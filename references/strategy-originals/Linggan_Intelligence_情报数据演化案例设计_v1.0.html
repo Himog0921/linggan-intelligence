@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Linggan Intelligence 情报数据演化案例</title>
+<style>
+body{font-family:Arial,"Microsoft YaHei";background:#0b1020;color:#eee;padding:40px;line-height:1.8}
+h1,h2{color:#7dd3fc}.card{background:#151d33;border-radius:16px;padding:24px;margin:20px 0;border:1px solid #34415d}
+.node{background:#182641;border:1px solid #45618f;border-radius:12px;padding:16px;margin:10px;text-align:center}
+.agent{border-color:#fb7185}.arrow{text-align:center;font-size:30px;color:#fbbf24}
+pre{background:#070b14;padding:15px;border-radius:10px;color:#a7f3d0}
+table{width:100%;border-collapse:collapse}td,th{border:1px solid #445;padding:10px}
+</style>
+</head>
+<body>
+
+<h1>Linggan Intelligence 情报数据演化案例 v1.0</h1>
+
+<div class="card">
+<h2>案例目标</h2>
+<p>
+模拟一个真实社交媒体信号如何从一篇普通笔记，
+经过数据采集、清洗、变化追踪、Agent分析，
+最终升级成为行业情报。
+</p>
+</div>
+
+<h2>案例：发现“家长注意力焦虑正在形成新市场需求”</h2>
+
+<div class="node">
+第一步：监控任务发现<br>
+关键词任务：注意力、坐不住、写作业拖拉、粗心、孩子不专心
+</div>
+<div class="arrow">↓</div>
+
+<div class="node">
+第二步：采集原始数据<br>
+笔记正文 / 封面 / 视频ASR / 作者 / 点赞 / 收藏 / 评论树
+</div>
+<div class="arrow">↓</div>
+
+<div class="card">
+<h2>原始内容资产 Content Asset</h2>
+<pre>
+content_id: xhs_88991
+作者: 小学妈妈日记
+粉丝: 3280
+
+标题:
+孩子不是不会，是根本坐不住
+
+正文:
+三年级每天写作业两个小时，
+一会喝水一会上厕所，我真的快崩溃了。
+</pre>
+</div>
+
+<div class="node agent">
+第三步：内容理解 Agent<br>
+主题识别：注意力问题、家庭作业冲突<br>
+情绪识别：焦虑0.82、无助0.75<br>
+用户推断：小学阶段家长
+</div>
+
+<div class="arrow">↓</div>
+
+<div class="card">
+<h2>第四步：历史快照 Observation</h2>
+<pre>
+2026-08-01
+
+点赞 120
+评论 35
+收藏 80
+
+
+2026-08-05
+
+点赞 5600
+评论 620
+收藏 1100
+</pre>
+<p>系统不覆盖数据，而记录变化。</p>
+</div>
+
+<div class="node agent">
+第五步：异常检测 Agent<br>
+发现：
+3000粉账号出现5600点赞<br>
+互动效率远超历史均值<br>
+生成信号：低粉高共鸣内容
+</div>
+
+<div class="arrow">↓</div>
+
+<div class="card">
+<h2>第六步：评论情报分析</h2>
+<pre>
+评论A:
+我家也是这样
+
+  回复:
+  每天写作业我要崩溃
+
+  回复:
+  是不是注意力有问题？
+
+  回复:
+  有没有训练方法？
+</pre>
+
+<table>
+<tr><th>分析</th><th>结果</th></tr>
+<tr><td>共鸣</td><td>大量用户出现同类经历</td></tr>
+<tr><td>认知变化</td><td>从“不努力”转向“注意力问题”</td></tr>
+<tr><td>需求</td><td>开始寻找解决方案</td></tr>
+</table>
+</div>
+
+<div class="node">
+第七步：跨内容关联<br>
+发现30天内23篇类似内容<br>
+18个新进入该主题的小博主
+</div>
+
+<div class="arrow">↓</div>
+
+<div class="node agent">
+第八步：多Agent推理
+
+Scout:
+发现异常
+
+Analyst:
+判断需求迁移
+
+Forecast:
+预测未来增长
+
+Red Team:
+验证是否只是短期热点
+</div>
+
+<div class="arrow">↓</div>
+
+<div class="card">
+<h2>最终情报事件</h2>
+<pre>
+编号:
+INT-20260805-001
+
+标题:
+小学家长关注点正在从成绩焦虑
+迁移到注意力焦虑
+
+证据:
+23篇内容
+18400条评论
+18个新兴博主
+
+判断:
+需求迁移概率 68%
+
+行动:
+内容测试注意力主题
+产品评估家庭干预方案
+</pre>
+</div>
+
+
+<div class="card">
+<h2>案例二：低粉爆文发现未来影响者</h2>
+<pre>
+账号:
+粉丝3000
+
+作品:
+点赞9000
+评论1500
+
+系统发现:
+互动效率异常
+评论深度高
+用户表达集中
+
+结果:
+进入重点观察名单
+</pre>
+</div>
+
+
+<div class="card">
+<h2>案例三：评论如何变成产品机会</h2>
+<div class="node">单个抱怨：每天陪写作业都会吵架</div>
+<div class="arrow">↓</div>
+<div class="node">1000个类似表达聚合</div>
+<div class="arrow">↓</div>
+<div class="node agent">AI发现隐藏需求：亲子关系修复</div>
+<div class="arrow">↓</div>
+<div class="node">形成产品机会</div>
+</div>
+
+<h2>最终数据价值链</h2>
+<pre>
+采集任务
+ ↓
+原始数据
+ ↓
+清洗
+ ↓
+历史快照
+ ↓
+变化检测
+ ↓
+用户语言变化
+ ↓
+主题迁移
+ ↓
+Agent推理
+ ↓
+情报事件
+ ↓
+业务行动
+</pre>
+
+</body>
+</html>

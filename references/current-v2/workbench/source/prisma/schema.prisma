@@ -1,0 +1,4891 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../generated/prisma"
+  moduleFormat        = "esm"
+  importFileExtension = "ts"
+  previewFeatures     = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ExecutionTaskStatus {
+  pending
+  dispatched
+  running
+  paused
+  stopping
+  stopped
+  completed
+  failed
+}
+
+enum ExecutionTaskPhase {
+  assigned
+  preparing
+  running
+  raw_submitting
+  completed
+}
+
+enum ExecutionTaskWritebackStatus {
+  pending
+  success
+  skipped
+  retryable
+  failed
+}
+
+enum ExecutionTaskAttemptResult {
+  success
+  failed
+  released
+  expired
+  page_mismatch
+  stopped
+  // V1.1：raw-snapshot-ingest 处理旧 leaseEpoch 时标记，结果有效但已过期不再触发写回。
+  stale_result
+}
+
+enum ExecutionTaskFailureScope {
+  task
+  station
+  account
+  platform
+  unknown
+}
+
+enum ExecutionQueueEntryStatus {
+  queued
+  reserved
+  in_progress
+  // V1.1（手册第 4.5 节）：采集流程生命周期扩展。
+  // raw_committed: RawSnapshot 已落地，等待归一化；writeback_pending: 已派发 WritebackDelivery。
+  raw_committed
+  writeback_pending
+  succeeded
+  failed
+  cancelled
+}
+
+enum TaskDemandStatus {
+  open
+  satisfied_by_snapshot
+  linked
+  completed
+  cancelled
+  expired
+  failed
+}
+
+enum ExecutionJobStatus {
+  created
+  queued
+  reserved
+  in_progress
+  raw_committed
+  writeback_pending
+  succeeded
+  failed
+  cancelled
+  expired
+}
+
+enum WritebackDeliveryStatus {
+  pending
+  applying
+  applied
+  retry_wait
+  failed
+  dead
+  skipped
+}
+
+enum OutboxEventStatus {
+  pending
+  in_flight
+  retry_wait
+  processed
+  dead
+}
+
+enum RawSnapshotQualityStatus {
+  ok
+  partial
+  identity_mismatch
+  lease_lost
+  missing_metrics
+  clock_skew_suspected
+  invalid
+}
+
+enum TaxonomyNodeStatus {
+  proposed
+  active
+  merged
+  retired
+}
+
+enum ContentTagSubjectType {
+  market_content
+  topic
+  demand_card
+}
+
+enum CommentSignalType {
+  resonance
+  conflict
+  demand
+  golden_quote
+  story
+  faq
+  slang
+  solution
+}
+
+enum DemandCardStatus {
+  emerging
+  active
+  adopted
+  dismissed
+  archived
+}
+
+enum VoiceAssetStatus {
+  active
+  retired
+  restricted
+}
+
+enum VoiceAssetPromotionSource {
+  star
+  signal_batch
+  radar_evidence
+  manual
+}
+
+model User {
+  id            String   @id
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions                          Session[]
+  accounts                          Account[]
+  memberships                       Member[]
+  personnelGroupMemberships         PersonnelGroupMember[]
+  invitations                       Invitation[]                   @relation("InvitationInviter")
+  promotedVoiceAssets               VoiceAsset[]                   @relation("VoiceAssetPromoter")
+  reviewedVoiceAssets               VoiceAsset[]                   @relation("VoiceAssetReviewer")
+  voiceAssetLifecycleEvents         VoiceAssetLifecycleEvent[]     @relation("VoiceAssetLifecycleActor")
+  createdVoiceAssetPacks            VoiceAssetPack[]               @relation("VoiceAssetPackCreator")
+  reviewedVoiceSnippets             VoiceSnippet[]                 @relation("VoiceSnippetReviewer")
+  reviewedVoiceSnippetFacets        VoiceSnippetFacet[]            @relation("VoiceSnippetFacetReviewer")
+  reviewedDemandEvidence            DemandCardEvidenceAssessment[] @relation("DemandEvidenceReviewer")
+  reviewedDemandSnapshots           DemandCardReviewSnapshot[]     @relation("DemandSnapshotReviewer")
+  reviewedDemandTopics              DemandCardTopicSuggestion[]    @relation("DemandTopicSuggestionReviewer")
+  createdResearchSessions           ResearchSession[]              @relation("ResearchSessionCreator")
+  closedResearchSessions            ResearchSession[]              @relation("ResearchSessionCloser")
+  pinnedResearchEvidence            ResearchEvidencePin[]          @relation("ResearchEvidencePinner")
+  recordedResearchQueryRuns         ResearchQueryRun[]             @relation("ResearchQueryRunRecorder")
+  createdCorpusPacks                CorpusPack[]                   @relation("CorpusPackCreator")
+  initiatedCorpusRetrievals         CorpusRetrievalRun[]           @relation("CorpusRetrievalInitiator")
+  recordedCorpusUsage               CorpusMaterialUsage[]          @relation("CorpusUsageRecorder")
+  createdCorpusRankingPolicies      CorpusRankingPolicy[]          @relation("CorpusRankingPolicyCreator")
+  createdCorpusExperiments          CorpusExperiment[]             @relation("CorpusExperimentCreator")
+  createdSafetyProjectionBatches    CorpusSafetyProjectionBatch[]  @relation("CorpusSafetyProjectionBatchCreator")
+  rolledBackSafetyProjectionBatches CorpusSafetyProjectionBatch[]  @relation("CorpusSafetyProjectionBatchRollbackActor")
+}
+
+model Session {
+  id                   String   @id
+  userId               String
+  token                String   @unique
+  expiresAt            DateTime
+  ipAddress            String?
+  userAgent            String?
+  activeOrganizationId String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([activeOrganizationId])
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([providerId, accountId])
+  @@index([userId])
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+}
+
+model Organization {
+  id        String   @id
+  name      String
+  slug      String   @unique
+  logo      String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members                     Member[]
+  invitations                 Invitation[]
+  voiceAssets                 VoiceAsset[]
+  voiceAssetLifecycleEvents   VoiceAssetLifecycleEvent[]
+  voiceAssetPacks             VoiceAssetPack[]
+  voiceAssetPackItems         VoiceAssetPackItem[]
+  voiceSnippets               VoiceSnippet[]
+  dataLifecycleEvents         DataLifecycleEvent[]
+  demandEvidenceAssessments   DemandCardEvidenceAssessment[]
+  demandCardSnapshots         DemandCardReviewSnapshot[]
+  demandCardTopicSuggestions  DemandCardTopicSuggestion[]
+  researchSessions            ResearchSession[]
+  researchEvidencePins        ResearchEvidencePin[]
+  researchQueryRuns           ResearchQueryRun[]
+  corpusPacks                 CorpusPack[]
+  corpusRetrievalRuns         CorpusRetrievalRun[]
+  corpusMaterialUsage         CorpusMaterialUsage[]
+  corpusPackItems             CorpusPackItem[]
+  corpusRankingPolicies       CorpusRankingPolicy[]
+  corpusExperiments           CorpusExperiment[]
+  corpusExperimentAssignments CorpusExperimentAssignment[]
+  safetyProjectionBatches     CorpusSafetyProjectionBatch[]
+  safetyProjectionBatchItems  CorpusSafetyProjectionBatchItem[]
+}
+
+model Member {
+  id             String   @id @default(cuid())
+  organizationId String
+  userId         String
+  role           String   @default("member")
+  roleProfile    String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId])
+  @@index([role])
+  @@index([organizationId, roleProfile])
+}
+
+model PersonnelGroup {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  name            String
+  description     String?
+  status          String    @default("active")
+  createdByUserId String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  archivedAt      DateTime?
+
+  members PersonnelGroupMember[]
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId, status])
+  @@index([createdByUserId])
+}
+
+model PersonnelGroupMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  groupId     String
+  userId      String
+  role        String   @default("member") // leader | member
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  group PersonnelGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  user  User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId, groupId])
+  @@index([workspaceId, role])
+  @@index([userId])
+}
+
+model Invitation {
+  id             String   @id
+  organizationId String
+  email          String
+  role           String
+  status         String   @default("pending")
+  expiresAt      DateTime
+  inviterId      String
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inviter      User         @relation("InvitationInviter", fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([email])
+  @@index([status])
+}
+
+model Topic {
+  id          String    @id @default(cuid())
+  workspaceId String?
+  title       String
+  summary     String?
+  source      String
+  sourceId    String?
+  sourceUrl   String?
+  sourceLabel String?
+  status      String    @default("new")
+  isFavorite  Boolean   @default(false)
+  isUsed      Boolean   @default(false)
+  publishedAt DateTime?
+
+  logicTag         String?
+  tensionCore      String?
+  tensionType      String?
+  reuseScore       String?
+  contentValueRank Int     @default(0) // 内容价值等级（高=3/中=2/低=1/未评估=0），由 reuseScore 派生，供排序
+  saturation       String?
+  freshness        String?
+  targetProduct    String?
+  targetPlatform   String?
+  persona          String?
+
+  likes    Int @default(0)
+  collects Int @default(0)
+  comments Int @default(0)
+  shares   Int @default(0)
+
+  bodyText         String?
+  goldQuotes       String?
+  rewriteFramework String?
+
+  rawData String?
+
+  sourceTag       String?
+  hotScore        Int     @default(0)
+  engagementRate  Float   @default(0)
+  contentCategory String?
+  trendScore      Int     @default(0)
+  competitorFlag  Boolean @default(false)
+  qualityGrade    String?
+  platform        String?
+  contentType     String?
+  aiSummary       String?
+  tensionScore    Int?
+  rewriteCost     Int?
+
+  // 作者信息（从 rawData 中提升为一等字段）
+  authorId   String?
+  authorName String?
+
+  // 内容元数据
+  platformContentId String? // 平台原生内容 ID
+  contentAssetId    String?
+  contentCode       String?
+  ipLocation        String? // IP 属地
+  hashtags          String? // JSON 数组格式存储
+
+  // 媒体资源
+
+  evaluationStatus        String    @default("none")
+  evaluatedAt             DateTime?
+  materialStatus          String?
+  materialStatusUpdatedAt DateTime?
+  assigneeUserId          String?
+  reviewerUserId          String?
+  createdByUserId         String?
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  deletedAt       DateTime?
+  lifecycleStatus String    @default("active")
+  archivedAt      DateTime?
+  archiveReason   String?
+  version         Int       @default(0)
+
+  tags                 TopicTag[]
+  mediaSelections      TopicMediaSelection[]   @relation("TopicMediaSelections")
+  suggestions          TopicSuggestion[]
+  notifications        Notification[]
+  skillExecutions      SkillExecution[]
+  packItems            TopicPackItem[]
+  decisionEvents       DecisionEvent[]
+  signalTags           TopicSignalTag[]
+  recommendationTraces RecommendationTrace[]
+  contentAsset         ContentAsset?           @relation(fields: [contentAssetId], references: [id], onDelete: SetNull)
+  marketComparisons    TopicMarketComparison[]
+  reviewJudgments      TopicReviewJudgment[]
+
+  @@unique([workspaceId, id], map: "Topic_workspaceId_id_key")
+  @@index([status])
+  @@index([workspaceId])
+  @@index([source])
+  @@index([isFavorite])
+  @@index([createdAt])
+  @@index([sourceTag])
+  @@index([hotScore])
+  @@index([contentValueRank]) // L1: 内容价值排序（reuseScore）
+  @@index([contentCategory])
+  @@index([qualityGrade])
+  @@index([platform])
+  @@index([contentAssetId])
+  @@index([contentCode])
+  @@index([workspaceId, materialStatus])
+  @@index([workspaceId, assigneeUserId])
+  @@index([workspaceId, reviewerUserId])
+  @@index([workspaceId, createdByUserId])
+  @@index([deletedAt])
+  @@index([workspaceId, lifecycleStatus])
+}
+
+model OperationAccount {
+  id                String    @id @default(cuid())
+  workspaceId       String?
+  platform          String // xhs | douyin
+  accountName       String
+  handle            String?
+  deviceCode        String?
+  profileUrl        String?
+  followerCount     Int?
+  ipLocation        String?
+  operatorName      String?
+  responsibleUserId String?
+  createdByUserId   String?
+  reviewStatus      String    @default("confirmed")
+  isRetained        Boolean   @default(true)
+  status            String    @default("active") // active | paused | archived
+  notes             String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  @@unique([workspaceId, platform, accountName])
+  @@index([workspaceId])
+  @@index([platform])
+  @@index([operatorName])
+  @@index([workspaceId, responsibleUserId])
+  @@index([workspaceId, reviewStatus])
+  @@index([createdByUserId])
+  @@index([isRetained])
+  @@index([deletedAt])
+}
+
+model OperationPublication {
+  id                  String    @id @default(cuid())
+  workspaceId         String?
+  platform            String // xhs | douyin
+  platformContentId   String?
+  contentAssetId      String?
+  contentCode         String?
+  publicationUrl      String?
+  canonicalUrl        String?
+  publishedAt         DateTime?
+  title               String?
+  copy                String?
+  topicKeyword        String?
+  topicTitle          String?
+  imageType           String?
+  postType            String?
+  contentPosition     String?
+  viewCount           Int?
+  commentCount        Int?
+  coverClickRate      Float?
+  likeCount           Int?
+  collectCount        Int?
+  originalUrl         String?
+  publisherName       String?
+  responsibleUserId   String?
+  createdByUserId     String?
+  reviewStatus        String    @default("confirmed")
+  accountName         String?
+  operationAccountId  String?
+  sourceTopicId       String?
+  trafficCount        Int?
+  leadCount           Int?
+  viralAnalysis       String?
+  issueAnalysis       String?
+  notes               String?
+  dataSyncStatus      String    @default("syncable") // syncable | synced | content_unavailable | needs_link | manual_fill | excluded
+  dataSyncReason      String?
+  dataSyncedAt        DateTime?
+  dataSyncObservedAt  DateTime? // 最后一次被接受的同步事实时间；阻止迟到成功或失败覆盖新数据
+  dataSyncRevisionKey String? // observedAt 相同时的类型化稳定裁决键，也是写回审计锚点
+  source              String    @default("manual") // manual | csv_import | topic_publication_sync
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  deletedAt           DateTime?
+
+  contentAsset ContentAsset?      @relation(fields: [contentAssetId], references: [id], onDelete: SetNull)
+  media        PublicationMedia[] @relation("OperationPublicationMedia")
+
+  @@unique([workspaceId, id], map: "OperationPublication_workspaceId_id_key")
+  @@index([workspaceId])
+  @@index([platform])
+  @@index([platform, platformContentId])
+  @@index([contentAssetId])
+  @@index([contentCode])
+  @@index([publishedAt])
+  @@index([publisherName])
+  @@index([workspaceId, responsibleUserId])
+  @@index([workspaceId, reviewStatus])
+  @@index([createdByUserId])
+  @@index([accountName])
+  @@index([operationAccountId])
+  @@index([sourceTopicId])
+  @@index([workspaceId, dataSyncStatus])
+  @@index([deletedAt])
+}
+
+model DailyOperationMetric {
+  id                     String    @id @default(cuid())
+  workspaceId            String?
+  date                   DateTime
+  dateKey                String
+  weekday                String?
+  operatorName           String
+  responsibleUserId      String?
+  createdByUserId        String?
+  reviewStatus           String    @default("confirmed")
+  platform               String    @default("xhs") // xhs | douyin
+  accountName            String    @default("")
+  publishedCount         Int       @default(0)
+  linksOpenedCount       Int       @default(0)
+  followersGained        Int       @default(0)
+  viralCount             Int       @default(0)
+  monthlyFollowersGained Int       @default(0)
+  notes                  String?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  deletedAt              DateTime?
+
+  @@unique([workspaceId, dateKey, operatorName, platform, accountName])
+  @@index([workspaceId])
+  @@index([dateKey])
+  @@index([operatorName])
+  @@index([workspaceId, responsibleUserId])
+  @@index([workspaceId, reviewStatus])
+  @@index([createdByUserId])
+  @@index([platform])
+  @@index([accountName])
+  @@index([deletedAt])
+}
+
+// 运营目标设定（团队级，混合模式：未设定时前端回退历史估算）
+model OperationTarget {
+  id          String   @id @default(cuid())
+  workspaceId String
+  periodType  String // "week" | "month"
+  periodKey   String // week: "2026-W28"（ISO 周）; month: "2026-07"
+  metric      String   @default("followersGained")
+  targetValue Int
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, periodType, periodKey, metric])
+  @@index([workspaceId, periodType])
+}
+
+model DecisionReasonTag {
+  id               String    @id @default(cuid())
+  label            String    @unique
+  displayName      String
+  category         String
+  description      String?
+  usageCount       Int       @default(0)
+  lastUsedAt       DateTime?
+  isArchived       Boolean   @default(false)
+  promotedFromText Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([category, isArchived])
+}
+
+model DecisionEvent {
+  id               String   @id @default(cuid())
+  workspaceId      String?
+  // 通用判断主体：topic | monitor_opportunity | ...（历史数据默认 topic）
+  subjectType      String   @default("topic")
+  subjectId        String?
+  // topicId 仅在 subjectType=topic 时填写，保留与 Topic 的级联关系；其他主体为空
+  topicId          String?
+  topic            Topic?   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  action           String
+  fromStatus       String?
+  toStatus         String?
+  reasonTags       String[] @default([])
+  reasonText       String?
+  contextSnapshot  Json
+  actorType        String
+  actorUserId      String
+  actorAgentId     String?
+  actorAgentVer    String?
+  actorInvokedBy   String?
+  agentContextHash String?
+  createdAt        DateTime @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, subjectType, subjectId, createdAt])
+  @@index([topicId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@index([action, createdAt])
+}
+
+model RecommendationTrace {
+  id                 String    @id @default(cuid())
+  workspaceId        String?
+  topicId            String
+  topic              Topic     @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  kind               String
+  tier               String
+  payload            Json
+  evidenceTopicIds   String[]  @default([])
+  counterExampleIds  String[]  @default([])
+  citedPatternIds    String[]  @default([])
+  confidenceNote     String?
+  isTail             Boolean   @default(false)
+  isSilentSignal     Boolean   @default(false)
+  lifecycle          String    @default("suggested")
+  userAction         String?
+  userActionAt       DateTime?
+  rejectReason       String?
+  generatedForAction String?
+  requesterType      String
+  requesterUserId    String?
+  requesterAgentId   String?
+  audience           String    @default("human")
+  createdAt          DateTime  @default(now())
+  presentedAt        DateTime?
+  dismissedAt        DateTime?
+
+  @@index([workspaceId, topicId, createdAt])
+  @@index([workspaceId, lifecycle, createdAt])
+  @@index([topicId, lifecycle])
+}
+
+model CommentIngestion {
+  id               String    @id @default(cuid())
+  workspaceId      String?
+  platform         String
+  sourceId         String
+  noteSourceId     String?
+  taskId           String?
+  sourceUrl        String?
+  authorId         String?
+  authorName       String?
+  replyToCommentId String?
+  replyToUserName  String?
+  level            Int       @default(1)
+  likes            Int       @default(0)
+  content          String
+  rawPayload       String
+  // 评论树结构
+  rootCommentId    String?
+  commentEntityId  String?
+  // 评论者信息
+  profileUrl       String?
+  // 时间信息
+  publishedAt      DateTime?
+  collectedAt      DateTime?
+  // 位置信息
+  ipLocation       String?
+  status           String    @default("pending")
+  errorMessage     String?
+  processedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+  comment          Comment?
+
+  @@unique([workspaceId, platform, sourceId])
+  @@index([workspaceId])
+  @@index([status])
+  @@index([platform, noteSourceId])
+  @@index([taskId])
+  @@index([deletedAt])
+}
+
+model Comment {
+  id                 String  @id @default(cuid())
+  workspaceId        String?
+  ingestionId        String? @unique
+  platform           String
+  sourceId           String
+  noteSourceId       String?
+  contentAssetId     String?
+  contentCode        String?
+  sourceUrl          String?
+  authorId           String?
+  authorName         String?
+  replyToCommentId   String?
+  replyToUserName    String?
+  level              Int     @default(1)
+  likes              Int     @default(0)
+  content            String
+  status             String  @default("ready")
+  rawPayload         String?
+  // P1-D4 的安全投影：保留原文不变，只有受控处理才会填充这些可空字段。
+  normalizedText     String?
+  redactedText       String?
+  textSafetyVersion  String?
+  piiStatus          String?
+  safetyStatus       String?
+  riskFlags          Json?
+  writingEligibility String?
+
+  // 评论树完整结构
+  rootCommentId   String?
+  commentEntityId String?
+
+  // 评论者信息
+  profileUrl String?
+
+  // 时间信息
+  publishedAt DateTime?
+  collectedAt DateTime?
+
+  // 位置信息
+  ipLocation String?
+
+  isStarred Boolean @default(false)
+
+  createdAt                  DateTime                          @default(now())
+  updatedAt                  DateTime                          @updatedAt
+  deletedAt                  DateTime?
+  lifecycleStatus            String                            @default("active")
+  archivedAt                 DateTime?
+  archiveReason              String?
+  ingestion                  CommentIngestion?                 @relation(fields: [ingestionId], references: [id], onDelete: SetNull)
+  cleaningReview             CommentCleaningReview?
+  signals                    CommentSignal[]
+  signalExtractionReceipts   CommentSignalExtractionReceipt[]
+  star                       CommentStar?
+  contentAsset               ContentAsset?                     @relation(fields: [contentAssetId], references: [id], onDelete: SetNull)
+  voiceAssets                VoiceAsset[]                      @relation("VoiceAssetSourceComment")
+  voiceSnippets              VoiceSnippet[]                    @relation("VoiceSnippetSourceComment")
+  safetyProjectionBatchItems CorpusSafetyProjectionBatchItem[]
+
+  @@unique([workspaceId, platform, sourceId])
+  @@index([workspaceId])
+  @@index([platform, noteSourceId])
+  @@index([contentAssetId])
+  @@index([contentCode])
+  @@index([status])
+  @@index([deletedAt])
+  @@index([workspaceId, lifecycleStatus])
+  @@index([workspaceId, lifecycleStatus, deletedAt, createdAt, id])
+}
+
+model CommentCleaningReview {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  commentId        String    @unique
+  status           String    @default("keep")
+  reasons          Json
+  confidence       Int       @default(0)
+  ruleVersion      String
+  contentHash      String
+  contentPreview   String
+  normalizedLength Int       @default(0)
+  decidedByUserId  String?
+  decidedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, status, updatedAt])
+  @@index([workspaceId, ruleVersion, updatedAt])
+}
+
+model CommentSignal {
+  id               String            @id @default(cuid())
+  workspaceId      String
+  commentId        String
+  signalType       CommentSignalType
+  summary          String
+  quote            String
+  taxonomyNodeId   String?
+  strength         Int
+  intentDepth      Int?
+  extractorVersion String
+  signalHash       String
+  createdAt        DateTime          @default(now())
+
+  comment        Comment               @relation(fields: [commentId], references: [id], onDelete: Cascade)
+  taxonomyNode   TaxonomyNode?         @relation(fields: [taxonomyNodeId], references: [id], onDelete: SetNull)
+  demandEvidence DemandCardEvidence[]
+  voiceAssets    VoiceAsset[]          @relation("VoiceAssetSourceSignal")
+  voiceSnippets  VoiceSnippet[]        @relation("VoiceSnippetSourceSignal")
+  researchPins   ResearchEvidencePin[]
+
+  @@unique([workspaceId, signalHash])
+  @@index([workspaceId, signalType, createdAt])
+  @@index([workspaceId, taxonomyNodeId, signalType])
+  @@index([commentId])
+}
+
+// 每次当前版本的信号提取都必须留下回执：即便 AI 判断没有任何信号，
+// 后续批处理也不能把它误当成“从未分析”而重复调用。
+model CommentSignalExtractionReceipt {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  commentId          String
+  extractorVersion   String
+  status             String    @default("completed")
+  source             String    @default("ai")
+  model              String?
+  promptVersion      String?
+  schemaVersion      String?
+  contentHash        String
+  signalCount        Int       @default(0)
+  quoteRejectedCount Int       @default(0)
+  startedAt          DateTime?
+  completedAt        DateTime?
+  failureCode        String?
+  tokenUsage         Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@unique([commentId, extractorVersion])
+  @@index([workspaceId, extractorVersion, status, updatedAt])
+}
+
+model DemandCard {
+  id                    String           @id @default(cuid())
+  workspaceId           String
+  taxonomyNodeId        String?
+  title                 String
+  status                DemandCardStatus @default(emerging)
+  signalCount           Int              @default(0)
+  distinctAuthorCount   Int              @default(0)
+  highIntentAuthorCount Int              @default(0)
+  representativeQuotes  Json
+  marketValidation      Json?
+  aggregationKey        String
+  linkedTopicId         String?
+  decidedByUserId       String?
+  decidedAt             DateTime?
+  firstSeenAt           DateTime         @default(now())
+  lastSeenAt            DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  lifecycleStatus       String           @default("active")
+  archivedAt            DateTime?
+  archiveReason         String?
+
+  taxonomyNode     TaxonomyNode?               @relation(fields: [taxonomyNodeId], references: [id], onDelete: SetNull)
+  evidence         DemandCardEvidence[]
+  reviewSnapshots  DemandCardReviewSnapshot[]
+  topicSuggestions DemandCardTopicSuggestion[]
+  researchPins     ResearchEvidencePin[]
+
+  @@unique([workspaceId, aggregationKey])
+  @@index([workspaceId, status, lastSeenAt])
+  @@index([workspaceId, taxonomyNodeId, status])
+  @@index([workspaceId, lifecycleStatus])
+}
+
+model DataLifecycleEvent {
+  id          String   @id @default(cuid())
+  workspaceId String
+  subjectType String
+  subjectId   String
+  action      String
+  reason      String
+  actor       String
+  createdAt   DateTime @default(now())
+
+  workspace Organization @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, subjectType, createdAt])
+  @@index([subjectType, subjectId, createdAt])
+}
+
+model DemandCardEvidence {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  demandCardId    String
+  commentSignalId String
+  createdAt       DateTime @default(now())
+
+  demandCard    DemandCard                    @relation(fields: [demandCardId], references: [id], onDelete: Cascade)
+  commentSignal CommentSignal                 @relation(fields: [commentSignalId], references: [id], onDelete: Cascade)
+  assessment    DemandCardEvidenceAssessment?
+
+  @@unique([demandCardId, commentSignalId])
+  @@index([workspaceId, demandCardId])
+}
+
+// P2A：对既有“需求卡 - 评论信号”关系补充可审核的证据角色。
+// 历史关系没有这条记录时只表示“尚未分类”，不能被默认当作支持证据。
+model DemandCardEvidenceAssessment {
+  id                   String    @id @default(cuid())
+  workspaceId          String
+  demandCardEvidenceId String    @unique
+  evidenceRole         String
+  source               String    @default("human")
+  status               String    @default("suggested")
+  confidence           Float?
+  rationale            String?
+  assessorVersion      String?
+  reviewedByUserId     String?
+  reviewedAt           DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  workspace          Organization       @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  demandCardEvidence DemandCardEvidence @relation(fields: [demandCardEvidenceId], references: [id], onDelete: Cascade)
+  reviewedBy         User?              @relation("DemandEvidenceReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, evidenceRole, status, updatedAt])
+  @@index([reviewedByUserId])
+}
+
+// P2A：每次采纳、驳回或重新开启都保留当时的样本与统计快照，避免后来新数据
+// 让审核理由无法复现。
+model DemandCardReviewSnapshot {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  demandCardId     String
+  action           String
+  metrics          Json
+  evidenceSample   Json
+  snapshotVersion  String
+  reviewedByUserId String
+  createdAt        DateTime @default(now())
+
+  workspace  Organization @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  demandCard DemandCard   @relation(fields: [demandCardId], references: [id], onDelete: Cascade)
+  reviewedBy User         @relation("DemandSnapshotReviewer", fields: [reviewedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, demandCardId, createdAt])
+  @@index([reviewedByUserId])
+}
+
+// P2A：正式主题只能先建议、再人工确认。它与旧 CommentTopic 和片段分类互不替代。
+model DemandCardTopicSuggestion {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  demandCardId     String
+  taxonomyNodeId   String
+  source           String    @default("human")
+  status           String    @default("suggested")
+  confidence       Float?
+  rationale        String?
+  suggesterVersion String?
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  workspace    Organization @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  demandCard   DemandCard   @relation(fields: [demandCardId], references: [id], onDelete: Cascade)
+  taxonomyNode TaxonomyNode @relation(fields: [taxonomyNodeId], references: [id], onDelete: Restrict)
+  reviewedBy   User?        @relation("DemandTopicSuggestionReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([demandCardId, taxonomyNodeId])
+  @@index([workspaceId, status, updatedAt])
+  @@index([taxonomyNodeId, status])
+  @@index([reviewedByUserId])
+}
+
+// P2A：研究会话保存的是可复现的研究过程和结论草稿，不是正式需求结论。
+model ResearchSession {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  title            String
+  hypothesis       String?
+  scopeDescription String?
+  status           String    @default("draft")
+  conclusionDraft  String?
+  createdByUserId  String
+  closedByUserId   String?
+  closedAt         DateTime?
+  lastQueryAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  workspace    Organization          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdBy    User                  @relation("ResearchSessionCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  closedBy     User?                 @relation("ResearchSessionCloser", fields: [closedByUserId], references: [id], onDelete: SetNull)
+  evidencePins ResearchEvidencePin[]
+  queryRuns    ResearchQueryRun[]
+
+  @@index([workspaceId, status, updatedAt])
+  @@index([createdByUserId])
+  @@index([closedByUserId])
+}
+
+// P2A：只保存一次检索的条件、命中量和数据快照，不复制评论正文。它让研究会话
+// 能复现“当时按什么范围得出判断”，但不会把一次检索自动升级成正式需求结论。
+model ResearchQueryRun {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  researchSessionId String
+  queryText         String?
+  filters           Json
+  resultCount       Int
+  totalCommentCount Int
+  recordedFrom      String   @default("ui")
+  snapshotAt        DateTime
+  recordedByUserId  String
+  createdAt         DateTime @default(now())
+
+  workspace       Organization    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  researchSession ResearchSession @relation(fields: [researchSessionId], references: [id], onDelete: Cascade)
+  recordedBy      User            @relation("ResearchQueryRunRecorder", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, researchSessionId, createdAt])
+  @@index([recordedByUserId])
+}
+
+// P2A：研究者钉选有限的评论信号，明确记录选用理由和证据角色；删除来源信号时
+// 不保留一份脱离来源的复制文本。
+model ResearchEvidencePin {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  researchSessionId String
+  commentSignalId   String
+  demandCardId      String?
+  evidenceRole      String   @default("background")
+  selectionReason   String?
+  pinnedByUserId    String
+  createdAt         DateTime @default(now())
+
+  workspace       Organization    @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  researchSession ResearchSession @relation(fields: [researchSessionId], references: [id], onDelete: Cascade)
+  commentSignal   CommentSignal   @relation(fields: [commentSignalId], references: [id], onDelete: Cascade)
+  demandCard      DemandCard?     @relation(fields: [demandCardId], references: [id], onDelete: SetNull)
+  pinnedBy        User            @relation("ResearchEvidencePinner", fields: [pinnedByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([researchSessionId, commentSignalId])
+  @@index([workspaceId, researchSessionId, createdAt])
+  @@index([commentSignalId])
+  @@index([demandCardId])
+  @@index([pinnedByUserId])
+}
+
+// P2B：一次写作任务的受限语料快照。它只引用经过当前安全门槛的资源，不能成为
+// 未审核片段或原始评论的旁路。
+model CorpusPack {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  name            String
+  purpose         String
+  brief           String
+  audienceJson    Json?
+  platforms       Json?
+  requestedSlots  Json
+  retrievalRunId  String?
+  querySnapshotAt DateTime
+  taxonomyVersion String?
+  rankingVersion  String
+  status          String   @default("active")
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace    Organization          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdBy    User                  @relation("CorpusPackCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  retrievalRun CorpusRetrievalRun?   @relation(fields: [retrievalRunId], references: [id], onDelete: SetNull)
+  items        CorpusPackItem[]
+  usage        CorpusMaterialUsage[]
+
+  @@index([workspaceId, status, updatedAt])
+  @@index([createdByUserId])
+  @@index([retrievalRunId])
+}
+
+// P2B：包内只保存资源 ID、当时允许用途和选择理由，不复制用户原声。
+model CorpusPackItem {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  corpusPackId    String
+  resourceType    String
+  resourceId      String
+  voiceAssetId    String?
+  voiceSnippetId  String?
+  creativeRole    String
+  rank            Int
+  selectionReason String?
+  allowedUse      String
+  sourceGroup     String?
+  sortOrder       Int
+  createdAt       DateTime @default(now())
+
+  workspace    Organization  @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  corpusPack   CorpusPack    @relation(fields: [corpusPackId], references: [id], onDelete: Cascade)
+  voiceAsset   VoiceAsset?   @relation(fields: [voiceAssetId], references: [id], onDelete: Restrict)
+  voiceSnippet VoiceSnippet? @relation(fields: [voiceSnippetId], references: [id], onDelete: Restrict)
+
+  @@unique([corpusPackId, resourceType, resourceId])
+  @@index([workspaceId, corpusPackId, sortOrder])
+  @@index([voiceAssetId])
+  @@index([voiceSnippetId])
+}
+
+// P2B：每次受控检索都记录范围、版本、数量和证据不足提示；不记录原始评论正文。
+model CorpusRetrievalRun {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  initiatedByUserId String
+  agentRunId        String?
+  briefHash         String
+  queryPlan         Json
+  filters           Json
+  snapshotAt        DateTime
+  resultCount       Int
+  coverage          Json
+  warnings          Json
+  schemaVersion     String
+  rankingVersion    String
+  createdAt         DateTime @default(now())
+
+  workspace   Organization @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  initiatedBy User         @relation("CorpusRetrievalInitiator", fields: [initiatedByUserId], references: [id], onDelete: Restrict)
+  packs       CorpusPack[]
+
+  @@index([workspaceId, createdAt])
+  @@index([initiatedByUserId])
+}
+
+// P2B：使用账本只记录真实被选择、改写或未采用的材料关系；它不是模型调用次数统计。
+model CorpusMaterialUsage {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  corpusPackId     String?
+  voiceAssetPackId String?
+  resourceType     String
+  resourceId       String
+  voiceAssetId     String?
+  voiceSnippetId   String?
+  contentAssetId   String?
+  usageMode        String
+  creativeRole     String?
+  draftReference   String?
+  contentReference String?
+  agentRunId       String?
+  usageTarget      String?
+  adaptedText      String?
+  finalText        String?
+  note             String?
+  recordedByUserId String
+  usedAt           DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  workspace             Organization                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  corpusPack            CorpusPack?                  @relation(fields: [corpusPackId], references: [id], onDelete: SetNull)
+  voiceAssetPack        VoiceAssetPack?              @relation(fields: [voiceAssetPackId], references: [id], onDelete: SetNull)
+  voiceAsset            VoiceAsset?                  @relation(fields: [voiceAssetId], references: [id], onDelete: Restrict)
+  voiceSnippet          VoiceSnippet?                @relation(fields: [voiceSnippetId], references: [id], onDelete: Restrict)
+  contentAsset          ContentAsset?                @relation(fields: [contentAssetId], references: [id], onDelete: SetNull)
+  recordedBy            User                         @relation("CorpusUsageRecorder", fields: [recordedByUserId], references: [id], onDelete: Restrict)
+  experimentAssignments CorpusExperimentAssignment[]
+
+  @@index([workspaceId, usedAt])
+  @@index([corpusPackId])
+  @@index([voiceAssetPackId])
+  @@index([voiceAssetId])
+  @@index([voiceSnippetId])
+  @@index([workspaceId, contentAssetId, usedAt])
+  @@index([recordedByUserId])
+}
+
+// P4：排序反馈不直接写入材料或指标；它是可审计、可回滚的规则版本。
+// configuration 只保存规则参数，内容表现仍只从 ContentMetricSnapshot 读取。
+model CorpusRankingPolicy {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  version            String
+  status             String    @default("draft") // draft | active | rolled_back | archived
+  sourceSummary      String?
+  configuration      Json
+  evidenceWindowDays Int       @default(28)
+  activatedAt        DateTime?
+  rolledBackAt       DateTime?
+  rollbackReason     String?
+  createdByUserId    String
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  workspace Organization @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdBy User         @relation("CorpusRankingPolicyCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, version])
+  @@index([workspaceId, status, updatedAt])
+  @@index([createdByUserId])
+}
+
+// P4：实验只描述分组、假设和结论边界；没有预先登记的对照组，不允许它被解释为因果证明。
+model CorpusExperiment {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  name            String
+  hypothesis      String
+  status          String    @default("draft") // draft | running | completed | cancelled | archived
+  scope           Json
+  limitations     String?
+  conclusion      String?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  createdByUserId String
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace   Organization                 @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdBy   User                         @relation("CorpusExperimentCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  assignments CorpusExperimentAssignment[]
+
+  @@index([workspaceId, status, updatedAt])
+  @@index([createdByUserId])
+}
+
+// P4：允许对照内容没有语料使用记录；处理组必须在服务层核验使用记录与内容资产的关联。
+model CorpusExperimentAssignment {
+  id                    String   @id @default(cuid())
+  workspaceId           String
+  experimentId          String
+  contentAssetId        String
+  corpusMaterialUsageId String?
+  variantKey            String
+  isControl             Boolean  @default(false)
+  assignedAt            DateTime @default(now())
+  createdAt             DateTime @default(now())
+
+  workspace           Organization         @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  experiment          CorpusExperiment     @relation(fields: [experimentId], references: [id], onDelete: Cascade)
+  contentAsset        ContentAsset         @relation(fields: [contentAssetId], references: [id], onDelete: Restrict)
+  corpusMaterialUsage CorpusMaterialUsage? @relation(fields: [corpusMaterialUsageId], references: [id], onDelete: SetNull)
+
+  @@unique([experimentId, contentAssetId])
+  @@index([workspaceId, experimentId, variantKey])
+  @@index([contentAssetId])
+  @@index([corpusMaterialUsageId])
+}
+
+// P1-D3：可用于创作检索的评论原文片段。它不是长期语料资产，必须保留
+// 可机械核验的原文范围，并在审核完成前保持研究用途。
+model VoiceSnippet {
+  id                    String    @id @default(cuid())
+  workspaceId           String
+  sourceCommentId       String
+  sourceSignalId        String?
+  quoteText             String
+  redactedText          String?
+  quoteStart            Int
+  quoteEnd              Int
+  quoteHash             String
+  sourceContentHash     String
+  semanticType          String?
+  expressionForm        String?
+  creativeRole          String?
+  specificityScore      Int?
+  vividnessScore        Int?
+  colloquialScore       Int?
+  contextIntegrityScore Int?
+  piiStatus             String    @default("unknown")
+  safetyStatus          String    @default("unknown")
+  allowedUse            String    @default("research_only")
+  reviewStatus          String    @default("pending")
+  extractorVersion      String    @default("manual-v1")
+  reviewedByUserId      String?
+  reviewedAt            DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  workspace          Organization          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  sourceComment      Comment               @relation("VoiceSnippetSourceComment", fields: [sourceCommentId], references: [id], onDelete: Cascade)
+  sourceSignal       CommentSignal?        @relation("VoiceSnippetSourceSignal", fields: [sourceSignalId], references: [id], onDelete: SetNull)
+  reviewedBy         User?                 @relation("VoiceSnippetReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  facets             VoiceSnippetFacet[]
+  corpusPackItems    CorpusPackItem[]
+  corpusUsage        CorpusMaterialUsage[]
+  derivedVoiceAssets VoiceAsset[]          @relation("VoiceAssetSourceSnippet")
+
+  @@unique([workspaceId, sourceCommentId, quoteStart, quoteEnd, extractorVersion])
+  @@index([workspaceId, reviewStatus, allowedUse, updatedAt])
+  @@index([workspaceId, piiStatus, safetyStatus])
+  @@index([sourceCommentId])
+  @@index([sourceSignalId])
+}
+
+// P1-D5：分类字典与片段映射独立于正式主题。别名、版本、AI 建议和人工确认
+// 都保留在这条链上，不能用旧 CommentTopic 或临时标签替代。
+model CorpusFacetDimension {
+  id           String   @id @default(cuid())
+  key          String   @unique
+  displayName  String
+  description  String?
+  version      Int      @default(1)
+  isMultiValue Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  terms CorpusFacetTerm[]
+}
+
+model CorpusFacetTerm {
+  id          String   @id @default(cuid())
+  dimensionId String
+  key         String
+  displayName String
+  description String?
+  version     Int      @default(1)
+  status      String   @default("active")
+  aliasOfId   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  dimension CorpusFacetDimension @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+  aliasOf   CorpusFacetTerm?     @relation("CorpusFacetTermAlias", fields: [aliasOfId], references: [id], onDelete: SetNull)
+  aliases   CorpusFacetTerm[]    @relation("CorpusFacetTermAlias")
+  snippets  VoiceSnippetFacet[]
+
+  @@unique([dimensionId, key])
+  @@index([dimensionId, status])
+  @@index([aliasOfId])
+}
+
+model VoiceSnippetFacet {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  voiceSnippetId   String
+  facetTermId      String
+  source           String    @default("human")
+  status           String    @default("suggested")
+  confidence       Float?
+  extractorVersion String?
+  dimensionVersion Int
+  termVersion      Int
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  voiceSnippet VoiceSnippet    @relation(fields: [voiceSnippetId], references: [id], onDelete: Cascade)
+  facetTerm    CorpusFacetTerm @relation(fields: [facetTermId], references: [id], onDelete: Restrict)
+  reviewedBy   User?           @relation("VoiceSnippetFacetReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+
+  @@unique([voiceSnippetId, facetTermId])
+  @@index([workspaceId, status, updatedAt])
+  @@index([facetTermId, status])
+}
+
+model VoiceAsset {
+  id               String                    @id @default(cuid())
+  workspaceId      String
+  assetType        CommentSignalType
+  quote            String
+  contextNote      String?
+  semanticType     String?
+  expressionForm   String?
+  valueTags        Json?
+  creativeRoles    Json?
+  sourceCommentId  String?
+  sourceSignalId   String?
+  sourceSnippetId  String?
+  taxonomyNodeId   String?
+  allowedUse       String?
+  promotedByUserId String
+  promotionSource  VoiceAssetPromotionSource
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  status           VoiceAssetStatus          @default(active)
+  retiredAt        DateTime?
+  retiredReason    String?
+  assetHash        String
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  workspace                  Organization                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  promotedBy                 User                              @relation("VoiceAssetPromoter", fields: [promotedByUserId], references: [id], onDelete: Restrict)
+  reviewedBy                 User?                             @relation("VoiceAssetReviewer", fields: [reviewedByUserId], references: [id], onDelete: SetNull)
+  sourceComment              Comment?                          @relation("VoiceAssetSourceComment", fields: [sourceCommentId], references: [id], onDelete: Restrict)
+  sourceSignal               CommentSignal?                    @relation("VoiceAssetSourceSignal", fields: [sourceSignalId], references: [id], onDelete: Restrict)
+  sourceSnippet              VoiceSnippet?                     @relation("VoiceAssetSourceSnippet", fields: [sourceSnippetId], references: [id], onDelete: Restrict)
+  taxonomyNode               TaxonomyNode?                     @relation(fields: [taxonomyNodeId], references: [id], onDelete: Restrict)
+  corpusPackItems            CorpusPackItem[]
+  corpusUsage                CorpusMaterialUsage[]
+  packItems                  VoiceAssetPackItem[]
+  lifecycleEvents            VoiceAssetLifecycleEvent[]
+  safetyProjectionBatchItems CorpusSafetyProjectionBatchItem[]
+
+  @@unique([workspaceId, assetHash])
+  @@index([workspaceId, assetType, taxonomyNodeId])
+  @@index([workspaceId, status])
+  @@index([workspaceId, status, allowedUse, reviewedAt])
+  @@index([workspaceId, promotionSource, createdAt])
+  @@index([sourceCommentId])
+  @@index([sourceSignalId])
+  @@index([sourceSnippetId])
+  @@index([promotedByUserId])
+  @@index([reviewedByUserId])
+}
+
+// P3：资产生命周期是追加事件，退役/限制不会覆盖原始晋升和来源事实。
+model VoiceAssetLifecycleEvent {
+  id                String            @id @default(cuid())
+  workspaceId       String
+  voiceAssetId      String
+  action            String
+  previousStatus    VoiceAssetStatus?
+  nextStatus        VoiceAssetStatus?
+  reason            String?
+  metadata          Json?
+  performedByUserId String
+  occurredAt        DateTime          @default(now())
+  createdAt         DateTime          @default(now())
+
+  workspace   Organization @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  voiceAsset  VoiceAsset   @relation(fields: [voiceAssetId], references: [id], onDelete: Restrict)
+  performedBy User         @relation("VoiceAssetLifecycleActor", fields: [performedByUserId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, occurredAt])
+  @@index([voiceAssetId, occurredAt])
+  @@index([performedByUserId])
+}
+
+// H1/H2：历史安全投影批次账本只记录范围、摘要和补偿状态；不复制评论原文或资产文本。
+model CorpusSafetyProjectionBatch {
+  id                    String    @id @default(cuid())
+  workspaceId           String
+  batchKey              String
+  status                String    @default("running")
+  cutoff                DateTime
+  inputCursor           String?
+  nextCursor            String?
+  candidateDigest       String
+  safetyRuleVersion     String
+  candidateAssetCount   Int
+  candidateCommentCount Int
+  appliedCount          Int       @default(0)
+  skippedCount          Int       @default(0)
+  failedCount           Int       @default(0)
+  rollbackCount         Int       @default(0)
+  rollbackConflictCount Int       @default(0)
+  backupReference       String
+  executionVersion      String
+  createdByUserId       String
+  startedAt             DateTime  @default(now())
+  completedAt           DateTime?
+  rolledBackByUserId    String?
+  rolledBackAt          DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  workspace    Organization                      @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  createdBy    User                              @relation("CorpusSafetyProjectionBatchCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  rolledBackBy User?                             @relation("CorpusSafetyProjectionBatchRollbackActor", fields: [rolledBackByUserId], references: [id], onDelete: SetNull)
+  items        CorpusSafetyProjectionBatchItem[]
+
+  @@unique([workspaceId, batchKey])
+  @@index([workspaceId, status, createdAt])
+  @@index([createdByUserId])
+  @@index([rolledBackByUserId])
+}
+
+// 每项只存来源 ID、投影摘要和状态；旧字段全为空才允许本批补齐，因此补偿可安全恢复为空。
+model CorpusSafetyProjectionBatchItem {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  batchId          String
+  voiceAssetId     String
+  sourceCommentId  String
+  state            String    @default("planned")
+  reason           String?
+  projectionDigest String?
+  appliedAt        DateTime?
+  rolledBackAt     DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  workspace     Organization                @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  batch         CorpusSafetyProjectionBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  voiceAsset    VoiceAsset                  @relation(fields: [voiceAssetId], references: [id], onDelete: Restrict)
+  sourceComment Comment                     @relation(fields: [sourceCommentId], references: [id], onDelete: Restrict)
+
+  @@unique([batchId, sourceCommentId])
+  @@index([workspaceId, state, createdAt])
+  @@index([voiceAssetId])
+  @@index([sourceCommentId])
+}
+
+// P3：长期资产包不同于 P2B 的一次写作包，只保存可复用、已审核资产的引用关系。
+model VoiceAssetPack {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  name            String
+  purpose         String
+  targetAudience  Json?
+  taxonomyNodeId  String?
+  status          String   @default("active")
+  version         Int      @default(1)
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workspace Organization          @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  taxonomy  TaxonomyNode?         @relation(fields: [taxonomyNodeId], references: [id], onDelete: SetNull)
+  createdBy User                  @relation("VoiceAssetPackCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  items     VoiceAssetPackItem[]
+  usage     CorpusMaterialUsage[]
+
+  @@index([workspaceId, status, updatedAt])
+  @@index([workspaceId, taxonomyNodeId])
+  @@index([createdByUserId])
+}
+
+// P3：资产包只引用资产 ID；资产退役后保留包内历史，但服务层会如实标为不可用。
+model VoiceAssetPackItem {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  voiceAssetPackId String
+  voiceAssetId     String
+  usageRole        String
+  sortOrder        Int
+  note             String?
+  createdAt        DateTime @default(now())
+
+  workspace      Organization   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  voiceAssetPack VoiceAssetPack @relation(fields: [voiceAssetPackId], references: [id], onDelete: Cascade)
+  voiceAsset     VoiceAsset     @relation(fields: [voiceAssetId], references: [id], onDelete: Restrict)
+
+  @@unique([voiceAssetPackId, voiceAssetId])
+  @@index([workspaceId, voiceAssetPackId, sortOrder])
+  @@index([voiceAssetId])
+}
+
+model TopicTag {
+  id          String  @id @default(cuid())
+  workspaceId String?
+  topicId     String
+  tag         String
+  topic       Topic   @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([tag])
+}
+
+model TagDimension {
+  id           String      @id @default(cuid())
+  key          String      @unique
+  displayName  String
+  description  String?
+  version      Int         @default(1)
+  sortOrder    Int         @default(0)
+  addedAt      DateTime    @default(now())
+  deprecatedAt DateTime?
+  isMultiValue Boolean     @default(true)
+  weight       Float       @default(0.15)
+  tags         SignalTag[]
+
+  @@index([sortOrder])
+  @@index([deprecatedAt])
+}
+
+model SignalTag {
+  id                     String               @id @default(cuid())
+  workspaceId            String?
+  dimensionId            String
+  dimension              TagDimension         @relation(fields: [dimensionId], references: [id], onDelete: Cascade)
+  label                  String
+  displayName            String
+  description            String?
+  aliasOfId              String?
+  aliasOf                SignalTag?           @relation("SignalTagAlias", fields: [aliasOfId], references: [id])
+  aliases                SignalTag[]          @relation("SignalTagAlias")
+  isArchived             Boolean              @default(false)
+  promotedFrom           String?
+  confirmedByUserId      String?
+  confirmedAt            DateTime?
+  usageCount             Int                  @default(0)
+  lastUsedAt             DateTime?
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
+  topicTags              TopicSignalTag[]
+  sourceGovernanceEvents TagGovernanceEvent[] @relation("SignalTagGovernanceSource")
+  targetGovernanceEvents TagGovernanceEvent[] @relation("SignalTagGovernanceTarget")
+
+  @@unique([workspaceId, dimensionId, label])
+  @@index([workspaceId, dimensionId, isArchived])
+  @@index([aliasOfId])
+}
+
+model TopicSignalTag {
+  id             String    @id @default(cuid())
+  workspaceId    String?
+  topicId        String
+  topic          Topic     @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  tagId          String
+  tag            SignalTag @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  status         String
+  confidence     Float?
+  evidenceText   String?
+  evidenceSource String?
+  actorType      String
+  actorUserId    String
+  actorAgentId   String?
+  actorAgentVer  String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([topicId, tagId])
+  @@index([workspaceId, topicId, status])
+  @@index([tagId, status])
+  @@index([status, createdAt])
+}
+
+model TagGovernanceEvent {
+  id           String     @id @default(cuid())
+  workspaceId  String?
+  action       String
+  sourceTagId  String?
+  sourceTag    SignalTag? @relation("SignalTagGovernanceSource", fields: [sourceTagId], references: [id], onDelete: SetNull)
+  targetTagId  String?
+  targetTag    SignalTag? @relation("SignalTagGovernanceTarget", fields: [targetTagId], references: [id], onDelete: SetNull)
+  actorType    String
+  actorUserId  String
+  actorAgentId String?
+  metadata     Json?
+  createdAt    DateTime   @default(now())
+
+  @@index([workspaceId, createdAt])
+  @@index([sourceTagId])
+  @@index([targetTagId])
+}
+
+model TopicSuggestion {
+  id             String   @id @default(cuid())
+  workspaceId    String?
+  sourceContent  String
+  sourceType     String?
+  product        String?
+  platform       String?
+  persona        String?
+  frameworks     String
+  status         String   @default("pending")
+  adoptedTopicId String?
+  topicId        String?
+  createdAt      DateTime @default(now())
+  topic          Topic?   @relation(fields: [topicId], references: [id])
+
+  @@index([workspaceId])
+  @@index([status])
+}
+
+model TopicPack {
+  id          String          @id @default(cuid())
+  workspaceId String?
+  name        String
+  description String?
+  source      String          @default("library_selection")
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  deletedAt   DateTime?
+  items       TopicPackItem[]
+
+  @@index([workspaceId])
+  @@index([createdAt])
+  @@index([deletedAt])
+}
+
+model TopicPackItem {
+  id          String    @id @default(cuid())
+  workspaceId String?
+  packId      String
+  topicId     String
+  role        String    @default("reference")
+  note        String?
+  sortOrder   Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  deletedAt   DateTime?
+  pack        TopicPack @relation(fields: [packId], references: [id], onDelete: Cascade)
+  topic       Topic     @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@unique([packId, topicId])
+  @@index([workspaceId])
+  @@index([topicId])
+  @@index([deletedAt])
+}
+
+model DailyDigest {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  date        String
+  topicIds    String
+  createdAt   DateTime @default(now())
+
+  @@unique([workspaceId, date])
+  @@index([workspaceId])
+}
+
+model Notification {
+  id              String    @id @default(cuid())
+  workspaceId     String?
+  type            String
+  message         String
+  status          String    @default("pending")
+  feishuMessageId String?
+  sentAt          DateTime?
+  createdAt       DateTime  @default(now())
+  topicId         String?
+  topic           Topic?    @relation(fields: [topicId], references: [id])
+
+  @@index([workspaceId])
+  @@index([createdAt])
+}
+
+model SkillRegistry {
+  id            String    @id @default(cuid())
+  skillName     String    @unique
+  displayName   String
+  description   String?
+  skillPath     String
+  category      String?   @default("content")
+  status        String    @default("available")
+  fileCount     Int       @default(0)
+  subdirs       String? // JSON array: ["references","specs","assets"]
+  lastRunAt     DateTime?
+  lastRunStatus String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model SkillExecution {
+  id            String    @id @default(cuid())
+  workspaceId   String?
+  skillName     String
+  triggerSource String // "topic_detail" | "ai_tool" | "skills_page"
+  inputSummary  String? // JSON
+  outputSummary String? // JSON
+  status        String    @default("running")
+  durationMs    Int?
+  tokenCount    Int?
+  errorMessage  String?
+  topicId       String?
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
+  topic         Topic?    @relation(fields: [topicId], references: [id])
+
+  @@index([workspaceId])
+  @@index([skillName])
+  @@index([createdAt])
+}
+
+model AiModelProviderConfig {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  ownerUserId        String   @default("workspace-config")
+  providerType       String   @default("anthropic_compatible")
+  displayName        String
+  baseUrl            String?
+  defaultModel       String
+  smallModel         String?
+  reasoningModel     String?
+  authTokenEncrypted String?
+  authTokenPreview   String?
+  status             String   @default("active")
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([workspaceId, ownerUserId, providerType])
+  @@index([workspaceId])
+  @@index([ownerUserId])
+  @@index([status])
+}
+
+model AiUsageDaily {
+  id           String @id @default(cuid())
+  workspaceId  String
+  day          String
+  taskKind     String
+  modelTier    String
+  callCount    Int    @default(0)
+  inputTokens  Int    @default(0)
+  outputTokens Int    @default(0)
+
+  @@unique([workspaceId, day, taskKind, modelTier])
+  @@index([workspaceId, day])
+}
+
+model WorkspaceAiBudget {
+  id                     String   @id @default(cuid())
+  workspaceId            String   @unique
+  dailyStrongCallLimit   Int      @default(100)
+  dailyFastCallLimit     Int      @default(2000)
+  dailyCommentProbeLimit Int      @default(30)
+  overflowPolicy         String   @default("queue")
+  updatedAt              DateTime @updatedAt
+}
+
+// V1.1 影子层下线（2026-06-27）：model CollectionTask 已删除。
+// 历史数据已迁移到 ExecutionJob（rich 字段 + originalXxx 业务态字段，08 backfill）；
+// ExecutionJobEvent 已承接所有事件流（09 backfill）；6 张依赖表（runtime/writeback/
+// queueEntry/attempts/events/records）的 FK 已重新指向 ExecutionJob.id。
+// CollectionTaskEvent / CollectionTaskRecord 两张子表保留（FK 已重指 ExecutionJob）。
+
+model ExecutionTaskRuntime {
+  jobId              String              @id
+  workspaceId        String?
+  status             ExecutionTaskStatus @default(pending)
+  progress           Int                 @default(0)
+  errorMessage       String?
+  pluginRunId        String?
+  activeExecutor     String?
+  latestHeartbeatAt  DateTime?
+  controlAction      String?
+  controlRequestedAt DateTime?
+  controlRequestedBy String?
+  assignedStationId  String?
+  leaseToken         String?
+  leaseExpiresAt     DateTime?
+  leaseEpoch         Int                 @default(0)
+  sequenceCursor     Int                 @default(0)
+  attemptCount       Int                 @default(0)
+  currentAttemptId   String?
+  executionPhase     ExecutionTaskPhase?
+  dispatchedAt       DateTime?
+  startedAt          DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+
+  task ExecutionJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([workspaceId, status])
+  @@index([status])
+  @@index([assignedStationId])
+  @@index([leaseExpiresAt])
+  @@index([leaseEpoch])
+  @@index([currentAttemptId])
+  @@index([executionPhase])
+}
+
+model ExecutionTaskWriteback {
+  jobId         String                        @id
+  workspaceId   String?
+  status        ExecutionTaskWritebackStatus?
+  errorMessage  String?
+  attemptCount  Int                           @default(0)
+  nextAttemptAt DateTime?
+  createdAt     DateTime                      @default(now())
+  updatedAt     DateTime                      @updatedAt
+
+  task ExecutionJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([status, nextAttemptAt])
+}
+
+model ExecutionQueueEntry {
+  id                           String                    @id @default(cuid())
+  // V1.1 主字段（手册第 4.5 节）：QueueEntry 以 jobId 关联 ExecutionJob。
+  jobId                        String                    @unique
+  workspaceId                  String?
+  platform                     String
+  source                       String
+  lane                         String
+  weight                       String                    @default("normal")
+  priority                     Int                       @default(0)
+  estimatedSeconds             Int                       @default(120) // 手册 6.3 lane 配额需要
+  status                       ExecutionQueueEntryStatus @default(queued)
+  availableAt                  DateTime?
+  expiresAt                    DateTime? // reserved/in_progress 过期才有效
+  // V1.1 reservation 三件套（手册 5.5 start_job 协议依赖）
+  reservedByStationId          String?
+  reservedPlatformAccountId    String?
+  // 用于并发保护的执行身份。真实账号跨工位共享；浏览器会话只在所属工位内共享。
+  reservedExecutionIdentityKey String?
+  reserveToken                 String?
+  reservationEpoch             Int                       @default(0)
+  reservedUntil                DateTime?
+  startBefore                  DateTime? // 未按时开始自动释放
+  // V1.1 lease 三件套（手册第 4.5 节）：从 ExecutionTaskRuntime 迁移过来，QueueEntry 成为执行权权威
+  leaseToken                   String?
+  leaseEpoch                   Int                       @default(0)
+  leaseExpiresAt               DateTime?
+  // V1.1 失败归因（手册 5.10 failure-policy-service 依赖）
+  attemptCount                 Int                       @default(0)
+  lastAttemptId                String?
+  lastErrorCode                String?
+  lastErrorScope               String?
+  lastErrorMessage             String?
+  createdAt                    DateTime                  @default(now())
+  updatedAt                    DateTime                  @updatedAt
+
+  job ExecutionJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([status, availableAt])
+  @@index([platform, status, availableAt])
+  @@index([source, status, availableAt])
+  @@index([reservedByStationId])
+  @@index([reserveToken])
+  @@index([priority])
+  // V1.1 索引（手册第 4.5 节），partial unique 索引走独立 SQL migration
+  @@index([reservedUntil])
+  @@index([leaseExpiresAt])
+  @@index([workspaceId, platform, status])
+}
+
+model TaskAttempt {
+  id            String                      @id @default(cuid())
+  // Release-B execution Evidence identity. The server creates this opaque,
+  // stable value with the attempt and returns it to the authenticated station;
+  // plugin retries must reuse it and may never synthesize a capture identity.
+  captureId     String                      @unique @default(cuid())
+  jobId         String
+  stationId     String?
+  platform      String?
+  source        String?
+  attemptNumber Int                         @default(1)
+  leaseToken    String?
+  leaseEpoch    Int                         @default(0)
+  startedAt     DateTime                    @default(now())
+  endedAt       DateTime?
+  result        ExecutionTaskAttemptResult?
+  failureCode   String? // page_open_failed | login_required | permission_denied | platform_restricted | content_not_found | heartbeat_only
+  failureScope  ExecutionTaskFailureScope?
+  errorMessage  String?
+  createdAt     DateTime                    @default(now())
+
+  task ExecutionJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([stationId])
+  @@index([platform])
+  @@index([source])
+  @@index([failureCode])
+  @@index([failureScope])
+  @@index([startedAt])
+  @@index([endedAt])
+}
+
+model ExecutionPlannerSnapshot {
+  id             String   @id @default(cuid())
+  workspaceId    String?
+  status         String   @default("active") // active | expired
+  plannedAt      DateTime
+  expiresAt      DateTime
+  capacity       Json
+  lanePlan       Json
+  platformStates Json?
+  blockedTasks   Json?
+  stationStates  Json?
+  summary        Json?
+  createdAt      DateTime @default(now())
+
+  @@index([workspaceId])
+  @@index([status])
+  @@index([plannedAt])
+  @@index([expiresAt])
+}
+
+model MonitorRound {
+  id            String    @id @default(cuid())
+  workspaceId   String?
+  monitorId     String
+  triggerType   String // auto | manual | backfill
+  entryStrategy String // author_baseline | author_patrol | keyword_patrol
+  status        String    @default("pending") // pending | running | completed | failed
+  scheduledAt   DateTime
+  startedAt     DateTime?
+  completedAt   DateTime?
+  lastTaskId    String?
+  errorMessage  String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([workspaceId])
+  @@index([monitorId])
+  @@index([status])
+  @@index([scheduledAt])
+}
+
+// V1.1 写回重构（2026-06-27）：CollectionTaskRecord 表已 DROP。
+// record 写入走 RawSnapshot+RawRecord 批次（commitImportStyleRawSnapshot）。
+// 历史数据已由 03-migrate-records-to-raw.ts 迁移到 RawRecord（jobId = 原 taskId）。
+// 读路径全部切换到 RawRecord；UI 类型 CollectionTaskRecord（contracts.ts）保留为 plain object 类型。
+
+model AuthorArchiveJob {
+  id                  String    @id @default(cuid())
+  workspaceId         String?
+  archiveId           String?
+  authorId            String?
+  monitorId           String?
+  platform            String    @default("xhs")
+  profileUrl          String
+  authorPlatformId    String?
+  authorName          String?
+  requestedLimit      Int       @default(200)
+  batchSize           Int       @default(15)
+  includeDetails      Boolean   @default(true)
+  includeComments     Boolean   @default(true)
+  commentsLimit       Int       @default(20)
+  status              String    @default("discovering") // discovering | discovered | detail_queued | running | completed | partial_failed | failed
+  runType             String    @default("baseline") // baseline | incremental | repair | reconcile
+  generation          Int       @default(1)
+  triggerSource       String    @default("migration") // user | monitor | repair_plan | sweeper | migration
+  scopeTerminalReason String?
+  discoveryTaskId     String?
+  totalDiscovered     Int       @default(0)
+  detailTasksCreated  Int       @default(0)
+  detailSucceeded     Int       @default(0)
+  detailFailed        Int       @default(0)
+  commentSucceeded    Int       @default(0)
+  commentFailed       Int       @default(0)
+  failureCode         String?
+  failureMessage      String?
+  completedAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  archive        AuthorArchive?      @relation("AuthorArchiveRuns", fields: [archiveId], references: [id], onDelete: SetNull)
+  items          AuthorArchiveItem[]
+  firstSeenWorks AuthorArchiveWork[] @relation("ArchiveWorkFirstSeenRun")
+  lastSeenWorks  AuthorArchiveWork[] @relation("ArchiveWorkLastSeenRun")
+
+  @@index([workspaceId])
+  @@index([archiveId, runType, status])
+  @@index([authorId])
+  @@index([monitorId])
+  @@index([platform, authorPlatformId])
+  @@index([status])
+  @@index([discoveryTaskId])
+  @@index([createdAt])
+}
+
+model AuthorArchiveItem {
+  id                 String    @id @default(cuid())
+  workspaceId        String?
+  jobId              String
+  discoveryTaskId    String?
+  detailTaskId       String?
+  commentTaskId      String?
+  contentAssetId     String?
+  archiveWorkId      String?
+  generation         Int       @default(1)
+  membershipDecision String    @default("unresolved") // included | conflict | unresolved | excluded
+  platform           String    @default("xhs")
+  authorPlatformId   String?
+  platformContentId  String
+  contentCode        String?
+  signedUrl          String?
+  sourceUrl          String?
+  xsecToken          String?
+  title              String?
+  publishedAtText    String?
+  rank               Int?
+  detailStatus       String    @default("pending") // pending | queued | completed | failed | needs_refresh | skipped
+  commentStatus      String    @default("pending") // pending | queued | completed | failed | skipped
+  retryCount         Int       @default(0)
+  failureCode        String?
+  failureMessage     String?
+  discoveredAt       DateTime  @default(now())
+  lastAttemptAt      DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  job               AuthorArchiveJob                @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  contentAsset      ContentAsset?                   @relation("ArchiveRunItemContentAsset", fields: [contentAssetId], references: [id], onDelete: SetNull)
+  archiveWork       AuthorArchiveWork?              @relation("ArchiveRunItemWork", fields: [archiveWorkId], references: [id], onDelete: SetNull)
+  commentTask       ExecutionJob?                   @relation("ArchiveRunItemCommentTask", fields: [commentTaskId], references: [id], onDelete: SetNull)
+  backfillPlanItems AuthorArchiveBackfillPlanItem[] @relation("ArchiveBackfillPlanItemRunItem")
+
+  @@unique([jobId, platformContentId])
+  @@index([workspaceId])
+  @@index([jobId])
+  @@index([discoveryTaskId])
+  @@index([detailTaskId])
+  @@index([commentTaskId])
+  @@index([contentAssetId])
+  @@index([archiveWorkId])
+  @@index([membershipDecision])
+  @@index([platform, platformContentId])
+  @@index([detailStatus])
+  @@index([commentStatus])
+  @@index([retryCount])
+}
+
+model AuthorArchive {
+  id                      String    @id @default(cuid())
+  workspaceId             String
+  authorId                String?
+  platform                String
+  authorPlatformId        String
+  canonicalProfileUrl     String?
+  dataRevision            Int       @default(0)
+  scopeStatus             String    @default("unknown") // unknown | scanning | bounded | complete | failed
+  lastScopeEvidence       Json?
+  lastBaselineAt          DateTime?
+  lastIncrementalAt       DateTime?
+  lastReconciledAt        DateTime?
+  currentWorkCount        Int       @default(0)
+  excludedWorkCount       Int       @default(0)
+  detailPersistedCount    Int       @default(0)
+  commentAcceptedCount    Int       @default(0)
+  commentSkippedCount     Int       @default(0)
+  stableMediaCount        Int       @default(0)
+  videoWorkCount          Int       @default(0)
+  transcriptArtifactCount Int       @default(0)
+  transcriptAcceptedCount Int       @default(0)
+  topicMaterializedCount  Int       @default(0)
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
+
+  author        Author?                          @relation("AuthorArchiveAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  works         AuthorArchiveWork[]              @relation("AuthorArchiveWorks")
+  runs          AuthorArchiveJob[]               @relation("AuthorArchiveRuns")
+  backfillPlans AuthorArchiveBackfillPlan[]      @relation("AuthorArchiveBackfillPlans")
+  receipts      AuthorArchiveProjectionReceipt[] @relation("AuthorArchiveProjectionReceipts")
+  dossiers      Dossier[]                        @relation("AuthorArchiveDossiers")
+  contextPacks  AuthorContextArchive[]           @relation("AuthorArchiveContextPacks")
+
+  @@unique([workspaceId, platform, authorPlatformId])
+  @@index([workspaceId, scopeStatus])
+  @@index([authorId])
+  @@index([updatedAt])
+}
+
+model AuthorArchiveWork {
+  id                       String    @id @default(cuid())
+  workspaceId              String
+  archiveId                String
+  contentAssetId           String
+  firstSeenAt              DateTime
+  lastSeenAt               DateTime
+  availabilityStatus       String    @default("active") // active | unavailable | excluded
+  excludedAt               DateTime?
+  exclusionReason          String?
+  firstSeenRunId           String?
+  lastSeenRunId            String?
+  detailStatus             String    @default("missing") // missing | persisted | invalid
+  commentCoverageStatus    String    @default("unknown") // unknown | accepted | skipped | insufficient
+  commentPolicyVersion     String?
+  commentExpectedCount     Int?
+  commentCollectedCount    Int?
+  commentAllowedShortfall  Int?
+  mediaStatus              String    @default("unknown") // unknown | ready | missing | failed
+  transcriptArtifactStatus String    @default("not_applicable") // not_applicable | missing | ready | failed
+  transcriptQualityStatus  String    @default("not_applicable") // not_applicable | unknown | accepted | review_required | rejected | no_speech
+  topicStatus              String    @default("missing") // missing | materialized | archived
+  coveragePolicyVersion    String?
+  coverageHash             String?
+  coverageUpdatedAt        DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  archive           AuthorArchive                   @relation("AuthorArchiveWorks", fields: [archiveId], references: [id], onDelete: Cascade)
+  contentAsset      ContentAsset                    @relation("ContentAssetArchiveWorks", fields: [contentAssetId], references: [id], onDelete: Restrict)
+  firstSeenRun      AuthorArchiveJob?               @relation("ArchiveWorkFirstSeenRun", fields: [firstSeenRunId], references: [id], onDelete: SetNull)
+  lastSeenRun       AuthorArchiveJob?               @relation("ArchiveWorkLastSeenRun", fields: [lastSeenRunId], references: [id], onDelete: SetNull)
+  runItems          AuthorArchiveItem[]             @relation("ArchiveRunItemWork")
+  backfillPlanItems AuthorArchiveBackfillPlanItem[] @relation("ArchiveBackfillPlanItemWork")
+
+  @@unique([archiveId, contentAssetId])
+  @@index([workspaceId, availabilityStatus])
+  @@index([contentAssetId])
+  @@index([firstSeenRunId])
+  @@index([lastSeenRunId])
+  @@index([coverageUpdatedAt])
+}
+
+model AuthorArchiveBackfillPlan {
+  id                           String    @id @default(cuid())
+  workspaceId                  String
+  archiveId                    String
+  policyVersion                String
+  requestedByUserId            String
+  previewRevision              Int
+  parentPlanId                 String?
+  generation                   Int       @default(1)
+  status                       String    @default("approved") // approved | running | completed | partial_failed | cancelled
+  detailGapCount               Int       @default(0)
+  commentGapCount              Int       @default(0)
+  stableMediaGapCount          Int       @default(0)
+  transcriptGapCount           Int       @default(0)
+  transcriptQualityGapCount    Int       @default(0)
+  topicMaterializationGapCount Int       @default(0)
+  completedItemCount           Int       @default(0)
+  failedItemCount              Int       @default(0)
+  completedAt                  DateTime?
+  cancelledAt                  DateTime?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+
+  archive    AuthorArchive                   @relation("AuthorArchiveBackfillPlans", fields: [archiveId], references: [id], onDelete: Restrict)
+  parentPlan AuthorArchiveBackfillPlan?      @relation("AuthorArchiveBackfillPlanChildren", fields: [parentPlanId], references: [id], onDelete: Restrict)
+  childPlans AuthorArchiveBackfillPlan[]     @relation("AuthorArchiveBackfillPlanChildren")
+  items      AuthorArchiveBackfillPlanItem[] @relation("AuthorArchiveBackfillPlanItems")
+
+  @@index([workspaceId, status, createdAt])
+  @@index([archiveId, status])
+  @@index([parentPlanId])
+}
+
+model AuthorArchiveBackfillPlanItem {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  planId            String
+  gapKind           String // detail | comments | stable_media | transcript | transcript_quality | topic_materialization
+  subjectKey        String
+  handlerKey        String
+  dependsOnGapKind  String?
+  archiveWorkId     String?
+  contentAssetId    String?
+  runItemId         String?
+  platform          String
+  platformContentId String
+  status            String    @default("planned") // planned | queued | running | completed | accepted_existing | failed | cancelled
+  taskDemandId      String?
+  executionJobId    String?
+  dispatchKind      String? // task_demand | outbox_event
+  dispatchRef       String?
+  failureCode       String?
+  failureMessage    String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  completedAt       DateTime?
+
+  plan         AuthorArchiveBackfillPlan @relation("AuthorArchiveBackfillPlanItems", fields: [planId], references: [id], onDelete: Cascade)
+  archiveWork  AuthorArchiveWork?        @relation("ArchiveBackfillPlanItemWork", fields: [archiveWorkId], references: [id], onDelete: SetNull)
+  contentAsset ContentAsset?             @relation("ArchiveBackfillPlanItemContentAsset", fields: [contentAssetId], references: [id], onDelete: SetNull)
+  runItem      AuthorArchiveItem?        @relation("ArchiveBackfillPlanItemRunItem", fields: [runItemId], references: [id], onDelete: SetNull)
+  taskDemand   TaskDemand?               @relation("ArchiveBackfillPlanItemTaskDemand", fields: [taskDemandId], references: [id], onDelete: SetNull)
+  executionJob ExecutionJob?             @relation("ArchiveBackfillPlanItemExecutionJob", fields: [executionJobId], references: [id], onDelete: SetNull)
+
+  @@unique([planId, gapKind, subjectKey])
+  @@index([workspaceId, status, createdAt])
+  @@index([archiveWorkId])
+  @@index([contentAssetId])
+  @@index([runItemId])
+  @@index([taskDemandId])
+  @@index([executionJobId])
+  @@index([workspaceId, dispatchKind, dispatchRef], map: "AuthorArchiveBackfillItem_dispatch_ref_idx")
+}
+
+model AuthorArchiveProjectionReceipt {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  archiveId       String
+  sourceType      String
+  sourceId        String
+  status          String // applied | skipped | conflict
+  dataRevision    Int
+  addedCount      Int      @default(0)
+  updatedCount    Int      @default(0)
+  conflictCount   Int      @default(0)
+  payloadChecksum String
+  appliedAt       DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  archive AuthorArchive @relation("AuthorArchiveProjectionReceipts", fields: [archiveId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, archiveId, sourceType, sourceId])
+  @@index([workspaceId, sourceType, appliedAt])
+  @@index([archiveId, appliedAt])
+}
+
+model RawEvidence {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  contentAssetId    String?
+  evidenceKey       String    @unique
+  sourceType        String
+  sourceRunId       String?
+  sourceRunCode     String?
+  sourceRecordId    String?
+  taskId            String?
+  pluginRunId       String?
+  monitorId         String?
+  roundId           String?
+  platform          String?
+  recordType        String
+  contentType       String?
+  platformContentId String?
+  contentCode       String?
+  authorPlatformId  String?
+  authorCode        String?
+  externalRecordId  String?
+  dedupeKey         String?
+  idempotencyKey    String?
+  payload           Json
+  payloadHash       String
+  sourceMeta        Json?
+  collectedAt       DateTime?
+  receivedAt        DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+
+  contentAsset ContentAsset? @relation(fields: [contentAssetId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([workspaceId, createdAt])
+  @@index([contentAssetId])
+  @@index([sourceType])
+  @@index([sourceRunId])
+  @@index([sourceRunCode])
+  @@index([sourceRecordId])
+  @@index([taskId])
+  @@index([pluginRunId])
+  @@index([monitorId])
+  @@index([platform, platformContentId])
+  @@index([contentCode])
+  @@index([authorCode])
+  @@index([payloadHash])
+  @@index([receivedAt])
+}
+
+model ContentAsset {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  assetKey          String    @unique
+  contentCode       String?
+  platform          String
+  platformContentId String
+  contentType       String
+  contentKind       String    @default("unknown")
+  title             String?
+  bodyText          String?
+  summary           String?
+  sourceUrl         String?
+  authorPlatformId  String?
+  authorCode        String?
+  authorName        String?
+  sourcePools       Json?
+  firstSeenAt       DateTime?
+  lastObservedAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  sourceRefs                  ContentAssetSourceRef[]
+  businessRefs                ContentAssetBusinessRef[]
+  rawEvidences                RawEvidence[]
+  topics                      Topic[]
+  monitorWorks                MonitorWork[]
+  monitorOpportunities        MonitorOpportunity[]
+  radarSignals                RadarSignal[]
+  comments                    Comment[]
+  operationPublications       OperationPublication[]
+  marketSamples               MarketSample[]
+  marketSignalCards           MarketSignalCard[]
+  metricSnapshots             ContentMetricSnapshot[]
+  corpusMaterialUsages        CorpusMaterialUsage[]
+  corpusExperimentAssignments CorpusExperimentAssignment[]
+  mediaUsages                 ContentMediaUsage[]
+  contentObservations         ContentObservation[]        @relation("ContentAssetObservations")
+  currentProjection           ContentCurrentProjection?   @relation("ContentAssetCurrentProjection")
+  understandings              ContentAssetUnderstanding[]
+  archiveWorks                AuthorArchiveWork[]             @relation("ContentAssetArchiveWorks")
+  archiveRunItems             AuthorArchiveItem[]             @relation("ArchiveRunItemContentAsset")
+  archiveBackfillPlanItems    AuthorArchiveBackfillPlanItem[] @relation("ArchiveBackfillPlanItemContentAsset")
+
+  @@unique([workspaceId, platform, platformContentId])
+  @@unique([workspaceId, id], map: "ContentAsset_workspaceId_id_key")
+  @@index([workspaceId])
+  @@index([contentCode])
+  @@index([platform, platformContentId])
+  @@index([contentType])
+  @@index([contentKind])
+  @@index([authorCode])
+  @@index([firstSeenAt])
+  @@index([lastObservedAt])
+}
+
+model MarketSample {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  platform           String    @default("xhs")
+  contentAssetId     String
+  contentCode        String?
+  platformContentId  String
+  sampleRole         String
+  selectionReasons   Json
+  metricsSnapshot    Json
+  authorFansSnapshot Int?
+  segmentKey         String?
+  selectedAt         DateTime  @default(now())
+  expiresAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+  lifecycleStatus    String    @default("active")
+  archivedAt         DateTime?
+  archiveReason      String?
+
+  contentAsset  ContentAsset               @relation(fields: [contentAssetId], references: [id], onDelete: Cascade)
+  signalCards   MarketSignalCard[]
+  qualityEvents MarketSampleQualityEvent[]
+
+  @@unique([workspaceId, contentAssetId, sampleRole])
+  @@index([workspaceId])
+  @@index([platform])
+  @@index([contentAssetId])
+  @@index([platform, platformContentId])
+  @@index([sampleRole])
+  @@index([segmentKey])
+  @@index([selectedAt])
+  @@index([expiresAt])
+  @@index([workspaceId, lifecycleStatus])
+}
+
+model MarketSignalCard {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  marketSampleId  String
+  contentAssetId  String
+  analyzerVersion String
+  inputHash       String
+  status          String   @default("pending")
+  signals         Json?
+  evidence        Json?
+  missingEvidence Json?
+  confidence      Float?
+  errorMessage    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  marketSample MarketSample @relation(fields: [marketSampleId], references: [id], onDelete: Cascade)
+  contentAsset ContentAsset @relation(fields: [contentAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([marketSampleId, analyzerVersion, inputHash])
+  @@index([workspaceId])
+  @@index([marketSampleId])
+  @@index([contentAssetId])
+  @@index([analyzerVersion])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model TopicMarketComparison {
+  id                    String   @id @default(cuid())
+  workspaceId           String
+  topicId               String
+  materialHash          String
+  comparisonVersion     String
+  status                String
+  disposition           String?
+  confidence            String?
+  usedStrongSampleIds   Json?
+  usedBaselineSampleIds Json?
+  usedSignalCardIds     Json?
+  materialPackage       Json?
+  result                Json?
+  errorMessage          String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  topic Topic @relation(fields: [topicId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([topicId])
+  @@index([materialHash])
+  @@index([comparisonVersion])
+  @@index([status])
+  @@index([disposition])
+  @@index([createdAt])
+}
+
+model TopicReviewJudgment {
+  id                   String   @id @default(cuid())
+  workspaceId          String
+  topicId              String
+  materialHash         String
+  algorithmVersion     String
+  status               String
+  action               String?
+  confidence           String?
+  summary              String?
+  source               String   @default("manual")
+  marketComparisonId   String?
+  marketDisposition    String?
+  materialStatus       String?
+  originalPerformance  Json?
+  materialReadiness    Json?
+  transferFit          Json?
+  marketContext        Json?
+  marketRollupSnapshot Json?
+  missingEvidence      Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  topic   Topic                       @relation(fields: [topicId], references: [id], onDelete: Cascade)
+  factors TopicReviewJudgmentFactor[]
+
+  @@index([workspaceId])
+  @@index([topicId])
+  @@index([materialHash])
+  @@index([algorithmVersion])
+  @@index([status])
+  @@index([action])
+  @@index([confidence])
+  @@index([createdAt])
+}
+
+model TopicReviewJudgmentFactor {
+  id                    String   @id @default(cuid())
+  workspaceId           String
+  topicReviewJudgmentId String
+  topicId               String
+  factorKey             String
+  label                 String
+  verdict               String
+  reasons               Json?
+  createdAt             DateTime @default(now())
+
+  judgment TopicReviewJudgment @relation(fields: [topicReviewJudgmentId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([topicReviewJudgmentId])
+  @@index([topicId])
+  @@index([factorKey])
+  @@index([verdict])
+}
+
+model MarketSampleQualityEvent {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  marketSampleId String
+  quality        String
+  reason         String?
+  actorUserId    String?
+  createdAt      DateTime @default(now())
+
+  marketSample MarketSample @relation(fields: [marketSampleId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([marketSampleId])
+  @@index([quality])
+  @@index([actorUserId])
+  @@index([createdAt])
+}
+
+model ContentAssetSourceRef {
+  id             String    @id @default(cuid())
+  workspaceId    String?
+  contentAssetId String
+  sourceType     String
+  sourceId       String
+  sourceKey      String    @unique
+  sourceRunId    String?
+  sourceRunCode  String?
+  sourceRecordId String?
+  rawEvidenceKey String?
+  taskId         String?
+  pluginRunId    String?
+  monitorId      String?
+  firstSeenAt    DateTime?
+  lastSeenAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  contentAsset ContentAsset @relation(fields: [contentAssetId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([contentAssetId])
+  @@index([sourceType])
+  @@index([sourceId])
+  @@index([sourceRunId])
+  @@index([rawEvidenceKey])
+  @@index([taskId])
+  @@index([pluginRunId])
+  @@index([monitorId])
+}
+
+model ContentAssetBusinessRef {
+  id                String   @id @default(cuid())
+  workspaceId       String?
+  contentAssetId    String
+  sourceType        String
+  sourceId          String
+  sourceKey         String   @unique
+  relationType      String   @default("primary")
+  contentCode       String?
+  platform          String?
+  platformContentId String?
+  title             String?
+  metadata          Json?
+  firstLinkedAt     DateTime @default(now())
+  lastLinkedAt      DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  contentAsset ContentAsset @relation(fields: [contentAssetId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([contentAssetId])
+  @@index([sourceType])
+  @@index([sourceId])
+  @@index([contentCode])
+  @@index([platform, platformContentId])
+  @@index([relationType])
+  @@index([lastLinkedAt])
+}
+
+model ContentMetricSnapshot {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  contentAssetId     String?
+  snapshotKey        String    @unique
+  keyGeneration      Int?
+  contentCode        String?
+  platform           String
+  platformContentId  String
+  contentType        String
+  sourceType         String
+  sourceId           String?
+  sourceRunId        String?
+  sourceRunCode      String?
+  sourceRecordId     String?
+  rawEvidenceKey     String?
+  taskId             String?
+  pluginRunId        String?
+  monitorId          String?
+  likes              Int       @default(0)
+  collects           Int       @default(0)
+  comments           Int       @default(0)
+  shares             Int       @default(0)
+  weightedEngagement Int       @default(0)
+  metrics            Json?
+  observedAt         DateTime
+  publishedAt        DateTime?
+  discoveredAt       DateTime?
+  // V1.1 字段（手册第 4.9 节）：监控中心时间语义重构依赖
+  // targetKey 是强去重核心；firstSeenAt 稳定记录进入监控时间；receivedAt 区分插件观察与服务端入库。
+  targetKey          String?
+  firstSeenAt        DateTime?
+  receivedAt         DateTime?
+  // V1.1 溯源链 + 质量层（手册 4.9）
+  rawSnapshotId      String?
+  rawRecordId        String?
+  captureId          String?
+  viewCount          Int?
+  title              String?
+  authorPlatformId   String?
+  qualityStatus      String    @default("ok") // ok | partial | identity_mismatch | missing_metrics | clock_skew_suspected | invalid
+  qualityReason      String?
+  payloadHash        String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  contentAsset ContentAsset? @relation(fields: [contentAssetId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([contentAssetId])
+  @@index([contentCode])
+  @@index([platform, platformContentId])
+  @@index([sourceType])
+  @@index([sourceRunId])
+  @@index([rawEvidenceKey])
+  @@index([taskId])
+  @@index([pluginRunId])
+  @@index([monitorId])
+  @@index([observedAt])
+  @@index([publishedAt])
+  @@index([weightedEngagement])
+  // V1.1 targetKey 复合索引（手册第 4.9 节）
+  @@index([workspaceId, platform, targetKey, observedAt])
+  @@index([workspaceId, platform, targetKey, publishedAt])
+  @@index([workspaceId, platform, targetKey, receivedAt])
+}
+
+model AuthorMetricSnapshot {
+  id                String   @id @default(cuid())
+  workspaceId       String?
+  snapshotKey       String   @unique
+  platform          String
+  authorPlatformId  String
+  authorCode        String?
+  authorName        String?
+  sourceType        String
+  sourceId          String?
+  sourceRunId       String?
+  sourceRunCode     String?
+  sourceRecordId    String?
+  rawEvidenceKey    String?
+  taskId            String?
+  pluginRunId       String?
+  monitorId         String?
+  contentCode       String?
+  platformContentId String?
+  fans              Int
+  observedAt        DateTime
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@index([platform, authorPlatformId])
+  @@index([authorCode])
+  @@index([sourceType])
+  @@index([sourceRunId])
+  @@index([rawEvidenceKey])
+  @@index([taskId])
+  @@index([pluginRunId])
+  @@index([monitorId])
+  @@index([contentCode])
+  @@index([observedAt])
+  @@index([fans])
+}
+
+model DataQualityIssue {
+  id                String    @id @default(cuid())
+  workspaceId       String?
+  issueKey          String    @unique
+  code              String
+  severity          String
+  severityRank      Int       @default(3)
+  title             String
+  detail            String
+  status            String    @default("pending")
+  affectedCount     Int       @default(0)
+  sampleContentKeys Json?
+  sourceType        String    @default("workspace_inventory")
+  sourceRef         String?
+  firstDetectedAt   DateTime  @default(now())
+  lastDetectedAt    DateTime  @default(now())
+  resolvedAt        DateTime?
+  ignoredAt         DateTime?
+  resolutionReason  String?
+  ownerUserId       String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  events DataQualityIssueEvent[]
+
+  @@index([workspaceId])
+  @@index([code])
+  @@index([severityRank])
+  @@index([status])
+  @@index([sourceType])
+  @@index([lastDetectedAt])
+  @@index([resolvedAt])
+  @@index([ignoredAt])
+}
+
+model DataQualityIssueEvent {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  issueId     String
+  action      String
+  actorUserId String?
+  note        String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+
+  issue DataQualityIssue @relation(fields: [issueId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([issueId])
+  @@index([action])
+  @@index([actorUserId])
+  @@index([createdAt])
+}
+
+model MonitorConfig {
+  id                  String    @id @default(cuid())
+  workspaceId         String?
+  monitorType         String // "author" | "keyword"
+  platform            String // "xhs" | "douyin"
+  target              String // 博主 ID/URL 或关键词
+  isActive            Boolean   @default(true)
+  interval            Int       @default(3600) // 检查间隔（秒），默认 1 小时
+  lastCheckedAt       DateTime?
+  lastScheduledAt     DateTime?
+  lastSuccessfulRunAt DateTime?
+  lastResultId        String? // 最近一次检查的 CollectionTask ID
+  configJson          Json? // 结构化配置对象：{ commentLimit, topByLikes, ... }
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  deletedAt           DateTime?
+
+  @@index([workspaceId])
+  @@index([monitorType])
+  @@index([platform])
+  @@index([isActive])
+  @@index([deletedAt])
+}
+
+model WorkspaceExecutionRule {
+  id          String   @id @default(cuid())
+  workspaceId String
+  kind        String
+  config      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([workspaceId, kind])
+  @@index([workspaceId])
+  @@index([kind])
+}
+
+model ExecutionStation {
+  id                        String    @id @default(cuid())
+  stationKey                String    @unique
+  workspaceId               String?
+  pluginAuthorizationId     String?
+  displayName               String
+  role                      String    @default("monitor") // manual | author_monitor | keyword_monitor | backup
+  status                    String    @default("offline") // online | busy | cooling | offline | needs_login | disabled
+  acceptingTasks            Boolean   @default(true)
+  acceptingTasksUpdatedAt   DateTime?
+  acceptingTasksUpdatedBy   String?
+  capabilities              String // JSON array: ["xhs.authorSurfaceScan", "xhs.keywordSurfaceScan"]
+  pluginVersion             String?
+  browserLabel              String?
+  pairingCodeHash           String?
+  pairingExpiresAt          DateTime?
+  pairingConsumedAt         DateTime?
+  stationTokenHash          String?
+  signingSecretEncrypted    String?
+  signingSecretVersion      Int       @default(1)
+  signatureRequiredAt       DateTime?
+  pairedAt                  DateTime?
+  lastSeenAt                DateTime?
+  leaseTaskId               String?
+  leaseExpiresAt            DateTime?
+  cooldownUntil             DateTime?
+  lastFailureCode           String?
+  lastFailureMessage        String?
+  lastClaimAttemptAt        DateTime?
+  lastClaimResult           String?
+  lastClaimReasonCode       String?
+  lastClaimReasonMessage    String?
+  pushSubscription          Json?
+  pushSubscriptionUpdatedAt DateTime?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  pluginAuthorization PluginAuthorization?           @relation(fields: [pluginAuthorizationId], references: [id], onDelete: SetNull)
+  platformAccounts    PlatformAccount[]
+  mailbox             ExecutionStationMailbox?
+  requestNonces       ExecutionStationRequestNonce[]
+
+  @@index([pluginAuthorizationId])
+  @@index([workspaceId])
+  @@index([role])
+  @@index([status])
+  @@index([acceptingTasks])
+  @@index([lastSeenAt])
+  @@index([cooldownUntil])
+  @@index([lastFailureCode])
+  @@index([lastClaimAttemptAt])
+  @@index([pairingExpiresAt])
+  @@index([pushSubscriptionUpdatedAt])
+  @@index([signatureRequiredAt])
+}
+
+model ExecutionStationMailbox {
+  stationId    String   @id
+  workspaceId  String?
+  version      Int      @default(1)
+  pendingCount Int      @default(0)
+  wakeReason   String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  station ExecutionStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([updatedAt])
+}
+
+model ExecutionStationRequestNonce {
+  id        String   @id @default(cuid())
+  stationId String
+  nonce     String
+  issuedAt  DateTime
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  station ExecutionStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@unique([stationId, nonce])
+  @@index([stationId, expiresAt])
+  @@index([expiresAt])
+}
+
+model PluginAuthorizationCode {
+  id          String    @id @default(cuid())
+  workspaceId String?
+  codeHash    String    @unique
+  codePrefix  String
+  teamName    String?
+  memberName  String?
+  seatName    String?
+  issuedBy    String?
+  scope       String    @default("[]")
+  maxDevices  Int       @default(1)
+  status      String    @default("active") // active | revoked
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  authorizations PluginAuthorization[]
+
+  @@index([status])
+  @@index([workspaceId])
+  @@index([expiresAt])
+  @@index([createdAt])
+}
+
+model PluginAuthorization {
+  id                     String    @id @default(cuid())
+  workspaceId            String?
+  authorizationCodeId    String?
+  deviceId               String
+  browserLabel           String?
+  pluginVersion          String?
+  authorizationTokenHash String?
+  status                 String    @default("active") // active | revoked
+  teamName               String?
+  memberName             String?
+  seatName               String?
+  issuedBy               String?
+  scope                  String    @default("[]")
+  expiresAt              DateTime?
+  activatedAt            DateTime  @default(now())
+  lastSeenAt             DateTime?
+  revokedAt              DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  authorizationCode PluginAuthorizationCode? @relation(fields: [authorizationCodeId], references: [id], onDelete: SetNull)
+  executionStations ExecutionStation[]
+
+  @@unique([authorizationCodeId, deviceId])
+  @@index([workspaceId])
+  @@index([deviceId])
+  @@index([status])
+  @@index([expiresAt])
+  @@index([lastSeenAt])
+}
+
+model PlatformAccount {
+  id                         String    @id @default(cuid())
+  workspaceId                String?
+  stationId                  String
+  platform                   String // xhs | douyin
+  platformAccountId          String?
+  // 平台账号或浏览器会话的身份语义，供队列生成正确的并发锁。
+  executionIdentityKind      String    @default("platform_account")
+  displayName                String?
+  purpose                    String    @default("monitor") // manual | author_monitor | keyword_monitor | backup
+  healthStatus               String    @default("unknown") // healthy | busy | cooling | needs_login | restricted | unknown
+  lastCheckedAt              DateTime?
+  cooldownUntil              DateTime?
+  // V1.1 风控字段（手册第 4.15 节）：服务端成为账号风控事实源，插件只上报风险信号。
+  riskControlUntil           DateTime?
+  riskControlCode            String?
+  riskControlObservedAt      DateTime?
+  riskControlEvidence        Json?
+  riskControlSourceStationId String?
+  // V1.1 失败评分（手册第 4.15 节）：失败归因 + 评分，作为 AccountHealthProjection 输入。
+  recentFailureScore         Int       @default(0)
+  lastFailureCode            String?
+  lastFailureScope           String?
+  lastFailureAt              DateTime?
+  dailyTaskCount             Int       @default(0)
+  dailyOpenedCount           Int       @default(0)
+  dailySuccessCount          Int       @default(0)
+  dailyFailedCount           Int       @default(0)
+  dailyWindowDate            String?
+  rawProfile                 String?
+  createdAt                  DateTime  @default(now())
+  updatedAt                  DateTime  @updatedAt
+
+  station ExecutionStation @relation(fields: [stationId], references: [id], onDelete: Cascade)
+
+  @@unique([stationId, platform])
+  @@index([workspaceId])
+  @@index([platform])
+  @@index([platform, platformAccountId])
+  @@index([purpose])
+  @@index([healthStatus])
+  // V1.1 风控索引（手册第 4.15 节）
+  @@index([workspaceId, platform, riskControlUntil])
+}
+
+model MonitorObservation {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  monitorId         String
+  roundId           String?
+  taskId            String?
+  taskRecordId      String?   @unique
+  stationId         String?
+  platformAccountId String?
+  platform          String
+  observationType   String // author_profile | author_surface_item | keyword_surface_item | detail_probe
+  platformContentId String?
+  authorPlatformId  String?
+  sourceUrl         String?
+  title             String?
+  publishedAt       DateTime?
+  likes             Int       @default(0)
+  collects          Int       @default(0)
+  comments          Int       @default(0)
+  shares            Int       @default(0)
+  rawPayload        String
+  observedAt        DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+
+  @@index([workspaceId])
+  @@index([monitorId])
+  @@index([roundId])
+  @@index([taskId])
+  @@index([platform, platformContentId])
+  @@index([observedAt])
+  @@index([updatedAt])
+  @@index([deletedAt])
+}
+
+model MonitorWork {
+  id                           String    @id @default(cuid())
+  workspaceId                  String
+  monitorId                    String
+  platform                     String
+  platformContentId            String
+  contentAssetId               String?
+  contentCode                  String?
+  authorPlatformId             String?
+  sourceUrl                    String?
+  title                        String?
+  contentType                  String?
+  content                      String?
+  tags                         String?
+  publishedAt                  DateTime?
+  publishedAtText              String?
+  firstCollectedAt             DateTime
+  baselineLikes                Int       @default(0)
+  baselineCollects             Int       @default(0)
+  baselineComments             Int       @default(0)
+  baselineShares               Int       @default(0)
+  lastObservedAt               DateTime?
+  lastObservedLikes            Int       @default(0)
+  lastObservedCollects         Int       @default(0)
+  lastObservedComments         Int       @default(0)
+  lastObservedShares           Int       @default(0)
+  commentCollectionStatus      String    @default("pending") // pending | collecting | collected | ignored
+  commentExecutionJobId        String?
+  commentCollectionRequestedAt DateTime?
+  commentCollectionCompletedAt DateTime?
+  commentCollectionIgnoredAt   DateTime?
+  // 失效笔记归因修复（2026-07-08）：与 OperationPublication.dataSyncStatus 同一语义，
+  // 挂在监控作品上。available：正常 | content_unavailable：已确认失效/隐藏/无法访问。
+  contentStatus                String    @default("available")
+  contentStatusReason          String?
+  contentStatusUpdatedAt       DateTime?
+  createdAt                    DateTime  @default(now())
+  updatedAt                    DateTime  @updatedAt
+  deletedAt                    DateTime?
+
+  contentAsset ContentAsset? @relation(fields: [contentAssetId], references: [id], onDelete: SetNull)
+
+  @@unique([monitorId, platformContentId])
+  @@index([workspaceId])
+  @@index([monitorId, publishedAt])
+  @@index([platform, platformContentId])
+  @@index([contentAssetId])
+  @@index([contentCode])
+  @@index([authorPlatformId])
+  @@index([firstCollectedAt])
+  @@index([commentCollectionStatus])
+  @@index([commentExecutionJobId])
+  @@index([deletedAt])
+}
+
+model MonitorContentHit {
+  id                String   @id @default(cuid())
+  workspaceId       String
+  platform          String
+  platformContentId String
+  monitorId         String
+  hitAt             DateTime @default(now())
+  likesAtHit        Int      @default(0)
+  collectsAtHit     Int      @default(0)
+  commentsAtHit     Int      @default(0)
+  sharesAtHit       Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([workspaceId, platform, platformContentId, monitorId])
+  @@index([workspaceId, platformContentId])
+  @@index([monitorId])
+  @@index([hitAt])
+}
+
+model MonitorSourcePolicy {
+  id                  String    @id @default(cuid())
+  workspaceId         String
+  monitorId           String
+  isWhitelisted       Boolean   @default(false)
+  whitelistReason     String?
+  whitelistedByUserId String?
+  whitelistedAt       DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@unique([workspaceId, monitorId])
+  @@index([workspaceId])
+  @@index([monitorId])
+  @@index([isWhitelisted])
+}
+
+model MonitorFrequencyHistory {
+  id                  String   @id @default(cuid())
+  workspaceId         String
+  monitorId           String
+  fromIntervalSeconds Int
+  toIntervalSeconds   Int
+  reasonCode          String
+  reason              String?
+  evaluationScore     Int?
+  actor               String   @default("system") // system | leader
+  changedAt           DateTime @default(now())
+  createdAt           DateTime @default(now())
+
+  @@index([workspaceId])
+  @@index([monitorId])
+  @@index([changedAt])
+  @@index([reasonCode])
+}
+
+model MonitorEvaluationSnapshot {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  monitorId       String
+  score           Int
+  productionScore Int
+  scarcityScore   Int
+  breakdown       Json?
+  windowStart     DateTime
+  windowEnd       DateTime
+  evaluatedAt     DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@unique([workspaceId, monitorId, windowStart])
+  @@index([workspaceId])
+  @@index([monitorId])
+  @@index([evaluatedAt])
+  @@index([workspaceId, monitorId, evaluatedAt])
+}
+
+model MonitorSurgeTracking {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  monitorId          String
+  platform           String
+  platformContentId  String
+  status             String    @default("tracking") // tracking | queued | exited
+  channel            String
+  placement          String    @default("tracking")
+  title              String?
+  sourceUrl          String?
+  authorName         String?
+  latestDelta        Float     @default(0)
+  activeStartedAt    DateTime?
+  queuedAt           DateTime?
+  exitedAt           DateTime?
+  exitReason         String?
+  cooldownUntil      DateTime?
+  lastNotifiedAt     DateTime?
+  surgeScore         Float? // V1.1 §5.7 surge 分数（首次超 P95 判定依据）
+  selectedSnapshotId String? // 触发起量的快照 id（锚定 surgeStartedAt = selectedSnapshot.observedAt）
+  surgeStartedAt     DateTime? // 起量开始时间（锚点，来自 selectedSnapshot）
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([workspaceId, platform, platformContentId])
+  @@index([workspaceId])
+  @@index([monitorId])
+  @@index([status])
+  @@index([channel])
+  @@index([createdAt])
+}
+
+model MonitorEliminationSuggestion {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  monitorId        String
+  status           String    @default("pending") // pending | accepted | ignored | whitelisted
+  reasonCode       String
+  reason           String?
+  scoreCurve       Json?
+  firstSuggestedAt DateTime  @default(now())
+  lastFlaggedAt    DateTime  @default(now())
+  ignoredUntil     DateTime?
+  actedAt          DateTime?
+  actedByUserId    String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([workspaceId])
+  @@index([monitorId])
+  @@index([status])
+  @@index([ignoredUntil])
+  @@index([lastFlaggedAt])
+}
+
+model MonitorEvaluationSetting {
+  id                        String    @id @default(cuid())
+  workspaceId               String
+  autoAdjustEnabled         Boolean   @default(false)
+  observationStartedAt      DateTime  @default(now())
+  observationEndsAt         DateTime?
+  activationDecision        String?
+  activationDecidedAt       DateTime?
+  activationDecidedByUserId String?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
+
+  @@unique([workspaceId])
+  @@index([autoAdjustEnabled])
+}
+
+model MonitorOpportunity {
+  id                   String    @id @default(cuid())
+  workspaceId          String?
+  monitorId            String
+  platform             String
+  platformContentId    String
+  contentAssetId       String?
+  contentCode          String?
+  sourceUrl            String?
+  title                String?
+  authorPlatformId     String?
+  authorName           String?
+  primaryReason        String // first_seen | recent_publish | growth | discussion_spike | keyword_relevant | needs_probe
+  status               String    @default("pending") // pending | pending_probe | watching | confirmed | accepted | ignored | expired | archived
+  summary              String?
+  priorityScore        Int       @default(0)
+  confidenceScore      Int       @default(0)
+  reasonTypes          String // JSON array
+  evidence             String // JSON object
+  needsDetailProbe     Boolean   @default(false)
+  firstTriggeredAt     DateTime  @default(now())
+  lastTriggeredAt      DateTime  @default(now())
+  firstObservedAt      DateTime?
+  lastObservedAt       DateTime?
+  firstStationId       String?
+  lastStationId        String?
+  baselineLikes        Int       @default(0)
+  baselineCollects     Int       @default(0)
+  baselineComments     Int       @default(0)
+  baselineShares       Int       @default(0)
+  lastObservedLikes    Int       @default(0)
+  lastObservedCollects Int       @default(0)
+  lastObservedComments Int       @default(0)
+  lastObservedShares   Int       @default(0)
+  acceptedAt           DateTime?
+  ignoredAt            DateTime?
+  expiredAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  deletedAt            DateTime?
+
+  reasons      MonitorOpportunityReason[]
+  contentAsset ContentAsset?              @relation(fields: [contentAssetId], references: [id], onDelete: SetNull)
+
+  @@unique([monitorId, platformContentId])
+  @@index([workspaceId])
+  @@index([monitorId, status])
+  @@index([monitorId, primaryReason])
+  @@index([platform, platformContentId])
+  @@index([contentAssetId])
+  @@index([contentCode])
+  @@index([lastTriggeredAt])
+  @@index([deletedAt])
+}
+
+model MonitorOpportunityReason {
+  id               String   @id @default(cuid())
+  workspaceId      String?
+  opportunityId    String
+  reasonType       String
+  isActive         Boolean  @default(true)
+  summary          String?
+  evidence         String // JSON object
+  firstTriggeredAt DateTime @default(now())
+  lastTriggeredAt  DateTime @default(now())
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  opportunity MonitorOpportunity @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+
+  @@unique([opportunityId, reasonType])
+  @@index([workspaceId])
+  @@index([reasonType, isActive])
+  @@index([opportunityId, lastTriggeredAt])
+}
+
+model RadarSignal {
+  id                String    @id @default(cuid())
+  workspaceId       String?
+  signalKey         String
+  primaryGroup      String // author_new | keyword_viral | rising
+  groups            String // JSON array: ["author_new","rising"]
+  status            String    @default("pending") // pending | accepted | ignored | watching | archived
+  platform          String
+  platformContentId String
+  contentAssetId    String?
+  contentCode       String?
+  sourceUrl         String?
+  title             String
+  summary           String?
+  authorName        String?
+  monitorIds        String // JSON array
+  evidence          String // JSON object
+  radarScore        Int       @default(0)
+  surgeStatus       String?
+  surgeChannel      String?
+  surgeTrackingId   String?
+  surgeDetectedAt   DateTime?
+  firstSeenAt       DateTime  @default(now())
+  lastSeenAt        DateTime  @default(now())
+  acceptedAt        DateTime?
+  ignoredAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  contentAsset ContentAsset? @relation(fields: [contentAssetId], references: [id], onDelete: SetNull)
+
+  @@unique([workspaceId, signalKey])
+  @@index([workspaceId])
+  @@index([signalKey])
+  @@index([primaryGroup])
+  @@index([status])
+  @@index([radarScore])
+  @@index([surgeStatus])
+  @@index([surgeDetectedAt])
+  @@index([lastSeenAt])
+  @@index([platform])
+  @@index([contentAssetId])
+  @@index([contentCode])
+}
+
+model Author {
+  id               String           @id @default(cuid())
+  workspaceId      String?
+  authorEntityId   String // 跨平台统一 ID
+  platformAuthorId String // 平台原生 ID
+  platform         String // xhs / douyin
+  name             String // 博主名
+  description      String? // 简介
+  fans             Int              @default(0) // 粉丝数
+  follows          Int              @default(0) // 关注数
+  interactions     Int              @default(0) // 获赞收藏
+  ipLocation       String? // IP 属地
+  profileUrl       String? // 主页链接
+  handle           String? // 账号标识（红薯号/抖音号）
+  keywords         String? // JSON 数组，标签列表
+  userGroup        String? // 用户自定义分组
+  userNote         String? // 用户自定义备注
+  userTags         String? // JSON 数组，用户自定义标签
+  rawData          String? // 完整原始数据
+  collectedAt      DateTime? // 采集时间
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  deletedAt        DateTime?
+  snapshots        AuthorSnapshot[]
+  archives         AuthorArchive[]  @relation("AuthorArchiveAuthor")
+  media            AuthorMedia[]
+
+  @@unique([workspaceId, id], map: "Author_workspaceId_id_key")
+  @@unique([workspaceId, authorEntityId])
+  @@unique([workspaceId, platform, platformAuthorId])
+  @@index([workspaceId])
+  @@index([authorEntityId])
+  @@index([platform])
+  @@index([name])
+  @@index([deletedAt])
+}
+
+model AuthorSnapshot {
+  id               String    @id @default(cuid())
+  workspaceId      String?
+  authorId         String
+  authorEntityId   String
+  platformAuthorId String
+  platform         String
+  name             String
+  description      String?
+  fans             Int       @default(0)
+  follows          Int       @default(0)
+  interactions     Int       @default(0)
+  ipLocation       String?
+  profileUrl       String?
+  handle           String?
+  keywords         String?
+  userGroup        String?
+  userNote         String?
+  userTags         String?
+  rawData          String?
+  collectedAt      DateTime?
+  createdAt        DateTime  @default(now())
+
+  author Author @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([authorId, createdAt])
+  @@index([authorEntityId])
+  @@index([platform, platformAuthorId])
+}
+
+// 博主蒸馏记录：lgboom-author-dossier 技能产出的档案与创作 skill 入库后落在这里。
+// 聚合单位是博主（platform + authorPlatformId），同一博主多次蒸馏为多条版本。
+model Dossier {
+  id               String   @id @default(cuid())
+  workspaceId      String // 归属工作区
+  createdById      String // 蒸馏人（User.id），用于「我的蒸馏」筛选
+  authorId         String? // 可选关联 Author 实体（存在时）
+  platform         String // xhs / douyin
+  authorPlatformId String // 平台稳定 ID（= dossier.json author.userId），聚合键
+  authorNickname   String // 展示用昵称
+  distilledAt      DateTime // 这一次蒸馏的时间（= dossier.json generatedAt），版本标识
+  archiveId        String?
+  dataRevision     Int?
+  evidenceRevision String?
+  worksCount       Int      @default(0) // 基线：蒸馏当时的作品数
+  countsJson       String? // dossier.json counts 全量（JSON）
+  readinessJson    String? // 数据覆盖质量（dossier.json readiness，如正文/评论覆盖率）
+  limitationsJson  String? // 局限说明（dossier.json limitations）
+  reportBlobUrl    String? // 博主档案 HTML 的 Blob 公网地址
+  reportBlobKey    String? // 报告 Blob storageKey
+  skillBlobUrl     String? // SKILL.md 的 Blob 公网地址（下载用）
+  skillBlobKey     String? // skill Blob storageKey
+  skillMarkdown    String? // SKILL.md 全文（内联，供网页直接展示与复制）
+  status           String   @default("ready") // ready | failed
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  archive AuthorArchive? @relation("AuthorArchiveDossiers", fields: [archiveId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, platform, authorPlatformId, distilledAt]) // workspace 内同博主同次蒸馏不重复入库
+  @@index([workspaceId])
+  @@index([workspaceId, platform, authorPlatformId])
+  @@index([workspaceId, archiveId, dataRevision])
+  @@index([workspaceId, evidenceRevision])
+  @@index([createdById])
+  @@index([platform, authorPlatformId])
+}
+
+model AuthorContextArchive {
+  id                   String   @id @default(cuid())
+  workspaceId          String?
+  authorId             String
+  platform             String
+  platformAuthorId     String
+  authorName           String
+  archiveId            String?
+  dataRevision         Int?
+  evidenceRevision     String?
+  requestedLimit       Int      @default(20)
+  worksCount           Int      @default(0)
+  mediaReadyCount      Int      @default(0)
+  mediaMissingCount    Int      @default(0)
+  commentsReadyCount   Int      @default(0)
+  commentsMissingCount Int      @default(0)
+  status               String   @default("ready")
+  manifestJson         String
+  authorJson           String
+  worksJson            String
+  mediaJson            String
+  commentsIndexJson    String
+  readmeMarkdown       String
+  refreshedAt          DateTime @default(now())
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  archive AuthorArchive? @relation("AuthorArchiveContextPacks", fields: [archiveId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId])
+  @@index([workspaceId, authorId, refreshedAt])
+  @@index([workspaceId, authorName])
+  @@index([workspaceId, platform, platformAuthorId])
+  @@index([workspaceId, archiveId, dataRevision])
+  @@index([workspaceId, evidenceRevision])
+  @@index([refreshedAt])
+}
+
+model CommentTopic {
+  id              String           @id @default(cuid())
+  workspaceId     String?
+  name            String
+  keywords        String // JSON 数组
+  platform        String? // 限定平台或 null=全平台
+  matchedCount    Int              @default(0) // 匹配评论数
+  description     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  analysisReports AnalysisReport[]
+
+  @@index([workspaceId])
+  @@index([platform])
+}
+
+model CommentStar {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  commentId   String   @unique
+  category    String // resonance/conflict/demand/quote/story/question/slang
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  comment     Comment  @relation(fields: [commentId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([category])
+}
+
+model AnalysisReport {
+  id             String   @id @default(cuid())
+  workspaceId    String?
+  title          String
+  analysisType   String // sentiment/painpoint/opportunity/persona/faq/slang/custom
+  sourceType     String // comment_topic/collection_task/search_filter/manual
+  sourceRef      String?
+  sourceQuery    String? // 原始查询/筛选条件
+  commentTopicId String? // 关联 CommentTopic（可选）
+  commentIds     String // JSON 数组
+  reportContent  String // JSON 格式报告内容
+  createdAt      DateTime @default(now())
+
+  commentTopic CommentTopic? @relation(fields: [commentTopicId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId])
+  @@index([analysisType])
+  @@index([sourceType])
+  @@index([commentTopicId])
+}
+
+model CoverReference {
+  id          String   @id @default(cuid())
+  workspaceId String?
+  url         String
+  tags        String? // JSON 数组格式存储
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([workspaceId])
+  @@index([createdAt])
+}
+
+// 媒体账本是唯一媒体事实来源；历史归档与兼容表已物理退役。
+// 目前不能表达 partial / expression unique indexes。
+model MediaBlob {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  sha256         String
+  byteSize       Int
+  mimeType       String
+  width          Int?
+  height         Int?
+  durationMs     Int?
+  integrityState String    @default("pending")
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  replicas         MediaReplica[]
+  materializations MediaMaterialization[]
+
+  @@unique([workspaceId, id], map: "MediaBlob_workspaceId_id_key")
+  @@index([workspaceId, integrityState, createdAt])
+}
+
+model MediaReplica {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  blobId         String
+  provider       String
+  storageKey     String
+  // 正式交付地址或稳定句柄。云副本没有它时只能作为物理事实，不能交付给页面、AI 或发布。
+  deliveryHandle String?
+  replicaState   String    @default("pending")
+  verifiedAt     DateTime?
+  lastCheckedAt  DateTime?
+  etag           String?
+  createdAt      DateTime  @default(now())
+  deletedAt      DateTime?
+
+  blob MediaBlob @relation(fields: [workspaceId, blobId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@index([workspaceId, replicaState, lastCheckedAt])
+  @@index([blobId])
+}
+
+model MediaItem {
+  id             String    @id @default(cuid())
+  workspaceId    String
+  kind           String
+  lifecycleState String    @default("active")
+  createdAt      DateTime  @default(now())
+  supersededAt   DateTime?
+  deletedAt      DateTime?
+
+  origins          MediaOrigin[]          @relation("MediaItemOrigins")
+  materializations MediaMaterialization[]
+  usages           ContentMediaUsage[]
+  topicSelections  TopicMediaSelection[]
+  publicationMedia PublicationMedia[]
+  authorMedia      AuthorMedia[]
+
+  @@unique([workspaceId, id], map: "MediaItem_workspaceId_id_key")
+  @@index([workspaceId, lifecycleState, createdAt])
+}
+
+// 选题的显式媒体选择关系。当前有效关系的唯一性由 migration.sql 的 partial unique index 保证。
+model TopicMediaSelection {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  topicId          String
+  mediaItemId      String
+  purpose          String
+  sourceRevision   String?
+  selectedAt       DateTime  @default(now())
+  selectedByUserId String?
+  validFrom        DateTime  @default(now())
+  validTo          DateTime?
+  createdAt        DateTime  @default(now())
+
+  topic     Topic     @relation("TopicMediaSelections", fields: [workspaceId, topicId], references: [workspaceId, id], onDelete: Restrict)
+  mediaItem MediaItem @relation(fields: [workspaceId, mediaItemId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, id], map: "TopicMediaSelection_workspaceId_id_key")
+  @@index([workspaceId, topicId, purpose, validTo])
+  @@index([workspaceId, mediaItemId, validTo])
+}
+
+// 发布媒体关系。预览与有序成品都只接受同一工作区中已经存在的 MediaItem。
+model PublicationMedia {
+  id                     String    @id @default(cuid())
+  workspaceId            String
+  operationPublicationId String
+  mediaItemId            String
+  purpose                String
+  ordinal                Int?
+  sourceRevision         String?
+  selectedAt             DateTime  @default(now())
+  selectedByUserId       String?
+  validFrom              DateTime  @default(now())
+  validTo                DateTime?
+  createdAt              DateTime  @default(now())
+
+  operationPublication OperationPublication @relation("OperationPublicationMedia", fields: [workspaceId, operationPublicationId], references: [workspaceId, id], onDelete: Restrict)
+  mediaItem            MediaItem            @relation(fields: [workspaceId, mediaItemId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, id], map: "PublicationMedia_workspaceId_id_key")
+  @@index([workspaceId, operationPublicationId, purpose, ordinal, validTo])
+  @@index([workspaceId, mediaItemId, validTo])
+}
+
+// 作者级媒体关系。头像不属于任何 ContentAsset，因此不能挂 ContentMediaUsage；
+// 它与 TopicMediaSelection / PublicationMedia 同构，是媒体域的第四张业务关系表。
+//
+// purpose 先只收 `avatar` 一个值：作者级媒体将来可能扩展（主页背景等），但
+// 词表开宽就是给缺口留门，需要时再经准入流程扩。
+// 当前有效关系的唯一性由 migration.sql 的 partial unique index 保证。
+model AuthorMedia {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  authorId         String
+  mediaItemId      String
+  purpose          String
+  sourceRevision   String?
+  selectedAt       DateTime  @default(now())
+  selectedByUserId String?
+  validFrom        DateTime  @default(now())
+  validTo          DateTime?
+  createdAt        DateTime  @default(now())
+
+  author    Author    @relation(fields: [workspaceId, authorId], references: [workspaceId, id], onDelete: Restrict)
+  mediaItem MediaItem @relation(fields: [workspaceId, mediaItemId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([workspaceId, id], map: "AuthorMedia_workspaceId_id_key")
+  @@index([workspaceId, authorId, purpose, validTo])
+  @@index([workspaceId, mediaItemId, validTo])
+}
+
+model MediaOrigin {
+  id                String    @id @default(cuid())
+  workspaceId       String
+  mediaItemId       String
+  provider          String
+  stableLocator     String
+  fetchUrl          String?
+  fetchUrlExpiresAt DateTime?
+  generation        Int       @default(1)
+  originState       String    @default("observed")
+  observedAt        DateTime  @default(now())
+  lastResolvedAt    DateTime?
+  lastErrorCode     String?
+  nextRetryAt       DateTime?
+  deletedAt         DateTime?
+
+  mediaItem        MediaItem              @relation("MediaItemOrigins", fields: [workspaceId, mediaItemId], references: [workspaceId, id], onDelete: Restrict)
+  materializations MediaMaterialization[]
+  contentMediaUsages ContentMediaUsage[] @relation("ContentMediaUsageOrigin")
+
+  @@unique([workspaceId, id], map: "MediaOrigin_workspaceId_id_key")
+  @@unique([workspaceId, id, mediaItemId], map: "MediaOrigin_workspaceId_id_mediaItemId_key")
+  @@index([mediaItemId])
+  @@index([workspaceId, originState, nextRetryAt])
+}
+
+model MediaMaterialization {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  mediaItemId      String
+  mediaOriginId    String
+  originGeneration Int
+  blobId           String?
+  state            String    @default("pending")
+  materializedAt   DateTime?
+  supersededAt     DateTime?
+  createdAt        DateTime  @default(now())
+
+  mediaItem MediaItem   @relation(fields: [workspaceId, mediaItemId], references: [workspaceId, id], onDelete: Restrict)
+  origin    MediaOrigin @relation(fields: [workspaceId, mediaOriginId, mediaItemId], references: [workspaceId, id, mediaItemId], onDelete: Restrict)
+  blob      MediaBlob?  @relation(fields: [workspaceId, blobId], references: [workspaceId, id], onDelete: Restrict)
+
+  @@unique([mediaOriginId, originGeneration])
+  @@index([workspaceId, mediaItemId, supersededAt])
+  @@index([blobId])
+}
+
+model ContentMediaUsage {
+  id                       String    @id @default(cuid())
+  workspaceId              String
+  contentAssetId           String
+  mediaItemId              String
+  purpose                  String
+  ordinal                  Int?
+  // B3-PROJECTION-FOUNDATION-001: canonical provenance (all-or-nothing).
+  contractEvaluationId     String?
+  canonicalObservationId   String?
+  canonicalSlotId          String?
+  mediaOriginId            String?
+  originGeneration         Int?
+  mediaProcessingEventId   String?
+  sourceRevision           String?
+  observedAt               DateTime?
+  validFrom                DateTime  @default(now())
+  validTo                  DateTime?
+  createdAt                DateTime  @default(now())
+
+  contentAsset       ContentAsset          @relation(fields: [workspaceId, contentAssetId], references: [workspaceId, id], onDelete: Restrict)
+  mediaItem          MediaItem             @relation(fields: [workspaceId, mediaItemId], references: [workspaceId, id], onDelete: Restrict)
+  contractEvaluation ContractEvaluation?   @relation("ContentMediaUsageEvaluation", fields: [workspaceId, contractEvaluationId], references: [workspaceId, id], onDelete: Restrict, map: "CMU_evaluation_fkey")
+  canonicalSlot      CanonicalMediaSlot?   @relation("ContentMediaUsageSlot", fields: [workspaceId, canonicalObservationId, canonicalSlotId], references: [workspaceId, canonicalObservationId, slotId], onDelete: Restrict, map: "CMU_slot_fkey")
+  mediaOrigin        MediaOrigin?          @relation("ContentMediaUsageOrigin", fields: [workspaceId, mediaOriginId, mediaItemId], references: [workspaceId, id, mediaItemId], onDelete: Restrict, map: "CMU_origin_fkey")
+  processingEvent    OutboxEvent?          @relation("MediaUsageProcessingEvent", fields: [mediaProcessingEventId], references: [id], onDelete: Restrict, map: "CMU_processing_event_fkey")
+
+  @@unique([workspaceId, id], map: "ContentMediaUsage_workspaceId_id_key")
+  @@index([workspaceId, contentAssetId, purpose, ordinal])
+  @@index([mediaItemId])
+  @@index([canonicalObservationId])
+}
+
+// 内容资产的「理解结果」：封面/多图 OCR、口播转录、视频理解。
+//
+// 为什么挂在 ContentAsset 而不是 Topic：同一条笔记可能既在选题库里、也被监控/雷达引用，
+// 库外笔记（cw note pack）根本没有 Topic。理解是内容本身的属性，不是某个选题的属性。
+// 选题侧通过 Topic.contentAssetId 桥接读取，两边看到同一份结果。
+//
+// role 使用媒体账本的业务槽位词表（cover / image:{index} / video），一一对应具体素材。
+model ContentAssetUnderstanding {
+  id             String   @id @default(cuid())
+  workspaceId    String
+  contentAssetId String
+  // kind 是「哪一类理解」，role 是「作用在哪个素材上」。封面 OCR 不单列 kind——
+  // 它就是 kind=image_ocr + role=cover，这样查一条笔记的全部图片文字只需一次查询。
+  kind           String // image_ocr | video_transcript | video_understanding
+  role           String // cover | image:{index} | video
+  provider       String // doubao_cover_understanding | local_mlx_whisper | ...
+  model          String?
+  status         String   @default("completed") // completed | failed
+  ocrText        String? // 图片里识别出的文字 / 口播文本
+  summary        String? // 视觉摘要或内容摘要
+  payload        Json? // 完整原始结果（textLayout / riskNotes / segments 等）
+  errorMessage   String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  contentAsset ContentAsset @relation(fields: [contentAssetId], references: [id], onDelete: Cascade)
+
+  // 同一张图的同一种理解只保留一条，重跑就地覆盖。
+  @@unique([contentAssetId, kind, role])
+  @@index([workspaceId])
+  @@index([contentAssetId])
+  @@index([kind])
+}
+
+// 调度 tick 日志：记录每轮 dispatch/maintenance tick 的执行情况，便于回溯排查。
+// 替代原先只进 console 的 logExecutionTaskSchedulerTick——容器重启后历史 tick 全失。
+model SchedulerTickLog {
+  id            String    @id @default(cuid())
+  workspaceId   String?
+  mode          String // dispatch | maintenance
+  skipped       Boolean   @default(false)
+  startedAt     DateTime
+  finishedAt    DateTime?
+  durationMs    Int       @default(0)
+  stepDurations Json? // [{ step, durationMs }]
+  errors        Json? // [{ step, message }]
+  metrics       Json? // 各 step 的 metric 摘要（planner/recovery/scheduler 等）
+  createdAt     DateTime  @default(now())
+
+  @@index([createdAt])
+  @@index([mode, createdAt])
+  @@index([workspaceId, createdAt])
+}
+
+// 平台熔断状态变化事件：记录 open/degraded/normal 的转换历史。
+// evaluatePlatformCircuitBreakers 本身保持只读纯计算，状态变化在 maintenance tick 里持久化，
+// 解决"熔断纯内存、重启归零、无法回溯打开/恢复时间线"的缺口。
+model PlatformCircuitBreakerEvent {
+  id            String    @id @default(cuid())
+  workspaceId   String?
+  platform      String
+  state         String // normal | degraded | open
+  previousState String?
+  reason        String?
+  failureCount  Int       @default(0)
+  stationCount  Int       @default(0)
+  retryAt       DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([platform, createdAt])
+  @@index([workspaceId, platform, createdAt])
+  @@index([createdAt])
+}
+
+// ============================================================================
+// V1.1 采集架构重构目标模型（手册 target-architecture-handbook-v1.1.md 第 4 节）
+// 现役链路以 ExecutionJob / ExecutionQueueEntry / RawSnapshot / WritebackDelivery 为主。
+// 所有 partial unique index 走独立 SQL migration
+// （prisma/migrations/features/collection-refactor-indexes.sql）
+// ============================================================================
+
+// 手册 4.1：平台对象标准化身份，解决同一 URL / 博主 / 作品多种形式重复创建任务。
+model PlatformTarget {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  platform           String
+  targetType         String // note | author | keyword | comment_thread
+  targetKey          String
+  aliasOfTargetKey   String?
+  platformContentId  String?
+  platformAuthorId   String?
+  keywordHash        String?
+  canonicalUrl       String?
+  rawUrlVariants     Json?
+  title              String?
+  authorName         String?
+  status             String    @default("active") // active | deleted | private | invalid | unknown
+  // 失效确认标记（2026-07-08，笔记失效归因修复）：status="invalid" 时以下字段生效。
+  // 只在多次确认后才写入（沿用 PR#41 已验证的 24h 内失败≥3 次阈值），避免网络抖动
+  // 误杀。invalidReleasedAt 非空表示人工解除，恢复排单资格；不清空 status，
+  // 造单入口读取时需同时检查 status 与 invalidReleasedAt。
+  invalidConfirmedAt DateTime?
+  invalidReasonCode  String? // 确认失效时的终态错误码，如 content_not_found
+  invalidEvidence    String? // 最后一次失败的错误摘要，供排障
+  invalidSourceLane  String? // 触发确认的来源，如 monitor | operation_data_sync | data_governance
+  invalidReleasedAt  DateTime? // 人工解除时间，非空即视为已解除
+  firstSeenAt        DateTime  @default(now())
+  lastSeenAt         DateTime  @default(now())
+  lastObservedAt     DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([workspaceId, platform, targetKey])
+  @@index([workspaceId, platform, aliasOfTargetKey])
+  @@index([workspaceId, platform, targetType])
+  @@index([workspaceId, platform, platformContentId])
+  @@index([workspaceId, platform, platformAuthorId])
+  @@index([workspaceId, platform, status])
+}
+
+// 手册 4.2：业务需求层。所有业务入口必须先创建 Demand，禁止直接创建 ExecutionJob。
+// requiredFields 必须是字段名数组（V1.1 设计拍板 1）。
+model TaskDemand {
+  id                           String                          @id @default(cuid())
+  workspaceId                  String
+  sourceSystem                 String // manual | monitor | operation_data_sync | data_governance | topic_material | author_archive
+  sourceRequestId              String // 永久唯一幂等键（手册 L335-343）
+  sourceRecordId               String?
+  platform                     String
+  targetType                   String
+  targetKey                    String
+  platformTargetId             String?
+  demandKind                   String // metrics | detail | comments | author_profile | archive
+  requiredFields               Json // 字段名数组（V1.1 设计拍板 1）
+  collectionProfile            String // list_scan | note_detail | note_full | comment_probe | author_profile | author_links
+  // freshness：latest 必须有 maxSnapshotAgeSec（V1.1 致命 Bug 3）
+  freshnessType                String // latest | max_age | checkpoint | force_new
+  maxSnapshotAgeSec            Int?
+  checkpointType               String?
+  checkpointAnchorType         String?
+  checkpointDueAt              DateTime?
+  checkpointToleranceBeforeSec Int?
+  checkpointToleranceAfterSec  Int?
+  priority                     Int                             @default(50)
+  slaClass                     String                          @default("normal") // hot | normal | cold
+  expiresAt                    DateTime?
+  expiredPolicy                String                          @default("skip") // skip | downgrade | keep | manual_review
+  status                       TaskDemandStatus                @default(open) // open | satisfied_by_snapshot | linked | completed | cancelled | expired | failed
+  linkedJobId                  String?
+  linkedSnapshotId             String?
+  createdAt                    DateTime                        @default(now())
+  updatedAt                    DateTime                        @updatedAt
+  completedAt                  DateTime?
+  cancelledAt                  DateTime?
+  idempotencyHash              String?
+  idempotencyPayload           Json?
+  links                        TaskDemandLink[]
+  archiveBackfillPlanItems     AuthorArchiveBackfillPlanItem[] @relation("ArchiveBackfillPlanItemTaskDemand")
+
+  @@unique([workspaceId, sourceSystem, sourceRequestId])
+  @@index([workspaceId, status, priority, createdAt])
+  @@index([workspaceId, platform, targetKey, status])
+  @@index([workspaceId, checkpointDueAt])
+  @@index([workspaceId, expiresAt])
+}
+
+// 手册 4.4：Demand 与 Job 的多对一绑定（多业务共用一个 Job）。
+model TaskDemandLink {
+  id          String       @id @default(cuid())
+  workspaceId String
+  demandId    String
+  jobId       String
+  role        String       @default("consumer")
+  createdAt   DateTime     @default(now())
+  demand      TaskDemand   @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  job         ExecutionJob @relation(fields: [jobId], references: [id], onDelete: Restrict)
+
+  @@unique([demandId, jobId])
+  @@index([jobId])
+  @@index([workspaceId, demandId])
+}
+
+// 手册 4.3：一次实际采集作业。多个 TaskDemand 可共用一个 ExecutionJob。
+// activeDedupeKey + partial unique index 是防 TOCTOU 的兜底（V1.1 致命 Bug 2）。
+model ExecutionJob {
+  id                   String             @id @default(cuid())
+  workspaceId          String
+  platform             String
+  targetType           String
+  targetKey            String
+  platformTargetId     String?
+  jobType              String // collect_metrics | collect_detail | collect_comments | collect_author | deep_archive
+  collectionProfile    String
+  requiredFields       Json
+  payload              Json
+  // DEC-B1-023: server-owned opaque plan identity. Historical rows may remain
+  // null; every new Prisma-created job gets one value that retries must reuse.
+  // A changed execution plan is represented by a new ExecutionJob.
+  executionPlanVersion String?            @default(cuid())
+  activeDedupeKey      String? // sha256(workspace+platform+targetKey+profile+requiredFields+depth)
+  priority             Int                @default(50)
+  lane                 String // manual_hot | monitor_checkpoint | monitor_patrol | data_sync | governance | archive | comments
+  estimatedSeconds     Int                @default(120)
+  notBeforeAt          DateTime?
+  expiresAt            DateTime?
+  status               ExecutionJobStatus @default(created) // created | queued | reserved | in_progress | raw_committed | writeback_pending | succeeded | failed | cancelled | expired
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  completedAt          DateTime?
+
+  // V1.1 UI 切换阻塞 2/4 解除：保留业务态细分（taskType/source/taskStrategy/monitorId），
+  // 供 UI 读模型（listCollectionTasks / findTaskById / monitor-detail）按 monitorId 索引
+  // 历史并精确显示 taskType / source / taskStrategy。由 createExecutionJobForDemand
+  // 从 jobPayload 回填，存量行由 scripts/migration/07-backfill-executionjob-original-fields.ts 回填。
+  originalTaskType     String? // xhs.batchNotes | xhs.collectAuthor | ... 共 8 种业务态
+  originalSource       String? // manual | monitor | operation_data_sync | data_governance | topic_material | author_archive
+  originalTaskStrategy String? // author_baseline | author_patrol | keyword_patrol | detail_probe | comment_sweep
+  monitorId            String? // 仅 source=monitor 入口回填；manual/data_sync/governance 为 null
+
+  // V1.1 影子层下线前置（08-backfill-executionjob-rich-fields.ts）：
+  // 把 CollectionTask 的 rich UI 字段镜像到 ExecutionJob，让 ExecutionJob 成为
+  // 采集结果的权威主表。这些字段之前只存在 CollectionTask 上，UI 读 CollectionTask
+  // 才能显示 target/resultSummary/notesImported/commentsImported/authorsImported 等。
+  // 回填完成后，UI 切到 ExecutionJob 主表即可下线 CollectionTask 影子层。
+  target                 String? // raw URL（UI 显示用；ExecutionJob.targetKey 是规范化的，不含原 URL）
+  resultSummary          String? // 采集结果摘要（JSON；与 CollectionTask.resultSummary 同语义）
+  latestSummary          String? // 最新观察快照（JSON；与 CollectionTask.latestSummary 同语义）
+  notesImported          Int       @default(0) // 本次采集导入的笔记数
+  commentsImported       Int       @default(0) // 本次采集导入的评论数
+  authorsImported        Int       @default(0) // 本次采集导入的作者数
+  operationPublicationId String? // 仅 source=operation_data_sync 入口回填
+  roundId                String? // 仅 source=monitor 入口回填（与 monitorId 配对）
+  deletedAt              DateTime? // 软删（UI 默认排除）
+
+  // V1.1 影子层下线（2026-06-27）：6 张依赖表的 FK 已重新指向 ExecutionJob.id。
+  // ExecutionJob 现在是采集执行链路的权威父表。
+  runtime                  ExecutionTaskRuntime?
+  writeback                ExecutionTaskWriteback?
+  queueEntry               ExecutionQueueEntry?
+  attempts                 TaskAttempt[]
+  demandLinks              TaskDemandLink[]
+  writebackDeliveries      WritebackDelivery[]
+  archiveCommentRunItems   AuthorArchiveItem[]             @relation("ArchiveRunItemCommentTask")
+  archiveBackfillPlanItems AuthorArchiveBackfillPlanItem[] @relation("ArchiveBackfillPlanItemExecutionJob")
+  // V1.1 写回重构（2026-06-27）：records 反向 relation 已删除（CollectionTaskRecord 表 DROP）。
+  // record 数据走 RawRecord（通过 jobId 字段关联，无 schema relation）。
+
+  @@index([workspaceId, platform, targetKey, status])
+  @@index([workspaceId, lane, status, priority])
+  @@index([workspaceId, monitorId])
+  @@index([workspaceId, operationPublicationId])
+  @@index([workspaceId, deletedAt])
+}
+
+// V1.1 影子层下线（2026-06-27）：事件流权威表。
+//
+// 背景：CollectionTaskEvent 原本是任务事件的唯一事实源，但 CollectionTaskEvent.taskId
+// 有 FK→CollectionTask.id（onDelete: Cascade），与"CollectionTask 不再写入"目标冲突。
+// 在 ExecutionTaskRuntime / ExecutionTaskWriteback / ExecutionQueueEntry / TaskAttempt /
+// CollectionTaskEvent / CollectionTaskRecord 全部 FK 重新指向 ExecutionJob 之前，无法
+// 停止写 CollectionTask（FK 锚点）。
+//
+// 本表是事件流去耦合的第一步：collection-task-observation-service 的事件写入
+// （createTaskEvent / createIdempotentTaskEvent）从 CollectionTaskEvent 切换到本表；
+// jobId 即 ExecutionJob.id（不再依赖 CollectionTask 行存在）。UI 详情页/更新页读取
+// 也相应切换。CollectionTaskEvent 保留只读（历史数据），不再写入。
+//
+// 字段语义与 CollectionTaskEvent 一一对应（便于后续把历史数据迁移过来）：
+//   - jobId         即 ExecutionJob.id（与 CollectionTask.id 1:1，向后兼容旧影子）
+//   - sequence      任务内单调递增（同 ExecutionTaskRuntime.sequenceCursor 派生）
+//   - idempotencyKey 幂等键（同 taskId+idempotencyKey 唯一约束）
+//   - eventType     同 ExecutionTaskEventType 词表（task.created/started/progress/...）
+//   - payload       JSON 字符串（与 CollectionTaskEvent.payload 同形式）
+model ExecutionJobEvent {
+  id             String   @id @default(cuid())
+  workspaceId    String?
+  jobId          String
+  sequence       Int
+  idempotencyKey String?
+  eventType      String
+  source         String   @default("workbench")
+  message        String?
+  payload        String?
+  pluginRunId    String?
+  createdAt      DateTime @default(now())
+
+  @@unique([jobId, idempotencyKey])
+  @@unique([jobId, sequence])
+  @@index([workspaceId])
+  @@index([jobId, sequence])
+  @@index([jobId, createdAt])
+  @@index([eventType])
+  @@index([pluginRunId])
+}
+
+// 任务执行全链路日志（给调度状态弹窗和排障查询使用）。
+// 与 ExecutionJobEvent 不同，本表按 job / queueEntry / attempt / rawSnapshot /
+// writebackDelivery 等跨链路维度建索引，用于回答“为什么排队、派给谁、插件交了什么、
+// 是否入库、哪里失败”。
+model ExecutionLogEvent {
+  id                  String   @id @default(cuid())
+  workspaceId         String?
+  jobId               String?
+  demandId            String?
+  queueEntryId        String?
+  taskAttemptId       String?
+  rawSnapshotId       String?
+  rawRecordId         String?
+  writebackDeliveryId String?
+  stationId           String?
+  platform            String?
+  lane                String?
+  source              String?
+  eventType           String
+  stage               String
+  status              String?
+  title               String
+  message             String?
+  reasonCode          String?
+  details             Json?
+  occurredAt          DateTime @default(now())
+  createdAt           DateTime @default(now())
+
+  @@index([workspaceId, occurredAt])
+  @@index([jobId, occurredAt])
+  @@index([queueEntryId, occurredAt])
+  @@index([demandId, occurredAt])
+  @@index([taskAttemptId, occurredAt])
+  @@index([rawSnapshotId, occurredAt])
+  @@index([writebackDeliveryId, occurredAt])
+  @@index([stationId, occurredAt])
+  @@index([eventType, occurredAt])
+}
+
+// V2 B1 Release-A：CapturePackage is the immutable physical package.  It is
+// additive only in this release; no runtime path writes it until the B1
+// EvidenceIngress cutover has passed isolated-database proof.
+model CapturePackage {
+  id                String        @id @default(cuid())
+  workspaceId       String
+  packagePayload    Bytes
+  checksumAlgorithm String        @default("sha256")
+  checksumValue     String
+  contentLength     Int
+  restricted        Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+  rawSnapshots      RawSnapshot[] @relation("RawSnapshotCapturePackage")
+  accessAudits      EvidenceAccessAudit[] @relation("CapturePackageAudit")
+
+  @@unique([workspaceId, id])
+}
+
+// V2 B1 Release-A：entry receipts are immutable evidence-ingress facts.
+model EvidenceIngressReceipt {
+  id               String      @id @default(dbgenerated("gen_random_uuid()::text"))
+  workspaceId      String
+  rawSnapshotId    String
+  captureId        String
+  ingressKind      String
+  collectorVersion String
+  receivedAt       DateTime    @default(now())
+  rawSnapshot      RawSnapshot @relation("RawSnapshotIngressReceipt", fields: [workspaceId, rawSnapshotId], references: [workspaceId, id], onDelete: Restrict, map: "EvidenceIngressReceipt_workspace_snapshot_fkey")
+  v2DurableWorks   V2DurableWork[] @relation("V2DurableWorkReceipt")
+
+  @@unique([workspaceId, rawSnapshotId])
+  @@unique([workspaceId, id])
+  @@index([workspaceId, receivedAt])
+}
+
+// V2 B1 Release-A：an artifact is metadata for a capture package, never a
+// second payload store.  The underlying file, if any, remains managed by the
+// established local-media storage boundary.
+model CaptureArtifact {
+  id               String      @id @default(cuid())
+  workspaceId      String
+  rawSnapshotId    String
+  kind             String
+  artifactChecksum String
+  restricted       Boolean     @default(false)
+  createdAt        DateTime    @default(now())
+  rawSnapshot      RawSnapshot @relation("RawSnapshotCaptureArtifacts", fields: [workspaceId, rawSnapshotId], references: [workspaceId, id], onDelete: Restrict, map: "CaptureArtifact_workspace_snapshot_fkey")
+
+  @@unique([workspaceId, id])
+  @@unique([workspaceId, rawSnapshotId, id])
+}
+
+// V2 Release-B: EvidenceAccessAudit — append-only log recording every controlled
+// CapturePackage read. One INSERT per read; no UPDATE/DELETE.
+model EvidenceAccessAudit {
+  id               String         @id @default(dbgenerated("gen_random_uuid()::text"))
+  workspaceId      String
+  capturePackageId String
+  accessedBy       String
+  accessReason     String
+  requestTraceId   String?
+  restricted       Boolean        @default(false)
+  accessedAt       DateTime       @default(now())
+  capturePackage   CapturePackage @relation("CapturePackageAudit", fields: [workspaceId, capturePackageId], references: [workspaceId, id], onDelete: Restrict, map: "EvidenceAccessAudit_workspace_package_fkey")
+
+  @@index([workspaceId, capturePackageId])
+}
+
+// V2 Release-B: EvidenceReaderWorkspaceGrant — per-workspace reader authorisation.
+model EvidenceReaderWorkspaceGrant {
+  id          String    @id @default(dbgenerated("gen_random_uuid()::text"))
+  workspaceId String
+  readerRole  String
+  grantedAt   DateTime  @default(now())
+  grantedBy   String
+  revokedAt   DateTime?
+
+  @@unique([workspaceId, readerRole])
+}
+
+// V2 Release-B: V2DurableWork — durable B2/B3 dispatch.
+// Created in same transaction as EvidenceIngress (no best-effort enqueue).
+// FK to RawSnapshot + EvidenceIngressReceipt ensures same-workspace provenance.
+model V2DurableWork {
+  id             String                    @id @default(dbgenerated("gen_random_uuid()::text"))
+  workspaceId    String
+  rawSnapshotId  String
+  receiptId      String
+  status         String                    @default("pending")
+  attemptCount   Int                       @default(0)
+  nextAttemptAt  DateTime                  @default(now())
+  lockedBy       String?
+  lockedAt       DateTime?
+  leaseExpiresAt DateTime?
+  lastError      String?
+  deadReason     String?
+  b2Result       Json?
+  b3Result       Json?
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @default(now()) @updatedAt
+
+  rawSnapshot RawSnapshot           @relation("V2DurableWorkSnapshot", fields: [workspaceId, rawSnapshotId], references: [workspaceId, id], onDelete: Restrict, map: "V2DurableWork_snapshot_fkey")
+  receipt     EvidenceIngressReceipt @relation("V2DurableWorkReceipt", fields: [workspaceId, receiptId], references: [workspaceId, id], onDelete: Restrict, map: "V2DurableWork_receipt_fkey")
+
+  @@unique([workspaceId, rawSnapshotId])
+  @@index([status, nextAttemptAt])
+  @@index([workspaceId, status])
+}
+
+// 手册 4.7：原始结果包不可变。重传同 captureId 不重复创建（不变量 7）。
+// checksum 必须在写对象存储前按 raw bytes 计算（V1.1 致命 Bug 4）。
+model RawSnapshot {
+  id                     String                    @id @default(cuid())
+  workspaceId            String
+  // V2 Release-A permits non-execution Evidence (manual import, recovery and
+  // migration) without inventing an ExecutionJob or TaskAttempt.  V1 writers
+  // still provide both fields until the Release-B ingress hard cutover.
+  jobId                  String?
+  attemptId              String?
+  captureId              String
+  platform               String
+  targetKey              String
+  expectedTargetKey      String?
+  observedTargetKey      String?
+  observedAt             DateTime
+  receivedAt             DateTime                  @default(now())
+  clientObservedAt       DateTime?
+  clockSkewSeconds       Int?
+  observedAtSource       String? // client | server_clamped
+  storageKey             String? // raw/{workspaceId}/{jobId}/{attemptId}/{leaseEpoch}/{captureId}.json
+  checksumAlgorithm      String?
+  checksumValue          String?
+  contentLength          Int?
+  // 06-raw-storage-decision：原始结果包本轮先存 PostgreSQL，不引入 Vercel Blob。
+  // 小包直接存 payloadClob；未来启用对象存储时填 storageKey，payloadClob 可置空或存摘要。
+  payloadClob            String? // 原始 JSON 包（canonical bytes）
+  // Release-B prepare: nullable so V2 EvidenceIngress can write null without
+  // a fabricated V1 value; existing V1 rows keep their defaults.
+  schemaVersion          String?
+  pluginVersion          String?
+  stationId              String?
+  qualityStatus          RawSnapshotQualityStatus? @default(ok) // ok | partial | identity_mismatch | lease_lost | missing_metrics | clock_skew_suspected | invalid
+  qualityReason          String?
+  // 2026-07-13 报告 §9.3：快照来源。plugin_sync = 正常执行链路写回；
+  // plugin_local_recovery = 显式恢复导入（插件本地账本/死信导出后人工导入，
+  // 可审计、可去重，不伪造旧 TaskAttempt 成功）。
+  // Release-B prepare: nullable for V2 EvidenceIngress (writes null).
+  source                 String?                   @default("plugin_sync")
+  // V2 EvidenceIngress fields.  They intentionally remain nullable in
+  // Release-A so existing historical observations stay readable without any
+  // invented backfill.  Release-B makes them mandatory only after the hard
+  // ingress cutover.
+  ingressKind            String?
+  capturePackageId       String?
+  protocolVersion        String?
+  collectorVersion       String?
+  sourcePrincipal        String?
+  sourceSummary          String?
+  importerIdentity       String?
+  migrationAuthorization String?
+  recoveryCaptureId      String?
+  recoveryAuthorizedBy   String?
+  leaseEpoch             Int?
+  executionPlanVersion   String?
+  integrityStatus        String?
+  integrityReason        String?
+  // Server-owned Evidence lifecycle. New V2 Evidence starts ACTIVE; legacy
+  // rows remain null rather than being falsely backfilled as active.
+  lifecycleStatus        String?
+  contractId             String?
+  contractVersion        Int?
+  contractHash           String?
+  createdAt              DateTime                  @default(now())
+  records                RawRecord[]
+  v2DurableWorks         V2DurableWork[]          @relation("V2DurableWorkSnapshot")
+  capturePackage         CapturePackage?           @relation("RawSnapshotCapturePackage", fields: [workspaceId, capturePackageId], references: [workspaceId, id], onDelete: Restrict, map: "RawSnapshot_workspace_capturePackage_fkey")
+  ingressReceipt         EvidenceIngressReceipt?   @relation("RawSnapshotIngressReceipt")
+  captureArtifacts       CaptureArtifact[]         @relation("RawSnapshotCaptureArtifacts")
+  normalizationRuns      NormalizationRun[]        @relation("RawSnapshotNormalizationRuns")
+  contractEvaluations    ContractEvaluation[]      @relation("RawSnapshotContractEvaluations")
+
+  // Release-A keeps the V1 selector and uniqueness for rows without a V2
+  // CapturePackage. V2 variants are deduplicated by the complete package hash,
+  // while only one verified variant may become normalization input.
+  @@unique([workspaceId, captureId], name: "workspaceId_captureId", map: "RawSnapshot_workspaceId_captureId_key", where: { capturePackageId: null })
+  @@unique([workspaceId, captureId, checksumAlgorithm, checksumValue], name: "workspaceId_captureId_checksumAlgorithm_checksumValue", map: "RawSnapshot_v2_capture_variant_key", where: { capturePackageId: { not: null } })
+  @@unique([workspaceId, captureId], name: "workspaceId_captureId_v2_verified", map: "RawSnapshot_v2_verified_capture_key", where: raw("\"capturePackageId\" IS NOT NULL AND \"integrityStatus\" = 'verified'"))
+  @@unique([workspaceId, id])
+  @@index([workspaceId, platform, targetKey, observedAt])
+  @@index([workspaceId, jobId])
+  @@index([workspaceId, source])
+}
+
+// 手册 4.8：原始结果中的结构化记录。
+model RawRecord {
+  id                      String                    @id @default(cuid())
+  workspaceId             String
+  rawSnapshotId           String
+  jobId                   String?
+  // Release-B prepare: nullable so V2 writes recordKind instead; V1 readers
+  // that filter on recordType must guard for null (fail-closed).
+  recordType              String? // note | comment | author | metric
+  // Release-A writes no value here.  Release-B replaces recordType with this
+  // field after the immutable ingress path is live and verified.
+  recordKind              String?
+  platform                String
+  targetKey               String?
+  externalRecordId        String?
+  sequence                Int?
+  payload                 Json
+  payloadHash             String?
+  observedAt              DateTime
+  collectedAt             DateTime?
+  idempotencyKey          String
+  dedupeKey               String?
+  createdAt               DateTime                  @default(now())
+  // Release-B prepare: compound FK ensures RawRecord cannot reference a
+  // RawSnapshot in a different workspace.
+  rawSnapshot             RawSnapshot               @relation(fields: [workspaceId, rawSnapshotId], references: [workspaceId, id], onDelete: Restrict, map: "RawRecord_workspace_snapshot_fkey")
+  normalizationRuns       NormalizationRun[]        @relation("RawRecordNormalizationRuns")
+  normalizationRunCurrent NormalizationRunCurrent[] @relation("RawRecordNormalizationRunCurrent")
+  canonicalObservations   CanonicalObservation[]    @relation("RawRecordCanonicalObservations")
+
+  // Release-B prepare: idempotency scoped to (workspaceId, rawSnapshotId,
+  // idempotencyKey) — prevents cross-snapshot merge or skip.
+  @@unique([workspaceId, rawSnapshotId, idempotencyKey])
+  @@unique([workspaceId, rawSnapshotId, id])
+  @@index([workspaceId, platform, targetKey])
+  @@index([rawSnapshotId])
+}
+
+// V2 B2: one immutable interpretation attempt for one RawRecord.
+model NormalizationRun {
+  id                     String                               @id @default(cuid())
+  workspaceId            String
+  rawSnapshotId          String
+  rawRecordId            String
+  adapterId              String
+  adapterVersion         String
+  canonicalSchemaVersion String
+  attemptNumber          Int                                  @default(1)
+  status                 String
+  inputPayloadHash       String
+  outputPayloadHash      String?
+  missingFields          Json?
+  parseErrors            Json?
+  startedAt              DateTime                             @default(now())
+  completedAt            DateTime                             @default(now())
+  createdAt              DateTime                             @default(now())
+  rawSnapshot            RawSnapshot                          @relation("RawSnapshotNormalizationRuns", fields: [workspaceId, rawSnapshotId], references: [workspaceId, id], onDelete: Restrict, map: "NormalizationRun_workspace_snapshot_fkey")
+  rawRecord              RawRecord                            @relation("RawRecordNormalizationRuns", fields: [workspaceId, rawSnapshotId, rawRecordId], references: [workspaceId, rawSnapshotId, id], onDelete: Restrict, map: "NormalizationRun_workspace_snapshot_record_fkey")
+  currentPointers        NormalizationRunCurrent[]            @relation("NormalizationRunCurrentRun")
+  canonicalObservations  CanonicalObservation[]               @relation("CanonicalObservationNormalizationRun")
+  contractEvaluations    ContractEvaluationNormalizationRun[] @relation("ContractEvaluationNormalizationRunRun")
+
+  @@unique([rawRecordId, adapterId, adapterVersion, canonicalSchemaVersion, attemptNumber], map: "NormalizationRun_record_adapter_attempt_key")
+  @@unique([workspaceId, id], map: "NormalizationRun_workspace_id_key")
+  @@unique([workspaceId, rawSnapshotId, id], map: "NormalizationRun_workspace_snapshot_id_key")
+}
+
+// V2 B2: mutable selector for the current immutable NormalizationRun.
+model NormalizationRunCurrent {
+  workspaceId            String
+  rawRecordId            String
+  rawSnapshotId          String
+  normalizationRunId     String
+  adapterId              String
+  adapterVersion         String
+  canonicalSchemaVersion String
+  updatedAt              DateTime         @default(now()) @updatedAt
+  normalizationRun       NormalizationRun @relation("NormalizationRunCurrentRun", fields: [workspaceId, rawSnapshotId, normalizationRunId], references: [workspaceId, rawSnapshotId, id], onDelete: Restrict, map: "NormalizationRunCurrent_workspace_snapshot_run_fkey")
+  rawRecord              RawRecord        @relation("RawRecordNormalizationRunCurrent", fields: [workspaceId, rawSnapshotId, rawRecordId], references: [workspaceId, rawSnapshotId, id], onDelete: Restrict, map: "NormalizationRunCurrent_workspace_snapshot_record_fkey")
+
+  @@id([workspaceId, rawRecordId], map: "NormalizationRunCurrent_pkey")
+  @@unique([workspaceId, normalizationRunId], map: "NormalizationRunCurrent_workspace_run_key")
+  @@unique([workspaceId, rawSnapshotId, rawRecordId], map: "NormalizationRunCurrent_workspace_snapshot_record_key")
+}
+
+// V2 B2 technical interpretation result; Domain Projection remains B3.
+model CanonicalObservation {
+  id                 String                    @id @default(cuid())
+  workspaceId        String
+  normalizationRunId String
+  rawSnapshotId      String
+  rawRecordId        String
+  observationKind    String
+  subjectKey         String
+  observedAt         DateTime
+  schemaVersion      String
+  payload            Json
+  payloadHash        String
+  qualityStatus      String
+  fieldPresence      Json?
+  createdAt          DateTime                  @default(now())
+  normalizationRun   NormalizationRun          @relation("CanonicalObservationNormalizationRun", fields: [workspaceId, rawSnapshotId, normalizationRunId], references: [workspaceId, rawSnapshotId, id], onDelete: Restrict, map: "CanonicalObservation_workspace_snapshot_run_fkey")
+  rawRecord          RawRecord                 @relation("RawRecordCanonicalObservations", fields: [workspaceId, rawSnapshotId, rawRecordId], references: [workspaceId, rawSnapshotId, id], onDelete: Restrict, map: "CanonicalObservation_workspace_snapshot_record_fkey")
+  contractInputs     ContractEvaluationInput[] @relation("ContractEvaluationInputObservation")
+  mediaSlots         CanonicalMediaSlot[]      @relation("CanonicalObservationMediaSlots")
+  contentObservations ContentObservation[]     @relation("ContentObsCanonical")
+
+  @@unique([workspaceId, id], map: "CanonicalObservation_workspace_id_key")
+  @@unique([workspaceId, rawSnapshotId, id], map: "CanonicalObservation_workspace_snapshot_id_key")
+  @@unique([workspaceId, rawSnapshotId, id, rawRecordId], map: "CanonicalObservation_workspace_snapshot_record_key")
+}
+
+// V2 B3-MEDIA-SRC-002: immutable media slot registry per design-freeze §5.12.
+// Slots are always created from a verified media_inventory Artifact. No URL,
+// CDN, localPath, MediaItemId, or OCR fields — this is a canonical observation
+// fact, not a delivery record.
+model CanonicalMediaSlot {
+  id                     String              @id @default(cuid())
+  workspaceId            String
+  canonicalObservationId String
+  slotId                 String
+  status                 String              // observed | absent | unavailable
+  kind                   String
+  ordinal                Int
+  canonicalObservation   CanonicalObservation @relation("CanonicalObservationMediaSlots", fields: [workspaceId, canonicalObservationId], references: [workspaceId, id], onDelete: Restrict, map: "CanonicalMediaSlot_workspace_observation_fkey")
+  contentMediaUsages     ContentMediaUsage[]   @relation("ContentMediaUsageSlot")
+
+  @@unique([workspaceId, canonicalObservationId, slotId], map: "CanonicalMediaSlot_workspace_observation_slot_key")
+  @@unique([workspaceId, id], map: "CanonicalMediaSlot_workspace_id_key")
+}
+
+// V2 B3-PROJECTION-FOUNDATION-001: Content Observation + Current Projection.
+model ContentObservation {
+  id                     String              @id @default(cuid())
+  workspaceId            String
+  contentAssetId         String
+  canonicalObservationId String
+  rawSnapshotId          String
+  rawRecordId            String
+  observedAt             DateTime
+  contentType            String?
+  title                  String?
+  bodyText               String?
+  publishedAt            DateTime?
+  authorId               String?
+  originalUrl            String?
+  fieldPresence          Json?
+  qualityStatus          String
+  adapterVersion         String
+  createdAt              DateTime            @default(now())
+
+  contentAsset         ContentAsset         @relation("ContentAssetObservations", fields: [workspaceId, contentAssetId], references: [workspaceId, id], onDelete: Restrict)
+  canonicalObservation CanonicalObservation @relation("ContentObsCanonical", fields: [workspaceId, rawSnapshotId, canonicalObservationId, rawRecordId], references: [workspaceId, rawSnapshotId, id, rawRecordId], onDelete: Restrict, map: "ContentObservation_canonical_4col_fkey")
+  currentProjection    ContentCurrentProjection? @relation("CurrentObsPtr")
+
+  @@unique([workspaceId, id], map: "ContentObservation_workspace_id_key")
+  @@unique([workspaceId, contentAssetId, id], map: "ContentObservation_asset_id_key")
+  @@unique([workspaceId, contentAssetId, canonicalObservationId], map: "ContentObservation_asset_canonical_key")
+}
+
+model ContentCurrentProjection {
+  contentAssetId        String   @id
+  workspaceId           String
+  currentObservationId  String
+  contractEvaluationId  String
+  title                 String?
+  bodyText              String?
+  contentType           String?
+  publishedAt           DateTime?
+  authorId              String?
+  originalUrl           String?
+  lastObservedAt        DateTime
+  projectionVersion     Int      @default(1)
+  lifecycleState        String?
+  visibilityState       String   @default("visible")
+  updatedAt             DateTime @default(now()) @updatedAt
+
+  contentAsset  ContentAsset        @relation("ContentAssetCurrentProjection", fields: [workspaceId, contentAssetId], references: [workspaceId, id], onDelete: Restrict)
+  observation   ContentObservation  @relation("CurrentObsPtr", fields: [workspaceId, contentAssetId, currentObservationId], references: [workspaceId, contentAssetId, id], onDelete: Restrict, map: "CCP_observation_fkey")
+  contractEvaluation ContractEvaluation @relation("ContentCurrentProjectionEvaluation", fields: [workspaceId, contractEvaluationId], references: [workspaceId, id], onDelete: Restrict, map: "CCP_evaluation_fkey")
+
+  @@unique([workspaceId, contentAssetId], map: "CCP_workspace_asset_key")
+  @@unique([workspaceId, contentAssetId, currentObservationId], map: "CCP_workspace_asset_observation_key")
+  @@index([workspaceId])
+}
+
+// V2 B3 internal serialization fence. This is coordination state only, not a
+// business fact or a Projection read model.
+model ContentProjectionSubjectFence {
+  workspaceId       String
+  platformContentId String
+  generation        BigInt   @default(0)
+  updatedAt         DateTime @default(now()) @updatedAt
+
+  @@id([workspaceId, platformContentId], map: "ContentProjectionSubjectFence_pkey")
+}
+
+// V2 B2 append-only contract decision for one RawSnapshot.
+model ContractEvaluation {
+  id                     String                               @id @default(cuid())
+  workspaceId            String
+  rawSnapshotId          String
+  contractId             String
+  contractVersion        Int
+  evaluatorVersion       String
+  canonicalSchemaVersion String
+  evaluationInputHash    String
+  decision               String
+  completeness           String
+  rejectionCode          String?
+  rejectionReason        String?
+  createdAt              DateTime                             @default(now())
+  rawSnapshot            RawSnapshot                          @relation("RawSnapshotContractEvaluations", fields: [workspaceId, rawSnapshotId], references: [workspaceId, id], onDelete: Restrict, map: "ContractEvaluation_workspace_snapshot_fkey")
+  currentPointers        ContractEvaluationCurrent[]          @relation("ContractEvaluationCurrentEvaluation")
+  normalizationRuns      ContractEvaluationNormalizationRun[] @relation("ContractEvaluationNormalizationRunEvaluation")
+  inputs                 ContractEvaluationInput[]            @relation("ContractEvaluationInputEvaluation")
+  currentContentProjections ContentCurrentProjection[]        @relation("ContentCurrentProjectionEvaluation")
+  contentMediaUsages       ContentMediaUsage[]                @relation("ContentMediaUsageEvaluation")
+
+  @@unique([workspaceId, rawSnapshotId, contractId, contractVersion, evaluatorVersion, canonicalSchemaVersion, evaluationInputHash], map: "ContractEvaluation_identity_key")
+  @@unique([workspaceId, id, rawSnapshotId, contractId, contractVersion], map: "ContractEvaluation_workspace_contract_id_key")
+  @@unique([workspaceId, rawSnapshotId, id], map: "ContractEvaluation_workspace_snapshot_id_key")
+  @@unique([workspaceId, id], map: "ContractEvaluation_workspace_id_key")
+}
+
+// V2 B2 mutable selector for the current immutable ContractEvaluation.
+model ContractEvaluationCurrent {
+  workspaceId          String
+  rawSnapshotId        String
+  contractId           String
+  contractVersion      Int
+  contractEvaluationId String
+  revision             Int
+  updatedAt            DateTime           @default(now()) @updatedAt
+  contractEvaluation   ContractEvaluation @relation("ContractEvaluationCurrentEvaluation", fields: [workspaceId, contractEvaluationId, rawSnapshotId, contractId, contractVersion], references: [workspaceId, id, rawSnapshotId, contractId, contractVersion], onDelete: Restrict, map: "ContractEvaluationCurrent_workspace_evaluation_fkey")
+
+  @@id([workspaceId, rawSnapshotId, contractId, contractVersion], map: "ContractEvaluationCurrent_pkey")
+}
+
+// V2 B2 immutable provenance edge from an evaluation to a normalization run.
+model ContractEvaluationNormalizationRun {
+  id                 String             @id @default(cuid())
+  evaluationId       String
+  normalizationRunId String
+  workspaceId        String
+  rawSnapshotId      String
+  status             String
+  inputPayloadHash   String
+  outputPayloadHash  String?
+  createdAt          DateTime           @default(now())
+  contractEvaluation ContractEvaluation @relation("ContractEvaluationNormalizationRunEvaluation", fields: [workspaceId, rawSnapshotId, evaluationId], references: [workspaceId, rawSnapshotId, id], onDelete: Restrict, map: "ContractEvaluationNormalizationRun_workspace_evaluation_fkey")
+  normalizationRun   NormalizationRun   @relation("ContractEvaluationNormalizationRunRun", fields: [workspaceId, rawSnapshotId, normalizationRunId], references: [workspaceId, rawSnapshotId, id], onDelete: Restrict, map: "ContractEvaluationNormalizationRun_workspace_run_fkey")
+
+  @@unique([evaluationId, normalizationRunId], map: "ContractEvaluationNormalizationRun_evaluation_run_key")
+  @@unique([workspaceId, id], map: "ContractEvaluationNormalizationRun_workspace_id_key")
+}
+
+// V2 B2 immutable ordered input edge from an evaluation to an observation.
+model ContractEvaluationInput {
+  id                     String               @id @default(cuid())
+  workspaceId            String
+  rawSnapshotId          String
+  contractEvaluationId   String
+  canonicalObservationId String
+  ordinal                Int
+  canonicalOutputHash    String
+  createdAt              DateTime             @default(now())
+  contractEvaluation     ContractEvaluation   @relation("ContractEvaluationInputEvaluation", fields: [workspaceId, rawSnapshotId, contractEvaluationId], references: [workspaceId, rawSnapshotId, id], onDelete: Restrict, map: "ContractEvaluationInput_workspace_evaluation_fkey")
+  canonicalObservation   CanonicalObservation @relation("ContractEvaluationInputObservation", fields: [workspaceId, rawSnapshotId, canonicalObservationId], references: [workspaceId, rawSnapshotId, id], onDelete: Restrict, map: "ContractEvaluationInput_workspace_observation_fkey")
+
+  @@unique([contractEvaluationId, canonicalObservationId], map: "ContractEvaluationInput_evaluation_observation_key")
+  @@unique([contractEvaluationId, ordinal], map: "ContractEvaluationInput_evaluation_ordinal_key")
+  @@unique([workspaceId, id], map: "ContractEvaluationInput_workspace_id_key")
+}
+
+// 手册 4.10：当前最新值投影。
+// 必须使用 UPSERT，禁止 UPDATE-only（V1.1 致命 Bug 1）。
+// latest 唯一判断依据是 observedAt，不能用 MAX(likeCount)。
+model ContentMetricLatest {
+  id                     String    @id @default(cuid())
+  workspaceId            String
+  platform               String
+  targetKey              String
+  latestSnapshotId       String
+  observedAt             DateTime
+  likeCount              Int?
+  likeCountObservedAt    DateTime?
+  collectCount           Int?
+  collectCountObservedAt DateTime?
+  commentCount           Int?
+  commentCountObservedAt DateTime?
+  shareCount             Int?
+  shareCountObservedAt   DateTime?
+  viewCount              Int?
+  viewCountObservedAt    DateTime?
+  updatedAt              DateTime  @updatedAt
+
+  @@unique([workspaceId, platform, targetKey])
+}
+
+// 手册 4.11：发布后 / 首次发现后 / 起量后检查点。
+// checkpointType 含 SURGE_T* —— Surge 起量追踪若未实现则从 enum 删除（V1.1 协议补齐 4）。
+model MonitorCheckpoint {
+  id                   String    @id @default(cuid())
+  workspaceId          String
+  monitorId            String?
+  platform             String
+  targetKey            String
+  checkpointType       String // BASELINE | T1H | T6H | T24H | T72H | T7D | SURGE_T1H | SURGE_T6H | SURGE_T24H | SURGE_T72H
+  anchorType           String // PUBLISHED_AT | FIRST_SEEN_AT | SURGE_STARTED_AT
+  anchorAt             DateTime
+  dueAt                DateTime
+  toleranceBeforeSec   Int
+  toleranceAfterSec    Int
+  finalizationDelaySec Int       @default(7200)
+  selectedSnapshotId   String?
+  selectedObservedAt   DateTime?
+  deviationSeconds     Int?
+  baselineSnapshotId   String?
+  deltaLikeCount       Int?
+  deltaCollectCount    Int?
+  deltaCommentCount    Int?
+  deltaShareCount      Int?
+  deltaWeightedScore   Float?
+  status               String    @default("pending") // pending | due | provisional | final | gap | corrected | target_lost | cancelled
+  gapReason            String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  finalizedAt          DateTime?
+
+  @@unique([workspaceId, platform, targetKey, checkpointType, anchorType, anchorAt])
+  @@index([workspaceId, status, dueAt])
+  @@index([workspaceId, platform, targetKey, dueAt])
+}
+
+// 手册 4.12：多业务独立写回。一个 RawSnapshot 可扇出多个 WritebackDelivery。
+// 必须有 required / blockingPolicy / terminalDisposition（V1.1 设计拍板 3）。
+// 写回失败不触发重新采集（不变量 14）。匹配用 sourceRecordId / targetKey，禁止模糊查找（不变量 12）。
+model WritebackDelivery {
+  id                  String                  @id @default(cuid())
+  workspaceId         String
+  demandId            String
+  jobId               String
+  rawSnapshotId       String?
+  targetSystem        String
+  targetRecordId      String?
+  targetKey           String
+  expectedTargetKey   String?
+  observedTargetKey   String?
+  processorVersion    String
+  idempotencyKey      String                  @unique
+  required            Boolean                 @default(true)
+  blockingPolicy      String                  @default("required") // required | optional | best_effort
+  terminalDisposition String? // applied | skipped | dead_non_blocking | dead_blocking | cancelled_target_missing
+  status              WritebackDeliveryStatus @default(pending) // pending | applying | applied | retry_wait | failed | dead | skipped
+  attemptCount        Int                     @default(0)
+  nextAttemptAt       DateTime?
+  lastErrorCode       String?
+  lastErrorMessage    String?
+  lastAppliedAt       DateTime?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  job                 ExecutionJob            @relation(fields: [jobId], references: [id], onDelete: Restrict)
+
+  @@index([workspaceId, status, nextAttemptAt])
+  @@index([demandId])
+  @@index([jobId])
+  @@index([rawSnapshotId])
+}
+
+// 手册 4.13：所有异步处理走 Outbox。outbox-worker-service.ts 必须实现（V1.1 交付补齐 1）。
+model OutboxEvent {
+  id            String            @id @default(cuid())
+  workspaceId   String?
+  eventType     String
+  aggregateType String
+  aggregateId   String
+  payload       Json
+  status        OutboxEventStatus @default(pending) // pending | in_flight | retry_wait | processed | dead
+  attemptCount  Int               @default(0)
+  nextAttemptAt DateTime          @default(now())
+  lockedBy      String?
+  lockedAt      DateTime?
+  lastError     String?
+  deadCategory  String?
+  createdAt     DateTime          @default(now())
+  processedAt   DateTime?
+  mediaUsageProcessingEvents ContentMediaUsage[] @relation("MediaUsageProcessingEvent")
+
+  @@index([status, nextAttemptAt])
+  @@index([status, processedAt])
+  @@index([aggregateType, aggregateId])
+}
+
+// 手册 4.14：UI 读模型。UI 禁止现场 join 多张事实表（不变量 16）。
+model TaskStatusProjection {
+  jobId            String    @id
+  workspaceId      String
+  sourceSystems    Json?
+  platform         String
+  targetKey        String
+  lane             String?
+  executionStatus  String
+  writebackStatus  String
+  analysisStatus   String?
+  currentStationId String?
+  currentAccountId String?
+  failureCode      String?
+  failureScope     String?
+  displayMessage   String?
+  progress         Int?
+  nextRetryAt      DateTime?
+  lastEventAt      DateTime?
+  updatedAt        DateTime  @updatedAt
+
+  // V1.1 UI 切换阻塞 3 解除：runtime 详情列补齐。UI 详情页直接读这三列展示
+  // plugin 运行 ID / lease 过期时间 / 派单时间。由 updateTaskStatusProjection 回填 +
+  // 存量由 scripts/migration/07-backfill-executionjob-original-fields.ts 从
+  // ExecutionTaskRuntime 复制到本投影。
+  pluginRunId    String?
+  leaseExpiresAt DateTime?
+  dispatchedAt   DateTime?
+
+  @@index([workspaceId, executionStatus, updatedAt])
+  @@index([workspaceId, platform, targetKey])
+}
+
+// 手册 4.14：账号健康投影。
+model AccountHealthProjection {
+  id                 String    @id @default(cuid())
+  workspaceId        String
+  platform           String
+  platformAccountId  String
+  healthStatus       String
+  cooldownUntil      DateTime?
+  riskControlUntil   DateTime?
+  riskControlCode    String?
+  recentFailureScore Int       @default(0)
+  lastFailureCode    String?
+  lastFailureAt      DateTime?
+  displayMessage     String?
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([workspaceId, platform, platformAccountId])
+}
+
+// 手册 4.16：lane 级 mailbox。与现有 ExecutionStationMailbox 配合降低空闲查询。
+// version bump 规则见手册 4.16 末尾。
+model ExecutionLaneMailbox {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  platform      String
+  lane          String
+  version       Int      @default(0)
+  pendingCount  Int      @default(0)
+  lastChangedAt DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([workspaceId, platform, lane])
+}
+
+// ============================================================================
+// V2-M1 主题坐标系
+// ============================================================================
+
+model TaxonomyNode {
+  id               String             @id @default(cuid())
+  workspaceId      String
+  parentId         String?
+  slug             String
+  name             String
+  level            Int
+  status           TaxonomyNodeStatus @default(proposed)
+  mergedIntoId     String?
+  description      String?
+  aliasKeywords    Json
+  proposedBy       String
+  approvedByUserId String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  parent                     TaxonomyNode?               @relation("TaxonomyNodeTree", fields: [parentId], references: [id], onDelete: Restrict)
+  children                   TaxonomyNode[]              @relation("TaxonomyNodeTree")
+  mergedInto                 TaxonomyNode?               @relation("TaxonomyNodeMerge", fields: [mergedIntoId], references: [id], onDelete: Restrict)
+  mergedFrom                 TaxonomyNode[]              @relation("TaxonomyNodeMerge")
+  contentTopicTags           ContentTopicTag[]
+  performanceRollups         TopicPerformanceRollup[]
+  commentSignals             CommentSignal[]
+  demandCards                DemandCard[]
+  voiceAssets                VoiceAsset[]
+  voiceAssetPacks            VoiceAssetPack[]
+  demandCardTopicSuggestions DemandCardTopicSuggestion[]
+
+  @@unique([workspaceId, slug])
+  @@index([workspaceId, parentId])
+  @@index([workspaceId, status])
+}
+
+model ContentTopicTag {
+  id             String                @id @default(cuid())
+  workspaceId    String
+  taxonomyNodeId String
+  subjectType    ContentTagSubjectType
+  subjectKey     String
+  confidence     Float
+  taggerVersion  String
+  source         String
+  createdAt      DateTime              @default(now())
+
+  taxonomyNode TaxonomyNode @relation(fields: [taxonomyNodeId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, taxonomyNodeId, subjectType, subjectKey], map: "ContentTopicTag_workspaceId_taxonomyNodeId_subjectType_subjectK")
+  @@index([workspaceId, subjectType, subjectKey])
+  @@index([workspaceId, taxonomyNodeId, subjectType])
+}
+
+model TopicPerformanceRollup {
+  id              String   @id @default(cuid())
+  workspaceId     String
+  taxonomyNodeId  String
+  platform        String
+  windowKey       String
+  sampleCount     Int
+  viralCount      Int
+  medianLikeCount Int
+  p90LikeCount    Int
+  topExampleKeys  Json
+  rollupVersion   String
+  computedAt      DateTime
+
+  taxonomyNode TaxonomyNode @relation(fields: [taxonomyNodeId], references: [id], onDelete: Restrict)
+
+  @@unique([workspaceId, taxonomyNodeId, platform, windowKey], map: "TopicPerformanceRollup_workspace_node_platform_window_key")
+  @@index([workspaceId, platform, windowKey])
+  @@index([workspaceId, taxonomyNodeId])
+}
+
+// ============================================================================
+// V1.1 目标模型结束
+// ============================================================================

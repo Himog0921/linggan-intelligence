@@ -1,0 +1,326 @@
+# B1 EvidenceIngress 主线审核任务：审核 B1-B-08-R1
+
+你是 B1 EvidenceIngress 的**主线审核 Agent**，不是执行 Agent。请独立审核外部执行代理交付的 **B1-B-08-R1 — Authority Decision Intake Gate 闭环一致性包**。
+
+外部执行代理的交付报告会作为附件提供；**报告不是证据，以当前工作树、实际 diff、测试结果和权威文档为准。**
+
+---
+
+## 0. 工作目录与固定点
+
+先进入：
+
+```bash
+cd /Users/gongyong/Services/content-workbench/v2-b1-evidence-ingress
+```
+
+然后只做以下基础确认：
+
+```bash
+git status --short --branch
+git rev-parse HEAD
+git log --oneline -8
+git diff --check
+```
+
+不要检查磁盘空间，不要触碰正式测试库、生产库或任何现役数据库。
+
+B1-B-07 审核收口后的已知基线为：
+
+```text
+e19aee3668f2efbd9c7af2ff848770861cec06ef
+fix authority registry field mappings
+```
+
+如果当前 HEAD 已前进，以实际 Git 历史和外部代理报告中的起始 SHA 为准，但必须明确说明它们之间的关系。
+
+---
+
+## 1. 你的角色与硬约束
+
+### 你必须做
+
+- 独立复核外部代理的实际代码、文档、测试和调用边界；
+- 对报告中的每一项结论做可证伪验证；
+- 若发现明确 bug、错误映射、错误测试或越界改动，**可以直接在当前工作树最小化修复**；
+- 修复后运行针对性验证并提交；
+- 若交付合格，给出审核结论和下一阶段是否可推进的判断。
+
+### 你禁止做
+
+- 不要创建或调用内部子 Agent；
+- 不要把审核工作转交给执行代理；
+- 不要自行决定任何 authority 格式或身份模型；
+- 不要把 `DECISION_REQUIRED` 擅自改为 `TRACEABLE`、`PROVED` 或 `CLOSED`；
+- 不要实现 execution / manual_import / recovery / migration adapter；
+- 不要新增 runtime caller、route、service、schema、migration、数据库写入；
+- 不要接入流量、双写、双读、fallback 或兼容路径；
+- 不要 push、部署、合并 main；
+- 不要修改插件仓库。
+
+任何无法从已确认资料唯一推出的架构选择，只能保持或登记为 `DECISION_REQUIRED`。
+
+---
+
+## 2. 已确认架构边界
+
+```text
+External → Evidence → Derived → Canonical → Projection/UI
+```
+
+必须遵守：
+
+- `RawSnapshot` 是唯一 Evidence Registry；
+- `RawRecord` 是所属快照的不可变原始片段；
+- 同 capture identity + 同完整 CapturePackage hash：关联既有观察；
+- 同 identity + 不同 hash：保留冲突 Evidence、阻断投影、可审计；
+- manual_import / recovery / migration 不得伪造 `ExecutionJob` 或 `TaskAttempt`；
+- Release-B 前不允许双写、双读、fallback；
+- Release-B authority 未确认前，不能实现生产 adapter；
+- 当前任务是 authority 决策卡的**闭环一致性审核**，不是 authority 决策本身。
+
+---
+
+## 3. 权威资料
+
+审核时以以下文件为准：
+
+```text
+AGENTS.md
+docs/architecture/v2/00-contract.md
+docs/architecture/v2/01-decisions.md
+docs/architecture/v2/02-model-contract.md
+docs/architecture/v2/04-blocker-ledger.md
+docs/architecture/v2/05-execution-plan.md
+docs/architecture/v2/06-v2-operating-contract.md
+docs/architecture/v2/07-evidence-ingress-release-b-contract.md
+docs/architecture/content-workbench-v2-design-freeze.md
+docs/guides/coding-standards.md
+```
+
+特别注意：
+
+- `docs/architecture/v2/07-evidence-ingress-release-b-contract.md` §3.4、§5.2、§7；
+- `/Users/gongyong/Services/content-workbench/v2-b1-evidence-ingress/src/lib/evidence/adapters/execution-provenance-audit.ts`
+- `/Users/gongyong/Services/content-workbench/v2-b1-evidence-ingress/src/lib/evidence/adapters/manual-import-provenance-audit.ts`
+- `/Users/gongyong/Services/content-workbench/v2-b1-evidence-ingress/src/lib/evidence/adapters/non-execution-provenance-audit.ts`
+- `/Users/gongyong/Services/content-workbench/v2-b1-evidence-ingress/src/lib/evidence/adapters/authority-decision-registry.test.ts`
+- `/Users/gongyong/Services/content-workbench/v2-b1-evidence-ingress/docs/architecture/v2/04-blocker-ledger.md`
+
+---
+
+## 4. B1-B-08-R1 应交付的范围
+
+B1-B-08-R1 只能做 authority decision registry 的闭环一致性验证。
+
+允许的主要改动范围应当仅限于：
+
+```text
+src/lib/evidence/adapters/authority-decision-registry.test.ts
+docs/architecture/v2/04-blocker-ledger.md
+```
+
+如外部交付修改了其他文件，必须逐项判断是否越界。除非是测试配置或完全必要的只读测试辅助，否则应视为风险项。
+
+本任务不得：
+
+- 解决 authority 决策；
+- 添加生产身份来源；
+- 添加真实授权校验；
+- 增加任何 adapter；
+- 修改 Prisma schema 或 migration；
+- 修改插件协议；
+- 创建任何数据库记录。
+
+---
+
+## 5. 必须核验的 19 张 Authority Card
+
+### Execution：3 张
+
+```text
+DR-B1-005-001  sourcePrincipal
+DR-B1-005-002  executionPlanVersion
+DR-B1-005-003  签名工位会话与 job workspace 同源绑定
+```
+
+### Manual import：5 张
+
+```text
+DR-B1-006-001  sourcePrincipal
+DR-B1-006-002  importerIdentity
+DR-B1-006-003  authorization/session workspace binding
+DR-B1-006-004  receivedAt
+DR-B1-006-005  execution identity separation
+```
+
+### Recovery：5 张
+
+```text
+DR-B1-006-R-001  sourcePrincipal
+DR-B1-006-R-002  recoveryAuthorizedBy
+DR-B1-006-R-003  receivedAt
+DR-B1-006-R-004  body authority isolation
+DR-B1-006-R-005  execution identity separation
+```
+
+### Migration：6 张
+
+```text
+DR-B1-006-M-001  workspaceId
+DR-B1-006-M-002  sourcePrincipal
+DR-B1-006-M-003  migrationAuthorization
+DR-B1-006-M-004  receivedAt
+DR-B1-006-M-005  body authority isolation
+DR-B1-006-M-006  execution identity separation
+```
+
+必须确认：
+
+1. 恰好是 19 张，不能缺失或新增未登记 authority card；
+2. 每张卡仍是 `DECISION_REQUIRED`；
+3. 每张卡的编号、字段语义和权威 audit module 完全一致；
+4. 卡片来源指向真实文件，引用行号未超出文件范围；
+5. fixture、类型定义、文档或 validator 的非空检查，不得被错误宣称为 runtime authority proof；
+6. registry test 是**精确集合校验**，而不是仅 `toContain` 的弱校验；
+7. `canConstructProductionAuthority` 仍为 `false`。
+
+---
+
+## 6. 已知历史风险：必须重点复核
+
+此前 B1-B-07 外部交付曾出现两类真实错误，后由主线审核直接修复：
+
+1. Recovery 卡的编号与字段语义错位；
+2. Migration 卡的编号与字段语义错位。
+
+因此不能只验证“19 个 ID 都存在”。必须验证：
+
+```text
+audit fact key
+→ blocker ID
+→ ledger card field semantics
+→ static test assertion
+```
+
+四者逐项一致。
+
+尤其要防止以下错误重新出现：
+
+```text
+M-001 被写成 migrationAuthorization
+M-002 被写成 workspaceId
+M-003 被写成 sourcePrincipal
+```
+
+正确顺序必须是：
+
+```text
+M-001 workspaceId
+M-002 sourcePrincipal
+M-003 migrationAuthorization
+```
+
+---
+
+## 7. 最低验证命令
+
+优先运行以下测试；如 Vitest 缓存权限受限，可把缓存指向 `/tmp`，但不得改动仓库配置来绕过问题。
+
+```bash
+NODE_PATH=/Users/gongyong/Services/content-workbench/v2-b1-evidence-ingress/node_modules \
+npx vitest run \
+  src/lib/evidence/adapters/authority-decision-registry.test.ts \
+  src/lib/evidence/adapters/execution-provenance-audit.test.ts \
+  src/lib/evidence/adapters/manual-import-provenance-audit.test.ts \
+  src/lib/evidence/adapters/non-execution-provenance-audit.test.ts
+```
+
+并运行：
+
+```bash
+npx tsc --noEmit --incremental false
+
+npx eslint src/lib/evidence/adapters/authority-decision-registry.test.ts
+
+git diff --check
+```
+
+不需要也不得为本工单建立隔离数据库；这是一个纯静态 authority-registry 审核任务，应证明没有数据库、网络、HTTP、socket 或 runtime caller。
+
+---
+
+## 8. 审核处置规则
+
+### 交付有 bug 时
+
+你可以直接最小化修复，但必须：
+
+1. 说明缺陷的编号、文件、行或可定位区域；
+2. 说明它违反了哪条 authority mapping；
+3. 修复后运行上述全部针对性验证；
+4. 单独提交修复；
+5. 不扩大到 adapter 或架构实现。
+
+### 交付合格时
+
+可以接受并提交外部交付，但不要因为测试通过就宣布 authority 已解决。
+
+### 无论是否合格
+
+都必须明确说明：
+
+```text
+19 张卡是否仍全部为 DECISION_REQUIRED；
+是否仍禁止进入 production adapter implementation；
+是否存在 runtime / schema / migration / database / 流量改动。
+```
+
+---
+
+## 9. 最终交付格式
+
+请按以下格式输出审核结论：
+
+```text
+A. 当前固定点
+- 起始 SHA：
+- 审核前 HEAD：
+- 审核后 HEAD：
+- 工作树状态：
+
+B. 外部交付范围
+- 实际修改文件：
+- 是否越界：
+- 是否有 runtime / schema / migration / DB 改动：
+
+C. 独立审核结论
+- 19 张卡完整性：
+- audit ↔ ledger 精确映射：
+- 状态是否全部仍为 DECISION_REQUIRED：
+- authority 是否仍不可生产构造：
+- 发现的问题与是否已修复：
+
+D. 验证结果
+- Vitest：
+- TypeScript：
+- ESLint：
+- git diff --check：
+- 隔离证明：
+
+E. Git 提交
+- 外部交付提交：
+- 主线修复提交（如有）：
+- 最终 SHA：
+
+F. 推进判断
+- 是否可进入 Authority Decision Resolution Recording：
+- 是否可进入 adapter implementation：
+- 未决前置条件：
+```
+
+最后用一句明确结论收口：
+
+```text
+“B1-B-08-R1 已接受/未接受；在 authority 决策得到明确确认前，不得进入任何 production adapter 或入口硬切实现。”
+```

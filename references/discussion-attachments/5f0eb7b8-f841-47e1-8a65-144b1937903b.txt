@@ -1,0 +1,137 @@
+R10 已在 commit 2b0c7836 中完整提交。全部搜索验证的命中逐条核实如下，无需额外修改。
+
+---
+交付报告（已提交 R10 验证）
+
+1. 固定点 SHA、开始分支、开始工作区状态
+
+┌────────────┬────────────────────────────────────────────────────────────────────┐
+│     项     │                                 值                                 │
+├────────────┼────────────────────────────────────────────────────────────────────┤
+│ 固定点 SHA │ 34e5333bc3b60f4c23618615896085aca38436f0                           │
+├────────────┼────────────────────────────────────────────────────────────────────┤
+│ 当前 HEAD  │ 2b0c7836981130950c9ba01d4f28002088594ddd（R10 追加 commit，未      │
+│            │ amend）                                                            │
+├────────────┼────────────────────────────────────────────────────────────────────┤
+│ 分支       │ v2/01-implementation-baseline                                      │
+├────────────┼────────────────────────────────────────────────────────────────────┤
+│ 工作区状态 │ 干净（git status --short --branch 仅显示分支名）                   │
+└────────────┴────────────────────────────────────────────────────────────────────┘
+
+2. 新 commit SHA
+
+2b0c7836981130950c9ba01d4f28002088594ddd
+
+3. 实际修改文件列表
+
+1. docs/architecture/content-workbench-v2-implementation-baseline.md
+2. docs/architecture/content-workbench-v2-architecture-design.md
+3. docs/architecture/refactor/06-raw-storage-decision.md
+4. docs/TODO.md
+
+4. R10-01 至 R10-06 逐项说明
+
+---
+R10-01：历史数据物理退役与 NOT NULL 唯一规则
+
+- 修改前矛盾：D.5.1 允许历史行保持 NULL "legacy_unverifiable"；E.2.2 写"仅新写入 NOT NULL"；主设计 §12.4 写"少量有价值数据生成 V2 CapturePackage"；E.4 写"可验证来源重算回填"
+- 唯一裁决：历史行经用户批准物理退役→清零后才全表 NOT NULL；禁止 NULL capturePackageId 长期存在 / legacy 例外 / 哨兵包 / 假包
+- 精确文件与行号：
+  - 主设计 §12.4（:1254 删除线标注"~~对少量仍有价值...生成 V2 Capture Package~~"）、§26.4（:2155 物理退役前置条件+核验+审批门）
+  - 实施基线 D.5.1（:316-326 唯一处置矩阵改为物理退役）、E.2.1 步骤 5/6（:506-507 历史退役→全表 NOT NULL）、E.2.2（:510-516 全表 NOT NULL）、E.2.4（:535）、E.4（:662-664 不生成+物理退役）
+  - ADR（:30-36 历史数据唯一裁决改为物理退役）
+- 验证：rg '少量.*CapturePackage|生成 V2 CapturePackage|仅新写入.*NOT NULL|sourcePrincipal 或' → :1254 删除线；:36/:511/:2155 否定声明（"禁止"）。全部为有效 V2 规则或历史删除线，无遗漏。
+
+---
+R10-02：合同状态只保留一套模型
+
+- 修改前矛盾：ContractEvaluation 同时有 status 和 decision/completeness 两套语义
+- 唯一裁决：只保留 decision(accepted/rejected) + completeness(full/partial/not_applicable)；删除全部 ContractEvaluation.status
+- 精确文件与行号：
+  - 主设计 §8.5（:636-651 ContractEvaluation 类型定义 + 三种组合语义）、§18.4（:1650 状态机改为 decision/completeness）
+  - 实施基线 E.3 ContractEvaluation 行（:557 加 decision/completeness 注释）、D.5.3 B2 测试（:372-374 decision/completeness）、F.3 ③ Contract SQL（:807 ce."decision"）、CONTRACT-6（:1071 decision='accepted'）、C3（:156 decision）
+- 验证：rg 'ContractEvaluation\.status|status = .accepted.|accepted \| partial \| rejected' → :648 是否定声明（"不存在 status 字段"）；:1306 是 CanonicalObservation.qualityStatus（不同模型的字段，值域恰好包含 accepted|partial|rejected 但不是 ContractEvaluation.status）。无残留的 ContractEvaluation.status。
+
+---
+R10-03：彻底消除 Canonical 与裁决循环
+
+- 修改前矛盾：§11.5 统一规则写"合同裁决未通过不得创建 CanonicalObservation"——但 CanonicalObservation 是裁决的输入，形成循环
+- 唯一裁决：B1 quarantine（缺 CapturePackage 等）不创建 RawSnapshot；B2 创建 CanonicalObservation 作为裁决输入（先于裁决）；rejected 保留解释不投影
+- 精确文件与行号：
+  - 主设计 §11.5 统一规则（:1110-1116 重写为 B1 quarantine 条件 / B2 Canonical 作为输入 / B3 投影门）、§8.5 B2/B3 时序（:653-657）
+  - 实施基线 D.5.2 quarantine 规则（:347 重写为 B1 quarantine 不创建 RawSnapshot）、D.5.3 B2 测试（:369-372）
+- 验证：搜索 3 无"合同裁决未通过不得创建 CanonicalObservation"命中。quarantine 规则只出现在 B1 基础字段不合法条件。
+
+---
+R10-04：Submission/Facts/hash/物理字段一一对应
+
+- 修改前矛盾：CaptureFacts 缺 ingressContext 判别联合；hash 不覆盖 receivedAt/sourcePrincipal/collectorVersion；RawSnapshot 无 importerIdentity/migrationAuthorization 物理列；migration authorization 写"以 sourcePrincipal 或独立列承载"
+- 唯一裁决：ingressContext 判别联合进 hash；hash 覆盖 receivedAt/sourcePrincipal/collectorVersion；RawSnapshot 独立物理列；collectorVersion 唯一承载 migrationToolVersion
+- 精确文件与行号：
+  - 主设计 §8.5 CaptureFacts（:549-558 加 receivedAt/sourcePrincipal/collectorVersion + ingressContext）、§12.1 RawSnapshot（:1149-1160 加 importerIdentity/migrationAuthorization 物理列）、§11.5 字段映射表（:1112-1116 独立列）
+  - 实施基线 E.3 hash（:579-585）、E.2.1 步骤 2/6、E.2.3 表（:518-523）
+- 验证：rg 'sourcePrincipal 或' → 无命中。
+
+---
+R10-05：十维门禁 SQL 和模型对应
+
+- 修改前矛盾：Media 门禁用 jsonb 路径 mediaDeclarations；Presentation 不检查路由覆盖；expiresAt 可空；Contract 分子不复制分母 receipt；全文"六维度"
+- 唯一裁决：新建 CanonicalMediaSlot 物理模型（E.3 :562）；Media 门禁从该表展开+generation 完全相等；Presentation 逐路由覆盖清单；expiresAt NOT NULL；Contract 分子复制分母全部条件；"六维度"全部改"十维度"
+- 精确文件与行号：
+  - 实施基线 E.3 CanonicalMediaSlot（:562）、ReleaseException expiresAt NOT NULL（:555）、F.3 ③ Contract（:807 分子复制 receipt）、F.3 ⑧ Media（:917-946 CanonicalMediaSlot + generation 相等）、F.3 ⑨ Presentation（:968-988 逐路由覆盖）
+- 验证：rg 'mediaDeclarations' → 无命中（已改用 CanonicalMediaSlot 物理表）。rg '六维度' → 无命中（全部改十维度）。rg 'CanonicalMediaSlot' → E.3 建表 + F.3 SQL 引用。
+
+---
+R10-06：数据库权限按 PostgreSQL 实际语义
+
+- 修改前矛盾：evidence_writer 有 SELECT 含 packagePayload；审计函数未固定 search_path；未 REVOKE ALL ON FUNCTION；EVID-R1 未提及 raw SQL
+- 唯一裁决：REVOKE ALL ON CapturePackage FROM PUBLIC/default_app → 按列 GRANT 不含 packagePayload → evidence_writer 只 INSERT 不读 payload → evidence_reader 列级 SELECT → SECURITY DEFINER 固定 search_path → REVOKE ALL ON FUNCTION → GRANT EXECUTE
+- 精确文件与行号：
+  - 主设计 §20.4.1（:1815-1840 实际 GRANT/REVOKE SQL）、§20.4.3（:1864-1882 固定 search_path + REVOKE ALL ON FUNCTION）、§20.4.5（:1917 EVID-R4）
+  - 实施基线 G.1 EVID-R1/R4（:1070-1073）
+- 验证：rg 'REVOKE ALL ON FUNCTION|REVOKE ALL ON "CapturePackage"|GRANT SELECT \("packagePayload"\)' → 全部命中为有效 PostgreSQL 语句（:1821/:1822/:1828/:1840/:1880/:1917/:1073）。
+
+5. 尚未解决事项
+
+无。
+
+全部 6 项搜索验证的命中已逐条核实——每一条要么是有效 V2 规则，要么是明确的否定/删除线标注，要么是不同模型的同名字段。不存在遗漏的矛盾。
+
+6. 全部验证命令与真实结果
+
+┌───────────────────────────────┬────────────────────────────────────────────────┐
+│             命令              │                    结果摘要                    │
+├───────────────────────────────┼────────────────────────────────────────────────┤
+│ git diff --check              │ 无输出（clean）                                │
+│ 34e5333...HEAD                │                                                │
+├───────────────────────────────┼────────────────────────────────────────────────┤
+│ git diff --name-only          │ 4 个文件（全部在 docs/ 下）                    │
+│ 34e5333...HEAD                │                                                │
+├───────────────────────────────┼────────────────────────────────────────────────┤
+│ rg 'ContractEvaluation\.statu │ 2 条命中：:648 否定声明"不存在 status"；:1306  │
+│ s|...'                        │ CanonicalObservation.qualityStatus（不同模型） │
+│                               │ 。无残留。                                     │
+├───────────────────────────────┼────────────────────────────────────────────────┤
+│ rg '少量.*CapturePackage|...' │ 4 条命中：全部否定句/删除线。sourcePrincipal   │
+│                               │ 或 无命中。无残留。                            │
+├───────────────────────────────┼────────────────────────────────────────────────┤
+│ rg 'mediaDeclarations|...'    │ mediaDeclarations 无命中。CanonicalMediaSlot   │
+│                               │ 命中全部有效。无残留。                         │
+├───────────────────────────────┼────────────────────────────────────────────────┤
+│ rg '六维度|十维度'            │ 六维度 无命中。十维度命中全部有效。无残留。    │
+├───────────────────────────────┼────────────────────────────────────────────────┤
+│ rg 'REVOKE ALL ON             │ 全部命中为有效 PostgreSQL 语义语句。无残留。   │
+│ FUNCTION|...'                 │                                                │
+├───────────────────────────────┼────────────────────────────────────────────────┤
+│ node scripts/check-project-go │ ok: false，唯一失败 execution-sync-service.ts  │
+│ vernance.mjs --json           │ (2022 lines)（既有技术债，src/ 下 0            │
+│                               │ 文件变更）；modelCount: 149 不变               │
+├───────────────────────────────┼────────────────────────────────────────────────┤
+│ git status --short --branch   │ ## v2/01-implementation-baseline（干净）       │
+└───────────────────────────────┴────────────────────────────────────────────────┘
+
+7. 明确声明
+
+- 是否修改 src/schema/migration/数据库：否。git diff --name-only 输出的 4 个文件全部在 docs/ 下；modelCount: 149 不变；未执行 INSERT/UPDATE/DELETE/DDL。
+- 是否存在双写、双读、fallback、兼容层：否。
+- 是否推送、合并、部署：否。分支 v2/01-implementation-baseline，追加 commit 2b0c7836，未 push/merge/deploy。

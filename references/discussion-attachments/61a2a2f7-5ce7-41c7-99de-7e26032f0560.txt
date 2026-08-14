@@ -1,0 +1,302 @@
+V2-D2 交付报告
+
+1. 固定点、新 commit、实际 diff
+
+┌───────────────┬────────────────────────────────────────────────────────────────┐
+│      项       │                               值                               │
+├───────────────┼────────────────────────────────────────────────────────────────┤
+│ 固定点 SHA    │ bbb02852d5dc46edce4fc5a447870e144ca5966e                       │
+├───────────────┼────────────────────────────────────────────────────────────────┤
+│ 新 commit SHA │ bf1774070e016badaea697677a0b1d38a343abff（追加提交，未 amend） │
+├───────────────┼────────────────────────────────────────────────────────────────┤
+│ 分支          │ v2/01-implementation-baseline                                  │
+├───────────────┼────────────────────────────────────────────────────────────────┤
+│ 工作区        │ 干净                                                           │
+└───────────────┴────────────────────────────────────────────────────────────────┘
+
+git diff --name-only bbb02852...HEAD：
+1. docs/architecture/content-workbench-v2-design-freeze.md
+2. docs/TODO.md
+3. docs/progress/2026-08.md
+
+2. D2-01 至 D2-06 逐项说明
+
+D2-01：SECURITY DEFINER 与审计 ID
+
+┌─────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────┬───────────────────────────┐
+│      子项       │                                           唯一裁决                                           │           位置            │
+├─────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────┤
+│ 审计 ID         │ gen_random_uuid()::text PostgreSQL native default（不依赖 Prisma cuid()）                    │ §5.15 :674, 函数 SQL :312 │
+├─────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────┤
+│ 函数签名        │ 完整 (text, text, text) REVOKE/GRANT + ALTER FUNCTION ... OWNER TO schema_owner              │ 函数 SQL :333-335         │
+├─────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────┤
+│ 表 owner        │ 全部证据表 + ExecutionLogEvent ALTER TABLE ... OWNER TO schema_owner                         │ GRANT SQL :178-189        │
+├─────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────┤
+│ 缺失权限        │ canonical_writer 补 RawSnapshot/RawRecord SELECT；default_app 补 CanonicalObservation SELECT │ GRANT SQL :213-217        │
+├─────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────┤
+│ restricted 限制 │ 移除——所有包经同一函数；restricted 决定审计等级不阻止读取                                    │ 规则 :152, 函数 SQL :312  │
+├─────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────┼───────────────────────────┤
+│ 分事务          │ 读取+审计独立提交 → canonical_writer SERIALIZABLE 裁决事务                                   │ 规则 :155-156, §7 B2      │
+└─────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────┴───────────────────────────┘
+
+D2-02：四类协议与约束
+
+┌─────────────────────────────┬──────────────────────────────────────────────┬────────────────────┐
+│            子项             │                   唯一裁决                   │        位置        │
+├─────────────────────────────┼──────────────────────────────────────────────┼────────────────────┤
+│ observedAt                  │ 补入共用字段                                 │ §6 :843            │
+├─────────────────────────────┼──────────────────────────────────────────────┼────────────────────┤
+│ 真实 CHECK                  │ ALTER TABLE ... ADD CONSTRAINT chk_ingress_* │ §5.3 :389-400      │
+├─────────────────────────────┼──────────────────────────────────────────────┼────────────────────┤
+│ attemptId/stationId IS NULL │ manual_import/recovery/migration 均要求      │ CHECK SQL :392-400 │
+├─────────────────────────────┼──────────────────────────────────────────────┼────────────────────┤
+│ recordKind                  │ 只在 RawRecord，从 RawSnapshot 列表移除      │ §5.3/§5.4          │
+└─────────────────────────────┴──────────────────────────────────────────────┴────────────────────┘
+
+D2-03：当前裁决与关联同源
+
+┌───────────────────────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────┬───────────────┐
+│                 子项                  │                                         唯一裁决                                         │     位置      │
+├───────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┼───────────────┤
+│ ContractEvaluation 复合唯一键         │ @@unique([workspaceId, id, rawSnapshotId, contractId, contractVersion])                  │ §5.7 :468     │
+├───────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┼───────────────┤
+│ ContractEvaluationCurrent FK          │ 五列复合 (workspaceId, contractEvaluationId, rawSnapshotId, contractId, contractVersion) │ §5.8 :494     │
+├───────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┼───────────────┤
+│ ContractEvaluationNormalizationRun FK │ 含 rawSnapshotId                                                                         │ §5.9 :570-574 │
+├───────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┼───────────────┤
+│ ContractEvaluationInput               │ 加 rawSnapshotId 列                                                                      │ §5.10 :534    │
+├───────────────────────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┼───────────────┤
+│ Contract 门禁 ce 别名                 │ JOIN 替代嵌套 EXISTS                                                                     │ §10③ :977     │
+└───────────────────────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────┴───────────────┘
+
+D2-04：Normalization 重试模型（方案 A）
+
+┌─────────────────────────┬───────────────────────────────────────────────────────────────────┬────────────────┐
+│          子项           │                             唯一裁决                              │      位置      │
+├─────────────────────────┼───────────────────────────────────────────────────────────────────┼────────────────┤
+│ NormalizationRun        │ 不可变一次尝试，创建时直接写终态，无 pending 无 UPDATE            │ §5.5 :435-465  │
+├─────────────────────────┼───────────────────────────────────────────────────────────────────┼────────────────┤
+│ attemptNumber           │ 唯一键含 attemptNumber，重试=新行                                 │ §5.5 :446/:455 │
+├─────────────────────────┼───────────────────────────────────────────────────────────────────┼────────────────┤
+│ NormalizationRunCurrent │ 新指针表，canonical_writer 可 UPDATE                              │ §5.5 :467-482  │
+├─────────────────────────┼───────────────────────────────────────────────────────────────────┼────────────────┤
+│ GRANT SQL               │ NormalizationRun 完全 REVOKE UPDATE/DELETE（含 canonical_writer） │ GRANT SQL :260 │
+└─────────────────────────┴───────────────────────────────────────────────────────────────────┴────────────────┘
+
+D2-05：十维门禁 P0 SQL
+
+┌─────────────────────────┬───────────────────────────────────────────────┬─────────────────┐
+│          子项           │                   唯一裁决                    │      位置       │
+├─────────────────────────┼───────────────────────────────────────────────┼─────────────────┤
+│ Evidence 分母           │ 全部 RawSnapshot（不先 receipt 过滤）         │ §10① :938       │
+├─────────────────────────┼───────────────────────────────────────────────┼─────────────────┤
+│ Contract 分母           │ 全部应裁决 RawSnapshot（不先 receipt 过滤）   │ §10③ :972       │
+├─────────────────────────┼───────────────────────────────────────────────┼─────────────────┤
+│ ce 别名越作用域         │ JOIN ContractEvaluation ce ON ...             │ §10③ :977       │
+├─────────────────────────┼───────────────────────────────────────────────┼─────────────────┤
+│ Presentation 四类       │ content 完整 SQL + author/topic/task 同理注释 │ §10⑨            │
+├─────────────────────────┼───────────────────────────────────────────────┼─────────────────┤
+│ projectionRevision CAST │ CAST(projectionVersion AS text)               │ §10⑨ :1041      │
+├─────────────────────────┼───────────────────────────────────────────────┼─────────────────┤
+│ TaskStatus 反向         │ 五维全检含 executionStatus                    │ §10⑩ :1138-1140 │
+├─────────────────────────┼───────────────────────────────────────────────┼─────────────────┤
+│ Canonical/Metric        │ 通过 NormalizationRunCurrent                  │ §10②/⑦          │
+└─────────────────────────┴───────────────────────────────────────────────┴─────────────────┘
+
+D2-06：文档治理
+
+┌──────────┬─────────────────────────────────────────┬─────────────────────┐
+│   子项   │                唯一裁决                 │        位置         │
+├──────────┼─────────────────────────────────────────┼─────────────────────┤
+│ 状态     │ "D2 基础可执行性收口完成，等待架构审核" │ :3                  │
+├──────────┼─────────────────────────────────────────┼─────────────────────┤
+│ TODO     │ D2 记录添加                             │ TODO :33-35         │
+├──────────┼─────────────────────────────────────────┼─────────────────────┤
+│ progress │ D2 + 审查 bug 历史添加                  │ progress/2026-08.md │
+└──────────┴─────────────────────────────────────────┴─────────────────────┘
+
+3. 目标 SQL 标注
+
+全部目标 SQL 标注「目标 schema，未执行」。无任何 SQL 声称已验证。
+
+4. rg 命中人工分类
+
+┌─────────────────────────────────────────────┬───────────────────────────────────────────────────────────┬──────────────────────────────────────────────────┐
+│                  搜索模式                   │                           命中                            │                       分类                       │
+├─────────────────────────────────────────────┼───────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ gen_random_uuid                             │ 3 处                                                      │ 有效规则（D2-01a 修复）                          │
+├─────────────────────────────────────────────┼───────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ attemptNumber                               │ 5 处                                                      │ 有效规则（D2-04 方案 A）                         │
+├─────────────────────────────────────────────┼───────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ NormalizationRunCurrent                     │ 多处                                                      │ 有效规则（D2-04 新增模型+GRANT+门禁）            │
+├─────────────────────────────────────────────┼───────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ restricted IS NOT TRUE / 包不通过此函数     │ 零命中                                                    │ 旧限制已移除（D2-01e）                           │
+├─────────────────────────────────────────────┼───────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ JOIN.*ContractEvaluation.*ce ON             │ 2 处                                                      │ 有效规则（D2-03/c ce 别名修复）                  │
+├─────────────────────────────────────────────┼───────────────────────────────────────────────────────────┼──────────────────────────────────────────────────┤
+│ subjectType.*author|topic|task（在 SQL 中） │ 零命中（Presentation SQL 只写了 content 示例 + 同理注释） │ 已知限制——author/topic/task 结构相同但未逐类展开 │
+└─────────────────────────────────────────────┴───────────────────────────────────────────────────────────┴──────────────────────────────────────────────────┘
+
+5. F-O1/F-O3 状态
+
+┌──────┬─────────────────────────────────────┐
+│ 编号 │                状态                 │
+├──────┼─────────────────────────────────────┤
+│ F-O1 │ 仍需产品/插件侧决定，阻塞 Release-B │
+├──────┼─────────────────────────────────────┤
+│ F-O3 │ 仍需产品确认，阻塞 Douyin 硬切      │
+└──────┴─────────────────────────────────────┘
+
+6. 验证命令原始结果
+
+┌──────────────────────────────────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                       命令                       │                                                    结果                                                     │
+├──────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ git diff --check bbb02852...HEAD                 │ 无输出（clean）                                                                                             │
+├──────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ git diff --name-only bbb02852...HEAD             │ 3 个文件（全部在 docs/ 下）                                                                                 │
+├──────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 围栏配对                                         │ 68（偶数）✓                                                                                                 │
+├──────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ node scripts/check-project-governance.mjs --json │ ok: false，唯一失败 execution-sync-service.ts (2022 lines)（既有技术债，src/ 0 变更）；modelCount: 149 不变 │
+├──────────────────────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ git status --short --branch                      │ ## v2/01-implementation-baseline（干净）                                                                    │
+└──────────────────────────────────────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+7. 尚未解决问题
+
+1. Presentation SQL 未逐类展开：content 有完整 SQL，author/topic/task 只标注"同理"模式。审核时可要求逐类展开。
+2. F-O1/F-O3 未被产品决策：阻塞 Release-B 范围。
+
+8. 明确声明
+
+- 未修改 src/schema/migration/数据库/环境：是。
+- 未 push/merge/deploy：是。
+- 当前状态：D2 基础可执行性收口完成，等待架构审核。不得宣称"V2 已实施"或"可以启动 B1"。
+
+✻ Sautéed for 6m 5s
+
+❯ 再 review 一遍 V2-D2 有没有引入新问题
+
+  Thought for 43s, read 1 file
+
+完整重读完毕。发现 3 个 D2 修改引入的新问题：
+
+---
+新问题 1（矛盾）：D4.2 描述与 §5.15 模型不一致
+
+:174 仍写：
+
+▎ D4.2 EvidenceAccessAudit——id 使用 @default(cuid())...
+
+但 §5.15 :674 已改为 @default(dbgenerated("gen_random_uuid()::text"))。D2-01a 改了模型但忘了同步 D4.2 描述。
+
+新问题 2（遗漏）：NormalizationRunCurrent 不在 §4 领域表的 Canonical 可写表列表中
+
+:354 Canonical 行的"可写表"列出了 NormalizationRun/CanonicalObservation/ContractEvaluation/ContractEvaluationCurrent/ContractEvaluationNormalizationRun/ContractEvaluationInput/CanonicalMediaSlot，但遗漏了 NormalizationRunCurrent。
+
+新问题 3（死变量+未实现承诺）：v_restricted 声明但从不使用；函数未按 restricted 区分审计等级
+
+:289 函数声明 v_restricted boolean，:307 SELECT 赋值了它，但 D2-01e 移除 IF v_restricted IS NOT TRUE 检查后，v_restricted 变成了死变量。同时 :154 规则承诺"restricted 决定审计等级...非 restricted 包审计级别为 normal"——但函数中 accessReason 只有 normalization/contract_evaluation，没有任何基于 restricted 的行为差异。规则承诺了一个函数没实现的行为。
+
+---
+现在修复这 3 个问题：
+
+⏺ Update(docs/architecture/content-workbench-v2-design-freeze.md)
+Added 1 line, removed 1 line
+
+函数必须 `EXISTS (SELECT 1 FROM public."EvidenceReaderWorkspaceGrant" WHERE workspaceId = p_workspace_id AND readerRole = mapped_role AND revokedAt IS NULL)
+`。
+
+**D4.2 EvidenceAccessAudit**——`id` 使用 `@default(cuid())`，函数 INSERT 时自动生成（不留无默认值导致 INSERT 失败的模型）。
+**D4.2 EvidenceAccessAudit**——`id` 使用 PostgreSQL native `gen_random_uuid()::text`（D2-01a：不依赖 Prisma 应用层 cuid()；函数 INSERT 不含 id 列，由数据库 D
+EFAULT 生成）。
+
+**D4.3 完整 GRANT/REVOKE SQL**（目标 schema，未执行）：
+
+
+⏺ Update(docs/architecture/content-workbench-v2-design-freeze.md)
+Added 1 line, removed 1 line
+| 领域 | 唯一职责 | 可写表 | 数据库身份 |
+|---|---|---|---|
+| Evidence | 接收 CaptureSubmissionV2 → 证据持久化 | CapturePackage, RawSnapshot, RawRecord, CaptureArtifact, ExecutionLogEvent(receipt) | evidence_writer |
+| Canonical | 解释 RawRecord + 合同裁决 | NormalizationRun, CanonicalObservation, ContractEvaluation, ContractEvaluationCurrent(可更新), ContractEvaluationN
+ormalizationRun, ContractEvaluationInput, CanonicalMediaSlot | canonical_writer |
+| Canonical | 解释 RawRecord + 合同裁决 | NormalizationRun, NormalizationRunCurrent(可更新指针), CanonicalObservation, ContractEvaluation, ContractEvaluatio
+nCurrent(可更新指针), ContractEvaluationNormalizationRun, ContractEvaluationInput, CanonicalMediaSlot | canonical_writer |
+| Content | ContentObservation + CurrentProjection | ContentObservation, ContentCurrentProjection | default_app |
+| Author | AuthorObservation + CurrentProjection | AuthorObservation, AuthorCurrentProjection | default_app |
+| Media | CanonicalMediaSlot → MediaRegistry → 账本 | (B2: CanonicalMediaSlot via canonical_writer; B3: MediaOrigin/MediaItem via default_app) | 分阶段 |
+
+修复新问题 3——移除死变量 v_restricted + 在审计中记录 restricted 标记使函数行为与规则一致：
+
+⏺ Update(docs/architecture/content-workbench-v2-design-freeze.md)
+Added 4 lines, removed 3 lines
+    RAISE EXCEPTION 'No workspace grant for role % in workspace %', v_role, p_workspace_id;
+  END IF;
+
+  -- D2-01e: 所有包均经此函数；restricted 决定审计等级，不阻止读取
+  -- D2-01e: 所有包均经此函数；restricted 标记写入审计（决定后续出口限制，不阻止读取）
+  SELECT "packagePayload", restricted INTO v_payload, v_restricted
+  FROM public."CapturePackage"
+  WHERE "workspaceId" = p_workspace_id AND id = p_capture_package_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'Package not found: %', p_capture_package_id; END IF;
+
+  -- D2-01a: INSERT 不含 id 列，由 PostgreSQL DEFAULT gen_random_uuid()::text 生成
+  -- 审计行记录 restricted 标记（复查 BUG: 使函数行为与 D4 规则 :154 一致）
+  INSERT INTO public."EvidenceAccessAudit"
+    ("workspaceId", "capturePackageId", "accessedBy", "accessReason", "requestTraceId", "accessedAt")
+  VALUES (p_workspace_id, p_capture_package_id, v_session, v_reason, p_request_trace_id, now());
+    ("workspaceId", "capturePackageId", "accessedBy", "accessReason", "requestTraceId", "accessedAt", restricted)
+  VALUES (p_workspace_id, p_capture_package_id, v_session, v_reason, p_request_trace_id, now(), v_restricted);
+
+  RETURN v_payload;
+END;
+
+EvidenceAccessAudit 模型也需要加 restricted 列以匹配函数 INSERT：
+
+⏺ Update(docs/architecture/content-workbench-v2-design-freeze.md)
+Added 2 lines, removed 1 line
+  workspaceId       String
+  capturePackageId  String   // → CapturePackage
+  accessedBy        String   // session_user（不可伪造）
+  accessReason      String   // normalization | contract_evaluation | normal（由角色固定；D2-01e）
+  accessReason      String   // normalization | contract_evaluation（由角色固定）
+  requestTraceId    String?
+  accessedAt        DateTime @default(now())
+  restricted        Boolean  @default(false)  // 复查修复：记录被读取包的 restricted 标记，供后续出口限制审计
+  @@index([workspaceId, capturePackageId])
+  append-only: REVOKE UPDATE, DELETE FROM ALL
+  // D2-01a: migration 前置: ALTER TABLE "EvidenceAccessAudit" ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+
+验证修复没有引入新问题：
+
+  Thought for 7s, ran 1 shell command
+
+全部验证通过：
+- D4.2 描述改为 gen_random_uuid()::text ✓
+- NormalizationRunCurrent 在领域表中 ✓
+- v_restricted 不再是死变量（3 处引用：DECLARE → SELECT INTO → INSERT VALUES）✓
+- EvidenceAccessAudit 模型有 restricted Boolean 列 ✓
+- 围栏 68（偶数）✓
+- diff --check clean ✓
+
+提交：
+
+  Committed 03a00c3a
+
+已提交 03a00c3a。复查发现并修复了 D2 修改引入的 3 个新问题：
+
+┌────────────────────────────┬──────────────────────────────────────────────────────────────────────┬───────────────────────────────────────────────────────────────────┐
+│            回归            │                                 原因                                 │                               修复                                │
+├────────────────────────────┼──────────────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────┤
+│ D4.2 描述与模型不一致      │ D2-01a 改了模型 gen_random_uuid()::text 但忘了同步 D4.2 文字（仍写   │ 同步描述                                                          │
+│                            │ cuid()）                                                             │                                                                   │
+├────────────────────────────┼──────────────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────┤
+│ NormalizationRunCurrent    │ D2-04 新增了该表，但 §4 领域表 Canonical 行没列出                    │ 补入可写表列表                                                    │
+│ 遗漏                       │                                                                      │                                                                   │
+├────────────────────────────┼──────────────────────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────────────┤
+│ v_restricted 死变量 +      │ D2-01e 移除 restricted=true 读取限制后，函数仍声明并赋值             │ EvidenceAccessAudit 加 restricted Boolean 列；函数 INSERT 写入    │
+│ 规则未实现                 │ v_restricted 但从不使用；规则 :154 承诺"restricted                   │ v_restricted 值——审计行实际记录是否读取了 restricted              │
+│                            │ 决定审计等级"但函数无差异化行为                                      │ 包，与规则承诺一致                                                │
+└────────────────────────────┴──────────────────────────────────────────────────────────────────────┴───────────────────────────────────────────────────────────────────┘

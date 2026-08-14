@@ -1,0 +1,94 @@
+L0 交付报告
+
+状态：✅ 完成。分支 fix/topic-library-l0-snapshot，未推送。
+Commit：f7ad2fcf（f7ad2fcf769a4973ad5e2ba85d19b5b0798b37f1）
+
+1. 修改文件清单（5 个，仅测试 + 证据文档）
+
+┌───────────────────────────────────────────────────────┬──────────────────────────┐
+│                         文件                          │           改动           │
+├───────────────────────────────────────────────────────┼──────────────────────────┤
+│ src/lib/library-workbench.test.ts                     │ +3 测试（L6×2、L2×1）+1  │
+│                                                       │ import                   │
+├───────────────────────────────────────────────────────┼──────────────────────────┤
+│ src/lib/services/topic-service.test.ts                │ +1 测试（L1）            │
+├───────────────────────────────────────────────────────┼──────────────────────────┤
+│ src/lib/services/topic-library-sync-service.test.ts   │ +1 测试（L7）            │
+├───────────────────────────────────────────────────────┼──────────────────────────┤
+│ src/app/library/page.test.tsx                         │ +2 测试（L2×2）          │
+├───────────────────────────────────────────────────────┼──────────────────────────┤
+│ docs/progress/2026-07-20-topic-library-l0-snapshot.md │ L0 证据文档（新建）      │
+└───────────────────────────────────────────────────────┴──────────────────────────┘
+
+共 5 files changed, 227 insertions(+)。提交后工作区干净。
+
+2. 每条确认成立的问题及证据（7 条改前基线测试，当前全绿 = 固化现状）
+
+┌──────┬─────┬────────────────────┬───────────────────────────────────────────────┐
+│ 编号 │ 卡  │        测试        │           断言（请求参数/orderBy）            │
+├──────┼─────┼────────────────────┼───────────────────────────────────────────────┤
+│      │     │ treats             │                                               │
+│ L0-1 │ L6  │ unknown_platform   │ normalizeLibraryPlatform("unknown_platform")  │
+│      │     │ as a valid         │ 仍是合法值                                    │
+│      │     │ platform value     │                                               │
+├──────┼─────┼────────────────────┼───────────────────────────────────────────────┤
+│      │     │ drops the platform │                                               │
+│ L0-2 │ L6  │  param for         │ 该值请求 URL 不含 platform=                   │
+│      │     │ unknown_platform   │                                               │
+├──────┼─────┼────────────────────┼───────────────────────────────────────────────┤
+│      │     │ does not truncate  │                                               │
+│ L0-3 │ L2  │ or block a         │ normalizeLibrarySearch("作") 原样返回         │
+│      │     │ single-character   │                                               │
+│      │     │ search term        │                                               │
+├──────┼─────┼────────────────────┼───────────────────────────────────────────────┤
+│      │     │ falls back to      │                                               │
+│ L0-4 │ L1  │ createdAt orderBy  │ listTopics({sort:"reuseScore"}) → Prisma      │
+│      │     │ when sort is       │ orderBy:{createdAt:"desc"}                    │
+│      │     │ reuseScore         │                                               │
+├──────┼─────┼────────────────────┼───────────────────────────────────────────────┤
+│      │     │ hardcodes          │ 同步新记录 topicFields.targetProduct ===      │
+│ L0-5 │ L7  │ targetProduct to   │ "卢叔数学"                                    │
+│      │     │ 卢叔数学           │                                               │
+├──────┼─────┼────────────────────┼───────────────────────────────────────────────┤
+│      │     │ sends a request    │                                               │
+│ L0-6 │ L2  │ for a              │ 输入"作"→请求 URL 含 search=%E4%BD%9C         │
+│      │     │ single-character   │                                               │
+│      │     │ search term        │                                               │
+├──────┼─────┼────────────────────┼───────────────────────────────────────────────┤
+│      │     │ keeps platform     │                                               │
+│ L0-7 │ L2  │ filter in the      │ 切 Tab 后请求仍含 platform=xhs（只重置页码）  │
+│      │     │ request when       │                                               │
+│      │     │ switching tabs     │                                               │
+└──────┴─────┴────────────────────┴───────────────────────────────────────────────┘
+
+3. 改前失败测试的实际输出
+
+✓ topic-library-sync-service.test.ts (4 tests)
+✓ library-workbench.test.ts (9 tests)
+✓ topic-service.test.ts (24 tests)
+✓ page.test.tsx (23 tests)
+Test Files  4 passed (4)     Tests  60 passed (60)
+eslint（改动文件）exit 0；tsc --noEmit 0 个 error TS（改动文件无错误）；pre-commit 全项目 lint ✅ Lint passed（0 errors）。
+
+4. 未能自动化的项及原因（详见证据文档第 4 节）
+
+- updatedAt 排序缺失（L1）：TopicListFilters["sort"] 严格 union 不含 updatedAt，强传需类型欺骗——改用三层源码引用（topic-service.ts:294-300/577-590 + route.ts:71）。
+- entry=all 落 platform（L5）：已有测试覆盖 + D1 已定保持两 Tab（文档修订，非代码修复）。
+- 收藏非乐观/新建落点（L4）、标签 OR（L3）、STATUS_FILTERS 形状（L2）、深度分析 POST（L7）：DOM 断言脆弱或属常量事实/跨模块，用源码引用证据。
+
+5. Commit hash
+
+f7ad2fcf
+
+6. 声明
+
+未修改任何业务实现、Prisma schema、migration、生产数据、API 合约、产品目录。唯一改动是 4 个 *.test.* 改前基线测试 + 1 个证据文档。所有断言固化当前现状，未为让测试通过而调整实现或断言。
+
+---
+⚠️ 三个验收方需知悉的事项（已写入证据文档第 0 节）
+
+1. 任务手册在 origin/main 上已消失：docs/superpowers/plans/2026-07-20-topic-library-remediation-execution-handbook.md 最后存在于 8ac0e40f，此后无删除 commit，但 main/origin/所有分支均不含——origin/main 历史被重写。L0 依据来自：任务指令 8 条决策 + 对话记录手册全文 + 选题库代码（8ac0e40f..HEAD 8 文件零改动，锚点精确未漂移）。若验收方有更新版手册，请以新版复核 L0 边界。
+2. 首次改动曾被 deploy runner 抹掉后重建：开工基线 8ac0e40f → 提交基线 f7097e9b（origin 多次 fast-forward）。
+3. docs/audit/rc/ 已不在工作区（任务标注"严禁触碰"）——被 deploy 的 reset/clean 清除，非本任务所为，未尝试恢复。
+
+L0 完成，停下等验收。

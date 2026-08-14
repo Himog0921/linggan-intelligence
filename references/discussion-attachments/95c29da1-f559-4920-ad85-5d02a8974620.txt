@@ -1,0 +1,142 @@
+B1-B-03-R2-F 最终交付报告
+
+A. 固定点
+
+┌──────────────────┬──────────────────────────────────────────┐
+│       项目       │                    值                    │
+├──────────────────┼──────────────────────────────────────────┤
+│ 插件基线 SHA     │ b36559f9bb765db8296b2565df961868b7525abf │
+├──────────────────┼──────────────────────────────────────────┤
+│ 插件 R2 初版 SHA │ a6fceada4250794515b7831b55817d35f30a6f85 │
+├──────────────────┼──────────────────────────────────────────┤
+│ 插件最终 SHA     │ ad8acb61037a355f44d180fa60f76787e67d16ba │
+├──────────────────┼──────────────────────────────────────────┤
+│ 工作台只读 SHA   │ b0425fd0ecca40a421e96b72c6f525b4f2615603 │
+├──────────────────┼──────────────────────────────────────────┤
+│ 两仓工作树       │ 均 clean ✅                              │
+└──────────────────┴──────────────────────────────────────────┘
+
+B. 提交
+
+a6fcead feat(v2): add dark CaptureSubmission package builder
+ad8acb6 fix(v2): enforce artifact restricted propagation and strict JSON validation
+
+C. Diff（vs 基线 b36559f9）
+
+git diff --stat b36559f9..ad8acb6:
+ progress.txt                                |   5 +-
+ src/workbench/protocol/v2/xhs-contracts.cjs | 117 +++++++++++++++++---
+ tests/xhs-collection-contracts.test.cjs     | 212 ++++++++++++++++++++++++++++-
+ 3 files changed, 312 insertions(+), 28 deletions(-)
+
+D. F1: Artifact restricted 传播 ✅
+
+问题：artifacts[].restricted === true 但 builder 不自动传播到 capturePackage.restricted，导致组合被工作台 validator 以 invalid_submission 拒绝（§3.3 规则）。
+
+修复：buildCaptureSubmissionBodyV2 自动传播:
+const effectiveRestricted = restricted || (artifacts || []).some(a => a.restricted === true);
+
+验证：
+- ✅ artifact.restricted=true → capturePackage.restricted=true（自动）
+- ✅ 无 restricted artifact + restricted: true → 保留 caller 显式值
+- ✅ 无 restricted artifact + 未设 → restricted: false
+- ✅ 工作台 cross-repo-verify.ts 6/6 workbench-validator=accepted
+- ✅ 六份 fixture hash 全部不变
+
+E. F2: 严格 JSON 值校验 ✅
+
+问题：canonicalJson 依赖 JSON.stringify，对 undefined（静默删除键）、NaN/Infinity（转为 null）、Date/Map/Set（允许通过但产出非法 JSON）不做任何拒绝。
+
+修复：新增 assertJsonValue(value, path) 函数，匹配工作台 assertJsonValue 语义：
+- undefined → throw
+- NaN → throw
+- Infinity → throw
+- BigInt → throw
+- function → throw
+- 非普通对象（Date/Map/Set/类实例）→ throw（检测 Object.getPrototypeOf）
+- 合法 JSON 递归校验
+
+sortKeys 改用 isPlainObject 替代 !(value instanceof Date) 条件。
+
+测试更新：
+
+┌──────────────────────────────┬─────────────────────────────────────┐
+│            旧测试            │               新测试                │
+├──────────────────────────────┼─────────────────────────────────────┤
+│ undefined 被静默丢弃视为正确 │ rejects undefined values → throw ✅ │
+├──────────────────────────────┼─────────────────────────────────────┤
+│ —                            │ rejects NaN → throw ✅              │
+├──────────────────────────────┼─────────────────────────────────────┤
+│ —                            │ rejects Infinity → throw ✅         │
+├──────────────────────────────┼─────────────────────────────────────┤
+│ —                            │ rejects Date → throw ✅             │
+├──────────────────────────────┼─────────────────────────────────────┤
+│ —                            │ rejects Map → throw ✅              │
+├──────────────────────────────┼─────────────────────────────────────┤
+│ —                            │ accepts valid JSON values ✅        │
+└──────────────────────────────┴─────────────────────────────────────┘
+
+F. F3: progress.txt ✅
+
+按插件仓库门禁补充 R2 时间线记录，不泛化文档重写。node scripts/check-project-governance.mjs 通过。
+
+F. 测试结果
+
+┌─────────────────────────────┬────────────────────────────────────────────────┐
+│            测试             │                      结果                      │
+├─────────────────────────────┼────────────────────────────────────────────────┤
+│ npm run check:contracts     │ ✅ 125 passed, 0 failed                        │
+├─────────────────────────────┼────────────────────────────────────────────────┤
+│ npm run test:douyin         │ ✅ 256 passed, 0 failed                        │
+├─────────────────────────────┼────────────────────────────────────────────────┤
+│ npm run build               │ ✅ compiled (3 webpack warnings, pre-existing) │
+├─────────────────────────────┼────────────────────────────────────────────────┤
+│ npm run release:verify      │ ✅ v2.0.91 verified                            │
+├─────────────────────────────┼────────────────────────────────────────────────┤
+│ governance:check            │ ✅ passed                                      │
+├─────────────────────────────┼────────────────────────────────────────────────┤
+│ 工作台 vitest contracts/    │ ✅ 63 passed                                   │
+├─────────────────────────────┼────────────────────────────────────────────────┤
+│ 工作台 cross-repo-verify.ts │ ✅ 6/6 OK, exit 0                              │
+├─────────────────────────────┼────────────────────────────────────────────────┤
+│ 静态扫描 runtime callers    │ ✅ 零命中                                      │
+└─────────────────────────────┴────────────────────────────────────────────────┘
+
+G. 固定值证明
+
+六份 contract hash 和 fixture package hash 全部不变：
+
+┌────────────────────┬─────────────────────────┬──────┐
+│      Contract      │      Fixture Hash       │ 匹配 │
+├────────────────────┼─────────────────────────┼──────┤
+│ xhs.list-scan      │ ba5984fb3f2d66d1...430e │ ✅   │
+├────────────────────┼─────────────────────────┼──────┤
+│ xhs.note-detail    │ 5019fdfc8c3c0f5a...9f72 │ ✅   │
+├────────────────────┼─────────────────────────┼──────┤
+│ xhs.note-full      │ c747aabfb0da652a...2896 │ ✅   │
+├────────────────────┼─────────────────────────┼──────┤
+│ xhs.comment-probe  │ c29f34071ddca01d...f1bc │ ✅   │
+├────────────────────┼─────────────────────────┼──────┤
+│ xhs.author-profile │ 43dd87cce03791fb...864b │ ✅   │
+├────────────────────┼─────────────────────────┼──────┤
+│ xhs.author-links   │ b8eaa5e141a1497a...4019 │ ✅   │
+└────────────────────┴─────────────────────────┴──────┘
+
+H. 隔离证明
+
+- ✅ 未调用 API、未发网络请求、未写数据库
+- ✅ 未修改工作台仓库（HEAD=b0425fd0，干净）
+- ✅ 零 runtime caller（taskLeaseClient/taskPoller/outbox/background 均无引用）
+- ✅ 未双写、双读、fallback、feature flag
+- ✅ 未 push、未部署、未发布
+
+I. 未做事项
+
+- execution/manual_import/recovery adapter
+- execution authority validator
+- executionPlanVersion 权威来源
+- V1 terminal → V2 reason 映射
+- captureId/targetKey 生成规则
+- execution 控制平面 CAS
+- 旧 Outbox 停发
+- Release-B 最终硬切

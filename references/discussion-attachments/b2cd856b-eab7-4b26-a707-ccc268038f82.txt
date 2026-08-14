@@ -1,0 +1,131 @@
+审计完成。所有权威资料和当前真实代码已交叉核实。现在我给出完整的来源审计报告和阻塞单。
+
+---
+来源审计结果：强制停机
+
+我已完成工单第四节要求的全部只读核对。审计结论是：第四部分 4.1–4.6 中存在 4 项无法从权威资料或真实代码唯一确定的缺口，触发第五节强制停机规则。未修改任何文件。
+
+审计总结
+
+┌─────────────────────────┬────────────────────────────────────┬───────────┐
+│         审计项          │                状态                │ 缺口编号  │
+├─────────────────────────┼────────────────────────────────────┼───────────┤
+│ 4.1 CaptureSubmissionV2 │ 无唯一来源                         │ DR-B1-002 │
+│  外部协议               │                                    │           │
+├─────────────────────────┼────────────────────────────────────┼───────────┤
+│ 4.2 Contract hash       │ 缺失                               │ DR-B1-003 │
+│ 真值来源                │                                    │           │
+├─────────────────────────┼────────────────────────────────────┼───────────┤
+│ 4.3 四类真实调用链（mig │ 无法定位                           │ DR-B1-004 │
+│ ration 入口）           │                                    │           │
+├─────────────────────────┼────────────────────────────────────┼───────────┤
+│ 4.4 execution 控制平面  │ 无来源                             │ DR-B1-005 │
+├─────────────────────────┼────────────────────────────────────┼───────────┤
+│                         │ 部分有来源（recordKind             │           │
+│ 4.5 RawRecord Release-B │ 允许值已在冻结规范                 │ 随        │
+│  转换                   │ §5.5:220），但时序/双写边界依赖    │ DR-B1-002 │
+│                         │ 4.1                                │           │
+├─────────────────────────┼────────────────────────────────────┼───────────┤
+│ 4.6 并发重试            │ 参数无来源                         │ DR-B1-005 │
+├─────────────────────────┼────────────────────────────────────┼───────────┤
+│ 4.7 九工位插件版本      │ DR-B1-006（工单允许继续不接流量代  │ 豁免至上  │
+│                         │ 码）                               │ 线        │
+└─────────────────────────┴────────────────────────────────────┴───────────┘
+
+---
+DR-B1-002
+
+缺口：CaptureSubmissionV2 / RawRecord 外部结构无唯一来源
+证据：
+  - docs/architecture/content-workbench-v2-design-freeze.md:548-556（§6 只用自然语言列出概念字段名，无 JSON 层级、无 base64 字段名、无 target 结构、无 protocolVersion V2 取值）
+  - src/ 全库 rg "CaptureSubmissionV2" = 0 结果；rg "captureSubmissionV2" = 0 结果
+  - 四类入口当前各有完全不同的 V1 数据格式：
+    · execution:  src/lib/services/execution-sync-service.ts:172-201（commit_raw_snapshot operation，checksumAlgorithm/checksumValue/contentLength/storageKey 散落在 operation 上，records[] 嵌套在 operation 内）
+    · manual_import: src/lib/services/plugin-manual-import-service.ts:9-13（PluginManualImportRecords { notes[], comments[], authors[] }）
+    · recovery: src/lib/services/plugin-local-recovery-service.ts:53-60（PluginLocalRecoveryExport { journal[], deadLetters[] }）
+  - 无任何 TypeScript 类型定义 CaptureSubmissionV2 的 JSON 层级
+为什么无法唯一推出：
+  冻结规范 §6 写的 capturePackage 是概念性的"bytea base64 + checksum"，但没有定义：
+  (a) JSON 层级——字段是平铺还是嵌套对象？capturePackage 是一个含 base64+checksum 的子对象，还是 checksumAlgorithm/checksumValue/contentLength 直接在顶层？
+  (b) base64 字段名——叫 data / payload / bytes / base64Content / packagePayload？
+  (c) target 的准确结构——当前 V1 用 observedTargetKey/expectedTargetKey 两个字符串；V2 的 target 是什么结构？它到 RawSnapshot.targetKey 的确定性映射规则是什么？
+  (d) RawRecord[] 的来源——嵌套在 capturePackage 内？还是顶层独立字段？字段名是 records 还是 rawRecords？
+  (e) protocolVersion 的 V2 取值——当前 V1 是 "3"（execution-sync-service.ts:114），V2 取值未在任何权威资料中定义
+  任意选择一组 JSON key 就构成一组不同的外部协议。工单明确禁止"冻结规范只写出概念字段，不代表可以自行发明 JSON key"。
+可证伪验收条件：
+  给出 CaptureSubmissionV2 的完整 TypeScript 类型定义，其中每个 JSON key 能追溯到冻结规范行号或已确认 DEC；或审核方在权威资料中补充完整的外部 JSON 合同。插件端或 API 路由中有对应实现或真实 fixture。
+未修改文件：全部文件未修改
+固定点 SHA：8687aa6537fe4a174f862d4291a91f99a91cbaae
+最终 SHA：8687aa6537fe4a174f862d4291a91f99a91cbaae
+
+---
+DR-B1-003
+
+缺口：Contract hash 真值来源缺失——无法实现 contractHash 一致性校验
+证据：
+  - prisma/schema.prisma:4258-4260（RawSnapshot 上只有三个 nullable 空壳列：contractId String? / contractVersion Int? / contractHash String?，无 Contract model）
+  - src/ 全库 rg "contractId|contractHash|contractVersion"（排除 node_modules/.test.）= 0 结果
+  - 无 Contract 模型、无服务端 contract registry、无 contract hash 计算逻辑
+  - 冻结规范 §6:556 将"contractHash 不一致"列为 B1 rejection 条件之一
+  - 冻结规范 §5.4:165 将 contractId/contractVersion/contractHash 列为 RawSnapshot 新增列，但未定义其校验来源
+为什么无法唯一推出：
+  工单 4.2 明确要求"找到真实代码或模型，证明 contractId/contractVersion/contractHash 分别从哪里读取，以及如何判断 contractHash 不一致。仅仅把客户端提交的 contractHash 原样保存，不算校验。"当前没有任何来源定义：服务端期望的 contract hash 存在哪里、如何计算、contractId 和 contractVersion 如何注册。contractHash 校验是 §6 定义的 B1 rejection 门禁之一，缺失它意味着 EvidenceIngress 无法完整实现入口拒绝逻辑。
+可证伪验收条件：
+  找到代码或权威文档中定义的服务端 contract registry / hash 计算 / 期望值来源；或审核方明确给出 contract hash 校验的完整合同（服务端期望值来源、计算方法、不一致时的处置）。
+未修改文件：全部文件未修改
+固定点 SHA：8687aa6537fe4a174f862d4291a91f99a91cbaae
+最终 SHA：8687aa6537fe4a174f862d4291a91f99a91cbaae
+
+---
+DR-B1-004
+
+缺口：migration 真实入口无法定位
+证据：
+  - scripts/ 目录下的 migration 脚本全部是内部领域迁移，不是 CaptureSubmissionV2 的 migration 入口：
+    · corpus-migration-rehearsal.mjs / corpus-migration-fingerprint.mjs（语料库迁移）
+    · migrate-monitor-evaluation.ts（监控评估迁移）
+    · migrate-team-workspace-data.mjs（团队工作区数据迁移）
+    · author-archive-schema-migration（作者归档 schema 迁移）
+  - src/app/api/ 中无 migration 路由
+  - 无服务或脚本将历史采集数据构造成 CaptureSubmissionV2 提交给 EvidenceIngress
+  - 冻结规范 §6 将 migration 列为四类 ingress 之一（概念存在），但无入口定义
+为什么无法唯一推出：
+  工单 4.3 明确要求"必须特别查明 migration 的真实运行入口。不能因为存在 migration 脚本就自行认定它是 CaptureSubmissionV2 的 migration 入口。"现有脚本都已被排除属于其他领域。migration 入口的数据来源、触发方式、运行位置均无权威来源。
+可证伪验收条件：
+  找到或由审核方指定 migration 入口的真实文件路径和数据流（历史数据如何构造为 CaptureSubmissionV2、由什么触发、写入哪里）。
+未修改文件：全部文件未修改
+固定点 SHA：8687aa6537fe4a174f862d4291a91f99a91cbaae
+最终 SHA：8687aa6537fe4a174f862d4291a91f99a91cbaae
+
+---
+DR-B1-005
+
+缺口：execution 状态推进语义与并发重试参数均无来源
+证据：
+  - src/lib/services/raw-snapshot-ingest-service.ts:497-561（当前 execution 链路在同一 ReadCommitted 事务中同时创建 RawSnapshot/RawRecord + 推进 ExecutionJob/ExecutionTaskRuntime/TaskAttempt/monitor + 创建 OutboxEvent）
+  - src/lib/services/raw-snapshot-ingest-service.ts:597-607（raw_snapshot.committed OutboxEvent 在 Evidence 事务内创建）
+  - src/lib/services/raw-snapshot-ingest-service.ts:618（isolationLevel: ReadCommitted，非 SERIALIZABLE）
+  - src/ 全库 rg "SERIALIZABLE" = 0 结果（现有最高为 RepeatableRead：author-archive-audit-service.ts:784）
+  - docs/architecture/v2/01-decisions.md:37（DEC-B1-016 只确认"使用 SERIALIZABLE 事务并重试序列化/唯一冲突，重复包返回既有快照"，未给出最大重试次数、可重试错误准确范围、重试耗尽返回语义）
+  - 冻结规范 §7 B1（L562-563）只说 EvidenceIngress 事务内 INSERT 四类对象 + 幂等，未定义 EvidenceIngress 与执行控制平面的分离机制
+为什么无法唯一推出：
+  (a) execution 控制平面：当前代码在 Evidence 事务内同时推进执行状态（释放租约、ExecutionJob→raw_committed、TaskAttempt→success、Runtime→completed）。DEC-B1-004 要求"Capture、Evidence 状态职责分离"，但硬切后 EvidenceIngress 只负责 Evidence 四对象，由谁在何时以什么事务边界推进执行状态、是否仍发出 raw_snapshot.committed OutboxEvent、EvidenceIngress 成功但执行状态推进失败时如何补偿——这些在冻结规范和决策文档中均无来源。工单 4.4 明确要求"不得把现有 V1 commitRawSnapshot 的行为直接复制进 EvidenceIngress，除非冻结合同明确授权。"
+  (b) 并发重试：DEC-B1-016 确认了 SERIALIZABLE + 重试方向，但工单 4.6 明确要求找到最大重试次数、可重试错误准确范围、重试耗尽后返回语义，且"找不到时不得自行选择'重试三次'等经验值。"这些参数在任何权威资料中都没有定义。
+可证伪验收条件：
+  审核方明确给出：(1) EvidenceIngress 与执行控制平面的事务边界、状态推进责任方、OutboxEvent 处置规则的完整合同；(2) SERIALIZABLE 重试参数（最大次数、可重试错误准确范围、重试耗尽返回语义）。
+未修改文件：全部文件未修改
+固定点 SHA：8687aa6537fe4a174f862d4291a91f99a91cbaae
+最终 SHA：8687aa6537fe4a174f862d4291a91f99a91cbaae
+
+---
+环境状态确认
+
+- 工作目录：/Users/gongyong/Services/content-workbench/v2-b1-evidence-ingress
+- 分支：v2/b1-evidence-ingress
+- HEAD：8687aa6537fe4a174f862d4291a91f99a91cbaae（与固定点一致）
+- 工作树：干净（git status --short 无输出）
+- 未执行任何 reset、stash、checkout、文件修改或数据库操作
+
+结论
+
+四项缺口（DR-B1-002 至 DR-B1-005）覆盖了工单第四节 4.1–4.4 和 4.6 的核心审计项。根据第六节"仅当第四部分除'九工位实际上线水位'外全部具有唯一来源时，才能开始代码修改"，本次硬切实施无法开始。需要审核方在权威资料中补齐上述四项来源后方可重新执行本工单。

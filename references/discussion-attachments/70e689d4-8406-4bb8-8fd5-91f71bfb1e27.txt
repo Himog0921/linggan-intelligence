@@ -1,0 +1,141 @@
+交付报告
+
+1. 固定点 SHA、开始分支、开始工作区状态
+
+┌──────────────────────────┬─────────────────────────────────────────────────────┐
+│            项            │                         值                          │
+├──────────────────────────┼─────────────────────────────────────────────────────┤
+│ 固定点 SHA               │ 6e9640a85e60a45d30794e1e051dbb362426eb58            │
+├──────────────────────────┼─────────────────────────────────────────────────────┤
+│ 开始分支                 │ v2/01-implementation-baseline                       │
+├──────────────────────────┼─────────────────────────────────────────────────────┤
+│ 开始工作区状态           │ 干净（git status --short --branch 仅显示分支名）    │
+├──────────────────────────┼─────────────────────────────────────────────────────┤
+│ git merge-base           │ 6e9640a85e60a45d30794e1e051dbb362426eb58（=         │
+│ 6e9640a...HEAD           │ 固定点自身）                                        │
+└──────────────────────────┴─────────────────────────────────────────────────────┘
+
+2. 新 commit SHA（追加提交，未 amend）
+
+34e5333bc3b60f4c23618615896085aca38436f0
+
+3. 实际修改文件列表
+
+1. docs/architecture/content-workbench-v2-implementation-baseline.md
+2. docs/architecture/content-workbench-v2-architecture-design.md
+3. docs/architecture/refactor/06-raw-storage-decision.md
+4. docs/TODO.md
+
+4. R9-01 至 R9-07 逐项说明
+
+---
+R9-01：消除 ContractEvaluation 与 CanonicalObservation 的循环依赖
+
+- 修改位置：C0（:82-91 时序规则）、C1（:93-108 B1 禁止产出投影）、C2（:122-146 B2 创建四表+Adapter）、C3（:148-167 B3 只做领域投影）、E.3 表（NormalizationRun/CanonicalObservation 移到 B2）、D.5.3 测试矩阵（:349-402 分 B1/B2/B3）、主设计 §8.5/§19.1/§19.2
+- 修改前矛盾：ContractEvaluationInput（B2）外键指向 CanonicalObservation（B3），但 B3 晚于 B2；文档又要求投影以 accepted ContractEvaluation 为前置
+- 唯一裁决：B2 创建 NormalizationRun + CanonicalObservation + ContractEvaluation + ContractEvaluationInput（技术解释+合同裁决）；B3 只做领域投影
+- 代码证据：E.3 表 NormalizationRun/CanonicalObservation 批次列改为 B2；§19.2 写明「CanonicalObservation 是合同裁决所需的技术解释结果（B2），不是领域投影（B3）」
+- 验收：rg -n 'ContractEvaluation.*RawSnapshot|RawSnapshot.*ContractEvaluation' 全部命中为有效规则或历史记录（搜索 2 输出已报告）
+
+---
+R9-02：CaptureSubmissionV2、CaptureFacts、RawSnapshot 三者可无伪造对应
+
+- 修改位置：主设计 §11.5（:993-1097 完整重写）、§12.1 RawSnapshot 目标字段（加 leaseEpoch/executionPlanVersion/sourceSummary/recoveryCaptureId/recoveryAuthorizedBy）、实施基线 E.2.1 步骤 2/6
+- 修改前矛盾：CaptureFacts 要求 startedAt/completedAt/terminal/slots/records/diagnostics/artifactManifest，但 CaptureSubmissionV2 没有共同事实块
+- 唯一裁决：四类共享 CaptureReportBlock（timing/terminal/slots/recordDigests/counters/diagnostics/artifactManifest）；字段不可变来源映射表；RawSnapshot 物理列包含所有 CHECK 所需字段
+- 验收：§11.5 字段映射表每个字段追溯到唯一来源；§12.1 条件约束引用的字段全部物理存在
+
+---
+R9-03：重写 F.3 门禁无法假通过
+
+- 修改位置：F.3 整段重写（:715-994），恢复十维度含 Comment；E.3 新增 ReleaseException + PresentationReceipt 建表定义（:555-556）
+- 修改前矛盾：只有九维度（Comment 缺失）；Contract 分母先要求 ContractEvaluation；Media 分母从 CanonicalObservation 一行而非每个 slot；Presentation 不检查活跃媒体关系
+- 唯一裁决：十维度（Evidence/Canonical/Contract/Content/Author/Comment/Metric/Media/Presentation/TaskStatus）；Contract 分母=全部合格 RawSnapshot；Media 按 slotId 展开；Presentation 检查 ContentMediaUsage validTo IS NULL；Evidence receipt 用 EXISTS；ReleaseException 含 expiresAt/revokedAt（过期/撤销后自动重入分母，只允许 cutover 前历史对象）
+- 验收：rg -n 'Comment' 确认 ⑥ Comment 恢复；rg -n 'ReleaseException|PresentationReceipt' 确认 E.3 建表
+
+---
+R9-04：唯一存储决策与历史数据处置只能各有一个答案
+
+- 修改位置：06-raw-storage-decision.md（完全重写，删除可执行旧步骤）；E.4（:665 不生成 CapturePackage）；D.5.1（:323-324 全部 legacy_unverifiable）；E.2.4（:535）；E.2.2 一致性声明（:327）
+- 修改前矛盾：ADR 保留可执行的 V1.1 操作步骤（payloadClob/staging/Blob）；D.5.1 允许 import 11 行"可验证迁移"回填 checksum；E.4 写"可验证历史包生成 CapturePackage"
+- 唯一裁决：全部历史行（含 import 11 行）不生成 CapturePackage；ADR 只保留简短历史背景；E.4/D.5.1/E.2.4 一致
+- 验收：rg -n 'staging|payloadClob.*回填|生成 CapturePackage' 全部为否定句或删除线标注
+
+---
+R9-05：恢复真正的证据不可变性
+
+- 修改位置：主设计 §4.8（:223-225）、§20.4.6（:1830-1838 删除 tombstone）、ADR 保留期字段
+- 修改前矛盾：§20.4.6 写"将 packagePayload 替换为 tombstone 标记"——破坏不可变性和 checksum
+- 唯一裁决：五表（CapturePackage/RawSnapshot/RawRecord/ContractEvaluation/EvidenceAccessAudit）均不可 UPDATE/DELETE；只定义追加式访问拒绝/隔离策略；物理清除另立 ADR
+- 验收：rg -n '替换.*packagePayload' 无命中
+
+---
+R9-06：restricted 包权限改成可实施的数据库边界
+
+- 修改位置：主设计 §20.4.1-§20.4.5（:1775-1830 四类身份 + SECURITY DEFINER + EVID-R1 精确文件）；实施基线 G.1 EVID-R 行
+- 修改前矛盾：evidence_writer 行写"写入由应用层 EvidenceIngress 在写入事务中临时提权"；EVID-R1 放行整个 src/lib/evidence/**
+- 唯一裁决：四类身份（schema_owner/evidence_writer/evidence_reader/default_app）；无 SET ROLE 无临时提权；SECURITY DEFINER 审计函数（reader 无 INSERT）；EVID-R1 只放行 restricted-package-reader.ts 精确文件
+- 验收：rg -n '临时提权|SET ROLE' 全部为"禁止"否定声明
+
+---
+R9-07：重做 D.7 清单不得报错数量
+
+- 修改位置：D.7 标题/互斥分类规则（:417-421）、② 计数 23→24（:425）、③ 5→4 文件不含 Prisma where（:429）、EVID-7 扫描基线（:1060-1061）
+- 修改前矛盾：② 标题"23 处"但实际 24 个唯一位置；③ "5 处文件"含一个"无独立条目"的矛盾标注
+- 唯一裁决：② 24 处（逐条验证均为 Prisma findMany/findFirst/select）；③ 4 文件（实际 $queryRaw/$queryRawUnsafe，Prisma where 不计入）；EVID-7 基线每类唯一文件/位置数
+- 复核命令：sed -n '/②/,/⑤/p' | grep -oP '#L[0-9]+' | sort -u | wc -l = 24
+
+5. 未解决问题
+
+无。
+
+R9-01 至 R9-07 全部完成，无未确认事实。
+
+6. 全部验证命令与真实结果
+
+命令: git rev-parse HEAD（开始）
+结果: 6e9640a85e60a45d30794e1e051dbb362426eb58
+────────────────────────────────────────
+命令: git status --short --branch（开始）
+结果: ## v2/01-implementation-baseline（干净）
+────────────────────────────────────────
+命令: git merge-base 6e9640a...HEAD
+结果: 6e9640a85e60a45d30794e1e051dbb362426eb58
+────────────────────────────────────────
+命令: git diff --check 6e9640a...HEAD
+结果: 无输出（clean）
+────────────────────────────────────────
+命令: git diff --name-only 6e9640a...HEAD
+结果: 4 个文件（见上方列表）
+────────────────────────────────────────
+命令: node scripts/check-project-governance.mjs --json
+结果: ok: false，唯一失败 execution-sync-service.ts (2022 lines)（既有技术债，src/ 下
+0 文件变更）；modelCount: 149 不变
+────────────────────────────────────────
+命令: git status --short --branch（结束）
+结果: ## v2/01-implementation-baseline（干净）
+────────────────────────────────────────
+命令: rg 'staging|payloadClob.*回填|生成
+CapturePackage|替换.*packagePayload|临时提权|SET ROLE'
+结果: 全部命中为有效 V2 否定规则或删除线标注（逐条解释见上）
+────────────────────────────────────────
+命令: rg 'ContractEvaluation.*RawSnapshot|RawSnapshot.*ContractEvaluation'
+结果: 全部命中为有效 V2 规则或历史记录
+────────────────────────────────────────
+命令: rg 'Comment'（门禁维度）
+结果: ⑥ Comment 维度已恢复
+────────────────────────────────────────
+命令: rg 'ReleaseException|PresentationReceipt'
+结果: E.3 建表定义 + F.3 各维度 SQL 同构引用
+────────────────────────────────────────
+命令: Markdown 围栏配对
+结果: 全部偶数
+────────────────────────────────────────
+命令: 相对链接
+结果: 无 BROKEN
+
+7. 明确声明
+
+- 是否修改 src/schema/migration/数据库：否。git diff --name-only 输出的 4 个文件全部在 docs/ 下；modelCount: 149 不变；未执行任何 INSERT/UPDATE/DELETE/DDL。
+- 是否存在双写、双读、fallback、兼容层：否。
+- 是否推送、合并、部署：否。git status 显示分支 v2/01-implementation-baseline，无 push/merge/deploy 操作。

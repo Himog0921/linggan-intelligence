@@ -1,0 +1,276 @@
+V2-D3 交付报告
+
+1. 固定点、提交 SHA、实际 diff
+
+┌───────────────┬────────────────────────────────────────────────────────────────┐
+│      项       │                               值                               │
+├───────────────┼────────────────────────────────────────────────────────────────┤
+│ 固定点 SHA    │ 03a00c3a88628485c29708e81e73a264fd0ab5b0                       │
+├───────────────┼────────────────────────────────────────────────────────────────┤
+│ 新 commit SHA │ 2d1192489fe5b47e2f975dd88585327f5b5f061d（追加提交，未 amend） │
+├───────────────┼────────────────────────────────────────────────────────────────┤
+│ 分支          │ v2/01-implementation-baseline                                  │
+├───────────────┼────────────────────────────────────────────────────────────────┤
+│ 工作区        │ 干净                                                           │
+└───────────────┴────────────────────────────────────────────────────────────────┘
+
+git diff --name-only：docs/architecture/content-workbench-v2-design-freeze.md、docs/TODO.md、docs/progress/2026-08.md（全部在 docs/ 下）。
+
+2. D3-1 至 D3-8 精确章节和行号
+
+┌────────────────────────────┬────────────────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│             项             │              章节              │                                                关键行号                                                 │
+├────────────────────────────┼────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ D3-1                       │ §5.1 模型 + §10① 门禁          │ 模型定义 + Evidence 分母/分子改用 EvidenceIngressReceipt                                                │
+│ EvidenceIngressReceipt     │                                │                                                                                                         │
+├────────────────────────────┼────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ D3-2 最小权限矩阵          │ §8.1 按表矩阵 + §8.2 函数 SQL  │ 无 REVOKE ALL ON ALL TABLES；函数改名 read_capture_package_and_audit                                    │
+├────────────────────────────┼────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ D3-3 四类约束              │ §5.4 RawSnapshot + §6 协议     │ 完整 ALTER TABLE CHECK（枚举 + 四类条件 + 复合 FK）                                                     │
+├────────────────────────────┼────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ D3-4 跨记录 FK             │ §5.6-§5.11 模型 + §10③         │ Contract SQL 显式 cec."contractId"=rs."contractId" AND cec."contractVersion"=rs."contractVersion"       │
+│                            │ Contract SQL                   │                                                                                                         │
+├────────────────────────────┼────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ D3-5 展示撤销              │ §7 D3-5 段 + §5.13 模型        │ visibilityState=quarantined 唯一机制；canonical_writer 同事务推进                                       │
+├────────────────────────────┼────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ D3-6 领域模型+四类 SQL     │ §5.13 + §10⑨                   │ content/author/topic/task 各有完整 SQL（无占位符）                                                      │
+├────────────────────────────┼────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ D3-7 删除 ReleaseException │ §5（无模型）+ §10（无排除）    │ ReleaseException 从模型和门禁 SQL 全部删除                                                              │
+├────────────────────────────┼────────────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ D3-8 全域退役              │ §9.1-§9.7                      │ RawSnapshot/RawRecord、RawEvidence、ContentAsset、AuthorSnapshot、Comment、latestSnapshotId、旧页面/API │
+└────────────────────────────┴────────────────────────────────┴─────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+3. 权限角色/表/操作/业务理由
+
+见 §8.1 完整矩阵。每张表列出 owner + 每个角色的 SELECT/INSERT/UPDATE/DELETE 及业务理由。关键决策：
+- EvidenceIngressReceipt：仅 evidence_writer INSERT（D3-1 门禁可信凭据）
+- RawRecord.payload：canonical_writer 不可读（D3-2 解释输入经 read_capture_package_and_audit 函数）
+- ContentCurrentProjection/AuthorCurrentProjection.visibilityState：canonical_writer 可 UPDATE（D3-5 裁决切换撤销）+ default_app 可 UPDATE（投影推进）
+- 全部不可变表：全角色 REVOKE UPDATE/DELETE
+
+4. 四类完整 Presentation SQL
+
+§10⑨ 分别展开：
+- content：ContentCurrentProjection × (content-list-v1, content-detail-v1) — 完整 denom/numer/missing_req/missing_rcpt
+- author：AuthorCurrentProjection × (author-profile-v1) — 完整同上
+- topic：Topic × (topic-list-v1, topic-detail-v1) — 完整同上
+- task：ExecutionJob × (task-detail-v1) — 完整同上
+- stale_requirement：UNION ALL 四类检查
+
+无"同理""替换""Topic*"等占位表达。
+
+5. 所有仍未决事项
+
+1. F-O1（插件 V2 协议与九工位升级排期）：仍需产品/插件侧决定，阻塞 Release-B。
+2. F-O3（Douyin fixture 与首期范围）：仍需产品确认，阻塞 Douyin 硬切。
+3. PresentationPolicy 代码注册：选择方案 B（代码注册不建表），实施时需在代码中定义 policyVersion + routeId + subjectType + lifecycleStates 快照。
+
+6. 验证结果
+
+┌──────────────────────────────────────────────────────────────────────┬────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 命令                                 │                                              结果                                              │
+├──────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ git diff --check 03a00c3a...HEAD                                     │ 无输出（clean）                                                                                │
+├──────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ git diff --name-only 03a00c3a...HEAD                                 │ 3 个文件（全部在 docs/ 下）                                                                    │
+├──────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ rg 'Topic\*|同理|替换 Projection|或另一张表|替换表名'                │ 零命中                                                                                         │
+│ design-freeze.md                                                     │                                                                                                │
+├──────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ rg 'ReleaseException' design-freeze.md                               │ 3 处否定声明（"不存在"/"已删除"/"无"）— 有效                                                   │
+├──────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ rg 'REVOKE ALL ON ALL TABLES' design-freeze.md                       │ 零命中                                                                                         │
+├──────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ rg 'ExecutionLogEvent.*门禁|evidence_ingress.committed'              │ 零命中（已改用 EvidenceIngressReceipt）                                                        │
+│ design-freeze.md                                                     │                                                                                                │
+├──────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 围栏配对                                                             │ 60（偶数）✓                                                                                    │
+├──────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ node scripts/check-project-governance.mjs --json                     │ ok: false，唯一失败 execution-sync-service.ts (2022 lines)（既有技术债，src/ 0                 │
+│                                                                      │ 变更）；modelCount: 149 不变                                                                   │
+├──────────────────────────────────────────────────────────────────────┼────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ git status --short --branch                                          │ ## v2/01-implementation-baseline（干净）                                                       │
+└──────────────────────────────────────────────────────────────────────┴────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+全部目标 SQL 标注「目标 schema，未执行」。
+
+7. 明确声明
+
+- 未修改 src/schema/migration/数据库/环境：是。modelCount: 149 不变。
+- 未 push/merge/deploy：是。
+- 当前状态：D3 冻结前系统完整性收口完成，等待架构审核。不得宣称"V2 已实施"。
+
+✻ Baked for 6m 9s
+
+❯ 再 review 一遍 V2-D3 有没有引入新问题
+
+  Thought for 42s, read 1 file
+
+完整重读完毕。发现 4 个 D3 引入的新问题：
+
+---
+新问题 1（严重）：RawRecord 缺少 @@unique([workspaceId, rawSnapshotId, id])
+
+多个模型的复合 FK 引用 RawRecord(workspaceId, rawSnapshotId, id)：
+- CanonicalObservation FK（§5.7 :289）
+- NormalizationRunCurrent FK（§5.6 :262）
+
+但 §5.5 RawRecord 没有定义 @@unique([workspaceId, rawSnapshotId, id])。RawRecord 当前只有 @@unique([workspaceId, idempotencyKey])。这些复合 FK 无法创建。
+
+新问题 2（中等）：ContentObservation 权限矩阵矛盾
+
+§8.1 :617 写 default_app 对 ContentObservation 有 UPDATE(CurrentProjection only)——但 §5.13 和 §625 都说 ContentObservation 是不可变表。default_app 不应对不可变表有 UPDATE。这是从 ContentCurrentProjection 行复制时的错误。
+
+新问题 3（中等）：Topic/Task Presentation 缺 projectionRevision 来源
+
+§10⑨ topic SQL (:959) 和 task SQL (:976) 中 PresentationReceipt 匹配 pr."projectionRevision"——但 Topic（现有模型）和 ExecutionJob（现有模型）都没有 projectionVersion 字段。Content/Author 有 CurrentProjection.projectionVersion，但 Topic/Task 没有。receipt 的 projectionRevision 无从匹配。
+
+新问题 4（低）：Topic/Task 缺少真正的 missing_requirement 检查
+
+§10⑨ topic :961 标记为 missing_req_topic 但实际逻辑是检查"requirement 存在但无 receipt"（即 missing_receipt）。content/author 有 missing_req + missing_rcpt 两个检查，topic/task 只有 receipt 检查，缺 requirement 存在性检查。
+
+---
+现在修复这 4 个问题：
+
+⏺ Update(docs/architecture/content-workbench-v2-design-freeze.md)
+Added 3 lines
+
+`recordType` → `recordKind`（只在 RawRecord）。`payloadHash` 目标 NOT NULL。删 `collectedAt`/`dedupeKey`/`jobId`。
+
+新增唯一约束（Release-A expand，支撑复合 FK）：`@@unique([workspaceId, rawSnapshotId, id])`——当前 RawRecord 只有 `@@unique([workspaceId, idempotencyKey])`，
+没有此约束。CanonicalObservation FK `(workspaceId, rawSnapshotId, rawRecordId)` 和 NormalizationRunCurrent FK `(workspaceId, rawSnapshotId, rawRecordId)` 都
+需要它。
+
+```sql
+-- 目标 schema，未执行
+ALTER TABLE "RawRecord" ALTER COLUMN "recordKind" SET NOT NULL;
+ALTER TABLE "RawRecord" ALTER COLUMN "payloadHash" SET NOT NULL;
+ALTER TABLE "RawRecord" ADD CONSTRAINT chk_record_kind
+  CHECK ("recordKind" IN ('note','comment','author','metric'));
+ALTER TABLE "RawRecord" ADD CONSTRAINT uq_rawrecord_ws_snapshot_id UNIQUE ("workspaceId", "rawSnapshotId", "id");
+```
+
+### 5.6 NormalizationRun + NormalizationRunCurrent
+
+  Thought for 6s
+
+修复新问题 2——ContentObservation 权限矩阵移除 UPDATE：
+
+⏺ Update(docs/architecture/content-workbench-v2-design-freeze.md)
+Added 1 line, removed 1 line
+| EvidenceAccessAudit | schema_owner | — | SELECT(审计核验) | — | 无（函数写入） |
+| EvidenceReaderWorkspaceGrant | schema_owner | — | — | — | SELECT(检查自己授权) |
+| ExecutionLogEvent | schema_owner | INSERT(业务日志) | — | SELECT, INSERT, UPDATE(业务日志) | 无 |
+| ContentObservation | schema_owner | — | — | INSERT + SELECT + UPDATE(CurrentProjection only) | 无 |
+| ContentObservation | schema_owner | — | — | INSERT + SELECT（不可变，无 UPDATE） | 无 |
+| ContentCurrentProjection | schema_owner | — | UPDATE(visibilityState only — D3-5) | INSERT + SELECT + UPDATE(投影推进) | 无 |
+| AuthorObservation | schema_owner | — | — | INSERT + SELECT | 无 |
+| AuthorCurrentProjection | schema_owner | — | UPDATE(visibilityState only — D3-5) | INSERT + SELECT + UPDATE(投影推进) | 无 |
+
+修复新问题 3——Topic/Task Presentation 缺 projectionRevision 来源。Topic 和 ExecutionJob 没有 projectionVersion 字标，需要在 Presentation SQL 中明确它们用固定值（因为 Topic/Task 不像 Content/Author 有时序投影推进，它们的 presentation revision 由内容更新时间或固定版本确定）：
+
+⏺ Update(docs/architecture/content-workbench-v2-design-freeze.md)
+Added 21 lines, removed 3 lines
+    AND pr."subjectType"=prq."subjectType" AND pr."subjectId"=prq."subjectId" AND pr."routeId"=prq."routeId"
+    AND pr."policyVersion"=prq."policyVersion" AND pr."projectionRevision"=prq."projectionRevision" AND pr."createdAt">=${cutoverAt});
+
+-- ===== topic =====
+-- ===== topic（projectionRevision = Topic.updatedAt epoch; Topic 无 projectionVersion，用 updatedAt 作为 revision 标识） =====
+SELECT count(*) AS denom_topic FROM "Topic" t
+  CROSS JOIN (VALUES ('topic-list-v1'),('topic-detail-v1')) AS routes(route_id)
+  WHERE t."workspaceId"=${ws} AND t."createdAt">=${cutoverAt} AND t."status" NOT IN ('archived','deleted');
+
+  AND EXISTS(SELECT 1 FROM "PresentationReceipt" pr WHERE pr."workspaceId"=t."workspaceId"
+    AND pr."subjectType"='topic' AND pr."subjectId"=t."id"
+    AND pr."routeId"=routes.route_id AND pr."policyVersion"=${policyVersion}
+    AND pr."projectionRevision"='static'  -- Topic 无投影版本推进，revision 固定
+    AND pr."resolverVersion" IS NOT NULL AND pr."createdAt">=${cutoverAt});
+SELECT count(*) AS missing_req_topic FROM "PresentationRequirement" prq
+-- missing_requirement（应有 requirement 但不存在）
+SELECT count(*) AS missing_req_topic FROM "Topic" t
+  CROSS JOIN (VALUES ('topic-list-v1'),('topic-detail-v1')) AS routes(route_id)
+  WHERE t."workspaceId"=${ws} AND t."createdAt">=${cutoverAt} AND t."status" NOT IN ('archived','deleted')
+  AND NOT EXISTS(SELECT 1 FROM "PresentationRequirement" prq WHERE prq."workspaceId"=t."workspaceId"
+    AND prq."subjectType"='topic' AND prq."subjectId"=t."id" AND prq."routeId"=routes.route_id
+    AND prq."policyVersion"=${policyVersion} AND prq."projectionRevision"='static');
+-- missing_receipt
+SELECT count(*) AS missing_rcpt_topic FROM "PresentationRequirement" prq
+  WHERE prq."workspaceId"=${ws} AND prq."requiredAt">=${cutoverAt} AND prq."subjectType"='topic'
+  AND NOT EXISTS(SELECT 1 FROM "PresentationReceipt" pr WHERE pr."workspaceId"=prq."workspaceId"
+    AND pr."subjectType"=prq."subjectType" AND pr."subjectId"=prq."subjectId" AND pr."routeId"=prq."routeId"
+    AND pr."policyVersion"=prq."policyVersion" AND pr."projectionRevision"=prq."projectionRevision" AND pr."createdAt">=${cutoverAt});
+
+-- ===== task =====
+-- ===== task（projectionRevision = 'static'; ExecutionJob 无投影版本推进） =====
+SELECT count(*) AS denom_task FROM "ExecutionJob" j
+  CROSS JOIN (VALUES ('task-detail-v1')) AS routes(route_id)
+  WHERE j."workspaceId"=${ws} AND j."createdAt">=${cutoverAt};
+
+  AND EXISTS(SELECT 1 FROM "PresentationReceipt" pr WHERE pr."workspaceId"=j."workspaceId"
+    AND pr."subjectType"='task' AND pr."subjectId"=j."id"
+    AND pr."routeId"=routes.route_id AND pr."policyVersion"=${policyVersion}
+    AND pr."projectionRevision"='static'  -- ExecutionJob 无投影版本推进，revision 固定
+    AND pr."resolverVersion" IS NOT NULL AND pr."createdAt">=${cutoverAt});
+-- missing_requirement
+SELECT count(*) AS missing_req_task FROM "ExecutionJob" j
+  CROSS JOIN (VALUES ('task-detail-v1')) AS routes(route_id)
+  WHERE j."workspaceId"=${ws} AND j."createdAt">=${cutoverAt}
+  AND NOT EXISTS(SELECT 1 FROM "PresentationRequirement" prq WHERE prq."workspaceId"=j."workspaceId"
+    AND prq."subjectType"='task' AND prq."subjectId"=j."id" AND prq."routeId"=routes.route_id
+    AND prq."policyVersion"=${policyVersion} AND prq."projectionRevision"='static');
+-- missing_receipt
+SELECT count(*) AS missing_rcpt_task FROM "PresentationRequirement" prq
+  WHERE prq."workspaceId"=${ws} AND prq."requiredAt">=${cutoverAt} AND prq."subjectType"='task'
+  AND NOT EXISTS(SELECT 1 FROM "PresentationReceipt" pr WHERE pr."workspaceId"=prq."workspaceId"
+
+更新 stale_requirement 检查中的 topic/task 匹配条件（也需要 projectionRevision='static'）：
+
+⏺ Update(docs/architecture/content-workbench-v2-design-freeze.md)
+Added 2 lines, removed 2 lines
+      AND ap."visibilityState"='visible' AND prq."subjectType"='author'
+    UNION ALL
+    SELECT 1 FROM "Topic" t WHERE t."workspaceId"=prq."workspaceId" AND t."id"=prq."subjectId"
+      AND prq."subjectType"='topic' AND t."status" NOT IN ('archived','deleted')
+      AND prq."subjectType"='topic' AND prq."projectionRevision"='static' AND t."status" NOT IN ('archived','deleted')
+    UNION ALL
+    SELECT 1 FROM "ExecutionJob" j WHERE j."workspaceId"=prq."workspaceId" AND j."id"=prq."subjectId"
+      AND prq."subjectType"='task');
+      AND prq."subjectType"='task' AND prq."projectionRevision"='static');
+
+-- 总阈值：denom=分子 对全部四类；全部 missing/stale = 0
+```
+
+验证修复没有引入新问题：
+
+  Ran 1 shell command
+
+全部验证通过：
+- RawRecord @@unique([workspaceId, rawSnapshotId, id]) 已定义 ✓
+- ContentObservation 权限 = INSERT + SELECT（不可变，无 UPDATE）✓
+- Topic/Task projectionRevision = 'static'（7 处引用）✓
+- missing_req_topic 和 missing_req_task 都有真正的 requirement 存在性检查 ✓
+- 围栏 60（偶数）✓
+- diff --check clean ✓
+
+提交：
+
+  Committed c3553c17
+
+已提交 c3553c17。复查发现并修复了 D3 重写引入的 4 个新问题：
+
+┌───────────────────────────────────────────────────────────────────┬──────────────────────────────────────────┬────────────────────────────────────────────────────────┐
+│                               回归                                │                   原因                   │                          修复                          │
+├───────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼────────────────────────────────────────────────────────┤
+│ RawRecord 缺 @@unique([workspaceId, rawSnapshotId, id])           │ 多个模型复合 FK 引用此约束但 §5.5 未定义 │ §5.5 新增 UNIQUE 约束 SQL                              │
+├───────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼────────────────────────────────────────────────────────┤
+│ ContentObservation 权限矩阵赋予 UPDATE                            │ 从 ContentCurrentProjection              │ 改为 INSERT + SELECT（不可变，无 UPDATE）              │
+│                                                                   │ 行复制粘贴错误                           │                                                        │
+├───────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼────────────────────────────────────────────────────────┤
+│ Topic/Task Presentation 使用 projectionRevision 但无              │ Topic 和 ExecutionJob 没有投影版本字段   │ 定义 projectionRevision='static'（无投影版本推进）     │
+│ projectionVersion                                                 │                                          │                                                        │
+├───────────────────────────────────────────────────────────────────┼──────────────────────────────────────────┼────────────────────────────────────────────────────────┤
+│ Topic/Task 缺真正的 missing_requirement 检查                      │ 只有 missing_receipt（误标为             │ 分别补全 missing_requirement + missing_receipt         │
+│                                                                   │ missing_req）                            │ 两个检查                                               │
+└───────────────────────────────────────────────────────────────────┴──────────────────────────────────────────┴────────────────────────────────────────────────────────┘
+
+文档当前状态干净，无已知矛盾。等待架构审核。

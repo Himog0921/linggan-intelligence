@@ -1,0 +1,27 @@
+{
+  "format": "linggan-intelligence/bootstrap-v1",
+  "createdAt": "2026-08-14T19:11:20+08:00",
+  "project": {
+    "name": "Linggan Intelligence",
+    "backend": "Rust",
+    "database": "new PostgreSQL database",
+    "legacyTablesAllowed": false
+  },
+  "sourceFixedPoints": {
+    "contentWorkbench": "2dca6cb9b08cd217d851aef845ea462c19289ef7",
+    "plugin": "60a896c1def5062dbb8098e05b030c5a0871203b",
+    "pluginVersion": "2.0.95"
+  },
+  "archiveCounts": {
+    "strategyFiles": 6,
+    "pluginSourceFiles": 468,
+    "workbenchReferenceFiles": 113,
+    "handoffFiles": 12,
+    "discussionAttachments": 38
+  },
+  "verification": {
+    "sourceChecksums": "references/SOURCE-MANIFEST.sha256",
+    "rustToolchainAvailableAtCreation": false,
+    "cargoWorkspaceCompiledAtCreation": false
+  }
+}

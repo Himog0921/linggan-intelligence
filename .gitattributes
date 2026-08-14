@@ -1,0 +1,2 @@
+# Reference snapshots are preserved byte-for-byte, including historical whitespace.
+references/** -whitespace

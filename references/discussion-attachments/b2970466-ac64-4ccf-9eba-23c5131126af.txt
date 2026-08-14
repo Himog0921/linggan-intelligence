@@ -1,0 +1,111 @@
+B2-A-02 交付报告
+
+XHS Normalization / ContractEvaluation 来源审计与决策包
+
+1. 固定点
+
+┌────────────┬────────────────────────────────────────────────────┐
+│    项目    │                         值                         │
+├────────────┼────────────────────────────────────────────────────┤
+│ 工作台 SHA │ 07364d65f970aa819205506482a332bd0c95842b（未变更） │
+├────────────┼────────────────────────────────────────────────────┤
+│ 插件 SHA   │ 227e365192d2141407599fefbf066aa66bfa0b26           │
+├────────────┼────────────────────────────────────────────────────┤
+│ 工作台分支 │ v2/b2-derived-readiness（clean + 1 new file）      │
+├────────────┼────────────────────────────────────────────────────┤
+│ 插件分支   │ main（ahead 5，clean）                             │
+└────────────┴────────────────────────────────────────────────────┘
+
+2. 实际读取的文件与命令
+
+工作台：
+- prisma/schema.prisma — 159 models，7 B2 models 已存在
+- docs/architecture/v2/02-model-contract.md — 25 模型合同（已转录）
+- docs/architecture/v2/04-blocker-ledger.md — BLK-001～016 + DR-B2-002
+- docs/architecture/content-workbench-v2-design-freeze.md §5.6～§5.11
+- src/lib/evidence/contracts/ — 六合同 registry + cross-repo verifier
+
+插件：
+- src/platforms/xhs/noteCollector.js — 生产 note payload 结构
+- src/platforms/xhs/commentCollector.js — 生产 comment payload 结构
+- src/platforms/xhs/authorCollector.js — 生产 author payload 结构
+- src/workbench/runtime/taskPoller.js:799-841 — V1 record 构造
+- src/workbench/protocol/v2/xhs-contracts.cjs:fixtureRecordPayload — V2 fixture payload
+- src/workbench/protocol/v2/xhs-terminal-mapper.cjs — 暗态 mapper
+
+3. 六合同 × 七模型逐字段覆盖统计
+
+┌────────────────────────┬──────┬─────────────────────────────────────────────────────────────────────┐
+│          状态          │ 数量 │                                说明                                 │
+├────────────────────────┼──────┼─────────────────────────────────────────────────────────────────────┤
+│ VERIFIED_DIRECT        │ 54   │ 从已确认来源直接映射（Evidence FK、合同固定值、类型约束）           │
+├────────────────────────┼──────┼─────────────────────────────────────────────────────────────────────┤
+│ VERIFIED_DERIVED       │ 8    │ 唯一公式可复算（sha256(canonicalJson(payload)) 等）                 │
+├────────────────────────┼──────┼─────────────────────────────────────────────────────────────────────┤
+│ DATABASE_GENERATED     │ 14   │ @default(cuid())、@default(now())、@updatedAt                       │
+├────────────────────────┼──────┼─────────────────────────────────────────────────────────────────────┤
+│ DECISION_REQUIRED (B2) │ 4    │ adapterId、adapterVersion、canonicalSchemaVersion、evaluatorVersion │
+├────────────────────────┼──────┼─────────────────────────────────────────────────────────────────────┤
+│ DECISION_REQUIRED (B3) │ 2    │ observationKind、subjectKey 值域                                    │
+└────────────────────────┴──────┴─────────────────────────────────────────────────────────────────────┘
+
+完整逐字段矩阵见 docs/progress/v2-b2-xhs-normalization-source-audit-2026-08-11.md。
+
+4. DECISION_REQUIRED
+
+┌───────────────┬─────────────────────────────────────┬──────────────────────────────┬───────────────────────────────────────────┬─────────────────────────────────────┐
+│      ID       │                字段                 │             问题             │                   推荐                    │                影响                 │
+├───────────────┼─────────────────────────────────────┼──────────────────────────────┼───────────────────────────────────────────┼─────────────────────────────────────┤
+│ DR-B2-002-001 │ NormalizationRun.adapterId          │ XHS normalization adapter    │ "xhs-note-v1" / "xhs-comment-v1" /        │ 无此值无法区分不同 recordKind       │
+│               │                                     │ 标识符                       │ "xhs-author-v1"                           │ 的标准化器                          │
+├───────────────┼─────────────────────────────────────┼──────────────────────────────┼───────────────────────────────────────────┼─────────────────────────────────────┤
+│ DR-B2-002-002 │ NormalizationRun.adapterVersion     │ adapter 版本号来源与递增规则 │ 跟随代码版本或独立 semver                 │ 错误版本号会导致旧 run 被误认为最新 │
+├───────────────┼─────────────────────────────────────┼──────────────────────────────┼───────────────────────────────────────────┼─────────────────────────────────────┤
+│ DR-B2-002-003 │ canonicalSchemaVersion              │ Canonical schema 版本标识    │ "v1" 或 "2026-08"                         │ NormalizationRun +                  │
+│               │                                     │                              │                                           │ ContractEvaluation 共用             │
+├───────────────┼─────────────────────────────────────┼──────────────────────────────┼───────────────────────────────────────────┼─────────────────────────────────────┤
+│ DR-B2-002-004 │ ContractEvaluation.evaluatorVersion │ XHS contract evaluator 版本  │ 独立 semver 或与合同版本关联              │ 不同 evaluator 版本可能产生不同     │
+│               │                                     │                              │                                           │ decision                            │
+└───────────────┴─────────────────────────────────────┴──────────────────────────────┴───────────────────────────────────────────┴─────────────────────────────────────┘
+
+DR-B2-002 仍需用户选择。四个标识符/版本号格式未确认。其余所有物理字段、关系、约束、hash 算法均可从已确认来源唯一推出。
+
+5. 实际 diff
+
+git status：仅 1 个新增文件
+docs/progress/v2-b2-xhs-normalization-source-audit-2026-08-11.md (新增)
+
+6. 测试结果
+
+┌──────────────────────────────────────────────────┬────────┬────────────┐
+│                       命令                       │ 退出码 │    通过    │
+├──────────────────────────────────────────────────┼────────┼────────────┤
+│ npx tsx cross-repo-verify.ts                     │ 0      │ 6/6 OK     │
+├──────────────────────────────────────────────────┼────────┼────────────┤
+│ vitest run contracts/                            │ 0      │ 63 passed  │
+├──────────────────────────────────────────────────┼────────┼────────────┤
+│ npm --prefix ... run check:contracts             │ 0      │ 161 passed │
+├──────────────────────────────────────────────────┼────────┼────────────┤
+│ git diff --check                                 │ 0      │ clean      │
+├──────────────────────────────────────────────────┼────────┼────────────┤
+│ node scripts/check-project-governance.mjs --json │ 0      │ 0 issues   │
+└──────────────────────────────────────────────────┴────────┴────────────┘
+
+7. 静态越界证明
+
+- prisma/schema.prisma：零修改
+- prisma/migrations/：零修改
+- src/**：零修改
+- tests/**：零修改
+- 插件仓：零修改
+- docs/architecture/v2/02-model-contract.md：零修改（linter 预改）
+- docs/architecture/v2/04-blocker-ledger.md：零修改
+
+8. 未做事项
+
+- 未提交、未 push、未部署
+- 未修改 schema、migration、src、tests、package
+- 未实现 NormalizationService、ContractEvaluationService
+- 未接 API、route、scheduler、outbox、V1 流量
+- 未创建 fallback、双读、双写、兼容路径
+- HEAD 保持 07364d65

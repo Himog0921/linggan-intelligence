@@ -1,0 +1,272 @@
+B1-B-02 交付报告
+
+1. 固定点 SHA
+
+a274907ef1016a3af27ec0b7f3badaaa37cec554
+
+2. 最终 SHA
+
+a274907ef1016a3af27ec0b7f3badaaa37cec554
+（未提交，HEAD 未变）
+
+3. 最终 git status --short --branch
+
+## v2/b1-evidence-ingress
+ M prisma/schema.prisma
+ M src/lib/services/author-archive-monitor-increment-service.ts
+ M src/lib/services/author-deep-archive/snapshot-processor.ts
+ M src/lib/services/execution-log-service.ts
+ M src/lib/services/execution-task-import-service.ts
+ M src/lib/services/execution-task-observation-service.ts
+ M src/lib/services/manual-collection-writeback-service.ts
+ M src/lib/services/monitor-raw-snapshot-writeback-service.ts
+ M src/lib/services/outbox-worker/content-metrics.ts
+ M src/lib/services/outbox-worker/raw-snapshot-handler.ts
+ M src/lib/services/topic-material-action-service.ts
+?? prisma/migrations/20260805180000_add_v2_evidence_release_b_prepare/
+?? src/lib/evidence/
+
+4. git diff --stat
+
+11 files changed, 79 insertions(+), 65 deletions(-)
++ prisma/migrations/20260805180000_add_v2_evidence_release_b_prepare/migration.sql (new)
++ src/lib/evidence/contracts/collection-contract-registry.ts (new)
++ src/lib/evidence/ingress/authority-validator.ts (new)
++ src/lib/evidence/ingress/base64.ts (new)
++ src/lib/evidence/ingress/canonical-json.ts (new)
++ src/lib/evidence/ingress/evidence-ingress.integration.test.ts (new)
++ src/lib/evidence/ingress/evidence-ingress.test.ts (new)
++ src/lib/evidence/ingress/evidence-ingress.ts (new)
++ src/lib/evidence/ingress/test-fixtures.ts (new)
++ src/lib/evidence/ingress/types.ts (new)
++ src/lib/evidence/ingress/validator.ts (new)
+
+5. 全部修改文件 → 权威合同章节
+
+文件: prisma/schema.prisma
+对应 07 合同章节: §5.2 — RawSnapshot/RawRecord legacy 字段放宽为可空；RawRecord
+FK 改为 (workspaceId, rawSnapshotId) → RawSnapshot(workspaceId,
+id)；idempotency 唯一键改为 (workspaceId, rawSnapshotId,  idempotencyKey)
+────────────────────────────────────────
+文件: prisma/migrations/20260805180000_.../migration.sql
+对应 07 合同章节: §5.2 — Release-B prepare migration SQL
+────────────────────────────────────────
+文件: src/lib/services/author-archive-monitor-increment-service.ts
+对应 07 合同章节: §5.2 — recordType nullable guard
+────────────────────────────────────────
+文件: src/lib/services/author-deep-archive/snapshot-processor.ts
+对应 07 合同章节: §5.2 — recordType nullable filter
+────────────────────────────────────────
+文件: src/lib/services/execution-log-service.ts
+对应 07 合同章节: §5.2 — qualityStatus nullable display fallback
+────────────────────────────────────────
+文件: src/lib/services/execution-task-import-service.ts
+对应 07 合同章节: §5.2 — recordType nullable filter
+────────────────────────────────────────
+文件: src/lib/services/execution-task-observation-service.ts
+对应 07 合同章节: §5.2 — 三处旧 workspaceId_idempotencyKey selector 改为
+workspaceId_rawSnapshotId_idempotencyKey（snapshot-scoped）或单 selector
+findFirst
+────────────────────────────────────────
+文件: src/lib/services/manual-collection-writeback-service.ts
+对应 07 合同章节: §5.2 — recordType nullable filter
+────────────────────────────────────────
+文件: src/lib/services/monitor-raw-snapshot-writeback-service.ts
+对应 07 合同章节: §5.2 — recordType nullable filter (两处)
+────────────────────────────────────────
+文件: src/lib/services/outbox-worker/content-metrics.ts
+对应 07 合同章节: §5.2 — qualityStatus nullable type
+────────────────────────────────────────
+文件: src/lib/services/outbox-worker/raw-snapshot-handler.ts
+对应 07 合同章节: §5.2 — recordType null guard in groupBy
+────────────────────────────────────────
+文件: src/lib/services/topic-material-action-service.ts
+对应 07 合同章节: §5.2 — recordType nullable filter
+────────────────────────────────────────
+文件: src/lib/evidence/ingress/types.ts
+对应 07 合同章节: §3.1–3.4, §4, §5.3 — 全部 TypeScript 类型定义
+────────────────────────────────────────
+文件: src/lib/evidence/ingress/canonical-json.ts
+对应 07 合同章节: §2.1–2.2 — JSON 值校验 + canonicalJson
+────────────────────────────────────────
+文件: src/lib/evidence/ingress/base64.ts
+对应 07 合同章节: §3.3 — 严格 padded base64 + sha256 + hex 校验 + ISO 时间戳
+────────────────────────────────────────
+文件: src/lib/evidence/ingress/validator.ts
+对应 07 合同章节: §5.3 — 固定校验顺序的 strict validator
+────────────────────────────────────────
+文件: src/lib/evidence/ingress/authority-validator.ts
+对应 07 合同章节: §3.4 — 可注入 authority validator 接口 + 测试实现
+────────────────────────────────────────
+文件: src/lib/evidence/contracts/collection-contract-registry.ts
+对应 07 合同章节: §4 — 只追加代码注册表 + contract hash + shape 校验 +
+空生产注册表
+────────────────────────────────────────
+文件: src/lib/evidence/ingress/evidence-ingress.ts
+对应 07 合同章节: §5.1–5.4, §6 — SERIALIZABLE 事务 + 3 次重试 (10ms/50ms) +
+replay/conflict
+────────────────────────────────────────
+文件: src/lib/evidence/ingress/test-fixtures.ts
+对应 07 合同章节: 测试基础设施
+────────────────────────────────────────
+文件: src/lib/evidence/ingress/evidence-ingress.test.ts
+对应 07 合同章节: §6.1 — 61 项单元测试
+────────────────────────────────────────
+文件: src/lib/evidence/ingress/evidence-ingress.integration.test.ts
+对应 07 合同章节: §6.2 — 12 项隔离库集成测试
+
+6. Schema 与 Migration 实际差异
+
+schema.prisma RawSnapshot:
+- schemaVersion: String → String?
+- qualityStatus: RawSnapshotQualityStatus @default(ok) → RawSnapshotQualityStatus? @default(ok)
+- source: String @default("plugin_sync") → String? @default("plugin_sync")
+
+schema.prisma RawRecord:
+- recordType: String → String?
+- FK: fields: [rawSnapshotId], references: [id] → fields: [workspaceId, rawSnapshotId], references: [workspaceId, id], map: "RawRecord_workspace_snapshot_fkey"
+- 唯一键: @@unique([workspaceId, idempotencyKey]) → @@unique([workspaceId, rawSnapshotId, idempotencyKey])
+
+Migration SQL (20260805180000_add_v2_evidence_release_b_prepare):
+- ALTER TABLE "RawSnapshot" ALTER COLUMN "schemaVersion" DROP NOT NULL
+- ALTER TABLE "RawSnapshot" ALTER COLUMN "qualityStatus" DROP NOT NULL
+- ALTER TABLE "RawSnapshot" ALTER COLUMN "source" DROP NOT NULL
+- ALTER TABLE "RawRecord" ALTER COLUMN "recordType" DROP NOT NULL
+- DROP CONSTRAINT "RawRecord_rawSnapshotId_fkey" + 新建 compound FK "RawRecord_workspace_snapshot_fkey"
+- DROP INDEX "RawRecord_workspaceId_idempotencyKey_key" + 新建 "RawRecord_workspaceId_rawSnapshotId_idempotencyKey_key"
+
+7. Red→Green 证据
+
+单元测试 (61/61 PASS):
+npx vitest run src/lib/evidence/ingress/evidence-ingress.test.ts
+Tests  61 passed (61)
+
+集成测试 (12/12 PASS):
+npx vitest run src/lib/evidence/ingress/evidence-ingress.integration.test.ts
+Tests  12 passed (12)
+
+集成测试数据库身份:
+[integration] Database identity: content_workbench_v2_b1_release_b_core_<timestamp>|postgres
+
+集成测试验证项:
+- ✓ execution 合法提交 (manual_import/recovery/migration 通过 AlwaysValidAuthorityValidator 测试)
+- ✓ 同 identity + 同 hash → replay，不增加任何 Evidence 行
+- ✓ 同 identity + 不同 hash → 完整保留 conflict Evidence
+- ✓ 不产生 outbox 事件
+- ✓ 不创建 Normalization/Canonical/Projection/Media
+- ✓ CapturePackage/EvidenceIngressReceipt/CaptureArtifact append-only trigger 拒绝 UPDATE/DELETE
+- ✓ RawSnapshot/RawRecord 无 append-only trigger
+- ✓ RawRecord compound FK 拒绝跨 workspace 引用
+- ✓ V1 execution 写入仍然成功
+- ✓ V1 使用非空 legacy 字段时读取行为不回归
+
+8. 每项质量门禁
+
+门禁: Prisma generate
+命令: npx prisma generate
+退出码: 0
+结果: ✓
+────────────────────────────────────────
+门禁: TypeScript
+命令: npx tsc --noEmit
+退出码: 0
+结果: ✓
+────────────────────────────────────────
+门禁: Evidence 单元测试
+命令: npx vitest run src/lib/evidence/ingress/evidence-ingress.test.ts
+退出码: 0
+结果: 61/61 PASS
+────────────────────────────────────────
+门禁: 隔离库集成测试
+命令: npx vitest run
+src/lib/evidence/ingress/evidence-ingress.integration.test.ts
+退出码: 0
+结果: 12/12 PASS
+────────────────────────────────────────
+门禁: Lint
+命令: npm run lint
+退出码: 0
+结果: 0 errors, 14 warnings (unused imports)
+────────────────────────────────────────
+门禁: Production build
+命令: npm run build
+退出码: 1
+结果: 编译 + TypeScript 通过；页面数据收集失败因 BETTER_AUTH_SECRET
+未设（预存问题，与本工单无关）
+────────────────────────────────────────
+门禁: git diff --check
+命令: git diff --check
+退出码: 0
+结果: ✓
+────────────────────────────────────────
+门禁: 静态扫描：无现役 caller
+命令: rg "import.*EvidenceIngress|from.*evidence/ingress" src/ (排除 evidence/ 及
+test)
+退出码: —
+结果: 0 结果 ✓
+────────────────────────────────────────
+门禁: 静态扫描：无 outbox/projection 写入
+命令: rg "OutboxEvent|NormalizationRun|..." src/lib/evidence/
+退出码: —
+结果: 0 结果 ✓
+────────────────────────────────────────
+门禁: 静态扫描：无 fallback
+命令: rg "fallback|dual.write" src/lib/evidence/
+退出码: —
+结果: 0 结果 ✓
+
+9. 隔离数据库证明
+
+- 数据库名: content_workbench_v2_b1_release_b_core_<timestamp> (每次测试新建)
+- 身份查询: SELECT current_database(), current_user; → 确认为新隔离库
+- Migration: 从正式库 pg_dump --schema-only → 应用 Release-A → 应用 Release-B prepare
+- 表计数（最终测试后）:
+  - CapturePackage > 0, RawSnapshot > 0, RawRecord > 0, EvidenceIngressReceipt > 0
+  - OutboxEvent = 0 (V2 不写旧 outbox)
+
+10. 两轴自审
+
+Spec（逐条核对 07 合同）:
+- §2.1–2.2 JSON 值校验 + canonicalJson ✓
+- §2.3 首期仅 xhs，douyin → unsupported_platform ✓
+- §3.1 CaptureHeaderV2 精确类型 + strict shape ✓
+- §3.2 RawRecordSubmissionV2 + CaptureArtifactSubmissionV2 ✓
+- §3.3 CapturePackagePayloadV2 + 严格 base64 + canonical round-trip + 外内 header deep-equal ✓
+- §3.4 EvidenceIngressAuthorityV2 + 可注入 validator ✓
+- §4 CollectionContractRegistry 只追加代码注册表 + hash = sha256(canonicalJson(def)) + shape 校验 + 空生产注册表 ✓
+- §5.1 EvidenceIngress 只负责 Evidence 持久化 ✓
+- §5.2 单 SERIALIZABLE 事务写 5 表 + V2 旧字段写 null + 非 execution 不生成 jobId 等 ✓
+- §5.3 返回合同 committed/conflict/replay/rejected ✓
+- §5.3 固定校验顺序 ✓
+- §5.4 replay/conflict 逻辑 ✓
+- §6 最多 3 次重试，10ms/50ms，仅重试 P2034/40001/40P01/P2002 ✓
+- §7 migration 无现役入口 ✓
+- §8 不修改 execution 控制平面 ✓
+
+Standards（逐条核对 coding standards）:
+- TypeScript strict: 无 any（使用类型断言替代） ✓
+- Prisma 从 @/lib/db 导入 ✓
+- kebab-case 文件名 ✓
+- 不引入新依赖（使用已有 Zod 未用，使用 node:crypto） ✓
+- 代码风格与现有一致 ✓
+
+11. 未做事项
+
+- 未提交、未 push、未部署
+- 未修改正式测试数据库（content_workbench_local）
+- 未修改任何 API route / server action / CLI / scheduler
+- 未修改 execution 控制平面或 outbox 逻辑
+- 未注册任何生产 CollectionContract
+- 未创建生产 authority validator
+- 未接入 Douyin
+- 未创建 migration API/CLI/定时任务
+- 未加 RawSnapshot/RawRecord append-only trigger
+- 未做全表 NOT NULL / default_app 撤权
+
+12. 阻塞或 DECISION_REQUIRED
+
+无。所有 07 合同字段均可唯一来源化。
+
+13. 声明
+
+未提交、未 push、未部署、未修改正式测试库。 HEAD 仍为 a274907ef1016a3af27ec0b7f3badaaa37cec554。

@@ -1,0 +1,116 @@
+B3 Domain Projection & Media — 最终交付报告
+
+1. 固定点
+
+┌────────────┬────────────────────────────────────────────────────┐
+│    项目    │                         值                         │
+├────────────┼────────────────────────────────────────────────────┤
+│ 工作台 SHA │ 38721ece5de80c781a4e059d67beda1388af64a6（未变更） │
+├────────────┼────────────────────────────────────────────────────┤
+│ 插件 SHA   │ c22fa1b160a74b741bf56a52ebab0e6cfed9eb1a           │
+├────────────┼────────────────────────────────────────────────────┤
+│ 分支       │ v2/b3-projection-readiness                         │
+├────────────┼────────────────────────────────────────────────────┤
+│ 模型数     │ 163（从 159 起）                                   │
+└────────────┴────────────────────────────────────────────────────┘
+
+2. 全部已完成工单
+
+┌───────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────────┬────────────────────────────────────────┐
+│         工单          │                                                 内容                                                 │                  证据                  │
+├───────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────┤
+│ B3-MEDIA-SRC-002      │ CanonicalMediaSlot schema + writer + append-only trigger + 隔离证明                                  │ 19 tests passed                        │
+├───────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────┤
+│ B3-MEDIA-SRC-003      │ Canonical Media → Media Domain adapter + enqueueCanonicalMediaProcessingJob + 五字段 ledgerOrigin    │ 22 tests passed, frozen SQL denom=num, │
+│                       │                                                                                                      │  unmatched=0                           │
+├───────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────┼────────────────────────────────────────┤
+│ B3-MEDIA-SRC-004      │ ContentObservation + ContentCurrentProjection + AuthorCurrentProjection + AuthorSnapshot 扩展 +      │ 4 个新模型，1 个扩展模型               │
+│ schema                │ ContentMediaUsage canonical 列                                                                       │                                        │
+└───────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────┴────────────────────────────────────────┘
+
+3. 实际 diff
+
+prisma/schema.prisma                                    | 162 ++++++++++---
+prisma/migrations/20260811120000_add_canonical_media_slot/   (new, B3-MEDIA-SRC-002)
+prisma/migrations/20260811140000_add_b3_domain_projection/   (new, B3-MEDIA-SRC-004)
+src/lib/evidence/media/verified-artifact-reader.ts           (new, B3-MEDIA-SRC-002)
+src/lib/evidence/media/canonical-media-slot-writer.ts        (new, B3-MEDIA-SRC-002)
+src/lib/evidence/media/canonical-media-adapter.ts            (new, B3-MEDIA-SRC-003)
+src/lib/evidence/media/canonical-media-slot.integration.test.ts   (new, 19 tests)
+src/lib/evidence/media/canonical-media-domain.integration.test.ts (new, 22 tests)
+src/lib/services/media-processing-queue-service.ts           (modified, +168 canonical support)
+docs/code-review/v2-b3-media-source-audit-2026-08-11.md     (modified)
+docs/code-review/v2-b3-domain-projection-source-audit-2026-08-11.md (modified)
+
+12 files, 499 insertions, 74 deletions.
+
+4. B3-MEDIA-SRC-004-A Phase 0：七 Gate 状态
+
+┌──────────────────────────┬──────────────────────┬──────────────────────────────────────────────────────────────────────────────────────────┐
+│           Gate           │         结论         │                                         关键证据                                         │
+├──────────────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+│ 001 CEC CAS              │ SOURCE_COMPLETE ✅   │ b2-derived-service.ts:141 Serializable + :676 CAS conflict                               │
+├──────────────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+│ 002 MediaUsage 绑定      │ SOURCE_COMPLETE ✅   │ ContentMediaUsage 新增 canonicalObservationId/canonicalMediaSlotId/mediaOriginGeneration │
+├──────────────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+│ 003 撤销                 │ DECISION_REQUIRED ❌ │ freeze:586 B2 负责；B2→B3 跨事务协调未定义                                               │
+├──────────────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+│ 004 quarantine 权限      │ DECISION_REQUIRED ❌ │ BLK-014：default_app 可覆盖 quarantined                                                  │
+├──────────────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+│ 005 CurrentProjection FK │ SOURCE_COMPLETE ✅   │ 模型已存在（本次新增）                                                                   │
+├──────────────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+│ 006 封面                 │ DECISION_REQUIRED ❌ │ 枚举存在但优先级无 DB 约束                                                               │
+├──────────────────────────┼──────────────────────┼──────────────────────────────────────────────────────────────────────────────────────────┤
+│ 007 打开原文             │ DECISION_REQUIRED ❌ │ DEC-B1-010 确认边界但无 model                                                            │
+└──────────────────────────┴──────────────────────┴──────────────────────────────────────────────────────────────────────────────────────────┘
+
+4/7 Gate SOURCE_COMPLETE，3/7 DECISION_REQUIRED。
+
+5. 隔离数据库证明
+
+B3-MEDIA-SRC-002 (CanonicalMediaSlot)
+
+opt-in: B3_MEDIA_INTEGRATION_DB=1
+database: content_workbench_b3_media_slot_proof_<timestamp>
+tests: 19 passed
+
+B3-MEDIA-SRC-003 (Media Domain)
+
+opt-in: B3_MEDIA_DOMAIN_INTEGRATION_DB=1
+database: content_workbench_b3_media_domain_proof_<timestamp>
+tests: 22 passed
+frozen SQL: denominator=1, numerator=1, unmatched=0
+
+手动删除命令随每个证明库输出。
+
+6. 全部验证门禁
+
+┌──────────────────────────────────────────────────┬────────────────────────────────────────┐
+│                       命令                       │                  结果                  │
+├──────────────────────────────────────────────────┼────────────────────────────────────────┤
+│ npx prisma validate                              │ valid ✅                               │
+├──────────────────────────────────────────────────┼────────────────────────────────────────┤
+│ npx prisma generate                              │ generated ✅                           │
+├──────────────────────────────────────────────────┼────────────────────────────────────────┤
+│ npx tsc --noEmit                                 │ 0 errors ✅                            │
+├──────────────────────────────────────────────────┼────────────────────────────────────────┤
+│ npx eslint media/                                │ 0/0 ✅                                 │
+├──────────────────────────────────────────────────┼────────────────────────────────────────┤
+│ node scripts/check-project-governance.mjs --json │ 0 issues ✅                            │
+├──────────────────────────────────────────────────┼────────────────────────────────────────┤
+│ npx tsx cross-repo-verify.ts                     │ 6/6 + record/media source contracts ✅ │
+├──────────────────────────────────────────────────┼────────────────────────────────────────┤
+│ git diff --check                                 │ clean ✅                               │
+├──────────────────────────────────────────────────┼────────────────────────────────────────┤
+│ 163 models                                       │ ✅                                     │
+└──────────────────────────────────────────────────┴────────────────────────────────────────┘
+
+7. 未做事项
+
+- GATE-003（B2→B3 撤销协调）
+- GATE-006（封面优先级 writer）
+- GATE-007（打开原文 action 模型）
+- B3 Projection writer 实现（ContentCurrentProjection + ContentObservation）
+- B3 AuthorObservation/Projection writer
+- 未接 caller、未部署、未 push
+- HEAD 保持 38721ece

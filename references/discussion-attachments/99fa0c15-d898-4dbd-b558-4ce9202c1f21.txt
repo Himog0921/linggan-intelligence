@@ -1,0 +1,281 @@
+Import trace:
+  App Route:
+    ./next.config.ts
+    ./src/lib/services/skill-registry-service.ts
+    ./src/app/api/skills/[name]/route.ts
+
+
+✓ Compiled successfully in 8.3s
+  Running TypeScript ...
+  Finished TypeScript in 15.4s ...
+  Collecting page data using 9 workers ...
+  Generating static pages using 9 workers (0/142) ...
+  Generating static pages using 9 workers (35/142) 
+  Generating static pages using 9 workers (70/142) 
+  Generating static pages using 9 workers (106/142) 
+✓ Generating static pages using 9 workers (142/142) in 90ms
+  Finalizing page optimization ...
+
+Route (app)
+┌ ƒ /
+├ ƒ /_not-found
+├ ƒ /analytics
+├ ƒ /api/admin/outbox-dead-letters
+├ ƒ /api/ai-generate
+├ ƒ /api/ai-provider-config
+├ ƒ /api/ai-provider-config/test
+├ ƒ /api/auth/[...all]
+├ ƒ /api/author-context/author
+├ ƒ /api/author-deep-archives
+├ ƒ /api/author-deep-archives/[id]
+├ ƒ /api/author-deep-archives/[id]/retry
+├ ƒ /api/author-dossier/audit
+├ ƒ /api/author-dossier/collect
+├ ƒ /api/authors
+├ ƒ /api/authors/[id]
+├ ƒ /api/authors/batch
+├ ƒ /api/authors/ingest
+├ ƒ /api/collect/batch
+├ ƒ /api/collect/status
+├ ƒ /api/comment-analysis/aggregate
+├ ƒ /api/comments
+├ ƒ /api/comments/analysis-reports
+├ ƒ /api/comments/cleaning
+├ ƒ /api/comments/generate-topics
+├ ƒ /api/comments/library
+├ ƒ /api/comments/process-pending
+├ ƒ /api/comments/topics
+├ ƒ /api/cover-references
+├ ƒ /api/cover-references/[id]
+├ ƒ /api/covers
+├ ƒ /api/covers/videos
+├ ƒ /api/creative/market-package
+├ ƒ /api/creative/topic-package/[topicId]
+├ ƒ /api/creative/voice-package
+├ ƒ /api/dashboard/summary
+├ ƒ /api/data-foundation/business-refs
+├ ƒ /api/data-foundation/business-refs/sync
+├ ƒ /api/data-foundation/content-assets
+├ ƒ /api/data-foundation/content-assets/[id]/agent-analysis
+├ ƒ /api/data-foundation/content-assets/backfill-acceptance
+├ ƒ /api/data-foundation/content-assets/sync
+├ ƒ /api/data-foundation/governance-report
+├ ƒ /api/data-foundation/health
+├ ƒ /api/data-foundation/history-maintenance
+├ ƒ /api/data-foundation/metric-snapshots
+├ ƒ /api/data-foundation/metric-snapshots/sync
+├ ƒ /api/data-foundation/production-validation
+├ ƒ /api/data-foundation/production-validation/daily
+├ ƒ /api/data-foundation/production-validation/status
+├ ƒ /api/data-foundation/quality-issues
+├ ƒ /api/data-foundation/quality-issues/audit
+├ ƒ /api/data-foundation/quality-issues/status
+├ ƒ /api/data-foundation/raw-evidence
+├ ƒ /api/data-foundation/raw-evidence/backfill
+├ ƒ /api/data-foundation/snapshots/daily
+├ ƒ /api/data-foundation/tag-governance/proposals/[id]/accept
+├ ƒ /api/data-foundation/tag-governance/proposals/[id]/reject
+├ ƒ /api/data-foundation/today-low-follower-viral
+├ ƒ /api/data-foundation/today-viral-clusters
+├ ƒ /api/data-foundation/topics/[id]/agent-analysis
+├ ƒ /api/data-foundation/workspace-inventory
+├ ƒ /api/data-management/accounts
+├ ƒ /api/data-management/accounts/[id]
+├ ƒ /api/data-management/daily-metrics
+├ ƒ /api/data-management/daily-metrics/[id]
+├ ƒ /api/data-management/export
+├ ƒ /api/data-management/import
+├ ƒ /api/data-management/publication-reconciliation
+├ ƒ /api/data-management/publications
+├ ƒ /api/data-management/publications/[id]
+├ ƒ /api/data-management/publications/sync-data
+├ ƒ /api/data-management/summary
+├ ƒ /api/data-management/sync-topic-publications
+├ ƒ /api/decision-assist
+├ ƒ /api/decision-events
+├ ƒ /api/demand-radar
+├ ƒ /api/demand-radar/[id]/action
+├ ƒ /api/dossiers
+├ ƒ /api/dossiers/[id]
+├ ƒ /api/dossiers/ingest
+├ ƒ /api/evaluate
+├ ƒ /api/evaluation-worker
+├ ƒ /api/execution-logs
+├ ƒ /api/execution-rules/monitor
+├ ƒ /api/execution-stations
+├ ƒ /api/execution-stations/[id]
+├ ƒ /api/execution-stations/[id]/pairing-code
+├ ƒ /api/execution-stations/[id]/unbind
+├ ƒ /api/execution-stations/pair
+├ ƒ /api/execution-stations/push-subscription
+├ ƒ /api/execution-stations/register
+├ ƒ /api/execution-stations/sync
+├ ƒ /api/execution-tasks
+├ ƒ /api/execution-tasks/[id]
+├ ƒ /api/execution-tasks/[id]/updates
+├ ƒ /api/execution-tasks/corpus
+├ ƒ /api/execution-tasks/import
+├ ƒ /api/execution-tasks/recover
+├ ƒ /api/execution-tasks/sync
+├ ƒ /api/feedback-reminders/pending
+├ ƒ /api/feishu/daily-boom-digest
+├ ƒ /api/inspiration
+├ ƒ /api/local-media/[...path]
+├ ƒ /api/market-samples/[id]/quality
+├ ƒ /api/materials/[id]
+├ ƒ /api/media-assets/cover
+├ ƒ /api/monitor-opportunities
+├ ƒ /api/monitor-opportunities/[id]/action
+├ ƒ /api/monitor-opportunities/featured
+├ ƒ /api/monitors
+├ ƒ /api/monitors/[id]
+├ ƒ /api/monitors/[id]/author-lifetime
+├ ƒ /api/monitors/[id]/comment-collection
+├ ƒ /api/monitors/[id]/daily-pulse
+├ ƒ /api/monitors/[id]/detail
+├ ƒ /api/monitors/[id]/evaluation
+├ ƒ /api/monitors/[id]/history
+├ ƒ /api/monitors/[id]/trigger
+├ ƒ /api/monitors/[id]/whitelist
+├ ƒ /api/monitors/author-audit-summary
+├ ƒ /api/monitors/content-assets/audit
+├ ƒ /api/monitors/effectiveness
+├ ƒ /api/monitors/evaluation/activate-auto-adjust
+├ ƒ /api/monitors/evaluation/elimination-queue
+├ ƒ /api/monitors/evaluation/elimination/[id]/action
+├ ƒ /api/monitors/evaluation/frequency-history
+├ ƒ /api/monitors/evaluation/overview
+├ ƒ /api/monitors/evaluation/surge-history
+├ ƒ /api/monitors/evaluation/surge/[id]/close
+├ ƒ /api/monitors/intelligence-feed
+├ ƒ /api/monitors/keyword-pulse
+├ ƒ /api/monitors/testing/reset
+├ ƒ /api/notify
+├ ƒ /api/outcome-snapshots
+├ ƒ /api/outcome-snapshots/[id]/confirm
+├ ƒ /api/outcome-snapshots/[id]/reject
+├ ƒ /api/plugin-authorizations
+├ ƒ /api/plugin-authorizations/activate
+├ ƒ /api/plugin-authorizations/codes/[id]/archive
+├ ƒ /api/plugin-authorizations/codes/[id]/extend
+├ ƒ /api/plugin-authorizations/codes/[id]/revoke
+├ ƒ /api/plugin-authorizations/devices/[id]/archive
+├ ƒ /api/plugin-authorizations/devices/[id]/extend
+├ ƒ /api/plugin-authorizations/devices/[id]/revoke
+├ ƒ /api/plugin-authorizations/requests
+├ ƒ /api/plugin-authorizations/requests/[id]/approve
+├ ƒ /api/plugin-authorizations/requests/[id]/claim
+├ ƒ /api/plugin-data-workspace
+├ ƒ /api/plugin-release/latest
+├ ƒ /api/plugin-release/latest/download
+├ ƒ /api/plugin/publications/candidate
+├ ƒ /api/push/vapid-public-key
+├ ƒ /api/radar-signals/[id]/action
+├ ƒ /api/radar-signals/featured
+├ ƒ /api/recommendations
+├ ƒ /api/recommendations/[id]/ack
+├ ƒ /api/review-algorithm/health
+├ ƒ /api/review-queue
+├ ƒ /api/review-queue/[id]/decide
+├ ƒ /api/review-queue/summary
+├ ƒ /api/scheduler/audit
+├ ƒ /api/scheduler/execution-queue-audit
+├ ƒ /api/scheduler/execution-status-audit
+├ ƒ /api/scheduler/execution-task-split-audit
+├ ƒ /api/scheduler/maintenance
+├ ƒ /api/scheduler/snapshot
+├ ƒ /api/scheduler/tick
+├ ƒ /api/sidebar-counts
+├ ƒ /api/signal-tags
+├ ƒ /api/signal-tags/[id]/alias
+├ ƒ /api/signal-tags/[id]/archive
+├ ƒ /api/skills
+├ ƒ /api/skills/[name]
+├ ƒ /api/skills/execute
+├ ƒ /api/skills/executions
+├ ƒ /api/sync
+├ ƒ /api/system-config
+├ ƒ /api/system-status
+├ ƒ /api/tag-dimensions
+├ ƒ /api/taxonomy
+├ ƒ /api/taxonomy/proposals
+├ ƒ /api/team-execution
+├ ƒ /api/topic-packs
+├ ƒ /api/topic-packs/[id]
+├ ƒ /api/topic-publications
+├ ƒ /api/topic-publications/[id]
+├ ƒ /api/topic-publications/[id]/confirm
+├ ƒ /api/topic-publications/[id]/reject
+├ ƒ /api/topic-publications/pending
+├ ƒ /api/topic-signal-tags/[id]/confirm
+├ ƒ /api/topic-signal-tags/[id]/reject
+├ ƒ /api/topics
+├ ƒ /api/topics/[id]
+├ ƒ /api/topics/[id]/comment-insights
+├ ƒ /api/topics/[id]/decision-boundary
+├ ƒ /api/topics/[id]/deep-evaluation
+├ ƒ /api/topics/[id]/favorite
+├ ƒ /api/topics/[id]/market-comparison
+├ ƒ /api/topics/[id]/material-actions
+├ ƒ /api/topics/[id]/publications
+├ ƒ /api/topics/[id]/retrospective
+├ ƒ /api/topics/[id]/retry-evaluation
+├ ƒ /api/topics/[id]/review
+├ ƒ /api/topics/[id]/review-judgment
+├ ƒ /api/topics/[id]/signal-tags
+├ ƒ /api/topics/[id]/signal-tags/suggest
+├ ƒ /api/topics/[id]/similar
+├ ƒ /api/topics/[id]/suggestions
+├ ƒ /api/topics/batch
+├ ƒ /api/voice-assets
+├ ƒ /api/voice-assets/candidates
+├ ƒ /api/voice-assets/promote
+├ ƒ /api/weekly-report
+├ ƒ /api/weekly-report/experience/confirm
+├ ƒ /api/weekly-report/experience/reject
+├ ƒ /api/workbench-health/summary
+├ ƒ /api/workspace/export
+├ ƒ /api/workspace/invitations
+├ ƒ /api/workspace/invitations/[id]
+├ ƒ /api/workspace/invitations/[id]/accept
+├ ƒ /api/workspace/members
+├ ƒ /api/workspace/members/[id]
+├ ƒ /api/workspace/personnel-groups
+├ ƒ /api/workspace/users/[id]/name
+├ ƒ /corpus
+├ ƒ /covers
+├ ƒ /crawl
+├ ƒ /data-foundation
+├ ƒ /design-system
+├ ƒ /forgot-password
+├ ƒ /insights
+├ ƒ /invite/[id]
+├ ƒ /library
+├ ƒ /login
+├ ƒ /materials/[id]
+├ ƒ /monitors
+├ ƒ /monitors/evaluation
+├ ƒ /privacy/linggan-boom-extension
+├ ƒ /reset-password
+├ ƒ /settings
+├ ƒ /skills
+├ ƒ /team-execution
+├ ƒ /topics/[id]
+└ ƒ /weekly-report
+
+
+ƒ Proxy (Middleware)
+
+ƒ  (Dynamic)  server-rendered on demand
+
+
+Database restore and build verification complete.
+
+Run app:
+  cd "/Users/gongyong/Services/content-workbench/migration/app"
+  npm run dev
+
+Open:
+  http://localhost:3000
+
+gongyong@gongyongdeMac-mini ~ % 

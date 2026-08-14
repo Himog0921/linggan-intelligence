@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Linggan Intelligence 数据底座架构 v1.0</title>
+<style>
+body{font-family:Arial,"PingFang SC";margin:40px;background:#0b1020;color:#e8eefc;line-height:1.8}
+h1,h2{color:#8fd3ff}
+.card{background:#151d33;border:1px solid #33415c;border-radius:14px;padding:20px;margin:20px 0}
+.node{background:#18253f;border:1px solid #4d6fa8;border-radius:12px;padding:15px;margin:12px auto;width:70%;text-align:center}
+.arrow{text-align:center;color:#ffb86b;font-size:30px}
+.agent{border-color:#ff7b7b}
+table{width:100%;border-collapse:collapse}
+td,th{border:1px solid #405070;padding:10px}
+</style>
+</head>
+<body>
+<h1>Linggan Intelligence 数据底座架构 v1.0</h1>
+
+<div class="card">
+<h2>核心原则</h2>
+<p>
+情报不是数据总结，而是从长期变化中发现异常。
+数据链路：
+世界信号 → 采集 → 保存 → 清洗 → 实体 → 变化 → 信号 → 情报。
+</p>
+</div>
+
+<h2>数据演变生命周期</h2>
+
+<div class="node">1. 信号发现<br>博主监控 / 关键词监控 / 长尾词 / 手动采集</div>
+<div class="arrow">↓</div>
+<div class="node">2. 数据采集层<br>笔记正文、多图、视频、ASR、作者、评论树</div>
+<div class="arrow">↓</div>
+<div class="node">3. Observation观测层<br>每次采集保存快照，不覆盖历史</div>
+<div class="arrow">↓</div>
+<div class="node">4. 数据清洗层<br>去重、实体识别、结构化、质量评分</div>
+<div class="arrow">↓</div>
+<div class="node">5. 实体资产层<br>博主、用户、内容、主题、产品</div>
+<div class="arrow">↓</div>
+<div class="node">6. 时间变化层<br>增长、衰减、迁移、异常检测</div>
+<div class="arrow">↓</div>
+<div class="node agent">7. AI Agent层<br>聚类、推理、假设、红队验证</div>
+<div class="arrow">↓</div>
+<div class="node">8. 情报事件<br>变化 + 证据 + 判断 + 行动建议</div>
+
+<div class="card">
+<h2>核心数据对象</h2>
+<table>
+<tr><th>对象</th><th>作用</th></tr>
+<tr><td>Content Asset</td><td>保存完整内容资产：正文、图片、视频、作者</td></tr>
+<tr><td>Observation</td><td>记录同一对象不同时间的数据快照</td></tr>
+<tr><td>Comment Tree</td><td>保存评论和回复关系，识别争议</td></tr>
+<tr><td>Entity</td><td>建立博主、用户、主题关系</td></tr>
+<tr><td>Event</td><td>将多个变化聚合为情报事件</td></tr>
+</table>
+</div>
+
+<div class="card">
+<h2>Agent介入节点</h2>
+<ul>
+<li>采集后：内容理解、分类、实体识别</li>
+<li>清洗后：主题聚类、语义归并</li>
+<li>变化检测：发现异常、新趋势、新人物</li>
+<li>事件生成：形成假设</li>
+<li>审核阶段：红队Agent挑战结论</li>
+</ul>
+</div>
+
+<div class="card">
+<h2>案例：低粉爆文发现</h2>
+<p>
+账号粉丝3000，单篇内容点赞8000，评论深度异常。
+系统判断：
+这不是普通爆款，而可能是早期趋势信号。
+</p>
+</div>
+
+<h2>最终架构</h2>
+<div class="node">采集任务系统</div>
+<div class="arrow">↓</div>
+<div class="node">原始数据仓库</div>
+<div class="arrow">↓</div>
+<div class="node">清洗标准化层</div>
+<div class="arrow">↓</div>
+<div class="node">实体关系层</div>
+<div class="arrow">↓</div>
+<div class="node">时间变化分析层</div>
+<div class="arrow">↓</div>
+<div class="node agent">AI情报分析层</div>
+<div class="arrow">↓</div>
+<div class="node">情报中心</div>
+
+</body>
+</html>

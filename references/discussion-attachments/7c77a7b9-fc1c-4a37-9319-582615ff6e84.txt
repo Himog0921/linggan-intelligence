@@ -1,0 +1,120 @@
+交付报告
+
+1. 固定点 SHA、开始分支、开始工作区状态
+
+┌────────────┬────────────────────────────────────────────────────────────────────┐
+│     项     │                                 值                                 │
+├────────────┼────────────────────────────────────────────────────────────────────┤
+│ 固定点 SHA │ 2b0c7836981130950c9ba01d4f28002088594ddd                           │
+├────────────┼────────────────────────────────────────────────────────────────────┤
+│ 当前 HEAD  │ 6c4acfa558524b9d82530224283a19dbabde336a（R11 追加 commit，未      │
+│            │ amend）                                                            │
+├────────────┼────────────────────────────────────────────────────────────────────┤
+│ 分支       │ v2/01-implementation-baseline                                      │
+├────────────┼────────────────────────────────────────────────────────────────────┤
+│ 工作区状态 │ 干净                                                               │
+└────────────┴────────────────────────────────────────────────────────────────────┘
+
+2. 新 commit SHA
+
+6c4acfa558524b9d82530224283a19dbabde336a
+
+3. 实际修改文件列表
+
+1. docs/architecture/content-workbench-v2-implementation-baseline.md
+2. docs/architecture/content-workbench-v2-architecture-design.md
+3. docs/TODO.md
+
+4. R11-01 至 R11-06 逐项说明
+
+---
+R11-01：历史数据物理退役全篇唯一
+
+- 修改前矛盾：C1 目标/允许修改/验收/成功判据仍写"ingressKind 回填"；D.5 写"历史行按本分类回填后只对新写入生效"；D.5.3 写"legacy_unverifiable"；E.2.5 写"payloadHash 重算回填"；F.2 写"ingressKind 回填后收紧约束"
+- 唯一裁决：RawRecord 先于 RawSnapshot 物理退役处理外键；退役清零后才全表 NOT NULL；不回填任何字段
+- 精确文件与行号：实施基线 C1（:96/:107/:117/:119）、D.5（:268-270/:312-314）、D.5.3（:396）、E.2.5（:541）、F.2（:717）、I.1（:1118）
+- 验证：rg 'ingressKind.*回填|legacy_unverifiable|仅新写入|payloadHash.*重算' → 全部为否定句/删除线/历史记录段。无遗漏。
+
+---
+R11-02：每个合格证据必须有终态合同裁决
+
+- 修改前矛盾：Adapter 失败只创建 NormalizationRun=rejected，不创建 ContractEvaluation——导致该证据无终态裁决
+- 唯一裁决：Adapter 失败仍创建 ContractEvaluation(decision=rejected, completeness=not_applicable)，记录 rejectionReason + failureNormalizationRunId；ContractEvaluationInput 允许为空
+- 精确文件与行号：主设计 §8.5 B2/B3 时序（:652-666）；实施基线 D.5.3 B2 测试（:369）、E.3 ContractEvaluation/Input 行（:557-558）
+- 验证：搜索 NormalizationRun.*accepted 无 n.status IN ('normalized','accepted') 残留。无遗漏。
+
+---
+R11-03：合同组合数据库约束
+
+- 修改前矛盾：ContractEvaluation 无 CHECK 约束约束 decision/completeness 组合
+- 唯一裁决：CHECK (accepted AND completeness IN full,partial) OR (rejected AND completeness=not_applicable)；B3 守卫验证 decision='accepted' AND completeness IN ('full','partial')
+- 精确文件与行号：主设计 §8.5（:662-668 CHECK SQL）；实施基线 E.3 ContractEvaluation 行（:557）、CONTRACT-6（:1071）
+- 验证：有效规则。无遗漏。
+
+---
+R11-04：修正十维门禁终态与媒体关系
+
+- 修改前矛盾：Canonical 门禁 SQL 用 n.status IN ('normalized','accepted')（accepted 不存在于 NormalizationRun）；Media 门禁分别 EXISTS MediaOrigin 和 MediaItem 而非联结
+- 唯一裁决：NormalizationRun 终态 normalized/rejected/quarantined（删除 accepted）；成功率与覆盖率分开；Media JOIN MediaOrigin.mediaItemId = ledgerOrigin.mediaItemId AND MediaItem.id = MediaOrigin.mediaItemId AND generation 完全相等
+- 精确文件与行号：实施基线 F.3 ② Canonical（:771-800 三段 SQL）、F.3 ⑧ Media（:944-962 JOIN 验证）
+- 验证：rg 'n\.status IN' → ('normalized','rejected','quarantined') 无 accepted。rg 'MediaOrigin.*mediaItemId' → Media SQL 正确 JOIN 四条件。无遗漏。
+
+---
+R11-05：Presentation 门禁可执行路由适用性
+
+- 修改前矛盾：Presentation 门禁用全局 ${supportedRouteIds} 数组套给所有内容，不区分 subjectType；依赖真实用户浏览
+- 唯一裁决：新增 PresentationRequirement 模型（唯一约束 (workspaceId, subjectType, subjectId, routeId, projectionRevision)）；PresentationVerificationJob 逐项调用；F.3 分母来自 PresentationRequirement
+- 精确文件与行号：实施基线 E.3 PresentationRequirement（:555）、F.3 ⑨ Presentation（:968-992）
+- 验证：rg 'supportedRouteIds' → 零命中。rg 'PresentationRequirement' → E.3 建表 + F.3 SQL。无遗漏。
+
+---
+R11-06：受限包读取与审计不可分开
+
+- 修改前矛盾：evidence_reader 有 packagePayload 直接列级 SELECT；审计和读取是两个独立函数（log_evidence_access + 直接 SELECT），可被绕过
+- 唯一裁决：单一 read_restricted_package_and_audit 函数同事务内定位+验证+审计+返回；evidence_reader 仅 EXECUTE 无直接表 SELECT；REVOKE UPDATE/DELETE 五表；EVID-R1 禁 ORM+rawSQL 直接读 packagePayload
+- 精确文件与行号：主设计 §20.4.1（:1823-1858 权限表+GRANT/REVOKE）、§20.4.2-3（:1860-1920 reader+函数定义）、§20.4.5（:1954-1957 守卫）；实施基线 G.1 EVID-R1/R2/R4（:1074-1077）
+- 验证：rg 'GRANT SELECT.*packagePayload' → 仅否定（"不再 GRANT"）。rg 'read_restricted_package_and_audit' → 正确定义。rg 'REVOKE ALL ON FUNCTION' → 正确。无遗漏。
+
+5. 尚未解决事项
+
+无。
+
+6. 全部验证命令与真实结果
+
+命令: git diff --check 2b0c7836...HEAD
+结果: 无输出（clean）
+────────────────────────────────────────
+命令: git diff --name-only 2b0c7836...HEAD
+结果: 3 个文件（全部在 docs/ 下；ADR 无变更）
+────────────────────────────────────────
+命令: rg 'ingressKind.*回填|legacy_unverifiable|仅新写入|payloadHash.*重算'
+结果: 全部为否定/删除线/历史记录。无遗漏。
+────────────────────────────────────────
+命令: rg 'status IN.*normalized.*accepted|NormalizationRun.*accepted'
+结果: 全部指 ContractEvaluation.decision=accepted（非
+NormalizationRun.status）。n.status IN ('normalized','rejected','quarantined') 已无
+accepted。无遗漏。
+────────────────────────────────────────
+命令: rg 'supportedRouteIds|PresentationRequirement|PresentationVerificationJob'
+结果: supportedRouteIds 零命中。PresentationRequirement/Job 正确引用。无遗漏。
+────────────────────────────────────────
+命令: rg 'GRANT SELECT.*packagePayload|read_restricted_package_and_audit|REVOKE ALL ON
+ FUNCTION'
+结果: GRANT SELECT packagePayload 仅否定；函数正确定义；REVOKE ALL ON FUNCTION
+正确。无遗漏。
+────────────────────────────────────────
+命令: rg 'MediaOrigin.*mediaItemId|ledgerOrigin.*mediaItemId|generation'
+结果: Media SQL 正确 JOIN 四条件（:958-960）。无遗漏。
+────────────────────────────────────────
+命令: node scripts/check-project-governance.mjs --json
+结果: ok: false，唯一失败 execution-sync-service.ts (2022 lines)（既有技术债，src/ 0
+文件变更）；modelCount: 149 不变
+────────────────────────────────────────
+命令: git status --short --branch
+结果: ## v2/01-implementation-baseline（干净）
+
+7. 明确声明
+
+- 是否修改 src/schema/migration/数据库：否。git diff --name-only 3 个文件全部在 docs/ 下；modelCount: 149 不变；未执行 INSERT/UPDATE/DELETE/DDL。
+- 是否存在双写、双读、fallback、兼容层：否。
+- 是否推送、合并、部署：否。分支 v2/01-implementation-baseline，追加 commit 6c4acfa5，未 push/merge/deploy。

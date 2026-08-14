@@ -1,0 +1,99 @@
+目录存在。现在撰写完整的进度报告：
+
+⏺ Write(docs/progress/v2-b1-evidence-proof-2026-08-05.md)
+Wrote 359 lines to docs/progress/v2-b1-evidence-proof-2026-08-05.md
+# V2 B1-E Gate 1 — EvidenceIngress 实施契约证明包
+
+> 本文件是 B1-E Gate 1 的唯一交付物。它只记录经源码/_schema 只读核查确认的事实，不包含 DDL、候选 Prisma 模型、迁移 SQL 或隔离数据库脚本。
+
+---
+
+## 1. 固定点、分支与清洁起始证明
+
+| 项 | 值 |
+|---|---|
+… +417 lines
+
+  Thought for 3s
+
+报告已创建。现在执行 completion checks：
+
+  Thought for 15s, ran 1 shell command
+
+Completion checks 全部通过。标记任务完成：
+
+  Thought for 6s
+
+---
+Delivery Response
+
+1. 状态：READY_FOR_REVIEW
+
+2. 固定点 / Final SHA / 分支 / 清洁状态
+
+┌──────────────┬────────────────────────────────────────────────────────────────────┐
+│      项      │                                 值                                 │
+├──────────────┼────────────────────────────────────────────────────────────────────┤
+│ Fixed SHA    │ 93af0680868479268784a6e859d96261d304a1c6                           │
+├──────────────┼────────────────────────────────────────────────────────────────────┤
+│ Final SHA    │ 93af0680868479268784a6e859d96261d304a1c6（未 commit，HEAD 未移动） │
+├──────────────┼────────────────────────────────────────────────────────────────────┤
+│ Branch       │ v2/b1-evidence-proof                                               │
+├──────────────┼────────────────────────────────────────────────────────────────────┤
+│ Clean status │ worktree 仅一个未跟踪新文件；git diff --check exit 0               │
+└──────────────┴────────────────────────────────────────────────────────────────────┘
+
+3. 变更文件
+
+?? docs/progress/v2-b1-evidence-proof-2026-08-05.md  （新建）
+
+未修改 02-model-contract.md、03-validation-matrix.md、04-blocker-ledger.md——核查确认三份文件的表清单、缺口标注、行号引用与当前 schema/源码一致，无需更正。
+
+4. 六行 blocker 结果表
+
+┌─────────┬─────────────────────┬───────────────┬──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ Blocker │ Complete physical   │  Resulting    │                                                       关键缺口                                                       │
+│         │       source?       │    status     │                                                                                                                      │
+├─────────┼─────────────────────┼───────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BLK-001 │ 否                  │ OPEN          │ 生命周期四态/冲突包/V2 16 列/@@unique([workspaceId,id])/CapturePackage 模型/evidence_writer                          │
+│         │                     │               │ 角色/删除规则——均无物理来源                                                                                          │
+├─────────┼─────────────────────┼───────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BLK-002 │ 否                  │ OPEN          │ 缺 @@unique([workspaceId,rawSnapshotId,id])/recordKind rename/payloadHash NOT                                        │
+│         │                     │               │ NULL/权限；当前代码已违反不可变（L593/L632 移动+覆盖，L102 删除）                                                    │
+├─────────┼─────────────────────┼───────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BLK-003 │ 否                  │ OPEN          │ NormalizationRun/Current 不存在于 schema；freeze FK 3→2 列矛盾；依赖 BLK-002                                         │
+├─────────┼─────────────────────┼───────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BLK-010 │ 否                  │ OPEN          │ 四个新状态列/值域枚举/终态语义/写入者/迁移顺序——均无来源                                                             │
+├─────────┼─────────────────────┼───────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BLK-015 │ 否                  │ OPEN          │ 六个 PostgreSQL 角色/表列权限/受控读取函数/三张审计表——均不存在；freeze:L605-606 与 DEC-B1-007 直接矛盾；DB 角色配置 │
+│         │                     │               │  UNVERIFIED                                                                                                          │
+├─────────┼─────────────────────┼───────────────┼──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ BLK-016 │ 否                  │ OPEN          │ NormalizationRun/Current 不存在；FK 同源链不完整；依赖 BLK-002/003                                                   │
+└─────────┴─────────────────────┴───────────────┴──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+READY_FOR_PROOF：0 项。OPEN：6 项。
+
+5. DECISION_REQUIRED
+
+None。 DC-001～DC-009 已在 2026-08-05 获确认；本轮核查未发现需要新增业务决策的事项——所有缺口均为"缺物理来源"，非"缺业务决策"。
+
+6. 验证结果
+
+- Preflight：HEAD = Fixed SHA ✓，worktree clean ✓
+- 8 份权威文档：全部完整阅读，规则来源提取完毕
+- Schema 核查：台账引用的 8 处行号全部核实准确；CapturePackage/EvidenceIngressReceipt/NormalizationRun 等 V2 模型在 schema 中确认不存在
+- 7 个源文件：全部核查；发现台账未明确记录的 monitor-reset-service.ts:L102 RawRecord deleteMany 违反路径
+- raw SQL：全仓 ~70 处 $executeRaw/$queryRaw，无一处直接访问 RawSnapshot/RawRecord/RawEvidence 表
+- 数据库角色：schema 和代码层面确认无角色定义；运行时 DB 角色配置标记 UNVERIFIED（未做只读 DB 观察）
+- Completion checks：git diff --check exit 0；diff --name-only 仅新报告文件；worktree 仅一个 untracked 文件；无 Markdown 链接需检查
+
+7. 显式声明
+
+无运行时代码修改、无 schema 修改、无迁移/DDL、无数据库变更（无隔离数据库、无写操作）、无冻结合同修改、无 blocker 状态越级（全部维持 OPEN）、无 commit/push/merge/deploy。 唯一产出是一个未跟踪的进度报告文件。
+
+---
+核查中最值得关注的发现（供 reviewer 重点复核）：
+
+1. RawRecord 不可变语义已被当前代码违反——execution-task-observation-service.ts:L593/L632 把已存在 RawRecord 的 rawSnapshotId 移到新 snapshot 并覆盖 payload；monitor-reset-service.ts:L102 按 jobId 批量删除 RawRecord。这意味着 BLK-002 的隔离验证不仅要证明新模型能拒绝 update/delete，还涉及现有代码路径的改造。
+2. 当前 RawSnapshot 无法表达非执行 ingress——jobId String（必填）+ job @relation onDelete: Restrict（schema:L4188）强制所有 snapshot 关联 ExecutionJob。导入路径（L548-L571）和恢复路径（L170-L215）都必须借用真实 ExecutionJob 的 ID 才能创建 RawSnapshot。
+3. BLK-015 的 freeze 内部矛盾——freeze:L605-606 权限表写 default_app "正常读写" RawSnapshot/RawRecord，直接与 DEC-B1-007 要求的数据库强制冲突。这不是"缺决策"（DC-007 已确认数据库强制），而是冻结合同权限表自身需要修正——但权限表所在的 design-freeze.md 属于 forbidden 修改，需 task owner 另行处理。

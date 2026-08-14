@@ -1,0 +1,93 @@
+L2 修复交付报告
+
+状态：✅ 完成。分支 fix/topic-library-l2-filters-search-tabs，新提交 b0c6ae66（非 amend），未推送。基线 baa413a9。
+
+根因（与验收诊断的精确对齐 + 一个关键修正）
+
+验收诊断"syncingFromUrlRef 阻止回写 effect 的 router.replace"——方向正确，但调试发现一个隐藏前提：
+
+- 回写 effect（baa413a9 :487）if (syncingFromUrlRef.current) return 在 mount 时跳过 replace。
+- 真实 Next.js 的 useRouter() 返回稳定单例 → mount 后回写依赖的 state 不变 → 回写只跑这一次（return）→ 不 replace → 地址栏残留（正是验收缺口）。
+- 但原测试 mock 的 useRouter: () => ({ push, replace }) 每次渲染返回新对象，router 引用每 render 变 → load/workspace fetch 的 setState 引起 re-render → 回写 effect 反复 re-run（syncingFromUrlRef 已 false）→ 误把 replace 触发了。这个 mock artifact 掩盖了真实问题（首次跑 3 个新测试竟全部通过）。
+
+改前失败 / 改后通过（router.replace 真实断言）
+
+修复了两处：
+1. page.tsx：删除 syncingFromUrlRef（声明 / URL 同步 effect 的赋值 / 回写 effect 的 return），回写 effect 改为纯 nextQuery !== searchParamsString 判断——即"当前 URL 已等于规范化 URL 才跳过"，否则 router.replace 一次。
+2. page.test.tsx：vi.mock("next/navigation") 改为返回稳定 router 实例（惰性缓存，反映真实 Next.js），让测试能暴露真实缺口。
+
+┌────────────────────────┬────────────────┬───────────────────────────────────────┐
+│                        │  baa413a9 +    │                                       │
+│          测试          │     稳定       │           b0c6ae66（改后）            │
+│                        │  mock（改前）  │                                       │
+├────────────────────────┼────────────────┼───────────────────────────────────────┤
+│ canonicalizes an       │ ❌ replaceMock │ ✅ replaceMock("/library",{scroll:fal │
+│ illegal status out of  │  未被调（waitF │ se})                                  │
+│ the address bar…       │ or 超时）      │                                       │
+├────────────────────────┼────────────────┼───────────────────────────────────────┤
+│ canonicalizes a        │                │                                       │
+│ single-character       │ ❌ 同上        │ ✅ replaceMock("/library",…)          │
+│ search out of the      │                │                                       │
+│ address bar            │                │                                       │
+├────────────────────────┼────────────────┼───────────────────────────────────────┤
+│ keeps a legal sort     │ ❌ replaceMock │ ✅ replaceMock("/library?sort=hotScor │
+│ when canonicalizing an │  未调          │ e",…)                                 │
+│  illegal status        │                │                                       │
+├────────────────────────┼────────────────┼───────────────────────────────────────┤
+│ preserves legal status │                │                                       │
+│  and sort…in the API   │ ✅             │ ✅                                    │
+│ request（防回归）      │                │                                       │
+├────────────────────────┼────────────────┼───────────────────────────────────────┤
+│ 升级原 drops an        │                │                                       │
+│ illegal status… →      │ —              │ ✅                                    │
+│ 现断言 replaceMock("/l │                │                                       │
+│ ibrary") + UI + 请求   │                │                                       │
+├────────────────────────┼────────────────┼───────────────────────────────────────┤
+│ 既有 27 个 L2 测试     │ ✅             │ ✅                                    │
+└────────────────────────┴────────────────┴───────────────────────────────────────┘
+
+npx vitest run：page 31 + library-workbench 12 + topic-service 24 + sync 4 = 71 passed。tsc --noEmit 0 errors；eslint 改动文件 0 errors。
+
+实际规范化前后 URL
+
+┌─────────────────────────────────┬───────────────────────┬───────────────────────┐
+│            粘贴 URL             │ 规范化后（router.repl │         说明          │
+│                                 │         ace）         │                       │
+├─────────────────────────────────┼───────────────────────┼───────────────────────┤
+│                                 │                       │ 非法 status 移除，UI" │
+│ /library?status=favorite        │ /library              │ 全部状态"、请求无     │
+│                                 │                       │ status                │
+├─────────────────────────────────┼───────────────────────┼───────────────────────┤
+│                                 │                       │ 单字 search           │
+│ /library?search=作              │ /library              │ 移除，请求无 search， │
+│                                 │                       │ 输入框按既定规则      │
+├─────────────────────────────────┼───────────────────────┼───────────────────────┤
+│ /library?status=favorite&sort=h │ /library?sort=hotScor │ 只移除非法            │
+│ otScore                         │ e                     │ status，合法 sort     │
+│                                 │                       │ 保留                  │
+├─────────────────────────────────┼───────────────────────┼───────────────────────┤
+│ /library?status=creating&sort=h │ 请求保留              │                       │
+│ otScore                         │ status=creating +     │ 合法参数不被误清      │
+│                                 │ sort=hotScore         │                       │
+└─────────────────────────────────┴───────────────────────┴───────────────────────┘
+
+无循环 replace：replace 后 searchParams 变 → URL 同步 effect 把规范 URL 同步回 state（无变化）→ 回写再次比较 nextQuery === searchParamsString → 不再 replace（mount 只 replace 一次）。
+
+Commit hash
+
+b0c6ae66（b0c6ae660bc2d495be79cf316b384620ef23e45c）· 2 files changed, 71 insertions(+), 18 deletions(-)
+
+修改文件
+
+- src/app/library/page.tsx：删 syncingFromUrlRef（import/声明/两处使用），回写 effect 改为纯 URL 比较 + 注释
+- src/app/library/page.test.tsx：vi.mock router 改稳定实例；升级 drops illegal status 为 canonicalizes…（含 replaceMock 断言）；新增 3 测（单字 search URL、非法status+合法sort、合法参数防回归）
+
+声明
+
+- ✅ 未改动 L2 以外范围：未触碰 schema、migration、L1（contentValueRank）、L3–L7；未动 library-workbench.ts / constants.ts（L2 既有改动原样保留）；未重构 page.tsx（只删 syncingFromUrlRef + 回写逻辑收敛到 URL 比较）
+- ✅ 未用字符串硬编码或直接操作 window.location（规范化经 buildLibraryWorkbenchQuery + router.replace）
+- ✅ 未触碰 docs/audit/rc/（提交后仍 untracked）
+- ✅ 新建提交，未 amend、未推送
+- ⚠️ page.tsx 两处 eslint-disable react-hooks/set-state-in-effect 为既存"Unused directive"warning（行号因删 useRef import 偏移至 314/821），非本次引入，不在本修复范围
+
+L2 验收缺口已修复，停下等复核。

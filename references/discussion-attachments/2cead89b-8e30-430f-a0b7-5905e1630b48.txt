@@ -1,0 +1,339 @@
+你负责内容工作台“媒体资源架构硬切换”的全面收尾。目标优先级是：
+
+1. 历史媒体数据完整进入新架构；
+2. 新旧媒体架构最终统一为新架构；
+3. 语义诚实：没有证据的历史关系绝不能猜造；
+4. 可接受受控维护窗口暂停运营，不以不停机为优先目标。
+
+你在 gongyong 机器上工作。gongyong 的真实生产数据库、媒体文件和部署状态是唯一真实数据依据；不得用其他机器数据库、开发环境或历史报告替代生产结论。
+
+## 工作目录与隔离
+
+本次开发 checkout 已创建：
+
+/Users/gongyong/Services/content-workbench/media-hard-cutover-finish
+
+当前分支：
+
+feat/media-hard-cutover-finish
+
+基线提交：
+
+50849703 docs(media): record hard cutover preflight status
+
+不要改动、切换、重置或清理以下原工作目录：
+
+/Users/gongyong/Services/content-workbench/migration/app
+
+开始前只读确认：
+
+pwd
+git rev-parse --show-toplevel
+git status --short --branch
+git remote get-url origin
+git fetch origin
+git log -1 --oneline origin/main
+git log --oneline --decorate -5
+
+确认 origin 为 Himog0921/topic-dashboard。开发只在新的 worktree 完成；部署、真实审计与维护窗口只在明确识别出的 gongyong 受管生产运行环境执行。
+
+不要泄露 DATABASE_URL、数据库凭据、备份路径、签名 URL、临时媒体 URL 或真实媒体文件路径。
+
+## 已有总体事实
+
+M0–M5 基础已存在，当前正式数据库曾确认共 126 个 Prisma migrations，M5 migration：
+
+20260724120000_add_media_library_m5_domain_relations
+
+已经应用。
+
+截至 2026-07-27 的 gongyong 只读生产基线：
+
+- 旧 MediaAsset 总数：44,839
+- ready/local_file：35,767
+- 实际可读：35,663
+- 当前磁盘缺失：104
+- 正式 MediaReplica=missing：117
+- 活跃新账本 ContentMediaUsage：7,874
+- 新旧读模型差异：43,306
+- legacy-only / 未证明旧关系：39,291
+- M3 已标记 projection drift：13
+- TopicMediaSelection 活跃关系：0
+- PublicationMedia 活跃关系：29，均为 publication_preview，目标可用
+
+关键约束：
+
+- 已正式确认的 117 条缺文件记录必须始终保持 missing，绝不能伪造为 available。
+- 104 个当前磁盘缺失与 117 个 missing 账本必须在正式冻结基线中逐条对账；不可以用状态覆盖掩盖差异。
+- 历史旧 MediaAsset 没有可审计证据证明 Usage、Topic 选择或 Publication 关系时，只能标为“已导入但未分配 / needs_review / conflicted”，不能猜造进 ContentMediaUsage、TopicMediaSelection 或 PublicationMedia。
+- 旧 ready 状态、URL 相似、ownerType、role、首图推断、OperationPublication.contentAssetId，都不是充分的历史关系证据。
+- 当前普通页面、Cover Library、Archive、AI、Publication、导出仍有 M0 兼容读取；绝不可在数据未完成前直接删掉或一次性切换。
+- 历史导入完成后，旧 MediaAsset 应冻结为只读审计档案，不再参与运行时业务读取或新写入；本轮不删除旧表或文件。
+
+## 已完成的 HC-0 代码（本地提交、尚未 PR/部署/启用）
+
+当前新 worktree 基线已经包含三个本地提交：
+
+- 972fbc71 feat(media): add hard cutover maintenance lock
+- ebcd5e78 feat(media): add hard cutover preflight
+- 50849703 docs(media): record hard cutover preflight status
+
+实现内容：
+
+1. 维护锁环境变量：
+
+MEDIA_LIBRARY_MAINTENANCE_MODE=hard_cutover
+
+只有精确值 hard_cutover 才会启用。
+
+2. 启用维护锁后：
+
+- 普通页面重定向至 /media-library-maintenance；
+- 除 /api/scheduler/tick 与 /api/scheduler/maintenance 外，所有 /api 请求（包括 GET）返回 503；
+- 两个 scheduler 路由先完成既有鉴权，再返回 skipped，不执行调度；
+- 进程内 scheduler heartbeat 不 dispatch、不 maintenance、不写 tick log；
+- Outbox 不回收、不领取、不重试、不处理事件；
+- 维护锁不等同于允许任意脚本写库；未来 HC-4 专用导入 runner 必须单独实现显式 batch 许可。
+
+3. 新的只读预检命令：
+
+npm run media:hard-cutover-preflight -- --concurrency 64 --backup-path /controlled/verified-backup
+
+它输出一个脱敏 JSON，读取：
+
+- Git HEAD
+- Prisma migration 完成情况
+- Outbox 状态和活动 ExecutionJob
+- 媒体物理基线
+- M3 projection drift
+- M4 差异分类
+- M5 关系审计
+- 备份新鲜度
+- 媒体盘容量
+
+它禁止 --apply，不应输出数据库连接字符串、备份路径或临时 URL。
+
+当前在 migration/app 中试跑预检时，数据库连接指向不可达的 127.0.0.1:54329，因此脚本正确输出：
+
+preflight_execution_failed
+
+这不是生产数据结论。不得为了让它成功而擅自寻找、替换或打印其他数据库连接；应先确认真正的 gongyong 受管生产运行环境和其受控连接方式。
+
+4. 文档：
+
+- docs/architecture/media-library-hard-cutover-implementation-plan-2026-07-27.md
+- docs/runbooks/media-library-hard-cutover-maintenance.md
+- docs/TODO.md
+
+先完整阅读这三份文档，再行动。
+
+## 验证现状
+
+已通过：
+
+- 维护锁、scheduler、Outbox、预检相关定向测试：143 项通过
+- 本次改动相关 ESLint：通过
+- commit hook 的全量 ESLint：0 errors，有既有 warnings
+- 构建进程已生成 .next 构建产物；请在新 checkout 独立复核其退出状态
+
+已知独立失败，不属于本次媒体代码：
+
+src/lib/services/topic-material-action-service.test.ts
+
+失败用例：
+
+starts asset-backed video understanding asynchronously and returns a polling marker
+
+断言期望 asyncPending，但实际为 null。该失败在本次改动前后均可复现。不要为了让媒体 PR 绿而修改无关逻辑；应先确认 origin/main 是否同样失败，并在 PR/CI 中如实报告。
+
+## 硬切换实施路径
+
+按以下顺序推进。每个代码工作包独立分支/PR/CI/合并/部署；不要把所有风险合成一个大 PR。
+
+### HC-0：冻结定义、预检、演练
+
+当前只完成本地代码，尚未完成验收。
+
+下一步：
+
+1. 审查维护锁是否覆盖所有真实写入口，特别是：
+   - 采集任务创建与插件 callback
+   - Publication 同步
+   - 人工上传与媒体下载
+   - scheduler / heartbeat
+   - Outbox
+   - AI、转录、来源刷新、媒体处理
+   - 外部 Cloudflare tick 与 GitHub workflow
+   - 直接运行的本地脚本
+2. 为遗漏入口补齐“入口拒绝 + 执行层二次拒绝”的最小实现和测试。
+3. 创建 PR，等待 CI；不要直接部署未合并代码。
+4. 部署到正确的 gongyong 生产受管环境后，先不启用维护锁，运行真实只读预检并保存完整 JSON 到受控 docs/progress 目录。
+5. 完成一次不写数据库、不跑 migration、不回填的冻结/排空/恢复演练：
+   - 记录 Git SHA、两次预检 JSON、Outbox、活动 ExecutionJob；
+   - 启用维护锁；
+   - 验证所有 API 默认拒绝，仅两个 scheduler 入口 skipped；
+   - 验证 heartbeat 与 Outbox 无任何新写；
+   - 验证采集、同步、上传、插件入口不能新建任务；
+   - 移除锁并确认恢复；
+   - 留存演练报告。
+6. 未拿到真实生产预检和完整演练记录前，不得进入 HC-3 或任何历史写入。
+
+### HC-1：消除双主写与 M3 冲突（代码，不做历史回填）
+
+必须解决：
+
+- 旧 MediaAsset 仍在新账本之前被直接写入；
+- 旧投影需要版本、时间戳和漂移对账；
+- expired_url 需要进入 needs_refresh/recollect，而不是旧失败路径；
+- 来源 URL 更新必须推进 generation/CAS，旧任务不得覆盖新来源；
+- cacheRawSnapshotMediaAssets / registerSourceMediaIdentities 的活跃 Usage 冲突必须有明确、可测试的语义；
+- M3 已标记的 13 条 drift 不能继续增长。
+
+目标是让新媒体只经 MediaLibrary 主写；旧 MediaAsset 在过渡期只能作为同事务兼容投影。此阶段先修机制、再产生可审计修复计划；不要直接覆盖历史数据。
+
+### HC-2：历史导入账本与最终统一 ReadModel（expand migration）
+
+需要新增能表达“历史已完整导入但关系未证明”的不可变导入账本，建议模型名：
+
+MediaLegacyImport
+
+每条旧 MediaAsset 必须恰好有一条导入记录，至少包括：
+
+- legacyMediaAssetId（唯一）
+- workspaceId
+- mediaItemId / mediaBlobId（可空但有状态说明）
+- importBatchId
+- importState
+- relationshipState
+- evidenceKind / evidenceFingerprint
+- reason
+- 受控 legacySnapshot
+- importedAt / verifiedAt
+
+状态必须能表达：
+
+- available
+- missing_file
+- failed_legacy
+- invalid_metadata
+- review_required
+- proven
+- unassigned
+- conflicted
+- not_applicable
+
+只能写 expand migration；严禁：
+
+- prisma migrate dev
+- prisma migrate reset
+- prisma db push
+- 删除旧表、旧文件或历史审计资料
+
+同时实现统一 ReadModel，明确输出 deliverable、missing、unassigned_historical、failed。页面、导出、AI 不得把旧 ready 或旧 URL 作为权威媒体事实。
+
+### HC-3：维护窗口冻结与正式生产基线
+
+只有 HC-0 和 HC-1 合格后才做。
+
+固定顺序：
+
+1. 启用维护锁。
+2. 排空可完成任务；无法完成的任务保留为可恢复状态并记录，不丢弃。
+3. 验证所有写入口静止。
+4. 做可恢复数据库备份并验证可读。
+5. 固定 cutoff：时间、Git SHA、migration 列表、相关表计数。
+6. 在 gongyong 真实数据上重跑只读基线、M3、M4、M5 审计。
+7. 保存完整 JSON，作为后续 batch 的不可覆盖证据。
+
+任一写入口还在写、备份不可验证、媒体基线失败或磁盘容量不足：停止，保持维护状态，不执行导入。
+
+### HC-4：全量物理与身份导入（有副作用）
+
+仅在 HC-3 完成且明确批准 importBatchId 后执行。
+
+必须实现独立受控 runner：
+
+- 固定 cutoff；
+- dry-run；
+- 显式 --apply；
+- importBatchId；
+- 分页 cursor；
+- checkpoint；
+- 幂等与可续跑；
+- 每批输入/输出/失败/missing/unassigned/conflicted 计数；
+- checksum 与物理文件核验；
+- 完整 JSON/NDJSON 审计输出；
+- 不泄露临时 URL、凭据或本地路径。
+
+验收硬条件：
+
+legacy MediaAsset 总数 = MediaLegacyImport 总数
+
+并且每条恰好一次。117 missing 全部保持 missing。无文件、失败和非法元数据也必须有明确导入结果，不能静默遗漏。
+
+### HC-5：关系重建与人工复核
+
+仅根据冻结前原始事实建立业务关系：
+
+- ContentAsset 身份
+- RawSnapshot
+- RawRecord
+- RawEvidence
+- 明确上传/选择操作事件
+- checksum
+- 可审计的同一来源证据
+
+可证明的内容封面、多图、视频，才写 ContentMediaUsage。
+可证明的 Topic 明确选择，才写 TopicMediaSelection。
+可证明的 Publication 预览/成品，才写 PublicationMedia。
+
+无法证明或多候选的记录必须保留为 unassigned/conflicted，并进入人工复核队列。绝不根据 URL 或 role 推断。
+
+### HC-6：统一读取切换
+
+在维护窗口内逐消费者切换，但目标是最终全部统一：
+
+- 普通页面
+- Topic
+- 内容材料
+- Archive
+- AI
+- Cover Library
+- Publication
+- 导出
+- CLI/API
+
+所有业务消费者都必须只读统一 ReadModel；不再允许 feature flag 回落 M0，也不允许旧 URL fallback。旧 MediaAsset 的业务读取静态盘点必须为 0，仅允许受控审计/血缘工具读取。
+
+### HC-7：恢复运营与旧表冻结
+
+先恢复只读页面、再恢复人工写入、Publication 同步、采集和 Outbox。
+观察一个完整保留周期。
+旧 MediaAsset 停止接收投影，冻结为只读审计档案。
+旧表/旧文件删除必须另开 HC-8，不属于本轮。
+
+## 安全规则
+
+严禁在 HC-0/HC-1/HC-2 或未通过 HC-3 前执行：
+
+- 任何历史回填
+- --apply
+- migration deploy（除已审查、已合并、已授权的 expand migration）
+- 媒体修复
+- 文件删除
+- prisma migrate dev
+- prisma migrate reset
+- prisma db push
+- 将 missing 改为 available
+- 根据旧 URL / role / ownerType 猜造新关系
+- 用其他机器的数据冒充 gongyong 生产结论
+
+每一步都先报告：
+- 当前 Git SHA 与分支
+- 目标运行环境
+- 是否只读/是否有写入
+- 真实审计计数
+- blocker
+- 下一步门禁
+
+现在先做 HC-0 的完整只读现场复核、写入口盘点和 PR 准备；不要直接执行 migration、回填或维护锁启用。
