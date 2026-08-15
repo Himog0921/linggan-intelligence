@@ -1,15 +1,22 @@
 # Linggan Intelligence
 
+> 状态: 权威当前
+> 最后核对: 2026-08-15
+> 适用范围: 项目总入口
+> 事实来源: 当前仓库、ACCEPTED ADR 与实际验证结果
+> 冲突时以谁为准: `AGENTS.md`、真实代码与运行证据
+
 Linggan Intelligence 是一个以可信证据为起点的领域情报系统。
 
 本仓库不是旧“内容工作台”的整体复制，也不是对已验证 V2 内核的盲目推倒重写。它以 Rust 和全新 PostgreSQL 数据库重新实现产品，同时把现役插件与 V2 合同作为可追溯参考资产。
 
 ## 从这里开始
 
-1. 阅读 [`docs/context/START-HERE.md`](docs/context/START-HERE.md)。
-2. 阅读 [`docs/product/PRD.md`](docs/product/PRD.md) 和 [`docs/architecture/target-architecture.md`](docs/architecture/target-architecture.md)。
-3. 按 [`docs/migration/action-plan.md`](docs/migration/action-plan.md) 推进，不直接复制旧数据库结构。
-4. 在安装 Rust 工具链后执行 `cargo test --workspace`。
+1. 先阅读 [`AGENTS.md`](AGENTS.md)，确认最高约束。
+2. 通过 [`docs/README.md`](docs/README.md) 进入文档地图。
+3. 查看 [`docs/current-state.md`](docs/current-state.md)，只处理当前已确认事项。
+4. 根据任务按需阅读产品、架构、运行手册或历史证据，不一次性加载整个 `references/`。
+5. 提交变更前运行 `./scripts/check-project-governance.sh`。
 
 ## 已确认边界
 
@@ -22,4 +29,4 @@ Linggan Intelligence 是一个以可信证据为起点的领域情报系统。
 
 ## 当前状态
 
-这是 `bootstrap` 固定点：项目结构、上下文、源码参考快照和迁移路线已建立；业务实现尚未开始。Rust 工具链在创建本固定点的电脑上尚未安装，因此不能把此骨架描述为已编译。
+项目仍处于业务实现前的准备阶段。当前机器的 Rust 工具链可用，但 PostgreSQL 16 客户端尚未就绪；具体以 [`docs/current-state.md`](docs/current-state.md) 和 `./scripts/new-machine-check.sh` 的实际结果为准。

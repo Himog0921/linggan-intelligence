@@ -1,5 +1,11 @@
 # 重建行动方案
 
+> 状态: 活跃计划
+> 最后核对: 2026-08-15
+> 适用范围: 从 Bootstrap 到情报闭环的阶段路线
+> 事实来源: 当前项目边界、目标架构和来源盘点
+> 冲突时以谁为准: `docs/current-state.md`、ACCEPTED ADR 和真实验证结果
+
 ## Phase 0：Bootstrap（当前交付）
 
 - 建立 Rust workspace、项目合同和来源固定点。

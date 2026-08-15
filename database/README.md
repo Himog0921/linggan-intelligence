@@ -1,5 +1,11 @@
 # 数据库交付边界
 
+> 状态: 权威当前
+> 最后核对: 2026-08-15
+> 适用范围: 新 PostgreSQL 数据库、migration、fixture 与秘密边界
+> 事实来源: ACCEPTED ADR、当前数据库目录和实际 migration
+> 冲突时以谁为准: ACCEPTED ADR 与实际新项目 migration
+
 本目录只承载 Linggan Intelligence 的全新数据库设计、migration 和脱敏 fixture。
 
 当前没有创建业务 DDL，因为 Capture Contract、Coverage、Author/Comment/Media Observation 仍需事实审计。提前建表会把讨论稿中的设想伪装为物理事实。

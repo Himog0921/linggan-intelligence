@@ -1,5 +1,11 @@
 # TypeScript V2 → Rust 模块迁移地图
 
+> 状态: 活跃计划
+> 最后核对: 2026-08-15
+> 适用范围: V2 参考能力到 Rust 模块的迁移顺序
+> 事实来源: 固定 V2 源码、fixture、测试与目标架构
+> 冲突时以谁为准: 真实 producer 合同、fixture 和目标 Rust 代码
+
 | 现役参考 | Rust 目标 | 迁移方式 |
 |---|---|---|
 | 插件 `protocol/v2` | `crates/contracts` | 保留真实 JSON fixture，Rust runtime validate |
