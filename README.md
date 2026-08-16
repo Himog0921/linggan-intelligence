@@ -1,7 +1,7 @@
 # Linggan Intelligence
 
 > 状态: 权威当前
-> 最后核对: 2026-08-15
+> 最后核对: 2026-08-16
 > 适用范围: 项目总入口
 > 事实来源: 当前仓库、ACCEPTED ADR 与实际验证结果
 > 冲突时以谁为准: `AGENTS.md`、真实代码与运行证据
@@ -18,6 +18,18 @@ Linggan Intelligence 是一个以可信证据为起点的领域情报系统。
 4. 根据任务按需阅读产品、架构、运行手册或历史证据，不一次性加载整个 `references/`。
 5. 提交变更前运行 `./scripts/check-project-governance.sh`。
 
+## 开发环境
+
+本项目使用“本机 Rust + Docker PostgreSQL 16”。第一次运行先启动 Docker Desktop，然后执行：
+
+```bash
+./scripts/setup-local-env.sh
+./scripts/dev-db.sh up
+./scripts/verify-development-environment.sh
+```
+
+详细说明见 [`docs/runbooks/development-environment.md`](docs/runbooks/development-environment.md)。
+
 ## 已确认边界
 
 - 后端与 worker 使用 Rust。
@@ -29,4 +41,4 @@ Linggan Intelligence 是一个以可信证据为起点的领域情报系统。
 
 ## 当前状态
 
-项目仍处于业务实现前的准备阶段。当前机器的 Rust 工具链可用，但 PostgreSQL 16 客户端尚未就绪；具体以 [`docs/current-state.md`](docs/current-state.md) 和 `./scripts/new-machine-check.sh` 的实际结果为准。
+项目仍处于业务实现前的准备阶段。Rust 与 Docker PostgreSQL 16 环境基线已建立；具体以 [`docs/current-state.md`](docs/current-state.md) 和完整环境验收脚本的实际结果为准。

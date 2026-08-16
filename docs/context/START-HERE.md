@@ -1,7 +1,7 @@
 # 新电脑启动入口
 
 > 状态: 权威当前
-> 最后核对: 2026-08-15
+> 最后核对: 2026-08-16
 > 适用范围: 新机器与新 Agent 的项目背景入口
 > 事实来源: Bootstrap 固定点、当前仓库和本机验证
 > 冲突时以谁为准: `docs/current-state.md`、真实工具输出与 ACCEPTED ADR
@@ -21,12 +21,12 @@
 
 ## 在另一台电脑上的顺序
 
-1. 安装 Git、Rust stable、PostgreSQL 16、Docker（可选）。
+1. 安装 Git、Rustup、Node 24 和 Docker Desktop；PostgreSQL 16 由 Docker 提供。
 2. 克隆或复制本仓库。
 3. 核对 `references/SOURCE-MANIFEST.sha256`。
 4. 阅读 `docs/decisions/0001-greenfield-rust-clean-db.md`。
-5. 运行 `cargo test --workspace`；如果 Rust 尚未安装，不得报告通过。
-6. 创建空 PostgreSQL 数据库，目标名建议 `linggan_intelligence_dev`。
+5. 运行 `./scripts/setup-local-env.sh` 和 `./scripts/dev-db.sh up`。
+6. 运行 `./scripts/verify-development-environment.sh`，用真实数据库副作用和 `cargo test --workspace --locked` 验收。
 7. 先完成合同与字段审计，再创建第一份数据库 migration。
 
 ## 不要做

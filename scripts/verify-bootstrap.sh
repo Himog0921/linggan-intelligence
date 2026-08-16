@@ -22,8 +22,11 @@ for path in "${required[@]}"; do
   fi
 done
 
-if find . -path './.git' -prune -o -type f \( -name '.env' -o -name '*.dump' -o -name '*.backup' -o -name '*.pem' -o -name '*.key' \) -print | grep -q .; then
-  echo "forbidden private artifact found in project" >&2
+if {
+  git ls-files
+  git ls-files --others --exclude-standard
+} | grep -E '(^|/)(\.env(\.[^/]*)?|[^/]+\.(dump|backup|pem|key))$' | grep -q .; then
+  echo "forbidden private artifact is visible to Git" >&2
   exit 1
 fi
 
