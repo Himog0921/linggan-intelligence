@@ -26,6 +26,7 @@
 | `apps/` | Rust 可执行程序组合入口，不存放计划或报告 |
 | `crates/` | Rust 模块源码，不存放一次性分析材料 |
 | `database/` | 全新 PostgreSQL migration、脱敏 fixture、数据库边界说明 |
+| `docs/agents/` | Agent 工程技能的仓库级配置、任务追踪规则、标签映射和领域文档消费规则；不得复制产品或架构真相 |
 | `docs/context/` | 当前项目背景和来源盘点 |
 | `docs/product/` | 产品定义、用户工作流和验收标准 |
 | `docs/architecture/` | 当前或目标架构与模块边界 |

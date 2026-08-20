@@ -23,6 +23,10 @@
 | [`governance/file-placement-standard.md`](governance/file-placement-standard.md) | 权威当前 | 文件分类、命名、放置、归档与生成物规则 |
 | [`governance/agent-collaboration.md`](governance/agent-collaboration.md) | 权威当前 | Agent 读取、任务、冲突、更新和验收流程 |
 | [`governance/generated-artifacts-registry.md`](governance/generated-artifacts-registry.md) | 权威当前 | 所有生成型文件的固定位置与入库许可 |
+| [`agents/issue-tracker.md`](agents/issue-tracker.md) | 权威当前 | GitHub Issues 的 Agent 任务追踪与授权边界 |
+| [`agents/triage-labels.md`](agents/triage-labels.md) | 权威当前 | GitHub Issue 的五类任务分流角色 |
+| [`agents/domain.md`](agents/domain.md) | 权威当前 | 工程技能读取 Linggan 领域语言、决策与不变量的适配规则 |
+| [`agents/scope-001-execution-contract.md`](agents/scope-001-execution-contract.md) | 权威当前 | SCOPE-001 的 Closed World、状态分责、unknown、语义 Oracle 与证明边界执行合同 |
 | [`context/START-HERE.md`](context/START-HERE.md) | 权威当前 | 新机器和新 Agent 的项目背景入口 |
 | [`context/current-system-inventory.md`](context/current-system-inventory.md) | 代码事实优先 | 固定来源资产及已证实能力盘点 |
 | [`context/discussion-decisions.md`](context/discussion-decisions.md) | 权威当前 | 已确认结论和待决定事项摘要 |
@@ -51,11 +55,13 @@
 | [`audits/gate-7-synthetic-task-walkthrough-2026-08-20.md`](audits/gate-7-synthetic-task-walkthrough-2026-08-20.md) | 一次性报告 | 用完全合成的“任务启动困难”负面场景走查今日关注、Topic、50/100 运行状态与外部 Agent CLI |
 | [`audits/pre-scope-001-readiness-2026-08-20.md`](audits/pre-scope-001-readiness-2026-08-20.md) | 一次性报告 | 不启动 SCOPE/代码的前提下预演首个 Content Evidence 切片的 fixture、数据库副作用、模块/文件预算和完成标准 |
 | [`audits/scope-001-final-adversarial-audit-2026-08-20.md`](audits/scope-001-final-adversarial-audit-2026-08-20.md) | 一次性报告 | 正式 SCOPE-001 的独立代码前审查；P0/P1/P2、修订结果和最终实施确认边界 |
+| [`audits/implementation-readiness-review-2026-08-20.md`](audits/implementation-readiness-review-2026-08-20.md) | 一次性报告 | 全项目正式编码前实施就绪终审；NO-GO 证据、P0/P1、15 个场景、真实最小闭环及主线 Agent 复核协议 |
 | [`runbooks/development-environment.md`](runbooks/development-environment.md) | 权威当前 | Rust 与 Docker PostgreSQL 16 的统一运行入口 |
-| [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一事项：独立审查已吸收、实施已获用户批准；代码前基线推送后进入 TDD |
+| [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一事项：实施已获批准；先通过代码前语义冻结 G1–G5，再进入合成事实内核 TDD |
 | [`plans/completed/disc-001-project-foundation-design.md`](plans/completed/disc-001-project-foundation-design.md) | 已完成计划 | 七道项目基础设计关口与 `USER-DEC-01`–`06` 的完成记录 |
 | [`plans/completed/env-001-development-environment.md`](plans/completed/env-001-development-environment.md) | 已完成计划 | ENV-001 的范围、执行和验收记录 |
 | [`plans/completed/gov-001-project-file-governance.md`](plans/completed/gov-001-project-file-governance.md) | 已完成计划 | GOV-001 的范围、交付和验收记录 |
+| [`plans/completed/gov-002-agent-skills-configuration.md`](plans/completed/gov-002-agent-skills-configuration.md) | 已完成计划 | Matt Pocock 工程技能、GitHub Issues、triage 与领域文档适配的配置记录 |
 | [`progress/README.md`](progress/README.md) | 权威当前 | 变更记录规则和月份索引 |
 | [`progress/2026-08.md`](progress/2026-08.md) | 权威当前 | 2026-08 的重要变更记录 |
 
@@ -71,6 +77,8 @@
 ## 按任务渐进读取
 
 - 项目管理或新增文件：先读 `governance/`，再读当前事项文档。
+- 使用 Matt Pocock 工程技能：先读 `agents/` 中与任务追踪、triage 或领域文档相关的配置，再进入当前 Issue 和直接关联文档。
+- 实施或审查 SCOPE-001：读取当前 SCOPE 后必须读取 `agents/scope-001-execution-contract.md`；未通过 G1–G5 时只允许收口规格和测试 Oracle。
 - 环境配置：读 `current-state.md`、[`runbooks/development-environment.md`](runbooks/development-environment.md) 和 `database/README.md`。
 - 产品讨论：读 `product/PRD.md`、`context/discussion-decisions.md` 和相关 ACCEPTED ADR。
 - 数据与 PostgreSQL 设计：先读 `architecture/data-architecture.md`；只有需要关系/基数时再读 `architecture/data-relations.md`，需要事务/并发/验收时再读 `architecture/data-consistency.md`，并同时遵守 `database/README.md` 和领域不变量；未确认草案不得直接生成 DDL。

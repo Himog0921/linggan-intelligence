@@ -49,4 +49,4 @@ Linggan Intelligence 是一个面向垂直领域的持续情报研究系统。�
 
 ## 当前状态
 
-`DISC-001` 七道基础设计关口已经完成，正式 `SCOPE-001` 的独立对抗审查、问题吸收和用户实施批准也已完成。Rust 与 Docker PostgreSQL 16 环境基线已建立；代码前设计基线推送后可以按 SCOPE 开始合成 fixture、两份 migration 与 Rust 事实内核。真实平台访问、AI Agent 内核和插件升级仍未获准开始。具体以 [`docs/current-state.md`](docs/current-state.md) 和完整环境验收脚本的实际结果为准。
+`DISC-001` 七道基础设计关口和正式 `SCOPE-001` 的合成切片授权已经完成，Rust 与 Docker PostgreSQL 16 环境基线也已建立。当前处于代码前语义冻结：必须先让 F01–F10 的逐层状态、unknown、正负 Oracle 和证明范围通过 G1–G5，再进入合成 fixture、两份 migration 与 Rust 事实内核 TDD。真实平台访问、AI Agent 内核和插件升级仍未获准开始。具体以 [`docs/current-state.md`](docs/current-state.md) 和完整环境验收脚本的实际结果为准。

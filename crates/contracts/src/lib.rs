@@ -1,4 +1,5 @@
-//! Versioned boundary contracts. No contract is added without a real producer fixture.
+//! Versioned boundary contracts. SCOPE-001 authorizes only the frozen
+//! `content-detail.synthetic.v1` proof contract; real producer contracts require a later scope.
 
 pub const BOOTSTRAP_CONTRACT_VERSION: &str = "unimplemented";
 

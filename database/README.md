@@ -1,16 +1,18 @@
 # 数据库交付边界
 
 > 状态: 权威当前
-> 最后核对: 2026-08-16
+> 最后核对: 2026-08-20
 > 适用范围: 新 PostgreSQL 数据库、migration、fixture 与秘密边界
 > 事实来源: ACCEPTED ADR、当前数据库目录和实际 migration
 > 冲突时以谁为准: ACCEPTED ADR 与实际新项目 migration
 
 本目录只承载 Linggan Intelligence 的全新数据库设计、migration 和脱敏 fixture。
 
-当前没有创建业务 DDL，因为 Capture Contract、Coverage、Author/Comment/Media Observation 仍需事实审计。提前建表会把讨论稿中的设想伪装为物理事实。
+当前 HEAD 没有业务 DDL。SCOPE-001 已经授权在代码门打开后创建且只创建两份 proof migration，用于合成 `content-detail.synthetic.v1` 的 Package/Record/Coverage、最小 Content Observation 与 Current；G1–G5 语义冻结和冻结后独立复核完成前仍不得创建。
 
-Gate 5 的数据分类、身份、版本、Current、隐私传播、统计资格和事务边界候选模型维护在 [`docs/architecture/data-architecture.md`](../docs/architecture/data-architecture.md)；候选基数与外键责任按渐进披露进入 [`docs/architecture/data-relations.md`](../docs/architecture/data-relations.md)，并发、重放、隐私传播与 PostgreSQL 验收进入 [`docs/architecture/data-consistency.md`](../docs/architecture/data-consistency.md)。三份文档在用户确认前均为草案；本目录不会因为概念模型存在就提前创建表、SQLx model 或 migration。
+该授权不证明真实 XHS producer、Raw Artifact、作者/评论/媒体、平台穷尽、趋势、AI Agent 或生产数据库设计。SCOPE-001 不创建通用 `evidence` 表、对象存储或真实平台 payload；需要这些能力时必须由后续 SCOPE 依据真实来源合同重新授权。
+
+Gate 5 的长期数据分类、身份、版本、Current、隐私传播、统计资格和事务边界候选模型维护在 [`docs/architecture/data-architecture.md`](../docs/architecture/data-architecture.md)；候选基数与外键责任按渐进披露进入 [`docs/architecture/data-relations.md`](../docs/architecture/data-relations.md)，并发、重放、隐私传播与 PostgreSQL 验收进入 [`docs/architecture/data-consistency.md`](../docs/architecture/data-consistency.md)。这些概念文档不直接授权物理表；当前物理范围只由 [`../docs/plans/active/scope-001-content-evidence-vertical-slice.md`](../docs/plans/active/scope-001-content-evidence-vertical-slice.md) 控制。
 
 ## 禁止进入 Git
 

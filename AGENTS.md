@@ -16,6 +16,24 @@
 
 以上规则高于 `references/`、历史 handoff、一次性报告及任务对话中的临时建议。具体分类和协作流程以 `docs/governance/` 为准。
 
+## Agent skills
+
+### Issue tracker
+
+本项目使用私有仓库 `Himog0921/linggan-intelligence` 的 GitHub Issues 追踪任务、问题、阻塞和 Agent 工作单；Issue 不是产品、架构或事实的第二权威来源。具体规则见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+任务分流使用 `needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix` 五个角色标签；标签只表达下一步责任，不替代事项编号、正式授权、文档状态或验收结果。具体映射见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+本项目采用单一领域上下文，但继续使用现有的 `docs/context/domain-language.md`、`docs/product/domain-invariants.md` 和 `docs/decisions/`，不复制根目录 `CONTEXT.md` 或 `docs/adr/`。Agent 的读取和冲突处理规则见 `docs/agents/domain.md`。
+
+### SCOPE-001 execution
+
+任何 Agent 在修改 SCOPE-001 的 fixture、migration、Rust、PostgreSQL、API、worker、CLI、测试或完成声明前，必须阅读 `docs/agents/scope-001-execution-contract.md` 和当前 SCOPE。当前切片采用 Closed World：未列能力不获授权，独立状态不压成总 `completed`，unknown 不变成默认值，低层不越权生成高层 Claim，任何通过声明必须携带证明与未证明范围。
+
 ## 目标
 
 构建能够持续观察世界、保存可追溯来源材料与版本化观察、发现变化并形成有证据边界的可行动情报系统。

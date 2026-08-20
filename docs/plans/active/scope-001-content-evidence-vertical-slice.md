@@ -23,7 +23,7 @@ SCOPE-001 选择以下最小垂直切片：
 
 采用 **API + minimal CLI**。CLI 只调用 API，不连接数据库；Web UI 不进入本切片。
 
-六项产品/架构决定已经确认，DISC-001 已退出。最终独立 Agent 对抗审查、问题吸收和 Mog 最后实施确认均已于 2026-08-20 完成。用户授权在代码前设计基线提交推送后，按本文范围创建 migration、fixture、Rust 业务实现、测试数据库角色和验证脚本；授权不包含真实平台、真实原文、插件改动、AI Agent 或后续产品切片。
+六项产品/架构决定已经确认，DISC-001 已退出。最终独立 Agent 对抗审查、问题吸收和 Mog 最后实施确认均已于 2026-08-20 完成。用户随后要求在业务代码前继续消除 Agent 的未经授权推断，并确认采用 Closed World、正负语义 Oracle 和证明边界；因此当前先完成本文的 G1–G5 语义冻结，五项全部通过后才按本文范围创建 migration、fixture、Rust 业务实现、测试数据库角色和验证脚本。授权不包含真实平台、真实原文、插件改动、AI Agent 或后续产品切片。
 
 ## 这条切片要证明什么
 
@@ -57,6 +57,26 @@ SCOPE-001 选择以下最小垂直切片：
 - 市场正在增长/下降，材料代表 ADHD 家庭，或现实中不存在未捕获对象；
 - 生产部署、备份恢复、RPO/RTO、多租户、MCP 或第三方 Agent 权限已经就绪。
 
+## 代码前 Agent 执行门
+
+任何 SCOPE-001 实现或审查先遵守 [`../../agents/scope-001-execution-contract.md`](../../agents/scope-001-execution-contract.md)。当前是 Closed World：本文未列出的业务状态、表、route、能力、兼容路径和副作用均未获授权。
+
+代码门只由五项条件开启：F01–F10 语义唯一；未列语义有停止规则；每个场景具备正负 Oracle；读取与结果能回到对应责任；验证声明同时携带 VERIFIED 与 NOT VERIFIED。任一条件未满足时，只允许修订规格、fixture 预期和测试设计，不创建业务 migration 或 Rust 业务实现。
+
+本切片对状态采用分责而非统一状态机：Ingress Delivery、Package Acceptance、Attempt Terminal、Capture Satisfaction、Record Processing Runtime、Record Processing Business Outcome、Observation Formation 和 Current Field Resolution 必须分别表达。不得用单一 `status`、`ok`、`completed` 或成功布尔值替代。
+
+### 当前代码门状态
+
+| Gate | 主线自审 | 当前证据 | 独立复核 |
+|---|---|---|---|
+| G1 语义唯一性 | YES | F01–F10 已有逐层状态、业务结果与最终数据库行数真值 | PENDING |
+| G2 禁止推断 | YES | Closed World、封闭枚举、拒绝代码与未列语义停止规则已经写明 | PENDING |
+| G3 负向约束 | YES | 每个 fixture 族和全部 rejectionCode 都有明确禁止结果/零副作用要求 | PENDING |
+| G4 证据边界 | YES | Package/Record/Observation/Current 分责，读取值与处理结果的来源责任已经固定 | PENDING |
+| G5 证明边界 | YES | Agent 合同要求每次报告同时给出 VERIFIED 与 NOT VERIFIED | PENDING |
+
+这里的 YES 只是本轮主线自审，不是第二双眼复核。五项独立复核全部通过前，整体代码门仍为 CLOSED。
+
 ## 入口与用户合同
 
 ### API routes
@@ -65,11 +85,32 @@ SCOPE-001 选择以下最小垂直切片：
 |---|---|---|---|
 | `POST /v1/capture/packages` | 为服务端已存在且仍有 authority 的 Attempt 提交一个终态 Package | accepted/replay/conflict/rejected receipt；accepted 时 Package、Record、Coverage 与 processing work 同事务成立 | 不创建 Work Order/Attempt，不接受客户端自授予 authority，不运行 Record 解析 |
 | `GET /v1/capture/receipts/{receipt_ref}` | 查询权威接入回执 | Package 接入、replay/conflict、Coverage 与处理水位 | 不把 Package accepted 写成对象已观察完成 |
-| `GET /v1/processing/{work_ref}` | 查询一个 Record processing work | ready/leased/succeeded/stopped/dead-letter 与业务结果类型 | 不把 worker succeeded 写成市场或研究成功 |
+| `GET /v1/processing/{work_ref}` | 查询一个 Record processing work | `ready/leased/finalized` 运行水位与独立业务结果 | 不把运行完成写成 Observation、市场或研究成功；本切片不预设未证明的 stopped/dead-letter 策略 |
 | `GET /v1/contents/{content_ref}` | 读取当前 Content | 有来源的 title/body、版本、水位和限制 | 不返回数据库自增 ID 或原始任意 payload |
 | `GET /v1/contents/{content_ref}/explain` | 解释 Current | 字段来源 Observation/Record/Package、时间、Coverage、policy、applicability | 不生成 AI 总结或趋势结论 |
 
-普通 API 不提供“创建 synthetic Work Order/Attempt”route。集成测试通过专用 test harness 在 proof database 预置获准目标；生产 build 不暴露这个入口。
+普通 API 不提供“创建 synthetic Work Order/Attempt”route。集成测试通过专用 test harness 在 proof database 预置获准目标；正常运行二进制不编译或暴露这个入口，“正常运行”不等于已经生产部署。
+
+Ingress receipt 的 outcome 使用封闭词表 `accepted | replay | conflict | rejected`。`conflict` 只表示同一 Capture Identity 已存在另一份合法 hash；`rejected` 必须带下列一个封闭 `rejectionCode`，不能用自由字符串代替程序判断：
+
+```text
+unauthenticated
+forbidden
+body_limit_exceeded
+package_schema_invalid
+canonicalization_invalid
+package_hash_invalid
+record_hash_invalid
+work_attempt_mismatch
+attempt_capture_mismatch
+lease_epoch_mismatch
+contract_mismatch
+target_mismatch
+authority_expired
+authority_revoked
+```
+
+具体 parser 错误可写入受控内部诊断，但不能扩张外部业务枚举、泄露凭据或让 `rejected` 自动终止 Attempt。无法归入上述代码的新失败先停止受影响入口并修订合同。
 
 ### CLI commands
 
@@ -117,6 +158,25 @@ CLI 只通过版本化 HTTP API 访问。它不能接收数据库 DSN，不能�
 ```
 
 `applicability` 只针对本次读取目的说明允许用途与尚未证明事项，不写回 Evidence 永久属性。unknown 必须显式表达，不能省略成 `0`、`false`、空数组或完整成功。
+
+本切片的 applicability 使用封闭词表，不接受自由文本：
+
+```text
+allowed
+- inspect_synthetic_observed_content
+- verify_synthetic_provenance
+- inspect_synthetic_processing
+
+notEstablished
+- real_platform_observation
+- source_completeness
+- representativeness
+- market_trend
+- user_need
+- market_opportunity
+```
+
+每个 route 只返回与本次读取目的相关的成员；空集合只表示该集合经规则判断确实没有成员，不能代替 unknown、未评估或无权限。`limitations` 必须明确本结果只属于合成 `content-detail.synthetic.v1`。
 
 ## Capture Package v1 合同
 
@@ -324,13 +384,90 @@ crates/contracts/tests/fixtures/capture-v1/
 | F-03 replay | 同 identity/hash 返回原 receipt；首次 accepted 后 authority 过期再重传同 hash，仍返回原 receipt | Package/Record/work/Observation 均不增加；只追加安全 replay delivery |
 | F-04 conflict | 同 identity、不同 hash fail closed | 不覆盖旧 hash/payload，不创建第二 Package/Evidence |
 | F-05 Package 身份错误 | 从合法 base fixture 分别变异 Attempt/Work/capture/epoch/contract/authority，每项独立拒绝 | 不产生 Package/Record/Observation；只留最小安全 delivery/failure audit |
-| F-06 单 Record 来源身份错误 | 合格 Package 内坏 Record 终止为 source identity conflict，其他成员正常 | 不回滚整包，不为坏 Record 建 Source Identity/Observation |
+| F-06 单 Record 隔离 | 基础场景证明 source identity conflict；独立 mutation 证明 record contract invalid；其他成员正常 | 不回滚整包，不为坏 Record 建 Source Identity/Observation |
 | F-07 迟到 Observation | 较早观察后接入，历史保留，Current 不倒退 | 不按 received/accepted/last-write 决定 Current |
 | F-08 来源差异 | 同一 observed time 不同来源对 title/body 给出不同值，field resolution 为 unresolved | 不取最大、平均或最后写入；双方 Observation 均保留 |
 | F-09 最大配额部分结果 | quota 100、取得 50、剩余范围 unknown | 不建 50 个未尝试对象，不显示 50% 完成或平台共 100 个 |
-| F-10 混合 Record | 6 个 Record 原子接入；4 个新对象、1 个复用身份并形成新 Observation、1 个 unresolved | 不等待全部解析才接入；不把身份复用记作 replay；不重复计数对象 |
+| F-10 混合 Record | 6 个 Record 原子接入；4 个新对象、1 个复用身份并形成新 Observation、1 个身份 unresolved；一个合格对象的 title 明确未观察 | 不等待全部解析才接入；不把身份复用记作 replay；不重复计数对象；不把未观察 title 变成空字符串 |
 
 fixture 只含合成英文/中文短文本和虚构身份，不包含真实 ADHD、儿童、账号、Cookie、Token、DSN 或旧 Evidence。
+
+### F01–F10 状态真值
+
+`manifest.json` 必须把下表逐层冻结；不允许测试或实现自行推导另一种总状态。表中的 Capture Satisfaction 只评价 producer 对冻结采集目标的交付，不评价 Record 是否最终形成 Observation。
+
+本表使用以下封闭表达：Ingress Delivery 只允许 `accepted/replay/conflict/rejected`；权威 Package 只允许“已存在 accepted Package”或“未创建”；Attempt 对读取者只允许 `open` 或 `terminal(target_reached|risk_control)`；`open` 只表示尚无终态 Package，不表示 authority 仍有效；processing runtime 只允许 `ready/leased/finalized`；每个 Record 的 Observation Formation 由业务结果确定为 `formed/not_formed`，不另建一个可漂移的总状态；每个 Current 字段只允许 `selected/unknown/unresolved`。
+
+| Fixture | Ingress Delivery | 权威 Package | Attempt | Capture Satisfaction | Processing runtime / business outcome | Observation Formation | Current Field Resolution |
+|---|---|---|---|---|---|---|---|
+| F-01 | accepted | accepted | terminal(target_reached) | satisfied | finalized×2；`observation_recorded`×2 | formed×2 | 两个 Content 的 title/body 均 selected |
+| F-02 | accepted | accepted | terminal(risk_control) | known_gap | finalized×2；`observation_recorded`×2 | formed×2；第 3 个目标无 Record | 两个 Content 的 title/body 均 selected |
+| F-03 | replay（发生在首次 accepted 后） | 保持原 accepted | 保持 terminal(target_reached) | 保持 satisfied | 不创建新 work/attempt/outcome | 不新增 | 保持原 revision/pointer |
+| F-04 | conflict（发生在首次 accepted 后） | 保持原 accepted | 保持 terminal(target_reached) | 保持 satisfied | 不创建新 work/attempt/outcome | 不新增 | 保持原 revision/pointer |
+| F-05 | rejected | 未创建 | open | not_evaluated | 无 processing work/outcome | not_formed | 无 Content/Current |
+| F-06A 身份冲突 | accepted | accepted | terminal(target_reached) | satisfied | finalized×2；`observation_recorded`×1；`source_identity_conflict`×1 | formed×1；not_formed×1 | 合格 Content 的 title/body selected |
+| F-06B Record 合同错误 mutation | accepted | accepted | terminal(target_reached) | satisfied | finalized×2；`observation_recorded`×1；`record_contract_invalid`×1 | formed×1；not_formed×1 | 合格 Content 的 title/body selected |
+| F-07 | 两个独立 Work 各 accepted 一次 | accepted×2 | 两个 Attempt 均 terminal(target_reached) | 两个 Work 均 satisfied | finalized×2；`observation_recorded`×2 | formed×2 | 第二次重算仍选择 observedAt 较新的第一次 Observation |
+| F-08 | 两个独立 Work 各 accepted 一次 | accepted×2 | 两个 Attempt 均 terminal(target_reached) | 两个 Work 均 satisfied | finalized×2；`observation_recorded`×2 | formed×2 | 最新同一时刻存在不同值，title/body 均 unresolved |
+| F-09 | accepted | accepted | terminal(risk_control) | unknown | finalized×50；`observation_recorded`×50 | formed×50 | 50 个 Content 的 title/body 均 selected；来源剩余范围仍 unknown |
+| F-10 | accepted | accepted | terminal(target_reached) | satisfied | finalized×6；`observation_recorded`×5；`source_identity_unresolved`×1 | formed×5；not_formed×1 | 4 个 Content 的 title/body selected；第 5 个 Content 的 title unknown、body selected |
+
+F-06A 与 F-06B 是同一 fixture 族中的两个独立 fresh-database mutation，不在同一个 Package 内同时运行。`record_contract_invalid` 仅用于：Record envelope 已通过 Package 最小硬门，但固定 `content-detail.synthetic.v1` payload 在逐 Record parser 中出现未知 payload schemaVersion、非法字段形状或违反已声明字段合同。Package 顶层 schema/contract 未知、任意顶层扩展字段或 Record envelope 无法安全枚举仍在 ingress 失败关闭，不能下沉到该 outcome。
+
+### F01–F10 数据库副作用真值
+
+下表记录每个场景全部 ordered steps 完成后的权威业务行数；`delivery` 包括 replay/conflict/rejected 的最小安全审计。F-05 每个 mutation 独立运行。F-10 的 fresh seed 预置且只预置一个没有 Observation/Current 的 `source_identity + source_content`，用于证明身份复用；其他场景不预置业务对象。
+
+| Fixture | Work / Attempt | delivery | Package | Record | target result | processing work | Source Identity / Content | Observation | Current revision | field source |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| F-01 | 1 / 1 | 1 | 1 | 2 | 2 | 2 | 2 / 2 | 2 | 2 | 4 |
+| F-02 | 1 / 1 | 1 | 1 | 2 | 3 | 2 | 2 / 2 | 2 | 2 | 4 |
+| F-03 | 1 / 1 | 2 | 1 | 2 | 2 | 2 | 2 / 2 | 2 | 2 | 4 |
+| F-04 | 1 / 1 | 2 | 1 | 2 | 2 | 2 | 2 / 2 | 2 | 2 | 4 |
+| F-05 | 1 / 1 | 1 | 0 | 0 | 0 | 0 | 0 / 0 | 0 | 0 | 0 |
+| F-06A | 1 / 1 | 1 | 1 | 2 | 2 | 2 | 1 / 1 | 1 | 1 | 2 |
+| F-06B | 1 / 1 | 1 | 1 | 2 | 2 | 2 | 1 / 1 | 1 | 1 | 2 |
+| F-07 | 2 / 2 | 2 | 2 | 2 | 2 | 2 | 1 / 1 | 2 | 2 | 4 |
+| F-08 | 2 / 2 | 2 | 2 | 2 | 2 | 2 | 1 / 1 | 2 | 2 | 6 |
+| F-09 | 1 / 1 | 1 | 1 | 50 | 0 | 50 | 50 / 50 | 50 | 50 | 100 |
+| F-10 | 1 / 1 | 1 | 1 | 6 | 6 | 6 | 5 / 5 | 5 | 5 | 9 |
+
+`field source` 只计算已发布 revision 的 title/body 固定来源行。F-07 第二个 revision 仍引用 observedAt 较新的第一次 Observation；F-08 的第一个 revision 有 2 条 selected source，第二个 unresolved revision 有 4 条 conflicting source。任何实现若产生不同数量，必须先修订本 Oracle，不能把差异解释成等价实现。
+
+F-05 的每个 mutation 必须单独冻结 Attempt 的 authority 前置状态：hash/合同/身份等请求错误在 authority 仍有效时允许修正后重新提交；authority 已过期时继续拒绝首次接入。一次 rejected HTTP delivery 不是终态 Package，也不能自行把 Work 标成失败、满足或完成。
+
+### Capture Satisfaction v1
+
+Capture Satisfaction 是从 accepted Package 的目标结果与 Coverage 重建的独立评估，不是 Work Order 的运行状态。尚无 accepted terminal Package 时显式为 `not_evaluated`，不能使用缺省字段表达。
+
+v1 只允许：
+
+| 值 | 唯一生成规则 |
+|---|---|
+| `not_evaluated` | 尚无 accepted terminal Package 可以评估；rejected delivery 不改变它 |
+| `satisfied` | known-set 每个冻结成员至少有一个 emitted 结果且没有未解决成员；或单一 maximum-quota Package 确实达到 limit、failed=0 |
+| `known_gap` | known-set 中仍有明确 failed/not_attempted 成员；或已经达到明确范围边界但存在可计数 failed 缺口 |
+| `unknown` | maximum-quota 在 limit 前停止且 remainingScope=unknown；任何已知失败计数也不能消除剩余范围未知 |
+
+`needs_decision` 不进入 v1 数据库枚举、API 或 fixture。是否值得补采属于后续 Acquisition Admission/Decision，不是采集目标满足程度。known-set 跨 Attempt 重建时 emitted 可以满足同一冻结目标，旧 failed/not_attempted 历史仍保留；maximum-quota 多个部分 Attempt 不得直接相加为 satisfied，因为本切片没有证明跨 Attempt 对象去重与来源范围可加性。
+
+### 正向与负向 Oracle
+
+每个 fixture 除了上表的正向结果，还必须在 manifest 固定负向 Oracle：
+
+- 所有场景：不得出现替代分责状态的总 `completed/ok/success`，不得让 Package accepted 自动生成 Observation；
+- F-02：不得出现 2/3、66.7% 等完成比例，不得为空缺成员创建 Record、Source Identity 或 Observation；
+- F-03/F-04：不得增加或覆盖权威业务行；
+- F-05：不得创建 accepted receipt 或任何 Package 下游行，不得因一次拒绝自动终止仍有 authority 的 Attempt；
+- F-06：不得因一条来源身份冲突回滚其他 Record，也不得给坏 Record 建空身份或空 Observation；
+- F-07：不得按 receivedAt、acceptedAt、insert 顺序或最后写入推进 Current；
+- F-08：不得选择最大值、平均值、任一来源或最后处理值；
+- F-09：不得出现 `completionRate=0.5`、`remaining=50`、`knownNotAttempted=50`、`sourceExhausted=true`、`target_reached` 或“平台共 100 个”；
+- F-10：不得把 Source Identity 复用记作 Package replay，不得把 unresolved 原料伪造成 Source Object/Observation；明确未观察的 title 必须保持 unknown，不得变成 `""`、`null` selected、`false` 或“无标题”。
+
+每个 `rejectionCode` 必须有独立请求、唯一预期和零业务副作用断言；不得用一个 generic invalid 测试代表全部拒绝原因。合法但不同 hash 才是 conflict，客户端 hash 错误必须是 rejected/package_hash_invalid，二者不得互换。
+
+上述禁止项必须覆盖合同、数据库、API/CLI JSON 与人类输出；字段改名不能绕过语义 Oracle。
 
 ## PostgreSQL 16 物理范围
 
@@ -358,14 +495,18 @@ database/migrations/0002_scope_001_content_observation.sql
 | `capture_package_target_result` | known-set 每个冻结成员在本 Package 的 emitted/failed/not-attempted 结果 | 每 Package/target 唯一；target 必须属于 Package 的 Work；emitted 必须组合引用同 Package Record；quota 没有该行族 |
 | `capture_package_coverage` | 本 Package 同单位 Coverage 与终止事实 | Package 1:1；basis-specific CHECK；unknown 不能被差额制造 |
 | `record_processing_work` | 只处理一个 accepted Capture Record 的持久工作 | `capture_record_id` 唯一；processor 固定 `content-detail-processor-v1`；typed FK，不使用任意 job payload JSON |
-| `record_processing_attempt` | worker claim/lease/epoch/finalize 历史 | `(work_id, epoch)` 唯一；旧 epoch 不能 finalize；业务 outcome 与运行状态分开列 |
+| `record_processing_attempt` | worker claim/lease/epoch/finalize 历史 | `(work_id, epoch)` 唯一；旧 epoch 不能 finalize；运行水位与封闭业务 outcome 分开列 |
 | `source_identity` | 极小来源身份注册 | `(source_system, namespace, object_type, external_id)` 唯一；无正文/Topic/指标/业务状态 |
 | `source_content` | 类型化 Content anchor 与公开引用 | `source_identity_id` 唯一；`public_ref` 唯一；current revision pointer 可空但只能指向自身 revision |
 | `content_observation` | 一次 Record 支持的类型化 Content 状态 | `capture_record_id` 唯一；只追加；title/body 各有 observed flag；时间与 parser version 分开 |
 | `content_current_revision` | 可重建、不可变的当前读取版本 | typed title/body 值、三态、policy/version/watermark；不做 EAV；来源集合由下表固定 |
 | `content_current_revision_field_source` | 固定每个 Current 字段当时采用或冲突的 Observation 集合 | `(revision_id, field_kind, observation_id)` 唯一；role 为 selected_support/conflicting_candidate；三者必须属于同一个 Source Content |
 
-`capture_work_order` 的目标满足程度与 Package 接入结果分责：Package 只说明交付是否 accepted/replay/conflict/rejected；Attempt 保存本次为何停止及实际 Coverage；Work Order satisfaction 从全部 Attempt/Package 重建为 satisfied/known_gap/unknown/needs_decision，不把部分 Package 冒充目标已满足。补采创建新 Attempt/Package，旧执行历史不改。
+`capture_work_order` 的 Capture Satisfaction 与 Package 接入结果分责：Package 只说明交付是否 accepted/replay/conflict/rejected；Attempt 保存本次为何停止及实际 Coverage；Capture Satisfaction 按上文封闭规则表达 not_evaluated/satisfied/known_gap/unknown，不把部分 Package 冒充目标已满足。补采创建新 Attempt/Package，旧执行历史不改。
+
+本切片不创建通用 `evidence` 表。通过最小接入硬门的 `capture_package`、`capture_record` 及其不可变血缘共同承担合成 Evidence 原料；Evidence 是接入资格与用途中的角色，不复制第二份 payload。SCOPE-001 也不创建 Raw Artifact 表、对象存储、HTML/截图/媒体或真实平台响应；真实 producer 合同证明需要 Artifact 时再开后续 SCOPE。
+
+长期领域模型允许一个 Observation 引用多份互补 Evidence；本合成 proof 有意收窄为一个 accepted Capture Record 最多形成一个 `content_observation`。该唯一约束只证明 `content-detail.synthetic.v1`，不得据此否定未来多 Evidence 血缘，也不得为未来提前创建万能连接图。
 
 下列跨表关系必须由数据库组合 FK、唯一/排除约束、deferred constraint trigger 或消除冗余字段直接保护，并有绕过 Rust facade 的 SQL 负例：Attempt/Capture 同属、Package/Work Target 同属、emitted Result/Record 同 Package、content-detail Package 内目标身份不重复、Coverage 与 Target Result/Record 聚合一致、Current/Observation/Content 同属、同一 Work 同时最多一个 active authority。不能只靠应用层“先查再写”。`source_content ↔ content_current_revision` 的创建顺序固定为先建可空 pointer 的 content，再建 observation/revision/source relation，最后增加或验证组合 FK；运行期先插完整 revision 再原子更新 pointer。
 
@@ -395,6 +536,19 @@ database/migrations/0002_scope_001_content_observation.sql
 
 claim 使用 PostgreSQL 行锁/`SKIP LOCKED` 或等价原子更新；每次领取增加单调 epoch 并建立 `record_processing_attempt`。finalize 在同一事务验证当前 epoch、lease 未过期、输入仍有效，然后追加 Source/Observation/Current 和工作结果。worker 崩溃时 lease 到期可由新 epoch 接管；旧 epoch 后到必须被数据库拒绝。
 
+运行水位只允许 `ready | leased | finalized`。`finalized` 表示 handler 已经原子固定一个业务结果，不等于必然形成 Observation。业务结果只允许：
+
+```text
+observation_recorded
+source_identity_unresolved
+source_identity_conflict
+record_contract_invalid
+```
+
+运行水位属于 `record_processing_work` 的权威读取结果，不在 `record_processing_attempt` 再维护第二个可漂移状态机：尚未 finalize 且没有未过期 lease 为 `ready`；尚未 finalize 且当前 epoch 的 lease 未过期为 `leased`；工作已固定业务结果为 `finalized`。每条 processing attempt 只记录 epoch、claim/lease 时间、可空 finalizedAt 和本次运行错误审计。崩溃后旧 lease 过期，Work 重新读取为 `ready`；旧 attempt 历史保留，不能改写成业务 outcome。
+
+后面三种是处理器成功识别出的确定业务结果，不伪装成运行失败，也不创建空 Source Identity/Observation。进程崩溃、数据库暂不可用或旧 epoch 被拒绝属于运行尝试失败；lease 到期后回到可接管状态，不在没有重试预算和真实故障策略的情况下发明 stopped/dead-letter。API/CLI 必须同时返回运行水位和业务结果，不能用 `succeeded` 一个词吞并二者。
+
 SCOPE-001 只允许固定的 `content-detail-processor-v1`。同一 Record 不在本切片以新 parser version 重解释；任何第二 processor version 必须失败关闭，不得 UPDATE 旧 Observation 或伪造新世界 Observation。parser 重处理等到后续 SCOPE 明确引入 Interpretation Revision 后再开放。
 
 ### 数据库角色
@@ -423,11 +577,11 @@ caller authentication + canonical/hash
 → known target result(s)
 → capture_package_coverage
 → record_processing_work(s)
-→ freeze Attempt terminal relation and re-evaluate Work satisfaction
+→ freeze Attempt terminal relation and re-evaluate Capture Satisfaction
 → authoritative receipt
 ```
 
-逐 Record parser、Source Identity、Observation 和 Current 不在该事务内。Package 事务故障注入点至少覆盖 Package 后、Record 中途、Coverage 前和 work 中途；任一点失败时 accepted 业务行全部为 0，安全请求日志不能冒充 accepted receipt。合法 replay 只返回原 receipt 并追加最小 delivery，不重写 Attempt 终态或 Work satisfaction。
+逐 Record parser、Source Identity、Observation 和 Current 不在该事务内。Package 事务故障注入点至少覆盖 Package 后、Record 中途、Coverage 前和 work 中途；任一点失败时 accepted 业务行全部为 0，安全请求日志不能冒充 accepted receipt。合法 replay 只返回原 receipt 并追加最小 delivery，不重写 Attempt 终态或 Capture Satisfaction。
 
 ### Record processing 事务
 
@@ -598,6 +752,7 @@ docs/progress/2026-08.md
 
 ## TDD 执行顺序与阶段退出
 
+0. **语义代码门** → verify：G1–G5 逐项有可检查证据，冻结后的本文与 Agent 执行合同再经过一次独立只读对抗复核；存在新增 P0/P1 时继续修规格，不进入业务代码。
 1. **合同与 fixture** → verify：F-01–F-10 独立场景、known-set 逐成员结果、JCS 固定 golden + Node/reference 复核、I-JSON/资源上限、unknown/目标语义负例先失败再通过。
 2. **空库 migration 与权限** → verify：随机 proof DB 从零重放两份 migration；运行角色不能 DDL、UPDATE/DELETE 不可变历史，组合 FK/聚合/同属约束能拒绝绕过 Rust 的串错 SQL。
 3. **Package ingress** → verify：认证、accepted/replay/conflict/rejected、authority 过期后的合法 replay、F-02/F-09、事务中途故障和数据库行数/约束同时通过。
@@ -628,22 +783,23 @@ cargo test --workspace --all-targets --all-features --locked
 
 只有以下全部成立，SCOPE-001 的实现才可报告完成：
 
-1. F-01–F-10 每组都有独立 seed/步骤/预期；F-05 mutation、authority 过期 replay 和 JCS/I-JSON 攻击性负例可以单独运行；
-2. API/module receipt 与真实 PostgreSQL 行、唯一约束、权限和事务副作用同时成立；
-3. known-set 逐目标 emitted/failed/not_attempted 与 Record 映射可追溯，2/3 与 quota 50/100 在数据库、API、CLI 中保持不同语义；
-4. accepted Package 不等待逐 Record 解析；坏 Record 不连坐其他成员；
-5. replay 不重复、authority 过期后的同 hash replay 可返回原 receipt、conflict 不覆盖、normal re-observation 不被误叫 replay；
-6. authority/worker 旧 epoch 都不能写入受保护事实；
-7. Source Identity 并发唯一，unresolved 不制造对象；
-8. Content Observation 只追加，迟到历史不丢，Current 不按最后写入倒退；
-9. title/body 的 selected/unresolved 都固定完整支持或冲突来源集合，并能追到 Observation、Record、Package 与合同版本；
-10. API/CLI 明确返回 scope、四类时间、版本、Coverage、applicability、limitations、provenance 和 processing；
-11. API、worker 或 CLI 重启后历史仍存在，未完成 work 可安全接管；
-12. 运行角色不能修改不可变历史、串接不同父对象或执行 DDL；API 有最小本地认证，CLI 无数据库旁路；
-13. 文件规模与依赖方向自动门通过，没有巨型文件或万能模块；
-14. 没有真实平台访问、旧库连接、未脱敏数据、secret、fallback 或静默降级；
-15. 所有统一验证命令通过，且数据库副作用证据被记录为脱敏计数/hash/receipt，不提交 dump；
-16. 交付措辞只允许“合成事实链实现证明通过”，不得报告 Linggan 已可日常使用、真实采集已接通或市场情报闭环已上线。
+1. G1–G5 已在代码前全部通过，冻结版本经过一次独立对抗复核且没有未关闭的 P0/P1 语义歧义；
+2. F-01–F-10 每组都有独立 seed/步骤/预期；F-05 mutation、authority 过期 replay 和 JCS/I-JSON 攻击性负例可以单独运行；
+3. API/module receipt 与真实 PostgreSQL 行、唯一约束、权限和事务副作用同时成立；
+4. known-set 逐目标 emitted/failed/not_attempted 与 Record 映射可追溯，2/3 与 quota 50/100 在数据库、API、CLI 中保持不同语义；
+5. accepted Package 不等待逐 Record 解析；坏 Record 不连坐其他成员；
+6. replay 不重复、authority 过期后的同 hash replay 可返回原 receipt、conflict 不覆盖、normal re-observation 不被误叫 replay；
+7. authority/worker 旧 epoch 都不能写入受保护事实；
+8. Source Identity 并发唯一，unresolved 不制造对象；
+9. Content Observation 只追加，迟到历史不丢，Current 不按最后写入倒退；
+10. title/body 的 selected/unresolved 都固定完整支持或冲突来源集合，并能追到 Observation、Record、Package 与合同版本；
+11. API/CLI 明确返回 scope、四类时间、版本、Coverage、applicability、limitations、provenance 和 processing；
+12. API、worker 或 CLI 重启后历史仍存在，未完成 work 可安全接管；
+13. 运行角色不能修改不可变历史、串接不同父对象或执行 DDL；API 有最小本地认证，CLI 无数据库旁路；
+14. 文件规模与依赖方向自动门通过，没有巨型文件或万能模块；
+15. 没有真实平台访问、旧库连接、未脱敏数据、secret、fallback 或静默降级；
+16. 所有统一验证命令通过，且数据库副作用证据被记录为脱敏计数/hash/receipt，不提交 dump；
+17. 交付措辞只允许“合成事实链实现证明通过”，不得报告 Linggan 已可日常使用、真实采集已接通或市场情报闭环已上线。
 
 任何一项缺失，只能报告“完成到哪一层”，不能把 HTTP 200、类型、编译、mock、fixture schema 或 worker succeeded 单独称为端到端完成。
 
@@ -677,6 +833,12 @@ SCOPE-001 完成也不自动授权：
 
 ### 2026-08-20 独立审查结果
 
-独立只读审查原结论为“条件通过”，发现 1 个 P0、7 个 P1 和 5 个 P2。P0/P1 已全部修入本文：known-set 逐目标结果、authority 过期后的合法 replay、最小本地认证、独立 JCS/I-JSON 证明、组合数据库约束、Current 固定来源集合、单一 processor v1，以及 Package/Attempt/Work satisfaction 分责。P2 的场景独立、支撑文件白名单、可靠代码门、草案状态和实现证明口径也已吸收。
+独立只读审查原结论为“条件通过”，发现 1 个 P0、7 个 P1 和 5 个 P2。P0/P1 已全部修入本文：known-set 逐目标结果、authority 过期后的合法 replay、最小本地认证、独立 JCS/I-JSON 证明、组合数据库约束、Current 固定来源集合、单一 processor v1，以及 Package/Attempt/Capture Satisfaction 分责。P2 的场景独立、支撑文件白名单、可靠代码门、草案状态和实现证明口径也已吸收。
 
 完整记录见 [`../../audits/scope-001-final-adversarial-audit-2026-08-20.md`](../../audits/scope-001-final-adversarial-audit-2026-08-20.md)。用户随后已明确批准按修订后的 SCOPE-001 开始实现；本次授权仍受本文的合成数据、文件白名单、数据库安全与后续切片硬停止线约束。
+
+### 2026-08-20 语义冻结后的复核要求
+
+实施就绪终审随后指出：早先审查虽然裁定了范围和结构，但仍可能让不同 Agent 把分责状态压成总成功、用默认值吞掉 unknown、越过 Claim 层级或放大证明范围。用户已确认以 G1–G5、正负 Oracle 和 [`../../agents/scope-001-execution-contract.md`](../../agents/scope-001-execution-contract.md) 消除这些执行歧义。
+
+因此早先独立审查不替代冻结后的最终复核。当前代码门保持关闭；完成本轮文档收口后必须对同一冻结版本再做一次独立只读对抗复核。复核只判断 G1–G5 是否真正唯一、是否仍需 Agent 猜测，不借机扩大到真实插件、Raw Artifact、AI Agent 或全产品实现。
