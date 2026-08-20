@@ -10,6 +10,8 @@
 
 当前没有创建业务 DDL，因为 Capture Contract、Coverage、Author/Comment/Media Observation 仍需事实审计。提前建表会把讨论稿中的设想伪装为物理事实。
 
+Gate 5 的数据分类、身份、版本、Current、隐私传播、统计资格和事务边界候选模型维护在 [`docs/architecture/data-architecture.md`](../docs/architecture/data-architecture.md)；候选基数与外键责任按渐进披露进入 [`docs/architecture/data-relations.md`](../docs/architecture/data-relations.md)，并发、重放、隐私传播与 PostgreSQL 验收进入 [`docs/architecture/data-consistency.md`](../docs/architecture/data-consistency.md)。三份文档在用户确认前均为草案；本目录不会因为概念模型存在就提前创建表、SQLx model 或 migration。
+
 ## 禁止进入 Git
 
 - 旧数据库 dump。
