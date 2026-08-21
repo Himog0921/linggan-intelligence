@@ -2,7 +2,7 @@
 
 ## Related Issue and authority
 
-- Closes #
+- Refs #
 - Active SCOPE / accepted decision / explicit authority:
 - Base commit:
 - Execution Agent / task-id:
@@ -42,7 +42,7 @@
 
 - Exclusive files changed:
 - Shared files changed:
-- Integration owner and required merge order:
+- Integration owner task-id and required merge order:
 - Known parallel branches or conflicts:
 
 ## Completion layers
@@ -74,3 +74,4 @@
 - [ ] Independent review is complete for the current head commit.
 - [ ] Integration owner has confirmed shared-file order and conflicts.
 - [ ] Deploy and business acceptance have not been inferred from merge readiness.
+- [ ] PR uses `Refs #`; after merge, main/docs will be re-verified, completion layers recorded, and the Issue closed manually.

@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        This form creates a work request, not implementation authority. A coordinator must confirm authority, dependencies, file ownership, and `ready-for-agent` before an execution Agent may Claim it.
+        This form creates a work request, not a Claim, completion report, or implementation authority. At request time, provide authority, goal/scope, dependencies, proposed file boundaries, acceptance, validation plan, stop/escalation, and completion requirements. A coordinator must manually verify every required field before assignment and `ready-for-agent`; GitHub `required` metadata is only a form hint in this private repository and is not the enforcement gate.
 
   - type: textarea
     id: scope_authority
@@ -40,26 +40,13 @@ body:
       required: true
 
   - type: textarea
-    id: execution_identity
-    attributes:
-      label: Agent identity and isolated Git workspace
-      description: Record the execution Agent/task-id, exact base commit, branch, and independent worktree path. Shared root main is forbidden for repository writes.
-      placeholder: |
-        Agent / task-id:
-        Base commit:
-        Branch:
-        Worktree:
-    validations:
-      required: true
-
-  - type: textarea
     id: file_ownership
     attributes:
-      label: Exclusive, shared, and forbidden files
-      description: Give explicit paths or bounded globs. Shared files require an integration owner; everything outside the allowed set remains forbidden.
+      label: Proposed exclusive, shared, and forbidden files
+      description: Give explicit paths or bounded globs. The coordinator confirms ownership before assignment; the later Claim records the assigned Agent, exact base/branch/worktree, start time, and final ownership. Everything outside the allowed set remains forbidden.
       placeholder: |
-        Exclusive files:
-        Shared files and integration owner:
+        Proposed exclusive files:
+        Proposed shared files:
         Forbidden files:
     validations:
       required: true
@@ -74,12 +61,12 @@ body:
       required: true
 
   - type: textarea
-    id: tests_and_proofs
+    id: validation_plan
     attributes:
-      label: Tests and proof commands
-      description: List exact checks and the real side effects or artifacts they prove. Mark checks that require credentials or external state.
+      label: Validation plan
+      description: List planned checks, expected proof, and external prerequisites. Actual commands/results belong in the later PR and handoff.
       placeholder: |
-        Commands:
+        Planned checks:
         Expected evidence:
         External prerequisites:
     validations:
@@ -95,18 +82,13 @@ body:
       required: true
 
   - type: textarea
-    id: completion_evidence
+    id: completion_requirements
     attributes:
-      label: Completion layers, proved, and not proved
-      description: Report Design, Code, Automated checks, Real-chain proof, Deploy, and Mog acceptance separately; then state proved and not proved boundaries.
+      label: Completion reporting requirements
+      description: State which Design, Code, Automated, Real-chain, Deploy, Mog acceptance, Proved, and Not proved layers the future handoff must report. Do not invent actual results at Issue creation.
       placeholder: |
-        Design:
-        Code:
-        Automated:
-        Real-chain:
-        Deploy:
-        Mog acceptance:
-        Proved:
-        Not proved:
+        Required completion layers:
+        Required proof boundaries:
+        Layers expected to be N/A or NOT VERIFIED:
     validations:
       required: true

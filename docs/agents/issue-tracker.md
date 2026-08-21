@@ -36,21 +36,33 @@ Issue 是工作入口，不是第二事实源，也不是自动授权书。
 
 本项目采用中央派单，不允许 Agent 自由抢单。协调者先确认目标、正式授权、依赖、文件所有权和验收，再把 Issue 标为 `ready-for-agent`；执行 Agent 只能领取明确分配给自己的 Issue。
 
-标准链路是：
+标准链路分成四个阶段，不能在 Issue 创建时提前填写未来事实：
 
 ```text
-Issue 已确认并分配
+Issue request
+→ coordinator 人工核对、ready/assignment
 → Claim 评论
 → 独立 branch + worktree
 → 有界修改与验证
 → draft PR
 → independent review
 → integration owner 按序合并
+→ 重新核验 main 与正式文档
 → 分层记录完成证据
-→ 满足关闭条件后关闭 Issue
+→ 手工关闭 Issue
 ```
 
-### Claim 协议
+### 阶段 1：Issue request
+
+Issue Form 在创建时只要求：SCOPE/authority、goal、in/out、dependencies、候选文件边界、acceptance、validation plan、stop/escalation 和 completion requirements。它不要求填写尚未发生的 Agent、exact base、branch、worktree、实际验证结果或完成证据。
+
+本仓库是 private repository，Issue Form 中的 `validations.required` 只作为表单提示，不能当成可靠执行门。coordinator 必须人工检查字段完整、权威有效、依赖已解、文件范围可分配、停止条件清楚，才能赋 assignee 和 `ready-for-agent`；不得用占位符骗过表单后直接 Claim。
+
+### 阶段 2：Coordinator ready 与 assignment
+
+coordinator 决定是否可以派单，并在 Issue 正文或评论中明确执行 Agent、exclusive/shared/forbidden 文件、integration owner 与依赖。涉及产品、领域、架构、真实权限或多个 Issue/PR 的事项必须先完成对应决定或 active plan，不能靠标签放行。
+
+### 阶段 3：Claim 协议
 
 任何仓库写入开始前，执行 Agent 必须在 Issue 评论中留下 Claim，至少包含：
 
@@ -60,13 +72,15 @@ Issue 已确认并分配
 - exclusive files、shared files 与 forbidden files；
 - 开始时间、依赖和停止条件。
 
-同一个 Issue 同一时间只能有一个执行 Agent。协作者、reviewer 和 integration owner 可以存在，但不能在同一 Issue 下形成第二个未声明的执行分支。使用相同 GitHub 账号的所有 Agent 必须靠 task-id、Claim 和 commit/PR 证据区分责任，不能把共同账号当成执行身份。
+同一个 Issue 同一时间只能有一个执行 Agent。协作者、reviewer 和 integration owner 可以存在，但不能在同一 Issue 下形成第二个未声明的执行分支。使用相同 GitHub 账号的所有 Agent 必须靠稳定 task-id、Claim 和 exact commit/PR 证据区分责任，不能把共同账号当成执行身份。实现者不能是最终 reviewer 或最终 integrator。
 
 本项目没有额外的 `in-progress` triage 标签。执行中由 Claim 评论和 assignee 表达；`ready-for-agent` 可以保留，因为它说明任务仍是机器可执行的有界工作，不代表尚未被领取。
 
 ### 分支、worktree 与文件所有权
 
 所有仓库修改都必须发生在 Issue 专属 feature branch 和独立 worktree。禁止编码 Agent 在共享 root checkout 或其 `main` 分支直接编辑、提交或暂存文件；root checkout 只用于核对和集成，不是并行执行工作区。
+
+纯只读调查或审查没有仓库写入，可以不创建 worktree/PR；一旦需要把结果写回仓库，就必须先完成 Issue/Claim，并走独立 branch/worktree + PR。
 
 Issue 必须把文件分为：
 
@@ -76,13 +90,24 @@ Issue 必须把文件分为：
 
 执行 Agent 不得通过扩大 glob、顺手重构或修改相邻文档绕过所有权。共享文件出现并行变化时，执行 Agent 保留自己的有界补丁和证据，由 integration owner 在独立集成步骤中按已声明顺序处理；禁止在任一执行 worktree 中擅自吸收其他任务。
 
-### Pull Request、审查和集成
+### 阶段 4：Pull Request、handoff、审查和集成
 
-仓库变更通过 draft PR 交付。PR 必须关联主 Issue/SCOPE，使用模板报告修改范围、非目标、验证、数据库/外部副作用、proved/not proved、共享文件和分层完成证据。
+仓库变更通过 draft PR 交付。PR 默认使用 `Refs #<issue>`，不能用 `Closes` 跳过合并后核验。PR 必须关联主 Issue/SCOPE，使用模板报告修改范围、非目标、实际验证、数据库/外部副作用、proved/not proved、共享文件和分层完成证据。
 
-实现者不能作为最终独立 reviewer。reviewer 必须审查 PR 当前 head commit，并给出 `PASS` 或带可执行发现的 `FAIL`；代码可合并性、模板勾选或自动检查通过都不能代替 independent review。修订后需要复核受影响的新 head。
+实现者不能作为最终独立 reviewer 或最终 integrator。reviewer 和 integration owner 都必须使用稳定 task-id；reviewer 必须审查 PR 当前 exact head commit，并给出 `PASS` 或带可执行发现的 `FAIL`。代码可合并性、模板勾选或自动检查通过都不能代替 independent review，修订后需要复核新 head。
 
-integration owner 负责按依赖和共享文件顺序合并已通过审查的 PR。执行 Agent 不自行 merge；同一批并行 PR 不通过“最后一起解决冲突”压缩来源或责任。
+integration owner 负责按依赖和共享文件顺序合并已通过审查的 PR。执行 Agent 不自行 merge；同一批并行 PR 不通过“最后一起解决冲突”压缩来源或责任。合并后由 integration owner 重新核验 main、正式文档与实际副作用，追加完成层级记录，再手工关闭 Issue。
+
+### 小型工作单与 active plan
+
+小型、低风险、单 Issue/单 PR 工作可以不建立独立 `docs/plans/active/` 计划，但必须同时满足：
+
+1. 已有 SCOPE、ACCEPTED 治理规则或用户明确授权；
+2. 不改变产品含义、领域含义、系统架构、真实权限、生产或敏感数据范围；
+3. 不跨多个 Issue 或 PR；
+4. Issue 已完整写明验收、验证计划、文件边界、停止/升级条件和完成报告要求。
+
+任一条件不满足，就必须先建立 active plan。这个例外只降低重复文档成本，不降低 Claim、worktree、PR、review、integration、进度记录或证明边界。
 
 ### 没有 GitHub 自动保护时的人工门禁
 
@@ -92,8 +117,9 @@ integration owner 负责按依赖和共享文件顺序合并已通过审查的 P
 2. 独立 worktree/branch；
 3. draft PR 和模板完整报告；
 4. 与实现者不同的 reviewer 结论；
-5. integration owner 的合并次序确认；
-6. 合并后对目标 branch 和正式文档状态的重新核验。
+5. 带稳定 task-id 的 integration owner 合并次序确认；
+6. 合并后对目标 branch 和正式文档状态的重新核验；
+7. 分层完成记录与手工 Issue close。
 
 任一证据缺失都不得用“GitHub 允许 Merge”替代。
 
@@ -110,7 +136,7 @@ Issue close 不得把不同完成层压成一个 `done`。关闭评论和正式�
 - Proved；
 - Not proved。
 
-不适用的层标 `N/A` 并说明理由；未发生的层标 `NOT VERIFIED`。PR merge 不能自动证明部署、真实链路或业务验收，Issue close 也不能改写这些边界。
+不适用的层标 `N/A` 并说明理由；未发生的层标 `NOT VERIFIED`。PR merge 不能自动证明部署、真实链路或业务验收。Issue 只能在 merge 后核验和分层记录完成后手工关闭，close 也不能改写这些边界。
 
 ## 基本操作
 
