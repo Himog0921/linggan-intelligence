@@ -12,12 +12,14 @@
 
 [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) 的 `product-shell` 与 `primary-daily-job` 已 resolved：Linggan Intelligence 是独立且完整的 Web 产品；每天先让 Mog 处理少量值得关注事项，理解来源、出现原因与不确定性，再决定暂不处理、继续观察、进入 Topic 深入或提出行动。内容工作台只是历史原型和能力样本，不是运行时依赖；首页五个名称是产品职责，不是五个已授权运行实例。这里确认的是产品身份和日常用户任务，不表示 Web、P0 或 Agent 已获实现授权。ARC-001 当前已解锁但未回答的票是 `p0-surface-prototype` 与 `first-producer-canary`。
 
+当前唯一获准的**业务实施**仍是 `SCOPE-001 / F01`。`GOV-003` 是并行进行的低风险单 Issue/单 PR 治理工作单，不是第二个业务 SCOPE：GitHub [Issue #1](https://github.com/Himog0921/linggan-intelligence/issues/1) 与 draft [PR #2](https://github.com/Himog0921/linggan-intelligence/pull/2) 已建立，但 independent review 对旧 head `a7b63c365c7d3befccc54fd42586c48fe0f22542` 的结论为 **FAIL**，当前只允许在同一 branch/worktree 内修订并请求原 reviewer 复核；不得 merge、close 或把 GOV-003 记为完成。
+
 全项目已正式按“开发阶段”跟踪；阶段路线、每阶段验收证据与需要 Mog 决定的关口统一见 [`development-stage-tracker.md`](development-stage-tracker.md)。本文继续只维护当前快照和唯一下一步，不复制长期路线。
 
 已确认事实：
 
 - GOV-001 已在 commit `73a6dd928a3be01d642efa9aa4c6c5e293c944cf` 推送至 `origin/main`。
-- 代码前语义冻结基线已在 commit `9801fdf5deb55e1b3fc5b8ac2c43234be295a42d` 使用 GitHub noreply 身份推送至 `origin/main`；该推送完成时本地与远端为 `0/0` 分歧。当前本轮修订是后续未提交工作，不得把两个状态混报。
+- 代码前语义冻结基线 `9801fdf5deb55e1b3fc5b8ac2c43234be295a42d` 之后的 6 个提交（截至 `64a2141`），以及 F01 ingress 实现 `a45cc61` 和证明记录 `d88fd87`，均已使用 GitHub noreply 身份推送至 `origin/main`。启动 GOV-003 前重新核实 root checkout 为 clean `main @ d88fd8715051aa15da9eeb6860770a03eaad67f6`；这只证明该时点 Git 同步状态，不证明 Issue → worktree → PR → independent review 协作链已跑通。GOV-003 只有在对应 PR 合并并重新核验后才进入当前完成记录。
 - 当前机器已有 Git、Rust 和 Cargo。
 - Docker PostgreSQL 16.14 已完成真实验证；日常是否正在运行以 `./scripts/dev-db.sh status` 为准。
 - ENV-001 采用本机 Rust + Docker PostgreSQL 16，容器内 `psql` 与 `pg_restore` 已通过真实验证。
@@ -67,6 +69,7 @@
 | 4 | DISC-001 | 产品定义、领域语言、不变量与责任边界基线 | 已完成 | 七道设计关口与 `USER-DEC-01`–`06` 已确认；不代表完整产品形态或物理技术架构完成 |
 | 5 | SCOPE-001 | synthetic fact-kernel technical tracer | 执行中（F01 主链） | 完成 Package → PostgreSQL atomic ingress → two Records → Observation/Current → loopback API → minimal CLI 后 hard stop；不是用户可见产品切片 |
 | 6 | ARC-001 | 产品与系统架构收口决策图 | 进行中（决策） | `product-shell`、`primary-daily-job` 已解决；P0 原型与 producer Canary 两票已解锁但未回答，最后由 Mog 批准首个用户可见 SCOPE |
+| 7 | GOV-003 | 外部 Agent Issue → worktree → PR 协作闭环 | 修订中（review FAIL） | 同一 PR 新 head 通过独立复核；integrator 合并后重新核验 main/正式文档、记录完成层并手工关闭 Issue；不是第二业务 SCOPE |
 
 同一时间默认只允许一个事项处于“执行中”。状态流转为：`待讨论 → 需要决定 → 已确认 → 执行中 → 验证中 → 已完成`。来源不足使用 `SOURCE_INCOMPLETE`；必须由用户决定的边界使用 `DECISION_REQUIRED`；外部条件无法继续时使用 `BLOCKED`。
 

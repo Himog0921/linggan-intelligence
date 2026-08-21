@@ -1,0 +1,94 @@
+name: Agent work item
+description: Create a centrally assigned, evidence-bounded work item for one execution Agent.
+title: "[WORK] "
+labels:
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form creates a work request, not a Claim, completion report, or implementation authority. At request time, provide authority, goal/scope, dependencies, proposed file boundaries, acceptance, validation plan, stop/escalation, and completion requirements. A coordinator must manually verify every required field before assignment and `ready-for-agent`; GitHub `required` metadata is only a form hint in this private repository and is not the enforcement gate.
+
+  - type: textarea
+    id: scope_authority
+    attributes:
+      label: SCOPE and authority
+      description: Cite the active SCOPE, accepted decision, user authorization, or governance rule that permits this work. State any authority that is explicitly absent.
+      placeholder: "Authorized by ...; does not authorize ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: goal_and_scope
+    attributes:
+      label: Goal, in scope, and out of scope
+      description: State the user-visible or verifiable goal, then separate what is included from what must not be changed.
+      placeholder: |
+        Goal:
+        In scope:
+        Out of scope:
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and blockers
+      description: Reference blocking Issues, decisions, external conditions, or write None.
+      placeholder: "Blocked by #... / None - can start immediately"
+    validations:
+      required: true
+
+  - type: textarea
+    id: file_ownership
+    attributes:
+      label: Proposed exclusive, shared, and forbidden files
+      description: Give explicit paths or bounded globs. The coordinator confirms ownership before assignment; the later Claim records the assigned Agent, exact base/branch/worktree, start time, and final ownership. Everything outside the allowed set remains forbidden.
+      placeholder: |
+        Proposed exclusive files:
+        Proposed shared files:
+        Forbidden files:
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List independently checkable outcomes. A build, HTTP 200, task completion, or generated text cannot stand in for the business result.
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: validation_plan
+    attributes:
+      label: Validation plan
+      description: List planned checks, expected proof, and external prerequisites. Actual commands/results belong in the later PR and handoff.
+      placeholder: |
+        Planned checks:
+        Expected evidence:
+        External prerequisites:
+    validations:
+      required: true
+
+  - type: textarea
+    id: stop_and_escalation
+    attributes:
+      label: Stop and escalation conditions
+      description: State when the Agent must stop instead of guessing, expanding scope, resolving conflicts, or performing destructive/external actions.
+      placeholder: "Stop when ...; escalate to ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: completion_requirements
+    attributes:
+      label: Completion reporting requirements
+      description: State which Design, Code, Automated, Real-chain, Deploy, Mog acceptance, Proved, and Not proved layers the future handoff must report. Do not invent actual results at Issue creation.
+      placeholder: |
+        Required completion layers:
+        Required proof boundaries:
+        Layers expected to be N/A or NOT VERIFIED:
+    validations:
+      required: true
