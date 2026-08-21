@@ -14,6 +14,8 @@
 
 当前唯一获准的**业务实施**仍是 `SCOPE-001 / F01`。`GOV-003` 是并行进行的低风险单 Issue/单 PR 治理工作单，不是第二个业务 SCOPE：GitHub [Issue #1](https://github.com/Himog0921/linggan-intelligence/issues/1) 与 draft [PR #2](https://github.com/Himog0921/linggan-intelligence/pull/2) 已建立，但 independent review 对旧 head `a7b63c365c7d3befccc54fd42586c48fe0f22542` 的结论为 **FAIL**，当前只允许在同一 branch/worktree 内修订并请求原 reviewer 复核；不得 merge、close 或把 GOV-003 记为完成。
 
+F01 的当前 processing runtime 只通过三项窄 PostgreSQL function 领取、处理或记录 run-error，不拥有表级直接 DML。该结论只在隔离 proof 的 runtime role 上验证；migration/schema owner 与 proof administrator 属可信 control-plane，数据库不防止其恶意改写自身，生产 credential 分离、secret/IAM 与真实部署身份隔离均仍为 **NOT VERIFIED**。
+
 全项目已正式按“开发阶段”跟踪；阶段路线、每阶段验收证据与需要 Mog 决定的关口统一见 [`development-stage-tracker.md`](development-stage-tracker.md)。本文继续只维护当前快照和唯一下一步，不复制长期路线。
 
 已确认事实：

@@ -1076,6 +1076,10 @@ cargo test --workspace --all-targets --all-features --locked
 
 `test-scope-001-postgres.sh` 必须精确创建随机 `linggan_intelligence_proof_<suffix>`，运行真实 PostgreSQL 16 测试并在成功/失败后只删除该 proof database；不得 reset 开发库、恢复旧 dump、打印 DSN/密码或删除 Docker 数据卷。
 
+### F01 当前 runtime 信任边界
+
+本切片的应用 runtime 只使用受限 credential，不能表级直接读取或写入事实；其领取、处理与 run-error 通过三项窄 PostgreSQL function 完成。migration/schema owner、proof administrator 与未来运维管理员属于可信 control-plane principal：数据库不能被表述为能防止自身 owner/admin 恶意改写。生产 credential 分离、secret 保管、部署 IAM 与真实运行身份隔离均为 **NOT VERIFIED**，不由本地 synthetic proof 外推。
+
 ## F01 主链完成标准
 
 只有以下全部成立，才可报告“F01 合成主链实现证明通过”：

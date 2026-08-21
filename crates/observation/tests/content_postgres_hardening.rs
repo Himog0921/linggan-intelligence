@@ -479,6 +479,72 @@ async fn runtime_cannot_reuse_an_accepted_external_id_to_forge_a_fact_chain() {
     );
 }
 
+// Round-6 RED: SECURITY DEFINER must resolve the trusted proof schema, never a runtime
+// session's TEMP objects. The temporary relations are intentionally malformed: an insecure
+// function either reads an empty fake queue or fails on a fake relation. A secure function must
+// still claim and process the real accepted record.
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn runtime_temp_shadow_relations_cannot_change_claim_or_processing_facts() {
+    let schema = "f01_runtime_temp_shadow";
+    let admin = accepted_f01_database(schema, F01_PACKAGE).await;
+    let runtime = runtime_role_database(schema).await;
+
+    raw(
+        &runtime,
+        "CREATE TEMP TABLE record_processing_work (id bigint, processing_work_ref uuid, capture_record_id bigint, business_outcome text); \
+         CREATE TEMP TABLE capture_record (id bigint, record_ref uuid, target_external_id text, source_external_id text, payload jsonb); \
+         CREATE TEMP TABLE record_processing_attempt (id bigint, processing_work_id bigint, epoch integer, finalized_at timestamptz, lease_expires_at timestamptz); \
+         CREATE TEMP TABLE source_identity (id bigint); \
+         CREATE TEMP TABLE source_content (id bigint); \
+         CREATE TEMP TABLE content_observation (id bigint); \
+         CREATE TEMP TABLE content_current_revision (id bigint); \
+         CREATE TEMP TABLE content_current_revision_field_source (id bigint); \
+         CREATE TEMP TABLE capture_package (id bigint); \
+         CREATE TEMP TABLE capture_ingress_delivery (id bigint); \
+         CREATE OR REPLACE FUNCTION pg_temp.scope_001_now() RETURNS timestamptz LANGUAGE sql AS $$ SELECT '2000-01-01T00:00:00Z'::timestamptz $$; \
+         SET search_path = pg_temp, f01_runtime_temp_shadow",
+    )
+    .await
+    .expect("the runtime may create session-local shadows for this security proof");
+
+    let processed = process_one_ready_record(&runtime, &f01_processing_options(0))
+        .await
+        .expect("TEMP shadows must not change the real function-owned chain");
+    assert!(
+        matches!(processed, ProcessingOutcome::Processed(record) if record.business_outcome == BusinessOutcome::ObservationRecorded)
+    );
+    assert_eq!(count(&admin, "record_processing_attempt").await, 1);
+    assert_eq!(count(&admin, "content_observation").await, 1);
+    assert_eq!(count(&admin, "content_current_revision").await, 1);
+}
+
+// Round-6 RED: delivery is ingress audit history. This attacks it as the trusted admin rather
+// than relying on the runtime role's absence of table privileges.
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn accepted_delivery_is_append_only_even_for_direct_owner_sql() {
+    let database = accepted_f01_database("f01_delivery_append_only", F01_PACKAGE).await;
+    let before = count(&database, "capture_ingress_delivery").await;
+    for statement in [
+        "UPDATE capture_ingress_delivery SET delivery_ref = gen_random_uuid()",
+        "UPDATE capture_ingress_delivery SET work_order_id = NULL",
+        "UPDATE capture_ingress_delivery SET attempt_id = NULL",
+        "UPDATE capture_ingress_delivery SET capture_identity = NULL",
+        "UPDATE capture_ingress_delivery SET outcome = 'conflict'",
+        "UPDATE capture_ingress_delivery SET external_code = 'authority_expired'",
+        "UPDATE capture_ingress_delivery SET received_at = scope_001_now() + interval '1 second'",
+        "DELETE FROM capture_ingress_delivery",
+    ] {
+        assert_refused(raw(&database, statement).await, "append-only");
+        assert_eq!(count(&database, "capture_ingress_delivery").await, before);
+        assert_eq!(count(&database, "capture_package").await, 1);
+        assert_eq!(count(&database, "capture_record").await, 2);
+        assert_eq!(count(&database, "record_processing_work").await, 2);
+        assert_eq!(count(&database, "content_observation").await, 0);
+    }
+}
+
 // Round-5: valid accepted material remains available, but it is no longer editable or deletable
 // merely because an administrator can issue SQL. Each attempted overwrite must roll back without
 // changing any protected evidence-side row.

@@ -636,6 +636,13 @@ CREATE TRIGGER capture_package_coverage_is_append_only_after_acceptance
     BEFORE UPDATE OR DELETE ON capture_package_coverage
     FOR EACH ROW EXECUTE FUNCTION scope_001_forbid_rewriting_accepted_evidence();
 
+-- Delivery is the immutable ingress audit, distinct from Package acceptance and all later
+-- processing facts. An owner may still alter the schema, but ordinary SQL must not silently
+-- turn an accepted delivery into a different routing/outcome history.
+CREATE TRIGGER capture_ingress_delivery_is_append_only
+    BEFORE UPDATE OR DELETE ON capture_ingress_delivery
+    FOR EACH ROW EXECUTE FUNCTION scope_001_forbid_rewriting_accepted_evidence();
+
 -- Lease claiming is deliberately a separate narrow operation. It commits the durable attempt
 -- before business processing starts; no runtime client receives INSERT on the attempt table.
 CREATE FUNCTION scope_001_claim_processing_work(p_attempt_ref uuid)
@@ -951,6 +958,36 @@ BEGIN
     IF NOT FOUND THEN
         RAISE EXCEPTION 'the claimed processing attempt was no longer available for run-error persistence';
     END IF;
+END;
+$$;
+
+-- Every SECURITY DEFINER function above was created while this migration connection was pinned
+-- to one trusted proof/runtime schema. Persist that schema before `pg_temp`: PostgreSQL otherwise
+-- searches a caller-created TEMP schema first even when it is absent from the apparent path.
+-- This dynamic ALTER exists only at migration time to capture the already validated schema name;
+-- it is not a runtime router and no function performs dynamic SQL.
+DO $$
+DECLARE
+    trusted_schema text := current_schema();
+    protected_function regprocedure;
+BEGIN
+    IF trusted_schema IS NULL OR trusted_schema = 'pg_temp' THEN
+        RAISE EXCEPTION 'SCOPE-001 SECURITY DEFINER functions require a trusted non-temporary schema';
+    END IF;
+    FOR protected_function IN
+        SELECT p.oid::regprocedure
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        WHERE n.nspname = trusted_schema
+          AND p.prosecdef
+          AND p.proname LIKE 'scope_001_%'
+    LOOP
+        EXECUTE format(
+            'ALTER FUNCTION %s SET search_path TO %I, pg_temp',
+            protected_function,
+            trusted_schema
+        );
+    END LOOP;
 END;
 $$;
 
