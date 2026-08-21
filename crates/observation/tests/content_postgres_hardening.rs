@@ -29,6 +29,50 @@ async fn database_refuses_clearing_a_finished_outcome_before_deleting_its_attemp
     assert_eq!(count(&database, "record_processing_attempt").await, 1);
 }
 
+// This constraint attack belongs with the other database-owned hardening proofs. Moving it from
+// the ingress happy-path target keeps both proof binaries below the repository warning limit
+// without changing the assertion, fixture, or covered boundary.
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn database_refuses_cross_parent_ingress_rows_written_around_the_rust_facade() {
+    let database = accepted_f01_database("f01_cross_parent", F01_PACKAGE).await;
+
+    raw(
+        &database,
+        "INSERT INTO capture_work_order \
+             (work_order_ref, contract_version, target_basis, target_unit, target_manifest_hash, known_target_count, quota_limit) \
+         VALUES \
+             ('00000000-0000-4000-8000-000000000901', 'content-detail.synthetic.v1', 'known_set', 'content_detail', \
+              'sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', 1, NULL); \
+         INSERT INTO capture_attempt \
+             (attempt_ref, capture_identity, work_order_id, lease_epoch, authority_valid_until) \
+         SELECT '00000000-0000-4000-8000-000000000902', '00000000-0000-4000-8000-000000000903', id, 1, \
+                scope_001_now() + interval '1 hour' \
+         FROM capture_work_order \
+         WHERE work_order_ref = '00000000-0000-4000-8000-000000000901'",
+    )
+    .await
+    .expect("the second work and attempt are only constraint-negative fixtures");
+
+    let cross_parent_delivery = sqlx::query(
+        "INSERT INTO capture_ingress_delivery \
+             (audit_kind, delivery_ref, work_order_id, attempt_id, capture_identity, outcome, external_code) \
+         SELECT 'public_delivery', '00000000-0000-4000-8000-000000000904', first_work.id, \
+                second_attempt.id, second_attempt.capture_identity, 'rejected', 'lease_epoch_mismatch' \
+         FROM capture_work_order first_work \
+         JOIN capture_attempt second_attempt \
+           ON second_attempt.attempt_ref = '00000000-0000-4000-8000-000000000902' \
+         WHERE first_work.work_order_ref = $1",
+    )
+    .bind(manifest_ref("workOrderRef"))
+    .execute(database.pool())
+    .await;
+    assert!(
+        cross_parent_delivery.is_err(),
+        "a delivery that mixes one work with another work's attempt must be rejected by the database"
+    );
+}
+
 #[tokio::test]
 #[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
 async fn database_refuses_rolling_current_back_to_an_older_revision() {
@@ -246,7 +290,7 @@ async fn a_run_error_that_cannot_be_persisted_is_returned_as_an_explicit_failure
     let role = format!("scope_001_runtime_{schema}");
     raw(
         &admin,
-        &format!("REVOKE UPDATE (run_error) ON record_processing_attempt FROM {role}"),
+        &format!("REVOKE EXECUTE ON FUNCTION scope_001_record_processing_run_error(uuid, integer, text) FROM {role}"),
     )
     .await
     .expect("the proof may remove only run-error persistence from the runtime role");
@@ -271,6 +315,66 @@ async fn a_run_error_that_cannot_be_persisted_is_returned_as_an_explicit_failure
     );
 }
 
+// Least-privilege runtime role. Triggers state what is true; permissions decide who may even
+// attempt to write. Both layers are proved here, separately.
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn the_runtime_role_runs_the_chain_but_cannot_rewrite_history_or_change_the_schema() {
+    let schema = "f01_runtime_role";
+    let admin = accepted_f01_database(schema, F01_PACKAGE).await;
+    let runtime = runtime_role_database(schema).await;
+
+    // The database-owned operations are sufficient to finish real work without any table grant.
+    let processed = process_one_ready_record(&runtime, &f01_processing_options(0))
+        .await
+        .expect("the runtime role must be able to process a record");
+    match processed {
+        ProcessingOutcome::Processed(record) => assert_eq!(
+            record.business_outcome,
+            BusinessOutcome::ObservationRecorded
+        ),
+        ProcessingOutcome::NothingReady => panic!("record A was ready"),
+    }
+
+    // They are not enough to rewrite history, read protected tables or touch the schema.
+    for (statement, what) in [
+        (
+            "SELECT * FROM capture_record",
+            "read an accepted record directly",
+        ),
+        ("DELETE FROM content_observation", "delete an observation"),
+        (
+            "UPDATE content_current_revision SET title_value = 'FORGED'",
+            "rewrite a current revision",
+        ),
+        (
+            "DELETE FROM content_current_revision_field_source",
+            "delete a field source",
+        ),
+        ("DELETE FROM capture_record", "delete a capture record"),
+        ("DELETE FROM capture_package", "delete a package"),
+        (
+            "ALTER TABLE capture_record ADD COLUMN forged text",
+            "alter a table",
+        ),
+        ("CREATE TABLE forged (id bigint)", "create a table"),
+    ] {
+        let error = raw(&runtime, statement)
+            .await
+            .expect_err(&format!("the runtime role must not be able to {what}"))
+            .to_string();
+        assert!(
+            error.contains("permission denied") || error.contains("must be owner"),
+            "expected a privilege refusal when trying to {what}, got: {error}"
+        );
+    }
+
+    // Nothing above changed the facts the admin connection can still read.
+    assert_eq!(count(&admin, "content_observation").await, 1);
+    assert_eq!(count(&admin, "capture_record").await, 2);
+    assert_eq!(count(&admin, "content_current_revision").await, 1);
+}
+
 #[tokio::test]
 #[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
 async fn runtime_role_cannot_direct_insert_a_fabricated_fact_chain() {
@@ -285,7 +389,7 @@ async fn runtime_role_cannot_direct_insert_a_fabricated_fact_chain() {
          VALUES (gen_random_uuid(), 'synthetic', 'scope-001', 'content', 'forged-runtime-object')",
     )
     .await;
-    assert_refused(fabricated_identity, "accepted record envelope");
+    assert_refused(fabricated_identity, "permission denied");
 
     let fabricated_work = raw(
         &runtime,
@@ -302,4 +406,129 @@ async fn runtime_role_cannot_direct_insert_a_fabricated_fact_chain() {
     );
     assert_eq!(count(&admin, "source_identity").await, 0);
     assert_eq!(count(&admin, "record_processing_work").await, 2);
+}
+
+// Round-5: a runtime writer must not be able to reuse an accepted external id and turn it into
+// an independent Source -> Observation -> Current -> outcome chain. This starts RED against the
+// broad direct-table grants: the old runtime role can create the identity and content anchors
+// directly, even though it does not invent a new external id.
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn runtime_cannot_reuse_an_accepted_external_id_to_forge_a_fact_chain() {
+    let schema = "f01_runtime_reused_identity";
+    let admin = accepted_f01_database(schema, F01_PACKAGE).await;
+    let runtime = runtime_role_database(schema).await;
+
+    let forged = raw(
+        &runtime,
+        "WITH identity AS (\
+             INSERT INTO source_identity \
+                 (source_identity_ref, source_system, namespace, object_type, external_id) \
+             VALUES (gen_random_uuid(), 'synthetic', 'scope-001', 'content', 'synthetic-note-a') \
+             RETURNING id\
+         ), content AS (\
+             INSERT INTO source_content (content_ref, source_identity_id) \
+             SELECT gen_random_uuid(), id FROM identity RETURNING id\
+         ), observation AS (\
+             INSERT INTO content_observation \
+                 (observation_ref, source_content_id, capture_record_id, observed_at, \
+                  observed_at_precision, parser_version, title_observed, title_value, \
+                  body_observed, body_value) \
+             SELECT gen_random_uuid(), content.id, r.id, r.observed_at, r.observed_at_precision, \
+                    'content-detail-processor-v1', true, 'FORGED', true, 'FORGED' \
+             FROM content, capture_record r WHERE r.ordinal = 1 RETURNING id, source_content_id\
+         ), revision AS (\
+             INSERT INTO content_current_revision \
+                 (revision_ref, source_content_id, policy_version, title_state, title_value, body_state, body_value, watermark) \
+             SELECT gen_random_uuid(), source_content_id, 'content-current-policy-v1', 'selected', 'FORGED', 'selected', 'FORGED', '[]'::jsonb \
+             FROM observation RETURNING id, source_content_id\
+         ), sources AS (\
+             INSERT INTO content_current_revision_field_source \
+                 (field_source_ref, revision_id, source_content_id, field_kind, observation_id, role) \
+             SELECT gen_random_uuid(), revision.id, revision.source_content_id, 'title', observation.id, 'selected_support' \
+             FROM revision JOIN observation USING (source_content_id) RETURNING revision_id\
+         ), published AS (\
+             UPDATE content_current_revision revision SET published_at = scope_001_now() \
+             FROM sources WHERE revision.id = sources.revision_id RETURNING revision.id, revision.source_content_id\
+         ), current AS (\
+             UPDATE source_content content SET current_revision_id = published.id \
+             FROM published WHERE content.id = published.source_content_id RETURNING content.id\
+         ), finalized_attempt AS (\
+             INSERT INTO record_processing_attempt \
+                 (processing_attempt_ref, processing_work_id, epoch, lease_expires_at, finalized_at) \
+             SELECT gen_random_uuid(), work.id, 1, scope_001_now() + interval '5 minutes', scope_001_now() \
+             FROM record_processing_work work CROSS JOIN current WHERE work.capture_record_id = (SELECT id FROM capture_record WHERE ordinal = 1) \
+             RETURNING processing_work_id\
+         )\
+         UPDATE record_processing_work work SET business_outcome = 'observation_recorded' \
+         FROM finalized_attempt WHERE work.id = finalized_attempt.processing_work_id",
+    )
+    .await;
+    assert_refused(forged, "permission denied");
+    assert_eq!(count(&admin, "source_identity").await, 0);
+    assert_eq!(count(&admin, "source_content").await, 0);
+    assert_eq!(count(&admin, "content_observation").await, 0);
+    assert_eq!(count(&admin, "content_current_revision").await, 0);
+    assert_eq!(
+        scalar(
+            &admin,
+            "SELECT count(*) FROM record_processing_work WHERE business_outcome IS NOT NULL"
+        )
+        .await,
+        0
+    );
+}
+
+// Round-5: valid accepted material remains available, but it is no longer editable or deletable
+// merely because an administrator can issue SQL. Each attempted overwrite must roll back without
+// changing any protected evidence-side row.
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn accepted_evidence_side_rows_are_append_only_after_acceptance() {
+    let database = accepted_f01_database("f01_accepted_evidence_append_only", F01_PACKAGE).await;
+    processed(&database, 0).await;
+    let before = (
+        count(&database, "capture_package").await,
+        count(&database, "capture_record").await,
+        count(&database, "capture_package_target_result").await,
+        count(&database, "capture_package_coverage").await,
+        count(&database, "content_observation").await,
+        count(&database, "content_current_revision").await,
+        scalar(
+            &database,
+            "SELECT count(*) FROM record_processing_work WHERE business_outcome IS NOT NULL",
+        )
+        .await,
+    );
+
+    for statement in [
+        "UPDATE capture_package SET package_hash = decode(repeat('00', 32), 'hex')",
+        "DELETE FROM capture_package",
+        "UPDATE capture_record SET payload = '{}'::jsonb",
+        "DELETE FROM capture_record",
+        "UPDATE capture_package_target_result SET outcome = 'failed'",
+        "DELETE FROM capture_package_target_result",
+        "UPDATE capture_package_coverage SET emitted = 0",
+        "DELETE FROM capture_package_coverage",
+    ] {
+        let rejected = raw(&database, statement).await;
+        assert_refused(rejected, "accepted");
+        assert_eq!(
+            (
+                count(&database, "capture_package").await,
+                count(&database, "capture_record").await,
+                count(&database, "capture_package_target_result").await,
+                count(&database, "capture_package_coverage").await,
+                count(&database, "content_observation").await,
+                count(&database, "content_current_revision").await,
+                scalar(
+                    &database,
+                    "SELECT count(*) FROM record_processing_work WHERE business_outcome IS NOT NULL",
+                )
+                .await,
+            ),
+            before,
+            "a refused accepted-evidence attack must leave no partial side effect: {statement}"
+        );
+    }
 }

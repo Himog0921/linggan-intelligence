@@ -2,9 +2,7 @@
 //! recomputed current value. SCOPE-001 authorizes only the synthetic
 //! `content-detail-processor-v1`; a second processor version fails closed.
 
-mod content;
 mod processing;
-mod source_identity;
 
 pub use processing::{
     BusinessOutcome, ClaimedRecord, ProcessedRecord, ProcessingError, ProcessingFault,

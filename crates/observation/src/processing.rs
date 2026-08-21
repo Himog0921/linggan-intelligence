@@ -1,24 +1,19 @@
-//! Claiming one ready processing work, running `content-detail-processor-v1` against its record,
-//! and finalizing exactly one closed business outcome.
+//! Claiming one ready processing work and asking PostgreSQL's restricted processing interface to
+//! form the corresponding facts. Rust never receives direct fact-table write privileges: the
+//! database binds every write to the accepted Record and durable lease that already exist.
 
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use linggan_storage_postgres::Database;
 use serde_json::Value;
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::Row;
 use thiserror::Error;
 use tokio::sync::Barrier;
 use uuid::Uuid;
 
-use crate::content::current::republish_current;
-use crate::content::observation::{append_observation, parse_payload};
-use crate::source_identity::{IdentityRuling, resolve_source_content, rule_on_identity};
-
-const DEFAULT_LEASE: &str = "5 minutes";
-
 /// The closed set of business results a finalized work may hold. Runtime level
-/// (ready/leased/finalized) is a separate reading; neither collapses into a `success` flag.
+/// (ready/leased/finalized) is separate from this business result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BusinessOutcome {
     ObservationRecorded,
@@ -36,6 +31,18 @@ impl BusinessOutcome {
             Self::RecordContractInvalid => "record_contract_invalid",
         }
     }
+
+    fn parse(value: &str) -> Result<Self, ProcessingError> {
+        match value {
+            "observation_recorded" => Ok(Self::ObservationRecorded),
+            "source_identity_unresolved" => Ok(Self::SourceIdentityUnresolved),
+            "source_identity_conflict" => Ok(Self::SourceIdentityConflict),
+            "record_contract_invalid" => Ok(Self::RecordContractInvalid),
+            _ => Err(ProcessingError::Internal(format!(
+                "the database returned an unrecognized processing outcome: {value}"
+            ))),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -49,20 +56,16 @@ pub struct ProcessedRecord {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ProcessingOutcome {
     Processed(ProcessedRecord),
-    /// No work is ready. This is not the same fact as "all work finished successfully".
+    /// No work is ready. This is not evidence that every work has completed.
     NothingReady,
 }
 
 #[derive(Debug, Error)]
 pub enum ProcessingError {
-    #[error("the processing transaction failed: {0}")]
+    #[error("the processing operation failed: {0}")]
     Internal(String),
-    /// A newer epoch took the work over, so this run must not write its result.
     #[error("this lease is no longer the current epoch for the work")]
     LeaseLost,
-    /// The business transaction failed and the separate durable attempt audit failed too. This
-    /// must remain visible to callers; otherwise a crashed run would look traceable when its
-    /// `run_error` row was never actually persisted.
     #[error("processing failed: {processing}; run-error persistence also failed: {persistence}")]
     RunErrorPersistence {
         processing: String,
@@ -72,27 +75,26 @@ pub enum ProcessingError {
 
 impl ProcessingError {
     pub(crate) fn internal(error: impl std::fmt::Display) -> Self {
-        Self::Internal(error.to_string())
+        let text = error.to_string();
+        if text.contains("processing claim is no longer current") {
+            Self::LeaseLost
+        } else {
+            Self::Internal(text)
+        }
     }
 }
 
-/// Where public refs come from. A frozen sequence fails closed at both ends: it never silently
-/// substitutes a random UUID when it runs out, and a leftover reference is an error too, because
-/// it means the run consumed refs in a different order than the oracle froze.
 #[derive(Debug)]
 enum RefSource {
     Random,
     Frozen(Mutex<VecDeque<Uuid>>),
 }
 
-/// Where a run can be told to fail, so the proof can show a crashed run rolls its business
-/// writes back yet still leaves a traceable attempt. Production never sets one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcessingFault {
     AfterObservation,
 }
 
-/// Processing inputs a proof run needs to pin down. Refs default to random v4 UUIDs.
 #[derive(Debug)]
 pub struct ProcessingOptions {
     refs: RefSource,
@@ -111,8 +113,8 @@ impl Default for ProcessingOptions {
 }
 
 impl ProcessingOptions {
-    /// Pins minted refs to a frozen sequence: attempt, identity, content, observation, revision,
-    /// title field source, body field source.
+    /// The public refs created by one normal F01 run: attempt, identity, content, observation,
+    /// revision, title source and body source.
     pub fn use_fixed_refs(&mut self, values: Vec<Uuid>) {
         self.refs = RefSource::Frozen(Mutex::new(values.into()));
     }
@@ -121,9 +123,6 @@ impl ProcessingOptions {
         self.fault = Some(fault);
     }
 
-    /// Proof-only: holds this run just after its transaction opens, until every participant has
-    /// arrived. Without it a concurrency proof is probabilistic - it can pass whether or not the
-    /// serialization it claims to test is present. Production never sets a rendezvous.
     pub fn synchronize_before_identity(&mut self, rendezvous: Arc<Barrier>) {
         self.rendezvous = Some(rendezvous);
     }
@@ -134,17 +133,6 @@ impl ProcessingOptions {
         }
     }
 
-    fn fail_at(&self, point: ProcessingFault) -> Result<(), ProcessingError> {
-        if self.fault == Some(point) {
-            return Err(ProcessingError::Internal(format!(
-                "injected processing fault at {point:?}"
-            )));
-        }
-        Ok(())
-    }
-
-    /// Proof-only: fails when a frozen sequence still holds references after a run. Without this
-    /// a drifting mint order could leave a test green while proving the wrong thing.
     pub fn assert_frozen_refs_fully_consumed(&self) {
         if let RefSource::Frozen(queue) = &self.refs {
             let remaining = queue
@@ -166,24 +154,24 @@ impl ProcessingOptions {
                 .lock()
                 .expect("the ref sequence lock is never held across a panic")
                 .pop_front()
-                .expect(
-                    "the frozen proof reference sequence ran out; a fixed reference must never \
-                     be replaced by a random UUID",
-                ),
+                .expect("the frozen proof reference sequence ran out; a fixed reference must never be replaced by a random UUID"),
         }
+    }
+
+    fn fault_after_observation(&self) -> bool {
+        self.fault == Some(ProcessingFault::AfterObservation)
     }
 }
 
-/// A durable claim on one processing work. It is committed before the work runs, so other
-/// readers can see the work is leased and a crash leaves a state a later epoch can take over.
+/// A durable claim carries a read-only copy of the exact accepted Record only so the proof
+/// harness can decide whether its frozen public refs must be consumed. The database-owned write
+/// operation below re-reads and validates that same accepted Record before it persists anything.
+/// Runtime never receives direct fact-table write privilege.
 #[derive(Debug)]
 pub struct ClaimedRecord {
-    work_id: i64,
     processing_work_ref: Uuid,
-    attempt_id: i64,
-    epoch: i32,
-    record_id: i64,
     record_ref: Uuid,
+    epoch: i32,
     target_external_id: String,
     source_external_id: Option<String>,
     payload: Value,
@@ -203,11 +191,6 @@ impl ClaimedRecord {
     }
 }
 
-/// Claims one ready processing work and runs it to a single finalized business outcome.
-///
-/// The claim commits on its own before the run starts. That is deliberate: a lease that only
-/// exists inside the processing transaction is not a lease at all - other readers could not see
-/// it, and a crash would erase the fact that the work was ever attempted.
 pub async fn process_one_ready_record(
     database: &Database,
     options: &ProcessingOptions,
@@ -220,254 +203,147 @@ pub async fn process_one_ready_record(
     Ok(ProcessingOutcome::Processed(processed))
 }
 
-/// Phase one: take a durable lease on one ready work. Committed before any processing happens.
+/// Commits a durable lease before any processing operation. Only the database function can make
+/// this attempt; runtime gets EXECUTE rather than a fact-table INSERT grant.
 pub async fn claim_one_ready_record(
     database: &Database,
     options: &ProcessingOptions,
 ) -> Result<Option<ClaimedRecord>, ProcessingError> {
-    let mut transaction = database
-        .pool()
-        .begin()
-        .await
-        .map_err(ProcessingError::internal)?;
-    let claim = claim_next_ready_work(&mut transaction, options).await?;
-    transaction
-        .commit()
-        .await
-        .map_err(ProcessingError::internal)?;
-    Ok(claim)
-}
-
-/// Phase two: run the processor and finalize, in a transaction of its own. A failure rolls back
-/// every business write but still records why this run did not finish, so the attempt stays
-/// visible history rather than vanishing.
-pub async fn run_claimed_record(
-    database: &Database,
-    claim: ClaimedRecord,
-    options: &ProcessingOptions,
-) -> Result<ProcessedRecord, ProcessingError> {
-    match attempt_run(database, &claim, options).await {
-        Ok(business_outcome) => Ok(ProcessedRecord {
-            processing_work_ref: claim.processing_work_ref,
-            record_ref: claim.record_ref,
-            epoch: claim.epoch,
-            business_outcome,
-        }),
-        Err(error) => match record_run_error(database, &claim, &error).await {
-            Ok(()) => Err(error),
-            Err(persistence) => Err(ProcessingError::RunErrorPersistence {
-                processing: error.to_string(),
-                persistence: persistence.to_string(),
-            }),
-        },
-    }
-}
-
-async fn attempt_run(
-    database: &Database,
-    claim: &ClaimedRecord,
-    options: &ProcessingOptions,
-) -> Result<BusinessOutcome, ProcessingError> {
-    let mut transaction = database
-        .pool()
-        .begin()
-        .await
-        .map_err(ProcessingError::internal)?;
-    verify_claim_is_current(&mut transaction, claim).await?;
-    options.wait_for_other_runs().await;
-    let business_outcome = run_processor(&mut transaction, claim, options).await?;
-    finalize(&mut transaction, claim, business_outcome).await?;
-    transaction
-        .commit()
-        .await
-        .map_err(ProcessingError::internal)?;
-    Ok(business_outcome)
-}
-
-/// Fails fast when a newer epoch already took this work over, so a superseded run does no work
-/// and cannot collide with the winner's rows.
-async fn verify_claim_is_current(
-    transaction: &mut Transaction<'_, Postgres>,
-    claim: &ClaimedRecord,
-) -> Result<(), ProcessingError> {
-    let current = sqlx::query(
-        "SELECT (SELECT max(epoch) FROM record_processing_attempt WHERE processing_work_id = $1) AS latest_epoch, \
-                (SELECT business_outcome IS NOT NULL FROM record_processing_work WHERE id = $1) AS already_finished, \
-                (SELECT lease_expires_at > scope_001_now() FROM record_processing_attempt WHERE id = $2) AS lease_live",
-    )
-    .bind(claim.work_id)
-    .bind(claim.attempt_id)
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(ProcessingError::internal)?;
-
-    let latest_epoch: Option<i32> = current.get("latest_epoch");
-    let already_finished: Option<bool> = current.get("already_finished");
-    let lease_live: Option<bool> = current.get("lease_live");
-    if latest_epoch != Some(claim.epoch)
-        || already_finished != Some(false)
-        || lease_live != Some(true)
-    {
-        return Err(ProcessingError::LeaseLost);
-    }
-    Ok(())
-}
-
-/// Records why a run did not finish, on its own connection so it survives the rolled-back
-/// processing transaction. It never touches an attempt that already finalized something.
-async fn record_run_error(
-    database: &Database,
-    claim: &ClaimedRecord,
-    error: &ProcessingError,
-) -> Result<(), ProcessingError> {
-    let updated = sqlx::query(
-        "UPDATE record_processing_attempt SET run_error = $1 \
-         WHERE id = $2 AND finalized_at IS NULL",
-    )
-    .bind(error.to_string())
-    .bind(claim.attempt_id)
-    .execute(database.pool())
-    .await
-    .map_err(ProcessingError::internal)?;
-    if updated.rows_affected() != 1 {
-        return Err(ProcessingError::Internal(
-            "the claimed processing attempt was no longer available for run-error persistence"
-                .to_owned(),
-        ));
-    }
-    Ok(())
-}
-
-const CLAIM_SQL: &str = "\
-SELECT w.id AS work_id, w.processing_work_ref, r.id AS record_id, r.record_ref, \
-       r.target_external_id, r.source_external_id, r.payload \
-FROM record_processing_work w \
-JOIN capture_record r ON r.id = w.capture_record_id \
-WHERE w.business_outcome IS NULL \
-  AND NOT EXISTS ( \
-      SELECT 1 FROM record_processing_attempt a \
-      WHERE a.processing_work_id = w.id AND a.finalized_at IS NULL \
-        AND a.lease_expires_at > scope_001_now() \
-  ) \
-ORDER BY r.id \
-FOR UPDATE OF w SKIP LOCKED \
-LIMIT 1";
-
-async fn claim_next_ready_work(
-    transaction: &mut Transaction<'_, Postgres>,
-    options: &ProcessingOptions,
-) -> Result<Option<ClaimedRecord>, ProcessingError> {
-    let Some(row) = sqlx::query(CLAIM_SQL)
-        .fetch_optional(&mut **transaction)
-        .await
-        .map_err(ProcessingError::internal)?
-    else {
-        return Ok(None);
-    };
-
-    let work_id: i64 = row.get("work_id");
-    let attempt = sqlx::query(
-        "INSERT INTO record_processing_attempt \
-             (processing_attempt_ref, processing_work_id, epoch, lease_expires_at) \
-         SELECT $1, $2, coalesce(max(epoch), 0) + 1, scope_001_now() + $3::interval \
-         FROM record_processing_attempt WHERE processing_work_id = $2 \
-         RETURNING id, epoch",
+    let row = sqlx::query(
+        "SELECT processing_work_ref, record_ref, epoch, target_external_id, source_external_id, payload \
+         FROM scope_001_claim_processing_work($1)",
     )
     .bind(options.mint())
-    .bind(work_id)
-    .bind(DEFAULT_LEASE)
-    .fetch_one(&mut **transaction)
+    .fetch_optional(database.pool())
     .await
     .map_err(ProcessingError::internal)?;
 
-    Ok(Some(ClaimedRecord {
-        work_id,
+    Ok(row.map(|row| ClaimedRecord {
         processing_work_ref: row.get("processing_work_ref"),
-        attempt_id: attempt.get("id"),
-        epoch: attempt.get("epoch"),
-        record_id: row.get("record_id"),
         record_ref: row.get("record_ref"),
+        epoch: row.get("epoch"),
         target_external_id: row.get("target_external_id"),
         source_external_id: row.get("source_external_id"),
         payload: row.get("payload"),
     }))
 }
 
-/// Runs `content-detail-processor-v1`. Every path here ends in one closed business outcome; a
-/// record that forms no observation still forms no empty identity, content or current value.
-async fn run_processor(
-    transaction: &mut Transaction<'_, Postgres>,
-    claim: &ClaimedRecord,
+pub async fn run_claimed_record(
+    database: &Database,
+    claim: ClaimedRecord,
     options: &ProcessingOptions,
-) -> Result<BusinessOutcome, ProcessingError> {
-    let Some(payload) = parse_payload(&claim.payload) else {
-        return Ok(BusinessOutcome::RecordContractInvalid);
+) -> Result<ProcessedRecord, ProcessingError> {
+    options.wait_for_other_runs().await;
+    let fact_refs = if accepted_record_can_form_observation(&claim) {
+        Some([
+            options.mint(),
+            options.mint(),
+            options.mint(),
+            options.mint(),
+            options.mint(),
+            options.mint(),
+        ])
+    } else {
+        None
     };
-
-    let external_id = match rule_on_identity(
-        &claim.target_external_id,
-        claim.source_external_id.as_deref(),
-        payload.source_external_id.as_deref(),
-    ) {
-        IdentityRuling::Resolved(external_id) => external_id,
-        IdentityRuling::NotFormed(outcome) => return Ok(outcome),
-    };
-
-    let source_content_id =
-        resolve_source_content(transaction, &external_id, options.mint(), options.mint()).await?;
-    append_observation(
-        transaction,
-        source_content_id,
-        claim.record_id,
-        &payload,
-        options.mint(),
+    let result = sqlx::query_scalar::<_, String>(
+        "SELECT scope_001_process_claimed_record($1, $2, $3, $4, $5, $6, $7, $8, $9)",
     )
-    .await?;
-    options.fail_at(ProcessingFault::AfterObservation)?;
-    republish_current(
-        transaction,
-        source_content_id,
-        options.mint(),
-        options.mint(),
-        options.mint(),
-    )
-    .await?;
+    .bind(claim.processing_work_ref)
+    .bind(claim.epoch)
+    .bind(fact_refs.map(|refs| refs[0]))
+    .bind(fact_refs.map(|refs| refs[1]))
+    .bind(fact_refs.map(|refs| refs[2]))
+    .bind(fact_refs.map(|refs| refs[3]))
+    .bind(fact_refs.map(|refs| refs[4]))
+    .bind(fact_refs.map(|refs| refs[5]))
+    .bind(options.fault_after_observation())
+    .fetch_one(database.pool())
+    .await;
 
-    Ok(BusinessOutcome::ObservationRecorded)
+    match result {
+        Ok(outcome) => Ok(ProcessedRecord {
+            processing_work_ref: claim.processing_work_ref,
+            record_ref: claim.record_ref,
+            epoch: claim.epoch,
+            business_outcome: BusinessOutcome::parse(&outcome)?,
+        }),
+        Err(error) => {
+            let processing = ProcessingError::internal(error);
+            match record_run_error(database, &claim, &processing).await {
+                Ok(()) => Err(processing),
+                Err(persistence) => Err(ProcessingError::RunErrorPersistence {
+                    processing: processing.to_string(),
+                    persistence: persistence.to_string(),
+                }),
+            }
+        }
+    }
 }
 
-/// Fixes the one business outcome on the work and closes this attempt. The epoch fence makes a
-/// late run fail rather than overwrite a newer epoch's result.
-async fn finalize(
-    transaction: &mut Transaction<'_, Postgres>,
-    claim: &ClaimedRecord,
-    business_outcome: BusinessOutcome,
-) -> Result<(), ProcessingError> {
-    let closed_attempt = sqlx::query(
-        "UPDATE record_processing_attempt SET finalized_at = scope_001_now() \
-         WHERE id = $1 AND finalized_at IS NULL AND lease_expires_at > scope_001_now() \
-           AND epoch = (SELECT max(epoch) FROM record_processing_attempt WHERE processing_work_id = $2)",
-    )
-    .bind(claim.attempt_id)
-    .bind(claim.work_id)
-    .execute(&mut **transaction)
-    .await
-    .map_err(ProcessingError::internal)?;
-    if closed_attempt.rows_affected() != 1 {
-        return Err(ProcessingError::LeaseLost);
-    }
+/// This derives only frozen-ref consumption from the exact Record returned by the narrow claim
+/// operation. It is deliberately not an authorization check: PostgreSQL repeats the closed
+/// payload and identity validation before it writes any fact, and has no caller-provided source,
+/// content, observation, time, field value, Current or business-outcome input to trust.
+fn accepted_record_can_form_observation(claim: &ClaimedRecord) -> bool {
+    let Some(payload_source) = parse_payload_source_external_id(&claim.payload) else {
+        return false;
+    };
+    claim
+        .source_external_id
+        .as_deref()
+        .is_some_and(|source| source == claim.target_external_id)
+        && payload_source
+            .as_deref()
+            .is_none_or(|payload| payload == claim.target_external_id)
+}
 
-    let fixed_outcome = sqlx::query(
-        "UPDATE record_processing_work SET business_outcome = $1 \
-         WHERE id = $2 AND business_outcome IS NULL",
-    )
-    .bind(business_outcome.as_str())
-    .bind(claim.work_id)
-    .execute(&mut **transaction)
-    .await
-    .map_err(ProcessingError::internal)?;
-    if fixed_outcome.rows_affected() != 1 {
-        return Err(ProcessingError::LeaseLost);
+fn parse_payload_source_external_id(payload: &Value) -> Option<Option<String>> {
+    let object = payload.as_object()?;
+    if object.len() != 3 || object.get("schemaVersion")?.as_str()? != "content-detail.synthetic.v1"
+    {
+        return None;
     }
+    let source = match object.get("sourceExternalId")? {
+        Value::Null => None,
+        Value::String(value) => Some(value.clone()),
+        _ => return None,
+    };
+    let fields = object.get("fields")?.as_object()?;
+    if fields.len() != 2
+        || !field_is_closed(fields.get("title")?)
+        || !field_is_closed(fields.get("body")?)
+    {
+        return None;
+    }
+    Some(source)
+}
+
+fn field_is_closed(field: &Value) -> bool {
+    let Some(object) = field.as_object() else {
+        return false;
+    };
+    if object.len() != 2 {
+        return false;
+    }
+    matches!(
+        (object.get("observed"), object.get("value")),
+        (Some(Value::Bool(true)), Some(Value::String(_)))
+            | (Some(Value::Bool(false)), Some(Value::Null))
+    )
+}
+
+async fn record_run_error(
+    database: &Database,
+    claim: &ClaimedRecord,
+    error: &ProcessingError,
+) -> Result<(), ProcessingError> {
+    sqlx::query("SELECT scope_001_record_processing_run_error($1, $2, $3)")
+        .bind(claim.processing_work_ref)
+        .bind(claim.epoch)
+        .bind(error.to_string())
+        .execute(database.pool())
+        .await
+        .map_err(ProcessingError::internal)?;
     Ok(())
 }

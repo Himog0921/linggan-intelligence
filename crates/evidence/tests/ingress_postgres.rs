@@ -228,38 +228,6 @@ async fn f01_different_hash_conflict_does_not_overwrite_the_accepted_package() {
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
-async fn f01_database_rejects_cross_parent_rows_written_around_the_rust_facade() {
-    let database = fresh_f01_database("f01_cross_parent").await;
-
-    sqlx::raw_sql(AssertSqlSafe(
-        "INSERT INTO capture_work_order (work_order_ref, contract_version, target_basis, target_unit, target_manifest_hash, known_target_count, quota_limit) \
-         VALUES ('00000000-0000-4000-8000-000000000901', 'content-detail.synthetic.v1', 'known_set', 'content_detail', 'sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', 1, NULL); \
-         INSERT INTO capture_attempt (attempt_ref, capture_identity, work_order_id, lease_epoch, authority_valid_until) \
-         SELECT '00000000-0000-4000-8000-000000000902', '00000000-0000-4000-8000-000000000903', id, 1, scope_001_now() + interval '1 hour' \
-         FROM capture_work_order WHERE work_order_ref = '00000000-0000-4000-8000-000000000901';".to_owned(),
-    ))
-    .execute(database.pool())
-    .await
-    .expect("the second work and attempt are only constraint-negative fixtures");
-
-    let cross_parent_delivery = sqlx::query(
-        "INSERT INTO capture_ingress_delivery (audit_kind, delivery_ref, work_order_id, attempt_id, capture_identity, outcome, external_code) \
-         SELECT 'public_delivery', '00000000-0000-4000-8000-000000000904', first_work.id, second_attempt.id, second_attempt.capture_identity, 'rejected', 'lease_epoch_mismatch' \
-         FROM capture_work_order first_work \
-         JOIN capture_attempt second_attempt ON second_attempt.attempt_ref = '00000000-0000-4000-8000-000000000902' \
-         WHERE first_work.work_order_ref = $1",
-    )
-    .bind(manifest_ref("workOrderRef"))
-    .execute(database.pool())
-    .await;
-    assert!(
-        cross_parent_delivery.is_err(),
-        "a delivery that mixes one work with another work's attempt must be rejected by the database"
-    );
-}
-
-#[tokio::test]
-#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
 async fn f01_accepted_records_persist_the_whole_typed_envelope() {
     let database = fresh_f01_database("f01_envelope").await;
     ingest_capture_package_with(&database, F01_PACKAGE, &f01_fixed_options())

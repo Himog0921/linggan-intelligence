@@ -173,7 +173,7 @@ CREATE FUNCTION scope_001_verify_current_field(
     field text,
     state text,
     published_value text
-) RETURNS void LANGUAGE plpgsql AS $$
+) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
 DECLARE
     latest timestamptz;
     qualified_at_latest integer;
@@ -247,7 +247,7 @@ END;
 $$;
 
 CREATE FUNCTION scope_001_verify_current_field_provenance() RETURNS trigger
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
 BEGIN
     PERFORM scope_001_verify_current_field(
         NEW.id, NEW.source_content_id, 'title', NEW.title_state, NEW.title_value);
@@ -268,7 +268,7 @@ CREATE FUNCTION scope_001_verify_current_revision_watermark_values(
     revision_id bigint,
     content_id bigint,
     supplied_watermark jsonb
-) RETURNS void LANGUAGE plpgsql AS $$
+) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
 DECLARE
     expected jsonb;
 BEGIN
@@ -297,7 +297,7 @@ END;
 $$;
 
 CREATE FUNCTION scope_001_verify_current_revision_watermark() RETURNS trigger
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
 BEGIN
     PERFORM scope_001_verify_current_revision_watermark_values(
         NEW.id, NEW.source_content_id, NEW.watermark);
@@ -362,7 +362,7 @@ CREATE TRIGGER content_current_revision_field_source_is_append_only
 -- and a published current revision for the content that observation belongs to. Every other
 -- outcome forms no observation at all.
 CREATE FUNCTION scope_001_verify_business_outcome_facts() RETURNS trigger
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
 DECLARE
     observed integer;
     published integer;
@@ -438,7 +438,7 @@ CREATE TRIGGER record_processing_work_business_outcome_is_fixed
 -- Once a revision is the published current value, the set of observations it fixes is closed.
 -- New evidence produces a new revision; it never re-opens the meaning of an old one.
 CREATE FUNCTION scope_001_forbid_appending_to_published_revision() RETURNS trigger
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
 BEGIN
     IF EXISTS (
         SELECT 1 FROM content_current_revision
@@ -478,7 +478,7 @@ CREATE TRIGGER record_processing_attempt_keeps_supporting_a_finished_outcome
 -- staging a valid revision, contaminating it later, and only then publishing it cannot bypass
 -- the insert-time deferred checks.
 CREATE FUNCTION scope_001_protect_published_current_pointer() RETURNS trigger
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
 DECLARE
     revision content_current_revision%ROWTYPE;
 BEGIN
@@ -540,7 +540,7 @@ CREATE TRIGGER source_identity_anchor_is_fixed_after_use
     FOR EACH ROW EXECUTE FUNCTION scope_001_protect_source_identity_anchor();
 
 CREATE FUNCTION scope_001_protect_source_content_anchor() RETURNS trigger
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
 BEGIN
     IF (NEW.source_identity_id IS DISTINCT FROM OLD.source_identity_id
         OR NEW.content_ref IS DISTINCT FROM OLD.content_ref)
@@ -562,7 +562,7 @@ CREATE TRIGGER source_content_anchor_is_fixed_after_use
 -- direct writer cannot invent a brand-new external identity and then build a parallel fact chain
 -- around it: every identity must already be stated by at least one accepted typed envelope.
 CREATE FUNCTION scope_001_require_identity_from_accepted_record() RETURNS trigger
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
 BEGIN
     IF NOT EXISTS (
         SELECT 1 FROM capture_record r
@@ -584,7 +584,7 @@ CREATE TRIGGER source_identity_requires_accepted_record
 -- An Observation cannot bind an accepted record to some different Content. This turns the typed
 -- envelope's source statement into a database-enforced boundary even for callers bypassing Rust.
 CREATE FUNCTION scope_001_require_observation_anchor_match() RETURNS trigger
-    LANGUAGE plpgsql AS $$
+    LANGUAGE plpgsql SECURITY DEFINER SET search_path FROM CURRENT AS $$
 DECLARE
     record_external_id text;
     content_external_id text;
@@ -604,3 +604,368 @@ $$;
 CREATE TRIGGER content_observation_requires_matching_anchor
     BEFORE INSERT ON content_observation
     FOR EACH ROW EXECUTE FUNCTION scope_001_require_observation_anchor_match();
+
+-- ---------------------------------------------------------------------------
+-- 6. Round-5: accepted evidence is append-only and the runtime writes facts
+--    only through narrow, database-owned processing operations.
+-- ---------------------------------------------------------------------------
+
+-- An accepted Package is immutable evidence-side history. A later correction must be represented
+-- by another authorized attempt/package in a later scope; it must never edit, delete or silently
+-- strengthen the material that was actually accepted here.
+CREATE FUNCTION scope_001_forbid_rewriting_accepted_evidence() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'accepted evidence is append-only; create a new traceable attempt instead of rewriting or deleting %', TG_TABLE_NAME;
+END;
+$$;
+
+CREATE TRIGGER capture_package_is_append_only_after_acceptance
+    BEFORE UPDATE OR DELETE ON capture_package
+    FOR EACH ROW EXECUTE FUNCTION scope_001_forbid_rewriting_accepted_evidence();
+
+CREATE TRIGGER capture_record_is_append_only_after_acceptance
+    BEFORE UPDATE OR DELETE ON capture_record
+    FOR EACH ROW EXECUTE FUNCTION scope_001_forbid_rewriting_accepted_evidence();
+
+CREATE TRIGGER capture_package_target_result_is_append_only_after_acceptance
+    BEFORE UPDATE OR DELETE ON capture_package_target_result
+    FOR EACH ROW EXECUTE FUNCTION scope_001_forbid_rewriting_accepted_evidence();
+
+CREATE TRIGGER capture_package_coverage_is_append_only_after_acceptance
+    BEFORE UPDATE OR DELETE ON capture_package_coverage
+    FOR EACH ROW EXECUTE FUNCTION scope_001_forbid_rewriting_accepted_evidence();
+
+-- Lease claiming is deliberately a separate narrow operation. It commits the durable attempt
+-- before business processing starts; no runtime client receives INSERT on the attempt table.
+CREATE FUNCTION scope_001_claim_processing_work(p_attempt_ref uuid)
+RETURNS TABLE(
+    processing_work_ref uuid,
+    record_ref uuid,
+    epoch integer,
+    target_external_id text,
+    source_external_id text,
+    payload jsonb
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path FROM CURRENT
+AS $$
+DECLARE
+    candidate record;
+    created_attempt record;
+BEGIN
+    SELECT w.id, w.processing_work_ref, r.record_ref, r.target_external_id,
+           r.source_external_id, r.payload
+      INTO candidate
+      FROM record_processing_work w
+      JOIN capture_record r ON r.id = w.capture_record_id
+     WHERE w.business_outcome IS NULL
+       AND NOT EXISTS (
+            SELECT 1 FROM record_processing_attempt a
+             WHERE a.processing_work_id = w.id
+               AND a.finalized_at IS NULL
+               AND a.lease_expires_at > scope_001_now()
+       )
+     ORDER BY r.id
+     FOR UPDATE OF w SKIP LOCKED
+     LIMIT 1;
+
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+
+    INSERT INTO record_processing_attempt
+        (processing_attempt_ref, processing_work_id, epoch, lease_expires_at)
+    SELECT p_attempt_ref, candidate.id, coalesce(max(a.epoch), 0) + 1,
+           scope_001_now() + interval '5 minutes'
+      FROM record_processing_attempt a
+     WHERE a.processing_work_id = candidate.id
+    RETURNING record_processing_attempt.id, record_processing_attempt.epoch INTO created_attempt;
+
+    RETURN QUERY SELECT candidate.processing_work_ref, candidate.record_ref, created_attempt.epoch,
+                        candidate.target_external_id, candidate.source_external_id, candidate.payload;
+END;
+$$;
+
+-- This is the sole fact-writing interface available to the runtime role. It binds a durable
+-- claim to exactly one accepted Record, derives every persisted value from that Record, and
+-- publishes the new Current together with the outcome in the same SQL statement. Supplying refs
+-- only chooses public identities for rows the accepted Record already authorizes; it cannot
+-- choose a different source, content, title, time, observation, Current or outcome.
+CREATE FUNCTION scope_001_process_claimed_record(
+    p_processing_work_ref uuid,
+    p_epoch integer,
+    p_source_identity_ref uuid,
+    p_content_ref uuid,
+    p_observation_ref uuid,
+    p_revision_ref uuid,
+    p_title_field_source_ref uuid,
+    p_body_field_source_ref uuid,
+    p_fault_after_observation boolean DEFAULT false
+) RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path FROM CURRENT
+AS $$
+DECLARE
+    work_row record;
+    record_row record;
+    payload_source_external_id text;
+    v_external_id text;
+    outcome text;
+    identity_id bigint;
+    content_id bigint;
+    observation_id bigint;
+    revision_id bigint;
+    watermark jsonb;
+    title_latest timestamptz;
+    body_latest timestamptz;
+    title_distinct integer;
+    body_distinct integer;
+    title_state text;
+    body_state text;
+    title_value text;
+    body_value text;
+    payload_keys integer;
+    field_keys integer;
+BEGIN
+    SELECT w.id AS work_id, w.capture_record_id, a.id AS attempt_id
+      INTO work_row
+      FROM record_processing_work w
+      JOIN record_processing_attempt a ON a.processing_work_id = w.id
+     WHERE w.processing_work_ref = p_processing_work_ref
+       AND a.epoch = p_epoch
+       AND w.business_outcome IS NULL
+       AND a.finalized_at IS NULL
+       AND a.lease_expires_at > scope_001_now()
+       AND p_epoch = (SELECT max(epoch) FROM record_processing_attempt x WHERE x.processing_work_id = w.id)
+     FOR UPDATE OF w, a;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'the processing claim is no longer current';
+    END IF;
+
+    SELECT r.* INTO record_row FROM capture_record r WHERE r.id = work_row.capture_record_id;
+
+    -- This is the exact payload subtree used by content-detail-processor-v1. The accepted Record
+    -- is the source of every value below; malformed per-record payloads close as the existing
+    -- record_contract_invalid outcome rather than accepting caller-supplied substitutes.
+    SELECT count(*) INTO payload_keys FROM jsonb_object_keys(record_row.payload);
+    IF jsonb_typeof(record_row.payload) <> 'object'
+       OR payload_keys <> 3
+       OR record_row.payload ->> 'schemaVersion' <> 'content-detail.synthetic.v1'
+       OR NOT (record_row.payload ? 'sourceExternalId')
+       OR jsonb_typeof(record_row.payload -> 'sourceExternalId') NOT IN ('string', 'null')
+       OR jsonb_typeof(record_row.payload -> 'fields') <> 'object' THEN
+        outcome := 'record_contract_invalid';
+    ELSE
+        SELECT count(*) INTO field_keys FROM jsonb_object_keys(record_row.payload -> 'fields');
+        IF field_keys <> 2
+           OR NOT ((record_row.payload -> 'fields') ? 'title')
+           OR NOT ((record_row.payload -> 'fields') ? 'body')
+           OR jsonb_typeof(record_row.payload -> 'fields' -> 'title') <> 'object'
+           OR jsonb_typeof(record_row.payload -> 'fields' -> 'body') <> 'object'
+           OR (SELECT count(*) FROM jsonb_object_keys(record_row.payload -> 'fields' -> 'title')) <> 2
+           OR (SELECT count(*) FROM jsonb_object_keys(record_row.payload -> 'fields' -> 'body')) <> 2
+           OR jsonb_typeof(record_row.payload -> 'fields' -> 'title' -> 'observed') <> 'boolean'
+           OR jsonb_typeof(record_row.payload -> 'fields' -> 'body' -> 'observed') <> 'boolean'
+           OR NOT (
+                ((record_row.payload -> 'fields' -> 'title' ->> 'observed')::boolean
+                 AND jsonb_typeof(record_row.payload -> 'fields' -> 'title' -> 'value') = 'string')
+                OR
+                (NOT (record_row.payload -> 'fields' -> 'title' ->> 'observed')::boolean
+                 AND record_row.payload -> 'fields' -> 'title' -> 'value' = 'null'::jsonb)
+           )
+           OR NOT (
+                ((record_row.payload -> 'fields' -> 'body' ->> 'observed')::boolean
+                 AND jsonb_typeof(record_row.payload -> 'fields' -> 'body' -> 'value') = 'string')
+                OR
+                (NOT (record_row.payload -> 'fields' -> 'body' ->> 'observed')::boolean
+                 AND record_row.payload -> 'fields' -> 'body' -> 'value' = 'null'::jsonb)
+           ) THEN
+            outcome := 'record_contract_invalid';
+        END IF;
+    END IF;
+
+    IF outcome IS NULL THEN
+        payload_source_external_id := record_row.payload ->> 'sourceExternalId';
+        IF record_row.source_external_id IS NULL AND payload_source_external_id IS NULL THEN
+            outcome := 'source_identity_unresolved';
+        ELSIF record_row.source_external_id IS NOT NULL
+              AND record_row.source_external_id = record_row.target_external_id
+              AND (payload_source_external_id IS NULL OR payload_source_external_id = record_row.target_external_id) THEN
+            v_external_id := record_row.source_external_id;
+        ELSE
+            outcome := 'source_identity_conflict';
+        END IF;
+    END IF;
+
+    IF outcome IS NULL THEN
+        PERFORM pg_advisory_xact_lock(hashtextextended('scope-001:content-identity:' || v_external_id, 0));
+        SELECT i.id INTO identity_id FROM source_identity i
+         WHERE i.source_system = 'synthetic' AND i.namespace = 'scope-001'
+           AND i.object_type = 'content' AND i.external_id = v_external_id;
+        IF NOT FOUND THEN
+            INSERT INTO source_identity
+                (source_identity_ref, source_system, namespace, object_type, external_id)
+            VALUES (p_source_identity_ref, 'synthetic', 'scope-001', 'content', v_external_id)
+            RETURNING id INTO identity_id;
+        END IF;
+
+        SELECT c.id INTO content_id FROM source_content c WHERE c.source_identity_id = identity_id;
+        IF NOT FOUND THEN
+            INSERT INTO source_content (content_ref, source_identity_id)
+            VALUES (p_content_ref, identity_id) RETURNING id INTO content_id;
+        END IF;
+
+        INSERT INTO content_observation
+            (observation_ref, source_content_id, capture_record_id, observed_at,
+             observed_at_precision, parser_version, title_observed, title_value,
+             body_observed, body_value)
+        VALUES (
+            p_observation_ref, content_id, record_row.id, record_row.observed_at,
+            record_row.observed_at_precision, 'content-detail-processor-v1',
+            (record_row.payload -> 'fields' -> 'title' ->> 'observed')::boolean,
+            record_row.payload -> 'fields' -> 'title' ->> 'value',
+            (record_row.payload -> 'fields' -> 'body' ->> 'observed')::boolean,
+            record_row.payload -> 'fields' -> 'body' ->> 'value'
+        ) RETURNING id INTO observation_id;
+
+        IF p_fault_after_observation THEN
+            RAISE EXCEPTION 'injected processing fault after observation';
+        END IF;
+
+        SELECT max(o.observed_at) INTO title_latest FROM content_observation o
+         WHERE o.source_content_id = content_id AND o.title_observed;
+        IF title_latest IS NULL THEN
+            title_state := 'unknown'; title_value := NULL;
+        ELSE
+            SELECT count(DISTINCT o.title_value), min(o.title_value)
+              INTO title_distinct, title_value
+              FROM content_observation o
+             WHERE o.source_content_id = content_id AND o.title_observed AND o.observed_at = title_latest;
+            title_state := CASE WHEN title_distinct = 1 THEN 'selected' ELSE 'unresolved' END;
+            IF title_state = 'unresolved' THEN title_value := NULL; END IF;
+        END IF;
+
+        SELECT max(o.observed_at) INTO body_latest FROM content_observation o
+         WHERE o.source_content_id = content_id AND o.body_observed;
+        IF body_latest IS NULL THEN
+            body_state := 'unknown'; body_value := NULL;
+        ELSE
+            SELECT count(DISTINCT o.body_value), min(o.body_value)
+              INTO body_distinct, body_value
+              FROM content_observation o
+             WHERE o.source_content_id = content_id AND o.body_observed AND o.observed_at = body_latest;
+            body_state := CASE WHEN body_distinct = 1 THEN 'selected' ELSE 'unresolved' END;
+            IF body_state = 'unresolved' THEN body_value := NULL; END IF;
+        END IF;
+
+        SELECT coalesce(jsonb_agg(entry ORDER BY entry ->> 'packageRef'), '[]'::jsonb)
+          INTO watermark
+          FROM (
+            SELECT jsonb_build_object(
+                'packageRef', p.package_ref,
+                'originalAcceptedDeliveryRef', d.delivery_ref,
+                'acceptedReceiptRef', p.accepted_receipt_ref,
+                'recordRefs', jsonb_agg(DISTINCT to_jsonb(r.record_ref::text) ORDER BY to_jsonb(r.record_ref::text)),
+                'observationRefs', jsonb_agg(DISTINCT to_jsonb(o.observation_ref::text) ORDER BY to_jsonb(o.observation_ref::text))
+            ) AS entry
+            FROM content_observation o
+            JOIN capture_record r ON r.id = o.capture_record_id
+            JOIN capture_package p ON p.id = r.package_id
+            JOIN capture_ingress_delivery d ON d.id = p.accepted_delivery_id
+            WHERE o.source_content_id = content_id
+            GROUP BY p.package_ref, d.delivery_ref, p.accepted_receipt_ref
+          ) grouped;
+
+        INSERT INTO content_current_revision
+            (revision_ref, source_content_id, policy_version, title_state, title_value,
+             body_state, body_value, watermark)
+        VALUES (p_revision_ref, content_id, 'content-current-policy-v1', title_state, title_value,
+                body_state, body_value, watermark)
+        RETURNING id INTO revision_id;
+
+        IF title_state <> 'unknown' THEN
+            INSERT INTO content_current_revision_field_source
+                (field_source_ref, revision_id, source_content_id, field_kind, observation_id, role)
+            SELECT CASE WHEN row_number() OVER (ORDER BY id) = 1 THEN p_title_field_source_ref ELSE gen_random_uuid() END,
+                   revision_id, content_id, 'title', id,
+                   CASE WHEN title_state = 'selected' THEN 'selected_support' ELSE 'conflicting_candidate' END
+              FROM content_observation
+             WHERE source_content_id = content_id AND title_observed AND observed_at = title_latest
+             ORDER BY id;
+        END IF;
+        IF body_state <> 'unknown' THEN
+            INSERT INTO content_current_revision_field_source
+                (field_source_ref, revision_id, source_content_id, field_kind, observation_id, role)
+            SELECT CASE WHEN row_number() OVER (ORDER BY id) = 1 THEN p_body_field_source_ref ELSE gen_random_uuid() END,
+                   revision_id, content_id, 'body', id,
+                   CASE WHEN body_state = 'selected' THEN 'selected_support' ELSE 'conflicting_candidate' END
+              FROM content_observation
+             WHERE source_content_id = content_id AND body_observed AND observed_at = body_latest
+             ORDER BY id;
+        END IF;
+
+        UPDATE content_current_revision SET published_at = scope_001_now()
+         WHERE id = revision_id AND published_at IS NULL;
+        UPDATE source_content SET current_revision_id = revision_id WHERE id = content_id;
+        outcome := 'observation_recorded';
+    END IF;
+
+    UPDATE record_processing_attempt SET finalized_at = scope_001_now()
+     WHERE id = work_row.attempt_id AND finalized_at IS NULL
+       AND lease_expires_at > scope_001_now()
+       AND p_epoch = (SELECT max(epoch) FROM record_processing_attempt WHERE processing_work_id = work_row.work_id);
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'the processing claim is no longer current';
+    END IF;
+    UPDATE record_processing_work SET business_outcome = outcome
+     WHERE id = work_row.work_id AND business_outcome IS NULL;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'the processing claim is no longer current';
+    END IF;
+    RETURN outcome;
+END;
+$$;
+
+-- Failure metadata is also a narrow operation. The runtime cannot update an arbitrary attempt;
+-- it may only attach an error to the still-open attempt identified by its own work/epoch claim.
+CREATE FUNCTION scope_001_record_processing_run_error(
+    p_processing_work_ref uuid,
+    p_epoch integer,
+    p_error text
+) RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path FROM CURRENT
+AS $$
+BEGIN
+    UPDATE record_processing_attempt a
+       SET run_error = p_error
+      FROM record_processing_work w
+     WHERE a.processing_work_id = w.id
+       AND w.processing_work_ref = p_processing_work_ref
+       AND a.epoch = p_epoch
+       AND a.finalized_at IS NULL;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'the claimed processing attempt was no longer available for run-error persistence';
+    END IF;
+END;
+$$;
+
+-- Runtime clients get read access and these exact operations only. They receive no direct fact
+-- table INSERT/UPDATE/DELETE privilege, so SQL bypass cannot construct or repoint a fact chain.
+REVOKE ALL ON FUNCTION scope_001_claim_processing_work(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION scope_001_process_claimed_record(uuid, integer, uuid, uuid, uuid, uuid, uuid, uuid, boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION scope_001_record_processing_run_error(uuid, integer, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION scope_001_verify_current_field(bigint, bigint, text, text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION scope_001_verify_current_field_provenance() FROM PUBLIC;
+REVOKE ALL ON FUNCTION scope_001_verify_current_revision_watermark_values(bigint, bigint, jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION scope_001_verify_current_revision_watermark() FROM PUBLIC;
+REVOKE ALL ON FUNCTION scope_001_verify_business_outcome_facts() FROM PUBLIC;
+REVOKE ALL ON FUNCTION scope_001_forbid_appending_to_published_revision() FROM PUBLIC;
+REVOKE ALL ON FUNCTION scope_001_protect_published_current_pointer() FROM PUBLIC;
+REVOKE ALL ON FUNCTION scope_001_protect_source_content_anchor() FROM PUBLIC;
+REVOKE ALL ON FUNCTION scope_001_require_identity_from_accepted_record() FROM PUBLIC;
+REVOKE ALL ON FUNCTION scope_001_require_observation_anchor_match() FROM PUBLIC;

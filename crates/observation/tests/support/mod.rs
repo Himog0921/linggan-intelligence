@@ -514,8 +514,8 @@ pub fn f01_run_refs(suffix: &str) -> ProcessingOptions {
 }
 
 /// Creates the least-privilege runtime role SCOPE-001 describes and returns a database connected
-/// as that role. The role may read, append and set the few columns the runtime advances; it may
-/// not delete, rewrite immutable history, or run DDL.
+/// as that role. It receives no direct table privilege: its only processing access is the three
+/// database-owned operations, which bind every write to the accepted Record and claim.
 pub async fn runtime_role_database(schema: &str) -> Database {
     let admin_url = std::env::var("SCOPE_001_PROOF_DATABASE_URL")
         .expect("test-scope-001-postgres.sh must provide an isolated proof database URL");
@@ -529,18 +529,13 @@ pub async fn runtime_role_database(schema: &str) -> Database {
         format!("DROP ROLE IF EXISTS {role}"),
         format!("CREATE ROLE {role} LOGIN PASSWORD '{password}'"),
         format!("GRANT USAGE ON SCHEMA {schema} TO {role}"),
-        format!("GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO {role}"),
-        format!("GRANT INSERT ON record_processing_attempt TO {role}"),
-        format!("GRANT INSERT ON source_identity TO {role}"),
-        format!("GRANT INSERT ON source_content TO {role}"),
-        format!("GRANT INSERT ON content_observation TO {role}"),
-        format!("GRANT INSERT ON content_current_revision TO {role}"),
-        format!("GRANT INSERT ON content_current_revision_field_source TO {role}"),
-        format!("GRANT UPDATE (terminal_reason) ON capture_attempt TO {role}"),
-        format!("GRANT UPDATE (business_outcome) ON record_processing_work TO {role}"),
-        format!("GRANT UPDATE (finalized_at, run_error) ON record_processing_attempt TO {role}"),
-        format!("GRANT UPDATE (published_at) ON content_current_revision TO {role}"),
-        format!("GRANT UPDATE (current_revision_id) ON source_content TO {role}"),
+        format!("GRANT EXECUTE ON FUNCTION scope_001_claim_processing_work(uuid) TO {role}"),
+        format!(
+            "GRANT EXECUTE ON FUNCTION scope_001_process_claimed_record(uuid, integer, uuid, uuid, uuid, uuid, uuid, uuid, boolean) TO {role}"
+        ),
+        format!(
+            "GRANT EXECUTE ON FUNCTION scope_001_record_processing_run_error(uuid, integer, text) TO {role}"
+        ),
     ] {
         raw(&admin, &statement).await.unwrap_or_else(|error| {
             panic!("granting the runtime role failed on {statement}: {error}")
