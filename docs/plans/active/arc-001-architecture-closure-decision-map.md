@@ -117,7 +117,7 @@ Asset target: `docs/product/first-phase-interface-prototype.md`
 ## first-producer-canary: 首批真实 Canary 是否包含媒体？
 
 Blocked by: primary-daily-job
-Status: open
+Status: resolved
 Type: Grilling
 Decision owner: Mog
 
@@ -127,9 +127,9 @@ Decision owner: Mog
 
 ### Answer
 
-草案决策材料已由 GitHub [Issue #11](https://github.com/Himog0921/linggan-intelligence/issues/11) 形成：[`first-producer-canary-decision-pack.md`](../../architecture/first-producer-canary-decision-pack.md)。它比较文本与结构优先和同步媒体两种边界，给出 A 的建议，并明确两者均不授权真实访问、媒体下载、schema、保留期限或实际 Canary。
+Mog 于 2026-08-22 明确选择 B：首批真实 producer Canary 必须同步纳入受限媒体，而不是只验证文本与结构。该决定保留旧项目未闭合的媒体问题作为 Linggan 的首批责任，不将它后置为可选能力。
 
-本票仍为 `open`：只有 Mog 从决策包中的 A/B 选项作出明确选择后，才能填写本节的正式 Answer、设为 `resolved`，并解锁后续 Capture/Media 合同工作。
+因此 `first-producer-canary` 已作为**决策状态** resolved；`capture-control-contract` 与 `media-lifecycle-contract` 已解锁为真实 Canary 的共同前置门。二者完成前，B 不授权真实平台/账号/插件访问、媒体下载、OCR/转录、schema、存储、保留/删除政策或实际 Canary。Issue #11 / PR #13 的交付与集成状态另行治理，不能由本图的 resolved 状态替代。
 
 
 ## capture-control-contract: 真实插件前必须冻结哪些调度责任？
@@ -166,7 +166,7 @@ Linggan 怎样用最小模型表达媒体身份、来源代次、下载、字节
 
 Asset target: `docs/architecture/media-lifecycle-contract.md`
 
-若首批 Canary 不含媒体，本票不阻塞纯文本真实 producer 探查，但必须在任何媒体 Lane 开工前 resolved。
+首批 Canary 已确定包含媒体；因此本票必须在任何真实 producer Canary 申请或执行前 resolved。它不授权媒体访问本身，只冻结“媒体合同先于真实 Canary”的依赖顺序。
 
 ## first-phase-runtime: 第一阶段怎样形成完整可运行系统？
 
@@ -204,7 +204,7 @@ Resolved 后才允许创建新的活跃 SCOPE、对应 GitHub Issues，并更新
 
 ## Next steps
 
-`product-shell` 与 `primary-daily-job` 已 resolved。当前有两个互不替代、均已解锁但尚未回答的票：`p0-surface-prototype` 与 `first-producer-canary`。
+`product-shell`、`primary-daily-job` 与 `first-producer-canary` 已 resolved。`p0-surface-prototype` 仍等待 Mog 的走查确认；`capture-control-contract` 与 `media-lifecycle-contract` 现已解锁，且两者都必须在首批真实 producer Canary 前完成。它们可以分别形成有界设计工作，但不得把 B 当成真实访问、媒体处理或实施授权。
 
 一次只推进一个 ticket 时：
 
@@ -216,5 +216,5 @@ Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-
 
 ```text
 Session A: Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket p0-surface-prototype.
-Session B: Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket first-producer-canary.
+Session B: Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket media-lifecycle-contract.
 ```

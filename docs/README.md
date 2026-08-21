@@ -65,7 +65,7 @@
 | [`architecture/module-architecture.md`](architecture/module-architecture.md) | 草案 | Gate 6 Rust 模块、接口、依赖、adapter、测试表面与无巨型文件门禁；不授权创建 crate |
 | [`architecture/agent-architecture.md`](architecture/agent-architecture.md) | 草案 | Gate 6 Agent Invocation、工具权限、预算/停止、恢复、结构化输出、隐私与评测；不选择模型或授权真实原文 |
 | [`architecture/capture-plugin-architecture.md`](architecture/capture-plugin-architecture.md) | 草案 | Gate 6 服务端采集控制层、有限工位/账号、Work Order/Attempt/lease、部分结果、MV3 插件与协议升级 |
-| [`architecture/first-producer-canary-decision-pack.md`](architecture/first-producer-canary-decision-pack.md) | 草案 / `PROVISIONAL` | ARC-001 首批真实 producer Canary 的文本优先与媒体边界决策材料；等待 Mog 选择，不授权真实访问 |
+| [`architecture/first-producer-canary-decision-pack.md`](architecture/first-producer-canary-decision-pack.md) | 草案；B 边界已确认 | ARC-001 首批真实 producer Canary 纳入受限媒体的决策材料；先完成 Capture/Media 合同，不授权真实访问 |
 | [`architecture/runtime-operations-architecture.md`](architecture/runtime-operations-architecture.md) | 草案 | Gate 6 API/worker、Durable Work、scheduler、重试/接管、可观测性、数据库角色、部署与恢复 |
 | [`architecture/data-architecture.md`](architecture/data-architecture.md) | 草案 | Gate 5 数据分类、身份、版本、Current、隐私、统计资格与 PostgreSQL 概念模型；不是 DDL |
 | [`architecture/data-relations.md`](architecture/data-relations.md) | 草案 | `data-architecture.md` 的渐进披露子文档；收敛候选基数、外键责任、类型化关系与并发约束，不是最终表清单 |
