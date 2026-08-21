@@ -98,5 +98,6 @@ export SCOPE_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password
 
 cargo test -p linggan-evidence --test ingress_postgres --locked -- --ignored
 cargo test -p linggan-observation --test content_postgres --locked -- --ignored
+cargo test -p linggan-observation --test content_postgres_negatives --locked -- --ignored
 
 echo "SCOPE-001 PostgreSQL proof passed"

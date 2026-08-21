@@ -39,8 +39,13 @@ pub(crate) fn rule_on_identity(
     }
 }
 
-/// Resolves the identity and its content anchor, reusing both when they already exist. The unique
-/// constraint on the identity tuple is what makes concurrent resolution safe.
+/// Resolves the identity and its content anchor, reusing both when they already exist.
+///
+/// Concurrency note: `ON CONFLICT DO UPDATE` is deliberate. With `DO NOTHING`, a transaction that
+/// loses the race gets no row back, and a `SELECT` in the same statement cannot see the winner's
+/// uncommitted row either - the loser would fail instead of continuing. `DO UPDATE` waits for the
+/// competing transaction, then returns the winning row. The update itself is a no-op rewrite of
+/// the same value, so no identity fact ever changes.
 pub(crate) async fn resolve_source_content(
     transaction: &mut Transaction<'_, Postgres>,
     external_id: &str,
@@ -48,18 +53,12 @@ pub(crate) async fn resolve_source_content(
     content_ref: Uuid,
 ) -> Result<i64, ProcessingError> {
     let identity_id = sqlx::query(
-        "WITH inserted AS ( \
-             INSERT INTO source_identity (source_identity_ref, source_system, namespace, object_type, external_id) \
-             VALUES ($1, 'synthetic', 'scope-001', 'content', $2) \
-             ON CONFLICT (source_system, namespace, object_type, external_id) DO NOTHING \
-             RETURNING id \
-         ) \
-         SELECT id FROM inserted \
-         UNION ALL \
-         SELECT id FROM source_identity \
-         WHERE source_system = 'synthetic' AND namespace = 'scope-001' \
-           AND object_type = 'content' AND external_id = $2 \
-         LIMIT 1",
+        "INSERT INTO source_identity \
+             (source_identity_ref, source_system, namespace, object_type, external_id) \
+         VALUES ($1, 'synthetic', 'scope-001', 'content', $2) \
+         ON CONFLICT (source_system, namespace, object_type, external_id) \
+         DO UPDATE SET external_id = source_identity.external_id \
+         RETURNING id",
     )
     .bind(identity_ref)
     .bind(external_id)
@@ -69,15 +68,10 @@ pub(crate) async fn resolve_source_content(
     .map_err(ProcessingError::internal)?;
 
     sqlx::query(
-        "WITH inserted AS ( \
-             INSERT INTO source_content (content_ref, source_identity_id) VALUES ($1, $2) \
-             ON CONFLICT (source_identity_id) DO NOTHING \
-             RETURNING id \
-         ) \
-         SELECT id FROM inserted \
-         UNION ALL \
-         SELECT id FROM source_content WHERE source_identity_id = $2 \
-         LIMIT 1",
+        "INSERT INTO source_content (content_ref, source_identity_id) VALUES ($1, $2) \
+         ON CONFLICT (source_identity_id) \
+         DO UPDATE SET source_identity_id = source_content.source_identity_id \
+         RETURNING id",
     )
     .bind(content_ref)
     .bind(identity_id)

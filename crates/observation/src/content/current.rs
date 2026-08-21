@@ -36,6 +36,20 @@ pub(crate) async fn republish_current(
     title_source_ref: Uuid,
     body_source_ref: Uuid,
 ) -> Result<(), ProcessingError> {
+    // Serialize recomputation per content: a concurrent build must not read observations from
+    // before the other transaction's observation, then publish over it.
+    //
+    // Today this lock is defence in depth rather than the only guard: `resolve_source_content`
+    // already takes a row lock on this content through its `ON CONFLICT DO UPDATE`, so removing
+    // this statement does not currently make the concurrency proof fail. It stays explicit so the
+    // guarantee is stated where it is relied on, and so a future change to identity resolution
+    // cannot silently drop it.
+    sqlx::query("SELECT id FROM source_content WHERE id = $1 FOR UPDATE")
+        .bind(source_content_id)
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(ProcessingError::internal)?;
+
     let observations = load_observations(transaction, source_content_id).await?;
     let title = resolve_field(&observations, |observation| observation.title.as_deref());
     let body = resolve_field(&observations, |observation| observation.body.as_deref());

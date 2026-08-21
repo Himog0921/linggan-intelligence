@@ -67,16 +67,25 @@ impl ProcessingError {
     }
 }
 
+/// Where public refs come from. A frozen sequence fails closed at both ends: it never silently
+/// substitutes a random UUID when it runs out, and a leftover reference is an error too, because
+/// it means the run consumed refs in a different order than the oracle froze.
+#[derive(Debug)]
+enum RefSource {
+    Random,
+    Frozen(Mutex<VecDeque<Uuid>>),
+}
+
 /// Processing inputs a proof run needs to pin down. Refs default to random v4 UUIDs.
 #[derive(Debug)]
 pub struct ProcessingOptions {
-    refs: Mutex<VecDeque<Uuid>>,
+    refs: RefSource,
 }
 
 impl Default for ProcessingOptions {
     fn default() -> Self {
         Self {
-            refs: Mutex::new(VecDeque::new()),
+            refs: RefSource::Random,
         }
     }
 }
@@ -85,15 +94,37 @@ impl ProcessingOptions {
     /// Pins minted refs to a frozen sequence: attempt, identity, content, observation, revision,
     /// title field source, body field source.
     pub fn use_fixed_refs(&mut self, values: Vec<Uuid>) {
-        self.refs = Mutex::new(values.into());
+        self.refs = RefSource::Frozen(Mutex::new(values.into()));
+    }
+
+    /// Proof-only: fails when a frozen sequence still holds references after a run. Without this
+    /// a drifting mint order could leave a test green while proving the wrong thing.
+    pub fn assert_frozen_refs_fully_consumed(&self) {
+        if let RefSource::Frozen(queue) = &self.refs {
+            let remaining = queue
+                .lock()
+                .expect("the ref sequence lock is never held across a panic")
+                .len();
+            assert_eq!(
+                remaining, 0,
+                "the frozen proof reference sequence has {remaining} unconsumed reference(s); \
+                 the run did not mint what the oracle froze"
+            );
+        }
     }
 
     fn mint(&self) -> Uuid {
-        self.refs
-            .lock()
-            .expect("the ref sequence lock is never held across a panic")
-            .pop_front()
-            .unwrap_or_else(Uuid::new_v4)
+        match &self.refs {
+            RefSource::Random => Uuid::new_v4(),
+            RefSource::Frozen(queue) => queue
+                .lock()
+                .expect("the ref sequence lock is never held across a panic")
+                .pop_front()
+                .expect(
+                    "the frozen proof reference sequence ran out; a fixed reference must never \
+                     be replaced by a random UUID",
+                ),
+        }
     }
 }
 
@@ -117,15 +148,17 @@ pub async fn process_one_ready_record(
     database: &Database,
     options: &ProcessingOptions,
 ) -> Result<ProcessingOutcome, ProcessingError> {
-    let Some(claim) = claim_next_ready_work(database, options).await? else {
-        return Ok(ProcessingOutcome::NothingReady);
-    };
-
+    // Claim, run and finalize share one transaction. If anything fails, the attempt row rolls
+    // back with the rest, so a failed run can never leave a work leased and unfinalized with no
+    // recorded reason. Concurrency is handled by the row lock the claim takes, not by the lease.
     let mut transaction = database
         .pool()
         .begin()
         .await
         .map_err(ProcessingError::internal)?;
+    let Some(claim) = claim_next_ready_work(&mut transaction, options).await? else {
+        return Ok(ProcessingOutcome::NothingReady);
+    };
     let business_outcome = run_processor(&mut transaction, &claim, options).await?;
     finalize(&mut transaction, &claim, business_outcome).await?;
     transaction
@@ -157,16 +190,11 @@ FOR UPDATE OF w SKIP LOCKED \
 LIMIT 1";
 
 async fn claim_next_ready_work(
-    database: &Database,
+    transaction: &mut Transaction<'_, Postgres>,
     options: &ProcessingOptions,
 ) -> Result<Option<ClaimedWork>, ProcessingError> {
-    let mut transaction = database
-        .pool()
-        .begin()
-        .await
-        .map_err(ProcessingError::internal)?;
     let Some(row) = sqlx::query(CLAIM_SQL)
-        .fetch_optional(&mut *transaction)
+        .fetch_optional(&mut **transaction)
         .await
         .map_err(ProcessingError::internal)?
     else {
@@ -184,13 +212,9 @@ async fn claim_next_ready_work(
     .bind(options.mint())
     .bind(work_id)
     .bind(DEFAULT_LEASE)
-    .fetch_one(&mut *transaction)
+    .fetch_one(&mut **transaction)
     .await
     .map_err(ProcessingError::internal)?;
-    transaction
-        .commit()
-        .await
-        .map_err(ProcessingError::internal)?;
 
     Ok(Some(ClaimedWork {
         work_id,

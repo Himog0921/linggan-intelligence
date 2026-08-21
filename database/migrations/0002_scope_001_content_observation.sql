@@ -159,36 +159,96 @@ CREATE TABLE content_current_revision_field_source (
     FOREIGN KEY (observation_id, source_content_id) REFERENCES content_observation(id, source_content_id)
 );
 
--- A published field state must match the provenance it claims: `selected` needs at least one
--- same-value support, `unresolved` needs at least two conflicting candidates, and `unknown` must
--- not invent any field support at all.
-CREATE FUNCTION scope_001_verify_current_field_provenance() RETURNS trigger
-    LANGUAGE plpgsql AS $$
+-- A published field state must be true of the observations it names: the support must actually
+-- observe the published value at the latest qualified instant, an unresolved field must really
+-- have competing values at that instant, and unknown must have had nothing qualified to use.
+-- Counting rows by role is not enough; a bypassing writer could satisfy counts with any rows.
+CREATE FUNCTION scope_001_verify_current_field(
+    revision_id bigint,
+    content_id bigint,
+    field text,
+    state text,
+    published_value text
+) RETURNS void LANGUAGE plpgsql AS $$
 DECLARE
-    field text;
-    state text;
+    latest timestamptz;
+    qualified_at_latest integer;
     supports integer;
     conflicts integer;
+    unobserved integer;
+    stale integer;
+    wrong_value integer;
+    distinct_values integer;
 BEGIN
-    FOREACH field IN ARRAY ARRAY['title', 'body'] LOOP
-        state := CASE field WHEN 'title' THEN NEW.title_state ELSE NEW.body_state END;
-        SELECT
-            count(*) FILTER (WHERE role = 'selected_support'),
-            count(*) FILTER (WHERE role = 'conflicting_candidate')
-        INTO supports, conflicts
-        FROM content_current_revision_field_source
-        WHERE revision_id = NEW.id AND field_kind = field;
+    SELECT max(o.observed_at) INTO latest
+    FROM content_observation o
+    WHERE o.source_content_id = content_id
+      AND CASE field WHEN 'title' THEN o.title_observed ELSE o.body_observed END;
 
-        IF state = 'selected' AND (supports < 1 OR conflicts > 0) THEN
+    SELECT count(*) INTO qualified_at_latest
+    FROM content_observation o
+    WHERE o.source_content_id = content_id
+      AND CASE field WHEN 'title' THEN o.title_observed ELSE o.body_observed END
+      AND o.observed_at = latest;
+
+    SELECT
+        count(*) FILTER (WHERE fs.role = 'selected_support'),
+        count(*) FILTER (WHERE fs.role = 'conflicting_candidate'),
+        count(*) FILTER (WHERE NOT (CASE field WHEN 'title' THEN o.title_observed ELSE o.body_observed END)),
+        count(*) FILTER (WHERE o.observed_at IS DISTINCT FROM latest),
+        count(*) FILTER (WHERE (CASE field WHEN 'title' THEN o.title_value ELSE o.body_value END) IS DISTINCT FROM published_value),
+        count(DISTINCT CASE field WHEN 'title' THEN o.title_value ELSE o.body_value END)
+    INTO supports, conflicts, unobserved, stale, wrong_value, distinct_values
+    FROM content_current_revision_field_source fs
+    JOIN content_observation o ON o.id = fs.observation_id
+    WHERE fs.revision_id = scope_001_verify_current_field.revision_id
+      AND fs.field_kind = field;
+
+    IF unobserved > 0 THEN
+        RAISE EXCEPTION 'a % field source names an observation that does not observe %', field, field;
+    END IF;
+    IF stale > 0 THEN
+        RAISE EXCEPTION 'a % field source is not from the latest qualified observation instant', field;
+    END IF;
+
+    IF state = 'selected' THEN
+        IF supports < 1 OR conflicts > 0 THEN
             RAISE EXCEPTION 'selected % must have at least one selected_support and no conflicting candidate', field;
         END IF;
-        IF state = 'unresolved' AND (conflicts < 2 OR supports > 0) THEN
+        IF wrong_value > 0 THEN
+            RAISE EXCEPTION 'a selected % source does not observe the published value', field;
+        END IF;
+        IF supports <> qualified_at_latest THEN
+            RAISE EXCEPTION 'selected % must fix every observation at the latest qualified instant', field;
+        END IF;
+    ELSIF state = 'unresolved' THEN
+        IF conflicts < 2 OR supports > 0 THEN
             RAISE EXCEPTION 'unresolved % must have at least two conflicting candidates and no support', field;
         END IF;
-        IF state = 'unknown' AND (supports > 0 OR conflicts > 0) THEN
+        IF distinct_values < 2 THEN
+            RAISE EXCEPTION 'unresolved % must name candidates with at least two distinct values', field;
+        END IF;
+        IF conflicts <> qualified_at_latest THEN
+            RAISE EXCEPTION 'unresolved % must fix every observation at the latest qualified instant', field;
+        END IF;
+    ELSE
+        IF supports > 0 OR conflicts > 0 THEN
             RAISE EXCEPTION 'unknown % must not claim any field source', field;
         END IF;
-    END LOOP;
+        IF latest IS NOT NULL THEN
+            RAISE EXCEPTION 'unknown % cannot ignore a qualified observation of %', field, field;
+        END IF;
+    END IF;
+END;
+$$;
+
+CREATE FUNCTION scope_001_verify_current_field_provenance() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+BEGIN
+    PERFORM scope_001_verify_current_field(
+        NEW.id, NEW.source_content_id, 'title', NEW.title_state, NEW.title_value);
+    PERFORM scope_001_verify_current_field(
+        NEW.id, NEW.source_content_id, 'body', NEW.body_state, NEW.body_value);
     RETURN NULL;
 END;
 $$;
@@ -234,3 +294,75 @@ CREATE CONSTRAINT TRIGGER content_current_revision_watermark_matches_inputs
     AFTER INSERT ON content_current_revision
     DEFERRABLE INITIALLY DEFERRED
     FOR EACH ROW EXECUTE FUNCTION scope_001_verify_current_revision_watermark();
+
+-- ---------------------------------------------------------------------------
+-- 4. What the database refuses regardless of which client is writing
+-- ---------------------------------------------------------------------------
+
+-- Observations and published current values are append-only. Correcting a value means
+-- recomputing a new revision from qualified evidence, never rewriting history in place.
+CREATE FUNCTION scope_001_forbid_rewriting_history() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION '% is append-only; recompute instead of rewriting or deleting a row', TG_TABLE_NAME;
+END;
+$$;
+
+CREATE TRIGGER content_observation_is_append_only
+    BEFORE UPDATE OR DELETE ON content_observation
+    FOR EACH ROW EXECUTE FUNCTION scope_001_forbid_rewriting_history();
+
+CREATE TRIGGER content_current_revision_is_append_only
+    BEFORE UPDATE OR DELETE ON content_current_revision
+    FOR EACH ROW EXECUTE FUNCTION scope_001_forbid_rewriting_history();
+
+CREATE TRIGGER content_current_revision_field_source_is_append_only
+    BEFORE UPDATE OR DELETE ON content_current_revision_field_source
+    FOR EACH ROW EXECUTE FUNCTION scope_001_forbid_rewriting_history();
+
+-- A finalized business outcome must be true of the rows that exist. `observation_recorded` in
+-- particular may not be claimed without a finalized attempt, the observation this record formed,
+-- and a published current revision for the content that observation belongs to. Every other
+-- outcome forms no observation at all.
+CREATE FUNCTION scope_001_verify_business_outcome_facts() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+DECLARE
+    observed integer;
+    published integer;
+BEGIN
+    IF NEW.business_outcome IS NULL THEN
+        RETURN NULL;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM record_processing_attempt a
+        WHERE a.processing_work_id = NEW.id AND a.finalized_at IS NOT NULL
+    ) THEN
+        RAISE EXCEPTION 'a finalized work must have a finalized processing attempt';
+    END IF;
+
+    SELECT count(*) INTO observed
+    FROM content_observation o WHERE o.capture_record_id = NEW.capture_record_id;
+
+    IF NEW.business_outcome = 'observation_recorded' THEN
+        IF observed <> 1 THEN
+            RAISE EXCEPTION 'observation_recorded requires exactly one observation for this record, found %', observed;
+        END IF;
+        SELECT count(*) INTO published
+        FROM content_observation o
+        JOIN source_content c ON c.id = o.source_content_id
+        WHERE o.capture_record_id = NEW.capture_record_id AND c.current_revision_id IS NOT NULL;
+        IF published <> 1 THEN
+            RAISE EXCEPTION 'observation_recorded requires a published current revision for the observed content';
+        END IF;
+    ELSIF observed <> 0 THEN
+        RAISE EXCEPTION 'business outcome % must not leave an observation behind', NEW.business_outcome;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER record_processing_work_outcome_matches_facts
+    AFTER INSERT OR UPDATE ON record_processing_work
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION scope_001_verify_business_outcome_facts();
