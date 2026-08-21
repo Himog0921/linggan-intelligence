@@ -1,59 +1,61 @@
 # PAGE-TOPIC-001 · Topic Intelligence Reference Page
 
 > 状态: 权威当前
+> 运行时状态: L2 静态合成参考，不是运行页面
 > 最后核对: 2026-08-21
-> 适用范围: DESIGN-002 的「任务启动困难」合成 Topic Intelligence 静态参考页
-> 事实来源: `docs/pages/topic-intelligence-surface.md`、DS-001–DS-007、PAT-001–PAT-004、Issue #7 与现有产品边界
-> 冲突时以谁为准: 用户最新确认、产品页面、真实数据/权限/行动合同与当前 SCOPE；本规格不替代这些来源
+> 适用范围: DESIGN-002 的「任务启动困难」Topic Intelligence 本地 Reference Page
+> 事实来源: docs/pages/topic-intelligence-surface.md、[LIDS-SYS-001](../lids/system.md)、[LIDS-PAT-001](../lids/patterns.md)、DS-REF-TOPIC-001、Issue #7 与当前产品边界
+> 冲突时以谁为准: 用户最新确认、产品页面、真实数据/权限/行动合同、当前 SCOPE 与 AGENTS.md；本规格不替代这些来源
 
-## 1. 身份与授权
+## 1. 页面核心任务、答案和动作
 
-- 页面规格 ID：`PAGE-TOPIC-001`
-- 关联 Issue / 计划：Issue #7 / `DESIGN-002`
-- 当前状态：静态、合成、本地参考实现；不是运行页面。
-- 产品页面来源：[Topic Intelligence Surface](../../pages/topic-intelligence-surface.md)
-- 用户任务：在明确样本范围与限制下，判断是否继续探索「任务启动困难」。
-- 明确非目标：真实趋势、真实 Evidence/Source、Topic 管理、检索、采集、权限、写入、研究创建、行动执行和完整移动工作台。
-- 当前可用数据/权限合同：无；所有内容是 `SYNTHETIC_REFERENCE`。
-- 决策 owner：Mog；真实数据和动作边界必须另立决定/SCOPE。
+- **核心任务**：在清楚的合成范围与限制下，理解样本中围绕「任务启动困难」出现了哪些表达，并选择“继续探索”或“暂时搁置”的本地意图。
+- **三秒答案**：这是一个 `SYNTHETIC / NOT LIVE`、`SOURCE_INCOMPLETE` 的 L2 参考，不包含已验证的趋势、覆盖、系统结论或真实研究。
+- **五秒动作**：用户可找到“查看示例限制”，然后选择本地的继续探索/暂时搁置；该选择不创建任何真实记录。
+- **非目标**：真实趋势/Evidence/Source/Topic 管理/检索/采集/权限/写入/研究创建/行动执行/移动工作台/完整 P0。
 
-## 2. 页面组合
+## 2. 强度、Pattern、真相边界
 
-| 页面区域 | 来源 ID | 使用目的 | 明确不允许的替代 |
-|---|---|---|---|
-| 模式/范围旗标 | DS-001、DS-004、DS-005、PAT-003 | 首屏声明合成模式与来源不足 | 小字脚注、纯颜色或模拟状态灯 |
-| Topic Header | DS-002、DS-003；page-local Topic Header | 锁定 Topic、定义版本与唯一任务 | Hero 营销文案、无来源的系统结论 |
-| 时间窗口 | DS-006、DS-007；page-local Sample Window | 切换两组演示文案 | 真实筛选、统计查询或“最近趋势” |
-| 样本观察 / 原声 | DS-003、DS-005、PAT-001 | 把示例观察和其限制放在一起 | 无标签引语、数量/百分比/趋势箭头 |
-| 内容叙事 | DS-003、PAT-001 | 展示示例叙事的差异 | 市场分类、可复制的增长标签 |
-| Candidate / Boundary | DS-001、DS-005、PAT-002、PAT-003 | 候选解释与未知识别分栏 | 总置信度、正式 Claim、伪进度 |
-| 本地意图 | DS-006、DS-007、PAT-004 | 演示用户选择后的诚实回显 | 创建真实决定、toast 成功或隐藏限制 |
+| 字段 | 固定值 |
+|---|---|
+| 视觉强度 | L2 · Research / Analysis |
+| 主 Pattern | LIDS Topic Intelligence Detail 的受限静态阅读段落 |
+| 数据真源 | 无；全部为 `SYNTHETIC_REFERENCE`，不触碰数据/权限/行动合同 |
+| 状态策略 | 合成/来源不足标记；不冒充 LIDS 五轴真实状态 |
+| 主动作 | `LOCAL_INTENT_ONLY` 的局部意图回显 |
+| 禁止元素 | KPI 卡、趋势百分比/箭头/曲线、Coverage 数字、正式状态 Tag、假运行日志、Agent 命令、真实成功/错误回执、常驻场景/动效 |
 
-## 3. 状态与互动
+## 3. 页面结构与信息顺序
 
-| 用户动作 | 前置条件 | 参考页反馈 | 不得宣称 |
-|---|---|---|---|
-| 切换 7 / 30 日样本 | 用户浏览本地页面 | 替换合成标题和示例片段；模式边界保留 | 真实窗口查询、趋势比较或数据刷新 |
-| 展开示例原声 | 用户选择一条样本 | 原位展示“合成示例／不能证明什么” | 真实来源上下文、证据资格或隐私已检查 |
-| 继续探索 / 暂时搁置 | 用户表达界面意图 | 在本地意图区回显选择与“未创建真实记录” | Research、Decision、Action、通知或待办已创建 |
+```text
+L2 Workbench Header / mode / synthetic boundary
+Topic identity + explicit scope and limitation
+Synthetic sample window
+Observation (limited sample) | Interpretation boundary
+Raw voice samples (each explicitly synthetic / not evidence)
+Candidate explanation | Unknown / source gap
+Local intent (no persistence)
+```
 
-## 4. 视觉工作条件
+顺序服从 LIDS 的“变化/观察 → 原声 → 解释 → 证据边界 → 下一步”，但当前没有真实变化/证据资格，所以首个区块只能称为有限样本观察，不能称 Trend 或 Current Signal。
 
-- 主工作条件：1280px 以上桌面研究工作区，中心观察区是视觉主角。
-- 窄视图：按文档阅读顺序单列；只验证阅读和键盘操作，不作为移动产品交付。
-- 支持的阅读内容：短 Topic 名称、有限原声片段、三类叙事、一个候选方向、一个明显来源限制。
-- 动效：只能使用短暂、原位的 disclosure；`prefers-reduced-motion` 下无过渡。
+## 4. 区域组合与互动
 
-## 5. 最小验收
+| 区域 | LIDS / 本页来源 | 可以做 | 必须持续显示 | 不得替代 |
+|---|---|---|---|---|
+| Header/Boundary | LIDS-SYS-001、DS-REF-TOPIC-001 | 显示模式、范围、限制 | `SYNTHETIC / NOT LIVE`、`SOURCE_INCOMPLETE` | 真实系统状态、营销 Hero |
+| Topic identity | LIDS Topic Detail | 说明样本 Topic 与唯一任务 | 合成范围/不推断趋势 | 真实 Topic 对象或官方结论 |
+| Sample window | Page-local candidate | 切换两组合成阅读片段 | `DEMO WINDOW / NOT QUERY` | 实际筛选或刷新 |
+| Observation/voice | Raw Voice 原则 + PAT-001 | 展开“不能证明什么” | 每条 `SYNTHETIC / NOT EVIDENCE` | 来源合格、真实 Evidence 或统计 |
+| Candidate/boundary | PAT-002/PAT-003 | 提出待核验方向、列未知 | 支持样本和缺口 | Claim、Signal、Intelligence、Confidence |
+| Local intent | PAT-004 | 局部回显选择 | `LOCAL_INTENT_ONLY` 与未创建记录 | Decision/Action/通知/待办/成功 toast |
 
-1. 第一眼即可见 `SYNTHETIC / NOT LIVE` 与 `SOURCE_INCOMPLETE`。
-2. 任何人不能从页面读出“市场正在增长/下降”“全部覆盖”“系统已确认”或“真实决定已执行”。
-3. 展开、窗口和意图互动可键盘到达，并只影响声明范围内的局部内容。
-4. 视觉元素在没有任何外部图像、字体、运行数据或框架依赖时仍成立。
-5. 使用任一局部块仍不证明它是跨页面 `CMP`，除非满足组件晋升规则。
+互动键盘可达、Focus 可见、原位短过渡，`prefers-reduced-motion` 取消过渡。当前不承诺移动产品；窄视图只验证连续阅读与键盘，不得从中推断正式移动交互。
 
-实际走查结果记录在 [ACC-TOPIC-001](topic-intelligence-reference-acceptance.md)。
+## 5. 验收和未证明边界
 
-## 6. 未证明边界
-
-本规格不证明品牌最终视觉、真实产品可用性、数据正确性、响应式移动交付、组件代码、真实 API/数据库/权限/动作、部署或 Mog 视觉验收。它是后续 P0 原型讨论的一个可审查输入，不是 ARC-001 `p0-surface-prototype` 的完整答案。
+1. 首屏和每条样本均不需要点击即可看到合成/非 Evidence 边界。
+2. 页面不出现真实五轴状态、趋势/增长/完整 Coverage/真实回执或网络读取/写入。
+3. 任意局部互动只改变宣称范围内的本地文本，且可键盘到达、Reduced Motion 后仍有意义。
+4. 视觉仅使用 LIDS 暖灰/煤黑/Signal、Sans/Mono 和 L2 Pattern；没有旧暗色主题或外部依赖。
+5. 本页局部块仍是候选，不能声称正式组件库、真实 Topic 产品、P0 或部署。

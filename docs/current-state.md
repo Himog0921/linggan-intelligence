@@ -12,7 +12,7 @@
 
 [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) 的 `product-shell` 与 `primary-daily-job` 已 resolved：Linggan Intelligence 是独立且完整的 Web 产品；每天先让 Mog 处理少量值得关注事项，理解来源、出现原因与不确定性，再决定暂不处理、继续观察、进入 Topic 深入或提出行动。内容工作台只是历史原型和能力样本，不是运行时依赖；首页五个名称是产品职责，不是五个已授权运行实例。这里确认的是产品身份和日常用户任务，不表示 Web、P0 或 Agent 已获实现授权。ARC-001 当前已解锁但未回答的票是 `p0-surface-prototype` 与 `first-producer-canary`。
 
-当前唯一获准的**业务实施**仍是 `SCOPE-001 / F01`。Mog 已另行确认 `DESIGN-002`：以「任务启动困难」为例制作一个明确标为 `SYNTHETIC / NOT LIVE` 的 Topic Intelligence Reference Page，并由它形成第一批受限设计规则；它是 `p0-surface-prototype` 的一个可审查输入，不回答完整 P0、不会创建真实 Web 业务能力，也不扩大 F01 或任何真实数据/权限/行动授权。`GOV-003` 是并行进行的低风险单 Issue/单 PR 治理工作单，不是第二个业务 SCOPE：GitHub [Issue #1](https://github.com/Himog0921/linggan-intelligence/issues/1) 与 draft [PR #2](https://github.com/Himog0921/linggan-intelligence/pull/2) 已建立，但 independent review 对旧 head `a7b63c365c7d3befccc54fd42586c48fe0f22542` 的结论为 **FAIL**，当前只允许在同一 branch/worktree 内修订并请求原 reviewer 复核；不得 merge、close 或把 GOV-003 记为完成。
+当前唯一获准的**业务实施**仍是 `SCOPE-001 / F01`。Mog 已另行确认 `DESIGN-002`：以「任务启动困难」为例制作一个明确标为 `SYNTHETIC / NOT LIVE` 的 Topic Intelligence Reference Page，并把 [LIDS v2.0](design/lids/README.md) 纳入全项目唯一设计表达标准。LIDS 现在约束未来 UI 的 Token → Primitive → Component → Pattern → Page、L1/L2/L3、状态诚实与 Agent 工作方式，但成熟度仍为 Proposed；它不创建真实 Web、运行时主题/组件、真实数据、3D/技术栈、权限或动作。DESIGN-002 仍只是 `p0-surface-prototype` 的一个可审查输入，不回答完整 P0，也不扩大 F01 或任何真实数据/权限/行动授权。`GOV-003` 是并行进行的低风险单 Issue/单 PR 治理工作单，不是第二个业务 SCOPE：GitHub [Issue #1](https://github.com/Himog0921/linggan-intelligence/issues/1) 与 draft [PR #2](https://github.com/Himog0921/linggan-intelligence/pull/2) 已建立，但 independent review 对旧 head `a7b63c365c7d3befccc54fd42586c48fe0f22542` 的结论为 **FAIL**，当前只允许在同一 branch/worktree 内修订并请求原 reviewer 复核；不得 merge、close 或把 GOV-003 记为完成。
 
 全项目已正式按“开发阶段”跟踪；阶段路线、每阶段验收证据与需要 Mog 决定的关口统一见 [`development-stage-tracker.md`](development-stage-tracker.md)。本文继续只维护当前快照和唯一下一步，不复制长期路线。
 
@@ -70,7 +70,7 @@
 | 5 | SCOPE-001 | synthetic fact-kernel technical tracer | 执行中（F01 主链） | 完成 Package → PostgreSQL atomic ingress → two Records → Observation/Current → loopback API → minimal CLI 后 hard stop；不是用户可见产品切片 |
 | 6 | ARC-001 | 产品与系统架构收口决策图 | 进行中（决策） | `product-shell`、`primary-daily-job` 已解决；P0 原型与 producer Canary 两票已解锁但未回答，最后由 Mog 批准首个用户可见 SCOPE |
 | 7 | GOV-003 | 外部 Agent Issue → worktree → PR 协作闭环 | 修订中（review FAIL） | 同一 PR 新 head 通过独立复核；integrator 合并后重新核验 main/正式文档、记录完成层并手工关闭 Issue；不是第二业务 SCOPE |
-| 8 | DESIGN-002 | Topic Intelligence 合成 Reference Page | 执行中（设计参考） | Issue #7 只交付可本地走查的静态参考页、页面/视觉/模式规格与组件晋升门；不接入真实数据、Web 产品或真实动作 |
+| 8 | DESIGN-002 | Topic Intelligence 合成 Reference Page + LIDS v2.0 | 执行中（设计参考/治理） | Issue #7 将 LIDS 作为全项目设计表达标准，并交付其 L2 合成参考页、规格、组件晋升门和检查；不接入真实数据、Web 产品、运行时主题/组件或真实动作 |
 
 同一时间默认只允许一个事项处于“执行中”。状态流转为：`待讨论 → 需要决定 → 已确认 → 执行中 → 验证中 → 已完成`。来源不足使用 `SOURCE_INCOMPLETE`；必须由用户决定的边界使用 `DECISION_REQUIRED`；外部条件无法继续时使用 `BLOCKED`。
 

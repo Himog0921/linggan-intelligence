@@ -8,16 +8,71 @@
 
 ## 目标与用户可见结果
 
-为 Topic「任务启动困难」制作一份可在本地打开的 Reference Page。它让 Mog 在 5–10 分钟内走查一个窄问题：
+为 Topic「任务启动困难」制作一份可在本地打开的 Reference Page，并把 Mog 指定的 LIDS v2.0 融入项目的 UI 治理。它让 Mog 在 5–10 分钟内走查一个窄问题：
 
 > 在**明确的样本与限制**下，这个 Topic 最近有哪些值得继续研究的观察，下一步是继续探索还是暂时搁置？
 
-交付的页面不是运行中的 Linggan，也不是未来产品的技术原型。它是一个真实可查看的设计基准：后续 Agent 必须引用其页面规格、基础规则和模式；尚未被第二个页面验证的局部块不得伪装成通用组件库。
+交付的页面不是运行中的 Linggan，也不是未来产品的技术原型。它是一个真实可查看的设计基准：后续 Agent 必须引用 LIDS、页面规格、基础规则和模式；尚未被第二个页面验证的局部块不得伪装成通用组件库。
+
+## UI Change Manifest
+
+### 1. 事项
+
+- Issue / SCOPE：Issue #7 / `DESIGN-002`；用户于 2026-08-21 追加明确指定 `Linggan_Intelligence_Design_System_v2.0` 为全项目设计表达标准。
+- Agent 与 worktree：`/root` / `/Users/moglenny/proma/.worktrees/linggan-intelligence/issue-7-design-002`。
+- 目标：将 LIDS 的 Token → Primitive → Component → Pattern → Page、L1/L2/L3、状态诚实、Agent 决策树、模板/迁移纪律和机器检查纳入 Linggan 的设计治理；将合成 Topic 参考页改为 L2 LIDS 表达。
+- 用户可见结果：可本地打开的暖灰精密情报风格静态参考页；用户能持续看见样本为合成且没有真实动作；未来 UI Agent 有统一、可执行的标准入口。
+- 明确非目标：不创建 Web/React/Rust 前端、运行时 Token CSS、正式组件、真实数据/状态、3D/WebGL、真实 Agent、权限、网络请求、持久化、部署或完整 P0。
+
+### 2. 读取回执
+
+| 来源 | 状态 | 本次解决的问题 | 已核对 |
+|---|---|---|---|
+| `AGENTS.md` / `docs/current-state.md` | 已读 | 事实优先、Issue/PR、无 UI 实现授权与 ARC/P0 边界 | 2026-08-21 |
+| UI execution contract | 已读 | UI 写入的闭集、变更分类、停止与验收合同 | 2026-08-21 |
+| 产品页面文档 | 已读 | Topic 的单一任务、无趋势/真实行动的限制 | 2026-08-21 |
+| 既有设计治理/PAGE/PAT/CMP | 已读并更新 | 保留事实/候选/边界与组件晋升门，消除旧视觉规则冲突 | 2026-08-21 |
+| Mog 提供的 LIDS v2.0 包 | 已完整核对 | 设计表达、Token、Primitive、Pattern、Agent 规则、模板、原型审计与迁移标准 | 2026-08-21 |
+| 数据/权限/行动合同 | 当前不存在 | 确认所有演示必须保持 synthetic/not-live | 2026-08-21 |
+| 当前代码/测试 | 已核对 | 当前没有可继承的 Web UI、主题或真实状态实现 | 2026-08-21 |
+
+### 3. 分类
+
+- 分类：混合（视觉表达 + 本地演示互动 + 状态/语义）。
+- 最高风险类别：状态/语义。
+- 对应来源：PAGE-TOPIC-001、PAT-001–PAT-004、LIDS-SYS-001、LIDS-AGENT-001、当前产品边界与 UI execution contract。
+- 风险理由：页面中的原声、窗口、候选、边界和下一步意图可能被误读为真实 Evidence、趋势、系统判断或已发生动作；因此视觉变化按状态诚实标准执行。
+- `DECISION_REQUIRED`：真实数据状态、Trend/Coverage、真实 Topic/Source/Evidence、真正的研究/行动、运行时 Web 技术、场景资产与部署均仍需要独立决定。
+
+### 4. 影响边界
+
+- 受影响页面：仅 `PAGE-TOPIC-001` 静态参考；未来 UI Agent 读取入口和治理约束。
+- 受影响组件：无运行时组件；仅更新候选/Primitive/CMP 晋升规则。
+- 受影响状态：合成/来源不足/本地意图；无真实五轴数据状态。
+- 数据、权限、敏感展示、真实行动：不改变且不接入。
+- 禁止修改的文件/能力：`apps/`、`crates/`、`database/`、F01 代码/测试/migration、`references/`、部署/配置、外部资产与任何真实 Producer/API。
+- 停止条件：需声明/实现真实数据、权限、回执、产品动作、框架/技术路径、外部资产、生产部署或未被当前文档支持的视觉/组件规则时，停下并记录 `DECISION_REQUIRED` 或 `SOURCE_INCOMPLETE`。
+
+### 5. 验收与证明边界
+
+| 层级 | 验收方法 | 实际结果 | 未证明边界 |
+|---|---|---|---|
+| 任务可用 | 页面规格与浏览器走查 | 待本次重做后更新 | 非真实产品任务/工作流 |
+| 状态诚实 | 每条合成样本与本地意图的持续边界检查 | 待本次重做后更新 | 真实状态/权限/回执 |
+| 视觉一致 | LIDS 专项检查、静态浏览器走查、响应式/Reduced Motion | 待本次重做后更新 | 运行时组件/完整 L1/L2/L3/用户审美验收 |
+| 真实后果 | 禁止任何网络/写入并检查源文件 | N/A：设计事项明确禁止 | 真实链路和部署 |
+
+### 6. 交接
+
+- 修改文件：本计划列出的 DESIGN-002 文档、LIDS 标准目录、设计治理/Agent 合同/模板/索引/进度、静态参考页与专项检查。
+- 验证：`git diff --check`、LIDS/UI/Topic/项目治理检查、静态浏览器桌面/窄屏/键盘/Reduced Motion 走查。
+- 例外与替代：旧 DESIGN-002 局部暗色视觉规则由 LIDS 替代；事实边界和第二独立页面晋升门保留。
+- PR / reviewer / integration owner：draft PR #9；更新后必须新建独立 reviewer 审查最新 head，另由不同 integration owner 合并并在 main 复验。
 
 ## 已确认范围
 
 - 页面：`Topic Intelligence Surface`；示例 Topic 是「任务启动困难」。
-- 视觉方向：未来感 + ASCII + 新粗野主义 + 情报系统感。
+- 视觉方向：采用 LIDS v2.0 的“暖灰纸面上的精密情报基础设施”；ASCII 只作机器语义，L2 不使用 L3 大场景。此前“未来感 + ASCII + 新粗野主义 + 情报系统感”仅保留为已被 LIDS 收敛后的品牌意图，不再单独定义色值/页面骨架。
 - 载体：一份自包含静态 HTML 源文件，可本地用浏览器打开。
 - 数据：全部为合成、脱敏式示例；页面第一屏和每个关键区都必须显示它不是实时系统、不能支撑真实结论。
 - 交互：只演示时间窗口、证据展开和“继续探索／暂时搁置”的**本地意图**反馈；不创建研究、决定、采集或任何持久记录。
@@ -44,7 +99,8 @@
 |---|---|---|
 | 活跃计划 | 本文件 | 冻结范围、停止点与验收 |
 | 产品页面规格 | `docs/pages/topic-intelligence-surface.md` | 冻结用户任务、状态、行动语义和非目标 |
-| Foundation | `docs/design/foundation/topic-intelligence-visual-language.md` | 形成 DS-001–DS-007，仅适用于本参考页及其后明确采纳的页面 |
+| LIDS foundation | `docs/design/lids/` | 全项目 Token、Primitive、Pattern、Agent、原型审计与迁移标准；成熟度仍为 Proposed |
+| Reference foundation | `docs/design/foundation/topic-intelligence-visual-language.md` | 记录 PAGE-TOPIC-001 如何采用 LIDS，并加固合成边界 |
 | Patterns | `docs/design/patterns/evidence-candidate-and-boundary-patterns.md` | 形成 PAT-001–PAT-004，阻止事实、候选与缺口混写 |
 | Component lifecycle | `docs/design/components/component-promotion.md` | 规定局部块如何经第二页面验证后才晋升 |
 | Page spec + reference source | `docs/design/pages/` | 固定 PAGE-TOPIC-001 的组合与视觉参考 |

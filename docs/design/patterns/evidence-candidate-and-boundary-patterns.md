@@ -3,10 +3,12 @@
 > 状态: 权威当前
 > 最后核对: 2026-08-21
 > 适用范围: DESIGN-002 Topic Intelligence Reference Page 及后续明确采纳的情报页面
-> 事实来源: `docs/pages/topic-intelligence-surface.md`、产品不变量、DEC-05、Issue #7 与 UI 设计治理协议
+> 事实来源: `docs/pages/topic-intelligence-surface.md`、产品不变量、DEC-05、Issue #7、LIDS-SYS-001 / LIDS-PAT-001 与 UI 设计治理协议
 > 冲突时以谁为准: 用户最新确认、产品页面和真实数据/权限/行动合同；模式不自行发明事实或资格
 
 这些模式解决的不是“如何把内容装进卡片”，而是如何让用户一眼分清：样本里看见了什么、系统目前只能提出什么、以及仍然不知道什么。
+
+它们是 LIDS Pattern 的事实边界补充，不是第二套页面骨架或视觉主题：页面仍先按 L1/L2/L3 选择 LIDS Pattern，颜色、排版、Surface、状态和动效仍由 LIDS Token/Primitive 管理。
 
 ## PAT-001 · 可追溯观察块
 

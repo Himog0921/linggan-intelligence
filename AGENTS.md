@@ -38,9 +38,9 @@
 
 ### UI design handbook
 
-任何 Agent 在创建、修改、审查或验收用户可见 Web UI、前端组件、页面交互、状态文案、视觉资产或 UI 自动验证前，必须先阅读 docs/agents/ui-execution-contract.md 和 docs/design/README.md，再按具体事项进入相关产品页面、设计规则与数据合同。
+任何 Agent 在创建、修改、审查或验收用户可见 Web UI、前端组件、页面交互、状态文案、视觉资产或 UI 自动验证前，必须先阅读 docs/agents/ui-execution-contract.md、docs/design/README.md 和 docs/design/lids/README.md，再按具体事项进入相关产品页面、设计规则与数据合同。
 
-设计手册只规定已获批准的界面表达与协作流程，不替代用户确认、运行时事实、产品语义、权限边界、API/数据合同或当前 SCOPE。没有状态为“权威当前”的明确依据时，Agent 必须停止受影响部分并标记 DECISION_REQUIRED，不得借助参考图、旧系统、截图、通用设计习惯或模型推断自行补全。
+LIDS 是全项目唯一设计表达标准：Token → Primitive → Component → Pattern → Page，Motion / Scene / Data Truth 为横向约束。设计手册只规定已获批准的界面表达与协作流程，不替代用户确认、运行时事实、产品语义、权限边界、API/数据合同或当前 SCOPE。LIDS 的建议技术路径、原型、模拟数值和历史状态不是实现授权；没有状态为“权威当前”的明确依据时，Agent 必须停止受影响部分并标记 DECISION_REQUIRED，不得借助参考图、旧系统、截图、通用设计习惯或模型推断自行补全。
 
 ## 目标
 

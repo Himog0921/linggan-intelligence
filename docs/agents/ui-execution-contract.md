@@ -3,7 +3,7 @@
 > 状态: 权威当前
 > 最后核对: 2026-08-21
 > 适用范围: 所有创建、修改、审查或验收 Linggan 用户可见 UI、前端组件、页面交互、状态文案、视觉资产和 UI 自动验证的 Agent
-> 事实来源: AGENTS.md、docs/governance/、docs/design/、当前 SCOPE、产品/数据合同和用户对 DESIGN-001 的授权
+> 事实来源: AGENTS.md、docs/governance/、docs/design/、LIDS v2.0、当前 SCOPE、产品/数据合同和用户对 DESIGN-001/DESIGN-002 的授权
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策和当前 SCOPE；本合同不自行扩大任何授权
 
 本合同让 UI Agent 成为已批准设计的执行者和问题发现者，而不是新的产品负责人、视觉总监、权限裁定者或事实来源。
@@ -14,9 +14,10 @@
 
 1. 核对 Issue 分配、Claim、独立 branch/worktree 和文件所有权；
 2. 阅读 AGENTS.md、docs/README.md、docs/current-state.md；
-3. 阅读 [../design/README.md](../design/README.md) 和 [../design/design-governance.md](../design/design-governance.md)；
-4. 阅读与本次 UI 事项直接相关的产品页面文档、已批准页面/组件/模式规格、数据/权限/行动合同和当前 SCOPE；
-5. 在 Issue、计划或 PR 中填写 [../design/templates/ui-change-manifest-form.md](../design/templates/ui-change-manifest-form.md) 所要求的读取回执、范围、非目标、分类、文件边界、停止条件和验证计划。
+3. 阅读 [../design/README.md](../design/README.md)、[../design/design-governance.md](../design/design-governance.md) 与 [../design/lids/README.md](../design/lids/README.md)；
+4. 按任务读取相应的 LIDS Token、Primitive、Pattern、Agent guide 或原型审计；先定 `Token → Primitive → Component → Pattern → Page` 和 L1/L2/L3，后写任何视觉实现；
+5. 阅读与本次 UI 事项直接相关的产品页面文档、已批准页面/组件/模式规格、数据/权限/行动合同和当前 SCOPE；
+6. 在 Issue、计划或 PR 中填写 [../design/templates/ui-change-manifest-form.md](../design/templates/ui-change-manifest-form.md) 所要求的读取回执、范围、非目标、分类、文件边界、停止条件和验证计划。
 
 没有完成上述任何一项时，Agent 只能做只读调查，不能开始修改。
 
@@ -32,6 +33,8 @@ Agent 不得：
 - 用前端本地状态、toast、动画、模拟数据或乐观展示声称真实动作已经完成；
 - 绕过后端合同、权限判断、数据来源或当前 SCOPE；
 - 在代码中埋入长期设计例外，或顺手重构未列入本次事项的相邻页面。
+- 写第二套颜色、字号、间距、圆角、阴影、动效、Header、Button、Status、Surface、Command Dock、Pattern 或组件实现；已有 LIDS 规则/正式 CMP 时不得临时另造。
+- 将 LIDS 来源包的原型、模拟数值、运行文字、React/Three/Blender 线路、目录建议或场景视觉直接当作本项目已获准的实现。
 
 ## 变更分类
 
@@ -67,6 +70,8 @@ Agent 不得：
 - 组件规格：仅当组件成为真实跨页面合同，用 [../design/templates/component-spec-form.md](../design/templates/component-spec-form.md) 建立；
 - 变更清单：每次实施都必须有；
 - 验收记录：用 [../design/templates/visual-acceptance-form.md](../design/templates/visual-acceptance-form.md) 分开记录任务、状态、视觉和真实后果。
+
+每个真实数据页面还必须把 Truth、Coverage、Validity、Freshness、Operation 分开表达；`PARTIAL` 不等于 `INVALID`，未知不等于 0。没有真实合同的静态参考必须明确为 synthetic/not-live，不能借 LIDS 状态标签营造假运行感。
 
 验收至少分别回答：
 

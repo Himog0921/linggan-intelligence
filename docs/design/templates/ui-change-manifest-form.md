@@ -3,7 +3,7 @@
 > 状态: 权威当前
 > 最后核对: 2026-08-21
 > 适用范围: 每一个涉及 Linggan 用户可见 UI、前端组件、状态文案、交互、视觉资产或 UI 自动验证的实施/审查事项
-> 事实来源: docs/design/design-governance.md、docs/agents/ui-execution-contract.md 与项目 Issue 协作协议
+> 事实来源: docs/design/design-governance.md、docs/agents/ui-execution-contract.md、docs/design/lids/ 与项目 Issue 协作协议
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、当前 SCOPE、产品/数据合同、已批准设计规格和真实运行事实
 
 本清单应放在 Issue 正文、实施计划或 PR 描述中；不要为每次变更在 docs/design/ 下创建新的零散 Markdown。它是实施前的最小“依据与影响回执”。
@@ -24,6 +24,7 @@
 | UI execution contract | 待填写 | 待填写 | 待填写 |
 | 产品页面文档 | 待填写 | 待填写 | 待填写 |
 | 设计规则/页面/组件规格 | 待填写 | 待填写 | 待填写 |
+| LIDS（Token/Primitive/Pattern/Agent guide，按适用项） | 待填写 | 待填写 | 待填写 |
 | 数据/权限/行动合同 | 待填写 | 待填写 | 待填写 |
 | 当前代码/测试（如适用） | 待填写 | 待填写 | 待填写 |
 
@@ -34,6 +35,8 @@
 - 对应来源 ID：
 - 为什么该类别足以覆盖本次风险：
 - 是否存在 DECISION_REQUIRED：
+- L1 / L2 / L3 与主 Pattern：
+- 是否触及 Token、Primitive、CMP、Scene、Motion 或 Data Truth：
 
 ## 4. 影响边界
 
@@ -59,4 +62,5 @@
 - 验证命令/走查：
 - 规则或索引同步：
 - 例外与替代：
+- LIDS migration log / 预览同步：
 - PR / reviewer / integration owner：

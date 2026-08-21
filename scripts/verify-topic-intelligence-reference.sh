@@ -80,10 +80,34 @@ if [[ -f "$html" ]]; then
   if grep -Fq 'fetch(' "$html" || grep -Fq 'XMLHttpRequest' "$html"; then
     report_error "static reference page must not request live data"
   fi
+
+  for token in \
+    'data-theme="linggan-intelligence"' \
+    '--lgi-canvas: #ecebe6;' \
+    '--lgi-signal: #ef4f25;' \
+    'L2 REFERENCE' \
+    'SYNTHETIC / NOT EVIDENCE'; do
+    if ! grep -Fq -- "$token" "$html"; then
+      report_error "static reference page is missing required LIDS marker: $token"
+    fi
+  done
+
+  quote_boundary_count="$(grep -Foc 'SYNTHETIC / NOT EVIDENCE' "$html" || true)"
+  if [[ "$quote_boundary_count" -lt 3 ]]; then
+    report_error "every synthetic quote must have a persistent non-evidence boundary"
+  fi
 fi
 
 if ! grep -Fq '第二个独立页面' docs/design/components/component-promotion.md; then
   report_error "component promotion rule must require a second independent page"
+fi
+
+if ! grep -Fq 'LIDS-SYS-001' docs/design/pages/topic-intelligence-reference-page.md; then
+  report_error "Topic page spec must declare its LIDS adoption"
+fi
+
+if ! grep -Fq 'UI Change Manifest' docs/plans/active/design-002-topic-intelligence-reference-page.md; then
+  report_error "DESIGN-002 plan must include the completed UI Change Manifest"
 fi
 
 if ! grep -Fq '页面没有增长箭头、百分比变化、趋势线' docs/pages/topic-intelligence-surface.md; then

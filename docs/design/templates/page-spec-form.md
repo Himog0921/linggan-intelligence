@@ -3,7 +3,7 @@
 > 状态: 权威当前
 > 最后核对: 2026-08-21
 > 适用范围: 已获准进入原型或实现的 Linggan 用户可见页面、工作区、抽屉、对话框和独立流程
-> 事实来源: docs/design/design-governance.md、docs/agents/ui-execution-contract.md 与未来获准页面事项
+> 事实来源: docs/design/design-governance.md、docs/agents/ui-execution-contract.md、docs/design/lids/ 与未来获准页面事项
 > 冲突时以谁为准: 用户最新确认、产品页面文档、数据/权限合同、当前 SCOPE 和真实运行事实；本模板不授予实现
 
 本模板只在页面已经获得对应产品原型或当前 SCOPE 的明确实施授权后使用。它不能用来把页面草案提前包装成开发任务。
@@ -13,8 +13,12 @@
 - 页面规格 ID：
 - 关联 Issue / SCOPE：
 - 当前状态：
+- LIDS 视觉强度：L1 / L2 / L3
+- LIDS 主 Pattern：
 - 产品页面来源：
 - 用户任务：
+- 三秒答案：
+- 五秒主动作：
 - 明确非目标：
 - 当前可用数据/权限合同：
 - 决策 owner：
@@ -44,6 +48,16 @@
 | 待填写 | 待填写 | 待填写 | 待填写 |
 
 没有来源 ID 的区域不得进入实现。需要新规则时，先建立相应草案或 DECISION_REQUIRED，不在页面代码中临时造规则。
+
+### LIDS 采用清单
+
+- Token 基线与唯一数值来源：
+- Primitive / 正式 CMP 查重结果：
+- 页面唯一视觉核心：
+- 原声、来源、样本、窗口、Coverage/Validity/冲突/复核边界：
+- ASCII / 场景 / 动效是否允许及其真实状态依据：
+- `prefers-reduced-motion` 与移动降级：
+- 明确禁止的第二套视觉语言、容器、按钮、状态或 Pattern：
 
 ## 5. 交互与真实后果
 
