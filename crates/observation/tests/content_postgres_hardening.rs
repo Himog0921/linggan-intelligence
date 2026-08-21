@@ -6,7 +6,7 @@
 mod support;
 
 use linggan_observation::{
-    BusinessOutcome, ProcessingFault, ProcessingOptions, ProcessingOutcome,
+    BusinessOutcome, ProcessingFault, ProcessingOptions, ProcessingOutcome, claim_one_ready_record,
     process_one_ready_record,
 };
 use support::*;
@@ -517,6 +517,85 @@ async fn runtime_temp_shadow_relations_cannot_change_claim_or_processing_facts()
     assert_eq!(count(&admin, "record_processing_attempt").await, 1);
     assert_eq!(count(&admin, "content_observation").await, 1);
     assert_eq!(count(&admin, "content_current_revision").await, 1);
+}
+
+// Round-7 RED: `run_error` is an independently callable SECURITY DEFINER entry. It must retain
+// the same trusted-schema guarantee as claim and processing even after a real claim has created
+// an open attempt. This invokes the narrow entry directly on the attack session: no Rust facade
+// may hide a temporary-relation, temporary-function or caller search-path resolution mistake.
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn runtime_temp_shadow_cannot_redirect_a_claimed_run_error() {
+    let schema = "f01_run_error_temp_shadow";
+    let admin = accepted_f01_database(schema, F01_PACKAGE).await;
+    let runtime = runtime_role_database(schema).await;
+    let claim = claim_one_ready_record(&runtime, &attempt_ref_only())
+        .await
+        .expect("the runtime role must claim a real accepted record")
+        .expect("record A must be ready for the run-error attack");
+    let error_text = "run-error must stay on the real claimed attempt";
+
+    // Hold one session while creating the attacker-controlled TEMP objects and invoking the
+    // function. A vulnerable SECURITY DEFINER function would either update the malformed fake
+    // relations or dispatch to the fake same-signature function below.
+    let mut session = runtime
+        .pool()
+        .acquire()
+        .await
+        .expect("the runtime attack session must be available");
+    sqlx::raw_sql(
+        "CREATE TEMP TABLE record_processing_work (decoy text); \
+         CREATE TEMP TABLE record_processing_attempt (decoy text); \
+         CREATE TEMP TABLE scope_001_run_error_decoy (id bigint GENERATED ALWAYS AS IDENTITY); \
+         CREATE OR REPLACE FUNCTION pg_temp.scope_001_record_processing_run_error(uuid, integer, text) \
+         RETURNS void LANGUAGE plpgsql AS $$ \
+         BEGIN INSERT INTO scope_001_run_error_decoy DEFAULT VALUES; END; $$; \
+         SET search_path = pg_temp, f01_run_error_temp_shadow",
+    )
+    .execute(&mut *session)
+    .await
+    .expect("the runtime may create session-local shadows for this security proof");
+
+    sqlx::query("SELECT scope_001_record_processing_run_error($1, $2, $3)")
+        .bind(claim.processing_work_ref())
+        .bind(claim.epoch())
+        .bind(error_text)
+        .execute(&mut *session)
+        .await
+        .expect("the trusted run-error entry must update the real claim despite TEMP shadows");
+    let decoy_calls: i64 = sqlx::query_scalar("SELECT count(*) FROM scope_001_run_error_decoy")
+        .fetch_one(&mut *session)
+        .await
+        .expect("the temporary decoy marker must remain queryable in the same session");
+    assert_eq!(
+        decoy_calls, 0,
+        "the caller's fake same-signature function must never receive the run-error call"
+    );
+    drop(session);
+
+    let stored_error: Option<String> = sqlx::query_scalar(
+        "SELECT a.run_error \
+         FROM record_processing_attempt a \
+         JOIN record_processing_work w ON w.id = a.processing_work_id \
+         WHERE w.processing_work_ref = $1 AND a.epoch = $2",
+    )
+    .bind(claim.processing_work_ref())
+    .bind(claim.epoch())
+    .fetch_one(admin.pool())
+    .await
+    .expect("the real claimed attempt must remain readable to the proof admin");
+    assert_eq!(stored_error.as_deref(), Some(error_text));
+    assert_eq!(count(&admin, "content_observation").await, 0);
+    assert_eq!(count(&admin, "content_current_revision").await, 0);
+    assert_eq!(
+        scalar(
+            &admin,
+            "SELECT count(*) FROM record_processing_work WHERE business_outcome IS NOT NULL",
+        )
+        .await,
+        0,
+        "run-error persistence must not create a business outcome"
+    );
 }
 
 // Round-6 RED: delivery is ingress audit history. This attacks it as the trusted admin rather
