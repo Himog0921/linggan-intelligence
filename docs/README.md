@@ -28,6 +28,7 @@
 | [`agents/triage-labels.md`](agents/triage-labels.md) | 权威当前 | GitHub Issue 的五类任务分流角色 |
 | [`agents/domain.md`](agents/domain.md) | 权威当前 | 工程技能读取 Linggan 领域语言、决策与不变量的适配规则 |
 | [`agents/scope-001-execution-contract.md`](agents/scope-001-execution-contract.md) | 权威当前 | SCOPE-001 的 Closed World、状态分责、unknown、语义 Oracle 与证明边界执行合同 |
+| [agents/ui-execution-contract.md](agents/ui-execution-contract.md) | 权威当前 | 所有 UI 协作 Agent 的读取、闭集执行、停工、验收与交接合同；不授予 UI 实现范围 |
 | [`context/START-HERE.md`](context/START-HERE.md) | 权威当前 | 新机器和新 Agent 的项目背景入口 |
 | [`context/current-system-inventory.md`](context/current-system-inventory.md) | 代码事实优先 | 固定来源资产及已证实能力盘点 |
 | [`context/discussion-decisions.md`](context/discussion-decisions.md) | 权威当前 | 已确认结论和待决定事项摘要 |
@@ -35,6 +36,13 @@
 | [`decisions/0001-greenfield-rust-clean-db.md`](decisions/0001-greenfield-rust-clean-db.md) | 权威当前 | 已接受的 Rust 与全新 PostgreSQL 决策 |
 | [`product/PRD.md`](product/PRD.md) | 草案 | DISC-001 的产品输入，不是已接受实现合同 |
 | [`product/domain-invariants.md`](product/domain-invariants.md) | 权威当前 | 跨 Gate 的领域不变量、判断资格与持续扩展的对抗性验收案例 |
+| [design/README.md](design/README.md) | 权威当前 | 前端设计手册入口、权威地图、读取路径和当前已建立/未建立边界 |
+| [design/design-governance.md](design/design-governance.md) | 权威当前 | UI 设计来源优先级、闭集执行、变更分类、例外和验收治理 |
+| [design/reference-register.md](design/reference-register.md) | 权威当前 | 设计参考的登记格式与“参考不等于指令”边界；当前未登记具体视觉标准 |
+| [design/templates/page-spec-form.md](design/templates/page-spec-form.md) | 权威当前 | 获准页面的设计执行规格表单 |
+| [design/templates/component-spec-form.md](design/templates/component-spec-form.md) | 权威当前 | 可复用组件规格表单 |
+| [design/templates/ui-change-manifest-form.md](design/templates/ui-change-manifest-form.md) | 权威当前 | 每次 UI 变更的来源、范围、影响与证明清单表单 |
+| [design/templates/visual-acceptance-form.md](design/templates/visual-acceptance-form.md) | 权威当前 | 视觉、任务、状态和真实后果四层验收记录表单 |
 | [`architecture/technical-architecture-baseline.md`](architecture/technical-architecture-baseline.md) | 权威当前 | 全产品技术架构统一入口：权威层级、确定性、当前/目标边界、模块/入口/数据/运行主干与 SCOPE 符合性 |
 | [`architecture/target-architecture.md`](architecture/target-architecture.md) | 草案 | DISC-001 已确认硬边界之上的总体架构建议；具体实现按 SCOPE 渐进冻结 |
 | [`architecture/system-overview-diagram.html`](architecture/system-overview-diagram.html) | 草案 | AEDS 风格的整体架构图；在同一视图中区分当前代码骨架、已批准 Evidence 切片与后续目标能力 |
@@ -87,6 +95,7 @@
 
 - 项目管理或新增文件：先读 `governance/`，再读当前事项文档。
 - 使用 Matt Pocock 工程技能：先读 `agents/` 中与任务追踪、triage 或领域文档相关的配置，再进入当前 Issue 和直接关联文档。
+- UI 设计、前端实现或 UI 审查：先读 [agents/ui-execution-contract.md](agents/ui-execution-contract.md) 和 [design/README.md](design/README.md)，再进入对应产品页面、已批准设计规则、数据合同与当前 SCOPE；产品草案、截图、旧系统和参考材料不能单独授权实现。
 - 实施或审查 SCOPE-001：读取当前 SCOPE 后必须读取 `agents/scope-001-execution-contract.md`；当前仅按 CONTROLLED OPEN FOR TDD 推进，新增产品含义、权限或真实范围仍须停止并确认。
 - 环境配置：读 `current-state.md`、[`runbooks/development-environment.md`](runbooks/development-environment.md) 和 `database/README.md`。
 - 产品讨论：读 `product/PRD.md`、`context/discussion-decisions.md` 和相关 ACCEPTED ADR。

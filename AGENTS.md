@@ -36,6 +36,12 @@
 
 任何 Agent 在修改 SCOPE-001 的 fixture、migration、Rust、PostgreSQL、API、worker、CLI、测试或完成声明前，必须阅读 `docs/agents/scope-001-execution-contract.md` 和当前 SCOPE。当前切片采用 Closed World：未列能力不获授权，独立状态不压成总 `completed`，unknown 不变成默认值，低层不越权生成高层 Claim，任何通过声明必须携带证明与未证明范围。
 
+### UI design handbook
+
+任何 Agent 在创建、修改、审查或验收用户可见 Web UI、前端组件、页面交互、状态文案、视觉资产或 UI 自动验证前，必须先阅读 docs/agents/ui-execution-contract.md 和 docs/design/README.md，再按具体事项进入相关产品页面、设计规则与数据合同。
+
+设计手册只规定已获批准的界面表达与协作流程，不替代用户确认、运行时事实、产品语义、权限边界、API/数据合同或当前 SCOPE。没有状态为“权威当前”的明确依据时，Agent 必须停止受影响部分并标记 DECISION_REQUIRED，不得借助参考图、旧系统、截图、通用设计习惯或模型推断自行补全。
+
 ## 目标
 
 构建能够持续观察世界、保存可追溯来源材料与版本化观察、发现变化并形成有证据边界的可行动情报系统。
