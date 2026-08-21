@@ -8,6 +8,10 @@
 
 本文是 [`module-architecture.md`](module-architecture.md) 中 Agent Runtime 的下一层渐进披露。它不选择模型供应商，不创建 Agent、prompt、工具代码，也不授权把真实原文发送给第三方模型。
 
+用户于 2026-08-20 提出把 [`earendil-works/pi`](https://github.com/earendil-works/pi) 作为全系统统一 Agent 内核的方向。当前上游适配审查裁定为候选 `CONDITIONAL ADAPTER`：Pi 可在未来 SCOPE 中承接模型与工具循环，Linggan 继续拥有准入、委托、材料、预算、持久任务、工具回执、隐私、结果资格和正式状态；各业务模块不直接依赖 Pi。版本、成熟度、禁用清单和验证门见 [`../audits/pi-agent-kernel-upstream-assessment-2026-08-20.md`](../audits/pi-agent-kernel-upstream-assessment-2026-08-20.md)。这项候选不改变本文的权限边界，也不授权当前实现。
+
+用户补充的《统一Agent运行时架构》讨论强化了“系统驱动 Agent、同一 Runtime + 不同 Profile、领域工具优先、先业务价值后平台抽象”的方向。对抗归并后不新增万能 `Agent Task`：用户看到的研究工作继续由 `Research Question`、`Information Need`、`Analysis Run`、`Agent Invocation` 和必要时的 `Research Project` 分责；Profile 只是版本化调用模板，不是权限主体。首期只实现一个调用场景、一个 Linggan Agent Kernel Module、一个窄 `ModelToolLoopPort`、deterministic/Pi 两个 Adapter 和少量领域工具，不建设 Agent Control Plane 微服务、Profile 管理平台、Runtime Router 或多 Agent 编排。
+
 ## 一句话结论
 
 > **Linggan 的 Agent 是一次有调用者、有目的、有材料边界、有工具权限、有预算、有停止条件和结构化结果的受控研究运行；它不是拥有数据库、插件和正式知识写权限的永久自治角色。**
