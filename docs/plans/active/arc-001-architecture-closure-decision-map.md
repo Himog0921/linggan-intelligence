@@ -114,6 +114,8 @@ Asset target: `docs/product/first-phase-interface-prototype.md`
 
 验收必须包含三条真实脱敏样本走查：早晨判断、Topic 深入、采集不完整；同时明确 P0 不做清单。
 
+Issue #10 已产出 [`../../product/first-phase-interface-prototype.md`](../../product/first-phase-interface-prototype.md) 作为 `PROVISIONAL` 候选：一个“今日关注”一级入口、上下文 Topic 深入工作区、证据/Coverage 抽屉与下一步意图面板，并用合成/脱敏走查覆盖早晨判断、Topic 深入和采集不完整。该候选仍等待 Mog 走查；本票保持 open，未授权 Web、数据、权限、技术选型或实现。
+
 ## first-producer-canary: 首批真实 Canary 是否包含媒体？
 
 Blocked by: primary-daily-job

@@ -35,6 +35,7 @@
 | [`context/domain-language.md`](context/domain-language.md) | 权威当前 | DISC-001 已确认的产品、领域与采集责任共同语言；不预设数据库对象 |
 | [`decisions/0001-greenfield-rust-clean-db.md`](decisions/0001-greenfield-rust-clean-db.md) | 权威当前 | 已接受的 Rust 与全新 PostgreSQL 决策 |
 | [`product/PRD.md`](product/PRD.md) | 草案 | DISC-001 的产品输入，不是已接受实现合同 |
+| [`product/first-phase-interface-prototype.md`](product/first-phase-interface-prototype.md) | 草案；PROVISIONAL | ARC-001 / Issue #10 的 P0 日常入口与 Topic 深入走查候选；只供 Mog 确认，不授权真实 Web、数据、权限或技术选型 |
 | [`product/domain-invariants.md`](product/domain-invariants.md) | 权威当前 | 跨 Gate 的领域不变量、判断资格与持续扩展的对抗性验收案例 |
 | [design/README.md](design/README.md) | 权威当前 | 前端设计手册入口、权威地图、读取路径和当前已建立/未建立边界 |
 | [design/design-governance.md](design/design-governance.md) | 权威当前 | UI 设计来源优先级、闭集执行、变更分类、例外和验收治理 |
