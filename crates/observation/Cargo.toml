@@ -13,6 +13,8 @@ linggan-storage-postgres = { path = "../storage-postgres" }
 serde_json.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
+# Only for the proof-only rendezvous: an async barrier that does not block a runtime thread.
+tokio = { workspace = true, features = ["sync"] }
 uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]

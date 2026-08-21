@@ -74,7 +74,7 @@ async fn f01_records_are_processed_independently_into_observation_and_current() 
 async fn f01_bad_record_does_not_revoke_the_qualified_record_in_the_same_package() {
     let database = accepted_f01_database("f01_bad_record", F01_PAYLOAD_EXTENSION).await;
 
-    let bad = processed(&database, 0).await;
+    let bad = processed_with(&database, &attempt_ref_only()).await;
     assert_eq!(
         bad.business_outcome,
         BusinessOutcome::RecordContractInvalid,

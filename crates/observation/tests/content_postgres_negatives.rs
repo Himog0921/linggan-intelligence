@@ -7,7 +7,8 @@
 mod support;
 
 use linggan_observation::{
-    BusinessOutcome, ProcessingOptions, ProcessingOutcome, process_one_ready_record,
+    BusinessOutcome, ProcessingError, ProcessingFault, ProcessingOptions, ProcessingOutcome,
+    claim_one_ready_record, process_one_ready_record, run_claimed_record,
 };
 use support::*;
 
@@ -199,24 +200,28 @@ async fn concurrent_records_for_one_identity_converge_and_keep_the_newest_observ
         "Newer body A",
     )
     .await;
-    // All three ready records run at once. Two of them resolve the same identity, so one must
-    // lose that race and still read the winner rather than failing or returning no row.
-    let options = [
-        ProcessingOptions::default(),
-        ProcessingOptions::default(),
-        ProcessingOptions::default(),
-    ];
-    let (first, second, third) = tokio::join!(
-        process_one_ready_record(&database, &options[0]),
-        process_one_ready_record(&database, &options[1]),
-        process_one_ready_record(&database, &options[2]),
-    );
-    for outcome in [
-        first.expect("a concurrent claim must not fail"),
-        second.expect("a concurrent claim must not fail"),
-        third.expect("a concurrent claim must not fail"),
-    ] {
-        match outcome {
+    // All three ready records run at once, each on its own task, held at a rendezvous until every
+    // run has opened its transaction. Without the rendezvous this proof is probabilistic: it
+    // passes whether or not identity resolution is actually serialized. The runs must be separate
+    // tasks so they can actually overlap; the barrier is async so it never blocks a runtime
+    // thread.
+    let rendezvous = std::sync::Arc::new(tokio::sync::Barrier::new(3));
+    let mut runs = Vec::new();
+    for _ in 0..3 {
+        let database = database.clone();
+        let rendezvous = rendezvous.clone();
+        runs.push(tokio::spawn(async move {
+            let mut options = ProcessingOptions::default();
+            options.synchronize_before_identity(rendezvous);
+            process_one_ready_record(&database, &options).await
+        }));
+    }
+    for run in runs {
+        match run
+            .await
+            .expect("a concurrent run must not panic")
+            .expect("a concurrent claim must not fail")
+        {
             ProcessingOutcome::Processed(record) => assert_eq!(
                 record.business_outcome,
                 BusinessOutcome::ObservationRecorded,
@@ -255,7 +260,7 @@ async fn concurrent_records_for_one_identity_converge_and_keep_the_newest_observ
 async fn explicit_null_source_external_id_conflicts_instead_of_falling_back() {
     let database = accepted_f01_database("f01_null_no_fallback", F01_SOURCE_EXTERNAL_ID_NULL).await;
 
-    let ruled = processed(&database, 0).await;
+    let ruled = processed_with(&database, &attempt_ref_only()).await;
     assert_eq!(
         ruled.business_outcome,
         BusinessOutcome::SourceIdentityConflict,
@@ -314,4 +319,325 @@ async fn unconsumed_frozen_refs_fail_closed_at_the_end_of_a_run() {
         .await
         .expect("the run itself succeeds");
     options.assert_frozen_refs_fully_consumed();
+}
+
+// ---------------------------------------------------------------------------
+// Second review round: a published fact must stay closed, and an outcome must keep the facts it
+// depends on. Every case below is written with direct SQL, outside the Rust facade.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn database_refuses_appending_a_source_to_a_published_revision() {
+    let database = accepted_f01_database("f01_append_source", F01_PACKAGE).await;
+    processed(&database, 0).await;
+    let observation_id = single_observation_id(&database).await;
+
+    // A published revision already says title is `selected`. Adding a conflicting candidate after
+    // the fact would rewrite what that revision means without creating a new revision.
+    let appended = raw(
+        &database,
+        &format!(
+            "INSERT INTO content_current_revision_field_source \
+                 (field_source_ref, revision_id, source_content_id, field_kind, observation_id, role) \
+             SELECT gen_random_uuid(), c.current_revision_id, c.id, 'title', {observation_id}, 'conflicting_candidate' \
+             FROM source_content c WHERE c.current_revision_id IS NOT NULL"
+        ),
+    )
+    .await;
+    assert_refused(appended, "closed");
+
+    assert_eq!(
+        count(&database, "content_current_revision_field_source").await,
+        2,
+        "the published revision must still fix exactly its original two sources"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn database_refuses_observation_recorded_that_borrows_an_older_current() {
+    let database = accepted_f01_database("f01_borrowed_current", F01_PACKAGE).await;
+    processed(&database, 0).await;
+    let content_id = single_content_id(&database).await;
+
+    // A later record for the same content forms its own observation, but current is never
+    // recomputed, so the published revision cannot possibly include it.
+    let record_id = insert_extra_capture_record_and_work(
+        &database,
+        3,
+        "synthetic-note-a",
+        Some("synthetic-note-a"),
+        "2026-08-20T10:00:00Z",
+        "Newer title A",
+        "Newer body A",
+    )
+    .await;
+    raw(
+        &database,
+        &format!(
+            "INSERT INTO content_observation \
+                 (observation_ref, source_content_id, capture_record_id, observed_at, observed_at_precision, \
+                  parser_version, title_observed, title_value, body_observed, body_value) \
+             SELECT gen_random_uuid(), {content_id}, r.id, r.observed_at, r.observed_at_precision, \
+                    'content-detail-processor-v1', true, 'Newer title A', true, 'Newer body A' \
+             FROM capture_record r WHERE r.id = {record_id}"
+        ),
+    )
+    .await
+    .expect("an observation on its own is legal");
+    raw(
+        &database,
+        &format!(
+            "INSERT INTO record_processing_attempt \
+                 (processing_attempt_ref, processing_work_id, epoch, lease_expires_at, finalized_at) \
+             SELECT gen_random_uuid(), w.id, 1, scope_001_now() + interval '5 minutes', scope_001_now() \
+             FROM record_processing_work w WHERE w.capture_record_id = {record_id}"
+        ),
+    )
+    .await
+    .expect("an attempt row on its own is legal");
+
+    let borrowed = raw(
+        &database,
+        &format!(
+            "UPDATE record_processing_work SET business_outcome = 'observation_recorded' \
+             WHERE capture_record_id = {record_id}"
+        ),
+    )
+    .await;
+    assert_refused(borrowed, "current revision to include");
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn database_refuses_removing_the_facts_a_finished_outcome_depends_on() {
+    let database = accepted_f01_database("f01_remove_support", F01_PACKAGE).await;
+    processed(&database, 0).await;
+
+    let deleted_attempt = raw(&database, "DELETE FROM record_processing_attempt").await;
+    assert_refused(deleted_attempt, "cannot be removed or reopened");
+
+    let reopened_attempt = raw(
+        &database,
+        "UPDATE record_processing_attempt SET finalized_at = NULL",
+    )
+    .await;
+    assert_refused(reopened_attempt, "cannot be removed or reopened");
+
+    let cleared_pointer = raw(
+        &database,
+        "UPDATE source_content SET current_revision_id = NULL WHERE current_revision_id IS NOT NULL",
+    )
+    .await;
+    assert_refused(cleared_pointer, "cannot be cleared");
+
+    assert_eq!(count(&database, "record_processing_attempt").await, 1);
+    assert_eq!(
+        scalar(
+            &database,
+            "SELECT count(*) FROM source_content WHERE current_revision_id IS NOT NULL"
+        )
+        .await,
+        1
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Durable lease and epoch. A claim is persisted before the work runs, so other readers can see
+// the work is leased, a crash leaves a takeable state, and a late epoch cannot write back.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn an_expired_lease_is_taken_over_by_a_higher_epoch_and_the_late_one_is_refused() {
+    let database = accepted_f01_database("f01_lease_takeover", F01_PACKAGE).await;
+    processed(&database, 0).await; // finish record A so only record B is claimable
+
+    let first = claim_one_ready_record(&database, &attempt_ref_only())
+        .await
+        .expect("claiming must succeed")
+        .expect("record B is ready");
+    assert_eq!(first.epoch(), 1);
+    assert_eq!(first.record_ref(), manifest_ref("recordB"));
+
+    // The claim is durable: another worker sees the lease and finds nothing else to take.
+    assert!(
+        claim_one_ready_record(&database, &attempt_ref_only())
+            .await
+            .expect("a second claim attempt must not error")
+            .is_none(),
+        "a live lease must be visible to other readers, not hidden inside a transaction"
+    );
+
+    raw(
+        &database,
+        "UPDATE record_processing_attempt SET lease_expires_at = scope_001_now() - interval '1 minute' WHERE finalized_at IS NULL",
+    )
+    .await
+    .expect("expiring a lease is legal");
+
+    let second = claim_one_ready_record(&database, &attempt_ref_only())
+        .await
+        .expect("claiming must succeed")
+        .expect("an expired lease must be takeable");
+    assert_eq!(second.epoch(), 2, "a takeover increments the epoch");
+    assert_eq!(second.record_ref(), first.record_ref());
+
+    // The superseded epoch may not write its result back.
+    let late = run_claimed_record(&database, first, &f01_run_refs("B")).await;
+    assert!(
+        matches!(late, Err(ProcessingError::LeaseLost)),
+        "a late epoch must be refused, got {late:?}"
+    );
+    assert_eq!(
+        scalar(
+            &database,
+            "SELECT count(*) FROM record_processing_work WHERE business_outcome IS NOT NULL"
+        )
+        .await,
+        1,
+        "only record A is finished; the refused epoch must not have finalized record B"
+    );
+
+    let taken_over = run_claimed_record(&database, second, &f01_run_refs("B"))
+        .await
+        .expect("the current epoch must be able to finish");
+    assert_eq!(
+        taken_over.business_outcome,
+        BusinessOutcome::ObservationRecorded
+    );
+
+    // Both attempts survive as history; only the winning epoch is finalized.
+    assert_eq!(count(&database, "record_processing_attempt").await, 3);
+    assert_eq!(
+        scalar(
+            &database,
+            "SELECT count(*) FROM record_processing_attempt WHERE epoch = 1 AND finalized_at IS NULL AND run_error IS NOT NULL"
+        )
+        .await,
+        1,
+        "the superseded attempt keeps an honest, unfinalized run record"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn a_failed_run_leaves_a_traceable_attempt_instead_of_vanishing() {
+    let database = accepted_f01_database("f01_failed_run", F01_PACKAGE).await;
+
+    let claim = claim_one_ready_record(&database, &attempt_ref_only())
+        .await
+        .expect("claiming must succeed")
+        .expect("record A is ready");
+    let mut faulty = f01_run_refs("A");
+    faulty.inject_fault(ProcessingFault::AfterObservation);
+
+    let failed = run_claimed_record(&database, claim, &faulty).await;
+    assert!(
+        failed.is_err(),
+        "an injected fault must not report a business outcome"
+    );
+
+    // Business writes rolled back, but the run itself is on the record.
+    assert_eq!(count(&database, "content_observation").await, 0);
+    assert_eq!(count(&database, "content_current_revision").await, 0);
+    assert_eq!(count(&database, "record_processing_attempt").await, 1);
+    assert_eq!(
+        scalar(
+            &database,
+            "SELECT count(*) FROM record_processing_attempt WHERE finalized_at IS NULL AND run_error IS NOT NULL"
+        )
+        .await,
+        1,
+        "a crashed run must leave a traceable attempt, not disappear"
+    );
+    assert_eq!(
+        scalar(
+            &database,
+            "SELECT count(*) FROM record_processing_work WHERE business_outcome IS NOT NULL"
+        )
+        .await,
+        0
+    );
+
+    // After the lease expires the work is takeable again and completes normally.
+    raw(
+        &database,
+        "UPDATE record_processing_attempt SET lease_expires_at = scope_001_now() - interval '1 minute' WHERE finalized_at IS NULL",
+    )
+    .await
+    .expect("expiring a lease is legal");
+    let retried = process_one_ready_record(&database, &f01_processing_options(0))
+        .await
+        .expect("the work must be recoverable");
+    match retried {
+        ProcessingOutcome::Processed(record) => {
+            assert_eq!(record.epoch, 2);
+            assert_eq!(
+                record.business_outcome,
+                BusinessOutcome::ObservationRecorded
+            );
+        }
+        ProcessingOutcome::NothingReady => panic!("an expired lease must make the work takeable"),
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Least-privilege runtime role. Triggers state what is true; permissions decide who may even
+// attempt to write. Both layers are proved here, separately.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn the_runtime_role_runs_the_chain_but_cannot_rewrite_history_or_change_the_schema() {
+    let schema = "f01_runtime_role";
+    let admin = accepted_f01_database(schema, F01_PACKAGE).await;
+    let runtime = runtime_role_database(schema).await;
+
+    // The minimum privileges are enough to finish real work.
+    let processed = process_one_ready_record(&runtime, &f01_processing_options(0))
+        .await
+        .expect("the runtime role must be able to process a record");
+    match processed {
+        ProcessingOutcome::Processed(record) => assert_eq!(
+            record.business_outcome,
+            BusinessOutcome::ObservationRecorded
+        ),
+        ProcessingOutcome::NothingReady => panic!("record A was ready"),
+    }
+
+    // They are not enough to rewrite history or to touch the schema.
+    for (statement, what) in [
+        ("DELETE FROM content_observation", "delete an observation"),
+        (
+            "UPDATE content_current_revision SET title_value = 'FORGED'",
+            "rewrite a current revision",
+        ),
+        (
+            "DELETE FROM content_current_revision_field_source",
+            "delete a field source",
+        ),
+        ("DELETE FROM capture_record", "delete a capture record"),
+        ("DELETE FROM capture_package", "delete a package"),
+        (
+            "ALTER TABLE capture_record ADD COLUMN forged text",
+            "alter a table",
+        ),
+        ("CREATE TABLE forged (id bigint)", "create a table"),
+    ] {
+        let error = raw(&runtime, statement)
+            .await
+            .expect_err(&format!("the runtime role must not be able to {what}"))
+            .to_string();
+        assert!(
+            error.contains("permission denied") || error.contains("must be owner"),
+            "expected a privilege refusal when trying to {what}, got: {error}"
+        );
+    }
+
+    // Nothing above changed the facts the admin connection can still read.
+    assert_eq!(count(&admin, "content_observation").await, 1);
+    assert_eq!(count(&admin, "capture_record").await, 2);
+    assert_eq!(count(&admin, "content_current_revision").await, 1);
 }

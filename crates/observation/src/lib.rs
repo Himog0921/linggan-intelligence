@@ -7,6 +7,7 @@ mod processing;
 mod source_identity;
 
 pub use processing::{
-    BusinessOutcome, ProcessedRecord, ProcessingError, ProcessingOptions, ProcessingOutcome,
-    process_one_ready_record,
+    BusinessOutcome, ClaimedRecord, ProcessedRecord, ProcessingError, ProcessingFault,
+    ProcessingOptions, ProcessingOutcome, claim_one_ready_record, process_one_ready_record,
+    run_claimed_record,
 };

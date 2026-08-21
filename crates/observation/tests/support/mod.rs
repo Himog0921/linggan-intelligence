@@ -35,6 +35,18 @@ pub const DOWNSTREAM_TABLES: [(&str, &str); 6] = [
     ("fieldSource", "content_current_revision_field_source"),
 ];
 
+/// Runs one record under explicit references. Outcomes that form no observation mint only the
+/// attempt reference, so their oracle must freeze only that one.
+pub async fn processed_with(database: &Database, options: &ProcessingOptions) -> ProcessedRecord {
+    match process_one_ready_record(database, options)
+        .await
+        .expect("a ready record must be processable")
+    {
+        ProcessingOutcome::Processed(record) => record,
+        ProcessingOutcome::NothingReady => panic!("a record should have been ready"),
+    }
+}
+
 pub async fn processed(database: &Database, index: usize) -> ProcessedRecord {
     match process_one_ready_record(database, &f01_processing_options(index))
         .await
@@ -478,4 +490,64 @@ pub async fn insert_revision_with_sources(
         .await?;
     }
     transaction.commit().await
+}
+
+/// A claim mints exactly one reference: the attempt.
+pub fn attempt_ref_only() -> ProcessingOptions {
+    let mut options = ProcessingOptions::default();
+    options.use_fixed_refs(vec![Uuid::new_v4()]);
+    options
+}
+
+/// The references a successful run mints after its claim, in mint order.
+pub fn f01_run_refs(suffix: &str) -> ProcessingOptions {
+    let mut options = ProcessingOptions::default();
+    options.use_fixed_refs(vec![
+        manifest_ref(&format!("sourceIdentity{suffix}")),
+        manifest_ref(&format!("content{suffix}")),
+        manifest_ref(&format!("observation{suffix}")),
+        manifest_ref(&format!("currentRevision{suffix}")),
+        manifest_ref(&format!("fieldSourceTitle{suffix}")),
+        manifest_ref(&format!("fieldSourceBody{suffix}")),
+    ]);
+    options
+}
+
+/// Creates the least-privilege runtime role SCOPE-001 describes and returns a database connected
+/// as that role. The role may read, append and set the few columns the runtime advances; it may
+/// not delete, rewrite immutable history, or run DDL.
+pub async fn runtime_role_database(schema: &str) -> Database {
+    let admin_url = std::env::var("SCOPE_001_PROOF_DATABASE_URL")
+        .expect("test-scope-001-postgres.sh must provide an isolated proof database URL");
+    let role = format!("scope_001_runtime_{schema}");
+    let password = Uuid::new_v4().simple().to_string();
+    let admin = Database::connect_within_schema(&admin_url, schema)
+        .await
+        .expect("the admin connection must succeed");
+
+    for statement in [
+        format!("DROP ROLE IF EXISTS {role}"),
+        format!("CREATE ROLE {role} LOGIN PASSWORD '{password}'"),
+        format!("GRANT USAGE ON SCHEMA {schema} TO {role}"),
+        format!("GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA {schema} TO {role}"),
+        format!("GRANT UPDATE (terminal_reason) ON capture_attempt TO {role}"),
+        format!("GRANT UPDATE (business_outcome) ON record_processing_work TO {role}"),
+        format!("GRANT UPDATE (finalized_at, run_error) ON record_processing_attempt TO {role}"),
+        format!("GRANT UPDATE (current_revision_id) ON source_content TO {role}"),
+    ] {
+        raw(&admin, &statement).await.unwrap_or_else(|error| {
+            panic!("granting the runtime role failed on {statement}: {error}")
+        });
+    }
+
+    let host_and_database = admin_url
+        .split_once('@')
+        .expect("the proof URL always carries credentials")
+        .1;
+    Database::connect_within_schema(
+        &format!("postgresql://{role}:{password}@{host_and_database}"),
+        schema,
+    )
+    .await
+    .expect("the runtime role must be able to connect")
 }

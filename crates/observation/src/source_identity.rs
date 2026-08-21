@@ -41,42 +41,78 @@ pub(crate) fn rule_on_identity(
 
 /// Resolves the identity and its content anchor, reusing both when they already exist.
 ///
-/// Concurrency note: `ON CONFLICT DO UPDATE` is deliberate. With `DO NOTHING`, a transaction that
-/// loses the race gets no row back, and a `SELECT` in the same statement cannot see the winner's
-/// uncommitted row either - the loser would fail instead of continuing. `DO UPDATE` waits for the
-/// competing transaction, then returns the winning row. The update itself is a no-op rewrite of
-/// the same value, so no identity fact ever changes.
+/// Concurrency note: resolution for one external id is serialized by a transaction-scoped
+/// advisory lock. Two earlier shapes were rejected: `ON CONFLICT DO NOTHING` leaves the loser of
+/// a race with no row and no way to see the winner's uncommitted one, and `ON CONFLICT DO UPDATE`
+/// would require granting the runtime role UPDATE on the identity tables - exactly the privilege
+/// it must not have. An advisory lock needs no table privileges at all, and the loser simply
+/// waits and then reads the committed row.
 pub(crate) async fn resolve_source_content(
     transaction: &mut Transaction<'_, Postgres>,
     external_id: &str,
     identity_ref: Uuid,
     content_ref: Uuid,
 ) -> Result<i64, ProcessingError> {
-    let identity_id = sqlx::query(
-        "INSERT INTO source_identity \
-             (source_identity_ref, source_system, namespace, object_type, external_id) \
-         VALUES ($1, 'synthetic', 'scope-001', 'content', $2) \
-         ON CONFLICT (source_system, namespace, object_type, external_id) \
-         DO UPDATE SET external_id = source_identity.external_id \
-         RETURNING id",
-    )
-    .bind(identity_ref)
-    .bind(external_id)
-    .fetch_one(&mut **transaction)
-    .await
-    .map(|row| row.get::<i64, _>("id"))
-    .map_err(ProcessingError::internal)?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("scope-001:content-identity:{external_id}"))
+        .execute(&mut **transaction)
+        .await
+        .map_err(ProcessingError::internal)?;
 
+    let identity_id = match existing_identity_id(transaction, external_id).await? {
+        Some(id) => id,
+        None => sqlx::query(
+            "INSERT INTO source_identity \
+                 (source_identity_ref, source_system, namespace, object_type, external_id) \
+             VALUES ($1, 'synthetic', 'scope-001', 'content', $2) RETURNING id",
+        )
+        .bind(identity_ref)
+        .bind(external_id)
+        .fetch_one(&mut **transaction)
+        .await
+        .map(|row| row.get::<i64, _>("id"))
+        .map_err(ProcessingError::internal)?,
+    };
+
+    match existing_content_id(transaction, identity_id).await? {
+        Some(id) => Ok(id),
+        None => sqlx::query(
+            "INSERT INTO source_content (content_ref, source_identity_id) VALUES ($1, $2) \
+             RETURNING id",
+        )
+        .bind(content_ref)
+        .bind(identity_id)
+        .fetch_one(&mut **transaction)
+        .await
+        .map(|row| row.get::<i64, _>("id"))
+        .map_err(ProcessingError::internal),
+    }
+}
+
+async fn existing_identity_id(
+    transaction: &mut Transaction<'_, Postgres>,
+    external_id: &str,
+) -> Result<Option<i64>, ProcessingError> {
     sqlx::query(
-        "INSERT INTO source_content (content_ref, source_identity_id) VALUES ($1, $2) \
-         ON CONFLICT (source_identity_id) \
-         DO UPDATE SET source_identity_id = source_content.source_identity_id \
-         RETURNING id",
+        "SELECT id FROM source_identity \
+         WHERE source_system = 'synthetic' AND namespace = 'scope-001' \
+           AND object_type = 'content' AND external_id = $1",
     )
-    .bind(content_ref)
-    .bind(identity_id)
-    .fetch_one(&mut **transaction)
+    .bind(external_id)
+    .fetch_optional(&mut **transaction)
     .await
-    .map(|row| row.get::<i64, _>("id"))
+    .map(|row| row.map(|row| row.get::<i64, _>("id")))
     .map_err(ProcessingError::internal)
+}
+
+async fn existing_content_id(
+    transaction: &mut Transaction<'_, Postgres>,
+    identity_id: i64,
+) -> Result<Option<i64>, ProcessingError> {
+    sqlx::query("SELECT id FROM source_content WHERE source_identity_id = $1")
+        .bind(identity_id)
+        .fetch_optional(&mut **transaction)
+        .await
+        .map(|row| row.map(|row| row.get::<i64, _>("id")))
+        .map_err(ProcessingError::internal)
 }

@@ -348,12 +348,22 @@ BEGIN
         IF observed <> 1 THEN
             RAISE EXCEPTION 'observation_recorded requires exactly one observation for this record, found %', observed;
         END IF;
+        -- Not merely "some current exists": the published revision must have this record's own
+        -- observation in its watermark, otherwise the work would be borrowing an older current
+        -- that never absorbed it.
         SELECT count(*) INTO published
         FROM content_observation o
         JOIN source_content c ON c.id = o.source_content_id
-        WHERE o.capture_record_id = NEW.capture_record_id AND c.current_revision_id IS NOT NULL;
+        JOIN content_current_revision rev ON rev.id = c.current_revision_id
+        WHERE o.capture_record_id = NEW.capture_record_id
+          AND EXISTS (
+              SELECT 1
+              FROM jsonb_array_elements(rev.watermark) AS package_entry,
+                   jsonb_array_elements_text(package_entry -> 'observationRefs') AS watermark_ref
+              WHERE watermark_ref.value = o.observation_ref::text
+          );
         IF published <> 1 THEN
-            RAISE EXCEPTION 'observation_recorded requires a published current revision for the observed content';
+            RAISE EXCEPTION 'observation_recorded requires the published current revision to include this record''s observation';
         END IF;
     ELSIF observed <> 0 THEN
         RAISE EXCEPTION 'business outcome % must not leave an observation behind', NEW.business_outcome;
@@ -366,3 +376,58 @@ CREATE CONSTRAINT TRIGGER record_processing_work_outcome_matches_facts
     AFTER INSERT OR UPDATE ON record_processing_work
     DEFERRABLE INITIALLY DEFERRED
     FOR EACH ROW EXECUTE FUNCTION scope_001_verify_business_outcome_facts();
+
+-- ---------------------------------------------------------------------------
+-- 5. Published facts stay closed, and a finished outcome keeps what it depends on
+-- ---------------------------------------------------------------------------
+
+-- Once a revision is the published current value, the set of observations it fixes is closed.
+-- New evidence produces a new revision; it never re-opens the meaning of an old one.
+CREATE FUNCTION scope_001_forbid_appending_to_published_revision() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM source_content WHERE current_revision_id = NEW.revision_id) THEN
+        RAISE EXCEPTION 'the source set of a published current revision is closed; new evidence must produce a new revision';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER content_current_revision_field_source_closes_on_publication
+    BEFORE INSERT ON content_current_revision_field_source
+    FOR EACH ROW EXECUTE FUNCTION scope_001_forbid_appending_to_published_revision();
+
+-- A business outcome may not outlive the facts that justify it. Finalizing an attempt is legal;
+-- deleting or reopening one that already supports an outcome is not.
+CREATE FUNCTION scope_001_protect_finalized_attempt() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.finalized_at IS NOT NULL AND EXISTS (
+        SELECT 1 FROM record_processing_work w
+        WHERE w.id = OLD.processing_work_id AND w.business_outcome IS NOT NULL
+    ) THEN
+        RAISE EXCEPTION 'a finalized attempt supporting a business outcome cannot be removed or reopened';
+    END IF;
+    RETURN CASE TG_OP WHEN 'DELETE' THEN OLD ELSE NEW END;
+END;
+$$;
+
+CREATE TRIGGER record_processing_attempt_keeps_supporting_a_finished_outcome
+    BEFORE UPDATE OR DELETE ON record_processing_attempt
+    FOR EACH ROW EXECUTE FUNCTION scope_001_protect_finalized_attempt();
+
+-- A published current pointer may move forward to a newer revision, but it may never be cleared:
+-- doing so would silently remove the current value an outcome already depends on.
+CREATE FUNCTION scope_001_protect_published_current_pointer() RETURNS trigger
+    LANGUAGE plpgsql AS $$
+BEGIN
+    IF OLD.current_revision_id IS NOT NULL AND NEW.current_revision_id IS NULL THEN
+        RAISE EXCEPTION 'a published current pointer cannot be cleared; recompute a new revision instead';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER source_content_keeps_its_published_current
+    BEFORE UPDATE ON source_content
+    FOR EACH ROW EXECUTE FUNCTION scope_001_protect_published_current_pointer();
