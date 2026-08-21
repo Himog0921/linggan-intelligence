@@ -14,6 +14,8 @@
 
 当前唯一获准的**业务实施**仍是 `SCOPE-001 / F01`。Mog 已另行确认 `DESIGN-002`：以「任务启动困难」为例制作一个明确标为 `SYNTHETIC / NOT LIVE` 的 Topic Intelligence Reference Page，并把 [LIDS v2.0](design/lids/README.md) 纳入全项目唯一设计表达标准。LIDS 现在约束未来 UI 的 Token → Primitive → Component → Pattern → Page、L1/L2/L3、状态诚实与 Agent 工作方式，但成熟度仍为 Proposed；它不创建真实 Web、运行时主题/组件、真实数据、3D/技术栈、权限或动作。DESIGN-002 仍只是 `p0-surface-prototype` 的一个可审查输入，不回答完整 P0，也不扩大 F01 或任何真实数据/权限/行动授权。`GOV-003` 是并行进行的低风险单 Issue/单 PR 治理工作单，不是第二个业务 SCOPE：GitHub [Issue #1](https://github.com/Himog0921/linggan-intelligence/issues/1) 与 draft [PR #2](https://github.com/Himog0921/linggan-intelligence/pull/2) 已建立，但 independent review 对旧 head `a7b63c365c7d3befccc54fd42586c48fe0f22542` 的结论为 **FAIL**，当前只允许在同一 branch/worktree 内修订并请求原 reviewer 复核；不得 merge、close 或把 GOV-003 记为完成。
 
+F01 的当前 processing runtime 只通过三项窄 PostgreSQL function 领取、处理或记录 run-error，不拥有表级直接 DML。该结论只在隔离 proof 的 runtime role 上验证；migration/schema owner 与 proof administrator 属可信 control-plane，数据库不防止其恶意改写自身，生产 credential 分离、secret/IAM 与真实部署身份隔离均仍为 **NOT VERIFIED**。
+
 全项目已正式按“开发阶段”跟踪；阶段路线、每阶段验收证据与需要 Mog 决定的关口统一见 [`development-stage-tracker.md`](development-stage-tracker.md)。本文继续只维护当前快照和唯一下一步，不复制长期路线。
 
 已确认事实：
@@ -78,7 +80,11 @@
 
 当前唯一获准实施事项是 [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md)。它把已确认设计压缩为一条合成/脱敏技术 tracer：终态 Package 接入、逐 Record 处理、最小 Content 身份与 Observation、字段级 Current 来源，以及 API + minimal CLI 的解释结果；它不是用户可见产品切片。
 
-语义冻结已经经过四次独立只读攻击。第四轮发现的 payload/ingress 分层、pre-routing audit union、动态 ref/time snapshot 和跨 Attempt Satisfaction 已分别用 processor owner、封闭数据库 union、固定 proof clock/ref 与 Work 1:1 Attempt 收口。按用户最新裁定不再进行第五轮文档复核。F01 已完成 contracts tracer、手工静态 manifest Oracle，以及 **TDD 步骤 3 的 Package ingress**：有效 Package 在随机隔离的 PostgreSQL 16 schema 中原子接入，行数逐表对齐 manifest 的 `fresh_seed` 与 `final` 阶段，六个事务故障注入点任一失败都零半写，同 hash replay 与不同 hash conflict 只新增一行 delivery 且不覆盖既有 Package，接入后 Observation/Current/Source 侧表仍不存在。三项主链保护中前两项（接入阶段不提前形成 Observation/Current、接入故障零半写）已有真实数据库证据；第三项（坏 Record 不撤销合格 Record）属于 Record processing，尚未实现。下一步是 TDD 步骤 4 的两条 Record 独立处理与 Observation/Current，需要先创建 `0002` migration；随后才是 loopback API 与只经 API 的 CLI。完成该链后停止实施扩张；其余 canonicalization、完整 envelope、资源上限和 F02–F10 等待 ARC-001 收口及后续明确排期，不从 F01 自动继续。
+语义冻结已经经过四次独立只读攻击。第四轮发现的 payload/ingress 分层、pre-routing audit union、动态 ref/time snapshot 和跨 Attempt Satisfaction 已分别用 processor owner、封闭数据库 union、固定 proof clock/ref 与 Work 1:1 Attempt 收口。按用户最新裁定不再进行第五轮文档复核。F01 已完成 contracts tracer、手工静态 manifest Oracle，以及 **TDD 步骤 3 的 Package ingress**：有效 Package 在随机隔离的 PostgreSQL 16 schema 中原子接入，行数逐表对齐 manifest 的 `fresh_seed` 与 `final` 阶段，六个事务故障注入点任一失败都零半写，同 hash replay 与不同 hash conflict 只新增一行 delivery 且不覆盖既有 Package，接入后 Observation/Current/Source 侧表仍不存在。
+
+**TDD 步骤 4 的实现仍在 GitHub Issue #3 / draft PR #8，尚未 merge，Issue #3 仍保持 open。**运行身份不拥有直接表权限：它只能调用受限的领取、原子处理与失败留痕入口；数据库把每次事实写入绑定到已领取的 accepted Record 与 epoch，并拒绝直接复用已接纳 external id 伪造完整事实链。已接纳 Package、Record、target result 与 Coverage 的直接 UPDATE/DELETE 会被数据库拒绝；两条 Record 仍独立形成 Observation/Current，坏 Record 不连坐合格 Record。
+
+Round-6 的已核对基线为隔离 PostgreSQL 16 runner **39 passed, 0 failed**（8 ingress、4 正向 processing、14 基础负例/并发、13 hardening），并逐次确认 disposable database/container/volume 清理；它只证明 synthetic F01 的数据库切片。Round-7 在同一标准 runner 中新增 `scope_001_record_processing_run_error` 的直接 TEMP-shadow 攻击证明；当前标准 runner 已核对为 **40 passed, 0 failed**（8 ingress、4 正向 processing、14 基础负例/并发、14 hardening），并再次确认 disposable database/container/volume 清理。Round-6 的 39 项只表示该轮基线，不包含新增证明。当前**不能**把下一步自动写成 API/CLI：必须先由非实现者对 PR #8 的新 exact head 独立完成 Standards 与 Spec review，再由 integration owner 作 merge 决定。F02–F10、真实 producer/插件/媒体/AI、生产部署与业务验收仍未证明也未授权。
 
 并行的产品决策下一步可在两个独立会话中分别推进 [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) 的 `p0-surface-prototype` 与 `first-producer-canary`；两票均已解锁但未回答。`DESIGN-002` 的 Topic Reference Page 是 `p0-surface-prototype` 的一个可走查输入，而不是这张票的完整答案。首页职责到运行时的语义已澄清，但这不授权 P0、Web、Agent、真实 producer、媒体或旧系统迁移实现。`ADV-AUDIT-001` 的独立复核最终处置见 [`audits/pre-implementation-architecture-audit-2026-08-21.md`](audits/pre-implementation-architecture-audit-2026-08-21.md)；它没有改动 F01 migration/合同，也不授权真实访问。
 

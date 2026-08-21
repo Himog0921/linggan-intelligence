@@ -624,6 +624,16 @@ version = "0.1.0"
 [[package]]
 name = "linggan-observation"
 version = "0.1.0"
+dependencies = [
+ "linggan-contracts",
+ "linggan-evidence",
+ "linggan-storage-postgres",
+ "serde_json",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "linggan-storage-postgres"

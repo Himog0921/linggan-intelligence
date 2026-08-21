@@ -1,4 +1,4 @@
-use linggan_contracts::{ContractError, parse_capture_package};
+use linggan_contracts::{CapturePackage, ContractError, parse_capture_package};
 
 const F01_COMPLETE_KNOWN_SET: &str =
     include_str!("fixtures/capture-v1/f01-complete-known-set.json");
@@ -12,6 +12,12 @@ const F01_UNSAFE_INTEGER_SCHEMA_INVALID: &str =
     include_str!("fixtures/capture-v1/f01-unsafe-integer-schema-invalid.json");
 const F01_UNPAIRED_SURROGATE_SCHEMA_INVALID: &str =
     include_str!("fixtures/capture-v1/f01-unpaired-surrogate-schema-invalid.json");
+const F01_SOURCE_EXTERNAL_ID_NULL: &str =
+    include_str!("fixtures/capture-v1/f01-source-external-id-null.json");
+const F01_SOURCE_EXTERNAL_ID_MISSING: &str =
+    include_str!("fixtures/capture-v1/f01-source-external-id-missing.json");
+const F01_OBSERVED_AT_INVALID: &str =
+    include_str!("fixtures/capture-v1/f01-observed-at-invalid.json");
 
 #[test]
 fn f01_complete_known_set_is_read_through_the_public_contract() {
@@ -187,5 +193,123 @@ fn safe_integers_and_legal_non_integer_numbers_remain_schema_errors() {
             matches!(error, ContractError::PackageSchemaInvalid(_)),
             "{literal} must not be misclassified as an unsafe-integer canonicalization error"
         );
+    }
+}
+
+#[test]
+fn record_envelope_exposes_every_verified_field_through_the_public_contract() {
+    let package = parse_capture_package(F01_COMPLETE_KNOWN_SET).expect("F01 must be valid");
+    let record = &package.records()[0];
+
+    assert_eq!(
+        (
+            record.ordinal(),
+            record.record_kind(),
+            record.target_external_id(),
+            record.source_system(),
+            record.source_namespace(),
+            record.source_object_type(),
+            record.source_external_id(),
+            record.source_channel(),
+            record.observed_at_value(),
+            record.observed_at_precision(),
+            record.observed_at_basis(),
+        ),
+        (
+            1,
+            "content_detail",
+            "synthetic-note-a",
+            "synthetic",
+            "scope-001",
+            "content",
+            Some("synthetic-note-a"),
+            "synthetic_page",
+            "2026-08-20T08:00:00Z",
+            "exact",
+            "fixture",
+        )
+    );
+}
+
+#[test]
+fn explicit_null_source_external_id_is_a_legal_envelope_value() {
+    let package =
+        parse_capture_package(F01_SOURCE_EXTERNAL_ID_NULL).expect("an explicit null is legal");
+    let record = &package.records()[0];
+
+    assert_eq!(record.source_external_id(), None);
+    assert_eq!(
+        record.target_external_id(),
+        "synthetic-note-a",
+        "the target statement stays readable but never substitutes for the source statement"
+    );
+    assert_eq!(
+        record.payload()["sourceExternalId"].as_str(),
+        Some("synthetic-note-a"),
+        "the payload still states an id, so any fallback would be visible downstream"
+    );
+}
+
+#[test]
+fn missing_source_external_id_field_is_a_package_schema_error_not_a_null() {
+    let error = parse_capture_package(F01_SOURCE_EXTERNAL_ID_MISSING)
+        .expect_err("a mandatory envelope field must not be optional");
+
+    assert!(
+        matches!(error, ContractError::PackageSchemaInvalid(_)),
+        "an absent mandatory field must fail the schema rather than become an explicit null: {error:?}"
+    );
+}
+
+#[test]
+fn observed_at_outside_the_frozen_utc_form_fails_closed() {
+    let error = parse_capture_package(F01_OBSERVED_AT_INVALID)
+        .expect_err("a non-UTC RFC 3339 instant is a different lexical contract");
+
+    assert!(
+        matches!(error, ContractError::PackageSchemaInvalid(_)),
+        "an offset instant must fail closed rather than be normalized to UTC: {error:?}"
+    );
+}
+
+#[test]
+fn observed_at_and_source_fixed_values_are_closed_enumerations() {
+    let base: serde_json::Value =
+        serde_json::from_str(F01_COMPLETE_KNOWN_SET).expect("F01 fixture must be JSON");
+
+    for (path, replacement) in [
+        (["observedAt", "precision"], "approximate"),
+        (["observedAt", "basis"], "inferred"),
+        (["source", "system"], "xiaohongshu"),
+        (["source", "namespace"], "scope-002"),
+        (["source", "objectType"], "comment"),
+        (["source", "channel"], "search_page"),
+    ] {
+        let mut mutated = base.clone();
+        mutated["records"][0][path[0]][path[1]] = serde_json::json!(replacement);
+        let mutated = serde_json::to_string(&mutated).expect("mutation must serialize");
+
+        let error = parse_capture_package(&mutated)
+            .unwrap_err_or_else_message(&format!("{}.{} = {replacement}", path[0], path[1]));
+        assert!(
+            matches!(error, ContractError::PackageSchemaInvalid(_)),
+            "{}.{} = {replacement} must fail the schema, not be accepted as a free string",
+            path[0],
+            path[1]
+        );
+    }
+}
+
+/// Small helper so a failing mutation names itself in the panic message.
+trait UnwrapErrOrElseMessage<T> {
+    fn unwrap_err_or_else_message(self, context: &str) -> ContractError;
+}
+
+impl UnwrapErrOrElseMessage<CapturePackage> for Result<CapturePackage, ContractError> {
+    fn unwrap_err_or_else_message(self, context: &str) -> ContractError {
+        match self {
+            Ok(_) => panic!("{context} must not be accepted"),
+            Err(error) => error,
+        }
     }
 }

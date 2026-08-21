@@ -2,19 +2,29 @@
 //! from the hand-maintained fixture manifest so neither the test nor the implementation can
 //! derive a second version of the truth.
 
-use linggan_evidence::{IngressFault, IngressOptions, IngressOutcome, ingest_capture_package_with};
+use linggan_evidence::{
+    IngressError, IngressFault, IngressOptions, IngressOutcome, PreRoutingCode,
+    ingest_capture_package_with,
+};
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use serde_json::Value;
 use sqlx::{AssertSqlSafe, Row};
 use uuid::Uuid;
 
 const CAPTURE_MIGRATION: &str = "database/migrations/0001_scope_001_capture_evidence.sql";
+const OBSERVATION_MIGRATION: &str = "database/migrations/0002_scope_001_content_observation.sql";
 const F01_PACKAGE: &str =
     include_str!("../../contracts/tests/fixtures/capture-v1/f01-complete-known-set.json");
 const F01_PACKAGE_OTHER_HASH: &str = include_str!(
     "../../contracts/tests/fixtures/capture-v1/f01-complete-known-set-payload-extension.json"
 );
 const F01_MANIFEST: &str = include_str!("../../contracts/tests/fixtures/capture-v1/manifest.json");
+const F01_SOURCE_EXTERNAL_ID_NULL: &str =
+    include_str!("../../contracts/tests/fixtures/capture-v1/f01-source-external-id-null.json");
+const F01_SOURCE_EXTERNAL_ID_MISSING: &str =
+    include_str!("../../contracts/tests/fixtures/capture-v1/f01-source-external-id-missing.json");
+const F01_OBSERVED_AT_INVALID: &str =
+    include_str!("../../contracts/tests/fixtures/capture-v1/f01-observed-at-invalid.json");
 
 /// The tables the F01 foundation migration owns, keyed by their manifest name.
 const FOUNDATION_TABLES: [(&str, &str); 9] = [
@@ -68,7 +78,7 @@ async fn f01_valid_package_is_accepted_atomically_and_forms_no_observation_or_cu
     );
 
     assert_stage_rows(&database, "final", "total").await;
-    assert_downstream_tables_absent(&database).await;
+    assert_downstream_tables_empty(&database).await;
 
     let package = sqlx::query(
         "SELECT accepted_outcome, package_hash, accepted_receipt_ref, accepted_delivery_id, \
@@ -128,7 +138,7 @@ async fn f01_ingress_faults_before_commit_leave_no_half_written_rows() {
         );
 
         assert_stage_rows(&database, "fresh_seed", "total").await;
-        assert_downstream_tables_absent(&database).await;
+        assert_downstream_tables_empty(&database).await;
     }
 }
 
@@ -171,7 +181,7 @@ async fn f01_same_hash_replay_reuses_the_original_receipt_and_adds_only_a_delive
 
     assert_delivery_outcomes(&database, &["accepted", "replay"]).await;
     assert_business_rows_match_stage(&database, "final").await;
-    assert_downstream_tables_absent(&database).await;
+    assert_downstream_tables_empty(&database).await;
 }
 
 #[tokio::test]
@@ -218,34 +228,143 @@ async fn f01_different_hash_conflict_does_not_overwrite_the_accepted_package() {
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
-async fn f01_database_rejects_cross_parent_rows_written_around_the_rust_facade() {
-    let database = fresh_f01_database("f01_cross_parent").await;
+async fn f01_accepted_records_persist_the_whole_typed_envelope() {
+    let database = fresh_f01_database("f01_envelope").await;
+    ingest_capture_package_with(&database, F01_PACKAGE, &f01_fixed_options())
+        .await
+        .expect("a valid F01 package must be accepted");
 
-    sqlx::raw_sql(AssertSqlSafe(
-        "INSERT INTO capture_work_order (work_order_ref, contract_version, target_basis, target_unit, target_manifest_hash, known_target_count, quota_limit) \
-         VALUES ('00000000-0000-4000-8000-000000000901', 'content-detail.synthetic.v1', 'known_set', 'content_detail', 'sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff', 1, NULL); \
-         INSERT INTO capture_attempt (attempt_ref, capture_identity, work_order_id, lease_epoch, authority_valid_until) \
-         SELECT '00000000-0000-4000-8000-000000000902', '00000000-0000-4000-8000-000000000903', id, 1, scope_001_now() + interval '1 hour' \
-         FROM capture_work_order WHERE work_order_ref = '00000000-0000-4000-8000-000000000901';".to_owned(),
-    ))
-    .execute(database.pool())
-    .await
-    .expect("the second work and attempt are only constraint-negative fixtures");
-
-    let cross_parent_delivery = sqlx::query(
-        "INSERT INTO capture_ingress_delivery (audit_kind, delivery_ref, work_order_id, attempt_id, capture_identity, outcome, external_code) \
-         SELECT 'public_delivery', '00000000-0000-4000-8000-000000000904', first_work.id, second_attempt.id, second_attempt.capture_identity, 'rejected', 'lease_epoch_mismatch' \
-         FROM capture_work_order first_work \
-         JOIN capture_attempt second_attempt ON second_attempt.attempt_ref = '00000000-0000-4000-8000-000000000902' \
-         WHERE first_work.work_order_ref = $1",
+    let rows = sqlx::query(
+        "SELECT ordinal, record_kind, source_system, source_namespace, source_object_type, \
+                source_external_id, source_channel, \
+                to_char(observed_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') AS observed_at_utc, \
+                observed_at_precision, observed_at_basis, target_external_id, record_hash, payload \
+         FROM capture_record ORDER BY ordinal",
     )
-    .bind(manifest_ref("workOrderRef"))
-    .execute(database.pool())
-    .await;
-    assert!(
-        cross_parent_delivery.is_err(),
-        "a delivery that mixes one work with another work's attempt must be rejected by the database"
+    .fetch_all(database.pool())
+    .await
+    .expect("accepted records must expose their typed envelope");
+    assert_eq!(rows.len(), 2);
+
+    for (index, row) in rows.iter().enumerate() {
+        let expected = &fixture_package(F01_PACKAGE)["records"][index];
+        assert_eq!(
+            row.get::<i32, _>("ordinal"),
+            expected["ordinal"].as_i64().unwrap() as i32
+        );
+        assert_eq!(row.get::<String, _>("record_kind"), expected["recordKind"]);
+        assert_eq!(
+            row.get::<String, _>("source_system"),
+            expected["source"]["system"]
+        );
+        assert_eq!(
+            row.get::<String, _>("source_namespace"),
+            expected["source"]["namespace"]
+        );
+        assert_eq!(
+            row.get::<String, _>("source_object_type"),
+            expected["source"]["objectType"]
+        );
+        assert_eq!(
+            row.get::<Option<String>, _>("source_external_id")
+                .as_deref(),
+            expected["source"]["externalId"].as_str(),
+            "the envelope's own external id must be stored verbatim"
+        );
+        assert_eq!(
+            row.get::<String, _>("source_channel"),
+            expected["source"]["channel"]
+        );
+        assert_eq!(
+            row.get::<String, _>("observed_at_utc"),
+            expected["observedAt"]["value"],
+            "observedAt must be the producer's observation instant, not a receive or insert time"
+        );
+        assert_eq!(
+            row.get::<String, _>("observed_at_precision"),
+            expected["observedAt"]["precision"]
+        );
+        assert_eq!(
+            row.get::<String, _>("observed_at_basis"),
+            expected["observedAt"]["basis"]
+        );
+        assert_eq!(
+            row.get::<String, _>("target_external_id"),
+            expected["targetExternalId"]
+        );
+        assert_eq!(row.get::<String, _>("record_hash"), expected["recordHash"]);
+        assert_eq!(row.get::<Value, _>("payload"), expected["payload"]);
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn f01_explicit_null_source_external_id_is_accepted_and_stored_as_null() {
+    let database = fresh_f01_database("f01_external_id_null").await;
+    ingest_capture_package_with(&database, F01_SOURCE_EXTERNAL_ID_NULL, &f01_fixed_options())
+        .await
+        .expect("an explicit null source external id is a legal envelope value");
+
+    let stored: Option<String> =
+        sqlx::query("SELECT source_external_id FROM capture_record WHERE ordinal = 1")
+            .fetch_one(database.pool())
+            .await
+            .expect("the record must be readable")
+            .get("source_external_id");
+    assert_eq!(
+        stored, None,
+        "an explicit null must stay null; it must not be back-filled from the target or payload"
     );
+
+    let payload_states_an_id: Option<String> = sqlx::query(
+        "SELECT payload->>'sourceExternalId' AS payload_source_external_id FROM capture_record WHERE ordinal = 1",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the record must be readable")
+    .get("payload_source_external_id");
+    assert!(
+        payload_states_an_id.is_some(),
+        "this fixture only proves the no-fallback rule while the payload still states an id"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn f01_missing_source_external_id_field_fails_the_contract_instead_of_reaching_the_database()
+{
+    let database = fresh_f01_database("f01_external_id_missing").await;
+    let error = ingest_capture_package_with(
+        &database,
+        F01_SOURCE_EXTERNAL_ID_MISSING,
+        &f01_fixed_options(),
+    )
+    .await
+    .expect_err("a missing mandatory envelope field must not be accepted");
+
+    assert!(matches!(
+        error,
+        IngressError::PreRouting(PreRoutingCode::PackageSchemaInvalid)
+    ));
+    assert_stage_rows(&database, "fresh_seed", "total").await;
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-scope-001-postgres.sh and an isolated PostgreSQL proof database"]
+async fn f01_non_utc_observed_at_fails_the_contract_instead_of_being_normalized() {
+    let database = fresh_f01_database("f01_observed_at_invalid").await;
+    let error =
+        ingest_capture_package_with(&database, F01_OBSERVED_AT_INVALID, &f01_fixed_options())
+            .await
+            .expect_err(
+                "a non-UTC observedAt is a different lexical contract and must fail closed",
+            );
+
+    assert!(matches!(
+        error,
+        IngressError::PreRouting(PreRoutingCode::PackageSchemaInvalid)
+    ));
+    assert_stage_rows(&database, "fresh_seed", "total").await;
 }
 
 fn f01_fixed_options() -> IngressOptions {
@@ -275,9 +394,17 @@ async fn fresh_f01_database(schema: &str) -> Database {
         .expect("test-scope-001-postgres.sh must provide an isolated proof database URL");
     let migration = std::fs::read_to_string(workspace_path(CAPTURE_MIGRATION))
         .unwrap_or_else(|error| panic!("required F01 capture migration is unavailable: {error}"));
-    let database = isolated_proof_schema(&proof_database_url, schema, &migration)
-        .await
-        .expect("the F01 migration must apply to an isolated empty schema");
+    let observation_migration = std::fs::read_to_string(workspace_path(OBSERVATION_MIGRATION))
+        .unwrap_or_else(|error| {
+            panic!("required F01 observation migration is unavailable: {error}")
+        });
+    let database = isolated_proof_schema(
+        &proof_database_url,
+        schema,
+        &format!("{migration}\n{observation_migration}"),
+    )
+    .await
+    .expect("both F01 migrations must apply in order to an isolated empty schema");
     seed_f01_work_attempt_and_targets(&database).await;
     database
 }
@@ -346,17 +473,14 @@ async fn assert_business_rows_match_stage(database: &Database, stage: &str) {
     }
 }
 
-async fn assert_downstream_tables_absent(database: &Database) {
+/// The downstream tables exist once 0002 is applied, so acceptance must leave them empty rather
+/// than merely absent. The manifest freezes every one of these as zero for accepted ingress.
+async fn assert_downstream_tables_empty(database: &Database) {
+    let expected = manifest_stage("accepted_ingress", "delta");
     for (manifest_name, table) in DOWNSTREAM_TABLES {
-        let present =
-            sqlx::query("SELECT to_regclass(current_schema() || '.' || $1) IS NOT NULL AS present")
-                .bind(table)
-                .fetch_one(database.pool())
-                .await
-                .expect("the proof schema must report its table boundary")
-                .get::<bool, _>("present");
-        assert!(
-            !present,
+        assert_eq!(
+            count(database, table).await,
+            expected[manifest_name].as_i64().expect("frozen row count"),
             "accepted ingress must not create {manifest_name} ({table}); it belongs to record processing"
         );
     }

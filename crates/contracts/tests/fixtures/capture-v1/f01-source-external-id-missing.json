@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "capture.package.v1",
+  "workOrderRef": "00000000-0000-4000-8000-000000000101",
+  "attemptRef": "00000000-0000-4000-8000-000000000102",
+  "captureIdentity": "00000000-0000-4000-8000-000000000103",
+  "leaseEpoch": 1,
+  "contractVersion": "content-detail.synthetic.v1",
+  "target": {
+    "basis": "known_set",
+    "unit": "content_detail",
+    "targetManifestHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "knownTargetCount": 2
+  },
+  "terminal": {
+    "reason": "target_reached"
+  },
+  "coverage": {
+    "unit": "content_detail",
+    "attempted": 2,
+    "emitted": 2,
+    "failed": 0,
+    "knownNotAttempted": 0,
+    "remainingScope": "known_members"
+  },
+  "knownTargetResults": [
+    {
+      "targetOrdinal": 1,
+      "targetExternalId": "synthetic-note-a",
+      "outcome": "emitted",
+      "recordOrdinal": 1,
+      "reason": null
+    },
+    {
+      "targetOrdinal": 2,
+      "targetExternalId": "synthetic-note-b",
+      "outcome": "emitted",
+      "recordOrdinal": 2,
+      "reason": null
+    }
+  ],
+  "records": [
+    {
+      "ordinal": 1,
+      "recordKind": "content_detail",
+      "targetExternalId": "synthetic-note-a",
+      "source": {
+        "system": "synthetic",
+        "namespace": "scope-001",
+        "objectType": "content",
+        "channel": "synthetic_page"
+      },
+      "observedAt": {
+        "value": "2026-08-20T08:00:00Z",
+        "precision": "exact",
+        "basis": "fixture"
+      },
+      "payload": {
+        "schemaVersion": "content-detail.synthetic.v1",
+        "sourceExternalId": "synthetic-note-a",
+        "fields": {
+          "title": {
+            "observed": true,
+            "value": "Synthetic title A"
+          },
+          "body": {
+            "observed": true,
+            "value": "Synthetic body A"
+          }
+        }
+      },
+      "recordHash": "sha256:d5db266f604f01272f65cb7fa0afdeae89ac7f141086c79fc35e3a4fa94935ab"
+    },
+    {
+      "ordinal": 2,
+      "recordKind": "content_detail",
+      "targetExternalId": "synthetic-note-b",
+      "source": {
+        "system": "synthetic",
+        "namespace": "scope-001",
+        "objectType": "content",
+        "externalId": "synthetic-note-b",
+        "channel": "synthetic_page"
+      },
+      "observedAt": {
+        "value": "2026-08-20T08:00:00Z",
+        "precision": "exact",
+        "basis": "fixture"
+      },
+      "payload": {
+        "schemaVersion": "content-detail.synthetic.v1",
+        "sourceExternalId": "synthetic-note-b",
+        "fields": {
+          "title": {
+            "observed": true,
+            "value": "Synthetic title B"
+          },
+          "body": {
+            "observed": true,
+            "value": "Synthetic body B"
+          }
+        }
+      },
+      "recordHash": "sha256:ca93b6cbebf52a16f4bdbbcd9c82496b2e99d2863d61b2ca7cfeec059547bee9"
+    }
+  ],
+  "packageHash": "sha256:a1d6bbe59d107450bf85985a5eabfcc719280da4b38530625a631c169b1cf681"
+}

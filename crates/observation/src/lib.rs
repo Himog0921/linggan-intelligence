@@ -1,4 +1,11 @@
-//! Typed source observations and Current resolution. SCOPE-001 authorizes only synthetic Content
-//! title/body after the semantic code gate; inferred absence and analysis remain out of scope.
+//! Turning one accepted capture record into a source identity, a content observation and a
+//! recomputed current value. SCOPE-001 authorizes only the synthetic
+//! `content-detail-processor-v1`; a second processor version fails closed.
 
-pub const OBSERVATION_IMPLEMENTED: bool = false;
+mod processing;
+
+pub use processing::{
+    BusinessOutcome, ClaimedRecord, ProcessedRecord, ProcessingError, ProcessingFault,
+    ProcessingOptions, ProcessingOutcome, claim_one_ready_record, process_one_ready_record,
+    run_claimed_record,
+};
