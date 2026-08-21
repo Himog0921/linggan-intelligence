@@ -1,7 +1,7 @@
 # ARC-001 代码前产品与系统架构收口决策图
 
 > 状态: 活跃计划
-> 最后核对: 2026-08-21
+> 最后核对: 2026-08-22
 > 适用范围: F01 之后、首个真实 producer 与首个用户可见产品切片之前的产品和系统架构收口
 > 事实来源: 用户最新 course correction、当前开发跟踪表、产品/页面草案、采集与媒体历史经验、`ADV-AUDIT-001` 最终处置
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、ACCEPTED ADR、当前活跃 SCOPE 与可复现代码/数据库事实；本图不自动授权真实访问或实现
@@ -117,7 +117,7 @@ Asset target: `docs/product/first-phase-interface-prototype.md`
 ## first-producer-canary: 首批真实 Canary 是否包含媒体？
 
 Blocked by: primary-daily-job
-Status: open
+Status: resolved
 Type: Grilling
 Decision owner: Mog
 
@@ -126,6 +126,12 @@ Decision owner: Mog
 首批获得授权的真实 producer Canary，是只验证内容身份、标题、正文、作者、时间、有限评论和 Coverage，还是同时包含图片/视频下载与转录？
 
 ### Answer
+
+Mog 已确认选择 **B：首批真实 producer Canary 必须同步纳入受限媒体**。选择动机是：媒体是旧项目长期未闭合的问题，Linggan 不能把它再次留在正文链路之外。
+
+这项选择只决定首批 Canary 的产品边界。它不授权真实平台/账号/插件/媒体访问、下载、对象存储、OCR、转录、具体保留期、供应商、schema 或实际运行。方案 B 的真实 Canary 必须先通过媒体生命周期与采集控制两个合同门，并另立获准 SCOPE。
+
+媒体职责草案见 [`../../architecture/media-lifecycle-contract.md`](../../architecture/media-lifecycle-contract.md)。其中仍由 Mog 或明确授权负责人决定的媒体种类、样本上限、下载/处理许可、保存/访问/保留、第三方处理和风险预算均标为 `DECISION_REQUIRED`；工程团队不得自行默认。
 
 
 ## capture-control-contract: 真实插件前必须冻结哪些调度责任？
@@ -149,7 +155,7 @@ Asset target: `docs/architecture/capture-control-contract.md`
 ## media-lifecycle-contract: Linggan 的媒体后继架构是什么？
 
 Blocked by: first-producer-canary
-Status: open
+Status: open (draft contract prepared)
 Type: Research
 Decision owner: 工程架构团队；隐私、外部模型和保留策略交 Mog
 
@@ -158,6 +164,8 @@ Decision owner: 工程架构团队；隐私、外部模型和保留策略交 Mog
 Linggan 怎样用最小模型表达媒体身份、来源代次、下载、字节、存储副本、用途、转码/OCR/转录、撤回和派生失效，而不退化成 URL 字段或复制旧 `MediaAsset`？
 
 ### Answer
+
+方案 B 已使本票成为真实 Canary 的前置门。草案合同已提交为 [`../../architecture/media-lifecycle-contract.md`](../../architecture/media-lifecycle-contract.md)，等待独立审查、集成以及其中的 `DECISION_REQUIRED` 收口；在此之前，本票没有 resolved，也不授权任何媒体 lane。
 
 
 Asset target: `docs/architecture/media-lifecycle-contract.md`
@@ -200,17 +208,17 @@ Resolved 后才允许创建新的活跃 SCOPE、对应 GitHub Issues，并更新
 
 ## Next steps
 
-`product-shell` 与 `primary-daily-job` 已 resolved。当前有两个互不替代、均已解锁但尚未回答的票：`p0-surface-prototype` 与 `first-producer-canary`。
+`product-shell`、`primary-daily-job` 与 `first-producer-canary` 已 resolved。首批 Canary 已选择方案 B，因此 `media-lifecycle-contract` 与 `capture-control-contract` 必须在任何真实 producer 前完成；两者都不能由媒体方向确认自动跳过。
 
 一次只推进一个 ticket 时：
 
 ```text
-Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket p0-surface-prototype.
+Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket media-lifecycle-contract.
 ```
 
 若由两个独立会话并行推进，分别使用：
 
 ```text
-Session A: Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket p0-surface-prototype.
-Session B: Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket first-producer-canary.
+Session A: Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket media-lifecycle-contract.
+Session B: Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket capture-control-contract.
 ```
