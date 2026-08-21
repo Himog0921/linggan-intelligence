@@ -117,7 +117,7 @@ Asset target: `docs/product/first-phase-interface-prototype.md`
 ## first-producer-canary: 首批真实 Canary 是否包含媒体？
 
 Blocked by: primary-daily-job
-Status: open
+Status: resolved
 Type: Grilling
 Decision owner: Mog
 
@@ -127,11 +127,14 @@ Decision owner: Mog
 
 ### Answer
 
+Mog 已确认选择 **B：首批真实 producer Canary 同步纳入受限媒体**。动机是媒体不能再次作为旧项目长期未闭合的外围问题被留在文本链路之外。
+
+这只确定方向：首批 Canary 必须同时具备 Capture 控制与媒体生命周期责任。它不授权真实平台/账号/插件访问、媒体下载、存储、OCR/转录、schema、固定配额或保留政策；这些仍须先由 `capture-control-contract`、`media-lifecycle-contract`、独立审查和新的真实 Canary SCOPE 收口。对应决策材料由单独的 Issue #11 / Draft PR #13 维护，整合前不得将本答案表述为真实执行完成。
 
 ## capture-control-contract: 真实插件前必须冻结哪些调度责任？
 
 Blocked by: first-producer-canary
-Status: open
+Status: resolved
 Type: Research
 Decision owner: 工程架构团队；只有真实账号、风险或资源边界扩大时再交 Mog
 
@@ -140,6 +143,10 @@ Decision owner: 工程架构团队；只有真实账号、风险或资源边界�
 结合旧内容工作台事故与新系统 Acquisition Admission，新 Linggan 在真实插件开工前最少必须冻结哪些 Demand、Work、Attempt、Lease、Reconcile、Package、ACK、Coverage 和恢复责任？
 
 ### Answer
+
+形成草案 [`capture-control-contract.md`](../../architecture/capture-control-contract.md)。它不复制旧 `CollectionTask`、pending fallback 或旧表结构，而是冻结：Research Intent / Evidence Need / Acquisition Authorization / Admission / Work Order / Attempt / Lease / Package / ACK / Evidence / Observation 的分责；known set 与 maximum quota 的 Coverage 语义；Discovery、详情、评论与媒体 lane；Evidence 复用、去重和有意复观测；有限工位/账号/预算/风险控制与执行前重估；partial success、replay、conflict、retry、recovery；以及“采集结果可用”与“Claim 有资格”之间的硬边界。
+
+Mog 已选择含受限媒体的 Canary 方案 B。因此本票与 `media-lifecycle-contract` 必须在任何真实媒体 lane 之前一起通过独立审查和集成；草案本身不授权真实账号、频率、配额、预算、风控阈值、恢复政策、样本、下载、存储、OCR/转录或实现。未决定项明确保留为 `DECISION_REQUIRED`，并将由新的真实 Canary SCOPE 处理。
 
 
 Asset target: `docs/architecture/capture-control-contract.md`
@@ -200,7 +207,7 @@ Resolved 后才允许创建新的活跃 SCOPE、对应 GitHub Issues，并更新
 
 ## Next steps
 
-`product-shell` 与 `primary-daily-job` 已 resolved。当前有两个互不替代、均已解锁但尚未回答的票：`p0-surface-prototype` 与 `first-producer-canary`。
+`product-shell`、`primary-daily-job` 与 `first-producer-canary` 已 resolved。Mog 已确认「今日关注」为唯一默认入口，也已选择首批真实 Canary 方案 B（同步纳入受限媒体）；对应 P0、Capture 与媒体合同草案仍须经过独立审查和集成，不能把用户方向确认误报为真实执行授权。当前未阻塞但仍需走查的票是 `p0-surface-prototype`；`media-lifecycle-contract` 与其后的 `first-phase-runtime` 仍必须在真实 Canary 前完成。
 
 一次只推进一个 ticket 时：
 
