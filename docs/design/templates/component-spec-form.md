@@ -3,7 +3,7 @@
 > 状态: 权威当前
 > 最后核对: 2026-08-21
 > 适用范围: 首次成为跨页面可复用合同的 Linggan UI 组件、复合控件与展示单元
-> 事实来源: docs/design/design-governance.md、docs/agents/ui-execution-contract.md 与未来获准组件事项
+> 事实来源: docs/design/design-governance.md、docs/agents/ui-execution-contract.md、docs/design/lids/ 与未来获准组件事项
 > 冲突时以谁为准: 用户最新确认、产品语义、数据/权限合同、相关页面规格和当前 SCOPE；本模板不授予组件实现
 
 组件规格只在同一种界面责任需要稳定复用时创建。一次性的页面局部结构应留在页面规格中，不为了“设计系统完整”提前抽象。
@@ -12,6 +12,8 @@
 
 - 组件规格 ID：
 - 名称：
+- 生命周期：EXPERIMENTAL / PROPOSED / STABLE / DEPRECATED / REMOVED
+- LIDS 适用强度：L1 / L2 / L3
 - 关联 Issue / SCOPE：
 - 服务的界面责任：
 - 允许使用的页面：
@@ -29,6 +31,17 @@
 
 组件是展示与受控交互边界，不承载领域判断、权限升级、数据修复、任意请求、状态猜测或真实行动确认。
 
+### LIDS 状态与视觉契约
+
+| 项目 | 合同来源 | 空值/未知策略 | 组件不可替代成 |
+|---|---|---|---|
+| Truth | 待填写 | 待填写 | Coverage / Operation |
+| Coverage | 待填写 | 待填写 | Validity / Failed |
+| Validity | 待填写 | 待填写 | Coverage |
+| Freshness | 待填写 | 待填写 | 已完成/已失败 |
+| Operation | 待填写 | 待填写 | Truth / Coverage |
+| Token / Primitive | 待填写 | 不适用 | 硬编码或第二套样式 |
+
 ## 3. 组合与变体
 
 - 允许的组合方式：
@@ -44,6 +57,7 @@
 - 自动检查：
 - 视觉/交互走查：
 - 使用该组件仍不能证明什么：
+- Component Spec、预览与 LIDS migration log 是否同一事项同步：
 
 ## 5. 变更纪律
 

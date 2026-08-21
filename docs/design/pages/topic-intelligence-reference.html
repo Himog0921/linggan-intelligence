@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="linggan-intelligence">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="LIDS v2.0 Topic Intelligence L2 静态参考页。全部内容为合成示例，不是运行中的 Linggan 系统。"
+    />
+    <title>Topic Intelligence / 任务启动困难 · LIDS Synthetic Reference</title>
+    <style>
+      /*
+       * Exact, self-contained mirror of LIDS-TOK-001. This static reference
+       * cannot import a future runtime token file; its declarations and use
+       * are mechanically checked by verify-topic-intelligence-reference.sh.
+       */
+      :root {
+        --lgi-canvas: #ecebe6;
+        --lgi-canvas-hi: #f6f5f1;
+        --lgi-canvas-low: #deddd7;
+        --lgi-canvas-overlay: rgba(236, 235, 230, 0.92);
+        --lgi-canvas-glass: rgba(246, 245, 241, 0.86);
+        --lgi-ink: #121211;
+        --lgi-body: #2d2d2a;
+        --lgi-muted: #64635e;
+        --lgi-ghost: #8c8a84;
+        --lgi-on-dark: #faf9f5;
+        --lgi-signal: #ef4f25;
+        --lgi-signal-hover: #dd431e;
+        --lgi-signal-ink: #a73317;
+        --lgi-signal-soft: rgba(239, 79, 37, 0.12);
+        --lgi-signal-faint: rgba(239, 79, 37, 0.06);
+        --lgi-success: #4b6525;
+        --lgi-success-dot: #9fcb54;
+        --lgi-success-soft: rgba(159, 203, 84, 0.14);
+        --lgi-warning: #805500;
+        --lgi-warning-dot: #c18a1a;
+        --lgi-warning-soft: rgba(193, 138, 26, 0.14);
+        --lgi-danger: #9e2517;
+        --lgi-danger-soft: rgba(158, 37, 23, 0.10);
+        --lgi-info: #345a6f;
+        --lgi-info-soft: rgba(52, 90, 111, 0.10);
+        --lgi-hairline: rgba(18, 18, 17, 0.14);
+        --lgi-border: rgba(18, 18, 17, 0.20);
+        --lgi-border-strong: rgba(18, 18, 17, 0.28);
+        --lgi-border-solid: #121211;
+        --lgi-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+        --lgi-font-mono: "SFMono-Regular", "JetBrains Mono", "Roboto Mono", "Noto Sans Mono CJK SC", ui-monospace, monospace;
+        --lgi-text-display: clamp(3rem, 6vw, 5.5rem);
+        --lgi-text-hero: 3rem;
+        --lgi-text-page-title: 1.75rem;
+        --lgi-text-section: 1.125rem;
+        --lgi-text-longform: 1rem;
+        --lgi-text-body: 0.875rem;
+        --lgi-text-data: 0.75rem;
+        --lgi-text-label: 0.6875rem;
+        --lgi-text-calibration: 0.5625rem;
+        --lgi-weight-regular: 400;
+        --lgi-weight-medium: 500;
+        --lgi-weight-semibold: 600;
+        --lgi-weight-bold: 700;
+        --lgi-lh-display: 0.96;
+        --lgi-lh-title: 1.1;
+        --lgi-lh-heading: 1.25;
+        --lgi-lh-data: 1.4;
+        --lgi-lh-body: 1.55;
+        --lgi-lh-longform: 1.65;
+        --lgi-ls-tight: -0.04em;
+        --lgi-ls-normal: 0;
+        --lgi-ls-data: 0.04em;
+        --lgi-ls-caps: 0.12em;
+        --lgi-ls-calibration: 0.18em;
+        --lgi-space-1: 4px;
+        --lgi-space-2: 8px;
+        --lgi-space-3: 12px;
+        --lgi-space-4: 16px;
+        --lgi-space-5: 20px;
+        --lgi-space-6: 24px;
+        --lgi-space-8: 32px;
+        --lgi-space-10: 40px;
+        --lgi-space-12: 48px;
+        --lgi-space-16: 64px;
+        --lgi-space-24: 96px;
+        --lgi-radius-none: 0;
+        --lgi-radius-xs: 2px;
+        --lgi-radius-sm: 4px;
+        --lgi-radius-md: 8px;
+        --lgi-shadow-none: none;
+        --lgi-shadow-contact: 0 1px 2px rgba(18, 18, 17, 0.08);
+        --lgi-shadow-overlay: 0 12px 30px rgba(18, 18, 17, 0.12);
+        --lgi-shadow-stage: 0 24px 25px rgba(18, 18, 17, 0.055);
+        --lgi-shadow-hard: 8px 8px 0 rgba(18, 18, 17, 0.08);
+        --lgi-page-max-l3: 1720px;
+        --lgi-page-max-workbench: 1440px;
+        --lgi-header-height: 64px;
+        --lgi-header-height-compact: 58px;
+        --lgi-command-height: 76px;
+        --lgi-grid-major: 180px;
+        --lgi-grid-mobile: 120px;
+        --lgi-calibration-width: 27px;
+        --lgi-duration-press: 100ms;
+        --lgi-duration-state: 160ms;
+        --lgi-duration-overlay: 200ms;
+        --lgi-duration-panel: 240ms;
+        --lgi-duration-page: 280ms;
+        --lgi-duration-scene: 600ms;
+        --lgi-duration-ambient: 10s;
+        --lgi-ease-ui: cubic-bezier(0.2, 0.75, 0.2, 1);
+        --lgi-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+        --lgi-ease-linear: linear;
+        --lgi-z-base: 0;
+        --lgi-z-stage: 10;
+        --lgi-z-sticky: 30;
+        --lgi-z-header: 40;
+        --lgi-z-drawer: 80;
+        --lgi-z-overlay: 100;
+        --lgi-z-popover: 140;
+        --lgi-z-toast: 180;
+        --lgi-iso-axis-angle: 26.565deg;
+        --lgi-iso-layer-gap: 32px;
+        --lgi-iso-module-depth-sm: 12px;
+        --lgi-iso-module-depth-md: 22px;
+        --lgi-iso-module-depth-lg: 44px;
+        --lgi-scene-pixel-ratio-max: 1.75;
+      }
+
+      * { box-sizing: border-box; }
+
+      html { background: var(--lgi-canvas); }
+
+      body {
+        margin: 0;
+        overflow-x: hidden;
+        background:
+          linear-gradient(90deg, var(--lgi-hairline) 1px, transparent 1px) 0 0 / var(--lgi-grid-major) var(--lgi-grid-major),
+          linear-gradient(var(--lgi-hairline) 1px, transparent 1px) 0 0 / var(--lgi-grid-major) var(--lgi-grid-major),
+          var(--lgi-canvas);
+        color: var(--lgi-body);
+        font-family: var(--lgi-font-sans);
+        font-size: var(--lgi-text-body);
+        line-height: var(--lgi-lh-body);
+      }
+
+      button {
+        border: 0;
+        color: inherit;
+        cursor: pointer;
+        font: inherit;
+      }
+
+      button:focus-visible,
+      a:focus-visible {
+        outline: none;
+        box-shadow: 0 0 0 2px var(--lgi-canvas-hi), 0 0 0 4px var(--lgi-info);
+      }
+
+      .shell {
+        width: min(var(--lgi-page-max-workbench), calc(100% - var(--lgi-space-12)));
+        margin: 0 auto;
+        padding: var(--lgi-space-5) 0 var(--lgi-space-12);
+      }
+
+      .mono,
+      .eyebrow,
+      .boundary-tag,
+      .section-label,
+      .microcopy,
+      .window-button,
+      .intent-button,
+      .readout,
+      .footer {
+        font-family: var(--lgi-font-mono);
+        font-variant-numeric: tabular-nums slashed-zero;
+        letter-spacing: var(--lgi-ls-data);
+      }
+
+      .boundary-band {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr) auto;
+        gap: var(--lgi-space-3);
+        align-items: center;
+        padding: var(--lgi-space-3) var(--lgi-space-4);
+        border: 1px solid var(--lgi-border-solid);
+        background: var(--lgi-canvas-hi);
+      }
+
+      .boundary-band strong {
+        color: var(--lgi-signal-ink);
+        font-family: var(--lgi-font-mono);
+        font-size: var(--lgi-text-label);
+        letter-spacing: var(--lgi-ls-caps);
+        line-height: var(--lgi-lh-data);
+      }
+
+      .boundary-band span {
+        color: var(--lgi-muted);
+        font-family: var(--lgi-font-mono);
+        font-size: var(--lgi-text-data);
+        line-height: var(--lgi-lh-data);
+      }
+
+      .boundary-band span:last-child { text-align: right; }
+
+      .masthead {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 0.42fr);
+        gap: var(--lgi-space-10);
+        align-items: end;
+        padding: var(--lgi-space-12) 0 var(--lgi-space-8);
+        border-bottom: 2px solid var(--lgi-border-solid);
+      }
+
+      .eyebrow {
+        margin: 0 0 var(--lgi-space-3);
+        color: var(--lgi-signal-ink);
+        font-size: var(--lgi-text-label);
+        font-weight: var(--lgi-weight-semibold);
+        letter-spacing: var(--lgi-ls-caps);
+        line-height: var(--lgi-lh-data);
+      }
+
+      h1, h2, h3, p { margin-top: 0; }
+
+      h1 {
+        margin-bottom: var(--lgi-space-3);
+        color: var(--lgi-ink);
+        font-size: var(--lgi-text-page-title);
+        font-weight: var(--lgi-weight-semibold);
+        letter-spacing: var(--lgi-ls-tight);
+        line-height: var(--lgi-lh-title);
+      }
+
+      .thesis {
+        max-width: 58ch;
+        margin-bottom: 0;
+        color: var(--lgi-body);
+        font-size: var(--lgi-text-longform);
+        line-height: var(--lgi-lh-longform);
+      }
+
+      .object-readout {
+        display: grid;
+        gap: var(--lgi-space-2);
+        padding: var(--lgi-space-4);
+        border-left: 3px solid var(--lgi-signal);
+        background: var(--lgi-canvas-hi);
+      }
+
+      .readout {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: var(--lgi-space-3);
+        padding-bottom: var(--lgi-space-2);
+        border-bottom: 1px solid var(--lgi-hairline);
+        color: var(--lgi-muted);
+        font-size: var(--lgi-text-data);
+        line-height: var(--lgi-lh-data);
+      }
+
+      .readout:last-child { padding-bottom: 0; border-bottom: 0; }
+      .readout b { color: var(--lgi-ink); font-weight: var(--lgi-weight-semibold); text-align: right; }
+
+      .stage {
+        display: grid;
+        grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.72fr) minmax(0, 0.84fr);
+        gap: var(--lgi-space-6);
+        margin-top: var(--lgi-space-6);
+      }
+
+      .rail,
+      .center,
+      .panel,
+      .observation,
+      .voice,
+      .narratives,
+      .candidate,
+      .boundary,
+      .intent { min-width: 0; }
+
+      .panel,
+      .observation,
+      .voice,
+      .narratives,
+      .candidate,
+      .boundary,
+      .intent {
+        border: 1px solid var(--lgi-border);
+        background: var(--lgi-canvas-hi);
+      }
+
+      .panel { margin-bottom: var(--lgi-space-6); padding: var(--lgi-space-4); }
+      .panel--rail { border-left: 3px solid var(--lgi-signal); }
+      .panel--warning { border-left: 3px solid var(--lgi-warning); }
+
+      .section-label {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--lgi-space-2);
+        margin-bottom: var(--lgi-space-3);
+        color: var(--lgi-muted);
+        font-size: var(--lgi-text-label);
+        font-weight: var(--lgi-weight-semibold);
+        letter-spacing: var(--lgi-ls-caps);
+        line-height: var(--lgi-lh-data);
+      }
+
+      .section-label b { color: var(--lgi-ink); font-weight: var(--lgi-weight-semibold); }
+      .section-label .signal { color: var(--lgi-signal-ink); }
+      .section-label .warning { color: var(--lgi-warning); }
+
+      .window-controls { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--lgi-space-2); }
+
+      .window-button {
+        min-height: var(--lgi-space-10);
+        padding: var(--lgi-space-2) var(--lgi-space-3);
+        border: 1px solid var(--lgi-border-strong);
+        border-radius: var(--lgi-radius-sm);
+        background: var(--lgi-canvas-hi);
+        color: var(--lgi-body);
+        font-size: var(--lgi-text-data);
+        line-height: var(--lgi-lh-data);
+        text-align: left;
+        transition: background-color var(--lgi-duration-state) var(--lgi-ease-ui), border-color var(--lgi-duration-state) var(--lgi-ease-ui), color var(--lgi-duration-state) var(--lgi-ease-ui), transform var(--lgi-duration-press) var(--lgi-ease-ui);
+      }
+
+      .window-button:hover { background: var(--lgi-canvas-low); }
+      .window-button:active { transform: scale(0.98); }
+      .window-button[aria-pressed="true"] { border-color: var(--lgi-signal); background: var(--lgi-signal-soft); color: var(--lgi-signal-ink); font-weight: var(--lgi-weight-bold); }
+
+      .microcopy { margin: var(--lgi-space-3) 0 0; color: var(--lgi-muted); font-size: var(--lgi-text-data); line-height: var(--lgi-lh-body); }
+
+      .fingerprint {
+        margin: 0;
+        color: var(--lgi-muted);
+        font-family: var(--lgi-font-mono);
+        font-size: var(--lgi-text-data);
+        line-height: var(--lgi-lh-body);
+        white-space: pre-wrap;
+      }
+
+      .observation {
+        padding: clamp(var(--lgi-space-6), 4vw, var(--lgi-space-12));
+        border-top: 3px solid var(--lgi-ink);
+      }
+
+      .observation h2 {
+        max-width: 17ch;
+        margin-bottom: var(--lgi-space-4);
+        color: var(--lgi-ink);
+        font-size: var(--lgi-text-page-title);
+        font-weight: var(--lgi-weight-semibold);
+        letter-spacing: var(--lgi-ls-tight);
+        line-height: var(--lgi-lh-title);
+      }
+
+      .observation p:last-of-type { max-width: 58ch; margin-bottom: 0; color: var(--lgi-body); font-size: var(--lgi-text-longform); line-height: var(--lgi-lh-longform); }
+
+      .boundary-tags { display: flex; flex-wrap: wrap; gap: var(--lgi-space-2); margin-top: var(--lgi-space-6); }
+
+      .boundary-tag {
+        padding: var(--lgi-space-1) var(--lgi-space-2);
+        border: 1px solid var(--lgi-border-strong);
+        border-radius: var(--lgi-radius-xs);
+        color: var(--lgi-body);
+        font-size: var(--lgi-text-label);
+        line-height: var(--lgi-lh-data);
+      }
+
+      .boundary-tag--signal { border-color: var(--lgi-signal); color: var(--lgi-signal-ink); }
+      .boundary-tag--warning { border-color: var(--lgi-warning); color: var(--lgi-warning); }
+
+      .voice,
+      .narratives,
+      .candidate,
+      .boundary { margin-top: var(--lgi-space-6); padding: var(--lgi-space-5); }
+
+      .voice-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--lgi-space-3); }
+
+      .quote-card {
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: var(--lgi-space-4);
+        border: 1px solid var(--lgi-hairline);
+        border-top: 3px solid var(--lgi-ink);
+        background: var(--lgi-canvas);
+      }
+
+      .quote-boundary {
+        margin: 0 0 var(--lgi-space-4);
+        color: var(--lgi-danger);
+        font-family: var(--lgi-font-mono);
+        font-size: var(--lgi-text-label);
+        font-weight: var(--lgi-weight-semibold);
+        letter-spacing: var(--lgi-ls-caps);
+        line-height: var(--lgi-lh-data);
+      }
+
+      .quote-card blockquote { margin: 0 0 var(--lgi-space-4); color: var(--lgi-ink); font-size: var(--lgi-text-longform); line-height: var(--lgi-lh-longform); }
+
+      .quote-button {
+        align-self: flex-start;
+        min-height: var(--lgi-space-6);
+        padding: 0;
+        background: transparent;
+        color: var(--lgi-info);
+        font-family: var(--lgi-font-mono);
+        font-size: var(--lgi-text-data);
+        line-height: var(--lgi-lh-data);
+        text-align: left;
+        text-decoration: underline;
+        text-underline-offset: 4px;
+      }
+
+      .quote-detail { margin-top: var(--lgi-space-3); padding: var(--lgi-space-3); border-left: 3px solid var(--lgi-warning); background: var(--lgi-warning-soft); color: var(--lgi-body); }
+      .quote-detail[hidden] { display: none; }
+      .quote-detail strong { color: var(--lgi-ink); }
+
+      .narrative-list { display: grid; gap: 0; border-top: 1px solid var(--lgi-hairline); }
+
+      .narrative-item {
+        display: grid;
+        grid-template-columns: var(--lgi-space-10) minmax(0, 1fr) minmax(0, 0.55fr);
+        gap: var(--lgi-space-3);
+        align-items: start;
+        padding: var(--lgi-space-3) 0;
+        border-bottom: 1px solid var(--lgi-hairline);
+      }
+
+      .narrative-item > span:first-child { color: var(--lgi-signal-ink); font-family: var(--lgi-font-mono); font-size: var(--lgi-text-data); line-height: var(--lgi-lh-data); }
+      .narrative-item h3 { margin: 0 0 var(--lgi-space-1); color: var(--lgi-ink); font-size: var(--lgi-text-longform); line-height: var(--lgi-lh-heading); }
+      .narrative-item p { margin: 0; color: var(--lgi-body); }
+      .narrative-item .meta { color: var(--lgi-muted); font-family: var(--lgi-font-mono); font-size: var(--lgi-text-label); line-height: var(--lgi-lh-data); text-align: right; }
+
+      .candidate { border-left: 3px solid var(--lgi-signal); }
+      .boundary { border-left: 3px solid var(--lgi-warning); background: var(--lgi-warning-soft); }
+      .candidate h3, .boundary h3, .intent h3 { margin-bottom: var(--lgi-space-2); color: var(--lgi-ink); font-size: var(--lgi-text-section); line-height: var(--lgi-lh-heading); }
+      .candidate p, .boundary p, .intent p { margin-bottom: 0; color: var(--lgi-body); }
+
+      .intent { margin-top: var(--lgi-space-6); padding: var(--lgi-space-4); border: 1px solid var(--lgi-border-solid); background: var(--lgi-ink); color: var(--lgi-on-dark); }
+      .intent .section-label { color: var(--lgi-on-dark); }
+      .intent .section-label b { color: var(--lgi-on-dark); }
+      .intent .section-label .signal { color: var(--lgi-signal); }
+      .intent h3 { color: var(--lgi-on-dark); }
+      .intent p { color: var(--lgi-canvas-low); }
+
+      .intent-buttons { display: grid; gap: var(--lgi-space-2); margin: var(--lgi-space-4) 0 var(--lgi-space-3); }
+
+      .intent-button {
+        min-height: 36px;
+        padding: var(--lgi-space-2) var(--lgi-space-3);
+        border: 1px solid var(--lgi-canvas-low);
+        border-radius: var(--lgi-radius-sm);
+        background: transparent;
+        color: var(--lgi-on-dark);
+        font-size: var(--lgi-text-data);
+        line-height: var(--lgi-lh-data);
+        text-align: left;
+        transition: background-color var(--lgi-duration-state) var(--lgi-ease-ui), border-color var(--lgi-duration-state) var(--lgi-ease-ui), color var(--lgi-duration-state) var(--lgi-ease-ui), transform var(--lgi-duration-press) var(--lgi-ease-ui);
+      }
+
+      .intent-button:hover { border-color: var(--lgi-signal); color: var(--lgi-signal); }
+      .intent-button:active { transform: scale(0.98); }
+      .intent-button[aria-pressed="true"] { border-color: var(--lgi-signal); background: var(--lgi-signal); color: var(--lgi-ink); font-weight: var(--lgi-weight-bold); }
+
+      .intent-result { min-height: calc(var(--lgi-space-12) + var(--lgi-space-2)); color: var(--lgi-canvas-low); font-family: var(--lgi-font-mono); font-size: var(--lgi-text-data); line-height: var(--lgi-lh-body); }
+
+      .footer {
+        display: flex;
+        justify-content: space-between;
+        gap: var(--lgi-space-4);
+        margin-top: var(--lgi-space-8);
+        padding-top: var(--lgi-space-4);
+        border-top: 1px solid var(--lgi-border);
+        color: var(--lgi-muted);
+        font-size: var(--lgi-text-label);
+        line-height: var(--lgi-lh-data);
+      }
+
+      @media (max-width: 1280px) {
+        .stage { grid-template-columns: minmax(0, 1fr) minmax(0, 0.52fr); }
+        .rail--left { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--lgi-space-6); }
+        .rail--left .panel { margin-bottom: 0; }
+        .center { grid-column: 1 / 2; }
+        .rail--right { grid-column: 2; grid-row: 1 / span 2; }
+      }
+
+      @media (max-width: 820px) {
+        .shell { width: min(calc(100% - var(--lgi-space-8)), var(--lgi-page-max-workbench)); padding-top: var(--lgi-space-3); }
+        .boundary-band { grid-template-columns: 1fr; gap: var(--lgi-space-1); }
+        .boundary-band span:last-child { text-align: left; }
+        .masthead { grid-template-columns: 1fr; gap: var(--lgi-space-6); padding: var(--lgi-space-8) 0 var(--lgi-space-6); }
+        .stage { display: flex; flex-direction: column; }
+        .rail--left, .rail--right { display: contents; }
+        .rail--left .panel { margin-bottom: 0; }
+        .voice-grid { grid-template-columns: 1fr; }
+        .quote-card { min-height: 0; }
+        .narrative-item { grid-template-columns: var(--lgi-space-8) minmax(0, 1fr); }
+        .narrative-item .meta { grid-column: 2; text-align: left; }
+        .footer { flex-direction: column; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+      }
+    </style>
+  </head>
+  <body data-reference-mode="synthetic" data-state="source-incomplete">
+    <main class="shell" aria-labelledby="page-title">
+      <section class="boundary-band" aria-label="参考页模式和事实边界">
+        <strong>SYNTHETIC / NOT LIVE</strong>
+        <span>DESIGN-002 · L2 静态参考实现 · 只走查视觉、信息与本地互动</span>
+        <span>不读取 / 不写入 / 不创建真实记录</span>
+      </section>
+
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">LINGGAN INTELLIGENCE / TOPIC DETAIL / L2 REFERENCE</p>
+          <h1 id="page-title">任务启动困难</h1>
+          <p class="thesis">在明确的样本范围与限制下，读懂示例表达怎样被组织；它不把合成样本、候选解释或界面演示伪装成系统已经得出的结论。</p>
+        </div>
+        <aside class="object-readout" aria-label="Topic 身份与范围">
+          <div class="readout"><span>MODE</span><b>SYNTHETIC_REFERENCE</b></div>
+          <div class="readout"><span>QUALIFICATION</span><b>SOURCE_INCOMPLETE</b></div>
+          <div class="readout"><span>TASK</span><b>READ / LOCAL INTENT</b></div>
+          <div class="readout"><span>NOT CLAIMED</span><b>NO TREND / NO COVERAGE</b></div>
+        </aside>
+      </header>
+
+      <div class="stage">
+        <aside class="rail rail--left" aria-label="样本范围和阅读协议">
+          <section class="panel panel--rail">
+            <p class="section-label"><span>01 / DEMO WINDOW</span><span class="signal">NOT QUERY</span></p>
+            <div class="window-controls" aria-label="切换合成样本阅读窗口">
+              <button class="window-button" type="button" data-window="7" aria-pressed="false">07D<br /><small>合成片段</small></button>
+              <button class="window-button" type="button" data-window="30" aria-pressed="true">30D<br /><small>合成片段</small></button>
+            </div>
+            <p class="microcopy">切换只改变本地示例文案；不是查询、趋势计算或真实数据刷新。</p>
+          </section>
+
+          <section class="panel panel--warning">
+            <p class="section-label"><span>READING PROTOCOL</span><span class="warning">NO SCORE</span></p>
+            <pre class="fingerprint" aria-hidden="true">[ SAMPLE ]
+    │
+    ├─ OBSERVATION
+    ├─ RAW-VOICE STYLE
+    ├─ CANDIDATE
+    └─ UNKNOWN</pre>
+            <p class="microcopy">ASCII 只标识阅读顺序；没有总置信度、趋势图、运行日志或“正在分析”。</p>
+          </section>
+        </aside>
+
+        <section class="center" aria-label="Topic 合成样本观察">
+          <section class="observation" aria-labelledby="observation-title">
+            <p class="section-label"><span>02 / LIMITED SAMPLE</span><span class="signal" id="window-label">30D · SYNTHETIC</span></p>
+            <h2 id="observation-title">样本里的共同点，不是市场趋势。</h2>
+            <p id="observation-copy">在这组完全合成的例示里，“知道该开始但迟迟无法启动”的描述，与作业、家庭冲突和自我责备并列出现。它只说明如何组织阅读，不说明真实人群正在增加、减少或普遍存在。</p>
+            <div class="boundary-tags" aria-label="当前样本边界">
+              <span class="boundary-tag boundary-tag--signal">SAMPLE / FICTIONAL</span>
+              <span class="boundary-tag">TIME / <span id="window-token">30D</span></span>
+              <span class="boundary-tag boundary-tag--warning">NO TREND CLAIM</span>
+              <span class="boundary-tag boundary-tag--warning">NOT A STATUS TAG</span>
+            </div>
+          </section>
+
+          <section class="voice" aria-labelledby="voice-title">
+            <p class="section-label"><span id="voice-title">03 / USER-VOICE STYLE</span><span>SYNTHETIC ONLY</span></p>
+            <div class="voice-grid">
+              <article class="quote-card">
+                <p class="quote-boundary">SYNTHETIC / NOT EVIDENCE</p>
+                <blockquote>“不是不会做，最难的是把第一步真的开始。”</blockquote>
+                <button type="button" class="quote-button" data-quote="one" aria-expanded="false" aria-controls="quote-detail-one">查看这个示例不能证明什么 ↗</button>
+                <div class="quote-detail" id="quote-detail-one" hidden><strong>合成示例，不是 Evidence。</strong>没有来源、时间、上下文、权限或资格；只用于检查原声样式和边界是否可读。</div>
+              </article>
+              <article class="quote-card">
+                <p class="quote-boundary">SYNTHETIC / NOT EVIDENCE</p>
+                <blockquote>“坐在书桌前很久，越拖越觉得自己又失败了。”</blockquote>
+                <button type="button" class="quote-button" data-quote="two" aria-expanded="false" aria-controls="quote-detail-two">查看这个示例不能证明什么 ↗</button>
+                <div class="quote-detail" id="quote-detail-two" hidden><strong>合成示例，不是 Evidence。</strong>它不是脱敏原文，不能证明有人真实表达、频率、代表性或变化。</div>
+              </article>
+              <article class="quote-card">
+                <p class="quote-boundary">SYNTHETIC / NOT EVIDENCE</p>
+                <blockquote>“提醒越多，开始这件事反而变成一次冲突。”</blockquote>
+                <button type="button" class="quote-button" data-quote="three" aria-expanded="false" aria-controls="quote-detail-three">查看这个示例不能证明什么 ↗</button>
+                <div class="quote-detail" id="quote-detail-three" hidden><strong>合成示例，不是 Evidence。</strong>它只暴露一个待核验方向，不能形成因果、分类、趋势或正式 Claim。</div>
+              </article>
+            </div>
+          </section>
+
+          <section class="narratives" aria-labelledby="narrative-title">
+            <p class="section-label"><span id="narrative-title">04 / HOW CONTENT TALKS</span><span>EXAMPLE CLUSTERS</span></p>
+            <div class="narrative-list">
+              <article class="narrative-item"><span>01</span><div><h3>家长求助</h3><p>“如何让第一步小到能发生”是示例里的提问方式，不是需求规模结论。</p></div><span class="meta">SYNTHETIC<br />NARRATIVE</span></article>
+              <article class="narrative-item"><span>02</span><div><h3>方法分享</h3><p>拆任务、陪伴启动、外部提示只是不同示例说法，不比较有效性。</p></div><span class="meta">NO OUTCOME<br />CLAIM</span></article>
+              <article class="narrative-item"><span>03</span><div><h3>冲突记录</h3><p>提醒、拖延和自责被并列呈现，用来暴露后续需要核验的关系。</p></div><span class="meta">NOT A<br />CLASSIFIER</span></article>
+            </div>
+          </section>
+        </section>
+
+        <aside class="rail rail--right" aria-label="候选解释、来源边界与本地意图">
+          <section class="candidate">
+            <p class="section-label"><span>05 / CANDIDATE</span><span class="signal">NOT A CLAIM</span></p>
+            <h3>“第一步”也许比“完成任务”更值得单独研究。</h3>
+            <p>这只是由页面示例提出的后续问题：需要什么真实、可追溯材料，才能判断启动阻滞在不同场景里的异同？它不是已成立解释。</p>
+          </section>
+
+          <section class="boundary">
+            <p class="section-label"><span>06 / UNKNOWN</span><span class="warning">SOURCE_INCOMPLETE</span></p>
+            <h3>现在不能知道什么？</h3>
+            <p>没有真实来源、可比采集面、Coverage、分析版本或权限合同。因此不能说近期上升/下降、不能说有多少人、不能说这些叙事代表谁，也不能产生正式系统判断。</p>
+          </section>
+
+          <section class="intent" aria-labelledby="intent-title">
+            <p class="section-label"><span id="intent-title">07 / NEXT INTENT</span><span class="signal">LOCAL ONLY</span></p>
+            <h3>看完后，你想怎样放置这个问题？</h3>
+            <div class="intent-buttons" aria-label="演示下一步意图">
+              <button class="intent-button" type="button" data-intent="继续探索" aria-pressed="false">→ 继续探索</button>
+              <button class="intent-button" type="button" data-intent="暂时搁置" aria-pressed="false">→ 暂时搁置</button>
+            </div>
+            <p class="intent-result" id="intent-result" aria-live="polite">尚未选择。本参考页不会创建真实研究、决定、行动、通知或待办。</p>
+          </section>
+        </aside>
+      </div>
+
+      <footer class="footer">
+        <span>PAGE-TOPIC-001 · LIDS-SYS-001 · LIDS-PAT-001 · PAT-001…004</span>
+        <span>LOCAL REFERENCE ONLY · NO LIVE EVIDENCE · NO REAL RECEIPT</span>
+      </footer>
+    </main>
+
+    <script>
+      const sampleWindows = {
+        7: {
+          label: "07D · SYNTHETIC",
+          copy: "在这组完全合成的短窗口例示里，几种“想做却跨不过第一步”的说法并列出现。它只演示短窗口的信息密度，不能与任何其它窗口比较，也不能构成变化判断。"
+        },
+        30: {
+          label: "30D · SYNTHETIC",
+          copy: "在这组完全合成的例示里，“知道该开始但迟迟无法启动”的描述，与作业、家庭冲突和自我责备并列出现。它只说明如何组织阅读，不说明真实人群正在增加、减少或普遍存在。"
+        }
+      };
+
+      const windowButtons = document.querySelectorAll("[data-window]");
+      const windowLabel = document.querySelector("#window-label");
+      const windowToken = document.querySelector("#window-token");
+      const observationCopy = document.querySelector("#observation-copy");
+
+      windowButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const value = button.dataset.window;
+          const sample = sampleWindows[value];
+          windowButtons.forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+          windowLabel.textContent = sample.label;
+          windowToken.textContent = `${value}D`;
+          observationCopy.textContent = sample.copy;
+        });
+      });
+
+      document.querySelectorAll(".quote-button").forEach((button) => {
+        button.addEventListener("click", () => {
+          const detail = document.querySelector(`#${button.getAttribute("aria-controls")}`);
+          const shouldOpen = detail.hidden;
+          detail.hidden = !shouldOpen;
+          button.setAttribute("aria-expanded", String(shouldOpen));
+        });
+      });
+
+      const intentButtons = document.querySelectorAll("[data-intent]");
+      const intentResult = document.querySelector("#intent-result");
+      intentButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const intent = button.dataset.intent;
+          intentButtons.forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+          intentResult.textContent = `LOCAL_INTENT_ONLY / 已选择“${intent}”。未创建真实记录、研究、决定、行动、通知或待办。`;
+        });
+      });
+    </script>
+  </body>
+</html>

@@ -3,12 +3,12 @@
 > 状态: 权威当前
 > 最后核对: 2026-08-21
 > 适用范围: Linggan Intelligence 未来用户可见 Web UI 的设计规则、页面/组件规格、协作入口与验收追踪
-> 事实来源: 用户对 DESIGN-001 的明确授权、AGENTS.md、docs/governance/、docs/agents/ui-execution-contract.md、已确认产品边界与当前文件树
+> 事实来源: 用户对 DESIGN-001 / DESIGN-002 的明确授权、AGENTS.md、docs/governance/、docs/agents/ui-execution-contract.md、已确认产品边界与当前文件树
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策与当前 SCOPE；本手册不覆盖这些来源
 
 本目录是未来 UI 工作的唯一设计入口。它的作用不是替产品决定页面要做什么，也不是把一组视觉偏好变成无需验证的实现命令；它把已经获准的界面规则、它们的来源、适用范围、验收方式和未决空白整理成 Agent 可以执行与复核的合同。
 
-当前已建立的是设计治理骨架，尚未建立任何具体视觉标准、页面视觉规格、组件规格或前端实现授权。
+当前已有三层内容：DESIGN-001 建立设计治理骨架；Mog 指定的 LIDS v2.0 已吸收为全项目唯一设计表达标准；DESIGN-002 用一个明确标为合成、非运行时的 Topic Reference Page 验证 LIDS 的 L2 局部表达、事实边界和组件晋升门。它们不构成通用 Web 技术选型、真实数据合同或完整前端实现授权。
 
 ## 固定读取路径
 
@@ -17,9 +17,10 @@
 1. 根目录 AGENTS.md、docs/README.md 与 docs/current-state.md；
 2. docs/agents/ui-execution-contract.md；
 3. 对应的产品页面文档；它回答用户任务、事实含义、权限、状态与行动后果；
-4. 本目录中状态为“权威当前”的相关基础规则、模式、组件或页面规格；
-5. 已确认的数据合同、当前 SCOPE、真实代码或测试；只有要核对实际事实时才读取；
-6. 明确登记的设计参考。参考只能辅助提出候选，不能覆盖前五层。
+4. [lids/README.md](lids/README.md)，再进入与事项直接相关的 Token、Primitive、Pattern、Agent guide 或原型审计；
+5. 本目录中状态为“权威当前”的相关基础规则、模式、组件或页面规格；
+6. 已确认的数据合同、当前 SCOPE、真实代码或测试；只有要核对实际事实时才读取；
+7. 明确登记的设计参考。参考只能辅助提出候选，不能覆盖前六层。
 
 如果第 3–5 层没有给出足以实施的答案，必须停止并记录 DECISION_REQUIRED。不得用截图、旧项目、通用设计惯例、模型偏好或“页面看起来更完整”补齐缺口。
 
@@ -42,21 +43,35 @@
 | [design-governance.md](design-governance.md) | 来源优先级、闭集执行、变更分类、例外、追踪与验收规则 | 权威当前 |
 | [reference-register.md](reference-register.md) | 设计参考登记与引用边界 | 权威当前 |
 | [../agents/ui-execution-contract.md](../agents/ui-execution-contract.md) | UI 协作 Agent 的强制工作合同 | 权威当前 |
+| [lids/README.md](lids/README.md) | LIDS v2.0 的项目内入口、来源回执、权威边界和成熟度 | 权威当前；标准成熟度 Proposed |
+| [lids/system.md](lids/system.md) | LIDS-SYS-001：五层架构、L1/L2/L3、数据真实性、动效、场景、a11y 与治理 | 权威当前 |
+| [lids/tokens.md](lids/tokens.md) | LIDS-TOK-001：完整 `--lgi-*` 数值基线与唯一数值来源规则 | 权威当前 |
+| [lids/primitives.md](lids/primitives.md) | LIDS-PRI-001：文本、按钮、状态、Surface、Readout、反馈和 Focus 契约 | 权威当前 |
+| [lids/patterns.md](lids/patterns.md) | LIDS-PAT-001：L1/L2/L3 的唯一页面 Pattern 与组合限制 | 权威当前 |
+| [lids/agent-execution-guide.md](lids/agent-execution-guide.md) | LIDS-AGENT-001：协作 Agent 决策树与交付前检查 | 权威当前 |
+| [lids/prototype-audit.md](lids/prototype-audit.md) | LIDS-AUD-001：V3 视觉母题的接纳、删除与技术/数据非授权边界 | 权威当前 |
+| [lids/migration-log.md](lids/migration-log.md) | LIDS-LOG-001：规则/实现/例外的迁移与验证记录 | 权威当前 |
 | [templates/page-spec-form.md](templates/page-spec-form.md) | 首个获准页面切片的规格表单 | 权威当前 |
 | [templates/component-spec-form.md](templates/component-spec-form.md) | 首个真实复用组件的规格表单 | 权威当前 |
 | [templates/ui-change-manifest-form.md](templates/ui-change-manifest-form.md) | 实施前的最小来源与影响清单 | 权威当前 |
 | [templates/visual-acceptance-form.md](templates/visual-acceptance-form.md) | 设计、状态、任务和真实后果的验收记录 | 权威当前 |
+| [foundation/topic-intelligence-visual-language.md](foundation/topic-intelligence-visual-language.md) | DS-REF-TOPIC-001：Topic 合成参考页怎样采用 LIDS，并加固合成/非 Evidence 边界 | 权威当前 |
+| [patterns/evidence-candidate-and-boundary-patterns.md](patterns/evidence-candidate-and-boundary-patterns.md) | PAT-001–PAT-004：观察、候选、来源限制与无副作用意图的表达模式 | 权威当前 |
+| [components/component-promotion.md](components/component-promotion.md) | Reference Page 局部块如何经第二页面验证后才可晋升为 CMP | 权威当前 |
+| [pages/topic-intelligence-reference-page.md](pages/topic-intelligence-reference-page.md) | PAGE-TOPIC-001：Topic Reference Page 的获准组合、状态与验收 | 权威当前 |
+| [pages/topic-intelligence-reference.html](pages/topic-intelligence-reference.html) | 可本地打开的合成静态参考实现；不读取、写入或声称真实系统事实 | 权威当前 |
+| [pages/topic-intelligence-reference-acceptance.md](pages/topic-intelligence-reference-acceptance.md) | ACC-TOPIC-001：静态视觉、互动和证明边界的实际验收记录 | 权威当前 |
 
 ## 未来按需扩展的书架
 
-以下目录现在不存在，且不得为了“看起来完整”预先创建。它们只在出现第一个已获批准、确有内容的对应规格时建立，并在本表登记。
+以下书架只在出现第一个已获批准、确有内容的对应规格时建立。DESIGN-002 已创建四个书架；这不等于它们已经拥有完整组件库或全局设计系统。
 
 | 未来位置 | 创建触发条件 | 内容边界 |
 |---|---|---|
-| foundation/ | 首个跨页面的基础界面规则获得明确来源和验收方式 | 只放跨页面规则，不放某一页面的临时决定 |
-| patterns/ | 至少两个已获准页面需要同一种可复用交互/信息组织方式 | 只放经过实际页面验证的模式 |
-| components/ | 首个真实可复用组件需要跨页面一致合同 | 每个组件一份规格，不能成为业务规则容器 |
-| pages/ | 一个首期页面已获得产品原型/当前 SCOPE 的实施授权 | 只说明该页面如何组合既有规则，不复制产品语义 |
+| foundation/ | 已建立：DESIGN-002 有明确来源、范围和验收的 DS-001–DS-007 | 只放跨页面可采纳规则，不放某一页面的临时实现细节 |
+| patterns/ | 已建立：DESIGN-002 的 PAT-001–PAT-004 可被明确采纳 | 只放稳定的表达责任，不放无来源的“通用 UI 习惯” |
+| components/ | 已建立：组件晋升门槛；没有实际 CMP | 不得把 page-local candidate 当成公共组件或业务规则容器 |
+| pages/ | 已建立：PAGE-TOPIC-001 是合成参考页的组合规格 | 只说明页面如何组合既有规则，不复制产品语义 |
 
 ## 版本、状态与替代
 
@@ -68,6 +83,6 @@
 
 ## 当前未获授权的事项
 
-DESIGN-001 不确定也不决定颜色、字体、字号、间距、阴影、断点、动效、页面布局、组件外观、前端技术路径或任何页面实现。它同样不把现有页面草案、首页形态、架构图、旧工作台或外部产品转化为实现许可。
+LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed。DESIGN-002 只在 Topic 合成参考页的边界内验证 L2 采用记录、PAT-001–PAT-004 和 PAGE-TOPIC-001。它不证明或决定完整组件库、字体资产、前端技术路径、真实数据字段、权限/行动合同、完整 P0 或任何生产页面实现。它同样不把现有页面草案、首页形态、架构图、旧工作台或外部产品转化为实现许可。
 
 当首个 UI 切片进入明确的产品原型和 SCOPE 后，先创建最小的页面规格以及它实际依赖的基础/模式/组件规则，再开始编码。

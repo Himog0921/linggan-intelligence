@@ -106,6 +106,9 @@ Decision owner: 产品团队制作，Mog 走查确认
 
 ### Answer
 
+Mog 已批准一个有界的 DESIGN-002 输入：以「任务启动困难」为例，制作 `SYNTHETIC / NOT LIVE` 的 Topic Intelligence Reference Page，用来走查 Topic 深入时的单一判断任务、LIDS v2.0 设计表达、状态诚实与组件晋升门。LIDS 统一约束未来 UI 的 Token → Primitive → Component → Pattern → Page，但仍为 Proposed 标准，不声明任何运行时页面/组件已经存在。该交付物见 [`design-002-topic-intelligence-reference-page.md`](design-002-topic-intelligence-reference-page.md) 及其引用规格。
+
+这不是本票的完整答案：它不决定完整 P0 有几个一级入口/详情工作区，不选择运行时前端技术方案，不接入真实脱敏样本，也不授权任何真实 Web、数据、权限或行动。完成后只能作为本票的走查输入，不能把 `p0-surface-prototype` 标为 resolved。
 
 Asset target: `docs/product/first-phase-interface-prototype.md`
 

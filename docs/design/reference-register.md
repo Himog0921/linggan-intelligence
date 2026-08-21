@@ -3,14 +3,16 @@
 > 状态: 权威当前
 > 最后核对: 2026-08-21
 > 适用范围: Linggan Intelligence UI 设计工作中引用的旧系统、外部产品、截图、品牌材料和原型
-> 事实来源: DESIGN-001 授权、AGENTS.md、docs/design/design-governance.md、当前 references/ 边界
+> 事实来源: DESIGN-001 / DESIGN-002 授权、AGENTS.md、docs/design/design-governance.md、当前 references/ 边界
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、已接受的产品/设计决定和当前 SCOPE；参考资料永不覆盖这些来源
 
 本表的目的是让“我看过一个不错的界面”变成可审查的参考记录，而不是隐性需求。它不保存截图或素材，也不将任何历史项目、原型或外部产品自动变成 Linggan 的产品指令。
 
 ## 当前登记结论
 
-DESIGN-001 不选择视觉风格，也不登记具体视觉标准。当前没有可供直接实现的设计参考条目。
+Mog 于 2026-08-21 明确指定的 LIDS v2.0 已通过 [lids/README.md](lids/README.md) 吸收为项目的**设计表达标准**，因此不是普通外部参考条目。它的来源校验、可继承范围和不继承范围都在 LIDS 入口中冻结：可继承 Token、Primitive、Pattern、状态表达和 Agent 治理；不可继承任何产品事实、模拟数据、V3 原型、技术栈、资产或运行状态。
+
+DESIGN-002 原先的“未来感 + ASCII + 新粗野主义 + 情报系统感”已被 LIDS 收敛为“暖灰纸面上的精密情报基础设施”。ASCII 保留为机器语义，不再是可自由扩散的视觉风格。除 LIDS 外，当前仍没有可供直接实现的外部产品、旧系统、截图或品牌材料条目。
 
 仓库内的 references/ 是历史证据区；现有页面与架构草案是产品/架构候选。两者可以在未来按具体事项被核对，但均不能单独授权 UI 实现。
 
