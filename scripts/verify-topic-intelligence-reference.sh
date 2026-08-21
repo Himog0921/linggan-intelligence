@@ -62,6 +62,7 @@ for path in \
 done
 
 html="docs/design/pages/topic-intelligence-reference.html"
+token_baseline="docs/design/lids/tokens.md"
 if [[ -f "$html" ]]; then
   for token in \
     'data-reference-mode="synthetic"' \
@@ -91,6 +92,21 @@ if [[ -f "$html" ]]; then
       report_error "static reference page is missing required LIDS marker: $token"
     fi
   done
+
+  if [[ ! -f "$token_baseline" ]]; then
+    report_error "missing canonical LIDS token baseline: $token_baseline"
+  else
+    while IFS= read -r declaration; do
+      declaration="${declaration#"${declaration%%[![:space:]]*}"}"
+      if ! grep -Fq -- "$declaration" "$html"; then
+        report_error "static reference token mirror is missing or drifted: $declaration"
+      fi
+    done < <(rg '^  --lgi-' "$token_baseline")
+  fi
+
+  if rg -n 'font-size:|font-weight:|line-height:|letter-spacing:' "$html" | rg -v 'var\(--lgi-' >/dev/null; then
+    report_error "static reference page must consume LIDS typography tokens rather than direct values"
+  fi
 
   quote_boundary_count="$(grep -Foc 'SYNTHETIC / NOT EVIDENCE' "$html" || true)"
   if [[ "$quote_boundary_count" -lt 3 ]]; then

@@ -37,7 +37,7 @@ git diff --check
 ./scripts/check-project-governance.sh origin/main
 ```
 
-Topic 专项检查现额外验证：LIDS 主题/关键 Token/L2 marker、每条原声的持续 `SYNTHETIC / NOT EVIDENCE` 边界、PAGE 中的 LIDS 采用记录、已完成 UI Change Manifest，以及无 `fetch(`/`XMLHttpRequest`。
+Topic 专项检查现额外验证：静态页的每一个 `--lgi-*` 声明均逐条对应 `LIDS-TOK-001`，且页面排版不得绕过 `--lgi-text-*` / `--lgi-lh-*` / `--lgi-ls-*`；同时验证 LIDS 主题/L2 marker、每条原声的持续 `SYNTHETIC / NOT EVIDENCE` 边界、PAGE 中的 LIDS 采用记录、已完成 UI Change Manifest，以及无 `fetch(`/`XMLHttpRequest`。
 
 ## 4. 分层结论
 
@@ -53,7 +53,7 @@ Topic 专项检查现额外验证：LIDS 主题/关键 Token/L2 marker、每条�
 
 ## 5. 发现与后续
 
-- 已修正独立预审指出的两项 P1：原声卡在点击前已持续显示合成/非 Evidence 边界；DESIGN-002 active plan 现包含完整 UI Change Manifest。
+- 已修正独立预审指出的三项 P1：静态页现为 `LIDS-TOK-001` 全量、可对照的 Token 镜像且所有排版消费 Token；原声卡在点击前持续显示合成/非 Evidence 边界；DESIGN-002 active plan 现记录 L1/L2/L3、主 Pattern、跨层触及与实际验证结论。
 - 已修正与 LIDS 冲突的首版视觉方向：暗色酸绿、全局粗野主义和“ASCII 可自由扩张”不再保留；当前参考页为 L2 暖灰 Precision Canvas，ASCII 只承担阅读协议。
 - 仍需 `DECISION_REQUIRED`：完整 P0 入口/详情集合、真实脱敏材料、真实 Topic/Source/Observation/Coverage/Trend 合同、真实动作回执、运行时前端技术、Token 落库、正式组件、L3 场景资产/性能和部署。
 - 不得因此推断：LIDS 已转 Stable、真实 Topic Intelligence 产品可用、样本文案/候选成立，或用户已经执行真实行动。

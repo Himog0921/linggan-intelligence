@@ -40,6 +40,8 @@
 
 - 分类：混合（视觉表达 + 本地演示互动 + 状态/语义）。
 - 最高风险类别：状态/语义。
+- LIDS 层级 / 主 Pattern：L2（Topic Intelligence Detail，含 L2 工作台信息密度和局部 L3 深度阅读感）；主 Pattern 为“观察变化 → 阅读原声 → 区分候选解释与证据缺口 → 形成仅本地的下一步意图”。L1 只提供未来入口语义，本页不实现；L3 只在单条原声/限制的深读节奏中被引用，不创建大场景、3D 或独立 L3 工作区。
+- 跨层触及判定：Token **是**（将 `LIDS-TOK-001` 全量镜像进静态页并由脚本对照）；Primitive **是**（页面仅演示 Text / Quiet button / InstrumentSurface / Readout / Focus 的规则）；CMP **否**（未建立或晋升正式组件）；Scene **否**（L2 禁止大场景，未添加 3D/WebGL）；Motion **是，局部**（仅使用 LIDS 交互时长及 Reduced Motion 回退）；Data Truth **是，展示边界**（只展示 `SYNTHETIC` / `SOURCE_INCOMPLETE`，不声明任何真实 Truth / Coverage / Validity / Freshness / Operation 值）。
 - 对应来源：PAGE-TOPIC-001、PAT-001–PAT-004、LIDS-SYS-001、LIDS-AGENT-001、当前产品边界与 UI execution contract。
 - 风险理由：页面中的原声、窗口、候选、边界和下一步意图可能被误读为真实 Evidence、趋势、系统判断或已发生动作；因此视觉变化按状态诚实标准执行。
 - `DECISION_REQUIRED`：真实数据状态、Trend/Coverage、真实 Topic/Source/Evidence、真正的研究/行动、运行时 Web 技术、场景资产与部署均仍需要独立决定。
@@ -57,9 +59,9 @@
 
 | 层级 | 验收方法 | 实际结果 | 未证明边界 |
 |---|---|---|---|
-| 任务可用 | 页面规格与浏览器走查 | 待本次重做后更新 | 非真实产品任务/工作流 |
-| 状态诚实 | 每条合成样本与本地意图的持续边界检查 | 待本次重做后更新 | 真实状态/权限/回执 |
-| 视觉一致 | LIDS 专项检查、静态浏览器走查、响应式/Reduced Motion | 待本次重做后更新 | 运行时组件/完整 L1/L2/L3/用户审美验收 |
+| 任务可用 | 页面规格与浏览器走查 | 2026-08-21 本机 Chrome 静态走查：首屏可持续读出 Topic、合成模式、限制与本地意图；7D/30D 只改变本地示例文本 | 非真实产品任务/工作流 |
+| 状态诚实 | 每条合成样本与本地意图的持续边界检查 | 三条原声在展开前均有 `SYNTHETIC / NOT EVIDENCE`；窗口/意图都标为 synthetic/local，源文件无网络或写入代码 | 真实状态/权限/回执 |
+| 视觉一致 | LIDS 专项检查、静态浏览器走查、响应式/Reduced Motion | LIDS Token 全量镜像和排版 Token 消费由专项脚本检查；Chrome 已在 1440px、375px 与 Reduced Motion 下走查 | 运行时组件/完整 L1/L2/L3/用户审美验收 |
 | 真实后果 | 禁止任何网络/写入并检查源文件 | N/A：设计事项明确禁止 | 真实链路和部署 |
 
 ### 6. 交接
