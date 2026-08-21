@@ -32,8 +32,8 @@
 > **当前处于 `DEV-02 / SCOPE-001：synthetic fact-kernel technical tracer`，状态为“执行中”；`ARC-001` 同时进行产品与系统架构决策，但不授权代码扩张。**
 
 - 已完成：项目治理、开发环境、产品/领域/架构基础设计和代码前语义冻结。
-- 已开始：只使用合成/脱敏材料的 `F01` 合同 TDD；已有 Package/Record hash、三类 canonicalization 攻击、RFC 8785 golden 和 F01 静态 manifest Oracle。
-- 尚未完成：完整 F01 的 PostgreSQL atomic ingress、two Records、Observation/Current、loopback API、worker、minimal CLI 和本 tracer 验证门。
+- 已开始：只使用合成/脱敏材料的 `F01` 合同 TDD；已有 Package/Record hash、三类 canonicalization 攻击、RFC 8785 golden、F01 静态 manifest Oracle，以及**在真实 PostgreSQL 16 上通过的 Package atomic ingress**（accepted / 六点事务故障零半写 / replay / conflict / 逐表行数）。
+- 尚未完成：two Records 的独立处理、Observation/Current、loopback API、worker、minimal CLI、`0002` migration、运行角色权限负例和本 tracer 验证门。
 - 当前硬停止线：F01 完成后停止；`ARC-001` 未收口前，F02–F10、真实小红书访问、真实原文、插件升级、媒体、AI Agent crew、Topic/Corpus/Signal、Web 产品、生产部署和旧系统迁移均不开始。
 - 当前权威执行文件：[`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md)。
 
@@ -96,7 +96,7 @@ F01 是当前唯一获准实施并计入 DEV-02 退出条件的场景。F02–F1
 
 | 场景 | 要证明什么 | 当前状态 | 当前证据 | 退出条件 |
 |---|---|---|---|---|
-| `F01` 完整合法包 | 已知集合完整交付后，Package、两个 Record、两个 Observation 和字段 Current 都可追溯 | 执行中 | 已有公开合同解析、Package/Record hash、duplicate key、unsafe integer、unpaired surrogate、RFC 8785 golden 与仅含 F01 的静态 manifest tracer | 完整合同/I-JSON/资源上限负例、数据库各阶段 Oracle、API/CLI 读取和真实 PostgreSQL 副作用全部通过 |
+| `F01` 完整合法包 | 已知集合完整交付后，Package、两个 Record、两个 Observation 和字段 Current 都可追溯 | 执行中 | 公开合同解析、Package/Record hash、duplicate key、unsafe integer、unpaired surrogate、RFC 8785 golden、静态 manifest tracer，**以及真实 PostgreSQL 上的 accepted 原子接入、六点事务故障回滚、replay/conflict 不覆盖与逐表行数** | 完整合同/I-JSON/资源上限负例、数据库各阶段 Oracle、API/CLI 读取和真实 PostgreSQL 副作用全部通过 |
 | `F02` 已知集合部分结果 | 目标 3 个只取得 2 个时保留两条好数据，并明确第三个未尝试，不冒充完成 | 未开始 | 只有 SCOPE 中的手工语义 Oracle | 独立 fixture、数据库、API/CLI 都显示 `known_gap`，不为空缺对象造事实 |
 | `F03` Replay | 同 identity/hash 重传只新增安全 delivery，复用原 Package/receipt | 未开始 | 只有 SCOPE 中的手工语义 Oracle | authority 过期后的合法 replay、行数和不可重复副作用通过 |
 | `F04` Conflict | 同 identity、不同 hash 失败关闭且不覆盖历史 | 未开始 | 只有 SCOPE 中的手工语义 Oracle | 冲突响应、审计和零业务副作用通过 |
@@ -114,9 +114,9 @@ F01 是当前唯一获准实施并计入 DEV-02 退出条件的场景。F02–F1
 | 实施层 | 状态 | 完成证明 |
 |---|---|---|
 | 语义代码门 | 已完成 | 四轮攻击和 P0/P1 处置有记录；用户裁定 `CONTROLLED OPEN FOR TDD` |
-| 合同与 fixture | 执行中 | 当前只要求 F01 主链使用的正负 Oracle、固定 golden 与保护通过；F02–F10 不在本 tracer 完成门中 |
-| 空库 migration 与权限 | 未开始 | 随机 proof DB 从零重放；不可变历史、同属关系、DDL/UPDATE/DELETE 权限负例通过 |
-| Package ingress | 未开始 | accepted/replay/conflict/rejected、authority、部分结果、事务故障和行数同时通过 |
+| 合同与 fixture | 已完成（仅 F01 主链） | F01 主链所需的正负 Oracle、RFC 8785 golden 与静态 manifest 均通过（21 项）；F02–F10 仍不在本 tracer 完成门中 |
+| 空库 migration 与权限 | 部分完成 | 随机 proof DB 从零重放 `0001` 通过，绕过 Rust facade 的串父 SQL 被拒绝；**运行角色的 DDL/UPDATE/DELETE 权限负例仍未做**，`0002` 未创建 |
+| Package ingress | 已完成 | 真实 PostgreSQL 16 上 accepted 原子接入、六点事务故障零半写、同 hash replay 与不同 hash conflict 不覆盖、行数逐表对齐 manifest 均通过；F05 的 pre-routing audit 行与逐类错误码未证明 |
 | Record processing | 未开始 | F06/F10、identity 并发、unresolved、worker fence 和接管通过 |
 | Observation/Current | 未开始 | append-only、F07/F08、字段来源和 pointer 原子发布通过 |
 | API/worker/minimal CLI | 未开始 | 真实 loopback API + worker + PostgreSQL；CLI 只经 API 且诚实显示未完成/权限/断网 |

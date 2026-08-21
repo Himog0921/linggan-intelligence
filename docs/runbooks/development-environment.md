@@ -42,7 +42,8 @@ macOS
 | 停止容器 | `./scripts/dev-db.sh stop` | 数据卷保留 |
 | 停止并移除容器 | `./scripts/dev-db.sh down` | 数据卷仍保留 |
 | 完整验收 | `./scripts/verify-development-environment.sh` | 创建并清理独立 proof 数据库 |
-| F01 数据库 foundation proof | `./scripts/test-scope-001-postgres.sh` | 在独立一次性 PostgreSQL 16 container/volume 中创建、迁移、测试并清理随机 proof 数据库；不连接或复用开发库/container/volume |
+| Rust 文件与依赖门 | `./scripts/check-rust-boundaries.sh` | 文件规模、无主目录、依赖方向和 apps 无业务 SQL；明确打印它未自动化的 review 门 |
+| F01 数据库 proof | `./scripts/test-scope-001-postgres.sh` | 在独立一次性 PostgreSQL 16 container/volume 中创建、迁移、测试并清理随机 proof 数据库；不连接或复用开发库/container/volume |
 
 ## 数据与秘密在哪里
 
