@@ -1,0 +1,112 @@
+name: Agent work item
+description: Create a centrally assigned, evidence-bounded work item for one execution Agent.
+title: "[WORK] "
+labels:
+  - needs-triage
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This form creates a work request, not implementation authority. A coordinator must confirm authority, dependencies, file ownership, and `ready-for-agent` before an execution Agent may Claim it.
+
+  - type: textarea
+    id: scope_authority
+    attributes:
+      label: SCOPE and authority
+      description: Cite the active SCOPE, accepted decision, user authorization, or governance rule that permits this work. State any authority that is explicitly absent.
+      placeholder: "Authorized by ...; does not authorize ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: goal_and_scope
+    attributes:
+      label: Goal, in scope, and out of scope
+      description: State the user-visible or verifiable goal, then separate what is included from what must not be changed.
+      placeholder: |
+        Goal:
+        In scope:
+        Out of scope:
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and blockers
+      description: Reference blocking Issues, decisions, external conditions, or write None.
+      placeholder: "Blocked by #... / None - can start immediately"
+    validations:
+      required: true
+
+  - type: textarea
+    id: execution_identity
+    attributes:
+      label: Agent identity and isolated Git workspace
+      description: Record the execution Agent/task-id, exact base commit, branch, and independent worktree path. Shared root main is forbidden for repository writes.
+      placeholder: |
+        Agent / task-id:
+        Base commit:
+        Branch:
+        Worktree:
+    validations:
+      required: true
+
+  - type: textarea
+    id: file_ownership
+    attributes:
+      label: Exclusive, shared, and forbidden files
+      description: Give explicit paths or bounded globs. Shared files require an integration owner; everything outside the allowed set remains forbidden.
+      placeholder: |
+        Exclusive files:
+        Shared files and integration owner:
+        Forbidden files:
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: List independently checkable outcomes. A build, HTTP 200, task completion, or generated text cannot stand in for the business result.
+      placeholder: "- [ ] ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests_and_proofs
+    attributes:
+      label: Tests and proof commands
+      description: List exact checks and the real side effects or artifacts they prove. Mark checks that require credentials or external state.
+      placeholder: |
+        Commands:
+        Expected evidence:
+        External prerequisites:
+    validations:
+      required: true
+
+  - type: textarea
+    id: stop_and_escalation
+    attributes:
+      label: Stop and escalation conditions
+      description: State when the Agent must stop instead of guessing, expanding scope, resolving conflicts, or performing destructive/external actions.
+      placeholder: "Stop when ...; escalate to ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: completion_evidence
+    attributes:
+      label: Completion layers, proved, and not proved
+      description: Report Design, Code, Automated checks, Real-chain proof, Deploy, and Mog acceptance separately; then state proved and not proved boundaries.
+      placeholder: |
+        Design:
+        Code:
+        Automated:
+        Real-chain:
+        Deploy:
+        Mog acceptance:
+        Proved:
+        Not proved:
+    validations:
+      required: true

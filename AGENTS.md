@@ -22,6 +22,8 @@
 
 本项目使用私有仓库 `Himog0921/linggan-intelligence` 的 GitHub Issues 追踪任务、问题、阻塞和 Agent 工作单；Issue 不是产品、架构或事实的第二权威来源。具体规则见 `docs/agents/issue-tracker.md`。
 
+任何仓库写入必须先有已分配 Issue 和 Claim 评论，并在 Issue 专属 branch/worktree 中通过 draft PR 交付；编码 Agent 禁止直接在共享 root checkout 或 `main` 工作。共享文件由指定 integration owner 统一，最终结论需要非实现者 independent review。
+
 ### Triage labels
 
 任务分流使用 `needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix` 五个角色标签；标签只表达下一步责任，不替代事项编号、正式授权、文档状态或验收结果。具体映射见 `docs/agents/triage-labels.md`。

@@ -17,7 +17,7 @@
 已确认事实：
 
 - GOV-001 已在 commit `73a6dd928a3be01d642efa9aa4c6c5e293c944cf` 推送至 `origin/main`。
-- 代码前语义冻结基线已在 commit `9801fdf5deb55e1b3fc5b8ac2c43234be295a42d` 使用 GitHub noreply 身份推送至 `origin/main`；该推送完成时本地与远端为 `0/0` 分歧。当前本轮修订是后续未提交工作，不得把两个状态混报。
+- 代码前语义冻结基线 `9801fdf5deb55e1b3fc5b8ac2c43234be295a42d` 之后的 6 个提交（截至 `64a2141`），以及 F01 ingress 实现 `a45cc61` 和证明记录 `d88fd87`，均已使用 GitHub noreply 身份推送至 `origin/main`。启动 GOV-003 前重新核实 root checkout 为 clean `main @ d88fd8715051aa15da9eeb6860770a03eaad67f6`；这只证明该时点 Git 同步状态，不证明 Issue → worktree → PR → independent review 协作链已跑通。GOV-003 只有在对应 PR 合并并重新核验后才进入当前完成记录。
 - 当前机器已有 Git、Rust 和 Cargo。
 - Docker PostgreSQL 16.14 已完成真实验证；日常是否正在运行以 `./scripts/dev-db.sh status` 为准。
 - ENV-001 采用本机 Rust + Docker PostgreSQL 16，容器内 `psql` 与 `pg_restore` 已通过真实验证。

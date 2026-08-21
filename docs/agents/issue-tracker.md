@@ -1,7 +1,7 @@
 # Agent 任务追踪：GitHub Issues
 
 > 状态: 权威当前
-> 最后核对: 2026-08-20
+> 最后核对: 2026-08-21
 > 适用范围: Matt Pocock 工程技能与其他 Agent 对 Linggan Intelligence 任务、问题、阻塞和工作单的读写
 > 事实来源: GitHub 私有仓库配置、当前 `origin`、`gh` 实际读取结果和用户确认
 > 冲突时以谁为准: `AGENTS.md`、真实代码与运行证据、ACCEPTED 决策、`docs/README.md` 中的权威文档和用户最新确认
@@ -31,6 +31,86 @@ GitHub Issues 不用于：
 - 通过一个 Issue 自动扩大真实数据、生产系统、插件工位、外部 Agent 或现实行动的授权范围。
 
 Issue 是工作入口，不是第二事实源，也不是自动授权书。
+
+## 外部 Agent 的执行闭环
+
+本项目采用中央派单，不允许 Agent 自由抢单。协调者先确认目标、正式授权、依赖、文件所有权和验收，再把 Issue 标为 `ready-for-agent`；执行 Agent 只能领取明确分配给自己的 Issue。
+
+标准链路是：
+
+```text
+Issue 已确认并分配
+→ Claim 评论
+→ 独立 branch + worktree
+→ 有界修改与验证
+→ draft PR
+→ independent review
+→ integration owner 按序合并
+→ 分层记录完成证据
+→ 满足关闭条件后关闭 Issue
+```
+
+### Claim 协议
+
+任何仓库写入开始前，执行 Agent 必须在 Issue 评论中留下 Claim，至少包含：
+
+- Agent 标识和稳定 task-id；
+- exact base commit；
+- feature branch 和独立 worktree 绝对路径；
+- exclusive files、shared files 与 forbidden files；
+- 开始时间、依赖和停止条件。
+
+同一个 Issue 同一时间只能有一个执行 Agent。协作者、reviewer 和 integration owner 可以存在，但不能在同一 Issue 下形成第二个未声明的执行分支。使用相同 GitHub 账号的所有 Agent 必须靠 task-id、Claim 和 commit/PR 证据区分责任，不能把共同账号当成执行身份。
+
+本项目没有额外的 `in-progress` triage 标签。执行中由 Claim 评论和 assignee 表达；`ready-for-agent` 可以保留，因为它说明任务仍是机器可执行的有界工作，不代表尚未被领取。
+
+### 分支、worktree 与文件所有权
+
+所有仓库修改都必须发生在 Issue 专属 feature branch 和独立 worktree。禁止编码 Agent 在共享 root checkout 或其 `main` 分支直接编辑、提交或暂存文件；root checkout 只用于核对和集成，不是并行执行工作区。
+
+Issue 必须把文件分为：
+
+- **exclusive**：只由本 Issue 执行 Agent 修改；
+- **shared**：可能被多个事项触碰，只能由指定 integration owner 统一整合；
+- **forbidden**：本 Issue 不得修改；未列出的文件默认 forbidden。
+
+执行 Agent 不得通过扩大 glob、顺手重构或修改相邻文档绕过所有权。共享文件出现并行变化时，执行 Agent 保留自己的有界补丁和证据，由 integration owner 在独立集成步骤中按已声明顺序处理；禁止在任一执行 worktree 中擅自吸收其他任务。
+
+### Pull Request、审查和集成
+
+仓库变更通过 draft PR 交付。PR 必须关联主 Issue/SCOPE，使用模板报告修改范围、非目标、验证、数据库/外部副作用、proved/not proved、共享文件和分层完成证据。
+
+实现者不能作为最终独立 reviewer。reviewer 必须审查 PR 当前 head commit，并给出 `PASS` 或带可执行发现的 `FAIL`；代码可合并性、模板勾选或自动检查通过都不能代替 independent review。修订后需要复核受影响的新 head。
+
+integration owner 负责按依赖和共享文件顺序合并已通过审查的 PR。执行 Agent 不自行 merge；同一批并行 PR 不通过“最后一起解决冲突”压缩来源或责任。
+
+### 没有 GitHub 自动保护时的人工门禁
+
+当前未把 GitHub Actions、branch protection 或 CODEOWNERS 作为本流程前提。在这些自动门不存在时，以下人工证据缺一不可：
+
+1. Issue Claim 与 assignee；
+2. 独立 worktree/branch；
+3. draft PR 和模板完整报告；
+4. 与实现者不同的 reviewer 结论；
+5. integration owner 的合并次序确认；
+6. 合并后对目标 branch 和正式文档状态的重新核验。
+
+任一证据缺失都不得用“GitHub 允许 Merge”替代。
+
+### Issue 关闭与完成层级
+
+Issue close 不得把不同完成层压成一个 `done`。关闭评论和正式进度记录必须分别说明：
+
+- Design；
+- Code；
+- Automated checks；
+- Real-chain proof；
+- Deploy；
+- Mog / business acceptance；
+- Proved；
+- Not proved。
+
+不适用的层标 `N/A` 并说明理由；未发生的层标 `NOT VERIFIED`。PR merge 不能自动证明部署、真实链路或业务验收，Issue close 也不能改写这些边界。
 
 ## 基本操作
 
