@@ -59,6 +59,10 @@ if ! grep -Fq "docs/agents/ui-execution-contract.md" AGENTS.md; then
   report_error "AGENTS.md does not require the UI execution contract"
 fi
 
+if ! grep -Fq '| `docs/design/` |' docs/governance/file-placement-standard.md; then
+  report_error "file-placement standard does not define the docs/design/ shelf"
+fi
+
 if ! grep -Fq "DECISION_REQUIRED" docs/design/design-governance.md; then
   report_error "design governance is missing the required decision stop state"
 fi
