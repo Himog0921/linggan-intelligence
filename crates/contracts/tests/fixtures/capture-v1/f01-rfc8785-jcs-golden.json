@@ -1,0 +1,126 @@
+{
+  "fixture": "f01-rfc8785-jcs-golden",
+  "source": "RFC 8785, Sections 3.2.2 through 3.2.4, https://www.rfc-editor.org/rfc/rfc8785.html",
+  "input": {
+    "numbers": [333333333.33333329, 1E30, 4.50, 2e-3, 0.000000000000000000000000001],
+    "string": "\u20ac$\u000F\u000aA'\u0042\u0022\u005c\\\"\/",
+    "literals": [null, true, false]
+  },
+  "expectedCanonicalUtf8": "{\"literals\":[null,true,false],\"numbers\":[333333333.3333333,1e+30,4.5,0.002,1e-27],\"string\":\"€$\\u000f\\nA'B\\\"\\\\\\\\\\\"/\"}",
+  "expectedCanonicalUtf8Hex": "7b226c69746572616c73223a5b6e756c6c2c747275652c66616c73655d2c226e756d62657273223a5b3333333333333333332e333333333333332c31652b33302c342e352c302e3030322c31652d32375d2c22737472696e67223a22e282ac245c75303030665c6e4127425c225c5c5c5c5c222f227d",
+  "expectedSha256Source": "Hand-maintained SHA-256 literal of the RFC 8785 Section 3.2.4 UTF-8 bytes above; independently verified by the read-only Node checker.",
+  "expectedSha256": "sha256:2d5e01a318d0f0879ab568c4be289c8b1f64ef8921a53c6277d5e069978baacb",
+  "capturePackage": {
+    "schemaVersion": "capture.package.v1",
+    "workOrderRef": "00000000-0000-4000-8000-000000000101",
+    "attemptRef": "00000000-0000-4000-8000-000000000102",
+    "captureIdentity": "00000000-0000-4000-8000-000000000103",
+    "leaseEpoch": 1,
+    "contractVersion": "content-detail.synthetic.v1",
+    "target": {
+      "basis": "known_set",
+      "unit": "content_detail",
+      "targetManifestHash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "knownTargetCount": 2
+    },
+    "terminal": {
+      "reason": "target_reached"
+    },
+    "coverage": {
+      "unit": "content_detail",
+      "attempted": 2,
+      "emitted": 2,
+      "failed": 0,
+      "knownNotAttempted": 0,
+      "remainingScope": "known_members"
+    },
+    "knownTargetResults": [
+      {
+        "targetOrdinal": 1,
+        "targetExternalId": "synthetic-note-a",
+        "outcome": "emitted",
+        "recordOrdinal": 1,
+        "reason": null
+      },
+      {
+        "targetOrdinal": 2,
+        "targetExternalId": "synthetic-note-b",
+        "outcome": "emitted",
+        "recordOrdinal": 2,
+        "reason": null
+      }
+    ],
+    "records": [
+      {
+        "ordinal": 1,
+        "recordKind": "content_detail",
+        "targetExternalId": "synthetic-note-a",
+        "source": {
+          "system": "synthetic",
+          "namespace": "scope-001",
+          "objectType": "content",
+          "externalId": "synthetic-note-a",
+          "channel": "synthetic_page"
+        },
+        "observedAt": {
+          "value": "2026-08-20T08:00:00Z",
+          "precision": "exact",
+          "basis": "fixture"
+        },
+        "payload": {
+          "schemaVersion": "content-detail.synthetic.v1",
+          "sourceExternalId": "synthetic-note-a",
+          "fields": {
+            "title": {
+              "observed": true,
+              "value": "Synthetic title A"
+            },
+            "body": {
+              "observed": true,
+              "value": "Synthetic body A"
+            }
+          },
+          "rfc8785GoldenInput": {
+            "numbers": [333333333.33333329, 1E30, 4.50, 2e-3, 0.000000000000000000000000001],
+            "string": "\u20ac$\u000F\u000aA'\u0042\u0022\u005c\\\"\/",
+            "literals": [null, true, false]
+          }
+        },
+        "recordHash": "sha256:72e94cf60de2f42b2054bcdb68f40e7428928935d9039f2190653078b43b940b"
+      },
+      {
+        "ordinal": 2,
+        "recordKind": "content_detail",
+        "targetExternalId": "synthetic-note-b",
+        "source": {
+          "system": "synthetic",
+          "namespace": "scope-001",
+          "objectType": "content",
+          "externalId": "synthetic-note-b",
+          "channel": "synthetic_page"
+        },
+        "observedAt": {
+          "value": "2026-08-20T08:00:00Z",
+          "precision": "exact",
+          "basis": "fixture"
+        },
+        "payload": {
+          "schemaVersion": "content-detail.synthetic.v1",
+          "sourceExternalId": "synthetic-note-b",
+          "fields": {
+            "title": {
+              "observed": true,
+              "value": "Synthetic title B"
+            },
+            "body": {
+              "observed": true,
+              "value": "Synthetic body B"
+            }
+          }
+        },
+        "recordHash": "sha256:ca93b6cbebf52a16f4bdbbcd9c82496b2e99d2863d61b2ca7cfeec059547bee9"
+      }
+    ],
+    "packageHash": "sha256:ecf39bc0621972e0d9d1b6681c6e13737064651a5f725d6f70e6658a0901a16b"
+  }
+}

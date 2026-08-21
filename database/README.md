@@ -1,14 +1,16 @@
 # 数据库交付边界
 
 > 状态: 权威当前
-> 最后核对: 2026-08-20
+> 最后核对: 2026-08-21
 > 适用范围: 新 PostgreSQL 数据库、migration、fixture 与秘密边界
 > 事实来源: ACCEPTED ADR、当前数据库目录和实际 migration
 > 冲突时以谁为准: ACCEPTED ADR 与实际新项目 migration
 
 本目录只承载 Linggan Intelligence 的全新数据库设计、migration 和脱敏 fixture。
 
-当前 HEAD 没有业务 DDL。SCOPE-001 已经授权在代码门打开后创建且只创建两份 proof migration，用于合成 `content-detail.synthetic.v1` 的 Package/Record/Coverage、最小 Content Observation 与 Current；G1–G5 语义冻结和冻结后独立复核完成前仍不得创建。
+`0001_scope_001_capture_evidence.sql` 已建立 F01 主链的最小接入侧 foundation：合成 Work/Attempt/冻结 target、Delivery、Package、Record、target result、Coverage 与 typed processing work。它不创建 Source、Content、Observation 或 Current；这些事实只由后续 F01 Record processing 切片创建。`0002_scope_001_content_observation.sql` 仍未创建。
+
+`./scripts/test-scope-001-postgres.sh` 每次创建随机 `linggan_intelligence_proof_<suffix>` proof database，并在独立、一次性的 PostgreSQL 16 container 与 test-only named volume 中从零执行 `0001` 和真实约束测试。成功或失败后都必须显式验证并删除该 proof database，再删除该 container 与 test-only volume；它不调用 `dev-db.sh`、不复用开发 container/volume，也不得用于开发库或旧库。它不替代后续 ingress 原子回滚、worker、Observation/Current、API/CLI 或生产证明。
 
 该授权不证明真实 XHS producer、Raw Artifact、作者/评论/媒体、平台穷尽、趋势、AI Agent 或生产数据库设计。SCOPE-001 不创建通用 `evidence` 表、对象存储或真实平台 payload；需要这些能力时必须由后续 SCOPE 依据真实来源合同重新授权。
 
