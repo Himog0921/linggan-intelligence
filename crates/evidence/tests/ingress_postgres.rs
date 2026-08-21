@@ -78,7 +78,7 @@ async fn f01_valid_package_is_accepted_atomically_and_forms_no_observation_or_cu
     );
 
     assert_stage_rows(&database, "final", "total").await;
-    assert_downstream_tables_absent(&database).await;
+    assert_downstream_tables_empty(&database).await;
 
     let package = sqlx::query(
         "SELECT accepted_outcome, package_hash, accepted_receipt_ref, accepted_delivery_id, \
@@ -138,7 +138,7 @@ async fn f01_ingress_faults_before_commit_leave_no_half_written_rows() {
         );
 
         assert_stage_rows(&database, "fresh_seed", "total").await;
-        assert_downstream_tables_absent(&database).await;
+        assert_downstream_tables_empty(&database).await;
     }
 }
 
@@ -181,7 +181,7 @@ async fn f01_same_hash_replay_reuses_the_original_receipt_and_adds_only_a_delive
 
     assert_delivery_outcomes(&database, &["accepted", "replay"]).await;
     assert_business_rows_match_stage(&database, "final").await;
-    assert_downstream_tables_absent(&database).await;
+    assert_downstream_tables_empty(&database).await;
 }
 
 #[tokio::test]
@@ -505,17 +505,14 @@ async fn assert_business_rows_match_stage(database: &Database, stage: &str) {
     }
 }
 
-async fn assert_downstream_tables_absent(database: &Database) {
+/// The downstream tables exist once 0002 is applied, so acceptance must leave them empty rather
+/// than merely absent. The manifest freezes every one of these as zero for accepted ingress.
+async fn assert_downstream_tables_empty(database: &Database) {
+    let expected = manifest_stage("accepted_ingress", "delta");
     for (manifest_name, table) in DOWNSTREAM_TABLES {
-        let present =
-            sqlx::query("SELECT to_regclass(current_schema() || '.' || $1) IS NOT NULL AS present")
-                .bind(table)
-                .fetch_one(database.pool())
-                .await
-                .expect("the proof schema must report its table boundary")
-                .get::<bool, _>("present");
-        assert!(
-            !present,
+        assert_eq!(
+            count(database, table).await,
+            expected[manifest_name].as_i64().expect("frozen row count"),
             "accepted ingress must not create {manifest_name} ({table}); it belongs to record processing"
         );
     }

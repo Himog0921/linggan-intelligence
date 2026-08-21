@@ -7,3 +7,15 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+linggan-storage-postgres = { path = "../storage-postgres" }
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+linggan-contracts = { path = "../contracts" }
+linggan-evidence = { path = "../evidence" }
+tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread"] }
