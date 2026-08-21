@@ -60,6 +60,14 @@ pub enum ProcessingError {
     /// A newer epoch took the work over, so this run must not write its result.
     #[error("this lease is no longer the current epoch for the work")]
     LeaseLost,
+    /// The business transaction failed and the separate durable attempt audit failed too. This
+    /// must remain visible to callers; otherwise a crashed run would look traceable when its
+    /// `run_error` row was never actually persisted.
+    #[error("processing failed: {processing}; run-error persistence also failed: {persistence}")]
+    RunErrorPersistence {
+        processing: String,
+        persistence: String,
+    },
 }
 
 impl ProcessingError {
@@ -245,10 +253,13 @@ pub async fn run_claimed_record(
             epoch: claim.epoch,
             business_outcome,
         }),
-        Err(error) => {
-            record_run_error(database, &claim, &error).await;
-            Err(error)
-        }
+        Err(error) => match record_run_error(database, &claim, &error).await {
+            Ok(()) => Err(error),
+            Err(persistence) => Err(ProcessingError::RunErrorPersistence {
+                processing: error.to_string(),
+                persistence: persistence.to_string(),
+            }),
+        },
     }
 }
 
@@ -304,15 +315,27 @@ async fn verify_claim_is_current(
 
 /// Records why a run did not finish, on its own connection so it survives the rolled-back
 /// processing transaction. It never touches an attempt that already finalized something.
-async fn record_run_error(database: &Database, claim: &ClaimedRecord, error: &ProcessingError) {
-    let _ = sqlx::query(
+async fn record_run_error(
+    database: &Database,
+    claim: &ClaimedRecord,
+    error: &ProcessingError,
+) -> Result<(), ProcessingError> {
+    let updated = sqlx::query(
         "UPDATE record_processing_attempt SET run_error = $1 \
          WHERE id = $2 AND finalized_at IS NULL",
     )
     .bind(error.to_string())
     .bind(claim.attempt_id)
     .execute(database.pool())
-    .await;
+    .await
+    .map_err(ProcessingError::internal)?;
+    if updated.rows_affected() != 1 {
+        return Err(ProcessingError::Internal(
+            "the claimed processing attempt was no longer available for run-error persistence"
+                .to_owned(),
+        ));
+    }
+    Ok(())
 }
 
 const CLAIM_SQL: &str = "\

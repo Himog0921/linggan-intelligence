@@ -448,8 +448,8 @@ pub async fn insert_revision_with_sources(
              SELECT jsonb_build_object( \
                  'packageRef', p.package_ref, 'originalAcceptedDeliveryRef', d.delivery_ref, \
                  'acceptedReceiptRef', p.accepted_receipt_ref, \
-                 'recordRefs', jsonb_agg(DISTINCT to_jsonb(r.record_ref::text)), \
-                 'observationRefs', jsonb_agg(DISTINCT to_jsonb(o.observation_ref::text))) AS entry \
+                 'recordRefs', jsonb_agg(DISTINCT to_jsonb(r.record_ref::text) ORDER BY to_jsonb(r.record_ref::text)), \
+                 'observationRefs', jsonb_agg(DISTINCT to_jsonb(o.observation_ref::text) ORDER BY to_jsonb(o.observation_ref::text))) AS entry \
              FROM content_observation o \
              JOIN capture_record r ON r.id = o.capture_record_id \
              JOIN capture_package p ON p.id = r.package_id \
@@ -529,10 +529,17 @@ pub async fn runtime_role_database(schema: &str) -> Database {
         format!("DROP ROLE IF EXISTS {role}"),
         format!("CREATE ROLE {role} LOGIN PASSWORD '{password}'"),
         format!("GRANT USAGE ON SCHEMA {schema} TO {role}"),
-        format!("GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA {schema} TO {role}"),
+        format!("GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO {role}"),
+        format!("GRANT INSERT ON record_processing_attempt TO {role}"),
+        format!("GRANT INSERT ON source_identity TO {role}"),
+        format!("GRANT INSERT ON source_content TO {role}"),
+        format!("GRANT INSERT ON content_observation TO {role}"),
+        format!("GRANT INSERT ON content_current_revision TO {role}"),
+        format!("GRANT INSERT ON content_current_revision_field_source TO {role}"),
         format!("GRANT UPDATE (terminal_reason) ON capture_attempt TO {role}"),
         format!("GRANT UPDATE (business_outcome) ON record_processing_work TO {role}"),
         format!("GRANT UPDATE (finalized_at, run_error) ON record_processing_attempt TO {role}"),
+        format!("GRANT UPDATE (published_at) ON content_current_revision TO {role}"),
         format!("GRANT UPDATE (current_revision_id) ON source_content TO {role}"),
     ] {
         raw(&admin, &statement).await.unwrap_or_else(|error| {

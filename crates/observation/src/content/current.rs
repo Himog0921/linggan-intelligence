@@ -93,6 +93,18 @@ pub(crate) async fn republish_current(
     )
     .await?;
 
+    // A revision first closes its own source set, then becomes the visible Current in the same
+    // transaction. The database revalidates both field provenance and the exact watermark on the
+    // pointer transition; this order therefore cannot publish a revision that was later altered.
+    sqlx::query(
+        "UPDATE content_current_revision SET published_at = scope_001_now() \
+         WHERE id = $1 AND published_at IS NULL",
+    )
+    .bind(revision_id)
+    .execute(&mut **transaction)
+    .await
+    .map_err(ProcessingError::internal)?;
+
     // Readers only ever follow a published pointer, so the revision is complete before this runs.
     sqlx::query("UPDATE source_content SET current_revision_id = $1 WHERE id = $2")
         .bind(revision_id)
