@@ -110,9 +110,17 @@ async fn insert_records(
 ) -> Result<Vec<(u32, i64)>, IngressError> {
     let mut record_ids = Vec::with_capacity(package.records().len());
     for record in package.records() {
+        // The whole verified envelope is persisted, not just the payload: the source statement is
+        // the only value allowed to establish an identity later, and observed_at is the only time
+        // the current-value policy may order by.
         let id = sqlx::query(
-            "INSERT INTO capture_record (record_ref, package_id, ordinal, target_external_id, record_hash, payload) \
-             VALUES ($1, $2, $3, $4, $5, $6) RETURNING id",
+            "INSERT INTO capture_record \
+                 (record_ref, package_id, ordinal, target_external_id, record_hash, payload, \
+                  record_kind, source_system, source_namespace, source_object_type, \
+                  source_external_id, source_channel, observed_at, observed_at_precision, \
+                  observed_at_basis) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::timestamptz, $14, $15) \
+             RETURNING id",
         )
         .bind(options.mint_ref())
         .bind(package_id)
@@ -120,6 +128,15 @@ async fn insert_records(
         .bind(record.target_external_id())
         .bind(record.record_hash())
         .bind(record.payload())
+        .bind(record.record_kind())
+        .bind(record.source_system())
+        .bind(record.source_namespace())
+        .bind(record.source_object_type())
+        .bind(record.source_external_id())
+        .bind(record.source_channel())
+        .bind(record.observed_at_value())
+        .bind(record.observed_at_precision())
+        .bind(record.observed_at_basis())
         .fetch_one(&mut **transaction)
         .await
         .map(|row| row.get::<i64, _>("id"))
