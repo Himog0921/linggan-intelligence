@@ -1,7 +1,7 @@
 # 工作台、API 与外部 Agent CLI 入口架构
 
 > 状态: 草案
-> 最后核对: 2026-08-20
+> 最后核对: 2026-08-21
 > 适用范围: DISC-001 Gate 7 的日常入口、Topic 工作区、Corpus、研究/判断/行动、采集运营、API 与外部 Agent CLI
 > 事实来源: 已确认 PRD/DEC-01–05、Gate 2–3 用户任务与权力边界、Gate 5–6 数据/模块候选、`page-map.md`
 > 冲突时以谁为准: 用户最新确认、真实可用样本的可用性测试、运行时权限和后端权威 receipt；本文页面名、导航和命令名均是 Gate 7 候选
@@ -51,6 +51,8 @@
 禁止按 `Evidence / Observation / Claim / Run / Job` 一对象一菜单，也不复制旧工作台导航、建设万能 AI 中心或在首页堆全量累计数字。
 
 ## 今日关注
+
+> 本节已被 [`home-intelligence-surface.md`](home-intelligence-surface.md) 细化并部分取代。`HOME-01`–`HOME-17` 是用户于 2026-08-21 逐题确认的首页形态，包括三栏骨架、恒定领域地形与昨夜行动轨迹、常驻 Agent 编队与总编、选题卡回流规则、就地抽屉下钻、每早钩子与校准回路。本节以下内容作为仍然有效的原则保留；版面、栏位职责、事项供给与展示条数以该子文档为准，两处冲突时以子文档和用户最新确认为准。
 
 ### 第一眼应回答
 
@@ -245,7 +247,7 @@ Action Proposal → Decision → Action Plan（预期/窗口/条件）
 }
 ```
 
-这是形状示意，不是最终 schema。`data` 不能脱离范围/版本；`asOf` 不用一个 `updatedAt` 混合世界观察、分析和投影时间；unknown 不省略成 0/false；查询时执行隐私授权；Read Model 延迟显示水位，不回退旧字段；按钮返回 Decision/Request/Action receipt，不以 toast 结束。
+这是 Gate 7 的产品形状示意，不是可执行 schema；其中的 `{}` 不授权实现自由 JSON。SCOPE-001 当前唯一可执行的 API/CLI response model，以 [`../plans/active/scope-001-content-evidence-vertical-slice.md`](../plans/active/scope-001-content-evidence-vertical-slice.md) 的“API/CLI envelope 与八责任外部表示”为准。`data` 不能脱离范围/版本；`asOf` 不用一个 `updatedAt` 混合世界观察、分析和投影时间；unknown 不省略成 0/false；查询时执行隐私授权；Read Model 延迟显示水位，不回退旧字段；按钮返回 Decision/Request/Action receipt，不以 toast 结束。
 
 `applicability` 只描述“针对本次请求/问题，这份结果可以怎样使用、明确不能证明什么”，不能成为 Evidence 上永久的 `usable` 或全局等级。部分批次可以允许对象事实、经授权的原声检索和固定分母的集合内描述，同时拒绝总体比例、跨期增长和市场规模；另一个用途必须重新评估。
 
@@ -368,9 +370,9 @@ UI/CLI 不把技术栈和原始调用栈推给 Mog；`INTERNAL_FAILURE` 返回�
 
 | 编号 | 决定 | 当前推荐 | 验证方式 |
 |---|---|---|---|
-| `DEC-G7-01` | 一级导航最终数量/名称 | 今日关注、领域探索、语料、研究/情报、选题/行动、运行中心为主，治理二级化 | 低保真任务走查 |
-| `DEC-G7-02` | 今日关注展示多少 | 不先固定；以 5–10 分钟完成判断为门 | 一周候选量模拟 |
-| `DEC-G7-03` | Topic 首屏顺序 | 快速理解 → 原声 → 内容叙事 → 历史/近期 → 依据 → 动作 | 真实脱敏样本原型 |
+| `DEC-G7-01` | 一级导航最终数量/名称 | **已收口（首页部分）**：日常入口采用三栏首页 + 三段下滚区，见 `HOME-01`/`HOME-03`/`HOME-09`；其余一级入口仍待走查 | 低保真任务走查 |
+| `DEC-G7-02` | 今日关注展示多少 | **已收口**：绝对门槛 + 上限封顶，不设保底条数，交白卷合法；条数由左栏目录决定，见 `HOME-07`/`HOME-09` | 真实候选量与 5–10 分钟走查复核 |
+| `DEC-G7-03` | Topic 首屏顺序 | 维持原推荐；首页到 Topic 之间新增就地抽屉一级下钻，Topic 工作区保持重结构，见 `HOME-13` | 真实脱敏样本原型 |
 | `DEC-G7-04` | Corpus 选择单位 | 同一材料 + Fragment + Selection，不建第二物理池 | 评论/线程/片段任务测试 |
 | `DEC-G7-05` | CLI 首批命令 | 只读/explain/status + proposal/request，正式写入和批量原文关闭 | 两个 Agent contract test |
 | `DEC-G7-06` | CLI 认证与 Delegation | 短期用途化凭据，服务端保存委托 | 威胁建模与撤权测试 |

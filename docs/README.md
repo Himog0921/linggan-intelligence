@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-08-20
+> 最后核对: 2026-08-21
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -20,6 +20,7 @@
 | 文档 | 状态 | 用途 |
 |---|---|---|
 | [`current-state.md`](current-state.md) | 权威当前 | 当前阶段、事项队列和决策缺口 |
+| [`development-stage-tracker.md`](development-stage-tracker.md) | 权威当前 | 从开发基线到真实运行与业务验收的全项目阶段总表、阶段证据和 Mog 跟进入口 |
 | [`governance/file-placement-standard.md`](governance/file-placement-standard.md) | 权威当前 | 文件分类、命名、放置、归档与生成物规则 |
 | [`governance/agent-collaboration.md`](governance/agent-collaboration.md) | 权威当前 | Agent 读取、任务、冲突、更新和验收流程 |
 | [`governance/generated-artifacts-registry.md`](governance/generated-artifacts-registry.md) | 权威当前 | 所有生成型文件的固定位置与入库许可 |
@@ -34,7 +35,11 @@
 | [`decisions/0001-greenfield-rust-clean-db.md`](decisions/0001-greenfield-rust-clean-db.md) | 权威当前 | 已接受的 Rust 与全新 PostgreSQL 决策 |
 | [`product/PRD.md`](product/PRD.md) | 草案 | DISC-001 的产品输入，不是已接受实现合同 |
 | [`product/domain-invariants.md`](product/domain-invariants.md) | 权威当前 | 跨 Gate 的领域不变量、判断资格与持续扩展的对抗性验收案例 |
+| [`architecture/technical-architecture-baseline.md`](architecture/technical-architecture-baseline.md) | 权威当前 | 全产品技术架构统一入口：权威层级、确定性、当前/目标边界、模块/入口/数据/运行主干与 SCOPE 符合性 |
 | [`architecture/target-architecture.md`](architecture/target-architecture.md) | 草案 | DISC-001 已确认硬边界之上的总体架构建议；具体实现按 SCOPE 渐进冻结 |
+| [`architecture/system-overview-diagram.html`](architecture/system-overview-diagram.html) | 草案 | AEDS 风格的整体架构图；在同一视图中区分当前代码骨架、已批准 Evidence 切片与后续目标能力 |
+| [`architecture/business-process-diagram.html`](architecture/business-process-diagram.html) | 草案 | AEDS 风格的内容情报业务流程图；展示人、控制层、Capture、Evidence 与 Intelligence 的责任交接 |
+| [`architecture/project-architecture-atlas.html`](architecture/project-architecture-atlas.html) | 草案 | 面向非技术项目负责人的 AEDS 中文架构全景页；分层展示新旧项目、模块化单体技术主干、开发 Agent 协作、逻辑模块、数据、采集、产品内 Agent、界面、运行环境、当前切片与状态路线图 |
 | [`architecture/module-architecture.md`](architecture/module-architecture.md) | 草案 | Gate 6 Rust 模块、接口、依赖、adapter、测试表面与无巨型文件门禁；不授权创建 crate |
 | [`architecture/agent-architecture.md`](architecture/agent-architecture.md) | 草案 | Gate 6 Agent Invocation、工具权限、预算/停止、恢复、结构化输出、隐私与评测；不选择模型或授权真实原文 |
 | [`architecture/capture-plugin-architecture.md`](architecture/capture-plugin-architecture.md) | 草案 | Gate 6 服务端采集控制层、有限工位/账号、Work Order/Attempt/lease、部分结果、MV3 插件与协议升级 |
@@ -46,7 +51,8 @@
 | [`architecture/rust-porting-map.md`](architecture/rust-porting-map.md) | 草案 | Rust 移植候选参考；只有正式 SCOPE 内明确列出的部分可以实施 |
 | [`pages/page-map.md`](pages/page-map.md) | 草案 | 页面与情报工作流的初步映射 |
 | [`pages/product-interface-architecture.md`](pages/product-interface-architecture.md) | 草案 | Gate 7 工作台、Topic/Corpus/研究/行动/运行中心、API 与外部 Agent CLI 入口架构 |
-| [`migration/action-plan.md`](migration/action-plan.md) | 活跃计划 | 分阶段重建路线与退出条件 |
+| [`pages/home-intelligence-surface.md`](pages/home-intelligence-surface.md) | 草案 | `HOME-01`–`HOME-17` 确认的首页情报面形态：三栏骨架、恒定地形与昨夜行动、常驻编队与总编、选题卡回流、校准回路；不是实现授权 |
+| [`migration/action-plan.md`](migration/action-plan.md) | 活跃计划 | 基础设计阶段形成的重建顺序与架构工作包参考；实时阶段状态、完成证据和决策门以 `development-stage-tracker.md` 为准 |
 | [`migration/transfer-checklist.md`](migration/transfer-checklist.md) | 活跃计划 | 跨机器搬迁和隔离检查 |
 | [`reviews/bootstrap-review.md`](reviews/bootstrap-review.md) | 一次性报告 | Bootstrap 固定点审查，不代表当前实现状态 |
 | [`audits/gate-3-domain-model-audit-2026-08-20.md`](audits/gate-3-domain-model-audit-2026-08-20.md) | 一次性报告 | 已获用户整体确认的 Gate 3 设计快照与全链压力测试；不替代权威共同语言，也不证明 Gate 4–7 已通过 |
@@ -56,8 +62,11 @@
 | [`audits/pre-scope-001-readiness-2026-08-20.md`](audits/pre-scope-001-readiness-2026-08-20.md) | 一次性报告 | 不启动 SCOPE/代码的前提下预演首个 Content Evidence 切片的 fixture、数据库副作用、模块/文件预算和完成标准 |
 | [`audits/scope-001-final-adversarial-audit-2026-08-20.md`](audits/scope-001-final-adversarial-audit-2026-08-20.md) | 一次性报告 | 正式 SCOPE-001 的独立代码前审查；P0/P1/P2、修订结果和最终实施确认边界 |
 | [`audits/implementation-readiness-review-2026-08-20.md`](audits/implementation-readiness-review-2026-08-20.md) | 一次性报告 | 全项目正式编码前实施就绪终审；NO-GO 证据、P0/P1、15 个场景、真实最小闭环及主线 Agent 复核协议 |
+| [`audits/pi-agent-kernel-upstream-assessment-2026-08-20.md`](audits/pi-agent-kernel-upstream-assessment-2026-08-20.md) | 一次性报告 | Pi 上游发布版/源码/安全边界审查；裁定为统一 Agent 执行适配器候选，不是权限、持久任务或业务事实内核，也不授权当前编码 |
+| [`audits/pre-implementation-architecture-audit-2026-08-21.md`](audits/pre-implementation-architecture-audit-2026-08-21.md) | 一次性报告 | `ADV-AUDIT-001` 的独立复核最终处置：保留权威冲突、真实 producer 接缝、产品职责和 dirty worktree 风险，否定当前解除 Attempt 1:1、强加 `attemptRef`、改 crate 或整批提交的危险建议；不改变 F01 代码门 |
 | [`runbooks/development-environment.md`](runbooks/development-environment.md) | 权威当前 | Rust 与 Docker PostgreSQL 16 的统一运行入口 |
-| [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一事项：实施已获批准；先通过代码前语义冻结 G1–G5，再进入合成事实内核 TDD |
+| [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) | 活跃计划 | F01 后、首个真实 producer 和用户可见切片前的产品形态、P0 页面、Canary、Capture/Media 与第一阶段运行架构决策图；当前首票为 `product-shell` |
+| [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一获准实施事项：F01 synthetic fact-kernel technical tracer 受控进入 TDD；完成 loopback API + minimal CLI 后 hard stop，不扩入 F02–F10、真实平台/AI/插件/Web |
 | [`plans/completed/disc-001-project-foundation-design.md`](plans/completed/disc-001-project-foundation-design.md) | 已完成计划 | 七道项目基础设计关口与 `USER-DEC-01`–`06` 的完成记录 |
 | [`plans/completed/env-001-development-environment.md`](plans/completed/env-001-development-environment.md) | 已完成计划 | ENV-001 的范围、执行和验收记录 |
 | [`plans/completed/gov-001-project-file-governance.md`](plans/completed/gov-001-project-file-governance.md) | 已完成计划 | GOV-001 的范围、交付和验收记录 |
@@ -78,11 +87,12 @@
 
 - 项目管理或新增文件：先读 `governance/`，再读当前事项文档。
 - 使用 Matt Pocock 工程技能：先读 `agents/` 中与任务追踪、triage 或领域文档相关的配置，再进入当前 Issue 和直接关联文档。
-- 实施或审查 SCOPE-001：读取当前 SCOPE 后必须读取 `agents/scope-001-execution-contract.md`；未通过 G1–G5 时只允许收口规格和测试 Oracle。
+- 实施或审查 SCOPE-001：读取当前 SCOPE 后必须读取 `agents/scope-001-execution-contract.md`；当前仅按 CONTROLLED OPEN FOR TDD 推进，新增产品含义、权限或真实范围仍须停止并确认。
 - 环境配置：读 `current-state.md`、[`runbooks/development-environment.md`](runbooks/development-environment.md) 和 `database/README.md`。
 - 产品讨论：读 `product/PRD.md`、`context/discussion-decisions.md` 和相关 ACCEPTED ADR。
+- 首页与日常入口形态：先读 [`pages/page-map.md`](pages/page-map.md)，再读 [`pages/product-interface-architecture.md`](pages/product-interface-architecture.md)，最后读 [`pages/home-intelligence-surface.md`](pages/home-intelligence-surface.md)；三者均为草案，不得据此直接实现前端。
 - 数据与 PostgreSQL 设计：先读 `architecture/data-architecture.md`；只有需要关系/基数时再读 `architecture/data-relations.md`，需要事务/并发/验收时再读 `architecture/data-consistency.md`，并同时遵守 `database/README.md` 和领域不变量；未确认草案不得直接生成 DDL。
-- 架构或实现：读目标架构、对应迁移地图、真实代码与测试；文档不得替代代码事实。
+- 架构或实现：先读 [`architecture/technical-architecture-baseline.md`](architecture/technical-architecture-baseline.md)，再按任务读相应专题架构、当前 SCOPE、真实代码与测试；文档不得替代代码事实。
 - 来源审计：先读 `references/README.md` 和 provenance，再只打开被当前审计明确引用的 fixture、源码或 handoff。
 
 ## 入库完成标准
