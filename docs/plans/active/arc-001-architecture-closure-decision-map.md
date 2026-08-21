@@ -127,6 +127,10 @@ Decision owner: Mog
 
 ### Answer
 
+草案决策材料已由 GitHub [Issue #11](https://github.com/Himog0921/linggan-intelligence/issues/11) 形成：[`first-producer-canary-decision-pack.md`](../../architecture/first-producer-canary-decision-pack.md)。它比较文本与结构优先和同步媒体两种边界，给出 A 的建议，并明确两者均不授权真实访问、媒体下载、schema、保留期限或实际 Canary。
+
+本票仍为 `open`：只有 Mog 从决策包中的 A/B 选项作出明确选择后，才能填写本节的正式 Answer、设为 `resolved`，并解锁后续 Capture/Media 合同工作。
+
 
 ## capture-control-contract: 真实插件前必须冻结哪些调度责任？
 
