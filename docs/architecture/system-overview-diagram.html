@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="diagram-status" content="target-blueprint-with-current-boundary">
+  <meta name="last-verified" content="2026-08-20">
+  <title>Linggan Intelligence · 内容情报系统整体架构</title>
+  <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&amp;family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --paper: #fafaf7;
+      --paper-2: #f8fafc;
+      --ink: #181d26;
+      --muted: #41454d;
+      --soft: #6b7280;
+      --rule: rgba(24, 29, 38, 0.12);
+      --rule-strong: #9297a0;
+      --accent: #aa2d00;
+      --accent-tint: rgba(170, 45, 0, 0.08);
+      --link: #002fa7;
+      --link-tint: rgba(0, 47, 167, 0.08);
+      --sans: Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      --serif: "Instrument Serif", "Songti SC", "STSong", serif;
+      --mono: "Geist Mono", "SFMono-Regular", Consolas, monospace;
+    }
+    body {
+      min-height: 100vh;
+      padding: 48px 32px;
+      color: var(--ink);
+      background:
+        linear-gradient(var(--rule) 1px, transparent 1px),
+        linear-gradient(90deg, var(--rule) 1px, transparent 1px),
+        var(--paper);
+      background-size: 32px 32px;
+      font-family: var(--sans);
+    }
+    .frame { width: min(1320px, 100%); margin: 0 auto; }
+    .eyebrow {
+      margin-bottom: 12px;
+      color: var(--muted);
+      font: 500 12px/16px var(--mono);
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+    h1 {
+      max-width: 920px;
+      font: 400 40px/44px var(--serif);
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      max-width: 880px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 16px;
+      line-height: 24px;
+    }
+    .status-rail {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      margin: 32px 0 20px;
+      border: 1px solid var(--rule);
+      background: rgba(250, 250, 247, 0.92);
+    }
+    .status-item { min-height: 80px; padding: 16px 20px; }
+    .status-item + .status-item { border-left: 1px solid var(--rule); }
+    .status-key { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font: 600 12px/16px var(--mono); letter-spacing: 0.08em; }
+    .status-key::before { width: 8px; height: 8px; border-radius: 50%; background: var(--rule-strong); content: ""; }
+    .status-item.scope .status-key::before { background: var(--accent); }
+    .status-item.target .status-key::before { background: var(--link); }
+    .status-item p { color: var(--muted); font-size: 12px; line-height: 20px; }
+    .diagram-shell { overflow-x: auto; border: 1px solid var(--rule); background: var(--paper-2); padding: 24px; }
+    svg { display: block; width: 100%; min-width: 1000px; }
+    .cards { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-top: 20px; }
+    .card { min-height: 156px; padding: 20px; border: 1px solid var(--rule); background: rgba(250, 250, 247, 0.94); }
+    .card-label { margin-bottom: 12px; color: var(--soft); font: 500 8px/12px var(--mono); letter-spacing: 0.16em; text-transform: uppercase; }
+    .card h2 { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--rule); font-size: 16px; line-height: 20px; }
+    .card p, .card li { color: var(--muted); font-size: 12px; line-height: 20px; }
+    .card ul { list-style: none; }
+    .card li { position: relative; padding-left: 16px; }
+    .card li::before { position: absolute; left: 0; color: var(--accent); content: "—"; }
+    footer { display: flex; justify-content: space-between; gap: 16px; margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--rule); color: var(--soft); font: 400 12px/16px var(--mono); }
+    @media (max-width: 840px) {
+      body { padding: 32px 16px; }
+      h1 { font-size: 32px; line-height: 36px; }
+      .status-rail, .cards { grid-template-columns: 1fr; }
+      .status-item + .status-item { border-top: 1px solid var(--rule); border-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <header>
+      <p class="eyebrow">Linggan Intelligence / System Architecture / 2026-08-20</p>
+      <h1>内容情报系统整体架构</h1>
+      <p class="subtitle">一套以 Evidence 为底座的持续情报研究系统：人保留授权与后果决定，采集只执行有界工作，所有观察、判断与行动都能追溯来源。</p>
+    </header>
+
+    <section class="status-rail" aria-label="架构状态说明">
+      <article class="status-item">
+        <div class="status-key">CURRENT CODE</div>
+        <p>API、worker 与 Rust workspace 仍是可编译骨架；尚无业务 DDL、migration 或已证明业务链。</p>
+      </article>
+      <article class="status-item scope">
+        <div class="status-key">AUTHORIZED SLICE</div>
+        <p>范围只含合成/脱敏 Package → Evidence → Observation/Current → API/CLI；当前 G1–G5 语义冻结中，代码门关闭。</p>
+      </article>
+      <article class="status-item target">
+        <div class="status-key">TARGET BLUEPRINT</div>
+        <p>真实采集、工作台、Agent 情报、Topic/Corpus/Claim 与生产运行仍是目标能力，不代表已经上线。</p>
+      </article>
+    </section>
+
+    <section class="diagram-shell" aria-label="整体架构图">
+      <svg viewBox="0 0 1200 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="li-architecture-title li-architecture-desc">
+        <title id="li-architecture-title">Linggan Intelligence 内容情报系统整体架构</title>
+        <desc id="li-architecture-desc">三层架构图。上层是来源、人与受限 Agent，中层是 Capture、API 和 worker，下层是 Evidence、情报与 PostgreSQL。图中区分当前代码骨架、已批准的合成 Evidence 切片和后续目标能力。</desc>
+        <defs>
+          <pattern id="li-architecture-dots" width="24" height="24" patternUnits="userSpaceOnUse">
+            <circle cx="12" cy="12" r="1" fill="rgba(24,29,38,0.10)"/>
+          </pattern>
+          <marker id="li-architecture-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <polygon points="0 0,8 4,0 8" fill="#41454d"/>
+          </marker>
+          <marker id="li-architecture-arrow-accent" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <polygon points="0 0,8 4,0 8" fill="#aa2d00"/>
+          </marker>
+          <marker id="li-architecture-arrow-link" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+            <polygon points="0 0,8 4,0 8" fill="#002fa7"/>
+          </marker>
+        </defs>
+
+        <rect width="1200" height="640" fill="#f8fafc"/>
+        <rect width="1200" height="640" fill="url(#li-architecture-dots)" opacity="0.48"/>
+
+        <!-- Zones: background before connectors and nodes. -->
+        <rect x="40" y="32" width="1120" height="152" rx="8" fill="rgba(24,29,38,0.018)" stroke="rgba(24,29,38,0.12)"/>
+        <rect x="64" y="36" width="152" height="16" fill="#f8fafc"/>
+        <text x="140" y="48" fill="#6b7280" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.16em">ACTORS &amp; SOURCES</text>
+
+        <rect x="40" y="220" width="1120" height="152" rx="8" fill="rgba(0,47,167,0.018)" stroke="rgba(24,29,38,0.12)"/>
+        <rect x="64" y="224" width="172" height="16" fill="#f8fafc"/>
+        <text x="150" y="236" fill="#6b7280" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.16em">CONTROL &amp; EXECUTION</text>
+
+        <rect x="40" y="408" width="1120" height="152" rx="8" fill="rgba(170,45,0,0.018)" stroke="rgba(24,29,38,0.12)"/>
+        <rect x="64" y="412" width="156" height="16" fill="#f8fafc"/>
+        <text x="142" y="424" fill="#6b7280" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.16em">TRUTH &amp; LEARNING</text>
+
+        <!-- Connectors: always behind nodes. -->
+        <line x1="208" y1="156" x2="208" y2="264" stroke="#41454d" stroke-width="1" marker-end="url(#li-architecture-arrow)"/>
+        <line x1="344" y1="300" x2="464" y2="300" stroke="#002fa7" stroke-width="1.2" marker-end="url(#li-architecture-arrow-link)"/>
+        <line x1="552" y1="156" x2="552" y2="264" stroke="#002fa7" stroke-width="1.2" marker-end="url(#li-architecture-arrow-link)"/>
+        <path d="M 992,156 V 196 Q 992,204 984,204 H 688 Q 680,204 680,212 V 264" fill="none" stroke="#002fa7" stroke-width="1" stroke-dasharray="4,4" marker-end="url(#li-architecture-arrow-link)"/>
+        <path d="M 536,336 V 388 Q 536,396 528,396 H 248 Q 240,396 240,404 V 452" fill="none" stroke="#aa2d00" stroke-width="1.4" marker-end="url(#li-architecture-arrow-accent)"/>
+        <path d="M 880,336 V 408 Q 880,416 872,416 H 288 Q 280,416 280,424 V 452" fill="none" stroke="#41454d" stroke-width="1" marker-end="url(#li-architecture-arrow)"/>
+        <line x1="344" y1="488" x2="464" y2="488" stroke="#aa2d00" stroke-width="1.2" marker-end="url(#li-architecture-arrow-accent)"/>
+        <line x1="736" y1="488" x2="856" y2="488" stroke="#41454d" stroke-width="1" marker-end="url(#li-architecture-arrow)"/>
+        <line x1="992" y1="452" x2="992" y2="336" stroke="#41454d" stroke-width="1" marker-end="url(#li-architecture-arrow)"/>
+        <path d="M 920,452 V 392 Q 920,384 912,384 H 688 Q 680,384 680,376 V 336" fill="none" stroke="#41454d" stroke-width="1" marker-end="url(#li-architecture-arrow)"/>
+        <path d="M 208,524 V 540 Q 208,548 216,548 H 984 Q 992,548 992,540 V 524" fill="none" stroke="#41454d" stroke-width="1" stroke-dasharray="4,4" marker-end="url(#li-architecture-arrow)"/>
+
+        <!-- Connector labels with paper masks. -->
+        <rect x="160" y="196" width="96" height="16" fill="#f8fafc"/>
+        <text x="208" y="208" fill="#41454d" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">SOURCE TRACE</text>
+        <rect x="364" y="288" width="64" height="16" fill="#f8fafc"/>
+        <text x="396" y="300" fill="#002fa7" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">PACKAGE</text>
+        <rect x="508" y="196" width="88" height="16" fill="#f8fafc"/>
+        <text x="552" y="208" fill="#002fa7" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">HUMAN CALL</text>
+        <rect x="776" y="192" width="96" height="16" fill="#f8fafc"/>
+        <text x="824" y="204" fill="#002fa7" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">BOUNDED CALL</text>
+        <rect x="336" y="384" width="64" height="16" fill="#f8fafc"/>
+        <text x="368" y="396" fill="#aa2d00" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">INGRESS</text>
+        <rect x="544" y="404" width="72" height="16" fill="#f8fafc"/>
+        <text x="580" y="416" fill="#41454d" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">PROCESS</text>
+        <rect x="360" y="476" width="88" height="16" fill="#f8fafc"/>
+        <text x="404" y="488" fill="#aa2d00" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">PROVENANCE</text>
+        <rect x="948" y="372" width="88" height="16" fill="#f8fafc"/>
+        <text x="992" y="384" fill="#41454d" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">DURABLE WORK</text>
+
+        <!-- Node 1: world sources. -->
+        <g>
+          <rect x="72" y="84" width="272" height="72" rx="4" fill="#f8fafc"/>
+          <rect x="72" y="84" width="272" height="72" rx="4" fill="rgba(24,29,38,0.02)" stroke="#9297a0"/>
+          <rect x="84" y="96" width="36" height="16" fill="transparent" stroke="rgba(24,29,38,0.28)"/>
+          <text x="102" y="108" fill="#6b7280" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">EXT</text>
+          <text x="208" y="120" fill="#181d26" font-size="16" font-weight="600" font-family="Inter, sans-serif" text-anchor="middle">外部世界痕迹</text>
+          <text x="208" y="140" fill="#41454d" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">pages · APIs · files · human material</text>
+        </g>
+
+        <!-- Node 2: human-facing entry. -->
+        <g>
+          <rect x="464" y="84" width="272" height="72" rx="4" fill="#f8fafc"/>
+          <rect x="464" y="84" width="272" height="72" rx="4" fill="rgba(0,47,167,0.04)" stroke="#002fa7" stroke-dasharray="4,4"/>
+          <rect x="476" y="96" width="56" height="16" fill="rgba(0,47,167,0.08)"/>
+          <text x="504" y="108" fill="#002fa7" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">TARGET</text>
+          <text x="600" y="120" fill="#181d26" font-size="16" font-weight="600" font-family="Inter, sans-serif" text-anchor="middle">人 / 工作台 / CLI</text>
+          <text x="600" y="140" fill="#41454d" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">question · authorization · decision</text>
+        </g>
+
+        <!-- Node 3: bounded agent. -->
+        <g>
+          <rect x="856" y="84" width="272" height="72" rx="4" fill="#f8fafc"/>
+          <rect x="856" y="84" width="272" height="72" rx="4" fill="rgba(0,47,167,0.025)" stroke="#002fa7" stroke-dasharray="4,4"/>
+          <rect x="868" y="96" width="56" height="16" fill="rgba(0,47,167,0.08)"/>
+          <text x="896" y="108" fill="#002fa7" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">LATER</text>
+          <text x="992" y="120" fill="#181d26" font-size="16" font-weight="600" font-family="Inter, sans-serif" text-anchor="middle">受限外部 Agent</text>
+          <text x="992" y="140" fill="#41454d" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">delegation · bounded tools · no DB access</text>
+        </g>
+
+        <!-- Node 4: capture edge. -->
+        <g>
+          <rect x="72" y="264" width="272" height="72" rx="4" fill="#f8fafc"/>
+          <rect x="72" y="264" width="272" height="72" rx="4" fill="rgba(24,29,38,0.02)" stroke="#9297a0" stroke-dasharray="4,4"/>
+          <rect x="84" y="276" width="56" height="16" fill="rgba(24,29,38,0.06)"/>
+          <text x="112" y="288" fill="#6b7280" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">LATER</text>
+          <text x="208" y="300" fill="#181d26" font-size="16" font-weight="600" font-family="Inter, sans-serif" text-anchor="middle">Capture 执行边缘</text>
+          <text x="208" y="320" fill="#41454d" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">MV3 plugin · producer · terminal package</text>
+        </g>
+
+        <!-- Node 5: API bootstrap. -->
+        <g>
+          <rect x="464" y="264" width="272" height="72" rx="4" fill="#f8fafc"/>
+          <rect x="464" y="264" width="272" height="72" rx="4" fill="#fafaf7" stroke="#181d26"/>
+          <rect x="476" y="276" width="76" height="16" fill="rgba(24,29,38,0.08)"/>
+          <text x="514" y="288" fill="#181d26" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">BOOTSTRAP</text>
+          <text x="600" y="300" fill="#181d26" font-size="16" font-weight="600" font-family="Inter, sans-serif" text-anchor="middle">linggan-api</text>
+          <text x="600" y="320" fill="#41454d" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">auth · validation · module composition</text>
+        </g>
+
+        <!-- Node 6: worker bootstrap. -->
+        <g>
+          <rect x="856" y="264" width="272" height="72" rx="4" fill="#f8fafc"/>
+          <rect x="856" y="264" width="272" height="72" rx="4" fill="#fafaf7" stroke="#181d26"/>
+          <rect x="868" y="276" width="76" height="16" fill="rgba(24,29,38,0.08)"/>
+          <text x="906" y="288" fill="#181d26" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">BOOTSTRAP</text>
+          <text x="992" y="300" fill="#181d26" font-size="16" font-weight="600" font-family="Inter, sans-serif" text-anchor="middle">linggan-worker</text>
+          <text x="992" y="320" fill="#41454d" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">durable work · fenced handlers</text>
+        </g>
+
+        <!-- Node 7: authorized evidence core, the single focal node. -->
+        <g>
+          <rect x="72" y="452" width="272" height="72" rx="4" fill="#f8fafc"/>
+          <rect x="72" y="452" width="272" height="72" rx="4" fill="rgba(170,45,0,0.08)" stroke="#aa2d00" stroke-width="1.2"/>
+          <rect x="84" y="464" width="84" height="16" fill="rgba(170,45,0,0.12)"/>
+          <text x="126" y="476" fill="#aa2d00" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">AUTHORIZED</text>
+          <text x="208" y="488" fill="#181d26" font-size="16" font-weight="600" font-family="Inter, sans-serif" text-anchor="middle">Evidence / Observation</text>
+          <text x="208" y="508" fill="#41454d" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">immutable source · current with provenance</text>
+        </g>
+
+        <!-- Node 8: target intelligence. -->
+        <g>
+          <rect x="464" y="452" width="272" height="72" rx="4" fill="#f8fafc"/>
+          <rect x="464" y="452" width="272" height="72" rx="4" fill="rgba(24,29,38,0.02)" stroke="#9297a0" stroke-dasharray="4,4"/>
+          <rect x="476" y="464" width="56" height="16" fill="rgba(24,29,38,0.06)"/>
+          <text x="504" y="476" fill="#6b7280" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">LATER</text>
+          <text x="600" y="488" fill="#181d26" font-size="16" font-weight="600" font-family="Inter, sans-serif" text-anchor="middle">Knowledge / Intelligence</text>
+          <text x="600" y="508" fill="#41454d" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">topic · analysis · claim · brief · learning</text>
+        </g>
+
+        <!-- Node 9: PostgreSQL foundation. -->
+        <g>
+          <rect x="856" y="452" width="272" height="72" rx="4" fill="#f8fafc"/>
+          <rect x="856" y="452" width="272" height="72" rx="4" fill="rgba(0,47,167,0.06)" stroke="#002fa7"/>
+          <rect x="868" y="464" width="96" height="16" fill="rgba(0,47,167,0.10)"/>
+          <text x="916" y="476" fill="#002fa7" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">DEV VERIFIED</text>
+          <text x="992" y="488" fill="#181d26" font-size="16" font-weight="600" font-family="Inter, sans-serif" text-anchor="middle">PostgreSQL 16</text>
+          <text x="992" y="508" fill="#41454d" font-size="8" font-family="'Geist Mono', monospace" text-anchor="middle">one authority · business schema absent</text>
+        </g>
+
+        <!-- Bottom legend strip. -->
+        <line x1="40" y1="584" x2="1160" y2="584" stroke="rgba(24,29,38,0.12)"/>
+        <text x="40" y="604" fill="#6b7280" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.16em">LEGEND</text>
+        <rect x="136" y="596" width="20" height="12" fill="#fafaf7" stroke="#181d26"/>
+        <text x="168" y="606" fill="#41454d" font-size="8" font-family="Inter, sans-serif">当前代码骨架</text>
+        <rect x="304" y="596" width="20" height="12" fill="rgba(170,45,0,0.08)" stroke="#aa2d00"/>
+        <text x="336" y="606" fill="#41454d" font-size="8" font-family="Inter, sans-serif">已批准切片 / 代码门关闭</text>
+        <rect x="488" y="596" width="20" height="12" fill="#f8fafc" stroke="#9297a0" stroke-dasharray="4,4"/>
+        <text x="520" y="606" fill="#41454d" font-size="8" font-family="Inter, sans-serif">目标能力 / 尚未实现</text>
+        <line x1="728" y1="602" x2="772" y2="602" stroke="#002fa7" stroke-width="1.2" marker-end="url(#li-architecture-arrow-link)"/>
+        <text x="784" y="606" fill="#41454d" font-size="8" font-family="Inter, sans-serif">受控入口 / 调用</text>
+        <line x1="944" y1="602" x2="988" y2="602" stroke="#41454d" stroke-width="1" stroke-dasharray="4,4" marker-end="url(#li-architecture-arrow)"/>
+        <text x="1000" y="606" fill="#41454d" font-size="8" font-family="Inter, sans-serif">异步 / 回写</text>
+      </svg>
+    </section>
+
+    <section class="cards" aria-label="架构说明">
+      <article class="card">
+        <p class="card-label">CURRENT REALITY</p>
+        <h2>骨架可编译，不等于业务已成立</h2>
+        <p>API 和 worker 当前只打印启动说明；Evidence、Observation、Intelligence 与业务数据库常量仍明确标记未实现。</p>
+      </article>
+      <article class="card">
+        <p class="card-label">THE FIRST PROOF</p>
+        <h2>先证明事实链，再扩产品面</h2>
+        <ul>
+          <li>终态 Package 原子接入</li>
+          <li>逐 Record 形成 Observation 与 Current</li>
+          <li>API/CLI 返回 Coverage、限制与来源</li>
+        </ul>
+      </article>
+      <article class="card">
+        <p class="card-label">NON-NEGOTIABLE</p>
+        <h2>系统不能替现实补答案</h2>
+        <p>Evidence 只证明系统接纳了什么；Agent 判断不是事实；任务结束不是业务成功；没有观察到的结果保持 unknown，而不是 0。</p>
+      </article>
+    </section>
+
+    <footer>
+      <span>status: architecture blueprint with implementation boundary</span>
+      <span>source: current code + governed project docs</span>
+    </footer>
+  </main>
+</body>
+</html>
