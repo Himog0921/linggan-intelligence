@@ -43,6 +43,12 @@
 | [design/templates/component-spec-form.md](design/templates/component-spec-form.md) | 权威当前 | 可复用组件规格表单 |
 | [design/templates/ui-change-manifest-form.md](design/templates/ui-change-manifest-form.md) | 权威当前 | 每次 UI 变更的来源、范围、影响与证明清单表单 |
 | [design/templates/visual-acceptance-form.md](design/templates/visual-acceptance-form.md) | 权威当前 | 视觉、任务、状态和真实后果四层验收记录表单 |
+| [design/foundation/topic-intelligence-visual-language.md](design/foundation/topic-intelligence-visual-language.md) | 权威当前 | DESIGN-002 的 DS-001–DS-007：合成 Topic Reference Page 的受限视觉语言 |
+| [design/patterns/evidence-candidate-and-boundary-patterns.md](design/patterns/evidence-candidate-and-boundary-patterns.md) | 权威当前 | DESIGN-002 的 PAT-001–PAT-004：观察、候选、边界与无副作用意图表达 |
+| [design/components/component-promotion.md](design/components/component-promotion.md) | 权威当前 | 从 Reference Page 局部块到真实 CMP 的晋升条件；当前没有已晋升组件 |
+| [design/pages/topic-intelligence-reference-page.md](design/pages/topic-intelligence-reference-page.md) | 权威当前 | PAGE-TOPIC-001 的组合规格、状态、互动和验收边界 |
+| [design/pages/topic-intelligence-reference.html](design/pages/topic-intelligence-reference.html) | 权威当前 | 可本地打开的合成静态 Topic Reference Page；不是运行 Web 产品 |
+| [design/pages/topic-intelligence-reference-acceptance.md](design/pages/topic-intelligence-reference-acceptance.md) | 权威当前 | ACC-TOPIC-001：静态参考实现的视觉、互动、自动检查和未证明边界 |
 | [`architecture/technical-architecture-baseline.md`](architecture/technical-architecture-baseline.md) | 权威当前 | 全产品技术架构统一入口：权威层级、确定性、当前/目标边界、模块/入口/数据/运行主干与 SCOPE 符合性 |
 | [`architecture/target-architecture.md`](architecture/target-architecture.md) | 草案 | DISC-001 已确认硬边界之上的总体架构建议；具体实现按 SCOPE 渐进冻结 |
 | [`architecture/system-overview-diagram.html`](architecture/system-overview-diagram.html) | 草案 | AEDS 风格的整体架构图；在同一视图中区分当前代码骨架、已批准 Evidence 切片与后续目标能力 |
@@ -60,6 +66,7 @@
 | [`pages/page-map.md`](pages/page-map.md) | 草案 | 页面与情报工作流的初步映射 |
 | [`pages/product-interface-architecture.md`](pages/product-interface-architecture.md) | 草案 | Gate 7 工作台、Topic/Corpus/研究/行动/运行中心、API 与外部 Agent CLI 入口架构 |
 | [`pages/home-intelligence-surface.md`](pages/home-intelligence-surface.md) | 草案 | `HOME-01`–`HOME-17` 确认的首页情报面形态：三栏骨架、恒定地形与昨夜行动、常驻编队与总编、选题卡回流、校准回路；不是实现授权 |
+| [`pages/topic-intelligence-surface.md`](pages/topic-intelligence-surface.md) | 权威当前 | DESIGN-002 的 Topic 深入任务、信息/状态/行动边界；当前只授权合成静态参考页 |
 | [`migration/action-plan.md`](migration/action-plan.md) | 活跃计划 | 基础设计阶段形成的重建顺序与架构工作包参考；实时阶段状态、完成证据和决策门以 `development-stage-tracker.md` 为准 |
 | [`migration/transfer-checklist.md`](migration/transfer-checklist.md) | 活跃计划 | 跨机器搬迁和隔离检查 |
 | [`reviews/bootstrap-review.md`](reviews/bootstrap-review.md) | 一次性报告 | Bootstrap 固定点审查，不代表当前实现状态 |
@@ -74,6 +81,7 @@
 | [`audits/pre-implementation-architecture-audit-2026-08-21.md`](audits/pre-implementation-architecture-audit-2026-08-21.md) | 一次性报告 | `ADV-AUDIT-001` 的独立复核最终处置：保留权威冲突、真实 producer 接缝、产品职责和 dirty worktree 风险，否定当前解除 Attempt 1:1、强加 `attemptRef`、改 crate 或整批提交的危险建议；不改变 F01 代码门 |
 | [`runbooks/development-environment.md`](runbooks/development-environment.md) | 权威当前 | Rust 与 Docker PostgreSQL 16 的统一运行入口 |
 | [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) | 活跃计划 | F01 后、首个真实 producer 和用户可见切片前的产品形态、P0 页面、Canary、Capture/Media 与第一阶段运行架构决策图；当前首票为 `product-shell` |
+| [`plans/active/design-002-topic-intelligence-reference-page.md`](plans/active/design-002-topic-intelligence-reference-page.md) | 活跃计划 | 合成 Topic Intelligence Reference Page 的范围、规则、原型与验证计划；不替代完整 P0 或业务 SCOPE |
 | [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一获准实施事项：F01 synthetic fact-kernel technical tracer 受控进入 TDD；完成 loopback API + minimal CLI 后 hard stop，不扩入 F02–F10、真实平台/AI/插件/Web |
 | [`plans/completed/disc-001-project-foundation-design.md`](plans/completed/disc-001-project-foundation-design.md) | 已完成计划 | 七道项目基础设计关口与 `USER-DEC-01`–`06` 的完成记录 |
 | [`plans/completed/env-001-development-environment.md`](plans/completed/env-001-development-environment.md) | 已完成计划 | ENV-001 的范围、执行和验收记录 |
@@ -96,6 +104,7 @@
 - 项目管理或新增文件：先读 `governance/`，再读当前事项文档。
 - 使用 Matt Pocock 工程技能：先读 `agents/` 中与任务追踪、triage 或领域文档相关的配置，再进入当前 Issue 和直接关联文档。
 - UI 设计、前端实现或 UI 审查：先读 [agents/ui-execution-contract.md](agents/ui-execution-contract.md) 和 [design/README.md](design/README.md)，再进入对应产品页面、已批准设计规则、数据合同与当前 SCOPE；产品草案、截图、旧系统和参考材料不能单独授权实现。
+- DESIGN-002 Topic Reference Page：依次读 [`pages/topic-intelligence-surface.md`](pages/topic-intelligence-surface.md)、[`design/foundation/topic-intelligence-visual-language.md`](design/foundation/topic-intelligence-visual-language.md)、[`design/patterns/evidence-candidate-and-boundary-patterns.md`](design/patterns/evidence-candidate-and-boundary-patterns.md)、[`design/components/component-promotion.md`](design/components/component-promotion.md) 与 [`design/pages/topic-intelligence-reference-page.md`](design/pages/topic-intelligence-reference-page.md)；静态 HTML 只用于视觉走查，不能当成真实 API/UI 已实现的证据。
 - 实施或审查 SCOPE-001：读取当前 SCOPE 后必须读取 `agents/scope-001-execution-contract.md`；当前仅按 CONTROLLED OPEN FOR TDD 推进，新增产品含义、权限或真实范围仍须停止并确认。
 - 环境配置：读 `current-state.md`、[`runbooks/development-environment.md`](runbooks/development-environment.md) 和 `database/README.md`。
 - 产品讨论：读 `product/PRD.md`、`context/discussion-decisions.md` 和相关 ACCEPTED ADR。

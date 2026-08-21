@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="DESIGN-002 Topic Intelligence 静态参考页。全部内容为合成示例，不是运行中的 Linggan 系统。"
+    />
+    <title>Topic Intelligence / 任务启动困难 · Synthetic Reference</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #080b0a;
+        --surface: #121815;
+        --surface-raised: #1a211d;
+        --line: #66736a;
+        --line-strong: #d8ff4a;
+        --acid: #d8ff4a;
+        --coral: #ff745c;
+        --white: #f2f4ee;
+        --muted: #b2bcb4;
+        --quiet: #7f8b83;
+        --mono: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+        --sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+
+      html { background: var(--ink); }
+
+      body {
+        min-width: 320px;
+        margin: 0;
+        overflow-x: hidden;
+        background:
+          linear-gradient(90deg, rgba(216, 255, 74, 0.035) 1px, transparent 1px) 0 0 / 48px 48px,
+          linear-gradient(rgba(216, 255, 74, 0.025) 1px, transparent 1px) 0 0 / 48px 48px,
+          var(--ink);
+        color: var(--white);
+        font-family: var(--sans);
+        font-size: 16px;
+        line-height: 1.55;
+      }
+
+      button {
+        border: 0;
+        color: inherit;
+        cursor: pointer;
+        font: inherit;
+      }
+
+      button:focus-visible,
+      a:focus-visible {
+        outline: 3px solid var(--acid);
+        outline-offset: 4px;
+      }
+
+      .shell {
+        width: min(1500px, calc(100% - 40px));
+        margin: 0 auto;
+        padding: 20px 0 80px;
+      }
+
+      .eyebrow,
+      .meta,
+      .token,
+      .section-label,
+      .microcopy,
+      .window-button,
+      .intent-button,
+      .return-link {
+        font-family: var(--mono);
+        letter-spacing: 0.04em;
+      }
+
+      .mode-bar > *,
+      .eyebrow,
+      .definition-stamp,
+      .section-label > *,
+      .token,
+      .microcopy,
+      .intent-result {
+        overflow-wrap: anywhere;
+      }
+
+      .mode-bar {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 16px;
+        padding: 11px 14px;
+        border: 1px solid var(--acid);
+        background: rgba(216, 255, 74, 0.1);
+        color: var(--white);
+        font-size: 0.8rem;
+      }
+
+      .mode-bar strong { color: var(--acid); }
+      .mode-bar span:last-child { color: var(--muted); text-align: right; }
+
+      .masthead {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 40px;
+        align-items: end;
+        padding: 44px 0 32px;
+        border-bottom: 2px solid var(--white);
+      }
+
+      .eyebrow {
+        margin: 0 0 12px;
+        color: var(--acid);
+        font-size: 0.76rem;
+        font-weight: 700;
+      }
+
+      h1, h2, h3, p { margin-top: 0; }
+
+      h1 {
+        max-width: 13ch;
+        margin-bottom: 16px;
+        font-size: clamp(3.4rem, 8vw, 7.5rem);
+        line-height: 0.88;
+        letter-spacing: -0.08em;
+      }
+
+      .thesis {
+        max-width: 58ch;
+        margin-bottom: 0;
+        color: var(--muted);
+        font-size: 1.05rem;
+      }
+
+      .definition-stamp {
+        min-width: 275px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        font-family: var(--mono);
+        font-size: 0.78rem;
+        line-height: 1.75;
+      }
+
+      .definition-stamp b { color: var(--acid); }
+
+      .interface {
+        display: grid;
+        grid-template-columns: minmax(210px, 0.72fr) minmax(420px, 1.7fr) minmax(240px, 0.82fr);
+        gap: 22px;
+        margin-top: 22px;
+      }
+
+      .rail,
+      .center,
+      .rail-block,
+      .observation-main,
+      .voice,
+      .narratives,
+      .candidate,
+      .boundary,
+      .intent {
+        min-width: 0;
+      }
+
+      .rail-block,
+      .observation-main,
+      .voice,
+      .narratives,
+      .candidate,
+      .boundary,
+      .intent {
+        border: 1px solid var(--line);
+        background: var(--surface);
+      }
+
+      .rail-block {
+        margin-bottom: 22px;
+        padding: 18px;
+      }
+
+      .rail-block--acid { border-color: var(--acid); }
+      .rail-block--warning { border-color: var(--coral); }
+
+      .section-label {
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 16px;
+        color: var(--muted);
+        font-size: 0.71rem;
+        font-weight: 700;
+        text-transform: uppercase;
+      }
+
+      .section-label b { color: var(--white); font-weight: 700; }
+      .section-label .acid { color: var(--acid); }
+      .section-label .coral { color: var(--coral); }
+
+      .window-controls {
+        display: grid;
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+      }
+
+      .window-button {
+        min-height: 48px;
+        padding: 10px;
+        border: 1px solid var(--line);
+        background: transparent;
+        color: var(--muted);
+        font-size: 0.82rem;
+        text-align: left;
+      }
+
+      .window-button[aria-pressed="true"] {
+        border-color: var(--acid);
+        background: var(--acid);
+        color: var(--ink);
+        font-weight: 800;
+      }
+
+      .microcopy {
+        margin: 14px 0 0;
+        color: var(--quiet);
+        font-size: 0.72rem;
+        line-height: 1.55;
+      }
+
+      .ascii-frame {
+        overflow: hidden;
+        margin: 0;
+        color: var(--acid);
+        font-family: var(--mono);
+        font-size: 0.7rem;
+        line-height: 1.35;
+        white-space: pre;
+      }
+
+      .observation-main {
+        position: relative;
+        overflow: hidden;
+        min-height: 310px;
+        padding: clamp(24px, 4vw, 46px);
+        border-width: 2px;
+        border-color: var(--acid);
+        background:
+          linear-gradient(135deg, rgba(216, 255, 74, 0.13), transparent 53%),
+          var(--surface);
+      }
+
+      .observation-main::after {
+        position: absolute;
+        right: -1px;
+        bottom: -1px;
+        width: 110px;
+        height: 110px;
+        border-top: 2px solid var(--acid);
+        border-left: 2px solid var(--acid);
+        content: "";
+      }
+
+      .observation-main h2 {
+        position: relative;
+        z-index: 1;
+        max-width: 15ch;
+        margin-bottom: 16px;
+        font-size: clamp(2rem, 4vw, 4rem);
+        line-height: 0.98;
+        letter-spacing: -0.055em;
+      }
+
+      .observation-main p {
+        position: relative;
+        z-index: 1;
+        max-width: 55ch;
+        margin-bottom: 0;
+        color: var(--muted);
+      }
+
+      .data-line {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 26px;
+      }
+
+      .token {
+        padding: 5px 7px;
+        border: 1px solid rgba(242, 244, 238, 0.38);
+        color: var(--white);
+        font-size: 0.67rem;
+      }
+
+      .token--acid { border-color: var(--acid); color: var(--acid); }
+      .token--coral { border-color: var(--coral); color: var(--coral); }
+
+      .voice,
+      .narratives,
+      .candidate,
+      .boundary,
+      .intent { margin-top: 22px; }
+
+      .voice { padding: 22px; }
+
+      .voice-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .quote-card {
+        display: flex;
+        min-height: 215px;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 17px;
+        border-top: 3px solid var(--white);
+        background: var(--surface-raised);
+      }
+
+      .quote-card p {
+        margin-bottom: 20px;
+        font-size: 1.04rem;
+        line-height: 1.45;
+      }
+
+      .quote-card button {
+        align-self: flex-start;
+        padding: 0;
+        background: transparent;
+        color: var(--acid);
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        text-align: left;
+        text-decoration: underline;
+        text-underline-offset: 4px;
+      }
+
+      .quote-detail {
+        grid-column: 1 / -1;
+        padding: 16px 18px;
+        border-left: 3px solid var(--acid);
+        background: rgba(216, 255, 74, 0.08);
+        color: var(--muted);
+      }
+
+      .quote-detail[hidden] { display: none; }
+      .quote-detail strong { color: var(--white); }
+
+      .narratives { padding: 22px; }
+
+      .narrative-list { display: grid; gap: 1px; background: var(--line); }
+
+      .narrative-item {
+        display: grid;
+        grid-template-columns: 42px minmax(0, 1fr) minmax(130px, 0.55fr);
+        gap: 14px;
+        align-items: start;
+        padding: 14px;
+        background: var(--surface);
+      }
+
+      .narrative-item span:first-child {
+        color: var(--acid);
+        font-family: var(--mono);
+      }
+
+      .narrative-item h3 { margin: 0 0 4px; font-size: 1rem; }
+      .narrative-item p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+      .narrative-item .meta { color: var(--quiet); font-size: 0.68rem; text-align: right; }
+
+      .candidate,
+      .boundary,
+      .intent { padding: 18px; }
+
+      .candidate { border-color: var(--acid); }
+      .candidate h3,
+      .boundary h3,
+      .intent h3 { margin-bottom: 9px; font-size: 1.15rem; line-height: 1.2; }
+      .candidate p,
+      .boundary p,
+      .intent p { margin-bottom: 0; color: var(--muted); }
+      .boundary { border-color: var(--coral); }
+      .boundary h3 { color: var(--coral); }
+
+      .intent {
+        margin-top: 0;
+        border-color: var(--white);
+        background: var(--surface-raised);
+      }
+
+      .intent-buttons { display: grid; gap: 8px; margin: 16px 0 12px; }
+
+      .intent-button {
+        min-height: 46px;
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        background: var(--surface);
+        color: var(--white);
+        font-size: 0.76rem;
+        text-align: left;
+      }
+
+      .intent-button[aria-pressed="true"] { border-color: var(--acid); color: var(--acid); }
+      .intent-result { min-height: 54px; color: var(--muted); font-family: var(--mono); font-size: 0.72rem; }
+
+      .return-link {
+        display: inline-block;
+        margin-top: 18px;
+        color: var(--white);
+        font-size: 0.74rem;
+        text-underline-offset: 4px;
+      }
+
+      .footer {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        margin-top: 26px;
+        padding-top: 18px;
+        border-top: 1px solid var(--line);
+        color: var(--quiet);
+        font-family: var(--mono);
+        font-size: 0.68rem;
+      }
+
+      @media (max-width: 1060px) {
+        .interface { grid-template-columns: minmax(0, 1fr) 280px; }
+        .rail--left { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px; }
+        .rail--left .rail-block { margin-bottom: 0; }
+        .center { grid-column: 1 / 2; }
+        .rail--right { grid-column: 2; grid-row: 1 / span 2; }
+      }
+
+      @media (max-width: 760px) {
+        .shell { width: min(calc(100% - 24px), 620px); padding-top: 12px; }
+        .mode-bar { grid-template-columns: 1fr; gap: 6px; }
+        .mode-bar span:last-child { text-align: left; }
+        .masthead { grid-template-columns: 1fr; gap: 22px; padding: 32px 0 24px; }
+        h1 { font-size: clamp(3.1rem, 18vw, 5.4rem); }
+        .definition-stamp { min-width: 0; }
+        .interface { display: flex; flex-direction: column; }
+        .rail--left { display: contents; }
+        .rail--left .rail-block { margin-bottom: 0; }
+        .rail--right { display: contents; }
+        .voice-grid { grid-template-columns: 1fr; }
+        .narrative-item { grid-template-columns: 32px minmax(0, 1fr); }
+        .narrative-item .meta { grid-column: 2; text-align: left; }
+        .footer { flex-direction: column; }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; animation: none !important; }
+      }
+    </style>
+  </head>
+  <body data-reference-mode="synthetic" data-state="source-incomplete">
+    <main class="shell" aria-labelledby="page-title">
+      <section class="mode-bar" aria-label="参考页模式和事实边界">
+        <strong>SYNTHETIC / NOT LIVE</strong>
+        <span>DESIGN-002 · 静态参考实现 · 仅用于走查视觉、信息与局部交互</span>
+        <span>不读取 / 不写入 / 不创建真实记录</span>
+      </section>
+
+      <header class="masthead">
+        <div>
+          <p class="eyebrow">LINGGAN INTELLIGENCE // TOPIC WORKBENCH / REFERENCE</p>
+          <h1 id="page-title">任务启动<br />困难</h1>
+          <p class="thesis">在明确的样本范围与限制下，看见哪些表达值得继续理解；不把样本、候选或设计演示假装成系统已经得出的结论。</p>
+        </div>
+        <aside class="definition-stamp" aria-label="Topic 身份与范围">
+          <b>TOPIC / EXAMPLE ONLY</b><br />
+          DEFINITION VERSION / v0.1<br />
+          SAMPLE MODE / SYNTHETIC<br />
+          CURRENT QUALIFICATION / SOURCE_INCOMPLETE<br />
+          TASK / CONTINUE OR PARK
+        </aside>
+      </header>
+
+      <div class="interface">
+        <aside class="rail rail--left" aria-label="样本范围与页面阅读说明">
+          <section class="rail-block rail-block--acid">
+            <p class="section-label"><span>01 / SAMPLE WINDOW</span><span class="acid">LOCAL</span></p>
+            <div class="window-controls" aria-label="切换合成样本时间窗口">
+              <button class="window-button" type="button" data-window="7" aria-pressed="false">07D<br /><small>示例窗口</small></button>
+              <button class="window-button" type="button" data-window="30" aria-pressed="true">30D<br /><small>示例窗口</small></button>
+            </div>
+            <p class="microcopy">切换只改变合成示例的阅读文案；不是查询、趋势计算或真实数据刷新。</p>
+          </section>
+
+          <section class="rail-block">
+            <p class="section-label"><span>READING ORDER</span><span>NO SCORE</span></p>
+            <pre class="ascii-frame" aria-hidden="true">[ TOPIC ]
+    │
+    ├── SAMPLE OBSERVATION
+    ├── USER VOICE
+    ├── CANDIDATE
+    └── BOUNDARY</pre>
+            <p class="microcopy">这一页没有“总置信度”或“情报分数”。观察、候选与不知道的事分开出现。</p>
+          </section>
+        </aside>
+
+        <section class="center" aria-label="Topic 样本观察">
+          <section class="observation-main" aria-labelledby="observation-title">
+            <p class="section-label"><span>02 / CURRENT SAMPLE</span><span class="acid" id="window-label">30D · SYNTHETIC</span></p>
+            <h2 id="observation-title">样本里的共同点，不是市场趋势。</h2>
+            <p id="observation-copy">在这组完全合成的例示里，“知道该开始但迟迟无法启动”的描述，与作业、家庭冲突和自我责备并列出现。它只说明如何组织阅读，不说明真实人群正在增加、减少或普遍存在。</p>
+            <div class="data-line" aria-label="当前样本边界">
+              <span class="token token--acid">SAMPLE / FICTIONAL</span>
+              <span class="token">TIME / <span id="window-token">30D</span></span>
+              <span class="token token--coral">NO TREND CLAIM</span>
+            </div>
+          </section>
+
+          <section class="voice" aria-labelledby="voice-title">
+            <p class="section-label"><span id="voice-title">03 / USER VOICE</span><span>DE-IDENTIFIED STYLE SAMPLE</span></p>
+            <div class="voice-grid">
+              <article class="quote-card">
+                <p>“不是不会做，最难的是把第一步真的开始。”</p>
+                <button type="button" class="quote-button" aria-expanded="false" aria-controls="quote-detail">查看这个示例的限制 ↗</button>
+              </article>
+              <article class="quote-card">
+                <p>“坐在书桌前很久，越拖越觉得自己又失败了。”</p>
+                <button type="button" class="quote-button" aria-expanded="false" aria-controls="quote-detail">查看这个示例的限制 ↗</button>
+              </article>
+              <article class="quote-card">
+                <p>“提醒越多，开始这件事反而变成一次冲突。”</p>
+                <button type="button" class="quote-button" aria-expanded="false" aria-controls="quote-detail">查看这个示例的限制 ↗</button>
+              </article>
+              <div class="quote-detail" id="quote-detail" hidden>
+                <strong>合成示例，不是 Evidence。</strong>这些句子仅用于检查“原声”在页面里的阅读位置、长度与限制表达；它们没有来源、权限、上下文、时间、资格或可用于任何判断的真实合同。
+              </div>
+            </div>
+          </section>
+
+          <section class="narratives" aria-labelledby="narrative-title">
+            <p class="section-label"><span id="narrative-title">04 / HOW CONTENT TALKS</span><span>EXAMPLE CLUSTERS</span></p>
+            <div class="narrative-list">
+              <article class="narrative-item">
+                <span>01</span>
+                <div><h3>家长求助</h3><p>“如何让第一步小到能发生”是示例里的提问方式，不是需求规模结论。</p></div>
+                <span class="meta">SYNTHETIC<br />NARRATIVE</span>
+              </article>
+              <article class="narrative-item">
+                <span>02</span>
+                <div><h3>方法分享</h3><p>拆任务、陪伴启动、外部提示被展示为不同说法，不比较有效性。</p></div>
+                <span class="meta">NO OUTCOME<br />CLAIM</span>
+              </article>
+              <article class="narrative-item">
+                <span>03</span>
+                <div><h3>冲突记录</h3><p>提醒、拖延和自责被并列呈现，用来暴露后续需要核验的关系。</p></div>
+                <span class="meta">NOT A<br />CLASSIFIER</span>
+              </article>
+            </div>
+          </section>
+        </section>
+
+        <aside class="rail rail--right" aria-label="候选解释、来源边界与本地意图">
+          <section class="candidate">
+            <p class="section-label"><span>05 / CANDIDATE</span><span class="acid">NOT A CLAIM</span></p>
+            <h3>“第一步”也许比“完成任务”更值得单独研究。</h3>
+            <p>这只是由页面示例提出的后续问题：需要什么样的真实、可追溯材料，才能判断启动阻滞在不同场景里的异同？它不是已成立的解释。</p>
+          </section>
+
+          <section class="boundary">
+            <p class="section-label"><span>06 / BOUNDARY</span><span class="coral">SOURCE_INCOMPLETE</span></p>
+            <h3>现在不能知道什么？</h3>
+            <p>没有真实来源、可比采集面、Coverage、分析版本或权限合同。因此不能说近期上升/下降、不能说有多少人、不能说这些叙事代表谁，也不能产生正式系统判断。</p>
+          </section>
+
+          <section class="intent" aria-labelledby="intent-title">
+            <p class="section-label"><span id="intent-title">07 / NEXT INTENT</span><span>LOCAL ONLY</span></p>
+            <h3>看完后，你想怎样放置这个问题？</h3>
+            <div class="intent-buttons" aria-label="演示下一步意图">
+              <button class="intent-button" type="button" data-intent="继续探索" aria-pressed="false">→ 继续探索</button>
+              <button class="intent-button" type="button" data-intent="暂时搁置" aria-pressed="false">→ 暂时搁置</button>
+            </div>
+            <p class="intent-result" id="intent-result" aria-live="polite">尚未选择。本参考页不会创建真实研究、决定、行动、通知或待办。</p>
+            <a class="return-link" href="#page-title">← 返回日常入口（视觉占位，不是路由）</a>
+          </section>
+        </aside>
+      </div>
+
+      <footer class="footer">
+        <span>PAGE-TOPIC-001 · DS-001…007 · PAT-001…004</span>
+        <span>LOCAL REFERENCE ONLY · NO LIVE EVIDENCE · NO REAL RECEIPT</span>
+      </footer>
+    </main>
+
+    <script>
+      const sampleWindows = {
+        7: {
+          label: "07D · SYNTHETIC",
+          copy: "在这组完全合成的短窗口例示里，几种“想做却跨不过第一步”的说法并列出现。它只演示短窗口的信息密度，不能与任何其它窗口比较，也不能构成变化判断。"
+        },
+        30: {
+          label: "30D · SYNTHETIC",
+          copy: "在这组完全合成的例示里，“知道该开始但迟迟无法启动”的描述，与作业、家庭冲突和自我责备并列出现。它只说明如何组织阅读，不说明真实人群正在增加、减少或普遍存在。"
+        }
+      };
+
+      const windowButtons = document.querySelectorAll("[data-window]");
+      const windowLabel = document.querySelector("#window-label");
+      const windowToken = document.querySelector("#window-token");
+      const observationCopy = document.querySelector("#observation-copy");
+
+      windowButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const value = button.dataset.window;
+          const sample = sampleWindows[value];
+          windowButtons.forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+          windowLabel.textContent = sample.label;
+          windowToken.textContent = `${value}D`;
+          observationCopy.textContent = sample.copy;
+        });
+      });
+
+      const quoteButtons = document.querySelectorAll(".quote-button");
+      const quoteDetail = document.querySelector("#quote-detail");
+      quoteButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const shouldOpen = quoteDetail.hidden;
+          quoteDetail.hidden = !shouldOpen;
+          quoteButtons.forEach((item) => item.setAttribute("aria-expanded", String(shouldOpen)));
+        });
+      });
+
+      const intentButtons = document.querySelectorAll("[data-intent]");
+      const intentResult = document.querySelector("#intent-result");
+      intentButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          const intent = button.dataset.intent;
+          intentButtons.forEach((item) => item.setAttribute("aria-pressed", String(item === button)));
+          intentResult.textContent = `LOCAL_INTENT_ONLY / 已选择“${intent}”。未创建真实记录、研究、决定、行动、通知或待办。`;
+        });
+      });
+    </script>
+  </body>
+</html>
