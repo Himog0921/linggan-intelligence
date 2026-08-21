@@ -36,6 +36,37 @@
 
 因此本报告的项目级 NO-GO 不能被缩写成“当前合成 SCOPE 永远不允许编码”。主线当前结论是：**SCOPE-001 为条件开放，G1–G5 和冻结后独立复核通过前代码门关闭；真实 XHS、Raw Artifact、插件、AI Agent 和全产品运行闭环继续 NO-GO。** 本报告仍是一份一次性证据包，不取代当前 SCOPE 和 [`../agents/scope-001-execution-contract.md`](../agents/scope-001-execution-contract.md)。
 
+### 2026-08-20 语义冻结 commit 独立复核与修订处置
+
+独立 Agent 严格只读 commit `9801fdf5deb55e1b3fc5b8ac2c43234be295a42d`，没有纳入当前工作区的并行架构图改动。复核结论为 G1–G4 FAIL、G5 PASS，P0=0、P1=6、P2=2，因此代码门继续 CLOSED。六个 P1 不需要新的产品决定，本轮按最小合同修订如下：
+
+| 独立复核阻塞 | 修订处置 | 状态 |
+|---|---|---|
+| API/CLI 八责任只有空 envelope | 固定八个必有 key、applicable/not-applicable wrapper、entry union、合法组合、route 权限、provenance 和 CLI 人类词 | 首轮问题已由后续独立复核确认闭合；更细 wire 修订见最终审计 |
+| “全部行数”漏 Work target、Coverage、processing attempt | 扩展全表 final total，并固定 F03/F04/F07/F08 ordered delta、F05 mutation seed 和 lease/epoch 行数 | 已由第三轮独立复核确认闭合 |
+| rejectionCode 无故障映射/优先级，conflict 可绕过 routing fence | 固定 17 步判定顺序、15 个 externalIngressCode、pre-routing safe error/linked delivery、HTTP/code/零副作用和具体资源上限，先证明 immutable tuple 合法再 replay/conflict | 首轮问题已闭合；错误集合互斥和缺失引用在第四轮继续收口 |
+| Record 三个身份字段无权威顺序 | 固定 target/envelope/payload 三种陈述责任、不允许 fallback，增加六行身份真值和 F06A/F10 完整输入 | 已由第二轮独立复核确认闭合 |
+| 无 Record 的 F05 却产生 `not_formed` | Formation 只属于已存在 Record；无 Record 为 not-applicable，ready/leased 为 not-evaluated，finalized 才 formed/not-formed | 已由第二轮独立复核确认闭合 |
+| SCOPE 文件白名单与生成物登记冲突；AGENTS 仍说 crate 可改名 | fixture expected bytes/hash 明确为手工权威输入，checker 只验证；registry 进入白名单；AGENTS 改为 SCOPE 内名称已冻结 | 已由第二轮独立复核确认闭合 |
+
+修订未扩张到真实 producer、Raw Artifact、插件、AI Agent、Topic/Corpus 或生产部署。同一修订版独立复核全部通过前，不得将“修订已写入”报告为“代码门已开启”。
+
+后续实际又完成三轮独立只读复核。第四轮当时仍为 G1–G4 FAIL/G5 PASS，并新增 4 个 P1；主线已将它们收口为 payload/ingress 分层、pre-routing audit 联合类型、固定 proof ref/time 和 Work 1:1 Attempt。用户随后明确终止重复的文档复核循环并要求尽快进入代码，因此当前 SCOPE 的后续裁定改由正式计划承担：**CONTROLLED OPEN FOR TDD**，从 F01 失败测试开始。本段不把本报告原 NO-GO 或任何历史 FAIL 改写为 PASS，也不开放真实 producer、插件、AI Agent、生产或本报告其他未闭合范围。
+
+### 2026-08-20 新增候选方向：Pi 统一 Agent 执行内核
+
+用户在本报告完成后提出使用 [`earendil-works/pi`](https://github.com/earendil-works/pi) 作为整个内容情报系统的统一 Agent 内核。独立上游源码审查已落到 [`pi-agent-kernel-upstream-assessment-2026-08-20.md`](pi-agent-kernel-upstream-assessment-2026-08-20.md)，其裁定是 **`CONDITIONAL ADAPTER`，不是 `CORE OWNERSHIP`**：
+
+- 可以在未来独立 SCOPE 中采用已发布的 `@earendil-works/pi-agent-core`，按真实需要采用 `@earendil-works/pi-ai`，承接模型、工具循环和流式事件；
+- Linggan 仍独占 Actor/Delegation、材料、Tool Grant、预算、PostgreSQL durable work、Tool Receipt、隐私、输出资格、Candidate/Decision、正式知识和现实动作；
+- 各业务模块只调用 Linggan 自有 Agent Runtime，不直接依赖 Pi 类型、会话或工具；
+- 当前不采用核心方法显式未实现的 `AgentHarness`，也不把官方标为 experimental 的 `pi-server` / `pi-protocol` 当首版长期合同；
+- Pi 官方不提供内建权限系统或 prompt-injection 安全保证，因此 coding-agent 的 shell/文件/通用网络能力不得进入 Linggan 业务工具面；
+- 用户后续《统一Agent运行时架构》讨论中的“系统驱动 Agent、Profile 而非多个自治 Agent、领域工具、先验证价值再扩平台”被采纳；`Agent Task/Research Task` 不新增为万能核心对象，而映射到既有 Research Question、Information Need、Analysis Run 和 Agent Invocation；
+- 这项方向不关闭本报告任何 P0/P1，不扩入 `SCOPE-001`，不授权真实原文、依赖安装、Agent Runtime 编码或部署。
+
+主线 Agent 必须先核实上游固定发布版、Linggan/Pi 所有权表、禁用清单和 PI-0 至 PI-3 验收门，再决定是否把该候选升级为正式 Agent 实现 SCOPE。不得把“用户选 Pi”缩写成“Pi 已能安全接管整个 Agent 业务层”。
+
 ## 审查快照
 
 | 项目 | 本轮快照 |
@@ -486,7 +517,7 @@ Objective / Collection Plan
 | 8. 状态与覆盖 | target 3、visited 2 | visited/returned/valid/persisted 2，remaining 1，risk stopped | DB/API/CLI 三者一致 |
 | 9. 查询展示 | content ref | 当前值、来源、Coverage、limitations | 不宣称 3/3 或平台完整 |
 | 10. 补采 | 第三个 target + 新授权 | 新 Attempt、新 Capture Identity、新 Package | 不修改第一次 Package；Work satisfaction 重算 |
-| 11. 去重验证 | 重放同一 Package | 原 receipt | Package/Record/Evidence/Observation 行数不增加 |
+| 11. 去重验证 | 重放同一 Package | 新 deliveryRef + 原 acceptedReceiptRef | Package/Record/Evidence/Observation 行数不增加；只追加 replay delivery |
 | 12. 多时点验证 | 再次合法观察其中一条 | 新 Observation，必要时新 Current revision | 对象身份不复制；历史不覆盖 |
 
 ## 10.3 涉及模块
@@ -560,7 +591,7 @@ Objective / Collection Plan
 - 输入：同 Capture Identity、同 canonical bytes/hash 重传 100 次。
 - 执行动作：并发提交。
 - 数据库预期：1 Package/Record/Artifact/work/Observation 集合；可追加最小 Delivery 记录。
-- 任务状态预期：原 accepted receipt；重放不改变 Work satisfaction。
+- 任务状态预期：每次重放形成新的 deliveryRef，但继续指向原 acceptedReceiptRef；重放不改变 Work satisfaction。
 - 日志预期：replay 计数，不打印 payload。
 - 下游可见结果：内容和 Coverage 不变。
 - 失败判定：任一业务行重复或返回 conflict。
@@ -775,6 +806,8 @@ Objective / Collection Plan
 - 第一阶段真实数据规模与是否需要额外基础设施。
 
 # 15. 最终开工边界
+
+> **原快照结论，不是当前 SCOPE-001 命令。** 本章 15.1–15.4 保留当时项目级 NO-GO 的完整证据口径，已由本文“2026-08-20 主线复核处置”和当前 SCOPE 裁定取代。对当前 synthetic SCOPE 开工只使用 G1–G5；真实 producer/Raw Artifact/插件能力仍保留为后续范围的 NO-GO 条件。
 
 ## 15.1 编码前必须完成
 
