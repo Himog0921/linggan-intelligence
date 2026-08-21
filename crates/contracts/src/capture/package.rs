@@ -1,7 +1,11 @@
+//! Top-level envelope of `capture.package.v1` and its single parse entry point.
+
 use serde::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
+use uuid::Uuid;
 
+use super::{Coverage, KnownSetTarget, KnownTargetResult, Terminal, record::CaptureRecord};
 use crate::canonical::{
     JsonIngressError, canonical_json_sha256, first_unsafe_integer_token, reject_duplicate_keys,
     sanitized_surrogate_input,
@@ -28,43 +32,117 @@ pub enum ContractError {
     UnsupportedContentContract(String),
 }
 
+/// Where a package claims to belong. Ingress never trusts these values on their own; it still
+/// has to resolve and lock the matching routing rows and verify they belong together.
+#[derive(Debug)]
+pub struct PackageRouting {
+    work_order_ref: Uuid,
+    attempt_ref: Uuid,
+    capture_identity: Uuid,
+    lease_epoch: u32,
+}
+
+impl PackageRouting {
+    pub fn work_order_ref(&self) -> Uuid {
+        self.work_order_ref
+    }
+
+    pub fn attempt_ref(&self) -> Uuid {
+        self.attempt_ref
+    }
+
+    pub fn capture_identity(&self) -> Uuid {
+        self.capture_identity
+    }
+
+    pub fn lease_epoch(&self) -> u32 {
+        self.lease_epoch
+    }
+}
+
+/// A capture package whose canonical form, package hash and per-record hashes have been
+/// verified. Verified shape is not acceptance: only ingress decides accepted/replay/conflict.
 #[derive(Debug)]
 pub struct CapturePackage {
+    routing: PackageRouting,
     contract_version: String,
+    package_hash: String,
     target: KnownSetTarget,
     terminal: Terminal,
     coverage: Coverage,
-    record_count: usize,
+    known_target_results: Vec<KnownTargetResult>,
+    records: Vec<CaptureRecord>,
 }
 
 impl CapturePackage {
+    pub fn routing(&self) -> &PackageRouting {
+        &self.routing
+    }
+
     pub fn contract_version(&self) -> &str {
         &self.contract_version
     }
 
-    pub fn known_target_count(&self) -> u32 {
-        self.target.known_target_count
+    pub fn package_hash(&self) -> &str {
+        &self.package_hash
     }
 
-    pub fn record_count(&self) -> usize {
-        self.record_count
+    pub fn target(&self) -> &KnownSetTarget {
+        &self.target
     }
 
-    pub fn coverage_counts(&self) -> (u32, u32, u32, Option<u32>) {
-        (
-            self.coverage.attempted,
-            self.coverage.emitted,
-            self.coverage.failed,
-            self.coverage.known_not_attempted,
-        )
+    pub fn terminal(&self) -> &Terminal {
+        &self.terminal
     }
 
-    pub fn terminal_reason(&self) -> &str {
-        &self.terminal.reason
+    pub fn coverage(&self) -> &Coverage {
+        &self.coverage
+    }
+
+    pub fn known_target_results(&self) -> &[KnownTargetResult] {
+        &self.known_target_results
+    }
+
+    pub fn records(&self) -> &[CaptureRecord] {
+        &self.records
     }
 }
 
 pub fn parse_capture_package(input: &str) -> Result<CapturePackage, ContractError> {
+    let value = parse_canonical_value(input)?;
+    let wire: CapturePackageWire = serde_json::from_value(value.clone())
+        .map_err(|error| ContractError::PackageSchemaInvalid(error.to_string()))?;
+
+    if wire.schema_version != PACKAGE_SCHEMA_VERSION {
+        return Err(ContractError::UnsupportedPackageSchema(wire.schema_version));
+    }
+    if wire.contract_version != CONTENT_CONTRACT_VERSION {
+        return Err(ContractError::UnsupportedContentContract(
+            wire.contract_version,
+        ));
+    }
+
+    verify_package_hash(&value, &wire.package_hash)?;
+    verify_record_hashes(&value)?;
+
+    Ok(CapturePackage {
+        routing: PackageRouting {
+            work_order_ref: wire.work_order_ref,
+            attempt_ref: wire.attempt_ref,
+            capture_identity: wire.capture_identity,
+            lease_epoch: wire.lease_epoch,
+        },
+        contract_version: wire.contract_version,
+        package_hash: wire.package_hash,
+        target: wire.target,
+        terminal: wire.terminal,
+        coverage: wire.coverage,
+        known_target_results: wire.known_target_results,
+        records: wire.records,
+    })
+}
+
+fn parse_canonical_value(input: &str) -> Result<Value, ContractError> {
     let sanitized_surrogate_input = sanitized_surrogate_input(input);
     let syntax_input = sanitized_surrogate_input.as_deref().unwrap_or(input);
     match reject_duplicate_keys(syntax_input) {
@@ -86,19 +164,10 @@ pub fn parse_capture_package(input: &str) -> Result<CapturePackage, ContractErro
             "unpaired Unicode surrogate escape".to_owned(),
         ));
     }
-    let value: Value = serde_json::from_str(input)?;
-    let wire: CapturePackageWire = serde_json::from_value(value.clone())
-        .map_err(|error| ContractError::PackageSchemaInvalid(error.to_string()))?;
+    Ok(serde_json::from_str(input)?)
+}
 
-    if wire.schema_version != PACKAGE_SCHEMA_VERSION {
-        return Err(ContractError::UnsupportedPackageSchema(wire.schema_version));
-    }
-    if wire.contract_version != CONTENT_CONTRACT_VERSION {
-        return Err(ContractError::UnsupportedContentContract(
-            wire.contract_version,
-        ));
-    }
-
+fn verify_package_hash(value: &Value, declared_package_hash: &str) -> Result<(), ContractError> {
     let mut hash_input = value.clone();
     hash_input
         .as_object_mut()
@@ -106,10 +175,13 @@ pub fn parse_capture_package(input: &str) -> Result<CapturePackage, ContractErro
         .remove("packageHash");
     let computed_package_hash = canonical_json_sha256(&hash_input)
         .map_err(|error| ContractError::PackageSchemaInvalid(error.to_string()))?;
-    if wire.package_hash != computed_package_hash {
+    if declared_package_hash != computed_package_hash {
         return Err(ContractError::PackageHashInvalid);
     }
+    Ok(())
+}
 
+fn verify_record_hashes(value: &Value) -> Result<(), ContractError> {
     for record in value["records"]
         .as_array()
         .expect("validated capture package records must be an array")
@@ -129,97 +201,22 @@ pub fn parse_capture_package(input: &str) -> Result<CapturePackage, ContractErro
             return Err(ContractError::RecordHashInvalid);
         }
     }
-
-    Ok(CapturePackage {
-        contract_version: wire.contract_version,
-        target: wire.target,
-        terminal: wire.terminal,
-        coverage: wire.coverage,
-        record_count: wire.records.len(),
-    })
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct CapturePackageWire {
     schema_version: String,
-    #[serde(rename = "workOrderRef")]
-    _work_order_ref: String,
-    #[serde(rename = "attemptRef")]
-    _attempt_ref: String,
-    #[serde(rename = "captureIdentity")]
-    _capture_identity: String,
-    #[serde(rename = "leaseEpoch")]
-    _lease_epoch: u32,
+    work_order_ref: Uuid,
+    attempt_ref: Uuid,
+    capture_identity: Uuid,
+    lease_epoch: u32,
     contract_version: String,
     target: KnownSetTarget,
     terminal: Terminal,
     coverage: Coverage,
-    #[serde(rename = "knownTargetResults")]
-    _known_target_results: Vec<Value>,
-    records: Vec<RecordWire>,
-    #[serde(rename = "packageHash")]
+    known_target_results: Vec<KnownTargetResult>,
+    records: Vec<CaptureRecord>,
     package_hash: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct RecordWire {
-    #[serde(rename = "ordinal")]
-    _ordinal: Value,
-    #[serde(rename = "recordKind")]
-    _record_kind: Value,
-    #[serde(rename = "targetExternalId")]
-    _target_external_id: Value,
-    #[serde(rename = "source")]
-    _source: Value,
-    #[serde(rename = "observedAt")]
-    _observed_at: Value,
-    #[serde(rename = "payload")]
-    _payload: Value,
-    #[serde(rename = "recordHash")]
-    _record_hash: Value,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct KnownSetTarget {
-    #[serde(rename = "basis")]
-    _basis: KnownSetBasis,
-    #[serde(rename = "unit")]
-    _unit: ContentDetailUnit,
-    #[serde(rename = "targetManifestHash")]
-    _target_manifest_hash: String,
-    known_target_count: u32,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum KnownSetBasis {
-    KnownSet,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "snake_case")]
-enum ContentDetailUnit {
-    ContentDetail,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Terminal {
-    reason: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct Coverage {
-    #[serde(rename = "unit")]
-    _unit: ContentDetailUnit,
-    attempted: u32,
-    emitted: u32,
-    failed: u32,
-    known_not_attempted: Option<u32>,
-    #[serde(rename = "remainingScope")]
-    _remaining_scope: String,
 }

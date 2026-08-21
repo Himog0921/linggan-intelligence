@@ -20,10 +20,15 @@ fn f01_complete_known_set_is_read_through_the_public_contract() {
     assert_eq!(
         (
             package.contract_version(),
-            package.known_target_count(),
-            package.record_count(),
-            package.coverage_counts(),
-            package.terminal_reason(),
+            package.target().known_target_count(),
+            package.records().len(),
+            (
+                package.coverage().attempted(),
+                package.coverage().emitted(),
+                package.coverage().failed(),
+                package.coverage().known_not_attempted(),
+            ),
+            package.terminal().reason().as_str(),
         ),
         (
             "content-detail.synthetic.v1",

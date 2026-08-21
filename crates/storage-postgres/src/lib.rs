@@ -1,4 +1,9 @@
-//! PostgreSQL adapters. SCOPE-001 authorizes exactly two proof migrations after the semantic code
-//! gate; business SQL stays with the owning module.
+//! PostgreSQL adapter. It owns connections, storage errors and proof-database helpers only;
+//! business SQL stays in the crate that owns the invariant it protects.
 
-pub const DATABASE_BASELINE_CREATED: bool = false;
+mod error;
+mod pool;
+pub mod testing;
+
+pub use error::StorageError;
+pub use pool::Database;

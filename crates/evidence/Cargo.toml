@@ -8,6 +8,13 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[dependencies]
+linggan-contracts = { path = "../contracts" }
+linggan-storage-postgres = { path = "../storage-postgres" }
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+uuid = { workspace = true, features = ["v4"] }
+
 [dev-dependencies]
-sqlx = { version = "0.8.6", default-features = false, features = ["runtime-tokio", "postgres"] }
 tokio = { version = "1.48.0", features = ["macros", "rt-multi-thread"] }

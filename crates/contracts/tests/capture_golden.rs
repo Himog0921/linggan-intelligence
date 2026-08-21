@@ -6,8 +6,16 @@ const F01_RFC8785_JCS_GOLDEN_STALE_PACKAGE_HASH: &str =
     include_str!("fixtures/capture-v1/f01-rfc8785-jcs-golden-stale-package-hash.json");
 const F01_MANIFEST: &str = include_str!("fixtures/capture-v1/manifest.json");
 
+/// The hand-maintained F01 manifest. Every test below reads it through this one accessor so a
+/// renamed or removed fixture fails loudly instead of silently skipping assertions.
+fn f01_manifest() -> serde_json::Value {
+    let manifest: serde_json::Value =
+        serde_json::from_str(F01_MANIFEST).expect("the hand-maintained F01 manifest must be JSON");
+    manifest["fixtures"][0].clone()
+}
+
 #[test]
-fn f01_manifest_is_a_hand_maintained_static_oracle_for_the_accepted_slice() {
+fn f01_manifest_scope_boundary_excludes_f02_to_f10_explicitly() {
     let manifest: serde_json::Value =
         serde_json::from_str(F01_MANIFEST).expect("the hand-maintained F01 manifest must be JSON");
 
@@ -28,14 +36,23 @@ fn f01_manifest_is_a_hand_maintained_static_oracle_for_the_accepted_slice() {
         }),
         "the manifest must explicitly exclude F02-F10 rather than merely omit them"
     );
+}
 
-    let f01 = &manifest["fixtures"][0];
+#[test]
+fn f01_manifest_keeps_its_fixture_identity_frozen() {
+    let f01 = f01_manifest();
+
     assert_eq!(f01["fixtureId"], "F01");
     assert_eq!(f01["contractVersion"], "content-detail.synthetic.v1");
     assert_eq!(f01["synthetic"], true);
     assert_eq!(f01["baseCaptureFixturePath"], "f01-complete-known-set.json");
     assert_eq!(f01["acceptedTestSeedName"], "f01-fresh-seed");
     assert_eq!(f01["proofNow"], "2026-08-20T09:00:00Z");
+}
+
+#[test]
+fn f01_manifest_keeps_its_layered_outcomes_separate() {
+    let f01 = f01_manifest();
 
     assert_eq!(
         f01["expectedLayeredState"],
@@ -59,6 +76,11 @@ fn f01_manifest_is_a_hand_maintained_static_oracle_for_the_accepted_slice() {
         }),
         "the F01 manifest must retain the SCOPE's separate layered outcomes"
     );
+}
+
+#[test]
+fn f01_manifest_keeps_each_staged_table_count_separate() {
+    let f01 = f01_manifest();
 
     assert_eq!(
         f01["expectedTableRows"],
@@ -142,6 +164,11 @@ fn f01_manifest_is_a_hand_maintained_static_oracle_for_the_accepted_slice() {
         ]),
         "the F01 manifest must retain fresh, ingress, processing, and final table facts separately"
     );
+}
+
+#[test]
+fn f01_manifest_keeps_its_negative_and_proof_boundaries() {
+    let f01 = f01_manifest();
 
     assert_eq!(
         f01["negativeProhibitions"],
@@ -164,6 +191,11 @@ fn f01_manifest_is_a_hand_maintained_static_oracle_for_the_accepted_slice() {
         ]),
         "the F01 manifest must retain every explicit not-proven boundary"
     );
+}
+
+#[test]
+fn f01_manifest_provides_the_complete_fixed_reference_dictionary() {
+    let f01 = f01_manifest();
 
     assert_eq!(
         f01["fixedRefs"],
@@ -208,7 +240,7 @@ fn rfc8785_golden_payload_is_accepted_through_the_public_capture_contract() {
         .expect("the hand-maintained RFC 8785 golden package must be accepted");
 
     assert_eq!(package.contract_version(), "content-detail.synthetic.v1");
-    assert_eq!(package.record_count(), 2);
+    assert_eq!(package.records().len(), 2);
 }
 
 #[test]
