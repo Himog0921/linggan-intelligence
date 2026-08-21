@@ -116,6 +116,8 @@ Asset target: `docs/product/first-phase-interface-prototype.md`
 
 Issue #10 已产出 [`../../product/first-phase-interface-prototype.md`](../../product/first-phase-interface-prototype.md) 作为 `PROVISIONAL` 候选：一个“今日关注”一级入口、上下文 Topic 深入工作区、证据/Coverage 抽屉与下一步意图面板，并用合成/脱敏走查覆盖早晨判断、Topic 深入和采集不完整。该候选仍等待 Mog 走查；本票保持 open，未授权 Web、数据、权限、技术选型或实现。
 
+Mog 于 2026-08-22 已确认：**「今日关注」是第一版唯一默认一级入口**。这只确认入口职责；Topic 深入的连续工作区/抽屉/意图面板组合、采集不完整的具体表达、是否提供主动 Topic 浏览入口仍未确认，均不得由此推断。本票继续 open。
+
 ## first-producer-canary: 首批真实 Canary 是否包含媒体？
 
 Blocked by: primary-daily-job
