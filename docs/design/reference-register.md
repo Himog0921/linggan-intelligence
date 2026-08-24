@@ -1,7 +1,7 @@
 # 设计参考登记表
 
 > 状态: 权威当前
-> 最后核对: 2026-08-21
+> 最后核对: 2026-08-24
 > 适用范围: Linggan Intelligence UI 设计工作中引用的旧系统、外部产品、截图、品牌材料和原型
 > 事实来源: DESIGN-001 / DESIGN-002 授权、AGENTS.md、docs/design/design-governance.md、当前 references/ 边界
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、已接受的产品/设计决定和当前 SCOPE；参考资料永不覆盖这些来源
