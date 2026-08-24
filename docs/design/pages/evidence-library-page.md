@@ -1,22 +1,22 @@
 # PAGE-EVIDENCE-001 · Evidence Library 本地空态页
 
 > 状态: 权威当前
-> 最后核对: 2026-08-24
+> 最后核对: 2026-08-25
 > 适用范围: `http://localhost:3000/corpus/evidence` 的第一个 Linggan 本地产品页面
-> 事实来源: Mog 的 Local-001 产品确认、[LOCAL-001 活跃计划](../../plans/active/local-001-local-product-evidence-library.md)、Issue #25、LIDS 与当前 Rust 实现
-> 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；V7 只作为已登记的本页 Gold Master
+> 事实来源: Mog 的 Local-001 产品确认、[LOCAL-001 活跃计划](../../plans/active/local-001-local-product-evidence-library.md)、Issue #25、Issue #29、LIDS 与当前 Rust 实现
+> 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；V7 为本页受限的精确视觉与骨架 Gold Master
 
 ## 1. 身份与授权
 
 - 页面规格 ID: `PAGE-EVIDENCE-001`
-- 关联 Issue / Scope: `LOCAL-001 / 001A`，Issue #25
+- 关联 Issue / Scope: `LOCAL-001 / 001A`，Issue #25（host）与 Issue #29（V7 精确视觉/骨架）
 - 当前状态: 本地页面与 loopback host 获准；材料读投影、数据库读取和插件 ingress 未接通
 - LIDS 视觉强度: L1 Corpus Explorer，嵌入受限 L2 Split Evidence Inspector
 - LIDS 主 Pattern: `LIDS-PAT-001 / Corpus Explorer`，右侧使用同一工作面的 Inspector，不建立第二首页
 - 产品页面来源: LOCAL-001 的 Evidence Library 用户任务；`REF-V7-001` 的页面 Gold Master
 - 用户任务: 在此找到、看懂、验证、追溯 Linggan 已接纳的本地材料；本卡只诚实呈现“尚无可展示材料”的前置状态
 - 三秒答案: “这是本地 Evidence Library；当前材料读投影尚未接通。”
-- 五秒主动作: 本卡无动作。001B/001C 的后续能力未接通，不能以假按钮代替。
+- 五秒主动作: 001A 不允许产生真实动作。V7 位置上的控件保留为禁用的视觉/交互骨架，以显示未来工作面位置而不伪造能力。
 - 明确非目标: 采集、读数据库、显示材料、搜索、保存查询、Topic/Insight/Agent 行动、媒体/OCR/ASR、真实状态或线上部署
 - 当前可用数据/权限合同: 仅 local host route 合同；没有 Materials read contract 或材料访问授权
 - 决策 owner: Mog；实施范围由 LOCAL-001 活跃计划和 Issue #25 限定
@@ -24,7 +24,7 @@
 ## 2. 页面边界
 
 - 入口: `GET /` 以临时重定向进入 `GET /corpus/evidence`；后者是同一 local host 的唯一页面路由
-- 退出与返回: 当前无可用的相邻产品路由；顶层和二级导航是工作空间方位标记，不是未接通能力的假链接
+- 退出与返回: 当前无可用的相邻产品路由；V7 顶层、二级导航与控件保持原方位和结构，但均为 disabled/`aria-disabled`，不是未接通能力的假链接
 - 本页负责的核心任务: 在材料存在以前，清楚说明 Evidence Library 将承接什么、当前哪些链路未接通、以及这些缺口不能证明什么
 - 本页明确不负责: 形成或接纳 Evidence、判断 Observation、计算 Coverage、读取原文、启动采集、修改设置或建立任何第二事实源
 - 第二事实源边界: HTML 只表达 host 的静态 `SOURCE_INCOMPLETE` 状态；它不保存数据、计数、材料、趋势或动作回执
@@ -53,13 +53,13 @@
 
 ### LIDS 采用清单
 
-- Token 基线与唯一运行时真源: `LIDS-TOK-001`。`apps/api/src/local_web/lids_tokens.css` 是唯一值编辑源，完整承载当前 107 个 `--lgi-*` token；`docs/design/lids/tokens.md` 是其版本化规范与校验镜像。Rust 测试逐项核对 107 个名称和值；`evidence_library.css` 只消费这些 token，不声明 token。
-- Primitive / 正式 CMP 查重结果: 没有新增跨页面 CMP；使用 `LIDS-PRI-001` 的 Sans/Mono、连续工作面、五轴状态分责与 hairline 原则。
-- 页面唯一视觉核心: 中央空材料边界说明；不是营销 Hero，也不是假数据仪表盘。
+- Token 基线与唯一运行时真源: `LIDS-TOK-001`。`apps/api/src/local_web/lids_tokens.css` 仍是唯一的全局 `--lgi-*` token 值编辑源，完整承载当前 107 个 token；`docs/design/lids/tokens.md` 是其版本化规范与校验镜像。Issue #29 不修改它。`evidence_library.css` 不声明 `--lgi-*` token。
+- Primitive / 正式 CMP 查重结果: 没有新增跨页面 CMP；沿用 LIDS 的语义分责，但本页由 V7 精确视觉/骨架例外控制具体排版和页面色值。
+- 页面唯一视觉核心: V7 的 128px 两层页头、白底硬线三栏工作面、FACT LAYER 与右侧 Inspector；中央区只用诚实空行替代 V7 的模拟材料。
 - 原声、来源、样本、窗口、Coverage/Validity/冲突/复核边界: 001A 没有材料、原声或样本；页面直接说明对应字段未知而非显示占位数字。
 - ASCII / 场景 / 动效: 不使用。`prefers-reduced-motion` 不触发额外动效，因为本页没有运动。
-- 页面级例外 `LOCAL-001-UI-EX-01`: 为满足 V7 三栏工作空间的检视比例，本页仅保留 216px 左栏、440px 右栏以及 2px 中央结构线。它们仅限本页布局，不是全局 Token；其余颜色、字体、尺寸、间距、半径和动效值均消费 LIDS token。响应式条件用相对 `em` 表达，避免另建页面尺寸体系。
-- 明确禁止: 第二套色彩/字体/状态/按钮语言，玻璃/渐变/悬浮卡，模拟数据、模拟 live/fresh、假 Primary 与任何前端事实写入。
+- 页面级例外 `LOCAL-001-UI-EX-01 / Issue #29 修订`: 用户直接授权本页依 `REF-V7-001` 精确复刻视觉值和 HTML 骨架：桌面为78px + 50px = 128px 页头、216px rail、440px inspector（≤1500px 为420px、≤1180px 为380px）、全白背景、黑色硬线、全局 `#E8003F` 与 Evidence `#EF4F25`。桌面必须是 `100vh` 固定工作台，document 不向下延展，Results 和 Inspector 在各自栏内滚动；≤900px 改为自动首行高度，以容纳可能换行的顶层导航和 context row，随后才开始顺序折叠和页面原生滚动。这些值只以明确命名的 `--v7-*` 页面局部变量存在于 `evidence_library.css`；不改写、不复制为 LIDS 全局 token，也不授权其他页面继承。
+- 明确禁止: 继承 V7 的模拟运行状态、计数、示例帖子/评论/转录、时间、引用或成功回执；任何 V7 位置上的未接通控件不得产生写入、采集、保存、研究或连接副作用。
 
 ## 5. 交互与真实后果
 

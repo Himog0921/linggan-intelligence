@@ -34,3 +34,11 @@
 - **当前受限事实**：已有 loopback Rust host、一个 `/corpus/evidence` Evidence Library 页面，以及 `apps/api/src/local_web/lids_tokens.css` 这一唯一运行时 Token 值编辑源。
 - **仍未证明**：没有真实数据或 Materials read model、通用组件库、L2/L3 页面或场景、Agent runtime、部署、完整产品 Web 或 Mog/业务验收。LIDS 成熟度仍为 `PROPOSED`。
 - **治理与验证**：README/system/tokens 的当前表述按这一区分同步；Rust 测试精确核对 107 个运行时 Token 名称和值，页面 CSS 不声明 Token。此对账不改页面代码、路由、视觉数值、数据或任何运行能力。
+
+## 2026-08-25 · Issue #29 Evidence Library V7 精确视觉/骨架例外
+
+- **直接授权与替代范围**：Mog 明确要求 `/corpus/evidence` 按 `REF-V7-001` 完整 1:1 复刻。该直接授权只替代旧 `LOCAL-001-UI-EX-01` 中“仅 216px / 440px / 2px、其余使用 LIDS 页面值”的窄例外；不改变任何数据、权限、行动或跨页设计决定。
+- **实际页面范围**：`evidence_library.css` 以页面局部 `--v7-*` 变量承载 V7 的桌面 78px + 50px = 128px 全局页头、216px rail、440px inspector（响应式 420/380px）、全白底、黑色硬线、`#E8003F` 全局强调色与 `#EF4F25` Evidence 强调色，连同 V7 的页头、视图/筛选/查询、FACT LAYER、三栏和 Inspector HTML 骨架。桌面为 `100vh` 固定工作台并将滚动限制在 Results/Inspector；移动端首行改为自动高度以容纳换行导航，随后顺序折叠并使用页面滚动。
+- **非继承边界**：V7 的模拟运行状态、计数、帖子/评论/转录、时间、引用及成功回执不进入本页；未接通控件保留位置和视觉，但均 disabled/`aria-disabled` 且无副作用。中央区只显示 `SOURCE_INCOMPLETE` / `NO_ACCEPTED_MATERIAL_AVAILABLE`，Inspector 仅显示 no-selection / `UNKNOWN`。
+- **不形成第二套系统**：`lids_tokens.css` 未修改，仍是唯一全局 `--lgi-*` token 值源；`--v7-*` 不可被其他页面、CMP 或后续页面当作全局 token 使用。需要复用时必须重新进行 LIDS/页面审查和独立授权。
+- **验证与未证明**：四个指定 Chrome 视口的本地截图/几何、route/HTML 的诚实边界测试、format/clippy/test 与治理检查记录在 `ACC-EVIDENCE-001`。本项只证明本页静态视觉与禁用骨架；不证明 Materials read model、Evidence、数据库、插件、媒体/OCR/ASR、Agent、部署或业务验收。
