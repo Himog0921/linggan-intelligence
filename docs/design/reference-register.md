@@ -16,6 +16,20 @@ DESIGN-002 原先的“未来感 + ASCII + 新粗野主义 + 情报系统感”�
 
 仓库内的 references/ 是历史证据区；现有页面与架构草案是产品/架构候选。两者可以在未来按具体事项被核对，但均不能单独授权 UI 实现。
 
+## `REF-V7-001` · Evidence Library V7 handoff（仅限 LOCAL-001）
+
+| 字段 | 登记内容 |
+|---|---|
+| 参考 ID 与名称 | `REF-V7-001` · Linggan Evidence Library V7 Gold Master |
+| 来源与核对时间 | Mog 提供的受控本地目录 `/Users/moglenny/Downloads/linggan-evidence-v7-handoff`；2026-08-24 核对。Gold Master HTML SHA-256：`03308715076d69b954cd207e6bd56fc5ce4243fcedb8d8d64d27ecc8672e5f85`。 |
+| 参考性质 | 用户明确指定的首个真实产品页面的产品/视觉 Gold Master；包含页面原型、页面规格、冻结视觉 token 与视觉验收检查表。 |
+| 可借鉴范围 | 仅用于 `/corpus/evidence` 的 Evidence Library：核心任务、Corpus Explorer + embedded Inspector 的层级、Research/Table/Cover 浏览、状态表达、布局与视觉回归基准。 |
+| 明确不继承 | handoff 自称的来源优先级、模拟数据/状态/计数、技术栈、全局 token、接口/数据库字段、权限、保留策略、真实平台/运行结论、历史项目运行链、自动行动，以及任何与 `AGENTS.md`、领域不变量、现有合同或 LIDS 冲突的要求。 |
+| 关联事项 | Issue #23、`LOCAL-001` 的 001A/001B/001C；不能被其它页面或 SCOPE 自动引用。 |
+| 时效与风险 | 本地 handoff 可变且非 Git 原件；SHA 仅证明本次核对版本。其页面数据与交互含模拟/参考内容，必须防止被误报为本地运行事实。 |
+| 页面级例外 | `LOCAL-001-UI-EX-01`：V7 是本页视觉 Gold Master；V7 的视觉值必须映射到 LIDS 或登记为页面局部、可撤销例外，禁止成为并行全局 token 真源。 |
+| 不构成什么 | 它不能单独授权 Web 技术选型、真实数据接入、原文展示、插件改动、真实平台访问、数据库/migration、AI/媒体/OCR/ASR、部署或用户验收。 |
+
 ## 新增参考的登记格式
 
 每一个条目必须至少包含下列信息：
