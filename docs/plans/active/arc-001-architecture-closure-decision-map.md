@@ -127,7 +127,7 @@ Decision owner: Mog
 
 ### Answer
 
-Mog 已确认方案 **B：首批真实 producer Canary 同步纳入媒体需要**。这个确认不等于任何真实下载、保存、派生或工位执行授权；首批媒体对象范围、处理深度、内部保存/访问/处置与工位/账号/时间/风险停止预算仍须由 Mog 在 [`../../architecture/first-media-canary-authorization-decision-pack.md`](../../architecture/first-media-canary-authorization-decision-pack.md) 逐项选择。该文是 Draft / `DECISION_REQUIRED`，所引用的 PR #13、#15、#17 亦为 Draft / 未整合；因此本票仍为 open，不能据此启动真实 Canary 或解锁下游实施。
+Mog 已确认方案 **B：首批真实 producer Canary 同步纳入媒体需要**，并确认处理架构应将 M1 原媒体生命周期、M2 异步图片 OCR、M3 异步视频 ASR 分成独立 lane，M4 视频抽帧 OCR只在目的与冻结抽帧边界被明确授权时进入。OCR/ASR/抽帧 OCR 输出只是版本化、可追溯的派生表示，不能自动形成被接纳的 raw Evidence、Observation、Topic、Claim、Intelligence 或 Agent 结论。这个确认不等于任何真实下载、保存、派生或工位执行授权；首批媒体对象范围、处理器边界（本地受控或任何外部服务接收原媒体）、内部保存/访问/处置与工位/账号/时间/风险停止预算仍须由 Mog 在 [`../../architecture/first-media-canary-authorization-decision-pack.md`](../../architecture/first-media-canary-authorization-decision-pack.md) 逐项选择。该文是 Draft / `DECISION_REQUIRED`，所引用的 PR #13、#15、#17 亦为 Draft / 未整合；因此本票仍为 open，不能据此启动真实 Canary 或解锁下游实施。
 
 
 ## capture-control-contract: 真实插件前必须冻结哪些调度责任？
