@@ -2,7 +2,7 @@
 
 > 状态: 权威当前
 > 标准成熟度: PROPOSED
-> 最后核对: 2026-08-21
+> 最后核对: 2026-08-25
 > 适用范围: Linggan Intelligence 全部未来用户可见 Web UI、设计 Token、基础语法、组件、页面模式、动效、场景、状态表达与 UI Agent 协作产物
 > 事实来源: Mog 于 2026-08-21 明确指定的 `Linggan_Intelligence_Design_System_v2.0`、AGENTS.md、docs/governance/、docs/current-state.md、已确认产品/数据/权限合同与当前 SCOPE
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策与当前 SCOPE；LIDS 只约束设计表达，不能越权改写这些来源
@@ -16,7 +16,7 @@ Token → Primitive → Component → Pattern → Page
 
 **它现在已经生效的含义**：未来 UI 任务必须按照这条链选择规则、记录来源、复用已正式化的构件并通过检查；不能再自建第二套颜色、按钮、状态标签、容器语言或页面骨架。
 
-**它尚不证明的事情**：当前仓库还没有获准的 Web 运行时、主题 CSS、React 组件、真实页面、真实数据状态、L3 3D 场景、外部 Agent 动作或部署。LIDS 的建议目录、React/Three/Blender 路线、V3 原型演示值及任何运行态文字均不是这些能力的授权。
+**它尚不证明的事情**：LOCAL-001A 已有受限的 loopback Rust Web host、一个 Evidence Library 页面和唯一运行时 Token 源；这不证明真实数据或 Materials read model、通用组件库、L2/L3 页面、L3 3D 场景、外部 Agent 动作、部署或完整产品 Web 已成立。LIDS 的建议目录、React/Three/Blender 路线、V3 原型演示值及任何运行态文字均不是这些能力的授权。
 
 ## 先读什么
 
@@ -33,7 +33,7 @@ Token → Primitive → Component → Pattern → Page
 ## LIDS 的项目内权威边界
 
 1. [system.md](system.md) 是 LIDS 在 Linggan 的主标准：定义产品气质、五层架构、L1/L2/L3、状态表达、动效、响应式、可访问性与治理门。
-2. [tokens.md](tokens.md) 是**当前无运行时阶段**唯一可编辑的 Token 基线。未来获准建立运行时主题后，数值必须原样迁至唯一 Token 文件；之后运行时 Token 才成为唯一可编辑数值真源，文档由其生成或校验。
+2. [tokens.md](tokens.md) 是 `LIDS-TOK-001` 的版本化规范与校验镜像；LOCAL-001A 的 `apps/api/src/local_web/lids_tokens.css` 已是唯一可编辑的运行时 Token 值源。两者的单向同步与 107 项名称→值校验规则由 `tokens.md` 明确规定；页面 CSS 只能消费 Token，不得另行声明主题。
 3. [primitives.md](primitives.md) 和 [patterns.md](patterns.md) 是基础语法与页面组合的权威约束；它们不是现有代码实现的声明。
 4. [agent-execution-guide.md](agent-execution-guide.md) 是给协作 Agent 的简明强制清单；它从主标准派生，不能与主标准冲突。
 5. [prototype-audit.md](prototype-audit.md) 把下载包中的 Observatory V3 降级为 L3 视觉母题参考，防止旧单页原型、模拟数据、永久动画或假运行状态被误带入产品。
@@ -67,6 +67,6 @@ Token → Primitive → Component → Pattern → Page
 
 ## 标准状态与升级门
 
-LIDS 对协作执行的约束已经是“权威当前”，但其系统成熟度保持 `PROPOSED`。转为 `STABLE` 至少需要由不同事项、不同验收层实际证明：一个真实 L3 Topic/Observatory 页、一个真实 L2 Evidence/Topic 页、一个真实 L1 Corpus/Collection 页；这些页面必须拥有真实数据合同、状态验证、响应式和可访问性证据。若包含 L3 场景，还必须另有通过的 Style Frame、性能、Poster、移动端和 Reduced Motion 证明。
+LIDS 对协作执行的约束已经是“权威当前”，但其系统成熟度保持 `PROPOSED`。LOCAL-001A 的 Evidence Library 只是一个受限 L1 loopback 页面：它没有材料 read model 或真实数据合同，因此不计入下列成熟度门。转为 `STABLE` 至少需要由不同事项、不同验收层实际证明：一个真实 L3 Topic/Observatory 页、一个真实 L2 Evidence/Topic 页、一个拥有真实数据合同、状态验证、响应式和可访问性证据的 L1 Corpus/Collection 页。若包含 L3 场景，还必须另有通过的 Style Frame、性能、Poster、移动端和 Reduced Motion 证明。
 
 这不是推迟 LIDS 的执行：从今天起，所有获准 UI 工作都遵从 LIDS；只是不能把“设计标准已写好”误报为“产品和完整组件系统已建成”。

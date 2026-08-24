@@ -1,7 +1,7 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-08-21
+> 最后核对: 2026-08-25
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
@@ -12,11 +12,11 @@
 
 - **来源**：Mog 明确指定 `/Users/moglenny/Downloads/Linggan_Intelligence_Design_System_v2.0`；主源文件校验值与不继承清单见 [README.md](README.md)。
 - **吸收**：`Token → Primitive → Component → Pattern → Page`、L1/L2/L3、暖灰/煤黑/Signal 的语义、Sans/Mono 分工、状态五轴、`PARTIAL + VALID`、动效/场景/响应式/a11y 边界、Agent 决策树、规格门与变更纪律。
-- **项目适配**：把来源包的运行时代码、目标目录、React/Three/Blender 路线、V3 模拟数据/状态和静态原型降级为未来候选；不创建 Web 应用、主题 CSS、组件、真实数据或部署。
+- **项目适配（截至 2026-08-21）**：把来源包的运行时代码、目标目录、React/Three/Blender 路线、V3 模拟数据/状态和静态原型降级为未来候选；当时未创建 Web 应用、主题 CSS、组件、真实数据或部署。LOCAL-001A 的后续受限实现见本日志 2026-08-24/25 条目。
 - **替代**：DESIGN-002 原有 DS-001–DS-007 的局部“暗色 Acid/新粗野主义”视觉值被 LIDS Token 与 L2 Pattern 取代；原有 Evidence/Boundary 和组件晋升的事实边界仍保留，并与 LIDS Data Truth 对齐。
 - **影响**：全项目未来 UI Agent；DESIGN-002 Topic 静态参考页、其 PAGE 规格、执行合同、设计治理、模板、索引和检查脚本。
 - **验证目标**：手册链接/状态头、LIDS 检查、Topic 专项检查、项目治理检查、静态浏览器走查与独立审查。
-- **未证明**：LIDS 仍为 `PROPOSED`；没有真实 L1/L2/L3 页面、运行时 Token、组件、真实数据/Agent 状态、3D 资产、性能、部署或 Mog 最终视觉验收。
+- **未证明（截至 2026-08-21）**：LIDS 当时仍为 `PROPOSED`；没有真实 L1/L2/L3 页面、运行时 Token、组件、真实数据/Agent 状态、3D 资产、性能、部署或 Mog 最终视觉验收。LOCAL-001A 的后续受限实现不改变该历史记录。
 
 ## 2026-08-24 · LOCAL-001A 首个运行时 L1 Evidence Library token 映射
 
@@ -27,3 +27,10 @@
 - **Data Truth**：页面只表达 `SOURCE_INCOMPLETE`、`NOT_CONNECTED`、`UNKNOWN` 与“本页没有可展示的已接纳材料”。这些不表示系统库为 0、平台不存在内容、捕获失败或任何趋势；没有模拟数值、`LIVE`/`FRESH`、假按钮或前端回执。
 - **验证目标**：Rust route test、loopback HTTP、指定视口浏览器走查、CSS token/a11y 检查和治理检查。实际结果与未证明边界记录在 `ACC-EVIDENCE-001`。
 - **未证明**：LIDS 整体仍为 `PROPOSED`；本项不证明 Materials read model、真实 Evidence/Observation/Capture、数据库、插件/真实平台、媒体、OCR/ASR、跨页组件、部署或 Mog 验收。
+
+## 2026-08-25 · LOCAL-001A LIDS 当前状态对账
+
+- **原因**：独立 Spec 审查发现 README 与 system 仍将 2026-08-21 的“没有 Web runtime/主题 CSS/真实页面”写成当前事实，与已实现的 LOCAL-001A 相冲突。
+- **当前受限事实**：已有 loopback Rust host、一个 `/corpus/evidence` Evidence Library 页面，以及 `apps/api/src/local_web/lids_tokens.css` 这一唯一运行时 Token 值编辑源。
+- **仍未证明**：没有真实数据或 Materials read model、通用组件库、L2/L3 页面或场景、Agent runtime、部署、完整产品 Web 或 Mog/业务验收。LIDS 成熟度仍为 `PROPOSED`。
+- **治理与验证**：README/system/tokens 的当前表述按这一区分同步；Rust 测试精确核对 107 个运行时 Token 名称和值，页面 CSS 不声明 Token。此对账不改页面代码、路由、视觉数值、数据或任何运行能力。
