@@ -1,7 +1,7 @@
 # 开发阶段跟踪总表
 
 > 状态: 权威当前
-> 最后核对: 2026-08-21
+> 最后核对: 2026-08-25
 > 适用范围: Linggan Intelligence 从开发基线、合成事实链到真实运行与业务验收的阶段级跟踪
 > 事实来源: `current-state.md`、已确认决定、当前活跃 SCOPE、真实代码/测试/数据库副作用与阶段计划
 > 冲突时以谁为准: `AGENTS.md` 是最高约束；实现状态以可复现代码、测试、数据库副作用和真实运行结果为准；产品含义与授权边界以用户最新确认、ACCEPTED ADR 和当前活跃 SCOPE 为准；本表不替代任务级合同
@@ -34,7 +34,8 @@
 - 已完成：项目治理、开发环境、产品/领域/架构基础设计和代码前语义冻结。
 - 已开始：只使用合成/脱敏材料的 `F01` 合同 TDD；已有 Package/Record hash、三类 canonicalization 攻击、RFC 8785 golden、F01 静态 manifest Oracle，以及**在真实 PostgreSQL 16 上通过的 Package atomic ingress**（accepted / 六点事务故障零半写 / replay / conflict / 逐表行数）。
 - 尚未完成：two Records 的独立处理、Observation/Current、loopback API、worker、minimal CLI、`0002` migration、运行角色权限负例和本 tracer 验证门。
-- 当前硬停止线：F01 完成后停止；`ARC-001` 未收口前，F02–F10、真实小红书访问、真实原文、插件升级、媒体、AI Agent crew、Topic/Corpus/Signal、Web 产品、生产部署和旧系统迁移均不开始。
+- 已有受限例外：`LOCAL-001A` 已独立合并并证明 loopback Rust host、根入口重定向、一个 `/corpus/evidence` 诚实空态页面和唯一运行时 Token 值源；它不接通 Materials read model、真实数据、数据库、插件/平台、媒体/OCR/ASR、Agent 或部署。
+- 当前硬停止线：F01 完成后停止；除已完成的 `LOCAL-001A` 受限本地入口外，F02–F10、真实小红书访问、真实原文、插件升级、媒体、AI Agent crew、Topic/Corpus/Signal、其余 Web 产品能力、生产部署和旧系统迁移均不开始，直到相应 Local/产品 Scope、Issue 和验证门明确开放。
 - 当前权威执行文件：[`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md)。
 
 ## `ARC-001` 架构收口门
