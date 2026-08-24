@@ -1,8 +1,8 @@
 # LIDS-PRI-001 · Primitive 与基础交互契约
 
 > 状态: 权威当前
-> 运行时状态: 定义未来唯一基础语法，不声明现有代码实现
-> 最后核对: 2026-08-21
+> 运行时状态: 定义跨页面基础语法；LOCAL-001A 页面存在，但本文件不把页面局部 HTML/CSS 提升为通用 Primitive 实现
+> 最后核对: 2026-08-25
 > 适用范围: Linggan Intelligence 未来前端的文本、按钮、状态、Surface、Readout、分割、输入、列表、提示、反馈和焦点行为
 > 事实来源: Mog 指定的 LIDS v2.0 `primitives.md`（SHA-256: `e7d67dba088fea500d05ecfa45a62a290e4b3d07f121830f010a9e38cecf5b73`）、[tokens.md](tokens.md)、[system.md](system.md)
 > 冲突时以谁为准: 用户最新确认、产品/数据/权限合同、当前 SCOPE 和已获准的正式 CMP；本文件不授予实现或数据状态

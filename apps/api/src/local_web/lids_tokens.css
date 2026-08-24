@@ -1,0 +1,136 @@
+[data-theme="linggan-intelligence"] {
+  /* Canvas */
+  --lgi-canvas: #ecebe6;
+  --lgi-canvas-hi: #f6f5f1;
+  --lgi-canvas-low: #deddd7;
+  --lgi-canvas-overlay: rgba(236, 235, 230, 0.92);
+  --lgi-canvas-glass: rgba(246, 245, 241, 0.86);
+
+  /* Ink */
+  --lgi-ink: #121211;
+  --lgi-body: #2d2d2a;
+  --lgi-muted: #64635e;
+  --lgi-ghost: #8c8a84;
+  --lgi-on-dark: #faf9f5;
+
+  /* Signature signal */
+  --lgi-signal: #ef4f25;
+  --lgi-signal-hover: #dd431e;
+  --lgi-signal-ink: #a73317;
+  --lgi-signal-soft: rgba(239, 79, 37, 0.12);
+  --lgi-signal-faint: rgba(239, 79, 37, 0.06);
+
+  /* Semantic */
+  --lgi-success: #4b6525;
+  --lgi-success-dot: #9fcb54;
+  --lgi-success-soft: rgba(159, 203, 84, 0.14);
+  --lgi-warning: #805500;
+  --lgi-warning-dot: #c18a1a;
+  --lgi-warning-soft: rgba(193, 138, 26, 0.14);
+  --lgi-danger: #9e2517;
+  --lgi-danger-soft: rgba(158, 37, 23, 0.10);
+  --lgi-info: #345a6f;
+  --lgi-info-soft: rgba(52, 90, 111, 0.10);
+
+  /* Borders */
+  --lgi-hairline: rgba(18, 18, 17, 0.14);
+  --lgi-border: rgba(18, 18, 17, 0.20);
+  --lgi-border-strong: rgba(18, 18, 17, 0.28);
+  --lgi-border-solid: #121211;
+
+  /* Typography */
+  --lgi-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  --lgi-font-mono: "SFMono-Regular", "JetBrains Mono", "Roboto Mono", "Noto Sans Mono CJK SC", ui-monospace, monospace;
+  --lgi-text-display: clamp(3rem, 6vw, 5.5rem);
+  --lgi-text-hero: 3rem;
+  --lgi-text-page-title: 1.75rem;
+  --lgi-text-section: 1.125rem;
+  --lgi-text-longform: 1rem;
+  --lgi-text-body: 0.875rem;
+  --lgi-text-data: 0.75rem;
+  --lgi-text-label: 0.6875rem;
+  --lgi-text-calibration: 0.5625rem;
+  --lgi-weight-regular: 400;
+  --lgi-weight-medium: 500;
+  --lgi-weight-semibold: 600;
+  --lgi-weight-bold: 700;
+  --lgi-lh-display: 0.96;
+  --lgi-lh-title: 1.1;
+  --lgi-lh-heading: 1.25;
+  --lgi-lh-data: 1.4;
+  --lgi-lh-body: 1.55;
+  --lgi-lh-longform: 1.65;
+  --lgi-ls-tight: -0.04em;
+  --lgi-ls-normal: 0;
+  --lgi-ls-data: 0.04em;
+  --lgi-ls-caps: 0.12em;
+  --lgi-ls-calibration: 0.18em;
+
+  /* Spacing */
+  --lgi-space-1: 4px;
+  --lgi-space-2: 8px;
+  --lgi-space-3: 12px;
+  --lgi-space-4: 16px;
+  --lgi-space-5: 20px;
+  --lgi-space-6: 24px;
+  --lgi-space-8: 32px;
+  --lgi-space-10: 40px;
+  --lgi-space-12: 48px;
+  --lgi-space-16: 64px;
+  --lgi-space-24: 96px;
+
+  /* Radius */
+  --lgi-radius-none: 0;
+  --lgi-radius-xs: 2px;
+  --lgi-radius-sm: 4px;
+  --lgi-radius-md: 8px;
+
+  /* Shadows */
+  --lgi-shadow-none: none;
+  --lgi-shadow-contact: 0 1px 2px rgba(18, 18, 17, 0.08);
+  --lgi-shadow-overlay: 0 12px 30px rgba(18, 18, 17, 0.12);
+  --lgi-shadow-stage: 0 24px 25px rgba(18, 18, 17, 0.055);
+  --lgi-shadow-hard: 8px 8px 0 rgba(18, 18, 17, 0.08);
+
+  /* Layout */
+  --lgi-page-max-l3: 1720px;
+  --lgi-page-max-workbench: 1440px;
+  --lgi-header-height: 64px;
+  --lgi-header-height-compact: 58px;
+  --lgi-command-height: 76px;
+  --lgi-grid-major: 180px;
+  --lgi-grid-mobile: 120px;
+  --lgi-calibration-width: 27px;
+
+  /* Motion */
+  --lgi-duration-press: 100ms;
+  --lgi-duration-state: 160ms;
+  --lgi-duration-overlay: 200ms;
+  --lgi-duration-panel: 240ms;
+  --lgi-duration-page: 280ms;
+  --lgi-duration-scene: 600ms;
+  --lgi-duration-ambient: 10s;
+  --lgi-ease-ui: cubic-bezier(0.2, 0.75, 0.2, 1);
+  --lgi-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --lgi-ease-linear: linear;
+
+  /* Z-index */
+  --lgi-z-base: 0;
+  --lgi-z-stage: 10;
+  --lgi-z-sticky: 30;
+  --lgi-z-header: 40;
+  --lgi-z-drawer: 80;
+  --lgi-z-overlay: 100;
+  --lgi-z-popover: 140;
+  --lgi-z-toast: 180;
+
+  /* Isometric 2.5D */
+  --lgi-iso-axis-angle: 26.565deg;
+  --lgi-iso-layer-gap: 32px;
+  --lgi-iso-module-depth-sm: 12px;
+  --lgi-iso-module-depth-md: 22px;
+  --lgi-iso-module-depth-lg: 44px;
+
+  /* WebGL quality */
+  --lgi-scene-pixel-ratio-max: 1.75;
+}

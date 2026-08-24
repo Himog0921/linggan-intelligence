@@ -2,7 +2,7 @@
 
 > 状态: 权威当前
 > 标准成熟度: PROPOSED
-> 最后核对: 2026-08-21
+> 最后核对: 2026-08-25
 > 适用范围: Linggan Intelligence 中所有获准实施的用户界面、视觉资产、状态呈现、动效、页面/组件规格和 UI Agent 交付
 > 事实来源: Mog 明确指定的 LIDS v2.0 来源包、[README.md](README.md)、AGENTS.md、docs/governance/、已确认产品页面、数据/权限/行动合同和当前 SCOPE
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策和当前 SCOPE；没有产品或数据依据时停止，不以 LIDS 补全事实
@@ -15,13 +15,13 @@ Linggan Intelligence 不是普通 SaaS 后台、传统 BI 看板或聊天窗口�
 
 系统应同时体现真实、精密、可追溯和克制：原声/来源/时间/范围/缺口可见；结构、读数和状态对齐；结论可回到证据；少色、少阴影、少装饰动效。视觉权重为编辑式信息设计约 55%、精密仪器语言约 25%、等距系统语言约 15%、ASCII/终端语言约 5%。ASCII 是稳定编码协议，不是纹理；等距场景表达数据路径，不是科技插图。
 
-未来获得运行时 UI 授权时，唯一主题名为：
+LOCAL-001A 已获准使用的运行时主题名为：
 
 ```html
 <html data-theme="linggan-intelligence">
 ```
 
-在当前无 Web 运行时阶段，这个名称只是冻结的迁移契约，不能被表述为已存在的应用代码。
+该主题名已由 loopback Rust host 的 Evidence Library 页面使用；其完整运行时 Token 值源是 `apps/api/src/local_web/lids_tokens.css`。这项受限实现不表示已有通用主题框架、组件库、真实数据/read model、L2/L3 页面、Agent、部署或完整产品 Web。
 
 ## 2. 五层架构和横向约束
 
@@ -113,4 +113,4 @@ L3 等距场景只能在另获技术和资产授权时进入实现；静态 Styl
 
 最低视觉验收尺寸为桌面 `1280×800`、`1440×900`、`1536×960`、`1728×1117`、`1920×1080`、`2560×1440` 和移动 `390×844`、`430×932`。无页面级横向滚动；移动端不是缩小桌面场景，而是保留 Topic、状态、原声和主动作，降级/隐藏不重要的仪器层。
 
-LIDS 从 `PROPOSED` 升至 `STABLE` 的证据门见 [README.md](README.md)。在此之前，任何项目文件只能声称“按 Proposed 标准执行/通过静态参考验证”，不能声称 LIDS 已获得真实运行页、组件、3D、数据或用户验收。
+LIDS 从 `PROPOSED` 升至 `STABLE` 的证据门见 [README.md](README.md)。在此之前，项目文件可以如实声明 LOCAL-001A 已有受限的 loopback L1 页面与运行时 Token 源；但不能因此声称 LIDS 已获得真实数据/read model、通用组件、L2/L3、3D、Agent、部署或用户验收。

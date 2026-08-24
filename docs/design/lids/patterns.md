@@ -1,8 +1,8 @@
 # LIDS-PAT-001 · L1/L2/L3 页面 Pattern
 
 > 状态: 权威当前
-> 运行时状态: 定义页面组合约束，不声明任何页面已实现
-> 最后核对: 2026-08-21
+> 运行时状态: 定义页面组合约束；LOCAL-001A 已有受限 L1 Evidence Library 页面，但本文件不把它声明为通用 Pattern 实现
+> 最后核对: 2026-08-25
 > 适用范围: Linggan Intelligence 已获批准页面的结构、信息顺序、视觉强度和 Pattern 选择
 > 事实来源: Mog 指定的 LIDS v2.0 `patterns.md`（SHA-256: `94fe15b47e7d38b1be15b0369c143f51859a1aa79a1ca6c2dba0db9dfa2a2719`）、[system.md](system.md)、已批准产品页面与 PAGE 规格
 > 冲突时以谁为准: 用户最新确认、当前产品任务、真实数据/权限/行动合同与 SCOPE；Pattern 不能自行增加模块或操作

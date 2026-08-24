@@ -18,11 +18,13 @@ license = "UNLICENSED"
 publish = false
 
 [workspace.dependencies]
+axum = { version = "0.8.8", default-features = false, features = ["http1", "json", "tokio"] }
 sqlx = { version = "0.9.0", default-features = false, features = ["runtime-tokio", "postgres", "uuid", "json"] }
 tokio = { version = "1.48.0", default-features = false }
 uuid = { version = "1.24.1", default-features = false, features = ["std"] }
 serde_json = "1"
 thiserror = "2"
+tower = { version = "0.5.2", default-features = false, features = ["util"] }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
