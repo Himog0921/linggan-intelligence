@@ -242,7 +242,7 @@ mod tests {
             "--v7-inspector-width:440px",
             "--v7-brand-red:#e8003f",
             "--v7-red:#ef4f25",
-            "@media(max-width:900px){html,body{height:auto;min-height:100%;overflow:auto}.v7-app{height:auto;min-height:100vh;overflow:visible}",
+            "@media(max-width:900px){html,body{height:auto;min-height:100%;overflow:auto}.v7-app{height:auto;min-height:100vh;grid-template-rows:auto minmax(0,1fr);overflow:visible}",
         ] {
             assert!(
                 EVIDENCE_LIBRARY_CSS.contains(required_css),

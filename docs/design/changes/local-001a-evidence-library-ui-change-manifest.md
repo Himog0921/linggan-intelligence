@@ -11,7 +11,7 @@
 - Issue / Scope: Issue #25（host）与 Issue #29（V7 fidelity）；`LOCAL-001 / 001A`
 - Agent 与 worktree: Issue #25 的 host 交付保持原记录；Issue #29 的 V7 修订由 `codex:/root/implement_v7_fidelity` 在 `/Users/moglenny/.proma/agent-workspaces/linggan-intelligence/issue-29-v7-evidence-library-fidelity` 完成。
 - 目标: 建立 loopback Rust host 与真实空态 Evidence Library 路由
-- 用户可见结果: 访问 `http://localhost:3000` 会临时进入 `/corpus/evidence`，看到 V7 的精确页头、固定桌面三栏、FACT LAYER 与 Inspector 骨架；桌面通过 Results/Inspector 内部滚动保持固定工作台，所有未接通内容保持诚实空态并禁用控件
+- 用户可见结果: 访问 `http://localhost:3000` 会临时进入 `/corpus/evidence`，看到 V7 的精确页头、固定桌面三栏、FACT LAYER 与 Inspector 骨架；桌面通过 Results/Inspector 内部滚动保持固定工作台，移动端页头改用自动高度以避免换行导航覆盖 context row，所有未接通内容保持诚实空态并禁用控件
 - 明确非目标: 数据库、插件、真实平台、媒体、OCR/ASR、Agent、旧内容工作台、部署和任何写动作
 
 ## 2. 读取回执
