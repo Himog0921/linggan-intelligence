@@ -23,7 +23,7 @@
 
 ## 2. 页面边界
 
-- 入口: `GET /corpus/evidence`；同一 local host 的唯一页面路由
+- 入口: `GET /` 以临时重定向进入 `GET /corpus/evidence`；后者是同一 local host 的唯一页面路由
 - 退出与返回: 当前无可用的相邻产品路由；顶层和二级导航是工作空间方位标记，不是未接通能力的假链接
 - 本页负责的核心任务: 在材料存在以前，清楚说明 Evidence Library 将承接什么、当前哪些链路未接通、以及这些缺口不能证明什么
 - 本页明确不负责: 形成或接纳 Evidence、判断 Observation、计算 Coverage、读取原文、启动采集、修改设置或建立任何第二事实源
@@ -53,12 +53,12 @@
 
 ### LIDS 采用清单
 
-- Token 基线与唯一数值来源: `LIDS-TOK-001`。运行时 CSS 只使用 `--lgi-*` 名称；值逐项抄自 `docs/design/lids/tokens.md`。
+- Token 基线与唯一运行时真源: `LIDS-TOK-001`。`apps/api/src/local_web/lids_tokens.css` 完整承载当前 107 个 `--lgi-*` token，并由 Rust 测试逐名与 `docs/design/lids/tokens.md` 核对；`evidence_library.css` 只消费这些 token，不声明 token。
 - Primitive / 正式 CMP 查重结果: 没有新增跨页面 CMP；使用 `LIDS-PRI-001` 的 Sans/Mono、连续工作面、五轴状态分责与 hairline 原则。
 - 页面唯一视觉核心: 中央空材料边界说明；不是营销 Hero，也不是假数据仪表盘。
 - 原声、来源、样本、窗口、Coverage/Validity/冲突/复核边界: 001A 没有材料、原声或样本；页面直接说明对应字段未知而非显示占位数字。
 - ASCII / 场景 / 动效: 不使用。`prefers-reduced-motion` 不触发额外动效，因为本页没有运动。
-- 页面级例外 `LOCAL-001-UI-EX-01`: 为满足 V7 三栏工作空间的检视比例，本页用 216px 左栏、440px 右栏以及 2px 中央分界线。这些仅限本页布局，不是全局 Token；其余颜色、字体、间距、半径和动效值均映射 LIDS。
+- 页面级例外 `LOCAL-001-UI-EX-01`: 为满足 V7 三栏工作空间的检视比例，本页仅保留 216px 左栏、440px 右栏以及 2px 中央结构线。它们仅限本页布局，不是全局 Token；其余颜色、字体、尺寸、间距、半径和动效值均消费 LIDS token。响应式条件用相对 `em` 表达，避免另建页面尺寸体系。
 - 明确禁止: 第二套色彩/字体/状态/按钮语言，玻璃/渐变/悬浮卡，模拟数据、模拟 live/fresh、假 Primary 与任何前端事实写入。
 
 ## 5. 交互与真实后果

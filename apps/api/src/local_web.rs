@@ -1,7 +1,7 @@
 use axum::{
     Json, Router,
     http::{HeaderValue, header},
-    response::{Html, IntoResponse, Response},
+    response::{Html, IntoResponse, Redirect, Response},
     routing::get,
 };
 use serde_json::{Value, json};
@@ -9,13 +9,21 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 const LOCAL_HOST: Ipv4Addr = Ipv4Addr::LOCALHOST;
 const LOCAL_PORT: u16 = 3000;
+const LIDS_TOKENS: &str = include_str!("local_web/lids_tokens.css");
 const EVIDENCE_LIBRARY_CSS: &str = include_str!("local_web/evidence_library.css");
+#[cfg(test)]
+const LIDS_TOKEN_DOCUMENT: &str = include_str!("../../../docs/design/lids/tokens.md");
 
 pub fn app() -> Router {
     Router::new()
+        .route("/", get(local_entry))
         .route("/health", get(health))
         .route("/corpus/evidence", get(evidence_library))
         .route("/assets/evidence-library.css", get(stylesheet))
+}
+
+async fn local_entry() -> Redirect {
+    Redirect::temporary("/corpus/evidence")
 }
 
 pub async fn serve() -> Result<(), std::io::Error> {
@@ -47,7 +55,7 @@ async fn stylesheet() -> Response {
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/css; charset=utf-8"),
         )],
-        EVIDENCE_LIBRARY_CSS,
+        format!("{LIDS_TOKENS}\n{EVIDENCE_LIBRARY_CSS}"),
     )
         .into_response()
 }
@@ -131,8 +139,9 @@ mod tests {
     use super::*;
     use axum::{
         body::Body,
-        http::{Request, StatusCode},
+        http::{Request, StatusCode, header},
     };
+    use std::collections::BTreeSet;
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -151,6 +160,20 @@ mod tests {
         assert_eq!(
             response.headers().get(header::CONTENT_TYPE).unwrap(),
             "application/json"
+        );
+    }
+
+    #[tokio::test]
+    async fn local_entry_redirects_to_the_evidence_library() {
+        let response = app()
+            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(
+            response.headers().get(header::LOCATION).unwrap(),
+            "/corpus/evidence"
         );
     }
 
@@ -176,5 +199,23 @@ mod tests {
     fn evidence_page_does_not_replace_unknown_with_zero() {
         assert!(evidence_library_html().contains("COVERAGE</span><strong>UNKNOWN"));
         assert!(!evidence_library_html().contains("评论 0"));
+    }
+
+    #[test]
+    fn runtime_token_source_matches_the_full_lids_baseline() {
+        let runtime = declared_token_names(LIDS_TOKENS);
+        let documented = declared_token_names(LIDS_TOKEN_DOCUMENT);
+
+        assert_eq!(runtime.len(), 107);
+        assert_eq!(runtime, documented);
+        assert!(declared_token_names(EVIDENCE_LIBRARY_CSS).is_empty());
+    }
+
+    fn declared_token_names(stylesheet: &str) -> BTreeSet<&str> {
+        stylesheet
+            .lines()
+            .filter_map(|line| line.trim().strip_prefix("--lgi-"))
+            .filter_map(|line| line.split_once(':').map(|(name, _)| name))
+            .collect()
     }
 }

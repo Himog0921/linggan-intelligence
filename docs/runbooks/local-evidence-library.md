@@ -12,6 +12,7 @@
 
 ```text
 http://localhost:3000/health
+http://localhost:3000/
 http://localhost:3000/corpus/evidence
 ```
 
@@ -25,7 +26,7 @@ http://localhost:3000/corpus/evidence
 cargo run -p linggan-api
 ```
 
-看到下面这行后，浏览器访问页面：
+看到下面这行后，浏览器直接访问 `http://localhost:3000`；它会临时重定向到 Evidence Library 页面：
 
 ```text
 Linggan local host listening on http://localhost:3000
@@ -39,6 +40,7 @@ Linggan local host listening on http://localhost:3000
 
 ```bash
 curl --fail --silent http://localhost:3000/health
+curl --head --silent http://localhost:3000/
 curl --fail --silent http://localhost:3000/corpus/evidence > /dev/null
 ```
 
@@ -47,6 +49,8 @@ curl --fail --silent http://localhost:3000/corpus/evidence > /dev/null
 - `listener: loopback-only`：表示服务只绑定本机回环地址；
 - `dataState: SOURCE_INCOMPLETE`：表示这不是数据接入成功的证明；
 - `evidenceReadModel: NOT_CONNECTED`：表示 Evidence Library 尚未读取任何材料。
+
+根入口的响应应为 `307 Temporary Redirect`，并包含 `location: /corpus/evidence`。`/health` 保持机器可读状态接口，不重定向。
 
 打开 `/corpus/evidence` 后，当前应该看到 Evidence Explorer + Provenance Inspector 的空态工作空间。它会说明“当前没有可展示的本地已接纳材料”，同时说明这**不能**推断世界没有内容或数据库为零。
 

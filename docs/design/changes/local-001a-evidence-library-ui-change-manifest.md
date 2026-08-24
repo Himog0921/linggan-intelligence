@@ -11,7 +11,7 @@
 - Issue / Scope: Issue #25；`LOCAL-001 / 001A`
 - Agent 与 worktree: `codex:/root/local_001a_impl`；`/Users/moglenny/.proma/agent-workspaces/linggan-intelligence/local-001a-host`
 - 目标: 建立 loopback Rust host 与真实空态 Evidence Library 路由
-- 用户可见结果: `http://localhost:3000/corpus/evidence` 显示 V7 方位/Explorer/Inspector 结构，并如实表示材料读投影未接通
+- 用户可见结果: 访问 `http://localhost:3000` 会临时进入 `/corpus/evidence`，显示 V7 方位/Explorer/Inspector 结构，并如实表示材料读投影未接通
 - 明确非目标: 数据库、插件、真实平台、媒体、OCR/ASR、Agent、旧内容工作台、部署和任何写动作
 
 ## 2. 读取回执
@@ -34,7 +34,7 @@
 - 为什么该类别足以覆盖本次风险: 页面唯一可见信息是“当前知道/不知道什么”；因此不把未接通状态压为无数据、成功或失败比视觉复杂度优先。
 - 是否存在 `DECISION_REQUIRED`: 否。真实材料读取留给 001B；这不是本卡未解决后暗中实现的内容。
 - L1 / L2 / L3 与主 Pattern: L1 `Corpus Explorer`，嵌入右侧 L2 `Split Evidence Inspector`；没有 L3。
-- 是否触及 Token、Primitive、CMP、Scene、Motion 或 Data Truth: 新增运行时 CSS token 映射、使用 Primitive/Pattern 与 Data Truth；没有新 CMP、Scene 或 Motion。
+- 是否触及 Token、Primitive、CMP、Scene、Motion 或 Data Truth: 新增单一、完整、可验证的运行时 LIDS token 真源；页面 CSS 只消费它，并使用 Primitive/Pattern 与 Data Truth；没有新 CMP、Scene 或 Motion。
 
 ## 4. 影响边界
 
@@ -59,6 +59,6 @@
 - 修改文件: Claim 内 Rust、CSS、Page Spec、Manifest、Acceptance、Runbook、LIDS migration log、docs index/progress
 - 验证命令/走查: `cargo fmt --all -- --check`、`cargo clippy -p linggan-api -- -D warnings`、`cargo test -p linggan-api`、loopback `curl`、浏览器视口检查、`./scripts/check-project-governance.sh origin/main`
 - 规则或索引同步: `docs/README.md`、`docs/design/lids/migration-log.md`、`docs/progress/2026-08.md`
-- 例外与替代: 仅 `LOCAL-001-UI-EX-01`；不替代 LIDS 或建立第二 Token 真源
+- 例外与替代: 仅 `LOCAL-001-UI-EX-01` 的 216px / 440px / 2px；不替代 LIDS 或建立第二 Token 真源。`lids_tokens.css` 的 107 个 token 是本地运行时唯一真源，Rust 测试逐名对照 `LIDS-TOK-001`，`evidence_library.css` 不声明 token。
 - LIDS migration log / 预览同步: runtime page is the preview; no generated screenshot is committed
 - PR / reviewer / integration owner: draft PR after checks; reviewer and `/root` integration owner remain non-implementers

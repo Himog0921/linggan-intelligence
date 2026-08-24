@@ -18,7 +18,7 @@
 
 | 场景 | 用户任务 | 预期状态含义 | 视觉检查重点 | 真实后果/回执 | 结果 |
 |---|---|---|---|---|---|
-| Local host response | Confirm a local Linggan page exists | host is loopback, not a data proof | header/Explorer/Inspector present | `GET /corpus/evidence` returned `200` | VERIFIED |
+| Local host response | Open the local Linggan entry | host is loopback, not a data proof | root enters the Evidence Library without a second page | `GET /` returned `307` with `location: /corpus/evidence`; `GET /corpus/evidence` returned `200` | VERIFIED |
 | 信息缺失或未知 | Understand why no material is shown | source/read model incomplete; not zero | separated `SOURCE_INCOMPLETE` / `NOT CONNECTED` / `UNKNOWN` readouts | no action | VERIFIED |
 | 处理中或部分结果 | N/A in 001A | no contract exists, so must not be invented | no fake loading/partial badge | N/A | VERIFIED (absence checked) |
 | 权限受限或失败 | N/A in 001A | no source/permission contract is queried | no error disguised as source state | N/A | VERIFIED (not implemented by design) |
@@ -28,7 +28,7 @@
 - 声明的桌面工作区/视口: 1280×800、1440×900、1920×1080；窄屏 390×844
 - 输入内容长度与数据密度: 无材料、无真实原文、无模拟计数
 - 已批准的设计规则: `PAGE-EVIDENCE-001`、`LIDS-TOK-001`、`LIDS-PRI-001`、`LIDS-PAT-001`、`LOCAL-001-UI-EX-01`
-- LIDS 强度 / Pattern / Token 依据: L1 Corpus Explorer + embedded L2 Inspector; runtime CSS maps listed `--lgi-*` tokens
+- LIDS 强度 / Pattern / Token 依据: L1 Corpus Explorer + embedded L2 Inspector; `lids_tokens.css` is the single 107-token runtime source, checked name-for-name against `LIDS-TOK-001`; page CSS only consumes it
 - LIDS 状态五轴或合成边界依据: source/read model/coverage separated; no generic status tag
 - Reduced Motion / 移动或静态 Poster 降级: no motion; mobile collapses three-column workspace into sequential regions
 - 已检查的响应式/可访问性条件: 2026-08-24 使用本机 headless Chrome 对 1280×800、1440×900、1920×1080 与 390×844 的 local route 截图走查。宽屏维持三栏，390px 顺序折叠为 header → rail → workspace → inspector；窄屏移除非关键的 loopback 方位读数，避免其挤压导航。页面无可点击控件，因此没有键盘动作路径；文档方位使用 `nav`/`aria-current`，内容有 `main`/`aside`/heading 语义。
@@ -40,7 +40,7 @@
 |---|---|---|---|
 | 设计规格一致 | VERIFIED | PAGE-EVIDENCE-001、LIDS token mapping、four-viewport visual walk-through | V7 只为页面 Gold Master，不是全局系统 |
 | 前端/组件实现 | VERIFIED | Rust route + CSS served by local host | no client framework/read model |
-| 自动检查 | VERIFIED | `cargo fmt --all -- --check`; `cargo clippy -p linggan-api -- -D warnings`; 3 API tests; Rust-boundary and governance checks | tests do not prove material/data chain |
+| 自动检查 | VERIFIED | `cargo fmt --all -- --check`; `cargo clippy --workspace -- -D warnings`; `cargo test --workspace` including root redirect and 107-token source checks; Rust-boundary and governance checks | tests do not prove material/data chain |
 | 真实链路/回执 | NOT VERIFIED | none | no DB/plugin/platform/material chain |
 | 部署 | NOT VERIFIED | none | local loopback only |
 | Mog / 业务验收 | NOT VERIFIED | none | pending user review |
