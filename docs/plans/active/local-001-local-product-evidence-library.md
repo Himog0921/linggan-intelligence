@@ -8,7 +8,7 @@
 
 ## 目标与用户可见结果
 
-Linggan 不再经由旧内容工作台运行。它是独立的本地 Web 产品；浏览器插件以 **Local Linggan 模式**连接 `http://127.0.0.1:3000`。用户第一个真实页面是 **Evidence Library**：在同一个地方找到、看懂、验证、追溯并继续研究本地 Linggan 已接纳的材料。
+Linggan 不再经由旧内容工作台运行。它是独立的本地 Web 产品；浏览器插件以 **Local Linggan 模式**连接 `http://localhost:3000`。用户第一个真实页面是 **Evidence Library**：在同一个地方找到、看懂、验证、追溯并继续研究本地 Linggan 已接纳的材料。
 
 用户给出的 V7 handoff 是此页的产品与视觉 **Gold Master**。这表示后续页面实施必须以 V7 的信息架构、布局、交互骨架和视觉验收为准绳；它不表示 V7 中的模拟数据、历史指令、技术栈、数据权限或运行状态可以替代 Linggan 的现行事实规则。
 
@@ -18,7 +18,7 @@ Linggan 不再经由旧内容工作台运行。它是独立的本地 Web 产品�
 真实平台页面
         ↓
 原插件的 Local Linggan 模式
-        ↓  仅 localhost:3000
+        ↓  仅 http://localhost:3000
 独立 Linggan 本地 host / API / 数据库
         ↓
 Evidence Library V7（真实状态与本地读投影）
@@ -44,7 +44,7 @@ Evidence Library V7（真实状态与本地读投影）
 
 ### 001A — 本地实际 host + V7 页面真实状态
 
-**用户结果**：访问 `http://127.0.0.1:3000/corpus/evidence` 时，看到的是真实 Linggan 本地页面及真实运行状态，而不是旧内容工作台、静态 handoff 或伪造的“已采集”数字。
+**用户结果**：访问 `http://localhost:3000/corpus/evidence` 时，看到的是真实 Linggan 本地页面及真实运行状态，而不是旧内容工作台、静态 handoff 或伪造的“已采集”数字。
 
 **范围**：
 
@@ -100,7 +100,11 @@ Evidence Library V7（真实状态与本地读投影）
 
 **停止条件**：若真实 Capture/Evidence 的保存、脱敏、访问范围或来源血缘尚不能由现有合同支持，001B 只能交付无数据/受限状态和合同测试；不得为“看见内容”而旁路接入旧系统或写入真实原文。
 
-### 001C — 插件 Local 模式 discovery ingress + ADHD 前 20 条 Canary
+### 001C — 首批媒体 Canary 的三段连续路线
+
+首批 Canary 已按用户确认纳入媒体；它不是“先做文本，以后再考虑媒体”。但媒体的发现、字节取得与语义处理是三种不同责任，不能让搜索页 discovery 假装完成它们。001C 因此只是一张父卡，必须按下列三个子卡顺序推进并分别证明。
+
+#### 001C-1 — 插件 Local 模式 discovery ingress + ADHD 前 20 条发现面
 
 **用户结果**：用户在本机使用原插件执行一次受控的 `ADHD` 搜索结果页 discovery；插件只向 Linggan local host 交付页面实际可见的前 20 个候选卡片及完整 Coverage 回执。随后 Evidence Library 只在数据已按 Local-001 合同接纳后显示它们。
 
@@ -131,6 +135,64 @@ Evidence Library V7（真实状态与本地读投影）
 
 **停止条件**：在以下任一情况发生前不得触发真实搜索：Local host 未可运行、插件实际加载版本不明、localhost 合同未通过、隐私/日志边界未验证、或页面/API 无法显示 Coverage。此时停在 source audit 或本地 dry-run，不以直接连旧工作台代替。
 
+#### 001C-2 — 内容详情与媒体 acquisition Canary
+
+**用户结果**：对于 001C-1 已安全发现、并被明确准入的有限内容，Linggan 能把“作品中的第几个媒体位置”“本次观察到的 URL”“实际取得的确定字节”分开记录，并诚实展示哪些图片/视频成功取得、失败、未尝试或仍未知。
+
+**范围**：
+
+- 仅在独立的详情/Capture、媒体生命周期、隐私与存储合同通过后，对经过准入的少量发现对象进行内容详情和图片/视频 acquisition；
+- 分开记录 Content、Media Slot、Media Observation、下载 Attempt、Media Blob、MIME/hash/size 与 per-slot Coverage；
+- URL 不是媒体身份，文件路径不是媒体身份；同一媒体重复出现、URL 变化和部分成功必须可追溯；
+- Media Canary 完成后，Evidence Library 只显示符合当前用途资格的媒体存在、处理状态和受控预览/引用。
+
+**明确禁止**：
+
+- 不把搜索页的封面或 candidate 卡片当作详情媒体已取得；
+- 不以“内容任务完成”覆盖媒体 slot 的失败/unknown，不把 URL、缩略图或下载路径当作 blob 事实；
+- 不默认批量下载、不开展历史回填、不从旧内容工作台复制媒体、不将原始媒体写入 Git、普通日志或无权限存储；
+- 不运行 OCR、ASR、摘要、embedding 或任何模型处理。
+
+**成功条件**：
+
+1. 每个媒体 slot 的 observed / attempted / acquired / verified Coverage 能单独解释，部分取得的 blob 仍可按用途受控保存；
+2. 每个可读 blob 都能回链到来源内容、slot、观察、下载 attempt 与 hash，而不是只回链 URL；
+3. 失败、未尝试、MIME 不符、URL 失效与下载中断不损坏已成功媒体，也不被写成不存在；
+4. 真实平台访问仍受已批准的有界对象/数量/风险/隐私合同约束，不能因“已发现 20 条”自动深化所有详情。
+
+**验证阶梯**：媒体合同负例 → 本地受控存储/hash/MIME proof → slot 级 partial proof → 小样本真实详情/media Canary → Evidence Library provenance/受限预览走查。
+
+**停止条件**：没有独立通过的 Capture、媒体生命周期、私密保存/读取和删除传播合同，或没有明确的最小对象/字节预算时，001C-2 不得开始；001C-1 的发现材料保留其自身价值，但不得被升级为已取得媒体。
+
+#### 001C-3 — 异步 OCR / 视频转录（ASR）派生材料
+
+**用户结果**：图片中的文案和视频口播不再被当成不可见内容；在原始媒体已经被合法取得且有明确用途后，OCR/ASR 在独立异步处理队列生成可追溯的派生材料。用户能看见处理尚未开始、处理中、部分完成、失败或可用，但不会把派生文本误当平台原文。
+
+**范围**：
+
+- image OCR 与 video audio/ASR 是异步、可重试、可版本化的派生处理，不阻塞原始 Capture/Evidence 接纳；
+- 派生材料必须带 source media/blob、处理器/模型版本、输入范围、时间、状态与失效/撤回血缘；
+- 多图内容按 slot 处理；视频处理至少区分音频提取、口播转录与可选帧 OCR，不能用一个总“转录成功”状态压平；
+- Evidence Library 仅在访问资格允许时，把派生文本作为明确标记的媒体派生信息与原始媒体来源并列展示。
+
+**明确禁止**：
+
+- 不同步阻塞采集、不将 OCR/ASR 结果写回或覆盖 Content 正文、媒体原件或历史 Observation；
+- 未确认第三方处理合同前，不向外部模型发送真实原文、图片、视频、音频或可识别个人材料；
+- 不以 OCR/ASR 完成证明内容真实性、完整性、用户身份、需求、趋势或媒体处理链整体成功；
+- 不训练模型、不建立长期 prompt 缓存、不把派生文本作为未经审计的外部 Agent 语料。
+
+**成功条件**：
+
+1. 原始媒体取得与派生处理的状态、失败和重试资格分离；原始媒体可用时，OCR/ASR 失败不会撤销其 Evidence；
+2. 每段派生文本可回链 blob、slot、处理任务和处理版本，且被清楚标为 OCR/ASR，不伪装平台字段；
+3. 任何撤回、脱敏或访问限制能沿血缘阻断派生文本、索引、预览与后续输出；
+4. 实际模型/服务、隐私、成本、队列和失败恢复通过独立合同与最小样本验证后，才允许真实媒体处理。
+
+**验证阶梯**：派生合同与隐私负例 → 异步队列/版本/lineage test → 受控本地样本 → 批次 partial/failure/withdrawal proof → 页面状态走查。真实第三方模型处理属于额外外部副作用，必须单独确认。
+
+**停止条件**：如果尚无明确的处理器、第三方数据处理、敏感材料访问、异步队列、成本和撤回传播合同，001C-3 只能停在接口与状态设计；不得把 OCR/ASR 作为浏览器或采集插件中的隐式同步步骤。
+
 ## 顺序、依赖与不做清单
 
 ```text
@@ -138,12 +200,16 @@ Evidence Library V7（真实状态与本地读投影）
   ↓
 001B 建立受控只读投影；真实数据绑定验证等待 001C
   ↓
-001C 才允许一次受控的前 20 条 discovery Canary
+001C-1 才允许一次受控的前 20 条 discovery Canary
+  ↓
+001C-2 对经准入的小样本完成详情与媒体 acquisition Canary
+  ↓
+001C-3 对合法取得媒体完成异步 OCR / ASR 派生处理验证
   ↓
 001B 对真实接纳结果完成页面证明
 ```
 
-Local-001 不包含：旧系统迁移、线上部署、完整采集调度、详情深采、评论、作者档案、媒体下载、OCR/ASR、Topic/Corpus 精选、Signal/Insight/Intelligence、AI Agent、真实趋势、Outcome 或外部 Agent CLI。
+Local-001 不包含：旧系统迁移、线上部署、完整采集调度、历史批量回填、评论深采、作者档案、Topic/Corpus 精选、Signal/Insight/Intelligence、AI Agent、真实趋势、Outcome 或外部 Agent CLI。首批媒体、OCR/ASR 只以 001C-2/001C-3 的独立、受限、合同先行路线纳入；并不授权在 001C-1 或本治理事项中实施它们。
 
 ## 当前需要由技术审计证明、不得臆测的事实
 
