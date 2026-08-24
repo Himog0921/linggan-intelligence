@@ -141,7 +141,7 @@ mod tests {
         body::Body,
         http::{Request, StatusCode, header},
     };
-    use std::collections::BTreeSet;
+    use std::collections::BTreeMap;
     use tower::ServiceExt;
 
     #[tokio::test]
@@ -203,19 +203,23 @@ mod tests {
 
     #[test]
     fn runtime_token_source_matches_the_full_lids_baseline() {
-        let runtime = declared_token_names(LIDS_TOKENS);
-        let documented = declared_token_names(LIDS_TOKEN_DOCUMENT);
+        let runtime = declared_token_values(LIDS_TOKENS);
+        let documented = declared_token_values(LIDS_TOKEN_DOCUMENT);
 
         assert_eq!(runtime.len(), 107);
+        assert_eq!(documented.len(), 107);
         assert_eq!(runtime, documented);
-        assert!(declared_token_names(EVIDENCE_LIBRARY_CSS).is_empty());
+        assert!(declared_token_values(EVIDENCE_LIBRARY_CSS).is_empty());
     }
 
-    fn declared_token_names(stylesheet: &str) -> BTreeSet<&str> {
+    fn declared_token_values(stylesheet: &str) -> BTreeMap<&str, &str> {
         stylesheet
             .lines()
             .filter_map(|line| line.trim().strip_prefix("--lgi-"))
-            .filter_map(|line| line.split_once(':').map(|(name, _)| name))
+            .filter_map(|line| {
+                line.split_once(':')
+                    .map(|(name, value)| (name, value.trim().trim_end_matches(';')))
+            })
             .collect()
     }
 }

@@ -53,7 +53,7 @@
 
 ### LIDS 采用清单
 
-- Token 基线与唯一运行时真源: `LIDS-TOK-001`。`apps/api/src/local_web/lids_tokens.css` 完整承载当前 107 个 `--lgi-*` token，并由 Rust 测试逐名与 `docs/design/lids/tokens.md` 核对；`evidence_library.css` 只消费这些 token，不声明 token。
+- Token 基线与唯一运行时真源: `LIDS-TOK-001`。`apps/api/src/local_web/lids_tokens.css` 是唯一值编辑源，完整承载当前 107 个 `--lgi-*` token；`docs/design/lids/tokens.md` 是其版本化规范与校验镜像。Rust 测试逐项核对 107 个名称和值；`evidence_library.css` 只消费这些 token，不声明 token。
 - Primitive / 正式 CMP 查重结果: 没有新增跨页面 CMP；使用 `LIDS-PRI-001` 的 Sans/Mono、连续工作面、五轴状态分责与 hairline 原则。
 - 页面唯一视觉核心: 中央空材料边界说明；不是营销 Hero，也不是假数据仪表盘。
 - 原声、来源、样本、窗口、Coverage/Validity/冲突/复核边界: 001A 没有材料、原声或样本；页面直接说明对应字段未知而非显示占位数字。

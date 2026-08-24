@@ -59,6 +59,6 @@
 - 修改文件: Claim 内 Rust、CSS、Page Spec、Manifest、Acceptance、Runbook、LIDS migration log、docs index/progress
 - 验证命令/走查: `cargo fmt --all -- --check`、`cargo clippy -p linggan-api -- -D warnings`、`cargo test -p linggan-api`、loopback `curl`、浏览器视口检查、`./scripts/check-project-governance.sh origin/main`
 - 规则或索引同步: `docs/README.md`、`docs/design/lids/migration-log.md`、`docs/progress/2026-08.md`
-- 例外与替代: 仅 `LOCAL-001-UI-EX-01` 的 216px / 440px / 2px；不替代 LIDS 或建立第二 Token 真源。`lids_tokens.css` 的 107 个 token 是本地运行时唯一真源，Rust 测试逐名对照 `LIDS-TOK-001`，`evidence_library.css` 不声明 token。
+- 例外与替代: 仅 `LOCAL-001-UI-EX-01` 的 216px / 440px / 2px；不替代 LIDS 或建立第二 Token 真源。`lids_tokens.css` 的 107 个 token 是本地运行时唯一值编辑源，`tokens.md` 是其版本化校验镜像，Rust 测试逐项对照 `LIDS-TOK-001` 的名称和值；`evidence_library.css` 不声明 token。
 - LIDS migration log / 预览同步: runtime page is the preview; no generated screenshot is committed
 - PR / reviewer / integration owner: draft PR after checks; reviewer and `/root` integration owner remain non-implementers

@@ -21,7 +21,7 @@
 ## 2026-08-24 · LOCAL-001A 首个运行时 L1 Evidence Library token 映射
 
 - **来源与事项**：Mog 确认的 LOCAL-001、`REF-V7-001` 页面 Gold Master、Issue #25、`PAGE-EVIDENCE-001`。
-- **实际实现**：`apps/api/src/local_web/lids_tokens.css` 是当前唯一完整的运行时 token 真源，完整承载 `LIDS-TOK-001` 的 107 个 `--lgi-*` token；`apps/api/src/local_web/evidence_library.css` 只能消费而不声明 token。Rust 测试逐名对照 `docs/design/lids/tokens.md`，没有引入第二个全局主题、组件库或视觉前缀。
+- **实际实现**：`apps/api/src/local_web/lids_tokens.css` 是当前唯一完整的运行时 token 值编辑源，完整承载 `LIDS-TOK-001` 的 107 个 `--lgi-*` token；`docs/design/lids/tokens.md` 是从该源单向同步的版本化规范与校验镜像，不能独立改值。`apps/api/src/local_web/evidence_library.css` 只能消费而不声明 token。Rust 测试逐项对照 107 个名称和值，没有引入第二个全局主题、组件库或视觉前缀。
 - **页面组合**：本页采用 `LIDS-PAT-001` 的 L1 `Corpus Explorer`，嵌入右侧受限 `Split Evidence Inspector`。原声、材料、搜索、动作和真实状态均未实现；首屏唯一视觉核心是来源不足的材料边界说明。
 - **局部例外**：`LOCAL-001-UI-EX-01` 仅为 V7 三栏比例保留 216px 左 rail、440px right inspector 与 2px 中央结构线。例外在 PAGE/Manifest 中可查询，未推广为 token 或跨页组件；以后第二页面复用前必须重新审查。
 - **Data Truth**：页面只表达 `SOURCE_INCOMPLETE`、`NOT_CONNECTED`、`UNKNOWN` 与“本页没有可展示的已接纳材料”。这些不表示系统库为 0、平台不存在内容、捕获失败或任何趋势；没有模拟数值、`LIVE`/`FRESH`、假按钮或前端回执。
