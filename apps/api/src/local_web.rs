@@ -235,11 +235,14 @@ mod tests {
         }
 
         for required_css in [
+            "html,body { height:100%; overflow:hidden; }",
+            ".v7-app { height:100vh; min-height:0;",
             "--v7-header-height:128px",
             "--v7-side-width:216px",
             "--v7-inspector-width:440px",
             "--v7-brand-red:#e8003f",
             "--v7-red:#ef4f25",
+            "@media(max-width:900px){html,body{height:auto;min-height:100%;overflow:auto}.v7-app{height:auto;min-height:100vh;overflow:visible}",
         ] {
             assert!(
                 EVIDENCE_LIBRARY_CSS.contains(required_css),

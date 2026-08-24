@@ -58,7 +58,7 @@
 - 页面唯一视觉核心: V7 的 128px 两层页头、白底硬线三栏工作面、FACT LAYER 与右侧 Inspector；中央区只用诚实空行替代 V7 的模拟材料。
 - 原声、来源、样本、窗口、Coverage/Validity/冲突/复核边界: 001A 没有材料、原声或样本；页面直接说明对应字段未知而非显示占位数字。
 - ASCII / 场景 / 动效: 不使用。`prefers-reduced-motion` 不触发额外动效，因为本页没有运动。
-- 页面级例外 `LOCAL-001-UI-EX-01 / Issue #29 修订`: 用户直接授权本页依 `REF-V7-001` 精确复刻视觉值和 HTML 骨架：78px + 50px = 128px 页头、216px rail、440px inspector（≤1500px 为420px、≤1180px 为380px）、全白背景、黑色硬线、全局 `#E8003F` 与 Evidence `#EF4F25`。这些值只以明确命名的 `--v7-*` 页面局部变量存在于 `evidence_library.css`；不改写、不复制为 LIDS 全局 token，也不授权其他页面继承。
+- 页面级例外 `LOCAL-001-UI-EX-01 / Issue #29 修订`: 用户直接授权本页依 `REF-V7-001` 精确复刻视觉值和 HTML 骨架：78px + 50px = 128px 页头、216px rail、440px inspector（≤1500px 为420px、≤1180px 为380px）、全白背景、黑色硬线、全局 `#E8003F` 与 Evidence `#EF4F25`。桌面必须是 `100vh` 固定工作台，document 不向下延展，Results 和 Inspector 在各自栏内滚动；≤900px 才恢复顺序折叠和页面原生滚动。这些值只以明确命名的 `--v7-*` 页面局部变量存在于 `evidence_library.css`；不改写、不复制为 LIDS 全局 token，也不授权其他页面继承。
 - 明确禁止: 继承 V7 的模拟运行状态、计数、示例帖子/评论/转录、时间、引用或成功回执；任何 V7 位置上的未接通控件不得产生写入、采集、保存、研究或连接副作用。
 
 ## 5. 交互与真实后果
