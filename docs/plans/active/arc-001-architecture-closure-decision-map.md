@@ -1,7 +1,7 @@
 # ARC-001 代码前产品与系统架构收口决策图
 
 > 状态: 活跃计划
-> 最后核对: 2026-08-21
+> 最后核对: 2026-08-24
 > 适用范围: F01 之后、首个真实 producer 与首个用户可见产品切片之前的产品和系统架构收口
 > 事实来源: 用户最新 course correction、当前开发跟踪表、产品/页面草案、采集与媒体历史经验、`ADV-AUDIT-001` 最终处置
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、ACCEPTED ADR、当前活跃 SCOPE 与可复现代码/数据库事实；本图不自动授权真实访问或实现
@@ -126,6 +126,8 @@ Decision owner: Mog
 首批获得授权的真实 producer Canary，是只验证内容身份、标题、正文、作者、时间、有限评论和 Coverage，还是同时包含图片/视频下载与转录？
 
 ### Answer
+
+Mog 已确认方案 **B：首批真实 producer Canary 同步纳入媒体需要**。这个确认不等于任何真实下载、保存、派生或工位执行授权；首批媒体对象范围、处理深度、内部保存/访问/处置与工位/账号/时间/风险停止预算仍须由 Mog 在 [`../../architecture/first-media-canary-authorization-decision-pack.md`](../../architecture/first-media-canary-authorization-decision-pack.md) 逐项选择。该文是 Draft / `DECISION_REQUIRED`，所引用的 PR #13、#15、#17 亦为 Draft / 未整合；因此本票仍为 open，不能据此启动真实 Canary 或解锁下游实施。
 
 
 ## capture-control-contract: 真实插件前必须冻结哪些调度责任？

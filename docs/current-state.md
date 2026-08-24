@@ -1,7 +1,7 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-08-21
+> 最后核对: 2026-08-24
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
@@ -10,7 +10,7 @@
 
 项目已完成 `DISC-001` 的产品定义、领域语言、不变量与责任边界基线；这不等于第一版产品形态、准确页面集合或完整前端/后端/数据库/插件/媒体/Agent 运行架构已经收口。`SCOPE-001` 的合成切片范围和实施授权已经确认；代码前语义冻结基线已经在 commit `9801fdf5deb55e1b3fc5b8ac2c43234be295a42d` 推送到本地记录的 `origin/main`。语义冻结随后经过四轮独立只读攻击，历史结论均如实保留为当时的 G1–G4 FAIL/G5 PASS；第四轮新增的 payload owner、pre-routing audit union、动态 snapshot Oracle 与跨 Attempt Satisfaction 四项 P1 已完成最小收口。用户已明确要求停止重复复核循环并尽快进入代码阶段，因此 SCOPE-001 代码门现为 **CONTROLLED OPEN FOR TDD**。2026-08-21 用户进一步明确确认 F01 采用“可运行、可查询的合成主链优先”：F01 只继续到 synthetic Package → PostgreSQL atomic ingress → two Records → Observation/Current → loopback API → minimal CLI，完成后 hard stop。F01 已完成 Package hash、Record hash、duplicate-key、unsafe-integer、unpaired-surrogate 与 RFC 8785 JCS golden tracer，并已有仅含 F01 的手工静态 manifest Oracle；其余 canonicalization 负例仍未开始且不阻塞 F01 主链。`ARC-001` 已建立为并行的产品与系统架构决策图；其未收口前，F02–F10、真实 producer、插件升级、媒体、Agent crew、Web、生产和旧系统迁移均不得开始。
 
-[`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) 的 `product-shell` 与 `primary-daily-job` 已 resolved：Linggan Intelligence 是独立且完整的 Web 产品；每天先让 Mog 处理少量值得关注事项，理解来源、出现原因与不确定性，再决定暂不处理、继续观察、进入 Topic 深入或提出行动。内容工作台只是历史原型和能力样本，不是运行时依赖；首页五个名称是产品职责，不是五个已授权运行实例。这里确认的是产品身份和日常用户任务，不表示 Web、P0 或 Agent 已获实现授权。ARC-001 当前已解锁但未回答的票是 `p0-surface-prototype` 与 `first-producer-canary`。
+[`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) 的 `product-shell` 与 `primary-daily-job` 已 resolved：Linggan Intelligence 是独立且完整的 Web 产品；每天先让 Mog 处理少量值得关注事项，理解来源、出现原因与不确定性，再决定暂不处理、继续观察、进入 Topic 深入或提出行动。内容工作台只是历史原型和能力样本，不是运行时依赖；首页五个名称是产品职责，不是五个已授权运行实例。这里确认的是产品身份和日常用户任务，不表示 Web、P0 或 Agent 已获实现授权。Mog 已为 `first-producer-canary` 确认方案 B（同步纳入媒体需要），但真实资源授权仍待 [`architecture/first-media-canary-authorization-decision-pack.md`](architecture/first-media-canary-authorization-decision-pack.md) 中的四项选择；该文及其引用的 PR #13、#15、#17 都是 Draft / 未整合状态，不能视为 `main` 的运行事实或真实 Canary 授权。ARC-001 当前仍有 `p0-surface-prototype` 与 `first-producer-canary` 两票未收口。
 
 当前唯一获准的**业务实施**仍是 `SCOPE-001 / F01`。Mog 已另行确认 `DESIGN-002`：以「任务启动困难」为例制作一个明确标为 `SYNTHETIC / NOT LIVE` 的 Topic Intelligence Reference Page，并把 [LIDS v2.0](design/lids/README.md) 纳入全项目唯一设计表达标准。LIDS 现在约束未来 UI 的 Token → Primitive → Component → Pattern → Page、L1/L2/L3、状态诚实与 Agent 工作方式，但成熟度仍为 Proposed；它不创建真实 Web、运行时主题/组件、真实数据、3D/技术栈、权限或动作。DESIGN-002 仍只是 `p0-surface-prototype` 的一个可审查输入，不回答完整 P0，也不扩大 F01 或任何真实数据/权限/行动授权。`GOV-003` 是并行进行的低风险单 Issue/单 PR 治理工作单，不是第二个业务 SCOPE：GitHub [Issue #1](https://github.com/Himog0921/linggan-intelligence/issues/1) 与 draft [PR #2](https://github.com/Himog0921/linggan-intelligence/pull/2) 已建立，但 independent review 对旧 head `a7b63c365c7d3befccc54fd42586c48fe0f22542` 的结论为 **FAIL**，当前只允许在同一 branch/worktree 内修订并请求原 reviewer 复核；不得 merge、close 或把 GOV-003 记为完成。
 
@@ -68,7 +68,7 @@
 | 3 | ENV-001 | Rust 与 PostgreSQL 16 开发环境 | 已完成 | 固定配置、真实数据库副作用、Rust 检查和用户确认均完成 |
 | 4 | DISC-001 | 产品定义、领域语言、不变量与责任边界基线 | 已完成 | 七道设计关口与 `USER-DEC-01`–`06` 已确认；不代表完整产品形态或物理技术架构完成 |
 | 5 | SCOPE-001 | synthetic fact-kernel technical tracer | 执行中（F01 主链） | 完成 Package → PostgreSQL atomic ingress → two Records → Observation/Current → loopback API → minimal CLI 后 hard stop；不是用户可见产品切片 |
-| 6 | ARC-001 | 产品与系统架构收口决策图 | 进行中（决策） | `product-shell`、`primary-daily-job` 已解决；P0 原型与 producer Canary 两票已解锁但未回答，最后由 Mog 批准首个用户可见 SCOPE |
+| 6 | ARC-001 | 产品与系统架构收口决策图 | 进行中（决策） | `product-shell`、`primary-daily-job` 已解决；P0 原型未收口；producer Canary 已确认方案 B，但仍待四项真实授权边界决定，最后由 Mog 批准首个用户可见 SCOPE |
 | 7 | GOV-003 | 外部 Agent Issue → worktree → PR 协作闭环 | 修订中（review FAIL） | 同一 PR 新 head 通过独立复核；integrator 合并后重新核验 main/正式文档、记录完成层并手工关闭 Issue；不是第二业务 SCOPE |
 | 8 | DESIGN-002 | Topic Intelligence 合成 Reference Page + LIDS v2.0 | 执行中（设计参考/治理） | Issue #7 将 LIDS 作为全项目设计表达标准，并交付其 L2 合成参考页、规格、组件晋升门和检查；不接入真实数据、Web 产品、运行时主题/组件或真实动作 |
 
@@ -80,7 +80,7 @@
 
 语义冻结已经经过四次独立只读攻击。第四轮发现的 payload/ingress 分层、pre-routing audit union、动态 ref/time snapshot 和跨 Attempt Satisfaction 已分别用 processor owner、封闭数据库 union、固定 proof clock/ref 与 Work 1:1 Attempt 收口。按用户最新裁定不再进行第五轮文档复核。F01 已完成 contracts tracer、手工静态 manifest Oracle，以及 **TDD 步骤 3 的 Package ingress**：有效 Package 在随机隔离的 PostgreSQL 16 schema 中原子接入，行数逐表对齐 manifest 的 `fresh_seed` 与 `final` 阶段，六个事务故障注入点任一失败都零半写，同 hash replay 与不同 hash conflict 只新增一行 delivery 且不覆盖既有 Package，接入后 Observation/Current/Source 侧表仍不存在。三项主链保护中前两项（接入阶段不提前形成 Observation/Current、接入故障零半写）已有真实数据库证据；第三项（坏 Record 不撤销合格 Record）属于 Record processing，尚未实现。下一步是 TDD 步骤 4 的两条 Record 独立处理与 Observation/Current，需要先创建 `0002` migration；随后才是 loopback API 与只经 API 的 CLI。完成该链后停止实施扩张；其余 canonicalization、完整 envelope、资源上限和 F02–F10 等待 ARC-001 收口及后续明确排期，不从 F01 自动继续。
 
-并行的产品决策下一步可在两个独立会话中分别推进 [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) 的 `p0-surface-prototype` 与 `first-producer-canary`；两票均已解锁但未回答。`DESIGN-002` 的 Topic Reference Page 是 `p0-surface-prototype` 的一个可走查输入，而不是这张票的完整答案。首页职责到运行时的语义已澄清，但这不授权 P0、Web、Agent、真实 producer、媒体或旧系统迁移实现。`ADV-AUDIT-001` 的独立复核最终处置见 [`audits/pre-implementation-architecture-audit-2026-08-21.md`](audits/pre-implementation-architecture-audit-2026-08-21.md)；它没有改动 F01 migration/合同，也不授权真实访问。
+并行的产品决策下一步可推进 [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) 的 `p0-surface-prototype`，以及由 Mog 对 [`architecture/first-media-canary-authorization-decision-pack.md`](architecture/first-media-canary-authorization-decision-pack.md) 的四项真实资源边界作出选择；后者确认后仍需新的真实 Canary SCOPE/Issue，不能从方案 B 或本决策包直接执行。`DESIGN-002` 的 Topic Reference Page 是 `p0-surface-prototype` 的一个可走查输入，而不是这张票的完整答案。首页职责到运行时的语义已澄清，但这不授权 P0、Web、Agent、真实 producer、媒体或旧系统迁移实现。`ADV-AUDIT-001` 的独立复核最终处置见 [`audits/pre-implementation-architecture-audit-2026-08-21.md`](audits/pre-implementation-architecture-audit-2026-08-21.md)；它没有改动 F01 migration/合同，也不授权真实访问。
 
 `SCOPE-001` 不包含真实 XHS 访问、真实原文、插件升级、Topic/Corpus/Signal/AI Agent、正式趋势、Web UI、生产部署或旧数据迁移。`AUD-XHS-001` 继续后置；真实 producer 实验必须重新取得账号、对象、访问与原件处置授权。
 

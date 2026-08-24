@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-08-21
+> 最后核对: 2026-08-24
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -58,6 +58,7 @@
 | [design/pages/topic-intelligence-reference.html](design/pages/topic-intelligence-reference.html) | 权威当前 | 可本地打开的合成静态 Topic Reference Page；不是运行 Web 产品 |
 | [design/pages/topic-intelligence-reference-acceptance.md](design/pages/topic-intelligence-reference-acceptance.md) | 权威当前 | ACC-TOPIC-001：静态参考实现的视觉、互动、自动检查和未证明边界 |
 | [`architecture/technical-architecture-baseline.md`](architecture/technical-architecture-baseline.md) | 权威当前 | 全产品技术架构统一入口：权威层级、确定性、当前/目标边界、模块/入口/数据/运行主干与 SCOPE 符合性 |
+| [`architecture/first-media-canary-authorization-decision-pack.md`](architecture/first-media-canary-authorization-decision-pack.md) | 草案 / `DECISION_REQUIRED` | 方案 B 已确认后的首批真实媒体 Canary 四项人类授权边界与未签发授权单模板；不授权任何真实执行 |
 | [`architecture/target-architecture.md`](architecture/target-architecture.md) | 草案 | DISC-001 已确认硬边界之上的总体架构建议；具体实现按 SCOPE 渐进冻结 |
 | [`architecture/system-overview-diagram.html`](architecture/system-overview-diagram.html) | 草案 | AEDS 风格的整体架构图；在同一视图中区分当前代码骨架、已批准 Evidence 切片与后续目标能力 |
 | [`architecture/business-process-diagram.html`](architecture/business-process-diagram.html) | 草案 | AEDS 风格的内容情报业务流程图；展示人、控制层、Capture、Evidence 与 Intelligence 的责任交接 |
