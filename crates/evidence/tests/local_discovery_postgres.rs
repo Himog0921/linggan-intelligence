@@ -66,6 +66,37 @@ async fn admission_preserves_partial_cards_replays_exact_input_and_rejects_inval
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn admission_rejects_conflicting_quota_reached_before_persistence() {
+    let database = proof_database("local_discovery_quota_consistency").await;
+    let observed_at = producer_fixture_observed_at(&database).await;
+    let conflicting = package(&observed_at, Some(&observed_at)).replace(
+        "\"stoppedReason\":\"risk_control\"",
+        "\"stoppedReason\":\"quota_reached\"",
+    );
+
+    assert!(matches!(
+        ingest_discovery_package(&database, &conflicting).await,
+        Err(DiscoveryIngressError::Contract(
+            DiscoveryContractError::QuotaReachedBeforeMaximumQuota
+        ))
+    ));
+    assert_counts(&database, &[0, 0, 0, 0, 0]).await;
+
+    let accepted = ingest_discovery_package(&database, &package(&observed_at, Some(&observed_at)))
+        .await
+        .expect("a truthful risk_control partial package remains admissible");
+    assert!(matches!(
+        accepted,
+        DiscoveryIngressOutcome::Accepted {
+            visible_cards: 2,
+            ..
+        }
+    ));
+    assert_counts(&database, &[1, 1, 2, 2, 1]).await;
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn read_projection_uses_known_published_time_and_counts_unknowns_only_within_the_query_candidate_set()
  {
     let database = proof_database("local_discovery_read").await;

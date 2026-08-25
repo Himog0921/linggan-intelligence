@@ -26,6 +26,8 @@ pub enum DiscoveryContractError {
     FirstCanaryChanged,
     #[error("discovery coverage does not match the delivered visible cards")]
     CoverageDoesNotMatchCards,
+    #[error("quota_reached requires visible cards to equal the maximum quota")]
+    QuotaReachedBeforeMaximumQuota,
     #[error("a visible discovery card is missing a stable platform content identity")]
     MissingPlatformContentIdentity,
     #[error("a package or occurrence observedAt is blank or not an RFC 3339 timestamp")]
@@ -333,6 +335,13 @@ pub fn parse_discovery_package(input: &str) -> Result<DiscoveryPackage, Discover
         || !matches!(wire.coverage.unit, DiscoveryUnit::VisibleSearchCard)
     {
         return Err(DiscoveryContractError::CoverageDoesNotMatchCards);
+    }
+    if matches!(
+        wire.coverage.stopped_reason,
+        DiscoveryStopReason::QuotaReached
+    ) && wire.coverage.visible_cards != wire.acquisition_spec.maximum_quota()
+    {
+        return Err(DiscoveryContractError::QuotaReachedBeforeMaximumQuota);
     }
     if wire
         .cards

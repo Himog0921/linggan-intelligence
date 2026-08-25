@@ -300,6 +300,32 @@ async fn loopback_7_day_query_keeps_api_and_page_window_metadata_in_sync() {
     assert!(!html.contains("WINDOW = PUBLISHED_AT / 30D"));
 }
 
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn loopback_rejects_conflicting_quota_reached_and_keeps_truthful_partial_cards() {
+    let database = proof_database("local_api_quota_consistency").await;
+    let observed_at = producer_fixture_observed_at(&database).await;
+    let application = app_with_database(database);
+    let conflicting = discovery_package(&observed_at).replace(
+        "\"stoppedReason\":\"risk_control\"",
+        "\"stoppedReason\":\"quota_reached\"",
+    );
+
+    let response = post_discovery_package(application.clone(), conflicting).await;
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("\"admission\":\"not_accepted\""));
+
+    let response = post_discovery_package(application, discovery_package(&observed_at)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
 async fn proof_database(schema: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL")
         .expect("test script must provide the isolated proof database URL");
@@ -316,6 +342,20 @@ async fn producer_fixture_observed_at(database: &Database) -> String {
         .await
         .expect("database returns a timestamp")
         .get("observed_at")
+}
+
+async fn post_discovery_package(application: Router, package: String) -> axum::response::Response {
+    application
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/discovery-packages")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(package))
+                .unwrap(),
+        )
+        .await
+        .unwrap()
 }
 
 fn discovery_package(observed_at: &str) -> String {

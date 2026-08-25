@@ -58,8 +58,9 @@ maximum quota   = 20
 1. 每张实际可见卡片仍有独立价值，不能因总目标 20 未达到而丢弃；
 2. `DiscoveryCoverage.visibleCards` 必须等于实际交付卡片数；
 3. 停止原因必须保留；`unknown` 仍是未知而不是零或“无更多结果”；
-4. 该材料可以在未来接纳后作为发现面材料使用，但 Coverage 不自动给趋势、代表性、平台总量或“没有看到”的 Claim 资格；
-5. 之后补采必须是新的授权/Attempt/Package，绝不能修改本次 discovery 包。
+4. `quota_reached` 只能在实际可见卡片数等于本次 `maximumQuota` 时使用；未达到配额的部分结果必须保留一个如 `risk_control`、`surface_ended`、`manual_stop` 或 `unknown` 的真实停止原因，不能把 `20 - visibleCards` 制造成缺失对象；
+5. 该材料可以在未来接纳后作为发现面材料使用，但 Coverage 不自动给趋势、代表性、平台总量或“没有看到”的 Claim 资格；
+6. 之后补采必须是新的授权/Attempt/Package，绝不能修改本次 discovery 包。
 
 ## 5. 封面、媒体与页面显示
 

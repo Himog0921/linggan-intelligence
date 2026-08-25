@@ -131,6 +131,25 @@ fn discovery_package_accepts_partial_visible_cards_without_inventing_missing_obj
 }
 
 #[test]
+fn discovery_rejects_quota_reached_before_the_fixed_visible_card_quota() {
+    let input = mutated(|package| {
+        package["coverage"]["stoppedReason"] = serde_json::json!("quota_reached");
+    });
+    let error = parse_discovery_package(&input).expect_err(
+        "two visible cards cannot truthfully report reaching the fixed quota of twenty",
+    );
+
+    assert!(matches!(
+        error,
+        DiscoveryContractError::QuotaReachedBeforeMaximumQuota
+    ));
+    assert!(
+        parse_discovery_package(PARTIAL_VISIBLE_DISCOVERY).is_ok(),
+        "risk_control remains a truthful allowed partial stop reason"
+    );
+}
+
+#[test]
 fn discovery_payload_rejects_detail_comments_media_bytes_ocr_and_asr() {
     for forbidden_key in ["body", "comments", "mediaBytes", "ocrText", "asrTranscript"] {
         let input = mutated(|package| {
