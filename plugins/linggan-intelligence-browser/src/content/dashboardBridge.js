@@ -1,4 +1,17 @@
-import { normalizeCompatResponse } from '../shared/responseEnvelope.js';
+import { createLingganPendingResult } from '../linggan/adapter.js';
+
+const DASHBOARD_ACTION = {
+  GET_ALL_NOTES: 'getAllNotes',
+  GET_ALL_COMMENTS: 'getAllComments',
+  GET_ALL_AUTHORS: 'getAllAuthors',
+  DOWNLOAD_NOTE_MEDIA: 'downloadNoteMedia',
+  CLEAR_ALL_NOTES: 'clearAllNotes',
+  CLEAR_ALL_COMMENTS: 'clearAllComments',
+  CLEAR_ALL_AUTHORS: 'clearAllAuthors',
+  DELETE_NOTE: 'deleteNote',
+  DELETE_COMMENT: 'deleteComment',
+  DELETE_AUTHOR: 'deleteAuthor',
+};
 
 function generateNonce() {
   const arr = new Uint8Array(16);
@@ -30,11 +43,9 @@ async function clearDashboardNonce() {
 }
 
 export function createDashboardBridge({
-  MSG,
   noteStore,
   commentStore,
   authorStore,
-  downloadNoteMediaFromRecord,
   _testNonce = null,
   _testDashboardWindow = null,
 } = {}) {
@@ -135,39 +146,30 @@ export function createDashboardBridge({
   }
 
   const dashboardMessageHandlers = {
-    [MSG.GET_ALL_NOTES]: (data) => readStoreRecords(noteStore, data),
-    [MSG.GET_ALL_COMMENTS]: (data) => readStoreRecords(commentStore, data),
-    [MSG.GET_ALL_AUTHORS]: (data) => readStoreRecords(authorStore, data),
-    [MSG.DOWNLOAD_NOTE_MEDIA]: async (data) => {
-      const noteId = data.noteId || '';
-      if (!noteId) return { success: false, error: 'noteId required' };
-      const note = await noteStore.getById(noteId);
-      if (!note) return { success: false, error: 'note not found' };
-      const summary = await downloadNoteMediaFromRecord(note, {
-        mediaTypes: Array.isArray(data.mediaTypes) ? data.mediaTypes : undefined,
-      });
-      return { success: true, summary };
-    },
-    [MSG.CLEAR_ALL_NOTES]: () => noteStore.clear(),
-    [MSG.CLEAR_ALL_COMMENTS]: () => commentStore.clear(),
-    [MSG.CLEAR_ALL_AUTHORS]: () => authorStore.clear(),
-    [MSG.DELETE_NOTE]: (data) => noteStore.deleteById(data.noteId),
-    [MSG.DELETE_COMMENT]: (data) => commentStore.deleteById(data.id),
-    [MSG.DELETE_AUTHOR]: (data) => authorStore.deleteById(data.userId),
+    [DASHBOARD_ACTION.GET_ALL_NOTES]: (data) => readStoreRecords(noteStore, data),
+    [DASHBOARD_ACTION.GET_ALL_COMMENTS]: (data) => readStoreRecords(commentStore, data),
+    [DASHBOARD_ACTION.GET_ALL_AUTHORS]: (data) => readStoreRecords(authorStore, data),
+    [DASHBOARD_ACTION.DOWNLOAD_NOTE_MEDIA]: () => createLingganPendingResult('media_download'),
+    [DASHBOARD_ACTION.CLEAR_ALL_NOTES]: () => noteStore.clear(),
+    [DASHBOARD_ACTION.CLEAR_ALL_COMMENTS]: () => commentStore.clear(),
+    [DASHBOARD_ACTION.CLEAR_ALL_AUTHORS]: () => authorStore.clear(),
+    [DASHBOARD_ACTION.DELETE_NOTE]: (data) => noteStore.deleteById(data.noteId),
+    [DASHBOARD_ACTION.DELETE_COMMENT]: (data) => commentStore.deleteById(data.id),
+    [DASHBOARD_ACTION.DELETE_AUTHOR]: (data) => authorStore.deleteById(data.userId),
   };
 
   function normalizeDashboardMessageResponse(action, result) {
     const normalizedAction = String(action || '').trim();
     if (
-      normalizedAction === MSG.GET_ALL_NOTES ||
-      normalizedAction === MSG.GET_ALL_COMMENTS ||
-      normalizedAction === MSG.GET_ALL_AUTHORS
+      normalizedAction === DASHBOARD_ACTION.GET_ALL_NOTES ||
+      normalizedAction === DASHBOARD_ACTION.GET_ALL_COMMENTS ||
+      normalizedAction === DASHBOARD_ACTION.GET_ALL_AUTHORS
     ) {
-      return normalizeCompatResponse(result, {
-        dataValue: Array.isArray(result) ? result : [],
-      });
+      if (Array.isArray(result)) return { success: true, data: result };
+      return result && typeof result === 'object' ? { success: result.success !== false, ...result } : { success: true, data: [] };
     }
-    return normalizeCompatResponse(result);
+    if (result && typeof result === 'object') return { success: result.success !== false, ...result };
+    return { success: true, data: result };
   }
 
   async function handleDashboardMessageEvent(event) {

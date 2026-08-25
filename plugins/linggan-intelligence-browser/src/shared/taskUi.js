@@ -1,4 +1,4 @@
-import { TASK_STATE } from './constants.js';
+import { TASK_STATE } from '../linggan/uiConstants.js';
 
 const TASK_STATE_VALUES = new Set(Object.values(TASK_STATE));
 

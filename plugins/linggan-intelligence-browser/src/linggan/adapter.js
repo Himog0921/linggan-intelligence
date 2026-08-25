@@ -11,6 +11,7 @@ export function createLingganPendingResult(capability = '') {
     code: 'linggan_adapter_pending',
     capability: String(capability || '').trim(),
     message: LINGGAN_PENDING_MESSAGE,
+    error: LINGGAN_PENDING_MESSAGE,
   };
 }
 

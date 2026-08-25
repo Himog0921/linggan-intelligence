@@ -1,4 +1,4 @@
-import { COMMENT_DEPTH_MODE } from './constants.js';
+import { COMMENT_DEPTH_MODE } from '../linggan/uiConstants.js';
 
 export const FEEDBACK_META = {
   info: {
