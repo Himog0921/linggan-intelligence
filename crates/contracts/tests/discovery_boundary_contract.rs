@@ -131,6 +131,25 @@ fn discovery_package_accepts_partial_visible_cards_without_inventing_missing_obj
 }
 
 #[test]
+fn discovery_rejects_quota_reached_before_the_fixed_visible_card_quota() {
+    let input = mutated(|package| {
+        package["coverage"]["stoppedReason"] = serde_json::json!("quota_reached");
+    });
+    let error = parse_discovery_package(&input).expect_err(
+        "two visible cards cannot truthfully report reaching the fixed quota of twenty",
+    );
+
+    assert!(matches!(
+        error,
+        DiscoveryContractError::QuotaReachedBeforeMaximumQuota
+    ));
+    assert!(
+        parse_discovery_package(PARTIAL_VISIBLE_DISCOVERY).is_ok(),
+        "risk_control remains a truthful allowed partial stop reason"
+    );
+}
+
+#[test]
 fn discovery_payload_rejects_detail_comments_media_bytes_ocr_and_asr() {
     for forbidden_key in ["body", "comments", "mediaBytes", "ocrText", "asrTranscript"] {
         let input = mutated(|package| {
@@ -235,13 +254,13 @@ fn remote_cover_is_only_a_candidate_and_never_a_display_url() {
 }
 
 #[test]
-fn published_window_filtering_is_deferred_to_001b_read_projection() {
+fn discovery_contract_keeps_unknown_published_time_for_the_read_projection() {
     let package = parse_discovery_package(PARTIAL_VISIBLE_DISCOVERY).expect("fixture is valid");
     assert_eq!(
         package.cards()[1].content().published_at_source_text(),
         None,
         "the discovery contract preserves absent source publication time as unknown"
     );
-    // This is deliberately not a result-filter assertion. 001B must later prove that its local
-    // read projection excludes publishedAt=UNKNOWN from a PublishedWindow query.
+    // Result filtering belongs to the local read projection. Its PostgreSQL proof separately
+    // verifies that this unknown value is excluded from a PublishedWindow query.
 }

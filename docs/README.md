@@ -36,7 +36,7 @@
 | [`decisions/0001-greenfield-rust-clean-db.md`](decisions/0001-greenfield-rust-clean-db.md) | 权威当前 | 已接受的 Rust 与全新 PostgreSQL 决策 |
 | [`product/PRD.md`](product/PRD.md) | 草案 | DISC-001 的产品输入，不是已接受实现合同 |
 | [`product/domain-invariants.md`](product/domain-invariants.md) | 权威当前 | 跨 Gate 的领域不变量、判断资格与持续扩展的对抗性验收案例 |
-| [`data-contracts/local-001-discovery-evidence-boundary.md`](data-contracts/local-001-discovery-evidence-boundary.md) | 权威当前 | `LOCAL-001 / 001C-0`：平台 discovery 与本地 Evidence Library 检索、partial Coverage、DiscoveryOccurrence 与本地封面引用的跨边界合同；不证明真实 ingress 或媒体取得 |
+| [`data-contracts/local-001-discovery-evidence-boundary.md`](data-contracts/local-001-discovery-evidence-boundary.md) | 权威当前 | `LOCAL-001 / 001C-0` 与 #34 localhost binding：平台 discovery 与本地 Evidence Library 检索、partial Coverage、DiscoveryOccurrence、接纳回执与本地封面引用的跨边界合同；不证明真实插件或媒体取得 |
 | [design/README.md](design/README.md) | 权威当前 | 前端设计手册入口、权威地图、读取路径和当前已建立/未建立边界 |
 | [design/design-governance.md](design/design-governance.md) | 权威当前 | UI 设计来源优先级、闭集执行、变更分类、例外和验收治理 |
 | [design/reference-register.md](design/reference-register.md) | 权威当前 | 设计参考的登记格式与“参考不等于指令”边界；LIDS v2.0 的可继承/不继承边界已登记 |
@@ -52,7 +52,7 @@
 | [design/templates/component-spec-form.md](design/templates/component-spec-form.md) | 权威当前 | 可复用组件规格表单 |
 | [design/templates/ui-change-manifest-form.md](design/templates/ui-change-manifest-form.md) | 权威当前 | 每次 UI 变更的来源、范围、影响与证明清单表单 |
 | [design/templates/visual-acceptance-form.md](design/templates/visual-acceptance-form.md) | 权威当前 | 视觉、任务、状态和真实后果四层验收记录表单 |
-| [design/pages/evidence-library-page.md](design/pages/evidence-library-page.md) | 权威当前 | `PAGE-EVIDENCE-001`：首个实际 local Evidence Library 页面；当前只证明诚实空态，不证明材料读取或采集 |
+| [design/pages/evidence-library-page.md](design/pages/evidence-library-page.md) | 权威当前 | `PAGE-EVIDENCE-001`：首个 local Evidence Library 页面；#34 Draft 仅增加受控 discovery 的本地读投影，未证明真实采集或媒体 |
 | [design/pages/plugin-producer-popup.md](design/pages/plugin-producer-popup.md) | 权威当前 | `PAGE-PLUGIN-001`：Linggan 自有 Browser Producer popup 的身份、loopback health 与未接通 Discovery 边界 |
 | [design/changes/local-001a-evidence-library-ui-change-manifest.md](design/changes/local-001a-evidence-library-ui-change-manifest.md) | 权威当前；LOCAL-001A | Issue #25 的 UI 来源、范围、例外和证明边界 |
 | [design/changes/plugin-001-producer-popup-ui-change-manifest.md](design/changes/plugin-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-001 | Issue #33 popup 的 UI 来源、状态、权限边界与证明清单 |
@@ -95,7 +95,7 @@
 | [`audits/pi-agent-kernel-upstream-assessment-2026-08-20.md`](audits/pi-agent-kernel-upstream-assessment-2026-08-20.md) | 一次性报告 | Pi 上游发布版/源码/安全边界审查；裁定为统一 Agent 执行适配器候选，不是权限、持久任务或业务事实内核，也不授权当前编码 |
 | [`audits/pre-implementation-architecture-audit-2026-08-21.md`](audits/pre-implementation-architecture-audit-2026-08-21.md) | 一次性报告 | `ADV-AUDIT-001` 的独立复核最终处置：保留权威冲突、真实 producer 接缝、产品职责和 dirty worktree 风险，否定当前解除 Attempt 1:1、强加 `attemptRef`、改 crate 或整批提交的危险建议；不改变 F01 代码门 |
 | [`runbooks/development-environment.md`](runbooks/development-environment.md) | 权威当前 | Rust 与 Docker PostgreSQL 16 的统一运行入口 |
-| [`runbooks/local-evidence-library.md`](runbooks/local-evidence-library.md) | 权威当前 | Rust loopback host、health 与 Evidence Library 本地启动/验证；明确不含数据库、插件或平台链路 |
+| [`runbooks/local-evidence-library.md`](runbooks/local-evidence-library.md) | 权威当前 | Rust loopback host、health、受控 discovery ingress 与 Evidence Library 本地启动/验证；明确不含真实插件、平台或媒体链路 |
 | [`runbooks/linggan-browser-producer-local.md`](runbooks/linggan-browser-producer-local.md) | 权威当前 | Linggan 自有 Browser Producer 的构建、包审计与未来人工加载边界；不授权平台访问 |
 | [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) | 活跃计划 | F01 后、首个真实 producer 和用户可见切片前的产品形态、P0 页面、Canary、Capture/Media 与第一阶段运行架构决策图；当前首票为 `product-shell` |
 | [`plans/active/design-002-topic-intelligence-reference-page.md`](plans/active/design-002-topic-intelligence-reference-page.md) | 活跃计划 | 合成 Topic Intelligence Reference Page 的范围、规则、原型与验证计划；不替代完整 P0 或业务 SCOPE |

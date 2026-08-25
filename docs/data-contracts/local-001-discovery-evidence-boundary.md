@@ -10,7 +10,7 @@
 
 本合同只解决下一张实现卡不能自由猜测的五件事：平台观察指令与本地库检索的区别、首批 discovery 能带回什么、部分结果如何诚实保留、搜索位置属于什么，以及封面候选何时才能显示。
 
-它不定义数据库表、HTTP API、插件消息、页面运行时代码或真实接入。未来唯一的运行时 producer 名称为 **Linggan-owned browser producer package（Linggan Plugin）**；它将与 Linggan local host/API 组成同一系统。旧内容工作台及其插件只可作为历史能力与风险参考，不是 producer、endpoint、fallback、数据源或验证中转。
+001C-0 本身不定义数据库表、HTTP API、插件消息、页面运行时代码或真实接入。未来唯一的运行时 producer 名称为 **Linggan-owned browser producer package（Linggan Plugin）**；它将与 Linggan local host/API 组成同一系统。旧内容工作台及其插件只可作为历史能力与风险参考，不是 producer、endpoint、fallback、数据源或验证中转。
 
 `xhs.discovery.visible-card.v1` 通过结构校验只说明“输入符合本卡的发现面形状”；它不表示 Linggan Plugin 已发送、服务端已接收、Evidence 已接纳、Source Object 已解析、Observation 已形成或页面已经可读。
 
@@ -26,8 +26,8 @@
 ### Evidence Library V1 检索语义
 
 - 浏览单位是 `ContentItem`；若未来发生文本匹配，命中单位是 `EvidenceFragment`。本卡没有建立这两个持久化对象或读投影。
-- `WINDOW` 的目标语义只指 `ContentItem.published_at`。本卡只保证 Discovery 合同不把缺少来源发布时间的卡片填成某个默认发布时间；**真正将 `published_at = UNKNOWN` 排除在 7 天或 30 天读取结果之外，仍是 001B read projection 的 `NOT VERIFIED` 验收项**。
-- `Latest Discovery` 只使用首次 Discovery 时间；它不是发布时间、最近观察时间或接收时间。
+- `WINDOW` 的目标语义只指 `ContentItem.published_at`，并以 read projection 求值时的 Linggan PostgreSQL `scope_001_now()` 为唯一时间参照。`last_7_days`/`last_30_days` 只保留 `published_at` 落在闭区间 `[scope_001_now() - window, scope_001_now()]` 的已知值；未来发布时间不被称为最近，也不进入窗口，但其已接纳发现记录仍保留。本卡只保证 Discovery 合同不把缺少来源发布时间的卡片填成某个默认发布时间；001B read projection 将 `published_at = UNKNOWN` 排除在 7 天或 30 天读取结果之外。排除数按当前 `EvidenceQuery` 匹配的 `ContentItem` 身份统计：只有该身份没有任何同一查询下、已知且位于当前窗口的 occurrence 时才计入。若同一 ContentItem 同时有窗口内已知发布时间和未知发布时间 occurrence，它显示一次且不增加排除数。文本不匹配的本地对象不能被计入页面的未知发布时间排除数。API 的 `window` 使用实际读取的 `last_7_days`/`last_30_days` 值；页面必须将同一值显示为 `7D`/`30D`，不能推定或硬编码默认窗口。
+- `Latest Discovery` 只使用同一稳定内容身份首次被 Linggan **接受**的时间；它不是发布时间、页面实际观察时间或最近接收/重放时间。
 - 标题、作者名、正文、评论、OCR、ASR 的实际召回和排序实现留给具有已接纳材料的 001B；缺少的材料必须呈现为 `NOT_ACQUIRED`/`UNKNOWN`，不能被当作“不匹配”。
 
 ## 3. 001C-1 首批发现面
@@ -58,8 +58,9 @@ maximum quota   = 20
 1. 每张实际可见卡片仍有独立价值，不能因总目标 20 未达到而丢弃；
 2. `DiscoveryCoverage.visibleCards` 必须等于实际交付卡片数；
 3. 停止原因必须保留；`unknown` 仍是未知而不是零或“无更多结果”；
-4. 该材料可以在未来接纳后作为发现面材料使用，但 Coverage 不自动给趋势、代表性、平台总量或“没有看到”的 Claim 资格；
-5. 之后补采必须是新的授权/Attempt/Package，绝不能修改本次 discovery 包。
+4. `quota_reached` 只能在实际可见卡片数等于本次 `maximumQuota` 时使用；未达到配额的部分结果必须保留一个如 `risk_control`、`surface_ended`、`manual_stop` 或 `unknown` 的真实停止原因，不能把 `20 - visibleCards` 制造成缺失对象；
+5. 该材料可以在未来接纳后作为发现面材料使用，但 Coverage 不自动给趋势、代表性、平台总量或“没有看到”的 Claim 资格；
+6. 之后补采必须是新的授权/Attempt/Package，绝不能修改本次 discovery 包。
 
 ## 5. 封面、媒体与页面显示
 
@@ -96,7 +97,30 @@ Evidence Library 的任何 `img` 或背景图在未来只能使用 Linggan 本�
 
 本合同不改变 `PAGE-EVIDENCE-001` 目前“没有可用动作”的运行时事实；它只是为下一张受控读投影和真实 discovery 卡定义不可越过的边界。
 
-## 7. 合同测试与未证明边界
+## 7. Issue #34 的 localhost 接入绑定
+
+Issue #34 不改变 discovery payload 合同；它只把当前 versioned payload 绑定到 Linggan 自有的受控 loopback 接口，供未来 Linggan Plugin 健康检查和提交使用。这个接口存在不证明插件已安装、页面已被真实观察或平台访问发生过。
+
+```text
+GET  http://localhost:3000/health
+POST http://localhost:3000/api/local/discovery-packages
+GET  http://localhost:3000/api/local/evidence-library
+GET  http://localhost:3000/corpus/evidence
+```
+
+| 接口/情况 | 允许的结果 | 禁止解释 |
+|---|---|---|
+| `GET /health`，未配置 Linggan DB | `SOURCE_INCOMPLETE` / `NOT_CONNECTED` | localhost 已接纳任何 Package 或平台可访问 |
+| `GET /health`，已配置 Linggan DB | `LOCAL_DISCOVERY_READ_PROJECTION` / `DISCOVERY_ONLY` | 真实 discovery、详情、评论、媒体或趋势已完成 |
+| `POST /api/local/discovery-packages`，合格新 payload | `200`，`admission=accepted`，有 delivery/package/receipt 引用、实际 `visibleCards` 和停止原因 | package 完整、平台只有 N 条或内容详情已取得 |
+| `POST`，字节完全相同的已接纳 payload | `200`，`admission=replay`，复用原 package/receipt 并有新 delivery 引用 | 覆盖、更新或重新解释旧 package |
+| `POST`，不合格 payload | `422 discovery_contract_invalid` | 已接纳任何卡片或 Coverage |
+| `POST`，未配置/不可用 DB | `503 ingress_not_connected` 或 `503 ingress_not_committed` | 失败等于无可用历史材料或应重试平台 |
+| `GET /api/local/evidence-library` / 页面 Search | 只读已接纳数据；`window=last_7_days|last_30_days`，标题/创作者名 V1 文本匹配 | 触发 `AcquisitionSpec`、平台搜索、补采或详情文本召回 |
+
+Ingress body 是 UTF-8 JSON 的 `xhs.discovery.visible-card.v1`；不接受拼接的插件命令、旧工作台 envelope 或任意“额外字段”。页面响应和 JSON 读取投影不返回外部封面 URL；未有本地副本前只返回/展示 `MEDIA_NOT_ACQUIRED`。
+
+## 8. 合同测试与未证明边界
 
 `crates/contracts/tests/discovery_boundary_contract.rs` 覆盖：两类 Query 的字段隔离、partial visible-card 保留、非空稳定内容身份和有效 observation time、详情/评论/媒体字节/OCR/ASR 的拒绝、position 只能在 occurrence 且同包唯一、remote cover 不能成为 display URL，以及来源发布时间缺失在 Discovery 合同内保持 unknown。
 
