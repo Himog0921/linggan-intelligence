@@ -7,7 +7,7 @@
 > 事实来源: Mog 指定的 LIDS v2.0 `tokens.md`（SHA-256: `97fac0fb590c7f349f5fe7bfc2e2e423c6c8145b03cec9ffdd80d4494f757e77`）、[system.md](system.md)、LOCAL-001A 运行时 Token 源与对应 Rust 校验
 > 冲突时以谁为准: 已获准运行时的唯一 Token 文件 `apps/api/src/local_web/lids_tokens.css` 优先；本 Markdown 是该源的版本化规范与校验镜像，不是第二个可独立编辑的运行时主题。产品/数据/权限冲突不由 Token 解决
 
-本文件冻结 LIDS v2.0 的 107 项数值基线。LOCAL-001A 已把同名完整基线迁入 `apps/api/src/local_web/lids_tokens.css`；该 CSS 是当前唯一的**值编辑源**。本 Markdown 中的 CSS 清单是从该源派生的版本化规范与校验镜像，不能作为第二套运行时主题或独立改值入口。Rust 测试逐项核对 107 个 token 的名称和完整值，防止两份文本无声漂移。
+本文件冻结 LIDS v3.0 的 117 项数值基线。LOCAL-001A 已把同名完整基线迁入 `apps/api/src/local_web/lids_tokens.css`；该 CSS 是当前唯一的**值编辑源**。本 Markdown 中的 CSS 清单是从该源派生的版本化规范与校验镜像，不能作为第二套运行时主题或独立改值入口。Rust 测试逐项核对 117 个 token 的名称和完整值，防止两份文本无声漂移。
 
 ## LOCAL-001A 运行时权威与后续 Agent 规则
 
@@ -21,7 +21,7 @@ docs/design/lids/tokens.md
 ```
 
 - 后续 Agent 要改变某个 LIDS token 值时，只能先修改 `apps/api/src/local_web/lids_tokens.css`；不得先在页面 CSS、组件 CSS 或本 Markdown 中创造不同值。
-- 同一提交必须把本文件的基线清单同步为运行时源的精确镜像，并通过 Rust 的 107 项名称→值比对。校验失败即表示变更未完成，不能用“名称一致”掩盖值漂移。
+- 同一提交必须把本文件的基线清单同步为运行时源的精确镜像，并通过 Rust 的 117 项名称→值比对。校验失败即表示变更未完成，不能用“名称一致”掩盖值漂移。
 - 任何 token 值的改变仍是跨页面设计变更：必须按 UI Change Manifest、迁移记录、影响页面和回退规则完成治理；LOCAL-001A 不因拥有运行时源而获得任意改值授权。
 - 页面 CSS 只消费 `var(--lgi-*)`，不得声明 `--lgi-*`；页面局部例外必须按 PAGE/Manifest/LIDS migration log 另行登记，不能反向写入 Token 真源。
 - 如未来需要自动生成 Markdown 镜像，必须另开受控任务；在此之前，本文件的镜像同步与 Rust 精确校验共同构成当前最小、可验证的单向关系。
@@ -33,48 +33,60 @@ docs/design/lids/tokens.md
 ```css
 [data-theme="linggan-intelligence"] {
   /* Canvas */
-  --lgi-canvas: #ecebe6;
-  --lgi-canvas-hi: #f6f5f1;
-  --lgi-canvas-low: #deddd7;
-  --lgi-canvas-overlay: rgba(236, 235, 230, 0.92);
-  --lgi-canvas-glass: rgba(246, 245, 241, 0.86);
+  --lgi-canvas: #ffffff;
+  --lgi-canvas-hi: #ffffff;
+  --lgi-canvas-low: #f7f8f8;
+  --lgi-canvas-sunken: #eef0f1;
+  --lgi-canvas-overlay: rgba(255, 255, 255, 0.94);
+  --lgi-canvas-glass: rgba(255, 255, 255, 0.88);
 
   /* Ink */
-  --lgi-ink: #121211;
-  --lgi-body: #2d2d2a;
-  --lgi-muted: #64635e;
-  --lgi-ghost: #8c8a84;
-  --lgi-on-dark: #faf9f5;
+  --lgi-ink: #111315;
+  --lgi-body: #4a5057;
+  --lgi-muted: #6f747a;
+  --lgi-ghost: #9aa0a6;
+  --lgi-on-dark: #ffffff;
 
   /* Signature signal */
   --lgi-signal: #ef4f25;
-  --lgi-signal-hover: #dd431e;
+  --lgi-signal-hover: #c73a15;
   --lgi-signal-ink: #a73317;
-  --lgi-signal-soft: rgba(239, 79, 37, 0.12);
-  --lgi-signal-faint: rgba(239, 79, 37, 0.06);
+  --lgi-signal-soft: rgba(239, 79, 37, 0.10);
+  --lgi-signal-faint: rgba(239, 79, 37, 0.05);
 
-  /* Semantic */
-  --lgi-success: #4b6525;
-  --lgi-success-dot: #9fcb54;
-  --lgi-success-soft: rgba(159, 203, 84, 0.14);
-  --lgi-warning: #805500;
-  --lgi-warning-dot: #c18a1a;
-  --lgi-warning-soft: rgba(193, 138, 26, 0.14);
-  --lgi-danger: #9e2517;
-  --lgi-danger-soft: rgba(158, 37, 23, 0.10);
-  --lgi-info: #345a6f;
-  --lgi-info-soft: rgba(52, 90, 111, 0.10);
+  /* Semantic: five axes, each carries text / fill / soft.
+   * Fill values stay saturated for solid badges; text values are darkened
+   * so they clear 4.5:1 on the white canvas. Never swap the two roles. */
+  --lgi-success: #05674a;
+  --lgi-success-dot: #0e9e6e;
+  --lgi-success-soft: rgba(14, 158, 110, 0.10);
+  --lgi-warning: #a67a04;
+  --lgi-warning-dot: #eaaa05;
+  --lgi-warning-soft: rgba(234, 170, 5, 0.12);
+  --lgi-danger: #a42001;
+  --lgi-danger-dot: #a42001;
+  --lgi-danger-soft: rgba(164, 32, 1, 0.08);
+  --lgi-info: #42555a;
+  --lgi-info-dot: #8d9a9d;
+  --lgi-info-soft: rgba(141, 154, 157, 0.14);
+  --lgi-unknown: #6f747a;
+  --lgi-unknown-dot: #c3c8cb;
+  --lgi-unknown-soft: #e7eaeb;
 
   /* Borders */
-  --lgi-hairline: rgba(18, 18, 17, 0.14);
-  --lgi-border: rgba(18, 18, 17, 0.20);
-  --lgi-border-strong: rgba(18, 18, 17, 0.28);
-  --lgi-border-solid: #121211;
+  --lgi-hairline: rgba(17, 19, 21, 0.09);
+  --lgi-border: rgba(17, 19, 21, 0.15);
+  --lgi-border-strong: rgba(17, 19, 21, 0.22);
+  --lgi-border-solid: #111315;
+
+  /* Instrument mesh: a measurement field, not decoration. Dots read lighter than
+   * a ruled grid at the same weight, so the surface stays quiet while gaining depth. */
+  --lgi-mesh-fine: rgba(17, 19, 21, 0.055);
+  --lgi-mesh-major: rgba(17, 19, 21, 0.10);
 
   /* Typography */
   --lgi-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   --lgi-font-mono: "SFMono-Regular", "JetBrains Mono", "Roboto Mono", "Noto Sans Mono CJK SC", ui-monospace, monospace;
-
   --lgi-text-display: clamp(3rem, 6vw, 5.5rem);
   --lgi-text-hero: 3rem;
   --lgi-text-page-title: 1.75rem;
@@ -84,19 +96,16 @@ docs/design/lids/tokens.md
   --lgi-text-data: 0.75rem;
   --lgi-text-label: 0.6875rem;
   --lgi-text-calibration: 0.5625rem;
-
   --lgi-weight-regular: 400;
   --lgi-weight-medium: 500;
   --lgi-weight-semibold: 600;
   --lgi-weight-bold: 700;
-
   --lgi-lh-display: 0.96;
   --lgi-lh-title: 1.1;
   --lgi-lh-heading: 1.25;
   --lgi-lh-data: 1.4;
   --lgi-lh-body: 1.55;
   --lgi-lh-longform: 1.65;
-
   --lgi-ls-tight: -0.04em;
   --lgi-ls-normal: 0;
   --lgi-ls-data: 0.04em;
@@ -124,10 +133,12 @@ docs/design/lids/tokens.md
 
   /* Shadows */
   --lgi-shadow-none: none;
-  --lgi-shadow-contact: 0 1px 2px rgba(18, 18, 17, 0.08);
-  --lgi-shadow-overlay: 0 12px 30px rgba(18, 18, 17, 0.12);
-  --lgi-shadow-stage: 0 24px 25px rgba(18, 18, 17, 0.055);
-  --lgi-shadow-hard: 8px 8px 0 rgba(18, 18, 17, 0.08);
+  --lgi-shadow-contact: 0 1px 2px rgba(17, 19, 21, 0.07);
+  --lgi-shadow-overlay: 0 12px 30px rgba(17, 19, 21, 0.11);
+  --lgi-shadow-stage: 0 24px 25px rgba(17, 19, 21, 0.05);
+  --lgi-shadow-hard: 8px 8px 0 rgba(17, 19, 21, 0.07);
+  --lgi-shadow-brutal: 4px 4px 0 #111315;
+  --lgi-shadow-brutal-lg: 7px 7px 0 #111315;
 
   /* Layout */
   --lgi-page-max-l3: 1720px;
@@ -147,7 +158,6 @@ docs/design/lids/tokens.md
   --lgi-duration-page: 280ms;
   --lgi-duration-scene: 600ms;
   --lgi-duration-ambient: 10s;
-
   --lgi-ease-ui: cubic-bezier(0.2, 0.75, 0.2, 1);
   --lgi-ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
   --lgi-ease-linear: linear;

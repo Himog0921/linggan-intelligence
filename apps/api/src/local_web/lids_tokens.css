@@ -1,42 +1,55 @@
 [data-theme="linggan-intelligence"] {
   /* Canvas */
-  --lgi-canvas: #ecebe6;
-  --lgi-canvas-hi: #f6f5f1;
-  --lgi-canvas-low: #deddd7;
-  --lgi-canvas-overlay: rgba(236, 235, 230, 0.92);
-  --lgi-canvas-glass: rgba(246, 245, 241, 0.86);
+  --lgi-canvas: #ffffff;
+  --lgi-canvas-hi: #ffffff;
+  --lgi-canvas-low: #f7f8f8;
+  --lgi-canvas-sunken: #eef0f1;
+  --lgi-canvas-overlay: rgba(255, 255, 255, 0.94);
+  --lgi-canvas-glass: rgba(255, 255, 255, 0.88);
 
   /* Ink */
-  --lgi-ink: #121211;
-  --lgi-body: #2d2d2a;
-  --lgi-muted: #64635e;
-  --lgi-ghost: #8c8a84;
-  --lgi-on-dark: #faf9f5;
+  --lgi-ink: #111315;
+  --lgi-body: #4a5057;
+  --lgi-muted: #6f747a;
+  --lgi-ghost: #9aa0a6;
+  --lgi-on-dark: #ffffff;
 
   /* Signature signal */
   --lgi-signal: #ef4f25;
-  --lgi-signal-hover: #dd431e;
+  --lgi-signal-hover: #c73a15;
   --lgi-signal-ink: #a73317;
-  --lgi-signal-soft: rgba(239, 79, 37, 0.12);
-  --lgi-signal-faint: rgba(239, 79, 37, 0.06);
+  --lgi-signal-soft: rgba(239, 79, 37, 0.10);
+  --lgi-signal-faint: rgba(239, 79, 37, 0.05);
 
-  /* Semantic */
-  --lgi-success: #4b6525;
-  --lgi-success-dot: #9fcb54;
-  --lgi-success-soft: rgba(159, 203, 84, 0.14);
-  --lgi-warning: #805500;
-  --lgi-warning-dot: #c18a1a;
-  --lgi-warning-soft: rgba(193, 138, 26, 0.14);
-  --lgi-danger: #9e2517;
-  --lgi-danger-soft: rgba(158, 37, 23, 0.10);
-  --lgi-info: #345a6f;
-  --lgi-info-soft: rgba(52, 90, 111, 0.10);
+  /* Semantic: five axes, each carries text / fill / soft.
+   * Fill values stay saturated for solid badges; text values are darkened
+   * so they clear 4.5:1 on the white canvas. Never swap the two roles. */
+  --lgi-success: #05674a;
+  --lgi-success-dot: #0e9e6e;
+  --lgi-success-soft: rgba(14, 158, 110, 0.10);
+  --lgi-warning: #a67a04;
+  --lgi-warning-dot: #eaaa05;
+  --lgi-warning-soft: rgba(234, 170, 5, 0.12);
+  --lgi-danger: #a42001;
+  --lgi-danger-dot: #a42001;
+  --lgi-danger-soft: rgba(164, 32, 1, 0.08);
+  --lgi-info: #42555a;
+  --lgi-info-dot: #8d9a9d;
+  --lgi-info-soft: rgba(141, 154, 157, 0.14);
+  --lgi-unknown: #6f747a;
+  --lgi-unknown-dot: #c3c8cb;
+  --lgi-unknown-soft: #e7eaeb;
 
   /* Borders */
-  --lgi-hairline: rgba(18, 18, 17, 0.14);
-  --lgi-border: rgba(18, 18, 17, 0.20);
-  --lgi-border-strong: rgba(18, 18, 17, 0.28);
-  --lgi-border-solid: #121211;
+  --lgi-hairline: rgba(17, 19, 21, 0.09);
+  --lgi-border: rgba(17, 19, 21, 0.15);
+  --lgi-border-strong: rgba(17, 19, 21, 0.22);
+  --lgi-border-solid: #111315;
+
+  /* Instrument mesh: a measurement field, not decoration. Dots read lighter than
+   * a ruled grid at the same weight, so the surface stays quiet while gaining depth. */
+  --lgi-mesh-fine: rgba(17, 19, 21, 0.055);
+  --lgi-mesh-major: rgba(17, 19, 21, 0.10);
 
   /* Typography */
   --lgi-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
@@ -87,10 +100,12 @@
 
   /* Shadows */
   --lgi-shadow-none: none;
-  --lgi-shadow-contact: 0 1px 2px rgba(18, 18, 17, 0.08);
-  --lgi-shadow-overlay: 0 12px 30px rgba(18, 18, 17, 0.12);
-  --lgi-shadow-stage: 0 24px 25px rgba(18, 18, 17, 0.055);
-  --lgi-shadow-hard: 8px 8px 0 rgba(18, 18, 17, 0.08);
+  --lgi-shadow-contact: 0 1px 2px rgba(17, 19, 21, 0.07);
+  --lgi-shadow-overlay: 0 12px 30px rgba(17, 19, 21, 0.11);
+  --lgi-shadow-stage: 0 24px 25px rgba(17, 19, 21, 0.05);
+  --lgi-shadow-hard: 8px 8px 0 rgba(17, 19, 21, 0.07);
+  --lgi-shadow-brutal: 4px 4px 0 #111315;
+  --lgi-shadow-brutal-lg: 7px 7px 0 #111315;
 
   /* Layout */
   --lgi-page-max-l3: 1720px;

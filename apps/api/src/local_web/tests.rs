@@ -91,14 +91,23 @@ fn evidence_page_keeps_the_v7_shell_and_three_column_geometry() {
         assert!(html.contains(required), "missing V7 structure: {required}");
     }
 
+    assert!(
+        !EVIDENCE_LIBRARY_CSS.contains("#e8003f"),
+        "the second signature colour must stay retired: DESIGN-003 collapsed the palette onto --lgi-signal"
+    );
+    assert!(
+        !EVIDENCE_LIBRARY_CSS.contains('#'),
+        "page CSS must not author raw colour: every value resolves through a LIDS token"
+    );
+
     for required_css in [
         "html,body { height:100%; overflow:hidden; }",
         ".v7-app { height:100vh; min-height:0;",
         "--v7-header-height:128px",
         "--v7-side-width:216px",
         "--v7-inspector-width:440px",
-        "--v7-brand-red:#e8003f",
-        "--v7-red:#ef4f25",
+        "--v7-red:var(--lgi-signal)",
+        "--v7-black:var(--lgi-ink)",
         "@media(max-width:900px){html,body{height:auto;min-height:100%;overflow:auto}.v7-app{height:auto;min-height:100vh;grid-template-rows:auto minmax(0,1fr);overflow:visible}",
     ] {
         assert!(
@@ -139,8 +148,8 @@ fn runtime_token_source_matches_the_full_lids_baseline() {
     let runtime = declared_token_values(LIDS_TOKENS);
     let documented = declared_token_values(LIDS_TOKEN_DOCUMENT);
 
-    assert_eq!(runtime.len(), 107);
-    assert_eq!(documented.len(), 107);
+    assert_eq!(runtime.len(), 117);
+    assert_eq!(documented.len(), 117);
     assert_eq!(runtime, documented);
     assert!(declared_token_values(EVIDENCE_LIBRARY_CSS).is_empty());
 }
