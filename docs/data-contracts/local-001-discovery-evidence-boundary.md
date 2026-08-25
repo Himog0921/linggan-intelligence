@@ -26,7 +26,7 @@
 ### Evidence Library V1 检索语义
 
 - 浏览单位是 `ContentItem`；若未来发生文本匹配，命中单位是 `EvidenceFragment`。本卡没有建立这两个持久化对象或读投影。
-- `WINDOW` 的目标语义只指 `ContentItem.published_at`。本卡只保证 Discovery 合同不把缺少来源发布时间的卡片填成某个默认发布时间；**真正将 `published_at = UNKNOWN` 排除在 7 天或 30 天读取结果之外，仍是 001B read projection 的 `NOT VERIFIED` 验收项**。
+- `WINDOW` 的目标语义只指 `ContentItem.published_at`。本卡只保证 Discovery 合同不把缺少来源发布时间的卡片填成某个默认发布时间；001B read projection 将 `published_at = UNKNOWN` 排除在 7 天或 30 天读取结果之外，并只在当前 `EvidenceQuery` 候选集中计入该排除数量。文本不匹配的本地对象不能被计入页面的未知发布时间排除数。
 - `Latest Discovery` 只使用同一稳定内容身份首次被 Linggan **接受**的时间；它不是发布时间、页面实际观察时间或最近接收/重放时间。
 - 标题、作者名、正文、评论、OCR、ASR 的实际召回和排序实现留给具有已接纳材料的 001B；缺少的材料必须呈现为 `NOT_ACQUIRED`/`UNKNOWN`，不能被当作“不匹配”。
 

@@ -177,7 +177,7 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discovery_cards() {
     let database = proof_database("local_api_ingress").await;
-    let observed_at = database_now(&database).await;
+    let observed_at = producer_fixture_observed_at(&database).await;
     let package = discovery_package(&observed_at);
     let application = app_with_database(database);
 
@@ -244,8 +244,10 @@ async fn proof_database(schema: &str) -> Database {
         .expect("isolated migration applies")
 }
 
-async fn database_now(database: &Database) -> String {
-    sqlx::query("SELECT scope_001_now()::text AS observed_at")
+async fn producer_fixture_observed_at(database: &Database) -> String {
+    sqlx::query(
+        "SELECT to_char(scope_001_now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS observed_at",
+    )
         .fetch_one(database.pool())
         .await
         .expect("database returns a timestamp")

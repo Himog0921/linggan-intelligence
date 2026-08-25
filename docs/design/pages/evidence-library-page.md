@@ -68,7 +68,7 @@
 
 | 用户动作 | 前置条件 | 请求/回执来源 | 页面如何区分接纳、处理中、完成、部分、失败 | 不得宣称 |
 |---|---|---|---|---|
-| 搜索本地卡片 | 服务已显式连接 Linggan PostgreSQL；输入可选文本，窗口为 7 或 30 天 | `GET /corpus/evidence` 或 `GET /api/local/evidence-library`；仅读取已接纳 discovery 数据 | 无数据库为 `NOT_CONNECTED`；无窗口内卡片为 `NO_ACCEPTED_MATERIAL_AVAILABLE`；未知发布时间的已接纳对象单独计数且被排除 | 触发小红书搜索、补采、详情/评论读取或“世界中没有内容” |
+| 搜索本地卡片 | 服务已显式连接 Linggan PostgreSQL；输入可选文本，窗口为 7 或 30 天 | `GET /corpus/evidence` 或 `GET /api/local/evidence-library`；仅读取已接纳 discovery 数据 | 无数据库为 `NOT_CONNECTED`；无窗口内卡片为 `NO_ACCEPTED_MATERIAL_AVAILABLE`；当前查询候选中发布时间未知的对象单独计数且被排除 | 触发小红书搜索、补采、详情/评论读取或“世界中没有内容” |
 | 其余 V7 控件 | 无 | 不适用 | 继续 disabled；没有写入或采集回执 | 保存视图、研究、补采、原文、选择材料或真实运行状态 |
 
 ### 5.1 001C-0 已冻结、但尚未接通的后续控件语义

@@ -68,7 +68,7 @@ curl --fail --silent http://localhost:3000/corpus/evidence > /dev/null
 
 - 没有数据库连接时，它说明 `SOURCE_INCOMPLETE / NOT_CONNECTED`；这不能推断世界没有内容或数据库为零。
 - 有连接且存在合格的受控 discovery Package 时，页面只显示本地已接纳的 visible card。搜索框只检索标题和创作者名；它绝不重新搜索小红书。
-- `WINDOW` 只按来源可直接验证的 `published_at` 过滤。未知发布时间不会被填成 0 或“当前”，而是在页面明确统计为排除对象。
+- `WINDOW` 只按来源可直接验证的 `published_at` 过滤。未知发布时间不会被填成 0 或“当前”，而是在页面明确统计为排除对象；该数量只统计当前 `EvidenceQuery` 候选集，不能把文本不匹配的本地对象计入。
 - 每张卡片只显示本次 discovery 可见的事实和 package 级 Coverage。`visible / quota` 不是平台总量、完整率或趋势。
 - 封面位置必须显示 `MEDIA NOT ACQUIRED`；此阶段绝不能请求或展示小红书 CDN 地址。
 

@@ -53,7 +53,7 @@ pub(super) fn render_read_projection(
 
 fn no_cards_markup(projection: &DiscoveryLibraryProjection) -> String {
     format!(
-        "<div class=\"v7-results-empty\"><section class=\"v7-empty-panel\"><h2>当前窗口没有可展示卡片</h2><p>本地 read projection 已接通，但本次查询没有已知发布时间且落在当前窗口内的 Discovery 卡片。</p><dl class=\"v7-empty-grid\"><div><dt>WINDOW</dt><dd>只按来源可知的 published_at 过滤。</dd></div><div><dt>UNKNOWN TIME</dt><dd>{} 个已接纳对象因发布时间未知而未进入窗口。</dd></div><div><dt>不代表</dt><dd>不代表平台没有内容、采集失败或世界没有讨论。</dd></div></dl></section></div>",
+        "<div class=\"v7-results-empty\"><section class=\"v7-empty-panel\"><h2>当前窗口没有可展示卡片</h2><p>本地 read projection 已接通，但本次查询没有已知发布时间且落在当前窗口内的 Discovery 卡片。</p><dl class=\"v7-empty-grid\"><div><dt>WINDOW</dt><dd>只按来源可知的 published_at 过滤。</dd></div><div><dt>UNKNOWN TIME</dt><dd>当前查询候选中 {} 个对象因发布时间未知而未进入窗口。</dd></div><div><dt>不代表</dt><dd>不代表平台没有内容、采集失败或世界没有讨论。</dd></div></dl></section></div>",
         projection.excluded_unknown_published_at
     )
 }
