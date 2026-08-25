@@ -235,13 +235,13 @@ fn remote_cover_is_only_a_candidate_and_never_a_display_url() {
 }
 
 #[test]
-fn published_window_filtering_is_deferred_to_001b_read_projection() {
+fn discovery_contract_keeps_unknown_published_time_for_the_read_projection() {
     let package = parse_discovery_package(PARTIAL_VISIBLE_DISCOVERY).expect("fixture is valid");
     assert_eq!(
         package.cards()[1].content().published_at_source_text(),
         None,
         "the discovery contract preserves absent source publication time as unknown"
     );
-    // This is deliberately not a result-filter assertion. 001B must later prove that its local
-    // read projection excludes publishedAt=UNKNOWN from a PublishedWindow query.
+    // Result filtering belongs to the local read projection. Its PostgreSQL proof separately
+    // verifies that this unknown value is excluded from a PublishedWindow query.
 }

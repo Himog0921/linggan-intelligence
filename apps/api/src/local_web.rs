@@ -1,11 +1,22 @@
+mod evidence_page;
+
 use axum::{
     Json, Router,
+    body::Bytes,
+    extract::{Query, State},
     http::{HeaderValue, header},
     response::{Html, IntoResponse, Redirect, Response},
-    routing::get,
+    routing::{get, post},
 };
+use linggan_contracts::EvidenceQuery;
+use linggan_evidence::{DiscoveryIngressError, ingest_discovery_package, read_discovery_library};
+use linggan_storage_postgres::Database;
+use serde::Deserialize;
 use serde_json::{Value, json};
-use std::net::{Ipv4Addr, SocketAddr};
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    sync::Arc,
+};
 
 const LOCAL_HOST: Ipv4Addr = Ipv4Addr::LOCALHOST;
 const LOCAL_PORT: u16 = 3000;
@@ -14,12 +25,36 @@ const EVIDENCE_LIBRARY_CSS: &str = include_str!("local_web/evidence_library.css"
 #[cfg(test)]
 const LIDS_TOKEN_DOCUMENT: &str = include_str!("../../../docs/design/lids/tokens.md");
 
+#[derive(Clone)]
+struct LocalWebState {
+    database: Option<Arc<Database>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EvidenceLibraryParams {
+    q: Option<String>,
+    window: Option<String>,
+}
+
 pub fn app() -> Router {
+    router(LocalWebState { database: None })
+}
+
+pub fn app_with_database(database: Database) -> Router {
+    router(LocalWebState {
+        database: Some(Arc::new(database)),
+    })
+}
+
+fn router(state: LocalWebState) -> Router {
     Router::new()
         .route("/", get(local_entry))
         .route("/health", get(health))
+        .route("/api/local/discovery-packages", post(discovery_ingress))
+        .route("/api/local/evidence-library", get(evidence_library_json))
         .route("/corpus/evidence", get(evidence_library))
         .route("/assets/evidence-library.css", get(stylesheet))
+        .with_state(state)
 }
 
 async fn local_entry() -> Redirect {
@@ -30,23 +65,148 @@ pub async fn serve() -> Result<(), std::io::Error> {
     let address = SocketAddr::from((LOCAL_HOST, LOCAL_PORT));
     let listener = tokio::net::TcpListener::bind(address).await?;
     println!("Linggan local host listening on http://localhost:{LOCAL_PORT}");
-    axum::serve(listener, app()).await
+    let application = match std::env::var("LINGGAN_LOCAL_DATABASE_URL") {
+        Ok(url) => app_with_database(Database::connect(&url).await.map_err(|_| {
+            std::io::Error::other("configured local discovery database is unavailable")
+        })?),
+        Err(_) => app(),
+    };
+    axum::serve(listener, application).await
 }
 
-async fn health() -> Json<Value> {
+async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     Json(json!({
         "service": "linggan-local-web",
         "listener": "loopback-only",
-        "dataState": "SOURCE_INCOMPLETE",
-        "evidenceReadModel": "NOT_CONNECTED",
+        "dataState": if state.database.is_some() { "LOCAL_DISCOVERY_READ_PROJECTION" } else { "SOURCE_INCOMPLETE" },
+        "evidenceReadModel": if state.database.is_some() { "DISCOVERY_ONLY" } else { "NOT_CONNECTED" },
         "routes": {
-            "evidenceLibrary": "/corpus/evidence"
+            "evidenceLibrary": "/corpus/evidence",
+            "discoveryIngress": "/api/local/discovery-packages"
         }
     }))
 }
 
-async fn evidence_library() -> Html<&'static str> {
-    Html(evidence_library_html())
+async fn evidence_library(
+    State(state): State<LocalWebState>,
+    Query(params): Query<EvidenceLibraryParams>,
+) -> Html<String> {
+    match state.database.as_deref() {
+        None => Html(evidence_library_html().to_owned()),
+        Some(database) => match local_query(&params) {
+            Ok(query) => match read_discovery_library(database, &query).await {
+                Ok(projection) => Html(evidence_page::render_read_projection(
+                    evidence_library_html(),
+                    &projection,
+                    params.q.as_deref(),
+                )),
+                Err(_) => Html(evidence_read_unavailable_html()),
+            },
+            Err(()) => Html(evidence_query_invalid_html()),
+        },
+    }
+}
+
+async fn evidence_library_json(
+    State(state): State<LocalWebState>,
+    Query(params): Query<EvidenceLibraryParams>,
+) -> Response {
+    let Some(database) = state.database.as_deref() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(query) = local_query(&params) else {
+        return local_read_json_error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "invalid_local_evidence_query",
+        );
+    };
+    match read_discovery_library(database, &query).await {
+        Ok(projection) => Json(projection).into_response(),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_projection_unavailable",
+        ),
+    }
+}
+
+async fn discovery_ingress(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.as_deref() else {
+        return ingress_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "ingress_not_connected",
+        );
+    };
+    let Ok(body) = std::str::from_utf8(&body) else {
+        return ingress_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "discovery_contract_invalid",
+        );
+    };
+    match ingest_discovery_package(database, body).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(DiscoveryIngressError::Contract(_)) => ingress_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "discovery_contract_invalid",
+        ),
+        Err(DiscoveryIngressError::Internal(_)) => ingress_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "ingress_not_committed",
+        ),
+    }
+}
+
+fn local_query(params: &EvidenceLibraryParams) -> Result<EvidenceQuery, ()> {
+    let window = match params.window.as_deref().unwrap_or("last_30_days") {
+        "last_7_days" => "last_7_days",
+        "last_30_days" => "last_30_days",
+        _ => return Err(()),
+    };
+    serde_json::from_value(json!({
+        "text": params.q,
+        "scope": "all_accepted_material",
+        "window": window,
+        "sort": "latest_discovery"
+    }))
+    .map_err(|_| ())
+}
+
+fn ingress_json_error(status: axum::http::StatusCode, code: &'static str) -> Response {
+    (
+        status,
+        Json(json!({ "admission": "not_accepted", "code": code })),
+    )
+        .into_response()
+}
+
+fn local_read_json_error(status: axum::http::StatusCode, code: &'static str) -> Response {
+    (
+        status,
+        Json(json!({ "operation": "local_read", "outcome": "unavailable", "code": code })),
+    )
+        .into_response()
+}
+
+fn evidence_read_unavailable_html() -> String {
+    evidence_library_html()
+        .replace("SOURCE_INCOMPLETE", "READ_PROJECTION_UNAVAILABLE")
+        .replace(
+            "页面还没有连接到受控的本地材料读投影",
+            "页面无法从受控本地读投影读取卡片；没有显示任何旧系统或远程数据",
+        )
+        .to_owned()
+}
+
+fn evidence_query_invalid_html() -> String {
+    evidence_library_html()
+        .replace("SOURCE_INCOMPLETE", "LOCAL_QUERY_INVALID")
+        .replace(
+            "页面还没有连接到受控的本地材料读投影",
+            "当前只接受本地 EvidenceQuery；没有触发平台搜索或补采",
+        )
+        .to_owned()
 }
 
 async fn stylesheet() -> Response {
@@ -120,7 +280,7 @@ fn evidence_library_html() -> &'static str {
                 <div class="v7-page-actions"><button class="v7-btn" disabled aria-disabled="true">复制查询</button><button class="v7-btn" disabled aria-disabled="true">保存当前视图</button><button class="v7-btn v7-primary" disabled aria-disabled="true">发起研究</button></div>
               </div>
             </div>
-            <div class="v7-search-row"><label class="v7-search"><span class="v7-cmd">⌘ FIND</span><input disabled aria-disabled="true" placeholder="等待受控材料读投影接通……"><kbd>⌘ K</kbd></label><div class="v7-scope" aria-label="搜索范围"><button disabled aria-current="true">全部</button><button disabled>作品</button><button disabled>评论</button><button disabled>转录</button><button disabled>作者</button></div></div>
+            <form class="v7-search-row" method="get"><label class="v7-search"><span class="v7-cmd">⌘ FIND</span><!-- EVIDENCE_SEARCH_INPUT_START --><input disabled aria-disabled="true" placeholder="等待受控材料读投影接通……"><!-- EVIDENCE_SEARCH_INPUT_END --><kbd>⌘ K</kbd></label><div class="v7-scope" aria-label="搜索范围"><button disabled aria-current="true">全部</button><button disabled>作品</button><button disabled>评论</button><button disabled>转录</button><button disabled>作者</button></div></form>
             <div class="v7-views-bar">
               <div class="v7-view-group"><span class="v7-view-label">SYSTEM VIEWS / 系统视图</span><div class="v7-view-strip"><button class="v7-view-pill" disabled aria-current="true"><i>01</i><span>最新发现</span><span class="v7-n">—</span></button><button class="v7-view-pill" disabled><i>02</i><span>待补采</span><span class="v7-n">—</span></button><button class="v7-view-pill" disabled><i>03</i><span>高互动</span><span class="v7-n">—</span></button><button class="v7-view-pill" disabled><i>04</i><span>评论密集</span><span class="v7-n">—</span></button><button class="v7-view-pill" disabled><i>05</i><span>最近异常</span><span class="v7-n">—</span></button><button class="v7-view-pill v7-more" disabled><i>+</i><span>更多</span><span class="v7-n">⌄</span></button></div></div>
               <div class="v7-view-group v7-my"><span class="v7-view-label">MY VIEWS / 我的视图</span><div class="v7-view-strip"><button class="v7-view-pill" disabled><i>A</i><span>ADHD 作业</span></button><button class="v7-view-pill" disabled><i>B</i><span>低粉爆文</span></button><button class="v7-view-pill" disabled><i>C</i><span>家长原声研究</span></button></div></div>
@@ -133,10 +293,10 @@ fn evidence_library_html() -> &'static str {
             <section class="v7-results" aria-label="事实材料列表">
               <div class="v7-fact-strap"><span>FACT LAYER / EVIDENCE</span><i aria-hidden="true"></i><b>原始内容资产</b></div>
               <div class="v7-results-head"><div class="v7-results-left"><input class="v7-check" type="checkbox" disabled aria-label="选择全部材料"><span>NO ACCEPTED MATERIAL AVAILABLE</span></div><div>READ MODEL NOT CONNECTED</div></div>
-              <div class="v7-results-empty">
+              <!-- EVIDENCE_RESULTS_START --><div class="v7-results-empty">
                 <article class="v7-empty-row"><input class="v7-check" type="checkbox" disabled aria-label="无材料"><div class="v7-empty-mark">?</div><div class="v7-empty-main"><div class="v7-empty-title">SOURCE_INCOMPLETE</div><div class="v7-empty-copy">页面还没有连接到受控的本地材料读投影，因此不能列出 Content、评论、转录或来源对象。</div><div class="v7-empty-boundary"><b>NO_ACCEPTED_MATERIAL_AVAILABLE</b>这不是世界中不存在内容，也不是库内数量为零。</div><div class="v7-empty-facts"><span>TRUTH <strong>UNKNOWN</strong></span><span>COVERAGE <strong>UNKNOWN</strong></span><span>DISPLAY <strong>NOT CONNECTED</strong></span></div></div><div class="v7-empty-metric"><div><b>—</b><span>ITEMS</span></div><div><b>—</b><span>OBS</span></div><div><b>—</b><span>SOURCE</span></div></div></article>
                 <section class="v7-empty-panel" aria-labelledby="empty-title"><h2 id="empty-title">没有可展示的本地材料</h2><p>当前本地 host 只提供此页面的视觉和信息边界；它没有读取数据库、历史内容工作台或插件结果。</p><dl class="v7-empty-grid"><div><dt>现在知道什么</dt><dd>页面可被本地 host 提供；材料读取合同未接通。</dd></div><div><dt>现在不知道什么</dt><dd>材料、来源、观察时间、Capture 与 Coverage 均为未知。</dd></div><div><dt>下一步</dt><dd>001B 另立范围后才能建立受控只读投影。</dd></div></dl></section>
-              </div>
+              </div><!-- EVIDENCE_RESULTS_END -->
             </section>
             <aside class="v7-inspect" aria-labelledby="inspector-title">
               <div class="v7-inspector-head"><div class="v7-inspector-identity"><div class="v7-iid">#NO_SELECTION</div><h2 class="v7-ititle" id="inspector-title">尚未选择材料</h2><div class="v7-imeta"><span>CONTENT ITEM UNKNOWN</span><span>·</span><span>OBSERVATION UNKNOWN</span><span>·</span><span>CAPTURE UNKNOWN</span></div></div><div class="v7-inspector-ops"><div class="v7-inspector-primary"><button disabled aria-disabled="true">↗ 原文</button><button disabled aria-disabled="true">⟳ 补采</button><button disabled aria-disabled="true">＋ 研究</button></div><div class="v7-inspector-window"><button disabled aria-disabled="true">PIN</button><button disabled aria-disabled="true">WIDE</button><button disabled aria-disabled="true">×</button></div></div><div class="v7-tabs" aria-label="材料详情页签"><button disabled aria-current="page">Overview</button><button disabled>Content</button><button disabled>Comments</button><button disabled>History</button><button disabled>Provenance</button><button disabled>Relations</button></div></div>
@@ -151,151 +311,4 @@ fn evidence_library_html() -> &'static str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::{
-        body::Body,
-        http::{Request, StatusCode, header},
-    };
-    use std::collections::BTreeMap;
-    use tower::ServiceExt;
-
-    #[tokio::test]
-    async fn health_route_returns_machine_readable_local_state() {
-        let response = app()
-            .oneshot(
-                Request::builder()
-                    .uri("/health")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.headers().get(header::CONTENT_TYPE).unwrap(),
-            "application/json"
-        );
-    }
-
-    #[tokio::test]
-    async fn local_entry_redirects_to_the_evidence_library() {
-        let response = app()
-            .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
-        assert_eq!(
-            response.headers().get(header::LOCATION).unwrap(),
-            "/corpus/evidence"
-        );
-    }
-
-    #[tokio::test]
-    async fn evidence_route_returns_the_honest_empty_state() {
-        let response = app()
-            .oneshot(
-                Request::builder()
-                    .uri("/corpus/evidence")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-        assert!(evidence_library_html().contains("SOURCE_INCOMPLETE"));
-        assert!(evidence_library_html().contains("没有可展示的本地材料"));
-        assert!(!evidence_library_html().contains(&["SYSTEM", "LIVE"].join(" ")));
-    }
-
-    #[test]
-    fn evidence_page_does_not_replace_unknown_with_zero() {
-        assert!(evidence_library_html().contains("COVERAGE <strong>UNKNOWN</strong>"));
-        assert!(!evidence_library_html().contains("评论 0"));
-    }
-
-    #[test]
-    fn evidence_page_keeps_the_v7_shell_and_three_column_geometry() {
-        let html = evidence_library_html();
-
-        for required in [
-            "v7-global-header",
-            "v7-context-row",
-            "v7-side",
-            "v7-page-header",
-            "v7-workspace",
-            "v7-results",
-            "v7-inspect",
-            "FACT LAYER / EVIDENCE",
-        ] {
-            assert!(html.contains(required), "missing V7 structure: {required}");
-        }
-
-        for required_css in [
-            "html,body { height:100%; overflow:hidden; }",
-            ".v7-app { height:100vh; min-height:0;",
-            "--v7-header-height:128px",
-            "--v7-side-width:216px",
-            "--v7-inspector-width:440px",
-            "--v7-brand-red:#e8003f",
-            "--v7-red:#ef4f25",
-            "@media(max-width:900px){html,body{height:auto;min-height:100%;overflow:auto}.v7-app{height:auto;min-height:100vh;grid-template-rows:auto minmax(0,1fr);overflow:visible}",
-        ] {
-            assert!(
-                EVIDENCE_LIBRARY_CSS.contains(required_css),
-                "missing V7 page-local visual constant: {required_css}"
-            );
-        }
-    }
-
-    #[test]
-    fn evidence_page_has_no_fabricated_v7_runtime_material_or_actions() {
-        let html = evidence_library_html();
-
-        let prohibited = [
-            ["SYSTEM", "LIVE"].join(" "),
-            ["INDEX", "FRESH"].join(" "),
-            ["12", "482"].join(","),
-            ["327", "9K"].join("."),
-            ["XHS", "78F2A"].join("-"),
-            ["为什么 ADHD 孩子", "每天写作业都像打仗？"].concat(),
-            ["已创建", "补采任务"].concat(),
-            ["已保存为", "个人视图"].concat(),
-        ];
-
-        for prohibited in &prohibited {
-            assert!(
-                !html.contains(prohibited),
-                "fabricated V7 value: {prohibited}"
-            );
-        }
-
-        assert!(html.contains("disabled aria-disabled=\"true\""));
-        assert!(html.contains("NO_ACCEPTED_MATERIAL_AVAILABLE"));
-    }
-
-    #[test]
-    fn runtime_token_source_matches_the_full_lids_baseline() {
-        let runtime = declared_token_values(LIDS_TOKENS);
-        let documented = declared_token_values(LIDS_TOKEN_DOCUMENT);
-
-        assert_eq!(runtime.len(), 107);
-        assert_eq!(documented.len(), 107);
-        assert_eq!(runtime, documented);
-        assert!(declared_token_values(EVIDENCE_LIBRARY_CSS).is_empty());
-    }
-
-    fn declared_token_values(stylesheet: &str) -> BTreeMap<&str, &str> {
-        stylesheet
-            .lines()
-            .filter_map(|line| line.trim().strip_prefix("--lgi-"))
-            .filter_map(|line| {
-                line.split_once(':')
-                    .map(|(name, value)| (name, value.trim().trim_end_matches(';')))
-            })
-            .collect()
-    }
-}
+mod tests;

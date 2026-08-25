@@ -12,8 +12,9 @@ pub use capture::{
 };
 pub use discovery::{
     AcquisitionSpec, CoverPresentationState, DiscoveryCard, DiscoveryContractError,
-    DiscoveryCoverage, DiscoveryOccurrence, DiscoveryPackage, EvidenceQuery, EvidenceQueryScope,
-    EvidenceQuerySort, PublishedWindow, parse_discovery_package,
+    DiscoveryCoverage, DiscoveryOccurrence, DiscoveryPackage, DiscoveryStopReason, EvidenceQuery,
+    EvidenceQueryScope, EvidenceQuerySort, PublishedWindow, is_rfc3339_timestamp,
+    parse_discovery_package,
 };
 
 pub const BOOTSTRAP_CONTRACT_VERSION: &str = "unimplemented";

@@ -381,7 +381,7 @@ struct DiscoveryPackageWire {
 /// This narrow parser keeps the discovery contract explicit without introducing a time library
 /// or converting source times into an inferred publication timestamp. It accepts a complete
 /// RFC-3339 calendar timestamp with an explicit `Z` or numeric UTC offset.
-fn is_rfc3339_timestamp(value: &str) -> bool {
+pub fn is_rfc3339_timestamp(value: &str) -> bool {
     if value.is_empty() || value.trim() != value {
         return false;
     }

@@ -26,9 +26,11 @@ CREATE TABLE local_discovery_ingress_delivery (
     delivery_ref uuid NOT NULL UNIQUE,
     package_id bigint NOT NULL REFERENCES local_discovery_package(id),
     outcome text NOT NULL CHECK (outcome IN ('accepted', 'replay')),
-    received_at timestamptz NOT NULL DEFAULT scope_001_now(),
-    UNIQUE (package_id, outcome)
+    received_at timestamptz NOT NULL DEFAULT scope_001_now()
 );
+
+CREATE UNIQUE INDEX local_discovery_only_one_accepted_delivery
+    ON local_discovery_ingress_delivery(package_id) WHERE outcome = 'accepted';
 
 CREATE TABLE local_discovery_content_item (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
