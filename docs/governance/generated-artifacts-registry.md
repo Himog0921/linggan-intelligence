@@ -21,6 +21,7 @@
 | 历史来源校验表 | `references/SOURCE-MANIFEST.sha256` | Bootstrap 来源固定流程 | 提交并受保护 | 禁止随意修改 | 与历史快照一起长期保留 |
 | 架构、业务流程与项目全景图 | `docs/architecture/system-overview-diagram.html`、`docs/architecture/business-process-diagram.html`、`docs/architecture/project-architecture-atlas.html` | `diagram-design` Skill 根据当前代码、`docs/current-state.md`、`docs/architecture/technical-architecture-baseline.md`、目标/模块/采集/数据/Agent/运行/界面架构与产品边界生成；用 Skill `self_check.py`、几何检查和浏览器渲染复核 | 提交 | 仅在同步复核来源、状态说明和图内边界后允许修改 | 稳定保留；架构状态、技术基线或获准范围变化时重新生成并复核 |
 | Linggan Browser Producer release | `plugins/linggan-browser-producer/releases/linggan-browser-producer-<version>.zip`、`plugins/linggan-browser-producer/releases/release-manifest.json` | `cd plugins/linggan-browser-producer && npm run build`；唯一源为该包的 `src/` 和 Linggan runtime token source `apps/api/src/local_web/lids_tokens.css`，build script 同时生成 ZIP/manifest | 提交 | 禁止手工修改 ZIP 或 release manifest；修改源后重新 build | 当前只保留当前发行版；替代/删除必须经单独发布卡和 hash 核对 |
+| Linggan Intelligence Browser migration release | `plugins/linggan-intelligence-browser/releases/linggan-intelligence-browser-v<version>.zip` | `cd plugins/linggan-intelligence-browser && npm run build && npm run package:release`；唯一源是该包的迁入 source；打包器固定 ZIP 时间与文件顺序 | 提交 | 禁止手工修改 ZIP；修改 source 后重新 build/package 并核验 | `PLUGIN-REHOME-001` Draft source baseline；当前只保留本次可复现发行包，不含真实材料、账号或运行日志 |
 
 ## 当前登记结论
 
@@ -30,3 +31,4 @@
 - 未来若引入 SQLx 离线元数据、API schema、前端构建包或机器生成 fixture，必须先补充：负责人、唯一来源、再生命令、一致性检查和是否必须入 Git。
 - 临时实验输出使用操作系统临时目录；若结果需要成为项目证据，应转写为 `docs/audits/` 的可读报告，敏感原件仍留在忽略目录或外部安全存储。
 - `PLUGIN-MIGRATION-001` 的 Browser Producer release 只包含 extension code、manifest 和由 Linggan runtime token source 打包的视觉 token；不得包含 Cookie、账号、真实页面材料、媒体字节、旧内容工作台运行依赖或运行日志。该发行物可被浏览器加载，不等于已经获得平台访问或实际采集授权。
+- `PLUGIN-REHOME-001` 的 Linggan Intelligence Browser release 是完整旧 UX/source 的 Linggan-owned 迁入基线。它同样不得包含 Cookie、账号、真实页面材料、媒体字节、旧工作台 host/endpoint/fallback 或运行日志；其 build/release 证明不等于真实平台采集、媒体本地化或 Evidence Library 数据互通。

@@ -1,0 +1,12 @@
+/* 灵感爆爆爆 Content Script 样式 */
+
+/* iframe 隐藏 */
+.lgboom-collect-iframe {
+  position: fixed !important;
+  top: -9999px !important;
+  left: -9999px !important;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}

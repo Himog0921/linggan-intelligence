@@ -1,0 +1,9 @@
+node_modules/
+dist/
+releases/*
+!releases/
+!releases/linggan-intelligence-browser-v*.zip
+.DS_Store
+design-exports/
+design-screenshots/
+screenshots/
