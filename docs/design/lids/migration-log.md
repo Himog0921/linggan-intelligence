@@ -87,3 +87,32 @@
 **测试同步**：`runtime_token_source_matches_the_full_lids_baseline` 的数量断言 107 → 117；`evidence_page_keeps_the_v7_shell_and_three_column_geometry` 中被锁定的 `--v7-brand-red:#e8003f` 与 `--v7-red:#ef4f25` 两条常量断言，改为断言页面消费 token 且第二签名色已退役。这是基线换向导致的合同更新，不是为通过测试而放宽断言。
 
 **未处理**：`.v7-*` → `.lgi-*` 类名迁移、键盘可达性与 ARIA 补全、状态色图例，均另立卡。
+
+## DESIGN-004 · Corpus Rail 面层差异化与选中态重音（2026-08-25）
+
+无 Issue，Mog 在 DESIGN-003 合并后于会话中直接指定。范围仅限 Evidence Library 左侧 216px rail 的呈现层。
+
+**Token**：无新增、无修改。全部值经既有 `--v7-*` 别名解析到 `--lgi-*`。
+
+**规则层**：无改写。本次是对既有规则的首次落地应用——`primitives.md` 线条原则 2「面代替线」与「粗野重音的位移」中「当前选中项」一项，此前均未在运行时页面兑现。
+
+**运行时**（`evidence_library.css`）：
+
+- rail 面由 `--v7-white` 改为 `--v7-gray` + 56px/14px 双层点阵，与上下文行同款，两者垂直连续。
+- 导航项常态底改为 `transparent`；hover 改为白实面浮起并把序号转 signal。
+- 导航序号 9px → 11px Mono `600`，常态色 `--v7-muted` → `--v7-ghost`。
+- 选中项追加：6px 棋盘像素纹理（自右边缘向左四档离散衰减、固定 84px 宽）、`--v7-brutal` 实色硬阴影、`translate(-2px,-2px)` 位移。
+- `prefers-reduced-motion:reduce` 下新增关闭选中项常驻位移。
+- 栏脚上边线 `--v7-line` → `--v7-line-strong`。
+
+**离散衰减而非渐变**：纹理密度用四档 hard stop 分级，不使用连续渐变，以同时满足像素/ASCII 语言与 `system.md` 的 L1 渐变禁令。宽度用绝对像素而非百分比，使 rail 在移动端展开为全宽区块时纹理不等比放大。
+
+**参考图取舍**：Mog 提供的胶囊按钮参考图只吸收像素纹理。厚胶囊圆角、模糊阴影、暖棕底色三项不采纳，理由是与 DESIGN-003 中 Mog 本人的确认直接冲突，依据分别为 `system.md` §4.5、`primitives.md` 位移条款与 DESIGN-003 画布换向。
+
+**重音计数**：不新增重音元素，仅强化已有一处；当前屏计 7 处，仍在 8 处上限内。
+
+**测试**：无断言变更，`cargo test -p linggan-api` 8 passed / 5 ignored（5 项需隔离 PostgreSQL 证明库）。页面 CSS 内 `#` 计数保持为 0。
+
+**未验证**：hover 与 `:focus-visible` 规则已写入但无法触发——五个导航项当前全部 `disabled`。待任一路由接通后补验。
+
+**未处理**（沿用 DESIGN-003 遗留）：`.v7-*` → `.lgi-*` 类名迁移、键盘可达性与 ARIA 补全、状态色图例。

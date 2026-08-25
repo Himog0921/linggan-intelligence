@@ -56,12 +56,12 @@
 
 ### LIDS 采用清单
 
-- Token 基线与唯一运行时真源: `LIDS-TOK-001`。`apps/api/src/local_web/lids_tokens.css` 仍是唯一的全局 `--lgi-*` token 值编辑源，完整承载当前 107 个 token；`docs/design/lids/tokens.md` 是其版本化规范与校验镜像。Issue #29 不修改它。`evidence_library.css` 不声明 `--lgi-*` token。
+- Token 基线与唯一运行时真源: `LIDS-TOK-001`。`apps/api/src/local_web/lids_tokens.css` 仍是唯一的全局 `--lgi-*` token 值编辑源，完整承载当前 117 个 token（DESIGN-003 由 107 增至 117）；`docs/design/lids/tokens.md` 是其版本化规范与校验镜像。Issue #29 不修改它。`evidence_library.css` 不声明 `--lgi-*` token。
 - Primitive / 正式 CMP 查重结果: 没有新增跨页面 CMP；沿用 LIDS 的语义分责，但本页由 V7 精确视觉/骨架例外控制具体排版和页面色值。
 - 页面唯一视觉核心: V7 的 128px 两层页头、白底硬线三栏工作面、FACT LAYER 与右侧 Inspector；中央区只用诚实空行替代 V7 的模拟材料。
 - 原声、来源、样本、窗口、Coverage/Validity/冲突/复核边界: 001A 没有材料、原声或样本；页面直接说明对应字段未知而非显示占位数字。
-- ASCII / 场景 / 动效: 不使用。`prefers-reduced-motion` 不触发额外动效，因为本页没有运动。
-- 页面级例外 `LOCAL-001-UI-EX-01 / Issue #29 修订`: 用户直接授权本页依 `REF-V7-001` 精确复刻视觉值和 HTML 骨架：桌面为78px + 50px = 128px 页头、216px rail、440px inspector（≤1500px 为420px、≤1180px 为380px）、全白背景、黑色硬线、全局 `#E8003F` 与 Evidence `#EF4F25`。桌面必须是 `100vh` 固定工作台，document 不向下延展，Results 和 Inspector 在各自栏内滚动；≤900px 改为自动首行高度，以容纳可能换行的顶层导航和 context row，随后才开始顺序折叠和页面原生滚动。这些值只以明确命名的 `--v7-*` 页面局部变量存在于 `evidence_library.css`；不改写、不复制为 LIDS 全局 token，也不授权其他页面继承。
+- ASCII / 场景 / 动效: 不使用等距场景与环境动效。ASCII/像素语言仅出现在一处——rail 选中项右边缘的离散像素纹理（DESIGN-004），承担 `system.md` 中约 5% 的终端语言权重，不构成场景。运动限于状态反馈：hover/选中的背景与色彩过渡（DESIGN-003）、以及品牌标识与 rail 选中项的粗野位移。`prefers-reduced-motion:reduce` 下关闭全部过渡，并把 rail 选中项的常驻位移置为 `none`。
+- 页面级例外 `LOCAL-001-UI-EX-01 / Issue #29 修订`: 用户直接授权本页依 `REF-V7-001` 精确复刻视觉值和 HTML 骨架：桌面为78px + 50px = 128px 页头、216px rail、440px inspector（≤1500px 为420px、≤1180px 为380px）、全白背景、黑色硬线、全局 `#E8003F` 与 Evidence `#EF4F25`。桌面必须是 `100vh` 固定工作台，document 不向下延展，Results 和 Inspector 在各自栏内滚动；≤900px 改为自动首行高度，以容纳可能换行的顶层导航和 context row，随后才开始顺序折叠和页面原生滚动。这些值只以明确命名的 `--v7-*` 页面局部变量存在于 `evidence_library.css`；不改写、不复制为 LIDS 全局 token，也不授权其他页面继承。本条中的「全白背景」与两个色值已被后续用户确认部分替代，原文保留以便追溯：DESIGN-003 使第二签名色 `#E8003F` 退役、签名色收敛为 `--lgi-signal`，并把上下文行改为 `--lgi-canvas-low` + 双层点阵；DESIGN-004 按同一依据把左侧 rail 一并改为该测量场底。两次替代都不改变 128px 页头、216px rail、440px inspector 的几何与断点。
 - 明确禁止: 继承 V7 的模拟运行状态、计数、示例帖子/评论/转录、时间、引用或成功回执；任何 V7 位置上的未接通控件不得产生写入、采集、保存、研究或连接副作用。
 
 ## 5. 交互与真实后果
