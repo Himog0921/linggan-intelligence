@@ -238,6 +238,65 @@ async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discov
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn loopback_projection_counts_unknown_published_time_by_content_item_identity() {
+    let database = proof_database("local_api_identity_unknown").await;
+    let observed_at = producer_fixture_observed_at(&database).await;
+    let application = app_with_database(database);
+
+    let response =
+        post_discovery_package(application.clone(), discovery_package(&observed_at)).await;
+    assert_eq!(response.status(), StatusCode::OK);
+    let response = post_discovery_package(
+        application.clone(),
+        shared_api_content_unknown_package(&observed_at),
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/local/evidence-library?q=ADHD&window=last_30_days")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("note-api-known"));
+    assert!(body.contains("\"excludedUnknownPublishedAt\":0"));
+
+    let response = application
+        .oneshot(
+            Request::builder()
+                .uri("/corpus/evidence?q=ADHD&window=last_30_days")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("API 接纳卡片"));
+    assert!(!html.contains("当前查询候选中 1 个对象因发布时间未知而未进入窗口"));
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn loopback_7_day_query_keeps_api_and_page_window_metadata_in_sync() {
     let database = proof_database("local_api_window_metadata").await;
     let observed_at = producer_fixture_observed_at(&database).await;
@@ -368,6 +427,20 @@ fn discovery_package(observed_at: &str) -> String {
           "cards":[
             {{"content":{{"platformContentId":"note-api-known","title":"API 接纳卡片 ADHD","creatorDisplayName":"A娃家长","publishedAtSourceText":"{observed_at}","coverCandidate":{{"observedExternalUri":"https://xhscdn.example/api-cover"}}}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":1}}}},
             {{"content":{{"platformContentId":"note-api-unknown","title":"未知发布时间","creatorDisplayName":"另一位家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":2}}}}
+          ]
+        }}"#,
+    )
+}
+
+fn shared_api_content_unknown_package(observed_at: &str) -> String {
+    format!(
+        r#"{{
+          "contractVersion":"xhs.discovery.visible-card.v1",
+          "acquisitionSpec":{{"platform":"xhs","query":"ADHD","sort":"comprehensive","target":{{"basis":"maximum_quota","unit":"visible_search_card","maximumQuota":20}}}},
+          "observedAt":"{observed_at}",
+          "coverage":{{"unit":"visible_search_card","visibleCards":1,"stoppedReason":"risk_control"}},
+          "cards":[
+            {{"content":{{"platformContentId":"note-api-known","title":"API 接纳卡片 ADHD","creatorDisplayName":"A娃家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":1}}}}
           ]
         }}"#,
     )

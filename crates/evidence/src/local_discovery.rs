@@ -182,7 +182,8 @@ pub async fn read_discovery_library(
     .fetch_all(database.pool())
     .await?;
 
-    let excluded_unknown_published_at = count_unknown_published_at(database, text).await?;
+    let excluded_unknown_published_at =
+        count_unknown_published_at(database, text, window_days).await?;
     let cards = rows
         .into_iter()
         .map(|row| DiscoveryLibraryCard {
@@ -386,15 +387,26 @@ async fn insert_delivery(
 async fn count_unknown_published_at(
     database: &Database,
     text: Option<&str>,
+    window_days: i32,
 ) -> Result<u64, sqlx::Error> {
     sqlx::query(
-        "SELECT count(DISTINCT occurrence.content_item_id) AS count \
-         FROM local_discovery_occurrence occurrence \
-         WHERE occurrence.published_at IS NULL \
-           AND ($1::text IS NULL OR lower(coalesce(occurrence.creator_display_name, '')) LIKE '%' || lower($1) || '%' \
-                OR lower(coalesce(occurrence.title, '')) LIKE '%' || lower($1) || '%')",
+        "SELECT count(DISTINCT unknown_occurrence.content_item_id) AS count \
+         FROM local_discovery_occurrence unknown_occurrence \
+         WHERE unknown_occurrence.published_at IS NULL \
+           AND ($1::text IS NULL OR lower(coalesce(unknown_occurrence.creator_display_name, '')) LIKE '%' || lower($1) || '%' \
+                OR lower(coalesce(unknown_occurrence.title, '')) LIKE '%' || lower($1) || '%') \
+           AND NOT EXISTS ( \
+                SELECT 1 FROM local_discovery_occurrence eligible_occurrence \
+                WHERE eligible_occurrence.content_item_id = unknown_occurrence.content_item_id \
+                  AND eligible_occurrence.published_at IS NOT NULL \
+                  AND eligible_occurrence.published_at >= scope_001_now() - make_interval(days => $2) \
+                  AND eligible_occurrence.published_at <= scope_001_now() \
+                  AND ($1::text IS NULL OR lower(coalesce(eligible_occurrence.creator_display_name, '')) LIKE '%' || lower($1) || '%' \
+                       OR lower(coalesce(eligible_occurrence.title, '')) LIKE '%' || lower($1) || '%') \
+           )",
     )
     .bind(text)
+    .bind(window_days)
     .fetch_one(database.pool())
     .await
     .map(|row| row.get::<i64, _>("count") as u64)

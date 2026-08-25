@@ -151,6 +151,31 @@ async fn read_projection_counts_matching_unknown_published_time_within_the_query
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn read_projection_counts_unknown_time_by_content_identity_not_by_occurrence() {
+    let database = proof_database("local_discovery_identity_unknown").await;
+    let observed_at = producer_fixture_observed_at(&database).await;
+    ingest_discovery_package(&database, &package(&observed_at, Some(&observed_at)))
+        .await
+        .expect("a known in-window occurrence is admitted");
+    ingest_discovery_package(&database, &shared_content_unknown_package(&observed_at))
+        .await
+        .expect("a second unknown-time occurrence for the same content identity is admitted");
+
+    let query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"ADHD","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+    )
+    .expect("fixed local retrieval query is valid");
+    let projection = read_discovery_library(&database, &query)
+        .await
+        .expect("accepted discovery data is locally readable");
+
+    assert_eq!(projection.cards.len(), 1);
+    assert_eq!(projection.cards[0].platform_content_id, "note-a");
+    assert_eq!(projection.excluded_unknown_published_at, 0);
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn read_projection_excludes_accepted_future_published_time_from_recent_windows() {
     let database = proof_database("local_discovery_future_published").await;
     let observed_at = producer_fixture_observed_at(&database).await;
@@ -281,6 +306,20 @@ fn package(observed_at: &str, known_published_at: Option<&str>) -> String {
           "cards":[
             {{"content":{{"platformContentId":"note-a","title":"标题命中 ADHD","creatorDisplayName":"A娃家长",{first_published}"coverCandidate":{{"observedExternalUri":"https://xhscdn.example/cover-a"}}}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":1}}}},
             {{"content":{{"platformContentId":"note-b","title":"无发布时间卡片","creatorDisplayName":"另一位家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":2}}}}
+          ]
+        }}"#,
+    )
+}
+
+fn shared_content_unknown_package(observed_at: &str) -> String {
+    format!(
+        r#"{{
+          "contractVersion":"xhs.discovery.visible-card.v1",
+          "acquisitionSpec":{{"platform":"xhs","query":"ADHD","sort":"comprehensive","target":{{"basis":"maximum_quota","unit":"visible_search_card","maximumQuota":20}}}},
+          "observedAt":"{observed_at}",
+          "coverage":{{"unit":"visible_search_card","visibleCards":1,"stoppedReason":"risk_control"}},
+          "cards":[
+            {{"content":{{"platformContentId":"note-a","title":"标题命中 ADHD","creatorDisplayName":"A娃家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":1}}}}
           ]
         }}"#,
     )
