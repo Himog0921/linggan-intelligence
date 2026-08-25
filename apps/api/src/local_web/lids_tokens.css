@@ -51,6 +51,21 @@
   --lgi-mesh-fine: rgba(17, 19, 21, 0.055);
   --lgi-mesh-major: rgba(17, 19, 21, 0.10);
 
+  /* Observation stream: the one deliberately dark surface in the product. Mog approved
+   * keeping the V4 Gold Master's low-luminance instrument terminal on 2026-08-26; it is a
+   * recorded long-term exception to the LIDS rule against dark terminal surfaces, and it is
+   * confined to Operations/NOW. Never reuse these outside that stream. */
+  --lgi-stream-bg: #07110e;
+  --lgi-stream-bg-raised: #091712;
+  --lgi-stream-ink: #d9f7e8;
+  --lgi-stream-muted: #78aa97;
+  --lgi-stream-dim: #42685a;
+  --lgi-stream-mint: #63d9a5;
+  --lgi-stream-cyan: #74b8ad;
+  --lgi-stream-amber: #d59a38;
+  --lgi-stream-red: #e06a55;
+  --lgi-stream-line: rgba(99, 217, 165, 0.2);
+
   /* Typography */
   --lgi-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   --lgi-font-mono: "SFMono-Regular", "JetBrains Mono", "Roboto Mono", "Noto Sans Mono CJK SC", ui-monospace, monospace;

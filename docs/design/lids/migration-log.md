@@ -129,3 +129,23 @@ Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵�
 **实测结论**：`primitives.md` 线条原则 2「面代替线」不能无条件套用。当页面已存在一条以纹理承担语义的横向带时，纵向面复用同款纹理会消掉那一层的唯一性，减少的线条不抵消失的层次。此处记为本页一次实测观察，**不构成新规则**；是否需要在 `primitives.md` 中补充「纹理的唯一性」约束，留待出现第二个候选面时再判断。
 
 **验证**：`cargo test -p linggan-api` 8 passed / 5 ignored；1440×900 真实 Chrome 复核。1280×800 与 390×844 未复拍（本次仅色值变更，不涉及几何）。
+
+## DESIGN-005 · Collection Workspace 落地（2026-08-26）
+
+无 Issue，Mog 直接指定落地 `REF-V4-001`（Collection Workspace V4 Gold Master），并在实施前裁定三项：真实产品页而非演示页、保留深绿终端配色、按方案 B 清掉纯冗余。
+
+**Token**：117 → 127。新增 `--lgi-stream-*` 十项（bg / bg-raised / ink / muted / dim / mint / cyan / amber / red / line），承载全产品唯一的深色面。同一提交同步 `tokens.md` 镜像与数量断言。
+
+**规则层**：无改写。新增一条页面级长期例外 `DESIGN-005-UI-EX-01`：深色实时观察流与 `system.md` §4.10「不使用黑底荧光绿终端」冲突，Mog 明确保留；仅限运行态 / NOW 右栏，禁止扩散。V4 原型在该面大量使用 7–9px 功能文字，本次一律提到 DESIGN-003 已确认的 11px 下限，仅时间戳与刻度保留 9px。
+
+**共享层抽取**：全局页头此前写死在 Evidence Library 的页面模板里。做第二个页面之前先抽出 `shell.rs`（页头生成）与 `shell.css`（reset、页头、上下文行、216px 导轨），两页共用。抽取前后 `/corpus/evidence` 的 HTML 输出**逐字节一致**，导轨的英文标注由硬编码的 `CORPUS` 改为 `attr(data-readout)` 参数化。
+
+**运行时**：新增 `collection.rs`（五个子面渲染）、`collection_workspace.css`（页面层，整文件无字面色值）、`collection_workspace.js`（仅抽屉 tab / 宽度 / Escape）。导航状态全部由服务端路由渲染，首屏即正确视图——不复制原型「先画错页再客户端切换」的行为。
+
+**深色面的两次修正**：首版把结构线 token（20%）误用作扫描线与环境亮，整片泛绿；按 Gold Master 的 2.5% / 7% 强度改用 `color-mix` 从 mint 派生后复拍通过。深色面上的小标题从 dim 提到 muted 才可读。
+
+**自我复查记录**：首版实现在观察生产流里给六个阶段各写四格 `UNKNOWN`，一屏 24 个——正是本次审核批评 Gold Master 的那类冗余。已改为每阶段一格加一句区域级说明。
+
+**测试**：新增 6 项 Collection 专属断言，其中两项是防伪造：真实路由不得出现 Gold Master 的任何示例数字（146 / 07-08 / 具体博主名 / 具体指标），以及不得出现 `>0<`。全量 14 passed / 5 ignored。
+
+**未处理**：`.v7-*` → `.lgi-*` 类名迁移；键盘可达性完整覆盖；目标行与两张图表的几何（无数据可渲染）；1440 / 1280 / 移动视口复拍。

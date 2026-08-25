@@ -1,4 +1,6 @@
+mod collection;
 mod evidence_page;
+mod shell;
 
 use axum::{
     Json, Router,
@@ -30,6 +32,9 @@ use std::{
 const LOCAL_HOST: Ipv4Addr = Ipv4Addr::LOCALHOST;
 const LOCAL_PORT: u16 = 3000;
 const LIDS_TOKENS: &str = include_str!("local_web/lids_tokens.css");
+const SHELL_CSS: &str = include_str!("local_web/shell.css");
+const COLLECTION_WORKSPACE_CSS: &str = include_str!("local_web/collection_workspace.css");
+const COLLECTION_WORKSPACE_JS: &str = include_str!("local_web/collection_workspace.js");
 const EVIDENCE_LIBRARY_CSS: &str = include_str!("local_web/evidence_library.css");
 #[cfg(test)]
 const LIDS_TOKEN_DOCUMENT: &str = include_str!("../../../docs/design/lids/tokens.md");
@@ -152,7 +157,18 @@ fn router(state: LocalWebState) -> Router {
         )
         .route("/api/local/evidence-library", get(evidence_library_json))
         .route("/corpus/evidence", get(evidence_library))
+        .route("/collection", get(collection_entry))
+        .route("/collection/targets", get(collection_targets))
+        .route("/collection/operations", get(collection_operations))
+        .route("/collection/attention", get(collection_attention))
+        .route("/collection/tasks", get(collection_tasks))
+        .route("/collection/runtime", get(collection_runtime))
         .route("/assets/evidence-library.css", get(stylesheet))
+        .route(
+            "/assets/collection-workspace.css",
+            get(collection_stylesheet),
+        )
+        .route("/assets/collection-workspace.js", get(collection_script))
         .with_state(state)
 }
 
@@ -209,11 +225,11 @@ async fn evidence_library(
     Query(params): Query<EvidenceLibraryParams>,
 ) -> Html<String> {
     match state.database.database() {
-        None => Html(evidence_library_html().to_owned()),
+        None => Html(evidence_library_html()),
         Some(database) => match local_query(&params) {
             Ok(query) => match read_discovery_library(database, &query).await {
                 Ok(projection) => Html(evidence_page::render_read_projection(
-                    evidence_library_html(),
+                    &evidence_library_html(),
                     &projection,
                     params.q.as_deref(),
                 )),
@@ -479,13 +495,87 @@ async fn stylesheet() -> Response {
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/css; charset=utf-8"),
         )],
-        format!("{LIDS_TOKENS}\n{EVIDENCE_LIBRARY_CSS}"),
+        format!("{LIDS_TOKENS}\n{SHELL_CSS}\n{EVIDENCE_LIBRARY_CSS}"),
     )
         .into_response()
 }
 
-fn evidence_library_html() -> &'static str {
-    r#"<!doctype html>
+/// Collection sub-surface handlers. The section is part of the path and the Operations mode
+/// is a query parameter, so every view is a real, shareable, refresh-safe address.
+#[derive(Deserialize)]
+struct CollectionParams {
+    mode: Option<String>,
+    drawer: Option<String>,
+}
+
+async fn collection_entry() -> Redirect {
+    Redirect::temporary("/collection/targets")
+}
+
+async fn collection_targets(Query(params): Query<CollectionParams>) -> Html<String> {
+    Html(collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        params.drawer.as_deref(),
+    ))
+}
+
+async fn collection_operations(Query(params): Query<CollectionParams>) -> Html<String> {
+    Html(collection::render(
+        collection::Section::Operations,
+        collection::OperationsMode::parse(params.mode.as_deref()),
+        None,
+    ))
+}
+
+async fn collection_attention() -> Html<String> {
+    Html(collection::render(
+        collection::Section::Attention,
+        collection::OperationsMode::Now,
+        None,
+    ))
+}
+
+async fn collection_tasks() -> Html<String> {
+    Html(collection::render(
+        collection::Section::Tasks,
+        collection::OperationsMode::Now,
+        None,
+    ))
+}
+
+async fn collection_runtime() -> Html<String> {
+    Html(collection::render(
+        collection::Section::Runtime,
+        collection::OperationsMode::Now,
+        None,
+    ))
+}
+
+async fn collection_stylesheet() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/css; charset=utf-8"),
+        )],
+        format!("{LIDS_TOKENS}\n{SHELL_CSS}\n{COLLECTION_WORKSPACE_CSS}"),
+    )
+        .into_response()
+}
+
+async fn collection_script() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/javascript; charset=utf-8"),
+        )],
+        COLLECTION_WORKSPACE_JS,
+    )
+        .into_response()
+}
+
+fn evidence_library_html() -> String {
+    let base = r#"<!doctype html>
 <html lang="zh-CN" data-theme="linggan-intelligence">
   <head>
     <meta charset="utf-8">
@@ -496,37 +586,11 @@ fn evidence_library_html() -> &'static str {
   </head>
   <body>
     <div class="v7-app">
-      <header class="v7-global-header">
-        <div class="v7-global-row">
-          <div class="v7-global-brand" aria-label="Linggan Intelligence">
-            <div class="v7-li-mark">LI</div>
-            <div class="v7-global-brand-copy"><div class="v7-global-brand-name">Linggan Intelligence</div><div class="v7-global-brand-sub">EDITORIAL INTELLIGENCE TERMINAL</div></div>
-          </div>
-          <nav class="v7-primary-nav" aria-label="一级导航">
-            <button disabled aria-disabled="true"><b class="v7-nav-zh">雷达</b><span class="v7-nav-readout">RADAR · —</span></button>
-            <button disabled aria-disabled="true"><b class="v7-nav-zh">主题图谱</b><span class="v7-nav-readout">TOPIC MAP · —</span></button>
-            <button disabled aria-disabled="true" aria-current="page"><b class="v7-nav-zh">语料</b><span class="v7-nav-readout">CORPUS · UNKNOWN</span></button>
-            <button disabled aria-disabled="true"><b class="v7-nav-zh">洞察</b><span class="v7-nav-readout">INSIGHTS · —</span></button>
-            <button disabled aria-disabled="true"><b class="v7-nav-zh">采集</b><span class="v7-nav-readout">COLLECTION · —</span></button>
-          </nav>
-          <div class="v7-global-flex" aria-hidden="true"></div>
-          <div class="v7-global-system">
-            <div class="v7-system-boundary">LOCAL HOST / NO READ MODEL</div>
-            <button class="v7-global-command" disabled aria-disabled="true"><span>&gt; 输入命令</span><kbd>/</kbd></button>
-          </div>
-        </div>
-        <div class="v7-context-row">
-          <div aria-hidden="true"></div>
-          <div class="v7-context-main">
-            <div class="v7-context-crumb">语料 <span class="v7-slash">/</span> <b>证据库</b> <span class="v7-slash">/</span> <span class="v7-context-current">材料状态</span></div>
-            <div class="v7-context-meta"><span class="v7-kpi"><em>内容</em><b>UNKNOWN</b></span><span class="v7-kpi"><em>评论</em><b>UNKNOWN</b></span><span class="v7-kpi"><em>创作者</em><b>UNKNOWN</b></span><i class="v7-vr" aria-hidden="true"></i><span class="v7-query-meta">READ MODEL NOT CONNECTED</span><span>SOURCE INCOMPLETE</span><span>UTC+08</span></div>
-          </div>
-        </div>
-      </header>
+      <!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->
 
       <div class="v7-shell">
         <aside class="v7-side" aria-label="语料导航">
-          <div class="v7-nav-label">语料与证据</div>
+          <div class="v7-nav-label" data-readout="CORPUS">语料与证据</div>
           <button class="v7-side-nav" disabled aria-disabled="true" aria-current="page"><i>01</i><span>证据库</span></button>
           <button class="v7-side-nav" disabled aria-disabled="true"><i>02</i><span>评论</span></button>
           <button class="v7-side-nav" disabled aria-disabled="true"><i>03</i><span>创作者</span></button>
@@ -565,7 +629,17 @@ fn evidence_library_html() -> &'static str {
       </div>
     </div>
   </body>
-</html>"#
+</html>"#;
+    let header = shell::global_header(
+        shell::PrimarySurface::Corpus,
+        "LOCAL HOST / NO READ MODEL",
+        "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">材料状态</span>",
+        "<span class=\"v7-kpi\"><em>内容</em><b>UNKNOWN</b></span><span class=\"v7-kpi\"><em>评论</em><b>UNKNOWN</b></span><span class=\"v7-kpi\"><em>创作者</em><b>UNKNOWN</b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span class=\"v7-query-meta\">READ MODEL NOT CONNECTED</span><span>SOURCE INCOMPLETE</span><span>UTC+08</span>",
+    );
+    base.replace(
+        "<!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->",
+        &header,
+    )
 }
 
 #[cfg(test)]

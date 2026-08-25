@@ -30,6 +30,20 @@ DESIGN-002 原先的“未来感 + ASCII + 新粗野主义 + 情报系统感”�
 | 页面级例外 | `LOCAL-001-UI-EX-01`：V7 是本页视觉 Gold Master；V7 的视觉值必须映射到 LIDS 或登记为页面局部、可撤销例外，禁止成为并行全局 token 真源。 |
 | 不构成什么 | 它不能单独授权 Web 技术选型、真实数据接入、原文展示、插件改动、真实平台访问、数据库/migration、AI/媒体/OCR/ASR、部署或用户验收。 |
 
+## `REF-V4-001` · Linggan Collection Workspace V4 Gold Master
+
+| 字段 | 内容 |
+|---|---|
+| 参考 ID 与名称 | `REF-V4-001` · Linggan Collection Workspace V4 Gold Master |
+| 来源与核对时间 | Mog 提供的受控本地目录 `/Users/moglenny/Downloads/Linggan_Collection_Workspace_V4_Agent_Handoff`；2026-08-26 核对，随包脚本校验通过。Gold Master HTML SHA-256：`cf6aa44df4d7de176aa0281f9848e261d700bfe9ef8c8832b895524a80c8167e`。 |
+| 参考性质 | 用户指定的 Collection 页面族产品/视觉 Gold Master：879 行单文件原型，附页面契约、数据合同、生产架构建议、代码地图、视觉验收与冻结视觉值。 |
+| 可借鉴范围 | 仅用于 `/collection/*`：五个子面的名称与顺序、页面骨架几何、宽幅目标抽屉行为、Operations 三模式、深色实时观察流的视觉气质，以及「部分完成不等于无效」「关键词世界是观察样本」「任务预算不是覆盖率」这类状态表达纪律。 |
+| 明确不继承 | 全部 mock 数据与计数（146 目标 / 18 任务 / 7 工位 / 具体博主名与指标）、`setInterval` 伪造事件、静态时间与图表点位、`toast()` 桩动作、单文件组织、React/`.tsx` 技术路线、自称的「Token 真源应同步升级」（与 DESIGN-003 冲突，见下）、以及任何与 `AGENTS.md`、领域不变量、现有合同或 LIDS 冲突的要求。 |
+| 关联事项 | `DESIGN-005`；Mog 于 2026-08-26 的直接指定。它不是 `p0-surface-prototype` 票的完整答案，也不能被其它页面自动引用。 |
+| 时效与风险 | 本地 handoff 可变且非 Git 原件；SHA 仅证明本次核对版本。它描绘的是系统满负荷运转后的形态，与当前唯一获准的一次性首个 canary 之间隔着整条采集授权链，必须防止被误读为已具备的能力。 |
+| 已记录的冲突 | ① 品牌红 `#e8003f`：V4 要求保留并升级 token 真源，而同日稍晚合并的 DESIGN-003 已使其退役、签名色收敛为 `--lgi-signal`。② 四轴语义色与 LIDS 现值均不同。③ 深色终端面与 LIDS「不使用黑底荧光绿终端」冲突。④ 上下文行 32px 划线网格已被 DESIGN-003 的双层点阵取代。以上四项的当前处置见 `DESIGN-005`。 |
+| 不构成什么 | 它不能单独授权真实数据接入、观察目标的创建、任何平台访问、调度器接通、插件改动、数据库/migration、实时传输通道、部署或用户验收。 |
+
 ## 新增参考的登记格式
 
 每一个条目必须至少包含下列信息：

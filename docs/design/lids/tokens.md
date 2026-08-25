@@ -7,7 +7,7 @@
 > 事实来源: Mog 指定的 LIDS v2.0 `tokens.md`（SHA-256: `97fac0fb590c7f349f5fe7bfc2e2e423c6c8145b03cec9ffdd80d4494f757e77`）、[system.md](system.md)、LOCAL-001A 运行时 Token 源与对应 Rust 校验
 > 冲突时以谁为准: 已获准运行时的唯一 Token 文件 `apps/api/src/local_web/lids_tokens.css` 优先；本 Markdown 是该源的版本化规范与校验镜像，不是第二个可独立编辑的运行时主题。产品/数据/权限冲突不由 Token 解决
 
-本文件冻结 LIDS v3.0 的 117 项数值基线。LOCAL-001A 已把同名完整基线迁入 `apps/api/src/local_web/lids_tokens.css`；该 CSS 是当前唯一的**值编辑源**。本 Markdown 中的 CSS 清单是从该源派生的版本化规范与校验镜像，不能作为第二套运行时主题或独立改值入口。Rust 测试逐项核对 117 个 token 的名称和完整值，防止两份文本无声漂移。
+本文件冻结 LIDS v3.0 的 127 项数值基线。LOCAL-001A 已把同名完整基线迁入 `apps/api/src/local_web/lids_tokens.css`；该 CSS 是当前唯一的**值编辑源**。本 Markdown 中的 CSS 清单是从该源派生的版本化规范与校验镜像，不能作为第二套运行时主题或独立改值入口。Rust 测试逐项核对 127 个 token 的名称和完整值，防止两份文本无声漂移。
 
 ## LOCAL-001A 运行时权威与后续 Agent 规则
 
@@ -21,7 +21,7 @@ docs/design/lids/tokens.md
 ```
 
 - 后续 Agent 要改变某个 LIDS token 值时，只能先修改 `apps/api/src/local_web/lids_tokens.css`；不得先在页面 CSS、组件 CSS 或本 Markdown 中创造不同值。
-- 同一提交必须把本文件的基线清单同步为运行时源的精确镜像，并通过 Rust 的 117 项名称→值比对。校验失败即表示变更未完成，不能用“名称一致”掩盖值漂移。
+- 同一提交必须把本文件的基线清单同步为运行时源的精确镜像，并通过 Rust 的 127 项名称→值比对。校验失败即表示变更未完成，不能用“名称一致”掩盖值漂移。
 - 任何 token 值的改变仍是跨页面设计变更：必须按 UI Change Manifest、迁移记录、影响页面和回退规则完成治理；LOCAL-001A 不因拥有运行时源而获得任意改值授权。
 - 页面 CSS 只消费 `var(--lgi-*)`，不得声明 `--lgi-*`；页面局部例外必须按 PAGE/Manifest/LIDS migration log 另行登记，不能反向写入 Token 真源。
 - 如未来需要自动生成 Markdown 镜像，必须另开受控任务；在此之前，本文件的镜像同步与 Rust 精确校验共同构成当前最小、可验证的单向关系。
@@ -83,6 +83,21 @@ docs/design/lids/tokens.md
    * a ruled grid at the same weight, so the surface stays quiet while gaining depth. */
   --lgi-mesh-fine: rgba(17, 19, 21, 0.055);
   --lgi-mesh-major: rgba(17, 19, 21, 0.10);
+
+  /* Observation stream: the one deliberately dark surface in the product. Mog approved
+   * keeping the V4 Gold Master's low-luminance instrument terminal on 2026-08-26; it is a
+   * recorded long-term exception to the LIDS rule against dark terminal surfaces, and it is
+   * confined to Operations/NOW. Never reuse these outside that stream. */
+  --lgi-stream-bg: #07110e;
+  --lgi-stream-bg-raised: #091712;
+  --lgi-stream-ink: #d9f7e8;
+  --lgi-stream-muted: #78aa97;
+  --lgi-stream-dim: #42685a;
+  --lgi-stream-mint: #63d9a5;
+  --lgi-stream-cyan: #74b8ad;
+  --lgi-stream-amber: #d59a38;
+  --lgi-stream-red: #e06a55;
+  --lgi-stream-line: rgba(99, 217, 165, 0.2);
 
   /* Typography */
   --lgi-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;

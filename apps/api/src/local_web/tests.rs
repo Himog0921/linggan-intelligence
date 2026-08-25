@@ -92,11 +92,11 @@ fn evidence_page_keeps_the_v7_shell_and_three_column_geometry() {
     }
 
     assert!(
-        !EVIDENCE_LIBRARY_CSS.contains("#e8003f"),
+        !evidence_page_stylesheet().contains("#e8003f"),
         "the second signature colour must stay retired: DESIGN-003 collapsed the palette onto --lgi-signal"
     );
     assert!(
-        !EVIDENCE_LIBRARY_CSS.contains('#'),
+        !evidence_page_stylesheet().contains('#'),
         "page CSS must not author raw colour: every value resolves through a LIDS token"
     );
 
@@ -111,7 +111,7 @@ fn evidence_page_keeps_the_v7_shell_and_three_column_geometry() {
         "@media(max-width:900px){html,body{height:auto;min-height:100%;overflow:auto}.v7-app{height:auto;min-height:100vh;grid-template-rows:auto minmax(0,1fr);overflow:visible}",
     ] {
         assert!(
-            EVIDENCE_LIBRARY_CSS.contains(required_css),
+            evidence_page_stylesheet().contains(required_css),
             "missing V7 page-local visual constant: {required_css}"
         );
     }
@@ -148,9 +148,10 @@ fn runtime_token_source_matches_the_full_lids_baseline() {
     let runtime = declared_token_values(LIDS_TOKENS);
     let documented = declared_token_values(LIDS_TOKEN_DOCUMENT);
 
-    assert_eq!(runtime.len(), 117);
-    assert_eq!(documented.len(), 117);
+    assert_eq!(runtime.len(), 127);
+    assert_eq!(documented.len(), 127);
     assert_eq!(runtime, documented);
+    assert!(declared_token_values(SHELL_CSS).is_empty());
     assert!(declared_token_values(EVIDENCE_LIBRARY_CSS).is_empty());
 }
 
@@ -175,7 +176,7 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
         window: "last_30_days",
     };
     let html =
-        evidence_page::render_read_projection(evidence_library_html(), &projection, Some("A娃"));
+        evidence_page::render_read_projection(&evidence_library_html(), &projection, Some("A娃"));
 
     assert!(html.contains("&lt;script&gt;not a cover&lt;/script&gt;"));
     assert!(html.contains("MEDIA<br>NOT ACQUIRED"));
@@ -572,6 +573,177 @@ fn local_submission(observed_at: &str) -> String {
         r#"{{"contractVersion":"linggan.local-trusted.submission.v1","producerInstanceId":"22222222-2222-4222-8222-222222222222","taskId":"11111111-1111-4111-8111-111111111111","attemptId":"33333333-3333-4333-8333-333333333333","submissionId":"44444444-4444-4444-8444-444444444444","discoveryPackage":{}}}"#,
         discovery_package(observed_at)
     )
+}
+
+#[test]
+fn collection_serves_all_five_sub_surfaces_from_the_shared_shell() {
+    for (section, marker) in [
+        (
+            collection::Section::Targets,
+            "COLLECTION / OBSERVATION TARGETS",
+        ),
+        (
+            collection::Section::Operations,
+            "COLLECTION / OBSERVATION OPERATIONS",
+        ),
+        (
+            collection::Section::Attention,
+            "COLLECTION / ATTENTION QUEUE",
+        ),
+        (collection::Section::Tasks, "COLLECTION / EXECUTION TASKS"),
+        (collection::Section::Runtime, "COLLECTION / RUNTIME"),
+    ] {
+        let html = collection::render(section, collection::OperationsMode::Now, None);
+        assert!(html.contains(marker), "missing surface eyebrow: {marker}");
+        // One header implementation for the whole product, rendered from shell.rs.
+        assert!(html.contains("v7-global-header"));
+        assert!(html.contains("v7-context-row"));
+        assert!(html.contains("data-readout=\"COLLECTION\""));
+    }
+}
+
+#[test]
+fn collection_never_publishes_prototype_material_or_a_fake_zero() {
+    let surfaces = [
+        collection::Section::Targets,
+        collection::Section::Operations,
+        collection::Section::Attention,
+        collection::Section::Tasks,
+        collection::Section::Runtime,
+    ];
+    // Figures lifted straight from the V4 Gold Master's mock data. None of them may reach a
+    // real route: the page has no observation targets, tasks, workers or events at all.
+    let fabricated = [
+        "146",
+        "07/08",
+        "@小北妈妈",
+        "ADHD 作业拖延",
+        "T-CR-019",
+        "W06",
+        "6.2K",
+        "8.3K",
+    ];
+    for section in surfaces {
+        for mode in [
+            collection::OperationsMode::Now,
+            collection::OperationsMode::Trace,
+            collection::OperationsMode::Review,
+        ] {
+            let html = collection::render(section, mode, None);
+            for figure in fabricated {
+                assert!(
+                    !html.contains(figure),
+                    "prototype material leaked into a real route: {figure}"
+                );
+            }
+            // Unknown must never be flattened into a confirmed zero.
+            assert!(!html.contains(">0<"));
+        }
+    }
+}
+
+#[test]
+fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
+    let targets = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        None,
+    );
+    assert!(targets.contains("采集授权链尚未存在"));
+    assert!(targets.contains("需要采集授权"));
+    // The create action must be visibly unavailable, not a button that silently does nothing.
+    assert!(targets.contains("＋ 新建观察目标"));
+    assert!(targets.contains("disabled aria-disabled=\"true\">＋ 新建观察目标"));
+
+    let attention = collection::render(
+        collection::Section::Attention,
+        collection::OperationsMode::Now,
+        None,
+    );
+    assert!(attention.contains("0 只用于已确认为零的数值"));
+
+    let runtime = collection::render(
+        collection::Section::Runtime,
+        collection::OperationsMode::Now,
+        None,
+    );
+    assert!(runtime.contains("调度器未接通"));
+}
+
+#[test]
+fn operations_modes_are_addressable_and_the_stream_stays_honest() {
+    let now = collection::render(
+        collection::Section::Operations,
+        collection::OperationsMode::Now,
+        None,
+    );
+    assert!(now.contains("LIVE OBSERVATION"));
+    assert!(now.contains("NOT CONNECTED"));
+    // The prototype invented an event every seven seconds. Production must not.
+    assert!(now.contains("不会用计时器伪造事件"));
+    assert!(now.contains("暂停只停止画面跟随，永远不会暂停真实的采集调度"));
+
+    let trace = collection::render(
+        collection::Section::Operations,
+        collection::OperationsMode::Trace,
+        None,
+    );
+    assert!(trace.contains("没有可回放的观察历史"));
+    let review = collection::render(
+        collection::Section::Operations,
+        collection::OperationsMode::Review,
+        None,
+    );
+    assert!(review.contains("观察盲区"));
+
+    assert!(now.contains("href=\"/collection/operations?mode=trace\""));
+}
+
+#[test]
+fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
+    let closed = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        None,
+    );
+    assert!(!closed.contains("c-drawer"));
+
+    let open = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        Some("T-CR-019"),
+    );
+    assert!(open.contains("id=\"c-drawer\""));
+    assert!(open.contains("#T-CR-019"));
+    assert!(open.contains("未找到该观察目标"));
+
+    let injected = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        Some("<script>alert(1)</script>"),
+    );
+    assert!(!injected.contains("<script>alert(1)</script>"));
+    assert!(injected.contains("&lt;script&gt;"));
+}
+
+#[test]
+fn collection_stylesheet_authors_no_colour_of_its_own() {
+    let sheet = format!("{SHELL_CSS}\n{COLLECTION_WORKSPACE_CSS}");
+    assert!(
+        !sheet.contains('#'),
+        "page CSS must not author raw colour: every value resolves through a LIDS token"
+    );
+    assert!(declared_token_values(COLLECTION_WORKSPACE_CSS).is_empty());
+    // The dark stream is the one approved exception and it lives in the token source.
+    assert!(LIDS_TOKENS.contains("--lgi-stream-bg:"));
+    assert!(COLLECTION_WORKSPACE_CSS.contains("var(--lgi-stream-bg)"));
+}
+
+/// The stylesheet the Evidence Library route actually serves: shared shell first, then the
+/// page layer. Assertions run against this so moving a rule between the two files cannot
+/// silently drop it from the page.
+fn evidence_page_stylesheet() -> String {
+    format!("{SHELL_CSS}\n{EVIDENCE_LIBRARY_CSS}")
 }
 
 fn declared_token_values(stylesheet: &str) -> BTreeMap<&str, &str> {
