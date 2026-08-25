@@ -26,7 +26,7 @@
 ### Evidence Library V1 检索语义
 
 - 浏览单位是 `ContentItem`；若未来发生文本匹配，命中单位是 `EvidenceFragment`。本卡没有建立这两个持久化对象或读投影。
-- `WINDOW` 只指 `ContentItem.published_at`。来源发布时间未知的内容不自动进入 7 天或 30 天窗口。
+- `WINDOW` 的目标语义只指 `ContentItem.published_at`。本卡只保证 Discovery 合同不把缺少来源发布时间的卡片填成某个默认发布时间；**真正将 `published_at = UNKNOWN` 排除在 7 天或 30 天读取结果之外，仍是 001B read projection 的 `NOT VERIFIED` 验收项**。
 - `Latest Discovery` 只使用首次 Discovery 时间；它不是发布时间、最近观察时间或接收时间。
 - 标题、作者名、正文、评论、OCR、ASR 的实际召回和排序实现留给具有已接纳材料的 001B；缺少的材料必须呈现为 `NOT_ACQUIRED`/`UNKNOWN`，不能被当作“不匹配”。
 
@@ -98,6 +98,6 @@ Evidence Library 的任何 `img` 或背景图在未来只能使用 Linggan 本�
 
 ## 7. 合同测试与未证明边界
 
-`crates/contracts/tests/discovery_boundary_contract.rs` 覆盖：两类 Query 的字段隔离、partial visible-card 保留、详情/评论/媒体字节/OCR/ASR 的拒绝、position 只能在 occurrence、remote cover 不能成为 display URL、来源发布时间未知不进入时间窗口。
+`crates/contracts/tests/discovery_boundary_contract.rs` 覆盖：两类 Query 的字段隔离、partial visible-card 保留、非空稳定内容身份和有效 observation time、详情/评论/媒体字节/OCR/ASR 的拒绝、position 只能在 occurrence 且同包唯一、remote cover 不能成为 display URL，以及来源发布时间缺失在 Discovery 合同内保持 unknown。
 
-它没有证明：插件已加载、localhost ingress 存在、任何真实平台访问、数据库写入、Evidence Acceptance、页面读投影、媒体副本、OCR/ASR、隐私处理、趋势或业务价值。
+它没有证明：插件已加载、localhost ingress 存在、任何真实平台访问、数据库写入、Evidence Acceptance、页面读投影或 `WINDOW` 结果过滤、媒体副本、OCR/ASR、隐私处理、趋势或业务价值。

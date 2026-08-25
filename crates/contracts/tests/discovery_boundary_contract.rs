@@ -165,6 +165,49 @@ fn search_position_is_only_a_discovery_occurrence_fact() {
 }
 
 #[test]
+fn discovery_rejects_blank_identity_or_missing_or_invalid_observation_time() {
+    for mutation in [
+        Box::new(|package: &mut serde_json::Value| {
+            package["cards"][0]["content"]["platformContentId"] = serde_json::json!("");
+        }) as Box<dyn FnOnce(&mut serde_json::Value)>,
+        Box::new(|package: &mut serde_json::Value| {
+            package["observedAt"] = serde_json::json!("");
+            package["cards"][0]["occurrence"]["observedAt"] = serde_json::json!("");
+        }),
+        Box::new(|package: &mut serde_json::Value| {
+            package["observedAt"] = serde_json::json!("2026-99-40T28:70:70Z");
+            package["cards"][0]["occurrence"]["observedAt"] =
+                serde_json::json!("2026-99-40T28:70:70Z");
+        }),
+    ] {
+        let error = parse_discovery_package(&mutated(mutation)).expect_err(
+            "a visible card needs a stable identity and a concrete valid observation time",
+        );
+        assert!(
+            matches!(
+                error,
+                DiscoveryContractError::MissingPlatformContentIdentity
+                    | DiscoveryContractError::InvalidObservedAt
+            ),
+            "the incomplete discovery fact must be rejected specifically"
+        );
+    }
+}
+
+#[test]
+fn discovery_rejects_two_cards_with_the_same_visible_position() {
+    let input = mutated(|package| {
+        package["cards"][1]["occurrence"]["resultPosition"] = serde_json::json!(1);
+    });
+    let error = parse_discovery_package(&input)
+        .expect_err("two cards cannot both claim the same visible search result position");
+    assert!(matches!(
+        error,
+        DiscoveryContractError::DuplicateResultPosition
+    ));
+}
+
+#[test]
 fn remote_cover_is_only_a_candidate_and_never_a_display_url() {
     let package = parse_discovery_package(PARTIAL_VISIBLE_DISCOVERY).expect("fixture is valid");
     let candidate = package.cards()[0]
@@ -192,11 +235,13 @@ fn remote_cover_is_only_a_candidate_and_never_a_display_url() {
 }
 
 #[test]
-fn published_window_never_defaults_unknown_source_time_into_results() {
+fn published_window_filtering_is_deferred_to_001b_read_projection() {
     let package = parse_discovery_package(PARTIAL_VISIBLE_DISCOVERY).expect("fixture is valid");
     assert_eq!(
         package.cards()[1].content().published_at_source_text(),
         None,
-        "a card without a source publication-time assertion is unknown, not recent"
+        "the discovery contract preserves absent source publication time as unknown"
     );
+    // This is deliberately not a result-filter assertion. 001B must later prove that its local
+    // read projection excludes publishedAt=UNKNOWN from a PublishedWindow query.
 }
