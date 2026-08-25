@@ -78,6 +78,7 @@ export const MSG = {
   // 进度与状态
   PROGRESS: 'progress',
   COLLECT_DONE: 'collectDone',
+  LOCAL_CAPTURE_READ: 'localCaptureRead',
   ERROR: 'error',
 };
 

@@ -42,6 +42,10 @@ for (const required of [
   './src/runtime/collectorReceiptSink.js',
   './src/content/xhsPageController.js',
   './src/platforms/xhs/noteCollector.js',
+  './src/platforms/xhs/batchController.js',
+  './src/platforms/douyin/index.js',
+  './src/platforms/douyin/batchController.js',
+  './src/linggan/localExecutionStore.js',
 ]) {
   if (![...activeContentModules].some((name) => name.includes(required))) {
     throw new Error(`active content module graph is missing the retained collector/runtime bridge: ${required}`);
@@ -50,7 +54,8 @@ for (const required of [
 
 const forbidden = [
   /(?:^|\/)src\/background\/index\.js$/,
-  /(?:^|\/)src\/workbench\/runtime\/(?:taskPoller|taskLeaseClient|outbox|sync)\.js$/,
+  /(?:^|\/)src\/workbench\/(?:runtime|protocol)\//,
+  /(?:^|\/)src\/db\/collectionRunStore\.js$/,
   /(?:^|\/)src\/sync\//,
 ];
 for (const moduleName of activeContentModules) {

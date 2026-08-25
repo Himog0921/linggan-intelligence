@@ -22,7 +22,7 @@ test('one adapter uses the same bounded package shape for every retained collect
   }
   const task = createManualRuntimeTask({
     platform: 'douyin', pageType: 'detail', target: { contentExternalId: 'fixture' },
-    capabilitiesRequested: ['content_detail', 'comments'], maximumQuota: 1,
+    capabilitiesRequested: ['content_detail'], maximumQuota: 1,
   });
   assert.equal(task.source, 'manual');
   assert.equal(task.platform, 'douyin');

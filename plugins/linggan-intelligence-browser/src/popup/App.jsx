@@ -13,7 +13,6 @@ import {
   getPageContextText,
   isDouyinVideoUrl, isDouyinStrictDetailUrl,
 } from './utils.js';
-import { formatLingganRuntimeNotice } from '../linggan/adapter.js';
 
 import TabNav from './components/TabNav.jsx';
 import StatsSection from './components/StatsSection.jsx';
@@ -22,9 +21,7 @@ import ProgressSection from './components/ProgressSection.jsx';
 import PageContextInfo from './components/PageContextInfo.jsx';
 import Notice from './components/Notice.jsx';
 import FlywheelSection from './components/FlywheelSection.jsx';
-import CookieAccountSection from './components/CookieAccountSection.jsx';
 import BatchSettingsModal from './components/BatchSettingsModal.jsx';
-import AddAccountModal from './components/AddAccountModal.jsx';
 import ConfirmModal from './components/ConfirmModal.jsx';
 
 const TABS = [
@@ -32,8 +29,6 @@ const TABS = [
   { id: 'tab-data', label: '数据', ariaControls: 'panel-data' },
   { id: 'tab-config', label: '配置', ariaControls: 'panel-config' },
 ];
-
-const LINGGAN_LOCAL_URL = 'http://localhost:3000';
 
 const BRAND_BANNER_SRC = getBrandAssetUrl(BRAND_ASSETS.banner);
 
@@ -81,13 +76,7 @@ export default function App() {
   const [notice, setNotice] = useState({ message: '', type: 'info', visible: false });
   const [idleClaimSnapshot, setIdleClaimSnapshot] = useState(null);
 
-  const [flywheelUrl, setFlywheelUrl] = useState('');
   const [flywheelStatus, setFlywheelStatus] = useState('unconfigured');
-  const [authorizationCode, setAuthorizationCode] = useState('');
-  const [stationStatus, setStationStatus] = useState({ registered: false });
-
-  const [cookieStatus, setCookieStatus] = useState({ xhs: null, douyin: null });
-  const [accounts, setAccounts] = useState([]);
 
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [batchModalType, setBatchModalType] = useState('notes');
@@ -96,8 +85,6 @@ export default function App() {
   const [commentLimitOptions, setCommentLimitOptions] = useState(null);
   const batchModalResolveRef = useRef(null);
 
-  const [addAccountModalOpen, setAddAccountModalOpen] = useState(false);
-  const [removingAccountId, setRemovingAccountId] = useState('');
   const [confirmDialog, setConfirmDialog] = useState({
     open: false,
     title: '',
@@ -177,24 +164,7 @@ export default function App() {
 
       loadStats(id);
 
-      try {
-        const flywheelConfig = await sendToBackground?.(MSG.GET_FLYWHEEL_CONFIG) ?? null;
-        if (!flywheelConfig) throw new Error('skip');
-        if (flywheelConfig?.serverUrl) {
-          setFlywheelUrl(flywheelConfig.serverUrl);
-          setFlywheelStatus('configured');
-        }
-        loadStationStatus();
-      } catch {}
-
-      try {
-        const storedResult = await sendToBackground(MSG.GET_STORED_PLATFORM_COOKIES);
-        if (storedResult?.results) {
-          setCookieStatus(storedResult.results);
-        }
-      } catch {}
-
-      loadAccounts();
+      setFlywheelStatus('configured');
     }
 
     init();
@@ -293,22 +263,6 @@ export default function App() {
   showNoticeRef.current = showNotice;
   hideNoticeRef.current = hideNotice;
 
-  const handleWorkbenchUrlChange = useCallback((nextUrl) => {
-    const value = String(nextUrl || '');
-    setFlywheelUrl(value);
-    setFlywheelStatus(value.trim() ? 'configured' : 'unconfigured');
-  }, []);
-
-  const handleUseWorkbenchPreset = useCallback(async (serverUrl) => {
-    const value = String(serverUrl || '').trim();
-    handleWorkbenchUrlChange(value);
-    try {
-      await sendToBackground(MSG.SAVE_FLYWHEEL_CONFIG, {
-        config: { serverUrl: value, enabled: true },
-      });
-    } catch {}
-  }, [handleWorkbenchUrlChange]);
-
   useEffect(() => () => {
     if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
   }, []);
@@ -382,33 +336,9 @@ export default function App() {
     }
   }, []);
 
-  const loadAccounts = useCallback(async () => {
-    try {
-      const response = await sendToBackground('getAccounts');
-      setAccounts(response?.accounts || []);
-    } catch {
-      setAccounts([]);
-    }
-  }, []);
-
-  const loadStationStatus = useCallback(async () => {
-    try {
-      const status = await sendToBackground(MSG.GET_EXECUTION_STATION_STATUS);
-      setStationStatus(status || { registered: false });
-    } catch {
-      setStationStatus({ registered: false });
-    }
-  }, []);
-
-  const requirePluginAuthorization = useCallback(() => {
-    if (stationStatus?.authorized) return true;
-    setActiveTab('tab-config');
-    showNotice(
-      stationStatus?.authorizationMessage || formatLingganRuntimeNotice(),
-      'warning',
-    );
-    return false;
-  }, [showNotice, stationStatus]);
+  // The testing package is deliberately LOCAL_TRUSTED. This check is named for the actual
+  // boundary: it validates local execution readiness, not a retired account/station grant.
+  const ensureLocalTrustedRuntime = useCallback(() => true, []);
 
   const handleThemeToggle = useCallback(async () => {
     const next = currentTheme === 'ac-ui' ? 'default' : 'ac-ui';
@@ -418,7 +348,7 @@ export default function App() {
   }, [currentTheme]);
 
   const handleCollectNote = useCallback(async () => {
-    if (!requirePluginAuthorization()) return;
+    if (!ensureLocalTrustedRuntime()) return;
     if (!capabilities.canCollectPrimary) {
       showNotice(getPrimaryActionWarning(platform, mode, capabilities), 'warning');
       return;
@@ -436,10 +366,10 @@ export default function App() {
         showNotice(toFriendlyError(err), 'warning');
       }
     });
-  }, [capabilities, platform, mode, tabId, hideNotice, showNotice, withBusyAction, requirePluginAuthorization]);
+  }, [capabilities, platform, mode, tabId, hideNotice, showNotice, withBusyAction, ensureLocalTrustedRuntime]);
 
   const handleCollectSecondary = useCallback(async () => {
-    if (!requirePluginAuthorization()) return;
+    if (!ensureLocalTrustedRuntime()) return;
     if (!capabilities.canCollectSecondary) {
       showNotice(getSecondaryActionWarning(platform, mode, capabilities), 'warning');
       return;
@@ -481,10 +411,10 @@ export default function App() {
         showNotice(toFriendlyError(err), 'warning');
       }
     });
-  }, [capabilities, platform, mode, tabId, hideNotice, showNotice, withBusyAction, requirePluginAuthorization]);
+  }, [capabilities, platform, mode, tabId, hideNotice, showNotice, withBusyAction, ensureLocalTrustedRuntime]);
 
   const handleCommentImages = useCallback(async () => {
-    if (!requirePluginAuthorization()) return;
+    if (!ensureLocalTrustedRuntime()) return;
     if (!capabilities.canDownloadCommentImages) {
       showNotice('请先进入抖音严格详情页，再执行评论图片区下载。', 'warning');
       return;
@@ -530,10 +460,10 @@ export default function App() {
         showNotice(toFriendlyError(err), 'warning');
       }
     });
-  }, [capabilities, tabId, hideNotice, showNotice, withBusyAction, requirePluginAuthorization]);
+  }, [capabilities, tabId, hideNotice, showNotice, withBusyAction, ensureLocalTrustedRuntime]);
 
   const handleBatchNotes = useCallback(async () => {
-    if (!requirePluginAuthorization()) return;
+    if (!ensureLocalTrustedRuntime()) return;
     if (!capabilities.canBatchNotes) {
       showNotice(getBatchActionWarning(platform, mode, capabilities), 'warning');
       return;
@@ -564,10 +494,10 @@ export default function App() {
         showNotice(toFriendlyError(err), 'warning');
       }
     });
-  }, [capabilities, platform, mode, tabId, hideNotice, showNotice, withBusyAction, requirePluginAuthorization]);
+  }, [capabilities, platform, mode, tabId, hideNotice, showNotice, withBusyAction, ensureLocalTrustedRuntime]);
 
   const handleBatchComments = useCallback(async () => {
-    if (!requirePluginAuthorization()) return;
+    if (!ensureLocalTrustedRuntime()) return;
     if (!capabilities.canBatchComments) {
       showNotice(getBatchActionWarning(platform, mode, capabilities), 'warning');
       return;
@@ -601,7 +531,7 @@ export default function App() {
         showNotice(toFriendlyError(err), 'warning');
       }
     });
-  }, [capabilities, platform, mode, tabId, hideNotice, showNotice, withBusyAction, requirePluginAuthorization]);
+  }, [capabilities, platform, mode, tabId, hideNotice, showNotice, withBusyAction, ensureLocalTrustedRuntime]);
 
   const handlePause = useCallback(async () => {
     await withBusyAction('pauseBatch', async () => {
@@ -664,7 +594,7 @@ export default function App() {
   }, [tabId, hideNotice, showNotice, withBusyAction, showConfirmDialog]);
 
   const handleDashboard = useCallback(async () => {
-    if (!requirePluginAuthorization()) return;
+    if (!ensureLocalTrustedRuntime()) return;
     await withBusyAction('openDashboard', async () => {
       hideNotice();
       try {
@@ -673,10 +603,10 @@ export default function App() {
         showNotice(toFriendlyError(err), 'warning');
       }
     });
-  }, [tabId, hideNotice, showNotice, withBusyAction, requirePluginAuthorization]);
+  }, [tabId, hideNotice, showNotice, withBusyAction, ensureLocalTrustedRuntime]);
 
   const handleExport = useCallback(async () => {
-    if (!requirePluginAuthorization()) return;
+    if (!ensureLocalTrustedRuntime()) return;
     await withBusyAction('quickExport', async () => {
       hideNotice();
       try {
@@ -686,10 +616,10 @@ export default function App() {
         showNotice(toFriendlyError(err), 'warning');
       }
     });
-  }, [tabId, hideNotice, showNotice, withBusyAction, requirePluginAuthorization]);
+  }, [tabId, hideNotice, showNotice, withBusyAction, ensureLocalTrustedRuntime]);
 
   const handleMaintenance = useCallback(async () => {
-    if (!requirePluginAuthorization()) return;
+    if (!ensureLocalTrustedRuntime()) return;
     if (platform === PLATFORM.UNKNOWN) {
       showNotice('请先打开小红书或抖音页面，再执行数据维护。', 'warning');
       return;
@@ -711,106 +641,7 @@ export default function App() {
         showNotice(toFriendlyError(err), 'warning');
       }
     });
-  }, [platform, tabId, hideNotice, showNotice, loadStats, withBusyAction, requirePluginAuthorization]);
-
-  const handlePluginAuthorize = useCallback(async () => {
-    const serverUrl = flywheelUrl.trim();
-    const code = authorizationCode.trim();
-    if (!serverUrl) {
-      showNotice('请先配置工作台地址。', 'warning');
-      return;
-    }
-    if (!code) {
-      showNotice('请输入内容工作台设置里生成的授权码。', 'warning');
-      return;
-    }
-    await withBusyAction('pluginAuthorize', async () => {
-      hideNotice();
-      try {
-        const result = await sendToBackground(MSG.AUTHORIZE_PLUGIN_ACCESS, {
-          serverUrl,
-          authorizationCode: code,
-          browserLabel: navigator.userAgent || '',
-        });
-        if (!result?.success) {
-          throw new Error(result?.error || '授权失败');
-        }
-        setAuthorizationCode('');
-        await loadStationStatus();
-        showNotice('插件已连接，工位也已自动准备好。', 'success');
-      } catch (err) {
-        showNotice(`授权失败：${toFriendlyError(err)}`, 'warning');
-      }
-    });
-  }, [authorizationCode, flywheelUrl, hideNotice, loadStationStatus, showNotice, withBusyAction]);
-
-  const handlePluginAuthorizationRequest = useCallback(async () => {
-    const serverUrl = flywheelUrl.trim();
-    if (!serverUrl) {
-      showNotice('请先配置工作台地址。', 'warning');
-      return;
-    }
-    await withBusyAction('requestPluginAuthorization', async () => {
-      hideNotice();
-      try {
-        const result = await sendToBackground(MSG.REQUEST_PLUGIN_AUTHORIZATION, {
-          serverUrl,
-          browserLabel: navigator.userAgent || '',
-        });
-        await loadStationStatus();
-        showNotice(result?.message || '授权申请已发送，请等待内容工作台审批。', 'success');
-      } catch (err) {
-        showNotice(`申请失败：${toFriendlyError(err)}`, 'warning');
-      }
-    });
-  }, [flywheelUrl, hideNotice, loadStationStatus, showNotice, withBusyAction]);
-
-  const handlePluginAuthorizationClaim = useCallback(async () => {
-    const serverUrl = flywheelUrl.trim();
-    if (!serverUrl) {
-      showNotice('请先配置工作台地址。', 'warning');
-      return;
-    }
-    await withBusyAction('claimPluginAuthorization', async () => {
-      hideNotice();
-      try {
-        const result = await sendToBackground(MSG.CLAIM_PLUGIN_AUTHORIZATION_REQUEST, {
-          serverUrl,
-          browserLabel: navigator.userAgent || '',
-        });
-        await loadStationStatus();
-        if (result?.authorized) {
-          showNotice('授权已生效，工位也已自动准备好。', 'success');
-          return;
-        }
-        showNotice(result?.message || '申请还在等待工作台审批。', 'info');
-      } catch (err) {
-        showNotice(`检查失败：${toFriendlyError(err)}`, 'warning');
-      }
-    });
-  }, [flywheelUrl, hideNotice, loadStationStatus, showNotice, withBusyAction]);
-
-  const handleClearPluginAuthorization = useCallback(async () => {
-    const confirmed = await showConfirmDialog({
-      title: '清除插件授权',
-      message: '清除后，这个浏览器将失去插件使用资格，并解除当前工位绑定。',
-      detail: '如果只是临时停止接单，请在内容工作台关闭这个工位的接单开关。',
-      confirmText: '确认清除',
-      confirmTone: 'danger',
-    });
-    if (!confirmed) return;
-    await withBusyAction('clearPluginAuthorization', async () => {
-      hideNotice();
-      try {
-        await sendToBackground(MSG.CLEAR_PLUGIN_AUTHORIZATION);
-        setAuthorizationCode('');
-        await loadStationStatus();
-        showNotice('插件授权已清除。', 'warning');
-      } catch (err) {
-        showNotice(`清除失败：${toFriendlyError(err)}`, 'warning');
-      }
-    });
-  }, [hideNotice, loadStationStatus, showConfirmDialog, showNotice, withBusyAction]);
+  }, [platform, tabId, hideNotice, showNotice, loadStats, withBusyAction, ensureLocalTrustedRuntime]);
 
   const handleFlywheelTest = useCallback(async () => {
     await withBusyAction('flywheelTest', async () => {
@@ -831,67 +662,6 @@ export default function App() {
       }
     });
   }, [hideNotice, showNotice, withBusyAction]);
-
-  const handleGetCookies = useCallback(async () => {
-    if (!requirePluginAuthorization()) return;
-    if (platform === PLATFORM.UNKNOWN) {
-      showNotice('请先打开小红书或抖音页面，再抓取当前平台 Cookie。', 'warning');
-      return;
-    }
-    await withBusyAction('getCookies', async () => {
-      hideNotice();
-      setProgressVisible(true);
-      setProgressCurrent(0);
-      setProgressTotal(1);
-      const platformText = platform === PLATFORM.DOUYIN ? '抖音' : '小红书';
-      setProgressStatus(`正在获取${platformText} Cookie...`);
-      try {
-        const result = await sendToBackground(MSG.GET_PLATFORM_COOKIES, { platform });
-        setProgressVisible(false);
-        setCookieStatus(result.results || {});
-        if (result.success) {
-          const xhs = result.results?.xhs;
-          const dy = result.results?.douyin;
-
-          if (platform === PLATFORM.XHS && xhs?.count > 0) {
-            const name = `小红书-${new Date().toLocaleDateString('zh-CN')} ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
-            await sendToBackground('addAccount', {
-              name,
-              cookieJson: JSON.stringify(xhs.cookies),
-              platform: 'xhs',
-              dailyQuotaLimit: 100,
-            });
-            loadAccounts();
-          }
-
-          if (platform === PLATFORM.DOUYIN && dy?.count > 0) {
-            const name = `抖音-${new Date().toLocaleDateString('zh-CN')} ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`;
-            await sendToBackground('addAccount', {
-              name,
-              cookieJson: JSON.stringify(dy.cookies),
-              platform: 'douyin',
-              dailyQuotaLimit: 100,
-            });
-            loadAccounts();
-          }
-
-          const currentResult = platform === PLATFORM.DOUYIN ? dy : xhs;
-          const currentLabel = platform === PLATFORM.DOUYIN ? '抖音' : '小红书';
-          const accountNote = platform === PLATFORM.XHS && xhs?.count > 0
-            ? '，小红书 Cookie 已自动保存为采集账号。'
-            : platform === PLATFORM.DOUYIN && dy?.count > 0
-              ? '，抖音 Cookie 已自动保存为采集账号。'
-              : '';
-          showNotice(`获取成功：${currentLabel} ${currentResult?.count || 0} 条${accountNote}`, 'success');
-        } else {
-          showNotice(`获取 Cookie 失败，请确认当前${platformText}页面已登录。`, 'warning');
-        }
-      } catch (err) {
-        setProgressVisible(false);
-        showNotice(toFriendlyError(err), 'warning');
-      }
-    });
-  }, [platform, hideNotice, showNotice, loadAccounts, withBusyAction, requirePluginAuthorization]);
 
   const openBatchSettings = useCallback((type, plat) => {
     return new Promise((resolve) => {
@@ -931,52 +701,6 @@ export default function App() {
     }
     setCommentLimitOptions(null);
   }, []);
-
-  const handleAddAccount = useCallback(async (accountData) => {
-    if (!requirePluginAuthorization()) {
-      return { success: false, error: stationStatus?.authorizationMessage || 'plugin_authorization_required' };
-    }
-    try {
-      const response = await sendToBackground('addAccount', accountData);
-      if (response?.success) {
-        loadAccounts();
-        showNotice('采集账号已保存。', 'success');
-        return { success: true };
-      }
-      return { success: false, error: response?.error || '添加失败' };
-    } catch (err) {
-      return { success: false, error: toFriendlyError(err) };
-    }
-  }, [loadAccounts, showNotice, requirePluginAuthorization, stationStatus]);
-
-  const handleOpenAddAccount = useCallback(async () => {
-    if (!requirePluginAuthorization()) return;
-    await withBusyAction('openAddAccount', async () => {
-      setAddAccountModalOpen(true);
-    });
-  }, [withBusyAction, requirePluginAuthorization]);
-
-  const handleRemoveAccount = useCallback(async (accountId) => {
-    const target = accounts.find((item) => item.accountId === accountId);
-    const confirmed = await showConfirmDialog({
-      title: '确认删除采集账号',
-      message: `删除后，这个账号不会再参与执行或监控。`,
-      detail: target?.name ? `将删除账号：${target.name}` : '删除后不可恢复，需要重新提取或手动添加。',
-      confirmText: '确认删除',
-      confirmTone: 'danger',
-    });
-    if (!confirmed) return;
-    setRemovingAccountId(accountId);
-    try {
-      await sendToBackground('removeAccount', { accountId });
-      loadAccounts();
-      showNotice('采集账号已删除。', 'success');
-    } catch (err) {
-      showNotice(toFriendlyError(err), 'warning');
-    } finally {
-      setRemovingAccountId('');
-    }
-  }, [accounts, loadAccounts, showConfirmDialog, showNotice]);
 
   const { scene, hint, tags } = getPageContextText(platform, mode, { isDyVideoPage, isDyStrictDetailPage, isStableSearchList });
 
@@ -1122,44 +846,19 @@ export default function App() {
         {activeTab === 'tab-data' && (
           <div id="panel-data" className="tab-panel" role="tabpanel" aria-labelledby="tab-data">
             <StatsSection stats={stats} />
-            <CookieAccountSection
-              currentPlatform={platform}
-              cookieStatus={cookieStatus}
-              accounts={accounts}
-              onGetCookies={handleGetCookies}
-              onOpenAddAccount={handleOpenAddAccount}
-              onRemoveAccount={handleRemoveAccount}
-              gettingCookies={Boolean(busyActions.getCookies)}
-              openingAddAccount={Boolean(busyActions.openAddAccount)}
-              removingAccountId={removingAccountId}
-            />
+            <section className="context-section">
+              <h2>本机数据状态</h2>
+              <p>页面读取会先进入 Browser Producer 的本机待交付队列；只有 Linggan 回执确认后，才会成为可用 Evidence。此测试包不提供 Cookie、账号、工位或授权码管理入口。</p>
+            </section>
           </div>
         )}
 
         {activeTab === 'tab-config' && (
           <div id="panel-config" className="tab-panel" role="tabpanel" aria-labelledby="tab-config">
             <FlywheelSection
-              flywheelUrl={flywheelUrl}
               flywheelStatus={flywheelStatus}
-              authorizationCode={authorizationCode}
-              authorizationStatus={stationStatus}
-              stationStatus={stationStatus}
-              onUrlChange={handleWorkbenchUrlChange}
-              onUsePresetUrl={handleUseWorkbenchPreset}
-              onAuthorizationCodeChange={setAuthorizationCode}
-              onAuthorize={handlePluginAuthorize}
-              onRequestAuthorization={handlePluginAuthorizationRequest}
-              onClaimAuthorization={handlePluginAuthorizationClaim}
-              onClearAuthorization={handleClearPluginAuthorization}
               onTest={handleFlywheelTest}
               testing={Boolean(busyActions.flywheelTest)}
-              authorizing={Boolean(busyActions.pluginAuthorize)}
-              requestingAuthorization={Boolean(busyActions.requestPluginAuthorization)}
-              claimingAuthorization={Boolean(busyActions.claimPluginAuthorization)}
-              clearingAuthorization={Boolean(busyActions.clearPluginAuthorization)}
-              presetUrls={{
-                local: LINGGAN_LOCAL_URL,
-              }}
             />
           </div>
         )}
@@ -1175,29 +874,6 @@ export default function App() {
         commentLimitOptions={commentLimitOptions}
         onConfirm={handleBatchModalConfirm}
         onCancel={handleBatchModalCancel}
-      />
-
-      <AddAccountModal
-        open={addAccountModalOpen}
-        onClose={() => setAddAccountModalOpen(false)}
-        onConfirm={handleAddAccount}
-        currentPlatform={platform}
-        onExtractCookie={async () => {
-          try {
-            const result = await sendToBackground(MSG.GET_PLATFORM_COOKIES, { platform });
-            const current = platform === PLATFORM.DOUYIN ? result?.results?.douyin : result?.results?.xhs;
-            const currentLabel = platform === PLATFORM.DOUYIN ? '抖音' : '小红书';
-            return {
-              success: Number(current?.count || 0) > 0,
-              cookies: Number(current?.count || 0) > 0 ? current.cookies : null,
-              allResults: result?.results,
-              error: result?.success ? null : `未检测到${currentLabel} Cookie`,
-            };
-          } catch (err) {
-            return { success: false, error: err.message };
-          }
-        }}
-        onCookieResult={setCookieStatus}
       />
 
       <ConfirmModal

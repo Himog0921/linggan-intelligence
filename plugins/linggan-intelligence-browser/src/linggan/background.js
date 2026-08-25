@@ -3,7 +3,6 @@ import {
   attemptStartIsAccepted,
   createLocalAttempt,
   createLocalSubmission,
-  createManualTaskSpec,
   createTaskSpec,
   isTerminalLocalDeliveryResult,
   localPost,
@@ -13,6 +12,7 @@ import {
 } from './adapter.js';
 import { LINGGAN_RUNTIME_ACTION } from './runtimeActions.js';
 import { localMediaOutbox, localProducerOutbox } from './localProducerOutbox.js';
+import { createManualRuntimeTask, packageDiscovery } from './producerRuntime.js';
 
 const PRODUCER_INSTANCE_KEY = 'linggan.localTrusted.producerInstanceId';
 const MAX_MEDIA_BYTES = 256 * 1024 * 1024;
@@ -102,9 +102,27 @@ async function flushMediaOutbox() {
       });
       await localMediaOutbox.acknowledge(upload.uploadId, uploaded);
     } catch (error) {
+      // Failure is a media-lane fact, not a reason to invalidate already accepted text/discovery.
+      // It is best effort because the failed candidate may be retried after an offline interval.
+      void recordMediaDownloadFailure(upload, error).catch(() => {});
       await localMediaOutbox.retry(upload.uploadId, error?.message || error);
     }
   }
+}
+
+async function recordMediaDownloadFailure(upload, error) {
+  const attemptedUri = String(upload?.candidateUris?.[0] || '').trim();
+  const observationRef = String(upload?.mediaObservationRef || '').trim();
+  if (!attemptedUri || !observationRef) return;
+  const message = String(error?.message || error || 'unknown');
+  const terminalReason = /mime/i.test(message) ? 'mime_mismatch'
+    : /size/i.test(message) ? 'size_limit'
+      : /http_404|expired/i.test(message) ? 'expired_url'
+        : /cancel/i.test(message) ? 'cancelled' : 'network_error';
+  await fetch(`${LINGGAN_LOCAL_ORIGIN}/api/local/producer/media-observations/${encodeURIComponent(observationRef)}/download-failures`, {
+    method: 'POST', credentials: 'omit', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ attemptedUri, terminalReason }),
+  });
 }
 
 async function uploadMediaInChunks({ mediaObservationRef, blob, mimeType, sha256 }) {
@@ -170,34 +188,23 @@ async function queueManualDiscovery(discoveryPackage) {
   // through this one runtime. Convert it at the boundary rather than preserving a second
   // Workbench delivery protocol.
   const cards = Array.isArray(discoveryPackage?.cards) ? discoveryPackage.cards : [];
-  const observedAt = String(discoveryPackage?.observedAt || new Date().toISOString());
-  const capturePackage = {
-    contractVersion: 'linggan.producer.capture-package.v1',
-    packageRef: crypto.randomUUID(),
-    packageKind: 'discovery_search',
-    platform: 'xhs',
-    observedAt,
-    capturedAt: new Date().toISOString(),
-    coverage: {
-      target: { basis: 'current_visible_surface', query: String(discoveryPackage?.query || '') },
-      layers: [{
-        capability: 'discovery_search', observed: cards.length, attempted: cards.length,
-        acquired: cards.length, verified: 0, failed: 0, notAttempted: 0, unknown: 0,
-        stoppedReason: String(discoveryPackage?.stopReason || 'surface_read_complete'),
-      }],
-    },
-    records: cards.map((card, ordinal) => ({
-      kind: 'discovery_card',
-      resultPosition: ordinal + 1,
-      sourceObject: {
-        platform: 'xhs', type: 'content',
-        externalId: String(card?.noteId || card?.id || card?.contentId || ''),
-      },
-      payload: card,
-    })),
-  };
+  const platform = String(discoveryPackage?.platform || 'xhs');
+  const query = String(discoveryPackage?.query || '').trim();
+  const authorExternalId = String(discoveryPackage?.authorExternalId || '').trim();
+  if (!query && !authorExternalId) throw new Error('linggan_discovery_target_required');
+  const capturePackage = packageDiscovery({
+    platform, cards, query, authorExternalId,
+    observedAt: String(discoveryPackage?.observedAt || new Date().toISOString()),
+    surface: String(discoveryPackage?.surface || 'current_visible_surface'),
+  });
+  const capability = authorExternalId ? 'profile_discovery' : 'discovery_search';
   return queueCapturePackage({
-    taskSpec: createManualTaskSpec(),
+    taskSpec: createManualRuntimeTask({
+      platform, pageType: authorExternalId ? 'profile' : 'search_results',
+      target: authorExternalId ? { authorExternalId, surface: 'current_visible_surface' } : { query, surface: 'current_visible_surface' },
+      capabilitiesRequested: [capability], maximumQuota: Math.max(1, capturePackage.records.length),
+      stopConditions: ['current_surface_read_once', 'maximum_quota'],
+    }),
     capturePackage,
   });
 }
@@ -302,7 +309,12 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
     if (action === LINGGAN_RUNTIME_ACTION.FLUSH_LOCAL_OUTBOX) return flushLocalOutbox();
     if (action === LINGGAN_RUNTIME_ACTION.CREATE_MANUAL_TASK) {
       const producerInstanceId = await producerInstanceId();
-      const taskSpec = createManualTaskSpec();
+      const taskSpec = createTaskSpec({
+        source: 'manual', platform: 'xhs', pageType: 'search_results',
+        target: { query: '__manual_placeholder__', surface: 'local_intent_only' }, capabilitiesRequested: ['discovery_search'],
+        maximumQuota: 20, commentLimit: 'not_requested', acquireMedia: 'not_requested',
+        riskPolicy: 'local_trusted_user_initiated', stopConditions: ['manual_stop', 'maximum_quota'],
+      });
       const attempt = createLocalAttempt({ producerInstanceId, taskId: taskSpec.taskId });
       return { success: true, producerInstanceId, taskSpec, attempt, scheduler: 'NOT_CONNECTED' };
     }

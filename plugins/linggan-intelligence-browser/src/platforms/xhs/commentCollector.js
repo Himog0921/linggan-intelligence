@@ -106,7 +106,7 @@ export async function collectComments({
   });
   if (!apiResult.needsDomContinuation && (apiResult.apiObserved || apiResult.total > 0)) {
     const result = { total: apiResult.total, comments: apiResult.comments };
-    await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
+    result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
     return result;
   }
 
@@ -132,7 +132,7 @@ export async function collectComments({
     captchaActionTimeoutMs,
     persist,
   });
-  await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
+  result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
   return result;
 }
 

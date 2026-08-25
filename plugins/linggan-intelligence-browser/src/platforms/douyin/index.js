@@ -1,7 +1,7 @@
 /**
  * 抖音平台适配器
  */
-import { BATCH_CONFIG, MSG } from '../../shared/constants.js';
+import { BATCH_CONFIG } from '../../shared/constants.js';
 import {
   injectDouyinUI,
   showDouyinToast,
@@ -66,8 +66,14 @@ const DouyinAdapter = {
 
   async _submitRuntimeReceipt(kind, payload, context = {}) {
     const submit = this._runtimeSink?.[kind];
-    if (typeof submit !== 'function') return;
-    await submit(payload, { platform: 'douyin', ...context });
+    if (typeof submit !== 'function') return { delivery: 'adapter_unavailable' };
+    return submit(payload, { platform: 'douyin', ...context });
+  },
+
+  _deliveryMessage(label, receipt) {
+    return receipt?.delivery === 'acknowledged'
+      ? `${label}，Linggan 已接纳`
+      : `${label}，待本机 Linggan 交付`;
   },
 
   /**
@@ -183,27 +189,6 @@ const DouyinAdapter = {
     const activeVid = document.querySelector('[data-e2e="feed-active-video"]')?.getAttribute('data-e2e-vid') || '';
     const awemeId = document.querySelector('[data-e2e="video-info"]')?.getAttribute('data-e2e-aweme-id') || '';
     return [window.location.pathname, modalId, vid, activeVid, awemeId].filter(Boolean).join('|');
-  },
-
-  _sendBackgroundAction(action, payload = {}) {
-    return new Promise((resolve, reject) => {
-      try {
-        chrome.runtime.sendMessage({ action, ...payload }, (response) => {
-          const runtimeErr = chrome.runtime.lastError;
-          if (runtimeErr) {
-            reject(new Error(String(runtimeErr.message || runtimeErr)));
-            return;
-          }
-          if (response?.error) {
-            reject(new Error(String(response.error)));
-            return;
-          }
-          resolve(response || { success: true });
-        });
-      } catch (err) {
-        reject(err);
-      }
-    });
   },
 
   _getBatchVideoDialogConfig(mode = 'profile') {
@@ -726,9 +711,9 @@ const DouyinAdapter = {
         showDouyinToast('采集中...', 'info');
         const result = await collectDouyinVideo();
         if (result.ok) {
-          await this._submitRuntimeReceipt('contentDetail', result.data);
+          const receipt = await this._submitRuntimeReceipt('contentDetail', result.data);
           await this._submitRuntimeReceipt('mediaSlots', result.data);
-          showDouyinToast(`视频已采集：${result.data.title?.slice(0, 20) || result.data.noteId}`, 'success');
+          showDouyinToast(this._deliveryMessage(`已读取视频：${result.data.title?.slice(0, 20) || result.data.noteId}`, receipt), 'success');
         } else {
           showDouyinToast(`采集失败：${result.error}`, 'error');
         }
@@ -806,11 +791,11 @@ const DouyinAdapter = {
                 });
               },
             });
-            await this._submitRuntimeReceipt('comments', result, { noteId: result?.noteId || '' });
+            const receipt = await this._submitRuntimeReceipt('comments', result, { noteId: result?.noteId || '' });
             if (result?.stopped) {
               showDouyinToast('当前评论采集已停止', 'warning');
             } else {
-              showDouyinToast(`评论采集完成：共 ${result.total} 条`, 'success');
+              showDouyinToast(this._deliveryMessage(`已读取评论：共 ${result.total} 条`, receipt), 'success');
             }
           } catch (err) {
             showDouyinToast(`评论采集失败：${String(err?.message || err)}`, 'error');
@@ -892,8 +877,8 @@ const DouyinAdapter = {
         showDouyinToast('采集博主信息...', 'info');
         const result = await collectDouyinAuthor();
         if (result.ok) {
-          await this._submitRuntimeReceipt('authorProfile', result.data);
-          showDouyinToast(`博主已采集：${result.data.name || result.data.userId}`, 'success');
+          const receipt = await this._submitRuntimeReceipt('authorProfile', result.data);
+          showDouyinToast(this._deliveryMessage(`已读取博主：${result.data.name || result.data.userId}`, receipt), 'success');
         } else {
           showDouyinToast(`采集失败：${result.error}`, 'error');
         }
@@ -931,16 +916,18 @@ const DouyinAdapter = {
         hideDouyinProgressBar();
         hideDouyinTaskControlBar();
         this._clearBatchIndicator();
-        try {
-          await this._sendBackgroundAction(MSG.START_BATCH_NOTES, {
-            mode: String(params.mode || 'profile'),
-            count: maxCount,
-            topByLikes,
+        const started = this._startManagedTask('batchVideos', maxCount, async ({ shouldStop, waitIfPaused }) => {
+          const result = await batchCollectDouyinProfileVideos({
+            maxCount, topByLikes, shouldStop, waitIfPaused,
+            onProgress: (progress) => this._syncBatchTaskUI({ taskType: 'batchVideos', taskState: progress.taskState || 'running', current: progress.current || 0, total: progress.total || maxCount, message: progress.message || '正在读取视频...' }),
+            onCollected: async (content) => {
+              await this._submitRuntimeReceipt('contentDetail', content);
+              await this._submitRuntimeReceipt('mediaSlots', content);
+            },
           });
-          showDouyinToast('批量视频已启动，可在右下角管理任务', 'info');
-        } catch (err) {
-          showDouyinToast(`批量采集失败：${String(err?.message || err)}`, 'error');
-        }
+          showDouyinToast(result.ok ? '批量视频已读取，待本机 Linggan 交付' : `批量视频未完成：${result.error || '未读取到可交付内容'}`, result.ok ? 'success' : 'warning');
+        });
+        if (started) showDouyinToast('批量视频已启动，可在右下角管理任务', 'info');
         break;
       }
 
@@ -993,18 +980,15 @@ const DouyinAdapter = {
         hideDouyinProgressBar();
         hideDouyinTaskControlBar();
         this._clearBatchIndicator();
-        try {
-          await this._sendBackgroundAction(MSG.START_BATCH_COMMENTS, {
-            mode: String(params.mode || 'profile'),
-            count: maxCount,
-            topByLikes,
-            commentLimit: maxCommentsPerVideo,
-            commentDepthMode: values.allReplies ? 'allReplies' : 'twoLevel',
+        const started = this._startManagedTask('batchComments', maxCount, async ({ shouldStop, waitIfPaused }) => {
+          const result = await batchCollectDouyinProfileComments({
+            maxCount, topByLikes, maxCommentsPerVideo, maxSubComments: values.allReplies ? 0 : BATCH_CONFIG.maxSubComments, shouldStop, waitIfPaused,
+            onProgress: (progress) => this._syncBatchTaskUI({ taskType: 'batchComments', taskState: progress.taskState || 'running', current: progress.current || 0, total: progress.total || maxCount, message: progress.message || '正在读取评论...' }),
+            onCollected: async (comments) => this._submitRuntimeReceipt('comments', comments, { noteId: comments?.note?.noteId || comments?.noteId || '' }),
           });
-          showDouyinToast(topByLikes ? 'Top N 批量评论已启动，可在右下角管理任务' : '顺位批量评论已启动，可在右下角管理任务', 'info');
-        } catch (err) {
-          showDouyinToast(`批量评论失败：${String(err?.message || err)}`, 'error');
-        }
+          showDouyinToast(result.ok ? '批量评论已读取，待本机 Linggan 交付' : `批量评论未完成：${result.error || '未读取到可交付内容'}`, result.ok ? 'success' : 'warning');
+        });
+        if (started) showDouyinToast(topByLikes ? 'Top N 批量评论已启动，可在右下角管理任务' : '顺位批量评论已启动，可在右下角管理任务', 'info');
         break;
       }
 

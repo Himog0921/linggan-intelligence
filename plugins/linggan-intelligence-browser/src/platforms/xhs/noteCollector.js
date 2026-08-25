@@ -10,7 +10,7 @@ import {
 import { isContextValid } from '../../shared/messaging.js';
 import { noteStore } from '../../db/noteStore.js';
 import { createCollectorEvidence, joinRawDomText } from '../../shared/collectorMetadata.js';
-import { withMonitorRecordMeta } from '../../workbench/runtime/monitorTask.js';
+import { withLocalReadMeta } from '../../linggan/localExecutionSupport.js';
 import { emitCollectorReceipt } from '../../runtime/collectorReceiptSink.js';
 import {
   ensureXhsCommentApiBridge,
@@ -457,7 +457,7 @@ export async function collectNote(wd = window, options = {}) {
     { now: collectedAt },
   );
 
-  const noteInfo = withMonitorRecordMeta({
+  const noteInfo = withLocalReadMeta({
     noteId: platformContentId,
     contentId: `xhs_${platformContentId}`,
     platformContentId,
@@ -520,8 +520,8 @@ export async function collectNote(wd = window, options = {}) {
 
   // 4. 写入 IndexedDB（主键 noteId 自动去重）
   await noteStore.upsert(noteInfo);
-  await emitCollectorReceipt('contentDetail', noteInfo, { platform: 'xhs', options });
-  await emitCollectorReceipt('mediaSlots', noteInfo, { platform: 'xhs', options });
+  noteInfo.lingganDelivery = await emitCollectorReceipt('contentDetail', noteInfo, { platform: 'xhs', options });
+  noteInfo.lingganMediaDelivery = await emitCollectorReceipt('mediaSlots', noteInfo, { platform: 'xhs', options });
 
   return noteInfo;
 }

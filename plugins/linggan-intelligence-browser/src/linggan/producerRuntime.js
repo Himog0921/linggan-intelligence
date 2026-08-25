@@ -31,23 +31,30 @@ function isoNow(now = () => new Date()) {
 
 function numeric(value) {
   const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : 0;
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : null;
 }
 
 function boundedCoverageLayer(capability, input = {}) {
-  const observed = numeric(input.observed);
-  const attempted = Math.min(observed, numeric(input.attempted));
-  const acquired = Math.min(attempted, numeric(input.acquired));
-  const verified = Math.min(acquired, numeric(input.verified));
+  // A quota, a time budget, and a currently visible surface are not a known set.  Do not turn
+  // a missing count into `0` or infer an unattempted remainder from it.  The numeric fields are
+  // still required by the wire contract, so `unknown` explicitly carries the uncertainty.
+  const values = ['observed', 'attempted', 'acquired', 'verified', 'failed', 'notAttempted', 'unknown']
+    .reduce((result, key) => ({ ...result, [key]: numeric(input[key]) }), {});
+  const invalidCount = Object.values(values).filter((value) => value === null).length;
+  const observed = values.observed ?? 0;
+  const attempted = Math.min(observed, values.attempted ?? 0);
+  const acquired = Math.min(attempted, values.acquired ?? 0);
+  const verified = Math.min(acquired, values.verified ?? 0);
+  const knownSet = String(input.targetBasis || '').trim() === 'known_set';
   return {
     capability,
     observed,
     attempted,
     acquired,
     verified,
-    failed: numeric(input.failed),
-    notAttempted: numeric(input.notAttempted),
-    unknown: numeric(input.unknown),
+    failed: values.failed ?? 0,
+    notAttempted: knownSet ? (values.notAttempted ?? 0) : 0,
+    unknown: (values.unknown ?? 0) + invalidCount + (knownSet ? 0 : (input.unknown === 0 ? 0 : 1)),
     stoppedReason: String(input.stoppedReason || 'unknown'),
   };
 }
@@ -78,7 +85,7 @@ export function createCapturePackage({
     capturedAt,
     coverage: {
       target: target && typeof target === 'object' && !Array.isArray(target) ? target : { basis: 'unknown' },
-      layers: [boundedCoverageLayer(packageKind, coverage)],
+      layers: [boundedCoverageLayer(packageKind, { ...coverage, targetBasis: target?.basis })],
     },
     records: asArray(records).slice(0, 2048),
     ...(checkpoint === undefined ? {} : { checkpoint }),
@@ -132,7 +139,9 @@ export function packageContentDetail({ platform, note, observedAt, capturedAt } 
 export function packageComments({ platform, result, noteId, observedAt, capturedAt } = {}) {
   const comments = asArray(result?.comments || result?.data || result)
     .filter((comment) => !isReplyRecord(comment));
-  const requested = numeric(result?.requested ?? result?.maxTotal ?? comments.length);
+  const knownSetSize = numeric(result?.knownSetSize);
+  const attempted = numeric(result?.attempted ?? comments.length);
+  const discovered = numeric(result?.discovered);
   return createCapturePackage({
     packageKind: PRODUCER_CAPABILITY.COMMENTS,
     platform,
@@ -140,9 +149,11 @@ export function packageComments({ platform, result, noteId, observedAt, captured
     capturedAt,
     target: { basis: 'known_set', contentExternalId: String(noteId || result?.noteId || '') },
     coverage: {
-      observed: numeric(result?.discovered ?? comments.length), attempted: numeric(result?.attempted ?? comments.length),
+      // `maxTotal` and a requested limit are budgets, not proof that that many comments exist.
+      observed: discovered ?? comments.length, attempted: attempted ?? comments.length,
       acquired: comments.length, verified: 0, failed: numeric(result?.failed),
-      notAttempted: Math.max(0, requested - numeric(result?.attempted ?? comments.length)), unknown: numeric(result?.unknown),
+      notAttempted: knownSetSize === null || attempted === null ? 0 : Math.max(0, knownSetSize - attempted),
+      unknown: (numeric(result?.unknown) ?? 0) + (knownSetSize === null ? 1 : 0),
       stoppedReason: String(result?.stopReason || 'collector_complete'),
     },
     records: comments.map((comment) => ({ kind: 'comment', payload: comment })),
@@ -155,7 +166,7 @@ export function packageComments({ platform, result, noteId, observedAt, captured
 export function packageReplies({ platform, result, noteId, observedAt, capturedAt } = {}) {
   const replies = asArray(result?.comments || result?.data || result)
     .filter((comment) => isReplyRecord(comment));
-  const requested = numeric(result?.requested ?? result?.maxTotal ?? replies.length);
+  const knownSetSize = numeric(result?.replyKnownSetSize);
   return createCapturePackage({
     packageKind: PRODUCER_CAPABILITY.REPLIES,
     platform,
@@ -170,9 +181,9 @@ export function packageReplies({ platform, result, noteId, observedAt, capturedA
       failed: 0,
       // The collector's requested amount refers to the combined comment tree.  It cannot be
       // used to invent a reply-only remainder, so only expose it when a dedicated count exists.
-      notAttempted: numeric(result?.replyNotAttempted),
-      unknown: numeric(result?.replyUnknown),
-      stoppedReason: String(result?.replyStopReason || result?.stopReason || (requested ? 'collector_complete' : 'unknown')),
+      notAttempted: knownSetSize === null ? 0 : Math.max(0, knownSetSize - replies.length),
+      unknown: (numeric(result?.replyUnknown) ?? 0) + (knownSetSize === null ? 1 : 0),
+      stoppedReason: String(result?.replyStopReason || result?.stopReason || 'unknown'),
     },
     records: replies.map((reply) => ({ kind: 'reply', payload: reply })),
   });
@@ -200,7 +211,7 @@ export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {
     observedAt,
     capturedAt,
     target: { basis: 'known_set', contentExternalId: String(note?.noteId || note?.id || '') },
-    coverage: { observed: sources.length, attempted: 0, acquired: 0, verified: 0, notAttempted: sources.length, stoppedReason: 'media_acquisition_not_started' },
+    coverage: { observed: sources.length, attempted: 0, acquired: 0, verified: 0, notAttempted: sources.length, unknown: 0, stoppedReason: 'media_acquisition_not_started' },
     records: sources.map((candidate, ordinal) => {
       const slotOrdinal = ordinal + 1;
       // Slot identity says "this content's nth image/video". A URL is intentionally only an
@@ -219,17 +230,49 @@ export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {
 }
 
 export function packageBatchCheckpoint({ platform, kind, progress, observedAt, capturedAt } = {}) {
-  const total = numeric(progress?.total);
-  const current = Math.min(total || Number.MAX_SAFE_INTEGER, numeric(progress?.current));
+  const total = numeric(progress?.knownSetSize);
+  const current = numeric(progress?.current) ?? 0;
   return createCapturePackage({
     packageKind: PRODUCER_CAPABILITY.BATCH_CHECKPOINT,
     platform,
     observedAt,
     capturedAt,
     target: { basis: 'execution_checkpoint', taskType: String(kind || '') },
-    coverage: { observed: total, attempted: current, acquired: current, verified: 0, unknown: Math.max(0, total - current), stoppedReason: String(progress?.taskState || progress?.status || 'running') },
+    // A batch counter often reports a maximum quota or elapsed budget.  It is a checkpoint,
+    // never a claim that `total - current` objects were not attempted.
+    coverage: { observed: total ?? current, attempted: Math.min(total ?? current, current), acquired: Math.min(total ?? current, current), verified: 0, unknown: total === null ? 1 : 0, stoppedReason: String(progress?.taskState || progress?.status || 'running') },
     records: [],
-    checkpoint: { taskType: kind || '', current, total, taskState: progress?.taskState || progress?.status || 'running', message: progress?.message || '' },
+    checkpoint: { taskType: kind || '', current, knownSetSize: total, taskState: progress?.taskState || progress?.status || 'running', message: progress?.message || '' },
+  });
+}
+
+export function packageDiscovery({ platform, cards = [], query = '', authorExternalId = '', observedAt, capturedAt, surface = 'current_visible_surface' } = {}) {
+  const kind = authorExternalId ? PRODUCER_CAPABILITY.PROFILE_DISCOVERY : PRODUCER_CAPABILITY.DISCOVERY_SEARCH;
+  const visible = asArray(cards).slice(0, 2048);
+  return createCapturePackage({
+    packageKind: kind,
+    platform,
+    observedAt,
+    capturedAt,
+    target: authorExternalId
+      ? { basis: 'current_visible_surface', authorExternalId: String(authorExternalId), surface }
+      : { basis: 'current_visible_surface', query: String(query || ''), surface },
+    coverage: {
+      observed: visible.length,
+      attempted: visible.length,
+      acquired: visible.length,
+      verified: 0,
+      // A visible page is not a complete search/profile result set.  `unknown` says that
+      // explicitly; it is not a synthetic remaining count.
+      unknown: 1,
+      stoppedReason: 'surface_read_complete',
+    },
+    records: visible.map((card, ordinal) => ({
+      kind: authorExternalId ? 'profile_discovery_card' : 'discovery_card',
+      resultPosition: ordinal + 1,
+      sourceObject: normalizeSourceObject(platform, card),
+      payload: card || {},
+    })),
   });
 }
 

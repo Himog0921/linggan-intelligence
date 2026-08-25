@@ -6,6 +6,7 @@ import {
   packageBatchCheckpoint,
   packageComments,
   packageContentDetail,
+  packageDiscovery,
   packageMediaSlots,
   packageReplies,
 } from './producerRuntime.js';
@@ -33,6 +34,17 @@ export function createLingganContentRuntime({ platform } = {}) {
   }
 
   return {
+    async submitDiscovery(cards, { query = '', authorExternalId = '', surface = 'current_visible_surface' } = {}) {
+      const packageValue = packageDiscovery({ platform, cards, query, authorExternalId, surface });
+      const capability = authorExternalId ? 'profile_discovery' : 'discovery_search';
+      const target = authorExternalId
+        ? { authorExternalId: String(authorExternalId), surface }
+        : { query: String(query || ''), surface };
+      return submit(taskFor(platform, capability, target, {
+        maximumQuota: Math.max(1, packageValue.records.length),
+        stopConditions: ['current_surface_read_once', 'maximum_quota'],
+      }), packageValue);
+    },
     async submitContentDetail(note) {
       const packageValue = packageContentDetail({ platform, note });
       return submit(taskFor(platform, 'content_detail', { contentExternalId: String(note?.noteId || note?.id || '') }, { acquireMedia: 'slots' }), packageValue);

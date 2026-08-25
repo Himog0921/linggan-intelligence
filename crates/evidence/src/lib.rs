@@ -26,7 +26,8 @@ pub use producer_runtime::{
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, admit_media_blob,
     begin_media_upload, claim_media_upload_finalize, complete_media_upload, create_producer_task,
     producer_runtime_has_packages, producer_runtime_schema_is_ready, read_local_media_blob,
-    read_media_upload_session, read_runtime_library, record_media_upload_chunk,
-    release_media_upload_finalize, start_producer_attempt, submit_producer_package,
+    read_media_upload_session, read_runtime_library, record_media_download_failure,
+    record_media_upload_chunk, release_media_upload_finalize, start_producer_attempt,
+    submit_producer_package,
 };
 pub use receipt::{IngressOutcome, RejectionCode};

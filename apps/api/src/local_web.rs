@@ -21,14 +21,15 @@ use linggan_evidence::{
     ingest_discovery_package, local_discovery_schema_is_ready, local_producer_schema_is_ready,
     producer_runtime_has_packages, producer_runtime_schema_is_ready, read_discovery_library,
     read_local_media_blob, read_media_upload_session, read_runtime_library,
-    record_media_upload_chunk, release_media_upload_finalize, start_local_attempt,
-    start_producer_attempt, submit_local_package, submit_producer_package,
+    record_media_download_failure, record_media_upload_chunk, release_media_upload_finalize,
+    start_local_attempt, start_producer_attempt, submit_local_package, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeSet,
     fs,
     io::{Error, ErrorKind, Seek, SeekFrom, Write},
     net::{Ipv4Addr, SocketAddr},
@@ -46,6 +47,7 @@ const LIDS_TOKEN_DOCUMENT: &str = include_str!("../../../docs/design/lids/tokens
 #[derive(Clone)]
 struct LocalWebState {
     database: LocalDatabaseState,
+    active_media_sessions: Arc<tokio::sync::Mutex<BTreeSet<uuid::Uuid>>>,
 }
 
 #[derive(Clone)]
@@ -146,6 +148,7 @@ struct EvidenceLibraryParams {
 fn app() -> Router {
     router(LocalWebState {
         database: LocalDatabaseState::NotConfigured,
+        active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
     })
 }
 
@@ -153,6 +156,7 @@ fn app() -> Router {
 fn app_with_database(database: Database) -> Router {
     router(LocalWebState {
         database: LocalDatabaseState::Ready(Arc::new(database)),
+        active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
     })
 }
 
@@ -190,6 +194,10 @@ fn router(state: LocalWebState) -> Router {
             post(start_media_upload_route),
         )
         .route(
+            "/api/local/producer/media-observations/{observation_ref}/download-failures",
+            post(record_media_download_failure_route),
+        )
+        .route(
             "/api/local/producer/media-uploads/{session_ref}/chunks",
             axum::routing::patch(append_media_upload_chunk_route),
         )
@@ -214,6 +222,7 @@ async fn local_entry() -> Redirect {
 pub async fn serve() -> Result<(), std::io::Error> {
     let application = router(LocalWebState {
         database: configured_database_state().await,
+        active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
     });
     let local_port = configured_local_port()?;
     let address = SocketAddr::from((LOCAL_HOST, local_port));
@@ -638,6 +647,59 @@ async fn start_media_upload_route(
     }
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MediaDownloadFailureWire {
+    attempted_uri: String,
+    terminal_reason: String,
+}
+
+async fn record_media_download_failure_route(
+    State(state): State<LocalWebState>,
+    Path(observation_ref): Path<String>,
+    Json(input): Json<MediaDownloadFailureWire>,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_connected",
+        );
+    };
+    let Ok(observation_ref) = uuid::Uuid::parse_str(&observation_ref) else {
+        return local_producer_error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "media_observation_invalid",
+        );
+    };
+    if input.attempted_uri.trim().is_empty() {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "media_download_failure_invalid",
+        );
+    }
+    match record_media_download_failure(
+        database,
+        observation_ref,
+        &input.attempted_uri,
+        &input.terminal_reason,
+    )
+    .await
+    {
+        Ok(download_attempt_ref) => {
+            Json(json!({"downloadAttemptRef": download_attempt_ref, "delivery": "acknowledged"}))
+                .into_response()
+        }
+        Err(ProducerRuntimeError::MediaObservationNotFound) => local_producer_error(
+            axum::http::StatusCode::NOT_FOUND,
+            "media_observation_not_found",
+        ),
+        Err(_) => local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "media_download_failure_not_recorded",
+        ),
+    }
+}
+
 async fn append_media_upload_chunk_route(
     State(state): State<LocalWebState>,
     Path(session_ref): Path<String>,
@@ -655,6 +717,10 @@ async fn append_media_upload_chunk_route(
             axum::http::StatusCode::BAD_REQUEST,
             "media_upload_session_invalid",
         );
+    };
+    let _session_guard = match acquire_media_session_guard(&state, session_ref).await {
+        Some(guard) => guard,
+        None => return local_producer_error(axum::http::StatusCode::CONFLICT, "media_upload_busy"),
     };
     let Some(offset) = headers
         .get("x-linggan-media-offset")
@@ -733,6 +799,10 @@ async fn finalize_media_upload_route(
             "media_upload_session_invalid",
         );
     };
+    let _session_guard = match acquire_media_session_guard(&state, session_ref).await {
+        Some(guard) => guard,
+        None => return local_producer_error(axum::http::StatusCode::CONFLICT, "media_upload_busy"),
+    };
     let session = match claim_media_upload_finalize(database, session_ref).await {
         Ok(MediaUploadFinalizeClaim::Materialized(admission)) => {
             return Json(admission).into_response();
@@ -773,7 +843,18 @@ async fn finalize_claimed_media_upload(
 ) -> Response {
     let root = local_media_root();
     let temporary_path = root.join(&session.temporary_storage_key);
-    match fs::read(&temporary_path) {
+    let storage_key = media_storage_key(&session.expected_sha256);
+    let final_path = root.join(&storage_key);
+    // A crash may happen after the atomic rename and before its database receipt. Retry from a
+    // verified final blob in that narrow interval instead of making `finalizing` terminal.
+    let bytes_to_verify = fs::read(&temporary_path).or_else(|error| {
+        if error.kind() == ErrorKind::NotFound {
+            fs::read(&final_path)
+        } else {
+            Err(error)
+        }
+    });
+    match bytes_to_verify {
         Ok(bytes)
             if i64::try_from(bytes.len()).ok() == Some(session.expected_byte_size)
                 && sha256_bytes(&bytes) == session.expected_sha256 => {}
@@ -785,8 +866,6 @@ async fn finalize_claimed_media_upload(
             );
         }
     };
-    let storage_key = media_storage_key(&session.expected_sha256);
-    let final_path = root.join(&storage_key);
     let created = match atomically_promote_media_upload(&temporary_path, &final_path) {
         Ok(created) => created,
         Err(error) => {
@@ -838,6 +917,35 @@ async fn finalize_claimed_media_upload(
             }
         }
     }
+}
+
+struct MediaSessionGuard {
+    sessions: Arc<tokio::sync::Mutex<BTreeSet<uuid::Uuid>>>,
+    session_ref: uuid::Uuid,
+}
+
+impl Drop for MediaSessionGuard {
+    fn drop(&mut self) {
+        let sessions = Arc::clone(&self.sessions);
+        let session_ref = self.session_ref;
+        tokio::spawn(async move {
+            sessions.lock().await.remove(&session_ref);
+        });
+    }
+}
+
+async fn acquire_media_session_guard(
+    state: &LocalWebState,
+    session_ref: uuid::Uuid,
+) -> Option<MediaSessionGuard> {
+    let mut sessions = state.active_media_sessions.lock().await;
+    if !sessions.insert(session_ref) {
+        return None;
+    }
+    Some(MediaSessionGuard {
+        sessions: Arc::clone(&state.active_media_sessions),
+        session_ref,
+    })
 }
 
 async fn read_local_media_blob_route(

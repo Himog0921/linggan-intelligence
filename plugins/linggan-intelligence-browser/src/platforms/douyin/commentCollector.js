@@ -2,7 +2,7 @@ import { BATCH_CONFIG } from '../../shared/constants.js';
 import { parseCount, randomDelay } from '../../shared/utils.js';
 import { commentStore } from '../../db/commentStore.js';
 import { mediaAssetStore } from '../../db/mediaAssetStore.js';
-import { collectionRunStore } from '../../db/collectionRunStore.js';
+import { localExecutionStore } from '../../linggan/localExecutionStore.js';
 import { noteStore } from '../../db/noteStore.js';
 import { collectDouyinVideo, collectDouyinVideoById, collectDouyinVideoByAweme } from './videoCollector.js';
 import { detectDouyinPageType, isStrictDouyinDetailPage, extractDouyinContentId } from './pageDetector.js';
@@ -20,7 +20,7 @@ import {
   downloadBlob,
 } from './commentMedia.js';
 import { buildDouyinSingleCommentRunPatch } from './commentTaskSupport.js';
-import { createCollectionRunHeartbeatReporter } from '../../workbench/runtime/heartbeat.js';
+import { createLocalExecutionHeartbeatReporter } from '../../linggan/localExecutionSupport.js';
 import {
   createDouyinSecurityChallengeError,
   detectDouyinSecurityChallenge,
@@ -28,7 +28,7 @@ import {
 } from './securityChallenge.js';
 import JSZip from 'jszip';
 
-const reportHeartbeat = createCollectionRunHeartbeatReporter({ collectionRunStore });
+const reportHeartbeat = createLocalExecutionHeartbeatReporter({ localExecutionStore });
 
 function sanitizeFileSegment(value = '', fallback = 'douyin') {
   const normalized = String(value || '')
@@ -78,7 +78,7 @@ async function createSingleCommentRun({
   meta = {},
 } = {}) {
   const page = detectDouyinPageType();
-  return collectionRunStore.createRun({
+  return localExecutionStore.createRun({
     platform: 'douyin',
     taskType,
     pageType: page?.type || 'unknown',
@@ -449,7 +449,7 @@ export async function collectDouyinComments({
 
     if (run) {
       if (result.stopped) {
-        await collectionRunStore.markStopped(
+        await localExecutionStore.markStopped(
           run.collectionRunId,
           buildDouyinSingleCommentRunPatch({
             stopped: true,
@@ -458,7 +458,7 @@ export async function collectDouyinComments({
           }),
         );
       } else {
-        await collectionRunStore.markDone(
+        await localExecutionStore.markDone(
           run.collectionRunId,
           buildDouyinSingleCommentRunPatch({
             stopped: false,
@@ -475,7 +475,7 @@ export async function collectDouyinComments({
     };
   } catch (err) {
     if (run) {
-      await collectionRunStore.markFailed(run.collectionRunId, err, {
+      await localExecutionStore.markFailed(run.collectionRunId, err, {
         itemsPlanned: 1,
         itemsSucceeded: 0,
         itemsFailed: 1,
@@ -612,8 +612,8 @@ export async function downloadDouyinCommentImages({
     if (imageAssets.length === 0) {
       const stoppedWithoutImages = result.stopped;
       if (run) {
-        const finalize = stoppedWithoutImages ? collectionRunStore.markStopped : collectionRunStore.markDone;
-        await finalize.call(collectionRunStore, run.collectionRunId, {
+        const finalize = stoppedWithoutImages ? localExecutionStore.markStopped : localExecutionStore.markDone;
+        await finalize.call(localExecutionStore, run.collectionRunId, {
           itemsPlanned: 0,
           itemsSucceeded: 0,
           itemsFailed: 0,
@@ -746,7 +746,7 @@ export async function downloadDouyinCommentImages({
 
     if (success === 0 && stopped) {
       if (run) {
-        await collectionRunStore.markStopped(run.collectionRunId, {
+        await localExecutionStore.markStopped(run.collectionRunId, {
           itemsPlanned: imageAssets.length,
           itemsSucceeded: 0,
           itemsFailed: failed,
@@ -776,7 +776,7 @@ export async function downloadDouyinCommentImages({
 
     if (success === 0) {
       if (run) {
-        await collectionRunStore.markStopped(run.collectionRunId, {
+        await localExecutionStore.markStopped(run.collectionRunId, {
           itemsPlanned: totalImages,
           itemsSucceeded: 0,
           itemsFailed: failed,
@@ -815,8 +815,8 @@ export async function downloadDouyinCommentImages({
     await downloadBlob(blob, zipName);
 
     if (run) {
-      const finalize = stopped ? collectionRunStore.markStopped : collectionRunStore.markDone;
-      await finalize.call(collectionRunStore, run.collectionRunId, {
+      const finalize = stopped ? localExecutionStore.markStopped : localExecutionStore.markDone;
+      await finalize.call(localExecutionStore, run.collectionRunId, {
         itemsPlanned: totalImages,
         itemsSucceeded: success,
         itemsFailed: failed,
@@ -849,7 +849,7 @@ export async function downloadDouyinCommentImages({
     };
   } catch (err) {
     if (run) {
-      await collectionRunStore.markFailed(run.collectionRunId, err, {
+      await localExecutionStore.markFailed(run.collectionRunId, err, {
         itemsPlanned: 0,
         itemsSucceeded: 0,
         itemsFailed: 0,

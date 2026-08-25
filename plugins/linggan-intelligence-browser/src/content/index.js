@@ -1,7 +1,7 @@
 import '../extensionPublicPath.js';
 import '../content.css';
 import { MSG } from '../shared/constants.js';
-import { collectNote } from '../platforms/xhs/noteCollector.js';
+import { collectNote, discoverSurfaceNotesFromBestSource } from '../platforms/xhs/noteCollector.js';
 import { collectComments, collectCommentImages } from '../platforms/xhs/commentCollector.js';
 import { collectAuthor } from '../platforms/xhs/authorCollector.js';
 import { BatchNoteController, BatchCommentController } from '../platforms/xhs/batchController.js';
@@ -84,6 +84,12 @@ const xhsPageController = createXhsPageController({
   extractNoteId,
   sendToBackground,
   downloadNoteMediaFromRecord: async (note) => runtime.acquireMediaSlots(note),
+  discoverSurface: async ({ mode, maximumQuota }) => discoverSurfaceNotesFromBestSource(
+    mode === 'profile' ? '#userPostedFeeds' : '.feeds-container',
+    10,
+    { expectedCount: maximumQuota, currentUrl: window.location.href },
+  ),
+  submitDiscovery: (cards, context) => runtime.submitDiscovery(cards, context),
 });
 
 async function initXhs() {

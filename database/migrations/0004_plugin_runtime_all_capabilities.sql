@@ -62,7 +62,13 @@ CREATE TABLE linggan_runtime_submission_receipt (
 CREATE TABLE linggan_runtime_record_disposition (
     package_ref uuid NOT NULL REFERENCES linggan_runtime_capture_package(package_ref),
     record_ordinal integer NOT NULL CHECK (record_ordinal >= 0),
-    disposition text NOT NULL CHECK (disposition IN ('retained_uninterpreted', 'accepted_for_media_identity', 'quarantined')),
+    disposition text NOT NULL CHECK (disposition IN (
+        'retained_uninterpreted',
+        'accepted_for_library_discovery',
+        'accepted_for_library_content',
+        'accepted_for_media_identity',
+        'quarantined'
+    )),
     reason text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT scope_001_now(),
     PRIMARY KEY (package_ref, record_ordinal)

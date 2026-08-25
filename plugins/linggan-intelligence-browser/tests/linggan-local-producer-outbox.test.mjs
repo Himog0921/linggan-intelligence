@@ -14,7 +14,7 @@ test('manual TaskSpec remains flat while scheduled control is never fabricated',
   assert.deepEqual(spec, {
     contractVersion: 'linggan.producer.task-spec.v1',
     taskId: '11111111-1111-4111-8111-111111111111', source: 'manual', platform: 'xhs',
-    pageType: 'search_results', target: { surface: 'current_visible_search_surface' },
+    pageType: 'search_results', target: { query: '__manual_placeholder__', surface: 'current_visible_search_surface' },
     capabilitiesRequested: ['discovery_search'], maximumQuota: 20,
     commentLimit: 'not_requested', acquireMedia: 'not_requested',
     riskPolicy: 'local_trusted_user_initiated',

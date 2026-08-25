@@ -34,6 +34,8 @@ export function createXhsPageController({
   extractNoteId,
   sendToBackground,
   downloadNoteMediaFromRecord,
+  discoverSurface,
+  submitDiscovery,
 } = {}) {
   let batchNoteCtrl = null;
   let batchCommentCtrl = null;
@@ -221,8 +223,9 @@ export function createXhsPageController({
         case 'collectNote': {
           showToast('正在采集笔记...', 'info');
           const note = await collectNote();
-          showToast(`笔记采集成功：${note.title}`, 'success');
-          reportDone('note', 1);
+          showToast(note?.lingganDelivery?.delivery === 'acknowledged'
+            ? `笔记已被 Linggan 接纳：${note.title}`
+            : `笔记已读取，待本机 Linggan 交付：${note.title}`, note?.lingganDelivery?.delivery === 'acknowledged' ? 'success' : 'info');
           if ((note.images && note.images.length > 0) || note.video || note.cover || note.coverUrl || note.livePhotoStreams?.length > 0) {
             const mediaCount = (note.images?.length || 0) + (note.video ? 1 : 0);
             try {
@@ -268,7 +271,6 @@ export function createXhsPageController({
             maxSubComments: commentSettings.commentDepthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 0 : 200,
             commentDepthMode: commentSettings.commentDepthMode,
           });
-          reportDone('comment', 0);
           break;
         }
 
@@ -276,8 +278,28 @@ export function createXhsPageController({
           await ensurePluginAuthorized();
           showToast('正在采集博主信息...', 'info');
           const author = await collectAuthor();
-          showToast(`博主采集成功：${author.name}`, 'success');
-          reportDone('author', 1);
+          showToast(author?.lingganDelivery?.delivery === 'acknowledged'
+            ? `博主资料已被 Linggan 接纳：${author.name}`
+            : `博主资料已读取，待本机 Linggan 交付：${author.name}`, author?.lingganDelivery?.delivery === 'acknowledged' ? 'success' : 'info');
+          break;
+        }
+
+        case 'discoverSurface': {
+          if (typeof discoverSurface !== 'function' || typeof submitDiscovery !== 'function') {
+            throw new Error('linggan_discovery_adapter_unavailable');
+          }
+          const mode = String(params.mode || '').trim();
+          showToast('正在读取当前页面可见内容…', 'info');
+          const cards = await discoverSurface({ mode, maximumQuota: 20 });
+          const target = new URL(window.location.href);
+          const query = target.searchParams.get('keyword') || target.searchParams.get('q') || '';
+          const authorExternalId = mode === COLLECT_MODE.PROFILE
+            ? (target.pathname.match(/\/user\/profile\/([^/?#]+)/)?.[1] || '')
+            : '';
+          const delivery = await submitDiscovery(cards, { query, authorExternalId, surface: 'current_visible_surface' });
+          showToast(delivery?.delivery === 'acknowledged'
+            ? `已接纳当前页面 ${cards.length} 条发现`
+            : `已读取当前页面 ${cards.length} 条，待本机 Linggan 交付`, delivery?.delivery === 'acknowledged' ? 'success' : 'info');
           break;
         }
 

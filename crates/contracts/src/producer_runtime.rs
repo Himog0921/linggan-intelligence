@@ -26,6 +26,16 @@ const PACKAGE_KINDS: &[&str] = &[
     "media_bytes",
     "batch_checkpoint",
 ];
+const STOP_CONDITIONS: &[&str] = &[
+    "manual_stop",
+    "maximum_quota",
+    "current_surface_read_once",
+    "surface_ended",
+    "time_budget",
+    "risk_budget",
+    "detail_read_complete",
+    "collector_complete",
+];
 
 #[derive(Debug, Error)]
 pub enum ProducerRuntimeContractError {
@@ -260,8 +270,19 @@ pub fn parse_producer_task_spec(
             .any(|value| !PACKAGE_KINDS.contains(&value.as_str()))
         || wire.comment_limit.is_null()
         || wire.acquire_media.is_null()
-        || wire.risk_policy.trim().is_empty()
+        || wire.risk_policy != "local_trusted_user_initiated"
         || wire.stop_conditions.is_empty()
+        || wire
+            .stop_conditions
+            .iter()
+            .any(|value| !STOP_CONDITIONS.contains(&value.as_str()))
+    {
+        return Err(ProducerRuntimeContractError::UnsupportedValue);
+    }
+    if wire.capabilities_requested.len() != 1
+        || !valid_target_for_capability(&wire.target, &wire.capabilities_requested[0])
+        || !valid_comment_limit(&wire.comment_limit)
+        || !valid_acquire_media(&wire.acquire_media)
     {
         return Err(ProducerRuntimeContractError::UnsupportedValue);
     }
@@ -366,16 +387,44 @@ fn validate_coverage(coverage: &CoverageWire) -> Result<(), ProducerRuntimeContr
         return Err(ProducerRuntimeContractError::InvalidCoverage);
     }
     for layer in &coverage.layers {
+        let known_set = coverage.target.get("basis").and_then(Value::as_str) == Some("known_set");
         if !PACKAGE_KINDS.contains(&layer.capability.as_str())
             || layer.stopped_reason.trim().is_empty()
             || layer.attempted > layer.observed
             || layer.acquired > layer.attempted
             || layer.verified > layer.acquired
+            || (!known_set && layer.not_attempted != 0)
         {
             return Err(ProducerRuntimeContractError::InvalidCoverage);
         }
     }
     Ok(())
+}
+
+fn valid_target_for_capability(target: &Value, capability: &str) -> bool {
+    let non_empty = |key: &str| {
+        target
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    };
+    match capability {
+        "discovery_search" => non_empty("query"),
+        "profile_discovery" | "author_profile" => non_empty("authorExternalId"),
+        "content_detail" | "comments" | "replies" | "media_slots" | "media_bytes" => {
+            non_empty("contentExternalId")
+        }
+        "batch_checkpoint" => non_empty("taskType"),
+        _ => false,
+    }
+}
+
+fn valid_comment_limit(value: &Value) -> bool {
+    value.as_str() == Some("not_requested") || value.as_u64().is_some_and(|limit| limit > 0)
+}
+
+fn valid_acquire_media(value: &Value) -> bool {
+    matches!(value.as_str(), Some("not_requested" | "slots" | "bytes"))
 }
 
 fn parse_uuid(value: &str) -> Result<Uuid, ProducerRuntimeContractError> {
@@ -394,7 +443,7 @@ mod tests {
 
     #[test]
     fn task_spec_allows_manual_and_scheduled_without_implementing_a_poller() {
-        let value = r#"{"contractVersion":"linggan.producer.task-spec.v1","taskId":"11111111-1111-4111-8111-111111111111","source":"scheduled","platform":"xhs","pageType":"detail","target":{"url":"https://example.test/note"},"capabilitiesRequested":["content_detail","media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted","stopConditions":["maximum_quota"]}"#;
+        let value = r#"{"contractVersion":"linggan.producer.task-spec.v1","taskId":"11111111-1111-4111-8111-111111111111","source":"scheduled","platform":"xhs","pageType":"detail","target":{"contentExternalId":"note-1"},"capabilitiesRequested":["content_detail"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]}"#;
         let spec = parse_producer_task_spec(value).expect("flat task spec is accepted");
         assert_eq!(spec.source(), "scheduled");
         assert_eq!(spec.platform(), "xhs");
@@ -404,5 +453,14 @@ mod tests {
     fn coverage_does_not_turn_unknown_into_a_zero_completion_claim() {
         let value = r#"{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"11111111-1111-4111-8111-111111111111","packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"known_set"},"layers":[{"capability":"media_slots","observed":9,"attempted":7,"acquired":6,"verified":6,"failed":1,"notAttempted":2,"unknown":0,"stoppedReason":"risk_control"}]},"records":[]}"#;
         assert!(parse_producer_capture_package(value).is_ok());
+    }
+
+    #[test]
+    fn quota_target_cannot_invent_unattempted_remainder() {
+        let value = r#"{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"11111111-1111-4111-8111-111111111111","packageKind":"comments","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"maximum_quota","contentExternalId":"n"},"layers":[{"capability":"comments","observed":50,"attempted":50,"acquired":50,"verified":0,"failed":0,"notAttempted":50,"unknown":1,"stoppedReason":"risk_budget"}]},"records":[]}"#;
+        assert!(matches!(
+            parse_producer_capture_package(value),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
     }
 }

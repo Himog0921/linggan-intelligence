@@ -178,6 +178,37 @@ pub async fn admit_media_blob(
     })
 }
 
+/// A failed download is still an immutable observation about the acquisition attempt. It does
+/// not alter the text package, slot identity, or a future retry's chance to acquire bytes.
+pub async fn record_media_download_failure(
+    database: &Database,
+    media_observation_ref: Uuid,
+    attempted_uri: &str,
+    terminal_reason: &str,
+) -> Result<Uuid, ProducerRuntimeError> {
+    let reason = match terminal_reason {
+        "expired_url" | "mime_mismatch" | "size_limit" | "cancelled" | "network_error" => {
+            terminal_reason
+        }
+        _ => "unknown",
+    };
+    let exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM linggan_media_observation WHERE observation_ref = $1)",
+    )
+    .bind(media_observation_ref)
+    .fetch_one(database.pool())
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if !exists {
+        return Err(ProducerRuntimeError::MediaObservationNotFound);
+    }
+    let attempt_ref = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_media_download_attempt (download_attempt_ref,media_observation_ref,ended_at,terminal_reason,attempted_uri) VALUES ($1,$2,scope_001_now(),$3,$4)")
+        .bind(attempt_ref).bind(media_observation_ref).bind(reason).bind(attempted_uri)
+        .execute(database.pool()).await.map_err(ProducerRuntimeError::Internal)?;
+    Ok(attempt_ref)
+}
+
 pub async fn begin_media_upload(
     database: &Database,
     media_observation_ref: Uuid,
@@ -355,7 +386,10 @@ pub async fn claim_media_upload_finalize(
             MediaUploadFinalizeClaim::Ready(session)
         }
         "receiving" => MediaUploadFinalizeClaim::Incomplete,
-        "finalizing" => MediaUploadFinalizeClaim::Busy,
+        // `finalizing` is a recoverable delivery state, not a truth state. The local process may
+        // have stopped after the atomic filesystem promotion but before recording its receipt.
+        // Retrying from the same immutable session is safe; the API serializes active requests.
+        "finalizing" => MediaUploadFinalizeClaim::Ready(session),
         _ => MediaUploadFinalizeClaim::Busy,
     };
     tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
@@ -466,8 +500,10 @@ fn runtime_library_sql() -> &'static str {
        SELECT package.platform, package.package_kind, package.accepted_at, package.observed_at, package.coverage, task.task_spec, record.value AS record \
        FROM linggan_runtime_capture_package package \
        JOIN linggan_runtime_task task ON task.task_id = package.task_id \
-       CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records') AS record(value) \
-       WHERE package.package_kind IN ('discovery_search','content_detail','comments','replies') \
+       CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records') WITH ORDINALITY AS record(value, ordinal) \
+       JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref = package.package_ref AND disposition.record_ordinal = record.ordinal - 1 \
+       WHERE disposition.disposition IN ('accepted_for_library_discovery','accepted_for_library_content') \
+       AND package.package_kind IN ('discovery_search','profile_discovery','content_detail') \
      ), normalized AS ( \
        SELECT platform, accepted_at, observed_at, coverage, task_spec, record, \
               COALESCE(record #>> '{sourceObject,externalId}', coverage #>> '{target,contentExternalId}') AS platform_content_id, \
@@ -515,8 +551,10 @@ fn runtime_library_sql() -> &'static str {
 fn runtime_unknown_time_sql() -> &'static str {
     "SELECT count(DISTINCT COALESCE(record.value #>> '{sourceObject,externalId}', package.coverage #>> '{target,contentExternalId}')) \
      FROM linggan_runtime_capture_package package \
-     CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records') AS record(value) \
-     WHERE package.package_kind IN ('discovery_search','content_detail') \
+     CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records') WITH ORDINALITY AS record(value, ordinal) \
+     JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref = package.package_ref AND disposition.record_ordinal = record.ordinal - 1 \
+     WHERE disposition.disposition IN ('accepted_for_library_discovery','accepted_for_library_content') \
+       AND package.package_kind IN ('discovery_search','profile_discovery','content_detail') \
        AND COALESCE(record.value #>> '{sourceObject,externalId}', package.coverage #>> '{target,contentExternalId}') IS NOT NULL \
        AND NOT CASE WHEN COALESCE(record.value #>> '{payload,publishedAt}', '') ~ '^[0-9]+$' \
                 THEN (record.value #>> '{payload,publishedAt}')::numeric > 0 ELSE false END"
@@ -715,6 +753,21 @@ async fn insert_record_dispositions(
             } else {
                 ("quarantined", "media_slot_contract_incomplete")
             }
+        } else if library_card_record(record) {
+            if matches!(
+                package.package_kind(),
+                "discovery_search" | "profile_discovery"
+            ) {
+                (
+                    "accepted_for_library_discovery",
+                    "typed_discovery_card_identity_valid",
+                )
+            } else {
+                (
+                    "accepted_for_library_content",
+                    "typed_content_card_identity_valid",
+                )
+            }
         } else {
             // This generic runtime does not promote opaque collector records into Evidence.
             // A later type-specific admission can use this immutable record reference.
@@ -725,6 +778,14 @@ async fn insert_record_dispositions(
             .bind(disposition).bind(reason).execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     }
     Ok(())
+}
+
+fn library_card_record(record: &Value) -> bool {
+    record
+        .pointer("/sourceObject/externalId")
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty())
+        && record.get("payload").is_some_and(Value::is_object)
 }
 
 struct MediaSlotRecord<'a> {

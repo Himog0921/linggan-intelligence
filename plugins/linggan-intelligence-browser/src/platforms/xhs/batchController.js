@@ -7,23 +7,28 @@ import {
 } from './noteCollector.js';
 import { collectComments } from './commentCollector.js';
 import { throttle, watchCaptcha, showCaptchaPauseOverlay } from './antiDetect.js';
-import { sendToBackground, reportProgress, reportDone, reportWorkbenchRecord } from '../../shared/messaging.js';
+import { sendToBackground, reportProgress, reportDone, reportLocalRead } from '../../shared/messaging.js';
 import { BATCH_CONFIG, COLLECT_MODE, COMMENT_DEPTH_MODE, MSG, TASK_STATE } from '../../shared/constants.js';
 import { extractProfileIdentityFromUrl } from '../../shared/targetIdentity.js';
 import { looksLikeDeadPageTitle } from '../../shared/deadPageSignals.js';
 import { randomDelay, parseCount, extractNoteId } from '../../shared/utils.js';
 import { noteStore } from '../../db/noteStore.js';
-import { collectionRunStore } from '../../db/collectionRunStore.js';
-import { createCollectionRunHeartbeatReporter } from '../../workbench/runtime/heartbeat.js';
-import { MONITOR_RECORD_MODE, MONITOR_TASK_STRATEGY, WORKBENCH_RECORD_TYPE } from '../../workbench/protocol/schema.js';
-import { buildXhsSurfaceNoteRecords, withMonitorRecordMeta } from '../../workbench/runtime/monitorTask.js';
+import { localExecutionStore } from '../../linggan/localExecutionStore.js';
 import {
-  buildRemoteRunCreatePayload,
+  createLocalExecutionHeartbeatReporter,
+  LOCAL_READ_RECORD_TYPE,
+  LOCAL_SURFACE_MODE,
+  LOCAL_TASK_STRATEGY,
+  buildXhsSurfaceNoteRecords,
+  withLocalReadMeta,
+} from '../../linggan/localExecutionSupport.js';
+import {
+  buildLocalExecutionCreatePayload,
   buildXhsAttachedCommentResult,
   buildXhsBatchNotesProgressPatch,
   buildXhsBatchNotesRunPatch,
   publicCommentCountFromXhsNote,
-} from '../../workbench/runtime/xhsBatchRunHelper.js';
+} from '../../linggan/localExecutionSupport.js';
 import {
   applyXhsSearchFilters,
   hasExplicitXhsSearchFilters,
@@ -31,7 +36,7 @@ import {
   readCurrentXhsSearchFilterSnapshot,
   summarizeXhsSearchFilters,
 } from './searchFilters.js';
-import { resolveBatchResumeState } from '../../workbench/runtime/batchResume.js';
+import { resolveBatchResumeState } from '../../linggan/localExecutionSupport.js';
 import {
   CLOSE_SELECTORS,
   isNoteDetailReady,
@@ -193,8 +198,8 @@ export function checkXhsAuthorMonitorTarget(monitorMeta = {}, {
 } = {}) {
   const strategy = normalizeTargetIdentity(monitorMeta?.taskStrategy);
   const monitorMode = normalizeTargetIdentity(monitorMeta?.surfaceMode || monitorMeta?.monitorMode);
-  const isAuthorMonitor = strategy === normalizeTargetIdentity(MONITOR_TASK_STRATEGY.AUTHOR_BASELINE)
-    || monitorMode === normalizeTargetIdentity(MONITOR_RECORD_MODE.AUTHOR_SURFACE)
+  const isAuthorMonitor = strategy === normalizeTargetIdentity(LOCAL_TASK_STRATEGY.AUTHOR_BASELINE)
+    || monitorMode === normalizeTargetIdentity(LOCAL_SURFACE_MODE.AUTHOR_SURFACE)
     || Boolean(monitorMeta?.surfaceOnly);
 
   if (!isAuthorMonitor || String(mode || '').trim() !== COLLECT_MODE.PROFILE) {
@@ -268,14 +273,14 @@ function createTargetMismatchError(check = {}) {
 async function resolveExistingBatchRun({ collectionRunId = '', externalTaskId = '', taskType = '' } = {}) {
   const explicitRunId = String(collectionRunId || '').trim();
   if (explicitRunId) {
-    return collectionRunStore.getById(explicitRunId).catch(() => null);
+    return localExecutionStore.getById(explicitRunId).catch(() => null);
   }
   const taskId = String(externalTaskId || '').trim();
   if (!taskId) return null;
-  if (typeof collectionRunStore.getLatestResumableByExternalTaskId === 'function') {
-    return collectionRunStore.getLatestResumableByExternalTaskId(taskId, { taskType }).catch(() => null);
+  if (typeof localExecutionStore.getLatestResumableByExternalTaskId === 'function') {
+    return localExecutionStore.getLatestResumableByExternalTaskId(taskId, { taskType }).catch(() => null);
   }
-  return collectionRunStore.getLatestByExternalTaskId(taskId).catch(() => null);
+  return localExecutionStore.getLatestByExternalTaskId(taskId).catch(() => null);
 }
 
 function hydrateXhsNoteResumeState(runRecord = {}, completedTargetIds = []) {
@@ -350,7 +355,7 @@ export class BatchNoteController extends BaseBatchController {
     this._totalCommentsCollected = 0;
     this._searchFilters = normalizeXhsSearchFilters();
     this._searchFilterSnapshot = null;
-    this.reportHeartbeat = createCollectionRunHeartbeatReporter({ collectionRunStore });
+    this.reportHeartbeat = createLocalExecutionHeartbeatReporter({ localExecutionStore });
   }
 
   async start(mode, onProgress, settings = {}) {
@@ -492,7 +497,7 @@ export class BatchNoteController extends BaseBatchController {
     const runPayload = existingCollectionRunId
       || existingRun?.collectionRunId
       ? null
-      : buildRemoteRunCreatePayload({
+      : buildLocalExecutionCreatePayload({
         platform: 'xhs',
         taskType: 'batchNotes',
         pageType: mode,
@@ -502,7 +507,7 @@ export class BatchNoteController extends BaseBatchController {
         externalTaskMeta: settings.externalTaskMeta || {},
       });
     if (runPayload) {
-      const run = await collectionRunStore.createRun(runPayload);
+      const run = await localExecutionStore.createRun(runPayload);
       this.collectionRunId = run.collectionRunId;
       existingRun = run;
     } else if (existingCollectionRunId || existingRun?.collectionRunId) {
@@ -680,9 +685,9 @@ export class BatchNoteController extends BaseBatchController {
   async _finalizeCollectionRun(status, patch = {}) {
     if (!this.collectionRunId) return null;
     const finalizer = status === 'stopped'
-      ? collectionRunStore.markStopped
-      : collectionRunStore.markDone;
-    const updated = await finalizer.call(collectionRunStore, this.collectionRunId, patch);
+      ? localExecutionStore.markStopped
+      : localExecutionStore.markDone;
+    const updated = await finalizer.call(localExecutionStore, this.collectionRunId, patch);
     if (!updated) {
       throw new Error(`采集运行记录最终状态写入失败：${this.collectionRunId}`);
     }
@@ -962,7 +967,7 @@ export class BatchNoteController extends BaseBatchController {
       commentResults: this.commentResults,
       processedCount: this.currentIndex,
     });
-    await collectionRunStore.updateById(this.collectionRunId, runPatch).catch(() => {});
+    await localExecutionStore.updateById(this.collectionRunId, runPatch).catch(() => {});
   }
 
   _buildPartialRunPatch() {
@@ -976,13 +981,13 @@ export class BatchNoteController extends BaseBatchController {
   }
 
   async _persistPausedState() {
-    if (!this.collectionRunId || !collectionRunStore?.markPaused) return;
-    await collectionRunStore.markPaused(this.collectionRunId, this._buildPartialRunPatch()).catch(() => {});
+    if (!this.collectionRunId || !localExecutionStore?.markPaused) return;
+    await localExecutionStore.markPaused(this.collectionRunId, this._buildPartialRunPatch()).catch(() => {});
   }
 
   async _persistRunningState() {
     if (!this.collectionRunId) return;
-    await collectionRunStore.updateById(this.collectionRunId, {
+    await localExecutionStore.updateById(this.collectionRunId, {
       ...this._buildPartialRunPatch(),
       status: 'running',
       finishedAt: undefined,
@@ -991,7 +996,7 @@ export class BatchNoteController extends BaseBatchController {
 
   async _persistStoppedState() {
     if (!this.collectionRunId) return;
-    await collectionRunStore.markStopped(this.collectionRunId, this._buildPartialRunPatch()).catch(() => {});
+    await localExecutionStore.markStopped(this.collectionRunId, this._buildPartialRunPatch()).catch(() => {});
   }
 
   async _captureOneNote(noteInfo) {
@@ -1142,15 +1147,15 @@ export class BatchNoteController extends BaseBatchController {
   _reportCollectedNote(result = {}) {
     if (!this.collectionRunId) return;
     if (this._shouldUseFinalResultPackageOnly()) return;
-    const record = withMonitorRecordMeta(
+    const record = withLocalReadMeta(
       buildWorkbenchNoteRecord(result),
       this.monitorMeta || result.monitorMeta,
       result.monitorMode,
     );
     const externalRecordId = String(record.noteId || record.platformContentId || record.url || '').trim();
     if (!externalRecordId && !record.title && !record.content) return;
-    reportWorkbenchRecord({
-      recordType: WORKBENCH_RECORD_TYPE.NOTE,
+    reportLocalRead({
+      recordType: LOCAL_READ_RECORD_TYPE.NOTE,
       externalRecordId,
       record,
       collectionRunId: this.collectionRunId,
@@ -1293,7 +1298,7 @@ export class BatchNoteController extends BaseBatchController {
     if (!this.collectionRunId) return;
     if (this._shouldUseFinalResultPackageOnly()) return;
     const noteId = String(comment.noteId || noteInfo.noteId || '').trim().replace(/^xhs_/, '');
-    const record = withMonitorRecordMeta({
+    const record = withLocalReadMeta({
       ...comment,
       platform: String(comment.platform || 'xhs').trim() || 'xhs',
       noteId,
@@ -1302,8 +1307,8 @@ export class BatchNoteController extends BaseBatchController {
     }, this.monitorMeta || comment.monitorMeta, comment.monitorMode);
     const externalRecordId = String(record.commentId || record.id || record.commentEntityId || '').trim();
     if (!externalRecordId || !String(record.text || record.content || record.commentText || '').trim()) return;
-    reportWorkbenchRecord({
-      recordType: WORKBENCH_RECORD_TYPE.COMMENT,
+    reportLocalRead({
+      recordType: LOCAL_READ_RECORD_TYPE.COMMENT,
       externalRecordId,
       record,
       collectionRunId: this.collectionRunId,
@@ -1635,7 +1640,7 @@ export class BatchNoteController extends BaseBatchController {
 
   async _markRunFailed(error) {
     if (!this.collectionRunId) return;
-    await collectionRunStore.markFailed(this.collectionRunId, error, {
+    await localExecutionStore.markFailed(this.collectionRunId, error, {
       ...buildXhsBatchNotesRunPatch({
         noteList: this.noteList,
         collected: this.collected,

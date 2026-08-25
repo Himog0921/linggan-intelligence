@@ -71,6 +71,22 @@ for (const forbiddenImport of [
 const dashboardBridgeSource = read(path.join(root, 'src/content/dashboardBridge.js'));
 assert(dashboardBridgeSource.includes('downloadNoteMediaFromRecord'), 'dashboard media action must enter the registered Linggan media runtime');
 assert(!dashboardBridgeSource.includes('createLingganPendingResult'), 'dashboard media action must not report a long-lived pending capability');
+const popupSource = read(path.join(root, 'src/popup/App.jsx'));
+assert(popupSource.includes('ensureLocalTrustedRuntime'), 'popup must use the LOCAL_TRUSTED runtime boundary');
+for (const retiredPopupAction of [
+  'AUTHORIZE_PLUGIN_ACCESS',
+  'REQUEST_PLUGIN_AUTHORIZATION',
+  'CLAIM_PLUGIN_AUTHORIZATION_REQUEST',
+  'CLEAR_PLUGIN_AUTHORIZATION',
+  'GET_PLATFORM_COOKIES',
+  'GET_STORED_PLATFORM_COOKIES',
+  'GET_EXECUTION_STATION_STATUS',
+  'GET_ACCOUNTS',
+  'ADD_ACCOUNT',
+  'REMOVE_ACCOUNT',
+]) {
+  assert(!popupSource.includes(retiredPopupAction), `popup must not retain a retired authorization, station, cookie, or account entry: ${retiredPopupAction}`);
+}
 
 const dist = path.join(root, 'dist');
 assert(existsSync(dist), 'dist is missing; run build first');
@@ -78,6 +94,19 @@ for (const file of walk(dist).filter((file) => /\.(?:js|html|json|css)$/.test(fi
   const contents = read(file);
   assert(!/lingganboom\.fun/i.test(contents), `built artifact includes old workbench host: ${path.relative(root, file)}`);
   assert(!/api\/(?:execution-stations|plugin-authorization)/i.test(contents), `built artifact includes old workbench endpoint: ${path.relative(root, file)}`);
+}
+const popupBundle = read(path.join(dist, 'popup.js'));
+for (const retiredPopupTransport of [
+  'authorizePluginAccess',
+  'requestPluginAuthorization',
+  'claimPluginAuthorizationRequest',
+  'clearPluginAuthorization',
+  'getPlatformCookies',
+  'getStoredPlatformCookies',
+  'getExecutionStationStatus',
+  'plugin_authorization_required',
+]) {
+  assert(!popupBundle.includes(retiredPopupTransport), `built popup must not retain retired management transport: ${retiredPopupTransport}`);
 }
 
 const activeContentBundles = walk(dist)

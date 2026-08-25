@@ -28,7 +28,7 @@ export async function readLingganLocalReadiness(fetchImpl = globalThis.fetch) {
 export function createManualTaskSpec({ taskId = crypto.randomUUID() } = {}) {
   return createTaskSpec({
     taskId, source: 'manual', platform: 'xhs', pageType: 'search_results',
-    target: { surface: 'current_visible_search_surface' }, capabilitiesRequested: ['discovery_search'],
+    target: { query: '__manual_placeholder__', surface: 'current_visible_search_surface' }, capabilitiesRequested: ['discovery_search'],
     maximumQuota: 20, commentLimit: 'not_requested', acquireMedia: 'not_requested',
     riskPolicy: 'local_trusted_user_initiated', stopConditions: ['current_surface_read_once', 'maximum_quota'],
   });
@@ -39,7 +39,7 @@ export function createTaskSpec({
   capabilitiesRequested, maximumQuota = null, commentLimit = 'not_requested',
   acquireMedia = 'not_requested', riskPolicy = 'local_trusted_user_initiated', stopConditions = [],
 } = {}) {
-  return {
+  const value = {
     contractVersion: 'linggan.producer.task-spec.v1', taskId, source, platform, pageType,
     target: target && typeof target === 'object' && !Array.isArray(target) ? target : {},
     capabilitiesRequested: Array.isArray(capabilitiesRequested) ? capabilitiesRequested : [],
@@ -47,6 +47,40 @@ export function createTaskSpec({
     commentLimit, acquireMedia, riskPolicy,
     stopConditions: Array.isArray(stopConditions) ? stopConditions : [],
   };
+  validateTaskSpec(value);
+  return value;
+}
+
+const CAPABILITIES = new Set([
+  'discovery_search', 'profile_discovery', 'content_detail', 'comments', 'replies',
+  'author_profile', 'media_slots', 'media_bytes', 'batch_checkpoint',
+]);
+const STOP_CONDITIONS = new Set([
+  'manual_stop', 'maximum_quota', 'current_surface_read_once', 'surface_ended',
+  'time_budget', 'risk_budget', 'detail_read_complete', 'collector_complete',
+]);
+
+// The browser must reject an ambiguous instruction before it creates an outbox envelope.  This
+// is intentionally closed rather than a "reasonable defaults" parser: a producer may execute
+// mechanics, but may not infer what Linggan meant to collect.
+export function validateTaskSpec(spec = {}) {
+  if (!['manual', 'scheduled'].includes(spec.source) || !['xhs', 'douyin'].includes(spec.platform)) throw new Error('task_spec_source_or_platform_invalid');
+  if (!spec.target || typeof spec.target !== 'object' || Array.isArray(spec.target)) throw new Error('task_spec_target_invalid');
+  const capabilities = Array.isArray(spec.capabilitiesRequested) ? spec.capabilitiesRequested : [];
+  if (capabilities.length !== 1 || !CAPABILITIES.has(capabilities[0])) throw new Error('task_spec_capability_lane_invalid');
+  const capability = capabilities[0];
+  const target = spec.target;
+  const requireText = (key) => { if (!String(target[key] || '').trim()) throw new Error(`task_spec_target_${key}_required`); };
+  if (capability === 'discovery_search') requireText('query');
+  if (capability === 'profile_discovery' || capability === 'author_profile') requireText('authorExternalId');
+  if (['content_detail', 'comments', 'replies', 'media_slots', 'media_bytes'].includes(capability)) requireText('contentExternalId');
+  if (capability === 'batch_checkpoint') requireText('taskType');
+  if (!(spec.commentLimit === 'not_requested' || (Number.isInteger(spec.commentLimit) && spec.commentLimit > 0))) throw new Error('task_spec_comment_limit_invalid');
+  if (!['not_requested', 'slots', 'bytes'].includes(spec.acquireMedia)) throw new Error('task_spec_acquire_media_invalid');
+  if (spec.riskPolicy !== 'local_trusted_user_initiated') throw new Error('task_spec_risk_policy_invalid');
+  if (!Array.isArray(spec.stopConditions) || spec.stopConditions.length === 0 || spec.stopConditions.some((value) => !STOP_CONDITIONS.has(value))) throw new Error('task_spec_stop_conditions_invalid');
+  if (spec.maximumQuota !== null && (!Number.isInteger(spec.maximumQuota) || spec.maximumQuota <= 0)) throw new Error('task_spec_maximum_quota_invalid');
+  return spec;
 }
 
 export function createLocalAttempt({ producerInstanceId, taskId, attemptId = crypto.randomUUID() } = {}) {

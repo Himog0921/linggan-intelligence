@@ -1,13 +1,15 @@
 use linggan_contracts::{
-    parse_local_producer_attempt, parse_local_producer_submission, parse_local_task_spec,
-    parse_producer_attempt, parse_producer_submission, parse_producer_task_spec,
+    EvidenceQuery, parse_local_producer_attempt, parse_local_producer_submission,
+    parse_local_task_spec, parse_producer_attempt, parse_producer_submission,
+    parse_producer_task_spec,
 };
 use linggan_evidence::{
     LocalAttemptOutcome, LocalSubmissionOutcome, LocalTaskOutcome, MediaUploadFinalizeClaim,
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, admit_media_blob,
     begin_media_upload, claim_media_upload_finalize, complete_media_upload, create_manual_task,
-    create_producer_task, read_runtime_library, record_media_upload_chunk, start_local_attempt,
-    start_producer_attempt, submit_local_package, submit_producer_package,
+    create_producer_task, read_runtime_library, record_media_download_failure,
+    record_media_upload_chunk, start_local_attempt, start_producer_attempt, submit_local_package,
+    submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::Row;
@@ -104,6 +106,17 @@ async fn full_runtime_accepts_each_capability_without_collapsing_partial_media_o
     assert_count(&database, "linggan_media_blob", 1).await;
     assert_count(&database, "linggan_media_materialization", 2).await;
     assert_count(&database, "linggan_media_processing_job_event", 4).await;
+    let failed_attempt = record_media_download_failure(
+        &database,
+        "ffffffff-ffff-4fff-8fff-ffffffffffff"
+            .parse()
+            .expect("observation id"),
+        "https://fixture.invalid/expired.jpg",
+        "expired_url",
+    )
+    .await
+    .expect("failed media acquisition is independently retained");
+    assert_ne!(failed_attempt, uuid::Uuid::nil());
     prove_resumable_media_upload(&database).await;
     let query = serde_json::from_str(r#"{"text":null,"scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#)
         .expect("read query is valid");
@@ -113,6 +126,171 @@ async fn full_runtime_accepts_each_capability_without_collapsing_partial_media_o
     assert!(
         projection.cards.is_empty(),
         "media-only packages do not fabricate content cards"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn every_declared_capability_admits_one_typed_package_without_a_second_transport() {
+    let database = proof_database("plugin_runtime_every_capability").await;
+    for capability in [
+        "discovery_search",
+        "profile_discovery",
+        "content_detail",
+        "comments",
+        "replies",
+        "author_profile",
+        "media_slots",
+        "media_bytes",
+        "batch_checkpoint",
+    ] {
+        let task_id = uuid::Uuid::new_v4();
+        let producer_instance_id = uuid::Uuid::new_v4();
+        let attempt_id = uuid::Uuid::new_v4();
+        let submission_id = uuid::Uuid::new_v4();
+        let package_ref = uuid::Uuid::new_v4();
+        let target = match capability {
+            "discovery_search" => serde_json::json!({"query":"synthetic ADHD"}),
+            "profile_discovery" | "author_profile" => {
+                serde_json::json!({"authorExternalId":"author-synthetic"})
+            }
+            "batch_checkpoint" => serde_json::json!({"taskType":"synthetic_batch"}),
+            _ => serde_json::json!({"contentExternalId":"content-synthetic"}),
+        };
+        let task_wire = serde_json::json!({
+            "contractVersion":"linggan.producer.task-spec.v1", "taskId":task_id,
+            "source":"manual", "platform":"xhs", "pageType":"synthetic",
+            "target":target, "capabilitiesRequested":[capability], "maximumQuota":1,
+            "commentLimit":"not_requested",
+            "acquireMedia": if matches!(capability, "media_slots" | "media_bytes") { "bytes" } else { "not_requested" },
+            "riskPolicy":"local_trusted_user_initiated", "stopConditions":["manual_stop","maximum_quota"]
+        });
+        let task =
+            parse_producer_task_spec(&task_wire.to_string()).expect("capability task validates");
+        assert!(matches!(
+            create_producer_task(&database, &task).await,
+            Ok(RuntimeTaskOutcome::Created { .. })
+        ));
+        let attempt_wire = serde_json::json!({"contractVersion":"linggan.producer.attempt.v1","producerInstanceId":producer_instance_id,"taskId":task_id,"attemptId":attempt_id});
+        let attempt = parse_producer_attempt(&attempt_wire.to_string())
+            .expect("capability attempt validates");
+        assert!(matches!(
+            start_producer_attempt(&database, &attempt).await,
+            Ok(RuntimeAttemptOutcome::Started { .. })
+        ));
+        let package = serde_json::json!({
+            "contractVersion":"linggan.producer.capture-package.v1", "packageRef":package_ref,
+            "packageKind":capability, "platform":"xhs", "observedAt":"2026-08-25T00:00:00Z", "capturedAt":"2026-08-25T00:00:01Z",
+            "coverage":{"target":{"basis":"known_set","contentExternalId":"content-synthetic"},"layers":[{"capability":capability,"observed":1,"attempted":1,"acquired":1,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"fixture"}]},
+            "records":[{"kind":"fixture","sourceObject":{"externalId":format!("{capability}-source")},"payload":{"title":"synthetic only"}}]
+        });
+        let submission_wire = serde_json::json!({"contractVersion":"linggan.producer.capture-package.v1","producerInstanceId":producer_instance_id,"taskId":task_id,"attemptId":attempt_id,"submissionId":submission_id,"capturePackage":package});
+        let submission = parse_producer_submission(&submission_wire.to_string())
+            .expect("capability package validates");
+        let outcome = submit_producer_package(&database, &submission).await;
+        assert!(
+            matches!(outcome, Ok(RuntimeSubmissionOutcome::Acknowledged { .. })),
+            "{capability} must use the shared runtime ingress; got {outcome:?}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retained_raw_records() {
+    let database = proof_database("plugin_runtime_search_twenty").await;
+    let task_id = uuid::Uuid::new_v4();
+    let producer_instance_id = uuid::Uuid::new_v4();
+    let attempt_id = uuid::Uuid::new_v4();
+    let task_wire = serde_json::json!({
+        "contractVersion":"linggan.producer.task-spec.v1", "taskId":task_id,
+        "source":"manual", "platform":"xhs", "pageType":"search_results",
+        "target":{"query":"ADHD"}, "capabilitiesRequested":["discovery_search"],
+        "maximumQuota":20, "commentLimit":"not_requested", "acquireMedia":"not_requested",
+        "riskPolicy":"local_trusted_user_initiated", "stopConditions":["surface_ended", "maximum_quota"]
+    });
+    let task = parse_producer_task_spec(&task_wire.to_string()).expect("search TaskSpec is closed");
+    assert!(matches!(
+        create_producer_task(&database, &task).await,
+        Ok(RuntimeTaskOutcome::Created { .. })
+    ));
+    let attempt_wire = serde_json::json!({
+        "contractVersion":"linggan.producer.attempt.v1", "producerInstanceId":producer_instance_id,
+        "taskId":task_id, "attemptId":attempt_id
+    });
+    let attempt =
+        parse_producer_attempt(&attempt_wire.to_string()).expect("search attempt is valid");
+    assert!(matches!(
+        start_producer_attempt(&database, &attempt).await,
+        Ok(RuntimeAttemptOutcome::Started { .. })
+    ));
+
+    let mut records = (1..=20)
+        .map(|position| {
+            serde_json::json!({
+                "kind":"discovery_card", "resultPosition":position,
+                "sourceObject":{"externalId":format!("adhd-search-{position:02}")},
+                "payload":{
+                    "title":format!("ADHD 搜索卡片 {position}"),
+                    "authorName":"fixture creator",
+                "publishedAt":1787589214_i64,
+                    "content":"synthetic search surface only"
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    // The package preserves a malformed raw record, but the default Evidence Library must not
+    // silently promote it into a browsable Evidence card.
+    records.push(serde_json::json!({"kind":"raw_unparsed","payload":"retained only"}));
+    let package = serde_json::json!({
+        "contractVersion":"linggan.producer.capture-package.v1", "packageRef":uuid::Uuid::new_v4(),
+        "packageKind":"discovery_search", "platform":"xhs",
+        "observedAt":"2026-08-25T00:00:00Z", "capturedAt":"2026-08-25T00:00:01Z",
+        "coverage":{"target":{"basis":"maximum_quota","query":"ADHD","maximumQuota":20},"layers":[{
+            "capability":"discovery_search", "observed":20,"attempted":20,"acquired":20,"verified":0,
+            "failed":0,"notAttempted":0,"unknown":1,"stoppedReason":"maximum_quota"
+        }]}, "records":records
+    });
+    let submission_wire = serde_json::json!({
+        "contractVersion":"linggan.producer.capture-package.v1", "producerInstanceId":producer_instance_id,
+        "taskId":task_id, "attemptId":attempt_id, "submissionId":uuid::Uuid::new_v4(),
+        "capturePackage":package
+    });
+    let submission = parse_producer_submission(&submission_wire.to_string())
+        .expect("typed search package is valid");
+    assert!(matches!(
+        submit_producer_package(&database, &submission).await,
+        Ok(RuntimeSubmissionOutcome::Acknowledged { .. })
+    ));
+
+    let query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"ADHD","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+    )
+    .expect("Evidence Library query is valid");
+    let projection = read_runtime_library(&database, &query)
+        .await
+        .expect("accepted search cards reach the Linggan read model");
+    assert_eq!(
+        projection.cards.len(),
+        20,
+        "the visible search surface reaches the library once"
+    );
+    assert!(
+        projection
+            .cards
+            .iter()
+            .all(|card| card.cover_local_asset_url.is_none())
+    );
+    let retained: i64 = sqlx::query(
+        "SELECT count(*) AS count FROM linggan_runtime_record_disposition WHERE disposition = 'retained_uninterpreted'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("retained raw disposition exists")
+    .get("count");
+    assert_eq!(
+        retained, 1,
+        "raw material stays auditable without appearing as an Evidence card"
     );
 }
 
@@ -139,6 +317,12 @@ async fn prove_resumable_media_upload(database: &Database) {
             .next_offset,
         2
     );
+    assert!(
+        record_media_upload_chunk(database, upload.session_ref, 0, 2)
+            .await
+            .is_err(),
+        "a replayed concurrent offset cannot silently extend or overwrite the staged bytes"
+    );
     assert_eq!(
         record_media_upload_chunk(database, upload.session_ref, 2, 2)
             .await
@@ -150,6 +334,12 @@ async fn prove_resumable_media_upload(database: &Database) {
         claim_media_upload_finalize(database, upload.session_ref)
             .await
             .expect("upload is finalizable"),
+        MediaUploadFinalizeClaim::Ready(_)
+    ));
+    assert!(matches!(
+        claim_media_upload_finalize(database, upload.session_ref)
+            .await
+            .expect("a crashed finalization can be claimed again"),
         MediaUploadFinalizeClaim::Ready(_)
     ));
     let admission = admit_media_blob(

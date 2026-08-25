@@ -3,11 +3,8 @@ import React from 'react';
 const LOCAL_ORIGIN = 'http://localhost:3000';
 
 export default function FlywheelSection({
-  flywheelUrl,
   flywheelStatus,
-  stationStatus = {},
   testing = false,
-  onUrlChange,
   onTest,
 }) {
   const statusText = {
@@ -17,8 +14,6 @@ export default function FlywheelSection({
     connected: '本机可访问',
     disconnected: '本机不可访问',
   }[flywheelStatus] || '待检查';
-  const readinessHint = stationStatus.authorizationMessage
-    || 'Linggan 的真实采集接收合同尚未逐项接通；此页没有执行任何平台访问。';
 
   return (
     <div className="flywheel-section">
@@ -26,27 +21,12 @@ export default function FlywheelSection({
         <div className="section-heading">
           <h2>Linggan Intelligence</h2>
           <div className="flywheel-heading-side">
-            <div className="flywheel-preset-row">
-              <button
-                type="button"
-                className="flywheel-preset-chip active"
-                onClick={() => onUrlChange?.(LOCAL_ORIGIN)}
-              >
-                本机 3000
-              </button>
-            </div>
+            <div className="flywheel-preset-row"><span className="flywheel-preset-chip active">本机 3000</span></div>
             <span id="flywheelStatus" className={`flywheel-status ${flywheelStatus}`}>{statusText}</span>
           </div>
         </div>
         <div className="flywheel-url-row">
-          <input
-            id="flywheelUrl"
-            type="text"
-            className="flywheel-input"
-            value={flywheelUrl || LOCAL_ORIGIN}
-            onChange={(event) => onUrlChange?.(event.target.value)}
-            aria-label="Linggan 本机地址"
-          />
+          <output id="flywheelUrl" className="flywheel-input" aria-label="Linggan 本机地址">{LOCAL_ORIGIN}</output>
           <button
             id="btnFlywheelTest"
             className={`popup-btn outline small${testing ? ' is-busy' : ''}`}
@@ -62,15 +42,15 @@ export default function FlywheelSection({
       <div className="station-panel">
         <div className="station-title-row">
           <span style={{ fontSize: '12px', fontWeight: 900 }}>Linggan 适配状态</span>
-          <span id="pluginAuthorizationStatus" className="flywheel-status unconfigured">待逐项接通</span>
+          <span id="pluginAuthorizationStatus" className="flywheel-status configured">LOCAL_TRUSTED</span>
         </div>
-        <p id="pluginAuthorizationHint" className="station-hint">{readinessHint}</p>
+        <p id="pluginAuthorizationHint" className="station-hint">测试阶段仅向本机 Linggan 交付已读取的页面材料；不使用内容工作台账号、工位、租约或人工授权。</p>
         <div className="station-diagnostics" aria-label="Linggan adapter status">
           <div className="station-diagnostic-grid">
             <div className="station-diagnostic-item"><span>迁入界面</span><strong>已保留</strong></div>
             <div className="station-diagnostic-item"><span>旧工作台连接</span><strong>已切断</strong></div>
-            <div className="station-diagnostic-item"><span>自动任务/工位</span><strong>未接通</strong></div>
-            <div className="station-diagnostic-item"><span>真实平台采集</span><strong>未授权执行</strong></div>
+            <div className="station-diagnostic-item"><span>执行模式</span><strong>手动采集</strong></div>
+            <div className="station-diagnostic-item"><span>交付方式</span><strong>本机回执</strong></div>
           </div>
         </div>
       </div>
@@ -81,7 +61,7 @@ export default function FlywheelSection({
           <span id="stationStatus" className="flywheel-status unconfigured">浏览器本地</span>
         </div>
         <p id="stationHint" className="station-hint">
-          原插件的本地暂存、恢复、Dashboard 与页面控件仍随包保留；它们不是 Linggan 的最终事实库，也不会自动同步。
+          原插件的本地暂存、恢复、Dashboard 与页面控件仍随包保留；待交付不等于 Linggan 已接纳，交付回执才决定最终状态。
         </p>
       </div>
     </div>

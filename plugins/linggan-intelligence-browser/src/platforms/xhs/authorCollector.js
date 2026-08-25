@@ -1,8 +1,7 @@
 import { getByInject, parseCount } from '../../shared/utils.js';
 import { authorStore } from '../../db/authorStore.js';
 import { createCollectorEvidence, createCollectorQualityMeta, joinRawDomText } from '../../shared/collectorMetadata.js';
-import { MONITOR_RECORD_MODE } from '../../workbench/protocol/schema.js';
-import { withMonitorRecordMeta } from '../../workbench/runtime/monitorTask.js';
+import { LOCAL_SURFACE_MODE, withLocalReadMeta } from '../../linggan/localExecutionSupport.js';
 import { emitCollectorReceipt } from '../../runtime/collectorReceiptSink.js';
 
 /**
@@ -85,7 +84,7 @@ export async function collectAuthor(options = {}) {
   const hasStructuredPageData = Object.keys(pageData || {}).length > 0;
 
   const collectedAt = Date.now();
-  const author = withMonitorRecordMeta({
+  const author = withLocalReadMeta({
     userId: userIdMatch[1],
     authorEntityId: `xhs_${userIdMatch[1]}`,
     platformAuthorId: userIdMatch[1],
@@ -142,10 +141,10 @@ export async function collectAuthor(options = {}) {
       rawUrl: window.location.href,
       rawSource: 'xhs.userPageData+dom',
     }),
-  }, options.monitorMeta, MONITOR_RECORD_MODE.AUTHOR_PROFILE);
+  }, options.monitorMeta, LOCAL_SURFACE_MODE.AUTHOR_PROFILE);
 
   await authorStore.upsert(author);
-  await emitCollectorReceipt('authorProfile', author, { platform: 'xhs', options });
+  author.lingganDelivery = await emitCollectorReceipt('authorProfile', author, { platform: 'xhs', options });
   return author;
 }
 
