@@ -25,6 +25,10 @@ proof_suffix="$(openssl rand -hex 8)"
 proof_database="linggan_intelligence_runtime_proof_${proof_suffix}"
 proof_directory="$(mktemp -d "${TMPDIR:-/tmp}/linggan-local-runtime-proof.XXXXXX")"
 proof_port="$((31000 + $(printf '%d' "0x${proof_suffix:0:4}") % 1000))"
+repair_project="linggan-runtime-repair-proof-${proof_suffix}"
+repair_compose="$proof_directory/repair-compose.yaml"
+repair_old_password="$(openssl rand -hex 24)"
+export RUNTIME_PROOF_OLD_PASSWORD="$repair_old_password"
 server_pid=""
 
 if lsof -nP -iTCP:"$proof_port" -sTCP:LISTEN >/dev/null 2>&1; then
@@ -45,10 +49,71 @@ cleanup() {
     echo "runtime proof database cleanup failed" >&2
     exit_code=1
   fi
+  if [[ -f "$repair_compose" ]]; then
+    COMPOSE_FILE="$repair_compose" COMPOSE_PROJECT_NAME="$repair_project" \
+      RUNTIME_PROOF_OLD_PASSWORD="$repair_old_password" \
+      docker compose down --volumes --remove-orphans >/dev/null || exit_code=1
+  fi
   rm -rf "$proof_directory"
   exit "$exit_code"
 }
 trap cleanup EXIT INT TERM
+
+require_password_repair_uses_current_env() {
+  cat > "$repair_compose" <<EOF
+services:
+  postgres:
+    image: postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: \${RUNTIME_PROOF_OLD_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \$\${POSTGRES_USER} -d \$\${POSTGRES_DB}"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+    volumes:
+      - repair-proof-data:/var/lib/postgresql/data
+volumes:
+  repair-proof-data:
+EOF
+
+  COMPOSE_FILE="$repair_compose" COMPOSE_PROJECT_NAME="$repair_project" \
+    RUNTIME_PROOF_OLD_PASSWORD="$repair_old_password" \
+    docker compose up -d --wait postgres >/dev/null
+
+  if COMPOSE_FILE="$repair_compose" COMPOSE_PROJECT_NAME="$repair_project" \
+    docker compose run --rm --no-deps -T -e "PGPASSWORD=$POSTGRES_PASSWORD" postgres \
+    psql -X -v ON_ERROR_STOP=1 -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT 1;' \
+    >/dev/null 2>&1; then
+    echo "runtime proof expected the isolated container old password to reject the current .env password before repair" >&2
+    exit 1
+  fi
+
+  COMPOSE_FILE="$repair_compose" COMPOSE_PROJECT_NAME="$repair_project" \
+    RUNTIME_PROOF_OLD_PASSWORD="$repair_old_password" \
+    "$project_root/scripts/local-runtime.sh" repair-password >/dev/null
+
+  if COMPOSE_FILE="$repair_compose" COMPOSE_PROJECT_NAME="$repair_project" \
+    docker compose run --rm --no-deps -T -e "PGPASSWORD=$repair_old_password" postgres \
+    psql -X -v ON_ERROR_STOP=1 -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT 1;' \
+    >/dev/null 2>&1; then
+    echo "runtime proof expected the isolated container old password to stop working after repair" >&2
+    exit 1
+  fi
+
+  COMPOSE_FILE="$repair_compose" COMPOSE_PROJECT_NAME="$repair_project" \
+    docker compose run --rm --no-deps -T -e "PGPASSWORD=$POSTGRES_PASSWORD" postgres \
+    psql -X -v ON_ERROR_STOP=1 -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT 1;' \
+    >/dev/null
+
+  COMPOSE_FILE="$repair_compose" COMPOSE_PROJECT_NAME="$repair_project" \
+    RUNTIME_PROOF_OLD_PASSWORD="$repair_old_password" \
+    docker compose down --volumes --remove-orphans >/dev/null
+}
+
+require_password_repair_uses_current_env
 
 docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres \
   -c "CREATE DATABASE ${proof_database};" >/dev/null

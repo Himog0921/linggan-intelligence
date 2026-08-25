@@ -100,13 +100,15 @@ struct EvidenceLibraryParams {
     window: Option<String>,
 }
 
-pub fn app() -> Router {
+#[cfg(test)]
+fn app() -> Router {
     router(LocalWebState {
         database: LocalDatabaseState::NotConfigured,
     })
 }
 
-pub fn app_with_database(database: Database) -> Router {
+#[cfg(test)]
+fn app_with_database(database: Database) -> Router {
     router(LocalWebState {
         database: LocalDatabaseState::Ready(Arc::new(database)),
     })
