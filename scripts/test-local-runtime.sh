@@ -236,7 +236,7 @@ require_runtime_target_mismatch_is_rejected
 
 start_server
 require_contains "$proof_directory/health.json" '"state":"READY"' "health did not report a ready database"
-require_contains "$proof_directory/health.json" '"schema":"LOCAL_001_SCHEMA_READY"' "health did not report both migrations"
+require_contains "$proof_directory/health.json" '"schema":"LOCAL_003_SCHEMA_READY"' "health did not report all local migrations"
 curl --fail --silent --show-error -H 'content-type: application/json' --data-binary @"$payload_path" \
   "http://localhost:${proof_port}/api/local/discovery-packages" >"$proof_directory/ingress.json"
 require_contains "$proof_directory/ingress.json" '"admission":"accepted"' "synthetic discovery was not accepted"

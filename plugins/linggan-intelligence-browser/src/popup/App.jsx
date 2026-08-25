@@ -64,7 +64,7 @@ export default function App() {
   const [isStableSearchList, setIsStableSearchList] = useState(false);
   const [capabilities, setCapabilities] = useState({});
 
-  const [stats, setStats] = useState({ notes: 0, comments: 0, authors: 0 });
+  const [stats, setStats] = useState({ notes: null, comments: null, authors: null, statsState: 'unknown' });
 
   const [progressVisible, setProgressVisible] = useState(false);
   const [progressCurrent, setProgressCurrent] = useState(0);
@@ -371,12 +371,15 @@ export default function App() {
       const stats = unwrapTabResponseData(response, response) || {};
       if (stats) {
         setStats({
-          notes: stats.notes || 0,
-          comments: stats.comments || 0,
-          authors: stats.authors || 0,
+          notes: Number.isFinite(stats.notes) ? stats.notes : null,
+          comments: Number.isFinite(stats.comments) ? stats.comments : null,
+          authors: Number.isFinite(stats.authors) ? stats.authors : null,
+          statsState: stats.statsState || 'unknown',
         });
       }
-    } catch {}
+    } catch {
+      setStats({ notes: null, comments: null, authors: null, statsState: 'unknown' });
+    }
   }, []);
 
   const loadAccounts = useCallback(async () => {

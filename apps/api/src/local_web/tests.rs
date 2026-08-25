@@ -13,6 +13,8 @@ const LOCAL_001_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0001_scope_001_capture_evidence.sql"),
     "\n",
     include_str!("../../../../database/migrations/0002_local_001_discovery.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0003_local_trusted_producer.sql"),
 );
 
 #[tokio::test]
@@ -385,6 +387,108 @@ async fn loopback_rejects_conflicting_quota_reached_and_keeps_truthful_partial_c
     assert_eq!(response.status(), StatusCode::OK);
 }
 
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn loopback_local_producer_acknowledges_one_partial_package_and_replays_timeout_submission() {
+    let database = proof_database("local_api_producer").await;
+    let observed_at = producer_fixture_observed_at(&database).await;
+    let application = app_with_database(database);
+    let task = local_task_spec();
+    let attempt = local_attempt();
+    let submission = local_submission(&observed_at);
+    for (path, body, expected) in [
+        (
+            "/api/local/producer/manual-tasks",
+            task.clone(),
+            "\"outcome\":\"created\"",
+        ),
+        (
+            "/api/local/producer/attempts",
+            attempt.clone(),
+            "\"outcome\":\"started\"",
+        ),
+        (
+            "/api/local/producer/submissions",
+            submission.clone(),
+            "\"delivery\":\"acknowledged\"",
+        ),
+        (
+            "/api/local/producer/submissions",
+            submission,
+            "\"delivery\":\"replay\"",
+        ),
+    ] {
+        let response = application
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).contains(expected));
+    }
+    let conflicting_attempt = attempt.replace(
+        "22222222-2222-4222-8222-222222222222",
+        "88888888-8888-4888-8888-888888888888",
+    );
+    let response = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/producer/attempts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(conflicting_attempt))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("attempt_identity_conflict"));
+    let terminal_conflict = local_submission(&observed_at)
+        .replace(
+            "44444444-4444-4444-8444-444444444444",
+            "55555555-5555-4555-8555-555555555555",
+        )
+        .replace("note-api-known", "note-api-conflict");
+    let response = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/producer/submissions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(terminal_conflict))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("attempt_terminal_submission_conflict"));
+    let invalid_scheduler = task.replace("\"manual\"", "\"scheduler\"");
+    let response = application
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/producer/manual-tasks")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(invalid_scheduler))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
 async fn proof_database(schema: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL")
         .expect("test script must provide the isolated proof database URL");
@@ -443,6 +547,21 @@ fn shared_api_content_unknown_package(observed_at: &str) -> String {
             {{"content":{{"platformContentId":"note-api-known","title":"API 接纳卡片 ADHD","creatorDisplayName":"A娃家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":1}}}}
           ]
         }}"#,
+    )
+}
+
+fn local_task_spec() -> String {
+    r#"{"contractVersion":"linggan.task-spec.v1","taskId":"11111111-1111-4111-8111-111111111111","source":"manual","platform":"xhs","pageType":"search_results","target":"current_visible_search_surface","capabilitiesRequested":["discover_visible_cards"],"maximumQuota":20,"commentLimit":"not_requested","acquireMedia":"not_requested","riskPolicy":"local_trusted_user_initiated","stopConditions":["current_surface_read_once","maximum_quota"]}"#.to_owned()
+}
+
+fn local_attempt() -> String {
+    r#"{"contractVersion":"linggan.local-trusted.attempt.v1","producerInstanceId":"22222222-2222-4222-8222-222222222222","taskId":"11111111-1111-4111-8111-111111111111","attemptId":"33333333-3333-4333-8333-333333333333"}"#.to_owned()
+}
+
+fn local_submission(observed_at: &str) -> String {
+    format!(
+        r#"{{"contractVersion":"linggan.local-trusted.submission.v1","producerInstanceId":"22222222-2222-4222-8222-222222222222","taskId":"11111111-1111-4111-8111-111111111111","attemptId":"33333333-3333-4333-8333-333333333333","submissionId":"44444444-4444-4444-8444-444444444444","discoveryPackage":{}}}"#,
+        discovery_package(observed_at)
     )
 }
 

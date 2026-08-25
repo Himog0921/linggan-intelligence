@@ -9,4 +9,7 @@ export const LINGGAN_RUNTIME_ACTION = {
   SAVE_FLYWHEEL_CONFIG: 'saveFlywheelConfig',
   TEST_FLYWHEEL_CONNECTION: 'testFlywheelConnection',
   GET_EXECUTION_STATION_STATUS: 'getExecutionStationStatus',
+  CREATE_MANUAL_TASK: 'lingganCreateManualTask',
+  SUBMIT_DISCOVERY_PACKAGE: 'lingganSubmitDiscoveryPackage',
+  FLUSH_LOCAL_OUTBOX: 'lingganFlushLocalOutbox',
 };

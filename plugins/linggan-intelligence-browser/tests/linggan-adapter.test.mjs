@@ -4,8 +4,12 @@ import test from 'node:test';
 import {
   LINGGAN_LOCAL_ORIGIN,
   LINGGAN_PENDING_MESSAGE,
+  attemptStartIsAccepted,
   createLingganPendingResult,
+  isTerminalLocalDeliveryResult,
   readLingganLocalReadiness,
+  taskCreationIsAccepted,
+  unavailableLingganStats,
 } from '../src/linggan/adapter.js';
 
 test('pending capability is explicit and has no success-shaped result', () => {
@@ -14,6 +18,27 @@ test('pending capability is explicit and has no success-shaped result', () => {
   assert.equal(result.code, 'linggan_adapter_pending');
   assert.equal(result.capability, 'xhs_detail');
   assert.match(result.message, /没有访问平台/);
+});
+
+test('unread Linggan stats stay explicitly unavailable instead of becoming zero', () => {
+  assert.deepEqual(unavailableLingganStats(), {
+    success: true,
+    statsState: 'not_connected',
+    notes: null,
+    comments: null,
+    authors: null,
+    source: 'linggan_data_not_read',
+  });
+});
+
+test('only created or replayed tasks and started or replayed attempts may continue to submission', () => {
+  assert.equal(taskCreationIsAccepted({ ok: true, payload: { outcome: 'created' } }), true);
+  assert.equal(taskCreationIsAccepted({ ok: true, payload: { outcome: 'replay' } }), true);
+  assert.equal(taskCreationIsAccepted({ ok: true, payload: { outcome: 'conflict' } }), false);
+  assert.equal(attemptStartIsAccepted({ ok: true, payload: { outcome: 'started' } }), true);
+  assert.equal(attemptStartIsAccepted({ ok: true, payload: { outcome: 'replay' } }), true);
+  assert.equal(attemptStartIsAccepted({ ok: true, payload: { outcome: 'conflict' } }), false);
+  assert.equal(isTerminalLocalDeliveryResult({ ok: false, status: 409, payload: { code: 'task_spec_conflict' } }), true);
 });
 
 test('local readiness probes only Linggan loopback without credentials', async () => {

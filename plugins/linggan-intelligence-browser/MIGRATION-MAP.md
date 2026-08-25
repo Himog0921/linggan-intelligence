@@ -1,6 +1,6 @@
 # PLUGIN-REHOME-001 · 旧插件迁入与运行边界映射
 
-> 状态: Draft migration map
+> 状态: Draft migration map（LOCAL_TRUSTED adapter 已接入合成回传）
 > 最后核对: 2026-08-25
 > 适用范围: `linggan-boom@8a00cc1` / `v2.0.91` 到 Linggan 自有浏览器包的第一条垂直迁入边界
 > 事实来源: `plugins/linggan-intelligence-browser/` 当前 source、Manifest、Webpack active entries 和 isolation check
@@ -22,7 +22,7 @@
 | Popup / Dashboard | 已原样迁入其主要布局、主题、品牌资产、数据页和操作位置 | 熟悉的灵感爆爆爆操作界面，Linggan 本机状态区替代旧工作台连接区 | 界面可构建；没有真实数据证明 |
 | 页面注入控制 | 已保留 XHS / 抖音页面识别、按钮位置和提示体验 | 原来的页面控制入口仍在 | 未接通动作显示 Linggan 未接通，不是采集成功 |
 | XHS / 抖音 collector source | 完整保留在 `src/platforms/` 和关联 source | 后续可在同一源码包上适配 | 不能在本轮视为已授权、已接通或已验证 |
-| 本机 Dexie / 恢复逻辑 | 完整 source 保留为浏览器临时暂存与恢复结构 | 后续 adapter 可以在同一包内接回受控暂存读取 | 本轮 active runtime 不读取它；它不是 Linggan Evidence / 数据库真相 |
+| 本机 Dexie / 恢复逻辑 | 单独 LOCAL_TRUSTED outbox 仅保存待交付的手动 Discovery submission；其余 legacy source 仍不进入 active runtime | 合成包先本地持久化，网络超时或 service worker 重启后以同一 submission id 重试 | outbox 不是 Linggan Evidence / 数据库真相；scheduler 为 `NOT_CONNECTED` |
 | 旧授权、轮询、lease、工位派发 | 旧 source 仅作历史保留；Webpack 不以旧 background 为入口 | 不再出现旧工作台授权成功或工位就绪承诺 | 当前 active service worker 不调用这些链路 |
 | 旧数据同步 / fallback | 已从当前 Dashboard 动作中切断 | “提交到 Linggan（待接通）”只显示原因，不会提交 | 不存在对旧工作台的兼容提交 |
 | cookies、媒体下载、定时、网络规则、通知权限 | 从 Manifest 移除 | 不会请求这些旧能力的浏览器权限 | 所有需要这些能力的未来接入必须重新评审 |
@@ -40,8 +40,12 @@ Popup / injected control
 当前路径（本轮实际）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
-  -> local readiness or explicit PENDING result
-  -> no platform action, no old endpoint, no Linggan write
+  -> manual synthetic TaskSpec / Attempt / durable Submission outbox
+  -> localhost receipt or retry; no old endpoint
+
+页面采集动作（本轮仍未接通）
+  -> explicit PENDING result
+  -> no platform action, no media write
 
 以后单独授权的路径（本轮未实现）
 user action -> authorized Linggan adapter -> bounded work -> receipt / Coverage
