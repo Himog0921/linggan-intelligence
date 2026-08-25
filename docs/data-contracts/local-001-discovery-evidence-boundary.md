@@ -10,7 +10,9 @@
 
 本合同只解决下一张实现卡不能自由猜测的五件事：平台观察指令与本地库检索的区别、首批 discovery 能带回什么、部分结果如何诚实保留、搜索位置属于什么，以及封面候选何时才能显示。
 
-它不定义数据库表、HTTP API、插件消息、页面运行时代码或真实接入。`xhs.discovery.visible-card.v1` 通过结构校验只说明“输入符合本卡的发现面形状”；它不表示插件已发送、服务端已接收、Evidence 已接纳、Source Object 已解析、Observation 已形成或页面已经可读。
+它不定义数据库表、HTTP API、插件消息、页面运行时代码或真实接入。未来唯一的运行时 producer 名称为 **Linggan-owned browser producer package（Linggan Plugin）**；它将与 Linggan local host/API 组成同一系统。旧内容工作台及其插件只可作为历史能力与风险参考，不是 producer、endpoint、fallback、数据源或验证中转。
+
+`xhs.discovery.visible-card.v1` 通过结构校验只说明“输入符合本卡的发现面形状”；它不表示 Linggan Plugin 已发送、服务端已接收、Evidence 已接纳、Source Object 已解析、Observation 已形成或页面已经可读。
 
 ## 2. 两类不能互相调用的 Query
 
@@ -19,7 +21,7 @@
 | `AcquisitionSpec` | 要去平台观察什么 | 平台、搜索词、排序、目标单位与上限 | Evidence Library 的本地检索、页面显示、自动详情/评论/媒体深化 |
 | `EvidenceQuery` | 要从 Linggan 已接纳材料中找什么 | 关键词、已接纳材料搜索范围、`WINDOW`、本地排序 | 平台、插件、采集命令、媒体/OCR/ASR 请求 |
 
-两者是不同 Rust 类型，并分别采用 `deny_unknown_fields` 的输入形状。任何未来 UI 输入“搜索”只构造 `EvidenceQuery`；没有新的 `Acquisition Authorization`、Admission 与 Work Order，绝不能被解释为平台搜索。
+两者是不同 Rust 类型，并分别采用 `deny_unknown_fields` 的输入形状。任何未来 UI 输入“搜索”只构造 `EvidenceQuery`；没有新的 `Acquisition Authorization`、Admission、Work Order 与 Linggan Plugin 执行，绝不能被解释为平台搜索。
 
 ### Evidence Library V1 检索语义
 
