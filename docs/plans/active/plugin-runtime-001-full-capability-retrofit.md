@@ -71,3 +71,9 @@ URL 既不是媒体身份，也不是 Evidence Library 的展示地址。一个 
 | P1-F/G/H | UI 明确“已读取/待本机交付/已接纳”边界，Popup/缓存 Dashboard 不把页面读取或 outbox pending 写成成功；删除 Popup 的旧授权、工位、Cookie、账号管理处理；TaskSpec target/limit/media/risk/stop conditions closed validation；抖音 progress 产生 batch checkpoint | popup built-bundle scan、contract negative tests、production build | 用户的浏览器视觉/行为验收 |
 
 Webpack 继续报告 `content.js` 600 KiB / content entry 785 KiB 的性能建议警告；它不阻塞正确性 proof，但不得被描述为性能验收通过。
+
+### 最终最小修订：控制动作真实性
+
+- Popup 的暂停、继续与停止不再把「动作已送出」自行解释为成功。页面控制器是唯一可报告控制状态的来源；只有它回传 `paused`、`running` 或 `stopped` 时，Popup 才更新可见状态并提示成功。
+- XHS 与抖音在不存在可控任务时统一返回 `no_active_task`，且不改变进度条、暂停/继续按钮或任务控制条。控制器存在且仍为 active 时，才允许调用其原有 pause/resume/stop mechanics 并回传对应成功状态。
+- 自动验证包含：XHS active pause/resume/stop、XHS 无任务无 UI 改动、抖音无任务负回执与 active 正回执，以及 Popup 对负回执抛出失败而非展示成功。它们只证明合成控制逻辑和已构建插件，不证明真实浏览器按钮、平台页面或用户验收。

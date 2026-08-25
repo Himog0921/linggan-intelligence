@@ -10,6 +10,8 @@ import {
   packageMediaSlots,
   packageReplies,
 } from '../src/linggan/producerRuntime.js';
+import { requireControlReceipt } from '../src/linggan/controlReceipt.js';
+import { resolveDouyinBatchControlReceipt } from '../src/platforms/douyin/controlReceipt.js';
 
 test('one adapter uses the same bounded package shape for every retained collector capability', () => {
   for (const capability of Object.values(PRODUCER_CAPABILITY)) {
@@ -109,12 +111,38 @@ test('every retained Popup control is a Linggan action or an explicit no-side-ef
   assert.match(popup, /LINGGAN_RUNTIME_ACTION\.RESUME_ACTIVE_BATCH/);
   assert.match(popup, /LINGGAN_RUNTIME_ACTION\.STOP_ACTIVE_BATCH/);
   assert.doesNotMatch(popup, /MSG\.(PAUSE_BATCH|RESUME_BATCH|STOP_BATCH)/);
-  assert.match(popup, /result\?\.state !== 'paused'/);
-  assert.match(popup, /result\?\.state !== 'running'/);
-  assert.match(popup, /result\?\.state !== 'stopped'/);
+  assert.match(popup, /requireControlReceipt\(result, 'paused'\)/);
+  assert.match(popup, /requireControlReceipt\(result, 'running'\)/);
+  assert.match(popup, /requireControlReceipt\(result, 'stopped'\)/);
   assert.match(popup, /快速导出暂不可用：尚未具备 Linggan Runtime 导出合同，未导出任何数据/);
   assert.match(popup, /数据维护暂不可用：尚未具备 Linggan Runtime 数据维护合同，未修改任何本机数据/);
   assert.match(content, /PAUSE_ACTIVE_BATCH.*'dy_pauseBatch'/s);
   assert.match(content, /PAUSE_ACTIVE_BATCH.*'pauseBatch'/s);
-  assert.match(content, /state: controlState \|\| 'page_read_started'/);
+  assert.match(content, /return pageResult && typeof pageResult === 'object'/);
+});
+
+test('control receipts preserve a rejected page response instead of producing a Popup success message', () => {
+  assert.throws(
+    () => requireControlReceipt({ success: false, state: 'no_active_task' }, 'paused'),
+    /页面没有确认paused当前任务/,
+  );
+  assert.deepEqual(
+    requireControlReceipt({ success: true, state: 'paused' }, 'paused'),
+    { success: true, state: 'paused' },
+  );
+});
+
+test('douyin control receipt is negative without an active controller and positive only with one', () => {
+  assert.deepEqual(resolveDouyinBatchControlReceipt(null, 'paused'), {
+    success: false,
+    state: 'no_active_task',
+  });
+  assert.deepEqual(resolveDouyinBatchControlReceipt({ isRunning: false }, 'running'), {
+    success: false,
+    state: 'no_active_task',
+  });
+  assert.deepEqual(resolveDouyinBatchControlReceipt({ isRunning: true }, 'stopped'), {
+    success: true,
+    state: 'stopped',
+  });
 });

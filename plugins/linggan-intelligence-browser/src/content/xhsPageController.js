@@ -129,12 +129,16 @@ export function createXhsPageController({
   });
 
   function pauseActiveTask() {
-    if (singleCommentCtrl?.isRunning()) singleCommentCtrl.pause();
-    if (batchNoteCtrl?.isRunning) batchNoteCtrl.pause();
-    if (batchCommentCtrl?.isRunning) batchCommentCtrl.pause();
-    if (commentImageController?.isRunning()) commentImageController.pause();
+    const running = [
+      singleCommentCtrl?.isRunning() ? singleCommentCtrl : null,
+      batchNoteCtrl?.isRunning ? batchNoteCtrl : null,
+      batchCommentCtrl?.isRunning ? batchCommentCtrl : null,
+      commentImageController?.isRunning() ? commentImageController : null,
+    ].filter(Boolean);
+    if (running.length === 0) return { success: false, state: 'no_active_task' };
+    running.forEach((controller) => controller.pause());
     togglePauseResumeButtons(true);
-    if (commentImageController?.isRunning() || singleCommentCtrl?.isRunning()) return;
+    if (commentImageController?.isRunning() || singleCommentCtrl?.isRunning()) return { success: true, state: 'paused' };
     const current = Number(lastTaskSnapshot?.current || 0);
     const total = Number(lastTaskSnapshot?.total || 0);
     syncTaskUI({
@@ -144,15 +148,20 @@ export function createXhsPageController({
       total,
       current,
     });
+    return { success: true, state: 'paused' };
   }
 
   function resumeActiveTask() {
-    if (singleCommentCtrl?.isRunning()) singleCommentCtrl.resume();
-    if (batchNoteCtrl?.isRunning) batchNoteCtrl.resume();
-    if (batchCommentCtrl?.isRunning) batchCommentCtrl.resume();
-    if (commentImageController?.isRunning()) commentImageController.resume();
+    const running = [
+      singleCommentCtrl?.isRunning() ? singleCommentCtrl : null,
+      batchNoteCtrl?.isRunning ? batchNoteCtrl : null,
+      batchCommentCtrl?.isRunning ? batchCommentCtrl : null,
+      commentImageController?.isRunning() ? commentImageController : null,
+    ].filter(Boolean);
+    if (running.length === 0) return { success: false, state: 'no_active_task' };
+    running.forEach((controller) => controller.resume());
     togglePauseResumeButtons(false);
-    if (commentImageController?.isRunning() || singleCommentCtrl?.isRunning()) return;
+    if (commentImageController?.isRunning() || singleCommentCtrl?.isRunning()) return { success: true, state: 'running' };
     const current = Number(lastTaskSnapshot?.current || 0);
     const total = Number(lastTaskSnapshot?.total || 0);
     syncTaskUI({
@@ -162,6 +171,22 @@ export function createXhsPageController({
       total,
       current,
     });
+    return { success: true, state: 'running' };
+  }
+
+  function stopActiveTask() {
+    const running = [
+      singleCommentCtrl?.isRunning() ? singleCommentCtrl : null,
+      batchNoteCtrl?.isRunning ? batchNoteCtrl : null,
+      batchCommentCtrl?.isRunning ? batchCommentCtrl : null,
+      commentImageController?.isRunning() ? commentImageController : null,
+    ].filter(Boolean);
+    if (running.length === 0) return { success: false, state: 'no_active_task' };
+    running.forEach((controller) => controller.stop());
+    toggleStopButton(false);
+    hideTaskControlBar();
+    activeTaskType = null;
+    return { success: true, state: 'stopped' };
   }
 
   function scheduleSelectorBootstrapProbe(delayMs = 420) {
@@ -374,29 +399,13 @@ export function createXhsPageController({
         }
 
         case 'stopBatch':
-          singleCommentCtrl?.stop();
-          batchNoteCtrl?.stop();
-          batchCommentCtrl?.stop();
-          if (commentImageController?.isRunning()) {
-            commentImageController.stop();
-            showToast('已停止采集', 'warning');
-            break;
-          }
-          toggleStopButton(false);
-          hideTaskControlBar();
-          activeTaskType = null;
-          showToast('已停止采集', 'warning');
-          break;
+          return stopActiveTask();
 
         case 'pauseBatch':
-          pauseActiveTask();
-          showToast('批量采集已暂停', 'warning');
-          break;
+          return pauseActiveTask();
 
         case 'resumeBatch':
-          resumeActiveTask();
-          showToast('批量采集继续中...', 'info');
-          break;
+          return resumeActiveTask();
 
         case 'collectCommentImages':
           // The old ZIP downloader is deliberately not a Linggan media export.  Keep the
@@ -469,6 +478,7 @@ export function createXhsPageController({
     startBatchTask,
     pauseActiveTask,
     resumeActiveTask,
+    stopActiveTask,
     getBatchNoteCtrl: () => batchNoteCtrl,
     setBatchNoteCtrl: (value) => {
       batchNoteCtrl = value;

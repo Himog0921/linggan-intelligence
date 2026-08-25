@@ -194,20 +194,28 @@ async function dispatchProducerRuntimeAction(action, message) {
     sortMode: message.sortMode,
     triggerSource: 'popup_linggan_runtime',
   };
+  const isControl = [
+    LINGGAN_RUNTIME_ACTION.PAUSE_ACTIVE_BATCH,
+    LINGGAN_RUNTIME_ACTION.RESUME_ACTIVE_BATCH,
+    LINGGAN_RUNTIME_ACTION.STOP_ACTIVE_BATCH,
+  ].includes(action);
+  let pageResult;
   if (isDouyin) {
     if (!activeDouyinAdapter) throw new Error('linggan_douyin_runtime_not_ready');
-    await activeDouyinAdapter.handleButtonClick(pageAction, params);
+    pageResult = await activeDouyinAdapter.handleButtonClick(pageAction, params);
   } else {
-    await dispatchXhsRuntimeAction(pageAction, params);
+    pageResult = await dispatchXhsRuntimeAction(pageAction, params);
   }
   // This means the page reader actually accepted the action. It is deliberately not an
   // admission receipt; Popup must continue to describe delivery as pending until one exists.
-  const controlState = {
-    [LINGGAN_RUNTIME_ACTION.PAUSE_ACTIVE_BATCH]: 'paused',
-    [LINGGAN_RUNTIME_ACTION.RESUME_ACTIVE_BATCH]: 'running',
-    [LINGGAN_RUNTIME_ACTION.STOP_ACTIVE_BATCH]: 'stopped',
-  }[action];
-  return { success: true, state: controlState || 'page_read_started', delivery: 'pending' };
+  if (isControl) {
+    // Do not infer controls from a dispatched message. The controller is the only authority on
+    // whether an active task actually transitioned state.
+    return pageResult && typeof pageResult === 'object'
+      ? pageResult
+      : { success: false, state: 'no_active_task' };
+  }
+  return { success: true, state: 'page_read_started', delivery: 'pending' };
 }
 
 chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {

@@ -60,8 +60,9 @@ test('xhs batch pause keeps the latest progress summary instead of resetting to 
     message: '正在采集第 3/10 条',
   });
 
-  controller.pauseActiveTask();
+  const receipt = controller.pauseActiveTask();
 
+  assert.deepEqual(receipt, { success: true, state: 'paused' });
   assert.equal(batchNoteCtrl.pauseCalled, 1);
   assert.deepEqual(pauseResumeStates, [true]);
 
@@ -92,8 +93,9 @@ test('xhs batch resume keeps the latest progress summary instead of resetting to
     message: '已暂停',
   });
 
-  controller.resumeActiveTask();
+  const receipt = controller.resumeActiveTask();
 
+  assert.deepEqual(receipt, { success: true, state: 'running' });
   assert.equal(batchCommentCtrl.resumeCalled, 1);
   assert.deepEqual(pauseResumeStates, [false]);
 
@@ -102,6 +104,33 @@ test('xhs batch resume keeps the latest progress summary instead of resetting to
   assert.equal(resumed.current, 5);
   assert.equal(resumed.total, 12);
   assert.equal(resumed.message, '继续采集');
+});
+
+test('xhs stop reports success only while an existing batch task is active', () => {
+  const { controller } = createControllerHarness();
+  const batchNoteCtrl = {
+    isRunning: true,
+    stopCalled: 0,
+    pause() {},
+    resume() {},
+    stop() {
+      this.stopCalled += 1;
+    },
+  };
+
+  controller.setBatchNoteCtrl(batchNoteCtrl);
+  assert.deepEqual(controller.stopActiveTask(), { success: true, state: 'stopped' });
+  assert.equal(batchNoteCtrl.stopCalled, 1);
+});
+
+test('xhs control actions refuse absent tasks without changing visible progress', () => {
+  const { controller, taskBarStates, pauseResumeStates } = createControllerHarness();
+
+  assert.deepEqual(controller.pauseActiveTask(), { success: false, state: 'no_active_task' });
+  assert.deepEqual(controller.resumeActiveTask(), { success: false, state: 'no_active_task' });
+  assert.deepEqual(controller.stopActiveTask(), { success: false, state: 'no_active_task' });
+  assert.deepEqual(taskBarStates, []);
+  assert.deepEqual(pauseResumeStates, []);
 });
 
 test('xhs task UI falls back to TASK_STATE status when taskState carries a collection terminal status', () => {

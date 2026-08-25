@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import '../extensionPublicPath.js';
 import { MSG, COMMENT_DEPTH_MODE } from '../shared/constants.js';
 import { LINGGAN_RUNTIME_ACTION } from '../linggan/runtimeActions.js';
+import { requireControlReceipt } from '../linggan/controlReceipt.js';
 import { BRAND_ASSETS, getBrandAssetUrl } from '../shared/brandAssets.js';
 import { initThemeManager, setTheme, getCurrentTheme } from '../themes/themeManager.js';
 import {
@@ -543,7 +544,7 @@ export default function App() {
       hideNotice();
       try {
         const result = await sendToTab(tabId, { action: LINGGAN_RUNTIME_ACTION.PAUSE_ACTIVE_BATCH });
-        if (!result?.success || result?.state !== 'paused') throw new Error(result?.message || '页面没有确认暂停当前任务');
+        requireControlReceipt(result, 'paused');
         setBatchPaused(true);
         showNotice('任务已暂停，可随时继续。', 'info');
       } catch (err) {
@@ -557,7 +558,7 @@ export default function App() {
       hideNotice();
       try {
         const result = await sendToTab(tabId, { action: LINGGAN_RUNTIME_ACTION.RESUME_ACTIVE_BATCH });
-        if (!result?.success || result?.state !== 'running') throw new Error(result?.message || '页面没有确认继续当前任务');
+        requireControlReceipt(result, 'running');
         setBatchPaused(false);
         showNotice('任务继续执行中。', 'info');
       } catch (err) {
@@ -580,7 +581,7 @@ export default function App() {
       setBatchStopping(true);
       try {
         const result = await sendToTab(tabId, { action: LINGGAN_RUNTIME_ACTION.STOP_ACTIVE_BATCH });
-        if (!result?.success || result?.state !== 'stopped') throw new Error(result?.message || '页面没有确认停止当前任务');
+        requireControlReceipt(result, 'stopped');
         setBatchControlsVisible(false);
         setProgressVisible(false);
         setBatchStopping(false);

@@ -26,6 +26,7 @@ import {
 } from './selectorHealth.js';
 import { resolveDouyinTaskbarRenderState } from './taskbarRenderState.js';
 import { createManagedTaskController } from '../../shared/managedTaskController.js';
+import { resolveDouyinBatchControlReceipt } from './controlReceipt.js';
 
 /**
  * 抖音平台适配器实现
@@ -409,7 +410,8 @@ const DouyinAdapter = {
     message = '已暂停，可点击继续恢复',
     toastMessage = '任务已暂停',
   } = {}) {
-    if (!this._batchTaskState.controller?.isRunning) return;
+    const receipt = resolveDouyinBatchControlReceipt(this._batchTaskState.controller, 'paused');
+    if (!receipt.success) return receipt;
     this._batchTaskState.controller.pause();
     this._syncBatchTaskUI({
       taskType,
@@ -419,6 +421,7 @@ const DouyinAdapter = {
       message,
     });
     showDouyinToast(toastMessage, 'warning');
+    return receipt;
   },
 
   _pauseForSecurityChallenge({
@@ -437,7 +440,8 @@ const DouyinAdapter = {
   },
 
   _resumeBatchTask() {
-    if (!this._batchTaskState.controller?.isRunning) return;
+    const receipt = resolveDouyinBatchControlReceipt(this._batchTaskState.controller, 'running');
+    if (!receipt.success) return receipt;
     this._batchTaskState.controller.resume();
     this._syncBatchTaskUI({
       taskType: this._batchTaskState.taskType,
@@ -447,15 +451,12 @@ const DouyinAdapter = {
       message: '任务继续执行中...',
     });
     showDouyinToast('任务继续中...', 'info');
+    return receipt;
   },
 
   _stopBatchTask() {
-    if (!this._batchTaskState.controller?.isRunning) {
-      hideDouyinProgressBar();
-      hideDouyinTaskControlBar();
-      this._clearBatchIndicator();
-      return;
-    }
+    const receipt = resolveDouyinBatchControlReceipt(this._batchTaskState.controller, 'stopped');
+    if (!receipt.success) return receipt;
     this._batchTaskState.controller.stop();
     this._syncBatchTaskUI({
       taskType: this._batchTaskState.taskType,
@@ -465,6 +466,7 @@ const DouyinAdapter = {
       message: '正在停止并收尾当前任务，请稍候...',
     });
     showDouyinToast('已请求停止，正在收尾当前任务...', 'warning');
+    return receipt;
   },
 
   _injectApiCapture() {
@@ -708,16 +710,13 @@ const DouyinAdapter = {
 
     switch (action) {
       case 'dy_pauseBatch':
-        this._pauseBatchTask();
-        break;
+        return this._pauseBatchTask();
 
       case 'dy_resumeBatch':
-        this._resumeBatchTask();
-        break;
+        return this._resumeBatchTask();
 
       case 'dy_stopBatch':
-        this._stopBatchTask();
-        break;
+        return this._stopBatchTask();
 
       case 'dy_collectVideo': {
         await this._ensurePluginAuthorized();
