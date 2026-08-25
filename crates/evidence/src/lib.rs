@@ -12,6 +12,7 @@ pub use ingress::{
 };
 pub use local_discovery::{
     DiscoveryIngressError, DiscoveryIngressOutcome, DiscoveryLibraryCard,
-    DiscoveryLibraryProjection, ingest_discovery_package, read_discovery_library,
+    DiscoveryLibraryProjection, ingest_discovery_package, local_discovery_schema_is_ready,
+    read_discovery_library,
 };
 pub use receipt::{IngressOutcome, RejectionCode};

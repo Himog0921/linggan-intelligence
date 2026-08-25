@@ -68,6 +68,23 @@ pub struct DiscoveryLibraryCard {
     pub cover_presentation_state: &'static str,
 }
 
+/// Verifies the exact migration ledger and table surface required by LOCAL-001 discovery.
+/// This is deliberately a read-only readiness check: it neither applies migrations nor repairs
+/// schema, so callers cannot mistake a connected database for a usable local read projection.
+pub async fn local_discovery_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT \
+             EXISTS (SELECT 1 FROM linggan_local_schema_migration WHERE migration_id = '0001_scope_001_capture_evidence') \
+             AND EXISTS (SELECT 1 FROM linggan_local_schema_migration WHERE migration_id = '0002_local_001_discovery') \
+             AND to_regclass('public.capture_work_order') IS NOT NULL \
+             AND to_regclass('public.local_discovery_package') IS NOT NULL \
+             AND to_regclass('public.local_discovery_occurrence') IS NOT NULL \
+             AND to_regclass('public.local_discovery_coverage') IS NOT NULL",
+    )
+    .fetch_one(database.pool())
+    .await
+}
+
 /// Validates and atomically admits one discovery-only package. Replaying byte-identical input
 /// preserves the original package and makes a new delivery receipt; a different payload never
 /// overwrites a prior package.

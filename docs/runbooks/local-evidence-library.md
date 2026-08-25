@@ -18,22 +18,22 @@ http://localhost:3000/corpus/evidence
 
 服务会明确绑定 `127.0.0.1:3000`。因此它只供这台 Mac 使用，不会监听局域网或互联网。它不连接旧内容工作台、旧数据库、真实平台、媒体服务或 AI 服务。
 
-默认启动时，它不连接数据库，Evidence Library 会保持 `SOURCE_INCOMPLETE / NOT_CONNECTED` 的诚实空态。
+未使用本运行手册启动时，Evidence Library 会保持 `SOURCE_INCOMPLETE / NOT_CONNECTED` 的诚实空态。不要把这个状态理解为“世界没有材料”。
 
-只有在显式提供 **Linggan 自己的** PostgreSQL 连接地址时，服务才会连接受控的本地 read projection：
+日常本地运行必须使用 Linggan 自己的受控入口。它从本机 `.env` 读取 Linggan 的本地数据库配置，确认 migration 已登记、通过 TCP 口令验证后再启动；不会读取旧内容工作台或其数据库：
 
 ```bash
-LINGGAN_LOCAL_DATABASE_URL='postgresql://…' cargo run -p linggan-api
+./scripts/local-runtime.sh serve
 ```
 
-该变量不能指向旧内容工作台或其数据库。服务不会自动执行 migration，也不会创建数据库；先按数据库交付流程在独立环境中准备好 schema。不要把真实连接地址写进终端截图、Issue、PR 或仓库文件。
+该脚本不会把真实连接地址写进终端、Issue、PR 或仓库文件。服务只认 Linggan 的两份当前 migration；数据库不可连接或 schema 未准备好时，`/health` 会明确拒绝报告 ready。
 
 ## 启动
 
 在 Linggan 仓库目录执行：
 
 ```bash
-cargo run -p linggan-api
+./scripts/local-runtime.sh serve
 ```
 
 看到下面这行后，浏览器直接访问 `http://localhost:3000`；它会临时重定向到 Evidence Library 页面：
@@ -42,7 +42,15 @@ cargo run -p linggan-api
 Linggan local host listening on http://localhost:3000
 ```
 
-停止服务时，在同一个终端按 `Ctrl+C`。这不会写入数据库，也不会影响任何平台账号或采集任务。
+停止服务时，在同一个终端按 `Ctrl+C`。这不会删除本机已接纳数据，也不会影响任何平台账号或采集任务。
+
+如果本机数据卷来自更早的 Docker 启动，而 `migrate` 明确提示“当前 `.env` 口令不匹配”，不要删除数据卷或 `.env`。先运行一次：
+
+```bash
+./scripts/local-runtime.sh repair-password
+```
+
+这个显式动作只把本机 `linggan_dev_admin` 角色口令对齐当前 `.env`，随后立即通过本机 TCP 验证；不会重建数据库、清空表或删除数据。完成后再次运行 `serve`。
 
 ## 验证本地入口
 
@@ -54,13 +62,13 @@ curl --head --silent http://localhost:3000/
 curl --fail --silent http://localhost:3000/corpus/evidence > /dev/null
 ```
 
-健康接口会返回机器可读的状态。其中未提供 `LINGGAN_LOCAL_DATABASE_URL` 时：
+健康接口会返回机器可读的状态：
 
 - `listener: loopback-only`：表示服务只绑定本机回环地址；
-- `dataState: SOURCE_INCOMPLETE`：表示这不是数据接入成功的证明；
-- `evidenceReadModel: NOT_CONNECTED`：表示 Evidence Library 尚未读取任何材料。
-
-提供有效的 Linggan PostgreSQL 连接地址后，健康接口只会表示 `LOCAL_DISCOVERY_READ_PROJECTION / DISCOVERY_ONLY`：这表示本地读取能力已连接，**不是**真实平台采集、详情 Evidence、评论、媒体或趋势已经完成。
+- `database.state: READY` 且 `database.schema: LOCAL_001_SCHEMA_READY`：表示 API 已连接 Linggan 本地数据库，且两份当前 migration 与 discovery 所需表都已实际核对；
+- `database.state: NOT_CONFIGURED`：表示没有给服务本地数据库配置；
+- `database.state: CONFIGURED_UNAVAILABLE`：表示数据库连接失败或 schema 尚未完成，不能进行 ingress 或读取；具体原因分别在 `database.schema` 中返回 `LOCAL_001_DATABASE_UNAVAILABLE` 或 `LOCAL_001_SCHEMA_UNAVAILABLE`；
+- `dataState: LOCAL_DISCOVERY_READ_PROJECTION / evidenceReadModel: DISCOVERY_ONLY`：只表示本地 discovery 读取能力已就绪，不表示真实平台已采集。
 
 根入口的响应应为 `307 Temporary Redirect`，并包含 `location: /corpus/evidence`。`/health` 保持机器可读状态接口，不重定向。
 
@@ -71,6 +79,14 @@ curl --fail --silent http://localhost:3000/corpus/evidence > /dev/null
 - `WINDOW` 只按来源可直接验证的 `published_at` 过滤，并以读取时 Linggan PostgreSQL 的 `scope_001_now()` 为唯一时间参照：7/30 天窗口只含 `[now - window, now]`，未来发布时间不称为最近也不返回。未来记录仍保留为已接纳发现材料；未知发布时间不会被填成 0 或“当前”，而是在页面明确统计为排除对象；该数量只统计当前 `EvidenceQuery` 候选集，不能把文本不匹配的本地对象计入。
 - 每张卡片只显示本次 discovery 可见的事实和 package 级 Coverage。`visible / quota` 不是平台总量、完整率或趋势。
 - 封面位置必须显示 `MEDIA NOT ACQUIRED`；此阶段绝不能请求或展示小红书 CDN 地址。
+
+## 运行环境证明（不写入日常数据）
+
+```bash
+./scripts/test-local-runtime.sh
+```
+
+这个命令只创建精确命名的临时 proof database：应用 migration，写入一份合成 discovery Package，启动服务、读取一次、停止并重启服务后再次读取。通过时才证明“重启没有丢失这份合成已接纳材料”；结束时它会删除并确认删除这一个临时数据库。它不会访问平台、插件、媒体或日常本地材料。
 
 ## 受控本地 ingress（仅测试/后续 Linggan 自有插件）
 
