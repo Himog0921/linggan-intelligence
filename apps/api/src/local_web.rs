@@ -50,7 +50,7 @@ impl LocalDatabaseState {
         }
     }
 
-    fn health_state(&self) -> (&'static str, &'static str, &'static str, &'static str) {
+    async fn health_state(&self) -> (&'static str, &'static str, &'static str, &'static str) {
         match self {
             Self::NotConfigured => (
                 "SOURCE_INCOMPLETE",
@@ -70,12 +70,26 @@ impl LocalDatabaseState {
                 "CONFIGURED_UNAVAILABLE",
                 "LOCAL_001_SCHEMA_UNAVAILABLE",
             ),
-            Self::Ready(_) => (
-                "LOCAL_DISCOVERY_READ_PROJECTION",
-                "DISCOVERY_ONLY",
-                "READY",
-                "LOCAL_001_SCHEMA_READY",
-            ),
+            Self::Ready(database) => match local_discovery_schema_is_ready(database).await {
+                Ok(true) => (
+                    "LOCAL_DISCOVERY_READ_PROJECTION",
+                    "DISCOVERY_ONLY",
+                    "READY",
+                    "LOCAL_001_SCHEMA_READY",
+                ),
+                Ok(false) => (
+                    "SOURCE_INCOMPLETE",
+                    "NOT_CONNECTED",
+                    "CONFIGURED_UNAVAILABLE",
+                    "LOCAL_001_SCHEMA_UNAVAILABLE",
+                ),
+                Err(_) => (
+                    "SOURCE_INCOMPLETE",
+                    "NOT_CONNECTED",
+                    "CONFIGURED_UNAVAILABLE",
+                    "LOCAL_001_DATABASE_UNAVAILABLE",
+                ),
+            },
         }
     }
 }
@@ -139,7 +153,7 @@ fn configured_local_port() -> Result<u16, std::io::Error> {
 
 async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     let (data_state, evidence_read_model, database_state, schema_state) =
-        state.database.health_state();
+        state.database.health_state().await;
     Json(json!({
         "service": "linggan-local-web",
         "listener": "loopback-only",

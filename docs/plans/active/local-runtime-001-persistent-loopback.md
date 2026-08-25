@@ -10,7 +10,7 @@
 
 ## 用户结果
 
-Linggan 在本机以一个独立、持久的 PostgreSQL 16 运行。启动服务前，系统会明确应用并登记当前两份获准 migration；`/health` 只有在数据库可连接且这两份 migration 与所需表均存在时才报告 `READY`。停止再启动本地服务不会删除已经接纳的 Linggan 数据。
+Linggan 在本机以一个独立、持久的 PostgreSQL 16 运行。启动服务前，系统会明确应用并登记当前两份获准 migration，并从同一组本地 `POSTGRES_*` 参数派生 API 的唯一数据库目标；`/health` 只有在数据库此刻可连接且这两份 migration 与所需表均存在时才报告 `READY`。停止再启动本地服务不会删除已经接纳的 Linggan 数据。
 
 ## 允许范围
 
@@ -29,8 +29,8 @@ Linggan 在本机以一个独立、持久的 PostgreSQL 16 运行。启动服务
 
 1. `./scripts/local-runtime.sh migrate`：启动本地 PostgreSQL，登记并仅应用 checksum 一致的 migration；若持久容器角色口令与 `.env` 不匹配，停止且不写业务数据。
 2. `./scripts/local-runtime.sh repair-password`：这是显式恢复动作，仅把本地 `linggan_dev_admin` 角色口令与当前 `.env` 对齐；不重建容器、不删除卷或表，并在随后用 TCP 口令验证。
-3. `./scripts/local-runtime.sh serve`：先完成上述安全检查，再以 `LINGGAN_LOCAL_DATABASE_URL` 启动 API；默认仍绑定 `127.0.0.1:3000`。
-4. `./scripts/test-local-runtime.sh`：使用严格命名的临时数据库和独立 loopback proof port，验证 migration → 合成 accepted discovery → health `READY` → API readback → 服务重启后相同 readback；清理仅针对该临时库和临时目录，并核验库确实消失。
+3. `./scripts/local-runtime.sh serve`：先完成上述安全检查，从已核验的本地 Compose 目标派生 `LINGGAN_LOCAL_DATABASE_URL`；如果外部预设地址冲突即拒绝启动，默认仍绑定 `127.0.0.1:3000`。服务后续每次 `/health` 都复核数据库与 schema，失联后不会继续报告 `READY`。
+4. `./scripts/test-local-runtime.sh`：使用严格命名的临时数据库和独立 loopback proof port，验证冲突目标拒绝 → migration → 合成 accepted discovery → health `READY` → API readback → 服务重启后相同 readback → 临时库失联后 health 降级与读取 503；清理仅针对该临时库和临时目录，并核验库确实消失。
 
 ## 通过与未证明边界
 

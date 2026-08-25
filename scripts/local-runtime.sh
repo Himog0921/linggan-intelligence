@@ -29,8 +29,13 @@ ensure_env() {
     exit 1
   fi
 
-  if [[ "${POSTGRES_USER:-}" != "linggan_dev_admin" || -z "${DATABASE_ADMIN_URL:-}" ]]; then
-    echo "local environment must use linggan_dev_admin and DATABASE_ADMIN_URL" >&2
+  if [[ "${POSTGRES_USER:-}" != "linggan_dev_admin" || -z "${POSTGRES_DB:-}" ]]; then
+    echo "local environment must use linggan_dev_admin and POSTGRES_DB" >&2
+    exit 1
+  fi
+
+  if [[ ! "${POSTGRES_PORT:-}" =~ ^[1-9][0-9]{0,4}$ ]] || (( POSTGRES_PORT > 65535 )); then
+    echo "POSTGRES_PORT must be a valid local TCP port" >&2
     exit 1
   fi
 }
@@ -53,6 +58,33 @@ command_name="$1"
 
 psql_in_container() {
   docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$database_name" "$@"
+}
+
+local_database_url() {
+  # POSTGRES_PASSWORD is generated as hex and POSTGRES_USER is fixed, so neither needs URL
+  # escaping. This is intentionally derived from the exact Compose target; DATABASE_ADMIN_URL
+  # is not an authority for the runtime target and must never redirect the API after migration.
+  printf 'postgresql://%s:%s@127.0.0.1:%s/%s' \
+    "$POSTGRES_USER" "$POSTGRES_PASSWORD" "$POSTGRES_PORT" "$database_name"
+}
+
+bind_runtime_database_target() {
+  local derived_url
+  derived_url="$(local_database_url)"
+  if [[ -n "${LINGGAN_LOCAL_DATABASE_URL:-}" && "$LINGGAN_LOCAL_DATABASE_URL" != "$derived_url" ]]; then
+    echo "LINGGAN_LOCAL_DATABASE_URL conflicts with the exact database verified by migration; refusing to start" >&2
+    exit 1
+  fi
+  export LINGGAN_LOCAL_DATABASE_URL="$derived_url"
+}
+
+verify_runtime_port_binding() {
+  local published_address
+  published_address="$(docker compose port postgres 5432)"
+  if [[ "$published_address" != "127.0.0.1:${POSTGRES_PORT}" ]]; then
+    echo "the Compose PostgreSQL port does not match the local runtime target; refusing to continue" >&2
+    exit 1
+  fi
 }
 
 verify_application_database_credentials() {
@@ -117,6 +149,7 @@ apply_migration_once() {
 
 migrate() {
   "$project_root/scripts/dev-db.sh" up >/dev/null
+  verify_runtime_port_binding
   verify_application_database_credentials
   ensure_migration_ledger
   apply_migration_once "0001_scope_001_capture_evidence" "$project_root/database/migrations/0001_scope_001_capture_evidence.sql"
@@ -142,7 +175,7 @@ case "$command_name" in
     ensure_env
     database_name="${database_name:-$POSTGRES_DB}"
     migrate
-    export LINGGAN_LOCAL_DATABASE_URL="$DATABASE_ADMIN_URL"
+    bind_runtime_database_target
     exec cargo run -p linggan-api
     ;;
   *)

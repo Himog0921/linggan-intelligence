@@ -69,8 +69,7 @@ EOF
 
 start_server() {
   LINGGAN_LOCAL_PORT="$proof_port" \
-  LINGGAN_LOCAL_DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT:-55432}/${proof_database}" \
-    cargo run -p linggan-api >"$proof_directory/server.log" 2>&1 &
+    "$project_root/scripts/local-runtime.sh" --database "$proof_database" serve >"$proof_directory/server.log" 2>&1 &
   server_pid=$!
   for _ in $(seq 1 240); do
     if curl --fail --silent "http://localhost:${proof_port}/health" >"$proof_directory/health.json"; then
@@ -107,6 +106,27 @@ require_contains() {
   fi
 }
 
+require_runtime_target_mismatch_is_rejected() {
+  local mismatched_url exit_code
+  mismatched_url="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT:-55432}/${proof_database}_other"
+  set +e
+  LINGGAN_LOCAL_PORT="$proof_port" \
+  LINGGAN_LOCAL_DATABASE_URL="$mismatched_url" \
+    "$project_root/scripts/local-runtime.sh" --database "$proof_database" serve \
+    >"$proof_directory/mismatched-target.log" 2>&1
+  exit_code=$?
+  set -e
+  if [[ $exit_code -eq 0 ]]; then
+    echo "runtime proof accepted a conflicting API database target" >&2
+    exit 1
+  fi
+  require_contains "$proof_directory/mismatched-target.log" \
+    'LINGGAN_LOCAL_DATABASE_URL conflicts with the exact database verified by migration' \
+    "runtime target mismatch was not explicitly rejected"
+}
+
+require_runtime_target_mismatch_is_rejected
+
 start_server
 require_contains "$proof_directory/health.json" '"state":"READY"' "health did not report a ready database"
 require_contains "$proof_directory/health.json" '"schema":"LOCAL_001_SCHEMA_READY"' "health did not report both migrations"
@@ -125,6 +145,29 @@ if grep -q 'example.invalid' "$proof_directory/read-after-restart.json"; then
   echo "runtime proof exposed a remote cover candidate" >&2
   exit 1
 fi
+
+# This removes only new connections to the exact disposable proof database and terminates
+# only its sessions. The already-running API must stop reporting READY after its pool loses
+# that database; no shared development database or process is stopped for this check.
+docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres <<SQL >/dev/null
+ALTER DATABASE ${proof_database} WITH ALLOW_CONNECTIONS false;
+SELECT pg_terminate_backend(pid)
+FROM pg_stat_activity
+WHERE datname = '${proof_database}' AND pid <> pg_backend_pid();
+SQL
+curl --fail --silent "http://localhost:${proof_port}/health" >"$proof_directory/health-after-loss.json"
+require_contains "$proof_directory/health-after-loss.json" \
+  '"state":"CONFIGURED_UNAVAILABLE"' \
+  "health continued to report READY after the proof database became unavailable"
+require_contains "$proof_directory/health-after-loss.json" \
+  '"schema":"LOCAL_001_DATABASE_UNAVAILABLE"' \
+  "health did not identify post-start database loss"
+read_after_loss_status="$(curl --silent --output "$proof_directory/read-after-loss.json" --write-out '%{http_code}' \
+  "http://localhost:${proof_port}/api/local/evidence-library?q=Synthetic")"
+if [[ "$read_after_loss_status" != "503" ]]; then
+  echo "runtime proof expected a 503 local read after proof database loss, got ${read_after_loss_status}" >&2
+  exit 1
+fi
 stop_server
 
-echo "local runtime proof passed: migration, accepted synthetic discovery, restart persistence, health readiness, and local-only readback"
+echo "local runtime proof passed: target mismatch rejection, migration, accepted synthetic discovery, restart persistence, post-start database-loss readiness, and local-only readback"

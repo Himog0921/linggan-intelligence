@@ -72,17 +72,28 @@ pub struct DiscoveryLibraryCard {
 /// This is deliberately a read-only readiness check: it neither applies migrations nor repairs
 /// schema, so callers cannot mistake a connected database for a usable local read projection.
 pub async fn local_discovery_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar::<_, bool>(
+    let required_tables_exist = sqlx::query_scalar::<_, bool>(
         "SELECT \
-             EXISTS (SELECT 1 FROM linggan_local_schema_migration WHERE migration_id = '0001_scope_001_capture_evidence') \
-             AND EXISTS (SELECT 1 FROM linggan_local_schema_migration WHERE migration_id = '0002_local_001_discovery') \
+             to_regclass('public.linggan_local_schema_migration') IS NOT NULL \
              AND to_regclass('public.capture_work_order') IS NOT NULL \
              AND to_regclass('public.local_discovery_package') IS NOT NULL \
              AND to_regclass('public.local_discovery_occurrence') IS NOT NULL \
              AND to_regclass('public.local_discovery_coverage') IS NOT NULL",
     )
     .fetch_one(database.pool())
-    .await
+    .await?;
+    if !required_tables_exist {
+        return Ok(false);
+    }
+
+    let applied_migration_count = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) \
+         FROM linggan_local_schema_migration \
+         WHERE migration_id IN ('0001_scope_001_capture_evidence', '0002_local_001_discovery')",
+    )
+    .fetch_one(database.pool())
+    .await?;
+    Ok(applied_migration_count == 2)
 }
 
 /// Validates and atomically admits one discovery-only package. Replaying byte-identical input

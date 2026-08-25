@@ -26,7 +26,9 @@ http://localhost:3000/corpus/evidence
 ./scripts/local-runtime.sh serve
 ```
 
-该脚本不会把真实连接地址写进终端、Issue、PR 或仓库文件。服务只认 Linggan 的两份当前 migration；数据库不可连接或 schema 未准备好时，`/health` 会明确拒绝报告 ready。
+该脚本不会把真实连接地址写进终端、Issue、PR 或仓库文件。它用当前 `.env` 的 `POSTGRES_USER`、`POSTGRES_PASSWORD`、`POSTGRES_PORT` 与目标数据库名派生唯一运行目标；不会在 migration 之后改用未经核验的 `DATABASE_ADMIN_URL`。如果外部环境预设的 API 数据库地址与该目标冲突，服务会在启动前拒绝，而不是悄悄连接另一套库。
+
+`/health` 不是仅在启动时检查一次：每次读取都会重新核对数据库与 LOCAL-001 schema。服务运行后数据库失联时，它会从 `READY` 降为 `CONFIGURED_UNAVAILABLE / LOCAL_001_DATABASE_UNAVAILABLE`；这不代表任何已接纳材料被删除，只表示此刻不能诚实读取或接纳。
 
 ## 启动
 
@@ -65,7 +67,7 @@ curl --fail --silent http://localhost:3000/corpus/evidence > /dev/null
 健康接口会返回机器可读的状态：
 
 - `listener: loopback-only`：表示服务只绑定本机回环地址；
-- `database.state: READY` 且 `database.schema: LOCAL_001_SCHEMA_READY`：表示 API 已连接 Linggan 本地数据库，且两份当前 migration 与 discovery 所需表都已实际核对；
+- `database.state: READY` 且 `database.schema: LOCAL_001_SCHEMA_READY`：表示此刻 API 已连接由本地运行入口验证的 Linggan 数据库，且两份当前 migration 与 discovery 所需表都已实际核对；
 - `database.state: NOT_CONFIGURED`：表示没有给服务本地数据库配置；
 - `database.state: CONFIGURED_UNAVAILABLE`：表示数据库连接失败或 schema 尚未完成，不能进行 ingress 或读取；具体原因分别在 `database.schema` 中返回 `LOCAL_001_DATABASE_UNAVAILABLE` 或 `LOCAL_001_SCHEMA_UNAVAILABLE`；
 - `dataState: LOCAL_DISCOVERY_READ_PROJECTION / evidenceReadModel: DISCOVERY_ONLY`：只表示本地 discovery 读取能力已就绪，不表示真实平台已采集。
@@ -86,7 +88,7 @@ curl --fail --silent http://localhost:3000/corpus/evidence > /dev/null
 ./scripts/test-local-runtime.sh
 ```
 
-这个命令只创建精确命名的临时 proof database：应用 migration，写入一份合成 discovery Package，启动服务、读取一次、停止并重启服务后再次读取。通过时才证明“重启没有丢失这份合成已接纳材料”；结束时它会删除并确认删除这一个临时数据库。它不会访问平台、插件、媒体或日常本地材料。
+这个命令只创建精确命名的临时 proof database：先证明冲突的 API 数据库目标被拒绝，再应用 migration，写入一份合成 discovery Package，启动服务、读取一次、停止并重启服务后再次读取。随后它只禁止该临时库的新连接并终止该临时库的 API 会话，确认 `/health` 不再报告 `READY` 且读取返回 503。结束时它会删除并确认删除这一个临时数据库。它不会停止共享开发库、不访问平台、插件、媒体或日常本地材料。
 
 ## 受控本地 ingress（仅测试/后续 Linggan 自有插件）
 
