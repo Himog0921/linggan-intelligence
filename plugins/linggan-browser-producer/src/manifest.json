@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Linggan Browser Producer",
+  "version": "0.1.0",
+  "description": "Linggan Intelligence 的受限本机 Discovery Producer。",
+  "action": {
+    "default_title": "Linggan Browser Producer",
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "service-worker.js",
+    "type": "module"
+  },
+  "permissions": [],
+  "host_permissions": [
+    "http://localhost:3000/*"
+  ]
+}
