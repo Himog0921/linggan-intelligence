@@ -3,11 +3,17 @@
 
 mod canonical;
 mod capture;
+mod discovery;
 
 pub use capture::{
     CapturePackage, CaptureRecord, ContractError, Coverage, KnownSetTarget, KnownTargetOutcome,
     KnownTargetResult, PackageRouting, RemainingScope, Terminal, TerminalReason,
     parse_capture_package,
+};
+pub use discovery::{
+    AcquisitionSpec, CoverPresentationState, DiscoveryCard, DiscoveryContractError,
+    DiscoveryCoverage, DiscoveryOccurrence, DiscoveryPackage, EvidenceQuery, EvidenceQueryScope,
+    EvidenceQuerySort, PublishedWindow, parse_discovery_package,
 };
 
 pub const BOOTSTRAP_CONTRACT_VERSION: &str = "unimplemented";

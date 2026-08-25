@@ -67,6 +67,20 @@
 |---|---|---|---|---|
 | 无 | 001A 无获准操作 | 不适用 | 不适用；只显示当前静态 source/read-model 边界 | 后续功能、数据写入、采集或真实系统回执 |
 
+### 5.1 001C-0 已冻结、但尚未接通的后续控件语义
+
+`LOCAL-001 / 001C-0` 只增加跨边界合同，不修改本页运行时代码或 001A 的“无可用动作”状态。未来 001B/001C-1 接通前，下列 V7 位置继续保持禁用；它们不是正在等待的隐式动作。
+
+| V7 控件位置 | 未来获准含义 | 当前状态 | 禁止退化 |
+|---|---|---|---|
+| Search | 只查询 Linggan 已接纳材料的 `EvidenceQuery` | disabled / `NOT_CONNECTED` | 把输入框当作小红书搜索或插件命令 |
+| Copy query | 只复制本地 URL 与读取查询状态 | disabled / `NOT_CONNECTED` | 创建采集、研究或外部链接任务 |
+| Save current view | 未定义 | disabled / `DEFINITION_PENDING` | 偷偷保存为监控或持续采集 |
+| Start research | 未定义 | disabled / `DEFINITION_PENDING` | 创建 Research、Claim、Agent 或任何写入 |
+| Reacquire / 补采 | 先选择明确数据缺口、经新授权的未来动作 | disabled / `SELECTION_AND_AUTHORIZATION_REQUIRED` | 用一个含糊按钮自动补详情、评论、媒体或指标 |
+
+封面位置同样没有本卡可用图片。搜索页中将来观察到的外部地址只是 `MediaCandidate`；在独立 001C-2 成功取得、验证并保存本地副本前，页面必须使用 `MEDIA_NOT_ACQUIRED` 等真实状态，绝不能把小红书 CDN 地址设为 `img src` 或 CSS 背景回退。
+
 ## 6. 验收与未证明边界
 
 - 任务验收场景: 打开页面后，能在首屏区分“本地 host 已运行”与“材料读投影未接通”。
