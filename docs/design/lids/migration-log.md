@@ -49,3 +49,41 @@
 - **实际实现**：新 popup 为受限 `L1 / Settings / Governance` Surface，仅呈现 `LINGGAN / version`、固定 `localhost:3000`、最小 `/health` 可达性、`NOT_AUTHORIZED` 和 `NOT_CONNECTED`。构建包从 Linggan 当前唯一 runtime token 值源复制 `--lgi-*` token，popup CSS 只消费该副本，不新增全局 Token 或 CMP。
 - **安全边界**：Manifest 只有 `http://localhost:3000/*` host permission 且 `permissions=[]`；无内容脚本、Cookie、下载、脚本注入、平台 host、真实材料、媒体或外部链接。Discovery 控件持续 disabled；本卡没有 ingress、Evidence 接纳、浏览器加载或平台采集。
 - **验证与未证明**：source/release 静态检查将记录在 `ACC-PLUGIN-001`；浏览器视觉走查、真实 health、安装加载、Discovery Package 接纳、平台/账号/媒体/OCR/ASR 和业务结果仍是 `NOT VERIFIED`，不得由安装包存在推断为已接通。
+
+## DESIGN-003 · 视觉基线换向 v2.0 → v3.0（2026-08-25）
+
+**触发**：Mog 在设计评审会话中逐项确认新的视觉方向，并要求手册与运行时页面同步到该方向。原基线的「暖灰纸面」与 Mog 的实际选择冲突。
+
+**Token 层**：107 项 → 117 项。
+
+| 项 | 原值 | 新值 | 理由 |
+|---|---|---|---|
+| `--lgi-canvas` | `#ecebe6` | `#ffffff` | Mog 明确选择纯白、否定暖灰 |
+| `--lgi-canvas-low` | `#deddd7` | `#f7f8f8` | 纯白体系层次向下做 |
+| `--lgi-canvas-sunken` | 不存在 | `#eef0f1` | 新增第三层面 |
+| `--lgi-ink` | `#121211` | `#111315` | 暖黑换冷黑，与纯白同调 |
+| `--lgi-body` / `muted` / `ghost` | 暖灰三级 | 冷灰三级 | 同上 |
+| `--lgi-success*` | 橄榄绿 | 祖母绿 `#05674a` / `#0e9e6e` | Mog 指定祖母绿 |
+| `--lgi-warning*` | 芥黄 | `#a67a04` / `#eaaa05` | Mog 指定蒙德里安参考色 |
+| `--lgi-danger*` | `#9e2517` | `#a42001` | 同一参考的砖红 |
+| `--lgi-info*` | 靛蓝 `#345a6f` | 灰蓝 `#42555a` / `#8d9a9d` | 原靛蓝在这套配色中过于跳脱 |
+| `--lgi-unknown*` | 不存在 | 三项 | 未知此前无专属角色，被迫借用 ghost |
+| `--lgi-danger-dot` / `--lgi-info-dot` | 不存在 | 新增 | 五轴对称，每轴都有文字 / 填充 / soft |
+| `--lgi-shadow-brutal` / `-lg` | 不存在 | `4px 4px 0` / `7px 7px 0` | 粗野重音需要实色硬阴影 |
+| `--lgi-mesh-fine` / `-major` | 不存在 | 两级点阵 | L1 背景纹理改用点阵而非划线网格 |
+
+**规则层**：
+
+- `system.md` 视觉定义改写为「纯白台面上的精密情报基础设施」，新增「新粗野主义作为重音，不作为底色」及每屏 8 处上限；L1 纹理条款由「关闭或极弱」改为「允许点阵测量场，禁止渐变/光晕/噪点/动态纹理」。
+- `primitives.md` 新增线条六原则；Primary 由 Ink 实底改为 Signal 实底 + Ink 边 + 硬阴影；hover 位移由全面禁止改为受限允许（仅重音元素、固定位移量、模糊阴影仍禁止）；新增禁用态规范；状态标签改实心填充并冻结填充色与文字色的分工。
+
+**运行时**：
+
+- `evidence_library.css` 不再 author 任何色值，全部经 `--v7-*` 别名解析到 LIDS token；测试新增断言禁止页面 CSS 出现 `#`。
+- 修复 11 处此前解析失败的变量引用（`--lgi-surface-base`、`--lgi-text-primary` 等从未在 token 中定义），这些引用全部位于真实 Discovery 卡片样式上，此前因窗口无卡片而未暴露。
+- 第二签名色 `#e8003f` 退役，签名色收敛为 `--lgi-signal`。
+- 可见边框由 194 条降至约 100 条，剩余部分几乎全部落在可交互元素上。
+
+**测试同步**：`runtime_token_source_matches_the_full_lids_baseline` 的数量断言 107 → 117；`evidence_page_keeps_the_v7_shell_and_three_column_geometry` 中被锁定的 `--v7-brand-red:#e8003f` 与 `--v7-red:#ef4f25` 两条常量断言，改为断言页面消费 token 且第二签名色已退役。这是基线换向导致的合同更新，不是为通过测试而放宽断言。
+
+**未处理**：`.v7-*` → `.lgi-*` 类名迁移、键盘可达性与 ARIA 补全、状态色图例，均另立卡。
