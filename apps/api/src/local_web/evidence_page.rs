@@ -5,6 +5,7 @@ pub(super) fn render_read_projection(
     projection: &DiscoveryLibraryProjection,
     query_text: Option<&str>,
 ) -> String {
+    let window_label = window_label(projection.window);
     let input = format!(
         "<input name=\"q\" value=\"{}\" placeholder=\"仅检索 Linggan 已接纳的本地发现材料\" aria-label=\"本地 Evidence Library 搜索\">",
         escape(query_text.unwrap_or_default())
@@ -35,7 +36,10 @@ pub(super) fn render_read_projection(
         "<b>UNKNOWN</b></div><div class=\"v7-stat\"><span>02 / COMMENTS",
         &format!("<b>{card_count}</b></div><div class=\"v7-stat\"><span>02 / COMMENTS"),
     )
-    .replace("<em>WINDOW:</em> UNKNOWN", "<em>WINDOW:</em> 30D")
+    .replace(
+        "<em>WINDOW:</em> UNKNOWN",
+        &format!("<em>WINDOW:</em> {window_label}"),
+    )
     .replace(
         "页面结构已就绪 · 材料读投影尚未接通",
         "只读取 Linggan 已接纳的 discovery 卡片；不触发平台采集",
@@ -46,9 +50,17 @@ pub(super) fn render_read_projection(
     )
     .replace(
         "<b>SOURCE_INCOMPLETE</b> · <span>NO QUERY AVAILABLE</span>",
-        "<b>LOCAL READ ONLY</b> · <span>WINDOW = PUBLISHED_AT / 30D</span>",
+        &format!("<b>LOCAL READ ONLY</b> · <span>WINDOW = PUBLISHED_AT / {window_label}</span>"),
     )
     .replace("NO ACCEPTED MATERIAL AVAILABLE", "ACCEPTED DISCOVERY CARDS")
+}
+
+fn window_label(window: &str) -> &'static str {
+    match window {
+        "last_7_days" => "7D",
+        "last_30_days" => "30D",
+        _ => panic!("read projection must supply a supported published-at window"),
+    }
 }
 
 fn no_cards_markup(projection: &DiscoveryLibraryProjection) -> String {

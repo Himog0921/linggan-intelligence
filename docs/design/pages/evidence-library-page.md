@@ -77,7 +77,7 @@
 
 | V7 控件位置 | 未来获准含义 | 当前状态 | 禁止退化 |
 |---|---|---|---|
-| Search | 只查询 Linggan 已接纳 discovery 卡片的 `EvidenceQuery`；V1 仅标题/创作者名，`WINDOW = known published_at` | 已接通时 enabled；无数据库时 `NOT_CONNECTED` | 把输入框当作小红书搜索、插件命令或正文/评论/OCR/ASR 检索 |
+| Search | 只查询 Linggan 已接纳 discovery 卡片的 `EvidenceQuery`；V1 仅标题/创作者名，`WINDOW = known published_at` | 已接通时 enabled；无数据库时 `NOT_CONNECTED`；JSON 使用实际 `last_7_days`/`last_30_days`，页面同源显示 `7D`/`30D` | 把输入框当作小红书搜索、插件命令或正文/评论/OCR/ASR 检索 |
 | Copy query | 只复制本地 URL 与读取查询状态 | disabled / `NOT_CONNECTED` | 创建采集、研究或外部链接任务 |
 | Save current view | 未定义 | disabled / `DEFINITION_PENDING` | 偷偷保存为监控或持续采集 |
 | Start research | 未定义 | disabled / `DEFINITION_PENDING` | 创建 Research、Claim、Agent 或任何写入 |

@@ -236,6 +236,70 @@ async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discov
     assert!(!html.contains("xhscdn"));
 }
 
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn loopback_7_day_query_keeps_api_and_page_window_metadata_in_sync() {
+    let database = proof_database("local_api_window_metadata").await;
+    let observed_at = producer_fixture_observed_at(&database).await;
+    let application = app_with_database(database);
+
+    let response = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/discovery-packages")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(discovery_package(&observed_at)))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let response = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/local/evidence-library?q=ADHD&window=last_7_days")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("\"window\":\"last_7_days\""));
+    assert!(!body.contains("\"window\":\"last_30_days\""));
+
+    let response = application
+        .oneshot(
+            Request::builder()
+                .uri("/corpus/evidence?q=ADHD&window=last_7_days")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("<em>WINDOW:</em> 7D"));
+    assert!(html.contains("WINDOW = PUBLISHED_AT / 7D"));
+    assert!(!html.contains("WINDOW = PUBLISHED_AT / 30D"));
+}
+
 async fn proof_database(schema: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL")
         .expect("test script must provide the isolated proof database URL");
