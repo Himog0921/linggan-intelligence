@@ -44,14 +44,17 @@ cd plugins/linggan-intelligence-browser
 npm ci --ignore-scripts
 npm run build
 npm run package:release
+npm run release:manifest
 npm run release:verify
+npm run release:reproducibility
 npm run verify:linggan-isolation
 ```
 
 发行包生成在 `releases/linggan-intelligence-browser-v0.3.0.zip`。打包器以
-固定 ZIP 时间戳和稳定文件顺序生成；相同 `dist/` 输入重复执行必须得到相同
-SHA-256。`npm run verify` 会运行 TypeScript 合同检查、Linggan adapter 测试、
-build、打包、ZIP 与 `dist/` 内容核验，以及旧工作台隔离扫描。
+固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
+ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
+和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台
+运行时隔离扫描。
 
 ## 未证明事项
 

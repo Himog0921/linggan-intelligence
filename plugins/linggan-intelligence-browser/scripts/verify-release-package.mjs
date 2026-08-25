@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import JSZip from 'jszip';
@@ -67,6 +68,7 @@ function assertPlatformManifestContract(manifest = {}, label = 'manifest') {
 const packageJson = readJson('package.json');
 const expectedVersion = readArg('--version', packageJson.version);
 const zipPath = readArg('--zip', path.join('releases', `linggan-intelligence-browser-v${expectedVersion}.zip`));
+const releaseManifest = readJson(path.join('releases', 'release-manifest.json'));
 
 const manifestJson = readJson('manifest.json');
 const packageLockJson = readJson('package-lock.json');
@@ -101,6 +103,13 @@ for (const file of requiredDistFiles) {
 }
 
 assertCondition(existsSync(zipPath), `${zipPath} is missing`);
+assertCondition(releaseManifest.package === packageJson.name, 'release manifest package does not match package.json');
+assertCondition(releaseManifest.version === expectedVersion, 'release manifest version does not match package.json');
+assertCondition(releaseManifest.zip === zipPath, 'release manifest ZIP path does not match verified ZIP');
+assertCondition(
+  releaseManifest.sha256 === createHash('sha256').update(readFileSync(zipPath)).digest('hex'),
+  'release manifest SHA-256 does not match the committed ZIP',
+);
 
 const zip = await JSZip.loadAsync(readFileSync(zipPath));
 for (const file of requiredDistFiles) {

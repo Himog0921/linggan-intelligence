@@ -34,3 +34,15 @@ Linggan Intelligence 拥有一份真正属于自己的、可构建与可安装�
 4. 未支持动作有明确 pending 文案，Manifest 未保留 cookies、下载、定时、网络规则与通知等旧权限；
 5. 迁入映射、生成物登记、索引、当前状态和当月进度均明确这是 Draft source baseline，不是实际采集完成；
 6. Draft PR 已请求独立 review。实施者不自批、不合并、不关闭 Issue。
+
+## PR #42 复审修正（2026-08-25）
+
+- 活跃 `content` 入口只保留 Linggan-owned 页面控制壳和明确 pending 回执；旧的
+  collector / workbench / lease / heartbeat / outbox / polling 源码继续留在 source tree，
+  但不允许进入活跃内容模块图；
+- Dashboard 的“下载媒体”保留原操作位置，但当前直接返回 `media_download` 未接通，
+  不读取本机笔记记录、不访问平台也不调用下载器；
+- release ZIP 的验证不再通过重新覆盖 ZIP 得出结论：新的 `npm ci → build → temporary
+  package` 必须与提交 ZIP 的 SHA-256 完全一致。
+
+这些是迁入包的运行边界修正，不是平台采集、媒体入库或 Linggan backend 已接通的证明。

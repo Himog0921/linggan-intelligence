@@ -3,6 +3,7 @@ dist/
 releases/*
 !releases/
 !releases/linggan-intelligence-browser-v*.zip
+!releases/release-manifest.json
 .DS_Store
 design-exports/
 design-screenshots/
