@@ -10,6 +10,10 @@ export const LINGGAN_RUNTIME_ACTION = {
   TEST_FLYWHEEL_CONNECTION: 'testFlywheelConnection',
   GET_EXECUTION_STATION_STATUS: 'getExecutionStationStatus',
   CREATE_MANUAL_TASK: 'lingganCreateManualTask',
+  GET_PRODUCER_INSTANCE: 'lingganGetProducerInstance',
   SUBMIT_DISCOVERY_PACKAGE: 'lingganSubmitDiscoveryPackage',
+  SUBMIT_CAPTURE_PACKAGE: 'lingganSubmitCapturePackage',
+  SUBMIT_MEDIA_SLOTS: 'lingganSubmitMediaSlots',
+  CREATE_SCHEDULED_TASK: 'lingganCreateScheduledTask',
   FLUSH_LOCAL_OUTBOX: 'lingganFlushLocalOutbox',
 };

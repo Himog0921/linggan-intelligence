@@ -231,6 +231,10 @@ export function createXhsPageController({
               if (selection && (selection === true || mediaTypes?.length > 0)) {
                 showToast(`正在下载 ${selection?.count || mediaCount} 个媒体文件...`, 'info');
                 const summary = await downloadNoteMediaFromRecord(note, { mediaTypes });
+                if (summary?.queued) {
+                  showToast(`媒体已加入 Linggan 本地下载队列：${summary.total} 个；正文采集不会等待媒体完成。`, 'success');
+                  break;
+                }
                 showToast(
                   summary.zipped
                     ? `媒体下载完成：已打包 ZIP（成功 ${summary.success}/${summary.total}，失败 ${summary.failed}）`

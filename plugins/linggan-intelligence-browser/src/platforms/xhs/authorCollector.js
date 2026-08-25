@@ -3,6 +3,7 @@ import { authorStore } from '../../db/authorStore.js';
 import { createCollectorEvidence, createCollectorQualityMeta, joinRawDomText } from '../../shared/collectorMetadata.js';
 import { MONITOR_RECORD_MODE } from '../../workbench/protocol/schema.js';
 import { withMonitorRecordMeta } from '../../workbench/runtime/monitorTask.js';
+import { emitCollectorReceipt } from '../../runtime/collectorReceiptSink.js';
 
 /**
  * 采集博主信息（小红书）
@@ -144,6 +145,7 @@ export async function collectAuthor(options = {}) {
   }, options.monitorMeta, MONITOR_RECORD_MODE.AUTHOR_PROFILE);
 
   await authorStore.upsert(author);
+  await emitCollectorReceipt('authorProfile', author, { platform: 'xhs', options });
   return author;
 }
 

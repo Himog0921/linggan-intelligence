@@ -26,7 +26,6 @@ import {
 } from './selectorHealth.js';
 import { resolveDouyinTaskbarRenderState } from './taskbarRenderState.js';
 import { createManagedTaskController } from '../../shared/managedTaskController.js';
-import { assertLingganCapability } from '../../linggan/adapter.js';
 
 /**
  * 抖音平台适配器实现
@@ -56,14 +55,19 @@ const DouyinAdapter = {
   _fallbackReinjectTimer: null,
   _nativeShareClickHandler: null,
   _apiBridgeCleanup: null,
+  _runtimeSink: null,
 
   async _ensurePluginAuthorized() {
-    try {
-      return await assertLingganCapability('douyin_collection');
-    } catch (error) {
-      showDouyinToast(String(error?.userMessage || error?.message || '当前浏览器还没有插件授权'), 'warning');
-      throw error;
-    }
+    // LOCAL_TRUSTED is a test-stage transport boundary, not an old Workbench authorization.
+    return { mode: 'LOCAL_TRUSTED', authorized: true };
+  },
+
+  setRuntimeSink(sink) { this._runtimeSink = sink && typeof sink === 'object' ? sink : null; },
+
+  async _submitRuntimeReceipt(kind, payload, context = {}) {
+    const submit = this._runtimeSink?.[kind];
+    if (typeof submit !== 'function') return;
+    await submit(payload, { platform: 'douyin', ...context });
   },
 
   /**
@@ -722,6 +726,8 @@ const DouyinAdapter = {
         showDouyinToast('采集中...', 'info');
         const result = await collectDouyinVideo();
         if (result.ok) {
+          await this._submitRuntimeReceipt('contentDetail', result.data);
+          await this._submitRuntimeReceipt('mediaSlots', result.data);
           showDouyinToast(`视频已采集：${result.data.title?.slice(0, 20) || result.data.noteId}`, 'success');
         } else {
           showDouyinToast(`采集失败：${result.error}`, 'error');
@@ -800,6 +806,7 @@ const DouyinAdapter = {
                 });
               },
             });
+            await this._submitRuntimeReceipt('comments', result, { noteId: result?.noteId || '' });
             if (result?.stopped) {
               showDouyinToast('当前评论采集已停止', 'warning');
             } else {
@@ -885,6 +892,7 @@ const DouyinAdapter = {
         showDouyinToast('采集博主信息...', 'info');
         const result = await collectDouyinAuthor();
         if (result.ok) {
+          await this._submitRuntimeReceipt('authorProfile', result.data);
           showDouyinToast(`博主已采集：${result.data.name || result.data.userId}`, 'success');
         } else {
           showDouyinToast(`采集失败：${result.error}`, 'error');

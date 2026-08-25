@@ -13,7 +13,7 @@ import {
   getPageContextText,
   isDouyinVideoUrl, isDouyinStrictDetailUrl,
 } from './utils.js';
-import { formatLingganIdleNotice } from '../linggan/adapter.js';
+import { formatLingganRuntimeNotice } from '../linggan/adapter.js';
 
 import TabNav from './components/TabNav.jsx';
 import StatsSection from './components/StatsSection.jsx';
@@ -360,7 +360,7 @@ export default function App() {
   }, [confirmDialog]);
 
   const idleClaimNotice = useMemo(
-    () => formatLingganIdleNotice(idleClaimSnapshot),
+    () => formatLingganRuntimeNotice(idleClaimSnapshot),
     [idleClaimSnapshot],
   );
   const displayNotice = notice.visible ? notice : idleClaimNotice;
@@ -404,7 +404,7 @@ export default function App() {
     if (stationStatus?.authorized) return true;
     setActiveTab('tab-config');
     showNotice(
-      stationStatus?.authorizationMessage || formatLingganIdleNotice(),
+      stationStatus?.authorizationMessage || formatLingganRuntimeNotice(),
       'warning',
     );
     return false;

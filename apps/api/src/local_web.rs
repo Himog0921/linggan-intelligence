@@ -3,27 +3,36 @@ mod evidence_page;
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{HeaderValue, header},
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
 use linggan_contracts::{
     EvidenceQuery, parse_local_producer_attempt, parse_local_producer_submission,
-    parse_local_task_spec,
+    parse_local_task_spec, parse_producer_attempt, parse_producer_submission,
+    parse_producer_task_spec,
 };
 use linggan_evidence::{
     DiscoveryIngressError, LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome,
-    LocalTaskOutcome, create_manual_task, ingest_discovery_package,
-    local_discovery_schema_is_ready, local_producer_schema_is_ready, read_discovery_library,
-    start_local_attempt, submit_local_package,
+    LocalTaskOutcome, MediaUploadFinalizeClaim, ProducerRuntimeError, RuntimeAttemptOutcome,
+    RuntimeSubmissionOutcome, RuntimeTaskOutcome, admit_media_blob, begin_media_upload,
+    claim_media_upload_finalize, complete_media_upload, create_manual_task, create_producer_task,
+    ingest_discovery_package, local_discovery_schema_is_ready, local_producer_schema_is_ready,
+    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_discovery_library,
+    read_local_media_blob, read_media_upload_session, read_runtime_library,
+    record_media_upload_chunk, release_media_upload_finalize, start_local_attempt,
+    start_producer_attempt, submit_local_package, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
-    io::{Error, ErrorKind},
+    fs,
+    io::{Error, ErrorKind, Seek, SeekFrom, Write},
     net::{Ipv4Addr, SocketAddr},
+    path::{Path as FsPath, PathBuf},
     sync::Arc,
 };
 
@@ -76,24 +85,38 @@ impl LocalDatabaseState {
                 "LOCAL_001_SCHEMA_UNAVAILABLE",
             ),
             Self::Ready(database) => match local_discovery_schema_is_ready(database).await {
-                Ok(true) => match local_producer_schema_is_ready(database).await {
+                Ok(true) => match producer_runtime_schema_is_ready(database).await {
                     Ok(true) => (
-                        "LOCAL_TRUSTED_PRODUCER",
-                        "MANUAL_DISCOVERY_ONLY",
+                        "LINGGAN_BROWSER_PRODUCER_RUNTIME",
+                        "MANUAL_RUNTIME_PACKAGES",
                         "READY",
-                        "LOCAL_003_SCHEMA_READY",
+                        "PLUGIN_RUNTIME_001_SCHEMA_READY",
                     ),
-                    Ok(false) => (
-                        "LOCAL_DISCOVERY_READ_PROJECTION",
-                        "DISCOVERY_ONLY",
-                        "READY",
-                        "LOCAL_001_SCHEMA_READY",
-                    ),
+                    Ok(false) => match local_producer_schema_is_ready(database).await {
+                        Ok(true) => (
+                            "LOCAL_TRUSTED_PRODUCER",
+                            "MANUAL_DISCOVERY_ONLY",
+                            "READY",
+                            "LOCAL_003_SCHEMA_READY",
+                        ),
+                        Ok(false) => (
+                            "LOCAL_DISCOVERY_READ_PROJECTION",
+                            "DISCOVERY_ONLY",
+                            "READY",
+                            "LOCAL_001_SCHEMA_READY",
+                        ),
+                        Err(_) => (
+                            "SOURCE_INCOMPLETE",
+                            "NOT_CONNECTED",
+                            "CONFIGURED_UNAVAILABLE",
+                            "LOCAL_003_DATABASE_UNAVAILABLE",
+                        ),
+                    },
                     Err(_) => (
                         "SOURCE_INCOMPLETE",
                         "NOT_CONNECTED",
                         "CONFIGURED_UNAVAILABLE",
-                        "LOCAL_003_DATABASE_UNAVAILABLE",
+                        "PLUGIN_RUNTIME_001_DATABASE_UNAVAILABLE",
                     ),
                 },
                 Ok(false) => (
@@ -143,12 +166,40 @@ fn router(state: LocalWebState) -> Router {
             post(create_manual_task_route),
         )
         .route(
+            "/api/local/producer/tasks",
+            post(create_producer_task_route),
+        )
+        .route(
             "/api/local/producer/attempts",
             post(start_local_attempt_route),
         )
         .route(
             "/api/local/producer/submissions",
             post(submit_local_package_route),
+        )
+        .route(
+            "/api/local/producer/runtime-attempts",
+            post(start_producer_attempt_route),
+        )
+        .route(
+            "/api/local/producer/runtime-submissions",
+            post(submit_producer_package_route),
+        )
+        .route(
+            "/api/local/producer/media-observations/{observation_ref}/uploads",
+            post(start_media_upload_route),
+        )
+        .route(
+            "/api/local/producer/media-uploads/{session_ref}/chunks",
+            axum::routing::patch(append_media_upload_chunk_route),
+        )
+        .route(
+            "/api/local/producer/media-uploads/{session_ref}/finalize",
+            post(finalize_media_upload_route),
+        )
+        .route(
+            "/api/local/media/{sha256}",
+            get(read_local_media_blob_route),
         )
         .route("/api/local/evidence-library", get(evidence_library_json))
         .route("/corpus/evidence", get(evidence_library))
@@ -211,7 +262,7 @@ async fn evidence_library(
     match state.database.database() {
         None => Html(evidence_library_html().to_owned()),
         Some(database) => match local_query(&params) {
-            Ok(query) => match read_discovery_library(database, &query).await {
+            Ok(query) => match read_evidence_library(database, &query).await {
                 Ok(projection) => Html(evidence_page::render_read_projection(
                     evidence_library_html(),
                     &projection,
@@ -240,12 +291,25 @@ async fn evidence_library_json(
             "invalid_local_evidence_query",
         );
     };
-    match read_discovery_library(database, &query).await {
+    match read_evidence_library(database, &query).await {
         Ok(projection) => Json(projection).into_response(),
         Err(_) => local_read_json_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "read_projection_unavailable",
         ),
+    }
+}
+
+async fn read_evidence_library(
+    database: &Database,
+    query: &EvidenceQuery,
+) -> Result<linggan_evidence::DiscoveryLibraryProjection, sqlx::Error> {
+    if producer_runtime_schema_is_ready(database).await?
+        && producer_runtime_has_packages(database).await?
+    {
+        read_runtime_library(database, query).await
+    } else {
+        read_discovery_library(database, query).await
     }
 }
 
@@ -300,6 +364,41 @@ async fn create_manual_task_route(State(state): State<LocalWebState>, body: Byte
         }
         Ok(outcome) => Json(outcome).into_response(),
         Err(LocalProducerError::Internal(_)) => local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_committed",
+        ),
+        Err(_) => local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "task_spec_invalid",
+        ),
+    }
+}
+
+async fn create_producer_task_route(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_connected",
+        );
+    };
+    let Ok(body) = std::str::from_utf8(&body) else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "task_spec_invalid",
+        );
+    };
+    let Ok(task) = parse_producer_task_spec(body) else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "task_spec_invalid",
+        );
+    };
+    match create_producer_task(database, &task).await {
+        Ok(RuntimeTaskOutcome::Conflict { .. }) => {
+            local_producer_error(axum::http::StatusCode::CONFLICT, "task_spec_conflict")
+        }
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(ProducerRuntimeError::Internal(_)) => local_producer_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "producer_not_committed",
         ),
@@ -394,6 +493,525 @@ async fn submit_local_package_route(State(state): State<LocalWebState>, body: By
             )
         }
     }
+}
+
+async fn start_producer_attempt_route(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_connected",
+        );
+    };
+    let Ok(body) = std::str::from_utf8(&body) else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "attempt_invalid",
+        );
+    };
+    let Ok(attempt) = parse_producer_attempt(body) else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "attempt_invalid",
+        );
+    };
+    match start_producer_attempt(database, &attempt).await {
+        Ok(RuntimeAttemptOutcome::Conflict { .. }) => local_producer_error(
+            axum::http::StatusCode::CONFLICT,
+            "attempt_identity_conflict",
+        ),
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(ProducerRuntimeError::RoutingNotFound) => {
+            local_producer_error(axum::http::StatusCode::NOT_FOUND, "task_not_found")
+        }
+        Err(ProducerRuntimeError::Internal(_)) => local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_committed",
+        ),
+        Err(_) => local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "attempt_invalid",
+        ),
+    }
+}
+
+async fn submit_producer_package_route(
+    State(state): State<LocalWebState>,
+    body: Bytes,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_connected",
+        );
+    };
+    let Ok(body) = std::str::from_utf8(&body) else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "submission_invalid",
+        );
+    };
+    let Ok(submission) = parse_producer_submission(body) else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "submission_invalid",
+        );
+    };
+    match submit_producer_package(database, &submission).await {
+        Ok(RuntimeSubmissionOutcome::Conflict { .. }) => local_producer_error(
+            axum::http::StatusCode::CONFLICT,
+            "attempt_terminal_submission_conflict",
+        ),
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(ProducerRuntimeError::RoutingNotFound) => {
+            local_producer_error(axum::http::StatusCode::NOT_FOUND, "attempt_not_found")
+        }
+        Err(ProducerRuntimeError::AttemptIdentityMismatch) => local_producer_error(
+            axum::http::StatusCode::CONFLICT,
+            "attempt_identity_mismatch",
+        ),
+        Err(ProducerRuntimeError::Internal(_)) => local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "submission_not_acknowledged",
+        ),
+        Err(_) => local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "submission_invalid",
+        ),
+    }
+}
+
+// These three routes are the resumable media lane.  They are intentionally separate from the
+// text package route: slow bytes and a retrying download must never delay an already-captured
+// note, comment, or discovery package.
+async fn start_media_upload_route(
+    State(state): State<LocalWebState>,
+    Path(observation_ref): Path<String>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_connected",
+        );
+    };
+    let Ok(observation_ref) = uuid::Uuid::parse_str(&observation_ref) else {
+        return local_producer_error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "media_observation_invalid",
+        );
+    };
+    let Some((expected_sha256, mime_type, expected_byte_size)) = media_upload_headers(&headers)
+    else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "media_upload_contract_invalid",
+        );
+    };
+    let temporary_storage_key = format!("uploads/{observation_ref}/{expected_sha256}.part");
+    match begin_media_upload(
+        database,
+        observation_ref,
+        &expected_sha256,
+        &mime_type,
+        expected_byte_size,
+        &temporary_storage_key,
+    )
+    .await
+    {
+        Ok(session) => Json(json!({
+            "sessionRef": session.session_ref,
+            "nextOffset": session.next_offset,
+            "state": session.state,
+        }))
+        .into_response(),
+        Err(ProducerRuntimeError::MediaObservationNotFound) => local_producer_error(
+            axum::http::StatusCode::NOT_FOUND,
+            "media_observation_not_found",
+        ),
+        Err(ProducerRuntimeError::MediaBlobConflict) => {
+            local_producer_error(axum::http::StatusCode::CONFLICT, "media_upload_conflict")
+        }
+        Err(_) => local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "media_upload_state_unavailable",
+        ),
+    }
+}
+
+async fn append_media_upload_chunk_route(
+    State(state): State<LocalWebState>,
+    Path(session_ref): Path<String>,
+    headers: axum::http::HeaderMap,
+    body: Bytes,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_connected",
+        );
+    };
+    let Ok(session_ref) = uuid::Uuid::parse_str(&session_ref) else {
+        return local_producer_error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "media_upload_session_invalid",
+        );
+    };
+    let Some(offset) = headers
+        .get("x-linggan-media-offset")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<i64>().ok())
+    else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "media_chunk_offset_invalid",
+        );
+    };
+    let Ok(byte_count) = i64::try_from(body.len()) else {
+        return local_producer_error(
+            axum::http::StatusCode::PAYLOAD_TOO_LARGE,
+            "media_chunk_size_invalid",
+        );
+    };
+    let session = match read_media_upload_session(database, session_ref).await {
+        Ok(Some(value)) => value,
+        Ok(None) => {
+            return local_producer_error(
+                axum::http::StatusCode::NOT_FOUND,
+                "media_upload_session_not_found",
+            );
+        }
+        Err(_) => {
+            return local_producer_error(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "media_upload_state_unavailable",
+            );
+        }
+    };
+    if session.state == "materialized" {
+        return Json(json!({"sessionRef": session_ref, "nextOffset": session.next_offset, "state": session.state})).into_response();
+    }
+    if session.state != "receiving" || session.next_offset != offset || byte_count < 1 {
+        return local_producer_error(
+            axum::http::StatusCode::CONFLICT,
+            "media_chunk_offset_conflict",
+        );
+    }
+    let temporary_path = local_media_root().join(&session.temporary_storage_key);
+    if let Err(error) = write_media_chunk(&temporary_path, offset, &body) {
+        eprintln!("Linggan local media chunk write failed: {error}");
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "media_chunk_not_written",
+        );
+    }
+    match record_media_upload_chunk(database, session_ref, offset, byte_count).await {
+        Ok(updated) => Json(json!({"sessionRef": updated.session_ref, "nextOffset": updated.next_offset, "state": updated.state})).into_response(),
+        Err(ProducerRuntimeError::MediaBlobConflict) => {
+            let _ = truncate_media_file(&temporary_path, offset);
+            local_producer_error(axum::http::StatusCode::CONFLICT, "media_chunk_offset_conflict")
+        }
+        Err(_) => {
+            let _ = truncate_media_file(&temporary_path, offset);
+            local_producer_error(axum::http::StatusCode::SERVICE_UNAVAILABLE, "media_chunk_state_not_updated")
+        }
+    }
+}
+
+async fn finalize_media_upload_route(
+    State(state): State<LocalWebState>,
+    Path(session_ref): Path<String>,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_connected",
+        );
+    };
+    let Ok(session_ref) = uuid::Uuid::parse_str(&session_ref) else {
+        return local_producer_error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "media_upload_session_invalid",
+        );
+    };
+    let session = match claim_media_upload_finalize(database, session_ref).await {
+        Ok(MediaUploadFinalizeClaim::Materialized(admission)) => {
+            return Json(admission).into_response();
+        }
+        Ok(MediaUploadFinalizeClaim::Incomplete) => {
+            return local_producer_error(
+                axum::http::StatusCode::CONFLICT,
+                "media_upload_incomplete",
+            );
+        }
+        Ok(MediaUploadFinalizeClaim::Busy) => {
+            return local_producer_error(
+                axum::http::StatusCode::CONFLICT,
+                "media_upload_finalizing",
+            );
+        }
+        Ok(MediaUploadFinalizeClaim::Ready(session)) => session,
+        Err(ProducerRuntimeError::MediaObservationNotFound) => {
+            return local_producer_error(
+                axum::http::StatusCode::NOT_FOUND,
+                "media_upload_session_not_found",
+            );
+        }
+        Err(_) => {
+            return local_producer_error(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "media_upload_state_unavailable",
+            );
+        }
+    };
+    finalize_claimed_media_upload(database, session_ref, session).await
+}
+
+async fn finalize_claimed_media_upload(
+    database: &Database,
+    session_ref: uuid::Uuid,
+    session: linggan_evidence::MediaUploadSession,
+) -> Response {
+    let root = local_media_root();
+    let temporary_path = root.join(&session.temporary_storage_key);
+    match fs::read(&temporary_path) {
+        Ok(bytes)
+            if i64::try_from(bytes.len()).ok() == Some(session.expected_byte_size)
+                && sha256_bytes(&bytes) == session.expected_sha256 => {}
+        _ => {
+            let _ = release_media_upload_finalize(database, session_ref).await;
+            return local_producer_error(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "media_upload_integrity_invalid",
+            );
+        }
+    };
+    let storage_key = media_storage_key(&session.expected_sha256);
+    let final_path = root.join(&storage_key);
+    let created = match atomically_promote_media_upload(&temporary_path, &final_path) {
+        Ok(created) => created,
+        Err(error) => {
+            let _ = release_media_upload_finalize(database, session_ref).await;
+            eprintln!("Linggan local media promotion failed: {error}");
+            return local_producer_error(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "media_upload_not_materialized",
+            );
+        }
+    };
+    let admission = admit_media_blob(
+        database,
+        session.media_observation_ref,
+        &session.expected_sha256,
+        &session.mime_type,
+        session.expected_byte_size,
+        &storage_key,
+    )
+    .await;
+    match admission {
+        Ok(outcome) => {
+            match complete_media_upload(database, session_ref, outcome.download_attempt_ref).await {
+                Ok(()) => Json(outcome).into_response(),
+                Err(_) => local_producer_error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "media_upload_receipt_not_recorded",
+                ),
+            }
+        }
+        Err(error) => {
+            if created {
+                let _ = remove_unreferenced_media(&root, &final_path);
+            }
+            let _ = release_media_upload_finalize(database, session_ref).await;
+            match error {
+                ProducerRuntimeError::MediaObservationNotFound => local_producer_error(
+                    axum::http::StatusCode::NOT_FOUND,
+                    "media_observation_not_found",
+                ),
+                ProducerRuntimeError::MediaBlobConflict => local_producer_error(
+                    axum::http::StatusCode::CONFLICT,
+                    "media_blob_metadata_conflict",
+                ),
+                _ => local_producer_error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "media_admission_not_committed",
+                ),
+            }
+        }
+    }
+}
+
+async fn read_local_media_blob_route(
+    State(state): State<LocalWebState>,
+    Path(sha256): Path<String>,
+) -> Response {
+    if !is_sha256(&sha256) {
+        return local_producer_error(axum::http::StatusCode::NOT_FOUND, "local_media_not_found");
+    }
+    let Some(database) = state.database.database() else {
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_connected",
+        );
+    };
+    match read_local_media_blob(database, &sha256).await {
+        Ok(Some((mime_type, storage_key))) => {
+            match fs::read(local_media_root().join(storage_key)) {
+                Ok(bytes) => {
+                    let Ok(content_type) = HeaderValue::from_str(&mime_type) else {
+                        return local_producer_error(
+                            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                            "local_media_metadata_invalid",
+                        );
+                    };
+                    (
+                        [
+                            (header::CONTENT_TYPE, content_type),
+                            (
+                                header::CACHE_CONTROL,
+                                HeaderValue::from_static("private, max-age=31536000, immutable"),
+                            ),
+                        ],
+                        bytes,
+                    )
+                        .into_response()
+                }
+                Err(_) => local_producer_error(
+                    axum::http::StatusCode::NOT_FOUND,
+                    "local_media_bytes_unavailable",
+                ),
+            }
+        }
+        Ok(None) => {
+            local_producer_error(axum::http::StatusCode::NOT_FOUND, "local_media_not_found")
+        }
+        Err(_) => local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "local_media_metadata_unavailable",
+        ),
+    }
+}
+
+fn local_media_root() -> PathBuf {
+    std::env::var("LINGGAN_LOCAL_MEDIA_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(".linggan-local/media"))
+}
+
+fn media_upload_headers(headers: &axum::http::HeaderMap) -> Option<(String, String, i64)> {
+    let expected_sha256 = headers
+        .get("x-linggan-media-sha256")?
+        .to_str()
+        .ok()?
+        .trim()
+        .to_ascii_lowercase();
+    let mime_type = headers
+        .get("x-linggan-media-mime")?
+        .to_str()
+        .ok()?
+        .trim()
+        .to_owned();
+    let expected_byte_size = headers
+        .get("x-linggan-media-size")?
+        .to_str()
+        .ok()?
+        .parse::<i64>()
+        .ok()?;
+    if !is_sha256(&expected_sha256)
+        || !(1..=256 * 1024 * 1024).contains(&expected_byte_size)
+        || (!mime_type.starts_with("image/")
+            && !mime_type.starts_with("video/")
+            && !mime_type.starts_with("audio/"))
+    {
+        return None;
+    }
+    Some((expected_sha256, mime_type, expected_byte_size))
+}
+
+fn media_storage_key(sha256: &str) -> String {
+    format!("blobs/{}/{}", &sha256[..2], sha256)
+}
+
+fn sha256_bytes(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64 && value.as_bytes().iter().all(u8::is_ascii_hexdigit)
+}
+
+fn write_media_chunk(path: &FsPath, offset: i64, bytes: &[u8]) -> Result<(), std::io::Error> {
+    let offset = u64::try_from(offset)
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "media_chunk_offset_invalid"))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "media_upload_temp_path_invalid"))?;
+    fs::create_dir_all(parent)?;
+    let existing_size = fs::metadata(path)
+        .map(|value| value.len())
+        .or_else(|error| {
+            if error.kind() == ErrorKind::NotFound {
+                Ok(0)
+            } else {
+                Err(error)
+            }
+        })?;
+    if existing_size != offset {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "media_chunk_file_offset_conflict",
+        ));
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(path)?;
+    file.seek(SeekFrom::Start(offset))?;
+    file.write_all(bytes)?;
+    file.sync_data()?;
+    Ok(())
+}
+
+fn truncate_media_file(path: &FsPath, offset: i64) -> Result<(), std::io::Error> {
+    if !path.exists() {
+        return Ok(());
+    }
+    let offset = u64::try_from(offset)
+        .map_err(|_| Error::new(ErrorKind::InvalidInput, "media_chunk_offset_invalid"))?;
+    let file = std::fs::OpenOptions::new().write(true).open(path)?;
+    file.set_len(offset)
+}
+
+fn atomically_promote_media_upload(
+    temporary_path: &FsPath,
+    final_path: &FsPath,
+) -> Result<bool, std::io::Error> {
+    if final_path.exists() {
+        let _ = fs::remove_file(temporary_path);
+        return Ok(false);
+    }
+    let parent = final_path
+        .parent()
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "media_storage_path_invalid"))?;
+    fs::create_dir_all(parent)?;
+    match fs::rename(temporary_path, final_path) {
+        Ok(()) => Ok(true),
+        Err(_error) if final_path.exists() => {
+            let _ = fs::remove_file(temporary_path);
+            Ok(false)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+fn remove_unreferenced_media(root: &FsPath, path: &FsPath) -> Result<(), std::io::Error> {
+    if path.starts_with(root) && path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
 }
 
 async fn configured_database_state() -> LocalDatabaseState {

@@ -4,6 +4,10 @@ const database = new Dexie('LingganLocalProducerOutbox');
 database.version(1).stores({
   submissions: '&submissionId, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]',
 });
+database.version(2).stores({
+  submissions: '&submissionId, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]',
+  mediaUploads: '&uploadId, slotSubmissionId, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]',
+});
 
 const RETRYABLE = ['pending', 'retryable', 'in_flight'];
 
@@ -24,6 +28,7 @@ export function createLocalProducerOutbox(table = database.submissions, now = cu
   }
 
   return {
+    async get(submissionId) { return table.get(submissionId); },
     async enqueue(envelope) {
       if (!envelope?.submissionId || !envelope?.attemptId || !envelope?.taskId || !envelope?.producerInstanceId) {
         throw new Error('invalid_local_producer_submission');
@@ -80,3 +85,52 @@ export function createLocalProducerOutbox(table = database.submissions, now = cu
 }
 
 export const localProducerOutbox = createLocalProducerOutbox();
+
+export function createLocalMediaOutbox(table = database.mediaUploads, now = currentTime) {
+  async function restoreExpired({ at = now(), limit = 20 } = {}) {
+    const rows = await table
+      .where('[status+nextAttemptAt+createdAt]')
+      .between(['in_flight', Dexie.minKey, Dexie.minKey], ['in_flight', at, Dexie.maxKey])
+      .limit(limit)
+      .toArray();
+    await Promise.all(rows.map((row) => table.update(row.uploadId, {
+      status: 'retryable', nextAttemptAt: at, updatedAt: at, error: 'media_delivery_timeout',
+    })));
+    return rows.length;
+  }
+
+  return {
+    async get(uploadId) { return table.get(uploadId); },
+    async enqueue(envelope) {
+      if (!envelope?.uploadId || !envelope?.slotSubmissionId || !envelope?.mediaObservationRef || !Array.isArray(envelope?.candidateUris)) throw new Error('invalid_local_media_upload');
+      const existing = await table.get(envelope.uploadId);
+      if (existing) return existing;
+      const createdAt = now();
+      const row = { ...envelope, status: 'pending', attempts: 0, nextAttemptAt: createdAt, createdAt, updatedAt: createdAt };
+      await table.add(row);
+      return row;
+    },
+    async due({ at = now(), limit = 2 } = {}) {
+      await restoreExpired({ at, limit });
+      const rows = [];
+      for (const status of ['pending', 'retryable']) {
+        rows.push(...await table.where('[status+nextAttemptAt+createdAt]').between([status, Dexie.minKey, Dexie.minKey], [status, at, Dexie.maxKey]).limit(limit).toArray());
+      }
+      return rows.sort((left, right) => left.createdAt - right.createdAt).slice(0, limit);
+    },
+    async markInFlight(uploadId, { at = now(), timeoutMs = 120000 } = {}) { await table.update(uploadId, { status: 'in_flight', nextAttemptAt: at + timeoutMs, updatedAt: at }); },
+    async acknowledge(uploadId, receipt, { at = now() } = {}) { await table.update(uploadId, { status: 'acknowledged', receipt, updatedAt: at, error: '' }); },
+    async retry(uploadId, error, { at = now() } = {}) {
+      const row = await table.get(uploadId); if (!row) return;
+      const attempts = Number(row.attempts || 0) + 1;
+      await table.update(uploadId, { status: 'retryable', attempts, nextAttemptAt: at + retryDelay(attempts), updatedAt: at, error: String(error || 'media_upload_not_acknowledged') });
+    },
+    async terminal(uploadId, error, { at = now() } = {}) { await table.update(uploadId, { status: 'terminal', updatedAt: at, error: String(error || 'media_upload_terminal') }); },
+    async pendingCount() {
+      const counts = await Promise.all(RETRYABLE.map((status) => table.where('status').equals(status).count()));
+      return counts.reduce((total, value) => total + value, 0);
+    },
+  };
+}
+
+export const localMediaOutbox = createLocalMediaOutbox();

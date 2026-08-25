@@ -37,12 +37,20 @@ function collectModules(modules = [], inheritedChunks = []) {
 }
 collectModules(stats.modules || []);
 
-if (![...activeContentModules].some((name) => name.includes('./src/linggan/pageControls.jsx'))) {
-  throw new Error('active content module graph does not include the Linggan pending UI shell');
+for (const required of [
+  './src/linggan/contentRuntimeAdapter.js',
+  './src/runtime/collectorReceiptSink.js',
+  './src/content/xhsPageController.js',
+  './src/platforms/xhs/noteCollector.js',
+]) {
+  if (![...activeContentModules].some((name) => name.includes(required))) {
+    throw new Error(`active content module graph is missing the retained collector/runtime bridge: ${required}`);
+  }
 }
 
 const forbidden = [
-  /(?:^|\/)src\/workbench\//,
+  /(?:^|\/)src\/background\/index\.js$/,
+  /(?:^|\/)src\/workbench\/runtime\/(?:taskPoller|taskLeaseClient|outbox|sync)\.js$/,
   /(?:^|\/)src\/sync\//,
 ];
 for (const moduleName of activeContentModules) {
@@ -53,4 +61,4 @@ for (const moduleName of activeContentModules) {
   }
 }
 
-console.log(`active content module graph verified: ${activeContentModules.size} modules; no src/workbench/** or src/sync/** module paths`);
+console.log(`active content module graph verified: ${activeContentModules.size} modules; retained page collectors enter Linggan Runtime and no retired poller/lease/sync runtime is loaded.`);

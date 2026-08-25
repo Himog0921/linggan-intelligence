@@ -13,7 +13,7 @@ import {
   sortByCreatedAt, formatLocalDate, normalizeUrl, toDisplayUrl, getPreferredRecordUrl, getUnifiedAuthorHandle,
   getItemId, getTabLabel, getColumns, getExportColumns, sendToParent, unwrapParentResponseData,
 } from './utils.js';
-import { formatLingganIdleNotice } from '../linggan/adapter.js';
+import { formatLingganRuntimeNotice } from '../linggan/adapter.js';
 
 const TABS = [
   { key: 'notes', label: '笔记' },
@@ -409,7 +409,7 @@ export default function App() {
   }, [mediaDownloadDialog]);
 
   const idleClaimNotice = useMemo(
-    () => formatLingganIdleNotice(idleClaimSnapshot),
+    () => formatLingganRuntimeNotice(idleClaimSnapshot),
     [idleClaimSnapshot],
   );
   const displayNotice = notice.visible ? notice : idleClaimNotice;

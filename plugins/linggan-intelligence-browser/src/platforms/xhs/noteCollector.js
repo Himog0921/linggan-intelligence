@@ -11,6 +11,7 @@ import { isContextValid } from '../../shared/messaging.js';
 import { noteStore } from '../../db/noteStore.js';
 import { createCollectorEvidence, joinRawDomText } from '../../shared/collectorMetadata.js';
 import { withMonitorRecordMeta } from '../../workbench/runtime/monitorTask.js';
+import { emitCollectorReceipt } from '../../runtime/collectorReceiptSink.js';
 import {
   ensureXhsCommentApiBridge,
   fetchXhsJsonViaBridge,
@@ -519,6 +520,8 @@ export async function collectNote(wd = window, options = {}) {
 
   // 4. 写入 IndexedDB（主键 noteId 自动去重）
   await noteStore.upsert(noteInfo);
+  await emitCollectorReceipt('contentDetail', noteInfo, { platform: 'xhs', options });
+  await emitCollectorReceipt('mediaSlots', noteInfo, { platform: 'xhs', options });
 
   return noteInfo;
 }
