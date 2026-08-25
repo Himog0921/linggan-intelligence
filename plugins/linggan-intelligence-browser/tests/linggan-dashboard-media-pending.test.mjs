@@ -3,7 +3,7 @@ import test from 'node:test';
 
 import { createDashboardBridge } from '../src/content/dashboardBridge.js';
 
-test('dashboard media action returns Linggan pending without reading or downloading platform media', async () => {
+test('dashboard media action enters the registered Linggan media runtime without using a legacy download', async () => {
   const payloads = [];
   let noteReads = 0;
   let downloaderCalls = 0;
@@ -16,11 +16,11 @@ test('dashboard media action returns Linggan pending without reading or download
     },
     commentStore: {},
     authorStore: {},
-    // A legacy caller may still provide this value; the active bridge must
-    // never invoke it before Linggan's media contract is available.
-    downloadNoteMediaFromRecord: async () => {
+    downloadNoteMediaFromRecord: async (note, options) => {
       downloaderCalls += 1;
-      throw new Error('must not download');
+      assert.equal(note.noteId, 'note-1');
+      assert.deepEqual(options, {});
+      return { success: true, queued: true, mediaDelivery: 'pending' };
     },
     _testNonce: 'media-pending-nonce',
   });
@@ -30,15 +30,14 @@ test('dashboard media action returns Linggan pending without reading or download
       source: 'lgboom-dashboard',
       action: 'downloadNoteMedia',
       nonce: 'media-pending-nonce',
-      noteId: 'note-1',
+      note: { noteId: 'note-1' },
     },
     ports: [{ postMessage(value) { payloads.push(value); } }],
   });
 
   assert.equal(noteReads, 0);
-  assert.equal(downloaderCalls, 0);
-  assert.equal(payloads[0].success, false);
-  assert.equal(payloads[0].code, 'linggan_adapter_pending');
-  assert.equal(payloads[0].capability, 'media_download');
-  assert.match(payloads[0].message, /没有下载媒体/);
+  assert.equal(downloaderCalls, 1);
+  assert.equal(payloads[0].success, true);
+  assert.equal(payloads[0].queued, true);
+  assert.equal(payloads[0].mediaDelivery, 'pending');
 });

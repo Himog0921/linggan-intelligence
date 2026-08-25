@@ -1,8 +1,8 @@
-import { collectionRunStore } from '../db/collectionRunStore.js';
+import { localExecutionStore } from '../linggan/localExecutionStore.js';
 import { MSG as RUNTIME_MSG, TASK_STATE } from '../shared/constants.js';
 import { sendToBackground as sendRuntimeToBackground } from '../shared/messaging.js';
 import { isPausedTaskState, resolveTaskState } from '../shared/taskUi.js';
-import { createCollectionRunHeartbeatReporter } from '../workbench/runtime/heartbeat.js';
+import { createLocalExecutionHeartbeatReporter } from '../linggan/localExecutionSupport.js';
 import JSZip from 'jszip';
 import {
   detectFileExt,
@@ -57,7 +57,7 @@ export function createCommentImageTaskController({
 } = {}) {
   let task = null;
   let abortPendingCommentImageFetches = () => {};
-  const reportHeartbeat = createCollectionRunHeartbeatReporter({ collectionRunStore });
+  const reportHeartbeat = createLocalExecutionHeartbeatReporter({ localExecutionStore });
 
   function cleanup() {
     abortPendingCommentImageFetches();
@@ -262,15 +262,15 @@ export function createCommentImageTaskController({
     const runId = String(task?.collectionRunId || '').trim();
     if (!runId) return;
     if (status === 'done') {
-      await collectionRunStore.markDone(runId, payload);
+      await localExecutionStore.markDone(runId, payload);
       return;
     }
     if (status === 'stopped') {
-      await collectionRunStore.markStopped(runId, payload);
+      await localExecutionStore.markStopped(runId, payload);
       return;
     }
     if (status === 'failed') {
-      await collectionRunStore.markFailed(runId, payload.error || '评论图片区任务失败', payload);
+      await localExecutionStore.markFailed(runId, payload.error || '评论图片区任务失败', payload);
     }
   }
 
@@ -363,7 +363,7 @@ export function createCommentImageTaskController({
       }
 
       const noteId = extractNoteId(window.location.href) || 'unknown';
-      const run = await collectionRunStore.createRun({
+      const run = await localExecutionStore.createRun({
         platform: 'xhs',
         taskType: 'commentImages',
         pageType: 'noteDetail',

@@ -5,6 +5,7 @@ import { reportProgress } from '../../shared/messaging.js';
 import { detectCaptcha, showCaptchaPauseOverlay, humanScroll } from './antiDetect.js';
 import { getActiveCommentsContext } from './batchShared.js';
 import { createCollectorEvidence, createCollectorQualityMeta, joinRawDomText } from '../../shared/collectorMetadata.js';
+import { emitCollectorReceipt } from '../../runtime/collectorReceiptSink.js';
 import {
   buildXhsCommentsFromSnapshot,
   requestXhsCommentSnapshot,
@@ -104,7 +105,9 @@ export async function collectComments({
     persist,
   });
   if (!apiResult.needsDomContinuation && (apiResult.apiObserved || apiResult.total > 0)) {
-    return { total: apiResult.total, comments: apiResult.comments };
+    const result = { total: apiResult.total, comments: apiResult.comments };
+    result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
+    return result;
   }
 
   if (apiResult.needsDomContinuation) {
@@ -115,7 +118,7 @@ export async function collectComments({
     });
   }
 
-  return collectCommentsFromDom({
+  const result = await collectCommentsFromDom({
     noteId,
     noteUrl,
     maxTotal,
@@ -129,6 +132,8 @@ export async function collectComments({
     captchaActionTimeoutMs,
     persist,
   });
+  result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
+  return result;
 }
 
 function buildCommentSeenId(comment) {

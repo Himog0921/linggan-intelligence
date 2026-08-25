@@ -9,8 +9,7 @@
 import { authorStore } from '../../db/authorStore.js';
 import { createCollectorEvidence, createCollectorQualityMeta, joinRawDomText } from '../../shared/collectorMetadata.js';
 import { getRenderData } from './videoApiData.js';
-import { MONITOR_RECORD_MODE } from '../../workbench/protocol/schema.js';
-import { withMonitorRecordMeta } from '../../workbench/runtime/monitorTask.js';
+import { LOCAL_SURFACE_MODE, withLocalReadMeta } from '../../linggan/localExecutionSupport.js';
 import { fetchDouyinWithTimeout } from './fetchWithTimeout.js';
 
 // ========== 已验证选择器（2026-03-24）==========
@@ -414,7 +413,7 @@ export async function collectDouyinAuthor(options = {}) {
   const dataQuality = qualityReason ? 'degraded' : 'full';
 
   const collectedAt = Date.now();
-  const record = withMonitorRecordMeta({
+  const record = withLocalReadMeta({
     userId:     `dy_${userId}`,
     authorEntityId: `douyin_${userId}`,
     platformAuthorId: userId,
@@ -462,7 +461,7 @@ export async function collectDouyinAuthor(options = {}) {
       rawUrl: window.location.href,
       rawSource: 'douyin.user-detail+profile-api',
     }),
-  }, options.monitorMeta, MONITOR_RECORD_MODE.AUTHOR_PROFILE);
+  }, options.monitorMeta, LOCAL_SURFACE_MODE.AUTHOR_PROFILE);
 
   await authorStore.upsert(record);
   return { ok: true, data: record };

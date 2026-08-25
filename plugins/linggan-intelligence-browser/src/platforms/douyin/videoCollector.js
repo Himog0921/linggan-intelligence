@@ -33,7 +33,7 @@ import {
   hasUsableApiVideo,
   resolveApiVideoData,
 } from './videoApiData.js';
-import { withMonitorRecordMeta } from '../../workbench/runtime/monitorTask.js';
+import { withLocalReadMeta } from '../../linggan/localExecutionSupport.js';
 
 // ========== 已验证选择器（2026-03-24）==========
 const SEL = {
@@ -297,7 +297,7 @@ async function buildDouyinVideoRecord(apiData = {}, options = {}) {
     ? Number(options.batchLikesSnapshot)
     : Number(apiData.statsLikes || 0);
 
-  const record = withMonitorRecordMeta({
+  const record = withLocalReadMeta({
     noteId: contentId,
     contentId,
     platformContentId: resolvedVideoId,
@@ -548,7 +548,7 @@ export async function collectDouyinVideo(options = {}) {
 
   const collectedAt = Date.now();
   const contentId = `dy_${resolvedVideoId}`;
-  const record = withMonitorRecordMeta({
+  const record = withLocalReadMeta({
     noteId: contentId ,
     contentId,
     platformContentId: resolvedVideoId,

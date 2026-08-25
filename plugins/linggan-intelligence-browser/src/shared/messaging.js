@@ -1,6 +1,4 @@
 import { MSG } from './constants.js';
-import { mapErrorToProtocolError } from '../workbench/runtime/errorMapper.js';
-import { normalizeProgressEvent, toLegacyProgressMessage } from '../workbench/runtime/progressEvent.js';
 
 /**
  * 检查扩展 context 是否仍然有效
@@ -123,47 +121,28 @@ export async function sendToTab(tabId, payload, {
  */
 export function reportProgress(current, total, status, meta = {}) {
   if (!isContextValid()) return;
-  const error = meta.error
-    ? mapErrorToProtocolError(meta.error)
-    : (String(meta.taskState || '').trim() === 'error' ? mapErrorToProtocolError(status) : null);
-  const progressEvent = normalizeProgressEvent({
-    current,
-    total,
-    status,
-    ...meta,
-    error,
-  });
-  const legacy = toLegacyProgressMessage(progressEvent);
   chrome.runtime.sendMessage({
     action: MSG.PROGRESS,
-    ...legacy,
-    progressEvent,
+    current: Number.isFinite(Number(current)) ? Number(current) : 0,
+    total: Number.isFinite(Number(total)) ? Number(total) : 0,
+    status: String(status || ''),
+    ...meta,
   });
 }
 
 export function reportTaskError(error, meta = {}) {
   if (!isContextValid()) return;
-  const protocolError = mapErrorToProtocolError(error, meta);
-  const progressEvent = normalizeProgressEvent({
-    current: Number(meta.current || 0),
-    total: Number(meta.total || 0),
-    status: protocolError.message,
-    taskState: 'error',
-    phase: meta.phase || meta.stage || 'finalizing',
-    taskType: meta.taskType,
-    metrics: meta.metrics,
-    heartbeatAt: meta.heartbeatAt,
-    error: protocolError,
-  });
-  const legacy = toLegacyProgressMessage(progressEvent);
   chrome.runtime.sendMessage({
     action: MSG.PROGRESS,
-    ...legacy,
-    progressEvent,
+    current: Number(meta.current || 0), total: Number(meta.total || 0),
+    status: String(error?.message || error || 'local_execution_error'), taskState: 'error',
+    phase: meta.phase || meta.stage || 'finalizing', taskType: meta.taskType,
+    metrics: meta.metrics, heartbeatAt: meta.heartbeatAt,
+    error: { code: 'local_execution_error', message: String(error?.message || error || 'local_execution_error') },
   });
 }
 
-export function reportWorkbenchRecord({
+export function reportLocalRead({
   recordType = '',
   externalRecordId = '',
   record = {},
@@ -174,7 +153,7 @@ export function reportWorkbenchRecord({
 } = {}) {
   if (!isContextValid()) return;
   chrome.runtime.sendMessage({
-    action: MSG.WORKBENCH_RECORD_DELTA,
+    action: MSG.LOCAL_CAPTURE_READ,
     recordType,
     externalRecordId,
     record: record && typeof record === 'object' && !Array.isArray(record) ? record : {},
@@ -185,7 +164,7 @@ export function reportWorkbenchRecord({
   });
 }
 
-export function reportWorkbenchRecords(records = []) {
+export function reportLocalReads(records = []) {
   if (!isContextValid()) return;
   const normalizedRecords = (Array.isArray(records) ? records : [])
     .map((item) => ({
@@ -202,7 +181,7 @@ export function reportWorkbenchRecords(records = []) {
     .filter((item) => item.recordType && Object.keys(item.record).length > 0);
   if (normalizedRecords.length === 0) return;
   chrome.runtime.sendMessage({
-    action: MSG.WORKBENCH_RECORD_DELTA,
+    action: MSG.LOCAL_CAPTURE_READ,
     records: normalizedRecords,
   });
 }
@@ -213,9 +192,12 @@ export function reportWorkbenchRecords(records = []) {
 export function reportDone(type, count, meta = {}) {
   if (!isContextValid()) return;
   chrome.runtime.sendMessage({
-    action: MSG.COLLECT_DONE,
+    // Page read completion is deliberately not a Linggan acceptance receipt.  UI surfaces that
+    // care about truth must show pending/acknowledged from the local producer outbox instead.
+    action: MSG.LOCAL_CAPTURE_READ,
     type,
     count,
+    delivery: String(meta.delivery || 'pending'),
     ...meta,
   });
 }

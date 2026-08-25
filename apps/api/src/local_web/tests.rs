@@ -158,6 +158,7 @@ fn runtime_token_source_matches_the_full_lids_baseline() {
 fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
     let projection = DiscoveryLibraryProjection {
         cards: vec![DiscoveryLibraryCard {
+            platform: "xhs".to_owned(),
             platform_content_id: "note-a".to_owned(),
             title: Some("<script>not a cover</script>".to_owned()),
             creator_display_name: Some("A娃 & 家长".to_owned()),
@@ -170,6 +171,7 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
             coverage_maximum_quota: 20,
             coverage_stopped_reason: "risk_control".to_owned(),
             cover_presentation_state: "MEDIA_NOT_ACQUIRED",
+            cover_local_asset_url: None,
         }],
         excluded_unknown_published_at: 0,
         window: "last_30_days",
@@ -182,6 +184,32 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
     assert!(!html.contains("<script>not a cover</script>"));
     assert!(!html.contains("https://"));
     assert!(!html.contains("xhscdn"));
+}
+
+#[test]
+fn resumable_media_temp_bytes_are_never_published_until_the_final_promotion() {
+    let root = std::env::temp_dir().join(format!("linggan-media-helper-{}", uuid::Uuid::new_v4()));
+    let temporary = root.join("uploads/fixture/bytes.part");
+    let final_path = root.join("blobs/88/fixture");
+
+    write_media_chunk(&temporary, 0, b"ab").expect("first synthetic chunk writes");
+    assert!(
+        !final_path.exists(),
+        "an interrupted upload has no public blob path"
+    );
+    assert!(
+        write_media_chunk(&temporary, 0, b"cd").is_err(),
+        "offset replay cannot overwrite the partial file"
+    );
+    write_media_chunk(&temporary, 2, b"cd").expect("second synthetic chunk resumes exactly");
+    assert!(
+        atomically_promote_media_upload(&temporary, &final_path).expect("final promotion succeeds")
+    );
+    assert_eq!(
+        std::fs::read(&final_path).expect("published synthetic bytes"),
+        b"abcd"
+    );
+    std::fs::remove_dir_all(root).expect("synthetic media root cleans up");
 }
 
 #[tokio::test]
@@ -365,7 +393,7 @@ async fn loopback_7_day_query_keeps_api_and_page_window_metadata_in_sync() {
             .to_vec(),
     )
     .unwrap();
-    assert!(html.contains("<em>WINDOW:</em> 7D"));
+    assert!(html.contains("<em>窗口</em> 7D"));
     assert!(html.contains("WINDOW = PUBLISHED_AT / 7D"));
     assert!(!html.contains("WINDOW = PUBLISHED_AT / 30D"));
 }

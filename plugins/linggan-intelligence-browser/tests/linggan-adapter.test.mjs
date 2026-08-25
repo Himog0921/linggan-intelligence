@@ -3,21 +3,17 @@ import test from 'node:test';
 
 import {
   LINGGAN_LOCAL_ORIGIN,
-  LINGGAN_PENDING_MESSAGE,
   attemptStartIsAccepted,
-  createLingganPendingResult,
+  formatLingganRuntimeNotice,
   isTerminalLocalDeliveryResult,
   readLingganLocalReadiness,
   taskCreationIsAccepted,
   unavailableLingganStats,
 } from '../src/linggan/adapter.js';
 
-test('pending capability is explicit and has no success-shaped result', () => {
-  const result = createLingganPendingResult('xhs_detail');
-  assert.equal(result.success, false);
-  assert.equal(result.code, 'linggan_adapter_pending');
-  assert.equal(result.capability, 'xhs_detail');
-  assert.match(result.message, /没有访问平台/);
+test('runtime notice never pretends that automatic scheduling already exists', () => {
+  assert.match(formatLingganRuntimeNotice(), /本机可靠队列/);
+  assert.match(formatLingganRuntimeNotice(), /自动调度尚未启动/);
 });
 
 test('unread Linggan stats stay explicitly unavailable instead of becoming zero', () => {
@@ -50,5 +46,5 @@ test('local readiness probes only Linggan loopback without credentials', async (
   assert.equal(result.connected, true);
   assert.equal(received.url, `${LINGGAN_LOCAL_ORIGIN}/health`);
   assert.equal(received.options.credentials, 'omit');
-  assert.match(LINGGAN_PENDING_MESSAGE, /尚未接通/);
+  assert.match(result.message, /Browser Producer Runtime/);
 });

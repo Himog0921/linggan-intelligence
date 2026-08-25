@@ -1,5 +1,8 @@
-import { buildCapabilityReport } from '../../workbench/runtime/capabilityReportBuilder.js';
-import { REMOTE_ERROR_CODE } from '../../workbench/protocol/schema.js';
+const PLATFORM_SECURITY_CHALLENGE = 'platform_security_challenge';
+
+function buildCapabilityReport(input = {}) {
+  return { ...input, collectedAt: new Date().toISOString(), runtime: 'linggan_local_producer' };
+}
 
 function getDefaultWindow() {
   return typeof window !== 'undefined' ? window : { location: { href: '' } };
@@ -82,7 +85,7 @@ export function createDouyinPlatformAdapter(options = {}) {
             pageType: 'unknown',
             url: href,
             platformBlocked: true,
-            blockReasonCode: REMOTE_ERROR_CODE.PLATFORM_SECURITY_CHALLENGE,
+            blockReasonCode: PLATFORM_SECURITY_CHALLENGE,
             blockReasonMessage: '检测到抖音安全验证，请先完成验证后继续操作',
             capabilities: {
               canCollectPrimary: false,
@@ -96,7 +99,7 @@ export function createDouyinPlatformAdapter(options = {}) {
             },
           }),
           platformBlocked: true,
-          blockReasonCode: REMOTE_ERROR_CODE.PLATFORM_SECURITY_CHALLENGE,
+          blockReasonCode: PLATFORM_SECURITY_CHALLENGE,
           target,
         };
       }

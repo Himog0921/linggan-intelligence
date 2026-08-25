@@ -37,8 +37,8 @@ pub(super) fn render_read_projection(
         &format!("<b>{card_count}</b></div><div class=\"v7-stat\"><span>02 / COMMENTS"),
     )
     .replace(
-        "<em>WINDOW:</em> UNKNOWN",
-        &format!("<em>WINDOW:</em> {window_label}"),
+        "<button class=\"v7-chip\" disabled><em>窗口</em> UNKNOWN</button>",
+        &format!("<button class=\"v7-chip\" disabled><em>窗口</em> {window_label}</button>"),
     )
     .replace(
         "页面结构已就绪 · 材料读投影尚未接通",
@@ -80,10 +80,15 @@ fn card_markup(card: &linggan_evidence::DiscoveryLibraryCard) -> String {
         .published_at_source_text
         .as_deref()
         .unwrap_or("SOURCE TIME UNKNOWN");
+    let media = card.cover_local_asset_url.as_deref().map(|url| format!(
+        "<img class=\"v7-media-local\" src=\"{}\" alt=\"Linggan 本地媒体副本\">", escape(url)
+    )).unwrap_or_else(|| "<div class=\"v7-media-pending\" aria-label=\"MEDIA NOT ACQUIRED\">MEDIA<br>NOT ACQUIRED</div>".to_owned());
     format!(
-        "<article class=\"v7-discovery-row\"><input class=\"v7-check\" type=\"checkbox\" disabled aria-label=\"未启用选择\"><div class=\"v7-media-pending\" aria-label=\"MEDIA NOT ACQUIRED\">MEDIA<br>NOT ACQUIRED</div><div class=\"v7-discovery-main\"><div class=\"v7-discovery-title\">{}</div><div class=\"v7-discovery-meta\"><span>{}</span><span>XHS / {}</span><span>POSITION #{}</span></div><div class=\"v7-discovery-boundary\"><b>DISCOVERY ONLY</b>来源发布时间：{} · 已知发布时间：{}</div></div><div class=\"v7-discovery-coverage\"><b>{}/{}</b><span>VISIBLE / QUOTA</span><small>{}</small></div></article>",
+        "<article class=\"v7-discovery-row\"><input class=\"v7-check\" type=\"checkbox\" disabled aria-label=\"未启用选择\">{}<div class=\"v7-discovery-main\"><div class=\"v7-discovery-title\">{}</div><div class=\"v7-discovery-meta\"><span>{}</span><span>{} / {}</span><span>POSITION #{}</span></div><div class=\"v7-discovery-boundary\"><b>ACCEPTED RUNTIME MATERIAL</b>来源发布时间：{} · 已知发布时间：{}</div></div><div class=\"v7-discovery-coverage\"><b>{}/{}</b><span>OBSERVED / QUOTA</span><small>{}</small></div></article>",
+        media,
         escape(title),
         escape(creator),
+        escape(&card.platform.to_uppercase()),
         escape(&card.platform_content_id),
         card.result_position,
         escape(source_time),

@@ -34,6 +34,8 @@ export function createXhsPageController({
   extractNoteId,
   sendToBackground,
   downloadNoteMediaFromRecord,
+  discoverSurface,
+  submitDiscovery,
 } = {}) {
   let batchNoteCtrl = null;
   let batchCommentCtrl = null;
@@ -127,12 +129,16 @@ export function createXhsPageController({
   });
 
   function pauseActiveTask() {
-    if (singleCommentCtrl?.isRunning()) singleCommentCtrl.pause();
-    if (batchNoteCtrl?.isRunning) batchNoteCtrl.pause();
-    if (batchCommentCtrl?.isRunning) batchCommentCtrl.pause();
-    if (commentImageController?.isRunning()) commentImageController.pause();
+    const running = [
+      singleCommentCtrl?.isRunning() ? singleCommentCtrl : null,
+      batchNoteCtrl?.isRunning ? batchNoteCtrl : null,
+      batchCommentCtrl?.isRunning ? batchCommentCtrl : null,
+      commentImageController?.isRunning() ? commentImageController : null,
+    ].filter(Boolean);
+    if (running.length === 0) return { success: false, state: 'no_active_task' };
+    running.forEach((controller) => controller.pause());
     togglePauseResumeButtons(true);
-    if (commentImageController?.isRunning() || singleCommentCtrl?.isRunning()) return;
+    if (commentImageController?.isRunning() || singleCommentCtrl?.isRunning()) return { success: true, state: 'paused' };
     const current = Number(lastTaskSnapshot?.current || 0);
     const total = Number(lastTaskSnapshot?.total || 0);
     syncTaskUI({
@@ -142,15 +148,20 @@ export function createXhsPageController({
       total,
       current,
     });
+    return { success: true, state: 'paused' };
   }
 
   function resumeActiveTask() {
-    if (singleCommentCtrl?.isRunning()) singleCommentCtrl.resume();
-    if (batchNoteCtrl?.isRunning) batchNoteCtrl.resume();
-    if (batchCommentCtrl?.isRunning) batchCommentCtrl.resume();
-    if (commentImageController?.isRunning()) commentImageController.resume();
+    const running = [
+      singleCommentCtrl?.isRunning() ? singleCommentCtrl : null,
+      batchNoteCtrl?.isRunning ? batchNoteCtrl : null,
+      batchCommentCtrl?.isRunning ? batchCommentCtrl : null,
+      commentImageController?.isRunning() ? commentImageController : null,
+    ].filter(Boolean);
+    if (running.length === 0) return { success: false, state: 'no_active_task' };
+    running.forEach((controller) => controller.resume());
     togglePauseResumeButtons(false);
-    if (commentImageController?.isRunning() || singleCommentCtrl?.isRunning()) return;
+    if (commentImageController?.isRunning() || singleCommentCtrl?.isRunning()) return { success: true, state: 'running' };
     const current = Number(lastTaskSnapshot?.current || 0);
     const total = Number(lastTaskSnapshot?.total || 0);
     syncTaskUI({
@@ -160,6 +171,22 @@ export function createXhsPageController({
       total,
       current,
     });
+    return { success: true, state: 'running' };
+  }
+
+  function stopActiveTask() {
+    const running = [
+      singleCommentCtrl?.isRunning() ? singleCommentCtrl : null,
+      batchNoteCtrl?.isRunning ? batchNoteCtrl : null,
+      batchCommentCtrl?.isRunning ? batchCommentCtrl : null,
+      commentImageController?.isRunning() ? commentImageController : null,
+    ].filter(Boolean);
+    if (running.length === 0) return { success: false, state: 'no_active_task' };
+    running.forEach((controller) => controller.stop());
+    toggleStopButton(false);
+    hideTaskControlBar();
+    activeTaskType = null;
+    return { success: true, state: 'stopped' };
   }
 
   function scheduleSelectorBootstrapProbe(delayMs = 420) {
@@ -221,8 +248,9 @@ export function createXhsPageController({
         case 'collectNote': {
           showToast('正在采集笔记...', 'info');
           const note = await collectNote();
-          showToast(`笔记采集成功：${note.title}`, 'success');
-          reportDone('note', 1);
+          showToast(note?.lingganDelivery?.delivery === 'acknowledged'
+            ? `笔记已被 Linggan 接纳：${note.title}`
+            : `笔记已读取，待本机 Linggan 交付：${note.title}`, note?.lingganDelivery?.delivery === 'acknowledged' ? 'success' : 'info');
           if ((note.images && note.images.length > 0) || note.video || note.cover || note.coverUrl || note.livePhotoStreams?.length > 0) {
             const mediaCount = (note.images?.length || 0) + (note.video ? 1 : 0);
             try {
@@ -231,6 +259,10 @@ export function createXhsPageController({
               if (selection && (selection === true || mediaTypes?.length > 0)) {
                 showToast(`正在下载 ${selection?.count || mediaCount} 个媒体文件...`, 'info');
                 const summary = await downloadNoteMediaFromRecord(note, { mediaTypes });
+                if (summary?.queued) {
+                  showToast(`媒体已加入 Linggan 本地下载队列：${summary.total} 个；正文采集不会等待媒体完成。`, 'success');
+                  break;
+                }
                 showToast(
                   summary.zipped
                     ? `媒体下载完成：已打包 ZIP（成功 ${summary.success}/${summary.total}，失败 ${summary.failed}）`
@@ -264,7 +296,6 @@ export function createXhsPageController({
             maxSubComments: commentSettings.commentDepthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 0 : 200,
             commentDepthMode: commentSettings.commentDepthMode,
           });
-          reportDone('comment', 0);
           break;
         }
 
@@ -272,8 +303,28 @@ export function createXhsPageController({
           await ensurePluginAuthorized();
           showToast('正在采集博主信息...', 'info');
           const author = await collectAuthor();
-          showToast(`博主采集成功：${author.name}`, 'success');
-          reportDone('author', 1);
+          showToast(author?.lingganDelivery?.delivery === 'acknowledged'
+            ? `博主资料已被 Linggan 接纳：${author.name}`
+            : `博主资料已读取，待本机 Linggan 交付：${author.name}`, author?.lingganDelivery?.delivery === 'acknowledged' ? 'success' : 'info');
+          break;
+        }
+
+        case 'discoverSurface': {
+          if (typeof discoverSurface !== 'function' || typeof submitDiscovery !== 'function') {
+            throw new Error('linggan_discovery_adapter_unavailable');
+          }
+          const mode = String(params.mode || '').trim();
+          showToast('正在读取当前页面可见内容…', 'info');
+          const cards = await discoverSurface({ mode, maximumQuota: 20 });
+          const target = new URL(window.location.href);
+          const query = target.searchParams.get('keyword') || target.searchParams.get('q') || '';
+          const authorExternalId = mode === COLLECT_MODE.PROFILE
+            ? (target.pathname.match(/\/user\/profile\/([^/?#]+)/)?.[1] || '')
+            : '';
+          const delivery = await submitDiscovery(cards, { query, authorExternalId, surface: 'current_visible_surface' });
+          showToast(delivery?.delivery === 'acknowledged'
+            ? `已接纳当前页面 ${cards.length} 条发现`
+            : `已读取当前页面 ${cards.length} 条，待本机 Linggan 交付`, delivery?.delivery === 'acknowledged' ? 'success' : 'info');
           break;
         }
 
@@ -348,33 +399,19 @@ export function createXhsPageController({
         }
 
         case 'stopBatch':
-          singleCommentCtrl?.stop();
-          batchNoteCtrl?.stop();
-          batchCommentCtrl?.stop();
-          if (commentImageController?.isRunning()) {
-            commentImageController.stop();
-            showToast('已停止采集', 'warning');
-            break;
-          }
-          toggleStopButton(false);
-          hideTaskControlBar();
-          activeTaskType = null;
-          showToast('已停止采集', 'warning');
-          break;
+          return stopActiveTask();
 
         case 'pauseBatch':
-          pauseActiveTask();
-          showToast('批量采集已暂停', 'warning');
-          break;
+          return pauseActiveTask();
 
         case 'resumeBatch':
-          resumeActiveTask();
-          showToast('批量采集继续中...', 'info');
-          break;
+          return resumeActiveTask();
 
         case 'collectCommentImages':
-          await ensurePluginAuthorized();
-          await commentImageController.start();
+          // The old ZIP downloader is deliberately not a Linggan media export.  Keep the
+          // familiar control visible but make the unavailable adapter explicit and side-effect
+          // free until comment images have a reviewed MediaSlot mapping.
+          showToast('评论图片区暂不可用：尚未具备 Linggan MediaSlot 回传合同，未执行下载。', 'warning');
           break;
       }
     } catch (err) {
@@ -441,6 +478,7 @@ export function createXhsPageController({
     startBatchTask,
     pauseActiveTask,
     resumeActiveTask,
+    stopActiveTask,
     getBatchNoteCtrl: () => batchNoteCtrl,
     setBatchNoteCtrl: (value) => {
       batchNoteCtrl = value;
