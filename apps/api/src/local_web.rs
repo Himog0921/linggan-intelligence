@@ -9,11 +9,15 @@ use axum::{
     routing::{get, post},
 };
 use linggan_contracts::EvidenceQuery;
-use linggan_evidence::{DiscoveryIngressError, ingest_discovery_package, read_discovery_library};
+use linggan_evidence::{
+    DiscoveryIngressError, ingest_discovery_package, local_discovery_schema_is_ready,
+    read_discovery_library,
+};
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
+    io::{Error, ErrorKind},
     net::{Ipv4Addr, SocketAddr},
     sync::Arc,
 };
@@ -27,7 +31,67 @@ const LIDS_TOKEN_DOCUMENT: &str = include_str!("../../../docs/design/lids/tokens
 
 #[derive(Clone)]
 struct LocalWebState {
-    database: Option<Arc<Database>>,
+    database: LocalDatabaseState,
+}
+
+#[derive(Clone)]
+enum LocalDatabaseState {
+    NotConfigured,
+    DatabaseUnavailable,
+    SchemaUnavailable,
+    Ready(Arc<Database>),
+}
+
+impl LocalDatabaseState {
+    fn database(&self) -> Option<&Database> {
+        match self {
+            Self::Ready(database) => Some(database),
+            Self::NotConfigured | Self::DatabaseUnavailable | Self::SchemaUnavailable => None,
+        }
+    }
+
+    async fn health_state(&self) -> (&'static str, &'static str, &'static str, &'static str) {
+        match self {
+            Self::NotConfigured => (
+                "SOURCE_INCOMPLETE",
+                "NOT_CONNECTED",
+                "NOT_CONFIGURED",
+                "NOT_CHECKED",
+            ),
+            Self::DatabaseUnavailable => (
+                "SOURCE_INCOMPLETE",
+                "NOT_CONNECTED",
+                "CONFIGURED_UNAVAILABLE",
+                "LOCAL_001_DATABASE_UNAVAILABLE",
+            ),
+            Self::SchemaUnavailable => (
+                "SOURCE_INCOMPLETE",
+                "NOT_CONNECTED",
+                "CONFIGURED_UNAVAILABLE",
+                "LOCAL_001_SCHEMA_UNAVAILABLE",
+            ),
+            Self::Ready(database) => match local_discovery_schema_is_ready(database).await {
+                Ok(true) => (
+                    "LOCAL_DISCOVERY_READ_PROJECTION",
+                    "DISCOVERY_ONLY",
+                    "READY",
+                    "LOCAL_001_SCHEMA_READY",
+                ),
+                Ok(false) => (
+                    "SOURCE_INCOMPLETE",
+                    "NOT_CONNECTED",
+                    "CONFIGURED_UNAVAILABLE",
+                    "LOCAL_001_SCHEMA_UNAVAILABLE",
+                ),
+                Err(_) => (
+                    "SOURCE_INCOMPLETE",
+                    "NOT_CONNECTED",
+                    "CONFIGURED_UNAVAILABLE",
+                    "LOCAL_001_DATABASE_UNAVAILABLE",
+                ),
+            },
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -36,13 +100,17 @@ struct EvidenceLibraryParams {
     window: Option<String>,
 }
 
-pub fn app() -> Router {
-    router(LocalWebState { database: None })
+#[cfg(test)]
+fn app() -> Router {
+    router(LocalWebState {
+        database: LocalDatabaseState::NotConfigured,
+    })
 }
 
-pub fn app_with_database(database: Database) -> Router {
+#[cfg(test)]
+fn app_with_database(database: Database) -> Router {
     router(LocalWebState {
-        database: Some(Arc::new(database)),
+        database: LocalDatabaseState::Ready(Arc::new(database)),
     })
 }
 
@@ -62,24 +130,41 @@ async fn local_entry() -> Redirect {
 }
 
 pub async fn serve() -> Result<(), std::io::Error> {
-    let address = SocketAddr::from((LOCAL_HOST, LOCAL_PORT));
+    let application = router(LocalWebState {
+        database: configured_database_state().await,
+    });
+    let local_port = configured_local_port()?;
+    let address = SocketAddr::from((LOCAL_HOST, local_port));
     let listener = tokio::net::TcpListener::bind(address).await?;
-    println!("Linggan local host listening on http://localhost:{LOCAL_PORT}");
-    let application = match std::env::var("LINGGAN_LOCAL_DATABASE_URL") {
-        Ok(url) => app_with_database(Database::connect(&url).await.map_err(|_| {
-            std::io::Error::other("configured local discovery database is unavailable")
-        })?),
-        Err(_) => app(),
-    };
+    println!("Linggan local host listening on http://localhost:{local_port}");
     axum::serve(listener, application).await
 }
 
+fn configured_local_port() -> Result<u16, std::io::Error> {
+    match std::env::var("LINGGAN_LOCAL_PORT") {
+        Ok(value) => match value.parse::<u16>() {
+            Ok(port) if port > 0 => Ok(port),
+            _ => Err(Error::new(
+                ErrorKind::InvalidInput,
+                "LINGGAN_LOCAL_PORT must be a valid non-zero loopback TCP port",
+            )),
+        },
+        Err(_) => Ok(LOCAL_PORT),
+    }
+}
+
 async fn health(State(state): State<LocalWebState>) -> Json<Value> {
+    let (data_state, evidence_read_model, database_state, schema_state) =
+        state.database.health_state().await;
     Json(json!({
         "service": "linggan-local-web",
         "listener": "loopback-only",
-        "dataState": if state.database.is_some() { "LOCAL_DISCOVERY_READ_PROJECTION" } else { "SOURCE_INCOMPLETE" },
-        "evidenceReadModel": if state.database.is_some() { "DISCOVERY_ONLY" } else { "NOT_CONNECTED" },
+        "dataState": data_state,
+        "evidenceReadModel": evidence_read_model,
+        "database": {
+            "state": database_state,
+            "schema": schema_state
+        },
         "routes": {
             "evidenceLibrary": "/corpus/evidence",
             "discoveryIngress": "/api/local/discovery-packages"
@@ -91,7 +176,7 @@ async fn evidence_library(
     State(state): State<LocalWebState>,
     Query(params): Query<EvidenceLibraryParams>,
 ) -> Html<String> {
-    match state.database.as_deref() {
+    match state.database.database() {
         None => Html(evidence_library_html().to_owned()),
         Some(database) => match local_query(&params) {
             Ok(query) => match read_discovery_library(database, &query).await {
@@ -111,7 +196,7 @@ async fn evidence_library_json(
     State(state): State<LocalWebState>,
     Query(params): Query<EvidenceLibraryParams>,
 ) -> Response {
-    let Some(database) = state.database.as_deref() else {
+    let Some(database) = state.database.database() else {
         return local_read_json_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "read_model_not_connected",
@@ -133,7 +218,7 @@ async fn evidence_library_json(
 }
 
 async fn discovery_ingress(State(state): State<LocalWebState>, body: Bytes) -> Response {
-    let Some(database) = state.database.as_deref() else {
+    let Some(database) = state.database.database() else {
         return ingress_json_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "ingress_not_connected",
@@ -155,6 +240,24 @@ async fn discovery_ingress(State(state): State<LocalWebState>, body: Bytes) -> R
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "ingress_not_committed",
         ),
+    }
+}
+
+async fn configured_database_state() -> LocalDatabaseState {
+    let Ok(url) = std::env::var("LINGGAN_LOCAL_DATABASE_URL") else {
+        return LocalDatabaseState::NotConfigured;
+    };
+    let database = match Database::connect(&url).await {
+        Ok(database) => database,
+        Err(_) => return LocalDatabaseState::DatabaseUnavailable,
+    };
+    if local_discovery_schema_is_ready(&database)
+        .await
+        .unwrap_or(false)
+    {
+        LocalDatabaseState::Ready(Arc::new(database))
+    } else {
+        LocalDatabaseState::SchemaUnavailable
     }
 }
 
