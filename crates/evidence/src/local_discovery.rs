@@ -32,6 +32,10 @@ pub enum DiscoveryIngressOutcome {
         package_ref: Uuid,
         accepted_receipt_ref: Uuid,
         visible_cards: u16,
+        discovered_cards: u16,
+        emitted_cards: u16,
+        failed_cards: u16,
+        not_attempted_cards: u16,
         stopped_reason: String,
     },
     Replay {
@@ -39,6 +43,10 @@ pub enum DiscoveryIngressOutcome {
         package_ref: Uuid,
         accepted_receipt_ref: Uuid,
         visible_cards: u16,
+        discovered_cards: Option<u16>,
+        emitted_cards: Option<u16>,
+        failed_cards: Option<u16>,
+        not_attempted_cards: Option<u16>,
         stopped_reason: String,
     },
 }
@@ -63,6 +71,10 @@ pub struct DiscoveryLibraryCard {
     pub observed_at: String,
     pub result_position: i32,
     pub coverage_visible_cards: i32,
+    pub coverage_discovered_cards: Option<i32>,
+    pub coverage_emitted_cards: Option<i32>,
+    pub coverage_failed_cards: Option<i32>,
+    pub coverage_not_attempted_cards: Option<i32>,
     pub coverage_maximum_quota: i32,
     pub coverage_stopped_reason: String,
     pub cover_presentation_state: &'static str,
@@ -89,11 +101,11 @@ pub async fn local_discovery_schema_is_ready(database: &Database) -> Result<bool
     let applied_migration_count = sqlx::query_scalar::<_, i64>(
         "SELECT count(*) \
          FROM linggan_local_schema_migration \
-         WHERE migration_id IN ('0001_scope_001_capture_evidence', '0002_local_001_discovery')",
+         WHERE migration_id IN ('0001_scope_001_capture_evidence', '0002_local_001_discovery', '0004_local_001_discovery_surface_coverage')",
     )
     .fetch_one(database.pool())
     .await?;
-    Ok(applied_migration_count == 2)
+    Ok(applied_migration_count == 3)
 }
 
 /// Validates and atomically admits one discovery-only package. Replaying byte-identical input
@@ -131,6 +143,10 @@ pub async fn ingest_discovery_package(
             package_ref: existing.package_ref,
             accepted_receipt_ref: existing.accepted_receipt_ref,
             visible_cards: existing.visible_cards,
+            discovered_cards: existing.discovered_cards,
+            emitted_cards: existing.emitted_cards,
+            failed_cards: existing.failed_cards,
+            not_attempted_cards: existing.not_attempted_cards,
             stopped_reason: existing.stopped_reason,
         });
     }
@@ -160,6 +176,10 @@ pub async fn ingest_discovery_package(
         package_ref,
         accepted_receipt_ref,
         visible_cards: package.coverage().visible_cards(),
+        discovered_cards: package.coverage().discovered_cards(),
+        emitted_cards: package.coverage().emitted_cards(),
+        failed_cards: package.coverage().failed_cards(),
+        not_attempted_cards: package.coverage().not_attempted_cards(),
         stopped_reason: stop_reason(package.coverage().stopped_reason()).to_owned(),
     })
 }
@@ -178,7 +198,8 @@ pub async fn read_discovery_library(
     let rows = sqlx::query(
         "WITH candidate AS ( \
              SELECT occurrence.*, content.platform_content_id, package.maximum_quota, \
-                    coverage.visible_cards, coverage.stopped_reason \
+                    coverage.visible_cards, coverage.discovered_cards, coverage.emitted_cards, \
+                    coverage.failed_cards, coverage.not_attempted_cards, coverage.stopped_reason \
              FROM local_discovery_occurrence occurrence \
              JOIN local_discovery_content_item content ON content.id = occurrence.content_item_id \
              JOIN local_discovery_package package ON package.id = occurrence.package_id \
@@ -201,7 +222,8 @@ pub async fn read_discovery_library(
                 latest.published_at_source_text, latest.published_at::text AS published_at, \
                 first_discovery.first_discovered_at::text AS first_discovered_at, \
                 latest.observed_at::text AS observed_at, latest.result_position, \
-                latest.visible_cards, latest.maximum_quota, latest.stopped_reason \
+                latest.visible_cards, latest.discovered_cards, latest.emitted_cards, latest.failed_cards, \
+                latest.not_attempted_cards, latest.maximum_quota, latest.stopped_reason \
          FROM latest JOIN first_discovery ON first_discovery.content_item_id = latest.content_item_id \
          ORDER BY first_discovery.first_discovered_at DESC, latest.result_position ASC",
     )
@@ -224,6 +246,10 @@ pub async fn read_discovery_library(
             observed_at: row.get("observed_at"),
             result_position: row.get("result_position"),
             coverage_visible_cards: row.get("visible_cards"),
+            coverage_discovered_cards: row.get("discovered_cards"),
+            coverage_emitted_cards: row.get("emitted_cards"),
+            coverage_failed_cards: row.get("failed_cards"),
+            coverage_not_attempted_cards: row.get("not_attempted_cards"),
             coverage_maximum_quota: row.get("maximum_quota"),
             coverage_stopped_reason: row.get("stopped_reason"),
             cover_presentation_state: "MEDIA_NOT_ACQUIRED",
@@ -244,6 +270,10 @@ struct ExistingPackage {
     package_ref: Uuid,
     accepted_receipt_ref: Uuid,
     visible_cards: u16,
+    discovered_cards: Option<u16>,
+    emitted_cards: Option<u16>,
+    failed_cards: Option<u16>,
+    not_attempted_cards: Option<u16>,
     stopped_reason: String,
 }
 
@@ -253,7 +283,8 @@ async fn existing_package(
 ) -> Result<Option<ExistingPackage>, DiscoveryIngressError> {
     let row = sqlx::query(
         "SELECT package.id, package.package_ref, package.accepted_receipt_ref, \
-                coverage.visible_cards, coverage.stopped_reason \
+                coverage.visible_cards, coverage.discovered_cards, coverage.emitted_cards, \
+                coverage.failed_cards, coverage.not_attempted_cards, coverage.stopped_reason \
          FROM local_discovery_package package \
          JOIN local_discovery_coverage coverage ON coverage.package_id = package.id \
          WHERE package.package_hash = $1 FOR UPDATE",
@@ -267,6 +298,18 @@ async fn existing_package(
         package_ref: row.get("package_ref"),
         accepted_receipt_ref: row.get("accepted_receipt_ref"),
         visible_cards: row.get::<i32, _>("visible_cards") as u16,
+        discovered_cards: row
+            .get::<Option<i32>, _>("discovered_cards")
+            .map(|value| value as u16),
+        emitted_cards: row
+            .get::<Option<i32>, _>("emitted_cards")
+            .map(|value| value as u16),
+        failed_cards: row
+            .get::<Option<i32>, _>("failed_cards")
+            .map(|value| value as u16),
+        not_attempted_cards: row
+            .get::<Option<i32>, _>("not_attempted_cards")
+            .map(|value| value as u16),
         stopped_reason: row.get("stopped_reason"),
     }))
 }
@@ -382,11 +425,16 @@ async fn insert_coverage(
     package: &DiscoveryPackage,
 ) -> Result<(), DiscoveryIngressError> {
     sqlx::query(
-        "INSERT INTO local_discovery_coverage (package_id, unit, visible_cards, stopped_reason) \
-         VALUES ($1, 'visible_search_card', $2, $3)",
+        "INSERT INTO local_discovery_coverage \
+         (package_id, unit, visible_cards, discovered_cards, emitted_cards, failed_cards, not_attempted_cards, stopped_reason) \
+         VALUES ($1, 'visible_search_card', $2, $3, $4, $5, $6, $7)",
     )
     .bind(package_id)
     .bind(i32::from(package.coverage().visible_cards()))
+    .bind(i32::from(package.coverage().discovered_cards()))
+    .bind(i32::from(package.coverage().emitted_cards()))
+    .bind(i32::from(package.coverage().failed_cards()))
+    .bind(i32::from(package.coverage().not_attempted_cards()))
     .bind(stop_reason(package.coverage().stopped_reason()))
     .execute(&mut **transaction)
     .await

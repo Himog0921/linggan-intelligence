@@ -12,6 +12,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0001_scope_001_capture_evidence.sql"),
     "\n",
     include_str!("../../../database/migrations/0002_local_001_discovery.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0004_local_001_discovery_surface_coverage.sql"),
 );
 
 #[tokio::test]
@@ -302,7 +304,7 @@ fn package(observed_at: &str, known_published_at: Option<&str>) -> String {
           "contractVersion":"xhs.discovery.visible-card.v1",
           "acquisitionSpec":{{"platform":"xhs","query":"ADHD","sort":"comprehensive","target":{{"basis":"maximum_quota","unit":"visible_search_card","maximumQuota":20}}}},
           "observedAt":"{observed_at}",
-          "coverage":{{"unit":"visible_search_card","visibleCards":2,"stoppedReason":"risk_control"}},
+          "coverage":{{"unit":"visible_search_card","visibleCards":2,"discoveredCards":2,"emittedCards":2,"failedCards":0,"notAttemptedCards":0,"stoppedReason":"risk_control"}},
           "cards":[
             {{"content":{{"platformContentId":"note-a","title":"标题命中 ADHD","creatorDisplayName":"A娃家长",{first_published}"coverCandidate":{{"observedExternalUri":"https://xhscdn.example/cover-a"}}}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":1}}}},
             {{"content":{{"platformContentId":"note-b","title":"无发布时间卡片","creatorDisplayName":"另一位家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":2}}}}
@@ -317,7 +319,7 @@ fn shared_content_unknown_package(observed_at: &str) -> String {
           "contractVersion":"xhs.discovery.visible-card.v1",
           "acquisitionSpec":{{"platform":"xhs","query":"ADHD","sort":"comprehensive","target":{{"basis":"maximum_quota","unit":"visible_search_card","maximumQuota":20}}}},
           "observedAt":"{observed_at}",
-          "coverage":{{"unit":"visible_search_card","visibleCards":1,"stoppedReason":"risk_control"}},
+          "coverage":{{"unit":"visible_search_card","visibleCards":1,"discoveredCards":1,"emittedCards":1,"failedCards":0,"notAttemptedCards":0,"stoppedReason":"risk_control"}},
           "cards":[
             {{"content":{{"platformContentId":"note-a","title":"标题命中 ADHD","creatorDisplayName":"A娃家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":1}}}}
           ]

@@ -80,14 +80,26 @@ fn card_markup(card: &linggan_evidence::DiscoveryLibraryCard) -> String {
         .published_at_source_text
         .as_deref()
         .unwrap_or("SOURCE TIME UNKNOWN");
+    let coverage_detail = match (
+        card.coverage_discovered_cards,
+        card.coverage_emitted_cards,
+        card.coverage_failed_cards,
+        card.coverage_not_attempted_cards,
+    ) {
+        (Some(discovered), Some(emitted), Some(failed), Some(not_attempted)) => format!(
+            "发现 {discovered} · 交付 {emitted} · 读取失败 {failed} · 当前页未读取 {not_attempted}"
+        ),
+        _ => "处理明细 UNKNOWN（该包早于当前 Coverage 合同）".to_owned(),
+    };
     format!(
-        "<article class=\"v7-discovery-row\"><input class=\"v7-check\" type=\"checkbox\" disabled aria-label=\"未启用选择\"><div class=\"v7-media-pending\" aria-label=\"MEDIA NOT ACQUIRED\">MEDIA<br>NOT ACQUIRED</div><div class=\"v7-discovery-main\"><div class=\"v7-discovery-title\">{}</div><div class=\"v7-discovery-meta\"><span>{}</span><span>XHS / {}</span><span>POSITION #{}</span></div><div class=\"v7-discovery-boundary\"><b>DISCOVERY ONLY</b>来源发布时间：{} · 已知发布时间：{}</div></div><div class=\"v7-discovery-coverage\"><b>{}/{}</b><span>VISIBLE / QUOTA</span><small>{}</small></div></article>",
+        "<article class=\"v7-discovery-row\"><input class=\"v7-check\" type=\"checkbox\" disabled aria-label=\"未启用选择\"><div class=\"v7-media-pending\" aria-label=\"MEDIA NOT ACQUIRED\">MEDIA<br>NOT ACQUIRED</div><div class=\"v7-discovery-main\"><div class=\"v7-discovery-title\">{}</div><div class=\"v7-discovery-meta\"><span>{}</span><span>XHS / {}</span><span>POSITION #{}</span></div><div class=\"v7-discovery-boundary\"><b>DISCOVERY ONLY</b>来源发布时间：{} · 已知发布时间：{} · {}</div></div><div class=\"v7-discovery-coverage\"><b>{}/{}</b><span>VISIBLE / QUOTA</span><small>{}</small></div></article>",
         escape(title),
         escape(creator),
         escape(&card.platform_content_id),
         card.result_position,
         escape(source_time),
         escape(&card.published_at),
+        escape(&coverage_detail),
         card.coverage_visible_cards,
         card.coverage_maximum_quota,
         escape(&card.coverage_stopped_reason),

@@ -47,7 +47,6 @@ module.exports = {
         { from: 'src/popup/popup.css', to: 'popup.css' },
         { from: 'src/dashboard/dashboard.css', to: 'dashboard.css' },
         { from: 'src/themes/ac-ui/popup.css', to: 'themes/ac-ui/popup.css' },
-        { from: 'src/injected', to: 'injected' },
         { from: 'src/assets', to: '.', globOptions: { ignore: ['**/.gitkeep'] } },
       ],
     }),

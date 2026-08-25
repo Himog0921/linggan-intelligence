@@ -174,6 +174,7 @@ migrate() {
   apply_migration_once "0001_scope_001_capture_evidence" "$project_root/database/migrations/0001_scope_001_capture_evidence.sql"
   apply_migration_once "0002_local_001_discovery" "$project_root/database/migrations/0002_local_001_discovery.sql"
   apply_migration_once "0003_local_trusted_producer" "$project_root/database/migrations/0003_local_trusted_producer.sql"
+  apply_migration_once "0004_local_001_discovery_surface_coverage" "$project_root/database/migrations/0004_local_001_discovery_surface_coverage.sql"
 }
 
 case "$command_name" in

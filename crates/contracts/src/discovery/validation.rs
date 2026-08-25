@@ -22,10 +22,19 @@ pub fn parse_discovery_package(input: &str) -> Result<DiscoveryPackage, Discover
         return Err(DiscoveryContractError::InvalidObservedAt);
     }
     if wire.coverage.visible_cards != wire.cards.len() as u16
+        || wire.coverage.emitted_cards != wire.cards.len() as u16
         || wire.coverage.visible_cards > wire.acquisition_spec.maximum_quota()
         || !matches!(wire.coverage.unit, DiscoveryUnit::VisibleSearchCard)
     {
         return Err(DiscoveryContractError::CoverageDoesNotMatchCards);
+    }
+    if wire.coverage.discovered_cards
+        != wire
+            .coverage
+            .emitted_cards
+            .saturating_add(wire.coverage.failed_cards)
+    {
+        return Err(DiscoveryContractError::CoverageProcessingMismatch);
     }
     if matches!(
         wire.coverage.stopped_reason,

@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: Draft LOCAL_TRUSTED adapter
-> 版本: `0.3.2`
+> 版本: `0.3.3`
 > 适用范围: `PLUGIN-RETROFIT-LOCAL-TRUSTED-001`（GitHub Issue #43）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -25,7 +25,7 @@ Linggan 的接收合同或平台访问授权。
 `http://localhost:3000`；旧工作台的站点授权、任务轮询、lease、工位调度、旧
 endpoint、同步和 fallback 都不是当前运行路径。
 
-目前唯一已接通的本机数据动作是 **合成的、手动 Discovery package 回传**：插件先将
+目前唯一已接通的本机数据动作是 **用户在已打开的 XHS `ADHD` / “综合”搜索页手动点击的当前可见前 20 张 Discovery 卡片回传**：插件只读取已经渲染的卡片，不滚动、不打开详情、不读取 Cookie/账号或隐藏页面状态。它先将
 固定 `TaskSpec → Attempt → Submission` 写入独立的浏览器本地 outbox，再由后台以小批次
 向 Linggan loopback 发送。页面侧采集不等待网络回执；服务中断、超时或 service worker
 重启后，同一 `submissionId` 会继续重试，服务端回执幂等。这个 outbox 只保存待交付材料，
@@ -35,6 +35,8 @@ submission 只能 replay，新的 package 必须创建新的 attempt。scheduler
 
 在尚未从 Linggan 读取统计时，插件和 Popup 只显示“未连接”或“未知”；绝不以 `0` 伪装
 成没有笔记、评论或博主。
+
+回传会分别报告当前面已发现、成功交付、字段不足/重复及因 20 上限尚未读取的卡片数；这些数只说明当前已渲染表面，绝不表示平台总量或完整度。已接纳卡片才可出现在本地 Evidence Library；页面封面始终是 `MEDIA_NOT_ACQUIRED`，不会使用小红书 CDN 地址。
 
 原有浏览器本地 Dexie 数据和恢复代码仅保留为**本机暂存/恢复层**，不是
 Linggan 的最终事实库。尚未获得 Linggan adapter 合同的详情、评论、媒体、
@@ -60,7 +62,7 @@ npm run release:reproducibility
 npm run verify:linggan-isolation
 ```
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.3.2.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.3.3.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台
@@ -68,7 +70,6 @@ ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `n
 
 ## 未证明事项
 
-本包可构建和可打包；合成回传测试可证明本机 Task/Attempt/Submission 的持久交付与
-幂等 receipt。它**不证明**浏览器已加载、真实 XHS 或抖音页面可采、真实内容已入库、
+本包可构建和可打包；合成回传、DOM fixture 与 PostgreSQL proof 可证明本机 Task/Attempt/Submission 的持久交付、幂等 receipt 和 discovery-only 接纳边界。它**不证明**浏览器已加载、真实 XHS 页面兼容、真实内容已入库、
 封面/媒体已本地化，或 OCR/ASR/研究链已运行。真实接入只能在对应的 Linggan backend
 合同、权限、Coverage、媒体生命周期和用户明确授权全部具备后另行验证。

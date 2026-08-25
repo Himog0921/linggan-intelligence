@@ -62,7 +62,7 @@ function injectXhsControls() {
     renderButtonGroup(container, {
       platform: 'xhs',
       buttons: [
-        { text: '批量笔记', action: 'batchNotes', style: 'primary', data: { mode: 'search' } },
+        { text: '发现当前前 20 条', action: 'lingganDiscoverCurrentVisibleXhsSearch', style: 'primary', data: { mode: 'search' } },
         { text: '批量评论', action: 'batchComments', style: 'secondary', data: { mode: 'search' } },
       ],
       containerStyle: { padding: '8px 14px', gap: '10px', marginBottom: '10px', boxShadow: '4px 4px 0 #121212' },
@@ -145,6 +145,10 @@ export function registerLingganPendingActionGuard() {
     event.preventDefault();
     event.stopImmediatePropagation();
     const label = String(button.textContent || '').trim() || '此操作';
+    if (button.dataset.action === 'lingganDiscoverCurrentVisibleXhsSearch') {
+      window.dispatchEvent(new CustomEvent('linggan:discover-current-xhs-search'));
+      return;
+    }
     showToast(`${label}：${PENDING_ACTION_NOTICE}`, 'warning');
   }, true);
 }

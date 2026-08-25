@@ -56,11 +56,13 @@ maximum quota   = 20
 页面/插件因为风险控制、页面结束、人工停止或未知原因只实际看见一部分卡片时：
 
 1. 每张实际可见卡片仍有独立价值，不能因总目标 20 未达到而丢弃；
-2. `DiscoveryCoverage.visibleCards` 必须等于实际交付卡片数；
-3. 停止原因必须保留；`unknown` 仍是未知而不是零或“无更多结果”；
-4. `quota_reached` 只能在实际可见卡片数等于本次 `maximumQuota` 时使用；未达到配额的部分结果必须保留一个如 `risk_control`、`surface_ended`、`manual_stop` 或 `unknown` 的真实停止原因，不能把 `20 - visibleCards` 制造成缺失对象；
-5. 该材料可以在未来接纳后作为发现面材料使用，但 Coverage 不自动给趋势、代表性、平台总量或“没有看到”的 Claim 资格；
-6. 之后补采必须是新的授权/Attempt/Package，绝不能修改本次 discovery 包。
+2. `visibleCards` 与 `emittedCards` 都必须等于实际交付卡片数；`discoveredCards = emittedCards + failedCards`；
+3. `failedCards` 只表示本次在前 20 个已检视的当前页卡片中，因没有独立稳定内容标识或重复而未能交付的卡片；它不代表平台内容失效或不存在；
+4. `notAttemptedCards` 只表示当前已经渲染、但因前 20 个上限没有检视的卡片。它不代表平台总量、缺失对象或未采完整度；
+5. 停止原因必须保留；`unknown` 仍是未知而不是零或“无更多结果”；
+6. `quota_reached` 只能在实际交付卡片数等于本次 `maximumQuota` 时使用；未达到配额的部分结果必须保留一个如 `risk_control`、`surface_ended`、`manual_stop` 或 `unknown` 的真实停止原因，不能把 `20 - visibleCards` 制造成缺失对象；
+7. 该材料可以在未来接纳后作为发现面材料使用，但 Coverage 不自动给趋势、代表性、平台总量或“没有看到”的 Claim 资格；
+8. 之后补采必须是新的授权/Attempt/Package，绝不能修改本次 discovery 包。
 
 ## 5. 封面、媒体与页面显示
 
@@ -112,7 +114,7 @@ GET  http://localhost:3000/corpus/evidence
 |---|---|---|
 | `GET /health`，未配置 Linggan DB | `SOURCE_INCOMPLETE` / `NOT_CONNECTED` | localhost 已接纳任何 Package 或平台可访问 |
 | `GET /health`，已配置 Linggan DB | `LOCAL_DISCOVERY_READ_PROJECTION` / `DISCOVERY_ONLY` | 真实 discovery、详情、评论、媒体或趋势已完成 |
-| `POST /api/local/discovery-packages`，合格新 payload | `200`，`admission=accepted`，有 delivery/package/receipt 引用、实际 `visibleCards` 和停止原因 | package 完整、平台只有 N 条或内容详情已取得 |
+| `POST /api/local/discovery-packages`，合格新 payload | `200`，`admission=accepted`，有 delivery/package/receipt 引用、实际 `visibleCards`/处理 counters 和停止原因 | package 完整、平台只有 N 条或内容详情已取得 |
 | `POST`，字节完全相同的已接纳 payload | `200`，`admission=replay`，复用原 package/receipt 并有新 delivery 引用 | 覆盖、更新或重新解释旧 package |
 | `POST`，不合格 payload | `422 discovery_contract_invalid` | 已接纳任何卡片或 Coverage |
 | `POST`，未配置/不可用 DB | `503 ingress_not_connected` 或 `503 ingress_not_committed` | 失败等于无可用历史材料或应重试平台 |
@@ -122,6 +124,6 @@ Ingress body 是 UTF-8 JSON 的 `xhs.discovery.visible-card.v1`；不接受拼�
 
 ## 8. 合同测试与未证明边界
 
-`crates/contracts/tests/discovery_boundary_contract.rs` 覆盖：两类 Query 的字段隔离、partial visible-card 保留、非空稳定内容身份和有效 observation time、详情/评论/媒体字节/OCR/ASR 的拒绝、position 只能在 occurrence 且同包唯一、remote cover 不能成为 display URL，以及来源发布时间缺失在 Discovery 合同内保持 unknown。
+`crates/contracts/tests/discovery_boundary_contract.rs` 覆盖：两类 Query 的字段隔离、partial visible-card 保留、缺少或不一致的 current-surface processing counters 的拒绝、非空稳定内容身份和有效 observation time、详情/评论/媒体字节/OCR/ASR 的拒绝、position 只能在 occurrence 且同包唯一、remote cover 不能成为 display URL，以及来源发布时间缺失在 Discovery 合同内保持 unknown。
 
 它没有证明：插件已加载、localhost ingress 存在、任何真实平台访问、数据库写入、Evidence Acceptance、页面读投影或 `WINDOW` 结果过滤、媒体副本、OCR/ASR、隐私处理、趋势或业务价值。

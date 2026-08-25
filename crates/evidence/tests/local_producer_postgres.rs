@@ -14,6 +14,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0002_local_001_discovery.sql"),
     "\n",
     include_str!("../../../database/migrations/0003_local_trusted_producer.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0004_local_001_discovery_surface_coverage.sql"),
 );
 
 #[tokio::test]
@@ -142,6 +144,6 @@ fn attempt_wire() -> &'static str {
 fn submission_wire() -> String {
     // `format!` intentionally unescapes the doubled JSON object braces in this fixed fixture.
     format!(
-        r#"{{"contractVersion":"linggan.local-trusted.submission.v1","producerInstanceId":"22222222-2222-4222-8222-222222222222","taskId":"11111111-1111-4111-8111-111111111111","attemptId":"33333333-3333-4333-8333-333333333333","submissionId":"44444444-4444-4444-8444-444444444444","discoveryPackage":{{"contractVersion":"xhs.discovery.visible-card.v1","acquisitionSpec":{{"platform":"xhs","query":"ADHD","sort":"comprehensive","target":{{"basis":"maximum_quota","unit":"visible_search_card","maximumQuota":20}}}},"observedAt":"2026-08-25T00:00:00Z","coverage":{{"unit":"visible_search_card","visibleCards":2,"stoppedReason":"risk_control"}},"cards":[{{"content":{{"platformContentId":"note-a","title":"synthetic A"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"2026-08-25T00:00:00Z","resultPosition":1}}}},{{"content":{{"platformContentId":"note-b","title":"synthetic B"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"2026-08-25T00:00:00Z","resultPosition":2}}}}]}}}}"#,
+        r#"{{"contractVersion":"linggan.local-trusted.submission.v1","producerInstanceId":"22222222-2222-4222-8222-222222222222","taskId":"11111111-1111-4111-8111-111111111111","attemptId":"33333333-3333-4333-8333-333333333333","submissionId":"44444444-4444-4444-8444-444444444444","discoveryPackage":{{"contractVersion":"xhs.discovery.visible-card.v1","acquisitionSpec":{{"platform":"xhs","query":"ADHD","sort":"comprehensive","target":{{"basis":"maximum_quota","unit":"visible_search_card","maximumQuota":20}}}},"observedAt":"2026-08-25T00:00:00Z","coverage":{{"unit":"visible_search_card","visibleCards":2,"discoveredCards":2,"emittedCards":2,"failedCards":0,"notAttemptedCards":0,"stoppedReason":"risk_control"}},"cards":[{{"content":{{"platformContentId":"note-a","title":"synthetic A"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"2026-08-25T00:00:00Z","resultPosition":1}}}},{{"content":{{"platformContentId":"note-b","title":"synthetic B"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"2026-08-25T00:00:00Z","resultPosition":2}}}}]}}}}"#,
     )
 }
