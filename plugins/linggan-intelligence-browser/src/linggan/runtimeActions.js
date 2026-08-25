@@ -24,4 +24,7 @@ export const LINGGAN_RUNTIME_ACTION = {
   START_BATCH_CONTENT: 'lingganStartBatchContent',
   START_BATCH_COMMENTS: 'lingganStartBatchComments',
   ACQUIRE_COMMENT_MEDIA: 'lingganAcquireCommentMedia',
+  PAUSE_ACTIVE_BATCH: 'lingganPauseActiveBatch',
+  RESUME_ACTIVE_BATCH: 'lingganResumeActiveBatch',
+  STOP_ACTIVE_BATCH: 'lingganStopActiveBatch',
 };

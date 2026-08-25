@@ -101,3 +101,20 @@ test('page-read completion is not rendered as Linggan acceptance', () => {
   assert.doesNotMatch(dashboard, /提交到 Linggan（待接通）/);
   assert.match(dashboard, /本机交付状态/);
 });
+
+test('every retained Popup control is a Linggan action or an explicit no-side-effect unavailable action', () => {
+  const popup = readFileSync(new URL('../src/popup/App.jsx', import.meta.url), 'utf8');
+  const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
+  assert.match(popup, /LINGGAN_RUNTIME_ACTION\.PAUSE_ACTIVE_BATCH/);
+  assert.match(popup, /LINGGAN_RUNTIME_ACTION\.RESUME_ACTIVE_BATCH/);
+  assert.match(popup, /LINGGAN_RUNTIME_ACTION\.STOP_ACTIVE_BATCH/);
+  assert.doesNotMatch(popup, /MSG\.(PAUSE_BATCH|RESUME_BATCH|STOP_BATCH)/);
+  assert.match(popup, /result\?\.state !== 'paused'/);
+  assert.match(popup, /result\?\.state !== 'running'/);
+  assert.match(popup, /result\?\.state !== 'stopped'/);
+  assert.match(popup, /快速导出暂不可用：尚未具备 Linggan Runtime 导出合同，未导出任何数据/);
+  assert.match(popup, /数据维护暂不可用：尚未具备 Linggan Runtime 数据维护合同，未修改任何本机数据/);
+  assert.match(content, /PAUSE_ACTIVE_BATCH.*'dy_pauseBatch'/s);
+  assert.match(content, /PAUSE_ACTIVE_BATCH.*'pauseBatch'/s);
+  assert.match(content, /state: controlState \|\| 'page_read_started'/);
+});

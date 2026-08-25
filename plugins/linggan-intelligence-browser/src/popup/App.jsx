@@ -8,7 +8,7 @@ import {
   PLATFORM, PAGE_MODE,
   detectPlatformByUrl, getModeFromUrl, getPageCapabilities,
   getPrimaryActionWarning, getSecondaryActionWarning, getBatchActionWarning,
-  toFriendlyError, formatMaintenanceStats, inferProgressStage,
+  toFriendlyError, inferProgressStage,
   sendToTab, sendToBackground,
   unwrapTabResponseData,
   getPageContextText,
@@ -542,10 +542,8 @@ export default function App() {
     await withBusyAction('pauseBatch', async () => {
       hideNotice();
       try {
-        await Promise.all([
-          sendToBackground(MSG.PAUSE_BATCH_NOTES, { tabId }),
-          sendToBackground(MSG.PAUSE_BATCH_COMMENTS, { tabId }),
-        ]);
+        const result = await sendToTab(tabId, { action: LINGGAN_RUNTIME_ACTION.PAUSE_ACTIVE_BATCH });
+        if (!result?.success || result?.state !== 'paused') throw new Error(result?.message || '页面没有确认暂停当前任务');
         setBatchPaused(true);
         showNotice('任务已暂停，可随时继续。', 'info');
       } catch (err) {
@@ -558,10 +556,8 @@ export default function App() {
     await withBusyAction('resumeBatch', async () => {
       hideNotice();
       try {
-        await Promise.all([
-          sendToBackground(MSG.RESUME_BATCH_NOTES, { tabId }),
-          sendToBackground(MSG.RESUME_BATCH_COMMENTS, { tabId }),
-        ]);
+        const result = await sendToTab(tabId, { action: LINGGAN_RUNTIME_ACTION.RESUME_ACTIVE_BATCH });
+        if (!result?.success || result?.state !== 'running') throw new Error(result?.message || '页面没有确认继续当前任务');
         setBatchPaused(false);
         showNotice('任务继续执行中。', 'info');
       } catch (err) {
@@ -583,10 +579,8 @@ export default function App() {
       hideNotice();
       setBatchStopping(true);
       try {
-        await Promise.all([
-          sendToBackground(MSG.STOP_BATCH_NOTES, { tabId }),
-          sendToBackground(MSG.STOP_BATCH_COMMENTS, { tabId }),
-        ]);
+        const result = await sendToTab(tabId, { action: LINGGAN_RUNTIME_ACTION.STOP_ACTIVE_BATCH });
+        if (!result?.success || result?.state !== 'stopped') throw new Error(result?.message || '页面没有确认停止当前任务');
         setBatchControlsVisible(false);
         setProgressVisible(false);
         setBatchStopping(false);
@@ -603,7 +597,8 @@ export default function App() {
     await withBusyAction('openDashboard', async () => {
       hideNotice();
       try {
-        await sendToBackground(MSG.TOGGLE_DASHBOARD, { tabId });
+        const result = await sendToBackground(LINGGAN_RUNTIME_ACTION.TOGGLE_DASHBOARD, { tabId });
+        if (!result?.success) throw new Error(result?.message || '本机暂存面板未打开');
       } catch (err) {
         showNotice(toFriendlyError(err), 'warning');
       }
@@ -611,49 +606,19 @@ export default function App() {
   }, [tabId, hideNotice, showNotice, withBusyAction, ensureLocalTrustedRuntime]);
 
   const handleExport = useCallback(async () => {
-    if (!ensureLocalTrustedRuntime()) return;
-    await withBusyAction('quickExport', async () => {
-      hideNotice();
-      try {
-        await sendToTab(tabId, { action: MSG.EXPORT_JSON });
-        showNotice('导出任务已发起。', 'success');
-      } catch (err) {
-        showNotice(toFriendlyError(err), 'warning');
-      }
-    });
-  }, [tabId, hideNotice, showNotice, withBusyAction, ensureLocalTrustedRuntime]);
+    showNotice('快速导出暂不可用：尚未具备 Linggan Runtime 导出合同，未导出任何数据。', 'warning');
+  }, [showNotice]);
 
   const handleMaintenance = useCallback(async () => {
-    if (!ensureLocalTrustedRuntime()) return;
-    if (platform === PLATFORM.UNKNOWN) {
-      showNotice('请先打开小红书或抖音页面，再执行数据维护。', 'warning');
-      return;
-    }
-    await withBusyAction('maintenance', async () => {
-      hideNotice();
-      setProgressVisible(true);
-      setProgressCurrent(0);
-      setProgressTotal(1);
-      setProgressStatus('正在整理历史数据...');
-      try {
-        const response = await sendToTab(tabId, { action: MSG.RUN_DATA_MAINTENANCE });
-        setProgressVisible(false);
-        const mStats = unwrapTabResponseData(response, response?.stats || {}) || {};
-        showNotice(formatMaintenanceStats(mStats), 'success');
-        loadStats(tabId);
-      } catch (err) {
-        setProgressVisible(false);
-        showNotice(toFriendlyError(err), 'warning');
-      }
-    });
-  }, [platform, tabId, hideNotice, showNotice, loadStats, withBusyAction, ensureLocalTrustedRuntime]);
+    showNotice('数据维护暂不可用：尚未具备 Linggan Runtime 数据维护合同，未修改任何本机数据。', 'warning');
+  }, [showNotice]);
 
   const handleFlywheelTest = useCallback(async () => {
     await withBusyAction('flywheelTest', async () => {
       hideNotice();
       setFlywheelStatus('testing');
       try {
-        const result = await sendToBackground(MSG.TEST_FLYWHEEL_CONNECTION);
+        const result = await sendToBackground(LINGGAN_RUNTIME_ACTION.TEST_FLYWHEEL_CONNECTION);
         if (result?.readiness?.reachable) {
           setFlywheelStatus('connected');
           showNotice('Linggan 本机服务可访问；真实采集接收合同仍需逐项接通。', 'info');

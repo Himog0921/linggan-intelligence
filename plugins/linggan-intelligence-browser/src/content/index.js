@@ -158,6 +158,9 @@ async function dispatchProducerRuntimeAction(action, message) {
       [LINGGAN_RUNTIME_ACTION.START_BATCH_CONTENT]: 'dy_batchVideos',
       [LINGGAN_RUNTIME_ACTION.START_BATCH_COMMENTS]: 'dy_batchComments',
       [LINGGAN_RUNTIME_ACTION.ACQUIRE_COMMENT_MEDIA]: 'dy_collectCommentImages',
+      [LINGGAN_RUNTIME_ACTION.PAUSE_ACTIVE_BATCH]: 'dy_pauseBatch',
+      [LINGGAN_RUNTIME_ACTION.RESUME_ACTIVE_BATCH]: 'dy_resumeBatch',
+      [LINGGAN_RUNTIME_ACTION.STOP_ACTIVE_BATCH]: 'dy_stopBatch',
     }
     : {
       [LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_CONTENT]: 'collectNote',
@@ -166,6 +169,9 @@ async function dispatchProducerRuntimeAction(action, message) {
       [LINGGAN_RUNTIME_ACTION.START_BATCH_CONTENT]: 'batchNotes',
       [LINGGAN_RUNTIME_ACTION.START_BATCH_COMMENTS]: 'batchComments',
       [LINGGAN_RUNTIME_ACTION.ACQUIRE_COMMENT_MEDIA]: 'collectCommentImages',
+      [LINGGAN_RUNTIME_ACTION.PAUSE_ACTIVE_BATCH]: 'pauseBatch',
+      [LINGGAN_RUNTIME_ACTION.RESUME_ACTIVE_BATCH]: 'resumeBatch',
+      [LINGGAN_RUNTIME_ACTION.STOP_ACTIVE_BATCH]: 'stopBatch',
     };
   const pageAction = map[action];
   if (!pageAction) return null;
@@ -196,7 +202,12 @@ async function dispatchProducerRuntimeAction(action, message) {
   }
   // This means the page reader actually accepted the action. It is deliberately not an
   // admission receipt; Popup must continue to describe delivery as pending until one exists.
-  return { success: true, state: 'page_read_started', delivery: 'pending' };
+  const controlState = {
+    [LINGGAN_RUNTIME_ACTION.PAUSE_ACTIVE_BATCH]: 'paused',
+    [LINGGAN_RUNTIME_ACTION.RESUME_ACTIVE_BATCH]: 'running',
+    [LINGGAN_RUNTIME_ACTION.STOP_ACTIVE_BATCH]: 'stopped',
+  }[action];
+  return { success: true, state: controlState || 'page_read_started', delivery: 'pending' };
 }
 
 chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
@@ -222,6 +233,9 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
     LINGGAN_RUNTIME_ACTION.START_BATCH_CONTENT,
     LINGGAN_RUNTIME_ACTION.START_BATCH_COMMENTS,
     LINGGAN_RUNTIME_ACTION.ACQUIRE_COMMENT_MEDIA,
+    LINGGAN_RUNTIME_ACTION.PAUSE_ACTIVE_BATCH,
+    LINGGAN_RUNTIME_ACTION.RESUME_ACTIVE_BATCH,
+    LINGGAN_RUNTIME_ACTION.STOP_ACTIVE_BATCH,
   ].includes(action)) {
     dispatchProducerRuntimeAction(action, message)
       .then((result) => sendResponse(result || { success: false, code: 'linggan_page_action_unavailable' }))
