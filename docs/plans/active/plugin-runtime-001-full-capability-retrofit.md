@@ -64,10 +64,10 @@ URL 既不是媒体身份，也不是 Evidence Library 的展示地址。一个 
 
 | 审查项 | 已实现的收口 | 证明方式 | 仍未证明 |
 |---|---|---|---|
-| P0-A | XHS 搜索/博主页发现、详情/评论/回复/作者/媒体与 XHS/抖音批量入口都写入同一 runtime outbox/receipt seam；不再只注册未调用动作 | synthetic 搜索 20 卡 → shared package → PostgreSQL admission → Evidence Library 20 卡；插件 runtime tests | 浏览器真实页面、平台字段与用户操作 |
-| P0-B | 活跃内容与后台模块图改用 Linggan local staging/checkpoint；旧 Workbench runtime/protocol/lease/poller/outbox 不进入 active graph | 94-module active graph + release isolation scan | 所有历史参考源码的物理删除（不属于 active runtime） |
+| P0-A | XHS 搜索/博主页发现、详情/评论/回复/作者、媒体与 XHS/抖音批量入口均通过同一 runtime outbox/receipt seam；Popup 直接向活跃页面发送 Linggan action。抖音视频进入 MediaSlot lane；没有已审查 Slot 映射的评论图片明确 `NOT_AVAILABLE` 且不执行旧下载 | synthetic 搜索 20 卡 → shared package → PostgreSQL admission → Evidence Library 20 卡；15 个插件 runtime tests | 浏览器真实页面、平台字段与用户操作 |
+| P0-B | 活跃内容与后台模块图改用 Linggan local staging/checkpoint；旧 Workbench runtime/protocol/lease/poller/outbox 不进入 active graph | 93-module active graph + release isolation scan | 所有历史参考源码的物理删除（不属于 active runtime） |
 | P0-C/D | 最大配额、时间预算和当前可见面不伪造未尝试/剩余；只在 known set 记录逐成员未尝试。默认 Library 仅显示被类型接纳的 discovery/content 记录 | contracts 负例、PostgreSQL partial/unknown proof、retained raw 不显示 20-card proof | 真实平台 Coverage 完整性和统计资格 |
 | P1-E | 媒体分为独立 resumable lane；同 offset 竞争拒绝、finalizing 可恢复、失败 download attempt 独立留痕，文字 package 不被媒体连坐 | PostgreSQL synthetic media proof、plugin media outbox test | 真实字节下载、性能上限与浏览器中断 |
-| P1-F/G/H | UI 明确“已读取/待本机交付/已接纳”边界，删除 Popup 的旧授权、工位、Cookie、账号管理处理；TaskSpec target/limit/media/risk/stop conditions closed validation | popup built-bundle scan、contract negative tests、production build | 用户的浏览器视觉/行为验收 |
+| P1-F/G/H | UI 明确“已读取/待本机交付/已接纳”边界，Popup/缓存 Dashboard 不把页面读取或 outbox pending 写成成功；删除 Popup 的旧授权、工位、Cookie、账号管理处理；TaskSpec target/limit/media/risk/stop conditions closed validation；抖音 progress 产生 batch checkpoint | popup built-bundle scan、contract negative tests、production build | 用户的浏览器视觉/行为验收 |
 
 Webpack 继续报告 `content.js` 600 KiB / content entry 785 KiB 的性能建议警告；它不阻塞正确性 proof，但不得被描述为性能验收通过。

@@ -3,7 +3,7 @@ import { collectDouyinVideo, refreshDouyinNoteMediaById } from '../platforms/dou
 import { collectDouyinAuthor } from '../platforms/douyin/authorCollector.js';
 import { batchCollectDouyinProfileVideos, batchCollectDouyinProfileComments } from '../platforms/douyin/batchController.js';
 import { discoverDouyinBatchTargets } from '../platforms/douyin/batchDiscovery.js';
-import { collectDouyinComments, downloadDouyinCommentImages } from '../platforms/douyin/commentCollector.js';
+import { collectDouyinComments } from '../platforms/douyin/commentCollector.js';
 import {
   detectDouyinPageType,
   detectDouyinSearchBatchContext,
@@ -21,7 +21,6 @@ export {
   batchCollectDouyinProfileComments,
   discoverDouyinBatchTargets,
   collectDouyinComments,
-  downloadDouyinCommentImages,
   detectDouyinPageType,
   detectDouyinSearchBatchContext,
   detectDouyinSecurityChallenge,

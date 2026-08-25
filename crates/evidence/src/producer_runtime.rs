@@ -457,6 +457,7 @@ pub async fn read_runtime_library(
         .fetch_all(database.pool())
         .await?;
     let excluded_unknown_published_at = sqlx::query_scalar::<_, i64>(runtime_unknown_time_sql())
+        .bind(text)
         .fetch_one(database.pool())
         .await? as u64;
     let cards = rows
@@ -549,15 +550,27 @@ fn runtime_library_sql() -> &'static str {
 }
 
 fn runtime_unknown_time_sql() -> &'static str {
-    "SELECT count(DISTINCT COALESCE(record.value #>> '{sourceObject,externalId}', package.coverage #>> '{target,contentExternalId}')) \
-     FROM linggan_runtime_capture_package package \
-     CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records') WITH ORDINALITY AS record(value, ordinal) \
-     JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref = package.package_ref AND disposition.record_ordinal = record.ordinal - 1 \
-     WHERE disposition.disposition IN ('accepted_for_library_discovery','accepted_for_library_content') \
-       AND package.package_kind IN ('discovery_search','profile_discovery','content_detail') \
-       AND COALESCE(record.value #>> '{sourceObject,externalId}', package.coverage #>> '{target,contentExternalId}') IS NOT NULL \
-       AND NOT CASE WHEN COALESCE(record.value #>> '{payload,publishedAt}', '') ~ '^[0-9]+$' \
-                THEN (record.value #>> '{payload,publishedAt}')::numeric > 0 ELSE false END"
+    // This is intentionally the same admitted/scope/text surface as the Library query.  An
+    // all-library unknown counter would make a narrow author/title query claim it excluded
+    // material the user did not ask to inspect.
+    "WITH normalized AS ( \
+       SELECT package.coverage, record.value AS record, \
+              concat_ws(' ', record.value #>> '{payload,title}', record.value #>> '{payload,content}', record.value #>> '{payload,bodyText}', record.value #>> '{payload,desc}', record.value #>> '{payload,text}', record.value #>> '{payload,contentText}') AS evidence_text, \
+              NULLIF(COALESCE(record.value #>> '{payload,authorName}', record.value #>> '{payload,user,nickname}', record.value #>> '{payload,author,nickname}'), '') AS creator_display_name, \
+              NULLIF(record.value #>> '{payload,title}', '') AS title, \
+              COALESCE(record.value #>> '{sourceObject,externalId}', package.coverage #>> '{target,contentExternalId}') AS platform_content_id, \
+              CASE WHEN COALESCE(record.value #>> '{payload,publishedAt}', '') ~ '^[0-9]+$' AND (record.value #>> '{payload,publishedAt}')::numeric > 0 THEN 1 ELSE 0 END AS has_published_at \
+       FROM linggan_runtime_capture_package package \
+       CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records') WITH ORDINALITY AS record(value, ordinal) \
+       JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref = package.package_ref AND disposition.record_ordinal = record.ordinal - 1 \
+       WHERE disposition.disposition IN ('accepted_for_library_discovery','accepted_for_library_content') \
+         AND package.package_kind IN ('discovery_search','profile_discovery','content_detail') \
+     ) \
+     SELECT count(DISTINCT platform_content_id) FROM normalized \
+     WHERE platform_content_id IS NOT NULL AND has_published_at = 0 \
+       AND ($1::text IS NULL OR lower(COALESCE(creator_display_name, '')) LIKE '%' || lower($1) || '%' \
+         OR lower(COALESCE(title, '')) LIKE '%' || lower($1) || '%' \
+         OR lower(COALESCE(evidence_text, '')) LIKE '%' || lower($1) || '%')"
 }
 
 pub async fn producer_runtime_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {

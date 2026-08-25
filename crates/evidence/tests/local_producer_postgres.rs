@@ -239,6 +239,11 @@ async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retai
             })
         })
         .collect::<Vec<_>>();
+    records.push(serde_json::json!({
+        "kind":"discovery_card", "resultPosition":21,
+        "sourceObject":{"externalId":"unknown-published-fixture"},
+        "payload":{"title":"only unknown publication fixture", "authorName":"fixture creator", "content":"synthetic unknown time"}
+    }));
     // The package preserves a malformed raw record, but the default Evidence Library must not
     // silently promote it into a browsable Evidence card.
     records.push(serde_json::json!({"kind":"raw_unparsed","payload":"retained only"}));
@@ -275,6 +280,19 @@ async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retai
         20,
         "the visible search surface reaches the library once"
     );
+    assert_eq!(
+        projection.excluded_unknown_published_at, 0,
+        "a publication-time unknown record outside the text query must not inflate this view's exclusion count"
+    );
+    let unknown_query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"unknown publication","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+    )
+    .expect("filtered unknown query is valid");
+    let unknown_projection = read_runtime_library(&database, &unknown_query)
+        .await
+        .expect("unknown publication count obeys the same query filter");
+    assert!(unknown_projection.cards.is_empty());
+    assert_eq!(unknown_projection.excluded_unknown_published_at, 1);
     assert!(
         projection
             .cards

@@ -399,8 +399,10 @@ export function createXhsPageController({
           break;
 
         case 'collectCommentImages':
-          await ensurePluginAuthorized();
-          await commentImageController.start();
+          // The old ZIP downloader is deliberately not a Linggan media export.  Keep the
+          // familiar control visible but make the unavailable adapter explicit and side-effect
+          // free until comment images have a reviewed MediaSlot mapping.
+          showToast('评论图片区暂不可用：尚未具备 Linggan MediaSlot 回传合同，未执行下载。', 'warning');
           break;
       }
     } catch (err) {

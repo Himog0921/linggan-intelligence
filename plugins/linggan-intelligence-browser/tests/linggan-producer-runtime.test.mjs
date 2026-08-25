@@ -75,3 +75,29 @@ test('media delivery uses its own resumable chunk lane instead of blocking text 
   assert.match(background, /media-uploads\/\$\{encodeURIComponent\(sessionRef\)\}\/finalize/);
   assert.doesNotMatch(background, /media-observations\/\$\{encodeURIComponent\(upload\.mediaObservationRef\)\}\/blob/);
 });
+
+test('visible producer controls use Linggan runtime commands and never revive old browser downloads', () => {
+  const popup = readFileSync(new URL('../src/popup/App.jsx', import.meta.url), 'utf8');
+  const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
+  const douyin = readFileSync(new URL('../src/platforms/douyin/index.js', import.meta.url), 'utf8');
+  const xhs = readFileSync(new URL('../src/content/xhsPageController.js', import.meta.url), 'utf8');
+  assert.match(popup, /LINGGAN_RUNTIME_ACTION\.COLLECT_CURRENT_CONTENT/);
+  assert.match(popup, /LINGGAN_RUNTIME_ACTION\.START_BATCH_CONTENT/);
+  assert.doesNotMatch(popup, /sendToBackground\(MSG\.START_BATCH/);
+  assert.doesNotMatch(popup, /action: MSG\.COLLECT_SINGLE/);
+  assert.match(content, /dispatchProducerRuntimeAction/);
+  assert.match(content, /LINGGAN_RUNTIME_ACTION\.START_BATCH_COMMENTS/);
+  assert.match(douyin, /Linggan's media lane/);
+  assert.doesNotMatch(douyin, /downloadDouyinVideo\(/);
+  assert.doesNotMatch(douyin, /downloadDouyinCommentImages\(/);
+  assert.match(douyin, /batchCheckpoint/);
+  assert.match(xhs, /评论图片区暂不可用/);
+});
+
+test('page-read completion is not rendered as Linggan acceptance', () => {
+  const popup = readFileSync(new URL('../src/popup/App.jsx', import.meta.url), 'utf8');
+  const dashboard = readFileSync(new URL('../src/dashboard/App.jsx', import.meta.url), 'utf8');
+  assert.match(popup, /页面读取已结束；请等待 Linggan 本机交付或接纳状态/);
+  assert.doesNotMatch(dashboard, /提交到 Linggan（待接通）/);
+  assert.match(dashboard, /本机交付状态/);
+});

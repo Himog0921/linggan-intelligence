@@ -62,7 +62,7 @@ function injectNoteDetailButtons() {
     buttons: [
       { text: '采集当前笔记', action: 'collectNote', style: 'primary' },
       { text: '采集当前评论', action: 'collectComment', style: 'secondary' },
-      { text: '采集评论图片', action: 'collectCommentImages', style: 'secondary' },
+      { text: '评论图片 · 暂不可用', action: 'collectCommentImages', style: 'secondary' },
     ],
     containerStyle: { flexDirection: 'column', alignItems: 'stretch', boxShadow: 'none' },
     brandStyle: { marginRight: '0', marginBottom: '10px', justifyContent: 'center', width: '100%' },

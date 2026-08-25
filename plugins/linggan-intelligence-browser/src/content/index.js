@@ -35,6 +35,7 @@ function localTrustedAuthorization() {
 }
 
 const runtime = createLingganContentRuntime({ platform: 'xhs' });
+let activeDouyinAdapter = null;
 const dashboardBridge = createDashboardBridge({
   noteStore,
   commentStore,
@@ -116,7 +117,9 @@ async function initDouyin() {
     mediaSlots: (content) => douyinRuntime.submitMediaSlots(content),
     comments: (result, context) => douyinRuntime.submitComments(result, context?.noteId || '', {}),
     authorProfile: (author) => douyinRuntime.submitAuthor(author),
+    batchCheckpoint: (progress, context) => douyinRuntime.submitBatchCheckpoint(context?.kind || 'douyin_batch', progress),
   });
+  activeDouyinAdapter = module.DouyinAdapter;
   module.DouyinAdapter.init();
   document.addEventListener('click', (event) => {
     const button = event.target.closest('.lgboom-dy-btn, .lgboom-dy-task-btn');
@@ -136,6 +139,66 @@ async function init() {
   else await initXhs();
 }
 
+function dispatchXhsRuntimeAction(nextAction, params = {}) {
+  // Reuse the mature XHS page controller without allowing Popup to invoke the old message
+  // catalogue.  The synthetic element only supplies the existing UI action contract.
+  const button = { dataset: { action: nextAction, params: JSON.stringify(params || {}) } };
+  return xhsPageController.handleButtonClick({
+    target: { closest: (selector) => selector === '.lgboom-btn' ? button : null },
+  });
+}
+
+async function dispatchProducerRuntimeAction(action, message) {
+  const isDouyin = platform() === 'douyin';
+  const map = isDouyin
+    ? {
+      [LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_CONTENT]: 'dy_collectVideo',
+      [LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_COMMENTS]: 'dy_collectComments',
+      [LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_AUTHOR]: 'dy_collectAuthor',
+      [LINGGAN_RUNTIME_ACTION.START_BATCH_CONTENT]: 'dy_batchVideos',
+      [LINGGAN_RUNTIME_ACTION.START_BATCH_COMMENTS]: 'dy_batchComments',
+      [LINGGAN_RUNTIME_ACTION.ACQUIRE_COMMENT_MEDIA]: 'dy_collectCommentImages',
+    }
+    : {
+      [LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_CONTENT]: 'collectNote',
+      [LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_COMMENTS]: 'collectComment',
+      [LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_AUTHOR]: 'collectAuthor',
+      [LINGGAN_RUNTIME_ACTION.START_BATCH_CONTENT]: 'batchNotes',
+      [LINGGAN_RUNTIME_ACTION.START_BATCH_COMMENTS]: 'batchComments',
+      [LINGGAN_RUNTIME_ACTION.ACQUIRE_COMMENT_MEDIA]: 'collectCommentImages',
+    };
+  const pageAction = map[action];
+  if (!pageAction) return null;
+  if (action === LINGGAN_RUNTIME_ACTION.ACQUIRE_COMMENT_MEDIA) {
+    return {
+      success: true,
+      state: 'not_available',
+      message: '评论图片区尚未具备 Linggan MediaSlot 回传合同，未执行下载。',
+    };
+  }
+  const params = {
+    mode: message.mode,
+    count: message.count,
+    topByLikes: message.topByLikes,
+    searchFilters: message.searchFilters,
+    commentLimit: message.commentLimit,
+    commentDepthMode: message.commentDepthMode,
+    maxTotal: message.maxTotal,
+    maxSubComments: message.maxSubComments,
+    sortMode: message.sortMode,
+    triggerSource: 'popup_linggan_runtime',
+  };
+  if (isDouyin) {
+    if (!activeDouyinAdapter) throw new Error('linggan_douyin_runtime_not_ready');
+    await activeDouyinAdapter.handleButtonClick(pageAction, params);
+  } else {
+    await dispatchXhsRuntimeAction(pageAction, params);
+  }
+  // This means the page reader actually accepted the action. It is deliberately not an
+  // admission receipt; Popup must continue to describe delivery as pending until one exists.
+  return { success: true, state: 'page_read_started', delivery: 'pending' };
+}
+
 chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
   const action = String(message.action || '');
   if (action === LINGGAN_RUNTIME_ACTION.GET_PAGE_CONTEXT) {
@@ -150,6 +213,19 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
   }
   if (action === LINGGAN_RUNTIME_ACTION.GET_STATS) {
     sendResponse(unavailableLingganStats('not_read'));
+    return true;
+  }
+  if ([
+    LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_CONTENT,
+    LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_COMMENTS,
+    LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_AUTHOR,
+    LINGGAN_RUNTIME_ACTION.START_BATCH_CONTENT,
+    LINGGAN_RUNTIME_ACTION.START_BATCH_COMMENTS,
+    LINGGAN_RUNTIME_ACTION.ACQUIRE_COMMENT_MEDIA,
+  ].includes(action)) {
+    dispatchProducerRuntimeAction(action, message)
+      .then((result) => sendResponse(result || { success: false, code: 'linggan_page_action_unavailable' }))
+      .catch((error) => sendResponse({ success: false, code: 'linggan_page_action_failed', message: String(error?.message || error) }));
     return true;
   }
   return false;

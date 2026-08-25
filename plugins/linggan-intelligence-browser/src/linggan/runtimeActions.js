@@ -16,4 +16,12 @@ export const LINGGAN_RUNTIME_ACTION = {
   SUBMIT_MEDIA_SLOTS: 'lingganSubmitMediaSlots',
   CREATE_SCHEDULED_TASK: 'lingganCreateScheduledTask',
   FLUSH_LOCAL_OUTBOX: 'lingganFlushLocalOutbox',
+  // Popup commands are intentionally separate from the retired MSG.COLLECT_* catalogue.
+  // They only reach the active page runtime, which owns the eventual package/receipt boundary.
+  COLLECT_CURRENT_CONTENT: 'lingganCollectCurrentContent',
+  COLLECT_CURRENT_COMMENTS: 'lingganCollectCurrentComments',
+  COLLECT_CURRENT_AUTHOR: 'lingganCollectCurrentAuthor',
+  START_BATCH_CONTENT: 'lingganStartBatchContent',
+  START_BATCH_COMMENTS: 'lingganStartBatchComments',
+  ACQUIRE_COMMENT_MEDIA: 'lingganAcquireCommentMedia',
 };

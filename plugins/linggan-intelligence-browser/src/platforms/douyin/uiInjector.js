@@ -84,7 +84,7 @@ function injectVideoDetailButtons(page) {
     { text: '采集视频', icon: 'collect', action: 'dy_collectVideo', style: 'primary' },
     { text: '下载视频', icon: 'download', action: 'dy_downloadVideo', style: 'secondary' },
     { text: '采集评论', icon: 'comment', action: 'dy_collectComments', style: 'secondary' },
-    { text: '评论图片', icon: 'image', action: 'dy_collectCommentImages', style: 'secondary' },
+    { text: '评论图片 · 暂不可用', icon: 'image', action: 'dy_collectCommentImages', style: 'secondary' },
   ];
 
   const filteredButtons = page.type === DY_PAGE_TYPE.NOTE_DETAIL

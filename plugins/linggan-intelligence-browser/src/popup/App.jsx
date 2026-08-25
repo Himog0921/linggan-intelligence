@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import '../extensionPublicPath.js';
 import { MSG, COMMENT_DEPTH_MODE } from '../shared/constants.js';
+import { LINGGAN_RUNTIME_ACTION } from '../linggan/runtimeActions.js';
 import { BRAND_ASSETS, getBrandAssetUrl } from '../shared/brandAssets.js';
 import { initThemeManager, setTheme, getCurrentTheme } from '../themes/themeManager.js';
 import {
@@ -231,7 +232,9 @@ export default function App() {
         setBatchControlsVisible(false);
         setBatchPaused(false);
         setBatchStopping(false);
-        showNotice('采集完成。', 'info');
+        // A page-side reader finishing is not a Linggan admission receipt.  The active runtime
+        // reports delivery separately; never turn this legacy progress event into success.
+        showNotice('页面读取已结束；请等待 Linggan 本机交付或接纳状态。', 'info');
         chrome.tabs.query({ active: true, currentWindow: true }).then(([t]) => {
           if (t?.id) loadStats(t.id);
         });
@@ -360,7 +363,7 @@ export default function App() {
       setProgressTotal(1);
       setProgressStatus(platform === PLATFORM.DOUYIN ? '正在发起视频采集...' : '正在发起笔记采集...');
       try {
-        await sendToTab(tabId, { action: MSG.COLLECT_SINGLE_NOTE });
+        await sendToTab(tabId, { action: LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_CONTENT });
       } catch (err) {
         setProgressVisible(false);
         showNotice(toFriendlyError(err), 'warning');
@@ -375,7 +378,7 @@ export default function App() {
       return;
     }
     const isCommentScene = capabilities.secondaryAction === 'comment';
-    let payload = { action: isCommentScene ? MSG.COLLECT_SINGLE_COMMENT : MSG.COLLECT_AUTHOR };
+    let payload = { action: isCommentScene ? LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_COMMENTS : LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_AUTHOR };
     if (isCommentScene) {
       const settings = await openCommentLimitSettings({
         title: platform === PLATFORM.DOUYIN ? '抖音当前评论设置' : '小红书当前评论设置',
@@ -389,7 +392,7 @@ export default function App() {
         ? COMMENT_DEPTH_MODE.ALL_REPLIES
         : COMMENT_DEPTH_MODE.TWO_LEVEL;
       payload = {
-        action: MSG.COLLECT_SINGLE_COMMENT,
+        action: LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_COMMENTS,
         maxTotal: settings.maxTotal,
         maxSubComments: commentDepthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 0 : undefined,
         sortMode: 'hot',
@@ -402,7 +405,7 @@ export default function App() {
       setProgressVisible(true);
       setProgressCurrent(0);
       setProgressTotal(1);
-      const action = isCommentScene ? MSG.COLLECT_SINGLE_COMMENT : MSG.COLLECT_AUTHOR;
+      const action = isCommentScene ? LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_COMMENTS : LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_AUTHOR;
       setProgressStatus(isCommentScene ? '正在发起评论采集...' : '正在发起博主采集...');
       try {
         await sendToTab(tabId, isCommentScene ? payload : { action });
@@ -433,16 +436,18 @@ export default function App() {
       setProgressVisible(true);
       setProgressCurrent(0);
       setProgressTotal(1);
-      setProgressStatus('正在下载当前视频评论图片区...');
+      setProgressStatus('正在确认评论图片区是否具备 Linggan 媒体回传合同...');
       try {
         const result = await sendToTab(tabId, {
-          action: MSG.DOWNLOAD_CURRENT_COMMENT_IMAGES,
+          action: LINGGAN_RUNTIME_ACTION.ACQUIRE_COMMENT_MEDIA,
           maxTotal: settings.maxTotal,
           maxSubComments: commentDepthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 0 : undefined,
           commentDepthMode,
         });
         setProgressVisible(false);
-        if (result?.stopped) {
+        if (result?.state === 'not_available') {
+          showNotice(result?.message || '评论图片区暂不可用：未执行下载。', 'warning');
+        } else if (result?.stopped) {
           showNotice(
             result?.downloaded > 0
               ? `评论图片区已停止，已打包 ${result?.downloaded || 0}/${result?.total || 0}，高清 ${result?.hdCount || 0}`
@@ -451,7 +456,7 @@ export default function App() {
           );
         } else {
           showNotice(
-            `评论图片区下载完成：成功 ${result?.downloaded || 0}/${result?.total || 0}，高清 ${result?.hdCount || 0}`,
+            '评论图片区任务已交给 Linggan Runtime；请等待本机交付或接纳状态。',
             'success',
           );
         }
@@ -473,8 +478,8 @@ export default function App() {
     await withBusyAction('batchNotes', async () => {
       hideNotice();
       try {
-        await sendToBackground(MSG.START_BATCH_NOTES, {
-          tabId,
+        await sendToTab(tabId, {
+          action: LINGGAN_RUNTIME_ACTION.START_BATCH_CONTENT,
           mode,
           count: settings.count,
           topByLikes: settings.topByLikes,
@@ -483,11 +488,11 @@ export default function App() {
         setProgressVisible(true);
         setProgressCurrent(0);
         setProgressTotal(settings.count);
-        setProgressStatus('批量笔记任务已启动');
+        setProgressStatus('批量笔记页面读取已启动；结果将进入 Linggan 本机交付队列');
         setBatchControlsVisible(true);
         setBatchPaused(false);
         setBatchStopping(false);
-        showNotice(`已启动批量笔记：本轮预计采集 ${settings.count} 条。`, 'info');
+        showNotice(`批量笔记已开始页面读取：本轮最多 ${settings.count} 条，尚未代表 Linggan 已接纳。`, 'info');
       } catch (err) {
         setProgressVisible(false);
         setBatchControlsVisible(false);
@@ -507,8 +512,8 @@ export default function App() {
     await withBusyAction('batchComments', async () => {
       hideNotice();
       try {
-        await sendToBackground(MSG.START_BATCH_COMMENTS, {
-          tabId,
+        await sendToTab(tabId, {
+          action: LINGGAN_RUNTIME_ACTION.START_BATCH_COMMENTS,
           mode,
           count: settings.count,
           topByLikes: settings.topByLikes,
@@ -519,12 +524,12 @@ export default function App() {
         setProgressVisible(true);
         setProgressCurrent(0);
         setProgressTotal(settings.count || 0);
-        setProgressStatus('批量评论任务已启动');
+        setProgressStatus('批量评论页面读取已启动；结果将进入 Linggan 本机交付队列');
         setProgressDepthMode(settings.commentDepthMode);
         setBatchControlsVisible(true);
         setBatchPaused(false);
         setBatchStopping(false);
-        showNotice(`已启动批量评论：本轮预计处理 ${settings.count} 条内容。`, 'info');
+        showNotice(`批量评论已开始页面读取：本轮最多 ${settings.count} 条，尚未代表 Linggan 已接纳。`, 'info');
       } catch (err) {
         setProgressVisible(false);
         setBatchControlsVisible(false);
