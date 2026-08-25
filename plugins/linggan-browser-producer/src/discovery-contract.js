@@ -152,6 +152,12 @@ export function buildFirstDiscoveryPackage({ observedAt, stoppedReason, cards })
   }
 
   const visibleCards = cards.map((card) => visibleCard(card, observedAt));
+  if (
+    stoppedReason === "quota_reached" &&
+    visibleCards.length !== FIRST_DISCOVERY_SPEC.target.maximumQuota
+  ) {
+    throw new TypeError("quota_reached requires all 20 currently visible cards to be present.");
+  }
   const positions = new Set(visibleCards.map((card) => card.occurrence.resultPosition));
   if (positions.size !== visibleCards.length) {
     throw new TypeError("Discovery result positions must be unique in one package.");

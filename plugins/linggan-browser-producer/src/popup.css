@@ -111,6 +111,10 @@ dd {
   color: var(--lgi-success);
 }
 
+[data-state="local_ingress_ready"] {
+  color: var(--lgi-success);
+}
+
 [data-state="checking"] {
   color: var(--lgi-warning);
 }
@@ -129,6 +133,13 @@ dd {
   background: var(--lgi-canvas-low);
   color: var(--lgi-ghost);
   cursor: not-allowed;
+}
+
+.producer-boundary button:not(:disabled) {
+  border-color: var(--lgi-danger);
+  background: var(--lgi-danger);
+  color: var(--lgi-canvas-hi);
+  cursor: pointer;
 }
 
 .producer-boundary button:focus-visible {

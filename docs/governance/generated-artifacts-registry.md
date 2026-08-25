@@ -24,9 +24,9 @@
 
 ## 当前登记结论
 
-- 当前获准提交 Git 的产品生成物只有上表中的架构沟通 HTML 与 `PLUGIN-001` 的 Browser Producer release；它们均不证明运行时接通、真实采集或产品业务完成。
+- 当前获准提交 Git 的产品生成物只有上表中的架构沟通 HTML 与 `PLUGIN-MIGRATION-001` 的 Browser Producer release；它们均不证明运行时接通、真实采集或产品业务完成。
 - `references/` 是已导入并校验的历史证据快照，不是产品运行时生成目录。
 - SCOPE-001 的 `crates/contracts/tests/fixtures/capture-v1/*` 及其 expected canonical bytes/hash 是人工审查和维护的权威测试输入，不是由 Rust 或 Node checker 生成的产物；`scripts/verify-capture-fixtures.mjs` 只验证、不回写。任何将来的自动生成/回写都必须先增加本表正式登记，不得沿用这一人工输入豁免。
 - 未来若引入 SQLx 离线元数据、API schema、前端构建包或机器生成 fixture，必须先补充：负责人、唯一来源、再生命令、一致性检查和是否必须入 Git。
 - 临时实验输出使用操作系统临时目录；若结果需要成为项目证据，应转写为 `docs/audits/` 的可读报告，敏感原件仍留在忽略目录或外部安全存储。
-- `PLUGIN-001` 的 Browser Producer release 只包含 extension code、manifest 和由 Linggan runtime token source 打包的视觉 token；不得包含 Cookie、账号、真实页面材料、媒体字节或运行日志。该发行物可被浏览器加载，不等于已经获得平台访问或实际采集授权。
+- `PLUGIN-MIGRATION-001` 的 Browser Producer release 只包含 extension code、manifest 和由 Linggan runtime token source 打包的视觉 token；不得包含 Cookie、账号、真实页面材料、媒体字节、旧内容工作台运行依赖或运行日志。该发行物可被浏览器加载，不等于已经获得平台访问或实际采集授权。
