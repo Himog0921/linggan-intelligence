@@ -30,6 +30,8 @@ repair_compose="$proof_directory/repair-compose.yaml"
 repair_old_password="$(openssl rand -hex 24)"
 export RUNTIME_PROOF_OLD_PASSWORD="$repair_old_password"
 server_pid=""
+real_docker="$(command -v docker)"
+docker_argv_guard_directory="$proof_directory/docker-argv-guard"
 
 if lsof -nP -iTCP:"$proof_port" -sTCP:LISTEN >/dev/null 2>&1; then
   echo "runtime proof port ${proof_port} is already in use; retry the proof without interrupting that process" >&2
@@ -59,6 +61,47 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+compose_client_authentication() {
+  local password="$1"
+  printf '%s\n' "$password" | docker compose run --rm --no-deps -T postgres sh -ceu '
+    IFS= read -r database_password
+    case "$database_password" in
+      ""|*[!0-9a-f]*)
+        echo "proof password must be a hex local secret" >&2
+        exit 1
+        ;;
+    esac
+    PGPASSWORD="$database_password" exec psql -X -v ON_ERROR_STOP=1 -h postgres \
+      -U linggan_dev_admin -d "$1" -c "SELECT 1;"
+  ' sh "$POSTGRES_DB"
+}
+
+require_no_password_in_docker_argv_contract() {
+  if rg -n -- '-e[[:space:]]+"?(PGPASSWORD|LINGGAN_REPAIR_PASSWORD)=' \
+    "$project_root/scripts/local-runtime.sh" "$project_root/scripts/test-local-runtime.sh"; then
+    echo "runtime proof found a password-bearing Docker CLI argument in source" >&2
+    exit 1
+  fi
+}
+
+install_docker_argv_guard() {
+  mkdir -p "$docker_argv_guard_directory"
+  cat > "$docker_argv_guard_directory/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+for argument in "$@"; do
+  if [[ "$argument" == *"${LINGGAN_RUNTIME_FORBIDDEN_DOCKER_ARG_SECRET:?}"* ]]; then
+    echo "runtime proof found a password in Docker CLI arguments" >&2
+    exit 97
+  fi
+done
+
+exec "${LINGGAN_RUNTIME_REAL_DOCKER:?}" "$@"
+EOF
+  chmod 700 "$docker_argv_guard_directory/docker"
+}
+
 require_password_repair_uses_current_env() {
   cat > "$repair_compose" <<EOF
 services:
@@ -84,35 +127,34 @@ EOF
     docker compose up -d --wait postgres >/dev/null
 
   if COMPOSE_FILE="$repair_compose" COMPOSE_PROJECT_NAME="$repair_project" \
-    docker compose run --rm --no-deps -T -e "PGPASSWORD=$POSTGRES_PASSWORD" postgres \
-    psql -X -v ON_ERROR_STOP=1 -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT 1;' \
-    >/dev/null 2>&1; then
+    compose_client_authentication "$POSTGRES_PASSWORD" >/dev/null 2>&1; then
     echo "runtime proof expected the isolated container old password to reject the current .env password before repair" >&2
     exit 1
   fi
 
+  install_docker_argv_guard
   COMPOSE_FILE="$repair_compose" COMPOSE_PROJECT_NAME="$repair_project" \
     RUNTIME_PROOF_OLD_PASSWORD="$repair_old_password" \
+    PATH="$docker_argv_guard_directory:$PATH" \
+    LINGGAN_RUNTIME_FORBIDDEN_DOCKER_ARG_SECRET="$POSTGRES_PASSWORD" \
+    LINGGAN_RUNTIME_REAL_DOCKER="$real_docker" \
     "$project_root/scripts/local-runtime.sh" repair-password >/dev/null
 
   if COMPOSE_FILE="$repair_compose" COMPOSE_PROJECT_NAME="$repair_project" \
-    docker compose run --rm --no-deps -T -e "PGPASSWORD=$repair_old_password" postgres \
-    psql -X -v ON_ERROR_STOP=1 -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT 1;' \
-    >/dev/null 2>&1; then
+    compose_client_authentication "$repair_old_password" >/dev/null 2>&1; then
     echo "runtime proof expected the isolated container old password to stop working after repair" >&2
     exit 1
   fi
 
   COMPOSE_FILE="$repair_compose" COMPOSE_PROJECT_NAME="$repair_project" \
-    docker compose run --rm --no-deps -T -e "PGPASSWORD=$POSTGRES_PASSWORD" postgres \
-    psql -X -v ON_ERROR_STOP=1 -h postgres -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c 'SELECT 1;' \
-    >/dev/null
+    compose_client_authentication "$POSTGRES_PASSWORD" >/dev/null
 
   COMPOSE_FILE="$repair_compose" COMPOSE_PROJECT_NAME="$repair_project" \
     RUNTIME_PROOF_OLD_PASSWORD="$repair_old_password" \
     docker compose down --volumes --remove-orphans >/dev/null
 }
 
+require_no_password_in_docker_argv_contract
 require_password_repair_uses_current_env
 
 docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres \
