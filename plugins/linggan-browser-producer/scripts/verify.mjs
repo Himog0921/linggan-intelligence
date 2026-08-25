@@ -14,7 +14,7 @@ const sourceDirectory = join(packageDirectory, "src");
 const manifest = JSON.parse(readFileSync(join(sourceDirectory, "manifest.json"), "utf8"));
 
 assert.equal(manifest.manifest_version, 3);
-assert.deepEqual(manifest.permissions, []);
+assert.deepEqual(manifest.permissions, ["activeTab", "scripting"]);
 assert.deepEqual(manifest.host_permissions, ["http://localhost:3000/*"]);
 assert.equal("content_scripts" in manifest, false);
 assert.equal("externally_connectable" in manifest, false);
@@ -30,13 +30,10 @@ for (const forbiddenRuntimeReference of [
   "linggan boom",
   "content workbench",
   "xhscdn",
-  "activeTab",
-  "cookies",
-  "downloads",
-  "scripting",
   "content_scripts",
-  "ocr",
-  "asr"
+  "externally_connectable",
+  "localhost:3001",
+  "127.0.0.1"
 ]) {
   assert.equal(
     releaseSource.toLowerCase().includes(forbiddenRuntimeReference.toLowerCase()),
@@ -46,11 +43,21 @@ for (const forbiddenRuntimeReference of [
 }
 
 assert.equal(releaseSource.includes("http://localhost:3000/health"), true);
+assert.equal(releaseSource.includes("http://localhost:3000/api/local/discovery-packages"), true);
 assert.equal(releaseSource.includes(`>${manifest.version}<`), true);
 assert.equal(releaseSource.includes("observedExternalUri"), true);
 assert.equal(releaseSource.includes("displayUrl"), false);
 assert.equal(releaseSource.includes("<img"), false);
 assert.equal(releaseSource.includes("background-image"), false);
+
+const adapterSource = readFileSync(join(sourceDirectory, "xhs-visible-search-adapter.js"), "utf8");
+for (const forbiddenAdapterCapability of ["window.scroll", "__INITIAL_STATE__", "fetch(", "document.cookie"]) {
+  assert.equal(
+    adapterSource.includes(forbiddenAdapterCapability),
+    false,
+    `visible-card adapter must not use ${forbiddenAdapterCapability}`
+  );
+}
 
 const partialPackage = buildFirstDiscoveryPackage({
   observedAt: "2026-08-25T10:00:00+08:00",
@@ -103,13 +110,21 @@ assert.throws(
   /RFC 3339/
 );
 assert.throws(
+  () => buildFirstDiscoveryPackage({
+    observedAt: "2026-08-25T10:00:00Z",
+    stoppedReason: "quota_reached",
+    cards: [{ platformContentId: "xhs-note-1", resultPosition: 1 }]
+  }),
+  /quota_reached/
+);
+assert.throws(
   () => buildFirstDiscoveryPackage({ observedAt: "2026-02-30T10:00:00Z", stoppedReason: "manual_stop", cards: [] }),
   /RFC 3339/
 );
 
 const archiveListing = execFileSync(
   "unzip",
-  ["-l", join(packageDirectory, "releases", "linggan-browser-producer-0.1.0.zip")],
+  ["-l", join(packageDirectory, "releases", `linggan-browser-producer-${manifest.version}.zip`)],
   { encoding: "utf8" }
 );
 for (const requiredReleaseFile of [
@@ -119,7 +134,8 @@ for (const requiredReleaseFile of [
   "popup.html",
   "popup.css",
   "popup.js",
-  "lids-tokens.css"
+  "lids-tokens.css",
+  "xhs-visible-search-adapter.js"
 ]) {
   assert.equal(archiveListing.includes(requiredReleaseFile), true, `${requiredReleaseFile} missing from ZIP`);
 }

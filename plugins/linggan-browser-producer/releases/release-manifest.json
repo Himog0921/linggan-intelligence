@@ -1,21 +1,21 @@
 {
   "format": "linggan-browser-producer-release-v1",
   "package": "linggan-browser-producer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "contractCompatibility": [
     "xhs.discovery.visible-card.v1"
   ],
   "loopbackHealthTarget": "http://localhost:3000/health",
   "archive": {
-    "file": "linggan-browser-producer-0.1.0.zip",
-    "sha256": "171000c177a2a84b8cf25c6841abfcf8728bf902b7281d3572780661868db8a7",
-    "bytes": 7009
+    "file": "linggan-browser-producer-0.2.0.zip",
+    "sha256": "505ed4f2f451751540a414a24a55d49c7ff691f657919307ed81966da618e326",
+    "bytes": 11484
   },
   "files": [
     {
       "path": "discovery-contract.js",
-      "sha256": "3fdb9aaba68e8a516075ffa4dfc364689b3de1bbdda61c12df66a56809b24b46",
-      "bytes": 5668
+      "sha256": "9c1b0b5f1e40f862ef6cab45f074d21e3708f97e6035116362580958ddd72a54",
+      "bytes": 5892
     },
     {
       "path": "lids-tokens.css",
@@ -24,28 +24,33 @@
     },
     {
       "path": "manifest.json",
-      "sha256": "9b83894cab91ab16223c30f5b83e53fe2cfc486824c802edec0436c365820243",
-      "bytes": 436
+      "sha256": "2271eb15116455add9eff114821afa2b1dfb2f24d9ba05d8bd23ba67fa1823cc",
+      "bytes": 476
     },
     {
       "path": "popup.css",
-      "sha256": "f3ae8a9289a08a715ef2b7681179d12d5bf0d87a56dfd642600009aa472d738c",
-      "bytes": 2873
+      "sha256": "f7f930370b8d4022a43cb66613e7dfa981a2594c0eb540b90428aba9488a7ef1",
+      "bytes": 3106
     },
     {
       "path": "popup.html",
-      "sha256": "5a8b531050f05a7b66f8a47fc6ae05162e1cde448349aa63eb875da5079b8a43",
-      "bytes": 1934
+      "sha256": "ab9b76cf6503abb3c95b4c4f3de18c3f1129494503785be766bd5b365bb6b4af",
+      "bytes": 2016
     },
     {
       "path": "popup.js",
-      "sha256": "586fcb520f627fa7f493d171dd7541694c80c68f539cdd4dd597f8f0e457d317",
-      "bytes": 601
+      "sha256": "dba81c4f826df7aafd6f531236ab61ab63a09fb91828160ae78ed109cfd832c9",
+      "bytes": 2392
     },
     {
       "path": "service-worker.js",
-      "sha256": "707bd8594ba0c8d7f98acb63af19a1c38514abf4548d63956267f1fe09c430d8",
-      "bytes": 1890
+      "sha256": "f9147191661f444e608206e707ea7a90b41ad082026f5d93c5c726b87c1728bc",
+      "bytes": 5681
+    },
+    {
+      "path": "xhs-visible-search-adapter.js",
+      "sha256": "7103cebcde3d9e4ac562441b0566168762d5e56544a631c9789f01d4d8e109f4",
+      "bytes": 4610
     }
   ]
 }

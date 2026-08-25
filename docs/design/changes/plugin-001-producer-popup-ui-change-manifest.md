@@ -1,10 +1,12 @@
 # PLUGIN-001 Popup UI Change Manifest
 
-> 状态: 权威当前
+> 状态: 历史归档
 > 最后核对: 2026-08-25
-> 适用范围: Issue #33 的 Linggan Browser Producer popup 视觉、状态与禁用 Discovery 边界
+> 适用范围: 历史 Issue #33 的 Linggan Browser Producer popup 视觉、状态与禁用 Discovery 边界；不再约束当前实现
 > 事实来源: Issue #33、`PAGE-PLUGIN-001`、Discovery boundary contract、LIDS 与实际 MV3 source
-> 冲突时以谁为准: 用户最新确认、`AGENTS.md`、实际合同/插件代码；本清单不扩大动作权限
+> 冲突时以谁为准: [`plugin-migration-001-producer-popup-ui-change-manifest.md`](plugin-migration-001-producer-popup-ui-change-manifest.md) 与用户最新确认；本清单只保留历史回执
+
+> 替代说明: Issue #37 / `PLUGIN-MIGRATION-001` 获准将受限的用户手势 Discovery 接入本机 ingress。本文件中“按钮持续 disabled”“无真实 ingress”仅是 Issue #33 的历史边界，不能与当前 popup 规格并存。
 
 ## 1. 事项
 

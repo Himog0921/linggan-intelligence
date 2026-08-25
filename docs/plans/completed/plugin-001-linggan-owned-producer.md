@@ -1,14 +1,14 @@
 # PLUGIN-001 Linggan 自有浏览器 Producer 包
 
-> 状态: 活跃计划
+> 状态: 已完成计划
 > 最后核对: 2026-08-25
-> 适用范围: GitHub Issue #33 的独立 Manifest V3 浏览器 Producer 源码、构建、可安装包、版本与完整性校验；不实现本地 ingress 或真实采集
+> 适用范围: GitHub Issue #33 的独立 Manifest V3 浏览器 Producer 基础源码、构建、可安装包、版本与完整性校验；不定义或限制 Issue #37 的后续适配实现
 > 事实来源: Mog 已确认 Linggan 自有插件是唯一运行时 Producer、Issue #33、`LOCAL-001C0-DISCOVERY-BOUNDARY-V1`、`LOCAL-001` 活跃计划与 `AGENTS.md`
-> 冲突时以谁为准: 用户最新确认、`AGENTS.md`、已合入的 Discovery 合同和真实运行证明；历史内容工作台仅为只读参考
+> 冲突时以谁为准: 用户最新确认、`AGENTS.md`、`PLUGIN-MIGRATION-001`、已合入的 Discovery 合同和真实运行证明；历史内容工作台仅为只读参考
 
 ## 目标与用户可见结果
 
-Linggan Intelligence 仓库拥有一份可独立审查、构建和安装的浏览器 Producer 包。它清楚显示自身身份、版本与 Linggan loopback 连接状态；未有本机 ingress/授权时，Discovery 操作保持不可执行并说明 `NOT_CONNECTED`，不伪装为可采集。
+Linggan Intelligence 仓库已拥有一份可独立审查、构建和安装的浏览器 Producer 基础包。该基础卡的 `health-only` 停止点已完成；用户随后确认不要从零另造采集器，而应适配当前 `linggan-boom` 的成熟 XHS 能力。因此真实 Discovery adapter、浏览器权限和固定 ingress submit 不再由本历史基础卡定义，统一由 `PLUGIN-MIGRATION-001` 承接。
 
 ## 已确认边界
 
