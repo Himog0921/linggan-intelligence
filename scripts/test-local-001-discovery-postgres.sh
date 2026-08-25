@@ -54,5 +54,6 @@ docker exec "$proof_container" createdb -U "$proof_user" "$proof_database"
 proof_database_created=1
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 cargo test -p linggan-evidence --test local_discovery_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test local_producer_postgres --locked -- --ignored
 cargo test -p linggan-api --bin linggan-api --locked -- --ignored
 echo "LOCAL-001 discovery PostgreSQL proof passed"

@@ -4,6 +4,7 @@
 mod canonical;
 mod capture;
 mod discovery;
+mod local_producer;
 
 pub use capture::{
     CapturePackage, CaptureRecord, ContractError, Coverage, KnownSetTarget, KnownTargetOutcome,
@@ -15,6 +16,10 @@ pub use discovery::{
     DiscoveryCoverage, DiscoveryOccurrence, DiscoveryPackage, DiscoveryStopReason, EvidenceQuery,
     EvidenceQueryScope, EvidenceQuerySort, PublishedWindow, is_rfc3339_timestamp,
     parse_discovery_package,
+};
+pub use local_producer::{
+    LocalProducerAttempt, LocalProducerContractError, LocalProducerSubmission, LocalTaskSpec,
+    parse_local_producer_attempt, parse_local_producer_submission, parse_local_task_spec,
 };
 
 pub const BOOTSTRAP_CONTRACT_VERSION: &str = "unimplemented";

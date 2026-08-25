@@ -8,10 +8,14 @@ use axum::{
     response::{Html, IntoResponse, Redirect, Response},
     routing::{get, post},
 };
-use linggan_contracts::EvidenceQuery;
+use linggan_contracts::{
+    EvidenceQuery, parse_local_producer_attempt, parse_local_producer_submission,
+    parse_local_task_spec,
+};
 use linggan_evidence::{
-    DiscoveryIngressError, ingest_discovery_package, local_discovery_schema_is_ready,
-    read_discovery_library,
+    DiscoveryIngressError, LocalProducerError, create_manual_task, ingest_discovery_package,
+    local_discovery_schema_is_ready, local_producer_schema_is_ready, read_discovery_library,
+    start_local_attempt, submit_local_package,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -71,12 +75,26 @@ impl LocalDatabaseState {
                 "LOCAL_001_SCHEMA_UNAVAILABLE",
             ),
             Self::Ready(database) => match local_discovery_schema_is_ready(database).await {
-                Ok(true) => (
-                    "LOCAL_DISCOVERY_READ_PROJECTION",
-                    "DISCOVERY_ONLY",
-                    "READY",
-                    "LOCAL_001_SCHEMA_READY",
-                ),
+                Ok(true) => match local_producer_schema_is_ready(database).await {
+                    Ok(true) => (
+                        "LOCAL_TRUSTED_PRODUCER",
+                        "MANUAL_DISCOVERY_ONLY",
+                        "READY",
+                        "LOCAL_003_SCHEMA_READY",
+                    ),
+                    Ok(false) => (
+                        "LOCAL_DISCOVERY_READ_PROJECTION",
+                        "DISCOVERY_ONLY",
+                        "READY",
+                        "LOCAL_001_SCHEMA_READY",
+                    ),
+                    Err(_) => (
+                        "SOURCE_INCOMPLETE",
+                        "NOT_CONNECTED",
+                        "CONFIGURED_UNAVAILABLE",
+                        "LOCAL_003_DATABASE_UNAVAILABLE",
+                    ),
+                },
                 Ok(false) => (
                     "SOURCE_INCOMPLETE",
                     "NOT_CONNECTED",
@@ -119,6 +137,18 @@ fn router(state: LocalWebState) -> Router {
         .route("/", get(local_entry))
         .route("/health", get(health))
         .route("/api/local/discovery-packages", post(discovery_ingress))
+        .route(
+            "/api/local/producer/manual-tasks",
+            post(create_manual_task_route),
+        )
+        .route(
+            "/api/local/producer/attempts",
+            post(start_local_attempt_route),
+        )
+        .route(
+            "/api/local/producer/submissions",
+            post(submit_local_package_route),
+        )
         .route("/api/local/evidence-library", get(evidence_library_json))
         .route("/corpus/evidence", get(evidence_library))
         .route("/assets/evidence-library.css", get(stylesheet))
@@ -167,7 +197,8 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
         },
         "routes": {
             "evidenceLibrary": "/corpus/evidence",
-            "discoveryIngress": "/api/local/discovery-packages"
+            "discoveryIngress": "/api/local/discovery-packages",
+            "localProducer": "/api/local/producer/manual-tasks"
         }
     }))
 }
@@ -243,6 +274,116 @@ async fn discovery_ingress(State(state): State<LocalWebState>, body: Bytes) -> R
     }
 }
 
+async fn create_manual_task_route(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_connected",
+        );
+    };
+    let Ok(body) = std::str::from_utf8(&body) else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "task_spec_invalid",
+        );
+    };
+    let Ok(task) = parse_local_task_spec(body) else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "task_spec_invalid",
+        );
+    };
+    match create_manual_task(database, &task).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(LocalProducerError::Internal(_)) => local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_committed",
+        ),
+        Err(_) => local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "task_spec_invalid",
+        ),
+    }
+}
+
+async fn start_local_attempt_route(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_connected",
+        );
+    };
+    let Ok(body) = std::str::from_utf8(&body) else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "attempt_invalid",
+        );
+    };
+    let Ok(attempt) = parse_local_producer_attempt(body) else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "attempt_invalid",
+        );
+    };
+    match start_local_attempt(database, &attempt).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(LocalProducerError::RoutingNotFound) => {
+            local_producer_error(axum::http::StatusCode::NOT_FOUND, "task_not_found")
+        }
+        Err(LocalProducerError::Internal(_)) => local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_committed",
+        ),
+        Err(_) => local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "attempt_invalid",
+        ),
+    }
+}
+
+async fn submit_local_package_route(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_connected",
+        );
+    };
+    let Ok(body) = std::str::from_utf8(&body) else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "submission_invalid",
+        );
+    };
+    let Ok(submission) = parse_local_producer_submission(body) else {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "submission_invalid",
+        );
+    };
+    match submit_local_package(database, &submission).await {
+        Ok(outcome) => Json(outcome).into_response(),
+        Err(LocalProducerError::RoutingNotFound) => {
+            local_producer_error(axum::http::StatusCode::NOT_FOUND, "attempt_not_found")
+        }
+        Err(LocalProducerError::AttemptIdentityMismatch) => local_producer_error(
+            axum::http::StatusCode::CONFLICT,
+            "attempt_identity_mismatch",
+        ),
+        Err(LocalProducerError::DiscoveryContract | LocalProducerError::Contract(_)) => {
+            local_producer_error(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                "submission_invalid",
+            )
+        }
+        Err(LocalProducerError::DiscoveryIngress(_) | LocalProducerError::Internal(_)) => {
+            local_producer_error(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "submission_not_acknowledged",
+            )
+        }
+    }
+}
+
 async fn configured_database_state() -> LocalDatabaseState {
     let Ok(url) = std::env::var("LINGGAN_LOCAL_DATABASE_URL") else {
         return LocalDatabaseState::NotConfigured;
@@ -280,6 +421,14 @@ fn ingress_json_error(status: axum::http::StatusCode, code: &'static str) -> Res
     (
         status,
         Json(json!({ "admission": "not_accepted", "code": code })),
+    )
+        .into_response()
+}
+
+fn local_producer_error(status: axum::http::StatusCode, code: &'static str) -> Response {
+    (
+        status,
+        Json(json!({ "delivery": "not_acknowledged", "code": code })),
     )
         .into_response()
 }

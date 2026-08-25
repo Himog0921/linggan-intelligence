@@ -1,4 +1,7 @@
 export const LINGGAN_LOCAL_ORIGIN = 'http://localhost:3000';
+const TASK_SPEC_VERSION = 'linggan.task-spec.v1';
+const ATTEMPT_VERSION = 'linggan.local-trusted.attempt.v1';
+const SUBMISSION_VERSION = 'linggan.local-trusted.submission.v1';
 
 export const LINGGAN_PENDING_MESSAGE = [
   '该采集能力已保留在 Linggan 插件界面中，但 Linggan 的对应接收合同尚未接通。',
@@ -40,4 +43,37 @@ export async function readLingganLocalReadiness(fetchImpl = globalThis.fetch) {
   } catch {
     return { connected: false, message: 'Linggan 本机服务当前不可访问。' };
   }
+}
+
+export function createManualTaskSpec({ taskId = crypto.randomUUID() } = {}) {
+  return {
+    contractVersion: TASK_SPEC_VERSION,
+    taskId,
+    source: 'manual',
+    platform: 'xhs',
+    pageType: 'search_results',
+    target: 'current_visible_search_surface',
+    capabilitiesRequested: ['discover_visible_cards'],
+    maximumQuota: 20,
+    commentLimit: 'not_requested',
+    acquireMedia: 'not_requested',
+    riskPolicy: 'local_trusted_user_initiated',
+    stopConditions: ['current_surface_read_once', 'maximum_quota'],
+  };
+}
+
+export function createLocalAttempt({ producerInstanceId, taskId, attemptId = crypto.randomUUID() } = {}) {
+  return { contractVersion: ATTEMPT_VERSION, producerInstanceId, taskId, attemptId };
+}
+
+export function createLocalSubmission({ producerInstanceId, taskId, attemptId, discoveryPackage, submissionId = crypto.randomUUID() } = {}) {
+  return { contractVersion: SUBMISSION_VERSION, producerInstanceId, taskId, attemptId, submissionId, discoveryPackage };
+}
+
+export async function localPost(path, body, fetchImpl = globalThis.fetch) {
+  const response = await fetchImpl(`${LINGGAN_LOCAL_ORIGIN}${path}`, {
+    method: 'POST', credentials: 'omit', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  return { ok: response.ok, status: response.status, payload };
 }

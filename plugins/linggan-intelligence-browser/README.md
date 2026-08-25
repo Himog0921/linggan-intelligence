@@ -1,8 +1,8 @@
 # Linggan Intelligence Browser
 
-> 状态: Draft migration baseline
-> 版本: `0.3.0`
-> 适用范围: `PLUGIN-REHOME-001`（GitHub Issue #41）
+> 状态: Draft LOCAL_TRUSTED adapter
+> 版本: `0.3.1`
+> 适用范围: `PLUGIN-RETROFIT-LOCAL-TRUSTED-001`（GitHub Issue #43）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
 
@@ -21,10 +21,15 @@ Linggan 的接收合同或平台访问授权。
 
 ## 当前行为与明确边界
 
-当前活跃 service worker 是 `src/linggan/background.js`。它只认识 Linggan
-本机 `http://localhost:3000` 的 readiness 检查和界面状态；旧工作台的站点
-授权、任务轮询、lease、工位调度、旧 endpoint、同步和 fallback 都不是当前
-运行路径。
+当前活跃 service worker 是 `src/linggan/background.js`。它只连接 Linggan 本机
+`http://localhost:3000`；旧工作台的站点授权、任务轮询、lease、工位调度、旧
+endpoint、同步和 fallback 都不是当前运行路径。
+
+目前唯一已接通的本机数据动作是 **合成的、手动 Discovery package 回传**：插件先将
+固定 `TaskSpec → Attempt → Submission` 写入独立的浏览器本地 outbox，再由后台以小批次
+向 Linggan loopback 发送。页面侧采集不等待网络回执；服务中断、超时或 service worker
+重启后，同一 `submissionId` 会继续重试，服务端回执幂等。这个 outbox 只保存待交付材料，
+不是 Evidence、也不代表平台采集已完成。scheduler 明确为 `NOT_CONNECTED`。
 
 原有浏览器本地 Dexie 数据和恢复代码仅保留为**本机暂存/恢复层**，不是
 Linggan 的最终事实库。尚未获得 Linggan adapter 合同的详情、评论、媒体、
@@ -50,7 +55,7 @@ npm run release:reproducibility
 npm run verify:linggan-isolation
 ```
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.3.0.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.3.1.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台
@@ -58,7 +63,7 @@ ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `n
 
 ## 未证明事项
 
-本包可构建和可打包，**不证明**浏览器已加载、Linggan backend 已接通、XHS 或
-抖音实际页面可采、真实内容已入库、封面/媒体已本地化，或 OCR/ASR/研究链已运行。
-真实接入只能在对应的 Linggan backend 合同、权限、Coverage、媒体生命周期和
-用户明确授权全部具备后另行验证。
+本包可构建和可打包；合成回传测试可证明本机 Task/Attempt/Submission 的持久交付与
+幂等 receipt。它**不证明**浏览器已加载、真实 XHS 或抖音页面可采、真实内容已入库、
+封面/媒体已本地化，或 OCR/ASR/研究链已运行。真实接入只能在对应的 Linggan backend
+合同、权限、Coverage、媒体生命周期和用户明确授权全部具备后另行验证。

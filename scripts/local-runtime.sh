@@ -8,7 +8,7 @@ usage() {
   cat >&2 <<'EOF'
 usage: ./scripts/local-runtime.sh {migrate|repair-password|serve} [--database database_name]
 
-  migrate          apply the two approved local Linggan migrations exactly once
+  migrate          apply the three approved local Linggan migrations exactly once
   repair-password  explicitly align the local persistent database role with .env
   serve            migrate the default local database, then start the loopback API
 
@@ -173,6 +173,7 @@ migrate() {
   ensure_migration_ledger
   apply_migration_once "0001_scope_001_capture_evidence" "$project_root/database/migrations/0001_scope_001_capture_evidence.sql"
   apply_migration_once "0002_local_001_discovery" "$project_root/database/migrations/0002_local_001_discovery.sql"
+  apply_migration_once "0003_local_trusted_producer" "$project_root/database/migrations/0003_local_trusted_producer.sql"
 }
 
 case "$command_name" in
