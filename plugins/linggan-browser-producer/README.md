@@ -1,12 +1,20 @@
 # Linggan Browser Producer
 
-> 状态: 受限实现
+> 状态: 已被替代的受限实现
 > 版本: `0.2.0`
 > 适用范围: `PLUGIN-MIGRATION-001` 的 Linggan 自有 Manifest V3 浏览器 Producer 包
 > 事实来源: Issue #37、`PLUGIN-MIGRATION-001`、`LOCAL-001C0-DISCOVERY-BOUNDARY-V1` 与 [`docs/runbooks/linggan-browser-producer-local.md`](../../docs/runbooks/linggan-browser-producer-local.md)
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、版本化 Discovery 合同和真实加载/运行证据
 
-这是 Linggan Intelligence 仓库内唯一获准的未来运行时 Browser Producer。它不依赖、导入、调用或回退到内容工作台的插件、服务、发布包、数据库或队列。
+> **替代说明（2026-08-25）**：这个 `0.2.0` 包只是一条受限 Discovery
+> proof，不能再被描述为 Linggan 的完整插件迁移。完整的灵感爆爆爆浏览器端
+> source / UX 基线现位于
+> [`../linggan-intelligence-browser/`](../linggan-intelligence-browser/)，由
+> `PLUGIN-REHOME-001` / Issue #41 维护；该新包同样尚未证明真实采集。
+
+这是历史上的 Linggan Browser Producer 受限实现。它不依赖、导入、调用或回退到
+内容工作台的插件、服务、发布包、数据库或队列，但其狭窄功能不再作为未来完整
+运行时的产品承诺。
 
 当前版本是独立、可构建的 Linggan 插件包。它复用了旧 `linggan-boom` 当前主分支中已被长期使用的 XHS 搜索页可见卡片发现规则，但没有携带旧产品的运行时依赖。首个启用能力只有：
 
