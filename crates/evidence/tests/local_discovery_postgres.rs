@@ -120,6 +120,39 @@ async fn read_projection_counts_matching_unknown_published_time_within_the_query
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn read_projection_excludes_accepted_future_published_time_from_recent_windows() {
+    let database = proof_database("local_discovery_future_published").await;
+    let observed_at = producer_fixture_observed_at(&database).await;
+    let future_published_at = future_producer_fixture_published_at(&database).await;
+    let package = package(&observed_at, Some(&future_published_at));
+    ingest_discovery_package(&database, &package)
+        .await
+        .expect("a syntactically valid future source time remains admissible discovery input");
+
+    let stored_future_count: i64 = sqlx::query(
+        "SELECT count(*) AS count FROM local_discovery_occurrence \
+         WHERE published_at > scope_001_now()",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("accepted future source time remains stored")
+    .get("count");
+    assert_eq!(stored_future_count, 1);
+
+    let query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"ADHD","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+    )
+    .expect("fixed local retrieval query is valid");
+    let projection = read_discovery_library(&database, &query)
+        .await
+        .expect("accepted discovery data is locally readable");
+
+    assert!(projection.cards.is_empty());
+    assert_eq!(projection.excluded_unknown_published_at, 0);
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn postgres_display_text_is_rejected_and_the_fixture_uses_explicit_rfc3339() {
     let database = proof_database("local_discovery_time_format").await;
     let (postgres_display_text, rfc3339_fixture_time) = database_clock_strings(&database).await;
@@ -156,6 +189,17 @@ async fn proof_database(schema: &str) -> Database {
 
 async fn producer_fixture_observed_at(database: &Database) -> String {
     database_clock_strings(database).await.1
+}
+
+async fn future_producer_fixture_published_at(database: &Database) -> String {
+    sqlx::query(
+        "SELECT to_char((scope_001_now() + interval '1 day') AT TIME ZONE 'UTC', \
+         'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS future_published_at",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("database explicitly formats a future RFC3339 fixture time")
+    .get("future_published_at")
 }
 
 async fn database_clock_strings(database: &Database) -> (String, String) {

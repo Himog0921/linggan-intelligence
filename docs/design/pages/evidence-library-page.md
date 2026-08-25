@@ -16,7 +16,7 @@
 - 产品页面来源: LOCAL-001 的 Evidence Library 用户任务；`REF-V7-001` 的页面 Gold Master
 - 用户任务: 在此检索、核验并追溯 Linggan 已接纳的本地 discovery 卡片；没有数据或没有可用发布时间时，清楚看到它们各自的限制。
 - 三秒答案: “这是本地 Evidence Library；它只显示已接纳的 discovery 卡片，不会重新搜索平台。”
-- 五秒主动作: 输入文本只检索标题与创作者名，并且只检索本地已接纳卡片；窗口固定按来源可知的 `published_at` 过滤。
+- 五秒主动作: 输入文本只检索标题与创作者名，并且只检索本地已接纳卡片；窗口固定按来源可知的 `published_at` 过滤，并以读取时的 Linggan PostgreSQL `scope_001_now()` 作为唯一时间参照，只显示过去 7/30 天至当前的卡片。
 - 明确非目标: 真实平台采集、详情、评论、作者主页、媒体下载/展示、OCR/ASR、保存查询、Topic/Insight/Agent 行动、线上部署。
 - 当前可用数据/权限合同: `xhs.discovery.visible-card.v1` 的 Package admission、visible-card Coverage 和本地 `EvidenceQuery` 读取合同；没有详情 Evidence 或媒体访问授权。
 - 决策 owner: Mog；实施范围由 LOCAL-001 活跃计划和 Issue #25 限定

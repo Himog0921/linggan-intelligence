@@ -157,6 +157,7 @@ pub async fn read_discovery_library(
              JOIN local_discovery_coverage coverage ON coverage.package_id = package.id \
              WHERE occurrence.published_at IS NOT NULL \
                AND occurrence.published_at >= scope_001_now() - make_interval(days => $1) \
+               AND occurrence.published_at <= scope_001_now() \
                AND ($2::text IS NULL OR lower(coalesce(occurrence.creator_display_name, '')) LIKE '%' || lower($2) || '%' \
                     OR lower(coalesce(occurrence.title, '')) LIKE '%' || lower($2) || '%') \
          ), first_discovery AS ( \
