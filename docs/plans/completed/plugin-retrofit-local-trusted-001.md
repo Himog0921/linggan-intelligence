@@ -1,9 +1,9 @@
 # PLUGIN-RETROFIT-LOCAL-TRUSTED-001 · 本机可信浏览器回传
 
-> 状态: 活跃计划
+> 状态: 已完成计划
 > 最后核对: 2026-08-25
 > 适用范围: GitHub Issue #43 的 Linggan 自有浏览器插件与本机 loopback 的最小回传闭环
-> 事实来源: 当前代码、`database/migrations/0003_local_trusted_producer.sql`、自动测试和 PostgreSQL proof
+> 事实来源: 已合入 `main` 的 PR #46（merge commit `123311c8dd98aa5c449b4ea508468a074a88db75`）、当前代码、`database/migrations/0003_local_trusted_producer.sql`、自动测试和 PostgreSQL proof
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、当前活跃 scope/合同、实际代码与可复现验证
 
 ## 用户可见目标
@@ -43,7 +43,7 @@ immutable payload 只返回原 receipt；同一 attempt 的新 submission 或不
 部分结果按既有 Discovery contract 接纳：已获得且合格的可见卡片仍可保存；Coverage 说明
 此次观察缺口，只限制之后 Claim 的解释资格，不能连坐丢弃每一张已取得卡片；未知不补零。
 
-## 实现边界
+## 已合并的实现边界
 
 ### 已实现
 
@@ -65,9 +65,28 @@ immutable payload 只返回原 receipt；同一 attempt 的新 submission 或不
 - 不处理媒体字节、封面本地副本、OCR、ASR、AI、Topic、Claim、研究或页面产品动作；
 - 不把浏览器 outbox 当作 Linggan Evidence、Corpus 或唯一事实来源。
 
+## 实际完成与合并后核对
+
+- implementation head `96a60da4718ce5e40fb4911e34762d673746f204` 已由非实施者审查后通过
+  [PR #46](https://github.com/Himog0921/linggan-intelligence/pull/46) 合并到 `main`；merge commit 为
+  `123311c8dd98aa5c449b4ea508468a074a88db75`。
+- 合并后 integration record 已核对：本地 `main` fast-forward 到上述 merge commit，
+  implementation head 是 `origin/main` 的祖先，`main...origin/main` 无差异，
+  `git diff --check origin/main` 与 `./scripts/check-project-governance.sh origin/main` 均通过。
+- 本计划的技术完成层仅为：合成 manual Discovery 的 versioned TaskSpec、attempt terminal
+  package、持久 outbox、loopback receipt、partial Coverage、replay/conflict 规则及其隔离
+  PostgreSQL / API / 插件合同证明。该完成层不替代浏览器或平台链路证明。
+
 ## 验收与仍未证明的事实
 
 自动和 PostgreSQL proof 只能证明合成输入的合同、持久 outbox、receipt 幂等与部分 Coverage
 边界。它们不证明浏览器已安装、真实插件 UI 已经触发 package、真实平台页面可读、真实素材
 已被接纳、Evidence Library 已出现真实数据，或媒体/研究链工作。上述每一项必须由下一张
 经过授权的真实 Canary 单独验证。
+
+## Issue 状态与后续
+
+本计划的实现与合并后核对已经完成，因此从 `docs/plans/active/` 迁入本目录。GitHub Issue #43
+仍保持 OPEN：本卡的文档 Draft PR 仍须由非实施者独立审查并合并；之后再重新核对 `main`、本计划、
+当前状态和月度记录，并由非实施者按分层完成证据手工关闭 Issue。该治理步骤不代表尚未完成的真实
+浏览器、平台、媒体或研究能力。
