@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: Draft LOCAL_TRUSTED adapter
-> 版本: `0.3.1`
+> 版本: `0.3.2`
 > 适用范围: `PLUGIN-RETROFIT-LOCAL-TRUSTED-001`（GitHub Issue #43）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -29,7 +29,12 @@ endpoint、同步和 fallback 都不是当前运行路径。
 固定 `TaskSpec → Attempt → Submission` 写入独立的浏览器本地 outbox，再由后台以小批次
 向 Linggan loopback 发送。页面侧采集不等待网络回执；服务中断、超时或 service worker
 重启后，同一 `submissionId` 会继续重试，服务端回执幂等。这个 outbox 只保存待交付材料，
-不是 Evidence、也不代表平台采集已完成。scheduler 明确为 `NOT_CONNECTED`。
+不是 Evidence、也不代表平台采集已完成。每个 attempt 只能有一个终态 package：相同
+submission 只能 replay，新的 package 必须创建新的 attempt。scheduler 明确为
+`NOT_CONNECTED`。
+
+在尚未从 Linggan 读取统计时，插件和 Popup 只显示“未连接”或“未知”；绝不以 `0` 伪装
+成没有笔记、评论或博主。
 
 原有浏览器本地 Dexie 数据和恢复代码仅保留为**本机暂存/恢复层**，不是
 Linggan 的最终事实库。尚未获得 Linggan adapter 合同的详情、评论、媒体、
@@ -55,7 +60,7 @@ npm run release:reproducibility
 npm run verify:linggan-isolation
 ```
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.3.1.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.3.2.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

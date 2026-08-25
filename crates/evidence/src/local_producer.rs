@@ -11,7 +11,7 @@ use linggan_contracts::{
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use sqlx::Row;
+use sqlx::{Postgres, Row, Transaction};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -208,10 +208,35 @@ pub async fn submit_local_package(
     let package_json = submission.discovery_package().to_string();
     parse_discovery_package(&package_json).map_err(|_| LocalProducerError::DiscoveryContract)?;
     let package_hash = sha256_hex(&package_json);
-    if let Some(outcome) = existing_submission(database, submission, &package_hash).await? {
+    let mut transaction = database
+        .pool()
+        .begin()
+        .await
+        .map_err(LocalProducerError::Internal)?;
+    if let Some(outcome) = existing_submission(&mut transaction, submission, &package_hash).await? {
+        transaction
+            .commit()
+            .await
+            .map_err(LocalProducerError::Internal)?;
         return Ok(outcome);
     }
-    assert_attempt_owner(database, submission).await?;
+    assert_attempt_owner(&mut transaction, submission).await?;
+    if let Some(outcome) = existing_submission(&mut transaction, submission, &package_hash).await? {
+        transaction
+            .commit()
+            .await
+            .map_err(LocalProducerError::Internal)?;
+        return Ok(outcome);
+    }
+    if terminal_submission_exists(&mut transaction, submission).await? {
+        transaction
+            .commit()
+            .await
+            .map_err(LocalProducerError::Internal)?;
+        return Ok(LocalSubmissionOutcome::Conflict {
+            submission_id: submission.submission_id(),
+        });
+    }
     let admitted = ingest_discovery_package(database, &package_json)
         .await
         .map_err(LocalProducerError::DiscoveryIngress)?;
@@ -227,23 +252,29 @@ pub async fn submit_local_package(
     .bind(submission.task_id())
     .bind(submission.attempt_id())
     .bind(submission.producer_instance_id())
-    .bind(package_hash)
+    .bind(&package_hash)
     .bind(receipt_ref)
     .bind(package_ref)
     .bind(discovery_receipt_ref)
     .bind(admission)
-    .execute(database.pool())
+    .execute(&mut *transaction)
     .await;
     match insert {
-        Ok(_) => Ok(LocalSubmissionOutcome::Acknowledged {
-            submission_id: submission.submission_id(),
-            receipt_ref,
-            discovery_package_ref: package_ref,
-            discovery_receipt_ref,
-            discovery_admission: admission,
-        }),
+        Ok(_) => {
+            transaction
+                .commit()
+                .await
+                .map_err(LocalProducerError::Internal)?;
+            Ok(LocalSubmissionOutcome::Acknowledged {
+                submission_id: submission.submission_id(),
+                receipt_ref,
+                discovery_package_ref: package_ref,
+                discovery_receipt_ref,
+                discovery_admission: admission,
+            })
+        }
         Err(error) if is_unique_violation(&error) => {
-            existing_submission(database, submission, &sha256_hex(&package_json))
+            existing_submission(&mut transaction, submission, &package_hash)
                 .await?
                 .ok_or(LocalProducerError::Internal(error))
         }
@@ -252,7 +283,7 @@ pub async fn submit_local_package(
 }
 
 async fn existing_submission(
-    database: &Database,
+    transaction: &mut Transaction<'_, Postgres>,
     submission: &LocalProducerSubmission,
     package_hash: &str,
 ) -> Result<Option<LocalSubmissionOutcome>, LocalProducerError> {
@@ -262,7 +293,7 @@ async fn existing_submission(
          FROM local_trusted_submission WHERE submission_id = $1",
     )
     .bind(submission.submission_id())
-    .fetch_optional(database.pool())
+    .fetch_optional(&mut **transaction)
     .await
     .map_err(LocalProducerError::Internal)?;
     Ok(row.map(|row| {
@@ -290,15 +321,28 @@ async fn existing_submission(
     }))
 }
 
+async fn terminal_submission_exists(
+    transaction: &mut Transaction<'_, Postgres>,
+    submission: &LocalProducerSubmission,
+) -> Result<bool, LocalProducerError> {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM local_trusted_submission WHERE attempt_id = $1)",
+    )
+    .bind(submission.attempt_id())
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(LocalProducerError::Internal)
+}
+
 async fn assert_attempt_owner(
-    database: &Database,
+    transaction: &mut Transaction<'_, Postgres>,
     submission: &LocalProducerSubmission,
 ) -> Result<(), LocalProducerError> {
     let row = sqlx::query(
-        "SELECT task_id, producer_instance_id FROM local_trusted_attempt WHERE attempt_id = $1",
+        "SELECT task_id, producer_instance_id FROM local_trusted_attempt WHERE attempt_id = $1 FOR UPDATE",
     )
     .bind(submission.attempt_id())
-    .fetch_optional(database.pool())
+    .fetch_optional(&mut **transaction)
     .await
     .map_err(LocalProducerError::Internal)?
     .ok_or(LocalProducerError::RoutingNotFound)?;

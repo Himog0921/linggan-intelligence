@@ -77,3 +77,26 @@ export async function localPost(path, body, fetchImpl = globalThis.fetch) {
   const payload = await response.json().catch(() => ({}));
   return { ok: response.ok, status: response.status, payload };
 }
+
+export function taskCreationIsAccepted(result) {
+  return result?.ok && ['created', 'replay'].includes(result.payload?.outcome);
+}
+
+export function attemptStartIsAccepted(result) {
+  return result?.ok && ['started', 'replay'].includes(result.payload?.outcome);
+}
+
+export function isTerminalLocalDeliveryResult(result) {
+  return (result?.status >= 400 && result.status < 500) || result?.payload?.outcome === 'conflict';
+}
+
+export function unavailableLingganStats(statsState = 'not_connected') {
+  return {
+    success: true,
+    statsState,
+    notes: null,
+    comments: null,
+    authors: null,
+    source: 'linggan_data_not_read',
+  };
+}

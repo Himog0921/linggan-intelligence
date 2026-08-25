@@ -36,6 +36,7 @@ CREATE TABLE local_trusted_submission (
     discovery_admission text NOT NULL CHECK (discovery_admission IN ('accepted', 'replay')),
     delivery_state text NOT NULL CHECK (delivery_state IN ('acknowledged')),
     received_at timestamptz NOT NULL DEFAULT scope_001_now(),
+    UNIQUE (attempt_id),
     FOREIGN KEY (attempt_id, task_id) REFERENCES local_trusted_attempt(attempt_id, task_id)
 );
 

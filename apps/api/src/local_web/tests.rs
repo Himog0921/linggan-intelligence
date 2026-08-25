@@ -434,6 +434,46 @@ async fn loopback_local_producer_acknowledges_one_partial_package_and_replays_ti
         let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         assert!(String::from_utf8_lossy(&body).contains(expected));
     }
+    let conflicting_attempt = attempt.replace(
+        "22222222-2222-4222-8222-222222222222",
+        "88888888-8888-4888-8888-888888888888",
+    );
+    let response = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/producer/attempts")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(conflicting_attempt))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("attempt_identity_conflict"));
+    let terminal_conflict = local_submission(&observed_at)
+        .replace(
+            "44444444-4444-4444-8444-444444444444",
+            "55555555-5555-4555-8555-555555555555",
+        )
+        .replace("note-api-known", "note-api-conflict");
+    let response = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/producer/submissions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(terminal_conflict))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("attempt_terminal_submission_conflict"));
     let invalid_scheduler = task.replace("\"manual\"", "\"scheduler\"");
     let response = application
         .oneshot(

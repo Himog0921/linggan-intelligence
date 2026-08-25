@@ -1,11 +1,15 @@
 import {
   LINGGAN_LOCAL_ORIGIN,
+  attemptStartIsAccepted,
   createLocalAttempt,
   createLocalSubmission,
   createManualTaskSpec,
   createLingganPendingResult,
+  isTerminalLocalDeliveryResult,
   localPost,
   readLingganLocalReadiness,
+  taskCreationIsAccepted,
+  unavailableLingganStats,
 } from './adapter.js';
 import { LINGGAN_RUNTIME_ACTION } from './runtimeActions.js';
 import { localProducerOutbox } from './localProducerOutbox.js';
@@ -27,9 +31,21 @@ async function flushLocalOutbox() {
     await localProducerOutbox.markInFlight(entry.submissionId);
     try {
       const task = await localPost('/api/local/producer/manual-tasks', entry.taskSpec);
-      if (!task.ok && task.status !== 409) throw new Error(task.payload.code || 'task_not_created');
+      if (!taskCreationIsAccepted(task)) {
+        if (isTerminalLocalDeliveryResult(task)) {
+          await localProducerOutbox.terminal(entry.submissionId, task.payload.code || 'task_not_created');
+          continue;
+        }
+        throw new Error(task.payload.code || 'task_not_created');
+      }
       const attempt = await localPost('/api/local/producer/attempts', entry.attempt);
-      if (!attempt.ok && attempt.status !== 409) throw new Error(attempt.payload.code || 'attempt_not_started');
+      if (!attemptStartIsAccepted(attempt)) {
+        if (isTerminalLocalDeliveryResult(attempt)) {
+          await localProducerOutbox.terminal(entry.submissionId, attempt.payload.code || 'attempt_not_started');
+          continue;
+        }
+        throw new Error(attempt.payload.code || 'attempt_not_started');
+      }
       const submitted = await localPost('/api/local/producer/submissions', {
         contractVersion: entry.contractVersion,
         producerInstanceId: entry.producerInstanceId,
@@ -117,7 +133,7 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
       const attempt = createLocalAttempt({ producerInstanceId, taskId: taskSpec.taskId });
       return { success: true, producerInstanceId, taskSpec, attempt, scheduler: 'NOT_CONNECTED' };
     }
-    if (action === LINGGAN_RUNTIME_ACTION.GET_STATS) return { success: true, notes: 0, comments: 0, authors: 0, source: 'browser_staging_only' };
+    if (action === LINGGAN_RUNTIME_ACTION.GET_STATS) return unavailableLingganStats();
     return createLingganPendingResult(action);
   }).then(sendResponse).catch((error) => {
     sendResponse({ success: false, code: 'linggan_adapter_error', message: String(error?.message || error) });

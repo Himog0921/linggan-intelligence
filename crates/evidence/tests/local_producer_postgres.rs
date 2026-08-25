@@ -18,7 +18,7 @@ const MIGRATIONS: &str = concat!(
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
-async fn local_manual_submission_retains_partial_coverage_and_replays_after_timeout() {
+async fn local_manual_submission_freezes_one_terminal_package_per_attempt() {
     let database = proof_database("local_trusted_producer").await;
     let task = parse_local_task_spec(task_spec()).expect("fixed manual task is valid");
     assert!(matches!(
@@ -50,10 +50,55 @@ async fn local_manual_submission_retains_partial_coverage_and_replays_after_time
         submit_local_package(&database, &submission).await,
         Ok(LocalSubmissionOutcome::Replay { .. })
     ));
+    let conflicting_submission = parse_local_producer_submission(
+        &submission_wire()
+            .replace(
+                "44444444-4444-4444-8444-444444444444",
+                "55555555-5555-4555-8555-555555555555",
+            )
+            .replace("note-a", "note-c")
+            .replace("note-b", "note-d"),
+    )
+    .expect("a distinct submission is valid");
+    assert!(matches!(
+        submit_local_package(&database, &conflicting_submission).await,
+        Ok(LocalSubmissionOutcome::Conflict { .. })
+    ));
     assert_count(&database, "local_trusted_task", 1).await;
     assert_count(&database, "local_trusted_attempt", 1).await;
     assert_count(&database, "local_trusted_submission", 1).await;
     assert_count(&database, "local_discovery_occurrence", 2).await;
+
+    let next_attempt_wire = attempt_wire().replace(
+        "33333333-3333-4333-8333-333333333333",
+        "66666666-6666-4666-8666-666666666666",
+    );
+    let next_attempt =
+        parse_local_producer_attempt(&next_attempt_wire).expect("new attempt is valid");
+    assert!(matches!(
+        start_local_attempt(&database, &next_attempt).await,
+        Ok(LocalAttemptOutcome::Started { .. })
+    ));
+    let next_submission_wire = submission_wire()
+        .replace(
+            "33333333-3333-4333-8333-333333333333",
+            "66666666-6666-4666-8666-666666666666",
+        )
+        .replace(
+            "44444444-4444-4444-8444-444444444444",
+            "77777777-7777-4777-8777-777777777777",
+        )
+        .replace("note-a", "note-c")
+        .replace("note-b", "note-d");
+    let next_submission = parse_local_producer_submission(&next_submission_wire)
+        .expect("new attempt submission is valid");
+    assert!(matches!(
+        submit_local_package(&database, &next_submission).await,
+        Ok(LocalSubmissionOutcome::Acknowledged { .. })
+    ));
+    assert_count(&database, "local_trusted_attempt", 2).await;
+    assert_count(&database, "local_trusted_submission", 2).await;
+    assert_count(&database, "local_discovery_occurrence", 4).await;
     let coverage: i32 = sqlx::query("SELECT visible_cards FROM local_discovery_coverage")
         .fetch_one(database.pool())
         .await

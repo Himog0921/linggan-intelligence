@@ -13,7 +13,8 @@ use linggan_contracts::{
     parse_local_task_spec,
 };
 use linggan_evidence::{
-    DiscoveryIngressError, LocalProducerError, create_manual_task, ingest_discovery_package,
+    DiscoveryIngressError, LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome,
+    LocalTaskOutcome, create_manual_task, ingest_discovery_package,
     local_discovery_schema_is_ready, local_producer_schema_is_ready, read_discovery_library,
     start_local_attempt, submit_local_package,
 };
@@ -294,6 +295,9 @@ async fn create_manual_task_route(State(state): State<LocalWebState>, body: Byte
         );
     };
     match create_manual_task(database, &task).await {
+        Ok(LocalTaskOutcome::Conflict { .. }) => {
+            local_producer_error(axum::http::StatusCode::CONFLICT, "task_spec_conflict")
+        }
         Ok(outcome) => Json(outcome).into_response(),
         Err(LocalProducerError::Internal(_)) => local_producer_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
@@ -326,6 +330,10 @@ async fn start_local_attempt_route(State(state): State<LocalWebState>, body: Byt
         );
     };
     match start_local_attempt(database, &attempt).await {
+        Ok(LocalAttemptOutcome::Conflict { .. }) => local_producer_error(
+            axum::http::StatusCode::CONFLICT,
+            "attempt_identity_conflict",
+        ),
         Ok(outcome) => Json(outcome).into_response(),
         Err(LocalProducerError::RoutingNotFound) => {
             local_producer_error(axum::http::StatusCode::NOT_FOUND, "task_not_found")
@@ -361,6 +369,10 @@ async fn submit_local_package_route(State(state): State<LocalWebState>, body: By
         );
     };
     match submit_local_package(database, &submission).await {
+        Ok(LocalSubmissionOutcome::Conflict { .. }) => local_producer_error(
+            axum::http::StatusCode::CONFLICT,
+            "attempt_terminal_submission_conflict",
+        ),
         Ok(outcome) => Json(outcome).into_response(),
         Err(LocalProducerError::RoutingNotFound) => {
             local_producer_error(axum::http::StatusCode::NOT_FOUND, "attempt_not_found")

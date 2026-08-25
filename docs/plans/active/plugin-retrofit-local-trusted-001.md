@@ -36,6 +36,10 @@ Delivery: Submission 已排队 / 重试 / receipt acknowledged
 Admission: 嵌套 Discovery package 被 accepted 或 immutable replay
 ```
 
+每个 `attempt_id` 只能冻结一份 terminal package：相同 `submission_id` 与完全相同的
+immutable payload 只返回原 receipt；同一 attempt 的新 submission 或不同 payload 明确冲突，
+不会触发第二次 Discovery admission。需要继续采集时，必须创建新的 attempt。
+
 部分结果按既有 Discovery contract 接纳：已获得且合格的可见卡片仍可保存；Coverage 说明
 此次观察缺口，只限制之后 Claim 的解释资格，不能连坐丢弃每一张已取得卡片；未知不补零。
 
@@ -50,7 +54,9 @@ Admission: 嵌套 Discovery package 被 accepted 或 immutable replay
 - `0003_local_trusted_producer` 仅追加任务、attempt、delivery receipt 事实，并复用既有
   immutable Discovery admission；
 - 真实隔离 PostgreSQL proof：首次接纳、timeout 后同一 submission replay、部分 Coverage 卡片
-  保留、API receipt 与运行时合同负例。
+  保留、attempt terminal conflict、API receipt 与运行时合同负例；
+- 未读取 Linggan 数据时，插件统计返回 `not_connected / unknown` 与空值，界面显示“未连接”或
+  “未知”，不把未知写成 0。
 
 ### 明确不做
 
