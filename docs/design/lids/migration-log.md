@@ -42,3 +42,10 @@
 - **非继承边界**：V7 的模拟运行状态、计数、帖子/评论/转录、时间、引用及成功回执不进入本页；未接通控件保留位置和视觉，但均 disabled/`aria-disabled` 且无副作用。中央区只显示 `SOURCE_INCOMPLETE` / `NO_ACCEPTED_MATERIAL_AVAILABLE`，Inspector 仅显示 no-selection / `UNKNOWN`。
 - **不形成第二套系统**：`lids_tokens.css` 未修改，仍是唯一全局 `--lgi-*` token 值源；`--v7-*` 不可被其他页面、CMP 或后续页面当作全局 token 使用。需要复用时必须重新进行 LIDS/页面审查和独立授权。
 - **验证与未证明**：四个指定 Chrome 视口的本地截图/几何、route/HTML 的诚实边界测试、format/clippy/test 与治理检查记录在 `ACC-EVIDENCE-001`。本项只证明本页静态视觉与禁用骨架；不证明 Materials read model、Evidence、数据库、插件、媒体/OCR/ASR、Agent、部署或业务验收。
+
+## 2026-08-25 · PLUGIN-001 自有 Browser Producer popup 的受限 L1 表达
+
+- **来源与事项**：Mog 已确认 Linggan 及其 Browser Producer 是同一独立系统；Issue #33 / `PLUGIN-001` 与 `LOCAL-001C0-DISCOVERY-BOUNDARY-V1`。
+- **实际实现**：新 popup 为受限 `L1 / Settings / Governance` Surface，仅呈现 `LINGGAN / version`、固定 `localhost:3000`、最小 `/health` 可达性、`NOT_AUTHORIZED` 和 `NOT_CONNECTED`。构建包从 Linggan 当前唯一 runtime token 值源复制 `--lgi-*` token，popup CSS 只消费该副本，不新增全局 Token 或 CMP。
+- **安全边界**：Manifest 只有 `http://localhost:3000/*` host permission 且 `permissions=[]`；无内容脚本、Cookie、下载、脚本注入、平台 host、真实材料、媒体或外部链接。Discovery 控件持续 disabled；本卡没有 ingress、Evidence 接纳、浏览器加载或平台采集。
+- **验证与未证明**：source/release 静态检查将记录在 `ACC-PLUGIN-001`；浏览器视觉走查、真实 health、安装加载、Discovery Package 接纳、平台/账号/媒体/OCR/ASR 和业务结果仍是 `NOT VERIFIED`，不得由安装包存在推断为已接通。
