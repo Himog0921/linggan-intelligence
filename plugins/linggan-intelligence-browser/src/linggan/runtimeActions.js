@@ -12,4 +12,6 @@ export const LINGGAN_RUNTIME_ACTION = {
   CREATE_MANUAL_TASK: 'lingganCreateManualTask',
   SUBMIT_DISCOVERY_PACKAGE: 'lingganSubmitDiscoveryPackage',
   FLUSH_LOCAL_OUTBOX: 'lingganFlushLocalOutbox',
+  DISCOVER_CURRENT_VISIBLE_XHS_SEARCH: 'lingganDiscoverCurrentVisibleXhsSearch',
+  DISCOVERY_DELIVERY_UPDATE: 'lingganDiscoveryDeliveryUpdate',
 };

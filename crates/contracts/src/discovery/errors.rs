@@ -12,6 +12,8 @@ pub enum DiscoveryContractError {
     FirstCanaryChanged,
     #[error("discovery coverage does not match the delivered visible cards")]
     CoverageDoesNotMatchCards,
+    #[error("discovery coverage cannot make processed cards disagree with emitted or failed cards")]
+    CoverageProcessingMismatch,
     #[error("quota_reached requires visible cards to equal the maximum quota")]
     QuotaReachedBeforeMaximumQuota,
     #[error("a visible discovery card is missing a stable platform content identity")]

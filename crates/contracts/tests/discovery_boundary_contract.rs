@@ -20,6 +20,10 @@ const PARTIAL_VISIBLE_DISCOVERY: &str = r#"
   "coverage": {
     "unit": "visible_search_card",
     "visibleCards": 2,
+    "discoveredCards": 2,
+    "emittedCards": 2,
+    "failedCards": 0,
+    "notAttemptedCards": 0,
     "stoppedReason": "risk_control"
   },
   "cards": [
@@ -147,6 +151,28 @@ fn discovery_rejects_quota_reached_before_the_fixed_visible_card_quota() {
         parse_discovery_package(PARTIAL_VISIBLE_DISCOVERY).is_ok(),
         "risk_control remains a truthful allowed partial stop reason"
     );
+}
+
+#[test]
+fn discovery_rejects_missing_or_inconsistent_surface_processing_counts() {
+    let missing = mutated(|package| {
+        package["coverage"]
+            .as_object_mut()
+            .expect("coverage object")
+            .remove("emittedCards");
+    });
+    assert!(matches!(
+        parse_discovery_package(&missing),
+        Err(DiscoveryContractError::SchemaInvalid(_))
+    ));
+
+    let inconsistent = mutated(|package| {
+        package["coverage"]["discoveredCards"] = serde_json::json!(3);
+    });
+    assert!(matches!(
+        parse_discovery_package(&inconsistent),
+        Err(DiscoveryContractError::CoverageProcessingMismatch)
+    ));
 }
 
 #[test]

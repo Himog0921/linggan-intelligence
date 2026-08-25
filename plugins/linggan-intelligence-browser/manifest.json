@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Linggan Intelligence Browser",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "Linggan Intelligence 浏览器执行端（灵感爆爆爆 v2.0.91 迁入基线）",
   "permissions": [
     "activeTab",
@@ -14,15 +14,7 @@
     "https://xiaohongshu.com/*",
     "https://*.xiaohongshu.com/*",
     "https://www.xiaohongshu.com/*",
-    "https://ci.xiaohongshu.com/*",
-    "https://*.xhscdn.com/*",
-    "https://www.douyin.com/*",
-    "https://*.byteimg.com/*",
-    "https://*.douyinpic.com/*",
-    "https://*.douyinstatic.com/*",
-    "https://*.amemv.com/*",
-    "https://*.douyinvod.com/*",
-    "https://*.bytevcloudcdn.com/*"
+    "https://www.xiaohongshu.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -32,19 +24,6 @@
       "matches": [
         "https://xiaohongshu.com/*",
         "https://*.xiaohongshu.com/*"
-      ],
-      "js": [
-        "vendor.js",
-        "content.js"
-      ],
-      "css": [
-        "content.css"
-      ],
-      "run_at": "document_end"
-    },
-    {
-      "matches": [
-        "https://www.douyin.com/*"
       ],
       "js": [
         "vendor.js",
@@ -79,30 +58,11 @@
         "content.css",
         "lgboom-logo.svg",
         "lgboom-banner.svg",
-        "lgboom-inject-logo.svg",
-        "injected/noteMap.js",
-        "injected/user.js",
-        "injected/xhsApiCapture.js"
+        "lgboom-inject-logo.svg"
       ],
       "matches": [
         "https://xiaohongshu.com/*",
         "https://*.xiaohongshu.com/*"
-      ]
-    },
-    {
-      "resources": [
-        "dashboard.html",
-        "dashboard.js",
-        "dashboard.css",
-        "vendor.js",
-        "content.css",
-        "lgboom-logo.svg",
-        "lgboom-banner.svg",
-        "lgboom-inject-logo.svg",
-        "injected/douyinApiCapture.js"
-      ],
-      "matches": [
-        "https://www.douyin.com/*"
       ]
     }
   ]

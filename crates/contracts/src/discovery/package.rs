@@ -38,12 +38,29 @@ impl DiscoveryPackage {
 pub struct DiscoveryCoverage {
     pub(super) unit: DiscoveryUnit,
     pub(super) visible_cards: u16,
+    pub(super) discovered_cards: u16,
+    pub(super) emitted_cards: u16,
+    pub(super) failed_cards: u16,
+    pub(super) not_attempted_cards: u16,
     pub(super) stopped_reason: DiscoveryStopReason,
 }
 
 impl DiscoveryCoverage {
     pub fn visible_cards(&self) -> u16 {
         self.visible_cards
+    }
+
+    pub fn discovered_cards(&self) -> u16 {
+        self.discovered_cards
+    }
+    pub fn emitted_cards(&self) -> u16 {
+        self.emitted_cards
+    }
+    pub fn failed_cards(&self) -> u16 {
+        self.failed_cards
+    }
+    pub fn not_attempted_cards(&self) -> u16 {
+        self.not_attempted_cards
     }
 
     pub fn stopped_reason(&self) -> DiscoveryStopReason {

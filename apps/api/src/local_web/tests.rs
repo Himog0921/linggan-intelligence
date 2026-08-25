@@ -15,6 +15,8 @@ const LOCAL_001_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0002_local_001_discovery.sql"),
     "\n",
     include_str!("../../../../database/migrations/0003_local_trusted_producer.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0004_local_001_discovery_surface_coverage.sql"),
 );
 
 #[tokio::test]
@@ -158,6 +160,10 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
             observed_at: "2026-08-25 00:00:00+00".to_owned(),
             result_position: 1,
             coverage_visible_cards: 1,
+            coverage_discovered_cards: Some(1),
+            coverage_emitted_cards: Some(1),
+            coverage_failed_cards: Some(0),
+            coverage_not_attempted_cards: Some(0),
             coverage_maximum_quota: 20,
             coverage_stopped_reason: "risk_control".to_owned(),
             cover_presentation_state: "MEDIA_NOT_ACQUIRED",
@@ -527,7 +533,7 @@ fn discovery_package(observed_at: &str) -> String {
           "contractVersion":"xhs.discovery.visible-card.v1",
           "acquisitionSpec":{{"platform":"xhs","query":"ADHD","sort":"comprehensive","target":{{"basis":"maximum_quota","unit":"visible_search_card","maximumQuota":20}}}},
           "observedAt":"{observed_at}",
-          "coverage":{{"unit":"visible_search_card","visibleCards":2,"stoppedReason":"risk_control"}},
+          "coverage":{{"unit":"visible_search_card","visibleCards":2,"discoveredCards":2,"emittedCards":2,"failedCards":0,"notAttemptedCards":0,"stoppedReason":"risk_control"}},
           "cards":[
             {{"content":{{"platformContentId":"note-api-known","title":"API 接纳卡片 ADHD","creatorDisplayName":"A娃家长","publishedAtSourceText":"{observed_at}","coverCandidate":{{"observedExternalUri":"https://xhscdn.example/api-cover"}}}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":1}}}},
             {{"content":{{"platformContentId":"note-api-unknown","title":"未知发布时间","creatorDisplayName":"另一位家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":2}}}}
@@ -542,7 +548,7 @@ fn shared_api_content_unknown_package(observed_at: &str) -> String {
           "contractVersion":"xhs.discovery.visible-card.v1",
           "acquisitionSpec":{{"platform":"xhs","query":"ADHD","sort":"comprehensive","target":{{"basis":"maximum_quota","unit":"visible_search_card","maximumQuota":20}}}},
           "observedAt":"{observed_at}",
-          "coverage":{{"unit":"visible_search_card","visibleCards":1,"stoppedReason":"risk_control"}},
+          "coverage":{{"unit":"visible_search_card","visibleCards":1,"discoveredCards":1,"emittedCards":1,"failedCards":0,"notAttemptedCards":0,"stoppedReason":"risk_control"}},
           "cards":[
             {{"content":{{"platformContentId":"note-api-known","title":"API 接纳卡片 ADHD","creatorDisplayName":"A娃家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":1}}}}
           ]

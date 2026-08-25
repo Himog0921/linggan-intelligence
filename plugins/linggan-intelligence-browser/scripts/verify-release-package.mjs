@@ -29,40 +29,33 @@ function assertIncludesAll(values = [], required = [], label = '') {
 }
 
 function assertPlatformManifestContract(manifest = {}, label = 'manifest') {
-  const douyinContentScript = (manifest.content_scripts || []).find((entry) =>
-    (entry.matches || []).includes('https://www.douyin.com/*')
+  const xhsContentScript = (manifest.content_scripts || []).find((entry) =>
+    (entry.matches || []).some((value) => value === 'https://xiaohongshu.com/*' || value === 'https://*.xiaohongshu.com/*')
   );
-  assertCondition(douyinContentScript, `${label} is missing douyin content script`);
+  assertCondition(xhsContentScript, `${label} is missing XHS content script`);
   assertIncludesAll(
-    douyinContentScript.js || [],
+    xhsContentScript.js || [],
     ['vendor.js', 'content.js'],
-    `${label} douyin content script js`,
+    `${label} XHS content script js`,
   );
   assertIncludesAll(
-    douyinContentScript.css || [],
+    xhsContentScript.css || [],
     ['content.css'],
-    `${label} douyin content script css`,
+    `${label} XHS content script css`,
   );
-
-  assertIncludesAll(
-    manifest.host_permissions || [],
-    [
-      'https://www.douyin.com/*',
-      'https://*.douyinpic.com/*',
-      'https://*.douyinvod.com/*',
-    ],
-    `${label} host_permissions`,
+  assertCondition(
+    !(manifest.content_scripts || []).some((entry) => (entry.matches || []).includes('https://www.douyin.com/*')),
+    `${label} must not activate a Douyin content script in this XHS-only release`,
   );
-
-  const douyinResources = (manifest.web_accessible_resources || []).find((entry) =>
-    (entry.matches || []).includes('https://www.douyin.com/*')
-  );
-  assertCondition(douyinResources, `${label} is missing douyin web accessible resources`);
-  assertIncludesAll(
-    douyinResources.resources || [],
-    ['injected/douyinApiCapture.js'],
-    `${label} douyin web accessible resources`,
-  );
+  for (const forbiddenHost of ['douyin', 'xhscdn', 'xiaohongshu.com/*']) {
+    assertCondition(
+      !(manifest.host_permissions || []).some((value) => value.includes(forbiddenHost)
+        && value !== 'https://xiaohongshu.com/*'
+        && value !== 'https://www.xiaohongshu.com/*'
+        && value !== 'https://*.xiaohongshu.com/*'),
+      `${label} retains an unapproved host permission containing ${forbiddenHost}`,
+    );
+  }
 }
 
 const packageJson = readJson('package.json');
@@ -95,7 +88,6 @@ const requiredDistFiles = [
   'dashboard.js',
   'popup.html',
   'dashboard.html',
-  'injected/douyinApiCapture.js',
 ];
 
 for (const file of requiredDistFiles) {

@@ -81,7 +81,7 @@ impl LocalDatabaseState {
                         "LOCAL_TRUSTED_PRODUCER",
                         "MANUAL_DISCOVERY_ONLY",
                         "READY",
-                        "LOCAL_003_SCHEMA_READY",
+                        "LOCAL_004_SCHEMA_READY",
                     ),
                     Ok(false) => (
                         "LOCAL_DISCOVERY_READ_PROJECTION",
