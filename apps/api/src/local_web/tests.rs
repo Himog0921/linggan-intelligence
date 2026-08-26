@@ -1114,8 +1114,8 @@ fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
         .expect("collection pages render the context row")
         .1;
     for kpi in [
-        "<span class=\"v7-kpi\"><em>巡逻中断</em><b>UNKNOWN</b></span>",
-        "<span class=\"v7-kpi\"><em>建档未完成</em><b>UNKNOWN</b></span>",
+        "<span class=\"v7-kpi\"><em>巡逻中断</em><b><span class=\"v7-status-main\">未知</span><small class=\"v7-tech-key\">UNKNOWN</small></b></span>",
+        "<span class=\"v7-kpi\"><em>建档未完成</em><b><span class=\"v7-status-main\">未知</span><small class=\"v7-tech-key\">UNKNOWN</small></b></span>",
     ] {
         assert!(
             context_row.contains(kpi),

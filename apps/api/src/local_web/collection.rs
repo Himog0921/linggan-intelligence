@@ -48,9 +48,9 @@ impl OperationsMode {
 
     fn label(self) -> &'static str {
         match self {
-            Self::Now => "NOW",
-            Self::Trace => "TRACE",
-            Self::Review => "REVIEW",
+            Self::Now => "当前",
+            Self::Trace => "追溯",
+            Self::Review => "复核",
         }
     }
 }

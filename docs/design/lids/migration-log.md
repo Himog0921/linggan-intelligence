@@ -170,3 +170,11 @@ Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵�
 - **页面落地**：Evidence Library 的导航、筛选、读投影、严格发布时间窗口、Discovery 卡片、Coverage、空态和 Inspector 均替换为中文主表达；`PUBLISHED_AT UNKNOWN`、`MEDIA NOT ACQUIRED`、`ACCEPTED RUNTIME MATERIAL`、`OBSERVED / QUOTA` 等保留为紧邻中文的技术键。默认「最新已接纳」及显式窗口显示「近 7 天／近 30 天」，不让 `7D/30D` 单独承担筛选含义。
 - **不改写事实**：Discovery 卡片继续只是已接纳的发现材料；封面仍只允许本地媒体副本，未取得时明确写「媒体尚未采集」；未知发布时间继续不以首次发现、观察或接收时间填补。没有接通详情、评论、媒体、OCR/ASR、查询行为、按钮行为、路由、Token、共享 Shell 或其它页面。
 - **验证与边界**：由 focused Rust render test、现有严格窗口/默认读取测试、格式/lint/governance 与本机 DOM 检查记录。它不证明真实平台材料、媒体取得、跨页中文迁移、部署或 Mog 的最终可读性验收。
+
+## 2026-08-26 · DESIGN-008 共享壳层采用中文主语义
+
+- **来源与事项**：Mog 明确确认「中文为主，英文只用来装饰或作为注释」；Issue #68 / `DESIGN-008`。项目级 `LIDS-LANG-001` 由独立的 Issue #65 / Draft PR #67 定义，本条只记录共享 shell 对该规则的采用，不复制或替代其页面局部规则。
+- **实际实现**：`shell.rs` 将一级导航、品牌副标题、本机边界与共享上下文中的静态运行码渲染为中文主文案加紧邻的 `v7-tech-key` 英文技术注释；`shell.css` 规定中文使用 Sans 主层、英文技术键使用较小 Mono 注释层，并把 `CORPUS` / `COLLECTION` 导轨读数改为中文可见语义。Collection 的 `NOW / TRACE / REVIEW` 短模式标签改为当前 / 追溯 / 复核。
+- **Data Truth**：`UNKNOWN` 仍为未知，`UTC+08` 仍为同一时区，连接/来源/运行时状态仍由原有调用方提供；本项只改变显示层，未变更状态判定、数据、查询、路由、权限或任何动作。
+- **不扩张**：无 Token、Primitive、CMP、Pattern、Scene、Motion、API、数据库、采集、插件、媒体或真实材料改动。Evidence Library 的页面局部模板、动态卡片及局部英文由 #67 单独处理。
+- **验证与集成**：shared shell 单元测试同时覆盖 Corpus 与 Collection 输入；最终 DOM/视觉走查与治理检查记录在 `ACC-DESIGN-008`。建议先合并 PR #67，再将 #68 rebase 至 main；两个事项的运行时文件边界不重叠，但 focused test / 文档索引需由 integration owner 做行级整合。
