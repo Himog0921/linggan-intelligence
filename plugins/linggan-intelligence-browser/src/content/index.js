@@ -53,6 +53,13 @@ class LingganBatchNoteController extends BatchNoteController {
 }
 
 class LingganBatchCommentController extends BatchCommentController {
+  constructor(...args) {
+    super(...args);
+    // The page bridge is needed by the mature comment collector, not by the passive
+    // current-surface discovery control.  Keep initialization at the actual comment action.
+    ensureXhsCommentApiBridge();
+  }
+
   _emitProgress(payload) {
     super._emitProgress(payload);
     void runtime.submitBatchCheckpoint('xhs_batch_comments', payload).catch(() => {});
@@ -63,7 +70,12 @@ const xhsPageController = createXhsPageController({
   MSG,
   assertPluginAuthorized: localTrustedAuthorization,
   collectNote,
-  collectComments,
+  collectComments: async (...args) => {
+    // Do not install the old page bridge when a search/profile page merely loads.  It is only
+    // needed if a user explicitly starts comment collection.
+    ensureXhsCommentApiBridge();
+    return collectComments(...args);
+  },
   collectAuthor,
   collectCommentImages: async (...args) => collectCommentImages(...args),
   BatchNoteController: LingganBatchNoteController,
@@ -100,7 +112,6 @@ async function initXhs() {
     authorProfile: (author) => runtime.submitAuthor(author),
     batchCheckpoint: (progress, context) => runtime.submitBatchCheckpoint(context?.kind || 'xhs_batch', progress),
   });
-  ensureXhsCommentApiBridge();
   dashboardBridge.registerDashboardBridge();
   xhsPageController.initPage();
   console.info('[Linggan Intelligence Browser] XHS collector runtime active.');

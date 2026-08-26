@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: Draft LOCAL_TRUSTED adapter
-> 版本: `0.4.3`
+> 版本: `0.4.4`
 > 适用范围: `PLUGIN-RETROFIT-LOCAL-TRUSTED-001`（GitHub Issue #43）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -61,7 +61,7 @@ npm run release:reproducibility
 npm run verify:linggan-isolation
 ```
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.4.3.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.4.4.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台
