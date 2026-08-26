@@ -34,7 +34,7 @@ export async function collectAuthor(options = {}) {
   interactions.forEach(item => {
     const type = item.type || item.name || item.label;
     const count = item.count ?? item.countText ?? item.displayText ?? item.value ?? item.num;
-    if (type && count !== undefined && count !== null && String(count).trim() !== '') {
+    if (type && hasObservedInteractionCount(count)) {
       countMap[type] = parseCount(count);
     }
   });
@@ -171,6 +171,25 @@ export function pickInteractionCount(map = {}, keys = []) {
     }
   }
   return null;
+}
+
+export function hasObservedInteractionCount(value) {
+  if (typeof value === 'number') return Number.isFinite(value) && value >= 0;
+  if (typeof value === 'string') return /\d/.test(value);
+  if (!value || typeof value !== 'object') return false;
+  return [
+    value.displayText,
+    value.display_text,
+    value.displayCount,
+    value.display_count,
+    value.text,
+    value.countText,
+    value.count_text,
+    value.value,
+    value.count,
+    value.num,
+    value.number,
+  ].some((candidate) => hasObservedInteractionCount(candidate));
 }
 
 function normalizeFollowStatus(rawStatus) {

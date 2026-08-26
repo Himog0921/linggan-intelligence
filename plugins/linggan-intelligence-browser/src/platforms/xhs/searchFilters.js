@@ -134,10 +134,12 @@ export function readCurrentXhsSearchFilterSnapshot(win = globalThis.window) {
   const labels = {};
 
   if (Array.isArray(filterParams)) {
+    filterParams.forEach((entry) => {
+      const type = String(entry?.type || '').trim();
+      if (type) raw[type] = toTextList(unwrapState(entry?.tags));
+    });
     Object.entries(FILTER_GROUPS).forEach(([groupKey, group]) => {
-      const item = filterParams.find((entry) => String(entry?.type || '').trim() === group.stateType);
-      const tags = toTextList(unwrapState(item?.tags));
-      raw[group.stateType] = tags;
+      const tags = raw[group.stateType] || [];
       const option = resolveOptionByLabel(groupKey, tags);
       result[groupKey] = option?.value || group.defaultValue;
       labels[groupKey] = option?.label || group.currentLabel;
@@ -172,6 +174,7 @@ export function readCurrentXhsSearchSurfaceContext({
     }),
     suggestions,
     filterLabels: filterSnapshot.labels,
+    rawFilterState: filterSnapshot.raw,
   };
 }
 

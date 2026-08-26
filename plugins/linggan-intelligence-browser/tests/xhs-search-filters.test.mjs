@@ -40,6 +40,8 @@ test('readCurrentXhsSearchFilterSnapshot maps Xiaohongshu active search filters'
       sort_type: ['最多评论'],
       filter_note_type: ['图文'],
       filter_note_time: ['一周内'],
+      filter_note_range: ['已看过'],
+      filter_pos_distance: ['附近'],
     },
   });
 });
@@ -73,6 +75,11 @@ test('readCurrentXhsSearchSurfaceContext keeps suggestions and loaded cards sepa
   assert.deepEqual(context.activeFilters, { sortBasis: 'latest', noteType: 'all', publishTime: 'one_week' });
   assert.deepEqual(context.suggestions, ['候选词 A', '候选词 B']);
   assert.equal(context.suggestionCount, 2);
+  assert.deepEqual(context.rawFilterState, {
+    sort_type: ['最新'],
+    filter_note_type: ['不限'],
+    filter_note_time: ['一周内'],
+  });
 });
 
 test('readCurrentXhsSearchFilterSnapshot unwraps live Xiaohongshu ref filter state', () => {
@@ -106,6 +113,8 @@ test('readCurrentXhsSearchFilterSnapshot unwraps live Xiaohongshu ref filter sta
       sort_type: ['collect_descending'],
       filter_note_type: ['不限'],
       filter_note_time: ['半年内'],
+      filter_note_range: ['不限'],
+      filter_pos_distance: ['不限'],
     },
   });
 });
