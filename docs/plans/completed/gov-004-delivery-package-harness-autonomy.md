@@ -1,10 +1,12 @@
 # GOV-004 · 交付包优先与 Harness 自主执行治理
 
-> 状态: 活跃计划
+> 状态: 已完成计划
 > 最后核对: 2026-08-26
 > 适用范围: Linggan Intelligence 的 Agent 协作、UI 执行和任务追踪治理
 > 事实来源: `AGENTS.md`、`docs/governance/agent-collaboration.md`、`docs/agents/ui-execution-contract.md`、Issue #70
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、真实代码/运行证据、ACCEPTED 决定
+
+> 替代说明: 本计划的“交付包优先、Harness 自主编排”已于 2026-08-26 合并进入 `main`，但用户随后确认协作派单、并发、审查与合并权应由 Mog 直接控制。该后续决定由 `GOV-005` 取代本计划中的 Harness 自主编排部分；交付包、表面/状态/依赖/验收矩阵和类别级自审要求继续保留。
 
 ## 目标与用户可见结果
 

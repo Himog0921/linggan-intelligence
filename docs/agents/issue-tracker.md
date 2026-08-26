@@ -34,19 +34,19 @@ Issue 是工作入口，不是第二事实源，也不是自动授权书。
 
 ## 外部 Agent 的执行闭环
 
-本项目采用中央派单，不允许 Agent 自由抢单。协调者先确认目标、正式授权、依赖、文件所有权和验收，再把 Issue 标为 `ready-for-agent`；执行 Agent 只能领取明确分配给自己的 Issue。
+本项目采用 **Mog 直接派单**，不允许 Agent 自由抢单、自动分派或自行增加并行。Mog 决定谁执行、允许多少并行、何时审查及何时合并；只有 Mog 在当前事项中明确委托时，指定协调者才可代行某一项协作决定。执行 Agent 只能处理 Mog 明确分配给自己的 Issue。
 
 标准链路分成四个阶段，不能在 Issue 创建时提前填写未来事实：
 
 ```text
 Issue request
-→ coordinator 人工核对、ready/assignment
+→ Mog（或其明确指定协调者）核对、ready/assignment
 → Claim 评论
 → 独立 branch + worktree
 → 有界修改与验证
 → draft PR
-→ independent review
-→ integration owner 按序合并
+→ Mog 指定时才进行 review
+→ Mog 对 exact head 授权后才集成
 → 重新核验 main 与正式文档
 → 分层记录完成证据
 → 手工关闭 Issue
@@ -56,11 +56,11 @@ Issue request
 
 Issue Form 在创建时只要求：SCOPE/authority、goal、in/out、dependencies、候选文件边界、acceptance、validation plan、stop/escalation 和 completion requirements。它不要求填写尚未发生的 Agent、exact base、branch、worktree、实际验证结果或完成证据。
 
-本仓库是 private repository，Issue Form 中的 `validations.required` 只作为表单提示，不能当成可靠执行门。coordinator 必须人工检查字段完整、权威有效、依赖已解、文件范围可分配、停止条件清楚，才能赋 assignee 和 `ready-for-agent`；不得用占位符骗过表单后直接 Claim。
+本仓库是 private repository，Issue Form 中的 `validations.required` 只作为表单提示，不能当成可靠执行门。Mog（或其明确指定协调者）必须人工检查字段完整、权威有效、依赖已解、文件范围可分配、停止条件清楚，才能赋 assignee 和 `ready-for-agent`；不得用占位符骗过表单后直接 Claim。
 
-### 阶段 2：Coordinator ready 与 assignment
+### 阶段 2：Mog ready 与 assignment
 
-coordinator 决定是否可以派单，并在 Issue 正文或评论中明确执行 Agent、exclusive/shared/forbidden 文件、integration owner 与依赖。涉及产品、领域、架构、真实权限或多个 Issue/PR 的事项必须先完成对应决定或 active plan，不能靠标签放行。
+Mog 决定是否可以派单，并在 Issue 正文或评论中明确执行 Agent、并发许可、exclusive/shared/forbidden 文件、依赖、是否需要 reviewer、谁可集成及 exact-head 合并授权方式。涉及产品、领域、架构、真实权限或多个 Issue/PR 的事项必须先完成对应决定或 active plan，不能靠标签放行。Agent 不得把“协调者”理解成默认获得派单、并发或合并权。
 
 ### 阶段 3：Claim 协议
 
@@ -72,7 +72,7 @@ coordinator 决定是否可以派单，并在 Issue 正文或评论中明确执�
 - exclusive files、shared files 与 forbidden files；
 - 开始时间、依赖和停止条件。
 
-同一个 Issue 同一时间只能有一个执行 Agent。协作者、reviewer 和 integration owner 可以存在，但不能在同一 Issue 下形成第二个未声明的执行分支。使用相同 GitHub 账号的所有 Agent 必须靠稳定 task-id、Claim 和 exact commit/PR 证据区分责任，不能把共同账号当成执行身份。实现者不能是最终 reviewer 或最终 integrator。
+同一个 Issue 同一时间只能有 Mog 明确允许的执行 Agent。协作者、reviewer 和 integration owner 只有在 Mog 指定时才可存在，且不能形成第二个未声明的执行分支。使用相同 GitHub 账号的所有 Agent 必须靠稳定 task-id、Claim 和 exact commit/PR 证据区分责任，不能把共同账号当成执行身份。实现者不得自行担任 reviewer、integrator 或 merge 授权者。
 
 本项目没有额外的 `in-progress` triage 标签。执行中由 Claim 评论和 assignee 表达；`ready-for-agent` 可以保留，因为它说明任务仍是机器可执行的有界工作，不代表尚未被领取。
 
@@ -88,15 +88,15 @@ Issue 必须把文件分为：
 - **shared**：可能被多个事项触碰，只能由指定 integration owner 统一整合；
 - **forbidden**：本 Issue 不得修改；未列出的文件默认 forbidden。
 
-执行 Agent 不得通过扩大 glob、顺手重构或修改相邻文档绕过所有权。共享文件出现并行变化时，执行 Agent 保留自己的有界补丁和证据，由 integration owner 在独立集成步骤中按已声明顺序处理；禁止在任一执行 worktree 中擅自吸收其他任务。
+执行 Agent 不得通过扩大 glob、顺手重构或修改相邻文档绕过所有权。共享文件出现并行变化时，执行 Agent 保留自己的有界补丁和证据，报告 Mog；由 Mog 决定是否指定 integration owner、改变并发或安排独立集成。禁止在任一执行 worktree 中擅自吸收其他任务。
 
 ### 阶段 4：Pull Request、handoff、审查和集成
 
 仓库变更通过 draft PR 交付。PR 默认使用 `Refs #<issue>`，不能用 `Closes` 跳过合并后核验。PR 必须关联主 Issue/SCOPE，使用模板报告修改范围、非目标、实际验证、数据库/外部副作用、proved/not proved、共享文件和分层完成证据。
 
-实现者不能作为最终独立 reviewer 或最终 integrator。reviewer 和 integration owner 都必须使用稳定 task-id；reviewer 必须审查 PR 当前 exact head commit，并给出 `PASS` 或带可执行发现的 `FAIL`。代码可合并性、模板勾选或自动检查通过都不能代替 independent review，修订后需要复核新 head。
+是否安排 reviewer、由谁审查、是否需要新 head 复核，以及何时集成，都由 Mog 对当前交付包明确决定。若 Mog 指定 reviewer，则 reviewer 必须使用稳定 task-id、审查 PR 当前 exact head commit，并给出 `PASS` 或带可执行发现的 `FAIL`。代码可合并性、模板勾选或自动检查通过不能自动取得 Mog 的合并授权。
 
-integration owner 负责按依赖和共享文件顺序合并已通过审查的 PR。执行 Agent 不自行 merge；同一批并行 PR 不通过“最后一起解决冲突”压缩来源或责任。合并后由 integration owner 重新核验 main、正式文档与实际副作用，追加完成层级记录，再手工关闭 Issue。
+只有 Mog 或 Mog 对当前 exact head 明确指定的 integration owner 可以合并 PR。执行 Agent 不自行 merge；同一批并行 PR 不通过“最后一起解决冲突”压缩来源或责任。合并后由 Mog 或其指定 integration owner 重新核验 main、正式文档与实际副作用，追加完成层级记录，再按 Mog 指示关闭 Issue。
 
 ### 小型工作单与 active plan
 

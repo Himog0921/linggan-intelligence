@@ -123,7 +123,8 @@
 | [`plans/active/local-runtime-001-persistent-loopback.md`](plans/active/local-runtime-001-persistent-loopback.md) | 活跃计划 | Issue #38 的持久本地 PostgreSQL migration、loopback readiness 与重启保留证明；不含插件或真实平台 |
 | [`plans/active/plugin-migration-001-linggan-owned-xhs-discovery.md`](plans/active/plugin-migration-001-linggan-owned-xhs-discovery.md) | 活跃计划 | Issue #37：将成熟旧插件的可见 XHS 搜索卡发现规则适配为 Linggan 自有包，且只启用一次手动 `ADHD` / “综合” / 前 20 卡 Discovery → 固定 localhost ingress |
 | [`plans/active/plugin-rehome-001-full-legacy-browser.md`](plans/active/plugin-rehome-001-full-legacy-browser.md) | 合并后文档收口待办 | Issue #41 / PR #42：完整迁入 `linggan-boom v2.0.91` 的浏览器 source/UX 作为 Linggan 自有包，并切断旧内容工作台运行时；不证明真实采集 |
-| [`plans/active/gov-004-delivery-package-harness-autonomy.md`](plans/active/gov-004-delivery-package-harness-autonomy.md) | 活跃计划；Issue #70 | 将协作推进改为交付包优先：Mog 定义结果与禁止项，Harness 自主拆分、验证和集成；不改产品或运行时 |
+| [`plans/completed/gov-004-delivery-package-harness-autonomy.md`](plans/completed/gov-004-delivery-package-harness-autonomy.md) | 已完成；已被 GOV-005 替代 | Issue #70：确立交付包、表面/状态/依赖/验收矩阵；其中 Harness 自主编排已由 GOV-005 取代 |
+| [`plans/active/gov-005-human-directed-collaboration.md`](plans/active/gov-005-human-directed-collaboration.md) | 活跃计划；Issue #72 | 将派单、并发、审查和合并的默认控制权交由 Mog；Agent 仅执行明确分配的 Work Package |
 | [`plans/completed/plugin-retrofit-local-trusted-001.md`](plans/completed/plugin-retrofit-local-trusted-001.md) | 已完成计划 | Issue #43 / PR #46：已合并的 LOCAL_TRUSTED synthetic manual `TaskSpec → Attempt → durable outbox → loopback receipt`；不证明真实浏览器、平台、媒体、scheduler 或 Evidence Library 真实数据 |
 | [`plans/completed/plugin-001-linggan-owned-producer.md`](plans/completed/plugin-001-linggan-owned-producer.md) | 已完成计划 | `PLUGIN-001`：Linggan 自有 MV3 基础包、loopback 探测与静态可安装 release；后续 Discovery 由 PLUGIN-MIGRATION-001 承接 |
 | [`plans/completed/disc-001-project-foundation-design.md`](plans/completed/disc-001-project-foundation-design.md) | 已完成计划 | 七道项目基础设计关口与 `USER-DEC-01`–`06` 的完成记录 |
