@@ -164,6 +164,9 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
 
     for prohibited in [
         "本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）",
+        "本机服务 / 读投影未接通",
+        "本地读投影未接通",
+        "READ MODEL NOT CONNECTED",
         "aria-label=\"MEDIA NOT ACQUIRED\"",
         "<span class=\"v7-published-unknown\">PUBLISHED",
         "<span>POSITION #17</span>",
@@ -196,9 +199,16 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
 #[test]
 fn base_no_db_header_and_nested_technical_keys_remain_chinese_first() {
     let base = evidence_library_html();
+    assert!(base.contains("<!-- EVIDENCE_HEADER_BOUNDARY_START -->"));
+    assert!(base.contains("<!-- EVIDENCE_HEADER_META_STATE_START -->"));
     assert!(base.contains(
         "本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span>"
     ));
+    assert!(
+        base.contains(
+            "本地读投影未接通 <span class=\"v7-tech-key\">READ MODEL NOT CONNECTED</span>"
+        )
+    );
     assert!(
         !base.contains("本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）"),
         "the English no-read-model sentence must not become the header state"
