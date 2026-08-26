@@ -173,3 +173,20 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
   .c-drawer { top:0; width:100vw; }
 }
 @media (prefers-reduced-motion:reduce) { .c-drawer { transition:none; } }
+
+/* COLLECTION-001 · stored observation targets. A row here proves the target was saved and
+ * nothing more, so the block stays quiet: no progress bars, no health scores, no percentages
+ * — none of those facts exist yet. */
+.c-targets { max-width:960px; padding:30px 20px 40px; }
+.c-targets-head { padding-bottom:16px; border-bottom:2px solid var(--v7-black); }
+.c-targets-count { display:flex; align-items:baseline; gap:9px; }
+.c-targets-count b { color:var(--v7-black); font:800 26px/1 var(--lgi-font-mono); letter-spacing:-.04em; }
+.c-targets-count span { color:var(--v7-muted); font-size:13px; }
+.c-targets-note { margin:11px 0 0; max-width:640px; color:var(--v7-muted); font-size:12px; line-height:1.7; }
+.c-target-row { display:grid; grid-template-columns:72px minmax(0,1fr) auto 64px; align-items:center; gap:16px; padding:14px 0; border-bottom:1px solid var(--v7-line); }
+.c-target-kind { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-target-name { min-width:0; }
+.c-target-name b { display:block; color:var(--v7-black); font-size:14px; font-weight:700; }
+.c-target-name span { display:block; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-ghost); font:11px var(--lgi-font-mono); }
+.c-target-meta { display:flex; gap:14px; color:var(--v7-muted); font:10px var(--lgi-font-mono); letter-spacing:.04em; }
+.c-target-state { color:var(--v7-black); font:700 11px var(--lgi-font-mono); text-align:right; }

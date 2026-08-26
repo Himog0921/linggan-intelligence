@@ -1,4 +1,5 @@
 mod collection;
+mod collection_targets_view;
 mod evidence_page;
 mod shell;
 
@@ -11,7 +12,7 @@ use axum::{
     routing::{get, post},
 };
 use linggan_contracts::{
-    EvidenceQuery, parse_local_producer_attempt, parse_local_producer_submission,
+    EvidenceQuery, LifecycleState, parse_local_producer_attempt, parse_local_producer_submission,
     parse_local_task_spec, parse_producer_attempt, parse_producer_submission,
     parse_producer_task_spec,
 };
@@ -20,11 +21,12 @@ use linggan_evidence::{
     LocalTaskOutcome, MediaUploadFinalizeClaim, ProducerRuntimeError, RuntimeAttemptOutcome,
     RuntimeSubmissionOutcome, RuntimeTaskOutcome, admit_media_blob, begin_media_upload,
     claim_media_upload_finalize, complete_media_upload, create_manual_task, create_producer_task,
-    ingest_discovery_package, local_discovery_schema_is_ready, local_producer_schema_is_ready,
-    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_discovery_library,
-    read_local_media_blob, read_media_upload_session, read_runtime_library,
-    record_media_download_failure, record_media_upload_chunk, release_media_upload_finalize,
-    start_local_attempt, start_producer_attempt, submit_local_package, submit_producer_package,
+    ingest_discovery_package, list_targets_in_state, local_discovery_schema_is_ready,
+    local_producer_schema_is_ready, producer_runtime_has_packages,
+    producer_runtime_schema_is_ready, read_discovery_library, read_local_media_blob,
+    read_media_upload_session, read_runtime_library, record_media_download_failure,
+    record_media_upload_chunk, release_media_upload_finalize, start_local_attempt,
+    start_producer_attempt, submit_local_package, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -224,6 +226,10 @@ fn router(state: LocalWebState) -> Router {
             get(read_local_media_blob_route),
         )
         .route("/api/local/evidence-library", get(evidence_library_json))
+        .route(
+            "/api/local/collection/targets",
+            get(collection_targets_json),
+        )
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))
@@ -351,6 +357,46 @@ async fn evidence_library_json(
         Err(_) => local_read_json_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "read_projection_unavailable",
+        ),
+    }
+}
+
+/// COLLECTION-001 · the pending observation targets, read-only.
+///
+/// Read-only on purpose: storing a target is harmless, but every route that would *create*
+/// one has to pass through Acquisition Request → Authorization → Admission first (INV-36),
+/// and none of those exist yet. A write route here would be the four-stage chain collapsed
+/// into one call — exactly what the rules forbid.
+async fn collection_targets_json(State(state): State<LocalWebState>) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    match list_targets_in_state(database, LifecycleState::PendingDecision, 200).await {
+        Ok(targets) => Json(serde_json::json!({
+            "lifecycleState": "pending_decision",
+            "storedTargetCount": targets.len(),
+            "targets": targets
+                .iter()
+                .map(|target| serde_json::json!({
+                    "targetRef": target.target_ref,
+                    "platform": target.platform,
+                    "targetKind": target.target_kind,
+                    "identityKey": target.identity_key,
+                    "displayName": target.display_name,
+                    "source": target.source,
+                    "firstStoredAt": target.first_stored_at,
+                }))
+                .collect::<Vec<_>>(),
+            // Storing a target proves it was saved and nothing else.
+            "acquisition": "NOT_AUTHORISED",
+        }))
+        .into_response(),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "collection_targets_unavailable",
         ),
     }
 }
@@ -1276,12 +1322,27 @@ async fn collection_entry() -> Redirect {
     Redirect::temporary("/collection/attention")
 }
 
-async fn collection_targets(Query(params): Query<CollectionParams>) -> Html<String> {
-    Html(collection::render(
+async fn collection_targets(
+    State(state): State<LocalWebState>,
+    Query(params): Query<CollectionParams>,
+) -> Html<String> {
+    let base = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
         params.drawer.as_deref(),
-    ))
+    );
+    // Without a database the page still renders its honest empty state rather than an error:
+    // "we cannot read targets right now" and "there are no targets" are different claims, and
+    // the empty state already makes only the weaker one.
+    let Some(database) = state.database.database() else {
+        return Html(base);
+    };
+    match list_targets_in_state(database, LifecycleState::PendingDecision, 200).await {
+        Ok(targets) => Html(collection_targets_view::render_stored_targets(
+            &base, &targets,
+        )),
+        Err(_) => Html(base),
+    }
 }
 
 async fn collection_operations(Query(params): Query<CollectionParams>) -> Html<String> {
