@@ -1,0 +1,260 @@
+//! COLLECTION-001 · Observation target identity and lifecycle.
+//!
+//! A target is the long-lived identity of something we intend to keep watching. Storing one
+//! proves it was saved and nothing else: it is not an Acquisition Request, not an
+//! Authorization, and not a claim that any capture will run (INV-36). The rules this module
+//! encodes are in `docs/product/collection-monitoring-rules.md` §2.
+
+use std::fmt;
+
+/// Creator and keyword are two distinct kinds, never one polymorphic target. They differ in
+/// what identifies them, in what "new content" means, and in whether deep archiving applies.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TargetKind {
+    Creator,
+    Keyword,
+}
+
+impl TargetKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Creator => "creator",
+            Self::Keyword => "keyword",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Result<Self, CollectionContractError> {
+        match raw {
+            "creator" => Ok(Self::Creator),
+            "keyword" => Ok(Self::Keyword),
+            _ => Err(CollectionContractError::UnknownTargetKind),
+        }
+    }
+}
+
+/// The lifecycle from the product rules §2.1. Deep archiving must complete before monitoring
+/// starts, so `Monitoring` is only reachable through `Archived` — see [`LifecycleState::may_move_to`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LifecycleState {
+    /// Stored, decided about by nobody yet. Consumes no platform access.
+    PendingDecision,
+    /// Deep archiving has been requested. Not "running" — a request is not an execution.
+    Archiving,
+    /// Deep archiving finished to the standard in DECISION-02: every work has a link and a
+    /// like count; other fields may be missing.
+    Archived,
+    Monitoring,
+    Paused,
+    /// The person decided not to watch this. Kept rather than deleted, because the decision
+    /// itself is a fact worth having.
+    Dismissed,
+}
+
+impl LifecycleState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PendingDecision => "pending_decision",
+            Self::Archiving => "archiving",
+            Self::Archived => "archived",
+            Self::Monitoring => "monitoring",
+            Self::Paused => "paused",
+            Self::Dismissed => "dismissed",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Result<Self, CollectionContractError> {
+        match raw {
+            "pending_decision" => Ok(Self::PendingDecision),
+            "archiving" => Ok(Self::Archiving),
+            "archived" => Ok(Self::Archived),
+            "monitoring" => Ok(Self::Monitoring),
+            "paused" => Ok(Self::Paused),
+            "dismissed" => Ok(Self::Dismissed),
+            _ => Err(CollectionContractError::UnknownLifecycleState),
+        }
+    }
+
+    /// The only legal moves. Monitoring is deliberately unreachable from `PendingDecision`:
+    /// without a baseline the first patrol would treat every work it sees as new, and the
+    /// surge baseline would have no distribution to compare against.
+    pub fn may_move_to(self, next: Self) -> bool {
+        matches!(
+            (self, next),
+            (Self::PendingDecision, Self::Archiving)
+                | (Self::PendingDecision, Self::Dismissed)
+                | (Self::Archiving, Self::Archived)
+                | (Self::Archiving, Self::PendingDecision)
+                | (Self::Archived, Self::Monitoring)
+                | (Self::Archived, Self::Archiving)
+                | (Self::Archived, Self::Dismissed)
+                | (Self::Monitoring, Self::Paused)
+                | (Self::Paused, Self::Monitoring)
+                | (Self::Paused, Self::Dismissed)
+                | (Self::Dismissed, Self::PendingDecision)
+        )
+    }
+}
+
+/// Where a target came from. Both routes produce the same pending target — a push from the
+/// browser is not a weaker claim than a manual add, it just happens while browsing.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum TargetSource {
+    PluginPush,
+    Manual,
+}
+
+impl TargetSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PluginPush => "plugin_push",
+            Self::Manual => "manual",
+        }
+    }
+
+    pub fn parse(raw: &str) -> Result<Self, CollectionContractError> {
+        match raw {
+            "plugin_push" => Ok(Self::PluginPush),
+            "manual" => Ok(Self::Manual),
+            _ => Err(CollectionContractError::UnknownSource),
+        }
+    }
+}
+
+/// The single platform with a controlled verification base. Others stay closed even though
+/// the column could hold them — a platform field is not an open platform (Issue #66).
+pub const OPEN_PLATFORM: &str = "xhs";
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum CollectionContractError {
+    UnknownTargetKind,
+    UnknownLifecycleState,
+    UnknownSource,
+    UnsupportedPlatform,
+    EmptyIdentity,
+    IllegalTransition,
+}
+
+impl fmt::Display for CollectionContractError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let message = match self {
+            Self::UnknownTargetKind => "target kind must be creator or keyword",
+            Self::UnknownLifecycleState => "unknown lifecycle state",
+            Self::UnknownSource => "target source must be plugin_push or manual",
+            Self::UnsupportedPlatform => "only xhs has a controlled verification base",
+            Self::EmptyIdentity => "a target must carry a non-empty normalised identity",
+            Self::IllegalTransition => "that lifecycle move is not allowed",
+        };
+        formatter.write_str(message)
+    }
+}
+
+impl std::error::Error for CollectionContractError {}
+
+/// A target's normalised identity: what deduplication is done on.
+///
+/// For a creator this is the platform's own stable id, **never a URL** — the same creator is
+/// reachable through several URL forms, and matching on URLs is how the legacy workbench ends
+/// up with parallel duplicate monitors. For a keyword it is the term plus its ranking, because
+/// the same word under two rankings is two different observation surfaces.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub struct TargetIdentity {
+    platform: String,
+    kind: TargetKind,
+    key: String,
+}
+
+impl TargetIdentity {
+    pub fn creator(
+        platform: &str,
+        platform_creator_id: &str,
+    ) -> Result<Self, CollectionContractError> {
+        Self::build(platform, TargetKind::Creator, platform_creator_id.trim())
+    }
+
+    /// `ranking` is part of the identity on purpose: searching one term by "comprehensive" and
+    /// by "latest" produces two different surfaces, and treating them as one target would let
+    /// each overwrite the other's results.
+    pub fn keyword(
+        platform: &str,
+        term: &str,
+        ranking: &str,
+    ) -> Result<Self, CollectionContractError> {
+        let term = term.trim().to_lowercase();
+        let ranking = ranking.trim().to_lowercase();
+        if term.is_empty() || ranking.is_empty() {
+            return Err(CollectionContractError::EmptyIdentity);
+        }
+        Self::build(platform, TargetKind::Keyword, &format!("{term}::{ranking}"))
+    }
+
+    fn build(platform: &str, kind: TargetKind, key: &str) -> Result<Self, CollectionContractError> {
+        if platform != OPEN_PLATFORM {
+            return Err(CollectionContractError::UnsupportedPlatform);
+        }
+        if key.trim().is_empty() {
+            return Err(CollectionContractError::EmptyIdentity);
+        }
+        Ok(Self {
+            platform: platform.to_owned(),
+            kind,
+            key: key.trim().to_owned(),
+        })
+    }
+
+    pub fn platform(&self) -> &str {
+        &self.platform
+    }
+
+    pub fn kind(&self) -> TargetKind {
+        self.kind
+    }
+
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monitoring_is_unreachable_without_archiving_first() {
+        // The product rule this guards: a patrol without a baseline calls every work it sees
+        // new, and surge judgement has no distribution to compare against.
+        assert!(!LifecycleState::PendingDecision.may_move_to(LifecycleState::Monitoring));
+        assert!(LifecycleState::PendingDecision.may_move_to(LifecycleState::Archiving));
+        assert!(LifecycleState::Archiving.may_move_to(LifecycleState::Archived));
+        assert!(LifecycleState::Archived.may_move_to(LifecycleState::Monitoring));
+    }
+
+    #[test]
+    fn a_creator_is_identified_by_platform_id_never_by_url() {
+        let from_id = TargetIdentity::creator("xhs", "5ebe6d210000000001000afe").unwrap();
+        assert_eq!(from_id.key(), "5ebe6d210000000001000afe");
+        // A URL is not an identity: the same creator has several URL forms, so accepting one
+        // would let the same person enter twice under different keys.
+        let from_url =
+            TargetIdentity::creator("xhs", "https://www.xiaohongshu.com/user/profile/5ebe6d21")
+                .unwrap();
+        assert_ne!(from_id.key(), from_url.key());
+    }
+
+    #[test]
+    fn the_same_keyword_under_two_rankings_is_two_targets() {
+        let comprehensive = TargetIdentity::keyword("xhs", "ADHD", "comprehensive").unwrap();
+        let latest = TargetIdentity::keyword("xhs", "ADHD", "latest").unwrap();
+        assert_ne!(comprehensive.key(), latest.key());
+        // Casing and padding are normalised away, so one term cannot enter twice.
+        let padded = TargetIdentity::keyword("xhs", "  adhd  ", "COMPREHENSIVE").unwrap();
+        assert_eq!(comprehensive.key(), padded.key());
+    }
+
+    #[test]
+    fn platforms_without_a_verification_base_stay_closed() {
+        assert_eq!(
+            TargetIdentity::creator("douyin", "abc").unwrap_err(),
+            CollectionContractError::UnsupportedPlatform
+        );
+    }
+}

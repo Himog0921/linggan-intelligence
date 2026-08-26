@@ -3,6 +3,7 @@
 
 mod canonical;
 mod capture;
+mod collection;
 mod discovery;
 mod local_producer;
 mod producer_runtime;
@@ -11,6 +12,10 @@ pub use capture::{
     CapturePackage, CaptureRecord, ContractError, Coverage, KnownSetTarget, KnownTargetOutcome,
     KnownTargetResult, PackageRouting, RemainingScope, Terminal, TerminalReason,
     parse_capture_package,
+};
+pub use collection::{
+    CollectionContractError, LifecycleState, OPEN_PLATFORM, TargetIdentity, TargetKind,
+    TargetSource,
 };
 pub use discovery::{
     AcquisitionSpec, CoverPresentationState, DiscoveryCard, DiscoveryContractError,
