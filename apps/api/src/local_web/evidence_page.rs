@@ -29,8 +29,21 @@ pub(super) fn render_read_projection(
     let html = replace_slot(&html, "EVIDENCE_RESULTS", &results);
     let html = replace_slot(
         &html,
+        "EVIDENCE_RESULTS_HEAD",
+        "<div class=\"v7-results-head\"><div class=\"v7-results-left\"><input class=\"v7-check\" type=\"checkbox\" disabled aria-label=\"选择全部材料\"><span>已接纳的发现卡片 <span class=\"v7-tech-key\">ACCEPTED DISCOVERY</span></span></div><div>本机发现读取投影 <span class=\"v7-tech-key\">LOCAL DISCOVERY READ PROJECTION</span></div></div>",
+    );
+    let html = replace_slot(
+        &html,
         "EVIDENCE_READ_STATUS",
         "<span class=\"v7-zh-status\">仅显示已接纳的发现材料</span><span class=\"v7-tech-key\">ACCEPTED DISCOVERY ONLY</span><br><span class=\"v7-zh-status\">不触发平台采集</span><span class=\"v7-tech-key\">LOCAL READ ONLY</span>",
+    );
+    let html = replace_slot(
+        &html,
+        "EVIDENCE_QUERY_LINE",
+        &format!(
+            "<div class=\"v7-query-line\"><div>只读取 Linggan 已接纳的发现卡片；不触发平台采集 <span class=\"v7-tech-key\">DISCOVERY ONLY</span></div><div><b>本机只读 <span class=\"v7-tech-key\">LOCAL READ ONLY</span></b> · <span>{}</span></div></div>",
+            time_view.boundary_copy
+        ),
     );
     html.replace(
         "本地读投影尚未接通（READ MODEL NOT CONNECTED）",
@@ -51,20 +64,65 @@ pub(super) fn render_read_projection(
             time_view.filter_label, time_view.value_label, time_view.technical_key
         ),
     )
-    .replace(
-        "页面结构已就绪 · 材料读投影尚未接通",
-        "只读取 Linggan 已接纳的 discovery 卡片；不触发平台采集",
+}
+
+/// Renders an explicit read failure without re-labeling it as source incompleteness. A failed
+/// local read or invalid local query tells us nothing about whether material exists upstream.
+pub(super) fn render_read_unavailable(base: &str) -> String {
+    render_read_failure(
+        base,
+        "本机发现材料读取暂时不可用",
+        "READ_PROJECTION_UNAVAILABLE",
+        "当前未读取任何材料；没有显示旧系统或远程数据。",
     )
-    .replace(
-        "<b>来源信息尚未完整接通（SOURCE INCOMPLETE）</b> · <span>当前没有可用查询（NO QUERY AVAILABLE）</span>",
+}
+
+/// Renders a local-query validation failure without treating it as an empty library or a source
+/// coverage finding. The page read does not acquire, search, or supplement platform material.
+pub(super) fn render_query_invalid(base: &str) -> String {
+    render_read_failure(
+        base,
+        "当前查询参数无效",
+        "LOCAL_QUERY_INVALID",
+        "当前未读取任何材料，也未触发平台搜索或补采。",
+    )
+}
+
+fn render_read_failure(
+    base: &str,
+    primary_copy: &str,
+    technical_code: &str,
+    detail: &str,
+) -> String {
+    let status = format!(
+        "<span class=\"v7-zh-status\">{primary_copy}</span><span class=\"v7-tech-key\">{technical_code}</span><br><span class=\"v7-zh-status\">{detail}</span>"
+    );
+    let query_line = format!(
+        "<div class=\"v7-query-line\"><div>{primary_copy} <span class=\"v7-tech-key\">{technical_code}</span></div><div><b>当前未读取材料 <span class=\"v7-tech-key\">NO MATERIAL READ</span></b> · <span>{detail}</span></div></div>"
+    );
+    let results_head = format!(
+        "<div class=\"v7-results-head\"><div class=\"v7-results-left\"><input class=\"v7-check\" type=\"checkbox\" disabled aria-label=\"选择全部材料\"><span>当前未读取材料 <span class=\"v7-tech-key\">NO MATERIAL READ</span></span></div><div>{primary_copy} <span class=\"v7-tech-key\">{technical_code}</span></div></div>"
+    );
+    let results = format!(
+        "<div class=\"v7-results-empty\"><section class=\"v7-empty-panel\"><h2>{primary_copy} <span class=\"v7-tech-key\">{technical_code}</span></h2><p>{detail}</p><dl class=\"v7-empty-grid\"><div><dt>材料读取 <span class=\"v7-tech-key\">NO MATERIAL READ</span></dt><dd>当前未读取任何材料；这不表示材料不存在或本地库为空。</dd></div><div><dt>未发生</dt><dd>没有显示旧系统或远程数据，也没有触发平台搜索或补采。</dd></div><div><dt>当前不能判断</dt><dd>不能据此判断采集是否失败、覆盖是否为零，或平台是否没有内容。</dd></div></dl></section></div>"
+    );
+    let html = replace_slot(base, "EVIDENCE_READ_STATUS", &status);
+    let html = replace_slot(&html, "EVIDENCE_QUERY_LINE", &query_line);
+    let html = replace_slot(&html, "EVIDENCE_RESULTS_HEAD", &results_head);
+    let html = replace_slot(&html, "EVIDENCE_RESULTS", &results);
+    let html = html.replace(
+        "本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）",
+        &format!("本机服务 / {primary_copy} <span class=\"v7-tech-key\">{technical_code}</span>"),
+    );
+    let html = html.replace(
+        "本地读投影未接通 <span class=\"v7-tech-key\">READ MODEL NOT CONNECTED</span>",
+        &format!("{primary_copy} <span class=\"v7-tech-key\">{technical_code}</span>"),
+    );
+    html.replace(
+        "来源信息尚未完整接通 <span class=\"v7-tech-key\">SOURCE INCOMPLETE</span>",
         &format!(
-            "<b>本机只读（LOCAL READ ONLY）</b> · <span>{}</span>",
-            time_view.boundary_copy
+            "当前未读取材料，来源状态未知 <span class=\"v7-tech-key\">{technical_code}</span>"
         ),
-    )
-    .replace(
-        "当前没有已接纳材料（NO ACCEPTED MATERIAL AVAILABLE）",
-        "已接纳的发现卡片 <span class=\"v7-tech-key\">ACCEPTED DISCOVERY</span>",
     )
 }
 

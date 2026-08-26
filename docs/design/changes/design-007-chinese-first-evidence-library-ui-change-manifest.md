@@ -45,6 +45,7 @@
 - `.v7-tech-key` 与 Discovery 卡片内的动态技术键改为相对关联中文主文案的较小字号；技术键保持可见，但不能大于中文主表达。
 - 共享 shell 中仍存在的孤立英文（例如页面共用的 `CORPUS · UNKNOWN` 或时区标记）影响其它页面，**明确不在 Issue #65 / DESIGN-007 改动范围内**；需另立事项确认其跨页语言与视觉合同。本事项不修改 `shell.rs` 或 `shell.css`。
 - Standards 复核仅余的三处页面内英文整句，均在本事项的页面模板／renderer 中收口：结果表头改为「已接纳的发现卡片（`ACCEPTED DISCOVERY`）」；未接通时的本机呈现与未读材料分为两条中文说明（`LOCAL PRESENTATION`、`NO MATERIAL READ`）；默认视角以中文完整说明「当前显示最新已接纳的发现卡片；其中部分卡片的发布时间仍可能未知」，英文只保留 `LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN` 技术旁注。此修订不改共享 shell、查询、数据或状态来源。
+- 最终动态路径审查：成功读投影的查询行采用「只读取 Linggan 已接纳的发现卡片」作为中文主表达，`DISCOVERY ONLY` 仅为紧邻旁注；无效查询与读投影暂不可用分别呈现其准确中文状态，并通过页面局部槽位写入原始代码 `LOCAL_QUERY_INVALID` / `READ_PROJECTION_UNAVAILABLE`。两条路径都明确「未读取材料」，不再通过全局替换把它们误写为 `SOURCE_INCOMPLETE`、空库或已完成读取。
 
 ## 5. 证明计划与边界
 
