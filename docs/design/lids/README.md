@@ -64,6 +64,7 @@ Token → Primitive → Component → Pattern → Page
 | [../templates/component-spec-form.md](../templates/component-spec-form.md) | 成为跨页面 CMP 前的唯一规格表单 |
 | [../components/component-promotion.md](../components/component-promotion.md) | 防止一次参考页把局部块误报为正式 LIDS 组件 |
 | [../pages/topic-intelligence-reference-page.md](../pages/topic-intelligence-reference-page.md) | 首个 L2 合成参考页；只验证 LIDS 的局部设计表达，不代表真实产品页 |
+| [language-policy.md](language-policy.md) | `LIDS-LANG-001`：用户界面中文主表达、英文技术旁注的权威规则；页面迁移仍须逐项受控 |
 
 ## 标准状态与升级门
 

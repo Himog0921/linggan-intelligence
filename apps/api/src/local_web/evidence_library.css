@@ -33,6 +33,27 @@
 .v7-window-exclusion{display:flex;gap:8px;align-items:flex-start;padding:10px 18px;border-bottom:1px solid var(--v7-line);background:var(--v7-unknown-soft);color:var(--v7-unknown);font:11px/1.45 var(--lgi-font-sans)}.v7-window-exclusion b{flex:0 0 auto;color:var(--v7-unknown);font:700 10px var(--lgi-font-mono);letter-spacing:.04em}
 @media(max-width:640px){.v7-discovery-row{grid-template-columns:18px 48px minmax(0,1fr);gap:10px;padding:12px 14px}.v7-media-pending,.v7-media-local{width:48px;height:62px}.v7-media-pending{font-size:7px}.v7-discovery-coverage{display:none}.v7-discovery-title{font-size:13px}.v7-discovery-meta,.v7-discovery-boundary{font-size:9px}}
 
+/* DESIGN-007 / LIDS-LANG-001: Chinese carries user meaning; English remains a
+ * compact, adjacent technical key. This is page-local because no cross-page
+ * component contract exists yet. */
+.v7-tech-key{display:inline;color:var(--v7-ghost);font:500 .82em/1.2 var(--lgi-font-mono);letter-spacing:.06em;white-space:nowrap}
+/* Descendant labels own stronger type rules. Repeat the technical-key contract here so an
+ * embedded code remains an annotation rather than inheriting the Chinese label's visual weight. */
+.v7-fact-strap span .v7-tech-key,.v7-empty-metric span .v7-tech-key,.v7-readout span .v7-tech-key{color:var(--v7-ghost);font:500 .82em/1.2 var(--lgi-font-mono);letter-spacing:.06em;white-space:nowrap}
+.v7-zh-status{color:var(--v7-muted);font:500 11px/1.35 var(--lgi-font-sans)}
+.v7-zh-status + .v7-tech-key{margin-left:5px}
+.v7-zh-value{color:var(--v7-muted);font:500 11px/1.2 var(--lgi-font-sans)}
+.v7-chip .v7-tech-key,.v7-control .v7-tech-key{margin-left:4px}
+.v7-discovery-meta .v7-tech-key{margin-left:-6px}
+.v7-discovery-boundary .v7-tech-key,.v7-discovery-coverage .v7-tech-key{margin-left:5px}
+.v7-media-pending{align-content:center;place-items:center}
+.v7-media-pending .v7-tech-key{display:block;max-width:54px;margin-top:4px;font-size:.82em;line-height:1.15;white-space:normal}
+.v7-published-unknown .v7-tech-key{margin-left:5px;color:var(--v7-unknown)}
+.v7-window-exclusion .v7-tech-key{color:var(--v7-unknown)}
+.v7-empty-title .v7-tech-key,.v7-empty-boundary .v7-tech-key,.v7-empty-facts .v7-tech-key,.v7-empty-metric .v7-tech-key{margin-left:5px}
+.v7-iid .v7-tech-key,.v7-imeta .v7-tech-key,.v7-section h3 > span .v7-tech-key,.v7-readout .v7-tech-key,.v7-matrix-row .v7-tech-key{margin-left:5px}
+@media(max-width:640px){.v7-tech-key{font-size:.82em}.v7-media-pending .v7-tech-key{font-size:.82em}}
+
 
 /* DESIGN-003 · Chinese-first typography, page-local half.
  * Chinese carries the label; Latin and status codes drop to a mono annotation.
@@ -41,7 +62,7 @@
  * reduced-motion — lives in shell.css so both surfaces receive it. */
 .v7-stat-zh { display:block; margin-bottom:4px; color:var(--v7-muted); font:500 11px/1.2 var(--lgi-font-sans); letter-spacing:0; }
 .v7-view-label em,
-.v7-filter-lead em { margin-left:7px; color:var(--v7-ghost); font:500 11px var(--lgi-font-mono); font-style:normal; letter-spacing:.11em; }
+.v7-filter-lead em { margin-left:7px; color:var(--v7-ghost); font:500 .82em/1.2 var(--lgi-font-mono); font-style:normal; letter-spacing:.06em; }
 .v7-view-label,
 .v7-filter-lead { font-family:var(--lgi-font-sans); letter-spacing:.01em; }
 .v7-seg-label { font-family:var(--lgi-font-sans); letter-spacing:.01em; }
@@ -49,7 +70,7 @@
 .v7-control small { font-family:var(--lgi-font-sans); font-size:11px; letter-spacing:0; }
 
 /* Section headings: Chinese leads, Latin annotates. */
-.v7-section h3 em { margin-right:auto; margin-left:8px; color:var(--v7-ghost); font:500 11px var(--lgi-font-mono); font-style:normal; letter-spacing:.11em; }
+.v7-section h3 em { margin-right:auto; margin-left:8px; color:var(--v7-ghost); font:500 .82em/1.2 var(--lgi-font-mono); font-style:normal; letter-spacing:.06em; }
 .v7-section h3 { font-family:var(--lgi-font-sans); letter-spacing:.01em; }
 .v7-matrix-row .v7-k { font-family:var(--lgi-font-sans); font-size:12px; letter-spacing:0; }
 .v7-tabs button { font-family:var(--lgi-font-sans); }

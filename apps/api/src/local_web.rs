@@ -1231,23 +1231,11 @@ fn local_read_json_error(status: axum::http::StatusCode, code: &'static str) -> 
 }
 
 fn evidence_read_unavailable_html() -> String {
-    evidence_library_html()
-        .replace("SOURCE_INCOMPLETE", "READ_PROJECTION_UNAVAILABLE")
-        .replace(
-            "页面还没有连接到受控的本地材料读投影",
-            "页面无法从受控本地读投影读取卡片；没有显示任何旧系统或远程数据",
-        )
-        .to_owned()
+    evidence_page::render_read_unavailable(&evidence_library_html())
 }
 
 fn evidence_query_invalid_html() -> String {
-    evidence_library_html()
-        .replace("SOURCE_INCOMPLETE", "LOCAL_QUERY_INVALID")
-        .replace(
-            "页面还没有连接到受控的本地材料读投影",
-            "当前只接受本地 EvidenceQuery；没有触发平台搜索或补采",
-        )
-        .to_owned()
+    evidence_page::render_query_invalid(&evidence_library_html())
 }
 
 async fn stylesheet() -> Response {
@@ -1345,7 +1333,7 @@ fn evidence_library_html() -> String {
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
-    <title>Evidence Library · Linggan Intelligence</title>
+    <title>证据库 · Linggan Intelligence</title>
     <link rel="stylesheet" href="/assets/evidence-library.css">
   </head>
   <body>
@@ -1360,33 +1348,33 @@ fn evidence_library_html() -> String {
           <button class="v7-side-nav" disabled aria-disabled="true"><i>03</i><span>创作者</span></button>
           <button class="v7-side-nav" disabled aria-disabled="true"><i>04</i><span>已存查询</span></button>
           <button class="v7-side-nav" disabled aria-disabled="true"><i>05</i><span>来源</span></button>
-          <div class="v7-side-foot"><span class="v7-side-dot"></span>SOURCE INCOMPLETE<br><span class="v7-mono">local presentation only · no material read</span></div>
+          <div class="v7-side-foot"><span class="v7-side-dot"></span><!-- EVIDENCE_READ_STATUS_START --><span class="v7-zh-status">来源材料尚未完整接通</span><span class="v7-tech-key">SOURCE INCOMPLETE</span><br><span class="v7-zh-status">仅展示本机页面结构</span><span class="v7-tech-key">LOCAL PRESENTATION</span><br><span class="v7-zh-status">当前尚未读取任何材料</span><span class="v7-tech-key">NO MATERIAL READ</span><!-- EVIDENCE_READ_STATUS_END --></div>
         </aside>
 
         <main class="v7-main" aria-labelledby="page-title">
           <section class="v7-page-header">
             <h1 class="v7-sr-only" id="page-title">证据库</h1>
-            <form class="v7-search-row" method="get"><label class="v7-search"><span class="v7-cmd">⌘ FIND</span><!-- EVIDENCE_SEARCH_INPUT_START --><input disabled aria-disabled="true" placeholder="等待受控材料读投影接通……"><!-- EVIDENCE_SEARCH_INPUT_END --><kbd>⌘ K</kbd></label><details class="v7-dd" aria-label="搜索范围"><summary><em>类型</em><strong>全部</strong><i aria-hidden="true">▾</i></summary><div class="v7-dd-menu"><button type="button" disabled aria-current="true">全部</button><button type="button" disabled>作品</button><button type="button" disabled>评论</button><button type="button" disabled>转录</button><button type="button" disabled>作者</button></div></details><div class="v7-page-actions"><button class="v7-btn" disabled aria-disabled="true">复制查询</button><button class="v7-btn" disabled aria-disabled="true">保存当前视图</button><button class="v7-btn v7-primary" disabled aria-disabled="true">发起研究</button></div></form>
+            <form class="v7-search-row" method="get"><label class="v7-search"><span class="v7-cmd">⌘ 检索</span><!-- EVIDENCE_SEARCH_INPUT_START --><input disabled aria-disabled="true" placeholder="等待受控材料读投影接通……"><!-- EVIDENCE_SEARCH_INPUT_END --><kbd>⌘ K</kbd></label><details class="v7-dd" aria-label="搜索范围"><summary><em>类型</em><strong>全部</strong><i aria-hidden="true">▾</i></summary><div class="v7-dd-menu"><button type="button" disabled aria-current="true">全部</button><button type="button" disabled>作品</button><button type="button" disabled>评论</button><button type="button" disabled>转录</button><button type="button" disabled>作者</button></div></details><div class="v7-page-actions"><button class="v7-btn" disabled aria-disabled="true">复制查询</button><button class="v7-btn" disabled aria-disabled="true">保存当前视图</button><button class="v7-btn v7-primary" disabled aria-disabled="true">发起研究</button></div></form>
             <div class="v7-views-bar">
               <div class="v7-view-group"><span class="v7-view-label">系统视图 <em>SYSTEM VIEWS</em></span><div class="v7-view-strip"><button class="v7-view-pill" disabled aria-current="true"><i>01</i><span>最新发现</span><span class="v7-n">—</span></button><button class="v7-view-pill" disabled><i>02</i><span>待补采</span><span class="v7-n">—</span></button><button class="v7-view-pill" disabled><i>03</i><span>高互动</span><span class="v7-n">—</span></button><button class="v7-view-pill" disabled><i>04</i><span>评论密集</span><span class="v7-n">—</span></button><button class="v7-view-pill" disabled><i>05</i><span>最近异常</span><span class="v7-n">—</span></button><button class="v7-view-pill v7-more" disabled><i>+</i><span>更多</span><span class="v7-n">⌄</span></button></div></div>
               <div class="v7-view-group v7-my"><span class="v7-view-label">我的视图 <em>MY VIEWS</em></span><div class="v7-view-strip"><button class="v7-view-pill" disabled><i>A</i><span>ADHD 作业</span></button><button class="v7-view-pill" disabled><i>B</i><span>低粉爆文</span></button><button class="v7-view-pill" disabled><i>C</i><span>家长原声研究</span></button></div></div>
             </div>
-            <div class="v7-controls-row"><div class="v7-filters"><span class="v7-filter-lead">筛选 <em>FILTER</em></span><button class="v7-chip" disabled><em>平台</em> ALL</button><button class="v7-chip" disabled><em>窗口</em> UNKNOWN</button><button class="v7-chip" disabled><em>类型</em> ALL</button><button class="v7-chip" disabled><em>来源</em> UNKNOWN</button><button class="v7-chip" disabled><em>状态</em> UNKNOWN</button></div><div class="v7-controls"><button class="v7-control" disabled><small>分组</small><strong>不分组</strong></button><button class="v7-control" disabled><small>排序</small><strong>UNKNOWN</strong></button><button class="v7-control" disabled><small>密度</small><strong>标准</strong></button><div class="v7-seg"><span class="v7-seg-label">视图</span><button disabled aria-current="true">研究</button><button disabled>表格</button><button disabled>封面</button></div></div></div>
-            <div class="v7-query-line"><div>页面结构已就绪 · 材料读投影尚未接通</div><div><b>SOURCE_INCOMPLETE</b> · <span>NO QUERY AVAILABLE</span></div></div>
+            <div class="v7-controls-row"><div class="v7-filters"><span class="v7-filter-lead">筛选 <em>FILTER</em></span><button class="v7-chip" disabled><em>平台</em> 全部 <span class="v7-tech-key">ALL</span></button><button class="v7-chip" disabled><em>窗口</em> 未知 <span class="v7-tech-key">UNKNOWN</span></button><button class="v7-chip" disabled><em>类型</em> 全部 <span class="v7-tech-key">ALL</span></button><button class="v7-chip" disabled><em>来源</em> 未知 <span class="v7-tech-key">UNKNOWN</span></button><button class="v7-chip" disabled><em>状态</em> 未知 <span class="v7-tech-key">UNKNOWN</span></button></div><div class="v7-controls"><button class="v7-control" disabled><small>分组</small><strong>不分组</strong></button><button class="v7-control" disabled><small>排序</small><strong>未知 <span class="v7-tech-key">UNKNOWN</span></strong></button><button class="v7-control" disabled><small>密度</small><strong>标准</strong></button><div class="v7-seg"><span class="v7-seg-label">视图</span><button disabled aria-current="true">研究</button><button disabled>表格</button><button disabled>封面</button></div></div></div>
+            <!-- EVIDENCE_QUERY_LINE_START --><div class="v7-query-line"><div>页面结构已就绪 · 材料读投影尚未接通</div><div><b>来源信息尚未完整接通 <span class="v7-tech-key">SOURCE INCOMPLETE</span></b> · <span>当前没有可用查询 <span class="v7-tech-key">NO QUERY AVAILABLE</span></span></div></div><!-- EVIDENCE_QUERY_LINE_END -->
           </section>
 
-          <section class="v7-workspace" aria-label="Evidence Library 工作区">
+            <section class="v7-workspace" aria-label="证据库工作区">
             <section class="v7-results" aria-label="事实材料列表">
-              <div class="v7-fact-strap"><span>FACT LAYER / EVIDENCE</span><i aria-hidden="true"></i><b>原始内容资产</b></div>
-              <div class="v7-results-head"><div class="v7-results-left"><input class="v7-check" type="checkbox" disabled aria-label="选择全部材料"><span>NO ACCEPTED MATERIAL AVAILABLE</span></div><div>READ MODEL NOT CONNECTED</div></div>
+              <div class="v7-fact-strap"><span>事实层 / 证据 <span class="v7-tech-key">FACT LAYER / EVIDENCE</span></span><i aria-hidden="true"></i><b>原始内容资产</b></div>
+              <!-- EVIDENCE_RESULTS_HEAD_START --><div class="v7-results-head"><div class="v7-results-left"><input class="v7-check" type="checkbox" disabled aria-label="选择全部材料"><span>当前没有已接纳材料 <span class="v7-tech-key">NO ACCEPTED MATERIAL AVAILABLE</span></span></div><div>本地读投影尚未接通 <span class="v7-tech-key">READ MODEL NOT CONNECTED</span></div></div><!-- EVIDENCE_RESULTS_HEAD_END -->
               <!-- EVIDENCE_RESULTS_START --><div class="v7-results-empty">
-                <article class="v7-empty-row"><input class="v7-check" type="checkbox" disabled aria-label="无材料"><div class="v7-empty-mark">?</div><div class="v7-empty-main"><div class="v7-empty-title">SOURCE_INCOMPLETE</div><div class="v7-empty-copy">页面还没有连接到受控的本地材料读投影，因此不能列出 Content、评论、转录或来源对象。</div><div class="v7-empty-boundary"><b>NO_ACCEPTED_MATERIAL_AVAILABLE</b>这不是世界中不存在内容，也不是库内数量为零。</div><div class="v7-empty-facts"><span>TRUTH <strong>UNKNOWN</strong></span><span>COVERAGE <strong>UNKNOWN</strong></span><span>DISPLAY <strong>NOT CONNECTED</strong></span></div></div><div class="v7-empty-metric"><div><b>—</b><span>ITEMS</span></div><div><b>—</b><span>OBS</span></div><div><b>—</b><span>SOURCE</span></div></div></article>
-                <section class="v7-empty-panel" aria-labelledby="empty-title"><h2 id="empty-title">没有可展示的本地材料</h2><p>当前本地 host 只提供此页面的视觉和信息边界；它没有读取数据库、历史内容工作台或插件结果。</p><dl class="v7-empty-grid"><div><dt>现在知道什么</dt><dd>页面可被本地 host 提供；材料读取合同未接通。</dd></div><div><dt>现在不知道什么</dt><dd>材料、来源、观察时间、Capture 与 Coverage 均为未知。</dd></div><div><dt>下一步</dt><dd>001B 另立范围后才能建立受控只读投影。</dd></div></dl></section>
+                <article class="v7-empty-row"><input class="v7-check" type="checkbox" disabled aria-label="无材料"><div class="v7-empty-mark">?</div><div class="v7-empty-main"><div class="v7-empty-title">来源信息尚未完整接通 <span class="v7-tech-key">SOURCE INCOMPLETE</span></div><div class="v7-empty-copy">页面还没有连接到受控的本地材料读投影，因此不能列出内容、评论、转录或来源对象。</div><div class="v7-empty-boundary"><b>当前没有已接纳材料 <span class="v7-tech-key">NO ACCEPTED MATERIAL AVAILABLE</span></b>这不是世界中不存在内容，也不是库内数量为零。</div><div class="v7-empty-facts"><span>事实层级 <strong>未知 <span class="v7-tech-key">UNKNOWN</span></strong></span><span>覆盖情况 <strong>未知 <span class="v7-tech-key">UNKNOWN</span></strong></span><span>页面投影 <strong>未接通 <span class="v7-tech-key">NOT CONNECTED</span></strong></span></div></div><div class="v7-empty-metric"><div><b>—</b><span>材料数 <span class="v7-tech-key">ITEMS</span></span></div><div><b>—</b><span>观察数 <span class="v7-tech-key">OBS</span></span></div><div><b>—</b><span>来源数 <span class="v7-tech-key">SOURCE</span></span></div></div></article>
+                <section class="v7-empty-panel" aria-labelledby="empty-title"><h2 id="empty-title">没有可展示的本地材料</h2><p>当前本机服务只提供此页面的视觉和信息边界；它没有读取数据库、历史内容工作台或插件结果。</p><dl class="v7-empty-grid"><div><dt>现在知道什么</dt><dd>页面可由本机服务提供；材料读取合同未接通。</dd></div><div><dt>现在不知道什么</dt><dd>材料、来源、观察时间、采集记录与覆盖情况均为未知。</dd></div><div><dt>下一步</dt><dd>需在独立范围内建立受控只读投影。</dd></div></dl></section>
               </div><!-- EVIDENCE_RESULTS_END -->
             </section>
             <aside class="v7-inspect" aria-labelledby="inspector-title">
-              <div class="v7-inspector-head"><div class="v7-inspector-identity"><div class="v7-iid">#NO_SELECTION</div><h2 class="v7-ititle" id="inspector-title">尚未选择材料</h2><div class="v7-imeta"><span>CONTENT ITEM UNKNOWN</span><span>·</span><span>OBSERVATION UNKNOWN</span><span>·</span><span>CAPTURE UNKNOWN</span></div></div><div class="v7-inspector-ops"><div class="v7-inspector-primary"><button disabled aria-disabled="true">↗ 原文</button><button disabled aria-disabled="true">⟳ 补采</button><button disabled aria-disabled="true">＋ 研究</button></div><div class="v7-inspector-window"><button disabled aria-disabled="true">PIN</button><button disabled aria-disabled="true">WIDE</button><button disabled aria-disabled="true">×</button></div></div><div class="v7-tabs" aria-label="材料详情页签"><button disabled aria-current="page">概览</button><button disabled>正文</button><button disabled>评论</button><button disabled>历史</button><button disabled>来源</button><button disabled>关系</button></div></div>
-              <div class="v7-inspector-body"><section class="v7-section"><h3>原始内容 <em>RAW CONTENT</em> <span>UNKNOWN</span></h3><div class="v7-body-copy">没有选中 ContentItem，也没有可显示的受限材料。此处不能推断标题、正文、作者或平台状态。</div></section><section class="v7-section"><h3>最强命中 <em>STRONGEST MATCH</em> <span>NO MATERIAL</span></h3><div class="v7-quote">没有材料可供匹配或引用。<small>不显示示例原文、评论或转录。</small></div></section><section class="v7-section"><h3>平台与本地事实 <em>PLATFORM / LOCAL FACTS</em> <span>UNKNOWN</span></h3><div class="v7-readout"><div><b>—</b><span>PLATFORM LIKES</span></div><div><b>—</b><span>PLATFORM COMMENTS</span></div><div><b>—</b><span>LOCAL COMMENTS</span></div><div><b>—</b><span>OBSERVATIONS</span></div></div></section><section class="v7-section"><h3>状态矩阵 <em>STATE MATRIX</em></h3><div class="v7-matrix"><div class="v7-matrix-row"><div class="v7-k">事实来源</div><div class="v7-v"><i class="v7-dot"></i>SOURCE_INCOMPLETE</div></div><div class="v7-matrix-row"><div class="v7-k">读投影</div><div class="v7-v"><i class="v7-dot"></i>NOT CONNECTED</div></div><div class="v7-matrix-row"><div class="v7-k">覆盖</div><div class="v7-v"><i class="v7-dot"></i>UNKNOWN</div></div></div></section></div>
+              <div class="v7-inspector-head"><div class="v7-inspector-identity"><div class="v7-iid">未选择材料 <span class="v7-tech-key">#NO_SELECTION</span></div><h2 class="v7-ititle" id="inspector-title">尚未选择材料</h2><div class="v7-imeta"><span>内容对象未知 <span class="v7-tech-key">CONTENT ITEM UNKNOWN</span></span><span>·</span><span>观察未知 <span class="v7-tech-key">OBSERVATION UNKNOWN</span></span><span>·</span><span>采集记录未知 <span class="v7-tech-key">CAPTURE UNKNOWN</span></span></div></div><div class="v7-inspector-ops"><div class="v7-inspector-primary"><button disabled aria-disabled="true">↗ 原文</button><button disabled aria-disabled="true">⟳ 补采</button><button disabled aria-disabled="true">＋ 研究</button></div><div class="v7-inspector-window"><button disabled aria-disabled="true">固定面板 <span class="v7-tech-key">PIN</span></button><button disabled aria-disabled="true">加宽面板 <span class="v7-tech-key">WIDE</span></button><button disabled aria-label="关闭检查器">×</button></div></div><div class="v7-tabs" aria-label="材料详情页签"><button disabled aria-current="page">概览</button><button disabled>正文</button><button disabled>评论</button><button disabled>历史</button><button disabled>来源</button><button disabled>关系</button></div></div>
+              <div class="v7-inspector-body"><section class="v7-section"><h3>原始内容 <em>RAW CONTENT</em> <span>未知 <span class="v7-tech-key">UNKNOWN</span></span></h3><div class="v7-body-copy">没有选中内容对象，也没有可显示的受限材料。此处不能推断标题、正文、作者或平台状态。</div></section><section class="v7-section"><h3>最强命中 <em>STRONGEST MATCH</em> <span>没有材料 <span class="v7-tech-key">NO MATERIAL</span></span></h3><div class="v7-quote">没有材料可供匹配或引用。<small>不显示示例原文、评论或转录。</small></div></section><section class="v7-section"><h3>平台与本地事实 <em>PLATFORM / LOCAL FACTS</em> <span>未知 <span class="v7-tech-key">UNKNOWN</span></span></h3><div class="v7-readout"><div><b>—</b><span>平台点赞 <span class="v7-tech-key">PLATFORM LIKES</span></span></div><div><b>—</b><span>平台评论 <span class="v7-tech-key">PLATFORM COMMENTS</span></span></div><div><b>—</b><span>本地评论 <span class="v7-tech-key">LOCAL COMMENTS</span></span></div><div><b>—</b><span>观察记录 <span class="v7-tech-key">OBSERVATIONS</span></span></div></div></section><section class="v7-section"><h3>状态矩阵 <em>STATE MATRIX</em></h3><div class="v7-matrix"><div class="v7-matrix-row"><div class="v7-k">事实来源</div><div class="v7-v"><i class="v7-dot"></i>来源信息尚未完整接通 <span class="v7-tech-key">SOURCE INCOMPLETE</span></div></div><div class="v7-matrix-row"><div class="v7-k">读投影</div><div class="v7-v"><i class="v7-dot"></i>未接通 <span class="v7-tech-key">NOT CONNECTED</span></div></div><div class="v7-matrix-row"><div class="v7-k">覆盖</div><div class="v7-v"><i class="v7-dot"></i>未知 <span class="v7-tech-key">UNKNOWN</span></div></div></div></section></div>
             </aside>
           </section>
         </main>
@@ -1396,9 +1384,9 @@ fn evidence_library_html() -> String {
 </html>"#;
     let header = shell::global_header(
         shell::PrimarySurface::Corpus,
-        "LOCAL HOST / NO READ MODEL",
+        "<!-- EVIDENCE_HEADER_BOUNDARY_START -->本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span><!-- EVIDENCE_HEADER_BOUNDARY_END -->",
         "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">材料状态</span>",
-        "<span class=\"v7-kpi\"><em>内容</em><b>UNKNOWN</b></span><span class=\"v7-kpi\"><em>评论</em><b>UNKNOWN</b></span><span class=\"v7-kpi\"><em>创作者</em><b>UNKNOWN</b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span class=\"v7-query-meta\">READ MODEL NOT CONNECTED</span><span>SOURCE INCOMPLETE</span><span>UTC+08</span>",
+        "<span class=\"v7-kpi\"><em>内容</em><b>未知 <span class=\"v7-tech-key\">UNKNOWN</span></b></span><span class=\"v7-kpi\"><em>评论</em><b>未知 <span class=\"v7-tech-key\">UNKNOWN</span></b></span><span class=\"v7-kpi\"><em>创作者</em><b>未知 <span class=\"v7-tech-key\">UNKNOWN</span></b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><!-- EVIDENCE_HEADER_META_STATE_START --><span class=\"v7-query-meta\">本地读投影未接通 <span class=\"v7-tech-key\">READ MODEL NOT CONNECTED</span></span><span>来源信息尚未完整接通 <span class=\"v7-tech-key\">SOURCE INCOMPLETE</span></span><!-- EVIDENCE_HEADER_META_STATE_END --><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
     );
     base.replace(
         "<!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->",
