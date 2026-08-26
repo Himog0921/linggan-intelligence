@@ -41,8 +41,14 @@
 |---|---|---|---|
 | 设计规格一致 | 通过 | `LIDS-LANG-001`、DESIGN-007、LIDS/项目索引和迁移记录 | 不证明其它页面已迁移 |
 | 页面实现 | 通过 | Rust template / projection renderer / page CSS；中文主表达与技术键组合均有 focused test | 不改行为 |
-| 自动检查 | 通过 | `cargo fmt --all -- --check`、`cargo clippy --workspace -- -D warnings`、`cargo test --workspace`、governance check | 不证明真实平台或用户验收 |
+| 自动检查 | 通过 | `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace`、governance check | 不证明真实平台或用户验收 |
 | DOM / 数据边界 | 通过 | 独立 loopback `127.0.0.1:3100` DOM 读取；隔离 PostgreSQL proof 的 9+5 数据测试和 6 条 API/页面测试 | 本机 loopback 无真实平台材料，不输出或保存真实 XHS 内容 |
 | 视觉 / Mog 验收 | 待用户确认 | 本项未改几何、Token、页面结构或按钮状态；CSS 仅降低英文技术键的语义角色 | 未重新提交真实材料截图；用户仍须在合并后确认整体阅读感受 |
 | 真实链路/回执 | 不适用 | 本事项为文案与展示治理切片 | 不证明采集或媒体 |
 | Mog / 业务验收 | 待用户确认 | 本机页面视觉检查 | 用户决定最终可读性 |
+
+## 5. 交付质量门与后续整合
+
+- 最终质量门实际执行 `cargo clippy --workspace --all-targets --locked -- -D warnings`。此前仅记录的非 `--all-targets` 命令不能代表该更严格门已通过；本次以最小测试 helper 拆分 loopback 证明函数，保留全部原有状态与媒体未采集断言。
+- 已知后续依赖为 Draft PR #69 的共享 shell 中文化。#67 只触及 Evidence Library 的页面局部 renderer/CSS，#69 才拥有共享 `shell.rs` / `shell.css`；两者运行时文件边界不重叠，不能在本事项内合并。
+- 集成顺序固定为：先合并 #67；随后将 #69 rebase 到新的 `main`，由 integration owner 处理可能重叠的 focused tests / 文档行，再对 #69 的新 exact head 重新审查和整合。任何旧 head 的审查结论均不得复用。

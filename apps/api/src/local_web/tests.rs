@@ -535,36 +535,16 @@ fn resumable_media_temp_bytes_are_never_published_until_the_final_promotion() {
 async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discovery_cards() {
     let database = proof_database("local_api_ingress").await;
     let observed_at = producer_fixture_observed_at(&database).await;
-    let package = discovery_package(&observed_at);
     let application = app_with_database(database);
 
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/local/discovery-packages")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(package))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_discovery_package_is_accepted(application.clone(), discovery_package(&observed_at))
+        .await;
 
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/api/local/evidence-library?q=ADHD&window=last_30_days")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let body = String::from_utf8(body.to_vec()).unwrap();
+    let body = get_successful_utf8_response(
+        application.clone(),
+        "/api/local/evidence-library?q=ADHD&window=last_30_days",
+    )
+    .await;
     assert!(body.contains("note-api-known"));
     assert!(!body.contains("note-api-unknown"));
     assert!(body.contains("\"timeView\":\"last_30_days\""));
@@ -572,71 +552,26 @@ async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discov
     assert!(!body.contains("https://"));
     assert!(!body.contains("xhscdn"));
 
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/api/local/evidence-library?q=ADHD")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = String::from_utf8(
-        to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
+    let body =
+        get_successful_utf8_response(application.clone(), "/api/local/evidence-library?q=ADHD")
+            .await;
     assert!(body.contains("note-api-known"));
     assert!(body.contains("note-api-unknown"));
     assert!(body.contains("\"timeView\":\"latest_accepted_discovery\""));
     assert!(body.contains("\"excludedUnknownPublishedAt\":0"));
 
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/corpus/evidence?q=ADHD&window=last_30_days")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let html = String::from_utf8(
-        to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
+    let html = get_successful_utf8_response(
+        application.clone(),
+        "/corpus/evidence?q=ADHD&window=last_30_days",
     )
-    .unwrap();
+    .await;
     assert!(html.contains("API 接纳卡片"));
     assert!(html.contains("媒体<br>尚未采集"));
     assert!(html.contains("MEDIA NOT ACQUIRED"));
     assert!(!html.contains("https://"));
     assert!(!html.contains("xhscdn"));
 
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/corpus/evidence?q=ADHD")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let html = String::from_utf8(
-        to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
+    let html = get_successful_utf8_response(application, "/corpus/evidence?q=ADHD").await;
     assert!(html.contains("PUBLISHED_AT UNKNOWN"));
     assert!(html.contains("未用首次发现、观察或接收时间替代"));
 }
@@ -1001,6 +936,26 @@ async fn post_discovery_package(application: Router, package: String) -> axum::r
         )
         .await
         .unwrap()
+}
+
+async fn assert_discovery_package_is_accepted(application: Router, package: String) {
+    let response = post_discovery_package(application, package).await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+async fn get_successful_utf8_response(application: Router, uri: &str) -> String {
+    let response = application
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap()
 }
 
 fn discovery_package(observed_at: &str) -> String {
