@@ -34,6 +34,39 @@ body {
   color: var(--ink);
 }
 
+.popup-startup-failure {
+  min-height: 220px;
+  margin: 14px;
+  padding: 16px;
+  background: var(--paper);
+  border: var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  font-family: var(--text);
+}
+
+.popup-startup-failure-eyebrow {
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-family: var(--display);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+}
+
+.popup-startup-failure h1 {
+  margin-bottom: 10px;
+  font-family: var(--headline);
+  font-size: 19px;
+  line-height: 1.2;
+}
+
+.popup-startup-failure p {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.55;
+}
+
 /* ===== Scrollbar ===== */
 .popup-container::-webkit-scrollbar { width: 4px; }
 .popup-container::-webkit-scrollbar-thumb { background: var(--ink); border-radius: 2px; }
