@@ -242,6 +242,49 @@ fn default_read_view_surfaces_unknown_published_time_without_a_surrogate_date() 
 }
 
 #[test]
+fn strict_published_window_reports_unknown_exclusions_even_with_visible_cards() {
+    let known_card = || DiscoveryLibraryCard {
+        platform: "xhs".to_owned(),
+        platform_content_id: "synthetic-known-publication".to_owned(),
+        title: Some("synthetic known discovery".to_owned()),
+        creator_display_name: Some("synthetic creator".to_owned()),
+        published_at_source_text: Some("2026-08-26T00:00:00Z".to_owned()),
+        published_at: Some("2026-08-26 00:00:00+00".to_owned()),
+        published_at_state: "KNOWN",
+        first_discovered_at: "2026-08-26 00:00:00+00".to_owned(),
+        observed_at: "2026-08-26 00:00:00+00".to_owned(),
+        result_position: 1,
+        coverage_visible_cards: 1,
+        coverage_maximum_quota: 20,
+        coverage_stopped_reason: "surface_read_complete".to_owned(),
+        cover_presentation_state: "MEDIA_NOT_ACQUIRED",
+        cover_local_asset_url: None,
+    };
+    let strict_html = evidence_page::render_read_projection(
+        &evidence_library_html(),
+        &DiscoveryLibraryProjection {
+            cards: vec![known_card()],
+            excluded_unknown_published_at: 1,
+            time_view: "last_30_days",
+        },
+        None,
+    );
+    assert!(strict_html.contains("当前查询有 1 个对象因来源发布时间未知而未进入此发布时间窗口"));
+    assert!(strict_html.contains("synthetic known discovery"));
+
+    let default_html = evidence_page::render_read_projection(
+        &evidence_library_html(),
+        &DiscoveryLibraryProjection {
+            cards: vec![known_card()],
+            excluded_unknown_published_at: 0,
+            time_view: "latest_accepted_discovery",
+        },
+        None,
+    );
+    assert!(!default_html.contains("未进入此发布时间窗口"));
+}
+
+#[test]
 fn default_empty_read_view_is_not_misdescribed_as_an_empty_published_window() {
     let projection = DiscoveryLibraryProjection {
         cards: vec![],

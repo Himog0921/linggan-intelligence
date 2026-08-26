@@ -178,39 +178,34 @@ pub async fn read_discovery_library(
     let window_days = query.published_window().map(published_window_days);
     let text = query.text().filter(|value| !value.trim().is_empty());
     let rows = sqlx::query(
-        "WITH candidate AS ( \
-             SELECT occurrence.*, content.platform_content_id, package.maximum_quota, \
+        "WITH accepted AS ( \
+             SELECT occurrence.*, content.platform_content_id, package.accepted_at, package.maximum_quota, \
                     coverage.visible_cards, coverage.stopped_reason \
              FROM local_discovery_occurrence occurrence \
              JOIN local_discovery_content_item content ON content.id = occurrence.content_item_id \
              JOIN local_discovery_package package ON package.id = occurrence.package_id \
              JOIN local_discovery_coverage coverage ON coverage.package_id = package.id \
-             WHERE ($1::integer IS NULL OR (occurrence.published_at IS NOT NULL \
-               AND occurrence.published_at >= scope_001_now() - make_interval(days => $1) \
-               AND occurrence.published_at <= scope_001_now())) \
-               AND ($2::text IS NULL OR lower(coalesce(occurrence.creator_display_name, '')) LIKE '%' || lower($2) || '%' \
-                    OR lower(coalesce(occurrence.title, '')) LIKE '%' || lower($2) || '%') \
-         ), first_discovery AS ( \
-             SELECT occurrence.content_item_id, min(package.accepted_at) AS first_discovered_at \
-             FROM local_discovery_occurrence occurrence \
-             JOIN local_discovery_package package ON package.id = occurrence.package_id \
-             GROUP BY occurrence.content_item_id \
-         ), known_published AS ( \
+         ), grouped AS ( \
              SELECT content_item_id, max(published_at) AS published_at, \
-                    max(published_at_source_text) FILTER (WHERE published_at IS NOT NULL) AS published_at_source_text \
-             FROM candidate GROUP BY content_item_id \
+                    max(published_at_source_text) FILTER (WHERE published_at IS NOT NULL) AS published_at_source_text, \
+                    min(accepted_at) AS first_discovered_at, \
+                    string_agg(concat_ws(' ', creator_display_name, title), ' ') AS retrieval_text \
+             FROM accepted GROUP BY content_item_id \
          ), latest AS ( \
-             SELECT DISTINCT ON (content_item_id) * FROM candidate \
+             SELECT DISTINCT ON (content_item_id) * FROM accepted \
              ORDER BY content_item_id, observed_at DESC, id DESC \
          ) \
          SELECT latest.platform_content_id, latest.title, latest.creator_display_name, \
-                known_published.published_at_source_text, known_published.published_at::text AS published_at, \
-                first_discovery.first_discovered_at::text AS first_discovered_at, \
+                grouped.published_at_source_text, grouped.published_at::text AS published_at, \
+                grouped.first_discovered_at::text AS first_discovered_at, \
                 latest.observed_at::text AS observed_at, latest.result_position, \
                 latest.visible_cards, latest.maximum_quota, latest.stopped_reason \
-         FROM latest JOIN first_discovery ON first_discovery.content_item_id = latest.content_item_id \
-              JOIN known_published ON known_published.content_item_id = latest.content_item_id \
-         ORDER BY first_discovery.first_discovered_at DESC, latest.result_position ASC",
+         FROM latest JOIN grouped ON grouped.content_item_id = latest.content_item_id \
+         WHERE ($1::integer IS NULL OR (grouped.published_at IS NOT NULL \
+           AND grouped.published_at >= scope_001_now() - make_interval(days => $1) \
+           AND grouped.published_at <= scope_001_now())) \
+           AND ($2::text IS NULL OR lower(grouped.retrieval_text) LIKE '%' || lower($2) || '%') \
+         ORDER BY grouped.first_discovered_at DESC, latest.result_position ASC",
     )
     .bind(window_days)
     .bind(text)
@@ -218,9 +213,7 @@ pub async fn read_discovery_library(
     .await?;
 
     let excluded_unknown_published_at = match query.published_window() {
-        Some(window) => {
-            count_unknown_published_at(database, text, published_window_days(window)).await?
-        }
+        Some(_) => count_unknown_published_at(database, text).await?,
         None => 0,
     };
     let cards = rows
@@ -445,26 +438,18 @@ async fn insert_delivery(
 async fn count_unknown_published_at(
     database: &Database,
     text: Option<&str>,
-    window_days: i32,
 ) -> Result<u64, sqlx::Error> {
     sqlx::query(
-        "SELECT count(DISTINCT unknown_occurrence.content_item_id) AS count \
-         FROM local_discovery_occurrence unknown_occurrence \
-         WHERE unknown_occurrence.published_at IS NULL \
-           AND ($1::text IS NULL OR lower(coalesce(unknown_occurrence.creator_display_name, '')) LIKE '%' || lower($1) || '%' \
-                OR lower(coalesce(unknown_occurrence.title, '')) LIKE '%' || lower($1) || '%') \
-           AND NOT EXISTS ( \
-                SELECT 1 FROM local_discovery_occurrence eligible_occurrence \
-                WHERE eligible_occurrence.content_item_id = unknown_occurrence.content_item_id \
-                  AND eligible_occurrence.published_at IS NOT NULL \
-                  AND eligible_occurrence.published_at >= scope_001_now() - make_interval(days => $2) \
-                  AND eligible_occurrence.published_at <= scope_001_now() \
-                  AND ($1::text IS NULL OR lower(coalesce(eligible_occurrence.creator_display_name, '')) LIKE '%' || lower($1) || '%' \
-                       OR lower(coalesce(eligible_occurrence.title, '')) LIKE '%' || lower($1) || '%') \
-           )",
+        "WITH grouped AS ( \
+             SELECT occurrence.content_item_id, max(occurrence.published_at) AS published_at, \
+                    string_agg(concat_ws(' ', occurrence.creator_display_name, occurrence.title), ' ') AS retrieval_text \
+             FROM local_discovery_occurrence occurrence \
+             GROUP BY occurrence.content_item_id \
+         ) SELECT count(*) AS count FROM grouped \
+         WHERE published_at IS NULL \
+           AND ($1::text IS NULL OR lower(retrieval_text) LIKE '%' || lower($1) || '%')",
     )
     .bind(text)
-    .bind(window_days)
     .fetch_one(database.pool())
     .await
     .map(|row| row.get::<i64, _>("count") as u64)

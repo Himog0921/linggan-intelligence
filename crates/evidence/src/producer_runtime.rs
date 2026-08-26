@@ -573,7 +573,7 @@ fn runtime_unknown_time_sql() -> &'static str {
     // all-library unknown counter would make a narrow author/title query claim it excluded
     // material the user did not ask to inspect.
     "WITH normalized AS ( \
-       SELECT package.coverage, record.value AS record, \
+       SELECT package.platform, package.coverage, record.value AS record, \
               concat_ws(' ', record.value #>> '{payload,title}', record.value #>> '{payload,content}', record.value #>> '{payload,bodyText}', record.value #>> '{payload,desc}', record.value #>> '{payload,text}', record.value #>> '{payload,contentText}') AS evidence_text, \
               NULLIF(COALESCE(record.value #>> '{payload,authorName}', record.value #>> '{payload,user,nickname}', record.value #>> '{payload,author,nickname}'), '') AS creator_display_name, \
               NULLIF(record.value #>> '{payload,title}', '') AS title, \
@@ -590,7 +590,7 @@ fn runtime_unknown_time_sql() -> &'static str {
          OR lower(COALESCE(title, '')) LIKE '%' || lower($1) || '%' \
          OR lower(COALESCE(evidence_text, '')) LIKE '%' || lower($1) || '%') \
      ) SELECT count(*) FROM ( \
-       SELECT platform_content_id FROM matching GROUP BY platform_content_id \
+       SELECT platform, platform_content_id FROM matching GROUP BY platform, platform_content_id \
        HAVING max(has_published_at) = 0 \
      ) unknown_content"
 }

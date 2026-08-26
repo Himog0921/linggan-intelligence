@@ -37,7 +37,7 @@
 | `SOURCE_INCOMPLETE` / `NOT_CONNECTED` | 服务未配置 `LINGGAN_LOCAL_DATABASE_URL` | 页面没有读取任何材料 | Linggan 库为 0、平台没有内容、旧内容工作台或插件已被读取 | 显式配置 Linggan 本地数据库后重启 host | LOCAL-001 / 001A |
 | `ACCEPTED_DISCOVERY_ONLY` | 服务读到 #34 接纳的 discovery Package | 此页只显示搜索面实际可见的卡片 | 已有详情、评论、作者画像、媒体或市场趋势 | 只读检索本地材料 | `xhs.discovery.visible-card.v1` |
 | `PUBLISHED_AT UNKNOWN` | 已接纳 discovery 卡片没有来源可验证发布时间 | 在默认 `latest_accepted_discovery` 视角中显示该卡和未知标签；不显示替代日期 | 发布时间为 0、旧内容、平台没有内容或采集失败 | 等待未来独立事实补充；本卡不猜测 | EvidenceQuery / default time view |
-| `UNKNOWN_PUBLISHED_TIME_EXCLUDED` | 显式 7/30 天 `WINDOW` 下，当前 `EvidenceQuery` 匹配的 ContentItem 没有任何位于窗口内的已知来源发布时间 | 该对象不进入显式 `WINDOW` 结果；同一对象若另有窗口内已知 occurrence，则显示一次且不计入排除数 | 发布时间为 0、旧内容、平台没有内容或采集失败 | 等待未来独立事实补充；本卡不猜测 | EvidenceQuery / explicit WINDOW |
+| `UNKNOWN_PUBLISHED_TIME_EXCLUDED` | 显式 7/30 天 `WINDOW` 下，当前 `EvidenceQuery` 匹配且按 ContentItem 合并后仍没有任何已知来源发布时间的对象 | 该对象不进入显式 `WINDOW` 结果并计入排除数；同一对象只要有任一已知来源发布时间，即使在窗口外、或文本命中来自未知时间 occurrence，也不计入此状态 | 发布时间为 0、旧内容、平台没有内容或采集失败 | 等待未来独立事实补充；本卡不猜测 | EvidenceQuery / explicit WINDOW |
 | `READ_PROJECTION_UNAVAILABLE` | 已配置数据库但本地读取失败 | 页面没有显示旧系统或远程回退数据 | 所有已接纳材料均丢失或平台不可用 | 修复本地数据库连接后重试读取 | #34 read projection |
 | `LOCAL_QUERY_INVALID` | URL 查询不是当前受限 EvidenceQuery | 系统没有执行读取或平台搜索 | 查询被转成采集命令 | 使用受限文本 + 7/30 天窗口 | EvidenceQuery |
 | `UNKNOWN` | 没有选择 ContentItem，且没有可用 Observation/Capture 输入 | 来源、观察、Capture 和 Coverage 当前未知 | unknown 等于 0、正常、失败或完整 | 无 | AGENTS.md 领域不变量；LIDS-PRI-001 |

@@ -27,7 +27,7 @@
 
 - 浏览单位是 `ContentItem`；若未来发生文本匹配，命中单位是 `EvidenceFragment`。本卡没有建立这两个持久化对象或读投影。
 - URL 未携带 `window` 时，Evidence Library 使用显式内部时间视角 `latest_accepted_discovery`：仅读取已接纳的 discovery 卡片，已知和未知 `published_at` 都可显示；未知卡必须标为 `PUBLISHED_AT UNKNOWN`，且不得用 `first_discovered_at`、`observed_at`、接收/重放时间或任何其他时间代替来源发布时间。它不是 `WINDOW`，也不构成“最近发布”的主张。
-- 只有 URL 显式指定 `window=last_7_days` 或 `window=last_30_days` 时，`WINDOW` 才只指 `ContentItem.published_at`，并以 read projection 求值时的 Linggan PostgreSQL `scope_001_now()` 为唯一时间参照。显式窗口只保留 `published_at` 落在闭区间 `[scope_001_now() - window, scope_001_now()]` 的已知值；未来发布时间不被称为最近，也不进入窗口，但其已接纳发现记录仍保留。`published_at = UNKNOWN` 必须排除，并报告排除数。排除数按当前 `EvidenceQuery` 匹配的 `ContentItem` 身份统计：只有该身份没有任何同一查询下、已知且位于当前窗口的 occurrence 时才计入。若同一 ContentItem 同时有窗口内已知发布时间和未知发布时间 occurrence，它显示一次且不增加排除数。文本不匹配的本地对象不能被计入页面的未知发布时间排除数。API 的 `window` 使用实际读取的 `last_7_days`/`last_30_days` 值；页面必须将同一值显示为 `7D`/`30D`，不能推定或硬编码一个发布窗口为默认值。
+- 只有 URL 显式指定 `window=last_7_days` 或 `window=last_30_days` 时，`WINDOW` 才只指按 `ContentItem` 身份合并后的来源 `published_at`，并以 read projection 求值时的 Linggan PostgreSQL `scope_001_now()` 为唯一时间参照。合并发布时间/未知状态必须先于文本检索与排序求值：显式窗口只保留已知 `published_at` 落在闭区间 `[scope_001_now() - window, scope_001_now()]` 的 ContentItem；未来发布时间不被称为最近，也不进入窗口，但其已接纳发现记录仍保留。合并后 `published_at = UNKNOWN` 的当前查询匹配 ContentItem 必须排除并报告排除数，即使同一窗口仍有其他可见卡片。若同一 ContentItem 有任一已知来源发布时间，即使该值在窗口外、或文本命中来自另一次发布时间未知的 occurrence，它不是 `PUBLISHED_AT UNKNOWN`，不得计入未知排除数；它只是未满足严格发布时间窗口。文本不匹配的本地对象不能被计入页面的未知发布时间排除数。API 的 `window` 使用实际读取的 `last_7_days`/`last_30_days` 值；页面必须将同一值显示为 `7D`/`30D`，不能推定或硬编码一个发布窗口为默认值。
 - `Latest Discovery` 只使用同一稳定内容身份首次被 Linggan **接受**的时间；它不是发布时间、页面实际观察时间或最近接收/重放时间。
 - 标题、作者名、正文、评论、OCR、ASR 的实际召回和排序实现留给具有已接纳材料的 001B；缺少的材料必须呈现为 `NOT_ACQUIRED`/`UNKNOWN`，不能被当作“不匹配”。
 

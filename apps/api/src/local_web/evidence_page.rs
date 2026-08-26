@@ -13,12 +13,16 @@ pub(super) fn render_read_projection(
     let results = if projection.cards.is_empty() {
         no_cards_markup(projection)
     } else {
-        projection
-            .cards
-            .iter()
-            .map(card_markup)
-            .collect::<Vec<_>>()
-            .join("")
+        format!(
+            "{}{}",
+            strict_window_exclusion_markup(projection),
+            projection
+                .cards
+                .iter()
+                .map(card_markup)
+                .collect::<Vec<_>>()
+                .join("")
+        )
     };
     let card_count = projection.cards.len();
     let html = replace_slot(base, "EVIDENCE_SEARCH_INPUT", &input);
@@ -59,6 +63,18 @@ pub(super) fn render_read_projection(
         ),
     )
     .replace("NO ACCEPTED MATERIAL AVAILABLE", "ACCEPTED DISCOVERY CARDS")
+}
+
+fn strict_window_exclusion_markup(projection: &DiscoveryLibraryProjection) -> String {
+    if projection.time_view == "latest_accepted_discovery"
+        || projection.excluded_unknown_published_at == 0
+    {
+        return String::new();
+    }
+    format!(
+        "<div class=\"v7-window-exclusion\" role=\"note\"><b>PUBLISHED_AT UNKNOWN</b><span>当前查询有 {} 个对象因来源发布时间未知而未进入此发布时间窗口；未用首次发现、观察或接收时间替代。</span></div>",
+        projection.excluded_unknown_published_at
+    )
 }
 
 struct TimeViewCopy {
