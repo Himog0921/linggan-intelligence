@@ -9,18 +9,12 @@
   --c-drawer-width: min(1120px, 72vw); --c-drawer-wide: min(1380px, 86vw);
   --c-now-aside: 450px; --c-stream-feed: 472px; --c-inspector: 430px; }
 
-/* Page scaffolding: eyebrow + title only. The prototype's standing description line under
- * every title is deliberately gone; the page states its identity once. */
-.c-page { min-width:0; min-height:0; display:grid; grid-template-rows:auto auto minmax(0,1fr); overflow:hidden; }
-.c-head { padding:16px 20px 13px; border-bottom:2px solid var(--v7-black); background:var(--v7-white); display:flex; align-items:flex-end; justify-content:space-between; gap:24px; }
-.c-eyebrow { color:var(--lgi-signal-ink); font:700 10px var(--lgi-font-mono); letter-spacing:.17em; }
-.c-title { margin-top:7px; color:var(--v7-black); font-size:30px; line-height:1; font-weight:850; letter-spacing:-.055em; }
-.c-readout { display:flex; flex:0 0 auto; border-top:2px solid var(--v7-black); border-bottom:2px solid var(--v7-black); }
-.c-readout > div { min-width:118px; display:flex; flex-direction:column-reverse; padding:8px 15px 7px; border-right:1px solid var(--v7-black); }
-.c-readout > div:last-child { border-right:0; }
-.c-readout b { color:var(--v7-black); font:800 19px/1 var(--lgi-font-mono); letter-spacing:-.05em; }
-.c-readout span { margin-bottom:7px; color:var(--v7-ghost); font:11px/1.3 var(--lgi-font-mono); letter-spacing:.09em; white-space:nowrap; }
-.c-readout .c-unknown b { color:var(--v7-unknown); }
+/* Page scaffolding. DESIGN-003 header reclaim: there is no title block here at all. The
+ * breadcrumb and the rail already name this page, the h1 survives only as .v7-sr-only for
+ * assistive tech, and the counts moved into the context row. Column flex rather than fixed
+ * grid rows because three of the five surfaces carry no second bar — the body must claim
+ * the remaining height whether or not a toolbar sits above it. */
+.c-page { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
 
 /* Toolbar: filters left, actions right. Every control stays disabled until its route is
  * connected; none of them may imply an authorised platform action. */
@@ -35,7 +29,7 @@
 .c-tabs a:first-child[aria-current="page"]::after,.c-tabs .c-on:first-child::after { left:0; }
 .c-actions { display:flex; align-items:center; gap:8px; }
 .c-text-command { border:0; background:transparent; color:var(--v7-muted); font:700 10px var(--lgi-font-mono); letter-spacing:.06em; }
-.c-body { min-width:0; min-height:0; overflow:auto; background:var(--v7-white); }
+.c-body { flex:1; min-width:0; min-height:0; overflow:auto; background:var(--v7-white); }
 
 /* Honest empty state. Every Collection surface currently resolves here: the page states
  * what it cannot show, why, and what would have to exist first. It never shows 0. */
@@ -162,7 +156,5 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 }
 @media (max-width:900px) {
   .c-drawer { top:0; width:100vw; }
-  .c-head { flex-direction:column; align-items:flex-start; gap:16px; }
-  .c-readout { width:100%; overflow-x:auto; }
 }
 @media (prefers-reduced-motion:reduce) { .c-drawer { transition:none; } }

@@ -59,20 +59,12 @@
 
 
 /* ── DESIGN-003 · Header reclaim ────────────────────────────────────────────
- * The page title is stated three times before this block: breadcrumb, side rail,
- * and the h1 itself. Only the h1 has to survive, and only for assistive tech and
- * document structure, so it goes visually hidden and the vertical space returns
- * to the list. Counts move up into the context row; actions move into the search
- * row. Nothing here changes what the page claims about data. */
-.v7-sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
-  clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; border:0; }
+ * The reclaim itself now belongs to every page, so .v7-sr-only, .v7-kpi and .v7-vr
+ * live in shell.css. Only this page's own reclaimed padding stays here: with the
+ * title gone, the search row is what the header has to breathe around. Counts moved
+ * up into the context row; actions moved into the search row. Nothing here changes
+ * what the page claims about data. */
 .v7-page-header { padding:18px 20px 14px; }
-
-/* Counts in the context row: three independent readings, never summed. */
-.v7-kpi { display:inline-flex; align-items:baseline; gap:6px; }
-.v7-kpi em { color:var(--v7-muted); font:500 11px var(--lgi-font-sans); font-style:normal; letter-spacing:0; }
-.v7-kpi b { color:var(--v7-black); font:700 12px var(--lgi-font-mono); letter-spacing:.03em; }
-.v7-vr { width:1px; height:16px; background:var(--v7-line-strong); }
 
 /* Search row now carries scope and actions. */
 .v7-search-row { display:flex; align-items:stretch; gap:10px; flex-wrap:wrap; margin-top:0; }

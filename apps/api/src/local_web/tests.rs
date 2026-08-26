@@ -577,29 +577,99 @@ fn local_submission(observed_at: &str) -> String {
 
 #[test]
 fn collection_serves_all_five_sub_surfaces_from_the_shared_shell() {
-    for (section, marker) in [
-        (
-            collection::Section::Targets,
-            "COLLECTION / OBSERVATION TARGETS",
-        ),
-        (
-            collection::Section::Operations,
-            "COLLECTION / OBSERVATION OPERATIONS",
-        ),
-        (
-            collection::Section::Attention,
-            "COLLECTION / ATTENTION QUEUE",
-        ),
-        (collection::Section::Tasks, "COLLECTION / EXECUTION TASKS"),
-        (collection::Section::Runtime, "COLLECTION / RUNTIME"),
+    for (section, name) in [
+        (collection::Section::Targets, "观察目标"),
+        (collection::Section::Operations, "运行态"),
+        (collection::Section::Attention, "待处理"),
+        (collection::Section::Tasks, "执行任务"),
+        (collection::Section::Runtime, "执行运行时"),
     ] {
         let html = collection::render(section, collection::OperationsMode::Now, None);
-        assert!(html.contains(marker), "missing surface eyebrow: {marker}");
+        // The breadcrumb, not a title block, is where a surface states which page this is.
+        assert!(
+            html.contains(&format!("<b>{name}</b>")),
+            "missing surface breadcrumb: {name}"
+        );
         // One header implementation for the whole product, rendered from shell.rs.
         assert!(html.contains("v7-global-header"));
         assert!(html.contains("v7-context-row"));
         assert!(html.contains("data-readout=\"COLLECTION\""));
     }
+}
+
+#[test]
+fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
+    // DESIGN-003: breadcrumb and rail already name the page, so the h1 survives only for
+    // assistive tech and the vertical space returns to the content. A page that grows a
+    // visible title block back is restating its name for the third time.
+    let mut pages = vec![evidence_library_html()];
+    for section in [
+        collection::Section::Targets,
+        collection::Section::Operations,
+        collection::Section::Attention,
+        collection::Section::Tasks,
+        collection::Section::Runtime,
+    ] {
+        pages.push(collection::render(
+            section,
+            collection::OperationsMode::Now,
+            None,
+        ));
+    }
+
+    for html in &pages {
+        assert!(
+            html.contains("<h1 class=\"v7-sr-only\" id=\"page-title\">"),
+            "the page title must survive as the visually hidden h1"
+        );
+        for restated in ["c-title", "c-eyebrow", "c-head", "v7-title", "v7-eyebrow"] {
+            assert!(
+                !html.contains(restated),
+                "reclaimed header must not return as {restated}"
+            );
+        }
+    }
+
+    // The counts the title block used to carry now read from the context row, and each one
+    // stays a separate figure rather than a single invented total.
+    let targets = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        None,
+    );
+    let context_row = targets
+        .split_once("v7-context-meta")
+        .expect("collection pages render the context row")
+        .1;
+    for kpi in [
+        "<span class=\"v7-kpi\"><em>TARGETS</em><b>UNKNOWN</b></span>",
+        "<span class=\"v7-kpi\"><em>BASELINING</em><b>UNKNOWN</b></span>",
+    ] {
+        assert!(
+            context_row.contains(kpi),
+            "count missing from context row: {kpi}"
+        );
+    }
+}
+
+#[test]
+fn the_selected_rail_entry_keeps_its_inked_block_under_the_pointer() {
+    // Hover invites you to leave the page you are on; it must never repaint the entry that
+    // marks where you already are. The selected block is only readable while it stays inked.
+    let shell = SHELL_CSS;
+    for rule in [
+        ".v7-side-nav:not([disabled]):not([aria-current=\"page\"]):hover",
+        ".v7-primary-nav a:not([aria-current=\"page\"]):hover",
+    ] {
+        assert!(
+            shell.contains(rule),
+            "hover state must exclude the current page: {rule}"
+        );
+    }
+    assert!(
+        !shell.contains(".v7-side-nav:not([disabled]):hover {"),
+        "the unqualified rail hover rule outranks the selected state and must not return"
+    );
 }
 
 #[test]

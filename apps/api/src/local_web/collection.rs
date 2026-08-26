@@ -57,7 +57,6 @@ struct SectionMeta {
     slug: &'static str,
     index: &'static str,
     zh: &'static str,
-    eyebrow: &'static str,
     title: &'static str,
 }
 
@@ -68,7 +67,6 @@ const SECTIONS: [(Section, SectionMeta); 5] = [
             slug: "targets",
             index: "01",
             zh: "观察目标",
-            eyebrow: "COLLECTION / OBSERVATION TARGETS",
             title: "观察目标",
         },
     ),
@@ -78,7 +76,6 @@ const SECTIONS: [(Section, SectionMeta); 5] = [
             slug: "operations",
             index: "02",
             zh: "运行态",
-            eyebrow: "COLLECTION / OBSERVATION OPERATIONS",
             title: "运行态",
         },
     ),
@@ -88,7 +85,6 @@ const SECTIONS: [(Section, SectionMeta); 5] = [
             slug: "attention",
             index: "03",
             zh: "待处理",
-            eyebrow: "COLLECTION / ATTENTION QUEUE",
             title: "待处理",
         },
     ),
@@ -98,7 +94,6 @@ const SECTIONS: [(Section, SectionMeta); 5] = [
             slug: "tasks",
             index: "04",
             zh: "执行任务",
-            eyebrow: "COLLECTION / EXECUTION TASKS",
             title: "执行任务",
         },
     ),
@@ -108,7 +103,6 @@ const SECTIONS: [(Section, SectionMeta); 5] = [
             slug: "runtime",
             index: "05",
             zh: "执行运行时",
-            eyebrow: "COLLECTION / RUNTIME",
             title: "执行运行时",
         },
     ),
@@ -148,21 +142,19 @@ fn rail(active: Section) -> String {
     )
 }
 
-/// Readouts carry only figures this surface owns. System-wide counters live in the context
-/// row and are not repeated here — the prototype printed several of them three times.
+/// Readouts carry only figures this surface owns — the prototype printed several of the
+/// system-wide ones three times over. Under the DESIGN-003 header reclaim they no longer
+/// get a title block of their own: they join the system state in the context row. Each
+/// reading stays a separate `.v7-kpi` and they are never summed, because two unknowns do
+/// not add up to a known total.
 fn readout(entries: &[(&str, &str)]) -> String {
     let mut cells = String::new();
     for (value, label) in entries {
-        let unknown = if *value == "UNKNOWN" {
-            " class=\"c-unknown\""
-        } else {
-            ""
-        };
         cells.push_str(&format!(
-            "<div{unknown}><b>{value}</b><span>{label}</span></div>"
+            "<span class=\"v7-kpi\"><em>{label}</em><b>{value}</b></span>"
         ));
     }
-    format!("<div class=\"c-readout\">{cells}</div>")
+    cells
 }
 
 fn empty_state(heading: &str, body: &str, notes: &[(&str, &str)]) -> String {
@@ -577,11 +569,17 @@ fn crumb(section: Section, mode: OperationsMode) -> String {
 
 pub fn render(section: Section, mode: OperationsMode, drawer: Option<&str>) -> String {
     let entry = meta(section);
+    // DESIGN-003 header reclaim: this surface's own counts ride in the context row next to
+    // the system state, so the page can start at its content instead of restating its name.
+    let meta_row = format!(
+        "{counts}<i class=\"v7-vr\" aria-hidden=\"true\"></i><span class=\"v7-query-meta\">SCHEDULER NOT CONNECTED</span><span>NO OBSERVATION TARGETS</span><span>UTC+08</span>",
+        counts = head_readout(section),
+    );
     let header = global_header(
         PrimarySurface::Collection,
         "LOCAL HOST / NO COLLECTION RUNTIME",
         &crumb(section, mode),
-        "<span class=\"v7-query-meta\">SCHEDULER NOT CONNECTED</span><span>NO OBSERVATION TARGETS</span><span>UTC+08</span>",
+        &meta_row,
     );
     format!(
         r#"<!doctype html>
@@ -598,14 +596,8 @@ pub fn render(section: Section, mode: OperationsMode, drawer: Option<&str>) -> S
       {header}
       <div class="v7-shell">
         {rail}
-        <main class="c-page" aria-label="{title}">
-          <div class="c-head">
-            <div>
-              <div class="c-eyebrow">{eyebrow}</div>
-              <h1 class="c-title">{title}</h1>
-            </div>
-            {readout}
-          </div>
+        <main class="c-page" aria-labelledby="page-title">
+          <h1 class="v7-sr-only" id="page-title">{title}</h1>
           {second_bar}
           <div class="c-body">{body}</div>
         </main>
@@ -616,9 +608,7 @@ pub fn render(section: Section, mode: OperationsMode, drawer: Option<&str>) -> S
 </html>
 "#,
         title = entry.title,
-        eyebrow = entry.eyebrow,
         rail = rail(section),
-        readout = head_readout(section),
         second_bar = second_bar(section, mode),
         body = body(section, mode, drawer),
     )
