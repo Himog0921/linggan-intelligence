@@ -56,6 +56,7 @@ Primitive 是全站可复用的基础语法，不承载具体 Topic、真实请�
 
 - 只有承担粗野重音的元素可以位移：品牌标识、Primary、Secondary、当前选中项。普通列表行、筛选、标签、卡片一律不得位移。
 - 位移量固定 `translate(-2px, -2px)`，同时把 `--lgi-shadow-brutal` 换成 `--lgi-shadow-brutal-lg`；按下状态回落到 `translate(1px, 1px)`。
+- **静止只有一档深度：`--lgi-shadow-brutal`（4px）。** `--lgi-shadow-brutal-lg`（7px）是上一条那个位移的配套，只能出现在 `:hover` / `:active` 里。任何静止元素——包括展开的下拉菜单、抽屉、浮层——用 7px 就等于在页面上放了第二种静止深度，看上去就是「这块阴影特别厚」。此条由 `the_larger_hard_shadow_only_marks_hover_displacement` 自动执行。
 - 阴影必须是实色偏移（`4px 4px 0`），不得使用模糊或多层阴影。模糊阴影仍在禁止之列，被解除的只是位移本身。
 - `prefers-reduced-motion: reduce` 下位移与过渡全部关闭。
 

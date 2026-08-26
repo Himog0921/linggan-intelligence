@@ -680,7 +680,9 @@ fn context_row_counts_read_in_chinese_so_one_row_holds_one_english_scale() {
 
     for label in &labels {
         assert!(
-            label.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)),
+            label
+                .chars()
+                .any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)),
             "count label must read in Chinese, not in the Mono slot's English: {label}"
         );
     }
@@ -938,6 +940,140 @@ fn served_primary_surfaces_link_to_each_other_and_unserved_ones_stay_disabled() 
                     "<button disabled aria-disabled=\"true\"><b class=\"v7-nav-zh\">{unserved}</b>"
                 )),
                 "{page} must keep the unconnected {unserved} entry disabled"
+            );
+        }
+    }
+}
+
+/// Every class the shell declares. `shell.css` styles what `shell.rs` renders for all
+/// pages, so these names are the shell's to own.
+fn shell_owned_classes() -> std::collections::BTreeSet<String> {
+    let mut classes = std::collections::BTreeSet::new();
+    let mut rest = SHELL_CSS;
+    while let Some(start) = rest.find(".v7-") {
+        rest = &rest[start + 1..];
+        let end = rest
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '-')
+            .unwrap_or(rest.len());
+        classes.insert(rest[..end].to_owned());
+    }
+    classes
+}
+
+/// Selectors a page stylesheet declares, including the ones inside `@media` blocks.
+fn declared_selectors(stylesheet: &str) -> Vec<String> {
+    let mut selectors = Vec::new();
+    let mut cursor = stylesheet;
+    while let Some(brace) = cursor.find('{') {
+        let head = cursor[..brace].trim();
+        cursor = &cursor[brace + 1..];
+        // An @media head opens a nested block; its inner selectors are read on the next pass.
+        let selector = head
+            .rsplit(['}', '\n'])
+            .next()
+            .unwrap_or(head)
+            .trim();
+        if selector.is_empty() || selector.starts_with('@') || selector.starts_with("/*") {
+            continue;
+        }
+        selectors.push(selector.to_owned());
+    }
+    selectors
+}
+
+#[test]
+fn no_page_stylesheet_restyles_a_component_the_shell_owns() {
+    // One header, one implementation. While the primary nav's typography lived in the
+    // Evidence Library stylesheet, Corpus rendered its readouts at 11px and Collection at
+    // 8px from the very same markup — one shared header wearing two type standards. A page
+    // stylesheet may style its own components; the shell's are not its to restyle.
+    let shell_classes = shell_owned_classes();
+
+    for (page, stylesheet) in [
+        ("evidence_library.css", EVIDENCE_LIBRARY_CSS),
+        ("collection_workspace.css", COLLECTION_WORKSPACE_CSS),
+    ] {
+        let mut violations = Vec::new();
+        for selector in declared_selectors(stylesheet) {
+            for class in shell_classes.iter() {
+                let needle = format!(".{class}");
+                let matched = selector.match_indices(&needle).any(|(index, _)| {
+                    // ".v7-side" must not match ".v7-side-nav"
+                    selector[index + needle.len()..]
+                        .chars()
+                        .next()
+                        .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '-')
+                });
+                if matched {
+                    violations.push(format!("{selector}  (shell owns .{class})"));
+                    break;
+                }
+            }
+        }
+        assert!(
+            violations.is_empty(),
+            "{page} restyles shell-owned components; move these rules into shell.css:\n  {}",
+            violations.join("\n  ")
+        );
+    }
+}
+
+#[test]
+fn both_surfaces_render_the_header_at_one_type_scale() {
+    // The regression this locks: same markup, same stylesheet layer, same declarations.
+    let corpus = evidence_library_html();
+    let collection = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        None,
+    );
+
+    // Neither page may carry its own copy of the nav typography.
+    for (page, stylesheet) in [
+        ("evidence_library.css", EVIDENCE_LIBRARY_CSS),
+        ("collection_workspace.css", COLLECTION_WORKSPACE_CSS),
+    ] {
+        for owned in [".v7-nav-readout", ".v7-nav-zh", ".v7-primary-nav"] {
+            assert!(
+                !stylesheet.contains(owned),
+                "{page} must not declare {owned}: the shell renders the primary nav"
+            );
+        }
+    }
+
+    // And both pages must actually emit that markup, so the shared rule reaches both.
+    for (page, html) in [("corpus", &corpus), ("collection", &collection)] {
+        assert_eq!(
+            html.matches("class=\"v7-nav-zh\"").count(),
+            5,
+            "{page} renders five primary entries"
+        );
+        assert_eq!(
+            html.matches("class=\"v7-nav-readout\"").count(),
+            5,
+            "{page} renders five primary readouts"
+        );
+    }
+}
+
+#[test]
+fn the_larger_hard_shadow_only_marks_hover_displacement() {
+    // Two resting depths would be two standards. --v7-brutal-lg exists for the 2px hover
+    // displacement that DESIGN-003 permits; anything that sits still wears --v7-brutal.
+    for (name, stylesheet) in [
+        ("shell.css", SHELL_CSS),
+        ("evidence_library.css", EVIDENCE_LIBRARY_CSS),
+        ("collection_workspace.css", COLLECTION_WORKSPACE_CSS),
+    ] {
+        for (index, _) in stylesheet.match_indices("var(--v7-brutal-lg)") {
+            let selector = stylesheet[..index]
+                .rfind('}')
+                .map(|end| &stylesheet[end + 1..index])
+                .unwrap_or(&stylesheet[..index]);
+            assert!(
+                selector.contains(":hover") || selector.contains(":active"),
+                "{name}: the larger hard shadow is for hover displacement, but it is applied at rest here:\n  {}",
+                selector.trim().lines().last().unwrap_or(selector).trim()
             );
         }
     }
