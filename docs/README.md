@@ -61,6 +61,7 @@
 | [design/changes/design-004-corpus-rail-ui-change-manifest.md](design/changes/design-004-corpus-rail-ui-change-manifest.md) | 权威当前；DESIGN-004 | Corpus rail 面层差异化与选中态重音：规则依据、参考图取舍与重音计数 |
 | [design/changes/design-005-collection-workspace-ui-change-manifest.md](design/changes/design-005-collection-workspace-ui-change-manifest.md) | 权威当前；DESIGN-005 | Collection 五个子面落地：Mog 三项裁定、清掉的冗余、消化的断层与两项待决 |
 | [design/changes/design-006-collection-ux-revision-ui-change-manifest.md](design/changes/design-006-collection-ux-revision-ui-change-manifest.md) | 权威当前；DESIGN-006 | Collection 五面 UX 修订：顺序与默认入口、命名去重、空态分级、读数异常优先、无数据时结构留数据格延后 |
+| [design/changes/design-008-shared-shell-chinese-first-ui-change-manifest.md](design/changes/design-008-shared-shell-chinese-first-ui-change-manifest.md) | 权威当前；DESIGN-008 / Issue #68 | 共享 local-web shell 的中文主语义、英文技术旁注与 Corpus/Collection 双页面验收边界 |
 | [design/changes/plugin-001-producer-popup-ui-change-manifest.md](design/changes/plugin-001-producer-popup-ui-change-manifest.md) | 已被替代；PLUGIN-001 | Issue #33 popup 的历史 UI 边界；不再约束当前实现 |
 | [design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md](design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-MIGRATION-001 | Issue #37 popup 的 Discovery 行动与状态边界；启动恢复由 Issue #53 文档补充 |
 | [design/changes/plugin-popup-recovery-001-ui-change-manifest.md](design/changes/plugin-popup-recovery-001-ui-change-manifest.md) | 权威当前；PLUGIN-POPUP-RECOVERY-001 | Issue #53 popup 启动恢复、无副作用 fallback 与 v0.4.2 release 边界；Issue #55 的运行时修订见当月进度记录 |
@@ -69,6 +70,7 @@
 | [design/acceptance/design-003-lids-visual-baseline-visual-acceptance.md](design/acceptance/design-003-lids-visual-baseline-visual-acceptance.md) | 一次性报告 | Issue #44 的双实例同屏实测：计量、诚实性逐条核对与未证明范围 |
 | [design/acceptance/design-004-corpus-rail-visual-acceptance.md](design/acceptance/design-004-corpus-rail-visual-acceptance.md) | 一次性报告 | `ACC-RAIL-004`：rail 三视口实拍验收；hover/focus 因全部路由禁用而未验证 |
 | [design/acceptance/design-005-collection-workspace-visual-acceptance.md](design/acceptance/design-005-collection-workspace-visual-acceptance.md) | 一次性报告 | `ACC-COLLECTION-001`：五个子面与抽屉四态实拍；无数据的行与图表未验证 |
+| [design/acceptance/design-008-shared-shell-chinese-first-acceptance.md](design/acceptance/design-008-shared-shell-chinese-first-acceptance.md) | 一次性报告 | `ACC-DESIGN-008`：共享壳层的中文主语义、技术注释层级与未证明边界 |
 | [design/acceptance/plugin-001-producer-popup-visual-acceptance.md](design/acceptance/plugin-001-producer-popup-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-001`：Issue #33 popup 的静态 source/release 验收；不证明浏览器加载或真实采集 |
 | [design/acceptance/plugin-migration-001-producer-popup-visual-acceptance.md](design/acceptance/plugin-migration-001-producer-popup-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-002`：Issue #37 adapter/mock ingress/release 验收；不证明真实浏览器或采集 |
 | [design/acceptance/plugin-popup-recovery-001-visual-acceptance.md](design/acceptance/plugin-popup-recovery-001-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-POPUP-RECOVERY-001`：Issue #53 source/release 启动保护验收；不证明 Chrome 已加载或真实采集 |

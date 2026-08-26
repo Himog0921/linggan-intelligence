@@ -162,3 +162,11 @@ Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵�
 - **Data Truth 修订**：URL 缺省时页面使用命名的内部 `latest_accepted_discovery` 视角，而不是发布时间窗口。卡片可显示 `PUBLISHED_AT UNKNOWN`，并明确不使用首次发现、观察、接收或重放时间代替来源发布时间。显式 `last_7_days` / `last_30_days` 保持严格 published-time 筛选，未知对象继续排除并单独计数。
 - **运行时表达**：只增加既有 Unknown token 的 page-local label；不新增全局 token、Primitive、CMP、Scene、Motion、按钮、筛选器或跨页模式。L1 `Corpus Explorer` + embedded L2 Inspector 的既有组合和 V7 几何不变。
 - **验证与边界**：合成 contracts、runtime/fallback PostgreSQL proof、API/页面 render tests 验证 default/explicit view 分离、未知标签和无替代日期。本事项不读取或改写真实 Canary 材料，不证明真实浏览器呈现、平台、采集、媒体、OCR/ASR、趋势或用户验收。
+
+## 2026-08-26 · DESIGN-008 共享壳层采用中文主语义
+
+- **来源与事项**：Mog 明确确认「中文为主，英文只用来装饰或作为注释」；Issue #68 / `DESIGN-008`。项目级 `LIDS-LANG-001` 由独立的 Issue #65 / Draft PR #67 定义，本条只记录共享 shell 对该规则的采用，不复制或替代其页面局部规则。
+- **实际实现**：`shell.rs` 将一级导航、品牌副标题、本机边界与共享上下文中的静态运行码渲染为中文主文案加紧邻的 `v7-tech-key` 英文技术注释；`shell.css` 规定中文使用 Sans 主层、英文技术键使用较小 Mono 注释层，并把 `CORPUS` / `COLLECTION` 导轨读数改为中文可见语义。Collection 的 `NOW / TRACE / REVIEW` 短模式标签改为当前 / 追溯 / 复核。
+- **Data Truth**：`UNKNOWN` 仍为未知，`UTC+08` 仍为同一时区，连接/来源/运行时状态仍由原有调用方提供；本项只改变显示层，未变更状态判定、数据、查询、路由、权限或任何动作。
+- **不扩张**：无 Token、Primitive、CMP、Pattern、Scene、Motion、API、数据库、采集、插件、媒体或真实材料改动。Evidence Library 的页面局部模板、动态卡片及局部英文由 #67 单独处理。
+- **验证与集成**：shared shell 单元测试同时覆盖 Corpus 与 Collection 输入；最终 DOM/视觉走查与治理检查记录在 `ACC-DESIGN-008`。建议先合并 PR #67，再将 #68 rebase 至 main；两个事项的运行时文件边界不重叠，但 focused test / 文档索引需由 integration owner 做行级整合。
