@@ -1,7 +1,7 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-08-25
+> 最后核对: 2026-08-26
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
@@ -155,3 +155,10 @@ Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵�
 - **实际实现**：`plugins/linggan-intelligence-browser/webpack.config.cjs` 在 build 时将唯一 runtime 值源 `apps/api/src/local_web/lids_tokens.css` 复制为 release 内的 `themes/lids-tokens.css`，`src/popup/popup.html` 加载该副本。新 `popup-startup-failure*` CSS 仅消费 `--lgi-*`；没有新增 token 值、全局主题、CMP、Scene 或 Motion。
 - **LIDS 组合**：局部 `L1 / Settings / Governance`，沿用 `InstrumentSurface` 和 L1 可读错误反馈；2px border 是 LIDS 已批准的结构线，而非新的视觉数值。文案只表达 `UNKNOWN` 与“该提示没有发起新的采集或传输”，不把失败页面写成 host、receipt、Evidence 或平台状态。
 - **验证与边界**：受控首次渲染 harness 复现 v0.4.0 缺失 import 的 `ReferenceError`，并验证 v0.4.2 正常或 fallback 输出；build/release verifier 要求 token CSS 同时存在于 `dist` 和 ZIP。它不证明 Chrome 像素画面、辅助技术、真实浏览器加载、平台、Cookie、Discovery、接纳、媒体或研究结果。
+
+## 2026-08-26 · LOCAL-001D Evidence Library 未知发布时间的默认读取表达
+
+- **来源与事项**：Issue #62、`LOCAL-001D`、PAGE-EVIDENCE-001、`LOCAL-001C0-DISCOVERY-BOUNDARY-V1` 与 Mog 的明确裁定。真实 Canary 的聚合事实表明：已接纳 discovery 卡片可能没有来源发布时间；此前 URL 缺省读法等同隐式 `PUBLISHED:30D`，会使这些材料在页面中完全不可见。
+- **Data Truth 修订**：URL 缺省时页面使用命名的内部 `latest_accepted_discovery` 视角，而不是发布时间窗口。卡片可显示 `PUBLISHED_AT UNKNOWN`，并明确不使用首次发现、观察、接收或重放时间代替来源发布时间。显式 `last_7_days` / `last_30_days` 保持严格 published-time 筛选，未知对象继续排除并单独计数。
+- **运行时表达**：只增加既有 Unknown token 的 page-local label；不新增全局 token、Primitive、CMP、Scene、Motion、按钮、筛选器或跨页模式。L1 `Corpus Explorer` + embedded L2 Inspector 的既有组合和 V7 几何不变。
+- **验证与边界**：合成 contracts、runtime/fallback PostgreSQL proof、API/页面 render tests 验证 default/explicit view 分离、未知标签和无替代日期。本事项不读取或改写真实 Canary 材料，不证明真实浏览器呈现、平台、采集、媒体、OCR/ASR、趋势或用户验收。

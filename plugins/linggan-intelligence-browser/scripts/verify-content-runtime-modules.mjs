@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const webpackCli = path.join(process.cwd(), 'node_modules', 'webpack', 'bin', 'webpack.js');
@@ -64,6 +64,17 @@ for (const moduleName of activeContentModules) {
       throw new Error(`active content module graph loads retired workbench runtime: ${moduleName}`);
     }
   }
+}
+
+const backgroundBundle = readFileSync(path.join(process.cwd(), 'dist', 'background.js'), 'utf8');
+const queueCapturePackage = backgroundBundle.match(
+  /async function \w+\(\{taskSpec:\w+,capturePackage:\w+\}=\{\}\)\{const (\w+)=await (\w+)\(\);/,
+);
+if (!queueCapturePackage) {
+  throw new Error('built background bundle is missing the current capture-package queue initializer');
+}
+if (queueCapturePackage[1] === queueCapturePackage[2]) {
+  throw new Error('built background bundle reintroduces a TDZ-shaded producer-instance initializer');
 }
 
 console.log(`active content module graph verified: ${activeContentModules.size} modules; retained page collectors enter Linggan Runtime and no retired poller/lease/sync runtime is loaded.`);

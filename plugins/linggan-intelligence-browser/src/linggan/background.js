@@ -222,13 +222,16 @@ async function queueManualDiscovery(discoveryPackage) {
 }
 
 async function queueCapturePackage({ taskSpec, capturePackage } = {}) {
-  const producerInstanceId = await producerInstanceId();
+  // Keep the stable-instance lookup callable.  Naming the local result
+  // `producerInstanceId` shadows the helper for this whole block, which turns
+  // the first current-surface delivery into a temporal-dead-zone failure.
+  const instanceId = await producerInstanceId();
   if (!taskSpec || !capturePackage) {
     throw new Error('linggan_capture_package_required');
   }
-  const attempt = createLocalAttempt({ producerInstanceId, taskId: taskSpec.taskId });
+  const attempt = createLocalAttempt({ producerInstanceId: instanceId, taskId: taskSpec.taskId });
   const submission = createLocalSubmission({
-    producerInstanceId,
+    producerInstanceId: instanceId,
     taskId: taskSpec.taskId,
     attemptId: attempt.attemptId,
     capturePackage,

@@ -15,7 +15,7 @@ pub use capture::{
 pub use discovery::{
     AcquisitionSpec, CoverPresentationState, DiscoveryCard, DiscoveryContractError,
     DiscoveryCoverage, DiscoveryOccurrence, DiscoveryPackage, DiscoveryStopReason, EvidenceQuery,
-    EvidenceQueryScope, EvidenceQuerySort, PublishedWindow, is_rfc3339_timestamp,
+    EvidenceQueryScope, EvidenceQuerySort, EvidenceTimeView, PublishedWindow, is_rfc3339_timestamp,
     parse_discovery_package,
 };
 pub use local_producer::{

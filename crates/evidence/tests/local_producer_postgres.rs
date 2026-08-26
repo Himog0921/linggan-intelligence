@@ -284,15 +284,7 @@ async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retai
         projection.excluded_unknown_published_at, 0,
         "a publication-time unknown record outside the text query must not inflate this view's exclusion count"
     );
-    let unknown_query: EvidenceQuery = serde_json::from_str(
-        r#"{"text":"unknown publication","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
-    )
-    .expect("filtered unknown query is valid");
-    let unknown_projection = read_runtime_library(&database, &unknown_query)
-        .await
-        .expect("unknown publication count obeys the same query filter");
-    assert!(unknown_projection.cards.is_empty());
-    assert_eq!(unknown_projection.excluded_unknown_published_at, 1);
+    assert_unknown_publication_default_and_explicit_window(&database).await;
     assert!(
         projection
             .cards
@@ -310,6 +302,136 @@ async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retai
         retained, 1,
         "raw material stays auditable without appearing as an Evidence card"
     );
+}
+
+async fn assert_unknown_publication_default_and_explicit_window(database: &Database) {
+    let default_unknown_query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"unknown publication","scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"}"#,
+    )
+    .expect("the explicit default discovery view is valid");
+    let default_unknown_projection = read_runtime_library(database, &default_unknown_query)
+        .await
+        .expect("accepted discovery with unknown publication time remains readable by default");
+    assert_eq!(default_unknown_projection.cards.len(), 1);
+    assert_eq!(
+        default_unknown_projection.cards[0].platform_content_id,
+        "unknown-published-fixture"
+    );
+    assert_eq!(default_unknown_projection.cards[0].published_at, None);
+    assert_eq!(
+        default_unknown_projection.cards[0].published_at_state, "UNKNOWN",
+        "the default view must label the missing source fact instead of deriving a date"
+    );
+    assert_eq!(default_unknown_projection.excluded_unknown_published_at, 0);
+    assert_eq!(
+        default_unknown_projection.time_view,
+        "latest_accepted_discovery"
+    );
+
+    let unknown_query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"unknown publication","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+    )
+    .expect("filtered unknown query is valid");
+    let unknown_projection = read_runtime_library(database, &unknown_query)
+        .await
+        .expect("unknown publication count obeys the same query filter");
+    assert!(unknown_projection.cards.is_empty());
+    assert_eq!(unknown_projection.excluded_unknown_published_at, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn runtime_unknown_published_count_keeps_platform_content_identities_separate() {
+    let database = proof_database("plugin_runtime_platform_identity_unknown").await;
+    let shared_external_id = "synthetic-shared-external-id";
+    submit_runtime_discovery_fixture(
+        &database,
+        "xhs",
+        shared_external_id,
+        "synthetic cross platform identity",
+        Some(1_787_589_214),
+    )
+    .await;
+    submit_runtime_discovery_fixture(
+        &database,
+        "douyin",
+        shared_external_id,
+        "synthetic cross platform identity",
+        None,
+    )
+    .await;
+
+    let query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"cross platform identity","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+    )
+    .expect("strict library query is valid");
+    let projection = read_runtime_library(&database, &query)
+        .await
+        .expect("runtime view retains platform identity in unknown exclusion counting");
+
+    assert_eq!(projection.cards.len(), 1);
+    assert_eq!(projection.cards[0].platform, "xhs");
+    assert_eq!(projection.cards[0].platform_content_id, shared_external_id);
+    assert_eq!(projection.excluded_unknown_published_at, 1);
+}
+
+async fn submit_runtime_discovery_fixture(
+    database: &Database,
+    platform: &str,
+    external_id: &str,
+    title: &str,
+    published_at: Option<i64>,
+) {
+    let task_id = uuid::Uuid::new_v4();
+    let producer_instance_id = uuid::Uuid::new_v4();
+    let attempt_id = uuid::Uuid::new_v4();
+    let task_wire = serde_json::json!({
+        "contractVersion":"linggan.producer.task-spec.v1", "taskId":task_id,
+        "source":"manual", "platform":platform, "pageType":"search_results",
+        "target":{"query":"synthetic identity fixture"}, "capabilitiesRequested":["discovery_search"],
+        "maximumQuota":1, "commentLimit":"not_requested", "acquireMedia":"not_requested",
+        "riskPolicy":"local_trusted_user_initiated", "stopConditions":["maximum_quota"]
+    });
+    let task = parse_producer_task_spec(&task_wire.to_string()).expect("synthetic task is valid");
+    assert!(matches!(
+        create_producer_task(database, &task).await,
+        Ok(RuntimeTaskOutcome::Created { .. })
+    ));
+    let attempt_wire = serde_json::json!({
+        "contractVersion":"linggan.producer.attempt.v1", "producerInstanceId":producer_instance_id,
+        "taskId":task_id, "attemptId":attempt_id
+    });
+    let attempt =
+        parse_producer_attempt(&attempt_wire.to_string()).expect("synthetic attempt is valid");
+    assert!(matches!(
+        start_producer_attempt(database, &attempt).await,
+        Ok(RuntimeAttemptOutcome::Started { .. })
+    ));
+    let mut payload = serde_json::json!({"title":title,"authorName":"synthetic creator"});
+    if let Some(published_at) = published_at {
+        payload["publishedAt"] = serde_json::json!(published_at);
+    }
+    let package = serde_json::json!({
+        "contractVersion":"linggan.producer.capture-package.v1", "packageRef":uuid::Uuid::new_v4(),
+        "packageKind":"discovery_search", "platform":platform,
+        "observedAt":"2026-08-25T00:00:00Z", "capturedAt":"2026-08-25T00:00:01Z",
+        "coverage":{"target":{"basis":"maximum_quota","query":"synthetic identity fixture","maximumQuota":1},"layers":[{
+            "capability":"discovery_search", "observed":1,"attempted":1,"acquired":1,"verified":0,
+            "failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"maximum_quota"
+        }]}, "records":[{"kind":"discovery_card","resultPosition":1,
+            "sourceObject":{"externalId":external_id},"payload":payload}]
+    });
+    let submission_wire = serde_json::json!({
+        "contractVersion":"linggan.producer.capture-package.v1", "producerInstanceId":producer_instance_id,
+        "taskId":task_id, "attemptId":attempt_id, "submissionId":uuid::Uuid::new_v4(),
+        "capturePackage":package
+    });
+    let submission = parse_producer_submission(&submission_wire.to_string())
+        .expect("synthetic package is valid");
+    assert!(matches!(
+        submit_producer_package(database, &submission).await,
+        Ok(RuntimeSubmissionOutcome::Acknowledged { .. })
+    ));
 }
 
 async fn prove_resumable_media_upload(database: &Database) {
