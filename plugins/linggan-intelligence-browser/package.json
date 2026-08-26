@@ -26,6 +26,10 @@
     "probe:douyin-author-fields": "cat scripts/probe-douyin-author-fields.js",
     "probe:douyin-root-cause": "cat scripts/probe-douyin-root-cause.js",
     "probe:detail-probe-relay": "cat scripts/probe-detail-probe-relay.js",
+    "probe:xhs-search-context-v2": "cat scripts/probe-xhs-search-context-v2.js",
+    "probe:xhs-search-results-v2": "cat scripts/probe-xhs-search-results-v2.js",
+    "probe:xhs-note-detail-v2": "cat scripts/probe-xhs-note-detail-v2.js",
+    "probe:xhs-profile-v2": "cat scripts/probe-xhs-profile-v2.js",
     "probe:note-stored-urls": "cat scripts/probe-note-stored-urls.js",
     "watch:review": "node scripts/watch-review.cjs"
   },

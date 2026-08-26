@@ -8,6 +8,12 @@
 
 ## 当前阶段
 
+### AUD-XHS-001 / Issue #74（受限真实页面探针执行中）
+
+Mog 已于 2026-08-26 明确授权在已连接 Chrome 中执行最小小红书页面探针，用于回答当前搜索上下文/下拉联想、搜索列表、笔记详情（详情、媒体与当前顺序下最多 30 条评论）和作者页究竟有哪些可见字段、插件能否交付、何时停止。该授权严格限于匿名化的字段存在性、数量、页面状态、顺序和缺口记录：不向 Linggan 提交或持久化真实笔记、评论、作者资料、媒体或原始页面/API 输出；不读取 Cookie、账号秘密或隐藏账户资料；不下载媒体、不调用 OCR/ASR、不绕过验证码或安全限制。它是对 `DEV-03` 的受限预检，不表示 DEV-03、真实 Evidence 接入、插件发布、Canary、平台兼容、分析、部署或用户验收已经通过。唯一登记入口为 [`platforms/xiaohongshu/capture-capability-registry.md`](platforms/xiaohongshu/capture-capability-registry.md)，执行计划为 [`plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md)。
+
+首轮实测已确认搜索筛选、下拉结构、搜索卡片和作者页 DOM 的一部分当前事实，但同时暴露详情面漂移：当前详情使用 `.note-detail-mask / .note-container / .note-content / .comments-el`，本次页面未出现现有 `collectNote()` 所依赖的 `noteDetailMap`；首样本明确为空评论，补样本未进入有效详情，因此详情“最多 30 条评论”的正向交付仍为 `SOURCE_INCOMPLETE`。这不是零评论、零字段或采集成功的替代说法。当前裁定是：应以搜索上下文、详情 DOM 回退和统一的“详情 + 最多 30 条评论”回执为中心安排下一张插件升级卡；本卡不实现该升级。
+
 ### PLUGIN-RUNTIME-001 / Issue #50（执行中）
 
 用户已明确拒绝“按搜索、详情、评论、媒体逐张卡重新开放”的路线，改为将完整灵感爆爆爆浏览器插件一次性 retrofit 为 Linggan Intelligence 自有 Browser Producer Runtime。实现必须保留成熟 XHS/抖音页面采集、批量、恢复和原交互，只切断内容工作台运行时；Linggan 负责 TaskSpec、接入、Coverage、receipt、媒体真相与本地读取边界。媒体不再是后续附录：URL 只是 Observation，UI 只能使用 Linggan 本地 asset URL，OCR/ASR 为独立异步派生队列。2026-08-26 的同 Issue #50 / Draft PR #51 最终修订已形成可审查 head：合成“搜索前 20 条”可经 shared package、loopback ingress 到 Evidence Library；无类型接纳的 raw/quarantine 记录不显示为 Evidence 卡片；媒体保留独立上传/失败/派生队列血缘；Popup 已删除旧授权、工位、Cookie 和账号管理处理，并且暂停/继续/停止只在页面控制器实际确认状态转换后显示成功；无可控任务返回 `no_active_task` 且不修改可见进度。隔离且自动清理的 PostgreSQL proof 已通过，但未发生真实平台、账号、媒体、OCR/ASR 或用户验收。**但 v0.4.0 已被用户实际点击验证为工具栏 popup 空白，不能用于 REAL-CANARY-001；Issue #53 正在以 v0.4.2 只修复 popup 启动与诚实 fallback，未合并、未重新加载、未进行真实平台访问。** 本机持久运行库迁移仍受 `.env` 与 Docker 应用角色密码不一致阻塞，未自行运行要求明确授权的密码修复。
@@ -85,7 +91,7 @@ REAL-CANARY #52 的聚合结果已确认：本地库存在已接纳的当前可�
 
 ## 当前下一步
 
-当前唯一获准实施事项是 [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md)。它把已确认设计压缩为一条合成/脱敏技术 tracer：终态 Package 接入、逐 Record 处理、最小 Content 身份与 Observation、字段级 Current 来源，以及 API + minimal CLI 的解释结果；它不是用户可见产品切片。
+当前主线实施事项仍是 [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md)。它把已确认设计压缩为一条合成/脱敏技术 tracer：终态 Package 接入、逐 Record 处理、最小 Content 身份与 Observation、字段级 Current 来源，以及 API + minimal CLI 的解释结果；它不是用户可见产品切片。与主线并列、且由 Mog 单独授权的唯一受限现实页面工作是 `AUD-XHS-001 / Issue #74`；它只降低小红书字段与插件兼容性的未知，不接入真实材料，也不扩大 SCOPE-001。
 
 语义冻结已经经过四次独立只读攻击。第四轮发现的 payload/ingress 分层、pre-routing audit union、动态 ref/time snapshot 和跨 Attempt Satisfaction 已分别用 processor owner、封闭数据库 union、固定 proof clock/ref 与 Work 1:1 Attempt 收口。按用户最新裁定不再进行第五轮文档复核。F01 已完成 contracts tracer、手工静态 manifest Oracle，以及 **TDD 步骤 3 的 Package ingress**：有效 Package 在随机隔离的 PostgreSQL 16 schema 中原子接入，行数逐表对齐 manifest 的 `fresh_seed` 与 `final` 阶段，六个事务故障注入点任一失败都零半写，同 hash replay 与不同 hash conflict 只新增一行 delivery 且不覆盖既有 Package，接入后 Observation/Current/Source 侧表仍不存在。三项主链保护中前两项（接入阶段不提前形成 Observation/Current、接入故障零半写）已有真实数据库证据；第三项（坏 Record 不撤销合格 Record）属于 Record processing，尚未实现。下一步是 TDD 步骤 4 的两条 Record 独立处理与 Observation/Current，需要先创建 `0002` migration；随后才是 loopback API 与只经 API 的 CLI。完成该链后停止实施扩张；其余 canonicalization、完整 envelope、资源上限和 F02–F10 等待 ARC-001 收口及后续明确排期，不从 F01 自动继续。
 
