@@ -34,8 +34,8 @@ export function createLingganContentRuntime({ platform } = {}) {
   }
 
   return {
-    async submitDiscovery(cards, { query = '', authorExternalId = '', surface = 'current_visible_surface' } = {}) {
-      const packageValue = packageDiscovery({ platform, cards, query, authorExternalId, surface });
+    async submitDiscovery(cards, { query = '', authorExternalId = '', surface = 'current_visible_surface', pageFacts = undefined } = {}) {
+      const packageValue = packageDiscovery({ platform, cards, query, authorExternalId, surface, pageFacts });
       const capability = authorExternalId ? 'profile_discovery' : 'discovery_search';
       const target = authorExternalId
         ? { authorExternalId: String(authorExternalId), surface }

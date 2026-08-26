@@ -1,7 +1,9 @@
 import '../extensionPublicPath.js';
 import '../content.css';
 import { MSG } from '../shared/constants.js';
-import { collectNote, readCurrentVisibleSurfaceNotes } from '../platforms/xhs/noteCollector.js';
+import { readCurrentVisibleSurfaceNotes } from '../platforms/xhs/noteCollector.js';
+import { collectXhsNoteDetailPackage } from '../platforms/xhs/detailPackageCollector.js';
+import { readCurrentXhsSearchSurfaceContext } from '../platforms/xhs/searchFilters.js';
 import { collectComments, collectCommentImages } from '../platforms/xhs/commentCollector.js';
 import { collectAuthor } from '../platforms/xhs/authorCollector.js';
 import { BatchNoteController, BatchCommentController } from '../platforms/xhs/batchController.js';
@@ -46,6 +48,13 @@ const dashboardBridge = createDashboardBridge({
 });
 
 class LingganBatchNoteController extends BatchNoteController {
+  constructor(...args) {
+    super(...args);
+    // A note-detail package includes its attached comments. Install the existing bridge only
+    // when a batch collection controller is actually created, never on ordinary page load.
+    ensureXhsCommentApiBridge();
+  }
+
   _emitProgress(payload) {
     super._emitProgress(payload);
     void runtime.submitBatchCheckpoint('xhs_batch_notes', payload).catch(() => {});
@@ -69,7 +78,13 @@ class LingganBatchCommentController extends BatchCommentController {
 const xhsPageController = createXhsPageController({
   MSG,
   assertPluginAuthorized: localTrustedAuthorization,
-  collectNote,
+  collectNote: async (...args) => {
+    // A direct detail request carries its attached comments in the same logical package.
+    // The bridge remains task-triggered rather than becoming an always-on page observer.
+    ensureXhsCommentApiBridge();
+    const result = await collectXhsNoteDetailPackage(...args);
+    return result.note;
+  },
   collectComments: async (...args) => {
     // Do not install the old page bridge when a search/profile page merely loads.  It is only
     // needed if a user explicitly starts comment collection.
@@ -97,10 +112,20 @@ const xhsPageController = createXhsPageController({
   extractNoteId,
   sendToBackground,
   downloadNoteMediaFromRecord: async (note) => runtime.acquireMediaSlots(note),
-  discoverSurface: async ({ mode, maximumQuota }) => readCurrentVisibleSurfaceNotes(
-    mode === 'profile' ? '#userPostedFeeds' : '.feeds-container',
-    maximumQuota,
-  ),
+  discoverSurface: async ({ mode, maximumQuota }) => {
+    const cards = readCurrentVisibleSurfaceNotes(
+      mode === 'profile' ? '#userPostedFeeds' : '.feeds-container',
+      maximumQuota,
+    );
+    if (mode === 'profile') return cards;
+    return {
+      cards,
+      pageFacts: readCurrentXhsSearchSurfaceContext({
+        requestedLimit: maximumQuota,
+        loadedCount: cards.length,
+      }),
+    };
+  },
   submitDiscovery: (cards, context) => runtime.submitDiscovery(cards, context),
 });
 

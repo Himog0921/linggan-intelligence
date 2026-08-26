@@ -15,7 +15,7 @@ import {
   shouldStopDiscovery,
 } from '../src/platforms/xhs/noteCollector.js';
 
-test('current visible surface reader stays bounded to 20 cards and does not perform a scroll', () => {
+test('current visible surface reader respects the task quota without a permanent 20-card cap or scroll', () => {
   const originalDocument = globalThis.document;
   const originalWindow = globalThis.window;
   let scrollCalls = 0;
@@ -33,8 +33,8 @@ test('current visible surface reader stays bounded to 20 cards and does not perf
   globalThis.window = { scrollY: 0, scrollTo: () => { scrollCalls += 1; } };
   try {
     const records = readCurrentVisibleSurfaceNotes('.feeds-container', 200);
-    assert.equal(records.length, 20);
-    assert.deepEqual(records.map((record) => record.noteId), noteIds.slice(0, 20));
+    assert.equal(records.length, 22);
+    assert.deepEqual(records.map((record) => record.noteId), noteIds);
     assert.equal(scrollCalls, 0);
   } finally {
     globalThis.document = originalDocument;

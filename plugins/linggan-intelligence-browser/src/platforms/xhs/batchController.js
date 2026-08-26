@@ -1,10 +1,10 @@
 import {
-  collectNote,
   discoverProfileSurfaceNotesFromApi,
   discoverSearchSurfaceNotesFromApi,
   discoverWithScroll,
   resolveExpectedNoteFromMap,
 } from './noteCollector.js';
+import { collectXhsNoteDetailPackage } from './detailPackageCollector.js';
 import { collectComments } from './commentCollector.js';
 import { throttle, watchCaptcha, showCaptchaPauseOverlay } from './antiDetect.js';
 import { sendToBackground, reportProgress, reportDone, reportLocalRead } from '../../shared/messaging.js';
@@ -156,7 +156,7 @@ export function mergeSurfaceCoverFallback(note = {}, surfaceNote = {}) {
     ? note.images
     : [fallbackCover];
 
-  return {
+  const merged = {
     ...note,
     cover: fallbackCover,
     coverImg: firstText(note.coverImg) || fallbackCover,
@@ -164,6 +164,11 @@ export function mergeSurfaceCoverFallback(note = {}, surfaceNote = {}) {
     thumbnail: firstText(note.thumbnail) || fallbackCover,
     images,
   };
+  // The unified detail package is deliberately non-enumerable so it never enters record
+  // payloads. Preserve it across a cover-only fallback so comments are not collected twice.
+  const packageDescriptor = Object.getOwnPropertyDescriptor(note, '__xhsDetailPackage');
+  if (packageDescriptor) Object.defineProperty(merged, '__xhsDetailPackage', packageDescriptor);
+  return merged;
 }
 
 function normalizeTargetIdentity(value = '') {
@@ -885,6 +890,27 @@ export class BatchNoteController extends BaseBatchController {
     }
   }
 
+  async _collectDetailPackage(wd, options = {}) {
+    const result = await collectXhsNoteDetailPackage(wd, {
+      ...options,
+      includeComments: this._includeComments,
+      commentLimit: this._commentLimit,
+      commentDepthMode: this._commentDepthMode,
+      shouldStop: () => !this.isRunning,
+      waitIfPaused: () => this._waitIfPaused(),
+      onCommentProgress: (progress) => {
+        void this.reportHeartbeat.report(this.collectionRunId, {
+          taskState: this.state,
+          stage: 'collecting_comments',
+          current: this.currentIndex,
+          total: this.noteList.length,
+          message: progress?.message || '正在读取当前笔记评论',
+        }).catch(() => {});
+      },
+    });
+    return result.note;
+  }
+
   async _collectCurrentDetailNote(noteInfo) {
     let collectedNote = null;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -895,7 +921,7 @@ export class BatchNoteController extends BaseBatchController {
           await this._waitForNoteDataStable(noteInfo.noteId, 2600 + (attempt * 1200));
           await randomDelay(420, 760);
         }
-        const result = await collectNote(window, {
+        const result = await this._collectDetailPackage(window, {
           collectionRunId: this.collectionRunId,
           expectedNoteId: noteInfo.noteId,
           monitorMeta: this.monitorMeta,
@@ -1057,7 +1083,7 @@ export class BatchNoteController extends BaseBatchController {
             await this._waitForNoteDataStable(noteInfo.noteId, 2600 + (attempt * 1200));
             await randomDelay(420, 760);
           }
-          const result = mergeSurfaceCoverFallback(await collectNote(window, {
+          const result = mergeSurfaceCoverFallback(await this._collectDetailPackage(window, {
             collectionRunId: this.collectionRunId,
             expectedNoteId: noteInfo.noteId,
             monitorMeta: this.monitorMeta,
@@ -1112,7 +1138,7 @@ export class BatchNoteController extends BaseBatchController {
       await this._settleAfterDetailReady();
       await this._waitForNoteDataStable(noteInfo.noteId, 2500);
 
-      const result = mergeSurfaceCoverFallback(await collectNote(window, {
+      const result = mergeSurfaceCoverFallback(await this._collectDetailPackage(window, {
         collectionRunId: this.collectionRunId,
         expectedNoteId: noteInfo.noteId,
         monitorMeta: this.monitorMeta,
@@ -1176,6 +1202,29 @@ export class BatchNoteController extends BaseBatchController {
     const noteId = String(noteInfo?.noteId || '').trim().replace(/^xhs_/, '');
     if (!noteId) return { total: 0, comments: [] };
     const publicCommentCount = publicCommentCountFromXhsNote(collectedNote);
+    const packaged = collectedNote?.__xhsDetailPackage;
+    if (packaged?.receipt?.comments) {
+      const coverage = packaged.receipt.comments;
+      const commentResult = buildXhsAttachedCommentResult({
+        noteId,
+        total: coverage.actual,
+        publicCommentCount,
+        requestedCommentLimit: coverage.requested,
+        error: coverage.state === 'target_reached' || coverage.state === 'explicit_empty_state'
+          ? ''
+          : coverage.stopReason,
+      });
+      this._totalCommentsCollected += commentResult.total;
+      this.commentResults.push(commentResult);
+      const comments = Array.isArray(packaged.comments) ? packaged.comments : [];
+      comments.forEach((comment, index) => this._reportCollectedComment(comment, noteInfo, index));
+      return {
+        total: commentResult.total,
+        comments,
+        ...(publicCommentCount !== null ? { publicCommentCount } : {}),
+        ...(commentResult.error ? { error: commentResult.error } : {}),
+      };
+    }
     if (publicCommentCount === 0) {
       const result = buildXhsAttachedCommentResult({
         noteId,

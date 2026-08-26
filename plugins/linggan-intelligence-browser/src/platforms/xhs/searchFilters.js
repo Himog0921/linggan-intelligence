@@ -1,3 +1,5 @@
+import { buildXhsSearchSurfaceReceipt } from './captureReceipt.js';
+
 const SEARCH_PAGE_RE = /xiaohongshu\.com\/search_result/i;
 const FEED_CONTAINER_SELECTOR = '.feeds-container';
 const SEARCH_RESULT_SETTLE_TIMEOUT_MS = 15000;
@@ -132,10 +134,12 @@ export function readCurrentXhsSearchFilterSnapshot(win = globalThis.window) {
   const labels = {};
 
   if (Array.isArray(filterParams)) {
+    filterParams.forEach((entry) => {
+      const type = String(entry?.type || '').trim();
+      if (type) raw[type] = toTextList(unwrapState(entry?.tags));
+    });
     Object.entries(FILTER_GROUPS).forEach(([groupKey, group]) => {
-      const item = filterParams.find((entry) => String(entry?.type || '').trim() === group.stateType);
-      const tags = toTextList(unwrapState(item?.tags));
-      raw[group.stateType] = tags;
+      const tags = raw[group.stateType] || [];
       const option = resolveOptionByLabel(groupKey, tags);
       result[groupKey] = option?.value || group.defaultValue;
       labels[groupKey] = option?.label || group.currentLabel;
@@ -146,6 +150,31 @@ export function readCurrentXhsSearchFilterSnapshot(win = globalThis.window) {
     ...normalizeXhsSearchFilters(result),
     labels,
     raw,
+  };
+}
+
+export function readCurrentXhsSearchSurfaceContext({
+  doc = globalThis.document,
+  win = globalThis.window,
+  requestedLimit = 0,
+  loadedCount = 0,
+  stopReason = 'current_surface_read_once',
+} = {}) {
+  const filterSnapshot = readCurrentXhsSearchFilterSnapshot(win);
+  const suggestions = [...new Set(Array.from(doc?.querySelectorAll?.('.sug-item') || [])
+    .map((element) => String(element?.textContent || '').trim())
+    .filter(Boolean))].slice(0, 30);
+  return {
+    ...buildXhsSearchSurfaceReceipt({
+      requestedLimit,
+      loadedCount,
+      stopReason,
+      activeFilters: normalizeXhsSearchFilters(filterSnapshot),
+      suggestionCount: suggestions.length,
+    }),
+    suggestions,
+    filterLabels: filterSnapshot.labels,
+    rawFilterState: filterSnapshot.raw,
   };
 }
 

@@ -246,7 +246,7 @@ export function packageBatchCheckpoint({ platform, kind, progress, observedAt, c
   });
 }
 
-export function packageDiscovery({ platform, cards = [], query = '', authorExternalId = '', observedAt, capturedAt, surface = 'current_visible_surface' } = {}) {
+export function packageDiscovery({ platform, cards = [], query = '', authorExternalId = '', observedAt, capturedAt, surface = 'current_visible_surface', pageFacts = undefined } = {}) {
   const kind = authorExternalId ? PRODUCER_CAPABILITY.PROFILE_DISCOVERY : PRODUCER_CAPABILITY.DISCOVERY_SEARCH;
   const visible = asArray(cards).slice(0, 2048);
   return createCapturePackage({
@@ -278,6 +278,11 @@ export function packageDiscovery({ platform, cards = [], query = '', authorExter
       payload,
       };
     }),
+    // The Producer contract rejects unknown top-level fields. Keep page facts in its existing
+    // execution checkpoint slot so the receipt survives strict parsing and durable delivery.
+    ...(pageFacts && typeof pageFacts === 'object' && !Array.isArray(pageFacts)
+      ? { checkpoint: { kind: 'search_surface_receipt', surfaceReceipt: pageFacts } }
+      : {}),
   });
 }
 

@@ -7,6 +7,7 @@ import {
   isCollectedNoteUsable,
   parseXhsInteractCount,
   parseXhsPublishedAt,
+  readXhsNoteDetailFromDom,
   resolveExpectedNoteFromMap,
   selectNoteKey,
 } from '../src/platforms/xhs/noteCollector.js';
@@ -184,4 +185,43 @@ test('extractXhsLivePhotoStreams keeps xhs live photo stream candidates', () => 
       'https://sns-video-hw.xhscdn.com/live-backup.mp4',
     ],
   );
+});
+
+test('readXhsNoteDetailFromDom keeps a current detail page usable when the injected map is absent', () => {
+  const title = { textContent: '页面标题' };
+  const description = { textContent: '页面正文' };
+  const author = { textContent: '页面作者' };
+  const image = { currentSrc: 'https://img.example.com/detail.jpg', getAttribute: () => '' };
+  const root = {
+    querySelector(selector) {
+      if (selector === '.note-title') return title;
+      if (selector === '.note-content .desc') return description;
+      if (selector === '.author-wrapper .name') return author;
+      return null;
+    },
+    querySelectorAll(selector) {
+      return selector === '.note-slider-img img, .note-slider img' ? [image] : [];
+    },
+  };
+  const doc = {
+    querySelector(selector) {
+      return selector === '.note-detail-mask, .note-container, [class*="note-detail"]' ? root : null;
+    },
+  };
+
+  const result = readXhsNoteDetailFromDom({
+    document: doc,
+    location: { href: 'https://www.xiaohongshu.com/explore/note_dom_1' },
+  }, { expectedNoteId: 'note_dom_1' });
+
+  assert.deepEqual(result, {
+    noteId: 'note_dom_1',
+    title: '页面标题',
+    desc: '页面正文',
+    type: 'normal',
+    imageList: [{ urlDefault: 'https://img.example.com/detail.jpg' }],
+    user: { nickname: '页面作者' },
+    interactInfo: {},
+    _captureSource: 'xhs.detail_dom',
+  });
 });

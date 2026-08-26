@@ -55,6 +55,28 @@ test('current-surface discovery packages exclude temporary DOM ordering referenc
   assert.doesNotThrow(() => JSON.stringify(packageValue));
 });
 
+test('search discovery retains its page receipt in the contract-supported checkpoint without claiming the result set is complete', () => {
+  const packageValue = packageDiscovery({
+    platform: 'xhs',
+    query: 'ADHD',
+    cards: [{ noteId: 'note-1', title: 'visible' }],
+    pageFacts: {
+      kind: 'xhs_search_surface',
+      requestedLimit: 50,
+      loadedCount: 1,
+      stopReason: 'current_surface_read_once',
+      resultSetComplete: false,
+    },
+  });
+  assert.deepEqual(Object.keys(packageValue).sort(), [
+    'capturedAt', 'checkpoint', 'contractVersion', 'coverage', 'observedAt', 'packageKind', 'packageRef', 'platform', 'records',
+  ]);
+  assert.equal(packageValue.checkpoint.kind, 'search_surface_receipt');
+  assert.equal(packageValue.checkpoint.surfaceReceipt.requestedLimit, 50);
+  assert.equal(packageValue.checkpoint.surfaceReceipt.loadedCount, 1);
+  assert.equal(packageValue.checkpoint.surfaceReceipt.resultSetComplete, false);
+});
+
 test('partial media coverage retains acquired bytes and explicitly keeps unknown/not-attempted distinct', () => {
   const packageValue = createCapturePackage({
     packageKind: 'media_slots', platform: 'xhs', target: { basis: 'known_set' },

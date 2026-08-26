@@ -364,6 +364,46 @@ export function parseXhsPublishedAt(raw, { now = Date.now() } = {}) {
   return 0;
 }
 
+function readDetailText(root, selectors = []) {
+  for (const selector of selectors) {
+    const value = String(root?.querySelector?.(selector)?.textContent || '').trim();
+    if (value) return value;
+  }
+  return '';
+}
+
+export function readXhsNoteDetailFromDom(wd = window, { expectedNoteId = '' } = {}) {
+  const doc = wd?.document;
+  const root = doc?.querySelector?.('.note-detail-mask, .note-container, [class*="note-detail"]');
+  if (!root) return null;
+
+  const noteId = String(expectedNoteId || extractNoteId(wd?.location?.href || '')).trim();
+  if (!noteId) return null;
+
+  const imageList = Array.from(root.querySelectorAll?.('.note-slider-img img, .note-slider img') || [])
+    .map((element) => pickImageUrlFromElement(element))
+    .filter(Boolean)
+    .map((urlDefault) => ({ urlDefault }));
+  const title = readDetailText(root, ['.note-title', '[class*="note-title"]']);
+  const desc = readDetailText(root, ['.note-content .desc', '[class*="note-content"] [class*="desc"]']);
+  const authorName = readDetailText(root, ['.author-wrapper .name', '[class*="author"] [class*="name"]']);
+  if (!title && !desc && imageList.length === 0 && !authorName) return null;
+
+  return {
+    noteId,
+    title,
+    desc,
+    type: 'normal',
+    imageList,
+    user: {
+      nickname: authorName,
+    },
+    // DOM fallback intentionally leaves metrics unknown. It must not manufacture zero values.
+    interactInfo: {},
+    _captureSource: 'xhs.detail_dom',
+  };
+}
+
 /**
  * 采集单篇笔记数据
  * 技术路径：注入 noteMap.js → 从 __INITIAL_STATE__ 提取结构化数据
@@ -398,37 +438,34 @@ export async function collectNote(wd = window, options = {}) {
     noteMap = null;
   }
 
-  if (!noteMap || Object.keys(noteMap).length === 0) {
-    throw lastErr || new Error('未找到笔记数据，请确认当前页面是笔记详情页');
-  }
-
-  // 2. 找到正确的笔记数据
-  // 优先用当前 URL 的 noteId 精确匹配，避免拿到 'undefined' / '' 等无效 key
   const expectedNoteId = String(options.expectedNoteId || '').trim();
   const currentUrl = wd.location?.href || window.location.href;
-  const currentNoteId = extractNoteId(currentUrl);
-  const validKeys = Object.keys(noteMap).filter(k => k && k !== 'undefined' && k.length > 10);
+  let noteKey = '';
+  let note = null;
+  let detailSource = '__INITIAL_STATE__';
 
-  console.log('[灵感爆爆爆] noteMap keys:', validKeys, '| currentNoteId:', currentNoteId, '| expectedNoteId:', expectedNoteId);
-
-  const noteKey = selectNoteKey(noteMap, expectedNoteId, currentUrl);
-
-  if (!noteKey) {
-    throw new Error('未找到笔记数据，请确认当前页面是笔记详情页');
+  if (noteMap && Object.keys(noteMap).length > 0) {
+    noteKey = selectNoteKey(noteMap, expectedNoteId, currentUrl);
+    if (noteKey) {
+      note = resolveExpectedNoteFromMap(noteMap, expectedNoteId, currentUrl).note;
+    }
   }
 
-  const { note } = resolveExpectedNoteFromMap(noteMap, expectedNoteId, currentUrl);
+  if (!note) {
+    note = readXhsNoteDetailFromDom(wd, { expectedNoteId });
+    noteKey = String(note?.noteId || '').trim();
+    detailSource = note?._captureSource || 'xhs.detail_dom';
+  }
 
-  console.log('[灵感爆爆爆] note 原始数据:', JSON.stringify({
-    noteId: note?.noteId, id: note?.id, title: note?.title,
-    likes: note?.interactInfo?.likedCount, type: note?.type,
-  }));
+  if (!note) {
+    throw lastErr || new Error('未找到笔记数据，请确认当前页面是笔记详情页');
+  }
 
   if (!note || (!note.noteId && !note.id && !note.title)) {
     throw new Error('笔记数据解析失败，数据结构异常');
   }
 
-  if (!isCollectedNoteUsable(note, expectedNoteId, { requireStats: true })) {
+  if (detailSource === '__INITIAL_STATE__' && !isCollectedNoteUsable(note, expectedNoteId, { requireStats: true })) {
     throw new Error(`笔记数据未稳定就绪: expected=${expectedNoteId || 'unknown'} actual=${note.noteId || note.id || ''}`);
   }
 
@@ -477,7 +514,7 @@ export async function collectNote(wd = window, options = {}) {
     videoStreams: videoSelection.streams || [],
     likes: parseXhsInteractCount(note.interactInfo, ['likedCount', 'likeCount', 'likes']),
     collects: parseXhsInteractCount(note.interactInfo, ['collectedCount', 'collectCount', 'collects', 'favoriteCount']),
-    comments: publicCommentCount ?? 0,
+    comments: publicCommentCount,
     publicCommentCount,
     publicCommentCountKnown: publicCommentCount !== null,
     shares: parseXhsInteractCount(note.interactInfo, ['shareCount', 'shares']),
@@ -501,7 +538,10 @@ export async function collectNote(wd = window, options = {}) {
     collectedAt,
     updatedAt: collectedAt,
     collectionRunId: String(options.collectionRunId || '').trim(),
-    dataSource: '__INITIAL_STATE__',
+    dataSource: detailSource,
+    ...(detailSource === '__INITIAL_STATE__'
+      ? {}
+      : { dataQuality: 'degraded', qualityReason: 'dom_detail_fallback', sourceTier: 'dom' }),
     createdAt: existing?.createdAt || collectedAt,
     mediaQuality: 'HD',
     syncStatus: 'pending',
@@ -514,14 +554,16 @@ export async function collectNote(wd = window, options = {}) {
         (note.tagList || []).map((item) => item?.name || '').filter(Boolean).join(' '),
       ]),
       rawUrl: safeUrl(wd.location?.href || window.location.href),
-      rawSource: '__INITIAL_STATE__.noteMap',
+      rawSource: detailSource === '__INITIAL_STATE__' ? '__INITIAL_STATE__.noteMap' : 'xhs.detail_dom',
     }),
   }, options.monitorMeta);
 
   // 4. 写入 IndexedDB（主键 noteId 自动去重）
   await noteStore.upsert(noteInfo);
-  noteInfo.lingganDelivery = await emitCollectorReceipt('contentDetail', noteInfo, { platform: 'xhs', options });
-  noteInfo.lingganMediaDelivery = await emitCollectorReceipt('mediaSlots', noteInfo, { platform: 'xhs', options });
+  if (options.deferLingganDelivery !== true) {
+    noteInfo.lingganDelivery = await emitCollectorReceipt('contentDetail', noteInfo, { platform: 'xhs', options });
+    noteInfo.lingganMediaDelivery = await emitCollectorReceipt('mediaSlots', noteInfo, { platform: 'xhs', options });
+  }
 
   return noteInfo;
 }
@@ -586,7 +628,7 @@ export function discoverNotesFromDOM(containerSelector) {
 // the legacy API snapshot bridge and never scrolls.  A short current page is partial evidence,
 // not proof that the platform has no more cards.
 export function readCurrentVisibleSurfaceNotes(containerSelector, maximumQuota = 20) {
-  const quota = Math.min(20, normalizePositiveInteger(maximumQuota, 20));
+  const quota = normalizePositiveInteger(maximumQuota, 20);
   return discoverNotesFromDOM(containerSelector).slice(0, quota);
 }
 
