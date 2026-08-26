@@ -1,6 +1,6 @@
 use linggan_contracts::{
-    CoverPresentationState, DiscoveryContractError, EvidenceQuery, PublishedWindow,
-    parse_discovery_package,
+    CoverPresentationState, DiscoveryContractError, EvidenceQuery, EvidenceTimeView,
+    PublishedWindow, parse_discovery_package,
 };
 
 const PARTIAL_VISIBLE_DISCOVERY: &str = r#"
@@ -76,7 +76,8 @@ fn acquisition_and_local_evidence_query_are_disjoint_contracts() {
     )
     .expect("a local EvidenceQuery must not need platform fields");
 
-    assert_eq!(query.window(), PublishedWindow::Last30Days);
+    assert_eq!(query.time_view(), EvidenceTimeView::PublishedLast30Days);
+    assert_eq!(query.published_window(), Some(PublishedWindow::Last30Days));
     assert!(
         serde_json::from_str::<EvidenceQuery>(
             r#"{
@@ -263,4 +264,40 @@ fn discovery_contract_keeps_unknown_published_time_for_the_read_projection() {
     );
     // Result filtering belongs to the local read projection. Its PostgreSQL proof separately
     // verifies that this unknown value is excluded from a PublishedWindow query.
+}
+
+#[test]
+fn evidence_query_keeps_default_discovery_view_separate_from_published_windows() {
+    let default_query: EvidenceQuery = serde_json::from_str(
+        r#"{
+          "text": null,
+          "scope": "all_accepted_material",
+          "window": "latest_accepted_discovery",
+          "sort": "latest_discovery"
+        }"#,
+    )
+    .expect("the bounded accepted-discovery reading view is valid");
+    assert_eq!(
+        default_query.time_view(),
+        EvidenceTimeView::LatestAcceptedDiscovery
+    );
+    assert_eq!(default_query.published_window(), None);
+
+    let explicit_window: EvidenceQuery = serde_json::from_str(
+        r#"{
+          "text": null,
+          "scope": "all_accepted_material",
+          "window": "last_7_days",
+          "sort": "latest_discovery"
+        }"#,
+    )
+    .expect("a strict published-time window remains valid");
+    assert_eq!(
+        explicit_window.time_view(),
+        EvidenceTimeView::PublishedLast7Days
+    );
+    assert_eq!(
+        explicit_window.published_window(),
+        Some(PublishedWindow::Last7Days)
+    );
 }

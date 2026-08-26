@@ -184,7 +184,8 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
             title: Some("<script>not a cover</script>".to_owned()),
             creator_display_name: Some("A娃 & 家长".to_owned()),
             published_at_source_text: Some("2026-08-25T00:00:00Z".to_owned()),
-            published_at: "2026-08-25 00:00:00+00".to_owned(),
+            published_at: Some("2026-08-25 00:00:00+00".to_owned()),
+            published_at_state: "KNOWN",
             first_discovered_at: "2026-08-25 00:00:00+00".to_owned(),
             observed_at: "2026-08-25 00:00:00+00".to_owned(),
             result_position: 1,
@@ -195,7 +196,7 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
             cover_local_asset_url: None,
         }],
         excluded_unknown_published_at: 0,
-        window: "last_30_days",
+        time_view: "last_30_days",
     };
     let html =
         evidence_page::render_read_projection(&evidence_library_html(), &projection, Some("A娃"));
@@ -205,6 +206,82 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
     assert!(!html.contains("<script>not a cover</script>"));
     assert!(!html.contains("https://"));
     assert!(!html.contains("xhscdn"));
+}
+
+#[test]
+fn default_read_view_surfaces_unknown_published_time_without_a_surrogate_date() {
+    let projection = DiscoveryLibraryProjection {
+        cards: vec![DiscoveryLibraryCard {
+            platform: "xhs".to_owned(),
+            platform_content_id: "synthetic-unknown-publication".to_owned(),
+            title: Some("synthetic accepted discovery".to_owned()),
+            creator_display_name: Some("synthetic creator".to_owned()),
+            published_at_source_text: None,
+            published_at: None,
+            published_at_state: "UNKNOWN",
+            first_discovered_at: "2026-08-26 00:00:00+00".to_owned(),
+            observed_at: "2026-08-26 00:00:00+00".to_owned(),
+            result_position: 1,
+            coverage_visible_cards: 1,
+            coverage_maximum_quota: 20,
+            coverage_stopped_reason: "surface_read_complete".to_owned(),
+            cover_presentation_state: "MEDIA_NOT_ACQUIRED",
+            cover_local_asset_url: None,
+        }],
+        excluded_unknown_published_at: 0,
+        time_view: "latest_accepted_discovery",
+    };
+
+    let html = evidence_page::render_read_projection(&evidence_library_html(), &projection, None);
+
+    assert!(html.contains("PUBLISHED_AT UNKNOWN"));
+    assert!(html.contains("未用首次发现、观察或接收时间替代"));
+    assert!(html.contains("VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN"));
+    assert!(html.contains("<em>视角</em> 最新已接纳"));
+    assert!(!html.contains("2026-08-26 00:00:00+00"));
+}
+
+#[test]
+fn default_empty_read_view_is_not_misdescribed_as_an_empty_published_window() {
+    let projection = DiscoveryLibraryProjection {
+        cards: vec![],
+        excluded_unknown_published_at: 0,
+        time_view: "latest_accepted_discovery",
+    };
+
+    let html = evidence_page::render_read_projection(&evidence_library_html(), &projection, None);
+
+    assert!(html.contains("当前视角没有可展示卡片"));
+    assert!(html.contains("最新已接纳不是发布时间窗口"));
+    assert!(!html.contains("当前窗口没有可展示卡片"));
+}
+
+#[test]
+fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_published_only() {
+    let default = local_query(&EvidenceLibraryParams {
+        q: None,
+        window: None,
+    })
+    .expect("an omitted URL window selects the explicit default discovery view");
+    assert_eq!(
+        default.time_view(),
+        linggan_contracts::EvidenceTimeView::LatestAcceptedDiscovery
+    );
+    assert_eq!(default.published_window(), None);
+
+    let explicit = local_query(&EvidenceLibraryParams {
+        q: None,
+        window: Some("last_30_days".to_owned()),
+    })
+    .expect("an explicit published window remains valid");
+    assert_eq!(
+        explicit.time_view(),
+        linggan_contracts::EvidenceTimeView::PublishedLast30Days
+    );
+    assert_eq!(
+        explicit.published_window(),
+        Some(linggan_contracts::PublishedWindow::Last30Days)
+    );
 }
 
 #[test]
@@ -270,10 +347,36 @@ async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discov
     let body = String::from_utf8(body.to_vec()).unwrap();
     assert!(body.contains("note-api-known"));
     assert!(!body.contains("note-api-unknown"));
+    assert!(body.contains("\"timeView\":\"last_30_days\""));
+    assert!(body.contains("\"excludedUnknownPublishedAt\":1"));
     assert!(!body.contains("https://"));
     assert!(!body.contains("xhscdn"));
 
     let response = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/local/evidence-library?q=ADHD")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(body.contains("note-api-known"));
+    assert!(body.contains("note-api-unknown"));
+    assert!(body.contains("\"timeView\":\"latest_accepted_discovery\""));
+    assert!(body.contains("\"excludedUnknownPublishedAt\":0"));
+
+    let response = application
+        .clone()
         .oneshot(
             Request::builder()
                 .uri("/corpus/evidence?q=ADHD&window=last_30_days")
@@ -294,6 +397,27 @@ async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discov
     assert!(html.contains("MEDIA<br>NOT ACQUIRED"));
     assert!(!html.contains("https://"));
     assert!(!html.contains("xhscdn"));
+
+    let response = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/corpus/evidence?q=ADHD")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let html = String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap();
+    assert!(html.contains("PUBLISHED_AT UNKNOWN"));
+    assert!(html.contains("未用首次发现、观察或接收时间替代"));
 }
 
 #[tokio::test]
@@ -317,7 +441,7 @@ async fn loopback_projection_counts_unknown_published_time_by_content_item_ident
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?q=ADHD&window=last_30_days")
+                .uri("/api/local/evidence-library?q=API&window=last_30_days")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -337,7 +461,7 @@ async fn loopback_projection_counts_unknown_published_time_by_content_item_ident
     let response = application
         .oneshot(
             Request::builder()
-                .uri("/corpus/evidence?q=ADHD&window=last_30_days")
+                .uri("/corpus/evidence?q=API&window=last_30_days")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -394,8 +518,8 @@ async fn loopback_7_day_query_keeps_api_and_page_window_metadata_in_sync() {
             .to_vec(),
     )
     .unwrap();
-    assert!(body.contains("\"window\":\"last_7_days\""));
-    assert!(!body.contains("\"window\":\"last_30_days\""));
+    assert!(body.contains("\"timeView\":\"last_7_days\""));
+    assert!(!body.contains("\"timeView\":\"last_30_days\""));
 
     let response = application
         .oneshot(
@@ -667,7 +791,7 @@ fn discovery_package(observed_at: &str) -> String {
           "coverage":{{"unit":"visible_search_card","visibleCards":2,"stoppedReason":"risk_control"}},
           "cards":[
             {{"content":{{"platformContentId":"note-api-known","title":"API 接纳卡片 ADHD","creatorDisplayName":"A娃家长","publishedAtSourceText":"{observed_at}","coverCandidate":{{"observedExternalUri":"https://xhscdn.example/api-cover"}}}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":1}}}},
-            {{"content":{{"platformContentId":"note-api-unknown","title":"未知发布时间","creatorDisplayName":"另一位家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":2}}}}
+            {{"content":{{"platformContentId":"note-api-unknown","title":"ADHD 未知发布时间","creatorDisplayName":"另一位家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":2}}}}
           ]
         }}"#,
     )

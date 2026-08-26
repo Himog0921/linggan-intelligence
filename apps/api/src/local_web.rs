@@ -1178,7 +1178,12 @@ async fn configured_database_state() -> LocalDatabaseState {
 }
 
 fn local_query(params: &EvidenceLibraryParams) -> Result<EvidenceQuery, ()> {
-    let window = match params.window.as_deref().unwrap_or("last_30_days") {
+    let window = match params
+        .window
+        .as_deref()
+        .unwrap_or("latest_accepted_discovery")
+    {
+        "latest_accepted_discovery" => "latest_accepted_discovery",
         "last_7_days" => "last_7_days",
         "last_30_days" => "last_30_days",
         _ => return Err(()),

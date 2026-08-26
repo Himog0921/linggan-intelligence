@@ -284,15 +284,7 @@ async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retai
         projection.excluded_unknown_published_at, 0,
         "a publication-time unknown record outside the text query must not inflate this view's exclusion count"
     );
-    let unknown_query: EvidenceQuery = serde_json::from_str(
-        r#"{"text":"unknown publication","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
-    )
-    .expect("filtered unknown query is valid");
-    let unknown_projection = read_runtime_library(&database, &unknown_query)
-        .await
-        .expect("unknown publication count obeys the same query filter");
-    assert!(unknown_projection.cards.is_empty());
-    assert_eq!(unknown_projection.excluded_unknown_published_at, 1);
+    assert_unknown_publication_default_and_explicit_window(&database).await;
     assert!(
         projection
             .cards
@@ -310,6 +302,41 @@ async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retai
         retained, 1,
         "raw material stays auditable without appearing as an Evidence card"
     );
+}
+
+async fn assert_unknown_publication_default_and_explicit_window(database: &Database) {
+    let default_unknown_query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"unknown publication","scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"}"#,
+    )
+    .expect("the explicit default discovery view is valid");
+    let default_unknown_projection = read_runtime_library(database, &default_unknown_query)
+        .await
+        .expect("accepted discovery with unknown publication time remains readable by default");
+    assert_eq!(default_unknown_projection.cards.len(), 1);
+    assert_eq!(
+        default_unknown_projection.cards[0].platform_content_id,
+        "unknown-published-fixture"
+    );
+    assert_eq!(default_unknown_projection.cards[0].published_at, None);
+    assert_eq!(
+        default_unknown_projection.cards[0].published_at_state, "UNKNOWN",
+        "the default view must label the missing source fact instead of deriving a date"
+    );
+    assert_eq!(default_unknown_projection.excluded_unknown_published_at, 0);
+    assert_eq!(
+        default_unknown_projection.time_view,
+        "latest_accepted_discovery"
+    );
+
+    let unknown_query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"unknown publication","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+    )
+    .expect("filtered unknown query is valid");
+    let unknown_projection = read_runtime_library(database, &unknown_query)
+        .await
+        .expect("unknown publication count obeys the same query filter");
+    assert!(unknown_projection.cards.is_empty());
+    assert_eq!(unknown_projection.excluded_unknown_published_at, 1);
 }
 
 async fn prove_resumable_media_upload(database: &Database) {

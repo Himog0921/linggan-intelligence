@@ -4,8 +4,8 @@
 //! create detail evidence, media, Observation, Topic, Research, Insight, or a claim about XHS.
 
 use linggan_contracts::{
-    DiscoveryContractError, DiscoveryPackage, DiscoveryStopReason, EvidenceQuery, PublishedWindow,
-    is_rfc3339_timestamp, parse_discovery_package,
+    DiscoveryContractError, DiscoveryPackage, DiscoveryStopReason, EvidenceQuery, EvidenceTimeView,
+    PublishedWindow, is_rfc3339_timestamp, parse_discovery_package,
 };
 use linggan_storage_postgres::Database;
 use serde::Serialize;
@@ -48,7 +48,7 @@ pub enum DiscoveryIngressOutcome {
 pub struct DiscoveryLibraryProjection {
     pub cards: Vec<DiscoveryLibraryCard>,
     pub excluded_unknown_published_at: u64,
-    pub window: &'static str,
+    pub time_view: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -61,7 +61,8 @@ pub struct DiscoveryLibraryCard {
     pub title: Option<String>,
     pub creator_display_name: Option<String>,
     pub published_at_source_text: Option<String>,
-    pub published_at: String,
+    pub published_at: Option<String>,
+    pub published_at_state: &'static str,
     pub first_discovered_at: String,
     pub observed_at: String,
     pub result_position: i32,
@@ -174,10 +175,7 @@ pub async fn read_discovery_library(
     database: &Database,
     query: &EvidenceQuery,
 ) -> Result<DiscoveryLibraryProjection, sqlx::Error> {
-    let window_days = match query.window() {
-        PublishedWindow::Last7Days => 7,
-        PublishedWindow::Last30Days => 30,
-    };
+    let window_days = query.published_window().map(published_window_days);
     let text = query.text().filter(|value| !value.trim().is_empty());
     let rows = sqlx::query(
         "WITH candidate AS ( \
@@ -187,9 +185,9 @@ pub async fn read_discovery_library(
              JOIN local_discovery_content_item content ON content.id = occurrence.content_item_id \
              JOIN local_discovery_package package ON package.id = occurrence.package_id \
              JOIN local_discovery_coverage coverage ON coverage.package_id = package.id \
-             WHERE occurrence.published_at IS NOT NULL \
+             WHERE ($1::integer IS NULL OR (occurrence.published_at IS NOT NULL \
                AND occurrence.published_at >= scope_001_now() - make_interval(days => $1) \
-               AND occurrence.published_at <= scope_001_now() \
+               AND occurrence.published_at <= scope_001_now())) \
                AND ($2::text IS NULL OR lower(coalesce(occurrence.creator_display_name, '')) LIKE '%' || lower($2) || '%' \
                     OR lower(coalesce(occurrence.title, '')) LIKE '%' || lower($2) || '%') \
          ), first_discovery AS ( \
@@ -197,16 +195,21 @@ pub async fn read_discovery_library(
              FROM local_discovery_occurrence occurrence \
              JOIN local_discovery_package package ON package.id = occurrence.package_id \
              GROUP BY occurrence.content_item_id \
+         ), known_published AS ( \
+             SELECT content_item_id, max(published_at) AS published_at, \
+                    max(published_at_source_text) FILTER (WHERE published_at IS NOT NULL) AS published_at_source_text \
+             FROM candidate GROUP BY content_item_id \
          ), latest AS ( \
              SELECT DISTINCT ON (content_item_id) * FROM candidate \
              ORDER BY content_item_id, observed_at DESC, id DESC \
          ) \
          SELECT latest.platform_content_id, latest.title, latest.creator_display_name, \
-                latest.published_at_source_text, latest.published_at::text AS published_at, \
+                known_published.published_at_source_text, known_published.published_at::text AS published_at, \
                 first_discovery.first_discovered_at::text AS first_discovered_at, \
                 latest.observed_at::text AS observed_at, latest.result_position, \
                 latest.visible_cards, latest.maximum_quota, latest.stopped_reason \
          FROM latest JOIN first_discovery ON first_discovery.content_item_id = latest.content_item_id \
+              JOIN known_published ON known_published.content_item_id = latest.content_item_id \
          ORDER BY first_discovery.first_discovered_at DESC, latest.result_position ASC",
     )
     .bind(window_days)
@@ -214,8 +217,12 @@ pub async fn read_discovery_library(
     .fetch_all(database.pool())
     .await?;
 
-    let excluded_unknown_published_at =
-        count_unknown_published_at(database, text, window_days).await?;
+    let excluded_unknown_published_at = match query.published_window() {
+        Some(window) => {
+            count_unknown_published_at(database, text, published_window_days(window)).await?
+        }
+        None => 0,
+    };
     let cards = rows
         .into_iter()
         .map(|row| DiscoveryLibraryCard {
@@ -225,6 +232,11 @@ pub async fn read_discovery_library(
             creator_display_name: row.get("creator_display_name"),
             published_at_source_text: row.get("published_at_source_text"),
             published_at: row.get("published_at"),
+            published_at_state: if row.get::<Option<String>, _>("published_at").is_some() {
+                "KNOWN"
+            } else {
+                "UNKNOWN"
+            },
             first_discovered_at: row.get("first_discovered_at"),
             observed_at: row.get("observed_at"),
             result_position: row.get("result_position"),
@@ -238,11 +250,23 @@ pub async fn read_discovery_library(
     Ok(DiscoveryLibraryProjection {
         cards,
         excluded_unknown_published_at,
-        window: match query.window() {
-            PublishedWindow::Last7Days => "last_7_days",
-            PublishedWindow::Last30Days => "last_30_days",
-        },
+        time_view: time_view_code(query.time_view()),
     })
+}
+
+fn published_window_days(window: PublishedWindow) -> i32 {
+    match window {
+        PublishedWindow::Last7Days => 7,
+        PublishedWindow::Last30Days => 30,
+    }
+}
+
+fn time_view_code(view: EvidenceTimeView) -> &'static str {
+    match view {
+        EvidenceTimeView::LatestAcceptedDiscovery => "latest_accepted_discovery",
+        EvidenceTimeView::PublishedLast7Days => "last_7_days",
+        EvidenceTimeView::PublishedLast30Days => "last_30_days",
+    }
 }
 
 struct ExistingPackage {

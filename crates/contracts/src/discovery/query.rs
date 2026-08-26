@@ -40,7 +40,8 @@ impl AcquisitionSpec {
 pub struct EvidenceQuery {
     text: Option<String>,
     scope: EvidenceQueryScope,
-    window: PublishedWindow,
+    #[serde(rename = "window")]
+    time_view: EvidenceTimeView,
     sort: EvidenceQuerySort,
 }
 
@@ -53,8 +54,19 @@ impl EvidenceQuery {
         self.scope
     }
 
-    pub fn window(&self) -> PublishedWindow {
-        self.window
+    pub fn time_view(&self) -> EvidenceTimeView {
+        self.time_view
+    }
+
+    /// A publication-time filter exists only for an explicit published-time view.  The default
+    /// accepted-discovery view is intentionally not allowed to smuggle first-seen or observed
+    /// time into this return value.
+    pub fn published_window(&self) -> Option<PublishedWindow> {
+        match self.time_view {
+            EvidenceTimeView::LatestAcceptedDiscovery => None,
+            EvidenceTimeView::PublishedLast7Days => Some(PublishedWindow::Last7Days),
+            EvidenceTimeView::PublishedLast30Days => Some(PublishedWindow::Last30Days),
+        }
     }
 
     pub fn sort(&self) -> EvidenceQuerySort {
@@ -77,14 +89,27 @@ pub enum EvidenceQuerySort {
     LatestDiscovery,
 }
 
-/// `WINDOW` is only a ContentItem published-time window. A missing source publication time is
-/// not silently included in this window.
+/// Evidence Library's bounded time/reading view.
+///
+/// The wire name remains `window` for the local URL/API contract, but
+/// `latest_accepted_discovery` is deliberately a view, not a publication-time window.  It
+/// surfaces accepted Discovery material in latest-discovery order and keeps publication time
+/// unknown when the producer did not supply it.  The two `published_*` values remain strict
+/// `ContentItem.published_at` filters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PublishedWindow {
+pub enum EvidenceTimeView {
+    LatestAcceptedDiscovery,
     #[serde(rename = "last_7_days")]
-    Last7Days,
+    PublishedLast7Days,
     #[serde(rename = "last_30_days")]
+    PublishedLast30Days,
+}
+
+/// A source-published-time window. This is never inferred from an accepted/observed timestamp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PublishedWindow {
+    Last7Days,
     Last30Days,
 }
 

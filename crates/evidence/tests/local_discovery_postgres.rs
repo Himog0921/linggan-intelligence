@@ -151,6 +151,47 @@ async fn read_projection_counts_matching_unknown_published_time_within_the_query
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn default_discovery_view_surfaces_accepted_unknown_published_time_without_reclassifying_it()
+{
+    let database = proof_database("local_discovery_default_unknown").await;
+    let observed_at = producer_fixture_observed_at(&database).await;
+    let package = package(&observed_at, None)
+        .replace("\"标题命中 ADHD\"", "\"ADHD 未知发布时间卡片\"")
+        .replace("\"无发布时间卡片\"", "\"ADHD 第二张未知发布时间卡片\"");
+    ingest_discovery_package(&database, &package)
+        .await
+        .expect("accepted discovery records remain valid without source publication time");
+    let default_query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"ADHD","scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"}"#,
+    )
+    .expect("the default accepted-discovery view is a valid local query");
+
+    let projection = read_discovery_library(&database, &default_query)
+        .await
+        .expect("the default view reads accepted unknown-time discovery cards");
+    assert_eq!(projection.cards.len(), 2);
+    assert!(
+        projection
+            .cards
+            .iter()
+            .all(|card| card.published_at.is_none() && card.published_at_state == "UNKNOWN")
+    );
+    assert_eq!(projection.excluded_unknown_published_at, 0);
+    assert_eq!(projection.time_view, "latest_accepted_discovery");
+
+    let explicit_window: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"ADHD","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+    )
+    .expect("an explicit published window remains valid");
+    let explicit_projection = read_discovery_library(&database, &explicit_window)
+        .await
+        .expect("the strict published window remains locally readable");
+    assert!(explicit_projection.cards.is_empty());
+    assert_eq!(explicit_projection.excluded_unknown_published_at, 2);
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn read_projection_counts_unknown_time_by_content_identity_not_by_occurrence() {
     let database = proof_database("local_discovery_identity_unknown").await;
     let observed_at = producer_fixture_observed_at(&database).await;

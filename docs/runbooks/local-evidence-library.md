@@ -1,7 +1,7 @@
 # 本地 Evidence Library 运行手册
 
 > 状态: 权威当前
-> 最后核对: 2026-08-25
+> 最后核对: 2026-08-26
 > 适用范围: Linggan `apps/api` 的本地 loopback host、`/health` 与 `/corpus/evidence`
 > 事实来源: Issue #25、LOCAL-001、当前 Rust 实现与实际运行验证
 > 冲突时以谁为准: 实际运行输出、当前代码、LOCAL-001 与用户最新确认；本手册不授予插件或平台访问
@@ -78,7 +78,8 @@ curl --fail --silent http://localhost:3000/corpus/evidence > /dev/null
 
 - 没有数据库连接时，它说明 `SOURCE_INCOMPLETE / NOT_CONNECTED`；这不能推断世界没有内容或数据库为零。
 - 有连接且存在合格的受控 discovery Package 时，页面只显示本地已接纳的 visible card。搜索框只检索标题和创作者名；它绝不重新搜索小红书。
-- `WINDOW` 只按来源可直接验证的 `published_at` 过滤，并以读取时 Linggan PostgreSQL 的 `scope_001_now()` 为唯一时间参照：7/30 天窗口只含 `[now - window, now]`，未来发布时间不称为最近也不返回。未来记录仍保留为已接纳发现材料；未知发布时间不会被填成 0 或“当前”，而是在页面明确统计为排除对象；该数量只统计当前 `EvidenceQuery` 候选集，不能把文本不匹配的本地对象计入。
+- URL 未携带 `window` 时，页面采用 `latest_accepted_discovery` 默认读取视角：已接纳 discovery 卡片即使没有来源发布时间也会显示为 `PUBLISHED_AT UNKNOWN`。这不是“最近发布”；页面不会用首次发现、观察、接收或重放时间替代来源发布时间。
+- 只有 URL 显式使用 `window=last_7_days` 或 `window=last_30_days` 时，`WINDOW` 才按来源可直接验证的 `published_at` 严格过滤，并以读取时 Linggan PostgreSQL 的 `scope_001_now()` 为唯一时间参照：7/30 天窗口只含 `[now - window, now]`，未来发布时间不称为最近也不返回。未来记录仍保留为已接纳发现材料；未知发布时间不会被填成 0 或“当前”，而是在页面明确统计为排除对象；该数量只统计当前 `EvidenceQuery` 候选集，不能把文本不匹配的本地对象计入。
 - 每张卡片只显示本次 discovery 可见的事实和 package 级 Coverage。`visible / quota` 不是平台总量、完整率或趋势。
 - 封面位置必须显示 `MEDIA NOT ACQUIRED`；此阶段绝不能请求或展示小红书 CDN 地址。
 
