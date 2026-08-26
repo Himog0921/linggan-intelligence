@@ -1,7 +1,9 @@
 //! Collection Workspace — the continuous observation execution layer.
 //!
-//! Five sub-surfaces, frozen in name and order by the V4 Gold Master:
-//! Targets / Operations / Attention / Tasks / Runtime.
+//! Five sub-surfaces. The V4 Gold Master froze the set; DESIGN-006 reordered and renamed
+//! them so the row reads by urgency rather than by pipeline stage:
+//! 待处理 / 观察目标 / 生产流 / 采集任务 / 执行工位.
+//! The slugs behind them are unchanged and remain the URL contract.
 //!
 //! Every surface here is structurally complete and factually empty. Collection's domain
 //! objects (ObservationTarget, plan, capture task, attempt, observation event, worker)
@@ -60,12 +62,31 @@ struct SectionMeta {
     title: &'static str,
 }
 
+/// DESIGN-006 · order follows urgency, not the pipeline's own stages. Attention is the only
+/// surface whose contents expire: the other four read the same today and next week. The
+/// Collection Control pattern already required `NEEDS ATTENTION` first; the pipeline order
+/// this list used to carry was tidy but never the order anyone reads it in.
+///
+/// The names avoid sharing a word stem. The three that used to (运行态 / 执行任务 /
+/// 执行运行时) were page labels, not domain terms — `domain-language.md` defines none of
+/// them, so they were free to change. It does define 工位, which is why 执行工位 keeps it.
+///
+/// Slugs are untouched: they are the URL contract the browser plugin and bookmarks hold.
 const SECTIONS: [(Section, SectionMeta); 5] = [
+    (
+        Section::Attention,
+        SectionMeta {
+            slug: "attention",
+            index: "01",
+            zh: "待处理",
+            title: "待处理",
+        },
+    ),
     (
         Section::Targets,
         SectionMeta {
             slug: "targets",
-            index: "01",
+            index: "02",
             zh: "观察目标",
             title: "观察目标",
         },
@@ -74,18 +95,9 @@ const SECTIONS: [(Section, SectionMeta); 5] = [
         Section::Operations,
         SectionMeta {
             slug: "operations",
-            index: "02",
-            zh: "运行态",
-            title: "运行态",
-        },
-    ),
-    (
-        Section::Attention,
-        SectionMeta {
-            slug: "attention",
             index: "03",
-            zh: "待处理",
-            title: "待处理",
+            zh: "生产流",
+            title: "生产流",
         },
     ),
     (
@@ -93,8 +105,8 @@ const SECTIONS: [(Section, SectionMeta); 5] = [
         SectionMeta {
             slug: "tasks",
             index: "04",
-            zh: "执行任务",
-            title: "执行任务",
+            zh: "采集任务",
+            title: "采集任务",
         },
     ),
     (
@@ -102,8 +114,8 @@ const SECTIONS: [(Section, SectionMeta); 5] = [
         SectionMeta {
             slug: "runtime",
             index: "05",
-            zh: "执行运行时",
-            title: "执行运行时",
+            zh: "执行工位",
+            title: "执行工位",
         },
     ),
 ];
@@ -157,17 +169,69 @@ fn readout(entries: &[(&str, &str)]) -> String {
     cells
 }
 
-fn empty_state(heading: &str, body: &str, notes: &[(&str, &str)]) -> String {
+/// DESIGN-006 · Collection has five empty surfaces but only three kinds of empty, and only
+/// one of them is the reader's to act on. Rendering all five at equal weight produced five
+/// honest reports that together answered everything except "so what do I do".
+#[derive(Clone, Copy)]
+enum Empty<'a> {
+    /// The chain is stopped on a decision only a person can make. Carries that one action.
+    AwaitingYou { action: &'a str },
+    /// Nothing here until something is connected. Reading it changes nothing, and saying so
+    /// is more useful than letting the reader hunt for an action that does not exist.
+    AwaitingEngineering { note: &'a str },
+    /// Empty only because its upstream is. The shortest of the three: it states the fact and
+    /// points at whatever is actually stopped, instead of re-deriving the whole chain.
+    Upstream {
+        because: &'a str,
+        pointer: &'a str,
+        href: &'a str,
+    },
+    /// Not one of the three. Local emptiness inside a drawer panel, where the surface-level
+    /// question "is this mine to act on" has already been answered by the surface around it.
+    Plain,
+}
+
+fn empty_state(kind: Empty<'_>, heading: &str, body: &str, notes: &[(&str, &str)]) -> String {
+    if let Empty::Upstream {
+        because,
+        pointer,
+        href,
+    } = kind
+    {
+        return format!(
+            r#"<section class="c-empty c-empty-upstream">
+              <div class="c-empty-rule"></div>
+              <h2>{heading}</h2>
+              <p>{because}</p>
+              <a class="c-empty-pointer" href="{href}">{pointer} <i aria-hidden="true">→</i></a>
+            </section>"#
+        );
+    }
+
     let mut grid = String::new();
     for (term, description) in notes {
         grid.push_str(&format!("<div><dt>{term}</dt><dd>{description}</dd></div>"));
     }
+    let (variant, tail) = match kind {
+        Empty::AwaitingYou { action } => (
+            " c-empty-you",
+            format!(r#"<p class="c-empty-action"><b>等你</b>{action}</p>"#),
+        ),
+        Empty::AwaitingEngineering { note } => (
+            " c-empty-engineering",
+            format!(r#"<p class="c-empty-note">{note}</p>"#),
+        ),
+        Empty::Plain => ("", String::new()),
+        Empty::Upstream { .. } => unreachable!("handled above"),
+    };
+
     format!(
-        r#"<section class="c-empty">
+        r#"<section class="c-empty{variant}">
               <div class="c-empty-rule"></div>
               <h2>{heading}</h2>
               <p>{body}</p>
               <dl class="c-empty-grid">{grid}</dl>
+              {tail}
               <div class="c-empty-foot"></div>
             </section>"#
     )
@@ -177,6 +241,10 @@ const AUTHORISATION_NOTE: &str = "创建观察目标会消耗真实平台访问�
 
 fn targets_body(drawer: Option<&str>) -> String {
     let empty = empty_state(
+        // The only surface in Collection whose emptiness has a human in front of it.
+        Empty::AwaitingYou {
+            action: "：批准第一条采集授权。四段责任链「申请 → 授权 → 准入 → 工单」都还没有实现，所以现在没有可点的按钮——这一步要先在项目里推进，不在这个页面上完成。",
+        },
         "还没有观察目标",
         "这里将列出长期观察的创作者与关键词。当前没有任何观察目标，原因不是列表为空，而是建立观察目标所需的采集授权链尚未存在。",
         &[
@@ -247,6 +315,7 @@ fn drawer_markup(drawer: Option<&str>) -> String {
 
 fn drawer_panel_overview() -> String {
     empty_state(
+        Empty::Plain,
         "这个标识没有对应的观察目标",
         "抽屉按地址栏里的标识打开，因此刷新和分享都会回到同一个对象。当前系统里还没有任何观察目标，所以这个标识无法解析。",
         &[
@@ -265,6 +334,7 @@ fn drawer_panel_overview() -> String {
 
 fn drawer_panel_baseline() -> String {
     empty_state(
+        Empty::Plain,
         "没有建档基线",
         "首次深度建档记录的是「第一次到底观察了什么、边界在哪里」。没有目标，也就没有基线。",
         &[
@@ -286,6 +356,7 @@ fn drawer_panel_baseline() -> String {
 
 fn drawer_panel_patrol() -> String {
     empty_state(
+        Empty::Plain,
         "没有巡逻策略",
         "巡逻策略回答「为什么这个对象被这样观察」。策略变更会扩大来源、深度或成本时必须形成新版本并重新检查授权，这套版本化机制尚未实现。",
         &[
@@ -307,6 +378,7 @@ fn drawer_panel_patrol() -> String {
 
 fn drawer_panel_evidence() -> String {
     empty_state(
+        Empty::Plain,
         "没有关联证据",
         "证据面优先显示原始事实，不用 AI 摘要替换原声。当前没有目标，也没有任何已接纳材料与之关联。",
         &[
@@ -319,6 +391,7 @@ fn drawer_panel_evidence() -> String {
 
 fn drawer_panel_trace() -> String {
     empty_state(
+        Empty::Plain,
         "没有观察史",
         "观察史是这一个对象的历史，既不是运行态的实时流，也不是执行运行时的技术日志。",
         &[
@@ -340,13 +413,19 @@ fn operations_body(mode: OperationsMode) -> String {
                 ("05", "事实资产保留", "Evidence Retain"),
                 ("06", "恢复与重排", "Recovery"),
             ];
+            // DESIGN-006 · the six stage names are the domain model and carry information;
+            // a counter reading UNKNOWN six times over carries none. The stage counts do not
+            // exist yet — the scheduler is not connected — so the cells are not rendered
+            // rather than filled with a placeholder. Nothing is hidden: the reason sits in
+            // the context row as SCHEDULER NOT CONNECTED, and the note below says so again
+            // once. Six repetitions of UNKNOWN would only teach the eye to skip UNKNOWN,
+            // which is the one word here that must never become invisible.
             let mut flow = String::new();
             for (no, zh, en) in stages {
                 flow.push_str(&format!(
                     r#"<div class="c-flow-stage">
                     <div class="c-flow-no">{no}</div>
                     <div class="c-flow-name"><b>{zh}</b><span>{en}</span></div>
-                    <div class="c-flow-metrics"><div><b>UNKNOWN</b><span>阶段计数</span></div></div>
                   </div>"#
                 ));
             }
@@ -358,7 +437,7 @@ fn operations_body(mode: OperationsMode) -> String {
                   <div class="c-conclusion-state">UNKNOWN</div>
                   <p>调度器未接通，没有「最近一轮观察」可供判断。这里将来只显示能说明时间窗、样本与判定规则的结论，不显示无出处的系统判断。</p>
                 </div>
-                <div class="c-flow"><p class="c-flow-note">进入、处理中、完成与异常四项计数各自独立，将在调度接通后分别显示。当前每个阶段都还没有可判断的运行，因此统一为未知，而不是零。</p>{flow}</div>
+                <div class="c-flow"><p class="c-flow-note">下面是观察生产的六个阶段，顺序固定。每个阶段的进入、处理中、完成与异常四项计数各自独立，将在调度接通后显示——现在还没有任何一次运行可供计数，所以这里不放数字，而不是放一个零或六个未知。</p>{flow}</div>
               </div>
               {stream}
             </div>"#,
@@ -366,6 +445,9 @@ fn operations_body(mode: OperationsMode) -> String {
             )
         }
         OperationsMode::Trace => empty_state(
+            Empty::AwaitingEngineering {
+                note: "这一栏不需要你做任何事：历史要等调度接通、产生过观察之后才会有内容。",
+            },
             "没有可回放的观察历史",
             "观察轨迹是可检索、可回放的语义历史，与右侧实时流的区别在于时间跨度，不在于内容层级。两者都不承载技术日志。",
             &[
@@ -378,6 +460,9 @@ fn operations_body(mode: OperationsMode) -> String {
             ],
         ),
         OperationsMode::Review => empty_state(
+            Empty::AwaitingEngineering {
+                note: "这一栏不需要你做任何事：复盘需要跨时间可比的观察记录，那要等真实观察积累起来。",
+            },
             "没有可复盘的周期",
             "周期复盘回答过去一段时间观察了多少、发现了什么、哪些变化重要，以及最要紧的一件事——观察体系哪里还有盲区。",
             &[
@@ -418,55 +503,47 @@ fn stream_markup() -> String {
                   </dl>
                 </div>
               </div>
-              <div class="c-stream-readout">
-                <div><b>UNKNOWN</b><span>EVENTS / 1H</span></div>
-                <div><b>UNKNOWN</b><span>RETAINED</span></div>
-                <div><b>UNKNOWN</b><span>EXCEPTIONS</span></div>
-              </div>
               <div class="c-stream-foot"><span>SEMANTIC EVENTS ONLY</span><span>SCHEDULER NOT CONNECTED</span></div>
             </aside>"#
         .to_owned()
 }
 
+/// The default landing surface. It is empty because nothing upstream is running yet, so it
+/// says that in one line and points at the step that is actually stopped — a reader who
+/// arrives here should leave knowing where the chain broke, not having read three columns
+/// about a queue that cannot have contents.
 fn attention_body() -> String {
     empty_state(
+        Empty::Upstream {
+            because: "没有需要你处理的事。这不是「已确认零故障」——而是还没有任何观察在运行，因此还不可能产生需要处理的问题。真正卡住的是上一环：",
+            pointer: "观察目标 · 采集授权链尚未建立",
+            href: "/collection/targets",
+        },
         "没有待处理事项",
-        "这里只保留真正需要人介入的问题。当前没有事项，是因为还没有任何观察在运行——不是因为已确认零故障。",
-        &[
-            (
-                "会包含什么",
-                "巡逻中断、建档不完整、执行运行时故障、输出数据问题。每一条都必须说明影响边界与已保留的证据。",
-            ),
-            (
-                "为什么不是 0",
-                "0 只用于已确认为零的数值。当前没有可判断的运行，因此是未知，不是零。",
-            ),
-            ("不代表", "不代表系统健康，也不代表没有数据丢失。"),
-        ],
+        "",
+        &[],
     )
 }
 
 fn tasks_body() -> String {
     empty_state(
-        "没有执行任务",
-        "任务是纯执行视角：一次具体的采集目标。观察对象是长期身份，任务只是它的某一次执行，两者不能互相冒充。",
-        &[
-            (
-                "任务预算不是覆盖率",
-                "预算 100、观察到 67，说明的是这次执行的边界，不能写成覆盖率 67%。",
-            ),
-            (
-                "部分完成仍然有效",
-                "任务部分完成而数据可用，是一等状态；已保留的材料不因任务未完成而隐藏或归零。",
-            ),
-            ("当前", "没有观察目标，也就没有任何任务被创建。"),
-        ],
+        Empty::Upstream {
+            because: "没有采集任务。任务是一次具体执行，只能由观察目标产生——当前没有观察目标，因此不可能有任务。真正卡住的是上一环：",
+            pointer: "观察目标 · 采集授权链尚未建立",
+            href: "/collection/targets",
+        },
+        "没有采集任务",
+        "",
+        &[],
     )
 }
 
 fn runtime_body() -> String {
     empty_state(
-        "执行运行时未接通",
+        Empty::AwaitingEngineering {
+            note: "这一栏不需要你做任何事：调度器接通是工程实现，不是等你决定。",
+        },
+        "执行工位未接通",
         "这是唯一允许出现工程执行细节的页面：执行工位、队列、租约、心跳与回执。这些细节不会反向进入观察目标与观察史。",
         &[
             (
@@ -497,13 +574,20 @@ fn body(section: Section, mode: OperationsMode, drawer: Option<&str>) -> String 
 /// system words in the same row, so two English labels end up at two different weights and
 /// sizes. `PARTIAL` keeps its English form wherever it means the LIDS validity state; this
 /// count is the number of partially completed tasks, which is why it can read in Chinese.
+/// DESIGN-006 · at least one reading per surface answers "is anything wrong here", because
+/// a total never makes anyone act: nobody moves because there are 30 targets, they move
+/// because 3 stopped. This is the Collection Control pattern's own Failed-first rule applied
+/// to the context row. Attention needs no change — it is already nothing but exceptions.
+///
+/// 部分完成 stays alongside 失败 rather than folded into it: a partially completed task whose
+/// data is usable is a first-class state here, not a failure.
 fn head_readout(section: Section) -> String {
     match section {
-        Section::Targets => readout(&[("UNKNOWN", "目标"), ("UNKNOWN", "建档中")]),
-        Section::Operations => readout(&[("UNKNOWN", "运行中"), ("UNKNOWN", "留存 / 24H")]),
         Section::Attention => readout(&[("UNKNOWN", "待处理"), ("UNKNOWN", "数据缺失")]),
-        Section::Tasks => readout(&[("UNKNOWN", "进行中"), ("UNKNOWN", "部分完成")]),
-        Section::Runtime => readout(&[("UNKNOWN", "工位"), ("UNKNOWN", "队列")]),
+        Section::Targets => readout(&[("UNKNOWN", "巡逻中断"), ("UNKNOWN", "建档未完成")]),
+        Section::Operations => readout(&[("UNKNOWN", "异常阶段"), ("UNKNOWN", "最近一轮")]),
+        Section::Tasks => readout(&[("UNKNOWN", "失败"), ("UNKNOWN", "部分完成")]),
+        Section::Runtime => readout(&[("UNKNOWN", "离线工位"), ("UNKNOWN", "队列积压")]),
     }
 }
 
@@ -514,11 +598,11 @@ fn second_bar(section: Section, mode: OperationsMode) -> String {
         Section::Targets => format!(
             r#"<div class="c-toolbar">
           <div class="c-tabs">
-            <button type="button" class="c-on" disabled aria-disabled="true">全部 <small>UNKNOWN</small></button>
-            <button type="button" disabled aria-disabled="true">创作者 <small>UNKNOWN</small></button>
-            <button type="button" disabled aria-disabled="true">关键词 <small>UNKNOWN</small></button>
-            <button type="button" disabled aria-disabled="true">建档中 <small>UNKNOWN</small></button>
-            <button type="button" disabled aria-disabled="true">巡逻中 <small>UNKNOWN</small></button>
+            <button type="button" class="c-on" disabled aria-disabled="true">全部</button>
+            <button type="button" disabled aria-disabled="true">创作者</button>
+            <button type="button" disabled aria-disabled="true">关键词</button>
+            <button type="button" disabled aria-disabled="true">建档中</button>
+            <button type="button" disabled aria-disabled="true">巡逻中</button>
           </div>
           <div class="c-actions">
             <span class="c-gate" title="{note}">需要采集授权</span>

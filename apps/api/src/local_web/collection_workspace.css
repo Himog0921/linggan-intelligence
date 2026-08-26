@@ -43,6 +43,21 @@
 .c-empty-grid dd { margin:7px 0 0; color:var(--v7-body); font-size:12px; line-height:1.6; }
 .c-empty-foot { margin-top:24px; height:2px; background:var(--v7-black); }
 
+/* DESIGN-006 · three weights of empty. Five surfaces are empty here but only one of them is
+ * the reader's to act on; rendering them identically made that impossible to see. Weight is
+ * carried by the rule and the tail line, never by hiding what a surface says about itself. */
+.c-empty-you .c-empty-rule { background:var(--v7-red); }
+.c-empty-action { margin:22px 0 0; padding:13px 15px; border-left:3px solid var(--v7-red); background:var(--v7-soft-red); color:var(--v7-black); font-size:12px; line-height:1.7; }
+.c-empty-action b { margin-right:9px; padding:2px 7px; background:var(--v7-red); color:var(--v7-white); font:800 10px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-empty-engineering .c-empty-rule { background:var(--v7-line-strong); }
+.c-empty-note { margin:22px 0 0; color:var(--v7-ghost); font-size:12px; line-height:1.7; }
+/* Upstream-empty is the lightest: a fact and a way out, no grid, no closing rule. */
+.c-empty-upstream { padding-bottom:28px; }
+.c-empty-upstream .c-empty-rule { background:var(--v7-line-strong); }
+.c-empty-pointer { margin-top:18px; display:inline-flex; align-items:center; gap:9px; padding:11px 15px; border:1px solid var(--v7-black); background:var(--v7-white); color:var(--v7-black); text-decoration:none; font-size:12px; transition:background var(--v7-t-state) var(--v7-ease); }
+.c-empty-pointer:hover { background:var(--v7-gray); }
+.c-empty-pointer i { color:var(--v7-red); font-style:normal; }
+
 /* Operations mode bar sits directly under the page head; NOW / TRACE / REVIEW are routes,
  * not client-side tabs, so refresh and share both land on the same view. */
 .c-modebar { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 20px; border-bottom:1px solid var(--v7-black); background:var(--v7-white); }

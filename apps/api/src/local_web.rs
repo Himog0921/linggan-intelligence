@@ -1255,8 +1255,11 @@ struct CollectionParams {
     drawer: Option<String>,
 }
 
+/// DESIGN-006: the entry lands on the one surface whose contents expire. Arriving on the
+/// target list meant opening with the most static thing in Collection — a list that does not
+/// change for a week — while anything actually waiting sat two tabs away.
 async fn collection_entry() -> Redirect {
-    Redirect::temporary("/collection/targets")
+    Redirect::temporary("/collection/attention")
 }
 
 async fn collection_targets(Query(params): Query<CollectionParams>) -> Html<String> {

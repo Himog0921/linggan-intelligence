@@ -706,10 +706,10 @@ fn local_submission(observed_at: &str) -> String {
 fn collection_serves_all_five_sub_surfaces_from_the_shared_shell() {
     for (section, name) in [
         (collection::Section::Targets, "观察目标"),
-        (collection::Section::Operations, "运行态"),
+        (collection::Section::Operations, "生产流"),
         (collection::Section::Attention, "待处理"),
-        (collection::Section::Tasks, "执行任务"),
-        (collection::Section::Runtime, "执行运行时"),
+        (collection::Section::Tasks, "采集任务"),
+        (collection::Section::Runtime, "执行工位"),
     ] {
         let html = collection::render(section, collection::OperationsMode::Now, None);
         // The breadcrumb, not a title block, is where a surface states which page this is.
@@ -769,8 +769,8 @@ fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
         .expect("collection pages render the context row")
         .1;
     for kpi in [
-        "<span class=\"v7-kpi\"><em>目标</em><b>UNKNOWN</b></span>",
-        "<span class=\"v7-kpi\"><em>建档中</em><b>UNKNOWN</b></span>",
+        "<span class=\"v7-kpi\"><em>巡逻中断</em><b>UNKNOWN</b></span>",
+        "<span class=\"v7-kpi\"><em>建档未完成</em><b>UNKNOWN</b></span>",
     ] {
         assert!(
             context_row.contains(kpi),
@@ -928,7 +928,11 @@ fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
         collection::OperationsMode::Now,
         None,
     );
-    assert!(attention.contains("0 只用于已确认为零的数值"));
+    // Q9 moved this out of its own column and into the opening line, but the claim it guards
+    // is unchanged: an empty queue must never read as "confirmed zero faults".
+    assert!(attention.contains("这不是「已确认零故障」"));
+    // Upstream-empty surfaces must hand the reader the step that is actually stopped.
+    assert!(attention.contains("/collection/targets"));
 
     let runtime = collection::render(
         collection::Section::Runtime,
@@ -1212,4 +1216,171 @@ fn the_larger_hard_shadow_only_marks_hover_displacement() {
             );
         }
     }
+}
+
+#[test]
+fn collection_orders_its_surfaces_by_urgency_and_opens_on_the_one_that_expires() {
+    // DESIGN-006 Q7. Attention is the only surface whose contents go stale; the other four
+    // read the same next week. The Collection Control pattern already required NEEDS
+    // ATTENTION first — the pipeline order this page shipped with never matched it.
+    let html = collection::render(
+        collection::Section::Attention,
+        collection::OperationsMode::Now,
+        None,
+    );
+
+    // Search inside the rail only: the global header's Collection entry is also a
+    // /collection/* link and it renders before the rail.
+    let rail = html
+        .split_once("aria-label=\"采集导航\"")
+        .expect("collection renders its rail")
+        .1
+        .split_once("</aside>")
+        .expect("the rail closes")
+        .0;
+
+    let mut positions = Vec::new();
+    for (index, slug) in [
+        ("01", "attention"),
+        ("02", "targets"),
+        ("03", "operations"),
+        ("04", "tasks"),
+        ("05", "runtime"),
+    ] {
+        let entry = format!("href=\"/collection/{slug}\"");
+        let at = rail
+            .find(&entry)
+            .unwrap_or_else(|| panic!("rail is missing {slug}"));
+        assert!(
+            rail[at..].contains(&format!("<i>{index}</i>")),
+            "{slug} must be numbered {index}"
+        );
+        positions.push(at);
+    }
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "rail order must follow urgency, not pipeline stage"
+    );
+}
+
+#[test]
+fn every_empty_surface_says_whether_it_is_waiting_on_you() {
+    // DESIGN-006 Q9. Five empty surfaces, three kinds of empty — and only one of them is the
+    // reader's to act on. Rendered at equal weight they answered everything except "so what
+    // do I do".
+    let surface = |section| collection::render(section, collection::OperationsMode::Now, None);
+
+    // Exactly one surface may claim the reader's attention, and it must name the action.
+    let targets = surface(collection::Section::Targets);
+    assert!(targets.contains("c-empty-you"));
+    assert!(targets.contains("c-empty-action"));
+
+    for (name, html) in [
+        ("attention", surface(collection::Section::Attention)),
+        ("tasks", surface(collection::Section::Tasks)),
+        ("operations", surface(collection::Section::Operations)),
+        ("runtime", surface(collection::Section::Runtime)),
+    ] {
+        assert!(
+            !html.contains("c-empty-you"),
+            "{name} must not claim the reader's attention: only one surface is waiting on them"
+        );
+    }
+
+    // Surfaces empty only because their upstream is must hand over a way out.
+    for (name, html, href) in [
+        (
+            "attention",
+            surface(collection::Section::Attention),
+            "/collection/targets",
+        ),
+        (
+            "tasks",
+            surface(collection::Section::Tasks),
+            "/collection/targets",
+        ),
+    ] {
+        assert!(
+            html.contains("c-empty-upstream"),
+            "{name} is upstream-empty"
+        );
+        assert!(
+            html.contains(&format!("class=\"c-empty-pointer\" href=\"{href}\"")),
+            "{name} must point at the step that is actually stopped"
+        );
+    }
+
+    // Surfaces waiting on engineering must say so, so nobody hunts for an action.
+    // Operations' default mode is not an empty state — it renders the pipeline itself — so
+    // its awaiting-engineering wording lives on the two modes that are empty.
+    for (name, html) in [
+        (
+            "operations/trace",
+            collection::render(
+                collection::Section::Operations,
+                collection::OperationsMode::Trace,
+                None,
+            ),
+        ),
+        (
+            "operations/review",
+            collection::render(
+                collection::Section::Operations,
+                collection::OperationsMode::Review,
+                None,
+            ),
+        ),
+        ("runtime", surface(collection::Section::Runtime)),
+    ] {
+        assert!(
+            html.contains("这一栏不需要你做任何事"),
+            "{name} must state that it needs nothing from the reader"
+        );
+    }
+}
+
+#[test]
+fn structure_survives_without_data_but_placeholder_counters_do_not() {
+    // DESIGN-006 Q11. The six stage names are the domain model and carry information; a
+    // counter reading UNKNOWN six times over carries none, and teaches the eye to skip the
+    // one word on this page that must never become invisible.
+    let operations = collection::render(
+        collection::Section::Operations,
+        collection::OperationsMode::Now,
+        None,
+    );
+
+    for stage in [
+        "目标接入",
+        "首次建档",
+        "日常巡逻",
+        "触发式深采",
+        "事实资产保留",
+        "恢复与重排",
+    ] {
+        assert!(
+            operations.contains(stage),
+            "stage name must survive: {stage}"
+        );
+    }
+    for retired in ["c-flow-metrics", "阶段计数", "c-stream-readout"] {
+        assert!(
+            !operations.contains(retired),
+            "counter cells must wait for data that exists: {retired}"
+        );
+    }
+
+    // The reason is still on the page — once, in the shared context row.
+    assert!(operations.contains("SCHEDULER NOT CONNECTED"));
+
+    // Filter tabs keep their names and lose their placeholder counts.
+    let targets = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        None,
+    );
+    for tab in ["创作者", "关键词", "建档中", "巡逻中"] {
+        assert!(targets.contains(tab), "filter tab must survive: {tab}");
+    }
+    assert!(!targets.contains("<small>UNKNOWN</small>"));
 }
