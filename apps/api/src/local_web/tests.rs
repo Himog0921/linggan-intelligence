@@ -707,6 +707,41 @@ fn the_selected_rail_entry_keeps_its_inked_block_under_the_pointer() {
 }
 
 #[test]
+fn the_primary_nav_readouts_all_share_one_type_scale_and_one_colour() {
+    // At 8px a colour change reads as a size change, so darkening the current entry's readout
+    // makes one shared header look like it carries two type standards. The current entry is
+    // marked by the signal rule beneath it; the readouts stay one row of one scale.
+    assert!(
+        !SHELL_CSS.contains("[aria-current=\"page\"] .v7-nav-readout"),
+        "the current entry must not restyle its readout: the signal rule already marks it"
+    );
+
+    let readout_declarations = SHELL_CSS
+        .match_indices(".v7-nav-readout")
+        .filter(|(index, _)| SHELL_CSS[*index..].starts_with(".v7-nav-readout {"))
+        .count();
+    assert_eq!(
+        readout_declarations, 1,
+        "one readout scale means exactly one rule owns it"
+    );
+
+    // Both surfaces render the same five entries from the one shared header.
+    let mut pages = vec![evidence_library_html()];
+    pages.push(collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        None,
+    ));
+    for html in &pages {
+        assert_eq!(
+            html.matches("class=\"v7-nav-readout\"").count(),
+            5,
+            "every page renders the same five primary entries"
+        );
+    }
+}
+
+#[test]
 fn collection_never_publishes_prototype_material_or_a_fake_zero() {
     let surfaces = [
         collection::Section::Targets,
