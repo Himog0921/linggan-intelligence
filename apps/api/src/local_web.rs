@@ -224,6 +224,7 @@ fn router(state: LocalWebState) -> Router {
             get(read_local_media_blob_route),
         )
         .route("/api/local/evidence-library", get(evidence_library_json))
+        .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))
         .route("/collection/targets", get(collection_targets))
@@ -241,6 +242,14 @@ fn router(state: LocalWebState) -> Router {
 }
 
 async fn local_entry() -> Redirect {
+    Redirect::temporary("/corpus/evidence")
+}
+
+/// Each primary responsibility owns an entry route, and that route is the single place its
+/// default surface is decided. The global header links here rather than to a sub-surface: a
+/// header that names a sub-surface is a second copy of that decision, and the two drift the
+/// first time the default moves.
+async fn corpus_entry() -> Redirect {
     Redirect::temporary("/corpus/evidence")
 }
 

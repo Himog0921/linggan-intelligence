@@ -38,7 +38,7 @@ const PRIMARY_ENTRIES: [PrimaryEntry; 5] = [
         zh: "语料",
         readout: "CORPUS · UNKNOWN",
         surface: Some(PrimarySurface::Corpus),
-        href: Some("/corpus/evidence"),
+        href: Some("/corpus"),
     },
     PrimaryEntry {
         zh: "洞察",
@@ -50,7 +50,7 @@ const PRIMARY_ENTRIES: [PrimaryEntry; 5] = [
         zh: "采集",
         readout: "COLLECTION · —",
         surface: Some(PrimarySurface::Collection),
-        href: Some("/collection/targets"),
+        href: Some("/collection"),
     },
 ];
 

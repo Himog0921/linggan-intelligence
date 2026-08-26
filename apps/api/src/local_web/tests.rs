@@ -1053,18 +1053,8 @@ fn served_primary_surfaces_link_to_each_other_and_unserved_ones_stay_disabled() 
     );
 
     for (html, page, own_href, other_href) in [
-        (
-            &evidence,
-            "corpus",
-            "/corpus/evidence",
-            "/collection/targets",
-        ),
-        (
-            &collection,
-            "collection",
-            "/collection/targets",
-            "/corpus/evidence",
-        ),
+        (&evidence, "corpus", "/corpus", "/collection"),
+        (&collection, "collection", "/collection", "/corpus"),
     ] {
         assert!(
             html.contains(&format!("<a href=\"{own_href}\" aria-current=\"page\">")),
@@ -1383,4 +1373,35 @@ fn structure_survives_without_data_but_placeholder_counters_do_not() {
         assert!(targets.contains(tab), "filter tab must survive: {tab}");
     }
     assert!(!targets.contains("<small>UNKNOWN</small>"));
+}
+
+#[test]
+fn the_primary_nav_links_to_entry_routes_never_to_a_sub_surface() {
+    // The default surface of a responsibility is decided in exactly one place: its entry
+    // route. A header that links straight to a sub-surface is a second copy of that
+    // decision, and the two drift the first time the default moves — which is exactly what
+    // happened when Collection's default became /collection/attention while the header
+    // still pointed at /collection/targets.
+    let html = evidence_library_html();
+    let nav = html
+        .split_once("v7-primary-nav")
+        .expect("every page renders the primary nav")
+        .1
+        .split_once("</nav>")
+        .expect("the nav closes")
+        .0;
+
+    for href in nav.split("href=\"").skip(1) {
+        let href = href.split('"').next().expect("href closes");
+        assert_eq!(
+            href.matches('/').count(),
+            1,
+            "primary nav must link to an entry route, not a sub-surface: {href}"
+        );
+    }
+
+    // And both served responsibilities must actually be reachable that way.
+    for entry in ["href=\"/corpus\"", "href=\"/collection\""] {
+        assert!(nav.contains(entry), "primary nav is missing {entry}");
+    }
 }
