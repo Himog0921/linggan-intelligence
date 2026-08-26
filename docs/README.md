@@ -117,10 +117,12 @@
 | [`runbooks/development-environment.md`](runbooks/development-environment.md) | 权威当前 | Rust 与 Docker PostgreSQL 16 的统一运行入口 |
 | [`runbooks/local-evidence-library.md`](runbooks/local-evidence-library.md) | 权威当前 | Rust loopback host、health、受控 discovery ingress 与 Evidence Library 本地启动/验证；明确不含真实插件、平台或媒体链路 |
 | [`runbooks/linggan-browser-producer-local.md`](runbooks/linggan-browser-producer-local.md) | 权威当前 | Linggan 自有 Browser Producer 的构建、包审计与未来人工加载边界；不授权平台访问 |
+| [`platforms/xiaohongshu/capture-capability-registry.md`](platforms/xiaohongshu/capture-capability-registry.md) | 权威当前；AUD-XHS-001 范围内 | 小红书页面字段、探针、插件交付能力、Coverage 与平台漂移的唯一登记入口；不保存真实原文或接入真实材料 |
 | [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) | 活跃计划 | F01 后、首个真实 producer 和用户可见切片前的产品形态、P0 页面、Canary、Capture/Media 与第一阶段运行架构决策图；当前首票为 `product-shell` |
 | [`plans/active/design-002-topic-intelligence-reference-page.md`](plans/active/design-002-topic-intelligence-reference-page.md) | 活跃计划 | 合成 Topic Intelligence Reference Page 的范围、规则、原型与验证计划；不替代完整 P0 或业务 SCOPE |
 | [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一获准实施事项：F01 synthetic fact-kernel technical tracer 受控进入 TDD；完成 loopback API + minimal CLI 后 hard stop，不扩入 F02–F10、真实平台/AI/插件/Web |
 | [`plans/active/plugin-runtime-001-full-capability-retrofit.md`](plans/active/plugin-runtime-001-full-capability-retrofit.md) | 活跃计划；Issue #50 | 将灵感爆爆爆的成熟浏览器采集能力一次性适配为 Linggan 自有 Browser Producer Runtime；媒体本地资产与异步处理血缘为本事项第一类约束 |
+| [`plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md) | 活跃计划；Issue #74 | 在最小真实页面样本上刷新小红书搜索、详情（含最多 30 条评论）和作者页探针，形成不含真实原文的字段与能力登记；不接入或持久化真实材料 |
 | [`plans/active/local-001-local-product-evidence-library.md`](plans/active/local-001-local-product-evidence-library.md) | 活跃计划 | 本地独立 Linggan 产品的第一个页面与最小真实采集接缝：V7 Evidence Library Gold Master、`http://localhost:3000`、只读投影，以及 discovery → media acquisition → 异步 OCR/ASR 的连续 Canary 路线；不扩张 SCOPE-001 |
 | [`plans/active/local-001d-unknown-published-discovery-view.md`](plans/active/local-001d-unknown-published-discovery-view.md) | 活跃计划；Issue #62 | 修复默认 Evidence Library 把已接纳、来源发布时间未知的 discovery 卡片隐藏的问题；显式 7/30 天发布时间窗口保持严格 |
 | [`plans/active/local-runtime-001-persistent-loopback.md`](plans/active/local-runtime-001-persistent-loopback.md) | 活跃计划 | Issue #38 的持久本地 PostgreSQL migration、loopback readiness 与重启保留证明；不含插件或真实平台 |
