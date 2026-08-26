@@ -2,16 +2,10 @@ export const LINGGAN_LOCAL_ORIGIN = 'http://localhost:3000';
 const TASK_SPEC_VERSION = 'linggan.task-spec.v1';
 const ATTEMPT_VERSION = 'linggan.producer.attempt.v1';
 const SUBMISSION_VERSION = 'linggan.producer.capture-package.v1';
-const APPROVED_LOCAL_PRODUCER_READINESS_VARIANTS = Object.freeze([
-  Object.freeze({
-    dataState: 'LINGGAN_BROWSER_PRODUCER_RUNTIME',
-    schema: 'PLUGIN_RUNTIME_001_SCHEMA_READY',
-  }),
-  Object.freeze({
-    dataState: 'LOCAL_TRUSTED_PRODUCER',
-    schema: 'LOCAL_003_SCHEMA_READY',
-  }),
-]);
+const FULL_LOCAL_PRODUCER_READINESS = Object.freeze({
+  dataState: 'LINGGAN_BROWSER_PRODUCER_RUNTIME',
+  schema: 'PLUGIN_RUNTIME_001_SCHEMA_READY',
+});
 
 export function formatLingganRuntimeNotice() {
   return 'Linggan 本机执行端已启用：页面采集结果会先写入本机可靠队列，再由 Linggan 接纳。自动调度尚未启动。';
@@ -33,10 +27,9 @@ function producerRoutesFromHealth(health) {
     : null;
 }
 
-function isApprovedLocalProducerReadiness(health) {
-  return APPROVED_LOCAL_PRODUCER_READINESS_VARIANTS.some(({ dataState, schema }) => (
-    health?.dataState === dataState && health?.database?.schema === schema
-  ));
+function isFullLocalProducerReadiness(health) {
+  return health?.dataState === FULL_LOCAL_PRODUCER_READINESS.dataState
+    && health?.database?.schema === FULL_LOCAL_PRODUCER_READINESS.schema;
 }
 
 export async function readLingganLocalReadiness(fetchImpl = globalThis.fetch) {
@@ -52,22 +45,29 @@ export async function readLingganLocalReadiness(fetchImpl = globalThis.fetch) {
       return { connected: false, message: `Linggan 本机服务返回 ${response.status}。` };
     }
     const health = await response.json().catch(() => null);
-    const producerRoutes = producerRoutesFromHealth(health);
-    const ready = health?.service === 'linggan-local-web'
+    const localServiceReachable = health?.service === 'linggan-local-web'
       && health?.listener === 'loopback-only'
-      && health?.database?.state === 'READY'
-      && isApprovedLocalProducerReadiness(health)
-      && producerRoutes;
-    if (!ready) {
+      && health?.database?.state === 'READY';
+    if (!localServiceReachable) {
       return {
         connected: false,
         reachable: false,
         message: 'Linggan 本机服务可访问，但当前不是可接收本机 Producer 采集包的运行状态。',
       };
     }
+    const producerRoutes = producerRoutesFromHealth(health);
+    if (!isFullLocalProducerReadiness(health) || !producerRoutes) {
+      return {
+        connected: false,
+        reachable: true,
+        deliveryReady: false,
+        message: 'Linggan 本机服务可访问，但尚未升级到可接收完整 Producer 采集包的运行状态；未发送任何采集包。',
+      };
+    }
     return {
       connected: true,
       reachable: true,
+      deliveryReady: true,
       producerRoutes,
       message: `Linggan 本机服务可访问；${health.dataState} 已就绪。`,
     };

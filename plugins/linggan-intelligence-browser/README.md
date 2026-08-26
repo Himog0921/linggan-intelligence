@@ -36,10 +36,11 @@ submission 只能 replay，新的 package 必须创建新的 attempt。scheduler
 
 交付前，插件只信任 `GET /health` 在 `routes.localProducer` 中同时公布的
 `taskCreation`、`attemptStart` 与 `submission` 三条本机路径；后台会按这一份 route bundle
-依次创建 Task、开始 Attempt、提交 Package。health 同时只能使用两组精确的本机 Producer
-ready 标识之一：`LINGGAN_BROWSER_PRODUCER_RUNTIME / PLUGIN_RUNTIME_001_SCHEMA_READY` 或
-`LOCAL_TRUSTED_PRODUCER / LOCAL_003_SCHEMA_READY`。health 缺少任一条、标识不成对或不在
-ready 状态时，材料只会
+依次创建 Task、开始 Attempt、提交 Package。只有完整运行时
+`LINGGAN_BROWSER_PRODUCER_RUNTIME / PLUGIN_RUNTIME_001_SCHEMA_READY` 才会公布并允许使用
+这一份完整 bundle。旧的 `LOCAL_TRUSTED_PRODUCER / LOCAL_003_SCHEMA_READY` 可以说明本机服务
+可访问，但不是 Producer 交付就绪状态：它不会公布 bundle，也不会发送 Task、Attempt 或 Package。
+health 缺少任一条、标识不成对或不在 ready 状态时，材料只会
 保留为 retryable 本机 outbox 项，不显示为已接纳、已入库或已展示。
 
 在尚未从 Linggan 读取统计时，插件和 Popup 只显示“未连接”或“未知”；绝不以 `0` 伪装

@@ -37,7 +37,7 @@ test('only created or replayed tasks and started or replayed attempts may contin
   assert.equal(isTerminalLocalDeliveryResult({ ok: false, status: 409, payload: { code: 'task_spec_conflict' } }), true);
 });
 
-test('local readiness accepts only the ready local trusted producer contract without credentials', async () => {
+test('legacy local trusted health remains reachable but is not delivery-ready', async () => {
   let received = null;
   const result = await readLingganLocalReadiness(async (url, options) => {
     received = { url, options };
@@ -48,26 +48,17 @@ test('local readiness accepts only the ready local trusted producer contract wit
         listener: 'loopback-only',
         dataState: 'LOCAL_TRUSTED_PRODUCER',
         database: { state: 'READY', schema: 'LOCAL_003_SCHEMA_READY' },
-        routes: {
-          localProducer: {
-            taskCreation: '/api/local/producer/tasks',
-            attemptStart: '/api/local/producer/runtime-attempts',
-            submission: '/api/local/producer/runtime-submissions',
-          },
-        },
+        routes: { localProducer: null },
       }),
     };
   });
-  assert.equal(result.connected, true);
+  assert.equal(result.connected, false);
   assert.equal(result.reachable, true);
-  assert.deepEqual(result.producerRoutes, {
-    taskCreation: '/api/local/producer/tasks',
-    attemptStart: '/api/local/producer/runtime-attempts',
-    submission: '/api/local/producer/runtime-submissions',
-  });
+  assert.equal(result.deliveryReady, false);
+  assert.equal(result.producerRoutes, undefined);
   assert.equal(received.url, `${LINGGAN_LOCAL_ORIGIN}/health`);
   assert.equal(received.options.credentials, 'omit');
-  assert.match(result.message, /LOCAL_TRUSTED_PRODUCER/);
+  assert.match(result.message, /尚未升级/);
 });
 
 test('local readiness accepts the exact full Browser Producer runtime contract without credentials', async () => {
@@ -89,10 +80,11 @@ test('local readiness accepts the exact full Browser Producer runtime contract w
   }));
   assert.equal(result.connected, true);
   assert.equal(result.reachable, true);
+  assert.equal(result.deliveryReady, true);
   assert.match(result.message, /LINGGAN_BROWSER_PRODUCER_RUNTIME/);
 });
 
-test('local readiness rejects a mixed producer readiness pair', async () => {
+test('local readiness keeps a mixed producer readiness pair reachable but not delivery-ready', async () => {
   const result = await readLingganLocalReadiness(async () => ({
     ok: true,
     json: async () => ({
@@ -110,10 +102,11 @@ test('local readiness rejects a mixed producer readiness pair', async () => {
     }),
   }));
   assert.equal(result.connected, false);
-  assert.equal(result.reachable, false);
+  assert.equal(result.reachable, true);
+  assert.equal(result.deliveryReady, false);
 });
 
-test('local readiness does not treat an older local read projection as a ready producer runtime', async () => {
+test('an older local read projection stays reachable but is not Producer delivery-ready', async () => {
   const result = await readLingganLocalReadiness(async () => ({
     ok: true,
     json: async () => ({
@@ -125,11 +118,12 @@ test('local readiness does not treat an older local read projection as a ready p
     }),
   }));
   assert.equal(result.connected, false);
-  assert.equal(result.reachable, false);
+  assert.equal(result.reachable, true);
+  assert.equal(result.deliveryReady, false);
   assert.match(result.message, /可访问/);
 });
 
-test('local readiness refuses a partial producer route bundle instead of inventing a delivery path', async () => {
+test('a partial producer route bundle remains reachable but never invents a delivery path', async () => {
   const result = await readLingganLocalReadiness(async () => ({
     ok: true,
     json: async () => ({
@@ -139,6 +133,7 @@ test('local readiness refuses a partial producer route bundle instead of inventi
     }),
   }));
   assert.equal(result.connected, false);
-  assert.equal(result.reachable, false);
+  assert.equal(result.reachable, true);
+  assert.equal(result.deliveryReady, false);
   assert.equal(result.producerRoutes, undefined);
 });

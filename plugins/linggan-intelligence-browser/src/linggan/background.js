@@ -36,7 +36,7 @@ export async function flushLocalOutboxOnce({
   flushMedia = flushMediaOutbox,
 } = {}) {
   const readiness = await readReadiness();
-  const producerRoutes = readiness?.connected ? readiness.producerRoutes : null;
+  const producerRoutes = readiness?.deliveryReady === true ? readiness.producerRoutes : null;
   const due = await outbox.due({ limit: 5 });
   for (const entry of due) {
     await outbox.markInFlight(entry.submissionId);

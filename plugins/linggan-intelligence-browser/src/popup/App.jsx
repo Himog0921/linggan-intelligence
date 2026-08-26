@@ -621,9 +621,12 @@ export default function App() {
       setFlywheelStatus('testing');
       try {
         const result = await sendToBackground(LINGGAN_RUNTIME_ACTION.TEST_FLYWHEEL_CONNECTION);
-        if (result?.readiness?.reachable) {
+        if (result?.readiness?.deliveryReady === true) {
           setFlywheelStatus('connected');
-          showNotice('Linggan 本机服务可访问；真实采集接收合同仍需逐项接通。', 'info');
+          showNotice('Linggan 本机服务可访问，完整 Producer 交付合同已就绪。', 'info');
+        } else if (result?.readiness?.reachable) {
+          setFlywheelStatus('producer_not_ready');
+          showNotice(result.readiness.message, 'warning');
         } else {
           setFlywheelStatus('disconnected');
           showNotice(result?.readiness?.message || 'Linggan 本机服务当前不可访问。', 'warning');

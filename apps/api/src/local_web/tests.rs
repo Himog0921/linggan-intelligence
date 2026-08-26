@@ -50,22 +50,9 @@ async fn health_route_returns_machine_readable_local_state() {
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(
-        payload.pointer("/routes/localProducer/taskCreation"),
-        Some(&serde_json::Value::String(
-            "/api/local/producer/tasks".to_owned()
-        ))
-    );
-    assert_eq!(
-        payload.pointer("/routes/localProducer/attemptStart"),
-        Some(&serde_json::Value::String(
-            "/api/local/producer/runtime-attempts".to_owned()
-        ))
-    );
-    assert_eq!(
-        payload.pointer("/routes/localProducer/submission"),
-        Some(&serde_json::Value::String(
-            "/api/local/producer/runtime-submissions".to_owned()
-        ))
+        payload.pointer("/routes/localProducer"),
+        Some(&serde_json::Value::Null),
+        "a non-ready local host must not publish a full Producer delivery bundle"
     );
 }
 

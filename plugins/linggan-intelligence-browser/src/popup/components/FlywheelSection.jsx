@@ -12,6 +12,7 @@ export default function FlywheelSection({
     configured: '本机地址已保存',
     testing: '检查中…',
     connected: '本机可访问',
+    producer_not_ready: '本机可访问 / 未升级',
     disconnected: '本机不可访问',
   }[flywheelStatus] || '待检查';
 

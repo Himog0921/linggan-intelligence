@@ -39,6 +39,8 @@ use std::{
 
 const LOCAL_HOST: Ipv4Addr = Ipv4Addr::LOCALHOST;
 const LOCAL_PORT: u16 = 3000;
+const FULL_PRODUCER_RUNTIME_DATA_STATE: &str = "LINGGAN_BROWSER_PRODUCER_RUNTIME";
+const FULL_PRODUCER_RUNTIME_SCHEMA: &str = "PLUGIN_RUNTIME_001_SCHEMA_READY";
 // The Browser Producer obtains these three paths from /health before it starts a
 // durable outbox delivery. Keep the router and published contract on the same
 // constants so a renamed server route cannot leave the plugin delivering to a
@@ -96,10 +98,10 @@ impl LocalDatabaseState {
             Self::Ready(database) => match local_discovery_schema_is_ready(database).await {
                 Ok(true) => match producer_runtime_schema_is_ready(database).await {
                     Ok(true) => (
-                        "LINGGAN_BROWSER_PRODUCER_RUNTIME",
+                        FULL_PRODUCER_RUNTIME_DATA_STATE,
                         "MANUAL_RUNTIME_PACKAGES",
                         "READY",
-                        "PLUGIN_RUNTIME_001_SCHEMA_READY",
+                        FULL_PRODUCER_RUNTIME_SCHEMA,
                     ),
                     Ok(false) => match local_producer_schema_is_ready(database).await {
                         Ok(true) => (
@@ -254,6 +256,18 @@ fn configured_local_port() -> Result<u16, std::io::Error> {
 async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     let (data_state, evidence_read_model, database_state, schema_state) =
         state.database.health_state().await;
+    let local_producer_routes = if data_state == FULL_PRODUCER_RUNTIME_DATA_STATE
+        && database_state == "READY"
+        && schema_state == FULL_PRODUCER_RUNTIME_SCHEMA
+    {
+        json!({
+            "taskCreation": LOCAL_PRODUCER_TASK_CREATION_PATH,
+            "attemptStart": LOCAL_PRODUCER_ATTEMPT_START_PATH,
+            "submission": LOCAL_PRODUCER_SUBMISSION_PATH
+        })
+    } else {
+        Value::Null
+    };
     Json(json!({
         "service": "linggan-local-web",
         "listener": "loopback-only",
@@ -266,11 +280,7 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
         "routes": {
             "evidenceLibrary": "/corpus/evidence",
             "discoveryIngress": "/api/local/discovery-packages",
-            "localProducer": {
-                "taskCreation": LOCAL_PRODUCER_TASK_CREATION_PATH,
-                "attemptStart": LOCAL_PRODUCER_ATTEMPT_START_PATH,
-                "submission": LOCAL_PRODUCER_SUBMISSION_PATH
-            }
+            "localProducer": local_producer_routes
         }
     }))
 }

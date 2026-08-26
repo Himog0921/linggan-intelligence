@@ -96,3 +96,29 @@ test('a missing health route bundle only retries the durable envelope and never 
     ['retry', 'submission-1', 'local_producer_route_contract_not_ready'],
   ]);
 });
+
+test('legacy 003 health is reachable but cannot start full Producer delivery', async () => {
+  const outbox = memoryOutbox();
+  let requested = false;
+  await flushLocalOutboxOnce({
+    outbox,
+    mediaOutbox: { pendingCount: async () => 0 },
+    readReadiness: () => readLingganLocalReadiness(async () => ({
+      ok: true,
+      json: async () => ({
+        service: 'linggan-local-web',
+        listener: 'loopback-only',
+        dataState: 'LOCAL_TRUSTED_PRODUCER',
+        database: { state: 'READY', schema: 'LOCAL_003_SCHEMA_READY' },
+        routes: { localProducer: null },
+      }),
+    })),
+    post: async () => { requested = true; throw new Error('must not post'); },
+    flushMedia: async () => {},
+  });
+  assert.equal(requested, false);
+  assert.deepEqual(outbox.calls, [
+    ['in_flight', 'submission-1'],
+    ['retry', 'submission-1', 'local_producer_route_contract_not_ready'],
+  ]);
+});
