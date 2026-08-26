@@ -315,13 +315,19 @@ export function createXhsPageController({
           }
           const mode = String(params.mode || '').trim();
           showToast('正在读取当前页面可见内容…', 'info');
-          const cards = await discoverSurface({ mode, maximumQuota: 20 });
+          const discovered = await discoverSurface({ mode, maximumQuota: Number(params.maximumQuota || params.limit || 20) });
+          const cards = Array.isArray(discovered) ? discovered : (Array.isArray(discovered?.cards) ? discovered.cards : []);
           const target = new URL(window.location.href);
           const query = target.searchParams.get('keyword') || target.searchParams.get('q') || '';
           const authorExternalId = mode === COLLECT_MODE.PROFILE
             ? (target.pathname.match(/\/user\/profile\/([^/?#]+)/)?.[1] || '')
             : '';
-          const delivery = await submitDiscovery(cards, { query, authorExternalId, surface: 'current_visible_surface' });
+          const delivery = await submitDiscovery(cards, {
+            query,
+            authorExternalId,
+            surface: 'current_visible_surface',
+            pageFacts: Array.isArray(discovered) ? undefined : discovered?.pageFacts,
+          });
           showToast(delivery?.delivery === 'acknowledged'
             ? `已接纳当前页面 ${cards.length} 条发现`
             : `已读取当前页面 ${cards.length} 条，待本机 Linggan 交付`, delivery?.delivery === 'acknowledged' ? 'success' : 'info');

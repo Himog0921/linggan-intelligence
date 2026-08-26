@@ -246,10 +246,10 @@ export function packageBatchCheckpoint({ platform, kind, progress, observedAt, c
   });
 }
 
-export function packageDiscovery({ platform, cards = [], query = '', authorExternalId = '', observedAt, capturedAt, surface = 'current_visible_surface' } = {}) {
+export function packageDiscovery({ platform, cards = [], query = '', authorExternalId = '', observedAt, capturedAt, surface = 'current_visible_surface', pageFacts = undefined } = {}) {
   const kind = authorExternalId ? PRODUCER_CAPABILITY.PROFILE_DISCOVERY : PRODUCER_CAPABILITY.DISCOVERY_SEARCH;
   const visible = asArray(cards).slice(0, 2048);
-  return createCapturePackage({
+  const capturePackage = createCapturePackage({
     packageKind: kind,
     platform,
     observedAt,
@@ -279,6 +279,10 @@ export function packageDiscovery({ platform, cards = [], query = '', authorExter
       };
     }),
   });
+  if (pageFacts && typeof pageFacts === 'object' && !Array.isArray(pageFacts)) {
+    capturePackage.surfaceReceipt = pageFacts;
+  }
+  return capturePackage;
 }
 
 function normalizeSourceObject(platform, value = {}, type = 'content') {

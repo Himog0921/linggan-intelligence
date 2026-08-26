@@ -6,6 +6,7 @@ import {
   applyXhsSearchFilters,
   normalizeXhsSearchFilters,
   readCurrentXhsSearchFilterSnapshot,
+  readCurrentXhsSearchSurfaceContext,
   readXhsSearchResultFeedSnapshot,
   summarizeXhsSearchFilters,
   waitForXhsSearchResultsSettled,
@@ -41,6 +42,37 @@ test('readCurrentXhsSearchFilterSnapshot maps Xiaohongshu active search filters'
       filter_note_time: ['一周内'],
     },
   });
+});
+
+test('readCurrentXhsSearchSurfaceContext keeps suggestions and loaded cards separate from task quota', () => {
+  const context = readCurrentXhsSearchSurfaceContext({
+    requestedLimit: 50,
+    loadedCount: 27,
+    doc: {
+      querySelectorAll(selector) {
+        assert.equal(selector, '.sug-item, [class*="sug-"]');
+        return [{ textContent: '候选词 A' }, { textContent: '候选词 A' }, { textContent: '候选词 B' }];
+      },
+    },
+    win: {
+      __INITIAL_STATE__: {
+        search: {
+          filterParams: [
+            { type: 'sort_type', tags: ['最新'] },
+            { type: 'filter_note_type', tags: ['不限'] },
+            { type: 'filter_note_time', tags: ['一周内'] },
+          ],
+        },
+      },
+    },
+  });
+
+  assert.equal(context.requestedLimit, 50);
+  assert.equal(context.loadedCount, 27);
+  assert.equal(context.resultSetComplete, false);
+  assert.deepEqual(context.activeFilters, { sortBasis: 'latest', noteType: 'all', publishTime: 'one_week' });
+  assert.deepEqual(context.suggestions, ['候选词 A', '候选词 B']);
+  assert.equal(context.suggestionCount, 2);
 });
 
 test('readCurrentXhsSearchFilterSnapshot unwraps live Xiaohongshu ref filter state', () => {

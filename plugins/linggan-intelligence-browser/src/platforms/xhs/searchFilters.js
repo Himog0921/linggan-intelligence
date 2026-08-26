@@ -1,3 +1,5 @@
+import { buildXhsSearchSurfaceReceipt } from './captureReceipt.js';
+
 const SEARCH_PAGE_RE = /xiaohongshu\.com\/search_result/i;
 const FEED_CONTAINER_SELECTOR = '.feeds-container';
 const SEARCH_RESULT_SETTLE_TIMEOUT_MS = 15000;
@@ -146,6 +148,30 @@ export function readCurrentXhsSearchFilterSnapshot(win = globalThis.window) {
     ...normalizeXhsSearchFilters(result),
     labels,
     raw,
+  };
+}
+
+export function readCurrentXhsSearchSurfaceContext({
+  doc = globalThis.document,
+  win = globalThis.window,
+  requestedLimit = 0,
+  loadedCount = 0,
+  stopReason = 'current_surface_read_once',
+} = {}) {
+  const filterSnapshot = readCurrentXhsSearchFilterSnapshot(win);
+  const suggestions = [...new Set(Array.from(doc?.querySelectorAll?.('.sug-item, [class*="sug-"]') || [])
+    .map((element) => String(element?.textContent || '').trim())
+    .filter(Boolean))].slice(0, 30);
+  return {
+    ...buildXhsSearchSurfaceReceipt({
+      requestedLimit,
+      loadedCount,
+      stopReason,
+      activeFilters: normalizeXhsSearchFilters(filterSnapshot),
+      suggestionCount: suggestions.length,
+    }),
+    suggestions,
+    filterLabels: filterSnapshot.labels,
   };
 }
 

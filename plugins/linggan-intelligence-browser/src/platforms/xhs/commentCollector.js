@@ -90,6 +90,7 @@ export async function collectComments({
   collectionRunId = '',
   captchaActionTimeoutMs = 0,
   persist = true,
+  emitReceipt = true,
 } = {}) {
   const apiResult = await collectCommentsViaApi({
     noteId,
@@ -105,8 +106,10 @@ export async function collectComments({
     persist,
   });
   if (!apiResult.needsDomContinuation && (apiResult.apiObserved || apiResult.total > 0)) {
-    const result = { total: apiResult.total, comments: apiResult.comments };
-    result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
+    const result = withCommentCollectionReceipt({ total: apiResult.total, comments: apiResult.comments }, { maxTotal });
+    if (emitReceipt) {
+      result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
+    }
     return result;
   }
 
@@ -132,8 +135,26 @@ export async function collectComments({
     captchaActionTimeoutMs,
     persist,
   });
-  result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
-  return result;
+  const normalizedResult = withCommentCollectionReceipt(result, { maxTotal });
+  if (emitReceipt) {
+    normalizedResult.lingganDelivery = await emitCollectorReceipt('comments', normalizedResult, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
+  }
+  return normalizedResult;
+}
+
+function withCommentCollectionReceipt(result = {}, { maxTotal = 0 } = {}) {
+  const context = getActiveCommentsContext();
+  const total = Number(result?.total ?? (Array.isArray(result?.comments) ? result.comments.length : 0)) || 0;
+  const explicitEmptyState = Boolean(context?.hasExplicitEmptyState);
+  const targetReached = maxTotal > 0 && total >= maxTotal;
+  return {
+    ...result,
+    total,
+    explicitEmptyState,
+    ordering: 'unknown',
+    stopReason: String(result?.stopReason || '').trim()
+      || (explicitEmptyState ? 'explicit_empty_state' : (targetReached ? 'comment_cap_reached' : 'collector_returned_partial')),
+  };
 }
 
 function buildCommentSeenId(comment) {

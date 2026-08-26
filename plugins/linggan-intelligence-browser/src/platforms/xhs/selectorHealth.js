@@ -12,6 +12,7 @@ const SELECTOR_VERIFIED_AT = '2026-04-28T00:00:00+08:00';
 const SEARCH_FEED_VERIFIED_AT = '2026-06-01T00:00:00+08:00';
 const NOTE_DETAIL_SIGNAL_SELECTORS = POPUP_SELECTORS;
 const COMMENTS_CONTAINER_SELECTORS = [
+  '.comments-el',
   '.comments-container',
   '[class*="comment-list"]',
   '[class*="comment_container"]',
