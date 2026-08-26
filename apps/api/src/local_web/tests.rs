@@ -144,7 +144,7 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
         "搜索位置 #17</span><span class=\"v7-tech-key\">POSITION #17</span>",
         "已接纳的本机发现材料 <span class=\"v7-tech-key\">ACCEPTED RUNTIME MATERIAL</span>",
         "观察到 / 配额 <span class=\"v7-tech-key\">OBSERVED / QUOTA</span>",
-        "停止原因：<span class=\"v7-tech-key\">surface_read_complete</span>",
+        "停止原因：当前页面读取完成 <span class=\"v7-tech-key\">surface_read_complete</span>",
         "<span class=\"v7-kpi\"><em>内容</em><b>1</b></span>",
     ] {
         assert!(
@@ -163,6 +163,38 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
         assert!(
             !html.contains(prohibited),
             "English technical key must not carry this user meaning alone: {prohibited}"
+        );
+    }
+
+    let stylesheet = evidence_page_stylesheet();
+    assert!(
+        stylesheet.contains(".v7-tech-key{display:inline;color:var(--v7-ghost);font:500 .82em/1.2"),
+        "technical annotations must be visually smaller than their Chinese primary expression"
+    );
+    assert!(
+        stylesheet.contains(".v7-media-pending .v7-tech-key{display:block;max-width:54px;margin-top:4px;font-size:.82em"),
+        "the media-state technical annotation must also remain subordinate on discovery cards"
+    );
+}
+
+#[test]
+fn discovery_stop_reasons_keep_raw_codes_but_lead_with_truthful_chinese_meaning() {
+    for (raw_reason, expected_meaning) in [
+        ("quota_reached", "已达到本次配额"),
+        ("surface_ended", "当前页面内容已结束"),
+        ("risk_control", "平台风险控制导致停止"),
+        ("manual_stop", "用户手动停止"),
+        ("unknown", "停止原因未知"),
+        ("future_reason", "停止原因未归类"),
+    ] {
+        let markup = evidence_page::stopped_reason_markup(raw_reason);
+        assert!(
+            markup.contains(expected_meaning),
+            "missing meaning for {raw_reason}"
+        );
+        assert!(
+            markup.contains(&format!("<span class=\"v7-tech-key\">{raw_reason}</span>")),
+            "the stored code must remain an adjacent technical annotation for {raw_reason}"
         );
     }
 }
