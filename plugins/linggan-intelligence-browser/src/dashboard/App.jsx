@@ -13,7 +13,7 @@ import {
   sortByCreatedAt, formatLocalDate, normalizeUrl, toDisplayUrl, getPreferredRecordUrl, getUnifiedAuthorHandle,
   getItemId, getTabLabel, getColumns, getExportColumns, sendToParent, unwrapParentResponseData,
 } from './utils.js';
-import { formatLingganIdleNotice } from '../linggan/adapter.js';
+import { formatLingganRuntimeNotice } from '../linggan/adapter.js';
 
 const TABS = [
   { key: 'notes', label: '笔记' },
@@ -409,7 +409,7 @@ export default function App() {
   }, [mediaDownloadDialog]);
 
   const idleClaimNotice = useMemo(
-    () => formatLingganIdleNotice(idleClaimSnapshot),
+    () => formatLingganRuntimeNotice(idleClaimSnapshot),
     [idleClaimSnapshot],
   );
   const displayNotice = notice.visible ? notice : idleClaimNotice;
@@ -534,9 +534,10 @@ export default function App() {
     });
   }, [currentTab, showNotice, showConfirm, loadData, withBusyAction]);
 
-  // ===== Linggan adapter =====
-  const handleLingganPendingSubmit = useCallback(async () => {
-    showNotice('Linggan 接收 adapter 尚未接通：没有提交、没有平台访问，也没有写入 Linggan。', 'warning');
+  // This dashboard is an execution-cache inspector.  It must not create a second submission
+  // path alongside the page runtime/outbox, nor imply that selected cache rows are Evidence.
+  const handleLocalDeliveryStatus = useCallback(async () => {
+    showNotice('这些是本机执行缓存；Linggan 回传由采集时的本地队列负责。此处不会重复提交或发起平台访问。', 'info');
   }, [showNotice]);
 
   // ===== Tab 切换 =====
@@ -835,10 +836,10 @@ export default function App() {
           <button
             className="toolbar-btn primary"
             style={{ display: selectedCount > 0 ? 'inline-block' : 'none' }}
-            onClick={handleLingganPendingSubmit}
+            onClick={handleLocalDeliveryStatus}
             disabled={Boolean(busyActions.syncWorkbench)}
           >
-            {busyActions.syncWorkbench ? '检查中...' : '提交到 Linggan（待接通）'}
+            {busyActions.syncWorkbench ? '检查中...' : '本机交付状态'}
           </button>
           <button className="toolbar-btn" onClick={handleExportCsv} disabled={Boolean(busyActions.exportCsv)}>
             {busyActions.exportCsv ? '导出中...' : '导出 CSV'}

@@ -2,7 +2,7 @@ import { BATCH_CONFIG } from '../../shared/constants.js';
 import { reportProgress } from '../../shared/messaging.js';
 import { extractProfileIdentityFromUrl } from '../../shared/targetIdentity.js';
 import { noteStore } from '../../db/noteStore.js';
-import { collectionRunStore } from '../../db/collectionRunStore.js';
+import { localExecutionStore, isTerminalLocalExecutionStatus } from '../../linggan/localExecutionStore.js';
 import { collectDouyinVideoByAweme, collectDouyinVideoById } from './videoCollector.js';
 import { collectDouyinCommentsByVideoId } from './commentCollector.js';
 import { detectDouyinPageType, detectDouyinSearchBatchContext, DY_PAGE_TYPE } from './pageDetector.js';
@@ -11,20 +11,20 @@ import {
   createDouyinBatchPacer,
   discoverDouyinBatchTargets,
 } from './batchDiscovery.js';
-import { createCollectionRunHeartbeatReporter } from '../../workbench/runtime/heartbeat.js';
-import { buildDouyinSurfaceNoteRecords } from '../../workbench/runtime/monitorTask.js';
-import { pauseForDouyinSecurityChallenge } from './securityChallenge.js';
-import { MONITOR_RECORD_MODE, MONITOR_TASK_STRATEGY } from '../../workbench/protocol/schema.js';
 import {
+  createLocalExecutionHeartbeatReporter,
+  buildDouyinSurfaceNoteRecords,
+  LOCAL_SURFACE_MODE,
+  LOCAL_TASK_STRATEGY,
   buildDouyinBatchCommentsProgressPatch,
   buildDouyinBatchCommentsRunPatch,
   buildDouyinBatchVideosProgressPatch,
   buildDouyinBatchVideosRunPatch,
-} from '../../workbench/runtime/douyinBatchRunHelper.js';
-import { resolveBatchResumeState } from '../../workbench/runtime/batchResume.js';
-import { isTerminalCollectionRunStatus } from '../../db/collectionRunStatus.js';
+  resolveBatchResumeState,
+} from '../../linggan/localExecutionSupport.js';
+import { pauseForDouyinSecurityChallenge } from './securityChallenge.js';
 
-const reportHeartbeat = createCollectionRunHeartbeatReporter({ collectionRunStore });
+const reportHeartbeat = createLocalExecutionHeartbeatReporter({ localExecutionStore });
 
 export function emitDouyinBatchProgress(onProgress, payload = {}) {
   if (typeof onProgress !== 'function') return;
@@ -55,8 +55,8 @@ export function checkDouyinAuthorMonitorTarget(monitorMeta = {}, {
 } = {}) {
   const strategy = normalizeTargetIdentity(monitorMeta?.taskStrategy);
   const monitorMode = normalizeTargetIdentity(monitorMeta?.surfaceMode || monitorMeta?.monitorMode);
-  const isAuthorMonitor = strategy === normalizeTargetIdentity(MONITOR_TASK_STRATEGY.AUTHOR_BASELINE)
-    || monitorMode === normalizeTargetIdentity(MONITOR_RECORD_MODE.AUTHOR_SURFACE)
+  const isAuthorMonitor = strategy === normalizeTargetIdentity(LOCAL_TASK_STRATEGY.AUTHOR_BASELINE)
+    || monitorMode === normalizeTargetIdentity(LOCAL_SURFACE_MODE.AUTHOR_SURFACE)
     || Boolean(monitorMeta?.surfaceOnly);
 
   if (!isAuthorMonitor || page.type !== DY_PAGE_TYPE.PROFILE) {
@@ -185,11 +185,11 @@ async function createOrResumeDouyinBatchRun({
 } = {}) {
   const externalTaskId = String(externalTaskMeta.externalTaskId || '').trim();
   if (externalTaskId) {
-    const existing = await collectionRunStore.getLatestByExternalTaskId(externalTaskId).catch(() => null);
+    const existing = await localExecutionStore.getLatestByExternalTaskId(externalTaskId).catch(() => null);
     if (
       existing?.collectionRunId
       && String(existing.taskType || '').trim() === String(taskType || '').trim()
-      && !isTerminalCollectionRunStatus(existing.status)
+      && !isTerminalLocalExecutionStatus(existing.status)
     ) {
       return { run: existing, resumeRun: existing };
     }
@@ -300,6 +300,7 @@ export async function batchCollectDouyinProfileVideos({
   surfaceOnly = false,
   onCollectionRun = null,
   onProgress = null,
+  onCollected = null,
   shouldStop = () => false,
   waitIfPaused = async () => {},
 } = {}) {
@@ -402,7 +403,7 @@ export async function batchCollectDouyinProfileVideos({
         });
         if (pauseResult.handled) {
           if (pauseResult.stopped) {
-            await collectionRunStore.markStopped(run.collectionRunId, {
+            await localExecutionStore.markStopped(run.collectionRunId, {
               itemsPlanned: 0,
               itemsSucceeded: 0,
               itemsFailed: 0,
@@ -425,7 +426,7 @@ export async function batchCollectDouyinProfileVideos({
 
     if (targets.length === 0) {
       const error = '当前主页没有发现可批量采集的视频作品';
-      await collectionRunStore.markFailed(run.collectionRunId, error, {
+      await localExecutionStore.markFailed(run.collectionRunId, error, {
         itemsPlanned: 0,
         itemsSucceeded: 0,
         itemsFailed: 0,
@@ -457,7 +458,7 @@ export async function batchCollectDouyinProfileVideos({
           monitorMode: record.monitorMode,
         })),
       };
-      await collectionRunStore.markDone(run.collectionRunId, summary);
+      await localExecutionStore.markDone(run.collectionRunId, summary);
       onProgress?.({
         current: records.length,
         total: targets.length,
@@ -480,7 +481,7 @@ export async function batchCollectDouyinProfileVideos({
       getTargetId: (item) => item.awemeId,
     });
     targets = resumeState.targets;
-    await collectionRunStore.updateById(run.collectionRunId, buildDouyinBatchVideosProgressPatch({
+    await localExecutionStore.updateById(run.collectionRunId, buildDouyinBatchVideosProgressPatch({
       targets,
       results: hydrateDouyinResumeResults(resumeRun, targets, resumeState.nextIndex),
       processedCount: resumeState.nextIndex,
@@ -578,6 +579,8 @@ export async function batchCollectDouyinProfileVideos({
           throw new Error(collected?.error || '采集失败');
         }
 
+        await Promise.resolve(onCollected?.(collected.data, { target, index, kind: 'content_detail' }));
+
         videoPacer.recordSuccess();
         success += 1;
         results.push({
@@ -609,7 +612,7 @@ export async function batchCollectDouyinProfileVideos({
         total: targets.length,
         message: `已完成 ${index + 1}/${targets.length} 条${results[results.length - 1]?.ok ? '' : '，当前条失败'}`,
       }).catch(() => {});
-      await collectionRunStore.updateById(run.collectionRunId, buildDouyinBatchVideosProgressPatch({
+      await localExecutionStore.updateById(run.collectionRunId, buildDouyinBatchVideosProgressPatch({
         targets,
         results,
         processedCount: index + 1,
@@ -628,11 +631,11 @@ export async function batchCollectDouyinProfileVideos({
       error: firstError || undefined,
     };
     if (stopped) {
-      await collectionRunStore.markStopped(run.collectionRunId, summary);
+      await localExecutionStore.markStopped(run.collectionRunId, summary);
     } else if (success > 0) {
-      await collectionRunStore.markDone(run.collectionRunId, summary);
+      await localExecutionStore.markDone(run.collectionRunId, summary);
     } else {
-      await collectionRunStore.markFailed(run.collectionRunId, firstError || '批量视频采集全部失败', summary);
+      await localExecutionStore.markFailed(run.collectionRunId, firstError || '批量视频采集全部失败', summary);
     }
 
     const finalLabel = stopped ? '已停止' : (success > 0 ? '已完成' : '失败');
@@ -655,7 +658,7 @@ export async function batchCollectDouyinProfileVideos({
       collectionRunId: run.collectionRunId,
     };
   } catch (err) {
-    await collectionRunStore.markFailed(run.collectionRunId, err, {
+    await localExecutionStore.markFailed(run.collectionRunId, err, {
       itemsPlanned: 0,
       itemsSucceeded: 0,
       itemsFailed: 0,
@@ -672,6 +675,7 @@ export async function batchCollectDouyinProfileComments({
   externalTaskMeta = {},
   onCollectionRun = null,
   onProgress = null,
+  onCollected = null,
   shouldStop = () => false,
   waitIfPaused = async () => {},
 } = {}) {
@@ -750,7 +754,7 @@ export async function batchCollectDouyinProfileComments({
         });
         if (pauseResult.handled) {
           if (pauseResult.stopped) {
-            await collectionRunStore.markStopped(run.collectionRunId, {
+            await localExecutionStore.markStopped(run.collectionRunId, {
               itemsPlanned: 0,
               itemsSucceeded: 0,
               itemsFailed: 0,
@@ -775,7 +779,7 @@ export async function batchCollectDouyinProfileComments({
 
     if (targets.length === 0) {
       const error = '当前主页没有发现可批量采集评论的视频作品';
-      await collectionRunStore.markFailed(run.collectionRunId, error, {
+      await localExecutionStore.markFailed(run.collectionRunId, error, {
         itemsPlanned: 0,
         itemsSucceeded: 0,
         itemsFailed: 0,
@@ -798,7 +802,7 @@ export async function batchCollectDouyinProfileComments({
     const commentPacer = createDouyinBatchPacer({
       baseRange: { min: 140, max: 220 },
     });
-    await collectionRunStore.updateById(run.collectionRunId, buildDouyinBatchCommentsProgressPatch({
+    await localExecutionStore.updateById(run.collectionRunId, buildDouyinBatchCommentsProgressPatch({
       targets,
       results,
       totalComments,
@@ -899,6 +903,8 @@ export async function batchCollectDouyinProfileComments({
         }
         if (shouldStop()) break;
 
+        await Promise.resolve(onCollected?.(collected, { target, index, kind: 'comments' }));
+
         commentPacer.recordSuccess();
         success += 1;
         totalComments += Number(collected?.total || 0);
@@ -940,7 +946,7 @@ export async function batchCollectDouyinProfileComments({
         total: targets.length,
         message: `已完成 ${index + 1}/${targets.length} 条视频评论采集`,
       }).catch(() => {});
-      await collectionRunStore.updateById(run.collectionRunId, buildDouyinBatchCommentsProgressPatch({
+      await localExecutionStore.updateById(run.collectionRunId, buildDouyinBatchCommentsProgressPatch({
         targets,
         results,
         totalComments,
@@ -961,11 +967,11 @@ export async function batchCollectDouyinProfileComments({
       error: firstError || undefined,
     };
     if (stopped) {
-      await collectionRunStore.markStopped(run.collectionRunId, summary);
+      await localExecutionStore.markStopped(run.collectionRunId, summary);
     } else if (success > 0) {
-      await collectionRunStore.markDone(run.collectionRunId, summary);
+      await localExecutionStore.markDone(run.collectionRunId, summary);
     } else {
-      await collectionRunStore.markFailed(run.collectionRunId, firstError || '批量评论采集全部失败', summary);
+      await localExecutionStore.markFailed(run.collectionRunId, firstError || '批量评论采集全部失败', summary);
     }
 
     const commentFinalLabel = stopped ? '已停止' : (success > 0 ? '已完成' : '失败');
@@ -989,7 +995,7 @@ export async function batchCollectDouyinProfileComments({
       collectionRunId: run.collectionRunId,
     };
   } catch (err) {
-    await collectionRunStore.markFailed(run.collectionRunId, err, {
+    await localExecutionStore.markFailed(run.collectionRunId, err, {
       itemsPlanned: 0,
       itemsSucceeded: 0,
       itemsFailed: 0,

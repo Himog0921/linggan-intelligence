@@ -10,7 +10,8 @@ import {
 import { isContextValid } from '../../shared/messaging.js';
 import { noteStore } from '../../db/noteStore.js';
 import { createCollectorEvidence, joinRawDomText } from '../../shared/collectorMetadata.js';
-import { withMonitorRecordMeta } from '../../workbench/runtime/monitorTask.js';
+import { withLocalReadMeta } from '../../linggan/localExecutionSupport.js';
+import { emitCollectorReceipt } from '../../runtime/collectorReceiptSink.js';
 import {
   ensureXhsCommentApiBridge,
   fetchXhsJsonViaBridge,
@@ -456,7 +457,7 @@ export async function collectNote(wd = window, options = {}) {
     { now: collectedAt },
   );
 
-  const noteInfo = withMonitorRecordMeta({
+  const noteInfo = withLocalReadMeta({
     noteId: platformContentId,
     contentId: `xhs_${platformContentId}`,
     platformContentId,
@@ -519,6 +520,8 @@ export async function collectNote(wd = window, options = {}) {
 
   // 4. 写入 IndexedDB（主键 noteId 自动去重）
   await noteStore.upsert(noteInfo);
+  noteInfo.lingganDelivery = await emitCollectorReceipt('contentDetail', noteInfo, { platform: 'xhs', options });
+  noteInfo.lingganMediaDelivery = await emitCollectorReceipt('mediaSlots', noteInfo, { platform: 'xhs', options });
 
   return noteInfo;
 }
@@ -577,6 +580,14 @@ export function discoverNotesFromDOM(containerSelector) {
   });
 
   return notes;
+}
+
+// This is deliberately a one-shot DOM read for the visible-surface control.  It never invokes
+// the legacy API snapshot bridge and never scrolls.  A short current page is partial evidence,
+// not proof that the platform has no more cards.
+export function readCurrentVisibleSurfaceNotes(containerSelector, maximumQuota = 20) {
+  const quota = Math.min(20, normalizePositiveInteger(maximumQuota, 20));
+  return discoverNotesFromDOM(containerSelector).slice(0, quota);
 }
 
 function normalizePositiveInteger(value, fallback = 0) {

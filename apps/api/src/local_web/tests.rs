@@ -10,11 +10,24 @@ use std::collections::BTreeMap;
 use tower::ServiceExt;
 
 const LOCAL_001_MIGRATIONS: &str = concat!(
+    "CREATE TABLE linggan_local_schema_migration (\n",
+    "  migration_id text PRIMARY KEY,\n",
+    "  migration_sha256 text NOT NULL CHECK (migration_sha256 ~ '^[0-9a-f]{64}$'),\n",
+    "  applied_at timestamptz NOT NULL DEFAULT clock_timestamp()\n",
+    ");\n",
     include_str!("../../../../database/migrations/0001_scope_001_capture_evidence.sql"),
     "\n",
     include_str!("../../../../database/migrations/0002_local_001_discovery.sql"),
     "\n",
     include_str!("../../../../database/migrations/0003_local_trusted_producer.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
+    "\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
+    "('0001_scope_001_capture_evidence', '0000000000000000000000000000000000000000000000000000000000000001'),\n",
+    "('0002_local_001_discovery', '0000000000000000000000000000000000000000000000000000000000000002'),\n",
+    "('0003_local_trusted_producer', '0000000000000000000000000000000000000000000000000000000000000003'),\n",
+    "('0004_plugin_runtime_all_capabilities', '0000000000000000000000000000000000000000000000000000000000000004');\n",
 );
 
 #[tokio::test]
@@ -33,6 +46,13 @@ async fn health_route_returns_machine_readable_local_state() {
     assert_eq!(
         response.headers().get(header::CONTENT_TYPE).unwrap(),
         "application/json"
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        payload.pointer("/routes/localProducer"),
+        Some(&serde_json::Value::Null),
+        "a non-ready local host must not publish a full Producer delivery bundle"
     );
 }
 
@@ -159,6 +179,7 @@ fn runtime_token_source_matches_the_full_lids_baseline() {
 fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
     let projection = DiscoveryLibraryProjection {
         cards: vec![DiscoveryLibraryCard {
+            platform: "xhs".to_owned(),
             platform_content_id: "note-a".to_owned(),
             title: Some("<script>not a cover</script>".to_owned()),
             creator_display_name: Some("A娃 & 家长".to_owned()),
@@ -171,6 +192,7 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
             coverage_maximum_quota: 20,
             coverage_stopped_reason: "risk_control".to_owned(),
             cover_presentation_state: "MEDIA_NOT_ACQUIRED",
+            cover_local_asset_url: None,
         }],
         excluded_unknown_published_at: 0,
         window: "last_30_days",
@@ -183,6 +205,32 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
     assert!(!html.contains("<script>not a cover</script>"));
     assert!(!html.contains("https://"));
     assert!(!html.contains("xhscdn"));
+}
+
+#[test]
+fn resumable_media_temp_bytes_are_never_published_until_the_final_promotion() {
+    let root = std::env::temp_dir().join(format!("linggan-media-helper-{}", uuid::Uuid::new_v4()));
+    let temporary = root.join("uploads/fixture/bytes.part");
+    let final_path = root.join("blobs/88/fixture");
+
+    write_media_chunk(&temporary, 0, b"ab").expect("first synthetic chunk writes");
+    assert!(
+        !final_path.exists(),
+        "an interrupted upload has no public blob path"
+    );
+    assert!(
+        write_media_chunk(&temporary, 0, b"cd").is_err(),
+        "offset replay cannot overwrite the partial file"
+    );
+    write_media_chunk(&temporary, 2, b"cd").expect("second synthetic chunk resumes exactly");
+    assert!(
+        atomically_promote_media_upload(&temporary, &final_path).expect("final promotion succeeds")
+    );
+    assert_eq!(
+        std::fs::read(&final_path).expect("published synthetic bytes"),
+        b"abcd"
+    );
+    std::fs::remove_dir_all(root).expect("synthetic media root cleans up");
 }
 
 #[tokio::test]
@@ -366,7 +414,7 @@ async fn loopback_7_day_query_keeps_api_and_page_window_metadata_in_sync() {
             .to_vec(),
     )
     .unwrap();
-    assert!(html.contains("<em>WINDOW:</em> 7D"));
+    assert!(html.contains("<em>窗口</em> 7D"));
     assert!(html.contains("WINDOW = PUBLISHED_AT / 7D"));
     assert!(!html.contains("WINDOW = PUBLISHED_AT / 30D"));
 }
@@ -497,6 +545,85 @@ async fn loopback_local_producer_acknowledges_one_partial_package_and_replays_ti
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn loopback_runtime_producer_uses_the_three_routes_published_by_health() {
+    let database = proof_database("local_api_runtime_route_contract").await;
+    let application = app_with_database(database);
+    let health_response = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(health_response.status(), StatusCode::OK);
+    let health_body = to_bytes(health_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let health: serde_json::Value = serde_json::from_slice(&health_body).unwrap();
+    assert_eq!(
+        health.pointer("/dataState"),
+        Some(&serde_json::Value::String(
+            "LINGGAN_BROWSER_PRODUCER_RUNTIME".to_owned()
+        ))
+    );
+    assert_eq!(
+        health.pointer("/database/schema"),
+        Some(&serde_json::Value::String(
+            "PLUGIN_RUNTIME_001_SCHEMA_READY".to_owned()
+        ))
+    );
+    let task_path = health
+        .pointer("/routes/localProducer/taskCreation")
+        .and_then(serde_json::Value::as_str)
+        .expect("health publishes task creation route")
+        .to_owned();
+    let attempt_path = health
+        .pointer("/routes/localProducer/attemptStart")
+        .and_then(serde_json::Value::as_str)
+        .expect("health publishes attempt start route")
+        .to_owned();
+    let submission_path = health
+        .pointer("/routes/localProducer/submission")
+        .and_then(serde_json::Value::as_str)
+        .expect("health publishes submission route")
+        .to_owned();
+    let task = runtime_producer_task_spec();
+    let attempt = runtime_producer_attempt();
+    let submission = runtime_producer_submission();
+    for (path, body, expected) in [
+        (task_path, task, "\"outcome\":\"created\""),
+        (attempt_path, attempt, "\"outcome\":\"started\""),
+        (
+            submission_path.clone(),
+            submission.clone(),
+            "\"delivery\":\"acknowledged\"",
+        ),
+        (submission_path, submission, "\"delivery\":\"replay\""),
+    ] {
+        let response = application
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(&path)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).contains(expected));
+    }
 }
 
 async fn proof_database(schema: &str) -> Database {
@@ -887,6 +1014,18 @@ fn evidence_page_stylesheet() -> String {
     format!("{SHELL_CSS}\n{EVIDENCE_LIBRARY_CSS}")
 }
 
+fn runtime_producer_task_spec() -> String {
+    r#"{"contractVersion":"linggan.producer.task-spec.v1","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","source":"manual","platform":"xhs","pageType":"note_detail","target":{"contentExternalId":"note-a"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["manual_stop","maximum_quota"]}"#.to_owned()
+}
+
+fn runtime_producer_attempt() -> String {
+    r#"{"contractVersion":"linggan.producer.attempt.v1","producerInstanceId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","attemptId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc"}"#.to_owned()
+}
+
+fn runtime_producer_submission() -> String {
+    r#"{"contractVersion":"linggan.producer.capture-package.v1","producerInstanceId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","attemptId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","submissionId":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","capturePackage":{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-a"},"layers":[{"capability":"media_slots","observed":2,"attempted":2,"acquired":0,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"media_acquisition_not_started"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-a:image:1","slot":{"role":"image","ordinal":1},"sourceObject":{"externalId":"note-a"},"observation":{"externalUri":"https://fixture.invalid/one.jpg"},"observationRef":"ffffffff-ffff-4fff-8fff-ffffffffffff"},{"kind":"media_slot","slotKey":"xhs:note-a:image:2","slot":{"role":"image","ordinal":2},"sourceObject":{"externalId":"note-a"},"observation":{"externalUri":"https://fixture.invalid/two.jpg"},"observationRef":"11111111-2222-4333-8444-555555555555"}]}}"#.to_owned()
+}
+
 fn declared_token_values(stylesheet: &str) -> BTreeMap<&str, &str> {
     stylesheet
         .lines()
@@ -968,11 +1107,7 @@ fn declared_selectors(stylesheet: &str) -> Vec<String> {
         let head = cursor[..brace].trim();
         cursor = &cursor[brace + 1..];
         // An @media head opens a nested block; its inner selectors are read on the next pass.
-        let selector = head
-            .rsplit(['}', '\n'])
-            .next()
-            .unwrap_or(head)
-            .trim();
+        let selector = head.rsplit(['}', '\n']).next().unwrap_or(head).trim();
         if selector.is_empty() || selector.starts_with('@') || selector.starts_with("/*") {
             continue;
         }

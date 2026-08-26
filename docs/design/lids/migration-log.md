@@ -149,3 +149,9 @@ Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵�
 **测试**：新增 6 项 Collection 专属断言，其中两项是防伪造：真实路由不得出现 Gold Master 的任何示例数字（146 / 07-08 / 具体博主名 / 具体指标），以及不得出现 `>0<`。全量 14 passed / 5 ignored。
 
 **未处理**：`.v7-*` → `.lgi-*` 类名迁移；键盘可达性完整覆盖；目标行与两张图表的几何（无数据可渲染）；1440 / 1280 / 移动视口复拍。
+## 2026-08-26 · Issue #53 Popup Startup Recovery 的 L1 token 消费
+
+- **来源与事项**：Issue #53 / Draft PR #54、`PAGE-PLUGIN-001` 与 `PLUGIN-POPUP-RECOVERY-001`。此前 v0.4.0 工具栏 popup 在初始渲染缺少 formatter import，真实用户点击时呈现空白；本事项只修复这个启动故障与其诚实失败路线。
+- **实际实现**：`plugins/linggan-intelligence-browser/webpack.config.cjs` 在 build 时将唯一 runtime 值源 `apps/api/src/local_web/lids_tokens.css` 复制为 release 内的 `themes/lids-tokens.css`，`src/popup/popup.html` 加载该副本。新 `popup-startup-failure*` CSS 仅消费 `--lgi-*`；没有新增 token 值、全局主题、CMP、Scene 或 Motion。
+- **LIDS 组合**：局部 `L1 / Settings / Governance`，沿用 `InstrumentSurface` 和 L1 可读错误反馈；2px border 是 LIDS 已批准的结构线，而非新的视觉数值。文案只表达 `UNKNOWN` 与“该提示没有发起新的采集或传输”，不把失败页面写成 host、receipt、Evidence 或平台状态。
+- **验证与边界**：受控首次渲染 harness 复现 v0.4.0 缺失 import 的 `ReferenceError`，并验证 v0.4.2 正常或 fallback 输出；build/release verifier 要求 token CSS 同时存在于 `dist` 和 ZIP。它不证明 Chrome 像素画面、辅助技术、真实浏览器加载、平台、Cookie、Discovery、接纳、媒体或研究结果。

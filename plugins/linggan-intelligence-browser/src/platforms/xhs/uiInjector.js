@@ -62,7 +62,7 @@ function injectNoteDetailButtons() {
     buttons: [
       { text: '采集当前笔记', action: 'collectNote', style: 'primary' },
       { text: '采集当前评论', action: 'collectComment', style: 'secondary' },
-      { text: '采集评论图片', action: 'collectCommentImages', style: 'secondary' },
+      { text: '评论图片 · 暂不可用', action: 'collectCommentImages', style: 'secondary' },
     ],
     containerStyle: { flexDirection: 'column', alignItems: 'stretch', boxShadow: 'none' },
     brandStyle: { marginRight: '0', marginBottom: '10px', justifyContent: 'center', width: '100%' },
@@ -82,6 +82,7 @@ function injectBatchButtons(mode) {
   renderButtonGroup(container, {
     platform: 'xhs',
     buttons: [
+      { text: '发现当前 20 条', action: 'discoverSurface', style: 'primary', data: { mode } },
       { text: '批量笔记', action: 'batchNotes', style: 'primary', data: { mode } },
       { text: '批量评论', action: 'batchComments', style: 'secondary', data: { mode } },
     ],
@@ -124,6 +125,7 @@ function injectProfileButtons() {
     floatingKey: 'xhs.profile',
     buttons: [
       { text: '采集博主', action: 'collectAuthor', style: 'primary' },
+      { text: '发现当前 20 条', action: 'discoverSurface', style: 'secondary', data: { mode: 'profile' } },
       { text: '批量笔记', action: 'batchNotes', style: 'secondary', data: { mode: 'profile' } },
       { text: '批量评论', action: 'batchComments', style: 'secondary', data: { mode: 'profile' } },
     ],

@@ -1,5 +1,3 @@
-import { createLingganPendingResult } from '../linggan/adapter.js';
-
 const DASHBOARD_ACTION = {
   GET_ALL_NOTES: 'getAllNotes',
   GET_ALL_COMMENTS: 'getAllComments',
@@ -46,6 +44,7 @@ export function createDashboardBridge({
   noteStore,
   commentStore,
   authorStore,
+  downloadNoteMediaFromRecord,
   _testNonce = null,
   _testDashboardWindow = null,
 } = {}) {
@@ -149,7 +148,12 @@ export function createDashboardBridge({
     [DASHBOARD_ACTION.GET_ALL_NOTES]: (data) => readStoreRecords(noteStore, data),
     [DASHBOARD_ACTION.GET_ALL_COMMENTS]: (data) => readStoreRecords(commentStore, data),
     [DASHBOARD_ACTION.GET_ALL_AUTHORS]: (data) => readStoreRecords(authorStore, data),
-    [DASHBOARD_ACTION.DOWNLOAD_NOTE_MEDIA]: () => createLingganPendingResult('media_download'),
+    [DASHBOARD_ACTION.DOWNLOAD_NOTE_MEDIA]: (data) => {
+      if (typeof downloadNoteMediaFromRecord !== 'function') {
+        throw new Error('linggan_media_runtime_not_registered');
+      }
+      return downloadNoteMediaFromRecord(data?.note || data, data?.options || {});
+    },
     [DASHBOARD_ACTION.CLEAR_ALL_NOTES]: () => noteStore.clear(),
     [DASHBOARD_ACTION.CLEAR_ALL_COMMENTS]: () => commentStore.clear(),
     [DASHBOARD_ACTION.CLEAR_ALL_AUTHORS]: () => authorStore.clear(),

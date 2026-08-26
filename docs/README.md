@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-08-25
+> 最后核对: 2026-08-26
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -60,13 +60,15 @@
 | [design/changes/design-004-corpus-rail-ui-change-manifest.md](design/changes/design-004-corpus-rail-ui-change-manifest.md) | 权威当前；DESIGN-004 | Corpus rail 面层差异化与选中态重音：规则依据、参考图取舍与重音计数 |
 | [design/changes/design-005-collection-workspace-ui-change-manifest.md](design/changes/design-005-collection-workspace-ui-change-manifest.md) | 权威当前；DESIGN-005 | Collection 五个子面落地：Mog 三项裁定、清掉的冗余、消化的断层与两项待决 |
 | [design/changes/plugin-001-producer-popup-ui-change-manifest.md](design/changes/plugin-001-producer-popup-ui-change-manifest.md) | 已被替代；PLUGIN-001 | Issue #33 popup 的历史 UI 边界；不再约束当前实现 |
-| [design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md](design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-MIGRATION-001 | Issue #37 popup 的来源、状态、单次行动与证明边界 |
+| [design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md](design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-MIGRATION-001 | Issue #37 popup 的 Discovery 行动与状态边界；启动恢复由 Issue #53 文档补充 |
+| [design/changes/plugin-popup-recovery-001-ui-change-manifest.md](design/changes/plugin-popup-recovery-001-ui-change-manifest.md) | 权威当前；PLUGIN-POPUP-RECOVERY-001 | Issue #53 popup 启动恢复、无副作用 fallback 与 v0.4.2 release 边界；Issue #55 的运行时修订见当月进度记录 |
 | [design/acceptance/local-001a-evidence-library-visual-acceptance.md](design/acceptance/local-001a-evidence-library-visual-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-001`：本地页面的视觉、状态与真实后果分层验收记录 |
 | [design/acceptance/design-003-lids-visual-baseline-visual-acceptance.md](design/acceptance/design-003-lids-visual-baseline-visual-acceptance.md) | 一次性报告 | Issue #44 的双实例同屏实测：计量、诚实性逐条核对与未证明范围 |
 | [design/acceptance/design-004-corpus-rail-visual-acceptance.md](design/acceptance/design-004-corpus-rail-visual-acceptance.md) | 一次性报告 | `ACC-RAIL-004`：rail 三视口实拍验收；hover/focus 因全部路由禁用而未验证 |
 | [design/acceptance/design-005-collection-workspace-visual-acceptance.md](design/acceptance/design-005-collection-workspace-visual-acceptance.md) | 一次性报告 | `ACC-COLLECTION-001`：五个子面与抽屉四态实拍；无数据的行与图表未验证 |
 | [design/acceptance/plugin-001-producer-popup-visual-acceptance.md](design/acceptance/plugin-001-producer-popup-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-001`：Issue #33 popup 的静态 source/release 验收；不证明浏览器加载或真实采集 |
 | [design/acceptance/plugin-migration-001-producer-popup-visual-acceptance.md](design/acceptance/plugin-migration-001-producer-popup-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-002`：Issue #37 adapter/mock ingress/release 验收；不证明真实浏览器或采集 |
+| [design/acceptance/plugin-popup-recovery-001-visual-acceptance.md](design/acceptance/plugin-popup-recovery-001-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-POPUP-RECOVERY-001`：Issue #53 source/release 启动保护验收；不证明 Chrome 已加载或真实采集 |
 | [design/foundation/topic-intelligence-visual-language.md](design/foundation/topic-intelligence-visual-language.md) | 权威当前 | DESIGN-002 的 DS-001–DS-007：合成 Topic Reference Page 的受限视觉语言 |
 | [design/patterns/evidence-candidate-and-boundary-patterns.md](design/patterns/evidence-candidate-and-boundary-patterns.md) | 权威当前 | DESIGN-002 的 PAT-001–PAT-004：观察、候选、边界与无副作用意图表达 |
 | [design/components/component-promotion.md](design/components/component-promotion.md) | 权威当前 | 从 Reference Page 局部块到真实 CMP 的晋升条件；当前没有已晋升组件 |
@@ -109,6 +111,7 @@
 | [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) | 活跃计划 | F01 后、首个真实 producer 和用户可见切片前的产品形态、P0 页面、Canary、Capture/Media 与第一阶段运行架构决策图；当前首票为 `product-shell` |
 | [`plans/active/design-002-topic-intelligence-reference-page.md`](plans/active/design-002-topic-intelligence-reference-page.md) | 活跃计划 | 合成 Topic Intelligence Reference Page 的范围、规则、原型与验证计划；不替代完整 P0 或业务 SCOPE |
 | [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一获准实施事项：F01 synthetic fact-kernel technical tracer 受控进入 TDD；完成 loopback API + minimal CLI 后 hard stop，不扩入 F02–F10、真实平台/AI/插件/Web |
+| [`plans/active/plugin-runtime-001-full-capability-retrofit.md`](plans/active/plugin-runtime-001-full-capability-retrofit.md) | 活跃计划；Issue #50 | 将灵感爆爆爆的成熟浏览器采集能力一次性适配为 Linggan 自有 Browser Producer Runtime；媒体本地资产与异步处理血缘为本事项第一类约束 |
 | [`plans/active/local-001-local-product-evidence-library.md`](plans/active/local-001-local-product-evidence-library.md) | 活跃计划 | 本地独立 Linggan 产品的第一个页面与最小真实采集接缝：V7 Evidence Library Gold Master、`http://localhost:3000`、只读投影，以及 discovery → media acquisition → 异步 OCR/ASR 的连续 Canary 路线；不扩张 SCOPE-001 |
 | [`plans/active/local-runtime-001-persistent-loopback.md`](plans/active/local-runtime-001-persistent-loopback.md) | 活跃计划 | Issue #38 的持久本地 PostgreSQL migration、loopback readiness 与重启保留证明；不含插件或真实平台 |
 | [`plans/active/plugin-migration-001-linggan-owned-xhs-discovery.md`](plans/active/plugin-migration-001-linggan-owned-xhs-discovery.md) | 活跃计划 | Issue #37：将成熟旧插件的可见 XHS 搜索卡发现规则适配为 Linggan 自有包，且只启用一次手动 `ADHD` / “综合” / 前 20 卡 Discovery → 固定 localhost ingress |

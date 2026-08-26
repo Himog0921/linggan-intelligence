@@ -54,6 +54,9 @@ pub struct DiscoveryLibraryProjection {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DiscoveryLibraryCard {
+    /// The platform that supplied the source object. This is source provenance, not a Topic or
+    /// semantic classification, and must never be inferred from the content identifier.
+    pub platform: String,
     pub platform_content_id: String,
     pub title: Option<String>,
     pub creator_display_name: Option<String>,
@@ -66,6 +69,7 @@ pub struct DiscoveryLibraryCard {
     pub coverage_maximum_quota: i32,
     pub coverage_stopped_reason: String,
     pub cover_presentation_state: &'static str,
+    pub cover_local_asset_url: Option<String>,
 }
 
 /// Verifies the exact migration ledger and table surface required by LOCAL-001 discovery.
@@ -74,11 +78,11 @@ pub struct DiscoveryLibraryCard {
 pub async fn local_discovery_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
     let required_tables_exist = sqlx::query_scalar::<_, bool>(
         "SELECT \
-             to_regclass('public.linggan_local_schema_migration') IS NOT NULL \
-             AND to_regclass('public.capture_work_order') IS NOT NULL \
-             AND to_regclass('public.local_discovery_package') IS NOT NULL \
-             AND to_regclass('public.local_discovery_occurrence') IS NOT NULL \
-             AND to_regclass('public.local_discovery_coverage') IS NOT NULL",
+             to_regclass('linggan_local_schema_migration') IS NOT NULL \
+             AND to_regclass('capture_work_order') IS NOT NULL \
+             AND to_regclass('local_discovery_package') IS NOT NULL \
+             AND to_regclass('local_discovery_occurrence') IS NOT NULL \
+             AND to_regclass('local_discovery_coverage') IS NOT NULL",
     )
     .fetch_one(database.pool())
     .await?;
@@ -215,6 +219,7 @@ pub async fn read_discovery_library(
     let cards = rows
         .into_iter()
         .map(|row| DiscoveryLibraryCard {
+            platform: "xhs".to_owned(),
             platform_content_id: row.get("platform_content_id"),
             title: row.get("title"),
             creator_display_name: row.get("creator_display_name"),
@@ -227,6 +232,7 @@ pub async fn read_discovery_library(
             coverage_maximum_quota: row.get("maximum_quota"),
             coverage_stopped_reason: row.get("stopped_reason"),
             cover_presentation_state: "MEDIA_NOT_ACQUIRED",
+            cover_local_asset_url: None,
         })
         .collect();
     Ok(DiscoveryLibraryProjection {

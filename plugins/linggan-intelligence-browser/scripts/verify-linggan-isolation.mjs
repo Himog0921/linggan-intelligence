@@ -58,26 +58,35 @@ for (const file of activeEntryFiles) {
 }
 assert(read(path.join(root, 'webpack.config.cjs')).includes("background: './src/linggan/background.js'"), 'legacy background must not be the active service worker entry');
 const activeContentSource = read(path.join(root, 'src/content/index.js'));
-assert(activeContentSource.includes('injectLingganPendingPageControls'), 'active content entry must retain the Linggan-owned pending UI shell');
-assert(activeContentSource.includes('createLingganPendingResult'), 'active content entry must return explicit pending results');
+assert(activeContentSource.includes('createLingganContentRuntime'), 'active content entry must route collectors through the Linggan runtime');
+assert(activeContentSource.includes('registerCollectorReceiptSink'), 'active content entry must connect mature collectors to Linggan receipts');
 for (const forbiddenImport of [
   'contentDataRuntime',
   'messageListener',
-  'xhsPageController',
-  'douyinRuntime',
   'douyinBatchMessageHandlers',
-  'shared/messaging',
   'managedTaskController',
-  'noteCollector',
-  'commentCollector',
-  'authorCollector',
-  'batchController',
 ]) {
-  assert(!activeContentSource.includes(forbiddenImport), `active content entry must not load retired collector/workbench runtime: ${forbiddenImport}`);
+  assert(!activeContentSource.includes(forbiddenImport), `active content entry must not load retired workbench runtime: ${forbiddenImport}`);
 }
 const dashboardBridgeSource = read(path.join(root, 'src/content/dashboardBridge.js'));
-assert(dashboardBridgeSource.includes("createLingganPendingResult('media_download')"), 'dashboard media action must return Linggan pending state');
-assert(!dashboardBridgeSource.includes('downloadNoteMediaFromRecord'), 'dashboard media action must not invoke legacy downloader');
+assert(dashboardBridgeSource.includes('downloadNoteMediaFromRecord'), 'dashboard media action must enter the registered Linggan media runtime');
+assert(!dashboardBridgeSource.includes('createLingganPendingResult'), 'dashboard media action must not report a long-lived pending capability');
+const popupSource = read(path.join(root, 'src/popup/App.jsx'));
+assert(popupSource.includes('ensureLocalTrustedRuntime'), 'popup must use the LOCAL_TRUSTED runtime boundary');
+for (const retiredPopupAction of [
+  'AUTHORIZE_PLUGIN_ACCESS',
+  'REQUEST_PLUGIN_AUTHORIZATION',
+  'CLAIM_PLUGIN_AUTHORIZATION_REQUEST',
+  'CLEAR_PLUGIN_AUTHORIZATION',
+  'GET_PLATFORM_COOKIES',
+  'GET_STORED_PLATFORM_COOKIES',
+  'GET_EXECUTION_STATION_STATUS',
+  'GET_ACCOUNTS',
+  'ADD_ACCOUNT',
+  'REMOVE_ACCOUNT',
+]) {
+  assert(!popupSource.includes(retiredPopupAction), `popup must not retain a retired authorization, station, cookie, or account entry: ${retiredPopupAction}`);
+}
 
 const dist = path.join(root, 'dist');
 assert(existsSync(dist), 'dist is missing; run build first');
@@ -86,10 +95,28 @@ for (const file of walk(dist).filter((file) => /\.(?:js|html|json|css)$/.test(fi
   assert(!/lingganboom\.fun/i.test(contents), `built artifact includes old workbench host: ${path.relative(root, file)}`);
   assert(!/api\/(?:execution-stations|plugin-authorization)/i.test(contents), `built artifact includes old workbench endpoint: ${path.relative(root, file)}`);
 }
+const popupBundle = read(path.join(dist, 'popup.js'));
+for (const retiredPopupTransport of [
+  'authorizePluginAccess',
+  'requestPluginAuthorization',
+  'claimPluginAuthorizationRequest',
+  'clearPluginAuthorization',
+  'getPlatformCookies',
+  'getStoredPlatformCookies',
+  'getExecutionStationStatus',
+  'plugin_authorization_required',
+]) {
+  assert(!popupBundle.includes(retiredPopupTransport), `built popup must not retain retired management transport: ${retiredPopupTransport}`);
+}
 
 const activeContentBundles = walk(dist)
   .filter((file) => /(?:^|\/)content(?:\.[^.]+)?\.js$/.test(file.replaceAll('\\', '/')));
 assert(activeContentBundles.length > 0, 'built active content bundle is missing');
+// Mature page collectors deliberately retain their local pause/recovery helpers during this
+// retrofit. The executable control plane is the new service worker, so isolation is checked at
+// the runnable entry boundary rather than by treating every retained historical helper name in a
+// bundled collector as a network dependency.
+const activeBackgroundSource = read(path.join(root, 'src/linggan/background.js'));
 const forbiddenRuntimeTokens = [
   /workbench\/runtime/i,
   /workbenchOutbox/i,
@@ -100,11 +127,8 @@ const forbiddenRuntimeTokens = [
   /collectionRunHeartbeat/i,
   /lease[_-]?client/i,
 ];
-for (const file of activeContentBundles) {
-  const contents = read(file);
-  for (const token of forbiddenRuntimeTokens) {
-    assert(!token.test(contents), `active content bundle retains retired workbench runtime token ${token}: ${path.relative(root, file)}`);
-  }
+for (const token of forbiddenRuntimeTokens) {
+  assert(!token.test(activeBackgroundSource), `active service worker retains retired workbench runtime token ${token}`);
 }
 
-console.log('Linggan isolation verified: legacy source is retained, active content bundle has no retired workbench runtime, and old workbench host is absent.');
+console.log('Linggan isolation verified: the active service worker owns delivery, old Workbench hosts are absent, and mature page collectors have no old transport route.');

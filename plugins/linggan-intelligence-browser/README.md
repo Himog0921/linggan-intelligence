@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: Draft LOCAL_TRUSTED adapter
-> 版本: `0.3.2`
+> 版本: `0.4.6`
 > 适用范围: `PLUGIN-RETROFIT-LOCAL-TRUSTED-001`（GitHub Issue #43）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -25,13 +25,23 @@ Linggan 的接收合同或平台访问授权。
 `http://localhost:3000`；旧工作台的站点授权、任务轮询、lease、工位调度、旧
 endpoint、同步和 fallback 都不是当前运行路径。
 
-目前唯一已接通的本机数据动作是 **合成的、手动 Discovery package 回传**：插件先将
+当前页面的「发现当前 20 条」是一个受限的手动 Discovery 入口：只读取此刻已经渲染在
+当前页面的最多 20 张卡片，不滚动、不调用页面内部接口快照、不打开详情。它先将
 固定 `TaskSpec → Attempt → Submission` 写入独立的浏览器本地 outbox，再由后台以小批次
 向 Linggan loopback 发送。页面侧采集不等待网络回执；服务中断、超时或 service worker
 重启后，同一 `submissionId` 会继续重试，服务端回执幂等。这个 outbox 只保存待交付材料，
 不是 Evidence、也不代表平台采集已完成。每个 attempt 只能有一个终态 package：相同
 submission 只能 replay，新的 package 必须创建新的 attempt。scheduler 明确为
 `NOT_CONNECTED`。
+
+交付前，插件只信任 `GET /health` 在 `routes.localProducer` 中同时公布的
+`taskCreation`、`attemptStart` 与 `submission` 三条本机路径；后台会按这一份 route bundle
+依次创建 Task、开始 Attempt、提交 Package。只有完整运行时
+`LINGGAN_BROWSER_PRODUCER_RUNTIME / PLUGIN_RUNTIME_001_SCHEMA_READY` 才会公布并允许使用
+这一份完整 bundle。旧的 `LOCAL_TRUSTED_PRODUCER / LOCAL_003_SCHEMA_READY` 可以说明本机服务
+可访问，但不是 Producer 交付就绪状态：它不会公布 bundle，也不会发送 Task、Attempt 或 Package。
+health 缺少任一条、标识不成对或不在 ready 状态时，材料只会
+保留为 retryable 本机 outbox 项，不显示为已接纳、已入库或已展示。
 
 在尚未从 Linggan 读取统计时，插件和 Popup 只显示“未连接”或“未知”；绝不以 `0` 伪装
 成没有笔记、评论或博主。
@@ -60,7 +70,7 @@ npm run release:reproducibility
 npm run verify:linggan-isolation
 ```
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.3.2.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.4.6.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

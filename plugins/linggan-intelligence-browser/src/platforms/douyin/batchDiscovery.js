@@ -1,4 +1,4 @@
-import { collectionRunStore } from '../../db/collectionRunStore.js';
+import { localExecutionStore } from '../../linggan/localExecutionStore.js';
 import { parseCount } from '../../shared/utils.js';
 import { detectDouyinPageType, detectDouyinSearchBatchContext, getDouyinSearchKeyword, getDouyinSearchTabType, DY_PAGE_TYPE } from './pageDetector.js';
 import { mergeCapturedDouyinSearchPages, normalizeDouyinSearchChannel } from './searchCapture.js';
@@ -402,7 +402,7 @@ export async function createDouyinBatchRun({
   config = {},
   meta = {},
 } = {}) {
-  return collectionRunStore.createRun({
+  return localExecutionStore.createRun({
     externalTaskId: String(externalTaskMeta.externalTaskId || '').trim(),
     externalTaskType: String(externalTaskMeta.externalTaskType || '').trim(),
     executorInstanceId: String(externalTaskMeta.executorInstanceId || '').trim(),

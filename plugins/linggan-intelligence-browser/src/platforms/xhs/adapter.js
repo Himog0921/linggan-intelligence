@@ -1,5 +1,8 @@
-import { buildCapabilityReport } from '../../workbench/runtime/capabilityReportBuilder.js';
-import { REMOTE_ERROR_CODE } from '../../workbench/protocol/schema.js';
+const LOGIN_REQUIRED = 'login_required';
+
+function buildCapabilityReport(input = {}) {
+  return { ...input, collectedAt: new Date().toISOString(), runtime: 'linggan_local_producer' };
+}
 import { detectPageType } from './pageDetector.js';
 
 function getDefaultWindow() {
@@ -75,7 +78,7 @@ export function createXhsPlatformAdapter(options = {}) {
           title,
           isStableSearchList: mode === 'search',
           platformBlocked: requiresAppScan,
-          blockReasonCode: requiresAppScan ? REMOTE_ERROR_CODE.LOGIN_REQUIRED : '',
+          blockReasonCode: requiresAppScan ? LOGIN_REQUIRED : '',
           blockReasonMessage: requiresAppScan
             ? '小红书要求使用已登录账号的 APP 扫码验证身份'
             : '',

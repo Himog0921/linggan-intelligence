@@ -60,8 +60,9 @@ test('xhs batch pause keeps the latest progress summary instead of resetting to 
     message: '正在采集第 3/10 条',
   });
 
-  controller.pauseActiveTask();
+  const receipt = controller.pauseActiveTask();
 
+  assert.deepEqual(receipt, { success: true, state: 'paused' });
   assert.equal(batchNoteCtrl.pauseCalled, 1);
   assert.deepEqual(pauseResumeStates, [true]);
 
@@ -92,8 +93,9 @@ test('xhs batch resume keeps the latest progress summary instead of resetting to
     message: '已暂停',
   });
 
-  controller.resumeActiveTask();
+  const receipt = controller.resumeActiveTask();
 
+  assert.deepEqual(receipt, { success: true, state: 'running' });
   assert.equal(batchCommentCtrl.resumeCalled, 1);
   assert.deepEqual(pauseResumeStates, [false]);
 
@@ -102,6 +104,94 @@ test('xhs batch resume keeps the latest progress summary instead of resetting to
   assert.equal(resumed.current, 5);
   assert.equal(resumed.total, 12);
   assert.equal(resumed.message, '继续采集');
+});
+
+test('xhs stop reports success only while an existing batch task is active', () => {
+  const { controller } = createControllerHarness();
+  const batchNoteCtrl = {
+    isRunning: true,
+    stopCalled: 0,
+    pause() {},
+    resume() {},
+    stop() {
+      this.stopCalled += 1;
+    },
+  };
+
+  controller.setBatchNoteCtrl(batchNoteCtrl);
+  assert.deepEqual(controller.stopActiveTask(), { success: true, state: 'stopped' });
+  assert.equal(batchNoteCtrl.stopCalled, 1);
+});
+
+test('xhs control actions refuse absent tasks without changing visible progress', () => {
+  const { controller, taskBarStates, pauseResumeStates } = createControllerHarness();
+
+  assert.deepEqual(controller.pauseActiveTask(), { success: false, state: 'no_active_task' });
+  assert.deepEqual(controller.resumeActiveTask(), { success: false, state: 'no_active_task' });
+  assert.deepEqual(controller.stopActiveTask(), { success: false, state: 'no_active_task' });
+  assert.deepEqual(taskBarStates, []);
+  assert.deepEqual(pauseResumeStates, []);
+});
+
+test('current-surface discovery submits only after its bounded page reader has returned cards', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const order = [];
+  let releaseCards;
+  const cardRead = new Promise((resolve) => {
+    releaseCards = resolve;
+  });
+  globalThis.window = {
+    location: { href: 'https://www.xiaohongshu.com/search_result?keyword=ADHD' },
+  };
+  globalThis.document = {};
+  try {
+    const controller = createXhsPageController({
+      MSG: {},
+      collectComments: async () => ({ total: 0, comments: [] }),
+      collectCommentImages: async () => ({ total: 0, images: [] }),
+      collectNote: async () => ({}),
+      collectAuthor: async () => ({}),
+      BatchNoteController: function BatchNoteController() {},
+      BatchCommentController: function BatchCommentController() {},
+      injectUI: () => {},
+      toggleStopButton: () => {},
+      togglePauseResumeButtons: () => {},
+      showToast: () => {},
+      showCommentLimitDialog: async () => ({}),
+      showMediaDownloadDialog: async () => false,
+      showBatchSettingsDialog: async () => ({}),
+      ensureTaskControlBar: () => {},
+      updateTaskControlBar: () => {},
+      hideTaskControlBar: () => {},
+      isContextValid: () => true,
+      reportDone: () => {},
+      extractNoteId: () => 'note_1',
+      sendToBackground: async () => ({}),
+      downloadNoteMediaFromRecord: async () => ({}),
+      discoverSurface: async ({ maximumQuota }) => {
+        order.push(`read:${maximumQuota}`);
+        return cardRead;
+      },
+      submitDiscovery: async (cards, context) => {
+        order.push(`submit:${cards.length}`);
+        assert.equal(context.query, 'ADHD');
+        return { delivery: 'pending' };
+      },
+    });
+    const button = { dataset: { action: 'discoverSurface', params: JSON.stringify({ mode: 'search' }) } };
+    const pending = controller.handleButtonClick({
+      target: { closest: (selector) => (selector === '.lgboom-btn' ? button : null) },
+    });
+    await Promise.resolve();
+    assert.deepEqual(order, ['read:20']);
+    releaseCards([{ noteId: 'note_1' }]);
+    await pending;
+    assert.deepEqual(order, ['read:20', 'submit:1']);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+  }
 });
 
 test('xhs task UI falls back to TASK_STATE status when taskState carries a collection terminal status', () => {
