@@ -162,3 +162,11 @@ Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵�
 - **Data Truth 修订**：URL 缺省时页面使用命名的内部 `latest_accepted_discovery` 视角，而不是发布时间窗口。卡片可显示 `PUBLISHED_AT UNKNOWN`，并明确不使用首次发现、观察、接收或重放时间代替来源发布时间。显式 `last_7_days` / `last_30_days` 保持严格 published-time 筛选，未知对象继续排除并单独计数。
 - **运行时表达**：只增加既有 Unknown token 的 page-local label；不新增全局 token、Primitive、CMP、Scene、Motion、按钮、筛选器或跨页模式。L1 `Corpus Explorer` + embedded L2 Inspector 的既有组合和 V7 几何不变。
 - **验证与边界**：合成 contracts、runtime/fallback PostgreSQL proof、API/页面 render tests 验证 default/explicit view 分离、未知标签和无替代日期。本事项不读取或改写真实 Canary 材料，不证明真实浏览器呈现、平台、采集、媒体、OCR/ASR、趋势或用户验收。
+
+## 2026-08-26 · DESIGN-007 中文优先的 Evidence Library 表达
+
+- **来源与事项**：Issue #65、`LIDS-LANG-001` 与 Mog 的明确裁定「中文为主，英文只用来装饰或作为注释」。本项只审查并修订 `/corpus/evidence`；它不构成其它页面已完成翻译或可读性验收。
+- **规则层**：新增 `language-policy.md`，固定用户理解必须由中文独立承担。英文只可作为品牌/固有名或紧邻中文的等宽技术旁注，不能单独作为按钮、筛选、状态、空态或错误处置。该规则保持 `UNKNOWN`、`NOT_ACQUIRED`、`DISCOVERY_ONLY` 等数据边界原义，且不翻译原始用户材料。
+- **页面落地**：Evidence Library 的导航、筛选、读投影、严格发布时间窗口、Discovery 卡片、Coverage、空态和 Inspector 均替换为中文主表达；`PUBLISHED_AT UNKNOWN`、`MEDIA NOT ACQUIRED`、`ACCEPTED RUNTIME MATERIAL`、`OBSERVED / QUOTA` 等保留为紧邻中文的技术键。默认「最新已接纳」及显式窗口显示「近 7 天／近 30 天」，不让 `7D/30D` 单独承担筛选含义。
+- **不改写事实**：Discovery 卡片继续只是已接纳的发现材料；封面仍只允许本地媒体副本，未取得时明确写「媒体尚未采集」；未知发布时间继续不以首次发现、观察或接收时间填补。没有接通详情、评论、媒体、OCR/ASR、查询行为、按钮行为、路由、Token、共享 Shell 或其它页面。
+- **验证与边界**：由 focused Rust render test、现有严格窗口/默认读取测试、格式/lint/governance 与本机 DOM 检查记录。它不证明真实平台材料、媒体取得、跨页中文迁移、部署或 Mog 的最终可读性验收。
