@@ -22,17 +22,17 @@
 
 本项目使用私有仓库 `Himog0921/linggan-intelligence` 的 GitHub Issues 追踪任务、问题、阻塞和 Agent 工作单；Issue 不是产品、架构或事实的第二权威来源。具体规则见 `docs/agents/issue-tracker.md`。
 
-任何仓库写入必须先有已分配 Issue 和 Claim 评论，并在 Issue 专属 branch/worktree 中通过 draft PR 交付；编码 Agent 禁止直接在共享 root checkout 或 `main` 工作。PR 默认 `Refs #`，由非实现者 reviewer 审查、稳定 task-id 的 integration owner 合并，并在合并后核验和分层记录完成后手工关闭 Issue。满足 [`docs/governance/agent-collaboration.md`](docs/governance/agent-collaboration.md) 全部条件的小型低风险单 Issue/单 PR 工作可免独立 active plan，其他事项仍必须建计划；细节见 `docs/agents/issue-tracker.md`。
+任何仓库写入必须先有 **Mog 明确派定**的 Issue 和 Claim 评论，并在 Issue 专属 branch/worktree 中通过 draft PR 交付；编码 Agent 禁止直接在共享 root checkout 或 `main` 工作。PR 默认 `Refs #`。Mog 决定谁执行、允许多少并行工作、是否/由谁审查、何时集成，以及对哪个 exact head 授权合并；Agent 不得自行派单、提高并行度、安排 reviewer/integration owner 或 merge。满足 [`docs/governance/agent-collaboration.md`](docs/governance/agent-collaboration.md) 全部条件的小型低风险单 Issue/单 PR 工作可免独立 active plan，其他事项仍必须建计划；细节见 `docs/agents/issue-tracker.md`。
 
-### 协作权力边界：用户结果优先，Harness 自主执行
+### 协作权力边界：Mog 指挥协作，Harness 在任务内执行
 
-Mog 负责定义**想得到的用户结果**、**明确不能接受的结果**，以及会改变产品语义、真实世界权限、敏感数据、资源消耗或不可逆后果的决定。Harness 负责将这些约束转化为交付包，并自行选择实现拆分、Issue/PR 顺序、文件所有权、验证方法、审查安排和集成路径。
+Mog 负责定义**想得到的用户结果**、**明确不能接受的结果**、协作派单与并行边界，以及会改变产品语义、真实世界权限、敏感数据、资源消耗或不可逆后果的决定。Harness 只在 Mog 已派定的交付包或 Work Package 内，选择满足既有约束的最小实现和验证方法。
 
-- 用户不需要、也不应被要求选择任务怎样拆、改哪些文件、由哪个 Agent 做、先跑哪些测试或怎样处理工作树；这些是 Harness 的执行责任。
-- 用户提出的“不要做什么”是硬约束；用户明确要求某种执行方式且该方式本身涉及安全、成本、真实权限或产品结果时，也必须如实保留。除此以外，Agent 不得把一次聊天中的实现建议误升级为要求用户逐步指挥 Harness。
-- 任何需要用户确认的问题，必须是产品语义、风险接受度、权限、真实世界动作、敏感数据、不可逆后果或彼此等价性无法由现有权威文档裁定的选择；技术排查、实现路径和协作编排不得回推给 Mog。
-- 当前交付包才是唯一的**用户结果授权**；Issue、任务卡、文件边界、PR 和测试只是交付包内部的执行与审计单位，不能替代用户结果，也不能要求 Mog 逐卡验收后才能继续。
-- Agent 不得用“严格治理”掩盖不完整盘点：凡承诺一个可见结果，必须先识别该结果涉及的表面、状态、共享依赖和验收路径；发现遗漏时应在同一交付包内批量收口同类问题，或明确说明为何应另开交付包。
+- Mog 决定谁派单、哪些工作同时进行、是否拆分、何时暂停/恢复、是否需要独立审查，以及何时对哪个 PR head 授权合并。除非 Mog 在当前事项中明确委托，Agent 不得替代这些决定，也不得自行创建/领取衍生任务、启动额外 Agent 或扩大并发。
+- 用户提出的“不要做什么”是硬约束；用户也可以直接指定协作方式、执行者、并发上限和合并时机。Agent 必须如实执行，不能以“更优的 Harness 编排”为由覆盖。
+- 任何需要用户确认的问题，除了产品语义、风险接受度、权限、真实世界动作、敏感数据和不可逆后果外，也包括跨任务派单、并发、审查和合并决定。技术排查与当前已派任务内部的最小实现仍由执行 Agent 负责，不得转嫁给 Mog。
+- 当前交付包才是唯一的**用户结果授权**；Issue、任务卡、文件边界、PR 和测试只是交付包内部的执行与审计单位，不能替代用户结果。Mog 可以要求逐卡验收，也可以授权连续推进；Agent 不得自行假定任一模式。
+- Agent 不得用“严格治理”掩盖不完整盘点：凡被派定的可见结果，必须识别其涉及的表面、状态、共享依赖和验收路径；发现遗漏时，报告给 Mog 由其决定当前任务扩展、另开任务或停止，不得自行重编排。
 
 ### Triage labels
 
