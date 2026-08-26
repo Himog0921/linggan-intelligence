@@ -19,7 +19,25 @@ export async function readLingganLocalReadiness(fetchImpl = globalThis.fetch) {
     if (!response.ok) {
       return { connected: false, message: `Linggan 本机服务返回 ${response.status}。` };
     }
-    return { connected: true, message: 'Linggan 本机服务可访问；Browser Producer Runtime 已可交付采集包。' };
+    const health = await response.json().catch(() => null);
+    const ready = health?.service === 'linggan-local-web'
+      && health?.listener === 'loopback-only'
+      && health?.dataState === 'LOCAL_TRUSTED_PRODUCER'
+      && health?.database?.state === 'READY'
+      && health?.database?.schema === 'LOCAL_003_SCHEMA_READY'
+      && health?.routes?.localProducer === '/api/local/producer/manual-tasks';
+    if (!ready) {
+      return {
+        connected: false,
+        reachable: false,
+        message: 'Linggan 本机服务可访问，但当前不是可接收本机 Producer 采集包的运行状态。',
+      };
+    }
+    return {
+      connected: true,
+      reachable: true,
+      message: 'Linggan 本机服务可访问；LOCAL_TRUSTED_PRODUCER 已就绪。',
+    };
   } catch {
     return { connected: false, message: 'Linggan 本机服务当前不可访问。' };
   }

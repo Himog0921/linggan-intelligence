@@ -7,6 +7,7 @@ import {
   createCapturePackage,
   createManualRuntimeTask,
   packageComments,
+  packageDiscovery,
   packageMediaSlots,
   packageReplies,
 } from '../src/linggan/producerRuntime.js';
@@ -39,6 +40,19 @@ test('media slots retain URL observations but no remote URL becomes a local pres
   assert.equal(packageValue.coverage.layers[0].observed, 2);
   assert.equal(packageValue.records[0].observation.externalUri, 'https://cdn.example/one.jpg');
   assert.equal(Object.hasOwn(packageValue.records[0], 'localAssetUrl'), false);
+});
+
+test('current-surface discovery packages exclude temporary DOM ordering references', () => {
+  const element = {};
+  element.self = element;
+  const packageValue = packageDiscovery({
+    platform: 'xhs',
+    query: 'ADHD',
+    cards: [{ noteId: 'note-1', title: 'visible', element, _top: 32, _left: 16 }],
+  });
+  assert.equal(packageValue.records[0].sourceObject.externalId, 'note-1');
+  assert.deepEqual(packageValue.records[0].payload, { noteId: 'note-1', title: 'visible' });
+  assert.doesNotThrow(() => JSON.stringify(packageValue));
 });
 
 test('partial media coverage retains acquired bytes and explicitly keeps unknown/not-attempted distinct', () => {
@@ -88,12 +102,27 @@ test('visible producer controls use Linggan runtime commands and never revive ol
   assert.doesNotMatch(popup, /sendToBackground\(MSG\.START_BATCH/);
   assert.doesNotMatch(popup, /action: MSG\.COLLECT_SINGLE/);
   assert.match(content, /dispatchProducerRuntimeAction/);
+  assert.match(content, /readCurrentVisibleSurfaceNotes/);
+  assert.doesNotMatch(content, /discoverSurfaceNotesFromBestSource/);
   assert.match(content, /LINGGAN_RUNTIME_ACTION\.START_BATCH_COMMENTS/);
   assert.match(douyin, /Linggan's media lane/);
   assert.doesNotMatch(douyin, /downloadDouyinVideo\(/);
   assert.doesNotMatch(douyin, /downloadDouyinCommentImages\(/);
   assert.match(douyin, /batchCheckpoint/);
   assert.match(xhs, /评论图片区暂不可用/);
+});
+
+test('XHS startup plus the current-surface route does not initialize the old API bridge or discovery helpers', () => {
+  const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
+  const initStart = content.indexOf('async function initXhs()');
+  const initEnd = content.indexOf('\nasync function initDouyin()', initStart);
+  const currentSurfaceStart = content.indexOf('discoverSurface: async');
+  const currentSurfaceEnd = content.indexOf('\n  submitDiscovery:', currentSurfaceStart);
+  const init = content.slice(initStart, initEnd);
+  const currentSurface = content.slice(currentSurfaceStart, currentSurfaceEnd);
+  assert.doesNotMatch(init, /ensureXhsCommentApiBridge|discoverSurfaceNotesFromBestSource|discoverWithScroll|requestXhs(?:Search|Profile)NotesSnapshot|Batch(?:Note|Comment)Controller/);
+  assert.match(currentSurface, /readCurrentVisibleSurfaceNotes/);
+  assert.doesNotMatch(currentSurface, /ensureXhsCommentApiBridge|discoverSurfaceNotesFromBestSource|discoverWithScroll|requestXhs(?:Search|Profile)NotesSnapshot|Batch(?:Note|Comment)Controller/);
 });
 
 test('page-read completion is not rendered as Linggan acceptance', () => {

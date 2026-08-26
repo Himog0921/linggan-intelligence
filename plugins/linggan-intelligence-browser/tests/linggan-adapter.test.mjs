@@ -37,14 +37,40 @@ test('only created or replayed tasks and started or replayed attempts may contin
   assert.equal(isTerminalLocalDeliveryResult({ ok: false, status: 409, payload: { code: 'task_spec_conflict' } }), true);
 });
 
-test('local readiness probes only Linggan loopback without credentials', async () => {
+test('local readiness accepts only the ready local trusted producer contract without credentials', async () => {
   let received = null;
   const result = await readLingganLocalReadiness(async (url, options) => {
     received = { url, options };
-    return { ok: true };
+    return {
+      ok: true,
+      json: async () => ({
+        service: 'linggan-local-web',
+        listener: 'loopback-only',
+        dataState: 'LOCAL_TRUSTED_PRODUCER',
+        database: { state: 'READY', schema: 'LOCAL_003_SCHEMA_READY' },
+        routes: { localProducer: '/api/local/producer/manual-tasks' },
+      }),
+    };
   });
   assert.equal(result.connected, true);
+  assert.equal(result.reachable, true);
   assert.equal(received.url, `${LINGGAN_LOCAL_ORIGIN}/health`);
   assert.equal(received.options.credentials, 'omit');
-  assert.match(result.message, /Browser Producer Runtime/);
+  assert.match(result.message, /LOCAL_TRUSTED_PRODUCER/);
+});
+
+test('local readiness does not treat an older local read projection as a ready producer runtime', async () => {
+  const result = await readLingganLocalReadiness(async () => ({
+    ok: true,
+    json: async () => ({
+      service: 'linggan-local-web',
+      listener: 'loopback-only',
+      dataState: 'LOCAL_DISCOVERY_READ_PROJECTION',
+      database: { state: 'READY', schema: 'LOCAL_001_SCHEMA_READY' },
+      routes: { localProducer: '/api/local/discovery-packages' },
+    }),
+  }));
+  assert.equal(result.connected, false);
+  assert.equal(result.reachable, false);
+  assert.match(result.message, /可访问/);
 });

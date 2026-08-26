@@ -124,7 +124,7 @@ test('the startup boundary has a normal path and a truthful no-new-action recove
   assert.equal(fallback.type, 'main');
   assert.match(fallbackText, /本机状态目前未知，无法确认是否已读取页面信息/);
   assert.match(fallbackText, /本提示没有发起新的采集或传输/);
-  assert.match(fallbackText, /重新加载 Linggan Intelligence Browser v0\.4\.2/);
+  assert.match(fallbackText, /重新加载 Linggan Intelligence Browser v0\.4\.4/);
   assert.doesNotMatch(fallbackText, /本次没有读取、采集或传输任何数据/);
 });
 
@@ -136,5 +136,5 @@ test('the recovery surface uses the copied LIDS tokens without adding another vi
   assert.match(recoveryCss, /var\(--lgi-font-sans\)/);
   assert.doesNotMatch(recoveryCss, /var\(--(?!lgi-)/);
   assert.doesNotMatch(recoveryCss, /#[0-9a-f]{3,8}/i);
-  assert.equal(POPUP_STARTUP_RECOVERY.version, 'v0.4.2');
+  assert.equal(POPUP_STARTUP_RECOVERY.version, 'v0.4.4');
 });
