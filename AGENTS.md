@@ -24,6 +24,16 @@
 
 任何仓库写入必须先有已分配 Issue 和 Claim 评论，并在 Issue 专属 branch/worktree 中通过 draft PR 交付；编码 Agent 禁止直接在共享 root checkout 或 `main` 工作。PR 默认 `Refs #`，由非实现者 reviewer 审查、稳定 task-id 的 integration owner 合并，并在合并后核验和分层记录完成后手工关闭 Issue。满足 [`docs/governance/agent-collaboration.md`](docs/governance/agent-collaboration.md) 全部条件的小型低风险单 Issue/单 PR 工作可免独立 active plan，其他事项仍必须建计划；细节见 `docs/agents/issue-tracker.md`。
 
+### 协作权力边界：用户结果优先，Harness 自主执行
+
+Mog 负责定义**想得到的用户结果**、**明确不能接受的结果**，以及会改变产品语义、真实世界权限、敏感数据、资源消耗或不可逆后果的决定。Harness 负责将这些约束转化为交付包，并自行选择实现拆分、Issue/PR 顺序、文件所有权、验证方法、审查安排和集成路径。
+
+- 用户不需要、也不应被要求选择任务怎样拆、改哪些文件、由哪个 Agent 做、先跑哪些测试或怎样处理工作树；这些是 Harness 的执行责任。
+- 用户提出的“不要做什么”是硬约束；用户明确要求某种执行方式且该方式本身涉及安全、成本、真实权限或产品结果时，也必须如实保留。除此以外，Agent 不得把一次聊天中的实现建议误升级为要求用户逐步指挥 Harness。
+- 任何需要用户确认的问题，必须是产品语义、风险接受度、权限、真实世界动作、敏感数据、不可逆后果或彼此等价性无法由现有权威文档裁定的选择；技术排查、实现路径和协作编排不得回推给 Mog。
+- 当前交付包才是唯一的**用户结果授权**；Issue、任务卡、文件边界、PR 和测试只是交付包内部的执行与审计单位，不能替代用户结果，也不能要求 Mog 逐卡验收后才能继续。
+- Agent 不得用“严格治理”掩盖不完整盘点：凡承诺一个可见结果，必须先识别该结果涉及的表面、状态、共享依赖和验收路径；发现遗漏时应在同一交付包内批量收口同类问题，或明确说明为何应另开交付包。
+
 ### Triage labels
 
 任务分流使用 `needs-triage`、`needs-info`、`ready-for-agent`、`ready-for-human`、`wontfix` 五个角色标签；标签只表达下一步责任，不替代事项编号、正式授权、文档状态或验收结果。具体映射见 `docs/agents/triage-labels.md`。

@@ -8,6 +8,19 @@
 
 本合同让 UI Agent 成为已批准设计的执行者和问题发现者，而不是新的产品负责人、视觉总监、权限裁定者或事实来源。
 
+## 交付包与 Harness 自主
+
+UI Agent 面向的用户结果是一个交付包，不是一串需要 Mog 逐卡指挥的文件修改。Mog 定义用户要看到或完成什么、哪些结果不可接受，以及涉及产品语义、真实权限、敏感数据、成本或不可逆后果的选择；Harness 自主决定组件拆分、实现顺序、文件分工、测试、审查与集成。
+
+在进入代码前，Harness 必须建立并写入变更清单或计划：
+
+1. **表面地图**：此用户结果涉及的页面入口、页面壳、共享 Header/导航/按钮、面板和反馈位置；
+2. **状态词典**：常用、空、失败、受限、部分、处理中和真实回执状态各自的用户含义，及禁止互相替代的边界；
+3. **依赖地图**：共享组件、样式、数据合同、运行时回执与其他 Work Package 的所有权；
+4. **验收矩阵**：每个表面/状态怎样被自动检查、运行验证或人工验收覆盖。
+
+没有这四项，Agent 只能调查，不能把“只改了当前文件”报告为完整用户结果。它们也不授权范围扩张：新功能、状态、权限或数据语义仍须有权威来源。
+
 ## 开始前必须完成
 
 在写代码、设计文档、组件、页面、文案、截图或验收资产之前，Agent 必须：
@@ -17,13 +30,13 @@
 3. 阅读 [../design/README.md](../design/README.md)、[../design/design-governance.md](../design/design-governance.md) 与 [../design/lids/README.md](../design/lids/README.md)；
 4. 按任务读取相应的 LIDS Token、Primitive、Pattern、Agent guide 或原型审计；先定 `Token → Primitive → Component → Pattern → Page` 和 L1/L2/L3，后写任何视觉实现；
 5. 阅读与本次 UI 事项直接相关的产品页面文档、已批准页面/组件/模式规格、数据/权限/行动合同和当前 SCOPE；
-6. 在 Issue、计划或 PR 中填写 [../design/templates/ui-change-manifest-form.md](../design/templates/ui-change-manifest-form.md) 所要求的读取回执、范围、非目标、分类、文件边界、停止条件和验证计划。
+6. 在 Issue、计划或 PR 中填写 [../design/templates/ui-change-manifest-form.md](../design/templates/ui-change-manifest-form.md) 所要求的读取回执、范围、非目标、分类、文件边界、停止条件和验证计划，并附本交付包的表面、状态、依赖和验收矩阵。
 
 没有完成上述任何一项时，Agent 只能做只读调查，不能开始修改。
 
 ## 闭集执行规则
 
-Agent 只可实现本次变更清单中明确引用、状态为“权威当前”的规则和合同。没有出处的内容不是“可自由发挥的空间”，而是未决事项。
+Agent 只可实现本次变更清单中明确引用、状态为“权威当前”的规则和合同。没有出处的内容不是“可自由发挥的空间”，而是未决事项。这里的闭集约束保护的是**产品语义和权限**，不是第一次列出的文件名单：为完成既有用户结果而必需的共享依赖必须显式纳入关联 Work Package 或交由 integration owner 处理。
 
 Agent 不得：
 
@@ -58,13 +71,13 @@ Agent 不得：
 - 无法说明某个数字、文案、状态、图标、图表或按钮的事实来源与用户含义；
 - 需要新增、扩大或隐藏权限、敏感材料访问、采集、Agent 调用、行动、发布或外部副作用；
 - 需要真实数据、账号、截图/录屏、部署或其它尚未获得授权的资源；
-- 发现共享文件有并行修改，且本 Issue 无权自行整合。
+- 发现共享文件有并行修改，且本 Issue 无权自行整合；此时先声明直接依赖、保留有界补丁并交由关联 Work Package 或 integration owner 协调。只有该共享改动会新增产品语义、权限、行动或数据范围时，才把它升级为需要 Mog 决定的问题。
 
 升级时应提供简短决策包：已确认事实、缺少的决定、可选方案、影响范围、最小需要的用户选择，以及继续前不能宣称什么。不得把技术排查责任转给 Mog。
 
 ## 实施和验收
 
-实施只能完成一个有界 UI 切片。Agent 必须同步维护：
+每个 Issue 只能完成一个有界 UI Work Package；交付包可以由多个有界 Work Package 组成。Agent 必须同步维护：
 
 - 页面规格：用 [../design/templates/page-spec-form.md](../design/templates/page-spec-form.md) 说明本页如何组合已批准规则；
 - 组件规格：仅当组件成为真实跨页面合同，用 [../design/templates/component-spec-form.md](../design/templates/component-spec-form.md) 建立；
@@ -82,11 +95,13 @@ Agent 不得：
 
 只有实际验证到的层才可写 VERIFIED；未运行、无环境、无权限、无真实输入或未部署时，必须写 NOT VERIFIED 并说明原因。
 
+送审前，实施 Agent 必须按验收矩阵完成类别级自审。审查发现同一类别遗漏（例如语言、状态、可见入口或共享组件）时，修订必须先盘点并有界处理该类别的全部受影响位置；不得只修一处、再等待下一轮审查重新发现同类遗漏。
+
 ## 收口与交接
 
 结束前，Agent 必须：
 
-1. 核对仅修改了 Issue 授权文件；共享文件差异交给 integration owner 协调；
+1. 核对所有差异都属于本 Work Package，或已按依赖地图交给关联 Work Package / integration owner 协调；不得把必需共享依赖留成用户结果的隐性缺口；
 2. 更新必要的设计索引、来源追踪、替代关系和当月 progress；
 3. 运行设计手册结构检查、项目治理检查及与变更风险相称的其它验证；
 4. 在 PR 中报告：已改内容、验证、真实副作用、已证明、未证明、例外和待决项；
