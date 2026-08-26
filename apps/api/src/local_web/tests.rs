@@ -756,3 +756,50 @@ fn declared_token_values(stylesheet: &str) -> BTreeMap<&str, &str> {
         })
         .collect()
 }
+
+#[test]
+fn served_primary_surfaces_link_to_each_other_and_unserved_ones_stay_disabled() {
+    // A responsibility whose route this binary actually serves must be reachable from every
+    // other served surface. An operator standing on either page can always leave it.
+    let evidence = evidence_library_html();
+    let collection = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        None,
+    );
+
+    for (html, page, own_href, other_href) in [
+        (
+            &evidence,
+            "corpus",
+            "/corpus/evidence",
+            "/collection/targets",
+        ),
+        (
+            &collection,
+            "collection",
+            "/collection/targets",
+            "/corpus/evidence",
+        ),
+    ] {
+        assert!(
+            html.contains(&format!("<a href=\"{own_href}\" aria-current=\"page\">")),
+            "{page} must mark its own primary entry as the current page"
+        );
+        assert!(
+            html.contains(&format!("<a href=\"{other_href}\">")),
+            "{page} must offer a working link to the other served surface"
+        );
+
+        // Naming a responsibility is not the same as serving it: the four unconnected
+        // entries must stay disabled buttons rather than become dead links.
+        for unserved in ["雷达", "主题图谱", "洞察"] {
+            assert!(
+                html.contains(&format!(
+                    "<button disabled aria-disabled=\"true\"><b class=\"v7-nav-zh\">{unserved}</b>"
+                )),
+                "{page} must keep the unconnected {unserved} entry disabled"
+            );
+        }
+    }
+}

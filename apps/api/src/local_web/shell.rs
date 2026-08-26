@@ -13,37 +13,67 @@ struct PrimaryEntry {
     zh: &'static str,
     readout: &'static str,
     surface: Option<PrimarySurface>,
+    /// The connected entry route. `None` means the responsibility has no served route yet,
+    /// so the entry stays a disabled button rather than becoming a dead link.
+    href: Option<&'static str>,
 }
 
 /// The five names are product responsibilities, not five authorised runtime instances.
-/// Every one of them stays disabled until its route is actually connected.
+/// An entry only becomes navigable once `href` names a route this binary actually serves;
+/// every other one stays disabled.
 const PRIMARY_ENTRIES: [PrimaryEntry; 5] = [
     PrimaryEntry {
         zh: "雷达",
         readout: "RADAR · —",
         surface: None,
+        href: None,
     },
     PrimaryEntry {
         zh: "主题图谱",
         readout: "TOPIC MAP · —",
         surface: None,
+        href: None,
     },
     PrimaryEntry {
         zh: "语料",
         readout: "CORPUS · UNKNOWN",
         surface: Some(PrimarySurface::Corpus),
+        href: Some("/corpus/evidence"),
     },
     PrimaryEntry {
         zh: "洞察",
         readout: "INSIGHTS · —",
         surface: None,
+        href: None,
     },
     PrimaryEntry {
         zh: "采集",
         readout: "COLLECTION · —",
         surface: Some(PrimarySurface::Collection),
+        href: Some("/collection/targets"),
     },
 ];
+
+/// Renders one primary entry. A connected route becomes a real link so an operator can move
+/// between served surfaces; a responsibility with no served route stays a disabled button
+/// rather than a dead link. Both forms keep the same label markup and `aria-current`.
+fn primary_entry_markup(entry: &PrimaryEntry, active: PrimarySurface) -> String {
+    let current = if entry.surface == Some(active) {
+        " aria-current=\"page\""
+    } else {
+        ""
+    };
+    let label = format!(
+        "<b class=\"v7-nav-zh\">{zh}</b><span class=\"v7-nav-readout\">{readout}</span>",
+        zh = entry.zh,
+        readout = entry.readout,
+    );
+
+    match entry.href {
+        Some(href) => format!("<a href=\"{href}\"{current}>{label}</a>"),
+        None => format!("<button disabled aria-disabled=\"true\"{current}>{label}</button>"),
+    }
+}
 
 /// Renders the 128px global header: the 78px global row plus the 50px context row.
 ///
@@ -58,19 +88,10 @@ pub fn global_header(
 ) -> String {
     let mut nav = String::new();
     for entry in PRIMARY_ENTRIES {
-        let current = if entry.surface == Some(active) {
-            " aria-current=\"page\""
-        } else {
-            ""
-        };
         if !nav.is_empty() {
             nav.push_str("\n            ");
         }
-        nav.push_str(&format!(
-            "<button disabled aria-disabled=\"true\"{current}><b class=\"v7-nav-zh\">{zh}</b><span class=\"v7-nav-readout\">{readout}</span></button>",
-            zh = entry.zh,
-            readout = entry.readout,
-        ));
+        nav.push_str(&primary_entry_markup(&entry, active));
     }
 
     format!(
