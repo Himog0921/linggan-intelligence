@@ -83,15 +83,232 @@ async fn evidence_route_returns_the_honest_empty_state() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(evidence_library_html().contains("SOURCE_INCOMPLETE"));
+    assert!(evidence_library_html().contains("来源材料尚未完整接通"));
+    assert!(evidence_library_html().contains("SOURCE INCOMPLETE"));
     assert!(evidence_library_html().contains("没有可展示的本地材料"));
     assert!(!evidence_library_html().contains(&["SYSTEM", "LIVE"].join(" ")));
 }
 
 #[test]
 fn evidence_page_does_not_replace_unknown_with_zero() {
-    assert!(evidence_library_html().contains("COVERAGE <strong>UNKNOWN</strong>"));
+    assert!(evidence_library_html().contains("覆盖情况 <strong>未知"));
     assert!(!evidence_library_html().contains("评论 0"));
+}
+
+#[test]
+fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_keys() {
+    let base = evidence_library_html();
+
+    for required in [
+        "事实层 / 证据",
+        "本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span>",
+        "本机时区 <span class=\"v7-tech-key\">UTC+08</span>",
+        "当前没有已接纳材料 <span class=\"v7-tech-key\">NO ACCEPTED MATERIAL AVAILABLE</span>",
+        "来源材料尚未完整接通",
+        "固定面板 <span class=\"v7-tech-key\">PIN</span>",
+        "加宽面板 <span class=\"v7-tech-key\">WIDE</span>",
+        "平台点赞 <span class=\"v7-tech-key\">PLATFORM LIKES</span>",
+        "状态矩阵 <em>STATE MATRIX</em>",
+        "仅展示本机页面结构</span><span class=\"v7-tech-key\">LOCAL PRESENTATION</span>",
+        "当前尚未读取任何材料</span><span class=\"v7-tech-key\">NO MATERIAL READ</span>",
+    ] {
+        assert!(
+            base.contains(required),
+            "missing Chinese-first copy: {required}"
+        );
+    }
+
+    let projection = DiscoveryLibraryProjection {
+        cards: vec![DiscoveryLibraryCard {
+            platform: "xhs".to_owned(),
+            platform_content_id: "local-language-card".to_owned(),
+            title: Some("原始标题保持不翻译".to_owned()),
+            creator_display_name: None,
+            published_at_source_text: None,
+            published_at: None,
+            published_at_state: "UNKNOWN",
+            first_discovered_at: "2026-08-26 00:00:00+00".to_owned(),
+            observed_at: "2026-08-26 00:00:00+00".to_owned(),
+            result_position: 17,
+            coverage_visible_cards: 20,
+            coverage_maximum_quota: 20,
+            coverage_stopped_reason: "surface_read_complete".to_owned(),
+            cover_presentation_state: "MEDIA_NOT_ACQUIRED",
+            cover_local_asset_url: None,
+        }],
+        excluded_unknown_published_at: 0,
+        time_view: "latest_accepted_discovery",
+    };
+    let html = evidence_page::render_read_projection(&base, &projection, None);
+
+    for required in [
+        "创作者未知",
+        "发布时间未知 <span class=\"v7-tech-key\">PUBLISHED_AT UNKNOWN</span>",
+        "媒体<br>尚未采集<span class=\"v7-tech-key\">MEDIA NOT ACQUIRED</span>",
+        "搜索位置 #17</span><span class=\"v7-tech-key\">POSITION #17</span>",
+        "已接纳的本机发现材料 <span class=\"v7-tech-key\">ACCEPTED RUNTIME MATERIAL</span>",
+        "观察到 / 配额 <span class=\"v7-tech-key\">OBSERVED / QUOTA</span>",
+        "停止原因：当前页面读取完成 <span class=\"v7-tech-key\">surface_read_complete</span>",
+        "已接纳的发现卡片 <span class=\"v7-tech-key\">ACCEPTED DISCOVERY</span>",
+        "当前显示最新已接纳的发现卡片；其中部分卡片的发布时间仍可能未知。",
+        "<span class=\"v7-tech-key\">LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN</span>",
+        "只读取 Linggan 已接纳的发现卡片；不触发平台采集 <span class=\"v7-tech-key\">DISCOVERY ONLY</span>",
+        "本机服务 / 已接纳发现材料 <span class=\"v7-tech-key\">LOCAL HOST / ACCEPTED DISCOVERY</span>",
+        "<span class=\"v7-kpi\"><em>内容</em><b>1</b></span>",
+    ] {
+        assert!(
+            html.contains(required),
+            "missing Chinese-first dynamic copy: {required}"
+        );
+    }
+
+    for prohibited in [
+        "本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）",
+        "本机服务 / 读投影未接通",
+        "本地读投影未接通",
+        "READ MODEL NOT CONNECTED",
+        "aria-label=\"MEDIA NOT ACQUIRED\"",
+        "<span class=\"v7-published-unknown\">PUBLISHED",
+        "<span>POSITION #17</span>",
+        "<b>ACCEPTED RUNTIME MATERIAL</b>",
+        "<span>OBSERVED / QUOTA</span>",
+        "LOCAL PRESENTATION ONLY / NO MATERIAL READ",
+        ">ACCEPTED DISCOVERY CARDS<",
+        "VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN",
+        "只读取 Linggan 已接纳的 discovery 卡片",
+        "本机服务 / 已接纳发现材料（LOCAL HOST / ACCEPTED DISCOVERY）",
+        "<span>UTC+08</span>",
+    ] {
+        assert!(
+            !html.contains(prohibited),
+            "English technical key must not carry this user meaning alone: {prohibited}"
+        );
+    }
+
+    let stylesheet = evidence_page_stylesheet();
+    assert!(
+        stylesheet.contains(".v7-tech-key{display:inline;color:var(--v7-ghost);font:500 .82em/1.2"),
+        "technical annotations must be visually smaller than their Chinese primary expression"
+    );
+    assert!(
+        stylesheet.contains(".v7-media-pending .v7-tech-key{display:block;max-width:54px;margin-top:4px;font-size:.82em"),
+        "the media-state technical annotation must also remain subordinate on discovery cards"
+    );
+}
+
+#[test]
+fn base_no_db_header_and_nested_technical_keys_remain_chinese_first() {
+    let base = evidence_library_html();
+    assert!(base.contains("<!-- EVIDENCE_HEADER_BOUNDARY_START -->"));
+    assert!(base.contains("<!-- EVIDENCE_HEADER_META_STATE_START -->"));
+    assert!(base.contains(
+        "本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span>"
+    ));
+    assert!(
+        base.contains(
+            "本地读投影未接通 <span class=\"v7-tech-key\">READ MODEL NOT CONNECTED</span>"
+        )
+    );
+    assert!(
+        !base.contains("本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）"),
+        "the English no-read-model sentence must not become the header state"
+    );
+
+    let stylesheet = evidence_page_stylesheet();
+    for selector in [
+        ".v7-fact-strap span .v7-tech-key",
+        ".v7-empty-metric span .v7-tech-key",
+        ".v7-readout span .v7-tech-key",
+    ] {
+        assert!(
+            stylesheet.contains(selector),
+            "a nested technical key needs a selector stronger than its label: {selector}"
+        );
+    }
+    for rule in [
+        ".v7-view-label em,\n.v7-filter-lead em { margin-left:7px; color:var(--v7-ghost); font:500 .82em/1.2 var(--lgi-font-mono); font-style:normal; letter-spacing:.06em; }",
+        ".v7-section h3 em { margin-right:auto; margin-left:8px; color:var(--v7-ghost); font:500 .82em/1.2 var(--lgi-font-mono); font-style:normal; letter-spacing:.06em; }",
+    ] {
+        assert!(
+            stylesheet.contains(rule),
+            "English annotation must not outweigh its Chinese label: {rule}"
+        );
+    }
+}
+
+#[test]
+fn invalid_and_unavailable_reads_render_the_actual_chinese_state_without_source_incomplete() {
+    for (html, primary, code, detail) in [
+        (
+            evidence_query_invalid_html(),
+            "当前查询参数无效",
+            "LOCAL_QUERY_INVALID",
+            "当前未读取任何材料，也未触发平台搜索或补采。",
+        ),
+        (
+            evidence_read_unavailable_html(),
+            "本机发现材料读取暂时不可用",
+            "READ_PROJECTION_UNAVAILABLE",
+            "当前未读取任何材料；没有显示旧系统或远程数据。",
+        ),
+    ] {
+        assert!(
+            html.contains(primary),
+            "missing Chinese primary state: {primary}"
+        );
+        assert!(
+            html.contains(&format!("<span class=\"v7-tech-key\">{code}</span>")),
+            "the raw code must remain an adjacent technical key: {code}"
+        );
+        assert!(
+            html.contains(detail),
+            "missing exact state boundary: {detail}"
+        );
+        assert!(html.contains("当前未读取材料"));
+        assert!(html.contains("当前未读取材料，来源状态未知"));
+        assert!(
+            !html.contains("来源信息尚未完整接通"),
+            "a query/read failure must not be misdescribed as source incompleteness"
+        );
+        assert!(
+            !html.contains("SOURCE INCOMPLETE"),
+            "a query/read failure must not inherit the base SOURCE_INCOMPLETE code"
+        );
+        assert!(
+            !html.contains("读投影未接通"),
+            "a query/read failure must not be misdescribed as a disconnected read model"
+        );
+        assert!(
+            !html.contains("当前没有已接纳材料"),
+            "a failed read must not be misdescribed as an empty accepted-material set"
+        );
+        assert!(
+            !html.contains("当前没有可用查询"),
+            "the old generic query copy must not survive a state-specific failure"
+        );
+    }
+}
+
+#[test]
+fn discovery_stop_reasons_keep_raw_codes_but_lead_with_truthful_chinese_meaning() {
+    for (raw_reason, expected_meaning) in [
+        ("quota_reached", "已达到本次配额"),
+        ("surface_ended", "当前页面内容已结束"),
+        ("risk_control", "平台风险控制导致停止"),
+        ("manual_stop", "用户手动停止"),
+        ("unknown", "停止原因未知"),
+        ("future_reason", "停止原因未归类"),
+    ] {
+        let markup = evidence_page::stopped_reason_markup(raw_reason);
+        assert!(
+            markup.contains(expected_meaning),
+            "missing meaning for {raw_reason}"
+        );
+        assert!(
+            markup.contains(&format!("<span class=\"v7-tech-key\">{raw_reason}</span>")),
+            "the stored code must remain an adjacent technical annotation for {raw_reason}"
+        );
+    }
 }
 
 #[test]
@@ -160,7 +377,9 @@ fn evidence_page_has_no_fabricated_v7_runtime_material_or_actions() {
     }
 
     assert!(html.contains("disabled aria-disabled=\"true\""));
-    assert!(html.contains("NO_ACCEPTED_MATERIAL_AVAILABLE"));
+    assert!(html.contains(
+        "当前没有已接纳材料 <span class=\"v7-tech-key\">NO ACCEPTED MATERIAL AVAILABLE</span>"
+    ));
 }
 
 #[test]
@@ -202,7 +421,8 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
         evidence_page::render_read_projection(&evidence_library_html(), &projection, Some("A娃"));
 
     assert!(html.contains("&lt;script&gt;not a cover&lt;/script&gt;"));
-    assert!(html.contains("MEDIA<br>NOT ACQUIRED"));
+    assert!(html.contains("媒体<br>尚未采集"));
+    assert!(html.contains("MEDIA NOT ACQUIRED"));
     assert!(!html.contains("<script>not a cover</script>"));
     assert!(!html.contains("https://"));
     assert!(!html.contains("xhscdn"));
@@ -236,8 +456,10 @@ fn default_read_view_surfaces_unknown_published_time_without_a_surrogate_date() 
 
     assert!(html.contains("PUBLISHED_AT UNKNOWN"));
     assert!(html.contains("未用首次发现、观察或接收时间替代"));
-    assert!(html.contains("VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN"));
-    assert!(html.contains("<em>视角</em> 最新已接纳"));
+    assert!(html.contains("当前显示最新已接纳的发现卡片；其中部分卡片的发布时间仍可能未知。"));
+    assert!(html.contains("LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN"));
+    assert!(!html.contains("VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN"));
+    assert!(html.contains("<em>视角</em> <span class=\"v7-zh-value\">最新已接纳</span>"));
     assert!(!html.contains("2026-08-26 00:00:00+00"));
 }
 
@@ -358,36 +580,16 @@ fn resumable_media_temp_bytes_are_never_published_until_the_final_promotion() {
 async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discovery_cards() {
     let database = proof_database("local_api_ingress").await;
     let observed_at = producer_fixture_observed_at(&database).await;
-    let package = discovery_package(&observed_at);
     let application = app_with_database(database);
 
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .method("POST")
-                .uri("/api/local/discovery-packages")
-                .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(package))
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
+    assert_discovery_package_is_accepted(application.clone(), discovery_package(&observed_at))
+        .await;
 
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/api/local/evidence-library?q=ADHD&window=last_30_days")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let body = String::from_utf8(body.to_vec()).unwrap();
+    let body = get_successful_utf8_response(
+        application.clone(),
+        "/api/local/evidence-library?q=ADHD&window=last_30_days",
+    )
+    .await;
     assert!(body.contains("note-api-known"));
     assert!(!body.contains("note-api-unknown"));
     assert!(body.contains("\"timeView\":\"last_30_days\""));
@@ -395,70 +597,26 @@ async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discov
     assert!(!body.contains("https://"));
     assert!(!body.contains("xhscdn"));
 
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/api/local/evidence-library?q=ADHD")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let body = String::from_utf8(
-        to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
+    let body =
+        get_successful_utf8_response(application.clone(), "/api/local/evidence-library?q=ADHD")
+            .await;
     assert!(body.contains("note-api-known"));
     assert!(body.contains("note-api-unknown"));
     assert!(body.contains("\"timeView\":\"latest_accepted_discovery\""));
     assert!(body.contains("\"excludedUnknownPublishedAt\":0"));
 
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/corpus/evidence?q=ADHD&window=last_30_days")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let html = String::from_utf8(
-        to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
+    let html = get_successful_utf8_response(
+        application.clone(),
+        "/corpus/evidence?q=ADHD&window=last_30_days",
     )
-    .unwrap();
+    .await;
     assert!(html.contains("API 接纳卡片"));
-    assert!(html.contains("MEDIA<br>NOT ACQUIRED"));
+    assert!(html.contains("媒体<br>尚未采集"));
+    assert!(html.contains("MEDIA NOT ACQUIRED"));
     assert!(!html.contains("https://"));
     assert!(!html.contains("xhscdn"));
 
-    let response = application
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/corpus/evidence?q=ADHD")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let html = String::from_utf8(
-        to_bytes(response.into_body(), usize::MAX)
-            .await
-            .unwrap()
-            .to_vec(),
-    )
-    .unwrap();
+    let html = get_successful_utf8_response(application, "/corpus/evidence?q=ADHD").await;
     assert!(html.contains("PUBLISHED_AT UNKNOWN"));
     assert!(html.contains("未用首次发现、观察或接收时间替代"));
 }
@@ -581,9 +739,9 @@ async fn loopback_7_day_query_keeps_api_and_page_window_metadata_in_sync() {
             .to_vec(),
     )
     .unwrap();
-    assert!(html.contains("<em>窗口</em> 7D"));
-    assert!(html.contains("WINDOW = PUBLISHED_AT / 7D"));
-    assert!(!html.contains("WINDOW = PUBLISHED_AT / 30D"));
+    assert!(html.contains("<em>窗口</em> <span class=\"v7-zh-value\">近 7 天</span>"));
+    assert!(html.contains("<span class=\"v7-tech-key\">PUBLISHED_AT / 7D</span>"));
+    assert!(!html.contains("PUBLISHED_AT / 30D"));
 }
 
 #[tokio::test]
@@ -825,6 +983,26 @@ async fn post_discovery_package(application: Router, package: String) -> axum::r
         .unwrap()
 }
 
+async fn assert_discovery_package_is_accepted(application: Router, package: String) {
+    let response = post_discovery_package(application, package).await;
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+async fn get_successful_utf8_response(application: Router, uri: &str) -> String {
+    let response = application
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    String::from_utf8(
+        to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap()
+            .to_vec(),
+    )
+    .unwrap()
+}
+
 fn discovery_package(observed_at: &str) -> String {
     format!(
         r#"{{
@@ -936,8 +1114,8 @@ fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
         .expect("collection pages render the context row")
         .1;
     for kpi in [
-        "<span class=\"v7-kpi\"><em>巡逻中断</em><b>UNKNOWN</b></span>",
-        "<span class=\"v7-kpi\"><em>建档未完成</em><b>UNKNOWN</b></span>",
+        "<span class=\"v7-kpi\"><em>巡逻中断</em><b><span class=\"v7-status-main\">未知</span><small class=\"v7-tech-key\">UNKNOWN</small></b></span>",
+        "<span class=\"v7-kpi\"><em>建档未完成</em><b><span class=\"v7-status-main\">未知</span><small class=\"v7-tech-key\">UNKNOWN</small></b></span>",
     ] {
         assert!(
             context_row.contains(kpi),

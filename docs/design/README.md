@@ -49,6 +49,7 @@
 | [lids/primitives.md](lids/primitives.md) | LIDS-PRI-001：文本、按钮、状态、Surface、Readout、反馈和 Focus 契约 | 权威当前 |
 | [lids/patterns.md](lids/patterns.md) | LIDS-PAT-001：L1/L2/L3 的唯一页面 Pattern 与组合限制 | 权威当前 |
 | [lids/agent-execution-guide.md](lids/agent-execution-guide.md) | LIDS-AGENT-001：协作 Agent 决策树与交付前检查 | 权威当前 |
+| [lids/language-policy.md](lids/language-policy.md) | LIDS-LANG-001：中文主表达、英文技术旁注、状态诚实性与页面迁移边界 | 权威当前 |
 | [lids/prototype-audit.md](lids/prototype-audit.md) | LIDS-AUD-001：V3 视觉母题的接纳、删除与技术/数据非授权边界 | 权威当前 |
 | [lids/migration-log.md](lids/migration-log.md) | LIDS-LOG-001：规则/实现/例外的迁移与验证记录 | 权威当前 |
 | [templates/page-spec-form.md](templates/page-spec-form.md) | 首个获准页面切片的规格表单 | 权威当前 |
@@ -59,8 +60,10 @@
 | [patterns/evidence-candidate-and-boundary-patterns.md](patterns/evidence-candidate-and-boundary-patterns.md) | PAT-001–PAT-004：观察、候选、来源限制与无副作用意图的表达模式 | 权威当前 |
 | [components/component-promotion.md](components/component-promotion.md) | Reference Page 局部块如何经第二页面验证后才可晋升为 CMP | 权威当前 |
 | [pages/topic-intelligence-reference-page.md](pages/topic-intelligence-reference-page.md) | PAGE-TOPIC-001：Topic Reference Page 的获准组合、状态与验收 | 权威当前 |
+| [changes/design-007-chinese-first-evidence-library-ui-change-manifest.md](changes/design-007-chinese-first-evidence-library-ui-change-manifest.md) | DESIGN-007：Evidence Library 中文优先规则的受限落地清单 | 权威当前 |
 | [pages/topic-intelligence-reference.html](pages/topic-intelligence-reference.html) | 可本地打开的合成静态参考实现；不读取、写入或声称真实系统事实 | 权威当前 |
 | [pages/topic-intelligence-reference-acceptance.md](pages/topic-intelligence-reference-acceptance.md) | ACC-TOPIC-001：静态视觉、互动和证明边界的实际验收记录 | 权威当前 |
+| [acceptance/design-007-chinese-first-evidence-library-acceptance.md](acceptance/design-007-chinese-first-evidence-library-acceptance.md) | ACC-DESIGN-007：Evidence Library 中文优先表达的验收记录 | 一次性报告 |
 
 ## 未来按需扩展的书架
 

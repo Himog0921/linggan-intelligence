@@ -47,6 +47,7 @@
 | [design/lids/primitives.md](design/lids/primitives.md) | 权威当前 | LIDS-PRI-001：文字、按钮、状态、Surface、Readout、反馈和 Focus 的基础契约 |
 | [design/lids/patterns.md](design/lids/patterns.md) | 权威当前 | LIDS-PAT-001：L1/L2/L3 页面 Pattern、结构与组合限制 |
 | [design/lids/agent-execution-guide.md](design/lids/agent-execution-guide.md) | 权威当前 | LIDS-AGENT-001：UI Agent 强制决策树、禁止项和交付前检查 |
+| [design/lids/language-policy.md](design/lids/language-policy.md) | 权威当前 | LIDS-LANG-001：中文主表达、英文技术旁注、状态诚实性和有界页面迁移规则 |
 | [design/lids/prototype-audit.md](design/lids/prototype-audit.md) | 权威当前 | LIDS-AUD-001：Observatory V3 原型的品牌母题与非授权边界 |
 | [design/lids/migration-log.md](design/lids/migration-log.md) | 权威当前 | LIDS-LOG-001：设计系统迁移、替代、例外与验证记录 |
 | [design/templates/page-spec-form.md](design/templates/page-spec-form.md) | 权威当前 | 获准页面的设计执行规格表单 |
@@ -62,6 +63,8 @@
 | [design/changes/design-004-corpus-rail-ui-change-manifest.md](design/changes/design-004-corpus-rail-ui-change-manifest.md) | 权威当前；DESIGN-004 | Corpus rail 面层差异化与选中态重音：规则依据、参考图取舍与重音计数 |
 | [design/changes/design-005-collection-workspace-ui-change-manifest.md](design/changes/design-005-collection-workspace-ui-change-manifest.md) | 权威当前；DESIGN-005 | Collection 五个子面落地：Mog 三项裁定、清掉的冗余、消化的断层与两项待决 |
 | [design/changes/design-006-collection-ux-revision-ui-change-manifest.md](design/changes/design-006-collection-ux-revision-ui-change-manifest.md) | 权威当前；DESIGN-006 | Collection 五面 UX 修订：顺序与默认入口、命名去重、空态分级、读数异常优先、无数据时结构留数据格延后 |
+| [design/changes/design-007-chinese-first-evidence-library-ui-change-manifest.md](design/changes/design-007-chinese-first-evidence-library-ui-change-manifest.md) | 权威当前；DESIGN-007 | Evidence Library 中文优先表达：中文独立承担用户含义，英文仅作技术旁注 |
+| [design/changes/design-008-shared-shell-chinese-first-ui-change-manifest.md](design/changes/design-008-shared-shell-chinese-first-ui-change-manifest.md) | 权威当前；DESIGN-008 / Issue #68 | 共享 local-web shell 的中文主语义、英文技术旁注与 Corpus/Collection 双页面验收边界 |
 | [design/changes/plugin-001-producer-popup-ui-change-manifest.md](design/changes/plugin-001-producer-popup-ui-change-manifest.md) | 已被替代；PLUGIN-001 | Issue #33 popup 的历史 UI 边界；不再约束当前实现 |
 | [design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md](design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-MIGRATION-001 | Issue #37 popup 的 Discovery 行动与状态边界；启动恢复由 Issue #53 文档补充 |
 | [design/changes/plugin-popup-recovery-001-ui-change-manifest.md](design/changes/plugin-popup-recovery-001-ui-change-manifest.md) | 权威当前；PLUGIN-POPUP-RECOVERY-001 | Issue #53 popup 启动恢复、无副作用 fallback 与 v0.4.2 release 边界；Issue #55 的运行时修订见当月进度记录 |
@@ -70,9 +73,11 @@
 | [design/acceptance/design-003-lids-visual-baseline-visual-acceptance.md](design/acceptance/design-003-lids-visual-baseline-visual-acceptance.md) | 一次性报告 | Issue #44 的双实例同屏实测：计量、诚实性逐条核对与未证明范围 |
 | [design/acceptance/design-004-corpus-rail-visual-acceptance.md](design/acceptance/design-004-corpus-rail-visual-acceptance.md) | 一次性报告 | `ACC-RAIL-004`：rail 三视口实拍验收；hover/focus 因全部路由禁用而未验证 |
 | [design/acceptance/design-005-collection-workspace-visual-acceptance.md](design/acceptance/design-005-collection-workspace-visual-acceptance.md) | 一次性报告 | `ACC-COLLECTION-001`：五个子面与抽屉四态实拍；无数据的行与图表未验证 |
+| [design/acceptance/design-008-shared-shell-chinese-first-acceptance.md](design/acceptance/design-008-shared-shell-chinese-first-acceptance.md) | 一次性报告 | `ACC-DESIGN-008`：共享壳层的中文主语义、技术注释层级与未证明边界 |
 | [design/acceptance/plugin-001-producer-popup-visual-acceptance.md](design/acceptance/plugin-001-producer-popup-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-001`：Issue #33 popup 的静态 source/release 验收；不证明浏览器加载或真实采集 |
 | [design/acceptance/plugin-migration-001-producer-popup-visual-acceptance.md](design/acceptance/plugin-migration-001-producer-popup-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-002`：Issue #37 adapter/mock ingress/release 验收；不证明真实浏览器或采集 |
 | [design/acceptance/plugin-popup-recovery-001-visual-acceptance.md](design/acceptance/plugin-popup-recovery-001-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-POPUP-RECOVERY-001`：Issue #53 source/release 启动保护验收；不证明 Chrome 已加载或真实采集 |
+| [design/acceptance/design-007-chinese-first-evidence-library-acceptance.md](design/acceptance/design-007-chinese-first-evidence-library-acceptance.md) | 一次性报告 | `ACC-DESIGN-007`：Evidence Library 中文优先表达的分层验收记录 |
 | [design/foundation/topic-intelligence-visual-language.md](design/foundation/topic-intelligence-visual-language.md) | 权威当前 | DESIGN-002 的 DS-001–DS-007：合成 Topic Reference Page 的受限视觉语言 |
 | [design/patterns/evidence-candidate-and-boundary-patterns.md](design/patterns/evidence-candidate-and-boundary-patterns.md) | 权威当前 | DESIGN-002 的 PAT-001–PAT-004：观察、候选、边界与无副作用意图表达 |
 | [design/components/component-promotion.md](design/components/component-promotion.md) | 权威当前 | 从 Reference Page 局部块到真实 CMP 的晋升条件；当前没有已晋升组件 |
@@ -121,6 +126,8 @@
 | [`plans/active/local-runtime-001-persistent-loopback.md`](plans/active/local-runtime-001-persistent-loopback.md) | 活跃计划 | Issue #38 的持久本地 PostgreSQL migration、loopback readiness 与重启保留证明；不含插件或真实平台 |
 | [`plans/active/plugin-migration-001-linggan-owned-xhs-discovery.md`](plans/active/plugin-migration-001-linggan-owned-xhs-discovery.md) | 活跃计划 | Issue #37：将成熟旧插件的可见 XHS 搜索卡发现规则适配为 Linggan 自有包，且只启用一次手动 `ADHD` / “综合” / 前 20 卡 Discovery → 固定 localhost ingress |
 | [`plans/active/plugin-rehome-001-full-legacy-browser.md`](plans/active/plugin-rehome-001-full-legacy-browser.md) | 合并后文档收口待办 | Issue #41 / PR #42：完整迁入 `linggan-boom v2.0.91` 的浏览器 source/UX 作为 Linggan 自有包，并切断旧内容工作台运行时；不证明真实采集 |
+| [`plans/completed/gov-004-delivery-package-harness-autonomy.md`](plans/completed/gov-004-delivery-package-harness-autonomy.md) | 已完成；已被 GOV-005 替代 | Issue #70：确立交付包、表面/状态/依赖/验收矩阵；其中 Harness 自主编排已由 GOV-005 取代 |
+| [`plans/active/gov-005-human-directed-collaboration.md`](plans/active/gov-005-human-directed-collaboration.md) | 活跃计划；Issue #72 | 将派单、并发、审查和合并的默认控制权交由 Mog；Agent 仅执行明确分配的 Work Package |
 | [`plans/completed/plugin-retrofit-local-trusted-001.md`](plans/completed/plugin-retrofit-local-trusted-001.md) | 已完成计划 | Issue #43 / PR #46：已合并的 LOCAL_TRUSTED synthetic manual `TaskSpec → Attempt → durable outbox → loopback receipt`；不证明真实浏览器、平台、媒体、scheduler 或 Evidence Library 真实数据 |
 | [`plans/completed/plugin-001-linggan-owned-producer.md`](plans/completed/plugin-001-linggan-owned-producer.md) | 已完成计划 | `PLUGIN-001`：Linggan 自有 MV3 基础包、loopback 探测与静态可安装 release；后续 Discovery 由 PLUGIN-MIGRATION-001 承接 |
 | [`plans/completed/disc-001-project-foundation-design.md`](plans/completed/disc-001-project-foundation-design.md) | 已完成计划 | 七道项目基础设计关口与 `USER-DEC-01`–`06` 的完成记录 |

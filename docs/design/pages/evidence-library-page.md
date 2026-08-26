@@ -18,6 +18,7 @@
 - 三秒答案: “这是本地 Evidence Library；它只显示已接纳的 discovery 卡片，不会重新搜索平台。”
 - 五秒主动作: 输入文本只检索标题与创作者名，并且只检索本地已接纳卡片；URL 未指定窗口时，页面采用 `latest_accepted_discovery` 视角并明确显示来源发布时间未知的卡片；只有 URL 显式指定 7/30 天发布窗口时，才按来源可知的 `published_at` 严格过滤，并以读取时的 Linggan PostgreSQL `scope_001_now()` 作为唯一时间参照。
 - 明确非目标: 真实平台采集、详情、评论、作者主页、媒体下载/展示、OCR/ASR、保存查询、Topic/Insight/Agent 行动、线上部署。
+- 页面语言: 按 `LIDS-LANG-001` 采用中文主表达；英文只作为紧邻中文的技术键、固有名或短代码。原始标题、创作者展示名、来源时间原文和平台标识保持来源原样，未知/未取得/仅发现面状态不得在本地化中被弱化或改写。
 - 当前可用数据/权限合同: `xhs.discovery.visible-card.v1` 的 Package admission、visible-card Coverage 和本地 `EvidenceQuery` 读取合同；没有详情 Evidence 或媒体访问授权。
 - 决策 owner: Mog；实施范围由 LOCAL-001 活跃计划和 Issue #25 限定
 
@@ -64,6 +65,7 @@
 - ASCII / 场景 / 动效: 不使用等距场景与环境动效。ASCII/像素语言仅出现在一处——rail 选中项右边缘的离散像素纹理（DESIGN-004），承担 `system.md` 中约 5% 的终端语言权重，不构成场景。运动限于状态反馈：hover/选中的背景与色彩过渡（DESIGN-003）、以及品牌标识与 rail 选中项的粗野位移。`prefers-reduced-motion:reduce` 下关闭全部过渡，并把 rail 选中项的常驻位移置为 `none`。
 - 页面级例外 `LOCAL-001-UI-EX-01 / Issue #29 修订`: 用户直接授权本页依 `REF-V7-001` 精确复刻视觉值和 HTML 骨架：桌面为78px + 50px = 128px 页头、216px rail、440px inspector（≤1500px 为420px、≤1180px 为380px）、全白背景、黑色硬线、全局 `#E8003F` 与 Evidence `#EF4F25`。桌面必须是 `100vh` 固定工作台，document 不向下延展，Results 和 Inspector 在各自栏内滚动；≤900px 改为自动首行高度，以容纳可能换行的顶层导航和 context row，随后才开始顺序折叠和页面原生滚动。这些值只以明确命名的 `--v7-*` 页面局部变量存在于 `evidence_library.css`；不改写、不复制为 LIDS 全局 token，也不授权其他页面继承。本条中的「全白背景」与两个色值已被后续用户确认部分替代，原文保留以便追溯：DESIGN-003 使第二签名色 `#E8003F` 退役、签名色收敛为 `--lgi-signal`，并把上下文行改为 `--lgi-canvas-low` + 双层点阵；DESIGN-004 按同一依据把左侧 rail 一并改为该测量场底。两次替代都不改变 128px 页头、216px rail、440px inspector 的几何与断点。
 - 明确禁止: 继承 V7 的模拟运行状态、计数、示例帖子/评论/转录、时间、引用或成功回执；任何 V7 位置上的未接通控件不得产生写入、采集、保存、研究或连接副作用。
+- 文案禁止: 以 `UNKNOWN`、`MEDIA NOT ACQUIRED`、`PUBLISHED_AT UNKNOWN`、`LOCAL READ ONLY` 等英文孤立文字承担按钮、状态、空态或筛选含义；必须以中文主状态加紧邻技术旁注表达。
 
 ## 5. 交互与真实后果
 
