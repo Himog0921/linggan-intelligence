@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: Draft LOCAL_TRUSTED adapter
-> 版本: `0.4.4`
+> 版本: `0.4.5`
 > 适用范围: `PLUGIN-RETROFIT-LOCAL-TRUSTED-001`（GitHub Issue #43）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -34,6 +34,11 @@ endpoint、同步和 fallback 都不是当前运行路径。
 submission 只能 replay，新的 package 必须创建新的 attempt。scheduler 明确为
 `NOT_CONNECTED`。
 
+交付前，插件只信任 `GET /health` 在 `routes.localProducer` 中同时公布的
+`taskCreation`、`attemptStart` 与 `submission` 三条本机路径；后台会按这一份 route bundle
+依次创建 Task、开始 Attempt、提交 Package。health 缺少任一条或不在 ready 状态时，材料只会
+保留为 retryable 本机 outbox 项，不显示为已接纳、已入库或已展示。
+
 在尚未从 Linggan 读取统计时，插件和 Popup 只显示“未连接”或“未知”；绝不以 `0` 伪装
 成没有笔记、评论或博主。
 
@@ -61,7 +66,7 @@ npm run release:reproducibility
 npm run verify:linggan-isolation
 ```
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.4.4.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.4.5.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

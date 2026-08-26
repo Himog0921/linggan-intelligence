@@ -28,28 +28,40 @@ async function producerInstanceId() {
   return created;
 }
 
-async function flushLocalOutboxOnce() {
-  const due = await localProducerOutbox.due({ limit: 5 });
+export async function flushLocalOutboxOnce({
+  outbox = localProducerOutbox,
+  mediaOutbox = localMediaOutbox,
+  readReadiness = readLingganLocalReadiness,
+  post = localPost,
+  flushMedia = flushMediaOutbox,
+} = {}) {
+  const readiness = await readReadiness();
+  const producerRoutes = readiness?.connected ? readiness.producerRoutes : null;
+  const due = await outbox.due({ limit: 5 });
   for (const entry of due) {
-    await localProducerOutbox.markInFlight(entry.submissionId);
+    await outbox.markInFlight(entry.submissionId);
+    if (!producerRoutes) {
+      await outbox.retry(entry.submissionId, 'local_producer_route_contract_not_ready');
+      continue;
+    }
     try {
-      const task = await localPost('/api/local/producer/tasks', entry.taskSpec);
+      const task = await post(producerRoutes.taskCreation, entry.taskSpec);
       if (!taskCreationIsAccepted(task)) {
         if (isTerminalLocalDeliveryResult(task)) {
-          await localProducerOutbox.terminal(entry.submissionId, task.payload.code || 'task_not_created');
+          await outbox.terminal(entry.submissionId, task.payload.code || 'task_not_created');
           continue;
         }
         throw new Error(task.payload.code || 'task_not_created');
       }
-      const attempt = await localPost('/api/local/producer/runtime-attempts', entry.attempt);
+      const attempt = await post(producerRoutes.attemptStart, entry.attempt);
       if (!attemptStartIsAccepted(attempt)) {
         if (isTerminalLocalDeliveryResult(attempt)) {
-          await localProducerOutbox.terminal(entry.submissionId, attempt.payload.code || 'attempt_not_started');
+          await outbox.terminal(entry.submissionId, attempt.payload.code || 'attempt_not_started');
           continue;
         }
         throw new Error(attempt.payload.code || 'attempt_not_started');
       }
-      const submitted = await localPost('/api/local/producer/runtime-submissions', {
+      const submitted = await post(producerRoutes.submission, {
         contractVersion: entry.contractVersion,
         producerInstanceId: entry.producerInstanceId,
         taskId: entry.taskId,
@@ -58,20 +70,20 @@ async function flushLocalOutboxOnce() {
         capturePackage: entry.capturePackage,
       });
       if (submitted.ok && ['acknowledged', 'replay'].includes(submitted.payload.delivery)) {
-        await localProducerOutbox.acknowledge(entry.submissionId, submitted.payload);
+        await outbox.acknowledge(entry.submissionId, submitted.payload);
       } else if (submitted.status >= 400 && submitted.status < 500) {
-        await localProducerOutbox.terminal(entry.submissionId, submitted.payload.code);
+        await outbox.terminal(entry.submissionId, submitted.payload.code);
       } else {
-        await localProducerOutbox.retry(entry.submissionId, submitted.payload.code || 'submission_not_acknowledged');
+        await outbox.retry(entry.submissionId, submitted.payload.code || 'submission_not_acknowledged');
       }
     } catch (error) {
-      await localProducerOutbox.retry(entry.submissionId, error?.message || error);
+      await outbox.retry(entry.submissionId, error?.message || error);
     }
   }
-  await flushMediaOutbox();
+  await flushMedia();
   return {
-    pending: await localProducerOutbox.pendingCount(),
-    mediaPending: await localMediaOutbox.pendingCount(),
+    pending: await outbox.pendingCount(),
+    mediaPending: await mediaOutbox.pendingCount(),
   };
 }
 

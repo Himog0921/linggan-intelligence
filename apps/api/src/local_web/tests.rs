@@ -15,6 +15,8 @@ const LOCAL_001_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0002_local_001_discovery.sql"),
     "\n",
     include_str!("../../../../database/migrations/0003_local_trusted_producer.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
 );
 
 #[tokio::test]
@@ -33,6 +35,26 @@ async fn health_route_returns_machine_readable_local_state() {
     assert_eq!(
         response.headers().get(header::CONTENT_TYPE).unwrap(),
         "application/json"
+    );
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        payload.pointer("/routes/localProducer/taskCreation"),
+        Some(&serde_json::Value::String(
+            "/api/local/producer/tasks".to_owned()
+        ))
+    );
+    assert_eq!(
+        payload.pointer("/routes/localProducer/attemptStart"),
+        Some(&serde_json::Value::String(
+            "/api/local/producer/runtime-attempts".to_owned()
+        ))
+    );
+    assert_eq!(
+        payload.pointer("/routes/localProducer/submission"),
+        Some(&serde_json::Value::String(
+            "/api/local/producer/runtime-submissions".to_owned()
+        ))
     );
 }
 
@@ -526,6 +548,54 @@ async fn loopback_local_producer_acknowledges_one_partial_package_and_replays_ti
     assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
 }
 
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn loopback_runtime_producer_uses_the_three_routes_published_by_health() {
+    let database = proof_database("local_api_runtime_route_contract").await;
+    let application = app_with_database(database);
+    let task = runtime_producer_task_spec();
+    let attempt = runtime_producer_attempt();
+    let submission = runtime_producer_submission();
+    for (path, body, expected) in [
+        (
+            LOCAL_PRODUCER_TASK_CREATION_PATH,
+            task,
+            "\"outcome\":\"created\"",
+        ),
+        (
+            LOCAL_PRODUCER_ATTEMPT_START_PATH,
+            attempt,
+            "\"outcome\":\"started\"",
+        ),
+        (
+            LOCAL_PRODUCER_SUBMISSION_PATH,
+            submission.clone(),
+            "\"delivery\":\"acknowledged\"",
+        ),
+        (
+            LOCAL_PRODUCER_SUBMISSION_PATH,
+            submission,
+            "\"delivery\":\"replay\"",
+        ),
+    ] {
+        let response = application
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&body).contains(expected));
+    }
+}
+
 async fn proof_database(schema: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL")
         .expect("test script must provide the isolated proof database URL");
@@ -600,6 +670,18 @@ fn local_submission(observed_at: &str) -> String {
         r#"{{"contractVersion":"linggan.local-trusted.submission.v1","producerInstanceId":"22222222-2222-4222-8222-222222222222","taskId":"11111111-1111-4111-8111-111111111111","attemptId":"33333333-3333-4333-8333-333333333333","submissionId":"44444444-4444-4444-8444-444444444444","discoveryPackage":{}}}"#,
         discovery_package(observed_at)
     )
+}
+
+fn runtime_producer_task_spec() -> String {
+    r#"{"contractVersion":"linggan.producer.task-spec.v1","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","source":"manual","platform":"xhs","pageType":"note_detail","target":{"contentExternalId":"note-a"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["manual_stop","maximum_quota"]}"#.to_owned()
+}
+
+fn runtime_producer_attempt() -> String {
+    r#"{"contractVersion":"linggan.producer.attempt.v1","producerInstanceId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","attemptId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc"}"#.to_owned()
+}
+
+fn runtime_producer_submission() -> String {
+    r#"{"contractVersion":"linggan.producer.capture-package.v1","producerInstanceId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","attemptId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","submissionId":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","capturePackage":{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-a"},"layers":[{"capability":"media_slots","observed":2,"attempted":2,"acquired":0,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"media_acquisition_not_started"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-a:image:1","slot":{"role":"image","ordinal":1},"sourceObject":{"externalId":"note-a"},"observation":{"externalUri":"https://fixture.invalid/one.jpg"},"observationRef":"ffffffff-ffff-4fff-8fff-ffffffffffff"},{"kind":"media_slot","slotKey":"xhs:note-a:image:2","slot":{"role":"image","ordinal":2},"sourceObject":{"externalId":"note-a"},"observation":{"externalUri":"https://fixture.invalid/two.jpg"},"observationRef":"11111111-2222-4333-8444-555555555555"}]}}"#.to_owned()
 }
 
 fn declared_token_values(stylesheet: &str) -> BTreeMap<&str, &str> {

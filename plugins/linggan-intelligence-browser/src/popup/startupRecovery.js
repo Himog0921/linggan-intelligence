@@ -1,9 +1,9 @@
 export const POPUP_STARTUP_RECOVERY = Object.freeze({
-  version: 'v0.4.4',
+  version: 'v0.4.5',
   title: '插件界面未能启动',
   state: '本机状态目前未知，无法确认是否已读取页面信息。',
   effect: '本提示没有发起新的采集或传输。',
-  recovery: '请在 Chrome 的“扩展程序”页面重新加载 Linggan Intelligence Browser v0.4.4，然后再打开此窗口。',
+  recovery: '请在 Chrome 的“扩展程序”页面重新加载 Linggan Intelligence Browser v0.4.5，然后再打开此窗口。',
 });
 
 export function createPopupStartupBoundary(React) {

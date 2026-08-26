@@ -7,6 +7,22 @@ export function formatLingganRuntimeNotice() {
   return 'Linggan 本机执行端已启用：页面采集结果会先写入本机可靠队列，再由 Linggan 接纳。自动调度尚未启动。';
 }
 
+function producerRoute(value) {
+  const path = String(value || '').trim();
+  return path.startsWith('/api/local/producer/') && !/[?#]/.test(path) ? path : null;
+}
+
+function producerRoutesFromHealth(health) {
+  const routes = health?.routes?.localProducer;
+  if (!routes || typeof routes !== 'object' || Array.isArray(routes)) return null;
+  const taskCreation = producerRoute(routes.taskCreation);
+  const attemptStart = producerRoute(routes.attemptStart);
+  const submission = producerRoute(routes.submission);
+  return taskCreation && attemptStart && submission
+    ? { taskCreation, attemptStart, submission }
+    : null;
+}
+
 export async function readLingganLocalReadiness(fetchImpl = globalThis.fetch) {
   if (typeof fetchImpl !== 'function') {
     return { connected: false, message: '浏览器当前无法检查 Linggan 本机服务。' };
@@ -20,12 +36,13 @@ export async function readLingganLocalReadiness(fetchImpl = globalThis.fetch) {
       return { connected: false, message: `Linggan 本机服务返回 ${response.status}。` };
     }
     const health = await response.json().catch(() => null);
+    const producerRoutes = producerRoutesFromHealth(health);
     const ready = health?.service === 'linggan-local-web'
       && health?.listener === 'loopback-only'
       && health?.dataState === 'LOCAL_TRUSTED_PRODUCER'
       && health?.database?.state === 'READY'
       && health?.database?.schema === 'LOCAL_003_SCHEMA_READY'
-      && health?.routes?.localProducer === '/api/local/producer/manual-tasks';
+      && producerRoutes;
     if (!ready) {
       return {
         connected: false,
@@ -36,6 +53,7 @@ export async function readLingganLocalReadiness(fetchImpl = globalThis.fetch) {
     return {
       connected: true,
       reachable: true,
+      producerRoutes,
       message: 'Linggan 本机服务可访问；LOCAL_TRUSTED_PRODUCER 已就绪。',
     };
   } catch {
