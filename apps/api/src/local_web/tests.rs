@@ -83,15 +83,88 @@ async fn evidence_route_returns_the_honest_empty_state() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(evidence_library_html().contains("SOURCE_INCOMPLETE"));
+    assert!(evidence_library_html().contains("来源材料尚未完整接通"));
+    assert!(evidence_library_html().contains("SOURCE INCOMPLETE"));
     assert!(evidence_library_html().contains("没有可展示的本地材料"));
     assert!(!evidence_library_html().contains(&["SYSTEM", "LIVE"].join(" ")));
 }
 
 #[test]
 fn evidence_page_does_not_replace_unknown_with_zero() {
-    assert!(evidence_library_html().contains("COVERAGE <strong>UNKNOWN</strong>"));
+    assert!(evidence_library_html().contains("覆盖情况 <strong>未知"));
     assert!(!evidence_library_html().contains("评论 0"));
+}
+
+#[test]
+fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_keys() {
+    let base = evidence_library_html();
+
+    for required in [
+        "事实层 / 证据",
+        "当前没有已接纳材料（NO ACCEPTED MATERIAL AVAILABLE）",
+        "来源材料尚未完整接通",
+        "固定面板 <span class=\"v7-tech-key\">PIN</span>",
+        "加宽面板 <span class=\"v7-tech-key\">WIDE</span>",
+        "平台点赞 <span class=\"v7-tech-key\">PLATFORM LIKES</span>",
+        "状态矩阵 <em>STATE MATRIX</em>",
+    ] {
+        assert!(
+            base.contains(required),
+            "missing Chinese-first copy: {required}"
+        );
+    }
+
+    let projection = DiscoveryLibraryProjection {
+        cards: vec![DiscoveryLibraryCard {
+            platform: "xhs".to_owned(),
+            platform_content_id: "local-language-card".to_owned(),
+            title: Some("原始标题保持不翻译".to_owned()),
+            creator_display_name: None,
+            published_at_source_text: None,
+            published_at: None,
+            published_at_state: "UNKNOWN",
+            first_discovered_at: "2026-08-26 00:00:00+00".to_owned(),
+            observed_at: "2026-08-26 00:00:00+00".to_owned(),
+            result_position: 17,
+            coverage_visible_cards: 20,
+            coverage_maximum_quota: 20,
+            coverage_stopped_reason: "surface_read_complete".to_owned(),
+            cover_presentation_state: "MEDIA_NOT_ACQUIRED",
+            cover_local_asset_url: None,
+        }],
+        excluded_unknown_published_at: 0,
+        time_view: "latest_accepted_discovery",
+    };
+    let html = evidence_page::render_read_projection(&base, &projection, None);
+
+    for required in [
+        "创作者未知",
+        "发布时间未知 <span class=\"v7-tech-key\">PUBLISHED_AT UNKNOWN</span>",
+        "媒体<br>尚未采集<span class=\"v7-tech-key\">MEDIA NOT ACQUIRED</span>",
+        "搜索位置 #17</span><span class=\"v7-tech-key\">POSITION #17</span>",
+        "已接纳的本机发现材料 <span class=\"v7-tech-key\">ACCEPTED RUNTIME MATERIAL</span>",
+        "观察到 / 配额 <span class=\"v7-tech-key\">OBSERVED / QUOTA</span>",
+        "停止原因：<span class=\"v7-tech-key\">surface_read_complete</span>",
+        "<span class=\"v7-kpi\"><em>内容</em><b>1</b></span>",
+    ] {
+        assert!(
+            html.contains(required),
+            "missing Chinese-first dynamic copy: {required}"
+        );
+    }
+
+    for prohibited in [
+        "aria-label=\"MEDIA NOT ACQUIRED\"",
+        "<span class=\"v7-published-unknown\">PUBLISHED",
+        "<span>POSITION #17</span>",
+        "<b>ACCEPTED RUNTIME MATERIAL</b>",
+        "<span>OBSERVED / QUOTA</span>",
+    ] {
+        assert!(
+            !html.contains(prohibited),
+            "English technical key must not carry this user meaning alone: {prohibited}"
+        );
+    }
 }
 
 #[test]
@@ -160,7 +233,7 @@ fn evidence_page_has_no_fabricated_v7_runtime_material_or_actions() {
     }
 
     assert!(html.contains("disabled aria-disabled=\"true\""));
-    assert!(html.contains("NO_ACCEPTED_MATERIAL_AVAILABLE"));
+    assert!(html.contains("当前没有已接纳材料（NO ACCEPTED MATERIAL AVAILABLE）"));
 }
 
 #[test]
@@ -202,7 +275,8 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
         evidence_page::render_read_projection(&evidence_library_html(), &projection, Some("A娃"));
 
     assert!(html.contains("&lt;script&gt;not a cover&lt;/script&gt;"));
-    assert!(html.contains("MEDIA<br>NOT ACQUIRED"));
+    assert!(html.contains("媒体<br>尚未采集"));
+    assert!(html.contains("MEDIA NOT ACQUIRED"));
     assert!(!html.contains("<script>not a cover</script>"));
     assert!(!html.contains("https://"));
     assert!(!html.contains("xhscdn"));
@@ -237,7 +311,7 @@ fn default_read_view_surfaces_unknown_published_time_without_a_surrogate_date() 
     assert!(html.contains("PUBLISHED_AT UNKNOWN"));
     assert!(html.contains("未用首次发现、观察或接收时间替代"));
     assert!(html.contains("VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN"));
-    assert!(html.contains("<em>视角</em> 最新已接纳"));
+    assert!(html.contains("<em>视角</em> <span class=\"v7-zh-value\">最新已接纳</span>"));
     assert!(!html.contains("2026-08-26 00:00:00+00"));
 }
 
@@ -437,7 +511,8 @@ async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discov
     )
     .unwrap();
     assert!(html.contains("API 接纳卡片"));
-    assert!(html.contains("MEDIA<br>NOT ACQUIRED"));
+    assert!(html.contains("媒体<br>尚未采集"));
+    assert!(html.contains("MEDIA NOT ACQUIRED"));
     assert!(!html.contains("https://"));
     assert!(!html.contains("xhscdn"));
 
@@ -581,9 +656,9 @@ async fn loopback_7_day_query_keeps_api_and_page_window_metadata_in_sync() {
             .to_vec(),
     )
     .unwrap();
-    assert!(html.contains("<em>窗口</em> 7D"));
-    assert!(html.contains("WINDOW = PUBLISHED_AT / 7D"));
-    assert!(!html.contains("WINDOW = PUBLISHED_AT / 30D"));
+    assert!(html.contains("<em>窗口</em> <span class=\"v7-zh-value\">近 7 天</span>"));
+    assert!(html.contains("<span class=\"v7-tech-key\">PUBLISHED_AT / 7D</span>"));
+    assert!(!html.contains("PUBLISHED_AT / 30D"));
 }
 
 #[tokio::test]
