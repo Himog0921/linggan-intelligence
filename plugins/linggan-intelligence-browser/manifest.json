@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Linggan Intelligence Browser",
-  "version": "0.4.4",
+  "version": "0.4.6",
   "description": "Linggan Intelligence 浏览器执行端（灵感爆爆爆 v2.0.91 迁入基线）",
   "permissions": [
     "activeTab",

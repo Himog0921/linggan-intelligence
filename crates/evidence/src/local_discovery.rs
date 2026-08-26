@@ -78,11 +78,11 @@ pub struct DiscoveryLibraryCard {
 pub async fn local_discovery_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
     let required_tables_exist = sqlx::query_scalar::<_, bool>(
         "SELECT \
-             to_regclass('public.linggan_local_schema_migration') IS NOT NULL \
-             AND to_regclass('public.capture_work_order') IS NOT NULL \
-             AND to_regclass('public.local_discovery_package') IS NOT NULL \
-             AND to_regclass('public.local_discovery_occurrence') IS NOT NULL \
-             AND to_regclass('public.local_discovery_coverage') IS NOT NULL",
+             to_regclass('linggan_local_schema_migration') IS NOT NULL \
+             AND to_regclass('capture_work_order') IS NOT NULL \
+             AND to_regclass('local_discovery_package') IS NOT NULL \
+             AND to_regclass('local_discovery_occurrence') IS NOT NULL \
+             AND to_regclass('local_discovery_coverage') IS NOT NULL",
     )
     .fetch_one(database.pool())
     .await?;

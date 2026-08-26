@@ -579,12 +579,12 @@ pub async fn producer_runtime_schema_is_ready(database: &Database) -> Result<boo
     // LOCAL-001 database cleanly selects its discovery projection rather than reporting the
     // whole Evidence Library unavailable.
     let tables_exist = sqlx::query_scalar::<_, bool>(
-        "SELECT to_regclass('public.linggan_local_schema_migration') IS NOT NULL \
-                AND to_regclass('public.linggan_runtime_task') IS NOT NULL \
-                AND to_regclass('public.linggan_runtime_attempt') IS NOT NULL \
-                AND to_regclass('public.linggan_runtime_capture_package') IS NOT NULL \
-                AND to_regclass('public.linggan_runtime_submission_receipt') IS NOT NULL \
-                AND to_regclass('public.linggan_media_slot') IS NOT NULL",
+        "SELECT to_regclass('linggan_local_schema_migration') IS NOT NULL \
+                AND to_regclass('linggan_runtime_task') IS NOT NULL \
+                AND to_regclass('linggan_runtime_attempt') IS NOT NULL \
+                AND to_regclass('linggan_runtime_capture_package') IS NOT NULL \
+                AND to_regclass('linggan_runtime_submission_receipt') IS NOT NULL \
+                AND to_regclass('linggan_media_slot') IS NOT NULL",
     )
     .fetch_one(database.pool())
     .await?;
