@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   buildDiscoveryPlan,
   discoverNotesFromDOM,
+  readCurrentVisibleSurfaceNotes,
   discoverProfileSurfaceNotesFromApi,
   discoverSearchSurfaceNotesFromApi,
   discoverSurfaceNotesFromBestSource,
@@ -12,6 +14,42 @@ import {
   normalizeSearchSurfaceNote,
   shouldStopDiscovery,
 } from '../src/platforms/xhs/noteCollector.js';
+
+test('current visible surface reader stays bounded to 20 cards and does not perform a scroll', () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  let scrollCalls = 0;
+  const noteIds = Array.from({ length: 22 }, (_, index) => `6800000000000000000000${String(index + 1).padStart(2, '0')}`);
+  const sections = noteIds.map((noteId, index) => ({
+    querySelector(selector) {
+      if (selector === 'a.cover') return { getAttribute: () => `/explore/${noteId}` };
+      if (selector === '.footer span' || selector === '.title') return { textContent: `note ${index + 1}` };
+      if (selector === '.like-wrapper .count') return { textContent: String(index + 1) };
+      return null;
+    },
+    getBoundingClientRect: () => ({ top: index * 10, left: 0 }),
+  }));
+  globalThis.document = { querySelectorAll: () => sections };
+  globalThis.window = { scrollY: 0, scrollTo: () => { scrollCalls += 1; } };
+  try {
+    const records = readCurrentVisibleSurfaceNotes('.feeds-container', 200);
+    assert.equal(records.length, 20);
+    assert.deepEqual(records.map((record) => record.noteId), noteIds.slice(0, 20));
+    assert.equal(scrollCalls, 0);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('current visible surface reader has no legacy snapshot, bridge, or scrolling dependency', () => {
+  const source = readFileSync(new URL('../src/platforms/xhs/noteCollector.js', import.meta.url), 'utf8');
+  const start = source.indexOf('export function readCurrentVisibleSurfaceNotes');
+  const end = source.indexOf('\nfunction normalizePositiveInteger', start);
+  const reader = source.slice(start, end);
+  assert.match(reader, /discoverNotesFromDOM/);
+  assert.doesNotMatch(reader, /discoverSurfaceNotesFromBestSource|discoverWithScroll|discoverSearchSurfaceNotesFromApi|discoverProfileSurfaceNotesFromApi|ensureXhsCommentApiBridge/);
+});
 
 test('profile api note normalization maps Xiaohongshu user_posted cards into surface notes', () => {
   const note = normalizeProfilePostedNote({

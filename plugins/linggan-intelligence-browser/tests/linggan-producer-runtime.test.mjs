@@ -7,6 +7,7 @@ import {
   createCapturePackage,
   createManualRuntimeTask,
   packageComments,
+  packageDiscovery,
   packageMediaSlots,
   packageReplies,
 } from '../src/linggan/producerRuntime.js';
@@ -39,6 +40,19 @@ test('media slots retain URL observations but no remote URL becomes a local pres
   assert.equal(packageValue.coverage.layers[0].observed, 2);
   assert.equal(packageValue.records[0].observation.externalUri, 'https://cdn.example/one.jpg');
   assert.equal(Object.hasOwn(packageValue.records[0], 'localAssetUrl'), false);
+});
+
+test('current-surface discovery packages exclude temporary DOM ordering references', () => {
+  const element = {};
+  element.self = element;
+  const packageValue = packageDiscovery({
+    platform: 'xhs',
+    query: 'ADHD',
+    cards: [{ noteId: 'note-1', title: 'visible', element, _top: 32, _left: 16 }],
+  });
+  assert.equal(packageValue.records[0].sourceObject.externalId, 'note-1');
+  assert.deepEqual(packageValue.records[0].payload, { noteId: 'note-1', title: 'visible' });
+  assert.doesNotThrow(() => JSON.stringify(packageValue));
 });
 
 test('partial media coverage retains acquired bytes and explicitly keeps unknown/not-attempted distinct', () => {
@@ -88,6 +102,8 @@ test('visible producer controls use Linggan runtime commands and never revive ol
   assert.doesNotMatch(popup, /sendToBackground\(MSG\.START_BATCH/);
   assert.doesNotMatch(popup, /action: MSG\.COLLECT_SINGLE/);
   assert.match(content, /dispatchProducerRuntimeAction/);
+  assert.match(content, /readCurrentVisibleSurfaceNotes/);
+  assert.doesNotMatch(content, /discoverSurfaceNotesFromBestSource/);
   assert.match(content, /LINGGAN_RUNTIME_ACTION\.START_BATCH_COMMENTS/);
   assert.match(douyin, /Linggan's media lane/);
   assert.doesNotMatch(douyin, /downloadDouyinVideo\(/);

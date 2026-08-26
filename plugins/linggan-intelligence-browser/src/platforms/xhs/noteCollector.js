@@ -582,6 +582,14 @@ export function discoverNotesFromDOM(containerSelector) {
   return notes;
 }
 
+// This is deliberately a one-shot DOM read for the visible-surface control.  It never invokes
+// the legacy API snapshot bridge and never scrolls.  A short current page is partial evidence,
+// not proof that the platform has no more cards.
+export function readCurrentVisibleSurfaceNotes(containerSelector, maximumQuota = 20) {
+  const quota = Math.min(20, normalizePositiveInteger(maximumQuota, 20));
+  return discoverNotesFromDOM(containerSelector).slice(0, quota);
+}
+
 function normalizePositiveInteger(value, fallback = 0) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;

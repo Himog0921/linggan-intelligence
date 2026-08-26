@@ -133,6 +133,67 @@ test('xhs control actions refuse absent tasks without changing visible progress'
   assert.deepEqual(pauseResumeStates, []);
 });
 
+test('current-surface discovery submits only after its bounded page reader has returned cards', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const order = [];
+  let releaseCards;
+  const cardRead = new Promise((resolve) => {
+    releaseCards = resolve;
+  });
+  globalThis.window = {
+    location: { href: 'https://www.xiaohongshu.com/search_result?keyword=ADHD' },
+  };
+  globalThis.document = {};
+  try {
+    const controller = createXhsPageController({
+      MSG: {},
+      collectComments: async () => ({ total: 0, comments: [] }),
+      collectCommentImages: async () => ({ total: 0, images: [] }),
+      collectNote: async () => ({}),
+      collectAuthor: async () => ({}),
+      BatchNoteController: function BatchNoteController() {},
+      BatchCommentController: function BatchCommentController() {},
+      injectUI: () => {},
+      toggleStopButton: () => {},
+      togglePauseResumeButtons: () => {},
+      showToast: () => {},
+      showCommentLimitDialog: async () => ({}),
+      showMediaDownloadDialog: async () => false,
+      showBatchSettingsDialog: async () => ({}),
+      ensureTaskControlBar: () => {},
+      updateTaskControlBar: () => {},
+      hideTaskControlBar: () => {},
+      isContextValid: () => true,
+      reportDone: () => {},
+      extractNoteId: () => 'note_1',
+      sendToBackground: async () => ({}),
+      downloadNoteMediaFromRecord: async () => ({}),
+      discoverSurface: async ({ maximumQuota }) => {
+        order.push(`read:${maximumQuota}`);
+        return cardRead;
+      },
+      submitDiscovery: async (cards, context) => {
+        order.push(`submit:${cards.length}`);
+        assert.equal(context.query, 'ADHD');
+        return { delivery: 'pending' };
+      },
+    });
+    const button = { dataset: { action: 'discoverSurface', params: JSON.stringify({ mode: 'search' }) } };
+    const pending = controller.handleButtonClick({
+      target: { closest: (selector) => (selector === '.lgboom-btn' ? button : null) },
+    });
+    await Promise.resolve();
+    assert.deepEqual(order, ['read:20']);
+    releaseCards([{ noteId: 'note_1' }]);
+    await pending;
+    assert.deepEqual(order, ['read:20', 'submit:1']);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+  }
+});
+
 test('xhs task UI falls back to TASK_STATE status when taskState carries a collection terminal status', () => {
   const { controller, taskBarStates } = createControllerHarness();
 

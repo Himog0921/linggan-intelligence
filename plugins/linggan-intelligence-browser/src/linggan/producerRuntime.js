@@ -267,12 +267,17 @@ export function packageDiscovery({ platform, cards = [], query = '', authorExter
       unknown: 1,
       stoppedReason: 'surface_read_complete',
     },
-    records: visible.map((card, ordinal) => ({
+    records: visible.map((card, ordinal) => {
+      // DOM nodes are only a temporary aid for ordering the current surface. They are not
+      // transportable evidence and must never enter the local outbox payload.
+      const { element: _element, _top: _top, _left: _left, ...payload } = card && typeof card === 'object' ? card : {};
+      return {
       kind: authorExternalId ? 'profile_discovery_card' : 'discovery_card',
       resultPosition: ordinal + 1,
-      sourceObject: normalizeSourceObject(platform, card),
-      payload: card || {},
-    })),
+      sourceObject: normalizeSourceObject(platform, payload),
+      payload,
+      };
+    }),
   });
 }
 
