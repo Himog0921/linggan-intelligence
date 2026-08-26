@@ -1469,19 +1469,24 @@ fn no_page_stylesheet_restyles_a_component_the_shell_owns() {
     ] {
         let mut violations = Vec::new();
         for selector in declared_selectors(stylesheet) {
-            for class in shell_classes.iter() {
-                let needle = format!(".{class}");
-                let matched = selector.match_indices(&needle).any(|(index, _)| {
-                    // ".v7-side" must not match ".v7-side-nav"
-                    selector[index + needle.len()..]
-                        .chars()
-                        .next()
-                        .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '-')
-                });
-                if matched {
-                    violations.push(format!("{selector}  (shell owns .{class})"));
-                    break;
-                }
+            // Only the parts that redefine the component itself count. A page may position a
+            // shell element inside its own component (".v7-fact-strap .v7-tech-key") — that
+            // is the page styling its own context, not restyling the shell. What it may not
+            // do is redeclare the component: a second base definition means the same element
+            // renders differently depending on which page loaded last.
+            let redefines_component = selector.split(',').any(|part| {
+                let part = part.trim();
+                shell_classes.iter().any(|class| {
+                    let needle = format!(".{class}");
+                    part.starts_with(&needle)
+                        && part[needle.len()..]
+                            .chars()
+                            .next()
+                            .is_none_or(|c| !c.is_ascii_alphanumeric() && c != '-')
+                })
+            });
+            if redefines_component {
+                violations.push(selector);
             }
         }
         assert!(
