@@ -64,7 +64,7 @@ pub(super) fn render_read_projection(
     )
     .replace(
         "当前没有已接纳材料（NO ACCEPTED MATERIAL AVAILABLE）",
-        "已接纳的发现卡片（ACCEPTED DISCOVERY CARDS）",
+        "已接纳的发现卡片 <span class=\"v7-tech-key\">ACCEPTED DISCOVERY</span>",
     )
 }
 
@@ -92,8 +92,8 @@ fn time_view_copy(time_view: &str) -> TimeViewCopy {
         "latest_accepted_discovery" => TimeViewCopy {
             filter_label: "视角",
             value_label: "最新已接纳",
-            boundary_copy: "默认视角为最新已接纳发现；发布时间可能未知。",
-            technical_key: "<span class=\"v7-tech-key\">VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN</span>",
+            boundary_copy: "当前显示最新已接纳的发现卡片；其中部分卡片的发布时间仍可能未知。",
+            technical_key: "<span class=\"v7-tech-key\">LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN</span>",
         },
         "last_7_days" => TimeViewCopy {
             filter_label: "窗口",

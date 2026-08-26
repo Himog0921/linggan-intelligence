@@ -107,6 +107,8 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
         "加宽面板 <span class=\"v7-tech-key\">WIDE</span>",
         "平台点赞 <span class=\"v7-tech-key\">PLATFORM LIKES</span>",
         "状态矩阵 <em>STATE MATRIX</em>",
+        "仅展示本机页面结构</span><span class=\"v7-tech-key\">LOCAL PRESENTATION</span>",
+        "当前尚未读取任何材料</span><span class=\"v7-tech-key\">NO MATERIAL READ</span>",
     ] {
         assert!(
             base.contains(required),
@@ -145,6 +147,9 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
         "已接纳的本机发现材料 <span class=\"v7-tech-key\">ACCEPTED RUNTIME MATERIAL</span>",
         "观察到 / 配额 <span class=\"v7-tech-key\">OBSERVED / QUOTA</span>",
         "停止原因：当前页面读取完成 <span class=\"v7-tech-key\">surface_read_complete</span>",
+        "已接纳的发现卡片 <span class=\"v7-tech-key\">ACCEPTED DISCOVERY</span>",
+        "当前显示最新已接纳的发现卡片；其中部分卡片的发布时间仍可能未知。",
+        "<span class=\"v7-tech-key\">LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN</span>",
         "<span class=\"v7-kpi\"><em>内容</em><b>1</b></span>",
     ] {
         assert!(
@@ -159,6 +164,9 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
         "<span>POSITION #17</span>",
         "<b>ACCEPTED RUNTIME MATERIAL</b>",
         "<span>OBSERVED / QUOTA</span>",
+        "LOCAL PRESENTATION ONLY / NO MATERIAL READ",
+        ">ACCEPTED DISCOVERY CARDS<",
+        "VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN",
     ] {
         assert!(
             !html.contains(prohibited),
@@ -342,7 +350,9 @@ fn default_read_view_surfaces_unknown_published_time_without_a_surrogate_date() 
 
     assert!(html.contains("PUBLISHED_AT UNKNOWN"));
     assert!(html.contains("未用首次发现、观察或接收时间替代"));
-    assert!(html.contains("VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN"));
+    assert!(html.contains("当前显示最新已接纳的发现卡片；其中部分卡片的发布时间仍可能未知。"));
+    assert!(html.contains("LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN"));
+    assert!(!html.contains("VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN"));
     assert!(html.contains("<em>视角</em> <span class=\"v7-zh-value\">最新已接纳</span>"));
     assert!(!html.contains("2026-08-26 00:00:00+00"));
 }
