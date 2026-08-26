@@ -137,7 +137,7 @@ fn card_markup(card: &linggan_evidence::DiscoveryLibraryCard) -> String {
         "<img class=\"v7-media-local\" src=\"{}\" alt=\"Linggan 本地媒体副本\">", escape(url)
     )).unwrap_or_else(|| "<div class=\"v7-media-pending\" aria-label=\"媒体尚未采集（MEDIA NOT ACQUIRED）\">媒体<br>尚未采集<span class=\"v7-tech-key\">MEDIA NOT ACQUIRED</span></div>".to_owned());
     format!(
-        "<article class=\"v7-discovery-row\"><input class=\"v7-check\" type=\"checkbox\" disabled aria-label=\"未启用选择\">{}<div class=\"v7-discovery-main\"><div class=\"v7-discovery-title\">{}</div><div class=\"v7-discovery-meta\"><span>{}</span><span>{} / {}</span><span>搜索位置 #{}</span><span class=\"v7-tech-key\">POSITION #{}</span></div><div class=\"v7-discovery-boundary\"><b>已接纳的本机发现材料 <span class=\"v7-tech-key\">ACCEPTED RUNTIME MATERIAL</span></b>{}</div></div><div class=\"v7-discovery-coverage\"><b>{}/{}</b><span>观察到 / 配额 <span class=\"v7-tech-key\">OBSERVED / QUOTA</span></span><small>停止原因：<span class=\"v7-tech-key\">{}</span></small></div></article>",
+        "<article class=\"v7-discovery-row\"><input class=\"v7-check\" type=\"checkbox\" disabled aria-label=\"未启用选择\">{}<div class=\"v7-discovery-main\"><div class=\"v7-discovery-title\">{}</div><div class=\"v7-discovery-meta\"><span>{}</span><span>{} / {}</span><span>搜索位置 #{}</span><span class=\"v7-tech-key\">POSITION #{}</span></div><div class=\"v7-discovery-boundary\"><b>已接纳的本机发现材料 <span class=\"v7-tech-key\">ACCEPTED RUNTIME MATERIAL</span></b>{}</div></div><div class=\"v7-discovery-coverage\"><b>{}/{}</b><span>观察到 / 配额 <span class=\"v7-tech-key\">OBSERVED / QUOTA</span></span><small>{}</small></div></article>",
         media,
         escape(title),
         escape(creator),
@@ -148,7 +148,27 @@ fn card_markup(card: &linggan_evidence::DiscoveryLibraryCard) -> String {
         publication_state,
         card.coverage_visible_cards,
         card.coverage_maximum_quota,
-        escape(&card.coverage_stopped_reason),
+        stopped_reason_markup(&card.coverage_stopped_reason),
+    )
+}
+
+/// Keeps the persisted stop-reason code intact while making its present meaning readable without
+/// requiring an operator to understand a producer enum. Unknown future codes deliberately remain
+/// unknown instead of being guessed as a successful or complete collection outcome.
+pub(super) fn stopped_reason_markup(raw_reason: &str) -> String {
+    let meaning = match raw_reason {
+        "quota_reached" | "maximum_quota" => "已达到本次配额",
+        "surface_ended" => "当前页面内容已结束",
+        "surface_read_complete" => "当前页面读取完成",
+        "risk_control" => "平台风险控制导致停止",
+        "manual_stop" => "用户手动停止",
+        "unknown" => "停止原因未知",
+        _ => "停止原因未归类",
+    };
+
+    format!(
+        "停止原因：{meaning} <span class=\"v7-tech-key\">{}</span>",
+        escape(raw_reason),
     )
 }
 

@@ -36,7 +36,7 @@
 /* DESIGN-007 / LIDS-LANG-001: Chinese carries user meaning; English remains a
  * compact, adjacent technical key. This is page-local because no cross-page
  * component contract exists yet. */
-.v7-tech-key{display:inline;color:var(--v7-ghost);font:500 11px/1.2 var(--lgi-font-mono);letter-spacing:.06em;white-space:nowrap}
+.v7-tech-key{display:inline;color:var(--v7-ghost);font:500 .82em/1.2 var(--lgi-font-mono);letter-spacing:.06em;white-space:nowrap}
 .v7-zh-status{color:var(--v7-muted);font:500 11px/1.35 var(--lgi-font-sans)}
 .v7-zh-status + .v7-tech-key{margin-left:5px}
 .v7-zh-value{color:var(--v7-muted);font:500 11px/1.2 var(--lgi-font-sans)}
@@ -44,12 +44,12 @@
 .v7-discovery-meta .v7-tech-key{margin-left:-6px}
 .v7-discovery-boundary .v7-tech-key,.v7-discovery-coverage .v7-tech-key{margin-left:5px}
 .v7-media-pending{align-content:center;place-items:center}
-.v7-media-pending .v7-tech-key{display:block;max-width:54px;margin-top:4px;font-size:11px;line-height:1.15;white-space:normal}
+.v7-media-pending .v7-tech-key{display:block;max-width:54px;margin-top:4px;font-size:.82em;line-height:1.15;white-space:normal}
 .v7-published-unknown .v7-tech-key{margin-left:5px;color:var(--v7-unknown)}
 .v7-window-exclusion .v7-tech-key{color:var(--v7-unknown)}
 .v7-empty-title .v7-tech-key,.v7-empty-boundary .v7-tech-key,.v7-empty-facts .v7-tech-key,.v7-empty-metric .v7-tech-key{margin-left:5px}
 .v7-iid .v7-tech-key,.v7-imeta .v7-tech-key,.v7-section h3 > span .v7-tech-key,.v7-readout .v7-tech-key,.v7-matrix-row .v7-tech-key{margin-left:5px}
-@media(max-width:640px){.v7-tech-key{font-size:11px}.v7-media-pending .v7-tech-key{font-size:11px}}
+@media(max-width:640px){.v7-tech-key{font-size:.82em}.v7-media-pending .v7-tech-key{font-size:.82em}}
 
 
 /* DESIGN-003 · Chinese-first typography, page-local half.
