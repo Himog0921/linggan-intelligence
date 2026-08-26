@@ -23,6 +23,7 @@
 | 严格发布时间窗口 | 仅按来源可知发布时间过滤；未知发布时间对象被排除并计数 | `WINDOW / PUBLISHED_AT` | 通过：7D loopback API/页面同源 proof |
 | 无卡片 / 未接通 | 当前无可展示材料或本地读投影未接通，不代表平台无内容 | `SOURCE INCOMPLETE`、`NOT CONNECTED` | 通过：loopback DOM 检查 |
 | Discovery 停止原因 | 已达到配额、页面结束、风险控制、用户手动停止或原因未知；不把部分结果说成完整 | 原始 `stopped_reason` 代码 | 通过：focused render test；未知代码显示「未归类」 |
+| 无效查询 / 读取暂不可用 | 两条路径各自显示准确中文主状态；未读取材料不冒充来源不完整、空库、已读取或已采集 | `LOCAL_QUERY_INVALID`、`READ_PROJECTION_UNAVAILABLE` | 通过：focused render test；不证明数据库、平台或真实 producer 可用 |
 | 页面内剩余英文整句 | 结果表头、本机呈现／未读材料、默认视角均以中文独立说明 | `ACCEPTED DISCOVERY`、`LOCAL PRESENTATION`、`NO MATERIAL READ`、`LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN` | 通过：focused render regression；不涉及共享 Shell |
 | 英文技术注释层级 | 中文主表达独立可读，英文技术键保持可见但相对更小 | `.v7-tech-key` | 通过：页面局部样式断言；不涉及共享 Shell |
 

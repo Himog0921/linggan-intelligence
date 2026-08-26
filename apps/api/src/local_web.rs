@@ -1231,23 +1231,11 @@ fn local_read_json_error(status: axum::http::StatusCode, code: &'static str) -> 
 }
 
 fn evidence_read_unavailable_html() -> String {
-    evidence_library_html()
-        .replace("SOURCE_INCOMPLETE", "READ_PROJECTION_UNAVAILABLE")
-        .replace(
-            "页面还没有连接到受控的本地材料读投影",
-            "页面无法从受控本地读投影读取卡片；没有显示任何旧系统或远程数据",
-        )
-        .to_owned()
+    evidence_page::render_read_unavailable(&evidence_library_html())
 }
 
 fn evidence_query_invalid_html() -> String {
-    evidence_library_html()
-        .replace("SOURCE_INCOMPLETE", "LOCAL_QUERY_INVALID")
-        .replace(
-            "页面还没有连接到受控的本地材料读投影",
-            "当前只接受本地 EvidenceQuery；没有触发平台搜索或补采",
-        )
-        .to_owned()
+    evidence_page::render_query_invalid(&evidence_library_html())
 }
 
 async fn stylesheet() -> Response {
@@ -1372,13 +1360,13 @@ fn evidence_library_html() -> String {
               <div class="v7-view-group v7-my"><span class="v7-view-label">我的视图 <em>MY VIEWS</em></span><div class="v7-view-strip"><button class="v7-view-pill" disabled><i>A</i><span>ADHD 作业</span></button><button class="v7-view-pill" disabled><i>B</i><span>低粉爆文</span></button><button class="v7-view-pill" disabled><i>C</i><span>家长原声研究</span></button></div></div>
             </div>
             <div class="v7-controls-row"><div class="v7-filters"><span class="v7-filter-lead">筛选 <em>FILTER</em></span><button class="v7-chip" disabled><em>平台</em> 全部 <span class="v7-tech-key">ALL</span></button><button class="v7-chip" disabled><em>窗口</em> 未知 <span class="v7-tech-key">UNKNOWN</span></button><button class="v7-chip" disabled><em>类型</em> 全部 <span class="v7-tech-key">ALL</span></button><button class="v7-chip" disabled><em>来源</em> 未知 <span class="v7-tech-key">UNKNOWN</span></button><button class="v7-chip" disabled><em>状态</em> 未知 <span class="v7-tech-key">UNKNOWN</span></button></div><div class="v7-controls"><button class="v7-control" disabled><small>分组</small><strong>不分组</strong></button><button class="v7-control" disabled><small>排序</small><strong>未知 <span class="v7-tech-key">UNKNOWN</span></strong></button><button class="v7-control" disabled><small>密度</small><strong>标准</strong></button><div class="v7-seg"><span class="v7-seg-label">视图</span><button disabled aria-current="true">研究</button><button disabled>表格</button><button disabled>封面</button></div></div></div>
-            <div class="v7-query-line"><div>页面结构已就绪 · 材料读投影尚未接通</div><div><b>来源信息尚未完整接通（SOURCE INCOMPLETE）</b> · <span>当前没有可用查询（NO QUERY AVAILABLE）</span></div></div>
+            <!-- EVIDENCE_QUERY_LINE_START --><div class="v7-query-line"><div>页面结构已就绪 · 材料读投影尚未接通</div><div><b>来源信息尚未完整接通 <span class="v7-tech-key">SOURCE INCOMPLETE</span></b> · <span>当前没有可用查询 <span class="v7-tech-key">NO QUERY AVAILABLE</span></span></div></div><!-- EVIDENCE_QUERY_LINE_END -->
           </section>
 
             <section class="v7-workspace" aria-label="证据库工作区">
             <section class="v7-results" aria-label="事实材料列表">
               <div class="v7-fact-strap"><span>事实层 / 证据 <span class="v7-tech-key">FACT LAYER / EVIDENCE</span></span><i aria-hidden="true"></i><b>原始内容资产</b></div>
-              <div class="v7-results-head"><div class="v7-results-left"><input class="v7-check" type="checkbox" disabled aria-label="选择全部材料"><span>当前没有已接纳材料（NO ACCEPTED MATERIAL AVAILABLE）</span></div><div>本地读投影尚未接通（READ MODEL NOT CONNECTED）</div></div>
+              <!-- EVIDENCE_RESULTS_HEAD_START --><div class="v7-results-head"><div class="v7-results-left"><input class="v7-check" type="checkbox" disabled aria-label="选择全部材料"><span>当前没有已接纳材料 <span class="v7-tech-key">NO ACCEPTED MATERIAL AVAILABLE</span></span></div><div>本地读投影尚未接通 <span class="v7-tech-key">READ MODEL NOT CONNECTED</span></div></div><!-- EVIDENCE_RESULTS_HEAD_END -->
               <!-- EVIDENCE_RESULTS_START --><div class="v7-results-empty">
                 <article class="v7-empty-row"><input class="v7-check" type="checkbox" disabled aria-label="无材料"><div class="v7-empty-mark">?</div><div class="v7-empty-main"><div class="v7-empty-title">来源信息尚未完整接通 <span class="v7-tech-key">SOURCE INCOMPLETE</span></div><div class="v7-empty-copy">页面还没有连接到受控的本地材料读投影，因此不能列出内容、评论、转录或来源对象。</div><div class="v7-empty-boundary"><b>当前没有已接纳材料 <span class="v7-tech-key">NO ACCEPTED MATERIAL AVAILABLE</span></b>这不是世界中不存在内容，也不是库内数量为零。</div><div class="v7-empty-facts"><span>事实层级 <strong>未知 <span class="v7-tech-key">UNKNOWN</span></strong></span><span>覆盖情况 <strong>未知 <span class="v7-tech-key">UNKNOWN</span></strong></span><span>页面投影 <strong>未接通 <span class="v7-tech-key">NOT CONNECTED</span></strong></span></div></div><div class="v7-empty-metric"><div><b>—</b><span>材料数 <span class="v7-tech-key">ITEMS</span></span></div><div><b>—</b><span>观察数 <span class="v7-tech-key">OBS</span></span></div><div><b>—</b><span>来源数 <span class="v7-tech-key">SOURCE</span></span></div></div></article>
                 <section class="v7-empty-panel" aria-labelledby="empty-title"><h2 id="empty-title">没有可展示的本地材料</h2><p>当前本机服务只提供此页面的视觉和信息边界；它没有读取数据库、历史内容工作台或插件结果。</p><dl class="v7-empty-grid"><div><dt>现在知道什么</dt><dd>页面可由本机服务提供；材料读取合同未接通。</dd></div><div><dt>现在不知道什么</dt><dd>材料、来源、观察时间、采集记录与覆盖情况均为未知。</dd></div><div><dt>下一步</dt><dd>需在独立范围内建立受控只读投影。</dd></div></dl></section>

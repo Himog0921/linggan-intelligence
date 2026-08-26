@@ -101,7 +101,7 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
 
     for required in [
         "事实层 / 证据",
-        "当前没有已接纳材料（NO ACCEPTED MATERIAL AVAILABLE）",
+        "当前没有已接纳材料 <span class=\"v7-tech-key\">NO ACCEPTED MATERIAL AVAILABLE</span>",
         "来源材料尚未完整接通",
         "固定面板 <span class=\"v7-tech-key\">PIN</span>",
         "加宽面板 <span class=\"v7-tech-key\">WIDE</span>",
@@ -150,6 +150,7 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
         "已接纳的发现卡片 <span class=\"v7-tech-key\">ACCEPTED DISCOVERY</span>",
         "当前显示最新已接纳的发现卡片；其中部分卡片的发布时间仍可能未知。",
         "<span class=\"v7-tech-key\">LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN</span>",
+        "只读取 Linggan 已接纳的发现卡片；不触发平台采集 <span class=\"v7-tech-key\">DISCOVERY ONLY</span>",
         "<span class=\"v7-kpi\"><em>内容</em><b>1</b></span>",
     ] {
         assert!(
@@ -167,6 +168,7 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
         "LOCAL PRESENTATION ONLY / NO MATERIAL READ",
         ">ACCEPTED DISCOVERY CARDS<",
         "VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN",
+        "只读取 Linggan 已接纳的 discovery 卡片",
     ] {
         assert!(
             !html.contains(prohibited),
@@ -183,6 +185,59 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
         stylesheet.contains(".v7-media-pending .v7-tech-key{display:block;max-width:54px;margin-top:4px;font-size:.82em"),
         "the media-state technical annotation must also remain subordinate on discovery cards"
     );
+}
+
+#[test]
+fn invalid_and_unavailable_reads_render_the_actual_chinese_state_without_source_incomplete() {
+    for (html, primary, code, detail) in [
+        (
+            evidence_query_invalid_html(),
+            "当前查询参数无效",
+            "LOCAL_QUERY_INVALID",
+            "当前未读取任何材料，也未触发平台搜索或补采。",
+        ),
+        (
+            evidence_read_unavailable_html(),
+            "本机发现材料读取暂时不可用",
+            "READ_PROJECTION_UNAVAILABLE",
+            "当前未读取任何材料；没有显示旧系统或远程数据。",
+        ),
+    ] {
+        assert!(
+            html.contains(primary),
+            "missing Chinese primary state: {primary}"
+        );
+        assert!(
+            html.contains(&format!("<span class=\"v7-tech-key\">{code}</span>")),
+            "the raw code must remain an adjacent technical key: {code}"
+        );
+        assert!(
+            html.contains(detail),
+            "missing exact state boundary: {detail}"
+        );
+        assert!(html.contains("当前未读取材料"));
+        assert!(html.contains("当前未读取材料，来源状态未知"));
+        assert!(
+            !html.contains("来源信息尚未完整接通"),
+            "a query/read failure must not be misdescribed as source incompleteness"
+        );
+        assert!(
+            !html.contains("SOURCE INCOMPLETE"),
+            "a query/read failure must not inherit the base SOURCE_INCOMPLETE code"
+        );
+        assert!(
+            !html.contains("读投影未接通"),
+            "a query/read failure must not be misdescribed as a disconnected read model"
+        );
+        assert!(
+            !html.contains("当前没有已接纳材料"),
+            "a failed read must not be misdescribed as an empty accepted-material set"
+        );
+        assert!(
+            !html.contains("当前没有可用查询"),
+            "the old generic query copy must not survive a state-specific failure"
+        );
+    }
 }
 
 #[test]
@@ -273,7 +328,9 @@ fn evidence_page_has_no_fabricated_v7_runtime_material_or_actions() {
     }
 
     assert!(html.contains("disabled aria-disabled=\"true\""));
-    assert!(html.contains("当前没有已接纳材料（NO ACCEPTED MATERIAL AVAILABLE）"));
+    assert!(html.contains(
+        "当前没有已接纳材料 <span class=\"v7-tech-key\">NO ACCEPTED MATERIAL AVAILABLE</span>"
+    ));
 }
 
 #[test]
