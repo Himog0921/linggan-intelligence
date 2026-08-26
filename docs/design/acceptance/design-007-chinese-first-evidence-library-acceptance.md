@@ -27,6 +27,8 @@
 | 页面内剩余英文整句 | 结果表头、本机呈现／未读材料、默认视角均以中文独立说明 | `ACCEPTED DISCOVERY`、`LOCAL PRESENTATION`、`NO MATERIAL READ`、`LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN` | 通过：focused render regression；不涉及共享 Shell |
 | 英文技术注释层级 | 中文主表达独立可读，英文技术键保持可见但相对更小 | `.v7-tech-key` | 通过：页面局部样式断言；不涉及共享 Shell |
 | 顶栏服务状态与时区 | 成功读投影显示「本机服务 / 已接纳发现材料」；时区显示「本机时区」 | `LOCAL HOST / ACCEPTED DISCOVERY`、`UTC+08` | 通过：focused render regression；不改状态、时间事实或共享 Shell |
+| 未接通读模型顶栏 | 无本机读模型时中文独立显示「本机服务 / 读投影未接通」；不把英文整句当作状态主文案 | `LOCAL HOST / NO READ MODEL` | 通过：base DOM regression；不改 Shell、状态判定或读模型 |
+| 嵌入式技术旁注层级 | Fact strap、空态指标与事实读数内的技术键，仍低于相邻中文标签；视图、筛选及区块标题的英文注释同样不得放大 | `.v7-tech-key`、`SYSTEM VIEWS`、`FILTER`、`RAW CONTENT` | 通过：focused CSS selector / typography regression；不改结构或数据 |
 
 ## 3. 验收边界
 
@@ -50,5 +52,6 @@
 ## 5. 交付质量门与后续整合
 
 - 最终质量门实际执行 `cargo clippy --workspace --all-targets --locked -- -D warnings`。此前仅记录的非 `--all-targets` 命令不能代表该更严格门已通过；本次以最小测试 helper 拆分 loopback 证明函数，保留全部原有状态与媒体未采集断言。
+- 最终 CSS / 文案补正：base 无读模型顶栏以「本机服务 / 读投影未接通」独立表达，`LOCAL HOST / NO READ MODEL` 收回相邻 `.v7-tech-key`；同时为会被 descendant label selector 覆盖的 Fact strap、空态指标与事实读数技术键增加更高特异性的页面局部规则，并把 `SYSTEM VIEWS`、`FILTER`、`RAW CONTENT` 的英文注释降为相对中文的 `.82em`。本补正不触及共享 Shell、API、数据库、查询、采集或运行时。
 - 已知后续依赖为 Draft PR #69 的共享 shell 中文化。#67 只触及 Evidence Library 的页面局部 renderer/CSS，#69 才拥有共享 `shell.rs` / `shell.css`；两者运行时文件边界不重叠，不能在本事项内合并。
 - 集成顺序固定为：先合并 #67；随后将 #69 rebase 到新的 `main`，由 integration owner 处理可能重叠的 focused tests / 文档行，再对 #69 的新 exact head 重新审查和整合。任何旧 head 的审查结论均不得复用。

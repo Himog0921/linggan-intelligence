@@ -50,7 +50,7 @@ pub(super) fn render_read_projection(
         "本机发现读取投影（LOCAL DISCOVERY READ PROJECTION）",
     )
     .replace(
-        "本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）",
+        "本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span>",
         "本机服务 / 已接纳发现材料 <span class=\"v7-tech-key\">LOCAL HOST / ACCEPTED DISCOVERY</span>",
     )
     .replace(
@@ -111,7 +111,7 @@ fn render_read_failure(
     let html = replace_slot(&html, "EVIDENCE_RESULTS_HEAD", &results_head);
     let html = replace_slot(&html, "EVIDENCE_RESULTS", &results);
     let html = html.replace(
-        "本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）",
+        "本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span>",
         &format!("本机服务 / {primary_copy} <span class=\"v7-tech-key\">{technical_code}</span>"),
     );
     let html = html.replace(
