@@ -1,6 +1,6 @@
 {
   "name": "linggan-intelligence-browser",
-  "version": "0.4.0",
+  "version": "0.4.2",
   "type": "module",
   "description": "Linggan Intelligence 浏览器执行端（由灵感爆爆爆 v2.0.91 迁入）",
   "private": true,
@@ -31,6 +31,7 @@
   },
   "devDependencies": {
     "@babel/core": "^7.29.0",
+    "@babel/plugin-transform-modules-commonjs": "^7.28.6",
     "@babel/preset-react": "^7.28.5",
     "babel-loader": "^10.1.1",
     "copy-webpack-plugin": "^12.0.2",

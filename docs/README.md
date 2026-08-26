@@ -57,11 +57,13 @@
 | [design/changes/local-001a-evidence-library-ui-change-manifest.md](design/changes/local-001a-evidence-library-ui-change-manifest.md) | 权威当前；LOCAL-001A | Issue #25 的 UI 来源、范围、例外和证明边界 |
 | [design/changes/design-003-lids-visual-baseline-ui-change-manifest.md](design/changes/design-003-lids-visual-baseline-ui-change-manifest.md) | 权威当前；DESIGN-003 | Issue #44 的视觉基线换向：token、规则、页面与数据诚实性逐条核对 |
 | [design/changes/plugin-001-producer-popup-ui-change-manifest.md](design/changes/plugin-001-producer-popup-ui-change-manifest.md) | 已被替代；PLUGIN-001 | Issue #33 popup 的历史 UI 边界；不再约束当前实现 |
-| [design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md](design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-MIGRATION-001 | Issue #37 popup 的来源、状态、单次行动与证明边界 |
+| [design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md](design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-MIGRATION-001 | Issue #37 popup 的 Discovery 行动与状态边界；启动恢复由 Issue #53 文档补充 |
+| [design/changes/plugin-popup-recovery-001-ui-change-manifest.md](design/changes/plugin-popup-recovery-001-ui-change-manifest.md) | 权威当前；PLUGIN-POPUP-RECOVERY-001 | Issue #53 popup 启动恢复、无副作用 fallback 与 v0.4.2 release 边界 |
 | [design/acceptance/local-001a-evidence-library-visual-acceptance.md](design/acceptance/local-001a-evidence-library-visual-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-001`：本地页面的视觉、状态与真实后果分层验收记录 |
 | [design/acceptance/design-003-lids-visual-baseline-visual-acceptance.md](design/acceptance/design-003-lids-visual-baseline-visual-acceptance.md) | 一次性报告 | Issue #44 的双实例同屏实测：计量、诚实性逐条核对与未证明范围 |
 | [design/acceptance/plugin-001-producer-popup-visual-acceptance.md](design/acceptance/plugin-001-producer-popup-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-001`：Issue #33 popup 的静态 source/release 验收；不证明浏览器加载或真实采集 |
 | [design/acceptance/plugin-migration-001-producer-popup-visual-acceptance.md](design/acceptance/plugin-migration-001-producer-popup-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-002`：Issue #37 adapter/mock ingress/release 验收；不证明真实浏览器或采集 |
+| [design/acceptance/plugin-popup-recovery-001-visual-acceptance.md](design/acceptance/plugin-popup-recovery-001-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-POPUP-RECOVERY-001`：Issue #53 source/release 启动保护验收；不证明 Chrome 已加载或真实采集 |
 | [design/foundation/topic-intelligence-visual-language.md](design/foundation/topic-intelligence-visual-language.md) | 权威当前 | DESIGN-002 的 DS-001–DS-007：合成 Topic Reference Page 的受限视觉语言 |
 | [design/patterns/evidence-candidate-and-boundary-patterns.md](design/patterns/evidence-candidate-and-boundary-patterns.md) | 权威当前 | DESIGN-002 的 PAT-001–PAT-004：观察、候选、边界与无副作用意图表达 |
 | [design/components/component-promotion.md](design/components/component-promotion.md) | 权威当前 | 从 Reference Page 局部块到真实 CMP 的晋升条件；当前没有已晋升组件 |

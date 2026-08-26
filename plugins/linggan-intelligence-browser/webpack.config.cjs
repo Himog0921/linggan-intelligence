@@ -44,6 +44,7 @@ module.exports = {
         { from: 'manifest.json', to: 'manifest.json' },
         { from: 'src/popup/popup.html', to: 'popup.html' },
         { from: 'src/dashboard/dashboard.html', to: 'dashboard.html' },
+        { from: '../../apps/api/src/local_web/lids_tokens.css', to: 'themes/lids-tokens.css' },
         { from: 'src/popup/popup.css', to: 'popup.css' },
         { from: 'src/dashboard/dashboard.css', to: 'dashboard.css' },
         { from: 'src/themes/ac-ui/popup.css', to: 'themes/ac-ui/popup.css' },

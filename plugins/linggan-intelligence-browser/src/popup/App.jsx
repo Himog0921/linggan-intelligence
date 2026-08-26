@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import '../extensionPublicPath.js';
 import { MSG, COMMENT_DEPTH_MODE } from '../shared/constants.js';
+import { formatLingganRuntimeNotice } from '../linggan/adapter.js';
 import { LINGGAN_RUNTIME_ACTION } from '../linggan/runtimeActions.js';
 import { requireControlReceipt } from '../linggan/controlReceipt.js';
 import { BRAND_ASSETS, getBrandAssetUrl } from '../shared/brandAssets.js';

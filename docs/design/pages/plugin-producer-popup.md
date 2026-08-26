@@ -6,6 +6,16 @@
 > 事实来源: Issue #37、`LOCAL-001C0-DISCOVERY-BOUNDARY-V1`、`LIDS-PAT-001`、`LIDS-PRI-001` 与 `PLUGIN-MIGRATION-001` 活跃计划
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、当前 Discovery 合同和实际 plugin/runtime receipt；本页不扩大采集权限
 
+## Issue #53 · v0.4.2 启动失败补充
+
+`POPUP_STARTUP_FAILURE` 只表示 toolbar popup 的 React 渲染发生错误；它不是本机 host、Discovery、接纳、Evidence 或平台状态。它保持 `L1 / Settings / Governance`：使用既有 `InstrumentSurface` 的 canvas-hi、mono readout、文字状态和 LIDS 批准的 2px 结构线，不晋升 CMP、不新增 Scene 或 Motion。`popup.html` 从唯一值源 `apps/api/src/local_web/lids_tokens.css` 的构建副本加载 `themes/lids-tokens.css`；此局部失败 Surface 只消费 `--lgi-*` token，不创建第二套 token 值。
+
+| 失败状态 | 触发与可见内容 | 可以诚实说明 | 明确不能说明 | 用户下一步 / receipt |
+|---|---|---|---|---|
+| `POPUP_STARTUP_FAILURE` | `App` 初始渲染或后续渲染错误；显示版本、启动失败、`本机状态目前未知` 和本提示未发起新的采集或传输 | 此提示自身没有新 collector 或交付动作；本机状态未知 | 失败前 `App` 未读取 tab/context/storage；host 已就绪；任务成功；任何材料已接纳或入库 | 在 Chrome 扩展程序页面重新加载明确版本后重新打开；无 receipt、无按钮行动 |
+
+此路由不是 Dashboard fallback，也不得改变已有 popup、内容页浮条、Collector、TaskSpec、回传、权限、host permission、API、数据库或真实浏览器配置。若实现需要任一上述变化，停止并另立事项。
+
 ## 用户任务与 3 秒答案
 
 用户打开 popup 的唯一任务是确认：这是不是 Linggan 自有 Producer、它只连接哪个本机地址、当前本机 host 是否可达、以及能否开始 Discovery。

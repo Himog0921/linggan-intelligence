@@ -6,6 +6,8 @@
 > 事实来源: Issue #37、`PLUGIN-MIGRATION-001`、`PAGE-PLUGIN-001`、`LOCAL-001C0-DISCOVERY-BOUNDARY-V1`、LIDS 与实际 MV3 source
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、实际合同/插件代码；本清单不扩大动作权限
 
+> popup 启动恢复由 [`plugin-popup-recovery-001-ui-change-manifest.md`](plugin-popup-recovery-001-ui-change-manifest.md) 补充；本文件继续约束 Issue #37 已确认的 Discovery 行动与状态边界。
+
 ## 事项与读取回执
 
 - 目标：在不引入内容工作台运行依赖的前提下，让 popup 承接唯一获准的 XHS `ADHD` / “综合” / 当前可见前 20 卡 Discovery。
