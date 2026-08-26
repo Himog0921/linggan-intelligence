@@ -95,6 +95,7 @@ const requiredDistFiles = [
   'dashboard.js',
   'popup.html',
   'dashboard.html',
+  'themes/lids-tokens.css',
   'injected/douyinApiCapture.js',
 ];
 
