@@ -50,7 +50,7 @@ test('readCurrentXhsSearchSurfaceContext keeps suggestions and loaded cards sepa
     loadedCount: 27,
     doc: {
       querySelectorAll(selector) {
-        assert.equal(selector, '.sug-item, [class*="sug-"]');
+        assert.equal(selector, '.sug-item');
         return [{ textContent: '候选词 A' }, { textContent: '候选词 A' }, { textContent: '候选词 B' }];
       },
     },

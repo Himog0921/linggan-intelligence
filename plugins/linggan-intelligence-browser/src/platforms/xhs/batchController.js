@@ -156,7 +156,7 @@ export function mergeSurfaceCoverFallback(note = {}, surfaceNote = {}) {
     ? note.images
     : [fallbackCover];
 
-  return {
+  const merged = {
     ...note,
     cover: fallbackCover,
     coverImg: firstText(note.coverImg) || fallbackCover,
@@ -164,6 +164,11 @@ export function mergeSurfaceCoverFallback(note = {}, surfaceNote = {}) {
     thumbnail: firstText(note.thumbnail) || fallbackCover,
     images,
   };
+  // The unified detail package is deliberately non-enumerable so it never enters record
+  // payloads. Preserve it across a cover-only fallback so comments are not collected twice.
+  const packageDescriptor = Object.getOwnPropertyDescriptor(note, '__xhsDetailPackage');
+  if (packageDescriptor) Object.defineProperty(merged, '__xhsDetailPackage', packageDescriptor);
+  return merged;
 }
 
 function normalizeTargetIdentity(value = '') {

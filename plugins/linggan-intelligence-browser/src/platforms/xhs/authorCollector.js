@@ -33,8 +33,10 @@ export async function collectAuthor(options = {}) {
   const countMap = {};
   interactions.forEach(item => {
     const type = item.type || item.name || item.label;
-    const count = item.count ?? item.countText ?? item.displayText ?? item.value ?? item.num ?? 0;
-    if (type) countMap[type] = parseCount(count);
+    const count = item.count ?? item.countText ?? item.displayText ?? item.value ?? item.num;
+    if (type && count !== undefined && count !== null && String(count).trim() !== '') {
+      countMap[type] = parseCount(count);
+    }
   });
 
   // 解析 tags
@@ -155,18 +157,20 @@ function normalizeGender(rawGender) {
   return 0;
 }
 
-function pickInteractionCount(map = {}, keys = []) {
+export function pickInteractionCount(map = {}, keys = []) {
   for (const key of keys) {
-    if (typeof map[key] === 'number' && map[key] > 0) return map[key];
+    if (Object.prototype.hasOwnProperty.call(map, key) && Number.isFinite(Number(map[key])) && Number(map[key]) >= 0) {
+      return Number(map[key]);
+    }
   }
   const normalizedKeys = keys.map((key) => String(key).toLowerCase());
   for (const [rawKey, value] of Object.entries(map)) {
     const normalized = String(rawKey || '').toLowerCase();
-    if (normalizedKeys.some((key) => normalized.includes(key)) && Number(value) > 0) {
+    if (normalizedKeys.some((key) => normalized.includes(key)) && Number.isFinite(Number(value)) && Number(value) >= 0) {
       return Number(value);
     }
   }
-  return 0;
+  return null;
 }
 
 function normalizeFollowStatus(rawStatus) {

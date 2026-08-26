@@ -159,7 +159,7 @@ export function readCurrentXhsSearchSurfaceContext({
   stopReason = 'current_surface_read_once',
 } = {}) {
   const filterSnapshot = readCurrentXhsSearchFilterSnapshot(win);
-  const suggestions = [...new Set(Array.from(doc?.querySelectorAll?.('.sug-item, [class*="sug-"]') || [])
+  const suggestions = [...new Set(Array.from(doc?.querySelectorAll?.('.sug-item') || [])
     .map((element) => String(element?.textContent || '').trim())
     .filter(Boolean))].slice(0, 30);
   return {

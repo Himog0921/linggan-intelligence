@@ -43,6 +43,17 @@ test('mergeSurfaceCoverFallback uses nested image candidates when card cover is 
   assert.deepEqual(merged.images, ['https://sns-img.example.com/candidate-card.jpg']);
 });
 
+test('mergeSurfaceCoverFallback keeps the non-enumerable detail package for attached comments', () => {
+  const note = { noteId: 'note_detail_package', cover: '', images: [] };
+  const detailPackage = { receipt: { comments: { actual: 2 } }, comments: [{ commentId: 'c_1' }] };
+  Object.defineProperty(note, '__xhsDetailPackage', { value: detailPackage, enumerable: false });
+
+  const merged = mergeSurfaceCoverFallback(note, { cover: 'https://sns-img.example.com/card.jpg' });
+
+  assert.equal(merged.__xhsDetailPackage, detailPackage);
+  assert.equal(Object.prototype.propertyIsEnumerable.call(merged, '__xhsDetailPackage'), false);
+});
+
 test('BatchNoteController reports a workbench record delta after collecting one note', () => {
   const messages = [];
   globalThis.chrome = {
