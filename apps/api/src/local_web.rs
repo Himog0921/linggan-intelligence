@@ -1360,7 +1360,7 @@ fn evidence_library_html() -> String {
           <button class="v7-side-nav" disabled aria-disabled="true"><i>03</i><span>创作者</span></button>
           <button class="v7-side-nav" disabled aria-disabled="true"><i>04</i><span>已存查询</span></button>
           <button class="v7-side-nav" disabled aria-disabled="true"><i>05</i><span>来源</span></button>
-          <div class="v7-side-foot"><span class="v7-side-dot"></span><!-- EVIDENCE_READ_STATUS_START --><span class="v7-zh-status">来源材料尚未完整接通</span><span class="v7-tech-key">SOURCE INCOMPLETE</span><br><span class="v7-zh-status">仅展示本地页面投影</span><span class="v7-tech-key">LOCAL PRESENTATION ONLY / NO MATERIAL READ</span><!-- EVIDENCE_READ_STATUS_END --></div>
+          <div class="v7-side-foot"><span class="v7-side-dot"></span><!-- EVIDENCE_READ_STATUS_START --><span class="v7-zh-status">来源材料尚未完整接通</span><span class="v7-tech-key">SOURCE INCOMPLETE</span><br><span class="v7-zh-status">仅展示本机页面结构</span><span class="v7-tech-key">LOCAL PRESENTATION</span><br><span class="v7-zh-status">当前尚未读取任何材料</span><span class="v7-tech-key">NO MATERIAL READ</span><!-- EVIDENCE_READ_STATUS_END --></div>
         </aside>
 
         <main class="v7-main" aria-labelledby="page-title">

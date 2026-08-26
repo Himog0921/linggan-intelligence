@@ -17,12 +17,13 @@
 
 | 场景 | 用户应理解的中文主表达 | 英文旁注 | 验证结果 |
 |---|---|---|---|
-| 默认已接纳发现 | 已接纳的本机发现材料；默认视角不是发布时间窗口 | `ACCEPTED DISCOVERY ONLY`、`LATEST ACCEPTED DISCOVERY` | 通过：render test + loopback PostgreSQL proof |
+| 默认已接纳发现 | 已接纳的发现卡片；当前显示最新已接纳的发现卡片，其中部分卡片的发布时间仍可能未知 | `ACCEPTED DISCOVERY`、`LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN` | 通过：render test + loopback PostgreSQL proof |
 | 发布时间未知 | 发布时间未知，未使用首次发现/观察/接收时间替代 | `PUBLISHED_AT UNKNOWN` | 通过：render test + strict window proof |
 | 媒体尚未取得 | 媒体尚未采集，非远程封面、非封面不存在 | `MEDIA NOT ACQUIRED` | 通过：render test；未取得不显示远程封面 |
 | 严格发布时间窗口 | 仅按来源可知发布时间过滤；未知发布时间对象被排除并计数 | `WINDOW / PUBLISHED_AT` | 通过：7D loopback API/页面同源 proof |
 | 无卡片 / 未接通 | 当前无可展示材料或本地读投影未接通，不代表平台无内容 | `SOURCE INCOMPLETE`、`NOT CONNECTED` | 通过：loopback DOM 检查 |
 | Discovery 停止原因 | 已达到配额、页面结束、风险控制、用户手动停止或原因未知；不把部分结果说成完整 | 原始 `stopped_reason` 代码 | 通过：focused render test；未知代码显示「未归类」 |
+| 页面内剩余英文整句 | 结果表头、本机呈现／未读材料、默认视角均以中文独立说明 | `ACCEPTED DISCOVERY`、`LOCAL PRESENTATION`、`NO MATERIAL READ`、`LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN` | 通过：focused render regression；不涉及共享 Shell |
 | 英文技术注释层级 | 中文主表达独立可读，英文技术键保持可见但相对更小 | `.v7-tech-key` | 通过：页面局部样式断言；不涉及共享 Shell |
 
 ## 3. 验收边界
