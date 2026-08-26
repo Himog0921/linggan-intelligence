@@ -151,6 +151,47 @@ async fn read_projection_counts_matching_unknown_published_time_within_the_query
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn default_discovery_view_surfaces_accepted_unknown_published_time_without_reclassifying_it()
+{
+    let database = proof_database("local_discovery_default_unknown").await;
+    let observed_at = producer_fixture_observed_at(&database).await;
+    let package = package(&observed_at, None)
+        .replace("\"标题命中 ADHD\"", "\"ADHD 未知发布时间卡片\"")
+        .replace("\"无发布时间卡片\"", "\"ADHD 第二张未知发布时间卡片\"");
+    ingest_discovery_package(&database, &package)
+        .await
+        .expect("accepted discovery records remain valid without source publication time");
+    let default_query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"ADHD","scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"}"#,
+    )
+    .expect("the default accepted-discovery view is a valid local query");
+
+    let projection = read_discovery_library(&database, &default_query)
+        .await
+        .expect("the default view reads accepted unknown-time discovery cards");
+    assert_eq!(projection.cards.len(), 2);
+    assert!(
+        projection
+            .cards
+            .iter()
+            .all(|card| card.published_at.is_none() && card.published_at_state == "UNKNOWN")
+    );
+    assert_eq!(projection.excluded_unknown_published_at, 0);
+    assert_eq!(projection.time_view, "latest_accepted_discovery");
+
+    let explicit_window: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"ADHD","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+    )
+    .expect("an explicit published window remains valid");
+    let explicit_projection = read_discovery_library(&database, &explicit_window)
+        .await
+        .expect("the strict published window remains locally readable");
+    assert!(explicit_projection.cards.is_empty());
+    assert_eq!(explicit_projection.excluded_unknown_published_at, 2);
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
 async fn read_projection_counts_unknown_time_by_content_identity_not_by_occurrence() {
     let database = proof_database("local_discovery_identity_unknown").await;
     let observed_at = producer_fixture_observed_at(&database).await;
@@ -172,6 +213,47 @@ async fn read_projection_counts_unknown_time_by_content_identity_not_by_occurren
     assert_eq!(projection.cards.len(), 1);
     assert_eq!(projection.cards[0].platform_content_id, "note-a");
     assert_eq!(projection.excluded_unknown_published_at, 0);
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn read_projection_keeps_known_content_time_when_only_a_later_unknown_occurrence_matches() {
+    let database = proof_database("local_discovery_identity_known_time").await;
+    let observed_at = producer_fixture_observed_at(&database).await;
+    let known = package(&observed_at, Some(&observed_at)).replace("标题命中 ADHD", "旧的合成标题");
+    ingest_discovery_package(&database, &known)
+        .await
+        .expect("the known source publication time is admitted");
+    ingest_discovery_package(
+        &database,
+        &shared_content_unknown_title_package(&observed_at, "新的合成匹配标题"),
+    )
+    .await
+    .expect("the later matching occurrence may retain an unknown source time");
+
+    let default_query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"新的合成匹配标题","scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"}"#,
+    )
+    .expect("default local view is valid");
+    let default_projection = read_discovery_library(&database, &default_query)
+        .await
+        .expect("identity-level publication state remains readable by default");
+    assert_eq!(default_projection.cards.len(), 1);
+    assert_eq!(default_projection.cards[0].platform_content_id, "note-a");
+    assert_eq!(default_projection.cards[0].published_at_state, "KNOWN");
+    assert!(default_projection.cards[0].published_at.is_some());
+    assert_eq!(default_projection.excluded_unknown_published_at, 0);
+
+    let strict_query: EvidenceQuery = serde_json::from_str(
+        r#"{"text":"新的合成匹配标题","scope":"all_accepted_material","window":"last_30_days","sort":"latest_discovery"}"#,
+    )
+    .expect("strict local view is valid");
+    let strict_projection = read_discovery_library(&database, &strict_query)
+        .await
+        .expect("the known identity remains in its strict source-time window");
+    assert_eq!(strict_projection.cards.len(), 1);
+    assert_eq!(strict_projection.cards[0].published_at_state, "KNOWN");
+    assert_eq!(strict_projection.excluded_unknown_published_at, 0);
 }
 
 #[tokio::test]
@@ -312,6 +394,10 @@ fn package(observed_at: &str, known_published_at: Option<&str>) -> String {
 }
 
 fn shared_content_unknown_package(observed_at: &str) -> String {
+    shared_content_unknown_title_package(observed_at, "标题命中 ADHD")
+}
+
+fn shared_content_unknown_title_package(observed_at: &str, title: &str) -> String {
     format!(
         r#"{{
           "contractVersion":"xhs.discovery.visible-card.v1",
@@ -319,7 +405,7 @@ fn shared_content_unknown_package(observed_at: &str) -> String {
           "observedAt":"{observed_at}",
           "coverage":{{"unit":"visible_search_card","visibleCards":1,"stoppedReason":"risk_control"}},
           "cards":[
-            {{"content":{{"platformContentId":"note-a","title":"标题命中 ADHD","creatorDisplayName":"A娃家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":1}}}}
+            {{"content":{{"platformContentId":"note-a","title":"{title}","creatorDisplayName":"A娃家长"}},"occurrence":{{"query":"ADHD","sort":"comprehensive","observedAt":"{observed_at}","resultPosition":1}}}}
           ]
         }}"#,
     )

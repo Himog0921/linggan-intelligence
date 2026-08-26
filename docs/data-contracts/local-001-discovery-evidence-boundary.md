@@ -26,7 +26,8 @@
 ### Evidence Library V1 检索语义
 
 - 浏览单位是 `ContentItem`；若未来发生文本匹配，命中单位是 `EvidenceFragment`。本卡没有建立这两个持久化对象或读投影。
-- `WINDOW` 的目标语义只指 `ContentItem.published_at`，并以 read projection 求值时的 Linggan PostgreSQL `scope_001_now()` 为唯一时间参照。`last_7_days`/`last_30_days` 只保留 `published_at` 落在闭区间 `[scope_001_now() - window, scope_001_now()]` 的已知值；未来发布时间不被称为最近，也不进入窗口，但其已接纳发现记录仍保留。本卡只保证 Discovery 合同不把缺少来源发布时间的卡片填成某个默认发布时间；001B read projection 将 `published_at = UNKNOWN` 排除在 7 天或 30 天读取结果之外。排除数按当前 `EvidenceQuery` 匹配的 `ContentItem` 身份统计：只有该身份没有任何同一查询下、已知且位于当前窗口的 occurrence 时才计入。若同一 ContentItem 同时有窗口内已知发布时间和未知发布时间 occurrence，它显示一次且不增加排除数。文本不匹配的本地对象不能被计入页面的未知发布时间排除数。API 的 `window` 使用实际读取的 `last_7_days`/`last_30_days` 值；页面必须将同一值显示为 `7D`/`30D`，不能推定或硬编码默认窗口。
+- URL 未携带 `window` 时，Evidence Library 使用显式内部时间视角 `latest_accepted_discovery`：仅读取已接纳的 discovery 卡片，已知和未知 `published_at` 都可显示；未知卡必须标为 `PUBLISHED_AT UNKNOWN`，且不得用 `first_discovered_at`、`observed_at`、接收/重放时间或任何其他时间代替来源发布时间。它不是 `WINDOW`，也不构成“最近发布”的主张。
+- 只有 URL 显式指定 `window=last_7_days` 或 `window=last_30_days` 时，`WINDOW` 才只指按 `ContentItem` 身份合并后的来源 `published_at`，并以 read projection 求值时的 Linggan PostgreSQL `scope_001_now()` 为唯一时间参照。合并发布时间/未知状态必须先于文本检索与排序求值：显式窗口只保留已知 `published_at` 落在闭区间 `[scope_001_now() - window, scope_001_now()]` 的 ContentItem；未来发布时间不被称为最近，也不进入窗口，但其已接纳发现记录仍保留。合并后 `published_at = UNKNOWN` 的当前查询匹配 ContentItem 必须排除并报告排除数，即使同一窗口仍有其他可见卡片。若同一 ContentItem 有任一已知来源发布时间，即使该值在窗口外、或文本命中来自另一次发布时间未知的 occurrence，它不是 `PUBLISHED_AT UNKNOWN`，不得计入未知排除数；它只是未满足严格发布时间窗口。文本不匹配的本地对象不能被计入页面的未知发布时间排除数。API 的 `window` 使用实际读取的 `last_7_days`/`last_30_days` 值；页面必须将同一值显示为 `7D`/`30D`，不能推定或硬编码一个发布窗口为默认值。
 - `Latest Discovery` 只使用同一稳定内容身份首次被 Linggan **接受**的时间；它不是发布时间、页面实际观察时间或最近接收/重放时间。
 - 标题、作者名、正文、评论、OCR、ASR 的实际召回和排序实现留给具有已接纳材料的 001B；缺少的材料必须呈现为 `NOT_ACQUIRED`/`UNKNOWN`，不能被当作“不匹配”。
 
@@ -116,7 +117,7 @@ GET  http://localhost:3000/corpus/evidence
 | `POST`，字节完全相同的已接纳 payload | `200`，`admission=replay`，复用原 package/receipt 并有新 delivery 引用 | 覆盖、更新或重新解释旧 package |
 | `POST`，不合格 payload | `422 discovery_contract_invalid` | 已接纳任何卡片或 Coverage |
 | `POST`，未配置/不可用 DB | `503 ingress_not_connected` 或 `503 ingress_not_committed` | 失败等于无可用历史材料或应重试平台 |
-| `GET /api/local/evidence-library` / 页面 Search | 只读已接纳数据；`window=last_7_days|last_30_days`，标题/创作者名 V1 文本匹配 | 触发 `AcquisitionSpec`、平台搜索、补采或详情文本召回 |
+| `GET /api/local/evidence-library` / 页面 Search | 只读已接纳数据；省略 `window` 时为 `latest_accepted_discovery`，显式 `window=last_7_days|last_30_days` 才按来源发布时间严格过滤；标题/创作者名 V1 文本匹配 | 触发 `AcquisitionSpec`、平台搜索、补采或详情文本召回 |
 
 Ingress body 是 UTF-8 JSON 的 `xhs.discovery.visible-card.v1`；不接受拼接的插件命令、旧工作台 envelope 或任意“额外字段”。页面响应和 JSON 读取投影不返回外部封面 URL；未有本地副本前只返回/展示 `MEDIA_NOT_ACQUIRED`。
 

@@ -56,6 +56,7 @@
 | [design/pages/collection-workspace-page.md](design/pages/collection-workspace-page.md) | 权威当前；PAGE-COLLECTION-001 | Collection 五个子面的职责、状态诚实性、页面级例外与未证明边界 |
 | [design/pages/plugin-producer-popup.md](design/pages/plugin-producer-popup.md) | 权威当前 | `PAGE-PLUGIN-001`：Linggan 自有 Browser Producer popup 的身份、本机接纳准备度与受限手动 Discovery receipt |
 | [design/changes/local-001a-evidence-library-ui-change-manifest.md](design/changes/local-001a-evidence-library-ui-change-manifest.md) | 权威当前；LOCAL-001A | Issue #25 的 UI 来源、范围、例外和证明边界 |
+| [design/changes/local-001d-unknown-published-discovery-ui-change-manifest.md](design/changes/local-001d-unknown-published-discovery-ui-change-manifest.md) | 权威当前；LOCAL-001D / Issue #62 | 默认最新已接纳读取、`PUBLISHED_AT UNKNOWN` 与显式发布时间窗口的来源和范围 |
 | [design/changes/design-003-lids-visual-baseline-ui-change-manifest.md](design/changes/design-003-lids-visual-baseline-ui-change-manifest.md) | 权威当前；DESIGN-003 | Issue #44 的视觉基线换向：token、规则、页面与数据诚实性逐条核对 |
 | [design/changes/design-004-corpus-rail-ui-change-manifest.md](design/changes/design-004-corpus-rail-ui-change-manifest.md) | 权威当前；DESIGN-004 | Corpus rail 面层差异化与选中态重音：规则依据、参考图取舍与重音计数 |
 | [design/changes/design-005-collection-workspace-ui-change-manifest.md](design/changes/design-005-collection-workspace-ui-change-manifest.md) | 权威当前；DESIGN-005 | Collection 五个子面落地：Mog 三项裁定、清掉的冗余、消化的断层与两项待决 |
@@ -63,6 +64,7 @@
 | [design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md](design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-MIGRATION-001 | Issue #37 popup 的 Discovery 行动与状态边界；启动恢复由 Issue #53 文档补充 |
 | [design/changes/plugin-popup-recovery-001-ui-change-manifest.md](design/changes/plugin-popup-recovery-001-ui-change-manifest.md) | 权威当前；PLUGIN-POPUP-RECOVERY-001 | Issue #53 popup 启动恢复、无副作用 fallback 与 v0.4.2 release 边界；Issue #55 的运行时修订见当月进度记录 |
 | [design/acceptance/local-001a-evidence-library-visual-acceptance.md](design/acceptance/local-001a-evidence-library-visual-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-001`：本地页面的视觉、状态与真实后果分层验收记录 |
+| [design/acceptance/local-001d-unknown-published-discovery-acceptance.md](design/acceptance/local-001d-unknown-published-discovery-acceptance.md) | 一次性报告 | `ACC-LOCAL-001D-001`：未知发布时间默认读取和显式窗口的分层验收记录 |
 | [design/acceptance/design-003-lids-visual-baseline-visual-acceptance.md](design/acceptance/design-003-lids-visual-baseline-visual-acceptance.md) | 一次性报告 | Issue #44 的双实例同屏实测：计量、诚实性逐条核对与未证明范围 |
 | [design/acceptance/design-004-corpus-rail-visual-acceptance.md](design/acceptance/design-004-corpus-rail-visual-acceptance.md) | 一次性报告 | `ACC-RAIL-004`：rail 三视口实拍验收；hover/focus 因全部路由禁用而未验证 |
 | [design/acceptance/design-005-collection-workspace-visual-acceptance.md](design/acceptance/design-005-collection-workspace-visual-acceptance.md) | 一次性报告 | `ACC-COLLECTION-001`：五个子面与抽屉四态实拍；无数据的行与图表未验证 |
@@ -113,6 +115,7 @@
 | [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一获准实施事项：F01 synthetic fact-kernel technical tracer 受控进入 TDD；完成 loopback API + minimal CLI 后 hard stop，不扩入 F02–F10、真实平台/AI/插件/Web |
 | [`plans/active/plugin-runtime-001-full-capability-retrofit.md`](plans/active/plugin-runtime-001-full-capability-retrofit.md) | 活跃计划；Issue #50 | 将灵感爆爆爆的成熟浏览器采集能力一次性适配为 Linggan 自有 Browser Producer Runtime；媒体本地资产与异步处理血缘为本事项第一类约束 |
 | [`plans/active/local-001-local-product-evidence-library.md`](plans/active/local-001-local-product-evidence-library.md) | 活跃计划 | 本地独立 Linggan 产品的第一个页面与最小真实采集接缝：V7 Evidence Library Gold Master、`http://localhost:3000`、只读投影，以及 discovery → media acquisition → 异步 OCR/ASR 的连续 Canary 路线；不扩张 SCOPE-001 |
+| [`plans/active/local-001d-unknown-published-discovery-view.md`](plans/active/local-001d-unknown-published-discovery-view.md) | 活跃计划；Issue #62 | 修复默认 Evidence Library 把已接纳、来源发布时间未知的 discovery 卡片隐藏的问题；显式 7/30 天发布时间窗口保持严格 |
 | [`plans/active/local-runtime-001-persistent-loopback.md`](plans/active/local-runtime-001-persistent-loopback.md) | 活跃计划 | Issue #38 的持久本地 PostgreSQL migration、loopback readiness 与重启保留证明；不含插件或真实平台 |
 | [`plans/active/plugin-migration-001-linggan-owned-xhs-discovery.md`](plans/active/plugin-migration-001-linggan-owned-xhs-discovery.md) | 活跃计划 | Issue #37：将成熟旧插件的可见 XHS 搜索卡发现规则适配为 Linggan 自有包，且只启用一次手动 `ADHD` / “综合” / 前 20 卡 Discovery → 固定 localhost ingress |
 | [`plans/active/plugin-rehome-001-full-legacy-browser.md`](plans/active/plugin-rehome-001-full-legacy-browser.md) | 合并后文档收口待办 | Issue #41 / PR #42：完整迁入 `linggan-boom v2.0.91` 的浏览器 source/UX 作为 Linggan 自有包，并切断旧内容工作台运行时；不证明真实采集 |

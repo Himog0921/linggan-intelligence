@@ -6,8 +6,8 @@
 
 use crate::local_discovery::{DiscoveryLibraryCard, DiscoveryLibraryProjection};
 use linggan_contracts::{
-    EvidenceQuery, ProducerAttempt, ProducerCapturePackage, ProducerRuntimeContractError,
-    ProducerSubmission, ProducerTaskSpec, PublishedWindow,
+    EvidenceQuery, EvidenceTimeView, ProducerAttempt, ProducerCapturePackage,
+    ProducerRuntimeContractError, ProducerSubmission, ProducerTaskSpec, PublishedWindow,
 };
 use linggan_storage_postgres::Database;
 use serde::Serialize;
@@ -446,20 +446,22 @@ pub async fn read_runtime_library(
     database: &Database,
     query: &EvidenceQuery,
 ) -> Result<DiscoveryLibraryProjection, sqlx::Error> {
-    let window_days = match query.window() {
-        PublishedWindow::Last7Days => 7,
-        PublishedWindow::Last30Days => 30,
-    };
+    let window_days = query.published_window().map(published_window_days);
     let text = query.text().filter(|value| !value.trim().is_empty());
     let rows = sqlx::query(runtime_library_sql())
         .bind(window_days)
         .bind(text)
         .fetch_all(database.pool())
         .await?;
-    let excluded_unknown_published_at = sqlx::query_scalar::<_, i64>(runtime_unknown_time_sql())
-        .bind(text)
-        .fetch_one(database.pool())
-        .await? as u64;
+    let excluded_unknown_published_at = match query.published_window() {
+        Some(_) => {
+            sqlx::query_scalar::<_, i64>(runtime_unknown_time_sql())
+                .bind(text)
+                .fetch_one(database.pool())
+                .await? as u64
+        }
+        None => 0,
+    };
     let cards = rows
         .into_iter()
         .map(|row| DiscoveryLibraryCard {
@@ -469,6 +471,11 @@ pub async fn read_runtime_library(
             creator_display_name: row.get("creator_display_name"),
             published_at_source_text: row.get("published_at_source_text"),
             published_at: row.get("published_at"),
+            published_at_state: if row.get::<Option<String>, _>("published_at").is_some() {
+                "KNOWN"
+            } else {
+                "UNKNOWN"
+            },
             first_discovered_at: row.get("first_discovered_at"),
             observed_at: row.get("observed_at"),
             result_position: row.get("result_position"),
@@ -489,11 +496,23 @@ pub async fn read_runtime_library(
     Ok(DiscoveryLibraryProjection {
         cards,
         excluded_unknown_published_at,
-        window: match query.window() {
-            PublishedWindow::Last7Days => "last_7_days",
-            PublishedWindow::Last30Days => "last_30_days",
-        },
+        time_view: time_view_code(query.time_view()),
     })
+}
+
+fn published_window_days(window: PublishedWindow) -> i32 {
+    match window {
+        PublishedWindow::Last7Days => 7,
+        PublishedWindow::Last30Days => 30,
+    }
+}
+
+fn time_view_code(view: EvidenceTimeView) -> &'static str {
+    match view {
+        EvidenceTimeView::LatestAcceptedDiscovery => "latest_accepted_discovery",
+        EvidenceTimeView::PublishedLast7Days => "last_7_days",
+        EvidenceTimeView::PublishedLast30Days => "last_30_days",
+    }
 }
 
 fn runtime_library_sql() -> &'static str {
@@ -518,7 +537,7 @@ fn runtime_library_sql() -> &'static str {
        FROM raw \
      ), grouped AS ( \
        SELECT platform, platform_content_id, max(title) AS title, max(creator_display_name) AS creator_display_name, \
-              max(published_at_source_text) AS published_at_source_text, max(published_at) AS published_at, \
+              max(published_at_source_text) FILTER (WHERE published_at IS NOT NULL) AS published_at_source_text, max(published_at) AS published_at, \
               min(accepted_at) AS first_discovered_at, max(observed_at) AS observed_at, min(result_position) AS result_position, \
               max((coverage #>> '{layers,0,observed}')::integer) AS coverage_visible_cards, \
               max(COALESCE((task_spec->>'maximumQuota')::integer, 1)) AS coverage_maximum_quota, \
@@ -537,9 +556,9 @@ fn runtime_library_sql() -> &'static str {
               WHERE slot.platform = grouped.platform AND slot.content_external_id = grouped.platform_content_id \
               ORDER BY CASE WHEN slot.role = 'cover' THEN 0 ELSE 1 END, slot.ordinal, materialization.verified_at DESC LIMIT 1) AS cover_local_asset_url \
      FROM grouped \
-     WHERE grouped.published_at IS NOT NULL \
+     WHERE ($1::integer IS NULL OR (grouped.published_at IS NOT NULL \
        AND grouped.published_at >= scope_001_now() - make_interval(days => $1) \
-       AND grouped.published_at <= scope_001_now() \
+       AND grouped.published_at <= scope_001_now())) \
        AND ($2::text IS NULL OR lower(COALESCE(grouped.creator_display_name, '')) LIKE '%' || lower($2) || '%' \
          OR lower(COALESCE(grouped.title, '')) LIKE '%' || lower($2) || '%' \
          OR lower(COALESCE(grouped.evidence_text, '')) LIKE '%' || lower($2) || '%') \
@@ -554,7 +573,7 @@ fn runtime_unknown_time_sql() -> &'static str {
     // all-library unknown counter would make a narrow author/title query claim it excluded
     // material the user did not ask to inspect.
     "WITH normalized AS ( \
-       SELECT package.coverage, record.value AS record, \
+       SELECT package.platform, package.coverage, record.value AS record, \
               concat_ws(' ', record.value #>> '{payload,title}', record.value #>> '{payload,content}', record.value #>> '{payload,bodyText}', record.value #>> '{payload,desc}', record.value #>> '{payload,text}', record.value #>> '{payload,contentText}') AS evidence_text, \
               NULLIF(COALESCE(record.value #>> '{payload,authorName}', record.value #>> '{payload,user,nickname}', record.value #>> '{payload,author,nickname}'), '') AS creator_display_name, \
               NULLIF(record.value #>> '{payload,title}', '') AS title, \
@@ -565,12 +584,15 @@ fn runtime_unknown_time_sql() -> &'static str {
        JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref = package.package_ref AND disposition.record_ordinal = record.ordinal - 1 \
        WHERE disposition.disposition IN ('accepted_for_library_discovery','accepted_for_library_content') \
          AND package.package_kind IN ('discovery_search','profile_discovery','content_detail') \
-     ) \
-     SELECT count(DISTINCT platform_content_id) FROM normalized \
-     WHERE platform_content_id IS NOT NULL AND has_published_at = 0 \
+     ), matching AS ( \
+       SELECT * FROM normalized WHERE platform_content_id IS NOT NULL \
        AND ($1::text IS NULL OR lower(COALESCE(creator_display_name, '')) LIKE '%' || lower($1) || '%' \
          OR lower(COALESCE(title, '')) LIKE '%' || lower($1) || '%' \
-         OR lower(COALESCE(evidence_text, '')) LIKE '%' || lower($1) || '%')"
+         OR lower(COALESCE(evidence_text, '')) LIKE '%' || lower($1) || '%') \
+     ) SELECT count(*) FROM ( \
+       SELECT platform, platform_content_id FROM matching GROUP BY platform, platform_content_id \
+       HAVING max(has_published_at) = 0 \
+     ) unknown_content"
 }
 
 pub async fn producer_runtime_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
