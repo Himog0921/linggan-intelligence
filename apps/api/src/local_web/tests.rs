@@ -642,12 +642,46 @@ fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
         .expect("collection pages render the context row")
         .1;
     for kpi in [
-        "<span class=\"v7-kpi\"><em>TARGETS</em><b>UNKNOWN</b></span>",
-        "<span class=\"v7-kpi\"><em>BASELINING</em><b>UNKNOWN</b></span>",
+        "<span class=\"v7-kpi\"><em>目标</em><b>UNKNOWN</b></span>",
+        "<span class=\"v7-kpi\"><em>建档中</em><b>UNKNOWN</b></span>",
     ] {
         assert!(
             context_row.contains(kpi),
             "count missing from context row: {kpi}"
+        );
+    }
+}
+
+#[test]
+fn context_row_counts_read_in_chinese_so_one_row_holds_one_english_scale() {
+    // `.v7-kpi em` is the 11px Sans reading slot; the system words beside it are 9px Mono
+    // caps. An English label in the Sans slot puts two English scales in one row, which is
+    // exactly what the Corpus surface does not do. Every count label must read in Chinese.
+    let mut labels = Vec::new();
+    for section in [
+        collection::Section::Targets,
+        collection::Section::Operations,
+        collection::Section::Attention,
+        collection::Section::Tasks,
+        collection::Section::Runtime,
+    ] {
+        let html = collection::render(section, collection::OperationsMode::Now, None);
+        for fragment in html.split("<span class=\"v7-kpi\"><em>").skip(1) {
+            labels.push(
+                fragment
+                    .split_once("</em>")
+                    .expect("a kpi label closes its em")
+                    .0
+                    .to_owned(),
+            );
+        }
+    }
+    assert_eq!(labels.len(), 10, "each surface carries two counts");
+
+    for label in &labels {
+        assert!(
+            label.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c)),
+            "count label must read in Chinese, not in the Mono slot's English: {label}"
         );
     }
 }

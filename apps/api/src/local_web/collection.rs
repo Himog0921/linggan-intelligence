@@ -492,13 +492,18 @@ fn body(section: Section, mode: OperationsMode, drawer: Option<&str>) -> String 
     }
 }
 
+/// Labels are Chinese because `.v7-kpi em` is the Sans reading slot the Corpus surface set
+/// the standard for. An English label here renders at 11px Sans beside the 9px Mono English
+/// system words in the same row, so two English labels end up at two different weights and
+/// sizes. `PARTIAL` keeps its English form wherever it means the LIDS validity state; this
+/// count is the number of partially completed tasks, which is why it can read in Chinese.
 fn head_readout(section: Section) -> String {
     match section {
-        Section::Targets => readout(&[("UNKNOWN", "TARGETS"), ("UNKNOWN", "BASELINING")]),
-        Section::Operations => readout(&[("UNKNOWN", "RUNNING"), ("UNKNOWN", "RETAINED / 24H")]),
-        Section::Attention => readout(&[("UNKNOWN", "OPEN"), ("UNKNOWN", "DATA LOSS")]),
-        Section::Tasks => readout(&[("UNKNOWN", "ACTIVE"), ("UNKNOWN", "PARTIAL")]),
-        Section::Runtime => readout(&[("UNKNOWN", "WORKERS"), ("UNKNOWN", "QUEUE")]),
+        Section::Targets => readout(&[("UNKNOWN", "目标"), ("UNKNOWN", "建档中")]),
+        Section::Operations => readout(&[("UNKNOWN", "运行中"), ("UNKNOWN", "留存 / 24H")]),
+        Section::Attention => readout(&[("UNKNOWN", "待处理"), ("UNKNOWN", "数据缺失")]),
+        Section::Tasks => readout(&[("UNKNOWN", "进行中"), ("UNKNOWN", "部分完成")]),
+        Section::Runtime => readout(&[("UNKNOWN", "工位"), ("UNKNOWN", "队列")]),
     }
 }
 
