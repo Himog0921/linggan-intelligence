@@ -45,15 +45,17 @@ pub(super) fn render_read_projection(
             time_view.boundary_copy
         ),
     );
-    html.replace(
-        "本地读投影尚未接通（READ MODEL NOT CONNECTED）",
-        "本机发现读取投影（LOCAL DISCOVERY READ PROJECTION）",
-    )
-    .replace(
-        "本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span>",
+    let html = replace_slot(
+        &html,
+        "EVIDENCE_HEADER_BOUNDARY",
         "本机服务 / 已接纳发现材料 <span class=\"v7-tech-key\">LOCAL HOST / ACCEPTED DISCOVERY</span>",
-    )
-    .replace(
+    );
+    let html = replace_slot(
+        &html,
+        "EVIDENCE_HEADER_META_STATE",
+        "<span class=\"v7-query-meta\">已接纳发现材料 <span class=\"v7-tech-key\">ACCEPTED DISCOVERY</span></span>",
+    );
+    html.replace(
         "<span class=\"v7-kpi\"><em>内容</em><b>未知 <span class=\"v7-tech-key\">UNKNOWN</span></b></span>",
         &format!("<span class=\"v7-kpi\"><em>内容</em><b>{card_count}</b></span>"),
     )
@@ -110,13 +112,17 @@ fn render_read_failure(
     let html = replace_slot(&html, "EVIDENCE_QUERY_LINE", &query_line);
     let html = replace_slot(&html, "EVIDENCE_RESULTS_HEAD", &results_head);
     let html = replace_slot(&html, "EVIDENCE_RESULTS", &results);
-    let html = html.replace(
-        "本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span>",
+    let html = replace_slot(
+        &html,
+        "EVIDENCE_HEADER_BOUNDARY",
         &format!("本机服务 / {primary_copy} <span class=\"v7-tech-key\">{technical_code}</span>"),
     );
-    let html = html.replace(
-        "本地读投影未接通 <span class=\"v7-tech-key\">READ MODEL NOT CONNECTED</span>",
-        &format!("{primary_copy} <span class=\"v7-tech-key\">{technical_code}</span>"),
+    let html = replace_slot(
+        &html,
+        "EVIDENCE_HEADER_META_STATE",
+        &format!(
+            "<span class=\"v7-query-meta\">{primary_copy} <span class=\"v7-tech-key\">{technical_code}</span></span><span>当前未读取材料，来源状态未知 <span class=\"v7-tech-key\">{technical_code}</span></span>"
+        ),
     );
     html.replace(
         "来源信息尚未完整接通 <span class=\"v7-tech-key\">SOURCE INCOMPLETE</span>",

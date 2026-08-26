@@ -44,6 +44,7 @@
 | 设计规格一致 | 通过 | `LIDS-LANG-001`、DESIGN-007、LIDS/项目索引和迁移记录 | 不证明其它页面已迁移 |
 | 页面实现 | 通过 | Rust template / projection renderer / page CSS；中文主表达与技术键组合均有 focused test | 不改行为 |
 | 自动检查 | 通过 | `cargo fmt --all -- --check`、`cargo clippy --workspace --all-targets --locked -- -D warnings`、`cargo test --workspace`、governance check | 不证明真实平台或用户验收 |
+| Rust 边界检查 | **NOT VERIFIED** | exact head 实际运行 `./scripts/check-rust-boundaries.sh` 退出 1：5 个 error、4 个 warning；`main @ 176ae824` 同样为 5/4，错误类别相同 | 这是既有、跨模块的边界债，不被本 UI 事项静默视为通过 |
 | DOM / 数据边界 | 通过 | 独立 loopback `127.0.0.1:3100` DOM 读取；隔离 PostgreSQL proof 的 9+5 数据测试和 6 条 API/页面测试 | 本机 loopback 无真实平台材料，不输出或保存真实 XHS 内容 |
 | 视觉 / Mog 验收 | 待用户确认 | 本项未改几何、Token、页面结构或按钮状态；CSS 仅降低英文技术键的语义角色 | 未重新提交真实材料截图；用户仍须在合并后确认整体阅读感受 |
 | 真实链路/回执 | 不适用 | 本事项为文案与展示治理切片 | 不证明采集或媒体 |
@@ -53,5 +54,7 @@
 
 - 最终质量门实际执行 `cargo clippy --workspace --all-targets --locked -- -D warnings`。此前仅记录的非 `--all-targets` 命令不能代表该更严格门已通过；本次以最小测试 helper 拆分 loopback 证明函数，保留全部原有状态与媒体未采集断言。
 - 最终 CSS / 文案补正：base 无读模型顶栏以「本机服务 / 读投影未接通」独立表达，`LOCAL HOST / NO READ MODEL` 收回相邻 `.v7-tech-key`；同时为会被 descendant label selector 覆盖的 Fact strap、空态指标与事实读数技术键增加更高特异性的页面局部规则，并把 `SYSTEM VIEWS`、`FILTER`、`RAW CONTENT` 的英文注释降为相对中文的 `.82em`。本补正不触及共享 Shell、API、数据库、查询、采集或运行时。
+- 最后状态一致性补正：成功读投影不再依赖易失的整句替换，而是使用页面专属 `EVIDENCE_HEADER_BOUNDARY` 与 `EVIDENCE_HEADER_META_STATE` 插槽，同时更新顶栏的服务边界和读取状态。因此成功输出只表达「已接纳发现材料」及其技术旁注，绝不保留「本地读投影未接通」或 `READ MODEL NOT CONNECTED`；base 无数据库页面仍保留该未接通状态。focused regression 同时锁定这两个相反场景。
+- Rust 边界门的真实结论：`./scripts/check-rust-boundaries.sh` 在本 PR exact head 失败（**5 errors / 4 warnings**），而 `main @ 176ae824` 以同一错误类别与数量失败：`apps/api/src/local_web.rs`、`collection.rs`、`local_web/tests.rs`、`crates/evidence/src/producer_runtime.rs` 的超限，以及 `local_web/tests.rs` 中既有业务 SQL；另有四条既有 size warning。此 PR 没有修绿、屏蔽或重构这些跨模块债务，故该门明确为 **NOT VERIFIED**。责任路径为项目 integration owner 后续建立并分配独立 `RUST-BOUNDARIES` 债务事项；本 Issue #65 仅记录，禁止以页面局部文案修订宣称全仓边界干净。
 - 已知后续依赖为 Draft PR #69 的共享 shell 中文化。#67 只触及 Evidence Library 的页面局部 renderer/CSS，#69 才拥有共享 `shell.rs` / `shell.css`；两者运行时文件边界不重叠，不能在本事项内合并。
 - 集成顺序固定为：先合并 #67；随后将 #69 rebase 到新的 `main`，由 integration owner 处理可能重叠的 focused tests / 文档行，再对 #69 的新 exact head 重新审查和整合。任何旧 head 的审查结论均不得复用。
