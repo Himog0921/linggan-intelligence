@@ -10,6 +10,11 @@ use std::collections::BTreeMap;
 use tower::ServiceExt;
 
 const LOCAL_001_MIGRATIONS: &str = concat!(
+    "CREATE TABLE linggan_local_schema_migration (\n",
+    "  migration_id text PRIMARY KEY,\n",
+    "  migration_sha256 text NOT NULL CHECK (migration_sha256 ~ '^[0-9a-f]{64}$'),\n",
+    "  applied_at timestamptz NOT NULL DEFAULT clock_timestamp()\n",
+    ");\n",
     include_str!("../../../../database/migrations/0001_scope_001_capture_evidence.sql"),
     "\n",
     include_str!("../../../../database/migrations/0002_local_001_discovery.sql"),
@@ -17,6 +22,12 @@ const LOCAL_001_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0003_local_trusted_producer.sql"),
     "\n",
     include_str!("../../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
+    "\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
+    "('0001_scope_001_capture_evidence', '0000000000000000000000000000000000000000000000000000000000000001'),\n",
+    "('0002_local_001_discovery', '0000000000000000000000000000000000000000000000000000000000000002'),\n",
+    "('0003_local_trusted_producer', '0000000000000000000000000000000000000000000000000000000000000003'),\n",
+    "('0004_plugin_runtime_all_capabilities', '0000000000000000000000000000000000000000000000000000000000000004');\n",
 );
 
 #[tokio::test]
@@ -553,37 +564,68 @@ async fn loopback_local_producer_acknowledges_one_partial_package_and_replays_ti
 async fn loopback_runtime_producer_uses_the_three_routes_published_by_health() {
     let database = proof_database("local_api_runtime_route_contract").await;
     let application = app_with_database(database);
+    let health_response = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("GET")
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(health_response.status(), StatusCode::OK);
+    let health_body = to_bytes(health_response.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let health: serde_json::Value = serde_json::from_slice(&health_body).unwrap();
+    assert_eq!(
+        health.pointer("/dataState"),
+        Some(&serde_json::Value::String(
+            "LINGGAN_BROWSER_PRODUCER_RUNTIME".to_owned()
+        ))
+    );
+    assert_eq!(
+        health.pointer("/database/schema"),
+        Some(&serde_json::Value::String(
+            "PLUGIN_RUNTIME_001_SCHEMA_READY".to_owned()
+        ))
+    );
+    let task_path = health
+        .pointer("/routes/localProducer/taskCreation")
+        .and_then(serde_json::Value::as_str)
+        .expect("health publishes task creation route")
+        .to_owned();
+    let attempt_path = health
+        .pointer("/routes/localProducer/attemptStart")
+        .and_then(serde_json::Value::as_str)
+        .expect("health publishes attempt start route")
+        .to_owned();
+    let submission_path = health
+        .pointer("/routes/localProducer/submission")
+        .and_then(serde_json::Value::as_str)
+        .expect("health publishes submission route")
+        .to_owned();
     let task = runtime_producer_task_spec();
     let attempt = runtime_producer_attempt();
     let submission = runtime_producer_submission();
     for (path, body, expected) in [
+        (task_path, task, "\"outcome\":\"created\""),
+        (attempt_path, attempt, "\"outcome\":\"started\""),
         (
-            LOCAL_PRODUCER_TASK_CREATION_PATH,
-            task,
-            "\"outcome\":\"created\"",
-        ),
-        (
-            LOCAL_PRODUCER_ATTEMPT_START_PATH,
-            attempt,
-            "\"outcome\":\"started\"",
-        ),
-        (
-            LOCAL_PRODUCER_SUBMISSION_PATH,
+            submission_path.clone(),
             submission.clone(),
             "\"delivery\":\"acknowledged\"",
         ),
-        (
-            LOCAL_PRODUCER_SUBMISSION_PATH,
-            submission,
-            "\"delivery\":\"replay\"",
-        ),
+        (submission_path, submission, "\"delivery\":\"replay\""),
     ] {
         let response = application
             .clone()
             .oneshot(
                 Request::builder()
                     .method("POST")
-                    .uri(path)
+                    .uri(&path)
                     .header(header::CONTENT_TYPE, "application/json")
                     .body(Body::from(body))
                     .unwrap(),

@@ -70,6 +70,49 @@ test('local readiness accepts only the ready local trusted producer contract wit
   assert.match(result.message, /LOCAL_TRUSTED_PRODUCER/);
 });
 
+test('local readiness accepts the exact full Browser Producer runtime contract without credentials', async () => {
+  const result = await readLingganLocalReadiness(async () => ({
+    ok: true,
+    json: async () => ({
+      service: 'linggan-local-web',
+      listener: 'loopback-only',
+      dataState: 'LINGGAN_BROWSER_PRODUCER_RUNTIME',
+      database: { state: 'READY', schema: 'PLUGIN_RUNTIME_001_SCHEMA_READY' },
+      routes: {
+        localProducer: {
+          taskCreation: '/api/local/producer/tasks',
+          attemptStart: '/api/local/producer/runtime-attempts',
+          submission: '/api/local/producer/runtime-submissions',
+        },
+      },
+    }),
+  }));
+  assert.equal(result.connected, true);
+  assert.equal(result.reachable, true);
+  assert.match(result.message, /LINGGAN_BROWSER_PRODUCER_RUNTIME/);
+});
+
+test('local readiness rejects a mixed producer readiness pair', async () => {
+  const result = await readLingganLocalReadiness(async () => ({
+    ok: true,
+    json: async () => ({
+      service: 'linggan-local-web',
+      listener: 'loopback-only',
+      dataState: 'LINGGAN_BROWSER_PRODUCER_RUNTIME',
+      database: { state: 'READY', schema: 'LOCAL_003_SCHEMA_READY' },
+      routes: {
+        localProducer: {
+          taskCreation: '/api/local/producer/tasks',
+          attemptStart: '/api/local/producer/runtime-attempts',
+          submission: '/api/local/producer/runtime-submissions',
+        },
+      },
+    }),
+  }));
+  assert.equal(result.connected, false);
+  assert.equal(result.reachable, false);
+});
+
 test('local readiness does not treat an older local read projection as a ready producer runtime', async () => {
   const result = await readLingganLocalReadiness(async () => ({
     ok: true,

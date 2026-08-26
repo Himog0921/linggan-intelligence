@@ -75,9 +75,9 @@ pub enum LocalSubmissionOutcome {
 /// anything. Discovery reads can remain ready even while this adapter is not yet migrated.
 pub async fn local_producer_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
-        "SELECT to_regclass('public.local_trusted_task') IS NOT NULL \
-                AND to_regclass('public.local_trusted_attempt') IS NOT NULL \
-                AND to_regclass('public.local_trusted_submission') IS NOT NULL \
+        "SELECT to_regclass('local_trusted_task') IS NOT NULL \
+                AND to_regclass('local_trusted_attempt') IS NOT NULL \
+                AND to_regclass('local_trusted_submission') IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
                             WHERE migration_id = '0003_local_trusted_producer')",
     )

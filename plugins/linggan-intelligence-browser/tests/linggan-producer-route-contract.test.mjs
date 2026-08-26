@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { readLingganLocalReadiness } from '../src/linggan/adapter.js';
+
 const originalChrome = globalThis.chrome;
 globalThis.chrome = {
   runtime: {
@@ -35,20 +37,32 @@ function memoryOutbox() {
   };
 }
 
-test('producer flush uses exactly the healthy host route bundle for task, attempt and submission', async () => {
+test('full Producer runtime health enables an exact route-bundle flush through receipt', async () => {
   const outbox = memoryOutbox();
   const requested = [];
+  const readReadiness = () => readLingganLocalReadiness(async () => ({
+    ok: true,
+    json: async () => ({
+      service: 'linggan-local-web',
+      listener: 'loopback-only',
+      dataState: 'LINGGAN_BROWSER_PRODUCER_RUNTIME',
+      database: { state: 'READY', schema: 'PLUGIN_RUNTIME_001_SCHEMA_READY' },
+      routes: {
+        localProducer: {
+          taskCreation: '/api/local/producer/tasks',
+          attemptStart: '/api/local/producer/runtime-attempts',
+          submission: '/api/local/producer/runtime-submissions',
+        },
+      },
+    }),
+  }));
+  const readiness = await readReadiness();
+  assert.equal(readiness.connected, true);
+  assert.equal(readiness.reachable, true);
   await flushLocalOutboxOnce({
     outbox,
     mediaOutbox: { pendingCount: async () => 0 },
-    readReadiness: async () => ({
-      connected: true,
-      producerRoutes: {
-        taskCreation: '/api/local/producer/tasks',
-        attemptStart: '/api/local/producer/runtime-attempts',
-        submission: '/api/local/producer/runtime-submissions',
-      },
-    }),
+    readReadiness: async () => readiness,
     post: async (path) => {
       requested.push(path);
       if (path === '/api/local/producer/tasks') return { ok: true, status: 200, payload: { outcome: 'created' } };
