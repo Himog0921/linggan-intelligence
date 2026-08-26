@@ -101,6 +101,7 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
 
     for required in [
         "事实层 / 证据",
+        "本机时区 <span class=\"v7-tech-key\">UTC+08</span>",
         "当前没有已接纳材料 <span class=\"v7-tech-key\">NO ACCEPTED MATERIAL AVAILABLE</span>",
         "来源材料尚未完整接通",
         "固定面板 <span class=\"v7-tech-key\">PIN</span>",
@@ -151,6 +152,7 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
         "当前显示最新已接纳的发现卡片；其中部分卡片的发布时间仍可能未知。",
         "<span class=\"v7-tech-key\">LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN</span>",
         "只读取 Linggan 已接纳的发现卡片；不触发平台采集 <span class=\"v7-tech-key\">DISCOVERY ONLY</span>",
+        "本机服务 / 已接纳发现材料 <span class=\"v7-tech-key\">LOCAL HOST / ACCEPTED DISCOVERY</span>",
         "<span class=\"v7-kpi\"><em>内容</em><b>1</b></span>",
     ] {
         assert!(
@@ -169,6 +171,8 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
         ">ACCEPTED DISCOVERY CARDS<",
         "VIEW = LATEST ACCEPTED DISCOVERY / PUBLISHED_AT MAY BE UNKNOWN",
         "只读取 Linggan 已接纳的 discovery 卡片",
+        "本机服务 / 已接纳发现材料（LOCAL HOST / ACCEPTED DISCOVERY）",
+        "<span>UTC+08</span>",
     ] {
         assert!(
             !html.contains(prohibited),

@@ -26,6 +26,7 @@
 | 无效查询 / 读取暂不可用 | 两条路径各自显示准确中文主状态；未读取材料不冒充来源不完整、空库、已读取或已采集 | `LOCAL_QUERY_INVALID`、`READ_PROJECTION_UNAVAILABLE` | 通过：focused render test；不证明数据库、平台或真实 producer 可用 |
 | 页面内剩余英文整句 | 结果表头、本机呈现／未读材料、默认视角均以中文独立说明 | `ACCEPTED DISCOVERY`、`LOCAL PRESENTATION`、`NO MATERIAL READ`、`LATEST ACCEPTED DISCOVERY · PUBLISHED_AT UNKNOWN` | 通过：focused render regression；不涉及共享 Shell |
 | 英文技术注释层级 | 中文主表达独立可读，英文技术键保持可见但相对更小 | `.v7-tech-key` | 通过：页面局部样式断言；不涉及共享 Shell |
+| 顶栏服务状态与时区 | 成功读投影显示「本机服务 / 已接纳发现材料」；时区显示「本机时区」 | `LOCAL HOST / ACCEPTED DISCOVERY`、`UTC+08` | 通过：focused render regression；不改状态、时间事实或共享 Shell |
 
 ## 3. 验收边界
 

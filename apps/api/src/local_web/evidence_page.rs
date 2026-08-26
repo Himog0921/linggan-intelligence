@@ -51,7 +51,7 @@ pub(super) fn render_read_projection(
     )
     .replace(
         "本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）",
-        "本机服务 / 已接纳发现材料（LOCAL HOST / ACCEPTED DISCOVERY）",
+        "本机服务 / 已接纳发现材料 <span class=\"v7-tech-key\">LOCAL HOST / ACCEPTED DISCOVERY</span>",
     )
     .replace(
         "<span class=\"v7-kpi\"><em>内容</em><b>未知 <span class=\"v7-tech-key\">UNKNOWN</span></b></span>",
