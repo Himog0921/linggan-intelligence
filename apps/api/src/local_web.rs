@@ -1384,7 +1384,7 @@ fn evidence_library_html() -> String {
 </html>"#;
     let header = shell::global_header(
         shell::PrimarySurface::Corpus,
-        "本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）",
+        "本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span>",
         "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">材料状态</span>",
         "<span class=\"v7-kpi\"><em>内容</em><b>未知 <span class=\"v7-tech-key\">UNKNOWN</span></b></span><span class=\"v7-kpi\"><em>评论</em><b>未知 <span class=\"v7-tech-key\">UNKNOWN</span></b></span><span class=\"v7-kpi\"><em>创作者</em><b>未知 <span class=\"v7-tech-key\">UNKNOWN</span></b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span class=\"v7-query-meta\">本地读投影未接通 <span class=\"v7-tech-key\">READ MODEL NOT CONNECTED</span></span><span>来源信息尚未完整接通 <span class=\"v7-tech-key\">SOURCE INCOMPLETE</span></span><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
     );

@@ -101,6 +101,7 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
 
     for required in [
         "事实层 / 证据",
+        "本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span>",
         "本机时区 <span class=\"v7-tech-key\">UTC+08</span>",
         "当前没有已接纳材料 <span class=\"v7-tech-key\">NO ACCEPTED MATERIAL AVAILABLE</span>",
         "来源材料尚未完整接通",
@@ -162,6 +163,7 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
     }
 
     for prohibited in [
+        "本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）",
         "aria-label=\"MEDIA NOT ACQUIRED\"",
         "<span class=\"v7-published-unknown\">PUBLISHED",
         "<span>POSITION #17</span>",
@@ -189,6 +191,39 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
         stylesheet.contains(".v7-media-pending .v7-tech-key{display:block;max-width:54px;margin-top:4px;font-size:.82em"),
         "the media-state technical annotation must also remain subordinate on discovery cards"
     );
+}
+
+#[test]
+fn base_no_db_header_and_nested_technical_keys_remain_chinese_first() {
+    let base = evidence_library_html();
+    assert!(base.contains(
+        "本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span>"
+    ));
+    assert!(
+        !base.contains("本机服务 / 读投影未接通（LOCAL HOST / NO READ MODEL）"),
+        "the English no-read-model sentence must not become the header state"
+    );
+
+    let stylesheet = evidence_page_stylesheet();
+    for selector in [
+        ".v7-fact-strap span .v7-tech-key",
+        ".v7-empty-metric span .v7-tech-key",
+        ".v7-readout span .v7-tech-key",
+    ] {
+        assert!(
+            stylesheet.contains(selector),
+            "a nested technical key needs a selector stronger than its label: {selector}"
+        );
+    }
+    for rule in [
+        ".v7-view-label em,\n.v7-filter-lead em { margin-left:7px; color:var(--v7-ghost); font:500 .82em/1.2 var(--lgi-font-mono); font-style:normal; letter-spacing:.06em; }",
+        ".v7-section h3 em { margin-right:auto; margin-left:8px; color:var(--v7-ghost); font:500 .82em/1.2 var(--lgi-font-mono); font-style:normal; letter-spacing:.06em; }",
+    ] {
+        assert!(
+            stylesheet.contains(rule),
+            "English annotation must not outweigh its Chinese label: {rule}"
+        );
+    }
 }
 
 #[test]
