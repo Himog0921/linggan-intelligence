@@ -13,7 +13,7 @@
     "package:release": "node scripts/package-release.mjs",
     "verify:content-runtime": "node scripts/verify-content-runtime-modules.mjs",
     "verify:linggan-isolation": "node scripts/verify-linggan-isolation.mjs",
-    "test:linggan": "node --test tests/linggan-*.test.mjs tests/xhs-page-controller-summary.test.mjs tests/xhs-note-discovery.test.mjs",
+    "test:linggan": "node --test tests/linggan-*.test.mjs tests/xhs-active-collection.test.mjs tests/xhs-page-controller-summary.test.mjs tests/xhs-note-discovery.test.mjs",
     "verify": "npm run check:contracts && npm run test:linggan && npm run build && npm run verify:content-runtime && npm run release:verify && npm run release:reproducibility && npm run verify:linggan-isolation",
     "check:contracts": "tsc -p jsconfig.contracts.json --noEmit",
     "test:douyin": "node --test tests/douyin-*.test.mjs tests/xhs-anti-detect.test.mjs tests/workbench-douyin-remote-long-tail.test.mjs tests/note-media-download.test.mjs tests/flywheel-sync-quality.test.mjs tests/cookie-platform-scope.test.mjs tests/workbench-capability-check.test.mjs tests/background-page-type.test.mjs tests/navigation-orchestrator.test.mjs tests/execution-station-runtime.test.mjs tests/shared-messaging-send-to-tab.test.mjs tests/inject-button-group-ui.test.mjs tests/dashboard-response-envelope.test.mjs tests/workbench-progress-error.test.mjs tests/workbench-outbox-store-dexie.test.mjs tests/capture-journal-store.test.mjs tests/workbench-outbox-recovery-export.test.mjs tests/workbench-result-packager.test.mjs tests/workbench-task-poller.test.mjs tests/release-script-contract.test.mjs tests/content-runtime-loading.test.mjs",

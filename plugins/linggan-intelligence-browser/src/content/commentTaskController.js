@@ -160,13 +160,16 @@ export function createCommentTaskController({
           });
           showToast(total > 0 ? `评论采集已停止，已采集 ${total} 条` : '评论采集已停止', 'warning');
         } else {
+          const completion = result?.stopReason === 'comment_cap_reached'
+            ? `已达到目标 ${safeMaxTotal} 条`
+            : (result?.explicitEmptyState ? '页面明确没有公开评论' : `页面加载结束（${result?.stopReason || 'collector_complete'}）`);
           publishProgress({
             taskState: 'done',
             current: total,
             total: safeMaxTotal || total,
-            message: `评论采集完成：共 ${total} 条`,
+            message: `评论采集完成：共 ${total} 条；${completion}`,
           });
-          showToast(`评论采集完成：共 ${total} 条`, 'success');
+          showToast(`评论采集完成：共 ${total} 条；${completion}`, 'success');
         }
         cleanup();
         return result;

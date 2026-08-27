@@ -7,6 +7,11 @@ import {
   runXhsSelectorBootstrapProbe,
   runXhsSelectorPreflight,
 } from '../platforms/xhs/selectorHealth.js';
+import {
+  applyXhsSearchFilters,
+  hasExplicitXhsSearchFilters,
+  normalizeXhsSearchFilters,
+} from '../platforms/xhs/searchFilters.js';
 
 const XHS_CONTEXT_REFRESH_MESSAGE = '插件刚更新，请刷新当前页面后再点一次，刷新后即可继续。';
 
@@ -248,9 +253,11 @@ export function createXhsPageController({
         case 'collectNote': {
           showToast('正在采集笔记...', 'info');
           const note = await collectNote();
-          showToast(note?.lingganDelivery?.delivery === 'acknowledged'
-            ? `笔记已被 Linggan 接纳：${note.title}`
-            : `笔记已读取，待本机 Linggan 交付：${note.title}`, note?.lingganDelivery?.delivery === 'acknowledged' ? 'success' : 'info');
+          const packageDelivery = note?.lingganDetailPackageDelivery;
+          const allAccepted = packageDelivery?.state === 'acknowledged';
+          showToast(allAccepted
+            ? `笔记详情包已被 Linggan 接纳：${note.title}`
+            : `笔记详情已读取；${packageDelivery?.message || '各采集通道待本机 Linggan 交付'}`, allAccepted ? 'success' : 'info');
           if ((note.images && note.images.length > 0) || note.video || note.cover || note.coverUrl || note.livePhotoStreams?.length > 0) {
             const mediaCount = (note.images?.length || 0) + (note.video ? 1 : 0);
             try {
@@ -314,8 +321,31 @@ export function createXhsPageController({
             throw new Error('linggan_discovery_adapter_unavailable');
           }
           const mode = String(params.mode || '').trim();
-          showToast('正在读取当前页面可见内容…', 'info');
-          const discovered = await discoverSurface({ mode, maximumQuota: Number(params.maximumQuota || params.limit || 20) });
+          const suppliedQuota = Number(params.maximumQuota || params.limit || 0);
+          let discoverySettings = {
+            count: Number.isFinite(suppliedQuota) && suppliedQuota > 0 ? suppliedQuota : 0,
+            searchFilters: normalizeXhsSearchFilters(),
+          };
+          // Page buttons ask for a real target.  Runtime dispatches may supply a quota directly
+          // and therefore do not open another dialog.
+          if (!discoverySettings.count) {
+            try {
+              discoverySettings = await showBatchSettingsDialog({
+                title: mode === COLLECT_MODE.PROFILE ? '博主页发现设置' : '搜索发现设置',
+                enableTopLikes: false,
+                enableSearchFilters: mode === COLLECT_MODE.SEARCH,
+              });
+            } catch {
+              break;
+            }
+          }
+          const maximumQuota = Math.max(1, Number(discoverySettings.count || 20));
+          const searchFilters = normalizeXhsSearchFilters(discoverySettings.searchFilters || {});
+          if (mode === COLLECT_MODE.SEARCH && hasExplicitXhsSearchFilters(searchFilters)) {
+            await applyXhsSearchFilters(searchFilters, { document, win: window });
+          }
+          showToast(`正在按目标加载，最多 ${maximumQuota} 条…`, 'info');
+          const discovered = await discoverSurface({ mode, maximumQuota });
           const cards = Array.isArray(discovered) ? discovered : (Array.isArray(discovered?.cards) ? discovered.cards : []);
           const target = new URL(window.location.href);
           const query = target.searchParams.get('keyword') || target.searchParams.get('q') || '';
@@ -325,12 +355,17 @@ export function createXhsPageController({
           const delivery = await submitDiscovery(cards, {
             query,
             authorExternalId,
-            surface: 'current_visible_surface',
+            surface: 'target_driven_surface',
             pageFacts: Array.isArray(discovered) ? undefined : discovered?.pageFacts,
+            maximumQuota,
           });
+          const stopReason = Array.isArray(discovered) ? '' : discovered?.discoveryMeta?.stopReason;
+          const resultText = stopReason === 'target_reached'
+            ? `已达到目标，采集 ${cards.length}/${maximumQuota} 条`
+            : `已采集 ${cards.length}/${maximumQuota} 条，${stopReason || '页面加载已停止'}`;
           showToast(delivery?.delivery === 'acknowledged'
-            ? `已接纳当前页面 ${cards.length} 条发现`
-            : `已读取当前页面 ${cards.length} 条，待本机 Linggan 交付`, delivery?.delivery === 'acknowledged' ? 'success' : 'info');
+            ? `Linggan 已接纳：${resultText}`
+            : `${resultText}，待本机 Linggan 交付`, delivery?.delivery === 'acknowledged' ? 'success' : 'info');
           break;
         }
 

@@ -106,7 +106,11 @@ export async function collectComments({
     persist,
   });
   if (!apiResult.needsDomContinuation && (apiResult.apiObserved || apiResult.total > 0)) {
-    const result = withCommentCollectionReceipt({ total: apiResult.total, comments: apiResult.comments }, { maxTotal });
+    const result = withCommentCollectionReceipt({
+      total: apiResult.total,
+      comments: apiResult.comments,
+      stopReason: apiResult.stopReason,
+    }, { maxTotal });
     if (emitReceipt) {
       result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
     }
@@ -330,7 +334,7 @@ async function collectCommentsViaApi({
       });
       if (noNewCount >= maxNoNew) {
         if (!apiObserved && allComments.length === 0) {
-          return { total: 0, comments: [], apiObserved: false };
+          return { total: 0, comments: [], apiObserved: false, stopReason: 'api_unobserved' };
         }
         break;
       }
@@ -382,6 +386,11 @@ async function collectCommentsViaApi({
       commentHint: finalSignals.commentHint,
       hasDomComments,
     }),
+    stopReason: shouldStop()
+      ? 'manual_stop'
+      : (maxTotal > 0 && allComments.length >= maxTotal
+        ? 'comment_cap_reached'
+        : (finalSignals.hasEndMarker ? 'comment_area_end' : 'stable_no_new')),
   };
 }
 
@@ -574,7 +583,16 @@ async function collectCommentsFromDom({
     await commentStore.bulkUpsert(allComments);
   }
 
-  return { total: allComments.length, comments: allComments };
+  const finalSignals = readCommentSignalsSafe(resolveContainer() || container);
+  return {
+    total: allComments.length,
+    comments: allComments,
+    stopReason: shouldStop()
+      ? 'manual_stop'
+      : (maxTotal > 0 && allComments.length >= maxTotal
+        ? 'comment_cap_reached'
+        : (finalSignals.hasEndMarker ? 'comment_area_end' : 'stable_no_new')),
+  };
 }
 
 /**

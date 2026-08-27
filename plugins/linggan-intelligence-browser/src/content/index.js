@@ -1,7 +1,7 @@
 import '../extensionPublicPath.js';
 import '../content.css';
 import { MSG } from '../shared/constants.js';
-import { readCurrentVisibleSurfaceNotes } from '../platforms/xhs/noteCollector.js';
+import { discoverWithScroll } from '../platforms/xhs/noteCollector.js';
 import { collectXhsNoteDetailPackage } from '../platforms/xhs/detailPackageCollector.js';
 import { readCurrentXhsSearchSurfaceContext } from '../platforms/xhs/searchFilters.js';
 import { collectComments, collectCommentImages } from '../platforms/xhs/commentCollector.js';
@@ -113,17 +113,23 @@ const xhsPageController = createXhsPageController({
   sendToBackground,
   downloadNoteMediaFromRecord: async (note) => runtime.acquireMediaSlots(note),
   discoverSurface: async ({ mode, maximumQuota }) => {
-    const cards = readCurrentVisibleSurfaceNotes(
+    const expectedCount = Math.max(1, Number(maximumQuota) || 20);
+    const cards = await discoverWithScroll(
       mode === 'profile' ? '#userPostedFeeds' : '.feeds-container',
-      maximumQuota,
+      undefined,
+      { expectedCount },
     );
-    if (mode === 'profile') return cards;
+    if (mode === 'profile') {
+      return { cards, discoveryMeta: cards.discoveryMeta };
+    }
     return {
       cards,
       pageFacts: readCurrentXhsSearchSurfaceContext({
-        requestedLimit: maximumQuota,
+        requestedLimit: expectedCount,
         loadedCount: cards.length,
+        stopReason: cards.discoveryMeta?.stopReason,
       }),
+      discoveryMeta: cards.discoveryMeta,
     };
   },
   submitDiscovery: (cards, context) => runtime.submitDiscovery(cards, context),
@@ -226,6 +232,7 @@ async function dispatchProducerRuntimeAction(action, message) {
     commentDepthMode: message.commentDepthMode,
     maxTotal: message.maxTotal,
     maxSubComments: message.maxSubComments,
+    maximumQuota: message.maximumQuota ?? message.count,
     sortMode: message.sortMode,
     triggerSource: 'popup_linggan_runtime',
   };

@@ -42,6 +42,7 @@ export function getByInject(wd, type) {
       return;
     }
 
+    const requestId = crypto.randomUUID();
     const timeout = setTimeout(() => {
       wd.removeEventListener('message', handler);
       reject(new Error(`Inject ${type} timeout`));
@@ -49,7 +50,7 @@ export function getByInject(wd, type) {
 
     const handler = (event) => {
       if (event.source !== wd) return;
-      if (event.data?.type !== type) return;
+      if (event.data?.type !== type || event.data?.requestId !== requestId) return;
       wd.removeEventListener('message', handler);
       clearTimeout(timeout);
       resolve(event.data.data);
@@ -59,7 +60,7 @@ export function getByInject(wd, type) {
     // 外部文件注入：用 src 加载，绕过 CSP 内联限制
     // 加 cache-bust 参数避免浏览器缓存旧版本
     const script = wd.document.createElement('script');
-    script.src = scriptUrl + '?t=' + Date.now();
+    script.src = scriptUrl + '?t=' + Date.now() + '&requestId=' + encodeURIComponent(requestId);
     script.onload = () => script.remove();
     script.onerror = () => {
       wd.removeEventListener('message', handler);

@@ -1,6 +1,9 @@
 import Dexie from 'dexie';
 
-const db = new Dexie('LingganBoomDB');
+// This is durable browser-local staging for the current producer only.  A distinct name keeps
+// legacy Workbench records out of the active runtime and prevents local cache from posing as
+// Linggan truth.
+const db = new Dexie('LingganIntelligenceBrowserLocalStaging');
 
 db.version(1).stores({
   notes: 'noteId, url, title, type, authorId, authorName, likes, collects, comments, releaseDate, createdAt, syncStatus',

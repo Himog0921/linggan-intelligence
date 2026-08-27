@@ -1,8 +1,8 @@
 # Linggan Intelligence Browser
 
-> 状态: Draft LOCAL_TRUSTED adapter
+> 状态: Draft target-driven XHS Producer adapter
 > 版本: `0.4.7`
-> 适用范围: `PLUGIN-RETROFIT-LOCAL-TRUSTED-001`（GitHub Issue #43）
+> 适用范围: `PLUGIN-XHS-ACTIVE-COLLECTION-001`（GitHub Issue #78）及其既有 LOCAL_TRUSTED 接收边界
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
 
@@ -25,14 +25,24 @@ Linggan 的接收合同或平台访问授权。
 `http://localhost:3000`；旧工作台的站点授权、任务轮询、lease、工位调度、旧
 endpoint、同步和 fallback 都不是当前运行路径。
 
-当前页面的「发现当前 20 条」是一个受限的手动 Discovery 入口：只读取此刻已经渲染在
-当前页面的最多 20 张卡片，不滚动、不调用页面内部接口快照、不打开详情。它先将
-固定 `TaskSpec → Attempt → Submission` 写入独立的浏览器本地 outbox，再由后台以小批次
-向 Linggan loopback 发送。页面侧采集不等待网络回执；服务中断、超时或 service worker
-重启后，同一 `submissionId` 会继续重试，服务端回执幂等。这个 outbox 只保存待交付材料，
-不是 Evidence、也不代表平台采集已完成。每个 attempt 只能有一个终态 package：相同
-submission 只能 replay，新的 package 必须创建新的 attempt。scheduler 明确为
-`NOT_CONNECTED`。
+小红书的「按目标发现」会以任务请求数量为上限，继续滚动和去重：达到目标、确认页面
+已无新增、稳定无新增或达到执行预算时，都会保留实际数、轮次和停止原因。搜索页会同时
+带回当前可见筛选状态和下拉联想的页面事实；它不把自然到底说成平台全量，也不把实际数
+反写成任务目标。
+
+标准「采集当前笔记」是一次逻辑结果：详情、媒体槽位观察以及**最多 30 条**当前评论。
+其中任一交付 lane 尚在队列时，界面只会说明详情已读取、各 lane 待交付，不会把正文
+接纳误说为整个详情包已接纳。单篇评论深采和批量评论是另一类明确执行任务：可设上限，
+或选择“尽量采到公开自然结束”；它们不受标准详情 30 条窗口限制。批量评论逐篇保留
+暂停/恢复 checkpoint；页面明确无评论是一篇成功的空结果，页面打不开、超时和用户停止
+则各自保留原因，不连坐已取得的其它目标。
+
+所有页面动作先将固定 `TaskSpec → Attempt → Submission` 写入 Linggan 专属的浏览器本地
+outbox，再由后台以小批次向 Linggan loopback 发送。页面侧采集不等待网络回执；服务中断、
+超时或 service worker 重启后，同一 `submissionId` 会继续重试，服务端回执幂等。这个
+outbox 只保存待交付材料，不是 Evidence、也不代表平台采集已完成。每个 attempt 只能有
+一个终态 package：相同 submission 只能 replay，新的 package 必须创建新的 attempt。
+scheduler 明确为 `NOT_CONNECTED`。
 
 交付前，插件只信任 `GET /health` 在 `routes.localProducer` 中同时公布的
 `taskCreation`、`attemptStart` 与 `submission` 三条本机路径；后台会按这一份 route bundle
@@ -46,10 +56,10 @@ health 缺少任一条、标识不成对或不在 ready 状态时，材料只会
 在尚未从 Linggan 读取统计时，插件和 Popup 只显示“未连接”或“未知”；绝不以 `0` 伪装
 成没有笔记、评论或博主。
 
-原有浏览器本地 Dexie 数据和恢复代码仅保留为**本机暂存/恢复层**，不是
-Linggan 的最终事实库。尚未获得 Linggan adapter 合同的详情、评论、媒体、
-批量、抖音和自动化动作仍保留在原界面位置，但会显示明确的“未接通”原因；
-它们不会静默访问平台、下载媒体或写入 Linggan。
+当前运行时的 Dexie 名称为 `LingganIntelligenceBrowserLocalStaging`，仅作**本机暂存/恢复层**，
+不是 Linggan 的最终事实库，也不会复用旧 `LingganBoomDB`。媒体原件只在用户单独请求时
+进入独立字节通道；候选地址必须是受允许的平台 HTTPS 媒体地址，页面回传也使用一次性请求
+标识，不能把任意页面消息或本机地址送入下载/交付队列。
 
 本轮刻意移除了不需要的 `cookies`、`downloads`、`alarms`、网络规则和通知
 权限。平台内容脚本仍用于保持原注入界面与页面识别体验；可执行采集动作在
