@@ -746,6 +746,10 @@ struct ArchiveRequestBody {
     purpose: String,
     #[serde(default)]
     requested_by: Option<String>,
+    /// 哪条观察 lane。深度建档与轻巡检的风险与成本不同，因此授权也分开——写死一个 lane
+    /// 会让另一条 lane 的申请永远找不到匹配的授权。
+    #[serde(default)]
+    lane: Option<String>,
 }
 
 /// COLLECTION-001 · request deep archiving for one target, and run admission on it.
@@ -766,10 +770,11 @@ async fn collection_archive_request(State(state): State<LocalWebState>, body: By
         );
     };
     let requested_by = request.requested_by.as_deref().unwrap_or("person");
+    let lane = request.lane.as_deref().unwrap_or("deep_archive");
     match request_and_admit(
         database,
         request.target_ref,
-        "deep_archive",
+        lane,
         &request.purpose,
         requested_by,
     )
