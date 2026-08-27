@@ -1,4 +1,5 @@
 mod collection;
+mod collection_intake;
 mod collection_targets_view;
 mod evidence_page;
 mod shell;
@@ -19,14 +20,14 @@ use linggan_contracts::{
 use linggan_evidence::{
     DiscoveryIngressError, LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome,
     LocalTaskOutcome, MediaUploadFinalizeClaim, ProducerRuntimeError, RuntimeAttemptOutcome,
-    RuntimeSubmissionOutcome, RuntimeTaskOutcome, admit_media_blob, begin_media_upload,
-    claim_media_upload_finalize, complete_media_upload, create_manual_task, create_producer_task,
-    ingest_discovery_package, list_targets_in_state, local_discovery_schema_is_ready,
-    local_producer_schema_is_ready, producer_runtime_has_packages,
+    RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome, admit_media_blob,
+    begin_media_upload, claim_media_upload_finalize, complete_media_upload, create_manual_task,
+    create_producer_task, ingest_discovery_package, list_targets_in_state,
+    local_discovery_schema_is_ready, local_producer_schema_is_ready, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_discovery_library, read_local_media_blob,
     read_media_upload_session, read_runtime_library, record_media_download_failure,
     record_media_upload_chunk, release_media_upload_finalize, start_local_attempt,
-    start_producer_attempt, submit_local_package, submit_producer_package,
+    start_producer_attempt, store_pending_target, submit_local_package, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -228,7 +229,7 @@ fn router(state: LocalWebState) -> Router {
         .route("/api/local/evidence-library", get(evidence_library_json))
         .route(
             "/api/local/collection/targets",
-            get(collection_targets_json),
+            get(collection_targets_json).post(collection_target_intake),
         )
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
@@ -357,6 +358,63 @@ async fn evidence_library_json(
         Err(_) => local_read_json_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "read_projection_unavailable",
+        ),
+    }
+}
+
+/// COLLECTION-001 · accept an observation target from the browser.
+///
+/// No Acquisition Authorization is required here, and that is deliberate: storing identity
+/// consumes no platform access. Deep archiving — going back to read 200 works — is what needs
+/// authorising, and that route does not exist yet.
+async fn collection_target_intake(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(intake) = serde_json::from_slice::<collection_intake::TargetIntake>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "target_intake_invalid",
+        );
+    };
+    let identity = match collection_intake::parse_intake(&intake) {
+        Ok(identity) => identity,
+        Err(rejection) => {
+            return local_read_json_error(
+                axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+                rejection.code(),
+            );
+        }
+    };
+
+    match store_pending_target(
+        database,
+        &identity,
+        collection_intake::INTAKE_SOURCE,
+        intake.display_name.as_deref(),
+        intake.identity_facts.as_ref(),
+    )
+    .await
+    {
+        Ok((target, outcome)) => Json(serde_json::json!({
+            // Two pushes of the same creator is a normal outcome, not a failure — but the
+            // caller must be able to tell which happened rather than assume it created one.
+            "outcome": match outcome {
+                StoreOutcome::Stored => "stored",
+                StoreOutcome::AlreadyPresent => "already_present",
+            },
+            "targetRef": target.target_ref,
+            "lifecycleState": target.lifecycle_state,
+            // Storing proves storage. Nothing here has been archived or authorised.
+            "acquisition": "NOT_AUTHORISED",
+        }))
+        .into_response(),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "collection_targets_unavailable",
         ),
     }
 }
