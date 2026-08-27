@@ -1442,12 +1442,14 @@ export function buildDiscoveryPlan(containerSelector, {
   const normalizedMaxScrolls = normalizePositiveInteger(maxScrolls, 10);
   const normalizedExpectedCount = normalizePositiveInteger(expectedCount, 0);
   const profileTargetRounds = estimateProfileMaxRounds(normalizedExpectedCount);
+  const surfaceTargetRounds = normalizedExpectedCount >= 100 ? 60
+    : (normalizedExpectedCount >= 50 ? 40 : (normalizedExpectedCount > 20 ? 24 : normalizedMaxScrolls));
   const maxRounds = isProfileMode
     ? Math.max(
       normalizedMaxScrolls,
       profileTargetRounds,
     )
-    : normalizedMaxScrolls;
+    : Math.max(normalizedMaxScrolls, surfaceTargetRounds);
 
   return {
     isProfileMode,

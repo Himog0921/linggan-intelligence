@@ -124,7 +124,7 @@ test('visible producer controls use Linggan runtime commands and never revive ol
   assert.doesNotMatch(popup, /sendToBackground\(MSG\.START_BATCH/);
   assert.doesNotMatch(popup, /action: MSG\.COLLECT_SINGLE/);
   assert.match(content, /dispatchProducerRuntimeAction/);
-  assert.match(content, /readCurrentVisibleSurfaceNotes/);
+  assert.match(content, /discoverWithScroll/);
   assert.doesNotMatch(content, /discoverSurfaceNotesFromBestSource/);
   assert.match(content, /LINGGAN_RUNTIME_ACTION\.START_BATCH_COMMENTS/);
   assert.match(douyin, /Linggan's media lane/);
@@ -134,7 +134,7 @@ test('visible producer controls use Linggan runtime commands and never revive ol
   assert.match(xhs, /评论图片区暂不可用/);
 });
 
-test('XHS startup plus the current-surface route does not initialize the old API bridge or discovery helpers', () => {
+test('XHS startup keeps page initialization passive while the target-driven route owns active loading', () => {
   const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
   const initStart = content.indexOf('async function initXhs()');
   const initEnd = content.indexOf('\nasync function initDouyin()', initStart);
@@ -143,8 +143,9 @@ test('XHS startup plus the current-surface route does not initialize the old API
   const init = content.slice(initStart, initEnd);
   const currentSurface = content.slice(currentSurfaceStart, currentSurfaceEnd);
   assert.doesNotMatch(init, /ensureXhsCommentApiBridge|discoverSurfaceNotesFromBestSource|discoverWithScroll|requestXhs(?:Search|Profile)NotesSnapshot|Batch(?:Note|Comment)Controller/);
-  assert.match(currentSurface, /readCurrentVisibleSurfaceNotes/);
-  assert.doesNotMatch(currentSurface, /ensureXhsCommentApiBridge|discoverSurfaceNotesFromBestSource|discoverWithScroll|requestXhs(?:Search|Profile)NotesSnapshot|Batch(?:Note|Comment)Controller/);
+  assert.match(currentSurface, /discoverWithScroll/);
+  assert.match(currentSurface, /expectedCount/);
+  assert.doesNotMatch(currentSurface, /ensureXhsCommentApiBridge|discoverSurfaceNotesFromBestSource|requestXhs(?:Search|Profile)NotesSnapshot|Batch(?:Note|Comment)Controller/);
 });
 
 test('page-read completion is not rendered as Linggan acceptance', () => {

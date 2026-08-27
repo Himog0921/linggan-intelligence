@@ -333,9 +333,23 @@ export class BatchCommentController extends BaseBatchController {
       }).catch(() => {});
 
       try {
-        await this._captureNoteWithTimeout(noteInfo);
+        const captured = await this._captureNoteWithTimeout(noteInfo);
+        if (!captured) {
+          this.results.push({
+            noteId: noteInfo.noteId,
+            total: 0,
+            error: 'comment_detail_not_accessible',
+            stopReason: 'detail_unavailable',
+          });
+        }
       } catch (err) {
         console.warn(`[灵感爆爆爆] 评论采集失败: ${noteInfo.noteId}`, err);
+        this.results.push({
+          noteId: noteInfo.noteId,
+          total: 0,
+          error: String(err?.message || err || 'comment_collection_failed'),
+          stopReason: this._noteTimedOut ? 'time_budget' : 'collection_error',
+        });
         if (this._blockingError) throw this._blockingError;
         await this._closeNotePopup();
       } finally {

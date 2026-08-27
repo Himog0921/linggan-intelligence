@@ -179,7 +179,7 @@ test('current-surface discovery submits only after its bounded page reader has r
         return { delivery: 'pending' };
       },
     });
-    const button = { dataset: { action: 'discoverSurface', params: JSON.stringify({ mode: 'search' }) } };
+    const button = { dataset: { action: 'discoverSurface', params: JSON.stringify({ mode: 'search', maximumQuota: 20 }) } };
     const pending = controller.handleButtonClick({
       target: { closest: (selector) => (selector === '.lgboom-btn' ? button : null) },
     });
