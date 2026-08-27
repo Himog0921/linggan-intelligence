@@ -20,19 +20,19 @@ use linggan_contracts::{
 };
 use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, CheckInOutcome, DiscoveryIngressError,
-    InstallationCheckIn, LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome,
-    LocalTaskOutcome, MediaUploadFinalizeClaim, ProducerRuntimeError, RuntimeAttemptOutcome,
-    RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome, admit_media_blob,
-    begin_media_upload, check_in_installation, claim_installation, claim_media_upload_finalize,
-    close_claim_window, complete_media_upload, create_manual_task, create_producer_task,
-    grant_authorization, ingest_discovery_package, list_targets_in_state,
-    local_discovery_schema_is_ready, local_producer_schema_is_ready, open_claim_window,
-    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_discovery_library,
-    read_local_media_blob, read_media_upload_session, read_runtime_library, read_station_overview,
-    record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, request_and_admit, retire_station, start_local_attempt,
-    start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
-    submit_producer_package,
+    InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
+    LocalSubmissionOutcome, LocalTaskOutcome, MediaUploadFinalizeClaim, ProducerRuntimeError,
+    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome,
+    admit_media_blob, begin_media_upload, check_in_installation, claim_installation,
+    claim_media_upload_finalize, close_claim_window, complete_media_upload, create_manual_task,
+    create_producer_task, grant_authorization, ingest_discovery_package, issue_work_order_lease,
+    list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
+    open_claim_window, producer_runtime_has_packages, producer_runtime_schema_is_ready,
+    read_discovery_library, read_local_media_blob, read_media_upload_session, read_runtime_library,
+    read_station_overview, record_media_download_failure, record_media_upload_chunk,
+    register_station, release_media_upload_finalize, request_and_admit, retire_station,
+    start_local_attempt, start_producer_attempt, station_schema_is_ready, store_pending_target,
+    submit_local_package, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -182,6 +182,36 @@ fn app_with_database(database: Database) -> Router {
     })
 }
 
+/// COLLECTION-001 的写入面：观察目标、四段授权链、工位与租约。
+///
+/// 与主路由表分开，因为它们共享一条纪律——每一个都只写本机记录，没有一个会访问平台。
+fn collection_api_routes() -> Router<LocalWebState> {
+    Router::new()
+        .route(
+            "/api/local/collection/targets",
+            get(collection_targets_json).post(collection_target_intake),
+        )
+        .route(
+            "/api/local/collection/authorizations",
+            post(collection_grant_authorization),
+        )
+        .route(
+            "/api/local/collection/archive-requests",
+            post(collection_archive_request),
+        )
+        .route(
+            "/api/local/collection/work-order-leases",
+            post(collection_issue_lease),
+        )
+        .route("/api/local/stations", post(station_register))
+        .route(
+            "/api/local/stations/claim-window",
+            post(station_claim_window),
+        )
+        .route(STATION_CHECK_IN_PATH, post(station_check_in))
+        .route("/api/local/stations/claims", post(station_claim))
+}
+
 fn router(state: LocalWebState) -> Router {
     Router::new()
         .route("/", get(local_entry))
@@ -232,25 +262,7 @@ fn router(state: LocalWebState) -> Router {
             get(read_local_media_blob_route),
         )
         .route("/api/local/evidence-library", get(evidence_library_json))
-        .route(
-            "/api/local/collection/targets",
-            get(collection_targets_json).post(collection_target_intake),
-        )
-        .route(
-            "/api/local/collection/authorizations",
-            post(collection_grant_authorization),
-        )
-        .route(
-            "/api/local/collection/archive-requests",
-            post(collection_archive_request),
-        )
-        .route("/api/local/stations", post(station_register))
-        .route(
-            "/api/local/stations/claim-window",
-            post(station_claim_window),
-        )
-        .route(STATION_CHECK_IN_PATH, post(station_check_in))
-        .route("/api/local/stations/claims", post(station_claim))
+        .merge(collection_api_routes())
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))
@@ -1888,6 +1900,70 @@ async fn collection_runtime_claim(
         let _ = claim_installation(database, form.installation_ref, form.station_ref).await;
     }
     Redirect::to(RUNTIME_SURFACE)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LeaseBody {
+    work_order_ref: uuid::Uuid,
+    #[serde(default)]
+    valid_for_minutes: Option<i32>,
+}
+
+/// COLLECTION-001 · turn one admitted work order into a bounded, revocable permission.
+///
+/// Issuing is not executing: no platform is contacted and no plugin is told anything. The
+/// lease records who may run this work order, inside which frozen identity, until when.
+///
+/// Authorisation is re-checked here rather than trusted from admission — time passes between
+/// the two, and a station can go offline or a risk pause can start in between.
+async fn collection_issue_lease(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(request) = serde_json::from_slice::<LeaseBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "lease_request_invalid",
+        );
+    };
+    // A default that expires: an unbounded permission cannot be taken back once handed out.
+    let minutes = request.valid_for_minutes.unwrap_or(30);
+    match issue_work_order_lease(database, request.work_order_ref, minutes).await {
+        Ok(lease) => Json(serde_json::json!({
+            "leaseRef": lease.lease_ref,
+            "taskId": lease.task_id,
+            // 派发尚未接通，原因写在响应里而不是留给人去猜。
+            "dispatch": linggan_evidence::DISPATCH_BLOCKED_REASON,
+            "stationRef": lease.station_ref,
+            "expiresAt": lease.expires_at,
+            // A lease permits; nothing has run and no plugin has been told anything.
+            "execution": "NOT_STARTED",
+        }))
+        .into_response(),
+        Err(error) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            lease_error_code(&error),
+        ),
+    }
+}
+
+/// Each refusal names the specific gate that stopped it. "lease_rejected" would send the
+/// reader looking through five different checks.
+fn lease_error_code(error: &LeaseError) -> &'static str {
+    match error {
+        LeaseError::SchemaUnavailable => "lease_schema_unavailable",
+        LeaseError::UnknownWorkOrder => "work_order_not_found",
+        LeaseError::AlreadyLeased => "work_order_already_leased",
+        LeaseError::NoStation => "work_order_names_no_station",
+        LeaseError::StationUnavailable => "station_unavailable",
+        LeaseError::AuthorizationLapsed => "authorization_lapsed",
+        LeaseError::RiskPaused { .. } => "risk_paused",
+        LeaseError::Database(_) => "lease_write_failed",
+    }
 }
 
 async fn collection_stylesheet() -> Response {

@@ -180,6 +180,7 @@ migrate() {
   apply_migration_once "0007_execution_station" "$project_root/database/migrations/0007_execution_station.sql"
   apply_migration_once "0008_collection_risk_pause" "$project_root/database/migrations/0008_collection_risk_pause.sql"
   apply_migration_once "0009_work_order_station" "$project_root/database/migrations/0009_work_order_station.sql"
+  apply_migration_once "0010_work_order_lease" "$project_root/database/migrations/0010_work_order_lease.sql"
 }
 
 case "$command_name" in

@@ -10,6 +10,7 @@ mod local_producer;
 mod producer_runtime;
 mod receipt;
 mod work_order;
+mod work_order_lease;
 
 pub use acquisition_chain::{
     AcquisitionChainError, AuthorizationGrant, RequestOutcome, acquisition_chain_schema_is_ready,
@@ -47,3 +48,7 @@ pub use producer_runtime::{
     submit_producer_package,
 };
 pub use receipt::{IngressOutcome, RejectionCode};
+pub use work_order_lease::{
+    DISPATCH_BLOCKED_REASON, IssuedLease, LeaseError, expire_lapsed_leases, issue_work_order_lease,
+    lease_schema_is_ready, release_work_order_lease,
+};
