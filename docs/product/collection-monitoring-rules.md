@@ -3,7 +3,7 @@
 > 状态: 权威当前
 > 最后核对: 2026-08-26
 > 适用范围: 观察目标的生命周期、深度建档、巡检频率、爆款追踪、插件推送协同，覆盖 `COLLECTION-001`（Issue #66）的前两条交付线
-> 事实来源: Mog 于 2026-08-26 的结构化设计讨论逐题确认、三路只读调研的实测证据（见 §8）、`capture-control-contract`（Draft PR #17）、`domain-invariants.md`、小红书字段实测文档
+> 事实来源: Mog 于 2026-08-26 的结构化设计讨论逐题确认、三路只读调研的实测证据（见 §8）、`capture-control-contract`（已合并）、`domain-invariants.md`、小红书字段实测文档
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、`domain-invariants.md`、采集控制合同；本文件不授权任何真实采集执行
 
 **本文件不是实现授权。** 它定义规则，不代表调度器、工位、观察目标实体或授权链已经存在——§7 列明了全部前置。
@@ -479,7 +479,7 @@ Mog 说的「吃过亏」，完整根因链是：①最初无并发限制 → �
 
 | 前置 | 现状 |
 |---|---|
-| 采集控制合同（PR #17） | **Draft，未合并**，正文写明 "must not be merged or treated as real execution authorization" |
+| 采集控制合同 | ✅ **已合并**（PR #17，2026-08-27）。文件在 [`architecture/capture-control-contract.md`](../architecture/capture-control-contract.md)。**合并的是文档不是执行授权**——它的状态仍是「草案」，§12 的 7 条退出门无一因合并而满足 |
 | 观察目标实体 | 不存在——无表、无类型、无 API |
 | 授权链（申请→授权→准入→工单） | 申请、授权、准入**全缺**；工单表存在但生产代码零 INSERT |
 | 调度器 | 不存在，worker 是 3 行 stub。**当前不存在"派发"动作**，任务由插件自己 POST 创建 |
