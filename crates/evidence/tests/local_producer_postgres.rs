@@ -658,3 +658,91 @@ fn runtime_attempt() -> &'static str {
 fn runtime_submission() -> &'static str {
     r#"{"contractVersion":"linggan.producer.capture-package.v1","producerInstanceId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","attemptId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","submissionId":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","capturePackage":{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-a"},"layers":[{"capability":"media_slots","observed":9,"attempted":7,"acquired":6,"verified":6,"failed":1,"notAttempted":2,"unknown":0,"stoppedReason":"risk_control"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-a:image:1","slot":{"role":"image","ordinal":1},"sourceObject":{"externalId":"note-a"},"observation":{"externalUri":"https://cdn.example/one.jpg"},"observationRef":"ffffffff-ffff-4fff-8fff-ffffffffffff"},{"kind":"media_slot","slotKey":"xhs:note-a:image:2","slot":{"role":"image","ordinal":2},"sourceObject":{"externalId":"note-a"},"observation":{"externalUri":"https://cdn.example/two.jpg"},"observationRef":"11111111-2222-4333-8444-555555555555"}]}}"#
 }
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn records_beyond_the_task_quota_are_quarantined_instead_of_silently_admitted() {
+    // 合同：止损条件是工单的一部分，不允许执行端自行放宽。此前 maximumQuota 只在读投影里
+    // 被拿来显示，提交路径上没有任何校验——任务说「最多 2」，插件交 4，全部入库，页面还
+    // 显示一个自相矛盾的「4/2」。
+    let database = proof_database("plugin_runtime_quota_bound").await;
+    let task_id = uuid::Uuid::new_v4();
+    let producer_instance_id = uuid::Uuid::new_v4();
+    let attempt_id = uuid::Uuid::new_v4();
+    let task_wire = serde_json::json!({
+        "contractVersion":"linggan.producer.task-spec.v1", "taskId":task_id,
+        "source":"manual", "platform":"xhs", "pageType":"search_results",
+        "target":{"query":"ADHD"}, "capabilitiesRequested":["discovery_search"],
+        "maximumQuota":2, "commentLimit":"not_requested", "acquireMedia":"not_requested",
+        "riskPolicy":"local_trusted_user_initiated", "stopConditions":["maximum_quota"]
+    });
+    let task = parse_producer_task_spec(&task_wire.to_string()).expect("TaskSpec is closed");
+    assert!(matches!(
+        create_producer_task(&database, &task).await,
+        Ok(RuntimeTaskOutcome::Created { .. })
+    ));
+    let attempt_wire = serde_json::json!({
+        "contractVersion":"linggan.producer.attempt.v1", "producerInstanceId":producer_instance_id,
+        "taskId":task_id, "attemptId":attempt_id
+    });
+    let attempt = parse_producer_attempt(&attempt_wire.to_string()).expect("attempt is valid");
+    assert!(matches!(
+        start_producer_attempt(&database, &attempt).await,
+        Ok(RuntimeAttemptOutcome::Started { .. })
+    ));
+
+    let records = (1..=4)
+        .map(|position| {
+            serde_json::json!({
+                "kind":"discovery_card", "resultPosition":position,
+                "sourceObject":{"externalId":format!("quota-bound-{position:02}")},
+                "payload":{"title":format!("卡片 {position}"), "authorName":"fixture creator"}
+            })
+        })
+        .collect::<Vec<_>>();
+    let package_ref = uuid::Uuid::new_v4();
+    let submission_wire = serde_json::json!({
+        "contractVersion":"linggan.producer.capture-package.v1",
+        "producerInstanceId":producer_instance_id, "taskId":task_id, "attemptId":attempt_id,
+        "submissionId":uuid::Uuid::new_v4(),
+        "capturePackage":{
+            "contractVersion":"linggan.producer.capture-package.v1", "packageRef":package_ref,
+            "packageKind":"discovery_search", "platform":"xhs",
+            "observedAt":"2026-08-27T10:00:00Z", "capturedAt":"2026-08-27T10:00:01Z",
+            "coverage":{
+                "target":{"query":"ADHD","surface":"current_visible_surface"},
+                "layers":[{"capability":"discovery_search","observed":4,"attempted":4,"acquired":4,
+                           "verified":0,"failed":0,"notAttempted":0,"unknown":0,
+                           "stoppedReason":"surface_read_complete"}]
+            },
+            "records":records
+        }
+    });
+    let submission =
+        parse_producer_submission(&submission_wire.to_string()).expect("submission is well formed");
+    submit_producer_package(&database, &submission)
+        .await
+        .expect("the package is still accepted");
+
+    let quarantined: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_runtime_record_disposition \
+         WHERE package_ref = $1 AND disposition = 'quarantined' \
+           AND reason = 'beyond_task_maximum_quota'",
+    )
+    .bind(package_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("dispositions are readable");
+    // 超出上限的两条被隔离，且理由具名——不是笼统的「不合格」。
+    assert_eq!(quarantined, 2);
+
+    // 材料没有被连坐丢弃：整包仍然接纳，前两条走正常处置路径。
+    let total: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_runtime_record_disposition WHERE package_ref = $1",
+    )
+    .bind(package_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("dispositions are readable");
+    assert_eq!(total, 4);
+}

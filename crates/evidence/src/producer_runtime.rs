@@ -741,7 +741,16 @@ pub async fn submit_producer_package(
         .bind(package.package_kind()).bind(package.platform()).bind(&package_hash).bind(package.observed_at()).bind(package.captured_at())
         .bind(package.coverage()).bind(package.checkpoint()).bind(package.raw())
         .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
-    insert_record_dispositions(&mut tx, package).await?;
+    // 任务给的篇数上限必须在接纳时执行，而不只是在页面上显示。
+    let maximum_quota: Option<i32> = sqlx::query_scalar(
+        "SELECT (task_spec->>'maximumQuota')::integer FROM linggan_runtime_task WHERE task_id = $1",
+    )
+    .bind(submission.task_id())
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?
+    .flatten();
+    insert_record_dispositions(&mut tx, package, maximum_quota).await?;
     if package.package_kind() == "media_slots" {
         insert_media_slots(&mut tx, package).await?;
     }
@@ -777,12 +786,26 @@ async fn insert_media_slots(
     Ok(())
 }
 
+/// 逐条决定记录的处置。
+///
+/// `maximum_quota` 是任务给的篇数上限。**超出上限的记录一律隔离**，不进语料库：合同写着
+/// 「止损条件是工单的一部分，不允许执行端自行放宽」，而此前这个上限只在读投影里被拿来
+/// 显示，提交路径上没有任何校验——任务说「最多 10」，插件交 20，直接入库，页面还显示
+/// 一个「20/10」的自相矛盾读数。
+///
+/// 隔离而不是拒收整包，是因为材料本身是安全取得的：连坐已取得的前一段材料，正是合同
+/// 反复禁止的事。隔离让它留下来、可追溯，但**不成为观察面的一部分，也不占当日额度**。
 async fn insert_record_dispositions(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
+    maximum_quota: Option<i32>,
 ) -> Result<(), ProducerRuntimeError> {
     for (ordinal, record) in package.records().iter().enumerate() {
-        let (disposition, reason) = if package.package_kind() == "media_slots" {
+        let beyond_quota = maximum_quota
+            .is_some_and(|quota| i64::try_from(ordinal).unwrap_or(i64::MAX) >= i64::from(quota));
+        let (disposition, reason) = if beyond_quota {
+            ("quarantined", "beyond_task_maximum_quota")
+        } else if package.package_kind() == "media_slots" {
             if media_slot_record(record).is_some() {
                 ("accepted_for_media_identity", "media_slot_contract_valid")
             } else {
