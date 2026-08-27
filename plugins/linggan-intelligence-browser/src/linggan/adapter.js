@@ -52,6 +52,7 @@ export async function readLingganLocalReadiness(fetchImpl = globalThis.fetch) {
       return {
         connected: false,
         reachable: false,
+        health,
         message: 'Linggan 本机服务可访问，但当前不是可接收本机 Producer 采集包的运行状态。',
       };
     }
@@ -61,6 +62,7 @@ export async function readLingganLocalReadiness(fetchImpl = globalThis.fetch) {
         connected: false,
         reachable: true,
         deliveryReady: false,
+        health,
         message: 'Linggan 本机服务可访问，但尚未升级到可接收完整 Producer 采集包的运行状态；未发送任何采集包。',
       };
     }
@@ -69,11 +71,92 @@ export async function readLingganLocalReadiness(fetchImpl = globalThis.fetch) {
       reachable: true,
       deliveryReady: true,
       producerRoutes,
+      health,
       message: `Linggan 本机服务可访问；${health.dataState} 已就绪。`,
     };
   } catch {
     return { connected: false, message: 'Linggan 本机服务当前不可访问。' };
   }
+}
+
+
+/// 工位报到路由由 /health 通告，插件不写死路径——与 producer 路由同一套约定。
+function stationCheckInRoute(health) {
+  const path = String(health?.routes?.station?.checkIn || '').trim();
+  return path.startsWith('/api/local/stations/') && !/[?#]/.test(path) ? path : null;
+}
+
+export function stationCheckInRouteFromHealth(health) {
+  return stationCheckInRoute(health);
+}
+
+/**
+ * 向 Linggan 报到。
+ *
+ * 报的是「这次安装」，不是「这台工位」：installKey 存在 chrome.storage.local，重装即换。
+ * 工位由人在 Linggan 里登记，插件不创建也不选择工位——它只说明自己是谁、能做什么。
+ * 服务端据此决定自动归位、还是挂进待认领。
+ */
+export async function checkInLingganStation({
+  installKey,
+  pluginVersion,
+  browserLabel = '',
+  capabilities = [],
+  origin = LINGGAN_LOCAL_ORIGIN,
+  fetchImpl = globalThis.fetch,
+  health = null,
+} = {}) {
+  if (typeof fetchImpl !== 'function') {
+    return { checkedIn: false, message: '浏览器当前无法连接 Linggan 本机服务。' };
+  }
+  if (!String(installKey || '').trim()) {
+    return { checkedIn: false, message: '本次安装还没有本机标识，无法报到。' };
+  }
+  const route = stationCheckInRoute(health);
+  if (!route) {
+    // 服务端没通告这个路由，说明工位表还没建好。此时报到必然失败，不如不发。
+    return {
+      checkedIn: false,
+      message: 'Linggan 本机服务尚未开放工位报到；未发送任何报到请求。',
+    };
+  }
+  try {
+    const response = await fetchImpl(`${origin}${route}`, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        installKey,
+        pluginVersion,
+        browserLabel,
+        capabilities: Array.isArray(capabilities) ? capabilities : [],
+      }),
+    });
+    if (!response.ok) {
+      return { checkedIn: false, message: `Linggan 本机服务返回 ${response.status}。` };
+    }
+    const body = await response.json().catch(() => null);
+    const state = String(body?.state || '').trim();
+    return {
+      checkedIn: true,
+      state,
+      installationRef: String(body?.installationRef || '').trim(),
+      stationRef: String(body?.stationRef || '').trim(),
+      message: stationStateMessage(state),
+    };
+  } catch {
+    return { checkedIn: false, message: 'Linggan 本机服务当前不可访问。' };
+  }
+}
+
+/// 三种状态对使用者意味着完全不同的事，不能都说成「已连接」。
+function stationStateMessage(state) {
+  if (state === 'claimed') return '已报到并归位到一台工位。';
+  if (state === 'heartbeat') return '已报到；本次安装此前已归位。';
+  if (state === 'awaiting_claim') {
+    return '已报到，但还没有归位到任何工位。请在 Linggan 的采集 → 执行工位页认领它，或先开一个认领窗口。';
+  }
+  return '已报到。';
 }
 
 export function createManualTaskSpec({ taskId = crypto.randomUUID() } = {}) {

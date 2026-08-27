@@ -31,7 +31,7 @@ use linggan_evidence::{
     read_local_media_blob, read_media_upload_session, read_runtime_library, read_station_overview,
     record_media_download_failure, record_media_upload_chunk, register_station,
     release_media_upload_finalize, request_and_admit, start_local_attempt, start_producer_attempt,
-    store_pending_target, submit_local_package, submit_producer_package,
+    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -248,7 +248,7 @@ fn router(state: LocalWebState) -> Router {
             "/api/local/stations/claim-window",
             post(station_claim_window),
         )
-        .route("/api/local/stations/installations", post(station_check_in))
+        .route(STATION_CHECK_IN_PATH, post(station_check_in))
         .route("/api/local/stations/claims", post(station_claim))
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
@@ -320,6 +320,15 @@ fn configured_local_port() -> Result<u16, std::io::Error> {
 async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     let (data_state, evidence_read_model, database_state, schema_state) =
         state.database.health_state().await;
+    // The plugin learns where to check in from /health rather than hardcoding a path, the
+    // same way it already learns the producer routes. A route is advertised only once its
+    // schema is applied: advertising it earlier would invite a call that cannot succeed.
+    let station_routes = match state.database.database() {
+        Some(database) if station_schema_is_ready(database).await.unwrap_or(false) => json!({
+            "checkIn": STATION_CHECK_IN_PATH
+        }),
+        _ => Value::Null,
+    };
     let local_producer_routes = if data_state == FULL_PRODUCER_RUNTIME_DATA_STATE
         && database_state == "READY"
         && schema_state == FULL_PRODUCER_RUNTIME_SCHEMA
@@ -344,7 +353,8 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
         "routes": {
             "evidenceLibrary": "/corpus/evidence",
             "discoveryIngress": "/api/local/discovery-packages",
-            "localProducer": local_producer_routes
+            "localProducer": local_producer_routes,
+            "station": station_routes
         }
     }))
 }
@@ -1791,6 +1801,10 @@ async fn collection_runtime(State(state): State<LocalWebState>) -> Html<String> 
 ///
 /// Each one redirects back with 303 so a refresh re-reads the page instead of re-submitting.
 const RUNTIME_SURFACE: &str = "/collection/runtime";
+
+/// Where a plugin install reports in. Advertised through `/health` so the plugin never has to
+/// hardcode it.
+const STATION_CHECK_IN_PATH: &str = "/api/local/stations/installations";
 
 #[derive(serde::Deserialize)]
 struct StationForm {

@@ -1,6 +1,7 @@
 import {
   LINGGAN_LOCAL_ORIGIN,
   attemptStartIsAccepted,
+  checkInLingganStation,
   createLocalAttempt,
   createLocalSubmission,
   createTaskSpec,
@@ -318,20 +319,61 @@ async function getLingganStatus() {
   };
 }
 
+/**
+ * 报到并汇报真实状态。
+ *
+ * 报到只写 Linggan 本机记录，不访问任何平台，也不会让任何采集开始——因此它可以在
+ * 每次询问状态时执行，而不需要人先批准什么。
+ *
+ * `registered` 的含义很窄：本次安装已归位到一台工位。仅仅「报到成功」不算，因为
+ * 未归位的安装不会被派任何活。
+ */
+async function reportStationStatus() {
+  const readiness = await readLingganLocalReadiness();
+  const pluginVersion = chrome.runtime.getManifest().version;
+  if (!readiness.reachable) {
+    return {
+      success: true,
+      registered: false,
+      authorized: false,
+      pluginVersion,
+      authorizationMessage: readiness.message,
+    };
+  }
+  const installKey = await producerInstanceId();
+  const checkIn = await checkInLingganStation({
+    installKey,
+    pluginVersion,
+    browserLabel: browserLabel(),
+    capabilities: ['discovery_search'],
+    health: readiness.health,
+  });
+  return {
+    success: true,
+    registered: checkIn.state === 'claimed' || checkIn.state === 'heartbeat',
+    authorized: Boolean(checkIn.checkedIn),
+    pluginVersion,
+    stationState: checkIn.state || 'unknown',
+    installationRef: checkIn.installationRef || '',
+    authorizationMessage: checkIn.message,
+  };
+}
+
+/// 浏览器标签只用来让人在页面上认出是哪台机器，不作为身份。
+function browserLabel() {
+  const agent = String(globalThis.navigator?.userAgent || '');
+  if (agent.includes('Edg/')) return 'Edge';
+  if (agent.includes('Chrome/')) return 'Chrome';
+  return '';
+}
+
 chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
   const action = String(message.action || '').trim();
   Promise.resolve().then(async () => {
     if (action === LINGGAN_RUNTIME_ACTION.TOGGLE_DASHBOARD) return openDashboard();
     if (action === LINGGAN_RUNTIME_ACTION.GET_FLYWHEEL_CONFIG || action === LINGGAN_RUNTIME_ACTION.SAVE_FLYWHEEL_CONFIG) return getLingganStatus();
     if (action === LINGGAN_RUNTIME_ACTION.GET_EXECUTION_STATION_STATUS) {
-      const readiness = await readLingganLocalReadiness();
-      return {
-        success: true,
-        registered: false,
-        authorized: false,
-        pluginVersion: chrome.runtime.getManifest().version,
-        authorizationMessage: `${readiness.message} 当前测试模式为本机直连；不使用旧工位或授权机制。`,
-      };
+      return reportStationStatus();
     }
     if (action === LINGGAN_RUNTIME_ACTION.TEST_FLYWHEEL_CONNECTION) return getLingganStatus();
     if (action === LINGGAN_RUNTIME_ACTION.SUBMIT_DISCOVERY_PACKAGE) {
