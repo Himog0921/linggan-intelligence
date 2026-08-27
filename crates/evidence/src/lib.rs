@@ -3,12 +3,14 @@
 
 mod acquisition_chain;
 mod collection_target;
+mod dispatch;
 mod execution_station;
 mod ingress;
 mod local_discovery;
 mod local_producer;
 mod producer_runtime;
 mod receipt;
+mod station_read;
 mod work_order;
 mod work_order_lease;
 
@@ -20,10 +22,11 @@ pub use collection_target::{
     CollectionTargetError, ObservationTarget, StoreOutcome, collection_target_schema_is_ready,
     list_targets_in_state, store_pending_target, transition_target,
 };
+pub use dispatch::{DispatchDecision, DispatchError, decide_dispatch, dispatch_schema_is_ready};
 pub use execution_station::{
-    CheckInOutcome, InstallationCheckIn, StationError, StationOverview, UnclaimedInstallation,
-    check_in_installation, claim_installation, close_claim_window, open_claim_window,
-    read_station_overview, register_station, retire_station, station_schema_is_ready,
+    CheckInOutcome, InstallationCheckIn, StationError, check_in_installation, claim_installation,
+    close_claim_window, open_claim_window, register_station, retire_station,
+    station_schema_is_ready,
 };
 pub use ingress::{
     IngressError, IngressFault, IngressOptions, PreRoutingCode, ingest_capture_package,
@@ -48,6 +51,9 @@ pub use producer_runtime::{
     submit_producer_package,
 };
 pub use receipt::{IngressOutcome, RejectionCode};
+pub use station_read::{
+    StationOverview, UnclaimedInstallation, read_station_overview, station_daily_note_usage,
+};
 pub use work_order_lease::{
     DETAIL_STEP_DEFERRED_REASON, IssuedLease, LeaseError, expire_lapsed_leases,
     issue_work_order_lease, lease_schema_is_ready, release_work_order_lease,

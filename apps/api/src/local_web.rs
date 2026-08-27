@@ -20,19 +20,20 @@ use linggan_contracts::{
 };
 use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, CheckInOutcome, DiscoveryIngressError,
-    InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
+    DispatchDecision, InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
     LocalSubmissionOutcome, LocalTaskOutcome, MediaUploadFinalizeClaim, ProducerRuntimeError,
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome,
     admit_media_blob, begin_media_upload, check_in_installation, claim_installation,
     claim_media_upload_finalize, close_claim_window, complete_media_upload, create_manual_task,
-    create_producer_task, grant_authorization, ingest_discovery_package, issue_work_order_lease,
-    list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
-    open_claim_window, producer_runtime_has_packages, producer_runtime_schema_is_ready,
-    read_discovery_library, read_local_media_blob, read_media_upload_session, read_runtime_library,
-    read_station_overview, record_media_download_failure, record_media_upload_chunk,
-    register_station, release_media_upload_finalize, request_and_admit, retire_station,
-    start_local_attempt, start_producer_attempt, station_schema_is_ready, store_pending_target,
-    submit_local_package, submit_producer_package,
+    create_producer_task, decide_dispatch, grant_authorization, ingest_discovery_package,
+    issue_work_order_lease, list_targets_in_state, local_discovery_schema_is_ready,
+    local_producer_schema_is_ready, open_claim_window, producer_runtime_has_packages,
+    producer_runtime_schema_is_ready, read_discovery_library, read_local_media_blob,
+    read_media_upload_session, read_runtime_library, read_station_overview,
+    record_media_download_failure, record_media_upload_chunk, register_station,
+    release_media_upload_finalize, request_and_admit, retire_station, start_local_attempt,
+    start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
+    submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -210,6 +211,7 @@ fn collection_api_routes() -> Router<LocalWebState> {
         )
         .route(STATION_CHECK_IN_PATH, post(station_check_in))
         .route("/api/local/stations/claims", post(station_claim))
+        .route("/api/local/dispatch/claim", post(dispatch_claim))
 }
 
 fn router(state: LocalWebState) -> Router {
@@ -1974,6 +1976,82 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
         LeaseError::TaskSpecInvalid(_) => "task_spec_invalid",
         LeaseError::Database(_) => "lease_write_failed",
     }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DispatchClaimBody {
+    install_key: String,
+}
+
+/// COLLECTION-001 · a station asks whether there is work it may run right now.
+///
+/// Only one answer permits a platform to be touched. Every other answer names the specific
+/// gate that stopped it: a flat "nothing for you" cannot distinguish "quota spent" from
+/// "risk paused" from "real execution was never authorised", and those need different acts.
+async fn dispatch_claim(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(request) = serde_json::from_slice::<DispatchClaimBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "dispatch_claim_invalid",
+        );
+    };
+    match decide_dispatch(database, &request.install_key).await {
+        Ok(decision) => Json(dispatch_payload(&decision)).into_response(),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "dispatch_claim_rejected",
+        ),
+    }
+}
+
+fn dispatch_payload(decision: &DispatchDecision) -> serde_json::Value {
+    let mut payload = serde_json::json!({
+        "decision": decision.code(),
+        // The plugin must key off this and nothing else. A task body without permission is
+        // still not permission.
+        "mayExecute": decision.permits_execution(),
+    });
+    match decision {
+        DispatchDecision::Dispatch {
+            task_id,
+            lease_ref,
+            task_spec,
+        } => {
+            payload["taskId"] = serde_json::json!(task_id);
+            payload["leaseRef"] = serde_json::json!(lease_ref);
+            payload["taskSpec"] = task_spec.clone();
+        }
+        DispatchDecision::GateClosed => {
+            payload["reason"] = serde_json::json!(
+                "真实执行闸门未开。这是默认状态，不是故障：合同 §12 要求先有一份新的真实 \
+                 Canary SCOPE 明确平台、镜头、lane、目标语义、最大范围与停止恢复，由人授权。"
+            );
+        }
+        DispatchDecision::RiskPaused { reason } => {
+            payload["reason"] = serde_json::json!(reason);
+        }
+        DispatchDecision::DailyQuotaReached { quota, used } => {
+            payload["reason"] = serde_json::json!(format!(
+                "这台工位今天已入库 {used} 篇，达到每日 {quota} 篇上限。工位没有离线，\
+                 明天窗口重置后自然恢复。"
+            ));
+        }
+        DispatchDecision::InstallationNotClaimed => {
+            payload["reason"] =
+                serde_json::json!("这个插件安装还没有归位到任何工位，不属于任何工位的产能。");
+        }
+        DispatchDecision::NothingWaiting => {
+            payload["reason"] = serde_json::json!("没有等待派发的任务。");
+        }
+    }
+    payload
 }
 
 async fn collection_stylesheet() -> Response {

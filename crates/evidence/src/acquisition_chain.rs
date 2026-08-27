@@ -6,7 +6,7 @@
 //! Nothing here reaches a platform. A Work Order row is a written instruction; execution is
 //! a later stage that does not exist yet.
 
-use crate::execution_station::station_daily_note_usage_in;
+use crate::station_read::station_daily_note_usage_in;
 use linggan_contracts::{AdmissionFacts, AdmissionOutcome, Capacity, decide_admission};
 use linggan_storage_postgres::Database;
 use serde_json::json;
