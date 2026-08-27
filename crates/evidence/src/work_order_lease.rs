@@ -157,6 +157,48 @@ pub async fn release_work_order_lease(
     Ok(())
 }
 
+/// 采集包被接纳后收尾：结束租约，并记下这个目标「真的拿回了材料」。
+///
+/// **这是闭环缺的那一环。**在它之前，租约只会过期——于是「派过」与「成了」永远分不开，
+/// 下一轮巡检也没有依据判断上一轮是成是败。
+///
+/// 按 task 找租约而不是按工单：插件交回来的只有 task 与 attempt，它不知道自己属于哪张
+/// 工单，也不该知道——工单是控制层的概念。
+pub async fn complete_lease_for_task(
+    database: &Database,
+    task_id: Uuid,
+) -> Result<Option<Uuid>, LeaseError> {
+    if !lease_schema_is_ready(database).await? {
+        return Err(LeaseError::SchemaUnavailable);
+    }
+    let mut transaction = database.pool().begin().await?;
+    let completed: Option<(Uuid, Uuid)> = sqlx::query_as(
+        "UPDATE collection_work_order_lease l \
+         SET released_at = scope_001_now(), release_reason = 'completed' \
+         FROM collection_work_order w \
+         WHERE l.task_id = $1 AND l.released_at IS NULL \
+           AND w.work_order_ref = l.work_order_ref \
+         RETURNING l.lease_ref, w.target_ref",
+    )
+    .bind(task_id)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some((lease_ref, target_ref)) = completed else {
+        // 没有对应的活租约不是错误：手动采集本来就不带租约，重放也可能已经收过尾。
+        transaction.commit().await?;
+        return Ok(None);
+    };
+    sqlx::query(
+        "UPDATE collection_observation_target \
+         SET last_patrol_succeeded_at = scope_001_now() WHERE target_ref = $1",
+    )
+    .bind(target_ref)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(Some(lease_ref))
+}
+
 /// 把已过期但仍标为未结束的租约收回。
 ///
 /// 过期是时间到了这个事实，不是一次状态变更；但**必须落成记录**，否则「它是正常到期还是

@@ -183,6 +183,7 @@ migrate() {
   apply_migration_once "0010_work_order_lease" "$project_root/database/migrations/0010_work_order_lease.sql"
   apply_migration_once "0011_execution_gate" "$project_root/database/migrations/0011_execution_gate.sql"
   apply_migration_once "0012_target_monitor_schedule" "$project_root/database/migrations/0012_target_monitor_schedule.sql"
+  apply_migration_once "0013_drop_execution_gate" "$project_root/database/migrations/0013_drop_execution_gate.sql"
 }
 
 case "$command_name" in

@@ -426,8 +426,44 @@ async function checkInStationOnce() {
   return checkingInStation;
 }
 
-chrome.runtime.onInstalled.addListener(() => { void checkInStationOnce(); });
-chrome.runtime.onStartup?.addListener(() => { void checkInStationOnce(); });
+/**
+ * 自动领活的节拍。
+ *
+ * 用 `chrome.alarms` 而不是长连接或 setInterval：**MV3 的 service worker 空闲会被终止**，
+ * setInterval 会随之消失，长连接则是在跟平台的设计对着干。alarms 能在 worker 被杀后把它
+ * 叫醒，浏览器重启也还在——它是这个平台的原生唤醒原语。
+ *
+ * **间隔由服务端在每次回答里给**（`nextPollAfterSeconds`）：没活就退避，有活就立刻再来。
+ * 插件不自定节奏，否则想调就得重新发一版，而十个插件会各自按自己的常量敲门。
+ */
+const PATROL_ALARM = 'linggan-patrol';
+// Chrome 对 alarms 的最小周期是 1 分钟，比这更短的退避只能靠下一次事件唤醒。
+const MIN_ALARM_MINUTES = 1;
+
+async function scheduleNextClaim(seconds) {
+  const minutes = Math.max(MIN_ALARM_MINUTES, Math.round((Number(seconds) || 300) / 60));
+  await chrome.alarms.create(PATROL_ALARM, { delayInMinutes: minutes });
+}
+
+async function patrolTick() {
+  const result = await runDispatchedTask().catch(() => null);
+  // 服务端说了下次隔多久；说不出来就用保守的 5 分钟，而不是继续每分钟敲。
+  await scheduleNextClaim(result?.nextPollAfterSeconds ?? 300);
+  return result;
+}
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === PATROL_ALARM) void patrolTick();
+});
+
+chrome.runtime.onInstalled.addListener(() => {
+  void checkInStationOnce();
+  void scheduleNextClaim(60);
+});
+chrome.runtime.onStartup?.addListener(() => {
+  void checkInStationOnce();
+  void scheduleNextClaim(60);
+});
 // service worker 每次被唤醒都会执行到这里，等于一次轻量心跳。
 void checkInStationOnce();
 
@@ -471,8 +507,9 @@ async function runDispatchedTask() {
   if (!authorExternalId) {
     return { success: true, state: 'target_incomplete', executed: false, message: '任务没有指明创作者。' };
   }
-  const tab = await openAuthorTab(authorExternalId);
-  if (!tab?.id) {
+  const { windowId, tabId } = await openAuthorWindow(authorExternalId);
+  if (!tabId) {
+    await closeCollectionWindow(windowId);
     return { success: false, state: 'tab_unavailable', message: '无法打开该创作者主页。' };
   }
 
@@ -480,7 +517,11 @@ async function runDispatchedTask() {
     ? LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_AUTHOR
     : LINGGAN_RUNTIME_ACTION.DISCOVER_SURFACE;
   try {
-    const response = await chrome.tabs.sendMessage(tab.id, {
+    const ready = await waitForTabReady(tabId);
+    if (!ready) {
+      return { success: false, state: 'page_timeout', message: '创作者主页加载超时，本次未采集。' };
+    }
+    const response = await chrome.tabs.sendMessage(tabId, {
       action,
       mode: 'profile',
       // 配额来自工单，不来自页面对话框：执行端不得自行放宽。
@@ -493,26 +534,63 @@ async function runDispatchedTask() {
       executed: true,
       capability,
       leaseRef: claim.leaseRef,
+      nextPollAfterSeconds: claim.nextPollAfterSeconds,
       message: response?.message || `已按派下来的任务执行「${capability}」。`,
     };
   } catch (error) {
-    return {
-      success: false,
-      state: 'page_unavailable',
-      message: '创作者主页尚未就绪，请等页面加载完成后重试。',
-    };
+    return { success: false, state: 'page_unavailable', message: '创作者主页未能响应，本次未采集。' };
+  } finally {
+    // 无论成败都关窗。留下的僵尸窗口会一直吃内存——1000 篇/天会开上百次窗。
+    await closeCollectionWindow(windowId);
   }
 }
 
-/// 打开或复用创作者主页。**平台 ID 才是身份**，URL 由它拼出来，不反过来。
-async function openAuthorTab(authorExternalId) {
+/**
+ * 在一个独立的、不抢焦点的窗口里打开创作者主页。
+ *
+ * 与内容工作台同一套做法（`navigationOrchestrator`）：`focused: false` 不打断人手上的
+ * 工作，`autoDiscardable: false` 防止浏览器在采集中途把标签页丢弃。**跑完即关**——
+ * 1000 篇/天意味着窗口会开上百次，不关就是几十个标签页常驻吃内存。
+ *
+ * **平台 ID 才是身份**，URL 由它拼出来，不反过来。
+ */
+async function openAuthorWindow(authorExternalId) {
   const url = `https://www.xiaohongshu.com/user/profile/${encodeURIComponent(authorExternalId)}`;
-  const existing = await chrome.tabs.query({ url: `${url}*` });
-  if (existing.length > 0) {
-    await chrome.tabs.update(existing[0].id, { active: true });
-    return existing[0];
+  const created = await chrome.windows.create({ url, focused: false, type: 'normal' });
+  const tabId = Number(created?.tabs?.[0]?.id || 0) || null;
+  if (tabId) {
+    await chrome.tabs.update(tabId, { autoDiscardable: false }).catch(() => {});
   }
-  return chrome.tabs.create({ url, active: true });
+  return { windowId: created?.id ?? null, tabId };
+}
+
+/// 采集窗口用完即关。失败也要关：留下的僵尸窗口会一直吃内存。
+async function closeCollectionWindow(windowId) {
+  if (!windowId) return;
+  try {
+    await chrome.windows.remove(windowId);
+  } catch {
+    // 窗口可能已被人手动关掉，那不是错误。
+  }
+}
+
+/// 等页面加载完成。不等就发消息，content script 往往还没注入。
+function waitForTabReady(tabId, timeoutMs = 20000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ready) => {
+      if (settled) return;
+      settled = true;
+      chrome.tabs.onUpdated.removeListener(listener);
+      resolve(ready);
+    };
+    function listener(updatedTabId, changeInfo) {
+      if (updatedTabId === tabId && changeInfo.status === 'complete') finish(true);
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+    // 超时也要有结论：一个永远不 resolve 的等待会把整个执行挂住。
+    setTimeout(() => finish(false), timeoutMs);
+  });
 }
 
 chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {

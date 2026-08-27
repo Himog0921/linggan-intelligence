@@ -59,6 +59,6 @@ pub use station_read::{
     StationOverview, UnclaimedInstallation, read_station_overview, station_daily_note_usage,
 };
 pub use work_order_lease::{
-    DETAIL_STEP_DEFERRED_REASON, IssuedLease, LeaseError, expire_lapsed_leases,
+    DETAIL_STEP_DEFERRED_REASON, IssuedLease, LeaseError, complete_lease_for_task, expire_lapsed_leases,
     issue_work_order_lease, lease_schema_is_ready, release_work_order_lease,
 };

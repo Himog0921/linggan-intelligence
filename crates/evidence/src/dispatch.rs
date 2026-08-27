@@ -3,8 +3,12 @@
 //! 这里**只做决策，不做执行**（规则文档：调度决策与重执行必须分开，tick 只做轻量状态推进
 //! 与入队）。它不下载、不转录、不访问任何平台，只回答「可以派 / 不可以派，以及为什么」。
 //!
-//! 拒绝的理由必须具体。一个笼统的「暂无任务」会让人分不清是「今天额度用完了」「风险
-//! 暂停中」还是「闸门根本没开」——这三件事的处置完全不同。
+//! 拒绝的理由必须具体。一个笼统的「暂无任务」会让人分不清是「今天额度用完了」还是
+//! 「风险暂停中」——这两件事的处置完全不同。
+//!
+//! 真实执行闸门已于 2026-08-28 删除（migration 0013）：一个必须由人反复上弦的开关，
+//! 装不进一个必须无人值守运行的系统。稳态的控制是每日额度、风险暂停与授权到期，它们
+//! 默认允许、有界、自己复位。
 
 use crate::station_read::station_daily_note_usage_in;
 use linggan_storage_postgres::Database;
@@ -32,8 +36,6 @@ pub enum DispatchDecision {
     },
     /// 这个安装还没归位到任何工位，因此不属于任何工位的产能。
     InstallationNotClaimed,
-    /// 真实执行闸门没开。这是**默认状态**，不是故障。
-    GateClosed,
     /// 有覆盖本平台或 lane 的风险暂停。
     RiskPaused { reason: String },
     /// 这台工位今天的额度已经用完。工位没坏，明天自然恢复。
@@ -43,11 +45,30 @@ pub enum DispatchDecision {
 }
 
 impl DispatchDecision {
+    /// 下次隔多久再来问。
+    ///
+    /// **节奏由服务端给，不由插件自己定。**插件定的话，想调就得重新发一版插件；而且十个
+    /// 插件会各自按自己的常量敲门，服务端对总量毫无控制。
+    ///
+    /// 取值按「这个答案多久可能变一次」来定：额度触顶要等次日窗口重置，没必要频繁问；
+    /// 有活可派时立刻再来，因为一次派发通常意味着后面还有。
+    pub fn next_poll_after_seconds(&self) -> u32 {
+        match self {
+            // 刚派出一个，后面很可能还有——立刻再来。
+            Self::Dispatch { .. } => 0,
+            Self::NothingWaiting => 300,
+            // 触顶要等次日自然日窗口重置，问得再勤也不会变。
+            Self::DailyQuotaReached { .. } => 1800,
+            Self::RiskPaused { .. } => 900,
+            // 没归位的安装再怎么问也拿不到活，等人认领。
+            Self::InstallationNotClaimed => 900,
+        }
+    }
+
     pub fn code(&self) -> &'static str {
         match self {
             Self::Dispatch { .. } => "dispatch",
             Self::InstallationNotClaimed => "installation_not_claimed",
-            Self::GateClosed => "execution_gate_closed",
             Self::RiskPaused { .. } => "risk_paused",
             Self::DailyQuotaReached { .. } => "daily_quota_reached",
             Self::NothingWaiting => "nothing_waiting",
@@ -61,7 +82,7 @@ impl DispatchDecision {
 }
 
 pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar::<_, bool>("SELECT to_regclass('collection_execution_gate') IS NOT NULL")
+    sqlx::query_scalar::<_, bool>("SELECT to_regclass('collection_work_order_lease') IS NOT NULL")
         .fetch_one(database.pool())
         .await
 }
@@ -102,11 +123,10 @@ pub async fn decide_dispatch(
         return Ok(DispatchDecision::DailyQuotaReached { quota, used });
     }
 
-    // 先取候选，因为闸门与风险暂停都是**按平台与 lane 限定范围**的：不知道这次要做的是
-    // 哪条 lane，就无法判断覆盖它的闸门是否开着。此前这两处检查不带范围，等于「任何一个
-    // 开着的闸门都放行全部 lane」——那让闸门表上的 platform/lane 两列形同虚设。
+    // 先取候选，因为风险暂停是**按平台与 lane 限定范围**的：不知道这次要做的是哪条
+    // lane，就无法判断覆盖它的暂停是否生效。
     //
-    // 顺序仍然保证「有任务却被拦」不会被报成「没有任务」：只有确实没有候选时才回
+    // 顺序保证「有任务却被拦」不会被报成「没有任务」：只有确实没有候选时才回
     // `NothingWaiting`。
     let waiting: Option<(Uuid, Uuid, Value, String, String)> = sqlx::query_as(
         "SELECT t.task_id, l.lease_ref, t.task_spec, t.platform, l_o.lane \
@@ -129,9 +149,6 @@ pub async fn decide_dispatch(
         return Ok(DispatchDecision::NothingWaiting);
     };
 
-    if !execution_gate_is_open(&mut transaction, &platform, &lane).await? {
-        return Ok(DispatchDecision::GateClosed);
-    }
     if let Some(reason) = active_risk_pause(&mut transaction, &platform, &lane).await? {
         return Ok(DispatchDecision::RiskPaused { reason });
     }
@@ -142,27 +159,6 @@ pub async fn decide_dispatch(
         lease_ref,
         task_spec,
     })
-}
-
-/// 覆盖这个平台与 lane 的闸门是否开着。空表即关闭——空表本身就是有效答案。
-///
-/// `platform IS NULL` / `lane IS NULL` 表示该维度不设限。**必须按范围匹配**：为 patrol
-/// 开的闸门不应连带放行 deep_archive。
-async fn execution_gate_is_open(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    platform: &str,
-    lane: &str,
-) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM collection_execution_gate \
-                        WHERE closed_at IS NULL AND expires_at > scope_001_now() \
-                          AND (platform IS NULL OR platform = $1) \
-                          AND (lane IS NULL OR lane = $2))",
-    )
-    .bind(platform)
-    .bind(lane)
-    .fetch_one(&mut **transaction)
-    .await
 }
 
 /// 覆盖这个平台与 lane 的风险暂停。判据与准入、发租处保持一致——同一条规则有三份实现

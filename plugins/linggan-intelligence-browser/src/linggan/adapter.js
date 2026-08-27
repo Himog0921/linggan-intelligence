@@ -178,11 +178,11 @@ export async function claimLingganDispatch({
   health = null,
 } = {}) {
   if (typeof fetchImpl !== 'function') {
-    return { mayExecute: false, decision: 'unavailable', message: '浏览器当前无法连接 Linggan。' };
+    return { mayExecute: false, decision: 'unavailable', message: '浏览器当前无法连接 Linggan。', nextPollAfterSeconds: 900 };
   }
   const route = dispatchClaimRouteFromHealth(health);
   if (!route) {
-    return { mayExecute: false, decision: 'unavailable', message: 'Linggan 本机服务尚未开放任务派发。' };
+    return { mayExecute: false, decision: 'unavailable', message: 'Linggan 本机服务尚未开放任务派发。', nextPollAfterSeconds: 900 };
   }
   try {
     const response = await fetchImpl(`${origin}${route}`, {
@@ -192,7 +192,7 @@ export async function claimLingganDispatch({
       body: JSON.stringify({ installKey }),
     });
     if (!response.ok) {
-      return { mayExecute: false, decision: 'unavailable', message: `Linggan 返回 ${response.status}。` };
+      return { mayExecute: false, decision: 'unavailable', message: `Linggan 返回 ${response.status}。`, nextPollAfterSeconds: 900 };
     }
     const body = await response.json().catch(() => null);
     const mayExecute = body?.mayExecute === true;
@@ -203,9 +203,12 @@ export async function claimLingganDispatch({
       taskSpec: mayExecute ? body?.taskSpec ?? null : null,
       leaseRef: mayExecute ? String(body?.leaseRef || '') : '',
       message: String(body?.reason || ''),
+      // 节奏由服务端给。插件不自定间隔——否则想调就得重新发一版插件。
+      nextPollAfterSeconds: Number(body?.nextPollAfterSeconds ?? 300),
     };
   } catch {
-    return { mayExecute: false, decision: 'unavailable', message: 'Linggan 本机服务当前不可访问。' };
+    // 连不上时退避得久一些：Linggan 没开着是常态，不该每分钟敲一次。
+    return { mayExecute: false, decision: 'unavailable', message: 'Linggan 本机服务当前不可访问。', nextPollAfterSeconds: 900 };
   }
 }
 

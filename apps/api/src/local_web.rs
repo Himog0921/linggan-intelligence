@@ -24,12 +24,13 @@ use linggan_evidence::{
     LocalSubmissionOutcome, LocalTaskOutcome, MediaUploadFinalizeClaim, ProducerRuntimeError,
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome,
     admit_media_blob, begin_media_upload, check_in_installation, claim_installation,
-    claim_media_upload_finalize, close_claim_window, complete_media_upload, create_manual_task,
-    create_producer_task, decide_dispatch, dispatch_schema_is_ready, grant_authorization,
-    ingest_discovery_package, issue_work_order_lease, list_targets_in_state,
-    local_discovery_schema_is_ready, local_producer_schema_is_ready, open_claim_window,
-    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_discovery_library,
-    read_local_media_blob, read_media_upload_session, read_runtime_library, read_station_overview,
+    claim_media_upload_finalize, close_claim_window, complete_lease_for_task,
+    complete_media_upload, create_manual_task, create_producer_task, decide_dispatch,
+    dispatch_schema_is_ready, grant_authorization, ingest_discovery_package,
+    issue_work_order_lease, list_targets_in_state, local_discovery_schema_is_ready,
+    local_producer_schema_is_ready, open_claim_window, producer_runtime_has_packages,
+    producer_runtime_schema_is_ready, read_discovery_library, read_local_media_blob,
+    read_media_upload_session, read_runtime_library, read_station_overview,
     record_media_download_failure, record_media_upload_chunk, register_station,
     release_media_upload_finalize, request_and_admit, retire_station, start_local_attempt,
     start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
@@ -1118,7 +1119,14 @@ async fn submit_producer_package_route(
             axum::http::StatusCode::CONFLICT,
             "attempt_terminal_submission_conflict",
         ),
-        Ok(outcome) => Json(outcome).into_response(),
+        Ok(outcome) => {
+            // 采集包被接纳后收尾：结束租约并记下这个目标真的拿回了材料。没有这一步，
+            // 「派过」与「成了」永远分不开，下一轮巡检也没有依据判断上一轮是成是败。
+            //
+            // 手动采集不带租约，此处返回 None，不是错误。
+            let _ = complete_lease_for_task(database, submission.task_id()).await;
+            Json(outcome).into_response()
+        }
         Err(ProducerRuntimeError::RoutingNotFound) => {
             local_producer_error(axum::http::StatusCode::NOT_FOUND, "attempt_not_found")
         }
@@ -2079,6 +2087,9 @@ fn dispatch_payload(decision: &DispatchDecision) -> serde_json::Value {
         // The plugin must key off this and nothing else. A task body without permission is
         // still not permission.
         "mayExecute": decision.permits_execution(),
+        // 节奏由服务端给：插件不自定间隔，否则想调就得重新发一版插件，而十个插件会各自
+        // 按自己的常量敲门，服务端对总量毫无控制。
+        "nextPollAfterSeconds": decision.next_poll_after_seconds(),
     });
     match decision {
         DispatchDecision::Dispatch {
@@ -2089,12 +2100,6 @@ fn dispatch_payload(decision: &DispatchDecision) -> serde_json::Value {
             payload["taskId"] = serde_json::json!(task_id);
             payload["leaseRef"] = serde_json::json!(lease_ref);
             payload["taskSpec"] = task_spec.clone();
-        }
-        DispatchDecision::GateClosed => {
-            payload["reason"] = serde_json::json!(
-                "真实执行闸门未开。这是默认状态，不是故障：合同 §12 要求先有一份新的真实 \
-                 Canary SCOPE 明确平台、镜头、lane、目标语义、最大范围与停止恢复，由人授权。"
-            );
         }
         DispatchDecision::RiskPaused { reason } => {
             payload["reason"] = serde_json::json!(reason);
