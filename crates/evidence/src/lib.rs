@@ -1,6 +1,7 @@
 //! Immutable source evidence. SCOPE-001 authorizes only synthetic Package/Record ingress after
 //! the semantic code gate; real producer evidence remains out of scope.
 
+mod acquisition_chain;
 mod collection_target;
 mod ingress;
 mod local_discovery;
@@ -9,6 +10,10 @@ mod producer_runtime;
 mod receipt;
 mod work_order;
 
+pub use acquisition_chain::{
+    AcquisitionChainError, AuthorizationGrant, RequestOutcome, acquisition_chain_schema_is_ready,
+    grant_authorization, request_and_admit,
+};
 pub use collection_target::{
     CollectionTargetError, ObservationTarget, StoreOutcome, collection_target_schema_is_ready,
     list_targets_in_state, store_pending_target, transition_target,

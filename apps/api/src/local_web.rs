@@ -18,16 +18,18 @@ use linggan_contracts::{
     parse_producer_task_spec,
 };
 use linggan_evidence::{
-    DiscoveryIngressError, LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome,
-    LocalTaskOutcome, MediaUploadFinalizeClaim, ProducerRuntimeError, RuntimeAttemptOutcome,
-    RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome, admit_media_blob,
-    begin_media_upload, claim_media_upload_finalize, complete_media_upload, create_manual_task,
-    create_producer_task, ingest_discovery_package, list_targets_in_state,
-    local_discovery_schema_is_ready, local_producer_schema_is_ready, producer_runtime_has_packages,
+    AcquisitionChainError, AuthorizationGrant, DiscoveryIngressError, LocalAttemptOutcome,
+    LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome, MediaUploadFinalizeClaim,
+    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
+    StoreOutcome, admit_media_blob, begin_media_upload, claim_media_upload_finalize,
+    complete_media_upload, create_manual_task, create_producer_task, grant_authorization,
+    ingest_discovery_package, list_targets_in_state, local_discovery_schema_is_ready,
+    local_producer_schema_is_ready, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_discovery_library, read_local_media_blob,
     read_media_upload_session, read_runtime_library, record_media_download_failure,
-    record_media_upload_chunk, release_media_upload_finalize, start_local_attempt,
-    start_producer_attempt, store_pending_target, submit_local_package, submit_producer_package,
+    record_media_upload_chunk, release_media_upload_finalize, request_and_admit,
+    start_local_attempt, start_producer_attempt, store_pending_target, submit_local_package,
+    submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -231,6 +233,14 @@ fn router(state: LocalWebState) -> Router {
             "/api/local/collection/targets",
             get(collection_targets_json).post(collection_target_intake),
         )
+        .route(
+            "/api/local/collection/authorizations",
+            post(collection_grant_authorization),
+        )
+        .route(
+            "/api/local/collection/archive-requests",
+            post(collection_archive_request),
+        )
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))
@@ -415,6 +425,128 @@ async fn collection_target_intake(State(state): State<LocalWebState>, body: Byte
         Err(_) => local_read_json_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "collection_targets_unavailable",
+        ),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct GrantBody {
+    target_kind: String,
+    #[serde(default)]
+    lane: Option<String>,
+    purpose: String,
+    #[serde(default)]
+    max_targets: Option<i32>,
+    #[serde(default)]
+    max_works_per_target: Option<i32>,
+    valid_for_days: i32,
+}
+
+/// COLLECTION-001 · a person grants an acquisition authorization.
+///
+/// Only a person may grant (contract §2). The route exists so that granting is an explicit,
+/// recorded act rather than a config file nobody reviews.
+async fn collection_grant_authorization(
+    State(state): State<LocalWebState>,
+    body: Bytes,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(grant) = serde_json::from_slice::<GrantBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "authorization_grant_invalid",
+        );
+    };
+    let lane = grant.lane.as_deref().unwrap_or("deep_archive");
+    match grant_authorization(
+        database,
+        &AuthorizationGrant {
+            platform: linggan_contracts::OPEN_PLATFORM,
+            target_kind: &grant.target_kind,
+            lane,
+            purpose: &grant.purpose,
+            max_targets: grant.max_targets,
+            max_works_per_target: grant.max_works_per_target,
+            valid_for_days: grant.valid_for_days,
+        },
+    )
+    .await
+    {
+        Ok(authorization_ref) => Json(serde_json::json!({
+            "authorizationRef": authorization_ref,
+            "grantedBy": "person",
+            // A grant permits; it does not schedule, queue or execute anything.
+            "execution": "NOT_STARTED",
+        }))
+        .into_response(),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "authorization_grant_rejected",
+        ),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ArchiveRequestBody {
+    target_ref: uuid::Uuid,
+    purpose: String,
+    #[serde(default)]
+    requested_by: Option<String>,
+}
+
+/// COLLECTION-001 · request deep archiving for one target, and run admission on it.
+///
+/// The response reports what admission concluded, including the refusals. A request that
+/// produced no Work Order is a normal, recorded outcome — not an error to be retried.
+async fn collection_archive_request(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(request) = serde_json::from_slice::<ArchiveRequestBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "archive_request_invalid",
+        );
+    };
+    let requested_by = request.requested_by.as_deref().unwrap_or("person");
+    match request_and_admit(
+        database,
+        request.target_ref,
+        "deep_archive",
+        &request.purpose,
+        requested_by,
+    )
+    .await
+    {
+        Ok(result) => Json(serde_json::json!({
+            "requestRef": result.request_ref,
+            "decisionRef": result.decision_ref,
+            "admission": result.outcome.code(),
+            "unansweredQuestion": result.outcome.unanswered_question().map(|q| q.number()),
+            "questionText": result.outcome.unanswered_question().map(|q| q.describe()),
+            "workOrderRef": result.work_order_ref,
+            // A Work Order is a written instruction. Nothing has run.
+            "execution": "NOT_STARTED",
+        }))
+        .into_response(),
+        Err(error) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            match error {
+                AcquisitionChainError::UnknownTarget => "unknown_target",
+                AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
+                AcquisitionChainError::SchemaUnavailable => "acquisition_chain_unavailable",
+                AcquisitionChainError::Database(_) => "acquisition_chain_unavailable",
+            },
         ),
     }
 }
