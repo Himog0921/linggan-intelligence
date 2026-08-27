@@ -159,6 +159,10 @@ export function readCurrentXhsSearchSurfaceContext({
   requestedLimit = 0,
   loadedCount = 0,
   stopReason = 'current_surface_read_once',
+  rounds = 0,
+  maxRounds = 0,
+  scrollTrace = [],
+  scrollTraceTruncated = false,
 } = {}) {
   const filterSnapshot = readCurrentXhsSearchFilterSnapshot(win);
   const suggestions = [...new Set(Array.from(doc?.querySelectorAll?.('.sug-item') || [])
@@ -172,6 +176,10 @@ export function readCurrentXhsSearchSurfaceContext({
       activeFilters: normalizeXhsSearchFilters(filterSnapshot),
       suggestionCount: suggestions.length,
     }),
+    rounds: Math.max(0, Math.round(Number(rounds || 0))),
+    maxRounds: Math.max(0, Math.round(Number(maxRounds || 0))),
+    scrollTrace: Array.isArray(scrollTrace) ? scrollTrace : [],
+    scrollTraceTruncated: Boolean(scrollTraceTruncated),
     suggestions,
     filterLabels: filterSnapshot.labels,
     rawFilterState: filterSnapshot.raw,

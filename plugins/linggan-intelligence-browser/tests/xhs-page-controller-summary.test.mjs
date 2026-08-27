@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { createXhsPageController } from '../src/content/xhsPageController.js';
+import {
+  createXhsPageController,
+  formatXhsDetailDeliveryMessage,
+} from '../src/content/xhsPageController.js';
 import { TASK_STATE } from '../src/shared/constants.js';
 
 function createControllerHarness() {
@@ -131,6 +134,139 @@ test('xhs control actions refuse absent tasks without changing visible progress'
   assert.deepEqual(controller.stopActiveTask(), { success: false, state: 'no_active_task' });
   assert.deepEqual(taskBarStates, []);
   assert.deepEqual(pauseResumeStates, []);
+});
+
+test('Linggan detail collection reports every receipt lane and never opens the manual media window', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  const toasts = [];
+  let mediaDialogCalls = 0;
+  let mediaDownloadCalls = 0;
+  globalThis.window = { location: { href: 'https://www.xiaohongshu.com/explore/note_1' } };
+  globalThis.document = {};
+
+  try {
+    const controller = createXhsPageController({
+      MSG: {},
+      assertPluginAuthorized: async () => ({ authorized: true }),
+      collectComments: async () => ({ total: 0, comments: [] }),
+      collectCommentImages: async () => ({ total: 0, images: [] }),
+      collectNote: async () => ({
+        title: '不应出现在回执里的原始标题',
+        images: ['https://example.com/one.jpg'],
+        lingganDetailPackageDelivery: {
+          state: 'pending',
+          lanes: { content: 'acknowledged', mediaSlots: 'pending', comments: 'acknowledged' },
+        },
+      }),
+      collectAuthor: async () => ({}),
+      BatchNoteController: function BatchNoteController() {},
+      BatchCommentController: function BatchCommentController() {},
+      injectUI: () => {},
+      toggleStopButton: () => {},
+      togglePauseResumeButtons: () => {},
+      showToast: (message, tone) => toasts.push({ message, tone }),
+      showCommentLimitDialog: async () => ({}),
+      showMediaDownloadDialog: async () => {
+        mediaDialogCalls += 1;
+        return { mediaTypes: ['images'], count: 1 };
+      },
+      showBatchSettingsDialog: async () => ({}),
+      ensureTaskControlBar: () => {},
+      updateTaskControlBar: () => {},
+      hideTaskControlBar: () => {},
+      isContextValid: () => true,
+      reportDone: () => {},
+      extractNoteId: () => 'note_1',
+      sendToBackground: async () => ({}),
+      downloadNoteMediaFromRecord: async () => {
+        mediaDownloadCalls += 1;
+        return { total: 1, success: 1, failed: 0 };
+      },
+    });
+    const button = { dataset: { action: 'collectNote', params: '{}' } };
+    await controller.handleButtonClick({
+      target: { closest: (selector) => (selector === '.lgboom-btn' ? button : null) },
+    });
+
+    assert.equal(mediaDialogCalls, 0);
+    assert.equal(mediaDownloadCalls, 0);
+    assert.equal(toasts.at(-1).message, '笔记详情已读取。Linggan 接纳回执：笔记详情：已接纳；媒体观察：待本机交付；评论与回复：已接纳');
+    assert.doesNotMatch(toasts.at(-1).message, /原始标题/);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+  }
+});
+
+test('explicit manual detail action retains the media selection and local download workflow', async () => {
+  const originalWindow = globalThis.window;
+  const originalDocument = globalThis.document;
+  let mediaDialogCalls = 0;
+  let mediaDownloadCalls = 0;
+  globalThis.window = { location: { href: 'https://www.xiaohongshu.com/explore/note_1' } };
+  globalThis.document = {};
+
+  try {
+    const controller = createXhsPageController({
+      MSG: {},
+      assertPluginAuthorized: async () => ({ authorized: true }),
+      collectComments: async () => ({ total: 0, comments: [] }),
+      collectCommentImages: async () => ({ total: 0, images: [] }),
+      collectNote: async () => ({
+        images: ['https://example.com/one.jpg'],
+        lingganDetailPackageDelivery: {
+          state: 'acknowledged',
+          lanes: { content: 'acknowledged', mediaSlots: 'acknowledged', comments: 'acknowledged' },
+        },
+      }),
+      collectAuthor: async () => ({}),
+      BatchNoteController: function BatchNoteController() {},
+      BatchCommentController: function BatchCommentController() {},
+      injectUI: () => {},
+      toggleStopButton: () => {},
+      togglePauseResumeButtons: () => {},
+      showToast: () => {},
+      showCommentLimitDialog: async () => ({}),
+      showMediaDownloadDialog: async () => {
+        mediaDialogCalls += 1;
+        return { mediaTypes: ['images'], count: 1 };
+      },
+      showBatchSettingsDialog: async () => ({}),
+      ensureTaskControlBar: () => {},
+      updateTaskControlBar: () => {},
+      hideTaskControlBar: () => {},
+      isContextValid: () => true,
+      reportDone: () => {},
+      extractNoteId: () => 'note_1',
+      sendToBackground: async () => ({}),
+      downloadNoteMediaFromRecord: async (_note, options) => {
+        mediaDownloadCalls += 1;
+        assert.deepEqual(options, { mediaTypes: ['images'] });
+        return { total: 1, success: 1, failed: 0 };
+      },
+    });
+    const button = { dataset: { action: 'collectNoteWithManualMedia', params: '{}' } };
+    await controller.handleButtonClick({
+      target: { closest: (selector) => (selector === '.lgboom-btn' ? button : null) },
+    });
+
+    assert.equal(mediaDialogCalls, 1);
+    assert.equal(mediaDownloadCalls, 1);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.document = originalDocument;
+  }
+});
+
+test('detail receipt formatting keeps a terminal lane visible instead of collapsing it into a package success', () => {
+  assert.deepEqual(formatXhsDetailDeliveryMessage({
+    state: 'partial_delivery_failure',
+    lanes: { content: 'acknowledged', mediaSlots: 'terminal', comments: 'pending' },
+  }), {
+    allAccepted: false,
+    message: '笔记详情已读取。Linggan 接纳回执：笔记详情：已接纳；媒体观察：未接纳；评论与回复：待本机交付',
+  });
 });
 
 test('current-surface discovery submits only after its bounded page reader has returned cards', async () => {

@@ -11,6 +11,7 @@ import {
   packageMediaSlots,
   packageReplies,
 } from '../src/linggan/producerRuntime.js';
+import { buildDiscoveryExecutionSummary } from '../src/platforms/xhs/noteCollector.js';
 import { requireControlReceipt } from '../src/linggan/controlReceipt.js';
 import { resolveDouyinBatchControlReceipt } from '../src/platforms/douyin/controlReceipt.js';
 
@@ -56,6 +57,23 @@ test('current-surface discovery packages exclude temporary DOM ordering referenc
 });
 
 test('search discovery retains its page receipt in the contract-supported checkpoint without claiming the result set is complete', () => {
+  const executionSummary = buildDiscoveryExecutionSummary({
+    stopReason: 'risk_control',
+    rounds: 3,
+    maxRounds: 40,
+    scrollTrace: [{
+      round: 3,
+      scrollTarget: 'window',
+      visibleCards: 27,
+      newlyDiscovered: 0,
+      totalDiscovered: 27,
+      action: 'none',
+      stopReason: 'risk_control',
+      noteId: 'must_not_leave_the_page',
+      title: 'must_not_leave_the_page',
+      before: { scrollTop: 800, viewportHeight: 600, documentHeight: 2000, atBottom: false },
+    }],
+  });
   const packageValue = packageDiscovery({
     platform: 'xhs',
     query: 'ADHD',
@@ -66,6 +84,7 @@ test('search discovery retains its page receipt in the contract-supported checkp
       loadedCount: 1,
       stopReason: 'current_surface_read_once',
       resultSetComplete: false,
+      ...executionSummary,
     },
   });
   assert.deepEqual(Object.keys(packageValue).sort(), [
@@ -75,6 +94,15 @@ test('search discovery retains its page receipt in the contract-supported checkp
   assert.equal(packageValue.checkpoint.surfaceReceipt.requestedLimit, 50);
   assert.equal(packageValue.checkpoint.surfaceReceipt.loadedCount, 1);
   assert.equal(packageValue.checkpoint.surfaceReceipt.resultSetComplete, false);
+  assert.equal(packageValue.checkpoint.surfaceReceipt.scrollTrace[0].stopReason, 'risk_control');
+  assert.equal(JSON.stringify(packageValue.checkpoint.surfaceReceipt.scrollTrace).includes('must_not_leave_the_page'), false);
+});
+
+test('observed media slots request slots rather than media bytes', () => {
+  const adapter = readFileSync(new URL('../src/linggan/contentRuntimeAdapter.js', import.meta.url), 'utf8');
+  const submitMediaSlots = adapter.slice(adapter.indexOf('async submitMediaSlots'), adapter.indexOf('async acquireMediaSlots'));
+  assert.match(submitMediaSlots, /acquireMedia: 'slots'/);
+  assert.doesNotMatch(submitMediaSlots, /acquireMedia: 'bytes'/);
 });
 
 test('partial media coverage retains acquired bytes and explicitly keeps unknown/not-attempted distinct', () => {
@@ -114,7 +142,7 @@ test('media delivery uses its own resumable chunk lane instead of blocking text 
   assert.doesNotMatch(background, /media-observations\/\$\{encodeURIComponent\(upload\.mediaObservationRef\)\}\/blob/);
 });
 
-test('visible producer controls use Linggan runtime commands and never revive old browser downloads', () => {
+test('producer controls use Linggan runtime commands while manual media remains an explicit separate action', () => {
   const popup = readFileSync(new URL('../src/popup/App.jsx', import.meta.url), 'utf8');
   const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
   const douyin = readFileSync(new URL('../src/platforms/douyin/index.js', import.meta.url), 'utf8');
@@ -132,6 +160,7 @@ test('visible producer controls use Linggan runtime commands and never revive ol
   assert.doesNotMatch(douyin, /downloadDouyinCommentImages\(/);
   assert.match(douyin, /batchCheckpoint/);
   assert.match(xhs, /评论图片区暂不可用/);
+  assert.match(xhs, /collectNoteWithManualMedia/);
 });
 
 test('XHS startup keeps page initialization passive while the target-driven route owns active loading', () => {

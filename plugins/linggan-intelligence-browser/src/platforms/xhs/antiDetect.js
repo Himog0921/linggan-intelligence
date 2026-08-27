@@ -1,38 +1,37 @@
-import { BATCH_CONFIG } from '../../shared/constants.js';
-import { randomDelay } from '../../shared/utils.js';
+// ========== 1. 有界页面加载等待 ==========
 
-// ========== 1. 随机延迟（已在 utils 中） ==========
+export function waitForPageSettle(delayMs = 120) {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(0, Math.round(Number(delayMs) || 0))));
+}
 
-// ========== 2. 模拟人类滚动 ==========
+// ========== 2. 有界页面加载滚动 ==========
 
 /**
- * 模拟人类滚动行为
- * 分多次小幅滚动，每次 100~300px，间隔 200~500ms
+ * Legacy function name retained for existing callers. It performs a finite, observable page
+ * loading scroll; it does not attempt to imitate or evade a platform's detection systems.
  */
-export async function humanScroll(element, distance) {
-  const steps = Math.ceil(Math.abs(distance) / 200);
-  const direction = distance > 0 ? 1 : -1;
+export async function humanScroll(element, distance, settleDelayMs = 180) {
+  if (!element || typeof element.scrollBy !== 'function') return;
+  const totalDistance = Math.abs(Number(distance || 0));
+  if (totalDistance <= 0) return;
 
-  for (let i = 0; i < steps; i++) {
-    const step = (Math.random() * (BATCH_CONFIG.scrollStepMax - BATCH_CONFIG.scrollStepMin) + BATCH_CONFIG.scrollStepMin) * direction;
-    element.scrollBy({ top: step, behavior: 'auto' });
-    await randomDelay(BATCH_CONFIG.scrollIntervalMin, BATCH_CONFIG.scrollIntervalMax);
-  }
+  element.scrollBy({ top: distance, behavior: 'auto' });
+  await waitForPageSettle(settleDelayMs);
 }
 
 // ========== 3. 分级节流 ==========
 
 /**
  * 根据已采集数量动态调整等待时间
- * 采集越多，等待越长，降低被检测风险
+ * 采集越多，等待越长，为页面加载和本地保存留出稳定窗口
  */
 export function throttle(collectedCount) {
   if (collectedCount < 10) {
-    return randomDelay(BATCH_CONFIG.intervalMin, BATCH_CONFIG.intervalMax);
+    return waitForPageSettle(450);
   } else if (collectedCount < 30) {
-    return randomDelay(BATCH_CONFIG.intervalMin * 1.5, BATCH_CONFIG.intervalMax * 1.5);
+    return waitForPageSettle(650);
   } else {
-    return randomDelay(BATCH_CONFIG.intervalMin * 2, BATCH_CONFIG.intervalMax * 2);
+    return waitForPageSettle(850);
   }
 }
 

@@ -1,7 +1,7 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-08-26
+> 最后核对: 2026-08-27
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
@@ -12,7 +12,9 @@
 
 Mog 已于 2026-08-26 明确授权在已连接 Chrome 中执行最小小红书页面探针，用于回答当前搜索上下文/下拉联想、搜索列表、笔记详情（详情、媒体与当前顺序下最多 30 条评论）和作者页究竟有哪些可见字段、插件能否交付、何时停止。该授权严格限于匿名化的字段存在性、数量、页面状态、顺序和缺口记录：不向 Linggan 提交或持久化真实笔记、评论、作者资料、媒体或原始页面/API 输出；不读取 Cookie、账号秘密或隐藏账户资料；不下载媒体、不调用 OCR/ASR、不绕过验证码或安全限制。它是对 `DEV-03` 的受限预检，不表示 DEV-03、真实 Evidence 接入、插件发布、Canary、平台兼容、分析、部署或用户验收已经通过。唯一登记入口为 [`platforms/xiaohongshu/capture-capability-registry.md`](platforms/xiaohongshu/capture-capability-registry.md)，执行计划为 [`plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md)。
 
-首轮实测已确认搜索筛选、下拉结构、搜索卡片和作者页 DOM 的一部分当前事实，但同时暴露详情面漂移：当前详情使用 `.note-detail-mask / .note-container / .note-content / .comments-el`，本次页面未出现旧 `noteDetailMap`。Issue #76 已在源码中实现搜索页面事实回执、详情 DOM 回退和统一的“详情 + 媒体观察 + 最多 30 条评论”逻辑结果；其中 `30` 是标准详情窗口硬上限，空状态、部分结果和停止原因分开记录。Issue #78 `PLUGIN-XHS-ACTIVE-COLLECTION-001` 已获 Mog 授权，负责把搜索/主页发现、单篇评论深采和批量评论升级为目标驱动、主动加载、可暂停恢复的执行能力：`30` 不限制独立深采或批量评论，但每项任务必须保留目标、实际、停止原因和恢复状态。它不授权真实页面执行、真实材料交付、发布、部署或业务验收；**真实非空评论、排序、楼中楼、实际接纳、发布、部署和用户验收仍为 `SOURCE_INCOMPLETE` / 未验证**。代码通过不替代这些真实链路结论。
+首轮实测已确认搜索筛选、下拉结构、搜索卡片和作者页 DOM 的一部分当前事实，但同时暴露详情面漂移：当前详情使用 `.note-detail-mask / .note-container / .note-content / .comments-el`，本次页面未出现旧 `noteDetailMap`。Issue #76 已在源码中实现搜索页面事实回执、详情 DOM 回退和统一的“详情 + 媒体观察 + 最多 30 条评论”逻辑结果；其中 `30` 是标准详情窗口硬上限，空状态、部分结果和停止原因分开记录。Issue #78 `PLUGIN-XHS-ACTIVE-COLLECTION-001` 已获 Mog 授权，负责把搜索/主页发现、单篇评论深采和批量评论升级为目标驱动、主动加载、可暂停恢复的执行能力：`30` 不限制独立深采或批量评论，但每项任务必须保留目标、实际、停止原因和恢复状态。
+
+Issue #80 `PLUGIN-XHS-ADAPTIVE-SCROLL-AND-DETAIL-RECEIPT-001` 正在专属 worktree 实施：它把“采集当前笔记到 Linggan”与“人工采集并下载媒体”明确拆分，前者不得弹下载窗口，后者保留旧的人工选择和下载；详情回执按笔记详情、媒体观察、评论与回复三条 lane 如实显示。本轮还将页面加载收敛为有限、可解释的步骤，`no_progress` 不伪装成页面结束。此前在一次明确确认下提交的最小详情样本，仅证明一条当前笔记记录进入 Linggan 当前投影；未下载媒体，未证明三条 lane 各自接纳。**真实新版本安装、不同筛选、非空评论/楼中楼、实际 lane 接纳、发布、部署和用户验收仍为 `SOURCE_INCOMPLETE` / 未验证**；代码检查不替代这些真实链路结论。
 
 ### PLUGIN-RUNTIME-001 / Issue #50（执行中）
 

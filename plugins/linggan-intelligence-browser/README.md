@@ -1,8 +1,8 @@
 # Linggan Intelligence Browser
 
 > 状态: Draft target-driven XHS Producer adapter
-> 版本: `0.4.7`
-> 适用范围: `PLUGIN-XHS-ACTIVE-COLLECTION-001`（GitHub Issue #78）及其既有 LOCAL_TRUSTED 接收边界
+> 版本: `0.4.8`
+> 适用范围: `PLUGIN-XHS-ACTIVE-COLLECTION-001`（GitHub Issue #78）、`PLUGIN-XHS-ADAPTIVE-SCROLL-AND-DETAIL-RECEIPT-001`（GitHub Issue #80）及其既有 LOCAL_TRUSTED 接收边界
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
 
@@ -26,13 +26,17 @@ Linggan 的接收合同或平台访问授权。
 endpoint、同步和 fallback 都不是当前运行路径。
 
 小红书的「按目标发现」会以任务请求数量为上限，继续滚动和去重：达到目标、确认页面
-已无新增、稳定无新增或达到执行预算时，都会保留实际数、轮次和停止原因。搜索页会同时
+已无新增、无新增但未证明页面到底，或达到执行预算时，都会保留实际数、轮次和停止原因。
+每轮仅记录可解释的页面加载事实（可见数量、增量数量、滚动位置/高度、到底状态与停止原因），
+不记录笔记原文、链接或标识。搜索页会同时
 带回当前可见筛选状态和下拉联想的页面事实；它不把自然到底说成平台全量，也不把实际数
 反写成任务目标。
 
-标准「采集当前笔记」是一次逻辑结果：详情、媒体槽位观察以及**最多 30 条**当前评论。
-其中任一交付 lane 尚在队列时，界面只会说明详情已读取、各 lane 待交付，不会把正文
-接纳误说为整个详情包已接纳。单篇评论深采和批量评论是另一类明确执行任务：可设上限，
+标准「采集当前笔记到 Linggan」是一次逻辑结果：详情、媒体槽位观察以及**最多 30 条**当前评论。
+它不会打开媒体选择窗口，也不会下载媒体字节；界面逐条显示“笔记详情、媒体观察、评论与回复”
+的本机接纳状态，其中任一 lane 尚在队列或未接纳时，不会把正文接纳误说为整个详情包已接纳。
+「人工采集并下载媒体」是并列的明确人工动作：先保留同一详情结果，再打开原有选择窗口，按
+人工选择下载本地媒体。单篇评论深采和批量评论是另一类明确执行任务：可设上限，
 或选择“尽量采到公开自然结束”；它们不受标准详情 30 条窗口限制。批量评论逐篇保留
 暂停/恢复 checkpoint；页面明确无评论是一篇成功的空结果，页面打不开、超时和用户停止
 则各自保留原因，不连坐已取得的其它目标。
@@ -80,7 +84,7 @@ npm run release:reproducibility
 npm run verify:linggan-isolation
 ```
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.4.7.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.4.8.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

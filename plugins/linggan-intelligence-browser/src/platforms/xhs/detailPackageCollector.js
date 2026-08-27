@@ -5,10 +5,37 @@ import { buildXhsDetailCaptureReceipt, normalizeXhsDetailCommentLimit } from './
 import { collectNote } from './noteCollector.js';
 
 function deliveryState(deliveries = []) {
-  const states = deliveries.map((value) => String(value?.delivery || '')).filter(Boolean);
+  const states = deliveries.map((value) => String(value?.delivery || value || '')).filter(Boolean);
   if (states.length > 0 && states.every((state) => state === 'acknowledged')) return 'acknowledged';
   if (states.some((state) => state === 'rejected' || state === 'terminal')) return 'partial_delivery_failure';
   return 'pending';
+}
+
+export function aggregateCommentAndReplyDelivery(commentDelivery = {}) {
+  const comments = String(commentDelivery?.delivery || 'unknown');
+  const replies = String(commentDelivery?.replies?.delivery || '');
+  if (!replies) return comments;
+  if (comments === 'rejected' || comments === 'terminal' || replies === 'rejected' || replies === 'terminal') {
+    return 'terminal';
+  }
+  if (comments === 'acknowledged' && replies === 'acknowledged') return 'acknowledged';
+  return 'pending';
+}
+
+function detailDeliveryMessage(lanes = {}) {
+  const laneSummary = [
+    ['content', '笔记详情'],
+    ['mediaSlots', '媒体观察'],
+    ['comments', '评论与回复'],
+  ].map(([key, label]) => {
+    const value = String(lanes[key] || 'unknown');
+    const status = value === 'acknowledged'
+      ? '已接纳'
+      : (value === 'pending' || value === 'queued' ? '待本机交付' : (value === 'rejected' || value === 'terminal' ? '未接纳' : '状态未知'));
+    return `${label}：${status}`;
+  }).join('；');
+
+  return `Linggan 接纳回执：${laneSummary}`;
 }
 
 // This composes one user-visible collection intent. Delivery still uses the established
@@ -73,17 +100,21 @@ export async function collectXhsNoteDetailPackage(wd = window, options = {}) {
       noteId: note.noteId,
       options: { maxTotal: commentLimit, maxSubComments: options.maxSubComments, commentDepthMode: options.commentDepthMode },
     });
-    const state = deliveryState([note.lingganDelivery, note.lingganMediaDelivery, commentResult.lingganDelivery]);
+    const commentAndReplyDelivery = aggregateCommentAndReplyDelivery(commentResult.lingganDelivery);
+    const state = deliveryState([
+      note.lingganDelivery,
+      note.lingganMediaDelivery,
+      commentAndReplyDelivery,
+    ]);
+    const lanes = {
+      content: note.lingganDelivery?.delivery || 'unknown',
+      mediaSlots: note.lingganMediaDelivery?.delivery || 'unknown',
+      comments: commentAndReplyDelivery,
+    };
     note.lingganDetailPackageDelivery = {
       state,
-      lanes: {
-        content: note.lingganDelivery?.delivery || 'unknown',
-        mediaSlots: note.lingganMediaDelivery?.delivery || 'unknown',
-        comments: commentResult.lingganDelivery?.delivery || 'unknown',
-      },
-      message: state === 'acknowledged'
-        ? '正文、媒体观察和默认评论窗口均已接纳'
-        : '正文、媒体观察和默认评论窗口已分别进入本机交付队列',
+      lanes,
+      message: detailDeliveryMessage(lanes),
     };
     await noteStore.upsert(note);
   }
