@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": false,
+    "skipLibCheck": true,
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": [
+    "src/workbench/protocol/schema.js",
+    "src/workbench/protocol/deltaEnvelope.js",
+    "src/workbench/protocol/recordPayloadValidator.js",
+    "src/workbench/protocol/validator.js",
+    "src/workbench/runtime/batchResume.js",
+    "src/workbench/runtime/taskRuntimeObservability.js",
+    "src/platforms/registry.js",
+    "src/platforms/xhs/adapter.js",
+    "src/platforms/douyin/adapter.js",
+    "src/shared/targetIdentity.js"
+  ]
+}

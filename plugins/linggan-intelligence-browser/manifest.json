@@ -1,0 +1,109 @@
+{
+  "manifest_version": 3,
+  "name": "Linggan Intelligence Browser",
+  "version": "0.4.7",
+  "description": "Linggan Intelligence 浏览器执行端（灵感爆爆爆 v2.0.91 迁入基线）",
+  "permissions": [
+    "activeTab",
+    "tabs",
+    "storage",
+    "scripting"
+  ],
+  "host_permissions": [
+    "http://localhost:3000/*",
+    "https://xiaohongshu.com/*",
+    "https://*.xiaohongshu.com/*",
+    "https://www.xiaohongshu.com/*",
+    "https://ci.xiaohongshu.com/*",
+    "https://*.xhscdn.com/*",
+    "https://www.douyin.com/*",
+    "https://*.byteimg.com/*",
+    "https://*.douyinpic.com/*",
+    "https://*.douyinstatic.com/*",
+    "https://*.amemv.com/*",
+    "https://*.douyinvod.com/*",
+    "https://*.bytevcloudcdn.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://xiaohongshu.com/*",
+        "https://*.xiaohongshu.com/*"
+      ],
+      "js": [
+        "vendor.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_end"
+    },
+    {
+      "matches": [
+        "https://www.douyin.com/*"
+      ],
+      "js": [
+        "vendor.js",
+        "content.js"
+      ],
+      "css": [
+        "content.css"
+      ],
+      "run_at": "document_end"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icon-16.png",
+      "48": "icon-48.png",
+      "128": "icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icon-16.png",
+    "48": "icon-48.png",
+    "128": "icon-128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "dashboard.html",
+        "dashboard.js",
+        "dashboard.css",
+        "vendor.js",
+        "content.css",
+        "lgboom-logo.svg",
+        "lgboom-banner.svg",
+        "lgboom-inject-logo.svg",
+        "injected/noteMap.js",
+        "injected/user.js",
+        "injected/xhsApiCapture.js"
+      ],
+      "matches": [
+        "https://xiaohongshu.com/*",
+        "https://*.xiaohongshu.com/*"
+      ]
+    },
+    {
+      "resources": [
+        "dashboard.html",
+        "dashboard.js",
+        "dashboard.css",
+        "vendor.js",
+        "content.css",
+        "lgboom-logo.svg",
+        "lgboom-banner.svg",
+        "lgboom-inject-logo.svg",
+        "injected/douyinApiCapture.js"
+      ],
+      "matches": [
+        "https://www.douyin.com/*"
+      ]
+    }
+  ]
+}

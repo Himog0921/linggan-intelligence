@@ -11,7 +11,9 @@ workspace = true
 [dependencies]
 linggan-contracts = { path = "../contracts" }
 linggan-storage-postgres = { path = "../storage-postgres" }
+serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
+sha2 = "0.11.0"
 sqlx.workspace = true
 thiserror.workspace = true
 uuid = { workspace = true, features = ["v4"] }

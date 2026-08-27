@@ -7,3 +7,18 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+axum = { workspace = true, features = ["query"] }
+linggan-contracts = { path = "../../crates/contracts" }
+linggan-evidence = { path = "../../crates/evidence" }
+linggan-storage-postgres = { path = "../../crates/storage-postgres" }
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+sha2 = "0.11.0"
+sqlx.workspace = true
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread"] }
+uuid = { workspace = true, features = ["v4"] }
+
+[dev-dependencies]
+tower.workspace = true

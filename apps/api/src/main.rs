@@ -1,3 +1,6 @@
-fn main() {
-    println!("Linggan Intelligence API bootstrap: no production routes are enabled yet");
+mod local_web;
+
+#[tokio::main]
+async fn main() -> Result<(), std::io::Error> {
+    local_web::serve().await
 }

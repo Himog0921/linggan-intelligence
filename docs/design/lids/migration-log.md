@@ -1,7 +1,7 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-08-21
+> 最后核对: 2026-08-26
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
@@ -12,8 +12,169 @@
 
 - **来源**：Mog 明确指定 `/Users/moglenny/Downloads/Linggan_Intelligence_Design_System_v2.0`；主源文件校验值与不继承清单见 [README.md](README.md)。
 - **吸收**：`Token → Primitive → Component → Pattern → Page`、L1/L2/L3、暖灰/煤黑/Signal 的语义、Sans/Mono 分工、状态五轴、`PARTIAL + VALID`、动效/场景/响应式/a11y 边界、Agent 决策树、规格门与变更纪律。
-- **项目适配**：把来源包的运行时代码、目标目录、React/Three/Blender 路线、V3 模拟数据/状态和静态原型降级为未来候选；不创建 Web 应用、主题 CSS、组件、真实数据或部署。
+- **项目适配（截至 2026-08-21）**：把来源包的运行时代码、目标目录、React/Three/Blender 路线、V3 模拟数据/状态和静态原型降级为未来候选；当时未创建 Web 应用、主题 CSS、组件、真实数据或部署。LOCAL-001A 的后续受限实现见本日志 2026-08-24/25 条目。
 - **替代**：DESIGN-002 原有 DS-001–DS-007 的局部“暗色 Acid/新粗野主义”视觉值被 LIDS Token 与 L2 Pattern 取代；原有 Evidence/Boundary 和组件晋升的事实边界仍保留，并与 LIDS Data Truth 对齐。
 - **影响**：全项目未来 UI Agent；DESIGN-002 Topic 静态参考页、其 PAGE 规格、执行合同、设计治理、模板、索引和检查脚本。
 - **验证目标**：手册链接/状态头、LIDS 检查、Topic 专项检查、项目治理检查、静态浏览器走查与独立审查。
-- **未证明**：LIDS 仍为 `PROPOSED`；没有真实 L1/L2/L3 页面、运行时 Token、组件、真实数据/Agent 状态、3D 资产、性能、部署或 Mog 最终视觉验收。
+- **未证明（截至 2026-08-21）**：LIDS 当时仍为 `PROPOSED`；没有真实 L1/L2/L3 页面、运行时 Token、组件、真实数据/Agent 状态、3D 资产、性能、部署或 Mog 最终视觉验收。LOCAL-001A 的后续受限实现不改变该历史记录。
+
+## 2026-08-24 · LOCAL-001A 首个运行时 L1 Evidence Library token 映射
+
+- **来源与事项**：Mog 确认的 LOCAL-001、`REF-V7-001` 页面 Gold Master、Issue #25、`PAGE-EVIDENCE-001`。
+- **实际实现**：`apps/api/src/local_web/lids_tokens.css` 是当前唯一完整的运行时 token 值编辑源，完整承载 `LIDS-TOK-001` 的 107 个 `--lgi-*` token；`docs/design/lids/tokens.md` 是从该源单向同步的版本化规范与校验镜像，不能独立改值。`apps/api/src/local_web/evidence_library.css` 只能消费而不声明 token。Rust 测试逐项对照 107 个名称和值，没有引入第二个全局主题、组件库或视觉前缀。
+- **页面组合**：本页采用 `LIDS-PAT-001` 的 L1 `Corpus Explorer`，嵌入右侧受限 `Split Evidence Inspector`。原声、材料、搜索、动作和真实状态均未实现；首屏唯一视觉核心是来源不足的材料边界说明。
+- **局部例外**：`LOCAL-001-UI-EX-01` 仅为 V7 三栏比例保留 216px 左 rail、440px right inspector 与 2px 中央结构线。例外在 PAGE/Manifest 中可查询，未推广为 token 或跨页组件；以后第二页面复用前必须重新审查。
+- **Data Truth**：页面只表达 `SOURCE_INCOMPLETE`、`NOT_CONNECTED`、`UNKNOWN` 与“本页没有可展示的已接纳材料”。这些不表示系统库为 0、平台不存在内容、捕获失败或任何趋势；没有模拟数值、`LIVE`/`FRESH`、假按钮或前端回执。
+- **验证目标**：Rust route test、loopback HTTP、指定视口浏览器走查、CSS token/a11y 检查和治理检查。实际结果与未证明边界记录在 `ACC-EVIDENCE-001`。
+- **未证明**：LIDS 整体仍为 `PROPOSED`；本项不证明 Materials read model、真实 Evidence/Observation/Capture、数据库、插件/真实平台、媒体、OCR/ASR、跨页组件、部署或 Mog 验收。
+
+## 2026-08-25 · LOCAL-001A LIDS 当前状态对账
+
+- **原因**：独立 Spec 审查发现 README 与 system 仍将 2026-08-21 的“没有 Web runtime/主题 CSS/真实页面”写成当前事实，与已实现的 LOCAL-001A 相冲突。
+- **当前受限事实**：已有 loopback Rust host、一个 `/corpus/evidence` Evidence Library 页面，以及 `apps/api/src/local_web/lids_tokens.css` 这一唯一运行时 Token 值编辑源。
+- **仍未证明**：没有真实数据或 Materials read model、通用组件库、L2/L3 页面或场景、Agent runtime、部署、完整产品 Web 或 Mog/业务验收。LIDS 成熟度仍为 `PROPOSED`。
+- **治理与验证**：README/system/tokens 的当前表述按这一区分同步；Rust 测试精确核对 107 个运行时 Token 名称和值，页面 CSS 不声明 Token。此对账不改页面代码、路由、视觉数值、数据或任何运行能力。
+
+## 2026-08-25 · Issue #29 Evidence Library V7 精确视觉/骨架例外
+
+- **直接授权与替代范围**：Mog 明确要求 `/corpus/evidence` 按 `REF-V7-001` 完整 1:1 复刻。该直接授权只替代旧 `LOCAL-001-UI-EX-01` 中“仅 216px / 440px / 2px、其余使用 LIDS 页面值”的窄例外；不改变任何数据、权限、行动或跨页设计决定。
+- **实际页面范围**：`evidence_library.css` 以页面局部 `--v7-*` 变量承载 V7 的桌面 78px + 50px = 128px 全局页头、216px rail、440px inspector（响应式 420/380px）、全白底、黑色硬线、`#E8003F` 全局强调色与 `#EF4F25` Evidence 强调色，连同 V7 的页头、视图/筛选/查询、FACT LAYER、三栏和 Inspector HTML 骨架。桌面为 `100vh` 固定工作台并将滚动限制在 Results/Inspector；移动端首行改为自动高度以容纳换行导航，随后顺序折叠并使用页面滚动。
+- **非继承边界**：V7 的模拟运行状态、计数、帖子/评论/转录、时间、引用及成功回执不进入本页；未接通控件保留位置和视觉，但均 disabled/`aria-disabled` 且无副作用。中央区只显示 `SOURCE_INCOMPLETE` / `NO_ACCEPTED_MATERIAL_AVAILABLE`，Inspector 仅显示 no-selection / `UNKNOWN`。
+- **不形成第二套系统**：`lids_tokens.css` 未修改，仍是唯一全局 `--lgi-*` token 值源；`--v7-*` 不可被其他页面、CMP 或后续页面当作全局 token 使用。需要复用时必须重新进行 LIDS/页面审查和独立授权。
+- **验证与未证明**：四个指定 Chrome 视口的本地截图/几何、route/HTML 的诚实边界测试、format/clippy/test 与治理检查记录在 `ACC-EVIDENCE-001`。本项只证明本页静态视觉与禁用骨架；不证明 Materials read model、Evidence、数据库、插件、媒体/OCR/ASR、Agent、部署或业务验收。
+
+## 2026-08-25 · PLUGIN-001 自有 Browser Producer popup 的受限 L1 表达
+
+- **来源与事项**：Mog 已确认 Linggan 及其 Browser Producer 是同一独立系统；Issue #33 / `PLUGIN-001` 与 `LOCAL-001C0-DISCOVERY-BOUNDARY-V1`。
+- **实际实现**：新 popup 为受限 `L1 / Settings / Governance` Surface，仅呈现 `LINGGAN / version`、固定 `localhost:3000`、最小 `/health` 可达性、`NOT_AUTHORIZED` 和 `NOT_CONNECTED`。构建包从 Linggan 当前唯一 runtime token 值源复制 `--lgi-*` token，popup CSS 只消费该副本，不新增全局 Token 或 CMP。
+- **安全边界**：Manifest 只有 `http://localhost:3000/*` host permission 且 `permissions=[]`；无内容脚本、Cookie、下载、脚本注入、平台 host、真实材料、媒体或外部链接。Discovery 控件持续 disabled；本卡没有 ingress、Evidence 接纳、浏览器加载或平台采集。
+- **验证与未证明**：source/release 静态检查将记录在 `ACC-PLUGIN-001`；浏览器视觉走查、真实 health、安装加载、Discovery Package 接纳、平台/账号/媒体/OCR/ASR 和业务结果仍是 `NOT VERIFIED`，不得由安装包存在推断为已接通。
+
+## DESIGN-003 · 视觉基线换向 v2.0 → v3.0（2026-08-25）
+
+**触发**：Mog 在设计评审会话中逐项确认新的视觉方向，并要求手册与运行时页面同步到该方向。原基线的「暖灰纸面」与 Mog 的实际选择冲突。
+
+**Token 层**：107 项 → 117 项。
+
+| 项 | 原值 | 新值 | 理由 |
+|---|---|---|---|
+| `--lgi-canvas` | `#ecebe6` | `#ffffff` | Mog 明确选择纯白、否定暖灰 |
+| `--lgi-canvas-low` | `#deddd7` | `#f7f8f8` | 纯白体系层次向下做 |
+| `--lgi-canvas-sunken` | 不存在 | `#eef0f1` | 新增第三层面 |
+| `--lgi-ink` | `#121211` | `#111315` | 暖黑换冷黑，与纯白同调 |
+| `--lgi-body` / `muted` / `ghost` | 暖灰三级 | 冷灰三级 | 同上 |
+| `--lgi-success*` | 橄榄绿 | 祖母绿 `#05674a` / `#0e9e6e` | Mog 指定祖母绿 |
+| `--lgi-warning*` | 芥黄 | `#a67a04` / `#eaaa05` | Mog 指定蒙德里安参考色 |
+| `--lgi-danger*` | `#9e2517` | `#a42001` | 同一参考的砖红 |
+| `--lgi-info*` | 靛蓝 `#345a6f` | 灰蓝 `#42555a` / `#8d9a9d` | 原靛蓝在这套配色中过于跳脱 |
+| `--lgi-unknown*` | 不存在 | 三项 | 未知此前无专属角色，被迫借用 ghost |
+| `--lgi-danger-dot` / `--lgi-info-dot` | 不存在 | 新增 | 五轴对称，每轴都有文字 / 填充 / soft |
+| `--lgi-shadow-brutal` / `-lg` | 不存在 | `4px 4px 0` / `7px 7px 0` | 粗野重音需要实色硬阴影 |
+| `--lgi-mesh-fine` / `-major` | 不存在 | 两级点阵 | L1 背景纹理改用点阵而非划线网格 |
+
+**规则层**：
+
+- `system.md` 视觉定义改写为「纯白台面上的精密情报基础设施」，新增「新粗野主义作为重音，不作为底色」及每屏 8 处上限；L1 纹理条款由「关闭或极弱」改为「允许点阵测量场，禁止渐变/光晕/噪点/动态纹理」。
+- `primitives.md` 新增线条六原则；Primary 由 Ink 实底改为 Signal 实底 + Ink 边 + 硬阴影；hover 位移由全面禁止改为受限允许（仅重音元素、固定位移量、模糊阴影仍禁止）；新增禁用态规范；状态标签改实心填充并冻结填充色与文字色的分工。
+
+**运行时**：
+
+- `evidence_library.css` 不再 author 任何色值，全部经 `--v7-*` 别名解析到 LIDS token；测试新增断言禁止页面 CSS 出现 `#`。
+- 修复 11 处此前解析失败的变量引用（`--lgi-surface-base`、`--lgi-text-primary` 等从未在 token 中定义），这些引用全部位于真实 Discovery 卡片样式上，此前因窗口无卡片而未暴露。
+- 第二签名色 `#e8003f` 退役，签名色收敛为 `--lgi-signal`。
+- 可见边框由 194 条降至约 100 条，剩余部分几乎全部落在可交互元素上。
+
+**测试同步**：`runtime_token_source_matches_the_full_lids_baseline` 的数量断言 107 → 117；`evidence_page_keeps_the_v7_shell_and_three_column_geometry` 中被锁定的 `--v7-brand-red:#e8003f` 与 `--v7-red:#ef4f25` 两条常量断言，改为断言页面消费 token 且第二签名色已退役。这是基线换向导致的合同更新，不是为通过测试而放宽断言。
+
+**未处理**：`.v7-*` → `.lgi-*` 类名迁移、键盘可达性与 ARIA 补全、状态色图例，均另立卡。
+
+## DESIGN-004 · Corpus Rail 面层差异化与选中态重音（2026-08-25）
+
+无 Issue，Mog 在 DESIGN-003 合并后于会话中直接指定。范围仅限 Evidence Library 左侧 216px rail 的呈现层。
+
+**Token**：无新增、无修改。全部值经既有 `--v7-*` 别名解析到 `--lgi-*`。
+
+**规则层**：无改写。本次是对既有规则的首次落地应用——`primitives.md` 线条原则 2「面代替线」与「粗野重音的位移」中「当前选中项」一项，此前均未在运行时页面兑现。
+
+**运行时**（`evidence_library.css`）：
+
+- rail 面由 `--v7-white` 改为 `--v7-gray` + 56px/14px 双层点阵，与上下文行同款，两者垂直连续。
+- 导航项常态底改为 `transparent`；hover 改为白实面浮起并把序号转 signal。
+- 导航序号 9px → 11px Mono `600`，常态色 `--v7-muted` → `--v7-ghost`。
+- 选中项追加：6px 棋盘像素纹理（自右边缘向左四档离散衰减、固定 84px 宽）、`--v7-brutal` 实色硬阴影、`translate(-2px,-2px)` 位移。
+- `prefers-reduced-motion:reduce` 下新增关闭选中项常驻位移。
+- 栏脚上边线 `--v7-line` → `--v7-line-strong`。
+
+**离散衰减而非渐变**：纹理密度用四档 hard stop 分级，不使用连续渐变，以同时满足像素/ASCII 语言与 `system.md` 的 L1 渐变禁令。宽度用绝对像素而非百分比，使 rail 在移动端展开为全宽区块时纹理不等比放大。
+
+**参考图取舍**：Mog 提供的胶囊按钮参考图只吸收像素纹理。厚胶囊圆角、模糊阴影、暖棕底色三项不采纳，理由是与 DESIGN-003 中 Mog 本人的确认直接冲突，依据分别为 `system.md` §4.5、`primitives.md` 位移条款与 DESIGN-003 画布换向。
+
+**重音计数**：不新增重音元素，仅强化已有一处；当前屏计 7 处，仍在 8 处上限内。
+
+**测试**：无断言变更，`cargo test -p linggan-api` 8 passed / 5 ignored（5 项需隔离 PostgreSQL 证明库）。页面 CSS 内 `#` 计数保持为 0。
+
+**未验证**：hover 与 `:focus-visible` 规则已写入但无法触发——五个导航项当前全部 `disabled`。待任一路由接通后补验。
+
+**未处理**（沿用 DESIGN-003 遗留）：`.v7-*` → `.lgi-*` 类名迁移、键盘可达性与 ARIA 补全、状态色图例。
+
+### DESIGN-004 修订 · rail 面层回滚（2026-08-26）
+
+Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵纹理后，原本独一份的「上下文层」不再特殊，页面层次被压平。按用户最新确认优先，面层回滚。
+
+- `.v7-side` 背景由 `--v7-gray` + 双层点阵回到 `--v7-white`；rail 与主工作面继续由 2px 结构线分隔。
+- `.v7-side-nav:hover` 由「白实面浮起」回到 `--v7-gray`（白面上白色浮起不成立）；序号 hover 转 signal 保留。
+- `.v7-side-foot` 上边线由 `--v7-line-strong` 回到 `--v7-line`。
+- 选中态的像素纹理、实色硬阴影、`translate(-2px,-2px)` 位移，以及序号 11px / ghost、`:focus-visible`、reduced-motion 处理全部保留——它们各有独立规则依据，与面层选择无关。
+
+**实测结论**：`primitives.md` 线条原则 2「面代替线」不能无条件套用。当页面已存在一条以纹理承担语义的横向带时，纵向面复用同款纹理会消掉那一层的唯一性，减少的线条不抵消失的层次。此处记为本页一次实测观察，**不构成新规则**；是否需要在 `primitives.md` 中补充「纹理的唯一性」约束，留待出现第二个候选面时再判断。
+
+**验证**：`cargo test -p linggan-api` 8 passed / 5 ignored；1440×900 真实 Chrome 复核。1280×800 与 390×844 未复拍（本次仅色值变更，不涉及几何）。
+
+## DESIGN-005 · Collection Workspace 落地（2026-08-26）
+
+无 Issue，Mog 直接指定落地 `REF-V4-001`（Collection Workspace V4 Gold Master），并在实施前裁定三项：真实产品页而非演示页、保留深绿终端配色、按方案 B 清掉纯冗余。
+
+**Token**：117 → 127。新增 `--lgi-stream-*` 十项（bg / bg-raised / ink / muted / dim / mint / cyan / amber / red / line），承载全产品唯一的深色面。同一提交同步 `tokens.md` 镜像与数量断言。
+
+**规则层**：无改写。新增一条页面级长期例外 `DESIGN-005-UI-EX-01`：深色实时观察流与 `system.md` §4.10「不使用黑底荧光绿终端」冲突，Mog 明确保留；仅限运行态 / NOW 右栏，禁止扩散。V4 原型在该面大量使用 7–9px 功能文字，本次一律提到 DESIGN-003 已确认的 11px 下限，仅时间戳与刻度保留 9px。
+
+**共享层抽取**：全局页头此前写死在 Evidence Library 的页面模板里。做第二个页面之前先抽出 `shell.rs`（页头生成）与 `shell.css`（reset、页头、上下文行、216px 导轨），两页共用。抽取前后 `/corpus/evidence` 的 HTML 输出**逐字节一致**，导轨的英文标注由硬编码的 `CORPUS` 改为 `attr(data-readout)` 参数化。
+
+**运行时**：新增 `collection.rs`（五个子面渲染）、`collection_workspace.css`（页面层，整文件无字面色值）、`collection_workspace.js`（仅抽屉 tab / 宽度 / Escape）。导航状态全部由服务端路由渲染，首屏即正确视图——不复制原型「先画错页再客户端切换」的行为。
+
+**深色面的两次修正**：首版把结构线 token（20%）误用作扫描线与环境亮，整片泛绿；按 Gold Master 的 2.5% / 7% 强度改用 `color-mix` 从 mint 派生后复拍通过。深色面上的小标题从 dim 提到 muted 才可读。
+
+**自我复查记录**：首版实现在观察生产流里给六个阶段各写四格 `UNKNOWN`，一屏 24 个——正是本次审核批评 Gold Master 的那类冗余。已改为每阶段一格加一句区域级说明。
+
+**测试**：新增 6 项 Collection 专属断言，其中两项是防伪造：真实路由不得出现 Gold Master 的任何示例数字（146 / 07-08 / 具体博主名 / 具体指标），以及不得出现 `>0<`。全量 14 passed / 5 ignored。
+
+**未处理**：`.v7-*` → `.lgi-*` 类名迁移；键盘可达性完整覆盖；目标行与两张图表的几何（无数据可渲染）；1440 / 1280 / 移动视口复拍。
+## 2026-08-26 · Issue #53 Popup Startup Recovery 的 L1 token 消费
+
+- **来源与事项**：Issue #53 / Draft PR #54、`PAGE-PLUGIN-001` 与 `PLUGIN-POPUP-RECOVERY-001`。此前 v0.4.0 工具栏 popup 在初始渲染缺少 formatter import，真实用户点击时呈现空白；本事项只修复这个启动故障与其诚实失败路线。
+- **实际实现**：`plugins/linggan-intelligence-browser/webpack.config.cjs` 在 build 时将唯一 runtime 值源 `apps/api/src/local_web/lids_tokens.css` 复制为 release 内的 `themes/lids-tokens.css`，`src/popup/popup.html` 加载该副本。新 `popup-startup-failure*` CSS 仅消费 `--lgi-*`；没有新增 token 值、全局主题、CMP、Scene 或 Motion。
+- **LIDS 组合**：局部 `L1 / Settings / Governance`，沿用 `InstrumentSurface` 和 L1 可读错误反馈；2px border 是 LIDS 已批准的结构线，而非新的视觉数值。文案只表达 `UNKNOWN` 与“该提示没有发起新的采集或传输”，不把失败页面写成 host、receipt、Evidence 或平台状态。
+- **验证与边界**：受控首次渲染 harness 复现 v0.4.0 缺失 import 的 `ReferenceError`，并验证 v0.4.2 正常或 fallback 输出；build/release verifier 要求 token CSS 同时存在于 `dist` 和 ZIP。它不证明 Chrome 像素画面、辅助技术、真实浏览器加载、平台、Cookie、Discovery、接纳、媒体或研究结果。
+
+## 2026-08-26 · LOCAL-001D Evidence Library 未知发布时间的默认读取表达
+
+- **来源与事项**：Issue #62、`LOCAL-001D`、PAGE-EVIDENCE-001、`LOCAL-001C0-DISCOVERY-BOUNDARY-V1` 与 Mog 的明确裁定。真实 Canary 的聚合事实表明：已接纳 discovery 卡片可能没有来源发布时间；此前 URL 缺省读法等同隐式 `PUBLISHED:30D`，会使这些材料在页面中完全不可见。
+- **Data Truth 修订**：URL 缺省时页面使用命名的内部 `latest_accepted_discovery` 视角，而不是发布时间窗口。卡片可显示 `PUBLISHED_AT UNKNOWN`，并明确不使用首次发现、观察、接收或重放时间代替来源发布时间。显式 `last_7_days` / `last_30_days` 保持严格 published-time 筛选，未知对象继续排除并单独计数。
+- **运行时表达**：只增加既有 Unknown token 的 page-local label；不新增全局 token、Primitive、CMP、Scene、Motion、按钮、筛选器或跨页模式。L1 `Corpus Explorer` + embedded L2 Inspector 的既有组合和 V7 几何不变。
+- **验证与边界**：合成 contracts、runtime/fallback PostgreSQL proof、API/页面 render tests 验证 default/explicit view 分离、未知标签和无替代日期。本事项不读取或改写真实 Canary 材料，不证明真实浏览器呈现、平台、采集、媒体、OCR/ASR、趋势或用户验收。
+
+## 2026-08-26 · DESIGN-007 中文优先的 Evidence Library 表达
+
+- **来源与事项**：Issue #65、`LIDS-LANG-001` 与 Mog 的明确裁定「中文为主，英文只用来装饰或作为注释」。本项只审查并修订 `/corpus/evidence`；它不构成其它页面已完成翻译或可读性验收。
+- **规则层**：新增 `language-policy.md`，固定用户理解必须由中文独立承担。英文只可作为品牌/固有名或紧邻中文的等宽技术旁注，不能单独作为按钮、筛选、状态、空态或错误处置。该规则保持 `UNKNOWN`、`NOT_ACQUIRED`、`DISCOVERY_ONLY` 等数据边界原义，且不翻译原始用户材料。
+- **页面落地**：Evidence Library 的导航、筛选、读投影、严格发布时间窗口、Discovery 卡片、Coverage、空态和 Inspector 均替换为中文主表达；`PUBLISHED_AT UNKNOWN`、`MEDIA NOT ACQUIRED`、`ACCEPTED RUNTIME MATERIAL`、`OBSERVED / QUOTA` 等保留为紧邻中文的技术键。默认「最新已接纳」及显式窗口显示「近 7 天／近 30 天」，不让 `7D/30D` 单独承担筛选含义。
+- **不改写事实**：Discovery 卡片继续只是已接纳的发现材料；封面仍只允许本地媒体副本，未取得时明确写「媒体尚未采集」；未知发布时间继续不以首次发现、观察或接收时间填补。没有接通详情、评论、媒体、OCR/ASR、查询行为、按钮行为、路由、Token、共享 Shell 或其它页面。
+- **验证与边界**：由 focused Rust render test、现有严格窗口/默认读取测试、格式/lint/governance 与本机 DOM 检查记录。它不证明真实平台材料、媒体取得、跨页中文迁移、部署或 Mog 的最终可读性验收。
+
+## 2026-08-26 · DESIGN-008 共享壳层采用中文主语义
+
+- **来源与事项**：Mog 明确确认「中文为主，英文只用来装饰或作为注释」；Issue #68 / `DESIGN-008`。项目级 `LIDS-LANG-001` 由独立的 Issue #65 / Draft PR #67 定义，本条只记录共享 shell 对该规则的采用，不复制或替代其页面局部规则。
+- **实际实现**：`shell.rs` 将一级导航、品牌副标题、本机边界与共享上下文中的静态运行码渲染为中文主文案加紧邻的 `v7-tech-key` 英文技术注释；`shell.css` 规定中文使用 Sans 主层、英文技术键使用较小 Mono 注释层，并把 `CORPUS` / `COLLECTION` 导轨读数改为中文可见语义。Collection 的 `NOW / TRACE / REVIEW` 短模式标签改为当前 / 追溯 / 复核。
+- **Data Truth**：`UNKNOWN` 仍为未知，`UTC+08` 仍为同一时区，连接/来源/运行时状态仍由原有调用方提供；本项只改变显示层，未变更状态判定、数据、查询、路由、权限或任何动作。
+- **不扩张**：无 Token、Primitive、CMP、Pattern、Scene、Motion、API、数据库、采集、插件、媒体或真实材料改动。Evidence Library 的页面局部模板、动态卡片及局部英文由 #67 单独处理。
+- **验证与集成**：shared shell 单元测试同时覆盖 Corpus 与 Collection 输入；最终 DOM/视觉走查与治理检查记录在 `ACC-DESIGN-008`。建议先合并 PR #67，再将 #68 rebase 至 main；两个事项的运行时文件边界不重叠，但 focused test / 文档索引需由 integration owner 做行级整合。

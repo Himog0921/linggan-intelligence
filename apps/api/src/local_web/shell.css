@@ -1,0 +1,88 @@
+/* Shared shell layer for every Linggan local page: page-local geometry variables,
+ * reset, the 128px global header, the context row and the 216px local rail.
+ * Colour is never authored here — every value resolves to a LIDS token in lids_tokens.css.
+ * Page-specific styling belongs in that page's own stylesheet, loaded after this one. */
+/* LOCAL-001A V7 page-local fidelity layer. It consumes LIDS runtime tokens
+ * but keeps V7 exact geometry and visual constants private to this route. */
+:root {
+ /* Colour is never authored here. Every value below resolves to a LIDS token so the
+  * page cannot drift from the single source in lids_tokens.css. Geometry stays local. */
+ --v7-black:var(--lgi-ink); --v7-white:var(--lgi-canvas); --v7-gray:var(--lgi-canvas-low);
+ --v7-sunken:var(--lgi-canvas-sunken); --v7-line:var(--lgi-hairline); --v7-line-strong:var(--lgi-border);
+ --v7-red:var(--lgi-signal); --v7-red-hover:var(--lgi-signal-hover); --v7-soft-red:var(--lgi-signal-soft);
+ --v7-muted:var(--lgi-muted); --v7-ghost:var(--lgi-ghost);
+ --v7-ok:var(--lgi-success); --v7-ok-fill:var(--lgi-success-dot); --v7-ok-soft:var(--lgi-success-soft);
+ --v7-warn:var(--lgi-warning); --v7-warn-fill:var(--lgi-warning-dot); --v7-warn-soft:var(--lgi-warning-soft);
+ --v7-bad:var(--lgi-danger); --v7-bad-fill:var(--lgi-danger-dot); --v7-bad-soft:var(--lgi-danger-soft);
+ --v7-info:var(--lgi-info); --v7-info-fill:var(--lgi-info-dot); --v7-info-soft:var(--lgi-info-soft);
+ --v7-unknown:var(--lgi-unknown); --v7-unknown-fill:var(--lgi-unknown-dot); --v7-unknown-soft:var(--lgi-unknown-soft);
+ --v7-brutal:var(--lgi-shadow-brutal); --v7-brutal-lg:var(--lgi-shadow-brutal-lg);
+ --v7-t-press:var(--lgi-duration-press); --v7-t-state:var(--lgi-duration-state); --v7-ease:var(--lgi-ease-ui);
+ --v7-header-height:128px; --v7-global-row:78px; --v7-context-row:50px;
+ --v7-side-width:216px; --v7-inspector-width:440px; }
+* { box-sizing:border-box; } html,body { height:100%; overflow:hidden; } body { margin:0; min-width:320px; background:var(--v7-white); color:var(--v7-black); font:14px/1.45 var(--lgi-font-sans); } button,input { font:inherit; } button { cursor:default; } button:disabled,input:disabled { cursor:not-allowed; opacity:1; }
+.v7-mono,.v7-label,dt { font-family:var(--lgi-font-mono); }
+
+/* ── DESIGN-003 · Chinese-first typography for the shell ────────────────────
+ * Chinese carries the label; Latin and status codes drop to a mono annotation, and
+ * Chinese never takes the mono face or the caps tracking that goes with it.
+ * These rules style components shell.rs renders for every page — the primary nav and
+ * the local rail — so they belong here. While they lived in one page's stylesheet the
+ * two surfaces drifted: the same readout rendered 11px on Corpus and 8px on Collection,
+ * which reads as one header with two type standards. */
+.v7-nav-zh { font:600 13px/1 var(--lgi-font-sans); letter-spacing:.01em; }
+.v7-side-nav span { font-family:var(--lgi-font-sans); }
+
+/* Focus is a state, not decoration: every reachable control shows it. */
+.v7-app :is(button,input,select,textarea,a):focus-visible { outline:2px solid var(--v7-red); outline-offset:2px; }
+@media (prefers-reduced-motion:reduce) { .v7-app * { transition:none !important; animation:none !important; } .v7-side-nav[aria-current="page"] { transform:none; } }
+
+/* ── DESIGN-003 · Header reclaim, shared by every page ──────────────────────
+ * A page states its own name three times before its content starts: the context row
+ * breadcrumb, the local rail, and the h1. Only the h1 has to survive, and only for
+ * assistive tech and document structure, so it goes visually hidden and the vertical
+ * space returns to the content. The counts it used to sit beside move up into the
+ * context row as .v7-kpi. These live in the shell rather than in one page's stylesheet
+ * because the context row itself is rendered by shell.rs for every page. */
+.v7-sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
+  clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; border:0; }
+.v7-kpi { display:inline-flex; align-items:baseline; gap:6px; }
+.v7-kpi em { color:var(--v7-muted); font:500 11px var(--lgi-font-sans); font-style:normal; letter-spacing:0; }
+.v7-kpi b { color:var(--v7-black); font:700 12px var(--lgi-font-mono); letter-spacing:.03em; }
+.v7-vr { width:1px; height:16px; background:var(--v7-line-strong); }
+
+/* V7 standardized 78px global row + 50px context row */
+.v7-app { height:100vh; min-height:0; display:grid; grid-template-rows:var(--v7-header-height) minmax(0,1fr); overflow:hidden; }.v7-global-header { height:var(--v7-header-height); background:var(--v7-white); position:relative; z-index:10; }.v7-global-row { height:var(--v7-global-row); display:flex; align-items:stretch; border-bottom:2px solid var(--v7-black); background:var(--v7-white); }.v7-global-brand { width:340px; flex:0 0 340px; display:flex; align-items:center; gap:13px; padding:0 24px; border-right:1px solid var(--v7-line-strong); }.v7-li-mark { width:38px; height:38px; display:grid; place-items:center; background:var(--v7-red); color:var(--v7-white); border:2px solid var(--v7-black); box-shadow:var(--v7-brutal); font:900 15px/1 var(--lgi-font-mono); letter-spacing:.02em; transition:transform var(--v7-t-state) var(--v7-ease), box-shadow var(--v7-t-state) var(--v7-ease); }
+.v7-global-brand:hover .v7-li-mark { transform:translate(-2px,-2px); box-shadow:var(--v7-brutal-lg); }.v7-global-brand-copy { min-width:0; }.v7-global-brand-name { font-size:15px; font-weight:850; letter-spacing:-.02em; white-space:nowrap; }.v7-global-brand-sub { display:flex; align-items:baseline; gap:6px; margin-top:4px; white-space:nowrap; }.v7-brand-sub-zh { color:var(--v7-muted); font:600 11px/1.2 var(--lgi-font-sans); letter-spacing:.01em; }
+.v7-primary-nav { height:100%; display:flex; align-items:stretch; flex:0 0 auto; }.v7-primary-nav button,.v7-primary-nav a { position:relative; min-width:118px; padding:0 22px; border:0; background:var(--v7-white); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; color:var(--v7-black); font-size:13px; font-weight:740; text-decoration:none; transition:background var(--v7-t-press) var(--v7-ease); }
+.v7-primary-nav a:focus-visible { outline:2px solid var(--v7-red); outline-offset:-2px; }
+.v7-primary-nav button:not([disabled]):hover,.v7-primary-nav a:not([aria-current="page"]):hover { background:var(--v7-gray); }.v7-primary-nav button[aria-current="page"]::after,.v7-primary-nav a[aria-current="page"]::after { content:""; position:absolute; left:18px; right:18px; bottom:0; height:5px; background:var(--v7-red); }/* One readout scale and one colour across the whole row. The current entry is marked by
+ * the signal rule under it, not by darkening its readout: at this size a colour change
+ * reads as a size change, so an inked current readout made the row look like it carried
+ * two type standards. The scale itself is DESIGN-003's Latin annotation, declared once. */
+.v7-primary-nav .v7-nav-readout { display:flex; align-items:baseline; gap:5px; color:var(--v7-muted); line-height:1; }.v7-nav-state { color:var(--v7-muted); font:600 11px/1 var(--lgi-font-sans); letter-spacing:.01em; }/* Relative so the annotation stays 18% under whatever it annotates: this key appears beside
+ * 26px counts and 11px labels alike, and one fixed size cannot serve both. */
+.v7-tech-key { display:inline; color:var(--v7-ghost); font:500 .82em/1.2 var(--lgi-font-mono); letter-spacing:.06em; white-space:nowrap; }.v7-global-flex { flex:1; min-width:40px; border-right:1px solid var(--v7-black); }.v7-global-system { display:flex; align-items:center; gap:12px; padding:0 22px; background:var(--v7-white); }.v7-system-boundary { height:37px; display:flex; align-items:baseline; gap:7px; padding:0 13px; border:1px solid var(--v7-black); background:var(--v7-warn-soft); color:var(--v7-black); }.v7-system-boundary .v7-status-main { font:800 11px/1 var(--lgi-font-sans); letter-spacing:.01em; }.v7-system-boundary::before { content:""; width:7px; height:7px; border-radius:50%; background:var(--v7-warn-fill); }.v7-global-command { height:37px; width:158px; border:1px solid var(--v7-black); background:var(--v7-white); display:flex; align-items:center; justify-content:space-between; padding:0 11px; color:var(--v7-ghost); font-size:11px; }.v7-global-command kbd { min-width:22px; height:20px; display:grid; place-items:center; border-left:1px solid var(--v7-line); padding-left:8px; color:var(--v7-black); font:9px var(--lgi-font-mono); }
+.v7-context-row { height:var(--v7-context-row); display:grid; grid-template-columns:var(--v7-side-width) 1fr; border-bottom:1px solid var(--v7-black); background-color:var(--v7-gray); background-image:radial-gradient(circle at center, var(--lgi-mesh-major) 1.1px, transparent 1.1px),radial-gradient(circle at center, var(--lgi-mesh-fine) 1px, transparent 1px); background-size:56px 56px, 14px 14px; background-position:0 0, 0 0; }.v7-context-main { background:transparent; min-width:0; display:flex; align-items:center; justify-content:space-between; gap:24px; padding:0 24px 0 10px; }.v7-context-crumb { color:var(--v7-muted); font:800 10px var(--lgi-font-mono); letter-spacing:.055em; white-space:nowrap; }.v7-context-crumb b,.v7-context-current { color:var(--v7-black); }.v7-context-crumb .v7-status-main { color:var(--v7-black); font:700 12px/1 var(--lgi-font-sans); letter-spacing:.01em; }.v7-slash { color:var(--v7-ghost); padding:0 7px; }.v7-context-meta { display:flex; gap:16px; align-items:baseline; color:var(--v7-muted); font:800 9px var(--lgi-font-mono); letter-spacing:.055em; white-space:nowrap; }.v7-context-meta .v7-status-main { color:var(--v7-muted); font:600 11px/1 var(--lgi-font-sans); letter-spacing:.01em; }.v7-context-meta .v7-query-meta { color:var(--v7-black); }
+
+/* V7 216px Corpus rail */
+.v7-shell { min-height:0; display:grid; grid-template-columns:var(--v7-side-width) minmax(0,1fr); background:var(--v7-white); }.v7-side { min-height:0; overflow:auto; padding:18px 12px 14px; border-right:2px solid var(--v7-black); background:var(--v7-white); display:flex; flex-direction:column; }.v7-nav-label { padding:0 9px 10px; color:var(--v7-black); font:800 10px var(--lgi-font-mono); letter-spacing:.13em; }.v7-nav-label::after { content:attr(data-readout); display:block; margin-top:5px; color:var(--v7-ghost); font:500 11px var(--lgi-font-mono); letter-spacing:.11em; }.v7-nav-label[data-readout="CORPUS"]::after { content:"语料库"; font:600 11px/1 var(--lgi-font-sans); letter-spacing:.01em; }.v7-nav-label[data-readout="COLLECTION"]::after { content:"采集"; font:600 11px/1 var(--lgi-font-sans); letter-spacing:.01em; }.v7-side-nav { position:relative; width:100%; padding:12px 9px; border:0; background:transparent; display:flex; align-items:center; gap:9px; color:var(--v7-muted); text-align:left; font-size:12px; transition:background var(--v7-t-state) var(--v7-ease), color var(--v7-t-state) var(--v7-ease); }
+.v7-side-nav > i,.v7-side-nav > span { position:relative; }
+.v7-side-nav:focus-visible { outline:2px solid var(--v7-red); outline-offset:2px; }
+/* Hover is the invitation to leave the current page, so it must never repaint the page
+ * you are already on: the selected item keeps its inked block. Excluding aria-current here
+ * rather than restating the selected colours after this rule keeps one owner per state. */
+.v7-side-nav:not([disabled]):not([aria-current="page"]):hover { background:var(--v7-gray); color:var(--v7-black); }
+.v7-side-nav:not([disabled]):not([aria-current="page"]):hover i { color:var(--v7-red); }.v7-side-nav i { width:22px; color:var(--v7-ghost); font:600 11px var(--lgi-font-mono); font-style:normal; letter-spacing:.04em; }.v7-side-nav[aria-current="page"] { background:var(--v7-black); color:var(--v7-white); box-shadow:var(--v7-brutal); transform:translate(-2px,-2px); }.v7-side-nav[aria-current="page"] i { color:var(--v7-red); }.v7-side-nav[aria-current="page"]::after { content:""; position:absolute; inset:0; pointer-events:none; opacity:.22; background-image:repeating-conic-gradient(var(--lgi-on-dark) 0 25%, transparent 0 50%); background-size:6px 6px; -webkit-mask-image:linear-gradient(to left, var(--lgi-ink) 0 24px, color-mix(in srgb, var(--lgi-ink) 60%, transparent) 24px 52px, color-mix(in srgb, var(--lgi-ink) 26%, transparent) 52px 84px, transparent 84px 100%); mask-image:linear-gradient(to left, var(--lgi-ink) 0 24px, color-mix(in srgb, var(--lgi-ink) 60%, transparent) 24px 52px, color-mix(in srgb, var(--lgi-ink) 26%, transparent) 52px 84px, transparent 84px 100%); }.v7-side-foot { margin-top:auto; padding:12px 9px 0; border-top:1px solid var(--v7-line); color:var(--v7-muted); font-size:10px; line-height:1.7; }.v7-side-dot { width:7px; height:7px; display:inline-block; margin-right:6px; border-radius:50%; background:var(--v7-warn-fill); box-shadow:0 0 0 3px var(--v7-warn-soft); }
+a.v7-side-nav { text-decoration:none; }
+
+/* ── Shell responsive geometry ──────────────────────────────────────────────
+ * The header, context row and rail belong to every page, so their breakpoints do too.
+ * These lived in the Evidence Library stylesheet, which left Collection with no header
+ * adaptation at all. Both entry forms are named: the primary nav mixes served routes
+ * (<a>) with unconnected responsibilities (<button>), and a rule that lists only one of
+ * them silently resizes half the row. */
+@media(max-width:1500px){.v7-global-brand{width:285px;flex-basis:285px;padding-left:18px}.v7-primary-nav button,.v7-primary-nav a{min-width:104px;padding:0 15px}.v7-global-command{width:130px}.v7-context-meta{gap:14px}.v7-global-system{padding:0 14px}}
+@media(max-width:1180px){:root{--v7-side-width:190px}.v7-global-brand{width:230px;flex-basis:230px}.v7-global-brand-sub,.v7-global-flex,.v7-system-boundary,.v7-context-meta span:nth-child(2){display:none}.v7-primary-nav button,.v7-primary-nav a{min-width:90px;padding:0 10px}}
+@media(max-width:900px){html,body{height:auto;min-height:100%;overflow:auto}.v7-app{height:auto;min-height:100vh;grid-template-rows:auto minmax(0,1fr);overflow:visible}.v7-global-header{height:auto}.v7-global-row{min-height:78px;height:auto;overflow-x:auto}.v7-global-brand{min-width:230px}.v7-primary-nav button,.v7-primary-nav a{min-width:86px}.v7-shell{grid-template-columns:1fr}.v7-side{border-right:0;border-bottom:2px solid var(--v7-black)}}
+@media(max-width:640px){.v7-global-row{display:grid;grid-template-columns:1fr auto}.v7-global-brand{width:auto;min-width:0;padding:0 14px;border-right:0}.v7-primary-nav{grid-column:1/-1;overflow-x:auto;border-top:1px solid var(--v7-line)}.v7-global-system{padding:0 10px}.v7-global-command{width:auto}.v7-context-row{grid-template-columns:1fr;height:auto}.v7-context-main{min-height:50px;padding:0 14px}.v7-context-meta{display:none}}

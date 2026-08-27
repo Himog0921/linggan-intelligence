@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="linggan-intelligence">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Linggan Browser Producer</title>
+    <link rel="stylesheet" href="lids-tokens.css">
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <main class="producer-surface" aria-labelledby="producer-title">
+      <header class="producer-header">
+        <p class="producer-kicker">LINGGAN / LOCAL PRODUCER</p>
+        <h1 id="producer-title">Browser Producer</h1>
+        <p class="producer-copy">只向 Linggan 本机提交获得授权的发现面材料。</p>
+      </header>
+
+      <dl class="producer-readouts" aria-label="插件状态">
+        <div>
+          <dt>PACKAGE</dt>
+          <dd>LINGGAN / <span id="plugin-version">0.2.0</span></dd>
+        </div>
+        <div>
+          <dt>LOOPBACK TARGET</dt>
+          <dd>localhost:3000</dd>
+        </div>
+        <div>
+          <dt>LOCAL HOST</dt>
+          <dd id="host-state" data-state="checking">CHECKING</dd>
+        </div>
+        <div>
+          <dt>DISCOVERY ACCESS</dt>
+          <dd id="discovery-access" data-state="blocked">NOT CONNECTED</dd>
+        </div>
+      </dl>
+
+      <section class="producer-boundary" aria-labelledby="discovery-title">
+        <p class="producer-kicker">DISCOVERY / USER-INITIATED CANARY</p>
+        <h2 id="discovery-title">ADHD · 综合排序 · 最多 20 张可见卡片</h2>
+        <p id="discovery-state" data-discovery-status="NOT_CONNECTED">NOT CONNECTED · Linggan 本机接纳入口尚未就绪。</p>
+        <button id="discovery-button" type="button" disabled aria-disabled="true">在当前搜索页发现前 20 条</button>
+      </section>
+
+      <p class="producer-foot">只在你点击时读取当前搜索卡片；不读取 Cookie、账号、详情、评论或媒体。页面显示不等于已接纳 Evidence。</p>
+    </main>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

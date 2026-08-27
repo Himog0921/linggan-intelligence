@@ -1,0 +1,466 @@
+//! Versioned, platform-neutral Browser Producer Runtime contracts.
+//!
+//! This boundary deliberately describes *execution* only.  A producer receives a bounded
+//! `TaskSpec` and returns one immutable `CapturePackage` per attempt.  It has no Domain,
+//! Topic, Claim, research, or market-intelligence vocabulary.
+
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use thiserror::Error;
+use uuid::Uuid;
+
+pub const PRODUCER_TASK_SPEC_VERSION: &str = "linggan.producer.task-spec.v1";
+pub const PRODUCER_ATTEMPT_VERSION: &str = "linggan.producer.attempt.v1";
+pub const CAPTURE_PACKAGE_VERSION: &str = "linggan.producer.capture-package.v1";
+
+const PLATFORM_VALUES: &[&str] = &["xhs", "douyin"];
+const SOURCE_VALUES: &[&str] = &["manual", "scheduled"];
+const PACKAGE_KINDS: &[&str] = &[
+    "discovery_search",
+    "profile_discovery",
+    "content_detail",
+    "comments",
+    "replies",
+    "author_profile",
+    "media_slots",
+    "media_bytes",
+    "batch_checkpoint",
+];
+const STOP_CONDITIONS: &[&str] = &[
+    "manual_stop",
+    "maximum_quota",
+    "current_surface_read_once",
+    "surface_ended",
+    "time_budget",
+    "risk_budget",
+    "detail_read_complete",
+    "collector_complete",
+];
+
+#[derive(Debug, Error)]
+pub enum ProducerRuntimeContractError {
+    #[error("producer runtime contract schema is invalid: {0}")]
+    SchemaInvalid(String),
+    #[error("producer runtime contract version is unsupported: {0}")]
+    UnsupportedContractVersion(String),
+    #[error("producer runtime contains invalid identifiers")]
+    InvalidIdentifiers,
+    #[error("producer runtime contains an unsupported enum value")]
+    UnsupportedValue,
+    #[error("producer runtime task spec is not bounded")]
+    UnboundedTask,
+    #[error("producer runtime coverage is invalid")]
+    InvalidCoverage,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct TaskSpecWire {
+    contract_version: String,
+    task_id: String,
+    source: String,
+    platform: String,
+    page_type: String,
+    target: Value,
+    capabilities_requested: Vec<String>,
+    maximum_quota: Option<u32>,
+    comment_limit: Value,
+    acquire_media: Value,
+    risk_policy: String,
+    stop_conditions: Vec<String>,
+}
+
+/// Flat, bounded execution instruction.  `scheduled` is valid at the protocol boundary but a
+/// scheduler is not implied by accepting the contract.
+#[derive(Debug, Clone)]
+pub struct ProducerTaskSpec {
+    task_id: Uuid,
+    source: String,
+    platform: String,
+    page_type: String,
+    raw: Value,
+}
+
+impl ProducerTaskSpec {
+    pub fn task_id(&self) -> Uuid {
+        self.task_id
+    }
+    pub fn source(&self) -> &str {
+        &self.source
+    }
+    pub fn platform(&self) -> &str {
+        &self.platform
+    }
+    pub fn page_type(&self) -> &str {
+        &self.page_type
+    }
+    pub fn raw(&self) -> &Value {
+        &self.raw
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AttemptWire {
+    contract_version: String,
+    producer_instance_id: String,
+    task_id: String,
+    attempt_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProducerAttempt {
+    producer_instance_id: Uuid,
+    task_id: Uuid,
+    attempt_id: Uuid,
+}
+
+impl ProducerAttempt {
+    pub fn producer_instance_id(&self) -> Uuid {
+        self.producer_instance_id
+    }
+    pub fn task_id(&self) -> Uuid {
+        self.task_id
+    }
+    pub fn attempt_id(&self) -> Uuid {
+        self.attempt_id
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CapturePackageWire {
+    contract_version: String,
+    package_ref: String,
+    package_kind: String,
+    platform: String,
+    observed_at: String,
+    captured_at: String,
+    coverage: CoverageWire,
+    records: Vec<Value>,
+    checkpoint: Option<Value>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CoverageWire {
+    target: Value,
+    layers: Vec<CoverageLayerWire>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CoverageLayerWire {
+    capability: String,
+    observed: u32,
+    attempted: u32,
+    acquired: u32,
+    verified: u32,
+    failed: u32,
+    not_attempted: u32,
+    unknown: u32,
+    stopped_reason: String,
+}
+
+/// Immutable producer result.  `records` remain opaque to this layer: each downstream evidence
+/// admission is allowed to validate its own record shape without turning a package into a generic
+/// fact container.
+#[derive(Debug, Clone)]
+pub struct ProducerCapturePackage {
+    package_ref: Uuid,
+    package_kind: String,
+    platform: String,
+    observed_at: String,
+    captured_at: String,
+    coverage: Value,
+    records: Vec<Value>,
+    checkpoint: Option<Value>,
+    raw: Value,
+}
+
+impl ProducerCapturePackage {
+    pub fn package_ref(&self) -> Uuid {
+        self.package_ref
+    }
+    pub fn package_kind(&self) -> &str {
+        &self.package_kind
+    }
+    pub fn platform(&self) -> &str {
+        &self.platform
+    }
+    pub fn observed_at(&self) -> &str {
+        &self.observed_at
+    }
+    pub fn captured_at(&self) -> &str {
+        &self.captured_at
+    }
+    pub fn coverage(&self) -> &Value {
+        &self.coverage
+    }
+    pub fn records(&self) -> &[Value] {
+        &self.records
+    }
+    pub fn checkpoint(&self) -> Option<&Value> {
+        self.checkpoint.as_ref()
+    }
+    pub fn raw(&self) -> &Value {
+        &self.raw
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SubmissionWire {
+    contract_version: String,
+    producer_instance_id: String,
+    task_id: String,
+    attempt_id: String,
+    submission_id: String,
+    capture_package: Value,
+}
+
+#[derive(Debug, Clone)]
+pub struct ProducerSubmission {
+    producer_instance_id: Uuid,
+    task_id: Uuid,
+    attempt_id: Uuid,
+    submission_id: Uuid,
+    capture_package: ProducerCapturePackage,
+}
+
+impl ProducerSubmission {
+    pub fn producer_instance_id(&self) -> Uuid {
+        self.producer_instance_id
+    }
+    pub fn task_id(&self) -> Uuid {
+        self.task_id
+    }
+    pub fn attempt_id(&self) -> Uuid {
+        self.attempt_id
+    }
+    pub fn submission_id(&self) -> Uuid {
+        self.submission_id
+    }
+    pub fn capture_package(&self) -> &ProducerCapturePackage {
+        &self.capture_package
+    }
+}
+
+pub fn parse_producer_task_spec(
+    input: &str,
+) -> Result<ProducerTaskSpec, ProducerRuntimeContractError> {
+    let raw: Value = serde_json::from_str(input)
+        .map_err(|error| ProducerRuntimeContractError::SchemaInvalid(error.to_string()))?;
+    let wire: TaskSpecWire = serde_json::from_value(raw.clone())
+        .map_err(|error| ProducerRuntimeContractError::SchemaInvalid(error.to_string()))?;
+    if wire.contract_version != PRODUCER_TASK_SPEC_VERSION {
+        return Err(ProducerRuntimeContractError::UnsupportedContractVersion(
+            wire.contract_version,
+        ));
+    }
+    let task_id = parse_uuid(&wire.task_id)?;
+    if !SOURCE_VALUES.contains(&wire.source.as_str())
+        || !PLATFORM_VALUES.contains(&wire.platform.as_str())
+        || wire.page_type.trim().is_empty()
+        || !wire.target.is_object()
+        || wire.capabilities_requested.is_empty()
+        || wire
+            .capabilities_requested
+            .iter()
+            .any(|value| !PACKAGE_KINDS.contains(&value.as_str()))
+        || wire.comment_limit.is_null()
+        || wire.acquire_media.is_null()
+        || wire.risk_policy != "local_trusted_user_initiated"
+        || wire.stop_conditions.is_empty()
+        || wire
+            .stop_conditions
+            .iter()
+            .any(|value| !STOP_CONDITIONS.contains(&value.as_str()))
+    {
+        return Err(ProducerRuntimeContractError::UnsupportedValue);
+    }
+    if wire.capabilities_requested.len() != 1
+        || !valid_target_for_capability(&wire.target, &wire.capabilities_requested[0])
+        || !valid_comment_limit(&wire.comment_limit)
+        || !valid_acquire_media(&wire.acquire_media)
+    {
+        return Err(ProducerRuntimeContractError::UnsupportedValue);
+    }
+    if wire.maximum_quota.is_none()
+        && !wire.stop_conditions.iter().any(|value| {
+            value == "surface_ended"
+                || value == "manual_stop"
+                || value == "time_budget"
+                || value == "risk_budget"
+        })
+    {
+        return Err(ProducerRuntimeContractError::UnboundedTask);
+    }
+    Ok(ProducerTaskSpec {
+        task_id,
+        source: wire.source,
+        platform: wire.platform,
+        page_type: wire.page_type,
+        raw,
+    })
+}
+
+pub fn parse_producer_attempt(
+    input: &str,
+) -> Result<ProducerAttempt, ProducerRuntimeContractError> {
+    let wire: AttemptWire = serde_json::from_str(input)
+        .map_err(|error| ProducerRuntimeContractError::SchemaInvalid(error.to_string()))?;
+    if wire.contract_version != PRODUCER_ATTEMPT_VERSION {
+        return Err(ProducerRuntimeContractError::UnsupportedContractVersion(
+            wire.contract_version,
+        ));
+    }
+    Ok(ProducerAttempt {
+        producer_instance_id: parse_uuid(&wire.producer_instance_id)?,
+        task_id: parse_uuid(&wire.task_id)?,
+        attempt_id: parse_uuid(&wire.attempt_id)?,
+    })
+}
+
+pub fn parse_producer_capture_package(
+    input: &str,
+) -> Result<ProducerCapturePackage, ProducerRuntimeContractError> {
+    let raw: Value = serde_json::from_str(input)
+        .map_err(|error| ProducerRuntimeContractError::SchemaInvalid(error.to_string()))?;
+    parse_producer_capture_value(raw)
+}
+
+pub fn parse_producer_submission(
+    input: &str,
+) -> Result<ProducerSubmission, ProducerRuntimeContractError> {
+    let wire: SubmissionWire = serde_json::from_str(input)
+        .map_err(|error| ProducerRuntimeContractError::SchemaInvalid(error.to_string()))?;
+    if wire.contract_version != CAPTURE_PACKAGE_VERSION {
+        return Err(ProducerRuntimeContractError::UnsupportedContractVersion(
+            wire.contract_version,
+        ));
+    }
+    let capture_package = parse_producer_capture_value(wire.capture_package)?;
+    Ok(ProducerSubmission {
+        producer_instance_id: parse_uuid(&wire.producer_instance_id)?,
+        task_id: parse_uuid(&wire.task_id)?,
+        attempt_id: parse_uuid(&wire.attempt_id)?,
+        submission_id: parse_uuid(&wire.submission_id)?,
+        capture_package,
+    })
+}
+
+fn parse_producer_capture_value(
+    raw: Value,
+) -> Result<ProducerCapturePackage, ProducerRuntimeContractError> {
+    let wire: CapturePackageWire = serde_json::from_value(raw.clone())
+        .map_err(|error| ProducerRuntimeContractError::SchemaInvalid(error.to_string()))?;
+    if wire.contract_version != CAPTURE_PACKAGE_VERSION {
+        return Err(ProducerRuntimeContractError::UnsupportedContractVersion(
+            wire.contract_version,
+        ));
+    }
+    if !PACKAGE_KINDS.contains(&wire.package_kind.as_str())
+        || !PLATFORM_VALUES.contains(&wire.platform.as_str())
+        || wire.records.len() > 2048
+        || !is_timestamp(&wire.observed_at)
+        || !is_timestamp(&wire.captured_at)
+    {
+        return Err(ProducerRuntimeContractError::UnsupportedValue);
+    }
+    validate_coverage(&wire.coverage)?;
+    Ok(ProducerCapturePackage {
+        package_ref: parse_uuid(&wire.package_ref)?,
+        package_kind: wire.package_kind,
+        platform: wire.platform,
+        observed_at: wire.observed_at,
+        captured_at: wire.captured_at,
+        coverage: serde_json::to_value(wire.coverage).expect("coverage is serializable"),
+        records: wire.records,
+        checkpoint: wire.checkpoint,
+        raw,
+    })
+}
+
+fn validate_coverage(coverage: &CoverageWire) -> Result<(), ProducerRuntimeContractError> {
+    if !coverage.target.is_object() || coverage.layers.is_empty() || coverage.layers.len() > 16 {
+        return Err(ProducerRuntimeContractError::InvalidCoverage);
+    }
+    for layer in &coverage.layers {
+        let known_set = coverage.target.get("basis").and_then(Value::as_str) == Some("known_set");
+        if !PACKAGE_KINDS.contains(&layer.capability.as_str())
+            || layer.stopped_reason.trim().is_empty()
+            || layer.attempted > layer.observed
+            || layer.acquired > layer.attempted
+            || layer.verified > layer.acquired
+            || (!known_set && layer.not_attempted != 0)
+        {
+            return Err(ProducerRuntimeContractError::InvalidCoverage);
+        }
+    }
+    Ok(())
+}
+
+fn valid_target_for_capability(target: &Value, capability: &str) -> bool {
+    let non_empty = |key: &str| {
+        target
+            .get(key)
+            .and_then(Value::as_str)
+            .is_some_and(|value| !value.trim().is_empty())
+    };
+    match capability {
+        "discovery_search" => non_empty("query"),
+        "profile_discovery" | "author_profile" => non_empty("authorExternalId"),
+        "content_detail" | "comments" | "replies" | "media_slots" | "media_bytes" => {
+            non_empty("contentExternalId")
+        }
+        "batch_checkpoint" => non_empty("taskType"),
+        _ => false,
+    }
+}
+
+fn valid_comment_limit(value: &Value) -> bool {
+    value.as_str() == Some("not_requested") || value.as_u64().is_some_and(|limit| limit > 0)
+}
+
+fn valid_acquire_media(value: &Value) -> bool {
+    matches!(value.as_str(), Some("not_requested" | "slots" | "bytes"))
+}
+
+fn parse_uuid(value: &str) -> Result<Uuid, ProducerRuntimeContractError> {
+    Uuid::parse_str(value).map_err(|_| ProducerRuntimeContractError::InvalidIdentifiers)
+}
+
+fn is_timestamp(value: &str) -> bool {
+    // The boundary does not derive platform time.  It only requires the producer to submit an
+    // explicit RFC3339 timestamp string; parsing/precision policy remains record-specific.
+    value.contains('T') && value.ends_with('Z') && value.len() >= 20
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_spec_allows_manual_and_scheduled_without_implementing_a_poller() {
+        let value = r#"{"contractVersion":"linggan.producer.task-spec.v1","taskId":"11111111-1111-4111-8111-111111111111","source":"scheduled","platform":"xhs","pageType":"detail","target":{"contentExternalId":"note-1"},"capabilitiesRequested":["content_detail"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]}"#;
+        let spec = parse_producer_task_spec(value).expect("flat task spec is accepted");
+        assert_eq!(spec.source(), "scheduled");
+        assert_eq!(spec.platform(), "xhs");
+    }
+
+    #[test]
+    fn coverage_does_not_turn_unknown_into_a_zero_completion_claim() {
+        let value = r#"{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"11111111-1111-4111-8111-111111111111","packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"known_set"},"layers":[{"capability":"media_slots","observed":9,"attempted":7,"acquired":6,"verified":6,"failed":1,"notAttempted":2,"unknown":0,"stoppedReason":"risk_control"}]},"records":[]}"#;
+        assert!(parse_producer_capture_package(value).is_ok());
+    }
+
+    #[test]
+    fn quota_target_cannot_invent_unattempted_remainder() {
+        let value = r#"{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"11111111-1111-4111-8111-111111111111","packageKind":"comments","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"maximum_quota","contentExternalId":"n"},"layers":[{"capability":"comments","observed":50,"attempted":50,"acquired":50,"verified":0,"failed":0,"notAttempted":50,"unknown":1,"stoppedReason":"risk_budget"}]},"records":[]}"#;
+        assert!(matches!(
+            parse_producer_capture_package(value),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+    }
+}

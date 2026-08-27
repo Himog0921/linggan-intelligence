@@ -1,7 +1,7 @@
 # ARC-001 代码前产品与系统架构收口决策图
 
 > 状态: 活跃计划
-> 最后核对: 2026-08-21
+> 最后核对: 2026-08-24
 > 适用范围: F01 之后、首个真实 producer 与首个用户可见产品切片之前的产品和系统架构收口
 > 事实来源: 用户最新 course correction、当前开发跟踪表、产品/页面草案、采集与媒体历史经验、`ADV-AUDIT-001` 最终处置
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、ACCEPTED ADR、当前活跃 SCOPE 与可复现代码/数据库事实；本图不自动授权真实访问或实现
@@ -19,7 +19,7 @@ synthetic Package
 → minimal CLI
 ```
 
-完成即 hard stop。ARC-001 未收口前，不开始 F02–F10、真实 producer、插件升级、媒体、Agent crew、Web、生产或旧系统迁移。当前 F01 内不改变产品含义的合同、migration、来源追踪和命名修正由工程团队负责，不建立 Mog 决策票。
+完成即 hard stop。此处原有的“ARC-001 未收口前，不开始真实 producer、插件升级、媒体、Web”是一条历史性总禁令。Mog 于 2026-08-24 明确以 `LOCAL-001` 取代这条总禁令中针对**独立本地 Linggan 产品**的部分：可以分别规划和申请本地 Web、插件 Local 模式、local data presentation，以及经过 preflight 后的受控真实 Canary。它不解除 F02–F10、生产、旧系统迁移、Agent crew、外部/线上 host、无界真实采集、历史回填或敏感材料无合同处理的禁令；也不改变 SCOPE-001 的 synthetic-only 范围。真实 producer、媒体与异步 OCR/ASR 仍只能按 LOCAL-001 的独立子卡、明确合同和停止条件推进，不能因本段例外自动开始。当前 F01 内不改变产品含义的合同、migration、来源追踪和命名修正由工程团队负责，不建立 Mog 决策票。
 
 审计衍生的 `ADV-M-01` 最高权威冲突规则仍为单独的 `DECISION_REQUIRED`；它不改变本图票序，也不授权低层实现或文档静默改写产品含义。
 
@@ -70,7 +70,7 @@ Mog 已确认：
    ```
 
 6. 与旧内容工作台的数据导入、迁移、兼容、导出或“情报弹药包”只是未来可选接缝，不定义 Linggan 的产品身份，本票不授权实现。
-7. 本票只解决 `product-shell`。它不决定首页或页面数量、每日主任务、首个 producer、媒体是否进入 Canary，也不授权旧系统迁移。
+7. 本票只解决 `product-shell`。它不决定首页或页面数量，也不授权旧系统迁移。首个 producer 与媒体方向已在 2026-08-24 的 `LOCAL-001` 中由 Mog 明确：首批 Canary 纳入媒体；搜索发现面、详情/媒体取得和异步 OCR/ASR 必须连续但分卡推进。
 
 ## primary-daily-job: 用户每天首先要完成什么？
 
@@ -117,7 +117,7 @@ Asset target: `docs/product/first-phase-interface-prototype.md`
 ## first-producer-canary: 首批真实 Canary 是否包含媒体？
 
 Blocked by: primary-daily-job
-Status: resolved
+Status: resolved by LOCAL-001
 Type: Grilling
 Decision owner: Mog
 
@@ -127,9 +127,15 @@ Decision owner: Mog
 
 ### Answer
 
-Mog 已确认选择 **B：首批真实 producer Canary 同步纳入受限媒体**。动机是媒体不能再次作为旧项目长期未闭合的外围问题被留在文本链路之外。
+Mog 已于 2026-08-24 确认：首批真实 Canary **包含媒体**，并且图片 OCR、视频口播转录/ASR 都是后续异步派生处理的必要能力。该确认不允许把它们压成一个插件大任务：
 
-这只确定方向：首批 Canary 必须同时具备 Capture 控制与媒体生命周期责任。它不授权真实平台/账号/插件访问、媒体下载、存储、OCR/转录、schema、固定配额或保留政策；这些仍须先由 `capture-control-contract`、`media-lifecycle-contract`、独立审查和新的真实 Canary SCOPE 收口。对应决策材料由单独的 Issue #11 / Draft PR #13 维护，整合前不得将本答案表述为真实执行完成。
+```text
+搜索前 20 条 discovery
+→ 受控详情与媒体 acquisition
+→ 独立异步 OCR / ASR 派生处理
+```
+
+前一段只形成发现面与 Coverage，不代表详情、媒体字节或媒体 Canary 已完成。后两段分别等待媒体生命周期、隐私、存储、处理器、队列、撤回传播与最小样本合同；任何一段失败不能连坐安全取得的前一段材料。具体执行顺序、禁止项和验证阶梯以 [`local-001-local-product-evidence-library.md`](local-001-local-product-evidence-library.md) 的 `001C-1`–`001C-3` 为准。
 
 ## capture-control-contract: 真实插件前必须冻结哪些调度责任？
 
@@ -169,7 +175,7 @@ Linggan 怎样用最小模型表达媒体身份、来源代次、下载、字节
 
 Asset target: `docs/architecture/media-lifecycle-contract.md`
 
-若首批 Canary 不含媒体，本票不阻塞纯文本真实 producer 探查，但必须在任何媒体 Lane 开工前 resolved。
+首批 Canary 已确认含媒体；本票不再存在“纯文本即可绕开媒体”的路径。它继续作为任何 001C-2/001C-3 真实媒体 Lane 开工前的独立生命周期/隐私/派生血缘合同门。
 
 ## first-phase-runtime: 第一阶段怎样形成完整可运行系统？
 
@@ -207,7 +213,7 @@ Resolved 后才允许创建新的活跃 SCOPE、对应 GitHub Issues，并更新
 
 ## Next steps
 
-`product-shell`、`primary-daily-job` 与 `first-producer-canary` 已 resolved。Mog 已确认「今日关注」为唯一默认入口，也已选择首批真实 Canary 方案 B（同步纳入受限媒体）；对应 P0、Capture 与媒体合同草案仍须经过独立审查和集成，不能把用户方向确认误报为真实执行授权。当前未阻塞但仍需走查的票是 `p0-surface-prototype`；`media-lifecycle-contract` 与其后的 `first-phase-runtime` 仍必须在真实 Canary 前完成。
+`product-shell`、`primary-daily-job` 与 `first-producer-canary` 已 resolved。`p0-surface-prototype` 仍是本图未收口的页面形态票；真实 producer 的下一步不再重复询问是否含媒体，而是按 LOCAL-001 的 001C-1 → 001C-2 → 001C-3 逐段建立和验证合同。
 
 一次只推进一个 ticket 时：
 
@@ -219,5 +225,5 @@ Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-
 
 ```text
 Session A: Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket p0-surface-prototype.
-Session B: Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket first-producer-canary.
+Session B: Read LOCAL-001 001C-1 before creating the next producer-contract decision card; do not reopen whether media is included.
 ```

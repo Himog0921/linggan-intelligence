@@ -1,0 +1,192 @@
+/* Collection Workspace page layer. Geometry follows the V4 Gold Master; every colour
+ * resolves to a LIDS token. The shared shell (global header, context row, 216px rail)
+ * comes from shell.css and is not redeclared here.
+ *
+ * DESIGN-005 removed four classes of prototype noise that carried no information:
+ * repeated counters, duplicated action buttons, standing explanatory copy, and truncated
+ * readouts. See docs/design/changes/design-005-*.md for the itemised list. */
+:root {
+  --c-drawer-width: min(1120px, 72vw); --c-drawer-wide: min(1380px, 86vw);
+  --c-now-aside: 450px; --c-stream-feed: 472px; --c-inspector: 430px; }
+
+/* Page scaffolding. DESIGN-003 header reclaim: there is no title block here at all. The
+ * breadcrumb and the rail already name this page, the h1 survives only as .v7-sr-only for
+ * assistive tech, and the counts moved into the context row. Column flex rather than fixed
+ * grid rows because three of the five surfaces carry no second bar — the body must claim
+ * the remaining height whether or not a toolbar sits above it. */
+.c-page { min-width:0; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
+
+/* Toolbar: filters left, actions right. Every control stays disabled until its route is
+ * connected; none of them may imply an authorised platform action. */
+.c-toolbar { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 20px; border-bottom:1px solid var(--v7-black); background:var(--v7-white); }
+.c-tabs { display:flex; align-items:stretch; }
+.c-tabs a,.c-tabs button { position:relative; height:46px; display:flex; align-items:center; gap:7px; padding:0 15px; border:0; background:transparent; color:var(--v7-muted); font-size:12px; font-weight:600; text-decoration:none; transition:color var(--v7-t-state) var(--v7-ease); }
+.c-tabs a:first-child,.c-tabs button:first-child { padding-left:0; }
+.c-tabs small { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-tabs a:hover,.c-tabs button:not([disabled]):hover { color:var(--v7-black); }
+.c-tabs [aria-current="page"],.c-tabs .c-on { color:var(--v7-black); }
+.c-tabs [aria-current="page"]::after,.c-tabs .c-on::after { content:""; position:absolute; left:0; right:15px; bottom:0; height:3px; background:var(--v7-red); }
+.c-tabs a:first-child[aria-current="page"]::after,.c-tabs .c-on:first-child::after { left:0; }
+.c-actions { display:flex; align-items:center; gap:8px; }
+.c-text-command { border:0; background:transparent; color:var(--v7-muted); font:700 10px var(--lgi-font-mono); letter-spacing:.06em; }
+.c-body { flex:1; min-width:0; min-height:0; overflow:auto; background:var(--v7-white); }
+
+/* Honest empty state. Every Collection surface currently resolves here: the page states
+ * what it cannot show, why, and what would have to exist first. It never shows 0. */
+.c-empty { max-width:760px; margin:0; padding:34px 20px 40px; }
+.c-empty-rule { height:2px; background:var(--v7-black); }
+.c-empty h2 { margin:19px 0 0; color:var(--v7-black); font-size:24px; font-weight:850; letter-spacing:-.04em; }
+.c-empty p { margin:9px 0 0; max-width:640px; color:var(--v7-muted); font-size:13px; line-height:1.65; }
+.c-empty-grid { margin-top:22px; display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); border-top:1px solid var(--v7-line-strong); }
+.c-empty-grid > div { padding:13px 16px 15px 0; }
+.c-empty-grid dt { color:var(--v7-ghost); font:700 11px var(--lgi-font-mono); letter-spacing:.11em; }
+.c-empty-grid dd { margin:7px 0 0; color:var(--v7-body); font-size:12px; line-height:1.6; }
+.c-empty-foot { margin-top:24px; height:2px; background:var(--v7-black); }
+
+/* DESIGN-006 · three weights of empty. Five surfaces are empty here but only one of them is
+ * the reader's to act on; rendering them identically made that impossible to see. Weight is
+ * carried by the rule and the tail line, never by hiding what a surface says about itself. */
+.c-empty-you .c-empty-rule { background:var(--v7-red); }
+.c-empty-action { margin:22px 0 0; padding:13px 15px; border-left:3px solid var(--v7-red); background:var(--v7-soft-red); color:var(--v7-black); font-size:12px; line-height:1.7; }
+.c-empty-action b { margin-right:9px; padding:2px 7px; background:var(--v7-red); color:var(--v7-white); font:800 10px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-empty-engineering .c-empty-rule { background:var(--v7-line-strong); }
+.c-empty-note { margin:22px 0 0; color:var(--v7-ghost); font-size:12px; line-height:1.7; }
+/* Upstream-empty is the lightest: a fact and a way out, no grid, no closing rule. */
+.c-empty-upstream { padding-bottom:28px; }
+.c-empty-upstream .c-empty-rule { background:var(--v7-line-strong); }
+.c-empty-pointer { margin-top:18px; display:inline-flex; align-items:center; gap:9px; padding:11px 15px; border:1px solid var(--v7-black); background:var(--v7-white); color:var(--v7-black); text-decoration:none; font-size:12px; transition:background var(--v7-t-state) var(--v7-ease); }
+.c-empty-pointer:hover { background:var(--v7-gray); }
+.c-empty-pointer i { color:var(--v7-red); font-style:normal; }
+
+/* Operations mode bar sits directly under the page head; NOW / TRACE / REVIEW are routes,
+ * not client-side tabs, so refresh and share both land on the same view. */
+.c-modebar { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 20px; border-bottom:1px solid var(--v7-black); background:var(--v7-white); }
+.c-mode-meta { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.06em; }
+
+/* Operations NOW: flow on the left, the one dark surface on the right. */
+.c-now { display:grid; grid-template-columns:minmax(680px,1fr) var(--c-now-aside); min-height:0; }
+.c-now-main { min-width:0; padding:0 0 24px; border-right:2px solid var(--v7-black); }
+.c-conclusion { padding:20px 20px 18px; border-bottom:1px solid var(--v7-line-strong); }
+.c-conclusion-label { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.13em; }
+.c-conclusion-state { margin-top:9px; color:var(--v7-unknown); font-size:30px; font-weight:850; letter-spacing:-.04em; }
+.c-conclusion p { margin:9px 0 0; max-width:620px; color:var(--v7-muted); font-size:12px; line-height:1.6; }
+
+/* The prototype drew six flow stages as one table whose columns silently changed meaning
+ * three times. Stages are rendered as their own rows with their own labelled readouts. */
+.c-flow { padding:6px 20px 0; }
+.c-flow-note { padding:14px 0 2px; color:var(--v7-muted); font-size:12px; line-height:1.6; }
+.c-flow-stage { padding:15px 0; border-bottom:1px solid var(--v7-line); display:grid; grid-template-columns:34px minmax(150px,1fr) auto; align-items:center; gap:16px; }
+.c-flow-stage:last-child { border-bottom:0; }
+.c-flow-no { color:var(--v7-ghost); font:700 11px var(--lgi-font-mono); }
+.c-flow-name b { display:block; color:var(--v7-black); font-size:13px; font-weight:750; }
+.c-flow-name span { display:block; margin-top:3px; color:var(--v7-muted); font-size:11px; }
+.c-flow-metrics { display:flex; gap:20px; }
+.c-flow-metrics > div { min-width:104px; text-align:right; }
+.c-flow-metrics b { display:block; color:var(--v7-unknown); font:800 15px/1 var(--lgi-font-mono); }
+.c-flow-metrics span { display:block; margin-top:5px; color:var(--v7-ghost); font:700 11px var(--lgi-font-mono); letter-spacing:.06em; }
+
+/* Live Observation Stream — the product's single dark surface, kept from the V4 Gold
+ * Master on Mog's 2026-08-26 decision and recorded as a long-term LIDS exception.
+ * Functional text is lifted to the 11px floor; only the timestamp gutter stays at 9px. */
+.c-stream { position:relative; min-width:0; display:flex; flex-direction:column; padding:0 18px 18px; color:var(--lgi-stream-ink); overflow:hidden;
+  background:linear-gradient(color-mix(in srgb, var(--lgi-stream-mint) 2.5%, transparent) 1px, transparent 1px) 0 0/100% 4px,
+    radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--lgi-stream-mint) 7%, transparent), transparent 34%),
+    linear-gradient(180deg, var(--lgi-stream-bg-raised), var(--lgi-stream-bg)); }
+.c-stream-toolbar { height:52px; flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid var(--lgi-stream-line); }
+.c-stream-id { display:flex; align-items:center; gap:9px; min-width:0; }
+.c-stream-dot { width:7px; height:7px; flex:0 0 auto; background:var(--lgi-stream-dim); }
+.c-stream-id b { color:var(--lgi-stream-ink); font:800 11px var(--lgi-font-mono); letter-spacing:.07em; white-space:nowrap; }
+.c-stream-filters { display:flex; align-items:center; gap:11px; }
+.c-stream-filters button { border:0; background:transparent; color:var(--lgi-stream-dim); padding:0; font:700 11px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-stream-filters button:not([disabled]) { color:var(--lgi-stream-muted); }
+.c-stream-filters button:not([disabled]):hover,.c-stream-filters button.c-on { color:var(--lgi-stream-ink); }
+.c-stream-filters button.c-on::after { content:""; display:block; height:1px; margin-top:3px; background:var(--lgi-stream-mint); }
+.c-stream-feed { flex:1 1 auto; min-height:var(--c-stream-feed); overflow:auto; padding:4px 0 8px; scrollbar-width:none; }
+.c-stream-feed::-webkit-scrollbar { display:none; }
+.c-stream-empty { padding:30px 0 0; }
+.c-stream-empty b { display:block; color:var(--lgi-stream-ink); font:800 12px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-stream-empty p { margin:11px 0 0; max-width:330px; color:var(--lgi-stream-muted); font-size:12px; line-height:1.65; }
+.c-stream-empty dl { margin:20px 0 0; display:grid; gap:11px; }
+.c-stream-empty dt { color:var(--lgi-stream-muted); font:700 11px var(--lgi-font-mono); letter-spacing:.08em; }
+.c-stream-empty dd { margin:4px 0 0; color:var(--lgi-stream-muted); font-size:11px; line-height:1.55; }
+.c-stream-readout { flex:0 0 auto; height:78px; display:grid; grid-template-columns:repeat(3,1fr); border-top:2px solid var(--lgi-stream-line); border-bottom:1px solid var(--lgi-stream-line); }
+.c-stream-readout > div { display:flex; flex-direction:column; justify-content:center; }
+.c-stream-readout b { color:var(--lgi-stream-muted); font:800 16px var(--lgi-font-mono); }
+.c-stream-readout span { margin-top:4px; color:var(--lgi-stream-dim); font:700 11px var(--lgi-font-mono); letter-spacing:.07em; }
+.c-stream-foot { flex:0 0 auto; height:34px; display:flex; align-items:flex-end; justify-content:space-between; color:var(--lgi-stream-dim); font:700 11px var(--lgi-font-mono); letter-spacing:.05em; }
+
+/* Split workspace shared by Attention / Tasks / Runtime. */
+.c-split { display:grid; grid-template-columns:minmax(0,1fr) var(--c-inspector); min-height:0; }
+.c-split-main { min-width:0; border-right:2px solid var(--v7-black); }
+.c-inspector { min-width:0; padding:20px 18px; background:var(--v7-gray); }
+.c-inspector-id { color:var(--v7-ghost); font:700 11px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-inspector-title { margin-top:8px; color:var(--v7-black); font-size:17px; font-weight:800; letter-spacing:-.02em; }
+.c-inspector p { margin:10px 0 0; color:var(--v7-muted); font-size:12px; line-height:1.65; }
+
+/* Wide Target Workspace drawer. It anchors under the global header, never covers it, and
+ * never becomes a centred modal. Width and open state are owned by the URL. */
+.c-drawer { position:fixed; top:var(--v7-header-height); right:0; bottom:0; width:var(--c-drawer-width); z-index:var(--lgi-z-drawer); display:flex; flex-direction:column; background:var(--v7-white); border-left:3px solid var(--v7-black); box-shadow:var(--lgi-shadow-overlay); transform:translateX(0); transition:transform var(--lgi-duration-panel) var(--lgi-ease-ui), width var(--lgi-duration-panel) var(--lgi-ease-ui); }
+.c-drawer[hidden] { display:none; }
+.c-drawer.c-wide { width:var(--c-drawer-wide); }
+.c-drawer-head { flex:0 0 auto; padding:17px 20px 0; border-bottom:1px solid var(--v7-black); }
+.c-drawer-top { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; }
+.c-drawer-kind { color:var(--lgi-signal-ink); font:700 10px var(--lgi-font-mono); letter-spacing:.15em; }
+.c-drawer-name { margin-top:7px; color:var(--v7-black); font-size:23px; font-weight:850; letter-spacing:-.04em; }
+.c-drawer-id { margin-top:6px; color:var(--v7-muted); font:700 11px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-drawer-controls { display:flex; align-items:center; gap:7px; }
+.c-drawer-tabs { display:flex; align-items:stretch; margin-top:15px; }
+.c-drawer-tabs button { position:relative; height:40px; padding:0 14px; border:0; background:transparent; color:var(--v7-muted); font-size:12px; font-weight:600; }
+.c-drawer-tabs button:first-child { padding-left:0; }
+.c-drawer-tabs button.c-on { color:var(--v7-black); }
+.c-drawer-tabs button.c-on::after { content:""; position:absolute; left:0; right:14px; bottom:0; height:3px; background:var(--v7-red); }
+.c-drawer-body { flex:1 1 auto; min-height:0; overflow:auto; padding:0 20px 26px; }
+.c-drawer-panel[hidden] { display:none; }
+
+/* Buttons reuse the Evidence Library's single button language; nothing is redefined. */
+.c-btn { height:40px; padding:0 15px; border:2px solid var(--v7-black); border-radius:0; background:var(--v7-white); color:var(--v7-black); font-size:12px; font-weight:600; box-shadow:var(--v7-brutal); transition:transform var(--v7-t-state) var(--v7-ease), box-shadow var(--v7-t-state) var(--v7-ease), background var(--v7-t-state) var(--v7-ease); }
+.c-btn:not([disabled]):hover { background:var(--v7-gray); transform:translate(-2px,-2px); box-shadow:var(--v7-brutal-lg); }
+.c-btn:not([disabled]):active { transform:translate(1px,1px); box-shadow:2px 2px 0 var(--v7-black); }
+.c-btn[disabled] { box-shadow:none; border-color:var(--v7-line-strong); color:var(--v7-ghost); }
+.c-btn-quiet { height:34px; padding:0 11px; border:1px solid var(--v7-line-strong); background:var(--v7-white); color:var(--v7-muted); font:700 11px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-btn-quiet[disabled] { color:var(--v7-ghost); }
+a.c-btn-quiet { display:inline-flex; align-items:center; text-decoration:none; }
+a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-black); color:var(--v7-black); }
+
+/* A control that is disabled because an authorisation contract does not exist yet must say
+ * so; it must never look like a working action that simply did nothing. */
+.c-gate { display:inline-flex; align-items:center; gap:7px; padding:6px 10px; background:var(--v7-warn-soft); color:var(--v7-black); font:700 11px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-gate::before { content:""; width:7px; height:7px; flex:0 0 auto; border-radius:50%; background:var(--v7-warn-fill); }
+.c-gate-note { margin-top:11px; color:var(--v7-muted); font-size:12px; line-height:1.6; }
+
+@media (max-width:1450px) {
+  :root { --c-drawer-width:76vw; --c-drawer-wide:90vw; --c-now-aside:410px; --c-inspector:390px; }
+  .c-now { grid-template-columns:minmax(620px,1fr) var(--c-now-aside); }
+}
+@media (max-width:1180px) {
+  :root { --c-drawer-width:calc(100vw - var(--v7-side-width)); --c-drawer-wide:calc(100vw - var(--v7-side-width)); }
+  .c-now { grid-template-columns:minmax(0,1fr); }
+  .c-now-main { border-right:0; border-bottom:2px solid var(--v7-black); }
+  .c-split { grid-template-columns:minmax(0,1fr); }
+  .c-split-main { border-right:0; border-bottom:2px solid var(--v7-black); }
+}
+@media (max-width:900px) {
+  .c-drawer { top:0; width:100vw; }
+}
+@media (prefers-reduced-motion:reduce) { .c-drawer { transition:none; } }
+
+/* COLLECTION-001 · stored observation targets. A row here proves the target was saved and
+ * nothing more, so the block stays quiet: no progress bars, no health scores, no percentages
+ * — none of those facts exist yet. */
+.c-targets { max-width:960px; padding:30px 20px 40px; }
+.c-targets-head { padding-bottom:16px; border-bottom:2px solid var(--v7-black); }
+.c-targets-count { display:flex; align-items:baseline; gap:9px; }
+.c-targets-count b { color:var(--v7-black); font:800 26px/1 var(--lgi-font-mono); letter-spacing:-.04em; }
+.c-targets-count span { color:var(--v7-muted); font-size:13px; }
+.c-targets-note { margin:11px 0 0; max-width:640px; color:var(--v7-muted); font-size:12px; line-height:1.7; }
+.c-target-row { display:grid; grid-template-columns:72px minmax(0,1fr) auto 64px; align-items:center; gap:16px; padding:14px 0; border-bottom:1px solid var(--v7-line); }
+.c-target-kind { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-target-name { min-width:0; }
+.c-target-name b { display:block; color:var(--v7-black); font-size:14px; font-weight:700; }
+.c-target-name span { display:block; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-ghost); font:11px var(--lgi-font-mono); }
+.c-target-meta { display:flex; gap:14px; color:var(--v7-muted); font:10px var(--lgi-font-mono); letter-spacing:.04em; }
+.c-target-state { color:var(--v7-black); font:700 11px var(--lgi-font-mono); text-align:right; }

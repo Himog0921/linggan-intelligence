@@ -1,0 +1,56 @@
+{
+  "format": "linggan-browser-producer-release-v1",
+  "package": "linggan-browser-producer",
+  "version": "0.2.0",
+  "contractCompatibility": [
+    "xhs.discovery.visible-card.v1"
+  ],
+  "loopbackHealthTarget": "http://localhost:3000/health",
+  "archive": {
+    "file": "linggan-browser-producer-0.2.0.zip",
+    "sha256": "505ed4f2f451751540a414a24a55d49c7ff691f657919307ed81966da618e326",
+    "bytes": 11484
+  },
+  "files": [
+    {
+      "path": "discovery-contract.js",
+      "sha256": "9c1b0b5f1e40f862ef6cab45f074d21e3708f97e6035116362580958ddd72a54",
+      "bytes": 5892
+    },
+    {
+      "path": "lids-tokens.css",
+      "sha256": "b510d1ce8996cfafc90a9ba8f42ac03dfda6a009f02b6c3f4a9b2bfd95706491",
+      "bytes": 3780
+    },
+    {
+      "path": "manifest.json",
+      "sha256": "2271eb15116455add9eff114821afa2b1dfb2f24d9ba05d8bd23ba67fa1823cc",
+      "bytes": 476
+    },
+    {
+      "path": "popup.css",
+      "sha256": "f7f930370b8d4022a43cb66613e7dfa981a2594c0eb540b90428aba9488a7ef1",
+      "bytes": 3106
+    },
+    {
+      "path": "popup.html",
+      "sha256": "ab9b76cf6503abb3c95b4c4f3de18c3f1129494503785be766bd5b365bb6b4af",
+      "bytes": 2016
+    },
+    {
+      "path": "popup.js",
+      "sha256": "dba81c4f826df7aafd6f531236ab61ab63a09fb91828160ae78ed109cfd832c9",
+      "bytes": 2392
+    },
+    {
+      "path": "service-worker.js",
+      "sha256": "f9147191661f444e608206e707ea7a90b41ad082026f5d93c5c726b87c1728bc",
+      "bytes": 5681
+    },
+    {
+      "path": "xhs-visible-search-adapter.js",
+      "sha256": "7103cebcde3d9e4ac562441b0566168762d5e56544a631c9789f01d4d8e109f4",
+      "bytes": 4610
+    }
+  ]
+}
