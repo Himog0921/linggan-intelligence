@@ -187,7 +187,7 @@ fn station_row(station: &StationOverview) -> String {
         r#"<div class="c-target-row">
                 <div class="c-target-kind">工位</div>
                 <div class="c-target-name"><b>{name}</b><span>{plugin}</span></div>
-                <div class="c-target-meta"><span>{history}</span><span>{window}</span><span>每日 {quota} 篇</span></div>
+                <div class="c-target-meta"><span>{history}</span><span>{window}</span><span>今日 {used}/{quota} 篇</span></div>
                 <div class="c-target-state">{state}</div>
                 <form class="c-target-retire" method="post" action="/collection/runtime/retire">
                   <input type="hidden" name="station_ref" value="{station_ref}" />
@@ -199,6 +199,7 @@ fn station_row(station: &StationOverview) -> String {
         plugin = escape(&plugin_line),
         history = escape(&history),
         window = escape(window),
+        used = station.daily_notes_used,
         quota = station.daily_work_quota,
         state = escape(state_label),
     )
@@ -269,6 +270,7 @@ mod tests {
             active_browser_label: Some("Chrome".to_owned()),
             active_last_seen_at: Some("2026-08-27 02:58".to_owned()),
             superseded_count: superseded,
+            daily_notes_used: 0,
         }
     }
 

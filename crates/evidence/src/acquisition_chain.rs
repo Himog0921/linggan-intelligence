@@ -6,6 +6,7 @@
 //! Nothing here reaches a platform. A Work Order row is a written instruction; execution is
 //! a later stage that does not exist yet.
 
+use crate::execution_station::station_daily_note_usage_in;
 use linggan_contracts::{AdmissionFacts, AdmissionOutcome, Capacity, decide_admission};
 use linggan_storage_postgres::Database;
 use serde_json::json;
@@ -323,18 +324,14 @@ async fn establish_capacity(
             continue;
         }
 
-        // 预算算的是**已下发的承诺**，不是已经采到的数量——本项目还没有任何执行。
-        // 按承诺算才拦得住「一天下发三张 200 篇的工单」这种超发。
-        let committed: Option<i64> = sqlx::query_scalar(
-            "SELECT sum(w.max_works)::bigint FROM collection_work_order w \
-             WHERE w.station_ref = $1 AND w.created_at >= date_trunc('day', scope_001_now())",
-        )
-        .bind(station_ref)
-        .fetch_one(&mut **transaction)
-        .await?;
-        let committed = i32::try_from(committed.unwrap_or(0)).unwrap_or(i32::MAX);
-        if committed >= quota {
-            quota_blocked = Some((quota, committed));
+        // 计数单位是**实际入库的笔记条数**，不是任务数或已下发的承诺数：一次建档可能
+        // 入库 200 条却只算一个任务（规则文档 §单工位每日上限）。查询与页面展示共用同
+        // 一段 SQL，两处口径才不会漂移——旧项目两份 200 判据不同，出现过「页面显示已达
+        // 上限但仍在派单」。
+        let used = station_daily_note_usage_in(transaction, station_ref).await?;
+        let used = i32::try_from(used).unwrap_or(i32::MAX);
+        if used >= quota {
+            quota_blocked = Some((quota, used));
             continue;
         }
         return Ok(Capacity::Available {
