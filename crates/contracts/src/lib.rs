@@ -1,6 +1,7 @@
 //! Versioned boundary contracts. SCOPE-001 authorizes only the frozen
 //! `content-detail.synthetic.v1` proof contract; real producer contracts require a later scope.
 
+mod admission;
 mod canonical;
 mod capture;
 mod collection;
@@ -8,6 +9,7 @@ mod discovery;
 mod local_producer;
 mod producer_runtime;
 
+pub use admission::{AdmissionFacts, AdmissionOutcome, AdmissionQuestion, decide_admission};
 pub use capture::{
     CapturePackage, CaptureRecord, ContractError, Coverage, KnownSetTarget, KnownTargetOutcome,
     KnownTargetResult, PackageRouting, RemainingScope, Terminal, TerminalReason,

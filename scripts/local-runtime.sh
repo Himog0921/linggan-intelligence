@@ -176,6 +176,7 @@ migrate() {
   apply_migration_once "0003_local_trusted_producer" "$project_root/database/migrations/0003_local_trusted_producer.sql"
   apply_migration_once "0004_plugin_runtime_all_capabilities" "$project_root/database/migrations/0004_plugin_runtime_all_capabilities.sql"
   apply_migration_once "0005_collection_observation_target" "$project_root/database/migrations/0005_collection_observation_target.sql"
+  apply_migration_once "0006_collection_acquisition_chain" "$project_root/database/migrations/0006_collection_acquisition_chain.sql"
 }
 
 case "$command_name" in
