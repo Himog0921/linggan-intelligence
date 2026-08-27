@@ -615,6 +615,30 @@ export default function App() {
     showNotice('数据维护暂不可用：尚未具备 Linggan Runtime 数据维护合同，未修改任何本机数据。', 'warning');
   }, [showNotice]);
 
+  /**
+   * 领一个 Linggan 派下来的任务并执行。
+   *
+   * 结果如实呈现三种情况：执行了、被拦下（闸门关着、额度触顶等）、或没有任务。
+   * 「被拦下」不是错误——闸门默认关着就是正常状态，用提示而不是报错说明它。
+   */
+  const handleRunDispatchedTask = useCallback(async () => {
+    await withBusyAction('runDispatchedTask', async () => {
+      hideNotice();
+      try {
+        const result = await sendToBackground(LINGGAN_RUNTIME_ACTION.RUN_DISPATCHED_TASK);
+        if (result?.executed) {
+          showNotice(result.message, 'info');
+        } else if (result?.success) {
+          showNotice(result.message || '当前没有可执行的任务。', 'warning');
+        } else {
+          showNotice(result?.message || '未能领取任务。', 'warning');
+        }
+      } catch (error) {
+        showNotice(String(error?.message || error), 'warning');
+      }
+    });
+  }, [hideNotice, showNotice, withBusyAction]);
+
   const handleFlywheelTest = useCallback(async () => {
     await withBusyAction('flywheelTest', async () => {
       hideNotice();
@@ -835,6 +859,21 @@ export default function App() {
               onTest={handleFlywheelTest}
               testing={Boolean(busyActions.flywheelTest)}
             />
+            <section className="section">
+              <h2>执行 Linggan 派下来的任务</h2>
+              <p>
+                向 Linggan 领取一个已获授权的任务并执行。任务的目标与配额都由 Linggan 给定，
+                插件不自行放宽。闸门关着时会如实告诉你，不会执行任何采集。
+              </p>
+              <button
+                type="button"
+                className="btn"
+                onClick={handleRunDispatchedTask}
+                disabled={Boolean(busyActions.runDispatchedTask)}
+              >
+                {busyActions.runDispatchedTask ? '正在领取…' : '领取并执行'}
+              </button>
+            </section>
           </div>
         )}
       </main>

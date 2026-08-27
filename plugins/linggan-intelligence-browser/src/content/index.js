@@ -232,6 +232,7 @@ async function dispatchProducerRuntimeAction(action, message) {
       [LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_CONTENT]: 'collectNote',
       [LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_COMMENTS]: 'collectComment',
       [LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_AUTHOR]: 'collectAuthor',
+      [LINGGAN_RUNTIME_ACTION.DISCOVER_SURFACE]: 'discoverSurface',
       [LINGGAN_RUNTIME_ACTION.START_BATCH_CONTENT]: 'batchNotes',
       [LINGGAN_RUNTIME_ACTION.START_BATCH_COMMENTS]: 'batchComments',
       [LINGGAN_RUNTIME_ACTION.ACQUIRE_COMMENT_MEDIA]: 'collectCommentImages',

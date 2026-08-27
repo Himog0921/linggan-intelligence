@@ -2,6 +2,7 @@ import {
   LINGGAN_LOCAL_ORIGIN,
   attemptStartIsAccepted,
   checkInLingganStation,
+  claimLingganDispatch,
   createLocalAttempt,
   createLocalSubmission,
   createTaskSpec,
@@ -430,11 +431,96 @@ chrome.runtime.onStartup?.addListener(() => { void checkInStationOnce(); });
 // service worker 每次被唤醒都会执行到这里，等于一次轻量心跳。
 void checkInStationOnce();
 
+/**
+ * 领一个服务端派下来的任务并执行它。
+ *
+ * **只有 `mayExecute` 为真才会碰平台。**拿到任务体不等于拿到许可——闸门、风险暂停、当日
+ * 额度都可能在返回任务体的同时否决执行，`claimLingganDispatch` 因此在不许可时根本不把
+ * 任务体带出来。
+ *
+ * 执行严格按派下来的规格：目标、配额、能力都来自任务，不来自页面上的对话框。这一条是
+ * 授权链的意义所在——执行端不得自行放宽工单给定的边界。
+ */
+const SURFACE_CAPABILITIES = new Set(['author_profile', 'profile_discovery']);
+
+async function runDispatchedTask() {
+  const readiness = await readLingganLocalReadiness();
+  if (!readiness.reachable) {
+    return { success: false, state: 'unreachable', message: readiness.message };
+  }
+  const installKey = await producerInstanceId();
+  const claim = await claimLingganDispatch({ installKey, health: readiness.health });
+  if (!claim.mayExecute) {
+    // 不许执行不是故障：闸门默认关着就是正常状态。原样把服务端的判断带回去。
+    return { success: true, state: claim.decision, executed: false, message: claim.message };
+  }
+
+  const spec = claim.taskSpec || {};
+  const capability = Array.isArray(spec.capabilitiesRequested) ? spec.capabilitiesRequested[0] : '';
+  if (!SURFACE_CAPABILITIES.has(capability)) {
+    // 只执行表层能力。详情与媒体属于另一段 Canary，尚未获准，因此宁可交回也不越界执行。
+    return {
+      success: true,
+      state: 'capability_not_executable_here',
+      executed: false,
+      message: `派下来的能力「${capability}」当前不在可执行范围内：只执行作者信息与作品清单这两种表层采集。`,
+    };
+  }
+
+  const authorExternalId = String(spec.target?.authorExternalId || '').trim();
+  if (!authorExternalId) {
+    return { success: true, state: 'target_incomplete', executed: false, message: '任务没有指明创作者。' };
+  }
+  const tab = await openAuthorTab(authorExternalId);
+  if (!tab?.id) {
+    return { success: false, state: 'tab_unavailable', message: '无法打开该创作者主页。' };
+  }
+
+  const action = capability === 'author_profile'
+    ? LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_AUTHOR
+    : LINGGAN_RUNTIME_ACTION.DISCOVER_SURFACE;
+  try {
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      action,
+      mode: 'profile',
+      // 配额来自工单，不来自页面对话框：执行端不得自行放宽。
+      maximumQuota: Number(spec.maximumQuota) || 1,
+      triggerSource: 'linggan_dispatched_task',
+    });
+    return {
+      success: true,
+      state: 'executed',
+      executed: true,
+      capability,
+      leaseRef: claim.leaseRef,
+      message: response?.message || `已按派下来的任务执行「${capability}」。`,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      state: 'page_unavailable',
+      message: '创作者主页尚未就绪，请等页面加载完成后重试。',
+    };
+  }
+}
+
+/// 打开或复用创作者主页。**平台 ID 才是身份**，URL 由它拼出来，不反过来。
+async function openAuthorTab(authorExternalId) {
+  const url = `https://www.xiaohongshu.com/user/profile/${encodeURIComponent(authorExternalId)}`;
+  const existing = await chrome.tabs.query({ url: `${url}*` });
+  if (existing.length > 0) {
+    await chrome.tabs.update(existing[0].id, { active: true });
+    return existing[0];
+  }
+  return chrome.tabs.create({ url, active: true });
+}
+
 chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
   const action = String(message.action || '').trim();
   Promise.resolve().then(async () => {
     if (action === LINGGAN_RUNTIME_ACTION.TOGGLE_DASHBOARD) return openDashboard();
     if (action === LINGGAN_RUNTIME_ACTION.GET_FLYWHEEL_CONFIG || action === LINGGAN_RUNTIME_ACTION.SAVE_FLYWHEEL_CONFIG) return getLingganStatus();
+    if (action === LINGGAN_RUNTIME_ACTION.RUN_DISPATCHED_TASK) return runDispatchedTask();
     if (action === LINGGAN_RUNTIME_ACTION.GET_EXECUTION_STATION_STATUS) {
       return reportStationStatus();
     }

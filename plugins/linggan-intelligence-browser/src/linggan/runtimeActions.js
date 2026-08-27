@@ -21,6 +21,10 @@ export const LINGGAN_RUNTIME_ACTION = {
   COLLECT_CURRENT_CONTENT: 'lingganCollectCurrentContent',
   COLLECT_CURRENT_COMMENTS: 'lingganCollectCurrentComments',
   COLLECT_CURRENT_AUTHOR: 'lingganCollectCurrentAuthor',
+  // 表层发现面：作者页的作品清单。它只读页面已可见的卡片，**不打开任何详情**。
+  DISCOVER_SURFACE: 'lingganDiscoverSurface',
+  // 领取并执行服务端派下来的一个任务。
+  RUN_DISPATCHED_TASK: 'lingganRunDispatchedTask',
   START_BATCH_CONTENT: 'lingganStartBatchContent',
   START_BATCH_COMMENTS: 'lingganStartBatchComments',
   ACQUIRE_COMMENT_MEDIA: 'lingganAcquireCommentMedia',
