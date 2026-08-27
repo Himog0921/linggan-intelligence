@@ -189,7 +189,12 @@ fn station_row(station: &StationOverview) -> String {
                 <div class="c-target-name"><b>{name}</b><span>{plugin}</span></div>
                 <div class="c-target-meta"><span>{history}</span><span>{window}</span><span>每日 {quota} 篇</span></div>
                 <div class="c-target-state">{state}</div>
+                <form class="c-target-retire" method="post" action="/collection/runtime/retire">
+                  <input type="hidden" name="station_ref" value="{station_ref}" />
+                  <button class="c-btn-quiet" type="submit">停用</button>
+                </form>
               </div>"#,
+        station_ref = station.station_ref,
         name = escape(&station.display_name),
         plugin = escape(&plugin_line),
         history = escape(&history),

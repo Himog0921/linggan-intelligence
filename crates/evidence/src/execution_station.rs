@@ -123,6 +123,47 @@ pub async fn close_claim_window(
     Ok(())
 }
 
+/// 停用一台工位。
+///
+/// 不是删除：停用要留下时间与原因，否则「这台工位为什么不见了」以后没人答得上来。
+/// 停用会同时把它上面的在岗安装标记为被取代——否则那条安装会挂在一台已经不存在的
+/// 工位上，而唯一索引仍认为它在岗。
+pub async fn retire_station(
+    database: &Database,
+    station_ref: Uuid,
+    reason: &str,
+) -> Result<(), StationError> {
+    if !station_schema_is_ready(database).await? {
+        return Err(StationError::SchemaUnavailable);
+    }
+    let mut transaction = database.pool().begin().await?;
+    let affected = sqlx::query(
+        "UPDATE execution_station \
+         SET retired_at = scope_001_now(), retire_reason = $2, \
+             claim_window_opens_at = NULL, claim_window_expires_at = NULL \
+         WHERE station_ref = $1 AND retired_at IS NULL",
+    )
+    .bind(station_ref)
+    .bind(reason)
+    .execute(&mut *transaction)
+    .await?
+    .rows_affected();
+    if affected == 0 {
+        return Err(StationError::UnknownStation);
+    }
+    // 安装记录保留，只解除在岗关系：插件历史不因工位停用而消失。
+    sqlx::query(
+        "UPDATE plugin_installation \
+         SET superseded_at = scope_001_now(), superseded_by = installation_ref \
+         WHERE station_ref = $1 AND superseded_at IS NULL",
+    )
+    .bind(station_ref)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
 /// 插件报到自述。全部是插件自报的兼容性事实（合同 §5），不含任何它能改变的配额或范围。
 #[derive(Debug, Clone)]
 pub struct InstallationCheckIn<'a> {

@@ -30,8 +30,9 @@ use linggan_evidence::{
     producer_runtime_has_packages, producer_runtime_schema_is_ready, read_discovery_library,
     read_local_media_blob, read_media_upload_session, read_runtime_library, read_station_overview,
     record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, request_and_admit, start_local_attempt, start_producer_attempt,
-    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
+    release_media_upload_finalize, request_and_admit, retire_station, start_local_attempt,
+    start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
+    submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -269,6 +270,10 @@ fn router(state: LocalWebState) -> Router {
         .route(
             "/collection/runtime/close-window",
             post(collection_runtime_close_window),
+        )
+        .route(
+            "/collection/runtime/retire",
+            post(collection_runtime_retire_station),
         )
         .route("/collection/runtime/claims", post(collection_runtime_claim))
         .route("/assets/evidence-library.css", get(stylesheet))
@@ -1850,6 +1855,21 @@ async fn collection_runtime_close_window(
 ) -> Redirect {
     if let Some(database) = state.database.database() {
         let _ = close_claim_window(database, form.station_ref).await;
+    }
+    Redirect::to(RUNTIME_SURFACE)
+}
+
+#[derive(serde::Deserialize)]
+struct RetireForm {
+    station_ref: uuid::Uuid,
+}
+
+async fn collection_runtime_retire_station(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<RetireForm>,
+) -> Redirect {
+    if let Some(database) = state.database.database() {
+        let _ = retire_station(database, form.station_ref, "在执行工位页停用").await;
     }
     Redirect::to(RUNTIME_SURFACE)
 }

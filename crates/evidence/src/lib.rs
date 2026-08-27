@@ -22,7 +22,7 @@ pub use collection_target::{
 pub use execution_station::{
     CheckInOutcome, InstallationCheckIn, StationError, StationOverview, UnclaimedInstallation,
     check_in_installation, claim_installation, close_claim_window, open_claim_window,
-    read_station_overview, register_station, station_schema_is_ready,
+    read_station_overview, register_station, retire_station, station_schema_is_ready,
 };
 pub use ingress::{
     IngressError, IngressFault, IngressOptions, PreRoutingCode, ingest_capture_package,

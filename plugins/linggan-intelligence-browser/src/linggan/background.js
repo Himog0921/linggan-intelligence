@@ -367,6 +367,36 @@ function browserLabel() {
   return '';
 }
 
+/**
+ * 主动报到。
+ *
+ * 此前报到只在弹窗来问状态时才跑，于是重载插件后什么也不会发生——这正是「插件绑不上」
+ * 的直接原因。报到只写 Linggan 本机记录，不访问任何平台，因此可以主动做。
+ *
+ * MV3 的 service worker 是随事件唤醒的，所以在模块顶层调用一次即可获得天然心跳，
+ * 不需要 alarms 权限（多加权限会让重装时多一次授权确认）。
+ */
+let checkingInStation = null;
+async function checkInStationOnce() {
+  if (checkingInStation) return checkingInStation;
+  checkingInStation = (async () => {
+    try {
+      return await reportStationStatus();
+    } catch {
+      // 报到失败不能影响插件其余功能：Linggan 没开着是常态，不是错误。
+      return null;
+    } finally {
+      checkingInStation = null;
+    }
+  })();
+  return checkingInStation;
+}
+
+chrome.runtime.onInstalled.addListener(() => { void checkInStationOnce(); });
+chrome.runtime.onStartup?.addListener(() => { void checkInStationOnce(); });
+// service worker 每次被唤醒都会执行到这里，等于一次轻量心跳。
+void checkInStationOnce();
+
 chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
   const action = String(message.action || '').trim();
   Promise.resolve().then(async () => {
