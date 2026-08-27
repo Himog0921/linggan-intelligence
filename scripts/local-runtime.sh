@@ -177,6 +177,7 @@ migrate() {
   apply_migration_once "0004_plugin_runtime_all_capabilities" "$project_root/database/migrations/0004_plugin_runtime_all_capabilities.sql"
   apply_migration_once "0005_collection_observation_target" "$project_root/database/migrations/0005_collection_observation_target.sql"
   apply_migration_once "0006_collection_acquisition_chain" "$project_root/database/migrations/0006_collection_acquisition_chain.sql"
+  apply_migration_once "0007_execution_station" "$project_root/database/migrations/0007_execution_station.sql"
 }
 
 case "$command_name" in

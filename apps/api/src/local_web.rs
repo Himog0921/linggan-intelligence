@@ -3,6 +3,7 @@ mod collection_intake;
 mod collection_targets_view;
 mod evidence_page;
 mod shell;
+mod station_view;
 
 use axum::{
     Json, Router,
@@ -18,18 +19,19 @@ use linggan_contracts::{
     parse_producer_task_spec,
 };
 use linggan_evidence::{
-    AcquisitionChainError, AuthorizationGrant, DiscoveryIngressError, LocalAttemptOutcome,
-    LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome, MediaUploadFinalizeClaim,
-    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
-    StoreOutcome, admit_media_blob, begin_media_upload, claim_media_upload_finalize,
+    AcquisitionChainError, AuthorizationGrant, CheckInOutcome, DiscoveryIngressError,
+    InstallationCheckIn, LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome,
+    LocalTaskOutcome, MediaUploadFinalizeClaim, ProducerRuntimeError, RuntimeAttemptOutcome,
+    RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome, admit_media_blob,
+    begin_media_upload, check_in_installation, claim_installation, claim_media_upload_finalize,
     complete_media_upload, create_manual_task, create_producer_task, grant_authorization,
     ingest_discovery_package, list_targets_in_state, local_discovery_schema_is_ready,
-    local_producer_schema_is_ready, producer_runtime_has_packages,
+    local_producer_schema_is_ready, open_claim_window, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_discovery_library, read_local_media_blob,
-    read_media_upload_session, read_runtime_library, record_media_download_failure,
-    record_media_upload_chunk, release_media_upload_finalize, request_and_admit,
-    start_local_attempt, start_producer_attempt, store_pending_target, submit_local_package,
-    submit_producer_package,
+    read_media_upload_session, read_runtime_library, read_station_overview,
+    record_media_download_failure, record_media_upload_chunk, register_station,
+    release_media_upload_finalize, request_and_admit, start_local_attempt, start_producer_attempt,
+    store_pending_target, submit_local_package, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -241,6 +243,13 @@ fn router(state: LocalWebState) -> Router {
             "/api/local/collection/archive-requests",
             post(collection_archive_request),
         )
+        .route("/api/local/stations", post(station_register))
+        .route(
+            "/api/local/stations/claim-window",
+            post(station_claim_window),
+        )
+        .route("/api/local/stations/installations", post(station_check_in))
+        .route("/api/local/stations/claims", post(station_claim))
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))
@@ -488,6 +497,202 @@ async fn collection_grant_authorization(
         Err(_) => local_read_json_error(
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             "authorization_grant_rejected",
+        ),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StationBody {
+    display_name: String,
+    #[serde(default)]
+    daily_work_quota: Option<i32>,
+}
+
+/// COLLECTION-001 · register a work station. Only a person creates one.
+///
+/// The station is the durable side of the pair: name, quota and authorization live here, so a
+/// plugin reinstall never resets them.
+async fn station_register(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(station) = serde_json::from_slice::<StationBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "station_invalid",
+        );
+    };
+    // 200 notes per station per day (Mog's decision), held on the station, not the install.
+    let quota = station.daily_work_quota.unwrap_or(200);
+    match register_station(database, &station.display_name, quota).await {
+        Ok(station_ref) => Json(serde_json::json!({
+            "stationRef": station_ref,
+            "registeredBy": "person",
+            "dailyWorkQuota": quota,
+            "execution": "NOT_STARTED",
+        }))
+        .into_response(),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "station_rejected",
+        ),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaimWindowBody {
+    station_ref: uuid::Uuid,
+    #[serde(default)]
+    valid_for_hours: Option<i32>,
+}
+
+/// COLLECTION-001 · open a claim window so new installs bind themselves to this station.
+///
+/// Always time-bounded. During plugin development one window covers a day of reinstalls; a
+/// window that never closed would be an open door on a public domain.
+async fn station_claim_window(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(window) = serde_json::from_slice::<ClaimWindowBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "claim_window_invalid",
+        );
+    };
+    let hours = window.valid_for_hours.unwrap_or(24);
+    match open_claim_window(database, window.station_ref, hours).await {
+        Ok(()) => Json(serde_json::json!({
+            "stationRef": window.station_ref,
+            "validForHours": hours,
+            "execution": "NOT_STARTED",
+        }))
+        .into_response(),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "claim_window_rejected",
+        ),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CheckInBody {
+    install_key: String,
+    plugin_version: String,
+    #[serde(default)]
+    browser_label: Option<String>,
+    #[serde(default)]
+    capabilities: Vec<String>,
+}
+
+/// COLLECTION-001 · a plugin install reports in.
+///
+/// It never creates a station. An unclaimed install is recorded and left idle — present, but
+/// not something work can be handed to.
+async fn station_check_in(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(check_in) = serde_json::from_slice::<CheckInBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "check_in_invalid",
+        );
+    };
+    let result = check_in_installation(
+        database,
+        &InstallationCheckIn {
+            install_key: &check_in.install_key,
+            plugin_version: &check_in.plugin_version,
+            browser_label: check_in.browser_label.as_deref(),
+            capabilities: serde_json::json!(check_in.capabilities),
+        },
+    )
+    .await;
+    match result {
+        Ok(outcome) => Json(check_in_payload(&outcome)).into_response(),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "check_in_rejected",
+        ),
+    }
+}
+
+fn check_in_payload(outcome: &CheckInOutcome) -> serde_json::Value {
+    match outcome {
+        CheckInOutcome::Claimed {
+            installation_ref,
+            station_ref,
+            superseded,
+        } => serde_json::json!({
+            "installationRef": installation_ref,
+            "state": "claimed",
+            "claimKind": "claim_window",
+            "stationRef": station_ref,
+            // A reinstall replaces the previous install on the same station rather than
+            // registering a second station. The replaced one stays visible on purpose.
+            "supersededInstallationRef": superseded,
+            "execution": "NOT_STARTED",
+        }),
+        CheckInOutcome::AwaitingClaim { installation_ref } => serde_json::json!({
+            "installationRef": installation_ref,
+            "state": "awaiting_claim",
+            "stationRef": serde_json::Value::Null,
+            "execution": "NOT_STARTED",
+        }),
+        CheckInOutcome::Heartbeat { installation_ref } => serde_json::json!({
+            "installationRef": installation_ref,
+            "state": "heartbeat",
+            "execution": "NOT_STARTED",
+        }),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ClaimBody {
+    installation_ref: uuid::Uuid,
+    station_ref: uuid::Uuid,
+}
+
+/// COLLECTION-001 · a person points one waiting install at one station.
+async fn station_claim(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(claim) = serde_json::from_slice::<ClaimBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "claim_invalid",
+        );
+    };
+    match claim_installation(database, claim.installation_ref, claim.station_ref).await {
+        Ok(superseded) => Json(serde_json::json!({
+            "installationRef": claim.installation_ref,
+            "stationRef": claim.station_ref,
+            "claimKind": "person",
+            "supersededInstallationRef": superseded,
+            "execution": "NOT_STARTED",
+        }))
+        .into_response(),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "claim_rejected",
         ),
     }
 }
@@ -1547,12 +1752,23 @@ async fn collection_tasks() -> Html<String> {
     ))
 }
 
-async fn collection_runtime() -> Html<String> {
-    Html(collection::render(
+async fn collection_runtime(State(state): State<LocalWebState>) -> Html<String> {
+    let base = collection::render(
         collection::Section::Runtime,
         collection::OperationsMode::Now,
         None,
-    ))
+    );
+    // Without a database the page keeps its honest empty state: "we cannot read stations right
+    // now" and "no station is registered" are different claims.
+    let Some(database) = state.database.database() else {
+        return Html(base);
+    };
+    match read_station_overview(database).await {
+        Ok((stations, unclaimed)) => {
+            Html(station_view::render_stations(&base, &stations, &unclaimed))
+        }
+        Err(_) => Html(base),
+    }
 }
 
 async fn collection_stylesheet() -> Response {

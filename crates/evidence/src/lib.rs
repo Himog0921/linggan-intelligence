@@ -3,6 +3,7 @@
 
 mod acquisition_chain;
 mod collection_target;
+mod execution_station;
 mod ingress;
 mod local_discovery;
 mod local_producer;
@@ -17,6 +18,10 @@ pub use acquisition_chain::{
 pub use collection_target::{
     CollectionTargetError, ObservationTarget, StoreOutcome, collection_target_schema_is_ready,
     list_targets_in_state, store_pending_target, transition_target,
+};
+pub use execution_station::{
+    CheckInOutcome, InstallationCheckIn, StationError, StationOverview, UnclaimedInstallation, check_in_installation, claim_installation,
+    open_claim_window, read_station_overview, register_station, station_schema_is_ready,
 };
 pub use ingress::{
     IngressError, IngressFault, IngressOptions, PreRoutingCode, ingest_capture_package,
