@@ -8,6 +8,7 @@ mod execution_station;
 mod ingress;
 mod local_discovery;
 mod local_producer;
+mod patrol_scheduler;
 mod producer_runtime;
 mod receipt;
 mod station_read;
@@ -40,6 +41,9 @@ pub use local_discovery::{
 pub use local_producer::{
     LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome,
     create_manual_task, local_producer_schema_is_ready, start_local_attempt, submit_local_package,
+};
+pub use patrol_scheduler::{
+    PatrolTickSummary, patrol_schema_is_ready, run_due_patrols, set_target_monitoring,
 };
 pub use producer_runtime::{
     MediaBlobAdmission, MediaUploadFinalizeClaim, MediaUploadSession, ProducerRuntimeError,

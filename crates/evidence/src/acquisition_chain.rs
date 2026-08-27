@@ -118,9 +118,19 @@ pub async fn request_and_admit(
     let Some((platform, target_kind, lifecycle_state)) = target else {
         return Err(AcquisitionChainError::UnknownTarget);
     };
-    // Only a pending target may be requested for archiving. Anything else means the caller
-    // is acting on a stale view of the target.
-    if lifecycle_state != "pending_decision" {
+    // 前置状态按 lane 分开。
+    //
+    // **深度建档是一次性的**：只有待决的目标能申请，否则同一个博主会被反复全量建档。
+    // **巡检本来就要反复申请**：它的前置是「已经建过档」，因此允许 archiving 与
+    // monitoring。产品规则明写「深度建档必须完成之后才能启用监控」，两者的前置本就不同。
+    //
+    // 此前这里对所有 lane 一律要求 pending_decision，结果是巡检**永远派不出去**——
+    // 目标一旦进入 archiving 就再也无法申请。这个缺陷由第一轮 tick 当场暴露。
+    let requestable = match lane {
+        "deep_archive" => lifecycle_state == "pending_decision",
+        _ => matches!(lifecycle_state.as_str(), "archiving" | "monitoring"),
+    };
+    if !requestable {
         return Err(AcquisitionChainError::TargetNotRequestable {
             state: lifecycle_state,
         });
@@ -214,9 +224,18 @@ async fn gather_facts(
     .fetch_optional(&mut **transaction)
     .await?;
 
+    // 「在途」= 还有活着的租约，或已经开工但没交回结果的尝试。
+    //
+    // 此前的判据是「存在一行工单」——而工单从不结束，于是第一次巡检之后，后续每一次都被
+    // 合并掉，巡检永远只跑一次。一个只置位、从不复位的状态，等于把功能永久关掉。
     let in_flight: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM collection_work_order \
-                        WHERE target_ref = $1 AND lane = $2)",
+        "SELECT EXISTS ( \
+             SELECT 1 FROM collection_work_order w \
+             JOIN collection_work_order_lease l ON l.work_order_ref = w.work_order_ref \
+             LEFT JOIN linggan_runtime_attempt a ON a.task_id = l.task_id \
+             WHERE w.target_ref = $1 AND w.lane = $2 \
+               AND l.released_at IS NULL AND l.expires_at > scope_001_now() \
+               AND a.attempt_id IS NULL)",
     )
     .bind(target_ref)
     .bind(lane)
@@ -425,24 +444,28 @@ async fn write_work_order(
     .execute(&mut **transaction)
     .await?;
 
-    sqlx::query(
-        "UPDATE collection_observation_target \
-         SET lifecycle_state = 'archiving', lifecycle_changed_at = scope_001_now() \
-         WHERE target_ref = $1",
-    )
-    .bind(target_ref)
-    .execute(&mut **transaction)
-    .await?;
-    sqlx::query(
-        "INSERT INTO collection_observation_target_transition \
-             (transition_ref, target_ref, from_state, to_state, actor, reason_code, reason) \
-         VALUES ($1, $2, 'pending_decision', 'archiving', 'person', 'work_order_created', $3)",
-    )
-    .bind(Uuid::new_v4())
-    .bind(target_ref)
-    .bind(format!("工单 {work_order_ref} 已创建"))
-    .execute(&mut **transaction)
-    .await?;
+    // 只有深度建档会推进生命周期。**巡检不改状态**：它是一个已建档目标的常规动作，
+    // 每跑一次就改一次状态，会把「这个目标处于什么阶段」变成「它最近被派过一次」。
+    if lane == "deep_archive" {
+        sqlx::query(
+            "UPDATE collection_observation_target \
+             SET lifecycle_state = 'archiving', lifecycle_changed_at = scope_001_now() \
+             WHERE target_ref = $1",
+        )
+        .bind(target_ref)
+        .execute(&mut **transaction)
+        .await?;
+        sqlx::query(
+            "INSERT INTO collection_observation_target_transition \
+                 (transition_ref, target_ref, from_state, to_state, actor, reason_code, reason) \
+             VALUES ($1, $2, 'pending_decision', 'archiving', 'person', 'work_order_created', $3)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(target_ref)
+        .bind(format!("工单 {work_order_ref} 已创建"))
+        .execute(&mut **transaction)
+        .await?;
+    }
 
     Ok(work_order_ref)
 }
