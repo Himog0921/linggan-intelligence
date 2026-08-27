@@ -95,7 +95,7 @@ export function createLingganContentRuntime({ platform } = {}) {
     },
     async submitMediaSlots(note) {
       const packageValue = packageMediaSlots({ platform, note });
-      const taskSpec = taskFor(platform, 'media_slots', { contentExternalId: String(note?.noteId || note?.id || '') }, { acquireMedia: 'bytes' });
+      const taskSpec = taskFor(platform, 'media_slots', { contentExternalId: String(note?.noteId || note?.id || '') }, { acquireMedia: 'slots' });
       return submit(taskSpec, packageValue);
     },
     async acquireMediaSlots(note) {

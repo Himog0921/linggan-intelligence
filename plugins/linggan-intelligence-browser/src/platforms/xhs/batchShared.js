@@ -168,7 +168,7 @@ export function shouldWaitForNoteState(pathname = window.location.pathname, note
 }
 
 export function isRiskControlPage() {
-  const href = window.location.href || '';
+  const href = window.location?.href || '';
   if (/captcha|verify|verification|security|safety|risk/i.test(href)) return true;
   if (/error_code=300017/i.test(href)) return true;
   if (/website-login\/error/i.test(href)) return true;

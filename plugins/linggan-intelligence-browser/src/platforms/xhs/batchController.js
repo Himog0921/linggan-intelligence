@@ -6,12 +6,12 @@ import {
 } from './noteCollector.js';
 import { collectXhsNoteDetailPackage } from './detailPackageCollector.js';
 import { collectComments } from './commentCollector.js';
-import { throttle, watchCaptcha, showCaptchaPauseOverlay } from './antiDetect.js';
+import { waitForPageSettle } from './antiDetect.js';
 import { sendToBackground, reportProgress, reportDone, reportLocalRead } from '../../shared/messaging.js';
 import { BATCH_CONFIG, COLLECT_MODE, COMMENT_DEPTH_MODE, MSG, TASK_STATE } from '../../shared/constants.js';
 import { extractProfileIdentityFromUrl } from '../../shared/targetIdentity.js';
 import { looksLikeDeadPageTitle } from '../../shared/deadPageSignals.js';
-import { randomDelay, parseCount, extractNoteId } from '../../shared/utils.js';
+import { parseCount, extractNoteId } from '../../shared/utils.js';
 import { noteStore } from '../../db/noteStore.js';
 import { localExecutionStore } from '../../linggan/localExecutionStore.js';
 import {
@@ -341,7 +341,6 @@ export class BatchNoteController extends BaseBatchController {
     this.collected = [];
     this.failed = [];
     this.commentResults = [];
-    this.captchaWatcher = null;
     this._containerSelector = '.feeds-container';
     this._mode = COLLECT_MODE.SEARCH;
     this._topByLikes = false;
@@ -520,17 +519,6 @@ export class BatchNoteController extends BaseBatchController {
     } else {
       this.collectionRunId = '';
     }
-
-    // 1. 启动验证码监控
-    this.captchaWatcher = watchCaptcha(async () => {
-      this.pause();
-      const action = await showCaptchaPauseOverlay();
-      if (action === 'resume') {
-        this.resume();
-      } else {
-        this.stop();
-      }
-    });
 
     try {
       if (mode === COLLECT_MODE.DETAIL && !this.surfaceOnly) {
@@ -738,7 +726,7 @@ export class BatchNoteController extends BaseBatchController {
           // 弹窗方式失败，尝试 URL 导航 fallback
           if (this._allowNavigationFallback) {
             console.log('[灵感爆爆爆] 弹窗方式失败，尝试 URL 导航:', noteInfo.noteId);
-            await randomDelay(250, 450);
+            await waitForPageSettle(350);
             const fallbackSuccess = await this._captureByNavigation(noteInfo);
             if (!fallbackSuccess) {
               this.failed.push({ noteId: noteInfo.noteId, error: '弹窗和导航方式均失败' });
@@ -919,7 +907,7 @@ export class BatchNoteController extends BaseBatchController {
         if (!this.isRunning) break;
         if (attempt > 0) {
           await this._waitForNoteDataStable(noteInfo.noteId, 2600 + (attempt * 1200));
-          await randomDelay(420, 760);
+          await waitForPageSettle(590);
         }
         const result = await this._collectDetailPackage(window, {
           collectionRunId: this.collectionRunId,
@@ -956,12 +944,8 @@ export class BatchNoteController extends BaseBatchController {
   }
 
   async _throttleAfterOne() {
-    // TopN 在搜索页使用更快节奏；博主页保持保守节奏以降低风控概率
-    if (this._topByLikes && this._mode !== COLLECT_MODE.PROFILE) {
-      await randomDelay(300, 600);
-      return;
-    }
-    await throttle(this.collected.length);
+    // A bounded post-record settle gives the page and local store time to finish one action.
+    await waitForPageSettle(this._topByLikes && this._mode !== COLLECT_MODE.PROFILE ? 450 : 650);
   }
 
   _emitProgress(payload) {
@@ -1037,7 +1021,7 @@ export class BatchNoteController extends BaseBatchController {
         return false;
       }
 
-      await randomDelay(this._topByLikes ? 40 : 50, this._topByLikes ? 70 : 100);
+      await waitForPageSettle(this._topByLikes ? 55 : 75);
 
       await this._waitIfPaused();
       if (!this.isRunning) return false;
@@ -1081,7 +1065,7 @@ export class BatchNoteController extends BaseBatchController {
           if (!this.isRunning) break;
           if (attempt > 0) {
             await this._waitForNoteDataStable(noteInfo.noteId, 2600 + (attempt * 1200));
-            await randomDelay(420, 760);
+            await waitForPageSettle(590);
           }
           const result = mergeSurfaceCoverFallback(await this._collectDetailPackage(window, {
             collectionRunId: this.collectionRunId,
@@ -1113,7 +1097,7 @@ export class BatchNoteController extends BaseBatchController {
 
       // 8. 返回列表页
       await this._goBackToList(urlBefore);
-      await randomDelay(120, 200);
+      await waitForPageSettle(160);
 
       return collected;
     } finally {
@@ -1164,7 +1148,7 @@ export class BatchNoteController extends BaseBatchController {
       console.warn(`[灵感爆爆爆] URL 导航采集失败: ${noteInfo.noteId}`, err.message);
       try {
         window.history.back();
-        await randomDelay(700, 1100);
+        await waitForPageSettle(900);
       } catch { /* ignore */ }
       return false;
     }
@@ -1253,7 +1237,7 @@ export class BatchNoteController extends BaseBatchController {
         });
       }
 
-      await randomDelay(ready ? 120 : 220, ready ? 220 : 420);
+      await waitForPageSettle(ready ? 170 : 320);
       const result = await collectComments({
         noteId,
         noteUrl: noteUrl || noteInfo.url || window.location.href,
@@ -1338,7 +1322,7 @@ export class BatchNoteController extends BaseBatchController {
         total: this.noteList.length,
         message: `正在等待第 ${this.currentIndex}/${this.noteList.length} 篇评论区稳定`,
       }).catch(() => {});
-      await randomDelay(140, 220);
+      await waitForPageSettle(180);
     }
     return false;
   }
@@ -1391,7 +1375,7 @@ export class BatchNoteController extends BaseBatchController {
       const text = String(document.body?.innerText || '').slice(0, 2000);
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    await randomDelay(80, 150);
+    await waitForPageSettle(115);
   }
 
   _readExpectedNoteSnapshot(noteId) {
@@ -1460,14 +1444,14 @@ export class BatchNoteController extends BaseBatchController {
     const focusDelayMax = this._topByLikes ? 280 : 520;
     if (element && document.body.contains(element)) {
       element.scrollIntoView({ behavior: 'auto', block: 'center' });
-      await randomDelay(this._topByLikes ? 70 : 90, this._topByLikes ? 110 : 150);
+      await waitForPageSettle(this._topByLikes ? 90 : 120);
       return element;
     }
 
     const targetY = Math.max(Math.round((noteInfo._top || 0) - window.innerHeight * 0.8), 0);
     if (Math.abs(window.scrollY - targetY) > window.innerHeight) {
       window.scrollTo({ top: targetY, behavior: 'auto' });
-      await randomDelay(90, 160);
+      await waitForPageSettle(125);
     }
 
     const maxScrollAttempts = this._topByLikes ? 12 : 18;
@@ -1477,12 +1461,12 @@ export class BatchNoteController extends BaseBatchController {
       element = findNoteElementById(noteInfo.noteId, this._containerSelector);
       if (element && document.body.contains(element)) {
         element.scrollIntoView({ behavior: 'auto', block: 'center' });
-        await randomDelay(this._topByLikes ? 70 : 90, this._topByLikes ? 110 : 150);
+        await waitForPageSettle(this._topByLikes ? 90 : 120);
         return element;
       }
 
       window.scrollBy({ top: scrollStep, behavior: 'auto' });
-      await randomDelay(this._topByLikes ? 90 : 120, this._topByLikes ? 160 : 200);
+      await waitForPageSettle(this._topByLikes ? 125 : 160);
 
       if (window.scrollY > targetY + window.innerHeight * 3) break;
     }
@@ -1514,16 +1498,16 @@ export class BatchNoteController extends BaseBatchController {
   async _pauseForRiskControl() {
     if (!isRiskControlPage()) return false;
     const is300017 = isErrorCode300017();
-    this.pause();
+    this.stop();
     this._emitProgress({
-      status: TASK_STATE.PAUSED,
+      status: TASK_STATE.STOPPED,
       total: this.noteList.length,
       current: this.currentIndex,
       message: is300017
-        ? '检测到风控限制（300017），正在自动切换账号...'
-        : '检测到安全验证页面，已自动暂停，请完成验证后点击"继续采集"。',
+        ? '检测到风控限制（300017），已停止本次采集；请在限制解除后新建任务。'
+        : '检测到安全验证页面，已停止本次采集；请在验证完成后新建任务。',
     });
-    reportProgress(this.currentIndex, this.noteList.length, is300017 ? '风控300017' : '暂停', {
+    reportProgress(this.currentIndex, this.noteList.length, is300017 ? '风控300017，已停止' : '安全验证，已停止', {
       taskType: this.type,
       taskState: this.state,
       phase: 'risk_control',
@@ -1541,7 +1525,7 @@ export class BatchNoteController extends BaseBatchController {
         await new Promise(r => setTimeout(r, 150));
         if (!(/\/explore\/[a-z0-9]+/i.test(window.location.pathname)) &&
             !(/\/discovery\/item\/[a-z0-9]+/i.test(window.location.pathname))) {
-          await randomDelay(80, 150);
+          await waitForPageSettle(115);
           return;
         }
       }
@@ -1646,7 +1630,7 @@ export class BatchNoteController extends BaseBatchController {
         const el = document.querySelector(sel);
         if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
           el.click();
-          await randomDelay(80, 150);
+          await waitForPageSettle(115);
           if (!isPopupOpen()) return;
         }
       } catch { /* 忽略无效选择器 */ }
@@ -1654,7 +1638,7 @@ export class BatchNoteController extends BaseBatchController {
 
     try {
       await sendToBackground(MSG.DISPATCH_ESC);
-      await randomDelay(80, 150);
+      await waitForPageSettle(115);
     } catch (err) {
       console.warn('[灵感爆爆爆] 关闭弹窗失败', err);
     }
@@ -1674,7 +1658,6 @@ export class BatchNoteController extends BaseBatchController {
   }
 
   async _cleanupAfterLoop() {
-    this.captchaWatcher?.disconnect();
     this._cleanupCollectingMarks();
     this._cleanupTopSelectionMarks();
     await this._closeNotePopup().catch(() => {});

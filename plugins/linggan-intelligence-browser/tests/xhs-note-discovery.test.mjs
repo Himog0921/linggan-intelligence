@@ -343,7 +343,7 @@ test('profile discovery keeps scanning until enough content is found or the page
   assert.equal(plan.requireBottomOrExpected, true);
   assert.equal(plan.bottomConfirmationRounds, 9);
   assert.ok(plan.maxRounds >= 90);
-  assert.equal(plan.humanScroll, true);
+  assert.equal(plan.adaptivePageScroll, true);
 
   assert.equal(shouldStopDiscovery({
     noNewCount: 10,
@@ -390,7 +390,7 @@ test('profile discovery keeps scanning until enough content is found or the page
   }), true);
 });
 
-test('deep profile discovery allows enough human-paced rounds for 200-link archive jobs', () => {
+test('deep profile discovery allows enough bounded page-loading rounds for 200-link archive jobs', () => {
   const plan = buildDiscoveryPlan('#userPostedFeeds', {
     maxScrolls: 30,
     expectedCount: 200,
@@ -400,7 +400,7 @@ test('deep profile discovery allows enough human-paced rounds for 200-link archi
   assert.equal(plan.stableNoNewLimit, 15);
   assert.equal(plan.bottomConfirmationRounds, 12);
   assert.equal(plan.stepRatio, 0.74);
-  assert.equal(plan.humanScroll, true);
+  assert.equal(plan.adaptivePageScroll, true);
 });
 
 test('search discovery keeps the old eager stop behavior', () => {
@@ -516,6 +516,9 @@ test('profile discovery accumulates virtualized cards beyond the visible 28 item
     assert.equal(records.discoveryMeta.stopReason, 'target_reached');
     assert.equal(records.discoveryMeta.totalNotes, 50);
     assert.equal(records.discoveryMeta.fieldQuality.withTitle, 50);
+    assert.ok(Array.isArray(records.discoveryMeta.scrollTrace));
+    assert.equal(records.discoveryMeta.scrollTrace.at(-1).stopReason, 'target_reached');
+    assert.equal(records.discoveryMeta.scrollTrace.some((entry) => Object.prototype.hasOwnProperty.call(entry, 'noteId')), false);
   } finally {
     globalThis.document = originalDocument;
     globalThis.window = originalWindow;
@@ -621,19 +624,11 @@ test('profile discovery uses the actual feed viewport height instead of the brow
 test('profile discovery nudges the bottom of an infinite profile feed before giving up at 28 cards', async () => {
   const originalDocument = globalThis.document;
   const originalWindow = globalThis.window;
-  const originalWheelEvent = globalThis.WheelEvent;
   const originalNow = Date.now;
   const ids = Array.from({ length: 50 }, (_, index) => `68${String(index).padStart(22, '0')}`);
   let loadTriggered = false;
   let scrollY = 0;
   let now = 0;
-
-  class FakeWheelEvent {
-    constructor(type, init = {}) {
-      this.type = type;
-      this.deltaY = init.deltaY || 0;
-    }
-  }
 
   const makeSection = (id, index) => ({
     querySelector(selector) {
@@ -679,10 +674,6 @@ test('profile discovery nudges the bottom of an infinite profile feed before giv
     get scrollHeight() {
       return loadTriggered ? 2400 : 1000;
     },
-    dispatchEvent(event) {
-      if (event?.type === 'wheel' && event.deltaY > 0) loadTriggered = true;
-      return true;
-    },
   };
   const body = {
     scrollTop: 0,
@@ -690,10 +681,8 @@ test('profile discovery nudges the bottom of an infinite profile feed before giv
     get scrollHeight() {
       return loadTriggered ? 2400 : 1000;
     },
-    dispatchEvent: documentElement.dispatchEvent,
   };
 
-  globalThis.WheelEvent = FakeWheelEvent;
   globalThis.document = {
     documentElement,
     body,
@@ -704,10 +693,6 @@ test('profile discovery nudges the bottom of an infinite profile feed before giv
       if (selector !== '#userPostedFeeds section') return [];
       const visibleIds = loadTriggered || scrollY > 0 ? ids : ids.slice(0, 28);
       return visibleIds.map(makeSection);
-    },
-    dispatchEvent(event) {
-      if (event?.type === 'wheel' && event.deltaY > 0) loadTriggered = true;
-      return true;
     },
   };
   globalThis.window = {
@@ -722,16 +707,13 @@ test('profile discovery nudges the bottom of an infinite profile feed before giv
       scrollY = Math.max(0, Number(top || 0));
       documentElement.scrollTop = scrollY;
       body.scrollTop = scrollY;
+      if (top > 0) loadTriggered = true;
     },
     scrollBy({ top = 0 } = {}) {
       scrollY = Math.max(0, scrollY + Number(top || 0));
       documentElement.scrollTop = scrollY;
       body.scrollTop = scrollY;
-      if (top > 0 && scrollY === 0) loadTriggered = true;
-    },
-    dispatchEvent(event) {
-      if (event?.type === 'wheel' && event.deltaY > 0) loadTriggered = true;
-      return true;
+      if (top > 0) loadTriggered = true;
     },
   };
   Date.now = () => {
@@ -749,7 +731,6 @@ test('profile discovery nudges the bottom of an infinite profile feed before giv
   } finally {
     globalThis.document = originalDocument;
     globalThis.window = originalWindow;
-    globalThis.WheelEvent = originalWheelEvent;
     Date.now = originalNow;
   }
 });
@@ -807,6 +788,37 @@ test('note discovery carries the card cover image into surface records', () => {
     assert.equal(records[0].cover, 'https://sns-img.example.com/card-cover.jpg');
     assert.equal(records[0].coverImg, 'https://sns-img.example.com/card-cover.jpg');
     assert.deepEqual(records[0].images, ['https://sns-img.example.com/card-cover.jpg']);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('discovery stops with a risk-control receipt before loading more cards', async () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+
+  globalThis.document = {
+    documentElement: { scrollTop: 0, clientHeight: 800, scrollHeight: 800 },
+    body: { innerText: '操作频繁，请稍后再试', scrollTop: 0, clientHeight: 800, scrollHeight: 800 },
+    querySelector: () => null,
+    querySelectorAll: () => [],
+  };
+  globalThis.window = {
+    location: { href: 'https://www.xiaohongshu.com/search_result?keyword=ADHD' },
+    scrollY: 0,
+    innerHeight: 800,
+    scrollTo() {},
+  };
+
+  try {
+    const records = await discoverWithScroll('.feeds-container', 10, { expectedCount: 50 });
+
+    assert.equal(records.length, 0);
+    assert.equal(records.discoveryMeta.stopReason, 'risk_control');
+    assert.equal(records.discoveryMeta.scrollTrace.length, 1);
+    assert.equal(records.discoveryMeta.scrollTrace[0].action, 'none');
+    assert.equal(records.discoveryMeta.scrollTrace[0].stopReason, 'risk_control');
   } finally {
     globalThis.document = originalDocument;
     globalThis.window = originalWindow;

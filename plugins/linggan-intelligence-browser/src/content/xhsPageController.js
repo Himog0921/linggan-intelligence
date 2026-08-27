@@ -15,6 +15,58 @@ import {
 
 const XHS_CONTEXT_REFRESH_MESSAGE = '插件刚更新，请刷新当前页面后再点一次，刷新后即可继续。';
 
+const DETAIL_DELIVERY_LANES = [
+  ['content', '笔记详情'],
+  ['mediaSlots', '媒体观察'],
+  ['comments', '评论与回复'],
+];
+
+function describeDeliveryState(state) {
+  switch (String(state || '').trim()) {
+    case 'acknowledged':
+      return '已接纳';
+    case 'pending':
+    case 'queued':
+      return '待本机交付';
+    case 'rejected':
+    case 'terminal':
+      return '未接纳';
+    default:
+      return '状态未知';
+  }
+}
+
+export function formatXhsDetailDeliveryMessage(packageDelivery = {}) {
+  const laneSummary = DETAIL_DELIVERY_LANES
+    .map(([key, label]) => `${label}：${describeDeliveryState(packageDelivery?.lanes?.[key])}`)
+    .join('；');
+  const allAccepted = packageDelivery?.state === 'acknowledged';
+
+  return {
+    allAccepted,
+    message: allAccepted
+      ? `Linggan 接纳回执：${laneSummary}`
+      : `笔记详情已读取。Linggan 接纳回执：${laneSummary}`,
+  };
+}
+
+function hasDownloadableNoteMedia(note = {}) {
+  return Boolean(
+    (Array.isArray(note.images) && note.images.length > 0)
+    || note.video
+    || note.cover
+    || note.coverUrl
+    || (Array.isArray(note.livePhotoStreams) && note.livePhotoStreams.length > 0),
+  );
+}
+
+function getDownloadableNoteMediaCount(note = {}) {
+  return (note.cover || note.coverUrl || note.coverImg || note.thumbnail ? 1 : 0)
+    + (note.images?.length || 0)
+    + (note.video ? 1 : 0)
+    + (note.livePhotoStreams?.length || 0);
+}
+
 export function createXhsPageController({
   MSG,
   assertPluginAuthorized,
@@ -217,6 +269,39 @@ export function createXhsPageController({
     reinjectPending = false;
   }
 
+  async function collectCurrentNoteToLinggan() {
+    showToast('正在采集笔记并交付 Linggan…', 'info');
+    const note = await collectNote();
+    const delivery = formatXhsDetailDeliveryMessage(note?.lingganDetailPackageDelivery);
+    showToast(delivery.message, delivery.allAccepted ? 'success' : 'info');
+    return note;
+  }
+
+  async function downloadSelectedNoteMedia(note) {
+    if (!hasDownloadableNoteMedia(note)) {
+      showToast('当前笔记未发现可供人工下载的媒体。', 'info');
+      return;
+    }
+
+    try {
+      const selection = await showMediaDownloadDialog(note);
+      const mediaTypes = selection === true ? undefined : selection?.mediaTypes;
+      if (!selection || (selection !== true && mediaTypes?.length === 0)) return;
+
+      const mediaCount = getDownloadableNoteMediaCount(note);
+      showToast(`正在下载 ${selection?.count || mediaCount} 个媒体文件…`, 'info');
+      const summary = await downloadNoteMediaFromRecord(note, { mediaTypes });
+      showToast(
+        summary?.zipped
+          ? `媒体下载完成：已打包 ZIP（成功 ${summary.success}/${summary.total}，失败 ${summary.failed}）`
+          : `媒体下载完成：成功 ${summary.success}/${summary.total}，失败 ${summary.failed}`,
+        summary?.failed > 0 ? 'warning' : 'success',
+      );
+    } catch {
+      // The user can close the manual selection window without starting a download.
+    }
+  }
+
   async function handleButtonClick(e) {
     const btn = e.target.closest('.lgboom-btn');
     if (btn == null) return;
@@ -251,36 +336,13 @@ export function createXhsPageController({
     try {
       switch (action) {
         case 'collectNote': {
-          showToast('正在采集笔记...', 'info');
-          const note = await collectNote();
-          const packageDelivery = note?.lingganDetailPackageDelivery;
-          const allAccepted = packageDelivery?.state === 'acknowledged';
-          showToast(allAccepted
-            ? `笔记详情包已被 Linggan 接纳：${note.title}`
-            : `笔记详情已读取；${packageDelivery?.message || '各采集通道待本机 Linggan 交付'}`, allAccepted ? 'success' : 'info');
-          if ((note.images && note.images.length > 0) || note.video || note.cover || note.coverUrl || note.livePhotoStreams?.length > 0) {
-            const mediaCount = (note.images?.length || 0) + (note.video ? 1 : 0);
-            try {
-              const selection = await showMediaDownloadDialog(note);
-              const mediaTypes = selection === true ? undefined : selection?.mediaTypes;
-              if (selection && (selection === true || mediaTypes?.length > 0)) {
-                showToast(`正在下载 ${selection?.count || mediaCount} 个媒体文件...`, 'info');
-                const summary = await downloadNoteMediaFromRecord(note, { mediaTypes });
-                if (summary?.queued) {
-                  showToast(`媒体已加入 Linggan 本地下载队列：${summary.total} 个；正文采集不会等待媒体完成。`, 'success');
-                  break;
-                }
-                showToast(
-                  summary.zipped
-                    ? `媒体下载完成：已打包 ZIP（成功 ${summary.success}/${summary.total}，失败 ${summary.failed}）`
-                    : `媒体下载完成：成功 ${summary.success}/${summary.total}，失败 ${summary.failed}`,
-                  summary.failed > 0 ? 'warning' : 'success',
-                );
-              }
-            } catch {
-              // user cancelled
-            }
-          }
+          await collectCurrentNoteToLinggan();
+          break;
+        }
+
+        case 'collectNoteWithManualMedia': {
+          const note = await collectCurrentNoteToLinggan();
+          await downloadSelectedNoteMedia(note);
           break;
         }
 

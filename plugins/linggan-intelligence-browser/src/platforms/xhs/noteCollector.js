@@ -18,6 +18,7 @@ import {
   requestXhsProfileNotesSnapshot,
   requestXhsSearchNotesSnapshot,
 } from './commentApi.js';
+import { isRiskControlPage } from './batchShared.js';
 
 const XHS_CONTEXT_REFRESH_MESSAGE = '插件刚更新，请刷新当前页面后再点一次，刷新后即可继续。';
 
@@ -54,12 +55,16 @@ async function waitForDiscoverySettle(containerSelector, previousSnapshot, timeo
     const currentNotes = discoverNotesFromDOM(containerSelector);
     if (hasDiscoveryAdvanced(currentNotes, snapshot)) {
       stableRounds += 1;
-      if (stableRounds >= 2) return;
+      if (stableRounds >= 2) {
+        return { outcome: 'new_items_observed', elapsedMs: Date.now() - startedAt };
+      }
     } else {
       stableRounds = 0;
     }
     await new Promise((resolve) => setTimeout(resolve, isProfileMode ? 200 : 160));
   }
+
+  return { outcome: 'settled_without_new_items', elapsedMs: Date.now() - startedAt };
 }
 
 function getXhsImageUrl(image = {}) {
@@ -1197,6 +1202,8 @@ function buildMergedDiscoveryMeta({
     stopReason: scrollMeta?.stopReason || preferredMeta?.stopReason || '',
     rounds: scrollMeta?.rounds || 0,
     maxRounds: scrollMeta?.maxRounds || 0,
+    scrollTrace: Array.isArray(scrollMeta?.scrollTrace) ? scrollMeta.scrollTrace : [],
+    scrollTraceTruncated: Boolean(scrollMeta?.scrollTraceTruncated),
     canLoadMore: scrollMeta?.canLoadMore ?? undefined,
     isFinished: scrollMeta?.isFinished ?? (expectedCount > 0 ? mergedNotes.length >= expectedCount : undefined),
     fieldQuality: buildSurfaceDiscoveryFieldQuality(mergedNotes),
@@ -1337,6 +1344,46 @@ function getScrollMetrics(scrollTarget = getWindowScrollTarget()) {
   };
 }
 
+function summarizeScrollMetrics(metrics = {}) {
+  return {
+    scrollTop: Math.round(Number(metrics.scrollTop || 0)),
+    viewportHeight: Math.round(Number(metrics.viewportHeight || 0)),
+    documentHeight: Math.round(Number(metrics.scrollHeight || 0)),
+    atBottom: Boolean(metrics.atBottom),
+  };
+}
+
+export function buildDiscoveryExecutionSummary(discoveryMeta = {}) {
+  const normalizeMetrics = (metrics = {}) => ({
+    scrollTop: Math.round(Number(metrics?.scrollTop || 0)),
+    viewportHeight: Math.round(Number(metrics?.viewportHeight || 0)),
+    documentHeight: Math.round(Number(metrics?.documentHeight || 0)),
+    atBottom: Boolean(metrics?.atBottom),
+  });
+  const scrollTrace = (Array.isArray(discoveryMeta?.scrollTrace) ? discoveryMeta.scrollTrace : [])
+    .slice(0, 60)
+    .map((entry = {}) => ({
+      round: Math.max(0, Math.round(Number(entry?.round || 0))),
+      scrollTarget: String(entry?.scrollTarget || 'unknown'),
+      visibleCards: Math.max(0, Math.round(Number(entry?.visibleCards || 0))),
+      newlyDiscovered: Math.max(0, Math.round(Number(entry?.newlyDiscovered || 0))),
+      totalDiscovered: Math.max(0, Math.round(Number(entry?.totalDiscovered || 0))),
+      action: String(entry?.action || 'none'),
+      requestedStep: Math.max(0, Math.round(Number(entry?.requestedStep || 0))),
+      settleOutcome: String(entry?.settleOutcome || ''),
+      stopReason: String(entry?.stopReason || ''),
+      before: normalizeMetrics(entry?.before),
+      after: normalizeMetrics(entry?.after),
+    }));
+  return {
+    stopReason: String(discoveryMeta?.stopReason || 'unknown'),
+    rounds: Math.max(0, Math.round(Number(discoveryMeta?.rounds || 0))),
+    maxRounds: Math.max(0, Math.round(Number(discoveryMeta?.maxRounds || 0))),
+    scrollTrace,
+    scrollTraceTruncated: Boolean(discoveryMeta?.scrollTraceTruncated),
+  };
+}
+
 function scrollDiscoveryTargetTo(scrollTarget, top) {
   const nextTop = Math.max(0, Number(top || 0));
   if (isElementScrollTarget(scrollTarget)) {
@@ -1358,12 +1405,6 @@ function scrollDiscoveryTargetBy(scrollTarget, top) {
 
 function sleep(ms = 0) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms || 0))));
-}
-
-function clampNumber(value, min, max) {
-  const num = Number(value);
-  if (!Number.isFinite(num)) return min;
-  return Math.min(max, Math.max(min, num));
 }
 
 function estimateProfileMaxRounds(expectedCount = 0) {
@@ -1388,50 +1429,12 @@ function estimateProfileBottomConfirmationRounds(expectedCount = 0) {
   return 6;
 }
 
-const PROFILE_SCROLL_RATIOS = [0.58, 0.74, 0.88, 0.66, 0.81, 0.62, 0.9, 0.7];
-const PROFILE_SETTLE_EXTRA_MS = [120, 360, 220, 520, 180, 420, 260, 600];
-const PROFILE_MICRO_PAUSE_MS = [90, 150, 120, 210, 110, 180];
-
-function getDiscoveryScrollRatio(plan = {}, roundIndex = 0) {
-  if (!plan.isProfileMode) return plan.stepRatio;
-  const value = PROFILE_SCROLL_RATIOS[roundIndex % PROFILE_SCROLL_RATIOS.length] || plan.stepRatio;
-  return clampNumber(value, 0.5, 0.92);
-}
-
-function getDiscoverySettleDelay(plan = {}, roundIndex = 0) {
-  if (!plan.isProfileMode) return plan.settleDelay;
-  const extra = PROFILE_SETTLE_EXTRA_MS[roundIndex % PROFILE_SETTLE_EXTRA_MS.length] || 0;
-  return Math.max(plan.settleDelay, plan.settleDelay + extra);
-}
-
-async function performDiscoveryScroll(scrollTarget, {
-  currentTop = 0,
-  nextTop = 0,
-  step = 0,
-  plan = {},
-  roundIndex = 0,
-} = {}) {
-  if (!plan.isProfileMode) {
-    if (nextTop > currentTop + 1) {
-      scrollDiscoveryTargetTo(scrollTarget, nextTop);
-    } else {
-      scrollDiscoveryTargetBy(scrollTarget, step);
-    }
-    return;
+async function performDiscoveryScroll(scrollTarget, { currentTop = 0, nextTop = 0, step = 0 } = {}) {
+  if (nextTop > currentTop + 1) {
+    scrollDiscoveryTargetTo(scrollTarget, nextTop);
+  } else {
+    scrollDiscoveryTargetBy(scrollTarget, step);
   }
-
-  const targetTop = nextTop > currentTop + 1 ? nextTop : currentTop + Math.max(120, step);
-  const delta = Math.max(0, targetTop - currentTop);
-  if (delta <= 1) return;
-
-  const firstRatio = roundIndex % 3 === 0 ? 0.48 : (roundIndex % 3 === 1 ? 0.64 : 0.56);
-  const firstTop = Math.max(currentTop + 80, Math.min(targetTop, currentTop + Math.round(delta * firstRatio)));
-  scrollDiscoveryTargetTo(scrollTarget, firstTop);
-  dispatchDiscoveryWheel(scrollTarget, Math.max(80, firstTop - currentTop));
-  await sleep(PROFILE_MICRO_PAUSE_MS[roundIndex % PROFILE_MICRO_PAUSE_MS.length] || 120);
-
-  scrollDiscoveryTargetTo(scrollTarget, targetTop);
-  dispatchDiscoveryWheel(scrollTarget, Math.max(80, targetTop - firstTop));
 }
 
 export function buildDiscoveryPlan(containerSelector, {
@@ -1460,7 +1463,7 @@ export function buildDiscoveryPlan(containerSelector, {
     bottomConfirmationRounds: isProfileMode ? estimateProfileBottomConfirmationRounds(normalizedExpectedCount) : 0,
     stepRatio: isProfileMode ? 0.74 : 0.68,
     requireBottomOrExpected: isProfileMode,
-    humanScroll: isProfileMode,
+    adaptivePageScroll: isProfileMode,
   };
 }
 
@@ -1481,69 +1484,12 @@ export function shouldStopDiscovery({
   return atBottom && bottomNoNewCount >= bottomConfirmationRounds;
 }
 
-function createWheelEvent(deltaY) {
-  if (typeof WheelEvent === 'function') {
-    return () => new WheelEvent('wheel', {
-      deltaY,
-      bubbles: true,
-      cancelable: true,
-    });
-  }
-
-  if (typeof Event === 'function') {
-    return () => {
-      const event = new Event('wheel', {
-        bubbles: true,
-        cancelable: true,
-      });
-      try {
-        Object.defineProperty(event, 'deltaY', { value: deltaY });
-      } catch {
-        // Some browser Event objects do not allow redefining properties.
-      }
-      return event;
-    };
-  }
-
-  return () => ({ type: 'wheel', deltaY });
-}
-
-function dispatchDiscoveryWheel(scrollTarget, deltaY) {
-  const makeEvent = createWheelEvent(deltaY);
-  const targets = isElementScrollTarget(scrollTarget)
-    ? [scrollTarget.element]
-    : [window, document, document.documentElement, document.body];
-
-  for (const target of targets) {
-    if (!target || typeof target.dispatchEvent !== 'function') continue;
-    try {
-      target.dispatchEvent(makeEvent());
-    } catch {
-      // The wheel event is only a loading nudge; normal scroll still moves the page.
-    }
-  }
-}
-
 async function probeProfileBottom(containerSelector, previousSnapshot, settleDelay, scrollTarget) {
   const metrics = getScrollMetrics(scrollTarget);
   if (!metrics.atBottom) return false;
 
-  const bounceStep = Math.max(180, Math.round(metrics.viewportHeight * 0.35));
-  const retreatTop = Math.max(0, metrics.scrollTop - bounceStep);
-  if (retreatTop < metrics.scrollTop - 1) {
-    scrollDiscoveryTargetTo(scrollTarget, retreatTop);
-    await sleep(220);
-  }
-
-  const refreshed = getScrollMetrics(scrollTarget);
-  const returnTop = Math.max(metrics.maxTop, refreshed.maxTop);
-  if (returnTop > refreshed.scrollTop + 1) {
-    scrollDiscoveryTargetTo(scrollTarget, returnTop);
-  }
-
-  const nudgeStep = Math.max(220, Math.round(metrics.viewportHeight * 0.45));
-  scrollDiscoveryTargetBy(scrollTarget, nudgeStep);
-  dispatchDiscoveryWheel(scrollTarget, nudgeStep);
+  // A single bounded page-load nudge gives a virtual list one final chance to render.
+  scrollDiscoveryTargetBy(scrollTarget, Math.max(1, Math.round(metrics.viewportHeight * 0.45)));
 
   await waitForDiscoverySettle(
     containerSelector,
@@ -1561,6 +1507,9 @@ async function probeProfileBottom(containerSelector, previousSnapshot, settleDel
  */
 export async function discoverWithScroll(containerSelector, maxScrolls = 10, options = {}) {
   const allNotes = new Map(); // key=noteId，滚动期间持续累积，不依赖回顶后的 DOM
+  const scrollTrace = [];
+  const scrollTraceLimit = 60;
+  let scrollTraceTruncated = false;
   let noNewCount = 0;
   let bottomNoNewCount = 0;
   let roundsUsed = 0;
@@ -1571,12 +1520,29 @@ export async function discoverWithScroll(containerSelector, maxScrolls = 10, opt
     maxScrolls,
     expectedCount: options.expectedCount,
   });
+  const recordScrollTrace = (entry = {}) => {
+    if (scrollTrace.length >= scrollTraceLimit) {
+      scrollTraceTruncated = true;
+      return;
+    }
+    scrollTrace.push(entry);
+  };
 
   for (let i = 0; i < plan.maxRounds; i++) {
     roundsUsed = i + 1;
     scrollTarget = getDiscoveryScrollTarget(containerSelector);
+    if (isRiskControlPage()) {
+      stopReason = 'risk_control';
+      recordScrollTrace({
+        round: roundsUsed,
+        scrollTarget: scrollTarget?.type || 'window',
+        action: 'none',
+        stopReason,
+      });
+      break;
+    }
     const found = discoverNotesFromDOM(containerSelector);
-    let hasNew = false;
+    let newlyDiscovered = 0;
 
     for (const note of found) {
       if (!allNotes.has(note.noteId)) {
@@ -1584,18 +1550,29 @@ export async function discoverWithScroll(containerSelector, maxScrolls = 10, opt
           ...note,
           _discoveryOrder: allNotes.size,
         });
-        hasNew = true;
+        newlyDiscovered++;
       }
     }
+
+    const hasNew = newlyDiscovered > 0;
+    const metrics = getScrollMetrics(scrollTarget);
+    lastMetrics = metrics;
+    const roundTrace = {
+      round: roundsUsed,
+      scrollTarget: scrollTarget?.type || 'window',
+      visibleCards: found.length,
+      newlyDiscovered,
+      totalDiscovered: allNotes.size,
+      before: summarizeScrollMetrics(metrics),
+    };
 
     const discoveredEnough = plan.expectedCount > 0 && allNotes.size >= plan.expectedCount;
     if (discoveredEnough) {
       stopReason = 'target_reached';
+      recordScrollTrace({ ...roundTrace, action: 'none', stopReason });
       break;
     }
 
-    const metrics = getScrollMetrics(scrollTarget);
-    lastMetrics = metrics;
     const discoverySnapshot = {
       visibleCount: found.length,
       knownNoteIds: new Set(allNotes.keys()),
@@ -1606,6 +1583,11 @@ export async function discoverWithScroll(containerSelector, maxScrolls = 10, opt
         bottomNoNewCount++;
         if (bottomNoNewCount < plan.bottomConfirmationRounds) {
           await probeProfileBottom(containerSelector, discoverySnapshot, plan.settleDelay, scrollTarget);
+          recordScrollTrace({
+            ...roundTrace,
+            action: 'bottom_probe',
+            after: summarizeScrollMetrics(getScrollMetrics(scrollTarget)),
+          });
           continue;
         }
       } else {
@@ -1621,7 +1603,8 @@ export async function discoverWithScroll(containerSelector, maxScrolls = 10, opt
         bottomConfirmationRounds: plan.bottomConfirmationRounds,
         requireBottomOrExpected: plan.requireBottomOrExpected,
       })) {
-        stopReason = metrics.atBottom ? 'bottom_confirmed' : 'stable_no_new';
+        stopReason = metrics.atBottom ? 'bottom_confirmed' : 'no_progress';
+        recordScrollTrace({ ...roundTrace, action: 'none', stopReason });
         break;
       }
     } else {
@@ -1629,24 +1612,52 @@ export async function discoverWithScroll(containerSelector, maxScrolls = 10, opt
       bottomNoNewCount = 0;
     }
 
-    // 博主页使用长短步交替和分段停顿，模拟正常浏览，降低空白卡片和误判到底的概率。
-    const step = Math.round(metrics.viewportHeight * getDiscoveryScrollRatio(plan, i));
+    // Each round uses one finite, container-height-based page-load action.
+    const step = Math.round(metrics.viewportHeight * plan.stepRatio);
     const nextTop = Math.min(metrics.maxTop, metrics.scrollTop + step);
     if (nextTop > metrics.scrollTop + 1 || !metrics.atBottom) {
       await performDiscoveryScroll(scrollTarget, {
         currentTop: metrics.scrollTop,
         nextTop,
         step,
-        plan,
-        roundIndex: i,
       });
     }
-    await waitForDiscoverySettle(
+    if (isRiskControlPage()) {
+      stopReason = 'risk_control';
+      recordScrollTrace({
+        ...roundTrace,
+        action: 'scroll',
+        requestedStep: step,
+        after: summarizeScrollMetrics(getScrollMetrics(scrollTarget)),
+        stopReason,
+      });
+      break;
+    }
+    const settle = await waitForDiscoverySettle(
       containerSelector,
       discoverySnapshot,
-      getDiscoverySettleDelay(plan, i),
+      plan.settleDelay,
       plan.isProfileMode,
     );
+    if (isRiskControlPage()) {
+      stopReason = 'risk_control';
+      recordScrollTrace({
+        ...roundTrace,
+        action: nextTop > metrics.scrollTop + 1 || !metrics.atBottom ? 'scroll' : 'none',
+        requestedStep: step,
+        settleOutcome: settle?.outcome || 'unknown',
+        after: summarizeScrollMetrics(getScrollMetrics(scrollTarget)),
+        stopReason,
+      });
+      break;
+    }
+    recordScrollTrace({
+      ...roundTrace,
+      action: nextTop > metrics.scrollTop + 1 || !metrics.atBottom ? 'scroll' : 'none',
+      requestedStep: step,
+      settleOutcome: settle?.outcome || 'unknown',
+      after: summarizeScrollMetrics(getScrollMetrics(scrollTarget)),
+    });
 
     // 某些博主页会出现短暂空白，额外等待一次再做下一轮
     if (plan.isProfileMode && found.length === 0) {
@@ -1679,6 +1690,8 @@ export async function discoverWithScroll(containerSelector, maxScrolls = 10, opt
     stopReason,
     noNewCount,
     bottomNoNewCount,
+    scrollTrace,
+    scrollTraceTruncated,
     lastRound: {
       scrollTop: Math.round(lastMetrics?.scrollTop || 0),
       viewportHeight: Math.round(lastMetrics?.viewportHeight || 0),

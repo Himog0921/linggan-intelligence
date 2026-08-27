@@ -1,9 +1,9 @@
-import { randomDelay, parseCount, toHighQualityImageUrl, getHighQualityImageCandidates } from '../../shared/utils.js';
+import { parseCount, toHighQualityImageUrl, getHighQualityImageCandidates } from '../../shared/utils.js';
 import { commentStore } from '../../db/commentStore.js';
 import { BATCH_CONFIG, COMMENT_DEPTH_MODE } from '../../shared/constants.js';
 import { reportProgress } from '../../shared/messaging.js';
-import { detectCaptcha, showCaptchaPauseOverlay, humanScroll } from './antiDetect.js';
-import { getActiveCommentsContext } from './batchShared.js';
+import { detectCaptcha, waitForPageSettle } from './antiDetect.js';
+import { getActiveCommentsContext, isRiskControlPage } from './batchShared.js';
 import { createCollectorEvidence, createCollectorQualityMeta, joinRawDomText } from '../../shared/collectorMetadata.js';
 import { emitCollectorReceipt } from '../../runtime/collectorReceiptSink.js';
 import {
@@ -13,27 +13,21 @@ import {
   fetchXhsJsonViaBridge,
 } from './commentApi.js';
 
-const CAPTCHA_TIMEOUT_ERROR_MESSAGE = '检测到小红书安全验证，等待人工处理超时，已停止本次评论采集。';
 const DEFAULT_DOM_TOP_UP_MAX_NO_NEW = 3;
-const DEFAULT_DOM_TOP_UP_SCROLL_DELAY_MIN = 4200;
-const DEFAULT_DOM_TOP_UP_SCROLL_DELAY_MAX = 6200;
+const DEFAULT_DOM_TOP_UP_SETTLE_MS = 800;
 const ALL_REPLIES_EXPAND_ATTEMPTS = 20;
 const TIME_TEXT_RE = /^(刚刚|\d+\s*分钟前|\d+\s*小时前|\d+\s*天前|昨天(?:\s+\d{1,2}:\d{2})?|前天(?:\s+\d{1,2}:\d{2})?|\d{1,2}[-/]\d{1,2}(?:\s+\d{1,2}:\d{2})?|\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2})?(?:日)?(?:\s+\d{1,2}:\d{2})?)$/;
 const INLINE_TIME_TEXT_RE = /(刚刚|\d+\s*分钟前|\d+\s*小时前|\d+\s*天前|昨天\s*\d{0,2}:?\d{0,2}|前天\s*\d{0,2}:?\d{0,2}|\d{1,2}[-/]\d{1,2}(?:\s+\d{1,2}:\d{2})?|\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2})?(?:日)?(?:\s+\d{1,2}:\d{2})?)/;
 
-async function waitForCaptchaAction(timeoutMs = 0) {
-  const action = await showCaptchaPauseOverlay({ timeoutMs });
-  if (action === 'timeout') {
-    throw new Error(CAPTCHA_TIMEOUT_ERROR_MESSAGE);
-  }
-  return action;
+function hasXhsCollectionRiskSignal() {
+  return detectCaptcha() || isRiskControlPage();
 }
 
 async function waitForCondition(predicate, timeout = 500, interval = 80) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeout) {
     if (predicate()) return true;
-    await randomDelay(interval, Math.max(interval + 20, Math.round(interval * 1.35)));
+    await waitForPageSettle(interval);
   }
   return Boolean(predicate());
 }
@@ -64,6 +58,26 @@ function readCommentSignalsSafe(container) {
   return readCommentSignals(container);
 }
 
+function getCommentSurfaceFingerprint(container) {
+  const items = [...(container?.querySelectorAll?.('.parent-comment, .comment-item') || [])];
+  const ids = items.slice(0, 80).map((item, index) => String(item?.dataset?.commentId || item?.dataset?.id || item?.id || index)).join('|');
+  const signals = readCommentSignalsSafe(container);
+  return `${items.length}:${ids}:${signals.hasEndMarker ? 'end' : 'open'}`;
+}
+
+async function loadMoreCommentSurface(container, distance = 420) {
+  const scrollParent = findScrollParent(container);
+  if (!scrollParent || typeof scrollParent.scrollBy !== 'function') return false;
+  const before = getCommentSurfaceFingerprint(container);
+  scrollParent.scrollBy({ top: distance, behavior: 'auto' });
+  return waitForCondition(() => {
+    if (hasXhsCollectionRiskSignal()) return true;
+    const current = getActiveCommentsContext().container || container;
+    const signals = readCommentSignalsSafe(current);
+    return signals.hasEndMarker || getCommentSurfaceFingerprint(current) !== before;
+  }, DEFAULT_DOM_TOP_UP_SETTLE_MS, 80);
+}
+
 /**
  * 采集单篇笔记的所有评论（含子评论）
  * 技术路径：DOM 解析 + 自动滚动加载 + 子评论展开
@@ -88,7 +102,6 @@ export async function collectComments({
   waitIfPaused = async () => {},
   commentDepthMode = COMMENT_DEPTH_MODE.TWO_LEVEL,
   collectionRunId = '',
-  captchaActionTimeoutMs = 0,
   persist = true,
   emitReceipt = true,
 } = {}) {
@@ -102,10 +115,9 @@ export async function collectComments({
     waitIfPaused,
     commentDepthMode,
     collectionRunId,
-    captchaActionTimeoutMs,
     persist,
   });
-  if (!apiResult.needsDomContinuation && (apiResult.apiObserved || apiResult.total > 0)) {
+  if (apiResult.stopReason === 'risk_control' || (!apiResult.needsDomContinuation && (apiResult.apiObserved || apiResult.total > 0))) {
     const result = withCommentCollectionReceipt({
       total: apiResult.total,
       comments: apiResult.comments,
@@ -136,7 +148,6 @@ export async function collectComments({
     commentDepthMode,
     collectionRunId,
     initialComments: apiResult.comments,
-    captchaActionTimeoutMs,
     persist,
   });
   const normalizedResult = withCommentCollectionReceipt(result, { maxTotal });
@@ -210,7 +221,6 @@ async function collectCommentsViaApi({
   waitIfPaused = async () => {},
   commentDepthMode = COMMENT_DEPTH_MODE.TWO_LEVEL,
   collectionRunId = '',
-  captchaActionTimeoutMs = 0,
   persist = true,
 } = {}) {
   noteUrl = noteUrl || window.location.href;
@@ -228,6 +238,7 @@ async function collectCommentsViaApi({
   const replyExpandAttempts = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? ALL_REPLIES_EXPAND_ATTEMPTS : 0;
   let apiObserved = false;
   let hydrationDegradedEver = false;
+  let riskStopped = false;
 
   while (!shouldStop()) {
     container = resolveContainer() || container;
@@ -244,14 +255,14 @@ async function collectCommentsViaApi({
       message: `正在扫描评论区，当前已采集 ${allComments.length} 条评论`,
     });
 
-    if (detectCaptcha()) {
+    if (hasXhsCollectionRiskSignal()) {
+      riskStopped = true;
       onProgress?.({
-        status: 'collecting',
+        status: 'blocked',
         current: allComments.length,
-        message: `检测到安全验证，当前已采集 ${allComments.length} 条评论`,
+        message: `检测到安全验证或访问受限，已停止本次评论采集（当前 ${allComments.length} 条）`,
       });
-      const action = await waitForCaptchaAction(captchaActionTimeoutMs);
-      if (action === 'stop') break;
+      break;
     }
 
     let foundNew = false;
@@ -310,7 +321,7 @@ async function collectCommentsViaApi({
 
         const scrollParent = findScrollParent(container);
         await scrollIntoViewIfNeeded(parentEl, scrollParent);
-        await randomDelay(80, 160);
+        await waitForPageSettle(120);
         if (replyExpandAttempts > 0) {
           await expandAllReplies(parentEl, replyExpandAttempts);
         }
@@ -358,11 +369,9 @@ async function collectCommentsViaApi({
 
     const nextContainer = resolveContainer() || container;
     if (nextContainer) {
-      const nextScrollParent = findScrollParent(nextContainer);
-      await humanScroll(nextScrollParent, 420);
-      await randomDelay(350, 650);
+      await loadMoreCommentSurface(nextContainer, 420);
     } else {
-      await randomDelay(350, 650);
+      await waitForPageSettle(500);
     }
   }
 
@@ -386,11 +395,13 @@ async function collectCommentsViaApi({
       commentHint: finalSignals.commentHint,
       hasDomComments,
     }),
-    stopReason: shouldStop()
-      ? 'manual_stop'
-      : (maxTotal > 0 && allComments.length >= maxTotal
+    stopReason: riskStopped
+      ? 'risk_control'
+      : (shouldStop()
+        ? 'manual_stop'
+        : (maxTotal > 0 && allComments.length >= maxTotal
         ? 'comment_cap_reached'
-        : (finalSignals.hasEndMarker ? 'comment_area_end' : 'stable_no_new')),
+        : (finalSignals.hasEndMarker ? 'comment_area_end' : 'no_progress'))),
   };
 }
 
@@ -405,7 +416,6 @@ async function collectCommentsFromDom({
   commentDepthMode = COMMENT_DEPTH_MODE.TWO_LEVEL,
   collectionRunId = '',
   initialComments = [],
-  captchaActionTimeoutMs = 0,
   persist = true,
 } = {}) {
   noteUrl = noteUrl || window.location.href;
@@ -425,6 +435,7 @@ async function collectCommentsFromDom({
   let noNewCount = 0;
   const maxNoNew = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 8 : DEFAULT_DOM_TOP_UP_MAX_NO_NEW;
   const replyExpandAttempts = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? ALL_REPLIES_EXPAND_ATTEMPTS : 0;
+  let riskStopped = false;
 
   while (!shouldStop()) {
     container = resolveContainer() || container;
@@ -442,14 +453,14 @@ async function collectCommentsFromDom({
       message: `正在扫描评论区，当前已采集 ${allComments.length} 条评论`,
     });
 
-    if (detectCaptcha()) {
+    if (hasXhsCollectionRiskSignal()) {
+      riskStopped = true;
       onProgress?.({
-        status: 'collecting',
+        status: 'blocked',
         current: allComments.length,
-        message: `检测到安全验证，当前已采集 ${allComments.length} 条评论`,
+        message: `检测到安全验证或访问受限，已停止本次评论采集（当前 ${allComments.length} 条）`,
       });
-      const action = await waitForCaptchaAction(captchaActionTimeoutMs);
-      if (action === 'stop') break;
+      break;
     }
 
     const parentComments = container.querySelectorAll('.parent-comment');
@@ -498,7 +509,7 @@ async function collectCommentsFromDom({
         });
         const scrollParent = findScrollParent(container);
         await scrollIntoViewIfNeeded(parentEl, scrollParent);
-        await randomDelay(80, 160);
+        await waitForPageSettle(120);
         await expandAllReplies(parentEl, replyExpandAttempts);
       }
 
@@ -544,7 +555,7 @@ async function collectCommentsFromDom({
         });
       }
 
-      await randomDelay(60, 120);
+      await waitForPageSettle(90);
     }
 
     if (!foundNew) {
@@ -574,9 +585,7 @@ async function collectCommentsFromDom({
     }
 
     const nextContainer = resolveContainer() || container;
-    const nextScrollParent = findScrollParent(nextContainer);
-    await humanScroll(nextScrollParent, 420);
-    await randomDelay(DEFAULT_DOM_TOP_UP_SCROLL_DELAY_MIN, DEFAULT_DOM_TOP_UP_SCROLL_DELAY_MAX);
+    await loadMoreCommentSurface(nextContainer, 420);
   }
 
   if (persist && allComments.length > 0) {
@@ -587,11 +596,13 @@ async function collectCommentsFromDom({
   return {
     total: allComments.length,
     comments: allComments,
-    stopReason: shouldStop()
-      ? 'manual_stop'
-      : (maxTotal > 0 && allComments.length >= maxTotal
+    stopReason: riskStopped
+      ? 'risk_control'
+      : (shouldStop()
+        ? 'manual_stop'
+        : (maxTotal > 0 && allComments.length >= maxTotal
         ? 'comment_cap_reached'
-        : (finalSignals.hasEndMarker ? 'comment_area_end' : 'stable_no_new')),
+        : (finalSignals.hasEndMarker ? 'comment_area_end' : 'no_progress'))),
   };
 }
 
@@ -608,7 +619,6 @@ export async function collectCommentImages({
   onProgress = null,
   shouldStop = () => false,
   waitIfPaused = async () => {},
-  captchaActionTimeoutMs = 0,
 } = {}) {
   const resolveContainer = () => getActiveCommentsContext().container;
   let container = resolveContainer();
@@ -620,6 +630,7 @@ export async function collectCommentImages({
   const seenUrls = new Set();
   let noNewCount = 0;
   const maxNoNew = 4;
+  let riskStopped = false;
 
   while (!shouldStop()) {
     container = resolveContainer() || container;
@@ -631,9 +642,14 @@ export async function collectCommentImages({
       current: allImages.length,
       message: `正在扫描评论图片区，当前已发现 ${allImages.length} 张`,
     });
-    if (detectCaptcha()) {
-      const action = await waitForCaptchaAction(captchaActionTimeoutMs);
-      if (action === 'stop') break;
+    if (hasXhsCollectionRiskSignal()) {
+      riskStopped = true;
+      onProgress?.({
+        status: 'blocked',
+        current: allImages.length,
+        message: `检测到安全验证或访问受限，已停止本次评论图片采集（当前 ${allImages.length} 张）`,
+      });
+      break;
     }
 
     // 展开所有子评论
@@ -715,17 +731,20 @@ export async function collectCommentImages({
       noNewCount = 0;
     }
 
-    const nextScrollParent = findScrollParent(resolveContainer() || container);
+    const nextContainer = resolveContainer() || container;
     onProgress?.({
       status: 'collecting',
       current: allImages.length,
       message: `正在滚动加载更多评论，当前已发现 ${allImages.length} 张图片`,
     });
-    await humanScroll(nextScrollParent, 600);
-    await randomDelay(550, 1100);
+    await loadMoreCommentSurface(nextContainer, 600);
   }
 
-  return { total: allImages.length, images: allImages };
+  return {
+    total: allImages.length,
+    images: allImages,
+    stopReason: riskStopped ? 'risk_control' : (shouldStop() ? 'manual_stop' : 'collector_complete'),
+  };
 }
 
 /**
@@ -1056,7 +1075,7 @@ export async function expandAllReplies(parentCommentEl, maxAttempts = 10) {
 
     for (const btn of expandBtns) {
       btn.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-      await randomDelay(60, 110);
+      await waitForPageSettle(90);
       btn.click();
     }
 
@@ -1075,7 +1094,7 @@ async function scrollIntoViewIfNeeded(el, scrollParent) {
   const parentRect = scrollParent.getBoundingClientRect?.() ?? { top: 0, bottom: window.innerHeight };
   if (elRect.top < parentRect.top || elRect.bottom > parentRect.bottom) {
     el.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-    await randomDelay(90, 160);
+    await waitForPageSettle(120);
   }
 }
 

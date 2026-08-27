@@ -250,7 +250,7 @@ const buildAuthorNoteLinksShortfallNote = ({
   if (stopReason === 'bottom_confirmed') {
     return `这轮原计划发现 ${requested} 条博主历史笔记链接，当前主页多轮确认到底后只发现 ${discovered} 条可采作品，所以先按现有链接进入后续补采。`;
   }
-  if (stopReason === 'stable_no_new') {
+  if (stopReason === 'no_progress') {
     return `这轮原计划发现 ${requested} 条博主历史笔记链接，连续滚动没有新增后只发现 ${discovered} 条可采作品，所以先按现有链接进入后续补采。`;
   }
   return `这轮原计划发现 ${requested} 条博主历史笔记链接，但当前主页最终只发现 ${discovered} 条可采作品，所以先按现有链接进入后续补采。`;

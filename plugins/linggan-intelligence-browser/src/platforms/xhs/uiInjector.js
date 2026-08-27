@@ -60,7 +60,8 @@ function injectNoteDetailButtons() {
     brandVariant: 'banner',
     floatingKey: 'xhs.note-detail',
     buttons: [
-      { text: '采集当前笔记', action: 'collectNote', style: 'primary' },
+      { text: '采集当前笔记到 Linggan', action: 'collectNote', style: 'primary' },
+      { text: '人工采集并下载媒体', action: 'collectNoteWithManualMedia', style: 'secondary' },
       { text: '采集当前评论', action: 'collectComment', style: 'secondary' },
       { text: '评论图片 · 暂不可用', action: 'collectCommentImages', style: 'secondary' },
     ],

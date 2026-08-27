@@ -1,9 +1,9 @@
 import { collectComments } from './commentCollector.js';
 import { discoverWithScroll } from './noteCollector.js';
-import { watchCaptcha, showCaptchaPauseOverlay } from './antiDetect.js';
+import { waitForPageSettle } from './antiDetect.js';
 import { sendToBackground, reportProgress, reportDone } from '../../shared/messaging.js';
 import { BATCH_CONFIG, COLLECT_MODE, COMMENT_DEPTH_MODE, MSG, TASK_STATE } from '../../shared/constants.js';
-import { randomDelay, parseCount } from '../../shared/utils.js';
+import { parseCount } from '../../shared/utils.js';
 import { localExecutionStore } from '../../linggan/localExecutionStore.js';
 import {
   createLocalExecutionHeartbeatReporter,
@@ -33,9 +33,7 @@ import {
 } from './batchShared.js';
 import { BaseBatchController } from '../../shared/baseBatchController.js';
 
-const REMOTE_CAPTCHA_ACTION_TIMEOUT_MS = 45_000;
 const REMOTE_NOTE_COLLECTION_TIMEOUT_MS = 120_000;
-const CAPTCHA_TIMEOUT_ERROR_MESSAGE = '检测到小红书安全验证，等待人工处理超时，已停止本次评论采集。';
 const NOTE_COLLECTION_TIMEOUT_ERROR_MESSAGE = '单篇评论采集长时间没有结束，已停止本篇并释放任务。';
 
 async function resolveExistingBatchRun({ collectionRunId = '', externalTaskId = '', taskType = '' } = {}) {
@@ -74,7 +72,6 @@ export class BatchCommentController extends BaseBatchController {
     super();
     this.type = 'batchComments';
     this.results = [];
-    this.captchaWatcher = null;
     this._containerSelector = '.feeds-container';
     this._mode = COLLECT_MODE.SEARCH;
     this._originUrl = '';
@@ -84,7 +81,6 @@ export class BatchCommentController extends BaseBatchController {
     this._commentDepthMode = COMMENT_DEPTH_MODE.TWO_LEVEL;
     this._totalCommentsCollected = 0;
     this._stoppedByUser = false;
-    this._captchaActionTimeoutMs = 0;
     this._noteCollectionTimeoutMs = 0;
     this._blockingError = null;
     this._noteTimedOut = false;
@@ -164,10 +160,6 @@ export class BatchCommentController extends BaseBatchController {
     const triggerSource = String(settings.triggerSource || 'popup_manual').trim() || 'popup_manual';
     const externalTaskId = String(settings.externalTaskMeta?.externalTaskId || '').trim();
     const isRemoteDispatch = Boolean(externalTaskId);
-    this._captchaActionTimeoutMs = Math.max(
-      0,
-      Number(settings.captchaActionTimeoutMs ?? (isRemoteDispatch ? REMOTE_CAPTCHA_ACTION_TIMEOUT_MS : 0)) || 0,
-    );
     this._noteCollectionTimeoutMs = Math.max(
       0,
       Number(settings.noteCollectionTimeoutMs ?? (isRemoteDispatch ? REMOTE_NOTE_COLLECTION_TIMEOUT_MS : 0)) || 0,
@@ -216,17 +208,6 @@ export class BatchCommentController extends BaseBatchController {
         ? `批量评论已暂停：第 ${this.currentIndex}/${this.noteList.length} 篇`
         : `批量评论执行中：第 ${this.currentIndex}/${this.noteList.length} 篇`,
     }));
-
-    this.captchaWatcher = watchCaptcha(async () => {
-      this.pause();
-      const action = await showCaptchaPauseOverlay({ timeoutMs: this._captchaActionTimeoutMs });
-      if (action === 'resume') {
-        this.resume();
-      } else {
-        this._blockingError = new Error(action === 'timeout' ? CAPTCHA_TIMEOUT_ERROR_MESSAGE : '用户停止了安全验证后的评论采集。');
-        this.stop();
-      }
-    });
 
     let noteList = Array.isArray(settings.noteList) ? settings.noteList.slice() : [];
     if (noteList.length === 0) {
@@ -356,7 +337,7 @@ export class BatchCommentController extends BaseBatchController {
         await this._syncRunProgress();
       }
 
-      await randomDelay(1200, 2200);
+      await waitForPageSettle(1700);
     }
 
     await this._cleanupAfterLoop();
@@ -448,7 +429,7 @@ export class BatchCommentController extends BaseBatchController {
     const commentsReady = await this._waitForCommentPipelineReady(noteInfo.noteId, 12000);
     if (!commentsReady) return false;
 
-    await randomDelay(120, 220);
+    await waitForPageSettle(170);
 
     const result = await this._collectOneNoteComments(noteInfo, noteInfo.url || window.location.href);
     this._totalCommentsCollected += Number(result?.total || 0);
@@ -479,7 +460,7 @@ export class BatchCommentController extends BaseBatchController {
       return false;
     }
 
-    await randomDelay(120, 220);
+    await waitForPageSettle(170);
 
     const result = await this._collectOneNoteComments(noteInfo, noteInfo.url);
     this._totalCommentsCollected += Number(result?.total || 0);
@@ -504,19 +485,18 @@ export class BatchCommentController extends BaseBatchController {
       return false;
     }
 
-    await randomDelay(120, 220);
+    await waitForPageSettle(170);
 
     const result = await this._collectOneNoteComments(noteInfo, fullUrl);
     this._totalCommentsCollected += Number(result?.total || 0);
     this.results.push({ noteId: noteInfo.noteId, ...result });
     await this._goBackToList(urlBefore);
-    await randomDelay(180, 280);
+    await waitForPageSettle(230);
     return true;
   }
 
   async _cleanupAfterLoop() {
     this.heartbeatLoop.stop();
-    this.captchaWatcher?.disconnect();
     await this._closeNotePopup();
     await sendToBackground(MSG.UNBLOCK_MEDIA).catch(() => {});
     this.isRunning = false;
@@ -529,12 +509,12 @@ export class BatchCommentController extends BaseBatchController {
 
   async _pauseForRiskControl() {
     if (!isRiskControlPage()) return false;
-    this.pause();
+    this.stop();
     this._emitProgress({
-      status: TASK_STATE.PAUSED,
+      status: TASK_STATE.STOPPED,
       total: this.noteList.length,
       current: this.currentIndex,
-      message: '检测到安全验证页面，已自动暂停，请完成验证后点击“继续采集”。',
+      message: '检测到安全验证页面，已停止本次评论采集；请在验证完成后新建任务。',
     });
     return true;
   }
@@ -617,7 +597,6 @@ export class BatchCommentController extends BaseBatchController {
       shouldStop: () => !this.isRunning || this._noteTimedOut,
       waitIfPaused: () => this._waitIfPaused(),
       collectionRunId: this.collectionRunId,
-      captchaActionTimeoutMs: this._captchaActionTimeoutMs,
       onProgress: (progress) => {
         this._reportHeartbeat(progress?.message || `第 ${this.currentIndex}/${this.noteList.length} 篇评论采集中`, {
           stage: 'collecting',
@@ -637,7 +616,7 @@ export class BatchCommentController extends BaseBatchController {
     let commentHint = this._readVisibleCommentHint();
     if (commentHint > 0 || this._hasVisibleCommentItems()) {
       await this._waitForCommentPipelineReady(noteInfo.noteId, 3200);
-      await randomDelay(260, 420);
+      await waitForPageSettle(340);
       result = await collectComments(makeOptions());
       if (Number(result?.total || 0) > 0 || this._hasExplicitNoCommentsState()) return result;
     }
@@ -645,7 +624,7 @@ export class BatchCommentController extends BaseBatchController {
     await this._waitForCommentPipelineReady(noteInfo.noteId, 4200);
     commentHint = this._readVisibleCommentHint();
     if (commentHint > 0 || this._hasVisibleCommentItems() || !this._hasExplicitNoCommentsState()) {
-      await randomDelay(320, 520);
+      await waitForPageSettle(420);
       result = await collectComments(makeOptions());
     }
 
@@ -678,7 +657,7 @@ export class BatchCommentController extends BaseBatchController {
         current: this.currentIndex,
         total: this.noteList.length,
       });
-      await randomDelay(140, 220);
+      await waitForPageSettle(180);
     }
     return false;
   }
@@ -691,9 +670,9 @@ export class BatchCommentController extends BaseBatchController {
       const hasCommentItems = context.hasCommentItems;
       const hasCommentMeta = context.hasCommentMeta || context.hasExplicitEmptyState;
       if (hasContainer || hasCommentItems || hasCommentMeta) return;
-      await randomDelay(70, 120);
+      await waitForPageSettle(95);
     }
-    await randomDelay(160, 260);
+    await waitForPageSettle(210);
   }
 
   _waitForPageLoad(timeout) {
@@ -728,7 +707,7 @@ export class BatchCommentController extends BaseBatchController {
       if (isPopupOpen() || isNoteDetailReady()) {
         return true;
       }
-      await randomDelay(240, 340);
+      await waitForPageSettle(290);
     }
     return false;
   }
@@ -753,7 +732,7 @@ export class BatchCommentController extends BaseBatchController {
       if (hasContainer && ((inDetail && (hasCommentItems || hasCommentMeta)) || hasCommentItems || hasCommentMeta)) {
         return true;
       }
-      await randomDelay(220, 320);
+      await waitForPageSettle(270);
     }
     return false;
   }
@@ -767,14 +746,14 @@ export class BatchCommentController extends BaseBatchController {
     let element = findNoteElementById(noteInfo.noteId, this._containerSelector);
     if (element && document.body.contains(element)) {
       element.scrollIntoView({ behavior: 'auto', block: 'center' });
-      await randomDelay(120, 220);
+      await waitForPageSettle(170);
       return element;
     }
 
     const targetY = Math.max(Math.round((noteInfo._top || 0) - window.innerHeight * 0.8), 0);
     if (Math.abs(window.scrollY - targetY) > window.innerHeight) {
       window.scrollTo({ top: targetY, behavior: 'auto' });
-      await randomDelay(120, 220);
+      await waitForPageSettle(170);
     }
 
     const maxScrollAttempts = 18;
@@ -783,11 +762,11 @@ export class BatchCommentController extends BaseBatchController {
       element = findNoteElementById(noteInfo.noteId, this._containerSelector);
       if (element && document.body.contains(element)) {
         element.scrollIntoView({ behavior: 'auto', block: 'center' });
-        await randomDelay(120, 220);
+        await waitForPageSettle(170);
         return element;
       }
       window.scrollBy({ top: scrollStep, behavior: 'auto' });
-      await randomDelay(140, 240);
+      await waitForPageSettle(190);
       if (window.scrollY > targetY + window.innerHeight * 3) break;
     }
 
@@ -800,14 +779,14 @@ export class BatchCommentController extends BaseBatchController {
     if (currentUrl !== originalUrl) {
       window.history.back();
       for (let i = 0; i < 30; i += 1) {
-        await randomDelay(180, 260);
+        await waitForPageSettle(220);
         if (!this._isNoteDetailPath(window.location.pathname)) {
-          await randomDelay(160, 260);
+          await waitForPageSettle(210);
           return;
         }
       }
       window.location.href = originalUrl;
-      await randomDelay(1400, 2000);
+      await waitForPageSettle(1700);
     } else {
       await this._closeNotePopup();
     }
@@ -844,7 +823,7 @@ export class BatchCommentController extends BaseBatchController {
         const el = document.querySelector(sel);
         if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
           el.click();
-          await randomDelay(120, 220);
+          await waitForPageSettle(170);
           if (!isPopupOpen()) return;
         }
       } catch {
@@ -854,7 +833,7 @@ export class BatchCommentController extends BaseBatchController {
 
     try {
       await sendToBackground(MSG.DISPATCH_ESC);
-      await randomDelay(120, 220);
+      await waitForPageSettle(170);
     } catch {
       // ignore
     }

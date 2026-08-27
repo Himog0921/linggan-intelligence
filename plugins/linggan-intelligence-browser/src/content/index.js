@@ -1,7 +1,7 @@
 import '../extensionPublicPath.js';
 import '../content.css';
 import { MSG } from '../shared/constants.js';
-import { discoverWithScroll } from '../platforms/xhs/noteCollector.js';
+import { buildDiscoveryExecutionSummary, discoverWithScroll } from '../platforms/xhs/noteCollector.js';
 import { collectXhsNoteDetailPackage } from '../platforms/xhs/detailPackageCollector.js';
 import { readCurrentXhsSearchSurfaceContext } from '../platforms/xhs/searchFilters.js';
 import { collectComments, collectCommentImages } from '../platforms/xhs/commentCollector.js';
@@ -23,6 +23,7 @@ import { unavailableLingganStats } from '../linggan/adapter.js';
 import { loadDouyinRuntime } from './douyinRuntime.js';
 import { registerCollectorReceiptSink } from '../runtime/collectorReceiptSink.js';
 import { createDashboardBridge } from './dashboardBridge.js';
+import { createNoteMediaDownloadService } from './noteMediaDownload.js';
 import { noteStore } from '../db/noteStore.js';
 import { commentStore } from '../db/commentStore.js';
 import { authorStore } from '../db/authorStore.js';
@@ -38,13 +39,33 @@ function localTrustedAuthorization() {
 
 const runtime = createLingganContentRuntime({ platform: 'xhs' });
 let activeDouyinAdapter = null;
+
+async function collectCurrentXhsDetailPackage(...args) {
+  // A direct detail request carries its attached comments in the same logical package.
+  // The bridge remains task-triggered rather than becoming an always-on page observer.
+  ensureXhsCommentApiBridge();
+  const result = await collectXhsNoteDetailPackage(...args);
+  return result.note;
+}
+
+// Human-operated media download stays available as a local, explicit action.  It is
+// deliberately separate from Linggan receipt delivery, which only observes media slots.
+const manualMediaDownloadService = createNoteMediaDownloadService({
+  MSG,
+  noteStore,
+  sendToBackground,
+  collectNote: collectCurrentXhsDetailPackage,
+  loadDouyinRuntime,
+  extractNoteId,
+});
+
 const dashboardBridge = createDashboardBridge({
   noteStore,
   commentStore,
   authorStore,
-  // The familiar dashboard still reads the mature local execution cache, while this action now
-  // enters the same Linggan-owned media lane as page controls. It never invokes legacy downloads.
-  downloadNoteMediaFromRecord: (note) => runtime.acquireMediaSlots(note),
+  // The dashboard is also a human-operated surface, so it preserves the explicit local
+  // download workflow instead of reusing the Intelligence observation lane.
+  downloadNoteMediaFromRecord: (note, options) => manualMediaDownloadService.downloadNoteMediaFromRecord(note, options),
 });
 
 class LingganBatchNoteController extends BatchNoteController {
@@ -78,13 +99,7 @@ class LingganBatchCommentController extends BatchCommentController {
 const xhsPageController = createXhsPageController({
   MSG,
   assertPluginAuthorized: localTrustedAuthorization,
-  collectNote: async (...args) => {
-    // A direct detail request carries its attached comments in the same logical package.
-    // The bridge remains task-triggered rather than becoming an always-on page observer.
-    ensureXhsCommentApiBridge();
-    const result = await collectXhsNoteDetailPackage(...args);
-    return result.note;
-  },
+  collectNote: collectCurrentXhsDetailPackage,
   collectComments: async (...args) => {
     // Do not install the old page bridge when a search/profile page merely loads.  It is only
     // needed if a user explicitly starts comment collection.
@@ -100,8 +115,7 @@ const xhsPageController = createXhsPageController({
   togglePauseResumeButtons,
   showToast,
   showCommentLimitDialog,
-  // Familiar selection remains. Its old browser-download destination is intentionally replaced
-  // by Linggan's media-slot lane; it never writes a temporary machine path as evidence.
+  // This dialog is only reached by the explicit human media-download action.
   showMediaDownloadDialog,
   showBatchSettingsDialog,
   ensureTaskControlBar,
@@ -111,7 +125,7 @@ const xhsPageController = createXhsPageController({
   reportDone,
   extractNoteId,
   sendToBackground,
-  downloadNoteMediaFromRecord: async (note) => runtime.acquireMediaSlots(note),
+  downloadNoteMediaFromRecord: (note, options) => manualMediaDownloadService.downloadNoteMediaFromRecord(note, options),
   discoverSurface: async ({ mode, maximumQuota }) => {
     const expectedCount = Math.max(1, Number(maximumQuota) || 20);
     const cards = await discoverWithScroll(
@@ -119,8 +133,18 @@ const xhsPageController = createXhsPageController({
       undefined,
       { expectedCount },
     );
+    const executionSummary = buildDiscoveryExecutionSummary(cards.discoveryMeta);
     if (mode === 'profile') {
-      return { cards, discoveryMeta: cards.discoveryMeta };
+      return {
+        cards,
+        pageFacts: {
+          kind: 'xhs_profile_surface',
+          requestedLimit: expectedCount,
+          loadedCount: cards.length,
+          ...executionSummary,
+        },
+        discoveryMeta: cards.discoveryMeta,
+      };
     }
     return {
       cards,
@@ -128,6 +152,7 @@ const xhsPageController = createXhsPageController({
         requestedLimit: expectedCount,
         loadedCount: cards.length,
         stopReason: cards.discoveryMeta?.stopReason,
+        ...executionSummary,
       }),
       discoveryMeta: cards.discoveryMeta,
     };

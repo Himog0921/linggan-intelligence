@@ -198,3 +198,39 @@ test('collectComments can use API snapshot before comments container renders', a
   assert.equal(result.total, 1);
   assert.equal(result.comments[0].text, '这是一条接口评论');
 });
+
+test('collectComments stops immediately when the page reports an access risk', async (t) => {
+  const previousWindow = globalThis.window;
+  const previousDocument = globalThis.document;
+
+  globalThis.window = {
+    location: {
+      href: 'https://www.xiaohongshu.com/explore/note_risk',
+      pathname: '/explore/note_risk',
+    },
+  };
+  globalThis.document = {
+    body: { innerText: '操作频繁，请稍后再试' },
+    querySelector() {
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    },
+  };
+
+  t.after(() => {
+    globalThis.window = previousWindow;
+    globalThis.document = previousDocument;
+  });
+
+  const result = await collectComments({
+    noteId: 'note_risk',
+    noteUrl: 'https://www.xiaohongshu.com/explore/note_risk',
+    persist: false,
+    emitReceipt: false,
+  });
+
+  assert.equal(result.total, 0);
+  assert.equal(result.stopReason, 'risk_control');
+});
