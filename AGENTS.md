@@ -18,6 +18,15 @@
 
 ## Agent skills
 
+### 插件与工位的权威改动位置
+
+为避免把同一能力写进历史副本、插件和 Linggan 三处，以下边界是当前仓库的硬约束：
+
+- **工位、插件安装身份、认领窗口、授权、额度与第 5 问准入**只能修改 Linggan 的 Rust/domain、数据库、local API 与 `/collection` 页面；浏览器插件只能上报一次安装和执行受控任务，不能成为工位或授权的权威来源。
+- **浏览器插件的唯一权威源码**是当前受控 branch/worktree 中的 `plugins/linggan-intelligence-browser/`。发布包必须从这一目录的当前 `main` 或已派定的专属 worktree 生成，并与 `releases/release-manifest.json` 校验一致。
+- 名为 `plugin-retrofit-*`、旧版本插件副本、迁移快照和历史 worktree 只可用于只读对照、审计或受控迁移；不得在其中开始新功能、生成发布包或将其结果宣称为当前插件版本。
+- 新插件事项仍必须使用已派定的 Issue、专属 branch/worktree、独立复审与合并后核验；不得直接在共享 `main` 或历史副本写入。
+
 ### Issue tracker
 
 本项目使用私有仓库 `Himog0921/linggan-intelligence` 的 GitHub Issues 追踪任务、问题、阻塞和 Agent 工作单；Issue 不是产品、架构或事实的第二权威来源。具体规则见 `docs/agents/issue-tracker.md`。
