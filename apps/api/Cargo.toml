@@ -9,7 +9,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
-axum = { workspace = true, features = ["query"] }
+axum = { workspace = true, features = ["query", "form"] }
 linggan-contracts = { path = "../../crates/contracts" }
 linggan-evidence = { path = "../../crates/evidence" }
 linggan-storage-postgres = { path = "../../crates/storage-postgres" }

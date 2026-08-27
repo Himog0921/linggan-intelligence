@@ -7,18 +7,23 @@
 
 use linggan_evidence::{StationOverview, UnclaimedInstallation};
 
+/// 登记工位与认领安装都不消耗任何平台访问——它们只是在本地记下「这台机器是谁」。
+/// 因此这一页允许出现真实可点的按钮，而会触发平台访问的控件仍然不存在。
+const NO_PLATFORM_ACCESS_NOTE: &str =
+    "登记工位、开认领窗口与认领安装都只写本地记录，不访问任何平台，也不会让任何采集开始。";
+
 const EMPTY_STATE_OPEN: &str = "<section class=\"c-empty c-empty-engineering\">";
 const EMPTY_STATE_CLOSE: &str = "</section>";
 
-/// 用真实工位替换空态。都为空时原样返回：「还没接通」这个事实空态已经诚实答过了。
+/// 用工位面板替换空态。
+///
+/// 与观察目标那一栏不同，这里**即使一台工位都没有也要替换**：空态说的是「等工程」，
+/// 而登记工位现在真的可以做了，继续显示「等工程」就是在说假话。
 pub fn render_stations(
     base: &str,
     stations: &[StationOverview],
     unclaimed: &[UnclaimedInstallation],
 ) -> String {
-    if stations.is_empty() && unclaimed.is_empty() {
-        return base.to_owned();
-    }
     let Some(open) = base.find(EMPTY_STATE_OPEN) else {
         return base.to_owned();
     };
@@ -42,7 +47,10 @@ pub fn render_stations(
         ));
     }
     if !unclaimed.is_empty() {
-        let rows: String = unclaimed.iter().map(unclaimed_row).collect();
+        let rows: String = unclaimed
+            .iter()
+            .map(|installation| unclaimed_row(installation, stations))
+            .collect();
         sections.push_str(&format!(
             r#"<section class="c-targets">
               <div class="c-targets-head">
@@ -54,10 +62,96 @@ pub fn render_stations(
             count = unclaimed.len(),
         ));
     }
+    let console = format!(
+        r#"<section class="c-station-console">
+              <h2>工位</h2>
+              <p class="c-station-lede">工位由你登记，插件安装由插件自报。重装插件换的是安装，不是工位——名字、每日额度与授权都挂在工位上，不会被重装清掉。</p>
+              <p class="c-station-note">{note}</p>
+              <div class="c-station-forms">
+                <form class="c-station-form" method="post" action="/collection/runtime/stations">
+                  <label for="station-name">登记一台工位</label>
+                  <input id="station-name" name="display_name" required maxlength="60"
+                         placeholder="例如：MacBook Chrome" />
+                  <button class="c-btn-primary" type="submit">登记</button>
+                </form>
+                {window_form}
+              </div>
+            </section>"#,
+        note = NO_PLATFORM_ACCESS_NOTE,
+        window_form = claim_window_form(stations),
+    );
+    // 工位面板替换了原来的空态，而空态里「调度器未接通」那个事实必须留下来：
+    // 一台工位在岗只说明有个插件报到了，不说明任何采集会开始（INV-36）。
+    let pending = r#"<section class="c-station-pending">
+              <h3>还没有接通的部分</h3>
+              <dl class="c-empty-grid">
+                <div><dt>调度器</dt><dd>未接通。登记工位、认领插件都不会让任何采集开始——工位在岗只说明有个插件报到了。</dd></div>
+                <div><dt>准入第 5 问</dt><dd>「是否有兼容工位、账号、预算与风险余量」尚未接上工位，因此深度建档申请仍会停在这一问。</dd></div>
+                <div><dt>队列、租约、回执</dt><dd>尚不存在。这一页是唯一允许出现这些工程细节的地方，接通后会长在这里。</dd></div>
+              </dl>
+            </section>"#;
     format!(
-        "{before}{sections}{after}",
+        "{before}{console}{sections}{pending}{after}",
         before = &base[..open],
         after = &base[close..],
+    )
+}
+
+/// 开认领窗口的表单。没有工位时不渲染——没有可开窗口的对象。
+fn claim_window_form(stations: &[StationOverview]) -> String {
+    if stations.is_empty() {
+        return String::new();
+    }
+    let options: String = stations
+        .iter()
+        .map(|station| {
+            format!(
+                r#"<option value="{value}">{name}</option>"#,
+                value = station.station_ref,
+                name = escape(&station.display_name),
+            )
+        })
+        .collect();
+    format!(
+        r#"<form class="c-station-form" method="post" action="/collection/runtime/claim-window">
+                  <label for="claim-station">开认领窗口（开发期用）</label>
+                  <select id="claim-station" name="station_ref">{options}</select>
+                  <select name="valid_for_hours" aria-label="窗口时长">
+                    <option value="24">24 小时</option>
+                    <option value="8">8 小时</option>
+                    <option value="1">1 小时</option>
+                  </select>
+                  <button class="c-btn-secondary" type="submit">开窗口</button>
+                </form>{close}"#,
+        close = close_window_form(stations),
+    )
+}
+
+/// 关窗口。只在确实有窗口开着时出现——没有开着的窗口就没有可关的东西。
+fn close_window_form(stations: &[StationOverview]) -> String {
+    let open: Vec<&StationOverview> = stations
+        .iter()
+        .filter(|station| station.claim_window_open)
+        .collect();
+    if open.is_empty() {
+        return String::new();
+    }
+    let options: String = open
+        .iter()
+        .map(|station| {
+            format!(
+                r#"<option value="{value}">{name}</option>"#,
+                value = station.station_ref,
+                name = escape(&station.display_name),
+            )
+        })
+        .collect();
+    format!(
+        r#"<form class="c-station-form" method="post" action="/collection/runtime/close-window">
+                  <label for="close-station">提前关窗口</label>
+                  <select id="close-station" name="station_ref">{options}</select>
+                  <button class="c-btn-secondary" type="submit">关窗口</button>
+                </form>"#
     )
 }
 
@@ -105,17 +199,40 @@ fn station_row(station: &StationOverview) -> String {
     )
 }
 
-fn unclaimed_row(installation: &UnclaimedInstallation) -> String {
+fn unclaimed_row(installation: &UnclaimedInstallation, stations: &[StationOverview]) -> String {
     let browser = installation
         .browser_label
         .as_deref()
         .unwrap_or("未知浏览器");
+    // 没有已登记的工位时不给认领控件：没有可认领到的去处，给了也是点了没反应。
+    let claim = if stations.is_empty() {
+        r#"<div class="c-target-state">待认领</div>"#.to_owned()
+    } else {
+        let options: String = stations
+            .iter()
+            .map(|station| {
+                format!(
+                    r#"<option value="{value}">{name}</option>"#,
+                    value = station.station_ref,
+                    name = escape(&station.display_name),
+                )
+            })
+            .collect();
+        format!(
+            r#"<form class="c-target-claim" method="post" action="/collection/runtime/claims">
+                  <input type="hidden" name="installation_ref" value="{installation}" />
+                  <select name="station_ref" aria-label="认领到哪台工位">{options}</select>
+                  <button class="c-btn-quiet" type="submit">认领</button>
+                </form>"#,
+            installation = installation.installation_ref,
+        )
+    };
     format!(
         r#"<div class="c-target-row">
                 <div class="c-target-kind">安装</div>
                 <div class="c-target-name"><b>插件 {version}</b><span>{browser}</span></div>
                 <div class="c-target-meta"><span>首次报到 {first_seen}</span></div>
-                <div class="c-target-state">待认领</div>
+                {claim}
               </div>"#,
         version = escape(&installation.plugin_version),
         browser = escape(browser),
@@ -151,11 +268,26 @@ mod tests {
     }
 
     #[test]
-    fn nothing_registered_leaves_the_honest_empty_state_alone() {
-        // "还没接通" is already answered by the empty state; rendering a second empty list
-        // would only add noise.
-        let base = format!("before{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}after");
-        assert_eq!(render_stations(&base, &[], &[]), base);
+    fn nothing_registered_still_offers_the_one_thing_the_person_can_do() {
+        // The empty state this replaces says "这一栏不需要你做任何事". Registering a station
+        // is now a real action, so leaving that text in place would be a lie.
+        let base =
+            format!("before{EMPTY_STATE_OPEN}这一栏不需要你做任何事{EMPTY_STATE_CLOSE}after");
+        let rendered = render_stations(&base, &[], &[]);
+        assert!(rendered.contains("/collection/runtime/stations"));
+        assert!(!rendered.contains("这一栏不需要你做任何事"));
+        // Nothing exists to open a window on or claim yet, so neither control is offered.
+        assert!(!rendered.contains("/collection/runtime/claim-window"));
+        assert!(!rendered.contains("c-target-claim"));
+    }
+
+    #[test]
+    fn the_scheduler_being_absent_stays_visible_next_to_the_real_controls() {
+        // A station being 在岗 must never read as "capture will now happen" (INV-36).
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let rendered = render_stations(&base, &[station(Some("2.0.101"), 0)], &[]);
+        assert!(rendered.contains("c-station-pending"));
+        assert!(rendered.contains("调度器"));
     }
 
     #[test]

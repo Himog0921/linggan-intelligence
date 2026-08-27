@@ -24,11 +24,11 @@ use linggan_evidence::{
     LocalTaskOutcome, MediaUploadFinalizeClaim, ProducerRuntimeError, RuntimeAttemptOutcome,
     RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome, admit_media_blob,
     begin_media_upload, check_in_installation, claim_installation, claim_media_upload_finalize,
-    complete_media_upload, create_manual_task, create_producer_task, grant_authorization,
-    ingest_discovery_package, list_targets_in_state, local_discovery_schema_is_ready,
-    local_producer_schema_is_ready, open_claim_window, producer_runtime_has_packages,
-    producer_runtime_schema_is_ready, read_discovery_library, read_local_media_blob,
-    read_media_upload_session, read_runtime_library, read_station_overview,
+    close_claim_window, complete_media_upload, create_manual_task, create_producer_task,
+    grant_authorization, ingest_discovery_package, list_targets_in_state,
+    local_discovery_schema_is_ready, local_producer_schema_is_ready, open_claim_window,
+    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_discovery_library,
+    read_local_media_blob, read_media_upload_session, read_runtime_library, read_station_overview,
     record_media_download_failure, record_media_upload_chunk, register_station,
     release_media_upload_finalize, request_and_admit, start_local_attempt, start_producer_attempt,
     store_pending_target, submit_local_package, submit_producer_package,
@@ -258,6 +258,19 @@ fn router(state: LocalWebState) -> Router {
         .route("/collection/attention", get(collection_attention))
         .route("/collection/tasks", get(collection_tasks))
         .route("/collection/runtime", get(collection_runtime))
+        .route(
+            "/collection/runtime/stations",
+            post(collection_runtime_register_station),
+        )
+        .route(
+            "/collection/runtime/claim-window",
+            post(collection_runtime_open_window),
+        )
+        .route(
+            "/collection/runtime/close-window",
+            post(collection_runtime_close_window),
+        )
+        .route("/collection/runtime/claims", post(collection_runtime_claim))
         .route("/assets/evidence-library.css", get(stylesheet))
         .route(
             "/assets/collection-workspace.css",
@@ -1769,6 +1782,78 @@ async fn collection_runtime(State(state): State<LocalWebState>) -> Html<String> 
         }
         Err(_) => Html(base),
     }
+}
+
+/// COLLECTION-001 · the person-facing station actions on the 执行工位 surface.
+///
+/// These write local records only — no platform is contacted and no capture begins, which is
+/// why this page may carry real buttons while every platform-consuming control stays absent.
+///
+/// Each one redirects back with 303 so a refresh re-reads the page instead of re-submitting.
+const RUNTIME_SURFACE: &str = "/collection/runtime";
+
+#[derive(serde::Deserialize)]
+struct StationForm {
+    display_name: String,
+}
+
+async fn collection_runtime_register_station(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<StationForm>,
+) -> Redirect {
+    if let Some(database) = state.database.database() {
+        // 200 notes per station per day (Mog's decision), held on the station so a plugin
+        // reinstall never resets it.
+        let _ = register_station(database, form.display_name.trim(), 200).await;
+    }
+    Redirect::to(RUNTIME_SURFACE)
+}
+
+#[derive(serde::Deserialize)]
+struct ClaimWindowForm {
+    station_ref: uuid::Uuid,
+    valid_for_hours: i32,
+}
+
+async fn collection_runtime_open_window(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<ClaimWindowForm>,
+) -> Redirect {
+    if let Some(database) = state.database.database() {
+        let _ = open_claim_window(database, form.station_ref, form.valid_for_hours).await;
+    }
+    Redirect::to(RUNTIME_SURFACE)
+}
+
+#[derive(serde::Deserialize)]
+struct CloseWindowForm {
+    station_ref: uuid::Uuid,
+}
+
+async fn collection_runtime_close_window(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<CloseWindowForm>,
+) -> Redirect {
+    if let Some(database) = state.database.database() {
+        let _ = close_claim_window(database, form.station_ref).await;
+    }
+    Redirect::to(RUNTIME_SURFACE)
+}
+
+#[derive(serde::Deserialize)]
+struct ClaimForm {
+    installation_ref: uuid::Uuid,
+    station_ref: uuid::Uuid,
+}
+
+async fn collection_runtime_claim(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<ClaimForm>,
+) -> Redirect {
+    if let Some(database) = state.database.database() {
+        let _ = claim_installation(database, form.installation_ref, form.station_ref).await;
+    }
+    Redirect::to(RUNTIME_SURFACE)
 }
 
 async fn collection_stylesheet() -> Response {

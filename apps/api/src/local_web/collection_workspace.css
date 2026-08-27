@@ -190,3 +190,48 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-target-name span { display:block; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-ghost); font:11px var(--lgi-font-mono); }
 .c-target-meta { display:flex; gap:14px; color:var(--v7-muted); font:10px var(--lgi-font-mono); letter-spacing:.04em; }
 .c-target-state { color:var(--v7-black); font:700 11px var(--lgi-font-mono); text-align:right; }
+
+/* 工位面板。这一页允许出现真实可点的按钮，因为登记工位与认领安装只写本地记录，
+ * 不访问任何平台——与页面其余那些会消耗平台访问、因而显式不可用的控件不同。 */
+.c-station-console { padding:26px 0 8px; border-bottom:2px solid var(--v7-black); }
+.c-station-console h2 { margin:0; color:var(--v7-black); font-size:18px; font-weight:600; line-height:1.25; }
+.c-station-lede { margin:11px 0 0; max-width:640px; color:var(--v7-body); font-size:13px; line-height:1.7; }
+.c-station-note { margin:9px 0 0; max-width:640px; color:var(--v7-muted); font-size:12px; line-height:1.7; }
+.c-station-forms { margin-top:20px; display:flex; flex-wrap:wrap; gap:26px; }
+.c-station-form { display:flex; flex-wrap:wrap; align-items:center; gap:9px; }
+.c-station-form label { flex:0 0 100%; color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-station-form input,.c-station-form select,.c-target-claim select {
+  height:40px; padding:0 11px; border:1px solid var(--v7-line-strong); border-radius:4px;
+  background:var(--v7-white); color:var(--v7-black); font-size:13px;
+}
+.c-station-form input { min-width:230px; }
+.c-station-form input:focus-visible,.c-station-form select:focus-visible,.c-target-claim select:focus-visible,
+.c-btn-primary:focus-visible,.c-btn-secondary:focus-visible {
+  outline:2px solid var(--v7-black); outline-offset:2px;
+}
+
+/* Primary：本区域唯一真实主动作。实底 + Ink 边框 + 实色硬阴影，无模糊。 */
+.c-btn-primary {
+  height:40px; padding:0 18px; border:2px solid var(--v7-black); background:var(--v7-red);
+  color:var(--v7-white); font:800 12px var(--lgi-font-mono); letter-spacing:.05em; cursor:pointer;
+  box-shadow:var(--v7-brutal); transition:transform var(--v7-t-press) var(--v7-ease),box-shadow var(--v7-t-press) var(--v7-ease);
+}
+.c-btn-primary:hover { background:var(--v7-red-hover); transform:translate(-2px,-2px); box-shadow:var(--v7-brutal-lg); }
+.c-btn-primary:active { transform:translate(1px,1px); box-shadow:var(--v7-brutal); }
+.c-btn-secondary {
+  height:40px; padding:0 16px; border:2px solid var(--v7-black); background:var(--v7-white);
+  color:var(--v7-black); font:800 12px var(--lgi-font-mono); letter-spacing:.05em; cursor:pointer;
+}
+.c-btn-secondary:hover { background:var(--v7-sunken); }
+
+/* 带认领控件的行需要更宽的末列：默认的 64px 只够放一个状态词。 */
+.c-target-row:has(.c-target-claim) { grid-template-columns:72px minmax(0,1fr) auto auto; }
+.c-target-claim { display:flex; align-items:center; gap:7px; }
+.c-target-claim select { height:34px; font-size:12px; }
+
+@media (prefers-reduced-motion:reduce) {
+  .c-btn-primary { transition:none; }
+  .c-btn-primary:hover,.c-btn-primary:active { transform:none; box-shadow:var(--v7-brutal); }
+}
+.c-station-pending { padding:26px 0 30px; }
+.c-station-pending h3 { margin:0 0 4px; color:var(--v7-black); font-size:13px; font-weight:600; }

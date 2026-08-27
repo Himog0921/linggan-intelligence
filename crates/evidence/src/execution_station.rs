@@ -98,6 +98,31 @@ pub async fn open_claim_window(
     Ok(())
 }
 
+/// 提前关掉认领窗口。
+///
+/// 窗口本来就会自己过期，但「开了想撤」必须有退路：一个能开不能关的控制只是半个控制。
+pub async fn close_claim_window(
+    database: &Database,
+    station_ref: Uuid,
+) -> Result<(), StationError> {
+    if !station_schema_is_ready(database).await? {
+        return Err(StationError::SchemaUnavailable);
+    }
+    let affected = sqlx::query(
+        "UPDATE execution_station \
+         SET claim_window_opens_at = NULL, claim_window_expires_at = NULL \
+         WHERE station_ref = $1 AND retired_at IS NULL",
+    )
+    .bind(station_ref)
+    .execute(database.pool())
+    .await?
+    .rows_affected();
+    if affected == 0 {
+        return Err(StationError::UnknownStation);
+    }
+    Ok(())
+}
+
 /// 插件报到自述。全部是插件自报的兼容性事实（合同 §5），不含任何它能改变的配额或范围。
 #[derive(Debug, Clone)]
 pub struct InstallationCheckIn<'a> {
@@ -161,8 +186,13 @@ pub async fn check_in_installation(
             let superseded =
                 supersede_active_installation(&mut transaction, station_ref, installation_ref)
                     .await?;
-            insert_installation(&mut transaction, installation_ref, check_in, Some(station_ref))
-                .await?;
+            insert_installation(
+                &mut transaction,
+                installation_ref,
+                check_in,
+                Some(station_ref),
+            )
+            .await?;
             CheckInOutcome::Claimed {
                 installation_ref,
                 station_ref,
@@ -328,7 +358,10 @@ pub async fn read_station_overview(
     .await?;
 
     Ok((
-        station_rows.into_iter().map(StationOverview::from).collect(),
+        station_rows
+            .into_iter()
+            .map(StationOverview::from)
+            .collect(),
         unclaimed_rows
             .into_iter()
             .map(UnclaimedInstallation::from)
