@@ -269,6 +269,7 @@ fn router(state: LocalWebState) -> Router {
         .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))
         .route("/collection/targets", get(collection_targets))
+        .route("/collection/targets/new", post(collection_target_create))
         .route("/collection/operations", get(collection_operations))
         .route("/collection/attention", get(collection_attention))
         .route("/collection/tasks", get(collection_tasks))
@@ -1752,6 +1753,8 @@ async fn stylesheet() -> Response {
 struct CollectionParams {
     mode: Option<String>,
     drawer: Option<String>,
+    /// 观察目标的筛选。只改读取范围，不消耗任何平台访问。
+    filter: Option<String>,
 }
 
 /// DESIGN-006: the entry lands on the one surface whose contents expire. Arriving on the
@@ -1769,6 +1772,7 @@ async fn collection_targets(
         collection::Section::Targets,
         collection::OperationsMode::Now,
         params.drawer.as_deref(),
+        params.filter.as_deref(),
     );
     // Without a database the page still renders its honest empty state rather than an error:
     // "we cannot read targets right now" and "there are no targets" are different claims, and
@@ -1789,6 +1793,7 @@ async fn collection_operations(Query(params): Query<CollectionParams>) -> Html<S
         collection::Section::Operations,
         collection::OperationsMode::parse(params.mode.as_deref()),
         None,
+        None,
     ))
 }
 
@@ -1797,6 +1802,7 @@ async fn collection_attention() -> Html<String> {
         collection::Section::Attention,
         collection::OperationsMode::Now,
         None,
+        None,
     ))
 }
 
@@ -1804,6 +1810,7 @@ async fn collection_tasks() -> Html<String> {
     Html(collection::render(
         collection::Section::Tasks,
         collection::OperationsMode::Now,
+        None,
         None,
     ))
 }
@@ -1821,6 +1828,7 @@ async fn collection_runtime(
     let base = collection::render(
         collection::Section::Runtime,
         collection::OperationsMode::Now,
+        None,
         None,
     );
     // Without a database the page keeps its honest empty state: "we cannot read stations right
@@ -2099,6 +2107,82 @@ fn dispatch_payload(decision: &DispatchDecision) -> serde_json::Value {
         }
     }
     payload
+}
+
+#[derive(serde::Deserialize)]
+struct NewTargetForm {
+    target_kind: String,
+    identity: String,
+}
+
+/// COLLECTION-001 · 从页面加入一个观察目标。
+///
+/// 只写本机记录：不访问任何平台，也不会让任何采集开始。加入观察与「开始采集」是两件事，
+/// 后者仍然要走申请 → 授权 → 准入 → 工单 → 租约 → 闸门。
+async fn collection_target_create(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<NewTargetForm>,
+) -> Redirect {
+    let Some(database) = state.database.database() else {
+        return Redirect::to("/collection/targets?error=read_model_not_connected");
+    };
+    let raw = form.identity.trim();
+    // 创作者用主页链接就够了——平台 ID 藏在 URL 里，让人自己去扒是把工具的活推给使用者。
+    let identity = match form.target_kind.as_str() {
+        "creator" => creator_id_from(raw),
+        _ => Some(raw.to_owned()),
+    };
+    let Some(identity) = identity.filter(|value| !value.is_empty()) else {
+        return Redirect::to("/collection/targets?error=identity_unrecognised");
+    };
+    let intake = collection_intake::TargetIntake {
+        platform: linggan_contracts::OPEN_PLATFORM.to_owned(),
+        target_kind: form.target_kind.clone(),
+        identity,
+        // 同一个词的两种排序是两个观察面，因此关键词默认落在综合排序上并写明。
+        ranking: (form.target_kind == "keyword").then(|| "comprehensive".to_owned()),
+        // 粘进来的是链接时不要拿整条 URL 当名字：它又长又带追踪参数，在列表里认不出人。
+        // 真名要等采集回来才知道，在那之前留空比塞一条 URL 诚实。
+        display_name: (!raw.starts_with("http")).then(|| raw.to_owned()),
+        identity_facts: None,
+    };
+    let parsed_display_name = intake.display_name.clone();
+    match collection_intake::parse_intake(&intake) {
+        // 页面添加记 manual，不冒充插件推送——来源是「谁把它加进来的」这个事实。
+        Ok(parsed) => match store_pending_target(
+            database,
+            &parsed,
+            linggan_contracts::TargetSource::Manual,
+            parsed_display_name.as_deref(),
+            None,
+        )
+        .await
+        {
+            Ok(_) => Redirect::to("/collection/targets"),
+            Err(_) => Redirect::to("/collection/targets?error=store_failed"),
+        },
+        Err(_) => Redirect::to("/collection/targets?error=identity_unrecognised"),
+    }
+}
+
+/// 从小红书创作者主页链接里取出平台 ID。
+///
+/// 链接形如 `https://www.xiaohongshu.com/user/profile/<24 位十六进制>?...`。**平台 ID 才是
+/// 身份，URL 不是**：URL 会带追踪参数、会变形，同一个人两个链接会变成两个观察目标。
+/// 取不到就明说取不到，不拿整条 URL 凑数。
+fn creator_id_from(raw: &str) -> Option<String> {
+    let candidate = raw
+        .rsplit("/user/profile/")
+        .next()
+        .unwrap_or(raw)
+        .split(['?', '#', '/'])
+        .next()
+        .unwrap_or("")
+        .trim();
+    let looks_like_platform_id = candidate.len() >= 16
+        && candidate.len() <= 32
+        && candidate.chars().all(|c| c.is_ascii_hexdigit());
+    looks_like_platform_id.then(|| candidate.to_owned())
 }
 
 async fn collection_stylesheet() -> Response {

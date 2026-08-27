@@ -239,3 +239,15 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-target-retire { display:flex; }
 .c-station-failure { margin:11px 0 0; max-width:640px; padding:9px 12px; background:var(--v7-bad-soft); color:var(--v7-black); font-size:13px; line-height:1.7; }
 .c-station-failure b { margin-right:9px; padding:2px 7px; background:var(--v7-bad-fill); color:var(--v7-white); font:800 10px var(--lgi-font-mono); letter-spacing:.09em; }
+
+/* 加入观察：只写本机记录，不消耗平台访问，因此是真实可点的动作。 */
+.c-target-add { display:flex; align-items:center; gap:8px; }
+.c-target-add input { height:36px; min-width:280px; padding:0 11px; border:1px solid var(--v7-line-strong); border-radius:4px; background:var(--v7-white); color:var(--v7-black); font-size:13px; }
+.c-target-add select { height:36px; padding:0 9px; border:1px solid var(--v7-line-strong); border-radius:4px; background:var(--v7-white); color:var(--v7-black); font-size:13px; }
+.c-target-add .c-btn-primary { height:36px; }
+.c-target-add input:focus-visible,.c-target-add select:focus-visible { outline:2px solid var(--v7-black); outline-offset:2px; }
+/* 筛选页签是真链接，不再是禁用按钮。 */
+.c-tabs a { position:relative; height:46px; display:flex; align-items:center; padding:0 15px; color:var(--v7-muted); font-size:12px; font-weight:600; text-decoration:none; }
+.c-tabs a:hover { color:var(--v7-black); }
+.c-tabs a.c-on { color:var(--v7-black); }
+.c-tabs a.c-on::after { content:""; position:absolute; left:15px; right:15px; bottom:0; height:2px; background:var(--v7-red); }

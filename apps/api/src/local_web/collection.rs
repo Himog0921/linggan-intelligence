@@ -237,24 +237,22 @@ fn empty_state(kind: Empty<'_>, heading: &str, body: &str, notes: &[(&str, &str)
     )
 }
 
-const AUTHORISATION_NOTE: &str = "创建观察目标会消耗真实平台访问。项目已冻结「申请 → 授权 → 准入 → 工单」四段分责，其中任何一段都还没有实现，因此这个动作现在不存在，而不是点了没反应。";
-
 fn targets_body(drawer: Option<&str>) -> String {
     let empty = empty_state(
         // The only surface in Collection whose emptiness has a human in front of it.
         Empty::AwaitingYou {
-            action: "：批准第一条采集授权。四段责任链「申请 → 授权 → 准入 → 工单」都还没有实现，所以现在没有可点的按钮——这一步要先在项目里推进，不在这个页面上完成。",
+            action: "：用上方的「加入观察」把第一个创作者或关键词放进来。创作者直接粘主页链接即可，平台 ID 会自动认出来。",
         },
         "还没有观察目标",
-        "这里将列出长期观察的创作者与关键词。当前没有任何观察目标，原因不是列表为空，而是建立观察目标所需的采集授权链尚未存在。",
+        "这里将列出长期观察的创作者与关键词。加入观察只写本机记录，不访问任何平台，也不会让任何采集开始——两者是分开的两步。",
         &[
             (
                 "目标类型",
                 "只有创作者与关键词两类。首次深度建档是每个目标都会经历的生命周期能力，不是第三种类型。",
             ),
             (
-                "当前授权",
-                "项目目前只批准了一次性的首个 canary：小红书 · 关键词 ADHD · 综合排序 · 最多 20 张实际可见搜索卡片。它不是持续观察授权。",
+                "加进来之后",
+                "目标先停在「待决」。真正开始采集要另走一遍申请 → 授权 → 准入 → 工单 → 租约，最后还要人开闸——加入观察本身不消耗任何平台访问。",
             ),
             (
                 "不代表",
@@ -593,23 +591,55 @@ fn head_readout(section: Section) -> String {
 
 /// Targets and Operations carry their own second bar. Filter tabs stay disabled: with no
 /// targets there is nothing to filter, and pretending otherwise would be a fake control.
-fn second_bar(section: Section, mode: OperationsMode) -> String {
+/// 观察目标的筛选。
+///
+/// 这些页签此前一律 disabled，理由是「没有目标就没有可筛的」。但目标现在真的能建了，
+/// 继续禁用就变成了「有东西却不让看」。改为真链接：筛选只改读取范围，不消耗任何平台访问。
+fn target_filter_tabs(active: Option<&str>) -> String {
+    const FILTERS: &[(&str, &str)] = &[
+        ("", "全部"),
+        ("creator", "创作者"),
+        ("keyword", "关键词"),
+        ("archiving", "建档中"),
+        ("monitoring", "巡逻中"),
+    ];
+    FILTERS
+        .iter()
+        .map(|(value, label)| {
+            let current = active.unwrap_or("");
+            let class = if current == *value {
+                " class=\"c-on\""
+            } else {
+                ""
+            };
+            let href = if value.is_empty() {
+                "/collection/targets".to_owned()
+            } else {
+                format!("/collection/targets?filter={value}")
+            };
+            format!(r#"<a{class} href="{href}">{label}</a>"#)
+        })
+        .collect()
+}
+
+fn second_bar(section: Section, mode: OperationsMode, filter: Option<&str>) -> String {
     match section {
         Section::Targets => format!(
             r#"<div class="c-toolbar">
-          <div class="c-tabs">
-            <button type="button" class="c-on" disabled aria-disabled="true">全部</button>
-            <button type="button" disabled aria-disabled="true">创作者</button>
-            <button type="button" disabled aria-disabled="true">关键词</button>
-            <button type="button" disabled aria-disabled="true">建档中</button>
-            <button type="button" disabled aria-disabled="true">巡逻中</button>
-          </div>
+          <div class="c-tabs">{target_filters}</div>
           <div class="c-actions">
-            <span class="c-gate" title="{note}">需要采集授权</span>
-            <button class="c-btn" type="button" disabled aria-disabled="true">＋ 新建观察目标</button>
+            <form class="c-target-add" method="post" action="/collection/targets/new">
+              <select name="target_kind" aria-label="目标类型">
+                <option value="creator">创作者</option>
+                <option value="keyword">关键词</option>
+              </select>
+              <input name="identity" required maxlength="120"
+                     placeholder="创作者主页链接或 ID／关键词" />
+              <button class="c-btn-primary" type="submit">＋ 加入观察</button>
+            </form>
           </div>
         </div>"#,
-            note = AUTHORISATION_NOTE,
+            target_filters = target_filter_tabs(filter),
         ),
         Section::Operations => {
             let mut tabs = String::new();
@@ -656,7 +686,12 @@ fn crumb(section: Section, mode: OperationsMode) -> String {
     )
 }
 
-pub fn render(section: Section, mode: OperationsMode, drawer: Option<&str>) -> String {
+pub fn render(
+    section: Section,
+    mode: OperationsMode,
+    drawer: Option<&str>,
+    filter: Option<&str>,
+) -> String {
     let entry = meta(section);
     // DESIGN-003 header reclaim: this surface's own counts ride in the context row next to
     // the system state, so the page can start at its content instead of restating its name.
@@ -698,7 +733,7 @@ pub fn render(section: Section, mode: OperationsMode, drawer: Option<&str>) -> S
 "#,
         title = entry.title,
         rail = rail(section),
-        second_bar = second_bar(section, mode),
+        second_bar = second_bar(section, mode, filter),
         body = body(section, mode, drawer),
     )
 }
