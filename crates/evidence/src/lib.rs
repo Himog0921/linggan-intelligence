@@ -49,6 +49,6 @@ pub use producer_runtime::{
 };
 pub use receipt::{IngressOutcome, RejectionCode};
 pub use work_order_lease::{
-    DISPATCH_BLOCKED_REASON, IssuedLease, LeaseError, expire_lapsed_leases, issue_work_order_lease,
-    lease_schema_is_ready, release_work_order_lease,
+    DETAIL_STEP_DEFERRED_REASON, IssuedLease, LeaseError, expire_lapsed_leases,
+    issue_work_order_lease, lease_schema_is_ready, release_work_order_lease,
 };

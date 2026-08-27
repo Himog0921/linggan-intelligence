@@ -270,7 +270,7 @@ pub fn parse_producer_task_spec(
             .any(|value| !PACKAGE_KINDS.contains(&value.as_str()))
         || wire.comment_limit.is_null()
         || wire.acquire_media.is_null()
-        || wire.risk_policy != "local_trusted_user_initiated"
+        || !risk_policy_matches_source(&wire.source, &wire.risk_policy)
         || wire.stop_conditions.is_empty()
         || wire
             .stop_conditions
@@ -401,6 +401,28 @@ fn validate_coverage(coverage: &CoverageWire) -> Result<(), ProducerRuntimeContr
     Ok(())
 }
 
+/// 风险策略必须与来源配对，两者不是各自独立的字段。
+///
+/// `local_trusted_user_initiated` 的安全性来自「有人在键盘前，是他点的，他看着」。服务端
+/// 派发的任务没有这个人——它的边界来自租约。把两者混用会让追责链指向错误的人：查日志
+/// 时会以为某次访问是人手动触发的。
+///
+/// 配对是双向的。只放开「scheduled 可用服务端策略」而不禁止「manual 用服务端策略」，
+/// 插件就能自己铸造一份「服务端已授权」的任务，整条控制链被绕过。
+fn risk_policy_matches_source(source: &str, risk_policy: &str) -> bool {
+    match source {
+        "manual" => risk_policy == LOCAL_TRUSTED_RISK_POLICY,
+        "scheduled" => risk_policy == SERVER_LEASED_RISK_POLICY,
+        _ => false,
+    }
+}
+
+/// 人在键盘前发起、并且看着它跑。
+pub const LOCAL_TRUSTED_RISK_POLICY: &str = "local_trusted_user_initiated";
+
+/// 服务端在一份有到期时间的租约内授权。没有人在看，边界由租约与工单给定。
+pub const SERVER_LEASED_RISK_POLICY: &str = "server_authorized_leased";
+
 fn valid_target_for_capability(target: &Value, capability: &str) -> bool {
     let non_empty = |key: &str| {
         target
@@ -435,6 +457,41 @@ fn is_timestamp(value: &str) -> bool {
     // The boundary does not derive platform time.  It only requires the producer to submit an
     // explicit RFC3339 timestamp string; parsing/precision policy remains record-specific.
     value.contains('T') && value.ends_with('Z') && value.len() >= 20
+}
+
+#[cfg(test)]
+mod risk_policy_tests {
+    use super::*;
+
+    fn spec(source: &str, risk_policy: &str) -> String {
+        format!(
+            r#"{{"contractVersion":"linggan.producer.task-spec.v1",
+                "taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","source":"{source}",
+                "platform":"xhs","pageType":"profile","target":{{"authorExternalId":"a"}},
+                "capabilitiesRequested":["profile_discovery"],"maximumQuota":200,
+                "commentLimit":"not_requested","acquireMedia":"not_requested",
+                "riskPolicy":"{risk_policy}","stopConditions":["maximum_quota"]}}"#
+        )
+    }
+
+    #[test]
+    fn each_source_accepts_only_its_own_risk_policy() {
+        assert!(parse_producer_task_spec(&spec("manual", LOCAL_TRUSTED_RISK_POLICY)).is_ok());
+        assert!(parse_producer_task_spec(&spec("scheduled", SERVER_LEASED_RISK_POLICY)).is_ok());
+    }
+
+    #[test]
+    fn a_manual_task_cannot_mint_a_server_authorized_policy() {
+        // 若只放开「scheduled 可用服务端策略」而不禁止这一条，插件就能自签一份
+        // 「服务端已授权」的任务，整条授权链被绕过。
+        assert!(parse_producer_task_spec(&spec("manual", SERVER_LEASED_RISK_POLICY)).is_err());
+    }
+
+    #[test]
+    fn a_scheduled_task_cannot_claim_to_be_user_initiated() {
+        // 反向同样要挡：服务端派发的任务谎称「人在键盘前点的」，会让追责链指向错误的人。
+        assert!(parse_producer_task_spec(&spec("scheduled", LOCAL_TRUSTED_RISK_POLICY)).is_err());
+    }
 }
 
 #[cfg(test)]

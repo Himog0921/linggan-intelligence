@@ -929,6 +929,15 @@ async fn create_producer_task_route(State(state): State<LocalWebState>, body: By
             "task_spec_invalid",
         );
     };
+    // 派发任务只能由服务端的租约路径创建。少了这一条，插件就能自己提交一份
+    // `source: scheduled` 的任务——而 scheduled 必须配 `server_authorized_leased`，
+    // 于是它等于自签一份「服务端已授权」，整条授权链被绕过。
+    if task.source() == "scheduled" {
+        return local_producer_error(
+            axum::http::StatusCode::FORBIDDEN,
+            "scheduled_tasks_are_server_issued_only",
+        );
+    }
     match create_producer_task(database, &task).await {
         Ok(RuntimeTaskOutcome::Conflict { .. }) => {
             local_producer_error(axum::http::StatusCode::CONFLICT, "task_spec_conflict")
@@ -1935,9 +1944,9 @@ async fn collection_issue_lease(State(state): State<LocalWebState>, body: Bytes)
     match issue_work_order_lease(database, request.work_order_ref, minutes).await {
         Ok(lease) => Json(serde_json::json!({
             "leaseRef": lease.lease_ref,
-            "taskId": lease.task_id,
-            // 派发尚未接通，原因写在响应里而不是留给人去猜。
-            "dispatch": linggan_evidence::DISPATCH_BLOCKED_REASON,
+            "taskIds": lease.task_ids,
+            // 逐篇详情不在首批里，原因写在响应里而不是留给人去猜。
+            "detailStepDeferred": linggan_evidence::DETAIL_STEP_DEFERRED_REASON,
             "stationRef": lease.station_ref,
             "expiresAt": lease.expires_at,
             // A lease permits; nothing has run and no plugin has been told anything.
@@ -1962,6 +1971,7 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
         LeaseError::StationUnavailable => "station_unavailable",
         LeaseError::AuthorizationLapsed => "authorization_lapsed",
         LeaseError::RiskPaused { .. } => "risk_paused",
+        LeaseError::TaskSpecInvalid(_) => "task_spec_invalid",
         LeaseError::Database(_) => "lease_write_failed",
     }
 }

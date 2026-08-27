@@ -211,7 +211,14 @@ export function validateTaskSpec(spec = {}) {
   if (capability === 'batch_checkpoint') requireText('taskType');
   if (!(spec.commentLimit === 'not_requested' || (Number.isInteger(spec.commentLimit) && spec.commentLimit > 0))) throw new Error('task_spec_comment_limit_invalid');
   if (!['not_requested', 'slots', 'bytes'].includes(spec.acquireMedia)) throw new Error('task_spec_acquire_media_invalid');
-  if (spec.riskPolicy !== 'local_trusted_user_initiated') throw new Error('task_spec_risk_policy_invalid');
+  // 风险策略与来源必须配对，与服务端同一条规则：
+  // manual = 有人在键盘前点的、看着它跑；scheduled = 服务端在一份有到期时间的租约内授权。
+  // 双向校验缺一不可——只放开 scheduled 而不禁止 manual 用服务端策略，本插件就能自签
+  // 一份「服务端已授权」的任务。
+  const expectedRiskPolicy = spec.source === 'scheduled'
+    ? 'server_authorized_leased'
+    : 'local_trusted_user_initiated';
+  if (spec.riskPolicy !== expectedRiskPolicy) throw new Error('task_spec_risk_policy_invalid');
   if (!Array.isArray(spec.stopConditions) || spec.stopConditions.length === 0 || spec.stopConditions.some((value) => !STOP_CONDITIONS.has(value))) throw new Error('task_spec_stop_conditions_invalid');
   if (spec.maximumQuota !== null && (!Number.isInteger(spec.maximumQuota) || spec.maximumQuota <= 0)) throw new Error('task_spec_maximum_quota_invalid');
   return spec;

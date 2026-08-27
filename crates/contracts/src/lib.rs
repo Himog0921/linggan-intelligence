@@ -32,8 +32,9 @@ pub use local_producer::{
     parse_local_producer_attempt, parse_local_producer_submission, parse_local_task_spec,
 };
 pub use producer_runtime::{
-    CAPTURE_PACKAGE_VERSION, PRODUCER_ATTEMPT_VERSION, PRODUCER_TASK_SPEC_VERSION, ProducerAttempt,
-    ProducerCapturePackage, ProducerRuntimeContractError, ProducerSubmission, ProducerTaskSpec,
+    CAPTURE_PACKAGE_VERSION, LOCAL_TRUSTED_RISK_POLICY, PRODUCER_ATTEMPT_VERSION,
+    PRODUCER_TASK_SPEC_VERSION, ProducerAttempt, ProducerCapturePackage,
+    ProducerRuntimeContractError, ProducerSubmission, ProducerTaskSpec, SERVER_LEASED_RISK_POLICY,
     parse_producer_attempt, parse_producer_capture_package, parse_producer_submission,
     parse_producer_task_spec,
 };

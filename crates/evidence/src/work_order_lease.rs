@@ -6,8 +6,13 @@
 //! 授权在发租那一刻**重新检查**，而不是沿用准入时的结论：准入与执行之间隔着时间，
 //! 工位可能已经掉线、授权可能已经撤销、风险暂停可能已经生效。
 
+use linggan_contracts::{
+    PRODUCER_TASK_SPEC_VERSION, ProducerTaskSpec, SERVER_LEASED_RISK_POLICY,
+    parse_producer_task_spec,
+};
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -26,6 +31,8 @@ pub enum LeaseError {
     AuthorizationLapsed,
     #[error("a risk pause covering this work is in effect: {reason}")]
     RiskPaused { reason: String },
+    #[error("the task specification could not be built: {0}")]
+    TaskSpecInvalid(String),
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -40,8 +47,9 @@ pub async fn lease_schema_is_ready(database: &Database) -> Result<bool, sqlx::Er
 #[derive(Debug)]
 pub struct IssuedLease {
     pub lease_ref: Uuid,
-    /// 派发任务。目前恒为 `None`：租约是许可，派发是另一件事，而派发目前被合同挡着。
-    pub task_id: Option<Uuid>,
+    /// 本次发租生成的派发任务，按执行顺序排列。逐篇详情不在其中，原因见
+    /// `DETAIL_STEP_DEFERRED_REASON`。
+    pub task_ids: Vec<Uuid>,
     pub station_ref: Uuid,
     pub expires_at: String,
 }
@@ -93,17 +101,23 @@ pub async fn issue_work_order_lease(
     reject_if_station_unstaffed(&mut transaction, subject.station_ref).await?;
     reject_if_authorization_lapsed(&mut transaction, &subject).await?;
 
+    let tasks = expand_into_tasks(&subject)?;
+    for task in &tasks {
+        insert_scheduled_task(&mut transaction, task).await?;
+    }
+
     let lease_ref = Uuid::new_v4();
     let capture_identity = freeze_capture_identity(&subject);
     let expires_at: String = sqlx::query_scalar(
         "INSERT INTO collection_work_order_lease \
              (lease_ref, work_order_ref, station_ref, task_id, capture_identity, expires_at) \
-         VALUES ($1, $2, $3, NULL, $4, scope_001_now() + make_interval(mins => $5)) \
+         VALUES ($1, $2, $3, $4, $5, scope_001_now() + make_interval(mins => $6)) \
          RETURNING to_char(expires_at, 'YYYY-MM-DD HH24:MI')",
     )
     .bind(lease_ref)
     .bind(work_order_ref)
     .bind(subject.station_ref)
+    .bind(tasks.first().map(ProducerTaskSpec::task_id))
     .bind(&capture_identity)
     .bind(valid_for_minutes)
     .fetch_one(&mut *transaction)
@@ -114,8 +128,7 @@ pub async fn issue_work_order_lease(
         lease_ref,
         station_ref: subject.station_ref,
         expires_at,
-        // 派发任务尚未生成，原因见 `dispatch_is_blocked_by`。
-        task_id: None,
+        task_ids: tasks.iter().map(ProducerTaskSpec::task_id).collect(),
     })
 }
 
@@ -273,21 +286,105 @@ async fn reject_if_authorization_lapsed(
     Ok(())
 }
 
-/// 为什么租约还没有派发任务。
+/// 把一张工单展开成派发任务序列。
 ///
-/// 试着按插件自己的任务规格合同生成派发任务时，解析器挡住了两处——挡得对，记录在此，
-/// 免得下次有人绕开校验硬塞：
+/// **一个任务只能请求一个能力**（任务规格合同）。深度建档因此不是一个任务，而是一串：
+/// 先认清这个人是谁，再拿到他的作品清单，最后逐篇取详情。
 ///
-/// 1. **一个任务只能请求一个能力**（`capabilities_requested.len() != 1`）。因此创作者
-///    深度建档不是一个任务，而是一串：作者档案 → 作品清单 → 逐篇详情。这是合同「只负责
-///    这一小步做什么」的设计，不是缺陷；派发要先有把一张工单展开成任务序列的东西。
-/// 2. **`riskPolicy` 目前只接受 `local_trusted_user_initiated`**，而服务端派发的任务
-///    没有对应取值——尽管 `source` 早已允许 `scheduled`。合同在这里不自洽。把服务端派的
-///    任务谎报成「本机用户发起」，等于让追责链从第一步就指向错误的人。
-///
-/// 补一个取值是跨插件与服务端的合同变更，需要人来定，不由实现者顺手加上。
-pub const DISPATCH_BLOCKED_REASON: &str =
-    "派发未接通：任务规格合同要求一个任务只请求一个能力，且没有服务端派发对应的风险策略取值";
+/// 序列**不能一次性生成完**：`content_detail` 需要 `contentExternalId`，而那要等作品
+/// 清单跑完才知道。凭空造一批占位 id 会让「已派发 200 篇」变成一句假话。因此这里只生成
+/// 目标已经确定的步骤，逐篇详情等清单回来后再生成。
+fn expand_into_tasks(subject: &LeaseSubject) -> Result<Vec<ProducerTaskSpec>, LeaseError> {
+    let steps: Vec<(&str, Value, i32)> = match subject.target_kind.as_str() {
+        "creator" => vec![
+            // 作者档案只取一份，配额固定为 1，不受工单篇数上限影响。
+            (
+                "author_profile",
+                json!({ "authorExternalId": subject.identity_key }),
+                1,
+            ),
+            (
+                "profile_discovery",
+                json!({ "authorExternalId": subject.identity_key }),
+                subject.max_works,
+            ),
+        ],
+        _ => vec![(
+            "discovery_search",
+            json!({ "query": subject.identity_key }),
+            subject.max_works,
+        )],
+    };
+
+    steps
+        .into_iter()
+        .map(|(capability, target, quota)| build_task_spec(subject, capability, target, quota))
+        .collect()
+}
+
+/// 逐篇详情为什么不在发租时生成。
+pub const DETAIL_STEP_DEFERRED_REASON: &str =
+    "逐篇详情要等作品清单跑完才知道每篇的标识，发租时凭空造占位 id 会让「已派发」变成假话";
+
+fn build_task_spec(
+    subject: &LeaseSubject,
+    capability: &str,
+    target: Value,
+    quota: i32,
+) -> Result<ProducerTaskSpec, LeaseError> {
+    let page_type = match capability {
+        "author_profile" | "profile_discovery" => "profile",
+        "discovery_search" => "search_results",
+        _ => "note_detail",
+    };
+    let raw = json!({
+        "contractVersion": PRODUCER_TASK_SPEC_VERSION,
+        "taskId": Uuid::new_v4(),
+        // 服务端派发。它与 riskPolicy 必须配对，插件与服务端同一条规则。
+        "source": "scheduled",
+        "platform": subject.platform,
+        "pageType": page_type,
+        "target": target,
+        "capabilitiesRequested": [capability],
+        "maximumQuota": quota,
+        // 评论与媒体不在深度建档首片范围内。显式写 not_requested，而不是省略——
+        // 省略会让「没要」与「忘了写」无从分辨。
+        "commentLimit": "not_requested",
+        "acquireMedia": "not_requested",
+        "riskPolicy": SERVER_LEASED_RISK_POLICY,
+        // time_budget 就是租约：租约到期即止损，执行端不得自行放宽。
+        "stopConditions": ["maximum_quota", "surface_ended", "time_budget"],
+    });
+    parse_producer_task_spec(&raw.to_string())
+        .map_err(|error| LeaseError::TaskSpecInvalid(error.to_string()))
+}
+
+async fn insert_scheduled_task(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task: &ProducerTaskSpec,
+) -> Result<(), LeaseError> {
+    sqlx::query(
+        "INSERT INTO linggan_runtime_task \
+             (task_id, task_spec_hash, task_spec, source, platform, page_type) \
+         VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(task.task_id())
+    .bind(sha256_hex(&task.raw().to_string()))
+    .bind(task.raw())
+    .bind(task.source())
+    .bind(task.platform())
+    .bind(task.page_type())
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+fn sha256_hex(value: &str) -> String {
+    Sha256::digest(value.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
 
 /// 发租那一刻的执行身份。执行期间它不跟着目标或授权的后续变化漂移——事后追责依据的是
 /// 当时批准的那份。
