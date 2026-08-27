@@ -21,6 +21,8 @@ use uuid::Uuid;
 pub enum ProducerRuntimeError {
     #[error("producer runtime contract is invalid: {0}")]
     Contract(#[from] ProducerRuntimeContractError),
+    #[error("a scheduled task may only be created by the server's lease path")]
+    ScheduledTaskNotServerIssued,
     #[error("the producer task or attempt does not exist")]
     RoutingNotFound,
     #[error("the producer identity does not own the attempt")]
@@ -644,6 +646,16 @@ pub async fn create_producer_task(
     .fetch_optional(&mut *tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
+    // 派发任务只能由服务端的租约路径**创建**。少了这一条，插件就能自签一份
+    // `source: scheduled` 的任务——而 scheduled 必须配 `server_authorized_leased`，
+    // 等于自己发一张「服务端已授权」，整条授权链被绕过。
+    //
+    // 判据是「这个 task_id 此前不存在」，而不是「本次是不是插件来的」：**重放必须放行**，
+    // 插件执行服务端派下来的任务时会把同一份规格原样再送一次，那不是新造。一律拦掉会让
+    // 派发好的任务永远交不回结果。
+    if existing.is_none() && task.source() == "scheduled" {
+        return Err(ProducerRuntimeError::ScheduledTaskNotServerIssued);
+    }
     let outcome = match existing {
         Some(row) if row.get::<String, _>("task_spec_hash") == task_hash => {
             RuntimeTaskOutcome::Replay {

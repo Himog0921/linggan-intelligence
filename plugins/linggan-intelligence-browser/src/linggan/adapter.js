@@ -159,6 +159,56 @@ function stationStateMessage(state) {
   return '已报到。';
 }
 
+/// 派发路由同样由 /health 通告，插件不写死。
+export function dispatchClaimRouteFromHealth(health) {
+  const path = String(health?.routes?.dispatch?.claim || '').trim();
+  return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
+}
+
+/**
+ * 问 Linggan：现在有我能做的活吗？
+ *
+ * **只认 `mayExecute`**。服务端可能返回任务体的同时并不允许执行（例如闸门关着），
+ * 拿到任务体不等于拿到许可；凭「有没有 taskSpec」判断会绕过整条授权链。
+ */
+export async function claimLingganDispatch({
+  installKey,
+  origin = LINGGAN_LOCAL_ORIGIN,
+  fetchImpl = globalThis.fetch,
+  health = null,
+} = {}) {
+  if (typeof fetchImpl !== 'function') {
+    return { mayExecute: false, decision: 'unavailable', message: '浏览器当前无法连接 Linggan。' };
+  }
+  const route = dispatchClaimRouteFromHealth(health);
+  if (!route) {
+    return { mayExecute: false, decision: 'unavailable', message: 'Linggan 本机服务尚未开放任务派发。' };
+  }
+  try {
+    const response = await fetchImpl(`${origin}${route}`, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ installKey }),
+    });
+    if (!response.ok) {
+      return { mayExecute: false, decision: 'unavailable', message: `Linggan 返回 ${response.status}。` };
+    }
+    const body = await response.json().catch(() => null);
+    const mayExecute = body?.mayExecute === true;
+    return {
+      mayExecute,
+      decision: String(body?.decision || 'unknown'),
+      // 不许执行时**不把任务体带出去**：留着它只会让下游有机会「反正拿到了就跑」。
+      taskSpec: mayExecute ? body?.taskSpec ?? null : null,
+      leaseRef: mayExecute ? String(body?.leaseRef || '') : '',
+      message: String(body?.reason || ''),
+    };
+  } catch {
+    return { mayExecute: false, decision: 'unavailable', message: 'Linggan 本机服务当前不可访问。' };
+  }
+}
+
 export function createManualTaskSpec({ taskId = crypto.randomUUID() } = {}) {
   return createTaskSpec({
     taskId, source: 'manual', platform: 'xhs', pageType: 'search_results',

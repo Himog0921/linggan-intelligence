@@ -25,11 +25,11 @@ use linggan_evidence::{
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome,
     admit_media_blob, begin_media_upload, check_in_installation, claim_installation,
     claim_media_upload_finalize, close_claim_window, complete_media_upload, create_manual_task,
-    create_producer_task, decide_dispatch, grant_authorization, ingest_discovery_package,
-    issue_work_order_lease, list_targets_in_state, local_discovery_schema_is_ready,
-    local_producer_schema_is_ready, open_claim_window, producer_runtime_has_packages,
-    producer_runtime_schema_is_ready, read_discovery_library, read_local_media_blob,
-    read_media_upload_session, read_runtime_library, read_station_overview,
+    create_producer_task, decide_dispatch, dispatch_schema_is_ready, grant_authorization,
+    ingest_discovery_package, issue_work_order_lease, list_targets_in_state,
+    local_discovery_schema_is_ready, local_producer_schema_is_ready, open_claim_window,
+    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_discovery_library,
+    read_local_media_blob, read_media_upload_session, read_runtime_library, read_station_overview,
     record_media_download_failure, record_media_upload_chunk, register_station,
     release_media_upload_finalize, request_and_admit, retire_station, start_local_attempt,
     start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
@@ -211,7 +211,7 @@ fn collection_api_routes() -> Router<LocalWebState> {
         )
         .route(STATION_CHECK_IN_PATH, post(station_check_in))
         .route("/api/local/stations/claims", post(station_claim))
-        .route("/api/local/dispatch/claim", post(dispatch_claim))
+        .route(DISPATCH_CLAIM_PATH, post(dispatch_claim))
 }
 
 fn router(state: LocalWebState) -> Router {
@@ -349,6 +349,14 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
         }),
         _ => Value::Null,
     };
+    // 派发路由同样只在其 schema 就绪后通告。通告它不等于闸门开着——闸门是另一回事，
+    // 由 claim 的回答给出。
+    let dispatch_routes = match state.database.database() {
+        Some(database) if dispatch_schema_is_ready(database).await.unwrap_or(false) => json!({
+            "claim": DISPATCH_CLAIM_PATH
+        }),
+        _ => Value::Null,
+    };
     let local_producer_routes = if data_state == FULL_PRODUCER_RUNTIME_DATA_STATE
         && database_state == "READY"
         && schema_state == FULL_PRODUCER_RUNTIME_SCHEMA
@@ -374,7 +382,8 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
             "evidenceLibrary": "/corpus/evidence",
             "discoveryIngress": "/api/local/discovery-packages",
             "localProducer": local_producer_routes,
-            "station": station_routes
+            "station": station_routes,
+            "dispatch": dispatch_routes
         }
     }))
 }
@@ -937,16 +946,11 @@ async fn create_producer_task_route(State(state): State<LocalWebState>, body: By
             "task_spec_invalid",
         );
     };
-    // 派发任务只能由服务端的租约路径创建。少了这一条，插件就能自己提交一份
-    // `source: scheduled` 的任务——而 scheduled 必须配 `server_authorized_leased`，
-    // 于是它等于自签一份「服务端已授权」，整条授权链被绕过。
-    if task.source() == "scheduled" {
-        return local_producer_error(
+    match create_producer_task(database, &task).await {
+        Err(ProducerRuntimeError::ScheduledTaskNotServerIssued) => local_producer_error(
             axum::http::StatusCode::FORBIDDEN,
             "scheduled_tasks_are_server_issued_only",
-        );
-    }
-    match create_producer_task(database, &task).await {
+        ),
         Ok(RuntimeTaskOutcome::Conflict { .. }) => {
             local_producer_error(axum::http::StatusCode::CONFLICT, "task_spec_conflict")
         }
@@ -1867,6 +1871,9 @@ fn runtime_surface_with_error(code: &str) -> String {
 /// Where a plugin install reports in. Advertised through `/health` so the plugin never has to
 /// hardcode it.
 const STATION_CHECK_IN_PATH: &str = "/api/local/stations/installations";
+
+/// 工位来问「现在有我能做的活吗」。同样通过 `/health` 通告，插件不写死。
+const DISPATCH_CLAIM_PATH: &str = "/api/local/dispatch/claim";
 
 #[derive(serde::Deserialize)]
 struct StationForm {
