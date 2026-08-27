@@ -788,13 +788,16 @@ async fn insert_media_slots(
 
 /// 逐条决定记录的处置。
 ///
-/// `maximum_quota` 是任务给的篇数上限。**超出上限的记录一律隔离**，不进语料库：合同写着
-/// 「止损条件是工单的一部分，不允许执行端自行放宽」，而此前这个上限只在读投影里被拿来
-/// 显示，提交路径上没有任何校验——任务说「最多 10」，插件交 20，直接入库，页面还显示
-/// 一个「20/10」的自相矛盾读数。
+/// `maximum_quota` 是任务给的篇数上限。**超出上限的记录照常入库**，只是把「本条超出了
+/// 任务上限」记进 reason。
 ///
-/// 隔离而不是拒收整包，是因为材料本身是安全取得的：连坐已取得的前一段材料，正是合同
-/// 反复禁止的事。隔离让它留下来、可追溯，但**不成为观察面的一部分，也不占当日额度**。
+/// 这一点 2026-08-27 修正过一次：最初把超额记录判为隔离，Mog 指出那站不住——
+/// **配额是「平台访问」的闸门，不是「数据入库」的闸门**。材料既然已经取回，那次访问的
+/// 风险早已付掉；把它挡在语料库外并不能让访问没发生，只会让风险白付、情报白丢。真正
+/// 该拦的地方在访问之前：任务的止损条件、租约到期、领任务时的当日额度过滤。
+///
+/// 但**超额本身必须留痕**。它是「执行端没有守住给它的边界」的证据，而 Coverage 也不能
+/// 因此声称自己守住了那条边界。留痕的方式是 reason，不是把材料藏起来。
 async fn insert_record_dispositions(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
@@ -803,9 +806,7 @@ async fn insert_record_dispositions(
     for (ordinal, record) in package.records().iter().enumerate() {
         let beyond_quota = maximum_quota
             .is_some_and(|quota| i64::try_from(ordinal).unwrap_or(i64::MAX) >= i64::from(quota));
-        let (disposition, reason) = if beyond_quota {
-            ("quarantined", "beyond_task_maximum_quota")
-        } else if package.package_kind() == "media_slots" {
+        let (disposition, reason) = if package.package_kind() == "media_slots" {
             if media_slot_record(record).is_some() {
                 ("accepted_for_media_identity", "media_slot_contract_valid")
             } else {
@@ -831,9 +832,16 @@ async fn insert_record_dispositions(
             // A later type-specific admission can use this immutable record reference.
             ("retained_uninterpreted", "typed_evidence_admission_not_run")
         };
+        // 超额不改变处置，只改变理由：材料照常可用，而「它超出了任务上限」这件事留在
+        // 记录上，日后可查、可显示，不需要靠翻任务规格反推。
+        let reason = if beyond_quota {
+            format!("{reason}__beyond_task_maximum_quota")
+        } else {
+            reason.to_owned()
+        };
         sqlx::query("INSERT INTO linggan_runtime_record_disposition (package_ref,record_ordinal,disposition,reason) VALUES ($1,$2,$3,$4)")
             .bind(package.package_ref()).bind(i32::try_from(ordinal).expect("package record count is bounded"))
-            .bind(disposition).bind(reason).execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
+            .bind(disposition).bind(&reason).execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     }
     Ok(())
 }

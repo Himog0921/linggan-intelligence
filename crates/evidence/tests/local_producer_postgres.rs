@@ -661,10 +661,11 @@ fn runtime_submission() -> &'static str {
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
-async fn records_beyond_the_task_quota_are_quarantined_instead_of_silently_admitted() {
-    // 合同：止损条件是工单的一部分，不允许执行端自行放宽。此前 maximumQuota 只在读投影里
-    // 被拿来显示，提交路径上没有任何校验——任务说「最多 2」，插件交 4，全部入库，页面还
-    // 显示一个自相矛盾的「4/2」。
+async fn records_beyond_the_task_quota_still_enter_the_library_but_say_so() {
+    // 配额是「平台访问」的闸门，不是「数据入库」的闸门：材料既已取回，那次访问的风险
+    // 早已付掉，把它挡在语料库外并不能让访问没发生，只会让风险白付、情报白丢。
+    // 因此超额记录照常入库，但必须在 reason 上说明自己超出了任务上限——Coverage 不能
+    // 因为材料入库了就声称自己守住了那条边界。
     let database = proof_database("plugin_runtime_quota_bound").await;
     let task_id = uuid::Uuid::new_v4();
     let producer_instance_id = uuid::Uuid::new_v4();
@@ -724,25 +725,25 @@ async fn records_beyond_the_task_quota_are_quarantined_instead_of_silently_admit
         .await
         .expect("the package is still accepted");
 
-    let quarantined: i64 = sqlx::query_scalar(
+    // 四条全部进语料库：情报不因执行端越界而被丢掉。
+    let admitted: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_runtime_record_disposition \
-         WHERE package_ref = $1 AND disposition = 'quarantined' \
-           AND reason = 'beyond_task_maximum_quota'",
+         WHERE package_ref = $1 AND disposition = 'accepted_for_library_discovery'",
     )
     .bind(package_ref)
     .fetch_one(database.pool())
     .await
     .expect("dispositions are readable");
-    // 超出上限的两条被隔离，且理由具名——不是笼统的「不合格」。
-    assert_eq!(quarantined, 2);
+    assert_eq!(admitted, 4);
 
-    // 材料没有被连坐丢弃：整包仍然接纳，前两条走正常处置路径。
-    let total: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_runtime_record_disposition WHERE package_ref = $1",
+    // 但超出上限的两条必须自陈超额，否则日后没人能分辨哪些材料越过了当初的边界。
+    let flagged: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_runtime_record_disposition \
+         WHERE package_ref = $1 AND reason LIKE '%beyond_task_maximum_quota'",
     )
     .bind(package_ref)
     .fetch_one(database.pool())
     .await
     .expect("dispositions are readable");
-    assert_eq!(total, 4);
+    assert_eq!(flagged, 2);
 }
