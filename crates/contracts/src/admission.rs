@@ -10,6 +10,52 @@
 
 use std::fmt;
 
+/// What question 5 established about resources and risk.
+///
+/// The contract asks about worker, account, budget and risk headroom together. Keeping them
+/// as separate variants means a deferral names the one thing that is missing rather than
+/// reporting a vague "no capacity".
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Capacity {
+    /// A compatible station is in place, within budget, with no risk pause in effect.
+    Available { station_ref: String },
+    /// No station has a live plugin installation claimed to it.
+    NoStaffedStation,
+    /// A staffed station exists but none of them can do what this lane needs.
+    MissingCapabilities { missing: Vec<String> },
+    /// Every compatible station has already committed its day to other work orders.
+    DailyQuotaCommitted { quota: i32, committed: i32 },
+    /// A risk pause covering this platform or lane is still in effect.
+    RiskPaused { reason: String },
+}
+
+impl Capacity {
+    /// `None` when question 5 can be answered "yes".
+    pub fn blocking_reason(&self) -> Option<String> {
+        match self {
+            Self::Available { .. } => None,
+            Self::NoStaffedStation => {
+                Some("没有任何工位有在岗插件安装，因此没有可执行这次采集的资源".to_owned())
+            }
+            Self::MissingCapabilities { missing } => Some(format!(
+                "在岗工位都不具备本 lane 需要的能力：缺 {}",
+                missing.join("、")
+            )),
+            Self::DailyQuotaCommitted { quota, committed } => Some(format!(
+                "当天额度已被既有工单占满：每日 {quota} 篇，已下发 {committed} 篇"
+            )),
+            Self::RiskPaused { reason } => Some(format!("风险暂停仍在生效：{reason}")),
+        }
+    }
+
+    pub fn station_ref(&self) -> Option<&str> {
+        match self {
+            Self::Available { station_ref } => Some(station_ref),
+            _ => None,
+        }
+    }
+}
+
 /// The six questions, in the contract's order. The numbers are load-bearing: a decision that
 /// stops early records *which* question it stopped on.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -106,12 +152,9 @@ pub struct AdmissionFacts {
     pub in_flight_work_exists: bool,
     /// Has this target already been archived to the standard the purpose needs?
     pub need_already_satisfied: bool,
-    /// Whether the server can currently establish worker, account, budget and risk headroom.
-    ///
-    /// This is `false` for as long as no worker model exists. That is not a placeholder: the
-    /// contract forbids answering question 5 by assuming capacity, so until workers are a
-    /// real object the honest answer is "cannot be established".
-    pub capacity_is_establishable: bool,
+    /// What question 5 found. Not a bare boolean: a refusal that cannot say *which* resource
+    /// is missing sends the reader looking through four different subsystems.
+    pub capacity: Capacity,
     /// Whether stop conditions and coverage semantics can be written into the order.
     pub stop_conditions_expressible: bool,
 }
@@ -148,11 +191,11 @@ pub fn decide_admission(facts: &AdmissionFacts) -> AdmissionOutcome {
     };
 
     // 5 资源与风险
-    if !facts.capacity_is_establishable {
-        return AdmissionOutcome::DecisionRequired {
-            question: AdmissionQuestion::ResourcesAndRisk,
-            reason: "工位、账号与预算模型尚不存在，无法如实回答是否有资源与风险余量".to_owned(),
-        };
+    if let Some(reason) = facts.capacity.blocking_reason() {
+        // A missing resource is a *wait*, not a refusal: the request is legitimate and
+        // becomes runnable once the resource exists. Refusing would tell the caller to stop
+        // asking, which is the wrong instruction.
+        return AdmissionOutcome::Defer { reason };
     }
 
     // 6 可解释性
@@ -181,7 +224,9 @@ mod tests {
             authorization_ref: Some("auth-1".to_owned()),
             in_flight_work_exists: false,
             need_already_satisfied: false,
-            capacity_is_establishable: true,
+            capacity: Capacity::Available {
+                station_ref: "station-1".to_owned(),
+            },
             stop_conditions_expressible: true,
         }
     }
@@ -198,19 +243,17 @@ mod tests {
     }
 
     #[test]
-    fn an_unanswerable_question_is_named_not_swallowed() {
-        // Today's real state: no worker model exists, so question 5 cannot be answered. The
-        // contract requires saying so rather than assuming capacity.
+    fn a_missing_resource_defers_and_says_which_one() {
+        // Question 5 must name the missing resource: a bare "no capacity" sends the reader
+        // hunting through four subsystems.
         let outcome = decide_admission(&AdmissionFacts {
-            capacity_is_establishable: false,
+            capacity: Capacity::NoStaffedStation,
             ..facts()
         });
-        assert_eq!(
-            outcome.unanswered_question(),
-            Some(AdmissionQuestion::ResourcesAndRisk)
-        );
+        // A missing resource defers rather than refuses: the request stays legitimate and
+        // becomes runnable once a station is staffed.
+        assert_eq!(outcome.code(), "defer");
         assert!(!outcome.permits_work_order());
-        assert_eq!(outcome.code(), "decision_required");
     }
 
     #[test]
@@ -219,7 +262,7 @@ mod tests {
         // being rejected for lack of it.
         let outcome = decide_admission(&AdmissionFacts {
             need_already_satisfied: true,
-            capacity_is_establishable: false,
+            capacity: Capacity::NoStaffedStation,
             authorization_ref: None,
             ..facts()
         });
@@ -262,6 +305,37 @@ mod tests {
                 "{} must not permit a work order",
                 outcome.code()
             );
+        }
+    }
+
+    #[test]
+    fn each_capacity_gap_names_itself() {
+        // Every blocked variant must say which resource is missing, and the available one
+        // must block nothing.
+        assert!(
+            Capacity::Available {
+                station_ref: "s".to_owned()
+            }
+            .blocking_reason()
+            .is_none()
+        );
+        for capacity in [
+            Capacity::NoStaffedStation,
+            Capacity::MissingCapabilities {
+                missing: vec!["content_detail".to_owned()],
+            },
+            Capacity::DailyQuotaCommitted {
+                quota: 200,
+                committed: 200,
+            },
+            Capacity::RiskPaused {
+                reason: "演练".to_owned(),
+            },
+        ] {
+            let reason = capacity
+                .blocking_reason()
+                .expect("blocked capacity states a reason");
+            assert!(!reason.trim().is_empty());
         }
     }
 

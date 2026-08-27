@@ -189,15 +189,15 @@ pub async fn check_in_installation(
     let mut transaction = database.pool().begin().await?;
 
     // 同一个 install_key 且仍在岗 —— 插件只是又报了一次到。
-    let existing: Option<Uuid> = sqlx::query_scalar(
-        "SELECT installation_ref FROM plugin_installation \
+    let existing: Option<(Uuid, Option<Uuid>)> = sqlx::query_as(
+        "SELECT installation_ref, station_ref FROM plugin_installation \
          WHERE install_key = $1 AND superseded_at IS NULL \
          ORDER BY first_seen_at DESC LIMIT 1 FOR UPDATE",
     )
     .bind(check_in.install_key)
     .fetch_optional(&mut *transaction)
     .await?;
-    if let Some(installation_ref) = existing {
+    if let Some((installation_ref, station_ref)) = existing {
         sqlx::query(
             "UPDATE plugin_installation \
              SET last_seen_at = scope_001_now(), plugin_version = $2, capabilities = $3 \
@@ -208,18 +208,36 @@ pub async fn check_in_installation(
         .bind(&check_in.capabilities)
         .execute(&mut *transaction)
         .await?;
+        // 已归位的安装只更新心跳。**未归位的必须再试一次认领**：它上次报到时窗口可能
+        // 还关着，之后人才把窗口打开。不重试的话，这个安装会永远停在待认领——而使用者
+        // 看到的是「窗口开着，插件却始终不归位」，无从判断哪里出了问题。
+        if station_ref.is_none()
+            && let Some(open_station) = open_claim_station(&mut transaction).await?
+        {
+            let superseded =
+                supersede_active_installation(&mut transaction, open_station, installation_ref)
+                    .await?;
+            sqlx::query(
+                "UPDATE plugin_installation \
+                 SET station_ref = $2, claim_kind = 'claim_window', claimed_at = scope_001_now() \
+                 WHERE installation_ref = $1",
+            )
+            .bind(installation_ref)
+            .bind(open_station)
+            .execute(&mut *transaction)
+            .await?;
+            transaction.commit().await?;
+            return Ok(CheckInOutcome::Claimed {
+                installation_ref,
+                station_ref: open_station,
+                superseded,
+            });
+        }
         transaction.commit().await?;
         return Ok(CheckInOutcome::Heartbeat { installation_ref });
     }
 
-    // 找一台窗口开着的工位。窗口是人开的，过期自动关上。
-    let open_station: Option<Uuid> = sqlx::query_scalar(
-        "SELECT station_ref FROM execution_station \
-         WHERE retired_at IS NULL AND claim_window_expires_at > scope_001_now() \
-         ORDER BY claim_window_opens_at DESC LIMIT 1 FOR UPDATE",
-    )
-    .fetch_optional(&mut *transaction)
-    .await?;
+    let open_station = open_claim_station(&mut transaction).await?;
 
     let installation_ref = Uuid::new_v4();
     let outcome = match open_station {
@@ -247,6 +265,19 @@ pub async fn check_in_installation(
     };
     transaction.commit().await?;
     Ok(outcome)
+}
+
+/// 找一台认领窗口还开着的工位。窗口是人开的，过期自动关上。
+async fn open_claim_station(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT station_ref FROM execution_station \
+         WHERE retired_at IS NULL AND claim_window_expires_at > scope_001_now() \
+         ORDER BY claim_window_opens_at DESC LIMIT 1 FOR UPDATE",
+    )
+    .fetch_optional(&mut **transaction)
+    .await
 }
 
 /// 人手动把一个待认领的安装指到某台工位。窗口关着时走这条路。

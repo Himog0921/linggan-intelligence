@@ -345,7 +345,7 @@ async function reportStationStatus() {
     installKey,
     pluginVersion,
     browserLabel: browserLabel(),
-    capabilities: ['discovery_search'],
+    capabilities: await declaredCapabilities(),
     health: readiness.health,
   });
   return {
@@ -357,6 +357,39 @@ async function reportStationStatus() {
     installationRef: checkIn.installationRef || '',
     authorizationMessage: checkIn.message,
   };
+}
+
+/**
+ * 这次安装真正能做的事。
+ *
+ * 取值来自 Linggan 执行路径**已经实现**的能力，不是为了通过服务端检查而编的名字：
+ * 每一项都对应 `producerRuntime.js` 里一个真实的打包函数。报一个没实现的能力，只会让
+ * 工单派下来之后在执行阶段失败。
+ *
+ * `xhs.pageAccess` 是另一类事实：它说明浏览器已授予小红书站点权限。用
+ * `chrome.permissions.contains` 直接查，不需要新增任何权限。
+ */
+const IMPLEMENTED_CAPABILITIES = [
+  'discovery_search',
+  'profile_discovery',
+  'author_profile',
+  'content_detail',
+  'comments',
+  'replies',
+  'media_slots',
+];
+
+async function declaredCapabilities() {
+  const capabilities = [...IMPLEMENTED_CAPABILITIES];
+  try {
+    const granted = await chrome.permissions.contains({
+      origins: ['https://*.xiaohongshu.com/*'],
+    });
+    if (granted) capabilities.push('xhs.pageAccess');
+  } catch {
+    // 查不到就不报。少报一项只是让准入更保守，多报一项会让工单在执行时才失败。
+  }
+  return capabilities;
 }
 
 /// 浏览器标签只用来让人在页面上认出是哪台机器，不作为身份。

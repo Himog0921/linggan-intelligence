@@ -178,6 +178,8 @@ migrate() {
   apply_migration_once "0005_collection_observation_target" "$project_root/database/migrations/0005_collection_observation_target.sql"
   apply_migration_once "0006_collection_acquisition_chain" "$project_root/database/migrations/0006_collection_acquisition_chain.sql"
   apply_migration_once "0007_execution_station" "$project_root/database/migrations/0007_execution_station.sql"
+  apply_migration_once "0008_collection_risk_pause" "$project_root/database/migrations/0008_collection_risk_pause.sql"
+  apply_migration_once "0009_work_order_station" "$project_root/database/migrations/0009_work_order_station.sql"
 }
 
 case "$command_name" in

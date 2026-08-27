@@ -9,7 +9,9 @@ mod discovery;
 mod local_producer;
 mod producer_runtime;
 
-pub use admission::{AdmissionFacts, AdmissionOutcome, AdmissionQuestion, decide_admission};
+pub use admission::{
+    AdmissionFacts, AdmissionOutcome, AdmissionQuestion, Capacity, decide_admission,
+};
 pub use capture::{
     CapturePackage, CaptureRecord, ContractError, Coverage, KnownSetTarget, KnownTargetOutcome,
     KnownTargetResult, PackageRouting, RemainingScope, Terminal, TerminalReason,

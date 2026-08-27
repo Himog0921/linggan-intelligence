@@ -6,7 +6,7 @@
 //! Nothing here reaches a platform. A Work Order row is a written instruction; execution is
 //! a later stage that does not exist yet.
 
-use linggan_contracts::{AdmissionFacts, AdmissionOutcome, decide_admission};
+use linggan_contracts::{AdmissionFacts, AdmissionOutcome, Capacity, decide_admission};
 use linggan_storage_postgres::Database;
 use serde_json::json;
 use uuid::Uuid;
@@ -164,6 +164,11 @@ pub async fn request_and_admit(
     .await?;
 
     let work_order_ref = if outcome.permits_work_order() {
+        // 准入认定了哪台工位，工单就记哪台。没有这一步，每日额度算不出来。
+        let station_ref = facts
+            .capacity
+            .station_ref()
+            .and_then(|value| Uuid::parse_str(value).ok());
         Some(
             write_work_order(
                 &mut transaction,
@@ -171,6 +176,7 @@ pub async fn request_and_admit(
                 target_ref,
                 lane,
                 authorization_ref,
+                station_ref,
             )
             .await?,
         )
@@ -216,18 +222,131 @@ async fn gather_facts(
     .fetch_one(&mut **transaction)
     .await?;
 
+    let capacity = establish_capacity(transaction, platform, target_kind, lane).await?;
+
     Ok(AdmissionFacts {
         authorization_ref: authorization_ref.map(|value| value.to_string()),
         in_flight_work_exists: in_flight,
         // No archive exists yet, so no need can already be satisfied. This becomes a real
         // query once archiving produces results.
         need_already_satisfied: false,
-        // Question 5 cannot be answered while no worker, account or budget model exists. The
-        // contract forbids answering it by assuming capacity, so the honest value is false.
-        // This flips to a real check when workers become an object — not before.
-        capacity_is_establishable: false,
+        capacity,
         stop_conditions_expressible: true,
     })
+}
+
+/// What each lane actually needs a plugin to be able to do.
+///
+/// These strings are the plugin's own capability vocabulary, taken from what the Linggan
+/// browser path really implements — not invented for this check. Requiring a capability the
+/// plugin never declares would make the gate unpassable; inventing a name the plugin happens
+/// to echo back would make it theatre.
+fn required_capabilities(target_kind: &str, lane: &str) -> &'static [&'static str] {
+    match (target_kind, lane) {
+        // Deep archiving a creator means: who they are, which works exist, and each work.
+        ("creator", "deep_archive") => &["author_profile", "profile_discovery", "content_detail"],
+        ("keyword", "deep_archive") => &["discovery_search", "content_detail"],
+        ("creator", _) => &["profile_discovery"],
+        _ => &["discovery_search"],
+    }
+}
+
+/// Answer question 5 against real rows: staffed station, capabilities, budget, risk pause.
+///
+/// Asked in that order on purpose. A missing station makes the capability question moot, and
+/// reporting "quota exhausted" when nothing is even installed would send the reader to the
+/// wrong place.
+async fn establish_capacity(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    platform: &str,
+    target_kind: &str,
+    lane: &str,
+) -> Result<Capacity, sqlx::Error> {
+    // 风险暂停优先：正在停的时候，工位是否充足并不重要。
+    let pause: Option<String> = sqlx::query_scalar(
+        "SELECT reason FROM collection_risk_pause \
+         WHERE lifted_at IS NULL \
+           AND (platform IS NULL OR platform = $1) \
+           AND (lane IS NULL OR lane = $2) \
+         ORDER BY paused_at DESC LIMIT 1",
+    )
+    .bind(platform)
+    .bind(lane)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(reason) = pause {
+        return Ok(Capacity::RiskPaused { reason });
+    }
+
+    // 在岗 = 已登记且未停用的工位上，有一个未被取代的插件安装。
+    let staffed: Vec<(Uuid, serde_json::Value, i32)> = sqlx::query_as(
+        "SELECT s.station_ref, i.capabilities, s.daily_work_quota \
+         FROM execution_station s \
+         JOIN plugin_installation i \
+           ON i.station_ref = s.station_ref AND i.superseded_at IS NULL \
+         WHERE s.retired_at IS NULL \
+         ORDER BY s.registered_at",
+    )
+    .fetch_all(&mut **transaction)
+    .await?;
+    if staffed.is_empty() {
+        return Ok(Capacity::NoStaffedStation);
+    }
+
+    let required = required_capabilities(target_kind, lane);
+    let mut missing_for_all: Option<Vec<String>> = None;
+    let mut quota_blocked: Option<(i32, i32)> = None;
+
+    for (station_ref, capabilities, quota) in staffed {
+        let declared: Vec<String> = capabilities
+            .as_array()
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(|value| value.as_str().map(str::to_owned))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let missing: Vec<String> = required
+            .iter()
+            .filter(|needed| !declared.iter().any(|have| have == *needed))
+            .map(|needed| (*needed).to_owned())
+            .collect();
+        if !missing.is_empty() {
+            // 记下缺得最少的那台，报给人看的应该是「最接近可用的工位差什么」。
+            if missing_for_all
+                .as_ref()
+                .is_none_or(|current| missing.len() < current.len())
+            {
+                missing_for_all = Some(missing);
+            }
+            continue;
+        }
+
+        // 预算算的是**已下发的承诺**，不是已经采到的数量——本项目还没有任何执行。
+        // 按承诺算才拦得住「一天下发三张 200 篇的工单」这种超发。
+        let committed: Option<i64> = sqlx::query_scalar(
+            "SELECT sum(w.max_works)::bigint FROM collection_work_order w \
+             WHERE w.station_ref = $1 AND w.created_at >= date_trunc('day', scope_001_now())",
+        )
+        .bind(station_ref)
+        .fetch_one(&mut **transaction)
+        .await?;
+        let committed = i32::try_from(committed.unwrap_or(0)).unwrap_or(i32::MAX);
+        if committed >= quota {
+            quota_blocked = Some((quota, committed));
+            continue;
+        }
+        return Ok(Capacity::Available {
+            station_ref: station_ref.to_string(),
+        });
+    }
+
+    if let Some(missing) = missing_for_all {
+        return Ok(Capacity::MissingCapabilities { missing });
+    }
+    let (quota, committed) = quota_blocked.unwrap_or((0, 0));
+    Ok(Capacity::DailyQuotaCommitted { quota, committed })
 }
 
 async fn max_works_for(
@@ -284,19 +403,22 @@ async fn write_work_order(
     target_ref: Uuid,
     lane: &str,
     authorization_ref: Option<Uuid>,
+    station_ref: Option<Uuid>,
 ) -> Result<Uuid, sqlx::Error> {
     let work_order_ref = Uuid::new_v4();
     let max_works = max_works_for(transaction, authorization_ref).await?;
     sqlx::query(
         "INSERT INTO collection_work_order \
-             (work_order_ref, decision_ref, target_ref, lane, max_works, stop_conditions) \
-         VALUES ($1, $2, $3, $4, $5, $6)",
+             (work_order_ref, decision_ref, target_ref, lane, max_works, station_ref, \
+              stop_conditions) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
     .bind(work_order_ref)
     .bind(decision_ref)
     .bind(target_ref)
     .bind(lane)
     .bind(max_works)
+    .bind(station_ref)
     .bind(json!({
         "maximumQuota": max_works,
         // A quota's shortfall is not a set of real objects (contract §3.1), so the order
