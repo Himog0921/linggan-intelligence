@@ -9,6 +9,7 @@
 //! nothing about archiving, authorisation or any capture ever running (INV-36).
 
 use linggan_evidence::ObservationTarget;
+use serde_json::Value;
 
 /// The marker `collection.rs` leaves in the Targets page so the read side can find the empty
 /// state without re-parsing the whole document.
@@ -63,27 +64,89 @@ fn target_row(target: &ObservationTarget) -> String {
         "manual" => "手动添加",
         other => other,
     };
-    // A target that arrived without a display name is shown by its identity key rather than a
-    // filled-in placeholder: we would rather look bare than invent a name.
+    // 没有真名时用平台标识，而不是编一个占位名。
     let name = target
         .display_name
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(&target.identity_key);
+    let facts = target.identity_facts.as_ref();
 
     format!(
         r#"<div class="c-target-row">
                 <div class="c-target-kind">{kind}</div>
-                <div class="c-target-name"><b>{name}</b><span>{identity}</span></div>
-                <div class="c-target-meta"><span>{source}</span><span>{stored}</span></div>
+                {avatar}
+                <div class="c-target-name"><b>{name}</b><span>{identity}</span>{bio}</div>
+                <div class="c-target-meta">{counts}<span>{source}</span><span>{stored}</span></div>
                 <div class="c-target-state">待决</div>
               </div>"#,
         kind = escape(kind_label),
+        avatar = avatar_markup(facts),
         name = escape(name),
-        identity = escape(&target.identity_key),
+        identity = escape(&handle_or_identity(target)),
+        bio = bio_markup(facts),
+        counts = count_markup(facts),
         source = escape(source_label),
         stored = escape(&target.first_stored_at),
     )
+}
+
+/// 头像。没采到就不占位——一个灰方块会让人以为「这个博主没有头像」，而事实是还没采过。
+fn avatar_markup(facts: Option<&Value>) -> String {
+    let Some(url) = fact_text(facts, "avatar") else {
+        return String::new();
+    };
+    format!(
+        r#"<img class="c-target-avatar" src="{url}" alt="" loading="lazy" referrerpolicy="no-referrer" />"#,
+        url = escape(&url),
+    )
+}
+
+/// 小红书号优先，没采到就退回平台 ID。小红书号是人能对上的那个，平台 ID 不是。
+fn handle_or_identity(target: &ObservationTarget) -> String {
+    fact_text(target.identity_facts.as_ref(), "redId")
+        .map(|red_id| format!("小红书号 {red_id}"))
+        .unwrap_or_else(|| target.identity_key.clone())
+}
+
+fn bio_markup(facts: Option<&Value>) -> String {
+    let Some(description) = fact_text(facts, "description") else {
+        return String::new();
+    };
+    format!(
+        r#"<span class="c-target-bio">{description}</span>"#,
+        description = escape(&description),
+    )
+}
+
+/// 粉丝、关注、赞藏。
+///
+/// **只显示采到的**：缺的字段整个不出现，而不是显示「粉丝 0」。能力登记表明确记着
+/// `userPageData` 可能整个拿不到，那时粉丝数是真的「不知道」——把未知显示成 0，会让人
+/// 据此判断这个博主不值得看。
+fn count_markup(facts: Option<&Value>) -> String {
+    [
+        ("fans", "粉丝"),
+        ("follows", "关注"),
+        ("interactions", "赞藏"),
+    ]
+    .iter()
+    .filter_map(|(key, label)| {
+        facts
+            .and_then(|value| value.get(*key))
+            .and_then(Value::as_i64)
+            .map(|count| format!("<span>{label} {count}</span>"))
+    })
+    .collect()
+}
+
+fn fact_text(facts: Option<&Value>, key: &str) -> Option<String> {
+    facts
+        .and_then(|value| value.get(key))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 fn escape(value: &str) -> String {

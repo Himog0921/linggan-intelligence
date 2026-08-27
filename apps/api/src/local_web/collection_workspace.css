@@ -251,3 +251,8 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-tabs a:hover { color:var(--v7-black); }
 .c-tabs a.c-on { color:var(--v7-black); }
 .c-tabs a.c-on::after { content:""; position:absolute; left:15px; right:15px; bottom:0; height:2px; background:var(--v7-red); }
+
+/* 观察目标的博主资料。只显示采到的字段——缺的整个不出现，不占位。 */
+.c-target-row:has(.c-target-avatar) { grid-template-columns:72px 40px minmax(0,1fr) auto 64px; }
+.c-target-avatar { width:40px; height:40px; border-radius:50%; object-fit:cover; background:var(--v7-sunken); }
+.c-target-bio { display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-muted); font-size:12px; }

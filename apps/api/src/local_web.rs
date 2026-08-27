@@ -26,11 +26,11 @@ use linggan_evidence::{
     admit_media_blob, begin_media_upload, check_in_installation, claim_installation,
     claim_media_upload_finalize, close_claim_window, complete_lease_for_task,
     complete_media_upload, create_manual_task, create_producer_task, decide_dispatch,
-    dispatch_schema_is_ready, grant_authorization, ingest_discovery_package,
-    issue_work_order_lease, list_targets_in_state, local_discovery_schema_is_ready,
-    local_producer_schema_is_ready, open_claim_window, producer_runtime_has_packages,
-    producer_runtime_schema_is_ready, read_discovery_library, read_local_media_blob,
-    read_media_upload_session, read_runtime_library, read_station_overview,
+    dispatch_schema_is_ready, enrich_target_from_author_profile, grant_authorization,
+    ingest_discovery_package, issue_work_order_lease, list_targets, list_targets_in_state,
+    local_discovery_schema_is_ready, local_producer_schema_is_ready, open_claim_window,
+    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_discovery_library,
+    read_local_media_blob, read_media_upload_session, read_runtime_library, read_station_overview,
     record_media_download_failure, record_media_upload_chunk, register_station,
     release_media_upload_finalize, request_and_admit, retire_station, start_local_attempt,
     start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
@@ -1125,6 +1125,16 @@ async fn submit_producer_package_route(
             //
             // 手动采集不带租约，此处返回 None，不是错误。
             let _ = complete_lease_for_task(database, submission.task_id()).await;
+            // 采到的博主资料回填观察目标：采集与观察目标此前是两条不相交的线，人在列表里
+            // 看着一串十六进制 ID，认不出那是谁。
+            let package = submission.capture_package();
+            let _ = enrich_target_from_author_profile(
+                database,
+                package.package_kind(),
+                package.platform(),
+                package.records(),
+            )
+            .await;
             Json(outcome).into_response()
         }
         Err(ProducerRuntimeError::RoutingNotFound) => {
@@ -1792,7 +1802,7 @@ async fn collection_targets(
     let Some(database) = state.database.database() else {
         return Html(base);
     };
-    match list_targets_in_state(database, LifecycleState::PendingDecision, 200).await {
+    match list_targets(database, params.filter.as_deref(), 200).await {
         Ok(targets) => Html(collection_targets_view::render_stored_targets(
             &base, &targets,
         )),

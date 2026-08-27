@@ -131,6 +131,42 @@ async fn read_target_by_identity(
 }
 
 /// Targets in one lifecycle state, newest first.
+/// 列出观察目标，可按类型或生命周期筛选。
+///
+/// **不按状态硬筛**：观察目标列表就是「我在长期看谁」，一个已建档、正在巡检的博主当然
+/// 还在看。此前列表只读 `pending_decision`，于是目标一开始建档就从列表里消失——那把
+/// 「观察目标列表」做成了「待办列表」，两者不是一回事。
+pub async fn list_targets(
+    database: &Database,
+    filter: Option<&str>,
+    limit: i64,
+) -> Result<Vec<ObservationTarget>, CollectionTargetError> {
+    if !collection_target_schema_is_ready(database).await? {
+        return Err(CollectionTargetError::SchemaUnavailable);
+    }
+    // 筛选值来自页面页签：两个是目标类型，两个是生命周期。它们筛的是不同的列，因此
+    // 分开传，而不是把一个字符串塞进一列去猜。
+    let (kind, state) = match filter.unwrap_or("") {
+        "creator" | "keyword" => (filter, None),
+        value @ ("archiving" | "monitoring") => (None, Some(value)),
+        _ => (None, None),
+    };
+    let rows = sqlx::query_as::<_, TargetRow>(
+        "SELECT target_ref, platform, target_kind, identity_key, display_name, identity_facts, \
+                source, lifecycle_state, first_stored_at::text \
+         FROM collection_observation_target \
+         WHERE ($1::text IS NULL OR target_kind = $1) \
+           AND ($2::text IS NULL OR lifecycle_state = $2) \
+         ORDER BY first_stored_at DESC LIMIT $3",
+    )
+    .bind(kind)
+    .bind(state)
+    .bind(limit)
+    .fetch_all(database.pool())
+    .await?;
+    Ok(rows.into_iter().map(ObservationTarget::from).collect())
+}
+
 pub async fn list_targets_in_state(
     database: &Database,
     state: LifecycleState,

@@ -12,6 +12,7 @@ mod patrol_scheduler;
 mod producer_runtime;
 mod receipt;
 mod station_read;
+mod target_enrichment;
 mod work_order;
 mod work_order_lease;
 
@@ -21,7 +22,7 @@ pub use acquisition_chain::{
 };
 pub use collection_target::{
     CollectionTargetError, ObservationTarget, StoreOutcome, collection_target_schema_is_ready,
-    list_targets_in_state, store_pending_target, transition_target,
+    list_targets, list_targets_in_state, store_pending_target, transition_target,
 };
 pub use dispatch::{DispatchDecision, DispatchError, decide_dispatch, dispatch_schema_is_ready};
 pub use execution_station::{
@@ -58,7 +59,8 @@ pub use receipt::{IngressOutcome, RejectionCode};
 pub use station_read::{
     StationOverview, UnclaimedInstallation, read_station_overview, station_daily_note_usage,
 };
+pub use target_enrichment::enrich_target_from_author_profile;
 pub use work_order_lease::{
-    DETAIL_STEP_DEFERRED_REASON, IssuedLease, LeaseError, complete_lease_for_task, expire_lapsed_leases,
-    issue_work_order_lease, lease_schema_is_ready, release_work_order_lease,
+    DETAIL_STEP_DEFERRED_REASON, IssuedLease, LeaseError, complete_lease_for_task,
+    expire_lapsed_leases, issue_work_order_lease, lease_schema_is_ready, release_work_order_lease,
 };
