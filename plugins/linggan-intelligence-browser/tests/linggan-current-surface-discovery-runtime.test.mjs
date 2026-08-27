@@ -22,7 +22,7 @@ function createVisibleCard(noteId, top, left) {
   };
 }
 
-test('the current-surface handler reads only fixture cards and queues without the TDZ', async () => {
+test('the target-driven discovery handler preserves its requested quota when it queues a short result', async () => {
   const original = {
     chrome: globalThis.chrome,
     document: globalThis.document,
@@ -75,14 +75,16 @@ test('the current-surface handler reads only fixture cards and queues without th
 
   try {
     await import(`../src/linggan/background.js?current-surface-tdz=${Date.now()}`);
-    const { readCurrentVisibleSurfaceNotes } = await import('../src/platforms/xhs/noteCollector.js');
     const { createLingganContentRuntime } = await import('../src/linggan/contentRuntimeAdapter.js');
     const { createXhsPageController } = await import('../src/content/xhsPageController.js');
 
     const runtime = createLingganContentRuntime({ platform: 'xhs' });
     const controller = createXhsPageController({
       assertPluginAuthorized: async () => ({ mode: 'LOCAL_TRUSTED', authorized: true }),
-      discoverSurface: ({ maximumQuota }) => readCurrentVisibleSurfaceNotes('.feeds-container', maximumQuota),
+      discoverSurface: ({ maximumQuota }) => ({
+        cards: cards.map((card, index) => ({ noteId: `65ee6fe6000000000000000${String(index + 1).padStart(1, '0')}`, title: 'fixture', url: '/explore/fixture' })),
+        discoveryMeta: { stopReason: 'bottom_confirmed', expectedCount: maximumQuota },
+      }),
       submitDiscovery: (visibleCards, context) => runtime.submitDiscovery(visibleCards, context),
       isContextValid: () => true,
       showToast: (message, level) => toasts.push({ message, level }),
@@ -98,12 +100,12 @@ test('the current-surface handler reads only fixture cards and queues without th
     });
 
     await controller.handleButtonClick({
-      target: { closest: (selector) => selector === '.lgboom-btn' ? { dataset: { action: 'discoverSurface', params: '{"mode":"search"}' } } : null },
+      target: { closest: (selector) => selector === '.lgboom-btn' ? { dataset: { action: 'discoverSurface', params: '{"mode":"search","maximumQuota":50}' } } : null },
     });
 
-    assert.equal(selectorCalls, 1, 'the reader must query exactly the declared current-surface selector once');
+    assert.equal(selectorCalls, 0, 'the controller delegates loading to the target-driven collector');
     assert.equal(toasts.some(({ level }) => level === 'error'), false, 'the TDZ must not become a page error');
-    assert.equal(toasts.at(-1)?.message, '已读取当前页面 2 条，待本机 Linggan 交付');
+    assert.match(toasts.at(-1)?.message || '', /已采集 2\/50 条，bottom_confirmed/);
     assert.equal(localFetches >= 0, true, 'the synthetic test has no platform request');
   } finally {
     globalThis.chrome = original.chrome;
@@ -113,11 +115,12 @@ test('the current-surface handler reads only fixture cards and queues without th
   }
 });
 
-test('the current-surface handler remains isolated from legacy discovery and deeper collectors', () => {
+test('the target-driven handler uses DOM loading, not legacy snapshots or comment readers', () => {
   const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
   const start = content.indexOf('discoverSurface: async');
   const end = content.indexOf('\n  submitDiscovery:', start);
   const currentSurface = content.slice(start, end);
-  assert.match(currentSurface, /readCurrentVisibleSurfaceNotes/);
-  assert.doesNotMatch(currentSurface, /discoverSurfaceNotesFromBestSource|discoverWithScroll|requestXhs(?:Search|Profile)NotesSnapshot|ensureXhsCommentApiBridge|Batch(?:Note|Comment)Controller|collectNote|collectComments|collectAuthor|acquireMedia/);
+  assert.match(currentSurface, /discoverWithScroll/);
+  assert.match(currentSurface, /expectedCount/);
+  assert.doesNotMatch(currentSurface, /discoverSurfaceNotesFromBestSource|requestXhs(?:Search|Profile)NotesSnapshot|ensureXhsCommentApiBridge|Batch(?:Note|Comment)Controller|collectNote|collectComments|collectAuthor|acquireMedia/);
 });

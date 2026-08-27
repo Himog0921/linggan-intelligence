@@ -19,6 +19,22 @@ const MAX_MEDIA_BYTES = 256 * 1024 * 1024;
 const MEDIA_CHUNK_BYTES = 1024 * 1024;
 let flushingOutbox = null;
 
+const PLATFORM_MEDIA_HOST_SUFFIXES = Object.freeze([
+  '.xhscdn.com', '.xiaohongshu.com', '.byteimg.com', '.bytevcloudcdn.com',
+  '.douyinpic.com', '.douyinstatic.com', '.douyinvod.com', '.amemv.com',
+]);
+
+function allowedMediaCandidateUri(value) {
+  try {
+    const uri = new URL(String(value || '').trim());
+    if (uri.protocol !== 'https:' || uri.username || uri.password || uri.port) return false;
+    const hostname = uri.hostname.toLowerCase();
+    return PLATFORM_MEDIA_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix));
+  } catch {
+    return false;
+  }
+}
+
 async function producerInstanceId() {
   const stored = await chrome.storage.local.get(PRODUCER_INSTANCE_KEY);
   const current = String(stored[PRODUCER_INSTANCE_KEY] || '').trim();
@@ -176,8 +192,10 @@ async function fetchMediaCandidate(candidateUris = []) {
   let lastError = new Error('media_candidate_unavailable');
   for (const candidate of candidateUris.slice(0, 6)) {
     try {
+      if (!allowedMediaCandidateUri(candidate)) throw new Error('media_candidate_origin_not_allowed');
       const response = await fetch(candidate, { credentials: 'omit' });
       if (!response.ok) throw new Error(`media_download_http_${response.status}`);
+      if (!allowedMediaCandidateUri(response.url || candidate)) throw new Error('media_redirect_origin_not_allowed');
       const mimeType = String(response.headers.get('content-type') || '').split(';')[0].trim();
       if (!mimeType.startsWith('image/') && !mimeType.startsWith('video/') && !mimeType.startsWith('audio/')) throw new Error('media_mime_not_allowed');
       const declaredSize = Number(response.headers.get('content-length'));
@@ -259,11 +277,15 @@ async function queueMediaSlots({ taskSpec, capturePackage } = {}) {
       ? record.observation.candidateUris
       : [record?.observation?.externalUri];
     const observationRef = String(record?.observationRef || '').trim();
-    if (!candidateUris.some((value) => String(value || '').trim()) || !observationRef) continue;
+    const allowedCandidates = candidateUris
+      .map((value) => String(value || '').trim())
+      .filter(allowedMediaCandidateUri)
+      .slice(0, 6);
+    if (allowedCandidates.length === 0 || !observationRef) continue;
     await localMediaOutbox.enqueue({
       uploadId: crypto.randomUUID(), slotSubmissionId: queued.submissionId,
       mediaObservationRef: observationRef,
-      candidateUris: candidateUris.map((value) => String(value || '').trim()).filter(Boolean).slice(0, 6),
+      candidateUris: allowedCandidates,
     });
   }
   void flushLocalOutbox();

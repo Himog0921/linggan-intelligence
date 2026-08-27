@@ -197,12 +197,17 @@ export function buildXhsBatchNotesProgressPatch({ noteList = [], collected = [],
 export function buildXhsBatchCommentsRunPatch({ noteList = [], results = [] } = {}) {
   const targetIds = (Array.isArray(noteList) ? noteList : []).map((item) => text(item?.noteId)).filter(Boolean);
   const resultMap = new Map((results || []).map((item) => [text(item?.noteId), item]));
-  const succeeded = targetIds.filter((id) => Number(resultMap.get(id)?.total || 0) > 0);
+  // A page that explicitly has no public comments completed successfully.  Collection success
+  // is whether the target was read and reported, never whether a non-zero payload happened.
+  const succeeded = targetIds.filter((id) => {
+    const result = resultMap.get(id);
+    return result && !text(result.error);
+  });
   return { itemsPlanned: targetIds.length, itemsSucceeded: succeeded.length, itemsFailed: targetIds.length - succeeded.length, totalComments: (results || []).reduce((sum, item) => sum + (Number(item?.total) || 0), 0), targetIds, contentIds: succeeded.map((id) => `xhs_${id}`), failedTargets: targetIds.filter((id) => !succeeded.includes(id)).map((noteId) => ({ noteId, error: text(resultMap.get(noteId)?.error || 'no_result') })) };
 }
 export function buildXhsBatchCommentsProgressPatch({ noteList = [], results = [], processedCount = 0 } = {}) {
   const targetIds = (noteList || []).map((item) => text(item?.noteId)).filter(Boolean); const processed = targetIds.slice(0, Math.max(0, Number(processedCount) || 0));
-  return { ...buildXhsBatchCommentsRunPatch({ noteList: processed.map((noteId) => ({ noteId })), results }), ...buildBatchResumeCheckpoint({ targetIds, processedCount, resultStatuses: (results || []).filter((item) => processed.includes(text(item?.noteId))).map((item) => ({ targetId: text(item?.noteId), ok: Number(item?.total || 0) > 0, totalComments: Number(item?.total || 0), error: text(item?.error) })) }), itemsPlanned: targetIds.length, targetIds };
+  return { ...buildXhsBatchCommentsRunPatch({ noteList: processed.map((noteId) => ({ noteId })), results }), ...buildBatchResumeCheckpoint({ targetIds, processedCount, resultStatuses: (results || []).filter((item) => processed.includes(text(item?.noteId))).map((item) => ({ targetId: text(item?.noteId), ok: !text(item?.error), totalComments: Number(item?.total || 0), error: text(item?.error) })) }), itemsPlanned: targetIds.length, targetIds };
 }
 
 function douyinTarget(item = {}) { return text(item?.awemeId || item?.platformContentId || item?.videoId || item?.noteId || item?.contentId).replace(/^(dy_|douyin_)/i, ''); }

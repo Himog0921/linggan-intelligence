@@ -26,6 +26,26 @@ function taskFor(platform, capability, target, options = {}) {
   });
 }
 
+function positiveCommentLimit(value) {
+  const limit = Number(value);
+  return Number.isInteger(limit) && limit > 0 ? limit : 'not_requested';
+}
+
+export function commentTaskInstruction(noteId, maxTotal) {
+  const limited = positiveCommentLimit(maxTotal);
+  return {
+    commentLimit: limited,
+    target: {
+      contentExternalId: String(noteId || ''),
+      commentScope: limited === 'not_requested' ? 'all_public_until_natural_end' : 'maximum_quota',
+      ...(limited === 'not_requested' ? {} : { requestedCommentLimit: limited }),
+    },
+    stopConditions: limited === 'not_requested'
+      ? ['manual_stop', 'collector_complete', 'time_budget', 'risk_budget']
+      : ['manual_stop', 'maximum_quota', 'collector_complete', 'time_budget', 'risk_budget'],
+  };
+}
+
 export function createLingganContentRuntime({ platform } = {}) {
   async function submit(taskSpec, capturePackage) {
     const response = await sendToBackground(LINGGAN_RUNTIME_ACTION.SUBMIT_CAPTURE_PACKAGE, { taskSpec, capturePackage }, { timeoutMs: 5000 });
@@ -34,15 +54,20 @@ export function createLingganContentRuntime({ platform } = {}) {
   }
 
   return {
-    async submitDiscovery(cards, { query = '', authorExternalId = '', surface = 'current_visible_surface', pageFacts = undefined } = {}) {
+    async submitDiscovery(cards, {
+      query = '', authorExternalId = '', surface = 'current_visible_surface', pageFacts = undefined,
+      maximumQuota = undefined,
+    } = {}) {
       const packageValue = packageDiscovery({ platform, cards, query, authorExternalId, surface, pageFacts });
       const capability = authorExternalId ? 'profile_discovery' : 'discovery_search';
       const target = authorExternalId
         ? { authorExternalId: String(authorExternalId), surface }
         : { query: String(query || ''), surface };
       return submit(taskFor(platform, capability, target, {
-        maximumQuota: Math.max(1, packageValue.records.length),
-        stopConditions: ['current_surface_read_once', 'maximum_quota'],
+        // The requested target is execution intent.  A short page result must never silently
+        // rewrite it to the actual count returned by the collector.
+        maximumQuota: Math.max(1, Number(maximumQuota) || packageValue.records.length),
+        stopConditions: ['manual_stop', 'maximum_quota', 'surface_ended', 'time_budget', 'risk_budget'],
       }), packageValue);
     },
     async submitContentDetail(note) {
@@ -51,14 +76,15 @@ export function createLingganContentRuntime({ platform } = {}) {
     },
     async submitComments(result, noteId, settings = {}) {
       const packageValue = packageComments({ platform, result, noteId });
+      const instruction = commentTaskInstruction(noteId, settings.maxTotal);
       const comments = await submit(
-        taskFor(platform, 'comments', { contentExternalId: String(noteId || '') }, { commentLimit: settings.maxTotal ?? 'not_requested' }),
+        taskFor(platform, 'comments', instruction.target, instruction),
         packageValue,
       );
       const repliesPackage = packageReplies({ platform, result, noteId });
       if (repliesPackage.records.length === 0) return comments;
       const replies = await submit(
-        taskFor(platform, 'replies', { contentExternalId: String(noteId || '') }, { commentLimit: settings.maxTotal ?? 'not_requested' }),
+        taskFor(platform, 'replies', instruction.target, instruction),
         repliesPackage,
       );
       return { ...comments, replies };

@@ -4,6 +4,13 @@ import { collectComments } from './commentCollector.js';
 import { buildXhsDetailCaptureReceipt, normalizeXhsDetailCommentLimit } from './captureReceipt.js';
 import { collectNote } from './noteCollector.js';
 
+function deliveryState(deliveries = []) {
+  const states = deliveries.map((value) => String(value?.delivery || '')).filter(Boolean);
+  if (states.length > 0 && states.every((state) => state === 'acknowledged')) return 'acknowledged';
+  if (states.some((state) => state === 'rejected' || state === 'terminal')) return 'partial_delivery_failure';
+  return 'pending';
+}
+
 // This composes one user-visible collection intent. Delivery still uses the established
 // detail/media/comment lanes, but all three are produced only after the single package has an
 // explicit comment-coverage receipt.
@@ -66,6 +73,19 @@ export async function collectXhsNoteDetailPackage(wd = window, options = {}) {
       noteId: note.noteId,
       options: { maxTotal: commentLimit, maxSubComments: options.maxSubComments, commentDepthMode: options.commentDepthMode },
     });
+    const state = deliveryState([note.lingganDelivery, note.lingganMediaDelivery, commentResult.lingganDelivery]);
+    note.lingganDetailPackageDelivery = {
+      state,
+      lanes: {
+        content: note.lingganDelivery?.delivery || 'unknown',
+        mediaSlots: note.lingganMediaDelivery?.delivery || 'unknown',
+        comments: commentResult.lingganDelivery?.delivery || 'unknown',
+      },
+      message: state === 'acknowledged'
+        ? '正文、媒体观察和默认评论窗口均已接纳'
+        : '正文、媒体观察和默认评论窗口已分别进入本机交付队列',
+    };
+    await noteStore.upsert(note);
   }
 
   return { note, comments: commentResult.comments, commentResult, receipt };

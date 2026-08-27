@@ -1,7 +1,7 @@
 # PLUGIN-REHOME-001 · 旧插件迁入与运行边界映射
 
 > 状态: Draft migration map（LOCAL_TRUSTED adapter 已接入合成回传）
-> 最后核对: 2026-08-25
+> 最后核对: 2026-08-27
 > 适用范围: `linggan-boom@8a00cc1` / `v2.0.91` 到 Linggan 自有浏览器包的第一条垂直迁入边界
 > 事实来源: `plugins/linggan-intelligence-browser/` 当前 source、Manifest、Webpack active entries 和 isolation check
 > 冲突时以谁为准: 当前可构建 source 和实际运行证明；旧插件只说明迁入来源，不是 Linggan 运行规格
@@ -27,6 +27,15 @@
 | 旧数据同步 / fallback | 已从当前 Dashboard 动作中切断 | “提交到 Linggan（待接通）”只显示原因，不会提交 | 不存在对旧工作台的兼容提交 |
 | cookies、媒体下载、定时、网络规则、通知权限 | 从 Manifest 移除 | 不会请求这些旧能力的浏览器权限 | 所有需要这些能力的未来接入必须重新评审 |
 | 详情、评论、媒体、批量、抖音、自动化 | 代码与 UI 位置保留，运行动作均等待 adapter | 点击会得到具体未接通说明 | 未访问平台、未下载媒体、未写入 Linggan |
+
+## Issue #78 的当前执行边界（覆盖上表中旧的 XHS 静态入口描述）
+
+| XHS 能力 | 当前处置 | 不构成的承诺 |
+|---|---|---|
+| 搜索/博主页发现 | 以 DOM 主动加载、去重和目标数为执行边界；记录实际数与停止原因 | 不调用旧 API snapshot，不宣称平台全量或调度已接通 |
+| 标准详情 | 详情、媒体槽位观察和最多 30 条评论组成逻辑结果，三条交付 lane 分别可见 | 单一 lane 的接纳不代表全部接纳；不下载媒体原件 |
+| 单篇/批量评论 | 深采可明确设定上限或“公开自然结束”，批量逐篇 checkpoint、空态成功、失败隔离 | 不做内容分析、不绕过验证、不中断时不生成真实 Evidence |
+| 本机恢复与媒体 | 使用独立 `LingganIntelligenceBrowserLocalStaging`；媒体仅允许受限 HTTPS 平台域名 | 不复用 `LingganBoomDB`，不允许任意页面消息/本机 URL 作为下载来源 |
 
 ## 新旧运行路径对照
 
