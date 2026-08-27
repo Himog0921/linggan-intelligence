@@ -140,7 +140,7 @@ Mog 已于 2026-08-24 确认：首批真实 Canary **包含媒体**，并且图�
 ## capture-control-contract: 真实插件前必须冻结哪些调度责任？
 
 Blocked by: first-producer-canary
-Status: open
+Status: resolved
 Type: Research
 Decision owner: 工程架构团队；只有真实账号、风险或资源边界扩大时再交 Mog
 
@@ -149,6 +149,10 @@ Decision owner: 工程架构团队；只有真实账号、风险或资源边界�
 结合旧内容工作台事故与新系统 Acquisition Admission，新 Linggan 在真实插件开工前最少必须冻结哪些 Demand、Work、Attempt、Lease、Reconcile、Package、ACK、Coverage 和恢复责任？
 
 ### Answer
+
+形成草案 [`capture-control-contract.md`](../../architecture/capture-control-contract.md)。它不复制旧 `CollectionTask`、pending fallback 或旧表结构，而是冻结：Research Intent / Evidence Need / Acquisition Authorization / Admission / Work Order / Attempt / Lease / Package / ACK / Evidence / Observation 的分责；known set 与 maximum quota 的 Coverage 语义；Discovery、详情、评论与媒体 lane；Evidence 复用、去重和有意复观测；有限工位/账号/预算/风险控制与执行前重估；partial success、replay、conflict、retry、recovery；以及“采集结果可用”与“Claim 有资格”之间的硬边界。
+
+Mog 已选择含受限媒体的 Canary 方案 B。因此本票与 `media-lifecycle-contract` 必须在任何真实媒体 lane 之前一起通过独立审查和集成；草案本身不授权真实账号、频率、配额、预算、风控阈值、恢复政策、样本、下载、存储、OCR/转录或实现。未决定项明确保留为 `DECISION_REQUIRED`，并将由新的真实 Canary SCOPE 处理。
 
 
 Asset target: `docs/architecture/capture-control-contract.md`
