@@ -35,6 +35,9 @@ pub struct ObservationTarget {
     pub source: String,
     pub lifecycle_state: String,
     pub first_stored_at: String,
+    /// 巡检是否开着。与 `lifecycle_state` 分开：一个目标可以「已建档」但被人暂停巡检，
+    /// 压成一个状态就分不清「没在跑」是因为暂停还是因为还没建档。
+    pub monitoring_enabled: bool,
 }
 
 /// Whether a store call created a target or found the one already there.
@@ -151,9 +154,9 @@ pub async fn list_targets(
         value @ ("archiving" | "monitoring") => (None, Some(value)),
         _ => (None, None),
     };
-    let rows = sqlx::query_as::<_, TargetRow>(
+    let rows = sqlx::query_as::<_, ListedTargetRow>(
         "SELECT target_ref, platform, target_kind, identity_key, display_name, identity_facts, \
-                source, lifecycle_state, first_stored_at::text \
+                source, lifecycle_state, first_stored_at::text, monitoring_enabled \
          FROM collection_observation_target \
          WHERE ($1::text IS NULL OR target_kind = $1) \
            AND ($2::text IS NULL OR lifecycle_state = $2) \
@@ -164,8 +167,31 @@ pub async fn list_targets(
     .bind(limit)
     .fetch_all(database.pool())
     .await?;
-    Ok(rows.into_iter().map(ObservationTarget::from).collect())
+    Ok(rows
+        .into_iter()
+        .map(|row| ObservationTarget {
+            monitoring_enabled: row.9,
+            ..ObservationTarget::from((
+                row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8,
+            ))
+        })
+        .collect())
 }
+
+/// 列表比其它查询多读一列巡检开关，因此单独一个行类型——把它加进共用的 `TargetRow`
+/// 会打断另外两个只选九列的查询。
+type ListedTargetRow = (
+    Uuid,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<Value>,
+    String,
+    String,
+    Option<String>,
+    bool,
+);
 
 pub async fn list_targets_in_state(
     database: &Database,
@@ -321,6 +347,8 @@ impl From<TargetRow> for ObservationTarget {
             source: row.6,
             lifecycle_state: row.7,
             first_stored_at: row.8.unwrap_or_default(),
+            // 只有列表查询读它；其它入口保持 false，由调用方按需另读。
+            monitoring_enabled: false,
         }
     }
 }

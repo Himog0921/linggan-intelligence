@@ -32,9 +32,9 @@ use linggan_evidence::{
     producer_runtime_has_packages, producer_runtime_schema_is_ready, read_discovery_library,
     read_local_media_blob, read_media_upload_session, read_runtime_library, read_station_overview,
     record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, request_and_admit, retire_station, start_local_attempt,
-    start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
-    submit_producer_package,
+    release_media_upload_finalize, request_and_admit, retire_station, set_target_monitoring,
+    start_local_attempt, start_producer_attempt, station_schema_is_ready, store_pending_target,
+    submit_local_package, submit_producer_package, target_monitoring_enabled,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -271,6 +271,10 @@ fn router(state: LocalWebState) -> Router {
         .route("/collection", get(collection_entry))
         .route("/collection/targets", get(collection_targets))
         .route("/collection/targets/new", post(collection_target_create))
+        .route(
+            "/collection/targets/monitoring",
+            post(collection_target_toggle_monitoring),
+        )
         .route("/collection/operations", get(collection_operations))
         .route("/collection/attention", get(collection_attention))
         .route("/collection/tasks", get(collection_tasks))
@@ -1804,7 +1808,9 @@ async fn collection_targets(
     };
     match list_targets(database, params.filter.as_deref(), 200).await {
         Ok(targets) => Html(collection_targets_view::render_stored_targets(
-            &base, &targets,
+            &base,
+            &targets,
+            params.filter.as_deref(),
         )),
         Err(_) => Html(base),
     }
@@ -2205,6 +2211,33 @@ fn creator_id_from(raw: &str) -> Option<String> {
         && candidate.len() <= 32
         && candidate.chars().all(|c| c.is_ascii_hexdigit());
     looks_like_platform_id.then(|| candidate.to_owned())
+}
+
+#[derive(serde::Deserialize)]
+struct MonitoringForm {
+    target_ref: uuid::Uuid,
+}
+
+/// COLLECTION-001 · 切换一个观察目标的巡检开关。
+///
+/// 只写本机记录：打开巡检不等于立刻采集——调度器仍要按间隔到期、准入仍要过六问、
+/// 额度与风险暂停仍然管用。
+async fn collection_target_toggle_monitoring(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<MonitoringForm>,
+) -> Redirect {
+    if let Some(database) = state.database.database() {
+        let enabled = target_monitoring_enabled(database, form.target_ref)
+            .await
+            .unwrap_or(false);
+        if set_target_monitoring(database, form.target_ref, !enabled, None)
+            .await
+            .is_err()
+        {
+            return Redirect::to("/collection/targets?error=monitoring_toggle_failed");
+        }
+    }
+    Redirect::to("/collection/targets")
 }
 
 async fn collection_stylesheet() -> Response {

@@ -117,6 +117,21 @@ async fn dispatch_one_patrol(database: &Database, target_ref: Uuid) -> Result<Op
     Ok(Some(()))
 }
 
+/// 读一个目标当前的巡检开关。切换是「读了再写反」，不是盲写——盲写会让两个入口同时
+/// 操作时互相覆盖。
+pub async fn target_monitoring_enabled(
+    database: &Database,
+    target_ref: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT monitoring_enabled FROM collection_observation_target WHERE target_ref = $1",
+    )
+    .bind(target_ref)
+    .fetch_optional(database.pool())
+    .await
+    .map(|value| value.unwrap_or(false))
+}
+
 /// 开或关一个目标的巡检，并设定间隔。
 ///
 /// 间隔由人给定或由建档数据算出（产品规则 §4.2：发布间隔中位数 ÷ 2），上下限
