@@ -23,6 +23,7 @@ pub fn render_stations(
     base: &str,
     stations: &[StationOverview],
     unclaimed: &[UnclaimedInstallation],
+    error: Option<&str>,
 ) -> String {
     let Some(open) = base.find(EMPTY_STATE_OPEN) else {
         return base.to_owned();
@@ -65,6 +66,7 @@ pub fn render_stations(
     let console = format!(
         r#"<section class="c-station-console">
               <h2>工位</h2>
+              {failure}
               <p class="c-station-lede">工位由你登记，插件安装由插件自报。重装插件换的是安装，不是工位——名字、每日额度与授权都挂在工位上，不会被重装清掉。</p>
               <p class="c-station-note">{note}</p>
               <div class="c-station-forms">
@@ -77,6 +79,7 @@ pub fn render_stations(
                 {window_form}
               </div>
             </section>"#,
+        failure = failure_markup(error),
         note = NO_PLATFORM_ACCESS_NOTE,
         window_form = claim_window_form(stations),
     );
@@ -94,6 +97,30 @@ pub fn render_stations(
         "{before}{console}{sections}{pending}{after}",
         before = &base[..open],
         after = &base[close..],
+    )
+}
+
+/// 上一次动作失败时说明原因。
+///
+/// 失败必须看得见。跳转回来却什么都不说，会让人以为动作成功了——那比「点了没反应」更糟，
+/// 因为它会让人以为系统里有一台并不存在的工位。
+fn failure_markup(error: Option<&str>) -> String {
+    let Some(code) = error else {
+        return String::new();
+    };
+    let explanation = match code {
+        "station_rejected" => {
+            "工位没有登记成功。最常见的原因是名字与某台在册工位重复——名字要能让你一眼认出是哪台机器，因此不允许重名。"
+        }
+        "claim_window_rejected" => "认领窗口没有打开。该工位可能已被停用。",
+        "close_window_rejected" => "认领窗口没有关闭。它可能已经自己过期了。",
+        "retire_rejected" => "工位没有停用成功。它可能已经处于停用状态。",
+        "claim_rejected" => "认领没有成功。这台工位可能已有在岗安装，或该安装已被取代。",
+        _ => "上一次动作没有完成。",
+    };
+    format!(
+        r#"<p class="c-station-failure"><b>没有完成</b>{explanation}</p>"#,
+        explanation = escape(explanation),
     )
 }
 
@@ -280,7 +307,7 @@ mod tests {
         // is now a real action, so leaving that text in place would be a lie.
         let base =
             format!("before{EMPTY_STATE_OPEN}这一栏不需要你做任何事{EMPTY_STATE_CLOSE}after");
-        let rendered = render_stations(&base, &[], &[]);
+        let rendered = render_stations(&base, &[], &[], None);
         assert!(rendered.contains("/collection/runtime/stations"));
         assert!(!rendered.contains("这一栏不需要你做任何事"));
         // Nothing exists to open a window on or claim yet, so neither control is offered.
@@ -292,7 +319,7 @@ mod tests {
     fn the_scheduler_being_absent_stays_visible_next_to_the_real_controls() {
         // A station being 在岗 must never read as "capture will now happen" (INV-36).
         let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
-        let rendered = render_stations(&base, &[station(Some("2.0.101"), 0)], &[]);
+        let rendered = render_stations(&base, &[station(Some("2.0.101"), 0)], &[], None);
         assert!(rendered.contains("c-station-pending"));
         assert!(rendered.contains("调度器"));
     }
@@ -302,16 +329,28 @@ mod tests {
         // The failure this whole design exists to prevent: 内容工作台 turned 11 reinstalls
         // into 11 zombie stations. Here they must remain one station whose history is stated.
         let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
-        let rendered = render_stations(&base, &[station(Some("2.0.101"), 11)], &[]);
+        let rendered = render_stations(&base, &[station(Some("2.0.101"), 11)], &[], None);
         assert_eq!(rendered.matches("c-target-row").count(), 1);
         assert!(rendered.contains("换过 11 次插件"));
         assert!(rendered.contains("在岗"));
     }
 
     #[test]
+    fn a_failed_action_says_so_instead_of_looking_like_it_worked() {
+        // 表单失败后只是跳转回来、什么都不说，会让人以为动作成功了——那比「点了没反应」
+        // 更糟：它会让人以为系统里有一台并不存在的工位。
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let rendered = render_stations(&base, &[], &[], Some("station_rejected"));
+        assert!(rendered.contains("没有完成"));
+        assert!(rendered.contains("重复"));
+        // 没有失败时不留任何痕迹。
+        assert!(!render_stations(&base, &[], &[], None).contains("没有完成"));
+    }
+
+    #[test]
     fn a_station_with_no_plugin_reads_as_vacant_not_broken() {
         let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
-        let rendered = render_stations(&base, &[station(None, 0)], &[]);
+        let rendered = render_stations(&base, &[station(None, 0)], &[], None);
         assert!(rendered.contains("空缺"));
         assert!(rendered.contains("当前没有插件安装认领这台工位"));
         // A vacant station must never be dressed up with an invented plugin version.
@@ -327,7 +366,7 @@ mod tests {
             browser_label: None,
             first_seen_at: "2026-08-27 02:58".to_owned(),
         };
-        let rendered = render_stations(&base, &[], &[unclaimed]);
+        let rendered = render_stations(&base, &[], &[unclaimed], None);
         assert!(rendered.contains("待认领"));
         assert!(rendered.contains("未知浏览器"));
     }

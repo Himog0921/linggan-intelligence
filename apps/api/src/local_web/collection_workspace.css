@@ -237,3 +237,5 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-station-pending h3 { margin:0 0 4px; color:var(--v7-black); font-size:13px; font-weight:600; }
 .c-target-row:has(.c-target-retire) { grid-template-columns:72px minmax(0,1fr) auto 64px auto; }
 .c-target-retire { display:flex; }
+.c-station-failure { margin:11px 0 0; max-width:640px; padding:9px 12px; background:var(--v7-bad-soft); color:var(--v7-black); font-size:13px; line-height:1.7; }
+.c-station-failure b { margin-right:9px; padding:2px 7px; background:var(--v7-bad-fill); color:var(--v7-white); font:800 10px var(--lgi-font-mono); letter-spacing:.09em; }

@@ -1808,7 +1808,16 @@ async fn collection_tasks() -> Html<String> {
     ))
 }
 
-async fn collection_runtime(State(state): State<LocalWebState>) -> Html<String> {
+#[derive(serde::Deserialize)]
+struct RuntimeSurfaceParams {
+    #[serde(default)]
+    error: Option<String>,
+}
+
+async fn collection_runtime(
+    State(state): State<LocalWebState>,
+    Query(params): Query<RuntimeSurfaceParams>,
+) -> Html<String> {
     let base = collection::render(
         collection::Section::Runtime,
         collection::OperationsMode::Now,
@@ -1820,9 +1829,12 @@ async fn collection_runtime(State(state): State<LocalWebState>) -> Html<String> 
         return Html(base);
     };
     match read_station_overview(database).await {
-        Ok((stations, unclaimed)) => {
-            Html(station_view::render_stations(&base, &stations, &unclaimed))
-        }
+        Ok((stations, unclaimed)) => Html(station_view::render_stations(
+            &base,
+            &stations,
+            &unclaimed,
+            params.error.as_deref(),
+        )),
         Err(_) => Html(base),
     }
 }
@@ -1834,6 +1846,15 @@ async fn collection_runtime(State(state): State<LocalWebState>) -> Html<String> 
 ///
 /// Each one redirects back with 303 so a refresh re-reads the page instead of re-submitting.
 const RUNTIME_SURFACE: &str = "/collection/runtime";
+
+/// 把失败原因带回页面。
+///
+/// 此前这些表单处理用 `let _ =` 吞掉错误后照常跳转：登记一个重名工位会得到一次跳转、
+/// 一切如常的假象，而工位并没有建成。「点了没反应」已经够糟，「点了看起来成功了其实没有」
+/// 更糟——它会让人以为系统里有一台并不存在的工位。
+fn runtime_surface_with_error(code: &str) -> String {
+    format!("{RUNTIME_SURFACE}?error={code}")
+}
 
 /// Where a plugin install reports in. Advertised through `/health` so the plugin never has to
 /// hardcode it.
@@ -1851,7 +1872,12 @@ async fn collection_runtime_register_station(
     if let Some(database) = state.database.database() {
         // 200 notes per station per day (Mog's decision), held on the station so a plugin
         // reinstall never resets it.
-        let _ = register_station(database, form.display_name.trim(), 200).await;
+        if register_station(database, form.display_name.trim(), 200)
+            .await
+            .is_err()
+        {
+            return Redirect::to(&runtime_surface_with_error("station_rejected"));
+        }
     }
     Redirect::to(RUNTIME_SURFACE)
 }
@@ -1866,8 +1892,12 @@ async fn collection_runtime_open_window(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<ClaimWindowForm>,
 ) -> Redirect {
-    if let Some(database) = state.database.database() {
-        let _ = open_claim_window(database, form.station_ref, form.valid_for_hours).await;
+    if let Some(database) = state.database.database()
+        && open_claim_window(database, form.station_ref, form.valid_for_hours)
+            .await
+            .is_err()
+    {
+        return Redirect::to(&runtime_surface_with_error("claim_window_rejected"));
     }
     Redirect::to(RUNTIME_SURFACE)
 }
@@ -1881,8 +1911,12 @@ async fn collection_runtime_close_window(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<CloseWindowForm>,
 ) -> Redirect {
-    if let Some(database) = state.database.database() {
-        let _ = close_claim_window(database, form.station_ref).await;
+    if let Some(database) = state.database.database()
+        && close_claim_window(database, form.station_ref)
+            .await
+            .is_err()
+    {
+        return Redirect::to(&runtime_surface_with_error("close_window_rejected"));
     }
     Redirect::to(RUNTIME_SURFACE)
 }
@@ -1896,8 +1930,12 @@ async fn collection_runtime_retire_station(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<RetireForm>,
 ) -> Redirect {
-    if let Some(database) = state.database.database() {
-        let _ = retire_station(database, form.station_ref, "在执行工位页停用").await;
+    if let Some(database) = state.database.database()
+        && retire_station(database, form.station_ref, "在执行工位页停用")
+            .await
+            .is_err()
+    {
+        return Redirect::to(&runtime_surface_with_error("retire_rejected"));
     }
     Redirect::to(RUNTIME_SURFACE)
 }
@@ -1912,8 +1950,12 @@ async fn collection_runtime_claim(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<ClaimForm>,
 ) -> Redirect {
-    if let Some(database) = state.database.database() {
-        let _ = claim_installation(database, form.installation_ref, form.station_ref).await;
+    if let Some(database) = state.database.database()
+        && claim_installation(database, form.installation_ref, form.station_ref)
+            .await
+            .is_err()
+    {
+        return Redirect::to(&runtime_surface_with_error("claim_rejected"));
     }
     Redirect::to(RUNTIME_SURFACE)
 }

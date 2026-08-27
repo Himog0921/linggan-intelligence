@@ -96,24 +96,23 @@ pub async fn decide_dispatch(
         return Ok(DispatchDecision::InstallationNotClaimed);
     };
 
-    // 闸门先问。关着的时候，队列里有什么并不重要。
-    if !execution_gate_is_open(&mut transaction).await? {
-        return Ok(DispatchDecision::GateClosed);
-    }
-    if let Some(reason) = active_risk_pause(&mut transaction).await? {
-        return Ok(DispatchDecision::RiskPaused { reason });
-    }
-
     let used = station_daily_note_usage_in(&mut transaction, station_ref).await?;
     if used >= i64::from(quota) {
         // 触顶的是产能，不是工位。工位仍在线，明天窗口重置后自然恢复（规则文档 §6.3）。
         return Ok(DispatchDecision::DailyQuotaReached { quota, used });
     }
 
-    let waiting: Option<(Uuid, Uuid, Value)> = sqlx::query_as(
-        "SELECT t.task_id, l.lease_ref, t.task_spec \
+    // 先取候选，因为闸门与风险暂停都是**按平台与 lane 限定范围**的：不知道这次要做的是
+    // 哪条 lane，就无法判断覆盖它的闸门是否开着。此前这两处检查不带范围，等于「任何一个
+    // 开着的闸门都放行全部 lane」——那让闸门表上的 platform/lane 两列形同虚设。
+    //
+    // 顺序仍然保证「有任务却被拦」不会被报成「没有任务」：只有确实没有候选时才回
+    // `NothingWaiting`。
+    let waiting: Option<(Uuid, Uuid, Value, String, String)> = sqlx::query_as(
+        "SELECT t.task_id, l.lease_ref, t.task_spec, t.platform, l_o.lane \
          FROM collection_work_order_lease l \
          JOIN linggan_runtime_task t ON t.task_id = l.task_id \
+         JOIN collection_work_order l_o ON l_o.work_order_ref = l.work_order_ref \
          LEFT JOIN linggan_runtime_attempt a ON a.task_id = t.task_id \
          WHERE l.station_ref = $1 \
            AND l.released_at IS NULL \
@@ -126,34 +125,61 @@ pub async fn decide_dispatch(
     .fetch_optional(&mut *transaction)
     .await?;
 
-    let decision = match waiting {
-        Some((task_id, lease_ref, task_spec)) => DispatchDecision::Dispatch {
-            task_id,
-            lease_ref,
-            task_spec,
-        },
-        None => DispatchDecision::NothingWaiting,
+    let Some((task_id, lease_ref, task_spec, platform, lane)) = waiting else {
+        return Ok(DispatchDecision::NothingWaiting);
     };
+
+    if !execution_gate_is_open(&mut transaction, &platform, &lane).await? {
+        return Ok(DispatchDecision::GateClosed);
+    }
+    if let Some(reason) = active_risk_pause(&mut transaction, &platform, &lane).await? {
+        return Ok(DispatchDecision::RiskPaused { reason });
+    }
+
     transaction.commit().await?;
-    Ok(decision)
+    Ok(DispatchDecision::Dispatch {
+        task_id,
+        lease_ref,
+        task_spec,
+    })
 }
 
-/// 闸门是否开着。空表即关闭——与风险暂停同一个思路：空表本身就是有效答案。
+/// 覆盖这个平台与 lane 的闸门是否开着。空表即关闭——空表本身就是有效答案。
+///
+/// `platform IS NULL` / `lane IS NULL` 表示该维度不设限。**必须按范围匹配**：为 patrol
+/// 开的闸门不应连带放行 deep_archive。
 async fn execution_gate_is_open(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    platform: &str,
+    lane: &str,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM collection_execution_gate \
-                        WHERE closed_at IS NULL AND expires_at > scope_001_now())",
+                        WHERE closed_at IS NULL AND expires_at > scope_001_now() \
+                          AND (platform IS NULL OR platform = $1) \
+                          AND (lane IS NULL OR lane = $2))",
     )
+    .bind(platform)
+    .bind(lane)
     .fetch_one(&mut **transaction)
     .await
 }
 
+/// 覆盖这个平台与 lane 的风险暂停。判据与准入、发租处保持一致——同一条规则有三份实现
+/// 而判据不同，正是旧项目「页面显示已达上限但仍在派单」那类故障的来源。
 async fn active_risk_pause(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    platform: &str,
+    lane: &str,
 ) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar("SELECT reason FROM collection_risk_pause WHERE lifted_at IS NULL LIMIT 1")
-        .fetch_optional(&mut **transaction)
-        .await
+    sqlx::query_scalar(
+        "SELECT reason FROM collection_risk_pause \
+         WHERE lifted_at IS NULL \
+           AND (platform IS NULL OR platform = $1) \
+           AND (lane IS NULL OR lane = $2) LIMIT 1",
+    )
+    .bind(platform)
+    .bind(lane)
+    .fetch_optional(&mut **transaction)
+    .await
 }
