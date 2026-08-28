@@ -117,13 +117,9 @@ async fn cursor_freezes_as_of_rejects_corruption_and_avoids_cross_page_duplicate
     )
     .await;
     assert_eq!(second.pointer("/asOf").and_then(Value::as_str), Some(as_of));
-    assert_eq!(
-        second
-            .pointer("/cards")
-            .and_then(Value::as_array)
-            .map(Vec::len),
-        Some(0),
-        "cursor pages must not repeat the unpaginated legacy cards"
+    assert!(
+        second.get("cards").is_none(),
+        "Material cursor pages must never contain legacy cards"
     );
     assert_eq!(
         second

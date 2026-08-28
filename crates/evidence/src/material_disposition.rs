@@ -96,3 +96,31 @@ pub async fn record_blob_disposition(
     .await?;
     Ok(event_ref)
 }
+
+pub async fn record_slot_disposition(
+    database: &Database,
+    slot_key: &str,
+    disposition: MaterialMediaDisposition,
+    authority_ref: &str,
+    reason: &str,
+) -> Result<Uuid, sqlx::Error> {
+    if disposition == MaterialMediaDisposition::BytesCleaned {
+        return Err(sqlx::Error::Protocol(
+            "BYTES_CLEANED requires a materialization target".to_owned(),
+        ));
+    }
+    let event_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_material_media_disposition_event \
+         (event_ref,slot_key,state,authority_ref,reason,effective_at) \
+         VALUES ($1,$2,$3,$4,$5,scope_001_now())",
+    )
+    .bind(event_ref)
+    .bind(slot_key)
+    .bind(disposition.as_str())
+    .bind(authority_ref)
+    .bind(reason)
+    .execute(database.pool())
+    .await?;
+    Ok(event_ref)
+}

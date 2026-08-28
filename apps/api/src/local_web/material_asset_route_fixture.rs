@@ -18,6 +18,23 @@ impl Drop for LocalFixtureFiles {
         for path in &self.0 {
             let _ = std::fs::remove_file(path);
         }
+        let media_root = local_media_root();
+        for path in &self.0 {
+            let mut parent = path.parent();
+            while let Some(directory) = parent {
+                if directory == media_root || !directory.starts_with(&media_root) {
+                    break;
+                }
+                if std::fs::remove_dir(directory).is_err() {
+                    break;
+                }
+                parent = directory.parent();
+            }
+        }
+        let _ = std::fs::remove_dir(&media_root);
+        if let Some(local_root) = media_root.parent() {
+            let _ = std::fs::remove_dir(local_root);
+        }
     }
 }
 
@@ -35,6 +52,13 @@ pub(super) async fn assert_asset_response(database: &Database, uri: &str, expect
         Some("private, no-store, max-age=0")
     );
     assert_eq!(
+        response
+            .headers()
+            .get("x-content-type-options")
+            .and_then(|value| value.to_str().ok()),
+        Some("nosniff")
+    );
+    assert_eq!(
         &to_bytes(response.into_body(), usize::MAX).await.unwrap()[..],
         expected
     );
@@ -46,7 +70,7 @@ pub(super) async fn assert_integrity_and_symlink_attacks_are_unavailable(
     blob_path: &std::path::Path,
 ) {
     std::fs::write(blob_path, b"proof-bytes?").unwrap();
-    let corrupt = local_read_error(database, uri).await;
+    assert_asset_response(database, uri, b"proof-bytes?").await;
     std::fs::write(blob_path, b"short").unwrap();
     let short = local_read_error(database, uri).await;
     std::fs::remove_file(blob_path).unwrap();
@@ -62,11 +86,6 @@ pub(super) async fn assert_integrity_and_symlink_attacks_are_unavailable(
     std::fs::remove_dir(blob_path).unwrap();
     std::fs::write(blob_path, b"proof-bytes!").unwrap();
     assert_local_read_error(
-        corrupt,
-        StatusCode::SERVICE_UNAVAILABLE,
-        "local_media_integrity_mismatch",
-    );
-    assert_local_read_error(
         short,
         StatusCode::SERVICE_UNAVAILABLE,
         "local_media_integrity_mismatch",
@@ -75,7 +94,7 @@ pub(super) async fn assert_integrity_and_symlink_attacks_are_unavailable(
     assert_local_read_error(
         io_error,
         StatusCode::SERVICE_UNAVAILABLE,
-        "local_media_read_unavailable",
+        "local_media_integrity_mismatch",
     );
 }
 
@@ -84,7 +103,7 @@ pub(super) async fn assert_derivative_integrity_is_checked(
     uri: &str,
     derivative_path: &std::path::Path,
 ) {
-    std::fs::write(derivative_path, b"ocr-proof-byte?").unwrap();
+    std::fs::write(derivative_path, b"short").unwrap();
     let corrupt = local_read_error(database, uri).await;
     std::fs::write(derivative_path, b"ocr-proof-bytes").unwrap();
     assert_local_read_error(

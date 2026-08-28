@@ -98,6 +98,7 @@ async fn read_latest_material_page(
             .bind(scan_content_external_id.as_deref())
             .bind(query.lane().map(|lane| lane.as_str()))
             .bind(query.media_kind().map(|kind| kind.as_purpose()))
+            .bind(None::<Uuid>)
             .fetch_all(&mut *tx)
             .await?;
         let exhausted = rows.len() < MATERIAL_PAGE_SIZE + 1;
@@ -204,7 +205,7 @@ async fn validate_cursor_times(
     }
 }
 
-async fn enrich_discovery_material(
+pub(crate) async fn enrich_discovery_material(
     tx: &mut Transaction<'_, Postgres>,
     item: &mut MaterialLibraryItem,
     as_of: &str,
@@ -273,7 +274,7 @@ async fn enrich_discovery_material(
     Ok(())
 }
 
-async fn enrich_media_material(
+pub(crate) async fn enrich_media_material(
     tx: &mut Transaction<'_, Postgres>,
     item: &mut MaterialLibraryItem,
     as_of: &str,
@@ -328,6 +329,8 @@ async fn enrich_media_material(
     if let Some(inspector) = item.inspector.as_object_mut() {
         inspector.insert("mediaSlots".to_owned(), Value::Array(media.slots));
         inspector.insert("derivatives".to_owned(), Value::Array(media.derivatives));
+        inspector.insert("mediaSlotsReceipt".to_owned(), media.slot_receipt);
+        inspector.insert("derivativesReceipt".to_owned(), media.derivative_receipt);
         inspector.insert("permissions".to_owned(),serde_json::json!({"displayPolicy":"MINIMUM_NECESSARY","remoteCandidateUris":"NOT_EXPOSED"}));
         inspector.insert(
             "limitations".to_owned(),
@@ -396,7 +399,7 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
     .await
 }
 
-fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> MaterialLibraryItem {
+pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> MaterialLibraryItem {
     let title: Option<String> = row.get("title");
     let body: Option<String> = row.get("body_text");
     let creator: Option<String> = row.get("creator_display_name");

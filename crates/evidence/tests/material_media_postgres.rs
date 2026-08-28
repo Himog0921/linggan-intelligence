@@ -293,6 +293,7 @@ async fn media_owner_seams_reject_unsafe_storage_key_components_without_writing_
                 admission.processing_jobs[1],
                 "ocr_text",
                 "1320b046a60f7c39a3480dea50b655ca92ce61db269ea07e4037e7a6f0788e5a",
+                12,
                 Some(invalid),
             )
             .await
@@ -305,6 +306,56 @@ async fn media_owner_seams_reject_unsafe_storage_key_components_without_writing_
         .await
         .unwrap();
     assert_eq!(derivatives, 0);
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn media_owner_seams_preserve_unknown_mime_but_reject_unbounded_asset_sizes() {
+    let database = proof_database("material_media_asset_contract").await;
+    let observation_ref = uuid::Uuid::new_v4();
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-asset-contract"}),
+        media_record_with_observation(
+            "note-asset-contract",
+            "image",
+            1,
+            "asset-contract",
+            observation_ref,
+        ),
+    )
+    .await;
+    for (mime_type, byte_size) in [("image/jpeg", 0_i64), ("image/jpeg", 268_435_457_i64)] {
+        assert!(
+            admit_media_blob(
+                &database,
+                observation_ref,
+                "8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62",
+                mime_type,
+                byte_size,
+                "blobs/8a/8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62",
+            )
+            .await
+            .is_err(),
+            "unsafe asset contract must fail: mime={mime_type:?}, byte_size={byte_size}"
+        );
+    }
+    admit_media_blob(
+        &database,
+        observation_ref,
+        "8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62",
+        "application/x-new-platform-format",
+        12,
+        "blobs/8a/8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62",
+    )
+    .await
+    .expect("unknown declared MIME is retained; delivery decides whether inline is safe");
+    let blobs: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_media_blob")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(blobs, 1);
 }
 
 fn media_record(content_id: &str, role: &str, ordinal: i32, uri_suffix: &str) -> serde_json::Value {

@@ -2,11 +2,14 @@ mod collection;
 mod collection_intake;
 mod collection_targets_view;
 mod evidence_page;
+mod local_asset_delivery;
 mod local_media_routes;
 #[cfg(test)]
 mod material_asset_route_fixture;
 #[cfg(test)]
 mod material_cursor_tests;
+#[cfg(test)]
+mod material_media_delivery_tests;
 mod material_projection;
 #[cfg(test)]
 mod material_projection_media_fixture;
@@ -57,7 +60,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeSet,
     fs,
-    io::{Error, ErrorKind, Seek, SeekFrom, Write},
+    io::{BufReader, Error, ErrorKind, Read, Seek, SeekFrom, Write},
     net::{Ipv4Addr, SocketAddr},
     path::{Path as FsPath, PathBuf},
     sync::Arc,
@@ -268,15 +271,7 @@ fn router(state: LocalWebState) -> Router {
             "/api/local/producer/media-uploads/{session_ref}/finalize",
             post(finalize_media_upload_route),
         )
-        .route(
-            "/api/local/media/{materialization_ref}/{sha256}",
-            get(local_media_routes::materialization),
-        )
-        .route(
-            "/api/local/derivative/{derivative_ref}",
-            get(local_media_routes::derivative),
-        )
-        .route("/api/local/evidence-library", get(evidence_library_json))
+        .merge(material_api_routes())
         .merge(collection_api_routes())
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
@@ -320,6 +315,31 @@ fn router(state: LocalWebState) -> Router {
         )
         .route("/assets/collection-workspace.js", get(collection_script))
         .with_state(state)
+}
+
+fn material_api_routes() -> Router<LocalWebState> {
+    Router::new()
+        .route(
+            "/api/local/media/{materialization_ref}/{sha256}",
+            get(local_media_routes::materialization),
+        )
+        .route(
+            "/api/local/derivative/{derivative_ref}",
+            get(local_media_routes::derivative),
+        )
+        .route("/api/local/evidence-library", get(evidence_library_json))
+        .route(
+            "/api/local/evidence-library/legacy",
+            get(material_projection::legacy_json),
+        )
+        .route(
+            "/api/local/evidence-library/{public_ref}/comments",
+            get(material_projection::research_comments_json),
+        )
+        .route(
+            "/api/local/evidence-library/{public_ref}",
+            get(material_projection::detail_json),
+        )
 }
 
 async fn local_entry() -> Redirect {
@@ -446,33 +466,25 @@ async fn evidence_library_json(
             "invalid_local_evidence_query",
         );
     };
-    match read_evidence_library(database, &query).await {
-        Ok(projection) => {
-            match material_projection::compose_json(database, &query, projection).await {
-                Ok(response) => Json(response).into_response(),
-                Err(MaterialReadError::InvalidCursor | MaterialReadError::UnsupportedSort) => {
-                    local_read_json_error(
-                        axum::http::StatusCode::BAD_REQUEST,
-                        "invalid_material_query_cursor_or_sort",
-                    )
-                }
-                Err(MaterialReadError::ProjectionUnavailable) => local_read_json_error(
-                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                    "material_projection_schema_unavailable",
-                ),
-                Err(MaterialReadError::Database(error)) => {
-                    eprintln!("material read projection unavailable: {error}");
-                    local_read_json_error(
-                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                        "material_read_projection_unavailable",
-                    )
-                }
-            }
+    match material_projection::compose_json(database, &query).await {
+        Ok(response) => Json(response).into_response(),
+        Err(MaterialReadError::InvalidCursor | MaterialReadError::UnsupportedSort) => {
+            local_read_json_error(
+                axum::http::StatusCode::BAD_REQUEST,
+                "invalid_material_query_cursor_or_sort",
+            )
         }
-        Err(_) => local_read_json_error(
+        Err(MaterialReadError::ProjectionUnavailable) => local_read_json_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "read_projection_unavailable",
+            "material_projection_schema_unavailable",
         ),
+        Err(MaterialReadError::Database(error)) => {
+            eprintln!("material read projection unavailable: {error}");
+            local_read_json_error(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "material_read_projection_unavailable",
+            )
+        }
     }
 }
 
@@ -1455,18 +1467,15 @@ async fn finalize_claimed_media_upload(
     let final_path = root.join(&storage_key);
     // A crash may happen after the atomic rename and before its database receipt. Retry from a
     // verified final blob in that narrow interval instead of making `finalizing` terminal.
-    let bytes_to_verify = fs::read(&temporary_path).or_else(|error| {
+    match verify_media_file(&temporary_path, &session).or_else(|error| {
         if error.kind() == ErrorKind::NotFound {
-            fs::read(&final_path)
+            verify_media_file(&final_path, &session)
         } else {
             Err(error)
         }
-    });
-    match bytes_to_verify {
-        Ok(bytes)
-            if i64::try_from(bytes.len()).ok() == Some(session.expected_byte_size)
-                && sha256_bytes(&bytes) == session.expected_sha256 => {}
-        _ => {
+    }) {
+        Ok(()) => {}
+        Err(_) => {
             let _ = release_media_upload_finalize(database, session_ref).await;
             return local_producer_error(
                 axum::http::StatusCode::UNPROCESSABLE_ENTITY,
@@ -1527,6 +1536,47 @@ async fn finalize_claimed_media_upload(
     }
 }
 
+fn verify_media_file(
+    path: &FsPath,
+    session: &linggan_evidence::MediaUploadSession,
+) -> std::io::Result<()> {
+    let file = fs::File::open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || i64::try_from(metadata.len()).ok() != Some(session.expected_byte_size)
+    {
+        return Err(Error::new(ErrorKind::InvalidData, "media size mismatch"));
+    }
+    let mut reader = BufReader::new(file);
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut total = 0_i64;
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        total = total
+            .checked_add(i64::try_from(read).map_err(|_| Error::other("media size overflow"))?)
+            .ok_or_else(|| Error::other("media size overflow"))?;
+        if total > session.expected_byte_size {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "media exceeds declared size",
+            ));
+        }
+        digest.update(&buffer[..read]);
+    }
+    let actual_hash = digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    if total != session.expected_byte_size || actual_hash != session.expected_sha256 {
+        return Err(Error::new(ErrorKind::InvalidData, "media hash mismatch"));
+    }
+    Ok(())
+}
+
 struct MediaSessionGuard {
     sessions: Arc<tokio::sync::Mutex<BTreeSet<uuid::Uuid>>>,
     session_ref: uuid::Uuid,
@@ -1582,10 +1632,11 @@ fn media_upload_headers(headers: &axum::http::HeaderMap) -> Option<(String, Stri
         .parse::<i64>()
         .ok()?;
     if !is_sha256(&expected_sha256)
-        || !(1..=256 * 1024 * 1024).contains(&expected_byte_size)
-        || (!mime_type.starts_with("image/")
-            && !mime_type.starts_with("video/")
-            && !mime_type.starts_with("audio/"))
+        || !(1..=local_media_max_bytes()).contains(&expected_byte_size)
+        || mime_type.is_empty()
+        || mime_type.len() > 255
+        || !mime_type.is_ascii()
+        || mime_type.bytes().any(|byte| byte.is_ascii_control())
     {
         return None;
     }
@@ -1596,11 +1647,12 @@ fn media_storage_key(sha256: &str) -> String {
     format!("blobs/{}/{}", &sha256[..2], sha256)
 }
 
-fn sha256_bytes(bytes: &[u8]) -> String {
-    Sha256::digest(bytes)
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
+fn local_media_max_bytes() -> i64 {
+    std::env::var("LINGGAN_LOCAL_MEDIA_MAX_BYTES")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(256 * 1024 * 1024)
 }
 
 fn is_sha256(value: &str) -> bool {

@@ -7,7 +7,7 @@ use axum::{
 };
 use linggan_evidence::{
     MaterialMediaDisposition, admit_media_blob, record_blob_disposition,
-    record_materialization_disposition,
+    record_materialization_disposition, record_slot_disposition,
 };
 use linggan_storage_postgres::testing::isolated_proof_schema;
 use tower::ServiceExt;
@@ -86,14 +86,12 @@ async fn latest_disposed_replica_falls_back_to_the_newest_qualified_materializat
     let after = library(&database).await;
     assert_eq!(asset_url(&after), Some(m1.local_asset_path.as_str()));
     assert_eq!(
-        after
-            .pointer("/items/0/preview/bytesState")
-            .and_then(Value::as_str),
+        after.pointer("/preview/bytesState").and_then(Value::as_str),
         Some("ACQUIRED")
     );
     assert!(
         after
-            .pointer("/items/0/inspector/mediaSlots/0/replicaSelection/limitations")
+            .pointer("/inspector/mediaSlots/0/replicaSelection/limitations")
             .and_then(Value::as_array)
             .is_some_and(|values| values
                 .iter()
@@ -112,6 +110,64 @@ async fn latest_disposed_replica_falls_back_to_the_newest_qualified_materializat
     assert_eq!(denied.status(), StatusCode::NOT_FOUND);
 
     assert_blob_disposition_falls_back(&database, observation_ref, &m1.local_asset_path).await;
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn slot_disposition_blocks_every_materialization_without_fallback() {
+    let database = proof_database("material_slot_disposition").await;
+    let observation_ref = seed_media(&database).await;
+    let m1 = admit_media_blob(
+        &database,
+        observation_ref,
+        M1_SHA256,
+        "image/jpeg",
+        18,
+        "blobs/0a/0a8c8287ec12c5cebead27e5212d079358a60d6735f855f5083fe5390d33ca77",
+    )
+    .await
+    .unwrap();
+    let m2 = admit_media_blob(
+        &database,
+        observation_ref,
+        M2_SHA256,
+        "image/jpeg",
+        17,
+        "blobs/85/852a8bcbfad35ef908c0a4e05c637223146bd4fe5d6caf269af23879a057ae93",
+    )
+    .await
+    .unwrap();
+    let _fixture_files = LocalFixtureFiles::new(vec![
+        fixture_path(M1_SHA256, "0a"),
+        fixture_path(M2_SHA256, "85"),
+    ]);
+    write_fixture(M1_SHA256, "0a", b"fallback-old-bytes");
+    write_fixture(M2_SHA256, "85", b"newer-proof-bytes");
+    record_slot_disposition(
+        &database,
+        "xhs:note-api-media:image:1",
+        MaterialMediaDisposition::WithdrawnOrRestricted,
+        "slot-proof",
+        "whole-slot-withdrawn",
+    )
+    .await
+    .unwrap();
+    let item = library(&database).await;
+    assert_eq!(asset_url(&item), None);
+    assert!(
+        item.pointer("/inspector/limitations")
+            .and_then(Value::as_array)
+            .is_some_and(|values| values
+                .iter()
+                .any(|value| value == "SLOT_WITHDRAWN_OR_RESTRICTED"))
+    );
+    for url in [&m1.local_asset_path, &m2.local_asset_path] {
+        let response = app_with_database(database.clone())
+            .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
 }
 
 async fn assert_blob_disposition_falls_back(
@@ -147,7 +203,7 @@ async fn assert_blob_disposition_falls_back(
     assert_eq!(asset_url(&blob_fallback), Some(healthy_url));
     assert!(
         blob_fallback
-            .pointer("/items/0/inspector/mediaSlots/0/replicaSelection/limitations")
+            .pointer("/inspector/mediaSlots/0/replicaSelection/limitations")
             .and_then(Value::as_array)
             .is_some_and(|values| values
                 .iter()
@@ -177,12 +233,29 @@ async fn library(database: &Database) -> Value {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
+    let list: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let detail_url = list
+        .pointer("/items/0/detailUrl")
+        .and_then(Value::as_str)
+        .unwrap();
+    let response = app_with_database(database.clone())
+        .oneshot(
+            Request::builder()
+                .uri(detail_url)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let detail: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    detail.get("item").cloned().unwrap()
 }
 
 fn asset_url(value: &Value) -> Option<&str> {
     value
-        .pointer("/items/0/preview/localAssetUrl")
+        .pointer("/preview/localAssetUrl")
         .and_then(Value::as_str)
 }
 

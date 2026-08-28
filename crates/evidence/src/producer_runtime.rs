@@ -113,7 +113,9 @@ pub async fn admit_media_blob(
     byte_size: i64,
     storage_key: &str,
 ) -> Result<MediaBlobAdmission, ProducerRuntimeError> {
-    if !crate::material_storage_key::is_safe_storage_key(storage_key) {
+    if !crate::material_storage_key::is_safe_storage_key(storage_key)
+        || !crate::material_storage_key::is_safe_media_contract(mime_type, byte_size)
+    {
         return Err(ProducerRuntimeError::MaterialIdentityConflict);
     }
     let mut tx = database
@@ -234,6 +236,11 @@ pub async fn begin_media_upload(
     expected_byte_size: i64,
     temporary_storage_key: &str,
 ) -> Result<MediaUploadSession, ProducerRuntimeError> {
+    if !crate::material_storage_key::is_safe_storage_key(temporary_storage_key)
+        || !crate::material_storage_key::is_safe_media_contract(mime_type, expected_byte_size)
+    {
+        return Err(ProducerRuntimeError::MaterialIdentityConflict);
+    }
     let mut tx = database
         .pool()
         .begin()
@@ -571,7 +578,7 @@ fn runtime_library_sql() -> &'static str {
      ORDER BY CASE WHEN $2::text IS NULL THEN 4 \
        WHEN lower(COALESCE(grouped.creator_display_name, '')) LIKE '%' || lower($2) || '%' THEN 1 \
        WHEN lower(COALESCE(grouped.title, '')) LIKE '%' || lower($2) || '%' THEN 2 ELSE 3 END, \
-       grouped.first_discovered_at DESC, grouped.result_position ASC"
+       grouped.first_discovered_at DESC, grouped.result_position ASC LIMIT 51"
 }
 
 fn runtime_unknown_time_sql() -> &'static str {

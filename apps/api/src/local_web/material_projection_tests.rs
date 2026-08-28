@@ -1,17 +1,8 @@
-use super::material_asset_route_fixture::{
-    LocalFixtureFiles, assert_asset_response, assert_derivative_integrity_is_checked,
-    assert_integrity_and_symlink_attacks_are_unavailable, assert_materialization_read_contract,
-};
-use super::material_projection_media_fixture::{
-    assert_disposition_precedence, complete_ocr_derivative, seed_media, seed_media_refresh,
-    seed_shared_media,
-};
 use super::*;
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use linggan_evidence::admit_media_blob;
 use linggan_storage_postgres::testing::isolated_proof_schema;
 use tower::ServiceExt;
 
@@ -39,8 +30,6 @@ const MIGRATIONS: &str = concat!(
       ('0003_local_trusted_producer','3'),('0004_plugin_runtime_all_capabilities','4'), \
       ('0015_material_projection','15'),('0016_material_social_lanes','16'),('0017_material_media_projection','17'),('0018_material_discovery_lane','18');\n",
 );
-
-const PROOF_BLOB_SHA256: &str = "8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62";
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
@@ -107,7 +96,7 @@ async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrela
 async fn loopback_comment_lane_hides_sensitive_body_and_external_identity() {
     let database = proof_database("material_loopback_comments").await;
     seed_comment(&database).await;
-    let response = app_with_database(database)
+    let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
                 .uri("/api/local/evidence-library?lane=comments")
@@ -119,31 +108,33 @@ async fn loopback_comment_lane_hides_sensitive_body_and_external_identity() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert!(payload.pointer("/items/0/inspector").is_none());
+    let detail = fetch_detail(&database, &payload).await;
     assert_eq!(
-        payload.pointer("/items/0/inspector/commentThreads"),
+        detail.pointer("/item/inspector/commentThreads"),
         Some(&json!([]))
     );
     assert_eq!(
-        payload
-            .pointer("/items/0/inspector/commentsAccess/accessLevel")
+        detail
+            .pointer("/item/inspector/commentsAccess/accessLevel")
             .and_then(Value::as_str),
         Some("RESTRICTED_SOURCE")
     );
     assert_eq!(
-        payload
-            .pointer("/items/0/inspector/commentsAccess/bodyReturned")
+        detail
+            .pointer("/item/inspector/commentsAccess/bodyReturned")
             .and_then(Value::as_bool),
         Some(false)
     );
     assert_eq!(
-        payload
-            .pointer("/items/0/inspector/commentsAccess/externalIdentityReturned")
+        detail
+            .pointer("/item/inspector/commentsAccess/externalIdentityReturned")
             .and_then(Value::as_bool),
         Some(false)
     );
     assert_eq!(
-        payload
-            .pointer("/items/0/inspector/commentsCoverage/countState")
+        detail
+            .pointer("/item/inspector/commentsCoverage/countState")
             .and_then(Value::as_str),
         Some("UNKNOWN")
     );
@@ -163,186 +154,34 @@ async fn loopback_comment_lane_hides_sensitive_body_and_external_identity() {
     assert!(!payload.to_string().contains("评论命中"));
     assert!(!payload.to_string().contains("secret-raw-token"));
     assert!(!payload.to_string().contains("comment-api-1"));
+    let comments_url = detail
+        .pointer("/channels/comments/url")
+        .and_then(Value::as_str)
+        .unwrap();
+    let research = request_json(&database, comments_url).await;
+    assert_eq!(
+        research.pointer("/accessLevel").and_then(Value::as_str),
+        Some("LOCAL_AUTHORIZED_RESEARCH")
+    );
+    assert!(research.to_string().contains("评论命中"));
+    assert!(!research.to_string().contains("comment-api-1"));
 }
 
-#[tokio::test]
-#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn loopback_media_projection_exposes_only_local_replica_and_honest_processor_candidate_states()
- {
-    let database = proof_database("material_loopback_media").await;
-    let observation_ref = seed_media(&database).await;
-    let admission = admit_media_blob(
-        &database,
-        observation_ref,
-        PROOF_BLOB_SHA256,
-        "image/jpeg",
-        12,
-        "blobs/8a/8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62",
-    )
-    .await
-    .expect("synthetic verified blob materializes");
-    let shared_observation_ref = seed_shared_media(&database).await;
-    let shared_admission = admit_media_blob(
-        &database,
-        shared_observation_ref,
-        PROOF_BLOB_SHA256,
-        "image/jpeg",
-        12,
-        "blobs/8a/8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62",
-    )
-    .await
-    .expect("a second qualified materialization may share the content-addressed blob");
-    let derivative_ref = complete_ocr_derivative(&database, admission.processing_jobs[1]).await;
-    let blob_path = local_media_root()
-        .join("blobs/8a/8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62");
-    std::fs::create_dir_all(blob_path.parent().unwrap()).unwrap();
-    std::fs::write(&blob_path, b"proof-bytes!").unwrap();
-    let derivative_path = local_media_root().join("derivatives/ocr/proof");
-    let _fixture_files = LocalFixtureFiles::new(vec![blob_path.clone(), derivative_path.clone()]);
-    std::fs::create_dir_all(derivative_path.parent().unwrap()).unwrap();
-    std::fs::write(&derivative_path, b"ocr-proof-bytes").unwrap();
-    seed_media_refresh(&database).await;
+pub(super) async fn fetch_detail(database: &Database, list: &Value) -> Value {
+    let url = list
+        .pointer("/items/0/detailUrl")
+        .and_then(Value::as_str)
+        .expect("list item exposes its bounded detail URL");
+    request_json(database, url).await
+}
+
+async fn request_json(database: &Database, url: &str) -> Value {
     let response = app_with_database(database.clone())
-        .oneshot(
-            Request::builder()
-                .uri("/api/local/evidence-library?lane=media_slots&mediaKind=image")
-                .body(Body::empty())
-                .unwrap(),
-        )
+        .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
-    let payload: Value = serde_json::from_slice(&body).unwrap();
-    assert_media_payload(&payload);
-    assert_eq!(
-        payload
-            .pointer("/items/0/preview/localAssetUrl")
-            .and_then(Value::as_str),
-        Some(admission.local_asset_path.as_str()),
-        "the list and direct read use the same materialization-bound qualification handle"
-    );
-    assert_asr_absent(&database).await;
-    assert_materialization_read_contract(
-        &database,
-        &admission.local_asset_path,
-        admission.materialization_ref,
-        &shared_admission.local_asset_path,
-    )
-    .await;
-    assert_integrity_and_symlink_attacks_are_unavailable(
-        &database,
-        &admission.local_asset_path,
-        &blob_path,
-    )
-    .await;
-    let derivative_url = payload
-        .pointer("/items/0/inspector/derivatives")
-        .and_then(Value::as_array)
-        .and_then(|values| {
-            values
-                .iter()
-                .find(|value| value.get("kind").and_then(Value::as_str) == Some("ocr_text"))
-        })
-        .and_then(|value| value.pointer("/sourceLocation/localAssetUrl"))
-        .and_then(Value::as_str)
-        .expect("acquired OCR exposes a controlled derivative handle");
-    assert_asset_response(&database, derivative_url, b"ocr-proof-bytes").await;
-    assert_derivative_integrity_is_checked(&database, derivative_url, &derivative_path).await;
-    assert_disposition_precedence(
-        database,
-        admission.materialization_ref,
-        &admission.local_asset_path,
-        &shared_admission.local_asset_path,
-        derivative_ref,
-        derivative_url,
-    )
-    .await;
-}
-
-async fn assert_asr_absent(database: &Database) {
-    let response = app_with_database(database.clone())
-        .oneshot(
-            Request::builder()
-                .uri("/api/local/evidence-library?lane=asr")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let payload: Value =
-        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
-    assert_eq!(
-        payload
-            .pointer("/items")
-            .and_then(Value::as_array)
-            .map(Vec::len),
-        Some(0)
-    );
-}
-
-fn assert_media_payload(payload: &Value) {
-    assert_eq!(
-        payload
-            .pointer("/items/0/inspector/mediaSlots/0/origin/candidateUriCount")
-            .and_then(Value::as_i64),
-        Some(2)
-    );
-    assert_eq!(
-        payload
-            .pointer("/items/0/inspector/mediaSlots/0/origin/candidateSetState")
-            .and_then(Value::as_str),
-        Some("OBSERVED_SET")
-    );
-    assert_eq!(
-        payload
-            .pointer("/items/0/inspector/mediaSlots/0/origin/actualDownloadCandidateState")
-            .and_then(Value::as_str),
-        Some("UNKNOWN")
-    );
-    assert_eq!(
-        payload
-            .pointer("/items/0/inspector/mediaSlots/0/origin/sourceGeneration")
-            .and_then(Value::as_i64),
-        Some(2)
-    );
-    assert_eq!(
-        payload
-            .pointer("/items/0/inspector/mediaSlots/0/replica/isCurrentOrigin")
-            .and_then(Value::as_bool),
-        Some(false)
-    );
-    assert_eq!(
-        payload
-            .pointer("/items/0/preview/bytesState")
-            .and_then(Value::as_str),
-        Some("ACQUIRED")
-    );
-    let ocr = payload
-        .pointer("/items/0/inspector/derivatives")
-        .and_then(Value::as_array)
-        .unwrap()
-        .iter()
-        .find(|value| value.get("kind").and_then(Value::as_str) == Some("ocr_text"))
-        .unwrap();
-    assert_eq!(ocr.get("state").and_then(Value::as_str), Some("ACQUIRED"));
-    assert!(ocr.get("sourceLocation").is_some_and(Value::is_object));
-    assert_eq!(
-        payload
-            .pointer("/items/0/laneSummaries/7/state")
-            .and_then(Value::as_str),
-        Some("ACQUIRED")
-    );
-    assert!(
-        payload
-            .pointer("/items/0/preview/localAssetUrl")
-            .and_then(Value::as_str)
-            .is_some_and(|url| url.starts_with("/api/local/media/"))
-    );
-    assert!(
-        !payload.to_string().contains("media.example"),
-        "remote candidate URIs stay out of the ordinary read API"
-    );
+    serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
 }
 
 async fn seed_detail(database: &Database) {
@@ -401,7 +240,7 @@ async fn seed_comment(database: &Database) {
         .unwrap();
 }
 
-async fn proof_database(schema: &str) -> Database {
+pub(super) async fn proof_database(schema: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
     isolated_proof_schema(&url, schema, MIGRATIONS)
         .await

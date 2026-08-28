@@ -1,6 +1,7 @@
 //! Read-only discussion, author-context, coverage, and provenance enrichment.
 
 use crate::material_projection_types::MaterialLibraryItem;
+use linggan_storage_postgres::Database;
 use serde_json::Value;
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
@@ -13,6 +14,7 @@ pub(crate) async fn enrich(
 ) -> Result<(), sqlx::Error> {
     let mut coverage = read_lane_coverage(tx, item, as_of).await?;
     let comments = read_comments(item, text);
+    let comments_receipt = read_comment_receipt(tx, item, as_of).await?;
     let author_context = read_author_context(tx, item, as_of).await?;
     if !author_context.is_null()
         && let Some(summary) = item
@@ -46,6 +48,7 @@ pub(crate) async fn enrich(
             "commentsCoverage".to_owned(),
             coverage.remove("comments").unwrap_or(Value::Null),
         );
+        inspector.insert("commentsReceipt".to_owned(), comments_receipt);
         inspector.insert(
             "repliesCoverage".to_owned(),
             coverage.remove("replies").unwrap_or(Value::Null),
@@ -54,6 +57,26 @@ pub(crate) async fn enrich(
         inspector.insert("provenance".to_owned(), provenance);
     }
     Ok(())
+}
+
+async fn read_comment_receipt(
+    tx: &mut Transaction<'_, Postgres>,
+    item: &MaterialLibraryItem,
+    as_of: &str,
+) -> Result<Value, sqlx::Error> {
+    let total = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM linggan_material_comment comment \
+         JOIN linggan_runtime_capture_package package USING(package_ref) \
+         WHERE comment.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz",
+    )
+    .bind(item.identity.public_ref)
+    .bind(as_of)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(serde_json::json!({
+        "total":total,"returned":0,"truncated":total>0,"nextCursor":Value::Null,
+        "detailRequired":total>0
+    }))
 }
 
 async fn read_lane_coverage(
@@ -187,14 +210,14 @@ async fn read_provenance(
     item: &MaterialLibraryItem,
     as_of: &str,
 ) -> Result<Value, sqlx::Error> {
-    let rows = sqlx::query(
+    let mut rows = sqlx::query(
         "WITH refs AS (SELECT lane.package_ref FROM linggan_material_lane_observation lane WHERE lane.content_public_ref=$1 \
              UNION SELECT finding.package_ref FROM linggan_material_discovery_finding finding WHERE finding.content_public_ref=$1 \
              UNION SELECT author.package_ref FROM linggan_material_author_profile author WHERE author.platform=$2 AND author.author_external_id=$3) \
-         SELECT refs.package_ref,package.task_id,package.attempt_id,package.producer_instance_id,receipt.receipt_ref \
+         SELECT refs.package_ref,package.task_id,package.attempt_id,package.producer_instance_id,receipt.receipt_ref,count(*) OVER() AS total_count \
          FROM refs JOIN linggan_runtime_capture_package package ON package.package_ref=refs.package_ref \
          LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
-         WHERE package.accepted_at <= $4::timestamptz ORDER BY package.accepted_at",
+         WHERE package.accepted_at <= $4::timestamptz ORDER BY package.accepted_at,refs.package_ref LIMIT 21",
     )
     .bind(item.identity.public_ref)
     .bind(&item.identity.platform)
@@ -202,13 +225,89 @@ async fn read_provenance(
     .bind(as_of)
     .fetch_all(&mut **tx)
     .await?;
+    let total = rows.first().map_or(0_i64, |row| row.get("total_count"));
+    let truncated = rows.len() > 20;
+    if truncated {
+        rows.truncate(20);
+    }
+    let next_cursor = truncated
+        .then(|| {
+            rows.last()
+                .map(|row| format!("package:{}", row.get::<Uuid, _>("package_ref")))
+        })
+        .flatten();
     Ok(serde_json::json!({
         "packageRefs":rows.iter().map(|row| row.get::<Uuid,_>("package_ref")).collect::<Vec<_>>(),
         "taskRefs":rows.iter().map(|row| row.get::<Uuid,_>("task_id")).collect::<Vec<_>>(),
         "attemptRefs":rows.iter().map(|row| row.get::<Uuid,_>("attempt_id")).collect::<Vec<_>>(),
         "receiptRefs":rows.iter().filter_map(|row| row.get::<Option<Uuid>,_>("receipt_ref")).collect::<Vec<_>>(),
         "producers":rows.iter().map(|row| row.get::<Uuid,_>("producer_instance_id")).collect::<Vec<_>>(),
-        "stationAccountLens":{"state":"UNKNOWN"},"coverageRefs":rows.iter().map(|row| row.get::<Uuid,_>("package_ref")).collect::<Vec<_>>()
+        "stationAccountLens":{"state":"UNKNOWN"},"coverageRefs":rows.iter().map(|row| row.get::<Uuid,_>("package_ref")).collect::<Vec<_>>(),
+        "receipt":{"total":total,"returned":rows.len(),"truncated":truncated,"nextCursor":next_cursor,"limit":20}
+    }))
+}
+
+pub async fn read_authorized_research_comments(
+    database: &Database,
+    content_ref: Uuid,
+    after: Option<Uuid>,
+    text: Option<&str>,
+) -> Result<Value, sqlx::Error> {
+    let mut rows = sqlx::query(
+        "SELECT comment.material_ref,comment.is_reply,left(comment.body_text,4000) AS body_text, \
+             char_length(comment.body_text)>4000 AS body_truncated,comment.body_state,comment.observed_at, \
+             count(*) OVER() AS total_count \
+         FROM linggan_material_comment comment JOIN linggan_runtime_capture_package package USING(package_ref) \
+         WHERE comment.content_public_ref=$1 AND package.accepted_at <= scope_001_now() \
+           AND ($2::uuid IS NULL OR comment.material_ref > $2) \
+           AND ($3::text IS NULL OR lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($3) || '%') \
+         ORDER BY comment.material_ref LIMIT 21",
+    )
+    .bind(content_ref)
+    .bind(after)
+    .bind(text)
+    .fetch_all(database.pool())
+    .await?;
+    let total = sqlx::query_scalar::<_, i64>(
+        "SELECT count(*) FROM linggan_material_comment comment \
+         JOIN linggan_runtime_capture_package package USING(package_ref) \
+         WHERE comment.content_public_ref=$1 AND package.accepted_at <= scope_001_now() \
+           AND ($2::text IS NULL OR lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($2) || '%')",
+    )
+    .bind(content_ref)
+    .bind(text)
+    .fetch_one(database.pool())
+    .await?;
+    let truncated = rows.len() > 20;
+    if truncated {
+        rows.truncate(20);
+    }
+    let next_cursor = truncated
+        .then(|| {
+            rows.last()
+                .map(|row| row.get::<Uuid, _>("material_ref").to_string())
+        })
+        .flatten();
+    let items = rows
+        .iter()
+        .map(|row| {
+            serde_json::json!({
+                "sourceRef":row.get::<Uuid,_>("material_ref"),
+                "relation":if row.get::<bool,_>("is_reply") { "REPLY" } else { "ROOT" },
+                "body":row.get::<Option<String>,_>("body_text"),
+                "bodyState":row.get::<String,_>("body_state"),
+                "bodyTruncated":row.get::<Option<bool>,_>("body_truncated").unwrap_or(false),
+                "anonymousAuthorContext":{"identity":"WITHHELD","platformUserIdReturned":false},
+                "observedAt":row.get::<String,_>("observed_at")
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(serde_json::json!({
+        "channel":"comments","accessLevel":"LOCAL_AUTHORIZED_RESEARCH",
+        "searchableOriginalText":true,"externalAuthorIdentityReturned":false,
+        "query":text,
+        "total":total,"returned":items.len(),"truncated":truncated,"nextCursor":next_cursor,
+        "limit":20,"items":items
     }))
 }
 

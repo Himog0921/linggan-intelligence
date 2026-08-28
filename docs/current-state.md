@@ -1,7 +1,7 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-08-28
+> 最后核对: 2026-08-29
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
@@ -10,11 +10,11 @@
 
 ### MATERIAL-PROJECTION-001 / Issue #86（Draft stacked 实现）
 
-基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope，旧 `cards` 暂时保留兼容。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。
+基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope。默认 `/api/local/evidence-library` 只返回 Material Projection；旧 `cards` 仅由显式 `/api/local/evidence-library/legacy` 兼容入口提供，不再默认混读。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。插件到页面的现行映射见 [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md)。
 
 独立审查后的隔离 PostgreSQL 16 proof 已覆盖 Task/Package/Record/Coverage 的平台、能力与目标绑定，逐 Record 隔离且健康 sibling 不连坐，评论/回复数据库关系约束，媒体 `observationRef` 历史冲突与同包重复隔离，首次同槽位并发 generation，作品级查询，以及固定 `asOf` 的 50 项 keyset cursor。读取会先把 lane/media-kind 存在性下推，再在单次最多扫描 200 个作品的预算内补页；预算触发时返回 `scanLimited + cursor`，后续从最后扫描键继续，不重复扫描已排除对象。这个预算只关闭了无界事务风险，没有关闭 enrichment 的有界 N+1：当前最坏仍可达到每个候选 7 次、单响应最多 1,404 次 enrichment/base 查询，批量化债务由 Issue #89 单独承接。
 
-原件读取不再使用裸 SHA 作为资格：普通投影只返回 `/api/local/media/<materializationRef>/<sha256>`，服务端验证 Materialization 与 Blob 关系，并按 Blob 全局、Slot 和具体 Materialization 三层处置决定可读性；共享 Blob 的另一份合格 Materialization 不会被错误连坐。同一 Slot 有多个副本时选择最新仍合格的 Materialization；最新副本被局部或 Blob 处置后会回退旧健康副本，同时用 limitation 保留“较新副本已处置”事实，Slot 级处置仍阻断整个集合。Derivative 使用独立的 `/api/local/derivative/<derivativeRef>` 受控句柄，`inputScope` 不再冒充位置。两类可撤销资产都返回 `private, no-store, max-age=0`，并在每次读取时重新核对数据库 hash/size 与磁盘内容；接纳拒绝绝对路径、空组件和 `.`/`..`，读取 canonicalize 后拒绝软链越出媒体根。404/503 均使用 `local_read` envelope。合成本地原件和 OCR derivative 已证明处置前 HTTP 200 与精确 bytes、损坏/大小不符/软链逃逸拒绝及处置后不可读。旧 schema 也必须先验证 sort/cursor；合法但无法履行的 cursor 返回 503，不伪装 200 空页。这仍不是 OCR provider 或真实平台媒体证明。proof database/container/volume 均已清理。该 Draft 未回填历史 Package，未访问真实平台、未取得真实平台媒体字节、未运行 OCR/ASR provider、未改 Evidence Library HTML/CSS，也未部署或完成用户验收。
+原件读取不再使用裸 SHA 作为资格：普通投影只返回 `/api/local/media/<materializationRef>/<sha256>`，服务端验证 Materialization 与 Blob 关系，并按 Blob 全局、Slot 和具体 Materialization 三层处置决定可读性；共享 Blob 的另一份合格 Materialization 不会被错误连坐。同一 Slot 有多个副本时选择最新仍合格的 Materialization；最新副本被局部或 Blob 处置后会回退旧健康副本，同时用 limitation 保留“较新副本已处置”事实，Slot 级处置仍阻断整个集合。Derivative 使用独立的 `/api/local/derivative/<derivativeRef>` 受控句柄，`inputScope` 不再冒充位置。两类可撤销资产都返回 `private, no-store, max-age=0` 与 `nosniff`。上传 finalize 在写入时流式核对声明 hash/size 并原子提升到内容寻址路径；GET 重新检查当前治理资格和 size，以可配置上限流式交付，不把每次全量 hash 作为读取前提。未知或新媒体声明类型仍可保存；只有安全类型 inline，其他类型以 attachment 交付并标明 `UNSUPPORTED_MEDIA_TYPE`。接纳拒绝绝对路径、空组件和 `.`/`..`，读取 canonicalize 后拒绝根外路径。404/503 均使用 `local_read` envelope。旧 schema 遇到合法但无法履行的 Material query 返回 503，不伪装 200 空页。这仍不是 OCR provider 或真实平台媒体证明。该 Draft 未回填历史 Package，未访问真实平台、未取得真实平台媒体字节、未运行 OCR/ASR provider、未改 Evidence Library HTML/CSS，也未部署或完成用户验收。
 
 ### GOV-006 / Issue #82（决策治理收敛）
 

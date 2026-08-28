@@ -599,7 +599,7 @@ async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discov
 
     let body = get_successful_utf8_response(
         application.clone(),
-        "/api/local/evidence-library?q=ADHD&window=last_30_days",
+        "/api/local/evidence-library/legacy?q=ADHD&window=last_30_days",
     )
     .await;
     assert!(body.contains("note-api-known"));
@@ -609,9 +609,11 @@ async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discov
     assert!(!body.contains("https://"));
     assert!(!body.contains("xhscdn"));
 
-    let body =
-        get_successful_utf8_response(application.clone(), "/api/local/evidence-library?q=ADHD")
-            .await;
+    let body = get_successful_utf8_response(
+        application.clone(),
+        "/api/local/evidence-library/legacy?q=ADHD",
+    )
+    .await;
     assert!(body.contains("note-api-known"));
     assert!(body.contains("note-api-unknown"));
     assert!(body.contains("\"timeView\":\"latest_accepted_discovery\""));
@@ -654,7 +656,7 @@ async fn loopback_projection_counts_unknown_published_time_by_content_item_ident
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?q=API&window=last_30_days")
+                .uri("/api/local/evidence-library/legacy?q=API&window=last_30_days")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -717,7 +719,7 @@ async fn loopback_7_day_query_keeps_api_and_page_window_metadata_in_sync() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?q=ADHD&window=last_7_days")
+                .uri("/api/local/evidence-library/legacy?q=ADHD&window=last_7_days")
                 .body(Body::empty())
                 .unwrap(),
         )

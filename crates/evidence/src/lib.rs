@@ -13,6 +13,7 @@ mod material_admission;
 mod material_asset_read;
 mod material_contract_validation;
 mod material_cursor;
+mod material_detail_read;
 mod material_disposition;
 mod material_media;
 mod material_media_read;
@@ -62,9 +63,10 @@ pub use local_producer::{
 pub use material_asset_read::{
     LocalMaterialAsset, read_local_derivative, read_local_materialization,
 };
+pub use material_detail_read::read_material_detail;
 pub use material_disposition::{
     MaterialMediaDisposition, record_blob_disposition, record_derivative_disposition,
-    record_materialization_disposition,
+    record_materialization_disposition, record_slot_disposition,
 };
 pub use material_processing::record_media_derivative_completion;
 pub use material_projection::{
@@ -72,6 +74,7 @@ pub use material_projection::{
     MaterialLibraryProjection, MaterialPreview, MaterialReadError, MaterialSummary,
     material_projection_schema_is_ready, read_material_library,
 };
+pub use material_social_read::read_authorized_research_comments;
 pub use patrol_scheduler::{
     PatrolTickSummary, patrol_schema_is_ready, run_due_patrols, set_group_for_many,
     set_monitoring_for_many, set_target_monitoring, target_monitoring_enabled,

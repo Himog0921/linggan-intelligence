@@ -10,9 +10,13 @@ pub async fn record_media_derivative_completion(
     job_ref: Uuid,
     derivative_kind: &str,
     content_hash: &str,
+    byte_size: i64,
     storage_key: Option<&str>,
 ) -> Result<Uuid, ProducerRuntimeError> {
-    if storage_key.is_some_and(|value| !crate::material_storage_key::is_safe_storage_key(value)) {
+    if storage_key.is_some_and(|value| !crate::material_storage_key::is_safe_storage_key(value))
+        || !(1..=crate::material_storage_key::maximum_local_asset_bytes()).contains(&byte_size)
+        || crate::material_storage_key::derivative_mime(derivative_kind).is_none()
+    {
         return Err(ProducerRuntimeError::MaterialIdentityConflict);
     }
     let mut tx = database
@@ -54,13 +58,14 @@ pub async fn record_media_derivative_completion(
     let derivative_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO linggan_media_derivative \
-         (derivative_ref,job_ref,derivative_kind,content_hash,storage_key) \
-         VALUES($1,$2,$3,$4,$5)",
+         (derivative_ref,job_ref,derivative_kind,content_hash,byte_size,storage_key) \
+         VALUES($1,$2,$3,$4,$5,$6)",
     )
     .bind(derivative_ref)
     .bind(job_ref)
     .bind(derivative_kind)
     .bind(content_hash)
+    .bind(byte_size)
     .bind(storage_key)
     .execute(&mut *tx)
     .await

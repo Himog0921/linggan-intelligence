@@ -8,13 +8,28 @@ ALTER TABLE linggan_media_materialization
             OR local_asset_path ~ '^/api/local/media/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{64}$');
 
 ALTER TABLE linggan_media_blob
+    DROP CONSTRAINT linggan_media_blob_byte_size_check,
+    ADD CONSTRAINT linggan_media_blob_byte_size_check
+        CHECK (byte_size > 0),
+    ADD CONSTRAINT linggan_media_blob_declared_mime_type_check
+        CHECK (length(btrim(mime_type)) > 0 AND length(mime_type) <= 255),
     DROP CONSTRAINT linggan_media_blob_storage_key_check,
     ADD CONSTRAINT linggan_media_blob_storage_key_check
         CHECK (storage_key ~ '^[^/]+(/[^/]+)*$' AND storage_key !~ '(^|/)(\\.|\\.\\.)(/|$)');
 
 ALTER TABLE linggan_media_derivative
+    ADD COLUMN byte_size bigint,
+    ADD CONSTRAINT linggan_media_derivative_byte_size_check
+        CHECK (byte_size IS NULL OR byte_size > 0),
     ADD CONSTRAINT linggan_media_derivative_storage_key_check
         CHECK (storage_key IS NULL OR (storage_key ~ '^[^/]+(/[^/]+)*$' AND storage_key !~ '(^|/)(\\.|\\.\\.)(/|$)'));
+
+ALTER TABLE linggan_media_upload_session
+    DROP CONSTRAINT linggan_media_upload_session_expected_byte_size_check,
+    ADD CONSTRAINT linggan_media_upload_session_expected_byte_size_check
+        CHECK (expected_byte_size > 0),
+    ADD CONSTRAINT linggan_media_upload_session_declared_mime_type_check
+        CHECK (length(btrim(mime_type)) > 0 AND length(mime_type) <= 255);
 
 CREATE TABLE linggan_material_media_origin (
     observation_ref uuid PRIMARY KEY REFERENCES linggan_media_observation(observation_ref),
@@ -75,6 +90,12 @@ CREATE TABLE linggan_material_media_disposition_event (
     CHECK (num_nonnulls(slot_key,blob_sha256,materialization_ref,derivative_ref)=1),
     CHECK (state<>'BYTES_CLEANED' OR materialization_ref IS NOT NULL)
 );
+
+-- One qualification clock for list/detail/original/derivative reads. `asOf` freezes accepted
+-- material pagination only; it never re-opens a disposition that is effective now.
+CREATE VIEW linggan_current_material_media_disposition AS
+SELECT * FROM linggan_material_media_disposition_event
+WHERE recorded_at <= scope_001_now() AND effective_at <= scope_001_now();
 
 CREATE TRIGGER linggan_material_media_origin_is_append_only BEFORE UPDATE OR DELETE ON linggan_material_media_origin FOR EACH ROW EXECUTE FUNCTION linggan_plugin_runtime_forbid_mutation();
 CREATE TRIGGER linggan_material_media_candidate_is_append_only BEFORE UPDATE OR DELETE ON linggan_material_media_candidate FOR EACH ROW EXECUTE FUNCTION linggan_plugin_runtime_forbid_mutation();

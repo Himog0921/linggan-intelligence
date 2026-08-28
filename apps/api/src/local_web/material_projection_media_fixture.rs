@@ -40,16 +40,17 @@ pub(super) async fn assert_disposition_precedence(
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
-    let cleaned: Value =
+    let cleaned_list: Value =
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let cleaned = detail_for_list(&database, &cleaned_list).await;
     assert_eq!(
         cleaned
-            .pointer("/items/0/preview/bytesState")
+            .pointer("/item/preview/bytesState")
             .and_then(Value::as_str),
         Some("BYTES_CLEANED")
     );
     assert_eq!(
-        cleaned.pointer("/items/0/preview/localAssetUrl"),
+        cleaned.pointer("/item/preview/localAssetUrl"),
         Some(&Value::Null)
     );
     let gated = app_with_database(database.clone())
@@ -87,16 +88,17 @@ pub(super) async fn assert_disposition_precedence(
         )
         .await
         .unwrap();
-    let restricted: Value =
+    let restricted_list: Value =
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let restricted = detail_for_list(&database, &restricted_list).await;
     assert_eq!(
         restricted
-            .pointer("/items/0/preview/bytesState")
+            .pointer("/item/preview/bytesState")
             .and_then(Value::as_str),
         Some("WITHDRAWN_OR_RESTRICTED")
     );
     assert_eq!(
-        restricted.pointer("/items/0/preview/localAssetUrl"),
+        restricted.pointer("/item/preview/localAssetUrl"),
         Some(&Value::Null)
     );
     assert_asset_response(&database, shared_materialization_url, b"proof-bytes!").await;
@@ -141,10 +143,11 @@ async fn assert_derivative_disposition(
         )
         .await
         .unwrap();
-    let payload: Value =
+    let list: Value =
         serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    let payload = detail_for_list(database, &list).await;
     let derivative = payload
-        .pointer("/items/0/inspector/derivatives")
+        .pointer("/item/inspector/derivatives")
         .and_then(Value::as_array)
         .unwrap()
         .iter()
@@ -165,6 +168,18 @@ async fn assert_derivative_disposition(
         .await
         .unwrap();
     assert_eq!(gated.status(), StatusCode::NOT_FOUND);
+}
+
+async fn detail_for_list(database: &Database, list: &Value) -> Value {
+    let url = list
+        .pointer("/items/0/detailUrl")
+        .and_then(Value::as_str)
+        .unwrap();
+    let response = app_with_database(database.clone())
+        .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap()
 }
 
 pub(super) async fn seed_media(database: &Database) -> uuid::Uuid {
@@ -220,6 +235,7 @@ pub(super) async fn complete_ocr_derivative(
         job_ref,
         "ocr_text",
         OCR_PROOF_SHA256,
+        15,
         Some("derivatives/ocr/proof"),
     )
     .await
