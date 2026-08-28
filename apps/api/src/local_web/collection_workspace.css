@@ -292,3 +292,8 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-src-ready { color:var(--v7-ok); } .c-src-warning { color:var(--v7-warn); } .c-src-neutral,.c-src-dash { color:var(--v7-muted); }
 .c-src-muted { color:var(--v7-ghost); font-size:12px; }
 .c-src-updated { color:var(--v7-muted); font:11px var(--lgi-font-mono); }
+.c-src-actions { display:flex; flex-direction:column; gap:6px; align-items:flex-start; }
+.c-src-btn { height:30px; padding:0 12px; font-size:11px; box-shadow:none; }
+.c-src-btn:hover { transform:none; box-shadow:none; }
+.c-src-failure { margin:11px 0 0; max-width:720px; padding:9px 12px; background:var(--v7-bad-soft); color:var(--v7-black); font-size:13px; line-height:1.7; }
+.c-src-failure b { margin-right:9px; padding:2px 7px; background:var(--v7-bad-fill); color:var(--v7-white); font:800 10px var(--lgi-font-mono); letter-spacing:.09em; }

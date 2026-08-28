@@ -8,8 +8,9 @@
 //! What this view may claim is narrow: a row here proves the target was **stored**. It says
 //! nothing about archiving, authorisation or any capture ever running (INV-36).
 
-use linggan_evidence::ObservationTarget;
+use linggan_evidence::{ArchiveCompleteness, ObservationTarget};
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// The marker `collection.rs` leaves in the Targets page so the read side can find the empty
 /// state without re-parsing the whole document.
@@ -23,6 +24,8 @@ pub fn render_stored_targets(
     base: &str,
     targets: &[ObservationTarget],
     filter: Option<&str>,
+    completeness: &HashMap<String, ArchiveCompleteness>,
+    error: Option<&str>,
 ) -> String {
     if targets.is_empty() {
         return base.to_owned();
@@ -37,7 +40,11 @@ pub fn render_stored_targets(
 
     let mut rows = String::new();
     for (index, target) in targets.iter().enumerate() {
-        rows.push_str(&target_row(target, index));
+        rows.push_str(&target_row(
+            target,
+            index,
+            completeness.get(&target.identity_key),
+        ));
     }
 
     // 表头六列与内容工作台「监控来源」一致。它在真实环境用了数月，列的取舍有依据：
@@ -48,6 +55,7 @@ pub fn render_stored_targets(
                 <div class="c-sources-count"><b>{count}</b><span>个来源</span></div>
                 <div class="c-sources-filters">{filters}</div>
               </div>
+              {failure}
               <p class="c-sources-note">这里是「我在长期看谁」。加入观察只写本机记录，不访问任何平台；真正开始采集要另走一遍申请 → 授权 → 准入 → 工单 → 租约。</p>
               <div class="c-src-head">
                 <div>编号</div><div>博主信息</div><div>平台 / 分组</div>
@@ -57,11 +65,46 @@ pub fn render_stored_targets(
             </section>"#,
         count = targets.len(),
         filters = filter_chips(filter),
+        failure = failure_markup(error),
     );
     format!(
         "{before}{list}{after}",
         before = &base[..open],
         after = &base[close..],
+    )
+}
+
+/// 上一次动作失败时说明原因。
+///
+/// 失败必须看得见。跳转回来却什么都不说，会让人以为动作成功了——那比「点了没反应」
+/// 更糟，因为它会让人以为系统里正在跑一件其实没跑的事。
+fn failure_markup(error: Option<&str>) -> String {
+    let Some(code) = error else {
+        return String::new();
+    };
+    let explanation = match code {
+        "identity_unrecognised" => {
+            "认不出这是谁。创作者请粘主页链接（里面带平台 ID），关键词直接写词就行。"
+        }
+        "store_failed" => "没有保存成功。这个目标可能已经在观察列表里了。",
+        "archive_not_requestable" => {
+            "现在不能发起深度建档。深度建档是一次性的：目标已经在建档中或已建过档，增量由巡检负责。"
+        }
+        "archive_refuse" => "深度建档被拒绝：没有覆盖「创作者 · 深度建档」的有效采集授权。",
+        "archive_defer" => {
+            "深度建档暂缓：资源不够（没有在岗工位、能力不匹配、当天额度已满，或风险暂停生效中）。"
+        }
+        "archive_merge" => {
+            "深度建档暂缓：已经有一份在途的工作覆盖同一目标，等它跑完而不是再开一个。"
+        }
+        "archive_lease_failed" => "工单已建立但没能发出租约。工位可能刚刚掉线。",
+        "monitoring_toggle_failed" => "巡检开关没有切换成功。",
+        "read_model_not_connected" => "本机读投影未接通，这次没有写入任何东西。",
+        _ => "上一次动作没有完成。",
+    };
+    format!(
+        r#"<p class="c-src-failure"><b>没有完成</b>{explanation}</p>"#,
+        explanation = escape(explanation),
     )
 }
 
@@ -99,7 +142,11 @@ fn filter_chips(active: Option<&str>) -> String {
 /// 更新时间 / 操作。它在真实环境用了数月，列的取舍是有依据的——博主信息里放的是「人能
 /// 认出这是谁」所需的最少四样（名字、ID、简介、粉丝与赞藏），而不是把所有采到的字段
 /// 都摊开。
-fn target_row(target: &ObservationTarget, index: usize) -> String {
+fn target_row(
+    target: &ObservationTarget,
+    index: usize,
+    archive: Option<&ArchiveCompleteness>,
+) -> String {
     let facts = target.identity_facts.as_ref();
     let is_creator = target.target_kind == "creator";
     let name = target
@@ -134,9 +181,9 @@ fn target_row(target: &ObservationTarget, index: usize) -> String {
         platform = escape(&target.platform.to_uppercase()),
         kind = escape(if is_creator { "创作者" } else { "关键词" }),
         status = status_lines(target),
-        health = archive_health(target, is_creator),
+        health = archive_health(archive, is_creator),
         stored = escape(&target.first_stored_at),
-        actions = row_actions(target, is_creator),
+        actions = row_actions(target, is_creator, archive),
     )
 }
 
@@ -165,27 +212,81 @@ fn status_lines(target: &ObservationTarget) -> String {
     )
 }
 
-/// 档案健康度。
+/// 档案完整度。
 ///
-/// **不采到就写「未采集」，不给一个看起来像已知的读数。**内容工作台在这一列踩过的坑是
-/// 把「读不到」显示成正常值，人据此以为档案是好的。
-fn archive_health(target: &ObservationTarget, is_creator: bool) -> String {
+/// **分层计数，不给百分比**（取自内容工作台 `AuthorArchiveJob` 的
+/// `totalDiscovered` / `detailSucceeded` / `detailFailed`）。百分比会把「没采到」与
+/// 「采了但失败」压成同一个数字，而这两件事的处置完全不同：前者要派任务，后者要查原因。
+///
+/// 被隔离的记录单列出来——它们采到了却没进语料库，不列就彻底消失在视野外。
+fn archive_health(archive: Option<&ArchiveCompleteness>, is_creator: bool) -> String {
     if !is_creator {
         return r#"<span class="c-src-muted">关键词来源不生成博主档案</span>"#.to_owned();
     }
-    match target.identity_facts.as_ref() {
-        Some(_) => r#"<span class="c-src-line c-src-ready">公开资料已采</span>"#.to_owned(),
-        None => r#"<span class="c-src-line c-src-neutral">公开资料未采集</span>"#.to_owned(),
+    let Some(archive) = archive.filter(|value| !value.is_untouched()) else {
+        return r#"<span class="c-src-line c-src-neutral">尚未采集</span>"#.to_owned();
+    };
+    let mut lines = String::new();
+    lines.push_str(&layer_line(
+        "作者档案",
+        archive.author_profile_captures,
+        archive.author_profile_captures > 0,
+    ));
+    lines.push_str(&layer_line(
+        "作品清单",
+        archive.works_listed,
+        archive.works_listed > 0,
+    ));
+    lines.push_str(&layer_line(
+        "逐篇详情",
+        archive.details_captured,
+        archive.details_captured > 0,
+    ));
+    if archive.quarantined > 0 {
+        lines.push_str(&format!(
+            r#"<span class="c-src-line c-src-warning">已隔离 {}</span>"#,
+            archive.quarantined
+        ));
+    }
+    lines
+}
+
+/// 一层的读数。**0 写成「未采集」而不是「0 条」**：0 条看起来像一个已知的结论
+/// （「这个博主没有作品」），未采集才是事实。
+fn layer_line(label: &str, count: i64, has_any: bool) -> String {
+    if has_any {
+        format!(r#"<span class="c-src-line c-src-ready">{label} {count}</span>"#)
+    } else {
+        format!(r#"<span class="c-src-line c-src-neutral">{label} 未采集</span>"#)
     }
 }
 
-/// 行内操作。**只放真实存在的动作**：深度建档与巡检开关都已接通，因此是真按钮。
-fn row_actions(target: &ObservationTarget, is_creator: bool) -> String {
+/// 行内操作。**只放真实存在的动作**：深度建档与巡检开关都走与 API、与定时巡检完全
+/// 相同的那条授权链，按钮只是把「人现在想要这个」表达出来。
+fn row_actions(
+    target: &ObservationTarget,
+    is_creator: bool,
+    archive: Option<&ArchiveCompleteness>,
+) -> String {
     if !is_creator {
         return r#"<span class="c-src-muted">—</span>"#.to_owned();
     }
+    // 已经建过档就不再显示建档按钮：重复全量建档只会把当天额度吃光，而增量本来就是
+    // 巡检在做的事。
+    let archived = archive.is_some_and(|value| value.works_listed > 0);
+    let archive_button = if archived {
+        String::new()
+    } else {
+        format!(
+            r#"<form method="post" action="/collection/targets/archive">
+                  <input type="hidden" name="target_ref" value="{target_ref}" />
+                  <button class="c-btn-primary c-src-btn" type="submit">深度建档</button>
+                </form>"#,
+            target_ref = target.target_ref,
+        )
+    };
     format!(
-        r#"<form method="post" action="/collection/targets/monitoring">
+        r#"{archive_button}<form method="post" action="/collection/targets/monitoring">
                   <input type="hidden" name="target_ref" value="{target_ref}" />
                   <button class="c-btn-quiet" type="submit">{action}</button>
                 </form>"#,
@@ -198,7 +299,7 @@ fn row_actions(target: &ObservationTarget, is_creator: bool) -> String {
     )
 }
 
-/// 小红书号优先，采不到才退回平台 ID——小红书号是人能对上的那个。
+/// 小红书号优先/// 小红书号优先，采不到才退回平台 ID——小红书号是人能对上的那个。
 fn identity_display(target: &ObservationTarget) -> String {
     fact_text(target.identity_facts.as_ref(), "redId")
         .unwrap_or_else(|| target.identity_key.clone())
@@ -292,13 +393,22 @@ mod tests {
     #[test]
     fn an_empty_list_leaves_the_honest_empty_state_alone() {
         let base = format!("before{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}after");
-        assert_eq!(render_stored_targets(&base, &[], None), base);
+        assert_eq!(
+            render_stored_targets(&base, &[], None, &HashMap::new(), None),
+            base
+        );
     }
 
     #[test]
     fn stored_targets_never_claim_more_than_being_stored() {
         let base = format!("before{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}after");
-        let html = render_stored_targets(&base, &[target("creator", Some("孩悦"))], None);
+        let html = render_stored_targets(
+            &base,
+            &[target("creator", Some("孩悦"))],
+            None,
+            &HashMap::new(),
+            None,
+        );
 
         assert!(html.contains("孩悦"));
         // 词表换成了内容工作台那套（档案/巡检/分组三行），但断言的意图不变：
@@ -318,7 +428,13 @@ mod tests {
     #[test]
     fn a_target_without_a_name_shows_its_identity_rather_than_an_invented_one() {
         let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
-        let html = render_stored_targets(&base, &[target("keyword", None)], None);
+        let html = render_stored_targets(
+            &base,
+            &[target("keyword", None)],
+            None,
+            &HashMap::new(),
+            None,
+        );
         assert!(html.contains("5ebe6d21"));
         assert!(!html.contains("未命名"));
     }
@@ -329,6 +445,8 @@ mod tests {
         let html = render_stored_targets(
             &base,
             &[target("creator", Some("<script>x</script>"))],
+            None,
+            &HashMap::new(),
             None,
         );
         assert!(html.contains("&lt;script&gt;"));

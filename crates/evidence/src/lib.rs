@@ -2,6 +2,7 @@
 //! the semantic code gate; real producer evidence remains out of scope.
 
 mod acquisition_chain;
+mod archive_completeness;
 mod collection_target;
 mod dispatch;
 mod execution_station;
@@ -20,6 +21,7 @@ pub use acquisition_chain::{
     AcquisitionChainError, AuthorizationGrant, RequestOutcome, acquisition_chain_schema_is_ready,
     grant_authorization, request_and_admit,
 };
+pub use archive_completeness::{ArchiveCompleteness, read_archive_completeness};
 pub use collection_target::{
     CollectionTargetError, ObservationTarget, StoreOutcome, collection_target_schema_is_ready,
     list_targets, list_targets_in_state, store_pending_target, transition_target,

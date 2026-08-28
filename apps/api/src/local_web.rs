@@ -29,12 +29,12 @@ use linggan_evidence::{
     dispatch_schema_is_ready, enrich_target_from_author_profile, grant_authorization,
     ingest_discovery_package, issue_work_order_lease, list_targets, list_targets_in_state,
     local_discovery_schema_is_ready, local_producer_schema_is_ready, open_claim_window,
-    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_discovery_library,
-    read_local_media_blob, read_media_upload_session, read_runtime_library, read_station_overview,
-    record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, request_and_admit, retire_station, set_target_monitoring,
-    start_local_attempt, start_producer_attempt, station_schema_is_ready, store_pending_target,
-    submit_local_package, submit_producer_package, target_monitoring_enabled,
+    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_archive_completeness,
+    read_discovery_library, read_local_media_blob, read_media_upload_session, read_runtime_library,
+    read_station_overview, record_media_download_failure, record_media_upload_chunk,
+    register_station, release_media_upload_finalize, request_and_admit, retire_station,
+    set_target_monitoring, start_local_attempt, start_producer_attempt, station_schema_is_ready,
+    store_pending_target, submit_local_package, submit_producer_package, target_monitoring_enabled,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -274,6 +274,10 @@ fn router(state: LocalWebState) -> Router {
         .route(
             "/collection/targets/monitoring",
             post(collection_target_toggle_monitoring),
+        )
+        .route(
+            "/collection/targets/archive",
+            post(collection_target_deep_archive),
         )
         .route("/collection/operations", get(collection_operations))
         .route("/collection/attention", get(collection_attention))
@@ -1781,6 +1785,8 @@ struct CollectionParams {
     drawer: Option<String>,
     /// 观察目标的筛选。只改读取范围，不消耗任何平台访问。
     filter: Option<String>,
+    /// 上一次动作的失败原因。失败必须看得见，否则跳转回来什么都不说，会让人以为成功了。
+    error: Option<String>,
 }
 
 /// DESIGN-006: the entry lands on the one surface whose contents expire. Arriving on the
@@ -1806,11 +1812,18 @@ async fn collection_targets(
     let Some(database) = state.database.database() else {
         return Html(base);
     };
+    // 一次查完所有目标的档案完整度：列表最多两百行，逐行发查询会让页面打开一次跑
+    // 两百次数据库。
+    let completeness = read_archive_completeness(database, linggan_contracts::OPEN_PLATFORM)
+        .await
+        .unwrap_or_default();
     match list_targets(database, params.filter.as_deref(), 200).await {
         Ok(targets) => Html(collection_targets_view::render_stored_targets(
             &base,
             &targets,
             params.filter.as_deref(),
+            &completeness,
+            params.error.as_deref(),
         )),
         Err(_) => Html(base),
     }
@@ -2236,6 +2249,48 @@ async fn collection_target_toggle_monitoring(
         {
             return Redirect::to("/collection/targets?error=monitoring_toggle_failed");
         }
+    }
+    Redirect::to("/collection/targets")
+}
+
+/// COLLECTION-001 · 从页面发起一次深度建档。
+///
+/// 它**不绕过授权链**：走的是与定时巡检、与 API 完全相同的一条路——申请、准入六问、
+/// 工单、租约。按钮只是把「人现在想要这个」表达出来，能不能做仍由准入回答。
+///
+/// 失败原因原样带回页面：没有覆盖深度建档的授权、目标已在建档中、工位不在岗，这三种
+/// 情况的处置完全不同，压成一句「失败」等于让人自己去猜。
+async fn collection_target_deep_archive(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<MonitoringForm>,
+) -> Redirect {
+    let Some(database) = state.database.database() else {
+        return Redirect::to("/collection/targets?error=read_model_not_connected");
+    };
+    let outcome = request_and_admit(
+        database,
+        form.target_ref,
+        "deep_archive",
+        "从观察目标页发起深度建档",
+        "person",
+    )
+    .await;
+    let Ok(outcome) = outcome else {
+        return Redirect::to("/collection/targets?error=archive_not_requestable");
+    };
+    let Some(work_order_ref) = outcome.work_order_ref else {
+        // 准入没通过。把它的结论原样带回去——refuse 与 defer 的处置完全不同。
+        return Redirect::to(&format!(
+            "/collection/targets?error=archive_{}",
+            outcome.outcome.code()
+        ));
+    };
+    // 深度建档给 60 分钟：200 条作品的清单加逐篇详情，比一次巡检重得多。
+    if issue_work_order_lease(database, work_order_ref, 60)
+        .await
+        .is_err()
+    {
+        return Redirect::to("/collection/targets?error=archive_lease_failed");
     }
     Redirect::to("/collection/targets")
 }
