@@ -40,6 +40,11 @@ pub struct ObservationTarget {
     pub monitoring_enabled: bool,
     /// 人给的分组名。为空表示未分组——那是正常状态，不是缺失。
     pub group_name: Option<String>,
+    /// 上一次真的派出巡检的时间。没派过就是 `None`，不是「很久以前」。
+    pub last_patrol_dispatched_at: Option<String>,
+    /// 下一次到期时间，由「上次派出 + 间隔」算出。**巡检没开时不算**——算一个永远不会
+    /// 到来的时间，会让人以为它排上队了。
+    pub next_patrol_at: Option<String>,
 }
 
 /// Whether a store call created a target or found the one already there.
@@ -198,7 +203,12 @@ pub async fn list_targets(
     };
     let rows = sqlx::query_as::<_, ListedTargetRow>(
         "SELECT target_ref, platform, target_kind, identity_key, display_name, identity_facts, \
-                source, lifecycle_state, first_stored_at::text, monitoring_enabled, group_name \
+                source, lifecycle_state, first_stored_at::text, monitoring_enabled, group_name, \
+                to_char(last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
+                CASE WHEN monitoring_enabled AND last_patrol_dispatched_at IS NOT NULL \
+                     THEN to_char(last_patrol_dispatched_at \
+                                  + make_interval(secs => patrol_interval_seconds), \
+                                  'MM-DD HH24:MI') END \
          FROM collection_observation_target \
          WHERE ($1::text IS NULL OR target_kind = $1) \
            AND ($2::text IS NULL OR lifecycle_state = $2) \
@@ -214,6 +224,8 @@ pub async fn list_targets(
         .map(|row| ObservationTarget {
             monitoring_enabled: row.9,
             group_name: row.10,
+            last_patrol_dispatched_at: row.11,
+            next_patrol_at: row.12,
             ..ObservationTarget::from((
                 row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8,
             ))
@@ -234,6 +246,8 @@ type ListedTargetRow = (
     String,
     Option<String>,
     bool,
+    Option<String>,
+    Option<String>,
     Option<String>,
 );
 
@@ -394,6 +408,8 @@ impl From<TargetRow> for ObservationTarget {
             // 只有列表查询读它们；其它入口保持默认，由调用方按需另读。
             monitoring_enabled: false,
             group_name: None,
+            last_patrol_dispatched_at: None,
+            next_patrol_at: None,
         }
     }
 }

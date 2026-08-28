@@ -49,17 +49,16 @@ pub fn render_stored_targets(
     // 表头六列与内容工作台「监控来源」一致。它在真实环境用了数月，列的取舍有依据：
     // 「档案健康度」与「状态」分开，因为「有没有资料」和「在不在监控」是两件独立的事。
     let list = format!(
-        r#"<section class="c-sources">
+        r#"<section class="c-tg-workspace">
               {failure}
-              <form class="c-src-form" method="post" action="/collection/targets/batch">
-                <div class="c-src-head">
-                  <div>选择</div><div>编号</div><div>博主信息</div><div>平台 / 分组</div>
-                  <div>状态</div><div>档案健康度</div><div>深度建档</div><div>更新时间</div>
-                  <div class="c-src-head-count">{count} 个来源</div>
-                </div>
-                <div class="c-src-rows">{rows}</div>
-                <div class="c-src-batch">
-                  <span class="c-src-batch-label">对勾选的来源：</span>
+              <div class="c-tg-list-head">
+                <span>{count} 个观察目标</span>
+                <span class="c-tg-list-hint">点击一行 → 打开宽幅研究抽屉</span>
+              </div>
+              <form class="c-tg-form" method="post" action="/collection/targets/batch">
+                <div class="c-tg-list">{rows}</div>
+                <div class="c-tg-batch">
+                  <span class="c-tg-batch-label">对勾选的目标：</span>
                   <button class="c-btn-quiet" type="submit" name="action" value="monitor_on">开启巡检</button>
                   <button class="c-btn-quiet" type="submit" name="action" value="monitor_off">暂停巡检</button>
                   <input name="group_name" maxlength="40" placeholder="分组名（留空取消分组）" />
@@ -114,18 +113,19 @@ fn failure_markup(error: Option<&str>) -> String {
     )
 }
 
-/// 一行来源。
+/// 一行观察目标。
 ///
-/// 六列与内容工作台「监控来源」一致：编号 / 博主信息 / 平台·分组 / 状态 / 档案健康度 /
-/// 更新时间 / 操作。它在真实环境用了数月，列的取舍是有依据的——博主信息里放的是「人能
-/// 认出这是谁」所需的最少四样（名字、ID、简介、粉丝与赞藏），而不是把所有采到的字段
-/// 都摊开。
+/// 五列布局照 `linggan-collection-workspace-final-v4` 稿子：选择轨 / 编号 + 身份 /
+/// 内容量 / 信号 / 时间 / 基线摘要。
+///
+/// **稿子上有而系统里没有的读数，一律写「未采集」或「—」，不填假数**（Mog 于
+/// 2026-08-28 选定方案 A）。这样等评论、转录、爆款判定接通时，结构不用再改一次；
+/// 而在那之前，页面不会声称系统做得到它做不到的事。
 fn target_row(
     target: &ObservationTarget,
     index: usize,
     archive: Option<&ArchiveCompleteness>,
 ) -> String {
-    let facts = target.identity_facts.as_ref();
     let is_creator = target.target_kind == "creator";
     let name = target
         .display_name
@@ -134,64 +134,130 @@ fn target_row(
         .unwrap_or(&target.identity_key);
 
     format!(
-        r#"<div class="c-src-row">
-                <div class="c-src-pick"><input type="checkbox" name="target_ref" value="{target_ref}" aria-label="选择 {name}" /></div>
-                <div class="c-src-index">{index:02}</div>
-                <div class="c-src-identity">{avatar}
-                  <div class="c-src-identity-text">
-                    <b>{name}</b>
-                    <span class="c-src-id">ID {identity}</span>
-                    {bio}
-                    {counts}
+        r#"<article class="c-tg-item">
+                <div class="c-tg-pick"><input type="checkbox" name="target_ref" value="{target_ref}" aria-label="选择 {name}" /></div>
+                <div class="c-tg-index">{index:03}</div>
+                <div class="c-tg-object">
+                  {avatar}
+                  <div class="c-tg-object-text">
+                    <div class="c-tg-title">{name}</div>
+                    <div class="c-tg-meta">{kind} / {platform} · {handle}</div>
+                    <div class="c-tg-states">{states}</div>
                   </div>
                 </div>
-                <div class="c-src-platform"><span class="c-src-tag">{platform}</span>{kind}<span class="c-src-group">{group}</span></div>
-                <div class="c-src-status">{status}</div>
-                <div class="c-src-health">{health}</div>
-                <div class="c-src-archive">{archive_action}</div>
-                <div class="c-src-updated">{stored}</div>
-                <div class="c-src-actions">{actions}</div>
-              </div>"#,
+                <div class="c-tg-metrics">{metrics}</div>
+                <div class="c-tg-signals">{signals}</div>
+                <div class="c-tg-times">{times}</div>
+                <div class="c-tg-baseline">{baseline}</div>
+                <div class="c-tg-actions">{actions}</div>
+              </article>"#,
         target_ref = target.target_ref,
         index = index + 1,
-        avatar = avatar_markup(facts),
+        avatar = avatar_markup(target.identity_facts.as_ref()),
         name = escape(name),
-        identity = escape(&identity_display(target)),
-        bio = bio_markup(facts),
-        counts = count_markup(facts, is_creator),
-        platform = escape(&target.platform.to_uppercase()),
         kind = escape(if is_creator { "创作者" } else { "关键词" }),
-        group = escape(target.group_name.as_deref().unwrap_or("未分组")),
-        status = status_lines(target),
-        health = archive_health(archive, is_creator),
-        stored = escape(&target.first_stored_at),
-        archive_action = archive_action(target, is_creator, archive),
-        actions = row_actions(target, is_creator),
+        platform = escape(&target.platform.to_uppercase()),
+        handle = escape(&identity_display(target)),
+        states = state_chips(target),
+        metrics = metrics_cell(target, archive, is_creator),
+        signals = signals_cell(),
+        times = times_cell(target),
+        baseline = baseline_cell(archive, is_creator),
+        actions = row_actions(target, is_creator, archive),
     )
 }
 
-/// 状态三行，与内容工作台同构：档案 / 监控 / 分组。
-///
-/// 分成三行而不是压成一个词，是因为它们会各自独立变化——一个博主可以「已建档 + 监控已
-/// 暂停」，压成一个状态就分不清是没建档还是被人停了。
-fn status_lines(target: &ObservationTarget) -> String {
+/// 状态徽记。稿子是 `● BASELINE READY` / `PATROLLING` 这类，此处转中文。
+fn state_chips(target: &ObservationTarget) -> String {
     let (archive_tone, archive_label) = match target.lifecycle_state.as_str() {
         "pending_decision" => ("neutral", "尚未建档"),
-        "archiving" => ("warning", "建档中"),
-        "monitoring" => ("ready", "已建档"),
+        "archiving" => ("warn", "▲ 建档中"),
+        "monitoring" => ("ok", "● 基线就绪"),
         _ => ("neutral", "状态未知"),
     };
-    // 巡检与建档是两个独立事实：一个博主可以「已建档 + 巡检已暂停」。压成一个状态就
-    // 分不清「没在跑」是因为被停了还是因为还没建档。
     let (patrol_tone, patrol_label) = if target.monitoring_enabled {
-        ("ready", "巡检中")
+        ("info", "巡检中")
     } else {
         ("neutral", "未开启巡检")
     };
     format!(
-        r#"<span class="c-src-line c-src-{archive_tone}">{archive_label}</span>
-           <span class="c-src-line c-src-{patrol_tone}">{patrol_label}</span>
-           <span class="c-src-line c-src-dash">未分组</span>"#
+        r#"<span class="c-tg-truth c-tg-{archive_tone}">{archive_label}</span>
+           <span class="c-tg-truth c-tg-{patrol_tone}">{patrol_label}</span>
+           <span class="c-tg-truth c-tg-neutral">{group}</span>"#,
+        group = escape(target.group_name.as_deref().unwrap_or("未分组")),
+    )
+}
+
+/// 内容量。稿子是 `184 CONTENT / 6.2K COMMENTS`。
+///
+/// **评论数系统里没有**——评论从来没有被采过。写「未采」而不是 0：0 会被读成
+/// 「这个博主没有评论」。
+fn metrics_cell(
+    target: &ObservationTarget,
+    archive: Option<&ArchiveCompleteness>,
+    is_creator: bool,
+) -> String {
+    if !is_creator {
+        return readout_pairs(&[("—", "作品"), ("—", "评论")]);
+    }
+    let works = archive
+        .map(|value| value.works_listed)
+        .filter(|count| *count > 0)
+        .map(|count| count.to_string())
+        .unwrap_or_else(|| "未采".to_owned());
+    let _ = target;
+    readout_pairs(&[(&works, "作品"), ("未采", "评论")])
+}
+
+/// 信号。稿子是 `01 NEW / 01 BURST`。
+///
+/// **两项系统里都没有**：没有新增检测，也没有爆款判定。整格写「未接通」比写两个 0 诚实
+/// ——0 会被读成「查过了，没有新增也没有爆款」。
+fn signals_cell() -> String {
+    readout_pairs(&[("—", "新增"), ("—", "爆款")])
+}
+
+/// 时间。稿子是 `32m LAST / 28m NEXT`。
+///
+/// 上次派出是真实记录；下次时间由「上次 + 巡检间隔」算得出来，因此可以给。巡检没开时
+/// 下次写「—」，因为确实没有下一次。
+fn times_cell(target: &ObservationTarget) -> String {
+    let last = target
+        .last_patrol_dispatched_at
+        .as_deref()
+        .unwrap_or("未派过");
+    let next = if target.monitoring_enabled {
+        target.next_patrol_at.as_deref().unwrap_or("待定")
+    } else {
+        "—"
+    };
+    readout_pairs(&[(last, "上次"), (next, "下次")])
+}
+
+/// 一格两行的读数（稿子的 `<b>值</b><span>标签</span>` 结构）。
+fn readout_pairs(pairs: &[(&str, &str)]) -> String {
+    pairs
+        .iter()
+        .map(|(value, label)| {
+            format!(
+                "<b>{value}</b><span>{label}</span>",
+                value = escape(value),
+                label = escape(label),
+            )
+        })
+        .collect()
+}
+
+/// 基线摘要：标题 + 健康条 + 一行读数。
+fn baseline_cell(archive: Option<&ArchiveCompleteness>, is_creator: bool) -> String {
+    if !is_creator {
+        return r#"<div class="c-tg-baseline-title">搜索基线</div>
+                  <small>关键词来源不生成博主档案</small>"#
+            .to_owned();
+    }
+    format!(
+        r#"<div class="c-tg-baseline-title">档案 / 基线</div>{health}"#,
+        health = archive_health(archive, is_creator),
     )
 }
 
@@ -272,39 +338,30 @@ fn health_ticks(percent: i64) -> String {
         .collect()
 }
 
-/// 深度建档列。
+/// 行尾操作：深度建档 + 巡检开关。
 ///
-/// 从「操作」里拆出来单独成列（Mog 于 2026-08-28 要求）：它与巡检开关不是同一类动作
-/// ——巡检是长期节奏的开关，深度建档是一次性的、重的、会吃掉当天大半额度的动作。
-/// 混在一列里，一个日常操作和一个重动作会长得一样。
-///
-/// **不绕过授权链**：它走的是与定时巡检、与 API 完全相同的那条路。
-fn archive_action(
+/// 深度建档已建过就不再显示按钮——重复全量建档只会把当天额度吃光，增量是巡检在做的事。
+/// 两者都**不绕过授权链**：走的是与定时巡检、与 API 完全相同的一条路。
+fn row_actions(
     target: &ObservationTarget,
     is_creator: bool,
     archive: Option<&ArchiveCompleteness>,
 ) -> String {
     if !is_creator {
-        return r#"<span class="c-src-muted">—</span>"#.to_owned();
+        return r#"<span class="c-tg-muted">—</span>"#.to_owned();
     }
-    // 已经建过档就不再显示按钮：重复全量建档只会把当天额度吃光，增量是巡检在做的事。
-    if archive.is_some_and(|value| value.works_listed > 0) {
-        return r#"<span class="c-src-line c-src-ready">已建档</span>"#.to_owned();
-    }
-    format!(
-        r#"<button class="c-btn-primary c-src-btn" type="submit"
+    let archived = archive.is_some_and(|value| value.works_listed > 0);
+    let archive_button = if archived {
+        String::new()
+    } else {
+        format!(
+            r#"<button class="c-btn-primary c-tg-btn" type="submit"
                   formaction="/collection/targets/archive" name="row_target_ref" value="{target_ref}">深度建档</button>"#,
-        target_ref = target.target_ref,
-    )
-}
-
-/// 行内操作：只剩巡检开关。
-fn row_actions(target: &ObservationTarget, is_creator: bool) -> String {
-    if !is_creator {
-        return r#"<span class="c-src-muted">—</span>"#.to_owned();
-    }
+            target_ref = target.target_ref,
+        )
+    };
     format!(
-        r#"<button class="c-btn-quiet" type="submit"
+        r#"{archive_button}<button class="c-btn-quiet c-tg-btn" type="submit"
                   formaction="/collection/targets/monitoring" name="row_target_ref" value="{target_ref}">{action}</button>"#,
         target_ref = target.target_ref,
         action = if target.monitoring_enabled {
@@ -315,7 +372,7 @@ fn row_actions(target: &ObservationTarget, is_creator: bool) -> String {
     )
 }
 
-/// 小红书号优先/// 小红书号优先/// 小红书号优先，采不到才退回平台 ID——小红书号是人能对上的那个。
+/// 小红书号优先/// 小红书号优先/// 小红书号优先/// 小红书号优先，采不到才退回平台 ID——小红书号是人能对上的那个。
 fn identity_display(target: &ObservationTarget) -> String {
     fact_text(target.identity_facts.as_ref(), "redId")
         .unwrap_or_else(|| target.identity_key.clone())
@@ -327,44 +384,8 @@ fn avatar_markup(facts: Option<&Value>) -> String {
         return String::new();
     };
     format!(
-        r#"<img class="c-src-avatar" src="{url}" alt="" loading="lazy" referrerpolicy="no-referrer" />"#,
+        r#"<img class="c-tg-avatar" src="{url}" alt="" loading="lazy" referrerpolicy="no-referrer" />"#,
         url = escape(&url),
-    )
-}
-
-fn bio_markup(facts: Option<&Value>) -> String {
-    let Some(description) = fact_text(facts, "description") else {
-        return String::new();
-    };
-    format!(
-        r#"<span class="c-src-bio">{description}</span>"#,
-        description = escape(&description),
-    )
-}
-
-/// 粉丝与赞藏。
-///
-/// **缺的字段整个不出现，不显示 0**：能力登记表记着 `userPageData` 可能整个拿不到，
-/// 那时粉丝数是真的「不知道」。一个写着「粉丝 0」的档案会让人直接判定这个博主不值得看。
-fn count_markup(facts: Option<&Value>, is_creator: bool) -> String {
-    if !is_creator {
-        return String::new();
-    }
-    let parts: Vec<String> = [("fans", "粉丝"), ("interactions", "赞藏")]
-        .iter()
-        .filter_map(|(key, label)| {
-            facts
-                .and_then(|value| value.get(*key))
-                .and_then(Value::as_i64)
-                .map(|count| format!("{label} {count}"))
-        })
-        .collect();
-    if parts.is_empty() {
-        return r#"<span class="c-src-counts c-src-muted">粉丝与赞藏未采集</span>"#.to_owned();
-    }
-    format!(
-        r#"<span class="c-src-counts">{}</span>"#,
-        escape(&parts.join(" · "))
     )
 }
 
@@ -404,6 +425,8 @@ mod tests {
             first_stored_at: "2026-08-26T20:00:00+08".to_owned(),
             monitoring_enabled: false,
             group_name: None,
+            last_patrol_dispatched_at: None,
+            next_patrol_at: None,
         }
     }
 

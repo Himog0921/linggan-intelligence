@@ -257,8 +257,6 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-target-avatar { width:40px; height:40px; border-radius:50%; object-fit:cover; background:var(--v7-sunken); }
 .c-target-bio { display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-muted); font-size:12px; }
 
-/* 监控来源：六列表格，复刻内容工作台在真实环境用了数月的那套信息架构。 */
-.c-sources { padding:24px 0 30px; }
 
 .c-src-head,.c-src-row { display:grid; grid-template-columns:56px minmax(240px,1.6fr) 132px 148px 148px 132px 108px; align-items:center; gap:0; }
 .c-src-head { margin-top:18px; padding:9px 0; border-top:2px solid var(--v7-black); border-bottom:1px solid var(--v7-line-strong); color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
@@ -290,33 +288,57 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-src-failure b { margin-right:9px; padding:2px 7px; background:var(--v7-bad-fill); color:var(--v7-white); font:800 10px var(--lgi-font-mono); letter-spacing:.09em; }
 .c-src-head-count { text-align:right; color:var(--v7-muted); font:600 11px var(--lgi-font-mono); letter-spacing:0; text-transform:none; }
 
-/* 批量选择与深度建档独立列 */
-.c-src-pick { display:flex; align-items:center; justify-content:center; }
-.c-src-pick input { width:15px; height:15px; accent-color:var(--v7-black); cursor:pointer; }
-.c-src-group { display:block; margin-top:4px; color:var(--v7-ghost); font-size:11px; }
-.c-src-archive { display:flex; align-items:center; }
-.c-src-batch { display:flex; align-items:center; gap:9px; flex-wrap:wrap; padding:14px 12px; border-top:2px solid var(--v7-black); }
-.c-src-batch-label { color:var(--v7-muted); font-size:12px; }
-.c-src-batch input { height:32px; min-width:200px; padding:0 10px; border:1px solid var(--v7-line-strong); border-radius:4px; background:var(--v7-white); color:var(--v7-black); font-size:12px; }
 
-/* 博主信息固定宽度并截断——它会长到把健康度挤没；健康度需要宽度放进度条与读数。 */
-.c-src-head,.c-src-row { grid-template-columns:44px 48px 300px 116px 132px 264px 104px 116px 92px; }
-.c-src-identity-text { min-width:0; max-width:100%; }
-.c-src-identity-text b,.c-src-id,.c-src-bio,.c-src-counts {
-  display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%;
-}
 
-/* 档案健康度：分段进度条 + 逐项读数 + 缺口。 */
-.c-hp { min-width:0; }
+
+
+/* 观察目标列表：照 linggan-collection-workspace-final-v4 稿子的五列布局。
+ * 稿子上有而系统里没有的读数一律写「未采集」或「—」——不填假数（方案 A）。 */
+.c-tg-workspace { padding:0; }
+.c-tg-list-head { position:sticky; top:0; z-index:5; height:36px; display:flex; align-items:center; justify-content:space-between; padding:0 14px; border-bottom:1px solid var(--v7-line); background:var(--v7-white); color:var(--v7-ghost); font:800 10px var(--lgi-font-mono); letter-spacing:.04em; }
+.c-tg-list-hint { color:var(--v7-ghost); }
+
+.c-tg-item { position:relative; min-height:82px; display:grid; grid-template-columns:34px 40px minmax(240px,1fr) 104px 96px 132px 200px 104px; align-items:center; gap:12px; padding:10px 14px; border-bottom:1px solid var(--v7-line); }
+.c-tg-item:hover { background:var(--v7-sunken); }
+.c-tg-pick { display:flex; align-items:center; justify-content:center; }
+.c-tg-pick input { width:15px; height:15px; accent-color:var(--v7-black); cursor:pointer; }
+.c-tg-index { font:800 10px var(--lgi-font-mono); color:var(--v7-ghost); }
+.c-tg-object { display:flex; align-items:flex-start; gap:10px; min-width:0; }
+.c-tg-object-text { min-width:0; }
+.c-tg-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:13px; font-weight:800; color:var(--v7-black); }
+.c-tg-meta { margin-top:2px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:9px var(--lgi-font-mono); color:var(--v7-ghost); }
+.c-tg-states { display:flex; gap:12px; flex-wrap:wrap; margin-top:7px; }
+.c-tg-truth { font:800 9px var(--lgi-font-mono); letter-spacing:.02em; }
+.c-tg-ok { color:var(--v7-ok); } .c-tg-warn { color:var(--v7-warn); }
+.c-tg-info { color:var(--v7-info); } .c-tg-neutral { color:var(--v7-ghost); }
+
+.c-tg-metrics,.c-tg-signals,.c-tg-times { display:grid; grid-template-columns:1fr 1fr; gap:3px 7px; }
+.c-tg-metrics b,.c-tg-signals b,.c-tg-times b { font:800 11px var(--lgi-font-mono); color:var(--v7-black); font-variant-numeric:tabular-nums; }
+.c-tg-metrics span,.c-tg-signals span,.c-tg-times span { font:8px var(--lgi-font-mono); color:var(--v7-ghost); }
+
+.c-tg-baseline { min-width:0; }
+.c-tg-baseline-title { margin-bottom:5px; font:800 8px var(--lgi-font-mono); letter-spacing:.07em; color:var(--v7-ghost); }
+.c-tg-baseline small { display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:9px var(--lgi-font-mono); color:var(--v7-muted); }
+.c-tg-actions { display:flex; flex-direction:column; gap:5px; align-items:flex-start; }
+.c-tg-btn { height:26px; padding:0 10px; font-size:10px; box-shadow:none; }
+.c-tg-btn:hover { transform:none; box-shadow:none; }
+.c-tg-muted { color:var(--v7-ghost); font-size:11px; }
+.c-tg-avatar { width:34px; height:34px; flex:0 0 auto; border-radius:50%; object-fit:cover; background:var(--v7-sunken); }
+
+.c-tg-batch { display:flex; align-items:center; gap:9px; flex-wrap:wrap; padding:14px; border-top:2px solid var(--v7-black); }
+.c-tg-batch-label { color:var(--v7-muted); font-size:12px; }
+.c-tg-batch input { height:32px; min-width:200px; padding:0 10px; border:1px solid var(--v7-line-strong); border-radius:4px; background:var(--v7-white); color:var(--v7-black); font-size:12px; }
+.c-src-failure { margin:11px 14px 0; }
+
+/* 基线健康条：照稿子的 6px 细条 + 分段。 */
+.c-hp-bar { display:flex; gap:2px; height:6px; margin-top:5px; background:var(--v7-sunken); overflow:hidden; }
+.c-hp-tick { display:block; width:100%; height:6px; background:transparent; }
+.c-hp-tick-on { background:var(--v7-ok-fill); }
 .c-hp-top { display:flex; align-items:baseline; gap:8px; }
-.c-hp-key { color:var(--v7-ghost); font:700 9px var(--lgi-font-mono); letter-spacing:.09em; }
-.c-hp-state { flex:1; color:var(--v7-warn); font:700 9px var(--lgi-font-mono); letter-spacing:.09em; }
-.c-hp-percent { color:var(--v7-black); font:800 15px/1 var(--lgi-font-mono); letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
-.c-hp-bar { display:flex; gap:2px; margin-top:5px; }
-.c-hp-tick { display:block; width:100%; height:12px; background:var(--v7-sunken); }
-.c-hp-tick-on { background:var(--v7-warn-fill); }
-.c-hp-metrics,.c-hp-foot { display:flex; gap:12px; margin-top:5px; color:var(--v7-muted); font:10px var(--lgi-font-mono); font-variant-numeric:tabular-nums; }
-.c-hp-metrics { color:var(--v7-body); font-size:11px; }
+.c-hp-key { color:var(--v7-ghost); font:800 8px var(--lgi-font-mono); letter-spacing:.07em; }
+.c-hp-state { flex:1; color:var(--v7-warn); font:800 8px var(--lgi-font-mono); letter-spacing:.07em; }
+.c-hp-percent { color:var(--v7-black); font:800 12px/1 var(--lgi-font-mono); font-variant-numeric:tabular-nums; }
+.c-hp-metrics,.c-hp-foot { display:flex; gap:10px; margin-top:4px; color:var(--v7-muted); font:9px var(--lgi-font-mono); font-variant-numeric:tabular-nums; }
 .c-hp-gap { color:var(--v7-warn); }
-.c-hp-none { display:flex; flex-direction:column; gap:3px; }
-.c-hp-hint { color:var(--v7-muted); font-size:11px; line-height:1.5; }
+.c-hp-none { display:flex; flex-direction:column; gap:2px; }
+.c-hp-hint { color:var(--v7-muted); font-size:10px; line-height:1.5; }
