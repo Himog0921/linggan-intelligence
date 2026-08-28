@@ -9,6 +9,7 @@ mod execution_station;
 mod ingress;
 mod local_discovery;
 mod local_producer;
+mod material_admission;
 mod material_projection;
 mod patrol_scheduler;
 mod producer_runtime;

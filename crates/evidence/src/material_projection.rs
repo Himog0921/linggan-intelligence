@@ -4,12 +4,11 @@
 //! It stores only typed, source-linked values whose identity is sufficient under the active
 //! material contract; insufficient records remain retained/quarantined at ingress.
 
-use crate::producer_runtime::ProducerRuntimeError;
-use linggan_contracts::{EvidenceQuery, ProducerCapturePackage};
+use linggan_contracts::EvidenceQuery;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::Row;
 use uuid::Uuid;
 
 #[derive(Debug, Serialize)]
@@ -31,6 +30,8 @@ pub struct MaterialLibraryItem {
     pub summary: MaterialSummary,
     pub inspector: Value,
     pub matched_fields: Vec<&'static str>,
+    #[serde(skip)]
+    author_external_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -94,34 +95,50 @@ pub async fn read_material_library(
     let lane = query.lane().map(|value| value.as_str());
     let lane_state = query.lane_state().map(|value| value.as_str());
     let rows = sqlx::query(
-        "WITH latest AS ( \
+        "WITH latest_detail AS ( \
            SELECT DISTINCT ON (detail.content_public_ref) \
-             content.platform,content.content_external_id,content.public_ref, \
-             detail.material_ref,detail.package_ref,detail.record_ordinal,detail.observed_at, \
+             detail.content_public_ref,detail.material_ref,detail.package_ref,detail.record_ordinal,detail.observed_at, \
              detail.title,detail.title_state,detail.body_text,detail.body_state, \
              detail.creator_display_name,detail.creator_display_name_state, \
-             detail.published_at_source_text,detail.published_at_source_text_state \
+             detail.published_at_source_text,detail.published_at_source_text_state,detail.author_external_id \
            FROM linggan_material_content_detail detail \
-           JOIN linggan_material_content content ON content.public_ref = detail.content_public_ref \
            ORDER BY detail.content_public_ref,detail.observed_at DESC,detail.created_at DESC \
-         ) SELECT * FROM latest \
+         ), latest_lane AS ( \
+           SELECT content_public_ref,max(observed_at) AS observed_at \
+           FROM linggan_material_lane_observation WHERE content_public_ref IS NOT NULL GROUP BY content_public_ref \
+         ) SELECT content.platform,content.content_external_id,content.public_ref, \
+             detail.material_ref,detail.package_ref,detail.record_ordinal, \
+             COALESCE(detail.observed_at,lane_latest.observed_at) AS observed_at, \
+             detail.title,COALESCE(detail.title_state,'UNKNOWN') AS title_state,detail.body_text, \
+             COALESCE(detail.body_state,'UNKNOWN') AS body_state,detail.creator_display_name, \
+             COALESCE(detail.creator_display_name_state,'UNKNOWN') AS creator_display_name_state, \
+             detail.published_at_source_text,COALESCE(detail.published_at_source_text_state,'UNKNOWN') AS published_at_source_text_state, \
+             detail.author_external_id \
+         FROM linggan_material_content content \
+         LEFT JOIN latest_detail detail ON detail.content_public_ref = content.public_ref \
+         LEFT JOIN latest_lane lane_latest ON lane_latest.content_public_ref = content.public_ref \
          WHERE ($1::text IS NULL \
-           OR lower(COALESCE(title,'')) LIKE '%' || lower($1) || '%' \
-           OR lower(COALESCE(body_text,'')) LIKE '%' || lower($1) || '%' \
-           OR lower(COALESCE(creator_display_name,'')) LIKE '%' || lower($1) || '%') \
-           AND ($2::text IS NULL OR $2 = 'detail') \
+           OR lower(COALESCE(detail.title,'')) LIKE '%' || lower($1) || '%' \
+           OR lower(COALESCE(detail.body_text,'')) LIKE '%' || lower($1) || '%' \
+           OR lower(COALESCE(detail.creator_display_name,'')) LIKE '%' || lower($1) || '%' \
+           OR EXISTS (SELECT 1 FROM linggan_material_comment comment WHERE comment.content_public_ref=content.public_ref AND lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($1) || '%') \
+           OR EXISTS (SELECT 1 FROM linggan_material_author_profile author WHERE author.platform=content.platform AND author.author_external_id=detail.author_external_id AND (lower(COALESCE(author.display_name,'')) LIKE '%' || lower($1) || '%' OR lower(COALESCE(author.biography,'')) LIKE '%' || lower($1) || '%'))) \
+           AND ($2::text IS NULL OR EXISTS (SELECT 1 FROM linggan_material_lane_observation lane WHERE lane.content_public_ref=content.public_ref AND lane.lane=$2)) \
            AND ($3::text IS NULL OR $3 = 'SEARCHABLE') \
-         ORDER BY observed_at DESC,platform,content_external_id",
+           AND COALESCE(detail.observed_at,lane_latest.observed_at) IS NOT NULL \
+         ORDER BY COALESCE(detail.observed_at,lane_latest.observed_at) DESC,content.platform,content.content_external_id",
     )
     .bind(text)
     .bind(lane)
     .bind(lane_state)
     .fetch_all(database.pool())
     .await?;
-    let items = rows
-        .into_iter()
-        .map(|row| material_item(row, text))
-        .collect();
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut item = material_item(row, text);
+        enrich_social_material(database, &mut item, text).await?;
+        items.push(item);
+    }
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(database.pool())
         .await?;
@@ -136,7 +153,8 @@ pub async fn read_material_library(
 pub async fn material_projection_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
     let tables_exist = sqlx::query_scalar::<_, bool>(
         "SELECT to_regclass('linggan_material_content') IS NOT NULL \
-                AND to_regclass('linggan_material_content_detail') IS NOT NULL",
+                AND to_regclass('linggan_material_content_detail') IS NOT NULL \
+                AND to_regclass('linggan_material_lane_observation') IS NOT NULL",
     )
     .fetch_one(database.pool())
     .await?;
@@ -145,7 +163,7 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
     }
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM linggan_local_schema_migration \
-                        WHERE migration_id = '0015_material_projection')",
+                        WHERE migration_id = '0016_material_social_lanes')",
     )
     .fetch_one(database.pool())
     .await
@@ -156,9 +174,9 @@ fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> MaterialLibr
     let body: Option<String> = row.get("body_text");
     let creator: Option<String> = row.get("creator_display_name");
     let observed_at: String = row.get("observed_at");
-    let material_ref: Uuid = row.get("material_ref");
-    let package_ref: Uuid = row.get("package_ref");
-    let record_ordinal: i32 = row.get("record_ordinal");
+    let material_ref: Option<Uuid> = row.get("material_ref");
+    let package_ref: Option<Uuid> = row.get("package_ref");
+    let record_ordinal: Option<i32> = row.get("record_ordinal");
     let matched_fields = match text {
         None => Vec::new(),
         Some(text) => {
@@ -218,15 +236,223 @@ fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> MaterialLibr
             "mediaSlots": [],
             "derivatives": [],
             "provenance": {
-                "packageRefs":[package_ref],
+                "packageRefs":package_ref.into_iter().collect::<Vec<_>>(),
                 "recordRefs":[{"packageRef":package_ref,"recordOrdinal":record_ordinal}],
-                "coverageRefs":[package_ref]
+                "coverageRefs":package_ref.into_iter().collect::<Vec<_>>()
             },
             "displayPolicy":"MINIMUM_NECESSARY",
             "limitations":["COMMENTS_NOT_EVALUATED","MEDIA_NOT_EVALUATED","RAW_BODY_NOT_RETURNED"]
         }),
         matched_fields,
+        author_external_id: row.get("author_external_id"),
     }
+}
+
+async fn enrich_social_material(
+    database: &Database,
+    item: &mut MaterialLibraryItem,
+    text: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let content_ref = item.identity.public_ref;
+    let lane_rows = sqlx::query(
+        "SELECT DISTINCT ON (lane) lane,observed,retained,failed,known_unattempted,unknown_count,maximum_quota,stopped_reason,observed_at,package_ref \
+         FROM linggan_material_lane_observation WHERE content_public_ref=$1 \
+         ORDER BY lane,created_at DESC",
+    )
+    .bind(content_ref)
+    .fetch_all(database.pool())
+    .await?;
+    let mut coverage = serde_json::Map::new();
+    for row in lane_rows {
+        let lane: String = row.get("lane");
+        let observed: Option<i32> = row.get("observed");
+        let retained: Option<i32> = row.get("retained");
+        let failed: Option<i32> = row.get("failed");
+        let unattempted: Option<i32> = row.get("known_unattempted");
+        let unknown: Option<i32> = row.get("unknown_count");
+        let stopped_reason: Option<String> = row.get("stopped_reason");
+        let state = social_lane_state(
+            retained,
+            failed,
+            unattempted,
+            unknown,
+            stopped_reason.as_deref(),
+        );
+        if let Some(summary) = item
+            .lane_summaries
+            .iter_mut()
+            .find(|summary| summary.lane == lane)
+        {
+            summary.state = state;
+            summary.observed = observed.map(i64::from);
+            summary.retained = retained.map(i64::from);
+            summary.failed = failed.map(i64::from);
+            summary.known_unattempted = unattempted.map(i64::from);
+            summary.maximum_quota = row.get::<Option<i32>, _>("maximum_quota").map(i64::from);
+            summary.value_state = if [observed, retained, failed, unattempted, unknown]
+                .iter()
+                .all(Option::is_some)
+            {
+                "KNOWN"
+            } else {
+                "UNKNOWN"
+            };
+            summary.stopped_reason = stopped_reason.clone();
+            summary.limitations = if unknown.unwrap_or(1) > 0 || unattempted.unwrap_or(1) > 0 {
+                vec!["COVERAGE_NOT_EXHAUSTED"]
+            } else {
+                Vec::new()
+            };
+            summary.latest_observed_at = Some(row.get("observed_at"));
+        }
+        if lane == "comments" || lane == "replies" {
+            let count_state = if failed == Some(0) && unattempted == Some(0) && unknown == Some(0) {
+                "KNOWN"
+            } else {
+                "UNKNOWN"
+            };
+            coverage.insert(
+                lane,
+                serde_json::json!({
+                    "count": if count_state == "KNOWN" { retained } else { None },
+                    "countState":count_state,
+                    "observed":observed,"retained":retained,"failed":failed,
+                    "knownUnattempted":unattempted,"unknown":unknown,
+                    "stoppedReason":stopped_reason,"sourceRef":row.get::<Uuid,_>("package_ref")
+                }),
+            );
+        }
+    }
+
+    let comment_rows = sqlx::query(
+        "SELECT DISTINCT ON (comment_external_id) material_ref,package_ref,comment_external_id,root_comment_external_id,parent_comment_external_id,parent_identity_source_field,is_reply,body_text,body_state,author_external_id,author_display_name,observed_at \
+         FROM linggan_material_comment WHERE content_public_ref=$1 \
+         ORDER BY comment_external_id,created_at DESC",
+    )
+    .bind(content_ref)
+    .fetch_all(database.pool())
+    .await?;
+    let needle = text.map(str::to_lowercase);
+    let mut comments = Vec::with_capacity(comment_rows.len());
+    let mut comment_match = false;
+    for row in comment_rows {
+        let body: Option<String> = row.get("body_text");
+        comment_match |= needle.as_ref().is_some_and(|needle| {
+            body.as_ref()
+                .is_some_and(|body| body.to_lowercase().contains(needle))
+        });
+        comments.push(serde_json::json!({
+            "commentExternalId":row.get::<String,_>("comment_external_id"),
+            "rootCommentExternalId":row.get::<String,_>("root_comment_external_id"),
+            "parentCommentExternalId":row.get::<Option<String>,_>("parent_comment_external_id"),
+            "parentIdentitySourceField":row.get::<Option<String>,_>("parent_identity_source_field"),
+            "isReply":row.get::<bool,_>("is_reply"),
+            "snippet":body.as_deref().map(redacted_snippet),"bodyState":row.get::<String,_>("body_state"),
+            "accessLevel":"REDACTED_SNIPPET","sourceRef":row.get::<Uuid,_>("material_ref"),
+            "packageRef":row.get::<Uuid,_>("package_ref"),"observedAt":row.get::<String,_>("observed_at")
+        }));
+    }
+    if comment_match && !item.matched_fields.contains(&"comments") {
+        item.matched_fields.push("comments");
+    }
+
+    let author_context = match item.author_external_id.as_deref() {
+        None => Value::Null,
+        Some(author_id) => sqlx::query(
+            "SELECT material_ref,package_ref,observed_at,display_name,display_name_state,biography_state,follower_count,follower_count_state \
+             FROM linggan_material_author_profile WHERE platform=$1 AND author_external_id=$2 ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(&item.identity.platform)
+        .bind(author_id)
+        .fetch_optional(database.pool())
+        .await?
+        .map_or(Value::Null, |row| serde_json::json!({
+            "authorExternalId":author_id,"displayName":row.get::<Option<String>,_>("display_name"),
+            "displayNameState":row.get::<String,_>("display_name_state"),"biographyState":row.get::<String,_>("biography_state"),
+            "followerCount":row.get::<Option<i64>,_>("follower_count"),"followerCountState":row.get::<String,_>("follower_count_state"),
+            "sourceRef":row.get::<Uuid,_>("material_ref"),"packageRef":row.get::<Uuid,_>("package_ref"),"observedAt":row.get::<String,_>("observed_at")
+        })),
+    };
+
+    let provenance_rows = sqlx::query(
+        "SELECT lane.package_ref,package.task_id,package.attempt_id,package.producer_instance_id,receipt.receipt_ref \
+         FROM linggan_material_lane_observation lane \
+         JOIN linggan_runtime_capture_package package ON package.package_ref=lane.package_ref \
+         LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
+         WHERE lane.content_public_ref=$1 ORDER BY lane.created_at",
+    )
+    .bind(content_ref)
+    .fetch_all(database.pool())
+    .await?;
+    let provenance = serde_json::json!({
+        "packageRefs":provenance_rows.iter().map(|row| row.get::<Uuid,_>("package_ref")).collect::<Vec<_>>(),
+        "taskRefs":provenance_rows.iter().map(|row| row.get::<Uuid,_>("task_id")).collect::<Vec<_>>(),
+        "attemptRefs":provenance_rows.iter().map(|row| row.get::<Uuid,_>("attempt_id")).collect::<Vec<_>>(),
+        "receiptRefs":provenance_rows.iter().filter_map(|row| row.get::<Option<Uuid>,_>("receipt_ref")).collect::<Vec<_>>(),
+        "producers":provenance_rows.iter().map(|row| row.get::<Uuid,_>("producer_instance_id")).collect::<Vec<_>>(),
+        "stationAccountLens":{"state":"UNKNOWN"},"coverageRefs":provenance_rows.iter().map(|row| row.get::<Uuid,_>("package_ref")).collect::<Vec<_>>()
+    });
+    if let Some(inspector) = item.inspector.as_object_mut() {
+        inspector.insert("commentThreads".to_owned(), Value::Array(comments));
+        inspector.insert(
+            "commentsCoverage".to_owned(),
+            coverage.remove("comments").unwrap_or(Value::Null),
+        );
+        inspector.insert(
+            "repliesCoverage".to_owned(),
+            coverage.remove("replies").unwrap_or(Value::Null),
+        );
+        inspector.insert("authorContext".to_owned(), author_context);
+        inspector.insert("provenance".to_owned(), provenance);
+    }
+    Ok(())
+}
+
+fn social_lane_state(
+    retained: Option<i32>,
+    failed: Option<i32>,
+    unattempted: Option<i32>,
+    unknown: Option<i32>,
+    stopped_reason: Option<&str>,
+) -> &'static str {
+    if stopped_reason == Some("risk_control") {
+        return "RISK_CONTROL";
+    }
+    if retained.unwrap_or(0) > 0
+        && (failed.unwrap_or(0) > 0 || unattempted.unwrap_or(0) > 0 || unknown.unwrap_or(0) > 0)
+    {
+        return "PARTIAL";
+    }
+    if retained.unwrap_or(0) > 0 {
+        return "SEARCHABLE";
+    }
+    if failed.unwrap_or(0) > 0 {
+        return "FAILED";
+    }
+    if unknown.unwrap_or(0) > 0 {
+        return "UNKNOWN";
+    }
+    "NOT_OBSERVED"
+}
+
+fn redacted_snippet(value: &str) -> String {
+    let redacted = value
+        .split_whitespace()
+        .map(|part| {
+            let lower = part.to_ascii_lowercase();
+            if lower.contains("token") || lower.contains("secret") || lower.contains("cookie") {
+                "[REDACTED]"
+            } else {
+                part
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let mut snippet = redacted.chars().take(120).collect::<String>();
+    if value.chars().count() > 120 {
+        snippet.push('…');
+    }
+    snippet
 }
 
 fn lane_summaries(observed_at: &str) -> Vec<MaterialLaneSummary> {
@@ -269,135 +495,4 @@ fn lane_summaries(observed_at: &str) -> Vec<MaterialLaneSummary> {
             latest_observed_at: (*lane == "detail").then(|| observed_at.to_owned()),
         })
         .collect()
-}
-
-pub(crate) async fn insert_typed_materials(
-    tx: &mut Transaction<'_, Postgres>,
-    package: &ProducerCapturePackage,
-) -> Result<(), ProducerRuntimeError> {
-    if package.package_kind() != "content_detail" {
-        return Ok(());
-    }
-    for (ordinal, record) in package.records().iter().enumerate() {
-        let Some(detail) = content_detail_record(record) else {
-            continue;
-        };
-        let expected_content_id = package
-            .coverage()
-            .pointer("/target/contentExternalId")
-            .and_then(Value::as_str);
-        if expected_content_id != Some(detail.content_id) {
-            continue;
-        }
-        let content_public_ref = ensure_content(tx, package, detail.content_id).await?;
-        insert_content_detail(tx, package, ordinal, detail, content_public_ref).await?;
-    }
-    Ok(())
-}
-
-async fn ensure_content(
-    tx: &mut Transaction<'_, Postgres>,
-    package: &ProducerCapturePackage,
-    content_id: &str,
-) -> Result<Uuid, ProducerRuntimeError> {
-    sqlx::query(
-        "INSERT INTO linggan_material_content \
-         (platform,content_external_id,public_ref,first_package_ref) VALUES ($1,$2,$3,$4) \
-         ON CONFLICT (platform,content_external_id) DO NOTHING",
-    )
-    .bind(package.platform())
-    .bind(content_id)
-    .bind(Uuid::new_v4())
-    .bind(package.package_ref())
-    .execute(&mut **tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)?;
-    sqlx::query_scalar(
-        "SELECT public_ref FROM linggan_material_content \
-         WHERE platform = $1 AND content_external_id = $2",
-    )
-    .bind(package.platform())
-    .bind(content_id)
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)
-}
-
-async fn insert_content_detail(
-    tx: &mut Transaction<'_, Postgres>,
-    package: &ProducerCapturePackage,
-    ordinal: usize,
-    detail: ContentDetailRecord<'_>,
-    content_public_ref: Uuid,
-) -> Result<(), ProducerRuntimeError> {
-    let title = exact_string(detail.payload, "title");
-    let body = exact_string(detail.payload, "bodyText");
-    let creator = exact_string(detail.payload, "authorName");
-    let published_at = exact_scalar_text(detail.payload, "publishedAtText");
-    let searchable_text = [title, body]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join(" ");
-    sqlx::query(
-        "INSERT INTO linggan_material_content_detail \
-         (material_ref,content_public_ref,package_ref,record_ordinal,observed_at, \
-          title,title_state,body_text,body_state,creator_display_name,creator_display_name_state, \
-          published_at_source_text,published_at_source_text_state,searchable_text) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)",
-    )
-    .bind(Uuid::new_v4())
-    .bind(content_public_ref)
-    .bind(package.package_ref())
-    .bind(i32::try_from(ordinal).expect("package record count is bounded"))
-    .bind(package.observed_at())
-    .bind(title)
-    .bind(known_state(title))
-    .bind(body)
-    .bind(known_state(body))
-    .bind(creator)
-    .bind(known_state(creator))
-    .bind(published_at.as_deref())
-    .bind(known_state(published_at.as_deref()))
-    .bind(searchable_text)
-    .execute(&mut **tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)?;
-    Ok(())
-}
-
-struct ContentDetailRecord<'a> {
-    content_id: &'a str,
-    payload: &'a serde_json::Map<String, Value>,
-}
-
-fn content_detail_record(record: &Value) -> Option<ContentDetailRecord<'_>> {
-    if record.get("kind")?.as_str()? != "content_detail" {
-        return None;
-    }
-    let content_id = record.pointer("/sourceObject/externalId")?.as_str()?.trim();
-    let payload = record.get("payload")?.as_object()?;
-    if content_id.is_empty() {
-        return None;
-    }
-    Some(ContentDetailRecord {
-        content_id,
-        payload,
-    })
-}
-
-fn exact_string<'a>(payload: &'a serde_json::Map<String, Value>, key: &str) -> Option<&'a str> {
-    payload.get(key).and_then(Value::as_str)
-}
-
-fn exact_scalar_text(payload: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
-    payload.get(key).and_then(|value| match value {
-        Value::String(value) => Some(value.clone()),
-        Value::Number(value) => Some(value.to_string()),
-        _ => None,
-    })
-}
-
-fn known_state<T>(value: Option<T>) -> &'static str {
-    if value.is_some() { "KNOWN" } else { "UNKNOWN" }
 }

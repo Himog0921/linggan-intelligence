@@ -763,7 +763,7 @@ pub async fn submit_producer_package(
     .map_err(ProducerRuntimeError::Internal)?
     .flatten();
     insert_record_dispositions(&mut tx, package, maximum_quota).await?;
-    crate::material_projection::insert_typed_materials(&mut tx, package).await?;
+    crate::material_admission::insert_typed_materials(&mut tx, package).await?;
     if package.package_kind() == "media_slots" {
         insert_media_slots(&mut tx, package).await?;
     }
@@ -819,7 +819,11 @@ async fn insert_record_dispositions(
     for (ordinal, record) in package.records().iter().enumerate() {
         let beyond_quota = maximum_quota
             .is_some_and(|quota| i64::try_from(ordinal).unwrap_or(i64::MAX) >= i64::from(quota));
-        let (disposition, reason) = if package.package_kind() == "media_slots" {
+        let (disposition, reason) = if let Some(disposition) =
+            crate::material_admission::record_disposition(package, record)
+        {
+            disposition
+        } else if package.package_kind() == "media_slots" {
             if media_slot_record(record).is_some() {
                 ("accepted_for_media_identity", "media_slot_contract_valid")
             } else {

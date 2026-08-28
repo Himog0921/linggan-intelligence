@@ -17,6 +17,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
     "\n",
     include_str!("../../../database/migrations/0015_material_projection.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0016_material_social_lanes.sql"),
 );
 
 #[tokio::test]
@@ -88,6 +90,76 @@ async fn content_detail_submission_forms_a_typed_material_with_field_sources_and
         detail_count, 1,
         "mismatched source identity is not projected"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn comments_replies_and_author_keep_stable_identity_relationships_and_versions() {
+    let database = proof_database("material_social_lanes_red").await;
+    submit_package(
+        &database,
+        "comments",
+        serde_json::json!({"contentExternalId":"note-social-1"}),
+        serde_json::json!({
+            "kind":"comment",
+            "payload":{"commentId":"comment-root-1","noteId":"note-social-1","text":"评论可检索原声","authorId":"author-social-1"}
+        }),
+    ).await;
+    submit_package(
+        &database,
+        "replies",
+        serde_json::json!({"contentExternalId":"note-social-1"}),
+        serde_json::json!({
+            "kind":"reply",
+            "payload":{"commentId":"reply-1","noteId":"note-social-1","text":"回复原声","rootCommentId":"comment-root-1","parentCommentId":"comment-root-1"}
+        }),
+    ).await;
+    submit_package(
+        &database,
+        "author_profile",
+        serde_json::json!({"authorExternalId":"author-social-1"}),
+        serde_json::json!({
+            "kind":"author_profile",
+            "sourceObject":{"externalId":"author-social-1"},
+            "payload":{"userId":"author-social-1","nickname":"版本化作者","fans":17}
+        }),
+    )
+    .await;
+    submit_package(
+        &database,
+        "replies",
+        serde_json::json!({"contentExternalId":"note-social-1"}),
+        serde_json::json!({
+            "kind":"reply",
+            "payload":{"commentId":"reply-without-parent","noteId":"note-social-1","text":"不能猜父级"}
+        }),
+    ).await;
+
+    let relation = sqlx::query("SELECT comment_external_id,root_comment_external_id,parent_comment_external_id FROM linggan_material_comment ORDER BY is_reply")
+        .fetch_all(database.pool()).await.expect("typed comment relation exists");
+    assert_eq!(relation.len(), 2);
+    assert_eq!(
+        relation[1].get::<String, _>("root_comment_external_id"),
+        "comment-root-1"
+    );
+    assert_eq!(
+        relation[1]
+            .get::<Option<String>, _>("parent_comment_external_id")
+            .as_deref(),
+        Some("comment-root-1")
+    );
+
+    let author_count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_material_author_profile WHERE author_external_id = 'author-social-1'")
+        .fetch_one(database.pool()).await.expect("versioned author observation exists");
+    assert_eq!(author_count, 1);
+    let disposition: (String, String) = sqlx::query_as(
+        "SELECT disposition,reason FROM linggan_runtime_record_disposition disposition \
+         JOIN linggan_runtime_capture_package package USING (package_ref) \
+         WHERE package.package_kind='replies' AND package.payload::text LIKE '%reply-without-parent%'",
+    )
+    .fetch_one(database.pool()).await.expect("invalid reply keeps an explicit disposition");
+    assert_eq!(disposition.0, "quarantined");
+    assert_eq!(disposition.1, "typed_reply_relationship_invalid");
 }
 
 async fn submit_package(
