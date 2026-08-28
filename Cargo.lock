@@ -787,6 +787,11 @@ dependencies = [
 [[package]]
 name = "linggan-worker"
 version = "0.1.0"
+dependencies = [
+ "linggan-evidence",
+ "linggan-storage-postgres",
+ "tokio",
+]
 
 [[package]]
 name = "litemap"
