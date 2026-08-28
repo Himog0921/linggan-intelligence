@@ -88,7 +88,7 @@
 | [`architecture/target-architecture.md`](architecture/target-architecture.md) | 草案 | DISC-001 已确认硬边界之上的总体架构建议；具体实现按 SCOPE 渐进冻结 |
 | [`architecture/system-overview-diagram.html`](architecture/system-overview-diagram.html) | 草案 | AEDS 风格的整体架构图；在同一视图中区分当前代码骨架、已批准 Evidence 切片与后续目标能力 |
 | [`architecture/business-process-diagram.html`](architecture/business-process-diagram.html) | 草案 | AEDS 风格的内容情报业务流程图；展示人、控制层、Capture、Evidence 与 Intelligence 的责任交接 |
-| [`architecture/project-architecture-atlas.html`](architecture/project-architecture-atlas.html) | 草案 | 面向非技术项目负责人的 AEDS 中文架构全景页；分层展示新旧项目、模块化单体技术主干、开发 Agent 协作、逻辑模块、数据、采集、产品内 Agent、界面、运行环境、当前切片与状态路线图 |
+| [`architecture/project-architecture-atlas.html`](architecture/project-architecture-atlas.html) | 代码事实优先；本机快照 2026-08-28 | 面向非技术项目负责人的 AEDS 中文架构全景页；以当前本机代码、PostgreSQL、loopback API 与页面读取核对为主，分层展示独立本地产品、受控浏览器采集、模块化单体、数据/事实边界、界面、运行环境、AI Agent 与路线图；不替代运行、长期采集或生产证明 |
 | [`architecture/module-architecture.md`](architecture/module-architecture.md) | 草案 | Gate 6 Rust 模块、接口、依赖、adapter、测试表面与无巨型文件门禁；不授权创建 crate |
 | [`architecture/agent-architecture.md`](architecture/agent-architecture.md) | 草案 | Gate 6 Agent Invocation、工具权限、预算/停止、恢复、结构化输出、隐私与评测；不选择模型或授权真实原文 |
 | [`architecture/capture-plugin-architecture.md`](architecture/capture-plugin-architecture.md) | 草案 | Gate 6 服务端采集控制层、有限工位/账号、Work Order/Attempt/lease、部分结果、MV3 插件与协议升级 |

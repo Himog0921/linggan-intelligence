@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="diagram-status" content="draft-executive-architecture-atlas-with-technical-baseline-and-current-boundaries">
-  <meta name="last-verified" content="2026-08-21">
+  <meta name="diagram-status" content="current-local-architecture-atlas-with-implementation-and-proof-boundaries">
+  <meta name="last-verified" content="2026-08-28">
   <title>Linggan Intelligence · 项目架构全景地图</title>
   <link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600&amp;family=Instrument+Serif:ital@0;1&amp;family=Inter:wght@400;500;600&amp;display=swap" rel="stylesheet">
   <style>
@@ -161,34 +161,34 @@
 <body>
   <div class="page">
     <header class="hero">
-      <p class="eyebrow">Linggan Intelligence / Executive Architecture Atlas / 2026-08-21</p>
+      <p class="eyebrow">Linggan Intelligence / Executive Architecture Atlas / 2026-08-28</p>
       <h1>内容情报系统 · 项目架构全景地图</h1>
-      <p class="hero-copy">这不是给工程师看的代码拓扑，而是给项目负责人看的“整栋房子说明书”。它把旧系统、新项目、采集、数据、智能分析、产品界面、运行环境，以及两种不同的 AI Agent 放在同一张长页面里，并明确区分哪些已经存在、哪些只完成了设计。</p>
+      <p class="hero-copy">这不是给工程师看的代码拓扑，而是给项目负责人看的“整栋房子说明书”。它把独立本地产品、浏览器采集、控制链、证据库、后台巡检、未来智能分析与两种不同的 AI Agent 放在同一张长页面里，并明确区分“此刻本机可用”“已编码待持续证明”和“仍只是设计”。</p>
       <div class="hero-callout">
-        <strong>截至 2026-08-21，技术主干已经定型，第一段合成事实内核也已进入受控开发，但完整产品仍远未建成。</strong>
-        <p>项目采用“一个 Rust 模块化单体、一个 PostgreSQL 16 权威主库、API/worker 两个组合进程、一个轻量 MV3 平台插件和受控 Agent Runtime”。当前已经出现 F01 采集包合同、攻击性测试、第一份数据库升级文件和隔离 PostgreSQL 基础证明；API、worker、Observation/Current、CLI、网页工作台、真实小红书采集、产品内 AI Agent 与生产部署仍未形成完整业务链。</p>
+        <strong>截至 2026-08-28，Linggan 已从“合成事实地基”推进到“独立本地产品 + 受控浏览器采集运行链”的局部实现。</strong>
+        <p>本机 API 正在 loopback 地址运行，PostgreSQL 16 健康，Evidence Library、观察目标与工位运行面可访问；健康接口已报告 Browser Producer Runtime schema 就绪。系统也已实现观察目标、授权、准入、工单、租约、插件领任务、采集包接纳与巡检调度。它仍不是线上产品：本次没有观察到 worker 常驻进程，浏览器真实采集/回传、媒体 OCR/ASR、产品内 AI Agent、生产部署与长期业务验收都不能画成已完成。</p>
       </div>
 
       <section class="status-rail" aria-label="全页状态图例">
         <article class="status-item verified">
-          <div class="status-name"><span class="status-dot"></span>已验证存在</div>
-          <p>代码、环境或旧 V2 固定能力有当前文件、测试或运行证据支持。</p>
+          <div class="status-name"><span class="status-dot"></span>本机已核验</div>
+          <p>本次直接核对到运行中的 API、健康数据库、可访问页面或已返回的读取结果。</p>
         </article>
         <article class="status-item approved">
-          <div class="status-name"><span class="status-dot"></span>已授权 / 执行中</div>
-          <p>当前 SCOPE 允许继续开发；局部代码存在不等于整条链已经跑通。</p>
+          <div class="status-name"><span class="status-dot"></span>已编码 / 局部验证</div>
+          <p>模块、迁移与测试已存在；仍须分清一次性演练、真实浏览器回传与长期稳定运行。</p>
         </article>
         <article class="status-item design">
           <div class="status-name"><span class="status-dot"></span>责任已确认</div>
-          <p>模块“应该负责什么”已定，物理表、代码和真实运行仍待逐步实现。</p>
+          <p>模块“应该负责什么”已定；图中不会把它误画为已实现的产品能力。</p>
         </article>
         <article class="status-item draft">
-          <div class="status-name"><span class="status-dot"></span>草案 / 待实验证明</div>
-          <p>方向可用来理解全貌，但参数、协议或产品形态仍可能被真实实验修订。</p>
+          <div class="status-name"><span class="status-dot"></span>待持续证明</div>
+          <p>例如后台常驻、真实浏览器回传、完整 Coverage、媒体处理或跨设备运行；不能用代码存在替代。</p>
         </article>
         <article class="status-item blocked">
-          <div class="status-name"><span class="status-dot"></span>未授权 / 尚未上线</div>
-          <p>当前不能因为设计存在就开始真实采集、发生产或处理敏感原文。</p>
+          <div class="status-name"><span class="status-dot"></span>未形成产品能力</div>
+          <p>生产部署、完整媒体/OCR/ASR、产品内 AI Agent、趋势判断与用户业务验收仍在后方。</p>
         </article>
       </section>
     </header>
@@ -197,17 +197,17 @@
       <nav class="toc" aria-label="架构全景目录">
         <div class="toc-title">阅读目录</div>
         <ol>
-          <li><a href="#landscape"><span class="toc-num">01</span><span>项目版图：新旧系统是什么关系</span></a></li>
-          <li><a href="#technical-backbone"><span class="toc-num">02</span><span>技术主干：系统准备怎样运行</span></a></li>
+          <li><a href="#landscape"><span class="toc-num">01</span><span>项目版图：现在已经建成哪一部分</span></a></li>
+          <li><a href="#technical-backbone"><span class="toc-num">02</span><span>技术主干：本机怎样协同运行</span></a></li>
           <li><a href="#build-agents"><span class="toc-num">03</span><span>开发协作 Agent：谁负责什么</span></a></li>
           <li><a href="#modules"><span class="toc-num">04</span><span>产品核心模块：整栋房子的房间</span></a></li>
           <li><a href="#data-life"><span class="toc-num">05</span><span>数据生命线：材料怎样变成判断</span></a></li>
           <li><a href="#truth-layers"><span class="toc-num">06</span><span>事实分层：每一层能说到哪</span></a></li>
-          <li><a href="#capture"><span class="toc-num">07</span><span>采集子系统：插件怎样受控工作</span></a></li>
+          <li><a href="#capture"><span class="toc-num">07</span><span>采集子系统：观察如何变成受控任务</span></a></li>
           <li><a href="#product-agent"><span class="toc-num">08</span><span>产品内 AI Agent：未来怎样受约束</span></a></li>
-          <li><a href="#interfaces"><span class="toc-num">09</span><span>产品界面：人最终看见什么</span></a></li>
+          <li><a href="#interfaces"><span class="toc-num">09</span><span>产品界面：目前人已经能看见什么</span></a></li>
           <li><a href="#runtime"><span class="toc-num">10</span><span>运行环境：现在真实跑在哪里</span></a></li>
-          <li><a href="#scope"><span class="toc-num">11</span><span>当前切片：眼下正在实现什么</span></a></li>
+          <li><a href="#scope"><span class="toc-num">11</span><span>事实基础：F01 与当前产品链的关系</span></a></li>
           <li><a href="#roadmap"><span class="toc-num">12</span><span>状态路线图：项目现在走到哪</span></a></li>
         </ol>
         <p class="toc-note">建议第一次只看每章标题、粗体结论和图中的大字；需要追问时再展开“依据与术语”。</p>
@@ -218,8 +218,8 @@
           <div class="chapter-head">
             <div class="chapter-num">01</div>
             <div>
-              <h2>项目版图：新项目不是旧工作台换一种语言</h2>
-              <p class="chapter-summary">新系统使用全新的 Rust 与 PostgreSQL。旧工作台、旧插件和旧数据库只提供参考证据，不直接成为新系统的运行依赖，也不会把旧表整体搬进新库。</p>
+              <h2>项目版图：新项目已是独立本地产品，不是旧工作台换一种语言</h2>
+              <p class="chapter-summary">新系统使用全新的 Rust 与 PostgreSQL，旧工作台、旧插件和旧数据库仍只提供参考证据。变化在于：新项目自己已经拥有本地 Web 入口、证据库读取面、观察目标与浏览器采集运行时；它不再只是未来蓝图。</p>
             </div>
             <span class="state-badge verified">新旧隔离已确认</span>
           </div>
@@ -227,7 +227,7 @@
           <div class="diagram-shell">
             <svg viewBox="0 0 1200 620" role="img" aria-labelledby="f1-title f1-desc" xmlns="http://www.w3.org/2000/svg">
               <title id="f1-title">Linggan Intelligence 新旧项目版图</title>
-              <desc id="f1-desc">左侧是旧工作台、插件和旧数据库，只作为只读参考；中间是新项目的产品规则、Rust 骨架和新 PostgreSQL；右侧是尚未实现的工作台、受控采集和产品内 AI Agent。</desc>
+              <desc id="f1-desc">左侧是旧工作台、插件和旧数据库，只作为只读参考；中间是已运行的本地 Linggan API、数据库和产品界面；右侧区分已经接通的受控浏览器采集运行时与尚未实现的智能分析和产品内 AI Agent。</desc>
               <defs>
                 <pattern id="f1-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1" fill="rgba(24,29,38,.09)"/></pattern>
                 <marker id="f1-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#41454d"/></marker>
@@ -299,31 +299,31 @@
               <g>
                 <rect class="node-box verified" x="480" y="276" width="240" height="100" rx="6"/>
                 <rect class="tag-box verified" x="496" y="288" width="88" height="16" rx="2"/><text class="tag-text verified" x="540" y="300" text-anchor="middle">局部已编码</text>
-                <text class="node-title" x="600" y="326" text-anchor="middle">Rust 工作区 + F01 基础</text>
-                <text class="node-sub" x="600" y="346" text-anchor="middle">采集包合同、攻击测试与数据库基础已出现</text>
-                <text class="node-note mono" x="600" y="364" text-anchor="middle">API / worker 业务链仍未实现</text>
+                <text class="node-title" x="600" y="326" text-anchor="middle">Rust 产品内核 + 受控采集链</text>
+                <text class="node-sub" x="600" y="346" text-anchor="middle">API、Evidence、目标、工单、租约与插件运行时已编码</text>
+                <text class="node-note mono" x="600" y="364" text-anchor="middle">F01 是接纳可信度基础，不是唯一产品切片</text>
               </g>
               <g>
                 <rect class="node-box verified" x="480" y="432" width="240" height="92" rx="6"/>
                 <rect class="tag-box verified" x="496" y="444" width="88" height="16" rx="2"/><text class="tag-text verified" x="540" y="456" text-anchor="middle">开发库健康</text>
                 <text class="node-title" x="600" y="478" text-anchor="middle">全新 PostgreSQL 16</text>
-                <text class="node-sub" x="600" y="498" text-anchor="middle">Docker 当前健康；F01 proof 使用隔离数据库</text>
-                <text class="node-note mono" x="600" y="514" text-anchor="middle">第一份 F01 migration 本地存在</text>
+                <text class="node-sub" x="600" y="498" text-anchor="middle">Docker 当前健康；本地产品 schema 已应用</text>
+                <text class="node-note mono" x="600" y="514" text-anchor="middle">0001–0013 migrations · 运行时读取可用</text>
               </g>
 
               <g>
-                <rect class="node-box draft" x="880" y="96" width="240" height="92" rx="6"/>
-                <rect class="tag-box" x="896" y="108" width="72" height="16" rx="2"/><text class="tag-text" x="932" y="120" text-anchor="middle">尚未实现</text>
-                <text class="node-title" x="1000" y="142" text-anchor="middle">工作台 / 接口 / 命令行</text>
-                <text class="node-sub" x="1000" y="162" text-anchor="middle">人未来查看同一权威读取结果</text>
-                <text class="node-note mono" x="1000" y="178" text-anchor="middle">不直连数据库</text>
+                <rect class="node-box verified" x="880" y="96" width="240" height="92" rx="6"/>
+                <rect class="tag-box verified" x="896" y="108" width="72" height="16" rx="2"/><text class="tag-text verified" x="932" y="120" text-anchor="middle">本机可用</text>
+                <text class="node-title" x="1000" y="142" text-anchor="middle">Evidence Library / Collection 界面</text>
+                <text class="node-sub" x="1000" y="162" text-anchor="middle">查看材料、观察目标与工位，不直连数据库</text>
+                <text class="node-note mono" x="1000" y="178" text-anchor="middle">loopback-only · 不是线上工作台</text>
               </g>
               <g>
-                <rect class="node-box draft" x="880" y="254" width="240" height="92" rx="6"/>
-                <rect class="tag-box" x="896" y="266" width="72" height="16" rx="2"/><text class="tag-text" x="932" y="278" text-anchor="middle">尚未授权</text>
-                <text class="node-title" x="1000" y="300" text-anchor="middle">真实平台与受控采集</text>
-                <text class="node-sub" x="1000" y="320" text-anchor="middle">服务端下单，插件只执行有限工作</text>
-                <text class="node-note mono" x="1000" y="336" text-anchor="middle">真实账号 / 原文 / 插件升级均后置</text>
+                <rect class="node-box approved" x="880" y="254" width="240" height="92" rx="6"/>
+                <rect class="tag-box approved" x="896" y="266" width="80" height="16" rx="2"/><text class="tag-text approved" x="936" y="278" text-anchor="middle">局部已接通</text>
+                <text class="node-title" x="1000" y="300" text-anchor="middle">浏览器 Producer Runtime</text>
+                <text class="node-sub" x="1000" y="320" text-anchor="middle">服务端派单，插件领任务并回传冻结采集包</text>
+                <text class="node-note mono" x="1000" y="336" text-anchor="middle">真实浏览器采集/回传仍待持续证明</text>
               </g>
               <g>
                 <rect class="node-box draft" x="880" y="412" width="240" height="92" rx="6"/>
@@ -363,7 +363,7 @@
               <h2>技术主干：先建一栋可靠的大楼，不提前拆成一座“服务城市”</h2>
               <p class="chapter-summary">系统采用一个 Rust 模块化单体：所有业务责任仍清楚分房间，但先在一个代码工程和一个 PostgreSQL 主库里协作。API 负责接待和组合，worker 负责可恢复的后台步骤；插件、模型和未来对象存储都只是受控外部执行端，不能反过来拥有系统真相。</p>
             </div>
-            <span class="state-badge design">长期主干已接受 · 局部开始实现</span>
+            <span class="state-badge verified">长期主干已接受 · 本机局部运行</span>
           </div>
 
           <div class="diagram-shell">
@@ -398,18 +398,18 @@
               <path class="flow-soft" d="M 936 514 H 924 Q 916 514 916 506 V 168 Q 916 160 908 160 H 888" marker-end="url(#ft-arrow)"/>
 
               <g>
-                <rect class="node-box draft" x="72" y="100" width="216" height="104" rx="6"/>
-                <rect class="tag-box" x="88" y="112" width="72" height="16" rx="2"/><text class="tag-text" x="124" y="124" text-anchor="middle">使用入口</text>
-                <text class="node-title" x="180" y="150" text-anchor="middle">Web / CLI / 外部 Agent</text>
-                <text class="node-sub" x="180" y="172" text-anchor="middle">未来 MCP 复用同一产品合同</text>
-                <text class="node-note" x="180" y="190" text-anchor="middle">当前均未形成完整产品入口</text>
+                <rect class="node-box verified" x="72" y="100" width="216" height="104" rx="6"/>
+                <rect class="tag-box verified" x="88" y="112" width="72" height="16" rx="2"/><text class="tag-text verified" x="124" y="124" text-anchor="middle">本机入口</text>
+                <text class="node-title" x="180" y="150" text-anchor="middle">Evidence / Collection Web</text>
+                <text class="node-sub" x="180" y="172" text-anchor="middle">证据库、观察目标、工位运行面</text>
+                <text class="node-note" x="180" y="190" text-anchor="middle">CLI / 外部 Agent 仍在后方</text>
               </g>
               <g>
                 <rect class="node-box verified" x="384" y="100" width="200" height="104" rx="6"/>
                 <rect class="tag-box verified" x="400" y="112" width="64" height="16" rx="2"/><text class="tag-text verified" x="432" y="124" text-anchor="middle">已存在</text>
                 <text class="node-title" x="484" y="150" text-anchor="middle">linggan-api</text>
-                <text class="node-sub" x="484" y="172" text-anchor="middle">认证 · 用途 · 组合 · 产品回执</text>
-                <text class="node-note" x="484" y="190" text-anchor="middle">当前只是启动入口，无业务路由</text>
+                <text class="node-sub" x="484" y="172" text-anchor="middle">本地读取、接纳、目标、授权、工位与回执</text>
+                <text class="node-note" x="484" y="190" text-anchor="middle">只绑定 loopback，不是生产 API</text>
               </g>
               <g>
                 <rect class="node-box design" x="660" y="92" width="228" height="120" rx="6"/>
@@ -422,15 +422,15 @@
                 <rect class="node-box verified" x="384" y="268" width="200" height="88" rx="6"/>
                 <rect class="tag-box verified" x="400" y="280" width="64" height="16" rx="2"/><text class="tag-text verified" x="432" y="292" text-anchor="middle">已存在</text>
                 <text class="node-title" x="484" y="316" text-anchor="middle">linggan-worker</text>
-                <text class="node-sub" x="484" y="336" text-anchor="middle">未来领取数据库中的持久工作</text>
-                <text class="node-note" x="484" y="352" text-anchor="middle">当前无业务 runner / job</text>
+                <text class="node-sub" x="484" y="336" text-anchor="middle">每 60 秒检查到期观察目标并走同一准入链</text>
+                <text class="node-note" x="484" y="352" text-anchor="middle">代码已实现；本次未观察到常驻进程</text>
               </g>
               <g>
                 <rect class="node-box approved" x="660" y="260" width="228" height="104" rx="6"/>
                 <rect class="tag-box approved" x="676" y="272" width="80" height="16" rx="2"/><text class="tag-text approved" x="716" y="284" text-anchor="middle">权威主库</text>
                 <text class="node-title" x="774" y="312" text-anchor="middle">一个 PostgreSQL 16</text>
                 <text class="node-sub" x="774" y="334" text-anchor="middle">事实历史 · 读取投影 · 持久工作</text>
-                <text class="node-note" x="774" y="352" text-anchor="middle">F01 局部 migration / proof 已存在</text>
+                <text class="node-note" x="774" y="352" text-anchor="middle">0001–0013 migrations · 本地 Runtime schema 已就绪</text>
               </g>
 
               <g>
@@ -591,7 +591,7 @@
             <div class="chapter-num">04</div>
             <div>
               <h2>产品核心模块：按责任分房间，不按页面堆功能</h2>
-              <p class="chapter-summary">整个产品逻辑上由十个责任模块组成。它们目前是“已确认的房间用途”，不是十个已经写好的程序，也不是十套互相独立的系统；第一阶段仍是一个 Rust 模块化单体和一个 PostgreSQL 主库。</p>
+              <p class="chapter-summary">整个产品逻辑上由十个责任模块组成。它们不是十套互相独立的系统；第一阶段仍是一个 Rust 模块化单体和一个 PostgreSQL 主库。图中采集控制、世界观察的局部读取，以及读取模型已经有实际实现；知识、分析、情报、产品内 Agent 和决定学习仍主要是责任地图。</p>
             </div>
             <span class="state-badge design">逻辑责任已确认</span>
           </div>
@@ -599,7 +599,7 @@
           <div class="diagram-shell">
             <svg viewBox="0 0 1200 668" role="img" aria-labelledby="f3-title f3-desc" xmlns="http://www.w3.org/2000/svg">
               <title id="f3-title">Linggan Intelligence 核心逻辑模块地图</title>
-              <desc id="f3-desc">三层九个节点表示采集、世界观察、知识、材料、分析、情报、产品内 Agent、读取模型和决定学习；访问与隐私作为贯穿所有模块的边界。所有模块目前只是逻辑责任，不代表同名代码已经实现。</desc>
+              <desc id="f3-desc">三层九个节点表示采集、世界观察、知识、材料、分析、情报、产品内 Agent、读取模型和决定学习；访问与隐私作为贯穿所有模块的边界。采集控制、观察目标和本地读取有局部代码实现，其余模块仍按责任地图表达。</desc>
               <defs>
                 <pattern id="f3-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1" fill="rgba(24,29,38,.09)"/></pattern>
                 <marker id="f3-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#41454d"/></marker>
@@ -643,13 +643,13 @@
                 <rect class="node-box approved" x="100" y="100" width="256" height="84" rx="6"/>
                 <rect class="tag-box approved" x="116" y="112" width="56" height="16" rx="2"/><text class="tag-text approved" x="144" y="124" text-anchor="middle">01</text>
                 <text class="node-title" x="228" y="142" text-anchor="middle">采集控制</text>
-                <text class="node-sub" x="228" y="162" text-anchor="middle">F01 合同与接入基础局部在建</text>
+                <text class="node-sub" x="228" y="162" text-anchor="middle">目标、授权、工单、租约、派发与接纳已出现</text>
               </g>
               <g>
                 <rect class="node-box approved" x="460" y="100" width="268" height="84" rx="6"/>
                 <rect class="tag-box approved" x="476" y="112" width="56" height="16" rx="2"/><text class="tag-text approved" x="504" y="124" text-anchor="middle">02</text>
                 <text class="node-title" x="594" y="142" text-anchor="middle">世界观察</text>
-                <text class="node-sub" x="594" y="162" text-anchor="middle">来源身份、观察历史、当前读取</text>
+                <text class="node-sub" x="594" y="162" text-anchor="middle">本地材料、目标状态、档案完整度与当前读取</text>
               </g>
               <g>
                 <rect class="node-box design" x="832" y="100" width="280" height="84" rx="6"/>
@@ -711,7 +711,7 @@
             <div class="detail-body source-list">
               <ul>
                 <li><a href="module-architecture.md">模块架构</a>明确说明：这是逻辑责任，不要求立刻创建同名 crate、表或服务。</li>
-                <li>当前代码目录仍以 Bootstrap 和 SCOPE-001 放置护栏为主，但 contracts 与 Evidence 数据库基础已出现局部实现；不能把这些目录直接当成永久模块地图。</li>
+                <li>当前代码已不再只是 Bootstrap：Evidence 目录中已有本地 discovery、Producer Runtime、观察目标、授权/准入、工单、租约、工位、巡检与读取模块。它们说明局部责任已经实现，但仍不能直接当成完整长期模块地图。</li>
                 <li>首个切片只实现真实需要的部分，避免先创建十个空模块和一堆没有调用者的接口。</li>
               </ul>
             </div>
@@ -913,16 +913,16 @@
           <div class="chapter-head">
             <div class="chapter-num">07</div>
             <div>
-              <h2>采集子系统：服务端决定“值不值得采”，插件只负责“怎样去采”</h2>
-              <p class="chapter-summary">产品或 AI 只能提出信息缺口，不能直接命令浏览器。服务端先复用已有证据、合并相同需求、检查授权与工位资源，再下发有界工作单；插件领取、续租、执行并交付一个冻结采集包，最终由证据接入判断能否入库。</p>
+              <h2>采集子系统：从“加入观察”到“受控任务”，主控制链已落地</h2>
+              <p class="chapter-summary">现在用户可以先把创作者或关键词加入观察名单；这一步只写本机身份，不访问平台。后续采集仍必须经过授权、准入、工单、限时租约和工位匹配。插件不能自己铸造派发任务，只能领取服务端许可的工作，并把结果以可追溯采集包交回本机。</p>
             </div>
-            <span class="state-badge design">设计清楚 · 真实升级未授权</span>
+            <span class="state-badge approved">控制链已编码 · 浏览器实采待持续证明</span>
           </div>
 
           <div class="diagram-shell">
             <svg viewBox="0 0 1200 612" role="img" aria-labelledby="f6-title f6-desc" xmlns="http://www.w3.org/2000/svg">
               <title id="f6-title">受控采集子系统架构</title>
-              <desc id="f6-desc">上行从信息需要到复用与采集准入、有界工作单和插件工位；下行从插件形成终态采集包，经证据接入后产生接纳证据和逐条处理工作。插件不拥有研究优先级或事实接纳权。</desc>
+              <desc id="f6-desc">上行从观察目标和授权到准入、有界工单、租约和插件工位；下行从插件领取任务形成采集包，经本地接入后产生证据库读取与巡检完成回执。插件不拥有研究优先级、授权或事实接纳权。</desc>
               <defs>
                 <pattern id="f6-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1" fill="rgba(24,29,38,.09)"/></pattern>
                 <marker id="f6-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#41454d"/></marker>
@@ -956,54 +956,54 @@
               <rect class="arrow-mask" x="316" y="488" width="28" height="16"/><text class="arrow-label accent" x="330" y="500" text-anchor="middle">接纳</text>
 
               <g>
-                <rect class="node-box design" x="72" y="88" width="240" height="88" rx="6"/>
-                <rect class="tag-box design" x="88" y="100" width="72" height="16" rx="2"/><text class="tag-text design" x="124" y="112" text-anchor="middle">上层提出</text>
-                <text class="node-title" x="192" y="136" text-anchor="middle">信息需要</text>
-                <text class="node-sub" x="192" y="156" text-anchor="middle">缺什么 · 为何需要 · 允许到哪里</text>
+                <rect class="node-box verified" x="72" y="88" width="240" height="88" rx="6"/>
+                <rect class="tag-box verified" x="88" y="100" width="72" height="16" rx="2"/><text class="tag-text verified" x="124" y="112" text-anchor="middle">本机动作</text>
+                <text class="node-title" x="192" y="136" text-anchor="middle">加入观察目标</text>
+                <text class="node-sub" x="192" y="156" text-anchor="middle">记录要关注谁；不触发平台访问</text>
               </g>
               <g>
-                <rect class="node-box design" x="348" y="88" width="272" height="88" rx="6"/>
-                <rect class="tag-box design" x="364" y="100" width="88" height="16" rx="2"/><text class="tag-text design" x="408" y="112" text-anchor="middle">服务端裁定</text>
-                <text class="node-title" x="484" y="136" text-anchor="middle">复用 / 合并 / 延后 / 拒绝 / 准入</text>
-                <text class="node-sub" x="484" y="156" text-anchor="middle">检查证据、时效、授权、预算、风险和工位</text>
+                <rect class="node-box verified" x="348" y="88" width="272" height="88" rx="6"/>
+                <rect class="tag-box verified" x="364" y="100" width="88" height="16" rx="2"/><text class="tag-text verified" x="408" y="112" text-anchor="middle">服务端裁定</text>
+                <text class="node-title" x="484" y="136" text-anchor="middle">授权 / 准入 / 合并 / 延后 / 拒绝</text>
+                <text class="node-sub" x="484" y="156" text-anchor="middle">检查范围、风险暂停、额度、能力和可用工位</text>
               </g>
               <g>
-                <rect class="node-box design" x="656" y="88" width="272" height="88" rx="6"/>
-                <rect class="tag-box design" x="672" y="100" width="80" height="16" rx="2"/><text class="tag-text design" x="712" y="112" text-anchor="middle">有限命令</text>
-                <text class="node-title" x="792" y="136" text-anchor="middle">有界工作单</text>
-                <text class="node-sub" x="792" y="156" text-anchor="middle">目标、字段、数量/时间上限与停止条件</text>
+                <rect class="node-box approved" x="656" y="88" width="272" height="88" rx="6"/>
+                <rect class="tag-box approved" x="672" y="100" width="80" height="16" rx="2"/><text class="tag-text approved" x="712" y="112" text-anchor="middle">限时许可</text>
+                <text class="node-title" x="792" y="136" text-anchor="middle">工单 + 租约 + 派发任务</text>
+                <text class="node-sub" x="792" y="156" text-anchor="middle">目标、能力、数量/时间上限与停止条件</text>
               </g>
 
               <g>
-                <rect class="node-box draft" x="880" y="268" width="240" height="80" rx="6"/>
-                <rect class="tag-box" x="896" y="280" width="88" height="16" rx="2"/><text class="tag-text" x="940" y="292" text-anchor="middle">真实升级未做</text>
+                <rect class="node-box approved" x="880" y="268" width="240" height="80" rx="6"/>
+                <rect class="tag-box approved" x="896" y="280" width="88" height="16" rx="2"/><text class="tag-text approved" x="940" y="292" text-anchor="middle">插件已接通</text>
                 <text class="node-title" x="1000" y="312" text-anchor="middle">受控浏览器工位</text>
-                <text class="node-sub" x="1000" y="332" text-anchor="middle">领取 · 续租 · 风险暂停 · 恢复</text>
+                <text class="node-sub" x="1000" y="332" text-anchor="middle">报到 · 领任务 · 定时唤醒 · 有界执行</text>
               </g>
               <g>
-                <rect class="node-box draft" x="880" y="376" width="240" height="80" rx="6"/>
-                <rect class="tag-box" x="896" y="388" width="72" height="16" rx="2"/><text class="tag-text" x="932" y="400" text-anchor="middle">唯一终态</text>
+                <rect class="node-box approved" x="880" y="376" width="240" height="80" rx="6"/>
+                <rect class="tag-box approved" x="896" y="388" width="72" height="16" rx="2"/><text class="tag-text approved" x="932" y="400" text-anchor="middle">回传边界</text>
                 <text class="node-title" x="1000" y="420" text-anchor="middle">冻结采集包</text>
-                <text class="node-sub" x="1000" y="440" text-anchor="middle">材料、覆盖情况、失败与停止原因</text>
+                <text class="node-sub" x="1000" y="440" text-anchor="middle">材料、Coverage、失败、停止原因与回执</text>
               </g>
 
               <g>
                 <rect class="node-box approved" x="348" y="460" width="272" height="80" rx="6"/>
                 <rect class="tag-box approved" x="364" y="472" width="88" height="16" rx="2"/><text class="tag-text approved" x="408" y="484" text-anchor="middle">首切片边界</text>
                 <text class="node-title" x="484" y="504" text-anchor="middle">证据接入</text>
-                <text class="node-sub" x="484" y="524" text-anchor="middle">权限、身份、内容指纹、重放/冲突、原子回执</text>
+                <text class="node-sub" x="484" y="524" text-anchor="middle">身份、权限、额度、重放/冲突与接纳回执</text>
               </g>
               <g>
                 <rect class="node-box approved" x="72" y="460" width="240" height="80" rx="6"/>
                 <rect class="tag-box approved" x="88" y="472" width="88" height="16" rx="2"/><text class="tag-text approved" x="132" y="484" text-anchor="middle">接纳后</text>
-                <text class="node-title" x="192" y="504" text-anchor="middle">接纳证据 + 逐条处理</text>
-                <text class="node-sub" x="192" y="524" text-anchor="middle">坏记录隔离，不连坐其他合格材料</text>
+                <text class="node-title" x="192" y="504" text-anchor="middle">Evidence Library + 完成回执</text>
+                <text class="node-sub" x="192" y="524" text-anchor="middle">展示接纳材料；完成租约并记录巡检结果</text>
               </g>
 
               <g transform="translate(64 588)">
-                <rect x="0" y="-10" width="12" height="12" fill="rgba(170,45,0,.08)" stroke="#aa2d00"/><text class="legend-text" x="20" y="0">当前合成切片获准触及</text>
-                <rect x="224" y="-10" width="12" height="12" fill="rgba(0,47,167,.06)" stroke="#002fa7" stroke-dasharray="3 2"/><text class="legend-text" x="244" y="0">责任已确认</text>
-                <rect x="392" y="-10" width="12" height="12" fill="rgba(24,29,38,.02)" stroke="#9297a0" stroke-dasharray="3 2"/><text class="legend-text" x="412" y="0">真实插件与平台尚未授权</text>
+                <rect x="0" y="-10" width="12" height="12" fill="rgba(63,107,85,.07)" stroke="#3f6b55"/><text class="legend-text" x="20" y="0">本机已核验或可访问</text>
+                <rect x="224" y="-10" width="12" height="12" fill="rgba(170,45,0,.08)" stroke="#aa2d00"/><text class="legend-text" x="244" y="0">已编码的控制与运行时</text>
+                <rect x="456" y="-10" width="12" height="12" fill="rgba(24,29,38,.02)" stroke="#9297a0" stroke-dasharray="3 2"/><text class="legend-text" x="476" y="0">真实浏览器回传与长期运行待证明</text>
               </g>
             </svg>
           </div>
@@ -1017,9 +1017,9 @@
             <summary>展开：当前究竟哪些已经存在</summary>
             <div class="detail-body source-list">
               <ul>
-                <li>旧插件 v2.0.95 的工位注册、领取、租约、本地队列、重试、终态交付等能力在固定源码/测试中有证据，但它仍是<strong>参考系统</strong>。</li>
-                <li><a href="capture-plugin-architecture.md">新采集与插件架构</a>已经确定责任关系，但没有授权真实平台访问或插件升级。</li>
-                <li>当前 SCOPE-001 只从“服务端预置的合成工作单/尝试 + 冻结采集包”开始，不证明真实插件链路。</li>
+                <li>Linggan 自有插件已经有工位报到、领任务、定时唤醒、受控窗口与本地提交路径；它不是旧工作台的运行时依赖。</li>
+                <li>观察目标、授权、准入、工单、租约、风险暂停、日配额和派发均已有当前代码与 migration。调度决策不直接下载、转录或访问平台。</li>
+                <li>本图仍不把“插件代码能领任务”误画成“真实浏览器采集与回传已经稳定完成”。媒体、OCR/ASR 与多 lane 接纳要各自给出真实证据。</li>
               </ul>
             </div>
           </details>
@@ -1141,16 +1141,16 @@
           <div class="chapter-head">
             <div class="chapter-num">09</div>
             <div>
-              <h2>产品界面：所有入口读同一份“带来源和限制的结果”</h2>
-              <p class="chapter-summary">页面、命令行（CLI）和外部 Agent 都不能直接查数据库。权威历史先由领域模块组织成可重建读取模型，再由接口（API）按调用者权限返回数据、时间、范围、版本、覆盖情况、限制、来源和处理水位。</p>
+              <h2>产品界面：Evidence Library 与 Collection 已经是本地可用入口</h2>
+              <p class="chapter-summary">目前已经存在的页面不是完整情报工作台，而是两个真实的本地产品面：Evidence Library 用于读取已接纳材料；Collection 用于管理观察目标、建档/巡检申请和执行工位。它们都经 API 读取或写入本机数据库，不直连数据表。</p>
             </div>
-            <span class="state-badge blocked">产品形态草案 · 未实现</span>
+            <span class="state-badge verified">本机读取与控制面可访问</span>
           </div>
 
           <div class="diagram-shell">
             <svg viewBox="0 0 1200 532" role="img" aria-labelledby="f8-title f8-desc" xmlns="http://www.w3.org/2000/svg">
               <title id="f8-title">产品界面与权威读取架构</title>
-              <desc id="f8-desc">PostgreSQL 权威历史经过领域模块和读取模型，由 API 提供给 Web 工作台、最小 CLI 和外部受控 Agent。三个消费入口都不能直连数据库，读取模型返回来源、范围、版本、覆盖与限制。</desc>
+              <desc id="f8-desc">PostgreSQL 本地事实经 Evidence 和 Collection 读取模型，由 loopback API 提供给 Evidence Library、观察目标和工位页面。CLI、完整 Topic 工作台和外部受控 Agent仍是后续入口，不能直连数据库。</desc>
               <defs>
                 <pattern id="f8-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1" fill="rgba(24,29,38,.09)"/></pattern>
                 <marker id="f8-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#41454d"/></marker>
@@ -1171,49 +1171,49 @@
               <rect class="arrow-mask" x="628" y="184" width="44" height="16"/><text class="arrow-label link" x="650" y="196" text-anchor="middle">构建视图</text>
 
               <g>
-                <rect class="node-box draft" x="72" y="148" width="208" height="96" rx="6"/>
+                <rect class="node-box verified" x="72" y="148" width="208" height="96" rx="6"/>
                 <text class="node-title" x="176" y="184" text-anchor="middle">PostgreSQL 权威历史</text>
-                <text class="node-sub" x="176" y="206" text-anchor="middle">接纳证据 · 来源观察 · 主张 · 决定</text>
-                <text class="node-note" x="176" y="224" text-anchor="middle">仅有 F01 接入侧数据库基础</text>
+                <text class="node-sub" x="176" y="206" text-anchor="middle">采集包 · 观察目标 · 工单 · 租约 · 回执</text>
+                <text class="node-note" x="176" y="224" text-anchor="middle">本机 Runtime schema 已就绪</text>
               </g>
               <g>
-                <rect class="node-box design" x="356" y="148" width="256" height="96" rx="6"/>
-                <text class="node-title" x="484" y="184" text-anchor="middle">拥有事实的领域模块</text>
-                <text class="node-sub" x="484" y="206" text-anchor="middle">按权限、用途和版本组织可读结果</text>
+                <rect class="node-box verified" x="356" y="148" width="256" height="96" rx="6"/>
+                <text class="node-title" x="484" y="184" text-anchor="middle">Evidence / Collection 领域模块</text>
+                <text class="node-sub" x="484" y="206" text-anchor="middle">按身份、授权、工位与读取语义组织结果</text>
                 <text class="node-note" x="484" y="224" text-anchor="middle">不让页面自己拼业务真相</text>
               </g>
               <g>
-                <rect class="node-box design" x="688" y="136" width="232" height="120" rx="6"/>
-                <rect class="tag-box design" x="704" y="148" width="80" height="16" rx="2"/><text class="tag-text design" x="744" y="160" text-anchor="middle">统一读模型</text>
-                <text class="node-title" x="804" y="190" text-anchor="middle">可解释读取结果</text>
-                <text class="node-sub" x="804" y="212" text-anchor="middle">数据 · 时间 · 范围 · 版本</text>
-                <text class="node-sub" x="804" y="230" text-anchor="middle">覆盖情况 · 限制 · 来源 · 水位</text>
+                <rect class="node-box verified" x="688" y="136" width="232" height="120" rx="6"/>
+                <rect class="tag-box verified" x="704" y="148" width="80" height="16" rx="2"/><text class="tag-text verified" x="744" y="160" text-anchor="middle">当前读模型</text>
+                <text class="node-title" x="804" y="190" text-anchor="middle">Evidence / Target / Station 读取</text>
+                <text class="node-sub" x="804" y="212" text-anchor="middle">材料卡片 · 目标状态 · 建档完整度</text>
+                <text class="node-sub" x="804" y="230" text-anchor="middle">工位能力 · 配额 · 停止原因 · Coverage</text>
                 <text class="node-note" x="804" y="246" text-anchor="middle">unknown 不变成 0</text>
               </g>
               <g>
-                <rect class="node-box draft" x="968" y="148" width="192" height="96" rx="6"/>
+                <rect class="node-box verified" x="968" y="148" width="192" height="96" rx="6"/>
                 <text class="node-title" x="1064" y="184" text-anchor="middle">产品 API</text>
-                <text class="node-sub" x="1064" y="206" text-anchor="middle">按能力提供结果与回执</text>
-                <text class="node-note" x="1064" y="224" text-anchor="middle">不是按数据表开放增删改查</text>
+                <text class="node-sub" x="1064" y="206" text-anchor="middle">提供本地读取、申请、领任务和回执</text>
+                <text class="node-note" x="1064" y="224" text-anchor="middle">loopback-only，不是公开接口</text>
               </g>
 
               <g>
-                <rect class="node-box draft" x="280" y="332" width="240" height="88" rx="6"/>
-                <text class="node-title" x="400" y="364" text-anchor="middle">网页工作台</text>
-                <text class="node-sub" x="400" y="384" text-anchor="middle">今日关注、主题、语料库、研究、行动</text>
-                <text class="node-note" x="400" y="402" text-anchor="middle">尚未实现</text>
+                <rect class="node-box verified" x="280" y="332" width="240" height="88" rx="6"/>
+                <text class="node-title" x="400" y="364" text-anchor="middle">Evidence Library</text>
+                <text class="node-sub" x="400" y="384" text-anchor="middle">查看已接纳材料与覆盖/未知边界</text>
+                <text class="node-note" x="400" y="402" text-anchor="middle">当前本机返回 45 张材料卡片快照</text>
               </g>
               <g>
-                <rect class="node-box draft" x="612" y="332" width="240" height="88" rx="6"/>
-                <text class="node-title" x="732" y="364" text-anchor="middle">命令行入口</text>
-                <text class="node-sub" x="732" y="384" text-anchor="middle">给 Mog 与团队 Agent 的结构化入口</text>
-                <text class="node-note" x="732" y="402" text-anchor="middle">当前计划只含极小命令行</text>
+                <rect class="node-box verified" x="612" y="332" width="240" height="88" rx="6"/>
+                <text class="node-title" x="732" y="364" text-anchor="middle">Collection / 观察目标</text>
+                <text class="node-sub" x="732" y="384" text-anchor="middle">加入观察、巡检开关、建档状态与原因</text>
+                <text class="node-note" x="732" y="402" text-anchor="middle">只写本机控制记录，不等于平台访问</text>
               </g>
               <g>
-                <rect class="node-box draft" x="944" y="332" width="240" height="88" rx="6"/>
-                <text class="node-title" x="1064" y="364" text-anchor="middle">外部受控 Agent</text>
-                <text class="node-sub" x="1064" y="384" text-anchor="middle">按委托读取、解释、提交候选</text>
-                <text class="node-note" x="1064" y="402" text-anchor="middle">不能绕过 API 直查数据库</text>
+                <rect class="node-box verified" x="944" y="332" width="240" height="88" rx="6"/>
+                <text class="node-title" x="1064" y="364" text-anchor="middle">工位运行面</text>
+                <text class="node-sub" x="1064" y="384" text-anchor="middle">安装报到、能力、额度、claim 与暂停原因</text>
+                <text class="node-note" x="1064" y="402" text-anchor="middle">完整 Topic / Agent 仍未实现</text>
               </g>
 
               <rect x="72" y="460" width="1112" height="40" rx="4" fill="rgba(143,67,59,.05)" stroke="rgba(143,67,59,.34)" stroke-dasharray="5 4"/>
@@ -1245,16 +1245,16 @@
           <div class="chapter-head">
             <div class="chapter-num">10</div>
             <div>
-              <h2>运行环境：本机开发与 F01 基础正在运行，但没有一套已上线的 Linggan</h2>
-              <p class="chapter-summary">当前能确认本机 Rust/Node 工具链、可编译工作区和健康运行的 Docker PostgreSQL 16；F01 合同与隔离数据库基础证明已经出现。API 与 worker 仍只输出“尚未启用”的启动提示，没有业务路由、后台 runner、正式域名或生产部署。</p>
+              <h2>运行环境：本机本地产品正在运行，但它还不是线上 Linggan</h2>
+              <p class="chapter-summary">本次核验到 Docker PostgreSQL 16 健康、`linggan-api` 正在监听 `127.0.0.1:3000`、Evidence Library / Collection 页面可访问。API 健康接口报告插件 Runtime schema 就绪。worker 已经从启动占位变为巡检 tick 代码，但本次未观察到它作为独立常驻进程运行；没有正式域名、生产部署或外部服务。</p>
             </div>
             <span class="state-badge verified">本机状态已实时核对</span>
           </div>
 
           <div class="diagram-shell">
             <svg viewBox="0 0 1200 604" role="img" aria-labelledby="f9-title f9-desc" xmlns="http://www.w3.org/2000/svg">
-              <title id="f9-title">当前开发环境与未来第一阶段运行形态</title>
-              <desc id="f9-desc">左侧为当前本机开发环境，包含 Rust 和 Node 工具链、API/worker bootstrap、局部 F01 合同与健康运行的 Docker PostgreSQL。右侧为未来第一阶段建议运行形态，包含同版本 API/worker、一个 PostgreSQL 主库、受控浏览器工位以及按需启用的对象存储和模型供应商。</desc>
+              <title id="f9-title">当前本地运行环境与未形成能力</title>
+              <desc id="f9-desc">左侧为当前本机 loopback 产品，包含正在运行的 API、健康 PostgreSQL、Evidence Library、Collection 和已编码的巡检 worker。右侧为尚未形成的生产部署、外部对象存储、模型服务与长期运行验证。</desc>
               <defs>
                 <pattern id="f9-dots" width="24" height="24" patternUnits="userSpaceOnUse"><circle cx="12" cy="12" r="1" fill="rgba(24,29,38,.09)"/></pattern>
                 <marker id="f9-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 Z" fill="#41454d"/></marker>
@@ -1286,18 +1286,18 @@
               </g>
               <g>
                 <rect class="node-box verified" x="96" y="220" width="408" height="136" rx="6"/>
-                <rect class="tag-box verified" x="112" y="232" width="88" height="16" rx="2"/><text class="tag-text verified" x="156" y="244" text-anchor="middle">可编译骨架</text>
+                <rect class="tag-box verified" x="112" y="232" width="88" height="16" rx="2"/><text class="tag-text verified" x="156" y="244" text-anchor="middle">本地运行面</text>
                 <text class="node-title" x="300" y="268" text-anchor="middle">Rust workspace</text>
                 <rect x="128" y="286" width="344" height="24" rx="4" fill="rgba(24,29,38,.05)" stroke="rgba(24,29,38,.16)"/>
-                <text x="144" y="302" fill="#181d26" font-size="11">linggan-api</text><text x="448" y="302" fill="#6b7280" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end">无生产路由</text>
+                <text x="144" y="302" fill="#181d26" font-size="11">linggan-api</text><text x="448" y="302" fill="#6b7280" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end">127.0.0.1:3000 正在监听</text>
                 <rect x="128" y="318" width="344" height="24" rx="4" fill="rgba(24,29,38,.05)" stroke="rgba(24,29,38,.16)"/>
-                <text x="144" y="334" fill="#181d26" font-size="11">linggan-worker</text><text x="448" y="334" fill="#6b7280" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end">无后台工作</text>
+                <text x="144" y="334" fill="#181d26" font-size="11">linggan-worker</text><text x="448" y="334" fill="#6b7280" font-size="9" font-family="'Geist Mono', monospace" text-anchor="end">巡检 tick 已编码；本次未见常驻</text>
               </g>
               <g>
                 <rect class="node-box verified" x="96" y="396" width="408" height="76" rx="6"/>
                 <rect class="tag-box verified" x="112" y="408" width="88" height="16" rx="2"/><text class="tag-text verified" x="156" y="420" text-anchor="middle">当前健康</text>
                 <text class="node-title" x="300" y="440" text-anchor="middle">Docker PostgreSQL 16.14 环境</text>
-                <text class="node-sub" x="300" y="460" text-anchor="middle">容器健康；F01 proof 与日常开发库严格隔离</text>
+                <text class="node-sub" x="300" y="460" text-anchor="middle">容器健康；0001–0013 schema 与本地 Runtime 就绪</text>
               </g>
 
               <g>
@@ -1335,7 +1335,7 @@
               </g>
 
               <rect x="40" y="532" width="1120" height="40" rx="4" fill="rgba(143,67,59,.05)" stroke="rgba(143,67,59,.34)" stroke-dasharray="5 4"/>
-              <text x="600" y="556" fill="#8f433b" font-size="12" font-weight="600" text-anchor="middle">当前没有正式域名、生产数据库、已部署 API/worker、已接入对象存储或模型供应商</text>
+              <text x="600" y="556" fill="#8f433b" font-size="12" font-weight="600" text-anchor="middle">当前没有正式域名、生产数据库、已部署的长期 API/worker、对象存储或模型供应商</text>
             </svg>
           </div>
 
@@ -1346,7 +1346,7 @@
               <ul>
                 <li><code>rustc 1.95.0</code>、<code>cargo 1.95.0</code>、<code>node v24.13.0</code> 当前可用。</li>
                 <li><code>./scripts/dev-db.sh status</code> 当前显示 PostgreSQL 16.14 容器为 <code>healthy</code>；这只证明开发数据库环境在线，不证明完整业务 schema 或产品链已经完成。</li>
-                <li>F01 最小数据库基础曾在独立一次性 PostgreSQL proof 环境真实通过；它与日常开发库隔离，并且还不证明 Package 原子接入、worker、Observation/Current、API 或 CLI。</li>
+                <li>F01 的最小数据库 foundation 与 Package 原子 ingress 已有隔离 PostgreSQL proof；这不替代真实浏览器、媒体、AI 或生产运行证据。</li>
                 <li><a href="runtime-operations-architecture.md">运行与运维架构</a>规定第一阶段使用一个 API、一个 worker、一个 PostgreSQL 主库，按真实需要再启用对象存储和模型供应商。</li>
               </ul>
             </div>
@@ -1356,10 +1356,10 @@
           <div class="chapter-head">
             <div class="chapter-num">11</div>
             <div>
-              <h2>当前唯一实施切片：正在证明一条合成证据链，不碰真实平台</h2>
-              <p class="chapter-summary">SCOPE-001/F01 正在把一个服务端预置的合成工作单和冻结采集包写入 PostgreSQL，之后逐条形成内容观察与有来源的当前读取，再由接口（API）/极小命令行（CLI）解释结果。当前已完成一部分采集包合同和数据库基础；它仍不是完整产品，也不包含插件、主题、语料库、AI 或网页页面。</p>
+              <h2>事实基础：F01 仍是可信接纳地基，但不再是项目唯一实现切片</h2>
+              <p class="chapter-summary">F01/SCOPE-001 负责把“材料为什么可被接纳、能否重放、何时冲突、坏记录如何隔离”这些底层规则证明清楚。它仍是系统的可信地基；但当前项目已在其旁形成独立的 LOCAL / Producer / Collection 产品链。图中两条链必须分开理解：产品可见不等于 F01 全部完成，F01 通过也不等于真实采集、媒体或智能分析完成。</p>
             </div>
-            <span class="state-badge approved">执行中 · F01 受控 TDD</span>
+            <span class="state-badge approved">F01 持续作为事实接纳基础</span>
           </div>
 
           <div class="diagram-shell">
@@ -1376,7 +1376,7 @@
 
               <rect x="40" y="36" width="1120" height="56" rx="4" fill="rgba(170,45,0,.06)" stroke="rgba(170,45,0,.48)"/>
               <text x="600" y="60" fill="#aa2d00" font-size="13" font-weight="600" text-anchor="middle">代码门 CONTROLLED OPEN FOR TDD：F01 合成主链正在受控实现</text>
-              <text x="600" y="80" fill="#6b7280" font-size="10" text-anchor="middle">已完成 Package/Record hash、攻击性合同 tracer 与最小 PostgreSQL foundation proof；下一步是有效 Package 原子接入</text>
+              <text x="600" y="80" fill="#6b7280" font-size="10" text-anchor="middle">F01 已有 Package/Record hash、攻击性合同 tracer 与 PostgreSQL 原子 ingress proof；它不替代当前产品链的真实浏览器证明</text>
 
               <rect x="56" y="128" width="1088" height="344" rx="8" fill="rgba(170,45,0,.018)" stroke="rgba(170,45,0,.34)" stroke-dasharray="6 4"/>
               <rect x="80" y="124" width="252" height="16" fill="#f7f8f5"/>
@@ -1404,11 +1404,11 @@
                 <text class="node-sub" x="488" y="242" text-anchor="middle">Package/Record hash 与攻击性合同测试已出现</text>
               </g>
               <g>
-                <rect class="node-box approved" x="656" y="168" width="256" height="104" rx="6"/>
-                <rect class="tag-box approved" x="672" y="180" width="40" height="16" rx="2"/><text class="tag-text approved" x="692" y="192" text-anchor="middle">03</text>
+                <rect class="node-box verified" x="656" y="168" width="256" height="104" rx="6"/>
+                <rect class="tag-box verified" x="672" y="180" width="40" height="16" rx="2"/><text class="tag-text verified" x="692" y="192" text-anchor="middle">03</text>
                 <text class="node-title" x="784" y="220" text-anchor="middle">PostgreSQL 原子接入</text>
                 <text class="node-sub" x="784" y="242" text-anchor="middle">采集包、记录、覆盖情况、回执、处理工作</text>
-                <text class="node-note" x="784" y="258" text-anchor="middle">foundation 已证明；原子 ingress 是下一步</text>
+                <text class="node-note" x="784" y="258" text-anchor="middle">已做原子、replay/conflict 与故障零半写 proof</text>
               </g>
               <g>
                 <rect class="node-box approved" x="904" y="328" width="240" height="88" rx="6"/>
@@ -1441,7 +1441,7 @@
                 <text class="legend-text" x="232" y="0">插件升级</text>
                 <text class="legend-text" x="336" y="0">主题 / 语料库</text>
                 <text class="legend-text" x="476" y="0">AI Agent / 信号 / 情报</text>
-                <text class="legend-text" x="684" y="0">网页工作台</text>
+                <text class="legend-text" x="684" y="0">完整 Topic 工作台</text>
                 <text class="legend-text" x="808" y="0">生产部署</text>
                 <text class="legend-text" x="916" y="0">旧数据迁移</text>
               </g>
@@ -1468,10 +1468,10 @@
           <div class="chapter-head">
             <div class="chapter-num">12</div>
             <div>
-              <h2>状态路线图：技术主干已经形成，第一块事实内核正在开发</h2>
-              <p class="chapter-summary">下面按“已经真实完成、当前正在做、当前切片之后、需要重新授权、远期产品能力”收口。它不是承诺日期，而是防止后续 Agent 把局部合同、数据库基础或测试通过误报成完整产品完成。</p>
+              <h2>状态路线图：本地产品和受控采集已出现，长期情报系统仍在建设</h2>
+              <p class="chapter-summary">下面按“本机已核验、已编码待持续证明、必须分段验证、尚未形成能力”收口。它不是承诺日期；它用来防止把 API 200、一次任务领取、单次材料接纳或图中某个绿色节点误报成完整内容情报系统完成。</p>
             </div>
-            <span class="state-badge verified">截至 2026-08-21</span>
+            <span class="state-badge verified">截至本机快照 2026-08-28</span>
           </div>
 
           <div class="timeline" aria-label="项目状态路线图">
@@ -1482,18 +1482,18 @@
             </div>
             <div class="timeline-row">
               <div class="timeline-stage" style="color:var(--accent)">正在进行</div>
-              <div class="timeline-title">SCOPE-001 / F01 合成主链</div>
-              <div class="timeline-copy">代码门已按用户裁定受控开放。Package/Record hash、duplicate key、unsafe integer、unpaired surrogate、RFC 8785 golden 等合同 tracer 和最小 PostgreSQL foundation proof 已出现；当前下一步是有效 Package 原子接入。</div>
+              <div class="timeline-title">独立本地产品与受控采集控制链</div>
+              <div class="timeline-copy">本机 loopback API、PostgreSQL、Evidence Library、观察目标、授权/准入、工单、租约、工位和插件任务接口均已出现。最新本机 API 返回 Browser Producer Runtime schema READY 与 45 张材料卡片快照；这只是此刻读取状态，不是完整 Coverage 或业务验收。</div>
             </div>
             <div class="timeline-row">
               <div class="timeline-stage" style="color:var(--warning)">当前切片后续</div>
-              <div class="timeline-title">Record 处理 → Observation / Current → API / CLI</div>
-              <div class="timeline-copy">按同一 F01 主链逐段完成坏记录隔离、有来源的当前读取、loopback API、worker 和只经 API 的极小 CLI。F02–F10 作为后续硬化/回归场景，不再阻塞 F01 主链进入。</div>
+              <div class="timeline-title">持续运行、真实浏览器回传与完整观察证据</div>
+              <div class="timeline-copy">worker 已实现 60 秒巡检 tick；插件已实现领任务与定时唤醒。不过本次没有观察到 worker 常驻进程，真实浏览器采集和完整采集包回传仍需在受控范围内反复证明，不能被一次演练替代。</div>
             </div>
             <div class="timeline-row">
               <div class="timeline-stage" style="color:var(--danger)">需新授权</div>
-              <div class="timeline-title">真实 producer 与插件升级</div>
-              <div class="timeline-copy">需要真实账号、对象、访问范围、原件处置和风控边界；再以小范围实验核对平台字段、时间、Coverage、账号镜头和恢复协议。不能由合成切片自动扩张。</div>
+              <div class="timeline-title">媒体、OCR/ASR、更多采集 lane 与可比性</div>
+              <div class="timeline-copy">媒体 URL、下载、落盘、转录、衍生处理和平台字段稳定性各是独立事实。已接纳 discovery 材料、一次任务领取或页面显示，都不能替代媒体链、评论链、跨时间可比性或长期监控证明。</div>
             </div>
             <div class="timeline-row">
               <div class="timeline-stage" style="color:var(--link)">后续产品</div>
@@ -1507,7 +1507,7 @@
             </div>
           </div>
 
-          <div class="reading-note"><strong>一句话判断项目现状：</strong>“产品与技术架构已经比较完整；第一段合成合同和数据库基础正在形成；真实平台、用户界面、产品内 Agent 与生产运行仍未开始。”</div>
+          <div class="reading-note"><strong>一句话判断项目现状：</strong>“Linggan 已经是能在本机看材料、管理观察目标、向插件派受控任务的独立产品雏形；它还不是已经验证长期稳定、拥有完整媒体和 AI 情报能力的线上系统。”</div>
           <details>
             <summary>展开：以后如何保持这张全景图不过时</summary>
             <div class="detail-body source-list">
