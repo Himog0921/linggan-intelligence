@@ -1,7 +1,7 @@
 # ARC-001 代码前产品与系统架构收口决策图
 
 > 状态: 活跃计划
-> 最后核对: 2026-08-24
+> 最后核对: 2026-08-28
 > 适用范围: F01 之后、首个真实 producer 与首个用户可见产品切片之前的产品和系统架构收口
 > 事实来源: 用户最新 course correction、当前开发跟踪表、产品/页面草案、采集与媒体历史经验、`ADV-AUDIT-001` 最终处置
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、ACCEPTED ADR、当前活跃 SCOPE 与可复现代码/数据库事实；本图不自动授权真实访问或实现
@@ -38,6 +38,12 @@ Standing preferences:
 - 不因现有首页草案丰富就默认五 Agent 编队、等距地形或七个导航已进入 P0；
 - 历史能力只继承用户任务、业务价值、关键不变量和已验证交互认知；旧实现必须先经过 capability inheritance audit，不能因“保留能力”自动复制；
 - ticket 产物只链接到本图，不把专题设计复制进本图。
+
+状态只回答“这张决策卡是否仍需要新的决定”：
+
+- `resolved` 表示产品/架构问题已有权威答案；不自动表示代码、真实链、部署或业务验收完成。
+- `open` 必须说明尚缺的是产品选择、主线合同整合、实现基线还是用户验收，不能把已经回答的问题重新包装成开放研究。
+- 一个旧 Issue/PR 可以因答案已被主线或更高权威文件吸收而关闭，即使其历史分支从未合并；关闭时必须说明吸收来源与未证明边界。
 
 ## product-shell: 第一阶段以什么产品形态存在？
 
@@ -108,7 +114,9 @@ Decision owner: 产品团队制作，Mog 走查确认
 
 Mog 已批准一个有界的 DESIGN-002 输入：以「任务启动困难」为例，制作 `SYNTHETIC / NOT LIVE` 的 Topic Intelligence Reference Page，用来走查 Topic 深入时的单一判断任务、LIDS v2.0 设计表达、状态诚实与组件晋升门。LIDS 统一约束未来 UI 的 Token → Primitive → Component → Pattern → Page，但仍为 Proposed 标准，不声明任何运行时页面/组件已经存在。该交付物见 [`design-002-topic-intelligence-reference-page.md`](design-002-topic-intelligence-reference-page.md) 及其引用规格。
 
-这不是本票的完整答案：它不决定完整 P0 有几个一级入口/详情工作区，不选择运行时前端技术方案，不接入真实脱敏样本，也不授权任何真实 Web、数据、权限或行动。完成后只能作为本票的走查输入，不能把 `p0-surface-prototype` 标为 resolved。
+这张卡已经不再处于“从零决定页面结构”的阶段。当前主线已有 Evidence Library、Collection Workspace 五个子面、共享中文壳层及对应页面规格和视觉验收；这些是已经落地的产品表面事实。旧 Draft PR #12 仍停留在早期「今日关注」候选，不能整体合并为当前答案。
+
+本票保持 `open` 的唯一原因改为：尚未把当前真实页面、Topic 深入入口和“观察不完整”状态整理成一份统一的第一阶段界面验收说明，并由 Mog 完成页面级走查。后续不得再询问是否需要独立 Web、是否以中文为主或是否保留 Collection/Evidence 页面；这些已由当前主线回答。
 
 Asset target: `docs/product/first-phase-interface-prototype.md`
 
@@ -150,9 +158,9 @@ Decision owner: 工程架构团队；只有真实账号、风险或资源边界�
 
 ### Answer
 
-形成草案 [`capture-control-contract.md`](../../architecture/capture-control-contract.md)。它不复制旧 `CollectionTask`、pending fallback 或旧表结构，而是冻结：Research Intent / Evidence Need / Acquisition Authorization / Admission / Work Order / Attempt / Lease / Package / ACK / Evidence / Observation 的分责；known set 与 maximum quota 的 Coverage 语义；Discovery、详情、评论与媒体 lane；Evidence 复用、去重和有意复观测；有限工位/账号/预算/风险控制与执行前重估；partial success、replay、conflict、retry、recovery；以及“采集结果可用”与“Claim 有资格”之间的硬边界。
+[`capture-control-contract.md`](../../architecture/capture-control-contract.md) 已通过 PR #17 集成当前 `main`。它不复制旧 `CollectionTask`、pending fallback 或旧表结构，而是冻结：Research Intent / Evidence Need / Acquisition Authorization / Admission / Work Order / Attempt / Lease / Package / ACK / Evidence / Observation 的分责；known set 与 maximum quota 的 Coverage 语义；Discovery、详情、评论与媒体 lane；Evidence 复用、去重和有意复观测；有限工位/账号/预算/风险控制与执行前重估；partial success、replay、conflict、retry、recovery；以及“采集结果可用”与“Claim 有资格”之间的硬边界。
 
-Mog 已选择含受限媒体的 Canary 方案 B。因此本票与 `media-lifecycle-contract` 必须在任何真实媒体 lane 之前一起通过独立审查和集成；草案本身不授权真实账号、频率、配额、预算、风控阈值、恢复政策、样本、下载、存储、OCR/转录或实现。未决定项明确保留为 `DECISION_REQUIRED`，并将由新的真实 Canary SCOPE 处理。
+Mog 已选择含受限媒体的 Canary 方案 B。合同集成只证明控制责任已经冻结，不证明真实账号、媒体、OCR/转录、长期调度或用户验收；这些必须在对应实现和真实运行卡中分别证明。
 
 
 Asset target: `docs/architecture/capture-control-contract.md`
@@ -168,10 +176,18 @@ Decision owner: 工程架构团队；隐私、外部模型和保留策略交 Mog
 
 ### Question
 
-Linggan 怎样用最小模型表达媒体身份、来源代次、下载、字节、存储副本、用途、转码/OCR/转录、撤回和派生失效，而不退化成 URL 字段或复制旧 `MediaAsset`？
+怎样把内容工作台 V2 已验证的媒体身份/origin/slot/usage 语义、PR #15 已审查的生命周期草案、当前 Linggan Rust 媒体实现和最新产品运行规则，收敛成当前 `main` 的唯一媒体合同？
 
 ### Answer
 
+产品和核心语义已经回答，不再从零设计：
+
+- 直接继承 V2 的身份、来源、槽位、字节、副本、用途和异步事件分责；URL/路径不是媒体身份，同一物理媒体可服务多个业务槽位。
+- Linggan 增加媒体观察、下载尝试、lane Coverage、`TaskSpec → Attempt → Package → Receipt` 血缘、分块上传/校验、派生版本和处置传播；不迁移旧表、旧运行时或旧串行 Outbox。
+- [`collection-monitoring-rules.md`](../../product/collection-monitoring-rules.md) 已确认本机存储、图片长期保留、视频转录成功后 180 天、关键帧长期保留、OCR/ASR/抽帧/embedding 首批进入、资源队列分离、转录并发 1，以及外部 Agent 通过 CLI 而非直连数据库。
+- PR #15 的历史合同草案已经形成并通过语义审查，但其分支与当前主线冲突且落后；当前 Rust 主线也已实现 Slot、Observation、Download Attempt、Blob、Materialization、Processing Job/Event 和派生入口。旧 PR 不应强行合并。
+
+本票保持 `open` 只因为当前 `main` 尚无唯一的 `media-lifecycle-contract.md`。下一步是从新鲜 `main` 做 V2 继承矩阵、产品决定和现有实现的校准整合；不是继续向 Mog 重复询问已回答的存储、保留、派生范围或调度分离问题。真实媒体取得、OCR/ASR 输出、清理传播和用户验收仍属于后续实证，不阻塞本合同的决策收口。
 
 Asset target: `docs/architecture/media-lifecycle-contract.md`
 
@@ -190,6 +206,9 @@ Decision owner: 工程架构团队
 
 ### Answer
 
+产品层的运行形态已经回答：Mac mini + Cloudflare、本机 PostgreSQL 与媒体存储、沿用内容工作台的调度经验但不迁移旧代码、调度决策与下载/OCR/ASR 重执行分离、不同资源使用独立队列、外部 Agent 经 CLI 访问。当前主线也已经存在 Rust API、PostgreSQL、worker 接缝、Browser Producer Runtime、Evidence Library 和 Collection Workspace。
+
+本票保持 `open` 的原因不再是技术选型讨论，而是缺一份以当前代码为准的实现基线：逐项标明已实现/已由 PostgreSQL 合成链证明/仅有接口/尚未实现/尚未真实验证，并列出调度器、派发、媒体处理器、可观测性和部署的真实缺口。
 
 Asset target: `docs/architecture/first-phase-implementation-baseline.md`
 
@@ -208,22 +227,20 @@ Decision owner: Mog
 
 ### Answer
 
+第一阶段产品目标已经明确：先实现“可靠观察与可检索语料底座”，让观察目标按照明确规则形成任务，经工位执行并返回可追溯结果；成功、部分、失败、缺口、补采与最终语料可用性不能成为黑盒。现有一个账号、一个博主或一次入库只证明局部链路，不等于该阶段完成。
+
+本票保持 `open` 只等待把这条目标写成一个有界、可验收的正式 SCOPE，并引用当前界面验收、媒体合同和实现基线；不再重新讨论第一阶段愿景或另造“研究工作台”。
 
 Resolved 后才允许创建新的活跃 SCOPE、对应 GitHub Issues，并更新开发阶段跟踪和当前状态；F01 只在取得 SCOPE-001 约定的可复现技术证据后转为已完成 technical tracer。该证据必须包含真实 PostgreSQL 副作用，但不要求真实 producer、真实插件或真实平台数据。
 
 ## Next steps
 
-`product-shell`、`primary-daily-job` 与 `first-producer-canary` 已 resolved。`p0-surface-prototype` 仍是本图未收口的页面形态票；真实 producer 的下一步不再重复询问是否含媒体，而是按 LOCAL-001 的 001C-1 → 001C-2 → 001C-3 逐段建立和验证合同。
+`product-shell`、`primary-daily-job`、`first-producer-canary` 与 `capture-control-contract` 已 resolved。剩余开放卡均已改写成具体缺口，不再重复产品提问。
 
-一次只推进一个 ticket 时：
-
-```text
-Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket p0-surface-prototype.
-```
-
-若由两个独立会话并行推进，分别使用：
+当前优先只推进一个 ticket：
 
 ```text
-Session A: Invoke /decision-mapping with the map at docs/plans/active/arc-001-architecture-closure-decision-map.md, ticket p0-surface-prototype.
-Session B: Read LOCAL-001 001C-1 before creating the next producer-contract decision card; do not reopen whether media is included.
+media-lifecycle-contract：从当前 main 校准整合 V2 继承语义、PR #15 草案、最新产品规则与现有 Rust 实现。
 ```
+
+其后依次做 `first-phase-runtime` 的当前实现缺口基线、`first-user-visible-scope` 的正式范围冻结，再按需要补 `p0-surface-prototype` 的统一页面验收。旧 Issue #11/#16/#18 及 PR #12/#13/#15/#19 只作为历史输入或被取代材料处理；不得因关闭旧卡宣称真实媒体链、OCR/ASR、调度或业务验收完成。

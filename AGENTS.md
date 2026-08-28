@@ -31,7 +31,12 @@
 
 本项目使用私有仓库 `Himog0921/linggan-intelligence` 的 GitHub Issues 追踪任务、问题、阻塞和 Agent 工作单；Issue 不是产品、架构或事实的第二权威来源。具体规则见 `docs/agents/issue-tracker.md`。
 
-任何仓库写入必须先有 **Mog 明确派定**的 Issue 和 Claim 评论，并在 Issue 专属 branch/worktree 中通过 draft PR 交付；编码 Agent 禁止直接在共享 root checkout 或 `main` 工作。PR 默认 `Refs #`。Mog 决定谁执行、允许多少并行工作、是否/由谁审查、何时集成，以及对哪个 exact head 授权合并；Agent 不得自行派单、提高并行度、安排 reviewer/integration owner 或 merge。满足 [`docs/governance/agent-collaboration.md`](docs/governance/agent-collaboration.md) 全部条件的小型低风险单 Issue/单 PR 工作可免独立 active plan，其他事项仍必须建计划；细节见 `docs/agents/issue-tracker.md`。
+仓库写入按风险分级，不再把所有改动强制塞进同一套流程：
+
+- **受保护交付**必须有 Mog 明确派定的 Issue/交付包，并使用 Claim、专属 branch/worktree 和 PR。它包括代码、migration/schema、运行合同、插件与发布包、部署/生产、真实外部动作、敏感数据/权限、不可逆处置，以及存在并行冲突或较大权威面改写的事项。编码 Agent 仍禁止直接在共享 `main` 上实施这类改动。
+- **低风险直接维护**在 Mog 当前对话已明确授权、工作区干净且无并行冲突时，可以不预建 Issue、Claim、独立 worktree 或 PR。它只包括文档勘误、索引/链接、已确认决定的状态同步、进度记录、对已被取代卡片的说明与关闭，以及不改变产品/领域/运行/权限/数据语义的小型治理整理。必须检查 diff、运行适用治理检查、留下可追溯记录，并分别报告修改、验证、提交、推送和部署；未经明确授权不得借此扩展到实现、push、deploy 或真实外部动作。
+
+Mog 决定受保护交付的执行、并行、审查、集成与 exact-head 合并授权；当前交付包可以明确授权连续处理一组低风险治理项，不需要为每个状态修正重复建卡。具体分级与升级条件见 `docs/agents/issue-tracker.md` 和 [`docs/governance/agent-collaboration.md`](docs/governance/agent-collaboration.md)。
 
 ### 协作权力边界：Mog 指挥协作，Harness 在任务内执行
 

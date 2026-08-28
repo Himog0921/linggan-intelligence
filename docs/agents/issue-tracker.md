@@ -1,7 +1,7 @@
 # Agent 任务追踪：GitHub Issues
 
 > 状态: 权威当前
-> 最后核对: 2026-08-21
+> 最后核对: 2026-08-28
 > 适用范围: Matt Pocock 工程技能与其他 Agent 对 Linggan Intelligence 任务、问题、阻塞和工作单的读写
 > 事实来源: GitHub 私有仓库配置、当前 `origin`、`gh` 实际读取结果和用户确认
 > 冲突时以谁为准: `AGENTS.md`、真实代码与运行证据、ACCEPTED 决策、`docs/README.md` 中的权威文档和用户最新确认
@@ -32,11 +32,23 @@ GitHub Issues 不用于：
 
 Issue 是工作入口，不是第二事实源，也不是自动授权书。
 
-## 外部 Agent 的执行闭环
+## 先分级，再决定是否需要 Issue
+
+Issue/worktree/PR 是高风险与并行开发的隔离工具，不是所有文字改动的入场券。
+
+| 级别 | 典型改动 | 最低流程 |
+|---|---|---|
+| 受保护交付 | 代码、migration/schema、运行合同、插件/release、部署/生产、真实外部动作、敏感数据/权限、不可逆处置、多个执行者或可能冲突的权威文件改写 | Mog 派定 Issue/交付包 → Claim → 独立 branch/worktree → PR → 按要求审查/集成 |
+| 低风险直接维护 | 文档勘误、索引/链接、已确认决定的状态同步、进度记录、关闭/标记已被取代卡片，以及不改变产品/领域/运行/权限/数据语义的小型治理整理 | Mog 当前对话明确授权 → 核对干净工作区与无并行冲突 → 有界修改 → diff/治理检查 → 留痕并分层报告 |
+| 只读调查 | 代码、运行、数据库或历史证据核对，不写回仓库和外部系统 | 无需 Issue/worktree/PR；如要写回，重新按前两级分类 |
+
+低风险直接维护只免除不必要的流程，不免除事实核对、文件治理、变更记录和完成边界。执行中一旦需要改代码或运行合同、改变产品/领域/数据含义、扩大真实权限/敏感数据/成本/外部副作用、删除或重写重要历史、处理不干净或重叠工作区，或者无法用现有权威事实裁定，就必须升级为受保护交付。
+
+## 受保护交付的执行闭环
 
 本项目采用 **Mog 直接派单**，不允许 Agent 自由抢单、自动分派或自行增加并行。Mog 决定谁执行、允许多少并行、何时审查及何时合并；只有 Mog 在当前事项中明确委托时，指定协调者才可代行某一项协作决定。执行 Agent 只能处理 Mog 明确分配给自己的 Issue。
 
-标准链路分成四个阶段，不能在 Issue 创建时提前填写未来事实：
+受保护交付的标准链路分成四个阶段，不能在 Issue 创建时提前填写未来事实：
 
 ```text
 Issue request
@@ -44,7 +56,7 @@ Issue request
 → Claim 评论
 → 独立 branch + worktree
 → 有界修改与验证
-→ draft PR
+→ PR（是否先保持 Draft 由当前交付包决定）
 → Mog 指定时才进行 review
 → Mog 对 exact head 授权后才集成
 → 重新核验 main 与正式文档
@@ -64,7 +76,7 @@ Mog 决定是否可以派单，并在 Issue 正文或评论中明确执行 Agent
 
 ### 阶段 3：Claim 协议
 
-任何仓库写入开始前，执行 Agent 必须在 Issue 评论中留下 Claim，至少包含：
+任何受保护交付开始前，执行 Agent 必须在 Issue 评论中留下 Claim，至少包含：
 
 - Agent 标识和稳定 task-id；
 - exact base commit；
@@ -78,9 +90,9 @@ Mog 决定是否可以派单，并在 Issue 正文或评论中明确执行 Agent
 
 ### 分支、worktree 与文件所有权
 
-所有仓库修改都必须发生在 Issue 专属 feature branch 和独立 worktree。禁止编码 Agent 在共享 root checkout 或其 `main` 分支直接编辑、提交或暂存文件；root checkout 只用于核对和集成，不是并行执行工作区。
+所有受保护交付都必须发生在 Issue 专属 feature branch 和独立 worktree。禁止编码 Agent 在共享 root checkout 或其 `main` 分支直接实施这类改动；root checkout 只用于核对和集成，不是并行开发工作区。
 
-纯只读调查或审查没有仓库写入，可以不创建 worktree/PR；一旦需要把结果写回仓库，就必须先完成 Issue/Claim，并走独立 branch/worktree + PR。
+纯只读调查或审查不需要 worktree/PR。调查结果若只形成已经明确授权的低风险状态同步，可以走上文直接维护通道；若会改变代码、合同、语义、权限或高风险权威面，则必须升级为 Issue/Claim + 独立 branch/worktree + PR。
 
 Issue 必须把文件分为：
 
@@ -92,7 +104,7 @@ Issue 必须把文件分为：
 
 ### 阶段 4：Pull Request、handoff、审查和集成
 
-仓库变更通过 draft PR 交付。PR 默认使用 `Refs #<issue>`，不能用 `Closes` 跳过合并后核验。PR 必须关联主 Issue/SCOPE，使用模板报告修改范围、非目标、实际验证、数据库/外部副作用、proved/not proved、共享文件和分层完成证据。
+受保护交付通过 PR 交付；是否先保持 Draft 由当前交付包决定。PR 默认使用 `Refs #<issue>`，不能用 `Closes` 跳过合并后核验。PR 必须关联主 Issue/SCOPE，使用模板报告修改范围、非目标、实际验证、数据库/外部副作用、proved/not proved、共享文件和分层完成证据。
 
 是否安排 reviewer、由谁审查、是否需要新 head 复核，以及何时集成，都由 Mog 对当前交付包明确决定。若 Mog 指定 reviewer，则 reviewer 必须使用稳定 task-id、审查 PR 当前 exact head commit，并给出 `PASS` 或带可执行发现的 `FAIL`。代码可合并性、模板勾选或自动检查通过不能自动取得 Mog 的合并授权。
 
@@ -100,22 +112,22 @@ Issue 必须把文件分为：
 
 ### 小型工作单与 active plan
 
-小型、低风险、单 Issue/单 PR 工作可以不建立独立 `docs/plans/active/` 计划，但必须同时满足：
+小型、低风险工作可以不建立独立 `docs/plans/active/` 计划。若它已经属于受保护交付，则还必须同时满足：
 
 1. 已有 SCOPE、ACCEPTED 治理规则或用户明确授权；
 2. 不改变产品含义、领域含义、系统架构、真实权限、生产或敏感数据范围；
 3. 不跨多个 Issue 或 PR；
-4. Issue 已完整写明验收、验证计划、文件边界、停止/升级条件和完成报告要求。
+4. 对应 Issue/交付包已完整写明验收、验证计划、文件边界、停止/升级条件和完成报告要求。
 
-任一条件不满足，就必须先建立 active plan。这个例外只降低重复文档成本，不降低 Claim、worktree、PR、review、integration、进度记录或证明边界。
+任一条件不满足，就必须先建立 active plan。低风险直接维护不要求为了形式再建一个空 Issue；但必须符合本页分级条件并保留进度/提交或对话回执。受保护交付则不能借“小型”省略 Claim、worktree、PR 和必要的集成证明。
 
 ### 没有 GitHub 自动保护时的人工门禁
 
-当前未把 GitHub Actions、branch protection 或 CODEOWNERS 作为本流程前提。在这些自动门不存在时，以下人工证据缺一不可：
+当前未把 GitHub Actions、branch protection 或 CODEOWNERS 作为本流程前提。对受保护交付，在这些自动门不存在时，以下人工证据缺一不可：
 
 1. Issue Claim 与 assignee；
 2. 独立 worktree/branch；
-3. draft PR 和模板完整报告；
+3. PR 和模板完整报告（是否先保持 Draft 由当前交付包决定）；
 4. 与实现者不同的 reviewer 结论；
 5. 带稳定 task-id 的 integration owner 合并次序确认；
 6. 合并后对目标 branch 和正式文档状态的重新核验；
@@ -125,7 +137,7 @@ Issue 必须把文件分为：
 
 ### Issue 关闭与完成层级
 
-Issue close 不得把不同完成层压成一个 `done`。关闭评论和正式进度记录必须分别说明：
+Issue close 不得把不同完成层压成一个 `done`。受保护交付的关闭评论和正式进度记录必须分别说明：
 
 - Design；
 - Code；
@@ -136,7 +148,7 @@ Issue close 不得把不同完成层压成一个 `done`。关闭评论和正式�
 - Proved；
 - Not proved。
 
-不适用的层标 `N/A` 并说明理由；未发生的层标 `NOT VERIFIED`。PR merge 不能自动证明部署、真实链路或业务验收。Issue 只能在 merge 后核验和分层记录完成后手工关闭，close 也不能改写这些边界。
+不适用的层标 `N/A` 并说明理由；未发生的层标 `NOT VERIFIED`。PR merge 不能自动证明部署、真实链路或业务验收。实现型 Issue 只能在 merge 后核验和分层记录完成后手工关闭。纯决策/治理 Issue 可以在其权威决定已由当前主线或更高权威文件吸收、且关闭评论明确列出未证明层时关闭；close 不能改写这些边界。
 
 ## 基本操作
 
