@@ -6,9 +6,9 @@ use serde_json::Value;
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
-pub(crate) fn record_disposition<'a>(
+pub(crate) fn record_disposition(
     package: &ProducerCapturePackage,
-    record: &'a Value,
+    record: &Value,
 ) -> Option<(&'static str, &'static str)> {
     let accepted = "accepted_for_library_content";
     let quarantined = "quarantined";

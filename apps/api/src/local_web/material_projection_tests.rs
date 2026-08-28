@@ -3,7 +3,9 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use linggan_evidence::admit_media_blob;
+use linggan_evidence::{
+    MaterialMediaDisposition, admit_media_blob, record_materialization_disposition,
+};
 use linggan_storage_postgres::testing::isolated_proof_schema;
 use tower::ServiceExt;
 
@@ -24,7 +26,9 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0017_material_media_projection.sql"),
     "\n",
     include_str!("../../../../database/migrations/0018_material_discovery_lane.sql"),
-    "\nINSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES \
+    "\n",
+    "INSERT",
+    " INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES \
       ('0001_scope_001_capture_evidence','1'),('0002_local_001_discovery','2'), \
       ('0003_local_trusted_producer','3'),('0004_plugin_runtime_all_capabilities','4'), \
       ('0015_material_projection','15'),('0016_material_social_lanes','16'),('0017_material_media_projection','17'),('0018_material_discovery_lane','18');\n",
@@ -95,6 +99,19 @@ async fn loopback_comment_search_returns_redacted_tree_and_truthful_unknown_cove
             .and_then(Value::as_str),
         Some("UNKNOWN")
     );
+    assert_eq!(
+        payload
+            .pointer("/items/0/laneSummaries/1/state")
+            .and_then(Value::as_str),
+        Some("UNKNOWN"),
+        "a comments-only observation must not manufacture searchable detail"
+    );
+    assert_eq!(
+        payload
+            .pointer("/items/0/laneSummaries/2/state")
+            .and_then(Value::as_str),
+        Some("PARTIAL")
+    );
     assert!(payload.to_string().contains("评论命中"));
     assert!(!payload.to_string().contains("secret-raw-token"));
 }
@@ -105,7 +122,7 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
  {
     let database = proof_database("material_loopback_media").await;
     let observation_ref = seed_media(&database).await;
-    admit_media_blob(
+    let admission = admit_media_blob(
         &database,
         observation_ref,
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -161,14 +178,20 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
         !payload.to_string().contains("media.example"),
         "remote candidate URIs stay out of the ordinary read API"
     );
-    let materialization_ref: uuid::Uuid =
-        sqlx::query_scalar("SELECT materialization_ref FROM linggan_media_materialization LIMIT 1")
-            .fetch_one(database.pool())
-            .await
-            .unwrap();
-    sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,materialization_ref,state,authority_ref,reason,effective_at) VALUES($1,$2,'BYTES_CLEANED','proof-authority','retention-proof',scope_001_now())")
-        .bind(uuid::Uuid::new_v4()).bind(materialization_ref).execute(database.pool()).await.unwrap();
-    let response = app_with_database(database)
+    assert_disposition_precedence(database, admission.materialization_ref).await;
+}
+
+async fn assert_disposition_precedence(database: Database, materialization_ref: uuid::Uuid) {
+    record_materialization_disposition(
+        &database,
+        materialization_ref,
+        MaterialMediaDisposition::BytesCleaned,
+        "proof-authority",
+        "retention-proof",
+    )
+    .await
+    .unwrap();
+    let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
                 .uri("/api/local/evidence-library?restriction=BYTES_CLEANED")
@@ -188,6 +211,38 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
     );
     assert_eq!(
         cleaned.pointer("/items/0/preview/localAssetUrl"),
+        Some(&Value::Null)
+    );
+
+    record_materialization_disposition(
+        &database,
+        materialization_ref,
+        MaterialMediaDisposition::WithdrawnOrRestricted,
+        "proof-authority",
+        "rights-proof",
+    )
+    .await
+    .unwrap();
+    let response = app_with_database(database)
+        .oneshot(
+            Request::builder()
+                .uri("/api/local/evidence-library?restriction=WITHDRAWN_OR_RESTRICTED")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let restricted: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(
+        restricted
+            .pointer("/items/0/preview/bytesState")
+            .and_then(Value::as_str),
+        Some("WITHDRAWN_OR_RESTRICTED")
+    );
+    assert_eq!(
+        restricted.pointer("/items/0/preview/localAssetUrl"),
         Some(&Value::Null)
     );
 }

@@ -10,10 +10,12 @@ mod ingress;
 mod local_discovery;
 mod local_producer;
 mod material_admission;
+mod material_disposition;
 mod material_media;
 mod material_media_read;
 mod material_projection;
 mod material_projection_types;
+mod material_social_read;
 mod patrol_scheduler;
 mod producer_runtime;
 mod receipt;
@@ -51,6 +53,7 @@ pub use local_producer::{
     LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome,
     create_manual_task, local_producer_schema_is_ready, start_local_attempt, submit_local_package,
 };
+pub use material_disposition::{MaterialMediaDisposition, record_materialization_disposition};
 pub use material_projection::{
     MaterialDisplay, MaterialIdentity, MaterialLaneSummary, MaterialLibraryItem,
     MaterialLibraryProjection, MaterialPreview, MaterialSummary,

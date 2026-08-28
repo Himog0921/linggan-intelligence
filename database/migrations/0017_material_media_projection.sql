@@ -50,7 +50,7 @@ CREATE TABLE linggan_material_media_disposition_event (
     blob_sha256 text REFERENCES linggan_media_blob(sha256),
     materialization_ref uuid REFERENCES linggan_media_materialization(materialization_ref),
     derivative_ref uuid REFERENCES linggan_media_derivative(derivative_ref),
-    state text NOT NULL CHECK (state IN ('BYTES_CLEANED','WITHDRAWN_OR_RESTRICTED','ACCESS_RESTORED')),
+    state text NOT NULL CHECK (state IN ('BYTES_CLEANED','WITHDRAWN_OR_RESTRICTED')),
     authority_ref text NOT NULL CHECK (length(btrim(authority_ref)) > 0),
     reason text NOT NULL CHECK (length(btrim(reason)) > 0),
     effective_at timestamptz NOT NULL,

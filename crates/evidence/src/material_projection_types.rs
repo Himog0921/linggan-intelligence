@@ -80,7 +80,10 @@ pub struct MaterialSummary {
     pub restriction_state: &'static str,
 }
 
-pub(crate) fn default_lane_summaries(observed_at: &str) -> Vec<MaterialLaneSummary> {
+pub(crate) fn default_lane_summaries(
+    observed_at: &str,
+    has_detail: bool,
+) -> Vec<MaterialLaneSummary> {
     [
         "discovery",
         "detail",
@@ -95,24 +98,28 @@ pub(crate) fn default_lane_summaries(observed_at: &str) -> Vec<MaterialLaneSumma
     .into_iter()
     .map(|lane| MaterialLaneSummary {
         lane,
-        state: if lane == "detail" {
+        state: if lane == "detail" && has_detail {
             "SEARCHABLE"
         } else {
             "UNKNOWN"
         },
-        observed: (lane == "detail").then_some(1),
-        retained: (lane == "detail").then_some(1),
+        observed: (lane == "detail" && has_detail).then_some(1),
+        retained: (lane == "detail" && has_detail).then_some(1),
         failed: None,
         known_unattempted: None,
         maximum_quota: None,
-        value_state: if lane == "detail" { "KNOWN" } else { "UNKNOWN" },
+        value_state: if lane == "detail" && has_detail {
+            "KNOWN"
+        } else {
+            "UNKNOWN"
+        },
         stopped_reason: None,
-        limitations: if lane == "detail" {
+        limitations: if lane == "detail" && has_detail {
             vec!["RAW_BODY_NOT_RETURNED"]
         } else {
             vec!["LANE_NOT_EVALUATED"]
         },
-        latest_observed_at: (lane == "detail").then(|| observed_at.to_owned()),
+        latest_observed_at: (lane == "detail" && has_detail).then(|| observed_at.to_owned()),
     })
     .collect()
 }
