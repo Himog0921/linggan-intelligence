@@ -1,99 +1,344 @@
-# PAGE-EVIDENCE-001 · Evidence Library 本地页面
+# PAGE-EVIDENCE-001 · 多材料证据库
 
 > 状态: 权威当前
-> 最后核对: 2026-08-25
-> 适用范围: `http://localhost:3000/corpus/evidence` 的第一个 Linggan 本地产品页面
-> 事实来源: Mog 的 Local-001 产品确认、[LOCAL-001 活跃计划](../../plans/active/local-001-local-product-evidence-library.md)、[LOCAL-001D 活跃计划](../../plans/active/local-001d-unknown-published-discovery-view.md)、Issue #25、Issue #29、Issue #62、LIDS 与当前 Rust 实现
-> 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；V7 为本页受限的精确视觉与骨架 Gold Master
+> 最后核对: 2026-08-29
+> 适用范围: `语料 → 证据库` 的产品任务、页面信息架构、技术呈现要求、状态与验收；运行时入口仍为 `http://localhost:3000/corpus/evidence`
+> 事实来源: Mog 批准的五卡 Evidence Library 垂直交付、Issue #85/#86/#90、MEDIA-RECON-001、MATERIAL-PROJECTION-001、LIDS、UI execution contract 与当前 Rust/HTML/CSS/JS
+> 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；本页规格不让静态原型冒充已接通运行时
 
-## 1. 身份与授权
+本规格替代本文件 2026-08-25 的 Discovery-only 产品定义。Issue #90 已把本规格的可由现行合同承担的部分落到运行页；静态参考仍只证明设计场景，运行页只证明当前 Material Projection 可以诚实返回的字段和状态。禁止把“页面已接通”写成“真实平台、媒体、处理器或业务验收已完成”。
 
-- 页面规格 ID: `PAGE-EVIDENCE-001`
-- 关联 Issue / Scope: `LOCAL-001 / 001A`（host）、Issue #29（V7 精确视觉/骨架）与 Issue #34（受控 discovery 接纳/只读投影）
-- 当前状态: host 与 V7 骨架已存在；当且仅当服务显式配置 Linggan 本地 PostgreSQL 时，可接收并读取 `xhs.discovery.visible-card.v1` 的已接纳 discovery 卡片。没有配置数据库时，页面保持诚实空态。
-- LIDS 视觉强度: L1 Corpus Explorer，嵌入受限 L2 Split Evidence Inspector
-- LIDS 主 Pattern: `LIDS-PAT-001 / Corpus Explorer`，右侧使用同一工作面的 Inspector，不建立第二首页
-- 产品页面来源: LOCAL-001 的 Evidence Library 用户任务；`REF-V7-001` 的页面 Gold Master
-- 用户任务: 在此检索、核验并追溯 Linggan 已接纳的本地 discovery 卡片；没有数据或没有可用发布时间时，清楚看到它们各自的限制。
-- 三秒答案: “这是本地 Evidence Library；它只显示已接纳的 discovery 卡片，不会重新搜索平台。”
-- 五秒主动作: 输入文本只检索标题与创作者名，并且只检索本地已接纳卡片；URL 未指定窗口时，页面采用 `latest_accepted_discovery` 视角并明确显示来源发布时间未知的卡片；只有 URL 显式指定 7/30 天发布窗口时，才按来源可知的 `published_at` 严格过滤，并以读取时的 Linggan PostgreSQL `scope_001_now()` 作为唯一时间参照。
-- 明确非目标: 真实平台采集、详情、评论、作者主页、媒体下载/展示、OCR/ASR、保存查询、Topic/Insight/Agent 行动、线上部署。
-- 页面语言: 按 `LIDS-LANG-001` 采用中文主表达；英文只作为紧邻中文的技术键、固有名或短代码。原始标题、创作者展示名、来源时间原文和平台标识保持来源原样，未知/未取得/仅发现面状态不得在本地化中被弱化或改写。
-- 当前可用数据/权限合同: `xhs.discovery.visible-card.v1` 的 Package admission、visible-card Coverage 和本地 `EvidenceQuery` 读取合同；没有详情 Evidence 或媒体访问授权。
-- 决策 owner: Mog；实施范围由 LOCAL-001 活跃计划和 Issue #25 限定
+## 1. 产品结论
 
-## 2. 页面边界
+### 1.1 页面主对象
 
-- 入口: `GET /` 以临时重定向进入 `GET /corpus/evidence`；后者是同一 local host 的唯一页面路由
-- 退出与返回: 当前无可用的相邻产品路由；V7 顶层、二级导航与控件保持原方位和结构，但均为 disabled/`aria-disabled`，不是未接通能力的假链接
-- 本页负责的核心任务: 从 Linggan PostgreSQL 中读取已接纳的 discovery 卡片、显示其卡片级来源时间与 package 级 Coverage，并说明这不是详情或市场判断。
-- 本页明确不负责: 触发/调度平台采集、接纳详情/评论/作者资料、读取原文、下载媒体、创建 Observation、计算趋势、修改设置或建立任何第二事实源。
-- 第二事实源边界: HTML 只是数据库读取投影；它不保存搜索结果、计数、趋势或动作回执。`EvidenceQuery` 绝不等于 `AcquisitionSpec`。
-- Inspector 边界: 本卡没有“选择材料”或详情读取；右栏继续显示 `UNKNOWN`，不能从 discovery 卡片补造正文、作者画像、评论、Capture 或 Coverage 以外的信息。
+证据库列表的主对象固定为：
 
-## 3. 信息、状态与行动
+> **一个稳定来源作品在当前 Linggan 中可核验的材料集合。**
 
-| 状态 ID | 触发/数据来源 | 用户应理解什么 | 禁止暗示什么 | 可用下一步 | 对应合同 |
-|---|---|---|---|---|---|
-| `SOURCE_INCOMPLETE` / `NOT_CONNECTED` | 服务未配置 `LINGGAN_LOCAL_DATABASE_URL` | 页面没有读取任何材料 | Linggan 库为 0、平台没有内容、旧内容工作台或插件已被读取 | 显式配置 Linggan 本地数据库后重启 host | LOCAL-001 / 001A |
-| `ACCEPTED_DISCOVERY_ONLY` | 服务读到 #34 接纳的 discovery Package | 此页只显示搜索面实际可见的卡片 | 已有详情、评论、作者画像、媒体或市场趋势 | 只读检索本地材料 | `xhs.discovery.visible-card.v1` |
-| `PUBLISHED_AT UNKNOWN` | 已接纳 discovery 卡片没有来源可验证发布时间 | 在默认 `latest_accepted_discovery` 视角中显示该卡和未知标签；不显示替代日期 | 发布时间为 0、旧内容、平台没有内容或采集失败 | 等待未来独立事实补充；本卡不猜测 | EvidenceQuery / default time view |
-| `UNKNOWN_PUBLISHED_TIME_EXCLUDED` | 显式 7/30 天 `WINDOW` 下，当前 `EvidenceQuery` 匹配且按 ContentItem 合并后仍没有任何已知来源发布时间的对象 | 该对象不进入显式 `WINDOW` 结果并计入排除数；同一对象只要有任一已知来源发布时间，即使在窗口外、或文本命中来自未知时间 occurrence，也不计入此状态 | 发布时间为 0、旧内容、平台没有内容或采集失败 | 等待未来独立事实补充；本卡不猜测 | EvidenceQuery / explicit WINDOW |
-| `READ_PROJECTION_UNAVAILABLE` | 已配置数据库但本地读取失败 | 页面没有显示旧系统或远程回退数据 | 所有已接纳材料均丢失或平台不可用 | 修复本地数据库连接后重试读取 | #34 read projection |
-| `LOCAL_QUERY_INVALID` | URL 查询不是当前受限 EvidenceQuery | 系统没有执行读取或平台搜索 | 查询被转成采集命令 | 使用受限文本 + 7/30 天窗口 | EvidenceQuery |
-| `UNKNOWN` | 没有选择 ContentItem，且没有可用 Observation/Capture 输入 | 来源、观察、Capture 和 Coverage 当前未知 | unknown 等于 0、正常、失败或完整 | 无 | AGENTS.md 领域不变量；LIDS-PRI-001 |
-| `NO_ACCEPTED_MATERIAL_AVAILABLE` | 当前 local query 没有可显示的已接纳卡片；在显式 7/30 天窗口中，也可能是全部候选因未知发布时间被严格排除 | 页面现在不能展示卡片，并在适用时报告未知发布时间排除数 | 系统永久没有材料、平台无内容或库为 0 | 调整本地查询或等待未来独立补证 | #34 / #62 read projection |
+同一作品可以聚合多次发现、详情、评论、回复、作者上下文、媒体槽位、媒体字节与派生材料，但每个展示值仍保留自己的来源、版本、Coverage 与限制。聚合视图不制造一次从未发生的“完整快照”。
 
-本卡不显示 `success`、`live`、`fresh`、平台总量、完整百分比或趋势。Package admission、卡片处理、Coverage 与页面投影是独立状态，不能被压缩成一个“完成”。
+主对象明确不是：Capture Package、Media Blob、媒体槽位、采集任务或 Attempt、单条评论、“发现卡片”、Corpus Selection、AI 摘要或洞察。Package、槽位、任务和派生均在右侧核验区成为该作品集合的血缘或组成部分，不提升为顶层卡片。
 
-## 4. 已批准的设计组合
+### 1.2 用户、情境与成功标准
 
-| 页面区域/场景 | PAGE / DS / PAT / CMP 来源 ID | 使用目的 | 明确不允许的替代 |
-|---|---|---|---|
-| 顶层产品方位 | `REF-V7-001` + `LOCAL-001-UI-EX-01` + LIDS Token | 延续 V7 两层导航的工作空间方向 | 未接通页面路由、假链接或伪造 active task |
-| 左侧语料 rail | `LIDS-PAT-001 / Corpus Explorer` | 给 Evidence Library 一个稳定的 L1 定位 | 卡片瀑布流、全局第二侧栏 |
-| 中央 Evidence Workspace | `LIDS-PAT-001 / Corpus Explorer` | 连续材料工作面；001A 只显示边界空态 | 示例材料、KPI 卡、趋势图或人工造数 |
-| 右侧 Provenance Inspector | `LIDS-PAT-001 / Split Evidence Inspector` | 为真实对象预留来源/观察/Capture 边界位置 | 第二套筛选器、第二主页或 AI 结论 |
-| Truth / Read Model / Coverage readout | `LIDS-PRI-001` 五轴状态原则 | 分开表达来源不足、读模型未接通和未知 Coverage | 一个万能“正常”或“失败”标签 |
+- 首期用户：Mog 本人及小团队。
+- 使用情境：桌面工作台中快速检索一篇来源作品，判断系统实际拿到了哪些材料、缺了什么、为什么缺，以及是否值得进入受控核验。
+- 用户任务：以作品为单位检索、比较、阅读脱敏材料，并沿 `Target → Task → Attempt → Package → Receipt → Coverage` 追溯来源。
+- 三秒答案：**这篇作品目前有哪些可核验材料，哪些仍未请求、未观察、部分、失败、风险停止、尚未启用或已清理。**
+- 五秒主动作：选择一篇作品，在右侧 Inspector 查看当前材料 lane、来源、Coverage、限制与允许的下一步。
+- 成功标准：用户不查看数据库或插件日志，也能区分“没有请求”“没有观察到”“拿到一部分”“明确失败”“处理器未启用”“字节曾取得后清理”和“当前未知”。
 
-### LIDS 采用清单
+### 1.3 页面非目标
 
-- Token 基线与唯一运行时真源: `LIDS-TOK-001`。`apps/api/src/local_web/lids_tokens.css` 仍是唯一的全局 `--lgi-*` token 值编辑源，完整承载当前 117 个 token（DESIGN-003 由 107 增至 117）；`docs/design/lids/tokens.md` 是其版本化规范与校验镜像。Issue #29 不修改它。`evidence_library.css` 不声明 `--lgi-*` token。
-- Primitive / 正式 CMP 查重结果: 没有新增跨页面 CMP；沿用 LIDS 的语义分责，但本页由 V7 精确视觉/骨架例外控制具体排版和页面色值。
-- 页面唯一视觉核心: V7 的 128px 两层页头、白底硬线三栏工作面、FACT LAYER 与右侧 Inspector；中央区只用诚实空行替代 V7 的模拟材料。
-- 原声、来源、样本、窗口、Coverage/Validity/冲突/复核边界: 001A 没有材料、原声或样本；页面直接说明对应字段未知而非显示占位数字。
-- ASCII / 场景 / 动效: 不使用等距场景与环境动效。ASCII/像素语言仅出现在一处——rail 选中项右边缘的离散像素纹理（DESIGN-004），承担 `system.md` 中约 5% 的终端语言权重，不构成场景。运动限于状态反馈：hover/选中的背景与色彩过渡（DESIGN-003）、以及品牌标识与 rail 选中项的粗野位移。`prefers-reduced-motion:reduce` 下关闭全部过渡，并把 rail 选中项的常驻位移置为 `none`。
-- 页面级例外 `LOCAL-001-UI-EX-01 / Issue #29 修订`: 用户直接授权本页依 `REF-V7-001` 精确复刻视觉值和 HTML 骨架：桌面为78px + 50px = 128px 页头、216px rail、440px inspector（≤1500px 为420px、≤1180px 为380px）、全白背景、黑色硬线、全局 `#E8003F` 与 Evidence `#EF4F25`。桌面必须是 `100vh` 固定工作台，document 不向下延展，Results 和 Inspector 在各自栏内滚动；≤900px 改为自动首行高度，以容纳可能换行的顶层导航和 context row，随后才开始顺序折叠和页面原生滚动。这些值只以明确命名的 `--v7-*` 页面局部变量存在于 `evidence_library.css`；不改写、不复制为 LIDS 全局 token，也不授权其他页面继承。本条中的「全白背景」与两个色值已被后续用户确认部分替代，原文保留以便追溯：DESIGN-003 使第二签名色 `#E8003F` 退役、签名色收敛为 `--lgi-signal`，并把上下文行改为 `--lgi-canvas-low` + 双层点阵；DESIGN-004 按同一依据把左侧 rail 一并改为该测量场底。两次替代都不改变 128px 页头、216px rail、440px inspector 的几何与断点。
-- 明确禁止: 继承 V7 的模拟运行状态、计数、示例帖子/评论/转录、时间、引用或成功回执；任何 V7 位置上的未接通控件不得产生写入、采集、保存、研究或连接副作用。
-- 文案禁止: 以 `UNKNOWN`、`MEDIA NOT ACQUIRED`、`PUBLISHED_AT UNKNOWN`、`LOCAL READ ONLY` 等英文孤立文字承担按钮、状态、空态或筛选含义；必须以中文主状态加紧邻技术旁注表达。
+本页不负责：
 
-## 5. 交互与真实后果
+- 直接触发平台搜索、详情、评论或媒体采集；
+- 在证据库内创建或批准 Work Order；
+- 把一个含糊“补采”按钮连接到未知范围；
+- 远程 CDN 媒体回退；
+- 修改原始 Evidence、Package、Coverage 或来源时间；
+- 把材料升级为 Observation、Topic、Claim、趋势或市场事实；
+- 建立第二份正文、评论、媒体或作者真相；
+- 暴露批量原始敏感评论、账号身份、Cookie、令牌或完整 Package payload；
+- 把 checkpoint 当作语料或内容 Evidence；
+- 在本页运行 OCR、ASR、抽帧、embedding 或 Agent 分析。
 
-| 用户动作 | 前置条件 | 请求/回执来源 | 页面如何区分接纳、处理中、完成、部分、失败 | 不得宣称 |
+## 2. 当前运行事实与目标边界
+
+| 层级 | 当前事实 | 页面必须怎样表达 |
+|---|---|---|
+| 产品与设计 | 本规格和静态原型已冻结多材料职责 | 继续约束运行页，但原型内容不得冒充运行数据 |
+| 当前运行时 | `/corpus/evidence` 默认只消费 `/api/local/evidence-library`，列表以作品级 Material Projection 为事实源并按 `detailUrl` 读取 Inspector | 不混读 legacy cards；缺字段显示 `SOURCE_INCOMPLETE` |
+| 评论/回复 | 类型化 lane、Coverage 与本机授权评论研究通道已接入详情；普通列表不返回原文 | 原文只在授权详情按页读取，匿名上下文不暴露平台用户标识 |
+| 作者资料 | 详情可返回版本化作者上下文 | 页面不显示 `authorExternalId`，未知字段不补值 |
+| 媒体槽位 | Slot、来源代次、候选断言、Live Photo 组件及有界回执已进入 Material Projection | 槽位存在不等于字节已取得；回执截断但无通道 URL 时显示 `SOURCE_INCOMPLETE` |
+| 媒体字节 | Blob/Materialization/处置与受控本地 asset handle 已进入详情 | 仅 `INLINE_SAFE` 且同源受控句柄可内联；真实平台字节未验证 |
+| OCR/ASR 等派生 | Job/Event/Derivative 生命周期进入详情，provider 当前未由本卡启用 | 原样显示 `QUEUED/PROCESSING/NOT_ENABLED/FAILED/ACQUIRED/UNKNOWN`，不由 UI 推断 |
+| 静态原型 | 全部内容均为合成场景 | 首屏和每个材料区持续显示“合成参考 / 非运行数据” |
+
+## 3. 设计方向锁
+
+Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
+
+1. **谁使用、在什么情境**：Mog/小团队在 Linggan 桌面 App Shell 内执行高密度证据核验；不是营销站、客户门户或移动优先消费产品。
+2. **美学方向**：`LIDS-SYS-001` 的“纯白台面上的精密情报基础设施”；编辑式信息设计为主、仪器式读数为辅、新粗野主义只作少量重音。
+3. **记忆点**：每个来源作品拥有一条可横向扫描的“材料 lane 带”，用户不靠总百分比即可看见发现、详情、讨论、媒体和派生的真实分层。
+4. **硬约束**：中文主表达；现有 LIDS Token；桌面工作台优先；键盘可达；Reduced Motion；敏感材料默认脱敏；不修改 global Token、runtime HTML/CSS、后端或插件。
+5. **签名交互**：选择作品集合后，同一工作面更新右侧 Inspector；选中行只使用获准的 `translate(-2px,-2px)` 与硬阴影重音，Inspector 只以 opacity/transform 进入，Reduced Motion 下立即切换。
+
+### 3.1 视觉与内容 thesis
+
+- **Visual thesis**：高密度但克制的白色证据台面，以冷黑结构、橙红选中信号和琥珀/红/灰状态点，让材料差异像实验记录一样可扫描。
+- **Content plan**：方位与查询 → 作品集合列表和 lane 状态 → 当前作品材料 → 来源血缘与限制；没有营销 Hero。
+- **Interaction thesis**：行选择同步 Inspector；lane 筛选只改变本地合成视图；受限原文用 inline restricted state，不用 Modal 或 Tooltip 隐藏必读边界。
+- **CSS 策略**：原生 CSS only；静态原型直接消费 `apps/api/src/local_web/lids_tokens.css`，不声明 `--lgi-*`，不新增第二套 Token。
+- **半径系统**：只使用 `none / xs / sm / md = 0 / 2 / 4 / 8px`；按钮和选择项以 0–2px 为主，不使用 Pill。
+
+## 4. 页面强度、Pattern 与表面地图
+
+- LIDS 强度：L1 `Corpus Explorer`，嵌入受限 L2 `Split Evidence Inspector`。
+- 唯一主 Pattern：`Corpus Explorer`。
+- 页面唯一视觉核心：中央“来源作品材料集合 + lane 带”。
+- 右侧 Inspector 是当前作品的核验区，不是第二个首页，不复制搜索、筛选或导航。
+
+| 表面 ID | 表面 | 页面责任 | 主要数据 | 不负责 |
 |---|---|---|---|---|
-| 搜索本地卡片 | 服务已显式连接 Linggan PostgreSQL；输入可选文本；省略 URL `window` 时为最新已接纳视角，显式窗口才为 7 或 30 天发布窗口 | `GET /corpus/evidence` 或 `GET /api/local/evidence-library`；仅读取已接纳 discovery 数据 | 无数据库为 `NOT_CONNECTED`；默认视角显示 `PUBLISHED_AT UNKNOWN` 而不替代日期；显式窗口中未知对象单独计数且被排除 | 触发小红书搜索、补采、详情/评论读取或“世界中没有内容” |
-| 其余 V7 控件 | 无 | 不适用 | 继续 disabled；没有写入或采集回执 | 保存视图、研究、补采、原文、选择材料或真实运行状态 |
+| `EV-S01` | 共享页头与上下文行 | 产品方位、当前职责、关键数量/读取状态 | Shell + read envelope | 页面内再重复标题、显示假实时状态 |
+| `EV-S02` | 语料二级 rail | 当前位于证据库；其他未接通入口保持禁用 | Route capability | 承担材料筛选或对象状态 |
+| `EV-S03` | 查询与范围条 | 本地材料检索、时间视角、lane/状态/媒体/受限筛选 | Query scope / asOf / cursor | 触发平台采集或保存观察规则 |
+| `EV-S04` | 结果上下文 | 结果数、匹配字段、排除/限制、读取水位 | Query receipt | 用总数证明平台总量或完整性 |
+| `EV-S05` | 作品材料集合列表 | 比较作品身份、脱敏摘要、lane 状态、最近观察和主要限制 | Work-level material read model | 以 Package/Blob/Slot 作顶层行 |
+| `EV-S06` | 当前作品 Inspector | 概览、评论/回复、媒体、派生、来源/血缘、限制 | Selected work envelope | 第二搜索器、AI 结论、无来源补值 |
+| `EV-S07` | 反馈位置 | 查询无结果、读取失败、受限、部分、处理中、空态说明 | Read receipt / error envelope | Toast 替代必读错误或回执 |
+| `EV-S08` | 窄屏控制 | 打开材料筛选、切换列表/Inspector、返回当前作品 | Local view state | 把三栏按比例缩小或隐藏关键状态 |
 
-### 5.1 001C-0 已冻结、但尚未接通的后续控件语义
+### 4.1 依赖地图与文件所有权
 
-`LOCAL-001 / 001C-0` 已定义跨边界合同；Issue #34 只接通其中的本地搜索读取。除下列明确说明的 Search 外，V7 位置继续保持禁用；它们不是正在等待的隐式动作。
-
-| V7 控件位置 | 未来获准含义 | 当前状态 | 禁止退化 |
+| 依赖 | owner | 本卡如何使用 | 本卡不得做 |
 |---|---|---|---|
-| Search | 只查询 Linggan 已接纳 discovery 卡片的 `EvidenceQuery`；V1 仅标题/创作者名；省略 URL `window` 为 `latest_accepted_discovery`，显式 `WINDOW = known published_at` | 已接通时 enabled；无数据库时 `NOT_CONNECTED`；JSON 在省略时返回 `latest_accepted_discovery`，显式窗口使用实际 `last_7_days`/`last_30_days`，页面同源显示 `7D`/`30D` | 把输入框当作小红书搜索、插件命令或正文/评论/OCR/ASR 检索 |
-| Copy query | 只复制本地 URL 与读取查询状态 | disabled / `NOT_CONNECTED` | 创建采集、研究或外部链接任务 |
-| Save current view | 未定义 | disabled / `DEFINITION_PENDING` | 偷偷保存为监控或持续采集 |
-| Start research | 未定义 | disabled / `DEFINITION_PENDING` | 创建 Research、Claim、Agent 或任何写入 |
-| Reacquire / 补采 | 先选择明确数据缺口、经新授权的未来动作 | disabled / `SELECTION_AND_AUTHORIZATION_REQUIRED` | 用一个含糊按钮自动补详情、评论、媒体或指标 |
+| `MEDIA-RECON-001` | 卡 1 / PR #84 | 消费材料、媒体、状态与来源语义 | 修改 identity、slot、bytes、derivative 或处置合同 |
+| 多材料 read model/API | 卡 3 / Issue #86 | 冻结页面所需字段和查询语义 | 实现 Rust/SQL/API 或猜字段 |
+| 运行时页面 | 卡 4 / Issue #90 | 当前 HTML/CSS/JS 只消费卡 3 Material Projection，并提供有界 Inspector | 修改卡 3 字段、SQL、媒体资格或接纳语义 |
+| 真实垂直证明 | 卡 5 | 提供必须验证的页面场景 | 运行真实平台、媒体或 OCR/ASR |
+| Shell / LIDS Token | 共享 UI owner | 原型只消费现有规则 | 修改 `shell.rs`、`shell.css` 或全局 Token |
 
-封面位置同样没有本卡可用图片。搜索页中将来观察到的外部地址只是 `MediaCandidate`；在独立 001C-2 成功取得、验证并保存本地副本前，页面必须使用 `MEDIA_NOT_ACQUIRED` 等真实状态，绝不能把小红书 CDN 地址设为 `img src` 或 CSS 背景回退。
+## 5. 信息架构
 
-## 6. 验收与未证明边界
+### 5.1 列表行的信息顺序
 
-- 任务验收场景: 已配置本地数据库时，提交一份合格的受控 discovery Package 后可在页面读取卡片；未配置数据库时，仍能区分 host 已运行与读投影未接通。
-- 状态/语义验收场景: `SOURCE_INCOMPLETE`、`NOT_CONNECTED`、`ACCEPTED_DISCOVERY_ONLY`、默认视角的 `PUBLISHED_AT UNKNOWN`、显式窗口的未知发布时间排除、`UNKNOWN` 和“当前窗口没有可展示卡片”分别出现；页面不出现替代发布时间、0、LIVE、FRESH、平台总量或趋势语言。
-- 视觉验收场景与声明的工作条件: 1280×800、1440×900、1920×1080、390×844 的真实 local route 检查，见 `ACC-EVIDENCE-001`。
-- 真实后果验收场景: 仅当 isolated PostgreSQL proof 已真实通过时，才证明受控 Package → localhost ingress → 本地读取投影；它不证明真实插件、平台、账号或浏览器。
-- 自动检查: API route tests、discovery integration tests、workspace format/clippy/test、governance check。
-- 本次证明: 以 PR 的精确命令与数据库 proof 记录为准；Docker daemon 不可用时不得以编译/fixture 代替 PostgreSQL proof。
-- 本次未证明: 真实 001C-1 discovery、详情/评论/作者资料、任何媒体 bytes/本地 cover、OCR/ASR、Observation/Topic/Research/Insight、权限、部署和业务验收。
+每个作品集合按下列顺序呈现：
+
+1. 本地媒体预览，或准确的未取得/已清理/受限状态；
+2. 平台、稳定作品引用、标题、作者、来源发布时间及精度；
+3. 脱敏摘要或“尚无可展示摘要”；
+4. 发现、详情、讨论、媒体、派生五组 lane；其中评论/回复和 OCR/ASR 仍可分别展开；
+5. 最近观察时点、主要 Coverage/停止原因、限制；
+6. 当前选择信号。
+
+不得用一个“完整度 73%”代替 lane。列表不显示完整原始评论、URL、Cookie、完整 Package payload 或远程媒体地址。
+
+### 5.2 Inspector 信息顺序
+
+```text
+当前作品 / 稳定 public ref
+├─ 概览：标题、正文、作者、来源时间、逐字段来源/未知
+├─ 评论与回复：脱敏片段、父子关系、各 lane Coverage/停止原因
+├─ 媒体：槽位顺序、用途、来源代次、组件、字节/副本/清理状态
+├─ 派生：OCR/ASR/关键帧/embedding 状态、processor 版本、来源位置
+├─ 来源与血缘：目标、Task、Attempt、Package、Receipt、producer/工位/账号镜头
+└─ 限制与访问：用途、敏感级别、未请求/未观察/风险停止/真实链未验证
+```
+
+Inspector 默认停在“概览”，但页面不得只在隐藏 Tab 中提供限制；最严重限制在 Inspector 顶部和列表行都可见。评论原文、外部 URL 和账号镜头不进入首屏。
+
+### 5.3 搜索、筛选与排序职责
+
+| 控件 | 获准语义 | 必需回执 | 禁止退化 |
+|---|---|---|---|
+| 文本搜索 | 检索获准字段；首批至少标题、作者，后续可含已进入检索投影的脱敏正文/OCR/ASR | `matchedFields`、query scope、asOf、结果数 | 平台搜索、未接纳 Package/raw payload 搜索 |
+| 时间视角 | 缺省为最新已接纳视角；显式 7/30 天只按来源可验证发布时间 | time view、unknown published exclusion | 用观察/接收时间替代发布时间 |
+| Lane | discovery/detail/comments/replies/author/media/derivative | 当前 lane 与结果数 | 总“完整/不完整”筛选 |
+| Lane 状态 | 本规格状态词典闭集 | 状态来源与数量 | 把未请求混入失败 |
+| 媒体类型 | image/cover/video/live photo；只依据合格槽位 | 来源与槽位 Coverage | 从扩展名或 URL 猜类型 |
+| 访问/处置 | restricted/withdrawn/bytes cleaned 等 | 当前 display policy | 让筛选绕过权限 |
+| 排序 | 默认最近观察降序；后续可明确切换来源发布时间 | sort key、asOf | 把“最近观察”写成“最新发布” |
+
+保存视图、批量选择、发起研究和补采当前继续禁用，直到各自有独立产品/权限/回执合同。
+
+## 6. 材料 lane 与数据来源
+
+| Lane | 用户看到的材料 | 最小来源/字段 | 当前实现边界 |
+|---|---|---|---|
+| 发现 `discovery` | 从搜索面或作者页发现作品 | platform、content identity、入口、位置、observedAt、Coverage | 已有窄投影；不是详情 |
+| 详情 `detail` | 标题、正文、作者、来源发布时间、互动快照 | 每字段 value/state/sourceRef/version | 当前仅窄投影，不是完整 Observation/Current |
+| 评论 `comments` | 顶层评论脱敏片段、已知数量与覆盖 | comment refs、snippet、count state、Coverage、stop reason | 当前多为未类型化；无记录不得显示 0 |
+| 回复 `replies` | 楼中楼父子关系与脱敏片段 | reply/root/parent refs、tree state、Coverage | 当前父子投影未实现 |
+| 作者 `author` | 该作品的作者上下文 | author ref、字段状态、observedAt、sourceRef | 目标档案回填不等于统一材料投影 |
+| 媒体槽位 `media_slots` | 类型、用途、顺序、来源代次、组件 | slot key、purpose、display ordinal、generation、component state | 单 URI/顺序/Live Photo 适配有限 |
+| 媒体字节 `media_bytes` | 是否取得、校验、本地副本、清理 | download attempt、blob hash ref、replica/materialization、disposition | 只显示本地受控句柄；真实平台 bytes 未验证 |
+| OCR `ocr` | 图片文字的脱敏可检索片段 | derivative ref、processor version、source region | provider 未启用；不能显示 processing/success |
+| ASR `asr` | 视频转录的脱敏可检索片段 | derivative ref、processor version、time range | provider 未启用；不能显示 processing/success |
+| 执行 checkpoint | 本次执行进度与恢复位置 | checkpoint receipt、Attempt、stopped reason | 只在血缘区显示，不成为 lane/语料卡/Evidence |
+
+### 6.1 页面所需最小 read envelope
+
+字段名由卡 3 的版本化 API 决定，但语义责任必须完整：
+
+```text
+query: text / timeView / lane / laneState / mediaKind / restriction / sort / cursor
+read: asOf / scope / versions / cursor / resultCount / excludedCounts / limitations
+item:
+  identity: platform / contentExternalId / stablePublicRef
+  display: title / creator / publishedAt + each value state
+  preview: localAssetUrl / slotPurpose / bytesState / alt
+  laneSummaries[]: lane / state / counts-with-value-state / stopReason / limitations / latestObservedAt
+  summary: lastObservedAt / primaryLimitation / restrictionState / matchedFields
+inspector:
+  overview fields + sourceRefs
+  commentThreads + commentsCoverage + repliesCoverage
+  mediaSlots[]:
+    slotRef / purpose / displayOrdinal / currentCoverage
+    currentOriginGroup:
+      originGroupRef / packageRef / generation / observedAt
+      declaredBundle: bundleRef / bundleKind
+      components[]:
+        componentRef / componentKind / state
+        candidateAssertions[]:
+          candidateRef / order / primary / sourceField / observedAt / expiresAtState / expiresAt
+        downloadAttempts[]:
+          downloadAttemptRef / candidateRef / originGroupRef / generation / state / terminal / failureReason / startedAt / endedAt
+    originHistory[]: originGroupRef / packageRef / generation / observedAt / historyState
+    bytes / replica / derivative / disposition states
+  derivatives[] + processorVersion + source location
+  provenance: target/task/attempt/package/receipt/producer/station-account lens/coverage/checkpoint
+  permissions + displayPolicy + limitations
+```
+
+计数必须带 value state。`null/UNKNOWN`、`0/KNOWN` 与 `N/A` 不得共用一个空值。所有列表和 Inspector 值均来自受控 read model，不允许 UI 自行聚合原始业务表或 Package JSON。普通页面只读取脱敏 `candidateRef` 和上述地址断言元数据，不读取或显示原始 URI。`primary` 只表示 Producer 对本次来源观察的建议，不是永久权威；`expiresAtState=KNOWN` 时必须同时提供 `expiresAt`，未知时为 `UNKNOWN/null`。一次 Package 对同一 slot 只形成一个槽位级来源观察组；declared bundle、still/motion 组件和组件内 candidate assertions 都挂在该父级下。下载尝试必须同时绑定该来源观察组/generation 与精确 `candidateRef`，并交付开始/结束时间、terminal 和失败时的 `failureReason`。跨代来源只能进入明确标识的 `originHistory[]`，不得与本次 Package 的当前来源组摊平混排。
+
+## 7. 状态词典
+
+### 7.1 Lane 状态闭集
+
+| 状态 | 中文主表达 | 用户应理解 | 禁止暗示 | 视觉角色 |
+|---|---|---|---|---|
+| `NOT_REQUESTED` | 尚未请求 | 当前没有获准工作 | 失败、平台没有、以后一定会请求 | Unknown |
+| `QUEUED` | 已排队 | 有界工作已形成，尚未开始 | 已观察、处理中或已取得 | Info |
+| `NOT_OBSERVED` | 尚未形成观察 | lane 在范围内但没有合格观察 | 数量为 0、来源不存在 | Unknown |
+| `OBSERVED` | 已观察 | 看见来源材料/槽位 | 字节已取得、可检索、覆盖完整 | Info |
+| `PARTIAL` | 部分取得 | 已有合格材料，同时有缺口/失败/未尝试/未知 | 整体失败或完整代表性 | Warning |
+| `ACQUIRED` | 已取得 | 原始材料或字节已安全取得 | 已进入搜索、已完成派生 | Success |
+| `PROCESSING` | 处理中 | 处理器实际运行 | 仅有 pending/job row/provider disabled | Info/operation |
+| `NOT_ENABLED` | 处理器未启用 | 当前能力不存在或 provider disabled | 执行失败、正在处理 | Unknown |
+| `SEARCHABLE` | 可检索 | 合格材料/派生已进入当前检索投影 | 对任意用途可公开、可代表总体 | Success |
+| `FAILED` | 执行失败 | 有明确失败和原因 | 未请求、未知、访问受限 | Danger |
+| `RISK_CONTROL` | 风险控制停止 | 当前 Attempt 因风险/访问限制结束 | 可自动重试、换账号或绕过 | Danger |
+| `BYTES_CLEANED` | 字节已按策略清理 | 曾经取得，当前字节不再可读；允许派生/记录可追溯 | 从未取得、来源不存在 | Warning |
+| `WITHDRAWN_OR_RESTRICTED` | 已撤回或限制读取 | 有有效处置决定，读取被阻断/传播中或完成 | 普通失败、历史从未存在 | Danger |
+| `UNKNOWN` | 当前未知 | 合同或来源不能确定 | 0、正常、失败、完整 | Unknown |
+
+### 7.2 页面级状态
+
+| 状态 ID | 触发来源 | 用户理解 | 页面处理 |
+|---|---|---|---|
+| `SYNTHETIC_REFERENCE` | 本卡静态原型 | 仅验证设计，不是系统数据 | 首屏固定标识；每个原声/计数区域再次标识 |
+| `SOURCE_INCOMPLETE` | 来源/读模型没有资格回答 | 不是空库或平台没有内容 | 说明缺什么，禁用依赖动作 |
+| `READ_PROJECTION_UNAVAILABLE` | 受控读取失败 | 没有读取任何材料 | inline error + incident ref；不远程回退 |
+| `LOCAL_QUERY_INVALID` | 查询合同不接受 | 未执行读取或平台搜索 | 保留输入，说明可修正字段 |
+| `NO_MATCHING_MATERIAL` | 读模型成功、当前查询无匹配 | 只对当前范围为零 | 显示 scope/Coverage/排除，不能外推现实不存在 |
+| `SELECTION_REQUIRED` | 结果存在但未选择作品 | Inspector 尚无对象 | 引导选择一行；不显示伪造详情 |
+| `ACCESS_RESTRICTED` | displayPolicy 不允许当前材料 | 材料可能存在但当前不展示 | 显示限制与用途，不泄漏原文 |
+
+### 7.3 组合规则
+
+- 作品没有全局 `complete / failed` 状态；只显示 lane 组合和最高优先限制。
+- `PARTIAL + VALID` 是一等状态；列表保留已取得材料，不进入“全部失败”。
+- Package ACK 只说明交卷接纳，不产生作品完整状态。
+- Slot `OBSERVED` 与 bytes `NOT_REQUESTED` 可以同时成立。
+- detail `SEARCHABLE`、comments `FAILED`、media `NOT_REQUESTED` 可以同时成立。
+- bytes `BYTES_CLEANED` 与 ASR `SEARCHABLE` 可以同时成立，且必须保留清理说明。
+- risk control 只由现行 `stoppedReason=risk_control` 映射为 `RISK_CONTROL`，不派生自动重试。
+
+## 8. 交互、反馈与回执
+
+| 用户动作 | 前置条件 | 请求/回执 | 页面反馈 | 不得宣称 |
+|---|---|---|---|---|
+| 搜索/筛选/排序 | read model 可用 | Query receipt：normalized query、scope、asOf、cursor、结果/排除/限制 | 结果区 inline 更新；保留可恢复 URL 状态 | 平台搜索、采集已启动 |
+| 选择作品 | 当前结果包含 stable public ref | 只读 Inspector request/response | 选中态 + Inspector 更新；移动端进入详情并可返回 | 创建 Selection、修改 Evidence |
+| 展开材料片段 | displayPolicy 允许 | Material fragment read receipt | 展示脱敏片段、来源 ref、访问级别 | 自动获得完整原文权限 |
+| 查看来源/血缘 | 有受控 refs | Provenance read response | 展示 refs、Coverage、限制和 checkpoint execution receipt | checkpoint 是 Evidence、ACK 是完整 |
+| 查看本地媒体 | 可读本地副本且用途允许 | Linggan local asset handle | 固定尺寸预览、alt、bytes/replica 状态 | 使用外部 CDN fallback |
+| 保存视图/批量选择/研究/补采 | 当前无合同 | 无 | disabled + 开放条件 | 伪造成功 toast 或本地计数 |
+
+查询、选择和 Tab 是可恢复 URL/本地视图状态，但不能被写成服务端业务动作。必读失败、限制和部分状态使用结果区或 Inspector inline feedback，不使用 Toast/Tooltip 作为唯一载体。
+
+## 9. 敏感材料最小展示合同
+
+1. 普通列表只显示脱敏标题/摘要、作者显示名的获准形式、稳定 public ref 和状态；不显示完整评论、回复、来源 URL 或账号镜头。
+2. ADHD、儿童、家庭、医疗和可反向识别片段默认脱敏；短片段也必须有用途、访问级别与来源 ref。
+3. Inspector 只有在 `displayPolicy` 允许时显示受限原文；默认仍为脱敏片段。受限状态必须可理解，但不能泄漏被限制内容。
+4. 外部 Agent 权限与本页无关；页面不得因 Agent 可访问聚合结果，就为人类普通列表扩大原文。
+5. 获准撤回/限制后，页面、搜索和 Inspector 停止返回失效原文；历史条目显示“来源资格已变化”，而非无声消失。
+6. 静态原型只使用人工合成中文材料，不包含真实 XHS 标题、作者、URL、评论、媒体或 ID。
+
+## 10. 已批准的页面组合
+
+| 区域 | 来源 | 使用 | 禁止替代 |
+|---|---|---|---|
+| 共享壳层 | `LIDS-PAT-001` shell ownership | 页头、上下文、216px rail | 在页面 CSS 重新定义 runtime shell |
+| 查询条 | `Corpus Explorer` + LIDS Input/Quiet | 检索和筛选已接纳材料 | 平台搜索框、假保存视图 |
+| 作品连续列表 | `Corpus Explorer` | 高密度比较主对象 | 卡片瀑布流、KPI 卡阵列 |
+| 材料 lane 带 | `LIDS-PRI-001` 五轴分责 + MEDIA-RECON | 分开显示每 lane 状态 | 万能 StatusTag、完整度百分比 |
+| Inspector | `Split Evidence Inspector` | 核验当前作品和血缘 | 第二个首页/筛选器/AI summary |
+| 内联限制/错误 | LIDS feedback | 明确影响与下一步 | 原生 alert、toast-only、技术堆栈 |
+
+本卡不晋升正式 CMP。材料 lane 带、作品行和 Inspector section 都是 page-local 候选；只有第二个独立页面证明同一责任后才可走 CMP promotion。
+
+## 11. 响应式、可访问性与动效
+
+### 11.1 桌面
+
+- `≥1500px`：216px rail + flexible results + 440px Inspector。
+- `1181–1499px`：216px rail + flexible results + 420px Inspector。
+- `901–1180px`：216px rail + flexible results + 380px Inspector；lane 带允许分组换行，但不丢状态。
+- 桌面内容工作面固定在视口剩余高度；列表和 Inspector 各自内部滚动，不让 document 无界延长。
+
+### 11.2 窄屏
+
+- `≤900px`：共享页头按内容增高；rail、查询、结果、Inspector 顺序折叠；document 原生滚动。
+- `≤640px`：列表行不再保留横向缩略图列；预览进入标题下方，lane 使用两列网格；选择作品后滚动到 Inspector，Inspector 提供“返回当前作品所在列表”，形成列表 ↔ Inspector 闭环。
+- 390×844 和 430×932 必须无页面级横向滚动；技术键允许换行，不截断必读中文。
+
+### 11.3 可访问性和 Motion
+
+- 每个交互命中区至少 40×40px；可见 Focus Ring；不用 `tabindex>0`。
+- 结果使用语义列表/文章；lane 状态既有中文文字也有图形位置，不只靠颜色。
+- 技术键紧邻中文主语义，原始材料不翻译。
+- 选中行和按钮只使用 transform/box-shadow 的获准反馈；Inspector 内容只使用 opacity/transform。
+- `prefers-reduced-motion: reduce` 下关闭位移和过渡，状态信息不消失。
+
+## 12. 完整原型场景
+
+静态原型 [`evidence-library-multi-material-reference.html`](evidence-library-multi-material-reference.html) 至少包含：
+
+1. **部分但可用**：detail 可检索；comments partial；replies failed；media slots observed；bytes not requested；OCR/ASR not enabled。
+2. **风险停止**：详情/已有材料保留；当前 Attempt 为 `RISK_CONTROL`；不显示自动重试。
+3. **字节已清理**：视频 bytes 为 `BYTES_CLEANED`；ASR 仍可检索；来源 Blob 和清理状态可追溯。
+4. **未知与未请求**：作者/发布时间 unknown；媒体 not requested；无评论记录不显示 0。
+5. **处理中**：只有处理器实际运行才显示 `PROCESSING`；原始字节与本地副本状态、Job、处理版本和开始时间可核验；当前不得提前显示 `SEARCHABLE`。该场景是合成目标状态，不表示当前 provider 已启用。
+6. **多候选来源与 Live Photo 部分取得**：本次 Package 对同一 Live Photo slot 形成一个槽位级来源观察组/generation，再由 declared Bundle 关联独立的 `still_image` 与 `motion_stream` 组件。每个组件可保留多个脱敏地址断言，并逐条展示 `candidateRef/order/primary/sourceField/observedAt/expiresAtState/expiresAt`；`primary` 只是本次 Producer 建议。下载尝试绑定精确 `candidateRef`，并展示 startedAt、endedAt、terminal 及失败时的 failureReason。示例分别显示 still 取得、motion 失败、整体 `PARTIAL`。候选顺序不推断组件，不暴露原始 URL，也不把历史代次伪装成本次 Package 的并列来源组。
+7. **读取成功但无匹配**：说明当前 query scope、排除/限制，不外推平台没有内容；Inspector 与选择状态同时清空。
+8. **读投影失败**：明确未读取材料、无远程/旧系统 fallback、建议重试本机读取；Inspector、结果与选择状态互斥，不残留上一作品。
+9. **筛选回执**：全部、部分取得、风险停止、字节已清理和处理中均真实改变可见作品、结果数量、当前选择与 read receipt；不能使用无行为的 enabled 按钮。
+10. **未选择**：Inspector 显示 `SELECTION_REQUIRED`，不填充伪造详情。
+11. **受限材料**：脱敏片段可见，原文因 display policy 不可见。
+
+原型中的数量、作者、标题、ID、时间和片段均为合成内容。它验证设计与状态，不证明 API、数据库、平台或媒体链。
+
+## 13. 验收矩阵
+
+| 层 | 场景 | 验收方法 | 完成信号 | 不能证明 |
+|---|---|---|---|---|
+| 产品任务 | 选择作品并判断各 lane | PAGE + 原型走查 | 3 秒看状态、5 秒进入 Inspector | 运行时可用 |
+| 状态诚实 | partial/risk/cleaned/processing/unknown/not requested/read error/Live Photo partial | 文案与 DOM 检查 | 没有总完成度、unknown→0、slot→bytes、ACK→complete；processing 不提前成功 | 数据真实 |
+| 视觉 | 1280×800、1440×900、1536×960、1728×1117、1920×1080、2560×1440、390×844、430×932 | 实际浏览器 render + overflow/geometry 检查 | 无横向越界；重点与 LIDS 一致 | Mog 最终审美验收 |
+| 可访问性 | keyboard/focus/landmark/Reduced Motion | DOM/键盘/媒体查询检查 | 控件可达、状态双通道、无 motion 依赖 | 辅助技术全量认证 |
+| 技术呈现 | 字段/lane/provenance/sensitive boundary | 与 MEDIA-RECON 和卡 3 API 对照 | UI 无需从 Package/raw tables 猜测 | 后端已实现 |
+| 真实后果 | 不适用，本卡无写动作 | diff 与网络检查 | 静态原型不读写真实服务 | 采集、下载、OCR/ASR |
+
+### 13.1 当前页面实现证明
+
+- 多材料 Evidence Library 的唯一产品主对象、状态词典、表面地图、信息架构和消费字段已冻结；
+- 静态合成原型能覆盖正常、部分、未知、未请求、风险停止、处理中、字节已清理、多候选来源、Live Photo 组件部分取得、受限、空与读取失败；
+- 页面沿用 LIDS 与既有 `Corpus Explorer + Split Evidence Inspector`，没有第二套视觉语言；
+- 卡 3 已提供列表、`detailUrl`、详情、评论研究通道、媒体/派生/来源回执与受控本地 asset handle；卡 4 运行页默认只消费这些入口；
+- 列表选择、Inspector Tab、评论通道继续读取、作品列表继续读取与 375px 顺序流均有运行代码和聚焦合同测试。
+
+### 13.2 当前页面实现不证明
+
+- 历史 Package 已回填、所有现有作品都有完整 lane，或受控本机数据库含足够材料覆盖全部设计场景；
+- 媒体/派生/来源通道的下一页路由已经提供；当前回执截断但无 URL 时只显示 `SOURCE_INCOMPLETE`；
+- 真实媒体字节、OCR、ASR、抽帧、embedding、清理或撤回传播；
+- 真实平台、浏览器、账号、部署、性能、长期稳定性；
+- Mog 已完成最终视觉/业务验收。

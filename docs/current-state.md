@@ -16,11 +16,19 @@
 
 原件读取不再使用裸 SHA 作为资格：普通投影只返回 `/api/local/media/<materializationRef>/<sha256>`，服务端验证 Materialization 与 Blob 关系，并按 Blob 全局、Slot 和具体 Materialization 三层处置决定可读性；共享 Blob 的另一份合格 Materialization 不会被错误连坐。同一 Slot 有多个副本时选择最新仍合格的 Materialization；最新副本被局部或 Blob 处置后会回退旧健康副本，同时用 limitation 保留“较新副本已处置”事实，Slot 级处置仍阻断整个集合。Derivative 使用独立的 `/api/local/derivative/<derivativeRef>` 受控句柄，`inputScope` 不再冒充位置。两类可撤销资产都返回 `private, no-store, max-age=0` 与 `nosniff`。上传 finalize 在写入时流式核对声明 hash/size 并原子提升到内容寻址路径；GET 重新检查当前治理资格和 size，以可配置上限流式交付，不把每次全量 hash 作为读取前提。未知或新媒体声明类型仍可保存；只有安全类型 inline，其他类型以 attachment 交付并标明 `UNSUPPORTED_MEDIA_TYPE`。接纳拒绝绝对路径、空组件和 `.`/`..`，读取 canonicalize 后拒绝根外路径。404/503 均使用 `local_read` envelope。旧 schema 遇到合法但无法履行的 Material query 返回 503，不伪装 200 空页。这仍不是 OCR provider 或真实平台媒体证明。该 Draft 未回填历史 Package，未访问真实平台、未取得真实平台媒体字节、未运行 OCR/ASR provider、未改 Evidence Library HTML/CSS，也未部署或完成用户验收。
 
+### EVIDENCE-RUNTIME-001 / Issue #90（Draft stacked 实现）
+
+`/corpus/evidence` 已从 server-rendered discovery cards 切换为客户端只读 Material Projection：默认只请求 `/api/local/evidence-library`，以作品集合为结果行显示 discovery/detail/comments/replies/author/media slots/media bytes/OCR/ASR 九条 lane；选择作品后只沿列表给出的同源 `detailUrl` 更新右侧 Inspector。评论原文只在本机授权详情通道按页读取并显示匿名上下文；普通列表不显示评论原文、平台用户标识或 `contentExternalId`。媒体只在详情同时具备受控同源 `localAssetUrl` 与 `INLINE_SAFE` delivery 时内联，未知类型、受限、已清理或不安全 delivery 不回退 CDN。作品列表和评论通道支持 `nextCursor`；媒体、派生、来源回执若已截断但 API 未给通道 URL，页面明确显示 `SOURCE_INCOMPLETE`，不猜路由或扩大卡 3 合同。
+
+本卡没有修改数据库、接纳、Material Projection 字段/SQL、媒体资格/处置、插件、采集调度或 OCR/ASR provider。它也不证明历史 Package 已回填、真实平台材料/媒体、部署、长期稳定性或 Mog 业务验收；这些边界仍由后续真实垂直证明承担。
+
 ### GOV-006 / Issue #82（决策治理收敛）
 
 Mog 已明确取消“任何仓库写入都必须 Issue + Claim + 独立 worktree + Draft PR”的统一门禁。后续按风险分级：代码、数据库、运行合同、插件/release、部署/生产、真实外部动作、敏感数据/权限、不可逆处置和并行冲突继续走受保护交付；当前对话已明确授权的低风险文档勘误、索引/状态同步、进度记录和被取代卡片收口可以直接维护，但仍须核对工作区、检查 diff、运行适用治理检查并分层报告，不能借机扩成实现或自动 push/deploy。
 
 ARC-001 已同步为“已回答问题不再重复提问”：Capture Control Contract 已由 PR #17 合入；媒体卡已从当前主线完成 V2 语义、PR #15 草案、产品规则、插件 `v0.5.0` 通道、Rust/PostgreSQL 实现和 Evidence Library 消费边界的校准，唯一当前入口为 [`architecture/media-lifecycle-contract.md`](architecture/media-lifecycle-contract.md)，决策卡现为 `resolved`。这只证明合同收口；真实媒体字节、OCR/ASR/抽帧/embedding、保留期清理、撤回传播、多材料读模型、页面实现和用户验收仍未证明。第一阶段运行时只剩当前实现缺口基线，首个用户可见范围只剩正式 SCOPE 冻结。Issue #10 和 #14 保持开放以承接当前交付；旧 Issue #11/#16/#18 与 PR #12/#13/#15/#19 已按“已吸收/已被取代”关闭。
+
+Issue #85 / `EVIDENCE-PAGE-002` 已在上述媒体合同上冻结多材料 Evidence Library 的产品手册、技术呈现要求和合成静态高保真参考：主对象为“一个稳定来源作品在当前 Linggan 中可核验的材料集合”，并覆盖 discovery、详情、评论/回复、作者、媒体槽位/字节与 OCR/ASR 派生 lane。该设计明确区分部分可用、风险控制、访问受限、处理中、字节已清理、未知、空结果和读取错误，并静态演示一次 Package 的槽位级来源观察组如何包含 declared Bundle、still/motion 组件、逐地址 candidate assertions 以及绑定精确 `candidateRef` 的下载尝试；checkpoint 只进入来源核验，不成为材料卡。Issue #90 已把现行 API 能承担的部分落到运行页；静态参考仍不证明真实平台、媒体、OCR/ASR 或用户验收。
 
 ### AUD-XHS-001 / Issue #74（受限真实页面探针执行中）
 

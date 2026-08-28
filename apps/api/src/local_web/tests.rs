@@ -1809,3 +1809,66 @@ fn the_primary_nav_links_to_entry_routes_never_to_a_sub_surface() {
         assert!(nav.contains(entry), "primary nav is missing {entry}");
     }
 }
+
+#[test]
+fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
+    let html = evidence_library_html();
+
+    assert!(html.contains("/assets/evidence-library.js"));
+    assert!(html.contains("id=\"ev-work-list\""));
+    assert!(html.contains("data-ev-panel=\"provenance\""));
+    assert!(EVIDENCE_LIBRARY_JS.contains("const API_ROOT = '/api/local/evidence-library'"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("/api/local/evidence-library/legacy"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("fetch('http"));
+}
+
+#[test]
+fn evidence_runtime_preserves_unknown_partial_and_restricted_states() {
+    for state in [
+        "UNKNOWN",
+        "PARTIAL",
+        "RISK_CONTROL",
+        "BYTES_CLEANED",
+        "WITHDRAWN_OR_RESTRICTED",
+    ] {
+        assert!(
+            EVIDENCE_LIBRARY_JS.contains(state),
+            "runtime must render honest state {state}"
+        );
+    }
+    assert!(EVIDENCE_LIBRARY_JS.contains("数量未知"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("SOURCE INCOMPLETE"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("这不表示作品没有媒体"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("ACK 完整"));
+}
+
+#[test]
+fn evidence_runtime_keeps_sensitive_text_and_media_inside_controlled_detail_reads() {
+    assert!(EVIDENCE_LIBRARY_JS.contains("LOCAL AUTHORIZED RESEARCH"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("IDENTITY WITHHELD"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("comment.body"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("authorExternalId"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("blob?.deliveryState === 'INLINE_SAFE'"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("'/api/local/media/'"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("'/api/local/derivative/'"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("innerHTML"));
+}
+
+#[test]
+fn evidence_runtime_has_bounded_continuation_keyboard_and_mobile_contracts() {
+    for marker in [
+        "payload.nextCursor",
+        "payload.truncated",
+        "ArrowDown",
+        "ArrowRight",
+        "prefers-reduced-motion",
+        "max-width:900px",
+        "max-width:640px",
+        "min-height:40px",
+    ] {
+        assert!(
+            EVIDENCE_LIBRARY_JS.contains(marker) || EVIDENCE_LIBRARY_CSS.contains(marker),
+            "runtime contract marker missing: {marker}"
+        );
+    }
+}
