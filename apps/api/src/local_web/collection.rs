@@ -643,7 +643,8 @@ fn second_bar(
 ) -> String {
     match section {
         Section::Targets => format!(
-            r#"<div class="c-tabs c-tg-views">{target_filters}</div>
+            r#"<div class="c-toolbar">
+          <div class="c-tabs c-tg-views">{target_filters}</div>
           <div class="c-actions c-tg-toolbar">
             <a class="c-btn-quiet" href="/collection/targets?sort=last">排序 / 最近观察 ↓</a>
             <form class="c-target-add" method="post" action="/collection/targets/new">
