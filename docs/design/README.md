@@ -59,6 +59,10 @@
 | [foundation/topic-intelligence-visual-language.md](foundation/topic-intelligence-visual-language.md) | DS-REF-TOPIC-001：Topic 合成参考页怎样采用 LIDS，并加固合成/非 Evidence 边界 | 权威当前 |
 | [patterns/evidence-candidate-and-boundary-patterns.md](patterns/evidence-candidate-and-boundary-patterns.md) | PAT-001–PAT-004：观察、候选、来源限制与无副作用意图的表达模式 | 权威当前 |
 | [components/component-promotion.md](components/component-promotion.md) | Reference Page 局部块如何经第二页面验证后才可晋升为 CMP | 权威当前 |
+| [pages/evidence-library-page.md](pages/evidence-library-page.md) | PAGE-EVIDENCE-001：Evidence Library 多材料产品手册、技术呈现要求、表面地图、状态与回执合同 | 权威当前；目标产品规格，当前运行时仍为 discovery-only |
+| [pages/evidence-library-multi-material-reference.html](pages/evidence-library-multi-material-reference.html) | EVIDENCE-PAGE-002：多材料 Evidence Library 合成静态高保真参考；不连接运行时或真实材料 | 权威当前；静态参考 |
+| [changes/evidence-page-002-multi-material-ui-change-manifest.md](changes/evidence-page-002-multi-material-ui-change-manifest.md) | EVIDENCE-PAGE-002：本次产品与静态参考变更清单及越权边界 | 权威当前 |
+| [acceptance/evidence-page-002-multi-material-reference-acceptance.md](acceptance/evidence-page-002-multi-material-reference-acceptance.md) | ACC-EVIDENCE-PAGE-002：桌面/窄屏、状态、互动与证明边界验收 | 一次性报告 |
 | [pages/topic-intelligence-reference-page.md](pages/topic-intelligence-reference-page.md) | PAGE-TOPIC-001：Topic Reference Page 的获准组合、状态与验收 | 权威当前 |
 | [changes/design-007-chinese-first-evidence-library-ui-change-manifest.md](changes/design-007-chinese-first-evidence-library-ui-change-manifest.md) | DESIGN-007：Evidence Library 中文优先规则的受限落地清单 | 权威当前 |
 | [pages/topic-intelligence-reference.html](pages/topic-intelligence-reference.html) | 可本地打开的合成静态参考实现；不读取、写入或声称真实系统事实 | 权威当前 |
