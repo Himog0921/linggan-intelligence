@@ -74,7 +74,7 @@
 
 原型另外展示页面级：`SYNTHETIC_REFERENCE / NO_MATCHING_MATERIAL / READ_PROJECTION_UNAVAILABLE / ACCESS_RESTRICTED`。不创造万能作品状态，不显示总完整度，不把 unknown 写 0。
 
-`PROCESSING` 只用于“处理器实际运行”的合成场景；排队、只有 Job row 或当前 provider 未启用均不能映射为处理中。媒体静态参考另覆盖同一组件、同一来源观察组中的多个脱敏 candidate URI（等价地址断言），以及由显式 bundle 关系关联的 Live Photo `still_image` 已取得 / `motion_stream` 失败的 `PARTIAL` 组合；候选顺序不承担组件识别。
+`PROCESSING` 只用于“处理器实际运行”的合成场景；排队、只有 Job row 或当前 provider 未启用均不能映射为处理中。媒体静态参考另覆盖本次 Package 的一个槽位级来源观察组/generation、其 declared Bundle、独立的 Live Photo `still_image` / `motion_stream` 组件、组件内逐地址 candidate assertions，以及绑定精确 `candidateRef` 的下载尝试；示例以 still 已取得 / motion 失败形成 `PARTIAL`，候选顺序不承担组件识别，历史代次不混入当前来源组。
 
 ## 7. 依赖地图
 

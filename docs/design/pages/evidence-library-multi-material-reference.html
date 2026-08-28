@@ -142,10 +142,9 @@
 
     @keyframes panel-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
     @media (hover:hover) {
-      .work-row:hover { background: var(--lgi-canvas-low); }
-      .work-row[aria-selected="true"]:hover { transform: translate(-2px,-2px); box-shadow: var(--lgi-shadow-brutal); }
+      .work-row:not([aria-selected="true"]):hover { background: var(--lgi-canvas-low); transform: translate(-2px,-2px); box-shadow: var(--lgi-shadow-brutal); }
       .filter:not([disabled]):not([aria-pressed="true"]):hover, .inspector-tabs button:not([aria-selected="true"]):hover { color: var(--lgi-ink); }
-      .scenario-control button:hover { background: var(--lgi-canvas-low); }
+      .scenario-control button:not([aria-pressed="true"]):hover { background: var(--lgi-canvas-low); }
     }
     @media (max-width: 1600px) { .work-row { grid-template-columns: 92px minmax(0,1fr); } .lane-board { grid-column: 1 / -1; } }
     @media (max-width: 1500px) { .shell { grid-template-columns: 216px minmax(0,1fr) 420px; } .shell[data-inspector="false"] { grid-template-columns: 216px minmax(0,1fr); } }
@@ -192,7 +191,7 @@
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; }
-      .rail-nav button[aria-current="page"], .work-row[aria-selected="true"]:hover { transform: none; }
+      .rail-nav button[aria-current="page"] { transform: none; }
     }
   </style>
 </head>
@@ -248,43 +247,7 @@
       <section class="results" id="results" aria-label="来源作品材料集合">
         <div class="results-head"><span><b id="result-count">6 个合成作品集合</b> · 作品级聚合，不是 Package 计数</span><span class="tech" id="result-filter-key">FILTER ALL · SYNTHETIC</span></div>
 
-        <div class="work-list" role="listbox" aria-label="来源作品材料集合">
-        <article class="work-row" role="option" tabindex="0" aria-selected="true" data-item="01" data-filter-tags="partial">
-          <span class="preview"><strong>本地预览占位</strong><span class="tech">LOCAL ASSET PLACEHOLDER</span></span>
-          <span class="identity"><span class="identity-top">XHS · WORK-REF-01 <span class="tech">SYNTHETIC</span></span><h2>写作业前，孩子为什么总像“卡住了”</h2><p>合成脱敏摘要：围绕任务启动、转换成本与家庭沟通的来源作品材料。</p><span class="identity-foot"><span>合成作者 A</span><span>发布时间未知</span><span>最近观察：非运行时间</span></span></span>
-          <span class="lane-board"><span class="lane-groups"><span class="lane-group"><b>发现</b><span class="lane-list"><span class="lane" data-state="success"><span>可检索</span></span></span></span><span class="lane-group"><b>详情</b><span class="lane-list"><span class="lane" data-state="success"><span>可检索</span></span></span></span><span class="lane-group"><b>讨论</b><span class="lane-list"><span class="lane" data-state="warning"><span>评论部分取得</span></span><span class="lane" data-state="danger"><span>回复失败</span></span></span></span><span class="lane-group"><b>作者</b><span class="lane-list"><span class="lane" data-state="info"><span>上下文已观察</span></span></span></span><span class="lane-group"><b>媒体</b><span class="lane-list"><span class="lane" data-state="info"><span>槽位已观察</span></span><span class="lane"><span>字节尚未请求</span></span></span></span><span class="lane-group"><b>派生</b><span class="lane-list"><span class="lane"><span>OCR 未启用</span></span><span class="lane"><span>ASR 不适用</span></span></span></span></span><span class="limitation">已有详情可用；讨论与媒体仍有独立缺口。Package 已接纳不代表作品完整。</span></span>
-        </article>
-
-        <article class="work-row" role="option" tabindex="0" aria-selected="false" data-item="02" data-filter-tags="risk">
-          <span class="preview restricted"><strong>预览受限</strong><span class="tech">ACCESS RESTRICTED</span></span>
-          <span class="identity"><span class="identity-top">XHS · WORK-REF-02 <span class="tech">SYNTHETIC</span></span><h2>家庭早晨的转换时刻</h2><p>合成脱敏摘要：已保留此前安全取得的详情；本次继续观察因风险控制停止。</p><span class="identity-foot"><span>作者已脱敏</span><span>来源时间精度：日</span><span>当前 Attempt 已结束</span></span></span>
-          <span class="lane-board"><span class="lane-groups"><span class="lane-group"><b>发现</b><span class="lane-list"><span class="lane" data-state="success"><span>已取得</span></span></span></span><span class="lane-group"><b>详情</b><span class="lane-list"><span class="lane" data-state="success"><span>可检索</span></span></span></span><span class="lane-group"><b>讨论</b><span class="lane-list"><span class="lane" data-state="danger"><span>风险停止</span></span></span></span><span class="lane-group"><b>作者</b><span class="lane-list"><span class="lane" data-state="warning"><span>脱敏可见</span></span></span></span><span class="lane-group"><b>媒体</b><span class="lane-list"><span class="lane"><span>尚未观察</span></span></span></span><span class="lane-group"><b>派生</b><span class="lane-list"><span class="lane"><span>尚未请求</span></span></span></span></span><span class="limitation danger">风险控制结束当前 Attempt；不自动重试、不换账号、不绕过限制。</span></span>
-        </article>
-
-        <article class="work-row" role="option" tabindex="0" aria-selected="false" data-item="03" data-filter-tags="cleaned">
-          <span class="preview clean"><strong>原视频字节已清理</strong><span class="tech">BYTES CLEANED</span></span>
-          <span class="identity"><span class="identity-top">XHS · WORK-REF-03 <span class="tech">SYNTHETIC</span></span><h2>把“快点”换成可执行的一小步</h2><p>合成脱敏摘要：视频原件曾取得并成功转录；当前只展示获准保留的转录片段与关键帧状态。</p><span class="identity-foot"><span>合成作者 C</span><span>来源发布时间：合成已知</span><span>处置记录可追溯</span></span></span>
-          <span class="lane-board"><span class="lane-groups"><span class="lane-group"><b>发现</b><span class="lane-list"><span class="lane" data-state="success"><span>可检索</span></span></span></span><span class="lane-group"><b>详情</b><span class="lane-list"><span class="lane" data-state="success"><span>可检索</span></span></span></span><span class="lane-group"><b>讨论</b><span class="lane-list"><span class="lane"><span>尚未请求</span></span></span></span><span class="lane-group"><b>作者</b><span class="lane-list"><span class="lane" data-state="success"><span>可检索</span></span></span></span><span class="lane-group"><b>媒体</b><span class="lane-list"><span class="lane" data-state="warning"><span>字节已清理</span></span><span class="lane" data-state="success"><span>关键帧保留</span></span></span></span><span class="lane-group"><b>派生</b><span class="lane-list"><span class="lane" data-state="success"><span>ASR 可检索</span></span><span class="lane"><span>OCR 不适用</span></span></span></span></span><span class="limitation">字节曾经取得；不得显示成“从未取得”。转录仍需保留来源 Blob 与处理版本。</span></span>
-        </article>
-
-        <article class="work-row" role="option" tabindex="0" aria-selected="false" data-item="04" data-filter-tags="unknown">
-          <span class="preview"><strong>媒体尚未请求</strong><span class="tech">NOT REQUESTED</span></span>
-          <span class="identity"><span class="identity-top">XHS · WORK-REF-04 <span class="tech">SYNTHETIC</span></span><h2>标题与作者当前未知的发现材料</h2><p>没有合格详情字段；发现发生可追溯，但不能从缺字段推断平台没有内容。</p><span class="identity-foot"><span>作者未知</span><span>发布时间未知</span><span>无评论数量结论</span></span></span>
-          <span class="lane-board"><span class="lane-groups"><span class="lane-group"><b>发现</b><span class="lane-list"><span class="lane" data-state="info"><span>已观察</span></span></span></span><span class="lane-group"><b>详情</b><span class="lane-list"><span class="lane"><span>尚未请求</span></span></span></span><span class="lane-group"><b>讨论</b><span class="lane-list"><span class="lane"><span>当前未知</span></span></span></span><span class="lane-group"><b>作者</b><span class="lane-list"><span class="lane"><span>当前未知</span></span></span></span><span class="lane-group"><b>媒体</b><span class="lane-list"><span class="lane"><span>尚未请求</span></span></span></span><span class="lane-group"><b>派生</b><span class="lane-list"><span class="lane"><span>尚未请求</span></span></span></span></span><span class="limitation">没有评论记录不等于评论为 0；没有媒体工作不等于作品无媒体。</span></span>
-        </article>
-
-        <article class="work-row" role="option" tabindex="0" aria-selected="false" data-item="05" data-filter-tags="processing">
-          <span class="preview"><strong>本地图片字节可读</strong><span class="tech">PROCESSING SOURCE · SYNTHETIC</span></span>
-          <span class="identity"><span class="identity-top">XHS · WORK-REF-05 <span class="tech">SYNTHETIC</span></span><h2>把任务拆成看得见的第一步</h2><p>合成脱敏摘要：图片字节已经安全取得，OCR 处理器实际进入运行态，尚未形成可检索派生。</p><span class="identity-foot"><span>合成作者 E</span><span>来源发布时间：合成已知</span><span>处理开始：非运行时间</span></span></span>
-          <span class="lane-board"><span class="lane-groups"><span class="lane-group"><b>发现</b><span class="lane-list"><span class="lane" data-state="success"><span>可检索</span></span></span></span><span class="lane-group"><b>详情</b><span class="lane-list"><span class="lane" data-state="success"><span>可检索</span></span></span></span><span class="lane-group"><b>讨论</b><span class="lane-list"><span class="lane"><span>尚未请求</span></span></span></span><span class="lane-group"><b>作者</b><span class="lane-list"><span class="lane" data-state="info"><span>上下文已观察</span></span></span></span><span class="lane-group"><b>媒体</b><span class="lane-list"><span class="lane" data-state="success"><span>字节已取得</span></span><span class="lane" data-state="success"><span>本地副本可读</span></span></span></span><span class="lane-group"><b>派生</b><span class="lane-list"><span class="lane" data-state="info"><span>OCR 处理中</span></span><span class="lane"><span>ASR 不适用</span></span></span></span></span><span class="limitation">只有处理器实际运行才显示 PROCESSING；当前尚未产生可检索 OCR，不得提前标成成功。</span></span>
-        </article>
-
-        <article class="work-row" role="option" tabindex="0" aria-selected="false" data-item="06" data-filter-tags="partial">
-          <span class="preview"><strong>Live Photo 部分可用</strong><span class="tech">STILL ACQUIRED · MOTION FAILED</span></span>
-          <span class="identity"><span class="identity-top">XHS · WORK-REF-06 <span class="tech">SYNTHETIC</span></span><h2>用一张动态记录观察任务转换</h2><p>合成脱敏摘要：同一 Live Photo 槽位含 still 与 motion 组件；still 已取得，motion 在候选来源尝试后失败。</p><span class="identity-foot"><span>合成作者 F</span><span>来源发布时间：合成已知</span><span>来源组代次 3</span></span></span>
-          <span class="lane-board"><span class="lane-groups"><span class="lane-group"><b>发现</b><span class="lane-list"><span class="lane" data-state="success"><span>可检索</span></span></span></span><span class="lane-group"><b>详情</b><span class="lane-list"><span class="lane" data-state="success"><span>可检索</span></span></span></span><span class="lane-group"><b>讨论</b><span class="lane-list"><span class="lane"><span>尚未请求</span></span></span></span><span class="lane-group"><b>作者</b><span class="lane-list"><span class="lane" data-state="info"><span>上下文已观察</span></span></span></span><span class="lane-group"><b>媒体</b><span class="lane-list"><span class="lane" data-state="warning"><span>Live Photo 部分取得</span></span><span class="lane" data-state="success"><span>still 已取得</span></span><span class="lane" data-state="danger"><span>motion 失败</span></span></span></span><span class="lane-group"><b>派生</b><span class="lane-list"><span class="lane"><span>OCR 未启用</span></span><span class="lane"><span>ASR 未启用</span></span></span></span></span><span class="limitation">候选 URI 只在各组件自己的来源观察组内表达等价地址；组件由 bundle 关系声明，禁止从候选顺序推断。</span></span>
-        </article>
-        </div>
+        <div class="work-list" id="work-list" role="listbox" aria-label="来源作品材料集合"></div>
       </section>
 
       <section class="feedback" id="empty-feedback" aria-labelledby="empty-title">
@@ -298,7 +261,7 @@
 
     <aside class="inspector" aria-label="当前作品核验区">
       <div class="inspector-head"><button class="mobile-back" id="back-to-results" type="button">← 返回当前作品所在列表</button><span class="tech">PROVENANCE INSPECTOR · SYNTHETIC</span><h2 id="inspector-title"></h2><p id="inspector-summary"></p></div>
-      <div class="inspector-tabs" role="tablist" aria-label="材料核验栏目"><button id="tab-overview" type="button" role="tab" aria-selected="true" aria-controls="inspector-overview" data-tab="overview">概览</button><button id="tab-discussion" type="button" role="tab" aria-selected="false" aria-controls="inspector-discussion" data-tab="discussion">评论与回复</button><button id="tab-media" type="button" role="tab" aria-selected="false" aria-controls="inspector-media" data-tab="media">媒体与派生</button><button id="tab-provenance" type="button" role="tab" aria-selected="false" aria-controls="inspector-provenance" data-tab="provenance">来源与限制</button></div>
+      <div class="inspector-tabs" role="tablist" aria-label="材料核验栏目"><button id="tab-overview" type="button" role="tab" tabindex="0" aria-selected="true" aria-controls="inspector-overview" data-tab="overview">概览</button><button id="tab-discussion" type="button" role="tab" tabindex="-1" aria-selected="false" aria-controls="inspector-discussion" data-tab="discussion">评论与回复</button><button id="tab-media" type="button" role="tab" tabindex="-1" aria-selected="false" aria-controls="inspector-media" data-tab="media">媒体与派生</button><button id="tab-provenance" type="button" role="tab" tabindex="-1" aria-selected="false" aria-controls="inspector-provenance" data-tab="provenance">来源与限制</button></div>
       <div class="inspector-scroll">
         <section class="inspector-panel is-active" data-panel="overview" id="inspector-overview" role="tabpanel" aria-labelledby="tab-overview"></section>
         <section class="inspector-panel" data-panel="discussion" id="inspector-discussion" role="tabpanel" aria-labelledby="tab-discussion"></section>
@@ -317,15 +280,21 @@
     const shell = document.querySelector('.shell');
     const inspector = document.querySelector('.inspector');
     const filters = document.querySelectorAll('[data-filter]');
-    const rows = document.querySelectorAll('.work-row');
+    const workList = document.getElementById('work-list');
+    let rows = [];
     let currentScenario = 'results';
     let activeFilter = 'all';
     let selectedId = '01';
 
-    const itemCopy = {
+    const scenarioData = {
       '01': {
         title: '写作业前，孩子为什么总像“卡住了”',
         summary: '部分但可用：详情可检索，评论部分取得，回复失败，媒体字节尚未请求。',
+        filterTags: ['partial'], preview: ['本地预览占位', 'LOCAL ASSET PLACEHOLDER', ''],
+        rowSummary: '合成脱敏摘要：围绕任务启动、转换成本与家庭沟通的来源作品材料。',
+        meta: ['合成作者 A', '发布时间未知', '最近观察：非运行时间'],
+        lanes: [['发现',[['可检索','success']]],['详情',[['可检索','success']]],['讨论',[['评论部分取得','warning'],['回复失败','danger']]],['作者',[['上下文已观察','info']]],['媒体',[['槽位已观察','info'],['字节尚未请求','']]],['派生',[['OCR 未启用',''],['ASR 不适用','']]]],
+        limitation: '已有详情可用；讨论与媒体仍有独立缺口。Package 已接纳不代表作品完整。', limitationTone: '',
         overview: '<div class="inspect-section"><h3>作品字段与来源</h3><dl class="facts"><dt>稳定引用</dt><dd class="tech">WORK-REF-01 · SYNTHETIC</dd><dt>标题</dt><dd>合成已知 · 来源详情材料</dd><dt>作者</dt><dd>合成作者 A · 作者上下文已观察</dd><dt>发布时间</dt><dd>未知 <span class="tech inline">PUBLISHED_AT UNKNOWN</span></dd></dl></div><div class="inspect-section"><h3>脱敏材料片段</h3><div class="quote">“不是不想开始，而是从听见指令到组织下一步，中间像缺了一座桥。”</div><p class="tech">SYNTHETIC REDACTED FRAGMENT · NOT SOURCE QUOTE</p></div><div class="inspect-section"><div class="restricted-copy"><b>原文访问受限</b>：普通页面只显示脱敏片段；原型没有真实原文，也不能据此扩大访问权限。</div></div>',
         discussion: '<div class="inspect-section"><h3>评论 lane</h3><dl class="facts"><dt>状态</dt><dd>部分取得 <span class="tech inline">PARTIAL</span></dd><dt>观察到</dt><dd>12 条（合成）</dd><dt>保留可用</dt><dd>9 条脱敏片段（合成）</dd><dt>停止原因</dt><dd>当前详情窗口结束，不证明评论已穷尽</dd></dl></div><div class="inspect-section"><h3>回复 lane</h3><div class="restricted-copy"><b>执行失败（FAILED）</b>：父评论关系没有形成合格投影。失败不连坐已取得的顶层评论，也不显示回复为 0。</div></div>',
         media: '<div class="inspect-section"><h3>媒体槽位</h3><div class="slot-list"><div class="slot"><b>01</b><span>正文图片 · 槽位已观察</span><small>字节尚未请求</small></div><div class="slot"><b>02</b><span>正文图片 · 槽位已观察</span><small>字节尚未请求</small></div><div class="slot"><b>C</b><span>封面用途 · 与正文用途分责</span><small>来源代次 1（合成）</small></div></div></div><div class="inspect-section"><h3>派生处理</h3><dl class="facts"><dt>图片 OCR</dt><dd>处理器未启用 <span class="tech inline">NOT ENABLED</span></dd><dt>视频 ASR</dt><dd>不适用 <span class="tech inline">N/A</span></dd><dt>远程回退</dt><dd>禁止；没有本地副本就不显示 CDN</dd></dl></div>',
@@ -334,6 +303,11 @@
       '02': {
         title: '家庭早晨的转换时刻',
         summary: '风险停止：保留此前安全取得的详情；当前 Attempt 不自动重试或换账号。',
+        filterTags: ['risk'], preview: ['预览受限', 'ACCESS RESTRICTED', 'restricted'],
+        rowSummary: '合成脱敏摘要：已保留此前安全取得的详情；本次继续观察因风险控制停止。',
+        meta: ['作者已脱敏', '来源时间精度：日', '当前 Attempt 已结束'],
+        lanes: [['发现',[['已取得','success']]],['详情',[['可检索','success']]],['讨论',[['风险停止','danger']]],['作者',[['脱敏可见','warning']]],['媒体',[['尚未观察','']]],['派生',[['尚未请求','']]]],
+        limitation: '风险控制结束当前 Attempt；不自动重试、不换账号、不绕过限制。', limitationTone: 'danger',
         overview: '<div class="inspect-section"><h3>作品字段与来源</h3><dl class="facts"><dt>稳定引用</dt><dd class="tech">WORK-REF-02 · SYNTHETIC</dd><dt>详情</dt><dd>此前已安全取得并进入检索</dd><dt>作者</dt><dd>脱敏可见；原身份不展示</dd><dt>当前尝试</dt><dd>风险控制停止 <span class="tech inline">RISK CONTROL</span></dd></dl></div><div class="inspect-section"><div class="restricted-copy"><b>访问受限</b>：保留已合格材料，但不展示受限预览或原文。</div></div>',
         discussion: '<div class="inspect-section"><h3>评论与回复</h3><div class="restricted-copy"><b>风险控制停止（RISK_CONTROL）</b>：没有形成新的合格评论/回复观察；这不是评论为 0，也不会触发自动重试。</div></div>',
         media: '<div class="inspect-section"><h3>媒体槽位与字节</h3><dl class="facts"><dt>槽位</dt><dd>尚未形成合格观察 <span class="tech inline">NOT OBSERVED</span></dd><dt>字节</dt><dd>尚未请求 <span class="tech inline">NOT REQUESTED</span></dd><dt>远程回退</dt><dd>禁止；访问限制不以 CDN 绕过</dd></dl></div>',
@@ -342,6 +316,11 @@
       '03': {
         title: '把“快点”换成可执行的一小步',
         summary: '字节已清理：原视频曾取得；当前转录可检索，清理和处理版本可追溯。',
+        filterTags: ['cleaned'], preview: ['原视频字节已清理', 'BYTES CLEANED', 'clean'],
+        rowSummary: '合成脱敏摘要：视频原件曾取得并成功转录；当前只展示获准保留的转录片段与关键帧状态。',
+        meta: ['合成作者 C', '来源发布时间：合成已知', '处置记录可追溯'],
+        lanes: [['发现',[['可检索','success']]],['详情',[['可检索','success']]],['讨论',[['尚未请求','']]],['作者',[['可检索','success']]],['媒体',[['字节已清理','warning'],['关键帧保留','success']]],['派生',[['ASR 可检索','success'],['OCR 不适用','']]]],
+        limitation: '字节曾经取得；不得显示成“从未取得”。转录仍需保留来源 Blob 与处理版本。', limitationTone: '',
         overview: '<div class="inspect-section"><h3>作品字段与来源</h3><dl class="facts"><dt>稳定引用</dt><dd class="tech">WORK-REF-03 · SYNTHETIC</dd><dt>详情</dt><dd>可检索</dd><dt>作者</dt><dd>合成作者 C · 可检索</dd><dt>发布时间</dt><dd>合成已知 · 日精度</dd></dl></div><div class="inspect-section"><h3>允许展示</h3><p>仅保留获准的合成转录片段和关键帧状态；原视频当前不可读。</p></div>',
         discussion: '<div class="inspect-section"><h3>评论与回复</h3><dl class="facts"><dt>状态</dt><dd>尚未请求 <span class="tech inline">NOT REQUESTED</span></dd><dt>数量</dt><dd>当前无结论；不显示 0</dd></dl></div>',
         media: '<div class="inspect-section"><h3>媒体槽位、字节与副本</h3><div class="slot-list"><div class="slot"><b>01</b><span>正文视频 · 槽位已观察</span><small>来源代次 2</small></div><div class="slot"><b>B</b><span>Blob 曾取得 · 校验引用保留</span><small>字节已清理</small></div><div class="slot"><b>R</b><span>本地副本已处置</span><small>不可预览</small></div></div></div><div class="inspect-section"><h3>派生与用途</h3><dl class="facts"><dt>ASR</dt><dd>可检索 <span class="tech inline">SEARCHABLE</span></dd><dt>处理版本</dt><dd class="tech">processor/synthetic-v1</dd><dt>来源位置</dt><dd>视频 00:03–00:17（合成）</dd><dt>OCR</dt><dd>不适用</dd><dt>远程回退</dt><dd>禁止；字节清理后不使用来源 CDN</dd></dl></div>',
@@ -350,6 +329,11 @@
       '04': {
         title: '标题与作者当前未知的发现材料',
         summary: '未知与未请求：只证明发现发生；没有详情、评论数量或媒体结论。',
+        filterTags: ['unknown'], preview: ['媒体尚未请求', 'NOT REQUESTED', ''],
+        rowSummary: '没有合格详情字段；发现发生可追溯，但不能从缺字段推断平台没有内容。',
+        meta: ['作者未知', '发布时间未知', '无评论数量结论'],
+        lanes: [['发现',[['已观察','info']]],['详情',[['尚未请求','']]],['讨论',[['当前未知','']]],['作者',[['当前未知','']]],['媒体',[['尚未请求','']]],['派生',[['尚未请求','']]]],
+        limitation: '没有评论记录不等于评论为 0；没有媒体工作不等于作品无媒体。', limitationTone: '',
         overview: '<div class="inspect-section"><h3>作品字段与来源</h3><dl class="facts"><dt>稳定引用</dt><dd class="tech">WORK-REF-04 · SYNTHETIC</dd><dt>发现</dt><dd>已观察 <span class="tech inline">OBSERVED</span></dd><dt>标题</dt><dd>当前未知</dd><dt>作者</dt><dd>当前未知</dd><dt>发布时间</dt><dd>当前未知</dd></dl></div>',
         discussion: '<div class="inspect-section"><h3>评论与回复</h3><dl class="facts"><dt>状态</dt><dd>当前未知 <span class="tech inline">UNKNOWN</span></dd><dt>数量</dt><dd>无合格结论；不显示 0</dd></dl></div>',
         media: '<div class="inspect-section"><h3>媒体与派生</h3><dl class="facts"><dt>媒体工作</dt><dd>尚未请求 <span class="tech inline">NOT REQUESTED</span></dd><dt>槽位</dt><dd>当前未知；不能推断作品无媒体</dd><dt>OCR / ASR</dt><dd>尚未请求</dd><dt>预览</dt><dd>没有本地副本；不使用远程 CDN</dd></dl></div>',
@@ -358,6 +342,11 @@
       '05': {
         title: '把任务拆成看得见的第一步',
         summary: '处理中：图片字节和本地副本可读，OCR 处理器实际运行，当前还没有可检索派生。',
+        filterTags: ['processing'], preview: ['本地图片字节可读', 'PROCESSING SOURCE · SYNTHETIC', ''],
+        rowSummary: '合成脱敏摘要：图片字节已经安全取得，OCR 处理器实际进入运行态，尚未形成可检索派生。',
+        meta: ['合成作者 E', '来源发布时间：合成已知', '处理开始：非运行时间'],
+        lanes: [['发现',[['可检索','success']]],['详情',[['可检索','success']]],['讨论',[['尚未请求','']]],['作者',[['上下文已观察','info']]],['媒体',[['字节已取得','success'],['本地副本可读','success']]],['派生',[['OCR 处理中','info'],['ASR 不适用','']]]],
+        limitation: '只有处理器实际运行才显示 PROCESSING；当前尚未产生可检索 OCR，不得提前标成成功。', limitationTone: '',
         overview: '<div class="inspect-section"><h3>作品字段与来源</h3><dl class="facts"><dt>稳定引用</dt><dd class="tech">WORK-REF-05 · SYNTHETIC</dd><dt>详情</dt><dd>可检索</dd><dt>作者</dt><dd>合成作者 E · 上下文已观察</dd><dt>发布时间</dt><dd>合成已知 · 日精度</dd></dl></div><div class="inspect-section"><h3>处理边界</h3><p>PROCESSING 只表示合成处理任务已实际进入运行态，不表示 OCR 已成功或可以检索。</p></div>',
         discussion: '<div class="inspect-section"><h3>评论与回复</h3><dl class="facts"><dt>状态</dt><dd>尚未请求 <span class="tech inline">NOT REQUESTED</span></dd><dt>数量</dt><dd>当前无结论；不显示 0</dd></dl></div>',
         media: '<div class="inspect-section"><h3>媒体槽位、字节与副本</h3><div class="slot-list"><div class="slot"><b>01</b><span>正文图片 · 槽位已观察</span><small>来源代次 1</small></div><div class="slot"><b>B</b><span>Blob 已取得 · 校验引用保留</span><small>字节可读</small></div><div class="slot"><b>R</b><span>本地副本可读</span><small>仅获准用途</small></div></div></div><div class="inspect-section"><h3>派生处理</h3><dl class="facts"><dt>图片 OCR</dt><dd>处理中 <span class="tech inline">PROCESSING</span></dd><dt>Job</dt><dd class="tech">job/ocr/synthetic-005</dd><dt>处理版本</dt><dd class="tech">processor/synthetic-v2</dd><dt>开始时间</dt><dd>非运行时间 · 合成</dd><dt>当前派生</dt><dd>尚未形成；不可提前显示 SEARCHABLE</dd></dl></div>',
@@ -365,21 +354,43 @@
       },
       '06': {
         title: '用一张动态记录观察任务转换',
-        summary: 'Live Photo 部分取得：still 已取得，motion 在同一来源组的候选 URI 尝试后失败。',
+        summary: 'Live Photo 部分取得：本次 Package 的槽位级来源观察组内，still 已取得，motion 的精确候选地址尝试失败。',
+        filterTags: ['partial'], preview: ['Live Photo 部分可用', 'STILL ACQUIRED · MOTION FAILED', ''],
+        rowSummary: '合成脱敏摘要：本次 Package 对同一槽位声明 still 与 motion 组件；still 已取得，motion 失败。',
+        meta: ['合成作者 F', '来源发布时间：合成已知', '本次来源组代次 3'],
+        lanes: [['发现',[['可检索','success']]],['详情',[['可检索','success']]],['讨论',[['尚未请求','']]],['作者',[['上下文已观察','info']]],['媒体',[['Live Photo 部分取得','warning'],['still 已取得','success'],['motion 失败','danger']]],['派生',[['OCR 未启用',''],['ASR 未启用','']]]],
+        limitation: '组件由 declared bundle 明确关联；候选是组件内的地址断言，下载尝试必须绑定精确 candidateRef。', limitationTone: '',
         overview: '<div class="inspect-section"><h3>作品字段与来源</h3><dl class="facts"><dt>稳定引用</dt><dd class="tech">WORK-REF-06 · SYNTHETIC</dd><dt>详情</dt><dd>可检索</dd><dt>作者</dt><dd>合成作者 F · 上下文已观察</dd><dt>媒体类型</dt><dd>Live Photo · 两组件</dd></dl></div><div class="inspect-section"><h3>组件边界</h3><p>still 与 motion 各自拥有取得状态；一个组件成功不能把整个 Live Photo 写成完成。</p></div>',
         discussion: '<div class="inspect-section"><h3>评论与回复</h3><dl class="facts"><dt>状态</dt><dd>尚未请求 <span class="tech inline">NOT REQUESTED</span></dd><dt>数量</dt><dd>当前无结论；不显示 0</dd></dl></div>',
-        media: '<div class="inspect-section"><h3>Live Photo 槽位与 Bundle 关系</h3><dl class="facts"><dt>槽位</dt><dd class="tech">slot/live-photo/body/01</dd><dt>Bundle 关系</dt><dd class="tech">still_image ↔ motion_stream · declared pair</dd><dt>组件来源</dt><dd>由组件键与 bundle 声明，不由候选 URI 顺序推断</dd></dl></div><div class="inspect-section"><h3>still_image 组件 · 来源观察组</h3><dl class="facts"><dt>来源组代次</dt><dd>3（合成）</dd><dt>候选 URI A</dt><dd>已脱敏 · 同一 still 来源组的等价地址 · 顺序 1</dd><dt>候选 URI B</dt><dd>已脱敏 · 同一 still 来源组的等价地址 · 顺序 2</dd><dt>取得状态</dt><dd>已取得 <span class="tech inline">ACQUIRED</span></dd></dl></div><div class="inspect-section"><h3>motion_stream 组件 · 来源观察组</h3><dl class="facts"><dt>来源组代次</dt><dd>2（合成）</dd><dt>候选 URI M1</dt><dd>已脱敏 · motion 来源组；取得尝试失败</dd><dt>取得状态</dt><dd>执行失败 <span class="tech inline">FAILED</span></dd></dl></div><div class="inspect-section"><h3>组合结论</h3><p>Live Photo 部分取得 <span class="tech inline">PARTIAL</span>；候选顺序不推断组件，OCR/ASR 均未启用。</p></div>',
-        provenance: '<div class="inspect-section"><h3>媒体生命周期血缘</h3><div class="provenance"><div class="prov-row"><b>Bundle</b><code>bundle/live-photo/synthetic-006</code></div><div class="prov-row"><b>Still origin</b><code>origin-group/still/synthetic-006/g3</code></div><div class="prov-row"><b>Motion origin</b><code>origin-group/motion/synthetic-006/g2</code></div><div class="prov-row"><b>Still attempt</b><code>download/still/synthetic-006</code></div><div class="prov-row"><b>Motion attempt</b><code>download/motion/synthetic-006</code></div><div class="prov-row"><b>Receipt</b><code>partial components retained</code></div></div></div><div class="inspect-section"><h3>限制</h3><p>候选 URI 只在所属组件的同一来源组内表达等价地址；still 成功不覆盖 motion 失败，且不使用远程地址补预览。</p></div>'
+        media: '<div class="inspect-section"><h3>本次 Package 的槽位级来源观察组</h3><dl class="facts"><dt>Package</dt><dd class="tech">package/synthetic-006</dd><dt>槽位</dt><dd class="tech">slot/live-photo/body/01</dd><dt>来源观察组</dt><dd class="tech">origin-group/slot-006/g3</dd><dt>generation</dt><dd>3（合成；仅本次 Package）</dd><dt>observedAt</dt><dd>非运行时间 · SYNTHETIC</dd><dt>声明关系</dt><dd class="tech">bundle/live-photo/synthetic-006 · declared pair</dd></dl></div><div class="inspect-section"><h3>still_image 组件</h3><dl class="facts"><dt>candidateRef</dt><dd class="tech">candidate/still/A</dd><dt>order</dt><dd>1</dd><dt>sourceField</dt><dd class="tech">livePhotoStillUris[0]</dd><dt>observedAt</dt><dd>非运行时间 · SYNTHETIC</dd><dt>expiresAtState</dt><dd class="tech">UNKNOWN</dd><dt>下载尝试</dt><dd class="tech">download/still/synthetic-006 → candidate/still/A → ACQUIRED</dd><dt>备用断言</dt><dd><span class="tech">candidate/still/B</span> · order 2 · <span class="tech">livePhotoStillUris[1]</span> · observedAt SYNTHETIC · expiresAtState KNOWN · NOT_REQUESTED</dd></dl></div><div class="inspect-section"><h3>motion_stream 组件</h3><dl class="facts"><dt>candidateRef</dt><dd class="tech">candidate/motion/M1</dd><dt>order</dt><dd>1</dd><dt>sourceField</dt><dd class="tech">livePhotoMotionUris[0]</dd><dt>observedAt</dt><dd>非运行时间 · SYNTHETIC</dd><dt>expiresAtState</dt><dd class="tech">UNKNOWN</dd><dt>下载尝试</dt><dd class="tech">download/motion/synthetic-006 → candidate/motion/M1 → FAILED</dd></dl></div><div class="inspect-section"><h3>组合结论</h3><p>Live Photo 部分取得 <span class="tech inline">PARTIAL</span>；两个组件均隶属本次同一个槽位来源观察组和 declared bundle。候选顺序不推断组件，OCR/ASR 均未启用。</p></div>',
+        provenance: '<div class="inspect-section"><h3>媒体生命周期血缘</h3><div class="provenance"><div class="prov-row"><b>Package</b><code>package/synthetic-006</code></div><div class="prov-row"><b>Slot origin</b><code>origin-group/slot-006/g3</code></div><div class="prov-row"><b>Bundle</b><code>bundle/live-photo/synthetic-006</code></div><div class="prov-row"><b>Still component</b><code>still_image · candidate/still/A,B</code></div><div class="prov-row"><b>Motion component</b><code>motion_stream · candidate/motion/M1</code></div><div class="prov-row"><b>Still attempt</b><code>download/still/synthetic-006 → candidate/still/A</code></div><div class="prov-row"><b>Motion attempt</b><code>download/motion/synthetic-006 → candidate/motion/M1</code></div><div class="prov-row"><b>Receipt</b><code>partial components retained</code></div></div></div><div class="inspect-section"><h3>边界</h3><p>候选仅是组件内逐地址保留的来源断言；本视图没有把历史代次混入本次 Package。跨代来源只能在独立 history 中另列。still 成功不覆盖 motion 失败，且不使用远程地址补预览。</p></div>'
       }
     };
     const filterLabels = { all: '全部 lane', partial: '部分取得', risk: '风险停止', cleaned: '字节已清理', processing: '处理中' };
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const scrollBehavior = () => reducedMotion.matches ? 'auto' : 'smooth';
+
+    const escapeHTML = (value) => String(value).replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[character]));
+    const renderLane = ([label, state]) => `<span class="lane"${state ? ` data-state="${escapeHTML(state)}"` : ''}><span>${escapeHTML(label)}</span></span>`;
+    const renderWorkRows = () => {
+      workList.innerHTML = Object.entries(scenarioData).map(([id, item]) => {
+        const [previewTitle, previewTech, previewTone] = item.preview;
+        const laneGroups = item.lanes.map(([name, entries]) => `<span class="lane-group"><b>${escapeHTML(name)}</b><span class="lane-list">${entries.map(renderLane).join('')}</span></span>`).join('');
+        const meta = item.meta.map((value) => `<span>${escapeHTML(value)}</span>`).join('');
+        return `<article class="work-row" role="option" tabindex="-1" aria-selected="false" data-item="${id}" data-filter-tags="${item.filterTags.join(' ')}"><span class="preview ${escapeHTML(previewTone)}"><strong>${escapeHTML(previewTitle)}</strong><span class="tech">${escapeHTML(previewTech)}</span></span><span class="identity"><span class="identity-top">XHS · WORK-REF-${id} <span class="tech">SYNTHETIC</span></span><h2>${escapeHTML(item.title)}</h2><p>${escapeHTML(item.rowSummary)}</p><span class="identity-foot">${meta}</span></span><span class="lane-board"><span class="lane-groups">${laneGroups}</span><span class="limitation ${escapeHTML(item.limitationTone)}">${escapeHTML(item.limitation)}</span></span></article>`;
+      }).join('');
+      rows = [...workList.querySelectorAll('.work-row')];
+    };
+
     const renderSelection = (id, shouldScroll = false) => {
-      const copy = itemCopy[id];
+      const copy = scenarioData[id];
       if (!copy) return;
       selectedId = id;
-      rows.forEach((item) => item.setAttribute('aria-selected', String(item.dataset.item === id && !item.hidden)));
+      rows.forEach((item) => {
+        const isSelected = item.dataset.item === id && !item.hidden;
+        item.setAttribute('aria-selected', String(isSelected));
+        item.tabIndex = isSelected ? 0 : -1;
+      });
       document.getElementById('inspector-title').textContent = copy.title;
       document.getElementById('inspector-summary').textContent = copy.summary;
       document.getElementById('inspector-overview').innerHTML = copy.overview;
@@ -392,7 +403,7 @@
       if (shouldScroll && window.matchMedia('(max-width: 900px)').matches) inspector.scrollIntoView({ behavior: scrollBehavior(), block: 'start' });
     };
     const clearSelectionSurface = () => {
-      rows.forEach((item) => item.setAttribute('aria-selected', 'false'));
+      rows.forEach((item) => { item.setAttribute('aria-selected', 'false'); item.tabIndex = -1; });
       document.getElementById('context-selection').textContent = '—';
       document.getElementById('inspector-title').textContent = '';
       document.getElementById('inspector-summary').textContent = '';
@@ -410,6 +421,7 @@
       rows.forEach((row) => {
         const matches = filter === 'all' || row.dataset.filterTags.split(' ').includes(filter);
         row.hidden = !matches;
+        row.tabIndex = -1;
         if (matches) visibleRows.push(row);
       });
       const count = visibleRows.length;
@@ -442,9 +454,7 @@
         : '<span><b>当前未读取任何作品材料</b> · 结果和 Inspector 均不可用于判断，不回退旧系统或远程来源</span><span class="tech">READ PROJECTION UNAVAILABLE · SYNTHETIC</span>';
     };
 
-    scenarios.forEach((button) => button.addEventListener('click', () => setScenario(button.dataset.scenario)));
-    filters.forEach((button) => button.addEventListener('click', () => applyFilter(button.dataset.filter)));
-    rows.forEach((row) => {
+    const wireWorkRows = () => rows.forEach((row) => {
       row.addEventListener('click', () => renderSelection(row.dataset.item, true));
       row.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -453,26 +463,55 @@
         }
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
           event.preventDefault();
-          const visibleRows = [...rows].filter((item) => !item.hidden);
+          const visibleRows = rows.filter((item) => !item.hidden);
           const index = visibleRows.indexOf(row);
           const delta = event.key === 'ArrowDown' ? 1 : -1;
           const next = visibleRows[(index + delta + visibleRows.length) % visibleRows.length];
           if (next) {
-            next.focus();
             renderSelection(next.dataset.item);
+            next.focus();
           }
         }
       });
     });
+
+    scenarios.forEach((button) => button.addEventListener('click', () => setScenario(button.dataset.scenario)));
+    filters.forEach((button) => button.addEventListener('click', () => applyFilter(button.dataset.filter)));
     const tabs = document.querySelectorAll('[data-tab]');
-    tabs.forEach((tab) => tab.addEventListener('click', () => {
-      tabs.forEach((item) => item.setAttribute('aria-selected', String(item === tab)));
+    const activateTab = (tab, shouldFocus = false) => {
+      tabs.forEach((item) => {
+        const isSelected = item === tab;
+        item.setAttribute('aria-selected', String(isSelected));
+        item.tabIndex = isSelected ? 0 : -1;
+      });
       document.querySelectorAll('[data-panel]').forEach((panel) => panel.classList.toggle('is-active', panel.dataset.panel === tab.dataset.tab));
-    }));
+      if (shouldFocus) tab.focus();
+    };
+    tabs.forEach((tab) => {
+      tab.addEventListener('click', () => activateTab(tab));
+      tab.addEventListener('keydown', (event) => {
+        const tabArray = [...tabs];
+        const currentIndex = tabArray.indexOf(tab);
+        let nextIndex = null;
+        if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabArray.length;
+        if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabArray.length) % tabArray.length;
+        if (event.key === 'Home') nextIndex = 0;
+        if (event.key === 'End') nextIndex = tabArray.length - 1;
+        if (nextIndex !== null) {
+          event.preventDefault();
+          activateTab(tabArray[nextIndex], true);
+        }
+      });
+    });
     document.getElementById('back-to-results').addEventListener('click', () => {
       const selectedRow = document.querySelector(`.work-row[data-item="${selectedId}"]`);
-      if (selectedRow) selectedRow.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
+      if (selectedRow) {
+        selectedRow.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
+        requestAnimationFrame(() => selectedRow.focus({ preventScroll: true }));
+      }
     });
+    renderWorkRows();
+    wireWorkRows();
     setScenario('results');
   </script>
 </body>

@@ -177,13 +177,25 @@ item:
 inspector:
   overview fields + sourceRefs
   commentThreads + commentsCoverage + repliesCoverage
-  mediaSlots[] + origin generation + component/bytes/replica/derivative/disposition states
+  mediaSlots[]:
+    slotRef / purpose / displayOrdinal / currentCoverage
+    currentOriginGroup:
+      originGroupRef / packageRef / generation / observedAt
+      declaredBundle: bundleRef / bundleKind
+      components[]:
+        componentRef / componentKind / state
+        candidateAssertions[]:
+          candidateRef / order / sourceField / observedAt / expiresAtState
+        downloadAttempts[]:
+          downloadAttemptRef / candidateRef / originGroupRef / generation / state / failureReason / startedAt / endedAt
+    originHistory[]: originGroupRef / packageRef / generation / observedAt / historyState
+    bytes / replica / derivative / disposition states
   derivatives[] + processorVersion + source location
   provenance: target/task/attempt/package/receipt/producer/station-account lens/coverage/checkpoint
   permissions + displayPolicy + limitations
 ```
 
-计数必须带 value state。`null/UNKNOWN`、`0/KNOWN` 与 `N/A` 不得共用一个空值。所有列表和 Inspector 值均来自受控 read model，不允许 UI 自行聚合原始业务表或 Package JSON。
+计数必须带 value state。`null/UNKNOWN`、`0/KNOWN` 与 `N/A` 不得共用一个空值。所有列表和 Inspector 值均来自受控 read model，不允许 UI 自行聚合原始业务表或 Package JSON。普通页面只读取脱敏 `candidateRef` 和上述地址断言元数据，不读取或显示原始 URI。一次 Package 对同一 slot 只形成一个槽位级来源观察组；declared bundle、still/motion 组件和组件内 candidate assertions 都挂在该父级下。下载尝试必须同时绑定该来源观察组/generation 与精确 `candidateRef`。跨代来源只能进入明确标识的 `originHistory[]`，不得与本次 Package 的当前来源组摊平混排。
 
 ## 7. 状态词典
 
@@ -295,7 +307,7 @@ inspector:
 3. **字节已清理**：视频 bytes 为 `BYTES_CLEANED`；ASR 仍可检索；来源 Blob 和清理状态可追溯。
 4. **未知与未请求**：作者/发布时间 unknown；媒体 not requested；无评论记录不显示 0。
 5. **处理中**：只有处理器实际运行才显示 `PROCESSING`；原始字节与本地副本状态、Job、处理版本和开始时间可核验；当前不得提前显示 `SEARCHABLE`。该场景是合成目标状态，不表示当前 provider 已启用。
-6. **多候选来源与 Live Photo 部分取得**：同一组件、同一来源观察组可保留多个脱敏 candidate URI，表示等价地址断言；`still_image` 与 `motion_stream` 是独立组件，以显式 Bundle 关系（pair/bundle）关联并分别显示取得/失败，整体为 `PARTIAL`。候选顺序不推断组件，也不暴露原始 URL。
+6. **多候选来源与 Live Photo 部分取得**：本次 Package 对同一 Live Photo slot 形成一个槽位级来源观察组/generation，再由 declared Bundle 关联独立的 `still_image` 与 `motion_stream` 组件。每个组件可保留多个脱敏地址断言，并逐条展示 `candidateRef/order/sourceField/observedAt/expiresAtState`；下载尝试绑定精确 `candidateRef`。示例分别显示 still 取得、motion 失败、整体 `PARTIAL`。候选顺序不推断组件，不暴露原始 URL，也不把历史代次伪装成本次 Package 的并列来源组。
 7. **读取成功但无匹配**：说明当前 query scope、排除/限制，不外推平台没有内容；Inspector 与选择状态同时清空。
 8. **读投影失败**：明确未读取材料、无远程/旧系统 fallback、建议重试本机读取；Inspector、结果与选择状态互斥，不残留上一作品。
 9. **筛选回执**：全部、部分取得、风险停止、字节已清理和处理中均真实改变可见作品、结果数量、当前选择与 read receipt；不能使用无行为的 enabled 按钮。

@@ -183,5 +183,5 @@ Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵�
 
 - **来源与事项**：Issue #85、`PAGE-EVIDENCE-001` 与 `MEDIA-RECON-001`。本项冻结作品级材料集合、lane 摘要与 embedded L2 Inspector 的产品/视觉合同，并提供合成静态高保真参考；当前 discovery-only 运行时不在本卡修改范围。
 - **LIDS 组合**：继续采用 L1 `Corpus Explorer` + embedded L2 Inspector、216px 导轨与 440px Inspector 基线；直接消费现有 `lids_tokens.css`，没有新增或重声明全局 `--lgi-*` token。lane strip 是 page-local candidate，不晋升 CMP。
-- **状态诚实性**：分别呈现 `PARTIAL`、`RISK_CONTROL`、`WITHDRAWN_OR_RESTRICTED`、`PROCESSING`、`BYTES_CLEANED`、`NOT_ENABLED`、`NOT_REQUESTED`、`UNKNOWN`、无匹配结果和读取错误；同一组件来源组的候选地址不冒充 Live Photo 组件，still/motion 由显式 Bundle 关系分责。不生成总体完整度，不把 slot 当 bytes，不把未知当零或成功。
+- **状态诚实性**：分别呈现 `PARTIAL`、`RISK_CONTROL`、`WITHDRAWN_OR_RESTRICTED`、`PROCESSING`、`BYTES_CLEANED`、`NOT_ENABLED`、`NOT_REQUESTED`、`UNKNOWN`、无匹配结果和读取错误；一次 Package 的同一 slot 只有一个来源观察组/generation，declared Bundle 下的 still/motion 组件与逐地址 candidate assertions 分责，下载尝试绑定精确 `candidateRef`，历史代次不混入当前来源组。不生成总体完整度，不把 slot 当 bytes，不把未知当零或成功。
 - **验证与边界**：Chrome 桌面/窄屏渲染确认无横向溢出并验证结果/空态/错误态、作品选择和 Inspector tab；专用静态 verifier 检查合成标记、状态、Token 消费、无外部请求与 reduced motion。它不证明运行时、真实材料、媒体取得、OCR/ASR、数据库、插件或 Mog 验收。

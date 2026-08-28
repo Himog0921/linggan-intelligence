@@ -28,9 +28,14 @@ required_terms=(
   "处理版本"
   "Checkpoint"
   "Live Photo"
-  "候选 URI"
-  "Bundle 关系"
+  "地址断言"
+  "declared Bundle"
   "候选顺序不推断组件"
+  "槽位级来源观察组"
+  "candidateRef"
+  "sourceField"
+  "observedAt"
+  "expiresAtState"
 )
 
 for term in "${required_terms[@]}"; do
@@ -50,6 +55,9 @@ rg -q --fixed-strings '.results[hidden], .work-row[hidden], .inspector[hidden] {
 rg -q --fixed-strings "document.getElementById('inspector-overview').replaceChildren()" "$reference"
 rg -q --fixed-strings "shell.dataset.inspector = 'false'" "$reference"
 rg -q --fixed-strings 'const applyFilter = (filter)' "$reference"
+rg -q --fixed-strings 'const scenarioData = {' "$reference"
+rg -q --fixed-strings 'const renderWorkRows = () =>' "$reference"
+rg -q --fixed-strings '<div class="work-list" id="work-list" role="listbox" aria-label="来源作品材料集合"></div>' "$reference"
 rg -q --fixed-strings "row.hidden = !matches" "$reference"
 rg -q --fixed-strings "filters.forEach((button) => button.addEventListener('click', () => applyFilter(button.dataset.filter)))" "$reference"
 rg -q --fixed-strings "document.getElementById('context-count').textContent = String(count)" "$reference"
@@ -59,6 +67,25 @@ rg -q --fixed-strings 'id="inspector-overview" role="tabpanel" aria-labelledby="
 rg -q --fixed-strings 'id="inspector-discussion" role="tabpanel" aria-labelledby="tab-discussion"></section>' "$reference"
 rg -q --fixed-strings 'id="inspector-media" role="tabpanel" aria-labelledby="tab-media"></section>' "$reference"
 rg -q --fixed-strings 'id="inspector-provenance" role="tabpanel" aria-labelledby="tab-provenance"></section>' "$reference"
+rg -q --fixed-strings 'item.tabIndex = isSelected ? 0 : -1' "$reference"
+rg -q --fixed-strings "if (event.key === 'ArrowRight')" "$reference"
+rg -q --fixed-strings "if (event.key === 'ArrowLeft')" "$reference"
+rg -q --fixed-strings "if (event.key === 'Home')" "$reference"
+rg -q --fixed-strings "if (event.key === 'End')" "$reference"
+rg -q --fixed-strings 'selectedRow.focus({ preventScroll: true })' "$reference"
+rg -q --fixed-strings '.work-row:not([aria-selected="true"]):hover' "$reference"
+rg -q --fixed-strings '.scenario-control button:not([aria-pressed="true"]):hover' "$reference"
+rg -q --fixed-strings 'origin-group/slot-006/g3' "$reference"
+rg -q --fixed-strings 'download/still/synthetic-006 → candidate/still/A' "$reference"
+rg -q --fixed-strings 'download/motion/synthetic-006 → candidate/motion/M1' "$reference"
+
+if rg -q --fixed-strings 'const itemCopy' "$reference" ||
+   rg -q --fixed-strings 'origin-group/still/synthetic-006' "$reference" ||
+   rg -q --fixed-strings 'origin-group/motion/synthetic-006' "$reference" ||
+   rg -q --fixed-strings '等价地址' "$reference"; then
+  echo "reference must use one scenario source and one current slot origin group; candidate assertions are not inferred equivalents" >&2
+  exit 1
+fi
 
 for filter in all partial risk cleaned processing; do
   rg -q --fixed-strings "data-filter=\"$filter\"" "$reference"
