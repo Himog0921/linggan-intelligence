@@ -25,16 +25,17 @@ use linggan_evidence::{
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome,
     admit_media_blob, begin_media_upload, check_in_installation, claim_installation,
     claim_media_upload_finalize, close_claim_window, complete_lease_for_task,
-    complete_media_upload, create_manual_task, create_producer_task, decide_dispatch,
-    dispatch_schema_is_ready, enrich_target_from_author_profile, grant_authorization,
-    ingest_discovery_package, issue_work_order_lease, list_targets, list_targets_in_state,
-    local_discovery_schema_is_ready, local_producer_schema_is_ready, open_claim_window,
-    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_archive_completeness,
-    read_discovery_library, read_local_media_blob, read_media_upload_session, read_runtime_library,
-    read_station_overview, record_media_download_failure, record_media_upload_chunk,
-    register_station, release_media_upload_finalize, request_and_admit, retire_station,
-    set_target_monitoring, start_local_attempt, start_producer_attempt, station_schema_is_ready,
-    store_pending_target, submit_local_package, submit_producer_package, target_monitoring_enabled,
+    complete_media_upload, count_targets, create_manual_task, create_producer_task,
+    decide_dispatch, dispatch_schema_is_ready, enrich_target_from_author_profile,
+    grant_authorization, ingest_discovery_package, issue_work_order_lease, list_targets,
+    list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
+    open_claim_window, producer_runtime_has_packages, producer_runtime_schema_is_ready,
+    read_archive_completeness, read_discovery_library, read_local_media_blob,
+    read_media_upload_session, read_runtime_library, read_station_overview,
+    record_media_download_failure, record_media_upload_chunk, register_station,
+    release_media_upload_finalize, request_and_admit, retire_station, set_target_monitoring,
+    start_local_attempt, start_producer_attempt, station_schema_is_ready, store_pending_target,
+    submit_local_package, submit_producer_package, target_monitoring_enabled,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -1800,11 +1801,17 @@ async fn collection_targets(
     State(state): State<LocalWebState>,
     Query(params): Query<CollectionParams>,
 ) -> Html<String> {
+    // 计数不受当前筛选影响：tab 上的数字要回答「切过去有多少」。
+    let counts = match state.database.database() {
+        Some(database) => count_targets(database).await.ok(),
+        None => None,
+    };
     let base = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
         params.drawer.as_deref(),
         params.filter.as_deref(),
+        counts.as_ref(),
     );
     // Without a database the page still renders its honest empty state rather than an error:
     // "we cannot read targets right now" and "there are no targets" are different claims, and
@@ -1821,7 +1828,6 @@ async fn collection_targets(
         Ok(targets) => Html(collection_targets_view::render_stored_targets(
             &base,
             &targets,
-            params.filter.as_deref(),
             &completeness,
             params.error.as_deref(),
         )),
@@ -1835,6 +1841,7 @@ async fn collection_operations(Query(params): Query<CollectionParams>) -> Html<S
         collection::OperationsMode::parse(params.mode.as_deref()),
         None,
         None,
+        None,
     ))
 }
 
@@ -1844,6 +1851,7 @@ async fn collection_attention() -> Html<String> {
         collection::OperationsMode::Now,
         None,
         None,
+        None,
     ))
 }
 
@@ -1851,6 +1859,7 @@ async fn collection_tasks() -> Html<String> {
     Html(collection::render(
         collection::Section::Tasks,
         collection::OperationsMode::Now,
+        None,
         None,
         None,
     ))
@@ -1869,6 +1878,7 @@ async fn collection_runtime(
     let base = collection::render(
         collection::Section::Runtime,
         collection::OperationsMode::Now,
+        None,
         None,
         None,
     );

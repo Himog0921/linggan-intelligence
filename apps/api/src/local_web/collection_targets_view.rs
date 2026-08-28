@@ -23,7 +23,6 @@ const EMPTY_STATE_CLOSE: &str = "</section>";
 pub fn render_stored_targets(
     base: &str,
     targets: &[ObservationTarget],
-    filter: Option<&str>,
     completeness: &HashMap<String, ArchiveCompleteness>,
     error: Option<&str>,
 ) -> String {
@@ -51,20 +50,15 @@ pub fn render_stored_targets(
     // 「档案健康度」与「状态」分开，因为「有没有资料」和「在不在监控」是两件独立的事。
     let list = format!(
         r#"<section class="c-sources">
-              <div class="c-sources-bar">
-                <div class="c-sources-count"><b>{count}</b><span>个来源</span></div>
-                <div class="c-sources-filters">{filters}</div>
-              </div>
               {failure}
-              <p class="c-sources-note">这里是「我在长期看谁」。加入观察只写本机记录，不访问任何平台；真正开始采集要另走一遍申请 → 授权 → 准入 → 工单 → 租约。</p>
               <div class="c-src-head">
                 <div>编号</div><div>博主信息</div><div>平台 / 分组</div>
-                <div>状态</div><div>档案健康度</div><div>更新时间</div><div>操作</div>
+                <div>状态</div><div>档案健康度</div><div>更新时间</div>
+                <div class="c-src-head-count">{count} 个来源</div>
               </div>
               <div class="c-src-rows">{rows}</div>
             </section>"#,
         count = targets.len(),
-        filters = filter_chips(filter),
         failure = failure_markup(error),
     );
     format!(
@@ -106,34 +100,6 @@ fn failure_markup(error: Option<&str>) -> String {
         r#"<p class="c-src-failure"><b>没有完成</b>{explanation}</p>"#,
         explanation = escape(explanation),
     )
-}
-
-/// 筛选。与内容工作台同一组维度：全部 / 平台上的类型 / 生命周期。
-fn filter_chips(active: Option<&str>) -> String {
-    const FILTERS: &[(&str, &str)] = &[
-        ("", "全部来源"),
-        ("creator", "创作者"),
-        ("keyword", "关键词"),
-        ("archiving", "建档中"),
-        ("monitoring", "已建档"),
-    ];
-    FILTERS
-        .iter()
-        .map(|(value, label)| {
-            let current = active.unwrap_or("");
-            let class = if current == *value {
-                " c-src-chip-on"
-            } else {
-                ""
-            };
-            let href = if value.is_empty() {
-                "/collection/targets".to_owned()
-            } else {
-                format!("/collection/targets?filter={value}")
-            };
-            format!(r#"<a class="c-src-chip{class}" href="{href}">{label}</a>"#)
-        })
-        .collect()
 }
 
 /// 一行来源。
@@ -394,7 +360,7 @@ mod tests {
     fn an_empty_list_leaves_the_honest_empty_state_alone() {
         let base = format!("before{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}after");
         assert_eq!(
-            render_stored_targets(&base, &[], None, &HashMap::new(), None),
+            render_stored_targets(&base, &[], &HashMap::new(), None),
             base
         );
     }
@@ -405,7 +371,6 @@ mod tests {
         let html = render_stored_targets(
             &base,
             &[target("creator", Some("孩悦"))],
-            None,
             &HashMap::new(),
             None,
         );
@@ -415,8 +380,9 @@ mod tests {
         // **列表不得声称比「已保存」更多**。
         assert!(html.contains("尚未建档"));
         assert!(html.contains("未开启巡检"));
-        // 「加进来」与「开始采集」必须一直分得清。
-        assert!(html.contains("不访问任何平台"));
+        // 「加进来」与「开始采集」必须一直分得清——那句说明已从列表上方移除（与页面
+        // 自带的 tab 条重复），改由状态列的「尚未建档 / 未开启巡检」承担同一件事。
+        assert!(html.contains("尚未建档"));
         // 一个待决目标不得看起来像已经建过档或正在跑。
         //
         // 断言盯住**状态行的标记形态**而不是任意出现：「已建档」也是一个合法的筛选页签
@@ -428,13 +394,7 @@ mod tests {
     #[test]
     fn a_target_without_a_name_shows_its_identity_rather_than_an_invented_one() {
         let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
-        let html = render_stored_targets(
-            &base,
-            &[target("keyword", None)],
-            None,
-            &HashMap::new(),
-            None,
-        );
+        let html = render_stored_targets(&base, &[target("keyword", None)], &HashMap::new(), None);
         assert!(html.contains("5ebe6d21"));
         assert!(!html.contains("未命名"));
     }
@@ -445,7 +405,6 @@ mod tests {
         let html = render_stored_targets(
             &base,
             &[target("creator", Some("<script>x</script>"))],
-            None,
             &HashMap::new(),
             None,
         );

@@ -12,6 +12,7 @@
 //! substitutes a zero, a percentage, or a prototype figure for the missing fact.
 
 use super::shell::{PrimarySurface, global_header};
+use linggan_evidence::TargetCounts;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Section {
@@ -595,15 +596,27 @@ fn head_readout(section: Section) -> String {
 ///
 /// 这些页签此前一律 disabled，理由是「没有目标就没有可筛的」。但目标现在真的能建了，
 /// 继续禁用就变成了「有东西却不让看」。改为真链接：筛选只改读取范围，不消耗任何平台访问。
-fn target_filter_tabs(active: Option<&str>) -> String {
-    const FILTERS: &[(&str, &str)] = &[
-        ("", "全部"),
-        ("creator", "创作者"),
-        ("keyword", "关键词"),
-        ("archiving", "建档中"),
-        ("monitoring", "巡逻中"),
-    ];
-    FILTERS
+fn target_filter_tabs(active: Option<&str>, counts: Option<&TargetCounts>) -> String {
+    // 计数跟着标签走（内容工作台：`全部来源 88 / 博主 84 / 关键词 4`），而不是在列表
+    // 上方再摆一排带计数的按钮——那会让同一组筛选在一屏里出现两遍。
+    let labels: Vec<(&str, String)> = match counts {
+        Some(counts) => vec![
+            ("", format!("全部来源 {}", counts.total)),
+            ("creator", format!("创作者 {}", counts.creator)),
+            ("keyword", format!("关键词 {}", counts.keyword)),
+            ("archiving", format!("建档中 {}", counts.archiving)),
+            ("monitoring", format!("巡逻中 {}", counts.monitoring)),
+        ],
+        // 数不出来时不写 0——0 看起来像一个已知结论，而事实是没读到。
+        None => vec![
+            ("", "全部来源".to_owned()),
+            ("creator", "创作者".to_owned()),
+            ("keyword", "关键词".to_owned()),
+            ("archiving", "建档中".to_owned()),
+            ("monitoring", "巡逻中".to_owned()),
+        ],
+    };
+    labels
         .iter()
         .map(|(value, label)| {
             let current = active.unwrap_or("");
@@ -622,7 +635,12 @@ fn target_filter_tabs(active: Option<&str>) -> String {
         .collect()
 }
 
-fn second_bar(section: Section, mode: OperationsMode, filter: Option<&str>) -> String {
+fn second_bar(
+    section: Section,
+    mode: OperationsMode,
+    filter: Option<&str>,
+    counts: Option<&TargetCounts>,
+) -> String {
     match section {
         Section::Targets => format!(
             r#"<div class="c-toolbar">
@@ -639,7 +657,7 @@ fn second_bar(section: Section, mode: OperationsMode, filter: Option<&str>) -> S
             </form>
           </div>
         </div>"#,
-            target_filters = target_filter_tabs(filter),
+            target_filters = target_filter_tabs(filter, counts),
         ),
         Section::Operations => {
             let mut tabs = String::new();
@@ -691,6 +709,7 @@ pub fn render(
     mode: OperationsMode,
     drawer: Option<&str>,
     filter: Option<&str>,
+    counts: Option<&TargetCounts>,
 ) -> String {
     let entry = meta(section);
     // DESIGN-003 header reclaim: this surface's own counts ride in the context row next to
@@ -733,7 +752,7 @@ pub fn render(
 "#,
         title = entry.title,
         rail = rail(section),
-        second_bar = second_bar(section, mode, filter),
+        second_bar = second_bar(section, mode, filter, counts),
         body = body(section, mode, drawer),
     )
 }

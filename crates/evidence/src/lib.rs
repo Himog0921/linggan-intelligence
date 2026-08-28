@@ -23,8 +23,9 @@ pub use acquisition_chain::{
 };
 pub use archive_completeness::{ArchiveCompleteness, read_archive_completeness};
 pub use collection_target::{
-    CollectionTargetError, ObservationTarget, StoreOutcome, collection_target_schema_is_ready,
-    list_targets, list_targets_in_state, store_pending_target, transition_target,
+    CollectionTargetError, ObservationTarget, StoreOutcome, TargetCounts,
+    collection_target_schema_is_ready, count_targets, list_targets, list_targets_in_state,
+    store_pending_target, transition_target,
 };
 pub use dispatch::{DispatchDecision, DispatchError, decide_dispatch, dispatch_schema_is_ready};
 pub use execution_station::{

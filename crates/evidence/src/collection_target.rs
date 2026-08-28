@@ -134,6 +134,44 @@ async fn read_target_by_identity(
 }
 
 /// Targets in one lifecycle state, newest first.
+/// 各筛选维度下的来源数量。
+///
+/// 放进 tab 标签里（内容工作台的做法：`全部来源 88 / 博主 84 / 关键词 4`），而不是在
+/// 列表上方再摆一排带计数的按钮——那会让同一组筛选在一屏里出现两遍。
+#[derive(Debug, Default, Clone)]
+pub struct TargetCounts {
+    pub total: i64,
+    pub creator: i64,
+    pub keyword: i64,
+    pub archiving: i64,
+    pub monitoring: i64,
+}
+
+/// 数各维度的来源。**不受当前筛选影响**：tab 上的数字要回答「切过去有多少」，
+/// 用筛选后的结果去数，每个 tab 都会显示当前这一档的数量，那毫无意义。
+pub async fn count_targets(database: &Database) -> Result<TargetCounts, CollectionTargetError> {
+    if !collection_target_schema_is_ready(database).await? {
+        return Ok(TargetCounts::default());
+    }
+    let row: (i64, i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT count(*), \
+                count(*) FILTER (WHERE target_kind = 'creator'), \
+                count(*) FILTER (WHERE target_kind = 'keyword'), \
+                count(*) FILTER (WHERE lifecycle_state = 'archiving'), \
+                count(*) FILTER (WHERE lifecycle_state = 'monitoring') \
+         FROM collection_observation_target",
+    )
+    .fetch_one(database.pool())
+    .await?;
+    Ok(TargetCounts {
+        total: row.0,
+        creator: row.1,
+        keyword: row.2,
+        archiving: row.3,
+        monitoring: row.4,
+    })
+}
+
 /// 列出观察目标，可按类型或生命周期筛选。
 ///
 /// **不按状态硬筛**：观察目标列表就是「我在长期看谁」，一个已建档、正在巡检的博主当然
