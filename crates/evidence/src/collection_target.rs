@@ -156,6 +156,33 @@ pub struct TargetCounts {
     pub monitoring: i64,
 }
 
+/// 按引用读一个观察目标。
+///
+/// 抽屉必须用它，**不能从当前列表里找**：列表是筛过的，一个被筛掉的目标会让抽屉说
+/// 「未找到」——而它其实好好地在库里。那是在撒谎，且人无从判断是链接失效还是筛选挡住。
+pub async fn read_target(
+    database: &Database,
+    target_ref: Uuid,
+) -> Result<Option<ObservationTarget>, CollectionTargetError> {
+    if !collection_target_schema_is_ready(database).await? {
+        return Ok(None);
+    }
+    let row: Option<ListedTargetRow> = sqlx::query_as(
+        "SELECT target_ref, platform, target_kind, identity_key, display_name, identity_facts, \
+                source, lifecycle_state, first_stored_at::text, monitoring_enabled, group_name, \
+                to_char(last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
+                CASE WHEN monitoring_enabled AND last_patrol_dispatched_at IS NOT NULL \
+                     THEN to_char(last_patrol_dispatched_at \
+                                  + make_interval(secs => patrol_interval_seconds), \
+                                  'MM-DD HH24:MI') END \
+         FROM collection_observation_target WHERE target_ref = $1",
+    )
+    .bind(target_ref)
+    .fetch_optional(database.pool())
+    .await?;
+    Ok(row.map(listed_target))
+}
+
 /// 数各维度的来源。**不受当前筛选影响**：tab 上的数字要回答「切过去有多少」，
 /// 用筛选后的结果去数，每个 tab 都会显示当前这一档的数量，那毫无意义。
 pub async fn count_targets(database: &Database) -> Result<TargetCounts, CollectionTargetError> {
@@ -219,22 +246,24 @@ pub async fn list_targets(
     .bind(limit)
     .fetch_all(database.pool())
     .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| ObservationTarget {
-            monitoring_enabled: row.9,
-            group_name: row.10,
-            last_patrol_dispatched_at: row.11,
-            next_patrol_at: row.12,
-            ..ObservationTarget::from((
-                row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8,
-            ))
-        })
-        .collect())
+    Ok(rows.into_iter().map(listed_target).collect())
 }
 
 /// 列表比其它查询多读一列巡检开关，因此单独一个行类型——把它加进共用的 `TargetRow`
 /// 会打断另外两个只选九列的查询。
+/// 列表行转对象。列表与单条读取共用它——两处各写一遍，迟早会有一处漏掉新字段。
+fn listed_target(row: ListedTargetRow) -> ObservationTarget {
+    ObservationTarget {
+        monitoring_enabled: row.9,
+        group_name: row.10,
+        last_patrol_dispatched_at: row.11,
+        next_patrol_at: row.12,
+        ..ObservationTarget::from((
+            row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8,
+        ))
+    }
+}
+
 type ListedTargetRow = (
     Uuid,
     String,

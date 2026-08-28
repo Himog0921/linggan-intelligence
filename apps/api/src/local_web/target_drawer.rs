@@ -23,7 +23,7 @@ const TABS: &[(&str, &str)] = &[
 
 /// 渲染抽屉。`drawer` 为空时整块不渲染——没有选中目标时不该有一个空壳挂在那里。
 pub fn render(
-    targets: &[ObservationTarget],
+    target: Option<&ObservationTarget>,
     completeness: &std::collections::HashMap<String, ArchiveCompleteness>,
     drawer: Option<&str>,
     active_tab: Option<&str>,
@@ -32,10 +32,10 @@ pub fn render(
         return String::new();
     };
     // 找不到就如实说找不到，而不是静默关掉抽屉——链接失效与「我没点开」是两回事。
-    let Some(target) = targets
-        .iter()
-        .find(|target| target.target_ref.to_string() == drawer)
-    else {
+    //
+    // 目标由调用方**独立查询**得到，不从当前列表里找：列表是筛过的，一个被筛掉的目标
+    // 会让这里说「未找到」，而它其实好好地在库里——那是在撒谎。
+    let Some(target) = target else {
         return format!(
             r#"<aside class="c-dw" aria-label="观察目标工作区">
                  <div class="c-dw-head">

@@ -32,7 +32,7 @@ use linggan_evidence::{
     list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
     open_claim_window, producer_runtime_has_packages, producer_runtime_schema_is_ready,
     read_archive_completeness, read_discovery_library, read_local_media_blob,
-    read_media_upload_session, read_runtime_library, read_station_overview,
+    read_media_upload_session, read_runtime_library, read_station_overview, read_target,
     record_media_download_failure, record_media_upload_chunk, register_station,
     release_media_upload_finalize, request_and_admit, retire_station, set_group_for_many,
     set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
@@ -1830,6 +1830,15 @@ async fn collection_targets(
     let completeness = read_archive_completeness(database, linggan_contracts::OPEN_PLATFORM)
         .await
         .unwrap_or_default();
+    // 抽屉独立查目标，不从筛过的列表里找——被筛掉的目标不该显示成「未找到」。
+    let drawer_target = match params
+        .drawer
+        .as_deref()
+        .and_then(|value| uuid::Uuid::parse_str(value).ok())
+    {
+        Some(target_ref) => read_target(database, target_ref).await.ok().flatten(),
+        None => None,
+    };
     match list_targets(database, params.filter.as_deref(), 200).await {
         Ok(targets) => {
             let list = collection_targets_view::render_stored_targets(
@@ -1839,7 +1848,7 @@ async fn collection_targets(
                 params.error.as_deref(),
             );
             let drawer = target_drawer::render(
-                &targets,
+                drawer_target.as_ref(),
                 &completeness,
                 params.drawer.as_deref(),
                 params.dtab.as_deref(),
@@ -2348,24 +2357,49 @@ fn parse_form_pairs(body: &[u8]) -> Vec<(String, String)> {
 }
 
 /// 表单编码把空格写成 `+`，其余非 ASCII 写成 `%XX`。
+///
+/// **全程按字节做，不对字符串切片**。此前用 `&raw[index + 1..index + 3]` 取那两位十六
+/// 进制，而 `index` 是字节下标——一个裸 `%` 后面跟中文（比如分组名写成 `%中文`）就会
+/// 切在 UTF-8 字符中间，直接 panic 掉整个请求。这不是理论风险：分组名是自由文本。
 fn percent_decode(value: &str) -> String {
-    let raw = value.replace('+', " ");
-    let bytes = raw.as_bytes();
+    let bytes = value.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
     let mut index = 0;
     while index < bytes.len() {
-        if bytes[index] == b'%'
-            && index + 2 < bytes.len()
-            && let Ok(byte) = u8::from_str_radix(&raw[index + 1..index + 3], 16)
-        {
-            out.push(byte);
-            index += 3;
-            continue;
+        match bytes[index] {
+            b'+' => {
+                out.push(b' ');
+                index += 1;
+            }
+            b'%' if index + 2 < bytes.len() => {
+                match (hex_value(bytes[index + 1]), hex_value(bytes[index + 2])) {
+                    (Some(high), Some(low)) => {
+                        out.push(high << 4 | low);
+                        index += 3;
+                    }
+                    // 不是合法的 %XX 就当普通字符原样留下，而不是丢掉它。
+                    _ => {
+                        out.push(bytes[index]);
+                        index += 1;
+                    }
+                }
+            }
+            byte => {
+                out.push(byte);
+                index += 1;
+            }
         }
-        out.push(bytes[index]);
-        index += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 async fn collection_targets_batch(State(state): State<LocalWebState>, body: Bytes) -> Redirect {
