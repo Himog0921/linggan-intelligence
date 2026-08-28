@@ -436,6 +436,9 @@ pub async fn read_local_media_blob(
     database: &Database,
     sha256: &str,
 ) -> Result<Option<(String, String)>, sqlx::Error> {
+    if !crate::material_disposition::blob_is_readable(database, sha256).await? {
+        return Ok(None);
+    }
     sqlx::query("SELECT mime_type,storage_key FROM linggan_media_blob WHERE sha256 = $1")
         .bind(sha256)
         .fetch_optional(database.pool())
@@ -756,16 +759,23 @@ pub async fn submit_producer_package(
         .bind(package.coverage()).bind(package.checkpoint()).bind(package.raw())
         .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
     // 任务给的篇数上限必须在接纳时执行，而不只是在页面上显示。
-    let maximum_quota: Option<i32> = sqlx::query_scalar(
-        "SELECT (task_spec->>'maximumQuota')::integer FROM linggan_runtime_task WHERE task_id = $1",
-    )
-    .bind(submission.task_id())
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)?
-    .flatten();
-    insert_record_dispositions(&mut tx, package, maximum_quota).await?;
-    crate::material_admission::insert_typed_materials(&mut tx, package).await?;
+    let task_spec: Value =
+        sqlx::query_scalar("SELECT task_spec FROM linggan_runtime_task WHERE task_id = $1")
+            .bind(submission.task_id())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?
+            .ok_or(ProducerRuntimeError::RoutingNotFound)?;
+    let maximum_quota = task_spec
+        .get("maximumQuota")
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok());
+    let task_binding_valid =
+        crate::material_contract_validation::task_package_binding_valid(&task_spec, package);
+    insert_record_dispositions(&mut tx, package, maximum_quota, task_binding_valid).await?;
+    if task_binding_valid {
+        crate::material_admission::insert_typed_materials(&mut tx, package).await?;
+    }
     let receipt_ref = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_runtime_submission_receipt (submission_id,task_id,attempt_id,producer_instance_id,package_hash,package_ref,receipt_ref) VALUES ($1,$2,$3,$4,$5,$6,$7)")
         .bind(submission.submission_id()).bind(submission.task_id()).bind(submission.attempt_id()).bind(submission.producer_instance_id())
@@ -796,12 +806,20 @@ async fn insert_record_dispositions(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
     maximum_quota: Option<i32>,
+    task_binding_valid: bool,
 ) -> Result<(), ProducerRuntimeError> {
     for (ordinal, record) in package.records().iter().enumerate() {
         let beyond_quota = maximum_quota
             .is_some_and(|quota| i64::try_from(ordinal).unwrap_or(i64::MAX) >= i64::from(quota));
-        let (disposition, reason) = if let Some(disposition) =
-            crate::material_admission::record_disposition(package, record)
+        let media_identity_conflict = task_binding_valid
+            && package.package_kind() == "media_slots"
+            && crate::material_media::identity_conflicts(tx, package, record).await?;
+        let (disposition, reason) = if !task_binding_valid {
+            ("quarantined", "task_package_contract_mismatch")
+        } else if media_identity_conflict {
+            ("quarantined", "media_slot_identity_conflict")
+        } else if let Some(disposition) =
+            crate::material_contract_validation::record_disposition(package, ordinal, record)
         {
             disposition
         } else if library_card_record(record) {

@@ -51,6 +51,8 @@ pub struct EvidenceQuery {
     media_kind: Option<EvidenceMediaKind>,
     #[serde(default)]
     restriction: Option<EvidenceRestriction>,
+    #[serde(default)]
+    cursor: Option<String>,
 }
 
 impl EvidenceQuery {
@@ -95,6 +97,10 @@ impl EvidenceQuery {
 
     pub fn restriction(&self) -> Option<EvidenceRestriction> {
         self.restriction
+    }
+
+    pub fn cursor(&self) -> Option<&str> {
+        self.cursor.as_deref()
     }
 }
 

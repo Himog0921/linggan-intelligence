@@ -4,107 +4,8 @@ use crate::producer_runtime::ProducerRuntimeError;
 use linggan_contracts::ProducerCapturePackage;
 use serde_json::Value;
 use sqlx::{Postgres, Transaction};
+use std::collections::HashSet;
 use uuid::Uuid;
-
-pub(crate) fn record_disposition(
-    package: &ProducerCapturePackage,
-    record: &Value,
-) -> Option<(&'static str, &'static str)> {
-    let accepted = "accepted_for_library_content";
-    let quarantined = "quarantined";
-    match package.package_kind() {
-        "discovery_search" | "profile_discovery" => {
-            let expected_kind = if package.package_kind() == "profile_discovery" {
-                "profile_discovery_card"
-            } else {
-                "discovery_card"
-            };
-            if record.get("kind").and_then(Value::as_str) != Some(expected_kind) {
-                return None;
-            }
-            Some(match discovery_record(package, record) {
-                Some(_) => (
-                    "accepted_for_library_discovery",
-                    "typed_discovery_identity_valid",
-                ),
-                None => (quarantined, "typed_discovery_identity_invalid"),
-            })
-        }
-        "content_detail" => Some(
-            match content_detail_record(record).is_some_and(|detail| {
-                target_string(package, "contentExternalId") == Some(detail.content_id)
-            }) {
-                true => (accepted, "typed_detail_identity_valid"),
-                false => (quarantined, "typed_detail_identity_invalid"),
-            },
-        ),
-        "comments" | "replies" => {
-            let replies = package.package_kind() == "replies";
-            let expected_kind = if replies { "reply" } else { "comment" };
-            let valid = record.get("kind").and_then(Value::as_str) == Some(expected_kind)
-                && record
-                    .get("payload")
-                    .and_then(Value::as_object)
-                    .is_some_and(|payload| {
-                        exact_string(payload, "noteId")
-                            == target_string(package, "contentExternalId")
-                            && exact_string(payload, "commentId").is_some()
-                            && if replies {
-                                exact_string(payload, "rootCommentId").is_some()
-                                    && exact_string(payload, "parentCommentId")
-                                        .or_else(|| exact_string(payload, "replyToCommentId"))
-                                        .is_some()
-                            } else {
-                                ["rootCommentId", "parentCommentId", "replyToCommentId"]
-                                    .iter()
-                                    .all(|key| exact_string(payload, key).is_none())
-                            }
-                    });
-            Some(if valid {
-                (
-                    accepted,
-                    if replies {
-                        "typed_reply_relationship_valid"
-                    } else {
-                        "typed_comment_identity_valid"
-                    },
-                )
-            } else {
-                (
-                    quarantined,
-                    if replies {
-                        "typed_reply_relationship_invalid"
-                    } else {
-                        "typed_comment_identity_invalid"
-                    },
-                )
-            })
-        }
-        "author_profile" => {
-            let author_id = target_string(package, "authorExternalId");
-            let valid = record.get("kind").and_then(Value::as_str) == Some("author_profile")
-                && record
-                    .pointer("/sourceObject/externalId")
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    == author_id
-                && record
-                    .get("payload")
-                    .and_then(Value::as_object)
-                    .is_some_and(|payload| {
-                        exact_string(payload, "userId").or_else(|| exact_string(payload, "id"))
-                            == author_id
-                    });
-            Some(if valid {
-                (accepted, "typed_author_identity_valid")
-            } else {
-                (quarantined, "typed_author_identity_invalid")
-            })
-        }
-        "media_slots" => crate::material_media::record_disposition(package, record),
-        _ => None,
-    }
-}
 
 pub(crate) async fn insert_typed_materials(
     tx: &mut Transaction<'_, Postgres>,
@@ -121,13 +22,27 @@ pub(crate) async fn insert_typed_materials(
         }
         return Ok(());
     }
+    let accepted_ordinals = sqlx::query_scalar::<_, i32>(
+        "SELECT record_ordinal FROM linggan_runtime_record_disposition \
+         WHERE package_ref=$1 AND disposition <> 'quarantined'",
+    )
+    .bind(package.package_ref())
+    .fetch_all(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?
+    .into_iter()
+    .collect::<HashSet<_>>();
     match package.package_kind() {
-        "discovery_search" | "profile_discovery" => insert_discovery_records(tx, package).await?,
-        "content_detail" => insert_content_records(tx, package).await?,
-        "comments" => insert_comment_records(tx, package, false).await?,
-        "replies" => insert_comment_records(tx, package, true).await?,
-        "author_profile" => insert_author_records(tx, package).await?,
-        "media_slots" | "media_bytes" => crate::material_media::insert(tx, package).await?,
+        "discovery_search" | "profile_discovery" => {
+            insert_discovery_records(tx, package, &accepted_ordinals).await?
+        }
+        "content_detail" => insert_content_records(tx, package, &accepted_ordinals).await?,
+        "comments" => insert_comment_records(tx, package, false, &accepted_ordinals).await?,
+        "replies" => insert_comment_records(tx, package, true, &accepted_ordinals).await?,
+        "author_profile" => insert_author_records(tx, package, &accepted_ordinals).await?,
+        "media_slots" | "media_bytes" => {
+            crate::material_media::insert(tx, package, &accepted_ordinals).await?
+        }
         _ => {}
     }
     Ok(())
@@ -136,8 +51,12 @@ pub(crate) async fn insert_typed_materials(
 async fn insert_discovery_records(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
+    accepted_ordinals: &HashSet<i32>,
 ) -> Result<(), ProducerRuntimeError> {
     for (ordinal, record) in package.records().iter().enumerate() {
+        if !accepted_ordinals.contains(&i32::try_from(ordinal).expect("record count is bounded")) {
+            continue;
+        }
         let Some(finding) = discovery_record(package, record) else {
             continue;
         };
@@ -157,6 +76,7 @@ async fn insert_discovery_records(
 async fn insert_content_records(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
+    accepted_ordinals: &HashSet<i32>,
 ) -> Result<(), ProducerRuntimeError> {
     let Some(expected_content_id) = target_string(package, "contentExternalId") else {
         return Ok(());
@@ -164,7 +84,10 @@ async fn insert_content_records(
     let content_public_ref = ensure_content(tx, package, expected_content_id).await?;
     let mut retained = 0;
     for (ordinal, record) in package.records().iter().enumerate() {
-        let Some(detail) = content_detail_record(record) else {
+        if !accepted_ordinals.contains(&i32::try_from(ordinal).expect("record count is bounded")) {
+            continue;
+        }
+        let Some(detail) = content_detail_record(package, record) else {
             continue;
         };
         if detail.content_id != expected_content_id {
@@ -188,6 +111,7 @@ async fn insert_comment_records(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
     replies: bool,
+    accepted_ordinals: &HashSet<i32>,
 ) -> Result<(), ProducerRuntimeError> {
     let Some(content_id) = target_string(package, "contentExternalId") else {
         return Ok(());
@@ -196,6 +120,9 @@ async fn insert_comment_records(
     let expected_kind = if replies { "reply" } else { "comment" };
     let mut retained = 0;
     for (ordinal, record) in package.records().iter().enumerate() {
+        if !accepted_ordinals.contains(&i32::try_from(ordinal).expect("record count is bounded")) {
+            continue;
+        }
         if record.get("kind").and_then(Value::as_str) != Some(expected_kind) {
             continue;
         }
@@ -255,12 +182,16 @@ async fn insert_comment_records(
 async fn insert_author_records(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
+    accepted_ordinals: &HashSet<i32>,
 ) -> Result<(), ProducerRuntimeError> {
     let Some(author_id) = target_string(package, "authorExternalId") else {
         return Ok(());
     };
     let mut retained = 0;
     for (ordinal, record) in package.records().iter().enumerate() {
+        if !accepted_ordinals.contains(&i32::try_from(ordinal).expect("record count is bounded")) {
+            continue;
+        }
         if record.get("kind").and_then(Value::as_str) != Some("author_profile")
             || record
                 .pointer("/sourceObject/externalId")
@@ -303,16 +234,21 @@ pub(crate) async fn insert_lane_observation(
     author_external_id: Option<&str>,
     retained: i32,
 ) -> Result<(), ProducerRuntimeError> {
-    let layer = package.coverage().pointer("/layers/0");
+    let capability = match lane {
+        "detail" => "content_detail",
+        other => other,
+    };
+    let layer =
+        crate::material_contract_validation::unique_coverage_layer(package.coverage(), capability);
     let count = |field| {
         layer
             .and_then(|value| value.get(field))
             .and_then(Value::as_i64)
             .and_then(|value| i32::try_from(value).ok())
     };
-    sqlx::query("INSERT INTO linggan_material_lane_observation (package_ref,lane,content_public_ref,author_external_id,observed,retained,failed,known_unattempted,unknown_count,maximum_quota,stopped_reason,observed_at) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,(task.task_spec->>'maximumQuota')::integer,$10,$11 FROM linggan_runtime_capture_package package JOIN linggan_runtime_task task ON task.task_id = package.task_id WHERE package.package_ref = $1")
+    sqlx::query("INSERT INTO linggan_material_lane_observation (package_ref,lane,content_public_ref,author_external_id,observed,producer_acquired,retained,failed,known_unattempted,unknown_count,maximum_quota,stopped_reason,observed_at) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,(task.task_spec->>'maximumQuota')::integer,$11,$12 FROM linggan_runtime_capture_package package JOIN linggan_runtime_task task ON task.task_id = package.task_id WHERE package.package_ref = $1")
         .bind(package.package_ref()).bind(lane).bind(content_public_ref).bind(author_external_id)
-        .bind(count("observed")).bind(retained).bind(count("failed")).bind(count("notAttempted")).bind(count("unknown"))
+        .bind(count("observed")).bind(count("acquired")).bind(retained).bind(count("failed")).bind(count("notAttempted")).bind(count("unknown"))
         .bind(layer.and_then(|value| value.get("stoppedReason")).and_then(Value::as_str)).bind(package.observed_at())
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     Ok(())
@@ -389,15 +325,7 @@ fn discovery_record<'a>(
     if record.get("kind")?.as_str()? != expected_kind {
         return None;
     }
-    if record
-        .pointer("/sourceObject/platform")
-        .and_then(Value::as_str)
-        .is_some_and(|value| value != package.platform())
-        || record
-            .pointer("/sourceObject/type")
-            .and_then(Value::as_str)
-            .is_some_and(|value| value != "content")
-    {
+    if !source_is(package, record, "content") {
         return None;
     }
     let content_id = record.pointer("/sourceObject/externalId")?.as_str()?.trim();
@@ -417,8 +345,14 @@ fn discovery_record<'a>(
     })
 }
 
-fn content_detail_record(record: &Value) -> Option<ContentDetailRecord<'_>> {
+fn content_detail_record<'a>(
+    package: &ProducerCapturePackage,
+    record: &'a Value,
+) -> Option<ContentDetailRecord<'a>> {
     if record.get("kind")?.as_str()? != "content_detail" {
+        return None;
+    }
+    if !source_is(package, record, "content") {
         return None;
     }
     let content_id = record.pointer("/sourceObject/externalId")?.as_str()?.trim();
@@ -430,6 +364,14 @@ fn content_detail_record(record: &Value) -> Option<ContentDetailRecord<'_>> {
         content_id,
         payload,
     })
+}
+
+fn source_is(package: &ProducerCapturePackage, record: &Value, subject_type: &str) -> bool {
+    record
+        .pointer("/sourceObject/platform")
+        .and_then(Value::as_str)
+        == Some(package.platform())
+        && record.pointer("/sourceObject/type").and_then(Value::as_str) == Some(subject_type)
 }
 
 pub(crate) fn exact_string<'a>(

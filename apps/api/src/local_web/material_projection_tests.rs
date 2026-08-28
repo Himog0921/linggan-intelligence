@@ -1,11 +1,12 @@
+use super::material_projection_media_fixture::{
+    assert_disposition_precedence, complete_ocr_derivative, seed_media, seed_media_refresh,
+};
 use super::*;
 use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
-use linggan_evidence::{
-    MaterialMediaDisposition, admit_media_blob, record_materialization_disposition,
-};
+use linggan_evidence::admit_media_blob;
 use linggan_storage_postgres::testing::isolated_proof_schema;
 use tower::ServiceExt;
 
@@ -62,17 +63,47 @@ async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrela
             .map(Vec::len),
         Some(0)
     );
+    let unfiltered = app_with_database(database)
+        .oneshot(
+            Request::builder()
+                .uri("/api/local/evidence-library")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let unfiltered: Value =
+        serde_json::from_slice(&to_bytes(unfiltered.into_body(), usize::MAX).await.unwrap())
+            .unwrap();
+    for ordinal in [5, 6, 7, 8] {
+        assert_eq!(
+            unfiltered
+                .pointer(&format!("/items/0/laneSummaries/{ordinal}/state"))
+                .and_then(Value::as_str),
+            Some("UNKNOWN")
+        );
+        assert_eq!(
+            unfiltered.pointer(&format!("/items/0/laneSummaries/{ordinal}/observed")),
+            Some(&Value::Null)
+        );
+        assert_eq!(
+            unfiltered
+                .pointer(&format!("/items/0/laneSummaries/{ordinal}/valueState"))
+                .and_then(Value::as_str),
+            Some("UNKNOWN")
+        );
+    }
 }
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn loopback_comment_search_returns_redacted_tree_and_truthful_unknown_coverage() {
+async fn loopback_comment_lane_hides_sensitive_body_and_external_identity() {
     let database = proof_database("material_loopback_comments").await;
     seed_comment(&database).await;
     let response = app_with_database(database)
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?q=评论命中&lane=comments")
+                .uri("/api/local/evidence-library?lane=comments")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -82,16 +113,26 @@ async fn loopback_comment_search_returns_redacted_tree_and_truthful_unknown_cove
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let payload: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(
-        payload
-            .pointer("/items/0/matchedFields/0")
-            .and_then(Value::as_str),
-        Some("comments")
+        payload.pointer("/items/0/inspector/commentThreads"),
+        Some(&json!([]))
     );
     assert_eq!(
         payload
-            .pointer("/items/0/inspector/commentThreads/0/accessLevel")
+            .pointer("/items/0/inspector/commentsAccess/accessLevel")
             .and_then(Value::as_str),
-        Some("REDACTED_SNIPPET")
+        Some("RESTRICTED_SOURCE")
+    );
+    assert_eq!(
+        payload
+            .pointer("/items/0/inspector/commentsAccess/bodyReturned")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        payload
+            .pointer("/items/0/inspector/commentsAccess/externalIdentityReturned")
+            .and_then(Value::as_bool),
+        Some(false)
     );
     assert_eq!(
         payload
@@ -112,8 +153,9 @@ async fn loopback_comment_search_returns_redacted_tree_and_truthful_unknown_cove
             .and_then(Value::as_str),
         Some("PARTIAL")
     );
-    assert!(payload.to_string().contains("评论命中"));
+    assert!(!payload.to_string().contains("评论命中"));
     assert!(!payload.to_string().contains("secret-raw-token"));
+    assert!(!payload.to_string().contains("comment-api-1"));
 }
 
 #[tokio::test]
@@ -132,6 +174,12 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
     )
     .await
     .expect("synthetic verified blob materializes");
+    let derivative_ref = complete_ocr_derivative(&database, admission.processing_jobs[1]).await;
+    let blob_path = local_media_root()
+        .join("blobs/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    std::fs::create_dir_all(blob_path.parent().unwrap()).unwrap();
+    std::fs::write(&blob_path, b"proof-bytes!").unwrap();
+    seed_media_refresh(&database).await;
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
@@ -144,11 +192,48 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
     assert_eq!(response.status(), StatusCode::OK);
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_media_payload(&payload);
+    let asr = app_with_database(database.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/api/local/evidence-library?lane=asr")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let asr: Value =
+        serde_json::from_slice(&to_bytes(asr.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(
+        asr.pointer("/items")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
+    let blob_before = app_with_database(database.clone())
+        .oneshot(Request::builder().uri("/api/local/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").body(Body::empty()).unwrap())
+        .await.unwrap();
+    assert_eq!(blob_before.status(), StatusCode::OK);
+    assert_eq!(
+        &to_bytes(blob_before.into_body(), usize::MAX).await.unwrap()[..],
+        b"proof-bytes!"
+    );
+    assert_disposition_precedence(database, admission.materialization_ref, derivative_ref).await;
+    std::fs::remove_file(blob_path).unwrap();
+}
+
+fn assert_media_payload(payload: &Value) {
     assert_eq!(
         payload
             .pointer("/items/0/inspector/mediaSlots/0/origin/candidateUriCount")
             .and_then(Value::as_i64),
         Some(2)
+    );
+    assert_eq!(
+        payload
+            .pointer("/items/0/inspector/mediaSlots/0/origin/candidateSetState")
+            .and_then(Value::as_str),
+        Some("OBSERVED_SET")
     );
     assert_eq!(
         payload
@@ -158,15 +243,36 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
     );
     assert_eq!(
         payload
+            .pointer("/items/0/inspector/mediaSlots/0/origin/sourceGeneration")
+            .and_then(Value::as_i64),
+        Some(2)
+    );
+    assert_eq!(
+        payload
+            .pointer("/items/0/inspector/mediaSlots/0/replica/isCurrentOrigin")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        payload
             .pointer("/items/0/preview/bytesState")
             .and_then(Value::as_str),
         Some("ACQUIRED")
     );
+    let ocr = payload
+        .pointer("/items/0/inspector/derivatives")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|value| value.get("kind").and_then(Value::as_str) == Some("ocr_text"))
+        .unwrap();
+    assert_eq!(ocr.get("state").and_then(Value::as_str), Some("ACQUIRED"));
+    assert!(ocr.get("sourceLocation").is_some_and(Value::is_object));
     assert_eq!(
         payload
             .pointer("/items/0/laneSummaries/7/state")
             .and_then(Value::as_str),
-        Some("NOT_ENABLED")
+        Some("ACQUIRED")
     );
     assert!(
         payload
@@ -177,73 +283,6 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
     assert!(
         !payload.to_string().contains("media.example"),
         "remote candidate URIs stay out of the ordinary read API"
-    );
-    assert_disposition_precedence(database, admission.materialization_ref).await;
-}
-
-async fn assert_disposition_precedence(database: Database, materialization_ref: uuid::Uuid) {
-    record_materialization_disposition(
-        &database,
-        materialization_ref,
-        MaterialMediaDisposition::BytesCleaned,
-        "proof-authority",
-        "retention-proof",
-    )
-    .await
-    .unwrap();
-    let response = app_with_database(database.clone())
-        .oneshot(
-            Request::builder()
-                .uri("/api/local/evidence-library?restriction=BYTES_CLEANED")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let cleaned: Value =
-        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
-    assert_eq!(
-        cleaned
-            .pointer("/items/0/preview/bytesState")
-            .and_then(Value::as_str),
-        Some("BYTES_CLEANED")
-    );
-    assert_eq!(
-        cleaned.pointer("/items/0/preview/localAssetUrl"),
-        Some(&Value::Null)
-    );
-
-    record_materialization_disposition(
-        &database,
-        materialization_ref,
-        MaterialMediaDisposition::WithdrawnOrRestricted,
-        "proof-authority",
-        "rights-proof",
-    )
-    .await
-    .unwrap();
-    let response = app_with_database(database)
-        .oneshot(
-            Request::builder()
-                .uri("/api/local/evidence-library?restriction=WITHDRAWN_OR_RESTRICTED")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    let restricted: Value =
-        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
-    assert_eq!(
-        restricted
-            .pointer("/items/0/preview/bytesState")
-            .and_then(Value::as_str),
-        Some("WITHDRAWN_OR_RESTRICTED")
-    );
-    assert_eq!(
-        restricted.pointer("/items/0/preview/localAssetUrl"),
-        Some(&Value::Null)
     );
 }
 
@@ -266,7 +305,7 @@ async fn seed_detail(database: &Database) {
         "contractVersion":"linggan.producer.capture-package.v1","packageRef":uuid::Uuid::new_v4(),
         "packageKind":"content_detail","platform":"xhs","observedAt":"2026-08-28T10:00:00Z","capturedAt":"2026-08-28T10:00:01Z",
         "coverage":{"target":{"basis":"known_set","contentExternalId":"note-api-1"},"layers":[{"capability":"content_detail","observed":1,"attempted":1,"acquired":1,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"fixture_complete"}]},
-        "records":[{"kind":"content_detail","sourceObject":{"externalId":"note-api-1"},"payload":{"title":"可检索标题","bodyText":"受限正文"}}]
+        "records":[{"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"note-api-1"},"payload":{"title":"可检索标题","bodyText":"受限正文"}}]
     });
     let submission = json!({"contractVersion":"linggan.producer.capture-package.v1","producerInstanceId":producer_instance_id,"taskId":task_id,"attemptId":attempt_id,"submissionId":uuid::Uuid::new_v4(),"capturePackage":package});
     let submission = parse_producer_submission(&submission.to_string()).unwrap();
@@ -294,33 +333,13 @@ async fn seed_comment(database: &Database) {
         "contractVersion":"linggan.producer.capture-package.v1","packageRef":uuid::Uuid::new_v4(),
         "packageKind":"comments","platform":"xhs","observedAt":"2026-08-28T10:00:00Z","capturedAt":"2026-08-28T10:00:01Z",
         "coverage":{"target":{"basis":"known_set","contentExternalId":"note-api-comments"},"layers":[{"capability":"comments","observed":2,"attempted":1,"acquired":1,"verified":0,"failed":0,"notAttempted":1,"unknown":1,"stoppedReason":"collector_budget"}]},
-        "records":[{"kind":"comment","payload":{"commentId":"comment-api-1","noteId":"note-api-comments","text":"评论命中 secret-raw-token"}}]
+        "records":[{"kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"note-api-comments"},"payload":{"commentId":"comment-api-1","noteId":"note-api-comments","text":"评论命中 secret-raw-token"}}]
     });
     let submission = json!({"contractVersion":"linggan.producer.capture-package.v1","producerInstanceId":producer_instance_id,"taskId":task_id,"attemptId":attempt_id,"submissionId":uuid::Uuid::new_v4(),"capturePackage":package});
     let submission = parse_producer_submission(&submission.to_string()).unwrap();
     submit_producer_package(database, &submission)
         .await
         .unwrap();
-}
-
-async fn seed_media(database: &Database) -> uuid::Uuid {
-    let task_id = uuid::Uuid::new_v4();
-    let producer_instance_id = uuid::Uuid::new_v4();
-    let attempt_id = uuid::Uuid::new_v4();
-    let observation_ref = uuid::Uuid::new_v4();
-    let task = json!({"contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"manual","platform":"xhs","pageType":"synthetic_material_proof","target":{"contentExternalId":"note-api-media"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]});
-    let task = parse_producer_task_spec(&task.to_string()).unwrap();
-    create_producer_task(database, &task).await.unwrap();
-    let attempt = json!({"contractVersion":"linggan.producer.attempt.v1","producerInstanceId":producer_instance_id,"taskId":task_id,"attemptId":attempt_id});
-    let attempt = parse_producer_attempt(&attempt.to_string()).unwrap();
-    start_producer_attempt(database, &attempt).await.unwrap();
-    let package = json!({"contractVersion":"linggan.producer.capture-package.v1","packageRef":uuid::Uuid::new_v4(),"packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-28T10:00:00Z","capturedAt":"2026-08-28T10:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-api-media"},"layers":[{"capability":"media_slots","observed":1,"attempted":0,"acquired":0,"verified":0,"failed":0,"notAttempted":1,"unknown":0,"stoppedReason":"media_acquisition_not_started"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-api-media:image:1","observationRef":observation_ref,"slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/primary","candidateUris":["https://media.example/primary","https://media.example/backup"],"observedAt":"2026-08-28T10:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":"note-api-media"}}]});
-    let submission = json!({"contractVersion":"linggan.producer.capture-package.v1","producerInstanceId":producer_instance_id,"taskId":task_id,"attemptId":attempt_id,"submissionId":uuid::Uuid::new_v4(),"capturePackage":package});
-    let submission = parse_producer_submission(&submission.to_string()).unwrap();
-    submit_producer_package(database, &submission)
-        .await
-        .unwrap();
-    observation_ref
 }
 
 async fn proof_database(schema: &str) -> Database {

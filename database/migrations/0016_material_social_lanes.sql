@@ -10,6 +10,7 @@ CREATE TABLE linggan_material_lane_observation (
     content_public_ref uuid REFERENCES linggan_material_content(public_ref),
     author_external_id text,
     observed integer CHECK (observed >= 0),
+    producer_acquired integer CHECK (producer_acquired >= 0),
     retained integer CHECK (retained >= 0),
     failed integer CHECK (failed >= 0),
     known_unattempted integer CHECK (known_unattempted >= 0),
@@ -18,7 +19,8 @@ CREATE TABLE linggan_material_lane_observation (
     stopped_reason text,
     observed_at text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT scope_001_now(),
-    CHECK (content_public_ref IS NOT NULL OR author_external_id IS NOT NULL)
+    CHECK ((lane = 'author' AND content_public_ref IS NULL AND author_external_id IS NOT NULL)
+        OR (lane <> 'author' AND content_public_ref IS NOT NULL AND author_external_id IS NULL))
 );
 
 CREATE TABLE linggan_material_comment (
@@ -38,6 +40,7 @@ CREATE TABLE linggan_material_comment (
     observed_at text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT scope_001_now(),
     UNIQUE (package_ref, record_ordinal),
+    UNIQUE (package_ref, comment_external_id),
     FOREIGN KEY (package_ref, record_ordinal)
         REFERENCES linggan_runtime_record_disposition(package_ref, record_ordinal),
     CHECK ((body_state = 'KNOWN') = (body_text IS NOT NULL)),

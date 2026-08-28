@@ -9,13 +9,29 @@ use uuid::Uuid;
 
 pub(crate) fn record_disposition(
     package: &ProducerCapturePackage,
+    record_ordinal: usize,
     record: &Value,
 ) -> Option<(&'static str, &'static str)> {
     if package.package_kind() != "media_slots" {
         return None;
     }
-    Some(if media_record(package, record).is_some() {
+    let duplicated = record
+        .get("slotKey")
+        .and_then(Value::as_str)
+        .is_some_and(|slot_key| {
+            package
+                .records()
+                .iter()
+                .enumerate()
+                .any(|(other_ordinal, other)| {
+                    other_ordinal != record_ordinal
+                        && other.get("slotKey").and_then(Value::as_str) == Some(slot_key)
+                })
+        });
+    Some(if !duplicated && media_record(package, record).is_some() {
         ("accepted_for_media_identity", "media_origin_contract_valid")
+    } else if duplicated {
+        ("quarantined", "media_slot_identity_duplicate")
     } else {
         ("quarantined", "media_origin_contract_invalid")
     })
@@ -24,6 +40,7 @@ pub(crate) fn record_disposition(
 pub(crate) async fn insert(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
+    accepted_ordinals: &HashSet<i32>,
 ) -> Result<(), ProducerRuntimeError> {
     let Some(content_id) = target_content_id(package) else {
         return Ok(());
@@ -45,6 +62,9 @@ pub(crate) async fn insert(
     }
     let mut retained = 0;
     for (ordinal, value) in package.records().iter().enumerate() {
+        if !accepted_ordinals.contains(&i32::try_from(ordinal).expect("record count is bounded")) {
+            continue;
+        }
         let Some(media) = media_record(package, value) else {
             continue;
         };
@@ -60,6 +80,34 @@ pub(crate) async fn insert(
         retained,
     )
     .await
+}
+
+pub(crate) async fn identity_conflicts(
+    tx: &mut Transaction<'_, Postgres>,
+    package: &ProducerCapturePackage,
+    record: &Value,
+) -> Result<bool, ProducerRuntimeError> {
+    let Some(media) = media_record(package, record) else {
+        return Ok(false);
+    };
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind(media.slot_key)
+        .execute(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    let existing = sqlx::query(
+        "SELECT platform,content_external_id,role,ordinal FROM linggan_media_slot WHERE slot_key=$1",
+    )
+    .bind(media.slot_key)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    Ok(existing.is_some_and(|row| {
+        row.get::<String, _>("platform") != package.platform()
+            || row.get::<String, _>("content_external_id") != media.content_id
+            || row.get::<String, _>("role") != media.role
+            || row.get::<i32, _>("ordinal") != media.producer_ordinal
+    }))
 }
 
 pub(crate) async fn insert_legacy_only(

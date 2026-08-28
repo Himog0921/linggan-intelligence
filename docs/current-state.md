@@ -12,7 +12,7 @@
 
 基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope，旧 `cards` 暂时保留兼容。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。
 
-隔离 PostgreSQL 16 proof 已覆盖 producer admission、类型化表、首次同槽位并发 generation、作品级查询、loopback API、评论脱敏、媒体本地预览、`provider_not_enabled → NOT_ENABLED` 与 `BYTES_CLEANED` URL 抑制，并验证 proof database/container/volume 清理。该 Draft 未回填历史 Package，未访问真实平台、未取得真实媒体字节、未运行 OCR/ASR provider、未改 Evidence Library HTML/CSS，也未部署或完成用户验收。
+独立审查后的隔离 PostgreSQL 16 proof 已覆盖 Task/Package/Record/Coverage 的平台、能力与目标绑定，逐 Record 隔离且健康 sibling 不连坐，评论/回复关系冲突与同包重复身份拒绝，首次同槽位并发 generation，作品级查询，固定 `asOf` 的 50 项 keyset cursor，筛选补页，loopback API，评论正文与外部身份不返回，历史已取得副本保留，以及媒体处置对列表和 `/api/local/media/<sha256>` 直读的共同门禁。合成本地 blob 在处置前已证明 HTTP 200 与精确 bytes，`BYTES_CLEANED` 后不可读；OCR derivative 在处置前有可用 source location，受限后状态传播且 source location 被抑制。proof database/container/volume 均已清理。该 Draft 未回填历史 Package，未访问真实平台、未取得真实平台媒体字节、未运行 OCR/ASR provider、未改 Evidence Library HTML/CSS，也未部署或完成用户验收。
 
 ### GOV-006 / Issue #82（决策治理收敛）
 

@@ -2,7 +2,11 @@ mod collection;
 mod collection_intake;
 mod collection_targets_view;
 mod evidence_page;
+#[cfg(test)]
+mod material_cursor_tests;
 mod material_projection;
+#[cfg(test)]
+mod material_projection_media_fixture;
 #[cfg(test)]
 mod material_projection_tests;
 mod shell;
@@ -25,9 +29,9 @@ use linggan_contracts::{
 use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, CheckInOutcome, DiscoveryIngressError,
     DispatchDecision, InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
-    LocalSubmissionOutcome, LocalTaskOutcome, MediaUploadFinalizeClaim, ProducerRuntimeError,
-    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome,
-    admit_media_blob, begin_media_upload, check_in_installation, claim_installation,
+    LocalSubmissionOutcome, LocalTaskOutcome, MaterialReadError, MediaUploadFinalizeClaim,
+    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
+    StoreOutcome, admit_media_blob, begin_media_upload, check_in_installation, claim_installation,
     claim_media_upload_finalize, close_claim_window, complete_lease_for_task,
     complete_media_upload, count_targets, create_manual_task, create_producer_task,
     decide_dispatch, dispatch_schema_is_ready, enrich_target_from_author_profile,
@@ -166,18 +170,6 @@ impl LocalDatabaseState {
             },
         }
     }
-}
-
-#[derive(Debug, Deserialize)]
-struct EvidenceLibraryParams {
-    q: Option<String>,
-    window: Option<String>,
-    lane: Option<String>,
-    #[serde(rename = "laneState")]
-    lane_state: Option<String>,
-    #[serde(rename = "mediaKind")]
-    media_kind: Option<String>,
-    restriction: Option<String>,
 }
 
 #[cfg(test)]
@@ -412,11 +404,11 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
 
 async fn evidence_library(
     State(state): State<LocalWebState>,
-    Query(params): Query<EvidenceLibraryParams>,
+    Query(params): Query<material_projection::EvidenceLibraryParams>,
 ) -> Html<String> {
     match state.database.database() {
         None => Html(evidence_library_html()),
-        Some(database) => match local_query(&params) {
+        Some(database) => match material_projection::local_query(&params) {
             Ok(query) => match read_evidence_library(database, &query).await {
                 Ok(projection) => Html(evidence_page::render_read_projection(
                     &evidence_library_html(),
@@ -432,7 +424,7 @@ async fn evidence_library(
 
 async fn evidence_library_json(
     State(state): State<LocalWebState>,
-    Query(params): Query<EvidenceLibraryParams>,
+    Query(params): Query<material_projection::EvidenceLibraryParams>,
 ) -> Response {
     let Some(database) = state.database.database() else {
         return local_read_json_error(
@@ -440,7 +432,7 @@ async fn evidence_library_json(
             "read_model_not_connected",
         );
     };
-    let Ok(query) = local_query(&params) else {
+    let Ok(query) = material_projection::local_query(&params) else {
         return local_read_json_error(
             axum::http::StatusCode::BAD_REQUEST,
             "invalid_local_evidence_query",
@@ -450,10 +442,19 @@ async fn evidence_library_json(
         Ok(projection) => {
             match material_projection::compose_json(database, &query, projection).await {
                 Ok(response) => Json(response).into_response(),
-                Err(_) => local_read_json_error(
-                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
-                    "material_read_projection_unavailable",
-                ),
+                Err(MaterialReadError::InvalidCursor | MaterialReadError::UnsupportedSort) => {
+                    local_read_json_error(
+                        axum::http::StatusCode::BAD_REQUEST,
+                        "invalid_material_query_cursor_or_sort",
+                    )
+                }
+                Err(MaterialReadError::Database(error)) => {
+                    eprintln!("material read projection unavailable: {error}");
+                    local_read_json_error(
+                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        "material_read_projection_unavailable",
+                    )
+                }
             }
         }
         Err(_) => local_read_json_error(
@@ -1733,30 +1734,6 @@ async fn configured_database_state() -> LocalDatabaseState {
     } else {
         LocalDatabaseState::SchemaUnavailable
     }
-}
-
-fn local_query(params: &EvidenceLibraryParams) -> Result<EvidenceQuery, ()> {
-    let window = match params
-        .window
-        .as_deref()
-        .unwrap_or("latest_accepted_discovery")
-    {
-        "latest_accepted_discovery" => "latest_accepted_discovery",
-        "last_7_days" => "last_7_days",
-        "last_30_days" => "last_30_days",
-        _ => return Err(()),
-    };
-    serde_json::from_value(json!({
-        "text": params.q,
-        "scope": "all_accepted_material",
-        "window": window,
-        "sort": "latest_discovery",
-        "lane": params.lane,
-        "laneState": params.lane_state,
-        "mediaKind": params.media_kind,
-        "restriction": params.restriction
-    }))
-    .map_err(|_| ())
 }
 
 fn ingress_json_error(status: axum::http::StatusCode, code: &'static str) -> Response {

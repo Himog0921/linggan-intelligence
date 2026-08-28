@@ -11,6 +11,7 @@ pub struct MaterialLibraryProjection {
     pub query_scope: &'static str,
     pub as_of: String,
     pub cursor: Option<String>,
+    pub truncated: bool,
 }
 
 #[derive(Debug, Serialize)]

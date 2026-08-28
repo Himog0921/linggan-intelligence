@@ -523,9 +523,11 @@ fn default_empty_read_view_is_not_misdescribed_as_an_empty_published_window() {
 
 #[test]
 fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_published_only() {
-    let default = local_query(&EvidenceLibraryParams {
+    let default = material_projection::local_query(&material_projection::EvidenceLibraryParams {
+        cursor: None,
         q: None,
         window: None,
+        sort: None,
         lane: None,
         lane_state: None,
         media_kind: None,
@@ -538,9 +540,11 @@ fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_
     );
     assert_eq!(default.published_window(), None);
 
-    let explicit = local_query(&EvidenceLibraryParams {
+    let explicit = material_projection::local_query(&material_projection::EvidenceLibraryParams {
+        cursor: None,
         q: None,
         window: Some("last_30_days".to_owned()),
+        sort: None,
         lane: None,
         lane_state: None,
         media_kind: None,

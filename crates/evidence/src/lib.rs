@@ -10,11 +10,15 @@ mod ingress;
 mod local_discovery;
 mod local_producer;
 mod material_admission;
+mod material_contract_validation;
+mod material_cursor;
 mod material_disposition;
 mod material_media;
 mod material_media_read;
+mod material_processing;
 mod material_projection;
 mod material_projection_types;
+mod material_query_sql;
 mod material_social_read;
 mod patrol_scheduler;
 mod producer_runtime;
@@ -53,10 +57,13 @@ pub use local_producer::{
     LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome,
     create_manual_task, local_producer_schema_is_ready, start_local_attempt, submit_local_package,
 };
-pub use material_disposition::{MaterialMediaDisposition, record_materialization_disposition};
+pub use material_disposition::{
+    MaterialMediaDisposition, record_derivative_disposition, record_materialization_disposition,
+};
+pub use material_processing::record_media_derivative_completion;
 pub use material_projection::{
     MaterialDisplay, MaterialIdentity, MaterialLaneSummary, MaterialLibraryItem,
-    MaterialLibraryProjection, MaterialPreview, MaterialSummary,
+    MaterialLibraryProjection, MaterialPreview, MaterialReadError, MaterialSummary,
     material_projection_schema_is_ready, read_material_library,
 };
 pub use patrol_scheduler::{

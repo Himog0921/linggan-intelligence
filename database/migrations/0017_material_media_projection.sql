@@ -19,6 +19,7 @@ CREATE TABLE linggan_material_media_origin (
     live_photo_motion_state text CHECK (live_photo_motion_state IN ('OBSERVED','ACQUIRED','UNAVAILABLE','UNKNOWN')),
     created_at timestamptz NOT NULL DEFAULT scope_001_now(),
     UNIQUE (package_ref,record_ordinal),
+    UNIQUE (package_ref,slot_key),
     UNIQUE (slot_key,source_generation),
     FOREIGN KEY (package_ref,record_ordinal) REFERENCES linggan_runtime_record_disposition(package_ref,record_ordinal),
     CHECK ((display_order_state='KNOWN')=(display_ordinal IS NOT NULL)),
