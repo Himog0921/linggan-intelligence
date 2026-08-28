@@ -47,8 +47,8 @@ pub use local_producer::{
     create_manual_task, local_producer_schema_is_ready, start_local_attempt, submit_local_package,
 };
 pub use patrol_scheduler::{
-    PatrolTickSummary, patrol_schema_is_ready, run_due_patrols, set_target_monitoring,
-    target_monitoring_enabled,
+    PatrolTickSummary, patrol_schema_is_ready, run_due_patrols, set_group_for_many,
+    set_monitoring_for_many, set_target_monitoring, target_monitoring_enabled,
 };
 pub use producer_runtime::{
     MediaBlobAdmission, MediaUploadFinalizeClaim, MediaUploadSession, ProducerRuntimeError,

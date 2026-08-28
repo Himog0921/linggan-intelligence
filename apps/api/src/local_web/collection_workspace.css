@@ -289,3 +289,13 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-src-failure { margin:11px 0 0; max-width:720px; padding:9px 12px; background:var(--v7-bad-soft); color:var(--v7-black); font-size:13px; line-height:1.7; }
 .c-src-failure b { margin-right:9px; padding:2px 7px; background:var(--v7-bad-fill); color:var(--v7-white); font:800 10px var(--lgi-font-mono); letter-spacing:.09em; }
 .c-src-head-count { text-align:right; color:var(--v7-muted); font:600 11px var(--lgi-font-mono); letter-spacing:0; text-transform:none; }
+
+/* 批量选择与深度建档独立列 */
+.c-src-head,.c-src-row { grid-template-columns:48px 52px minmax(220px,1.5fr) 132px 140px 148px 108px 120px 96px; }
+.c-src-pick { display:flex; align-items:center; justify-content:center; }
+.c-src-pick input { width:15px; height:15px; accent-color:var(--v7-black); cursor:pointer; }
+.c-src-group { display:block; margin-top:4px; color:var(--v7-ghost); font-size:11px; }
+.c-src-archive { display:flex; align-items:center; }
+.c-src-batch { display:flex; align-items:center; gap:9px; flex-wrap:wrap; padding:14px 12px; border-top:2px solid var(--v7-black); }
+.c-src-batch-label { color:var(--v7-muted); font-size:12px; }
+.c-src-batch input { height:32px; min-width:200px; padding:0 10px; border:1px solid var(--v7-line-strong); border-radius:4px; background:var(--v7-white); color:var(--v7-black); font-size:12px; }

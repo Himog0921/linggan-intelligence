@@ -51,12 +51,21 @@ pub fn render_stored_targets(
     let list = format!(
         r#"<section class="c-sources">
               {failure}
-              <div class="c-src-head">
-                <div>编号</div><div>博主信息</div><div>平台 / 分组</div>
-                <div>状态</div><div>档案健康度</div><div>更新时间</div>
-                <div class="c-src-head-count">{count} 个来源</div>
-              </div>
-              <div class="c-src-rows">{rows}</div>
+              <form class="c-src-form" method="post" action="/collection/targets/batch">
+                <div class="c-src-head">
+                  <div>选择</div><div>编号</div><div>博主信息</div><div>平台 / 分组</div>
+                  <div>状态</div><div>档案健康度</div><div>深度建档</div><div>更新时间</div>
+                  <div class="c-src-head-count">{count} 个来源</div>
+                </div>
+                <div class="c-src-rows">{rows}</div>
+                <div class="c-src-batch">
+                  <span class="c-src-batch-label">对勾选的来源：</span>
+                  <button class="c-btn-quiet" type="submit" name="action" value="monitor_on">开启巡检</button>
+                  <button class="c-btn-quiet" type="submit" name="action" value="monitor_off">暂停巡检</button>
+                  <input name="group_name" maxlength="40" placeholder="分组名（留空取消分组）" />
+                  <button class="c-btn-quiet" type="submit" name="action" value="set_group">设置分组</button>
+                </div>
+              </form>
             </section>"#,
         count = targets.len(),
         failure = failure_markup(error),
@@ -92,6 +101,9 @@ fn failure_markup(error: Option<&str>) -> String {
             "深度建档暂缓：已经有一份在途的工作覆盖同一目标，等它跑完而不是再开一个。"
         }
         "archive_lease_failed" => "工单已建立但没能发出租约。工位可能刚刚掉线。",
+        "batch_nothing_selected" => "没有勾选任何来源。先在左侧勾上要操作的行，再点批量动作。",
+        "batch_unknown_action" => "这个批量动作系统不认识。",
+        "batch_failed" => "批量操作没有完成，没有任何来源被改动。",
         "monitoring_toggle_failed" => "巡检开关没有切换成功。",
         "read_model_not_connected" => "本机读投影未接通，这次没有写入任何东西。",
         _ => "上一次动作没有完成。",
@@ -123,6 +135,7 @@ fn target_row(
 
     format!(
         r#"<div class="c-src-row">
+                <div class="c-src-pick"><input type="checkbox" name="target_ref" value="{target_ref}" aria-label="选择 {name}" /></div>
                 <div class="c-src-index">{index:02}</div>
                 <div class="c-src-identity">{avatar}
                   <div class="c-src-identity-text">
@@ -132,12 +145,14 @@ fn target_row(
                     {counts}
                   </div>
                 </div>
-                <div class="c-src-platform"><span class="c-src-tag">{platform}</span>{kind}</div>
+                <div class="c-src-platform"><span class="c-src-tag">{platform}</span>{kind}<span class="c-src-group">{group}</span></div>
                 <div class="c-src-status">{status}</div>
                 <div class="c-src-health">{health}</div>
+                <div class="c-src-archive">{archive_action}</div>
                 <div class="c-src-updated">{stored}</div>
                 <div class="c-src-actions">{actions}</div>
               </div>"#,
+        target_ref = target.target_ref,
         index = index + 1,
         avatar = avatar_markup(facts),
         name = escape(name),
@@ -146,10 +161,12 @@ fn target_row(
         counts = count_markup(facts, is_creator),
         platform = escape(&target.platform.to_uppercase()),
         kind = escape(if is_creator { "创作者" } else { "关键词" }),
+        group = escape(target.group_name.as_deref().unwrap_or("未分组")),
         status = status_lines(target),
         health = archive_health(archive, is_creator),
         stored = escape(&target.first_stored_at),
-        actions = row_actions(target, is_creator, archive),
+        archive_action = archive_action(target, is_creator, archive),
+        actions = row_actions(target, is_creator),
     )
 }
 
@@ -227,9 +244,14 @@ fn layer_line(label: &str, count: i64, has_any: bool) -> String {
     }
 }
 
-/// 行内操作。**只放真实存在的动作**：深度建档与巡检开关都走与 API、与定时巡检完全
-/// 相同的那条授权链，按钮只是把「人现在想要这个」表达出来。
-fn row_actions(
+/// 深度建档列。
+///
+/// 从「操作」里拆出来单独成列（Mog 于 2026-08-28 要求）：它与巡检开关不是同一类动作
+/// ——巡检是长期节奏的开关，深度建档是一次性的、重的、会吃掉当天大半额度的动作。
+/// 混在一列里，一个日常操作和一个重动作会长得一样。
+///
+/// **不绕过授权链**：它走的是与定时巡检、与 API 完全相同的那条路。
+fn archive_action(
     target: &ObservationTarget,
     is_creator: bool,
     archive: Option<&ArchiveCompleteness>,
@@ -237,25 +259,25 @@ fn row_actions(
     if !is_creator {
         return r#"<span class="c-src-muted">—</span>"#.to_owned();
     }
-    // 已经建过档就不再显示建档按钮：重复全量建档只会把当天额度吃光，而增量本来就是
-    // 巡检在做的事。
-    let archived = archive.is_some_and(|value| value.works_listed > 0);
-    let archive_button = if archived {
-        String::new()
-    } else {
-        format!(
-            r#"<form method="post" action="/collection/targets/archive">
-                  <input type="hidden" name="target_ref" value="{target_ref}" />
-                  <button class="c-btn-primary c-src-btn" type="submit">深度建档</button>
-                </form>"#,
-            target_ref = target.target_ref,
-        )
-    };
+    // 已经建过档就不再显示按钮：重复全量建档只会把当天额度吃光，增量是巡检在做的事。
+    if archive.is_some_and(|value| value.works_listed > 0) {
+        return r#"<span class="c-src-line c-src-ready">已建档</span>"#.to_owned();
+    }
     format!(
-        r#"{archive_button}<form method="post" action="/collection/targets/monitoring">
-                  <input type="hidden" name="target_ref" value="{target_ref}" />
-                  <button class="c-btn-quiet" type="submit">{action}</button>
-                </form>"#,
+        r#"<button class="c-btn-primary c-src-btn" type="submit"
+                  formaction="/collection/targets/archive" name="row_target_ref" value="{target_ref}">深度建档</button>"#,
+        target_ref = target.target_ref,
+    )
+}
+
+/// 行内操作：只剩巡检开关。
+fn row_actions(target: &ObservationTarget, is_creator: bool) -> String {
+    if !is_creator {
+        return r#"<span class="c-src-muted">—</span>"#.to_owned();
+    }
+    format!(
+        r#"<button class="c-btn-quiet" type="submit"
+                  formaction="/collection/targets/monitoring" name="row_target_ref" value="{target_ref}">{action}</button>"#,
         target_ref = target.target_ref,
         action = if target.monitoring_enabled {
             "暂停巡检"
@@ -265,7 +287,7 @@ fn row_actions(
     )
 }
 
-/// 小红书号优先/// 小红书号优先，采不到才退回平台 ID——小红书号是人能对上的那个。
+/// 小红书号优先/// 小红书号优先/// 小红书号优先，采不到才退回平台 ID——小红书号是人能对上的那个。
 fn identity_display(target: &ObservationTarget) -> String {
     fact_text(target.identity_facts.as_ref(), "redId")
         .unwrap_or_else(|| target.identity_key.clone())
@@ -353,6 +375,7 @@ mod tests {
             lifecycle_state: "pending_decision".to_owned(),
             first_stored_at: "2026-08-26T20:00:00+08".to_owned(),
             monitoring_enabled: false,
+            group_name: None,
         }
     }
 

@@ -33,9 +33,10 @@ use linggan_evidence::{
     read_archive_completeness, read_discovery_library, read_local_media_blob,
     read_media_upload_session, read_runtime_library, read_station_overview,
     record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, request_and_admit, retire_station, set_target_monitoring,
-    start_local_attempt, start_producer_attempt, station_schema_is_ready, store_pending_target,
-    submit_local_package, submit_producer_package, target_monitoring_enabled,
+    release_media_upload_finalize, request_and_admit, retire_station, set_group_for_many,
+    set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
+    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
+    target_monitoring_enabled,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -280,6 +281,7 @@ fn router(state: LocalWebState) -> Router {
             "/collection/targets/archive",
             post(collection_target_deep_archive),
         )
+        .route("/collection/targets/batch", post(collection_targets_batch))
         .route("/collection/operations", get(collection_operations))
         .route("/collection/attention", get(collection_attention))
         .route("/collection/tasks", get(collection_tasks))
@@ -2238,7 +2240,9 @@ fn creator_id_from(raw: &str) -> Option<String> {
 
 #[derive(serde::Deserialize)]
 struct MonitoringForm {
-    target_ref: uuid::Uuid,
+    /// 行内按钮用的字段名与批量勾选的 `target_ref` **必须不同**：两者在同一个表单里，
+    /// 点单行按钮时勾选的行也会一起提交，同名会让单行动作莫名其妙作用到一批目标上。
+    row_target_ref: uuid::Uuid,
 }
 
 /// COLLECTION-001 · 切换一个观察目标的巡检开关。
@@ -2250,10 +2254,10 @@ async fn collection_target_toggle_monitoring(
     axum::extract::Form(form): axum::extract::Form<MonitoringForm>,
 ) -> Redirect {
     if let Some(database) = state.database.database() {
-        let enabled = target_monitoring_enabled(database, form.target_ref)
+        let enabled = target_monitoring_enabled(database, form.row_target_ref)
             .await
             .unwrap_or(false);
-        if set_target_monitoring(database, form.target_ref, !enabled, None)
+        if set_target_monitoring(database, form.row_target_ref, !enabled, None)
             .await
             .is_err()
         {
@@ -2279,7 +2283,7 @@ async fn collection_target_deep_archive(
     };
     let outcome = request_and_admit(
         database,
-        form.target_ref,
+        form.row_target_ref,
         "deep_archive",
         "从观察目标页发起深度建档",
         "person",
@@ -2301,6 +2305,88 @@ async fn collection_target_deep_archive(
         .is_err()
     {
         return Redirect::to("/collection/targets?error=archive_lease_failed");
+    }
+    Redirect::to("/collection/targets")
+}
+
+/// COLLECTION-001 · 对勾选的来源做批量操作。
+///
+/// 手工解析表单而不是用 `Form<T>`：`serde_urlencoded` **不支持同名字段收成数组**
+/// （已知限制，不是用法问题），而勾选框正是靠重复的 `target_ref` 表达「选了哪几行」。
+/// 与其为此引一个新依赖，不如就地解析这一个请求。
+///
+/// 批量是**明确指定开或关**，不是逐个取反：取反会让一次操作里有的开有的关，人点了
+/// 「批量开启巡检」却得到一半被关掉，那不是他要的。
+///
+/// 分组只写本机记录，不影响任何采集行为——它是人自己的分类方式。
+/// 解析 `application/x-www-form-urlencoded`，**保留同名字段的全部取值**。
+///
+/// 只做这一件事，因此不引新依赖：`serde_urlencoded` 丢掉重复键，而勾选框正是靠重复键
+/// 表达「选了哪几行」。
+fn parse_form_pairs(body: &[u8]) -> Vec<(String, String)> {
+    String::from_utf8_lossy(body)
+        .split('&')
+        .filter(|pair| !pair.is_empty())
+        .map(|pair| {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            (percent_decode(key), percent_decode(value))
+        })
+        .collect()
+}
+
+/// 表单编码把空格写成 `+`，其余非 ASCII 写成 `%XX`。
+fn percent_decode(value: &str) -> String {
+    let raw = value.replace('+', " ");
+    let bytes = raw.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%'
+            && index + 2 < bytes.len()
+            && let Ok(byte) = u8::from_str_radix(&raw[index + 1..index + 3], 16)
+        {
+            out.push(byte);
+            index += 3;
+            continue;
+        }
+        out.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+async fn collection_targets_batch(State(state): State<LocalWebState>, body: Bytes) -> Redirect {
+    let Some(database) = state.database.database() else {
+        return Redirect::to("/collection/targets?error=read_model_not_connected");
+    };
+    let mut action = String::new();
+    let mut group_name: Option<String> = None;
+    let mut target_refs: Vec<uuid::Uuid> = Vec::new();
+    for (key, value) in parse_form_pairs(&body) {
+        match key.as_str() {
+            "action" => action = value,
+            "group_name" => group_name = Some(value),
+            // 认不出的 uuid 直接忽略：一个坏值不该让整批操作失败，而它也不会被误当成
+            // 别的目标——解析不出来就不在名单里。
+            "target_ref" => {
+                if let Ok(parsed) = uuid::Uuid::parse_str(&value) {
+                    target_refs.push(parsed);
+                }
+            }
+            _ => {}
+        }
+    }
+    if target_refs.is_empty() {
+        return Redirect::to("/collection/targets?error=batch_nothing_selected");
+    }
+    let outcome = match action.as_str() {
+        "monitor_on" => set_monitoring_for_many(database, &target_refs, true).await,
+        "monitor_off" => set_monitoring_for_many(database, &target_refs, false).await,
+        "set_group" => set_group_for_many(database, &target_refs, group_name.as_deref()).await,
+        _ => return Redirect::to("/collection/targets?error=batch_unknown_action"),
+    };
+    if outcome.is_err() {
+        return Redirect::to("/collection/targets?error=batch_failed");
     }
     Redirect::to("/collection/targets")
 }

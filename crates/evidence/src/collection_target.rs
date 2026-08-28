@@ -38,6 +38,8 @@ pub struct ObservationTarget {
     /// 巡检是否开着。与 `lifecycle_state` 分开：一个目标可以「已建档」但被人暂停巡检，
     /// 压成一个状态就分不清「没在跑」是因为暂停还是因为还没建档。
     pub monitoring_enabled: bool,
+    /// 人给的分组名。为空表示未分组——那是正常状态，不是缺失。
+    pub group_name: Option<String>,
 }
 
 /// Whether a store call created a target or found the one already there.
@@ -144,6 +146,8 @@ pub struct TargetCounts {
     pub creator: i64,
     pub keyword: i64,
     pub archiving: i64,
+    /// 巡检开着的来源数。**按开关数，不按生命周期数**——一个目标可以「已建档」但被人
+    /// 暂停巡检，用生命周期数会把它算成在巡检。
     pub monitoring: i64,
 }
 
@@ -158,7 +162,7 @@ pub async fn count_targets(database: &Database) -> Result<TargetCounts, Collecti
                 count(*) FILTER (WHERE target_kind = 'creator'), \
                 count(*) FILTER (WHERE target_kind = 'keyword'), \
                 count(*) FILTER (WHERE lifecycle_state = 'archiving'), \
-                count(*) FILTER (WHERE lifecycle_state = 'monitoring') \
+                count(*) FILTER (WHERE monitoring_enabled) \
          FROM collection_observation_target",
     )
     .fetch_one(database.pool())
@@ -194,7 +198,7 @@ pub async fn list_targets(
     };
     let rows = sqlx::query_as::<_, ListedTargetRow>(
         "SELECT target_ref, platform, target_kind, identity_key, display_name, identity_facts, \
-                source, lifecycle_state, first_stored_at::text, monitoring_enabled \
+                source, lifecycle_state, first_stored_at::text, monitoring_enabled, group_name \
          FROM collection_observation_target \
          WHERE ($1::text IS NULL OR target_kind = $1) \
            AND ($2::text IS NULL OR lifecycle_state = $2) \
@@ -209,6 +213,7 @@ pub async fn list_targets(
         .into_iter()
         .map(|row| ObservationTarget {
             monitoring_enabled: row.9,
+            group_name: row.10,
             ..ObservationTarget::from((
                 row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8,
             ))
@@ -229,6 +234,7 @@ type ListedTargetRow = (
     String,
     Option<String>,
     bool,
+    Option<String>,
 );
 
 pub async fn list_targets_in_state(
@@ -385,8 +391,9 @@ impl From<TargetRow> for ObservationTarget {
             source: row.6,
             lifecycle_state: row.7,
             first_stored_at: row.8.unwrap_or_default(),
-            // 只有列表查询读它；其它入口保持 false，由调用方按需另读。
+            // 只有列表查询读它们；其它入口保持默认，由调用方按需另读。
             monitoring_enabled: false,
+            group_name: None,
         }
     }
 }

@@ -117,6 +117,48 @@ async fn dispatch_one_patrol(database: &Database, target_ref: Uuid) -> Result<Op
     Ok(Some(()))
 }
 
+/// 批量设置巡检开关。
+///
+/// 批量是**明确指定开或关**，不是逐个取反：取反会让一次操作里有的开有的关，人点了
+/// 「批量开启巡检」却得到一半关掉，那不是他要的。
+pub async fn set_monitoring_for_many(
+    database: &Database,
+    target_refs: &[Uuid],
+    enabled: bool,
+) -> Result<u64, sqlx::Error> {
+    if target_refs.is_empty() {
+        return Ok(0);
+    }
+    Ok(sqlx::query(
+        "UPDATE collection_observation_target SET monitoring_enabled = $2 \
+         WHERE target_ref = ANY($1)",
+    )
+    .bind(target_refs)
+    .bind(enabled)
+    .execute(database.pool())
+    .await?
+    .rows_affected())
+}
+
+/// 批量设置分组。空名字表示取消分组——那是一个正常操作，不是错误输入。
+pub async fn set_group_for_many(
+    database: &Database,
+    target_refs: &[Uuid],
+    group_name: Option<&str>,
+) -> Result<u64, sqlx::Error> {
+    if target_refs.is_empty() {
+        return Ok(0);
+    }
+    Ok(sqlx::query(
+        "UPDATE collection_observation_target SET group_name = $2 WHERE target_ref = ANY($1)",
+    )
+    .bind(target_refs)
+    .bind(group_name.map(str::trim).filter(|value| !value.is_empty()))
+    .execute(database.pool())
+    .await?
+    .rows_affected())
+}
+
 /// 读一个目标当前的巡检开关。切换是「读了再写反」，不是盲写——盲写会让两个入口同时
 /// 操作时互相覆盖。
 pub async fn target_monitoring_enabled(
