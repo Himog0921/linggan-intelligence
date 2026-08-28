@@ -291,7 +291,6 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-src-head-count { text-align:right; color:var(--v7-muted); font:600 11px var(--lgi-font-mono); letter-spacing:0; text-transform:none; }
 
 /* 批量选择与深度建档独立列 */
-.c-src-head,.c-src-row { grid-template-columns:48px 52px minmax(220px,1.5fr) 132px 140px 148px 108px 120px 96px; }
 .c-src-pick { display:flex; align-items:center; justify-content:center; }
 .c-src-pick input { width:15px; height:15px; accent-color:var(--v7-black); cursor:pointer; }
 .c-src-group { display:block; margin-top:4px; color:var(--v7-ghost); font-size:11px; }
@@ -299,3 +298,25 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-src-batch { display:flex; align-items:center; gap:9px; flex-wrap:wrap; padding:14px 12px; border-top:2px solid var(--v7-black); }
 .c-src-batch-label { color:var(--v7-muted); font-size:12px; }
 .c-src-batch input { height:32px; min-width:200px; padding:0 10px; border:1px solid var(--v7-line-strong); border-radius:4px; background:var(--v7-white); color:var(--v7-black); font-size:12px; }
+
+/* 博主信息固定宽度并截断——它会长到把健康度挤没；健康度需要宽度放进度条与读数。 */
+.c-src-head,.c-src-row { grid-template-columns:44px 48px 300px 116px 132px 264px 104px 116px 92px; }
+.c-src-identity-text { min-width:0; max-width:100%; }
+.c-src-identity-text b,.c-src-id,.c-src-bio,.c-src-counts {
+  display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%;
+}
+
+/* 档案健康度：分段进度条 + 逐项读数 + 缺口。 */
+.c-hp { min-width:0; }
+.c-hp-top { display:flex; align-items:baseline; gap:8px; }
+.c-hp-key { color:var(--v7-ghost); font:700 9px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-hp-state { flex:1; color:var(--v7-warn); font:700 9px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-hp-percent { color:var(--v7-black); font:800 15px/1 var(--lgi-font-mono); letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+.c-hp-bar { display:flex; gap:2px; margin-top:5px; }
+.c-hp-tick { display:block; width:100%; height:12px; background:var(--v7-sunken); }
+.c-hp-tick-on { background:var(--v7-warn-fill); }
+.c-hp-metrics,.c-hp-foot { display:flex; gap:12px; margin-top:5px; color:var(--v7-muted); font:10px var(--lgi-font-mono); font-variant-numeric:tabular-nums; }
+.c-hp-metrics { color:var(--v7-body); font-size:11px; }
+.c-hp-gap { color:var(--v7-warn); }
+.c-hp-none { display:flex; flex-direction:column; gap:3px; }
+.c-hp-hint { color:var(--v7-muted); font-size:11px; line-height:1.5; }

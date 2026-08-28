@@ -195,53 +195,81 @@ fn status_lines(target: &ObservationTarget) -> String {
     )
 }
 
-/// 档案完整度。
+/// 档案健康度：进度条 + 逐项读数 + 缺口。
 ///
-/// **分层计数，不给百分比**（取自内容工作台 `AuthorArchiveJob` 的
-/// `totalDiscovered` / `detailSucceeded` / `detailFailed`）。百分比会把「没采到」与
-/// 「采了但失败」压成同一个数字，而这两件事的处置完全不同：前者要派任务，后者要查原因。
+/// 算法照内容工作台 `monitor-archive-health.tsx`：**分母为 0 的维度不参与百分比**
+/// （`applicableMetrics.filter(total > 0)`），完全没有作品清单时**干脆不画进度条**——
+/// 那边对未建档的来源显示的是「ARCHIVE NOT CREATED」，不是一个 0%。
 ///
-/// 被隔离的记录单列出来——它们采到了却没进语料库，不列就彻底消失在视野外。
+/// 这一条很要紧：一个还没采过作品清单的博主，画一根 0% 的条会让人以为「采过了但什么
+/// 都没有」，而事实是根本没采。**没有分母就没有百分比。**
 fn archive_health(archive: Option<&ArchiveCompleteness>, is_creator: bool) -> String {
     if !is_creator {
         return r#"<span class="c-src-muted">关键词来源不生成博主档案</span>"#.to_owned();
     }
     let Some(archive) = archive.filter(|value| !value.is_untouched()) else {
-        return r#"<span class="c-src-line c-src-neutral">尚未采集</span>"#.to_owned();
+        return r#"<div class="c-hp-none"><span class="c-hp-key">ARCHIVE NOT CREATED</span>
+                  <span class="c-hp-hint">当前来源尚未采集。</span></div>"#
+            .to_owned();
     };
-    let mut lines = String::new();
-    lines.push_str(&layer_line(
-        "作者档案",
-        archive.author_profile_captures,
-        archive.author_profile_captures > 0,
-    ));
-    lines.push_str(&layer_line(
-        "作品清单",
-        archive.works_listed,
-        archive.works_listed > 0,
-    ));
-    lines.push_str(&layer_line(
-        "逐篇详情",
-        archive.details_captured,
-        archive.details_captured > 0,
-    ));
-    if archive.quarantined > 0 {
-        lines.push_str(&format!(
-            r#"<span class="c-src-line c-src-warning">已隔离 {}</span>"#,
-            archive.quarantined
-        ));
+    // 作品清单是所有逐篇指标的分母。没有它就只报已知的事实，不给百分比。
+    if archive.works_listed == 0 {
+        return format!(
+            r#"<div class="c-hp-none"><span class="c-hp-key">NO WORK SET</span>
+               <span class="c-hp-hint">已取得作者档案 {profile}，但还没有作品清单——逐篇进度没有分母。</span></div>"#,
+            profile = archive.author_profile_captures,
+        );
     }
-    lines
+
+    let total = archive.works_listed;
+    let done = archive.details_captured.min(total);
+    let percent = (done * 100 / total).clamp(0, 100);
+    let missing = total - done;
+
+    format!(
+        r#"<div class="c-hp">
+              <div class="c-hp-top">
+                <span class="c-hp-key">ARCHIVE HEALTH</span>
+                <span class="c-hp-state">{state}</span>
+                <span class="c-hp-percent">{percent}%</span>
+              </div>
+              <div class="c-hp-bar" role="img" aria-label="档案完成度 {percent}%">{ticks}</div>
+              <div class="c-hp-metrics"><span>详情 {done}/{total}</span></div>
+              <div class="c-hp-foot"><span>作品 {total}</span>{quarantined}{gap}</div>
+            </div>"#,
+        state = if percent >= 100 {
+            "COMPLETE"
+        } else {
+            "NEEDS COMPLETION"
+        },
+        ticks = health_ticks(percent),
+        quarantined = if archive.quarantined > 0 {
+            format!("<span>已隔离 {}</span>", archive.quarantined)
+        } else {
+            String::new()
+        },
+        gap = if missing > 0 {
+            format!(r#"<span class="c-hp-gap">缺详情 {missing}</span>"#)
+        } else {
+            String::new()
+        },
+    )
 }
 
-/// 一层的读数。**0 写成「未采集」而不是「0 条」**：0 条看起来像一个已知的结论
-/// （「这个博主没有作品」），未采集才是事实。
-fn layer_line(label: &str, count: i64, has_any: bool) -> String {
-    if has_any {
-        format!(r#"<span class="c-src-line c-src-ready">{label} {count}</span>"#)
-    } else {
-        format!(r#"<span class="c-src-line c-src-neutral">{label} 未采集</span>"#)
-    }
+/// 分段进度条。分段而不是一根实心条，是为了让「还差多少格」可数——一根渐变条只能看出
+/// 大概，数格子能看出确切进度。
+fn health_ticks(percent: i64) -> String {
+    const TICKS: i64 = 24;
+    let filled = (percent * TICKS / 100).clamp(0, TICKS);
+    (0..TICKS)
+        .map(|index| {
+            if index < filled {
+                r#"<i class="c-hp-tick c-hp-tick-on"></i>"#
+            } else {
+                r#"<i class="c-hp-tick"></i>"#
+            }
+        })
+        .collect()
 }
 
 /// 深度建档列。
