@@ -33,9 +33,15 @@ required_terms=(
   "候选顺序不推断组件"
   "槽位级来源观察组"
   "candidateRef"
+  "primary"
   "sourceField"
   "observedAt"
   "expiresAtState"
+  "expiresAt"
+  "failureReason"
+  "startedAt"
+  "endedAt"
+  "terminal"
 )
 
 for term in "${required_terms[@]}"; do
@@ -72,12 +78,23 @@ rg -q --fixed-strings "if (event.key === 'ArrowRight')" "$reference"
 rg -q --fixed-strings "if (event.key === 'ArrowLeft')" "$reference"
 rg -q --fixed-strings "if (event.key === 'Home')" "$reference"
 rg -q --fixed-strings "if (event.key === 'End')" "$reference"
+rg -q --fixed-strings "if (event.key === 'Home') next = visibleRows[0]" "$reference"
+rg -q --fixed-strings "if (event.key === 'End') next = visibleRows[visibleRows.length - 1]" "$reference"
 rg -q --fixed-strings 'selectedRow.focus({ preventScroll: true })' "$reference"
 rg -q --fixed-strings '.work-row:not([aria-selected="true"]):hover' "$reference"
 rg -q --fixed-strings '.scenario-control button:not([aria-pressed="true"]):hover' "$reference"
 rg -q --fixed-strings 'origin-group/slot-006/g3' "$reference"
 rg -q --fixed-strings 'download/still/synthetic-006 → candidate/still/A' "$reference"
 rg -q --fixed-strings 'download/motion/synthetic-006 → candidate/motion/M1' "$reference"
+rg -q --fixed-strings 'primary false' "$reference"
+rg -q --fixed-strings 'expiresAtState UNKNOWN / expiresAt null' "$reference"
+rg -q --fixed-strings 'failureReason source_unavailable · terminal FAILED' "$reference"
+
+if rg -q --fixed-strings '.work-row:not([aria-selected="true"]):hover { background: var(--lgi-canvas-low); transform:' "$reference" ||
+   rg -q --fixed-strings '.work-row:not([aria-selected="true"]):hover { background: var(--lgi-canvas-low); box-shadow: var(--lgi-shadow-brutal)' "$reference"; then
+  echo "ordinary list row hover must not move or use the 4px hard shadow" >&2
+  exit 1
+fi
 
 if rg -q --fixed-strings 'const itemCopy' "$reference" ||
    rg -q --fixed-strings 'origin-group/still/synthetic-006' "$reference" ||
