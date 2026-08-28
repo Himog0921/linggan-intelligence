@@ -149,7 +149,17 @@ pub async fn admit_media_blob(
             .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
     }
     let materialization_ref = Uuid::new_v4();
-    let local_asset_path = format!("/api/local/media/{sha256}");
+    let qualified_read_schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('linggan_material_media_disposition_event') IS NOT NULL",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    let local_asset_path = if qualified_read_schema_ready {
+        format!("/api/local/media/{materialization_ref}/{sha256}")
+    } else {
+        format!("/api/local/media/{sha256}")
+    };
     sqlx::query("INSERT INTO linggan_media_materialization (materialization_ref,blob_sha256,download_attempt_ref,local_asset_path) VALUES ($1,$2,$3,$4)")
         .bind(materialization_ref).bind(sha256).bind(download_attempt_ref).bind(&local_asset_path)
         .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
@@ -430,20 +440,6 @@ fn media_upload_session_from_row(row: &sqlx::postgres::PgRow) -> MediaUploadSess
         next_offset: row.get("received_byte_size"),
         state: row.get("state"),
     }
-}
-
-pub async fn read_local_media_blob(
-    database: &Database,
-    sha256: &str,
-) -> Result<Option<(String, String)>, sqlx::Error> {
-    if !crate::material_disposition::blob_is_readable(database, sha256).await? {
-        return Ok(None);
-    }
-    sqlx::query("SELECT mime_type,storage_key FROM linggan_media_blob WHERE sha256 = $1")
-        .bind(sha256)
-        .fetch_optional(database.pool())
-        .await
-        .map(|row| row.map(|row| (row.get("mime_type"), row.get("storage_key"))))
 }
 
 /// Runtime packages become a deliberately narrow read projection for the Evidence Library. It
@@ -811,13 +807,16 @@ async fn insert_record_dispositions(
     for (ordinal, record) in package.records().iter().enumerate() {
         let beyond_quota = maximum_quota
             .is_some_and(|quota| i64::try_from(ordinal).unwrap_or(i64::MAX) >= i64::from(quota));
-        let media_identity_conflict = task_binding_valid
-            && package.package_kind() == "media_slots"
-            && crate::material_media::identity_conflicts(tx, package, record).await?;
+        let media_identity_conflict =
+            if task_binding_valid && package.package_kind() == "media_slots" {
+                crate::material_media::identity_conflict_reason(tx, package, record).await?
+            } else {
+                None
+            };
         let (disposition, reason) = if !task_binding_valid {
             ("quarantined", "task_package_contract_mismatch")
-        } else if media_identity_conflict {
-            ("quarantined", "media_slot_identity_conflict")
+        } else if let Some(reason) = media_identity_conflict {
+            ("quarantined", reason)
         } else if let Some(disposition) =
             crate::material_contract_validation::record_disposition(package, ordinal, record)
         {

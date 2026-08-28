@@ -2,6 +2,7 @@ mod collection;
 mod collection_intake;
 mod collection_targets_view;
 mod evidence_page;
+mod local_media_routes;
 #[cfg(test)]
 mod material_cursor_tests;
 mod material_projection;
@@ -38,13 +39,12 @@ use linggan_evidence::{
     grant_authorization, ingest_discovery_package, issue_work_order_lease, list_targets,
     list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
     open_claim_window, producer_runtime_has_packages, producer_runtime_schema_is_ready,
-    read_archive_completeness, read_discovery_library, read_local_media_blob,
-    read_media_upload_session, read_runtime_library, read_station_overview, read_target,
-    record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, request_and_admit, retire_station, set_group_for_many,
-    set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
-    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
-    target_monitoring_enabled,
+    read_archive_completeness, read_discovery_library, read_media_upload_session,
+    read_runtime_library, read_station_overview, read_target, record_media_download_failure,
+    record_media_upload_chunk, register_station, release_media_upload_finalize, request_and_admit,
+    retire_station, set_group_for_many, set_monitoring_for_many, set_target_monitoring,
+    start_local_attempt, start_producer_attempt, station_schema_is_ready, store_pending_target,
+    submit_local_package, submit_producer_package, target_monitoring_enabled,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -265,8 +265,12 @@ fn router(state: LocalWebState) -> Router {
             post(finalize_media_upload_route),
         )
         .route(
-            "/api/local/media/{sha256}",
-            get(read_local_media_blob_route),
+            "/api/local/media/{materialization_ref}/{sha256}",
+            get(local_media_routes::materialization),
+        )
+        .route(
+            "/api/local/derivative/{derivative_ref}",
+            get(local_media_routes::derivative),
         )
         .route("/api/local/evidence-library", get(evidence_library_json))
         .merge(collection_api_routes())
@@ -1542,57 +1546,6 @@ async fn acquire_media_session_guard(
         sessions: Arc::clone(&state.active_media_sessions),
         session_ref,
     })
-}
-
-async fn read_local_media_blob_route(
-    State(state): State<LocalWebState>,
-    Path(sha256): Path<String>,
-) -> Response {
-    if !is_sha256(&sha256) {
-        return local_producer_error(axum::http::StatusCode::NOT_FOUND, "local_media_not_found");
-    }
-    let Some(database) = state.database.database() else {
-        return local_producer_error(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "producer_not_connected",
-        );
-    };
-    match read_local_media_blob(database, &sha256).await {
-        Ok(Some((mime_type, storage_key))) => {
-            match fs::read(local_media_root().join(storage_key)) {
-                Ok(bytes) => {
-                    let Ok(content_type) = HeaderValue::from_str(&mime_type) else {
-                        return local_producer_error(
-                            axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                            "local_media_metadata_invalid",
-                        );
-                    };
-                    (
-                        [
-                            (header::CONTENT_TYPE, content_type),
-                            (
-                                header::CACHE_CONTROL,
-                                HeaderValue::from_static("private, max-age=31536000, immutable"),
-                            ),
-                        ],
-                        bytes,
-                    )
-                        .into_response()
-                }
-                Err(_) => local_producer_error(
-                    axum::http::StatusCode::NOT_FOUND,
-                    "local_media_bytes_unavailable",
-                ),
-            }
-        }
-        Ok(None) => {
-            local_producer_error(axum::http::StatusCode::NOT_FOUND, "local_media_not_found")
-        }
-        Err(_) => local_producer_error(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "local_media_metadata_unavailable",
-        ),
-    }
 }
 
 fn local_media_root() -> PathBuf {

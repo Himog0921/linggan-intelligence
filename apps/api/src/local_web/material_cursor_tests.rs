@@ -62,6 +62,14 @@ async fn cursor_freezes_as_of_rejects_corruption_and_avoids_cross_page_duplicate
     assert_eq!(second.pointer("/asOf").and_then(Value::as_str), Some(as_of));
     assert_eq!(
         second
+            .pointer("/cards")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0),
+        "cursor pages must not repeat the unpaginated legacy cards"
+    );
+    assert_eq!(
+        second
             .pointer("/items")
             .and_then(Value::as_array)
             .map(Vec::len),
@@ -96,6 +104,33 @@ async fn cursor_freezes_as_of_rejects_corruption_and_avoids_cross_page_duplicate
     );
     assert_eq!(
         get_status(&database, "/api/local/evidence-library?sort=relevance").await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        get_status(
+            &database,
+            "/api/local/evidence-library?window=last_7_days&cursor=garbage"
+        )
+        .await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        get_status(
+            &database,
+            &format!("/api/local/evidence-library?window=last_7_days&cursor={cursor}")
+        )
+        .await,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(
+        get_status(
+            &database,
+            &format!(
+                "/api/local/evidence-library?cursor={}",
+                cursor_with_future_as_of(cursor)
+            )
+        )
+        .await,
         StatusCode::BAD_REQUEST
     );
 }
@@ -142,6 +177,70 @@ async fn a_late_accepted_older_observation_does_not_replace_the_latest_observed_
             .and_then(Value::as_str),
         Some("2026-08-28T10:00:00Z")
     );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn scan_budget_returns_an_honest_continuation_without_rescanning_non_matches() {
+    let database = proof_database("material_cursor_scan_budget").await;
+    seed_details(&database, 0, 205, false).await;
+    let first = get_json(
+        &database,
+        "/api/local/evidence-library?restriction=WITHDRAWN_OR_RESTRICTED",
+    )
+    .await;
+    assert_eq!(
+        first.pointer("/scanLimited").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        first.pointer("/scannedCount").and_then(Value::as_u64),
+        Some(200)
+    );
+    assert_eq!(
+        first
+            .pointer("/items")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
+    let cursor = first.pointer("/cursor").and_then(Value::as_str).unwrap();
+    let second = get_json(
+        &database,
+        &format!("/api/local/evidence-library?restriction=WITHDRAWN_OR_RESTRICTED&cursor={cursor}"),
+    )
+    .await;
+    assert_eq!(
+        second.pointer("/scanLimited").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        second.pointer("/scannedCount").and_then(Value::as_u64),
+        Some(5)
+    );
+    assert_eq!(second.pointer("/cursor"), Some(&Value::Null));
+}
+
+fn cursor_with_future_as_of(cursor: &str) -> String {
+    let mut parts = cursor.split('.');
+    assert_eq!(parts.next(), Some("m1"));
+    let encoded = parts.next().unwrap();
+    let bytes = (0..encoded.len())
+        .step_by(2)
+        .map(|index| u8::from_str_radix(&encoded[index..index + 2], 16).unwrap())
+        .collect::<Vec<_>>();
+    let mut payload: Value = serde_json::from_slice(&bytes).unwrap();
+    payload["asOf"] = json!("2999-01-01T00:00:00Z");
+    let encoded = serde_json::to_vec(&payload)
+        .unwrap()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    let checksum = Sha256::digest(format!("material-keyset-v1:{encoded}").as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("m1.{encoded}.{checksum}")
 }
 
 async fn seed_older_detail_version(database: &Database) {

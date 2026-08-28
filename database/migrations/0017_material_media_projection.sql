@@ -1,6 +1,12 @@
 -- MATERIAL-MEDIA-001
 -- Source-observation extension, complete candidate assertions, and append-only disposition facts.
 
+ALTER TABLE linggan_media_materialization
+    DROP CONSTRAINT linggan_media_materialization_local_asset_path_check,
+    ADD CONSTRAINT linggan_media_materialization_local_asset_path_check
+        CHECK (local_asset_path ~ '^/api/local/media/[0-9a-f]{64}$'
+            OR local_asset_path ~ '^/api/local/media/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{64}$');
+
 CREATE TABLE linggan_material_media_origin (
     observation_ref uuid PRIMARY KEY REFERENCES linggan_media_observation(observation_ref),
     content_public_ref uuid NOT NULL REFERENCES linggan_material_content(public_ref),

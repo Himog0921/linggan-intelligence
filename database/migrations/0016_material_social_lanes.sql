@@ -44,8 +44,15 @@ CREATE TABLE linggan_material_comment (
     FOREIGN KEY (package_ref, record_ordinal)
         REFERENCES linggan_runtime_record_disposition(package_ref, record_ordinal),
     CHECK ((body_state = 'KNOWN') = (body_text IS NOT NULL)),
-    CHECK ((NOT is_reply AND root_comment_external_id = comment_external_id AND parent_comment_external_id IS NULL)
-        OR (is_reply AND parent_comment_external_id IS NOT NULL))
+    CHECK ((NOT is_reply
+            AND root_comment_external_id = comment_external_id
+            AND parent_comment_external_id IS NULL
+            AND parent_identity_source_field IS NULL)
+        OR (is_reply
+            AND root_comment_external_id <> comment_external_id
+            AND parent_comment_external_id IS NOT NULL
+            AND parent_comment_external_id <> comment_external_id
+            AND parent_identity_source_field IN ('parentCommentId','replyToCommentId')))
 );
 
 CREATE INDEX linggan_material_comment_identity_idx

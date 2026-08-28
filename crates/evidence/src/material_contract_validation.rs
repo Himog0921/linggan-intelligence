@@ -161,7 +161,7 @@ fn author_record_valid(package: &ProducerCapturePackage, record: &Value) -> bool
             })
 }
 
-fn duplicate_value(
+pub(crate) fn duplicate_value(
     package: &ProducerCapturePackage,
     record_ordinal: usize,
     pointer: &str,

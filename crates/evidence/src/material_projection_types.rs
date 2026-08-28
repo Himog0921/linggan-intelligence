@@ -12,6 +12,8 @@ pub struct MaterialLibraryProjection {
     pub as_of: String,
     pub cursor: Option<String>,
     pub truncated: bool,
+    pub scan_limited: bool,
+    pub scanned_count: usize,
 }
 
 #[derive(Debug, Serialize)]

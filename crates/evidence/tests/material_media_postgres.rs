@@ -122,6 +122,8 @@ async fn database_identity_conflict_quarantines_only_the_bad_slot_and_duplicate_
 
     let target = serde_json::json!({"contentExternalId":"note-media-duplicate"});
     let duplicate = media_record("note-media-duplicate", "image", 1, "duplicate");
+    let mut duplicate_with_distinct_observation = duplicate.clone();
+    duplicate_with_distinct_observation["observationRef"] = serde_json::json!(uuid::Uuid::new_v4());
     submit_custom_package(
         &database,
         "xhs",
@@ -130,7 +132,7 @@ async fn database_identity_conflict_quarantines_only_the_bad_slot_and_duplicate_
         "media_slots",
         "xhs",
         serde_json::json!({"target":target,"layers":[coverage_layer("media_slots",2)]}),
-        vec![duplicate.clone(), duplicate],
+        vec![duplicate, duplicate_with_distinct_observation],
     )
     .await;
     let duplicate_quarantines: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_runtime_record_disposition WHERE reason='media_slot_identity_duplicate'")
@@ -138,11 +140,123 @@ async fn database_identity_conflict_quarantines_only_the_bad_slot_and_duplicate_
     assert_eq!(duplicate_quarantines, 2);
 }
 
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn observation_identity_conflicts_and_same_package_duplicates_quarantine_only_bad_records() {
+    let database = proof_database("material_media_observation_conflicts").await;
+    let historical_observation = uuid::Uuid::new_v4();
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-observation-conflict"}),
+        media_record_with_observation(
+            "note-observation-conflict",
+            "image",
+            1,
+            "historical",
+            historical_observation,
+        ),
+    )
+    .await;
+    let target = serde_json::json!({"contentExternalId":"note-observation-conflict"});
+    submit_custom_package(
+        &database,
+        "xhs",
+        &["media_slots"],
+        target.clone(),
+        "media_slots",
+        "xhs",
+        serde_json::json!({"target":target,"layers":[coverage_layer("media_slots",2)]}),
+        vec![
+            media_record_with_observation(
+                "note-observation-conflict",
+                "image",
+                2,
+                "conflict",
+                historical_observation,
+            ),
+            media_record("note-observation-conflict", "image", 3, "healthy"),
+        ],
+    )
+    .await;
+    let reasons: Vec<String> = sqlx::query_scalar(
+        "SELECT reason FROM linggan_runtime_record_disposition disposition \
+         JOIN linggan_runtime_capture_package package USING(package_ref) \
+         WHERE package.coverage #>> '{target,contentExternalId}'='note-observation-conflict' \
+         ORDER BY package.accepted_at,record_ordinal",
+    )
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert!(reasons.contains(&"media_observation_identity_conflict".to_owned()));
+    assert_eq!(
+        reasons.last().map(String::as_str),
+        Some("media_origin_contract_valid")
+    );
+
+    let duplicate_observation = uuid::Uuid::new_v4();
+    let target = serde_json::json!({"contentExternalId":"note-observation-duplicate"});
+    submit_custom_package(
+        &database,
+        "xhs",
+        &["media_slots"],
+        target.clone(),
+        "media_slots",
+        "xhs",
+        serde_json::json!({"target":target,"layers":[coverage_layer("media_slots",3)]}),
+        vec![
+            media_record_with_observation(
+                "note-observation-duplicate",
+                "image",
+                1,
+                "duplicate-a",
+                duplicate_observation,
+            ),
+            media_record_with_observation(
+                "note-observation-duplicate",
+                "image",
+                2,
+                "duplicate-b",
+                duplicate_observation,
+            ),
+            media_record("note-observation-duplicate", "image", 3, "healthy"),
+        ],
+    )
+    .await;
+    let duplicate_reasons: Vec<String> = sqlx::query_scalar(
+        "SELECT reason FROM linggan_runtime_record_disposition disposition \
+         JOIN linggan_runtime_capture_package package USING(package_ref) \
+         WHERE package.coverage #>> '{target,contentExternalId}'='note-observation-duplicate' \
+         ORDER BY record_ordinal",
+    )
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        duplicate_reasons,
+        vec![
+            "media_observation_identity_duplicate",
+            "media_observation_identity_duplicate",
+            "media_origin_contract_valid",
+        ]
+    );
+}
+
 fn media_record(content_id: &str, role: &str, ordinal: i32, uri_suffix: &str) -> serde_json::Value {
+    media_record_with_observation(content_id, role, ordinal, uri_suffix, uuid::Uuid::new_v4())
+}
+
+fn media_record_with_observation(
+    content_id: &str,
+    role: &str,
+    ordinal: i32,
+    uri_suffix: &str,
+    observation_ref: uuid::Uuid,
+) -> serde_json::Value {
     let uri = format!("https://media.example/{uri_suffix}");
     serde_json::json!({
         "kind":"media_slot","slotKey":format!("xhs:{content_id}:{role}:{ordinal}"),
-        "observationRef":uuid::Uuid::new_v4(),"slot":{"role":role,"ordinal":ordinal},
+        "observationRef":observation_ref,"slot":{"role":role,"ordinal":ordinal},
         "observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-08-28T10:00:00Z"},
         "sourceObject":{"platform":"xhs","type":"content","externalId":content_id}
     })

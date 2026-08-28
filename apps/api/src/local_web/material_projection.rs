@@ -69,6 +69,7 @@ pub(super) async fn compose_json(
         || query.lane_state().is_some()
         || query.media_kind().is_some()
         || query.restriction().is_some()
+        || query.cursor().is_some()
     {
         object.insert("cards".to_owned(), Value::Array(Vec::new()));
     }
@@ -81,6 +82,8 @@ pub(super) async fn compose_json(
         object.insert("asOf".to_owned(), Value::Null);
         object.insert("cursor".to_owned(), Value::Null);
         object.insert("truncated".to_owned(), Value::Bool(false));
+        object.insert("scanLimited".to_owned(), Value::Bool(false));
+        object.insert("scannedCount".to_owned(), Value::from(0));
         return Ok(value);
     }
     let material = read_material_library(database, query).await?;
@@ -98,5 +101,10 @@ pub(super) async fn compose_json(
         material.cursor.map_or(Value::Null, Value::String),
     );
     object.insert("truncated".to_owned(), Value::Bool(material.truncated));
+    object.insert("scanLimited".to_owned(), Value::Bool(material.scan_limited));
+    object.insert(
+        "scannedCount".to_owned(),
+        Value::from(material.scanned_count),
+    );
     Ok(value)
 }

@@ -12,7 +12,9 @@
 
 基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope，旧 `cards` 暂时保留兼容。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。
 
-独立审查后的隔离 PostgreSQL 16 proof 已覆盖 Task/Package/Record/Coverage 的平台、能力与目标绑定，逐 Record 隔离且健康 sibling 不连坐，评论/回复关系冲突与同包重复身份拒绝，首次同槽位并发 generation，作品级查询，固定 `asOf` 的 50 项 keyset cursor，筛选补页，loopback API，评论正文与外部身份不返回，历史已取得副本保留，以及媒体处置对列表和 `/api/local/media/<sha256>` 直读的共同门禁。合成本地 blob 在处置前已证明 HTTP 200 与精确 bytes，`BYTES_CLEANED` 后不可读；OCR derivative 在处置前有可用 source location，受限后状态传播且 source location 被抑制。proof database/container/volume 均已清理。该 Draft 未回填历史 Package，未访问真实平台、未取得真实平台媒体字节、未运行 OCR/ASR provider、未改 Evidence Library HTML/CSS，也未部署或完成用户验收。
+独立审查后的隔离 PostgreSQL 16 proof 已覆盖 Task/Package/Record/Coverage 的平台、能力与目标绑定，逐 Record 隔离且健康 sibling 不连坐，评论/回复数据库关系约束，媒体 `observationRef` 历史冲突与同包重复隔离，首次同槽位并发 generation，作品级查询，以及固定 `asOf` 的 50 项 keyset cursor。读取会先把 lane/media-kind 存在性下推，再在单次最多扫描 200 个作品的预算内补页；预算触发时返回 `scanLimited + cursor`，后续从最后扫描键继续，不重复扫描已排除对象。
+
+原件读取不再使用裸 SHA 作为资格：普通投影只返回 `/api/local/media/<materializationRef>/<sha256>`，服务端验证 Materialization 与 Blob 关系，并按 Blob 全局、Slot 和具体 Materialization 三层处置决定可读性；共享 Blob 的另一份合格 Materialization 不会被错误连坐。Derivative 使用独立的 `/api/local/derivative/<derivativeRef>` 受控句柄，`inputScope` 不再冒充位置。两类可撤销资产都返回 `private, no-store, max-age=0`。合成本地原件和 OCR derivative 均已证明处置前 HTTP 200 与精确 bytes、处置后不可读；这仍不是 OCR provider 或真实平台媒体证明。proof database/container/volume 均已清理。该 Draft 未回填历史 Package，未访问真实平台、未取得真实平台媒体字节、未运行 OCR/ASR provider、未改 Evidence Library HTML/CSS，也未部署或完成用户验收。
 
 ### GOV-006 / Issue #82（决策治理收敛）
 

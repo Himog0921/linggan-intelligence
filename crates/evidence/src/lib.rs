@@ -10,6 +10,7 @@ mod ingress;
 mod local_discovery;
 mod local_producer;
 mod material_admission;
+mod material_asset_read;
 mod material_contract_validation;
 mod material_cursor;
 mod material_disposition;
@@ -57,8 +58,12 @@ pub use local_producer::{
     LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome,
     create_manual_task, local_producer_schema_is_ready, start_local_attempt, submit_local_package,
 };
+pub use material_asset_read::{
+    LocalMaterialAsset, read_local_derivative, read_local_materialization,
+};
 pub use material_disposition::{
-    MaterialMediaDisposition, record_derivative_disposition, record_materialization_disposition,
+    MaterialMediaDisposition, record_blob_disposition, record_derivative_disposition,
+    record_materialization_disposition,
 };
 pub use material_processing::record_media_derivative_completion;
 pub use material_projection::{
@@ -74,10 +79,9 @@ pub use producer_runtime::{
     MediaBlobAdmission, MediaUploadFinalizeClaim, MediaUploadSession, ProducerRuntimeError,
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, admit_media_blob,
     begin_media_upload, claim_media_upload_finalize, complete_media_upload, create_producer_task,
-    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_local_media_blob,
-    read_media_upload_session, read_runtime_library, record_media_download_failure,
-    record_media_upload_chunk, release_media_upload_finalize, start_producer_attempt,
-    submit_producer_package,
+    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_media_upload_session,
+    read_runtime_library, record_media_download_failure, record_media_upload_chunk,
+    release_media_upload_finalize, start_producer_attempt, submit_producer_package,
 };
 pub use receipt::{IngressOutcome, RejectionCode};
 pub use station_read::{

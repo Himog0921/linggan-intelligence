@@ -19,6 +19,7 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 const MATERIAL_PAGE_SIZE: usize = 50;
+const MATERIAL_SCAN_BUDGET: usize = 200;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MaterialReadError {
@@ -37,25 +38,6 @@ pub async fn read_material_library(
     if query.sort() != EvidenceQuerySort::LatestDiscovery {
         return Err(MaterialReadError::UnsupportedSort);
     }
-    if query.published_window().is_some() {
-        let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-            .fetch_one(database.pool())
-            .await?;
-        return Ok(MaterialLibraryProjection {
-            items: Vec::new(),
-            query_scope: "accepted_typed_material_strict_published_time",
-            as_of,
-            cursor: None,
-            truncated: false,
-        });
-    }
-    read_latest_material_page(database, query).await
-}
-
-async fn read_latest_material_page(
-    database: &Database,
-    query: &EvidenceQuery,
-) -> Result<MaterialLibraryProjection, MaterialReadError> {
     let cursor = query
         .cursor()
         .map(|value| material_cursor::decode(query, value).ok_or(MaterialReadError::InvalidCursor))
@@ -73,6 +55,27 @@ async fn read_latest_material_page(
         }
     };
     validate_cursor_times(&mut tx, cursor.as_ref(), &as_of).await?;
+    if query.published_window().is_some() {
+        tx.commit().await?;
+        return Ok(MaterialLibraryProjection {
+            items: Vec::new(),
+            query_scope: "accepted_typed_material_strict_published_time",
+            as_of,
+            cursor: None,
+            truncated: false,
+            scan_limited: false,
+            scanned_count: 0,
+        });
+    }
+    read_latest_material_page(tx, query, cursor, as_of).await
+}
+
+async fn read_latest_material_page(
+    mut tx: Transaction<'_, Postgres>,
+    query: &EvidenceQuery,
+    cursor: Option<material_cursor::MaterialCursor>,
+    as_of: String,
+) -> Result<MaterialLibraryProjection, MaterialReadError> {
     let text = query.text().filter(|value| !value.trim().is_empty());
     let mut scan_observed_at = cursor
         .as_ref()
@@ -82,13 +85,17 @@ async fn read_latest_material_page(
         .as_ref()
         .map(|cursor| cursor.last_content_external_id.clone());
     let mut items = Vec::with_capacity(MATERIAL_PAGE_SIZE + 1);
-    loop {
+    let mut scanned_count = 0;
+    let mut scan_limited = false;
+    'scan: loop {
         let rows = sqlx::query(crate::material_query_sql::MATERIAL_PAGE_SQL)
             .bind(text)
             .bind(&as_of)
             .bind(scan_observed_at.as_deref())
             .bind(scan_platform.as_deref())
             .bind(scan_content_external_id.as_deref())
+            .bind(query.lane().map(|lane| lane.as_str()))
+            .bind(query.media_kind().map(|kind| kind.as_purpose()))
             .fetch_all(&mut *tx)
             .await?;
         let exhausted = rows.len() < MATERIAL_PAGE_SIZE + 1;
@@ -96,9 +103,14 @@ async fn read_latest_material_page(
             break;
         }
         for row in rows {
+            if scanned_count == MATERIAL_SCAN_BUDGET {
+                scan_limited = true;
+                break 'scan;
+            }
             scan_observed_at = Some(row.get("observed_at"));
             scan_platform = Some(row.get("platform"));
             scan_content_external_id = Some(row.get("content_external_id"));
+            scanned_count += 1;
             let mut item = material_item(row, text);
             enrich_discovery_material(&mut tx, &mut item, &as_of).await?;
             material_social_read::enrich(&mut tx, &mut item, text, &as_of).await?;
@@ -114,11 +126,11 @@ async fn read_latest_material_page(
             break;
         }
     }
-    let truncated = items.len() > MATERIAL_PAGE_SIZE;
-    if truncated {
+    let page_overflow = items.len() > MATERIAL_PAGE_SIZE;
+    if page_overflow {
         items.truncate(MATERIAL_PAGE_SIZE);
     }
-    let next_cursor = if truncated {
+    let next_cursor = if page_overflow {
         items.last().map(|item| {
             material_cursor::encode(
                 query,
@@ -131,6 +143,22 @@ async fn read_latest_material_page(
                 ),
             )
         })
+    } else if scan_limited {
+        scan_observed_at
+            .zip(scan_platform)
+            .zip(scan_content_external_id)
+            .map(|((observed_at, platform), content_external_id)| {
+                material_cursor::encode(
+                    query,
+                    material_cursor::for_last_item(
+                        query,
+                        as_of.clone(),
+                        observed_at,
+                        platform,
+                        content_external_id,
+                    ),
+                )
+            })
     } else {
         None
     };
@@ -140,7 +168,9 @@ async fn read_latest_material_page(
         query_scope: "accepted_typed_material_text_only",
         as_of,
         cursor: next_cursor,
-        truncated,
+        truncated: page_overflow || scan_limited,
+        scan_limited,
+        scanned_count,
     })
 }
 

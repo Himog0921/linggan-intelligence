@@ -77,7 +77,7 @@ async fn read_slots(
              origin.display_order_state,origin.display_order_basis,origin.source_generation,origin.candidate_set_state, \
              origin.composite_state,origin.live_photo_still_state,origin.live_photo_motion_state,observation.observed_at, \
              (SELECT count(*) FROM linggan_material_media_candidate candidate WHERE candidate.observation_ref=origin.observation_ref) AS candidate_count, \
-             replica.materialization_ref,replica.local_asset_path,replica.verified_at,replica.materialization_observation_ref, \
+             replica.materialization_ref,replica.verified_at,replica.materialization_observation_ref, \
              blob.sha256,blob.mime_type,blob.byte_size,current_download.download_attempt_ref,current_download.terminal_reason, \
              disposition.restricted AS disposition_restricted,disposition.cleaned AS disposition_cleaned \
          FROM current_origin origin JOIN linggan_media_observation observation USING (observation_ref) \
@@ -119,7 +119,14 @@ impl SlotAccumulator {
         let disposition_cleaned = row
             .get::<Option<bool>, _>("disposition_cleaned")
             .unwrap_or(false);
-        let mut local_asset_url: Option<String> = row.get("local_asset_path");
+        let materialization_ref = row.get::<Option<Uuid>, _>("materialization_ref");
+        let blob_sha256 = row.get::<Option<String>, _>("sha256");
+        let mut local_asset_url =
+            materialization_ref
+                .zip(blob_sha256.as_deref())
+                .map(|(materialization_ref, sha256)| {
+                    format!("/api/local/media/{materialization_ref}/{sha256}")
+                });
         let bytes_state = match (disposition_restricted, disposition_cleaned) {
             (true, _) => {
                 self.restricted = true;
@@ -204,7 +211,7 @@ async fn read_derivatives(
 ) -> Result<(Vec<Value>, &'static str, &'static str, bool), sqlx::Error> {
     let derivative_rows = sqlx::query(
         "SELECT job.job_ref,job.slot_key,job.processor_kind,job.processor_version,job.input_scope, \
-             event.state,event.reason,derivative.derivative_ref,derivative.derivative_kind, \
+             event.state,event.reason,derivative.derivative_ref,derivative.derivative_kind,derivative.storage_key, \
              disposition.restricted AS disposition_restricted \
          FROM linggan_media_processing_job job JOIN linggan_media_slot slot USING (slot_key) \
          LEFT JOIN LATERAL (SELECT state,reason FROM linggan_media_processing_job_event event WHERE event.job_ref=job.job_ref AND occurred_at <= $2::timestamptz ORDER BY occurred_at DESC LIMIT 1) event ON true \
@@ -249,7 +256,22 @@ async fn read_derivatives(
         if kind == "asr" {
             asr_state = state;
         }
-        derivatives.push(serde_json::json!({"jobRef":row.get::<Uuid,_>("job_ref"),"slotKey":row.get::<Option<String>,_>("slot_key"),"kind":row.get::<Option<String>,_>("derivative_kind"),"state":state,"dispositionState":if restricted{"WITHDRAWN_OR_RESTRICTED"}else{"UNKNOWN"},"processorVersion":row.get::<String,_>("processor_version"),"sourceLocation":if restricted{Value::Null}else{serde_json::json!({"inputScope":row.get::<String,_>("input_scope")})},"reason":reason}));
+        let derivative_ref = row.get::<Option<Uuid>, _>("derivative_ref");
+        let storage_key = row.get::<Option<String>, _>("storage_key");
+        let source_location = if restricted {
+            Value::Null
+        } else if derivative_ref.is_some()
+            && storage_key
+                .as_deref()
+                .is_some_and(|value| !value.is_empty())
+        {
+            serde_json::json!({
+                "localAssetUrl":format!("/api/local/derivative/{}",derivative_ref.expect("checked"))
+            })
+        } else {
+            Value::Null
+        };
+        derivatives.push(serde_json::json!({"jobRef":row.get::<Uuid,_>("job_ref"),"slotKey":row.get::<Option<String>,_>("slot_key"),"kind":row.get::<Option<String>,_>("derivative_kind"),"state":state,"dispositionState":if restricted{"WITHDRAWN_OR_RESTRICTED"}else{"UNKNOWN"},"processorVersion":row.get::<String,_>("processor_version"),"sourceScope":row.get::<String,_>("input_scope"),"sourceLocation":source_location,"reason":reason}));
     }
     Ok((derivatives, ocr_state, asr_state, any_restricted))
 }

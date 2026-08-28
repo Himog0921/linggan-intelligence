@@ -69,29 +69,30 @@ pub async fn record_derivative_disposition(
     Ok(event_ref)
 }
 
-pub(crate) async fn blob_is_readable(
+pub async fn record_blob_disposition(
     database: &Database,
-    sha256: &str,
-) -> Result<bool, sqlx::Error> {
-    let schema_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('linggan_material_media_disposition_event') IS NOT NULL",
-    )
-    .fetch_one(database.pool())
-    .await?;
-    if !schema_ready {
-        return Ok(true);
+    blob_sha256: &str,
+    disposition: MaterialMediaDisposition,
+    authority_ref: &str,
+    reason: &str,
+) -> Result<Uuid, sqlx::Error> {
+    if disposition == MaterialMediaDisposition::BytesCleaned {
+        return Err(sqlx::Error::Protocol(
+            "BYTES_CLEANED requires a materialization target".to_owned(),
+        ));
     }
-    sqlx::query_scalar(
-        "SELECT NOT EXISTS (SELECT 1 FROM linggan_material_media_disposition_event event \
-         WHERE event.blob_sha256=$1 \
-            OR event.materialization_ref IN (SELECT materialization_ref FROM linggan_media_materialization WHERE blob_sha256=$1) \
-            OR event.slot_key IN (SELECT observation.slot_key FROM linggan_media_materialization materialization \
-                JOIN linggan_media_download_attempt attempt USING(download_attempt_ref) \
-                JOIN linggan_media_observation observation ON observation.observation_ref=attempt.media_observation_ref \
-                WHERE materialization.blob_sha256=$1) \
-            OR event.derivative_ref IN (SELECT derivative_ref FROM linggan_media_derivative WHERE blob_sha256=$1))",
+    let event_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_material_media_disposition_event \
+         (event_ref,blob_sha256,state,authority_ref,reason,effective_at) \
+         VALUES ($1,$2,$3,$4,$5,scope_001_now())",
     )
-    .bind(sha256)
-    .fetch_one(database.pool())
-    .await
+    .bind(event_ref)
+    .bind(blob_sha256)
+    .bind(disposition.as_str())
+    .bind(authority_ref)
+    .bind(reason)
+    .execute(database.pool())
+    .await?;
+    Ok(event_ref)
 }

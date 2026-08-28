@@ -1,5 +1,6 @@
 use super::material_projection_media_fixture::{
-    assert_disposition_precedence, complete_ocr_derivative, seed_media, seed_media_refresh,
+    assert_asset_response, assert_disposition_precedence, assert_materialization_read_contract,
+    complete_ocr_derivative, seed_media, seed_media_refresh, seed_shared_media,
 };
 use super::*;
 use axum::{
@@ -174,11 +175,25 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
     )
     .await
     .expect("synthetic verified blob materializes");
+    let shared_observation_ref = seed_shared_media(&database).await;
+    let shared_admission = admit_media_blob(
+        &database,
+        shared_observation_ref,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "image/jpeg",
+        12,
+        "blobs/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    )
+    .await
+    .expect("a second qualified materialization may share the content-addressed blob");
     let derivative_ref = complete_ocr_derivative(&database, admission.processing_jobs[1]).await;
     let blob_path = local_media_root()
         .join("blobs/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     std::fs::create_dir_all(blob_path.parent().unwrap()).unwrap();
     std::fs::write(&blob_path, b"proof-bytes!").unwrap();
+    let derivative_path = local_media_root().join("derivatives/ocr/proof");
+    std::fs::create_dir_all(derivative_path.parent().unwrap()).unwrap();
+    std::fs::write(&derivative_path, b"ocr-proof-bytes").unwrap();
     seed_media_refresh(&database).await;
     let response = app_with_database(database.clone())
         .oneshot(
@@ -193,6 +208,13 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
     let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
     let payload: Value = serde_json::from_slice(&body).unwrap();
     assert_media_payload(&payload);
+    assert_eq!(
+        payload
+            .pointer("/items/0/preview/localAssetUrl")
+            .and_then(Value::as_str),
+        Some(admission.local_asset_path.as_str()),
+        "the list and direct read use the same materialization-bound qualification handle"
+    );
     let asr = app_with_database(database.clone())
         .oneshot(
             Request::builder()
@@ -210,16 +232,36 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
             .map(Vec::len),
         Some(0)
     );
-    let blob_before = app_with_database(database.clone())
-        .oneshot(Request::builder().uri("/api/local/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").body(Body::empty()).unwrap())
-        .await.unwrap();
-    assert_eq!(blob_before.status(), StatusCode::OK);
-    assert_eq!(
-        &to_bytes(blob_before.into_body(), usize::MAX).await.unwrap()[..],
-        b"proof-bytes!"
-    );
-    assert_disposition_precedence(database, admission.materialization_ref, derivative_ref).await;
+    assert_materialization_read_contract(
+        &database,
+        &admission.local_asset_path,
+        admission.materialization_ref,
+        &shared_admission.local_asset_path,
+    )
+    .await;
+    let derivative_url = payload
+        .pointer("/items/0/inspector/derivatives")
+        .and_then(Value::as_array)
+        .and_then(|values| {
+            values
+                .iter()
+                .find(|value| value.get("kind").and_then(Value::as_str) == Some("ocr_text"))
+        })
+        .and_then(|value| value.pointer("/sourceLocation/localAssetUrl"))
+        .and_then(Value::as_str)
+        .expect("acquired OCR exposes a controlled derivative handle");
+    assert_asset_response(&database, derivative_url, b"ocr-proof-bytes").await;
+    assert_disposition_precedence(
+        database,
+        admission.materialization_ref,
+        &admission.local_asset_path,
+        &shared_admission.local_asset_path,
+        derivative_ref,
+        derivative_url,
+    )
+    .await;
     std::fs::remove_file(blob_path).unwrap();
+    std::fs::remove_file(derivative_path).unwrap();
 }
 
 fn assert_media_payload(payload: &Value) {

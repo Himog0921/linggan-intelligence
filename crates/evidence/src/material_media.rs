@@ -15,26 +15,29 @@ pub(crate) fn record_disposition(
     if package.package_kind() != "media_slots" {
         return None;
     }
-    let duplicated = record
-        .get("slotKey")
-        .and_then(Value::as_str)
-        .is_some_and(|slot_key| {
-            package
-                .records()
-                .iter()
-                .enumerate()
-                .any(|(other_ordinal, other)| {
-                    other_ordinal != record_ordinal
-                        && other.get("slotKey").and_then(Value::as_str) == Some(slot_key)
-                })
-        });
-    Some(if !duplicated && media_record(package, record).is_some() {
-        ("accepted_for_media_identity", "media_origin_contract_valid")
-    } else if duplicated {
-        ("quarantined", "media_slot_identity_duplicate")
-    } else {
-        ("quarantined", "media_origin_contract_invalid")
-    })
+    let duplicated_observation = crate::material_contract_validation::duplicate_value(
+        package,
+        record_ordinal,
+        "/observationRef",
+        record,
+    );
+    let duplicated_slot = crate::material_contract_validation::duplicate_value(
+        package,
+        record_ordinal,
+        "/slotKey",
+        record,
+    );
+    Some(
+        if !duplicated_observation && !duplicated_slot && media_record(package, record).is_some() {
+            ("accepted_for_media_identity", "media_origin_contract_valid")
+        } else if duplicated_observation {
+            ("quarantined", "media_observation_identity_duplicate")
+        } else if duplicated_slot {
+            ("quarantined", "media_slot_identity_duplicate")
+        } else {
+            ("quarantined", "media_origin_contract_invalid")
+        },
+    )
 }
 
 pub(crate) async fn insert(
@@ -82,16 +85,21 @@ pub(crate) async fn insert(
     .await
 }
 
-pub(crate) async fn identity_conflicts(
+pub(crate) async fn identity_conflict_reason(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
     record: &Value,
-) -> Result<bool, ProducerRuntimeError> {
+) -> Result<Option<&'static str>, ProducerRuntimeError> {
     let Some(media) = media_record(package, record) else {
-        return Ok(false);
+        return Ok(None);
     };
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
         .bind(media.slot_key)
+        .execute(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text,1))")
+        .bind(media.observation_ref)
         .execute(&mut **tx)
         .await
         .map_err(ProducerRuntimeError::Internal)?;
@@ -102,12 +110,22 @@ pub(crate) async fn identity_conflicts(
     .fetch_optional(&mut **tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
-    Ok(existing.is_some_and(|row| {
+    if existing.is_some_and(|row| {
         row.get::<String, _>("platform") != package.platform()
             || row.get::<String, _>("content_external_id") != media.content_id
             || row.get::<String, _>("role") != media.role
             || row.get::<i32, _>("ordinal") != media.producer_ordinal
-    }))
+    }) {
+        return Ok(Some("media_slot_identity_conflict"));
+    }
+    let observation_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM linggan_media_observation WHERE observation_ref=$1)",
+    )
+    .bind(media.observation_ref)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    Ok(observation_exists.then_some("media_observation_identity_conflict"))
 }
 
 pub(crate) async fn insert_legacy_only(

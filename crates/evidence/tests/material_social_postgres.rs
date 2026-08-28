@@ -127,6 +127,109 @@ async fn relationship_conflicts_and_same_package_duplicates_are_quarantined_per_
     assert_eq!(conflicts, 3);
 }
 
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn database_rejects_self_reply_and_invalid_parent_source_even_when_rust_is_bypassed() {
+    let database = proof_database("material_reply_database_checks").await;
+    let package_ref = submit_package(
+        &database,
+        "comments",
+        serde_json::json!({"contentExternalId":"note-db-reply-check"}),
+        serde_json::json!({
+            "kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"note-db-reply-check"},
+            "payload":{"commentId":"root-db-check","noteId":"note-db-reply-check","text":"root"}
+        }),
+    )
+    .await;
+    let content_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id='note-db-reply-check'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    for (ordinal, comment_id, root_id, parent_id, source_field) in [
+        (
+            99,
+            "self-root",
+            "self-root",
+            "root-db-check",
+            "parentCommentId",
+        ),
+        (
+            100,
+            "self-parent",
+            "root-db-check",
+            "self-parent",
+            "parentCommentId",
+        ),
+        (
+            101,
+            "bad-source",
+            "root-db-check",
+            "root-db-check",
+            "inventedField",
+        ),
+    ] {
+        sqlx::query(
+            "INSERT INTO linggan_runtime_record_disposition \
+             (package_ref,record_ordinal,disposition,reason) \
+             VALUES($1,$2,'accepted_for_library_content','direct_sql_reply_check')",
+        )
+        .bind(package_ref)
+        .bind(ordinal)
+        .execute(database.pool())
+        .await
+        .unwrap();
+        let result = sqlx::query(
+            "INSERT INTO linggan_material_comment \
+             (material_ref,content_public_ref,package_ref,record_ordinal,comment_external_id, \
+              root_comment_external_id,parent_comment_external_id,parent_identity_source_field, \
+              is_reply,body_state,observed_at) \
+             VALUES($1,$2,$3,$4,$5,$6,$7,$8,true,'UNKNOWN','2026-08-28T10:00:00Z')",
+        )
+        .bind(uuid::Uuid::new_v4())
+        .bind(content_ref)
+        .bind(package_ref)
+        .bind(ordinal)
+        .bind(comment_id)
+        .bind(root_id)
+        .bind(parent_id)
+        .bind(source_field)
+        .execute(database.pool())
+        .await;
+        assert!(
+            result.is_err(),
+            "database accepted invalid reply {comment_id}"
+        );
+    }
+    sqlx::query(
+        "INSERT INTO linggan_runtime_record_disposition \
+         (package_ref,record_ordinal,disposition,reason) \
+         VALUES($1,102,'accepted_for_library_content','direct_sql_comment_check')",
+    )
+    .bind(package_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let non_reply = sqlx::query(
+        "INSERT INTO linggan_material_comment \
+         (material_ref,content_public_ref,package_ref,record_ordinal,comment_external_id, \
+          root_comment_external_id,parent_comment_external_id,parent_identity_source_field, \
+          is_reply,body_state,observed_at) \
+         VALUES($1,$2,$3,102,'root-with-source','root-with-source',NULL,'parentCommentId', \
+                false,'UNKNOWN','2026-08-28T10:00:00Z')",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(content_ref)
+    .bind(package_ref)
+    .execute(database.pool())
+    .await;
+    assert!(
+        non_reply.is_err(),
+        "database accepted non-reply parent source"
+    );
+}
+
 fn comment_record(comment_id: &str) -> serde_json::Value {
     serde_json::json!({
         "kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"note-discussion-attack"},

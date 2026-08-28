@@ -4,15 +4,18 @@ use axum::{
     http::{Request, StatusCode},
 };
 use linggan_evidence::{
-    MaterialMediaDisposition, record_derivative_disposition, record_materialization_disposition,
-    record_media_derivative_completion,
+    MaterialMediaDisposition, record_blob_disposition, record_derivative_disposition,
+    record_materialization_disposition, record_media_derivative_completion,
 };
 use tower::ServiceExt;
 
 pub(super) async fn assert_disposition_precedence(
     database: Database,
     materialization_ref: uuid::Uuid,
+    materialization_url: &str,
+    shared_materialization_url: &str,
     derivative_ref: uuid::Uuid,
+    derivative_url: &str,
 ) {
     record_materialization_disposition(
         &database,
@@ -45,14 +48,23 @@ pub(super) async fn assert_disposition_precedence(
         cleaned.pointer("/items/0/preview/localAssetUrl"),
         Some(&Value::Null)
     );
-    let gated=app_with_database(database.clone()).oneshot(Request::builder().uri("/api/local/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").body(Body::empty()).unwrap()).await.unwrap();
+    let gated = app_with_database(database.clone())
+        .oneshot(
+            Request::builder()
+                .uri(materialization_url)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
     let gated: Value =
         serde_json::from_slice(&to_bytes(gated.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(
         gated.pointer("/code").and_then(Value::as_str),
         Some("local_media_not_found")
     );
-    assert_derivative_disposition(&database, derivative_ref).await;
+    assert_asset_response(&database, shared_materialization_url, b"proof-bytes!").await;
+    assert_derivative_disposition(&database, derivative_ref, derivative_url).await;
     record_materialization_disposition(
         &database,
         materialization_ref,
@@ -62,7 +74,7 @@ pub(super) async fn assert_disposition_precedence(
     )
     .await
     .unwrap();
-    let response = app_with_database(database)
+    let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
                 .uri("/api/local/evidence-library?restriction=WITHDRAWN_OR_RESTRICTED")
@@ -83,9 +95,30 @@ pub(super) async fn assert_disposition_precedence(
         restricted.pointer("/items/0/preview/localAssetUrl"),
         Some(&Value::Null)
     );
+    assert_asset_response(&database, shared_materialization_url, b"proof-bytes!").await;
+    record_blob_disposition(
+        &database,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        MaterialMediaDisposition::WithdrawnOrRestricted,
+        "proof-authority",
+        "global-blob-rights",
+    )
+    .await
+    .unwrap();
+    for uri in [materialization_url, shared_materialization_url] {
+        let gated = app_with_database(database.clone())
+            .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(gated.status(), StatusCode::NOT_FOUND);
+    }
 }
 
-async fn assert_derivative_disposition(database: &Database, derivative_ref: uuid::Uuid) {
+async fn assert_derivative_disposition(
+    database: &Database,
+    derivative_ref: uuid::Uuid,
+    derivative_url: &str,
+) {
     record_derivative_disposition(
         database,
         derivative_ref,
@@ -118,6 +151,63 @@ async fn assert_derivative_disposition(database: &Database, derivative_ref: uuid
         Some("WITHDRAWN_OR_RESTRICTED")
     );
     assert_eq!(derivative.get("sourceLocation"), Some(&Value::Null));
+    let gated = app_with_database(database.clone())
+        .oneshot(
+            Request::builder()
+                .uri(derivative_url)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(gated.status(), StatusCode::NOT_FOUND);
+}
+
+pub(super) async fn assert_asset_response(database: &Database, uri: &str, expected: &[u8]) {
+    let response = app_with_database(database.clone())
+        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get(axum::http::header::CACHE_CONTROL)
+            .and_then(|value| value.to_str().ok()),
+        Some("private, no-store, max-age=0")
+    );
+    assert_eq!(
+        &to_bytes(response.into_body(), usize::MAX).await.unwrap()[..],
+        expected
+    );
+}
+
+pub(super) async fn assert_materialization_read_contract(
+    database: &Database,
+    materialization_url: &str,
+    materialization_ref: uuid::Uuid,
+    shared_materialization_url: &str,
+) {
+    assert_asset_response(database, materialization_url, b"proof-bytes!").await;
+    assert_asset_response(database, shared_materialization_url, b"proof-bytes!").await;
+    for invalid_uri in [
+        format!(
+            "/api/local/media/{materialization_ref}/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        ),
+        "/api/local/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            .to_owned(),
+    ] {
+        let invalid = app_with_database(database.clone())
+            .oneshot(
+                Request::builder()
+                    .uri(invalid_uri)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(invalid.status(), StatusCode::NOT_FOUND);
+    }
 }
 
 pub(super) async fn seed_media(database: &Database) -> uuid::Uuid {
@@ -137,6 +227,30 @@ pub(super) async fn seed_media(database: &Database) -> uuid::Uuid {
     .unwrap();
     let package = json!({"contractVersion":"linggan.producer.capture-package.v1","packageRef":uuid::Uuid::new_v4(),"packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-28T10:00:00Z","capturedAt":"2026-08-28T10:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-api-media"},"layers":[{"capability":"media_slots","observed":1,"attempted":0,"acquired":0,"verified":0,"failed":0,"notAttempted":1,"unknown":0,"stoppedReason":"media_acquisition_not_started"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-api-media:image:1","observationRef":observation_ref,"slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/primary","candidateUris":["https://media.example/primary","https://media.example/backup"],"observedAt":"2026-08-28T10:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":"note-api-media"}}]});
     submit(database, producer_instance_id, task_id, attempt_id, package).await;
+    observation_ref
+}
+
+pub(super) async fn seed_shared_media(database: &Database) -> uuid::Uuid {
+    let task_id = uuid::Uuid::new_v4();
+    let producer_id = uuid::Uuid::new_v4();
+    let attempt_id = uuid::Uuid::new_v4();
+    let observation_ref = uuid::Uuid::new_v4();
+    let task = json!({"contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"manual","platform":"xhs","pageType":"synthetic_material_proof","target":{"contentExternalId":"note-api-media-shared"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]});
+    create_producer_task(
+        database,
+        &parse_producer_task_spec(&task.to_string()).unwrap(),
+    )
+    .await
+    .unwrap();
+    let attempt = json!({"contractVersion":"linggan.producer.attempt.v1","producerInstanceId":producer_id,"taskId":task_id,"attemptId":attempt_id});
+    start_producer_attempt(
+        database,
+        &parse_producer_attempt(&attempt.to_string()).unwrap(),
+    )
+    .await
+    .unwrap();
+    let package = json!({"contractVersion":"linggan.producer.capture-package.v1","packageRef":uuid::Uuid::new_v4(),"packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-28T10:00:00Z","capturedAt":"2026-08-28T10:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-api-media-shared"},"layers":[{"capability":"media_slots","observed":1,"attempted":0,"acquired":0,"verified":0,"failed":0,"notAttempted":1,"unknown":0,"stoppedReason":"media_acquisition_not_started"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-api-media-shared:image:1","observationRef":observation_ref,"slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/shared","candidateUris":["https://media.example/shared"],"observedAt":"2026-08-28T10:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":"note-api-media-shared"}}]});
+    submit(database, producer_id, task_id, attempt_id, package).await;
     observation_ref
 }
 
