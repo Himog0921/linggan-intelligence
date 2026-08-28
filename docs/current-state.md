@@ -8,6 +8,12 @@
 
 ## 当前阶段
 
+### MATERIAL-PROJECTION-001 / Issue #86（Draft stacked 实现）
+
+基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope，旧 `cards` 暂时保留兼容。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。
+
+隔离 PostgreSQL 16 proof 已覆盖 producer admission、类型化表、首次同槽位并发 generation、作品级查询、loopback API、评论脱敏、媒体本地预览、`provider_not_enabled → NOT_ENABLED` 与 `BYTES_CLEANED` URL 抑制，并验证 proof database/container/volume 清理。该 Draft 未回填历史 Package，未访问真实平台、未取得真实媒体字节、未运行 OCR/ASR provider、未改 Evidence Library HTML/CSS，也未部署或完成用户验收。
+
 ### GOV-006 / Issue #82（决策治理收敛）
 
 Mog 已明确取消“任何仓库写入都必须 Issue + Claim + 独立 worktree + Draft PR”的统一门禁。后续按风险分级：代码、数据库、运行合同、插件/release、部署/生产、真实外部动作、敏感数据/权限、不可逆处置和并行冲突继续走受保护交付；当前对话已明确授权的低风险文档勘误、索引/状态同步、进度记录和被取代卡片收口可以直接维护，但仍须核对工作区、检查 diff、运行适用治理检查并分层报告，不能借机扩成实现或自动 push/deploy。

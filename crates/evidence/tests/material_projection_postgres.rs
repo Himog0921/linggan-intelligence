@@ -19,6 +19,10 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0015_material_projection.sql"),
     "\n",
     include_str!("../../../database/migrations/0016_material_social_lanes.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0017_material_media_projection.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0018_material_discovery_lane.sql"),
 );
 
 #[tokio::test]
@@ -94,6 +98,35 @@ async fn content_detail_submission_forms_a_typed_material_with_field_sources_and
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn discovery_forms_the_same_work_identity_without_claiming_detail() {
+    let database = proof_database("material_discovery_slice").await;
+    submit_package(&database,"discovery_search",serde_json::json!({"query":"ADHD"}),serde_json::json!({
+        "kind":"discovery_card","resultPosition":1,"sourceObject":{"platform":"xhs","type":"content","externalId":"note-discovery-material"},
+        "payload":{"title":"发现面标题","authorName":"发现面作者"}
+    })).await;
+    let row=sqlx::query("SELECT finding.title,finding.title_state,content.content_external_id FROM linggan_material_discovery_finding finding JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref")
+        .fetch_one(database.pool()).await.expect("typed discovery finding exists");
+    assert_eq!(
+        row.get::<String, _>("content_external_id"),
+        "note-discovery-material"
+    );
+    assert_eq!(
+        row.get::<Option<String>, _>("title").as_deref(),
+        Some("发现面标题")
+    );
+    let detail_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_material_content_detail")
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(
+        detail_count, 0,
+        "discovery never manufactures detail material"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn comments_replies_and_author_keep_stable_identity_relationships_and_versions() {
     let database = proof_database("material_social_lanes_red").await;
     submit_package(
@@ -160,6 +193,84 @@ async fn comments_replies_and_author_keep_stable_identity_relationships_and_vers
     .fetch_one(database.pool()).await.expect("invalid reply keeps an explicit disposition");
     assert_eq!(disposition.0, "quarantined");
     assert_eq!(disposition.1, "typed_reply_relationship_invalid");
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn media_slots_preserve_all_candidates_generation_and_honest_unknown_order_components() {
+    let database = proof_database("material_media_red").await;
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-media-1"}),
+        serde_json::json!({
+            "kind":"media_slot","slotKey":"xhs:note-media-1:image:1","observationRef":uuid::Uuid::new_v4(),
+            "slot":{"role":"image","ordinal":1},
+            "observation":{"externalUri":"https://media.example/primary","candidateUris":["https://media.example/primary","https://media.example/backup"],"observedAt":"2026-08-28T10:00:00Z"},
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-media-1"}
+        }),
+    ).await;
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-media-live"}),
+        serde_json::json!({
+            "kind":"media_slot","slotKey":"xhs:note-media-live:live_photo:1","observationRef":uuid::Uuid::new_v4(),
+            "slot":{"role":"live_photo","ordinal":1},
+            "observation":{"externalUri":"https://media.example/live-unknown","candidateUris":["https://media.example/live-unknown"],"observedAt":"2026-08-28T10:00:00Z"},
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-media-live"}
+        }),
+    ).await;
+
+    let origin = sqlx::query("SELECT purpose,producer_ordinal,display_ordinal,display_order_state,source_generation,candidate_set_state FROM linggan_material_media_origin WHERE slot_key='xhs:note-media-1:image:1'")
+        .fetch_one(database.pool()).await.expect("typed media origin exists");
+    assert_eq!(origin.get::<String, _>("purpose"), "body_image");
+    assert_eq!(origin.get::<Option<i32>, _>("display_ordinal"), None);
+    assert_eq!(origin.get::<String, _>("display_order_state"), "UNKNOWN");
+    assert_eq!(origin.get::<i32, _>("source_generation"), 1);
+    let candidate_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_material_media_candidate")
+            .fetch_one(database.pool())
+            .await
+            .expect("candidate rows query");
+    assert_eq!(candidate_count, 3);
+    let live: (String,String,String) = sqlx::query_as("SELECT composite_state,live_photo_still_state,live_photo_motion_state FROM linggan_material_media_origin WHERE purpose='live_photo'")
+        .fetch_one(database.pool()).await.expect("live photo stays partial");
+    assert_eq!(live, ("PARTIAL".into(), "UNKNOWN".into(), "UNKNOWN".into()));
+    submit_package(
+        &database,"media_slots",serde_json::json!({"contentExternalId":"note-media-invalid"}),
+        serde_json::json!({"kind":"media_slot","slotKey":"xhs:note-media-invalid:image:1","observationRef":uuid::Uuid::new_v4(),"slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/primary","candidateUris":["https://media.example/different-first","https://media.example/primary"],"observedAt":"2026-08-28T10:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":"note-media-invalid"}}),
+    ).await;
+    let invalid_disposition: (String,String) = sqlx::query_as("SELECT disposition,reason FROM linggan_runtime_record_disposition disposition JOIN linggan_runtime_capture_package package USING(package_ref) WHERE package.payload::text LIKE '%different-first%'")
+        .fetch_one(database.pool()).await.expect("invalid candidate list disposition exists");
+    assert_eq!(
+        invalid_disposition,
+        ("quarantined".into(), "media_origin_contract_invalid".into())
+    );
+    let invalid_origin_count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_material_media_origin origin JOIN linggan_material_content content ON content.public_ref=origin.content_public_ref WHERE content.content_external_id='note-media-invalid'")
+        .fetch_one(database.pool()).await.expect("invalid origin count reads");
+    assert_eq!(invalid_origin_count, 0);
+
+    let concurrent_a = submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-media-concurrent"}),
+        serde_json::json!({"kind":"media_slot","slotKey":"xhs:note-media-concurrent:image:1","observationRef":uuid::Uuid::new_v4(),"slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/a","candidateUris":["https://media.example/a"],"observedAt":"2026-08-28T10:01:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":"note-media-concurrent"}}),
+    );
+    let concurrent_b = submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-media-concurrent"}),
+        serde_json::json!({"kind":"media_slot","slotKey":"xhs:note-media-concurrent:image:1","observationRef":uuid::Uuid::new_v4(),"slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/b","candidateUris":["https://media.example/b"],"observedAt":"2026-08-28T10:02:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":"note-media-concurrent"}}),
+    );
+    tokio::join!(concurrent_a, concurrent_b);
+    let generations: Vec<i32> = sqlx::query_scalar("SELECT source_generation FROM linggan_material_media_origin WHERE slot_key='xhs:note-media-concurrent:image:1' ORDER BY source_generation")
+        .fetch_all(database.pool()).await.expect("concurrent generations query");
+    assert_eq!(
+        generations,
+        vec![1, 2],
+        "first concurrent observations serialize without losing a qualified package"
+    );
 }
 
 async fn submit_package(

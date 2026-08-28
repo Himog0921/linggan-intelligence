@@ -187,6 +187,8 @@ migrate() {
   apply_migration_once "0014_target_group" "$project_root/database/migrations/0014_target_group.sql"
   apply_migration_once "0015_material_projection" "$project_root/database/migrations/0015_material_projection.sql"
   apply_migration_once "0016_material_social_lanes" "$project_root/database/migrations/0016_material_social_lanes.sql"
+  apply_migration_once "0017_material_media_projection" "$project_root/database/migrations/0017_material_media_projection.sql"
+  apply_migration_once "0018_material_discovery_lane" "$project_root/database/migrations/0018_material_discovery_lane.sql"
 }
 
 case "$command_name" in

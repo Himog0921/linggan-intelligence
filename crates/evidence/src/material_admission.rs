@@ -13,6 +13,23 @@ pub(crate) fn record_disposition<'a>(
     let accepted = "accepted_for_library_content";
     let quarantined = "quarantined";
     match package.package_kind() {
+        "discovery_search" | "profile_discovery" => {
+            let expected_kind = if package.package_kind() == "profile_discovery" {
+                "profile_discovery_card"
+            } else {
+                "discovery_card"
+            };
+            if record.get("kind").and_then(Value::as_str) != Some(expected_kind) {
+                return None;
+            }
+            Some(match discovery_record(package, record) {
+                Some(_) => (
+                    "accepted_for_library_discovery",
+                    "typed_discovery_identity_valid",
+                ),
+                None => (quarantined, "typed_discovery_identity_invalid"),
+            })
+        }
         "content_detail" => Some(
             match content_detail_record(record).is_some_and(|detail| {
                 target_string(package, "contentExternalId") == Some(detail.content_id)
@@ -84,6 +101,7 @@ pub(crate) fn record_disposition<'a>(
                 (quarantined, "typed_author_identity_invalid")
             })
         }
+        "media_slots" => crate::material_media::record_disposition(package, record),
         _ => None,
     }
 }
@@ -98,14 +116,40 @@ pub(crate) async fn insert_typed_materials(
             .await
             .map_err(ProducerRuntimeError::Internal)?;
     if !schema_ready {
+        if package.package_kind() == "media_slots" {
+            crate::material_media::insert_legacy_only(tx, package).await?;
+        }
         return Ok(());
     }
     match package.package_kind() {
+        "discovery_search" | "profile_discovery" => insert_discovery_records(tx, package).await?,
         "content_detail" => insert_content_records(tx, package).await?,
         "comments" => insert_comment_records(tx, package, false).await?,
         "replies" => insert_comment_records(tx, package, true).await?,
         "author_profile" => insert_author_records(tx, package).await?,
+        "media_slots" | "media_bytes" => crate::material_media::insert(tx, package).await?,
         _ => {}
+    }
+    Ok(())
+}
+
+async fn insert_discovery_records(
+    tx: &mut Transaction<'_, Postgres>,
+    package: &ProducerCapturePackage,
+) -> Result<(), ProducerRuntimeError> {
+    for (ordinal, record) in package.records().iter().enumerate() {
+        let Some(finding) = discovery_record(package, record) else {
+            continue;
+        };
+        let content_public_ref = ensure_content(tx, package, finding.content_id).await?;
+        let title = exact_string(finding.payload, "title");
+        let creator = exact_string(finding.payload, "authorName");
+        let published = exact_scalar_text(finding.payload, "publishedAtText");
+        sqlx::query("INSERT INTO linggan_material_discovery_finding (material_ref,content_public_ref,package_ref,record_ordinal,discovery_kind,result_position,observed_at,title,title_state,creator_display_name,creator_state,published_at_source_text,published_at_source_text_state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+            .bind(Uuid::new_v4()).bind(content_public_ref).bind(package.package_ref()).bind(i32::try_from(ordinal).expect("package record count is bounded"))
+            .bind(package.package_kind()).bind(finding.result_position).bind(package.observed_at()).bind(title).bind(known_state(title))
+            .bind(creator).bind(known_state(creator)).bind(published.as_deref()).bind(known_state(published.as_deref()))
+            .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     }
     Ok(())
 }
@@ -251,7 +295,7 @@ async fn insert_author_records(
     insert_lane_observation(tx, package, "author", None, Some(author_id), retained).await
 }
 
-async fn insert_lane_observation(
+pub(crate) async fn insert_lane_observation(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
     lane: &str,
@@ -325,6 +369,52 @@ async fn insert_content_detail(
 struct ContentDetailRecord<'a> {
     content_id: &'a str,
     payload: &'a serde_json::Map<String, Value>,
+}
+
+struct DiscoveryRecord<'a> {
+    content_id: &'a str,
+    result_position: Option<i32>,
+    payload: &'a serde_json::Map<String, Value>,
+}
+
+fn discovery_record<'a>(
+    package: &ProducerCapturePackage,
+    record: &'a Value,
+) -> Option<DiscoveryRecord<'a>> {
+    let expected_kind = if package.package_kind() == "profile_discovery" {
+        "profile_discovery_card"
+    } else {
+        "discovery_card"
+    };
+    if record.get("kind")?.as_str()? != expected_kind {
+        return None;
+    }
+    if record
+        .pointer("/sourceObject/platform")
+        .and_then(Value::as_str)
+        .is_some_and(|value| value != package.platform())
+        || record
+            .pointer("/sourceObject/type")
+            .and_then(Value::as_str)
+            .is_some_and(|value| value != "content")
+    {
+        return None;
+    }
+    let content_id = record.pointer("/sourceObject/externalId")?.as_str()?.trim();
+    let payload = record.get("payload")?.as_object()?;
+    if content_id.is_empty() {
+        return None;
+    }
+    let result_position = record
+        .get("resultPosition")
+        .and_then(Value::as_i64)
+        .filter(|value| *value > 0)
+        .and_then(|value| i32::try_from(value).ok());
+    Some(DiscoveryRecord {
+        content_id,
+        result_position,
+        payload,
+    })
 }
 
 fn content_detail_record(record: &Value) -> Option<ContentDetailRecord<'_>> {

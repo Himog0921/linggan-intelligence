@@ -33,6 +33,8 @@ pub enum ProducerRuntimeError {
     MediaObservationNotFound,
     #[error("media bytes conflict with an existing content-addressed blob")]
     MediaBlobConflict,
+    #[error("typed material identity conflicts with an existing immutable fact")]
+    MaterialIdentityConflict,
 }
 
 #[derive(Debug, Serialize)]
@@ -764,9 +766,6 @@ pub async fn submit_producer_package(
     .flatten();
     insert_record_dispositions(&mut tx, package, maximum_quota).await?;
     crate::material_admission::insert_typed_materials(&mut tx, package).await?;
-    if package.package_kind() == "media_slots" {
-        insert_media_slots(&mut tx, package).await?;
-    }
     let receipt_ref = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_runtime_submission_receipt (submission_id,task_id,attempt_id,producer_instance_id,package_hash,package_ref,receipt_ref) VALUES ($1,$2,$3,$4,$5,$6,$7)")
         .bind(submission.submission_id()).bind(submission.task_id()).bind(submission.attempt_id()).bind(submission.producer_instance_id())
@@ -779,24 +778,6 @@ pub async fn submit_producer_package(
         package_ref: package.package_ref(),
         package_kind: package.package_kind().to_owned(),
     })
-}
-
-async fn insert_media_slots(
-    tx: &mut Transaction<'_, Postgres>,
-    package: &ProducerCapturePackage,
-) -> Result<(), ProducerRuntimeError> {
-    for record in package.records() {
-        let Some(media) = media_slot_record(record) else {
-            continue;
-        };
-        sqlx::query("INSERT INTO linggan_media_slot (slot_key,platform,content_external_id,role,ordinal,first_package_ref) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (slot_key) DO NOTHING")
-            .bind(media.slot_key).bind(package.platform()).bind(media.content_id).bind(media.role).bind(media.ordinal).bind(package.package_ref())
-            .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
-        sqlx::query("INSERT INTO linggan_media_observation (observation_ref,slot_key,package_ref,observed_external_uri,observed_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (observation_ref) DO NOTHING")
-            .bind(media.observation_ref).bind(media.slot_key).bind(package.package_ref()).bind(media.external_uri).bind(package.observed_at())
-            .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
-    }
-    Ok(())
 }
 
 /// 逐条决定记录的处置。
@@ -823,12 +804,6 @@ async fn insert_record_dispositions(
             crate::material_admission::record_disposition(package, record)
         {
             disposition
-        } else if package.package_kind() == "media_slots" {
-            if media_slot_record(record).is_some() {
-                ("accepted_for_media_identity", "media_slot_contract_valid")
-            } else {
-                ("quarantined", "media_slot_contract_incomplete")
-            }
         } else if library_card_record(record) {
             if matches!(
                 package.package_kind(),
@@ -869,39 +844,6 @@ fn library_card_record(record: &Value) -> bool {
         .and_then(Value::as_str)
         .is_some_and(|value| !value.trim().is_empty())
         && record.get("payload").is_some_and(Value::is_object)
-}
-
-struct MediaSlotRecord<'a> {
-    slot_key: &'a str,
-    observation_ref: Uuid,
-    external_uri: &'a str,
-    content_id: &'a str,
-    role: &'a str,
-    ordinal: i32,
-}
-
-fn media_slot_record(record: &Value) -> Option<MediaSlotRecord<'_>> {
-    let slot_key = record.get("slotKey")?.as_str()?.trim();
-    let observation_ref = Uuid::parse_str(record.get("observationRef")?.as_str()?).ok()?;
-    let external_uri = record.pointer("/observation/externalUri")?.as_str()?.trim();
-    let content_id = record.pointer("/sourceObject/externalId")?.as_str()?.trim();
-    let role = record.pointer("/slot/role")?.as_str()?.trim();
-    let ordinal = record
-        .pointer("/slot/ordinal")?
-        .as_i64()
-        .filter(|value| *value > 0)
-        .and_then(|value| i32::try_from(value).ok())?;
-    if slot_key.is_empty() || external_uri.is_empty() || content_id.is_empty() || role.is_empty() {
-        return None;
-    }
-    Some(MediaSlotRecord {
-        slot_key,
-        observation_ref,
-        external_uri,
-        content_id,
-        role,
-        ordinal,
-    })
 }
 
 async fn existing_submission(

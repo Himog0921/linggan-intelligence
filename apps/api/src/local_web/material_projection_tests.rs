@@ -3,6 +3,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
+use linggan_evidence::admit_media_blob;
 use linggan_storage_postgres::testing::isolated_proof_schema;
 use tower::ServiceExt;
 
@@ -19,10 +20,14 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0015_material_projection.sql"),
     "\n",
     include_str!("../../../../database/migrations/0016_material_social_lanes.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0017_material_media_projection.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0018_material_discovery_lane.sql"),
     "\nINSERT INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES \
       ('0001_scope_001_capture_evidence','1'),('0002_local_001_discovery','2'), \
       ('0003_local_trusted_producer','3'),('0004_plugin_runtime_all_capabilities','4'), \
-      ('0015_material_projection','15'),('0016_material_social_lanes','16');\n",
+      ('0015_material_projection','15'),('0016_material_social_lanes','16'),('0017_material_media_projection','17'),('0018_material_discovery_lane','18');\n",
 );
 
 #[tokio::test]
@@ -30,7 +35,7 @@ const MIGRATIONS: &str = concat!(
 async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrelated_detail() {
     let database = proof_database("material_loopback_lane_filter").await;
     seed_detail(&database).await;
-    let response = app_with_database(database)
+    let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
                 .uri("/api/local/evidence-library?q=可检索&lane=comments")
@@ -94,6 +99,99 @@ async fn loopback_comment_search_returns_redacted_tree_and_truthful_unknown_cove
     assert!(!payload.to_string().contains("secret-raw-token"));
 }
 
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn loopback_media_projection_exposes_only_local_replica_and_honest_processor_candidate_states()
+ {
+    let database = proof_database("material_loopback_media").await;
+    let observation_ref = seed_media(&database).await;
+    admit_media_blob(
+        &database,
+        observation_ref,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "image/jpeg",
+        12,
+        "blobs/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    )
+    .await
+    .expect("synthetic verified blob materializes");
+    let response = app_with_database(database.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/api/local/evidence-library?lane=media_slots&mediaKind=image")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let payload: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/items/0/inspector/mediaSlots/0/origin/candidateUriCount")
+            .and_then(Value::as_i64),
+        Some(2)
+    );
+    assert_eq!(
+        payload
+            .pointer("/items/0/inspector/mediaSlots/0/origin/actualDownloadCandidateState")
+            .and_then(Value::as_str),
+        Some("UNKNOWN")
+    );
+    assert_eq!(
+        payload
+            .pointer("/items/0/preview/bytesState")
+            .and_then(Value::as_str),
+        Some("ACQUIRED")
+    );
+    assert_eq!(
+        payload
+            .pointer("/items/0/laneSummaries/7/state")
+            .and_then(Value::as_str),
+        Some("NOT_ENABLED")
+    );
+    assert!(
+        payload
+            .pointer("/items/0/preview/localAssetUrl")
+            .and_then(Value::as_str)
+            .is_some_and(|url| url.starts_with("/api/local/media/"))
+    );
+    assert!(
+        !payload.to_string().contains("media.example"),
+        "remote candidate URIs stay out of the ordinary read API"
+    );
+    let materialization_ref: uuid::Uuid =
+        sqlx::query_scalar("SELECT materialization_ref FROM linggan_media_materialization LIMIT 1")
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,materialization_ref,state,authority_ref,reason,effective_at) VALUES($1,$2,'BYTES_CLEANED','proof-authority','retention-proof',scope_001_now())")
+        .bind(uuid::Uuid::new_v4()).bind(materialization_ref).execute(database.pool()).await.unwrap();
+    let response = app_with_database(database)
+        .oneshot(
+            Request::builder()
+                .uri("/api/local/evidence-library?restriction=BYTES_CLEANED")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let cleaned: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(
+        cleaned
+            .pointer("/items/0/preview/bytesState")
+            .and_then(Value::as_str),
+        Some("BYTES_CLEANED")
+    );
+    assert_eq!(
+        cleaned.pointer("/items/0/preview/localAssetUrl"),
+        Some(&Value::Null)
+    );
+}
+
 async fn seed_detail(database: &Database) {
     let task_id = uuid::Uuid::new_v4();
     let producer_instance_id = uuid::Uuid::new_v4();
@@ -148,6 +246,26 @@ async fn seed_comment(database: &Database) {
     submit_producer_package(database, &submission)
         .await
         .unwrap();
+}
+
+async fn seed_media(database: &Database) -> uuid::Uuid {
+    let task_id = uuid::Uuid::new_v4();
+    let producer_instance_id = uuid::Uuid::new_v4();
+    let attempt_id = uuid::Uuid::new_v4();
+    let observation_ref = uuid::Uuid::new_v4();
+    let task = json!({"contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"manual","platform":"xhs","pageType":"synthetic_material_proof","target":{"contentExternalId":"note-api-media"},"capabilitiesRequested":["media_slots"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]});
+    let task = parse_producer_task_spec(&task.to_string()).unwrap();
+    create_producer_task(database, &task).await.unwrap();
+    let attempt = json!({"contractVersion":"linggan.producer.attempt.v1","producerInstanceId":producer_instance_id,"taskId":task_id,"attemptId":attempt_id});
+    let attempt = parse_producer_attempt(&attempt.to_string()).unwrap();
+    start_producer_attempt(database, &attempt).await.unwrap();
+    let package = json!({"contractVersion":"linggan.producer.capture-package.v1","packageRef":uuid::Uuid::new_v4(),"packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-28T10:00:00Z","capturedAt":"2026-08-28T10:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-api-media"},"layers":[{"capability":"media_slots","observed":1,"attempted":0,"acquired":0,"verified":0,"failed":0,"notAttempted":1,"unknown":0,"stoppedReason":"media_acquisition_not_started"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-api-media:image:1","observationRef":observation_ref,"slot":{"role":"image","ordinal":1},"observation":{"externalUri":"https://media.example/primary","candidateUris":["https://media.example/primary","https://media.example/backup"],"observedAt":"2026-08-28T10:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":"note-api-media"}}]});
+    let submission = json!({"contractVersion":"linggan.producer.capture-package.v1","producerInstanceId":producer_instance_id,"taskId":task_id,"attemptId":attempt_id,"submissionId":uuid::Uuid::new_v4(),"capturePackage":package});
+    let submission = parse_producer_submission(&submission.to_string()).unwrap();
+    submit_producer_package(database, &submission)
+        .await
+        .unwrap();
+    observation_ref
 }
 
 async fn proof_database(schema: &str) -> Database {

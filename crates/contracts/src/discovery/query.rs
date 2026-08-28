@@ -177,6 +177,17 @@ pub enum EvidenceMediaKind {
     LivePhoto,
 }
 
+impl EvidenceMediaKind {
+    pub fn as_purpose(self) -> &'static str {
+        match self {
+            Self::Cover => "cover",
+            Self::Image => "body_image",
+            Self::Video => "video",
+            Self::LivePhoto => "live_photo",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EvidenceRestriction {
@@ -185,6 +196,17 @@ pub enum EvidenceRestriction {
     BytesCleaned,
     WithdrawnOrRestricted,
     Unknown,
+}
+
+impl EvidenceRestriction {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Unrestricted => "UNRESTRICTED",
+            Self::Restricted | Self::WithdrawnOrRestricted => "WITHDRAWN_OR_RESTRICTED",
+            Self::BytesCleaned => "BYTES_CLEANED",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
 }
 
 /// Evidence Library's V1 search scope. The values only describe local matching fields; they do
