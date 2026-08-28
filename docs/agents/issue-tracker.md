@@ -56,7 +56,7 @@ Issue request
 → Claim 评论
 → 独立 branch + worktree
 → 有界修改与验证
-→ draft PR
+→ PR（是否先保持 Draft 由当前交付包决定）
 → Mog 指定时才进行 review
 → Mog 对 exact head 授权后才集成
 → 重新核验 main 与正式文档
@@ -127,7 +127,7 @@ Issue 必须把文件分为：
 
 1. Issue Claim 与 assignee；
 2. 独立 worktree/branch；
-3. draft PR 和模板完整报告；
+3. PR 和模板完整报告（是否先保持 Draft 由当前交付包决定）；
 4. 与实现者不同的 reviewer 结论；
 5. 带稳定 task-id 的 integration owner 合并次序确认；
 6. 合并后对目标 branch 和正式文档状态的重新核验；
