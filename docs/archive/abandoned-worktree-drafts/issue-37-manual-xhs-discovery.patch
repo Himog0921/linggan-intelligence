@@ -1,0 +1,299 @@
+# issue-37 未提交草稿（2026-08-28 清理 worktree 前备份）
+#
+# 分支 codex/issue-37-manual-xhs-discovery 的提交已全部合入 main（未合并数 0）。
+# 这份是它工作区里从未提交的改动：新增 xhs-search-discovery-adapter.js（146 行）
+# 并删除 service-worker.js。同日 main 走了另一条路（7f08736 保留 service worker，
+# 适配器命名为 xhs-visible-search-adapter.js），因此这是一次被放弃的重构。
+#
+# 备份而非直接丢弃：成本几乎为零，万一其中有值得借鉴的写法还能翻回来。
+
+diff --git a/plugins/linggan-browser-producer/package.json b/plugins/linggan-browser-producer/package.json
+index 9a997d5..bbaf0a1 100644
+--- a/plugins/linggan-browser-producer/package.json
++++ b/plugins/linggan-browser-producer/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "linggan-browser-producer",
+   "private": true,
+-  "version": "0.1.0",
++  "version": "0.2.0",
+   "type": "module",
+   "scripts": {
+     "build": "node ./scripts/build.mjs",
+diff --git a/plugins/linggan-browser-producer/scripts/build.mjs b/plugins/linggan-browser-producer/scripts/build.mjs
+index df34c62..fcd098e 100644
+--- a/plugins/linggan-browser-producer/scripts/build.mjs
++++ b/plugins/linggan-browser-producer/scripts/build.mjs
+@@ -28,6 +28,7 @@ const sourceFiles = [
+   "manifest.json",
+   "service-worker.js",
+   "discovery-contract.js",
++  "xhs-search-discovery-adapter.js",
+   "popup.html",
+   "popup.css",
+   "popup.js"
+diff --git a/plugins/linggan-browser-producer/src/discovery-contract.js b/plugins/linggan-browser-producer/src/discovery-contract.js
+index f9467f4..71601db 100644
+--- a/plugins/linggan-browser-producer/src/discovery-contract.js
++++ b/plugins/linggan-browser-producer/src/discovery-contract.js
+@@ -152,6 +152,12 @@ export function buildFirstDiscoveryPackage({ observedAt, stoppedReason, cards })
+   }
+ 
+   const visibleCards = cards.map((card) => visibleCard(card, observedAt));
++  if (
++    stoppedReason === "quota_reached" &&
++    visibleCards.length !== FIRST_DISCOVERY_SPEC.target.maximumQuota
++  ) {
++    throw new TypeError("quota_reached requires exactly 20 actually visible cards.");
++  }
+   const positions = new Set(visibleCards.map((card) => card.occurrence.resultPosition));
+   if (positions.size !== visibleCards.length) {
+     throw new TypeError("Discovery result positions must be unique in one package.");
+diff --git a/plugins/linggan-browser-producer/src/manifest.json b/plugins/linggan-browser-producer/src/manifest.json
+index 8ec99fc..b70f015 100644
+--- a/plugins/linggan-browser-producer/src/manifest.json
++++ b/plugins/linggan-browser-producer/src/manifest.json
+@@ -1,7 +1,7 @@
+ {
+   "manifest_version": 3,
+   "name": "Linggan Browser Producer",
+-  "version": "0.1.0",
++  "version": "0.2.0",
+   "description": "Linggan Intelligence 的受限本机 Discovery Producer。",
+   "action": {
+     "default_title": "Linggan Browser Producer",
+@@ -11,7 +11,10 @@
+     "service_worker": "service-worker.js",
+     "type": "module"
+   },
+-  "permissions": [],
++  "permissions": [
++    "activeTab",
++    "scripting"
++  ],
+   "host_permissions": [
+     "http://localhost:3000/*"
+   ]
+diff --git a/plugins/linggan-browser-producer/src/service-worker.js b/plugins/linggan-browser-producer/src/service-worker.js
+deleted file mode 100644
+index 68a5dab..0000000
+--- a/plugins/linggan-browser-producer/src/service-worker.js
++++ /dev/null
+@@ -1,70 +0,0 @@
+-export const LINGGAN_LOOPBACK_HEALTH_URL = "http://localhost:3000/health";
+-
+-const MESSAGE_TYPE = "linggan.producer.health_probe.v1";
+-
+-function loopbackHealthTarget() {
+-  const target = new URL(LINGGAN_LOOPBACK_HEALTH_URL);
+-  if (target.protocol !== "http:" || target.hostname !== "localhost" || target.port !== "3000") {
+-    throw new Error("Linggan producer only permits the fixed localhost:3000 health target.");
+-  }
+-  return target;
+-}
+-
+-function localHostResult(payload) {
+-  const isExpectedService = payload && payload.service === "linggan-local-web";
+-
+-  if (!isExpectedService) {
+-    return {
+-      state: "LOOPBACK_UNREACHABLE",
+-      detail: "localhost:3000 responded, but it did not identify as the Linggan local host."
+-    };
+-  }
+-
+-  return {
+-    state: "LOCAL_HOST_REACHABLE",
+-    detail: "Linggan local host is reachable; Discovery ingress is not implemented by this plugin card."
+-  };
+-}
+-
+-export async function probeLingganHealth(fetchImplementation = globalThis.fetch) {
+-  const target = loopbackHealthTarget();
+-
+-  try {
+-    const response = await fetchImplementation(target, {
+-      method: "GET",
+-      cache: "no-store",
+-      credentials: "omit"
+-    });
+-
+-    if (!response.ok) {
+-      return {
+-        state: "LOOPBACK_UNREACHABLE",
+-        detail: `Linggan local host returned HTTP ${response.status}.`
+-      };
+-    }
+-
+-    return localHostResult(await response.json());
+-  } catch {
+-    return {
+-      state: "LOOPBACK_UNREACHABLE",
+-      detail: "Linggan local host could not be reached."
+-    };
+-  }
+-}
+-
+-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+-  if (!message || message.type !== MESSAGE_TYPE) {
+-    return false;
+-  }
+-
+-  probeLingganHealth()
+-    .then(sendResponse)
+-    .catch(() => {
+-      sendResponse({
+-        state: "LOOPBACK_UNREACHABLE",
+-        detail: "Linggan local host could not be reached."
+-      });
+-    });
+-
+-  return true;
+-});
+### 未跟踪的新文件：xhs-search-discovery-adapter.js
+# export const XHS_SEARCH_DISCOVERY_ADAPTER_VERSION = "xhs-visible-search-card-adapter.v1";
+# 
+# /**
+#  * This function is deliberately self-contained because Chrome serializes it into the current
+#  * tab after a user gesture. It only reads rendered DOM state and never scrolls, fetches, opens a
+#  * detail page, or examines browser credentials.
+#  */
+# export function collectVisibleXhsSearchDiscovery(input) {
+#   const page = input ?? { href: globalThis.location?.href, document: globalThis.document };
+#   const href = typeof page.href === "string" ? page.href : "";
+#   const document = page.document;
+# 
+#   const fail = (code, detail, extras = {}) => ({
+#     ok: false,
+#     adapterVersion: "xhs-visible-search-card-adapter.v1",
+#     code,
+#     detail,
+#     ...extras
+#   });
+# 
+#   if (!document || typeof document.querySelectorAll !== "function") {
+#     return fail("NOT_READY_DOCUMENT_UNAVAILABLE", "当前标签页无法读取可见搜索卡片。");
+#   }
+# 
+#   let url;
+#   try {
+#     url = new URL(href);
+#   } catch {
+#     return fail("NOT_READY_XHS_SEARCH_PAGE_REQUIRED", "请在小红书 ADHD 搜索结果页打开插件。");
+#   }
+# 
+#   if (
+#     !["www.xiaohongshu.com", "xiaohongshu.com"].includes(url.hostname) ||
+#     url.pathname !== "/search_result"
+#   ) {
+#     return fail("NOT_READY_XHS_SEARCH_PAGE_REQUIRED", "请在小红书 ADHD 搜索结果页打开插件。");
+#   }
+#   if (url.searchParams.get("keyword") !== "ADHD") {
+#     return fail("NOT_READY_FIXED_ADHD_QUERY_REQUIRED", "首批采集只允许关键词 ADHD；当前页面不是该固定搜索。");
+#   }
+# 
+#   const visible = (element) => {
+#     if (!element || typeof element.getBoundingClientRect !== "function") {
+#       return false;
+#     }
+#     const rect = element.getBoundingClientRect();
+#     const viewportWidth = globalThis.innerWidth ?? 0;
+#     const viewportHeight = globalThis.innerHeight ?? 0;
+#     return rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < viewportHeight && rect.left < viewportWidth;
+#   };
+#   const directText = (element) => {
+#     const value = typeof element?.textContent === "string" ? element.textContent.replace(/\s+/g, " ").trim() : "";
+#     return value === "" ? undefined : value;
+#   };
+#   const textFrom = (root, selectors) => {
+#     for (const selector of selectors) {
+#       const candidate = root.querySelector?.(selector);
+#       if (visible(candidate)) {
+#         const value = directText(candidate);
+#         if (value) return value;
+#       }
+#     }
+#     return undefined;
+#   };
+#   const comprehensiveSelected = [...document.querySelectorAll("[role='tab'][aria-selected='true'], [aria-current='page'], .active, .selected")]
+#     .some((element) => visible(element) && directText(element) === "综合");
+#   if (!comprehensiveSelected) {
+#     return fail(
+#       "NOT_READY_COMPREHENSIVE_SORT_UNVERIFIED",
+#       "无法确认当前搜索页选中“综合”排序；未读取或提交任何卡片。"
+#     );
+#   }
+# 
+#   const contentIdFrom = (anchor) => {
+#     const rawHref = typeof anchor?.href === "string" ? anchor.href : anchor?.getAttribute?.("href");
+#     if (typeof rawHref !== "string" || rawHref.trim() === "") return undefined;
+#     let target;
+#     try {
+#       target = new URL(rawHref, href);
+#     } catch {
+#       return undefined;
+#     }
+#     const match = /^\/(?:explore|discovery\/item)\/([A-Za-z0-9_-]+)(?:\/|$)/.exec(target.pathname);
+#     return match?.[1];
+#   };
+#   const cardRootFor = (anchor) =>
+#     anchor.closest?.("[data-note-id], article, section, .note-item, .feeds-container > div") ?? anchor.parentElement ?? anchor;
+#   const cards = [];
+#   const seenContentIds = new Set();
+#   let skippedWithoutStableId = 0;
+# 
+#   for (const anchor of document.querySelectorAll("a[href]")) {
+#     const root = cardRootFor(anchor);
+#     if (!visible(root)) continue;
+#     const platformContentId = contentIdFrom(anchor);
+#     if (!platformContentId) {
+#       if (/\/(?:explore|discovery\/item)\//.test(anchor.href ?? "")) skippedWithoutStableId += 1;
+#       continue;
+#     }
+#     if (seenContentIds.has(platformContentId)) continue;
+#     seenContentIds.add(platformContentId);
+#     if (cards.length === 20) break;
+# 
+#     const title = textFrom(root, ["[class*='title']", "a.title", "[data-note-title]"]) ?? directText(anchor);
+#     const creatorDisplayName = textFrom(root, ["a[href*='/user/profile/']", "[class*='author']", "[class*='user-name']"]);
+#     const publishedAtSourceText = textFrom(root, ["[class*='time']", "[class*='date']", "[data-published-at]"]);
+#     const image = root.querySelector?.("img");
+#     const coverUrl = image?.currentSrc || image?.src;
+#     const coverCandidate = (() => {
+#       try {
+#         const parsed = new URL(coverUrl, href);
+#         return ["http:", "https:"].includes(parsed.protocol)
+#           ? { observedExternalUri: parsed.toString() }
+#           : undefined;
+#       } catch {
+#         return undefined;
+#       }
+#     })();
+# 
+#     cards.push({
+#       platformContentId,
+#       ...(title ? { title } : {}),
+#       ...(creatorDisplayName ? { creatorDisplayName } : {}),
+#       ...(publishedAtSourceText ? { publishedAtSourceText } : {}),
+#       ...(coverCandidate ? { coverCandidate } : {}),
+#       resultPosition: cards.length + 1
+#     });
+#   }
+# 
+#   if (cards.length === 0) {
+#     return fail(
+#       "NOT_READY_VISIBLE_CARD_SELECTOR_UNAVAILABLE",
+#       "没有找到带稳定内容编号的当前可见搜索卡片；未提交任何数据。",
+#       { skippedWithoutStableId }
+#     );
+#   }
+# 
+#   return {
+#     ok: true,
+#     adapterVersion: "xhs-visible-search-card-adapter.v1",
+#     observedAt: new Date().toISOString(),
+#     cards,
+#     skippedWithoutStableId,
+#     stoppedReason: cards.length === 20 ? "quota_reached" : "manual_stop"
+#   };
+# }
