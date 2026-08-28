@@ -1,12 +1,12 @@
 # PAGE-EVIDENCE-001 · 多材料证据库
 
 > 状态: 权威当前
-> 最后核对: 2026-08-28
+> 最后核对: 2026-08-29
 > 适用范围: `语料 → 证据库` 的产品任务、页面信息架构、技术呈现要求、状态与验收；运行时入口仍为 `http://localhost:3000/corpus/evidence`
-> 事实来源: Mog 批准的五卡 Evidence Library 垂直交付、Issue #85、MEDIA-RECON-001、LIDS、UI execution contract、当前 Rust Discovery-only 页面/API 与现有 PostgreSQL 证明
+> 事实来源: Mog 批准的五卡 Evidence Library 垂直交付、Issue #85/#86/#90、MEDIA-RECON-001、MATERIAL-PROJECTION-001、LIDS、UI execution contract 与当前 Rust/HTML/CSS/JS
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；本页规格不让静态原型冒充已接通运行时
 
-本规格替代本文件 2026-08-25 的 Discovery-only 产品定义。旧定义仍准确描述当前运行时已经实现的窄能力，但不再代表证据库的目标产品职责。当前运行时与目标页面必须按下文分层表达，禁止把“产品已冻结”写成“多材料读模型或页面已经实现”。
+本规格替代本文件 2026-08-25 的 Discovery-only 产品定义。Issue #90 已把本规格的可由现行合同承担的部分落到运行页；静态参考仍只证明设计场景，运行页只证明当前 Material Projection 可以诚实返回的字段和状态。禁止把“页面已接通”写成“真实平台、媒体、处理器或业务验收已完成”。
 
 ## 1. 产品结论
 
@@ -48,13 +48,13 @@
 
 | 层级 | 当前事实 | 页面必须怎样表达 |
 |---|---|---|
-| 产品与设计 | 本规格和静态原型已冻结多材料职责 | 可以作为后续后端/UI 实现合同，不得标为运行完成 |
-| 当前运行时 | `/corpus/evidence` 主要读取已接纳 discovery，并有窄 `content_detail` 投影 | 继续标注 Discovery-only/窄详情边界，不得按原型显示未接通 lane |
-| 评论/回复 | Package 可保存，当前多为 `retained_uninterpreted` | 不得把原始 Package 条数显示为可检索评论数量 |
-| 作者资料 | 当前主要用于观察目标档案回填 | 不得假装已有统一作者材料投影 |
-| 媒体槽位 | Slot/单 URI 有实现与合成 PostgreSQL 证明 | 槽位存在不等于字节已取得；多 URI、顺序、Live Photo 仍有限制 |
-| 媒体字节 | 分块上传/Blob/本地路径有合成证明 | 仅本地受控副本可预览；真实平台字节未验证 |
-| OCR/ASR 等派生 | Job/Event/Derivative 入口存在，provider 未启用 | `NOT_ENABLED`，不得显示 `PROCESSING` 或 `SUCCEEDED` |
+| 产品与设计 | 本规格和静态原型已冻结多材料职责 | 继续约束运行页，但原型内容不得冒充运行数据 |
+| 当前运行时 | `/corpus/evidence` 默认只消费 `/api/local/evidence-library`，列表以作品级 Material Projection 为事实源并按 `detailUrl` 读取 Inspector | 不混读 legacy cards；缺字段显示 `SOURCE_INCOMPLETE` |
+| 评论/回复 | 类型化 lane、Coverage 与本机授权评论研究通道已接入详情；普通列表不返回原文 | 原文只在授权详情按页读取，匿名上下文不暴露平台用户标识 |
+| 作者资料 | 详情可返回版本化作者上下文 | 页面不显示 `authorExternalId`，未知字段不补值 |
+| 媒体槽位 | Slot、来源代次、候选断言、Live Photo 组件及有界回执已进入 Material Projection | 槽位存在不等于字节已取得；回执截断但无通道 URL 时显示 `SOURCE_INCOMPLETE` |
+| 媒体字节 | Blob/Materialization/处置与受控本地 asset handle 已进入详情 | 仅 `INLINE_SAFE` 且同源受控句柄可内联；真实平台字节未验证 |
+| OCR/ASR 等派生 | Job/Event/Derivative 生命周期进入详情，provider 当前未由本卡启用 | 原样显示 `QUEUED/PROCESSING/NOT_ENABLED/FAILED/ACQUIRED/UNKNOWN`，不由 UI 推断 |
 | 静态原型 | 全部内容均为合成场景 | 首屏和每个材料区持续显示“合成参考 / 非运行数据” |
 
 ## 3. 设计方向锁
@@ -99,7 +99,7 @@ Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
 |---|---|---|---|
 | `MEDIA-RECON-001` | 卡 1 / PR #84 | 消费材料、媒体、状态与来源语义 | 修改 identity、slot、bytes、derivative 或处置合同 |
 | 多材料 read model/API | 卡 3 / Issue #86 | 冻结页面所需字段和查询语义 | 实现 Rust/SQL/API 或猜字段 |
-| 运行时页面 | 卡 4 | 提供可直接实现的 PAGE/原型/验收输入 | 修改 runtime HTML/CSS/JS |
+| 运行时页面 | 卡 4 / Issue #90 | 当前 HTML/CSS/JS 只消费卡 3 Material Projection，并提供有界 Inspector | 修改卡 3 字段、SQL、媒体资格或接纳语义 |
 | 真实垂直证明 | 卡 5 | 提供必须验证的页面场景 | 运行真实平台、媒体或 OCR/ASR |
 | Shell / LIDS Token | 共享 UI owner | 原型只消费现有规则 | 修改 `shell.rs`、`shell.css` 或全局 Token |
 
@@ -327,17 +327,18 @@ inspector:
 | 技术呈现 | 字段/lane/provenance/sensitive boundary | 与 MEDIA-RECON 和卡 3 API 对照 | UI 无需从 Package/raw tables 猜测 | 后端已实现 |
 | 真实后果 | 不适用，本卡无写动作 | diff 与网络检查 | 静态原型不读写真实服务 | 采集、下载、OCR/ASR |
 
-### 13.1 本卡证明
+### 13.1 当前页面实现证明
 
 - 多材料 Evidence Library 的唯一产品主对象、状态词典、表面地图、信息架构和消费字段已冻结；
 - 静态合成原型能覆盖正常、部分、未知、未请求、风险停止、处理中、字节已清理、多候选来源、Live Photo 组件部分取得、受限、空与读取失败；
 - 页面沿用 LIDS 与既有 `Corpus Explorer + Split Evidence Inspector`，没有第二套视觉语言；
-- 后续卡 3/4 可以按本规格实现 read model 与运行时 UI，而无需从视觉稿猜语义。
+- 卡 3 已提供列表、`detailUrl`、详情、评论研究通道、媒体/派生/来源回执与受控本地 asset handle；卡 4 运行页默认只消费这些入口；
+- 列表选择、Inspector Tab、评论通道继续读取、作品列表继续读取与 375px 顺序流均有运行代码和聚焦合同测试。
 
-### 13.2 本卡不证明
+### 13.2 当前页面实现不证明
 
-- 多材料 API/read model、Rust/SQL、运行时 HTML/CSS 或交互已经实现；
-- comments/replies/author/multi-origin/Live Photo 已完成类型化；
+- 历史 Package 已回填、所有现有作品都有完整 lane，或受控本机数据库含足够材料覆盖全部设计场景；
+- 媒体/派生/来源通道的下一页路由已经提供；当前回执截断但无 URL 时只显示 `SOURCE_INCOMPLETE`；
 - 真实媒体字节、OCR、ASR、抽帧、embedding、清理或撤回传播；
 - 真实平台、浏览器、账号、部署、性能、长期稳定性；
 - Mog 已完成最终视觉/业务验收。

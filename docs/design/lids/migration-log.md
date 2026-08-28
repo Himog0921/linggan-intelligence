@@ -185,3 +185,12 @@ Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵�
 - **LIDS 组合**：继续采用 L1 `Corpus Explorer` + embedded L2 Inspector、216px 导轨与 440px Inspector 基线；直接消费现有 `lids_tokens.css`，没有新增或重声明全局 `--lgi-*` token。lane strip 是 page-local candidate，不晋升 CMP。
 - **状态诚实性**：分别呈现 `PARTIAL`、`RISK_CONTROL`、`WITHDRAWN_OR_RESTRICTED`、`PROCESSING`、`BYTES_CLEANED`、`NOT_ENABLED`、`NOT_REQUESTED`、`UNKNOWN`、无匹配结果和读取错误；一次 Package 的同一 slot 只有一个来源观察组/generation，declared Bundle 下的 still/motion 组件与逐地址 candidate assertions 分责，下载尝试绑定精确 `candidateRef`，历史代次不混入当前来源组。不生成总体完整度，不把 slot 当 bytes，不把未知当零或成功。
 - **验证与边界**：Chrome 桌面/窄屏渲染确认无横向溢出并验证结果/空态/错误态、作品选择和 Inspector tab；专用静态 verifier 检查合成标记、状态、Token 消费、无外部请求与 reduced motion。它不证明运行时、真实材料、媒体取得、OCR/ASR、数据库、插件或 Mog 验收。
+
+## 2026-08-29 · EVIDENCE-RUNTIME-001 多材料 Evidence Library 运行页
+
+- **来源与事项**：Issue #90、`PAGE-EVIDENCE-001`、PR #87 静态参考与 PR #88 `MATERIAL-PROJECTION-001`。页面从 discovery-only server render 切换为只读作品级 Material Projection；没有修改卡 3 合同。
+- **LIDS 组合**：沿用共享 Shell 与原生 `lids_tokens.css + shell.css`，页面 CSS 只使用 `ev-*` 局部类；L1 Corpus Explorer 由中央连续作品列表承担，右侧 embedded L2 Split Evidence Inspector 核验详情。九 lane 状态带是唯一视觉锚，signal 只表达选择。
+- **状态与敏感边界**：`UNKNOWN` 不写成 0，Slot 不冒充 bytes，ACK 不冒充完整；普通列表不显示评论原文或平台身份，本机授权详情才按页显示匿名上下文。媒体仅在同源受控句柄且 `INLINE_SAFE` 时内联；未知/不安全/受限/已清理不回退远程地址。
+- **响应与交互**：作品列表和评论通道按 cursor 有界读取；详情 Tab 使用 roving tabindex，作品行支持方向键/首尾键/确认键；≤900px 转顺序流，≤640px lane 为两列，所有控件至少 40px 并支持 reduced motion。
+- **未新增全局资产**：没有 Token、Primitive、CMP、Scene 或第二前端框架变更；作品行、lane 与 Inspector section 继续是 page-local candidate。
+- **验证与边界**：正式自动检查和一次桌面/375px 浏览器证据记录于 `ACC-EVIDENCE-RUNTIME-001`。它不证明真实平台、历史回填、媒体/OCR/ASR provider、部署、长期稳定性或 Mog 业务验收。
