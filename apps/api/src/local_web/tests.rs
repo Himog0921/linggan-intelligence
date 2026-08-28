@@ -526,6 +526,10 @@ fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_
     let default = local_query(&EvidenceLibraryParams {
         q: None,
         window: None,
+        lane: None,
+        lane_state: None,
+        media_kind: None,
+        restriction: None,
     })
     .expect("an omitted URL window selects the explicit default discovery view");
     assert_eq!(
@@ -537,6 +541,10 @@ fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_
     let explicit = local_query(&EvidenceLibraryParams {
         q: None,
         window: Some("last_30_days".to_owned()),
+        lane: None,
+        lane_state: None,
+        media_kind: None,
+        restriction: None,
     })
     .expect("an explicit published window remains valid");
     assert_eq!(

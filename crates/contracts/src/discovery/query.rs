@@ -43,6 +43,14 @@ pub struct EvidenceQuery {
     #[serde(rename = "window")]
     time_view: EvidenceTimeView,
     sort: EvidenceQuerySort,
+    #[serde(default)]
+    lane: Option<EvidenceMaterialLane>,
+    #[serde(default)]
+    lane_state: Option<EvidenceLaneState>,
+    #[serde(default)]
+    media_kind: Option<EvidenceMediaKind>,
+    #[serde(default)]
+    restriction: Option<EvidenceRestriction>,
 }
 
 impl EvidenceQuery {
@@ -72,6 +80,111 @@ impl EvidenceQuery {
     pub fn sort(&self) -> EvidenceQuerySort {
         self.sort
     }
+
+    pub fn lane(&self) -> Option<EvidenceMaterialLane> {
+        self.lane
+    }
+
+    pub fn lane_state(&self) -> Option<EvidenceLaneState> {
+        self.lane_state
+    }
+
+    pub fn media_kind(&self) -> Option<EvidenceMediaKind> {
+        self.media_kind
+    }
+
+    pub fn restriction(&self) -> Option<EvidenceRestriction> {
+        self.restriction
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceMaterialLane {
+    Discovery,
+    Detail,
+    Comments,
+    Replies,
+    Author,
+    MediaSlots,
+    MediaBytes,
+    Ocr,
+    Asr,
+}
+
+impl EvidenceMaterialLane {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Discovery => "discovery",
+            Self::Detail => "detail",
+            Self::Comments => "comments",
+            Self::Replies => "replies",
+            Self::Author => "author",
+            Self::MediaSlots => "media_slots",
+            Self::MediaBytes => "media_bytes",
+            Self::Ocr => "ocr",
+            Self::Asr => "asr",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EvidenceLaneState {
+    NotRequested,
+    Queued,
+    NotObserved,
+    Observed,
+    Partial,
+    Acquired,
+    Processing,
+    NotEnabled,
+    Searchable,
+    Failed,
+    RiskControl,
+    BytesCleaned,
+    WithdrawnOrRestricted,
+    Unknown,
+}
+
+impl EvidenceLaneState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::NotRequested => "NOT_REQUESTED",
+            Self::Queued => "QUEUED",
+            Self::NotObserved => "NOT_OBSERVED",
+            Self::Observed => "OBSERVED",
+            Self::Partial => "PARTIAL",
+            Self::Acquired => "ACQUIRED",
+            Self::Processing => "PROCESSING",
+            Self::NotEnabled => "NOT_ENABLED",
+            Self::Searchable => "SEARCHABLE",
+            Self::Failed => "FAILED",
+            Self::RiskControl => "RISK_CONTROL",
+            Self::BytesCleaned => "BYTES_CLEANED",
+            Self::WithdrawnOrRestricted => "WITHDRAWN_OR_RESTRICTED",
+            Self::Unknown => "UNKNOWN",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceMediaKind {
+    Cover,
+    Image,
+    Video,
+    LivePhoto,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum EvidenceRestriction {
+    Unrestricted,
+    Restricted,
+    BytesCleaned,
+    WithdrawnOrRestricted,
+    Unknown,
 }
 
 /// Evidence Library's V1 search scope. The values only describe local matching fields; they do

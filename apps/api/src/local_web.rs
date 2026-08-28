@@ -2,6 +2,9 @@ mod collection;
 mod collection_intake;
 mod collection_targets_view;
 mod evidence_page;
+mod material_projection;
+#[cfg(test)]
+mod material_projection_tests;
 mod shell;
 mod station_view;
 mod target_drawer;
@@ -169,6 +172,12 @@ impl LocalDatabaseState {
 struct EvidenceLibraryParams {
     q: Option<String>,
     window: Option<String>,
+    lane: Option<String>,
+    #[serde(rename = "laneState")]
+    lane_state: Option<String>,
+    #[serde(rename = "mediaKind")]
+    media_kind: Option<String>,
+    restriction: Option<String>,
 }
 
 #[cfg(test)]
@@ -438,7 +447,15 @@ async fn evidence_library_json(
         );
     };
     match read_evidence_library(database, &query).await {
-        Ok(projection) => Json(projection).into_response(),
+        Ok(projection) => {
+            match material_projection::compose_json(database, &query, projection).await {
+                Ok(response) => Json(response).into_response(),
+                Err(_) => local_read_json_error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "material_read_projection_unavailable",
+                ),
+            }
+        }
         Err(_) => local_read_json_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "read_projection_unavailable",
@@ -1733,7 +1750,11 @@ fn local_query(params: &EvidenceLibraryParams) -> Result<EvidenceQuery, ()> {
         "text": params.q,
         "scope": "all_accepted_material",
         "window": window,
-        "sort": "latest_discovery"
+        "sort": "latest_discovery",
+        "lane": params.lane,
+        "laneState": params.lane_state,
+        "mediaKind": params.media_kind,
+        "restriction": params.restriction
     }))
     .map_err(|_| ())
 }

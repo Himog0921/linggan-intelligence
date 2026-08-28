@@ -763,6 +763,7 @@ pub async fn submit_producer_package(
     .map_err(ProducerRuntimeError::Internal)?
     .flatten();
     insert_record_dispositions(&mut tx, package, maximum_quota).await?;
+    crate::material_projection::insert_typed_materials(&mut tx, package).await?;
     if package.package_kind() == "media_slots" {
         insert_media_slots(&mut tx, package).await?;
     }
