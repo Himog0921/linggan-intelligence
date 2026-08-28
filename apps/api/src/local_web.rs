@@ -4,12 +4,16 @@ mod collection_targets_view;
 mod evidence_page;
 mod local_media_routes;
 #[cfg(test)]
+mod material_asset_route_fixture;
+#[cfg(test)]
 mod material_cursor_tests;
 mod material_projection;
 #[cfg(test)]
 mod material_projection_media_fixture;
 #[cfg(test)]
 mod material_projection_tests;
+#[cfg(test)]
+mod material_replica_fallback_tests;
 mod shell;
 mod station_view;
 mod target_drawer;
@@ -452,6 +456,10 @@ async fn evidence_library_json(
                         "invalid_material_query_cursor_or_sort",
                     )
                 }
+                Err(MaterialReadError::ProjectionUnavailable) => local_read_json_error(
+                    axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                    "material_projection_schema_unavailable",
+                ),
                 Err(MaterialReadError::Database(error)) => {
                     eprintln!("material read projection unavailable: {error}");
                     local_read_json_error(

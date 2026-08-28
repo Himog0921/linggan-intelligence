@@ -7,6 +7,15 @@ ALTER TABLE linggan_media_materialization
         CHECK (local_asset_path ~ '^/api/local/media/[0-9a-f]{64}$'
             OR local_asset_path ~ '^/api/local/media/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/[0-9a-f]{64}$');
 
+ALTER TABLE linggan_media_blob
+    DROP CONSTRAINT linggan_media_blob_storage_key_check,
+    ADD CONSTRAINT linggan_media_blob_storage_key_check
+        CHECK (storage_key ~ '^[^/]+(/[^/]+)*$' AND storage_key !~ '(^|/)(\\.|\\.\\.)(/|$)');
+
+ALTER TABLE linggan_media_derivative
+    ADD CONSTRAINT linggan_media_derivative_storage_key_check
+        CHECK (storage_key IS NULL OR (storage_key ~ '^[^/]+(/[^/]+)*$' AND storage_key !~ '(^|/)(\\.|\\.\\.)(/|$)'));
+
 CREATE TABLE linggan_material_media_origin (
     observation_ref uuid PRIMARY KEY REFERENCES linggan_media_observation(observation_ref),
     content_public_ref uuid NOT NULL REFERENCES linggan_material_content(public_ref),

@@ -79,7 +79,8 @@ async fn read_slots(
              (SELECT count(*) FROM linggan_material_media_candidate candidate WHERE candidate.observation_ref=origin.observation_ref) AS candidate_count, \
              replica.materialization_ref,replica.verified_at,replica.materialization_observation_ref, \
              blob.sha256,blob.mime_type,blob.byte_size,current_download.download_attempt_ref,current_download.terminal_reason, \
-             disposition.restricted AS disposition_restricted,disposition.cleaned AS disposition_cleaned \
+             disposition.restricted AS disposition_restricted,disposition.cleaned AS disposition_cleaned, \
+             excluded.newer_disposed AS newer_disposed \
          FROM current_origin origin JOIN linggan_media_observation observation USING (observation_ref) \
          LEFT JOIN LATERAL (SELECT attempt.* FROM linggan_media_download_attempt attempt WHERE attempt.media_observation_ref=origin.observation_ref AND attempt.started_at <= $2::timestamptz ORDER BY attempt.started_at DESC LIMIT 1) current_download ON true \
          LEFT JOIN LATERAL (SELECT materialization.*,attempt.media_observation_ref AS materialization_observation_ref \
@@ -87,14 +88,32 @@ async fn read_slots(
              JOIN linggan_runtime_capture_package historical_package USING(package_ref) \
              JOIN linggan_media_download_attempt attempt ON attempt.media_observation_ref=historical_origin.observation_ref \
              JOIN linggan_media_materialization materialization ON materialization.download_attempt_ref=attempt.download_attempt_ref \
+             JOIN linggan_media_blob candidate_blob ON candidate_blob.sha256=materialization.blob_sha256 \
              WHERE historical_origin.slot_key=origin.slot_key AND historical_package.accepted_at <= $2::timestamptz \
                AND attempt.started_at <= $2::timestamptz AND materialization.verified_at <= $2::timestamptz \
+               AND NOT EXISTS (SELECT 1 FROM linggan_material_media_disposition_event event \
+                 WHERE event.recorded_at <= $2::timestamptz AND (event.slot_key=origin.slot_key \
+                   OR event.materialization_ref=materialization.materialization_ref OR event.blob_sha256=candidate_blob.sha256)) \
              ORDER BY materialization.verified_at DESC LIMIT 1) replica ON true \
          LEFT JOIN linggan_media_blob blob ON blob.sha256=replica.blob_sha256 \
          LEFT JOIN LATERAL (SELECT bool_or(event.state='WITHDRAWN_OR_RESTRICTED') AS restricted, \
-                 bool_or(event.state='BYTES_CLEANED') AS cleaned FROM linggan_material_media_disposition_event event \
-             WHERE event.recorded_at <= $2::timestamptz AND (event.slot_key=origin.slot_key OR event.materialization_ref=replica.materialization_ref OR event.blob_sha256=blob.sha256) \
+                 bool_or(event.state='BYTES_CLEANED') AS cleaned \
+             FROM linggan_material_media_disposition_event event \
+             WHERE event.recorded_at <= $2::timestamptz AND (event.slot_key=origin.slot_key \
+               OR event.materialization_ref IN (SELECT scoped_materialization.materialization_ref FROM linggan_material_media_origin scoped_origin JOIN linggan_media_download_attempt scoped_attempt ON scoped_attempt.media_observation_ref=scoped_origin.observation_ref JOIN linggan_media_materialization scoped_materialization USING(download_attempt_ref) WHERE scoped_origin.slot_key=origin.slot_key) \
+               OR event.blob_sha256 IN (SELECT scoped_materialization.blob_sha256 FROM linggan_material_media_origin scoped_origin JOIN linggan_media_download_attempt scoped_attempt ON scoped_attempt.media_observation_ref=scoped_origin.observation_ref JOIN linggan_media_materialization scoped_materialization USING(download_attempt_ref) WHERE scoped_origin.slot_key=origin.slot_key)) \
          ) disposition ON true \
+         LEFT JOIN LATERAL (SELECT EXISTS (SELECT 1 \
+             FROM linggan_material_media_origin excluded_origin \
+             JOIN linggan_media_download_attempt excluded_attempt ON excluded_attempt.media_observation_ref=excluded_origin.observation_ref \
+             JOIN linggan_media_materialization excluded_materialization USING(download_attempt_ref) \
+             WHERE excluded_origin.slot_key=origin.slot_key AND excluded_materialization.verified_at <= $2::timestamptz \
+               AND (replica.verified_at IS NULL OR excluded_materialization.verified_at > replica.verified_at) \
+               AND EXISTS (SELECT 1 FROM linggan_material_media_disposition_event excluded_event \
+                 WHERE excluded_event.recorded_at <= $2::timestamptz AND (excluded_event.slot_key=origin.slot_key \
+                   OR excluded_event.materialization_ref=excluded_materialization.materialization_ref \
+                   OR excluded_event.blob_sha256=excluded_materialization.blob_sha256))) AS newer_disposed \
+         ) excluded ON true \
          ORDER BY origin.producer_ordinal,origin.slot_key",
     )
     .bind(content_ref)
@@ -119,6 +138,9 @@ impl SlotAccumulator {
         let disposition_cleaned = row
             .get::<Option<bool>, _>("disposition_cleaned")
             .unwrap_or(false);
+        let newer_disposed = row
+            .get::<Option<bool>, _>("newer_disposed")
+            .unwrap_or(false);
         let materialization_ref = row.get::<Option<Uuid>, _>("materialization_ref");
         let blob_sha256 = row.get::<Option<String>, _>("sha256");
         let mut local_asset_url =
@@ -127,20 +149,24 @@ impl SlotAccumulator {
                 .map(|(materialization_ref, sha256)| {
                     format!("/api/local/media/{materialization_ref}/{sha256}")
                 });
-        let bytes_state = match (disposition_restricted, disposition_cleaned) {
-            (true, _) => {
+        let bytes_state = match (
+            materialization_ref.is_some(),
+            disposition_restricted,
+            disposition_cleaned,
+        ) {
+            (true, _, _) => {
+                self.acquired += 1;
+                "ACQUIRED"
+            }
+            (false, true, _) => {
                 self.restricted = true;
                 local_asset_url = None;
                 "WITHDRAWN_OR_RESTRICTED"
             }
-            (false, true) => {
+            (false, false, true) => {
                 self.cleaned = true;
                 local_asset_url = None;
                 "BYTES_CLEANED"
-            }
-            _ if row.get::<Option<Uuid>, _>("materialization_ref").is_some() => {
-                self.acquired += 1;
-                "ACQUIRED"
             }
             _ if row.get::<Option<String>, _>("terminal_reason").is_some() => {
                 self.failed += 1;
@@ -148,6 +174,9 @@ impl SlotAccumulator {
             }
             _ => "NOT_OBSERVED",
         };
+        if newer_disposed && !self.limitations.contains(&"NEWER_MATERIALIZATION_DISPOSED") {
+            self.limitations.push("NEWER_MATERIALIZATION_DISPOSED");
+        }
         if self.preview_url.is_none() && local_asset_url.is_some() {
             self.preview_url = local_asset_url.clone();
             self.preview_purpose = Some(row.get("purpose"));
@@ -173,9 +202,10 @@ impl SlotAccumulator {
             "displayOrderState":row.get::<String,_>("display_order_state"),"displayOrderBasis":row.get::<String,_>("display_order_basis"),
             "origin":{"observationRef":row.get::<Uuid,_>("observation_ref"),"sourceGeneration":row.get::<i32,_>("source_generation"),"observedAt":row.get::<String,_>("observed_at"),"candidateUriCount":candidate_count,"candidateSetState":row.get::<String,_>("candidate_set_state"),"actualDownloadCandidateState":"UNKNOWN"},
             "components":components,"bytesState":bytes_state,"replicaState":if local_asset_url.is_some(){"VERIFIED_AT_MATERIALIZATION"}else{"UNKNOWN"},
-            "dispositionState":if disposition_restricted{"WITHDRAWN_OR_RESTRICTED"}else if disposition_cleaned{"BYTES_CLEANED"}else{"UNKNOWN"},"localAssetUrl":local_asset_url,
+            "dispositionState":if materialization_ref.is_some(){"UNKNOWN"}else if disposition_restricted{"WITHDRAWN_OR_RESTRICTED"}else if disposition_cleaned{"BYTES_CLEANED"}else{"UNKNOWN"},"localAssetUrl":local_asset_url,
             "currentDownloadAttemptRef":row.get::<Option<Uuid>,_>("download_attempt_ref"),
             "replica":{"materializationRef":row.get::<Option<Uuid>,_>("materialization_ref"),"originObservationRef":row.get::<Option<Uuid>,_>("materialization_observation_ref"),"isCurrentOrigin":row.get::<Option<Uuid>,_>("materialization_observation_ref")==Some(row.get::<Uuid,_>("observation_ref"))},
+            "replicaSelection":{"limitations":if newer_disposed{vec!["NEWER_MATERIALIZATION_DISPOSED"]}else{Vec::<&str>::new()},"excludedDispositionStates":{"restricted":disposition_restricted,"cleaned":disposition_cleaned}},
             "blob":{"sha256":row.get::<Option<String>,_>("sha256"),"mimeType":row.get::<Option<String>,_>("mime_type"),"byteSize":row.get::<Option<i64>,_>("byte_size")}
         }));
     }

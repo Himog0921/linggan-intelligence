@@ -32,6 +32,63 @@ const MIGRATIONS: &str = concat!(
       ('0017_material_media_projection','17'),('0018_material_discovery_lane','18');\n",
 );
 
+const LEGACY_MIGRATIONS: &str = concat!(
+    "CREATE TABLE linggan_local_schema_migration (migration_id text PRIMARY KEY, migration_sha256 text NOT NULL, applied_at timestamptz NOT NULL DEFAULT clock_timestamp());\n",
+    include_str!("../../../../database/migrations/0001_scope_001_capture_evidence.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0002_local_001_discovery.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0003_local_trusted_producer.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
+    "\n",
+    "INSERT",
+    " INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0001_scope_001_capture_evidence','1'),('0002_local_001_discovery','2'),('0003_local_trusted_producer','3'),('0004_plugin_runtime_all_capabilities','4');\n",
+);
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn legacy_schema_validates_cursor_before_refusing_an_unfulfillable_page() {
+    let current = proof_database("material_cursor_source").await;
+    seed_details(&current, 0, 55, false).await;
+    let first = get_json(&current, "/api/local/evidence-library").await;
+    let cursor = first.pointer("/cursor").and_then(Value::as_str).unwrap();
+    let future = cursor_with_future_as_of(cursor);
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
+    let legacy = isolated_proof_schema(&url, "material_cursor_legacy", LEGACY_MIGRATIONS)
+        .await
+        .expect("legacy migrations apply");
+
+    for uri in [
+        "/api/local/evidence-library?cursor=garbage".to_owned(),
+        format!("/api/local/evidence-library?q=mismatch&cursor={cursor}"),
+        format!("/api/local/evidence-library?cursor={future}"),
+        "/api/local/evidence-library?sort=relevance".to_owned(),
+    ] {
+        assert_eq!(get_status(&legacy, &uri).await, StatusCode::BAD_REQUEST);
+    }
+    let response = app_with_database(legacy)
+        .oneshot(
+            Request::builder()
+                .uri(format!("/api/local/evidence-library?cursor={cursor}"))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let payload: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(
+        payload.pointer("/operation").and_then(Value::as_str),
+        Some("local_read")
+    );
+    assert_eq!(
+        payload.pointer("/outcome").and_then(Value::as_str),
+        Some("unavailable")
+    );
+}
+
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn cursor_freezes_as_of_rejects_corruption_and_avoids_cross_page_duplicates() {

@@ -14,7 +14,7 @@ pub(super) async fn materialization(
         return not_found();
     }
     let Some(database) = state.database.database() else {
-        return local_producer_error(
+        return local_read_json_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "producer_not_connected",
         );
@@ -34,7 +34,7 @@ pub(super) async fn derivative(
         return not_found();
     };
     let Some(database) = state.database.database() else {
-        return local_producer_error(
+        return local_read_json_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "producer_not_connected",
         );
@@ -48,24 +48,35 @@ pub(super) async fn derivative(
 
 fn read_asset(asset: LocalMaterialAsset) -> Response {
     let Ok(content_type) = HeaderValue::from_str(&asset.mime_type) else {
-        return local_producer_error(
+        return local_read_json_error(
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             "local_media_metadata_invalid",
         );
     };
     let storage_key = FsPath::new(&asset.storage_key);
-    if storage_key.is_absolute()
-        || storage_key
-            .components()
-            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    if asset.storage_key.is_empty()
+        || storage_key.is_absolute()
+        || asset
+            .storage_key
+            .split('/')
+            .any(|component| component.is_empty() || matches!(component, "." | ".."))
     {
-        return local_producer_error(
+        return local_read_json_error(
             axum::http::StatusCode::INTERNAL_SERVER_ERROR,
             "local_media_metadata_invalid",
         );
     }
-    match fs::read(local_media_root().join(storage_key)) {
-        Ok(bytes) => (
+    let root = match fs::canonicalize(local_media_root()) {
+        Ok(root) => root,
+        Err(error) => return io_failure(error),
+    };
+    let candidate = match fs::canonicalize(root.join(storage_key)) {
+        Ok(candidate) if candidate.starts_with(&root) => candidate,
+        Ok(_) => return not_found(),
+        Err(error) => return io_failure(error),
+    };
+    match fs::read(candidate) {
+        Ok(bytes) if bytes_match(&asset, &bytes) => (
             [
                 (header::CONTENT_TYPE, content_type),
                 (
@@ -76,19 +87,41 @@ fn read_asset(asset: LocalMaterialAsset) -> Response {
             bytes,
         )
             .into_response(),
-        Err(_) => local_producer_error(
-            axum::http::StatusCode::NOT_FOUND,
-            "local_media_bytes_unavailable",
-        ),
+        Ok(_) => {
+            eprintln!("local media read unavailable: integrity_mismatch");
+            local_read_json_error(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "local_media_integrity_mismatch",
+            )
+        }
+        Err(error) => io_failure(error),
     }
 }
 
+fn bytes_match(asset: &LocalMaterialAsset, bytes: &[u8]) -> bool {
+    let size_matches = asset.expected_byte_size.is_none_or(|expected| {
+        usize::try_from(expected).is_ok_and(|expected| expected == bytes.len())
+    });
+    size_matches && sha256_bytes(bytes) == asset.expected_sha256
+}
+
+fn io_failure(error: std::io::Error) -> Response {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return not_found();
+    }
+    eprintln!("local media read unavailable: io_kind={:?}", error.kind());
+    local_read_json_error(
+        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+        "local_media_read_unavailable",
+    )
+}
+
 fn not_found() -> Response {
-    local_producer_error(axum::http::StatusCode::NOT_FOUND, "local_media_not_found")
+    local_read_json_error(axum::http::StatusCode::NOT_FOUND, "local_media_not_found")
 }
 
 fn unavailable() -> Response {
-    local_producer_error(
+    local_read_json_error(
         axum::http::StatusCode::SERVICE_UNAVAILABLE,
         "local_media_metadata_unavailable",
     )

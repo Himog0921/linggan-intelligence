@@ -1,3 +1,4 @@
+use super::material_asset_route_fixture::assert_asset_response;
 use super::*;
 use axum::{
     body::{Body, to_bytes},
@@ -8,6 +9,9 @@ use linggan_evidence::{
     record_materialization_disposition, record_media_derivative_completion,
 };
 use tower::ServiceExt;
+
+const PROOF_BLOB_SHA256: &str = "8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62";
+const OCR_PROOF_SHA256: &str = "1320b046a60f7c39a3480dea50b655ca92ce61db269ea07e4037e7a6f0788e5a";
 
 pub(super) async fn assert_disposition_precedence(
     database: Database,
@@ -98,7 +102,7 @@ pub(super) async fn assert_disposition_precedence(
     assert_asset_response(&database, shared_materialization_url, b"proof-bytes!").await;
     record_blob_disposition(
         &database,
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        PROOF_BLOB_SHA256,
         MaterialMediaDisposition::WithdrawnOrRestricted,
         "proof-authority",
         "global-blob-rights",
@@ -163,53 +167,6 @@ async fn assert_derivative_disposition(
     assert_eq!(gated.status(), StatusCode::NOT_FOUND);
 }
 
-pub(super) async fn assert_asset_response(database: &Database, uri: &str, expected: &[u8]) {
-    let response = app_with_database(database.clone())
-        .oneshot(Request::builder().uri(uri).body(Body::empty()).unwrap())
-        .await
-        .unwrap();
-    assert_eq!(response.status(), StatusCode::OK);
-    assert_eq!(
-        response
-            .headers()
-            .get(axum::http::header::CACHE_CONTROL)
-            .and_then(|value| value.to_str().ok()),
-        Some("private, no-store, max-age=0")
-    );
-    assert_eq!(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap()[..],
-        expected
-    );
-}
-
-pub(super) async fn assert_materialization_read_contract(
-    database: &Database,
-    materialization_url: &str,
-    materialization_ref: uuid::Uuid,
-    shared_materialization_url: &str,
-) {
-    assert_asset_response(database, materialization_url, b"proof-bytes!").await;
-    assert_asset_response(database, shared_materialization_url, b"proof-bytes!").await;
-    for invalid_uri in [
-        format!(
-            "/api/local/media/{materialization_ref}/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-        ),
-        "/api/local/media/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-            .to_owned(),
-    ] {
-        let invalid = app_with_database(database.clone())
-            .oneshot(
-                Request::builder()
-                    .uri(invalid_uri)
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(invalid.status(), StatusCode::NOT_FOUND);
-    }
-}
-
 pub(super) async fn seed_media(database: &Database) -> uuid::Uuid {
     let task_id = uuid::Uuid::new_v4();
     let producer_instance_id = uuid::Uuid::new_v4();
@@ -262,7 +219,7 @@ pub(super) async fn complete_ocr_derivative(
         database,
         job_ref,
         "ocr_text",
-        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        OCR_PROOF_SHA256,
         Some("derivatives/ocr/proof"),
     )
     .await

@@ -2,6 +2,7 @@
 mod fixture;
 
 use fixture::{coverage_layer, proof_database, submit_custom_package, submit_package};
+use linggan_evidence::{admit_media_blob, record_media_derivative_completion};
 use sqlx::Row;
 
 #[tokio::test]
@@ -240,6 +241,70 @@ async fn observation_identity_conflicts_and_same_package_duplicates_quarantine_o
             "media_origin_contract_valid",
         ]
     );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn media_owner_seams_reject_unsafe_storage_key_components_without_writing_facts() {
+    let database = proof_database("material_media_storage_keys").await;
+    let observation_ref = uuid::Uuid::new_v4();
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-storage-key"}),
+        media_record_with_observation(
+            "note-storage-key",
+            "image",
+            1,
+            "storage-key",
+            observation_ref,
+        ),
+    )
+    .await;
+    for invalid in ["", "/absolute", "a/../b", "a/./b", "a//b"] {
+        assert!(
+            admit_media_blob(
+                &database,
+                observation_ref,
+                "8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62",
+                "image/jpeg",
+                12,
+                invalid,
+            )
+            .await
+            .is_err(),
+            "unsafe storage key must fail: {invalid:?}"
+        );
+    }
+    let admission = admit_media_blob(
+        &database,
+        observation_ref,
+        "8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62",
+        "image/jpeg",
+        12,
+        "blobs/8a/8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62",
+    )
+    .await
+    .unwrap();
+    for invalid in ["", "/absolute", "a/../b", "a/./b", "a//b"] {
+        assert!(
+            record_media_derivative_completion(
+                &database,
+                admission.processing_jobs[1],
+                "ocr_text",
+                "1320b046a60f7c39a3480dea50b655ca92ce61db269ea07e4037e7a6f0788e5a",
+                Some(invalid),
+            )
+            .await
+            .is_err(),
+            "unsafe derivative storage key must fail: {invalid:?}"
+        );
+    }
+    let derivatives: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_media_derivative")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(derivatives, 0);
 }
 
 fn media_record(content_id: &str, role: &str, ordinal: i32, uri_suffix: &str) -> serde_json::Value {

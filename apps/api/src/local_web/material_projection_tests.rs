@@ -1,6 +1,10 @@
+use super::material_asset_route_fixture::{
+    LocalFixtureFiles, assert_asset_response, assert_derivative_integrity_is_checked,
+    assert_integrity_and_symlink_attacks_are_unavailable, assert_materialization_read_contract,
+};
 use super::material_projection_media_fixture::{
-    assert_asset_response, assert_disposition_precedence, assert_materialization_read_contract,
-    complete_ocr_derivative, seed_media, seed_media_refresh, seed_shared_media,
+    assert_disposition_precedence, complete_ocr_derivative, seed_media, seed_media_refresh,
+    seed_shared_media,
 };
 use super::*;
 use axum::{
@@ -35,6 +39,8 @@ const MIGRATIONS: &str = concat!(
       ('0003_local_trusted_producer','3'),('0004_plugin_runtime_all_capabilities','4'), \
       ('0015_material_projection','15'),('0016_material_social_lanes','16'),('0017_material_media_projection','17'),('0018_material_discovery_lane','18');\n",
 );
+
+const PROOF_BLOB_SHA256: &str = "8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62";
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
@@ -168,10 +174,10 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
     let admission = admit_media_blob(
         &database,
         observation_ref,
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        PROOF_BLOB_SHA256,
         "image/jpeg",
         12,
-        "blobs/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "blobs/8a/8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62",
     )
     .await
     .expect("synthetic verified blob materializes");
@@ -179,19 +185,20 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
     let shared_admission = admit_media_blob(
         &database,
         shared_observation_ref,
-        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        PROOF_BLOB_SHA256,
         "image/jpeg",
         12,
-        "blobs/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "blobs/8a/8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62",
     )
     .await
     .expect("a second qualified materialization may share the content-addressed blob");
     let derivative_ref = complete_ocr_derivative(&database, admission.processing_jobs[1]).await;
     let blob_path = local_media_root()
-        .join("blobs/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        .join("blobs/8a/8a126be6897fab75359a5d57f5889376aac0fadec42a4c4be9dcf1080cccdd62");
     std::fs::create_dir_all(blob_path.parent().unwrap()).unwrap();
     std::fs::write(&blob_path, b"proof-bytes!").unwrap();
     let derivative_path = local_media_root().join("derivatives/ocr/proof");
+    let _fixture_files = LocalFixtureFiles::new(vec![blob_path.clone(), derivative_path.clone()]);
     std::fs::create_dir_all(derivative_path.parent().unwrap()).unwrap();
     std::fs::write(&derivative_path, b"ocr-proof-bytes").unwrap();
     seed_media_refresh(&database).await;
@@ -215,28 +222,18 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
         Some(admission.local_asset_path.as_str()),
         "the list and direct read use the same materialization-bound qualification handle"
     );
-    let asr = app_with_database(database.clone())
-        .oneshot(
-            Request::builder()
-                .uri("/api/local/evidence-library?lane=asr")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    let asr: Value =
-        serde_json::from_slice(&to_bytes(asr.into_body(), usize::MAX).await.unwrap()).unwrap();
-    assert_eq!(
-        asr.pointer("/items")
-            .and_then(Value::as_array)
-            .map(Vec::len),
-        Some(0)
-    );
+    assert_asr_absent(&database).await;
     assert_materialization_read_contract(
         &database,
         &admission.local_asset_path,
         admission.materialization_ref,
         &shared_admission.local_asset_path,
+    )
+    .await;
+    assert_integrity_and_symlink_attacks_are_unavailable(
+        &database,
+        &admission.local_asset_path,
+        &blob_path,
     )
     .await;
     let derivative_url = payload
@@ -251,6 +248,7 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
         .and_then(Value::as_str)
         .expect("acquired OCR exposes a controlled derivative handle");
     assert_asset_response(&database, derivative_url, b"ocr-proof-bytes").await;
+    assert_derivative_integrity_is_checked(&database, derivative_url, &derivative_path).await;
     assert_disposition_precedence(
         database,
         admission.materialization_ref,
@@ -260,8 +258,27 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
         derivative_url,
     )
     .await;
-    std::fs::remove_file(blob_path).unwrap();
-    std::fs::remove_file(derivative_path).unwrap();
+}
+
+async fn assert_asr_absent(database: &Database) {
+    let response = app_with_database(database.clone())
+        .oneshot(
+            Request::builder()
+                .uri("/api/local/evidence-library?lane=asr")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let payload: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(
+        payload
+            .pointer("/items")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0)
+    );
 }
 
 fn assert_media_payload(payload: &Value) {

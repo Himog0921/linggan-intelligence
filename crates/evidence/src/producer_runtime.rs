@@ -113,6 +113,9 @@ pub async fn admit_media_blob(
     byte_size: i64,
     storage_key: &str,
 ) -> Result<MediaBlobAdmission, ProducerRuntimeError> {
+    if !crate::material_storage_key::is_safe_storage_key(storage_key) {
+        return Err(ProducerRuntimeError::MaterialIdentityConflict);
+    }
     let mut tx = database
         .pool()
         .begin()

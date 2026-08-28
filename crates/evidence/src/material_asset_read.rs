@@ -8,6 +8,8 @@ use uuid::Uuid;
 pub struct LocalMaterialAsset {
     pub mime_type: String,
     pub storage_key: String,
+    pub expected_sha256: String,
+    pub expected_byte_size: Option<i64>,
 }
 
 pub async fn read_local_materialization(
@@ -16,7 +18,7 @@ pub async fn read_local_materialization(
     sha256: &str,
 ) -> Result<Option<LocalMaterialAsset>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT blob.mime_type,blob.storage_key FROM linggan_media_materialization materialization \
+        "SELECT blob.mime_type,blob.storage_key,blob.sha256,blob.byte_size FROM linggan_media_materialization materialization \
          JOIN linggan_media_blob blob ON blob.sha256=materialization.blob_sha256 \
          JOIN linggan_media_download_attempt attempt USING(download_attempt_ref) \
          JOIN linggan_media_observation observation ON observation.observation_ref=attempt.media_observation_ref \
@@ -31,6 +33,8 @@ pub async fn read_local_materialization(
     Ok(row.map(|row| LocalMaterialAsset {
         mime_type: row.get("mime_type"),
         storage_key: row.get("storage_key"),
+        expected_sha256: row.get("sha256"),
+        expected_byte_size: Some(row.get("byte_size")),
     }))
 }
 
@@ -39,7 +43,7 @@ pub async fn read_local_derivative(
     derivative_ref: Uuid,
 ) -> Result<Option<LocalMaterialAsset>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT derivative.derivative_kind,derivative.storage_key FROM linggan_media_derivative derivative \
+        "SELECT derivative.derivative_kind,derivative.storage_key,derivative.content_hash FROM linggan_media_derivative derivative \
          JOIN linggan_media_processing_job job USING(job_ref) \
          WHERE derivative.derivative_ref=$1 AND derivative.storage_key IS NOT NULL \
            AND NOT EXISTS (SELECT 1 FROM linggan_material_media_disposition_event event \
@@ -51,6 +55,8 @@ pub async fn read_local_derivative(
     Ok(row.map(|row| LocalMaterialAsset {
         mime_type: derivative_mime(row.get::<String, _>("derivative_kind").as_str()).to_owned(),
         storage_key: row.get("storage_key"),
+        expected_sha256: row.get("content_hash"),
+        expected_byte_size: None,
     }))
 }
 

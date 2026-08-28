@@ -27,6 +27,8 @@ pub enum MaterialReadError {
     InvalidCursor,
     #[error("material sort is not supported by the current projection")]
     UnsupportedSort,
+    #[error("the material projection schema cannot satisfy this query")]
+    ProjectionUnavailable,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }

@@ -12,6 +12,9 @@ pub async fn record_media_derivative_completion(
     content_hash: &str,
     storage_key: Option<&str>,
 ) -> Result<Uuid, ProducerRuntimeError> {
+    if storage_key.is_some_and(|value| !crate::material_storage_key::is_safe_storage_key(value)) {
+        return Err(ProducerRuntimeError::MaterialIdentityConflict);
+    }
     let mut tx = database
         .pool()
         .begin()

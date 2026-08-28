@@ -74,6 +74,14 @@ pub(super) async fn compose_json(
         object.insert("cards".to_owned(), Value::Array(Vec::new()));
     }
     if !material_projection_schema_is_ready(database).await? {
+        if query.cursor().is_some()
+            || query.sort() != linggan_contracts::EvidenceQuerySort::LatestDiscovery
+        {
+            return match read_material_library(database, query).await {
+                Err(error) => Err(error),
+                Ok(_) => Err(MaterialReadError::ProjectionUnavailable),
+            };
+        }
         object.insert("items".to_owned(), Value::Array(Vec::new()));
         object.insert(
             "queryScope".to_owned(),

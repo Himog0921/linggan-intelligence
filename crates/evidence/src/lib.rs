@@ -21,6 +21,7 @@ mod material_projection;
 mod material_projection_types;
 mod material_query_sql;
 mod material_social_read;
+mod material_storage_key;
 mod patrol_scheduler;
 mod producer_runtime;
 mod receipt;
