@@ -55,5 +55,8 @@ proof_database_created=1
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 cargo test -p linggan-evidence --test local_discovery_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test local_producer_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test material_projection_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test material_social_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test material_media_postgres --locked -- --ignored
 cargo test -p linggan-api --bin linggan-api --locked -- --ignored
 echo "LOCAL-001 discovery PostgreSQL proof passed"

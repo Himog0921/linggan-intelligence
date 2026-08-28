@@ -205,7 +205,7 @@ pub async fn read_discovery_library(
            AND grouped.published_at >= scope_001_now() - make_interval(days => $1) \
            AND grouped.published_at <= scope_001_now())) \
            AND ($2::text IS NULL OR lower(grouped.retrieval_text) LIKE '%' || lower($2) || '%') \
-         ORDER BY grouped.first_discovered_at DESC, latest.result_position ASC",
+         ORDER BY grouped.first_discovered_at DESC, latest.result_position ASC LIMIT 51",
     )
     .bind(window_days)
     .bind(text)

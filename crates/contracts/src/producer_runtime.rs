@@ -465,7 +465,7 @@ mod tests {
 
     #[test]
     fn task_spec_allows_manual_and_scheduled_without_implementing_a_poller() {
-        let value = r#"{"contractVersion":"linggan.producer.task-spec.v1","taskId":"11111111-1111-4111-8111-111111111111","source":"scheduled","platform":"xhs","pageType":"detail","target":{"contentExternalId":"note-1"},"capabilitiesRequested":["content_detail"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]}"#;
+        let value = r#"{"contractVersion":"linggan.producer.task-spec.v1","taskId":"11111111-1111-4111-8111-111111111111","source":"scheduled","platform":"xhs","pageType":"detail","target":{"contentExternalId":"note-1"},"capabilitiesRequested":["content_detail"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"slots","riskPolicy":"server_authorized_leased","stopConditions":["maximum_quota"]}"#;
         let spec = parse_producer_task_spec(value).expect("flat task spec is accepted");
         assert_eq!(spec.source(), "scheduled");
         assert_eq!(spec.platform(), "xhs");

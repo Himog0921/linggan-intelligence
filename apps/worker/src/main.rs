@@ -33,7 +33,10 @@ async fn main() {
             return;
         }
     };
-    println!("linggan worker: patrol tick every {}s", TICK_INTERVAL.as_secs());
+    println!(
+        "linggan worker: patrol tick every {}s",
+        TICK_INTERVAL.as_secs()
+    );
 
     let mut ticker = tokio::time::interval(TICK_INTERVAL);
     loop {

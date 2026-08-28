@@ -229,7 +229,7 @@ async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retai
         .map(|position| {
             serde_json::json!({
                 "kind":"discovery_card", "resultPosition":position,
-                "sourceObject":{"externalId":format!("adhd-search-{position:02}")},
+                "sourceObject":{"platform":"xhs","type":"content","externalId":format!("adhd-search-{position:02}")},
                 "payload":{
                     "title":format!("ADHD 搜索卡片 {position}"),
                     "authorName":"fixture creator",
@@ -241,7 +241,7 @@ async fn runtime_search_twenty_cards_reaches_the_library_without_promoting_retai
         .collect::<Vec<_>>();
     records.push(serde_json::json!({
         "kind":"discovery_card", "resultPosition":21,
-        "sourceObject":{"externalId":"unknown-published-fixture"},
+        "sourceObject":{"platform":"xhs","type":"content","externalId":"unknown-published-fixture"},
         "payload":{"title":"only unknown publication fixture", "authorName":"fixture creator", "content":"synthetic unknown time"}
     }));
     // The package preserves a malformed raw record, but the default Evidence Library must not
@@ -419,7 +419,7 @@ async fn submit_runtime_discovery_fixture(
             "capability":"discovery_search", "observed":1,"attempted":1,"acquired":1,"verified":0,
             "failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"maximum_quota"
         }]}, "records":[{"kind":"discovery_card","resultPosition":1,
-            "sourceObject":{"externalId":external_id},"payload":payload}]
+            "sourceObject":{"platform":platform,"type":"content","externalId":external_id},"payload":payload}]
     });
     let submission_wire = serde_json::json!({
         "contractVersion":"linggan.producer.capture-package.v1", "producerInstanceId":producer_instance_id,
@@ -696,7 +696,7 @@ async fn records_beyond_the_task_quota_still_enter_the_library_but_say_so() {
         .map(|position| {
             serde_json::json!({
                 "kind":"discovery_card", "resultPosition":position,
-                "sourceObject":{"externalId":format!("quota-bound-{position:02}")},
+                "sourceObject":{"platform":"xhs","type":"content","externalId":format!("quota-bound-{position:02}")},
                 "payload":{"title":format!("卡片 {position}"), "authorName":"fixture creator"}
             })
         })

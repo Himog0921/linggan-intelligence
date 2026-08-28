@@ -33,6 +33,8 @@ pub enum ProducerRuntimeError {
     MediaObservationNotFound,
     #[error("media bytes conflict with an existing content-addressed blob")]
     MediaBlobConflict,
+    #[error("typed material identity conflicts with an existing immutable fact")]
+    MaterialIdentityConflict,
 }
 
 #[derive(Debug, Serialize)]
@@ -111,6 +113,11 @@ pub async fn admit_media_blob(
     byte_size: i64,
     storage_key: &str,
 ) -> Result<MediaBlobAdmission, ProducerRuntimeError> {
+    if !crate::material_storage_key::is_safe_storage_key(storage_key)
+        || !crate::material_storage_key::is_safe_media_contract(mime_type, byte_size)
+    {
+        return Err(ProducerRuntimeError::MaterialIdentityConflict);
+    }
     let mut tx = database
         .pool()
         .begin()
@@ -147,7 +154,17 @@ pub async fn admit_media_blob(
             .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
     }
     let materialization_ref = Uuid::new_v4();
-    let local_asset_path = format!("/api/local/media/{sha256}");
+    let qualified_read_schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('linggan_material_media_disposition_event') IS NOT NULL",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    let local_asset_path = if qualified_read_schema_ready {
+        format!("/api/local/media/{materialization_ref}/{sha256}")
+    } else {
+        format!("/api/local/media/{sha256}")
+    };
     sqlx::query("INSERT INTO linggan_media_materialization (materialization_ref,blob_sha256,download_attempt_ref,local_asset_path) VALUES ($1,$2,$3,$4)")
         .bind(materialization_ref).bind(sha256).bind(download_attempt_ref).bind(&local_asset_path)
         .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
@@ -219,6 +236,11 @@ pub async fn begin_media_upload(
     expected_byte_size: i64,
     temporary_storage_key: &str,
 ) -> Result<MediaUploadSession, ProducerRuntimeError> {
+    if !crate::material_storage_key::is_safe_storage_key(temporary_storage_key)
+        || !crate::material_storage_key::is_safe_media_contract(mime_type, expected_byte_size)
+    {
+        return Err(ProducerRuntimeError::MaterialIdentityConflict);
+    }
     let mut tx = database
         .pool()
         .begin()
@@ -430,17 +452,6 @@ fn media_upload_session_from_row(row: &sqlx::postgres::PgRow) -> MediaUploadSess
     }
 }
 
-pub async fn read_local_media_blob(
-    database: &Database,
-    sha256: &str,
-) -> Result<Option<(String, String)>, sqlx::Error> {
-    sqlx::query("SELECT mime_type,storage_key FROM linggan_media_blob WHERE sha256 = $1")
-        .bind(sha256)
-        .fetch_optional(database.pool())
-        .await
-        .map(|row| row.map(|row| (row.get("mime_type"), row.get("storage_key"))))
-}
-
 /// Runtime packages become a deliberately narrow read projection for the Evidence Library. It
 /// reads only material the Browser Producer already delivered; it does not initiate platform
 /// access, manufacture missing publication times, or turn package admission into a claim.
@@ -567,7 +578,7 @@ fn runtime_library_sql() -> &'static str {
      ORDER BY CASE WHEN $2::text IS NULL THEN 4 \
        WHEN lower(COALESCE(grouped.creator_display_name, '')) LIKE '%' || lower($2) || '%' THEN 1 \
        WHEN lower(COALESCE(grouped.title, '')) LIKE '%' || lower($2) || '%' THEN 2 ELSE 3 END, \
-       grouped.first_discovered_at DESC, grouped.result_position ASC"
+       grouped.first_discovered_at DESC, grouped.result_position ASC LIMIT 51"
 }
 
 fn runtime_unknown_time_sql() -> &'static str {
@@ -754,17 +765,22 @@ pub async fn submit_producer_package(
         .bind(package.coverage()).bind(package.checkpoint()).bind(package.raw())
         .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
     // 任务给的篇数上限必须在接纳时执行，而不只是在页面上显示。
-    let maximum_quota: Option<i32> = sqlx::query_scalar(
-        "SELECT (task_spec->>'maximumQuota')::integer FROM linggan_runtime_task WHERE task_id = $1",
-    )
-    .bind(submission.task_id())
-    .fetch_optional(&mut *tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)?
-    .flatten();
-    insert_record_dispositions(&mut tx, package, maximum_quota).await?;
-    if package.package_kind() == "media_slots" {
-        insert_media_slots(&mut tx, package).await?;
+    let task_spec: Value =
+        sqlx::query_scalar("SELECT task_spec FROM linggan_runtime_task WHERE task_id = $1")
+            .bind(submission.task_id())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?
+            .ok_or(ProducerRuntimeError::RoutingNotFound)?;
+    let maximum_quota = task_spec
+        .get("maximumQuota")
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok());
+    let task_binding_valid =
+        crate::material_contract_validation::task_package_binding_valid(&task_spec, package);
+    insert_record_dispositions(&mut tx, package, maximum_quota, task_binding_valid).await?;
+    if task_binding_valid {
+        crate::material_admission::insert_typed_materials(&mut tx, package).await?;
     }
     let receipt_ref = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_runtime_submission_receipt (submission_id,task_id,attempt_id,producer_instance_id,package_hash,package_ref,receipt_ref) VALUES ($1,$2,$3,$4,$5,$6,$7)")
@@ -778,24 +794,6 @@ pub async fn submit_producer_package(
         package_ref: package.package_ref(),
         package_kind: package.package_kind().to_owned(),
     })
-}
-
-async fn insert_media_slots(
-    tx: &mut Transaction<'_, Postgres>,
-    package: &ProducerCapturePackage,
-) -> Result<(), ProducerRuntimeError> {
-    for record in package.records() {
-        let Some(media) = media_slot_record(record) else {
-            continue;
-        };
-        sqlx::query("INSERT INTO linggan_media_slot (slot_key,platform,content_external_id,role,ordinal,first_package_ref) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (slot_key) DO NOTHING")
-            .bind(media.slot_key).bind(package.platform()).bind(media.content_id).bind(media.role).bind(media.ordinal).bind(package.package_ref())
-            .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
-        sqlx::query("INSERT INTO linggan_media_observation (observation_ref,slot_key,package_ref,observed_external_uri,observed_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (observation_ref) DO NOTHING")
-            .bind(media.observation_ref).bind(media.slot_key).bind(package.package_ref()).bind(media.external_uri).bind(package.observed_at())
-            .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
-    }
-    Ok(())
 }
 
 /// 逐条决定记录的处置。
@@ -814,16 +812,25 @@ async fn insert_record_dispositions(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
     maximum_quota: Option<i32>,
+    task_binding_valid: bool,
 ) -> Result<(), ProducerRuntimeError> {
     for (ordinal, record) in package.records().iter().enumerate() {
         let beyond_quota = maximum_quota
             .is_some_and(|quota| i64::try_from(ordinal).unwrap_or(i64::MAX) >= i64::from(quota));
-        let (disposition, reason) = if package.package_kind() == "media_slots" {
-            if media_slot_record(record).is_some() {
-                ("accepted_for_media_identity", "media_slot_contract_valid")
+        let media_identity_conflict =
+            if task_binding_valid && package.package_kind() == "media_slots" {
+                crate::material_media::identity_conflict_reason(tx, package, record).await?
             } else {
-                ("quarantined", "media_slot_contract_incomplete")
-            }
+                None
+            };
+        let (disposition, reason) = if !task_binding_valid {
+            ("quarantined", "task_package_contract_mismatch")
+        } else if let Some(reason) = media_identity_conflict {
+            ("quarantined", reason)
+        } else if let Some(disposition) =
+            crate::material_contract_validation::record_disposition(package, ordinal, record)
+        {
+            disposition
         } else if library_card_record(record) {
             if matches!(
                 package.package_kind(),
@@ -864,39 +871,6 @@ fn library_card_record(record: &Value) -> bool {
         .and_then(Value::as_str)
         .is_some_and(|value| !value.trim().is_empty())
         && record.get("payload").is_some_and(Value::is_object)
-}
-
-struct MediaSlotRecord<'a> {
-    slot_key: &'a str,
-    observation_ref: Uuid,
-    external_uri: &'a str,
-    content_id: &'a str,
-    role: &'a str,
-    ordinal: i32,
-}
-
-fn media_slot_record(record: &Value) -> Option<MediaSlotRecord<'_>> {
-    let slot_key = record.get("slotKey")?.as_str()?.trim();
-    let observation_ref = Uuid::parse_str(record.get("observationRef")?.as_str()?).ok()?;
-    let external_uri = record.pointer("/observation/externalUri")?.as_str()?.trim();
-    let content_id = record.pointer("/sourceObject/externalId")?.as_str()?.trim();
-    let role = record.pointer("/slot/role")?.as_str()?.trim();
-    let ordinal = record
-        .pointer("/slot/ordinal")?
-        .as_i64()
-        .filter(|value| *value > 0)
-        .and_then(|value| i32::try_from(value).ok())?;
-    if slot_key.is_empty() || external_uri.is_empty() || content_id.is_empty() || role.is_empty() {
-        return None;
-    }
-    Some(MediaSlotRecord {
-        slot_key,
-        observation_ref,
-        external_uri,
-        content_id,
-        role,
-        ordinal,
-    })
 }
 
 async fn existing_submission(

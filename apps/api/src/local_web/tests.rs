@@ -523,9 +523,15 @@ fn default_empty_read_view_is_not_misdescribed_as_an_empty_published_window() {
 
 #[test]
 fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_published_only() {
-    let default = local_query(&EvidenceLibraryParams {
+    let default = material_projection::local_query(&material_projection::EvidenceLibraryParams {
+        cursor: None,
         q: None,
         window: None,
+        sort: None,
+        lane: None,
+        lane_state: None,
+        media_kind: None,
+        restriction: None,
     })
     .expect("an omitted URL window selects the explicit default discovery view");
     assert_eq!(
@@ -534,9 +540,15 @@ fn default_local_query_is_latest_accepted_discovery_and_explicit_windows_remain_
     );
     assert_eq!(default.published_window(), None);
 
-    let explicit = local_query(&EvidenceLibraryParams {
+    let explicit = material_projection::local_query(&material_projection::EvidenceLibraryParams {
+        cursor: None,
         q: None,
         window: Some("last_30_days".to_owned()),
+        sort: None,
+        lane: None,
+        lane_state: None,
+        media_kind: None,
+        restriction: None,
     })
     .expect("an explicit published window remains valid");
     assert_eq!(
@@ -587,7 +599,7 @@ async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discov
 
     let body = get_successful_utf8_response(
         application.clone(),
-        "/api/local/evidence-library?q=ADHD&window=last_30_days",
+        "/api/local/evidence-library/legacy?q=ADHD&window=last_30_days",
     )
     .await;
     assert!(body.contains("note-api-known"));
@@ -597,9 +609,11 @@ async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discov
     assert!(!body.contains("https://"));
     assert!(!body.contains("xhscdn"));
 
-    let body =
-        get_successful_utf8_response(application.clone(), "/api/local/evidence-library?q=ADHD")
-            .await;
+    let body = get_successful_utf8_response(
+        application.clone(),
+        "/api/local/evidence-library/legacy?q=ADHD",
+    )
+    .await;
     assert!(body.contains("note-api-known"));
     assert!(body.contains("note-api-unknown"));
     assert!(body.contains("\"timeView\":\"latest_accepted_discovery\""));
@@ -642,7 +656,7 @@ async fn loopback_projection_counts_unknown_published_time_by_content_item_ident
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?q=API&window=last_30_days")
+                .uri("/api/local/evidence-library/legacy?q=API&window=last_30_days")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -705,7 +719,7 @@ async fn loopback_7_day_query_keeps_api_and_page_window_metadata_in_sync() {
         .clone()
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?q=ADHD&window=last_7_days")
+                .uri("/api/local/evidence-library/legacy?q=ADHD&window=last_7_days")
                 .body(Body::empty())
                 .unwrap(),
         )
