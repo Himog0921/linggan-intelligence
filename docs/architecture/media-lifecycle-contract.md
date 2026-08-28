@@ -238,7 +238,7 @@ Package 被接纳只证明 producer 交卷通过运行时最低合同，不自�
 | `media_slots` | 作品当次媒体清单与来源候选 | Slot、来源观察组、candidate URIs、顺序/用途/组件与 Coverage | 槽位总数、类型、顺序、来源代次和取得状态 | Slot/单一 external URI 已实现并有合成 PostgreSQL proof；多 URI、明确顺序、Live Photo 组件待适配 |
 | `media_bytes` | 独立媒体字节 lane 的交付/回执语义 | Download Attempt、Upload Session、Blob、Replica/Materialization | 只显示本地受控副本、完整性和清理状态 | package kind/接口存在；真实字节走独立分块 API，真实平台 bytes 未验证；完整 Replica 模型不足 |
 | OCR / ASR / 抽帧 / embedding | 服务端派生处理，不是 producer 原始内容 Package | ProcessingJob/Event、Derivative、Source Span/Material Transformation | 可检索文字或关键帧，带 processor 版本与来源位置 | Job/Event/Derivative DDL 与 pending 入口存在；provider、真实输出、embedding/关键帧完整模型未实现 |
-| `batch_checkpoint` | 同一 Attempt 的可变运行进度/恢复事实 | checkpoint、暂停/恢复位置和任务状态 | **不成为语料卡或正文材料**；只在来源/执行核验区显示 | Package/checkpoint 已实现；不能作为 Evidence、Coverage 完成或成员清单 |
+| `batch_checkpoint` | 一次独立 checkpoint Attempt 提交时冻结的进度回执 | 当次进度、暂停/恢复位置和任务状态；浏览器可变 `resumeCheckpoint` 仍属于 execution control | **不成为语料卡或正文材料**；只在来源/执行核验区显示 | Package kind 已实现；当前每次提交会创建独立 TaskSpec/Attempt，服务端没有“同一 Attempt 可变 checkpoint”模型；不能作为 Evidence、Coverage 完成或成员清单 |
 
 评论图片、作者头像和其他新媒体来源不得借作品 `media_slots` 进入。它们需要各自稳定主体、slot、Coverage 和用途合同后再扩展。
 
@@ -293,7 +293,7 @@ Package 被接纳只证明 producer 交卷通过运行时最低合同，不自�
 | `NOT_ENABLED` | 当前处理器/读取能力没有启用；任务入口或 pending 记录存在不等于执行失败 |
 | `SEARCHABLE` | 合格材料/派生已进入当前检索投影 |
 | `FAILED` | 有明确执行失败和原因；不能用来表示未请求 |
-| `RISK_CONTROLLED` | 风险/访问限制终止当前 Attempt，不自动重试或换账号绕过 |
+| `RISK_CONTROL` | 风险/访问限制终止当前 Attempt，不自动重试或换账号绕过；读模型唯一映射现行协议 `stoppedReason=risk_control` |
 | `BYTES_CLEANED` | 曾取得的字节按获准策略清理，记录与允许保留的派生仍可追溯 |
 | `WITHDRAWN_OR_RESTRICTED` | 有有效处置决定，新的读取已阻断并传播中/完成 |
 | `UNKNOWN` | 当前合同或来源不能确定；绝不替换成 0、无媒体或完成 |
