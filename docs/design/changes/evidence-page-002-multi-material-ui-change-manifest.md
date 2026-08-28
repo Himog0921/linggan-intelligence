@@ -66,11 +66,15 @@
 | Empty / read failure / restricted | Inline feedback，不用 toast/modal | 本卡 Page spec + read contract |
 | Mobile sequential flow | rail → query → results → inspector | 本卡 responsive spec |
 
+窄屏选择作品会进入 Inspector，Inspector 的“返回当前作品所在列表”回到当前选中 option；这只是本地视图导航，不产生服务端动作。
+
 ## 6. 状态词典
 
 本卡采用 MEDIA-RECON 的闭集：`NOT_REQUESTED / QUEUED / NOT_OBSERVED / OBSERVED / PARTIAL / ACQUIRED / PROCESSING / NOT_ENABLED / SEARCHABLE / FAILED / RISK_CONTROL / BYTES_CLEANED / WITHDRAWN_OR_RESTRICTED / UNKNOWN`。
 
 原型另外展示页面级：`SYNTHETIC_REFERENCE / NO_MATCHING_MATERIAL / READ_PROJECTION_UNAVAILABLE / ACCESS_RESTRICTED`。不创造万能作品状态，不显示总完整度，不把 unknown 写 0。
+
+`PROCESSING` 只用于“处理器实际运行”的合成场景；排队、只有 Job row 或当前 provider 未启用均不能映射为处理中。媒体静态参考另覆盖同一组件、同一来源观察组中的多个脱敏 candidate URI（等价地址断言），以及由显式 bundle 关系关联的 Live Photo `still_image` 已取得 / `motion_stream` 失败的 `PARTIAL` 组合；候选顺序不承担组件识别。
 
 ## 7. 依赖地图
 

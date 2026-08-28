@@ -275,7 +275,7 @@ inspector:
 ### 11.2 窄屏
 
 - `≤900px`：共享页头按内容增高；rail、查询、结果、Inspector 顺序折叠；document 原生滚动。
-- `≤640px`：列表行不再保留横向缩略图列；预览进入标题下方，lane 使用两列网格；Inspector 作为同页后续区，提供“返回当前作品”锚点。
+- `≤640px`：列表行不再保留横向缩略图列；预览进入标题下方，lane 使用两列网格；选择作品后滚动到 Inspector，Inspector 提供“返回当前作品所在列表”，形成列表 ↔ Inspector 闭环。
 - 390×844 和 430×932 必须无页面级横向滚动；技术键允许换行，不截断必读中文。
 
 ### 11.3 可访问性和 Motion
@@ -294,10 +294,13 @@ inspector:
 2. **风险停止**：详情/已有材料保留；当前 Attempt 为 `RISK_CONTROL`；不显示自动重试。
 3. **字节已清理**：视频 bytes 为 `BYTES_CLEANED`；ASR 仍可检索；来源 Blob 和清理状态可追溯。
 4. **未知与未请求**：作者/发布时间 unknown；媒体 not requested；无评论记录不显示 0。
-5. **读取成功但无匹配**：说明当前 query scope、排除/限制，不外推平台没有内容。
-6. **读投影失败**：明确未读取材料、无远程/旧系统 fallback、建议重试本机读取。
-7. **未选择**：Inspector 显示 `SELECTION_REQUIRED`，不填充伪造详情。
-8. **受限材料**：脱敏片段可见，原文因 display policy 不可见。
+5. **处理中**：只有处理器实际运行才显示 `PROCESSING`；原始字节与本地副本状态、Job、处理版本和开始时间可核验；当前不得提前显示 `SEARCHABLE`。该场景是合成目标状态，不表示当前 provider 已启用。
+6. **多候选来源与 Live Photo 部分取得**：同一组件、同一来源观察组可保留多个脱敏 candidate URI，表示等价地址断言；`still_image` 与 `motion_stream` 是独立组件，以显式 Bundle 关系（pair/bundle）关联并分别显示取得/失败，整体为 `PARTIAL`。候选顺序不推断组件，也不暴露原始 URL。
+7. **读取成功但无匹配**：说明当前 query scope、排除/限制，不外推平台没有内容；Inspector 与选择状态同时清空。
+8. **读投影失败**：明确未读取材料、无远程/旧系统 fallback、建议重试本机读取；Inspector、结果与选择状态互斥，不残留上一作品。
+9. **筛选回执**：全部、部分取得、风险停止、字节已清理和处理中均真实改变可见作品、结果数量、当前选择与 read receipt；不能使用无行为的 enabled 按钮。
+10. **未选择**：Inspector 显示 `SELECTION_REQUIRED`，不填充伪造详情。
+11. **受限材料**：脱敏片段可见，原文因 display policy 不可见。
 
 原型中的数量、作者、标题、ID、时间和片段均为合成内容。它验证设计与状态，不证明 API、数据库、平台或媒体链。
 
@@ -306,7 +309,7 @@ inspector:
 | 层 | 场景 | 验收方法 | 完成信号 | 不能证明 |
 |---|---|---|---|---|
 | 产品任务 | 选择作品并判断各 lane | PAGE + 原型走查 | 3 秒看状态、5 秒进入 Inspector | 运行时可用 |
-| 状态诚实 | partial/risk/cleaned/unknown/not requested/read error | 文案与 DOM 检查 | 没有总完成度、unknown→0、slot→bytes、ACK→complete | 数据真实 |
+| 状态诚实 | partial/risk/cleaned/processing/unknown/not requested/read error/Live Photo partial | 文案与 DOM 检查 | 没有总完成度、unknown→0、slot→bytes、ACK→complete；processing 不提前成功 | 数据真实 |
 | 视觉 | 1280×800、1440×900、1536×960、1728×1117、1920×1080、2560×1440、390×844、430×932 | 实际浏览器 render + overflow/geometry 检查 | 无横向越界；重点与 LIDS 一致 | Mog 最终审美验收 |
 | 可访问性 | keyboard/focus/landmark/Reduced Motion | DOM/键盘/媒体查询检查 | 控件可达、状态双通道、无 motion 依赖 | 辅助技术全量认证 |
 | 技术呈现 | 字段/lane/provenance/sensitive boundary | 与 MEDIA-RECON 和卡 3 API 对照 | UI 无需从 Package/raw tables 猜测 | 后端已实现 |
@@ -315,7 +318,7 @@ inspector:
 ### 13.1 本卡证明
 
 - 多材料 Evidence Library 的唯一产品主对象、状态词典、表面地图、信息架构和消费字段已冻结；
-- 静态合成原型能覆盖正常、部分、未知、未请求、风险停止、字节已清理、受限、空与读取失败；
+- 静态合成原型能覆盖正常、部分、未知、未请求、风险停止、处理中、字节已清理、多候选来源、Live Photo 组件部分取得、受限、空与读取失败；
 - 页面沿用 LIDS 与既有 `Corpus Explorer + Split Evidence Inspector`，没有第二套视觉语言；
 - 后续卡 3/4 可以按本规格实现 read model 与运行时 UI，而无需从视觉稿猜语义。
 

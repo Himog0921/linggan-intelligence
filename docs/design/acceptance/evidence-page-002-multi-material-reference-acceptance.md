@@ -21,8 +21,10 @@
 | 风险停止 | 判断已有材料与本次停止的关系 | 保留此前合格详情；当前 Attempt `RISK_CONTROL` | danger 状态 + 不自动重试说明 | 无 | VERIFIED：第二作品行 |
 | 字节已清理 | 判断字节历史与派生可用性 | bytes 曾取得后清理；ASR 可检索且保留血缘 | warning + searchable 并存 | 无 | VERIFIED：第三作品行 + media Inspector 交互 |
 | Unknown / not requested | 避免把缺材料写成 0 或失败 | 作者/发布时间 unknown；媒体尚未请求；评论数量无结论 | 无 0、无“无媒体” | 无 | VERIFIED：第四作品行 + verifier 禁词 |
+| Processing | 区分真正运行、排队和成功 | 图片字节/副本可读；OCR 处理器实际运行；派生尚不可检索 | `PROCESSING` + Job/版本/开始时间；不提前成功 | 无处理器调用 | VERIFIED：第五作品行、处理中筛选与 Inspector |
+| 多候选来源 / Live Photo partial | 核验地址组、组件和组合关系 | still 组内 A/B 为等价 candidate URI；motion 有独立来源组；组件由 Bundle 关系关联 | still acquired / motion failed / overall partial；候选顺序不推断组件 | 无媒体请求 | VERIFIED：第六作品行与 Media Inspector |
 | 无匹配 | 理解当前查询零结果 | 只对 query scope 为零 | inline scope/限制/下一步 | 无平台搜索 | VERIFIED：场景按钮与 DOM 状态 |
-| 读取失败 | 理解页面没有读到材料 | 不是空库或平台无内容 | inline impact/未发生/恢复 | 无 fallback | VERIFIED：场景按钮与 DOM 状态 |
+| 读取失败 | 理解页面没有读到材料 | 不是空库或平台无内容 | results/Inspector/selection 清空；inline impact/未发生/恢复 | 无 fallback | VERIFIED：场景状态机与 DOM 回归 |
 | 访问受限 | 只看最小必要信息 | 脱敏片段可见，原文不展示 | restricted block 不泄漏内容 | 无权限扩张 | VERIFIED：列表与 Inspector |
 | 未选择 | Inspector 不补造详情 | `SELECTION_REQUIRED` | 实现卡必须覆盖；本参考默认选择 01 | 无 | 规格验证 |
 
@@ -31,10 +33,10 @@
 - 设计方向：纯白台面上的精密情报基础设施；lane 带为首屏唯一视觉核心。
 - Token：静态 HTML 通过相对路径消费唯一 `lids_tokens.css`；未声明 `--lgi-*`。
 - CSS：原生 CSS only；无外部库、外部字体、图片、网络 API 或远程 CDN。
-- 响应式：桌面三栏；≤900px 顺序折叠；≤640px lane 两列、Inspector 同页后续。
+- 响应式：桌面三栏；≤900px 顺序折叠；≤640px lane 两列、选择后进入 Inspector，并可返回当前作品所在列表。
 - Motion：只含 row/Inspector 的 transform/opacity；Reduced Motion 下关闭。
 - 视觉资产：预览均为带标签的合成 placeholder，没有真实媒体或仿制插画。
-- 截图：实际截图位于 `/tmp/linggan-evidence-reference.t4dWzW/desktop-fixed-1440x900.png` 与 `/tmp/linggan-evidence-reference.t4dWzW/mobile-fixed-390x844.png`；已人工查看，不提交 Git。
+- 截图：默认桌面/窄屏位于 `/tmp/linggan-evidence-reference.t4dWzW/desktop-fixed-1440x900.png` 与 `/tmp/linggan-evidence-reference.t4dWzW/mobile-fixed-390x844.png`；读取错误和处理中筛选另位于 `/tmp/linggan-evidence-reference.t4dWzW/desktop-read-error-1440x900.png`、`/tmp/linggan-evidence-reference.t4dWzW/desktop-processing-1440x900.png`。四张均已人工查看，不提交 Git。
 
 ### 3.1 实际视口几何
 
@@ -42,8 +44,8 @@ Chrome DevTools Protocol 在同一真实渲染页上逐个设置视口并读取 
 
 | 视口 | document | 横向越界 | 桌面 document 纵向越界 | 关键结论 |
 |---|---:|---:|---:|---|
-| 390×844 | 390×4042 | 否 | N/A（移动自然滚动） | rail→query→results→Inspector 顺序成立 |
-| 430×932 | 430×4028 | 否 | N/A（移动自然滚动） | 技术键/筛选可换行，无横向滚动 |
+| 390×844 | 390×5258 | 否 | N/A（移动自然滚动） | rail→query→results→Inspector 顺序成立；列表 ↔ Inspector 可返回 |
+| 430×932 | 430×5244 | 否 | N/A（移动自然滚动） | 技术键/筛选可换行，无横向滚动 |
 | 1280×800 | 1280×800 | 否 | 否 | Results/Inspector 内部滚动 |
 | 1440×900 | 1440×900 | 否 | 否 | 216px rail + 420px Inspector；三栏稳定 |
 | 1536×960 | 1536×960 | 否 | 否 | 216px rail + 440px Inspector |
@@ -74,9 +76,14 @@ Chrome DevTools Protocol 在同一真实渲染页上逐个设置视口并读取 
 
 ## 6. 实际交互与视觉结论
 
-- 场景按钮依次验证 `results → empty → error → results`；对应可见区互斥，read receipt 同步显示准确中文和技术键。
+- 场景按钮依次验证 `results → empty → error → results`；empty/error 均隐藏结果与 Inspector、清空当前选择和 Inspector DOM，恢复 results 时只从 `itemCopy` 单一映射重新渲染，没有残留 `WORK-REF-01`。
+- 全部、部分取得、风险停止、字节已清理、处理中五个筛选逐一点击；可见 option 分别为 `01–06 / 01+06 / 02 / 03 / 05`，结果数、当前选择、`aria-pressed` 与 read receipt 同步。
+- 初始 Inspector 的标题、概览、讨论、媒体和血缘均由 `setScenario('results') → applyFilter → renderSelection → itemCopy['01']` 生成；静态 Inspector 容器保持空，不存在两套初始事实。
 - 选择第三作品后，`context-selection=03`、Inspector 标题切换为“把‘快点’换成可执行的一小步”，media panel 成为 active，且始终只有一个 `aria-selected=true` 作品行；Inspector 同步显示来源代次、Blob 曾取得、字节已清理、ASR 可检索、处理版本和禁用 CDN 回退。
-- 四个作品行均独立显示作者 lane；评论和回复在讨论组内仍保留各自状态，未被压成单一讨论状态。
+- 六个作品 option 均独立显示作者 lane；评论和回复在讨论组内仍保留各自状态，未被压成单一讨论状态。结果使用 `role=listbox` + `role=option`，ArrowUp/ArrowDown、Enter/Space 均可切换当前作品。
+- 第五作品验证 `PROCESSING` 只在合成处理器实际运行时出现，Inspector 同时显示已取得 Blob、本地副本、Job、处理版本和“尚未形成可检索派生”。
+- 第六作品验证 still 组件的 A/B candidate URI 仅是同一来源观察组的等价地址；motion 使用独立来源组，`still_image ↔ motion_stream` 由显式 Bundle 关系声明，候选顺序不推断组件。
+- 390px 窄屏选择第六作品后进入 Inspector；点击“返回当前作品所在列表”后当前 option 回到视口内，避免单向滚动。
 - 桌面首屏的主视觉是作品行的 lane 带；Inspector 视觉重量次于中央列表，没有形成第二首页。
 - 移动端首屏先给出合成边界、产品方位、二级导航和查询；结果与 Inspector 在后续自然流中，不覆盖或横向压缩。
 - 未使用真实图像；预览采用带状态名称的 placeholder，避免把低质量仿制媒体误认成来源资产。
