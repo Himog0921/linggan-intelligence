@@ -643,9 +643,9 @@ fn second_bar(
 ) -> String {
     match section {
         Section::Targets => format!(
-            r#"<div class="c-toolbar">
-          <div class="c-tabs">{target_filters}</div>
-          <div class="c-actions">
+            r#"<div class="c-tabs c-tg-views">{target_filters}</div>
+          <div class="c-actions c-tg-toolbar">
+            <a class="c-btn-quiet" href="/collection/targets?sort=last">排序 / 最近观察 ↓</a>
             <form class="c-target-add" method="post" action="/collection/targets/new">
               <select name="target_kind" aria-label="目标类型">
                 <option value="creator">创作者</option>
@@ -653,7 +653,7 @@ fn second_bar(
               </select>
               <input name="identity" required maxlength="120"
                      placeholder="创作者主页链接或 ID／关键词" />
-              <button class="c-btn-primary" type="submit">＋ 加入观察</button>
+              <button class="c-btn-primary" type="submit">＋ 新建目标</button>
             </form>
           </div>
         </div>"#,

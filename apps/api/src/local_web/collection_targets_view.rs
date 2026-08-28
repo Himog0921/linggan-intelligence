@@ -140,7 +140,7 @@ fn target_row(
                 <div class="c-tg-object">
                   {avatar}
                   <div class="c-tg-object-text">
-                    <div class="c-tg-title">{name}</div>
+                    <a class="c-tg-title" href="/collection/targets?drawer={target_ref}">{name}</a>
                     <div class="c-tg-meta">{kind} / {platform} · {handle}</div>
                     <div class="c-tg-states">{states}</div>
                   </div>

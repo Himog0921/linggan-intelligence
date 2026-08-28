@@ -4,6 +4,7 @@ mod collection_targets_view;
 mod evidence_page;
 mod shell;
 mod station_view;
+mod target_drawer;
 
 use axum::{
     Json, Router,
@@ -1790,6 +1791,9 @@ struct CollectionParams {
     filter: Option<String>,
     /// 上一次动作的失败原因。失败必须看得见，否则跳转回来什么都不说，会让人以为成功了。
     error: Option<String>,
+    /// 抽屉打开的是哪个目标，以及停在哪个 tab。**放在 URL 里而不是 JS 状态里**：
+    /// 刷新与分享都不丢，而这一页的用途正是「打开一个目标细看，然后发给别人」。
+    dtab: Option<String>,
 }
 
 /// DESIGN-006: the entry lands on the one surface whose contents expire. Arriving on the
@@ -1827,12 +1831,21 @@ async fn collection_targets(
         .await
         .unwrap_or_default();
     match list_targets(database, params.filter.as_deref(), 200).await {
-        Ok(targets) => Html(collection_targets_view::render_stored_targets(
-            &base,
-            &targets,
-            &completeness,
-            params.error.as_deref(),
-        )),
+        Ok(targets) => {
+            let list = collection_targets_view::render_stored_targets(
+                &base,
+                &targets,
+                &completeness,
+                params.error.as_deref(),
+            );
+            let drawer = target_drawer::render(
+                &targets,
+                &completeness,
+                params.drawer.as_deref(),
+                params.dtab.as_deref(),
+            );
+            Html(format!("{list}{drawer}"))
+        }
         Err(_) => Html(base),
     }
 }

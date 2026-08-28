@@ -342,3 +342,31 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-hp-gap { color:var(--v7-warn); }
 .c-hp-none { display:flex; flex-direction:column; gap:2px; }
 .c-hp-hint { color:var(--v7-muted); font-size:10px; line-height:1.5; }
+
+/* 观察目标的宽幅研究抽屉。照稿子：右侧覆盖、左侧列表保持可见、3px 墨色左边。
+ * 用 URL 参数驱动而非 JS——刷新与分享都不丢状态。 */
+.c-dw { position:absolute; z-index:40; top:0; right:0; bottom:0; width:min(1120px,72vw); display:grid; grid-template-rows:auto auto minmax(0,1fr); overflow:hidden; background:var(--v7-white); border-left:3px solid var(--v7-black); }
+.c-dw-head { padding:18px 22px 0; border-bottom:1px solid var(--v7-line); }
+.c-dw-kicker { color:var(--v7-ghost); font:800 9px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-dw-title-row { display:flex; align-items:flex-start; justify-content:space-between; gap:20px; margin-top:6px; }
+.c-dw-title { color:var(--v7-black); font-size:22px; font-weight:700; line-height:1.2; }
+.c-dw-meta { margin-top:4px; color:var(--v7-muted); font:11px var(--lgi-font-mono); }
+.c-dw-actions { display:flex; gap:7px; flex:0 0 auto; }
+.c-dw-statusline { padding:10px 0 12px; color:var(--v7-muted); font-size:12px; }
+.c-dw-tabs { display:flex; align-items:flex-end; gap:26px; height:45px; padding:0 22px; border-bottom:1px solid var(--v7-line); }
+.c-dw-tab { display:flex; align-items:center; height:100%; color:var(--v7-muted); font-size:12px; font-weight:600; text-decoration:none; }
+.c-dw-tab:hover { color:var(--v7-black); }
+.c-dw-tab-on { position:relative; color:var(--v7-black); }
+.c-dw-tab-on::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--v7-red); }
+.c-dw-body { overflow:auto; padding:20px 22px 30px; }
+.c-dw-section { padding-bottom:22px; margin-bottom:22px; border-bottom:1px solid var(--v7-line); }
+.c-dw-section:last-child { border-bottom:0; margin-bottom:0; }
+.c-dw-section-head { display:flex; align-items:baseline; gap:12px; margin-bottom:12px; }
+.c-dw-section-head b { color:var(--v7-black); font-size:14px; font-weight:600; }
+.c-dw-section-head span { color:var(--v7-ghost); font:800 9px var(--lgi-font-mono); letter-spacing:.07em; }
+.c-dw-readouts { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:16px; }
+.c-dw-readouts b { display:block; color:var(--v7-black); font:800 20px/1.1 var(--lgi-font-mono); font-variant-numeric:tabular-nums; }
+.c-dw-readouts span { display:block; margin-top:5px; color:var(--v7-ghost); font:9px var(--lgi-font-mono); letter-spacing:.07em; }
+.c-dw-note { margin:14px 0 0; max-width:720px; color:var(--v7-muted); font-size:12px; line-height:1.7; }
+.c-dw-bio { margin:0; max-width:720px; color:var(--v7-body); font-size:13px; line-height:1.7; }
+.c-dw-empty { color:var(--v7-muted); font-size:13px; }
