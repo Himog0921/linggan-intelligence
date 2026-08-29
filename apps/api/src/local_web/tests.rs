@@ -1056,7 +1056,14 @@ fn collection_serves_all_five_sub_surfaces_from_the_shared_shell() {
         (collection::Section::Tasks, "采集任务"),
         (collection::Section::Runtime, "执行工位"),
     ] {
-        let html = collection::render(section, collection::OperationsMode::Now, None, None, None);
+        let html = collection::render(
+            section,
+            collection::OperationsMode::Now,
+            None,
+            None,
+            None,
+            None,
+        );
         // The breadcrumb, not a title block, is where a surface states which page this is.
         assert!(
             html.contains(&format!("<b>{name}</b>")),
@@ -1088,6 +1095,7 @@ fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
             None,
             None,
             None,
+            None,
         ));
     }
 
@@ -1109,6 +1117,7 @@ fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
     let targets = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
+        None,
         None,
         None,
         None,
@@ -1141,7 +1150,14 @@ fn context_row_counts_read_in_chinese_so_one_row_holds_one_english_scale() {
         collection::Section::Tasks,
         collection::Section::Runtime,
     ] {
-        let html = collection::render(section, collection::OperationsMode::Now, None, None, None);
+        let html = collection::render(
+            section,
+            collection::OperationsMode::Now,
+            None,
+            None,
+            None,
+            None,
+        );
         for fragment in html.split("<span class=\"v7-kpi\"><em>").skip(1) {
             labels.push(
                 fragment
@@ -1211,6 +1227,7 @@ fn the_primary_nav_readouts_all_share_one_type_scale_and_one_colour() {
         None,
         None,
         None,
+        None,
     ));
     for html in &pages {
         assert_eq!(
@@ -1248,7 +1265,7 @@ fn collection_never_publishes_prototype_material_or_a_fake_zero() {
             collection::OperationsMode::Trace,
             collection::OperationsMode::Review,
         ] {
-            let html = collection::render(section, mode, None, None, None);
+            let html = collection::render(section, mode, None, None, None, None);
             for figure in fabricated {
                 assert!(
                     !html.contains(figure),
@@ -1269,6 +1286,7 @@ fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
         None,
         None,
         None,
+        None,
     );
     // 加入观察只写本机记录，因此它是真实可点的动作；但页面必须把「加进来」与「开始采集」
     // 分清楚，否则会让人以为点一下就开始采了。
@@ -1280,6 +1298,7 @@ fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
     let attention = collection::render(
         collection::Section::Attention,
         collection::OperationsMode::Now,
+        None,
         None,
         None,
         None,
@@ -1296,6 +1315,7 @@ fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
         None,
         None,
         None,
+        None,
     );
     assert!(runtime.contains("调度器未接通"));
 }
@@ -1305,6 +1325,7 @@ fn operations_modes_are_addressable_and_the_stream_stays_honest() {
     let now = collection::render(
         collection::Section::Operations,
         collection::OperationsMode::Now,
+        None,
         None,
         None,
         None,
@@ -1321,11 +1342,13 @@ fn operations_modes_are_addressable_and_the_stream_stays_honest() {
         None,
         None,
         None,
+        None,
     );
     assert!(trace.contains("没有可回放的观察历史"));
     let review = collection::render(
         collection::Section::Operations,
         collection::OperationsMode::Review,
+        None,
         None,
         None,
         None,
@@ -1343,6 +1366,7 @@ fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
         None,
         None,
         None,
+        None,
     );
     assert!(!closed.contains("c-drawer"));
 
@@ -1350,6 +1374,7 @@ fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
         collection::Section::Targets,
         collection::OperationsMode::Now,
         Some("T-CR-019"),
+        None,
         None,
         None,
     );
@@ -1361,6 +1386,7 @@ fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
         collection::Section::Targets,
         collection::OperationsMode::Now,
         Some("<script>alert(1)</script>"),
+        None,
         None,
         None,
     );
@@ -1419,6 +1445,7 @@ fn served_primary_surfaces_link_to_each_other_and_unserved_ones_stay_disabled() 
     let collection = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
+        None,
         None,
         None,
         None,
@@ -1534,6 +1561,7 @@ fn both_surfaces_render_the_header_at_one_type_scale() {
         None,
         None,
         None,
+        None,
     );
 
     // Neither page may carry its own copy of the nav typography.
@@ -1598,6 +1626,7 @@ fn collection_orders_its_surfaces_by_urgency_and_opens_on_the_one_that_expires()
         None,
         None,
         None,
+        None,
     );
 
     // Search inside the rail only: the global header's Collection entry is also a
@@ -1639,8 +1668,16 @@ fn every_empty_surface_says_whether_it_is_waiting_on_you() {
     // DESIGN-006 Q9. Five empty surfaces, three kinds of empty — and only one of them is the
     // reader's to act on. Rendered at equal weight they answered everything except "so what
     // do I do".
-    let surface =
-        |section| collection::render(section, collection::OperationsMode::Now, None, None, None);
+    let surface = |section| {
+        collection::render(
+            section,
+            collection::OperationsMode::Now,
+            None,
+            None,
+            None,
+            None,
+        )
+    };
 
     // Exactly one surface may claim the reader's attention, and it must name the action.
     let targets = surface(collection::Section::Targets);
@@ -1694,6 +1731,7 @@ fn every_empty_surface_says_whether_it_is_waiting_on_you() {
                 None,
                 None,
                 None,
+                None,
             ),
         ),
         (
@@ -1701,6 +1739,7 @@ fn every_empty_surface_says_whether_it_is_waiting_on_you() {
             collection::render(
                 collection::Section::Operations,
                 collection::OperationsMode::Review,
+                None,
                 None,
                 None,
                 None,
@@ -1723,6 +1762,7 @@ fn structure_survives_without_data_but_placeholder_counters_do_not() {
     let operations = collection::render(
         collection::Section::Operations,
         collection::OperationsMode::Now,
+        None,
         None,
         None,
         None,
@@ -1755,6 +1795,7 @@ fn structure_survives_without_data_but_placeholder_counters_do_not() {
     let targets = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
+        None,
         None,
         None,
         None,

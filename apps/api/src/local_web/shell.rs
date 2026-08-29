@@ -53,6 +53,8 @@ const PRIMARY_ENTRIES: [PrimaryEntry; 5] = [
     },
     PrimaryEntry {
         zh: "采集",
+        // 这个状态词曾经写死为「尚未接通」。采集接通之后它一个字没变，于是全站页头
+        // 都在说一句已经不成立的话。现在由调用方按真实事实覆盖，见 `global_header`。
         technical_key: "COLLECTION",
         state: "尚未接通",
         surface: Some(PrimarySurface::Collection),
@@ -63,17 +65,26 @@ const PRIMARY_ENTRIES: [PrimaryEntry; 5] = [
 /// Renders one primary entry. A connected route becomes a real link so an operator can move
 /// between served surfaces; a responsibility with no served route stays a disabled button
 /// rather than a dead link. Both forms keep the same label markup and `aria-current`.
-fn primary_entry_markup(entry: &PrimaryEntry, active: PrimarySurface) -> String {
+fn primary_entry_markup(
+    entry: &PrimaryEntry,
+    active: PrimarySurface,
+    collection_state: Option<&str>,
+) -> String {
     let current = if entry.surface == Some(active) {
         " aria-current=\"page\""
     } else {
         ""
     };
+    // 一个责任的状态词只有它自己的页面读得到真实事实。读得到时用真的，读不到时保留
+    // 原来的静态词——**绝不允许因为读不到就宣布「已接通」**。
+    let state = match (entry.surface, collection_state) {
+        (Some(PrimarySurface::Collection), Some(state)) => state,
+        _ => entry.state,
+    };
     let label = format!(
         "<b class=\"v7-nav-zh\">{zh}</b><span class=\"v7-nav-readout\"><small class=\"v7-tech-key\">{technical_key}</small><span class=\"v7-nav-state\">{state}</span></span>",
         zh = entry.zh,
         technical_key = entry.technical_key,
-        state = entry.state,
     );
 
     match entry.href {
@@ -96,25 +107,35 @@ fn localize_context_markup(markup: &str) -> String {
 
     // Full codes must precede short tokens. The markup is authored only by the two
     // first-party renderers that use this shell; this helper never sees source material.
-    for (technical_key, zh) in [
-        ("SCHEDULER NOT CONNECTED", "调度器未接通"),
-        ("READ MODEL NOT CONNECTED", "读模型未接通"),
-        ("NO OBSERVATION TARGETS", "暂无观察目标"),
-        ("SOURCE INCOMPLETE", "来源信息不完整"),
-        ("UTC+08", "中国标准时间"),
-        ("UNKNOWN", "未知"),
-    ] {
+    for (technical_key, zh) in CONTEXT_CODES {
         localized = localized.replace(technical_key, &chinese_first(zh, technical_key));
     }
 
     localized
 }
 
+/// 上下文行里允许出现的技术码及其中文主表达。
+const CONTEXT_CODES: [(&str, &str); 9] = [
+    // 一条码不得包含另一条码。顺序在这里救不了：先替换长码会生成含短码的 markup，
+    // 后一轮再替换一次，得到嵌套的 `调度心跳读不到 SCHEDULER HEARTBEAT 未知 UNKNOWN`。
+    // 由 `no_code_contains_another_code` 自动执行，不靠人记得。
+    ("SCHEDULER HEARTBEAT UNREADABLE", "调度心跳读不到"),
+    ("SCHEDULER NOT CONNECTED", "调度器未接通"),
+    ("READ MODEL NOT CONNECTED", "读模型未接通"),
+    ("NO OBSERVATION TARGETS", "暂无观察目标"),
+    ("PATROL ARMED", "巡检已开启"),
+    ("PATROL OFF", "有观察目标但巡检未开"),
+    ("SOURCE INCOMPLETE", "来源信息不完整"),
+    ("UTC+08", "中国标准时间"),
+    ("UNKNOWN", "未知"),
+];
+
 fn localize_boundary_label(label: &str) -> String {
     let chinese = match label {
         "LOCAL HOST / NO READ MODEL" => "本机服务 / 读模型未接通",
         "LOCAL HOST / ACCEPTED DISCOVERY" => "本机服务 / 已接纳发现",
         "LOCAL HOST / NO COLLECTION RUNTIME" => "本机服务 / 采集运行时未接通",
+        "LOCAL HOST / NO PLATFORM ACCESS" => "本机服务 / 不访问任何平台",
         _ => "本机服务状态",
     };
 
@@ -126,18 +147,21 @@ fn localize_boundary_label(label: &str) -> String {
 /// `crumb` and `meta` are already-escaped markup owned by the calling page. The context
 /// row's first column is intentionally empty: it continues the local rail's width so the
 /// instrument mesh reads as one vertical field.
+/// `collection_state` 让采集页用真实事实覆盖一级导航里那个静态状态词。
+/// 传 `None` 保留静态词——读不到事实时不许宣布已接通。
 pub fn global_header(
     active: PrimarySurface,
     boundary_label: &str,
     crumb: &str,
     meta: &str,
+    collection_state: Option<&str>,
 ) -> String {
     let mut nav = String::new();
     for entry in PRIMARY_ENTRIES {
         if !nav.is_empty() {
             nav.push_str("\n            ");
         }
-        nav.push_str(&primary_entry_markup(&entry, active));
+        nav.push_str(&primary_entry_markup(&entry, active, collection_state));
     }
 
     let boundary_label = localize_boundary_label(boundary_label);
@@ -172,6 +196,27 @@ pub fn global_header(
 }
 
 #[cfg(test)]
+mod code_table_tests {
+    use super::CONTEXT_CODES;
+
+    #[test]
+    fn no_code_contains_another_code() {
+        // 替换是逐条顺序执行的：一条码若包含另一条，先替换的那条会生成含短码的 markup，
+        // 后一轮把它再替换一次，产出嵌套的技术键。这不是排序能解决的，只能不允许包含。
+        for (outer, _) in CONTEXT_CODES {
+            for (inner, _) in CONTEXT_CODES {
+                if outer != inner {
+                    assert!(
+                        !outer.contains(inner),
+                        "「{outer}」包含「{inner}」，第二轮替换会嵌套技术键"
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::{PrimarySurface, global_header};
 
@@ -182,12 +227,14 @@ mod tests {
             "LOCAL HOST / NO READ MODEL",
             "语料 <span class=\"v7-slash\">/</span> <b>证据库</b>",
             "<span class=\"v7-kpi\"><em>内容</em><b>UNKNOWN</b></span><span>READ MODEL NOT CONNECTED</span><span>SOURCE INCOMPLETE</span><span>UTC+08</span>",
+            None,
         );
         let collection = global_header(
             PrimarySurface::Collection,
             "LOCAL HOST / NO COLLECTION RUNTIME",
             "采集 <span class=\"v7-slash\">/</span> <b>生产流</b> <span class=\"v7-context-current\">NOW</span>",
             "<span class=\"v7-kpi\"><em>巡逻中断</em><b>UNKNOWN</b></span><span>SCHEDULER NOT CONNECTED</span><span>NO OBSERVATION TARGETS</span><span>UTC+08</span>",
+            None,
         );
 
         for (name, header, required_chinese) in [
