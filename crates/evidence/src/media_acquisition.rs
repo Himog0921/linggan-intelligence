@@ -30,6 +30,7 @@ pub enum MediaAcquisitionDecision {
     Acquired {
         work_ref: Uuid,
         observation_ref: Uuid,
+        component_kind: String,
         claim_generation: i32,
         candidate_uris: Vec<String>,
         lease_expires_at: String,
@@ -59,6 +60,7 @@ mod tests {
         let value = serde_json::to_value(MediaAcquisitionDecision::Acquired {
             work_ref,
             observation_ref,
+            component_kind: "single".to_owned(),
             claim_generation: 2,
             candidate_uris: vec!["https://media.example/cover.webp".to_owned()],
             lease_expires_at: "2026-08-29T16:30:00Z".to_owned(),
@@ -72,6 +74,7 @@ mod tests {
                 "decision": "acquired",
                 "workRef": work_ref,
                 "observationRef": observation_ref,
+                "componentKind": "single",
                 "claimGeneration": 2,
                 "candidateUris": ["https://media.example/cover.webp"],
                 "leaseExpiresAt": "2026-08-29T16:30:00Z",
@@ -334,7 +337,7 @@ pub async fn claim_media_acquisition(
     .execute(&mut *tx)
     .await?;
     let replay = sqlx::query(
-        "SELECT work_ref,observation_ref,claim_generation,lease_expires_at::text AS lease_expires_at \
+        "SELECT work_ref,observation_ref,component_kind,claim_generation,lease_expires_at::text AS lease_expires_at \
          FROM linggan_media_acquisition_work \
          WHERE state='leased' AND claimed_by_installation_ref=$1 \
            AND lease_expires_at > scope_001_now() \
@@ -366,7 +369,7 @@ pub async fn claim_media_acquisition(
              claim_generation=claim_generation+1,claimed_by_installation_ref=$2, \
              lease_expires_at=scope_001_now()+interval '5 minutes',updated_at=scope_001_now() \
              WHERE work_ref=$1 \
-             RETURNING work_ref,observation_ref,claim_generation,lease_expires_at::text AS lease_expires_at",
+             RETURNING work_ref,observation_ref,component_kind,claim_generation,lease_expires_at::text AS lease_expires_at",
         )
         .bind(candidate.get::<Uuid, _>("work_ref"))
         .bind(installation_ref)
@@ -374,17 +377,20 @@ pub async fn claim_media_acquisition(
         .await?
     };
     let observation_ref: Uuid = work.get("observation_ref");
+    let component_kind: String = work.get("component_kind");
     let candidate_uris = sqlx::query_scalar::<_, String>(
         "SELECT external_uri FROM linggan_material_media_candidate \
-         WHERE observation_ref=$1 ORDER BY candidate_ordinal LIMIT 6",
+         WHERE observation_ref=$1 AND component_kind=$2 ORDER BY candidate_ordinal LIMIT 6",
     )
     .bind(observation_ref)
+    .bind(&component_kind)
     .fetch_all(&mut *tx)
     .await?;
     let lease_expires_at: String = work.get("lease_expires_at");
     let outcome = MediaAcquisitionDecision::Acquired {
         work_ref: work.get("work_ref"),
         observation_ref,
+        component_kind,
         claim_generation: work.get("claim_generation"),
         candidate_uris,
         lease_expires_at,
@@ -458,6 +464,7 @@ pub async fn record_media_acquisition_failure(
 pub(crate) async fn complete_media_acquisition_for_observation(
     tx: &mut Transaction<'_, Postgres>,
     observation_ref: Uuid,
+    mime_type: &str,
 ) -> Result<(), sqlx::Error> {
     let schema_ready: bool =
         sqlx::query_scalar("SELECT to_regclass('linggan_media_acquisition_work') IS NOT NULL")
@@ -466,12 +473,24 @@ pub(crate) async fn complete_media_acquisition_for_observation(
     if !schema_ready {
         return Ok(());
     }
+    let purpose: Option<String> = sqlx::query_scalar(
+        "SELECT purpose FROM linggan_material_media_origin WHERE observation_ref=$1",
+    )
+    .bind(observation_ref)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let component_kind = match purpose.as_deref() {
+        Some("live_photo") if mime_type.starts_with("image/") => "still",
+        Some("live_photo") if mime_type.starts_with("video/") => "motion",
+        _ => "single",
+    };
     sqlx::query(
         "UPDATE linggan_media_acquisition_work SET state='completed',completed_at=scope_001_now(), \
          claimed_by_installation_ref=NULL,lease_expires_at=NULL,last_error=NULL,updated_at=scope_001_now() \
-         WHERE observation_ref=$1 AND state <> 'completed'",
+         WHERE observation_ref=$1 AND component_kind=$2 AND state <> 'completed'",
     )
     .bind(observation_ref)
+    .bind(component_kind)
     .execute(&mut **tx)
     .await?;
     Ok(())

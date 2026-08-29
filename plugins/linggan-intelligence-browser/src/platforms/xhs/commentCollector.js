@@ -104,6 +104,7 @@ export async function collectComments({
   collectionRunId = '',
   persist = true,
   emitReceipt = true,
+  taskSpec = undefined,
 } = {}) {
   const apiResult = await collectCommentsViaApi({
     noteId,
@@ -124,7 +125,7 @@ export async function collectComments({
       stopReason: apiResult.stopReason,
     }, { maxTotal });
     if (emitReceipt) {
-      result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
+      result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode, taskSpec } });
     }
     return result;
   }
@@ -152,7 +153,7 @@ export async function collectComments({
   });
   const normalizedResult = withCommentCollectionReceipt(result, { maxTotal });
   if (emitReceipt) {
-    normalizedResult.lingganDelivery = await emitCollectorReceipt('comments', normalizedResult, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode } });
+    normalizedResult.lingganDelivery = await emitCollectorReceipt('comments', normalizedResult, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode, taskSpec } });
   }
   return normalizedResult;
 }

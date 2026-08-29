@@ -269,9 +269,9 @@ export function createXhsPageController({
     reinjectPending = false;
   }
 
-  async function collectCurrentNoteToLinggan() {
+  async function collectCurrentNoteToLinggan(options = {}) {
     showToast('正在采集笔记并交付 Linggan…', 'info');
-    const note = await collectNote();
+    const note = await collectNote(window, options);
     const delivery = formatXhsDetailDeliveryMessage(note?.lingganDetailPackageDelivery);
     showToast(delivery.message, delivery.allAccepted ? 'success' : 'info');
     return note;
@@ -336,7 +336,10 @@ export function createXhsPageController({
     try {
       switch (action) {
         case 'collectNote': {
-          await collectCurrentNoteToLinggan();
+          await collectCurrentNoteToLinggan({
+            taskSpec: params.taskSpec,
+            expectedNoteId: params.taskSpec?.target?.contentExternalId,
+          });
           break;
         }
 
@@ -349,21 +352,33 @@ export function createXhsPageController({
         case 'collectComment': {
           await ensurePluginAuthorized();
           let commentSettings;
-          try {
-            commentSettings = await showCommentLimitDialog({
-              title: '单篇评论设置',
-              description: '选择评论上限和采集深度。留空或填 0 表示不限；“尽量全部回复”会继续展开更多回复。',
-              confirmText: '开始采集',
-            });
-          } catch {
-            break;
+          if (params.taskSpec?.source === 'scheduled') {
+            const capability = params.taskSpec.capabilitiesRequested?.[0];
+            commentSettings = {
+              maxComments: Number(params.taskSpec.commentLimit) || Number(params.taskSpec.maximumQuota) || 1,
+              commentDepthMode: capability === 'replies' ? COMMENT_DEPTH_MODE.ALL_REPLIES : COMMENT_DEPTH_MODE.TWO_LEVEL,
+              maxSubComments: Number(params.taskSpec.target?.replyExpandLimit) || 0,
+            };
+          } else {
+            try {
+              commentSettings = await showCommentLimitDialog({
+                title: '单篇评论设置',
+                description: '选择评论上限和采集深度。留空或填 0 表示不限；“尽量全部回复”会继续展开更多回复。',
+                confirmText: '开始采集',
+              });
+            } catch {
+              break;
+            }
           }
           await singleCommentCtrl.start({
-            noteId: extractNoteId(window.location.href),
+            noteId: params.taskSpec?.target?.contentExternalId || extractNoteId(window.location.href),
             noteUrl: window.location.href,
             maxTotal: commentSettings.maxComments,
-            maxSubComments: commentSettings.commentDepthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 0 : 200,
+            maxSubComments: params.taskSpec?.source === 'scheduled'
+              ? commentSettings.maxSubComments
+              : (commentSettings.commentDepthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 0 : 200),
             commentDepthMode: commentSettings.commentDepthMode,
+            taskSpec: params.taskSpec,
           });
           break;
         }

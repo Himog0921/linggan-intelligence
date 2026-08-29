@@ -18,6 +18,7 @@ mod material_disposition;
 mod material_media;
 mod material_media_read;
 mod material_processing;
+mod material_processing_validation;
 mod material_projection;
 mod material_projection_types;
 mod material_query_sql;
@@ -34,8 +35,9 @@ mod work_order;
 mod work_order_lease;
 
 pub use acquisition_chain::{
-    AcquisitionChainError, AuthorizationGrant, RequestOutcome, acquisition_chain_schema_is_ready,
-    grant_authorization, read_capacity, request_and_admit,
+    AcquisitionChainError, AuthorizationGrant, MaterialDeepeningTarget, RequestOutcome,
+    acquisition_chain_schema_is_ready, grant_authorization, read_capacity, request_and_admit,
+    request_and_admit_material_targets,
 };
 pub use archive_completeness::{ArchiveCompleteness, read_archive_completeness};
 pub use collection_target::{
@@ -70,7 +72,11 @@ pub use material_disposition::{
     MaterialMediaDisposition, record_blob_disposition, record_derivative_disposition,
     record_materialization_disposition, record_slot_disposition,
 };
-pub use material_processing::record_media_derivative_completion;
+pub use material_processing::{
+    MediaProcessingClaim, claim_media_processing_work, complete_media_processing_derivative,
+    complete_media_processing_text, complete_media_processing_without_output,
+    ensure_media_processing_work, fail_media_processing_work, record_media_derivative_completion,
+};
 pub use material_projection::{
     MaterialDisplay, MaterialEngagement, MaterialIdentity, MaterialLaneSummary,
     MaterialLibraryItem, MaterialLibraryProjection, MaterialPreview, MaterialReadError,

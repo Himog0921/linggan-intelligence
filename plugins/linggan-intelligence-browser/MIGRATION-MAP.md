@@ -1,7 +1,7 @@
 # PLUGIN-REHOME-001 · 旧插件迁入与运行边界映射
 
-> 状态: Draft migration map（LOCAL_TRUSTED adapter 已接入合成回传）
-> 最后核对: 2026-08-27
+> 状态: 当前迁移与自动执行边界
+> 最后核对: 2026-08-30
 > 适用范围: `linggan-boom@8a00cc1` / `v2.0.91` 到 Linggan 自有浏览器包的第一条垂直迁入边界
 > 事实来源: `plugins/linggan-intelligence-browser/` 当前 source、Manifest、Webpack active entries 和 isolation check
 > 冲突时以谁为准: 当前可构建 source 和实际运行证明；旧插件只说明迁入来源，不是 Linggan 运行规格
@@ -22,7 +22,7 @@
 | Popup / Dashboard | 已原样迁入其主要布局、主题、品牌资产、数据页和操作位置 | 熟悉的灵感爆爆爆操作界面，Linggan 本机状态区替代旧工作台连接区 | 界面可构建；没有真实数据证明 |
 | 页面注入控制 | 已保留 XHS / 抖音页面识别、按钮位置和提示体验 | 原来的页面控制入口仍在 | 未接通动作显示 Linggan 未接通，不是采集成功 |
 | XHS / 抖音 collector source | 完整保留在 `src/platforms/` 和关联 source | 后续可在同一源码包上适配 | 不能在本轮视为已授权、已接通或已验证 |
-| 本机 Dexie / 恢复逻辑 | 单独 LOCAL_TRUSTED outbox 仅保存待交付的手动 Discovery submission；其余 legacy source 仍不进入 active runtime | 合成包先本地持久化，网络超时或 service worker 重启后以同一 submission id 重试 | outbox 不是 Linggan Evidence / 数据库真相；scheduler 为 `NOT_CONNECTED` |
+| 本机 Dexie / 恢复逻辑 | Linggan 专属 outbox 保存待交付 Submission 与媒体上传；service worker 重启后继续同一不可变标识 | 人工与 scheduled Package 均可恢复投递 | outbox 不是 Evidence / 数据库真相；调度事实仍在 Rust/PostgreSQL |
 | 旧授权、轮询、lease、工位派发 | 旧 source 仅作历史保留；Webpack 不以旧 background 为入口 | 不再出现旧工作台授权成功或工位就绪承诺 | 当前 active service worker 不调用这些链路 |
 | 旧数据同步 / fallback | 已从当前 Dashboard 动作中切断 | “提交到 Linggan（待接通）”只显示原因，不会提交 | 不存在对旧工作台的兼容提交 |
 | cookies、媒体下载、定时、网络规则、通知权限 | 从 Manifest 移除 | 不会请求这些旧能力的浏览器权限 | 所有需要这些能力的未来接入必须重新评审 |
@@ -38,6 +38,9 @@
 | 单篇/批量评论 | 深采可明确设定上限或“公开自然结束”，批量逐篇 checkpoint、空态成功、失败隔离 | 不做内容分析、不绕过验证、不中断时不生成真实 Evidence |
 | 本机恢复与媒体 | 使用独立 `LingganIntelligenceBrowserLocalStaging`；媒体仅允许受限 HTTPS 平台域名 | 不复用 `LingganBoomDB`，不允许任意页面消息/本机 URL 作为下载来源 |
 | 发现封面自动物化（0.7.0） | 服务端从已接纳 discovery finding 建立 cover slot 与最多三代取得工作；插件自动领取、哈希、分块上传 | 不自动展开详情/评论/OCR/ASR；工作状态不是 Evidence，来源 URL 也不是长期资产 |
+| 固定作品深化（0.8.0） | 上游把明确作品集合冻结到 WorkOrder；插件自动顺序执行详情、媒体槽位、评论与回复 | 不对所有发现结果无界 fan-out；普通巡检仍只发现变化 |
+| 多样媒体卡槽（0.8.0） | 图片、封面、视频、实况图片进入同一媒体合同；实况 still/motion 分组件候选与有界取得工作 | URL 不是长期资产；一个组件成功不冒充整个实况卡槽完整 |
+| 本机派生（0.8.0） | Rust worker 对已物化字节运行 thumbnail/OCR/audio/ASR/frame OCR，空文本写 KNOWN_EMPTY | 插件不承担 OCR/ASR；处理工作不冒充 Evidence 或来源事实 |
 
 ## 新旧运行路径对照
 
@@ -48,18 +51,16 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（本轮实际）
+当前路径（0.8.0）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
-  -> manual synthetic TaskSpec / Attempt / durable Submission outbox
-  -> localhost receipt or retry; no old endpoint
+  -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox
+  -> localhost receipt / retry / Evidence Material Projection
 
-页面采集动作（本轮仍未接通）
-  -> explicit PENDING result
-  -> no platform action, no media write
-
-以后单独授权的路径（本轮未实现）
-user action -> authorized Linggan adapter -> bounded work -> receipt / Coverage
+自动观察路径
+Observation rule -> WorkOrder -> ordered single-capability steps
+  -> plugin page execution -> immutable Package -> Receipt
+  -> local media bytes -> local processors -> Evidence Library
 ```
 
 ## 发布前可验证项与未验证项

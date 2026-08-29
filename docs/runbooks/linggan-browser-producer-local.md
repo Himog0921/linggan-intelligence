@@ -1,8 +1,8 @@
 # Linggan Browser Producer 本地构建与加载核对
 
 > 状态: 权威当前
-> 最后核对: 2026-08-25
-> 适用范围: `PLUGIN-MIGRATION-001` 自有 MV3 Browser Producer 的本地构建、release 完整性核对与真实 Canary 前浏览器加载检查
+> 最后核对: 2026-08-30
+> 适用范围: `plugins/linggan-intelligence-browser` 当前 MV3 Browser Producer 的本地构建、release 完整性核对与真实链加载检查
 > 事实来源: Issue #37、插件 source/build scripts、`PLUGIN-MIGRATION-001` 与 `LOCAL-001C0-DISCOVERY-BOUNDARY-V1`
 > 冲突时以谁为准: 用户最新确认、实际 manifest/release hash、浏览器实际加载状态和 Linggan local host receipt
 
@@ -22,15 +22,20 @@ source build verified
 在 Linggan 仓库根目录执行：
 
 ```bash
-cd plugins/linggan-browser-producer
+cd plugins/linggan-intelligence-browser
+npm ci --ignore-scripts
 npm run build
-npm run check
+npm run package:release
+npm run release:manifest
+npm run release:verify
+npm run release:reproducibility
+npm run verify:linggan-isolation
 ```
 
 预期：
 
 - `dist/` 是可供浏览器“加载已解压的扩展程序”选择的临时目录，已忽略，不提交；
-- `releases/linggan-browser-producer-0.2.0.zip` 是提交的可安装发布包；
+- `releases/linggan-intelligence-browser-v0.8.0.zip` 是当前可安装发布包；
 - `releases/release-manifest.json` 给出版本、ZIP SHA-256、每个安装文件的 SHA-256 和 Discovery 合同兼容版本；
 - `npm run check` 从 clean source 临时重建并对比 release manifest/ZIP，同时检查最小权限和禁止依赖。
 
@@ -42,10 +47,10 @@ npm run check
 
 1. 在 Chrome 扩展管理页选择 `dist/` 作为“加载已解压的扩展程序”；不要加载旧内容工作台插件或其 ZIP。
 2. 在扩展详情页核对 manifest name、version 与 `releases/release-manifest.json` 一致。
-3. 打开 popup；它只能显示 `localhost:3000`。`LOCAL_INGRESS_READY` 表示本机健康接口同时确认了 Discovery 接纳数据库和固定 ingress 路由；其他状态均不得开始。
-4. 打开已经人工选择为 `ADHD` 且可见选中“综合”的小红书搜索结果页，再从 popup 明确点击 Discovery。浏览器只给当前 tab 一次 `activeTab` 页面读取权限；插件不持有 persistent 小红书 host permission。
-5. 首次动作只读取当前 card surface 中最多 20 个稳定链接卡片。它不滚动、不打开详情、不读取 Cookie/账号、评论或媒体。少于 20 的实际可见合格卡片可以提交，但会带 `unknown` stopped reason；只有正好 20 张时才是 `quota_reached`。
-6. popup 必须显示 `ACCEPTED`、`REPLAY`、`NOT_ACCEPTED` 或 `NOT_READY`。只有 `ACCEPTED`/`REPLAY` 是本机接纳回执；页面显示、HTTP 可达、按钮点击或卡片数量都不能替代该回执。
+3. 打开 popup；它只能显示 `localhost:3000`。健康接口必须公布 `LINGGAN_BROWSER_PRODUCER_RUNTIME / PLUGIN_RUNTIME_002_SCHEMA_READY` 及完整 runtime/media routes。
+4. 重载或启动插件后，它会自动签到并通过 alarm 领取服务端已批准任务；正常路径不要求点击 Popup 的“领取”。任务会自行打开明确的搜索、博主页或作品详情页。
+5. 固定作品深化只能来自服务端冻结的作品集合；一个作品依次提交 detail、media slots、comments、replies，任一 lane 失败不能抹掉已接纳 sibling。评论最多 30、回复展开最多 2，媒体/处理重试最多 3。
+6. 验收分别核对 Task/Attempt/Receipt、媒体 Blob/Materialization、处理 Job/Derivative 和 Evidence Library 页面；浏览器打开页面或出现本地文件都不能单独替代完整链回执。
 
 ## 错误处理
 

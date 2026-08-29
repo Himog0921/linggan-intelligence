@@ -311,17 +311,31 @@ async fn insert_content_detail(
     let creator = exact_string(detail.payload, "authorName");
     let author_external_id = exact_string(detail.payload, "authorId");
     let published_at = exact_scalar_text(detail.payload, "publishedAtText");
+    let like_count = exact_nonnegative_count(detail.payload, &["likes", "likeCount", "likedCount"]);
+    let comment_count = exact_nonnegative_count(
+        detail.payload,
+        &["publicCommentCount", "comments", "commentCount"],
+    );
+    let collect_count = exact_nonnegative_count(
+        detail.payload,
+        &["collects", "collectCount", "collectedCount"],
+    );
+    let share_count = exact_nonnegative_count(detail.payload, &["shares", "shareCount"]);
     let searchable_text = [title, body]
         .into_iter()
         .flatten()
         .collect::<Vec<_>>()
         .join(" ");
-    sqlx::query("INSERT INTO linggan_material_content_detail (material_ref,content_public_ref,package_ref,record_ordinal,observed_at,title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,published_at_source_text,published_at_source_text_state,searchable_text,author_external_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)")
+    sqlx::query("INSERT INTO linggan_material_content_detail (material_ref,content_public_ref,package_ref,record_ordinal,observed_at,title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,published_at_source_text,published_at_source_text_state,searchable_text,author_external_id,like_count,like_count_state,comment_count,comment_count_state,collect_count,collect_count_state,share_count,share_count_state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)")
         .bind(Uuid::new_v4()).bind(content_public_ref).bind(package.package_ref())
         .bind(i32::try_from(ordinal).expect("package record count is bounded")).bind(package.observed_at())
         .bind(title).bind(known_state(title)).bind(body).bind(known_state(body))
         .bind(creator).bind(known_state(creator)).bind(published_at.as_deref())
         .bind(known_state(published_at.as_deref())).bind(searchable_text).bind(author_external_id)
+        .bind(like_count).bind(known_state(like_count))
+        .bind(comment_count).bind(known_state(comment_count))
+        .bind(collect_count).bind(known_state(collect_count))
+        .bind(share_count).bind(known_state(share_count))
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     Ok(())
 }

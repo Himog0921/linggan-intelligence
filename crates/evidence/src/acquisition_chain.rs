@@ -20,6 +20,8 @@ pub enum AcquisitionChainError {
     UnknownTarget,
     #[error("that target is not in a state where deep archiving can be requested: {state}")]
     TargetNotRequestable { state: String },
+    #[error("material deepening needs between 1 and 200 distinct content targets")]
+    InvalidMaterialTargets,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -32,6 +34,20 @@ pub struct RequestOutcome {
     pub outcome: AdmissionOutcome,
     /// Present only when the decision admitted the request.
     pub work_order_ref: Option<Uuid>,
+}
+
+/// One already-admitted material identity that a person has explicitly selected for deepening.
+///
+/// This is deliberately not a discovery remainder.  Supplying the identities here is the act
+/// that prevents a normal profile scan from silently fanning out into detail/comment/media work.
+#[derive(Debug, Clone)]
+pub struct MaterialDeepeningTarget {
+    pub content_public_ref: Uuid,
+    pub comment_limit: i32,
+    pub reply_expand_limit: i32,
+    pub acquire_media: bool,
+    pub allow_ocr: bool,
+    pub allow_asr: bool,
 }
 
 pub async fn acquisition_chain_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
@@ -103,6 +119,41 @@ pub async fn request_and_admit(
     purpose: &str,
     requested_by: &str,
 ) -> Result<RequestOutcome, AcquisitionChainError> {
+    request_and_admit_inner(database, target_ref, lane, purpose, requested_by, &[]).await
+}
+
+/// Admit one exact, person-selected set of existing materials for bounded deepening.
+///
+/// It shares the ordinary authorization/admission/work-order chain.  The only extra fact is the
+/// exact content set written in the same transaction as the Work Order; no later scheduler query
+/// is allowed to replace it with "whatever is newest now".
+pub async fn request_and_admit_material_targets(
+    database: &Database,
+    target_ref: Uuid,
+    purpose: &str,
+    requested_by: &str,
+    material_targets: &[MaterialDeepeningTarget],
+) -> Result<RequestOutcome, AcquisitionChainError> {
+    validate_material_targets(material_targets)?;
+    request_and_admit_inner(
+        database,
+        target_ref,
+        "deep_archive",
+        purpose,
+        requested_by,
+        material_targets,
+    )
+    .await
+}
+
+async fn request_and_admit_inner(
+    database: &Database,
+    target_ref: Uuid,
+    lane: &str,
+    purpose: &str,
+    requested_by: &str,
+    material_targets: &[MaterialDeepeningTarget],
+) -> Result<RequestOutcome, AcquisitionChainError> {
     if !acquisition_chain_schema_is_ready(database).await? {
         return Err(AcquisitionChainError::SchemaUnavailable);
     }
@@ -127,6 +178,12 @@ pub async fn request_and_admit(
     // 此前这里对所有 lane 一律要求 pending_decision，结果是巡检**永远派不出去**——
     // 目标一旦进入 archiving 就再也无法申请。这个缺陷由第一轮 tick 当场暴露。
     let requestable = match lane {
+        // A fixed material set is a follow-up to an admitted baseline.  It may deepen an archived
+        // or monitored creator, but it still uses the existing deep-archive authorization class.
+        "deep_archive" if !material_targets.is_empty() => matches!(
+            lifecycle_state.as_str(),
+            "archiving" | "archived" | "monitoring" | "paused"
+        ),
         // `archiving` is accepted only so the scheduler can recover an expired bounded baseline.
         // Admission still merges a live lease and the scheduler caps the number of Work Orders.
         "deep_archive" => matches!(lifecycle_state.as_str(), "pending_decision" | "archiving"),
@@ -152,7 +209,17 @@ pub async fn request_and_admit(
     .execute(&mut *transaction)
     .await?;
 
-    let facts = gather_facts(&mut transaction, &platform, &target_kind, lane, target_ref).await?;
+    ensure_material_targets_belong_to_platform(&mut transaction, &platform, material_targets)
+        .await?;
+    let facts = gather_facts(
+        &mut transaction,
+        &platform,
+        &target_kind,
+        lane,
+        target_ref,
+        !material_targets.is_empty(),
+    )
+    .await?;
     let outcome = decide_admission(&facts);
 
     let decision_ref = Uuid::new_v4();
@@ -182,18 +249,18 @@ pub async fn request_and_admit(
             .capacity
             .station_ref()
             .and_then(|value| Uuid::parse_str(value).ok());
-        Some(
-            write_work_order(
-                &mut transaction,
-                decision_ref,
-                target_ref,
-                lane,
-                authorization_ref,
-                station_ref,
-                requested_by,
-            )
-            .await?,
+        let work_order_ref = write_work_order(
+            &mut transaction,
+            decision_ref,
+            target_ref,
+            lane,
+            authorization_ref,
+            station_ref,
+            requested_by,
         )
+        .await?;
+        write_material_targets(&mut transaction, work_order_ref, material_targets).await?;
+        Some(work_order_ref)
     } else {
         None
     };
@@ -207,6 +274,75 @@ pub async fn request_and_admit(
     })
 }
 
+fn validate_material_targets(
+    material_targets: &[MaterialDeepeningTarget],
+) -> Result<(), AcquisitionChainError> {
+    if material_targets.is_empty() || material_targets.len() > 200 {
+        return Err(AcquisitionChainError::InvalidMaterialTargets);
+    }
+    let mut identities = std::collections::HashSet::new();
+    if material_targets.iter().any(|target| {
+        !identities.insert(target.content_public_ref)
+            || !(1..=30).contains(&target.comment_limit)
+            || !(0..=2).contains(&target.reply_expand_limit)
+    }) {
+        return Err(AcquisitionChainError::InvalidMaterialTargets);
+    }
+    Ok(())
+}
+
+async fn ensure_material_targets_belong_to_platform(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    platform: &str,
+    material_targets: &[MaterialDeepeningTarget],
+) -> Result<(), AcquisitionChainError> {
+    if material_targets.is_empty() {
+        return Ok(());
+    }
+    let refs: Vec<Uuid> = material_targets
+        .iter()
+        .map(|target| target.content_public_ref)
+        .collect();
+    let matched: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_content \
+         WHERE public_ref = ANY($1) AND platform = $2",
+    )
+    .bind(&refs)
+    .bind(platform)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if usize::try_from(matched).ok() != Some(material_targets.len()) {
+        return Err(AcquisitionChainError::InvalidMaterialTargets);
+    }
+    Ok(())
+}
+
+async fn write_material_targets(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+    material_targets: &[MaterialDeepeningTarget],
+) -> Result<(), sqlx::Error> {
+    for (index, target) in material_targets.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO collection_work_order_material_target \
+             (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit, \
+              acquire_media,allow_ocr,allow_asr) \
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8)",
+        )
+        .bind(work_order_ref)
+        .bind(target.content_public_ref)
+        .bind(i32::try_from(index + 1).unwrap_or(i32::MAX))
+        .bind(target.comment_limit)
+        .bind(target.reply_expand_limit)
+        .bind(target.acquire_media)
+        .bind(target.allow_ocr)
+        .bind(target.allow_asr)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
+}
+
 /// Collect only facts the server can actually establish.
 async fn gather_facts(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -214,6 +350,7 @@ async fn gather_facts(
     target_kind: &str,
     lane: &str,
     target_ref: Uuid,
+    material_deepening: bool,
 ) -> Result<AdmissionFacts, sqlx::Error> {
     let authorization_ref: Option<Uuid> = sqlx::query_scalar(
         "SELECT authorization_ref FROM collection_acquisition_authorization \
@@ -244,8 +381,15 @@ async fn gather_facts(
     .fetch_one(&mut **transaction)
     .await?;
 
-    let capacity =
-        establish_capacity(transaction, platform, target_kind, lane, Some(target_ref)).await?;
+    let capacity = establish_capacity(
+        transaction,
+        platform,
+        target_kind,
+        lane,
+        Some(target_ref),
+        material_deepening,
+    )
+    .await?;
 
     Ok(AdmissionFacts {
         authorization_ref: authorization_ref.map(|value| value.to_string()),
@@ -291,7 +435,8 @@ pub async fn read_capacity(
     lane: &str,
 ) -> Result<Capacity, sqlx::Error> {
     let mut transaction = database.pool().begin().await?;
-    let capacity = establish_capacity(&mut transaction, platform, target_kind, lane, None).await?;
+    let capacity =
+        establish_capacity(&mut transaction, platform, target_kind, lane, None, false).await?;
     transaction.rollback().await?;
     Ok(capacity)
 }
@@ -307,6 +452,7 @@ async fn establish_capacity(
     target_kind: &str,
     lane: &str,
     target_ref: Option<Uuid>,
+    material_deepening: bool,
 ) -> Result<Capacity, sqlx::Error> {
     // 风险暂停优先：正在停的时候，工位是否充足并不重要。
     let pause: Option<String> = sqlx::query_scalar(
@@ -355,7 +501,11 @@ async fn establish_capacity(
         return Ok(Capacity::NoStaffedStation);
     }
 
-    let required = required_capabilities(target_kind, lane);
+    let required = if material_deepening {
+        &["content_detail", "media_slots", "comments", "replies"][..]
+    } else {
+        required_capabilities(target_kind, lane)
+    };
     let mut missing_for_all: Option<Vec<String>> = None;
     let mut quota_blocked: Option<(i32, i32)> = None;
 

@@ -1,7 +1,7 @@
 # 本地 Evidence Library 运行手册
 
 > 状态: 权威当前
-> 最后核对: 2026-08-26
+> 最后核对: 2026-08-30
 > 适用范围: Linggan `apps/api` 的本地 loopback host、`/health` 与 `/corpus/evidence`
 > 事实来源: Issue #25、LOCAL-001、当前 Rust 实现与实际运行验证
 > 冲突时以谁为准: 实际运行输出、当前代码、LOCAL-001 与用户最新确认；本手册不授予插件或平台访问
@@ -16,7 +16,9 @@ http://localhost:3000/
 http://localhost:3000/corpus/evidence
 ```
 
-服务会明确绑定 `127.0.0.1:3000`。因此它只供这台 Mac 使用，不会监听局域网或互联网。它不连接旧内容工作台、旧数据库、真实平台、媒体服务或 AI 服务。
+服务会明确绑定 `127.0.0.1:3000`。因此它只供这台 Mac 使用，不会监听局域网或互联网。它不连接旧内容工作台或旧数据库。平台访问只由已签到且已领取服务端 TaskSpec 的 Browser Producer 执行；API、scheduler 与媒体处理 worker 本身不登录平台。
+
+从 `MATERIAL-DEEPENING-001` 起，`serve` 同时启动三类本机进程：loopback API、观察调度 worker 和媒体处理 worker。媒体处理只读取已经物化到 `LINGGAN_LOCAL_MEDIA_ROOT` 的本地字节，并按可用命令启用 Tesseract OCR、FFmpeg 缩略图/音频/抽帧和 local Whisper ASR；它不会把原始媒体提交给外部模型 API。若处理器不可用，页面保留 `NOT_ENABLED/QUEUED/UNKNOWN`，不能写成已处理。
 
 未使用本运行手册启动时，Evidence Library 会保持 `SOURCE_INCOMPLETE / NOT_CONNECTED` 的诚实空态。不要把这个状态理解为“世界没有材料”。
 
@@ -67,21 +69,21 @@ curl --fail --silent http://localhost:3000/corpus/evidence > /dev/null
 健康接口会返回机器可读的状态：
 
 - `listener: loopback-only`：表示服务只绑定本机回环地址；
-- `database.state: READY` 且 `database.schema: LOCAL_001_SCHEMA_READY`：表示此刻 API 已连接由本地运行入口验证的 Linggan 数据库，且两份当前 migration 与 discovery 所需表都已实际核对；
+- `database.state: READY` 且 `database.schema: PLUGIN_RUNTIME_002_SCHEMA_READY`：表示此刻 API 已连接由本地运行入口验证的 Linggan 数据库，且自动观察、固定作品深化、媒体取得与本机处理所需 migration 已登记；
 - `database.state: NOT_CONFIGURED`：表示没有给服务本地数据库配置；
 - `database.state: CONFIGURED_UNAVAILABLE`：表示数据库连接失败或 schema 尚未完成，不能进行 ingress 或读取；具体原因分别在 `database.schema` 中返回 `LOCAL_001_DATABASE_UNAVAILABLE` 或 `LOCAL_001_SCHEMA_UNAVAILABLE`；
-- `dataState: LOCAL_DISCOVERY_READ_PROJECTION / evidenceReadModel: DISCOVERY_ONLY`：只表示本地 discovery 读取能力已就绪，不表示真实平台已采集。
+- `dataState: MATERIAL_PROJECTION / evidenceReadModel: MULTI_MATERIAL`：只表示多材料只读投影可用，不表示某个作品的每条 lane 已经取得。
 
 根入口的响应应为 `307 Temporary Redirect`，并包含 `location: /corpus/evidence`。`/health` 保持机器可读状态接口，不重定向。
 
 打开 `/corpus/evidence` 后，当前应该看到 Evidence Explorer + Provenance Inspector 工作空间。
 
 - 没有数据库连接时，它说明 `SOURCE_INCOMPLETE / NOT_CONNECTED`；这不能推断世界没有内容或数据库为零。
-- 有连接且存在合格的受控 discovery Package 时，页面只显示本地已接纳的 visible card。搜索框只检索标题和创作者名；它绝不重新搜索小红书。
+- 有连接且存在合格 Package 时，页面以作品材料集合展示 discovery、detail、comments、replies、author、media slots/bytes、OCR/ASR。搜索覆盖标题、创作者、详情正文、评论与本机派生文本；它绝不重新搜索小红书。
 - URL 未携带 `window` 时，页面采用 `latest_accepted_discovery` 默认读取视角：已接纳 discovery 卡片即使没有来源发布时间也会显示为 `PUBLISHED_AT UNKNOWN`。这不是“最近发布”；页面不会用首次发现、观察、接收或重放时间替代来源发布时间。
 - 只有 URL 显式使用 `window=last_7_days` 或 `window=last_30_days` 时，`WINDOW` 才按 ContentItem 身份合并后的来源可直接验证 `published_at` 严格过滤，并以读取时 Linggan PostgreSQL 的 `scope_001_now()` 为唯一时间参照：合并发布时间/未知状态先于文本检索和排序求值；7/30 天窗口只含 `[now - window, now]` 的已知发布时间，未来发布时间不称为最近也不返回。未来记录仍保留为已接纳发现材料；合并后发布时间未知的当前 `EvidenceQuery` 候选集对象不会被填成 0 或“当前”，会在页面明确计为排除对象，即使窗口还有其他可见卡片；有任一已知来源发布时间但不在窗口内的对象仅因超窗不返回，不能误计为未知。文本不匹配的本地对象不能被计入。
 - 每张卡片只显示本次 discovery 可见的事实和 package 级 Coverage。`visible / quota` 不是平台总量、完整率或趋势。
-- 封面位置必须显示 `MEDIA NOT ACQUIRED`；此阶段绝不能请求或展示小红书 CDN 地址。
+- 媒体只在已有合格本地 Materialization 时使用受控本地 URL；短期 CDN 地址只保留为来源观察，绝不作为长期展示回退。Live Photo 的 still/motion 组件分别显示状态；一个组件取得不等于整个卡槽完整。
 
 ## 运行环境证明（不写入日常数据）
 
@@ -106,9 +108,9 @@ curl --fail --silent http://localhost:3000/corpus/evidence > /dev/null
 
 ## 当前不做什么
 
-- 不显示详情正文、评论、原文、媒体或任何历史工作台数据；
-- 不访问小红书，不打开或下载内容详情；
-- 不形成 Observation / Topic / 趋势；
+- 不导入或显示任何历史内容工作台数据；
+- API 与媒体 worker 不访问小红书；只有领取了受控任务的插件可以打开明确页面和取得获准媒体候选；
+- 不因详情、评论、OCR/ASR 可见而自动形成 Topic、趋势、Claim 或自主观察决定；
 - 不部署到线上，也不监听 `0.0.0.0`。
 
 Issue #34 实现的是受控 discovery 接纳与只读投影。真实 Linggan Plugin 的 Local mode、真实 `ADHD` 前 20 条 Canary、媒体 acquisition 和 OCR/ASR 仍是独立范围。不要把页面 HTTP 成功或合成 Package 回执当成其中任一链路已经完成。

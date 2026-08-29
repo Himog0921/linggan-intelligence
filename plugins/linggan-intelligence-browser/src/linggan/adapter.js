@@ -245,6 +245,7 @@ export async function claimLingganMediaAcquisition({
       decision: String(body?.decision || 'unknown'),
       workRef: mayExecute ? String(body?.workRef || '') : '',
       mediaObservationRef: mayExecute ? String(body?.observationRef || '') : '',
+      componentKind: mayExecute ? String(body?.componentKind || 'single') : '',
       claimGeneration: mayExecute ? Number(body?.claimGeneration) : 0,
       candidateUris: mayExecute && Array.isArray(body?.candidateUris) ? body.candidateUris : [],
       nextPollAfterSeconds: Number(body?.nextPollAfterSeconds ?? 300),

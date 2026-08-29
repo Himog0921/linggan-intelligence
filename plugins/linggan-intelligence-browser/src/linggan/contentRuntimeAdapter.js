@@ -81,13 +81,31 @@ export function createLingganContentRuntime({ platform } = {}) {
         taskSpec,
       }), packageValue);
     },
-    async submitContentDetail(note) {
+    async submitContentDetail(note, options = {}) {
       const packageValue = packageContentDetail({ platform, note });
-      return submit(taskFor(platform, 'content_detail', { contentExternalId: String(note?.noteId || note?.id || '') }, { acquireMedia: 'slots' }), packageValue);
+      return submit(taskFor(
+        platform,
+        'content_detail',
+        { contentExternalId: String(note?.noteId || note?.id || '') },
+        { acquireMedia: 'not_requested', taskSpec: options.taskSpec },
+      ), packageValue);
     },
     async submitComments(result, noteId, settings = {}) {
-      const packageValue = packageComments({ platform, result, noteId });
       const instruction = commentTaskInstruction(noteId, settings.maxTotal);
+      if (settings.taskSpec) {
+        const capability = settings.taskSpec.capabilitiesRequested?.[0];
+        const packageValue = capability === 'replies'
+          ? packageReplies({ platform, result, noteId })
+          : packageComments({ platform, result, noteId });
+        return submit(
+          taskFor(platform, capability, instruction.target, {
+            ...instruction,
+            taskSpec: settings.taskSpec,
+          }),
+          packageValue,
+        );
+      }
+      const packageValue = packageComments({ platform, result, noteId });
       const comments = await submit(
         taskFor(platform, 'comments', instruction.target, instruction),
         packageValue,
@@ -109,9 +127,14 @@ export function createLingganContentRuntime({ platform } = {}) {
         { taskSpec: options.taskSpec },
       ), packageValue);
     },
-    async submitMediaSlots(note) {
+    async submitMediaSlots(note, options = {}) {
       const packageValue = packageMediaSlots({ platform, note });
-      const taskSpec = taskFor(platform, 'media_slots', { contentExternalId: String(note?.noteId || note?.id || '') }, { acquireMedia: 'slots' });
+      const taskSpec = taskFor(
+        platform,
+        'media_slots',
+        { contentExternalId: String(note?.noteId || note?.id || '') },
+        { acquireMedia: 'slots', taskSpec: options.taskSpec },
+      );
       return submit(taskSpec, packageValue);
     },
     async acquireMediaSlots(note) {

@@ -162,8 +162,8 @@ const xhsPageController = createXhsPageController({
 
 async function initXhs() {
   registerCollectorReceiptSink({
-    contentDetail: (note) => runtime.submitContentDetail(note),
-    mediaSlots: (note) => runtime.submitMediaSlots(note),
+    contentDetail: (note, context) => runtime.submitContentDetail(note, context?.options || {}),
+    mediaSlots: (note, context) => runtime.submitMediaSlots(note, context?.options || {}),
     comments: (result, context) => runtime.submitComments(result, context?.noteId || extractNoteId(location.href), context?.options || {}),
     authorProfile: (author, context) => runtime.submitAuthor(author, context?.options || {}),
     batchCheckpoint: (progress, context) => runtime.submitBatchCheckpoint(context?.kind || 'xhs_batch', progress),

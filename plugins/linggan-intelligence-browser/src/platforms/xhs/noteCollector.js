@@ -566,8 +566,15 @@ export async function collectNote(wd = window, options = {}) {
   // 4. 写入 IndexedDB（主键 noteId 自动去重）
   await noteStore.upsert(noteInfo);
   if (options.deferLingganDelivery !== true) {
-    noteInfo.lingganDelivery = await emitCollectorReceipt('contentDetail', noteInfo, { platform: 'xhs', options });
-    noteInfo.lingganMediaDelivery = await emitCollectorReceipt('mediaSlots', noteInfo, { platform: 'xhs', options });
+    const scheduledCapability = options.taskSpec?.source === 'scheduled'
+      ? options.taskSpec?.capabilitiesRequested?.[0]
+      : '';
+    if (!scheduledCapability || scheduledCapability === 'content_detail') {
+      noteInfo.lingganDelivery = await emitCollectorReceipt('contentDetail', noteInfo, { platform: 'xhs', options });
+    }
+    if (!scheduledCapability || scheduledCapability === 'media_slots') {
+      noteInfo.lingganMediaDelivery = await emitCollectorReceipt('mediaSlots', noteInfo, { platform: 'xhs', options });
+    }
   }
 
   return noteInfo;

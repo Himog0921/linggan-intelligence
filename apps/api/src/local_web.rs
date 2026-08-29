@@ -38,23 +38,23 @@ use linggan_contracts::{
 use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, CheckInOutcome, DiscoveryIngressError,
     DispatchDecision, InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
-    LocalSubmissionOutcome, LocalTaskOutcome, MaterialReadError, MediaUploadFinalizeClaim,
-    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
-    StoreOutcome, admit_media_blob, begin_media_upload, check_in_installation, claim_installation,
-    claim_media_acquisition, claim_media_upload_finalize, close_claim_window,
-    complete_media_upload, count_targets, create_manual_task, create_producer_task,
-    decide_dispatch, dispatch_schema_is_ready, enrich_target_from_author_profile,
-    grant_authorization, ingest_discovery_package, issue_work_order_lease, list_targets,
-    list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
-    media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
-    producer_runtime_schema_is_ready, read_archive_completeness, read_discovery_library,
-    read_media_upload_session, read_runtime_capacity, read_runtime_library,
+    LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget, MaterialReadError,
+    MediaUploadFinalizeClaim, ProducerRuntimeError, RuntimeAttemptOutcome,
+    RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome, admit_media_blob,
+    begin_media_upload, check_in_installation, claim_installation, claim_media_acquisition,
+    claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
+    create_manual_task, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
+    enrich_target_from_author_profile, grant_authorization, ingest_discovery_package,
+    issue_work_order_lease, list_targets, list_targets_in_state, local_discovery_schema_is_ready,
+    local_producer_schema_is_ready, media_acquisition_schema_is_ready, open_claim_window,
+    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_archive_completeness,
+    read_discovery_library, read_media_upload_session, read_runtime_capacity, read_runtime_library,
     read_scheduler_heartbeat, read_station_overview, read_target, record_media_acquisition_failure,
     record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, request_and_admit, retire_station, set_group_for_many,
-    set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
-    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
-    target_monitoring_enabled,
+    release_media_upload_finalize, request_and_admit, request_and_admit_material_targets,
+    retire_station, set_group_for_many, set_monitoring_for_many, set_target_monitoring,
+    start_local_attempt, start_producer_attempt, station_schema_is_ready, store_pending_target,
+    submit_local_package, submit_producer_package, target_monitoring_enabled,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -72,7 +72,7 @@ use std::{
 const LOCAL_HOST: Ipv4Addr = Ipv4Addr::LOCALHOST;
 const LOCAL_PORT: u16 = 3000;
 const FULL_PRODUCER_RUNTIME_DATA_STATE: &str = "LINGGAN_BROWSER_PRODUCER_RUNTIME";
-const FULL_PRODUCER_RUNTIME_SCHEMA: &str = "PLUGIN_RUNTIME_001_SCHEMA_READY";
+const FULL_PRODUCER_RUNTIME_SCHEMA: &str = "PLUGIN_RUNTIME_002_SCHEMA_READY";
 // The Browser Producer obtains these three paths from /health before it starts a
 // durable outbox delivery. Keep the router and published contract on the same
 // constants so a renamed server route cannot leave the plugin delivering to a
@@ -220,6 +220,10 @@ fn collection_api_routes() -> Router<LocalWebState> {
         .route(
             "/api/local/collection/work-order-leases",
             post(collection_issue_lease),
+        )
+        .route(
+            "/api/local/collection/material-deepening",
+            post(collection_material_deepening),
         )
         .route("/api/local/stations", post(station_register))
         .route(
@@ -842,6 +846,131 @@ struct ArchiveRequestBody {
     lane: Option<String>,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MaterialDeepeningRequestBody {
+    target_ref: uuid::Uuid,
+    purpose: String,
+    materials: Vec<MaterialDeepeningRequestItem>,
+    #[serde(default)]
+    lease_minutes: Option<i32>,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct MaterialDeepeningRequestItem {
+    content_public_ref: uuid::Uuid,
+    #[serde(default = "default_comment_limit")]
+    comment_limit: i32,
+    #[serde(default = "default_reply_expand_limit")]
+    reply_expand_limit: i32,
+    #[serde(default = "default_true")]
+    acquire_media: bool,
+    #[serde(default = "default_true")]
+    allow_ocr: bool,
+    #[serde(default = "default_true")]
+    allow_asr: bool,
+}
+
+const fn default_comment_limit() -> i32 {
+    30
+}
+
+const fn default_reply_expand_limit() -> i32 {
+    2
+}
+
+const fn default_true() -> bool {
+    true
+}
+
+/// Freeze and start one exact material-deepening run.
+///
+/// The endpoint is loopback-only with the rest of this API.  It deliberately accepts public
+/// material identities rather than a search such as "latest 12": the selected set must not drift
+/// between approval, Work Order creation and lease expansion.
+async fn collection_material_deepening(
+    State(state): State<LocalWebState>,
+    body: Bytes,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(request) = serde_json::from_slice::<MaterialDeepeningRequestBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "material_deepening_request_invalid",
+        );
+    };
+    let targets: Vec<MaterialDeepeningTarget> = request
+        .materials
+        .into_iter()
+        .map(|material| MaterialDeepeningTarget {
+            content_public_ref: material.content_public_ref,
+            comment_limit: material.comment_limit,
+            reply_expand_limit: material.reply_expand_limit,
+            acquire_media: material.acquire_media,
+            allow_ocr: material.allow_ocr,
+            allow_asr: material.allow_asr,
+        })
+        .collect();
+    let outcome = match request_and_admit_material_targets(
+        database,
+        request.target_ref,
+        &request.purpose,
+        "person",
+        &targets,
+    )
+    .await
+    {
+        Ok(outcome) => outcome,
+        Err(error) => {
+            let code = match error {
+                AcquisitionChainError::UnknownTarget => "unknown_target",
+                AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
+                AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
+                AcquisitionChainError::SchemaUnavailable | AcquisitionChainError::Database(_) => {
+                    "acquisition_chain_unavailable"
+                }
+            };
+            return local_read_json_error(axum::http::StatusCode::UNPROCESSABLE_ENTITY, code);
+        }
+    };
+    let Some(work_order_ref) = outcome.work_order_ref else {
+        return Json(json!({
+            "requestRef": outcome.request_ref,
+            "decisionRef": outcome.decision_ref,
+            "admission": outcome.outcome.code(),
+            "workOrderRef": null,
+            "execution": "NOT_STARTED",
+        }))
+        .into_response();
+    };
+    let lease_minutes = request.lease_minutes.unwrap_or(360).clamp(30, 360);
+    match issue_work_order_lease(database, work_order_ref, lease_minutes).await {
+        Ok(lease) => Json(json!({
+            "requestRef": outcome.request_ref,
+            "decisionRef": outcome.decision_ref,
+            "admission": outcome.outcome.code(),
+            "workOrderRef": work_order_ref,
+            "leaseRef": lease.lease_ref,
+            "taskIds": lease.task_ids,
+            "stationRef": lease.station_ref,
+            "expiresAt": lease.expires_at,
+            "materialCount": targets.len(),
+            "execution": "LEASED",
+        }))
+        .into_response(),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "material_deepening_lease_failed",
+        ),
+    }
+}
+
 /// COLLECTION-001 · request deep archiving for one target, and run admission on it.
 ///
 /// The response reports what admission concluded, including the refusals. A request that
@@ -886,6 +1015,7 @@ async fn collection_archive_request(State(state): State<LocalWebState>, body: By
             match error {
                 AcquisitionChainError::UnknownTarget => "unknown_target",
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
+                AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
                 AcquisitionChainError::SchemaUnavailable => "acquisition_chain_unavailable",
                 AcquisitionChainError::Database(_) => "acquisition_chain_unavailable",
             },

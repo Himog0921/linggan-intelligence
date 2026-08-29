@@ -77,6 +77,29 @@ test('media slots retain URL observations but no remote URL becomes a local pres
   assert.equal(Object.hasOwn(packageValue.records[0], 'localAssetUrl'), false);
 });
 
+test('a Live Photo remains one logical slot with independently addressable still and motion candidates', () => {
+  const packageValue = packageMediaSlots({
+    platform: 'xhs',
+    note: {
+      noteId: 'note-live-1',
+      livePhotoStreams: [{
+        url: 'https://sns-video.example/live.mp4',
+        candidates: ['https://sns-video.example/live.mp4', 'https://sns-video.example/live-backup.mp4'],
+        coverUrl: 'https://sns-img.example/live-still.webp',
+      }],
+    },
+  });
+  assert.equal(packageValue.records.length, 1);
+  assert.equal(packageValue.records[0].slot.role, 'live_photo');
+  assert.deepEqual(packageValue.records[0].observation.components.still.candidateUris, [
+    'https://sns-img.example/live-still.webp',
+  ]);
+  assert.deepEqual(packageValue.records[0].observation.components.motion.candidateUris, [
+    'https://sns-video.example/live.mp4',
+    'https://sns-video.example/live-backup.mp4',
+  ]);
+});
+
 test('current-surface discovery packages exclude temporary DOM ordering references', () => {
   const element = {};
   element.self = element;
@@ -186,13 +209,30 @@ test('background forwards the claimed scheduled identity into the content page a
   assert.doesNotMatch(dispatched, /createManualRuntimeTask/);
 });
 
-test('background immediately auto-claims after install or startup and supports bounded search discovery', () => {
+test('background immediately auto-claims and executes bounded baseline plus fixed material deepening', () => {
   const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
   assert.match(background, /onInstalled\?\.addListener[\s\S]*checkInStationOnce\(\)\.then\(\(\) => patrolTick\(\)\)/);
   assert.match(background, /onStartup\?\.addListener[\s\S]*checkInStationOnce\(\)\.then\(\(\) => patrolTick\(\)\)/);
-  assert.match(background, /SURFACE_CAPABILITIES = new Set\(\['author_profile', 'profile_discovery', 'discovery_search'\]\)/);
+  for (const capability of ['author_profile', 'profile_discovery', 'discovery_search', 'content_detail', 'media_slots', 'comments', 'replies']) {
+    assert.match(background, new RegExp(`'${capability}'`));
+  }
   assert.match(background, /search_result\?keyword=\$\{encodeURIComponent\(targetValue\)\}/);
+  assert.match(background, /explore\/\$\{encodeURIComponent\(targetValue\)\}/);
   assert.match(background, /mode: capability === 'discovery_search' \? 'search' : 'profile'/);
+  assert.match(background, /COLLECT_CURRENT_COMMENTS/);
+  assert.match(background, /COLLECT_CURRENT_CONTENT/);
+});
+
+test('scheduled material lanes preserve the server task and submit one capability package', () => {
+  const adapter = readFileSync(new URL('../src/linggan/contentRuntimeAdapter.js', import.meta.url), 'utf8');
+  const detail = readFileSync(new URL('../src/platforms/xhs/detailPackageCollector.js', import.meta.url), 'utf8');
+  const comments = readFileSync(new URL('../src/platforms/xhs/commentCollector.js', import.meta.url), 'utf8');
+  assert.match(adapter, /taskSpec: options\.taskSpec/);
+  assert.match(adapter, /capability === 'replies'/);
+  assert.match(detail, /scheduledCapability === 'content_detail'/);
+  assert.match(detail, /scheduledCapability === 'media_slots'/);
+  assert.match(comments, /taskSpec = undefined/);
+  assert.match(comments, /commentDepthMode, taskSpec/);
 });
 
 test('content message gate admits scheduled profile discovery without dropping dispatch identity', () => {
