@@ -32,8 +32,8 @@ use linggan_evidence::{
     list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
     open_claim_window, producer_runtime_has_packages, producer_runtime_schema_is_ready,
     read_archive_completeness, read_discovery_library, read_local_media_blob,
-    read_media_upload_session, read_runtime_library, read_station_overview, read_target,
-    record_media_download_failure, record_media_upload_chunk, register_station,
+    read_media_upload_session, read_runtime_capacity, read_runtime_library, read_station_overview,
+    read_target, record_media_download_failure, record_media_upload_chunk, register_station,
     release_media_upload_finalize, request_and_admit, retire_station, set_group_for_many,
     set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
     station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
@@ -1818,6 +1818,7 @@ async fn collection_targets(
         params.drawer.as_deref(),
         params.filter.as_deref(),
         counts.as_ref(),
+        None,
     );
     // Without a database the page still renders its honest empty state rather than an error:
     // "we cannot read targets right now" and "there are no targets" are different claims, and
@@ -1866,6 +1867,7 @@ async fn collection_operations(Query(params): Query<CollectionParams>) -> Html<S
         None,
         None,
         None,
+        None,
     ))
 }
 
@@ -1876,6 +1878,7 @@ async fn collection_attention() -> Html<String> {
         None,
         None,
         None,
+        None,
     ))
 }
 
@@ -1883,6 +1886,7 @@ async fn collection_tasks() -> Html<String> {
     Html(collection::render(
         collection::Section::Tasks,
         collection::OperationsMode::Now,
+        None,
         None,
         None,
         None,
@@ -1899,27 +1903,47 @@ async fn collection_runtime(
     State(state): State<LocalWebState>,
     Query(params): Query<RuntimeSurfaceParams>,
 ) -> Html<String> {
+    // Without a database the page keeps its honest empty state: "we cannot read stations right
+    // now" and "no station is registered" are different claims.
+    let Some(database) = state.database.database() else {
+        return Html(collection::render(
+            collection::Section::Runtime,
+            collection::OperationsMode::Now,
+            None,
+            None,
+            None,
+            None,
+        ));
+    };
+    // 三份读物一起决定这一页能说什么：工位现状、准入第 5 问的判定、上下文行的事实。
+    // 任何一份读不到，对应的那部分就说「读不到」——**不退回写死的「未接通」**，
+    // 那是这一页此前最大的问题：一句写下时为真、之后永不更新的状态。
+    let roster = read_station_overview(database).await.ok();
+    let capacity = read_runtime_capacity(database).await.ok();
+    let surface_state = capacity.as_ref().map(|capacity| collection::SurfaceState {
+        vacant_stations: capacity.registered_stations - capacity.staffed_stations,
+        unclaimed_installations: roster
+            .as_ref()
+            .map_or(0, |(_, unclaimed)| unclaimed.len() as i64),
+        total_targets: capacity.patrol.total_targets,
+        monitoring_targets: capacity.patrol.monitoring_targets,
+    });
     let base = collection::render(
         collection::Section::Runtime,
         collection::OperationsMode::Now,
         None,
         None,
         None,
+        surface_state.as_ref(),
     );
-    // Without a database the page keeps its honest empty state: "we cannot read stations right
-    // now" and "no station is registered" are different claims.
-    let Some(database) = state.database.database() else {
-        return Html(base);
-    };
-    match read_station_overview(database).await {
-        Ok((stations, unclaimed)) => Html(station_view::render_stations(
-            &base,
-            &stations,
-            &unclaimed,
-            params.error.as_deref(),
-        )),
-        Err(_) => Html(base),
-    }
+    let (stations, unclaimed) = roster.unwrap_or_default();
+    Html(station_view::render_runtime(
+        &base,
+        capacity.as_ref(),
+        &stations,
+        &unclaimed,
+        params.error.as_deref(),
+    ))
 }
 
 /// COLLECTION-001 · the person-facing station actions on the 执行工位 surface.
@@ -2521,6 +2545,9 @@ fn evidence_library_html() -> String {
         "<!-- EVIDENCE_HEADER_BOUNDARY_START -->本机服务 / 读投影未接通 <span class=\"v7-tech-key\">LOCAL HOST / NO READ MODEL</span><!-- EVIDENCE_HEADER_BOUNDARY_END -->",
         "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">材料状态</span>",
         "<span class=\"v7-kpi\"><em>内容</em><b>未知 <span class=\"v7-tech-key\">UNKNOWN</span></b></span><span class=\"v7-kpi\"><em>评论</em><b>未知 <span class=\"v7-tech-key\">UNKNOWN</span></b></span><span class=\"v7-kpi\"><em>创作者</em><b>未知 <span class=\"v7-tech-key\">UNKNOWN</span></b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><!-- EVIDENCE_HEADER_META_STATE_START --><span class=\"v7-query-meta\">本地读投影未接通 <span class=\"v7-tech-key\">READ MODEL NOT CONNECTED</span></span><span>来源信息尚未完整接通 <span class=\"v7-tech-key\">SOURCE INCOMPLETE</span></span><!-- EVIDENCE_HEADER_META_STATE_END --><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
+        // 语料页读不到采集的事实，因此不覆盖那个状态词：读不到时保留原话，
+        // 绝不因为读不到就宣布已接通。
+        None,
     );
     base.replace(
         "<!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->",

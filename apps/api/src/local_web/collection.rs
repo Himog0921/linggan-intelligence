@@ -131,7 +131,17 @@ fn meta(section: Section) -> &'static SectionMeta {
 
 /// The rail. Unlike the Corpus rail, every entry here is a real connected route, so these
 /// are links rather than disabled buttons.
-fn rail(active: Section) -> String {
+fn rail(active: Section, state: Option<&SurfaceState>) -> String {
+    // 导轨底部此前写死 `NO OBSERVATION TARGETS · scheduler not connected`，两句都已不成立。
+    let foot = match state {
+        Some(state) if state.total_targets > 0 => format!(
+            "观察目标 {total}<br><span class=\"v7-mono\">巡检开着 {monitoring} · 调度心跳读不到</span>",
+            total = state.total_targets,
+            monitoring = state.monitoring_targets,
+        ),
+        Some(_) => "暂无观察目标<br><span class=\"v7-mono\">没有可巡检的对象 · 调度心跳读不到</span>".to_owned(),
+        None => "NO OBSERVATION TARGETS<br><span class=\"v7-mono\">no acquisition authorisation chain · scheduler not connected</span>".to_owned(),
+    };
     let mut items = String::new();
     for (section, entry) in SECTIONS.iter() {
         let current = if *section == active {
@@ -150,7 +160,7 @@ fn rail(active: Section) -> String {
         r#"<aside class="v7-side" aria-label="采集导航">
           <div class="v7-nav-label" data-readout="COLLECTION">采集与观察</div>
           {items}
-          <div class="v7-side-foot"><span class="v7-side-dot"></span>NO OBSERVATION TARGETS<br><span class="v7-mono">no acquisition authorisation chain · scheduler not connected</span></div>
+          <div class="v7-side-foot"><span class="v7-side-dot"></span>{foot}</div>
         </aside>"#
     )
 }
@@ -568,6 +578,24 @@ fn body(section: Section, mode: OperationsMode, drawer: Option<&str>) -> String 
     }
 }
 
+/// 上下文行、系统边界与一级导航状态词要说的真话。
+///
+/// 这四处此前是写死的字符串：`调度器未接通`、`暂无观察目标`、`采集 尚未接通`、
+/// `本机服务 / 采集运行时未接通`。写下时都成立，之后采集接通而字符串一个字没变。
+/// **一个不会随系统状态改变的状态词，等于一个永远不会响的警报器。**
+///
+/// 只有执行工位页读得到这些事实，因此只有它传 `Some`。其余子面继续用静态词——
+/// 读不到事实时保留原话，绝不因为读不到就宣布已接通。
+pub struct SurfaceState {
+    /// 已登记但当前没有在岗插件的工位数。DESIGN-006：每个面至少有一个读数回答
+    /// 「这里有没有出问题」，因为没人因为「有 30 台」而行动，只因为「3 台停了」而行动。
+    pub vacant_stations: i64,
+    /// 报到了却没归位的插件安装数。它们不会被派活。
+    pub unclaimed_installations: i64,
+    pub total_targets: i64,
+    pub monitoring_targets: i64,
+}
+
 /// Labels are Chinese because `.v7-kpi em` is the Sans reading slot the Corpus surface set
 /// the standard for. An English label here renders at 11px Sans beside the 9px Mono English
 /// system words in the same row, so two English labels end up at two different weights and
@@ -580,14 +608,48 @@ fn body(section: Section, mode: OperationsMode, drawer: Option<&str>) -> String 
 ///
 /// 部分完成 stays alongside 失败 rather than folded into it: a partially completed task whose
 /// data is usable is a first-class state here, not a failure.
-fn head_readout(section: Section) -> String {
-    match section {
-        Section::Attention => readout(&[("UNKNOWN", "待处理"), ("UNKNOWN", "数据缺失")]),
-        Section::Targets => readout(&[("UNKNOWN", "巡逻中断"), ("UNKNOWN", "建档未完成")]),
-        Section::Operations => readout(&[("UNKNOWN", "异常阶段"), ("UNKNOWN", "最近一轮")]),
-        Section::Tasks => readout(&[("UNKNOWN", "失败"), ("UNKNOWN", "部分完成")]),
-        Section::Runtime => readout(&[("UNKNOWN", "离线工位"), ("UNKNOWN", "队列积压")]),
+fn head_readout(section: Section, state: Option<&SurfaceState>) -> String {
+    match (section, state) {
+        // 读得到真实事实时，两个读数都回答「这里有没有出问题」：空缺的工位和没归位的
+        // 安装，都是会让活派不出去的东西。此前这里是两个写死的 UNKNOWN，而页面正下方
+        // 就写着这台工位「在岗」——同一屏给出两个互相矛盾的答案。
+        (Section::Runtime, Some(state)) => readout(&[
+            (&state.vacant_stations.to_string(), "空缺工位"),
+            (&state.unclaimed_installations.to_string(), "未归位安装"),
+        ]),
+        (Section::Attention, _) => readout(&[("UNKNOWN", "待处理"), ("UNKNOWN", "数据缺失")]),
+        (Section::Targets, _) => readout(&[("UNKNOWN", "巡逻中断"), ("UNKNOWN", "建档未完成")]),
+        (Section::Operations, _) => readout(&[("UNKNOWN", "异常阶段"), ("UNKNOWN", "最近一轮")]),
+        (Section::Tasks, _) => readout(&[("UNKNOWN", "失败"), ("UNKNOWN", "部分完成")]),
+        (Section::Runtime, None) => readout(&[("UNKNOWN", "空缺工位"), ("UNKNOWN", "未归位安装")]),
     }
+}
+
+/// 上下文行右侧的系统状态词。
+///
+/// **「调度器未接通」是这一组里唯一一句系统读不到答案的话。** 没有任何进程心跳记录，
+/// 因此页面既不能说它在跑，也不能说它没在跑——只能如实说心跳读不到。编一个「运行中」
+/// 出来是撒谎，继续写「未接通」同样是撒谎，而且是更难被发现的那种。
+fn system_words(state: Option<&SurfaceState>) -> String {
+    let Some(state) = state else {
+        return "<span class=\"v7-query-meta\">SCHEDULER NOT CONNECTED</span>\
+                <span>NO OBSERVATION TARGETS</span><span>UTC+08</span>"
+            .to_owned();
+    };
+    // 系统状态词这一槽位只放状态，不放计数——计数是页面自己的读数，属于左边的
+    // `.v7-kpi`（LIDS 页头收回条）。数字混进 9px Mono 大写的系统词里两头都不像。
+    //
+    // 观察目标与巡检合成一个词，而不是各占一格：这一行在 1280 下本来就挤，而三种情况
+    // 互斥，分两格只是把同一件事说两遍。词的强度依次递进，读的人一眼知道卡在哪一层。
+    let observation = match (state.total_targets, state.monitoring_targets) {
+        (0, _) => "NO OBSERVATION TARGETS",
+        (_, 0) => "PATROL OFF",
+        _ => "PATROL ARMED",
+    };
+    format!(
+        "<span class=\"v7-query-meta\">SCHEDULER HEARTBEAT UNREADABLE</span>\
+         <span>{observation}</span><span>UTC+08</span>"
+    )
 }
 
 /// Targets and Operations carry their own second bar. Filter tabs stay disabled: with no
@@ -711,19 +773,38 @@ pub fn render(
     drawer: Option<&str>,
     filter: Option<&str>,
     counts: Option<&TargetCounts>,
+    state: Option<&SurfaceState>,
 ) -> String {
     let entry = meta(section);
     // DESIGN-003 header reclaim: this surface's own counts ride in the context row next to
     // the system state, so the page can start at its content instead of restating its name.
     let meta_row = format!(
-        "{counts}<i class=\"v7-vr\" aria-hidden=\"true\"></i><span class=\"v7-query-meta\">SCHEDULER NOT CONNECTED</span><span>NO OBSERVATION TARGETS</span><span>UTC+08</span>",
-        counts = head_readout(section),
+        "{counts}<i class=\"v7-vr\" aria-hidden=\"true\"></i>{system}",
+        counts = head_readout(section, state),
+        system = system_words(state),
     );
+    // 系统边界那个位置在 shell.css 里是**警告样式**（琥珀底 + 警告圆点），因此它只能
+    // 放真正值得警惕的事。「采集运行时未接通」曾经合格，接通后成了假话；换成「只写本地
+    // 记录」则是把一句正常状态塞进警告框。这台服务真正的边界是：它不访问任何平台。
+    let boundary = if state.is_some() {
+        "LOCAL HOST / NO PLATFORM ACCESS"
+    } else {
+        "LOCAL HOST / NO COLLECTION RUNTIME"
+    };
+    // 一级导航里「采集」的状态词同理：读得到才敢改，读不到保留原话。
+    let collection_state = state.map(|state| {
+        if state.total_targets > 0 {
+            "观察中"
+        } else {
+            "无观察目标"
+        }
+    });
     let header = global_header(
         PrimarySurface::Collection,
-        "LOCAL HOST / NO COLLECTION RUNTIME",
+        boundary,
         &crumb(section, mode),
         &meta_row,
+        collection_state,
     );
     format!(
         r#"<!doctype html>
@@ -752,7 +833,7 @@ pub fn render(
 </html>
 "#,
         title = entry.title,
-        rail = rail(section),
+        rail = rail(section, state),
         second_bar = second_bar(section, mode, filter, counts),
         body = body(section, mode, drawer),
     )
