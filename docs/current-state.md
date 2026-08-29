@@ -12,7 +12,7 @@
 
 Mog 已明确取消“任何仓库写入都必须 Issue + Claim + 独立 worktree + Draft PR”的统一门禁。后续按风险分级：代码、数据库、运行合同、插件/release、部署/生产、真实外部动作、敏感数据/权限、不可逆处置和并行冲突继续走受保护交付；当前对话已明确授权的低风险文档勘误、索引/状态同步、进度记录和被取代卡片收口可以直接维护，但仍须核对工作区、检查 diff、运行适用治理检查并分层报告，不能借机扩成实现或自动 push/deploy。
 
-ARC-001 已同步为“已回答问题不再重复提问”：Capture Control Contract 已由 PR #17 合入；媒体卡改为 V2 语义、PR #15 草案、当前产品规则与 Rust 实现的主线校准；第一阶段运行时只剩当前实现缺口基线，首个用户可见范围只剩正式 SCOPE 冻结。Issue #10 和 #14 保持开放并已收窄正文；旧 Issue #11/#16/#18 与 PR #12/#13/#15/#19 已按“已吸收/已被取代”关闭。关闭旧卡不证明真实媒体、OCR/ASR、长期调度、部署或业务验收。
+ARC-001 已同步为“已回答问题不再重复提问”：Capture Control Contract 已由 PR #17 合入；媒体卡已从当前主线完成 V2 语义、PR #15 草案、产品规则、插件 `v0.5.0` 通道、Rust/PostgreSQL 实现和 Evidence Library 消费边界的校准，唯一当前入口为 [`architecture/media-lifecycle-contract.md`](architecture/media-lifecycle-contract.md)，决策卡现为 `resolved`。这只证明合同收口；真实媒体字节、OCR/ASR/抽帧/embedding、保留期清理、撤回传播、多材料读模型、页面实现和用户验收仍未证明。第一阶段运行时只剩当前实现缺口基线，首个用户可见范围只剩正式 SCOPE 冻结。Issue #10 和 #14 保持开放以承接当前交付；旧 Issue #11/#16/#18 与 PR #12/#13/#15/#19 已按“已吸收/已被取代”关闭。
 
 ### AUD-XHS-001 / Issue #74（受限真实页面探针执行中）
 

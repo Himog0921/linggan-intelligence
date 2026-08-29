@@ -170,7 +170,7 @@ Asset target: `docs/architecture/capture-control-contract.md`
 ## media-lifecycle-contract: Linggan 的媒体后继架构是什么？
 
 Blocked by: first-producer-canary
-Status: open
+Status: resolved
 Type: Research
 Decision owner: 工程架构团队；隐私、外部模型和保留策略交 Mog
 
@@ -187,7 +187,15 @@ Decision owner: 工程架构团队；隐私、外部模型和保留策略交 Mog
 - [`collection-monitoring-rules.md`](../../product/collection-monitoring-rules.md) 已确认本机存储、图片长期保留、视频转录成功后 180 天、关键帧长期保留、OCR/ASR/抽帧/embedding 首批进入、资源队列分离、转录并发 1，以及外部 Agent 通过 CLI 而非直连数据库。
 - PR #15 的历史合同草案已经形成并通过语义审查，但其分支与当前主线冲突且落后；当前 Rust 主线也已实现 Slot、Observation、Download Attempt、Blob、Materialization、Processing Job/Event 和派生入口。旧 PR 不应强行合并。
 
-本票保持 `open` 只因为当前 `main` 尚无唯一的 `media-lifecycle-contract.md`。下一步是从新鲜 `main` 做 V2 继承矩阵、产品决定和现有实现的校准整合；不是继续向 Mog 重复询问已回答的存储、保留、派生范围或调度分离问题。真实媒体取得、OCR/ASR 输出、清理传播和用户验收仍属于后续实证，不阻塞本合同的决策收口。
+[`media-lifecycle-contract.md`](../../architecture/media-lifecycle-contract.md) 已从新鲜 `main` 完成校准并成为唯一当前入口。它已经：
+
+- 把 V2 分成直接继承、语义继承/实现重写、Linggan 新增和明确废弃四类；
+- 对齐插件 `v0.5.0` 的 discovery/profile/detail/comments/replies/author/media slots/media bytes/checkpoint 通道，以及 image/cover/video/live photo、多 candidate URI、展示顺序、用途和来源代次；
+- 冻结 Blob/Replica、分块上传、派生版本、图片/视频/关键帧保留、撤回传播和资源队列边界；
+- 对照当前 Rust/PostgreSQL 主线分别标明已实现、合成 PostgreSQL 证明、仅接口、未实现和真实链未验证；
+- 给出 Evidence Library 后续多材料页面的最低消费合同，但不在本票实现页面或读模型。
+
+因此产品和架构问题已经 resolved。真实媒体取得、OCR/ASR/抽帧/embedding 输出、保留期清理、撤回传播、多材料读模型、页面实现与用户验收仍由后续卡逐项证明；这些未证明项不能反向把本票重新包装成开放产品研究。
 
 Asset target: `docs/architecture/media-lifecycle-contract.md`
 
@@ -235,12 +243,12 @@ Resolved 后才允许创建新的活跃 SCOPE、对应 GitHub Issues，并更新
 
 ## Next steps
 
-`product-shell`、`primary-daily-job`、`first-producer-canary` 与 `capture-control-contract` 已 resolved。剩余开放卡均已改写成具体缺口，不再重复产品提问。
+`product-shell`、`primary-daily-job`、`first-producer-canary`、`capture-control-contract` 与 `media-lifecycle-contract` 已 resolved。剩余开放卡均已改写成具体缺口，不再重复产品提问。
 
-当前优先只推进一个 ticket：
+ARC-001 当前下一张未解决的系统卡是：
 
 ```text
-media-lifecycle-contract：从当前 main 校准整合 V2 继承语义、PR #15 草案、最新产品规则与现有 Rust 实现。
+first-phase-runtime：以当前代码为准形成已实现 / 合成证明 / 仅接口 / 未实现 / 未真实验证的运行时缺口基线。
 ```
 
-其后依次做 `first-phase-runtime` 的当前实现缺口基线、`first-user-visible-scope` 的正式范围冻结，再按需要补 `p0-surface-prototype` 的统一页面验收。旧 Issue #11/#16/#18 及 PR #12/#13/#15/#19 只作为历史输入或被取代材料处理；不得因关闭旧卡宣称真实媒体链、OCR/ASR、调度或业务验收完成。
+Mog 已另行批准五卡垂直路线；媒体合同之后的 Evidence Library 产品手册、材料接纳/读模型、运行时页面和真实垂直证明按各自任务卡推进，不由本图自动授权或宣称完成。`first-phase-runtime`、`first-user-visible-scope` 与 `p0-surface-prototype` 仍按各自具体缺口收口。旧 Issue #11/#16/#18 及 PR #12/#13/#15/#19 只作为历史输入或被取代材料处理；不得因本票 resolved 宣称真实媒体链、OCR/ASR、调度或业务验收完成。
