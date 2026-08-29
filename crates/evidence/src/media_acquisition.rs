@@ -68,14 +68,17 @@ pub async fn ensure_discovery_cover_media_work(
         return Err(MediaAcquisitionError::SchemaUnavailable);
     }
     let rows = sqlx::query(
-        "SELECT finding.material_ref,finding.content_public_ref,finding.package_ref, \
+        "WITH latest AS (SELECT DISTINCT ON (content_public_ref) finding.* \
+           FROM linggan_material_discovery_finding finding \
+           WHERE finding.cover_source_state='KNOWN' AND finding.cover_source_url IS NOT NULL \
+           ORDER BY content_public_ref,observed_at::timestamptz DESC,created_at DESC) \
+         SELECT finding.material_ref,finding.content_public_ref,finding.package_ref, \
                 finding.record_ordinal,finding.observed_at,finding.cover_source_url, \
                 content.platform,content.content_external_id \
-         FROM linggan_material_discovery_finding finding \
+         FROM latest finding \
          JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref \
          LEFT JOIN linggan_discovery_cover_media_link link USING(material_ref) \
-         WHERE link.material_ref IS NULL AND finding.cover_source_state='KNOWN' \
-           AND finding.cover_source_url IS NOT NULL \
+         WHERE link.material_ref IS NULL \
          ORDER BY finding.created_at LIMIT 500",
     )
     .fetch_all(database.pool())
@@ -214,7 +217,8 @@ pub(crate) async fn project_discovery_cover(
     .map_err(ProducerRuntimeError::Internal)?;
     let already_materialized: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM linggan_material_media_origin origin \
-          JOIN linggan_media_download_attempt attempt USING(observation_ref) \
+          JOIN linggan_media_download_attempt attempt \
+            ON attempt.media_observation_ref=origin.observation_ref \
           JOIN linggan_media_materialization materialization USING(download_attempt_ref) \
           WHERE origin.slot_key=$1)",
     )
@@ -222,21 +226,25 @@ pub(crate) async fn project_discovery_cover(
     .fetch_one(&mut **tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
-    sqlx::query(
-        "INSERT INTO linggan_media_acquisition_work \
-         (work_ref,observation_ref,state,completed_at) \
-         VALUES ($1,$2,$3,CASE WHEN $3='completed' THEN scope_001_now() ELSE NULL END)",
+    let acquisition_active: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM linggan_material_media_origin origin \
+          JOIN linggan_media_acquisition_work work USING(observation_ref) \
+          WHERE origin.slot_key=$1 AND work.state IN ('pending','leased','retry_wait'))",
     )
-    .bind(Uuid::new_v4())
-    .bind(observation_ref)
-    .bind(if already_materialized {
-        "completed"
-    } else {
-        "pending"
-    })
-    .execute(&mut **tx)
+    .bind(&slot_key)
+    .fetch_one(&mut **tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
+    if !already_materialized && !acquisition_active {
+        sqlx::query(
+            "INSERT INTO linggan_media_acquisition_work (work_ref,observation_ref) VALUES ($1,$2)",
+        )
+        .bind(Uuid::new_v4())
+        .bind(observation_ref)
+        .execute(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    }
     Ok(true)
 }
 
