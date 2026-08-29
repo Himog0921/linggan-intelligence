@@ -93,6 +93,6 @@ pub use station_read::{
 };
 pub use target_enrichment::enrich_target_from_author_profile;
 pub use work_order_lease::{
-    DETAIL_STEP_DEFERRED_REASON, IssuedLease, LeaseError, complete_lease_for_task,
-    expire_lapsed_leases, issue_work_order_lease, lease_schema_is_ready, release_work_order_lease,
+    DETAIL_STEP_DEFERRED_REASON, IssuedLease, LeaseError, expire_lapsed_leases,
+    issue_work_order_lease, lease_schema_is_ready, release_work_order_lease,
 };

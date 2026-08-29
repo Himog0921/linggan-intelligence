@@ -189,6 +189,8 @@ Work Order 创建时合理，不代表排队两天后仍值得执行。领取 le
 
 一个 Work Order 可以有多次 Attempt；每次 Attempt 由服务端冻结 Capture Identity 与有限 lease。lease 只允许当前工位在有效期内进行规定访问，不能修改 Work 的 lane、目标、观察身份或止损边界。续租失败后必须停止新的平台访问，但已经取得且可验证的终态原料仍可依 ingress 合同提交。
 
+一份 lease 可以按冻结顺序承载多个单能力 TaskSpec。例如创作者巡检先执行 `author_profile（作者资料）`，其回执接纳后才开放 `profile_discovery（作者作品发现）`。lease 与任务的多对一关系、顺序、领取安装和 `pending（待领取）/in_progress（执行中）/completed（已完成）` 必须由服务端持久记录；派发以原子 claim 独占任务，同一安装丢失 claim 响应后必须幂等取回同一 live task，不能领取第二份工作或一直卡到过期。插件只能用原样下发的 scheduled TaskSpec 创建 Attempt，不能在内容页重建一份 manual TaskSpec。Package 接纳时必须再次锁定并复核 live lease 与领取安装，Package、Receipt、task completion 以及必要的 lease completion 在同一事务提交。单个任务完成不结束整份 lease，只有序列全部形成已接纳回执才以 `completed` 收口；手动采集继续是独立的 manual TaskSpec，不借用 scheduled lease 身份。
+
 ### 7.2 终态 Package 与部分成功
 
 一个 Attempt 最多形成一个逻辑终态 Package：它包含不可变成员清单、Coverage 来源事实与 canonical hash。传输可分片；分片必须由一个冻结 manifest 统一指向，不能把 Attempt 变成持续追加的事实容器。

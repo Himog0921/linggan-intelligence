@@ -165,7 +165,7 @@ async function initXhs() {
     contentDetail: (note) => runtime.submitContentDetail(note),
     mediaSlots: (note) => runtime.submitMediaSlots(note),
     comments: (result, context) => runtime.submitComments(result, context?.noteId || extractNoteId(location.href), context?.options || {}),
-    authorProfile: (author) => runtime.submitAuthor(author),
+    authorProfile: (author, context) => runtime.submitAuthor(author, context?.options || {}),
     batchCheckpoint: (progress, context) => runtime.submitBatchCheckpoint(context?.kind || 'xhs_batch', progress),
   });
   dashboardBridge.registerDashboardBridge();
@@ -259,6 +259,7 @@ async function dispatchProducerRuntimeAction(action, message) {
     maxTotal: message.maxTotal,
     maxSubComments: message.maxSubComments,
     maximumQuota: message.maximumQuota ?? message.count,
+    taskSpec: message.taskSpec,
     sortMode: message.sortMode,
     triggerSource: 'popup_linggan_runtime',
   };

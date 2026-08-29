@@ -41,18 +41,18 @@ use linggan_evidence::{
     LocalSubmissionOutcome, LocalTaskOutcome, MaterialReadError, MediaUploadFinalizeClaim,
     ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
     StoreOutcome, admit_media_blob, begin_media_upload, check_in_installation, claim_installation,
-    claim_media_upload_finalize, close_claim_window, complete_lease_for_task,
-    complete_media_upload, count_targets, create_manual_task, create_producer_task,
-    decide_dispatch, dispatch_schema_is_ready, enrich_target_from_author_profile,
-    grant_authorization, ingest_discovery_package, issue_work_order_lease, list_targets,
-    list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
-    open_claim_window, producer_runtime_has_packages, producer_runtime_schema_is_ready,
-    read_archive_completeness, read_discovery_library, read_media_upload_session,
-    read_runtime_library, read_station_overview, read_target, record_media_download_failure,
-    record_media_upload_chunk, register_station, release_media_upload_finalize, request_and_admit,
-    retire_station, set_group_for_many, set_monitoring_for_many, set_target_monitoring,
-    start_local_attempt, start_producer_attempt, station_schema_is_ready, store_pending_target,
-    submit_local_package, submit_producer_package, target_monitoring_enabled,
+    claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
+    create_manual_task, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
+    enrich_target_from_author_profile, grant_authorization, ingest_discovery_package,
+    issue_work_order_lease, list_targets, list_targets_in_state, local_discovery_schema_is_ready,
+    local_producer_schema_is_ready, open_claim_window, producer_runtime_has_packages,
+    producer_runtime_schema_is_ready, read_archive_completeness, read_discovery_library,
+    read_media_upload_session, read_runtime_library, read_station_overview, read_target,
+    record_media_download_failure, record_media_upload_chunk, register_station,
+    release_media_upload_finalize, request_and_admit, retire_station, set_group_for_many,
+    set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
+    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
+    target_monitoring_enabled,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -1122,6 +1122,10 @@ async fn start_producer_attempt_route(State(state): State<LocalWebState>, body: 
         Err(ProducerRuntimeError::RoutingNotFound) => {
             local_producer_error(axum::http::StatusCode::NOT_FOUND, "task_not_found")
         }
+        Err(ProducerRuntimeError::ScheduledTaskNotClaimed) => local_producer_error(
+            axum::http::StatusCode::CONFLICT,
+            "scheduled_task_not_claimed_by_producer",
+        ),
         Err(ProducerRuntimeError::Internal(_)) => local_producer_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "producer_not_committed",
@@ -1161,11 +1165,8 @@ async fn submit_producer_package_route(
             "attempt_terminal_submission_conflict",
         ),
         Ok(outcome) => {
-            // 采集包被接纳后收尾：结束租约并记下这个目标真的拿回了材料。没有这一步，
-            // 「派过」与「成了」永远分不开，下一轮巡检也没有依据判断上一轮是成是败。
-            //
-            // 手动采集不带租约，此处返回 None，不是错误。
-            let _ = complete_lease_for_task(database, submission.task_id()).await;
+            // Scheduled task/lease completion was committed with Package and Receipt inside the
+            // producer transaction. This route must not create a second completion boundary.
             // 采到的博主资料回填观察目标：采集与观察目标此前是两条不相交的线，人在列表里
             // 看着一串十六进制 ID，认不出那是谁。
             let package = submission.capture_package();
@@ -1184,6 +1185,10 @@ async fn submit_producer_package_route(
         Err(ProducerRuntimeError::AttemptIdentityMismatch) => local_producer_error(
             axum::http::StatusCode::CONFLICT,
             "attempt_identity_mismatch",
+        ),
+        Err(ProducerRuntimeError::ScheduledTaskNotClaimed) => local_producer_error(
+            axum::http::StatusCode::CONFLICT,
+            "scheduled_submission_lease_not_live",
         ),
         Err(ProducerRuntimeError::Internal(_)) => local_producer_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
@@ -2163,6 +2168,9 @@ fn dispatch_payload(decision: &DispatchDecision) -> serde_json::Value {
             payload["taskId"] = serde_json::json!(task_id);
             payload["leaseRef"] = serde_json::json!(lease_ref);
             payload["taskSpec"] = task_spec.clone();
+            // Claim atomically moved this lease task out of pending. A second poll cannot receive
+            // it again while the first producer is opening the platform page.
+            payload["taskState"] = serde_json::json!("in_progress");
         }
         DispatchDecision::RiskPaused { reason } => {
             payload["reason"] = serde_json::json!(reason);

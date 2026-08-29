@@ -23,6 +23,8 @@ pub enum ProducerRuntimeError {
     Contract(#[from] ProducerRuntimeContractError),
     #[error("a scheduled task may only be created by the server's lease path")]
     ScheduledTaskNotServerIssued,
+    #[error("the scheduled task was not claimed by this producer installation")]
+    ScheduledTaskNotClaimed,
     #[error("the producer task or attempt does not exist")]
     RoutingNotFound,
     #[error("the producer identity does not own the attempt")]
@@ -698,15 +700,37 @@ pub async fn start_producer_attempt(
         .begin()
         .await
         .map_err(ProducerRuntimeError::Internal)?;
-    let task_exists = sqlx::query_scalar::<_, bool>(
-        "SELECT EXISTS (SELECT 1 FROM linggan_runtime_task WHERE task_id = $1)",
-    )
-    .bind(attempt.task_id())
-    .fetch_one(&mut *tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)?;
-    if !task_exists {
+    let task_source: Option<String> =
+        sqlx::query_scalar("SELECT source FROM linggan_runtime_task WHERE task_id = $1")
+            .bind(attempt.task_id())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+    let Some(task_source) = task_source else {
         return Err(ProducerRuntimeError::RoutingNotFound);
+    };
+    if task_source == "scheduled" {
+        let claimed_by_this_installation: bool = sqlx::query_scalar(
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM collection_work_order_lease_task lease_task \
+                 JOIN collection_work_order_lease lease USING (lease_ref) \
+                 JOIN plugin_installation installation \
+                   ON installation.installation_ref = lease_task.claimed_by_installation_ref \
+                 WHERE lease_task.task_id = $1 \
+                   AND lease_task.execution_state = 'in_progress' \
+                   AND lease.released_at IS NULL \
+                   AND lease.expires_at > scope_001_now() \
+                   AND installation.install_key = $2::text \
+                   AND installation.superseded_at IS NULL)",
+        )
+        .bind(attempt.task_id())
+        .bind(attempt.producer_instance_id())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+        if !claimed_by_this_installation {
+            return Err(ProducerRuntimeError::ScheduledTaskNotClaimed);
+        }
     }
     let existing = sqlx::query("SELECT task_id, producer_instance_id FROM linggan_runtime_attempt WHERE attempt_id = $1 FOR UPDATE")
         .bind(attempt.attempt_id()).fetch_optional(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
@@ -752,6 +776,16 @@ pub async fn submit_producer_package(
         return Ok(outcome);
     }
     assert_attempt_owner(&mut tx, submission).await?;
+    let (task_spec, task_source): (Value, String) =
+        sqlx::query_as("SELECT task_spec, source FROM linggan_runtime_task WHERE task_id = $1")
+            .bind(submission.task_id())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?
+            .ok_or(ProducerRuntimeError::RoutingNotFound)?;
+    if task_source == "scheduled" {
+        lock_live_scheduled_claim(&mut tx, submission).await?;
+    }
     if terminal_package_exists(&mut tx, submission.attempt_id()).await? {
         tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
         return Ok(RuntimeSubmissionOutcome::Conflict {
@@ -765,13 +799,6 @@ pub async fn submit_producer_package(
         .bind(package.coverage()).bind(package.checkpoint()).bind(package.raw())
         .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
     // 任务给的篇数上限必须在接纳时执行，而不只是在页面上显示。
-    let task_spec: Value =
-        sqlx::query_scalar("SELECT task_spec FROM linggan_runtime_task WHERE task_id = $1")
-            .bind(submission.task_id())
-            .fetch_optional(&mut *tx)
-            .await
-            .map_err(ProducerRuntimeError::Internal)?
-            .ok_or(ProducerRuntimeError::RoutingNotFound)?;
     let maximum_quota = task_spec
         .get("maximumQuota")
         .and_then(Value::as_i64)
@@ -787,6 +814,17 @@ pub async fn submit_producer_package(
         .bind(submission.submission_id()).bind(submission.task_id()).bind(submission.attempt_id()).bind(submission.producer_instance_id())
         .bind(&package_hash).bind(package.package_ref()).bind(receipt_ref)
         .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
+    if task_source == "scheduled" {
+        let completed = crate::work_order_lease::complete_lease_for_task_in_transaction(
+            &mut tx,
+            submission.task_id(),
+        )
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+        if !completed {
+            return Err(ProducerRuntimeError::ScheduledTaskNotClaimed);
+        }
+    }
     tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
     Ok(RuntimeSubmissionOutcome::Acknowledged {
         submission_id: submission.submission_id(),
@@ -794,6 +832,50 @@ pub async fn submit_producer_package(
         package_ref: package.package_ref(),
         package_kind: package.package_kind().to_owned(),
     })
+}
+
+/// Revalidate and lock the execution authority at the terminal submission boundary.
+///
+/// Attempt start is only a historical fact that authority existed then. A lease can expire, be
+/// revoked or move away from this installation before Package admission; admitting without this
+/// second check would let a stale Attempt mint a valid Receipt.
+async fn lock_live_scheduled_claim(
+    tx: &mut Transaction<'_, Postgres>,
+    submission: &ProducerSubmission,
+) -> Result<(), ProducerRuntimeError> {
+    // Match dispatch lock order: installation first, then lease task. This prevents a submission
+    // and a claim retry from taking the same two rows in opposite order.
+    let installation_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT installation_ref FROM plugin_installation \
+         WHERE install_key = $1::text AND superseded_at IS NULL FOR UPDATE",
+    )
+    .bind(submission.producer_instance_id())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    let Some(installation_ref) = installation_ref else {
+        return Err(ProducerRuntimeError::ScheduledTaskNotClaimed);
+    };
+    let claimed: Option<Uuid> = sqlx::query_scalar(
+        "SELECT lease_task.lease_ref \
+         FROM collection_work_order_lease_task lease_task \
+         JOIN collection_work_order_lease lease USING (lease_ref) \
+         WHERE lease_task.task_id = $1 \
+           AND lease_task.execution_state = 'in_progress' \
+           AND lease.released_at IS NULL \
+           AND lease.expires_at > scope_001_now() \
+           AND lease_task.claimed_by_installation_ref = $2 \
+         FOR UPDATE OF lease_task, lease",
+    )
+    .bind(submission.task_id())
+    .bind(installation_ref)
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if claimed.is_none() {
+        return Err(ProducerRuntimeError::ScheduledTaskNotClaimed);
+    }
+    Ok(())
 }
 
 /// 逐条决定记录的处置。

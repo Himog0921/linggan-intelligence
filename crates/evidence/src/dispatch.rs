@@ -82,9 +82,12 @@ impl DispatchDecision {
 }
 
 pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar::<_, bool>("SELECT to_regclass('collection_work_order_lease') IS NOT NULL")
-        .fetch_one(database.pool())
-        .await
+    sqlx::query_scalar::<_, bool>(
+        "SELECT to_regclass('collection_work_order_lease') IS NOT NULL \
+                AND to_regclass('collection_work_order_lease_task') IS NOT NULL",
+    )
+    .fetch_one(database.pool())
+    .await
 }
 
 /// 回答一次「有活吗」。
@@ -100,22 +103,50 @@ pub async fn decide_dispatch(
     }
     let mut transaction = database.pool().begin().await?;
 
-    let station: Option<(Option<Uuid>, Option<i32>)> = sqlx::query_as(
-        "SELECT i.station_ref, s.daily_work_quota \
+    let station: Option<(Uuid, Option<Uuid>, Option<i32>)> = sqlx::query_as(
+        "SELECT i.installation_ref, i.station_ref, s.daily_work_quota \
          FROM plugin_installation i \
          LEFT JOIN execution_station s \
                 ON s.station_ref = i.station_ref AND s.retired_at IS NULL \
-         WHERE i.install_key = $1 AND i.superseded_at IS NULL",
+         WHERE i.install_key = $1 AND i.superseded_at IS NULL \
+         FOR UPDATE OF i",
     )
     .bind(install_key)
     .fetch_optional(&mut *transaction)
     .await?;
-    let Some((station_ref, quota)) = station else {
+    let Some((installation_ref, station_ref, quota)) = station else {
         return Err(DispatchError::UnknownInstallation);
     };
     let (Some(station_ref), Some(quota)) = (station_ref, quota) else {
         return Ok(DispatchDecision::InstallationNotClaimed);
     };
+
+    // A committed claim response can be lost. Serializing on the installation row and replaying
+    // its same live task makes retry idempotent; without this, the task remains in progress until
+    // lease expiry or a concurrent poll claims unrelated work for the same installation.
+    let in_progress: Option<(Uuid, Uuid, Value)> = sqlx::query_as(
+        "SELECT task.task_id, lease.lease_ref, runtime.task_spec \
+         FROM collection_work_order_lease_task task \
+         JOIN collection_work_order_lease lease ON lease.lease_ref = task.lease_ref \
+         JOIN linggan_runtime_task runtime ON runtime.task_id = task.task_id \
+         WHERE task.claimed_by_installation_ref = $1 \
+           AND task.execution_state = 'in_progress' \
+           AND lease.released_at IS NULL \
+           AND lease.expires_at > scope_001_now() \
+         ORDER BY task.claimed_at, task.sequence_no \
+         LIMIT 1 FOR UPDATE OF task",
+    )
+    .bind(installation_ref)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if let Some((task_id, lease_ref, task_spec)) = in_progress {
+        transaction.commit().await?;
+        return Ok(DispatchDecision::Dispatch {
+            task_id,
+            lease_ref,
+            task_spec,
+        });
+    }
 
     let used = station_daily_note_usage_in(&mut transaction, station_ref).await?;
     if used >= i64::from(quota) {
@@ -129,17 +160,22 @@ pub async fn decide_dispatch(
     // 顺序保证「有任务却被拦」不会被报成「没有任务」：只有确实没有候选时才回
     // `NothingWaiting`。
     let waiting: Option<(Uuid, Uuid, Value, String, String)> = sqlx::query_as(
-        "SELECT t.task_id, l.lease_ref, t.task_spec, t.platform, l_o.lane \
-         FROM collection_work_order_lease l \
-         JOIN linggan_runtime_task t ON t.task_id = l.task_id \
-         JOIN collection_work_order l_o ON l_o.work_order_ref = l.work_order_ref \
-         LEFT JOIN linggan_runtime_attempt a ON a.task_id = t.task_id \
-         WHERE l.station_ref = $1 \
-           AND l.released_at IS NULL \
-           AND l.expires_at > scope_001_now() \
-           AND a.attempt_id IS NULL \
-         ORDER BY l.issued_at \
-         LIMIT 1 FOR UPDATE OF l",
+        "SELECT task.task_id, lease.lease_ref, runtime.task_spec, runtime.platform, work_order.lane \
+         FROM collection_work_order_lease_task task \
+         JOIN collection_work_order_lease lease ON lease.lease_ref = task.lease_ref \
+         JOIN linggan_runtime_task runtime ON runtime.task_id = task.task_id \
+         JOIN collection_work_order work_order ON work_order.work_order_ref = lease.work_order_ref \
+         WHERE lease.station_ref = $1 \
+           AND lease.released_at IS NULL \
+           AND lease.expires_at > scope_001_now() \
+           AND task.execution_state = 'pending' \
+           AND NOT EXISTS ( \
+               SELECT 1 FROM collection_work_order_lease_task prior \
+               WHERE prior.lease_ref = task.lease_ref \
+                 AND prior.sequence_no < task.sequence_no \
+                 AND prior.execution_state <> 'completed') \
+         ORDER BY lease.issued_at, task.sequence_no \
+         LIMIT 1 FOR UPDATE OF task SKIP LOCKED",
     )
     .bind(station_ref)
     .fetch_optional(&mut *transaction)
@@ -151,6 +187,21 @@ pub async fn decide_dispatch(
 
     if let Some(reason) = active_risk_pause(&mut transaction, &platform, &lane).await? {
         return Ok(DispatchDecision::RiskPaused { reason });
+    }
+
+    let claimed = sqlx::query(
+        "UPDATE collection_work_order_lease_task \
+         SET execution_state = 'in_progress', claimed_at = scope_001_now(), \
+             claimed_by_installation_ref = $2 \
+         WHERE task_id = $1 AND execution_state = 'pending'",
+    )
+    .bind(task_id)
+    .bind(installation_ref)
+    .execute(&mut *transaction)
+    .await?
+    .rows_affected();
+    if claimed != 1 {
+        return Ok(DispatchDecision::NothingWaiting);
     }
 
     transaction.commit().await?;

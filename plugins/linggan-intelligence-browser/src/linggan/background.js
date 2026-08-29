@@ -526,6 +526,9 @@ async function runDispatchedTask() {
       mode: 'profile',
       // 配额来自工单，不来自页面对话框：执行端不得自行放宽。
       maximumQuota: Number(spec.maximumQuota) || 1,
+      // The page collector must submit against this exact server-issued identity. Rebuilding a
+      // manual task here would leave the claimed scheduled task without Attempt or Receipt.
+      taskSpec: spec,
       triggerSource: 'linggan_dispatched_task',
     });
     return {

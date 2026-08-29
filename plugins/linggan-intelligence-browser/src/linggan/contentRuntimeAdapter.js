@@ -1,4 +1,5 @@
 import { sendToBackground } from '../shared/messaging.js';
+import { validateTaskSpec } from './adapter.js';
 import { LINGGAN_RUNTIME_ACTION } from './runtimeActions.js';
 import {
   createManualRuntimeTask,
@@ -17,7 +18,16 @@ function pageTypeFor(platform, kind) {
   return platform === 'douyin' ? 'detail' : 'note_detail';
 }
 
-function taskFor(platform, capability, target, options = {}) {
+export function taskFor(platform, capability, target, options = {}) {
+  if (options.taskSpec) {
+    const scheduled = validateTaskSpec(options.taskSpec);
+    if (scheduled.source !== 'scheduled'
+      || scheduled.platform !== platform
+      || scheduled.capabilitiesRequested?.[0] !== capability) {
+      throw new Error('dispatched_task_spec_mismatch');
+    }
+    return scheduled;
+  }
   return createManualRuntimeTask({
     platform, pageType: pageTypeFor(platform, capability), target,
     capabilitiesRequested: [capability], maximumQuota: options.maximumQuota ?? 1,
@@ -56,7 +66,7 @@ export function createLingganContentRuntime({ platform } = {}) {
   return {
     async submitDiscovery(cards, {
       query = '', authorExternalId = '', surface = 'current_visible_surface', pageFacts = undefined,
-      maximumQuota = undefined,
+      maximumQuota = undefined, taskSpec = undefined,
     } = {}) {
       const packageValue = packageDiscovery({ platform, cards, query, authorExternalId, surface, pageFacts });
       const capability = authorExternalId ? 'profile_discovery' : 'discovery_search';
@@ -68,6 +78,7 @@ export function createLingganContentRuntime({ platform } = {}) {
         // rewrite it to the actual count returned by the collector.
         maximumQuota: Math.max(1, Number(maximumQuota) || packageValue.records.length),
         stopConditions: ['manual_stop', 'maximum_quota', 'surface_ended', 'time_budget', 'risk_budget'],
+        taskSpec,
       }), packageValue);
     },
     async submitContentDetail(note) {
@@ -89,9 +100,14 @@ export function createLingganContentRuntime({ platform } = {}) {
       );
       return { ...comments, replies };
     },
-    async submitAuthor(author) {
+    async submitAuthor(author, options = {}) {
       const packageValue = packageAuthorProfile({ platform, author });
-      return submit(taskFor(platform, 'author_profile', { authorExternalId: String(author?.userId || author?.id || '') }), packageValue);
+      return submit(taskFor(
+        platform,
+        'author_profile',
+        { authorExternalId: String(author?.userId || author?.id || '') },
+        { taskSpec: options.taskSpec },
+      ), packageValue);
     },
     async submitMediaSlots(note) {
       const packageValue = packageMediaSlots({ platform, note });

@@ -224,7 +224,8 @@ async fn gather_facts(
     .fetch_optional(&mut **transaction)
     .await?;
 
-    // 「在途」= 还有活着的租约，或已经开工但没交回结果的尝试。
+    // 「在途」= 还有活着的租约。task 的 pending / in_progress / completed 由租约任务序列
+    // 分责；只要整份租约尚未结束，就不能再为同一目标和 lane 复制一份工单。
     //
     // 此前的判据是「存在一行工单」——而工单从不结束，于是第一次巡检之后，后续每一次都被
     // 合并掉，巡检永远只跑一次。一个只置位、从不复位的状态，等于把功能永久关掉。
@@ -232,10 +233,8 @@ async fn gather_facts(
         "SELECT EXISTS ( \
              SELECT 1 FROM collection_work_order w \
              JOIN collection_work_order_lease l ON l.work_order_ref = w.work_order_ref \
-             LEFT JOIN linggan_runtime_attempt a ON a.task_id = l.task_id \
              WHERE w.target_ref = $1 AND w.lane = $2 \
-               AND l.released_at IS NULL AND l.expires_at > scope_001_now() \
-               AND a.attempt_id IS NULL)",
+               AND l.released_at IS NULL AND l.expires_at > scope_001_now())",
     )
     .bind(target_ref)
     .bind(lane)
