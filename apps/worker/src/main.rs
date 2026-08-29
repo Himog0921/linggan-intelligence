@@ -43,10 +43,20 @@ async fn main() {
     {
         println!("linggan worker: cannot record scheduler identity: {error}");
     }
+    match linggan_evidence::ensure_discovery_cover_media_work(&database).await {
+        Ok(count) if count > 0 => {
+            println!("linggan worker: projected {count} discovery covers into media acquisition")
+        }
+        Ok(_) => {}
+        Err(error) => println!("linggan worker: media acquisition projection unavailable: {error}"),
+    }
 
     let mut ticker = tokio::time::interval(TICK_INTERVAL);
     loop {
         ticker.tick().await;
+        if let Err(error) = linggan_evidence::ensure_discovery_cover_media_work(&database).await {
+            println!("linggan worker: media acquisition projection failed: {error}");
+        }
         match linggan_evidence::run_due_patrols(&database).await {
             Ok(summary) => {
                 // 只在真的发生了什么时说话。一个每分钟打印「本轮 0 个」的 tick 会让日志

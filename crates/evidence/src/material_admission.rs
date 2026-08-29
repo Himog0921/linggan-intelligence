@@ -69,14 +69,30 @@ async fn insert_discovery_records(
         let comments = exact_nonnegative_count(finding.payload, &["commentCount", "comments"]);
         let collects = exact_nonnegative_count(finding.payload, &["collectCount", "collects"]);
         let shares = exact_nonnegative_count(finding.payload, &["shareCount", "shares"]);
+        let material_ref = Uuid::new_v4();
+        let record_ordinal = i32::try_from(ordinal).expect("package record count is bounded");
         sqlx::query("INSERT INTO linggan_material_discovery_finding (material_ref,content_public_ref,package_ref,record_ordinal,discovery_kind,result_position,observed_at,title,title_state,creator_display_name,creator_state,published_at_source_text,published_at_source_text_state,cover_source_url,cover_source_state,like_count,like_count_state,comment_count,comment_count_state,collect_count,collect_count_state,share_count,share_count_state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)")
-            .bind(Uuid::new_v4()).bind(content_public_ref).bind(package.package_ref()).bind(i32::try_from(ordinal).expect("package record count is bounded"))
+            .bind(material_ref).bind(content_public_ref).bind(package.package_ref()).bind(record_ordinal)
             .bind(package.package_kind()).bind(finding.result_position).bind(package.observed_at()).bind(title).bind(known_state(title))
             .bind(creator).bind(known_state(creator)).bind(published.as_deref()).bind(known_state(published.as_deref()))
             .bind(cover).bind(known_state(cover)).bind(likes).bind(known_state(likes))
             .bind(comments).bind(known_state(comments)).bind(collects).bind(known_state(collects))
             .bind(shares).bind(known_state(shares))
             .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
+        if let Some(cover_source_url) = cover {
+            crate::media_acquisition::project_discovery_cover(
+                tx,
+                material_ref,
+                content_public_ref,
+                package.package_ref(),
+                record_ordinal,
+                package.platform(),
+                finding.content_id,
+                package.observed_at(),
+                cover_source_url,
+            )
+            .await?;
+        }
     }
     Ok(())
 }

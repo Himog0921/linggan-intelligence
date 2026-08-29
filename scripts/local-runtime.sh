@@ -191,6 +191,7 @@ migrate() {
   apply_migration_once "0018_material_discovery_lane" "$project_root/database/migrations/0018_material_discovery_lane.sql"
   apply_migration_once "0019_work_order_lease_task_sequence" "$project_root/database/migrations/0019_work_order_lease_task_sequence.sql"
   apply_migration_once "0020_observation_runtime_automation" "$project_root/database/migrations/0020_observation_runtime_automation.sql"
+  apply_migration_once "0021_discovery_cover_media_acquisition" "$project_root/database/migrations/0021_discovery_cover_media_acquisition.sql"
 }
 
 case "$command_name" in

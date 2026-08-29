@@ -102,7 +102,8 @@ export function createLocalMediaOutbox(table = database.mediaUploads, now = curr
   return {
     async get(uploadId) { return table.get(uploadId); },
     async enqueue(envelope) {
-      if (!envelope?.uploadId || !envelope?.slotSubmissionId || !envelope?.mediaObservationRef || !Array.isArray(envelope?.candidateUris)) throw new Error('invalid_local_media_upload');
+      const dependency = envelope?.slotSubmissionId || envelope?.serverWorkRef;
+      if (!envelope?.uploadId || !dependency || !envelope?.mediaObservationRef || !Array.isArray(envelope?.candidateUris)) throw new Error('invalid_local_media_upload');
       const existing = await table.get(envelope.uploadId);
       if (existing) return existing;
       const createdAt = now();
@@ -123,6 +124,10 @@ export function createLocalMediaOutbox(table = database.mediaUploads, now = curr
     async retry(uploadId, error, { at = now() } = {}) {
       const row = await table.get(uploadId); if (!row) return;
       const attempts = Number(row.attempts || 0) + 1;
+      if (attempts >= 3) {
+        await table.update(uploadId, { status: 'terminal', attempts, updatedAt: at, error: String(error || 'media_upload_attempt_limit') });
+        return;
+      }
       await table.update(uploadId, { status: 'retryable', attempts, nextAttemptAt: at + retryDelay(attempts), updatedAt: at, error: String(error || 'media_upload_not_acknowledged') });
     },
     async terminal(uploadId, error, { at = now() } = {}) { await table.update(uploadId, { status: 'terminal', updatedAt: at, error: String(error || 'media_upload_terminal') }); },

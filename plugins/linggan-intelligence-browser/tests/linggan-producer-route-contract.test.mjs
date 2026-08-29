@@ -52,6 +52,7 @@ test('full Producer runtime health enables an exact route-bundle flush through r
           taskCreation: '/api/local/producer/tasks',
           attemptStart: '/api/local/producer/runtime-attempts',
           submission: '/api/local/producer/runtime-submissions',
+          mediaAcquisitionClaim: '/api/local/producer/media-acquisitions/claim',
         },
       },
     }),

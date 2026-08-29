@@ -66,3 +66,22 @@ test('media outbox restores an interrupted local upload without losing its indep
   assert.equal(due[0].status, 'retryable');
   await database.delete();
 });
+
+test('media outbox stops a local-only delivery after three failed attempts', async () => {
+  const database = new Dexie(`linggan-media-limit-${crypto.randomUUID()}`);
+  database.version(1).stores({ mediaUploads: '&uploadId, slotSubmissionId, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]' });
+  const outbox = createLocalMediaOutbox(database.mediaUploads, () => 100);
+  await outbox.enqueue({
+    uploadId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
+    serverWorkRef: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    mediaObservationRef: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+    candidateUris: ['https://sns-img-hw.xhscdn.com/cover.jpg'],
+  });
+  await outbox.retry('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'one');
+  await outbox.retry('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'two');
+  await outbox.retry('dddddddd-dddd-4ddd-8ddd-dddddddddddd', 'three');
+  const row = await outbox.get('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
+  assert.equal(row.status, 'terminal');
+  assert.equal(row.attempts, 3);
+  await database.delete();
+});

@@ -22,8 +22,9 @@ function producerRoutesFromHealth(health) {
   const taskCreation = producerRoute(routes.taskCreation);
   const attemptStart = producerRoute(routes.attemptStart);
   const submission = producerRoute(routes.submission);
-  return taskCreation && attemptStart && submission
-    ? { taskCreation, attemptStart, submission }
+  const mediaAcquisitionClaim = producerRoute(routes.mediaAcquisitionClaim);
+  return taskCreation && attemptStart && submission && mediaAcquisitionClaim
+    ? { taskCreation, attemptStart, submission, mediaAcquisitionClaim }
     : null;
 }
 
@@ -209,6 +210,47 @@ export async function claimLingganDispatch({
   } catch {
     // 连不上时退避得久一些：Linggan 没开着是常态，不该每分钟敲一次。
     return { mayExecute: false, decision: 'unavailable', message: 'Linggan 本机服务当前不可访问。', nextPollAfterSeconds: 900 };
+  }
+}
+
+/// Claim one bounded server-owned media acquisition. The source observation already passed
+/// admission; this permission only authorizes fetching its candidate bytes and uploading them.
+export async function claimLingganMediaAcquisition({
+  installKey,
+  origin = LINGGAN_LOCAL_ORIGIN,
+  fetchImpl = globalThis.fetch,
+  health = null,
+} = {}) {
+  if (typeof fetchImpl !== 'function') {
+    return { mayExecute: false, decision: 'unavailable', nextPollAfterSeconds: 900 };
+  }
+  const route = producerRoutesFromHealth(health)?.mediaAcquisitionClaim;
+  if (!route) {
+    return { mayExecute: false, decision: 'unavailable', nextPollAfterSeconds: 900 };
+  }
+  try {
+    const response = await fetchImpl(`${origin}${route}`, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ installKey }),
+    });
+    if (!response.ok) {
+      return { mayExecute: false, decision: 'unavailable', nextPollAfterSeconds: 300 };
+    }
+    const body = await response.json().catch(() => null);
+    const mayExecute = body?.decision === 'acquired';
+    return {
+      mayExecute,
+      decision: String(body?.decision || 'unknown'),
+      workRef: mayExecute ? String(body?.workRef || '') : '',
+      mediaObservationRef: mayExecute ? String(body?.observationRef || '') : '',
+      claimGeneration: mayExecute ? Number(body?.claimGeneration) : 0,
+      candidateUris: mayExecute && Array.isArray(body?.candidateUris) ? body.candidateUris : [],
+      nextPollAfterSeconds: Number(body?.nextPollAfterSeconds ?? 300),
+    };
+  } catch {
+    return { mayExecute: false, decision: 'unavailable', nextPollAfterSeconds: 900 };
   }
 }
 
