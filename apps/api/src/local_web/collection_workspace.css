@@ -159,10 +159,13 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-gate-note { margin-top:11px; color:var(--v7-muted); font-size:12px; line-height:1.6; }
 
 @media (max-width:1450px) {
+  .c-runtime-split { grid-template-columns:minmax(0,1fr) 340px; gap:28px; }
   :root { --c-drawer-width:76vw; --c-drawer-wide:90vw; --c-now-aside:410px; --c-inspector:390px; }
   .c-now { grid-template-columns:minmax(620px,1fr) var(--c-now-aside); }
 }
 @media (max-width:1180px) {
+  .c-runtime-split { grid-template-columns:minmax(0,1fr); gap:32px; }
+  .c-factors { grid-template-columns:repeat(2,minmax(0,1fr)); }
   :root { --c-drawer-width:calc(100vw - var(--v7-side-width)); --c-drawer-wide:calc(100vw - var(--v7-side-width)); }
   .c-now { grid-template-columns:minmax(0,1fr); }
   .c-now-main { border-right:0; border-bottom:2px solid var(--v7-black); }
@@ -170,6 +173,9 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
   .c-split-main { border-right:0; border-bottom:2px solid var(--v7-black); }
 }
 @media (max-width:900px) {
+  .c-station-row { grid-template-columns:56px minmax(0,1fr) auto; row-gap:8px; }
+  .c-station-row .c-quota,.c-station-row .c-station-meta { grid-column:2 / -1; text-align:left; }
+  .c-station-meta { flex-direction:row; gap:14px; }
   .c-drawer { top:0; width:100vw; }
 }
 @media (prefers-reduced-motion:reduce) { .c-drawer { transition:none; } }
@@ -191,21 +197,112 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-target-meta { display:flex; gap:14px; color:var(--v7-muted); font:10px var(--lgi-font-mono); letter-spacing:.04em; }
 .c-target-state { color:var(--v7-black); font:700 11px var(--lgi-font-mono); text-align:right; }
 
-/* 工位面板。这一页允许出现真实可点的按钮，因为登记工位与认领安装只写本地记录，
- * 不访问任何平台——与页面其余那些会消耗平台访问、因而显式不可用的控件不同。 */
-.c-station-console { padding:26px 0 8px; border-bottom:2px solid var(--v7-black); }
-.c-station-console h2 { margin:0; color:var(--v7-black); font-size:18px; font-weight:600; line-height:1.25; }
-.c-station-lede { margin:11px 0 0; max-width:640px; color:var(--v7-body); font-size:13px; line-height:1.7; }
-.c-station-note { margin:9px 0 0; max-width:640px; color:var(--v7-muted); font-size:12px; line-height:1.7; }
-.c-station-forms { margin-top:20px; display:flex; flex-wrap:wrap; gap:26px; }
-.c-station-form { display:flex; flex-wrap:wrap; align-items:center; gap:9px; }
-.c-station-form label { flex:0 0 100%; color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
-.c-station-form input,.c-station-form select,.c-target-claim select {
+/* 执行工位页。四层结构：能不能接活 → 缺哪一样 → 是谁 → 按什么边界跑。
+ *
+ * 这一页允许出现真实可点的按钮，因为登记工位与认领安装只写本地记录，不访问任何平台——
+ * 与页面其余那些会消耗平台访问、因而显式不可用的控件不同。 */
+.c-runtime { padding:24px 20px 40px; display:flex; flex-direction:column; gap:32px; }
+.c-runtime-split { display:grid; grid-template-columns:minmax(0,1fr) 400px; gap:40px; align-items:start; }
+.c-runtime-main { min-width:0; display:flex; flex-direction:column; gap:32px; }
+.c-runtime-aside { min-width:0; display:flex; flex-direction:column; gap:32px; }
+
+/* 第一层：一个判断，不是一串读数。整块底色，不用侧边色条。 */
+.c-verdict { padding:20px 24px 24px; background:var(--v7-sunken); }
+.c-verdict-partial { background:var(--v7-warn-soft); }
+.c-verdict-blocked { background:var(--v7-bad-soft); }
+.c-verdict-unknown { background:var(--v7-gray); }
+.c-verdict-head { display:flex; align-items:baseline; gap:20px; flex-wrap:wrap; }
+.c-verdict-state { flex:0 0 auto; color:var(--v7-black); font:700 24px/1.15 var(--lgi-font-sans); letter-spacing:-.01em; }
+.c-verdict-why { margin:0; flex:1 1 320px; min-width:0; max-width:70ch; color:var(--v7-body); font-size:13px; line-height:1.7; }
+.c-verdict-why-list { margin:0; padding:0; flex:1 1 320px; min-width:0; max-width:70ch; list-style:none; display:flex; flex-direction:column; gap:5px; }
+.c-verdict-why-list li { color:var(--v7-body); font-size:13px; line-height:1.65; }
+.c-verdict-why-list b { margin-right:9px; color:var(--v7-black); font:800 10px var(--lgi-font-mono); letter-spacing:.09em; }
+
+/* 两条 lane 分开判定：深度建档接不了、巡检还能跑，是真实情况。 */
+/* auto-fill 而非 auto-fit：宽屏下补空轨道，不把两条 lane 拉成 400px 宽——
+ * 拉宽会让「深度建档」和它的判定词隔着半屏，眼睛得来回找。 */
+.c-lanes { margin-top:18px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,400px)); gap:0 48px; justify-content:start; border-top:1px solid var(--v7-line-strong); }
+.c-lane { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:11px 0; border-bottom:1px solid var(--v7-line); }
+.c-lane-name b { display:block; color:var(--v7-black); font-size:13px; font-weight:600; }
+.c-lane-name span { display:block; margin-top:2px; color:var(--v7-ghost); font:10px var(--lgi-font-mono); letter-spacing:.04em; }
+.c-lane-state { flex:0 0 auto; font:700 11px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-lane-ok { color:var(--v7-black); }
+.c-lane-blocked { color:var(--v7-red); }
+
+/* 第二层：第 5 问的四个分项。账号那一项永远是「不参与判定」。 */
+/* 分项是竖排的（标签在上、值在下），铺满宽度不伤阅读；lane 是左右对照的，拉宽会让
+ * 名字和判定词隔着半屏，所以两者用不同的伸缩策略。 */
+.c-factors { margin:20px 0 0; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; border-top:1px solid var(--v7-line-strong); }
+.c-factor { padding:13px 20px 13px 0; }
+.c-factor dt { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-factor dd { margin:5px 0 0; color:var(--v7-black); font:700 17px/1.1 var(--lgi-font-mono); letter-spacing:-.02em; }
+.c-factor p { margin:5px 0 0; color:var(--v7-muted); font-size:11px; line-height:1.5; }
+/* 没有被检查的那一项不能与被检查过的看起来一样：显示成四项齐备就是改写资格。 */
+.c-factor-unchecked dd { color:var(--v7-muted); font-size:13px; font-weight:600; letter-spacing:0; }
+.c-factors-caveat { margin:14px 0 0; max-width:74ch; color:var(--v7-muted); font-size:11px; line-height:1.65; }
+
+/* 第三层：构成这些值的对象。 */
+.c-roster-head { padding-bottom:14px; border-bottom:2px solid var(--v7-black); }
+.c-roster-count { display:flex; align-items:baseline; gap:9px; }
+.c-roster-count b { color:var(--v7-black); font:800 26px/1 var(--lgi-font-mono); letter-spacing:-.04em; }
+.c-roster-count span { color:var(--v7-muted); font-size:13px; }
+.c-roster-note { margin:10px 0 0; max-width:66ch; color:var(--v7-muted); font-size:12px; line-height:1.7; }
+.c-roster-empty { margin:16px 0 0; max-width:66ch; color:var(--v7-muted); font-size:13px; line-height:1.7; }
+.c-station-row { display:grid; grid-template-columns:64px minmax(0,1fr) 108px auto 64px; align-items:center; gap:16px; padding:15px 0; border-bottom:1px solid var(--v7-line); }
+.c-station-row-unclaimed { grid-template-columns:64px minmax(0,1fr) auto; }
+.c-station-state { font:700 11px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-state-staffed { color:var(--v7-black); }
+.c-state-vacant { color:var(--v7-muted); }
+.c-state-waiting { color:var(--v7-warn); }
+.c-station-name { min-width:0; }
+.c-station-name b { display:block; color:var(--v7-black); font-size:14px; font-weight:600; }
+.c-station-name span { display:block; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-ghost); font:11px var(--lgi-font-mono); }
+/* 额度是这一行唯一回答「今天还能干多少活」的数，因此是第二视觉重量。 */
+.c-quota b { color:var(--v7-black); font:800 17px/1 var(--lgi-font-mono); letter-spacing:-.02em; }
+.c-quota span { color:var(--v7-muted); font:12px var(--lgi-font-mono); }
+.c-quota em { display:block; margin-top:3px; color:var(--v7-ghost); font:normal 10px var(--lgi-font-mono); letter-spacing:.04em; }
+.c-quota-full b,.c-quota-full span { color:var(--v7-red); }
+.c-station-meta { display:flex; flex-direction:column; gap:3px; color:var(--v7-muted); font:10px var(--lgi-font-mono); letter-spacing:.04em; text-align:right; }
+.c-station-retire { display:flex; justify-content:flex-end; }
+.c-station-claim { display:flex; align-items:center; gap:7px; }
+.c-station-claim select { height:34px; padding:0 9px; border:1px solid var(--v7-line-strong); border-radius:4px; background:var(--v7-white); color:var(--v7-black); font-size:12px; }
+
+/* 右栏主动作。登记一台工位是这一页唯一的真实主动作。 */
+.c-console { padding:20px; background:var(--v7-sunken); }
+.c-console-title { margin:0; color:var(--v7-black); font-size:14px; font-weight:600; }
+.c-console-form { margin-top:14px; display:flex; flex-wrap:wrap; align-items:center; gap:9px; }
+.c-console-form label { flex:0 0 100%; color:var(--v7-ghost); font-size:11px; line-height:1.5; }
+.c-console-form input,.c-console-form select {
   height:40px; padding:0 11px; border:1px solid var(--v7-line-strong); border-radius:4px;
   background:var(--v7-white); color:var(--v7-black); font-size:13px;
 }
-.c-station-form input { min-width:230px; }
-.c-station-form input:focus-visible,.c-station-form select:focus-visible,.c-target-claim select:focus-visible,
+.c-console-form input { flex:1 1 200px; min-width:0; }
+.c-console-note { margin:12px 0 0; color:var(--v7-muted); font-size:11px; line-height:1.6; }
+/* 开发期用的东西不与主动作同级：默认折叠。 */
+.c-dev-tools { margin-top:18px; border-top:1px solid var(--v7-line-strong); padding-top:12px; }
+.c-dev-tools summary { color:var(--v7-muted); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; cursor:pointer; }
+.c-dev-tools summary:focus-visible { outline:2px solid var(--v7-black); outline-offset:2px; }
+.c-console-form-quiet label { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-console-form-quiet select { height:34px; font-size:12px; }
+.c-console-failure { margin:12px 0 0; padding:9px 12px; background:var(--v7-bad-soft); color:var(--v7-black); font-size:12px; line-height:1.65; }
+.c-console-failure b { margin-right:9px; padding:2px 7px; background:var(--v7-bad-fill); color:var(--v7-white); font:800 10px var(--lgi-font-mono); letter-spacing:.09em; }
+
+/* 第四层：正在按什么边界跑。租约是许可，不是活。 */
+.c-bounds-title { margin:0 0 4px; color:var(--v7-black); font-size:14px; font-weight:600; }
+.c-bounds-group { margin-top:20px; }
+.c-bounds-group h3 { margin:0 0 2px; padding-bottom:8px; border-bottom:2px solid var(--v7-black); color:var(--v7-black); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-bound-row { display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:11px 0; border-bottom:1px solid var(--v7-line); }
+.c-bound-name b { display:block; color:var(--v7-black); font-size:13px; font-weight:600; }
+.c-bound-name span { display:block; margin-top:2px; color:var(--v7-ghost); font:10px var(--lgi-font-mono); letter-spacing:.04em; }
+.c-bound-meta { display:flex; flex-direction:column; gap:3px; color:var(--v7-muted); font:10px var(--lgi-font-mono); letter-spacing:.04em; text-align:right; }
+.c-bounds-empty { margin:12px 0 0; color:var(--v7-muted); font-size:12px; line-height:1.65; }
+.c-bounds-grid { margin:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0; }
+.c-bounds-grid div { padding:11px 12px 11px 0; border-bottom:1px solid var(--v7-line); }
+.c-bounds-grid dt { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-bounds-grid dd { margin:4px 0 0; color:var(--v7-black); font:700 13px var(--lgi-font-mono); }
+.c-bounds-note { margin:12px 0 0; color:var(--v7-muted); font-size:11px; line-height:1.6; }
+
+.c-console-form input:focus-visible,.c-console-form select:focus-visible,.c-station-claim select:focus-visible,
 .c-btn-primary:focus-visible,.c-btn-secondary:focus-visible {
   outline:2px solid var(--v7-black); outline-offset:2px;
 }
@@ -224,21 +321,11 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 }
 .c-btn-secondary:hover { background:var(--v7-sunken); }
 
-/* 带认领控件的行需要更宽的末列：默认的 64px 只够放一个状态词。 */
-.c-target-row:has(.c-target-claim) { grid-template-columns:72px minmax(0,1fr) auto auto; }
-.c-target-claim { display:flex; align-items:center; gap:7px; }
-.c-target-claim select { height:34px; font-size:12px; }
 
 @media (prefers-reduced-motion:reduce) {
   .c-btn-primary { transition:none; }
   .c-btn-primary:hover,.c-btn-primary:active { transform:none; box-shadow:var(--v7-brutal); }
 }
-.c-station-pending { padding:26px 0 30px; }
-.c-station-pending h3 { margin:0 0 4px; color:var(--v7-black); font-size:13px; font-weight:600; }
-.c-target-row:has(.c-target-retire) { grid-template-columns:72px minmax(0,1fr) auto 64px auto; }
-.c-target-retire { display:flex; }
-.c-station-failure { margin:11px 0 0; max-width:640px; padding:9px 12px; background:var(--v7-bad-soft); color:var(--v7-black); font-size:13px; line-height:1.7; }
-.c-station-failure b { margin-right:9px; padding:2px 7px; background:var(--v7-bad-fill); color:var(--v7-white); font:800 10px var(--lgi-font-mono); letter-spacing:.09em; }
 
 /* 加入观察：只写本机记录，不消耗平台访问，因此是真实可点的动作。 */
 .c-target-add { display:flex; align-items:center; gap:8px; }

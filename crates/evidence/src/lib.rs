@@ -26,6 +26,7 @@ mod material_storage_key;
 mod patrol_scheduler;
 mod producer_runtime;
 mod receipt;
+mod runtime_capacity;
 mod station_read;
 mod target_enrichment;
 mod work_order;
@@ -33,7 +34,7 @@ mod work_order_lease;
 
 pub use acquisition_chain::{
     AcquisitionChainError, AuthorizationGrant, RequestOutcome, acquisition_chain_schema_is_ready,
-    grant_authorization, request_and_admit,
+    grant_authorization, read_capacity, request_and_admit,
 };
 pub use archive_completeness::{ArchiveCompleteness, read_archive_completeness};
 pub use collection_target::{
@@ -88,6 +89,10 @@ pub use producer_runtime::{
     release_media_upload_finalize, start_producer_attempt, submit_producer_package,
 };
 pub use receipt::{IngressOutcome, RejectionCode};
+pub use runtime_capacity::{
+    ACCOUNT_CHECK_NOT_CONNECTED, ActiveRiskPause, LaneVerdict, LiveLease, PatrolOutlook,
+    RuntimeCapacityOverview, read_runtime_capacity,
+};
 pub use station_read::{
     StationOverview, UnclaimedInstallation, read_station_overview, station_daily_note_usage,
 };

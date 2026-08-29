@@ -270,6 +270,26 @@ fn required_capabilities(target_kind: &str, lane: &str) -> &'static [&'static st
     }
 }
 
+/// 只读地问一次第 5 问。不写任何东西，也不产生任何决定。
+///
+/// 执行工位页用它回答「系统现在有没有能力接活」。**页面与准入必须读同一个
+/// `establish_capacity`**：两处各写一份判据，正是旧项目「页面显示已达上限但仍在派单」
+/// 的成因，配额那段 SQL 已经因为同一个理由只留了一份。
+///
+/// 事务开了又回滚，不是浪费：`establish_capacity` 的签名要求事务内的一致快照，四个分项
+/// 必须读同一个瞬间——否则页面可能显示「有在岗工位」的同时显示「因为没有工位而接不了活」。
+pub async fn read_capacity(
+    database: &Database,
+    platform: &str,
+    target_kind: &str,
+    lane: &str,
+) -> Result<Capacity, sqlx::Error> {
+    let mut transaction = database.pool().begin().await?;
+    let capacity = establish_capacity(&mut transaction, platform, target_kind, lane).await?;
+    transaction.rollback().await?;
+    Ok(capacity)
+}
+
 /// Answer question 5 against real rows: staffed station, capabilities, budget, risk pause.
 ///
 /// Asked in that order on purpose. A missing station makes the capability question moot, and
