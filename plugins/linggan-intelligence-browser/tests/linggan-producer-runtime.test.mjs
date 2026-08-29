@@ -14,6 +14,7 @@ import {
 import { buildDiscoveryExecutionSummary } from '../src/platforms/xhs/noteCollector.js';
 import { requireControlReceipt } from '../src/linggan/controlReceipt.js';
 import { resolveDouyinBatchControlReceipt } from '../src/platforms/douyin/controlReceipt.js';
+import { taskFor } from '../src/linggan/contentRuntimeAdapter.js';
 
 test('one adapter uses the same bounded package shape for every retained collector capability', () => {
   for (const capability of Object.values(PRODUCER_CAPABILITY)) {
@@ -30,6 +31,39 @@ test('one adapter uses the same bounded package shape for every retained collect
   });
   assert.equal(task.source, 'manual');
   assert.equal(task.platform, 'douyin');
+});
+
+test('scheduled page delivery preserves the exact leased TaskSpec while manual delivery still creates a manual task', () => {
+  const scheduled = {
+    contractVersion: 'linggan.producer.task-spec.v1',
+    taskId: '11111111-1111-4111-8111-111111111111',
+    source: 'scheduled',
+    platform: 'xhs',
+    pageType: 'profile',
+    target: { authorExternalId: 'creator-1' },
+    capabilitiesRequested: ['author_profile'],
+    maximumQuota: 1,
+    commentLimit: 'not_requested',
+    acquireMedia: 'not_requested',
+    riskPolicy: 'server_authorized_leased',
+    stopConditions: ['maximum_quota', 'surface_ended', 'time_budget'],
+  };
+  assert.equal(taskFor('xhs', 'author_profile', scheduled.target, { taskSpec: scheduled }), scheduled);
+  const scheduledDiscovery = {
+    ...scheduled,
+    taskId: '22222222-2222-4222-8222-222222222222',
+    capabilitiesRequested: ['profile_discovery'],
+    maximumQuota: 10,
+  };
+  assert.equal(
+    taskFor('xhs', 'profile_discovery', scheduledDiscovery.target, { taskSpec: scheduledDiscovery }),
+    scheduledDiscovery,
+  );
+  assert.equal(taskFor('xhs', 'author_profile', scheduled.target).source, 'manual');
+  assert.throws(
+    () => taskFor('xhs', 'profile_discovery', scheduled.target, { taskSpec: scheduled }),
+    /dispatched_task_spec_mismatch/,
+  );
 });
 
 test('media slots retain URL observations but no remote URL becomes a local presentation URL', () => {
@@ -140,6 +174,35 @@ test('media delivery uses its own resumable chunk lane instead of blocking text 
   assert.match(background, /media-uploads\/\$\{encodeURIComponent\(sessionRef\)\}\/chunks/);
   assert.match(background, /media-uploads\/\$\{encodeURIComponent\(sessionRef\)\}\/finalize/);
   assert.doesNotMatch(background, /media-observations\/\$\{encodeURIComponent\(upload\.mediaObservationRef\)\}\/blob/);
+});
+
+test('background forwards the claimed scheduled identity into the content page action', () => {
+  const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
+  const start = background.indexOf('async function runDispatchedTask()');
+  const end = background.indexOf('\n/**\n * 在一个独立的', start);
+  const dispatched = background.slice(start, end);
+  assert.match(dispatched, /taskSpec: spec/);
+  assert.match(dispatched, /triggerSource: 'linggan_dispatched_task'/);
+  assert.doesNotMatch(dispatched, /createManualRuntimeTask/);
+});
+
+test('background immediately auto-claims after install or startup and supports bounded search discovery', () => {
+  const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
+  assert.match(background, /onInstalled\?\.addListener[\s\S]*checkInStationOnce\(\)\.then\(\(\) => patrolTick\(\)\)/);
+  assert.match(background, /onStartup\?\.addListener[\s\S]*checkInStationOnce\(\)\.then\(\(\) => patrolTick\(\)\)/);
+  assert.match(background, /SURFACE_CAPABILITIES = new Set\(\['author_profile', 'profile_discovery', 'discovery_search'\]\)/);
+  assert.match(background, /search_result\?keyword=\$\{encodeURIComponent\(targetValue\)\}/);
+  assert.match(background, /mode: capability === 'discovery_search' \? 'search' : 'profile'/);
+});
+
+test('content message gate admits scheduled profile discovery without dropping dispatch identity', () => {
+  const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
+  const gateStart = content.indexOf('if ([', content.indexOf('chrome.runtime.onMessage.addListener'));
+  const gateEnd = content.indexOf('].includes(action))', gateStart);
+  const gate = content.slice(gateStart, gateEnd);
+  assert.match(gate, /LINGGAN_RUNTIME_ACTION\.DISCOVER_SURFACE/);
+  assert.match(content, /taskSpec: message\.taskSpec/);
+  assert.match(content, /triggerSource: message\.triggerSource \|\| 'popup_linggan_runtime'/);
 });
 
 test('producer controls use Linggan runtime commands while manual media remains an explicit separate action', () => {

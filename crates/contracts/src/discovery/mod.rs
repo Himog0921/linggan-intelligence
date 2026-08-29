@@ -19,7 +19,7 @@ pub use content::{CoverPresentationState, DiscoveryCard, DiscoveryOccurrence};
 pub use errors::DiscoveryContractError;
 pub use package::{DiscoveryCoverage, DiscoveryPackage, DiscoveryStopReason};
 pub use query::{
-    AcquisitionSpec, EvidenceQuery, EvidenceQueryScope, EvidenceQuerySort, EvidenceTimeView,
-    PublishedWindow,
+    AcquisitionSpec, EvidenceLaneState, EvidenceMaterialLane, EvidenceMediaKind, EvidenceQuery,
+    EvidenceQueryScope, EvidenceQuerySort, EvidenceRestriction, EvidenceTimeView, PublishedWindow,
 };
 pub use validation::{is_rfc3339_timestamp, parse_discovery_package};

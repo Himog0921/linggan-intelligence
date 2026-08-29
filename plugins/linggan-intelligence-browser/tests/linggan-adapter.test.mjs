@@ -11,9 +11,10 @@ import {
   unavailableLingganStats,
 } from '../src/linggan/adapter.js';
 
-test('runtime notice never pretends that automatic scheduling already exists', () => {
+test('runtime notice describes automatic claim without overstating admission', () => {
   assert.match(formatLingganRuntimeNotice(), /本机可靠队列/);
-  assert.match(formatLingganRuntimeNotice(), /自动调度尚未启动/);
+  assert.match(formatLingganRuntimeNotice(), /自动领取/);
+  assert.match(formatLingganRuntimeNotice(), /再由 Linggan 接纳/);
 });
 
 test('unread Linggan stats stay explicitly unavailable instead of becoming zero', () => {

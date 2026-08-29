@@ -38,9 +38,12 @@ pub enum LeaseError {
 }
 
 pub async fn lease_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar::<_, bool>("SELECT to_regclass('collection_work_order_lease') IS NOT NULL")
-        .fetch_one(database.pool())
-        .await
+    sqlx::query_scalar::<_, bool>(
+        "SELECT to_regclass('collection_work_order_lease') IS NOT NULL \
+                AND to_regclass('collection_work_order_lease_task') IS NOT NULL",
+    )
+    .fetch_one(database.pool())
+    .await
 }
 
 /// 发出的租约。
@@ -111,17 +114,17 @@ pub async fn issue_work_order_lease(
     let expires_at: String = sqlx::query_scalar(
         "INSERT INTO collection_work_order_lease \
              (lease_ref, work_order_ref, station_ref, task_id, capture_identity, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, scope_001_now() + make_interval(mins => $6)) \
+         VALUES ($1, $2, $3, NULL, $4, scope_001_now() + make_interval(mins => $5)) \
          RETURNING to_char(expires_at, 'YYYY-MM-DD HH24:MI')",
     )
     .bind(lease_ref)
     .bind(work_order_ref)
     .bind(subject.station_ref)
-    .bind(tasks.first().map(ProducerTaskSpec::task_id))
     .bind(&capture_identity)
     .bind(valid_for_minutes)
     .fetch_one(&mut *transaction)
     .await?;
+    insert_lease_tasks(&mut transaction, lease_ref, &tasks).await?;
 
     transaction.commit().await?;
     Ok(IssuedLease {
@@ -157,46 +160,97 @@ pub async fn release_work_order_lease(
     Ok(())
 }
 
-/// 采集包被接纳后收尾：结束租约，并记下这个目标「真的拿回了材料」。
-///
-/// **这是闭环缺的那一环。**在它之前，租约只会过期——于是「派过」与「成了」永远分不开，
-/// 下一轮巡检也没有依据判断上一轮是成是败。
+/// 在 Package 与 Receipt 的同一事务中完成 scheduled task。
 ///
 /// 按 task 找租约而不是按工单：插件交回来的只有 task 与 attempt，它不知道自己属于哪张
-/// 工单，也不该知道——工单是控制层的概念。
-pub async fn complete_lease_for_task(
-    database: &Database,
+/// 工单，也不该知道。调用者已经在同一事务内锁定并复核 live lease 与领取安装；这里不得
+/// 自行提交，否则 Package 已接纳但 lease 未收尾的断点会再次出现。
+pub(crate) async fn complete_lease_for_task_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: Uuid,
-) -> Result<Option<Uuid>, LeaseError> {
-    if !lease_schema_is_ready(database).await? {
-        return Err(LeaseError::SchemaUnavailable);
-    }
-    let mut transaction = database.pool().begin().await?;
-    let completed: Option<(Uuid, Uuid)> = sqlx::query_as(
-        "UPDATE collection_work_order_lease l \
-         SET released_at = scope_001_now(), release_reason = 'completed' \
-         FROM collection_work_order w \
-         WHERE l.task_id = $1 AND l.released_at IS NULL \
-           AND w.work_order_ref = l.work_order_ref \
-         RETURNING l.lease_ref, w.target_ref",
+) -> Result<bool, sqlx::Error> {
+    let completed: Option<(Uuid, Uuid, String)> = sqlx::query_as(
+        "UPDATE collection_work_order_lease_task task \
+         SET execution_state = 'completed', completed_at = scope_001_now() \
+         FROM collection_work_order_lease lease, collection_work_order work_order \
+         WHERE task.task_id = $1 \
+           AND task.execution_state = 'in_progress' \
+           AND lease.lease_ref = task.lease_ref \
+           AND lease.released_at IS NULL \
+           AND work_order.work_order_ref = lease.work_order_ref \
+         RETURNING lease.lease_ref, work_order.target_ref, work_order.lane",
     )
     .bind(task_id)
-    .fetch_optional(&mut *transaction)
+    .fetch_optional(&mut **transaction)
     .await?;
-    let Some((lease_ref, target_ref)) = completed else {
-        // 没有对应的活租约不是错误：手动采集本来就不带租约，重放也可能已经收过尾。
-        transaction.commit().await?;
-        return Ok(None);
+    let Some((lease_ref, target_ref, lane)) = completed else {
+        return Ok(false);
     };
-    sqlx::query(
-        "UPDATE collection_observation_target \
-         SET last_patrol_succeeded_at = scope_001_now() WHERE target_ref = $1",
+    let all_completed: bool = sqlx::query_scalar(
+        "SELECT NOT EXISTS ( \
+             SELECT 1 FROM collection_work_order_lease_task \
+             WHERE lease_ref = $1 AND execution_state <> 'completed')",
     )
-    .bind(target_ref)
-    .execute(&mut *transaction)
+    .bind(lease_ref)
+    .fetch_one(&mut **transaction)
     .await?;
-    transaction.commit().await?;
-    Ok(Some(lease_ref))
+    if !all_completed {
+        return Ok(true);
+    }
+    sqlx::query(
+        "UPDATE collection_work_order_lease \
+         SET released_at = scope_001_now(), release_reason = 'completed' \
+         WHERE lease_ref = $1 AND released_at IS NULL",
+    )
+    .bind(lease_ref)
+    .execute(&mut **transaction)
+    .await?;
+    if lane == "patrol" {
+        sqlx::query(
+            "UPDATE collection_observation_target \
+             SET last_patrol_succeeded_at = scope_001_now() WHERE target_ref = $1",
+        )
+        .bind(target_ref)
+        .execute(&mut **transaction)
+        .await?;
+    } else if lane == "deep_archive" {
+        let monitoring_enabled: Option<bool> = sqlx::query_scalar(
+            "SELECT monitoring_enabled FROM collection_observation_target \
+             WHERE target_ref=$1 AND lifecycle_state='archiving' FOR UPDATE",
+        )
+        .bind(target_ref)
+        .fetch_optional(&mut **transaction)
+        .await?;
+        if let Some(monitoring_enabled) = monitoring_enabled {
+            let to_state = if monitoring_enabled {
+                "monitoring"
+            } else {
+                "archived"
+            };
+            sqlx::query(
+                "UPDATE collection_observation_target SET lifecycle_state=$2, \
+                     lifecycle_changed_at=scope_001_now(), \
+                     last_patrol_succeeded_at=scope_001_now() \
+                 WHERE target_ref=$1 AND lifecycle_state='archiving'",
+            )
+            .bind(target_ref)
+            .bind(to_state)
+            .execute(&mut **transaction)
+            .await?;
+            sqlx::query(
+                "INSERT INTO collection_observation_target_transition \
+                     (transition_ref,target_ref,from_state,to_state,actor,reason_code,reason) \
+                 VALUES ($1,$2,'archiving',$3,'system','baseline_receipts_completed',$4)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(target_ref)
+            .bind(to_state)
+            .bind(format!("租约 {lease_ref} 的全部基线步骤已接纳"))
+            .execute(&mut **transaction)
+            .await?;
+        }
+    }
+    Ok(true)
 }
 
 /// 把已过期但仍标为未结束的租约收回。
@@ -337,8 +391,9 @@ async fn reject_if_authorization_lapsed(
 /// 清单跑完才知道。凭空造一批占位 id 会让「已派发 200 篇」变成一句假话。因此这里只生成
 /// 目标已经确定的步骤，逐篇详情等清单回来后再生成。
 fn expand_into_tasks(subject: &LeaseSubject) -> Result<Vec<ProducerTaskSpec>, LeaseError> {
-    let steps: Vec<(&str, Value, i32)> = match subject.target_kind.as_str() {
-        "creator" => vec![
+    let steps: Vec<(&str, Value, i32)> = match (subject.target_kind.as_str(), subject.lane.as_str())
+    {
+        ("creator", "deep_archive") => vec![
             // 作者档案只取一份，配额固定为 1，不受工单篇数上限影响。
             (
                 "author_profile",
@@ -351,6 +406,13 @@ fn expand_into_tasks(subject: &LeaseSubject) -> Result<Vec<ProducerTaskSpec>, Le
                 subject.max_works,
             ),
         ],
+        // Recurring creator patrols only need the current discovery surface. Re-reading the
+        // stable profile every cycle adds platform load without improving change detection.
+        ("creator", _) => vec![(
+            "profile_discovery",
+            json!({ "authorExternalId": subject.identity_key }),
+            subject.max_works,
+        )],
         _ => vec![(
             "discovery_search",
             json!({ "query": subject.identity_key }),
@@ -418,6 +480,28 @@ async fn insert_scheduled_task(
     .bind(task.page_type())
     .execute(&mut **transaction)
     .await?;
+    Ok(())
+}
+
+async fn insert_lease_tasks(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lease_ref: Uuid,
+    tasks: &[ProducerTaskSpec],
+) -> Result<(), LeaseError> {
+    for (index, task) in tasks.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO collection_work_order_lease_task \
+                 (lease_ref, task_id, sequence_no, execution_state) \
+             VALUES ($1, $2, $3, 'pending')",
+        )
+        .bind(lease_ref)
+        .bind(task.task_id())
+        .bind(i32::try_from(index + 1).map_err(|error| {
+            LeaseError::TaskSpecInvalid(format!("lease task sequence overflow: {error}"))
+        })?)
+        .execute(&mut **transaction)
+        .await?;
+    }
     Ok(())
 }
 

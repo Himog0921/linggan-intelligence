@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-08-26
+> 最后核对: 2026-08-29
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -37,7 +37,9 @@
 | [`product/PRD.md`](product/PRD.md) | 草案 | DISC-001 的产品输入，不是已接受实现合同 |
 | [`product/domain-invariants.md`](product/domain-invariants.md) | 权威当前 | 跨 Gate 的领域不变量、判断资格与持续扩展的对抗性验收案例 |
 | [`product/collection-monitoring-rules.md`](product/collection-monitoring-rules.md) | 权威当前 | 博主/关键词监控的产品规则：目标生命周期、深度建档、频率、爆款追踪；含 4 项待 Mog 决定 |
+| [`plans/active/observation-runtime-001-implementation-manual.md`](plans/active/observation-runtime-001-implementation-manual.md) | 活跃计划；Issue #94 | 观察规则自动调度、插件无人领取、Package/Receipt、封面材料投影、发布与一次性验收的唯一实施规格 |
 | [`data-contracts/local-001-discovery-evidence-boundary.md`](data-contracts/local-001-discovery-evidence-boundary.md) | 权威当前 | `LOCAL-001 / 001C-0` 与 #34 localhost binding：平台 discovery 与本地 Evidence Library 检索、partial Coverage、DiscoveryOccurrence、接纳回执与本地封面引用的跨边界合同；不证明真实插件或媒体取得 |
+| [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md) | 权威当前；MATERIAL-PROJECTION-001 | 最新 Browser Producer 产出到服务接纳、作品级材料投影与 Evidence 列表/详情/受控媒体读取的逐 lane 映射及代表性 fixture |
 | [design/README.md](design/README.md) | 权威当前 | 前端设计手册入口、权威地图、读取路径和当前已建立/未建立边界 |
 | [design/design-governance.md](design/design-governance.md) | 权威当前 | UI 设计来源优先级、闭集执行、变更分类、例外和验收治理 |
 | [design/reference-register.md](design/reference-register.md) | 权威当前 | 设计参考的登记格式与“参考不等于指令”边界；LIDS v2.0 的可继承/不继承边界已登记 |
@@ -54,7 +56,8 @@
 | [design/templates/component-spec-form.md](design/templates/component-spec-form.md) | 权威当前 | 可复用组件规格表单 |
 | [design/templates/ui-change-manifest-form.md](design/templates/ui-change-manifest-form.md) | 权威当前 | 每次 UI 变更的来源、范围、影响与证明清单表单 |
 | [design/templates/visual-acceptance-form.md](design/templates/visual-acceptance-form.md) | 权威当前 | 视觉、任务、状态和真实后果四层验收记录表单 |
-| [design/pages/evidence-library-page.md](design/pages/evidence-library-page.md) | 权威当前 | `PAGE-EVIDENCE-001`：首个 local Evidence Library 页面；#34 Draft 仅增加受控 discovery 的本地读投影，未证明真实采集或媒体 |
+| [design/pages/evidence-library-page.md](design/pages/evidence-library-page.md) | 权威当前 | `PAGE-EVIDENCE-001`：多材料 Evidence Library 产品手册与技术呈现要求；运行页已按现行 Material Projection 落地作品 lane 与 Inspector，真实垂直证明仍未完成 |
+| [design/pages/evidence-library-multi-material-reference.html](design/pages/evidence-library-multi-material-reference.html) | 权威当前；静态参考 | `EVIDENCE-PAGE-002`：多材料 Evidence Library 合成高保真参考；不连接 API、真实平台、媒体或处理器 |
 | [design/pages/collection-workspace-page.md](design/pages/collection-workspace-page.md) | 权威当前；PAGE-COLLECTION-001 | Collection 五个子面的职责、状态诚实性、页面级例外与未证明边界 |
 | [design/pages/plugin-producer-popup.md](design/pages/plugin-producer-popup.md) | 权威当前 | `PAGE-PLUGIN-001`：Linggan 自有 Browser Producer popup 的身份、本机接纳准备度与受限手动 Discovery receipt |
 | [design/changes/local-001a-evidence-library-ui-change-manifest.md](design/changes/local-001a-evidence-library-ui-change-manifest.md) | 权威当前；LOCAL-001A | Issue #25 的 UI 来源、范围、例外和证明边界 |
@@ -64,7 +67,10 @@
 | [design/changes/design-005-collection-workspace-ui-change-manifest.md](design/changes/design-005-collection-workspace-ui-change-manifest.md) | 权威当前；DESIGN-005 | Collection 五个子面落地：Mog 三项裁定、清掉的冗余、消化的断层与两项待决 |
 | [design/changes/design-006-collection-ux-revision-ui-change-manifest.md](design/changes/design-006-collection-ux-revision-ui-change-manifest.md) | 权威当前；DESIGN-006 | Collection 五面 UX 修订：顺序与默认入口、命名去重、空态分级、读数异常优先、无数据时结构留数据格延后 |
 | [design/changes/design-007-chinese-first-evidence-library-ui-change-manifest.md](design/changes/design-007-chinese-first-evidence-library-ui-change-manifest.md) | 权威当前；DESIGN-007 | Evidence Library 中文优先表达：中文独立承担用户含义，英文仅作技术旁注 |
+| [design/changes/evidence-page-002-multi-material-ui-change-manifest.md](design/changes/evidence-page-002-multi-material-ui-change-manifest.md) | 权威当前；EVIDENCE-PAGE-002 | 多材料 Evidence Library 产品/静态参考的来源、表面、状态和明确非目标 |
+| [design/changes/evidence-runtime-001-ui-change-manifest.md](design/changes/evidence-runtime-001-ui-change-manifest.md) | 权威当前；EVIDENCE-RUNTIME-001 / Issue #90 | Material Projection 运行页的唯一数据入口、作品 lane、Inspector、敏感材料与一次性验收边界 |
 | [design/changes/design-008-shared-shell-chinese-first-ui-change-manifest.md](design/changes/design-008-shared-shell-chinese-first-ui-change-manifest.md) | 权威当前；DESIGN-008 / Issue #68 | 共享 local-web shell 的中文主语义、英文技术旁注与 Corpus/Collection 双页面验收边界 |
+| [design/changes/design-009-runtime-capacity-surface-ui-change-manifest.md](design/changes/design-009-runtime-capacity-surface-ui-change-manifest.md) | 权威当前；DESIGN-009 | 执行工位改为产能判定面，运行状态由真实容量读取而非写死文案 |
 | [design/changes/plugin-001-producer-popup-ui-change-manifest.md](design/changes/plugin-001-producer-popup-ui-change-manifest.md) | 已被替代；PLUGIN-001 | Issue #33 popup 的历史 UI 边界；不再约束当前实现 |
 | [design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md](design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-MIGRATION-001 | Issue #37 popup 的 Discovery 行动与状态边界；启动恢复由 Issue #53 文档补充 |
 | [design/changes/plugin-popup-recovery-001-ui-change-manifest.md](design/changes/plugin-popup-recovery-001-ui-change-manifest.md) | 权威当前；PLUGIN-POPUP-RECOVERY-001 | Issue #53 popup 启动恢复、无副作用 fallback 与 v0.4.2 release 边界；Issue #55 的运行时修订见当月进度记录 |
@@ -78,6 +84,9 @@
 | [design/acceptance/plugin-migration-001-producer-popup-visual-acceptance.md](design/acceptance/plugin-migration-001-producer-popup-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-002`：Issue #37 adapter/mock ingress/release 验收；不证明真实浏览器或采集 |
 | [design/acceptance/plugin-popup-recovery-001-visual-acceptance.md](design/acceptance/plugin-popup-recovery-001-visual-acceptance.md) | 一次性报告 | `ACC-PLUGIN-POPUP-RECOVERY-001`：Issue #53 source/release 启动保护验收；不证明 Chrome 已加载或真实采集 |
 | [design/acceptance/design-007-chinese-first-evidence-library-acceptance.md](design/acceptance/design-007-chinese-first-evidence-library-acceptance.md) | 一次性报告 | `ACC-DESIGN-007`：Evidence Library 中文优先表达的分层验收记录 |
+| [design/acceptance/evidence-page-002-multi-material-reference-acceptance.md](design/acceptance/evidence-page-002-multi-material-reference-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-PAGE-002`：多材料 Evidence Library 静态参考的双视口、状态、互动和边界验收 |
+| [design/acceptance/evidence-runtime-001-visual-acceptance.md](design/acceptance/evidence-runtime-001-visual-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-RUNTIME-001`：Issue #90 运行页的自动检查、桌面/375px 浏览器证据与未证明边界 |
+| [design/acceptance/design-009-runtime-capacity-surface-acceptance.md](design/acceptance/design-009-runtime-capacity-surface-acceptance.md) | 一次性报告 | `ACC-RUNTIME-001`：产能判定、状态诚实性与视觉的验收记录 |
 | [design/foundation/topic-intelligence-visual-language.md](design/foundation/topic-intelligence-visual-language.md) | 权威当前 | DESIGN-002 的 DS-001–DS-007：合成 Topic Reference Page 的受限视觉语言 |
 | [design/patterns/evidence-candidate-and-boundary-patterns.md](design/patterns/evidence-candidate-and-boundary-patterns.md) | 权威当前 | DESIGN-002 的 PAT-001–PAT-004：观察、候选、边界与无副作用意图表达 |
 | [design/components/component-promotion.md](design/components/component-promotion.md) | 权威当前 | 从 Reference Page 局部块到真实 CMP 的晋升条件；当前没有已晋升组件 |
@@ -93,6 +102,7 @@
 | [`architecture/agent-architecture.md`](architecture/agent-architecture.md) | 草案 | Gate 6 Agent Invocation、工具权限、预算/停止、恢复、结构化输出、隐私与评测；不选择模型或授权真实原文 |
 | [`architecture/capture-plugin-architecture.md`](architecture/capture-plugin-architecture.md) | 草案 | Gate 6 服务端采集控制层、有限工位/账号、Work Order/Attempt/lease、部分结果、MV3 插件与协议升级 |
 | [`architecture/capture-control-contract.md`](architecture/capture-control-contract.md) | 草案 | ARC-001 首批真实 Canary 前的采集控制合同：Need/授权/准入、有限资源、lane、Coverage、部分结果、回执与恢复边界；不授权真实执行 |
+| [`architecture/media-lifecycle-contract.md`](architecture/media-lifecycle-contract.md) | 权威当前 | ARC-001 媒体后继合同：V2 继承矩阵、插件多材料/媒体槽位适配、字节/派生/保留/处置责任与 Evidence Library 最低消费合同；不证明真实媒体链 |
 | [`architecture/runtime-operations-architecture.md`](architecture/runtime-operations-architecture.md) | 草案 | Gate 6 API/worker、Durable Work、scheduler、重试/接管、可观测性、数据库角色、部署与恢复 |
 | [`architecture/data-architecture.md`](architecture/data-architecture.md) | 草案 | Gate 5 数据分类、身份、版本、Current、隐私、统计资格与 PostgreSQL 概念模型；不是 DDL |
 | [`architecture/data-relations.md`](architecture/data-relations.md) | 草案 | `data-architecture.md` 的渐进披露子文档；收敛候选基数、外键责任、类型化关系与并发约束，不是最终表清单 |

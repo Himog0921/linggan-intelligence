@@ -33,7 +33,16 @@ async fn main() {
             return;
         }
     };
-    println!("linggan worker: patrol tick every {}s", TICK_INTERVAL.as_secs());
+    println!(
+        "linggan worker: patrol tick every {}s",
+        TICK_INTERVAL.as_secs()
+    );
+    let worker_instance_ref = uuid::Uuid::new_v4();
+    if let Err(error) =
+        linggan_evidence::record_scheduler_started(&database, worker_instance_ref).await
+    {
+        println!("linggan worker: cannot record scheduler identity: {error}");
+    }
 
     let mut ticker = tokio::time::interval(TICK_INTERVAL);
     loop {

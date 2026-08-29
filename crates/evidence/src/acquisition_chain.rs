@@ -127,7 +127,9 @@ pub async fn request_and_admit(
     // 此前这里对所有 lane 一律要求 pending_decision，结果是巡检**永远派不出去**——
     // 目标一旦进入 archiving 就再也无法申请。这个缺陷由第一轮 tick 当场暴露。
     let requestable = match lane {
-        "deep_archive" => lifecycle_state == "pending_decision",
+        // `archiving` is accepted only so the scheduler can recover an expired bounded baseline.
+        // Admission still merges a live lease and the scheduler caps the number of Work Orders.
+        "deep_archive" => matches!(lifecycle_state.as_str(), "pending_decision" | "archiving"),
         _ => matches!(lifecycle_state.as_str(), "archiving" | "monitoring"),
     };
     if !requestable {
@@ -188,6 +190,7 @@ pub async fn request_and_admit(
                 lane,
                 authorization_ref,
                 station_ref,
+                requested_by,
             )
             .await?,
         )
@@ -224,7 +227,8 @@ async fn gather_facts(
     .fetch_optional(&mut **transaction)
     .await?;
 
-    // 「在途」= 还有活着的租约，或已经开工但没交回结果的尝试。
+    // 「在途」= 还有活着的租约。task 的 pending / in_progress / completed 由租约任务序列
+    // 分责；只要整份租约尚未结束，就不能再为同一目标和 lane 复制一份工单。
     //
     // 此前的判据是「存在一行工单」——而工单从不结束，于是第一次巡检之后，后续每一次都被
     // 合并掉，巡检永远只跑一次。一个只置位、从不复位的状态，等于把功能永久关掉。
@@ -232,17 +236,16 @@ async fn gather_facts(
         "SELECT EXISTS ( \
              SELECT 1 FROM collection_work_order w \
              JOIN collection_work_order_lease l ON l.work_order_ref = w.work_order_ref \
-             LEFT JOIN linggan_runtime_attempt a ON a.task_id = l.task_id \
              WHERE w.target_ref = $1 AND w.lane = $2 \
-               AND l.released_at IS NULL AND l.expires_at > scope_001_now() \
-               AND a.attempt_id IS NULL)",
+               AND l.released_at IS NULL AND l.expires_at > scope_001_now())",
     )
     .bind(target_ref)
     .bind(lane)
     .fetch_one(&mut **transaction)
     .await?;
 
-    let capacity = establish_capacity(transaction, platform, target_kind, lane).await?;
+    let capacity =
+        establish_capacity(transaction, platform, target_kind, lane, Some(target_ref)).await?;
 
     Ok(AdmissionFacts {
         authorization_ref: authorization_ref.map(|value| value.to_string()),
@@ -263,9 +266,11 @@ async fn gather_facts(
 /// to echo back would make it theatre.
 fn required_capabilities(target_kind: &str, lane: &str) -> &'static [&'static str] {
     match (target_kind, lane) {
-        // Deep archiving a creator means: who they are, which works exist, and each work.
-        ("creator", "deep_archive") => &["author_profile", "profile_discovery", "content_detail"],
-        ("keyword", "deep_archive") => &["discovery_search", "content_detail"],
+        // The automatic baseline records identity plus the bounded discovery surface. Detail,
+        // comments and media-byte acquisition remain explicit follow-up work: discovering a
+        // hundred works must not silently authorize a hundred deep scans.
+        ("creator", "deep_archive") => &["author_profile", "profile_discovery"],
+        ("keyword", "deep_archive") => &["discovery_search"],
         ("creator", _) => &["profile_discovery"],
         _ => &["discovery_search"],
     }
@@ -286,7 +291,7 @@ pub async fn read_capacity(
     lane: &str,
 ) -> Result<Capacity, sqlx::Error> {
     let mut transaction = database.pool().begin().await?;
-    let capacity = establish_capacity(&mut transaction, platform, target_kind, lane).await?;
+    let capacity = establish_capacity(&mut transaction, platform, target_kind, lane, None).await?;
     transaction.rollback().await?;
     Ok(capacity)
 }
@@ -301,6 +306,7 @@ async fn establish_capacity(
     platform: &str,
     target_kind: &str,
     lane: &str,
+    target_ref: Option<Uuid>,
 ) -> Result<Capacity, sqlx::Error> {
     // 风险暂停优先：正在停的时候，工位是否充足并不重要。
     let pause: Option<String> = sqlx::query_scalar(
@@ -319,7 +325,20 @@ async fn establish_capacity(
     }
 
     // 在岗 = 已登记且未停用的工位上，有一个未被取代的插件安装。
-    let staffed: Vec<(Uuid, serde_json::Value, i32)> = sqlx::query_as(
+    let last_failed_station: Option<Uuid> = sqlx::query_scalar(
+        "SELECT w.station_ref FROM collection_work_order w \
+         JOIN collection_work_order_lease l USING(work_order_ref) \
+         WHERE $1::uuid IS NOT NULL AND w.target_ref=$1 AND w.lane=$2 \
+           AND l.release_reason IN ('expired','station_unavailable','revoked') \
+         ORDER BY l.released_at DESC LIMIT 1",
+    )
+    .bind(target_ref)
+    .bind(lane)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .flatten();
+
+    let mut staffed: Vec<(Uuid, serde_json::Value, i32)> = sqlx::query_as(
         "SELECT s.station_ref, i.capabilities, s.daily_work_quota \
          FROM execution_station s \
          JOIN plugin_installation i \
@@ -329,6 +348,9 @@ async fn establish_capacity(
     )
     .fetch_all(&mut **transaction)
     .await?;
+    // When another compatible station exists, do not send the recovery straight back to the
+    // station whose lease just expired. Stable registration order breaks remaining ties.
+    staffed.sort_by_key(|row| row.0 == last_failed_station.unwrap_or(Uuid::nil()));
     if staffed.is_empty() {
         return Ok(Capacity::NoStaffedStation);
     }
@@ -440,6 +462,7 @@ async fn write_work_order(
     lane: &str,
     authorization_ref: Option<Uuid>,
     station_ref: Option<Uuid>,
+    requested_by: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let work_order_ref = Uuid::new_v4();
     let max_works = max_works_for(transaction, authorization_ref).await?;
@@ -467,24 +490,32 @@ async fn write_work_order(
     // 只有深度建档会推进生命周期。**巡检不改状态**：它是一个已建档目标的常规动作，
     // 每跑一次就改一次状态，会把「这个目标处于什么阶段」变成「它最近被派过一次」。
     if lane == "deep_archive" {
-        sqlx::query(
+        let moved = sqlx::query(
             "UPDATE collection_observation_target \
              SET lifecycle_state = 'archiving', lifecycle_changed_at = scope_001_now() \
-             WHERE target_ref = $1",
+             WHERE target_ref = $1 AND lifecycle_state='pending_decision'",
         )
         .bind(target_ref)
         .execute(&mut **transaction)
-        .await?;
-        sqlx::query(
-            "INSERT INTO collection_observation_target_transition \
-                 (transition_ref, target_ref, from_state, to_state, actor, reason_code, reason) \
-             VALUES ($1, $2, 'pending_decision', 'archiving', 'person', 'work_order_created', $3)",
-        )
-        .bind(Uuid::new_v4())
-        .bind(target_ref)
-        .bind(format!("工单 {work_order_ref} 已创建"))
-        .execute(&mut **transaction)
-        .await?;
+        .await?
+        .rows_affected();
+        if moved == 1 {
+            sqlx::query(
+                "INSERT INTO collection_observation_target_transition \
+                     (transition_ref, target_ref, from_state, to_state, actor, reason_code, reason) \
+                 VALUES ($1, $2, 'pending_decision', 'archiving', $3, 'rule_baseline_started', $4)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(target_ref)
+            .bind(if requested_by == "agent" {
+                "system"
+            } else {
+                "person"
+            })
+            .bind(format!("工单 {work_order_ref} 已创建"))
+            .execute(&mut **transaction)
+            .await?;
+        }
     }
 
     Ok(work_order_ref)

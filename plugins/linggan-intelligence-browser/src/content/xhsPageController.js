@@ -371,7 +371,7 @@ export function createXhsPageController({
         case 'collectAuthor': {
           await ensurePluginAuthorized();
           showToast('正在采集博主信息...', 'info');
-          const author = await collectAuthor();
+          const author = await collectAuthor({ taskSpec: params.taskSpec });
           showToast(author?.lingganDelivery?.delivery === 'acknowledged'
             ? `博主资料已被 Linggan 接纳：${author.name}`
             : `博主资料已读取，待本机 Linggan 交付：${author.name}`, author?.lingganDelivery?.delivery === 'acknowledged' ? 'success' : 'info');
@@ -420,6 +420,7 @@ export function createXhsPageController({
             surface: 'target_driven_surface',
             pageFacts: Array.isArray(discovered) ? undefined : discovered?.pageFacts,
             maximumQuota,
+            taskSpec: params.taskSpec,
           });
           const stopReason = Array.isArray(discovered) ? '' : discovered?.discoveryMeta?.stopReason;
           const resultText = stopReason === 'target_reached'
