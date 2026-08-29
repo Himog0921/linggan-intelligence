@@ -8,8 +8,8 @@ use crate::material_cursor;
 use crate::material_media_read;
 use crate::material_projection_types::default_lane_summaries;
 pub use crate::material_projection_types::{
-    MaterialDisplay, MaterialIdentity, MaterialLaneSummary, MaterialLibraryItem,
-    MaterialLibraryProjection, MaterialPreview, MaterialSummary,
+    MaterialDisplay, MaterialEngagement, MaterialIdentity, MaterialLaneSummary,
+    MaterialLibraryItem, MaterialLibraryProjection, MaterialPreview, MaterialSummary,
 };
 use crate::material_social_read;
 use linggan_contracts::{EvidenceQuery, EvidenceQuerySort};
@@ -393,7 +393,7 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
     }
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM linggan_local_schema_migration \
-                        WHERE migration_id = '0018_material_discovery_lane')",
+                        WHERE migration_id = '0020_observation_runtime_automation')",
     )
     .fetch_one(database.pool())
     .await
@@ -441,9 +441,21 @@ pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> M
             // A source string is not promoted to an exact instant until a producer contract
             // guarantees its encoding. Preserve the source text while keeping time unknown.
             published_at_state: "UNKNOWN".to_owned(),
+            engagement: MaterialEngagement {
+                like_count: row.get("like_count"),
+                like_count_state: row.get("like_count_state"),
+                comment_count: row.get("comment_count"),
+                comment_count_state: row.get("comment_count_state"),
+                collect_count: row.get("collect_count"),
+                collect_count_state: row.get("collect_count_state"),
+                share_count: row.get("share_count"),
+                share_count_state: row.get("share_count_state"),
+            },
         },
         preview: MaterialPreview {
             local_asset_url: None,
+            observed_source_url: row.get("cover_source_url"),
+            observed_source_state: row.get("cover_source_state"),
             slot_purpose: None,
             bytes_state: "UNKNOWN",
             alt: "没有已验证的本地媒体副本".to_owned(),

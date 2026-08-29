@@ -81,9 +81,17 @@ async fn discovery_forms_the_same_work_identity_without_claiming_detail() {
     let database = proof_database("material_discovery_slice").await;
     submit_package(&database,"discovery_search",serde_json::json!({"query":"ADHD"}),serde_json::json!({
         "kind":"discovery_card","resultPosition":1,"sourceObject":{"platform":"xhs","type":"content","externalId":"note-discovery-material"},
-        "payload":{"title":"发现面标题","authorName":"发现面作者"}
+        "payload":{
+            "title":"发现面标题","authorName":"发现面作者",
+            "coverUrl":"https://sns-webpic-qc.xhscdn.com/observed-cover.webp",
+            "likes":321,"comments":17,"collects":43,"shares":5
+        }
     })).await;
-    let row=sqlx::query("SELECT finding.title,finding.title_state,content.content_external_id FROM linggan_material_discovery_finding finding JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref")
+    let row=sqlx::query("SELECT finding.title,finding.title_state,content.content_external_id, \
+                                finding.cover_source_url,finding.cover_source_state, \
+                                finding.like_count,finding.comment_count,finding.collect_count,finding.share_count \
+                         FROM linggan_material_discovery_finding finding \
+                         JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref")
         .fetch_one(database.pool()).await.expect("typed discovery finding exists");
     assert_eq!(
         row.get::<String, _>("content_external_id"),
@@ -93,6 +101,15 @@ async fn discovery_forms_the_same_work_identity_without_claiming_detail() {
         row.get::<Option<String>, _>("title").as_deref(),
         Some("发现面标题")
     );
+    assert_eq!(
+        row.get::<Option<String>, _>("cover_source_url").as_deref(),
+        Some("https://sns-webpic-qc.xhscdn.com/observed-cover.webp")
+    );
+    assert_eq!(row.get::<String, _>("cover_source_state"), "KNOWN");
+    assert_eq!(row.get::<Option<i64>, _>("like_count"), Some(321));
+    assert_eq!(row.get::<Option<i64>, _>("comment_count"), Some(17));
+    assert_eq!(row.get::<Option<i64>, _>("collect_count"), Some(43));
+    assert_eq!(row.get::<Option<i64>, _>("share_count"), Some(5));
     let detail_count: i64 =
         sqlx::query_scalar("SELECT count(*) FROM linggan_material_content_detail")
             .fetch_one(database.pool())

@@ -3,6 +3,7 @@ mod collection_intake;
 mod collection_targets_view;
 #[cfg(test)]
 mod evidence_page;
+#[cfg(test)]
 mod local_asset_delivery;
 mod local_media_routes;
 #[cfg(test)]
@@ -47,12 +48,12 @@ use linggan_evidence::{
     issue_work_order_lease, list_targets, list_targets_in_state, local_discovery_schema_is_ready,
     local_producer_schema_is_ready, open_claim_window, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_archive_completeness, read_discovery_library,
-    read_media_upload_session, read_runtime_capacity, read_runtime_library, read_station_overview, read_target,
-    record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, request_and_admit, retire_station, set_group_for_many,
-    set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
-    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
-    target_monitoring_enabled,
+    read_media_upload_session, read_runtime_capacity, read_runtime_library,
+    read_scheduler_heartbeat, read_station_overview, read_target, record_media_download_failure,
+    record_media_upload_chunk, register_station, release_media_upload_finalize, request_and_admit,
+    retire_station, set_group_for_many, set_monitoring_for_many, set_target_monitoring,
+    start_local_attempt, start_producer_attempt, station_schema_is_ready, store_pending_target,
+    submit_local_package, submit_producer_package, target_monitoring_enabled,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -414,6 +415,28 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     } else {
         Value::Null
     };
+    let scheduler = match state.database.database() {
+        Some(database) => match read_scheduler_heartbeat(database).await {
+            Ok(Some(heartbeat)) => json!({
+                "state": heartbeat.state,
+                "lastTickCompletedAt": heartbeat.last_tick_completed_at,
+                "lastOutcome": heartbeat.last_outcome,
+                "dispatchedCount": heartbeat.dispatched_count,
+                "skippedCount": heartbeat.skipped_count,
+                "lastError": heartbeat.last_error,
+            }),
+            Ok(None) | Err(_) => json!({
+                "state": "unknown",
+                "lastTickCompletedAt": Value::Null,
+                "lastOutcome": "unknown"
+            }),
+        },
+        None => json!({
+            "state": "unknown",
+            "lastTickCompletedAt": Value::Null,
+            "lastOutcome": "unknown"
+        }),
+    };
     Json(json!({
         "service": "linggan-local-web",
         "listener": "loopback-only",
@@ -423,6 +446,7 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
             "state": database_state,
             "schema": schema_state
         },
+        "scheduler": scheduler,
         "routes": {
             "evidenceLibrary": "/corpus/evidence",
             "discoveryIngress": "/api/local/discovery-packages",

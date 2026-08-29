@@ -22,6 +22,16 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0003_local_trusted_producer.sql"),
     "\n",
     include_str!("../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0015_material_projection.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0016_material_social_lanes.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0017_material_media_projection.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0018_material_discovery_lane.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0020_observation_runtime_automation.sql"),
 );
 
 #[tokio::test]
@@ -99,9 +109,17 @@ async fn full_runtime_accepts_each_capability_without_collapsing_partial_media_o
     )
     .await
     .expect("the same bytes may serve another slot");
-    assert_eq!(
+    for local_asset_path in [&first.local_asset_path, &second.local_asset_path] {
+        assert!(
+            local_asset_path.starts_with("/api/local/media/")
+                && local_asset_path
+                    .ends_with("/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            "presentation uses a qualified Linggan local materialization route"
+        );
+    }
+    assert_ne!(
         first.local_asset_path, second.local_asset_path,
-        "presentation uses the Linggan local asset route"
+        "two slot materializations keep distinct revocable handles even when bytes deduplicate"
     );
     assert_count(&database, "linggan_media_blob", 1).await;
     assert_count(&database, "linggan_media_materialization", 2).await;
@@ -656,7 +674,7 @@ fn runtime_attempt() -> &'static str {
 }
 
 fn runtime_submission() -> &'static str {
-    r#"{"contractVersion":"linggan.producer.capture-package.v1","producerInstanceId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","attemptId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","submissionId":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","capturePackage":{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-a"},"layers":[{"capability":"media_slots","observed":9,"attempted":7,"acquired":6,"verified":6,"failed":1,"notAttempted":2,"unknown":0,"stoppedReason":"risk_control"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-a:image:1","slot":{"role":"image","ordinal":1},"sourceObject":{"externalId":"note-a"},"observation":{"externalUri":"https://cdn.example/one.jpg"},"observationRef":"ffffffff-ffff-4fff-8fff-ffffffffffff"},{"kind":"media_slot","slotKey":"xhs:note-a:image:2","slot":{"role":"image","ordinal":2},"sourceObject":{"externalId":"note-a"},"observation":{"externalUri":"https://cdn.example/two.jpg"},"observationRef":"11111111-2222-4333-8444-555555555555"}]}}"#
+    r#"{"contractVersion":"linggan.producer.capture-package.v1","producerInstanceId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","attemptId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","submissionId":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","capturePackage":{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-a"},"layers":[{"capability":"media_slots","observed":9,"attempted":7,"acquired":6,"verified":6,"failed":1,"notAttempted":2,"unknown":0,"stoppedReason":"risk_control"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-a:image:1","slot":{"role":"image","ordinal":1},"sourceObject":{"platform":"xhs","type":"content","externalId":"note-a"},"observation":{"externalUri":"https://cdn.example/one.jpg","candidateUris":["https://cdn.example/one.jpg"]},"observationRef":"ffffffff-ffff-4fff-8fff-ffffffffffff"},{"kind":"media_slot","slotKey":"xhs:note-a:image:2","slot":{"role":"image","ordinal":2},"sourceObject":{"platform":"xhs","type":"content","externalId":"note-a"},"observation":{"externalUri":"https://cdn.example/two.jpg","candidateUris":["https://cdn.example/two.jpg"]},"observationRef":"11111111-2222-4333-8444-555555555555"}]}}"#
 }
 
 #[tokio::test]

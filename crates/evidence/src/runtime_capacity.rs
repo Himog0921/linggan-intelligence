@@ -147,7 +147,7 @@ pub async fn read_runtime_capacity(
     // 巡检还能跑」这种真实情况消失。
     let mut lanes = Vec::new();
     for (zh, lane, needs) in [
-        ("深度建档", "deep_archive", "作者档案 · 作品清单 · 逐篇详情"),
+        ("观察基线", "deep_archive", "作者档案 · 有界作品清单"),
         ("巡检", "patrol", "作品清单"),
     ] {
         lanes.push(LaneVerdict {

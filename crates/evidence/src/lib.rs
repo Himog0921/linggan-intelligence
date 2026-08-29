@@ -71,14 +71,15 @@ pub use material_disposition::{
 };
 pub use material_processing::record_media_derivative_completion;
 pub use material_projection::{
-    MaterialDisplay, MaterialIdentity, MaterialLaneSummary, MaterialLibraryItem,
-    MaterialLibraryProjection, MaterialPreview, MaterialReadError, MaterialSummary,
-    material_projection_schema_is_ready, read_material_library,
+    MaterialDisplay, MaterialEngagement, MaterialIdentity, MaterialLaneSummary,
+    MaterialLibraryItem, MaterialLibraryProjection, MaterialPreview, MaterialReadError,
+    MaterialSummary, material_projection_schema_is_ready, read_material_library,
 };
 pub use material_social_read::read_authorized_research_comments;
 pub use patrol_scheduler::{
-    PatrolTickSummary, patrol_schema_is_ready, run_due_patrols, set_group_for_many,
-    set_monitoring_for_many, set_target_monitoring, target_monitoring_enabled,
+    PatrolTickSummary, SchedulerHeartbeat, patrol_schema_is_ready, read_scheduler_heartbeat,
+    record_scheduler_started, run_due_patrols, set_group_for_many, set_monitoring_for_many,
+    set_target_monitoring, target_monitoring_enabled,
 };
 pub use producer_runtime::{
     MediaBlobAdmission, MediaUploadFinalizeClaim, MediaUploadSession, ProducerRuntimeError,

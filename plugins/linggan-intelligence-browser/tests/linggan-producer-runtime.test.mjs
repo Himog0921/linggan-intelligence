@@ -186,6 +186,15 @@ test('background forwards the claimed scheduled identity into the content page a
   assert.doesNotMatch(dispatched, /createManualRuntimeTask/);
 });
 
+test('background immediately auto-claims after install or startup and supports bounded search discovery', () => {
+  const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
+  assert.match(background, /onInstalled\?\.addListener[\s\S]*checkInStationOnce\(\)\.then\(\(\) => patrolTick\(\)\)/);
+  assert.match(background, /onStartup\?\.addListener[\s\S]*checkInStationOnce\(\)\.then\(\(\) => patrolTick\(\)\)/);
+  assert.match(background, /SURFACE_CAPABILITIES = new Set\(\['author_profile', 'profile_discovery', 'discovery_search'\]\)/);
+  assert.match(background, /search_result\?keyword=\$\{encodeURIComponent\(targetValue\)\}/);
+  assert.match(background, /mode: capability === 'discovery_search' \? 'search' : 'profile'/);
+});
+
 test('content message gate admits scheduled profile discovery without dropping dispatch identity', () => {
   const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
   const gateStart = content.indexOf('if ([', content.indexOf('chrome.runtime.onMessage.addListener'));

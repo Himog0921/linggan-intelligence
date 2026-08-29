@@ -213,6 +213,42 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
         .bind(target_ref)
         .execute(&mut **transaction)
         .await?;
+    } else if lane == "deep_archive" {
+        let monitoring_enabled: Option<bool> = sqlx::query_scalar(
+            "SELECT monitoring_enabled FROM collection_observation_target \
+             WHERE target_ref=$1 AND lifecycle_state='archiving' FOR UPDATE",
+        )
+        .bind(target_ref)
+        .fetch_optional(&mut **transaction)
+        .await?;
+        if let Some(monitoring_enabled) = monitoring_enabled {
+            let to_state = if monitoring_enabled {
+                "monitoring"
+            } else {
+                "archived"
+            };
+            sqlx::query(
+                "UPDATE collection_observation_target SET lifecycle_state=$2, \
+                     lifecycle_changed_at=scope_001_now(), \
+                     last_patrol_succeeded_at=scope_001_now() \
+                 WHERE target_ref=$1 AND lifecycle_state='archiving'",
+            )
+            .bind(target_ref)
+            .bind(to_state)
+            .execute(&mut **transaction)
+            .await?;
+            sqlx::query(
+                "INSERT INTO collection_observation_target_transition \
+                     (transition_ref,target_ref,from_state,to_state,actor,reason_code,reason) \
+                 VALUES ($1,$2,'archiving',$3,'system','baseline_receipts_completed',$4)",
+            )
+            .bind(Uuid::new_v4())
+            .bind(target_ref)
+            .bind(to_state)
+            .bind(format!("租约 {lease_ref} 的全部基线步骤已接纳"))
+            .execute(&mut **transaction)
+            .await?;
+        }
     }
     Ok(true)
 }
@@ -355,8 +391,9 @@ async fn reject_if_authorization_lapsed(
 /// 清单跑完才知道。凭空造一批占位 id 会让「已派发 200 篇」变成一句假话。因此这里只生成
 /// 目标已经确定的步骤，逐篇详情等清单回来后再生成。
 fn expand_into_tasks(subject: &LeaseSubject) -> Result<Vec<ProducerTaskSpec>, LeaseError> {
-    let steps: Vec<(&str, Value, i32)> = match subject.target_kind.as_str() {
-        "creator" => vec![
+    let steps: Vec<(&str, Value, i32)> = match (subject.target_kind.as_str(), subject.lane.as_str())
+    {
+        ("creator", "deep_archive") => vec![
             // 作者档案只取一份，配额固定为 1，不受工单篇数上限影响。
             (
                 "author_profile",
@@ -369,6 +406,13 @@ fn expand_into_tasks(subject: &LeaseSubject) -> Result<Vec<ProducerTaskSpec>, Le
                 subject.max_works,
             ),
         ],
+        // Recurring creator patrols only need the current discovery surface. Re-reading the
+        // stable profile every cycle adds platform load without improving change detection.
+        ("creator", _) => vec![(
+            "profile_discovery",
+            json!({ "authorExternalId": subject.identity_key }),
+            subject.max_works,
+        )],
         _ => vec![(
             "discovery_search",
             json!({ "query": subject.identity_key }),

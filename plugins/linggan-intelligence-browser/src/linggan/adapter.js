@@ -8,7 +8,7 @@ const FULL_LOCAL_PRODUCER_READINESS = Object.freeze({
 });
 
 export function formatLingganRuntimeNotice() {
-  return 'Linggan 本机执行端已启用：页面采集结果会先写入本机可靠队列，再由 Linggan 接纳。自动调度尚未启动。';
+  return 'Linggan 本机执行端已启用：系统侧有等待任务时会自动领取，采集结果先写入本机可靠队列，再由 Linggan 接纳。';
 }
 
 function producerRoute(value) {

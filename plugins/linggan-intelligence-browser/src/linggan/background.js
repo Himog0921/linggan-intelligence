@@ -441,31 +441,41 @@ const PATROL_ALARM = 'linggan-patrol';
 const MIN_ALARM_MINUTES = 1;
 
 async function scheduleNextClaim(seconds) {
+  if (!globalThis.chrome?.alarms?.create) return;
   const minutes = Math.max(MIN_ALARM_MINUTES, Math.round((Number(seconds) || 300) / 60));
-  await chrome.alarms.create(PATROL_ALARM, { delayInMinutes: minutes });
+  await globalThis.chrome.alarms.create(PATROL_ALARM, { delayInMinutes: minutes });
 }
 
+let patrolInFlight = null;
 async function patrolTick() {
-  const result = await runDispatchedTask().catch(() => null);
-  // 服务端说了下次隔多久；说不出来就用保守的 5 分钟，而不是继续每分钟敲。
-  await scheduleNextClaim(result?.nextPollAfterSeconds ?? 300);
-  return result;
+  if (patrolInFlight) return patrolInFlight;
+  patrolInFlight = (async () => {
+    const result = await runDispatchedTask().catch(() => null);
+    // 服务端说了下次隔多久；说不出来就用 5 分钟退避。
+    await scheduleNextClaim(result?.nextPollAfterSeconds ?? 300);
+    return result;
+  })();
+  try {
+    return await patrolInFlight;
+  } finally {
+    patrolInFlight = null;
+  }
 }
 
-chrome.alarms.onAlarm.addListener((alarm) => {
+chrome.alarms?.onAlarm?.addListener((alarm) => {
   if (alarm.name === PATROL_ALARM) void patrolTick();
 });
 
-chrome.runtime.onInstalled.addListener(() => {
-  void checkInStationOnce();
-  void scheduleNextClaim(60);
+chrome.runtime.onInstalled?.addListener(() => {
+  // 安装、升级或开发者重载后立即报到并领活；不再要求用户打开弹窗点击「领取」。
+  void checkInStationOnce().then(() => patrolTick());
 });
 chrome.runtime.onStartup?.addListener(() => {
-  void checkInStationOnce();
-  void scheduleNextClaim(60);
+  void checkInStationOnce().then(() => patrolTick());
 });
-// service worker 每次被唤醒都会执行到这里，等于一次轻量心跳。
-void checkInStationOnce();
+// service worker 每次被唤醒都会执行到这里：先签到，再领一次。alarm 事件可能紧接着到达，
+// `patrolInFlight` 会把两次入口合并为同一个领取请求。
+void checkInStationOnce().then(() => patrolTick());
 
 /**
  * 领一个服务端派下来的任务并执行它。
@@ -477,7 +487,7 @@ void checkInStationOnce();
  * 执行严格按派下来的规格：目标、配额、能力都来自任务，不来自页面上的对话框。这一条是
  * 授权链的意义所在——执行端不得自行放宽工单给定的边界。
  */
-const SURFACE_CAPABILITIES = new Set(['author_profile', 'profile_discovery']);
+const SURFACE_CAPABILITIES = new Set(['author_profile', 'profile_discovery', 'discovery_search']);
 
 async function runDispatchedTask() {
   const readiness = await readLingganLocalReadiness();
@@ -494,23 +504,26 @@ async function runDispatchedTask() {
   const spec = claim.taskSpec || {};
   const capability = Array.isArray(spec.capabilitiesRequested) ? spec.capabilitiesRequested[0] : '';
   if (!SURFACE_CAPABILITIES.has(capability)) {
-    // 只执行表层能力。详情与媒体属于另一段 Canary，尚未获准，因此宁可交回也不越界执行。
+    // 无人值守链只执行有界的表层观察。详情、评论与媒体字节需要显式工单，不能由发现结果
+    // 自动无限展开。
     return {
       success: true,
       state: 'capability_not_executable_here',
       executed: false,
-      message: `派下来的能力「${capability}」当前不在可执行范围内：只执行作者信息与作品清单这两种表层采集。`,
+      message: `派下来的能力「${capability}」当前不在无人值守表层采集范围内。`,
     };
   }
 
   const authorExternalId = String(spec.target?.authorExternalId || '').trim();
-  if (!authorExternalId) {
-    return { success: true, state: 'target_incomplete', executed: false, message: '任务没有指明创作者。' };
+  const query = String(spec.target?.query || '').trim();
+  const targetValue = capability === 'discovery_search' ? query : authorExternalId;
+  if (!targetValue) {
+    return { success: true, state: 'target_incomplete', executed: false, message: '任务没有指明观察目标。' };
   }
-  const { windowId, tabId } = await openAuthorWindow(authorExternalId);
+  const { windowId, tabId } = await openTaskWindow(capability, targetValue);
   if (!tabId) {
     await closeCollectionWindow(windowId);
-    return { success: false, state: 'tab_unavailable', message: '无法打开该创作者主页。' };
+    return { success: false, state: 'tab_unavailable', message: '无法打开观察页面。' };
   }
 
   const action = capability === 'author_profile'
@@ -519,11 +532,11 @@ async function runDispatchedTask() {
   try {
     const ready = await waitForTabReady(tabId);
     if (!ready) {
-      return { success: false, state: 'page_timeout', message: '创作者主页加载超时，本次未采集。' };
+      return { success: false, state: 'page_timeout', message: '观察页面加载超时，本次未采集。' };
     }
     const response = await chrome.tabs.sendMessage(tabId, {
       action,
-      mode: 'profile',
+      mode: capability === 'discovery_search' ? 'search' : 'profile',
       // 配额来自工单，不来自页面对话框：执行端不得自行放宽。
       maximumQuota: Number(spec.maximumQuota) || 1,
       // The page collector must submit against this exact server-issued identity. Rebuilding a
@@ -541,7 +554,7 @@ async function runDispatchedTask() {
       message: response?.message || `已按派下来的任务执行「${capability}」。`,
     };
   } catch (error) {
-    return { success: false, state: 'page_unavailable', message: '创作者主页未能响应，本次未采集。' };
+    return { success: false, state: 'page_unavailable', message: '观察页面未能响应，本次未采集。' };
   } finally {
     // 无论成败都关窗。留下的僵尸窗口会一直吃内存——1000 篇/天会开上百次窗。
     await closeCollectionWindow(windowId);
@@ -557,8 +570,10 @@ async function runDispatchedTask() {
  *
  * **平台 ID 才是身份**，URL 由它拼出来，不反过来。
  */
-async function openAuthorWindow(authorExternalId) {
-  const url = `https://www.xiaohongshu.com/user/profile/${encodeURIComponent(authorExternalId)}`;
+async function openTaskWindow(capability, targetValue) {
+  const url = capability === 'discovery_search'
+    ? `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(targetValue)}&source=web_explore_feed`
+    : `https://www.xiaohongshu.com/user/profile/${encodeURIComponent(targetValue)}`;
   const created = await chrome.windows.create({ url, focused: false, type: 'normal' });
   const tabId = Number(created?.tabs?.[0]?.id || 0) || null;
   if (tabId) {

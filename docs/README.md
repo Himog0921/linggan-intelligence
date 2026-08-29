@@ -37,6 +37,7 @@
 | [`product/PRD.md`](product/PRD.md) | 草案 | DISC-001 的产品输入，不是已接受实现合同 |
 | [`product/domain-invariants.md`](product/domain-invariants.md) | 权威当前 | 跨 Gate 的领域不变量、判断资格与持续扩展的对抗性验收案例 |
 | [`product/collection-monitoring-rules.md`](product/collection-monitoring-rules.md) | 权威当前 | 博主/关键词监控的产品规则：目标生命周期、深度建档、频率、爆款追踪；含 4 项待 Mog 决定 |
+| [`plans/active/observation-runtime-001-implementation-manual.md`](plans/active/observation-runtime-001-implementation-manual.md) | 活跃计划；Issue #94 | 观察规则自动调度、插件无人领取、Package/Receipt、封面材料投影、发布与一次性验收的唯一实施规格 |
 | [`data-contracts/local-001-discovery-evidence-boundary.md`](data-contracts/local-001-discovery-evidence-boundary.md) | 权威当前 | `LOCAL-001 / 001C-0` 与 #34 localhost binding：平台 discovery 与本地 Evidence Library 检索、partial Coverage、DiscoveryOccurrence、接纳回执与本地封面引用的跨边界合同；不证明真实插件或媒体取得 |
 | [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md) | 权威当前；MATERIAL-PROJECTION-001 | 最新 Browser Producer 产出到服务接纳、作品级材料投影与 Evidence 列表/详情/受控媒体读取的逐 lane 映射及代表性 fixture |
 | [design/README.md](design/README.md) | 权威当前 | 前端设计手册入口、权威地图、读取路径和当前已建立/未建立边界 |
@@ -69,6 +70,7 @@
 | [design/changes/evidence-page-002-multi-material-ui-change-manifest.md](design/changes/evidence-page-002-multi-material-ui-change-manifest.md) | 权威当前；EVIDENCE-PAGE-002 | 多材料 Evidence Library 产品/静态参考的来源、表面、状态和明确非目标 |
 | [design/changes/evidence-runtime-001-ui-change-manifest.md](design/changes/evidence-runtime-001-ui-change-manifest.md) | 权威当前；EVIDENCE-RUNTIME-001 / Issue #90 | Material Projection 运行页的唯一数据入口、作品 lane、Inspector、敏感材料与一次性验收边界 |
 | [design/changes/design-008-shared-shell-chinese-first-ui-change-manifest.md](design/changes/design-008-shared-shell-chinese-first-ui-change-manifest.md) | 权威当前；DESIGN-008 / Issue #68 | 共享 local-web shell 的中文主语义、英文技术旁注与 Corpus/Collection 双页面验收边界 |
+| [design/changes/design-009-runtime-capacity-surface-ui-change-manifest.md](design/changes/design-009-runtime-capacity-surface-ui-change-manifest.md) | 权威当前；DESIGN-009 | 执行工位改为产能判定面，运行状态由真实容量读取而非写死文案 |
 | [design/changes/plugin-001-producer-popup-ui-change-manifest.md](design/changes/plugin-001-producer-popup-ui-change-manifest.md) | 已被替代；PLUGIN-001 | Issue #33 popup 的历史 UI 边界；不再约束当前实现 |
 | [design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md](design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-MIGRATION-001 | Issue #37 popup 的 Discovery 行动与状态边界；启动恢复由 Issue #53 文档补充 |
 | [design/changes/plugin-popup-recovery-001-ui-change-manifest.md](design/changes/plugin-popup-recovery-001-ui-change-manifest.md) | 权威当前；PLUGIN-POPUP-RECOVERY-001 | Issue #53 popup 启动恢复、无副作用 fallback 与 v0.4.2 release 边界；Issue #55 的运行时修订见当月进度记录 |
@@ -84,6 +86,7 @@
 | [design/acceptance/design-007-chinese-first-evidence-library-acceptance.md](design/acceptance/design-007-chinese-first-evidence-library-acceptance.md) | 一次性报告 | `ACC-DESIGN-007`：Evidence Library 中文优先表达的分层验收记录 |
 | [design/acceptance/evidence-page-002-multi-material-reference-acceptance.md](design/acceptance/evidence-page-002-multi-material-reference-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-PAGE-002`：多材料 Evidence Library 静态参考的双视口、状态、互动和边界验收 |
 | [design/acceptance/evidence-runtime-001-visual-acceptance.md](design/acceptance/evidence-runtime-001-visual-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-RUNTIME-001`：Issue #90 运行页的自动检查、桌面/375px 浏览器证据与未证明边界 |
+| [design/acceptance/design-009-runtime-capacity-surface-acceptance.md](design/acceptance/design-009-runtime-capacity-surface-acceptance.md) | 一次性报告 | `ACC-RUNTIME-001`：产能判定、状态诚实性与视觉的验收记录 |
 | [design/foundation/topic-intelligence-visual-language.md](design/foundation/topic-intelligence-visual-language.md) | 权威当前 | DESIGN-002 的 DS-001–DS-007：合成 Topic Reference Page 的受限视觉语言 |
 | [design/patterns/evidence-candidate-and-boundary-patterns.md](design/patterns/evidence-candidate-and-boundary-patterns.md) | 权威当前 | DESIGN-002 的 PAT-001–PAT-004：观察、候选、边界与无副作用意图表达 |
 | [design/components/component-promotion.md](design/components/component-promotion.md) | 权威当前 | 从 Reference Page 局部块到真实 CMP 的晋升条件；当前没有已晋升组件 |

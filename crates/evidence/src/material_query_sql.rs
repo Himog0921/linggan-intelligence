@@ -24,7 +24,11 @@ pub(crate) const MATERIAL_PAGE_SQL: &str = "WITH latest_detail AS ( \
      COALESCE(detail.body_state,'UNKNOWN') AS body_state,COALESCE(detail.creator_display_name,discovery.creator_display_name) AS creator_display_name, \
      CASE WHEN detail.creator_display_name IS NOT NULL THEN detail.creator_display_name_state ELSE COALESCE(discovery.creator_state,'UNKNOWN') END AS creator_display_name_state, \
      COALESCE(detail.published_at_source_text,discovery.published_at_source_text) AS published_at_source_text,CASE WHEN detail.published_at_source_text IS NOT NULL THEN detail.published_at_source_text_state ELSE COALESCE(discovery.published_at_source_text_state,'UNKNOWN') END AS published_at_source_text_state, \
-     detail.author_external_id \
+     detail.author_external_id,discovery.cover_source_url,COALESCE(discovery.cover_source_state,'UNKNOWN') AS cover_source_state, \
+     discovery.like_count,COALESCE(discovery.like_count_state,'UNKNOWN') AS like_count_state, \
+     discovery.comment_count,COALESCE(discovery.comment_count_state,'UNKNOWN') AS comment_count_state, \
+     discovery.collect_count,COALESCE(discovery.collect_count_state,'UNKNOWN') AS collect_count_state, \
+     discovery.share_count,COALESCE(discovery.share_count_state,'UNKNOWN') AS share_count_state \
  FROM linggan_material_content content \
  LEFT JOIN latest_detail detail ON detail.content_public_ref = content.public_ref \
  LEFT JOIN latest_discovery discovery ON discovery.content_public_ref = content.public_ref \

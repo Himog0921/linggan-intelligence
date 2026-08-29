@@ -792,6 +792,7 @@ dependencies = [
  "linggan-evidence",
  "linggan-storage-postgres",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

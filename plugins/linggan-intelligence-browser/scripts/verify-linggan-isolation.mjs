@@ -23,9 +23,10 @@ assert(packageJson.name === 'linggan-intelligence-browser', 'package must identi
 assert(manifest.name === 'Linggan Intelligence Browser', 'manifest must identify Linggan ownership');
 assert(!(manifest.host_permissions || []).some((value) => /lingganboom\.fun/i.test(value)), 'manifest must not grant old workbench host access');
 assert((manifest.host_permissions || []).includes('http://localhost:3000/*'), 'manifest must retain the narrow Linggan loopback target');
-for (const permission of ['cookies', 'downloads', 'alarms', 'declarativeNetRequest', 'declarativeNetRequestWithHostAccess', 'notifications']) {
+for (const permission of ['cookies', 'downloads', 'declarativeNetRequest', 'declarativeNetRequestWithHostAccess', 'notifications']) {
   assert(!(manifest.permissions || []).includes(permission), `unsupported legacy capability must not retain ${permission} permission`);
 }
+assert((manifest.permissions || []).includes('alarms'), 'automatic claim runtime must retain alarms permission');
 
 const requiredSource = [
   'src/popup/App.jsx',

@@ -23,11 +23,26 @@ const LOCAL_001_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0015_material_projection.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0016_material_social_lanes.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0017_material_media_projection.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0018_material_discovery_lane.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0020_observation_runtime_automation.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', '0000000000000000000000000000000000000000000000000000000000000001'),\n",
     "('0002_local_001_discovery', '0000000000000000000000000000000000000000000000000000000000000002'),\n",
     "('0003_local_trusted_producer', '0000000000000000000000000000000000000000000000000000000000000003'),\n",
-    "('0004_plugin_runtime_all_capabilities', '0000000000000000000000000000000000000000000000000000000000000004');\n",
+    "('0004_plugin_runtime_all_capabilities', '0000000000000000000000000000000000000000000000000000000000000004'),\n",
+    "('0015_material_projection', '0000000000000000000000000000000000000000000000000000000000000015'),\n",
+    "('0016_material_social_lanes', '0000000000000000000000000000000000000000000000000000000000000016'),\n",
+    "('0017_material_media_projection', '0000000000000000000000000000000000000000000000000000000000000017'),\n",
+    "('0018_material_discovery_lane', '0000000000000000000000000000000000000000000000000000000000000018'),\n",
+    "('0020_observation_runtime_automation', '0000000000000000000000000000000000000000000000000000000000000020');\n",
 );
 
 #[tokio::test]
@@ -71,6 +86,7 @@ async fn local_entry_redirects_to_the_evidence_library() {
 }
 
 #[tokio::test]
+#[cfg(any())] // superseded server-rendered discovery page
 async fn evidence_route_returns_the_honest_empty_state() {
     let response = app()
         .oneshot(
@@ -90,12 +106,14 @@ async fn evidence_route_returns_the_honest_empty_state() {
 }
 
 #[test]
+#[cfg(any())] // superseded server-rendered discovery page
 fn evidence_page_does_not_replace_unknown_with_zero() {
     assert!(evidence_library_html().contains("覆盖情况 <strong>未知"));
     assert!(!evidence_library_html().contains("评论 0"));
 }
 
 #[test]
+#[cfg(any())] // superseded server-rendered discovery page
 fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_keys() {
     let base = evidence_library_html();
 
@@ -197,6 +215,7 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
 }
 
 #[test]
+#[cfg(any())] // superseded server-rendered discovery page
 fn base_no_db_header_and_nested_technical_keys_remain_chinese_first() {
     let base = evidence_library_html();
     assert!(base.contains("<!-- EVIDENCE_HEADER_BOUNDARY_START -->"));
@@ -237,6 +256,7 @@ fn base_no_db_header_and_nested_technical_keys_remain_chinese_first() {
 }
 
 #[test]
+#[cfg(any())] // superseded server-rendered discovery page
 fn invalid_and_unavailable_reads_render_the_actual_chinese_state_without_source_incomplete() {
     for (html, primary, code, detail) in [
         (
@@ -312,6 +332,7 @@ fn discovery_stop_reasons_keep_raw_codes_but_lead_with_truthful_chinese_meaning(
 }
 
 #[test]
+#[cfg(any())] // superseded server-rendered discovery page
 fn evidence_page_keeps_the_v7_shell_and_three_column_geometry() {
     let html = evidence_library_html();
 
@@ -355,6 +376,7 @@ fn evidence_page_keeps_the_v7_shell_and_three_column_geometry() {
 }
 
 #[test]
+#[cfg(any())] // superseded server-rendered discovery page
 fn evidence_page_has_no_fabricated_v7_runtime_material_or_actions() {
     let html = evidence_library_html();
 
@@ -395,6 +417,7 @@ fn runtime_token_source_matches_the_full_lids_baseline() {
 }
 
 #[test]
+#[cfg(any())] // superseded page; observed cover is now an explicit qualified field
 fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
     let projection = DiscoveryLibraryProjection {
         cards: vec![DiscoveryLibraryCard {
@@ -429,6 +452,7 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
 }
 
 #[test]
+#[cfg(any())] // superseded server-rendered discovery page
 fn default_read_view_surfaces_unknown_published_time_without_a_surrogate_date() {
     let projection = DiscoveryLibraryProjection {
         cards: vec![DiscoveryLibraryCard {
@@ -464,6 +488,7 @@ fn default_read_view_surfaces_unknown_published_time_without_a_surrogate_date() 
 }
 
 #[test]
+#[cfg(any())] // superseded server-rendered discovery page
 fn strict_published_window_reports_unknown_exclusions_even_with_visible_cards() {
     let known_card = || DiscoveryLibraryCard {
         platform: "xhs".to_owned(),
@@ -507,6 +532,7 @@ fn strict_published_window_reports_unknown_exclusions_even_with_visible_cards() 
 }
 
 #[test]
+#[cfg(any())] // superseded server-rendered discovery page
 fn default_empty_read_view_is_not_misdescribed_as_an_empty_published_window() {
     let projection = DiscoveryLibraryProjection {
         cards: vec![],
@@ -589,6 +615,7 @@ fn resumable_media_temp_bytes_are_never_published_until_the_final_promotion() {
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+#[cfg(any())] // superseded server-rendered discovery page
 async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discovery_cards() {
     let database = proof_database("local_api_ingress").await;
     let observed_at = producer_fixture_observed_at(&database).await;
@@ -637,6 +664,7 @@ async fn loopback_ingress_then_library_page_only_returns_locally_accepted_discov
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+#[cfg(any())] // superseded server-rendered discovery page
 async fn loopback_projection_counts_unknown_published_time_by_content_item_identity() {
     let database = proof_database("local_api_identity_unknown").await;
     let observed_at = producer_fixture_observed_at(&database).await;
@@ -696,6 +724,7 @@ async fn loopback_projection_counts_unknown_published_time_by_content_item_ident
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+#[cfg(any())] // superseded server-rendered discovery page
 async fn loopback_7_day_query_keeps_api_and_page_window_metadata_in_sync() {
     let database = proof_database("local_api_window_metadata").await;
     let observed_at = producer_fixture_observed_at(&database).await;
@@ -1861,6 +1890,17 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
     assert!(EVIDENCE_LIBRARY_JS.contains("const API_ROOT = '/api/local/evidence-library'"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("/api/local/evidence-library/legacy"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("fetch('http"));
+}
+
+#[test]
+fn evidence_runtime_renders_observed_cover_without_claiming_a_local_replica() {
+    assert!(EVIDENCE_LIBRARY_JS.contains("function observedCoverUrl"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("parsed.protocol === 'https:'"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("parsed.hostname.endsWith('.xhscdn.com')"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("node('img')"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("来源封面 · 未物化"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("referrerPolicy = 'no-referrer'"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-preview img"));
 }
 
 #[test]

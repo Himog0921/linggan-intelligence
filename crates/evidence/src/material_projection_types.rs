@@ -48,12 +48,28 @@ pub struct MaterialDisplay {
     pub published_at: Option<String>,
     pub published_at_source_text: Option<String>,
     pub published_at_state: String,
+    pub engagement: MaterialEngagement,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialEngagement {
+    pub like_count: Option<i64>,
+    pub like_count_state: String,
+    pub comment_count: Option<i64>,
+    pub comment_count_state: String,
+    pub collect_count: Option<i64>,
+    pub collect_count_state: String,
+    pub share_count: Option<i64>,
+    pub share_count_state: String,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MaterialPreview {
     pub local_asset_url: Option<String>,
+    pub observed_source_url: Option<String>,
+    pub observed_source_state: String,
     pub slot_purpose: Option<String>,
     pub bytes_state: &'static str,
     pub alt: String,

@@ -37,8 +37,107 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0013_drop_execution_gate.sql"),
     "\n",
+    include_str!("../../../database/migrations/0015_material_projection.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0016_material_social_lanes.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0017_material_media_projection.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0018_material_discovery_lane.sql"),
+    "\n",
     include_str!("../../../database/migrations/0019_work_order_lease_task_sequence.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0020_observation_runtime_automation.sql"),
 );
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn enabled_pending_target_is_automatically_dispatched_once_and_heartbeat_is_visible() {
+    let database = proof_database_for("collection_scheduler_enabled_target").await;
+    let target_ref = Uuid::new_v4();
+    let authorization_ref = Uuid::new_v4();
+    let station_ref = Uuid::new_v4();
+    let installation_ref = Uuid::new_v4();
+
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state,monitoring_enabled) \
+         VALUES ($1,'xhs','creator','creator-auto-proof','自动调度证明','manual','pending_decision',true)",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO collection_acquisition_authorization \
+             (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,purpose,granted_by,expires_at) \
+         VALUES ($1,'xhs','creator','deep_archive',10,20,'automatic baseline proof','person',scope_001_now()+interval '1 day')",
+    )
+    .bind(authorization_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO execution_station (station_ref,display_name,daily_work_quota) \
+         VALUES ($1,'automatic scheduler station',200)",
+    )
+    .bind(station_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO plugin_installation \
+             (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version,capabilities) \
+         VALUES ($1,$2,$3,'person',scope_001_now(),'0.6.0', \
+                 '[\"author_profile\",\"profile_discovery\",\"discovery_search\"]'::jsonb)",
+    )
+    .bind(installation_ref)
+    .bind(Uuid::new_v4().to_string())
+    .bind(station_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    linggan_evidence::record_scheduler_started(&database, Uuid::new_v4())
+        .await
+        .unwrap();
+    let first = linggan_evidence::run_due_patrols(&database).await.unwrap();
+    assert_eq!(first.dispatched, vec![target_ref]);
+    let work_order_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order WHERE target_ref=$1 AND lane='deep_archive'",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(work_order_count, 1);
+    let live_lease_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order w JOIN collection_work_order_lease l USING(work_order_ref) \
+         WHERE w.target_ref=$1 AND l.released_at IS NULL",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(live_lease_count, 1);
+
+    let second = linggan_evidence::run_due_patrols(&database).await.unwrap();
+    assert!(second.dispatched.is_empty());
+    let work_order_count_after: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order WHERE target_ref=$1 AND lane='deep_archive'",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(work_order_count_after, 1, "a live lease is not duplicated");
+    let heartbeat = linggan_evidence::read_scheduler_heartbeat(&database)
+        .await
+        .unwrap()
+        .expect("scheduler heartbeat exists");
+    assert_eq!(heartbeat.state, "running");
+    assert_eq!(heartbeat.last_outcome, "partial");
+}
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
@@ -115,6 +214,14 @@ async fn creator_lease_claims_and_completes_two_scheduled_tasks_in_order() {
     run_scheduled_task(&database, &second_task, fixture.producer_instance_id).await;
     assert_task_state(&database, second_task.task_id(), "completed").await;
     assert!(!lease_is_live(&database, lease.lease_ref).await);
+    let lifecycle_state: String = sqlx::query_scalar(
+        "SELECT lifecycle_state FROM collection_observation_target \
+         WHERE identity_key='creator-fixture'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("completed baseline advances target lifecycle");
+    assert_eq!(lifecycle_state, "archived");
 
     let manual_task = manual_task();
     assert!(matches!(
@@ -130,7 +237,7 @@ async fn creator_lease_claims_and_completes_two_scheduled_tasks_in_order() {
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn scheduled_submission_rechecks_live_claim_before_admission() {
+async fn late_scheduled_submission_keeps_material_without_advancing_revoked_execution() {
     let database = proof_database_for("collection_dispatch_submission_fence").await;
     let fixture = seed_creator_work_order(&database).await;
     let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
@@ -155,9 +262,16 @@ async fn scheduled_submission_rechecks_live_claim_before_admission() {
     .expect("lease is revoked after attempt start");
 
     let submission = scheduled_submission(&task, &attempt, fixture.producer_instance_id);
+    let outcome = submit_producer_package(&database, &submission)
+        .await
+        .expect("already observed material is retained after authority loss");
     assert!(matches!(
-        submit_producer_package(&database, &submission).await,
-        Err(ProducerRuntimeError::ScheduledTaskNotClaimed)
+        outcome,
+        RuntimeSubmissionOutcome::Acknowledged {
+            ref execution_effect,
+            ref material_admission,
+            ..
+        } if execution_effect == "LOST_AUTHORITY" && material_admission == "ACCEPTED"
     ));
     let package_count: i64 =
         sqlx::query_scalar("SELECT count(*) FROM linggan_runtime_capture_package")
@@ -169,7 +283,9 @@ async fn scheduled_submission_rechecks_live_claim_before_admission() {
             .fetch_one(database.pool())
             .await
             .expect("receipt count is readable");
-    assert_eq!((package_count, receipt_count), (0, 0));
+    assert_eq!((package_count, receipt_count), (1, 1));
+    assert!(lease_is_live(&database, lease.lease_ref).await == false);
+    assert_task_state(&database, task.task_id(), "in_progress").await;
 }
 
 struct Fixture {
@@ -204,7 +320,7 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     sqlx::query(
         "INSERT INTO collection_observation_target \
              (target_ref, platform, target_kind, identity_key, display_name, source, lifecycle_state) \
-         VALUES ($1, 'xhs', 'creator', 'creator-fixture', '顺序派发夹具', 'manual', 'monitoring')",
+         VALUES ($1, 'xhs', 'creator', 'creator-fixture', '顺序派发夹具', 'manual', 'archiving')",
     )
     .bind(target_ref)
     .execute(database.pool())
@@ -214,7 +330,7 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
         "INSERT INTO collection_acquisition_authorization \
              (authorization_ref, platform, target_kind, lane, max_targets, max_works_per_target, \
               purpose, granted_by, expires_at) \
-         VALUES ($1, 'xhs', 'creator', 'patrol', 1, 10, 'focused sequence proof', 'person', \
+         VALUES ($1, 'xhs', 'creator', 'deep_archive', 1, 10, 'focused sequence proof', 'person', \
                  scope_001_now() + interval '1 day')",
     )
     .bind(authorization_ref)
@@ -224,7 +340,7 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     sqlx::query(
         "INSERT INTO collection_acquisition_request \
              (request_ref, target_ref, lane, purpose, requested_by) \
-         VALUES ($1, $2, 'patrol', 'focused sequence proof', 'person')",
+         VALUES ($1, $2, 'deep_archive', 'focused sequence proof', 'person')",
     )
     .bind(request_ref)
     .bind(target_ref)
@@ -265,7 +381,7 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     sqlx::query(
         "INSERT INTO collection_work_order \
              (work_order_ref, decision_ref, target_ref, lane, max_works, stop_conditions, station_ref) \
-         VALUES ($1, $2, $3, 'patrol', 10, '[\"maximum_quota\",\"time_budget\"]'::jsonb, $4)",
+         VALUES ($1, $2, $3, 'deep_archive', 10, '[\"maximum_quota\",\"time_budget\"]'::jsonb, $4)",
     )
     .bind(work_order_ref)
     .bind(decision_ref)

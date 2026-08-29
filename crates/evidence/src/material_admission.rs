@@ -64,10 +64,18 @@ async fn insert_discovery_records(
         let title = exact_string(finding.payload, "title");
         let creator = exact_string(finding.payload, "authorName");
         let published = exact_scalar_text(finding.payload, "publishedAtText");
-        sqlx::query("INSERT INTO linggan_material_discovery_finding (material_ref,content_public_ref,package_ref,record_ordinal,discovery_kind,result_position,observed_at,title,title_state,creator_display_name,creator_state,published_at_source_text,published_at_source_text_state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+        let cover = observed_cover_url(finding.payload);
+        let likes = exact_nonnegative_count(finding.payload, &["likeCount", "likes"]);
+        let comments = exact_nonnegative_count(finding.payload, &["commentCount", "comments"]);
+        let collects = exact_nonnegative_count(finding.payload, &["collectCount", "collects"]);
+        let shares = exact_nonnegative_count(finding.payload, &["shareCount", "shares"]);
+        sqlx::query("INSERT INTO linggan_material_discovery_finding (material_ref,content_public_ref,package_ref,record_ordinal,discovery_kind,result_position,observed_at,title,title_state,creator_display_name,creator_state,published_at_source_text,published_at_source_text_state,cover_source_url,cover_source_state,like_count,like_count_state,comment_count,comment_count_state,collect_count,collect_count_state,share_count,share_count_state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)")
             .bind(Uuid::new_v4()).bind(content_public_ref).bind(package.package_ref()).bind(i32::try_from(ordinal).expect("package record count is bounded"))
             .bind(package.package_kind()).bind(finding.result_position).bind(package.observed_at()).bind(title).bind(known_state(title))
             .bind(creator).bind(known_state(creator)).bind(published.as_deref()).bind(known_state(published.as_deref()))
+            .bind(cover).bind(known_state(cover)).bind(likes).bind(known_state(likes))
+            .bind(comments).bind(known_state(comments)).bind(collects).bind(known_state(collects))
+            .bind(shares).bind(known_state(shares))
             .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     }
     Ok(())
@@ -391,6 +399,51 @@ fn exact_scalar_text(payload: &serde_json::Map<String, Value>, key: &str) -> Opt
         Value::Number(value) => Some(value.to_string()),
         _ => None,
     })
+}
+
+fn exact_nonnegative_count(payload: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<i64> {
+    keys.iter().find_map(|key| {
+        payload
+            .get(*key)
+            .and_then(Value::as_i64)
+            .filter(|value| *value >= 0)
+    })
+}
+
+fn observed_cover_url(payload: &serde_json::Map<String, Value>) -> Option<&str> {
+    let direct = ["cover", "coverImg", "coverUrl", "thumbnail"]
+        .into_iter()
+        .find_map(|key| exact_string(payload, key));
+    let first_image = payload
+        .get("images")
+        .and_then(Value::as_array)
+        .and_then(|images| images.first())
+        .and_then(|image| match image {
+            Value::String(value) => Some(value.as_str()),
+            Value::Object(value) => ["urlDefault", "url", "src"]
+                .into_iter()
+                .find_map(|key| exact_string(value, key)),
+            _ => None,
+        });
+    direct
+        .or(first_image)
+        .map(str::trim)
+        .filter(|value| observed_xhs_media_url_is_allowed(value))
+}
+
+fn observed_xhs_media_url_is_allowed(value: &str) -> bool {
+    let Some(authority_and_path) = value.strip_prefix("https://") else {
+        return false;
+    };
+    let authority = authority_and_path.split('/').next().unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host)
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    host == "xhscdn.com" || host.ends_with(".xhscdn.com")
 }
 
 pub(crate) fn known_state<T>(value: Option<T>) -> &'static str {

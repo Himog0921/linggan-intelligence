@@ -125,6 +125,23 @@
     }
   }
 
+  function observedCoverUrl(url, state) {
+    if (state !== 'KNOWN' || typeof url !== 'string' || !url) return null;
+    try {
+      const parsed = new URL(url);
+      const allowedHost = parsed.hostname === 'xhscdn.com' || parsed.hostname.endsWith('.xhscdn.com');
+      return parsed.protocol === 'https:' && allowedHost ? parsed.href : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function knownMetric(value, state, label) {
+    return state === 'KNOWN' && Number.isFinite(Number(value))
+      ? `${label} ${Number(value).toLocaleString('zh-CN')}`
+      : null;
+  }
+
   async function readJson(url, signal) {
     const response = await fetch(url, {
       method: 'GET',
@@ -237,11 +254,19 @@
 
   function previewBlock(item) {
     const preview = node('div', 'ev-preview');
-    const hasControlledHandle = sameOriginPath(item.preview?.localAssetUrl, ['/api/local/media/', '/api/local/derivative/']);
+    const controlledHandle = sameOriginPath(item.preview?.localAssetUrl, ['/api/local/media/', '/api/local/derivative/']);
+    const observedCover = observedCoverUrl(item.preview?.observedSourceUrl, item.preview?.observedSourceState);
     const bytesState = item.preview?.bytesState || 'UNKNOWN';
-    if (hasControlledHandle) {
+    if (controlledHandle || observedCover) {
+      const image = node('img');
+      image.src = controlledHandle || observedCover;
+      image.alt = item.preview?.alt || knownText(item.display?.title, item.display?.titleState, '作品封面');
+      image.loading = 'lazy';
+      image.referrerPolicy = 'no-referrer';
+      preview.append(image);
+      const label = controlledHandle ? '本地副本' : '来源封面 · 未物化';
+      preview.append(node('span', 'ev-preview-label', label));
       preview.dataset.tone = 'available';
-      preview.append(node('strong', null, '本地副本可用'), tech('SELECT TO VERIFY TYPE'));
     } else {
       const [label] = stateMeta(bytesState);
       if (bytesState === 'BYTES_CLEANED') preview.dataset.tone = 'cleaned';
@@ -272,6 +297,14 @@
       ? item.display?.publishedAt || item.display?.publishedAtSourceText || '来源时间已知'
       : '发布时间当前未知';
     meta.append(node('span', null, creator), node('span', null, published));
+    const engagement = item.display?.engagement || {};
+    const metrics = [
+      knownMetric(engagement.likeCount, engagement.likeCountState, '赞'),
+      knownMetric(engagement.commentCount, engagement.commentCountState, '评'),
+      knownMetric(engagement.collectCount, engagement.collectCountState, '藏'),
+      knownMetric(engagement.shareCount, engagement.shareCountState, '转'),
+    ].filter(Boolean);
+    if (metrics.length) meta.append(node('span', 'ev-engagement', metrics.join(' · ')));
     identity.append(eyebrow, title, meta);
 
     const lanes = node('div', 'ev-lane-board');
@@ -486,6 +519,10 @@
       ['标题', knownText(item.display?.title, item.display?.titleState), item.display?.titleState || 'UNKNOWN'],
       ['作者', knownText(item.display?.creatorDisplayName, item.display?.creatorState), item.display?.creatorState || 'UNKNOWN'],
       ['发布时间', item.display?.publishedAtState === 'KNOWN' ? item.display?.publishedAt || item.display?.publishedAtSourceText || '已知' : '当前未知', item.display?.publishedAtState || 'UNKNOWN'],
+      ['点赞', knownText(item.display?.engagement?.likeCount, item.display?.engagement?.likeCountState), item.display?.engagement?.likeCountState || 'UNKNOWN'],
+      ['评论', knownText(item.display?.engagement?.commentCount, item.display?.engagement?.commentCountState), item.display?.engagement?.commentCountState || 'UNKNOWN'],
+      ['收藏', knownText(item.display?.engagement?.collectCount, item.display?.engagement?.collectCountState), item.display?.engagement?.collectCountState || 'UNKNOWN'],
+      ['分享', knownText(item.display?.engagement?.shareCount, item.display?.engagement?.shareCountState), item.display?.engagement?.shareCountState || 'UNKNOWN'],
       ['最近观察', item.summary?.lastObservedAt || '当前未知', 'OBSERVED AT'],
     ]));
     panel.append(identity);

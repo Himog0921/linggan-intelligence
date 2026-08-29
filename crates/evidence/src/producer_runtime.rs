@@ -63,12 +63,16 @@ pub enum RuntimeSubmissionOutcome {
         receipt_ref: Uuid,
         package_ref: Uuid,
         package_kind: String,
+        execution_effect: String,
+        material_admission: String,
     },
     Replay {
         submission_id: Uuid,
         receipt_ref: Uuid,
         package_ref: Uuid,
         package_kind: String,
+        execution_effect: String,
+        material_admission: String,
     },
     Conflict {
         submission_id: Uuid,
@@ -783,9 +787,11 @@ pub async fn submit_producer_package(
             .await
             .map_err(ProducerRuntimeError::Internal)?
             .ok_or(ProducerRuntimeError::RoutingNotFound)?;
-    if task_source == "scheduled" {
-        lock_live_scheduled_claim(&mut tx, submission).await?;
-    }
+    let live_scheduled_claim = if task_source == "scheduled" {
+        lock_live_scheduled_claim(&mut tx, submission).await?
+    } else {
+        false
+    };
     if terminal_package_exists(&mut tx, submission.attempt_id()).await? {
         tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
         return Ok(RuntimeSubmissionOutcome::Conflict {
@@ -810,20 +816,26 @@ pub async fn submit_producer_package(
         crate::material_admission::insert_typed_materials(&mut tx, package).await?;
     }
     let receipt_ref = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_runtime_submission_receipt (submission_id,task_id,attempt_id,producer_instance_id,package_hash,package_ref,receipt_ref) VALUES ($1,$2,$3,$4,$5,$6,$7)")
+    let execution_effect = match (task_source.as_str(), live_scheduled_claim) {
+        ("scheduled", true) => "COMPLETED_LIVE_STEP",
+        ("scheduled", false) => "LOST_AUTHORITY",
+        _ => "NOT_APPLICABLE",
+    };
+    sqlx::query("INSERT INTO linggan_runtime_submission_receipt (submission_id,task_id,attempt_id,producer_instance_id,package_hash,package_ref,receipt_ref,execution_effect,material_admission) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'ACCEPTED')")
         .bind(submission.submission_id()).bind(submission.task_id()).bind(submission.attempt_id()).bind(submission.producer_instance_id())
-        .bind(&package_hash).bind(package.package_ref()).bind(receipt_ref)
+        .bind(&package_hash).bind(package.package_ref()).bind(receipt_ref).bind(execution_effect)
         .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
-    if task_source == "scheduled" {
+    if live_scheduled_claim {
         let completed = crate::work_order_lease::complete_lease_for_task_in_transaction(
             &mut tx,
             submission.task_id(),
         )
         .await
         .map_err(ProducerRuntimeError::Internal)?;
-        if !completed {
-            return Err(ProducerRuntimeError::ScheduledTaskNotClaimed);
-        }
+        debug_assert!(
+            completed,
+            "the locked live scheduled claim remains completable"
+        );
     }
     tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
     Ok(RuntimeSubmissionOutcome::Acknowledged {
@@ -831,6 +843,8 @@ pub async fn submit_producer_package(
         receipt_ref,
         package_ref: package.package_ref(),
         package_kind: package.package_kind().to_owned(),
+        execution_effect: execution_effect.to_owned(),
+        material_admission: "ACCEPTED".to_owned(),
     })
 }
 
@@ -842,7 +856,7 @@ pub async fn submit_producer_package(
 async fn lock_live_scheduled_claim(
     tx: &mut Transaction<'_, Postgres>,
     submission: &ProducerSubmission,
-) -> Result<(), ProducerRuntimeError> {
+) -> Result<bool, ProducerRuntimeError> {
     // Match dispatch lock order: installation first, then lease task. This prevents a submission
     // and a claim retry from taking the same two rows in opposite order.
     let installation_ref: Option<Uuid> = sqlx::query_scalar(
@@ -854,7 +868,7 @@ async fn lock_live_scheduled_claim(
     .await
     .map_err(ProducerRuntimeError::Internal)?;
     let Some(installation_ref) = installation_ref else {
-        return Err(ProducerRuntimeError::ScheduledTaskNotClaimed);
+        return Ok(false);
     };
     let claimed: Option<Uuid> = sqlx::query_scalar(
         "SELECT lease_task.lease_ref \
@@ -872,10 +886,7 @@ async fn lock_live_scheduled_claim(
     .fetch_optional(&mut **tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
-    if claimed.is_none() {
-        return Err(ProducerRuntimeError::ScheduledTaskNotClaimed);
-    }
-    Ok(())
+    Ok(claimed.is_some())
 }
 
 /// 逐条决定记录的处置。
@@ -960,7 +971,7 @@ async fn existing_submission(
     submission: &ProducerSubmission,
     package_hash: &str,
 ) -> Result<Option<RuntimeSubmissionOutcome>, ProducerRuntimeError> {
-    let row = sqlx::query("SELECT task_id,attempt_id,producer_instance_id,package_hash,receipt_ref,package_ref FROM linggan_runtime_submission_receipt WHERE submission_id = $1")
+    let row = sqlx::query("SELECT task_id,attempt_id,producer_instance_id,package_hash,receipt_ref,package_ref,execution_effect,material_admission FROM linggan_runtime_submission_receipt WHERE submission_id = $1")
         .bind(submission.submission_id()).fetch_optional(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     Ok(row.map(|row| {
         let matches = row.get::<Uuid, _>("task_id") == submission.task_id()
@@ -977,6 +988,8 @@ async fn existing_submission(
             receipt_ref: row.get("receipt_ref"),
             package_ref: row.get("package_ref"),
             package_kind: submission.capture_package().package_kind().to_owned(),
+            execution_effect: row.get("execution_effect"),
+            material_admission: row.get("material_admission"),
         }
     }))
 }

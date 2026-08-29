@@ -23,6 +23,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0017_material_media_projection.sql"),
     "\n",
     include_str!("../../../../database/migrations/0018_material_discovery_lane.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0020_observation_runtime_automation.sql"),
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

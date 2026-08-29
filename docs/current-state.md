@@ -8,6 +8,12 @@
 
 ## 当前阶段
 
+### OBSERVATION-RUNTIME-001 / Issue #94（单包交付中）
+
+观察目标与观察规则现在进入同一条有限运行链：常驻 worker 记录调度心跳，扫描已启用且授权有效的目标，基线建档、持续巡检和关键词发现分别生成有界 WorkOrder/Step；过期租约可恢复，单目标基线最多创建 3 个 WorkOrder，并优先避开最近失败工位。Browser Producer `v0.6.0` 使用 MV3 alarm、安装/启动和 Service Worker 唤醒自动签到并单飞领取，不再要求用户点击“领取任务”。迟到的真实 Package 不再因旧租约丢失而丢弃：它不能推进当前 Step，但可按独立材料接纳结果保留。
+
+Material Projection 已接纳搜索/主页发现面带回的真实标题、作者、封面来源和点赞/评论/收藏/分享读数；Evidence Library 优先展示本地受控资产，在没有本地副本时只允许 `https://*.xhscdn.com` 的来源封面并明确标为“未物化”，不会把来源 URL 伪装成本地媒体。数据库通过 additive `0020_observation_runtime_automation.sql` 增加调度心跳、发现面媒体/互动字段及 Receipt 的执行影响/材料接纳双轴。代码、PostgreSQL 合同测试和 `v0.6.0` 可复现发布包已通过冻结验证；本机共享库迁移、`origin/main` 合并、API/worker 切换、Chrome 实际加载与无人领取真实链仍须以本次交付后的运行结果单独确认。
+
 ### MATERIAL-PROJECTION-001 / Issue #86（Draft stacked 实现）
 
 基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope。默认 `/api/local/evidence-library` 只返回 Material Projection；旧 `cards` 仅由显式 `/api/local/evidence-library/legacy` 兼容入口提供，不再默认混读。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。插件到页面的现行映射见 [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md)。
@@ -28,7 +34,7 @@ Mog 已明确取消“任何仓库写入都必须 Issue + Claim + 独立 worktre
 
 ARC-001 已同步为“已回答问题不再重复提问”：Capture Control Contract 已由 PR #17 合入；媒体卡已从当前主线完成 V2 语义、PR #15 草案、产品规则、插件 `v0.5.0` 通道、Rust/PostgreSQL 实现和 Evidence Library 消费边界的校准，唯一当前入口为 [`architecture/media-lifecycle-contract.md`](architecture/media-lifecycle-contract.md)，决策卡现为 `resolved`。这只证明合同收口；真实媒体字节、OCR/ASR/抽帧/embedding、保留期清理、撤回传播、多材料读模型、页面实现和用户验收仍未证明。第一阶段运行时只剩当前实现缺口基线，首个用户可见范围只剩正式 SCOPE 冻结。Issue #10 和 #14 保持开放以承接当前交付；旧 Issue #11/#16/#18 与 PR #12/#13/#15/#19 已按“已吸收/已被取代”关闭。
 
-`PATROL-LEASE-SEQUENCE-001` 当前分支已把一次 creator patrol 的 `author_profile → profile_discovery` 固定为同一 lease 下的顺序任务关系：新 lease 不再双写旧 `task_id` 列；派发以数据库原子 claim 标记领取安装与 `in_progress`，同安装重试会取回同一 live task，后一步必须等待前一步形成已接纳回执；内容页允许 `DISCOVER_SURFACE` runtime 消息，并沿后台下发的 scheduled TaskSpec 与 `linggan_dispatched_task` 来源原样创建 Attempt，不再重建 manual task；Package 接纳时再次锁定 live lease 与领取安装，并把 Package、Receipt、task/必要的 lease completion 放进同一事务。只有全部步骤完成才释放 lease 并记录本轮 patrol 成功。手动页面采集仍走 manual TaskSpec。插件源码版本已升至 `v0.5.2`。这些是当前分支实现事实，尚不等于已经迁移本机共享数据库、重载 Chrome、实际巡检真实平台、部署或 Mog 验收。
+`PATROL-LEASE-SEQUENCE-001` 已把一次 creator 基线的 `author_profile → profile_discovery` 固定为同一 lease 下的顺序任务关系：新 lease 不再双写旧 `task_id` 列；派发以数据库原子 claim 标记领取安装与 `in_progress`，同安装重试会取回同一 live task，后一步必须等待前一步形成已接纳回执；内容页允许 `DISCOVER_SURFACE` runtime 消息，并沿后台下发的 scheduled TaskSpec 与 `linggan_dispatched_task` 来源原样创建 Attempt，不再重建 manual task；Package 接纳时再次锁定 live lease 与领取安装，并把 Package、Receipt、task/必要的 lease completion 放进同一事务。只有全部步骤完成才释放 lease 并记录本轮 patrol 成功。持续博主巡检只执行 `profile_discovery`，关键词目标执行 `discovery_search`；手动页面采集仍走 manual TaskSpec。自动领取与发布版本由 `OBSERVATION-RUNTIME-001` 统一升级至 `v0.6.0`。
 
 Issue #85 / `EVIDENCE-PAGE-002` 已在上述媒体合同上冻结多材料 Evidence Library 的产品手册、技术呈现要求和合成静态高保真参考：主对象为“一个稳定来源作品在当前 Linggan 中可核验的材料集合”，并覆盖 discovery、详情、评论/回复、作者、媒体槽位/字节与 OCR/ASR 派生 lane。该设计明确区分部分可用、风险控制、访问受限、处理中、字节已清理、未知、空结果和读取错误，并静态演示一次 Package 的槽位级来源观察组如何包含 declared Bundle、still/motion 组件、逐地址 candidate assertions 以及绑定精确 `candidateRef` 的下载尝试；checkpoint 只进入来源核验，不成为材料卡。Issue #90 已把现行 API 能承担的部分落到运行页；静态参考仍不证明真实平台、媒体、OCR/ASR 或用户验收。
 
