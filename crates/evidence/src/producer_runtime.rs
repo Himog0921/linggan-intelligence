@@ -393,6 +393,12 @@ pub async fn claim_media_upload_finalize(
     let claim = match session.state.as_str() {
         "materialized" => {
             let download_attempt_ref = row.get::<Uuid, _>("download_attempt_ref");
+            crate::media_acquisition::complete_media_acquisition_for_observation(
+                &mut tx,
+                session.media_observation_ref,
+            )
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
             let materialization = sqlx::query(
                 "SELECT materialization.materialization_ref,materialization.blob_sha256,materialization.local_asset_path,blob.mime_type,blob.byte_size \
                  FROM linggan_media_materialization materialization JOIN linggan_media_blob blob ON blob.sha256 = materialization.blob_sha256 \
@@ -431,8 +437,22 @@ pub async fn complete_media_upload(
     session_ref: Uuid,
     download_attempt_ref: Uuid,
 ) -> Result<(), ProducerRuntimeError> {
-    sqlx::query("UPDATE linggan_media_upload_session SET state = 'materialized',download_attempt_ref = $2,updated_at = scope_001_now() WHERE session_ref = $1 AND state = 'finalizing'")
-        .bind(session_ref).bind(download_attempt_ref).execute(database.pool()).await.map_err(ProducerRuntimeError::Internal)?;
+    let mut tx = database
+        .pool()
+        .begin()
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    let observation_ref = sqlx::query_scalar::<_, Uuid>("UPDATE linggan_media_upload_session SET state = 'materialized',download_attempt_ref = $2,updated_at = scope_001_now() WHERE session_ref = $1 AND state = 'finalizing' RETURNING media_observation_ref")
+        .bind(session_ref).bind(download_attempt_ref).fetch_optional(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
+    if let Some(observation_ref) = observation_ref {
+        crate::media_acquisition::complete_media_acquisition_for_observation(
+            &mut tx,
+            observation_ref,
+        )
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
+    }
+    tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
     Ok(())
 }
 

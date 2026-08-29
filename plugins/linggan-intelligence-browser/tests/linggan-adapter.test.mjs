@@ -4,12 +4,50 @@ import test from 'node:test';
 import {
   LINGGAN_LOCAL_ORIGIN,
   attemptStartIsAccepted,
+  claimLingganMediaAcquisition,
   formatLingganRuntimeNotice,
   isTerminalLocalDeliveryResult,
   readLingganLocalReadiness,
   taskCreationIsAccepted,
   unavailableLingganStats,
 } from '../src/linggan/adapter.js';
+
+test('media acquisition claim only permits an exact server-owned work generation', async () => {
+  let request = null;
+  const health = {
+    routes: {
+      localProducer: {
+        taskCreation: '/api/local/producer/tasks',
+        attemptStart: '/api/local/producer/runtime-attempts',
+        submission: '/api/local/producer/runtime-submissions',
+        mediaAcquisitionClaim: '/api/local/producer/media-acquisitions/claim',
+      },
+    },
+  };
+  const result = await claimLingganMediaAcquisition({
+    installKey: 'installation-1',
+    health,
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        json: async () => ({
+          decision: 'acquired',
+          workRef: '11111111-1111-4111-8111-111111111111',
+          observationRef: '22222222-2222-4222-8222-222222222222',
+          claimGeneration: 2,
+          candidateUris: ['https://sns-img-hw.xhscdn.com/cover.jpg'],
+          nextPollAfterSeconds: 0,
+        }),
+      };
+    },
+  });
+  assert.equal(result.mayExecute, true);
+  assert.equal(result.claimGeneration, 2);
+  assert.deepEqual(result.candidateUris, ['https://sns-img-hw.xhscdn.com/cover.jpg']);
+  assert.equal(request.url, `${LINGGAN_LOCAL_ORIGIN}/api/local/producer/media-acquisitions/claim`);
+  assert.deepEqual(JSON.parse(request.options.body), { installKey: 'installation-1' });
+});
 
 test('runtime notice describes automatic claim without overstating admission', () => {
   assert.match(formatLingganRuntimeNotice(), /本机可靠队列/);
@@ -75,6 +113,7 @@ test('local readiness accepts the exact full Browser Producer runtime contract w
           taskCreation: '/api/local/producer/tasks',
           attemptStart: '/api/local/producer/runtime-attempts',
           submission: '/api/local/producer/runtime-submissions',
+          mediaAcquisitionClaim: '/api/local/producer/media-acquisitions/claim',
         },
       },
     }),

@@ -61,8 +61,10 @@ health 缺少任一条、标识不成对或不在 ready 状态时，材料只会
 成没有笔记、评论或博主。
 
 当前运行时的 Dexie 名称为 `LingganIntelligenceBrowserLocalStaging`，仅作**本机暂存/恢复层**，
-不是 Linggan 的最终事实库，也不会复用旧 `LingganBoomDB`。媒体原件只在用户单独请求时
-进入独立字节通道；候选地址必须是受允许的平台 HTTPS 媒体地址，页面回传也使用一次性请求
+不是 Linggan 的最终事实库，也不会复用旧 `LingganBoomDB`。从 0.7.0 起，已授权的
+`discovery_search` / `profile_discovery` 回执中出现的封面会由服务端建立有界媒体取得工作，
+插件在后台自动领取并进入独立字节通道；候选地址必须是受允许的平台 HTTPS 媒体地址，
+页面回传也使用一次性请求
 标识，不能把任意页面消息或本机地址送入下载/交付队列。
 
 本轮刻意移除了不需要的 `cookies`、`downloads`、`alarms`、网络规则和通知
@@ -94,5 +96,5 @@ ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `n
 
 本包可构建和可打包；合成回传测试可证明本机 Task/Attempt/Submission 的持久交付与
 幂等 receipt。它**不证明**浏览器已加载、真实 XHS 或抖音页面可采、真实内容已入库、
-封面/媒体已本地化，或 OCR/ASR/研究链已运行。真实接入只能在对应的 Linggan backend
-合同、权限、Coverage、媒体生命周期和用户明确授权全部具备后另行验证。
+OCR/ASR/研究链已运行。封面是否已本地化以 Evidence 返回的本地物化句柄为准；来源链接
+只保留为观察事实，不能作为长期展示保证。

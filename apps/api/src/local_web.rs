@@ -41,18 +41,20 @@ use linggan_evidence::{
     LocalSubmissionOutcome, LocalTaskOutcome, MaterialReadError, MediaUploadFinalizeClaim,
     ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
     StoreOutcome, admit_media_blob, begin_media_upload, check_in_installation, claim_installation,
-    claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
-    create_manual_task, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
-    enrich_target_from_author_profile, grant_authorization, ingest_discovery_package,
-    issue_work_order_lease, list_targets, list_targets_in_state, local_discovery_schema_is_ready,
-    local_producer_schema_is_ready, open_claim_window, producer_runtime_has_packages,
+    claim_media_acquisition, claim_media_upload_finalize, close_claim_window,
+    complete_media_upload, count_targets, create_manual_task, create_producer_task,
+    decide_dispatch, dispatch_schema_is_ready, enrich_target_from_author_profile,
+    grant_authorization, ingest_discovery_package, issue_work_order_lease, list_targets,
+    list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
+    media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_archive_completeness, read_discovery_library,
     read_media_upload_session, read_runtime_capacity, read_runtime_library,
-    read_scheduler_heartbeat, read_station_overview, read_target, record_media_download_failure,
-    record_media_upload_chunk, register_station, release_media_upload_finalize, request_and_admit,
-    retire_station, set_group_for_many, set_monitoring_for_many, set_target_monitoring,
-    start_local_attempt, start_producer_attempt, station_schema_is_ready, store_pending_target,
-    submit_local_package, submit_producer_package, target_monitoring_enabled,
+    read_scheduler_heartbeat, read_station_overview, read_target, record_media_acquisition_failure,
+    record_media_download_failure, record_media_upload_chunk, register_station,
+    release_media_upload_finalize, request_and_admit, retire_station, set_group_for_many,
+    set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
+    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
+    target_monitoring_enabled,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -78,6 +80,7 @@ const FULL_PRODUCER_RUNTIME_SCHEMA: &str = "PLUGIN_RUNTIME_001_SCHEMA_READY";
 const LOCAL_PRODUCER_TASK_CREATION_PATH: &str = "/api/local/producer/tasks";
 const LOCAL_PRODUCER_ATTEMPT_START_PATH: &str = "/api/local/producer/runtime-attempts";
 const LOCAL_PRODUCER_SUBMISSION_PATH: &str = "/api/local/producer/runtime-submissions";
+const MEDIA_ACQUISITION_CLAIM_PATH: &str = "/api/local/producer/media-acquisitions/claim";
 const LIDS_TOKENS: &str = include_str!("local_web/lids_tokens.css");
 const SHELL_CSS: &str = include_str!("local_web/shell.css");
 const COLLECTION_WORKSPACE_CSS: &str = include_str!("local_web/collection_workspace.css");
@@ -262,6 +265,10 @@ fn router(state: LocalWebState) -> Router {
             post(start_media_upload_route),
         )
         .route(
+            MEDIA_ACQUISITION_CLAIM_PATH,
+            post(claim_media_acquisition_route),
+        )
+        .route(
             "/api/local/producer/media-observations/{observation_ref}/download-failures",
             post(record_media_download_failure_route),
         )
@@ -402,14 +409,22 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
         }),
         _ => Value::Null,
     };
+    let media_acquisition_ready = match state.database.database() {
+        Some(database) => media_acquisition_schema_is_ready(database)
+            .await
+            .unwrap_or(false),
+        None => false,
+    };
     let local_producer_routes = if data_state == FULL_PRODUCER_RUNTIME_DATA_STATE
         && database_state == "READY"
         && schema_state == FULL_PRODUCER_RUNTIME_SCHEMA
+        && media_acquisition_ready
     {
         json!({
             "taskCreation": LOCAL_PRODUCER_TASK_CREATION_PATH,
             "attemptStart": LOCAL_PRODUCER_ATTEMPT_START_PATH,
-            "submission": LOCAL_PRODUCER_SUBMISSION_PATH
+            "submission": LOCAL_PRODUCER_SUBMISSION_PATH,
+            "mediaAcquisitionClaim": MEDIA_ACQUISITION_CLAIM_PATH
         })
     } else {
         Value::Null
@@ -1227,6 +1242,37 @@ async fn submit_producer_package_route(
 // These three routes are the resumable media lane.  They are intentionally separate from the
 // text package route: slow bytes and a retrying download must never delay an already-captured
 // note, comment, or discovery package.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct MediaAcquisitionClaimWire {
+    install_key: String,
+}
+
+async fn claim_media_acquisition_route(
+    State(state): State<LocalWebState>,
+    Json(input): Json<MediaAcquisitionClaimWire>,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "producer_not_connected",
+        );
+    };
+    if input.install_key.trim().is_empty() {
+        return local_producer_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "media_acquisition_claim_invalid",
+        );
+    }
+    match claim_media_acquisition(database, &input.install_key).await {
+        Ok(decision) => Json(decision).into_response(),
+        Err(_) => local_producer_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "media_acquisition_unavailable",
+        ),
+    }
+}
+
 async fn start_media_upload_route(
     State(state): State<LocalWebState>,
     Path(observation_ref): Path<String>,
@@ -1287,6 +1333,9 @@ async fn start_media_upload_route(
 struct MediaDownloadFailureWire {
     attempted_uri: String,
     terminal_reason: String,
+    work_ref: Option<uuid::Uuid>,
+    claim_generation: Option<i32>,
+    install_key: Option<String>,
 }
 
 async fn record_media_download_failure_route(
@@ -1320,10 +1369,40 @@ async fn record_media_download_failure_route(
     )
     .await
     {
-        Ok(download_attempt_ref) => {
-            Json(json!({"downloadAttemptRef": download_attempt_ref, "delivery": "acknowledged"}))
-                .into_response()
-        }
+        Ok(download_attempt_ref) => match (
+            input.work_ref,
+            input.claim_generation,
+            input.install_key.as_deref(),
+        ) {
+            (Some(work_ref), Some(claim_generation), Some(install_key)) => {
+                match record_media_acquisition_failure(
+                    database,
+                    work_ref,
+                    observation_ref,
+                    install_key,
+                    claim_generation,
+                    &input.terminal_reason,
+                )
+                .await
+                {
+                    Ok(work) => Json(json!({
+                        "downloadAttemptRef": download_attempt_ref,
+                        "delivery": "acknowledged",
+                        "work": work,
+                    }))
+                    .into_response(),
+                    Err(_) => local_producer_error(
+                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        "media_acquisition_failure_not_recorded",
+                    ),
+                }
+            }
+            _ => Json(json!({
+                "downloadAttemptRef": download_attempt_ref,
+                "delivery": "acknowledged"
+            }))
+            .into_response(),
+        },
         Err(ProducerRuntimeError::MediaObservationNotFound) => local_producer_error(
             axum::http::StatusCode::NOT_FOUND,
             "media_observation_not_found",

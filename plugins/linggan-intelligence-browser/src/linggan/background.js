@@ -3,6 +3,7 @@ import {
   attemptStartIsAccepted,
   checkInLingganStation,
   claimLingganDispatch,
+  claimLingganMediaAcquisition,
   createLocalAttempt,
   createLocalSubmission,
   createTaskSpec,
@@ -114,12 +115,14 @@ function flushLocalOutbox() {
 async function flushMediaOutbox() {
   const due = await localMediaOutbox.due({ limit: 2 });
   for (const upload of due) {
-    const dependency = await localProducerOutbox.get(upload.slotSubmissionId);
-    if (!dependency || dependency.status === 'terminal') {
-      await localMediaOutbox.terminal(upload.uploadId, 'media_slot_delivery_not_accepted');
-      continue;
+    if (upload.slotSubmissionId) {
+      const dependency = await localProducerOutbox.get(upload.slotSubmissionId);
+      if (!dependency || dependency.status === 'terminal') {
+        await localMediaOutbox.terminal(upload.uploadId, 'media_slot_delivery_not_accepted');
+        continue;
+      }
+      if (dependency.status !== 'acknowledged') continue;
     }
-    if (dependency.status !== 'acknowledged') continue;
     await localMediaOutbox.markInFlight(upload.uploadId);
     try {
       const response = await fetchMediaCandidate(upload.candidateUris);
@@ -134,8 +137,18 @@ async function flushMediaOutbox() {
     } catch (error) {
       // Failure is a media-lane fact, not a reason to invalidate already accepted text/discovery.
       // It is best effort because the failed candidate may be retried after an offline interval.
-      void recordMediaDownloadFailure(upload, error).catch(() => {});
-      await localMediaOutbox.retry(upload.uploadId, error?.message || error);
+      const failure = await recordMediaDownloadFailure(upload, error).catch(() => null);
+      if (upload.serverWorkRef) {
+        // A server-owned work generation is attempted once. The server decides whether another
+        // generation may be leased; retaining this generation locally would create two retry
+        // authorities and could exceed the three-attempt limit.
+        await localMediaOutbox.terminal(
+          upload.uploadId,
+          failure?.work?.state || 'media_acquisition_generation_finished',
+        );
+      } else {
+        await localMediaOutbox.retry(upload.uploadId, error?.message || error);
+      }
     }
   }
 }
@@ -149,10 +162,21 @@ async function recordMediaDownloadFailure(upload, error) {
     : /size/i.test(message) ? 'size_limit'
       : /http_404|expired/i.test(message) ? 'expired_url'
         : /cancel/i.test(message) ? 'cancelled' : 'network_error';
-  await fetch(`${LINGGAN_LOCAL_ORIGIN}/api/local/producer/media-observations/${encodeURIComponent(observationRef)}/download-failures`, {
+  const response = await fetch(`${LINGGAN_LOCAL_ORIGIN}/api/local/producer/media-observations/${encodeURIComponent(observationRef)}/download-failures`, {
     method: 'POST', credentials: 'omit', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ attemptedUri, terminalReason }),
+    body: JSON.stringify({
+      attemptedUri,
+      terminalReason,
+      ...(upload?.serverWorkRef ? {
+        workRef: upload.serverWorkRef,
+        claimGeneration: upload.claimGeneration,
+        installKey: upload.installKey,
+      } : {}),
+    }),
   });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(payload?.code || 'media_download_failure_not_recorded');
+  return payload;
 }
 
 async function uploadMediaInChunks({ mediaObservationRef, blob, mimeType, sha256 }) {
@@ -451,15 +475,83 @@ async function patrolTick() {
   if (patrolInFlight) return patrolInFlight;
   patrolInFlight = (async () => {
     const result = await runDispatchedTask().catch(() => null);
+    // Finish delivery of the just-captured discovery package before asking for its derived cover
+    // work. The media lane remains separate: a slow CDN does not hold the discovery receipt open.
+    await flushLocalOutbox().catch(() => null);
+    const mediaResult = await drainMediaAcquisitions().catch(() => null);
     // 服务端说了下次隔多久；说不出来就用 5 分钟退避。
-    await scheduleNextClaim(result?.nextPollAfterSeconds ?? 300);
-    return result;
+    const nextPollAfterSeconds = Math.min(
+      Number(result?.nextPollAfterSeconds ?? 300),
+      Number(mediaResult?.nextPollAfterSeconds ?? 300),
+    );
+    await scheduleNextClaim(nextPollAfterSeconds);
+    return { ...result, media: mediaResult, nextPollAfterSeconds };
   })();
   try {
     return await patrolInFlight;
   } finally {
     patrolInFlight = null;
   }
+}
+
+async function drainMediaAcquisitions(limit = 12) {
+  const results = [];
+  for (let index = 0; index < limit; index += 1) {
+    const result = await runMediaAcquisitionOnce();
+    results.push(result);
+    if (!result?.executed) break;
+  }
+  const last = results.at(-1);
+  return {
+    success: results.some((result) => result?.success),
+    state: last?.state || 'media_unavailable',
+    executed: results.filter((result) => result?.executed).length,
+    nextPollAfterSeconds: last?.nextPollAfterSeconds ?? 300,
+  };
+}
+
+async function runMediaAcquisitionOnce() {
+  const readiness = await readLingganLocalReadiness();
+  if (!readiness.reachable || !readiness.deliveryReady) {
+    return { success: false, state: 'unreachable', nextPollAfterSeconds: 900 };
+  }
+  const installKey = await producerInstanceId();
+  const claim = await claimLingganMediaAcquisition({
+    installKey,
+    health: readiness.health,
+  });
+  if (!claim.mayExecute) {
+    return {
+      success: true,
+      state: claim.decision,
+      executed: false,
+      nextPollAfterSeconds: claim.nextPollAfterSeconds,
+    };
+  }
+  const candidateUris = claim.candidateUris
+    .map((value) => String(value || '').trim())
+    .filter(allowedMediaCandidateUri)
+    .slice(0, 6);
+  if (!claim.workRef || !claim.mediaObservationRef || !Number.isInteger(claim.claimGeneration)
+      || claim.claimGeneration < 1 || candidateUris.length === 0) {
+    return { success: false, state: 'media_claim_invalid', nextPollAfterSeconds: 300 };
+  }
+  await localMediaOutbox.enqueue({
+    uploadId: `${claim.workRef}:${claim.claimGeneration}`,
+    serverWorkRef: claim.workRef,
+    claimGeneration: claim.claimGeneration,
+    installKey,
+    mediaObservationRef: claim.mediaObservationRef,
+    candidateUris,
+  });
+  await flushMediaOutbox();
+  return {
+    success: true,
+    state: 'media_generation_executed',
+    executed: true,
+    workRef: claim.workRef,
+    nextPollAfterSeconds: 0,
+  };
 }
 
 chrome.alarms?.onAlarm?.addListener((alarm) => {

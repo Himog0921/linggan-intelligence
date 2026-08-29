@@ -23,6 +23,7 @@ mod material_projection_types;
 mod material_query_sql;
 mod material_social_read;
 mod material_storage_key;
+mod media_acquisition;
 mod patrol_scheduler;
 mod producer_runtime;
 mod receipt;
@@ -76,6 +77,11 @@ pub use material_projection::{
     MaterialSummary, material_projection_schema_is_ready, read_material_library,
 };
 pub use material_social_read::read_authorized_research_comments;
+pub use media_acquisition::{
+    MediaAcquisitionDecision, MediaAcquisitionError, MediaAcquisitionFailureOutcome,
+    claim_media_acquisition, ensure_discovery_cover_media_work, media_acquisition_schema_is_ready,
+    record_media_acquisition_failure,
+};
 pub use patrol_scheduler::{
     PatrolTickSummary, SchedulerHeartbeat, patrol_schema_is_ready, read_scheduler_heartbeat,
     record_scheduler_started, run_due_patrols, set_group_for_many, set_monitoring_for_many,
