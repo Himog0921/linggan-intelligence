@@ -21,7 +21,11 @@ pub enum MediaAcquisitionError {
 }
 
 #[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase", tag = "decision")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "decision"
+)]
 pub enum MediaAcquisitionDecision {
     Acquired {
         work_ref: Uuid,
@@ -40,6 +44,41 @@ pub enum MediaAcquisitionDecision {
     CapabilityUnavailable {
         next_poll_after_seconds: u64,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::MediaAcquisitionDecision;
+    use serde_json::json;
+    use uuid::Uuid;
+
+    #[test]
+    fn acquisition_claim_serializes_the_browser_producer_wire_contract() {
+        let work_ref = Uuid::new_v4();
+        let observation_ref = Uuid::new_v4();
+        let value = serde_json::to_value(MediaAcquisitionDecision::Acquired {
+            work_ref,
+            observation_ref,
+            claim_generation: 2,
+            candidate_uris: vec!["https://media.example/cover.webp".to_owned()],
+            lease_expires_at: "2026-08-29T16:30:00Z".to_owned(),
+            next_poll_after_seconds: 0,
+        })
+        .expect("media acquisition decision must serialize");
+
+        assert_eq!(
+            value,
+            json!({
+                "decision": "acquired",
+                "workRef": work_ref,
+                "observationRef": observation_ref,
+                "claimGeneration": 2,
+                "candidateUris": ["https://media.example/cover.webp"],
+                "leaseExpiresAt": "2026-08-29T16:30:00Z",
+                "nextPollAfterSeconds": 0
+            })
+        );
+    }
 }
 
 #[derive(Debug, Serialize)]
