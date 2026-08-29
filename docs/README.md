@@ -37,7 +37,7 @@
 | [`product/PRD.md`](product/PRD.md) | 草案 | DISC-001 的产品输入，不是已接受实现合同 |
 | [`product/domain-invariants.md`](product/domain-invariants.md) | 权威当前 | 跨 Gate 的领域不变量、判断资格与持续扩展的对抗性验收案例 |
 | [`product/collection-monitoring-rules.md`](product/collection-monitoring-rules.md) | 权威当前 | 博主/关键词监控的产品规则：目标生命周期、深度建档、频率、爆款追踪；含 4 项待 Mog 决定 |
-| [`plans/active/observation-runtime-001-implementation-manual.md`](plans/active/observation-runtime-001-implementation-manual.md) | 活跃计划；Issue #94 | 观察规则自动调度、插件无人领取、Package/Receipt、封面材料投影、发布与一次性验收的唯一实施规格 |
+| [`plans/completed/observation-runtime-001-implementation-manual.md`](plans/completed/observation-runtime-001-implementation-manual.md) | 已完成；Issue #94 / PR #95 / PR #96 | 观察规则自动调度、插件无人领取、Package/Receipt、封面材料投影、发布与一次性验收的实施规格和已完成边界 |
 | [`data-contracts/local-001-discovery-evidence-boundary.md`](data-contracts/local-001-discovery-evidence-boundary.md) | 权威当前 | `LOCAL-001 / 001C-0` 与 #34 localhost binding：平台 discovery 与本地 Evidence Library 检索、partial Coverage、DiscoveryOccurrence、接纳回执与本地封面引用的跨边界合同；不证明真实插件或媒体取得 |
 | [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md) | 权威当前；MATERIAL-PROJECTION-001 | 最新 Browser Producer 产出到服务接纳、作品级材料投影与 Evidence 列表/详情/受控媒体读取的逐 lane 映射及代表性 fixture |
 | [design/README.md](design/README.md) | 权威当前 | 前端设计手册入口、权威地图、读取路径和当前已建立/未建立边界 |

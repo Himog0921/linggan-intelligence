@@ -1,9 +1,10 @@
 # OBSERVATION-RUNTIME-001 实施手册
 
-> 状态: 活跃计划
+> 状态: 已完成计划
+> 完成时间: 2026-08-29
 > 最后核对: 2026-08-29
 > 适用范围: Issue #94；观察目标与规则、Rust API/worker、PostgreSQL、Browser Producer、材料投影、Evidence Library、本机发布
-> 事实来源: 当前 `main`、PR #84/#87/#88/#91 的已实现代码、内容工作台已验证的执行经验、`collection-monitoring-rules.md`、`capture-control-contract.md`、`media-lifecycle-contract.md`
+> 事实来源: `main@a12852f`、本机 PostgreSQL/LaunchAgent/Chrome 0.6.0 运行回执、PR #84/#87/#88/#91/#95/#96 的已实现代码、内容工作台已验证的执行经验、`collection-monitoring-rules.md`、`capture-control-contract.md`、`media-lifecycle-contract.md`
 > 冲突时以谁为准: 用户最新授权、`AGENTS.md`、领域不变量、当前代码与运行回执；本文不允许实现方自行扩大真实平台访问
 
 ## 1. 交付结果
