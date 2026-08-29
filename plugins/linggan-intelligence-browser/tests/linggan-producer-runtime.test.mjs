@@ -49,6 +49,16 @@ test('scheduled page delivery preserves the exact leased TaskSpec while manual d
     stopConditions: ['maximum_quota', 'surface_ended', 'time_budget'],
   };
   assert.equal(taskFor('xhs', 'author_profile', scheduled.target, { taskSpec: scheduled }), scheduled);
+  const scheduledDiscovery = {
+    ...scheduled,
+    taskId: '22222222-2222-4222-8222-222222222222',
+    capabilitiesRequested: ['profile_discovery'],
+    maximumQuota: 10,
+  };
+  assert.equal(
+    taskFor('xhs', 'profile_discovery', scheduledDiscovery.target, { taskSpec: scheduledDiscovery }),
+    scheduledDiscovery,
+  );
   assert.equal(taskFor('xhs', 'author_profile', scheduled.target).source, 'manual');
   assert.throws(
     () => taskFor('xhs', 'profile_discovery', scheduled.target, { taskSpec: scheduled }),
@@ -172,7 +182,18 @@ test('background forwards the claimed scheduled identity into the content page a
   const end = background.indexOf('\n/**\n * 在一个独立的', start);
   const dispatched = background.slice(start, end);
   assert.match(dispatched, /taskSpec: spec/);
+  assert.match(dispatched, /triggerSource: 'linggan_dispatched_task'/);
   assert.doesNotMatch(dispatched, /createManualRuntimeTask/);
+});
+
+test('content message gate admits scheduled profile discovery without dropping dispatch identity', () => {
+  const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
+  const gateStart = content.indexOf('if ([', content.indexOf('chrome.runtime.onMessage.addListener'));
+  const gateEnd = content.indexOf('].includes(action))', gateStart);
+  const gate = content.slice(gateStart, gateEnd);
+  assert.match(gate, /LINGGAN_RUNTIME_ACTION\.DISCOVER_SURFACE/);
+  assert.match(content, /taskSpec: message\.taskSpec/);
+  assert.match(content, /triggerSource: message\.triggerSource \|\| 'popup_linggan_runtime'/);
 });
 
 test('producer controls use Linggan runtime commands while manual media remains an explicit separate action', () => {

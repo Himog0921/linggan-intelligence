@@ -261,7 +261,7 @@ async function dispatchProducerRuntimeAction(action, message) {
     maximumQuota: message.maximumQuota ?? message.count,
     taskSpec: message.taskSpec,
     sortMode: message.sortMode,
-    triggerSource: 'popup_linggan_runtime',
+    triggerSource: message.triggerSource || 'popup_linggan_runtime',
   };
   const isControl = [
     LINGGAN_RUNTIME_ACTION.PAUSE_ACTIVE_BATCH,
@@ -307,6 +307,7 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
     LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_CONTENT,
     LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_COMMENTS,
     LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_AUTHOR,
+    LINGGAN_RUNTIME_ACTION.DISCOVER_SURFACE,
     LINGGAN_RUNTIME_ACTION.START_BATCH_CONTENT,
     LINGGAN_RUNTIME_ACTION.START_BATCH_COMMENTS,
     LINGGAN_RUNTIME_ACTION.ACQUIRE_COMMENT_MEDIA,

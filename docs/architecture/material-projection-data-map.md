@@ -3,7 +3,7 @@
 > 状态: 权威当前
 > 最后核对: 2026-08-29
 > 适用范围: 当前 Browser Producer 实际产出、服务接纳、Material Projection 与本机 Evidence API
-> 插件运行合同版本: `v0.5.1`；本次版本只修复 scheduled TaskSpec 身份贯穿与派发领取，不改变下表材料 Package 种类
+> 插件运行合同版本: `v0.5.2`；本次版本只修复 scheduled TaskSpec 身份贯穿、派发领取与作品发现消息准入，不改变下表材料 Package 种类
 > 事实来源: `plugins/linggan-intelligence-browser/src/linggan/producerRuntime.js`、`contentRuntimeAdapter.js`、Rust 接纳/投影代码、migration 0015–0018 与隔离 PostgreSQL fixture
 > 冲突时以谁为准: 当前插件合同与源码、Rust 运行时校验、数据库约束和真实测试结果
 
