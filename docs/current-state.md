@@ -8,11 +8,13 @@
 
 ## 当前阶段
 
-### OBSERVATION-RUNTIME-001 / Issue #94（单包交付中）
+### OBSERVATION-RUNTIME-001 / Issue #94（已完成并运行）
 
 观察目标与观察规则现在进入同一条有限运行链：常驻 worker 记录调度心跳，扫描已启用且授权有效的目标，基线建档、持续巡检和关键词发现分别生成有界 WorkOrder/Step；过期租约可恢复，单目标基线最多创建 3 个 WorkOrder，并优先避开最近失败工位。Browser Producer `v0.6.0` 使用 MV3 alarm、安装/启动和 Service Worker 唤醒自动签到并单飞领取，不再要求用户点击“领取任务”。迟到的真实 Package 不再因旧租约丢失而丢弃：它不能推进当前 Step，但可按独立材料接纳结果保留。
 
-Material Projection 已接纳搜索/主页发现面带回的真实标题、作者、封面来源和点赞/评论/收藏/分享读数；Evidence Library 优先展示本地受控资产，在没有本地副本时只允许 `https://*.xhscdn.com` 的来源封面并明确标为“未物化”，不会把来源 URL 伪装成本地媒体。数据库通过 additive `0020_observation_runtime_automation.sql` 增加调度心跳、发现面媒体/互动字段及 Receipt 的执行影响/材料接纳双轴。代码、PostgreSQL 合同测试和 `v0.6.0` 可复现发布包已通过冻结验证；本机共享库迁移、`origin/main` 合并、API/worker 切换、Chrome 实际加载与无人领取真实链仍须以本次交付后的运行结果单独确认。
+Material Projection 已接纳搜索/主页发现面带回的真实标题、作者、封面来源和点赞/评论/收藏/分享读数；Evidence Library 优先展示本地受控资产，在没有本地副本时只允许 `https://*.xhscdn.com` 的来源封面并明确标为“未物化”，不会把来源 URL 伪装成本地媒体。数据库通过 additive `0020_observation_runtime_automation.sql` 增加调度心跳、发现面媒体/互动字段及 Receipt 的执行影响/材料接纳双轴。
+
+本事项已由 PR #95/#96 合入 `main@a12852f`，共享数据库已在备份后应用 `0020`，API/worker LaunchAgent 已切到同一冻结快照，Chrome 已真实签到 Browser Producer `v0.6.0`。已有创作者目标在没有人工调用领取接口的情况下完成 `author_profile → profile_discovery`：两份 Receipt 均为 `COMPLETED_LIVE_STEP + ACCEPTED`，Lease 正常完成，目标由 `archiving` 转为 `monitoring`。来源实际保留 12 条发现材料；12 条标题和 12 条来源封面已知，Evidence Library 浏览器实测渲染 12 行且 12 张 640px 封面加载完成。来源未提供作品作者名、点赞、评论、收藏和分享数，因此这些字段保持 `UNKNOWN`；封面尚未形成本地媒体副本，详情、评论、媒体字节、OCR/ASR 也未执行，不能把本次基线说成完整作品建档。
 
 ### MATERIAL-PROJECTION-001 / Issue #86（Draft stacked 实现）
 
