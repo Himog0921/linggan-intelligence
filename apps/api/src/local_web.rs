@@ -3,7 +3,6 @@ mod collection_intake;
 mod collection_targets_view;
 #[cfg(test)]
 mod evidence_page;
-#[cfg(test)]
 mod local_asset_delivery;
 mod local_media_routes;
 #[cfg(test)]
