@@ -2421,12 +2421,16 @@ fn dispatch_payload(decision: &DispatchDecision) -> serde_json::Value {
             lease_ref,
             task_spec,
             execution_source_url,
+            page_session_plan,
         } => {
             payload["taskId"] = serde_json::json!(task_id);
             payload["leaseRef"] = serde_json::json!(lease_ref);
             payload["taskSpec"] = task_spec.clone();
             if let Some(url) = execution_source_url {
                 payload["executionSourceUrl"] = serde_json::json!(url);
+            }
+            if let Some(plan) = page_session_plan {
+                payload["pageSessionPlan"] = plan.clone();
             }
             // Claim atomically moved this lease task out of pending. A second poll cannot receive
             // it again while the first producer is opening the platform page.

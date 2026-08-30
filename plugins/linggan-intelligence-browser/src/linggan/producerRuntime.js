@@ -156,7 +156,11 @@ export function packageComments({ platform, result, noteId, observedAt, captured
       unknown: (numeric(result?.unknown) ?? 0) + (knownSetSize === null ? 1 : 0),
       stoppedReason: String(result?.stopReason || 'collector_complete'),
     },
-    records: comments.map((comment) => ({ kind: 'comment', payload: comment })),
+    records: comments.map((comment) => ({
+      kind: 'comment',
+      sourceObject: { platform, type: 'content', externalId: String(noteId || result?.noteId || '') },
+      payload: comment,
+    })),
   });
 }
 
@@ -185,7 +189,11 @@ export function packageReplies({ platform, result, noteId, observedAt, capturedA
       unknown: (numeric(result?.replyUnknown) ?? 0) + (knownSetSize === null ? 1 : 0),
       stoppedReason: String(result?.replyStopReason || result?.stopReason || 'unknown'),
     },
-    records: replies.map((reply) => ({ kind: 'reply', payload: reply })),
+    records: replies.map((reply) => ({
+      kind: 'reply',
+      sourceObject: { platform, type: 'content', externalId: String(noteId || result?.noteId || '') },
+      payload: reply,
+    })),
   });
 }
 

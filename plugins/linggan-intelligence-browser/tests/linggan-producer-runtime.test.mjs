@@ -223,6 +223,9 @@ test('background immediately auto-claims and executes bounded baseline plus fixe
   assert.match(background, /mode: capability === 'discovery_search' \? 'search' : 'profile'/);
   assert.match(background, /COLLECT_CURRENT_COMMENTS/);
   assert.match(background, /COLLECT_CURRENT_CONTENT/);
+  assert.match(background, /queueCachedDetailPageSessionLane/);
+  assert.match(background, /COLLECT_NOTE_FULL/);
+  assert.match(background, /pageSessionPlan: claim\.pageSessionPlan/);
 });
 
 test('task window readiness delegates final-document stability and content-runtime probing', () => {

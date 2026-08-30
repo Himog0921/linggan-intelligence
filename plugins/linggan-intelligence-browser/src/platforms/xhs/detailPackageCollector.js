@@ -46,7 +46,11 @@ export async function collectXhsNoteDetailPackage(wd = window, options = {}) {
   const scheduledCapability = options.taskSpec?.source === 'scheduled'
     ? options.taskSpec?.capabilitiesRequested?.[0]
     : '';
-  const includeComments = options.includeComments !== false && !scheduledCapability;
+  // A normal scheduled lane remains narrow. The server-approved detail-page session is the
+  // one exception: it explicitly asks the mature detail collector to prefetch comments while
+  // still deferring every Package until that lane receives its own TaskSpec.
+  const includeComments = options.includeComments === true
+    || (options.includeComments !== false && !scheduledCapability);
   const note = await collectNote(wd, {
     ...options,
     deferLingganDelivery: true,

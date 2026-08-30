@@ -1,7 +1,7 @@
 # 采集控制层、有限工位与浏览器插件架构
 
 > 状态: 草案
-> 最后核对: 2026-08-20
+> 最后核对: 2026-08-30
 > 适用范围: DISC-001 Gate 6 的采集准入、服务端调度、Work Order、Attempt/lease、浏览器 MV3 插件、离线恢复、终态 Package、部分结果、协议升级与可观测性
 > 事实来源: 已确认 Gate 2–3 边界、Gate 4 固定 V2 只读审计、Gate 5 数据候选、`module-architecture.md`、现役插件源码/fixture/测试参考
 > 冲突时以谁为准: 用户最新确认、真实 producer fixture、协议兼容测试、PostgreSQL 并发副作用与实际插件运行结果；旧插件字段和本文候选参数不自动成为现行合同
@@ -173,6 +173,20 @@ Content Detail batches（每批固定上限）
 ```
 
 每一阶段结束后，控制层根据新 Evidence 重新判断下一步。不能在第一步就预生成几千个不可撤回任务，也不能让插件根据页面内容自行扩大范围。
+
+### 同一详情页的执行复用
+
+`content_detail → media_slots → comments → replies` 是四个接纳与追溯边界，但不要求浏览器为同一作品重复打开四次页面。固定作品 WorkOrder 已经冻结上述范围时，服务端可在首个 `content_detail` 派发中返回一个短寿命的页面会话计划：作品身份、已批准 lane、评论上限、回复展开上限与缓存 TTL。
+
+插件只在这个计划内调用成熟的单篇详情采集能力，一次读取详情、媒体候选和有界评论树，并把页面结果按 `Lease + 作品` 存入 MV3 可恢复缓存。它不得提前为尚未领取的 lane 提交 Package；后续任务仍逐个领取自己的不可变 TaskSpec，再从缓存形成对应的单能力 Package、Attempt 与 Receipt。缓存过期、身份不符、lane 未批准或数据不存在时，只能回退原有单 lane 执行，不能自行补 lane 或扩大评论范围。
+
+因此这里复用的是昂贵的页面读取，不合并以下事实边界：
+
+- WorkOrder 中的顺序 Step；
+- 每个 Task 的能力和目标；
+- Attempt 与执行权；
+- Package、Coverage 和 Receipt；
+- 媒体字节取得与后续 OCR/ASR。
 
 ## Work Order 的边界
 
