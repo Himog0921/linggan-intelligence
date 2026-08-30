@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.4`
+> 版本: `0.8.5`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -89,6 +89,12 @@ Task，不重建任务、不重跑已完成步骤。
 领取自己的 TaskSpec，分别形成 Attempt、Package 和 Receipt，只是不再重复打开同一详情页。
 缓存按 Lease 与作品隔离、受租约剩余时间约束；缺失或过期时继续走原有单 lane 页面执行，
 不会用缓存扩大 WorkOrder 范围。
+0.8.5 补齐内容工作台 `2.0.93` 已经真实验证过、迁入时遗漏的 XHS SSR 详情读取路径：
+部分详情路由在页面水合后会删除全局 `__INITIAL_STATE__`，但原始页面脚本仍保留序列化的
+`noteDetailMap`。插件现在只做有界 JSON 对象解析，绝不执行页面脚本文本；详情就绪判断、
+完整度判断和正式单篇采集共用这一来源。旧详情容器缺失但 SSR 详情存在时，启动探针不再
+误报 selector blocked。全局运行态和 DOM fallback 继续保留，数据库、TaskSpec、Attempt、
+Package 与 WorkOrder 范围均未改变。
 
 实况图片仍是一个逻辑媒体卡槽，但静态图与动态图分别携带候选地址、取得工作和状态；
 普通图片、封面、视频和实况图片都只把远程 URL 当来源观察，长期展示必须使用 Linggan
@@ -114,7 +120,7 @@ npm run release:reproducibility
 npm run verify:linggan-isolation
 ```
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.4.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.5.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

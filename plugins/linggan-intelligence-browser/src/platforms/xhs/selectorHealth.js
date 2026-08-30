@@ -5,6 +5,7 @@ import {
 } from '../../shared/selectorHealth.js';
 import { POPUP_SELECTORS } from './batchShared.js';
 import { PAGE_TYPE } from '../../shared/constants.js';
+import { readXhsSsrNoteDetailMap } from './ssrNoteMap.js';
 
 const PROFILE_FEED_SELECTOR = '#userPostedFeeds';
 const FEEDS_CONTAINER_SELECTOR = '.feeds-container';
@@ -105,12 +106,22 @@ export function runXhsSelectorBootstrapProbe({ document = window.document, win =
       );
     }
     case PAGE_TYPE.NOTE_DETAIL: {
-      const check = buildPresenceCheck(
+      const shellCheck = buildPresenceCheck(
         document,
         'note_detail_shell',
         NOTE_DETAIL_SIGNAL_SELECTORS,
         '笔记详情容器',
       );
+      const ssrNoteMap = readXhsSsrNoteDetailMap(document);
+      const ssrCheck = {
+        name: 'note_detail_ssr_state',
+        ok: Object.keys(ssrNoteMap).length > 0,
+        selector: 'document.scripts -> window.__INITIAL_STATE__.note.noteDetailMap',
+        detail: '笔记详情 SSR 状态',
+        verifiedAt: new Date().toISOString(),
+        stale: false,
+      };
+      const check = shellCheck.ok ? shellCheck : ssrCheck;
       return publishSelectorHealthSnapshot(
         finalizeSelectorPreflight('xhs', 'bootstrap', check.ok
           ? {

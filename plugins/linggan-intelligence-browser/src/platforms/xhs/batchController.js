@@ -49,6 +49,7 @@ import {
   getActiveCommentsContext,
 } from './batchShared.js';
 import { BaseBatchController } from '../../shared/baseBatchController.js';
+import { readXhsSsrNoteDetailMap } from './ssrNoteMap.js';
 export { BatchCommentController } from './batchCommentController.js';
 
 function toFiniteNumber(value, fallback = 0) {
@@ -1391,7 +1392,8 @@ export class BatchNoteController extends BaseBatchController {
   }
 
   _readExpectedNoteSnapshot(noteId) {
-    const noteMap = window.__INITIAL_STATE__?.note?.noteDetailMap || {};
+    const noteMap = window.__INITIAL_STATE__?.note?.noteDetailMap
+      || readXhsSsrNoteDetailMap(document);
     return resolveExpectedNoteFromMap(noteMap, noteId, window.location.href);
   }
 

@@ -76,3 +76,23 @@ test('xhs selector bootstrap probe inspects current search route without blockin
   assert.equal(result.ok, true);
   assert.equal(result.checks[0].name, 'feed_container');
 });
+
+test('xhs selector bootstrap accepts a signed detail route backed by SSR note state', () => {
+  const noteId = '6a8e86de00000000240043b0';
+  const win = {
+    location: {
+      href: `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=SIGNED`,
+      pathname: `/explore/${noteId}`,
+    },
+  };
+  const document = createDocument({});
+  document.scripts = [{
+    textContent: `window.__INITIAL_STATE__={"note":{"noteDetailMap":{"${noteId}":{"note":{"noteId":"${noteId}","title":"真实详情"}}}}}`,
+  }];
+
+  const result = runXhsSelectorBootstrapProbe({ document, win });
+
+  assert.equal(result.action, 'bootstrap');
+  assert.equal(result.ok, true);
+  assert.equal(result.checks[0].name, 'note_detail_ssr_state');
+});
