@@ -25,6 +25,12 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0005_collection_observation_target.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0006_collection_acquisition_chain.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0007_execution_station.sql"),
+    "\n",
     include_str!("../../../../database/migrations/0015_material_projection.sql"),
     "\n",
     include_str!("../../../../database/migrations/0016_material_social_lanes.sql"),
@@ -34,6 +40,16 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0018_material_discovery_lane.sql"),
     "\n",
     include_str!("../../../../database/migrations/0020_observation_runtime_automation.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0021_discovery_cover_media_acquisition.sql"),
+    "\n",
+    include_str!(
+        "../../../../database/migrations/0023_material_engagement_and_media_components.sql"
+    ),
+    "\n",
+    include_str!("../../../../database/migrations/0024_media_processing_runtime.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0025_work_resource_read.sql"),
     "\n",
     "INSERT",
     " INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES ('0001_scope_001_capture_evidence','1'),('0002_local_001_discovery','2'),('0003_local_trusted_producer','3'),('0004_plugin_runtime_all_capabilities','4'),('0015_material_projection','15'),('0016_material_social_lanes','16'),('0017_material_media_projection','17'),('0018_material_discovery_lane','18'),('0020_observation_runtime_automation','20');\n",
@@ -228,7 +244,7 @@ async fn library(database: &Database) -> Value {
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?lane=media_slots")
+                .uri("/api/local/work-resources?lane=media_slots")
                 .body(Body::empty())
                 .unwrap(),
         )

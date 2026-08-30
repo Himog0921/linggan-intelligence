@@ -1,11 +1,12 @@
 use linggan_contracts::{
-    ProducerTaskSpec, parse_producer_attempt, parse_producer_submission, parse_producer_task_spec,
+    EvidenceQuery, ProducerTaskSpec, parse_producer_attempt, parse_producer_submission,
+    parse_producer_task_spec,
 };
 use linggan_evidence::{
     CheckInOutcome, DispatchDecision, InstallationCheckIn, ProducerRuntimeError,
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, check_in_installation,
     create_producer_task, decide_dispatch, issue_work_order_lease, open_claim_window,
-    start_producer_attempt, submit_producer_package,
+    read_work_resources, start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::Row;
@@ -57,6 +58,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0023_material_engagement_and_media_components.sql"),
     "\n",
     include_str!("../../../database/migrations/0024_media_processing_runtime.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0025_work_resource_read.sql"),
 );
 
 #[tokio::test]
@@ -412,6 +415,29 @@ async fn detail_dispatch_uses_the_latest_accepted_signed_discovery_url_outside_t
         "https://www.xiaohongshu.com/user/profile/creator-fixture/{content_external_id}?xsec_token=SIGNED_FIXTURE%3D&xsec_source=pc_user"
     );
     submit_profile_discovery(&database, content_external_id, &signed_url).await;
+    let query: EvidenceQuery = serde_json::from_value(serde_json::json!({
+        "scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"
+    }))
+    .expect("work resource query is valid");
+    let resources = read_work_resources(&database, &query)
+        .await
+        .expect("shared work resource interface reads the accepted discovery");
+    let resource = resources
+        .items
+        .first()
+        .expect("one work resource is projected");
+    assert_eq!(
+        resource.collection_context.target_display_name.as_deref(),
+        Some("顺序派发夹具")
+    );
+    assert_eq!(
+        resource.collection_context.relationship_state,
+        "OBSERVED_ON_TARGET_SURFACE"
+    );
+    assert_eq!(
+        resource.collection_context.author_identity_match_state,
+        "NOT_VERIFIED"
+    );
     let content_public_ref: Uuid = sqlx::query_scalar(
         "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
     )

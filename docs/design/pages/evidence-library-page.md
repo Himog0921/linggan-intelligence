@@ -1,7 +1,7 @@
 # PAGE-EVIDENCE-001 · 多材料证据库
 
 > 状态: 权威当前
-> 最后核对: 2026-08-29
+> 最后核对: 2026-08-31
 > 适用范围: `语料 → 证据库` 的产品任务、页面信息架构、技术呈现要求、状态与验收；运行时入口仍为 `http://localhost:3000/corpus/evidence`
 > 事实来源: Mog 批准的五卡 Evidence Library 垂直交付、Issue #85/#86/#90、MEDIA-RECON-001、MATERIAL-PROJECTION-001、LIDS、UI execution contract 与当前 Rust/HTML/CSS/JS
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；本页规格不让静态原型冒充已接通运行时
@@ -49,7 +49,9 @@
 | 层级 | 当前事实 | 页面必须怎样表达 |
 |---|---|---|
 | 产品与设计 | 本规格和静态原型已冻结多材料职责 | 继续约束运行页，但原型内容不得冒充运行数据 |
-| 当前运行时 | `/corpus/evidence` 默认只消费 `/api/local/evidence-library`，列表以作品级 Material Projection 为事实源并按 `detailUrl` 读取 Inspector | 不混读 legacy cards；缺字段显示 `SOURCE_INCOMPLETE` |
+| 当前交付分支 | `/corpus/evidence` 只消费共享 `/api/local/work-resources`，列表与 Inspector 共用 Work Resource Read Interface | Evidence Library 不是接口 owner；后续页面不得另写 SQL/API/字段推断；不混读 legacy cards |
+| 作者与监控目标 | profile discovery 可证明作品来自目标表面；详情作者 ID 才能证明作者身份一致 | 分开显示“作品作者”和“监控目标”，以 `MATCHED/NOT_VERIFIED/MISMATCH` 表达关系，不用目标名填补作者 |
+| 发布时间 | detail collector 交付原始字段、值类型、精度、参照时点和 parser version；只有平台 epoch 晋升为精确时间 | `KNOWN / SOURCE_TEXT_ONLY / UNKNOWN` 分开；禁止用 observed/accepted 时间代替发布 |
 | 评论/回复 | 类型化 lane、Coverage 与本机授权评论研究通道已接入详情；普通列表不返回原文 | 原文只在授权详情按页读取，匿名上下文不暴露平台用户标识 |
 | 作者资料 | 详情可返回版本化作者上下文 | 页面不显示 `authorExternalId`，未知字段不补值 |
 | 媒体槽位 | Slot、来源代次、候选断言、Live Photo 组件及有界回执已进入 Material Projection | 槽位存在不等于字节已取得；回执截断但无通道 URL 时显示 `SOURCE_INCOMPLETE` |
@@ -88,7 +90,7 @@ Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
 | `EV-S02` | 语料二级 rail | 当前位于证据库；其他未接通入口保持禁用 | Route capability | 承担材料筛选或对象状态 |
 | `EV-S03` | 查询与范围条 | 本地材料检索、时间视角、lane/状态/媒体/受限筛选 | Query scope / asOf / cursor | 触发平台采集或保存观察规则 |
 | `EV-S04` | 结果上下文 | 结果数、匹配字段、排除/限制、读取水位 | Query receipt | 用总数证明平台总量或完整性 |
-| `EV-S05` | 作品材料集合列表 | 比较作品身份、脱敏摘要、lane 状态、最近观察和主要限制 | Work-level material read model | 以 Package/Blob/Slot 作顶层行 |
+| `EV-S05` | 作品材料集合列表 | 以研读/表格/封面三种排版比较同一批作品身份、作者/目标、时间、lane 和限制 | Work Resource Read | 以 Package/Blob/Slot 作顶层行；布局各走一套数据逻辑 |
 | `EV-S06` | 当前作品 Inspector | 概览、评论/回复、媒体、派生、来源/血缘、限制 | Selected work envelope | 第二搜索器、AI 结论、无来源补值 |
 | `EV-S07` | 反馈位置 | 查询无结果、读取失败、受限、部分、处理中、空态说明 | Read receipt / error envelope | Toast 替代必读错误或回执 |
 | `EV-S08` | 窄屏控制 | 打开材料筛选、切换列表/Inspector、返回当前作品 | Local view state | 把三栏按比例缩小或隐藏关键状态 |
@@ -110,7 +112,7 @@ Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
 每个作品集合按下列顺序呈现：
 
 1. 本地媒体预览，或准确的未取得/已清理/受限状态；
-2. 平台、稳定作品引用、标题、作者、来源发布时间及精度；
+2. 平台、稳定作品引用、标题、作品作者、监控目标及二者身份关系、来源发布时间及精度；
 3. 脱敏摘要或“尚无可展示摘要”；
 4. 发现、详情、讨论、媒体、派生五组 lane；其中评论/回复和 OCR/ASR 仍可分别展开；
 5. 最近观察时点、主要 Coverage/停止原因、限制；
@@ -144,7 +146,7 @@ Inspector 默认停在“概览”，但页面不得只在隐藏 Tab 中提供�
 | 访问/处置 | restricted/withdrawn/bytes cleaned 等 | 当前 display policy | 让筛选绕过权限 |
 | 排序 | 默认最近观察降序；后续可明确切换来源发布时间 | sort key、asOf | 把“最近观察”写成“最新发布” |
 
-保存视图、批量选择、发起研究和补采当前继续禁用，直到各自有独立产品/权限/回执合同。
+排版使用独立 URL 参数 `layout=research|table|cover`；状态筛选继续使用 `view`。切换排版只重排已读取的同一 Work Resource 集合，不重新请求、不改字段资格、不改变当前选择。保存视图、批量选择、发起研究和补采当前继续禁用，直到各自有独立产品/权限/回执合同。
 
 ## 6. 材料 lane 与数据来源
 
@@ -170,7 +172,8 @@ query: text / timeView / lane / laneState / mediaKind / restriction / sort / cur
 read: asOf / scope / versions / cursor / resultCount / excludedCounts / limitations
 item:
   identity: platform / contentExternalId / stablePublicRef
-  display: title / creator / publishedAt + each value state
+  display: title / creator / publishedAt + source field/kind/precision/reference/parser + each value state
+  collectionContext: target / relationshipState / authorIdentityMatchState / workOrderRef
   preview: localAssetUrl / slotPurpose / bytesState / alt
   laneSummaries[]: lane / state / counts-with-value-state / stopReason / limitations / latestObservedAt
   summary: lastObservedAt / primaryLimitation / restrictionState / matchedFields
@@ -217,6 +220,7 @@ inspector:
 | `BYTES_CLEANED` | 字节已按策略清理 | 曾经取得，当前字节不再可读；允许派生/记录可追溯 | 从未取得、来源不存在 | Warning |
 | `WITHDRAWN_OR_RESTRICTED` | 已撤回或限制读取 | 有有效处置决定，读取被阻断/传播中或完成 | 普通失败、历史从未存在 | Danger |
 | `UNKNOWN` | 当前未知 | 合同或来源不能确定 | 0、正常、失败、完整 | Unknown |
+| `SOURCE_TEXT_ONLY` | 仅有来源时间文本 | 来源提供了可展示文本，但不足以证明精确时间点 | 精确发布时间、可用于严格时间窗 | Warning |
 
 ### 7.2 页面级状态
 

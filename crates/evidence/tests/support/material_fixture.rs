@@ -16,6 +16,12 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0005_collection_observation_target.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0006_collection_acquisition_chain.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0007_execution_station.sql"),
+    "\n",
     include_str!("../../../../database/migrations/0015_material_projection.sql"),
     "\n",
     include_str!("../../../../database/migrations/0016_material_social_lanes.sql"),
@@ -25,6 +31,16 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0018_material_discovery_lane.sql"),
     "\n",
     include_str!("../../../../database/migrations/0020_observation_runtime_automation.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0021_discovery_cover_media_acquisition.sql"),
+    "\n",
+    include_str!(
+        "../../../../database/migrations/0023_material_engagement_and_media_components.sql"
+    ),
+    "\n",
+    include_str!("../../../../database/migrations/0024_media_processing_runtime.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0025_work_resource_read.sql"),
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {
@@ -106,10 +122,11 @@ pub async fn submit_custom_package(
     });
     let submission =
         parse_producer_submission(&submission.to_string()).expect("submission validates");
-    assert!(matches!(
-        submit_producer_package(database, &submission).await,
-        Ok(RuntimeSubmissionOutcome::Acknowledged { .. })
-    ));
+    let outcome = submit_producer_package(database, &submission).await;
+    assert!(
+        matches!(outcome, Ok(RuntimeSubmissionOutcome::Acknowledged { .. })),
+        "material fixture submission must be acknowledged: {outcome:?}"
+    );
     package_ref
 }
 

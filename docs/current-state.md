@@ -1,12 +1,18 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-08-30
+> 最后核对: 2026-08-31
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
 ## 当前阶段
+
+### WORK-RESOURCE-READ-001 / Issue #110（交付分支实现中）
+
+为避免 Intelligence 各页各自拼封面、标题、作者与时间，当前交付分支新增中立 `Work Resource Read` Interface 与 `/api/local/work-resources`；Evidence Library 只是首个消费者。Media V2 继续拥有媒体事实，页面不能绕过共享接口另读 SQL/Package。profile discovery 的监控目标作为 collection context 单独返回，作品作者保持独立；没有详情 author ID 时明确 `NOT_VERIFIED`，不再把目标显示名填成作者。
+
+详情发布时间链修复了“插件算出 `publishedAt`、服务接纳却只存文本”的断点：additive `0025` 保存实际字段、source kind、precision、reference 与 parser version，只有合格 platform epoch 晋升为精确 `published_at`；相对/日历文本为 `SOURCE_TEXT_ONLY`。资料库增加 `layout=research|table|cover` 三种只改变排版的视图，继续共享查询、字段资格、当前选择和 Inspector。代码尚未合并、迁移尚未应用到共享库、运行时尚未发布；一条真实签名详情字段探针也仍等待用户对外部请求的当次确认。
 
 ### MATERIAL-DEEPENING-001 / Issue #103（真实 canary 执行中）
 

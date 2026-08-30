@@ -3,6 +3,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode, header},
 };
+#[cfg(any())]
 use linggan_evidence::{DiscoveryLibraryCard, DiscoveryLibraryProjection};
 use linggan_storage_postgres::testing::isolated_proof_schema;
 use sqlx::Row;
@@ -23,6 +24,26 @@ const LOCAL_001_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0005_collection_observation_target.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0006_collection_acquisition_chain.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0007_execution_station.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0008_collection_risk_pause.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0009_work_order_station.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0010_work_order_lease.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0011_execution_gate.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0012_target_monitor_schedule.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0013_drop_execution_gate.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0014_target_group.sql"),
+    "\n",
     include_str!("../../../../database/migrations/0015_material_projection.sql"),
     "\n",
     include_str!("../../../../database/migrations/0016_material_social_lanes.sql"),
@@ -31,18 +52,37 @@ const LOCAL_001_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0018_material_discovery_lane.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0019_work_order_lease_task_sequence.sql"),
+    "\n",
     include_str!("../../../../database/migrations/0020_observation_runtime_automation.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0021_discovery_cover_media_acquisition.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0022_material_deepening_scope.sql"),
+    "\n",
+    include_str!(
+        "../../../../database/migrations/0023_material_engagement_and_media_components.sql"
+    ),
+    "\n",
+    include_str!("../../../../database/migrations/0024_media_processing_runtime.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0025_work_resource_read.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', '0000000000000000000000000000000000000000000000000000000000000001'),\n",
     "('0002_local_001_discovery', '0000000000000000000000000000000000000000000000000000000000000002'),\n",
     "('0003_local_trusted_producer', '0000000000000000000000000000000000000000000000000000000000000003'),\n",
     "('0004_plugin_runtime_all_capabilities', '0000000000000000000000000000000000000000000000000000000000000004'),\n",
+    "('0005_collection_observation_target', '0000000000000000000000000000000000000000000000000000000000000005'),\n",
+    "('0006_collection_acquisition_chain', '0000000000000000000000000000000000000000000000000000000000000006'),\n",
+    "('0007_execution_station', '0000000000000000000000000000000000000000000000000000000000000007'),\n",
     "('0015_material_projection', '0000000000000000000000000000000000000000000000000000000000000015'),\n",
     "('0016_material_social_lanes', '0000000000000000000000000000000000000000000000000000000000000016'),\n",
     "('0017_material_media_projection', '0000000000000000000000000000000000000000000000000000000000000017'),\n",
     "('0018_material_discovery_lane', '0000000000000000000000000000000000000000000000000000000000000018'),\n",
-    "('0020_observation_runtime_automation', '0000000000000000000000000000000000000000000000000000000000000020');\n",
+    "('0020_observation_runtime_automation', '0000000000000000000000000000000000000000000000000000000000000020'),\n",
+    "('0024_media_processing_runtime', '0000000000000000000000000000000000000000000000000000000000000024'),\n",
+    "('0025_work_resource_read', '0000000000000000000000000000000000000000000000000000000000000025');\n",
 );
 
 #[tokio::test]
@@ -417,7 +457,7 @@ fn runtime_token_source_matches_the_full_lids_baseline() {
 }
 
 #[test]
-#[cfg(any())] // superseded page; observed cover is now an explicit qualified field
+#[cfg(any())] // superseded server-rendered discovery page
 fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
     let projection = DiscoveryLibraryProjection {
         cards: vec![DiscoveryLibraryCard {
@@ -945,8 +985,14 @@ async fn loopback_runtime_producer_uses_the_three_routes_published_by_health() {
     assert_eq!(
         health.pointer("/database/schema"),
         Some(&serde_json::Value::String(
-            "PLUGIN_RUNTIME_001_SCHEMA_READY".to_owned()
+            "PLUGIN_RUNTIME_002_SCHEMA_READY".to_owned()
         ))
+    );
+    assert_eq!(
+        health
+            .pointer("/routes/workResources")
+            .and_then(Value::as_str),
+        Some("/api/local/work-resources")
     );
     let task_path = health
         .pointer("/routes/localProducer/taskCreation")
@@ -1887,19 +1933,25 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
     assert!(html.contains("/assets/evidence-library.js"));
     assert!(html.contains("id=\"ev-work-list\""));
     assert!(html.contains("data-ev-panel=\"provenance\""));
-    assert!(EVIDENCE_LIBRARY_JS.contains("const API_ROOT = '/api/local/evidence-library'"));
+    for layout in ["research", "table", "cover"] {
+        assert!(html.contains(&format!("data-ev-layout=\"{layout}\"")));
+    }
+    assert!(EVIDENCE_LIBRARY_JS.contains("const API_ROOT = '/api/local/work-resources'"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("params.set('layout', model.activeLayout)"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("params.set('view', model.activeView)"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"cover\"]"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"table\"]"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("/api/local/evidence-library/legacy"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("fetch('http"));
 }
 
 #[test]
-fn evidence_runtime_renders_observed_cover_without_claiming_a_local_replica() {
-    assert!(EVIDENCE_LIBRARY_JS.contains("function observedCoverUrl"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("parsed.protocol === 'https:'"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("parsed.hostname.endsWith('.xhscdn.com')"));
+fn evidence_runtime_renders_only_controlled_media_handles() {
+    assert!(!EVIDENCE_LIBRARY_JS.contains("function observedCoverUrl"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("observedSourceUrl"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("sameOriginPath(item.preview?.localAssetUrl"));
     assert!(EVIDENCE_LIBRARY_JS.contains("node('img')"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("来源封面 · 未物化"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("referrerPolicy = 'no-referrer'"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("本地副本"));
     assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-preview img"));
 }
 
@@ -1907,6 +1959,7 @@ fn evidence_runtime_renders_observed_cover_without_claiming_a_local_replica() {
 fn evidence_runtime_preserves_unknown_partial_and_restricted_states() {
     for state in [
         "UNKNOWN",
+        "SOURCE_TEXT_ONLY",
         "PARTIAL",
         "RISK_CONTROL",
         "BYTES_CLEANED",
