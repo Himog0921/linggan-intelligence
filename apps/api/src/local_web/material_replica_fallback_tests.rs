@@ -206,7 +206,7 @@ async fn library(database: &Database) -> Value {
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?lane=media_slots")
+                .uri("/api/local/work-resources?lane=media_slots")
                 .body(Body::empty())
                 .unwrap(),
         )

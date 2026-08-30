@@ -3,6 +3,7 @@ use axum::{
     body::{Body, to_bytes},
     http::{Request, StatusCode, header},
 };
+#[cfg(any())]
 use linggan_evidence::{DiscoveryLibraryCard, DiscoveryLibraryProjection};
 use linggan_storage_postgres::testing::isolated_proof_schema;
 use sqlx::Row;
@@ -383,7 +384,7 @@ fn runtime_token_source_matches_the_full_lids_baseline() {
 }
 
 #[test]
-#[cfg(any())] // superseded page; observed cover is now an explicit qualified field
+#[cfg(any())] // superseded server-rendered discovery page
 fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
     let projection = DiscoveryLibraryProjection {
         cards: vec![DiscoveryLibraryCard {
@@ -913,6 +914,12 @@ async fn loopback_runtime_producer_uses_the_three_routes_published_by_health() {
         Some(&serde_json::Value::String(
             "PLUGIN_RUNTIME_002_SCHEMA_READY".to_owned()
         ))
+    );
+    assert_eq!(
+        health
+            .pointer("/routes/workResources")
+            .and_then(Value::as_str),
+        Some("/api/local/work-resources")
     );
     let task_path = health
         .pointer("/routes/localProducer/taskCreation")
@@ -1853,19 +1860,25 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
     assert!(html.contains("/assets/evidence-library.js"));
     assert!(html.contains("id=\"ev-work-list\""));
     assert!(html.contains("data-ev-panel=\"provenance\""));
-    assert!(EVIDENCE_LIBRARY_JS.contains("const API_ROOT = '/api/local/evidence-library'"));
+    for layout in ["research", "table", "cover"] {
+        assert!(html.contains(&format!("data-ev-layout=\"{layout}\"")));
+    }
+    assert!(EVIDENCE_LIBRARY_JS.contains("const API_ROOT = '/api/local/work-resources'"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("params.set('layout', model.activeLayout)"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("params.set('view', model.activeView)"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"cover\"]"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"table\"]"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("/api/local/evidence-library/legacy"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("fetch('http"));
 }
 
 #[test]
-fn evidence_runtime_renders_observed_cover_without_claiming_a_local_replica() {
-    assert!(EVIDENCE_LIBRARY_JS.contains("function observedCoverUrl"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("parsed.protocol === 'https:'"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("parsed.hostname.endsWith('.xhscdn.com')"));
+fn evidence_runtime_renders_only_controlled_media_handles() {
+    assert!(!EVIDENCE_LIBRARY_JS.contains("function observedCoverUrl"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("observedSourceUrl"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("sameOriginPath(item.preview?.localAssetUrl"));
     assert!(EVIDENCE_LIBRARY_JS.contains("node('img')"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("来源封面 · 未物化"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("referrerPolicy = 'no-referrer'"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("本地副本"));
     assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-preview img"));
 }
 
@@ -1873,6 +1886,7 @@ fn evidence_runtime_renders_observed_cover_without_claiming_a_local_replica() {
 fn evidence_runtime_preserves_unknown_partial_and_restricted_states() {
     for state in [
         "UNKNOWN",
+        "SOURCE_TEXT_ONLY",
         "PARTIAL",
         "RISK_CONTROL",
         "BYTES_CLEANED",

@@ -16,7 +16,7 @@ async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrela
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?q=可检索&lane=comments")
+                .uri("/api/local/work-resources?q=可检索&lane=comments")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -39,7 +39,7 @@ async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrela
     let unfiltered = app_with_database(database)
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library")
+                .uri("/api/local/work-resources")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -76,7 +76,7 @@ async fn loopback_comment_lane_hides_sensitive_body_and_external_identity() {
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?lane=comments")
+                .uri("/api/local/work-resources?lane=comments")
                 .body(Body::empty())
                 .unwrap(),
         )

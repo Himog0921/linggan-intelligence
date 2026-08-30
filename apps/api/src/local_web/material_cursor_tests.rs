@@ -27,7 +27,7 @@ const LEGACY_MIGRATIONS: &str = concat!(
 async fn legacy_schema_validates_cursor_before_refusing_an_unfulfillable_page() {
     let current = proof_database("material_cursor_source").await;
     seed_details(&current, 0, 55, false).await;
-    let first = get_json(&current, "/api/local/evidence-library").await;
+    let first = get_json(&current, "/api/local/work-resources").await;
     let cursor = first.pointer("/cursor").and_then(Value::as_str).unwrap();
     let future = cursor_with_future_as_of(cursor);
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
@@ -36,17 +36,17 @@ async fn legacy_schema_validates_cursor_before_refusing_an_unfulfillable_page() 
         .expect("legacy migrations apply");
 
     for uri in [
-        "/api/local/evidence-library?cursor=garbage".to_owned(),
-        format!("/api/local/evidence-library?q=mismatch&cursor={cursor}"),
-        format!("/api/local/evidence-library?cursor={future}"),
-        "/api/local/evidence-library?sort=relevance".to_owned(),
+        "/api/local/work-resources?cursor=garbage".to_owned(),
+        format!("/api/local/work-resources?q=mismatch&cursor={cursor}"),
+        format!("/api/local/work-resources?cursor={future}"),
+        "/api/local/work-resources?sort=relevance".to_owned(),
     ] {
         assert_eq!(get_status(&legacy, &uri).await, StatusCode::BAD_REQUEST);
     }
     let response = app_with_database(legacy)
         .oneshot(
             Request::builder()
-                .uri(format!("/api/local/evidence-library?cursor={cursor}"))
+                .uri(format!("/api/local/work-resources?cursor={cursor}"))
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -70,7 +70,7 @@ async fn legacy_schema_validates_cursor_before_refusing_an_unfulfillable_page() 
 async fn cursor_freezes_as_of_rejects_corruption_and_avoids_cross_page_duplicates() {
     let database = proof_database("material_cursor_watermark").await;
     seed_details(&database, 0, 55, false).await;
-    let first = get_json(&database, "/api/local/evidence-library").await;
+    let first = get_json(&database, "/api/local/work-resources").await;
     assert_eq!(
         first
             .pointer("/items")
@@ -89,7 +89,7 @@ async fn cursor_freezes_as_of_rejects_corruption_and_avoids_cross_page_duplicate
     seed_details(&database, 100, 1, false).await;
     let second = get_json(
         &database,
-        &format!("/api/local/evidence-library?cursor={cursor}"),
+        &format!("/api/local/work-resources?cursor={cursor}"),
     )
     .await;
     assert_eq!(second.pointer("/asOf").and_then(Value::as_str), Some(as_of));
@@ -118,7 +118,7 @@ async fn cursor_freezes_as_of_rejects_corruption_and_avoids_cross_page_duplicate
     assert_eq!(
         get_status(
             &database,
-            &format!("/api/local/evidence-library?cursor={corrupted}")
+            &format!("/api/local/work-resources?cursor={corrupted}")
         )
         .await,
         StatusCode::BAD_REQUEST
@@ -126,19 +126,19 @@ async fn cursor_freezes_as_of_rejects_corruption_and_avoids_cross_page_duplicate
     assert_eq!(
         get_status(
             &database,
-            &format!("/api/local/evidence-library?q=different&cursor={cursor}")
+            &format!("/api/local/work-resources?q=different&cursor={cursor}")
         )
         .await,
         StatusCode::BAD_REQUEST
     );
     assert_eq!(
-        get_status(&database, "/api/local/evidence-library?sort=relevance").await,
+        get_status(&database, "/api/local/work-resources?sort=relevance").await,
         StatusCode::BAD_REQUEST
     );
     assert_eq!(
         get_status(
             &database,
-            "/api/local/evidence-library?window=last_7_days&cursor=garbage"
+            "/api/local/work-resources?window=last_7_days&cursor=garbage"
         )
         .await,
         StatusCode::BAD_REQUEST
@@ -146,7 +146,7 @@ async fn cursor_freezes_as_of_rejects_corruption_and_avoids_cross_page_duplicate
     assert_eq!(
         get_status(
             &database,
-            &format!("/api/local/evidence-library?window=last_7_days&cursor={cursor}")
+            &format!("/api/local/work-resources?window=last_7_days&cursor={cursor}")
         )
         .await,
         StatusCode::BAD_REQUEST
@@ -155,7 +155,7 @@ async fn cursor_freezes_as_of_rejects_corruption_and_avoids_cross_page_duplicate
         get_status(
             &database,
             &format!(
-                "/api/local/evidence-library?cursor={}",
+                "/api/local/work-resources?cursor={}",
                 cursor_with_future_as_of(cursor)
             )
         )
@@ -169,7 +169,7 @@ async fn cursor_freezes_as_of_rejects_corruption_and_avoids_cross_page_duplicate
 async fn post_enrichment_filter_scans_past_non_matches_until_the_page_is_exhausted() {
     let database = proof_database("material_cursor_filter_fill").await;
     seed_details(&database, 0, 58, true).await;
-    let payload = get_json(&database, "/api/local/evidence-library?lane=author").await;
+    let payload = get_json(&database, "/api/local/work-resources?lane=author").await;
     assert_eq!(
         payload
             .pointer("/items")
@@ -193,7 +193,7 @@ async fn a_late_accepted_older_observation_does_not_replace_the_latest_observed_
     let database = proof_database("material_observation_order").await;
     seed_details(&database, 0, 1, false).await;
     seed_older_detail_version(&database).await;
-    let payload = get_json(&database, "/api/local/evidence-library").await;
+    let payload = get_json(&database, "/api/local/work-resources").await;
     assert_eq!(
         payload
             .pointer("/items/0/display/title")
@@ -215,7 +215,7 @@ async fn scan_budget_returns_an_honest_continuation_without_rescanning_non_match
     seed_details(&database, 0, 205, false).await;
     let first = get_json(
         &database,
-        "/api/local/evidence-library?restriction=WITHDRAWN_OR_RESTRICTED",
+        "/api/local/work-resources?restriction=WITHDRAWN_OR_RESTRICTED",
     )
     .await;
     assert_eq!(
@@ -236,7 +236,7 @@ async fn scan_budget_returns_an_honest_continuation_without_rescanning_non_match
     let cursor = first.pointer("/cursor").and_then(Value::as_str).unwrap();
     let second = get_json(
         &database,
-        &format!("/api/local/evidence-library?restriction=WITHDRAWN_OR_RESTRICTED&cursor={cursor}"),
+        &format!("/api/local/work-resources?restriction=WITHDRAWN_OR_RESTRICTED&cursor={cursor}"),
     )
     .await;
     assert_eq!(

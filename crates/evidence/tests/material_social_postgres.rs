@@ -3,7 +3,7 @@ mod fixture;
 
 use fixture::{coverage_layer, proof_database, submit_custom_package, submit_package};
 use linggan_evidence::{
-    material_projection_schema_is_ready, producer_runtime_schema_is_ready, read_material_detail,
+    producer_runtime_schema_is_ready, read_work_resource, work_resource_schema_is_ready,
 };
 use sqlx::Row;
 
@@ -12,11 +12,7 @@ use sqlx::Row;
 async fn runtime_and_material_readiness_require_the_comment_current_projection_migration() {
     let database = proof_database("comment_projection_readiness_gate").await;
     assert!(producer_runtime_schema_is_ready(&database).await.unwrap());
-    assert!(
-        material_projection_schema_is_ready(&database)
-            .await
-            .unwrap()
-    );
+    assert!(work_resource_schema_is_ready(&database).await.unwrap());
 
     sqlx::query(
         "DELETE FROM linggan_local_schema_migration \
@@ -27,11 +23,7 @@ async fn runtime_and_material_readiness_require_the_comment_current_projection_m
     .unwrap();
 
     assert!(!producer_runtime_schema_is_ready(&database).await.unwrap());
-    assert!(
-        !material_projection_schema_is_ready(&database)
-            .await
-            .unwrap()
-    );
+    assert!(!work_resource_schema_is_ready(&database).await.unwrap());
 }
 
 #[tokio::test]
@@ -224,7 +216,7 @@ async fn retrying_a_note_keeps_attempt_history_but_current_comments_are_idempote
     .fetch_one(database.pool())
     .await
     .unwrap();
-    let material = read_material_detail(&database, content_ref)
+    let material = read_work_resource(&database, content_ref)
         .await
         .unwrap()
         .expect("the earlier accepted Attempt remains visible at the read as-of boundary");

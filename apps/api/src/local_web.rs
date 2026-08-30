@@ -40,10 +40,10 @@ use linggan_contracts::{
 use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, CheckInOutcome, DiscoveryIngressError,
     DispatchDecision, InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
-    LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget, MaterialReadError,
-    MediaUploadFinalizeClaim, ProducerRuntimeError, RuntimeAttemptOutcome,
-    RuntimeSubmissionOutcome, RuntimeTaskOutcome, StoreOutcome, admit_media_blob,
-    begin_media_upload, check_in_installation, claim_installation, claim_media_acquisition,
+    LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget, MediaUploadFinalizeClaim,
+    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
+    StoreOutcome, WorkResourceReadError, admit_media_blob, begin_media_upload,
+    check_in_installation, claim_installation, claim_media_acquisition,
     claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
     create_manual_task, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
     enrich_target_from_author_profile, grant_authorization, ingest_discovery_package,
@@ -343,17 +343,17 @@ fn material_api_routes() -> Router<LocalWebState> {
             "/api/local/derivative/{derivative_ref}",
             get(local_media_routes::derivative),
         )
-        .route("/api/local/evidence-library", get(evidence_library_json))
+        .route("/api/local/work-resources", get(evidence_library_json))
         .route(
             "/api/local/evidence-library/legacy",
             get(material_projection::legacy_json),
         )
         .route(
-            "/api/local/evidence-library/{public_ref}/comments",
+            "/api/local/work-resources/{public_ref}/comments",
             get(material_projection::research_comments_json),
         )
         .route(
-            "/api/local/evidence-library/{public_ref}",
+            "/api/local/work-resources/{public_ref}",
             get(material_projection::detail_json),
         )
 }
@@ -469,6 +469,7 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
         "scheduler": scheduler,
         "routes": {
             "evidenceLibrary": "/corpus/evidence",
+            "workResources": "/api/local/work-resources",
             "discoveryIngress": "/api/local/discovery-packages",
             "localProducer": local_producer_routes,
             "station": station_routes,
@@ -499,17 +500,17 @@ async fn evidence_library_json(
     };
     match material_projection::compose_json(database, &query).await {
         Ok(response) => Json(response).into_response(),
-        Err(MaterialReadError::InvalidCursor | MaterialReadError::UnsupportedSort) => {
+        Err(WorkResourceReadError::InvalidCursor | WorkResourceReadError::UnsupportedSort) => {
             local_read_json_error(
                 axum::http::StatusCode::BAD_REQUEST,
                 "invalid_material_query_cursor_or_sort",
             )
         }
-        Err(MaterialReadError::ProjectionUnavailable) => local_read_json_error(
+        Err(WorkResourceReadError::ProjectionUnavailable) => local_read_json_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "material_projection_schema_unavailable",
         ),
-        Err(MaterialReadError::Database(error)) => {
+        Err(WorkResourceReadError::Database(error)) => {
             eprintln!("material read projection unavailable: {error}");
             local_read_json_error(
                 axum::http::StatusCode::SERVICE_UNAVAILABLE,
@@ -2800,8 +2801,19 @@ fn evidence_library_html() -> String {
             </aside>
 
             <section class="ev-results" aria-labelledby="results-title">
-              <header class="ev-results-head"><div><span class="ev-kicker">作品级材料集合</span><h2 id="results-title">多通道真实状态</h2></div><strong id="ev-results-count">正在读取</strong></header>
+              <header class="ev-results-head">
+                <div><span class="ev-kicker">作品级材料集合</span><h2 id="results-title">多通道真实状态</h2></div>
+                <div class="ev-results-tools">
+                  <strong id="ev-results-count">正在读取</strong>
+                  <div class="ev-layout-switch" role="group" aria-label="结果排版">
+                    <button type="button" data-ev-layout="research" aria-pressed="true">研读</button>
+                    <button type="button" data-ev-layout="table" aria-pressed="false">表格</button>
+                    <button type="button" data-ev-layout="cover" aria-pressed="false">封面</button>
+                  </div>
+                </div>
+              </header>
               <div class="ev-feedback" id="ev-feedback" role="status" aria-live="polite"></div>
+              <div class="ev-table-head" id="ev-table-head" aria-hidden="true" hidden><span>作品</span><span>作者与监控目标</span><span>发布时间</span><span>材料状态</span></div>
               <div class="ev-work-list" id="ev-work-list" role="listbox" aria-label="作品材料集合"></div>
               <div class="ev-list-footer"><button class="ev-button ev-button--secondary" id="ev-next-list" type="button" hidden>继续读取作品</button></div>
             </section>

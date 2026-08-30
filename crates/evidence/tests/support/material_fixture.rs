@@ -65,8 +65,11 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0025_comment_current_projection.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0026_work_resource_read.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
-    "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885');\n",
+    "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
+    "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {
@@ -148,10 +151,11 @@ pub async fn submit_custom_package(
     });
     let submission =
         parse_producer_submission(&submission.to_string()).expect("submission validates");
-    assert!(matches!(
-        submit_producer_package(database, &submission).await,
-        Ok(RuntimeSubmissionOutcome::Acknowledged { .. })
-    ));
+    let outcome = submit_producer_package(database, &submission).await;
+    assert!(
+        matches!(outcome, Ok(RuntimeSubmissionOutcome::Acknowledged { .. })),
+        "material fixture submission must be acknowledged: {outcome:?}"
+    );
     package_ref
 }
 

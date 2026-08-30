@@ -663,6 +663,11 @@ function sanitizeNoteRecord(note = {}) {
       || firstText(note.releaseDate)
       || firstText(note.timeText)
       || firstText(note.time),
+    publishedAtSourceField: firstText(note.publishedAtSourceField),
+    publishedAtSourceKind: firstText(note.publishedAtSourceKind) || 'unknown',
+    publishedAtPrecision: firstText(note.publishedAtPrecision) || 'unknown',
+    publishedAtReferenceObservedAt: firstText(note.publishedAtReferenceObservedAt),
+    publishedAtParserVersion: firstText(note.publishedAtParserVersion),
     type: String(note.type || note.contentType || note.noteType || note.itemType || '').trim(),
     lastUpdateTime: note.lastUpdateTime ?? null,
     rank: toFiniteNumber(note.rank ?? note.batchRank, 0),

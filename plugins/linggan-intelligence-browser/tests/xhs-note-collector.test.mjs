@@ -8,6 +8,7 @@ import {
   isCollectedNoteUsable,
   parseXhsInteractCount,
   parseXhsPublishedAt,
+  readXhsPublishedAtEvidence,
   readXhsNoteDetailFromDom,
   resolveExpectedNoteFromMap,
   selectNoteKey,
@@ -173,6 +174,28 @@ test('parseXhsPublishedAt parses relative and calendar time text', () => {
     parseXhsPublishedAt('3小时前', { now: fixedNow }),
     new Date('2026-04-21T09:00:00+08:00').getTime(),
   );
+});
+
+test('readXhsPublishedAtEvidence qualifies an exact detail epoch with its source field', () => {
+  assert.deepEqual(readXhsPublishedAtEvidence({ publishTime: 1713501296 }, { now: 1 }), {
+    publishedAt: 1713501296000,
+    publishedAtText: '1713501296',
+    publishedAtSourceField: 'publishTime',
+    publishedAtSourceKind: 'platform_epoch',
+    publishedAtPrecision: 'second',
+    publishedAtReferenceObservedAt: null,
+    publishedAtParserVersion: 'xhs-detail-time-v2',
+  });
+});
+
+test('readXhsPublishedAtEvidence keeps relative detail text reference-qualified, not exact', () => {
+  const now = new Date('2026-04-21T12:00:00+08:00').getTime();
+  const result = readXhsPublishedAtEvidence({ time: '3小时前' }, { now });
+  assert.equal(result.publishedAt, new Date('2026-04-21T09:00:00+08:00').getTime());
+  assert.equal(result.publishedAtSourceField, 'time');
+  assert.equal(result.publishedAtSourceKind, 'visible_text');
+  assert.equal(result.publishedAtPrecision, 'relative');
+  assert.equal(result.publishedAtReferenceObservedAt, new Date(now).toISOString());
 });
 
 test('extractXhsLivePhotoStreams keeps xhs live photo stream candidates', () => {

@@ -5,7 +5,9 @@ pub(crate) const MATERIAL_PAGE_SQL: &str = "WITH latest_detail AS ( \
      detail.content_public_ref,detail.material_ref,detail.package_ref,detail.record_ordinal,detail.observed_at, \
      detail.title,detail.title_state,detail.body_text,detail.body_state, \
      detail.creator_display_name,detail.creator_display_name_state, \
-     detail.published_at_source_text,detail.published_at_source_text_state,detail.author_external_id, \
+     detail.published_at::text AS published_at,detail.published_at_source_text,detail.published_at_source_text_state, \
+     detail.published_at_source_field,detail.published_at_source_kind,detail.published_at_precision, \
+     detail.published_at_reference_observed_at::text AS published_at_reference_observed_at,detail.published_at_parser_version,detail.author_external_id, \
      detail.like_count,detail.like_count_state,detail.comment_count,detail.comment_count_state, \
      detail.collect_count,detail.collect_count_state,detail.share_count,detail.share_count_state \
    FROM linggan_material_content_detail detail JOIN linggan_runtime_capture_package detail_package USING(package_ref) \
@@ -30,7 +32,8 @@ pub(crate) const MATERIAL_PAGE_SQL: &str = "WITH latest_detail AS ( \
      COALESCE(detail.title,discovery.title) AS title,CASE WHEN detail.title IS NOT NULL THEN detail.title_state ELSE COALESCE(discovery.title_state,'UNKNOWN') END AS title_state,detail.body_text, \
      COALESCE(detail.body_state,'UNKNOWN') AS body_state,COALESCE(detail.creator_display_name,discovery.creator_display_name) AS creator_display_name, \
      CASE WHEN detail.creator_display_name IS NOT NULL THEN detail.creator_display_name_state ELSE COALESCE(discovery.creator_state,'UNKNOWN') END AS creator_display_name_state, \
-     COALESCE(detail.published_at_source_text,discovery.published_at_source_text) AS published_at_source_text,CASE WHEN detail.published_at_source_text IS NOT NULL THEN detail.published_at_source_text_state ELSE COALESCE(discovery.published_at_source_text_state,'UNKNOWN') END AS published_at_source_text_state, \
+     detail.published_at,COALESCE(detail.published_at_source_text,discovery.published_at_source_text) AS published_at_source_text,CASE WHEN detail.published_at_source_text IS NOT NULL THEN detail.published_at_source_text_state ELSE COALESCE(discovery.published_at_source_text_state,'UNKNOWN') END AS published_at_source_text_state, \
+     detail.published_at_source_field,COALESCE(detail.published_at_source_kind,'unknown') AS published_at_source_kind,COALESCE(detail.published_at_precision,'unknown') AS published_at_precision,detail.published_at_reference_observed_at,detail.published_at_parser_version, \
      detail.author_external_id,discovery.cover_source_url,COALESCE(discovery.cover_source_state,'UNKNOWN') AS cover_source_state, \
      COALESCE(detail.like_count,discovery.like_count) AS like_count,CASE WHEN detail.like_count IS NOT NULL THEN detail.like_count_state ELSE COALESCE(discovery.like_count_state,'UNKNOWN') END AS like_count_state, \
      COALESCE(detail.comment_count,discovery.comment_count) AS comment_count,CASE WHEN detail.comment_count IS NOT NULL THEN detail.comment_count_state ELSE COALESCE(discovery.comment_count_state,'UNKNOWN') END AS comment_count_state, \

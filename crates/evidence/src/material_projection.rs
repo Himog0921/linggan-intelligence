@@ -8,7 +8,7 @@ use crate::material_cursor;
 use crate::material_media_read;
 use crate::material_projection_types::default_lane_summaries;
 pub use crate::material_projection_types::{
-    MaterialDisplay, MaterialEngagement, MaterialIdentity, MaterialLaneSummary,
+    MaterialCollectionContext, MaterialDisplay, MaterialEngagement, MaterialIdentity,
     MaterialLibraryItem, MaterialLibraryProjection, MaterialPreview, MaterialSummary,
 };
 use crate::material_social_read;
@@ -210,7 +210,7 @@ pub(crate) async fn enrich_discovery_material(
     item: &mut MaterialLibraryItem,
     as_of: &str,
 ) -> Result<(), sqlx::Error> {
-    let row=sqlx::query("SELECT finding.material_ref,finding.package_ref,finding.discovery_kind,finding.result_position,finding.observed_at,package.coverage,task.task_spec FROM linggan_material_discovery_finding finding JOIN linggan_runtime_capture_package package USING(package_ref) JOIN linggan_runtime_task task ON task.task_id=package.task_id WHERE finding.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz ORDER BY finding.observed_at::timestamptz DESC,finding.created_at DESC LIMIT 1")
+    let row=sqlx::query("SELECT finding.material_ref,finding.package_ref,finding.discovery_kind,finding.result_position,finding.observed_at,package.coverage,package.task_id,package.attempt_id,task.task_spec,receipt.receipt_ref FROM linggan_material_discovery_finding finding JOIN linggan_runtime_capture_package package USING(package_ref) JOIN linggan_runtime_task task ON task.task_id=package.task_id LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref WHERE finding.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz ORDER BY finding.observed_at::timestamptz DESC,finding.created_at DESC LIMIT 1")
         .bind(item.identity.public_ref).bind(as_of).fetch_optional(&mut **tx).await?;
     let Some(row) = row else {
         return Ok(());
@@ -270,6 +270,125 @@ pub(crate) async fn enrich_discovery_material(
     }
     if let Some(inspector) = item.inspector.as_object_mut() {
         inspector.insert("discovery".to_owned(),serde_json::json!({"kind":row.get::<String,_>("discovery_kind"),"resultPosition":row.get::<Option<i32>,_>("result_position"),"sourceRef":row.get::<Uuid,_>("material_ref"),"packageRef":row.get::<Uuid,_>("package_ref"),"coverage":coverage}));
+        if let Some(provenance) = inspector
+            .get_mut("provenance")
+            .and_then(Value::as_object_mut)
+        {
+            provenance.insert(
+                "taskRefs".to_owned(),
+                serde_json::json!([row.get::<Uuid, _>("task_id")]),
+            );
+            provenance.insert(
+                "attemptRefs".to_owned(),
+                serde_json::json!([row.get::<Uuid, _>("attempt_id")]),
+            );
+            provenance.insert(
+                "receiptRefs".to_owned(),
+                serde_json::json!(
+                    row.get::<Option<Uuid>, _>("receipt_ref")
+                        .into_iter()
+                        .collect::<Vec<_>>()
+                ),
+            );
+        }
+    }
+    enrich_collection_context(tx, item, &kind, row.get("task_id"), row.get("task_spec")).await?;
+    Ok(())
+}
+
+async fn enrich_collection_context(
+    tx: &mut Transaction<'_, Postgres>,
+    item: &mut MaterialLibraryItem,
+    discovery_kind: &str,
+    task_id: Uuid,
+    task_spec: Value,
+) -> Result<(), sqlx::Error> {
+    let schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('collection_observation_target') IS NOT NULL \
+         AND to_regclass('collection_work_order') IS NOT NULL \
+         AND to_regclass('collection_work_order_lease') IS NOT NULL \
+         AND to_regclass('collection_work_order_lease_task') IS NOT NULL",
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    if !schema_ready {
+        return Ok(());
+    }
+    let target_kind = task_spec
+        .pointer("/target/authorExternalId")
+        .and_then(Value::as_str)
+        .map(|_| "creator")
+        .or_else(|| {
+            task_spec
+                .pointer("/target/query")
+                .and_then(Value::as_str)
+                .map(|_| "keyword")
+        });
+    let identity_key = task_spec
+        .pointer("/target/authorExternalId")
+        .or_else(|| task_spec.pointer("/target/query"))
+        .and_then(Value::as_str);
+    let row = sqlx::query(
+        "SELECT target.target_ref,target.target_kind,target.identity_key,target.display_name,work_order.work_order_ref, \
+                (lease_task.task_id IS NOT NULL) AS task_linked \
+         FROM collection_observation_target target \
+         LEFT JOIN collection_work_order work_order ON work_order.target_ref=target.target_ref \
+         LEFT JOIN collection_work_order_lease lease ON lease.work_order_ref=work_order.work_order_ref \
+         LEFT JOIN collection_work_order_lease_task lease_task ON lease_task.lease_ref=lease.lease_ref AND lease_task.task_id=$1 \
+         WHERE lease_task.task_id=$1 OR (target.platform=$2 AND target.target_kind=$3 AND target.identity_key=$4) \
+         ORDER BY (lease_task.task_id IS NOT NULL) DESC,work_order.created_at DESC NULLS LAST,target.first_stored_at DESC LIMIT 1",
+    )
+    .bind(task_id)
+    .bind(&item.identity.platform)
+    .bind(target_kind)
+    .bind(identity_key)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(row) = row else {
+        return Ok(());
+    };
+    let target_kind: String = row.get("target_kind");
+    let target_identity: String = row.get("identity_key");
+    let target_display_name: Option<String> = row.get("display_name");
+    let target_ref: Uuid = row.get("target_ref");
+    let work_order_ref: Option<Uuid> = row.get("work_order_ref");
+    item.collection_context.relationship_state =
+        if discovery_kind == "profile_discovery" && target_kind == "creator" {
+            "OBSERVED_ON_TARGET_SURFACE".to_owned()
+        } else {
+            "DISCOVERED_FOR_TARGET".to_owned()
+        };
+    item.collection_context.target_ref = Some(target_ref);
+    item.collection_context.target_kind = Some(target_kind.clone());
+    item.collection_context.target_display_state = if target_display_name.is_some() {
+        "KNOWN".to_owned()
+    } else {
+        "UNKNOWN".to_owned()
+    };
+    item.collection_context.target_display_name = target_display_name;
+    item.collection_context.author_identity_match_state =
+        match item.author_external_id.as_deref() {
+            Some(author_external_id)
+                if target_kind == "creator" && author_external_id == target_identity =>
+            {
+                "MATCHED"
+            }
+            Some(_) if target_kind == "creator" => "MISMATCH",
+            _ if target_kind == "creator" => "NOT_VERIFIED",
+            _ => "NOT_APPLICABLE",
+        }
+        .to_owned();
+    item.collection_context.work_order_ref = work_order_ref;
+    if let Some(provenance) = item
+        .inspector
+        .pointer_mut("/provenance")
+        .and_then(Value::as_object_mut)
+    {
+        provenance.insert("targetRefs".to_owned(), serde_json::json!([target_ref]));
+        provenance.insert(
+            "workOrderRefs".to_owned(),
+            serde_json::json!(work_order_ref.into_iter().collect::<Vec<_>>()),
+        );
     }
     Ok(())
 }
@@ -394,7 +513,13 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
     }
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM linggan_local_schema_migration \
-                        WHERE migration_id = '0025_comment_current_projection')",
+                        WHERE migration_id = '0025_comment_current_projection') \
+                AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
+                            WHERE migration_id = '0026_work_resource_read') \
+                AND EXISTS (SELECT 1 FROM information_schema.columns \
+                            WHERE table_schema=current_schema() \
+                              AND table_name='linggan_material_content_detail' \
+                              AND column_name='published_at_source_kind')",
     )
     .fetch_one(database.pool())
     .await
@@ -404,6 +529,8 @@ pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> M
     let title: Option<String> = row.get("title");
     let body: Option<String> = row.get("body_text");
     let creator: Option<String> = row.get("creator_display_name");
+    let published_at: Option<String> = row.get("published_at");
+    let published_at_source_text: Option<String> = row.get("published_at_source_text");
     let observed_at: String = row.get("observed_at");
     let material_ref: Option<Uuid> = row.get("material_ref");
     let package_ref: Option<Uuid> = row.get("package_ref");
@@ -437,11 +564,21 @@ pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> M
             title_state: row.get("title_state"),
             creator_display_name: creator,
             creator_state: row.get("creator_display_name_state"),
-            published_at: None,
-            published_at_source_text: row.get("published_at_source_text"),
-            // A source string is not promoted to an exact instant until a producer contract
-            // guarantees its encoding. Preserve the source text while keeping time unknown.
-            published_at_state: "UNKNOWN".to_owned(),
+            published_at: published_at.clone(),
+            published_at_source_text: published_at_source_text.clone(),
+            published_at_state: if published_at.is_some() {
+                "KNOWN"
+            } else if published_at_source_text.is_some() {
+                "SOURCE_TEXT_ONLY"
+            } else {
+                "UNKNOWN"
+            }
+            .to_owned(),
+            published_at_source_field: row.get("published_at_source_field"),
+            published_at_source_kind: row.get("published_at_source_kind"),
+            published_at_precision: row.get("published_at_precision"),
+            published_at_reference_observed_at: row.get("published_at_reference_observed_at"),
+            published_at_parser_version: row.get("published_at_parser_version"),
             engagement: MaterialEngagement {
                 like_count: row.get("like_count"),
                 like_count_state: row.get("like_count_state"),
@@ -453,9 +590,17 @@ pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> M
                 share_count_state: row.get("share_count_state"),
             },
         },
+        collection_context: MaterialCollectionContext {
+            relationship_state: "UNKNOWN".to_owned(),
+            target_ref: None,
+            target_kind: None,
+            target_display_name: None,
+            target_display_state: "UNKNOWN".to_owned(),
+            author_identity_match_state: "NOT_VERIFIED".to_owned(),
+            work_order_ref: None,
+        },
         preview: MaterialPreview {
             local_asset_url: None,
-            observed_source_url: row.get("cover_source_url"),
             observed_source_state: row.get("cover_source_state"),
             slot_purpose: None,
             bytes_state: "UNKNOWN",

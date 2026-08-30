@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const API_ROOT = '/api/local/evidence-library';
+  const API_ROOT = '/api/local/work-resources';
   const laneOrder = [
     'discovery', 'detail', 'comments', 'replies', 'author',
     'media_slots', 'media_bytes', 'ocr', 'asr',
@@ -12,6 +12,7 @@
   };
   const stateLabels = {
     UNKNOWN: ['当前未知', 'unknown'],
+    SOURCE_TEXT_ONLY: ['仅有来源时间文本', 'warning'],
     NOT_REQUESTED: ['尚未请求', 'unknown'],
     QUEUED: ['已排队', 'info'],
     NOT_OBSERVED: ['尚未形成观察', 'unknown'],
@@ -56,18 +57,21 @@
     contextSelection: document.getElementById('ev-context-selection'),
     contextState: document.getElementById('ev-context-state'),
     back: document.getElementById('ev-back-to-list'),
+    tableHead: document.getElementById('ev-table-head'),
   };
   const panels = new Map(
     [...document.querySelectorAll('[data-ev-panel]')].map((panel) => [panel.dataset.evPanel, panel]),
   );
   const tabs = [...document.querySelectorAll('[data-ev-tab]')];
   const viewButtons = [...document.querySelectorAll('[data-ev-view]')];
+  const layoutButtons = [...document.querySelectorAll('[data-ev-layout]')];
 
   const model = {
     items: [],
     cursor: null,
     selectedRef: null,
     activeView: 'all',
+    activeLayout: 'research',
     listController: null,
     detailController: null,
     commentController: null,
@@ -126,17 +130,6 @@
     }
   }
 
-  function observedCoverUrl(url, state) {
-    if (state !== 'KNOWN' || typeof url !== 'string' || !url) return null;
-    try {
-      const parsed = new URL(url);
-      const allowedHost = parsed.hostname === 'xhscdn.com' || parsed.hostname.endsWith('.xhscdn.com');
-      return parsed.protocol === 'https:' && allowedHost ? parsed.href : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
   function knownMetric(value, state, label) {
     return state === 'KNOWN' && Number.isFinite(Number(value))
       ? `${label} ${Number(value).toLocaleString('zh-CN')}`
@@ -187,6 +180,7 @@
   function syncUrl() {
     const params = explicitParams();
     if (model.activeView !== 'all') params.set('view', model.activeView);
+    if (model.activeLayout !== 'research') params.set('layout', model.activeLayout);
     const query = params.toString();
     history.replaceState(null, '', query ? `/corpus/evidence?${query}` : '/corpus/evidence');
   }
@@ -256,17 +250,14 @@
   function previewBlock(item) {
     const preview = node('div', 'ev-preview');
     const controlledHandle = sameOriginPath(item.preview?.localAssetUrl, ['/api/local/media/', '/api/local/derivative/']);
-    const observedCover = observedCoverUrl(item.preview?.observedSourceUrl, item.preview?.observedSourceState);
     const bytesState = item.preview?.bytesState || 'UNKNOWN';
-    if (controlledHandle || observedCover) {
+    if (controlledHandle) {
       const image = node('img');
-      image.src = controlledHandle || observedCover;
+      image.src = controlledHandle;
       image.alt = item.preview?.alt || knownText(item.display?.title, item.display?.titleState, '作品封面');
       image.loading = 'lazy';
-      image.referrerPolicy = 'no-referrer';
       preview.append(image);
-      const label = controlledHandle ? '本地副本' : '来源封面 · 未物化';
-      preview.append(node('span', 'ev-preview-label', label));
+      preview.append(node('span', 'ev-preview-label', '本地副本'));
       preview.dataset.tone = 'available';
     } else {
       const [label] = stateMeta(bytesState);
@@ -279,7 +270,7 @@
 
   function rowFor(item) {
     const publicRef = item.identity?.publicRef;
-    const row = node('article', 'ev-work-row');
+    const row = node('article', `ev-work-row ev-work-row--${model.activeLayout}`);
     row.setAttribute('role', 'option');
     row.tabIndex = -1;
     row.dataset.publicRef = publicRef || '';
@@ -293,11 +284,20 @@
     );
     const title = node('h2', null, knownText(item.display?.title, item.display?.titleState, '标题当前未知'));
     const meta = node('div', 'ev-meta');
-    const creator = knownText(item.display?.creatorDisplayName, item.display?.creatorState, '作者当前未知');
+    const creator = knownText(item.display?.creatorDisplayName, item.display?.creatorState, '作品作者当前未知');
+    const target = item.collectionContext?.targetDisplayState === 'KNOWN'
+      ? `监控目标：${item.collectionContext.targetDisplayName}`
+      : '监控目标当前未知';
     const published = item.display?.publishedAtState === 'KNOWN'
-      ? item.display?.publishedAt || item.display?.publishedAtSourceText || '来源时间已知'
-      : '发布时间当前未知';
-    meta.append(node('span', null, creator), node('span', null, published));
+      ? item.display?.publishedAt || '发布时间已知'
+      : (item.display?.publishedAtState === 'SOURCE_TEXT_ONLY'
+        ? `来源时间：${item.display?.publishedAtSourceText || '已观察'}`
+        : '发布时间当前未知');
+    meta.append(
+      node('span', 'ev-author-line', `作品作者：${creator}`),
+      node('span', 'ev-target-line', target),
+      node('span', 'ev-time-line', published),
+    );
     const engagement = item.display?.engagement || {};
     const metrics = [
       knownMetric(engagement.likeCount, engagement.likeCountState, '赞'),
@@ -317,7 +317,18 @@
     const observed = node('span', 'ev-observed');
     addTextWithTech(observed, `最近观察 ${item.summary?.lastObservedAt || '未知'}`, 'OBSERVED AT');
 
-    row.append(previewBlock(item), identity, lanes, limitation, observed);
+    if (model.activeLayout === 'table') {
+      const work = node('div', 'ev-table-work');
+      work.append(eyebrow, title);
+      const context = node('div', 'ev-table-context');
+      context.append(node('strong', null, creator), node('span', null, target));
+      const time = node('div', 'ev-table-time', published);
+      const status = node('div', 'ev-table-status');
+      status.append(stateTag(laneSummary(item, 'detail')?.state || 'UNKNOWN'), observed);
+      row.append(work, context, time, status);
+    } else {
+      row.append(previewBlock(item), identity, lanes, limitation, observed);
+    }
     row.addEventListener('click', () => selectItem(item, true));
     row.addEventListener('keydown', (event) => onRowKeydown(event, item));
     return row;
@@ -325,12 +336,15 @@
 
   function renderRows(appended) {
     if (!appended) refs.list.replaceChildren();
+    refs.list.dataset.layout = model.activeLayout;
+    refs.tableHead.hidden = model.activeLayout !== 'table';
+    refs.tableHead.setAttribute('aria-hidden', String(model.activeLayout !== 'table'));
     const existing = new Set([...refs.list.querySelectorAll('[data-public-ref]')].map((row) => row.dataset.publicRef));
     model.items.forEach((item) => {
       const publicRef = item.identity?.publicRef;
       if (publicRef && !existing.has(publicRef)) refs.list.append(rowFor(item));
     });
-    const rows = [...refs.list.querySelectorAll('.ev-work-row')];
+    const rows = [...refs.list.querySelectorAll('[data-public-ref]')];
     rows.forEach((row) => {
       const selected = row.dataset.publicRef === model.selectedRef;
       row.setAttribute('aria-selected', String(selected));
@@ -385,7 +399,7 @@
   }
 
   function onRowKeydown(event, item) {
-    const rows = [...refs.list.querySelectorAll('.ev-work-row')];
+    const rows = [...refs.list.querySelectorAll('[data-public-ref]')];
     const current = event.currentTarget;
     const index = rows.indexOf(current);
     if (event.key === 'Enter' || event.key === ' ') {
@@ -428,7 +442,7 @@
     }
     model.selectedRef = publicRef;
     refs.contextSelection.textContent = publicRef.slice(0, 8);
-    [...refs.list.querySelectorAll('.ev-work-row')].forEach((row) => {
+    [...refs.list.querySelectorAll('[data-public-ref]')].forEach((row) => {
       const selected = row.dataset.publicRef === publicRef;
       row.setAttribute('aria-selected', String(selected));
       row.tabIndex = selected ? 0 : -1;
@@ -518,8 +532,12 @@
       ['稳定引用', item.identity?.publicRef || '当前未知', 'PUBLIC REF'],
       ['平台', item.identity?.platform || '当前未知', 'PLATFORM'],
       ['标题', knownText(item.display?.title, item.display?.titleState), item.display?.titleState || 'UNKNOWN'],
-      ['作者', knownText(item.display?.creatorDisplayName, item.display?.creatorState), item.display?.creatorState || 'UNKNOWN'],
-      ['发布时间', item.display?.publishedAtState === 'KNOWN' ? item.display?.publishedAt || item.display?.publishedAtSourceText || '已知' : '当前未知', item.display?.publishedAtState || 'UNKNOWN'],
+      ['作品作者', knownText(item.display?.creatorDisplayName, item.display?.creatorState), item.display?.creatorState || 'UNKNOWN'],
+      ['监控目标', item.collectionContext?.targetDisplayState === 'KNOWN' ? item.collectionContext.targetDisplayName : '当前未知', item.collectionContext?.relationshipState || 'UNKNOWN'],
+      ['作者身份关系', item.collectionContext?.authorIdentityMatchState === 'MATCHED' ? '已由平台作者 ID 证明一致' : '尚未证明监控目标就是作品作者', item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED'],
+      ['发布时间', item.display?.publishedAtState === 'KNOWN' ? item.display?.publishedAt || '已知' : (item.display?.publishedAtState === 'SOURCE_TEXT_ONLY' ? item.display?.publishedAtSourceText || '仅有来源文本' : '当前未知'), item.display?.publishedAtState || 'UNKNOWN'],
+      ['时间来源字段', item.display?.publishedAtSourceField || '当前未知', item.display?.publishedAtSourceKind || 'unknown'],
+      ['时间精度', item.display?.publishedAtPrecision || 'unknown', item.display?.publishedAtParserVersion || 'PARSER UNKNOWN'],
       ['点赞', knownText(item.display?.engagement?.likeCount, item.display?.engagement?.likeCountState), item.display?.engagement?.likeCountState || 'UNKNOWN'],
       ['评论', knownText(item.display?.engagement?.commentCount, item.display?.engagement?.commentCountState), item.display?.engagement?.commentCountState || 'UNKNOWN'],
       ['收藏', knownText(item.display?.engagement?.collectCount, item.display?.engagement?.collectCountState), item.display?.engagement?.collectCountState || 'UNKNOWN'],
@@ -829,6 +847,8 @@
         ['Task', provenance.taskRefs],
         ['Attempt', provenance.attemptRefs],
         ['Receipt', provenance.receiptRefs],
+        ['Target', provenance.targetRefs],
+        ['Work Order', provenance.workOrderRefs],
         ['Producer', provenance.producers],
       ];
       groups.forEach(([label, values]) => {
@@ -886,7 +906,10 @@
     if ([...refs.mediaKind.options].some((option) => option.value === params.get('mediaKind'))) refs.mediaKind.value = params.get('mediaKind');
     const view = params.get('view');
     if (view && viewFilters[view]) model.activeView = view;
+    const layout = params.get('layout');
+    if (['research', 'table', 'cover'].includes(layout)) model.activeLayout = layout;
     viewButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.evView === model.activeView)));
+    layoutButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.evLayout === model.activeLayout)));
   }
 
   refs.form.addEventListener('submit', (event) => {
@@ -907,6 +930,12 @@
     model.activeView = button.dataset.evView;
     viewButtons.forEach((candidate) => candidate.setAttribute('aria-pressed', String(candidate === button)));
     loadList();
+  }));
+  layoutButtons.forEach((button) => button.addEventListener('click', () => {
+    model.activeLayout = button.dataset.evLayout;
+    layoutButtons.forEach((candidate) => candidate.setAttribute('aria-pressed', String(candidate === button)));
+    renderRows(false);
+    syncUrl();
   }));
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => activateTab(tab));

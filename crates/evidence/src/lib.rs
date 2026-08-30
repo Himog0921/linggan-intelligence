@@ -33,6 +33,7 @@ mod station_read;
 mod target_enrichment;
 mod work_order;
 mod work_order_lease;
+mod work_resource_read;
 
 pub use acquisition_chain::{
     AcquisitionChainError, AuthorizationGrant, MaterialDeepeningTarget, RequestOutcome,
@@ -67,7 +68,6 @@ pub use local_producer::{
 pub use material_asset_read::{
     LocalMaterialAsset, read_local_derivative, read_local_materialization,
 };
-pub use material_detail_read::read_material_detail;
 pub use material_disposition::{
     MaterialMediaDisposition, record_blob_disposition, record_derivative_disposition,
     record_materialization_disposition, record_slot_disposition,
@@ -76,11 +76,6 @@ pub use material_processing::{
     MediaProcessingClaim, claim_media_processing_work, complete_media_processing_derivative,
     complete_media_processing_text, complete_media_processing_without_output,
     ensure_media_processing_work, fail_media_processing_work, record_media_derivative_completion,
-};
-pub use material_projection::{
-    MaterialDisplay, MaterialEngagement, MaterialIdentity, MaterialLaneSummary,
-    MaterialLibraryItem, MaterialLibraryProjection, MaterialPreview, MaterialReadError,
-    MaterialSummary, material_projection_schema_is_ready, read_material_library,
 };
 pub use material_social_read::read_authorized_research_comments;
 pub use media_acquisition::{
@@ -113,4 +108,10 @@ pub use target_enrichment::enrich_target_from_author_profile;
 pub use work_order_lease::{
     DETAIL_STEP_DEFERRED_REASON, IssuedLease, LeaseError, expire_lapsed_leases,
     issue_work_order_lease, lease_schema_is_ready, release_work_order_lease,
+};
+pub use work_resource_read::{
+    WorkResource, WorkResourceCollectionContext, WorkResourceDisplay, WorkResourceEngagement,
+    WorkResourceIdentity, WorkResourceLaneSummary, WorkResourcePage, WorkResourcePreview,
+    WorkResourceReadError, WorkResourceSummary, read_work_resource, read_work_resources,
+    work_resource_schema_is_ready,
 };
