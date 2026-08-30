@@ -188,7 +188,7 @@ fn readout(entries: &[(&str, &str)]) -> String {
     cells
 }
 
-/// DESIGN-006 · Collection has five empty surfaces but only three kinds of empty, and only
+/// DESIGN-006 · Collection has five empty surfaces but only two actionable kinds of empty, and only
 /// one of them is the reader's to act on. Rendering all five at equal weight produced five
 /// honest reports that together answered everything except "so what do I do".
 #[derive(Clone, Copy)]
@@ -198,35 +198,12 @@ enum Empty<'a> {
     /// Nothing here until something is connected. Reading it changes nothing, and saying so
     /// is more useful than letting the reader hunt for an action that does not exist.
     AwaitingEngineering { note: &'a str },
-    /// Empty only because its upstream is. The shortest of the three: it states the fact and
-    /// points at whatever is actually stopped, instead of re-deriving the whole chain.
-    Upstream {
-        because: &'a str,
-        pointer: &'a str,
-        href: &'a str,
-    },
-    /// Not one of the three. Local emptiness inside a drawer panel, where the surface-level
+    /// Not one of the two actionable kinds. Local emptiness inside a drawer panel, where the surface-level
     /// question "is this mine to act on" has already been answered by the surface around it.
     Plain,
 }
 
 fn empty_state(kind: Empty<'_>, heading: &str, body: &str, notes: &[(&str, &str)]) -> String {
-    if let Empty::Upstream {
-        because,
-        pointer,
-        href,
-    } = kind
-    {
-        return format!(
-            r#"<section class="c-empty c-empty-upstream">
-              <div class="c-empty-rule"></div>
-              <h2>{heading}</h2>
-              <p>{because}</p>
-              <a class="c-empty-pointer" href="{href}">{pointer} <i aria-hidden="true">→</i></a>
-            </section>"#
-        );
-    }
-
     let mut grid = String::new();
     for (term, description) in notes {
         grid.push_str(&format!("<div><dt>{term}</dt><dd>{description}</dd></div>"));
@@ -241,7 +218,6 @@ fn empty_state(kind: Empty<'_>, heading: &str, body: &str, notes: &[(&str, &str)
             format!(r#"<p class="c-empty-note">{note}</p>"#),
         ),
         Empty::Plain => ("", String::new()),
-        Empty::Upstream { .. } => unreachable!("handled above"),
     };
 
     format!(
@@ -266,7 +242,7 @@ fn targets_body(drawer: Option<&str>, state: Option<&SurfaceState>) -> String {
             "系统知道已有观察目标，因此这里不能显示成空列表。当前只是列表读取失败。",
             &[("不代表", "不代表观察目标被删除，也不代表巡检已经停止。")],
         )
-    } else if state.is_some_and(|state| state.total_targets.is_none()) {
+    } else if state.is_none_or(|state| state.total_targets.is_none()) {
         empty_state(
             Empty::AwaitingEngineering {
                 note: "目标计数与列表当前都不可读；系统不会把未知伪装成零。",
@@ -509,7 +485,7 @@ fn operations_body(mode: OperationsMode, state: Option<&SurfaceState>) -> String
             Empty::AwaitingEngineering {
                 note: "这一栏不需要你做任何事：观察历史读模型尚未接入，当前不能声称历史为空。",
             },
-            "没有可回放的观察历史",
+            "观察历史当前未知",
             "观察轨迹是可检索、可回放的语义历史，与右侧实时流的区别在于时间跨度，不在于内容层级。两者都不承载技术日志。",
             &[
                 ("事件类型", "观察、发现、变化、状态、异常。"),
@@ -522,12 +498,15 @@ fn operations_body(mode: OperationsMode, state: Option<&SurfaceState>) -> String
         ),
         OperationsMode::Review => empty_state(
             Empty::AwaitingEngineering {
-                note: "这一栏不需要你做任何事：复盘需要跨时间可比的观察记录，那要等真实观察积累起来。",
+                note: "这一栏不需要你做任何事：周期复盘读模型尚未接入，当前不能声称历史为空。",
             },
-            "没有可复盘的周期",
+            "周期复盘当前未知",
             "周期复盘回答过去一段时间观察了多少、发现了什么、哪些变化重要，以及最要紧的一件事——观察体系哪里还有盲区。",
             &[
-                ("重要变化", "需要跨时间可比的观察记录，目前不存在。"),
+                (
+                    "重要变化",
+                    "需要跨时间可比的观察记录；当前读模型未接入，状态未知。",
+                ),
                 (
                     "观察盲区",
                     "哪些地方我们还不能声称「看到了世界」。这需要真实的捕获面记录来支撑。",
@@ -592,56 +571,30 @@ fn stream_markup(state: Option<&SurfaceState>) -> String {
     )
 }
 
-/// The default landing surface. It is empty because nothing upstream is running yet, so it
-/// says that in one line and points at the step that is actually stopped — a reader who
-/// arrives here should leave knowing where the chain broke, not having read three columns
-/// about a queue that cannot have contents.
-fn attention_body(state: Option<&SurfaceState>) -> String {
-    if state.is_some_and(|state| state.total_targets != Some(0)) {
-        return empty_state(
-            Empty::AwaitingEngineering {
-                note: "待处理读模型尚未接入；当前不能声称需要处理的事项为零。",
-            },
-            "待处理状态当前未知",
-            "采集运行时与观察目标已经接通，但这一页还没有读取异常、缺口与人工决策项的事实来源。",
-            &[(
-                "不代表",
-                "不代表当前没有异常，也不代表已有目标都在正常运行。",
-            )],
-        );
-    }
+/// The default landing surface. Until its own read model exists, target counts cannot prove
+/// that exceptions are absent: historical and cross-target issues may still exist.
+fn attention_body(_state: Option<&SurfaceState>) -> String {
     empty_state(
-        Empty::Upstream {
-            because: "没有需要你处理的事。这不是「已确认零故障」——而是还没有任何观察在运行，因此还不可能产生需要处理的问题。真正卡住的是上一环：",
-            pointer: "观察目标 · 采集授权链尚未建立",
-            href: "/collection/targets",
+        Empty::AwaitingEngineering {
+            note: "待处理读模型尚未接入；当前不能声称需要处理的事项为零。",
         },
-        "没有待处理事项",
-        "",
-        &[],
+        "待处理状态当前未知",
+        "这一页还没有读取异常、缺口与人工决策项的事实来源；观察目标数量不能证明待处理事项为空。",
+        &[(
+            "不代表",
+            "不代表当前没有异常，也不代表已有目标都在正常运行。",
+        )],
     )
 }
 
-fn tasks_body(state: Option<&SurfaceState>) -> String {
-    if state.is_some_and(|state| state.total_targets != Some(0)) {
-        return empty_state(
-            Empty::AwaitingEngineering {
-                note: "采集任务读模型尚未接入；当前不能把未知任务数显示成零。",
-            },
-            "采集任务当前未知",
-            "系统已有观察目标，但这一页还没有读取 Work、Attempt 与 Receipt 的列表投影。",
-            &[("不代表", "不代表当前没有任务，也不代表已有任务已经完成。")],
-        );
-    }
+fn tasks_body(_state: Option<&SurfaceState>) -> String {
     empty_state(
-        Empty::Upstream {
-            because: "没有采集任务。任务是一次具体执行，只能由观察目标产生——当前没有观察目标，因此不可能有任务。真正卡住的是上一环：",
-            pointer: "观察目标 · 采集授权链尚未建立",
-            href: "/collection/targets",
+        Empty::AwaitingEngineering {
+            note: "采集任务读模型尚未接入；当前不能把未知任务数显示成零。",
         },
-        "没有采集任务",
-        "",
-        &[],
+        "采集任务当前未知",
+        "这一页还没有读取 Work、Attempt 与 Receipt 的列表投影；观察目标数量不能排除历史或在途任务。",
+        &[("不代表", "不代表当前没有任务，也不代表已有任务已经完成。")],
     )
 }
 
@@ -954,7 +907,7 @@ pub fn render(
     let collection_state = state.map(|state| match state.total_targets {
         Some(total) if total > 0 => "观察中",
         Some(_) => "无观察目标",
-        None => "已接通",
+        None => "状态未知",
     });
     let header = global_header(
         PrimarySurface::Collection,

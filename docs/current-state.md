@@ -32,7 +32,7 @@ Chrome 原已加载 0.8.6，并在一个获准真实 XHS 详情样本读到 3 �
 
 `/collection/targets` 已有 2 个真实目标、常驻 worker 也持续写入 scheduler heartbeat，但已部署页面仍同时显示“采集运行时未接通、调度器未接通、暂无观察目标”；`/collection/runtime` 也继续显示 `SCHEDULER HEARTBEAT UNREADABLE`。根因不是数据库缺事实，而是 DESIGN-009 当年只给执行工位页传入部分容量状态，其余四个子面和语料页一级导航保留了静态占位文案；后来新增的 scheduler heartbeat 从未接回页面。
 
-当前交付分支只复用现有 `count_targets`、`read_runtime_capacity`、`read_station_overview` 与 `read_scheduler_heartbeat`，把目标数、巡检数、建档数、空缺工位、未归位安装和调度状态按字段独立显示；任何一项读不到只让该项变成未知，不连坐其余已知事实。调度明确区分运行、心跳过期和读不到；有目标但任务/待处理/语义事件读模型尚未接入时，页面明确写“当前未知”，不再伪造空列表或零。Corpus 一级导航同样从真实目标计数显示“观察中 / 无观察目标 / 已接通”。`cargo test -p linggan-api` 为 56 passed、14 个需隔离 PostgreSQL 的测试按设计 ignored、0 failed；候选 API 在 3101 端口连接本机持久数据库只读实测显示 2 个目标、1 个巡检、1 个建档、0 个空缺工位、1 个未归位安装和 scheduler running，且目标页、生产流与 Corpus 不再出现相反状态。**该候选尚未合并，也未替换 3000 端口冻结运行快照；浏览器视觉和 Mog 业务验收仍待发布后完成。**
+当前交付分支只复用现有 `count_targets`、`read_runtime_capacity`、`read_station_overview` 与 `read_scheduler_heartbeat`，把目标数、巡检数、建档数、空缺工位、未归位安装和调度状态按字段独立显示；任何一项读不到只让该项变成未知，不连坐其余已知事实。调度明确区分运行、心跳过期和读不到；任务、待处理、观察历史、周期复盘与语义事件读模型尚未接入时，页面无论目标数是多少都明确写“当前未知”，不再伪造空列表或零。Corpus 一级导航同样从真实目标计数显示“观察中 / 无观察目标 / 状态未知”。`cargo test -p linggan-api` 为 58 passed、14 个需隔离 PostgreSQL 的测试按设计 ignored、0 failed；隔离 PostgreSQL proof harness 另有 46 passed、0 failed。候选 API 在 3101 端口连接本机持久数据库只读实测显示 2 个目标、1 个巡检、1 个建档、0 个空缺工位、1 个未归位安装和 scheduler running，且目标页、生产流与 Corpus 不再出现相反状态。**该候选尚未合并，也未替换 3000 端口冻结运行快照；浏览器视觉和 Mog 业务验收仍待发布后完成。**
 
 ### OBSERVATION-RUNTIME-001 / Issue #94 与 MEDIA-ACQUISITION-001 / Issue #98（已完成并运行）
 

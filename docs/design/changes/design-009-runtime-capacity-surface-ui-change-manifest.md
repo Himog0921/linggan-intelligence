@@ -14,7 +14,7 @@
 
 ## 1. 事项
 
-- 事项 ID: `DESIGN-009`（无 GitHub Issue，Mog 直接指定）
+- 事项 ID: `DESIGN-009`。原始变更由 Mog 直接指定、当时没有 GitHub Issue；2026-08-31 的共享状态硬化续作已在 [Issue #94](https://github.com/Himog0921/linggan-intelligence/issues/94) 留下 Claim 后实施。
 - 关联: `PAGE-COLLECTION-001`、`LIDS-SYS-001`、`LIDS-PAT-001`、`LIDS-PRI-001`、`DECISION-04`、`INV-36`
 - 触发: Mog 要求规划 `/collection/runtime` 的 UX/UI。调研中发现的不是排版问题，而是**这一页在系统性地说假话**。
 
@@ -103,7 +103,7 @@ Mog 已要求在同一交付中把观察目标、工位管理和语料展示地�
 |---|---|---|
 | `/collection/targets` | Header、上下文读数和导轨底部使用现有目标/调度事实 | 目标创建、筛选、巡检和建档动作 |
 | `/collection/runtime` | 心跳状态与 `/health` 使用同一 `read_scheduler_heartbeat` | 产能判定、工位认领、租约与准入规则 |
-| `/collection/attention`、`operations`、`tasks` | 共享 Header 不再显示过时的全局未接通状态 | 各子面尚未实现的业务列表与操作 |
+| `/collection/attention`、`operations`、`tasks` | 共享 Header 不再显示过时的全局未接通状态；缺少业务读模型的正文统一明确为“当前未知” | 各子面尚未实现的业务列表与操作 |
 | `/corpus/evidence` | 共享一级导航中的“采集”状态读取同一事实 | Work Resource、列表、Inspector、材料状态和隐私边界 |
 
 ### 状态词典
@@ -114,7 +114,7 @@ Mog 已要求在同一交付中把观察目标、工位管理和语料展示地�
 | heartbeat `stale` | 调度心跳已过期 | 调度运行中、调度器未接通 |
 | 无 heartbeat / 读取失败 | 调度心跳读不到 | 运行中、停止 |
 | 目标/巡检/建档计数已读 | 显示真实计数 | UNKNOWN、0 的推测 |
-| 数据库或对应读模型失败 | 未知 / 读不到 | 暂无、未接通 |
+| 数据库或对应读模型失败 | 未知 / 读不到 | 暂无、未接通、已接通 |
 
 ### 依赖地图
 

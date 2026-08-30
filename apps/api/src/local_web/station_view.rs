@@ -36,6 +36,25 @@ pub fn render_runtime(
     unclaimed: &[UnclaimedInstallation],
     error: Option<&str>,
 ) -> String {
+    render_runtime_with_roster(base, overview, Some((stations, unclaimed)), error)
+}
+
+/// Capacity and heartbeat can remain readable while the station roster query fails. The
+/// caller uses this entry instead of converting that failure into two empty slices.
+pub fn render_runtime_with_unreadable_roster(
+    base: &str,
+    overview: Option<&RuntimeCapacityOverview>,
+    error: Option<&str>,
+) -> String {
+    render_runtime_with_roster(base, overview, None, error)
+}
+
+fn render_runtime_with_roster(
+    base: &str,
+    overview: Option<&RuntimeCapacityOverview>,
+    roster: Option<(&[StationOverview], &[UnclaimedInstallation])>,
+    error: Option<&str>,
+) -> String {
     let Some(open) = base.find(EMPTY_STATE_OPEN) else {
         return base.to_owned();
     };
@@ -44,6 +63,7 @@ pub fn render_runtime(
     };
     let close = open + close_offset + EMPTY_STATE_CLOSE.len();
 
+    let stations = roster.map(|(stations, _)| stations);
     let body = format!(
         r#"<div class="c-runtime">
               {verdict}
@@ -53,8 +73,8 @@ pub fn render_runtime(
               </div>
             </div>"#,
         verdict = verdict_markup(overview, stations),
-        roster = roster_markup(stations, unclaimed),
-        console = console_markup(stations, error),
+        roster = roster_markup(roster),
+        console = console_markup(stations.unwrap_or_default(), error),
         bounds = bounds_markup(overview),
     );
 
@@ -75,7 +95,7 @@ pub fn render_runtime(
 /// 做一次判定，而那次判定服务端已经做过了——`Capacity` 枚举就是它的结论。
 fn verdict_markup(
     overview: Option<&RuntimeCapacityOverview>,
-    stations: &[StationOverview],
+    stations: Option<&[StationOverview]>,
 ) -> String {
     let Some(overview) = overview else {
         // 读不到与「没有」是两个不同的说法，绝不能合并。
@@ -159,7 +179,10 @@ fn lane_markup(lanes: &[LaneVerdict]) -> String {
 /// **账号那一项永远显示「不参与判定」**，因为 `establish_capacity` 检查的是风险、工位、
 /// 能力、预算四样，账号不在其中（DECISION-04 独立立项）。四项里有一项从未被检查，
 /// 却显示成四项齐备，就是用视觉便利改写资格。
-fn factor_markup(overview: &RuntimeCapacityOverview, stations: &[StationOverview]) -> String {
+fn factor_markup(
+    overview: &RuntimeCapacityOverview,
+    stations: Option<&[StationOverview]>,
+) -> String {
     let station_value = format!(
         "{staffed}/{registered}",
         staffed = overview.staffed_stations,
@@ -168,13 +191,14 @@ fn factor_markup(overview: &RuntimeCapacityOverview, stations: &[StationOverview
     // 配额按工位计（Mog 于 2026-08-27 确认）。多台工位时不加总成一个数——各自的额度是
     // 各自的边界，加总出来的「400」不对应任何一个真实上限。
     let budget_value = match stations {
-        [] => "—".to_owned(),
-        [single] => format!(
+        None => "未知".to_owned(),
+        Some([]) => "—".to_owned(),
+        Some([single]) => format!(
             "{used}/{quota}",
             used = single.daily_notes_used,
             quota = single.daily_work_quota
         ),
-        many => format!("{} 台各计", many.len()),
+        Some(many) => format!("{} 台各计", many.len()),
     };
     let risk_value = match overview.risk_pauses.len() {
         0 => "无".to_owned(),
@@ -221,7 +245,16 @@ fn factor_markup(overview: &RuntimeCapacityOverview, stations: &[StationOverview
 // 第三层：构成这些值的对象
 // ---------------------------------------------------------------------------
 
-fn roster_markup(stations: &[StationOverview], unclaimed: &[UnclaimedInstallation]) -> String {
+fn roster_markup(roster: Option<(&[StationOverview], &[UnclaimedInstallation])>) -> String {
+    let Some((stations, unclaimed)) = roster else {
+        return r#"<section class="c-roster">
+              <div class="c-roster-head">
+                <div class="c-roster-count"><b>未知</b><span>工位</span></div>
+                <p class="c-roster-note">工位与插件安装列表当前读不到。这不表示没有登记工位，也不表示没有待认领安装。</p>
+              </div>
+            </section>"#
+            .to_owned();
+    };
     let mut sections = String::new();
 
     sections.push_str(&group(
@@ -495,8 +528,7 @@ fn dev_tools_markup(stations: &[StationOverview]) -> String {
 
 /// 租约与巡检：系统在无人值守时按什么边界跑。
 ///
-/// **这里没有「调度器是否在运行」。** 系统没有任何进程心跳记录，那件事这一页读不到；
-/// 写一个「运行中」出来就是编的。能说的只有真实痕迹：派过没有、成了没有、下面还有几个到期。
+/// 调度器 heartbeat 由共享页头表达；这里不复制第二套状态，只显示租约与派发痕迹。
 fn bounds_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
     let Some(overview) = overview else {
         return String::new();
@@ -535,9 +567,9 @@ fn bounds_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
     // 「在跑但没活可派」与「根本没在跑」处置完全不同，页面必须把这个区别说出来，
     // 而不是把两者都写成「未接通」——那会让人去修一个没有坏的东西。
     let patrol_note = if patrol.silent_because_nothing_to_patrol() {
-        "没有任何目标开着巡检，因此调度即使正在运行也不会有动静。这一页读不到调度进程本身的心跳，只能看见它留下的痕迹。"
+        "没有任何目标开着巡检，因此调度即使正在运行也不会有动静。调度进程状态见页面顶部；这里显示它留下的租约与派发痕迹。"
     } else {
-        "到期判据与调度自己用的是同一个式子。这一页读不到调度进程本身的心跳，只能看见它留下的痕迹。"
+        "到期判据与调度自己用的是同一个式子。调度进程状态见页面顶部；这里显示它留下的租约与派发痕迹。"
     };
 
     format!(
@@ -732,6 +764,19 @@ mod tests {
     }
 
     #[test]
+    fn unreadable_roster_is_not_reported_as_no_registered_stations() {
+        let rendered = render_runtime_with_unreadable_roster(
+            &base(),
+            Some(&overview(vec![lane("巡检", available())])),
+            None,
+        );
+        assert!(rendered.contains("工位与插件安装列表当前读不到"));
+        assert!(!rendered.contains("还没有登记任何工位"));
+        assert!(rendered.contains("<dt>今日预算</dt>"));
+        assert!(rendered.contains("<dd>未知</dd>"));
+    }
+
+    #[test]
     fn many_reinstalls_stay_one_station_with_a_visible_count() {
         // The failure this whole design exists to prevent: 内容工作台 turned 11 reinstalls
         // into 11 zombie stations. Here they must remain one station whose history is stated.
@@ -819,7 +864,7 @@ mod tests {
             None,
         );
         assert!(rendered.contains("没有任何目标开着巡检"));
-        assert!(rendered.contains("读不到调度进程本身的心跳"));
+        assert!(rendered.contains("调度进程状态见页面顶部"));
     }
 
     #[test]

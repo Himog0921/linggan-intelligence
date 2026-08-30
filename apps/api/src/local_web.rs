@@ -484,7 +484,7 @@ async fn evidence_library(State(state): State<LocalWebState>) -> Html<String> {
         Some(database) => match count_targets(database).await {
             Ok(counts) if counts.total > 0 => Some("观察中"),
             Ok(_) => Some("无观察目标"),
-            Err(_) => Some("已接通"),
+            Err(_) => Some("状态未知"),
         },
         None => None,
     };
@@ -2054,16 +2054,8 @@ struct CollectionSurfaceReads {
     roster: Option<(Vec<StationOverview>, Vec<UnclaimedInstallation>)>,
 }
 
-async fn read_collection_surface(
-    database: &Database,
-    known_counts: Option<TargetCounts>,
-) -> CollectionSurfaceReads {
-    let counts_read = async {
-        match known_counts {
-            Some(counts) => Some(counts),
-            None => count_targets(database).await.ok(),
-        }
-    };
+async fn read_collection_surface(database: &Database) -> CollectionSurfaceReads {
+    let counts_read = async { count_targets(database).await.ok() };
     let (counts, heartbeat) = tokio::join!(counts_read, read_scheduler_heartbeat(database));
     let scheduler_state = match heartbeat {
         Ok(Some(heartbeat)) if heartbeat.state == "running" => collection::SchedulerState::Running,
@@ -2100,7 +2092,7 @@ async fn collection_targets(
     // 计数不受当前筛选影响：tab 上的数字要回答「切过去有多少」。
     let database = state.database.database();
     let reads = match database {
-        Some(database) => Some(read_collection_surface(database, None).await),
+        Some(database) => Some(read_collection_surface(database).await),
         None => None,
     };
     let counts = reads.as_ref().and_then(|reads| reads.counts.as_ref());
@@ -2157,7 +2149,7 @@ async fn collection_operations(
     Query(params): Query<CollectionParams>,
 ) -> Html<String> {
     let reads = match state.database.database() {
-        Some(database) => Some(read_collection_surface(database, None).await),
+        Some(database) => Some(read_collection_surface(database).await),
         None => None,
     };
     Html(collection::render(
@@ -2172,7 +2164,7 @@ async fn collection_operations(
 
 async fn collection_attention(State(state): State<LocalWebState>) -> Html<String> {
     let reads = match state.database.database() {
-        Some(database) => Some(read_collection_surface(database, None).await),
+        Some(database) => Some(read_collection_surface(database).await),
         None => None,
     };
     Html(collection::render(
@@ -2187,7 +2179,7 @@ async fn collection_attention(State(state): State<LocalWebState>) -> Html<String
 
 async fn collection_tasks(State(state): State<LocalWebState>) -> Html<String> {
     let reads = match state.database.database() {
-        Some(database) => Some(read_collection_surface(database, None).await),
+        Some(database) => Some(read_collection_surface(database).await),
         None => None,
     };
     Html(collection::render(
@@ -2226,7 +2218,7 @@ async fn collection_runtime(
     // 任何一份读不到，对应的那部分就说「读不到」——**不退回写死的「未接通」**，
     // 那是这一页此前最大的问题：一句写下时为真、之后永不更新的状态。
     let (mut reads, capacity, roster) = tokio::join!(
-        read_collection_surface(database, None),
+        read_collection_surface(database),
         read_runtime_capacity(database),
         read_station_overview(database),
     );
@@ -2258,14 +2250,21 @@ async fn collection_runtime(
         None,
         Some(&reads.surface_state),
     );
-    let (stations, unclaimed) = reads.roster.unwrap_or_default();
-    Html(station_view::render_runtime(
-        &base,
-        reads.capacity.as_ref(),
-        &stations,
-        &unclaimed,
-        params.error.as_deref(),
-    ))
+    let rendered = match reads.roster.as_ref() {
+        Some((stations, unclaimed)) => station_view::render_runtime(
+            &base,
+            reads.capacity.as_ref(),
+            stations,
+            unclaimed,
+            params.error.as_deref(),
+        ),
+        None => station_view::render_runtime_with_unreadable_roster(
+            &base,
+            reads.capacity.as_ref(),
+            params.error.as_deref(),
+        ),
+    };
+    Html(rendered)
 }
 
 /// COLLECTION-001 · the person-facing station actions on the 执行工位 surface.

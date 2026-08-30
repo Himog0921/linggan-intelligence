@@ -1224,7 +1224,7 @@ fn scheduler_stale_and_unreadable_remain_distinct_facts() {
     );
     assert!(stale_html.contains("调度心跳已过期"));
     assert!(stale_html.contains("SCHEDULER STALE"));
-    assert!(stale_html.contains("<span class=\"v7-nav-state\">已接通</span>"));
+    assert!(stale_html.contains("<span class=\"v7-nav-state\">状态未知</span>"));
 
     let unreadable = collection::SurfaceState {
         scheduler_state: collection::SchedulerState::Unreadable,
@@ -1250,6 +1250,16 @@ fn corpus_header_can_reflect_the_connected_collection_read_model() {
         .expect("the collection primary entry exists")
         .1;
     assert!(collection_entry.contains("<span class=\"v7-nav-state\">观察中</span>"));
+}
+
+#[test]
+fn corpus_header_can_preserve_an_unreadable_collection_state() {
+    let html = evidence_library_html(Some("状态未知"));
+    let collection_entry = html
+        .split_once("v7-tech-key\">COLLECTION")
+        .expect("the collection primary entry exists")
+        .1;
+    assert!(collection_entry.contains("<span class=\"v7-nav-state\">状态未知</span>"));
 }
 
 #[test]
@@ -1395,7 +1405,31 @@ fn collection_never_publishes_prototype_material_or_a_fake_zero() {
 
 #[test]
 fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
+    let confirmed_empty = collection::SurfaceState {
+        vacant_stations: None,
+        unclaimed_installations: None,
+        total_targets: Some(0),
+        monitoring_targets: Some(0),
+        archiving_targets: Some(0),
+        scheduler_state: collection::SchedulerState::Unreadable,
+    };
     let targets = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        None,
+        None,
+        None,
+        Some(&confirmed_empty),
+    );
+    // 加入观察只写本机记录，因此它是真实可点的动作；但页面必须把「加进来」与「开始采集」
+    // 分清楚，否则会让人以为点一下就开始采了。
+    assert!(targets.contains("不访问任何平台"));
+    assert!(targets.contains("/collection/targets/new"));
+    assert!(targets.contains("还没有观察目标"));
+    // 真正消耗平台访问的那一步仍然要走完整条链并由人开闸。
+    assert!(targets.contains("最后还要人开闸"));
+
+    let unknown_targets = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
         None,
@@ -1403,12 +1437,8 @@ fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
         None,
         None,
     );
-    // 加入观察只写本机记录，因此它是真实可点的动作；但页面必须把「加进来」与「开始采集」
-    // 分清楚，否则会让人以为点一下就开始采了。
-    assert!(targets.contains("不访问任何平台"));
-    assert!(targets.contains("/collection/targets/new"));
-    // 真正消耗平台访问的那一步仍然要走完整条链并由人开闸。
-    assert!(targets.contains("最后还要人开闸"));
+    assert!(unknown_targets.contains("观察目标当前未知"));
+    assert!(!unknown_targets.contains("还没有观察目标"));
 
     let attention = collection::render(
         collection::Section::Attention,
@@ -1418,11 +1448,21 @@ fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
         None,
         None,
     );
-    // Q9 moved this out of its own column and into the opening line, but the claim it guards
-    // is unchanged: an empty queue must never read as "confirmed zero faults".
-    assert!(attention.contains("这不是「已确认零故障」"));
-    // Upstream-empty surfaces must hand the reader the step that is actually stopped.
-    assert!(attention.contains("/collection/targets"));
+    assert!(attention.contains("待处理状态当前未知"));
+    assert!(attention.contains("待处理读模型尚未接入"));
+    assert!(!attention.contains("没有待处理事项"));
+
+    let tasks = collection::render(
+        collection::Section::Tasks,
+        collection::OperationsMode::Now,
+        None,
+        None,
+        None,
+        None,
+    );
+    assert!(tasks.contains("采集任务当前未知"));
+    assert!(tasks.contains("观察目标数量不能排除历史或在途任务"));
+    assert!(!tasks.contains("没有采集任务"));
 
     let runtime = collection::render(
         collection::Section::Runtime,
@@ -1459,7 +1499,8 @@ fn operations_modes_are_addressable_and_the_stream_stays_honest() {
         None,
         None,
     );
-    assert!(trace.contains("没有可回放的观察历史"));
+    assert!(trace.contains("观察历史当前未知"));
+    assert!(!trace.contains("没有可回放的观察历史"));
     let review = collection::render(
         collection::Section::Operations,
         collection::OperationsMode::Review,
@@ -1468,6 +1509,8 @@ fn operations_modes_are_addressable_and_the_stream_stays_honest() {
         None,
         None,
     );
+    assert!(review.contains("周期复盘当前未知"));
+    assert!(!review.contains("没有可复盘的周期"));
     assert!(review.contains("观察盲区"));
 
     assert!(now.contains("href=\"/collection/operations?mode=trace\""));
@@ -1780,7 +1823,7 @@ fn collection_orders_its_surfaces_by_urgency_and_opens_on_the_one_that_expires()
 
 #[test]
 fn every_empty_surface_says_whether_it_is_waiting_on_you() {
-    // DESIGN-006 Q9. Five empty surfaces, three kinds of empty — and only one of them is the
+    // DESIGN-006 Q9. Five empty surfaces, and only one confirmed-empty surface is the
     // reader's to act on. Rendered at equal weight they answered everything except "so what
     // do I do".
     let surface = |section| {
@@ -1795,7 +1838,22 @@ fn every_empty_surface_says_whether_it_is_waiting_on_you() {
     };
 
     // Exactly one surface may claim the reader's attention, and it must name the action.
-    let targets = surface(collection::Section::Targets);
+    let confirmed_empty = collection::SurfaceState {
+        vacant_stations: None,
+        unclaimed_installations: None,
+        total_targets: Some(0),
+        monitoring_targets: Some(0),
+        archiving_targets: Some(0),
+        scheduler_state: collection::SchedulerState::Unreadable,
+    };
+    let targets = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        None,
+        None,
+        None,
+        Some(&confirmed_empty),
+    );
     assert!(targets.contains("c-empty-you"));
     assert!(targets.contains("c-empty-action"));
 
@@ -1811,33 +1869,12 @@ fn every_empty_surface_says_whether_it_is_waiting_on_you() {
         );
     }
 
-    // Surfaces empty only because their upstream is must hand over a way out.
-    for (name, html, href) in [
-        (
-            "attention",
-            surface(collection::Section::Attention),
-            "/collection/targets",
-        ),
-        (
-            "tasks",
-            surface(collection::Section::Tasks),
-            "/collection/targets",
-        ),
-    ] {
-        assert!(
-            html.contains("c-empty-upstream"),
-            "{name} is upstream-empty"
-        );
-        assert!(
-            html.contains(&format!("class=\"c-empty-pointer\" href=\"{href}\"")),
-            "{name} must point at the step that is actually stopped"
-        );
-    }
-
     // Surfaces waiting on engineering must say so, so nobody hunts for an action.
     // Operations' default mode is not an empty state — it renders the pipeline itself — so
     // its awaiting-engineering wording lives on the two modes that are empty.
     for (name, html) in [
+        ("attention", surface(collection::Section::Attention)),
+        ("tasks", surface(collection::Section::Tasks)),
         (
             "operations/trace",
             collection::render(
@@ -1863,8 +1900,8 @@ fn every_empty_surface_says_whether_it_is_waiting_on_you() {
         ("runtime", surface(collection::Section::Runtime)),
     ] {
         assert!(
-            html.contains("这一栏不需要你做任何事"),
-            "{name} must state that it needs nothing from the reader"
+            html.contains("c-empty-engineering"),
+            "{name} must identify the missing engineering read model"
         );
     }
 }

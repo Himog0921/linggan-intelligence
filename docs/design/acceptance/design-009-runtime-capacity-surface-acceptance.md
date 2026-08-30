@@ -94,11 +94,12 @@ DESIGN-009 初次验收时，系统确实没有 scheduler heartbeat，因此第 
 | 生产流 | scheduler heartbeat | “调度运行中”或“调度心跳已过期” | heartbeat 不可读时才显示“调度心跳读不到”；语义事件读模型未接入时明确 `NO EVENT READ MODEL` |
 | 待处理 / 采集任务 | 目标计数与共享运行状态 | 有目标时不再声称“没有事项/任务” | 对应 read model 未接入时显示“当前未知” |
 | 执行工位 | capacity / station roster / heartbeat | 空缺工位、未归位安装与调度状态分别实读 | 每项独立未知，不连坐其他事实 |
-| Corpus 一级导航 | 观察目标总数 | “观察中 / 无观察目标 / 已接通” | 数据库未接通才保留原静态状态 |
+| Corpus 一级导航 | 观察目标总数 | “观察中 / 无观察目标 / 状态未知” | 读取失败必须显示“状态未知”，不得推断已接通或为零 |
 
 ### 7.3 自动与真实只读证明
 
-- `cargo test -p linggan-api`: **56 passed / 14 ignored / 0 failed**；ignored 项都明确要求隔离 PostgreSQL proof harness，不是本次失败。
+- `cargo test -p linggan-api`: **58 passed / 14 ignored / 0 failed**；ignored 项都明确要求隔离 PostgreSQL proof harness，不是本次失败。
+- `./scripts/test-local-001-discovery-postgres.sh`: 隔离 PostgreSQL 全链 **46 passed / 0 failed**，覆盖 9 个 local discovery、6 个 local producer、6 个 material projection、5 个 social、6 个 media 与 14 个 API 测试。
 - 新增回归锁住 running、stale、unreadable 三种 heartbeat；2 个目标 / 1 个巡检 / 1 个建档；生产流第二栏；Corpus 共享导航；以及“有目标时不得同时显示暂无目标/调度未接通”。
 - 候选 API 在 `127.0.0.1:3101` 连接本机持久数据库做只读验证，3000 正式进程未被替换：`/health` 为 scheduler running；目标页显示巡检 1、建档 1；执行工位显示空缺 0、未归位 1；Corpus 显示采集“观察中”。目标页与生产流均不再出现“调度器未接通”，目标页不再出现“暂无观察目标”。
 - 全依赖严格 Clippy 被 `linggan-evidence` 既有 11 个告警阻断，位置均不属于本次 diff；不能宣称 workspace Clippy 全绿。本次包级检查、治理检查和 diff 检查在提交前继续执行。
