@@ -223,6 +223,19 @@ test('background immediately auto-claims and executes bounded baseline plus fixe
   assert.match(background, /COLLECT_CURRENT_CONTENT/);
 });
 
+test('task window readiness covers tabs already complete before the listener starts waiting', () => {
+  const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
+  const start = background.indexOf('function waitForTabReady(');
+  const end = background.indexOf('\n\nchrome.runtime.onMessage', start);
+  const readiness = background.slice(start, end);
+  const listenerIndex = readiness.indexOf('chrome.tabs.onUpdated.addListener(listener)');
+  const snapshotIndex = readiness.indexOf('chrome.tabs.get(tabId)');
+  assert.ok(listenerIndex >= 0, 'readiness must subscribe to future completion');
+  assert.ok(snapshotIndex > listenerIndex, 'listener must be installed before the current tab snapshot is read');
+  assert.match(readiness, /tab\?\.status === 'complete'/);
+  assert.match(readiness, /clearTimeout\(timeoutHandle\)/);
+});
+
 test('scheduled material lanes preserve the server task and submit one capability package', () => {
   const adapter = readFileSync(new URL('../src/linggan/contentRuntimeAdapter.js', import.meta.url), 'utf8');
   const detail = readFileSync(new URL('../src/platforms/xhs/detailPackageCollector.js', import.meta.url), 'utf8');
