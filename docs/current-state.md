@@ -14,7 +14,7 @@
 
 Browser Producer 已沿真实 canary 升至 `0.8.2` 并进入 `main` 与本机发布：安装、启动或 alarm 唤醒后自动签到与领活，能按作品标识自动打开详情并分别回传详情、媒体、评论、回复 Package；不再依赖人工点击“领取”。服务端派发最新已接纳发现材料中的短期 XHS 签名来源链接，插件验证作品身份与 `xsec_token` 后执行；插件升级后同一工位可原位承接有效租约中的未完成 Task。普通图片、封面、视频与 Live Photo 共用媒体槽位，Live Photo 的 still/motion 候选和取得状态分开。服务端会自动取得短期 URL 的字节并保存在独立本地媒体根；本机媒体 worker 使用 Tesseract/FFmpeg/Whisper 形成缩略图、OCR、音频、ASR 和视频抽帧 OCR，空文本按 `KNOWN_EMPTY` 保留。Evidence Library 已接入互动时间线、评论/回复与派生文本检索，并只使用受控本地资产。
 
-共享数据库已应用 additive `0022`–`0024`，API、调度 worker 和媒体 worker 已切到 `origin/main@fbb1686` 冻结快照，Chrome 已加载 0.8.2。首个 `content_detail` Task 已由 0.8.2 自动承接，真实浏览历史证明带 token 的 `/discovery/item/{id}` 被打开并由平台跳转到仍保留 token 的 `/explore/{id}`；但该次没有形成 Attempt、Package 或 Receipt。当前 0.8.3 候选只收口这一真实时序缺口：首次 `complete` 后等待最终 URL/加载状态稳定 1.5 秒，并要求最终 content script 对同一 URL 回应，整体仍受 20 秒上限约束。它不新增 migration、不重建 WorkOrder/Task，也不扩大采集范围。真实 12 作品穿过详情/评论/媒体/OCR/ASR 与 Evidence Library 的最终验收仍未完成。
+共享数据库已应用 additive `0022`–`0024`，API、调度 worker 和媒体 worker 已切到 `origin/main@fbb1686` 冻结快照。Chrome 已加载 0.8.3；首个 `content_detail` Task 由同一工位原位承接，真实浏览历史证明签名 `/discovery/item/{id}` 跳转后，最终 `/explore/{id}` 保留 token 并持续约 9.2 秒，0.8.3 的最终页面稳定等待已经生效，但仍未形成 Attempt、Package 或 Receipt。当前 0.8.4 候选已经关闭两个代码断点：三轮有界等待后允许已取得的标题/正文/作者/媒体以互动字段部分未知提交；服务端同时把同一 WorkOrder 已批准的同页读取范围附在首个详情派发上，插件沿用单篇详情采集能力只开一次签名页面并将详情、媒体候选和有界评论树持久暂存。后续 `media_slots/comments/replies` 仍逐项领取并形成各自的 Task/Attempt/Package/Receipt，只复用页面结果。该实现不新增 PostgreSQL migration、不重建 WorkOrder/Task、不扩大采集范围；插件新增的独立 Dexie 表仅作为受 Lease/作品/TTL 约束的 MV3 恢复缓存，不是 Evidence 或调度真相。0.8.4 尚未合并、部署或加载，真实 12 作品穿过详情/评论/媒体/OCR/ASR 与 Evidence Library 的最终验收仍未完成。
 
 ### OBSERVATION-RUNTIME-001 / Issue #94 与 MEDIA-ACQUISITION-001 / Issue #98（已完成并运行）
 

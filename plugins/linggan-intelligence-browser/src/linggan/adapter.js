@@ -204,6 +204,9 @@ export async function claimLingganDispatch({
       taskSpec: mayExecute ? body?.taskSpec ?? null : null,
       executionSourceUrl: mayExecute ? String(body?.executionSourceUrl || '') : '',
       leaseRef: mayExecute ? String(body?.leaseRef || '') : '',
+      pageSessionPlan: mayExecute && body?.pageSessionPlan && typeof body.pageSessionPlan === 'object'
+        ? body.pageSessionPlan
+        : null,
       message: String(body?.reason || ''),
       // 节奏由服务端给。插件不自定间隔——否则想调就得重新发一版插件。
       nextPollAfterSeconds: Number(body?.nextPollAfterSeconds ?? 300),

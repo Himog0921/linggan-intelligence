@@ -35,6 +35,9 @@ pub enum DispatchDecision {
         task_spec: Value,
         /// 一次派发所需的短期页面定位信息。它不是 Task 身份，不写回不可变 TaskSpec。
         execution_source_url: Option<String>,
+        /// 同一详情页内已经由 Work Order 批准的读取范围。它只用于减少重复开页，
+        /// 不替代各 lane 自己的 TaskSpec，也不授权提前提交尚未领取的 Package。
+        page_session_plan: Option<Value>,
     },
     /// 这个安装还没归位到任何工位，因此不属于任何工位的产能。
     InstallationNotClaimed,
@@ -154,12 +157,15 @@ pub async fn decide_dispatch(
                     .to_owned(),
             });
         }
+        let page_session_plan =
+            page_session_plan_for_task(&mut transaction, lease_ref, &task_spec).await?;
         transaction.commit().await?;
         return Ok(DispatchDecision::Dispatch {
             task_id,
             lease_ref,
             task_spec,
             execution_source_url,
+            page_session_plan,
         });
     }
 
@@ -210,6 +216,8 @@ pub async fn decide_dispatch(
             reason: "这篇作品当前没有带 xsec_token 的已接纳发现链接，任务保持等待。".to_owned(),
         });
     }
+    let page_session_plan =
+        page_session_plan_for_task(&mut transaction, lease_ref, &task_spec).await?;
 
     let claimed = sqlx::query(
         "UPDATE collection_work_order_lease_task \
@@ -232,7 +240,73 @@ pub async fn decide_dispatch(
         lease_ref,
         task_spec,
         execution_source_url,
+        page_session_plan,
     })
+}
+
+/// 把已经冻结在 Work Order 中的同页读取范围交给 `content_detail` 执行。
+///
+/// 这里没有创造复合 Task：四个 lane 仍按自己的 TaskSpec、Attempt、Package、Receipt
+/// 逐一完成。计划只允许插件在第一次打开详情页时顺手读取后续已批准的数据并暂存，避免
+/// 同一作品为了媒体卡槽、评论和回复重复打开四次。
+async fn page_session_plan_for_task(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lease_ref: Uuid,
+    task_spec: &Value,
+) -> Result<Option<Value>, sqlx::Error> {
+    let capability = task_spec
+        .get("capabilitiesRequested")
+        .and_then(Value::as_array)
+        .and_then(|values| values.first())
+        .and_then(Value::as_str);
+    if capability != Some("content_detail") {
+        return Ok(None);
+    }
+    let Some(content_external_id) = task_spec
+        .pointer("/target/contentExternalId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+
+    let scope: Option<(i32, i32, bool, i64)> = sqlx::query_as(
+        "SELECT target.comment_limit,target.reply_expand_limit,target.acquire_media, \
+                GREATEST(1,FLOOR(EXTRACT(EPOCH FROM (lease.expires_at-scope_001_now()))))::bigint \
+         FROM collection_work_order_lease lease \
+         JOIN collection_work_order_material_target target \
+           ON target.work_order_ref=lease.work_order_ref \
+         JOIN linggan_material_content content \
+           ON content.public_ref=target.content_public_ref \
+         WHERE lease.lease_ref=$1 AND content.content_external_id=$2 LIMIT 1",
+    )
+    .bind(lease_ref)
+    .bind(content_external_id)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some((comment_limit, reply_expand_limit, acquire_media, ttl_seconds)) = scope else {
+        return Ok(None);
+    };
+
+    let mut lanes = vec!["content_detail"];
+    if acquire_media {
+        lanes.push("media_slots");
+    }
+    if comment_limit > 0 {
+        lanes.push("comments");
+    }
+    if reply_expand_limit > 0 {
+        lanes.push("replies");
+    }
+    Ok(Some(serde_json::json!({
+        "contractVersion": "linggan.detail-page-session.v1",
+        "contentExternalId": content_external_id,
+        "lanes": lanes,
+        "commentLimit": comment_limit,
+        "replyExpandLimit": reply_expand_limit,
+        "cacheTtlSeconds": ttl_seconds,
+    })))
 }
 
 fn requires_signed_execution_source(task_spec: &Value) -> bool {

@@ -45,6 +45,7 @@
 | XHS 签名详情定位（0.8.2） | 服务端从最新已接纳发现记录派发带 `xsec_token` 的短期来源链接；插件校验作品身份后转换为 `/discovery/item/{id}` | token 不进入 TaskSpec、作品身份或 Evidence；缺失时不执行，不回退裸 `/explore` |
 | 同工位安装承接（0.8.2） | 新安装取代旧安装时承接其有效租约内尚未完成的同一 Task | 不重建 Task、不重跑完成步骤；已被取代安装不能再改变执行状态 |
 | XHS 最终页面稳定（0.8.3） | 首次 `complete` 后继续观察 URL/加载变化；保持 1.5 秒稳定且最终 content script 回应同一 URL 才下发采集动作 | 总等待最多 20 秒；不新建 Task/Attempt，不把页面可响应冒充 Package 或 Receipt |
+| XHS 部分详情与同页执行（0.8.4） | 结构化详情已取得内容/作者/媒体时允许互动字段部分未知；首个详情 Task 按服务端已批准范围一次读取详情、媒体候选与有界评论树，后续单能力 Task 复用持久缓存 | 不以未知补 0；不合并 Task/Attempt/Package/Receipt；缓存不授权新 lane、不跨 Lease，缺失或过期时回退原 lane 执行 |
 
 ## 新旧运行路径对照
 
@@ -55,7 +56,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.3）
+当前路径（0.8.4）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox
@@ -63,7 +64,8 @@ Popup / Dashboard / injected control
 
 自动观察路径
 Observation rule -> WorkOrder -> ordered single-capability steps
-  -> plugin page execution -> immutable Package -> Receipt
+  -> first signed detail page read -> lease-scoped persistent page cache
+  -> each claimed lane -> its own immutable Package -> Receipt
   -> local media bytes -> local processors -> Evidence Library
 ```
 

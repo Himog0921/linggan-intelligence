@@ -356,6 +356,9 @@ export class BatchNoteController extends BaseBatchController {
     this._includeComments = false;
     this._commentLimit = 0;
     this._commentDepthMode = COMMENT_DEPTH_MODE.TWO_LEVEL;
+    this._maxSubComments = BATCH_CONFIG.maxSubComments;
+    this.taskSpec = null;
+    this._deferLingganDelivery = false;
     this._totalCommentsCollected = 0;
     this._searchFilters = normalizeXhsSearchFilters();
     this._searchFilterSnapshot = null;
@@ -423,6 +426,12 @@ export class BatchNoteController extends BaseBatchController {
     this._commentDepthMode = String(settings.commentDepthMode || COMMENT_DEPTH_MODE.TWO_LEVEL).trim() === COMMENT_DEPTH_MODE.ALL_REPLIES
       ? COMMENT_DEPTH_MODE.ALL_REPLIES
       : COMMENT_DEPTH_MODE.TWO_LEVEL;
+    const configuredMaxSubComments = Number(settings.maxSubComments ?? BATCH_CONFIG.maxSubComments);
+    this._maxSubComments = Number.isFinite(configuredMaxSubComments)
+      ? Math.max(0, Math.floor(configuredMaxSubComments))
+      : BATCH_CONFIG.maxSubComments;
+    this.taskSpec = settings.taskSpec || null;
+    this._deferLingganDelivery = settings.deferLingganDelivery === true;
     this._searchFilters = normalizeXhsSearchFilters(settings.searchFilters || {});
     this._searchFilterSnapshot = mode === COLLECT_MODE.SEARCH
       ? readCurrentXhsSearchFilterSnapshot(window)
@@ -884,6 +893,9 @@ export class BatchNoteController extends BaseBatchController {
       includeComments: this._includeComments,
       commentLimit: this._commentLimit,
       commentDepthMode: this._commentDepthMode,
+      maxSubComments: this._maxSubComments,
+      taskSpec: this.taskSpec,
+      deferLingganDelivery: this._deferLingganDelivery,
       shouldStop: () => !this.isRunning,
       waitIfPaused: () => this._waitIfPaused(),
       onCommentProgress: (progress) => {
@@ -1242,7 +1254,7 @@ export class BatchNoteController extends BaseBatchController {
         noteId,
         noteUrl: noteUrl || noteInfo.url || window.location.href,
         maxTotal: this._commentLimit,
-        maxSubComments: this._commentDepthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 0 : BATCH_CONFIG.maxSubComments,
+        maxSubComments: this._commentDepthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 0 : this._maxSubComments,
         commentDepthMode: this._commentDepthMode,
         shouldStop: () => !this.isRunning,
         waitIfPaused: () => this._waitIfPaused(),

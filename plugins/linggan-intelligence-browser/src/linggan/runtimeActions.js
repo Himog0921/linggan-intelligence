@@ -19,6 +19,9 @@ export const LINGGAN_RUNTIME_ACTION = {
   // Popup commands are intentionally separate from the retired MSG.COLLECT_* catalogue.
   // They only reach the active page runtime, which owns the eventual package/receipt boundary.
   COLLECT_CURRENT_CONTENT: 'lingganCollectCurrentContent',
+  // 服务端固定作品深化的单页全量读取。它只预取同一 Work Order 已批准的 lane；
+  // 每个 lane 仍等待自己的 TaskSpec 后才形成 Package/Receipt。
+  COLLECT_NOTE_FULL: 'lingganCollectNoteFull',
   COLLECT_CURRENT_COMMENTS: 'lingganCollectCurrentComments',
   COLLECT_CURRENT_AUTHOR: 'lingganCollectCurrentAuthor',
   // 表层发现面：作者页的作品清单。它只读页面已可见的卡片，**不打开任何详情**。

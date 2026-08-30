@@ -16,6 +16,10 @@ import {
 import { LINGGAN_RUNTIME_ACTION } from './runtimeActions.js';
 import { localMediaOutbox, localProducerOutbox } from './localProducerOutbox.js';
 import { createManualRuntimeTask, packageDiscovery } from './producerRuntime.js';
+import {
+  detailPageSessionStore,
+  packageDetailPageSessionLane,
+} from './detailPageSessionStore.js';
 import { waitForStableTab } from './tabReadiness.js';
 import { buildSignedXhsDetailExecutionUrl } from './xhsExecutionTarget.js';
 
@@ -592,6 +596,38 @@ const SURFACE_CAPABILITIES = new Set([
   'replies',
 ]);
 
+async function queueCachedDetailPageSessionLane({ leaseRef, taskSpec } = {}) {
+  const entry = await detailPageSessionStore.getForTask({ leaseRef, taskSpec });
+  if (!entry) return null;
+  if (entry.alreadyQueued) {
+    // A claim response can be replayed while its durable outbox item is still being delivered.
+    // Do not create a second Attempt for the same server task.
+    void flushLocalOutbox();
+    return {
+      success: true,
+      state: 'cached_page_session_already_queued',
+      executed: true,
+      capability: entry.capability,
+      leaseRef,
+      message: `已复用详情页缓存；「${entry.capability}」此前已进入待交付队列。`,
+    };
+  }
+  const capturePackage = packageDetailPageSessionLane(entry, taskSpec);
+  const queued = entry.capability === 'media_slots'
+    ? await queueMediaSlots({ taskSpec, capturePackage })
+    : await queueCapturePackage({ taskSpec, capturePackage });
+  await detailPageSessionStore.markTaskQueued(entry.cacheKey, entry.capability, taskSpec.taskId);
+  return {
+    success: true,
+    state: 'cached_page_session_queued',
+    executed: true,
+    capability: entry.capability,
+    leaseRef,
+    submissionId: queued.submissionId,
+    message: `已复用同一次详情页读取结果，并将「${entry.capability}」加入待交付队列。`,
+  };
+}
+
 async function runDispatchedTask() {
   const readiness = await readLingganLocalReadiness();
   if (!readiness.reachable) {
@@ -626,6 +662,17 @@ async function runDispatchedTask() {
   if (!targetValue) {
     return { success: true, state: 'target_incomplete', executed: false, message: '任务没有指明观察目标。' };
   }
+
+  // The first content_detail task opens the signed page and captures the server-approved lanes.
+  // Later sequential tasks from the same Work Order reuse those persisted facts, but still form
+  // their own Task/Attempt/Package/Receipt only after they are actually claimed.
+  if (['content_detail', 'media_slots', 'comments', 'replies'].includes(capability)) {
+    const cached = await queueCachedDetailPageSessionLane({
+      leaseRef: claim.leaseRef,
+      taskSpec: spec,
+    });
+    if (cached) return { ...cached, nextPollAfterSeconds: claim.nextPollAfterSeconds };
+  }
   const { windowId, tabId } = await openTaskWindow(capability, targetValue, claim.executionSourceUrl);
   if (!tabId) {
     await closeCollectionWindow(windowId);
@@ -638,7 +685,9 @@ async function runDispatchedTask() {
       ? LINGGAN_RUNTIME_ACTION.DISCOVER_SURFACE
       : (['comments', 'replies'].includes(capability)
         ? LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_COMMENTS
-        : LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_CONTENT));
+        : (capability === 'content_detail' && claim.pageSessionPlan
+          ? LINGGAN_RUNTIME_ACTION.COLLECT_NOTE_FULL
+          : LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_CONTENT)));
   try {
     const ready = await waitForTabReady(tabId);
     if (!ready) {
@@ -656,8 +705,17 @@ async function runDispatchedTask() {
       // The page collector must submit against this exact server-issued identity. Rebuilding a
       // manual task here would leave the claimed scheduled task without Attempt or Receipt.
       taskSpec: spec,
+      leaseRef: claim.leaseRef,
+      pageSessionPlan: claim.pageSessionPlan,
       triggerSource: 'linggan_dispatched_task',
     });
+    if (response?.success === false) {
+      return {
+        success: false,
+        state: response.state || 'page_read_failed',
+        message: response.message || `页面未能执行「${capability}」。`,
+      };
+    }
     return {
       success: true,
       state: 'executed',

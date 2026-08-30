@@ -440,6 +440,7 @@ async fn detail_dispatch_uses_the_latest_accepted_signed_discovery_url_outside_t
         DispatchDecision::Dispatch {
             task_spec,
             execution_source_url,
+            page_session_plan,
             ..
         } => {
             assert_eq!(task_spec["capabilitiesRequested"][0], "content_detail");
@@ -452,6 +453,20 @@ async fn detail_dispatch_uses_the_latest_accepted_signed_discovery_url_outside_t
                 "short-lived execution credentials never enter immutable TaskSpec"
             );
             assert_eq!(execution_source_url.as_deref(), Some(signed_url.as_str()));
+            let plan = page_session_plan.expect("fixed detail work exposes one same-page plan");
+            assert_eq!(plan["contractVersion"], "linggan.detail-page-session.v1");
+            assert_eq!(plan["contentExternalId"], content_external_id);
+            assert_eq!(
+                plan["lanes"],
+                serde_json::json!(["content_detail", "media_slots", "comments", "replies"])
+            );
+            assert_eq!(plan["commentLimit"], 30);
+            assert_eq!(plan["replyExpandLimit"], 2);
+            assert!(
+                plan["cacheTtlSeconds"]
+                    .as_i64()
+                    .is_some_and(|value| value > 0)
+            );
         }
         other => panic!("signed discovery must produce a detail dispatch; got {other:?}"),
     }

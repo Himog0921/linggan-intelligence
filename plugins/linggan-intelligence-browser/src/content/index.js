@@ -1,6 +1,6 @@
 import '../extensionPublicPath.js';
 import '../content.css';
-import { MSG } from '../shared/constants.js';
+import { COLLECT_MODE, COMMENT_DEPTH_MODE, MSG } from '../shared/constants.js';
 import { buildDiscoveryExecutionSummary, discoverWithScroll } from '../platforms/xhs/noteCollector.js';
 import { collectXhsNoteDetailPackage } from '../platforms/xhs/detailPackageCollector.js';
 import { readCurrentXhsSearchSurfaceContext } from '../platforms/xhs/searchFilters.js';
@@ -20,6 +20,10 @@ import { extractNoteId } from '../shared/utils.js';
 import { createLingganContentRuntime } from '../linggan/contentRuntimeAdapter.js';
 import { LINGGAN_RUNTIME_ACTION } from '../linggan/runtimeActions.js';
 import { unavailableLingganStats } from '../linggan/adapter.js';
+import {
+  detailPageSessionStore,
+  validateDetailPageSessionPlan,
+} from '../linggan/detailPageSessionStore.js';
 import { loadDouyinRuntime } from './douyinRuntime.js';
 import { registerCollectorReceiptSink } from '../runtime/collectorReceiptSink.js';
 import { createDashboardBridge } from './dashboardBridge.js';
@@ -214,7 +218,54 @@ function dispatchXhsRuntimeAction(nextAction, params = {}) {
   });
 }
 
+async function collectApprovedDetailPageSession(message = {}) {
+  if (platform() !== 'xhs') throw new Error('detail_page_session_platform_not_supported');
+  const taskSpec = message.taskSpec || {};
+  const contentExternalId = String(taskSpec?.target?.contentExternalId || '').trim();
+  const leaseRef = String(message.leaseRef || '').trim();
+  if (!leaseRef || !contentExternalId) throw new Error('detail_page_session_identity_required');
+  const plan = validateDetailPageSessionPlan(message.pageSessionPlan, contentExternalId);
+
+  const controller = new LingganBatchNoteController();
+  await controller.start(COLLECT_MODE.DETAIL, null, {
+    count: 1,
+    targetNoteId: contentExternalId,
+    includeComments: plan.lanes.includes('comments') || plan.lanes.includes('replies'),
+    commentLimit: plan.commentLimit,
+    commentDepthMode: COMMENT_DEPTH_MODE.TWO_LEVEL,
+    maxSubComments: plan.replyExpandLimit,
+    taskSpec,
+    deferLingganDelivery: true,
+    triggerSource: 'linggan_detail_page_session',
+  });
+
+  const note = controller.collected[0];
+  if (!note || String(note.noteId || '').trim() !== contentExternalId) {
+    throw new Error('detail_page_session_content_not_collected');
+  }
+  const packaged = note.__xhsDetailPackage || {};
+  const entry = await detailPageSessionStore.put({
+    leaseRef,
+    plan,
+    note,
+    commentResult: packaged.commentResult,
+    receipt: packaged.receipt,
+  });
+  const queued = await runtime.submitContentDetail(note, { taskSpec });
+  await detailPageSessionStore.markTaskQueued(entry.cacheKey, 'content_detail', taskSpec.taskId);
+  return {
+    success: true,
+    state: 'detail_page_session_queued',
+    delivery: queued.delivery || 'pending',
+    submissionId: queued.submissionId,
+    message: '当前详情页已完整读取；详情已进入待交付队列，其余已批准通道将复用本次页面结果。',
+  };
+}
+
 async function dispatchProducerRuntimeAction(action, message) {
+  if (action === LINGGAN_RUNTIME_ACTION.COLLECT_NOTE_FULL) {
+    return collectApprovedDetailPageSession(message);
+  }
   const isDouyin = platform() === 'douyin';
   const map = isDouyin
     ? {
@@ -275,6 +326,7 @@ async function dispatchProducerRuntimeAction(action, message) {
   } else {
     pageResult = await dispatchXhsRuntimeAction(pageAction, params);
   }
+  if (pageResult?.success === false) return pageResult;
   // This means the page reader actually accepted the action. It is deliberately not an
   // admission receipt; Popup must continue to describe delivery as pending until one exists.
   if (isControl) {
@@ -305,6 +357,7 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
   }
   if ([
     LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_CONTENT,
+    LINGGAN_RUNTIME_ACTION.COLLECT_NOTE_FULL,
     LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_COMMENTS,
     LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_AUTHOR,
     LINGGAN_RUNTIME_ACTION.DISCOVER_SURFACE,

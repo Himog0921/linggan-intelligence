@@ -223,6 +223,9 @@ test('background immediately auto-claims and executes bounded baseline plus fixe
   assert.match(background, /mode: capability === 'discovery_search' \? 'search' : 'profile'/);
   assert.match(background, /COLLECT_CURRENT_COMMENTS/);
   assert.match(background, /COLLECT_CURRENT_CONTENT/);
+  assert.match(background, /queueCachedDetailPageSessionLane/);
+  assert.match(background, /COLLECT_NOTE_FULL/);
+  assert.match(background, /pageSessionPlan: claim\.pageSessionPlan/);
 });
 
 test('task window readiness delegates final-document stability and content-runtime probing', () => {
@@ -318,6 +321,14 @@ test('content message gate admits scheduled profile discovery without dropping d
   assert.match(gate, /LINGGAN_RUNTIME_ACTION\.DISCOVER_SURFACE/);
   assert.match(content, /taskSpec: message\.taskSpec/);
   assert.match(content, /triggerSource: message\.triggerSource \|\| 'popup_linggan_runtime'/);
+});
+
+test('scheduled page execution propagates a collector failure instead of reporting a false start', () => {
+  const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
+  const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
+  assert.match(content, /if \(pageResult\?\.success === false\) return pageResult/);
+  assert.match(background, /if \(response\?\.success === false\)/);
+  assert.match(background, /response\.state \|\| 'page_read_failed'/);
 });
 
 test('producer controls use Linggan runtime commands while manual media remains an explicit separate action', () => {

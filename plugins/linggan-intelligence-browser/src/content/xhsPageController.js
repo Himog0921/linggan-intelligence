@@ -311,15 +311,16 @@ export function createXhsPageController({
 
     if (isContextValid() === false) {
       showToast(XHS_CONTEXT_REFRESH_MESSAGE, 'warning');
-      return;
+      return { success: false, state: 'context_invalid', message: XHS_CONTEXT_REFRESH_MESSAGE };
     }
 
     if (!['stopBatch', 'pauseBatch', 'resumeBatch'].includes(action)) {
       try {
         await ensurePluginAuthorized();
       } catch (error) {
-        showToast(String(error?.message || 'Linggan 采集 adapter 尚未接通。'), 'warning');
-        return;
+        const message = String(error?.message || 'Linggan 采集 adapter 尚未接通。');
+        showToast(message, 'warning');
+        return { success: false, state: 'authorization_unavailable', message };
       }
     }
 
@@ -330,17 +331,25 @@ export function createXhsPageController({
     });
     if (preflight.ok === false) {
       showToast(preflight.message || '当前页面结构未通过预检，请刷新后重试。', 'warning');
-      return;
+      return {
+        success: false,
+        state: preflight.code || 'selector_preflight_failed',
+        message: preflight.message || '当前页面结构未通过预检，请刷新后重试。',
+      };
     }
 
     try {
       switch (action) {
         case 'collectNote': {
-          await collectCurrentNoteToLinggan({
+          const note = await collectCurrentNoteToLinggan({
             taskSpec: params.taskSpec,
             expectedNoteId: params.taskSpec?.target?.contentExternalId,
           });
-          break;
+          return {
+            success: true,
+            state: 'page_read_completed',
+            delivery: note?.lingganDelivery?.delivery || 'pending',
+          };
         }
 
         case 'collectNoteWithManualMedia': {
@@ -380,7 +389,7 @@ export function createXhsPageController({
             commentDepthMode: commentSettings.commentDepthMode,
             taskSpec: params.taskSpec,
           });
-          break;
+          return { success: true, state: 'page_read_completed', delivery: 'pending' };
         }
 
         case 'collectAuthor': {
@@ -390,7 +399,11 @@ export function createXhsPageController({
           showToast(author?.lingganDelivery?.delivery === 'acknowledged'
             ? `博主资料已被 Linggan 接纳：${author.name}`
             : `博主资料已读取，待本机 Linggan 交付：${author.name}`, author?.lingganDelivery?.delivery === 'acknowledged' ? 'success' : 'info');
-          break;
+          return {
+            success: true,
+            state: 'page_read_completed',
+            delivery: author?.lingganDelivery?.delivery || 'pending',
+          };
         }
 
         case 'discoverSurface': {
@@ -444,7 +457,11 @@ export function createXhsPageController({
           showToast(delivery?.delivery === 'acknowledged'
             ? `Linggan 已接纳：${resultText}`
             : `${resultText}，待本机 Linggan 交付`, delivery?.delivery === 'acknowledged' ? 'success' : 'info');
-          break;
+          return {
+            success: true,
+            state: 'page_read_completed',
+            delivery: delivery?.delivery || 'pending',
+          };
         }
 
         case 'batchNotes': {
@@ -538,7 +555,7 @@ export function createXhsPageController({
       const errMsg = String(err?.message || '');
       if (/Extension context invalidated|context invalidated/i.test(errMsg) || isContextValid() === false) {
         showToast(XHS_CONTEXT_REFRESH_MESSAGE, 'warning');
-        return;
+        return { success: false, state: 'context_invalid', message: XHS_CONTEXT_REFRESH_MESSAGE };
       }
       if (action === 'batchNotes' || action === 'batchComments') {
         toggleStopButton(false);
@@ -546,6 +563,7 @@ export function createXhsPageController({
         activeTaskType = null;
       }
       showToast(`操作失败：${err.message}`, 'error');
+      return { success: false, state: 'page_read_failed', message: errMsg || '页面采集失败' };
     }
   }
 
