@@ -1,4 +1,5 @@
 import { parseCount, extractNoteId } from '../../shared/utils.js';
+import { readXhsSsrNoteDetailMap } from './ssrNoteMap.js';
 
 export const POPUP_SELECTORS = [
   '.note-detail-mask',
@@ -191,7 +192,8 @@ export function waitForNoteState(noteId, timeout = 10000) {
     const start = Date.now();
     const check = () => {
       try {
-        const noteMap = window.__INITIAL_STATE__?.note?.noteDetailMap;
+        const noteMap = window.__INITIAL_STATE__?.note?.noteDetailMap
+          || readXhsSsrNoteDetailMap(document);
         if (noteMap && noteMap[noteId]) {
           resolve(true);
           return;

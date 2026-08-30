@@ -19,6 +19,7 @@ import {
   requestXhsSearchNotesSnapshot,
 } from './commentApi.js';
 import { isRiskControlPage } from './batchShared.js';
+import { readXhsSsrNoteDetailMap } from './ssrNoteMap.js';
 
 const XHS_CONTEXT_REFRESH_MESSAGE = '插件刚更新，请刷新当前页面后再点一次，刷新后即可继续。';
 
@@ -429,14 +430,24 @@ export async function collectNote(wd = window, options = {}) {
     throw new Error(XHS_CONTEXT_REFRESH_MESSAGE);
   }
 
-  // 1. 注入脚本获取 noteDetailMap（最多重试 3 次，等待 __INITIAL_STATE__ 填充）
+  // 1. 优先读取页面保留的 SSR noteDetailMap。XHS 水合后可能删除全局
+  // __INITIAL_STATE__，但仍保留原始序列化脚本；这里只解析 JSON 对象，不执行页面脚本。
   const expectedNoteId = String(options.expectedNoteId || '').trim();
   const currentUrl = wd.location?.href || window.location.href;
-  let injectedCandidate = null;
-  let injectedCandidateState = 'unusable';
-  let injectedCandidateKey = '';
+  const ssrNoteMap = readXhsSsrNoteDetailMap(wd.document);
+  const ssrResolved = resolveExpectedNoteFromMap(ssrNoteMap, expectedNoteId, currentUrl);
+  const ssrCandidateState = classifyXhsNoteDetail(ssrResolved.note || {}, expectedNoteId);
+  let candidate = ssrCandidateState === 'unusable' ? null : ssrResolved.note;
+  let candidateState = ssrCandidateState;
+  let candidateKey = candidate ? ssrResolved.noteKey : '';
+  let candidateSource = candidate
+    ? (candidateState === 'complete' ? 'xhs.ssr_initial_state' : 'xhs.ssr_initial_state_partial')
+    : '';
+  const hasSsrCandidate = Boolean(candidate);
   let lastErr = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+
+  // 2. SSR 不可用时才注入读取运行态，全程最多三次。
+  for (let attempt = 0; !hasSsrCandidate && attempt < 3; attempt++) {
     try {
       if (attempt > 0) {
         await new Promise(r => setTimeout(r, 1500 * attempt));
@@ -444,15 +455,18 @@ export async function collectNote(wd = window, options = {}) {
       const noteMap = await getByInject(wd, 'noteMap');
       if (noteMap && Object.keys(noteMap).length > 0) {
         const resolved = resolveExpectedNoteFromMap(noteMap, expectedNoteId, currentUrl);
-        const candidateState = classifyXhsNoteDetail(resolved.note || {}, expectedNoteId);
-        if (candidateState !== 'unusable') {
-          injectedCandidate = resolved.note;
-          injectedCandidateState = candidateState;
-          injectedCandidateKey = resolved.noteKey;
+        const resolvedState = classifyXhsNoteDetail(resolved.note || {}, expectedNoteId);
+        if (resolvedState !== 'unusable') {
+          candidate = resolved.note;
+          candidateState = resolvedState;
+          candidateKey = resolved.noteKey;
+          candidateSource = resolvedState === 'complete'
+            ? '__INITIAL_STATE__'
+            : 'xhs.initial_state_partial';
         }
         // Keep waiting for AJAX interaction fields, but retain a structurally usable partial
         // candidate so missing metrics cannot discard title/body/author/media already observed.
-        if (candidateState === 'complete') break;
+        if (resolvedState === 'complete') break;
       }
     } catch (e) {
       lastErr = e;
@@ -465,11 +479,9 @@ export async function collectNote(wd = window, options = {}) {
     }
   }
 
-  let noteKey = injectedCandidateKey;
-  let note = injectedCandidate;
-  let detailSource = injectedCandidateState === 'complete'
-    ? '__INITIAL_STATE__'
-    : (injectedCandidateState === 'partial_stats' ? 'xhs.initial_state_partial' : '__INITIAL_STATE__');
+  let noteKey = candidateKey;
+  let note = candidate;
+  let detailSource = candidateSource || '__INITIAL_STATE__';
 
   if (!note) {
     note = readXhsNoteDetailFromDom(wd, { expectedNoteId });
@@ -555,9 +567,9 @@ export async function collectNote(wd = window, options = {}) {
     updatedAt: collectedAt,
     collectionRunId: String(options.collectionRunId || '').trim(),
     dataSource: detailSource,
-    ...(detailSource === '__INITIAL_STATE__'
+    ...(detailSource === '__INITIAL_STATE__' || detailSource === 'xhs.ssr_initial_state'
       ? {}
-      : (detailSource === 'xhs.initial_state_partial'
+      : (detailSource === 'xhs.initial_state_partial' || detailSource === 'xhs.ssr_initial_state_partial'
         ? { dataQuality: 'partial', qualityReason: 'interaction_stats_partial', sourceTier: 'initial_state' }
         : { dataQuality: 'degraded', qualityReason: 'dom_detail_fallback', sourceTier: 'dom' })),
     createdAt: existing?.createdAt || collectedAt,
@@ -574,7 +586,9 @@ export async function collectNote(wd = window, options = {}) {
       rawUrl: safeUrl(wd.location?.href || window.location.href),
       rawSource: detailSource === '__INITIAL_STATE__' || detailSource === 'xhs.initial_state_partial'
         ? '__INITIAL_STATE__.noteMap'
-        : 'xhs.detail_dom',
+        : (detailSource === 'xhs.ssr_initial_state' || detailSource === 'xhs.ssr_initial_state_partial'
+          ? 'document.ssr.__INITIAL_STATE__.note.noteDetailMap'
+          : 'xhs.detail_dom'),
     }),
   }, options.monitorMeta);
 
