@@ -9,10 +9,30 @@ use sqlx::Row;
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn runtime_and_material_readiness_require_the_comment_current_projection_migration() {
+async fn runtime_and_material_readiness_require_both_current_projection_migrations() {
     let database = proof_database("comment_projection_readiness_gate").await;
     assert!(producer_runtime_schema_is_ready(&database).await.unwrap());
     assert!(work_resource_schema_is_ready(&database).await.unwrap());
+
+    sqlx::query(
+        "DELETE FROM linggan_local_schema_migration \
+         WHERE migration_id = '0026_work_resource_read'",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    assert!(!producer_runtime_schema_is_ready(&database).await.unwrap());
+    assert!(!work_resource_schema_is_ready(&database).await.unwrap());
+
+    sqlx::query(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) \
+         VALUES ('0026_work_resource_read', \
+                 '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd')",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
 
     sqlx::query(
         "DELETE FROM linggan_local_schema_migration \

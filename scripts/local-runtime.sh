@@ -226,13 +226,15 @@ case "$command_name" in
     scheduler_pid=$!
     "$project_root/target/debug/linggan-media-worker" &
     media_worker_pid=$!
+    "$project_root/target/debug/linggan-api" &
+    api_pid=$!
     cleanup_runtime_children() {
-      kill "$scheduler_pid" "$media_worker_pid" 2>/dev/null || true
-      wait "$scheduler_pid" "$media_worker_pid" 2>/dev/null || true
+      kill "$scheduler_pid" "$media_worker_pid" "$api_pid" 2>/dev/null || true
+      wait "$scheduler_pid" "$media_worker_pid" "$api_pid" 2>/dev/null || true
     }
     trap cleanup_runtime_children EXIT
     trap 'exit 143' INT TERM
-    "$project_root/target/debug/linggan-api"
+    wait "$api_pid"
     ;;
   *)
     usage

@@ -11,7 +11,7 @@
 - Issue / Work Package：Issue #90 / `EVIDENCE-RUNTIME-001`，五卡 Evidence Library 垂直交付的卡 4。
 - Agent / worktree：`/root/evidence_runtime_agent`；`codex/issue-90-evidence-runtime`；独立 worktree `evidence-runtime`。
 - Stacked base：PR #88 exact head `510b5fa9c9c2e38aedf1e785ea7acecbeded324a`；本分支已合入 PR #87 exact head 作为设计输入。
-- 目标：让 `/corpus/evidence` 默认消费 `/api/local/evidence-library` 的 Material Projection，以来源作品为顶层对象显示九条材料 lane，并按 `detailUrl` 读取右侧 Inspector。
+- 目标：让 `/corpus/evidence` 默认消费 `/api/local/work-resources` 的共享作品资源投影，以来源作品为顶层对象显示九条材料 lane，并按 `detailUrl` 读取右侧 Inspector。
 - 用户可见结果：用户可以检索当前已接纳材料、选择作品、核验详情/评论/媒体/派生/来源，并在有界通道中继续读取下一页。
 - 明确非目标：修改数据库、接纳、媒体资格/处置语义、插件、采集调度、OCR/ASR provider、部署、真实平台、Issue #89 或 legacy 默认混读。
 
@@ -44,7 +44,7 @@
 |---|---|---|---|
 | 共享页头 / context / 二级 rail | 产品方位、结果数、选择与读取状态 | `shell.rs` + 页面客户端状态 | 页面 CSS 重定义 Shell、复制标题块 |
 | 查询与筛选 | 构造本地 Material Projection 查询 | URL 查询参数 + 列表 receipt | 平台搜索、保存视图、采集动作 |
-| 中央连续列表 | 作品级身份、预览、九条 lane、限制 | `/api/local/evidence-library` | legacy cards、Package/Blob/Slot 顶层对象 |
+| 中央连续列表 | 作品级身份、预览、九条 lane、限制 | `/api/local/work-resources` | legacy cards、Package/Blob/Slot 顶层对象 |
 | 右侧 Inspector | 概览、评论、媒体/派生、来源/限制 | `detailUrl` 与 channel receipts | raw Package 拼装、远程 CDN、AI 结论 |
 | Inline feedback | 加载、空、失败、查询无效、部分、受限 | `local_read` error / Material fields | toast-only、把失败写为空库 |
 | 375px 顺序流 | 查询 → 列表 → Inspector → 返回 | 本地视图状态 | 横向压缩三栏、隐藏关键状态 |

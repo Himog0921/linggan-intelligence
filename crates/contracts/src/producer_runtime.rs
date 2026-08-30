@@ -439,6 +439,15 @@ fn validate_comment_collection_receipt(
     let complete_all_public_matches_page = state != Some("complete")
         || scope != Some("all_public_comments")
         || (page_count == expected && expected == acquired);
+    let requested_limit = count("requestedLimit");
+    let detail_window_limit_is_valid = scope != Some("detail_window")
+        || requested_limit.is_some_and(|limit| (1..=30).contains(&limit));
+    let complete_detail_window_is_full = state != Some("complete")
+        || scope != Some("detail_window")
+        || requested_limit.is_some_and(|limit| {
+            let required = page_count.map_or(limit, |page_count| page_count.min(limit));
+            expected == Some(required) && acquired == Some(required)
+        });
     let state_matches_identity = matches!(
         (state, target_identity),
         (Some("complete"), Some("matched"))
@@ -463,8 +472,6 @@ fn validate_comment_collection_receipt(
                     | "api_unobserved"
             )
         );
-    let detail_window_has_limit =
-        scope != Some("detail_window") || count("requestedLimit").is_some();
     if version != Some(1)
         || !matches!(scope, Some("detail_window") | Some("all_public_comments"))
         || !matches!(
@@ -486,10 +493,11 @@ fn validate_comment_collection_receipt(
         || acquired.is_none()
         || !complete_matches_expected
         || !complete_all_public_matches_page
+        || !detail_window_limit_is_valid
+        || !complete_detail_window_is_full
         || !state_matches_identity
         || !usability_matches_identity_and_count
         || !complete_has_nonterminal_stop
-        || !detail_window_has_limit
     {
         return Err(ProducerRuntimeContractError::InvalidCoverage);
     }
@@ -618,6 +626,45 @@ mod tests {
         let risk_stopped = valid.replace("comment_area_end", "risk_control");
         assert!(matches!(
             parse_producer_capture_package(&risk_stopped),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+    }
+
+    #[test]
+    fn detail_window_complete_requires_the_full_standard_window() {
+        let valid = r#"{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"11111111-1111-4111-8111-111111111111","packageKind":"comments","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"n","commentCollection":{"version":1,"noteId":"n","scope":"detail_window","requestedLimit":30,"pageCommentCount":80,"expectedCount":30,"uniqueCollectedCount":30,"state":"complete","analysisUsability":"usable","targetIdentity":"matched","stopReason":"target_reached"}},"layers":[{"capability":"comments","observed":30,"attempted":30,"acquired":30,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"target_reached"}]},"records":[]}"#;
+        assert!(parse_producer_capture_package(valid).is_ok());
+
+        let short_window = valid
+            .replace("\"expectedCount\":30", "\"expectedCount\":20")
+            .replace("\"uniqueCollectedCount\":30", "\"uniqueCollectedCount\":20");
+        assert!(matches!(
+            parse_producer_capture_package(&short_window),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+
+        let oversized_window = valid
+            .replace("\"requestedLimit\":30", "\"requestedLimit\":31")
+            .replace("\"expectedCount\":30", "\"expectedCount\":31")
+            .replace("\"uniqueCollectedCount\":30", "\"uniqueCollectedCount\":31");
+        assert!(matches!(
+            parse_producer_capture_package(&oversized_window),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+
+        let known_short_page = valid
+            .replace("\"pageCommentCount\":80", "\"pageCommentCount\":20")
+            .replace("\"expectedCount\":30", "\"expectedCount\":20")
+            .replace("\"uniqueCollectedCount\":30", "\"uniqueCollectedCount\":20");
+        assert!(parse_producer_capture_package(&known_short_page).is_ok());
+
+        let unknown_page = valid.replace("\"pageCommentCount\":80", "\"pageCommentCount\":null");
+        assert!(parse_producer_capture_package(&unknown_page).is_ok());
+        let unknown_short_window = unknown_page
+            .replace("\"expectedCount\":30", "\"expectedCount\":20")
+            .replace("\"uniqueCollectedCount\":30", "\"uniqueCollectedCount\":20");
+        assert!(matches!(
+            parse_producer_capture_package(&unknown_short_window),
             Err(ProducerRuntimeContractError::InvalidCoverage)
         ));
     }
