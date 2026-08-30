@@ -42,6 +42,7 @@
 | [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md) | 权威当前；MATERIAL-PROJECTION-001 | 最新 Browser Producer 产出到服务接纳、作品级材料投影与 Evidence 列表/详情/受控媒体读取的逐 lane 映射及代表性 fixture |
 | [`architecture/work-resource-read-contract.md`](architecture/work-resource-read-contract.md) | 交付分支实现；Issue #110 | Intelligence 跨页面唯一作品资源读取入口；作者/监控目标关系、发布时间资格、Media V2 继承和三布局数据一致性 |
 | [`architecture/topic-workspace-contract.md`](architecture/topic-workspace-contract.md) | 交付分支实现；Issue #112 | 暂定 Topic Definition、人工 Classification Run、冻结 Material Pack、版本/幂等与 Agent 准入边界 |
+| [`architecture/agent-candidate-analysis-contract.md`](architecture/agent-candidate-analysis-contract.md) | 交付分支实现；Issue #113 | exact Topic Material Pack 的单一 A1–A2 Runtime、候选输出资格、deterministic/Pi transport seam 与未接真实 Pi 边界 |
 | [design/README.md](design/README.md) | 权威当前 | 前端设计手册入口、权威地图、读取路径和当前已建立/未建立边界 |
 | [design/design-governance.md](design/design-governance.md) | 权威当前 | UI 设计来源优先级、闭集执行、变更分类、例外和验收治理 |
 | [design/reference-register.md](design/reference-register.md) | 权威当前 | 设计参考的登记格式与“参考不等于指令”边界；LIDS v2.0 的可继承/不继承边界已登记 |
@@ -141,6 +142,7 @@
 | [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) | 活跃计划 | F01 后、首个真实 producer 和用户可见切片前的产品形态、P0 页面、Canary、Capture/Media 与第一阶段运行架构决策图；当前首票为 `product-shell` |
 | [`plans/active/design-002-topic-intelligence-reference-page.md`](plans/active/design-002-topic-intelligence-reference-page.md) | 活跃计划 | 合成 Topic Intelligence Reference Page 的范围、规则、原型与验证计划；不替代完整 P0 或业务 SCOPE |
 | [`plans/active/topic-workspace-real-001.md`](plans/active/topic-workspace-real-001.md) | 验证中；Issue #112 | 首个真实 Topic 工作区垂直切片；只到暂定定义、人工裁定、冻结 Material Pack 与共享 Work Resource Read |
+| [`plans/active/agent-candidate-analysis-001.md`](plans/active/agent-candidate-analysis-001.md) | Draft contract spike；Issue #113 | exact Topic Material Pack 上的单一受控 A1–A2 候选分析；不含真实 Pi/provider、真实材料或正式知识写入 |
 | [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一获准实施事项：F01 synthetic fact-kernel technical tracer 受控进入 TDD；完成 loopback API + minimal CLI 后 hard stop，不扩入 F02–F10、真实平台/AI/插件/Web |
 | [`plans/active/plugin-runtime-001-full-capability-retrofit.md`](plans/active/plugin-runtime-001-full-capability-retrofit.md) | 活跃计划；Issue #50 | 将灵感爆爆爆的成熟浏览器采集能力一次性适配为 Linggan 自有 Browser Producer Runtime；媒体本地资产与异步处理血缘为本事项第一类约束 |
 | [`plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md) | 活跃计划；Issue #74 | 在最小真实页面样本上刷新小红书搜索、详情（含最多 30 条评论）和作者页探针，形成不含真实原文的字段与能力登记；不接入或持久化真实材料 |

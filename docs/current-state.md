@@ -8,11 +8,11 @@
 
 ## 当前阶段
 
-### TOPIC-WORKSPACE-REAL-001 / Issue #112（交付分支验证中）
+### TOPIC-WORKSPACE-REAL-001 / Issue #112 与 AGENT-CANDIDATE-ANALYSIS-001 / Issue #113（两张 Draft）
 
-用户已授权开始推进「领域探索 / Topic 工作区」与后续单一受控 Agent 切片。当前 Topic 分支从 `main@3366a09` 隔离实施 additive `0027_topic_workspace.sql`、`linggan-intelligence::TopicWorkspace`、loopback import/read 与 `/topics/{canonical_key}`：只保存暂定 Definition Version、人工 Classification Run、冻结 Material Pack 和 Work Resource 引用，不复制原文，不形成正式 Release、Claim、趋势或行动。4 个 intelligence PostgreSQL 用例和 1 个完整 migration/API/Work Resource 组合用例已通过，proof container/volume 已清理；静态页面测试已通过。共享本机数据库尚未迁移，浏览器视觉、PR 审查、合并、部署和 Mog 业务验收仍未完成。
+用户已授权开始推进「领域探索 / Topic 工作区」与后续单一受控 Agent 切片。Topic 分支从 `main@3366a09` 隔离实施 additive `0027_topic_workspace.sql`、`linggan-intelligence::TopicWorkspace`、loopback import/read 与 `/topics/{canonical_key}`；Draft PR #115 基于 `df51269`。4 个 intelligence PostgreSQL 用例和 1 个完整 migration/API/Work Resource 组合用例已通过；1440×900 与 390×844 浏览器渲染、筛选/Inspector、无横向溢出和移动 Shell 状态已实测。它仍只保存暂定 Definition、人工 Run、冻结 Pack 和 Work 引用，不形成正式 Release、Claim、趋势或行动。
 
-AGENT-CANDIDATE-ANALYSIS-001 已登记为 Issue #113，但它只能读取 #112 固定的 exact Material Pack，并且输出只到带引用的候选解释、反例、unknown 与 gap。Topic 合同和浏览器/自动验收未稳定前，#113 保持 `needs-info`，不并发写 Agent runtime。
+Issue #113 已在 #115 的 exact Material Pack 合同上建立堆叠实现：additive `0028_agent_candidate_analysis.sql`、PostgreSQL `AgentRuntime` submit/status/cancel、窄 `ModelToolLoopPort`、deterministic adapter、固定 `0.84.2` 的 Pi transport seam，以及只允许 `candidate_only`、逐条引用、反例、替代解释、unknown/gap 的 Output Validator。隔离 PostgreSQL proof 已证明 Pack mismatch 拒绝、幂等、取消、中断失败关闭、越界输出拒绝与工具回执；**真实 Pi npm 包/provider 未安装或执行，真实材料入口 disabled**。两张 Draft 均未迁移共享本机数据库、未部署、未合并，也未完成 Mog 业务验收。
 
 ### WORK-RESOURCE-READ-001 / Issue #110（实现与集成验证完成，部署待完成）
 
