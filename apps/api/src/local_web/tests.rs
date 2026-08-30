@@ -9,41 +9,7 @@ use sqlx::Row;
 use std::collections::BTreeMap;
 use tower::ServiceExt;
 
-const LOCAL_001_MIGRATIONS: &str = concat!(
-    "CREATE TABLE linggan_local_schema_migration (\n",
-    "  migration_id text PRIMARY KEY,\n",
-    "  migration_sha256 text NOT NULL CHECK (migration_sha256 ~ '^[0-9a-f]{64}$'),\n",
-    "  applied_at timestamptz NOT NULL DEFAULT clock_timestamp()\n",
-    ");\n",
-    include_str!("../../../../database/migrations/0001_scope_001_capture_evidence.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0002_local_001_discovery.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0003_local_trusted_producer.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0015_material_projection.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0016_material_social_lanes.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0017_material_media_projection.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0018_material_discovery_lane.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0020_observation_runtime_automation.sql"),
-    "\n",
-    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
-    "('0001_scope_001_capture_evidence', '0000000000000000000000000000000000000000000000000000000000000001'),\n",
-    "('0002_local_001_discovery', '0000000000000000000000000000000000000000000000000000000000000002'),\n",
-    "('0003_local_trusted_producer', '0000000000000000000000000000000000000000000000000000000000000003'),\n",
-    "('0004_plugin_runtime_all_capabilities', '0000000000000000000000000000000000000000000000000000000000000004'),\n",
-    "('0015_material_projection', '0000000000000000000000000000000000000000000000000000000000000015'),\n",
-    "('0016_material_social_lanes', '0000000000000000000000000000000000000000000000000000000000000016'),\n",
-    "('0017_material_media_projection', '0000000000000000000000000000000000000000000000000000000000000017'),\n",
-    "('0018_material_discovery_lane', '0000000000000000000000000000000000000000000000000000000000000018'),\n",
-    "('0020_observation_runtime_automation', '0000000000000000000000000000000000000000000000000000000000000020');\n",
-);
+const LOCAL_001_MIGRATIONS: &str = full_schema_fixture::FULL_MIGRATIONS;
 
 #[tokio::test]
 async fn health_route_returns_machine_readable_local_state() {
@@ -945,7 +911,7 @@ async fn loopback_runtime_producer_uses_the_three_routes_published_by_health() {
     assert_eq!(
         health.pointer("/database/schema"),
         Some(&serde_json::Value::String(
-            "PLUGIN_RUNTIME_001_SCHEMA_READY".to_owned()
+            "PLUGIN_RUNTIME_002_SCHEMA_READY".to_owned()
         ))
     );
     let task_path = health

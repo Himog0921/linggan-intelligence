@@ -29,6 +29,10 @@ function normalizeResultStatuses(resultStatuses = []) {
         contentId: normalizeText(item.contentId || item.noteId || item.videoId),
         error: normalizeText(item.error),
         totalComments: Number.isFinite(Number(item.totalComments)) ? Number(item.totalComments) : undefined,
+        ...(Number.isFinite(Number(item.expectedComments)) ? { expectedComments: Number(item.expectedComments) } : {}),
+        ...(normalizeText(item.collectionState) ? { collectionState: normalizeText(item.collectionState) } : {}),
+        ...(normalizeText(item.commentScope) ? { commentScope: normalizeText(item.commentScope) } : {}),
+        ...(normalizeText(item.analysisUsability) ? { analysisUsability: normalizeText(item.analysisUsability) } : {}),
       };
     })
     .filter(Boolean);
@@ -141,7 +145,17 @@ export function resolveBatchResumeState({
     clampIndex(runRecord?.processedCount, orderedTargetIds.length),
     inferredProcessed,
   );
-  const nextIndex = clampIndex(processedCount, orderedTargetIds.length);
+  const storedStatuses = normalizeResultStatuses(checkpoint.resultStatuses)
+    .slice(0, clampIndex(processedCount, orderedTargetIds.length));
+  // A partial comment receipt preserves collected material, but a new run must open that note
+  // and collect its current comment set from the beginning. It may not resume an internal
+  // comment page position from a previous Attempt.
+  const firstIncompleteCommentIndex = storedStatuses.findIndex(
+    (status) => status.collectionState && status.collectionState !== 'complete',
+  );
+  const nextIndex = firstIncompleteCommentIndex >= 0
+    ? firstIncompleteCommentIndex
+    : clampIndex(processedCount, orderedTargetIds.length);
 
   return {
     targets: orderedTargets,
@@ -149,7 +163,7 @@ export function resolveBatchResumeState({
     nextIndex,
     processedCount: nextIndex,
     completedTargetIds: orderedTargetIds.slice(0, nextIndex),
-    resultStatuses: normalizeResultStatuses(checkpoint.resultStatuses),
+    resultStatuses: storedStatuses,
     resumed: nextIndex > 0,
   };
 }

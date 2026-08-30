@@ -129,6 +129,7 @@
 | [`runbooks/local-evidence-library.md`](runbooks/local-evidence-library.md) | 权威当前 | Rust loopback host、health、受控 discovery ingress 与 Evidence Library 本地启动/验证；明确不含真实插件、平台或媒体链路 |
 | [`runbooks/linggan-browser-producer-local.md`](runbooks/linggan-browser-producer-local.md) | 权威当前 | Linggan 自有 Browser Producer 的构建、包审计与未来人工加载边界；不授权平台访问 |
 | [`platforms/xiaohongshu/capture-capability-registry.md`](platforms/xiaohongshu/capture-capability-registry.md) | 权威当前；AUD-XHS-001 范围内 | 小红书页面字段、探针、插件交付能力、Coverage 与平台漂移的唯一登记入口；不保存真实原文或接入真实材料 |
+| [`decisions/0002-comment-collection-completion-and-retry.md`](decisions/0002-comment-collection-completion-and-retry.md) | ACCEPTED | 小红书评论的标准 30 条窗口、全量深采完成判据、部分材料可用性、重新从详情页采集及当前去重投影规则 |
 | [`proposals/real-canary-002-controlled-discovery-through-authorization-chain.md`](proposals/real-canary-002-controlled-discovery-through-authorization-chain.md) | 草案 | 让一次已获准过的 ADHD 发现面原样再走一遍，但全程经过「授权 → 准入 → 工单 → 租约 → 闸门 → 派发」，用于解锁采集控制合同 §12 第 5 条；不扩大平台足迹，不授权 001C-2/001C-3 |
 | [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) | 活跃计划 | F01 后、首个真实 producer 和用户可见切片前的产品形态、P0 页面、Canary、Capture/Media 与第一阶段运行架构决策图；当前首票为 `product-shell` |
 | [`plans/active/design-002-topic-intelligence-reference-page.md`](plans/active/design-002-topic-intelligence-reference-page.md) | 活跃计划 | 合成 Topic Intelligence Reference Page 的范围、规则、原型与验证计划；不替代完整 P0 或业务 SCOPE |

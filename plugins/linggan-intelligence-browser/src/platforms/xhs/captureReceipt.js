@@ -1,5 +1,22 @@
 export const XHS_DETAIL_COMMENT_CAP = 30;
 
+export const XHS_COMMENT_COLLECTION_SCOPE = Object.freeze({
+  DETAIL_WINDOW: 'detail_window',
+  ALL_PUBLIC_COMMENTS: 'all_public_comments',
+});
+
+export const XHS_COMMENT_COLLECTION_STATE = Object.freeze({
+  COMPLETE: 'complete',
+  PARTIAL: 'partial',
+  INVALID_TARGET: 'invalid_target',
+});
+
+export const XHS_COMMENT_ANALYSIS_USABILITY = Object.freeze({
+  USABLE: 'usable',
+  EMPTY: 'empty',
+  NOT_USABLE: 'not_usable',
+});
+
 function text(value = '') {
   return String(value || '').trim();
 }
@@ -22,6 +39,75 @@ export function normalizeXhsDetailCommentLimit(value, fallback = XHS_DETAIL_COMM
   return Math.min(requested === null || requested === 0 ? defaultValue : requested, XHS_DETAIL_COMMENT_CAP);
 }
 
+function collectionScope(maxTotal = 0) {
+  return nonNegative(maxTotal) > 0
+    ? XHS_COMMENT_COLLECTION_SCOPE.DETAIL_WINDOW
+    : XHS_COMMENT_COLLECTION_SCOPE.ALL_PUBLIC_COMMENTS;
+}
+
+function terminalCollectionStop(stopReason = '') {
+  return new Set([
+    'risk_control',
+    'manual_stop',
+    'comment_collection_failed',
+    'target_identity_mismatch',
+    'wrong_content',
+    'api_unobserved',
+  ]).has(text(stopReason));
+}
+
+// This is a producer fact, not an analysis gate.  It answers the deliberately mundane
+// question the operator needs answered: for the requested comment scope, how many did the
+// page show and how many unique comments did this Attempt actually bring back?
+export function buildXhsCommentCollectionReceipt({
+  noteId = '',
+  maxTotal = 0,
+  requestedLimit = null,
+  publicCommentCount = null,
+  actual = 0,
+  explicitEmptyState = false,
+  stopReason = '',
+  targetIdentity = 'matched',
+} = {}) {
+  const scope = collectionScope(maxTotal);
+  const received = nonNegative(actual) ?? 0;
+  const pageCount = nonNegative(publicCommentCount);
+  const requested = scope === XHS_COMMENT_COLLECTION_SCOPE.DETAIL_WINDOW
+    ? normalizeXhsDetailCommentLimit(requestedLimit ?? maxTotal)
+    : null;
+  const expected = scope === XHS_COMMENT_COLLECTION_SCOPE.DETAIL_WINDOW
+    ? (pageCount === null ? requested : Math.min(pageCount, requested))
+    : (pageCount === null && explicitEmptyState ? 0 : pageCount);
+  const reason = text(stopReason)
+    || (explicitEmptyState ? 'explicit_empty_state' : 'unknown');
+  const identityMatched = targetIdentity === 'matched';
+  const identityMismatched = targetIdentity === 'mismatched';
+  const complete = identityMatched
+    && !terminalCollectionStop(reason)
+    && expected !== null
+    && received === expected;
+  const state = identityMismatched
+    ? XHS_COMMENT_COLLECTION_STATE.INVALID_TARGET
+    : (complete ? XHS_COMMENT_COLLECTION_STATE.COMPLETE : XHS_COMMENT_COLLECTION_STATE.PARTIAL);
+  const analysisUsability = !identityMatched
+    ? XHS_COMMENT_ANALYSIS_USABILITY.NOT_USABLE
+    : (received > 0 ? XHS_COMMENT_ANALYSIS_USABILITY.USABLE : XHS_COMMENT_ANALYSIS_USABILITY.EMPTY);
+
+  return {
+    version: 1,
+    noteId: text(noteId),
+    scope,
+    ...(requested === null ? {} : { requestedLimit: requested }),
+    pageCommentCount: pageCount,
+    expectedCount: expected,
+    uniqueCollectedCount: received,
+    state,
+    analysisUsability,
+    targetIdentity,
+    stopReason: reason,
+  };
+}
+
 export function buildXhsDetailCaptureReceipt({
   note = {},
   commentResult = null,
@@ -32,12 +118,16 @@ export function buildXhsDetailCaptureReceipt({
   const publicCount = knownPublicCommentCount(note);
   const requested = normalizeXhsDetailCommentLimit(requestedCommentLimit);
   const explicitEmptyState = comments.explicitEmptyState === true;
-  const targetReached = actual >= requested || (publicCount !== null && actual >= Math.min(publicCount, requested));
-  const state = explicitEmptyState
-    ? 'explicit_empty_state'
-    : (targetReached ? 'target_reached' : 'partial');
-  const stopReason = text(comments.stopReason)
-    || (explicitEmptyState ? 'explicit_empty_state' : (targetReached ? 'comment_cap_reached' : 'unknown'));
+  const commentCollection = buildXhsCommentCollectionReceipt({
+    noteId: note.noteId || note.platformContentId || note.contentId,
+    maxTotal: requested,
+    requestedLimit: requested,
+    publicCommentCount: publicCount,
+    actual,
+    explicitEmptyState,
+    stopReason: comments.stopReason,
+    targetIdentity: comments.targetIdentity || 'matched',
+  });
   const mediaSlots = [
     ...(Array.isArray(note.images) ? note.images : []),
     ...(note.video ? [note.video] : []),
@@ -54,11 +144,7 @@ export function buildXhsDetailCaptureReceipt({
     },
     comments: {
       cap: XHS_DETAIL_COMMENT_CAP,
-      requested,
-      actual,
-      publicCount,
-      state,
-      stopReason,
+      ...commentCollection,
       ordering: text(comments.ordering) || 'unknown',
       repliesPreserved: true,
     },

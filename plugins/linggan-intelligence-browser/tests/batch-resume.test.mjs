@@ -56,6 +56,26 @@ test('resolveBatchResumeState resumes from the stored next index after page refr
   assert.deepEqual(state.targets.map((item) => item.noteId), ['n1', 'n2', 'n3']);
 });
 
+test('a partial comment target is reopened from that note, never resumed from a comment cursor', () => {
+  const state = resolveBatchResumeState({
+    runRecord: {
+      resumeCheckpoint: {
+        targetIds: ['n1', 'n2', 'n3'],
+        nextIndex: 3,
+        resultStatuses: [
+          { targetId: 'n1', ok: true, collectionState: 'complete' },
+          { targetId: 'n2', ok: false, collectionState: 'partial', totalComments: 200, expectedComments: 300 },
+          { targetId: 'n3', ok: true, collectionState: 'complete' },
+        ],
+      },
+    },
+    targets: [{ noteId: 'n1' }, { noteId: 'n2' }, { noteId: 'n3' }],
+    getTargetId: (item) => item.noteId,
+  });
+  assert.equal(state.nextIndex, 1);
+  assert.deepEqual(state.completedTargetIds, ['n1']);
+});
+
 test('resolveBatchResumeState can infer progress from old run summary fields', () => {
   const state = resolveBatchResumeState({
     runRecord: {

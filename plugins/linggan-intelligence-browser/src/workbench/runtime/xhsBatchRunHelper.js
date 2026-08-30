@@ -225,6 +225,7 @@ export function buildXhsBatchCommentsRunPatch({
   );
 
   const succeeded = [];
+  const partial = [];
   const failed = [];
   let totalComments = 0;
 
@@ -232,20 +233,40 @@ export function buildXhsBatchCommentsRunPatch({
     const result = resultMap.get(noteId);
     const total = Number(result?.total || 0) || 0;
     totalComments += total;
-    if (total > 0) {
+    const collectionState = normalizeText(result?.collectionState);
+    const analysisUsability = normalizeText(result?.analysisUsability);
+    const usable = analysisUsability !== 'not_usable';
+    if (result && !normalizeText(result?.error) && usable && collectionState === 'complete') {
+      succeeded.push(`xhs_${noteId}`);
+    } else if (result && !normalizeText(result?.error) && usable && collectionState === 'partial') {
+      partial.push(`xhs_${noteId}`);
+    } else if (result && !collectionState && total > 0) {
+      // Older manually-created local runs did not persist the receipt fields. Keep them
+      // readable without letting a new invalid_target/not_usable receipt enter contentIds.
       succeeded.push(`xhs_${noteId}`);
     } else {
-      failed.push(result ? { noteId, total } : { noteId, error: 'no_result' });
+      failed.push(result
+        ? {
+            noteId,
+            ...(normalizeText(result?.error)
+              || collectionState === 'invalid_target'
+              || analysisUsability === 'not_usable'
+              ? { error: normalizeText(result?.error) || collectionState || 'not_usable' }
+              : { total }),
+          }
+        : { noteId, error: 'no_result' });
     }
   }
 
   return {
     itemsPlanned: targets.length,
     itemsSucceeded: succeeded.length,
+    ...(partial.length ? { itemsPartiallyCollected: partial.length } : {}),
     itemsFailed: failed.length,
     totalComments,
     targetIds: targets,
-    contentIds: succeeded,
+    contentIds: succeeded.concat(partial),
+    ...(partial.length ? { partialTargets: partial } : {}),
     failedTargets: failed,
   };
 }

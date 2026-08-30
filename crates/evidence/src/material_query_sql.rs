@@ -19,6 +19,11 @@ pub(crate) const MATERIAL_PAGE_SQL: &str = "WITH latest_detail AS ( \
    SELECT lane.content_public_ref,max(lane.observed_at::timestamptz)::text AS observed_at \
    FROM linggan_material_lane_observation lane JOIN linggan_runtime_capture_package lane_package USING(package_ref) \
    WHERE content_public_ref IS NOT NULL AND lane_package.accepted_at <= $2::timestamptz GROUP BY content_public_ref \
+ ), current_comment AS ( \
+   SELECT DISTINCT ON (comment.content_public_ref,comment.comment_external_id) comment.* \
+   FROM linggan_material_comment comment JOIN linggan_runtime_capture_package comment_package USING(package_ref) \
+   WHERE comment_package.accepted_at <= $2::timestamptz \
+   ORDER BY comment.content_public_ref,comment.comment_external_id,comment.observed_at::timestamptz DESC,comment.created_at DESC,comment.material_ref DESC \
  ) SELECT content.platform,content.content_external_id,content.public_ref, \
      detail.material_ref AS detail_material_ref,COALESCE(detail.material_ref,discovery.material_ref) AS material_ref,COALESCE(detail.package_ref,discovery.package_ref) AS package_ref,COALESCE(detail.record_ordinal,discovery.record_ordinal) AS record_ordinal, \
      COALESCE(detail.observed_at,discovery.observed_at,lane_latest.observed_at) AS observed_at, \
@@ -41,7 +46,7 @@ pub(crate) const MATERIAL_PAGE_SQL: &str = "WITH latest_detail AS ( \
    OR lower(COALESCE(detail.creator_display_name,'')) LIKE '%' || lower($1) || '%' \
    OR lower(COALESCE(discovery.title,'')) LIKE '%' || lower($1) || '%' \
    OR lower(COALESCE(discovery.creator_display_name,'')) LIKE '%' || lower($1) || '%' \
-   OR EXISTS (SELECT 1 FROM linggan_material_comment comment WHERE comment.content_public_ref=content.public_ref AND lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($1) || '%') \
+   OR EXISTS (SELECT 1 FROM current_comment comment WHERE comment.content_public_ref=content.public_ref AND lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($1) || '%') \
    OR EXISTS (SELECT 1 FROM linggan_material_derived_text derived WHERE derived.content_public_ref=content.public_ref AND lower(derived.text_content) LIKE '%' || lower($1) || '%') \
    OR EXISTS (SELECT 1 FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package author_package USING(package_ref) WHERE author.platform=content.platform AND author.author_external_id=detail.author_external_id AND author_package.accepted_at <= $2::timestamptz AND (lower(COALESCE(author.display_name,'')) LIKE '%' || lower($1) || '%' OR lower(COALESCE(author.biography,'')) LIKE '%' || lower($1) || '%'))) \
    AND ($8::uuid IS NULL OR content.public_ref=$8) \

@@ -6,6 +6,7 @@ import { detectCaptcha, waitForPageSettle } from './antiDetect.js';
 import { getActiveCommentsContext, isRiskControlPage } from './batchShared.js';
 import { createCollectorEvidence, createCollectorQualityMeta, joinRawDomText } from '../../shared/collectorMetadata.js';
 import { emitCollectorReceipt } from '../../runtime/collectorReceiptSink.js';
+import { buildXhsCommentCollectionReceipt } from './captureReceipt.js';
 import {
   buildXhsCommentsFromSnapshot,
   requestXhsCommentSnapshot,
@@ -105,6 +106,8 @@ export async function collectComments({
   persist = true,
   emitReceipt = true,
   taskSpec = undefined,
+  publicCommentCount = null,
+  observedNoteId = '',
 } = {}) {
   const apiResult = await collectCommentsViaApi({
     noteId,
@@ -123,7 +126,7 @@ export async function collectComments({
       total: apiResult.total,
       comments: apiResult.comments,
       stopReason: apiResult.stopReason,
-    }, { maxTotal });
+    }, { noteId, maxTotal, publicCommentCount, observedNoteId });
     if (emitReceipt) {
       result.lingganDelivery = await emitCollectorReceipt('comments', result, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode, taskSpec } });
     }
@@ -151,25 +154,73 @@ export async function collectComments({
     initialComments: apiResult.comments,
     persist,
   });
-  const normalizedResult = withCommentCollectionReceipt(result, { maxTotal });
+  const normalizedResult = withCommentCollectionReceipt(result, {
+    noteId,
+    maxTotal,
+    publicCommentCount,
+    observedNoteId,
+  });
   if (emitReceipt) {
     normalizedResult.lingganDelivery = await emitCollectorReceipt('comments', normalizedResult, { platform: 'xhs', noteId, options: { maxTotal, maxSubComments, commentDepthMode, taskSpec } });
   }
   return normalizedResult;
 }
 
-function withCommentCollectionReceipt(result = {}, { maxTotal = 0 } = {}) {
+function strictNoteIdFromLocation(value = '') {
+  const match = String(value || '').match(/\/(?:explore|discovery\/item|search_result)\/([a-z0-9]+)/i)
+    || String(value || '').match(/\/user\/profile\/[a-z0-9]+\/([a-z0-9]+)/i);
+  return String(match?.[1] || '').trim();
+}
+
+export function resolveXhsCommentTargetIdentity({
+  expectedNoteId = '',
+  observedNoteId = '',
+  currentUrl = '',
+} = {}) {
+  const expected = String(expectedNoteId || '').trim();
+  const observed = String(observedNoteId || strictNoteIdFromLocation(currentUrl)).trim();
+  if (!observed) return 'unverified';
+  return observed === expected ? 'matched' : 'mismatched';
+}
+
+function withCommentCollectionReceipt(result = {}, {
+  noteId = '',
+  maxTotal = 0,
+  publicCommentCount = null,
+  observedNoteId = '',
+} = {}) {
   const context = getActiveCommentsContext();
   const total = Number(result?.total ?? (Array.isArray(result?.comments) ? result.comments.length : 0)) || 0;
   const explicitEmptyState = Boolean(context?.hasExplicitEmptyState);
-  const targetReached = maxTotal > 0 && total >= maxTotal;
+  const stopReason = String(result?.stopReason || '').trim()
+    || (explicitEmptyState ? 'explicit_empty_state' : 'collector_returned_partial');
+  const targetIdentity = resolveXhsCommentTargetIdentity({
+    expectedNoteId: noteId,
+    observedNoteId: observedNoteId || result?.observedNoteId,
+    currentUrl: window.location?.href,
+  });
+  const receipt = buildXhsCommentCollectionReceipt({
+    noteId,
+    maxTotal,
+    publicCommentCount: publicCommentCount ?? context?.publicCommentCount,
+    actual: total,
+    explicitEmptyState,
+    stopReason,
+    targetIdentity,
+  });
   return {
     ...result,
+    noteId,
     total,
     explicitEmptyState,
     ordering: 'unknown',
-    stopReason: String(result?.stopReason || '').trim()
-      || (explicitEmptyState ? 'explicit_empty_state' : (targetReached ? 'comment_cap_reached' : 'collector_returned_partial')),
+    publicCommentCount: receipt.pageCommentCount,
+    collectionReceipt: receipt,
+    collectionScope: receipt.scope,
+    collectionState: receipt.state,
+    analysisUsability: receipt.analysisUsability,
+    targetIdentity: receipt.targetIdentity,
+    stopReason,
   };
 }
 

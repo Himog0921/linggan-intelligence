@@ -57,6 +57,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0023_material_engagement_and_media_components.sql"),
     "\n",
     include_str!("../../../database/migrations/0024_media_processing_runtime.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0025_comment_current_projection.sql"),
 );
 
 #[tokio::test]

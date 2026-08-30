@@ -384,7 +384,8 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
                 AND to_regclass('linggan_material_content_detail') IS NOT NULL \
                 AND to_regclass('linggan_material_lane_observation') IS NOT NULL \
                 AND to_regclass('linggan_material_media_origin') IS NOT NULL \
-                AND to_regclass('linggan_material_discovery_finding') IS NOT NULL",
+                AND to_regclass('linggan_material_discovery_finding') IS NOT NULL \
+                AND to_regclass('linggan_material_comment_current') IS NOT NULL",
     )
     .fetch_one(database.pool())
     .await?;
@@ -393,7 +394,7 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
     }
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM linggan_local_schema_migration \
-                        WHERE migration_id = '0024_media_processing_runtime')",
+                        WHERE migration_id = '0025_comment_current_projection')",
     )
     .fetch_one(database.pool())
     .await

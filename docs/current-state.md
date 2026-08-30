@@ -16,6 +16,10 @@ Browser Producer 已沿真实 canary 升至 `0.8.4` 并进入 `main` 与本机�
 
 共享数据库已应用 additive `0022`–`0024`，API、调度 worker 和媒体 worker 已切到 `origin/main@8fe531e` 冻结快照。Chrome 已加载并认领 0.8.4；首个 `content_detail` Task 自动打开了带 `xsec_token` 的目标详情页，但页面水合后全局 `__INITIAL_STATE__` 已被删除、当前 DOM 又没有旧详情容器，导致详情采集在浏览器内失败，任务保持 `in_progress` 且仍为 0 Attempt / 0 Package，服务端接纳尚未发生。该现象与内容工作台 2.0.93 的真实热修根因一致。0.8.5 候选补回安全 SSR `noteDetailMap` 解析，并让详情就绪、完整度判断、正式单篇采集和启动探针共用这一路径；只解析有界 JSON 对象，不执行页面脚本。123 项 Browser Producer 测试、合同检查、生产构建、发布包校验、可复现性与旧工作台隔离已一次通过；发行 SHA-256 为 `62d17c53e0fd6153e3c28aaaa66351002b1de05a576942fd3f687483534f8676`。数据库、WorkOrder/Task、签名 URL、12 条固定范围和原 canary 均不改变。真实 12 作品穿过详情/评论/媒体/OCR/ASR 与 Evidence Library 的最终验收仍未完成，下一步是 0.8.5 精确 head 合并、发布、重载后继续同一 canary。
 
+### COMMENT-COLLECTION-RECEIPT-001（本地实现待发布/未真实复验）
+
+已按 ADR-0002 完成代码级收口：标准详情回执与全量深采回执分开；深采以“页面显示数 = 本次唯一采回数”判定 `COMPLETE`，`200 / 300` 等短采为 `PARTIAL` 但保留 `usable`；新的深采从笔记评论入口重新开始，而非续用旧页码。新增 `0025_comment_current_projection.sql` 使不可变 Attempt 评论历史与按稳定评论 ID 去重的当前检索投影并存。自动 focused 测试与 Rust 合同测试通过；**共享数据库尚未应用 0025、插件尚未构建/安装、真实非空评论页与真实 Linggan 接纳尚未复验**，所以这不是已部署或业务验收完成。
+
 ### OBSERVATION-RUNTIME-001 / Issue #94 与 MEDIA-ACQUISITION-001 / Issue #98（已完成并运行）
 
 观察目标与观察规则现在进入同一条有限运行链：常驻 worker 记录调度心跳，扫描已启用且授权有效的目标，基线建档、持续巡检和关键词发现分别生成有界 WorkOrder/Step；过期租约可恢复，单目标基线最多创建 3 个 WorkOrder，并优先避开最近失败工位。Browser Producer `v0.7.0` 使用 MV3 alarm、安装/启动和 Service Worker 唤醒自动签到并单飞领取，不再要求用户点击“领取任务”；发现封面另走有界媒体工作、SHA-256、分块上传与本地 Materialization，不阻塞已接纳的文本/发现材料。迟到的真实 Package 不再因旧租约丢失而丢弃：它不能推进当前 Step，但可按独立材料接纳结果保留。

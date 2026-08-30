@@ -18,10 +18,14 @@ pub(crate) async fn enrich(
     let author_context = read_author_context(tx, item, as_of).await?;
     if let Some(text) = text {
         let comment_match: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM linggan_material_comment comment \
-             JOIN linggan_runtime_capture_package package USING(package_ref) \
-             WHERE comment.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz \
-               AND lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($3) || '%')",
+            "WITH current_comment AS ( \
+               SELECT DISTINCT ON (comment.comment_external_id) comment.* \
+               FROM linggan_material_comment comment \
+               JOIN linggan_runtime_capture_package package USING(package_ref) \
+               WHERE comment.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz \
+               ORDER BY comment.comment_external_id,comment.observed_at::timestamptz DESC,comment.created_at DESC,comment.material_ref DESC \
+             ) SELECT EXISTS (SELECT 1 FROM current_comment comment \
+               WHERE lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($3) || '%')",
         )
         .bind(item.identity.public_ref)
         .bind(as_of)
@@ -102,9 +106,13 @@ async fn read_comment_receipt(
     as_of: &str,
 ) -> Result<Value, sqlx::Error> {
     let total = sqlx::query_scalar::<_, i64>(
-        "SELECT count(*) FROM linggan_material_comment comment \
-         JOIN linggan_runtime_capture_package package USING(package_ref) \
-         WHERE comment.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz",
+        "WITH current_comment AS ( \
+           SELECT DISTINCT ON (comment.comment_external_id) comment.comment_external_id \
+           FROM linggan_material_comment comment \
+           JOIN linggan_runtime_capture_package package USING(package_ref) \
+           WHERE comment.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz \
+           ORDER BY comment.comment_external_id,comment.observed_at::timestamptz DESC,comment.created_at DESC,comment.material_ref DESC \
+         ) SELECT count(*) FROM current_comment",
     )
     .bind(item.identity.public_ref)
     .bind(as_of)
@@ -122,7 +130,7 @@ async fn read_lane_coverage(
     as_of: &str,
 ) -> Result<serde_json::Map<String, Value>, sqlx::Error> {
     let lane_rows = sqlx::query(
-        "SELECT DISTINCT ON (lane.lane) lane.lane,lane.observed,lane.producer_acquired,lane.retained,lane.failed,lane.known_unattempted,lane.unknown_count,lane.maximum_quota,lane.stopped_reason,lane.observed_at,lane.package_ref \
+        "SELECT DISTINCT ON (lane.lane) lane.lane,lane.observed,lane.producer_acquired,lane.retained,lane.failed,lane.known_unattempted,lane.unknown_count,lane.maximum_quota,lane.stopped_reason,lane.observed_at,lane.package_ref,package.coverage \
          FROM linggan_material_lane_observation lane JOIN linggan_runtime_capture_package package USING(package_ref) \
          WHERE content_public_ref=$1 AND package.accepted_at <= $2::timestamptz \
          ORDER BY lane,lane.observed_at::timestamptz DESC,lane.created_at DESC",
@@ -141,6 +149,8 @@ async fn read_lane_coverage(
         let unattempted: Option<i32> = row.get("known_unattempted");
         let unknown: Option<i32> = row.get("unknown_count");
         let stopped_reason: Option<String> = row.get("stopped_reason");
+        let package_coverage: Value = row.get("coverage");
+        let receipt = comment_collection_receipt(&package_coverage, &lane);
         let state = lane_state(
             retained,
             producer_acquired,
@@ -149,6 +159,9 @@ async fn read_lane_coverage(
             unknown,
             stopped_reason.as_deref(),
         );
+        let state = receipt
+            .as_ref()
+            .map_or(state, |receipt| comment_collection_lane_state(receipt));
         if let Some(summary) = item
             .lane_summaries
             .iter_mut()
@@ -160,7 +173,24 @@ async fn read_lane_coverage(
             summary.failed = failed.map(i64::from);
             summary.known_unattempted = unattempted.map(i64::from);
             summary.maximum_quota = row.get::<Option<i32>, _>("maximum_quota").map(i64::from);
-            summary.value_state = if [
+            summary.collection_scope = receipt
+                .as_ref()
+                .and_then(|receipt| receipt_string(receipt, "scope"));
+            summary.expected_count = receipt
+                .as_ref()
+                .and_then(|receipt| receipt_count(receipt, "expectedCount"));
+            summary.unique_collected_count = receipt
+                .as_ref()
+                .and_then(|receipt| receipt_count(receipt, "uniqueCollectedCount"));
+            summary.collection_state = receipt
+                .as_ref()
+                .and_then(|receipt| receipt_string(receipt, "state"));
+            summary.analysis_usability = receipt
+                .as_ref()
+                .and_then(|receipt| receipt_string(receipt, "analysisUsability"));
+            summary.value_state = if receipt.is_some() {
+                "KNOWN"
+            } else if [
                 observed,
                 producer_acquired,
                 retained,
@@ -179,6 +209,13 @@ async fn read_lane_coverage(
             summary.stopped_reason = stopped_reason.clone();
             summary.limitations = if retained != producer_acquired {
                 vec!["RETAINED_COUNT_DIFFERS_FROM_PRODUCER_ACQUIRED"]
+            } else if receipt
+                .as_ref()
+                .and_then(|receipt| receipt_string(receipt, "state"))
+                .as_deref()
+                != Some("complete")
+            {
+                vec!["COMMENT_COLLECTION_PARTIAL"]
             } else if unknown.unwrap_or(1) > 0 || unattempted.unwrap_or(1) > 0 {
                 vec!["COVERAGE_NOT_EXHAUSTED"]
             } else {
@@ -187,10 +224,11 @@ async fn read_lane_coverage(
             summary.latest_observed_at = Some(row.get("observed_at"));
         }
         if lane == "comments" || lane == "replies" {
-            let count_state = if retained == producer_acquired
-                && failed == Some(0)
-                && unattempted == Some(0)
-                && unknown == Some(0)
+            let count_state = if receipt.is_some()
+                || (retained == producer_acquired
+                    && failed == Some(0)
+                    && unattempted == Some(0)
+                    && unknown == Some(0))
             {
                 "KNOWN"
             } else {
@@ -203,12 +241,56 @@ async fn read_lane_coverage(
                     "countState":count_state,
                     "observed":observed,"producerAcquired":producer_acquired,"retained":retained,"failed":failed,
                     "knownUnattempted":unattempted,"unknown":unknown,
-                    "stoppedReason":stopped_reason,"sourceRef":row.get::<Uuid,_>("package_ref")
+                    "stoppedReason":stopped_reason,"sourceRef":row.get::<Uuid,_>("package_ref"),
+                    "collectionScope":receipt.as_ref().and_then(|receipt| receipt_string(receipt,"scope")),
+                    "pageCommentCount":receipt.as_ref().and_then(|receipt| receipt_count(receipt,"pageCommentCount")),
+                    "expectedCount":receipt.as_ref().and_then(|receipt| receipt_count(receipt,"expectedCount")),
+                    "uniqueCollectedCount":receipt.as_ref().and_then(|receipt| receipt_count(receipt,"uniqueCollectedCount")),
+                    "collectionState":receipt.as_ref().and_then(|receipt| receipt_string(receipt,"state")),
+                    "analysisUsability":receipt.as_ref().and_then(|receipt| receipt_string(receipt,"analysisUsability")),
+                    "targetIdentity":receipt.as_ref().and_then(|receipt| receipt_string(receipt,"targetIdentity"))
                 }),
             );
         }
     }
     Ok(coverage)
+}
+
+fn comment_collection_receipt(coverage: &Value, lane: &str) -> Option<Value> {
+    if lane != "comments" && lane != "replies" {
+        return None;
+    }
+    let receipt = coverage.pointer("/target/commentCollection")?.as_object()?;
+    let state = receipt.get("state")?.as_str()?;
+    let scope = receipt.get("scope")?.as_str()?;
+    let usability = receipt.get("analysisUsability")?.as_str()?;
+    if !matches!(state, "complete" | "partial" | "invalid_target")
+        || !matches!(scope, "detail_window" | "all_public_comments")
+        || !matches!(usability, "usable" | "empty" | "not_usable")
+    {
+        return None;
+    }
+    Some(Value::Object(receipt.clone()))
+}
+
+fn receipt_string(receipt: &Value, key: &str) -> Option<String> {
+    receipt.get(key).and_then(Value::as_str).map(str::to_owned)
+}
+
+fn receipt_count(receipt: &Value, key: &str) -> Option<i64> {
+    receipt
+        .get(key)
+        .and_then(Value::as_i64)
+        .filter(|value| *value >= 0)
+}
+
+fn comment_collection_lane_state(receipt: &Value) -> &'static str {
+    match receipt.get("state").and_then(Value::as_str) {
+        Some("complete") => "COMPLETE",
+        Some("invalid_target") => "FAILED",
+        Some("partial") => "PARTIAL",
+        _ => "UNKNOWN",
+    }
 }
 
 fn read_comments(_item: &mut MaterialLibraryItem, _text: Option<&str>) -> Vec<Value> {
@@ -294,7 +376,7 @@ pub async fn read_authorized_research_comments(
         "SELECT comment.material_ref,comment.is_reply,left(comment.body_text,4000) AS body_text, \
              char_length(comment.body_text)>4000 AS body_truncated,comment.body_state,comment.observed_at, \
              count(*) OVER() AS total_count \
-         FROM linggan_material_comment comment JOIN linggan_runtime_capture_package package USING(package_ref) \
+         FROM linggan_material_comment_current comment JOIN linggan_runtime_capture_package package USING(package_ref) \
          WHERE comment.content_public_ref=$1 AND package.accepted_at <= scope_001_now() \
            AND ($2::uuid IS NULL OR comment.material_ref > $2) \
            AND ($3::text IS NULL OR lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($3) || '%') \
@@ -306,7 +388,7 @@ pub async fn read_authorized_research_comments(
     .fetch_all(database.pool())
     .await?;
     let total = sqlx::query_scalar::<_, i64>(
-        "SELECT count(*) FROM linggan_material_comment comment \
+        "SELECT count(*) FROM linggan_material_comment_current comment \
          JOIN linggan_runtime_capture_package package USING(package_ref) \
          WHERE comment.content_public_ref=$1 AND package.accepted_at <= scope_001_now() \
            AND ($2::text IS NULL OR lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($2) || '%')",

@@ -107,7 +107,7 @@ test('local readiness accepts the exact full Browser Producer runtime contract w
       service: 'linggan-local-web',
       listener: 'loopback-only',
       dataState: 'LINGGAN_BROWSER_PRODUCER_RUNTIME',
-      database: { state: 'READY', schema: 'PLUGIN_RUNTIME_001_SCHEMA_READY' },
+      database: { state: 'READY', schema: 'PLUGIN_RUNTIME_002_SCHEMA_READY' },
       routes: {
         localProducer: {
           taskCreation: '/api/local/producer/tasks',

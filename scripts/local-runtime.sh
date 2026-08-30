@@ -195,6 +195,7 @@ migrate() {
   apply_migration_once "0022_material_deepening_scope" "$project_root/database/migrations/0022_material_deepening_scope.sql"
   apply_migration_once "0023_material_engagement_and_media_components" "$project_root/database/migrations/0023_material_engagement_and_media_components.sql"
   apply_migration_once "0024_media_processing_runtime" "$project_root/database/migrations/0024_media_processing_runtime.sql"
+  apply_migration_once "0025_comment_current_projection" "$project_root/database/migrations/0025_comment_current_projection.sql"
 }
 
 case "$command_name" in

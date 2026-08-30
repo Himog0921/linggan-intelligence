@@ -67,6 +67,8 @@ export async function collectXhsNoteDetailPackage(wd = window, options = {}) {
         noteId: note.noteId,
         noteUrl: note.url,
         maxTotal: commentLimit,
+        publicCommentCount: note.publicCommentCount ?? note.commentCount ?? note.comments,
+        observedNoteId: note.noteId,
         maxSubComments: options.maxSubComments,
         commentDepthMode: options.commentDepthMode,
         collectionRunId: options.collectionRunId,

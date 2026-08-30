@@ -137,24 +137,28 @@ export function packageContentDetail({ platform, note, observedAt, capturedAt } 
 }
 
 export function packageComments({ platform, result, noteId, observedAt, capturedAt } = {}) {
-  const comments = asArray(result?.comments || result?.data || result)
-    .filter((comment) => !isReplyRecord(comment));
-  const knownSetSize = numeric(result?.knownSetSize);
-  const attempted = numeric(result?.attempted ?? comments.length);
-  const discovered = numeric(result?.discovered);
+  const collection = normalizedCommentCollectionReceipt(result, noteId);
+  const comments = collection?.analysisUsability === 'not_usable'
+    ? []
+    : asArray(result?.comments || result?.data || result).filter((comment) => !isReplyRecord(comment));
   return createCapturePackage({
     packageKind: PRODUCER_CAPABILITY.COMMENTS,
     platform,
     observedAt,
     capturedAt,
-    target: { basis: 'known_set', contentExternalId: String(noteId || result?.noteId || '') },
+    target: {
+      basis: 'known_set',
+      contentExternalId: String(noteId || result?.noteId || ''),
+      ...(collection ? { commentCollection: collection } : {}),
+    },
     coverage: {
-      // `maxTotal` and a requested limit are budgets, not proof that that many comments exist.
-      observed: discovered ?? comments.length, attempted: attempted ?? comments.length,
+      // The lane count is its own emitted record count.  Whole-comment-set completeness lives
+      // in `target.commentCollection`, because top-level comments and replies are delivered
+      // through two distinct packages and must never be added across Attempts.
+      observed: comments.length, attempted: comments.length,
       acquired: comments.length, verified: 0, failed: numeric(result?.failed),
-      notAttempted: knownSetSize === null || attempted === null ? 0 : Math.max(0, knownSetSize - attempted),
-      unknown: (numeric(result?.unknown) ?? 0) + (knownSetSize === null ? 1 : 0),
-      stoppedReason: String(result?.stopReason || 'collector_complete'),
+      notAttempted: 0, unknown: 0,
+      stoppedReason: collection?.stopReason || String(result?.stopReason || 'unknown'),
     },
     records: comments.map((comment) => ({
       kind: 'comment',
@@ -168,25 +172,30 @@ export function packageComments({ platform, result, noteId, observedAt, captured
 // in the same array as top-level comments.  This keeps a parent/reply relationship from being
 // silently flattened into a generic comment count or a second Content observation.
 export function packageReplies({ platform, result, noteId, observedAt, capturedAt } = {}) {
-  const replies = asArray(result?.comments || result?.data || result)
-    .filter((comment) => isReplyRecord(comment));
-  const knownSetSize = numeric(result?.replyKnownSetSize);
+  const collection = normalizedCommentCollectionReceipt(result, noteId);
+  const replies = collection?.analysisUsability === 'not_usable'
+    ? []
+    : asArray(result?.comments || result?.data || result).filter((comment) => isReplyRecord(comment));
   return createCapturePackage({
     packageKind: PRODUCER_CAPABILITY.REPLIES,
     platform,
     observedAt,
     capturedAt,
-    target: { basis: 'known_set', contentExternalId: String(noteId || result?.noteId || '') },
+    target: {
+      basis: 'known_set',
+      contentExternalId: String(noteId || result?.noteId || ''),
+    },
     coverage: {
       observed: replies.length,
       attempted: replies.length,
       acquired: replies.length,
       verified: 0,
       failed: 0,
-      // The collector's requested amount refers to the combined comment tree.  It cannot be
-      // used to invent a reply-only remainder, so only expose it when a dedicated count exists.
-      notAttempted: knownSetSize === null ? 0 : Math.max(0, knownSetSize - replies.length),
-      unknown: (numeric(result?.replyUnknown) ?? 0) + (knownSetSize === null ? 1 : 0),
+      // Whole-tree completion is carried by the comments package. The reply lane reports only
+      // what this independently accepted package retained, so a missing/rejected reply package
+      // can never be hidden by a copied whole-tree receipt.
+      notAttempted: 0,
+      unknown: 0,
       stoppedReason: String(result?.replyStopReason || result?.stopReason || 'unknown'),
     },
     records: replies.map((reply) => ({
@@ -195,6 +204,34 @@ export function packageReplies({ platform, result, noteId, observedAt, capturedA
       payload: reply,
     })),
   });
+}
+
+function normalizedCommentCollectionReceipt(result = {}, noteId = '') {
+  const source = result?.collectionReceipt && typeof result.collectionReceipt === 'object'
+    ? result.collectionReceipt
+    : {};
+  const explicitScope = String(source.scope || result?.collectionScope || '').trim();
+  if (!explicitScope) return null;
+  const total = numeric(source.uniqueCollectedCount ?? result?.total ?? asArray(result?.comments || result?.data || result).length) ?? 0;
+  const pageCommentCount = numeric(source.pageCommentCount ?? result?.publicCommentCount);
+  const expectedCount = numeric(source.expectedCount);
+  const scope = explicitScope;
+  const state = String(source.state || result?.collectionState || 'partial').trim() || 'partial';
+  const analysisUsability = String(source.analysisUsability || result?.analysisUsability || (total > 0 ? 'usable' : 'empty')).trim();
+  const targetIdentity = String(source.targetIdentity || result?.targetIdentity || 'matched').trim();
+  return {
+    version: 1,
+    noteId: String(source.noteId || noteId || result?.noteId || '').trim(),
+    scope,
+    ...(numeric(source.requestedLimit) === null ? {} : { requestedLimit: numeric(source.requestedLimit) }),
+    pageCommentCount,
+    expectedCount,
+    uniqueCollectedCount: total,
+    state,
+    analysisUsability,
+    targetIdentity,
+    stopReason: String(source.stopReason || result?.stopReason || 'unknown').trim() || 'unknown',
+  };
 }
 
 export function packageAuthorProfile({ platform, author, observedAt, capturedAt } = {}) {
