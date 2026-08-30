@@ -15,7 +15,7 @@ import {
 import { buildDiscoveryExecutionSummary } from '../src/platforms/xhs/noteCollector.js';
 import { requireControlReceipt } from '../src/linggan/controlReceipt.js';
 import { resolveDouyinBatchControlReceipt } from '../src/platforms/douyin/controlReceipt.js';
-import { taskFor } from '../src/linggan/contentRuntimeAdapter.js';
+import { commentTaskInstruction, taskFor } from '../src/linggan/contentRuntimeAdapter.js';
 
 test('one adapter uses the same bounded package shape for every retained collector capability', () => {
   for (const capability of Object.values(PRODUCER_CAPABILITY)) {
@@ -190,6 +190,102 @@ test('a retained collector can return one comment tree without flattening replie
   assert.equal(replies.records.length, 1);
   assert.equal(replies.records[0].payload.commentId, 'reply-1');
   assert.equal(replies.coverage.target.commentCollection, undefined);
+});
+
+test('real xhs fallback comment identities stay in the right lane and bind to their manual task', () => {
+  const source = {
+    noteId: 'note-real-shape',
+    comments: [
+      {
+        noteId: 'note-real-shape',
+        commentId: 'comment-root',
+        rootCommentId: 'comment-root',
+        parentCommentId: '',
+        replyToCommentId: '',
+        level: 1,
+        text: 'top level from the live DOM fallback',
+      },
+      {
+        noteId: 'note-real-shape',
+        commentId: 'comment-reply',
+        rootCommentId: 'comment-root',
+        parentCommentId: 'comment-root',
+        replyToCommentId: 'comment-root',
+        level: 2,
+        text: 'reply from the live DOM fallback',
+      },
+    ],
+    collectionReceipt: {
+      version: 1,
+      noteId: 'note-real-shape',
+      scope: 'detail_window',
+      requestedLimit: 30,
+      pageCommentCount: 2,
+      expectedCount: 2,
+      uniqueCollectedCount: 2,
+      state: 'complete',
+      analysisUsability: 'usable',
+      targetIdentity: 'matched',
+      stopReason: 'comment_area_end',
+    },
+  };
+  const instruction = commentTaskInstruction('note-real-shape', 30);
+  const comments = packageComments({
+    platform: 'xhs', result: source, noteId: source.noteId, taskTarget: instruction.target,
+  });
+  const replies = packageReplies({
+    platform: 'xhs', result: source, noteId: source.noteId, taskTarget: instruction.target,
+  });
+  const commentTask = taskFor('xhs', 'comments', instruction.target, instruction);
+  const replyTask = taskFor('xhs', 'replies', instruction.target, instruction);
+
+  assert.equal(comments.records.length, 1);
+  assert.equal(comments.records[0].payload.commentId, 'comment-root');
+  assert.equal(comments.records[0].payload.noteId, 'note-real-shape');
+  assert.equal(Object.hasOwn(comments.records[0].payload, 'rootCommentId'), false);
+  assert.equal(Object.hasOwn(comments.records[0].payload, 'parentCommentId'), false);
+  assert.equal(Object.hasOwn(comments.records[0].payload, 'replyToCommentId'), false);
+  assert.equal(replies.records.length, 1);
+  assert.equal(replies.records[0].payload.commentId, 'comment-reply');
+  assert.equal(replies.records[0].payload.noteId, 'note-real-shape');
+  assert.equal(replies.records[0].payload.rootCommentId, 'comment-root');
+  assert.equal(replies.records[0].payload.parentCommentId, 'comment-root');
+  assert.equal(Object.hasOwn(replies.records[0].payload, 'replyToCommentId'), false);
+  assert.equal(commentTask.maximumQuota, 30);
+  assert.equal(replyTask.maximumQuota, 30);
+  assert.equal(comments.coverage.target.commentScope, instruction.target.commentScope);
+  assert.equal(comments.coverage.target.requestedCommentLimit, 30);
+  assert.equal(replies.coverage.target.commentScope, instruction.target.commentScope);
+  assert.equal(replies.coverage.target.requestedCommentLimit, 30);
+});
+
+test('unlimited deep comments keep a real natural-end target without inventing a result quota', () => {
+  const instruction = commentTaskInstruction('note-deep', 0);
+  const task = taskFor('xhs', 'comments', instruction.target, instruction);
+  assert.equal(instruction.commentLimit, 'not_requested');
+  assert.equal(instruction.maximumQuota, null);
+  assert.equal(task.maximumQuota, null);
+  assert.equal(instruction.target.commentScope, 'all_public_until_natural_end');
+  assert.equal(Object.hasOwn(instruction.target, 'requestedCommentLimit'), false);
+});
+
+test('nested replies retain one exact parent identity for material admission', () => {
+  const result = {
+    noteId: 'note-nested',
+    comments: [{
+      noteId: 'note-nested',
+      commentId: 'reply-child',
+      rootCommentId: 'comment-root',
+      parentCommentId: 'comment-root',
+      replyToCommentId: 'reply-parent',
+      level: 3,
+    }],
+  };
+  const replies = packageReplies({ platform: 'xhs', result, noteId: result.noteId });
+
+  assert.equal(replies.records[0].payload.rootCommentId, 'comment-root');
+  assert.equal(replies.records[0].payload.replyToCommentId, 'reply-parent');
+  assert.equal(Object.hasOwn(replies.records[0].payload, 'parentCommentId'), false);
 });
 
 test('comment packages carry one Attempt receipt instead of adding old and new attempts as a fake total', () => {

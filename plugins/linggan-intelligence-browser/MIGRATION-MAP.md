@@ -1,7 +1,7 @@
 # PLUGIN-REHOME-001 · 旧插件迁入与运行边界映射
 
 > 状态: 当前迁移与自动执行边界
-> 最后核对: 2026-08-30
+> 最后核对: 2026-08-31
 > 适用范围: `linggan-boom@8a00cc1` / `v2.0.91` 到 Linggan 自有浏览器包的第一条垂直迁入边界
 > 事实来源: `plugins/linggan-intelligence-browser/` 当前 source、Manifest、Webpack active entries 和 isolation check
 > 冲突时以谁为准: 当前可构建 source 和实际运行证明；旧插件只说明迁入来源，不是 Linggan 运行规格
@@ -47,6 +47,8 @@
 | XHS 最终页面稳定（0.8.3） | 首次 `complete` 后继续观察 URL/加载变化；保持 1.5 秒稳定且最终 content script 回应同一 URL 才下发采集动作 | 总等待最多 20 秒；不新建 Task/Attempt，不把页面可响应冒充 Package 或 Receipt |
 | XHS 部分详情与同页执行（0.8.4） | 结构化详情已取得内容/作者/媒体时允许互动字段部分未知；首个详情 Task 按服务端已批准范围一次读取详情、媒体候选与有界评论树，后续单能力 Task 复用持久缓存 | 不以未知补 0；不合并 Task/Attempt/Package/Receipt；缓存不授权新 lane、不跨 Lease，缺失或过期时回退原 lane 执行 |
 | XHS SSR 详情读取（0.8.5） | 全局 `__INITIAL_STATE__` 被页面水合删除时，从原始页面脚本安全解析序列化 `noteDetailMap`，供详情就绪、完整度和正式采集共用 | 不执行页面脚本、不放宽作品身份校验、不把 SSR 内容冒充 API 或 DOM 观察；无 SSR 时仍走现有运行态/DOM 路径 |
+| 评论回执与当前投影（0.8.6） | 标准 30 条窗口与深采分开；短采保留，重试从评论入口重新遍历；服务端按稳定评论身份形成当前投影 | 不跨 Attempt 累加数量冒充完整，不从旧评论游标续采，不修改历史 Package |
+| 真实评论树接纳修复（0.8.7） | 顶层自指 root 与回复多关系字段在出包前规范到评论/回复唯一合同；自然结束深采使用无数值配额的有界停止条件 | 不从结果反推任务配额，不放宽服务端关系门闸，不改 scheduled TaskSpec |
 
 ## 新旧运行路径对照
 
@@ -57,7 +59,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.5）
+当前路径（0.8.7）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox

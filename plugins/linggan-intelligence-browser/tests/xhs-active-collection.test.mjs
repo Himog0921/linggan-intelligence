@@ -13,6 +13,7 @@ import { createCommentTaskController } from '../src/content/commentTaskControlle
 
 test('unlimited deep comments use an explicit all-public execution target instead of invalid zero quota', () => {
   assert.deepEqual(commentTaskInstruction('note_1', 0), {
+    maximumQuota: null,
     commentLimit: 'not_requested',
     target: {
       contentExternalId: 'note_1',
@@ -21,6 +22,7 @@ test('unlimited deep comments use an explicit all-public execution target instea
     stopConditions: ['manual_stop', 'collector_complete', 'time_budget', 'risk_budget'],
   });
   assert.deepEqual(commentTaskInstruction('note_1', 80), {
+    maximumQuota: 80,
     commentLimit: 80,
     target: {
       contentExternalId: 'note_1',

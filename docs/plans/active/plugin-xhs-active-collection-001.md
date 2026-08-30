@@ -1,7 +1,7 @@
 # PLUGIN-XHS-ACTIVE-COLLECTION-001：小红书目标驱动采集执行升级
 
 > 状态: 活跃计划
-> 最后核对: 2026-08-27
+> 最后核对: 2026-08-31
 > 适用范围: Issue #78 的 Linggan Browser Producer 小红书目标驱动采集执行升级
 > 事实来源: Mog 的当前授权、Issue #74/#76、当前插件源码、focused 测试与本计划验证记录
 > 冲突时以谁为准: 用户最新确认、当前运行时代码/合同、真实页面结果；代码检查不得替代真实页面或交付证明
@@ -62,3 +62,10 @@
 - 发布物：`releases/linggan-intelligence-browser-v0.4.7.zip` 已重建；`release-manifest.json` SHA-256 为 `ac2cc3d9666262badd4a92d18bbce383ddf9b7921704842119eed89362cdc8bb`。
 - 仓库治理：`./scripts/check-project-governance.sh origin/main` 和 `git diff --check` 通过。
 - 仍未证明：真实搜索/作者页滚动、非空评论与楼中楼、不同筛选状态、真实扩展安装/登录、真实 Linggan 接纳、部署与业务验收。它们是后续受控验收，不由本次源码/发行验证替代。
+
+## 真实详情接纳复验增量（2026-08-31）
+
+- 本机已加载 0.8.6，并在一个已授权的真实 XHS 详情样本中读到 3 条顶层评论和 3 条回复；标准详情回执同时记录 `requestedLimit=30`、页面显示 6、本次唯一采回 6、自然结束和 `COMPLETE / usable`。这证明页面读取和 30 条以内窗口已实际运行，不证明其他页面或 30 条以上样本。
+- 首次服务接纳没有形成评论/回复材料：真实 DOM fallback 会让顶层评论的 `rootCommentId` 等于自身 `commentId`，旧分流把“存在 rootCommentId”一律当成回复；同时手工任务仍沿用默认 `maximumQuota=1`，且 Package target 缠少 Task target 的评论范围，导致记录被正确隔离为合同不匹配/超配额。
+- 0.8.7 修复候选改为按父级、层级和“root 是否异于自身”分流，并在出包前把页面的自指 root、parent 与 reply-to 多关系表示规范成接纳合同的唯一关系；有限任务使用执行前明确上限，无限深采使用 `maximumQuota: null` 与人工/时间/风险/自然结束条件，不把本 Attempt 结果反写成任务目标；评论 Package 与 TaskSpec 复用同一 target。新的 Attempt 仍从评论入口重新完整采集，旧 Package 保持不可变。
+- 自动验证已通过 167 项插件测试、TypeScript 合同、production build、active runtime/旧工作台隔离以及 0.8.7 ZIP 校验和可复现构建；候选 SHA-256 为 `4cc80ac66762c82bb09f2e729a42afd4c6c5690d0ad0e03cf892fa7fdfe836b7`。修复后真实再采、Work Resource 评论树、批量评论和不同筛选状态仍待独立复验。
