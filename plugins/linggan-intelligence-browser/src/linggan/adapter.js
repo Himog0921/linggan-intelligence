@@ -202,6 +202,7 @@ export async function claimLingganDispatch({
       decision: String(body?.decision || 'unknown'),
       // 不许执行时**不把任务体带出去**：留着它只会让下游有机会「反正拿到了就跑」。
       taskSpec: mayExecute ? body?.taskSpec ?? null : null,
+      executionSourceUrl: mayExecute ? String(body?.executionSourceUrl || '') : '',
       leaseRef: mayExecute ? String(body?.leaseRef || '') : '',
       message: String(body?.reason || ''),
       // 节奏由服务端给。插件不自定间隔——否则想调就得重新发一版插件。

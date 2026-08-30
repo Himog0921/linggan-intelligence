@@ -208,6 +208,9 @@ pub async fn check_in_installation(
         .bind(&check_in.capabilities)
         .execute(&mut *transaction)
         .await?;
+        if let Some(station_ref) = station_ref {
+            adopt_predecessor_live_claims(&mut transaction, station_ref, installation_ref).await?;
+        }
         // 已归位的安装只更新心跳。**未归位的必须再试一次认领**：它上次报到时窗口可能
         // 还关着，之后人才把窗口打开。不重试的话，这个安装会永远停在待认领——而使用者
         // 看到的是「窗口开着，插件却始终不归位」，无从判断哪里出了问题。
@@ -226,6 +229,7 @@ pub async fn check_in_installation(
             .bind(open_station)
             .execute(&mut *transaction)
             .await?;
+            adopt_predecessor_live_claims(&mut transaction, open_station, installation_ref).await?;
             transaction.commit().await?;
             return Ok(CheckInOutcome::Claimed {
                 installation_ref,
@@ -252,6 +256,7 @@ pub async fn check_in_installation(
                 Some(station_ref),
             )
             .await?;
+            adopt_predecessor_live_claims(&mut transaction, station_ref, installation_ref).await?;
             CheckInOutcome::Claimed {
                 installation_ref,
                 station_ref,
@@ -318,6 +323,7 @@ pub async fn claim_installation(
     if affected == 0 {
         return Err(StationError::UnknownInstallation);
     }
+    adopt_predecessor_live_claims(&mut transaction, station_ref, installation_ref).await?;
     transaction.commit().await?;
     Ok(superseded)
 }
@@ -342,6 +348,33 @@ async fn supersede_active_installation(
     .fetch_optional(&mut **transaction)
     .await?;
     Ok(previous)
+}
+
+/// 新安装已经在同一工位取代旧安装时，承接这个工位所有已被取代安装尚在有效租约内的
+/// 执行权。不能只看直接前任：连续重载时，任务所有者可能仍停在更早一代安装。
+/// 旧安装已标记 superseded，Attempt/Submission 闸门会拒绝它继续改任务状态；这里只转移
+/// 所有权，不重建 Task，不改已完成步骤。
+async fn adopt_predecessor_live_claims(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    station_ref: Uuid,
+    replacement: Uuid,
+) -> Result<u64, sqlx::Error> {
+    Ok(sqlx::query(
+        "UPDATE collection_work_order_lease_task task \
+         SET claimed_by_installation_ref=$2,claimed_at=scope_001_now() \
+         FROM plugin_installation previous,collection_work_order_lease lease \
+         WHERE task.claimed_by_installation_ref=previous.installation_ref \
+           AND previous.station_ref=$1 AND previous.superseded_at IS NOT NULL \
+           AND previous.installation_ref<>$2 \
+           AND task.lease_ref=lease.lease_ref \
+           AND task.execution_state='in_progress' \
+           AND lease.released_at IS NULL AND lease.expires_at>scope_001_now()",
+    )
+    .bind(station_ref)
+    .bind(replacement)
+    .execute(&mut **transaction)
+    .await?
+    .rows_affected())
 }
 
 async fn insert_installation(
