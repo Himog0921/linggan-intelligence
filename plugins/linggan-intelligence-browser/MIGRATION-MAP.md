@@ -42,6 +42,8 @@
 | 多样媒体卡槽（0.8.0） | 图片、封面、视频、实况图片进入同一媒体合同；实况 still/motion 分组件候选与有界取得工作 | URL 不是长期资产；一个组件成功不冒充整个实况卡槽完整 |
 | 本机派生（0.8.0） | Rust worker 对已物化字节运行 thumbnail/OCR/audio/ASR/frame OCR，空文本写 KNOWN_EMPTY | 插件不承担 OCR/ASR；处理工作不冒充 Evidence 或来源事实 |
 | 无人值守页面就绪（0.8.1） | 先订阅 tab 后读取当前状态，既承接未来 complete 事件，也接纳已经 complete 的页面 | 只修复页面就绪竞态；不改任务身份、租约、Attempt 或接纳规则 |
+| XHS 签名详情定位（0.8.2） | 服务端从最新已接纳发现记录派发带 `xsec_token` 的短期来源链接；插件校验作品身份后转换为 `/discovery/item/{id}` | token 不进入 TaskSpec、作品身份或 Evidence；缺失时不执行，不回退裸 `/explore` |
+| 同工位安装承接（0.8.2） | 新安装取代旧安装时承接其有效租约内尚未完成的同一 Task | 不重建 Task、不重跑完成步骤；已被取代安装不能再改变执行状态 |
 
 ## 新旧运行路径对照
 
@@ -52,7 +54,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.1）
+当前路径（0.8.2）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox

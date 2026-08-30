@@ -33,6 +33,8 @@ pub enum DispatchDecision {
         task_id: Uuid,
         lease_ref: Uuid,
         task_spec: Value,
+        /// 一次派发所需的短期页面定位信息。它不是 Task 身份，不写回不可变 TaskSpec。
+        execution_source_url: Option<String>,
     },
     /// 这个安装还没归位到任何工位，因此不属于任何工位的产能。
     InstallationNotClaimed,
@@ -42,6 +44,8 @@ pub enum DispatchDecision {
     DailyQuotaReached { quota: i32, used: i64 },
     /// 没有等待派发的任务。
     NothingWaiting,
+    /// 任务存在，但当下没有符合资格的页面执行定位信息。
+    ExecutionLocatorUnavailable { reason: String },
 }
 
 impl DispatchDecision {
@@ -57,6 +61,7 @@ impl DispatchDecision {
             // 刚派出一个，后面很可能还有——立刻再来。
             Self::Dispatch { .. } => 0,
             Self::NothingWaiting => 300,
+            Self::ExecutionLocatorUnavailable { .. } => 300,
             // 触顶要等次日自然日窗口重置，问得再勤也不会变。
             Self::DailyQuotaReached { .. } => 1800,
             Self::RiskPaused { .. } => 900,
@@ -72,6 +77,7 @@ impl DispatchDecision {
             Self::RiskPaused { .. } => "risk_paused",
             Self::DailyQuotaReached { .. } => "daily_quota_reached",
             Self::NothingWaiting => "nothing_waiting",
+            Self::ExecutionLocatorUnavailable { .. } => "execution_locator_unavailable",
         }
     }
 
@@ -140,11 +146,20 @@ pub async fn decide_dispatch(
     .fetch_optional(&mut *transaction)
     .await?;
     if let Some((task_id, lease_ref, task_spec)) = in_progress {
+        let execution_source_url =
+            execution_source_url_for_task(&mut transaction, &task_spec).await?;
+        if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
+            return Ok(DispatchDecision::ExecutionLocatorUnavailable {
+                reason: "这篇作品当前没有带 xsec_token 的已接纳发现链接，未交给插件执行。"
+                    .to_owned(),
+            });
+        }
         transaction.commit().await?;
         return Ok(DispatchDecision::Dispatch {
             task_id,
             lease_ref,
             task_spec,
+            execution_source_url,
         });
     }
 
@@ -189,6 +204,13 @@ pub async fn decide_dispatch(
         return Ok(DispatchDecision::RiskPaused { reason });
     }
 
+    let execution_source_url = execution_source_url_for_task(&mut transaction, &task_spec).await?;
+    if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
+        return Ok(DispatchDecision::ExecutionLocatorUnavailable {
+            reason: "这篇作品当前没有带 xsec_token 的已接纳发现链接，任务保持等待。".to_owned(),
+        });
+    }
+
     let claimed = sqlx::query(
         "UPDATE collection_work_order_lease_task \
          SET execution_state = 'in_progress', claimed_at = scope_001_now(), \
@@ -209,7 +231,58 @@ pub async fn decide_dispatch(
         task_id,
         lease_ref,
         task_spec,
+        execution_source_url,
     })
+}
+
+fn requires_signed_execution_source(task_spec: &Value) -> bool {
+    task_spec.get("platform").and_then(Value::as_str) == Some("xhs")
+        && task_spec
+            .get("capabilitiesRequested")
+            .and_then(Value::as_array)
+            .and_then(|values| values.first())
+            .and_then(Value::as_str)
+            .is_some_and(|capability| {
+                matches!(
+                    capability,
+                    "content_detail" | "media_slots" | "comments" | "replies"
+                )
+            })
+}
+
+/// 发现链接是可过期的执行定位信息，不是作品身份。每次派发都从最新已接纳的
+/// discovery record 读取，而不把 token 冻结进长寿命 TaskSpec 或 Evidence UI。
+async fn execution_source_url_for_task(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    task_spec: &Value,
+) -> Result<Option<String>, sqlx::Error> {
+    if !requires_signed_execution_source(task_spec) {
+        return Ok(None);
+    }
+    let Some(content_external_id) = task_spec
+        .get("target")
+        .and_then(|target| target.get("contentExternalId"))
+        .and_then(Value::as_str)
+    else {
+        return Ok(None);
+    };
+    sqlx::query_scalar(
+        "SELECT record.value->'payload'->>'url' \
+         FROM linggan_material_discovery_finding finding \
+         JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref \
+         JOIN linggan_runtime_capture_package package USING(package_ref) \
+         CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records') \
+              WITH ORDINALITY AS record(value,ordinality) \
+         WHERE content.platform='xhs' AND content.content_external_id=$1 \
+           AND record.ordinality=finding.record_ordinal+1 \
+           AND record.value->'sourceObject'->>'externalId'=$1 \
+           AND record.value->'payload'->>'url' LIKE 'https://www.xiaohongshu.com/%' \
+           AND position('xsec_token=' IN record.value->'payload'->>'url') > 0 \
+         ORDER BY package.accepted_at DESC,finding.created_at DESC LIMIT 1",
+    )
+    .bind(content_external_id)
+    .fetch_optional(&mut **transaction)
+    .await
 }
 
 /// 覆盖这个平台与 lane 的风险暂停。判据与准入、发租处保持一致——同一条规则有三份实现

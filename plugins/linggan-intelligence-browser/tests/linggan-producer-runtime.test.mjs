@@ -217,7 +217,8 @@ test('background immediately auto-claims and executes bounded baseline plus fixe
     assert.match(background, new RegExp(`'${capability}'`));
   }
   assert.match(background, /search_result\?keyword=\$\{encodeURIComponent\(targetValue\)\}/);
-  assert.match(background, /explore\/\$\{encodeURIComponent\(targetValue\)\}/);
+  assert.match(background, /buildSignedXhsDetailExecutionUrl\(targetValue, executionSourceUrl\)/);
+  assert.doesNotMatch(background, /explore\/\$\{encodeURIComponent\(targetValue\)\}/);
   assert.match(background, /mode: capability === 'discovery_search' \? 'search' : 'profile'/);
   assert.match(background, /COLLECT_CURRENT_COMMENTS/);
   assert.match(background, /COLLECT_CURRENT_CONTENT/);

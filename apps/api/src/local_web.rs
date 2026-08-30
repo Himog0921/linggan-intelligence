@@ -2420,10 +2420,14 @@ fn dispatch_payload(decision: &DispatchDecision) -> serde_json::Value {
             task_id,
             lease_ref,
             task_spec,
+            execution_source_url,
         } => {
             payload["taskId"] = serde_json::json!(task_id);
             payload["leaseRef"] = serde_json::json!(lease_ref);
             payload["taskSpec"] = task_spec.clone();
+            if let Some(url) = execution_source_url {
+                payload["executionSourceUrl"] = serde_json::json!(url);
+            }
             // Claim atomically moved this lease task out of pending. A second poll cannot receive
             // it again while the first producer is opening the platform page.
             payload["taskState"] = serde_json::json!("in_progress");
@@ -2443,6 +2447,9 @@ fn dispatch_payload(decision: &DispatchDecision) -> serde_json::Value {
         }
         DispatchDecision::NothingWaiting => {
             payload["reason"] = serde_json::json!("没有等待派发的任务。");
+        }
+        DispatchDecision::ExecutionLocatorUnavailable { reason } => {
+            payload["reason"] = serde_json::json!(reason);
         }
     }
     payload

@@ -16,6 +16,7 @@ import {
 import { LINGGAN_RUNTIME_ACTION } from './runtimeActions.js';
 import { localMediaOutbox, localProducerOutbox } from './localProducerOutbox.js';
 import { createManualRuntimeTask, packageDiscovery } from './producerRuntime.js';
+import { buildSignedXhsDetailExecutionUrl } from './xhsExecutionTarget.js';
 
 const PRODUCER_INSTANCE_KEY = 'linggan.localTrusted.producerInstanceId';
 const MAX_MEDIA_BYTES = 256 * 1024 * 1024;
@@ -624,7 +625,7 @@ async function runDispatchedTask() {
   if (!targetValue) {
     return { success: true, state: 'target_incomplete', executed: false, message: '任务没有指明观察目标。' };
   }
-  const { windowId, tabId } = await openTaskWindow(capability, targetValue);
+  const { windowId, tabId } = await openTaskWindow(capability, targetValue, claim.executionSourceUrl);
   if (!tabId) {
     await closeCollectionWindow(windowId);
     return { success: false, state: 'tab_unavailable', message: '无法打开观察页面。' };
@@ -680,14 +681,16 @@ async function runDispatchedTask() {
  * 工作，`autoDiscardable: false` 防止浏览器在采集中途把标签页丢弃。**跑完即关**——
  * 1000 篇/天意味着窗口会开上百次，不关就是几十个标签页常驻吃内存。
  *
- * **平台 ID 才是身份**，URL 由它拼出来，不反过来。
+ * **平台 ID 才是身份**；详情页还必须使用服务端从已接纳发现材料选出的短期签名链接。
+ * 签名链接只负责定位页面，不能反过来成为 Task 或作品身份。
  */
-async function openTaskWindow(capability, targetValue) {
+async function openTaskWindow(capability, targetValue, executionSourceUrl = '') {
   const url = capability === 'discovery_search'
     ? `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(targetValue)}&source=web_explore_feed`
     : (['author_profile', 'profile_discovery'].includes(capability)
       ? `https://www.xiaohongshu.com/user/profile/${encodeURIComponent(targetValue)}`
-      : `https://www.xiaohongshu.com/explore/${encodeURIComponent(targetValue)}`);
+      : buildSignedXhsDetailExecutionUrl(targetValue, executionSourceUrl));
+  if (!url) return { windowId: null, tabId: null };
   const created = await chrome.windows.create({ url, focused: false, type: 'normal' });
   const tabId = Number(created?.tabs?.[0]?.id || 0) || null;
   if (tabId) {

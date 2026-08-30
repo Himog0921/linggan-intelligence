@@ -2,8 +2,9 @@ use linggan_contracts::{
     ProducerTaskSpec, parse_producer_attempt, parse_producer_submission, parse_producer_task_spec,
 };
 use linggan_evidence::{
-    DispatchDecision, ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome,
-    RuntimeTaskOutcome, create_producer_task, decide_dispatch, issue_work_order_lease,
+    CheckInOutcome, DispatchDecision, InstallationCheckIn, ProducerRuntimeError,
+    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, check_in_installation,
+    create_producer_task, decide_dispatch, issue_work_order_lease, open_claim_window,
     start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
@@ -48,6 +49,14 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0019_work_order_lease_task_sequence.sql"),
     "\n",
     include_str!("../../../database/migrations/0020_observation_runtime_automation.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0021_discovery_cover_media_acquisition.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0022_material_deepening_scope.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0023_material_engagement_and_media_components.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0024_media_processing_runtime.sql"),
 );
 
 #[tokio::test]
@@ -288,8 +297,170 @@ async fn late_scheduled_submission_keeps_material_without_advancing_revoked_exec
     assert_task_state(&database, task.task_id(), "in_progress").await;
 }
 
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn replacement_installation_adopts_a_stale_two_generation_task_without_recreating_it() {
+    let database = proof_database_for("collection_dispatch_installation_takeover").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("creator work order is leased");
+    let old_dispatch = decide_dispatch(&database, &fixture.install_key)
+        .await
+        .expect("old installation claims the first task");
+    let original_task_id = task_id(&old_dispatch);
+
+    open_claim_window(&database, fixture.station_ref, 1)
+        .await
+        .expect("the same station accepts the replacement installation");
+    let intermediate_instance_id = Uuid::new_v4();
+    let intermediate_install_key = intermediate_instance_id.to_string();
+    let intermediate = check_in_installation(
+        &database,
+        &InstallationCheckIn {
+            install_key: &intermediate_install_key,
+            plugin_version: "0.8.1",
+            browser_label: Some("intermediate fixture"),
+            capabilities: serde_json::json!(["author_profile", "profile_discovery"]),
+        },
+    )
+    .await
+    .expect("intermediate installation checks in");
+    let intermediate_installation_ref = match intermediate {
+        CheckInOutcome::Claimed {
+            installation_ref,
+            superseded,
+            ..
+        } => {
+            assert_eq!(superseded, Some(fixture.installation_ref));
+            installation_ref
+        }
+        other => panic!("intermediate install must claim the station; got {other:?}"),
+    };
+    // Recreate the already-observed pre-fix state: 0.8.1 is active, while the live task still
+    // names 0.8.0. The next version must not depend on an intermediate heartbeat to repair it.
+    sqlx::query(
+        "UPDATE collection_work_order_lease_task SET claimed_by_installation_ref=$2 WHERE task_id=$1",
+    )
+    .bind(original_task_id)
+    .bind(fixture.installation_ref)
+    .execute(database.pool())
+    .await
+    .expect("stale two-generation ownership is recreated");
+
+    let replacement_instance_id = Uuid::new_v4();
+    let replacement_install_key = replacement_instance_id.to_string();
+    let outcome = check_in_installation(
+        &database,
+        &InstallationCheckIn {
+            install_key: &replacement_install_key,
+            plugin_version: "0.8.2",
+            browser_label: Some("replacement fixture"),
+            capabilities: serde_json::json!([
+                "author_profile",
+                "profile_discovery",
+                "content_detail",
+                "media_slots",
+                "comments",
+                "replies"
+            ]),
+        },
+    )
+    .await
+    .expect("replacement installation checks in");
+    let replacement_installation_ref = match outcome {
+        CheckInOutcome::Claimed {
+            installation_ref,
+            station_ref,
+            superseded,
+        } => {
+            assert_eq!(station_ref, fixture.station_ref);
+            assert_eq!(superseded, Some(intermediate_installation_ref));
+            installation_ref
+        }
+        other => panic!("replacement must claim the open station; got {other:?}"),
+    };
+
+    let replacement_dispatch = decide_dispatch(&database, &replacement_install_key)
+        .await
+        .expect("replacement installation receives the live task");
+    assert_eq!(task_id(&replacement_dispatch), original_task_id);
+    let owner: Uuid = sqlx::query_scalar(
+        "SELECT claimed_by_installation_ref FROM collection_work_order_lease_task WHERE task_id=$1",
+    )
+    .bind(original_task_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("task owner is readable");
+    assert_eq!(owner, replacement_installation_ref);
+    let task = task_from_dispatch(&replacement_dispatch);
+    let replacement_attempt = attempt(task.task_id(), replacement_instance_id);
+    assert!(matches!(
+        start_producer_attempt(&database, &replacement_attempt).await,
+        Ok(RuntimeAttemptOutcome::Started { .. })
+    ));
+    assert!(lease_is_live(&database, lease.lease_ref).await);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn detail_dispatch_uses_the_latest_accepted_signed_discovery_url_outside_task_spec() {
+    let database = proof_database_for("collection_dispatch_signed_source").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let content_external_id = "note-signed-execution";
+    let signed_url = format!(
+        "https://www.xiaohongshu.com/user/profile/creator-fixture/{content_external_id}?xsec_token=SIGNED_FIXTURE%3D&xsec_source=pc_user"
+    );
+    submit_profile_discovery(&database, content_external_id, &signed_url).await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("accepted discovery creates the stable content identity");
+    sqlx::query(
+        "INSERT INTO collection_work_order_material_target \
+         (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) \
+         VALUES ($1,$2,1,30,2,true)",
+    )
+    .bind(fixture.work_order_ref)
+    .bind(content_public_ref)
+    .execute(database.pool())
+    .await
+    .expect("the work order freezes one authorized material target");
+
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("material deepening lease is issued");
+    let dispatch = decide_dispatch(&database, &fixture.install_key)
+        .await
+        .expect("detail dispatch is decided");
+    match dispatch {
+        DispatchDecision::Dispatch {
+            task_spec,
+            execution_source_url,
+            ..
+        } => {
+            assert_eq!(task_spec["capabilitiesRequested"][0], "content_detail");
+            assert_eq!(
+                task_spec["target"]["contentExternalId"],
+                content_external_id
+            );
+            assert!(
+                !task_spec.to_string().contains("xsec_token"),
+                "short-lived execution credentials never enter immutable TaskSpec"
+            );
+            assert_eq!(execution_source_url.as_deref(), Some(signed_url.as_str()));
+        }
+        other => panic!("signed discovery must produce a detail dispatch; got {other:?}"),
+    }
+}
+
 struct Fixture {
     work_order_ref: Uuid,
+    station_ref: Uuid,
+    installation_ref: Uuid,
     producer_instance_id: Uuid,
     install_key: String,
 }
@@ -370,7 +541,7 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
         "INSERT INTO plugin_installation \
              (installation_ref, install_key, station_ref, claim_kind, claimed_at, plugin_version, capabilities) \
          VALUES ($1, $2, $3, 'person', scope_001_now(), '0.5.1', \
-                 '[\"author_profile\",\"profile_discovery\"]'::jsonb)",
+                 '[\"author_profile\",\"profile_discovery\",\"content_detail\",\"media_slots\",\"comments\",\"replies\"]'::jsonb)",
     )
     .bind(installation_ref)
     .bind(&install_key)
@@ -393,9 +564,85 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
 
     Fixture {
         work_order_ref,
+        station_ref,
+        installation_ref,
         producer_instance_id,
         install_key,
     }
+}
+
+async fn submit_profile_discovery(
+    database: &Database,
+    content_external_id: &str,
+    signed_url: &str,
+) {
+    let task = parse_producer_task_spec(
+        &serde_json::json!({
+            "contractVersion":"linggan.producer.task-spec.v1",
+            "taskId":Uuid::new_v4(),
+            "source":"manual",
+            "platform":"xhs",
+            "pageType":"profile",
+            "target":{"authorExternalId":"creator-fixture"},
+            "capabilitiesRequested":["profile_discovery"],
+            "maximumQuota":1,
+            "commentLimit":"not_requested",
+            "acquireMedia":"not_requested",
+            "riskPolicy":"local_trusted_user_initiated",
+            "stopConditions":["surface_ended","maximum_quota"]
+        })
+        .to_string(),
+    )
+    .expect("profile discovery task is valid");
+    assert!(matches!(
+        create_producer_task(database, &task).await,
+        Ok(RuntimeTaskOutcome::Created { .. })
+    ));
+    let producer_instance_id = Uuid::new_v4();
+    let attempt = attempt(task.task_id(), producer_instance_id);
+    assert!(matches!(
+        start_producer_attempt(database, &attempt).await,
+        Ok(RuntimeAttemptOutcome::Started { .. })
+    ));
+    let submission = parse_producer_submission(
+        &serde_json::json!({
+            "contractVersion":"linggan.producer.capture-package.v1",
+            "producerInstanceId":producer_instance_id,
+            "taskId":task.task_id(),
+            "attemptId":attempt.attempt_id(),
+            "submissionId":Uuid::new_v4(),
+            "capturePackage":{
+                "contractVersion":"linggan.producer.capture-package.v1",
+                "packageRef":Uuid::new_v4(),
+                "packageKind":"profile_discovery",
+                "platform":"xhs",
+                "observedAt":"2026-08-30T00:00:00Z",
+                "capturedAt":"2026-08-30T00:00:01Z",
+                "coverage":{
+                    "target":{"basis":"known_set","authorExternalId":"creator-fixture"},
+                    "layers":[{
+                        "capability":"profile_discovery","observed":1,"attempted":1,
+                        "acquired":1,"verified":0,"failed":0,"notAttempted":0,
+                        "unknown":0,"stoppedReason":"surface_ended"
+                    }]
+                },
+                "records":[{
+                    "kind":"profile_discovery_card",
+                    "resultPosition":1,
+                    "sourceObject":{
+                        "platform":"xhs","type":"content","externalId":content_external_id
+                    },
+                    "payload":{"title":"signed fixture","url":signed_url}
+                }]
+            }
+        })
+        .to_string(),
+    )
+    .expect("signed profile discovery submission is valid");
+    assert!(matches!(
+        submit_producer_package(database, &submission).await,
+        Ok(RuntimeSubmissionOutcome::Acknowledged { .. })
+    ));
 }
 
 fn same_dispatch(
