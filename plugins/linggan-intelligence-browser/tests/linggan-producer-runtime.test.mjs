@@ -320,6 +320,14 @@ test('content message gate admits scheduled profile discovery without dropping d
   assert.match(content, /triggerSource: message\.triggerSource \|\| 'popup_linggan_runtime'/);
 });
 
+test('scheduled page execution propagates a collector failure instead of reporting a false start', () => {
+  const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
+  const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
+  assert.match(content, /if \(pageResult\?\.success === false\) return pageResult/);
+  assert.match(background, /if \(response\?\.success === false\)/);
+  assert.match(background, /response\.state \|\| 'page_read_failed'/);
+});
+
 test('producer controls use Linggan runtime commands while manual media remains an explicit separate action', () => {
   const popup = readFileSync(new URL('../src/popup/App.jsx', import.meta.url), 'utf8');
   const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');

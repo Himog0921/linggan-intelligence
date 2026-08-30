@@ -130,7 +130,8 @@ function firstPresentValue(source = {}, keys = []) {
 }
 
 export function parseXhsInteractCount(interactInfo = {}, keys = []) {
-  return parseCount(firstPresentValue(interactInfo, keys));
+  const value = firstPresentValue(interactInfo, keys);
+  return value == null ? null : parseCount(value);
 }
 
 export function isCollectedNoteUsable(note = {}, expectedNoteId = '', { requireStats = false } = {}) {
@@ -174,6 +175,13 @@ export function isCollectedNoteUsable(note = {}, expectedNoteId = '', { requireS
   );
 
   return (hasText || hasValidMedia || hasAuthor) && hasFullStats;
+}
+
+export function classifyXhsNoteDetail(note = {}, expectedNoteId = '') {
+  if (!isCollectedNoteUsable(note, expectedNoteId)) return 'unusable';
+  return isCollectedNoteUsable(note, expectedNoteId, { requireStats: true })
+    ? 'complete'
+    : 'partial_stats';
 }
 
 export function resolveExpectedNoteFromMap(noteMap = {}, expectedNoteId = '', currentUrl = '') {
@@ -422,15 +430,30 @@ export async function collectNote(wd = window, options = {}) {
   }
 
   // 1. 注入脚本获取 noteDetailMap（最多重试 3 次，等待 __INITIAL_STATE__ 填充）
-  let noteMap = null;
+  const expectedNoteId = String(options.expectedNoteId || '').trim();
+  const currentUrl = wd.location?.href || window.location.href;
+  let injectedCandidate = null;
+  let injectedCandidateState = 'unusable';
+  let injectedCandidateKey = '';
   let lastErr = null;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       if (attempt > 0) {
         await new Promise(r => setTimeout(r, 1500 * attempt));
       }
-      noteMap = await getByInject(wd, 'noteMap');
-      if (noteMap && Object.keys(noteMap).length > 0) break;
+      const noteMap = await getByInject(wd, 'noteMap');
+      if (noteMap && Object.keys(noteMap).length > 0) {
+        const resolved = resolveExpectedNoteFromMap(noteMap, expectedNoteId, currentUrl);
+        const candidateState = classifyXhsNoteDetail(resolved.note || {}, expectedNoteId);
+        if (candidateState !== 'unusable') {
+          injectedCandidate = resolved.note;
+          injectedCandidateState = candidateState;
+          injectedCandidateKey = resolved.noteKey;
+        }
+        // Keep waiting for AJAX interaction fields, but retain a structurally usable partial
+        // candidate so missing metrics cannot discard title/body/author/media already observed.
+        if (candidateState === 'complete') break;
+      }
     } catch (e) {
       lastErr = e;
       console.warn(`[灵感爆爆爆] getByInject 第 ${attempt + 1} 次失败:`, e.message);
@@ -440,21 +463,13 @@ export async function collectNote(wd = window, options = {}) {
         break;
       }
     }
-    noteMap = null;
   }
 
-  const expectedNoteId = String(options.expectedNoteId || '').trim();
-  const currentUrl = wd.location?.href || window.location.href;
-  let noteKey = '';
-  let note = null;
-  let detailSource = '__INITIAL_STATE__';
-
-  if (noteMap && Object.keys(noteMap).length > 0) {
-    noteKey = selectNoteKey(noteMap, expectedNoteId, currentUrl);
-    if (noteKey) {
-      note = resolveExpectedNoteFromMap(noteMap, expectedNoteId, currentUrl).note;
-    }
-  }
+  let noteKey = injectedCandidateKey;
+  let note = injectedCandidate;
+  let detailSource = injectedCandidateState === 'complete'
+    ? '__INITIAL_STATE__'
+    : (injectedCandidateState === 'partial_stats' ? 'xhs.initial_state_partial' : '__INITIAL_STATE__');
 
   if (!note) {
     note = readXhsNoteDetailFromDom(wd, { expectedNoteId });
@@ -468,10 +483,6 @@ export async function collectNote(wd = window, options = {}) {
 
   if (!note || (!note.noteId && !note.id && !note.title)) {
     throw new Error('笔记数据解析失败，数据结构异常');
-  }
-
-  if (detailSource === '__INITIAL_STATE__' && !isCollectedNoteUsable(note, expectedNoteId, { requireStats: true })) {
-    throw new Error(`笔记数据未稳定就绪: expected=${expectedNoteId || 'unknown'} actual=${note.noteId || note.id || ''}`);
   }
 
   // 3. 映射字段
@@ -546,7 +557,9 @@ export async function collectNote(wd = window, options = {}) {
     dataSource: detailSource,
     ...(detailSource === '__INITIAL_STATE__'
       ? {}
-      : { dataQuality: 'degraded', qualityReason: 'dom_detail_fallback', sourceTier: 'dom' }),
+      : (detailSource === 'xhs.initial_state_partial'
+        ? { dataQuality: 'partial', qualityReason: 'interaction_stats_partial', sourceTier: 'initial_state' }
+        : { dataQuality: 'degraded', qualityReason: 'dom_detail_fallback', sourceTier: 'dom' })),
     createdAt: existing?.createdAt || collectedAt,
     mediaQuality: 'HD',
     syncStatus: 'pending',
@@ -559,7 +572,9 @@ export async function collectNote(wd = window, options = {}) {
         (note.tagList || []).map((item) => item?.name || '').filter(Boolean).join(' '),
       ]),
       rawUrl: safeUrl(wd.location?.href || window.location.href),
-      rawSource: detailSource === '__INITIAL_STATE__' ? '__INITIAL_STATE__.noteMap' : 'xhs.detail_dom',
+      rawSource: detailSource === '__INITIAL_STATE__' || detailSource === 'xhs.initial_state_partial'
+        ? '__INITIAL_STATE__.noteMap'
+        : 'xhs.detail_dom',
     }),
   }, options.monitorMeta);
 

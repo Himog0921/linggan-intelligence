@@ -275,6 +275,7 @@ async function dispatchProducerRuntimeAction(action, message) {
   } else {
     pageResult = await dispatchXhsRuntimeAction(pageAction, params);
   }
+  if (pageResult?.success === false) return pageResult;
   // This means the page reader actually accepted the action. It is deliberately not an
   // admission receipt; Popup must continue to describe delivery as pending until one exists.
   if (isControl) {

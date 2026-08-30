@@ -658,6 +658,13 @@ async function runDispatchedTask() {
       taskSpec: spec,
       triggerSource: 'linggan_dispatched_task',
     });
+    if (response?.success === false) {
+      return {
+        success: false,
+        state: response.state || 'page_read_failed',
+        message: response.message || `页面未能执行「${capability}」。`,
+      };
+    }
     return {
       success: true,
       state: 'executed',

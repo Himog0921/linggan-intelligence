@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   discoverNotesFromDOM,
   extractXhsLivePhotoStreams,
+  classifyXhsNoteDetail,
   isCollectedNoteUsable,
   parseXhsInteractCount,
   parseXhsPublishedAt,
@@ -68,6 +69,20 @@ test('isCollectedNoteUsable treats aliased xhs metrics as complete stats', () =>
       comments: 43,
     },
   }, 'note_alias_metrics', { requireStats: true }), true);
+});
+
+test('partial XHS detail keeps observed content while missing metrics remain unknown', () => {
+  const note = {
+    noteId: 'note_partial_metrics',
+    title: '详情已取得',
+    imageList: [{ urlDefault: 'https://img.example.com/cover.jpg' }],
+    interactInfo: { likeCount: 12 },
+  };
+
+  assert.equal(classifyXhsNoteDetail(note, 'note_partial_metrics'), 'partial_stats');
+  assert.equal(parseXhsInteractCount(note.interactInfo, ['likeCount']), 12);
+  assert.equal(parseXhsInteractCount(note.interactInfo, ['collectCount']), null);
+  assert.equal(parseXhsInteractCount(note.interactInfo, ['comments']), null);
 });
 
 test('resolveExpectedNoteFromMap finds exact note id from wrapped note payload', () => {
