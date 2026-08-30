@@ -66,23 +66,23 @@ async fn evidence_route_returns_the_honest_empty_state() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(evidence_library_html().contains("来源材料尚未完整接通"));
-    assert!(evidence_library_html().contains("SOURCE INCOMPLETE"));
-    assert!(evidence_library_html().contains("没有可展示的本地材料"));
-    assert!(!evidence_library_html().contains(&["SYSTEM", "LIVE"].join(" ")));
+    assert!(evidence_library_html(None).contains("来源材料尚未完整接通"));
+    assert!(evidence_library_html(None).contains("SOURCE INCOMPLETE"));
+    assert!(evidence_library_html(None).contains("没有可展示的本地材料"));
+    assert!(!evidence_library_html(None).contains(&["SYSTEM", "LIVE"].join(" ")));
 }
 
 #[test]
 #[cfg(any())] // superseded server-rendered discovery page
 fn evidence_page_does_not_replace_unknown_with_zero() {
-    assert!(evidence_library_html().contains("覆盖情况 <strong>未知"));
-    assert!(!evidence_library_html().contains("评论 0"));
+    assert!(evidence_library_html(None).contains("覆盖情况 <strong>未知"));
+    assert!(!evidence_library_html(None).contains("评论 0"));
 }
 
 #[test]
 #[cfg(any())] // superseded server-rendered discovery page
 fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_keys() {
-    let base = evidence_library_html();
+    let base = evidence_library_html(None);
 
     for required in [
         "事实层 / 证据",
@@ -184,7 +184,7 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
 #[test]
 #[cfg(any())] // superseded server-rendered discovery page
 fn base_no_db_header_and_nested_technical_keys_remain_chinese_first() {
-    let base = evidence_library_html();
+    let base = evidence_library_html(None);
     assert!(base.contains("<!-- EVIDENCE_HEADER_BOUNDARY_START -->"));
     assert!(base.contains("<!-- EVIDENCE_HEADER_META_STATE_START -->"));
     assert!(base.contains(
@@ -301,7 +301,7 @@ fn discovery_stop_reasons_keep_raw_codes_but_lead_with_truthful_chinese_meaning(
 #[test]
 #[cfg(any())] // superseded server-rendered discovery page
 fn evidence_page_keeps_the_v7_shell_and_three_column_geometry() {
-    let html = evidence_library_html();
+    let html = evidence_library_html(None);
 
     for required in [
         "v7-global-header",
@@ -345,7 +345,7 @@ fn evidence_page_keeps_the_v7_shell_and_three_column_geometry() {
 #[test]
 #[cfg(any())] // superseded server-rendered discovery page
 fn evidence_page_has_no_fabricated_v7_runtime_material_or_actions() {
-    let html = evidence_library_html();
+    let html = evidence_library_html(None);
 
     let prohibited = [
         ["SYSTEM", "LIVE"].join(" "),
@@ -407,8 +407,11 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
         excluded_unknown_published_at: 0,
         time_view: "last_30_days",
     };
-    let html =
-        evidence_page::render_read_projection(&evidence_library_html(), &projection, Some("A娃"));
+    let html = evidence_page::render_read_projection(
+        &evidence_library_html(None),
+        &projection,
+        Some("A娃"),
+    );
 
     assert!(html.contains("&lt;script&gt;not a cover&lt;/script&gt;"));
     assert!(html.contains("媒体<br>尚未采集"));
@@ -443,7 +446,8 @@ fn default_read_view_surfaces_unknown_published_time_without_a_surrogate_date() 
         time_view: "latest_accepted_discovery",
     };
 
-    let html = evidence_page::render_read_projection(&evidence_library_html(), &projection, None);
+    let html =
+        evidence_page::render_read_projection(&evidence_library_html(None), &projection, None);
 
     assert!(html.contains("PUBLISHED_AT UNKNOWN"));
     assert!(html.contains("未用首次发现、观察或接收时间替代"));
@@ -475,7 +479,7 @@ fn strict_published_window_reports_unknown_exclusions_even_with_visible_cards() 
         cover_local_asset_url: None,
     };
     let strict_html = evidence_page::render_read_projection(
-        &evidence_library_html(),
+        &evidence_library_html(None),
         &DiscoveryLibraryProjection {
             cards: vec![known_card()],
             excluded_unknown_published_at: 1,
@@ -487,7 +491,7 @@ fn strict_published_window_reports_unknown_exclusions_even_with_visible_cards() 
     assert!(strict_html.contains("synthetic known discovery"));
 
     let default_html = evidence_page::render_read_projection(
-        &evidence_library_html(),
+        &evidence_library_html(None),
         &DiscoveryLibraryProjection {
             cards: vec![known_card()],
             excluded_unknown_published_at: 0,
@@ -507,7 +511,8 @@ fn default_empty_read_view_is_not_misdescribed_as_an_empty_published_window() {
         time_view: "latest_accepted_discovery",
     };
 
-    let html = evidence_page::render_read_projection(&evidence_library_html(), &projection, None);
+    let html =
+        evidence_page::render_read_projection(&evidence_library_html(None), &projection, None);
 
     assert!(html.contains("当前视角没有可展示卡片"));
     assert!(html.contains("最新已接纳不是发布时间窗口"));
@@ -1072,14 +1077,7 @@ fn collection_serves_all_five_sub_surfaces_from_the_shared_shell() {
         (collection::Section::Tasks, "采集任务"),
         (collection::Section::Runtime, "执行工位"),
     ] {
-        let html = collection::render(
-            section,
-            collection::OperationsMode::Now,
-            None,
-            None,
-            None,
-            None,
-        );
+        let html = collection::render(section, collection::OperationsMode::Now, None, None, None);
         // The breadcrumb, not a title block, is where a surface states which page this is.
         assert!(
             html.contains(&format!("<b>{name}</b>")),
@@ -1097,7 +1095,7 @@ fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
     // DESIGN-003: breadcrumb and rail already name the page, so the h1 survives only for
     // assistive tech and the vertical space returns to the content. A page that grows a
     // visible title block back is restating its name for the third time.
-    let mut pages = vec![evidence_library_html()];
+    let mut pages = vec![evidence_library_html(None)];
     for section in [
         collection::Section::Targets,
         collection::Section::Operations,
@@ -1108,7 +1106,6 @@ fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
         pages.push(collection::render(
             section,
             collection::OperationsMode::Now,
-            None,
             None,
             None,
             None,
@@ -1136,21 +1133,120 @@ fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
         None,
         None,
         None,
-        None,
     );
     let context_row = targets
         .split_once("v7-context-meta")
         .expect("collection pages render the context row")
         .1;
     for kpi in [
-        "<span class=\"v7-kpi\"><em>巡逻中断</em><b><span class=\"v7-status-main\">未知</span><small class=\"v7-tech-key\">UNKNOWN</small></b></span>",
-        "<span class=\"v7-kpi\"><em>建档未完成</em><b><span class=\"v7-status-main\">未知</span><small class=\"v7-tech-key\">UNKNOWN</small></b></span>",
+        "<span class=\"v7-kpi\"><em>巡检已开</em><b><span class=\"v7-status-main\">未知</span><small class=\"v7-tech-key\">UNKNOWN</small></b></span>",
+        "<span class=\"v7-kpi\"><em>建档中</em><b><span class=\"v7-status-main\">未知</span><small class=\"v7-tech-key\">UNKNOWN</small></b></span>",
     ] {
         assert!(
             context_row.contains(kpi),
             "count missing from context row: {kpi}"
         );
     }
+}
+
+#[test]
+fn connected_collection_surfaces_render_real_targets_and_scheduler_state() {
+    let running = collection::SurfaceState {
+        vacant_stations: Some(0),
+        unclaimed_installations: Some(1),
+        total_targets: Some(2),
+        monitoring_targets: Some(1),
+        archiving_targets: Some(1),
+        scheduler_state: collection::SchedulerState::Running,
+    };
+    let counts = linggan_evidence::TargetCounts {
+        total: 2,
+        creator: 1,
+        keyword: 1,
+        archiving: 1,
+        monitoring: 1,
+    };
+    let targets = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        None,
+        Some(&counts),
+        Some(&running),
+    );
+
+    assert!(targets.contains("调度运行中"));
+    assert!(targets.contains("SCHEDULER RUNNING"));
+    assert!(targets.contains("<em>巡检已开</em><b>1</b>"));
+    assert!(targets.contains("<em>建档中</em><b>1</b>"));
+    assert!(targets.contains("<span class=\"v7-nav-state\">观察中</span>"));
+    assert!(!targets.contains("调度器未接通"));
+    assert!(!targets.contains("<span class=\"v7-status-main\">暂无观察目标</span>"));
+
+    let operations = collection::render(
+        collection::Section::Operations,
+        collection::OperationsMode::Now,
+        None,
+        None,
+        Some(&running),
+    );
+    assert!(operations.contains("调度运行中"));
+    assert!(!operations.contains("调度器未接通"));
+}
+
+#[test]
+fn scheduler_stale_and_unreadable_remain_distinct_facts() {
+    let stale = collection::SurfaceState {
+        vacant_stations: None,
+        unclaimed_installations: None,
+        total_targets: None,
+        monitoring_targets: None,
+        archiving_targets: None,
+        scheduler_state: collection::SchedulerState::Stale,
+    };
+    let stale_html = collection::render(
+        collection::Section::Runtime,
+        collection::OperationsMode::Now,
+        None,
+        None,
+        Some(&stale),
+    );
+    assert!(stale_html.contains("调度心跳已过期"));
+    assert!(stale_html.contains("SCHEDULER STALE"));
+    assert!(stale_html.contains("<span class=\"v7-nav-state\">状态未知</span>"));
+
+    let unreadable = collection::SurfaceState {
+        scheduler_state: collection::SchedulerState::Unreadable,
+        ..stale
+    };
+    let unreadable_html = collection::render(
+        collection::Section::Runtime,
+        collection::OperationsMode::Now,
+        None,
+        None,
+        Some(&unreadable),
+    );
+    assert!(unreadable_html.contains("调度心跳读不到"));
+    assert!(unreadable_html.contains("SCHEDULER HEARTBEAT UNREADABLE"));
+}
+
+#[test]
+fn corpus_header_can_reflect_the_connected_collection_read_model() {
+    let html = evidence_library_html(Some("观察中"));
+    let collection_entry = html
+        .split_once("v7-tech-key\">COLLECTION")
+        .expect("the collection primary entry exists")
+        .1;
+    assert!(collection_entry.contains("<span class=\"v7-nav-state\">观察中</span>"));
+}
+
+#[test]
+fn corpus_header_can_preserve_an_unreadable_collection_state() {
+    let html = evidence_library_html(Some("状态未知"));
+    let collection_entry = html
+        .split_once("v7-tech-key\">COLLECTION")
+        .expect("the collection primary entry exists")
+        .1;
+    assert!(collection_entry.contains("<span class=\"v7-nav-state\">状态未知</span>"));
 }
 
 #[test]
@@ -1166,14 +1262,7 @@ fn context_row_counts_read_in_chinese_so_one_row_holds_one_english_scale() {
         collection::Section::Tasks,
         collection::Section::Runtime,
     ] {
-        let html = collection::render(
-            section,
-            collection::OperationsMode::Now,
-            None,
-            None,
-            None,
-            None,
-        );
+        let html = collection::render(section, collection::OperationsMode::Now, None, None, None);
         for fragment in html.split("<span class=\"v7-kpi\"><em>").skip(1) {
             labels.push(
                 fragment
@@ -1236,11 +1325,10 @@ fn the_primary_nav_readouts_all_share_one_type_scale_and_one_colour() {
     );
 
     // Both surfaces render the same five entries from the one shared header.
-    let mut pages = vec![evidence_library_html()];
+    let mut pages = vec![evidence_library_html(None)];
     pages.push(collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
-        None,
         None,
         None,
         None,
@@ -1281,7 +1369,7 @@ fn collection_never_publishes_prototype_material_or_a_fake_zero() {
             collection::OperationsMode::Trace,
             collection::OperationsMode::Review,
         ] {
-            let html = collection::render(section, mode, None, None, None, None);
+            let html = collection::render(section, mode, None, None, None);
             for figure in fabricated {
                 assert!(
                     !html.contains(figure),
@@ -1296,20 +1384,42 @@ fn collection_never_publishes_prototype_material_or_a_fake_zero() {
 
 #[test]
 fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
+    let confirmed_empty = collection::SurfaceState {
+        vacant_stations: None,
+        unclaimed_installations: None,
+        total_targets: Some(0),
+        monitoring_targets: Some(0),
+        archiving_targets: Some(0),
+        scheduler_state: collection::SchedulerState::Unreadable,
+    };
     let targets = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
         None,
         None,
-        None,
-        None,
+        Some(&confirmed_empty),
     );
     // 加入观察只写本机记录，因此它是真实可点的动作；但页面必须把「加进来」与「开始采集」
     // 分清楚，否则会让人以为点一下就开始采了。
     assert!(targets.contains("不访问任何平台"));
     assert!(targets.contains("/collection/targets/new"));
+    assert!(targets.contains("还没有观察目标"));
     // 真正消耗平台访问的那一步仍然要走完整条链并由人开闸。
     assert!(targets.contains("最后还要人开闸"));
+
+    let unknown_targets = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        None,
+        None,
+        None,
+    );
+    assert!(unknown_targets.contains("观察目标当前未知"));
+    assert!(!unknown_targets.contains("还没有观察目标"));
+    assert!(!unknown_targets.contains("本机采集运行时已接通"));
+    assert!(!unknown_targets.contains("SCHEDULER NOT CONNECTED"));
+    assert!(!unknown_targets.contains("NO OBSERVATION TARGETS"));
+    assert!(unknown_targets.contains("<span class=\"v7-nav-state\">状态未知</span>"));
 
     let attention = collection::render(
         collection::Section::Attention,
@@ -1317,13 +1427,21 @@ fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
         None,
         None,
         None,
+    );
+    assert!(attention.contains("待处理状态当前未知"));
+    assert!(attention.contains("待处理读模型尚未接入"));
+    assert!(!attention.contains("没有待处理事项"));
+
+    let tasks = collection::render(
+        collection::Section::Tasks,
+        collection::OperationsMode::Now,
+        None,
+        None,
         None,
     );
-    // Q9 moved this out of its own column and into the opening line, but the claim it guards
-    // is unchanged: an empty queue must never read as "confirmed zero faults".
-    assert!(attention.contains("这不是「已确认零故障」"));
-    // Upstream-empty surfaces must hand the reader the step that is actually stopped.
-    assert!(attention.contains("/collection/targets"));
+    assert!(tasks.contains("采集任务当前未知"));
+    assert!(tasks.contains("观察目标数量不能排除历史或在途任务"));
+    assert!(!tasks.contains("没有采集任务"));
 
     let runtime = collection::render(
         collection::Section::Runtime,
@@ -1331,9 +1449,10 @@ fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
         None,
         None,
         None,
-        None,
     );
-    assert!(runtime.contains("调度器未接通"));
+    assert!(runtime.contains("执行工位状态当前未知"));
+    assert!(runtime.contains("采集状态未知"));
+    assert!(!runtime.contains("调度器未接通"));
 }
 
 #[test]
@@ -1344,10 +1463,11 @@ fn operations_modes_are_addressable_and_the_stream_stays_honest() {
         None,
         None,
         None,
-        None,
     );
     assert!(now.contains("LIVE OBSERVATION"));
-    assert!(now.contains("NOT CONNECTED"));
+    assert!(now.contains("采集状态读不到"));
+    assert!(now.contains("COLLECTION STATE UNAVAILABLE"));
+    assert!(!now.contains("SCHEDULER NOT CONNECTED"));
     // The prototype invented an event every seven seconds. Production must not.
     assert!(now.contains("不会用计时器伪造事件"));
     assert!(now.contains("暂停只停止画面跟随，永远不会暂停真实的采集调度"));
@@ -1358,17 +1478,18 @@ fn operations_modes_are_addressable_and_the_stream_stays_honest() {
         None,
         None,
         None,
-        None,
     );
-    assert!(trace.contains("没有可回放的观察历史"));
+    assert!(trace.contains("观察历史当前未知"));
+    assert!(!trace.contains("没有可回放的观察历史"));
     let review = collection::render(
         collection::Section::Operations,
         collection::OperationsMode::Review,
         None,
         None,
         None,
-        None,
     );
+    assert!(review.contains("周期复盘当前未知"));
+    assert!(!review.contains("没有可复盘的周期"));
     assert!(review.contains("观察盲区"));
 
     assert!(now.contains("href=\"/collection/operations?mode=trace\""));
@@ -1382,30 +1503,24 @@ fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
         None,
         None,
         None,
-        None,
     );
     assert!(!closed.contains("c-drawer"));
 
-    let open = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        Some("T-CR-019"),
-        None,
-        None,
-        None,
-    );
+    let open = collection::render_unreadable_target_drawer(Some("T-CR-019"));
     assert!(open.contains("id=\"c-drawer\""));
     assert!(open.contains("#T-CR-019"));
-    assert!(open.contains("未找到该观察目标"));
+    assert!(open.contains("观察目标读取状态当前未知"));
+    for false_empty in [
+        "未找到该观察目标",
+        "没有建档基线",
+        "没有巡逻策略",
+        "没有关联证据",
+        "没有观察史",
+    ] {
+        assert!(!open.contains(false_empty));
+    }
 
-    let injected = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        Some("<script>alert(1)</script>"),
-        None,
-        None,
-        None,
-    );
+    let injected = collection::render_unreadable_target_drawer(Some("<script>alert(1)</script>"));
     assert!(!injected.contains("<script>alert(1)</script>"));
     assert!(injected.contains("&lt;script&gt;"));
 }
@@ -1457,11 +1572,10 @@ fn declared_token_values(stylesheet: &str) -> BTreeMap<&str, &str> {
 fn served_primary_surfaces_link_to_each_other_and_unserved_ones_stay_disabled() {
     // A responsibility whose route this binary actually serves must be reachable from every
     // other served surface. An operator standing on either page can always leave it.
-    let evidence = evidence_library_html();
+    let evidence = evidence_library_html(None);
     let collection = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
-        None,
         None,
         None,
         None,
@@ -1570,11 +1684,10 @@ fn no_page_stylesheet_restyles_a_component_the_shell_owns() {
 #[test]
 fn both_surfaces_render_the_header_at_one_type_scale() {
     // The regression this locks: same markup, same stylesheet layer, same declarations.
-    let corpus = evidence_library_html();
+    let corpus = evidence_library_html(None);
     let collection = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
-        None,
         None,
         None,
         None,
@@ -1642,7 +1755,6 @@ fn collection_orders_its_surfaces_by_urgency_and_opens_on_the_one_that_expires()
         None,
         None,
         None,
-        None,
     );
 
     // Search inside the rail only: the global header's Collection entry is also a
@@ -1681,22 +1793,28 @@ fn collection_orders_its_surfaces_by_urgency_and_opens_on_the_one_that_expires()
 
 #[test]
 fn every_empty_surface_says_whether_it_is_waiting_on_you() {
-    // DESIGN-006 Q9. Five empty surfaces, three kinds of empty — and only one of them is the
+    // DESIGN-006 Q9. Five empty surfaces, and only one confirmed-empty surface is the
     // reader's to act on. Rendered at equal weight they answered everything except "so what
     // do I do".
-    let surface = |section| {
-        collection::render(
-            section,
-            collection::OperationsMode::Now,
-            None,
-            None,
-            None,
-            None,
-        )
-    };
+    let surface =
+        |section| collection::render(section, collection::OperationsMode::Now, None, None, None);
 
     // Exactly one surface may claim the reader's attention, and it must name the action.
-    let targets = surface(collection::Section::Targets);
+    let confirmed_empty = collection::SurfaceState {
+        vacant_stations: None,
+        unclaimed_installations: None,
+        total_targets: Some(0),
+        monitoring_targets: Some(0),
+        archiving_targets: Some(0),
+        scheduler_state: collection::SchedulerState::Unreadable,
+    };
+    let targets = collection::render(
+        collection::Section::Targets,
+        collection::OperationsMode::Now,
+        None,
+        None,
+        Some(&confirmed_empty),
+    );
     assert!(targets.contains("c-empty-you"));
     assert!(targets.contains("c-empty-action"));
 
@@ -1712,39 +1830,17 @@ fn every_empty_surface_says_whether_it_is_waiting_on_you() {
         );
     }
 
-    // Surfaces empty only because their upstream is must hand over a way out.
-    for (name, html, href) in [
-        (
-            "attention",
-            surface(collection::Section::Attention),
-            "/collection/targets",
-        ),
-        (
-            "tasks",
-            surface(collection::Section::Tasks),
-            "/collection/targets",
-        ),
-    ] {
-        assert!(
-            html.contains("c-empty-upstream"),
-            "{name} is upstream-empty"
-        );
-        assert!(
-            html.contains(&format!("class=\"c-empty-pointer\" href=\"{href}\"")),
-            "{name} must point at the step that is actually stopped"
-        );
-    }
-
     // Surfaces waiting on engineering must say so, so nobody hunts for an action.
     // Operations' default mode is not an empty state — it renders the pipeline itself — so
     // its awaiting-engineering wording lives on the two modes that are empty.
     for (name, html) in [
+        ("attention", surface(collection::Section::Attention)),
+        ("tasks", surface(collection::Section::Tasks)),
         (
             "operations/trace",
             collection::render(
                 collection::Section::Operations,
                 collection::OperationsMode::Trace,
-                None,
                 None,
                 None,
                 None,
@@ -1758,14 +1854,13 @@ fn every_empty_surface_says_whether_it_is_waiting_on_you() {
                 None,
                 None,
                 None,
-                None,
             ),
         ),
         ("runtime", surface(collection::Section::Runtime)),
     ] {
         assert!(
-            html.contains("这一栏不需要你做任何事"),
-            "{name} must state that it needs nothing from the reader"
+            html.contains("c-empty-engineering"),
+            "{name} must identify the missing engineering read model"
         );
     }
 }
@@ -1778,7 +1873,6 @@ fn structure_survives_without_data_but_placeholder_counters_do_not() {
     let operations = collection::render(
         collection::Section::Operations,
         collection::OperationsMode::Now,
-        None,
         None,
         None,
         None,
@@ -1805,13 +1899,18 @@ fn structure_survives_without_data_but_placeholder_counters_do_not() {
     }
 
     // The reason is still on the page — once, in the shared context row.
-    assert!(operations.contains("SCHEDULER NOT CONNECTED"));
+    assert!(operations.contains("采集状态读不到"));
+    assert!(operations.contains("COLLECTION STATE UNAVAILABLE"));
+    assert!(operations.contains("来源读不到"));
+    assert!(operations.contains("SOURCE UNREADABLE"));
+    assert!(!operations.contains("COLLECTION STATE <span"));
+    assert!(!operations.contains("SOURCE <span"));
+    assert!(!operations.contains("SCHEDULER NOT CONNECTED"));
 
     // Filter tabs keep their names and lose their placeholder counts.
     let targets = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
-        None,
         None,
         None,
         None,
@@ -1829,7 +1928,7 @@ fn the_primary_nav_links_to_entry_routes_never_to_a_sub_surface() {
     // decision, and the two drift the first time the default moves — which is exactly what
     // happened when Collection's default became /collection/attention while the header
     // still pointed at /collection/targets.
-    let html = evidence_library_html();
+    let html = evidence_library_html(None);
     let nav = html
         .split_once("v7-primary-nav")
         .expect("every page renders the primary nav")
@@ -1855,7 +1954,7 @@ fn the_primary_nav_links_to_entry_routes_never_to_a_sub_surface() {
 
 #[test]
 fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
-    let html = evidence_library_html();
+    let html = evidence_library_html(None);
 
     assert!(html.contains("/assets/evidence-library.js"));
     assert!(html.contains("id=\"ev-work-list\""));

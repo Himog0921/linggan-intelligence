@@ -56,7 +56,7 @@ const PRIMARY_ENTRIES: [PrimaryEntry; 5] = [
         // 这个状态词曾经写死为「尚未接通」。采集接通之后它一个字没变，于是全站页头
         // 都在说一句已经不成立的话。现在由调用方按真实事实覆盖，见 `global_header`。
         technical_key: "COLLECTION",
-        state: "尚未接通",
+        state: "状态未知",
         surface: Some(PrimarySurface::Collection),
         href: Some("/collection"),
     },
@@ -76,7 +76,7 @@ fn primary_entry_markup(
         ""
     };
     // 一个责任的状态词只有它自己的页面读得到真实事实。读得到时用真的，读不到时保留
-    // 原来的静态词——**绝不允许因为读不到就宣布「已接通」**。
+    // 明确的未知——**绝不允许因为读不到就宣布「已接通」「未接通」或「为空」**。
     let state = match (entry.surface, collection_state) {
         (Some(PrimarySurface::Collection), Some(state)) => state,
         _ => entry.state,
@@ -115,17 +115,21 @@ fn localize_context_markup(markup: &str) -> String {
 }
 
 /// 上下文行里允许出现的技术码及其中文主表达。
-const CONTEXT_CODES: [(&str, &str); 9] = [
+const CONTEXT_CODES: [(&str, &str); 13] = [
     // 一条码不得包含另一条码。顺序在这里救不了：先替换长码会生成含短码的 markup，
     // 后一轮再替换一次，得到嵌套的 `调度心跳读不到 SCHEDULER HEARTBEAT 未知 UNKNOWN`。
     // 由 `no_code_contains_another_code` 自动执行，不靠人记得。
     ("SCHEDULER HEARTBEAT UNREADABLE", "调度心跳读不到"),
     ("SCHEDULER NOT CONNECTED", "调度器未接通"),
+    ("SCHEDULER RUNNING", "调度运行中"),
+    ("SCHEDULER STALE", "调度心跳已过期"),
     ("READ MODEL NOT CONNECTED", "读模型未接通"),
+    ("COLLECTION STATE UNAVAILABLE", "采集状态读不到"),
     ("NO OBSERVATION TARGETS", "暂无观察目标"),
     ("PATROL ARMED", "巡检已开启"),
     ("PATROL OFF", "有观察目标但巡检未开"),
     ("SOURCE INCOMPLETE", "来源信息不完整"),
+    ("SOURCE UNREADABLE", "来源读不到"),
     ("UTC+08", "中国标准时间"),
     ("UNKNOWN", "未知"),
 ];
@@ -135,6 +139,7 @@ fn localize_boundary_label(label: &str) -> String {
         "LOCAL HOST / NO READ MODEL" => "本机服务 / 读模型未接通",
         "LOCAL HOST / ACCEPTED DISCOVERY" => "本机服务 / 已接纳发现",
         "LOCAL HOST / NO COLLECTION RUNTIME" => "本机服务 / 采集运行时未接通",
+        "LOCAL HOST / COLLECTION STATE UNKNOWN" => "本机服务 / 采集状态未知",
         "LOCAL HOST / NO PLATFORM ACCESS" => "本机服务 / 不访问任何平台",
         _ => "本机服务状态",
     };
@@ -148,7 +153,7 @@ fn localize_boundary_label(label: &str) -> String {
 /// row's first column is intentionally empty: it continues the local rail's width so the
 /// instrument mesh reads as one vertical field.
 /// `collection_state` 让采集页用真实事实覆盖一级导航里那个静态状态词。
-/// 传 `None` 保留静态词——读不到事实时不许宣布已接通。
+/// 传 `None` 保留“状态未知”——读不到事实时不许宣布已接通或未接通。
 pub fn global_header(
     active: PrimarySurface,
     boundary_label: &str,

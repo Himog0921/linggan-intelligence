@@ -22,11 +22,17 @@ Browser Producer 已沿真实 canary 升至 `0.8.4` 并进入 `main` 与本机�
 
 共享数据库已应用 additive `0022`–`0024`，API、调度 worker 和媒体 worker 已切到 `origin/main@8fe531e` 冻结快照。Chrome 已加载并认领 0.8.4；首个 `content_detail` Task 自动打开了带 `xsec_token` 的目标详情页，但页面水合后全局 `__INITIAL_STATE__` 已被删除、当前 DOM 又没有旧详情容器，导致详情采集在浏览器内失败，任务保持 `in_progress` 且仍为 0 Attempt / 0 Package，服务端接纳尚未发生。该现象与内容工作台 2.0.93 的真实热修根因一致。0.8.5 候选补回安全 SSR `noteDetailMap` 解析，并让详情就绪、完整度判断、正式单篇采集和启动探针共用这一路径；只解析有界 JSON 对象，不执行页面脚本。123 项 Browser Producer 测试、合同检查、生产构建、发布包校验、可复现性与旧工作台隔离已一次通过；发行 SHA-256 为 `62d17c53e0fd6153e3c28aaaa66351002b1de05a576942fd3f687483534f8676`。数据库、WorkOrder/Task、签名 URL、12 条固定范围和原 canary 均不改变。真实 12 作品穿过详情/评论/媒体/OCR/ASR 与 Evidence Library 的最终验收仍未完成，下一步是 0.8.5 精确 head 合并、发布、重载后继续同一 canary。
 
-### COMMENT-COLLECTION-RECEIPT-001（v0.8.7 接纳修复候选，待重载后真实复验）
+### COMMENT-COLLECTION-RECEIPT-001（v0.8.7 已合入，Chrome 实际执行版本仍待切换）
 
 已按 ADR-0002 完成代码级收口：标准详情回执与全量深采回执分开；深采以“页面显示数 = 本次唯一采回数”判定 `COMPLETE`，`200 / 300` 等短采为 `PARTIAL` 但保留 `usable`；新的深采从笔记评论入口重新开始，而非续用旧页码。`0025_comment_current_projection.sql` 使不可变 Attempt 评论历史与按稳定评论 ID 去重的当前检索投影并存；本机 runtime 已切到 `main@b8bf0f0`，持久数据库已备份并应用 `0026_work_resource_read`，API、调度 worker、媒体 worker、health 和 Work Resource 路由均已核对。
 
-Chrome 已加载 0.8.6，并在一个获准真实 XHS 详情样本读到 3 条顶层评论和 3 条回复；页面显示 6、本 Attempt 唯一采回 6、自然结束，详情与媒体 Package 已接纳。评论材料没有进入语料：旧插件把顶层自指 root 误分为回复、把页面的 parent 与 reply-to 双字段原样出包，且手工任务错误带 `maximumQuota=1`，服务端因此按合同隔离，没有伪装为成功。0.8.7 候选在出包前规范评论关系，有限任务保留事前配额，自然结束深采使用 `maximumQuota: null` 与人工/时间/风险/自然结束条件，Package 与 TaskSpec 共享同一 target；167 项插件测试、构建、隔离、ZIP 校验与可复现性通过，候选 SHA-256 为 `4cc80ac66762c82bb09f2e729a42afd4c6c5690d0ad0e03cf892fa7fdfe836b7`，旧 0.8.6 ZIP 仍保持 `4ff1ed8ff05ce380c946edd048c6d569d974b7ec143450b2bf17c67fd1406040`。**0.8.7 尚未在 Chrome 重载，修复后真实 comments/replies 接纳、Work Resource 评论树、单篇深采、批量评论和业务验收仍未证明**。
+Chrome 原已加载 0.8.6，并在一个获准真实 XHS 详情样本读到 3 条顶层评论和 3 条回复；页面显示 6、本 Attempt 唯一采回 6、自然结束，详情与媒体 Package 已接纳。评论材料没有进入语料：旧插件把顶层自指 root 误分为回复、把页面的 parent 与 reply-to 双字段原样出包，且手工任务错误带 `maximumQuota=1`，服务端因此按合同隔离，没有伪装为成功。0.8.7 在出包前规范评论关系，有限任务保留事前配额，自然结束深采使用 `maximumQuota: null` 与人工/时间/风险/自然结束条件，Package 与 TaskSpec 共享同一 target；167 项插件测试、构建、隔离、ZIP 校验与可复现性通过，ZIP SHA-256 为 `4cc80ac66762c82bb09f2e729a42afd4c6c5690d0ad0e03cf892fa7fdfe836b7`，旧 0.8.6 ZIP 仍保持 `4ff1ed8ff05ce380c946edd048c6d569d974b7ec143450b2bf17c67fd1406040`。修复已由 PR #117 合入 `main@ebcac83`，磁盘上的 Chrome 加载目录也与 0.8.7 `dist` 完全一致；但重载后一次真实点击的最新工位报到仍明确上报 `plugin_version=0.8.6`，新 TaskSpec 仍是 `maximumQuota=1`，说明 Chrome 后台 Service Worker 实际没有切到新版本。该次回复包继续按旧合同隔离，不能拿它否定 0.8.7，也不能宣称 0.8.7 已真实通过。**修复后 comments/replies 接纳、Work Resource 评论树、单篇深采、批量评论和业务验收仍未证明**。
+
+### COLLECTION-SURFACE-TRUTH-001（真实状态硬化候选，待合并与发布）
+
+`/collection/targets` 已有 2 个真实目标、常驻 worker 也持续写入 scheduler heartbeat，但已部署页面仍同时显示“采集运行时未接通、调度器未接通、暂无观察目标”；`/collection/runtime` 也继续显示 `SCHEDULER HEARTBEAT UNREADABLE`。根因不是数据库缺事实，而是 DESIGN-009 当年只给执行工位页传入部分容量状态，其余四个子面和语料页一级导航保留了静态占位文案；后来新增的 scheduler heartbeat 从未接回页面。
+
+当前交付分支只复用现有 `count_targets`、`read_runtime_capacity`、`read_station_overview` 与 `read_scheduler_heartbeat`，把目标数、巡检数、建档数、空缺工位、未归位安装和调度状态按字段独立显示；任何一项读不到只让该项变成未知，不连坐其余已知事实。调度明确区分运行、心跳过期和读不到；任务、待处理、观察历史、周期复盘与语义事件读模型尚未接入时，页面无论目标数是多少都明确写“当前未知”，不再伪造空列表或零。Corpus 一级导航同样从真实目标计数显示“观察中 / 无观察目标 / 状态未知”。`cargo test -p linggan-api` 为 59 passed、14 个需隔离 PostgreSQL 的测试按设计 ignored、0 failed；隔离 PostgreSQL proof harness 另有 46 passed、0 failed。候选 API 在 3101 端口连接本机持久数据库只读实测显示 2 个目标、1 个巡检、1 个建档、0 个空缺工位、1 个未归位安装和 scheduler running，且目标页、生产流与 Corpus 不再出现相反状态。**该候选尚未合并，也未替换 3000 端口冻结运行快照；浏览器视觉和 Mog 业务验收仍待发布后完成。**
 
 ### OBSERVATION-RUNTIME-001 / Issue #94 与 MEDIA-ACQUISITION-001 / Issue #98（已完成并运行）
 
