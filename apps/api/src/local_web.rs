@@ -2078,6 +2078,25 @@ async fn read_collection_surface(database: &Database) -> CollectionSurfaceReads 
     }
 }
 
+async fn render_simple_collection_surface(
+    state: &LocalWebState,
+    section: collection::Section,
+    mode: collection::OperationsMode,
+) -> Html<String> {
+    let reads = match state.database.database() {
+        Some(database) => Some(read_collection_surface(database).await),
+        None => None,
+    };
+    Html(collection::render(
+        section,
+        mode,
+        None,
+        None,
+        None,
+        reads.as_ref().map(|reads| &reads.surface_state),
+    ))
+}
+
 /// DESIGN-006: the entry lands on the one surface whose contents expire. Arriving on the
 /// target list meant opening with the most static thing in Collection — a list that does not
 /// change for a week — while anything actually waiting sat two tabs away.
@@ -2148,48 +2167,30 @@ async fn collection_operations(
     State(state): State<LocalWebState>,
     Query(params): Query<CollectionParams>,
 ) -> Html<String> {
-    let reads = match state.database.database() {
-        Some(database) => Some(read_collection_surface(database).await),
-        None => None,
-    };
-    Html(collection::render(
+    render_simple_collection_surface(
+        &state,
         collection::Section::Operations,
         collection::OperationsMode::parse(params.mode.as_deref()),
-        None,
-        None,
-        None,
-        reads.as_ref().map(|reads| &reads.surface_state),
-    ))
+    )
+    .await
 }
 
 async fn collection_attention(State(state): State<LocalWebState>) -> Html<String> {
-    let reads = match state.database.database() {
-        Some(database) => Some(read_collection_surface(database).await),
-        None => None,
-    };
-    Html(collection::render(
+    render_simple_collection_surface(
+        &state,
         collection::Section::Attention,
         collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-        reads.as_ref().map(|reads| &reads.surface_state),
-    ))
+    )
+    .await
 }
 
 async fn collection_tasks(State(state): State<LocalWebState>) -> Html<String> {
-    let reads = match state.database.database() {
-        Some(database) => Some(read_collection_surface(database).await),
-        None => None,
-    };
-    Html(collection::render(
+    render_simple_collection_surface(
+        &state,
         collection::Section::Tasks,
         collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-        reads.as_ref().map(|reads| &reads.surface_state),
-    ))
+    )
+    .await
 }
 
 #[derive(serde::Deserialize)]

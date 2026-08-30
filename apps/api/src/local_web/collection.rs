@@ -148,7 +148,9 @@ fn rail(active: Section, state: Option<&SurfaceState>) -> String {
             "观察目标读不到<br><span class=\"v7-mono\">目标计数未知 · {}</span>",
             scheduler_zh(state.scheduler_state),
         ),
-        None => "NO OBSERVATION TARGETS<br><span class=\"v7-mono\">no acquisition authorisation chain · scheduler not connected</span>".to_owned(),
+        None => {
+            "采集状态未知<br><span class=\"v7-mono\">目标与调度状态当前读不到</span>".to_owned()
+        }
     };
     let mut items = String::new();
     for (section, entry) in SECTIONS.iter() {
@@ -248,7 +250,7 @@ fn targets_body(drawer: Option<&str>, state: Option<&SurfaceState>) -> String {
                 note: "目标计数与列表当前都不可读；系统不会把未知伪装成零。",
             },
             "观察目标当前未知",
-            "本机采集运行时已接通，但观察目标读模型暂时没有给出答案。",
+            "观察目标计数与列表当前都没有给出答案，系统不会据此推断已接通、未接通或目标为空。",
             &[("不代表", "不代表当前没有观察目标。")],
         )
     } else {
@@ -330,7 +332,7 @@ fn drawer_panel_overview() -> String {
     empty_state(
         Empty::Plain,
         "这个标识没有对应的观察目标",
-        "抽屉按地址栏里的标识打开，因此刷新和分享都会回到同一个对象。当前系统里还没有任何观察目标，所以这个标识无法解析。",
+        "抽屉按地址栏里的标识打开，因此刷新和分享都会回到同一个对象。当前读取结果无法解析这个标识，但不能据此推断观察目标为空。",
         &[
             (
                 "创作者概览",
@@ -457,13 +459,13 @@ fn operations_body(mode: OperationsMode, state: Option<&SurfaceState>) -> String
                 ),
                 Some(SchedulerState::Unreadable) => (
                     "HEARTBEAT UNREADABLE",
-                    "采集运行时已接通，但调度心跳当前读不到，因此不能判断最近一轮观察。",
+                    "目标读模型有响应，但调度心跳当前读不到，因此不能判断最近一轮观察。",
                     "下面是观察生产的六个固定阶段。阶段计数仍未知，这里不把未知写成零。",
                 ),
                 None => (
-                    "UNKNOWN",
-                    "调度器未接通，没有「最近一轮观察」可供判断。这里不显示无出处的系统判断。",
-                    "下面是观察生产的六个固定阶段。现在还没有任何一次运行可供计数，所以这里不放数字。",
+                    "STATE UNKNOWN",
+                    "调度与「最近一轮观察」的状态当前读不到。这里不把未知翻译成已接通、未接通或没有运行。",
+                    "下面是观察生产的六个固定阶段。各阶段的数字读模型尚未接入，因此这里不放数字。",
                 ),
             };
             format!(
@@ -539,9 +541,9 @@ fn stream_markup(state: Option<&SurfaceState>) -> String {
             "SCHEDULER HEARTBEAT UNREADABLE",
         ),
         None => (
-            "NOT CONNECTED",
-            "没有事件到达。调度器未接通，也没有任何观察目标会产生事件。这里不会用计时器伪造事件来证明系统在运行。",
-            "SCHEDULER NOT CONNECTED",
+            "STATE UNKNOWN",
+            "调度与语义事件状态当前读不到；未知不代表没有事件，也不代表调度器已接通或未接通。这里不会用计时器伪造事件来证明系统在运行。",
+            "COLLECTION STATE UNKNOWN",
         ),
     };
     format!(
@@ -606,20 +608,20 @@ fn runtime_body(state: Option<&SurfaceState>) -> String {
                 note: "工位详情读模型暂时没有返回；刷新会重新读取，不会改变工位或任务。",
             },
             "执行工位详情暂时读不到",
-            &format!("采集运行时已经接通，当前{scheduler}；这里只缺工位详情，不等于系统未接通。"),
+            &format!("本机采集读模型有响应，当前{scheduler}；这里只缺工位详情，不能推断工位为空。"),
             &[("不代表", "不代表执行工位全部离线，也不代表队列为空。")],
         );
     }
     empty_state(
         Empty::AwaitingEngineering {
-            note: "这一栏不需要你做任何事：调度器接通是工程实现，不是等你决定。",
+            note: "这一栏不需要你做任何事：工位、租约与调度状态当前读不到。",
         },
-        "执行工位未接通",
+        "执行工位状态当前未知",
         "这是唯一允许出现工程执行细节的页面：执行工位、队列、租约、心跳与回执。这些细节不会反向进入观察目标与观察史。",
         &[
             (
                 "当前状态",
-                "调度器未接通。插件侧已有「任务规格 → 尝试 → 浏览器待发件箱 → 本地回执」这条链，但它目前只服务受控的手动 discovery。",
+                "当前读不到工位、租约与调度事实，不能据此推断它们已接通、未接通或为空。",
             ),
             (
                 "这一页给谁看",
@@ -731,11 +733,11 @@ fn head_readout(section: Section, state: Option<&SurfaceState>) -> String {
 /// 上下文行右侧的系统状态词。
 ///
 /// scheduler 状态只来自持久 heartbeat：新鲜为 running，过期为 stale，缺记录或读取失败
-/// 才是 unreadable。数据库没接通时才保留最早的 `SCHEDULER NOT CONNECTED` fallback。
+/// 才是 unreadable。整个数据库状态不可读时同样只能表达未知。
 fn system_words(state: Option<&SurfaceState>) -> String {
     let Some(state) = state else {
-        return "<span class=\"v7-query-meta\">SCHEDULER NOT CONNECTED</span>\
-                <span>NO OBSERVATION TARGETS</span><span>UTC+08</span>"
+        return "<span class=\"v7-query-meta\">COLLECTION STATE UNKNOWN</span>\
+                <span>SOURCE UNREADABLE</span><span>UTC+08</span>"
             .to_owned();
     };
     // 系统状态词这一槽位只放状态，不放计数——计数是页面自己的读数，属于左边的
@@ -846,7 +848,7 @@ fn second_bar(
                 ));
             }
             let (scheduler_zh, scheduler) =
-                state.map_or(("调度器未接通", "SCHEDULER NOT CONNECTED"), |state| {
+                state.map_or(("调度状态未知", "COLLECTION STATE UNKNOWN"), |state| {
                     (
                         scheduler_zh(state.scheduler_state),
                         scheduler_code(state.scheduler_state),
@@ -901,14 +903,14 @@ pub fn render(
     let boundary = if state.is_some() {
         "LOCAL HOST / NO PLATFORM ACCESS"
     } else {
-        "LOCAL HOST / NO COLLECTION RUNTIME"
+        "LOCAL HOST / COLLECTION STATE UNKNOWN"
     };
     // 一级导航里「采集」的状态词同理：读得到才敢改，读不到保留原话。
-    let collection_state = state.map(|state| match state.total_targets {
+    let collection_state = Some(state.map_or("状态未知", |state| match state.total_targets {
         Some(total) if total > 0 => "观察中",
         Some(_) => "无观察目标",
         None => "状态未知",
-    });
+    }));
     let header = global_header(
         PrimarySurface::Collection,
         boundary,

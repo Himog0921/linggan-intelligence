@@ -14,7 +14,7 @@
 
 ## 1. 事项
 
-- 事项 ID: `DESIGN-009`。原始变更由 Mog 直接指定、当时没有 GitHub Issue；2026-08-31 的共享状态硬化续作已在 [Issue #94](https://github.com/Himog0921/linggan-intelligence/issues/94) 留下 Claim 后实施。
+- 事项 ID: `DESIGN-009`。原始变更由 Mog 直接指定、当时没有 GitHub Issue；2026-08-31 的共享状态硬化续作已在重新打开并指派的 [Issue #94](https://github.com/Himog0921/linggan-intelligence/issues/94) 下实施。首轮 Claim 的候选文件范围不足，独立审查后已补充 [Claim amendment](https://github.com/Himog0921/linggan-intelligence/issues/94#issuecomment-5470459730)，逐项列明 exclusive/shared/forbidden 文件。
 - 关联: `PAGE-COLLECTION-001`、`LIDS-SYS-001`、`LIDS-PAT-001`、`LIDS-PRI-001`、`DECISION-04`、`INV-36`
 - 触发: Mog 要求规划 `/collection/runtime` 的 UX/UI。调研中发现的不是排版问题，而是**这一页在系统性地说假话**。
 
@@ -115,6 +115,8 @@ Mog 已要求在同一交付中把观察目标、工位管理和语料展示地�
 | 无 heartbeat / 读取失败 | 调度心跳读不到 | 运行中、停止 |
 | 目标/巡检/建档计数已读 | 显示真实计数 | UNKNOWN、0 的推测 |
 | 数据库或对应读模型失败 | 未知 / 读不到 | 暂无、未接通、已接通 |
+
+数据库整体不可用时，目标正文、导轨、生产流、执行工位、上下文状态、系统边界与一级导航全部使用“未知 / 读不到”；任何一个表面都不得单独退回历史静态词。
 
 ### 依赖地图
 

@@ -56,7 +56,7 @@ const PRIMARY_ENTRIES: [PrimaryEntry; 5] = [
         // 这个状态词曾经写死为「尚未接通」。采集接通之后它一个字没变，于是全站页头
         // 都在说一句已经不成立的话。现在由调用方按真实事实覆盖，见 `global_header`。
         technical_key: "COLLECTION",
-        state: "尚未接通",
+        state: "状态未知",
         surface: Some(PrimarySurface::Collection),
         href: Some("/collection"),
     },
@@ -76,7 +76,7 @@ fn primary_entry_markup(
         ""
     };
     // 一个责任的状态词只有它自己的页面读得到真实事实。读得到时用真的，读不到时保留
-    // 原来的静态词——**绝不允许因为读不到就宣布「已接通」**。
+    // 明确的未知——**绝不允许因为读不到就宣布「已接通」「未接通」或「为空」**。
     let state = match (entry.surface, collection_state) {
         (Some(PrimarySurface::Collection), Some(state)) => state,
         _ => entry.state,
@@ -137,6 +137,7 @@ fn localize_boundary_label(label: &str) -> String {
         "LOCAL HOST / NO READ MODEL" => "本机服务 / 读模型未接通",
         "LOCAL HOST / ACCEPTED DISCOVERY" => "本机服务 / 已接纳发现",
         "LOCAL HOST / NO COLLECTION RUNTIME" => "本机服务 / 采集运行时未接通",
+        "LOCAL HOST / COLLECTION STATE UNKNOWN" => "本机服务 / 采集状态未知",
         "LOCAL HOST / NO PLATFORM ACCESS" => "本机服务 / 不访问任何平台",
         _ => "本机服务状态",
     };
@@ -150,7 +151,7 @@ fn localize_boundary_label(label: &str) -> String {
 /// row's first column is intentionally empty: it continues the local rail's width so the
 /// instrument mesh reads as one vertical field.
 /// `collection_state` 让采集页用真实事实覆盖一级导航里那个静态状态词。
-/// 传 `None` 保留静态词——读不到事实时不许宣布已接通。
+/// 传 `None` 保留“状态未知”——读不到事实时不许宣布已接通或未接通。
 pub fn global_header(
     active: PrimarySurface,
     boundary_label: &str,

@@ -1439,6 +1439,10 @@ fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
     );
     assert!(unknown_targets.contains("观察目标当前未知"));
     assert!(!unknown_targets.contains("还没有观察目标"));
+    assert!(!unknown_targets.contains("本机采集运行时已接通"));
+    assert!(!unknown_targets.contains("SCHEDULER NOT CONNECTED"));
+    assert!(!unknown_targets.contains("NO OBSERVATION TARGETS"));
+    assert!(unknown_targets.contains("<span class=\"v7-nav-state\">状态未知</span>"));
 
     let attention = collection::render(
         collection::Section::Attention,
@@ -1472,7 +1476,9 @@ fn collection_states_why_each_surface_is_empty_rather_than_looking_broken() {
         None,
         None,
     );
-    assert!(runtime.contains("调度器未接通"));
+    assert!(runtime.contains("执行工位状态当前未知"));
+    assert!(runtime.contains("采集状态未知"));
+    assert!(!runtime.contains("调度器未接通"));
 }
 
 #[test]
@@ -1486,7 +1492,8 @@ fn operations_modes_are_addressable_and_the_stream_stays_honest() {
         None,
     );
     assert!(now.contains("LIVE OBSERVATION"));
-    assert!(now.contains("NOT CONNECTED"));
+    assert!(now.contains("STATE UNKNOWN"));
+    assert!(!now.contains("SCHEDULER NOT CONNECTED"));
     // The prototype invented an event every seven seconds. Production must not.
     assert!(now.contains("不会用计时器伪造事件"));
     assert!(now.contains("暂停只停止画面跟随，永远不会暂停真实的采集调度"));
@@ -1941,7 +1948,8 @@ fn structure_survives_without_data_but_placeholder_counters_do_not() {
     }
 
     // The reason is still on the page — once, in the shared context row.
-    assert!(operations.contains("SCHEDULER NOT CONNECTED"));
+    assert!(operations.contains("COLLECTION STATE UNKNOWN"));
+    assert!(!operations.contains("SCHEDULER NOT CONNECTED"));
 
     // Filter tabs keep their names and lose their placeholder counts.
     let targets = collection::render(
