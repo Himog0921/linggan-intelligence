@@ -710,18 +710,27 @@ async function closeCollectionWindow(windowId) {
 function waitForTabReady(tabId, timeoutMs = 20000) {
   return new Promise((resolve) => {
     let settled = false;
+    let timeoutHandle = null;
     const finish = (ready) => {
       if (settled) return;
       settled = true;
+      if (timeoutHandle) clearTimeout(timeoutHandle);
       chrome.tabs.onUpdated.removeListener(listener);
       resolve(ready);
     };
     function listener(updatedTabId, changeInfo) {
       if (updatedTabId === tabId && changeInfo.status === 'complete') finish(true);
     }
+    // 先监听、再读取当前状态，覆盖 `windows.create` 返回前页面就已加载完成的竞态。
+    // 如果先 get 后监听，页面恰好在两者之间完成，仍然会漏掉唯一一次 complete 事件。
     chrome.tabs.onUpdated.addListener(listener);
+    void chrome.tabs.get(tabId)
+      .then((tab) => {
+        if (tab?.status === 'complete') finish(true);
+      })
+      .catch(() => finish(false));
     // 超时也要有结论：一个永远不 resolve 的等待会把整个执行挂住。
-    setTimeout(() => finish(false), timeoutMs);
+    timeoutHandle = setTimeout(() => finish(false), timeoutMs);
   });
 }
 
