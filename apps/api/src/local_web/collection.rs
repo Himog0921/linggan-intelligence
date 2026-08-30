@@ -234,8 +234,8 @@ fn empty_state(kind: Empty<'_>, heading: &str, body: &str, notes: &[(&str, &str)
     )
 }
 
-fn targets_body(drawer: Option<&str>, state: Option<&SurfaceState>) -> String {
-    let empty = if state.is_some_and(|state| state.total_targets.is_some_and(|total| total > 0)) {
+fn targets_body(state: Option<&SurfaceState>) -> String {
+    if state.is_some_and(|state| state.total_targets.is_some_and(|total| total > 0)) {
         empty_state(
             Empty::AwaitingEngineering {
                 note: "目标计数已经读到，但列表本身暂时不可用；刷新会重新读取，不会创建或删除目标。",
@@ -276,15 +276,7 @@ fn targets_body(drawer: Option<&str>, state: Option<&SurfaceState>) -> String {
                 ),
             ],
         )
-    };
-    let drawer = if state.is_none_or(|state| state.total_targets.is_none()) {
-        render_unreadable_target_drawer(drawer)
-    } else {
-        // The connected handler owns the real target lookup and renders `target_drawer` from
-        // its Result. Keeping a second placeholder here would duplicate or contradict it.
-        String::new()
-    };
-    format!("{empty}{drawer}")
+    }
 }
 
 /// The target identity cannot be resolved while its database read is unavailable. This is
@@ -542,14 +534,9 @@ fn runtime_body(state: Option<&SurfaceState>) -> String {
     )
 }
 
-fn body(
-    section: Section,
-    mode: OperationsMode,
-    drawer: Option<&str>,
-    state: Option<&SurfaceState>,
-) -> String {
+fn body(section: Section, mode: OperationsMode, state: Option<&SurfaceState>) -> String {
     match section {
-        Section::Targets => targets_body(drawer, state),
+        Section::Targets => targets_body(state),
         Section::Operations => operations_body(mode, state),
         Section::Attention => attention_body(state),
         Section::Tasks => tasks_body(state),
@@ -796,7 +783,7 @@ fn crumb(section: Section, mode: OperationsMode) -> String {
 pub fn render(
     section: Section,
     mode: OperationsMode,
-    drawer: Option<&str>,
+    _drawer: Option<&str>,
     filter: Option<&str>,
     counts: Option<&TargetCounts>,
     state: Option<&SurfaceState>,
@@ -859,7 +846,7 @@ pub fn render(
         title = entry.title,
         rail = rail(section, state),
         second_bar = second_bar(section, mode, filter, counts, state),
-        body = body(section, mode, drawer, state),
+        body = body(section, mode, state),
     )
 }
 

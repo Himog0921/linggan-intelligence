@@ -2127,7 +2127,10 @@ async fn collection_targets(
     // "we cannot read targets right now" and "there are no targets" are different claims, and
     // the empty state already makes only the weaker one.
     let Some(database) = database else {
-        return Html(base);
+        return Html(format!(
+            "{base}{}",
+            collection::render_unreadable_target_drawer(params.drawer.as_deref())
+        ));
     };
     // 一次查完所有目标的档案完整度：列表最多两百行，逐行发查询会让页面打开一次跑
     // 两百次数据库。
@@ -2143,30 +2146,28 @@ async fn collection_targets(
         Some(target_ref) => read_target(database, target_ref).await.map_err(|_| ()),
         None => Ok(None),
     };
-    match list_targets(database, params.filter.as_deref(), 200).await {
-        Ok(targets) => {
-            let list = collection_targets_view::render_stored_targets(
-                &base,
-                &targets,
-                &completeness,
-                params.error.as_deref(),
-            );
-            let drawer = match drawer_target.as_ref() {
-                Ok(target) => target_drawer::render(
-                    target.as_ref(),
-                    &completeness,
-                    params.drawer.as_deref(),
-                    params.dtab.as_deref(),
-                ),
-                Err(()) => collection::render_unreadable_target_drawer(params.drawer.as_deref()),
-            };
-            Html(format!("{list}{drawer}"))
-        }
-        Err(_) => Html(format!(
-            "{base}{}",
-            collection::render_unreadable_target_drawer(params.drawer.as_deref())
-        )),
-    }
+    let list = match list_targets(database, params.filter.as_deref(), 200).await {
+        Ok(targets) => collection_targets_view::render_stored_targets(
+            &base,
+            &targets,
+            &completeness,
+            params.error.as_deref(),
+        ),
+        Err(_) => base,
+    };
+    // The selected target lookup is independent from the list lookup. A filtered or failed
+    // list must not erase a target that was read successfully, and an unreadable target must
+    // not be flattened into "not found".
+    let drawer = match drawer_target.as_ref() {
+        Ok(target) => target_drawer::render(
+            target.as_ref(),
+            &completeness,
+            params.drawer.as_deref(),
+            params.dtab.as_deref(),
+        ),
+        Err(()) => collection::render_unreadable_target_drawer(params.drawer.as_deref()),
+    };
+    Html(format!("{list}{drawer}"))
 }
 
 async fn collection_operations(

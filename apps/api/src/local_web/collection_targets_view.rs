@@ -12,9 +12,10 @@ use linggan_evidence::{ArchiveCompleteness, ObservationTarget};
 use serde_json::Value;
 use std::collections::HashMap;
 
-/// The marker `collection.rs` leaves in the Targets page so the read side can find the empty
-/// state without re-parsing the whole document.
-const EMPTY_STATE_OPEN: &str = "<section class=\"c-empty c-empty-you\">";
+/// The marker `collection.rs` leaves in the Targets page so the read side can find either a
+/// confirmed-empty or unreadable empty state. A successful non-empty list is stronger than
+/// a failed count query and must replace either form without changing unrelated header facts.
+const EMPTY_STATE_OPEN: &str = "<section class=\"c-empty";
 const EMPTY_STATE_CLOSE: &str = "</section>";
 
 /// Replace the empty state with the stored targets. An empty list leaves the page untouched:
@@ -463,6 +464,22 @@ mod tests {
         // 标签，按裸字符串断言会把筛选项误当成对这一行的声称。
         assert!(!html.contains(r#"c-src-ready">已建档"#));
         assert!(!html.contains(r#"c-src-ready">巡检中"#));
+    }
+
+    #[test]
+    fn a_successful_list_replaces_an_unreadable_count_empty_state() {
+        let base =
+            "before<section class=\"c-empty c-empty-engineering\">count unreadable</section>after";
+        let html = render_stored_targets(
+            base,
+            &[target("creator", Some("真实目标"))],
+            &HashMap::new(),
+            None,
+        );
+
+        assert!(html.contains("真实目标"));
+        assert!(!html.contains("count unreadable"));
+        assert_eq!(html.matches("c-tg-workspace").count(), 1);
     }
 
     #[test]

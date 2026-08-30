@@ -98,7 +98,7 @@ DESIGN-009 初次验收时，系统确实没有 scheduler heartbeat，因此第 
 
 ### 7.3 自动与真实只读证明
 
-- `cargo test -p linggan-api`: **58 passed / 14 ignored / 0 failed**；ignored 项都明确要求隔离 PostgreSQL proof harness，不是本次失败。
+- `cargo test -p linggan-api`: **59 passed / 14 ignored / 0 failed**；ignored 项都明确要求隔离 PostgreSQL proof harness，不是本次失败。
 - `./scripts/test-local-001-discovery-postgres.sh`: 隔离 PostgreSQL 全链 **46 passed / 0 failed**，覆盖 9 个 local discovery、6 个 local producer、6 个 material projection、5 个 social、6 个 media 与 14 个 API 测试。
 - 新增回归锁住 running、stale、unreadable 三种 heartbeat；2 个目标 / 1 个巡检 / 1 个建档；生产流第二栏；Corpus 共享导航；以及“有目标时不得同时显示暂无目标/调度未接通”。
 - 候选 API 在 `127.0.0.1:3101` 连接本机持久数据库做只读验证，3000 正式进程未被替换：`/health` 为 scheduler running；目标页显示巡检 1、建档 1；执行工位显示空缺 0、未归位 1；Corpus 显示采集“观察中”。目标页与生产流均不再出现“调度器未接通”，目标页不再出现“暂无观察目标”。

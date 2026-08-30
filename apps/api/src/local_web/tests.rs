@@ -1536,14 +1536,7 @@ fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
     );
     assert!(!closed.contains("c-drawer"));
 
-    let open = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        Some("T-CR-019"),
-        None,
-        None,
-        None,
-    );
+    let open = collection::render_unreadable_target_drawer(Some("T-CR-019"));
     assert!(open.contains("id=\"c-drawer\""));
     assert!(open.contains("#T-CR-019"));
     assert!(open.contains("观察目标读取状态当前未知"));
@@ -1557,14 +1550,7 @@ fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
         assert!(!open.contains(false_empty));
     }
 
-    let injected = collection::render(
-        collection::Section::Targets,
-        collection::OperationsMode::Now,
-        Some("<script>alert(1)</script>"),
-        None,
-        None,
-        None,
-    );
+    let injected = collection::render_unreadable_target_drawer(Some("<script>alert(1)</script>"));
     assert!(!injected.contains("<script>alert(1)</script>"));
     assert!(injected.contains("&lt;script&gt;"));
 }
