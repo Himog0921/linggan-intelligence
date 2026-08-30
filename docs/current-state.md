@@ -8,6 +8,12 @@
 
 ## 当前阶段
 
+### TOPIC-WORKSPACE-REAL-001 / Issue #112（交付分支验证中）
+
+用户已授权开始推进「领域探索 / Topic 工作区」与后续单一受控 Agent 切片。当前 Topic 分支从 `main@3366a09` 隔离实施 additive `0027_topic_workspace.sql`、`linggan-intelligence::TopicWorkspace`、loopback import/read 与 `/topics/{canonical_key}`：只保存暂定 Definition Version、人工 Classification Run、冻结 Material Pack 和 Work Resource 引用，不复制原文，不形成正式 Release、Claim、趋势或行动。4 个 intelligence PostgreSQL 用例和 1 个完整 migration/API/Work Resource 组合用例已通过，proof container/volume 已清理；静态页面测试已通过。共享本机数据库尚未迁移，浏览器视觉、PR 审查、合并、部署和 Mog 业务验收仍未完成。
+
+AGENT-CANDIDATE-ANALYSIS-001 已登记为 Issue #113，但它只能读取 #112 固定的 exact Material Pack，并且输出只到带引用的候选解释、反例、unknown 与 gap。Topic 合同和浏览器/自动验收未稳定前，#113 保持 `needs-info`，不并发写 Agent runtime。
+
 ### WORK-RESOURCE-READ-001 / Issue #110（实现与集成验证完成，部署待完成）
 
 为避免 Intelligence 各页各自拼封面、标题、作者与时间，当前交付分支新增中立 `Work Resource Read` Interface 与 `/api/local/work-resources`；Evidence Library 只是首个消费者。Media V2 继续拥有媒体事实，页面不能绕过共享接口另读 SQL/Package。profile discovery 的监控目标作为 collection context 单独返回，作品作者保持独立；没有详情 author ID 时明确 `NOT_VERIFIED`，不再把目标显示名填成作者。

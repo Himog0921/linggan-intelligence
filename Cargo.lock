@@ -727,6 +727,7 @@ dependencies = [
  "axum",
  "linggan-contracts",
  "linggan-evidence",
+ "linggan-intelligence",
  "linggan-storage-postgres",
  "serde",
  "serde_json",
@@ -772,6 +773,16 @@ dependencies = [
 [[package]]
 name = "linggan-intelligence"
 version = "0.1.0"
+dependencies = [
+ "linggan-storage-postgres",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "sqlx",
+ "thiserror",
+ "tokio",
+ "uuid",
+]
 
 [[package]]
 name = "linggan-observation"

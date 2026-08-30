@@ -58,6 +58,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0026_work_resource_read.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0027_topic_workspace.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -84,5 +86,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0023_material_engagement_and_media_components', '0b4b6ae98cf345b7788236fa7b595b1fe75d22ce7b4ce08a1024333cff5c0e1c'),\n",
     "('0024_media_processing_runtime', '644b670c2c073336ceb175cca375d800b2634b48497babe681da1d76370ea16d'),\n",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'),\n",
-    "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd');\n",
+    "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd'),\n",
+    "('0027_topic_workspace', 'cd7e6a33c5c9203d2fcddc88d246aaa16b2a9de4bebfda21123978315ee6297b');\n",
 );

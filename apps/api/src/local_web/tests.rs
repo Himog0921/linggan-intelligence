@@ -1467,22 +1467,29 @@ fn served_primary_surfaces_link_to_each_other_and_unserved_ones_stay_disabled() 
         None,
     );
 
-    for (html, page, own_href, other_href) in [
-        (&evidence, "corpus", "/corpus", "/collection"),
-        (&collection, "collection", "/collection", "/corpus"),
+    for (html, page, own_href, other_hrefs) in [
+        (&evidence, "corpus", "/corpus", ["/collection", "/topics"]),
+        (
+            &collection,
+            "collection",
+            "/collection",
+            ["/corpus", "/topics"],
+        ),
     ] {
         assert!(
             html.contains(&format!("<a href=\"{own_href}\" aria-current=\"page\">")),
             "{page} must mark its own primary entry as the current page"
         );
-        assert!(
-            html.contains(&format!("<a href=\"{other_href}\">")),
-            "{page} must offer a working link to the other served surface"
-        );
+        for other_href in other_hrefs {
+            assert!(
+                html.contains(&format!("<a href=\"{other_href}\">")),
+                "{page} must offer a working link to {other_href}"
+            );
+        }
 
-        // Naming a responsibility is not the same as serving it: the four unconnected
-        // entries must stay disabled buttons rather than become dead links.
-        for unserved in ["雷达", "主题图谱", "洞察"] {
+        // Naming a responsibility is not the same as serving it: unconnected entries
+        // stay disabled buttons rather than becoming dead links.
+        for unserved in ["雷达", "洞察"] {
             assert!(
                 html.contains(&format!(
                     "<button disabled aria-disabled=\"true\"><b class=\"v7-nav-zh\">{unserved}</b>"
@@ -1848,7 +1855,11 @@ fn the_primary_nav_links_to_entry_routes_never_to_a_sub_surface() {
     }
 
     // And both served responsibilities must actually be reachable that way.
-    for entry in ["href=\"/corpus\"", "href=\"/collection\""] {
+    for entry in [
+        "href=\"/corpus\"",
+        "href=\"/collection\"",
+        "href=\"/topics\"",
+    ] {
         assert!(nav.contains(entry), "primary nav is missing {entry}");
     }
 }

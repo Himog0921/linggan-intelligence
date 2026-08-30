@@ -7,6 +7,7 @@
 pub enum PrimarySurface {
     Corpus,
     Collection,
+    Topic,
 }
 
 struct PrimaryEntry {
@@ -33,9 +34,9 @@ const PRIMARY_ENTRIES: [PrimaryEntry; 5] = [
     PrimaryEntry {
         zh: "主题图谱",
         technical_key: "TOPIC MAP",
-        state: "尚未接通",
-        surface: None,
-        href: None,
+        state: "暂定研究",
+        surface: Some(PrimarySurface::Topic),
+        href: Some("/topics"),
     },
     PrimaryEntry {
         zh: "语料",

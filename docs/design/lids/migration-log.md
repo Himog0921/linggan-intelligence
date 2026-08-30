@@ -8,6 +8,14 @@
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
 
+## 2026-08-31 · TOPIC-WORKSPACE-REAL-001 首个真实 L2 Topic 工作区
+
+- **来源与事项**：Mog 明确允许推进「领域探索 / Topic 工作区」；Issue #112、PAGE-TOPIC-WORKSPACE-001 与 TOPIC-WORKSPACE-REAL-001。
+- **Token / Primitive**：不新增 token；复用白色 canvas、煤黑结构、Signal 当前选择、semantic soft 状态、共享 focus 与 100–160ms motion。Reduced Motion 关闭过渡。
+- **Component / Pattern / Page**：新增 page-local Definition Header、Classification Lens、Frozen Material Row、Work Resource Inspector 与 Source Boundary；均不晋升全局 CMP。页面为 L2 Research/Analysis，旧 PAGE-TOPIC-001 合成静态 reference 保持独立。
+- **Data Truth**：真实指“数据库中有不可变 Definition/Run/Pack/Receipt”，不等于正式知识。页面固定显示 `PROVISIONAL`、`HUMAN_ADJUDICATED` 和来源不得外推；未读取不写成空/零，角色材料数只描述 frozen pack。
+- **验证与边界**：route/asset source tests 与隔离 PostgreSQL/API proof 已通过；浏览器视口、共享数据库迁移、部署、正式 Topic Release、Agent 与 Mog 验收仍未证明。完整清单见 [`../changes/topic-workspace-real-001-ui-change-manifest.md`](../changes/topic-workspace-real-001-ui-change-manifest.md)。
+
 ## 2026-08-31 · WORK-RESOURCE-READ-001 共享作品资源与三种资料库排版
 
 - **来源与事项**：Mog 要求所有 Intelligence 页面共用 Media V2 上方的封面/作者/时间/标题资源读取，不允许每页各走 API；Issue #110。
