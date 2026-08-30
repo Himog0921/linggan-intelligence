@@ -18,9 +18,9 @@ use std::collections::HashMap;
 const EMPTY_STATE_OPEN: &str = "<section class=\"c-empty";
 const EMPTY_STATE_CLOSE: &str = "</section>";
 
-/// Replace the empty state with the stored targets. An empty list leaves the page untouched:
-/// "no targets yet" is already answered honestly by the empty state, and a second empty
-/// rendering of the same fact would only add noise.
+/// Replace the provisional target state with the successful list result. An empty successful
+/// result is also a fact: it must replace both "list unreadable" variants without claiming
+/// that the entire unfiltered target collection is empty.
 pub fn render_stored_targets(
     base: &str,
     targets: &[ObservationTarget],
@@ -28,15 +28,16 @@ pub fn render_stored_targets(
     error: Option<&str>,
 ) -> String {
     if targets.is_empty() {
-        return base.to_owned();
+        return replace_target_state(
+            base,
+            r#"<section class="c-empty c-empty-known-view">
+                 <div class="c-empty-rule"></div>
+                 <h2>当前列表范围没有匹配的观察目标</h2>
+                 <p>目标列表读取成功，当前筛选范围返回零项；这不表示其他筛选范围为空，也不表示平台没有可观察对象。</p>
+                 <div class="c-empty-foot"></div>
+               </section>"#,
+        );
     }
-    let Some(open) = base.find(EMPTY_STATE_OPEN) else {
-        return base.to_owned();
-    };
-    let Some(close_offset) = base[open..].find(EMPTY_STATE_CLOSE) else {
-        return base.to_owned();
-    };
-    let close = open + close_offset + EMPTY_STATE_CLOSE.len();
 
     let mut rows = String::new();
     for (index, target) in targets.iter().enumerate() {
@@ -70,11 +71,18 @@ pub fn render_stored_targets(
         count = targets.len(),
         failure = failure_markup(error),
     );
-    format!(
-        "{before}{list}{after}",
-        before = &base[..open],
-        after = &base[close..],
-    )
+    replace_target_state(base, &list)
+}
+
+fn replace_target_state(base: &str, replacement: &str) -> String {
+    let Some(open) = base.find(EMPTY_STATE_OPEN) else {
+        return base.to_owned();
+    };
+    let Some(close_offset) = base[open..].find(EMPTY_STATE_CLOSE) else {
+        return base.to_owned();
+    };
+    let close = open + close_offset + EMPTY_STATE_CLOSE.len();
+    format!("{}{}{}", &base[..open], replacement, &base[close..])
 }
 
 /// 上一次动作失败时说明原因。
@@ -432,12 +440,17 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_list_leaves_the_honest_empty_state_alone() {
-        let base = format!("before{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}after");
-        assert_eq!(
-            render_stored_targets(&base, &[], &HashMap::new(), None),
-            base
-        );
+    fn a_successful_empty_list_replaces_each_provisional_unreadable_state() {
+        for provisional in ["观察目标列表暂时读不到", "目标计数与列表当前都不可读"]
+        {
+            let base = format!(
+                "before<section class=\"c-empty c-empty-engineering\">{provisional}</section>after"
+            );
+            let html = render_stored_targets(&base, &[], &HashMap::new(), None);
+            assert!(html.contains("当前列表范围没有匹配的观察目标"));
+            assert!(html.contains("目标列表读取成功"));
+            assert!(!html.contains(provisional));
+        }
     }
 
     #[test]

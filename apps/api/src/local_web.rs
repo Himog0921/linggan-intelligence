@@ -2092,7 +2092,6 @@ async fn render_simple_collection_surface(
         mode,
         None,
         None,
-        None,
         reads.as_ref().map(|reads| &reads.surface_state),
     ))
 }
@@ -2118,7 +2117,6 @@ async fn collection_targets(
     let base = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
-        params.drawer.as_deref(),
         params.filter.as_deref(),
         counts,
         reads.as_ref().map(|reads| &reads.surface_state),
@@ -2219,7 +2217,6 @@ async fn collection_runtime(
             None,
             None,
             None,
-            None,
         ));
     };
     // 三份读物一起决定这一页能说什么：工位现状、准入第 5 问的判定、上下文行的事实。
@@ -2253,7 +2250,6 @@ async fn collection_runtime(
     let base = collection::render(
         collection::Section::Runtime,
         collection::OperationsMode::Now,
-        None,
         None,
         None,
         Some(&reads.surface_state),

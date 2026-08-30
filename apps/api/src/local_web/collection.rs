@@ -783,7 +783,6 @@ fn crumb(section: Section, mode: OperationsMode) -> String {
 pub fn render(
     section: Section,
     mode: OperationsMode,
-    _drawer: Option<&str>,
     filter: Option<&str>,
     counts: Option<&TargetCounts>,
     state: Option<&SurfaceState>,
