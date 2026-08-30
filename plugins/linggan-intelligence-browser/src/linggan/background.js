@@ -16,6 +16,7 @@ import {
 import { LINGGAN_RUNTIME_ACTION } from './runtimeActions.js';
 import { localMediaOutbox, localProducerOutbox } from './localProducerOutbox.js';
 import { createManualRuntimeTask, packageDiscovery } from './producerRuntime.js';
+import { waitForStableTab } from './tabReadiness.js';
 import { buildSignedXhsDetailExecutionUrl } from './xhsExecutionTarget.js';
 
 const PRODUCER_INSTANCE_KEY = 'linggan.localTrusted.producerInstanceId';
@@ -709,31 +710,13 @@ async function closeCollectionWindow(windowId) {
   }
 }
 
-/// 等页面加载完成。不等就发消息，content script 往往还没注入。
+/// 等最终页面完成重定向且 content script 已属于当前 URL。
 function waitForTabReady(tabId, timeoutMs = 20000) {
-  return new Promise((resolve) => {
-    let settled = false;
-    let timeoutHandle = null;
-    const finish = (ready) => {
-      if (settled) return;
-      settled = true;
-      if (timeoutHandle) clearTimeout(timeoutHandle);
-      chrome.tabs.onUpdated.removeListener(listener);
-      resolve(ready);
-    };
-    function listener(updatedTabId, changeInfo) {
-      if (updatedTabId === tabId && changeInfo.status === 'complete') finish(true);
-    }
-    // 先监听、再读取当前状态，覆盖 `windows.create` 返回前页面就已加载完成的竞态。
-    // 如果先 get 后监听，页面恰好在两者之间完成，仍然会漏掉唯一一次 complete 事件。
-    chrome.tabs.onUpdated.addListener(listener);
-    void chrome.tabs.get(tabId)
-      .then((tab) => {
-        if (tab?.status === 'complete') finish(true);
-      })
-      .catch(() => finish(false));
-    // 超时也要有结论：一个永远不 resolve 的等待会把整个执行挂住。
-    timeoutHandle = setTimeout(() => finish(false), timeoutMs);
+  return waitForStableTab({
+    tabs: chrome.tabs,
+    tabId,
+    readinessAction: LINGGAN_RUNTIME_ACTION.GET_PAGE_CONTEXT,
+    timeoutMs,
   });
 }
 
