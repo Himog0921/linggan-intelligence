@@ -136,7 +136,9 @@ export function packageContentDetail({ platform, note, observedAt, capturedAt } 
   });
 }
 
-export function packageComments({ platform, result, noteId, observedAt, capturedAt } = {}) {
+export function packageComments({
+  platform, result, noteId, observedAt, capturedAt, taskTarget = {},
+} = {}) {
   const collection = normalizedCommentCollectionReceipt(result, noteId);
   const comments = collection?.analysisUsability === 'not_usable'
     ? []
@@ -147,6 +149,7 @@ export function packageComments({ platform, result, noteId, observedAt, captured
     observedAt,
     capturedAt,
     target: {
+      ...taskTarget,
       basis: 'known_set',
       contentExternalId: String(noteId || result?.noteId || ''),
       ...(collection ? { commentCollection: collection } : {}),
@@ -163,7 +166,7 @@ export function packageComments({ platform, result, noteId, observedAt, captured
     records: comments.map((comment) => ({
       kind: 'comment',
       sourceObject: { platform, type: 'content', externalId: String(noteId || result?.noteId || '') },
-      payload: comment,
+      payload: normalizeDiscussionPayload(comment, false),
     })),
   });
 }
@@ -171,7 +174,9 @@ export function packageComments({ platform, result, noteId, observedAt, captured
 // Replies are a distinct producer capability even when the retained page reader returns them
 // in the same array as top-level comments.  This keeps a parent/reply relationship from being
 // silently flattened into a generic comment count or a second Content observation.
-export function packageReplies({ platform, result, noteId, observedAt, capturedAt } = {}) {
+export function packageReplies({
+  platform, result, noteId, observedAt, capturedAt, taskTarget = {},
+} = {}) {
   const collection = normalizedCommentCollectionReceipt(result, noteId);
   const replies = collection?.analysisUsability === 'not_usable'
     ? []
@@ -182,6 +187,7 @@ export function packageReplies({ platform, result, noteId, observedAt, capturedA
     observedAt,
     capturedAt,
     target: {
+      ...taskTarget,
       basis: 'known_set',
       contentExternalId: String(noteId || result?.noteId || ''),
     },
@@ -201,7 +207,7 @@ export function packageReplies({ platform, result, noteId, observedAt, capturedA
     records: replies.map((reply) => ({
       kind: 'reply',
       sourceObject: { platform, type: 'content', externalId: String(noteId || result?.noteId || '') },
-      payload: reply,
+      payload: normalizeDiscussionPayload(reply, true),
     })),
   });
 }
@@ -341,10 +347,43 @@ function normalizeSourceObject(platform, value = {}, type = 'content') {
   return { platform, type, externalId: String(externalId || '') };
 }
 
+function normalizeDiscussionPayload(value = {}, reply = false) {
+  const {
+    rootCommentId: rawRootId,
+    parentCommentId: rawParentId,
+    replyToCommentId: rawReplyToId,
+    ...payload
+  } = value && typeof value === 'object' ? value : {};
+  if (!reply) return payload;
+
+  const rootId = String(rawRootId || '').trim();
+  const parentId = String(rawParentId || '').trim();
+  const replyToId = String(rawReplyToId || '').trim();
+  // The material contract retains one parent identity. Prefer a distinct reply target for a
+  // nested reply; otherwise keep the collector's direct parent. rootCommentId remains the
+  // top-level thread identity and is never inferred from a post-collection record count.
+  const parent = replyToId && replyToId !== rootId
+    ? { replyToCommentId: replyToId }
+    : (parentId ? { parentCommentId: parentId } : (replyToId ? { replyToCommentId: replyToId } : {}));
+  return {
+    ...payload,
+    ...(rootId ? { rootCommentId: rootId } : {}),
+    ...parent,
+  };
+}
+
 function isReplyRecord(value = {}) {
-  return Boolean(
-    String(value?.replyToCommentId || value?.parentCommentId || value?.rootCommentId || '').trim(),
-  );
+  const commentId = String(value?.commentId || value?.id || '').trim();
+  const parentId = String(value?.replyToCommentId || value?.parentCommentId || '').trim();
+  if (parentId) return true;
+
+  const level = Number(value?.level);
+  if (Number.isFinite(level) && level > 1) return true;
+
+  // The live XHS DOM fallback assigns every top-level comment its own identity as
+  // rootCommentId.  Presence alone therefore does not make a record a reply.
+  const rootId = String(value?.rootCommentId || '').trim();
+  return Boolean(rootId && (!commentId || rootId !== commentId));
 }
 
 function collectMediaCandidates(note = {}) {

@@ -30,7 +30,8 @@ export function taskFor(platform, capability, target, options = {}) {
   }
   return createManualRuntimeTask({
     platform, pageType: pageTypeFor(platform, capability), target,
-    capabilitiesRequested: [capability], maximumQuota: options.maximumQuota ?? 1,
+    capabilitiesRequested: [capability],
+    maximumQuota: Object.hasOwn(options, 'maximumQuota') ? options.maximumQuota : 1,
     commentLimit: options.commentLimit ?? 'not_requested', acquireMedia: options.acquireMedia ?? 'not_requested',
     stopConditions: options.stopConditions || ['manual_stop', 'maximum_quota'],
   });
@@ -44,6 +45,9 @@ function positiveCommentLimit(value) {
 export function commentTaskInstruction(noteId, maxTotal) {
   const limited = positiveCommentLimit(maxTotal);
   return {
+    // Natural-end deep collection has no numerical target. Its manual, time and risk stops
+    // bound execution without rewriting the returned count into a fictional prior quota.
+    maximumQuota: limited === 'not_requested' ? null : limited,
     commentLimit: limited,
     target: {
       contentExternalId: String(noteId || ''),
@@ -92,11 +96,12 @@ export function createLingganContentRuntime({ platform } = {}) {
     },
     async submitComments(result, noteId, settings = {}) {
       const instruction = commentTaskInstruction(noteId, settings.maxTotal);
+      const taskTarget = settings.taskSpec?.target || instruction.target;
       if (settings.taskSpec) {
         const capability = settings.taskSpec.capabilitiesRequested?.[0];
         const packageValue = capability === 'replies'
-          ? packageReplies({ platform, result, noteId })
-          : packageComments({ platform, result, noteId });
+          ? packageReplies({ platform, result, noteId, taskTarget })
+          : packageComments({ platform, result, noteId, taskTarget });
         return submit(
           taskFor(platform, capability, instruction.target, {
             ...instruction,
@@ -105,12 +110,12 @@ export function createLingganContentRuntime({ platform } = {}) {
           packageValue,
         );
       }
-      const packageValue = packageComments({ platform, result, noteId });
+      const packageValue = packageComments({ platform, result, noteId, taskTarget });
       const comments = await submit(
         taskFor(platform, 'comments', instruction.target, instruction),
         packageValue,
       );
-      const repliesPackage = packageReplies({ platform, result, noteId });
+      const repliesPackage = packageReplies({ platform, result, noteId, taskTarget });
       if (repliesPackage.records.length === 0) return comments;
       const replies = await submit(
         taskFor(platform, 'replies', instruction.target, instruction),
