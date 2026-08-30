@@ -57,7 +57,7 @@ async fn loopback_media_projection_exposes_only_local_replica_and_honest_process
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?lane=media_slots&mediaKind=image")
+                .uri("/api/local/work-resources?lane=media_slots&mediaKind=image")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -177,7 +177,7 @@ async fn assert_asr_absent(database: &Database) {
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?lane=asr")
+                .uri("/api/local/work-resources?lane=asr")
                 .body(Body::empty())
                 .unwrap(),
         )

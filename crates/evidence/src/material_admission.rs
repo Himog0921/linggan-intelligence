@@ -310,7 +310,7 @@ async fn insert_content_detail(
     let body = exact_string(detail.payload, "bodyText");
     let creator = exact_string(detail.payload, "authorName");
     let author_external_id = exact_string(detail.payload, "authorId");
-    let published_at = exact_scalar_text(detail.payload, "publishedAtText");
+    let published = published_at_evidence(detail.payload);
     let like_count = exact_nonnegative_count(detail.payload, &["likes", "likeCount", "likedCount"]);
     let comment_count = exact_nonnegative_count(
         detail.payload,
@@ -326,16 +326,19 @@ async fn insert_content_detail(
         .flatten()
         .collect::<Vec<_>>()
         .join(" ");
-    sqlx::query("INSERT INTO linggan_material_content_detail (material_ref,content_public_ref,package_ref,record_ordinal,observed_at,title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,published_at_source_text,published_at_source_text_state,searchable_text,author_external_id,like_count,like_count_state,comment_count,comment_count_state,collect_count,collect_count_state,share_count,share_count_state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)")
+    sqlx::query("INSERT INTO linggan_material_content_detail (material_ref,content_public_ref,package_ref,record_ordinal,observed_at,title,title_state,body_text,body_state,creator_display_name,creator_display_name_state,published_at_source_text,published_at_source_text_state,searchable_text,author_external_id,like_count,like_count_state,comment_count,comment_count_state,collect_count,collect_count_state,share_count,share_count_state,published_at,published_at_source_field,published_at_source_kind,published_at_precision,published_at_reference_observed_at,published_at_parser_version) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,CASE WHEN $24::bigint IS NULL THEN NULL ELSE to_timestamp($24::double precision / 1000.0) END,$25,$26,$27,$28::timestamptz,$29)")
         .bind(Uuid::new_v4()).bind(content_public_ref).bind(package.package_ref())
         .bind(i32::try_from(ordinal).expect("package record count is bounded")).bind(package.observed_at())
         .bind(title).bind(known_state(title)).bind(body).bind(known_state(body))
-        .bind(creator).bind(known_state(creator)).bind(published_at.as_deref())
-        .bind(known_state(published_at.as_deref())).bind(searchable_text).bind(author_external_id)
+        .bind(creator).bind(known_state(creator)).bind(published.source_text.as_deref())
+        .bind(known_state(published.source_text.as_deref())).bind(searchable_text).bind(author_external_id)
         .bind(like_count).bind(known_state(like_count))
         .bind(comment_count).bind(known_state(comment_count))
         .bind(collect_count).bind(known_state(collect_count))
         .bind(share_count).bind(known_state(share_count))
+        .bind(published.exact_millis).bind(published.source_field)
+        .bind(published.source_kind).bind(published.precision)
+        .bind(published.reference_observed_at).bind(published.parser_version)
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     Ok(())
 }
@@ -429,6 +432,69 @@ fn exact_scalar_text(payload: &serde_json::Map<String, Value>, key: &str) -> Opt
         Value::Number(value) => Some(value.to_string()),
         _ => None,
     })
+}
+
+struct PublishedAtEvidence<'a> {
+    exact_millis: Option<i64>,
+    source_text: Option<String>,
+    source_field: Option<&'a str>,
+    source_kind: &'a str,
+    precision: &'a str,
+    reference_observed_at: Option<&'a str>,
+    parser_version: Option<&'a str>,
+}
+
+fn published_at_evidence(payload: &serde_json::Map<String, Value>) -> PublishedAtEvidence<'_> {
+    let source_text = exact_scalar_text(payload, "publishedAtText");
+    let source_field = exact_string(payload, "publishedAtSourceField");
+    let declared_kind = exact_string(payload, "publishedAtSourceKind").unwrap_or("unknown");
+    let declared_precision = exact_string(payload, "publishedAtPrecision").unwrap_or("unknown");
+    let parser_version = exact_string(payload, "publishedAtParserVersion");
+    let normalized_millis = payload
+        .get("publishedAt")
+        .and_then(|value| {
+            value.as_i64().or_else(|| {
+                value
+                    .as_str()
+                    .and_then(|text| text.trim().parse::<i64>().ok())
+            })
+        })
+        .filter(|value| *value > 0);
+    let source_field_is_supported = matches!(
+        source_field,
+        Some("publishTime" | "publishDate" | "publishedAt" | "createTime" | "create_time" | "time")
+    );
+    let is_qualified_epoch = declared_kind == "platform_epoch"
+        && matches!(declared_precision, "second" | "millisecond")
+        && source_field_is_supported
+        && parser_version == Some("xhs-detail-time-v2")
+        && normalized_millis.is_some();
+    let source_kind = match declared_kind {
+        "platform_epoch" if is_qualified_epoch => "platform_epoch",
+        "visible_text" => "visible_text",
+        _ => "unknown",
+    };
+    let precision = match (source_kind, declared_precision) {
+        ("platform_epoch", "second") => "second",
+        ("platform_epoch", "millisecond") => "millisecond",
+        ("visible_text", "minute") => "minute",
+        ("visible_text", "day") => "day",
+        ("visible_text", "relative") => "relative",
+        _ => "unknown",
+    };
+    PublishedAtEvidence {
+        exact_millis: is_qualified_epoch.then_some(normalized_millis).flatten(),
+        source_text,
+        source_field: (source_kind != "unknown").then_some(source_field).flatten(),
+        source_kind,
+        precision,
+        reference_observed_at: (source_kind == "visible_text")
+            .then(|| exact_string(payload, "publishedAtReferenceObservedAt"))
+            .flatten(),
+        parser_version: (source_kind != "unknown")
+            .then_some(parser_version)
+            .flatten(),
+    }
 }
 
 fn exact_nonnegative_count(payload: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<i64> {

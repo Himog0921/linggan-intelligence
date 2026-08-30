@@ -2,7 +2,49 @@
 mod fixture;
 
 use fixture::{coverage_layer, proof_database, submit_custom_package, submit_package};
+use linggan_evidence::{
+    producer_runtime_schema_is_ready, read_work_resource, work_resource_schema_is_ready,
+};
 use sqlx::Row;
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn runtime_and_material_readiness_require_both_current_projection_migrations() {
+    let database = proof_database("comment_projection_readiness_gate").await;
+    assert!(producer_runtime_schema_is_ready(&database).await.unwrap());
+    assert!(work_resource_schema_is_ready(&database).await.unwrap());
+
+    sqlx::query(
+        "DELETE FROM linggan_local_schema_migration \
+         WHERE migration_id = '0026_work_resource_read'",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    assert!(!producer_runtime_schema_is_ready(&database).await.unwrap());
+    assert!(!work_resource_schema_is_ready(&database).await.unwrap());
+
+    sqlx::query(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) \
+         VALUES ('0026_work_resource_read', \
+                 '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd')",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "DELETE FROM linggan_local_schema_migration \
+         WHERE migration_id = '0025_comment_current_projection'",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    assert!(!producer_runtime_schema_is_ready(&database).await.unwrap());
+    assert!(!work_resource_schema_is_ready(&database).await.unwrap());
+}
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
@@ -125,6 +167,84 @@ async fn relationship_conflicts_and_same_package_duplicates_are_quarantined_per_
     let conflicts: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_runtime_record_disposition WHERE reason='typed_reply_relationship_invalid'")
         .fetch_one(database.pool()).await.unwrap();
     assert_eq!(conflicts, 3);
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn retrying_a_note_keeps_attempt_history_but_current_comments_are_idempotent_by_stable_id() {
+    let database = proof_database("material_comment_current_projection").await;
+    let target = serde_json::json!({"contentExternalId":"note-retry-current"});
+    for (body, clock) in [
+        ("first attempt", "2026-08-30T10:00:00Z"),
+        ("second attempt", "2026-08-30T11:00:00Z"),
+    ] {
+        let set_clock = match clock {
+            "2026-08-30T10:00:00Z" => {
+                "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT timestamptz '2026-08-30T10:00:00Z' $$"
+            }
+            "2026-08-30T11:00:00Z" => {
+                "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT timestamptz '2026-08-30T11:00:00Z' $$"
+            }
+            _ => unreachable!("the proof clock is a fixed fixture"),
+        };
+        sqlx::query(set_clock)
+            .execute(database.pool())
+            .await
+            .unwrap();
+        submit_custom_package(
+            &database,
+            "xhs",
+            &["comments"],
+            target.clone(),
+            "comments",
+            "xhs",
+            serde_json::json!({"target":target,"layers":[coverage_layer("comments",1)]}),
+            vec![serde_json::json!({
+                "kind":"comment",
+                "sourceObject":{"platform":"xhs","type":"content","externalId":"note-retry-current"},
+                "payload":{"commentId":"stable-comment-1","noteId":"note-retry-current","text":body}
+            })],
+        )
+        .await;
+    }
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT timestamptz '2026-08-30T10:30:00Z' $$",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let raw_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_comment WHERE comment_external_id='stable-comment-1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let current_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_comment_current WHERE comment_external_id='stable-comment-1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(raw_count, 2, "both Attempt observations are retained");
+    assert_eq!(
+        current_count, 1,
+        "current retrieval never double counts the stable comment"
+    );
+    let content_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id='note-retry-current'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let material = read_work_resource(&database, content_ref)
+        .await
+        .unwrap()
+        .expect("the earlier accepted Attempt remains visible at the read as-of boundary");
+    assert_eq!(
+        material.inspector["commentsReceipt"]["total"],
+        serde_json::json!(1),
+        "a later Attempt accepted after as-of must not hide the earlier stable comment"
+    );
 }
 
 #[tokio::test]

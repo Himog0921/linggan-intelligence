@@ -1204,12 +1204,8 @@ export class BatchNoteController extends BaseBatchController {
       const coverage = packaged.receipt.comments;
       const commentResult = buildXhsAttachedCommentResult({
         noteId,
-        total: coverage.actual,
-        publicCommentCount,
-        requestedCommentLimit: coverage.requested,
-        error: coverage.state === 'target_reached' || coverage.state === 'explicit_empty_state'
-          ? ''
-          : coverage.stopReason,
+        total: coverage.uniqueCollectedCount,
+        collectionReceipt: coverage,
       });
       this._totalCommentsCollected += commentResult.total;
       this.commentResults.push(commentResult);
@@ -1255,6 +1251,7 @@ export class BatchNoteController extends BaseBatchController {
         noteId,
         noteUrl: noteUrl || noteInfo.url || window.location.href,
         maxTotal: this._commentLimit,
+        observedNoteId: collectedNote.noteId,
         maxSubComments: this._commentDepthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 0 : this._maxSubComments,
         commentDepthMode: this._commentDepthMode,
         shouldStop: () => !this.isRunning,
@@ -1274,10 +1271,12 @@ export class BatchNoteController extends BaseBatchController {
       const comments = Array.isArray(result?.comments) ? result.comments : [];
       const total = Number(result?.total ?? comments.length) || 0;
       const commentResult = buildXhsAttachedCommentResult({
+        ...result,
         noteId,
         total,
         publicCommentCount,
         requestedCommentLimit: this._commentLimit,
+        collectionReceipt: result?.collectionReceipt,
       });
       this._totalCommentsCollected += total;
       this.commentResults.push(commentResult);

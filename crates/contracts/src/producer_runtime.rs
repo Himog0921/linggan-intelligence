@@ -368,7 +368,7 @@ fn parse_producer_capture_value(
     {
         return Err(ProducerRuntimeContractError::UnsupportedValue);
     }
-    validate_coverage(&wire.coverage)?;
+    validate_coverage(&wire.coverage, &wire.package_kind)?;
     Ok(ProducerCapturePackage {
         package_ref: parse_uuid(&wire.package_ref)?,
         package_kind: wire.package_kind,
@@ -382,7 +382,10 @@ fn parse_producer_capture_value(
     })
 }
 
-fn validate_coverage(coverage: &CoverageWire) -> Result<(), ProducerRuntimeContractError> {
+fn validate_coverage(
+    coverage: &CoverageWire,
+    package_kind: &str,
+) -> Result<(), ProducerRuntimeContractError> {
     if !coverage.target.is_object() || coverage.layers.is_empty() || coverage.layers.len() > 16 {
         return Err(ProducerRuntimeContractError::InvalidCoverage);
     }
@@ -397,6 +400,106 @@ fn validate_coverage(coverage: &CoverageWire) -> Result<(), ProducerRuntimeContr
         {
             return Err(ProducerRuntimeContractError::InvalidCoverage);
         }
+    }
+    validate_comment_collection_receipt(coverage, package_kind)?;
+    Ok(())
+}
+
+fn validate_comment_collection_receipt(
+    coverage: &CoverageWire,
+    package_kind: &str,
+) -> Result<(), ProducerRuntimeContractError> {
+    let Some(receipt) = coverage.target.get("commentCollection") else {
+        return Ok(());
+    };
+    if package_kind != "comments" {
+        return Err(ProducerRuntimeContractError::InvalidCoverage);
+    }
+    let Some(receipt) = receipt.as_object() else {
+        return Err(ProducerRuntimeContractError::InvalidCoverage);
+    };
+    let exact_string = |key: &str| receipt.get(key).and_then(Value::as_str);
+    let count = |key: &str| receipt.get(key).and_then(Value::as_u64);
+    let nullable_count = |key: &str| {
+        receipt
+            .get(key)
+            .map(|value| value.is_null() || value.as_u64().is_some())
+            .unwrap_or(false)
+    };
+    let scope = exact_string("scope");
+    let state = exact_string("state");
+    let usability = exact_string("analysisUsability");
+    let target_identity = exact_string("targetIdentity");
+    let stop_reason = exact_string("stopReason");
+    let version = receipt.get("version").and_then(Value::as_u64);
+    let expected = receipt.get("expectedCount").and_then(Value::as_u64);
+    let page_count = receipt.get("pageCommentCount").and_then(Value::as_u64);
+    let acquired = count("uniqueCollectedCount");
+    let complete_matches_expected = state != Some("complete") || expected == acquired;
+    let complete_all_public_matches_page = state != Some("complete")
+        || scope != Some("all_public_comments")
+        || (page_count == expected && expected == acquired);
+    let requested_limit = count("requestedLimit");
+    let detail_window_limit_is_valid = scope != Some("detail_window")
+        || requested_limit.is_some_and(|limit| (1..=30).contains(&limit));
+    let complete_detail_window_is_full = state != Some("complete")
+        || scope != Some("detail_window")
+        || requested_limit.is_some_and(|limit| {
+            let required = page_count.map_or(limit, |page_count| page_count.min(limit));
+            expected == Some(required) && acquired == Some(required)
+        });
+    let state_matches_identity = matches!(
+        (state, target_identity),
+        (Some("complete"), Some("matched"))
+            | (Some("partial"), Some("matched" | "unverified"))
+            | (Some("invalid_target"), Some("mismatched"))
+    );
+    let usability_matches_identity_and_count = match (target_identity, acquired, usability) {
+        (Some("matched"), Some(0), Some("empty")) => true,
+        (Some("matched"), Some(value), Some("usable")) if value > 0 => true,
+        (Some("mismatched" | "unverified"), Some(_), Some("not_usable")) => true,
+        _ => false,
+    };
+    let complete_has_nonterminal_stop = state != Some("complete")
+        || !matches!(
+            stop_reason,
+            Some(
+                "risk_control"
+                    | "manual_stop"
+                    | "comment_collection_failed"
+                    | "target_identity_mismatch"
+                    | "wrong_content"
+                    | "api_unobserved"
+            )
+        );
+    if version != Some(1)
+        || !matches!(scope, Some("detail_window") | Some("all_public_comments"))
+        || !matches!(
+            state,
+            Some("complete") | Some("partial") | Some("invalid_target")
+        )
+        || !matches!(
+            usability,
+            Some("usable") | Some("empty") | Some("not_usable")
+        )
+        || !matches!(
+            target_identity,
+            Some("matched") | Some("mismatched") | Some("unverified")
+        )
+        || exact_string("noteId").is_none_or(str::is_empty)
+        || exact_string("stopReason").is_none_or(str::is_empty)
+        || !nullable_count("pageCommentCount")
+        || !nullable_count("expectedCount")
+        || acquired.is_none()
+        || !complete_matches_expected
+        || !complete_all_public_matches_page
+        || !detail_window_limit_is_valid
+        || !complete_detail_window_is_full
+        || !state_matches_identity
+        || !usability_matches_identity_and_count
+        || !complete_has_nonterminal_stop
+    {
+        return Err(ProducerRuntimeContractError::InvalidCoverage);
     }
     Ok(())
 }
@@ -482,6 +585,86 @@ mod tests {
         let value = r#"{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"11111111-1111-4111-8111-111111111111","packageKind":"comments","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"maximum_quota","contentExternalId":"n"},"layers":[{"capability":"comments","observed":50,"attempted":50,"acquired":50,"verified":0,"failed":0,"notAttempted":50,"unknown":1,"stoppedReason":"risk_budget"}]},"records":[]}"#;
         assert!(matches!(
             parse_producer_capture_package(value),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+    }
+
+    #[test]
+    fn comment_collection_complete_requires_exact_page_and_unique_count_match() {
+        let valid = r#"{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"11111111-1111-4111-8111-111111111111","packageKind":"comments","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"n","commentCollection":{"version":1,"noteId":"n","scope":"all_public_comments","pageCommentCount":300,"expectedCount":300,"uniqueCollectedCount":300,"state":"complete","analysisUsability":"usable","targetIdentity":"matched","stopReason":"comment_area_end"}},"layers":[{"capability":"comments","observed":300,"attempted":300,"acquired":300,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"comment_area_end"}]},"records":[]}"#;
+        assert!(parse_producer_capture_package(valid).is_ok());
+
+        let invalid = valid.replace(
+            "\"uniqueCollectedCount\":300",
+            "\"uniqueCollectedCount\":200",
+        );
+        assert!(matches!(
+            parse_producer_capture_package(&invalid),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+
+        let truncated_but_self_consistent = valid
+            .replace("\"expectedCount\":300", "\"expectedCount\":200")
+            .replace(
+                "\"uniqueCollectedCount\":300",
+                "\"uniqueCollectedCount\":200",
+            );
+        assert!(matches!(
+            parse_producer_capture_package(&truncated_but_self_consistent),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+
+        let mismatched = valid.replace(
+            "\"targetIdentity\":\"matched\"",
+            "\"targetIdentity\":\"mismatched\"",
+        );
+        assert!(matches!(
+            parse_producer_capture_package(&mismatched),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+
+        let risk_stopped = valid.replace("comment_area_end", "risk_control");
+        assert!(matches!(
+            parse_producer_capture_package(&risk_stopped),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+    }
+
+    #[test]
+    fn detail_window_complete_requires_the_full_standard_window() {
+        let valid = r#"{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"11111111-1111-4111-8111-111111111111","packageKind":"comments","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"n","commentCollection":{"version":1,"noteId":"n","scope":"detail_window","requestedLimit":30,"pageCommentCount":80,"expectedCount":30,"uniqueCollectedCount":30,"state":"complete","analysisUsability":"usable","targetIdentity":"matched","stopReason":"target_reached"}},"layers":[{"capability":"comments","observed":30,"attempted":30,"acquired":30,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"target_reached"}]},"records":[]}"#;
+        assert!(parse_producer_capture_package(valid).is_ok());
+
+        let short_window = valid
+            .replace("\"expectedCount\":30", "\"expectedCount\":20")
+            .replace("\"uniqueCollectedCount\":30", "\"uniqueCollectedCount\":20");
+        assert!(matches!(
+            parse_producer_capture_package(&short_window),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+
+        let oversized_window = valid
+            .replace("\"requestedLimit\":30", "\"requestedLimit\":31")
+            .replace("\"expectedCount\":30", "\"expectedCount\":31")
+            .replace("\"uniqueCollectedCount\":30", "\"uniqueCollectedCount\":31");
+        assert!(matches!(
+            parse_producer_capture_package(&oversized_window),
+            Err(ProducerRuntimeContractError::InvalidCoverage)
+        ));
+
+        let known_short_page = valid
+            .replace("\"pageCommentCount\":80", "\"pageCommentCount\":20")
+            .replace("\"expectedCount\":30", "\"expectedCount\":20")
+            .replace("\"uniqueCollectedCount\":30", "\"uniqueCollectedCount\":20");
+        assert!(parse_producer_capture_package(&known_short_page).is_ok());
+
+        let unknown_page = valid.replace("\"pageCommentCount\":80", "\"pageCommentCount\":null");
+        assert!(parse_producer_capture_package(&unknown_page).is_ok());
+        let unknown_short_window = unknown_page
+            .replace("\"expectedCount\":30", "\"expectedCount\":20")
+            .replace("\"uniqueCollectedCount\":30", "\"uniqueCollectedCount\":20");
+        assert!(matches!(
+            parse_producer_capture_package(&unknown_short_window),
             Err(ProducerRuntimeContractError::InvalidCoverage)
         ));
     }

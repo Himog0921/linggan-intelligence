@@ -162,16 +162,28 @@ export function createCommentTaskController({
           });
           showToast(total > 0 ? `评论采集已停止，已采集 ${total} 条` : '评论采集已停止', 'warning');
         } else {
-          const completion = result?.stopReason === 'comment_cap_reached'
-            ? `已达到目标 ${safeMaxTotal} 条`
-            : (result?.explicitEmptyState ? '页面明确没有公开评论' : `页面加载结束（${result?.stopReason || 'collector_complete'}）`);
+          const collectionState = String(result?.collectionState || 'partial');
+          const expected = Number.isFinite(Number(result?.collectionReceipt?.expectedCount))
+            ? Number(result.collectionReceipt.expectedCount)
+            : null;
+          const countText = expected === null ? `已取得 ${total} 条` : `${total} / ${expected}`;
+          const complete = collectionState === 'complete';
+          const invalidTarget = collectionState === 'invalid_target';
+          const completion = complete
+            ? (result?.explicitEmptyState ? '页面明确没有公开评论' : `本次范围完整（${countText}）`)
+            : (invalidTarget
+              ? `目标笔记身份不一致（${countText}）`
+              : `本次为部分采集（${countText}；${result?.stopReason || 'collector_partial'}）`);
           publishProgress({
             taskState: 'done',
             current: total,
-            total: safeMaxTotal || total,
-            message: `评论采集完成：共 ${total} 条；${completion}`,
+            total: expected ?? (safeMaxTotal || total),
+            message: `${complete ? '评论采集完成' : (invalidTarget ? '评论采集未接纳' : '评论部分采集')}：${completion}`,
           });
-          showToast(`评论采集完成：共 ${total} 条；${completion}`, 'success');
+          showToast(
+            `${complete ? '评论采集完成' : (invalidTarget ? '评论采集未接纳' : '评论部分采集')}：${completion}`,
+            complete ? 'success' : (invalidTarget ? 'error' : 'warning'),
+          );
         }
         cleanup();
         return result;

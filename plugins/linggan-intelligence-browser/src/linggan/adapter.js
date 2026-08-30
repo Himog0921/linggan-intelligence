@@ -4,7 +4,7 @@ const ATTEMPT_VERSION = 'linggan.producer.attempt.v1';
 const SUBMISSION_VERSION = 'linggan.producer.capture-package.v1';
 const FULL_LOCAL_PRODUCER_READINESS = Object.freeze({
   dataState: 'LINGGAN_BROWSER_PRODUCER_RUNTIME',
-  schema: 'PLUGIN_RUNTIME_001_SCHEMA_READY',
+  schema: 'PLUGIN_RUNTIME_002_SCHEMA_READY',
 });
 
 export function formatLingganRuntimeNotice() {

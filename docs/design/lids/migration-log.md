@@ -8,6 +8,14 @@
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
 
+## 2026-08-31 · WORK-RESOURCE-READ-001 共享作品资源与三种资料库排版
+
+- **来源与事项**：Mog 要求所有 Intelligence 页面共用 Media V2 上方的封面/作者/时间/标题资源读取，不允许每页各走 API；Issue #110。
+- **Token / Primitive**：不新增 token。新增三段 layout selector，使用现有黑白/Signal、40px 可点击目标、focus-visible 和 160ms 颜色/按压反馈。
+- **Component / Pattern / Page**：同一 Work Resource row 形成 Research、Table、Cover 三个纯展示变体；Corpus Explorer、当前选择、Inspector、查询和数据回执不变。`layout` 与状态 `view` 分离，切换布局不重新读取。
+- **Data Truth**：作品作者与监控目标分开，只有平台作者 ID 匹配才可写 `MATCHED`；时间新增 `SOURCE_TEXT_ONLY`，禁止相对文本或观察时间冒充精确发布时间。
+- **验证与边界**：交付分支已加入 JS/Rust 静态与自动门禁；真实 Chrome 桌面/窄屏、真实签名详情字段、部署和 Mog 视觉验收仍未完成。完整清单见 [`../changes/work-resource-read-001-ui-change-manifest.md`](../changes/work-resource-read-001-ui-change-manifest.md)。
+
 ## 2026-08-21 · LIDS v2.0 导入为 Linggan 的权威设计表达标准
 
 - **来源**：Mog 明确指定 `/Users/moglenny/Downloads/Linggan_Intelligence_Design_System_v2.0`；主源文件校验值与不继承清单见 [README.md](README.md)。

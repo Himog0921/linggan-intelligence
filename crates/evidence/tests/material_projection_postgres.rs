@@ -2,6 +2,8 @@
 mod fixture;
 
 use fixture::{coverage_layer, proof_database, submit_custom_package, submit_package};
+use linggan_contracts::EvidenceQuery;
+use linggan_evidence::read_work_resources;
 use sqlx::Row;
 
 #[tokio::test]
@@ -18,7 +20,13 @@ async fn content_detail_submission_forms_a_typed_material_with_field_sources_and
             "payload":{
                 "title":"逐字段来源标题",
                 "bodyText":"可检索正文",
-                "authorId":"author-material-1"
+                "authorId":"author-material-1",
+                "publishedAt":1713501296000_i64,
+                "publishedAtText":"1713501296",
+                "publishedAtSourceField":"publishTime",
+                "publishedAtSourceKind":"platform_epoch",
+                "publishedAtPrecision":"second",
+                "publishedAtParserVersion":"xhs-detail-time-v2"
             }
         }),
     )
@@ -26,6 +34,8 @@ async fn content_detail_submission_forms_a_typed_material_with_field_sources_and
 
     let row = sqlx::query(
         "SELECT title, title_state, body_text, body_state, creator_display_name_state, \
+                published_at::text AS published_at,published_at_source_field, \
+                published_at_source_kind,published_at_precision,published_at_parser_version, \
                 package_ref, record_ordinal \
          FROM linggan_material_content_detail",
     )
@@ -47,8 +57,35 @@ async fn content_detail_submission_forms_a_typed_material_with_field_sources_and
         row.get::<String, _>("creator_display_name_state"),
         "UNKNOWN"
     );
+    assert!(row.get::<Option<String>, _>("published_at").is_some());
+    assert_eq!(
+        row.get::<String, _>("published_at_source_field"),
+        "publishTime"
+    );
+    assert_eq!(
+        row.get::<String, _>("published_at_source_kind"),
+        "platform_epoch"
+    );
+    assert_eq!(row.get::<String, _>("published_at_precision"), "second");
+    assert_eq!(
+        row.get::<String, _>("published_at_parser_version"),
+        "xhs-detail-time-v2"
+    );
     assert_ne!(row.get::<uuid::Uuid, _>("package_ref"), uuid::Uuid::nil());
     assert_eq!(row.get::<i32, _>("record_ordinal"), 0);
+
+    let query: EvidenceQuery = serde_json::from_value(serde_json::json!({
+        "scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"
+    }))
+    .expect("shared query validates");
+    let page = read_work_resources(&database, &query)
+        .await
+        .expect("shared work resource interface reads the exact timestamp");
+    assert_eq!(page.items[0].display.published_at_state, "KNOWN");
+    assert_eq!(
+        page.items[0].display.published_at_source_field.as_deref(),
+        Some("publishTime")
+    );
 
     submit_package(
         &database,
@@ -72,6 +109,90 @@ async fn content_detail_submission_forms_a_typed_material_with_field_sources_and
     assert_eq!(
         detail_count, 1,
         "mismatched source identity is not projected"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn relative_detail_time_remains_source_text_only_even_with_a_derived_millis_value() {
+    let database = proof_database("material_relative_time_slice").await;
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"note-relative-time"}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-relative-time"},
+            "payload":{
+                "title":"相对时间",
+                "publishedAt":1787283600000_i64,
+                "publishedAtText":"3小时前",
+                "publishedAtSourceField":"time",
+                "publishedAtSourceKind":"visible_text",
+                "publishedAtPrecision":"relative",
+                "publishedAtReferenceObservedAt":"2026-08-21T12:00:00Z",
+                "publishedAtParserVersion":"xhs-detail-time-v2"
+            }
+        }),
+    )
+    .await;
+    let query: EvidenceQuery = serde_json::from_value(serde_json::json!({
+        "scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"
+    }))
+    .expect("shared query validates");
+    let page = read_work_resources(&database, &query)
+        .await
+        .expect("shared work resource interface reads source text");
+    let display = &page.items[0].display;
+    assert_eq!(display.published_at, None);
+    assert_eq!(display.published_at_state, "SOURCE_TEXT_ONLY");
+    assert_eq!(display.published_at_source_text.as_deref(), Some("3小时前"));
+    assert_eq!(display.published_at_source_kind, "visible_text");
+    assert_eq!(display.published_at_precision, "relative");
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn exact_time_requires_a_supported_detail_field_and_parser_version() {
+    let database = proof_database("material_unqualified_exact_time").await;
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"note-unqualified-exact-time"}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-unqualified-exact-time"},
+            "payload":{
+                "title":"未资格化时间",
+                "publishedAt":1713501296000_i64,
+                "publishedAtText":"1713501296",
+                "publishedAtSourceField":"inventedField",
+                "publishedAtSourceKind":"platform_epoch",
+                "publishedAtPrecision":"second",
+                "publishedAtParserVersion":"invented-parser"
+            }
+        }),
+    )
+    .await;
+
+    let row = sqlx::query(
+        "SELECT published_at::text AS published_at,published_at_source_field, \
+                published_at_source_kind,published_at_precision,published_at_parser_version \
+         FROM linggan_material_content_detail",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("unqualified source remains a typed detail row");
+    assert_eq!(row.get::<Option<String>, _>("published_at"), None);
+    assert_eq!(
+        row.get::<Option<String>, _>("published_at_source_field"),
+        None
+    );
+    assert_eq!(row.get::<String, _>("published_at_source_kind"), "unknown");
+    assert_eq!(row.get::<String, _>("published_at_precision"), "unknown");
+    assert_eq!(
+        row.get::<Option<String>, _>("published_at_parser_version"),
+        None
     );
 }
 

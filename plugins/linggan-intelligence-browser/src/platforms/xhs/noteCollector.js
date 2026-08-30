@@ -378,6 +378,51 @@ export function parseXhsPublishedAt(raw, { now = Date.now() } = {}) {
   return 0;
 }
 
+export function readXhsPublishedAtEvidence(note = {}, { now = Date.now() } = {}) {
+  const candidates = [
+    ['publishTime', note.publishTime],
+    ['publishDate', note.publishDate],
+    ['publishedAt', note.publishedAt],
+    ['createTime', note.createTime],
+    ['create_time', note.create_time],
+    ['time', note.time],
+  ];
+  const observed = candidates.find(([, value]) => value !== null && value !== undefined && value !== '');
+  if (!observed) {
+    return {
+      publishedAt: null,
+      publishedAtText: '',
+      publishedAtSourceField: '',
+      publishedAtSourceKind: 'unknown',
+      publishedAtPrecision: 'unknown',
+      publishedAtReferenceObservedAt: null,
+      publishedAtParserVersion: 'xhs-detail-time-v2',
+    };
+  }
+
+  const [sourceField, raw] = observed;
+  const sourceText = String(raw).trim();
+  const numeric = typeof raw === 'number' || /^\d{10,13}$/.test(sourceText);
+  const normalized = parseXhsPublishedAt(raw, { now });
+  let precision = 'unknown';
+  if (numeric) {
+    precision = sourceText.length <= 10 ? 'second' : 'millisecond';
+  } else if (/^\d+\s*(秒钟?|分钟?|小时|天)前$/.test(sourceText) || /^(今天|昨天|前天)/.test(sourceText)) {
+    precision = 'relative';
+  } else if (/\d{1,2}[月/-]\d{1,2}/.test(sourceText)) {
+    precision = /\d{1,2}:\d{2}/.test(sourceText) ? 'minute' : 'day';
+  }
+  return {
+    publishedAt: normalized,
+    publishedAtText: sourceText,
+    publishedAtSourceField: sourceField,
+    publishedAtSourceKind: numeric ? 'platform_epoch' : 'visible_text',
+    publishedAtPrecision: precision,
+    publishedAtReferenceObservedAt: numeric ? null : new Date(now).toISOString(),
+    publishedAtParserVersion: 'xhs-detail-time-v2',
+  };
+}
+
 function readDetailText(root, selectors = []) {
   for (const selector of selectors) {
     const value = String(root?.querySelector?.(selector)?.textContent || '').trim();
@@ -512,15 +557,7 @@ export async function collectNote(wd = window, options = {}) {
   const collectedAt = Date.now();
   const rawPublicCommentCount = firstPresentValue(note.interactInfo, ['commentCount', 'comments']);
   const publicCommentCount = rawPublicCommentCount == null ? null : parseCount(rawPublicCommentCount);
-  const publishedAt = parseXhsPublishedAt(
-    note.publishTime
-      || note.publishDate
-      || note.publishedAt
-      || note.createTime
-      || note.create_time
-      || note.time,
-    { now: collectedAt },
-  );
+  const publishedAtEvidence = readXhsPublishedAtEvidence(note, { now: collectedAt });
 
   const noteInfo = withLocalReadMeta({
     noteId: platformContentId,
@@ -561,8 +598,7 @@ export async function collectNote(wd = window, options = {}) {
     authorEntityId: note.user?.userId ? `xhs_${note.user.userId}` : '',
     authorName: note.user?.nickname || '',
     authorAvatar: note.user?.avatar || '',
-    publishedAt,
-    publishedAtText: note.time || '',
+    ...publishedAtEvidence,
     collectedAt,
     updatedAt: collectedAt,
     collectionRunId: String(options.collectionRunId || '').trim(),

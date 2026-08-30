@@ -5,6 +5,7 @@ import {
   collectComments,
   initializeCollectedComments,
   parseCommentTextTail,
+  resolveXhsCommentTargetIdentity,
   shouldContinueDomAfterApi,
 } from '../src/platforms/xhs/commentCollector.js';
 import { COMMENT_DEPTH_MODE } from '../src/shared/constants.js';
@@ -19,6 +20,21 @@ test('initializeCollectedComments seeds API comments for later DOM continuation 
 
   assert.deepEqual(seeded.allComments.map((item) => item.commentId), ['root_1', 'reply_1']);
   assert.deepEqual([...seeded.seenIds], ['root_1', 'reply_1']);
+});
+
+test('comment target identity never treats an unobserved or different page as matched', () => {
+  assert.equal(resolveXhsCommentTargetIdentity({
+    expectedNoteId: 'expected',
+    currentUrl: 'https://www.xiaohongshu.com/explore/expected',
+  }), 'matched');
+  assert.equal(resolveXhsCommentTargetIdentity({
+    expectedNoteId: 'expected',
+    currentUrl: 'https://www.xiaohongshu.com/explore/different',
+  }), 'mismatched');
+  assert.equal(resolveXhsCommentTargetIdentity({
+    expectedNoteId: 'expected',
+    currentUrl: 'https://www.xiaohongshu.com/explore?source=webshare',
+  }), 'unverified');
 });
 
 test('shouldContinueDomAfterApi keeps reply continuation and visible top-up paths alive', () => {

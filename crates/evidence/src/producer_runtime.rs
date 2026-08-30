@@ -701,7 +701,8 @@ pub async fn producer_runtime_schema_is_ready(database: &Database) -> Result<boo
                 AND to_regclass('linggan_runtime_attempt') IS NOT NULL \
                 AND to_regclass('linggan_runtime_capture_package') IS NOT NULL \
                 AND to_regclass('linggan_runtime_submission_receipt') IS NOT NULL \
-                AND to_regclass('linggan_media_slot') IS NOT NULL",
+                AND to_regclass('linggan_media_slot') IS NOT NULL \
+                AND to_regclass('linggan_material_comment_current') IS NOT NULL",
     )
     .fetch_one(database.pool())
     .await?;
@@ -710,7 +711,13 @@ pub async fn producer_runtime_schema_is_ready(database: &Database) -> Result<boo
     }
     sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (SELECT 1 FROM linggan_local_schema_migration \
-                        WHERE migration_id = '0024_media_processing_runtime')",
+                        WHERE migration_id = '0025_comment_current_projection') \
+                AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
+                            WHERE migration_id = '0026_work_resource_read') \
+                AND EXISTS (SELECT 1 FROM information_schema.columns \
+                            WHERE table_schema=current_schema() \
+                              AND table_name='linggan_material_content_detail' \
+                              AND column_name='published_at_source_kind')",
     )
     .fetch_one(database.pool())
     .await

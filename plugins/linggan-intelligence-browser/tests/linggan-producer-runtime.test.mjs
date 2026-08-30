@@ -189,6 +189,62 @@ test('a retained collector can return one comment tree without flattening replie
   assert.equal(replies.packageKind, 'replies');
   assert.equal(replies.records.length, 1);
   assert.equal(replies.records[0].payload.commentId, 'reply-1');
+  assert.equal(replies.coverage.target.commentCollection, undefined);
+});
+
+test('comment packages carry one Attempt receipt instead of adding old and new attempts as a fake total', () => {
+  const source = {
+    noteId: 'note-retry',
+    total: 200,
+    stopReason: 'risk_control',
+    collectionScope: 'all_public_comments',
+    collectionState: 'partial',
+    analysisUsability: 'usable',
+    collectionReceipt: {
+      version: 1,
+      noteId: 'note-retry',
+      scope: 'all_public_comments',
+      pageCommentCount: 300,
+      expectedCount: 300,
+      uniqueCollectedCount: 200,
+      state: 'partial',
+      analysisUsability: 'usable',
+      targetIdentity: 'matched',
+      stopReason: 'risk_control',
+    },
+    comments: [{ commentId: 'root-1', text: 'first' }],
+  };
+  const packageValue = packageComments({ platform: 'xhs', result: source, noteId: 'note-retry' });
+  assert.deepEqual(packageValue.coverage.target.commentCollection, source.collectionReceipt);
+  assert.equal(packageValue.coverage.layers[0].acquired, 1);
+  assert.equal(packageValue.coverage.layers[0].unknown, 0);
+});
+
+test('not-usable wrong-target comment trees keep the receipt but emit no material records', () => {
+  const source = {
+    noteId: 'expected-note',
+    comments: [
+      { commentId: 'wrong-root', text: 'must not enter material search' },
+      { commentId: 'wrong-reply', replyToCommentId: 'wrong-root', text: 'must not enter replies' },
+    ],
+    collectionReceipt: {
+      version: 1,
+      noteId: 'expected-note',
+      scope: 'all_public_comments',
+      pageCommentCount: 2,
+      expectedCount: 2,
+      uniqueCollectedCount: 2,
+      state: 'invalid_target',
+      analysisUsability: 'not_usable',
+      targetIdentity: 'mismatched',
+      stopReason: 'target_identity_mismatch',
+    },
+  };
+  const comments = packageComments({ platform: 'xhs', result: source, noteId: 'expected-note' });
+  const replies = packageReplies({ platform: 'xhs', result: source, noteId: 'expected-note' });
+  assert.equal(comments.records.length, 0);
+  assert.equal(replies.records.length, 0);
+  assert.equal(comments.coverage.target.commentCollection.analysisUsability, 'not_usable');
 });
 
 test('media delivery uses its own resumable chunk lane instead of blocking text delivery with one raw upload', () => {

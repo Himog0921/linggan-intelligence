@@ -236,17 +236,20 @@ require_runtime_target_mismatch_is_rejected
 
 start_server
 require_contains "$proof_directory/health.json" '"state":"READY"' "health did not report a ready database"
-require_contains "$proof_directory/health.json" '"schema":"LOCAL_003_SCHEMA_READY"' "health did not report all local migrations"
+require_contains "$proof_directory/health.json" '"schema":"PLUGIN_RUNTIME_002_SCHEMA_READY"' "health did not report all local migrations"
 curl --fail --silent --show-error -H 'content-type: application/json' --data-binary @"$payload_path" \
   "http://localhost:${proof_port}/api/local/discovery-packages" >"$proof_directory/ingress.json"
 require_contains "$proof_directory/ingress.json" '"admission":"accepted"' "synthetic discovery was not accepted"
-curl --fail --silent "http://localhost:${proof_port}/api/local/evidence-library?q=Synthetic" >"$proof_directory/read-before-restart.json"
+# This payload exercises the retained discovery-only ingress, so its persisted card is read back
+# through the explicit legacy projection. Work Resource data is formed only from accepted Browser
+# Producer packages and is covered by the isolated material/API PostgreSQL proof.
+curl --fail --silent "http://localhost:${proof_port}/api/local/evidence-library/legacy?q=Synthetic" >"$proof_directory/read-before-restart.json"
 require_contains "$proof_directory/read-before-restart.json" 'runtime-proof-card' "readback did not contain the accepted card"
 stop_server
 
 start_server
 require_contains "$proof_directory/health.json" '"state":"READY"' "restarted health did not report ready"
-curl --fail --silent "http://localhost:${proof_port}/api/local/evidence-library?q=Synthetic" >"$proof_directory/read-after-restart.json"
+curl --fail --silent "http://localhost:${proof_port}/api/local/evidence-library/legacy?q=Synthetic" >"$proof_directory/read-after-restart.json"
 require_contains "$proof_directory/read-after-restart.json" 'runtime-proof-card' "restart lost the accepted card"
 if grep -q 'example.invalid' "$proof_directory/read-after-restart.json"; then
   echo "runtime proof exposed a remote cover candidate" >&2
@@ -270,7 +273,7 @@ require_contains "$proof_directory/health-after-loss.json" \
   '"schema":"LOCAL_001_DATABASE_UNAVAILABLE"' \
   "health did not identify post-start database loss"
 read_after_loss_status="$(curl --silent --output "$proof_directory/read-after-loss.json" --write-out '%{http_code}' \
-  "http://localhost:${proof_port}/api/local/evidence-library?q=Synthetic")"
+  "http://localhost:${proof_port}/api/local/work-resources?q=Synthetic")"
 if [[ "$read_after_loss_status" != "503" ]]; then
   echo "runtime proof expected a 503 local read after proof database loss, got ${read_after_loss_status}" >&2
   exit 1

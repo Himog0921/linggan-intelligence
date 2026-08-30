@@ -115,6 +115,11 @@ function readCommentMetaText(scope) {
   return String(scope?.innerText || '').slice(0, 6000);
 }
 
+function publicCommentCountFromText(value = '') {
+  const match = String(value || '').match(/共\s*(\d+)\s*条评论/);
+  return match ? Number(match[1] || 0) : null;
+}
+
 export function getActiveCommentsContext(root = document) {
   const detailRoot = getActiveNoteDetailRoot(root);
   const scopes = [detailRoot, root].filter(Boolean);
@@ -141,6 +146,7 @@ export function getActiveCommentsContext(root = document) {
           hasCommentItems: commentItems.length > 0,
           hasCommentMeta: hasMeta,
           hasExplicitEmptyState,
+          publicCommentCount: publicCommentCountFromText(text),
           text,
           score,
         };
@@ -154,6 +160,7 @@ export function getActiveCommentsContext(root = document) {
     hasCommentItems: false,
     hasCommentMeta: false,
     hasExplicitEmptyState: false,
+    publicCommentCount: null,
     text: '',
     score: 0,
   };

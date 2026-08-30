@@ -174,6 +174,23 @@ export function publicCommentCountFromXhsNote(note = {}) {
 }
 
 export function buildXhsAttachedCommentResult(input = {}) {
+  const receipt = input?.collectionReceipt && typeof input.collectionReceipt === 'object'
+    ? input.collectionReceipt
+    : null;
+  if (receipt) {
+    const total = nonNegative(receipt.uniqueCollectedCount ?? input.total) ?? 0;
+    return {
+      noteId: text(input.noteId || receipt.noteId),
+      total,
+      publicCommentCount: nonNegative(receipt.pageCommentCount),
+      expectedCommentCount: nonNegative(receipt.expectedCount),
+      collectionScope: text(receipt.scope) || 'unknown',
+      collectionState: text(receipt.state) || 'partial',
+      analysisUsability: text(receipt.analysisUsability) || (total > 0 ? 'usable' : 'empty'),
+      stopReason: text(receipt.stopReason || input.stopReason),
+      error: text(input.error),
+    };
+  }
   const total = nonNegative(input.total) ?? 0;
   const publicCount = nonNegative(input.publicCommentCount);
   const expected = expectedCommentCount({ ...input, publicCommentCount: publicCount });
@@ -197,17 +214,38 @@ export function buildXhsBatchNotesProgressPatch({ noteList = [], collected = [],
 export function buildXhsBatchCommentsRunPatch({ noteList = [], results = [] } = {}) {
   const targetIds = (Array.isArray(noteList) ? noteList : []).map((item) => text(item?.noteId)).filter(Boolean);
   const resultMap = new Map((results || []).map((item) => [text(item?.noteId), item]));
-  // A page that explicitly has no public comments completed successfully.  Collection success
-  // is whether the target was read and reported, never whether a non-zero payload happened.
-  const succeeded = targetIds.filter((id) => {
+  const completed = targetIds.filter((id) => {
     const result = resultMap.get(id);
-    return result && !text(result.error);
+    return result && !text(result.error) && text(result.collectionState) === 'complete'
+      && text(result.analysisUsability) !== 'not_usable';
   });
-  return { itemsPlanned: targetIds.length, itemsSucceeded: succeeded.length, itemsFailed: targetIds.length - succeeded.length, totalComments: (results || []).reduce((sum, item) => sum + (Number(item?.total) || 0), 0), targetIds, contentIds: succeeded.map((id) => `xhs_${id}`), failedTargets: targetIds.filter((id) => !succeeded.includes(id)).map((noteId) => ({ noteId, error: text(resultMap.get(noteId)?.error || 'no_result') })) };
+  const partial = targetIds.filter((id) => {
+    const result = resultMap.get(id);
+    return result && !text(result.error) && text(result.collectionState) === 'partial'
+      && text(result.analysisUsability) !== 'not_usable';
+  });
+  const failed = targetIds.filter((id) => !completed.includes(id) && !partial.includes(id));
+  return {
+    itemsPlanned: targetIds.length,
+    itemsSucceeded: completed.length,
+    itemsPartiallyCollected: partial.length,
+    itemsFailed: failed.length,
+    totalComments: (results || []).reduce((sum, item) => sum + (Number(item?.total) || 0), 0),
+    targetIds,
+    contentIds: completed.concat(partial).map((id) => `xhs_${id}`),
+    partialTargets: partial.map((noteId) => buildXhsAttachedCommentResult(resultMap.get(noteId))),
+    failedTargets: failed.map((noteId) => {
+      const result = resultMap.get(noteId);
+      return {
+        noteId,
+        error: text(result?.error || (text(result?.collectionState) === 'invalid_target' ? 'invalid_target' : 'not_usable')) || 'no_result',
+      };
+    }),
+  };
 }
 export function buildXhsBatchCommentsProgressPatch({ noteList = [], results = [], processedCount = 0 } = {}) {
   const targetIds = (noteList || []).map((item) => text(item?.noteId)).filter(Boolean); const processed = targetIds.slice(0, Math.max(0, Number(processedCount) || 0));
-  return { ...buildXhsBatchCommentsRunPatch({ noteList: processed.map((noteId) => ({ noteId })), results }), ...buildBatchResumeCheckpoint({ targetIds, processedCount, resultStatuses: (results || []).filter((item) => processed.includes(text(item?.noteId))).map((item) => ({ targetId: text(item?.noteId), ok: !text(item?.error), totalComments: Number(item?.total || 0), error: text(item?.error) })) }), itemsPlanned: targetIds.length, targetIds };
+  return { ...buildXhsBatchCommentsRunPatch({ noteList: processed.map((noteId) => ({ noteId })), results }), ...buildBatchResumeCheckpoint({ targetIds, processedCount, resultStatuses: (results || []).filter((item) => processed.includes(text(item?.noteId))).map((item) => ({ targetId: text(item?.noteId), ok: !text(item?.error) && text(item?.collectionState) === 'complete', totalComments: Number(item?.total || 0), expectedComments: nonNegative(item?.collectionReceipt?.expectedCount), collectionState: text(item?.collectionState) || 'partial', commentScope: text(item?.collectionScope) || 'unknown', analysisUsability: text(item?.analysisUsability) || (Number(item?.total || 0) > 0 ? 'usable' : 'empty'), error: text(item?.error) })) }), itemsPlanned: targetIds.length, targetIds };
 }
 
 function douyinTarget(item = {}) { return text(item?.awemeId || item?.platformContentId || item?.videoId || item?.noteId || item?.contentId).replace(/^(dy_|douyin_)/i, ''); }
@@ -222,13 +260,19 @@ export function buildDouyinBatchCommentsProgressPatch({ targets = [], results = 
 
 export function buildBatchResumeCheckpoint({ targetIds = [], processedCount = 0, resultStatuses = [], updatedAt = Date.now() } = {}) {
   const ids = (targetIds || []).map(text).filter(Boolean); const nextIndex = Math.min(Math.max(0, Math.floor(Number(processedCount) || 0)), ids.length); const allowed = new Set(ids.map(normalizedTargetId));
-  const statuses = (resultStatuses || []).map((item) => ({ targetId: text(item?.targetId || item?.noteId || item?.awemeId || item?.contentId), ok: item?.ok !== false && !text(item?.error), contentId: text(item?.contentId || item?.noteId || item?.videoId), error: text(item?.error), totalComments: Number.isFinite(Number(item?.totalComments)) ? Number(item.totalComments) : undefined })).filter((item) => item.targetId && allowed.has(normalizedTargetId(item.targetId))).slice(0, nextIndex);
+  const statuses = (resultStatuses || []).map((item) => ({ targetId: text(item?.targetId || item?.noteId || item?.awemeId || item?.contentId), ok: item?.ok !== false && !text(item?.error), contentId: text(item?.contentId || item?.noteId || item?.videoId), error: text(item?.error), totalComments: Number.isFinite(Number(item?.totalComments)) ? Number(item.totalComments) : undefined, expectedComments: Number.isFinite(Number(item?.expectedComments)) ? Number(item.expectedComments) : undefined, collectionState: text(item?.collectionState), commentScope: text(item?.commentScope), analysisUsability: text(item?.analysisUsability) })).filter((item) => item.targetId && allowed.has(normalizedTargetId(item.targetId))).slice(0, nextIndex);
   return { processedCount: nextIndex, nextIndex, resumeCheckpoint: { version: 1, processedCount: nextIndex, nextIndex, targetIds: ids, resultStatuses: statuses, updatedAt: Number.isFinite(Number(updatedAt)) ? Number(updatedAt) : Date.now() } };
 }
 
 export function resolveBatchResumeState({ runRecord = null, targets = [], getTargetId = (item) => item } = {}) {
   const targetById = new Map((targets || []).map((target) => [normalizedTargetId(getTargetId(target)), target]).filter(([id]) => id)); const checkpoint = runRecord?.resumeCheckpoint && typeof runRecord.resumeCheckpoint === 'object' ? runRecord.resumeCheckpoint : {}; const prior = Array.isArray(checkpoint.targetIds) && checkpoint.targetIds.length ? checkpoint.targetIds : (runRecord?.targetIds || []); const ordered = []; const seen = new Set();
   for (const id of [...prior, ...(targets || []).map(getTargetId)]) { const key = normalizedTargetId(id); const target = targetById.get(key); if (target && !seen.has(key)) { ordered.push(target); seen.add(key); } }
-  const targetIds = ordered.map(getTargetId).map(text).filter(Boolean); const nextIndex = Math.min(Math.max(0, Number(checkpoint.nextIndex ?? checkpoint.processedCount ?? runRecord?.nextIndex ?? runRecord?.processedCount) || 0), targetIds.length);
+  const targetIds = ordered.map(getTargetId).map(text).filter(Boolean); const storedNextIndex = Math.min(Math.max(0, Number(checkpoint.nextIndex ?? checkpoint.processedCount ?? runRecord?.nextIndex ?? runRecord?.processedCount) || 0), targetIds.length);
+  const statusPrefix = Array.isArray(checkpoint.resultStatuses) ? checkpoint.resultStatuses.slice(0, storedNextIndex) : [];
+  // Comment collection is restart-only at the per-note boundary.  A PARTIAL comment receipt
+  // may preserve useful material, but it must never cause the next run to resume from a stale
+  // comment-page cursor.  Start again at that note; later notes can safely be re-read too.
+  const firstIncompleteCommentIndex = statusPrefix.findIndex((status) => text(status?.collectionState) && text(status.collectionState) !== 'complete');
+  const nextIndex = firstIncompleteCommentIndex >= 0 ? firstIncompleteCommentIndex : storedNextIndex;
   return { targets: ordered, targetIds, nextIndex, processedCount: nextIndex, completedTargetIds: targetIds.slice(0, nextIndex), resultStatuses: Array.isArray(checkpoint.resultStatuses) ? checkpoint.resultStatuses : [], resumed: nextIndex > 0 };
 }

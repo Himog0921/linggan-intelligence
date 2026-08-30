@@ -46,7 +46,7 @@ test('full Producer runtime health enables an exact route-bundle flush through r
       service: 'linggan-local-web',
       listener: 'loopback-only',
       dataState: 'LINGGAN_BROWSER_PRODUCER_RUNTIME',
-      database: { state: 'READY', schema: 'PLUGIN_RUNTIME_001_SCHEMA_READY' },
+      database: { state: 'READY', schema: 'PLUGIN_RUNTIME_002_SCHEMA_READY' },
       routes: {
         localProducer: {
           taskCreation: '/api/local/producer/tasks',

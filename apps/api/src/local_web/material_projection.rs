@@ -6,8 +6,8 @@
 use super::*;
 use linggan_contracts::EvidenceQuery;
 use linggan_evidence::{
-    MaterialReadError, material_projection_schema_is_ready, read_authorized_research_comments,
-    read_material_detail, read_material_library,
+    WorkResourceReadError, read_authorized_research_comments, read_work_resource,
+    read_work_resources, work_resource_schema_is_ready,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -132,9 +132,9 @@ pub(super) async fn detail_json(
     let Ok(public_ref) = uuid::Uuid::parse_str(&public_ref) else {
         return local_read_json_error(axum::http::StatusCode::BAD_REQUEST, "invalid_material_ref");
     };
-    match read_material_detail(database, public_ref).await {
+    match read_work_resource(database, public_ref).await {
         Ok(Some(item)) => {
-            let comments_url = format!("/api/local/evidence-library/{public_ref}/comments");
+            let comments_url = format!("/api/local/work-resources/{public_ref}/comments");
             Json(json!({"item":item,"channels":{
                 "comments":{"url":comments_url,"receipt":item.inspector.get("commentsReceipt")},
                 "media":{"receipt":item.inspector.get("mediaSlotsReceipt")},
@@ -187,17 +187,18 @@ pub(super) fn local_query(params: &EvidenceLibraryParams) -> Result<EvidenceQuer
 pub(super) async fn compose_json(
     database: &Database,
     query: &EvidenceQuery,
-) -> Result<Value, MaterialReadError> {
-    if !material_projection_schema_is_ready(database).await? {
-        return match read_material_library(database, query).await {
-            Err(error @ MaterialReadError::InvalidCursor)
-            | Err(error @ MaterialReadError::UnsupportedSort) => Err(error),
-            Err(_) | Ok(_) => Err(MaterialReadError::ProjectionUnavailable),
+) -> Result<Value, WorkResourceReadError> {
+    if !work_resource_schema_is_ready(database).await? {
+        return match read_work_resources(database, query).await {
+            Err(error @ WorkResourceReadError::InvalidCursor)
+            | Err(error @ WorkResourceReadError::UnsupportedSort) => Err(error),
+            Err(_) | Ok(_) => Err(WorkResourceReadError::ProjectionUnavailable),
         };
     }
-    let material = read_material_library(database, query).await?;
-    let mut value = serde_json::to_value(material)
-        .map_err(|error| MaterialReadError::Database(sqlx::Error::Protocol(error.to_string())))?;
+    let material = read_work_resources(database, query).await?;
+    let mut value = serde_json::to_value(material).map_err(|error| {
+        WorkResourceReadError::Database(sqlx::Error::Protocol(error.to_string()))
+    })?;
     if let Some(items) = value.get_mut("items").and_then(Value::as_array_mut) {
         for item in items {
             let public_ref = item
@@ -209,7 +210,7 @@ pub(super) async fn compose_json(
                 object.insert(
                     "detailUrl".to_owned(),
                     public_ref.map_or(Value::Null, |public_ref| {
-                        Value::String(format!("/api/local/evidence-library/{public_ref}"))
+                        Value::String(format!("/api/local/work-resources/{public_ref}"))
                     }),
                 );
             }

@@ -21,6 +21,7 @@ pub struct MaterialLibraryProjection {
 pub struct MaterialLibraryItem {
     pub identity: MaterialIdentity,
     pub display: MaterialDisplay,
+    pub collection_context: MaterialCollectionContext,
     pub preview: MaterialPreview,
     pub lane_summaries: Vec<MaterialLaneSummary>,
     pub summary: MaterialSummary,
@@ -48,7 +49,24 @@ pub struct MaterialDisplay {
     pub published_at: Option<String>,
     pub published_at_source_text: Option<String>,
     pub published_at_state: String,
+    pub published_at_source_field: Option<String>,
+    pub published_at_source_kind: String,
+    pub published_at_precision: String,
+    pub published_at_reference_observed_at: Option<String>,
+    pub published_at_parser_version: Option<String>,
     pub engagement: MaterialEngagement,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialCollectionContext {
+    pub relationship_state: String,
+    pub target_ref: Option<Uuid>,
+    pub target_kind: Option<String>,
+    pub target_display_name: Option<String>,
+    pub target_display_state: String,
+    pub author_identity_match_state: String,
+    pub work_order_ref: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize)]
@@ -68,7 +86,6 @@ pub struct MaterialEngagement {
 #[serde(rename_all = "camelCase")]
 pub struct MaterialPreview {
     pub local_asset_url: Option<String>,
-    pub observed_source_url: Option<String>,
     pub observed_source_state: String,
     pub slot_purpose: Option<String>,
     pub bytes_state: &'static str,
@@ -85,6 +102,11 @@ pub struct MaterialLaneSummary {
     pub failed: Option<i64>,
     pub known_unattempted: Option<i64>,
     pub maximum_quota: Option<i64>,
+    pub collection_scope: Option<String>,
+    pub expected_count: Option<i64>,
+    pub unique_collected_count: Option<i64>,
+    pub collection_state: Option<String>,
+    pub analysis_usability: Option<String>,
     pub value_state: &'static str,
     pub stopped_reason: Option<String>,
     pub limitations: Vec<&'static str>,
@@ -127,6 +149,11 @@ pub(crate) fn default_lane_summaries(
         failed: None,
         known_unattempted: None,
         maximum_quota: None,
+        collection_scope: None,
+        expected_count: None,
+        unique_collected_count: None,
+        collection_state: None,
+        analysis_usability: None,
         value_state: if lane == "detail" && has_detail {
             "KNOWN"
         } else {

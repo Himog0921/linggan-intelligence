@@ -195,6 +195,8 @@ migrate() {
   apply_migration_once "0022_material_deepening_scope" "$project_root/database/migrations/0022_material_deepening_scope.sql"
   apply_migration_once "0023_material_engagement_and_media_components" "$project_root/database/migrations/0023_material_engagement_and_media_components.sql"
   apply_migration_once "0024_media_processing_runtime" "$project_root/database/migrations/0024_media_processing_runtime.sql"
+  apply_migration_once "0025_comment_current_projection" "$project_root/database/migrations/0025_comment_current_projection.sql"
+  apply_migration_once "0026_work_resource_read" "$project_root/database/migrations/0026_work_resource_read.sql"
 }
 
 case "$command_name" in
@@ -224,13 +226,15 @@ case "$command_name" in
     scheduler_pid=$!
     "$project_root/target/debug/linggan-media-worker" &
     media_worker_pid=$!
+    "$project_root/target/debug/linggan-api" &
+    api_pid=$!
     cleanup_runtime_children() {
-      kill "$scheduler_pid" "$media_worker_pid" 2>/dev/null || true
-      wait "$scheduler_pid" "$media_worker_pid" 2>/dev/null || true
+      kill "$scheduler_pid" "$media_worker_pid" "$api_pid" 2>/dev/null || true
+      wait "$scheduler_pid" "$media_worker_pid" "$api_pid" 2>/dev/null || true
     }
     trap cleanup_runtime_children EXIT
     trap 'exit 143' INT TERM
-    "$project_root/target/debug/linggan-api"
+    wait "$api_pid"
     ;;
   *)
     usage

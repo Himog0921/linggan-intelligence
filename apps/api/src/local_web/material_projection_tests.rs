@@ -6,32 +6,7 @@ use axum::{
 use linggan_storage_postgres::testing::isolated_proof_schema;
 use tower::ServiceExt;
 
-const MIGRATIONS: &str = concat!(
-    "CREATE TABLE linggan_local_schema_migration (migration_id text PRIMARY KEY, migration_sha256 text NOT NULL, applied_at timestamptz NOT NULL DEFAULT clock_timestamp());\n",
-    include_str!("../../../../database/migrations/0001_scope_001_capture_evidence.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0002_local_001_discovery.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0003_local_trusted_producer.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0004_plugin_runtime_all_capabilities.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0015_material_projection.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0016_material_social_lanes.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0017_material_media_projection.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0018_material_discovery_lane.sql"),
-    "\n",
-    include_str!("../../../../database/migrations/0020_observation_runtime_automation.sql"),
-    "\n",
-    "INSERT",
-    " INTO linggan_local_schema_migration (migration_id,migration_sha256) VALUES \
-      ('0001_scope_001_capture_evidence','1'),('0002_local_001_discovery','2'), \
-      ('0003_local_trusted_producer','3'),('0004_plugin_runtime_all_capabilities','4'), \
-      ('0015_material_projection','15'),('0016_material_social_lanes','16'),('0017_material_media_projection','17'),('0018_material_discovery_lane','18'),('0020_observation_runtime_automation','20');\n",
-);
+const MIGRATIONS: &str = full_schema_fixture::FULL_MIGRATIONS;
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
@@ -41,7 +16,7 @@ async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrela
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?q=可检索&lane=comments")
+                .uri("/api/local/work-resources?q=可检索&lane=comments")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -64,7 +39,7 @@ async fn loopback_material_query_applies_lane_filter_instead_of_returning_unrela
     let unfiltered = app_with_database(database)
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library")
+                .uri("/api/local/work-resources")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -101,7 +76,7 @@ async fn loopback_comment_lane_hides_sensitive_body_and_external_identity() {
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?lane=comments")
+                .uri("/api/local/work-resources?lane=comments")
                 .body(Body::empty())
                 .unwrap(),
         )

@@ -1,12 +1,18 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-08-30
+> 最后核对: 2026-08-31
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
 ## 当前阶段
+
+### WORK-RESOURCE-READ-001 / Issue #110（实现与集成验证完成，部署待完成）
+
+为避免 Intelligence 各页各自拼封面、标题、作者与时间，当前交付分支新增中立 `Work Resource Read` Interface 与 `/api/local/work-resources`；Evidence Library 只是首个消费者。Media V2 继续拥有媒体事实，页面不能绕过共享接口另读 SQL/Package。profile discovery 的监控目标作为 collection context 单独返回，作品作者保持独立；没有详情 author ID 时明确 `NOT_VERIFIED`，不再把目标显示名填成作者。
+
+详情发布时间链修复了“插件算出 `publishedAt`、服务接纳却只存文本”的断点：additive `0026_work_resource_read.sql` 保存实际字段、source kind、precision、reference 与 parser version，只有合格 platform epoch 晋升为精确 `published_at`；相对/日历文本为 `SOURCE_TEXT_ONLY`。资料库增加 `layout=research|table|cover` 三种只改变排版的视图，继续共享查询、字段资格、当前选择和 Inspector。与评论接纳升级合并后，Rust workspace、插件 164 项聚焦测试、发布包校验/可复现性、51 项隔离 PostgreSQL proof、调度序列与完整 local-runtime proof 均通过；共享本机库只记录到 `0025_comment_current_projection`，尚未应用 `0026`，运行时尚未发布，一条真实签名详情字段探针和三视口人工验收也仍未完成。
 
 ### MATERIAL-DEEPENING-001 / Issue #103（真实 canary 执行中）
 
@@ -15,6 +21,10 @@
 Browser Producer 已沿真实 canary 升至 `0.8.4` 并进入 `main` 与本机发布：安装、启动或 alarm 唤醒后自动签到与领活，能按作品标识自动打开详情并分别回传详情、媒体、评论、回复 Package；不再依赖人工点击“领取”。服务端派发最新已接纳发现材料中的短期 XHS 签名来源链接，插件验证作品身份与 `xsec_token` 后执行；插件升级后同一工位可原位承接有效租约中的未完成 Task。普通图片、封面、视频与 Live Photo 共用媒体槽位，Live Photo 的 still/motion 候选和取得状态分开。服务端会自动取得短期 URL 的字节并保存在独立本地媒体根；本机媒体 worker 使用 Tesseract/FFmpeg/Whisper 形成缩略图、OCR、音频、ASR 和视频抽帧 OCR，空文本按 `KNOWN_EMPTY` 保留。Evidence Library 已接入互动时间线、评论/回复与派生文本检索，并只使用受控本地资产。
 
 共享数据库已应用 additive `0022`–`0024`，API、调度 worker 和媒体 worker 已切到 `origin/main@8fe531e` 冻结快照。Chrome 已加载并认领 0.8.4；首个 `content_detail` Task 自动打开了带 `xsec_token` 的目标详情页，但页面水合后全局 `__INITIAL_STATE__` 已被删除、当前 DOM 又没有旧详情容器，导致详情采集在浏览器内失败，任务保持 `in_progress` 且仍为 0 Attempt / 0 Package，服务端接纳尚未发生。该现象与内容工作台 2.0.93 的真实热修根因一致。0.8.5 候选补回安全 SSR `noteDetailMap` 解析，并让详情就绪、完整度判断、正式单篇采集和启动探针共用这一路径；只解析有界 JSON 对象，不执行页面脚本。123 项 Browser Producer 测试、合同检查、生产构建、发布包校验、可复现性与旧工作台隔离已一次通过；发行 SHA-256 为 `62d17c53e0fd6153e3c28aaaa66351002b1de05a576942fd3f687483534f8676`。数据库、WorkOrder/Task、签名 URL、12 条固定范围和原 canary 均不改变。真实 12 作品穿过详情/评论/媒体/OCR/ASR 与 Evidence Library 的最终验收仍未完成，下一步是 0.8.5 精确 head 合并、发布、重载后继续同一 canary。
+
+### COMMENT-COLLECTION-RECEIPT-001（v0.8.6 发布候选已生成，待人工加载/真实复验）
+
+已按 ADR-0002 完成代码级收口：标准详情回执与全量深采回执分开；深采以“页面显示数 = 本次唯一采回数”判定 `COMPLETE`，`200 / 300` 等短采为 `PARTIAL` 但保留 `usable`；新的深采从笔记评论入口重新开始，而非续用旧页码。新增 `0025_comment_current_projection.sql` 使不可变 Attempt 评论历史与按稳定评论 ID 去重的当前检索投影并存；本机持久数据库 ledger 已只读确认记录该迁移。合并 #110 后的插件 164 项聚焦测试、生产构建、内容运行时/隔离、v0.8.6 ZIP 校验与可复现性通过，最终候选 SHA-256 为 `4ff1ed8ff05ce380c946edd048c6d569d974b7ec143450b2bf17c67fd1406040`；**Chrome 尚未加载该候选，真实非空评论/楼中楼、真实 Linggan 接纳和业务验收尚未复验**，所以这不是已部署或业务验收完成。
 
 ### OBSERVATION-RUNTIME-001 / Issue #94 与 MEDIA-ACQUISITION-001 / Issue #98（已完成并运行）
 
@@ -26,7 +36,7 @@ Material Projection 已接纳搜索/主页发现面带回的真实标题、作�
 
 ### MATERIAL-PROJECTION-001 / Issue #86（Draft stacked 实现）
 
-基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope。默认 `/api/local/evidence-library` 只返回 Material Projection；旧 `cards` 仅由显式 `/api/local/evidence-library/legacy` 兼容入口提供，不再默认混读。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。插件到页面的现行映射见 [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md)。
+基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope。默认 `/api/local/work-resources` 返回共享作品资源投影；旧 `cards` 仅由显式 `/api/local/evidence-library/legacy` 兼容入口提供，不再默认混读。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。插件到页面的现行映射见 [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md)。
 
 独立审查后的隔离 PostgreSQL 16 proof 已覆盖 Task/Package/Record/Coverage 的平台、能力与目标绑定，逐 Record 隔离且健康 sibling 不连坐，评论/回复数据库关系约束，媒体 `observationRef` 历史冲突与同包重复隔离，首次同槽位并发 generation，作品级查询，以及固定 `asOf` 的 50 项 keyset cursor。读取会先把 lane/media-kind 存在性下推，再在单次最多扫描 200 个作品的预算内补页；预算触发时返回 `scanLimited + cursor`，后续从最后扫描键继续，不重复扫描已排除对象。这个预算只关闭了无界事务风险，没有关闭 enrichment 的有界 N+1：当前最坏仍可达到每个候选 7 次、单响应最多 1,404 次 enrichment/base 查询，批量化债务由 Issue #89 单独承接。
 
@@ -34,7 +44,7 @@ Material Projection 已接纳搜索/主页发现面带回的真实标题、作�
 
 ### EVIDENCE-RUNTIME-001 / Issue #90（Draft stacked 实现）
 
-`/corpus/evidence` 已从 server-rendered discovery cards 切换为客户端只读 Material Projection：默认只请求 `/api/local/evidence-library`，以作品集合为结果行显示 discovery/detail/comments/replies/author/media slots/media bytes/OCR/ASR 九条 lane；选择作品后只沿列表给出的同源 `detailUrl` 更新右侧 Inspector。评论原文只在本机授权详情通道按页读取并显示匿名上下文；普通列表不显示评论原文、平台用户标识或 `contentExternalId`。媒体只在详情同时具备受控同源 `localAssetUrl` 与 `INLINE_SAFE` delivery 时内联，未知类型、受限、已清理或不安全 delivery 不回退 CDN。作品列表和评论通道支持 `nextCursor`；媒体、派生、来源回执若已截断但 API 未给通道 URL，页面明确显示 `SOURCE_INCOMPLETE`，不猜路由或扩大卡 3 合同。
+`/corpus/evidence` 已从 server-rendered discovery cards 切换为客户端只读 Work Resource Read：默认只请求 `/api/local/work-resources`，以作品集合为结果行显示 discovery/detail/comments/replies/author/media slots/media bytes/OCR/ASR 九条 lane；选择作品后只沿列表给出的同源 `detailUrl` 更新右侧 Inspector。评论原文只在本机授权详情通道按页读取并显示匿名上下文；普通列表不显示评论原文、平台用户标识或 `contentExternalId`。媒体只在详情同时具备受控同源 `localAssetUrl` 与 `INLINE_SAFE` delivery 时内联，未知类型、受限、已清理或不安全 delivery 不回退 CDN。作品列表和评论通道支持 `nextCursor`；媒体、派生、来源回执若已截断但 API 未给通道 URL，页面明确显示 `SOURCE_INCOMPLETE`，不猜路由或扩大卡 3 合同。
 
 本卡没有修改数据库、接纳、Material Projection 字段/SQL、媒体资格/处置、插件、采集调度或 OCR/ASR provider。它也不证明历史 Package 已回填、真实平台材料/媒体、部署、长期稳定性或 Mog 业务验收；这些边界仍由后续真实垂直证明承担。
 

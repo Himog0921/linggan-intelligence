@@ -33,7 +33,7 @@ pub(super) async fn assert_disposition_precedence(
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?restriction=BYTES_CLEANED")
+                .uri("/api/local/work-resources?restriction=BYTES_CLEANED")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -82,7 +82,7 @@ pub(super) async fn assert_disposition_precedence(
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?restriction=WITHDRAWN_OR_RESTRICTED")
+                .uri("/api/local/work-resources?restriction=WITHDRAWN_OR_RESTRICTED")
                 .body(Body::empty())
                 .unwrap(),
         )
@@ -137,7 +137,7 @@ async fn assert_derivative_disposition(
     let response = app_with_database(database.clone())
         .oneshot(
             Request::builder()
-                .uri("/api/local/evidence-library?lane=ocr&restriction=WITHDRAWN_OR_RESTRICTED")
+                .uri("/api/local/work-resources?lane=ocr&restriction=WITHDRAWN_OR_RESTRICTED")
                 .body(Body::empty())
                 .unwrap(),
         )

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import 'fake-indexeddb/auto';
 
 import {
   buildRemoteRunCreatePayload,
@@ -154,6 +155,48 @@ test('BatchNoteController records known public zero comments without collecting 
   assert.deepEqual(controller.commentResults, [
     { noteId: 'n1', total: 0, publicCommentCount: 0, error: '' },
   ]);
+});
+
+test('BatchNoteController consumes the v0.8.6 detail-window receipt without turning 30 / 30 into zero', async () => {
+  const controller = new BatchNoteController();
+  controller.isRunning = true;
+  controller._includeComments = true;
+  controller._commentLimit = 30;
+  const comments = Array.from({ length: 30 }, (_, index) => ({ commentId: `c_${index + 1}` }));
+  const collectedNote = {
+    noteId: 'n30',
+    publicCommentCount: 120,
+    publicCommentCountKnown: true,
+    __xhsDetailPackage: {
+      comments,
+      receipt: {
+        comments: {
+          version: 1,
+          noteId: 'n30',
+          scope: 'detail_window',
+          requestedLimit: 30,
+          pageCommentCount: 120,
+          expectedCount: 30,
+          uniqueCollectedCount: 30,
+          state: 'complete',
+          analysisUsability: 'usable',
+          targetIdentity: 'matched',
+          stopReason: 'comment_cap_reached',
+        },
+      },
+    },
+  };
+
+  const result = await controller._collectAttachedComments(
+    { noteId: 'n30' },
+    'https://www.xiaohongshu.com/explore/n30',
+    collectedNote,
+  );
+
+  assert.equal(result.total, 30);
+  assert.equal(result.error, undefined);
+  assert.equal(controller.commentResults[0].collectionState, 'complete');
+  assert.equal(controller.commentResults[0].expectedCommentCount, 30);
 });
 
 test('BatchNoteController finalizes surface runs before page cleanup', async () => {
@@ -468,6 +511,22 @@ test('buildXhsBatchCommentsRunPatch summarizes batch comment results', () => {
     contentIds: ['xhs_n1'],
     failedTargets: [{ noteId: 'n2', total: 0 }],
   });
+});
+
+test('buildXhsBatchCommentsRunPatch excludes invalid-target comments from manual content ids', () => {
+  const patch = buildXhsBatchCommentsRunPatch({
+    noteList: [{ noteId: 'expected-note' }],
+    results: [{
+      noteId: 'expected-note',
+      total: 9,
+      collectionState: 'invalid_target',
+      analysisUsability: 'not_usable',
+    }],
+  });
+  assert.equal(patch.itemsSucceeded, 0);
+  assert.equal(patch.itemsFailed, 1);
+  assert.deepEqual(patch.contentIds, []);
+  assert.equal(patch.failedTargets[0].error, 'invalid_target');
 });
 
 test('buildXhsBatchCommentsProgressPatch only counts processed targets during a running task', () => {
