@@ -41,16 +41,17 @@ use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, CheckInOutcome, DiscoveryIngressError,
     DispatchDecision, InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
     LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget, MediaUploadFinalizeClaim,
-    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
-    StoreOutcome, WorkResourceReadError, admit_media_blob, begin_media_upload,
-    check_in_installation, claim_installation, claim_media_acquisition,
-    claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
-    create_manual_task, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
-    enrich_target_from_author_profile, grant_authorization, ingest_discovery_package,
-    issue_work_order_lease, list_targets, list_targets_in_state, local_discovery_schema_is_ready,
-    local_producer_schema_is_ready, media_acquisition_schema_is_ready, open_claim_window,
-    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_archive_completeness,
-    read_discovery_library, read_media_upload_session, read_runtime_capacity, read_runtime_library,
+    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeCapacityOverview, RuntimeSubmissionOutcome,
+    RuntimeTaskOutcome, StationOverview, StoreOutcome, TargetCounts, UnclaimedInstallation,
+    WorkResourceReadError, admit_media_blob, begin_media_upload, check_in_installation,
+    claim_installation, claim_media_acquisition, claim_media_upload_finalize, close_claim_window,
+    complete_media_upload, count_targets, create_manual_task, create_producer_task,
+    decide_dispatch, dispatch_schema_is_ready, enrich_target_from_author_profile,
+    grant_authorization, ingest_discovery_package, issue_work_order_lease, list_targets,
+    list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
+    media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
+    producer_runtime_schema_is_ready, read_archive_completeness, read_discovery_library,
+    read_media_upload_session, read_runtime_capacity, read_runtime_library,
     read_scheduler_heartbeat, read_station_overview, read_target, record_media_acquisition_failure,
     record_media_download_failure, record_media_upload_chunk, register_station,
     release_media_upload_finalize, request_and_admit, request_and_admit_material_targets,
@@ -478,8 +479,16 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     }))
 }
 
-async fn evidence_library() -> Html<String> {
-    Html(evidence_library_html())
+async fn evidence_library(State(state): State<LocalWebState>) -> Html<String> {
+    let collection_state = match state.database.database() {
+        Some(database) => match count_targets(database).await {
+            Ok(counts) if counts.total > 0 => Some("观察中"),
+            Ok(_) => Some("无观察目标"),
+            Err(_) => Some("已接通"),
+        },
+        None => None,
+    };
+    Html(evidence_library_html(collection_state))
 }
 
 async fn evidence_library_json(
@@ -2002,12 +2011,12 @@ fn local_read_json_error(status: axum::http::StatusCode, code: &'static str) -> 
 
 #[cfg(test)]
 fn evidence_read_unavailable_html() -> String {
-    evidence_page::render_read_unavailable(&evidence_library_html())
+    evidence_page::render_read_unavailable(&evidence_library_html(None))
 }
 
 #[cfg(test)]
 fn evidence_query_invalid_html() -> String {
-    evidence_page::render_query_invalid(&evidence_library_html())
+    evidence_page::render_query_invalid(&evidence_library_html(None))
 }
 
 async fn stylesheet() -> Response {
@@ -2036,6 +2045,47 @@ struct CollectionParams {
     dtab: Option<String>,
 }
 
+/// Collection 的共享页头只读现有事实，不创造第二套状态口径。每一项独立保留：某个
+/// read model 暂时失败时，页面仍可显示另外三项已知事实，而不是整块退回「未接通」。
+struct CollectionSurfaceReads {
+    surface_state: collection::SurfaceState,
+    counts: Option<TargetCounts>,
+    capacity: Option<RuntimeCapacityOverview>,
+    roster: Option<(Vec<StationOverview>, Vec<UnclaimedInstallation>)>,
+}
+
+async fn read_collection_surface(
+    database: &Database,
+    known_counts: Option<TargetCounts>,
+) -> CollectionSurfaceReads {
+    let counts_read = async {
+        match known_counts {
+            Some(counts) => Some(counts),
+            None => count_targets(database).await.ok(),
+        }
+    };
+    let (counts, heartbeat) = tokio::join!(counts_read, read_scheduler_heartbeat(database));
+    let scheduler_state = match heartbeat {
+        Ok(Some(heartbeat)) if heartbeat.state == "running" => collection::SchedulerState::Running,
+        Ok(Some(_)) => collection::SchedulerState::Stale,
+        Ok(None) | Err(_) => collection::SchedulerState::Unreadable,
+    };
+    let surface_state = collection::SurfaceState {
+        vacant_stations: None,
+        unclaimed_installations: None,
+        total_targets: counts.as_ref().map(|counts| counts.total),
+        monitoring_targets: counts.as_ref().map(|counts| counts.monitoring),
+        archiving_targets: counts.as_ref().map(|counts| counts.archiving),
+        scheduler_state,
+    };
+    CollectionSurfaceReads {
+        surface_state,
+        counts,
+        capacity: None,
+        roster: None,
+    }
+}
+
 /// DESIGN-006: the entry lands on the one surface whose contents expire. Arriving on the
 /// target list meant opening with the most static thing in Collection — a list that does not
 /// change for a week — while anything actually waiting sat two tabs away.
@@ -2048,22 +2098,24 @@ async fn collection_targets(
     Query(params): Query<CollectionParams>,
 ) -> Html<String> {
     // 计数不受当前筛选影响：tab 上的数字要回答「切过去有多少」。
-    let counts = match state.database.database() {
-        Some(database) => count_targets(database).await.ok(),
+    let database = state.database.database();
+    let reads = match database {
+        Some(database) => Some(read_collection_surface(database, None).await),
         None => None,
     };
+    let counts = reads.as_ref().and_then(|reads| reads.counts.as_ref());
     let base = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
         params.drawer.as_deref(),
         params.filter.as_deref(),
-        counts.as_ref(),
-        None,
+        counts,
+        reads.as_ref().map(|reads| &reads.surface_state),
     );
     // Without a database the page still renders its honest empty state rather than an error:
     // "we cannot read targets right now" and "there are no targets" are different claims, and
     // the empty state already makes only the weaker one.
-    let Some(database) = state.database.database() else {
+    let Some(database) = database else {
         return Html(base);
     };
     // 一次查完所有目标的档案完整度：列表最多两百行，逐行发查询会让页面打开一次跑
@@ -2100,36 +2152,51 @@ async fn collection_targets(
     }
 }
 
-async fn collection_operations(Query(params): Query<CollectionParams>) -> Html<String> {
+async fn collection_operations(
+    State(state): State<LocalWebState>,
+    Query(params): Query<CollectionParams>,
+) -> Html<String> {
+    let reads = match state.database.database() {
+        Some(database) => Some(read_collection_surface(database, None).await),
+        None => None,
+    };
     Html(collection::render(
         collection::Section::Operations,
         collection::OperationsMode::parse(params.mode.as_deref()),
         None,
         None,
         None,
-        None,
+        reads.as_ref().map(|reads| &reads.surface_state),
     ))
 }
 
-async fn collection_attention() -> Html<String> {
+async fn collection_attention(State(state): State<LocalWebState>) -> Html<String> {
+    let reads = match state.database.database() {
+        Some(database) => Some(read_collection_surface(database, None).await),
+        None => None,
+    };
     Html(collection::render(
         collection::Section::Attention,
         collection::OperationsMode::Now,
         None,
         None,
         None,
-        None,
+        reads.as_ref().map(|reads| &reads.surface_state),
     ))
 }
 
-async fn collection_tasks() -> Html<String> {
+async fn collection_tasks(State(state): State<LocalWebState>) -> Html<String> {
+    let reads = match state.database.database() {
+        Some(database) => Some(read_collection_surface(database, None).await),
+        None => None,
+    };
     Html(collection::render(
         collection::Section::Tasks,
         collection::OperationsMode::Now,
         None,
         None,
         None,
-        None,
+        reads.as_ref().map(|reads| &reads.surface_state),
     ))
 }
 
@@ -2158,28 +2225,43 @@ async fn collection_runtime(
     // 三份读物一起决定这一页能说什么：工位现状、准入第 5 问的判定、上下文行的事实。
     // 任何一份读不到，对应的那部分就说「读不到」——**不退回写死的「未接通」**，
     // 那是这一页此前最大的问题：一句写下时为真、之后永不更新的状态。
-    let roster = read_station_overview(database).await.ok();
-    let capacity = read_runtime_capacity(database).await.ok();
-    let surface_state = capacity.as_ref().map(|capacity| collection::SurfaceState {
-        vacant_stations: capacity.registered_stations - capacity.staffed_stations,
-        unclaimed_installations: roster
+    let (mut reads, capacity, roster) = tokio::join!(
+        read_collection_surface(database, None),
+        read_runtime_capacity(database),
+        read_station_overview(database),
+    );
+    reads.capacity = capacity.ok();
+    reads.roster = roster.ok();
+    reads.surface_state.vacant_stations = reads
+        .capacity
+        .as_ref()
+        .map(|capacity| capacity.registered_stations - capacity.staffed_stations);
+    reads.surface_state.unclaimed_installations = reads
+        .roster
+        .as_ref()
+        .map(|(_, unclaimed)| unclaimed.len() as i64);
+    if reads.surface_state.total_targets.is_none() {
+        reads.surface_state.total_targets = reads
+            .capacity
             .as_ref()
-            .map_or(0, |(_, unclaimed)| unclaimed.len() as i64),
-        total_targets: capacity.patrol.total_targets,
-        monitoring_targets: capacity.patrol.monitoring_targets,
-    });
+            .map(|capacity| capacity.patrol.total_targets);
+        reads.surface_state.monitoring_targets = reads
+            .capacity
+            .as_ref()
+            .map(|capacity| capacity.patrol.monitoring_targets);
+    }
     let base = collection::render(
         collection::Section::Runtime,
         collection::OperationsMode::Now,
         None,
         None,
         None,
-        surface_state.as_ref(),
+        Some(&reads.surface_state),
     );
-    let (stations, unclaimed) = roster.unwrap_or_default();
+    let (stations, unclaimed) = reads.roster.unwrap_or_default();
     Html(station_view::render_runtime(
         &base,
-        capacity.as_ref(),
+        reads.capacity.as_ref(),
         &stations,
         &unclaimed,
         params.error.as_deref(),
@@ -2749,7 +2831,17 @@ async fn evidence_library_script() -> Response {
         .into_response()
 }
 
-fn evidence_library_html() -> String {
+fn evidence_library_header(collection_state: Option<&str>) -> String {
+    shell::global_header(
+        shell::PrimarySurface::Corpus,
+        "本机材料投影 <span class=\"v7-tech-key\">LOCAL MATERIAL PROJECTION</span>",
+        "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">作品材料集合</span>",
+        "<span class=\"v7-kpi\"><em>事实层</em><b>只读</b></span><span class=\"v7-kpi\"><em>材料入口</em><b>默认投影</b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span class=\"v7-query-meta\">不混读旧发现卡片 <span class=\"v7-tech-key\">NO LEGACY FALLBACK</span></span><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
+        collection_state,
+    )
+}
+
+fn evidence_library_html(collection_state: Option<&str>) -> String {
     let base = r#"<!doctype html>
 <html lang="zh-CN" data-theme="linggan-intelligence">
   <head>
@@ -2845,15 +2937,7 @@ fn evidence_library_html() -> String {
     </div>
   </body>
 </html>"#;
-    let header = shell::global_header(
-        shell::PrimarySurface::Corpus,
-        "本机材料投影 <span class=\"v7-tech-key\">LOCAL MATERIAL PROJECTION</span>",
-        "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">作品材料集合</span>",
-        "<span class=\"v7-kpi\"><em>事实层</em><b>只读</b></span><span class=\"v7-kpi\"><em>材料入口</em><b>默认投影</b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span class=\"v7-query-meta\">不混读旧发现卡片 <span class=\"v7-tech-key\">NO LEGACY FALLBACK</span></span><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
-        // 语料页读不到采集的事实，因此不覆盖那个状态词：读不到时保留原话，
-        // 绝不因为读不到就宣布已接通。
-        None,
-    );
+    let header = evidence_library_header(collection_state);
     base.replace(
         "<!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->",
         &header,
