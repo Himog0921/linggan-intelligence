@@ -222,7 +222,12 @@ export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {
         slotKey,
         observationRef: crypto.randomUUID(),
         slot: { role: candidate.role, ordinal: slotOrdinal },
-        observation: { externalUri: candidate.url, candidateUris: candidate.candidateUris, observedAt },
+        observation: {
+          externalUri: candidate.url,
+          candidateUris: candidate.candidateUris,
+          ...(candidate.components ? { components: candidate.components } : {}),
+          observedAt,
+        },
         sourceObject,
       };
     }),
@@ -299,18 +304,34 @@ function isReplyRecord(value = {}) {
 
 function collectMediaCandidates(note = {}) {
   const output = [];
+  const candidateValues = (value) => (typeof value === 'string'
+    ? [value]
+    : [
+      value?.url, value?.urlDefault, value?.originUrl, value?.downloadUrl,
+      value?.urlList, value?.url_list, value?.candidates, value?.uri,
+    ]);
+  const normalizeUris = (values) => [...new Set(values
+    .flatMap((candidate) => Array.isArray(candidate) ? candidate : [candidate])
+    .map((candidate) => String(candidate || '').trim())
+    .filter(Boolean))];
   const push = (role, value) => {
-    const values = typeof value === 'string'
-      ? [value]
-      : [
-        value?.url, value?.urlDefault, value?.originUrl, value?.downloadUrl,
-        value?.urlList?.[0], value?.url_list?.[0], value?.uri,
-      ];
-    const candidateUris = [...new Set(values
-      .flatMap((candidate) => Array.isArray(candidate) ? candidate : [candidate])
-      .map((candidate) => String(candidate || '').trim())
-      .filter(Boolean))];
-    if (candidateUris.length) output.push({ role, url: candidateUris[0], candidateUris });
+    const candidateUris = normalizeUris(candidateValues(value));
+    if (!candidateUris.length) return;
+    if (role !== 'live_photo') {
+      output.push({ role, url: candidateUris[0], candidateUris });
+      return;
+    }
+    const stillCandidates = normalizeUris(candidateValues(value?.coverUrl || value?.still));
+    const motionCandidates = candidateUris;
+    output.push({
+      role,
+      url: motionCandidates[0],
+      candidateUris: [...new Set([...motionCandidates, ...stillCandidates])],
+      components: {
+        ...(stillCandidates.length ? { still: { candidateUris: stillCandidates } } : {}),
+        motion: { candidateUris: motionCandidates },
+      },
+    });
   };
   asArray(note.images).forEach((value) => push('image', value));
   if (note.cover || note.coverUrl) push('cover', note.cover || note.coverUrl);

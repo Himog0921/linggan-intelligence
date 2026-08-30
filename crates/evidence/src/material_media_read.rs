@@ -140,12 +140,37 @@ async fn read_slots(
                 .map(|row| format!("slot:{}", row.get::<String, _>("slot_key")))
         })
         .flatten();
+    let component_work_ready: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_attribute \
+         WHERE attrelid=to_regclass('linggan_media_acquisition_work') \
+           AND attname='component_kind' AND NOT attisdropped)",
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    let mut acquired_components = std::collections::HashSet::new();
+    if component_work_ready {
+        for row in sqlx::query(
+            "SELECT work.observation_ref,work.component_kind \
+             FROM linggan_media_acquisition_work work \
+             JOIN linggan_material_media_origin origin USING(observation_ref) \
+             WHERE origin.content_public_ref=$1 AND work.state='completed'",
+        )
+        .bind(content_ref)
+        .fetch_all(&mut **tx)
+        .await?
+        {
+            acquired_components.insert((
+                row.get::<Uuid, _>("observation_ref"),
+                row.get::<String, _>("component_kind"),
+            ));
+        }
+    }
     let mut projection = SlotAccumulator {
         slots: Vec::with_capacity(rows.len()),
         ..SlotAccumulator::default()
     };
     for row in &rows {
-        projection.push(row);
+        projection.push(row, &acquired_components);
     }
     let mut projection = projection.finish(rows.len());
     projection.receipt = serde_json::json!({
@@ -156,7 +181,11 @@ async fn read_slots(
 }
 
 impl SlotAccumulator {
-    fn push(&mut self, row: &sqlx::postgres::PgRow) {
+    fn push(
+        &mut self,
+        row: &sqlx::postgres::PgRow,
+        acquired_components: &std::collections::HashSet<(Uuid, String)>,
+    ) {
         let disposition_restricted = row
             .get::<Option<bool>, _>("disposition_restricted")
             .unwrap_or(false);
@@ -222,7 +251,27 @@ impl SlotAccumulator {
         }
         let purpose: String = row.get("purpose");
         let components = if purpose == "live_photo" {
-            serde_json::json!({"bundleState":row.get::<String,_>("composite_state"),"stillState":row.get::<Option<String>,_>("live_photo_still_state"),"motionState":row.get::<Option<String>,_>("live_photo_motion_state")})
+            let observation_ref = row.get::<Uuid, _>("observation_ref");
+            let still_state =
+                if acquired_components.contains(&(observation_ref, "still".to_owned())) {
+                    "ACQUIRED".to_owned()
+                } else {
+                    row.get::<Option<String>, _>("live_photo_still_state")
+                        .unwrap_or_else(|| "UNKNOWN".to_owned())
+                };
+            let motion_state =
+                if acquired_components.contains(&(observation_ref, "motion".to_owned())) {
+                    "ACQUIRED".to_owned()
+                } else {
+                    row.get::<Option<String>, _>("live_photo_motion_state")
+                        .unwrap_or_else(|| "UNKNOWN".to_owned())
+                };
+            let bundle_state = if still_state == "ACQUIRED" && motion_state == "ACQUIRED" {
+                "COMPLETE".to_owned()
+            } else {
+                row.get::<String, _>("composite_state")
+            };
+            serde_json::json!({"bundleState":bundle_state,"stillState":still_state,"motionState":motion_state})
         } else {
             Value::Null
         };
@@ -290,10 +339,12 @@ async fn read_derivatives(
     let mut derivative_rows = sqlx::query(
         "SELECT job.job_ref,job.slot_key,job.processor_kind,job.processor_version,job.input_scope, \
              event.state,event.reason,derivative.derivative_ref,derivative.derivative_kind,derivative.storage_key, \
+             derived.display_text,derived.language_state,derived.language_tag, \
              disposition.restricted AS disposition_restricted,count(*) OVER() AS total_count \
          FROM linggan_media_processing_job job JOIN linggan_media_slot slot USING (slot_key) \
          LEFT JOIN LATERAL (SELECT state,reason FROM linggan_media_processing_job_event event WHERE event.job_ref=job.job_ref AND occurred_at <= $2::timestamptz ORDER BY occurred_at DESC LIMIT 1) event ON true \
          LEFT JOIN linggan_media_derivative derivative ON derivative.job_ref=job.job_ref AND derivative.created_at <= $2::timestamptz \
+         LEFT JOIN linggan_material_derived_text derived ON derived.derivative_ref=derivative.derivative_ref AND derived.created_at <= $2::timestamptz \
          LEFT JOIN LATERAL (SELECT bool_or(disposition.state='WITHDRAWN_OR_RESTRICTED') AS restricted \
              FROM linggan_current_material_media_disposition disposition \
              WHERE (disposition.derivative_ref=derivative.derivative_ref OR disposition.blob_sha256=job.blob_sha256 OR disposition.slot_key=job.slot_key)) disposition ON true \
@@ -334,10 +385,17 @@ async fn read_derivatives(
         ) {
             (true, _, _, _) => "WITHDRAWN_OR_RESTRICTED",
             (false, Some("pending"), Some("provider_not_enabled"), _) => "NOT_ENABLED",
+            (false, Some("pending"), Some("queued_for_local_processor"), _) => "QUEUED",
             (false, Some("pending"), _, _) => "QUEUED",
             (false, Some("running"), _, _) => "PROCESSING",
             (false, Some("failed"), _, _) => "FAILED",
             (false, Some("succeeded"), _, true) => "ACQUIRED",
+            (
+                false,
+                Some("succeeded"),
+                Some("no_text_observed" | "no_speech_observed" | "no_frame_text_observed"),
+                false,
+            ) => "KNOWN_EMPTY",
             (false, Some("succeeded"), _, false) => "UNKNOWN",
             _ => "UNKNOWN",
         };
@@ -363,7 +421,7 @@ async fn read_derivatives(
         } else {
             Value::Null
         };
-        derivatives.push(serde_json::json!({"jobRef":row.get::<Uuid,_>("job_ref"),"slotKey":row.get::<Option<String>,_>("slot_key"),"kind":row.get::<Option<String>,_>("derivative_kind"),"state":state,"dispositionState":if restricted{"WITHDRAWN_OR_RESTRICTED"}else{"UNKNOWN"},"processorVersion":row.get::<String,_>("processor_version"),"sourceScope":row.get::<String,_>("input_scope"),"sourceLocation":source_location,"reason":reason}));
+        derivatives.push(serde_json::json!({"jobRef":row.get::<Uuid,_>("job_ref"),"slotKey":row.get::<Option<String>,_>("slot_key"),"kind":row.get::<Option<String>,_>("derivative_kind"),"state":state,"displayText":if restricted{None}else{row.get::<Option<String>,_>("display_text")},"languageState":row.get::<Option<String>,_>("language_state"),"languageTag":if restricted{None}else{row.get::<Option<String>,_>("language_tag")},"dispositionState":if restricted{"WITHDRAWN_OR_RESTRICTED"}else{"UNKNOWN"},"processorVersion":row.get::<String,_>("processor_version"),"sourceScope":row.get::<String,_>("input_scope"),"sourceLocation":source_location,"reason":reason}));
     }
     Ok((
         derivatives,

@@ -16,6 +16,43 @@ pub(crate) async fn enrich(
     let comments = read_comments(item, text);
     let comments_receipt = read_comment_receipt(tx, item, as_of).await?;
     let author_context = read_author_context(tx, item, as_of).await?;
+    if let Some(text) = text {
+        let comment_match: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM linggan_material_comment comment \
+             JOIN linggan_runtime_capture_package package USING(package_ref) \
+             WHERE comment.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz \
+               AND lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($3) || '%')",
+        )
+        .bind(item.identity.public_ref)
+        .bind(as_of)
+        .bind(text)
+        .fetch_one(&mut **tx)
+        .await?;
+        if comment_match && !item.matched_fields.contains(&"comment_body") {
+            item.matched_fields.push("comment_body");
+        }
+        let derived_kinds: Vec<String> = sqlx::query_scalar(
+            "SELECT DISTINCT kind FROM linggan_material_derived_text \
+             WHERE content_public_ref=$1 AND created_at <= $2::timestamptz \
+               AND lower(text_content) LIKE '%' || lower($3) || '%'",
+        )
+        .bind(item.identity.public_ref)
+        .bind(as_of)
+        .bind(text)
+        .fetch_all(&mut **tx)
+        .await?;
+        for kind in derived_kinds {
+            let field = match kind.as_str() {
+                "ocr_text" => "ocr_text",
+                "asr_text" => "asr_text",
+                "frame_ocr_text" => "frame_ocr_text",
+                _ => continue,
+            };
+            if !item.matched_fields.contains(&field) {
+                item.matched_fields.push(field);
+            }
+        }
+    }
     if !author_context.is_null()
         && let Some(summary) = item
             .lane_summaries

@@ -81,6 +81,13 @@ struct LeaseSubject {
     authorization_ref: Option<Uuid>,
 }
 
+struct MaterialTarget {
+    content_external_id: String,
+    comment_limit: i32,
+    reply_expand_limit: i32,
+    acquire_media: bool,
+}
+
 /// 给一张工单发租。
 ///
 /// `valid_for_minutes` 必须有限：没有到期时间的租约一旦发出就再也收不回来。
@@ -104,7 +111,8 @@ pub async fn issue_work_order_lease(
     reject_if_station_unstaffed(&mut transaction, subject.station_ref).await?;
     reject_if_authorization_lapsed(&mut transaction, &subject).await?;
 
-    let tasks = expand_into_tasks(&subject)?;
+    let material_targets = load_material_targets(&mut transaction, work_order_ref).await?;
+    let tasks = expand_into_tasks(&subject, &material_targets)?;
     for task in &tasks {
         insert_scheduled_task(&mut transaction, task).await?;
     }
@@ -387,10 +395,60 @@ async fn reject_if_authorization_lapsed(
 /// **一个任务只能请求一个能力**（任务规格合同）。深度建档因此不是一个任务，而是一串：
 /// 先认清这个人是谁，再拿到他的作品清单，最后逐篇取详情。
 ///
-/// 序列**不能一次性生成完**：`content_detail` 需要 `contentExternalId`，而那要等作品
-/// 清单跑完才知道。凭空造一批占位 id 会让「已派发 200 篇」变成一句假话。因此这里只生成
-/// 目标已经确定的步骤，逐篇详情等清单回来后再生成。
-fn expand_into_tasks(subject: &LeaseSubject) -> Result<Vec<ProducerTaskSpec>, LeaseError> {
+/// 普通发现序列只生成当下已经确定的步骤；它不能凭空预建逐篇详情。只有上游在工单事务中
+/// 冻结了真实 Material 身份时，这里才按固定集合展开详情、媒体、评论与回复。
+fn expand_into_tasks(
+    subject: &LeaseSubject,
+    material_targets: &[MaterialTarget],
+) -> Result<Vec<ProducerTaskSpec>, LeaseError> {
+    if !material_targets.is_empty() {
+        let mut tasks = Vec::new();
+        for material in material_targets {
+            let target = json!({ "contentExternalId": material.content_external_id });
+            tasks.push(build_task_spec(
+                subject,
+                "content_detail",
+                target.clone(),
+                1,
+                json!("not_requested"),
+                json!("not_requested"),
+            )?);
+            if material.acquire_media {
+                tasks.push(build_task_spec(
+                    subject,
+                    "media_slots",
+                    target.clone(),
+                    1,
+                    json!("not_requested"),
+                    json!("slots"),
+                )?);
+            }
+            tasks.push(build_task_spec(
+                subject,
+                "comments",
+                target.clone(),
+                material.comment_limit,
+                json!(material.comment_limit),
+                json!("not_requested"),
+            )?);
+            if material.reply_expand_limit > 0 {
+                let reply_target = json!({
+                    "contentExternalId": material.content_external_id,
+                    "replyExpandLimit": material.reply_expand_limit,
+                });
+                tasks.push(build_task_spec(
+                    subject,
+                    "replies",
+                    reply_target,
+                    material.comment_limit,
+                    json!(material.comment_limit),
+                    json!("not_requested"),
+                )?);
+            }
+        }
+        return Ok(tasks);
+    }
+
     let steps: Vec<(&str, Value, i32)> = match (subject.target_kind.as_str(), subject.lane.as_str())
     {
         ("creator", "deep_archive") => vec![
@@ -422,19 +480,30 @@ fn expand_into_tasks(subject: &LeaseSubject) -> Result<Vec<ProducerTaskSpec>, Le
 
     steps
         .into_iter()
-        .map(|(capability, target, quota)| build_task_spec(subject, capability, target, quota))
+        .map(|(capability, target, quota)| {
+            build_task_spec(
+                subject,
+                capability,
+                target,
+                quota,
+                json!("not_requested"),
+                json!("not_requested"),
+            )
+        })
         .collect()
 }
 
 /// 逐篇详情为什么不在发租时生成。
 pub const DETAIL_STEP_DEFERRED_REASON: &str =
-    "逐篇详情要等作品清单跑完才知道每篇的标识，发租时凭空造占位 id 会让「已派发」变成假话";
+    "普通发现任务不会自动深化；只有工单已经冻结真实作品标识时才会展开逐篇详情";
 
 fn build_task_spec(
     subject: &LeaseSubject,
     capability: &str,
     target: Value,
     quota: i32,
+    comment_limit: Value,
+    acquire_media: Value,
 ) -> Result<ProducerTaskSpec, LeaseError> {
     let page_type = match capability {
         "author_profile" | "profile_discovery" => "profile",
@@ -451,16 +520,40 @@ fn build_task_spec(
         "target": target,
         "capabilitiesRequested": [capability],
         "maximumQuota": quota,
-        // 评论与媒体不在深度建档首片范围内。显式写 not_requested，而不是省略——
-        // 省略会让「没要」与「忘了写」无从分辨。
-        "commentLimit": "not_requested",
-        "acquireMedia": "not_requested",
+        // 每条任务仍只请求一个能力；没有请求的维度显式写 not_requested。
+        "commentLimit": comment_limit,
+        "acquireMedia": acquire_media,
         "riskPolicy": SERVER_LEASED_RISK_POLICY,
         // time_budget 就是租约：租约到期即止损，执行端不得自行放宽。
         "stopConditions": ["maximum_quota", "surface_ended", "time_budget"],
     });
     parse_producer_task_spec(&raw.to_string())
         .map_err(|error| LeaseError::TaskSpecInvalid(error.to_string()))
+}
+
+async fn load_material_targets(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+) -> Result<Vec<MaterialTarget>, LeaseError> {
+    let rows: Vec<(String, i32, i32, bool)> = sqlx::query_as(
+        "SELECT content.content_external_id,target.comment_limit,target.reply_expand_limit, \
+                target.acquire_media \
+         FROM collection_work_order_material_target target \
+         JOIN linggan_material_content content ON content.public_ref=target.content_public_ref \
+         WHERE target.work_order_ref=$1 ORDER BY target.ordinal",
+    )
+    .bind(work_order_ref)
+    .fetch_all(&mut **transaction)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| MaterialTarget {
+            content_external_id: row.0,
+            comment_limit: row.1,
+            reply_expand_limit: row.2,
+            acquire_media: row.3,
+        })
+        .collect())
 }
 
 async fn insert_scheduled_task(
@@ -524,4 +617,75 @@ fn freeze_capture_identity(subject: &LeaseSubject) -> Value {
         "maxWorks": subject.max_works,
         "authorizationRef": subject.authorization_ref,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LeaseSubject, MaterialTarget, expand_into_tasks};
+    use uuid::Uuid;
+
+    fn subject() -> LeaseSubject {
+        LeaseSubject {
+            target_ref: Uuid::new_v4(),
+            station_ref: Uuid::new_v4(),
+            lane: "material_deepening".to_owned(),
+            max_works: 12,
+            platform: "xhs".to_owned(),
+            target_kind: "creator".to_owned(),
+            identity_key: "creator-fixture".to_owned(),
+            authorization_ref: Some(Uuid::new_v4()),
+        }
+    }
+
+    #[test]
+    fn fixed_material_scope_expands_to_one_capability_per_bounded_step() {
+        let tasks = expand_into_tasks(
+            &subject(),
+            &[MaterialTarget {
+                content_external_id: "note-fixture".to_owned(),
+                comment_limit: 20,
+                reply_expand_limit: 2,
+                acquire_media: true,
+            }],
+        )
+        .expect("fixed material tasks must be valid");
+
+        let capabilities = tasks
+            .iter()
+            .map(|task| {
+                task.raw()["capabilitiesRequested"][0]
+                    .as_str()
+                    .expect("one string capability")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            capabilities,
+            ["content_detail", "media_slots", "comments", "replies"]
+        );
+        assert!(tasks.iter().all(|task| {
+            task.raw()["target"]["contentExternalId"] == "note-fixture"
+                && task.raw()["capabilitiesRequested"]
+                    .as_array()
+                    .is_some_and(|values| values.len() == 1)
+        }));
+        assert_eq!(tasks[2].raw()["commentLimit"], 20);
+        assert_eq!(tasks[3].raw()["target"]["replyExpandLimit"], 2);
+    }
+
+    #[test]
+    fn fixed_material_policy_can_omit_media_and_reply_steps_without_changing_scope() {
+        let tasks = expand_into_tasks(
+            &subject(),
+            &[MaterialTarget {
+                content_external_id: "note-text-only".to_owned(),
+                comment_limit: 10,
+                reply_expand_limit: 0,
+                acquire_media: false,
+            }],
+        )
+        .expect("text-only fixed material tasks must be valid");
+        assert_eq!(tasks.len(), 2);
+        assert_eq!(tasks[0].raw()["capabilitiesRequested"][0], "content_detail");
+        assert_eq!(tasks[1].raw()["capabilitiesRequested"][0], "comments");
+    }
 }

@@ -43,7 +43,10 @@ function detailDeliveryMessage(lanes = {}) {
 // explicit comment-coverage receipt.
 export async function collectXhsNoteDetailPackage(wd = window, options = {}) {
   const commentLimit = normalizeXhsDetailCommentLimit(options.commentLimit);
-  const includeComments = options.includeComments !== false;
+  const scheduledCapability = options.taskSpec?.source === 'scheduled'
+    ? options.taskSpec?.capabilitiesRequested?.[0]
+    : '';
+  const includeComments = options.includeComments !== false && !scheduledCapability;
   const note = await collectNote(wd, {
     ...options,
     deferLingganDelivery: true,
@@ -93,13 +96,19 @@ export async function collectXhsNoteDetailPackage(wd = window, options = {}) {
   await noteStore.upsert(note);
 
   if (options.deferLingganDelivery !== true) {
-    note.lingganDelivery = await emitCollectorReceipt('contentDetail', note, { platform: 'xhs', options });
-    note.lingganMediaDelivery = await emitCollectorReceipt('mediaSlots', note, { platform: 'xhs', options });
-    commentResult.lingganDelivery = await emitCollectorReceipt('comments', commentResult, {
-      platform: 'xhs',
-      noteId: note.noteId,
-      options: { maxTotal: commentLimit, maxSubComments: options.maxSubComments, commentDepthMode: options.commentDepthMode },
-    });
+    if (!scheduledCapability || scheduledCapability === 'content_detail') {
+      note.lingganDelivery = await emitCollectorReceipt('contentDetail', note, { platform: 'xhs', options });
+    }
+    if (!scheduledCapability || scheduledCapability === 'media_slots') {
+      note.lingganMediaDelivery = await emitCollectorReceipt('mediaSlots', note, { platform: 'xhs', options });
+    }
+    if (!scheduledCapability) {
+      commentResult.lingganDelivery = await emitCollectorReceipt('comments', commentResult, {
+        platform: 'xhs',
+        noteId: note.noteId,
+        options: { maxTotal: commentLimit, maxSubComments: options.maxSubComments, commentDepthMode: options.commentDepthMode },
+      });
+    }
     const commentAndReplyDelivery = aggregateCommentAndReplyDelivery(commentResult.lingganDelivery);
     const state = deliveryState([
       note.lingganDelivery,

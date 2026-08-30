@@ -181,14 +181,54 @@ pub async fn admit_media_blob(
     .fetch_one(&mut *tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
+    let policy_schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('collection_work_order_material_target') IS NOT NULL",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    let processing_policy = if policy_schema_ready {
+        sqlx::query(
+            "SELECT target.allow_ocr,target.allow_asr \
+             FROM linggan_material_media_origin origin \
+             JOIN linggan_runtime_capture_package package USING(package_ref) \
+             JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+             JOIN collection_work_order_lease lease USING(lease_ref) \
+             JOIN collection_work_order_material_target target \
+               ON target.work_order_ref=lease.work_order_ref \
+              AND target.content_public_ref=origin.content_public_ref \
+             WHERE origin.observation_ref=$1 ORDER BY target.created_at DESC LIMIT 1",
+        )
+        .bind(media_observation_ref)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?
+    } else {
+        None
+    };
+    let allow_ocr = processing_policy
+        .as_ref()
+        .is_none_or(|row| row.get::<bool, _>("allow_ocr"));
+    let allow_asr = processing_policy
+        .as_ref()
+        .is_none_or(|row| row.get::<bool, _>("allow_asr"));
     let mut processing_jobs = Vec::new();
-    for processor_kind in processors_for_mime(mime_type) {
+    for processor_kind in
+        processors_for_mime(mime_type)
+            .iter()
+            .copied()
+            .filter(|kind| match *kind {
+                "image_ocr" | "video_frame_ocr" => allow_ocr,
+                "asr" => allow_asr,
+                _ => true,
+            })
+    {
         let job_ref = Uuid::new_v4();
         let inserted = sqlx::query("INSERT INTO linggan_media_processing_job (job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES ($1,$2,$3,$4,'local-v1','full_blob') ON CONFLICT (blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING")
             .bind(job_ref).bind(sha256).bind(&slot_key).bind(processor_kind)
             .execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
         if inserted.rows_affected() == 1 {
-            sqlx::query("INSERT INTO linggan_media_processing_job_event (event_ref,job_ref,state,reason) VALUES ($1,$2,'pending','provider_not_enabled')")
+            sqlx::query("INSERT INTO linggan_media_processing_job_event (event_ref,job_ref,state,reason) VALUES ($1,$2,'pending','queued_for_local_processor')")
                 .bind(Uuid::new_v4()).bind(job_ref).execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
             processing_jobs.push(job_ref);
         }
@@ -228,9 +268,23 @@ pub async fn record_media_download_failure(
         return Err(ProducerRuntimeError::MediaObservationNotFound);
     }
     let attempt_ref = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_media_download_attempt (download_attempt_ref,media_observation_ref,ended_at,terminal_reason,attempted_uri) VALUES ($1,$2,scope_001_now(),$3,$4)")
-        .bind(attempt_ref).bind(media_observation_ref).bind(reason).bind(attempted_uri)
-        .execute(database.pool()).await.map_err(ProducerRuntimeError::Internal)?;
+    let candidate_column_ready: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_attribute \
+         WHERE attrelid='linggan_media_download_attempt'::regclass \
+           AND attname='candidate_ref' AND NOT attisdropped)",
+    )
+    .fetch_one(database.pool())
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if candidate_column_ready {
+        sqlx::query("INSERT INTO linggan_media_download_attempt (download_attempt_ref,media_observation_ref,ended_at,terminal_reason,attempted_uri,candidate_ref) VALUES ($1,$2,scope_001_now(),$3,$4,(SELECT candidate_ref FROM linggan_material_media_candidate WHERE observation_ref=$2 AND external_uri=$4 LIMIT 1))")
+            .bind(attempt_ref).bind(media_observation_ref).bind(reason).bind(attempted_uri)
+            .execute(database.pool()).await.map_err(ProducerRuntimeError::Internal)?;
+    } else {
+        sqlx::query("INSERT INTO linggan_media_download_attempt (download_attempt_ref,media_observation_ref,ended_at,terminal_reason,attempted_uri) VALUES ($1,$2,scope_001_now(),$3,$4)")
+            .bind(attempt_ref).bind(media_observation_ref).bind(reason).bind(attempted_uri)
+            .execute(database.pool()).await.map_err(ProducerRuntimeError::Internal)?;
+    }
     Ok(attempt_ref)
 }
 
@@ -396,6 +450,7 @@ pub async fn claim_media_upload_finalize(
             crate::media_acquisition::complete_media_acquisition_for_observation(
                 &mut tx,
                 session.media_observation_ref,
+                &session.mime_type,
             )
             .await
             .map_err(ProducerRuntimeError::Internal)?;
@@ -442,12 +497,13 @@ pub async fn complete_media_upload(
         .begin()
         .await
         .map_err(ProducerRuntimeError::Internal)?;
-    let observation_ref = sqlx::query_scalar::<_, Uuid>("UPDATE linggan_media_upload_session SET state = 'materialized',download_attempt_ref = $2,updated_at = scope_001_now() WHERE session_ref = $1 AND state = 'finalizing' RETURNING media_observation_ref")
+    let completed = sqlx::query("UPDATE linggan_media_upload_session SET state = 'materialized',download_attempt_ref = $2,updated_at = scope_001_now() WHERE session_ref = $1 AND state = 'finalizing' RETURNING media_observation_ref,mime_type")
         .bind(session_ref).bind(download_attempt_ref).fetch_optional(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
-    if let Some(observation_ref) = observation_ref {
+    if let Some(row) = completed {
         crate::media_acquisition::complete_media_acquisition_for_observation(
             &mut tx,
-            observation_ref,
+            row.get("media_observation_ref"),
+            row.get("mime_type"),
         )
         .await
         .map_err(ProducerRuntimeError::Internal)?;
@@ -654,7 +710,7 @@ pub async fn producer_runtime_schema_is_ready(database: &Database) -> Result<boo
     }
     sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS (SELECT 1 FROM linggan_local_schema_migration \
-                        WHERE migration_id = '0004_plugin_runtime_all_capabilities')",
+                        WHERE migration_id = '0024_media_processing_runtime')",
     )
     .fetch_one(database.pool())
     .await

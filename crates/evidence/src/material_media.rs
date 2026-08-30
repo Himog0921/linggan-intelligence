@@ -186,15 +186,109 @@ async fn insert_slot_and_origin(
         .bind(media.observation_ref).bind(media.slot_key).bind(package.package_ref()).bind(media.primary_uri).bind(package.observed_at())
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     let live = media.purpose == "live_photo";
+    let has_still = !media.still_candidates.is_empty();
+    let has_motion = !media.motion_candidates.is_empty();
     sqlx::query("INSERT INTO linggan_material_media_origin (observation_ref,content_public_ref,slot_key,package_ref,record_ordinal,source_generation,purpose,producer_ordinal,display_ordinal,display_order_state,display_order_basis,candidate_set_state,composite_state,live_photo_still_state,live_photo_motion_state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULL,'UNKNOWN','producer_global_sequence_unverified','OBSERVED_SET',$9,$10,$11)")
         .bind(media.observation_ref).bind(content_public_ref).bind(media.slot_key).bind(package.package_ref())
         .bind(i32::try_from(record_ordinal).expect("package record count is bounded")).bind(generation).bind(media.purpose).bind(media.producer_ordinal)
-        .bind(if live { "PARTIAL" } else { "NOT_APPLICABLE" }).bind(live.then_some("UNKNOWN")).bind(live.then_some("UNKNOWN"))
+        .bind(if live && has_still && has_motion { "COMPLETE" } else if live { "PARTIAL" } else { "NOT_APPLICABLE" })
+        .bind(live.then_some(if has_still { "OBSERVED" } else { "UNKNOWN" }))
+        .bind(live.then_some(if has_motion { "OBSERVED" } else { "UNKNOWN" }))
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
-    for (index, uri) in media.candidates.iter().enumerate() {
-        sqlx::query("INSERT INTO linggan_material_media_candidate (candidate_ref,observation_ref,candidate_ordinal,external_uri,producer_primary,source_field,source_field_state,expires_at,expires_at_state) VALUES ($1,$2,$3,$4,$5,NULL,'UNKNOWN',NULL,'UNKNOWN')")
-            .bind(Uuid::new_v4()).bind(media.observation_ref).bind(i32::try_from(index + 1).expect("candidate list is bounded"))
-            .bind(uri).bind(index == 0).execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
+    let component_candidates = if live && (has_still || has_motion) {
+        media
+            .still_candidates
+            .iter()
+            .map(|uri| ("still", *uri))
+            .chain(media.motion_candidates.iter().map(|uri| ("motion", *uri)))
+            .collect::<Vec<_>>()
+    } else {
+        media
+            .candidates
+            .iter()
+            .map(|uri| ("single", *uri))
+            .collect()
+    };
+    let component_column_ready: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_attribute \
+         WHERE attrelid='linggan_material_media_candidate'::regclass \
+           AND attname='component_kind' AND NOT attisdropped)",
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if component_column_ready {
+        let mut previous_component = "";
+        for (index, (component_kind, uri)) in component_candidates.iter().enumerate() {
+            let producer_primary = previous_component != *component_kind;
+            previous_component = component_kind;
+            sqlx::query("INSERT INTO linggan_material_media_candidate (candidate_ref,observation_ref,candidate_ordinal,external_uri,producer_primary,source_field,source_field_state,expires_at,expires_at_state,component_kind) VALUES ($1,$2,$3,$4,$5,NULL,'UNKNOWN',NULL,'UNKNOWN',$6)")
+                .bind(Uuid::new_v4()).bind(media.observation_ref).bind(i32::try_from(index + 1).expect("candidate list is bounded"))
+                .bind(uri).bind(producer_primary).bind(component_kind).execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
+        }
+    } else {
+        for (index, uri) in media.candidates.iter().enumerate() {
+            sqlx::query("INSERT INTO linggan_material_media_candidate (candidate_ref,observation_ref,candidate_ordinal,external_uri,producer_primary,source_field,source_field_state,expires_at,expires_at_state) VALUES ($1,$2,$3,$4,$5,NULL,'UNKNOWN',NULL,'UNKNOWN')")
+                .bind(Uuid::new_v4()).bind(media.observation_ref).bind(i32::try_from(index + 1).expect("candidate list is bounded"))
+                .bind(uri).bind(index == 0).execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
+        }
+    }
+    let components = component_candidates
+        .iter()
+        .map(|(component, _)| *component)
+        .collect::<HashSet<_>>();
+    enqueue_media_acquisition(tx, media.observation_ref, &components).await?;
+    Ok(())
+}
+
+/// Every accepted source-media observation gets bounded byte-acquisition work. Discovery covers
+/// used to be the only producer; detail slots now use the same durable work table rather than a
+/// second download queue.
+async fn enqueue_media_acquisition(
+    tx: &mut Transaction<'_, Postgres>,
+    observation_ref: Uuid,
+    components: &HashSet<&str>,
+) -> Result<(), ProducerRuntimeError> {
+    let schema_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_media_acquisition_work') IS NOT NULL")
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+    if !schema_ready {
+        return Ok(());
+    }
+    let component_column_ready: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_attribute \
+         WHERE attrelid='linggan_media_acquisition_work'::regclass \
+           AND attname='component_kind' AND NOT attisdropped)",
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if component_column_ready {
+        for component in components {
+            sqlx::query(
+                "INSERT INTO linggan_media_acquisition_work \
+                 (work_ref,observation_ref,component_kind) VALUES ($1,$2,$3) \
+                 ON CONFLICT (observation_ref,component_kind) DO NOTHING",
+            )
+            .bind(Uuid::new_v4())
+            .bind(observation_ref)
+            .bind(component)
+            .execute(&mut **tx)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+        }
+    } else {
+        sqlx::query(
+            "INSERT INTO linggan_media_acquisition_work (work_ref,observation_ref) \
+             VALUES ($1,$2) ON CONFLICT (observation_ref) DO NOTHING",
+        )
+        .bind(Uuid::new_v4())
+        .bind(observation_ref)
+        .execute(&mut **tx)
+        .await
+        .map_err(ProducerRuntimeError::Internal)?;
     }
     Ok(())
 }
@@ -204,6 +298,8 @@ struct MediaRecord<'a> {
     observation_ref: Uuid,
     primary_uri: &'a str,
     candidates: Vec<&'a str>,
+    still_candidates: Vec<&'a str>,
+    motion_candidates: Vec<&'a str>,
     content_id: &'a str,
     role: &'a str,
     purpose: &'static str,
@@ -236,6 +332,8 @@ fn legacy_media_record(record: &Value) -> Option<MediaRecord<'_>> {
         observation_ref,
         primary_uri,
         candidates: vec![primary_uri],
+        still_candidates: Vec::new(),
+        motion_candidates: Vec::new(),
         content_id,
         role,
         purpose,
@@ -285,11 +383,37 @@ fn media_record<'a>(
         .into_iter()
         .map(str::trim)
         .collect::<Vec<_>>();
+    let component_candidates = |component: &str| {
+        record
+            .pointer(&format!(
+                "/observation/components/{component}/candidateUris"
+            ))
+            .and_then(Value::as_array)
+            .and_then(|values| {
+                values
+                    .iter()
+                    .map(Value::as_str)
+                    .collect::<Option<Vec<_>>>()
+                    .map(|items| items.into_iter().map(str::trim).collect::<Vec<_>>())
+            })
+            .unwrap_or_default()
+    };
+    let still_candidates = component_candidates("still");
+    let motion_candidates = component_candidates("motion");
+    let component_set = still_candidates
+        .iter()
+        .chain(motion_candidates.iter())
+        .copied()
+        .collect::<HashSet<_>>();
     if primary_uri.is_empty()
         || candidates.is_empty()
         || candidates[0] != primary_uri
         || candidates.iter().any(|uri| uri.is_empty())
         || candidates.iter().copied().collect::<HashSet<_>>().len() != candidates.len()
+        || (!component_set.is_empty()
+            && (role != "live_photo"
+                || component_set.len() != still_candidates.len() + motion_candidates.len()
+                || component_set != candidates.iter().copied().collect::<HashSet<_>>()))
     {
         return None;
     }
@@ -298,6 +422,8 @@ fn media_record<'a>(
         observation_ref,
         primary_uri,
         candidates,
+        still_candidates,
+        motion_candidates,
         content_id,
         role,
         purpose,

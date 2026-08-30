@@ -5,7 +5,9 @@ pub(crate) const MATERIAL_PAGE_SQL: &str = "WITH latest_detail AS ( \
      detail.content_public_ref,detail.material_ref,detail.package_ref,detail.record_ordinal,detail.observed_at, \
      detail.title,detail.title_state,detail.body_text,detail.body_state, \
      detail.creator_display_name,detail.creator_display_name_state, \
-     detail.published_at_source_text,detail.published_at_source_text_state,detail.author_external_id \
+     detail.published_at_source_text,detail.published_at_source_text_state,detail.author_external_id, \
+     detail.like_count,detail.like_count_state,detail.comment_count,detail.comment_count_state, \
+     detail.collect_count,detail.collect_count_state,detail.share_count,detail.share_count_state \
    FROM linggan_material_content_detail detail JOIN linggan_runtime_capture_package detail_package USING(package_ref) \
    WHERE detail_package.accepted_at <= $2::timestamptz \
    ORDER BY detail.content_public_ref,detail.observed_at::timestamptz DESC,detail.created_at DESC \
@@ -25,10 +27,10 @@ pub(crate) const MATERIAL_PAGE_SQL: &str = "WITH latest_detail AS ( \
      CASE WHEN detail.creator_display_name IS NOT NULL THEN detail.creator_display_name_state ELSE COALESCE(discovery.creator_state,'UNKNOWN') END AS creator_display_name_state, \
      COALESCE(detail.published_at_source_text,discovery.published_at_source_text) AS published_at_source_text,CASE WHEN detail.published_at_source_text IS NOT NULL THEN detail.published_at_source_text_state ELSE COALESCE(discovery.published_at_source_text_state,'UNKNOWN') END AS published_at_source_text_state, \
      detail.author_external_id,discovery.cover_source_url,COALESCE(discovery.cover_source_state,'UNKNOWN') AS cover_source_state, \
-     discovery.like_count,COALESCE(discovery.like_count_state,'UNKNOWN') AS like_count_state, \
-     discovery.comment_count,COALESCE(discovery.comment_count_state,'UNKNOWN') AS comment_count_state, \
-     discovery.collect_count,COALESCE(discovery.collect_count_state,'UNKNOWN') AS collect_count_state, \
-     discovery.share_count,COALESCE(discovery.share_count_state,'UNKNOWN') AS share_count_state \
+     COALESCE(detail.like_count,discovery.like_count) AS like_count,CASE WHEN detail.like_count IS NOT NULL THEN detail.like_count_state ELSE COALESCE(discovery.like_count_state,'UNKNOWN') END AS like_count_state, \
+     COALESCE(detail.comment_count,discovery.comment_count) AS comment_count,CASE WHEN detail.comment_count IS NOT NULL THEN detail.comment_count_state ELSE COALESCE(discovery.comment_count_state,'UNKNOWN') END AS comment_count_state, \
+     COALESCE(detail.collect_count,discovery.collect_count) AS collect_count,CASE WHEN detail.collect_count IS NOT NULL THEN detail.collect_count_state ELSE COALESCE(discovery.collect_count_state,'UNKNOWN') END AS collect_count_state, \
+     COALESCE(detail.share_count,discovery.share_count) AS share_count,CASE WHEN detail.share_count IS NOT NULL THEN detail.share_count_state ELSE COALESCE(discovery.share_count_state,'UNKNOWN') END AS share_count_state \
  FROM linggan_material_content content \
  LEFT JOIN latest_detail detail ON detail.content_public_ref = content.public_ref \
  LEFT JOIN latest_discovery discovery ON discovery.content_public_ref = content.public_ref \
@@ -39,6 +41,8 @@ pub(crate) const MATERIAL_PAGE_SQL: &str = "WITH latest_detail AS ( \
    OR lower(COALESCE(detail.creator_display_name,'')) LIKE '%' || lower($1) || '%' \
    OR lower(COALESCE(discovery.title,'')) LIKE '%' || lower($1) || '%' \
    OR lower(COALESCE(discovery.creator_display_name,'')) LIKE '%' || lower($1) || '%' \
+   OR EXISTS (SELECT 1 FROM linggan_material_comment comment WHERE comment.content_public_ref=content.public_ref AND lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($1) || '%') \
+   OR EXISTS (SELECT 1 FROM linggan_material_derived_text derived WHERE derived.content_public_ref=content.public_ref AND lower(derived.text_content) LIKE '%' || lower($1) || '%') \
    OR EXISTS (SELECT 1 FROM linggan_material_author_profile author JOIN linggan_runtime_capture_package author_package USING(package_ref) WHERE author.platform=content.platform AND author.author_external_id=detail.author_external_id AND author_package.accepted_at <= $2::timestamptz AND (lower(COALESCE(author.display_name,'')) LIKE '%' || lower($1) || '%' OR lower(COALESCE(author.biography,'')) LIKE '%' || lower($1) || '%'))) \
    AND ($8::uuid IS NULL OR content.public_ref=$8) \
    AND COALESCE(detail.observed_at,discovery.observed_at,lane_latest.observed_at) IS NOT NULL \

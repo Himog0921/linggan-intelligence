@@ -542,6 +542,7 @@ async function runMediaAcquisitionOnce() {
     claimGeneration: claim.claimGeneration,
     installKey,
     mediaObservationRef: claim.mediaObservationRef,
+    componentKind: claim.componentKind,
     candidateUris,
   });
   await flushMediaOutbox();
@@ -579,7 +580,15 @@ void checkInStationOnce().then(() => patrolTick());
  * 执行严格按派下来的规格：目标、配额、能力都来自任务，不来自页面上的对话框。这一条是
  * 授权链的意义所在——执行端不得自行放宽工单给定的边界。
  */
-const SURFACE_CAPABILITIES = new Set(['author_profile', 'profile_discovery', 'discovery_search']);
+const SURFACE_CAPABILITIES = new Set([
+  'author_profile',
+  'profile_discovery',
+  'discovery_search',
+  'content_detail',
+  'media_slots',
+  'comments',
+  'replies',
+]);
 
 async function runDispatchedTask() {
   const readiness = await readLingganLocalReadiness();
@@ -596,8 +605,8 @@ async function runDispatchedTask() {
   const spec = claim.taskSpec || {};
   const capability = Array.isArray(spec.capabilitiesRequested) ? spec.capabilitiesRequested[0] : '';
   if (!SURFACE_CAPABILITIES.has(capability)) {
-    // 无人值守链只执行有界的表层观察。详情、评论与媒体字节需要显式工单，不能由发现结果
-    // 自动无限展开。
+    // Only capabilities with an implemented page reader may run unattended. Deepening is allowed
+    // here because the server has already frozen exact material identities in a bounded Work Order.
     return {
       success: true,
       state: 'capability_not_executable_here',
@@ -608,7 +617,10 @@ async function runDispatchedTask() {
 
   const authorExternalId = String(spec.target?.authorExternalId || '').trim();
   const query = String(spec.target?.query || '').trim();
-  const targetValue = capability === 'discovery_search' ? query : authorExternalId;
+  const contentExternalId = String(spec.target?.contentExternalId || '').trim();
+  const targetValue = capability === 'discovery_search'
+    ? query
+    : (['author_profile', 'profile_discovery'].includes(capability) ? authorExternalId : contentExternalId);
   if (!targetValue) {
     return { success: true, state: 'target_incomplete', executed: false, message: '任务没有指明观察目标。' };
   }
@@ -620,7 +632,11 @@ async function runDispatchedTask() {
 
   const action = capability === 'author_profile'
     ? LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_AUTHOR
-    : LINGGAN_RUNTIME_ACTION.DISCOVER_SURFACE;
+    : (['profile_discovery', 'discovery_search'].includes(capability)
+      ? LINGGAN_RUNTIME_ACTION.DISCOVER_SURFACE
+      : (['comments', 'replies'].includes(capability)
+        ? LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_COMMENTS
+        : LINGGAN_RUNTIME_ACTION.COLLECT_CURRENT_CONTENT));
   try {
     const ready = await waitForTabReady(tabId);
     if (!ready) {
@@ -631,6 +647,10 @@ async function runDispatchedTask() {
       mode: capability === 'discovery_search' ? 'search' : 'profile',
       // 配额来自工单，不来自页面对话框：执行端不得自行放宽。
       maximumQuota: Number(spec.maximumQuota) || 1,
+      commentLimit: spec.commentLimit,
+      maxTotal: Number(spec.commentLimit) || Number(spec.maximumQuota) || 1,
+      maxSubComments: Number(spec.target?.replyExpandLimit) || 0,
+      commentDepthMode: capability === 'replies' ? 'allReplies' : 'twoLevel',
       // The page collector must submit against this exact server-issued identity. Rebuilding a
       // manual task here would leave the claimed scheduled task without Attempt or Receipt.
       taskSpec: spec,
@@ -665,7 +685,9 @@ async function runDispatchedTask() {
 async function openTaskWindow(capability, targetValue) {
   const url = capability === 'discovery_search'
     ? `https://www.xiaohongshu.com/search_result?keyword=${encodeURIComponent(targetValue)}&source=web_explore_feed`
-    : `https://www.xiaohongshu.com/user/profile/${encodeURIComponent(targetValue)}`;
+    : (['author_profile', 'profile_discovery'].includes(capability)
+      ? `https://www.xiaohongshu.com/user/profile/${encodeURIComponent(targetValue)}`
+      : `https://www.xiaohongshu.com/explore/${encodeURIComponent(targetValue)}`);
   const created = await chrome.windows.create({ url, focused: false, type: 'normal' });
   const tabId = Number(created?.tabs?.[0]?.id || 0) || null;
   if (tabId) {

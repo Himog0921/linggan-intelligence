@@ -50,7 +50,7 @@ pub(crate) fn safe_inline_mime(mime_type: &str) -> Option<&str> {
 pub(crate) fn derivative_mime(kind: &str) -> Option<&'static str> {
     match kind {
         "thumbnail" => Some("image/jpeg"),
-        "audio" => Some("audio/mpeg"),
+        "audio" => Some("audio/wav"),
         "ocr_text" | "asr_text" | "frame_ocr_text" => Some("text/plain; charset=utf-8"),
         _ => None,
     }

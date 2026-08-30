@@ -8,9 +8,9 @@ usage() {
   cat >&2 <<'EOF'
 usage: ./scripts/local-runtime.sh {migrate|repair-password|serve} [--database database_name]
 
-  migrate          apply the three approved local Linggan migrations exactly once
+  migrate          apply the approved local Linggan migrations exactly once
   repair-password  explicitly align the local persistent database role with .env
-  serve            migrate the default local database, then start the loopback API
+  serve            migrate, then start the API, scheduler and local media processor
 
 The optional --database form is reserved for an exact, disposable runtime proof
 database. It refuses every name except linggan_intelligence_runtime_proof_<hex>.
@@ -192,6 +192,9 @@ migrate() {
   apply_migration_once "0019_work_order_lease_task_sequence" "$project_root/database/migrations/0019_work_order_lease_task_sequence.sql"
   apply_migration_once "0020_observation_runtime_automation" "$project_root/database/migrations/0020_observation_runtime_automation.sql"
   apply_migration_once "0021_discovery_cover_media_acquisition" "$project_root/database/migrations/0021_discovery_cover_media_acquisition.sql"
+  apply_migration_once "0022_material_deepening_scope" "$project_root/database/migrations/0022_material_deepening_scope.sql"
+  apply_migration_once "0023_material_engagement_and_media_components" "$project_root/database/migrations/0023_material_engagement_and_media_components.sql"
+  apply_migration_once "0024_media_processing_runtime" "$project_root/database/migrations/0024_media_processing_runtime.sql"
 }
 
 case "$command_name" in
@@ -214,7 +217,20 @@ case "$command_name" in
     database_name="${database_name:-$POSTGRES_DB}"
     migrate
     bind_runtime_database_target
-    exec cargo run -p linggan-api
+    # Build the three binaries once. Launching three concurrent `cargo run` processes can make
+    # startup appear hung while they contend for Cargo's build lock.
+    cargo build -p linggan-api -p linggan-worker --bins
+    "$project_root/target/debug/linggan-worker" &
+    scheduler_pid=$!
+    "$project_root/target/debug/linggan-media-worker" &
+    media_worker_pid=$!
+    cleanup_runtime_children() {
+      kill "$scheduler_pid" "$media_worker_pid" 2>/dev/null || true
+      wait "$scheduler_pid" "$media_worker_pid" 2>/dev/null || true
+    }
+    trap cleanup_runtime_children EXIT
+    trap 'exit 143' INT TERM
+    "$project_root/target/debug/linggan-api"
     ;;
   *)
     usage

@@ -89,6 +89,7 @@ export function createCommentTaskController({
       maxTotal = 0,
       maxSubComments = 0,
       commentDepthMode = 'twoLevel',
+      taskSpec = undefined,
     } = {}) {
       if (task?.isRunning) {
         showToast('评论采集任务进行中，可在右下角暂停或停止', 'warning');
@@ -148,6 +149,7 @@ export function createCommentTaskController({
               lastToastAt = Date.now();
             }
           },
+          taskSpec,
         });
 
         const total = Number(result?.total || 0);

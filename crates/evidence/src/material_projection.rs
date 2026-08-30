@@ -393,7 +393,7 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
     }
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM linggan_local_schema_migration \
-                        WHERE migration_id = '0020_observation_runtime_automation')",
+                        WHERE migration_id = '0024_media_processing_runtime')",
     )
     .fetch_one(database.pool())
     .await

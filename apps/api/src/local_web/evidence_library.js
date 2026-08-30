@@ -21,6 +21,7 @@
     PROCESSING: ['处理中', 'info'],
     NOT_ENABLED: ['处理器未启用', 'unknown'],
     SEARCHABLE: ['可检索', 'success'],
+    KNOWN_EMPTY: ['已处理，未识别到内容', 'info'],
     FAILED: ['执行失败', 'danger'],
     RISK_CONTROL: ['风险控制停止', 'danger'],
     BYTES_CLEANED: ['字节已清理', 'warning'],
@@ -527,6 +528,31 @@
     ]));
     panel.append(identity);
 
+    const timeline = section('互动数据观察时间线', 'ENGAGEMENT TIMELINE');
+    const observations = Array.isArray(inspector.engagementTimeline) ? inspector.engagementTimeline : [];
+    if (observations.length === 0) {
+      timeline.append(sourceIncompleteBlock('当前详情没有互动数据观察时点；不把未知写成 0。'));
+    } else {
+      const list = node('div', 'ev-slot-list');
+      observations.forEach((observation) => {
+        const entry = node('article', 'ev-derivative');
+        const metrics = [
+          knownMetric(observation.likeCount, observation.likeCountState, '赞'),
+          knownMetric(observation.commentCount, observation.commentCountState, '评'),
+          knownMetric(observation.collectCount, observation.collectCountState, '藏'),
+          knownMetric(observation.shareCount, observation.shareCountState, '转'),
+        ].filter(Boolean);
+        entry.append(
+          node('strong', null, observation.observedAt || '观察时间当前未知'),
+          node('p', null, metrics.length ? metrics.join(' · ') : '本时点互动字段均为当前未知'),
+          tech((observation.sourceLane || 'source').toUpperCase()),
+        );
+        list.append(entry);
+      });
+      timeline.append(list);
+    }
+    panel.append(timeline);
+
     const lanes = section('材料通道状态', 'LANE STATUS');
     const board = node('div', 'ev-detail-lanes');
     laneOrder.forEach((lane) => board.append(laneCell(item, lane)));
@@ -769,6 +795,15 @@
       ['来源范围', item.sourceScope || '当前未知', 'SOURCE SCOPE'],
       ['失败/限制原因', item.reason || '无已知原因', item.reason ? 'REASON' : 'UNKNOWN'],
     ]));
+    if (typeof item.displayText === 'string' && item.displayText.trim()) {
+      const text = node('div', 'ev-derived-text');
+      text.append(
+        node('strong', null, item.kind === 'asr_text' ? '视频转录摘要' : '识别文字摘要'),
+        node('p', null, item.displayText),
+        tech(item.languageTag || item.languageState || 'LANGUAGE UNKNOWN'),
+      );
+      article.append(text);
+    }
     const asset = sameOriginPath(item.sourceLocation?.localAssetUrl, ['/api/local/derivative/']);
     if (asset && item.state === 'ACQUIRED') {
       const link = node('a', 'ev-asset-link', '打开受控本地派生材料');
