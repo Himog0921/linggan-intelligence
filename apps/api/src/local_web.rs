@@ -2140,8 +2140,8 @@ async fn collection_targets(
         .as_deref()
         .and_then(|value| uuid::Uuid::parse_str(value).ok())
     {
-        Some(target_ref) => read_target(database, target_ref).await.ok().flatten(),
-        None => None,
+        Some(target_ref) => read_target(database, target_ref).await.map_err(|_| ()),
+        None => Ok(None),
     };
     match list_targets(database, params.filter.as_deref(), 200).await {
         Ok(targets) => {
@@ -2151,15 +2151,21 @@ async fn collection_targets(
                 &completeness,
                 params.error.as_deref(),
             );
-            let drawer = target_drawer::render(
-                drawer_target.as_ref(),
-                &completeness,
-                params.drawer.as_deref(),
-                params.dtab.as_deref(),
-            );
+            let drawer = match drawer_target.as_ref() {
+                Ok(target) => target_drawer::render(
+                    target.as_ref(),
+                    &completeness,
+                    params.drawer.as_deref(),
+                    params.dtab.as_deref(),
+                ),
+                Err(()) => collection::render_unreadable_target_drawer(params.drawer.as_deref()),
+            };
             Html(format!("{list}{drawer}"))
         }
-        Err(_) => Html(base),
+        Err(_) => Html(format!(
+            "{base}{}",
+            collection::render_unreadable_target_drawer(params.drawer.as_deref())
+        )),
     }
 }
 

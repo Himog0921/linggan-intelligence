@@ -1492,7 +1492,8 @@ fn operations_modes_are_addressable_and_the_stream_stays_honest() {
         None,
     );
     assert!(now.contains("LIVE OBSERVATION"));
-    assert!(now.contains("STATE UNKNOWN"));
+    assert!(now.contains("采集状态读不到"));
+    assert!(now.contains("COLLECTION STATE UNAVAILABLE"));
     assert!(!now.contains("SCHEDULER NOT CONNECTED"));
     // The prototype invented an event every seven seconds. Production must not.
     assert!(now.contains("不会用计时器伪造事件"));
@@ -1545,7 +1546,16 @@ fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
     );
     assert!(open.contains("id=\"c-drawer\""));
     assert!(open.contains("#T-CR-019"));
-    assert!(open.contains("未找到该观察目标"));
+    assert!(open.contains("观察目标读取状态当前未知"));
+    for false_empty in [
+        "未找到该观察目标",
+        "没有建档基线",
+        "没有巡逻策略",
+        "没有关联证据",
+        "没有观察史",
+    ] {
+        assert!(!open.contains(false_empty));
+    }
 
     let injected = collection::render(
         collection::Section::Targets,
@@ -1948,7 +1958,12 @@ fn structure_survives_without_data_but_placeholder_counters_do_not() {
     }
 
     // The reason is still on the page — once, in the shared context row.
-    assert!(operations.contains("COLLECTION STATE UNKNOWN"));
+    assert!(operations.contains("采集状态读不到"));
+    assert!(operations.contains("COLLECTION STATE UNAVAILABLE"));
+    assert!(operations.contains("来源读不到"));
+    assert!(operations.contains("SOURCE UNREADABLE"));
+    assert!(!operations.contains("COLLECTION STATE <span"));
+    assert!(!operations.contains("SOURCE <span"));
     assert!(!operations.contains("SCHEDULER NOT CONNECTED"));
 
     // Filter tabs keep their names and lose their placeholder counts.

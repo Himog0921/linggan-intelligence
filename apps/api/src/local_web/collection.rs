@@ -277,13 +277,20 @@ fn targets_body(drawer: Option<&str>, state: Option<&SurfaceState>) -> String {
             ],
         )
     };
-    format!("{empty}{}", drawer_markup(drawer))
+    let drawer = if state.is_none_or(|state| state.total_targets.is_none()) {
+        render_unreadable_target_drawer(drawer)
+    } else {
+        // The connected handler owns the real target lookup and renders `target_drawer` from
+        // its Result. Keeping a second placeholder here would duplicate or contradict it.
+        String::new()
+    };
+    format!("{empty}{drawer}")
 }
 
-/// The drawer opens from the URL, so a refresh or a shared link lands on the same object.
-/// No target exists yet, so any identifier resolves to an honest not-found panel — the
-/// shell geometry is real and verifiable, the content is not invented.
-fn drawer_markup(drawer: Option<&str>) -> String {
+/// The target identity cannot be resolved while its database read is unavailable. This is
+/// deliberately separate from `target_drawer::render(None, ...)`, which means a successful
+/// lookup proved that the identifier does not exist.
+pub fn render_unreadable_target_drawer(drawer: Option<&str>) -> String {
     let Some(raw) = drawer else {
         return String::new();
     };
@@ -294,126 +301,29 @@ fn drawer_markup(drawer: Option<&str>) -> String {
             <div class="c-drawer-top">
               <div>
                 <div class="c-drawer-kind">TARGET WORKSPACE</div>
-                <div class="c-drawer-name">未找到该观察目标</div>
+                <div class="c-drawer-name">观察目标读取状态当前未知</div>
                 <div class="c-drawer-id">#{identifier}</div>
               </div>
               <div class="c-drawer-controls">
-                <button class="c-btn-quiet" id="c-drawer-wide" type="button">WIDE ↔</button>
                 <a class="c-btn-quiet" href="/collection/targets">CLOSE ×</a>
               </div>
-            </div>
-            <div class="c-drawer-tabs" role="tablist">
-              <button type="button" class="c-on" data-panel="overview">概览</button>
-              <button type="button" data-panel="baseline">建档基线</button>
-              <button type="button" data-panel="patrol">巡逻策略</button>
-              <button type="button" data-panel="evidence">证据</button>
-              <button type="button" data-panel="trace">观察史</button>
             </div>
           </div>
           <div class="c-drawer-body">
             <div class="c-drawer-panel" data-panel="overview">
-              {overview}
+              {unknown}
             </div>
-            <div class="c-drawer-panel" data-panel="baseline" hidden>{baseline}</div>
-            <div class="c-drawer-panel" data-panel="patrol" hidden>{patrol}</div>
-            <div class="c-drawer-panel" data-panel="evidence" hidden>{evidence}</div>
-            <div class="c-drawer-panel" data-panel="trace" hidden>{trace}</div>
           </div>
         </aside>"#,
-        overview = drawer_panel_overview(),
-        baseline = drawer_panel_baseline(),
-        patrol = drawer_panel_patrol(),
-        evidence = drawer_panel_evidence(),
-        trace = drawer_panel_trace(),
-    )
-}
-
-fn drawer_panel_overview() -> String {
-    empty_state(
-        Empty::Plain,
-        "这个标识没有对应的观察目标",
-        "抽屉按地址栏里的标识打开，因此刷新和分享都会回到同一个对象。当前读取结果无法解析这个标识，但不能据此推断观察目标为空。",
-        &[
-            (
-                "创作者概览",
-                "将显示身份读数与作品生命周期分布：正常、超基线、爆发三档加滚动中位数。",
-            ),
-            (
-                "关键词概览",
-                "将显示搜索环境读数与结果景观，并始终声明它是观察样本、不是平台全量世界。",
-            ),
-            ("不代表", "不代表该对象在平台上不存在，也不代表它曾被删除。"),
-        ],
-    )
-}
-
-fn drawer_panel_baseline() -> String {
-    empty_state(
-        Empty::Plain,
-        "没有建档基线",
-        "首次深度建档记录的是「第一次到底观察了什么、边界在哪里」。没有目标，也就没有基线。",
-        &[
-            (
-                "创作者",
-                "主页探查 → 作品清单 → 身份解析 → 详情 → 评论 → 媒体 → 转录。",
-            ),
-            (
-                "关键词",
-                "搜索环境探查 → 生成条件 → 结果身份 → 详情与评论 → 作者观察。",
-            ),
-            (
-                "生成条件",
-                "关键词基线必须保存 query、排序、窗口、观察时刻、结果深度与捕获条件。",
-            ),
-        ],
-    )
-}
-
-fn drawer_panel_patrol() -> String {
-    empty_state(
-        Empty::Plain,
-        "没有巡逻策略",
-        "巡逻策略回答「为什么这个对象被这样观察」。策略变更会扩大来源、深度或成本时必须形成新版本并重新检查授权，这套版本化机制尚未实现。",
-        &[
-            (
-                "创作者默认",
-                "新作品轻量扫描；相对历史与速度触发自适应观察；历史锚点低频复访。",
-            ),
-            (
-                "关键词默认",
-                "同一查询环境对比基线；爆发自适应加深；旧内容重回高位记为变化。",
-            ),
-            (
-                "候选",
-                "作者候选与新词候选只能被提议，永远不自动升级为长期观察目标。",
-            ),
-        ],
-    )
-}
-
-fn drawer_panel_evidence() -> String {
-    empty_state(
-        Empty::Plain,
-        "没有关联证据",
-        "证据面优先显示原始事实，不用 AI 摘要替换原声。当前没有目标，也没有任何已接纳材料与之关联。",
-        &[
-            ("来源", "证据由全局事实层持有，采集侧不再造第二份原文。"),
-            ("已接纳材料", "现有的已接纳材料在语料 / 证据库中查看。"),
-            ("不代表", "不代表相关材料不存在。"),
-        ],
-    )
-}
-
-fn drawer_panel_trace() -> String {
-    empty_state(
-        Empty::Plain,
-        "没有观察史",
-        "观察史是这一个对象的历史，既不是运行态的实时流，也不是执行运行时的技术日志。",
-        &[
-            ("包含", "发现、变化、状态与异常这类有业务含义的事件。"),
-            ("不包含", "心跳、租约、选择器重试、HTTP 状态、堆栈。"),
-            ("当前", "没有对象，因此没有事件。"),
-        ],
+        unknown = empty_state(
+            Empty::Plain,
+            "当前无法判断这个标识是否对应观察目标",
+            "目标读取当前不可用；这不表示目标不存在、被删除，也不表示它没有建档、巡逻、证据或观察史。",
+            &[(
+                "下一步",
+                "读取恢复后刷新同一地址；系统不会在未知状态下改写目标。"
+            )],
+        ),
     )
 }
 
@@ -463,7 +373,7 @@ fn operations_body(mode: OperationsMode, state: Option<&SurfaceState>) -> String
                     "下面是观察生产的六个固定阶段。阶段计数仍未知，这里不把未知写成零。",
                 ),
                 None => (
-                    "STATE UNKNOWN",
+                    "COLLECTION STATE UNAVAILABLE",
                     "调度与「最近一轮观察」的状态当前读不到。这里不把未知翻译成已接通、未接通或没有运行。",
                     "下面是观察生产的六个固定阶段。各阶段的数字读模型尚未接入，因此这里不放数字。",
                 ),
@@ -541,9 +451,9 @@ fn stream_markup(state: Option<&SurfaceState>) -> String {
             "SCHEDULER HEARTBEAT UNREADABLE",
         ),
         None => (
-            "STATE UNKNOWN",
+            "COLLECTION STATE UNAVAILABLE",
             "调度与语义事件状态当前读不到；未知不代表没有事件，也不代表调度器已接通或未接通。这里不会用计时器伪造事件来证明系统在运行。",
-            "COLLECTION STATE UNKNOWN",
+            "COLLECTION STATE UNAVAILABLE",
         ),
     };
     format!(
@@ -736,7 +646,7 @@ fn head_readout(section: Section, state: Option<&SurfaceState>) -> String {
 /// 才是 unreadable。整个数据库状态不可读时同样只能表达未知。
 fn system_words(state: Option<&SurfaceState>) -> String {
     let Some(state) = state else {
-        return "<span class=\"v7-query-meta\">COLLECTION STATE UNKNOWN</span>\
+        return "<span class=\"v7-query-meta\">COLLECTION STATE UNAVAILABLE</span>\
                 <span>SOURCE UNREADABLE</span><span>UTC+08</span>"
             .to_owned();
     };
@@ -847,13 +757,15 @@ fn second_bar(
                     label = candidate.label(),
                 ));
             }
-            let (scheduler_zh, scheduler) =
-                state.map_or(("调度状态未知", "COLLECTION STATE UNKNOWN"), |state| {
+            let (scheduler_zh, scheduler) = state.map_or(
+                ("调度状态未知", "COLLECTION STATE UNAVAILABLE"),
+                |state| {
                     (
                         scheduler_zh(state.scheduler_state),
                         scheduler_code(state.scheduler_state),
                     )
-                });
+                },
+            );
             format!(
                 r#"<div class="c-modebar">
               <div class="c-tabs">{tabs}</div>

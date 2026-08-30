@@ -115,7 +115,7 @@ fn localize_context_markup(markup: &str) -> String {
 }
 
 /// 上下文行里允许出现的技术码及其中文主表达。
-const CONTEXT_CODES: [(&str, &str); 11] = [
+const CONTEXT_CODES: [(&str, &str); 13] = [
     // 一条码不得包含另一条码。顺序在这里救不了：先替换长码会生成含短码的 markup，
     // 后一轮再替换一次，得到嵌套的 `调度心跳读不到 SCHEDULER HEARTBEAT 未知 UNKNOWN`。
     // 由 `no_code_contains_another_code` 自动执行，不靠人记得。
@@ -124,10 +124,12 @@ const CONTEXT_CODES: [(&str, &str); 11] = [
     ("SCHEDULER RUNNING", "调度运行中"),
     ("SCHEDULER STALE", "调度心跳已过期"),
     ("READ MODEL NOT CONNECTED", "读模型未接通"),
+    ("COLLECTION STATE UNAVAILABLE", "采集状态读不到"),
     ("NO OBSERVATION TARGETS", "暂无观察目标"),
     ("PATROL ARMED", "巡检已开启"),
     ("PATROL OFF", "有观察目标但巡检未开"),
     ("SOURCE INCOMPLETE", "来源信息不完整"),
+    ("SOURCE UNREADABLE", "来源读不到"),
     ("UTC+08", "中国标准时间"),
     ("UNKNOWN", "未知"),
 ];
