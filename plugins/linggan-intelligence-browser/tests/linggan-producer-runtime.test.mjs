@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { waitForStableTab } from '../src/linggan/tabReadiness.js';
 
 import {
   PRODUCER_CAPABILITY,
@@ -224,17 +225,77 @@ test('background immediately auto-claims and executes bounded baseline plus fixe
   assert.match(background, /COLLECT_CURRENT_CONTENT/);
 });
 
-test('task window readiness covers tabs already complete before the listener starts waiting', () => {
+test('task window readiness delegates final-document stability and content-runtime probing', () => {
   const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
   const start = background.indexOf('function waitForTabReady(');
   const end = background.indexOf('\n\nchrome.runtime.onMessage', start);
   const readiness = background.slice(start, end);
-  const listenerIndex = readiness.indexOf('chrome.tabs.onUpdated.addListener(listener)');
-  const snapshotIndex = readiness.indexOf('chrome.tabs.get(tabId)');
-  assert.ok(listenerIndex >= 0, 'readiness must subscribe to future completion');
-  assert.ok(snapshotIndex > listenerIndex, 'listener must be installed before the current tab snapshot is read');
-  assert.match(readiness, /tab\?\.status === 'complete'/);
-  assert.match(readiness, /clearTimeout\(timeoutHandle\)/);
+  assert.match(readiness, /waitForStableTab/);
+  assert.match(readiness, /readinessAction: LINGGAN_RUNTIME_ACTION\.GET_PAGE_CONTEXT/);
+});
+
+test('stable tab wait ignores the first complete document when XHS redirects', async () => {
+  const listeners = new Set();
+  let tab = { status: 'complete', url: 'https://www.xiaohongshu.com/discovery/item/note-id?xsec_token=signed' };
+  const probedUrls = [];
+  const tabs = {
+    onUpdated: {
+      addListener(listener) { listeners.add(listener); },
+      removeListener(listener) { listeners.delete(listener); },
+    },
+    async get() { return { ...tab }; },
+    async sendMessage() {
+      probedUrls.push(tab.url);
+      return { success: true, context: { url: tab.url } };
+    },
+  };
+  const waiting = waitForStableTab({
+    tabs,
+    tabId: 42,
+    readinessAction: 'getPageContext',
+    timeoutMs: 250,
+    stableForMs: 30,
+    probeRetryMs: 5,
+  });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  tab = { status: 'loading', url: 'https://www.xiaohongshu.com/explore/note-id?xsec_token=signed' };
+  for (const listener of listeners) listener(42, { status: 'loading', url: tab.url }, { ...tab });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  tab = { ...tab, status: 'complete' };
+  for (const listener of listeners) listener(42, { status: 'complete' }, { ...tab });
+
+  assert.equal(await waiting, true);
+  assert.deepEqual(probedUrls, ['https://www.xiaohongshu.com/explore/note-id?xsec_token=signed']);
+  assert.equal(listeners.size, 0);
+});
+
+test('stable tab wait retries a late content-script injection within the bounded timeout', async () => {
+  const listeners = new Set();
+  let probes = 0;
+  const url = 'https://www.xiaohongshu.com/explore/note-id?xsec_token=signed';
+  const tabs = {
+    onUpdated: {
+      addListener(listener) { listeners.add(listener); },
+      removeListener(listener) { listeners.delete(listener); },
+    },
+    async get() { return { status: 'complete', url }; },
+    async sendMessage() {
+      probes += 1;
+      if (probes === 1) throw new Error('Receiving end does not exist');
+      return { success: true, context: { url } };
+    },
+  };
+
+  assert.equal(await waitForStableTab({
+    tabs,
+    tabId: 43,
+    readinessAction: 'getPageContext',
+    timeoutMs: 150,
+    stableForMs: 5,
+    probeRetryMs: 5,
+  }), true);
+  assert.equal(probes, 2);
+  assert.equal(listeners.size, 0);
 });
 
 test('scheduled material lanes preserve the server task and submit one capability package', () => {

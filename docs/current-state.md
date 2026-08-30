@@ -8,13 +8,13 @@
 
 ## 当前阶段
 
-### MATERIAL-DEEPENING-001 / Issue #103（实现中，未合并/未部署）
+### MATERIAL-DEEPENING-001 / Issue #103（真实 canary 执行中）
 
 当前实施把已发现的固定 12 个作品作为明确 WorkOrder 范围，而不是让普通巡检对全部发现结果自动扩张。新增 additive `0022`–`0024`：固定作品及评论/回复/媒体/OCR/ASR策略、详情互动观察时间线、实况图片 still/motion 组件、有界媒体处理租约和可检索派生文本。发租时每个作品顺序展开 `content_detail → media_slots → comments → replies`，每个 Task 只请求一个能力；媒体和处理重试均最多 3 次。
 
-Browser Producer 源码已升至 `0.8.0`：安装、启动或 alarm 唤醒后自动签到与领活，能按作品标识自动打开详情并分别回传详情、媒体、评论、回复 Package；不再依赖人工点击“领取”。普通图片、封面、视频与 Live Photo 共用媒体槽位，Live Photo 的 still/motion 候选和取得状态分开。服务端会自动取得短期 URL 的字节并保存在独立本地媒体根；本机媒体 worker 使用 Tesseract/FFmpeg/Whisper 形成缩略图、OCR、音频、ASR 和视频抽帧 OCR，空文本按 `KNOWN_EMPTY` 保留。Evidence Library 已接入互动时间线、评论/回复与派生文本检索，并只使用受控本地资产。
+Browser Producer 已沿真实 canary 升至 `0.8.2` 并进入 `main` 与本机发布：安装、启动或 alarm 唤醒后自动签到与领活，能按作品标识自动打开详情并分别回传详情、媒体、评论、回复 Package；不再依赖人工点击“领取”。服务端派发最新已接纳发现材料中的短期 XHS 签名来源链接，插件验证作品身份与 `xsec_token` 后执行；插件升级后同一工位可原位承接有效租约中的未完成 Task。普通图片、封面、视频与 Live Photo 共用媒体槽位，Live Photo 的 still/motion 候选和取得状态分开。服务端会自动取得短期 URL 的字节并保存在独立本地媒体根；本机媒体 worker 使用 Tesseract/FFmpeg/Whisper 形成缩略图、OCR、音频、ASR 和视频抽帧 OCR，空文本按 `KNOWN_EMPTY` 保留。Evidence Library 已接入互动时间线、评论/回复与派生文本检索，并只使用受控本地资产。
 
-当前只证明源码、migration 结构与聚焦合同测试；尚未生成最终 release ZIP、未合并到 `origin/main`、未应用到共享数据库、未切换 3000 常驻快照、未让 Chrome 加载 0.8.0，也未让 12 个作品真实穿过详情/评论/媒体/OCR/ASR。以上运行证明必须在本卡唯一一次最终验收中完成，不能由代码检查替代。
+共享数据库已应用 additive `0022`–`0024`，API、调度 worker 和媒体 worker 已切到 `origin/main@fbb1686` 冻结快照，Chrome 已加载 0.8.2。首个 `content_detail` Task 已由 0.8.2 自动承接，真实浏览历史证明带 token 的 `/discovery/item/{id}` 被打开并由平台跳转到仍保留 token 的 `/explore/{id}`；但该次没有形成 Attempt、Package 或 Receipt。当前 0.8.3 候选只收口这一真实时序缺口：首次 `complete` 后等待最终 URL/加载状态稳定 1.5 秒，并要求最终 content script 对同一 URL 回应，整体仍受 20 秒上限约束。它不新增 migration、不重建 WorkOrder/Task，也不扩大采集范围。真实 12 作品穿过详情/评论/媒体/OCR/ASR 与 Evidence Library 的最终验收仍未完成。
 
 ### OBSERVATION-RUNTIME-001 / Issue #94 与 MEDIA-ACQUISITION-001 / Issue #98（已完成并运行）
 
