@@ -117,12 +117,19 @@ async function loadMoreCommentSurface(container, distance = DEFAULT_COMMENT_SCRO
   await waitIfPaused();
   if (shouldStop() || !await actionGate.before({ kind: 'dom_scroll' })) return false;
   const before = getCommentSurfaceFingerprint(container);
+  const beforeScrollTop = Number(scrollParent.scrollTop || 0);
+  const beforeScrollHeight = Number(scrollParent.scrollHeight || 0);
   scrollParent.scrollBy({ top: distance, behavior: 'auto' });
   const changed = await waitForCondition(() => {
     if (hasXhsCollectionRiskSignal()) return true;
     const current = getActiveCommentsContext().container || container;
     const signals = readCommentSignalsSafe(current);
-    return signals.hasEndMarker || getCommentSurfaceFingerprint(current) !== before;
+    const positionAdvanced = Number(scrollParent.scrollTop || 0) > beforeScrollTop;
+    const surfaceExpanded = Number(scrollParent.scrollHeight || 0) > beforeScrollHeight;
+    return signals.hasEndMarker
+      || getCommentSurfaceFingerprint(current) !== before
+      || positionAdvanced
+      || surfaceExpanded;
   }, DEFAULT_DOM_TOP_UP_SETTLE_MS, 140);
   await actionGate.after({ kind: 'dom_scroll', changed });
   await waitIfPaused();
@@ -604,11 +611,12 @@ async function collectCommentsViaApi({
 
     const nextContainer = resolveContainer() || container;
     if (nextContainer) {
-      await loadMoreCommentSurface(nextContainer, DEFAULT_COMMENT_SCROLL_DISTANCE, {
+      const surfaceProgressed = await loadMoreCommentSurface(nextContainer, DEFAULT_COMMENT_SCROLL_DISTANCE, {
         actionGate,
         shouldStop,
         waitIfPaused,
       });
+      if (surfaceProgressed) noNewCount = 0;
     } else {
       await waitForPageSettle(500);
     }
@@ -861,11 +869,12 @@ async function collectCommentsFromDom({
     }
 
     const nextContainer = resolveContainer() || container;
-    await loadMoreCommentSurface(nextContainer, DEFAULT_COMMENT_SCROLL_DISTANCE, {
+    const surfaceProgressed = await loadMoreCommentSurface(nextContainer, DEFAULT_COMMENT_SCROLL_DISTANCE, {
       actionGate,
       shouldStop,
       waitIfPaused,
     });
+    if (surfaceProgressed) noNewCount = 0;
   }
 
   if (persist && allComments.length > 0) {
