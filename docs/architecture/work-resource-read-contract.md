@@ -70,6 +70,8 @@ Browser Producer 的详情解析先返回一个有来源资格的时间断言：
 
 服务端只有在 `sourceKind=platform_epoch`、精度为秒/毫秒、字段名命中已支持的详情字段清单，且 parser version 精确为 `xhs-detail-time-v2` 时，才把值写入 `published_at`。可见的“3 小时前”“4 月 17 日”仍保留为 `SOURCE_TEXT_ONLY`；即使插件为了当前页面体验算出了一个毫秒值，服务端也不得把该派生值晋升成历史精确发布时间。
 
+2026-08-31 的一条用户授权签名详情探针已完成：作品身份精确匹配，SSR `noteDetailMap` 顶层字段为 `time`，JavaScript 类型为 `number`，值为 13 位毫秒 epoch `1787747429000`，对应 `2026-08-26T12:30:29Z` / 北京时间 `2026-08-26 20:30:29 +08:00`；页面可见文本为“4天前 广东”。该结果精确命中现有 `time + platform_epoch + millisecond + xhs-detail-time-v2` 合同，不需要改动 Producer 映射。探针未保留签名 token、正文、作者资料、评论或媒体。
+
 迁移只新增列，不回写、覆盖或重新解释旧 Package。旧行没有精确来源时继续是 `UNKNOWN` 或 `SOURCE_TEXT_ONLY`，不能用 `observedAt/acceptedAt` 代替发布时间。
 
 ## 5. Media V2 继承
@@ -81,5 +83,5 @@ Browser Producer 的详情解析先返回一个有来源资格的时间断言：
 - `layout=research|table|cover` 是本地展示状态；`view=` 仍是材料状态筛选，两者不得复用。
 - 切换布局不重新请求 API，不修改数据，不改变当前选择与 Inspector。
 - `Research` 展示完整 lane 带；`Table` 用于横向比较；`Cover` 用于视觉扫描。
-- 真实签名详情字段探针只允许一条、只读发布时间字段名/类型/值，不保存正文或媒体；未获当次外部请求确认前保持未执行。
+- 真实签名详情字段探针已在当次明确授权下一次性完成，只读发布时间字段名/类型/值；未保存正文、作者资料、评论或媒体，不得把本次授权延伸为第二条平台请求。
 - 自动测试或 PostgreSQL 合成 proof 不等于真实 XHS、真实浏览器、部署或 Mog 业务验收。

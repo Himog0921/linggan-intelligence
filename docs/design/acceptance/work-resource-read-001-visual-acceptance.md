@@ -3,15 +3,15 @@
 > 状态: 一次性报告
 > 最后核对: 2026-08-31
 > 适用范围: Issue #110 / WORK-RESOURCE-READ-001 的共享作品资源读取、Evidence Library 三排版与自动验证
-> 事实来源: 当前分支 Rust/SQL/HTML/CSS/JS、Browser Producer 源码、聚焦自动检查、隔离 PostgreSQL proof 与 127.0.0.1:3300 in-app Browser 实际检查
-> 冲突时以谁为准: 用户最新确认、当前代码/API 合同与真实运行证据；本报告不替代合并、部署、真实 XHS 探针或 Mog 业务验收
+> 事实来源: 当前分支 Rust/SQL/HTML/CSS/JS、Browser Producer 源码、聚焦自动检查、隔离 PostgreSQL proof、127.0.0.1:3300 in-app Browser 实际检查与一条用户授权 XHS 签名详情字段探针
+> 冲突时以谁为准: 用户最新确认、当前代码/API 合同与真实运行证据；本报告不替代 content_detail Package/Receipt、共享库迁移、部署或 Mog 业务验收
 > Issue: #110
 > 页面: `/corpus/evidence`
 
 ## 验收对象与条件
 
 - PAGE / Pattern：`PAGE-EVIDENCE-001`；L1 Corpus Explorer + embedded L2 Split Evidence Inspector。
-- 数据前提：合同/状态 Oracle 使用隔离 PostgreSQL 16 合成 Package；本轮 UI 走查另以只读方式连接本机数据库，显示 13 个作品集合，不写入、不迁移、不访问真实 XHS。
+- 数据前提：合同/状态 Oracle 使用隔离 PostgreSQL 16 合成 Package；UI 走查另以只读方式连接本机数据库，显示 13 个作品集合。后续一次性 XHS 探针只读取一条已授权签名详情的发布时间字段元组，不写 Linggan、不保留正文/作者/评论/媒体。
 - 关联合同：`WORK-RESOURCE-READ-001`、Media V2、Material Projection。
 - 声明视口：1440×900 桌面与 375×812 窄屏已实际截图/几何检查；900/390px 未在本轮复拍。隔离实例没有接入当前运行快照的独立媒体根，个别图片采用诚实缺图替代，不据此判断媒体资格或生产呈现。
 
@@ -19,7 +19,7 @@
 
 | 场景 | 用户任务 | 预期事实 | 自动结果 | 视觉结果 |
 |---|---|---|---|---|
-| 精确详情时间 | 查看作品发布时间 | platform epoch 显示 `KNOWN`，带 field/kind/precision/parser | PostgreSQL proof 通过 | NOT VERIFIED |
+| 精确详情时间 | 查看作品发布时间 | platform epoch 显示 `KNOWN`，带 field/kind/precision/parser | PostgreSQL proof 通过；真实字段回归通过 | VERIFIED：`time` / `number` / 13 位毫秒 epoch，可见文本“4天前 广东” |
 | 相对时间文本 | 避免把“3小时前”当精确历史时间 | `publishedAt=null`、`SOURCE_TEXT_ONLY`、保留参照时间 | PostgreSQL 负向 proof 通过 | NOT VERIFIED |
 | 创作者目标发现 | 看出内容从哪个监控目标来 | 显示目标；作品作者在没有 ID 时仍未知，关系 `NOT_VERIFIED` | collection dispatch proof 通过 | NOT VERIFIED |
 | 三种排版 | 在研读、表格、封面间切换 | 同一 items、同一选择、同一 Inspector；不重新 fetch | JS/source test 通过 | VERIFIED：实际点击写入 `layout`，三种 DOM 布局切换且选择不变 |
@@ -37,12 +37,12 @@
 |---|---|---|---|
 | 设计规格一致 | VERIFIED（branch） | PAGE、Manifest、LIDS migration log、CSS/JS 静态检查、1440/375 实际渲染 | 未做 Chrome/900/390，多媒体根未接入隔离实例 |
 | 前端/组件实现 | VERIFIED（branch） | 三 layout selector、响应式 CSS、共享 API root | 未合并、未发布 |
-| 自动检查 | VERIFIED | Node 语法、125 项插件测试、Rust compile/test、PostgreSQL proof、新增状态预设/重复文案聚焦测试 | 自动检查不替代视觉走查 |
+| 自动检查 | VERIFIED | Node 语法、插件聚焦测试、Rust compile/test、PostgreSQL proof、新增状态预设/重复文案聚焦测试 | 自动检查不替代视觉走查或 content_detail Receipt |
 | 本机 UI 走查 | VERIFIED（隔离实例） | 13 个作品集合；1440/375 几何、双视图区、表格字号、截图、真实系统视图点击与 URL 状态 | 不是 `:3000` 部署，媒体根未接入，不是 Chrome/Mog 验收 |
-| 真实链路/回执 | PARTIAL | Target/WorkOrder/Package 合成链；真实已有目标数据只做先前诊断 | 签名详情探针未获确认，未执行 |
+| 真实链路/回执 | PARTIAL | Target/WorkOrder/Package 合成链；一条用户授权签名详情已核实 `time:number` 毫秒 epoch | 本次不产生 content_detail Attempt/Package/Receipt，不证明共享投影已收到真实时间 |
 | 部署 | NOT VERIFIED | 无 | 共享 migration/API/插件均未发布 |
 | Mog / 业务验收 | NOT VERIFIED | 无 | 等待 PR、运行页与用户验收 |
 
 ## 不得据此推断
 
-不得把本报告解释为真实 XHS 发布时间字段已核实、12 条历史笔记已回填、共享数据库已迁移、Chrome 已加载新插件、新 UI 已部署到 `:3000`、本轮视觉已由 Mog 最终接受或任务可合并。真实签名详情探针仍需要当次外部请求确认。
+本报告只证明一条真实 XHS 详情的发布时间字段已核实，不得扩大为 content_detail Package/Receipt 已接纳、12 条历史笔记已回填、共享数据库已迁移、Chrome 已加载本分支、新 UI 已部署到 `:3000`、本轮视觉已由 Mog 最终接受或任务可合并。
