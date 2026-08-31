@@ -158,3 +158,51 @@ test('an offscreen reply control is revealed in one loop and clicked only by a l
   delete globalThis.window;
   delete globalThis.document;
 });
+
+test('a reply control within one fractional pixel of the viewport edge is clicked without a reveal loop', async () => {
+  let clicks = 0;
+  let scrolls = 0;
+  const scrollParent = {
+    parentElement: null,
+    getBoundingClientRect: () => ({ top: 121, bottom: 768 }),
+  };
+  const button = {
+    parentElement: scrollParent,
+    textContent: '展开更多回复',
+    getBoundingClientRect: () => ({ top: 736.03125, bottom: 768.03125 }),
+    scrollIntoView() { scrolls += 1; },
+    click() { clicks += 1; },
+  };
+  const parentCommentEl = {
+    querySelectorAll(selector) {
+      if (selector === 'div.show-more') return [button];
+      if (selector === '.comment-item.comment-item-sub') return [];
+      return [];
+    },
+  };
+  globalThis.window = {
+    innerHeight: 900,
+    getComputedStyle: (element) => element === scrollParent
+      ? ({ overflow: 'visible', overflowY: 'auto' })
+      : ({ overflow: 'visible', overflowY: 'visible' }),
+  };
+  globalThis.document = {
+    documentElement: {
+      getBoundingClientRect: () => ({ top: 0, bottom: 900 }),
+    },
+  };
+
+  try {
+    const result = await expandNextReply(parentCommentEl, {
+      waitBeforeAction: async () => {},
+      waitAfterAction: async () => {},
+    });
+
+    assert.equal(result.reason, 'reply_expanded');
+    assert.equal(clicks, 1);
+    assert.equal(scrolls, 0);
+  } finally {
+    delete globalThis.window;
+    delete globalThis.document;
+  }
+});
