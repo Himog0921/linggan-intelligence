@@ -609,6 +609,7 @@ async function collectCommentsViaApi({
 
   const finalContainer = resolveContainer() || container;
   const finalSignals = readCommentSignalsSafe(finalContainer);
+  const finalContext = getActiveCommentsContext();
   const hasDomComments = Boolean(finalContainer?.querySelector?.('.parent-comment, .comment-item'));
   return {
     total: allComments.length,
@@ -620,7 +621,10 @@ async function collectCommentsViaApi({
       hasExpandableReplies: finalSignals.hasExpandableReplies,
       currentTotal: allComments.length,
       maxTotal,
-      commentHint: resolveCommentContinuationHint(finalSignals.commentHint, publicCommentCount),
+      commentHint: resolveCommentContinuationHint(
+        finalSignals.commentHint,
+        publicCommentCount ?? finalContext?.publicCommentCount,
+      ),
       hasDomComments,
     }),
     stopReason: riskStopped

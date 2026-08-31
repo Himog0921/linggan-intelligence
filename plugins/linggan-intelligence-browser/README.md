@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.9`
+> 版本: `0.8.10`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -115,6 +115,9 @@ Attempt 的缓存当成本次重采结果。新领取的
 媒体工作代次会优先于旧浏览器本地媒体行执行，平台候选下载最长等待 20 秒，避免旧请求悬挂
 并把新封面工作拖过 Lease。0.8.8 已真实证明 `15/492` 人工暂停会形成可接纳的
 `PARTIAL / manual_pause` 评论与回复 Package；完整 492 条与封面物化仍以 0.8.9 重载后复验为准。
+0.8.10 修正 0.8.9 真实复验暴露的最后一处公开数传递断点：当详情页标题不含
+“共 N 条评论”文案时，API collector 的终态续采判定直接使用当前详情上下文已观察的公开数，
+不再将已正确显示的 `18/508` 误判为无目标 `no_progress`。
 
 实况图片仍是一个逻辑媒体卡槽，但静态图与动态图分别携带候选地址、取得工作和状态；
 普通图片、封面、视频和实况图片都只把远程 URL 当来源观察，长期展示必须使用 Linggan
@@ -140,7 +143,7 @@ npm run release:reproducibility
 npm run verify:linggan-isolation
 ```
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.9.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.10.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台
