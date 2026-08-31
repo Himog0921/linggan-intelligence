@@ -56,6 +56,7 @@
 | 真实详情公开数续采（0.8.10） | 详情标题无“共 N 条”文案时，终态判定继续使用详情上下文观察到的公开评论数 | 不把 `18/508` 误判为无目标 `no_progress` |
 | Attempt 公开数持久（0.8.11） | 采集任一轮观察到的公开数在本 Attempt 内保留，供终态续采判定与部分快照共用 | 不依赖虚拟列表终态时仍保留同一 DOM 容器 |
 | 滚动位置进展（0.8.12） | `scrollTop` 能前进或 `scrollHeight` 增长即视为页面加载进展，继续克制下移到新评论或真实底部 | 不把“当前 280px 内没有新节点”误报为 no-progress |
+| 单篇全回复参数贯通（0.8.13） | 人工设置的 `allReplies` 与回复上限从单篇任务控制器传入共享评论采集器 | 不把界面已选“全部展开”静默降级成默认两级模式 |
 
 ## 新旧运行路径对照
 
@@ -66,7 +67,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.12）
+当前路径（0.8.13）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox
