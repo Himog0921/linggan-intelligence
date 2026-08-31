@@ -264,6 +264,7 @@
     row.setAttribute('role', 'option');
     row.tabIndex = -1;
     row.dataset.publicRef = publicRef || '';
+    row.dataset.platform = String(item.identity?.platform || 'unknown').toLowerCase();
     row.setAttribute('aria-selected', String(publicRef === model.selectedRef));
 
     const identity = node('div', 'ev-identity');

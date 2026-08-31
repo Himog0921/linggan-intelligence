@@ -2030,6 +2030,16 @@ fn evidence_runtime_renders_only_controlled_media_handles() {
 }
 
 #[test]
+fn evidence_runtime_uses_the_xhs_portrait_cover_ratio_in_visual_layouts() {
+    assert!(EVIDENCE_LIBRARY_JS.contains(
+        "row.dataset.platform = String(item.identity?.platform || 'unknown').toLowerCase()"
+    ));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(
+        ".ev-work-list .ev-work-row[data-platform=\"xhs\"] .ev-preview{min-height:0;aspect-ratio:3/4;align-self:start}"
+    ));
+}
+
+#[test]
 fn evidence_runtime_preserves_unknown_partial_and_restricted_states() {
     for state in [
         "UNKNOWN",
