@@ -26,6 +26,8 @@ Chrome 已真实重载 0.8.8 并报到；目标页当前公开评论数为 492�
 
 详情发布时间链修复了“插件算出 `publishedAt`、服务接纳却只存文本”的断点：additive `0026_work_resource_read.sql` 保存实际字段、source kind、precision、reference 与 parser version，只有合格 platform epoch 晋升为精确 `published_at`；相对/日历文本为 `SOURCE_TEXT_ONLY`。资料库增加 `layout=research|table|cover` 三种只改变排版的视图，继续共享查询、字段资格、当前选择和 Inspector。与评论接纳升级合并后，Rust workspace、插件 164 项聚焦测试、发布包校验/可复现性、51 项隔离 PostgreSQL proof、调度序列与完整 local-runtime proof 均通过；共享本机库只记录到 `0025_comment_current_projection`，尚未应用 `0026`，运行时尚未发布，一条真实签名详情字段探针和三视口人工验收也仍未完成。
 
+Mog 对当前 Evidence Library 首屏指出重复定位文案、左侧 `STATE VIEWS` 用途不清和主内容失焦，并确认参考稿红框内的 `SYSTEM VIEWS / 系统视图`、`MY VIEWS / 我的视图` 是希望保留的设计语言。交付分支已删除重复宣言和第三栏，把五项真实查询预设放入系统视图；我的视图因保存合同未接通，只显示诚实禁用空态。Table 标题/上下文/辅助正文/状态提升到 14/12/11/10px，桌面行高 92px。隔离 `127.0.0.1:3300` 只读实例以本机 13 个作品集合完成 1440×900 与 375×812 的 in-app Browser 几何、截图、computed style 和系统视图实际点击检查；没有改 `:3000`、数据库、媒体根、插件或采集，Mog 对本轮最终视觉仍待确认。
+
 ### MATERIAL-DEEPENING-001 / Issue #103（真实 canary 执行中）
 
 当前实施把已发现的固定 12 个作品作为明确 WorkOrder 范围，而不是让普通巡检对全部发现结果自动扩张。新增 additive `0022`–`0024`：固定作品及评论/回复/媒体/OCR/ASR策略、详情互动观察时间线、实况图片 still/motion 组件、有界媒体处理租约和可检索派生文本。发租时每个作品顺序展开 `content_detail → media_slots → comments → replies`，每个 Task 只请求一个能力；媒体和处理重试均最多 3 次。

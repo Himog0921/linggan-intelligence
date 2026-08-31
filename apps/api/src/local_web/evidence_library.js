@@ -53,9 +53,6 @@
     inspectorSummary: document.getElementById('ev-inspector-summary'),
     inspectorRef: document.getElementById('ev-inspector-ref'),
     inspectorFeedback: document.getElementById('ev-inspector-feedback'),
-    contextCount: document.getElementById('ev-context-count'),
-    contextSelection: document.getElementById('ev-context-selection'),
-    contextState: document.getElementById('ev-context-state'),
     back: document.getElementById('ev-back-to-list'),
     tableHead: document.getElementById('ev-table-head'),
   };
@@ -200,11 +197,6 @@
     refs.feedback.replaceChildren();
   }
 
-  function setReadState(chinese, code) {
-    refs.contextState.replaceChildren();
-    addTextWithTech(refs.contextState, chinese, code);
-  }
-
   function queryReceipt(payload, appended) {
     const count = model.items.length;
     refs.receipt.replaceChildren();
@@ -219,11 +211,9 @@
     }
     refs.receipt.append(main, meta);
     refs.resultsCount.textContent = `${count} 个作品集合`;
-    refs.contextCount.textContent = String(count);
     refs.nextList.hidden = !payload.cursor;
     refs.nextList.disabled = !payload.cursor;
     refs.nextList.dataset.cursor = payload.cursor || '';
-    setReadState('材料投影已读取', 'MATERIAL PROJECTION');
   }
 
   function laneSummary(item, lane) {
@@ -364,8 +354,7 @@
       clearInspector();
       setFeedback('loading', '正在读取本机材料投影', '只读取 Linggan 已接纳的作品级材料；不会触发平台搜索或采集。', 'LOCAL READ');
       refs.list.replaceChildren();
-      refs.contextCount.textContent = '—';
-      setReadState('正在读取材料投影', 'LOCAL READ');
+      refs.resultsCount.textContent = '正在读取';
     }
     refs.nextList.disabled = true;
     try {
@@ -388,10 +377,8 @@
       if (error.name === 'AbortError') return;
       model.items = [];
       renderRows(false);
-      refs.contextCount.textContent = '—';
       refs.resultsCount.textContent = '读取不可用';
       refs.nextList.hidden = true;
-      setReadState('材料投影读取失败', error.code || 'READ PROJECTION UNAVAILABLE');
       setFeedback('error', '本机材料读取暂时不可用', '当前没有读取任何作品材料；页面不会回退到旧卡片、远程数据库或平台 CDN。', error.code || 'READ PROJECTION UNAVAILABLE');
       refs.receipt.replaceChildren();
       addTextWithTech(refs.receipt, '当前未读取任何材料，不能据此判断库为空或来源不存在。', error.code || 'READ PROJECTION UNAVAILABLE');
@@ -424,7 +411,6 @@
     model.commentUrl = null;
     model.commentCursor = null;
     model.commentItems = [];
-    refs.contextSelection.textContent = '—';
     refs.inspectorRef.textContent = 'SELECTION REQUIRED';
     refs.inspectorTitle.textContent = '请选择一个作品材料集合';
     refs.inspectorSummary.textContent = '右侧只核验当前选择，不补造未读取的详情。';
@@ -441,7 +427,6 @@
       return;
     }
     model.selectedRef = publicRef;
-    refs.contextSelection.textContent = publicRef.slice(0, 8);
     [...refs.list.querySelectorAll('[data-public-ref]')].forEach((row) => {
       const selected = row.dataset.publicRef === publicRef;
       row.setAttribute('aria-selected', String(selected));
@@ -474,7 +459,6 @@
 
   function showInspectorSourceIncomplete(item, detail) {
     model.selectedRef = item?.identity?.publicRef || null;
-    refs.contextSelection.textContent = model.selectedRef ? model.selectedRef.slice(0, 8) : '—';
     refs.inspectorRef.textContent = model.selectedRef ? `WORK ${model.selectedRef}` : 'SELECTION REQUIRED';
     refs.inspectorTitle.textContent = knownText(item?.display?.title, item?.display?.titleState, '标题当前未知');
     refs.inspectorSummary.textContent = detail;

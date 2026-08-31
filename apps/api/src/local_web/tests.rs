@@ -1972,6 +1972,54 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
 }
 
 #[test]
+fn evidence_runtime_restores_system_and_personal_view_strategy_without_faking_saved_views() {
+    let html = evidence_library_html(None);
+
+    assert!(html.contains("aria-label=\"按材料状态快速筛选\""));
+    assert!(html.contains("SYSTEM VIEWS"));
+    assert!(html.contains("系统视图"));
+    assert!(html.contains("MY VIEWS"));
+    assert!(html.contains("我的视图"));
+    assert!(html.contains("暂无已保存视图"));
+    assert!(html.contains("SAVED VIEWS NOT CONNECTED"));
+    assert!(html.contains("data-ev-view=\"partial\""));
+    assert!(html.contains("data-ev-view=\"risk\""));
+    assert!(html.contains("data-ev-view=\"cleaned\""));
+    assert!(html.contains("data-ev-view=\"restricted\""));
+    assert!(!html.contains("data-ev-saved-view"));
+    assert!(!html.contains("保存当前视图"));
+    assert!(!html.contains("状态视图"));
+    assert!(!html.contains("以作品为顶层的多材料证据库"));
+    assert!(!html.contains("作品级材料集合"));
+    assert!(!html.contains("多通道真实状态"));
+    assert!(!html.contains("ev-context-count"));
+
+    assert!(EVIDENCE_LIBRARY_JS.contains("partial: { laneState: 'PARTIAL' }"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("risk: { laneState: 'RISK_CONTROL' }"));
+    assert!(
+        EVIDENCE_LIBRARY_JS
+            .contains("cleaned: { lane: 'media_bytes', laneState: 'BYTES_CLEANED' }")
+    );
+    assert!(EVIDENCE_LIBRARY_JS.contains("params.set('layout', model.activeLayout)"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("params.set('view', model.activeView)"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-table-work h2"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains("font-size:14px;line-height:1.35"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-table-context{display:grid;gap:6px;font-size:12px"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-layout-switch{display:flex;border:0}"));
+    assert!(
+        EVIDENCE_LIBRARY_CSS.contains(".ev-layout-switch button[aria-pressed=\"true\"]::after")
+    );
+    assert!(EVIDENCE_LIBRARY_CSS.contains("height:4px;background:var(--v7-red)"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(
+        ".ev-layout-switch button:focus-visible{outline:0;background:var(--v7-gray);box-shadow:inset 0 3px var(--v7-red)}"
+    ));
+    assert!(
+        !EVIDENCE_LIBRARY_CSS
+            .contains(".ev-layout-switch button[aria-pressed=\"true\"]{background:var(--v7-black)")
+    );
+}
+
+#[test]
 fn evidence_runtime_renders_only_controlled_media_handles() {
     assert!(!EVIDENCE_LIBRARY_JS.contains("function observedCoverUrl"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("observedSourceUrl"));
