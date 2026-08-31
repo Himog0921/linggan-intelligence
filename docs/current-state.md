@@ -8,7 +8,7 @@
 
 ## 当前阶段
 
-### PLUGIN-XHS-COMMENT-EXECUTION-MEDIA-001（v0.8.13 候选，真实链复验中）
+### PLUGIN-XHS-COMMENT-EXECUTION-MEDIA-001（v0.8.14 候选，真实链复验中）
 
 真实长评论样本“ADHD的尽头是成瘾”已证明标准详情的 30 条评论材料被 Linggan 接纳：当前投影为 16 条顶层评论、14 条回复，详情公开评论数为 452。暂停中的单篇深采在浏览器内已取得 130 条，但旧 0.8.7 只在 collector 返回时提交 Package，因此新增 100 条尚未进入 Intelligence；控制面把首轮 53 锁成总数，形成 `130/53`。同一作品已有 8 个媒体槽位和可访问的 XHS 封面候选，但没有本地 Materialization；媒体工作被领取后只留下 `lease_expired`，所以 Evidence Library 不展示远程 CDN 封面是符合边界的，缺陷在媒体执行没有完成而不是页面漏用远程 URL。
 
@@ -24,11 +24,13 @@ Chrome 已真实重载 0.8.8 并报到；目标页当前公开评论数为 492�
 
 0.8.12 重载后的真实两级评论 Attempt 已从旧停点 18 条推进到 `121/533`，滚动到底、无验证码或访问异常，并以 `PARTIAL / no_progress` 形成真实回执，证明自适应滚动与部分材料交付有效。继续验证“全部楼层回复”时，设置弹窗已明确显示选中，但单篇任务控制器只保存 `commentDepthMode`、没有把它传入 collector，运行日志仍显示两级模式的 `1/3` 停止预算，页面保留 27 个未展开入口。0.8.13 只补齐该参数透传及回归测试；完整 `533/533` 仍须重载后从新 Attempt 证明。
 
+0.8.14 将另一会话已合并的 Work Resource Read / Evidence Library 平台改动、0.8.13 评论执行修复和一条用户授权的 XHS 详情时间字段回归收口为同一发行快照。真实探针确认现有 `xhs-detail-time-v2` 映射正确，因此不新增另一套时间解析。197 项插件测试、TypeScript 合同、production build、content runtime / Linggan isolation、release 校验与全新依赖可复现重建已通过，ZIP SHA-256 为 `28acbf796468ba416dcffeea801ba34fea7686c6b532e2bc54913b20d999376a`。浏览器重载和新 Attempt 的全回复真实链验证仍待执行。
+
 ### WORK-RESOURCE-READ-001 / Issue #110（实现与集成验证完成，部署待完成）
 
 为避免 Intelligence 各页各自拼封面、标题、作者与时间，当前交付分支新增中立 `Work Resource Read` Interface 与 `/api/local/work-resources`；Evidence Library 只是首个消费者。Media V2 继续拥有媒体事实，页面不能绕过共享接口另读 SQL/Package。profile discovery 的监控目标作为 collection context 单独返回，作品作者保持独立；没有详情 author ID 时明确 `NOT_VERIFIED`，不再把目标显示名填成作者。
 
-详情发布时间链修复了“插件算出 `publishedAt`、服务接纳却只存文本”的断点：additive `0026_work_resource_read.sql` 保存实际字段、source kind、precision、reference 与 parser version，只有合格 platform epoch 晋升为精确 `published_at`；相对/日历文本为 `SOURCE_TEXT_ONLY`。资料库增加 `layout=research|table|cover` 三种只改变排版的视图，继续共享查询、字段资格、当前选择和 Inspector。与评论接纳升级合并后，Rust workspace、插件 164 项聚焦测试、发布包校验/可复现性、51 项隔离 PostgreSQL proof、调度序列与完整 local-runtime proof 均通过；共享本机库只记录到 `0025_comment_current_projection`，尚未应用 `0026`，运行时尚未发布，一条真实签名详情字段探针和三视口人工验收也仍未完成。
+详情发布时间链修复了“插件算出 `publishedAt`、服务接纳却只存文本”的断点：additive `0026_work_resource_read.sql` 保存实际字段、source kind、precision、reference 与 parser version，只有合格 platform epoch 晋升为精确 `published_at`；相对/日历文本为 `SOURCE_TEXT_ONLY`。资料库增加 `layout=research|table|cover` 三种只改变排版的视图，继续共享查询、字段资格、当前选择和 Inspector。与评论接纳升级合并后，Rust workspace、插件聚焦测试、发布包校验/可复现性、51 项隔离 PostgreSQL proof、调度序列与完整 local-runtime proof 均通过。2026-08-31 的一条用户授权 XHS 签名详情探针已确认 SSR 顶层 `time` 为 `number` 型 13 位毫秒 epoch，精确命中现有 `xhs-detail-time-v2`；未保存正文、作者资料、评论或媒体。探针不产生 content_detail Package/Receipt，不证明共享投影已收到该真实时间；运行发布与 Mog 最终业务验收仍未由本次探针完成。
 
 Mog 对当前 Evidence Library 首屏指出重复定位文案、左侧 `STATE VIEWS` 用途不清和主内容失焦，并确认参考稿红框内的 `SYSTEM VIEWS / 系统视图`、`MY VIEWS / 我的视图` 是希望保留的设计语言。交付分支已删除重复宣言和第三栏，把五项真实查询预设放入系统视图；我的视图因保存合同未接通，只显示诚实禁用空态。Table 标题/上下文/辅助正文/状态提升到 14/12/11/10px，桌面行高 92px。隔离 `127.0.0.1:3300` 只读实例以本机 13 个作品集合完成 1440×900 与 375×812 的 in-app Browser 几何、截图、computed style 和系统视图实际点击检查；没有改 `:3000`、数据库、媒体根、插件或采集，Mog 对本轮最终视觉仍待确认。
 

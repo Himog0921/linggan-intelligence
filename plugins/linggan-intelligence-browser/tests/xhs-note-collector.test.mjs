@@ -188,6 +188,18 @@ test('readXhsPublishedAtEvidence qualifies an exact detail epoch with its source
   });
 });
 
+test('readXhsPublishedAtEvidence preserves the real-probe time field as an exact millisecond epoch', () => {
+  assert.deepEqual(readXhsPublishedAtEvidence({ time: 1787747429000 }, { now: 1 }), {
+    publishedAt: 1787747429000,
+    publishedAtText: '1787747429000',
+    publishedAtSourceField: 'time',
+    publishedAtSourceKind: 'platform_epoch',
+    publishedAtPrecision: 'millisecond',
+    publishedAtReferenceObservedAt: null,
+    publishedAtParserVersion: 'xhs-detail-time-v2',
+  });
+});
+
 test('readXhsPublishedAtEvidence keeps relative detail text reference-qualified, not exact', () => {
   const now = new Date('2026-04-21T12:00:00+08:00').getTime();
   const result = readXhsPublishedAtEvidence({ time: '3小时前' }, { now });
