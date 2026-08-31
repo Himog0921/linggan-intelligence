@@ -8,6 +8,16 @@
 
 ## 当前阶段
 
+### PLUGIN-XHS-FINALIZATION-001（v0.8.16 终包候选，代码与隔离验证完成，真实重载待执行）
+
+在 `origin/main@62a60404` 上完成一次有界终包，不再按真实页面每暴露一个症状就增加一套旁路。执行面现在对 `TaskSpec → 页面动作回执 → Attempt/Package → outbox` fail-closed：同一详情 lane 以稳定幂等键复用单一提交，包含并发唤醒冲突回读；页面没有携带精确 `taskId/action/capability` 成功回执时不得报执行成功。暂停、停止、restart 和批量单篇 timeout 都等待当前 collector 退出后才允许下一执行者操作页面；scheduled 不限评论保留 `0 = unlimited`，批量数量允许明确输入 1–50 且不再静默缩成 50。
+
+媒体继续使用既有 Slot → Observation → Download → Blob → Materialization → Derivative 事实链，additive `0027_unified_media_resource.sql` 只补一层七类权威关系和统一 Work Resource `media` 读模型，不建立第二套资产。Evidence 列表、Inspector 与 Collection Target 禁止各自拼远程 URL；封面统一按“显式封面 → 首张正文图 → 视频 poster → 无”选择，并只返回 `INLINE_SAFE` 本地句柄。`requestedLimit` 与页面公开数、当前唯一取得数分开贯穿，避免再次产生 `130/53`。
+
+插件 207 项完整测试、合同检查、Rust workspace 测试/检查、隔离 PostgreSQL 全迁移与 47 项相关 proof、production build、发行校验和可复现重建已通过；新增并发 outbox 与远程头像禁止渲染回归也已通过。`v0.8.16` ZIP 当前 SHA-256 为 `b7b57375a20d83145ceabfea59a7ba71b2c313560d04fef006698ffd2ce8b05f`。Webpack 仍报告既有 bundle 体积警告，`npm audit` 仍报告 9 项既有依赖风险，Rust API 测试仍有既有 dead-code warnings。严格 `cargo clippy -D warnings` 在主线基线与终包分支均被同组 11 项既有 lint 阻断；本卡最初新增的 2 项已拆除，没有把全仓历史重构混入终包。
+
+真实边界没有被自动检查替代：现有运行工位最后上报 0.8.14，0.8.16 尚未被 Chrome 重载；“ADHD的尽头是成瘾”当前只证明跨 Attempt 的部分材料增长，最近一次为 `121/533 PARTIAL / manual_stop`，当前投影为 167 条稳定唯一评论。该作品 8 个媒体槽位仍为 0 个 Materialization，所以 Evidence 无封面仍是当前真实事实。共享持久数据库尚未应用 0027，本机 `:3000` 尚未替换，真实 XHS 全评论、媒体物化、Linggan 接纳和 Mog 业务验收都待精确包重载后的单次验证。
+
 ### PLUGIN-XHS-COMMENT-EXECUTION-MEDIA-001（v0.8.15 候选，真实链复验中）
 
 真实长评论样本“ADHD的尽头是成瘾”已证明标准详情的 30 条评论材料被 Linggan 接纳：当前投影为 16 条顶层评论、14 条回复，详情公开评论数为 452。暂停中的单篇深采在浏览器内已取得 130 条，但旧 0.8.7 只在 collector 返回时提交 Package，因此新增 100 条尚未进入 Intelligence；控制面把首轮 53 锁成总数，形成 `130/53`。同一作品已有 8 个媒体槽位和可访问的 XHS 封面候选，但没有本地 Materialization；媒体工作被领取后只留下 `lease_expired`，所以 Evidence Library 不展示远程 CDN 封面是符合边界的，缺陷在媒体执行没有完成而不是页面漏用远程 URL。

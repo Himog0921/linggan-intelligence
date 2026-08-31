@@ -4,6 +4,7 @@ import { waitForPageSettle } from './antiDetect.js';
 import { sendToBackground, reportProgress, reportDone } from '../../shared/messaging.js';
 import { BATCH_CONFIG, COLLECT_MODE, COMMENT_DEPTH_MODE, MSG, TASK_STATE } from '../../shared/constants.js';
 import { parseCount } from '../../shared/utils.js';
+import { requireBatchTargetCount } from '../../shared/batchLimits.js';
 import { localExecutionStore } from '../../linggan/localExecutionStore.js';
 import {
   createLocalExecutionHeartbeatReporter,
@@ -91,6 +92,7 @@ export class BatchCommentController extends BaseBatchController {
   }
 
   async start(mode, onProgress, settings = {}) {
+    const safeCount = requireBatchTargetCount(settings.count ?? 10);
     this.isRunning = true;
     this.isPaused = false;
     this._stoppedByUser = false;
@@ -156,7 +158,6 @@ export class BatchCommentController extends BaseBatchController {
         throw new Error(message);
       }
     }
-    const safeCount = Math.min(Math.max(1, Number(settings.count || 10) || 10), BATCH_CONFIG.maxPerSession);
     const triggerSource = String(settings.triggerSource || 'popup_manual').trim() || 'popup_manual';
     const externalTaskId = String(settings.externalTaskMeta?.externalTaskId || '').trim();
     const isRemoteDispatch = Boolean(externalTaskId);
@@ -313,6 +314,7 @@ export class BatchCommentController extends BaseBatchController {
         message: `正在采集第 ${this.currentIndex}/${this.noteList.length} 篇评论`,
       }).catch(() => {});
 
+      const resultsBeforeAttempt = this.results.length;
       try {
         const captured = await this._captureNoteWithTimeout(noteInfo);
         if (!captured) {
@@ -325,12 +327,21 @@ export class BatchCommentController extends BaseBatchController {
         }
       } catch (err) {
         console.warn(`[灵感爆爆爆] 评论采集失败: ${noteInfo.noteId}`, err);
-        this.results.push({
-          noteId: noteInfo.noteId,
-          total: 0,
-          error: String(err?.message || err || 'comment_collection_failed'),
-          stopReason: this._noteTimedOut ? 'time_budget' : 'collection_error',
-        });
+        if (this.results.length === resultsBeforeAttempt) {
+          this.results.push({
+            noteId: noteInfo.noteId,
+            total: 0,
+            error: String(err?.message || err || 'comment_collection_failed'),
+            stopReason: this._noteTimedOut ? 'time_budget' : 'collection_error',
+          });
+        } else if (this._noteTimedOut) {
+          const partial = this.results.at(-1);
+          if (partial?.noteId === noteInfo.noteId) {
+            partial.collectionState = partial.collectionState === 'complete' ? 'complete' : 'partial';
+            partial.stopReason = partial.collectionState === 'complete' ? partial.stopReason : 'time_budget';
+            partial.error = partial.collectionState === 'complete' ? partial.error : NOTE_COLLECTION_TIMEOUT_ERROR_MESSAGE;
+          }
+        }
         if (this._blockingError) throw this._blockingError;
         await this._closeNotePopup();
       } finally {
@@ -403,16 +414,24 @@ export class BatchCommentController extends BaseBatchController {
     if (!(timeoutMs > 0)) return this._captureNote(noteInfo);
 
     let timer = null;
+    const capture = Promise.resolve().then(() => this._captureNote(noteInfo));
     try {
-      return await Promise.race([
-        this._captureNote(noteInfo),
-        new Promise((_, reject) => {
+      const outcome = await Promise.race([
+        capture.then((value) => ({ kind: 'captured', value })),
+        new Promise((resolve) => {
           timer = window.setTimeout(() => {
             this._noteTimedOut = true;
-            reject(new Error(NOTE_COLLECTION_TIMEOUT_ERROR_MESSAGE));
+            resolve({ kind: 'timeout' });
           }, timeoutMs);
         }),
       ]);
+      if (outcome.kind === 'captured') return outcome.value;
+
+      // Timeout is a stop request, not permission to start the next note. The current collector
+      // observes `_noteTimedOut` through shouldStop; wait until it has drained all page actions
+      // before the loop can navigate again.
+      await capture.catch(() => null);
+      throw new Error(NOTE_COLLECTION_TIMEOUT_ERROR_MESSAGE);
     } finally {
       if (timer) window.clearTimeout(timer);
     }

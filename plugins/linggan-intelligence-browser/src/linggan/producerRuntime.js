@@ -254,6 +254,7 @@ export function packageAuthorProfile({ platform, author, observedAt, capturedAt 
 
 export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {}) {
   const sources = collectMediaCandidates(note);
+  const roleOrdinals = new Map();
   const sourceObject = normalizeSourceObject(platform, note);
   const contentExternalId = sourceObject.externalId;
   return createCapturePackage({
@@ -263,8 +264,11 @@ export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {
     capturedAt,
     target: { basis: 'known_set', contentExternalId: String(note?.noteId || note?.id || '') },
     coverage: { observed: sources.length, attempted: 0, acquired: 0, verified: 0, notAttempted: sources.length, unknown: 0, stoppedReason: 'media_acquisition_not_started' },
-    records: sources.map((candidate, ordinal) => {
-      const slotOrdinal = ordinal + 1;
+    records: sources.map((candidate) => {
+      // Ordinal belongs to the relationship purpose, not the mixed collector output. Seven body
+      // images followed by one explicit cover are image:1..7 plus cover:1, never cover:8.
+      const slotOrdinal = (roleOrdinals.get(candidate.role) || 0) + 1;
+      roleOrdinals.set(candidate.role, slotOrdinal);
       // Slot identity says "this content's nth image/video". A URL is intentionally only an
       // observation; it can change without replacing the slot or a previously acquired blob.
       const slotKey = `${platform}:${encodeURIComponent(contentExternalId)}:${candidate.role}:${slotOrdinal}`;

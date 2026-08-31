@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { COMMENT_DEPTH_MODE } from '../../shared/constants.js';
+import { BATCH_CONFIG, COMMENT_DEPTH_MODE } from '../../shared/constants.js';
 import { mountDialog, unmountDialog, NEO_OVERLAY_STYLE, NEO_PANEL_STYLE } from './dialogShared.js';
 import {
   XHS_SEARCH_FILTERS,
@@ -33,6 +33,10 @@ function BatchSettingsDialog({
     defaultDepthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? COMMENT_DEPTH_MODE.ALL_REPLIES : COMMENT_DEPTH_MODE.TWO_LEVEL,
   );
   const [commentLimit, setCommentLimit] = useState('');
+  const numericCount = Number(selectedCount);
+  const countIsValid = Number.isInteger(numericCount)
+    && numericCount >= 1
+    && numericCount <= BATCH_CONFIG.maxPerSession;
 
   const isAll = commentDepthMode === COMMENT_DEPTH_MODE.ALL_REPLIES;
   const updateSearchFilter = (groupKey, value) => {
@@ -81,6 +85,23 @@ function BatchSettingsDialog({
             </button>
           ))}
         </div>
+        <input
+          type="number"
+          min={1}
+          max={BATCH_CONFIG.maxPerSession}
+          step={1}
+          value={selectedCount}
+          onChange={(event) => setSelectedCount(event.target.value)}
+          aria-invalid={!countIsValid}
+          style={{
+            width: '100%', boxSizing: 'border-box', border: '2px solid #121212',
+            borderRadius: '10px', padding: '10px 12px', margin: '-6px 0 6px',
+            fontSize: '15px', fontWeight: 800, boxShadow: '2px 2px 0 #121212',
+          }}
+        />
+        <small style={{ display: 'block', color: '#555', lineHeight: 1.5, marginBottom: '16px', fontSize: '12px', fontFamily: "'Segoe UI',sans-serif", fontWeight: 600 }}>
+          可输入 1–{BATCH_CONFIG.maxPerSession}；超过上限请分批创建，插件不会静默缩小任务。
+        </small>
 
         {showSearchFilters && (
           <div style={{ marginBottom: '16px' }}>
@@ -252,11 +273,12 @@ function BatchSettingsDialog({
           <button
             type="button"
             onClick={() => {
+              if (!countIsValid) return;
               const limit = enableCommentLimit
                 ? Math.max(0, parseInt(String(commentLimit).trim(), 10) || 0)
                 : 0;
               onResolve({
-                count: selectedCount,
+                count: numericCount,
                 topByLikes: showTopLikes ? topByLikes : false,
                 searchFilters: showSearchFilters ? searchFilters : normalizeXhsSearchFilters(),
                 commentLimit: limit,
@@ -273,7 +295,9 @@ function BatchSettingsDialog({
               fontWeight: 800,
               cursor: 'pointer',
               boxShadow: '2px 2px 0 #121212',
+              opacity: countIsValid ? 1 : 0.5,
             }}
+            disabled={!countIsValid}
           >
             开始采集
           </button>

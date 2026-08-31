@@ -366,7 +366,9 @@ export function createXhsPageController({
           if (params.taskSpec?.source === 'scheduled') {
             const capability = params.taskSpec.capabilitiesRequested?.[0];
             commentSettings = {
-              maxComments: Number(params.taskSpec.commentLimit) || Number(params.taskSpec.maximumQuota) || 1,
+              // Background already decoded the server TaskSpec into the collector's execution
+              // value. Zero means all public comments until a real stop, never "one comment".
+              maxComments: Math.max(0, Number(params.maxTotal || 0) || 0),
               commentDepthMode: capability === 'replies' ? COMMENT_DEPTH_MODE.ALL_REPLIES : COMMENT_DEPTH_MODE.TWO_LEVEL,
               maxSubComments: Number(params.taskSpec.target?.replyExpandLimit) || 0,
             };
@@ -381,7 +383,7 @@ export function createXhsPageController({
               break;
             }
           }
-          await singleCommentCtrl.start({
+          const commentResult = await singleCommentCtrl.start({
             noteId: params.taskSpec?.target?.contentExternalId || extractNoteId(window.location.href),
             noteUrl: window.location.href,
             maxTotal: commentSettings.maxComments,
@@ -391,6 +393,7 @@ export function createXhsPageController({
             commentDepthMode: commentSettings.commentDepthMode,
             taskSpec: params.taskSpec,
           });
+          if (commentResult?.success === false) return commentResult;
           return { success: true, state: 'page_read_completed', delivery: 'pending' };
         }
 

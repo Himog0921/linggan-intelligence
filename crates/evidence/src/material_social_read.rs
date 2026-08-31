@@ -173,6 +173,9 @@ async fn read_lane_coverage(
             summary.failed = failed.map(i64::from);
             summary.known_unattempted = unattempted.map(i64::from);
             summary.maximum_quota = row.get::<Option<i32>, _>("maximum_quota").map(i64::from);
+            summary.requested_limit = receipt
+                .as_ref()
+                .and_then(|receipt| receipt_count(receipt, "requestedLimit"));
             summary.collection_scope = receipt
                 .as_ref()
                 .and_then(|receipt| receipt_string(receipt, "scope"));
@@ -243,6 +246,7 @@ async fn read_lane_coverage(
                     "knownUnattempted":unattempted,"unknown":unknown,
                     "stoppedReason":stopped_reason,"sourceRef":row.get::<Uuid,_>("package_ref"),
                     "collectionScope":receipt.as_ref().and_then(|receipt| receipt_string(receipt,"scope")),
+                    "requestedLimit":receipt.as_ref().and_then(|receipt| receipt_count(receipt,"requestedLimit")),
                     "pageCommentCount":receipt.as_ref().and_then(|receipt| receipt_count(receipt,"pageCommentCount")),
                     "expectedCount":receipt.as_ref().and_then(|receipt| receipt_count(receipt,"expectedCount")),
                     "uniqueCollectedCount":receipt.as_ref().and_then(|receipt| receipt_count(receipt,"uniqueCollectedCount")),

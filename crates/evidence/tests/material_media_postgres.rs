@@ -30,6 +30,14 @@ async fn media_slots_preserve_candidates_generation_unknown_order_and_concurrenc
     assert_eq!(origin.get::<Option<i32>, _>("display_ordinal"), None);
     assert_eq!(origin.get::<String, _>("display_order_state"), "UNKNOWN");
     assert_eq!(origin.get::<i32, _>("source_generation"), 1);
+    let relationship: (String, i32) = sqlx::query_as(
+        "SELECT relationship_kind,relationship_ordinal \
+         FROM linggan_media_resource_relation WHERE slot_key='xhs:note-media-1:image:1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(relationship, ("content.image".into(), 1));
     let live: (String,String,String) = sqlx::query_as("SELECT composite_state,live_photo_still_state,live_photo_motion_state FROM linggan_material_media_origin WHERE purpose='live_photo'")
         .fetch_one(database.pool()).await.unwrap();
     assert_eq!(live, ("PARTIAL".into(), "UNKNOWN".into(), "UNKNOWN".into()));

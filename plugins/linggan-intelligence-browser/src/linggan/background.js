@@ -7,11 +7,13 @@ import {
   createLocalAttempt,
   createLocalSubmission,
   createTaskSpec,
+  decodePageExecutionReceipt,
   isTerminalLocalDeliveryResult,
   localPost,
   readLingganLocalReadiness,
   taskCreationIsAccepted,
   unavailableLingganStats,
+  validateTaskSpec,
 } from './adapter.js';
 import { LINGGAN_RUNTIME_ACTION } from './runtimeActions.js';
 import { localMediaOutbox, localProducerOutbox } from './localProducerOutbox.js';
@@ -283,7 +285,19 @@ async function queueManualDiscovery(discoveryPackage) {
   });
 }
 
-async function queueCapturePackage({ taskSpec, capturePackage } = {}) {
+async function deterministicUuid(seed) {
+  const digest = new Uint8Array(await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(String(seed || '')),
+  ));
+  const bytes = digest.slice(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+async function queueCapturePackage({ taskSpec, capturePackage, idempotencyKey = '' } = {}) {
   // Keep the stable-instance lookup callable.  Naming the local result
   // `producerInstanceId` shadows the helper for this whole block, which turns
   // the first current-surface delivery into a temporal-dead-zone failure.
@@ -291,14 +305,30 @@ async function queueCapturePackage({ taskSpec, capturePackage } = {}) {
   if (!taskSpec || !capturePackage) {
     throw new Error('linggan_capture_package_required');
   }
-  const attempt = createLocalAttempt({ producerInstanceId: instanceId, taskId: taskSpec.taskId });
+  validateTaskSpec(taskSpec);
+  const stableKey = String(idempotencyKey || '').trim();
+  const attemptId = stableKey
+    ? await deterministicUuid(`attempt:${instanceId}:${taskSpec.taskId}:${stableKey}`)
+    : crypto.randomUUID();
+  const submissionId = stableKey
+    ? await deterministicUuid(`submission:${instanceId}:${taskSpec.taskId}:${stableKey}`)
+    : crypto.randomUUID();
+  const attempt = createLocalAttempt({
+    producerInstanceId: instanceId,
+    taskId: taskSpec.taskId,
+    attemptId,
+  });
   const submission = createLocalSubmission({
     producerInstanceId: instanceId,
     taskId: taskSpec.taskId,
     attemptId: attempt.attemptId,
     capturePackage,
+    submissionId,
   });
-  await localProducerOutbox.enqueue({ ...submission, taskSpec, attempt });
+  const queuedEnvelope = stableKey
+    ? { ...submission, taskSpec, attempt, idempotencyKey: stableKey }
+    : { ...submission, taskSpec, attempt };
+  const queuedRow = await localProducerOutbox.enqueue(queuedEnvelope);
   // The capture boundary ends once the durable browser outbox has accepted this envelope.
   // Network delivery happens behind it so a slow or unavailable Linggan service never holds
   // the page-side capture path hostage.
@@ -307,14 +337,14 @@ async function queueCapturePackage({ taskSpec, capturePackage } = {}) {
     success: true,
     queued: true,
     delivery: 'pending',
-    submissionId: submission.submissionId,
+    submissionId: queuedRow.submissionId,
     taskId: taskSpec.taskId,
-    attemptId: attempt.attemptId,
+    attemptId: queuedRow.attemptId,
   };
 }
 
-async function queueMediaSlots({ taskSpec, capturePackage } = {}) {
-  const queued = await queueCapturePackage({ taskSpec, capturePackage });
+async function queueMediaSlots({ taskSpec, capturePackage, idempotencyKey = '' } = {}) {
+  const queued = await queueCapturePackage({ taskSpec, capturePackage, idempotencyKey });
   const records = Array.isArray(capturePackage?.records) ? capturePackage.records : [];
   for (const record of records) {
     const candidateUris = Array.isArray(record?.observation?.candidateUris)
@@ -327,7 +357,7 @@ async function queueMediaSlots({ taskSpec, capturePackage } = {}) {
       .slice(0, 6);
     if (allowedCandidates.length === 0 || !observationRef) continue;
     await localMediaOutbox.enqueue({
-      uploadId: crypto.randomUUID(), slotSubmissionId: queued.submissionId,
+      uploadId: await deterministicUuid(`media:${queued.submissionId}:${observationRef}`), slotSubmissionId: queued.submissionId,
       mediaObservationRef: observationRef,
       candidateUris: allowedCandidates,
     });
@@ -609,9 +639,10 @@ async function queueCachedDetailPageSessionLane({ leaseRef, taskSpec } = {}) {
     };
   }
   const capturePackage = packageDetailPageSessionLane(entry, taskSpec);
+  const idempotencyKey = `detail-session:${taskSpec.taskId}:${entry.capability}`;
   const queued = entry.capability === 'media_slots'
-    ? await queueMediaSlots({ taskSpec, capturePackage })
-    : await queueCapturePackage({ taskSpec, capturePackage });
+    ? await queueMediaSlots({ taskSpec, capturePackage, idempotencyKey })
+    : await queueCapturePackage({ taskSpec, capturePackage, idempotencyKey });
   await detailPageSessionStore.markTaskQueued(entry.cacheKey, entry.capability, taskSpec.taskId);
   return {
     success: true,
@@ -705,11 +736,16 @@ async function runDispatchedTask() {
       pageSessionPlan: claim.pageSessionPlan,
       triggerSource: 'linggan_dispatched_task',
     });
-    if (response?.success === false) {
+    const receipt = decodePageExecutionReceipt(response, {
+      action,
+      capability,
+      taskId: spec.taskId,
+    });
+    if (!receipt.ok) {
       return {
         success: false,
-        state: response.state || 'page_read_failed',
-        message: response.message || `页面未能执行「${capability}」。`,
+        state: receipt.state,
+        message: receipt.message || `页面未能执行「${capability}」。`,
       };
     }
     return {
@@ -719,7 +755,7 @@ async function runDispatchedTask() {
       capability,
       leaseRef: claim.leaseRef,
       nextPollAfterSeconds: claim.nextPollAfterSeconds,
-      message: response?.message || `已按派下来的任务执行「${capability}」。`,
+      message: receipt.message || `已按派下来的任务执行「${capability}」。`,
     };
   } catch (error) {
     return { success: false, state: 'page_unavailable', message: '观察页面未能响应，本次未采集。' };
@@ -788,10 +824,18 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
       return queueManualDiscovery(message.discoveryPackage);
     }
     if (action === LINGGAN_RUNTIME_ACTION.SUBMIT_CAPTURE_PACKAGE) {
-      return queueCapturePackage({ taskSpec: message.taskSpec, capturePackage: message.capturePackage });
+      return queueCapturePackage({
+        taskSpec: message.taskSpec,
+        capturePackage: message.capturePackage,
+        idempotencyKey: message.idempotencyKey,
+      });
     }
     if (action === LINGGAN_RUNTIME_ACTION.SUBMIT_MEDIA_SLOTS) {
-      return queueMediaSlots({ taskSpec: message.taskSpec, capturePackage: message.capturePackage });
+      return queueMediaSlots({
+        taskSpec: message.taskSpec,
+        capturePackage: message.capturePackage,
+        idempotencyKey: message.idempotencyKey,
+      });
     }
     if (action === LINGGAN_RUNTIME_ACTION.FLUSH_LOCAL_OUTBOX) return flushLocalOutbox();
     if (action === LINGGAN_RUNTIME_ACTION.CREATE_MANUAL_TASK) {

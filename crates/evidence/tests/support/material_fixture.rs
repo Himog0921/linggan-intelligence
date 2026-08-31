@@ -67,9 +67,12 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0026_work_resource_read.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0027_unified_media_resource.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
-    "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd');\n",
+    "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd'), ",
+    "('0027_unified_media_resource', '70f09bf56fda491665fad0b5c3c534c74da3516fe65ad66416cae140ddee3100');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

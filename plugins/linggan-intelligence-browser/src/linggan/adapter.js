@@ -1,5 +1,5 @@
 export const LINGGAN_LOCAL_ORIGIN = 'http://localhost:3000';
-const TASK_SPEC_VERSION = 'linggan.task-spec.v1';
+const TASK_SPEC_VERSION = 'linggan.producer.task-spec.v1';
 const ATTEMPT_VERSION = 'linggan.producer.attempt.v1';
 const SUBMISSION_VERSION = 'linggan.producer.capture-package.v1';
 const FULL_LOCAL_PRODUCER_READINESS = Object.freeze({
@@ -196,25 +196,108 @@ export async function claimLingganDispatch({
       return { mayExecute: false, decision: 'unavailable', message: `Linggan 返回 ${response.status}。`, nextPollAfterSeconds: 900 };
     }
     const body = await response.json().catch(() => null);
-    const mayExecute = body?.mayExecute === true;
-    return {
-      mayExecute,
-      decision: String(body?.decision || 'unknown'),
-      // 不许执行时**不把任务体带出去**：留着它只会让下游有机会「反正拿到了就跑」。
-      taskSpec: mayExecute ? body?.taskSpec ?? null : null,
-      executionSourceUrl: mayExecute ? String(body?.executionSourceUrl || '') : '',
-      leaseRef: mayExecute ? String(body?.leaseRef || '') : '',
-      pageSessionPlan: mayExecute && body?.pageSessionPlan && typeof body.pageSessionPlan === 'object'
-        ? body.pageSessionPlan
-        : null,
-      message: String(body?.reason || ''),
-      // 节奏由服务端给。插件不自定间隔——否则想调就得重新发一版插件。
-      nextPollAfterSeconds: Number(body?.nextPollAfterSeconds ?? 300),
-    };
+    if (body?.mayExecute !== true) {
+      return {
+        mayExecute: false,
+        decision: String(body?.decision || 'unknown'),
+        // 不许执行时**不把任务体带出去**：留着它只会让下游有机会「反正拿到了就跑」。
+        taskSpec: null,
+        executionSourceUrl: '',
+        leaseRef: '',
+        pageSessionPlan: null,
+        message: String(body?.reason || ''),
+        nextPollAfterSeconds: normalizePollSeconds(body?.nextPollAfterSeconds),
+      };
+    }
+    try {
+      return decodeAcquiredDispatch(body);
+    } catch (error) {
+      return {
+        mayExecute: false,
+        decision: 'invalid_dispatch',
+        taskSpec: null,
+        executionSourceUrl: '',
+        leaseRef: '',
+        pageSessionPlan: null,
+        message: String(error?.message || 'dispatch_contract_invalid'),
+        nextPollAfterSeconds: 900,
+      };
+    }
   } catch {
     // 连不上时退避得久一些：Linggan 没开着是常态，不该每分钟敲一次。
     return { mayExecute: false, decision: 'unavailable', message: 'Linggan 本机服务当前不可访问。', nextPollAfterSeconds: 900 };
   }
+}
+
+function normalizePollSeconds(value, fallback = 300) {
+  const seconds = Number(value ?? fallback);
+  if (!Number.isFinite(seconds) || seconds < 60 || seconds > 86400) {
+    throw new Error('dispatch_poll_interval_invalid');
+  }
+  return Math.floor(seconds);
+}
+
+/**
+ * Decode the only response shape that is allowed to control a platform page.
+ * A service response is input, not authority by itself: every identity and bounded plan is
+ * checked here before background.js can open a window.
+ */
+export function decodeAcquiredDispatch(body = {}) {
+  if (body?.mayExecute !== true || String(body?.decision || '') !== 'dispatch') {
+    throw new Error('dispatch_permission_invalid');
+  }
+  const taskSpec = validateTaskSpec(body.taskSpec);
+  const leaseRef = String(body?.leaseRef || '').trim();
+  if (!leaseRef) throw new Error('dispatch_lease_required');
+  const executionSourceUrl = String(body?.executionSourceUrl || '').trim();
+  const capability = taskSpec.capabilitiesRequested[0];
+  if (['content_detail', 'comments', 'replies', 'media_slots'].includes(capability)
+      && !executionSourceUrl) {
+    throw new Error('dispatch_execution_source_required');
+  }
+  const pageSessionPlan = body?.pageSessionPlan == null
+    ? null
+    : body.pageSessionPlan;
+  if (pageSessionPlan !== null
+      && (typeof pageSessionPlan !== 'object' || Array.isArray(pageSessionPlan))) {
+    throw new Error('dispatch_page_session_plan_invalid');
+  }
+  return {
+    mayExecute: true,
+    decision: 'dispatch',
+    taskSpec,
+    executionSourceUrl,
+    leaseRef,
+    pageSessionPlan,
+    message: String(body?.reason || ''),
+    nextPollAfterSeconds: normalizePollSeconds(body?.nextPollAfterSeconds),
+  };
+}
+
+/**
+ * A page action is complete only when the content runtime returns the same task identity that
+ * background.js dispatched. Missing replies and legacy truthy objects are not receipts.
+ */
+export function decodePageExecutionReceipt(response, expected = {}) {
+  if (!response || typeof response !== 'object' || Array.isArray(response)) {
+    return { ok: false, state: 'page_receipt_missing', message: '页面没有返回执行回执。' };
+  }
+  if (response.success !== true) {
+    return {
+      ok: false,
+      state: String(response.state || response.code || 'page_read_failed'),
+      message: String(response.message || '页面执行失败。'),
+    };
+  }
+  const action = String(response.action || '');
+  const capability = String(response.capability || '');
+  const taskId = String(response.taskId || '');
+  if (action !== String(expected.action || '')
+      || capability !== String(expected.capability || '')
+      || taskId !== String(expected.taskId || '')) {
+    return { ok: false, state: 'page_receipt_identity_mismatch', message: '页面回执与派发任务身份不一致。' };
+  }
+  return { ok: true, state: String(response.state || 'page_read_completed'), message: String(response.message || '') };
 }
 
 /// Claim one bounded server-owned media acquisition. The source observation already passed
@@ -298,6 +381,9 @@ const STOP_CONDITIONS = new Set([
 // is intentionally closed rather than a "reasonable defaults" parser: a producer may execute
 // mechanics, but may not infer what Linggan meant to collect.
 export function validateTaskSpec(spec = {}) {
+  if (spec?.contractVersion !== TASK_SPEC_VERSION) throw new Error('task_spec_contract_version_invalid');
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(spec?.taskId || ''))) throw new Error('task_spec_task_id_invalid');
+  if (!String(spec?.pageType || '').trim()) throw new Error('task_spec_page_type_invalid');
   if (!['manual', 'scheduled'].includes(spec.source) || !['xhs', 'douyin'].includes(spec.platform)) throw new Error('task_spec_source_or_platform_invalid');
   if (!spec.target || typeof spec.target !== 'object' || Array.isArray(spec.target)) throw new Error('task_spec_target_invalid');
   const capabilities = Array.isArray(spec.capabilitiesRequested) ? spec.capabilitiesRequested : [];

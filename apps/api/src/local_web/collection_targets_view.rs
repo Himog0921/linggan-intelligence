@@ -147,7 +147,6 @@ fn target_row(
                 <div class="c-tg-pick"><input type="checkbox" name="target_ref" value="{target_ref}" aria-label="选择 {name}" /></div>
                 <div class="c-tg-index">{index:03}</div>
                 <div class="c-tg-object">
-                  {avatar}
                   <div class="c-tg-object-text">
                     <a class="c-tg-title" href="/collection/targets?drawer={target_ref}">{name}</a>
                     <div class="c-tg-meta">{kind} / {platform} · {handle}</div>
@@ -162,7 +161,6 @@ fn target_row(
               </article>"#,
         target_ref = target.target_ref,
         index = index + 1,
-        avatar = avatar_markup(target.identity_facts.as_ref()),
         name = escape(name),
         kind = escape(if is_creator { "创作者" } else { "关键词" }),
         platform = escape(&target.platform.to_uppercase()),
@@ -387,17 +385,6 @@ fn identity_display(target: &ObservationTarget) -> String {
         .unwrap_or_else(|| target.identity_key.clone())
 }
 
-/// 头像。没采到就不占位——一个灰方块会让人以为「这个博主没有头像」，而事实是还没采过。
-fn avatar_markup(facts: Option<&Value>) -> String {
-    let Some(url) = fact_text(facts, "avatar") else {
-        return String::new();
-    };
-    format!(
-        r#"<img class="c-tg-avatar" src="{url}" alt="" loading="lazy" referrerpolicy="no-referrer" />"#,
-        url = escape(&url),
-    )
-}
-
 fn fact_text(facts: Option<&Value>, key: &str) -> Option<String> {
     facts
         .and_then(|value| value.get(key))
@@ -514,5 +501,21 @@ mod tests {
         );
         assert!(html.contains("&lt;script&gt;"));
         assert!(!html.contains("<script>x"));
+    }
+
+    #[test]
+    fn stored_target_does_not_render_a_remote_identity_avatar() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let mut creator = target("creator", Some("真实创作者"));
+        creator.identity_facts = Some(serde_json::json!({
+            "avatar": "https://sns-avatar-qc.xhscdn.com/remote-avatar.jpg",
+            "redId": "creator-001"
+        }));
+
+        let html = render_stored_targets(&base, &[creator], &HashMap::new(), None);
+
+        assert!(html.contains("creator-001"));
+        assert!(!html.contains("remote-avatar.jpg"));
+        assert!(!html.contains("<img"));
     }
 }

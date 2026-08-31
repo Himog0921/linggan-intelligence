@@ -10,6 +10,7 @@ import {
 import { buildDiscoveryPlan } from '../src/platforms/xhs/noteCollector.js';
 import { buildXhsDetailCaptureReceipt } from '../src/platforms/xhs/captureReceipt.js';
 import { createCommentTaskController } from '../src/content/commentTaskController.js';
+import { requireBatchTargetCount } from '../src/shared/batchLimits.js';
 
 test('unlimited deep comments use an explicit all-public execution target instead of invalid zero quota', () => {
   assert.deepEqual(commentTaskInstruction('note_1', 0), {
@@ -270,6 +271,44 @@ test('pausing a manual deep comment task submits the latest material snapshot as
   controller.stop();
   finishCollection();
   await run;
+});
+
+test('stop keeps the current comment collector exclusive until its final action drains', async () => {
+  let releaseFirst;
+  let calls = 0;
+  const firstFinished = new Promise((resolve) => { releaseFirst = resolve; });
+  const controller = createCommentTaskController({
+    collectComments: async ({ shouldStop }) => {
+      calls += 1;
+      if (calls === 1) {
+        await firstFinished;
+        assert.equal(shouldStop(), true);
+      }
+      return { total: 0, collectionState: 'partial', stopReason: 'manual_stop', collectionReceipt: { expectedCount: 0 } };
+    },
+    showToast() {}, syncTaskUI() {}, startBatchTask() {}, toggleStopButton() {},
+    hideTaskControlBar() {}, setActiveTaskType() {},
+  });
+  const first = controller.start({ noteId: 'note-1', noteUrl: 'https://www.xiaohongshu.com/explore/note-1' });
+  await new Promise((resolve) => setImmediate(resolve));
+  controller.stop();
+  assert.deepEqual(
+    await controller.start({ noteId: 'note-2', noteUrl: 'https://www.xiaohongshu.com/explore/note-2' }),
+    { success: false, error: 'task_already_running' },
+  );
+  releaseFirst();
+  await first;
+  await controller.start({ noteId: 'note-2', noteUrl: 'https://www.xiaohongshu.com/explore/note-2' });
+  assert.equal(calls, 2);
+});
+
+test('batch target counts are explicit and never silently clamped', () => {
+  assert.equal(requireBatchTargetCount(1), 1);
+  assert.equal(requireBatchTargetCount(37), 37);
+  assert.equal(requireBatchTargetCount(50), 50);
+  assert.throws(() => requireBatchTargetCount(0), /batch_target_count_must_be_1_to_50/);
+  assert.throws(() => requireBatchTargetCount(51), /batch_target_count_must_be_1_to_50/);
+  assert.throws(() => requireBatchTargetCount(4.5), /batch_target_count_must_be_1_to_50/);
 });
 
 test('search target size expands the active DOM-loading plan beyond its old ten-round snapshot', () => {

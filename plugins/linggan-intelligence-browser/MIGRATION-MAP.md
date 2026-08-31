@@ -59,6 +59,7 @@
 | 单篇全回复参数贯通（0.8.13） | 人工设置的 `allReplies` 与回复上限从单篇任务控制器传入共享评论采集器 | 不把界面已选“全部展开”静默降级成默认两级模式 |
 | 平台与插件发行收口（0.8.14） | 合并 Work Resource Read / Evidence Library 主线后，以真实 `time:number` 毫秒 epoch 回归固定 `xhs-detail-time-v2` | 不为已验证映射建立第二分支，不把字段探针写成内容 Package/Receipt |
 | 首轮 API 失败转 DOM（0.8.15） | 新 Attempt 的首个 API 页未返回评论时，立即转交共享 DOM 采集器解析、去重、展开和滚动 | 不在 `allReplies` 模式中反复点击同一展开入口，不让页面已有评论时进度永久留在 0 |
+| 执行与媒体终包（0.8.16） | 严格派发/页面回执、详情 lane 幂等、评论 stop/restart 互斥、批量 timeout drain、缓存回收、显式批量数量，以及统一 MediaResource/七类关系/唯一封面选择 | 不把页面读成接纳，不并发控制同页，不静默缩小目标，不让业务页面绕过本地媒体资源读取远程 URL |
 
 ## 新旧运行路径对照
 
@@ -69,7 +70,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.15）
+当前路径（0.8.16）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox

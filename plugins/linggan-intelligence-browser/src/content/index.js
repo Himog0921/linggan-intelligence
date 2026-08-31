@@ -252,7 +252,10 @@ async function collectApprovedDetailPageSession(message = {}) {
     commentResult: packaged.commentResult,
     receipt: packaged.receipt,
   });
-  const queued = await runtime.submitContentDetail(note, { taskSpec });
+  const queued = await runtime.submitContentDetail(note, {
+    taskSpec,
+    idempotencyKey: `detail-session:${taskSpec.taskId}:content_detail`,
+  });
   await detailPageSessionStore.markTaskQueued(entry.cacheKey, 'content_detail', taskSpec.taskId);
   return {
     success: true,
@@ -327,7 +330,11 @@ async function dispatchProducerRuntimeAction(action, message) {
   } else {
     pageResult = await dispatchXhsRuntimeAction(pageAction, params);
   }
-  if (pageResult?.success === false) return pageResult;
+  if (pageResult?.success !== true) {
+    return pageResult && typeof pageResult === 'object'
+      ? pageResult
+      : { success: false, state: 'page_action_receipt_missing' };
+  }
   // This means the page reader actually accepted the action. It is deliberately not an
   // admission receipt; Popup must continue to describe delivery as pending until one exists.
   if (isControl) {
@@ -337,7 +344,17 @@ async function dispatchProducerRuntimeAction(action, message) {
       ? pageResult
       : { success: false, state: 'no_active_task' };
   }
-  return { success: true, state: 'page_read_started', delivery: 'pending' };
+  const capability = Array.isArray(message?.taskSpec?.capabilitiesRequested)
+    ? String(message.taskSpec.capabilitiesRequested[0] || '')
+    : '';
+  return {
+    success: true,
+    state: 'page_read_started',
+    delivery: 'pending',
+    action,
+    capability,
+    taskId: String(message?.taskSpec?.taskId || ''),
+  };
 }
 
 chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {

@@ -68,7 +68,7 @@ for (const moduleName of activeContentModules) {
 
 const backgroundBundle = readFileSync(path.join(process.cwd(), 'dist', 'background.js'), 'utf8');
 const queueCapturePackage = backgroundBundle.match(
-  /async function \w+\(\{taskSpec:\w+,capturePackage:\w+\}=\{\}\)\{const (\w+)=await (\w+)\(\);/,
+  /async function \w+\(\{taskSpec:\w+,capturePackage:\w+(?:,idempotencyKey:\w+="")?\}=\{\}\)\{const (\w+)=await (\w+)\(\);/,
 );
 if (!queueCapturePackage) {
   throw new Error('built background bundle is missing the current capture-package queue initializer');

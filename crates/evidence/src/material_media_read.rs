@@ -19,12 +19,11 @@ pub(crate) struct MediaReadProjection {
     pub limitations: Vec<&'static str>,
     pub slot_receipt: Value,
     pub derivative_receipt: Value,
+    pub resource: Value,
 }
 
 struct SlotReadProjection {
     slots: Vec<Value>,
-    preview_url: Option<String>,
-    preview_purpose: Option<String>,
     bytes_state: &'static str,
     restriction_state: &'static str,
     limitations: Vec<&'static str>,
@@ -34,8 +33,6 @@ struct SlotReadProjection {
 #[derive(Default)]
 struct SlotAccumulator {
     slots: Vec<Value>,
-    preview_url: Option<String>,
-    preview_purpose: Option<String>,
     acquired: usize,
     failed: usize,
     restricted: bool,
@@ -51,11 +48,13 @@ pub(crate) async fn read(
     let slots = read_slots(tx, content_ref, as_of).await?;
     let (derivatives, derivative_receipt, ocr_state, asr_state, derivative_restricted) =
         read_derivatives(tx, content_ref, as_of).await?;
+    let (resource, preview_url, preview_purpose) =
+        build_media_resource(&slots.slots, &derivatives, ocr_state, asr_state);
     Ok(MediaReadProjection {
         slots: slots.slots,
         derivatives,
-        preview_url: slots.preview_url,
-        preview_purpose: slots.preview_purpose,
+        preview_url,
+        preview_purpose,
         bytes_state: slots.bytes_state,
         ocr_state,
         asr_state,
@@ -67,7 +66,214 @@ pub(crate) async fn read(
         limitations: slots.limitations,
         slot_receipt: slots.receipt,
         derivative_receipt,
+        resource,
     })
+}
+
+fn build_media_resource(
+    slots: &[Value],
+    derivatives: &[Value],
+    ocr_state: &'static str,
+    asr_state: &'static str,
+) -> (Value, Option<String>, Option<String>) {
+    let (covers, images, videos) = partition_resource_slots(slots);
+    let cover = select_cover(&covers, &images, &videos, derivatives);
+    let (ocr_resources, transcript_resources) = derivative_resources(derivatives);
+    let resource = serde_json::json!({
+        "contractVersion":"linggan.media-resource.v1",
+        "state":if slots.is_empty() && derivatives.is_empty(){"NOT_OBSERVED"}else{"OBSERVED"},
+        "avatar":{"state":"NOT_OBSERVED","relationship":"author.avatar","localAssetUrl":null},
+        "cover":{
+            "state":cover.state,
+            "relationship":"content.cover",
+            "sourceRelationship":cover.source_relationship,
+            "selectedBy":cover.selected_by,
+            "fallbackUsed":cover.selected_by != "explicit_cover" && cover.selected_by != "none",
+            "localAssetUrl":cover.url.clone(),
+            "intrinsicDimensions":cover.dimensions
+        },
+        "coverCandidates":covers,
+        "images":images,
+        "video":{
+            "state":if videos.is_empty(){"NOT_OBSERVED"}else{"OBSERVED"},
+            "relationship":"content.video",
+            "items":videos
+        },
+        "ocr":{"state":ocr_state,"relationship":"content.ocr","resources":ocr_resources},
+        "transcript":{"state":asr_state,"relationship":"content.transcript","resources":transcript_resources},
+        "commentImages":{"state":"NOT_OBSERVED","relationship":"comment.image","items":[]}
+    });
+    (resource, cover.url, cover.purpose)
+}
+
+struct CoverSelection {
+    url: Option<String>,
+    selected_by: &'static str,
+    purpose: Option<String>,
+    source_relationship: &'static str,
+    state: &'static str,
+    dimensions: Value,
+}
+
+fn resource_slot(slot: &Value) -> Value {
+    let mut value = slot.clone();
+    let purpose = slot
+        .get("purpose")
+        .and_then(Value::as_str)
+        .unwrap_or("body_image");
+    let relationship = slot
+        .get("relationshipKind")
+        .and_then(Value::as_str)
+        .unwrap_or(match purpose {
+            "cover" => "content.cover",
+            "video" | "live_photo" => "content.video",
+            _ => "content.image",
+        });
+    if let Some(object) = value.as_object_mut() {
+        object.insert(
+            "relationship".to_owned(),
+            Value::String(relationship.to_owned()),
+        );
+        object.insert(
+            "relationshipOrdinal".to_owned(),
+            slot.get("relationshipOrdinal")
+                .filter(|value| !value.is_null())
+                .cloned()
+                .or_else(|| slot.get("producerOrdinal").cloned())
+                .unwrap_or(Value::Null),
+        );
+        object.insert(
+            "intrinsicDimensions".to_owned(),
+            slot.pointer("/blob/intrinsicDimensions")
+                .cloned()
+                .unwrap_or_else(
+                    || serde_json::json!({"state":"UNKNOWN","width":null,"height":null}),
+                ),
+        );
+    }
+    value
+}
+
+fn partition_resource_slots(slots: &[Value]) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
+    let select = |purposes: &[&str]| {
+        slots
+            .iter()
+            .filter(|slot| {
+                slot.get("purpose")
+                    .and_then(Value::as_str)
+                    .is_some_and(|purpose| purposes.contains(&purpose))
+            })
+            .map(resource_slot)
+            .collect::<Vec<_>>()
+    };
+    (
+        select(&["cover"]),
+        select(&["body_image"]),
+        select(&["video", "live_photo"]),
+    )
+}
+
+fn local_handle(value: &Value) -> Option<String> {
+    (value.pointer("/blob/deliveryState").and_then(Value::as_str) == Some("INLINE_SAFE"))
+        .then(|| {
+            value
+                .get("localAssetUrl")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .flatten()
+}
+
+fn select_cover(
+    covers: &[Value],
+    images: &[Value],
+    videos: &[Value],
+    derivatives: &[Value],
+) -> CoverSelection {
+    let explicit_cover = covers.iter().find_map(local_handle);
+    let first_image = images.iter().find_map(local_handle);
+    let video_slot_keys = videos
+        .iter()
+        .filter_map(|slot| slot.get("slotKey").and_then(Value::as_str))
+        .collect::<std::collections::HashSet<_>>();
+    let video_poster = derivatives.iter().find_map(|derivative| {
+        let slot_key = derivative.get("slotKey").and_then(Value::as_str)?;
+        (derivative.get("kind").and_then(Value::as_str) == Some("thumbnail")
+            && video_slot_keys.contains(slot_key))
+        .then(|| {
+            derivative
+                .pointer("/sourceLocation/localAssetUrl")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+        })
+        .flatten()
+    });
+    let (url, selected_by, purpose, source_relationship) = if let Some(url) = explicit_cover {
+        (
+            Some(url),
+            "explicit_cover",
+            Some("cover".to_owned()),
+            "content.cover",
+        )
+    } else if let Some(url) = first_image {
+        (
+            Some(url),
+            "first_body_image",
+            Some("body_image".to_owned()),
+            "content.image",
+        )
+    } else if let Some(url) = video_poster {
+        (
+            Some(url),
+            "video_poster",
+            Some("video".to_owned()),
+            "content.video",
+        )
+    } else {
+        (None, "none", None, "content.cover")
+    };
+    let dimensions = match selected_by {
+        "explicit_cover" => covers.iter().find(|slot| local_handle(slot).is_some()),
+        "first_body_image" => images.iter().find(|slot| local_handle(slot).is_some()),
+        _ => None,
+    }
+    .and_then(|slot| slot.get("intrinsicDimensions"))
+    .cloned()
+    .unwrap_or_else(|| serde_json::json!({"state":"UNKNOWN","width":null,"height":null}));
+    let state = if url.is_some() {
+        "AVAILABLE"
+    } else if covers.is_empty() && images.is_empty() && videos.is_empty() {
+        "NOT_OBSERVED"
+    } else {
+        "OBSERVED"
+    };
+    CoverSelection {
+        url,
+        selected_by,
+        purpose,
+        source_relationship,
+        state,
+        dimensions,
+    }
+}
+
+fn derivative_resources(derivatives: &[Value]) -> (Vec<Value>, Vec<Value>) {
+    let ocr = derivatives
+        .iter()
+        .filter(|item| {
+            matches!(
+                item.get("kind").and_then(Value::as_str),
+                Some("ocr_text" | "frame_ocr_text")
+            )
+        })
+        .cloned()
+        .collect();
+    let transcript = derivatives
+        .iter()
+        .filter(|item| item.get("kind").and_then(Value::as_str) == Some("asr_text"))
+        .cloned()
+        .collect();
+    (ocr, transcript)
 }
 
 async fn read_slots(
@@ -86,7 +292,7 @@ async fn read_slots(
              origin.composite_state,origin.live_photo_still_state,origin.live_photo_motion_state,observation.observed_at, \
              (SELECT count(*) FROM linggan_material_media_candidate candidate WHERE candidate.observation_ref=origin.observation_ref) AS candidate_count, \
              replica.materialization_ref,replica.verified_at,replica.materialization_observation_ref, \
-             blob.sha256,blob.mime_type,blob.byte_size,current_download.download_attempt_ref,current_download.terminal_reason, \
+             blob.sha256,blob.mime_type,blob.byte_size,blob.pixel_width,blob.pixel_height,blob.duration_ms,relation.relationship_kind,relation.relationship_ordinal,current_download.download_attempt_ref,current_download.terminal_reason, \
              disposition.restricted AS disposition_restricted,disposition.cleaned AS disposition_cleaned,disposition.slot_restricted, \
              excluded.newer_disposed AS newer_disposed,count(*) OVER() AS total_count \
          FROM current_origin origin JOIN linggan_media_observation observation USING (observation_ref) \
@@ -104,6 +310,7 @@ async fn read_slots(
                    OR event.materialization_ref=materialization.materialization_ref OR event.blob_sha256=candidate_blob.sha256)) \
              ORDER BY materialization.verified_at DESC LIMIT 1) replica ON true \
          LEFT JOIN linggan_media_blob blob ON blob.sha256=replica.blob_sha256 \
+         LEFT JOIN linggan_media_resource_relation relation ON relation.slot_key=origin.slot_key \
          LEFT JOIN LATERAL (SELECT bool_or(event.state='WITHDRAWN_OR_RESTRICTED') AS restricted, \
                  bool_or(event.slot_key=origin.slot_key AND event.state='WITHDRAWN_OR_RESTRICTED') AS slot_restricted, \
                  bool_or(event.state='BYTES_CLEANED') AS cleaned \
@@ -236,10 +443,6 @@ impl SlotAccumulator {
         } else if newer_disposed && !self.limitations.contains(&"NEWER_MATERIALIZATION_DISPOSED") {
             self.limitations.push("NEWER_MATERIALIZATION_DISPOSED");
         }
-        if self.preview_url.is_none() && local_asset_url.is_some() {
-            self.preview_url = local_asset_url.clone();
-            self.preview_purpose = Some(row.get("purpose"));
-        }
         let candidate_count: i64 = row.get("candidate_count");
         if candidate_count > 1
             && !self
@@ -278,6 +481,7 @@ impl SlotAccumulator {
         self.slots.push(serde_json::json!({
             "slotKey":row.get::<String,_>("slot_key"),"purpose":purpose,
             "producerOrdinal":row.get::<i32,_>("producer_ordinal"),"displayOrdinal":row.get::<Option<i32>,_>("display_ordinal"),
+            "relationshipKind":row.get::<Option<String>,_>("relationship_kind"),"relationshipOrdinal":row.get::<Option<i32>,_>("relationship_ordinal"),
             "displayOrderState":row.get::<String,_>("display_order_state"),"displayOrderBasis":row.get::<String,_>("display_order_basis"),
             "origin":{"observationRef":row.get::<Uuid,_>("observation_ref"),"sourceGeneration":row.get::<i32,_>("source_generation"),"observedAt":row.get::<String,_>("observed_at"),"candidateUriCount":candidate_count,"candidateSetState":row.get::<String,_>("candidate_set_state"),"actualDownloadCandidateState":"UNKNOWN"},
             "components":components,"bytesState":bytes_state,"replicaState":if local_asset_url.is_some(){"VERIFIED_AT_MATERIALIZATION"}else{"UNKNOWN"},
@@ -285,7 +489,14 @@ impl SlotAccumulator {
             "currentDownloadAttemptRef":row.get::<Option<Uuid>,_>("download_attempt_ref"),
             "replica":{"materializationRef":row.get::<Option<Uuid>,_>("materialization_ref"),"originObservationRef":row.get::<Option<Uuid>,_>("materialization_observation_ref"),"isCurrentOrigin":row.get::<Option<Uuid>,_>("materialization_observation_ref")==Some(row.get::<Uuid,_>("observation_ref"))},
             "replicaSelection":{"limitations":if slot_restricted{vec!["SLOT_WITHDRAWN_OR_RESTRICTED"]}else if newer_disposed{vec!["NEWER_MATERIALIZATION_DISPOSED"]}else{Vec::<&str>::new()},"excludedDispositionStates":{"restricted":disposition_restricted,"cleaned":disposition_cleaned}},
-            "blob":media_blob_contract(row.get::<Option<String>,_>("sha256"),row.get::<Option<String>,_>("mime_type"),row.get::<Option<i64>,_>("byte_size"))
+            "blob":media_blob_contract(
+                row.get::<Option<String>,_>("sha256"),
+                row.get::<Option<String>,_>("mime_type"),
+                row.get::<Option<i64>,_>("byte_size"),
+                row.get::<Option<i32>,_>("pixel_width"),
+                row.get::<Option<i32>,_>("pixel_height"),
+                row.get::<Option<i64>,_>("duration_ms")
+            )
         }));
     }
 
@@ -306,8 +517,6 @@ impl SlotAccumulator {
                 "UNKNOWN"
             },
             slots: self.slots,
-            preview_url: self.preview_url,
-            preview_purpose: self.preview_purpose,
             limitations: self.limitations,
             receipt: Value::Null,
         }
@@ -318,6 +527,9 @@ fn media_blob_contract(
     sha256: Option<String>,
     declared_mime_type: Option<String>,
     byte_size: Option<i64>,
+    pixel_width: Option<i32>,
+    pixel_height: Option<i32>,
+    duration_ms: Option<i64>,
 ) -> Value {
     let inline_safe = declared_mime_type
         .as_deref()
@@ -327,7 +539,13 @@ fn media_blob_contract(
         "sha256":sha256,"declaredMimeType":declared_mime_type,"detectedMimeType":Value::Null,
         "deliveryMimeType":if inline_safe { declared_mime_type } else { Some("application/octet-stream".to_owned()) },
         "deliveryState":if inline_safe { "INLINE_SAFE" } else { "UNSUPPORTED_MEDIA_TYPE" },
-        "byteSize":byte_size
+        "byteSize":byte_size,
+        "intrinsicDimensions":{
+            "state":if pixel_width.is_some() && pixel_height.is_some(){"KNOWN"}else{"UNKNOWN"},
+            "width":pixel_width,
+            "height":pixel_height
+        },
+        "durationMs":duration_ms
     })
 }
 

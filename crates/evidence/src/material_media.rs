@@ -195,6 +195,7 @@ async fn insert_slot_and_origin(
         .bind(live.then_some(if has_still { "OBSERVED" } else { "UNKNOWN" }))
         .bind(live.then_some(if has_motion { "OBSERVED" } else { "UNKNOWN" }))
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
+    insert_resource_relation(tx, package, content_public_ref, &media).await?;
     let component_candidates = if live && (has_still || has_motion) {
         media
             .still_candidates
@@ -238,6 +239,61 @@ async fn insert_slot_and_origin(
         .map(|(component, _)| *component)
         .collect::<HashSet<_>>();
     enqueue_media_acquisition(tx, media.observation_ref, &components).await?;
+    Ok(())
+}
+
+async fn insert_resource_relation(
+    tx: &mut Transaction<'_, Postgres>,
+    package: &ProducerCapturePackage,
+    content_public_ref: Uuid,
+    media: &MediaRecord<'_>,
+) -> Result<(), ProducerRuntimeError> {
+    let table_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_media_resource_relation') IS NOT NULL")
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+    if !table_ready {
+        return Ok(());
+    }
+    let relationship_kind = match media.purpose {
+        "cover" => "content.cover",
+        "body_image" => "content.image",
+        "video" | "live_photo" => "content.video",
+        _ => return Err(ProducerRuntimeError::MaterialIdentityConflict),
+    };
+    sqlx::query(
+        "INSERT INTO linggan_media_resource_relation \
+         (relation_ref,platform,subject_kind,subject_external_id,subject_public_ref,relationship_kind,relationship_ordinal,slot_key,source_package_ref) \
+         VALUES ($1,$2,'content',$3,$4,$5,$6,$7,$8) \
+         ON CONFLICT (platform,subject_kind,subject_external_id,relationship_kind,relationship_ordinal) DO NOTHING",
+    )
+    .bind(Uuid::new_v4())
+    .bind(package.platform())
+    .bind(media.content_id)
+    .bind(content_public_ref)
+    .bind(relationship_kind)
+    .bind(media.producer_ordinal)
+    .bind(media.slot_key)
+    .bind(package.package_ref())
+    .execute(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    let stored_slot_key: String = sqlx::query_scalar(
+        "SELECT slot_key FROM linggan_media_resource_relation \
+         WHERE platform=$1 AND subject_kind='content' AND subject_external_id=$2 \
+           AND relationship_kind=$3 AND relationship_ordinal=$4",
+    )
+    .bind(package.platform())
+    .bind(media.content_id)
+    .bind(relationship_kind)
+    .bind(media.producer_ordinal)
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    if stored_slot_key != media.slot_key {
+        return Err(ProducerRuntimeError::MaterialIdentityConflict);
+    }
     Ok(())
 }
 

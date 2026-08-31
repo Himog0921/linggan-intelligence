@@ -16,6 +16,26 @@ async fn runtime_and_material_readiness_require_both_current_projection_migratio
 
     sqlx::query(
         "DELETE FROM linggan_local_schema_migration \
+         WHERE migration_id = '0027_unified_media_resource'",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    assert!(!producer_runtime_schema_is_ready(&database).await.unwrap());
+    assert!(!work_resource_schema_is_ready(&database).await.unwrap());
+
+    sqlx::query(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) \
+         VALUES ('0027_unified_media_resource', \
+                 '70f09bf56fda491665fad0b5c3c534c74da3516fe65ad66416cae140ddee3100')",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "DELETE FROM linggan_local_schema_migration \
          WHERE migration_id = '0026_work_resource_read'",
     )
     .execute(database.pool())
