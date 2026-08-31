@@ -5,6 +5,8 @@ const PAGE_BRIDGE_SOURCE = 'lgboom-xhs-api-capture';
 const PAGE_FETCH_REQUEST_SOURCE = 'lgboom-xhs-content';
 const SNAPSHOT_REQUEST_TYPE = '__lgboom_xhs_comment_api_request__';
 const SNAPSHOT_RESPONSE_TYPE = '__lgboom_xhs_comment_api_response__';
+const SNAPSHOT_RESET_REQUEST_TYPE = '__lgboom_xhs_comment_api_reset_request__';
+const SNAPSHOT_RESET_RESPONSE_TYPE = '__lgboom_xhs_comment_api_reset_response__';
 const PROFILE_NOTES_REQUEST_TYPE = '__lgboom_xhs_profile_notes_request__';
 const PROFILE_NOTES_RESPONSE_TYPE = '__lgboom_xhs_profile_notes_response__';
 const SEARCH_NOTES_REQUEST_TYPE = '__lgboom_xhs_search_notes_request__';
@@ -741,6 +743,40 @@ export async function requestXhsCommentSnapshot(noteId = '') {
     pages: Array.isArray(payload?.pages) ? payload.pages : [],
     subPages: Array.isArray(payload?.subPages) ? payload.subPages : [],
   };
+}
+
+export async function resetXhsCommentSnapshot(noteId = '') {
+  const normalizedNoteId = normalizeText(noteId);
+  if (!normalizedNoteId) return false;
+  const payload = await postBridgeRequest(
+    SNAPSHOT_RESET_REQUEST_TYPE,
+    { noteId: normalizedNoteId },
+    SNAPSHOT_RESET_RESPONSE_TYPE,
+  );
+  return payload?.reset === true;
+}
+
+export async function startFreshXhsCommentSnapshot(noteId = '', {
+  fetchJson = fetchXhsJsonViaBridge,
+  resetSnapshot = resetXhsCommentSnapshot,
+  beforeExternalAction = async () => {},
+  afterExternalAction = async () => {},
+} = {}) {
+  const normalizedNoteId = normalizeText(noteId);
+  if (!normalizedNoteId) return { noteId: '', pages: [], subPages: [] };
+  const resetConfirmed = await resetSnapshot(normalizedNoteId);
+  if (resetConfirmed !== true) throw new Error('comment_snapshot_reset_not_confirmed');
+  const xsecToken = readCurrentXsecToken();
+  const requestUrls = buildXhsCommentPageRequestUrls(normalizedNoteId, '', { xsecToken });
+  await beforeExternalAction({ kind: 'api_main_page', noteId: normalizedNoteId, cursor: '', freshAttempt: true });
+  try {
+    const json = await fetchJson(requestUrls);
+    const page = parseXhsCommentPagePayload(json, { sourceUrl: requestUrls[0] });
+    if (!page.noteId) page.noteId = normalizedNoteId;
+    return { noteId: normalizedNoteId, pages: [page], subPages: [] };
+  } finally {
+    await afterExternalAction({ kind: 'api_main_page', noteId: normalizedNoteId, cursor: '', freshAttempt: true });
+  }
 }
 
 export async function requestXhsProfileNotesSnapshot(userId = '') {

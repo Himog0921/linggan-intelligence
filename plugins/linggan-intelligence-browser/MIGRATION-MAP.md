@@ -51,6 +51,8 @@
 | 真实评论树接纳修复（0.8.7） | 顶层自指 root 与回复多关系字段在出包前规范到评论/回复唯一合同；自然结束深采使用无数值配额的有界停止条件 | 不从结果反推任务配额，不放宽服务端关系门闸，不改 scheduled TaskSpec |
 | 克制评论执行与暂停交付（0.8.8） | API 分页、DOM 滚动、回复展开每轮三选一；最低冷却、页面稳定、暂停/停止检查共用；暂停提交真实 PARTIAL 评论树；进度区分已取得、页面公开数和请求上限 | 不伪装随机真人轨迹，不把 checkpoint 计数冒充评论材料，不跨 Attempt 累加完整性 |
 | 媒体领取代际保护（0.8.8） | 领取后先安排恢复唤醒，再写可靠队列并执行；入队或执行异常按 workRef/claimGeneration 回报 | 不把来源 URL 当本地封面，不让人工媒体窗口消失，不把排队冒充物化完成 |
+| 长评论首屏续采（0.8.9） | 不限任务以页面公开数作为当前集合目标；API 首屏不足时进入共用 DOM 补采器；新 Attempt 清空同页旧快照并从空游标重拉第一页 | 不把首屏 `no_progress` 冒充自然结束，不续用上一 Attempt 分页，不跨 Attempt 累加完成度 |
+| 新媒体工作优先与超时（0.8.9） | 精确新领取代次优先于旧本地媒体行；候选请求 20 秒超时 | 不绕过三次服务端尝试上限，不删除人工媒体窗口，不把来源 URI 当物化结果 |
 
 ## 新旧运行路径对照
 
@@ -61,7 +63,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.8）
+当前路径（0.8.9）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox
