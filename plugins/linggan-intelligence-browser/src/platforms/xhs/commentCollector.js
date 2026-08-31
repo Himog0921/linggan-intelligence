@@ -360,6 +360,18 @@ export function shouldContinueDomAfterApi({
   return wantsReplyContinuation || needsVisibleTopUp;
 }
 
+export function shouldFallbackToDomAfterFreshApiFailure({
+  freshAttemptStarted = false,
+  freshAttemptReady = false,
+  apiObserved = false,
+  currentTotal = 0,
+} = {}) {
+  return Boolean(freshAttemptStarted)
+    && !freshAttemptReady
+    && !apiObserved
+    && Number(currentTotal || 0) === 0;
+}
+
 export function resolveCommentContinuationHint(pageCommentCount = 0, publicCommentCount = null) {
   const pageCount = Number(pageCommentCount || 0);
   if (Number.isFinite(pageCount) && pageCount > 0) return Math.floor(pageCount);
@@ -546,6 +558,25 @@ async function collectCommentsViaApi({
         current: allComments.length,
         message: `已通过页面 API 同步 ${allComments.length} 条评论${maxTotal > 0 ? `（上限 ${maxTotal}）` : ''}`,
       });
+    }
+
+    // A failed fresh-page request means this Attempt has no API state it can advance.
+    // In allReplies mode, staying in this loop would repeatedly click the same visible
+    // expand control before any DOM comment is parsed, leaving real page comments at 0.
+    // Return to the shared DOM collector immediately; it owns parsing, reply expansion,
+    // pacing, pause/stop boundaries and immutable snapshots for this fallback path.
+    if (shouldFallbackToDomAfterFreshApiFailure({
+      freshAttemptStarted,
+      freshAttemptReady,
+      apiObserved,
+      currentTotal: allComments.length,
+    })) {
+      publishCountedProgress({
+        status: 'collecting',
+        current: 0,
+        message: '本轮页面 API 未返回评论，切换到页面评论树采集',
+      });
+      break;
     }
 
     // The API hydrator is deliberately stepwise: after one network page this loop yields,

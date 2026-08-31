@@ -58,6 +58,7 @@
 | 滚动位置进展（0.8.12） | `scrollTop` 能前进或 `scrollHeight` 增长即视为页面加载进展，继续克制下移到新评论或真实底部 | 不把“当前 280px 内没有新节点”误报为 no-progress |
 | 单篇全回复参数贯通（0.8.13） | 人工设置的 `allReplies` 与回复上限从单篇任务控制器传入共享评论采集器 | 不把界面已选“全部展开”静默降级成默认两级模式 |
 | 平台与插件发行收口（0.8.14） | 合并 Work Resource Read / Evidence Library 主线后，以真实 `time:number` 毫秒 epoch 回归固定 `xhs-detail-time-v2` | 不为已验证映射建立第二分支，不把字段探针写成内容 Package/Receipt |
+| 首轮 API 失败转 DOM（0.8.15） | 新 Attempt 的首个 API 页未返回评论时，立即转交共享 DOM 采集器解析、去重、展开和滚动 | 不在 `allReplies` 模式中反复点击同一展开入口，不让页面已有评论时进度永久留在 0 |
 
 ## 新旧运行路径对照
 
@@ -68,7 +69,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.14）
+当前路径（0.8.15）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox

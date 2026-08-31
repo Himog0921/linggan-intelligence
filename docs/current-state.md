@@ -8,7 +8,7 @@
 
 ## 当前阶段
 
-### PLUGIN-XHS-COMMENT-EXECUTION-MEDIA-001（v0.8.14 候选，真实链复验中）
+### PLUGIN-XHS-COMMENT-EXECUTION-MEDIA-001（v0.8.15 候选，真实链复验中）
 
 真实长评论样本“ADHD的尽头是成瘾”已证明标准详情的 30 条评论材料被 Linggan 接纳：当前投影为 16 条顶层评论、14 条回复，详情公开评论数为 452。暂停中的单篇深采在浏览器内已取得 130 条，但旧 0.8.7 只在 collector 返回时提交 Package，因此新增 100 条尚未进入 Intelligence；控制面把首轮 53 锁成总数，形成 `130/53`。同一作品已有 8 个媒体槽位和可访问的 XHS 封面候选，但没有本地 Materialization；媒体工作被领取后只留下 `lease_expired`，所以 Evidence Library 不展示远程 CDN 封面是符合边界的，缺陷在媒体执行没有完成而不是页面漏用远程 URL。
 
@@ -25,6 +25,8 @@ Chrome 已真实重载 0.8.8 并报到；目标页当前公开评论数为 492�
 0.8.12 重载后的真实两级评论 Attempt 已从旧停点 18 条推进到 `121/533`，滚动到底、无验证码或访问异常，并以 `PARTIAL / no_progress` 形成真实回执，证明自适应滚动与部分材料交付有效。继续验证“全部楼层回复”时，设置弹窗已明确显示选中，但单篇任务控制器只保存 `commentDepthMode`、没有把它传入 collector，运行日志仍显示两级模式的 `1/3` 停止预算，页面保留 27 个未展开入口。0.8.13 只补齐该参数透传及回归测试；完整 `533/533` 仍须重载后从新 Attempt 证明。
 
 0.8.14 将另一会话已合并的 Work Resource Read / Evidence Library 平台改动、0.8.13 评论执行修复和一条用户授权的 XHS 详情时间字段回归收口为同一发行快照。真实探针确认现有 `xhs-detail-time-v2` 映射正确，因此不新增另一套时间解析。197 项插件测试、TypeScript 合同、production build、content runtime / Linggan isolation、release 校验与全新依赖可复现重建已通过，ZIP SHA-256 为 `28acbf796468ba416dcffeea801ba34fea7686c6b532e2bc54913b20d999376a`。浏览器重载和新 Attempt 的全回复真实链验证仍待执行。
+
+0.8.14 重载后工位已真实上报新版本。新的不限数量/全部楼层回复 Attempt 正确重置为 `0/552`，页面从 19 个评论节点加载到 29 个且无验证码或访问受限，但约 70 秒后仍停在 0。根因是首轮 API 获取失败后，`allReplies` 分支在 DOM 评论解析前反复尝试同一展开入口并直接 `continue`。0.8.15 改为首轮 API 失败即转交共享 DOM 采集器，由同一条路径完成解析、去重、1.2 秒动作冷却、回复展开、滚动和部分快照交付。本轮 0.8.14 Attempt 已人工暂停为 `0/552`，不宣称已取得评论。198 项插件测试、TypeScript 合同、production build、content runtime / Linggan isolation、release 校验与全新依赖可复现重建已通过，0.8.15 ZIP SHA-256 为 `37fe88bdcf7cf948eb490cd76454d5d93134b3669d4cb34a856ff8a9bbf38e3b`；浏览器重载后的真实链复验仍需执行。
 
 ### WORK-RESOURCE-READ-001 / Issue #110（实现与集成验证完成，部署待完成）
 
