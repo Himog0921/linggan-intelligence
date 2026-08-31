@@ -8,6 +8,12 @@
 
 ## 当前阶段
 
+### PLUGIN-XHS-COMMENT-EXECUTION-MEDIA-001（v0.8.8 候选，自动验证中）
+
+真实长评论样本“ADHD的尽头是成瘾”已证明标准详情的 30 条评论材料被 Linggan 接纳：当前投影为 16 条顶层评论、14 条回复，详情公开评论数为 452。暂停中的单篇深采在浏览器内已取得 130 条，但旧 0.8.7 只在 collector 返回时提交 Package，因此新增 100 条尚未进入 Intelligence；控制面把首轮 53 锁成总数，形成 `130/53`。同一作品已有 8 个媒体槽位和可访问的 XHS 封面候选，但没有本地 Materialization；媒体工作被领取后只留下 `lease_expired`，所以 Evidence Library 不展示远程 CDN 封面是符合边界的，缺陷在媒体执行没有完成而不是页面漏用远程 URL。
+
+0.8.8 候选把评论采集改为状态同步的单动作循环：API 分页、一次回复展开、一次 280px 页面滚动每轮三选一；动作间至少 1.2 秒，并在动作前后检查暂停/停止。详情 30 条、单篇深采与批量评论继续复用同一 collector。进度明确分为本次唯一评论数、页面公开评论数、用户请求上限；人工暂停会提交当前真实评论树的 `PARTIAL / manual_pause` Package。媒体工作在领取后先安排一分钟内恢复唤醒，入队和执行异常按精确 work generation 回报，不再只等租约静默过期。自动测试、发布包、真实重载后的暂停接纳、452 条口径探针和封面物化仍须分别验证，当前不能宣称完成。
+
 ### WORK-RESOURCE-READ-001 / Issue #110（实现与集成验证完成，部署待完成）
 
 为避免 Intelligence 各页各自拼封面、标题、作者与时间，当前交付分支新增中立 `Work Resource Read` Interface 与 `/api/local/work-resources`；Evidence Library 只是首个消费者。Media V2 继续拥有媒体事实，页面不能绕过共享接口另读 SQL/Package。profile discovery 的监控目标作为 collection context 单独返回，作品作者保持独立；没有详情 author ID 时明确 `NOT_VERIFIED`，不再把目标显示名填成作者。

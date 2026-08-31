@@ -112,12 +112,18 @@ export function getActiveNoteDetailRoot(root = document) {
 }
 
 function readCommentMetaText(scope) {
-  return String(scope?.innerText || '').slice(0, 6000);
+  const raw = String(scope?.innerText || '');
+  if (raw.length <= 12000) return raw;
+  // Long threads can push the public total outside a fixed prefix. Keep both ends without
+  // reading an unbounded DOM string into every acquisition loop.
+  return `${raw.slice(0, 6000)}\n${raw.slice(-6000)}`;
 }
 
 function publicCommentCountFromText(value = '') {
-  const match = String(value || '').match(/共\s*(\d+)\s*条评论/);
-  return match ? Number(match[1] || 0) : null;
+  const match = String(value || '').match(/共\s*([\d,.]+(?:万|亿)?)\s*条评论/);
+  if (!match) return null;
+  const count = parseCount(String(match[1] || '').replace(/,/g, ''));
+  return Number.isFinite(count) && count >= 0 ? Math.floor(count) : null;
 }
 
 export function getActiveCommentsContext(root = document) {
@@ -131,7 +137,7 @@ export function getActiveCommentsContext(root = document) {
     matches.forEach((container) => {
       const commentItems = container.querySelectorAll?.('.parent-comment, .comment-item') || [];
       const text = readCommentMetaText(container);
-      const hasMeta = /共\s*\d+\s*条评论/.test(text) || /- THE END -/.test(text);
+      const hasMeta = /共\s*[\d,.]+(?:万|亿)?\s*条评论/.test(text) || /- THE END -/.test(text);
       const hasExplicitEmptyState = /(暂无评论|还没有评论|还木有评论|还没有人评论|暂无回复)/.test(text);
       const score = (scope === detailRoot ? 100 : 0)
         + (scopeIndex === 0 ? 30 : 0)

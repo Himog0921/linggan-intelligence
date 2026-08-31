@@ -48,6 +48,7 @@ function collectionScope(maxTotal = 0) {
 function terminalCollectionStop(stopReason = '') {
   return new Set([
     'risk_control',
+    'manual_pause',
     'manual_stop',
     'comment_collection_failed',
     'target_identity_mismatch',

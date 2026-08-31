@@ -71,6 +71,7 @@ export function createXhsPageController({
   MSG,
   assertPluginAuthorized,
   collectComments,
+  submitCommentCheckpoint,
   collectCommentImages,
   collectNote,
   collectAuthor,
@@ -175,6 +176,7 @@ export function createXhsPageController({
 
   singleCommentCtrl = createCommentTaskController({
     collectComments,
+    submitCommentCheckpoint,
     showToast,
     syncTaskUI,
     startBatchTask,
