@@ -98,6 +98,12 @@
 - 本机持久数据库、`:3000` 和历史材料都没有在本卡中改写；0027 只在隔离数据库证明可前向应用。
 - 真实验收使用同一个已授权长评论样本，一次性核对评论 Package/Receipt、三计数、媒体 Materialization/精确失败回执和 Evidence 统一读取；不再用连续试错扩大范围。
 
+## 2026-08-31 受控后续：0.8.19 作者头像与 Evidence 身份分栏
+
+Mog 已授权对同一作品“ADHD的尽头是成瘾”重新执行详情与评论采集，并要求所有实际取得的媒体在 Evidence Library 可见。范围固定为：详情 `authorId + authorAvatar` 形成独立 `author.avatar` 槽位并走既有媒体链；Work Resource 返回受控本地头像；Evidence 把作品作者和监控目标拆成两个事实区，并在媒体 Inspector 连续列出头像、封面、正文图片、视频和派生资源。评论总数持续增长按平台真实进量处理，最新 Attempt 与历史累计仍保持不同口径。
+
+本后续不允许远程头像/CDN 回退、不把监控目标填成作者、不把头像送入 OCR、不改评论重采与完整性规则，也不新增第二媒体表。自动检查、隔离 PostgreSQL、0.8.19 发行包、本机 migration/runtime、Chrome 重载、真实 Package/Receipt/Materialization 和页面验收继续分层记录；本段不预先宣称真实链完成。
+
 ## 停止条件
 
 需要历史破坏性改写、第二资产模型、新页面/产品决定、扩大真实目标、绕过登录/风控、暴露签名 URL/敏感原文、或覆盖并行修改时，停止受影响部分并报告。没有真实来源的 avatar/comment image/OCR/transcript 必须保持 `NOT_OBSERVED`，不能为通过验收伪造。

@@ -81,6 +81,31 @@ test('media slots retain URL observations but no remote URL becomes a local pres
   assert.deepEqual(packageValue.records.map((record) => record.slot.ordinal), [1, 1]);
 });
 
+test('content detail media package carries the observed author avatar as an author-owned slot', () => {
+  const packageValue = packageMediaSlots({
+    platform: 'xhs',
+    note: {
+      noteId: 'note-with-author-avatar',
+      authorId: 'author-42',
+      authorAvatar: 'https://sns-avatar.example/author-42.jpg',
+      images: [{ url: 'https://sns-img.example/body.jpg' }],
+    },
+  });
+  assert.equal(packageValue.coverage.layers[0].observed, 2);
+  assert.deepEqual(packageValue.records.map((record) => record.slotKey), [
+    'xhs:note-with-author-avatar:image:1',
+    'xhs:author:author-42:avatar:1',
+  ]);
+  assert.deepEqual(packageValue.records[1].sourceObject, {
+    platform: 'xhs',
+    type: 'author',
+    externalId: 'author-42',
+  });
+  assert.equal(packageValue.records[1].contextContentExternalId, 'note-with-author-avatar');
+  assert.equal(packageValue.records[1].observation.externalUri, 'https://sns-avatar.example/author-42.jpg');
+  assert.equal(Object.hasOwn(packageValue.records[1], 'localAssetUrl'), false);
+});
+
 test('media slot ordinals are scoped to each relationship purpose', () => {
   const packageValue = packageMediaSlots({
     platform: 'xhs',

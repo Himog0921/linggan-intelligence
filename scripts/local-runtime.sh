@@ -198,6 +198,7 @@ migrate() {
   apply_migration_once "0025_comment_current_projection" "$project_root/database/migrations/0025_comment_current_projection.sql"
   apply_migration_once "0026_work_resource_read" "$project_root/database/migrations/0026_work_resource_read.sql"
   apply_migration_once "0027_unified_media_resource" "$project_root/database/migrations/0027_unified_media_resource.sql"
+  apply_migration_once "0029_author_avatar_media" "$project_root/database/migrations/0029_author_avatar_media.sql"
 }
 
 case "$command_name" in

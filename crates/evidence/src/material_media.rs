@@ -112,7 +112,7 @@ pub(crate) async fn identity_conflict_reason(
     .map_err(ProducerRuntimeError::Internal)?;
     if existing.is_some_and(|row| {
         row.get::<String, _>("platform") != package.platform()
-            || row.get::<String, _>("content_external_id") != media.content_id
+            || row.get::<String, _>("content_external_id") != media.subject_external_id
             || row.get::<String, _>("role") != media.role
             || row.get::<i32, _>("ordinal") != media.producer_ordinal
     }) {
@@ -137,7 +137,7 @@ pub(crate) async fn insert_legacy_only(
             continue;
         };
         sqlx::query("INSERT INTO linggan_media_slot (slot_key,platform,content_external_id,role,ordinal,first_package_ref) VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (slot_key) DO NOTHING")
-            .bind(media.slot_key).bind(package.platform()).bind(media.content_id).bind(media.role).bind(media.producer_ordinal).bind(package.package_ref())
+            .bind(media.slot_key).bind(package.platform()).bind(media.subject_external_id).bind(media.role).bind(media.producer_ordinal).bind(package.package_ref())
             .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
         sqlx::query("INSERT INTO linggan_media_observation (observation_ref,slot_key,package_ref,observed_external_uri,observed_at) VALUES ($1,$2,$3,$4,$5) ON CONFLICT (observation_ref) DO NOTHING")
             .bind(media.observation_ref).bind(media.slot_key).bind(package.package_ref()).bind(media.primary_uri).bind(package.observed_at())
@@ -164,7 +164,7 @@ async fn insert_slot_and_origin(
         .bind(media.slot_key).fetch_optional(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
     if let Some(row) = existing {
         if row.get::<String, _>("platform") != package.platform()
-            || row.get::<String, _>("content_external_id") != media.content_id
+            || row.get::<String, _>("content_external_id") != media.subject_external_id
             || row.get::<String, _>("role") != media.role
             || row.get::<i32, _>("ordinal") != media.producer_ordinal
         {
@@ -172,7 +172,7 @@ async fn insert_slot_and_origin(
         }
     } else {
         sqlx::query("INSERT INTO linggan_media_slot (slot_key,platform,content_external_id,role,ordinal,first_package_ref) VALUES ($1,$2,$3,$4,$5,$6)")
-            .bind(media.slot_key).bind(package.platform()).bind(media.content_id).bind(media.role).bind(media.producer_ordinal).bind(package.package_ref())
+            .bind(media.slot_key).bind(package.platform()).bind(media.subject_external_id).bind(media.role).bind(media.producer_ordinal).bind(package.package_ref())
             .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
         sqlx::query("SELECT slot_key FROM linggan_media_slot WHERE slot_key=$1 FOR UPDATE")
             .bind(media.slot_key)
@@ -257,21 +257,24 @@ async fn insert_resource_relation(
         return Ok(());
     }
     let relationship_kind = match media.purpose {
+        "author_avatar" => "author.avatar",
         "cover" => "content.cover",
         "body_image" => "content.image",
         "video" | "live_photo" => "content.video",
         _ => return Err(ProducerRuntimeError::MaterialIdentityConflict),
     };
+    let subject_public_ref = (media.subject_kind == "content").then_some(content_public_ref);
     sqlx::query(
         "INSERT INTO linggan_media_resource_relation \
          (relation_ref,platform,subject_kind,subject_external_id,subject_public_ref,relationship_kind,relationship_ordinal,slot_key,source_package_ref) \
-         VALUES ($1,$2,'content',$3,$4,$5,$6,$7,$8) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) \
          ON CONFLICT (platform,subject_kind,subject_external_id,relationship_kind,relationship_ordinal) DO NOTHING",
     )
     .bind(Uuid::new_v4())
     .bind(package.platform())
-    .bind(media.content_id)
-    .bind(content_public_ref)
+    .bind(media.subject_kind)
+    .bind(media.subject_external_id)
+    .bind(subject_public_ref)
     .bind(relationship_kind)
     .bind(media.producer_ordinal)
     .bind(media.slot_key)
@@ -281,11 +284,12 @@ async fn insert_resource_relation(
     .map_err(ProducerRuntimeError::Internal)?;
     let stored_slot_key: String = sqlx::query_scalar(
         "SELECT slot_key FROM linggan_media_resource_relation \
-         WHERE platform=$1 AND subject_kind='content' AND subject_external_id=$2 \
-           AND relationship_kind=$3 AND relationship_ordinal=$4",
+         WHERE platform=$1 AND subject_kind=$2 AND subject_external_id=$3 \
+           AND relationship_kind=$4 AND relationship_ordinal=$5",
     )
     .bind(package.platform())
-    .bind(media.content_id)
+    .bind(media.subject_kind)
+    .bind(media.subject_external_id)
     .bind(relationship_kind)
     .bind(media.producer_ordinal)
     .fetch_one(&mut **tx)
@@ -356,7 +360,8 @@ struct MediaRecord<'a> {
     candidates: Vec<&'a str>,
     still_candidates: Vec<&'a str>,
     motion_candidates: Vec<&'a str>,
-    content_id: &'a str,
+    subject_kind: &'static str,
+    subject_external_id: &'a str,
     role: &'a str,
     purpose: &'static str,
     producer_ordinal: i32,
@@ -390,7 +395,8 @@ fn legacy_media_record(record: &Value) -> Option<MediaRecord<'_>> {
         candidates: vec![primary_uri],
         still_candidates: Vec::new(),
         motion_candidates: Vec::new(),
-        content_id,
+        subject_kind: "content",
+        subject_external_id: content_id,
         role,
         purpose,
         producer_ordinal,
@@ -404,10 +410,10 @@ fn media_record<'a>(
     if record.get("kind")?.as_str()? != "media_slot" {
         return None;
     }
-    let content_id = record.pointer("/sourceObject/externalId")?.as_str()?.trim();
-    if Some(content_id) != target_content_id(package)
+    let subject_external_id = record.pointer("/sourceObject/externalId")?.as_str()?.trim();
+    let subject_type = record.pointer("/sourceObject/type")?.as_str()?.trim();
+    if subject_external_id.is_empty()
         || record.pointer("/sourceObject/platform")?.as_str()? != package.platform()
-        || record.pointer("/sourceObject/type")?.as_str()? != "content"
     {
         return None;
     }
@@ -417,6 +423,24 @@ fn media_record<'a>(
         "cover" => "cover",
         "video" => "video",
         "live_photo" => "live_photo",
+        "avatar" => "author_avatar",
+        _ => return None,
+    };
+    let subject_kind = match (role, subject_type) {
+        ("avatar", "author")
+            if record
+                .get("contextContentExternalId")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                == target_content_id(package) =>
+        {
+            "author"
+        }
+        ("image" | "cover" | "video" | "live_photo", "content")
+            if Some(subject_external_id) == target_content_id(package) =>
+        {
+            "content"
+        }
         _ => return None,
     };
     let producer_ordinal = record
@@ -425,7 +449,15 @@ fn media_record<'a>(
         .filter(|value| *value > 0)
         .and_then(|value| i32::try_from(value).ok())?;
     let slot_key = record.get("slotKey")?.as_str()?.trim();
-    if slot_key != canonical_slot_key(package.platform(), content_id, role, producer_ordinal) {
+    if slot_key
+        != canonical_slot_key(
+            package.platform(),
+            subject_kind,
+            subject_external_id,
+            role,
+            producer_ordinal,
+        )
+    {
         return None;
     }
     let observation_ref = Uuid::parse_str(record.get("observationRef")?.as_str()?).ok()?;
@@ -480,7 +512,8 @@ fn media_record<'a>(
         candidates,
         still_candidates,
         motion_candidates,
-        content_id,
+        subject_kind,
+        subject_external_id,
         role,
         purpose,
         producer_ordinal,
@@ -496,11 +529,19 @@ fn target_content_id(package: &ProducerCapturePackage) -> Option<&str> {
         .filter(|value| !value.is_empty())
 }
 
-fn canonical_slot_key(platform: &str, content_id: &str, role: &str, ordinal: i32) -> String {
-    format!(
-        "{platform}:{}:{role}:{ordinal}",
-        encode_uri_component(content_id)
-    )
+fn canonical_slot_key(
+    platform: &str,
+    subject_kind: &str,
+    subject_external_id: &str,
+    role: &str,
+    ordinal: i32,
+) -> String {
+    let encoded = encode_uri_component(subject_external_id);
+    if subject_kind == "author" {
+        format!("{platform}:author:{encoded}:{role}:{ordinal}")
+    } else {
+        format!("{platform}:{encoded}:{role}:{ordinal}")
+    }
 }
 
 fn encode_uri_component(value: &str) -> String {

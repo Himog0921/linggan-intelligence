@@ -2033,6 +2033,18 @@ fn evidence_runtime_renders_only_controlled_media_handles() {
 }
 
 #[test]
+fn evidence_runtime_separates_creator_and_monitoring_target_and_renders_avatar_from_media() {
+    assert!(EVIDENCE_LIBRARY_JS.contains("ev-creator-fact"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("ev-target-fact"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("作品作者"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("监控目标"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("media.avatar"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("sameOriginPath(avatar.localAssetUrl"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-author-avatar"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("identity_facts.avatar"));
+}
+
+#[test]
 fn evidence_runtime_uses_the_xhs_portrait_cover_ratio_in_visual_layouts() {
     assert!(EVIDENCE_LIBRARY_JS.contains(
         "row.dataset.platform = String(item.identity?.platform || 'unknown').toLowerCase()"

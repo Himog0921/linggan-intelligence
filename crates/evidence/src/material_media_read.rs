@@ -76,13 +76,14 @@ fn build_media_resource(
     ocr_state: &'static str,
     asr_state: &'static str,
 ) -> (Value, Option<String>, Option<String>) {
-    let (covers, images, videos) = partition_resource_slots(slots);
+    let (avatars, covers, images, videos) = partition_resource_slots(slots);
+    let avatar = select_avatar(&avatars);
     let cover = select_cover(&covers, &images, &videos, derivatives);
     let (ocr_resources, transcript_resources) = derivative_resources(derivatives);
     let resource = serde_json::json!({
         "contractVersion":"linggan.media-resource.v1",
         "state":if slots.is_empty() && derivatives.is_empty(){"NOT_OBSERVED"}else{"OBSERVED"},
-        "avatar":{"state":"NOT_OBSERVED","relationship":"author.avatar","localAssetUrl":null},
+        "avatar":avatar,
         "cover":{
             "state":cover.state,
             "relationship":"content.cover",
@@ -125,6 +126,7 @@ fn resource_slot(slot: &Value) -> Value {
         .get("relationshipKind")
         .and_then(Value::as_str)
         .unwrap_or(match purpose {
+            "author_avatar" => "author.avatar",
             "cover" => "content.cover",
             "video" | "live_photo" => "content.video",
             _ => "content.image",
@@ -154,7 +156,7 @@ fn resource_slot(slot: &Value) -> Value {
     value
 }
 
-fn partition_resource_slots(slots: &[Value]) -> (Vec<Value>, Vec<Value>, Vec<Value>) {
+fn partition_resource_slots(slots: &[Value]) -> (Vec<Value>, Vec<Value>, Vec<Value>, Vec<Value>) {
     let select = |purposes: &[&str]| {
         slots
             .iter()
@@ -167,10 +169,41 @@ fn partition_resource_slots(slots: &[Value]) -> (Vec<Value>, Vec<Value>, Vec<Val
             .collect::<Vec<_>>()
     };
     (
+        select(&["author_avatar"]),
         select(&["cover"]),
         select(&["body_image"]),
         select(&["video", "live_photo"]),
     )
+}
+
+fn select_avatar(avatars: &[Value]) -> Value {
+    let selected = avatars
+        .iter()
+        .find(|avatar| local_handle(avatar).is_some())
+        .or_else(|| avatars.first());
+    let Some(selected) = selected else {
+        return serde_json::json!({
+            "state":"NOT_OBSERVED","relationship":"author.avatar","localAssetUrl":null
+        });
+    };
+    let mut avatar = selected.clone();
+    if let Some(object) = avatar.as_object_mut() {
+        object.insert(
+            "state".to_owned(),
+            Value::String(
+                selected
+                    .get("bytesState")
+                    .and_then(Value::as_str)
+                    .unwrap_or("OBSERVED")
+                    .to_owned(),
+            ),
+        );
+        object.insert(
+            "relationship".to_owned(),
+            Value::String("author.avatar".to_owned()),
+        );
+    }
+    avatar
 }
 
 fn local_handle(value: &Value) -> Option<String> {

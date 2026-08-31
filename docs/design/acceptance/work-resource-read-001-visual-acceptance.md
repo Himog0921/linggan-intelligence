@@ -53,3 +53,10 @@
 - 研读排版：实际作品行带 `data-platform=xhs`，封面容器 computed `aspect-ratio=3 / 4`，几何为 `72×96px`，宽高比 `0.75`。
 - 封面排版：切换后同一作品、同一选择与 Inspector 保持，封面容器约 `215.94×287.91px`，computed `aspect-ratio=3 / 4`，宽高比 `0.75`。
 - 媒体资格仍诚实：目标作品当时没有本地物化，隔离页继续显示 `NOT_OBSERVED`；本复验只证明布局比例，不把远程候选或缺图状态解释为封面已取得，也不证明 `:3000` 已部署。
+
+## 2026-08-31 · 作者头像与作者/目标分栏增量验收
+
+- 代码合同：研读、表格、封面与 Inspector 概览均消费两个独立事实区；作品作者使用 `media.avatar`，监控目标使用 `collectionContext`。页面不读取 `identity_facts.avatar`，也不接受远程媒体地址。
+- 数据合同：隔离 PostgreSQL 已证明详情作者头像从 author-owned slot 进入既有媒体链、物化后返回 `/api/local/media/...`，同时写入唯一 `author.avatar` 关系；头像不创建派生处理工作。
+- 自动结果：Evidence source guard、Rust workspace、插件 209 项与 0.8.19 可复现发行通过。
+- 尚未证明：本机 `:3000` 的 1440/390 实际视觉、Chrome 0.8.19 真实目标重采、头像/封面/正文图 Materialization 和 Mog 视觉验收。完成这些证据前，本段状态为 `AUTOMATED_AND_PG_VERIFIED / REAL_UI_PENDING`。

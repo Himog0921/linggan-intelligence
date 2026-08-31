@@ -8,6 +8,14 @@
 
 ## 当前阶段
 
+### XHS-MEDIA-AUTHOR-EVIDENCE-001（v0.8.19 候选，自动与隔离 PostgreSQL 已证明，真实重载待执行）
+
+用户已确认“ADHD的尽头是成瘾”仍在平台推流，页面公开评论数随时间增长属于真实进量，不按重复或错误分母处理。本后续只对该已授权作品重新执行详情、评论和媒体链；最新 Attempt 数量、页面公开数与历史累计唯一评论继续分别表达。
+
+0.8.19 已让详情中同时存在的 `authorId + authorAvatar` 形成独立作者媒体槽位。Rust 以当前作品作为观察上下文校验作者主体，写入 `author.avatar` 权威关系，再复用 Slot → Candidate → Download → Blob → Materialization；头像不进入 OCR/ASR。Work Resource 的 `media.avatar` 只返回 `INLINE_SAFE` 本地句柄。Evidence Library 已把作品作者与监控目标拆成两个事实区，作者区支持本地头像，媒体 Inspector 连续列出头像、封面、正文图、视频及派生资源。
+
+插件合同与 209 项聚焦测试、Rust workspace test/check/format、JS 语法、隔离 PostgreSQL author-avatar 真链、0.8.19 production build、发行校验、可复现性和运行隔离已通过。发行 ZIP SHA-256 为 `c8410c08cd981e9cad93945515613db77918adea3589794232ed623d5ba70338`。仍存在既有 Webpack content bundle 体积警告和 npm audit 9 项依赖风险。本机持久库 `0029`、`:3000` Runtime、Chrome 0.8.19 重载、目标作品新 Package/Receipt/Materialization 和 Mog 页面验收尚未执行，当前不得写成真实链完成。
+
 ### PLUGIN-XHS-FINALIZATION-001（v0.8.16 终包候选，代码与隔离验证完成，真实重载待执行）
 
 在 `origin/main@62a60404` 上完成一次有界终包，不再按真实页面每暴露一个症状就增加一套旁路。执行面现在对 `TaskSpec → 页面动作回执 → Attempt/Package → outbox` fail-closed：同一详情 lane 以稳定幂等键复用单一提交，包含并发唤醒冲突回读；页面没有携带精确 `taskId/action/capability` 成功回执时不得报执行成功。暂停、停止、restart 和批量单篇 timeout 都等待当前 collector 退出后才允许下一执行者操作页面；scheduled 不限评论保留 `0 = unlimited`，批量数量允许明确输入 1–50 且不再静默缩成 50。

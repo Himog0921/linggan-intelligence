@@ -181,6 +181,13 @@ pub async fn admit_media_blob(
     .fetch_one(&mut *tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
+    let media_purpose = sqlx::query_scalar::<_, String>(
+        "SELECT purpose FROM linggan_material_media_origin WHERE observation_ref = $1",
+    )
+    .bind(media_observation_ref)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
     let policy_schema_ready: bool = sqlx::query_scalar(
         "SELECT to_regclass('collection_work_order_material_target') IS NOT NULL",
     )
@@ -213,16 +220,16 @@ pub async fn admit_media_blob(
         .as_ref()
         .is_none_or(|row| row.get::<bool, _>("allow_asr"));
     let mut processing_jobs = Vec::new();
-    for processor_kind in
+    let processors = if media_purpose.as_deref() == Some("author_avatar") {
+        &[][..]
+    } else {
         processors_for_mime(mime_type)
-            .iter()
-            .copied()
-            .filter(|kind| match *kind {
-                "image_ocr" | "video_frame_ocr" => allow_ocr,
-                "asr" => allow_asr,
-                _ => true,
-            })
-    {
+    };
+    for processor_kind in processors.iter().copied().filter(|kind| match *kind {
+        "image_ocr" | "video_frame_ocr" => allow_ocr,
+        "asr" => allow_asr,
+        _ => true,
+    }) {
         let job_ref = Uuid::new_v4();
         let inserted = sqlx::query("INSERT INTO linggan_media_processing_job (job_ref,blob_sha256,slot_key,processor_kind,processor_version,input_scope) VALUES ($1,$2,$3,$4,'local-v1','full_blob') ON CONFLICT (blob_sha256,slot_key,processor_kind,processor_version,input_scope) DO NOTHING")
             .bind(job_ref).bind(sha256).bind(&slot_key).bind(processor_kind)

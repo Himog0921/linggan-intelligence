@@ -255,8 +255,8 @@ export function packageAuthorProfile({ platform, author, observedAt, capturedAt 
 export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {}) {
   const sources = collectMediaCandidates(note);
   const roleOrdinals = new Map();
-  const sourceObject = normalizeSourceObject(platform, note);
-  const contentExternalId = sourceObject.externalId;
+  const contentSourceObject = normalizeSourceObject(platform, note);
+  const contentExternalId = contentSourceObject.externalId;
   return createCapturePackage({
     packageKind: PRODUCER_CAPABILITY.MEDIA_SLOTS,
     platform,
@@ -271,7 +271,10 @@ export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {
       roleOrdinals.set(candidate.role, slotOrdinal);
       // Slot identity says "this content's nth image/video". A URL is intentionally only an
       // observation; it can change without replacing the slot or a previously acquired blob.
-      const slotKey = `${platform}:${encodeURIComponent(contentExternalId)}:${candidate.role}:${slotOrdinal}`;
+      const sourceObject = candidate.subject ? { platform, ...candidate.subject } : contentSourceObject;
+      const slotKey = candidate.role === 'avatar'
+        ? `${platform}:author:${encodeURIComponent(sourceObject.externalId)}:avatar:${slotOrdinal}`
+        : `${platform}:${encodeURIComponent(contentExternalId)}:${candidate.role}:${slotOrdinal}`;
       return {
         kind: 'media_slot',
         slotKey,
@@ -284,6 +287,7 @@ export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {
           observedAt,
         },
         sourceObject,
+        ...(candidate.role === 'avatar' ? { contextContentExternalId: contentExternalId } : {}),
       };
     }),
   });
@@ -402,11 +406,11 @@ function collectMediaCandidates(note = {}) {
     .flatMap((candidate) => Array.isArray(candidate) ? candidate : [candidate])
     .map((candidate) => String(candidate || '').trim())
     .filter(Boolean))];
-  const push = (role, value) => {
+  const push = (role, value, subject = null) => {
     const candidateUris = normalizeUris(candidateValues(value));
     if (!candidateUris.length) return;
     if (role !== 'live_photo') {
-      output.push({ role, url: candidateUris[0], candidateUris });
+      output.push({ role, url: candidateUris[0], candidateUris, ...(subject ? { subject } : {}) });
       return;
     }
     const stillCandidates = normalizeUris(candidateValues(value?.coverUrl || value?.still));
@@ -425,5 +429,12 @@ function collectMediaCandidates(note = {}) {
   if (note.cover || note.coverUrl) push('cover', note.cover || note.coverUrl);
   if (note.video) push('video', note.video);
   asArray(note.livePhotoStreams).forEach((value) => push('live_photo', value));
+  const authorExternalId = String(note.authorId || note.authorPlatformId || '').trim();
+  if (authorExternalId && note.authorAvatar) {
+    push('avatar', note.authorAvatar, {
+      type: 'author',
+      externalId: authorExternalId,
+    });
+  }
   return output;
 }

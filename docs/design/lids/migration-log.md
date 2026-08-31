@@ -8,6 +8,14 @@
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
 
+## 2026-08-31 · XHS-MEDIA-AUTHOR-EVIDENCE-001 作者头像与身份分栏
+
+- **来源与事项**：Mog 要求重新采集持续进量样本，并让 Evidence Library 显示全部已取得媒体；作品作者与监控目标必须拆开，作者区显示头像。
+- **Token / Primitive**：不新增 token。头像使用既有圆形身份锚点和 `INLINE_SAFE` 状态；两类事实使用现有 1px 结构线、中文主标签和技术状态副标。
+- **Component / Pattern / Page**：Corpus Explorer 与 Split Evidence Inspector 不变；Work Resource row 增加 `creator fact / target fact` 两个明确区块，媒体 Inspector 将 avatar 与内容媒体放在同一连续资源列表。
+- **Data Truth**：头像只来自统一 `media.avatar` 的受控本地句柄；远程 URL、监控目标头像和目标显示名都不得替代作品作者事实。缺失保持 `NOT_OBSERVED/FAILED/RESTRICTED`。
+- **验证与边界**：JS/Rust 聚焦测试与隔离 PostgreSQL author-avatar 链已通过；真实 Chrome 重载、目标作品新 Package/Receipt/媒体物化与 Mog 视觉验收尚未完成。
+
 ## 2026-08-31 · WORK-RESOURCE-READ-001 共享作品资源与三种资料库排版
 
 - **来源与事项**：Mog 要求所有 Intelligence 页面共用 Media V2 上方的封面/作者/时间/标题资源读取，不允许每页各走 API；Issue #110。
