@@ -204,6 +204,7 @@ export function createCommentTaskController({
           noteUrl: safeNoteUrl,
           maxTotal: safeMaxTotal,
           maxSubComments: safeMaxSubComments,
+          commentDepthMode,
           shouldStop,
           waitIfPaused,
           onProgress: (progress) => {

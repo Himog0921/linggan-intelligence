@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.12`
+> 版本: `0.8.13`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -123,6 +123,9 @@ Attempt 的缓存当成本次重采结果。新领取的
 0.8.12 按真实 `.note-scroller` 探针修正滚动停止语义：首批 18 个节点占用约 3000px，前 560px 下移不会
 立即产生新节点。只要 `scrollTop` 仍能前进或 `scrollHeight` 继续增长，就不累计 no-progress；只有到底且
 无新节点才进入有界停止计数。
+0.8.13 修复真实单篇深采暴露的深度参数断点：设置弹窗已经选择“全部展开”时，单篇任务控制器会把
+`commentDepthMode=allReplies` 原样交给共享评论采集器；不再只把该值保存在任务状态、却让执行器按默认
+两级模式运行。有限/不限配额、动作冷却、暂停交付和新 Attempt 从头重采语义均不改变。
 
 实况图片仍是一个逻辑媒体卡槽，但静态图与动态图分别携带候选地址、取得工作和状态；
 普通图片、封面、视频和实况图片都只把远程 URL 当来源观察，长期展示必须使用 Linggan
@@ -148,7 +151,7 @@ npm run release:reproducibility
 npm run verify:linggan-isolation
 ```
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.12.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.13.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

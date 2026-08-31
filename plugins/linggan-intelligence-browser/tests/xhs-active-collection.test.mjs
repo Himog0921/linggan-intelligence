@@ -115,6 +115,38 @@ test('single-note comment UI reports 200 / 300 as partial instead of success', a
   assert.equal(toasts.at(-1).state, 'warning');
 });
 
+test('single-note all-replies settings reach the comment collector', async () => {
+  let received;
+  const controller = createCommentTaskController({
+    collectComments: async (options) => {
+      received = options;
+      return {
+        total: 0,
+        collectionState: 'partial',
+        stopReason: 'no_progress',
+        collectionReceipt: { expectedCount: 0 },
+      };
+    },
+    showToast() {},
+    syncTaskUI() {},
+    startBatchTask() {},
+    toggleStopButton() {},
+    hideTaskControlBar() {},
+    setActiveTaskType() {},
+  });
+
+  await controller.start({
+    noteId: 'note_all_replies',
+    noteUrl: 'https://www.xiaohongshu.com/explore/note_all_replies',
+    maxTotal: 0,
+    maxSubComments: 0,
+    commentDepthMode: 'allReplies',
+  });
+
+  assert.equal(received.commentDepthMode, 'allReplies');
+  assert.equal(received.maxSubComments, 0);
+});
+
 test('unlimited comment progress uses the page count and never latches the first collected count as total', async () => {
   const progress = [];
   const controller = createCommentTaskController({
