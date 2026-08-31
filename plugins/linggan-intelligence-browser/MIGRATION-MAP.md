@@ -53,6 +53,7 @@
 | 媒体领取代际保护（0.8.8） | 领取后先安排恢复唤醒，再写可靠队列并执行；入队或执行异常按 workRef/claimGeneration 回报 | 不把来源 URL 当本地封面，不让人工媒体窗口消失，不把排队冒充物化完成 |
 | 长评论首屏续采（0.8.9） | 不限任务以页面公开数作为当前集合目标；API 首屏不足时进入共用 DOM 补采器；新 Attempt 清空同页旧快照并从空游标重拉第一页 | 不把首屏 `no_progress` 冒充自然结束，不续用上一 Attempt 分页，不跨 Attempt 累加完成度 |
 | 新媒体工作优先与超时（0.8.9） | 精确新领取代次优先于旧本地媒体行；候选请求 20 秒超时 | 不绕过三次服务端尝试上限，不删除人工媒体窗口，不把来源 URI 当物化结果 |
+| 真实详情公开数续采（0.8.10） | 详情标题无“共 N 条”文案时，终态判定继续使用详情上下文观察到的公开评论数 | 不把 `18/508` 误判为无目标 `no_progress` |
 
 ## 新旧运行路径对照
 
@@ -63,7 +64,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.9）
+当前路径（0.8.10）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox
