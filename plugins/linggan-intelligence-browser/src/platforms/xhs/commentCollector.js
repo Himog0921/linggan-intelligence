@@ -395,6 +395,17 @@ async function collectCommentsViaApi({
   let retainedSnapshot = null;
   let freshAttemptStarted = false;
   let freshAttemptReady = false;
+  let observedPublicCommentCount = Number.isFinite(Number(publicCommentCount))
+    ? Math.max(0, Math.floor(Number(publicCommentCount)))
+    : null;
+  const publishCountedProgress = (payload) => {
+    const enriched = withPageCommentCount(payload, container);
+    if (enriched.pageCommentCount != null && Number.isFinite(Number(enriched.pageCommentCount))) {
+      observedPublicCommentCount = Math.max(0, Math.floor(Number(enriched.pageCommentCount)));
+    }
+    onProgress?.(enriched);
+    return enriched;
+  };
 
   while (!shouldStop()) {
     container = resolveContainer() || container;
@@ -405,19 +416,19 @@ async function collectCommentsViaApi({
       break;
     }
 
-    onProgress?.(withPageCommentCount({
+    publishCountedProgress({
       status: 'collecting',
       current: allComments.length,
       message: `正在扫描评论区，当前已采集 ${allComments.length} 条评论`,
-    }, container));
+    });
 
     if (hasXhsCollectionRiskSignal()) {
       riskStopped = true;
-      onProgress?.(withPageCommentCount({
+      publishCountedProgress({
         status: 'blocked',
         current: allComments.length,
         message: `检测到安全验证或访问受限，已停止本次评论采集（当前 ${allComments.length} 条）`,
-      }, container));
+      });
       break;
     }
 
@@ -517,17 +528,17 @@ async function collectCommentsViaApi({
         }, {
           noteId,
           maxTotal,
-          publicCommentCount: context?.publicCommentCount,
+          publicCommentCount: context?.publicCommentCount ?? observedPublicCommentCount,
         }));
       }
     }
 
     if (foundNew) {
-      onProgress?.(withPageCommentCount({
+      publishCountedProgress({
         status: 'collecting',
         current: allComments.length,
         message: `已通过页面 API 同步 ${allComments.length} 条评论${maxTotal > 0 ? `（上限 ${maxTotal}）` : ''}`,
-      }, container));
+      });
     }
 
     // The API hydrator is deliberately stepwise: after one network page this loop yields,
@@ -562,11 +573,11 @@ async function collectCommentsViaApi({
 
     if (!foundNew) {
       noNewCount++;
-      onProgress?.(withPageCommentCount({
+      publishCountedProgress({
         status: 'collecting',
         current: allComments.length,
         message: `本轮未同步到新评论，准备继续滚动加载（第 ${noNewCount}/${maxNoNew} 次）`,
-      }, container));
+      });
       if (noNewCount >= maxNoNew) {
         if (!apiObserved && allComments.length === 0) {
           return { total: 0, comments: [], apiObserved: false, stopReason: 'api_unobserved' };
@@ -623,7 +634,7 @@ async function collectCommentsViaApi({
       maxTotal,
       commentHint: resolveCommentContinuationHint(
         finalSignals.commentHint,
-        publicCommentCount ?? finalContext?.publicCommentCount,
+        publicCommentCount ?? finalContext?.publicCommentCount ?? observedPublicCommentCount,
       ),
       hasDomComments,
     }),
