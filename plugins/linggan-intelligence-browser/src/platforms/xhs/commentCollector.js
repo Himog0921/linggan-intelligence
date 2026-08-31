@@ -411,6 +411,7 @@ async function collectCommentsViaApi({
   let noNewCount = 0;
   const maxNoNew = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 8 : 4;
   const shouldExpandReplies = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES;
+  const stalledReplyControls = new WeakSet();
   let apiObserved = false;
   let hydrationDegradedEver = false;
   let consecutiveHydrationFailures = 0;
@@ -591,18 +592,17 @@ async function collectCommentsViaApi({
     }
 
     if (shouldExpandReplies && hydrationDegradedEver && container) {
-      const expandableParent = [...container.querySelectorAll('.parent-comment')]
-        .find((parentEl) => [...parentEl.querySelectorAll('div.show-more')]
-          .some((el) => isExpandMoreReplyTrigger(el?.textContent)));
-      if (expandableParent) {
-        const expanded = await expandNextReply(expandableParent, {
+      const expandableTarget = findNextExpandableReplyTarget(container, { stalledReplyControls });
+      if (expandableTarget) {
+        const expanded = await expandNextReply(expandableTarget.parentEl, {
+          control: expandableTarget.control,
           waitIfPaused,
           shouldStop,
           waitBeforeAction: () => actionGate.before({ kind: 'dom_expand_reply' }),
           waitAfterAction: async ({ beforeCount }) => {
             await waitForCondition(() => {
               const signals = readCommentSignalsSafe(resolveContainer() || container);
-              return expandableParent.querySelectorAll('.comment-item.comment-item-sub').length > beforeCount
+              return expandableTarget.parentEl.querySelectorAll('.comment-item.comment-item-sub').length > beforeCount
                 || signals.hasEndMarker
                 || !signals.hasExpandableReplies;
             }, DEFAULT_DOM_TOP_UP_SETTLE_MS, 140);
@@ -610,6 +610,10 @@ async function collectCommentsViaApi({
           },
         });
         if (expanded.acted) continue;
+        if (expanded.reason === 'reply_expand_no_progress') {
+          stalledReplyControls.add(expandableTarget.control);
+          if (findNextExpandableReplyTarget(container, { stalledReplyControls })) continue;
+        }
       }
     }
 
@@ -725,6 +729,7 @@ async function collectCommentsFromDom({
   let noNewCount = 0;
   const maxNoNew = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 8 : DEFAULT_DOM_TOP_UP_MAX_NO_NEW;
   const shouldExpandReplies = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES;
+  const stalledReplyControls = new WeakSet();
   let riskStopped = false;
 
   while (!shouldStop()) {
@@ -848,23 +853,22 @@ async function collectCommentsFromDom({
     }
 
     if (shouldExpandReplies) {
-      const expandableParent = [...container.querySelectorAll('.parent-comment')]
-        .find((parentEl) => [...parentEl.querySelectorAll('div.show-more')]
-          .some((el) => isExpandMoreReplyTrigger(el?.textContent)));
-      if (expandableParent) {
+      const expandableTarget = findNextExpandableReplyTarget(container, { stalledReplyControls });
+      if (expandableTarget) {
         onProgress?.(withPageCommentCount({
           status: 'collecting',
           current: allComments.length,
           message: `正在按页展开回复（当前已取得 ${allComments.length} 条）`,
         }, container));
-        const expanded = await expandNextReply(expandableParent, {
+        const expanded = await expandNextReply(expandableTarget.parentEl, {
+          control: expandableTarget.control,
           waitIfPaused,
           shouldStop,
           waitBeforeAction: () => actionGate.before({ kind: 'dom_expand_reply' }),
           waitAfterAction: async ({ beforeCount }) => {
             await waitForCondition(() => {
               const current = resolveContainer() || container;
-              return expandableParent.querySelectorAll('.comment-item.comment-item-sub').length > beforeCount
+              return expandableTarget.parentEl.querySelectorAll('.comment-item.comment-item-sub').length > beforeCount
                 || !readCommentSignalsSafe(current).hasExpandableReplies;
             }, DEFAULT_DOM_TOP_UP_SETTLE_MS, 140);
             await actionGate.after({ kind: 'dom_expand_reply' });
@@ -873,6 +877,15 @@ async function collectCommentsFromDom({
         if (expanded.acted) {
           noNewCount = foundNew ? 0 : noNewCount;
           continue;
+        }
+        if (expanded.reason === 'reply_expand_no_progress') {
+          stalledReplyControls.add(expandableTarget.control);
+          onProgress?.(withPageCommentCount({
+            status: 'collecting',
+            current: allComments.length,
+            message: `当前回复入口未产生新数据，继续检查其他楼层（已取得 ${allComments.length} 条）`,
+          }, container));
+          if (findNextExpandableReplyTarget(container, { stalledReplyControls })) continue;
         }
       }
     }
@@ -1387,6 +1400,18 @@ export function isExpandMoreReplyTrigger(text = '') {
   return /展开/.test(String(text || '').trim());
 }
 
+export function findNextExpandableReplyTarget(container, {
+  stalledReplyControls = new WeakSet(),
+} = {}) {
+  if (!container?.querySelectorAll) return null;
+  for (const parentEl of container.querySelectorAll('.parent-comment')) {
+    const control = [...parentEl.querySelectorAll('div.show-more')]
+      .find((el) => isExpandMoreReplyTrigger(el?.textContent) && !stalledReplyControls.has(el));
+    if (control) return { parentEl, control };
+  }
+  return null;
+}
+
 function replyControlIsVisible(button) {
   if (typeof button?.getBoundingClientRect !== 'function') return true;
   const rect = button.getBoundingClientRect();
@@ -1399,6 +1424,7 @@ function replyControlIsVisible(button) {
 }
 
 export async function expandNextReply(parentCommentEl, {
+  control = null,
   waitIfPaused = async () => {},
   shouldStop = () => false,
   waitBeforeAction = () => waitForPageSettle(90),
@@ -1406,8 +1432,10 @@ export async function expandNextReply(parentCommentEl, {
 } = {}) {
   await waitIfPaused();
   if (shouldStop()) return { acted: false, reason: 'stopped' };
-  const button = [...parentCommentEl.querySelectorAll('div.show-more')]
-    .find((el) => isExpandMoreReplyTrigger(el?.textContent));
+  const button = control && isExpandMoreReplyTrigger(control?.textContent)
+    ? control
+    : [...parentCommentEl.querySelectorAll('div.show-more')]
+      .find((el) => isExpandMoreReplyTrigger(el?.textContent));
   if (!button) return { acted: false, reason: 'no_expand_control' };
 
   const beforeCount = parentCommentEl.querySelectorAll('.comment-item.comment-item-sub').length;
@@ -1436,7 +1464,25 @@ export async function expandNextReply(parentCommentEl, {
     }, 800, 70);
   }
   await waitIfPaused();
-  return { acted: true, reason: 'reply_expanded' };
+  const afterCount = parentCommentEl.querySelectorAll('.comment-item.comment-item-sub').length;
+  const sameControlStillExpandable = [...parentCommentEl.querySelectorAll('div.show-more')]
+    .some((el) => el === button && isExpandMoreReplyTrigger(el?.textContent));
+  if (afterCount <= beforeCount && sameControlStillExpandable) {
+    return {
+      acted: false,
+      reason: 'reply_expand_no_progress',
+      control: button,
+      beforeCount,
+      afterCount,
+    };
+  }
+  return {
+    acted: true,
+    reason: 'reply_expanded',
+    control: button,
+    beforeCount,
+    afterCount,
+  };
 }
 
 export async function expandAllReplies(parentCommentEl, maxAttempts = 10, controls = {}) {

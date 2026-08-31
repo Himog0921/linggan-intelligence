@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.19`
+> 版本: `0.8.20`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -138,7 +138,9 @@ Attempt 的缓存当成本次重采结果。新领取的
 媒体序号按 cover/image/video 各自计数，服务端新增七类统一媒体关系和一份
 `linggan.media-resource.v1` 读模型；Evidence 只消费受控本地句柄，封面按平台封面、首张正文图、
 视频 poster 的唯一顺序选择，3:4 仅作为卡片展示策略。人工媒体下载窗口继续保留。
-0.8.19 补齐详情作者头像的真实媒体链：`content_detail` 已取得的 `authorId + authorAvatar`
+0.8.20 为“全部楼层回复”增加无进展保护：展开控件点击后如果回复数没有增长且同一控件仍存在，
+本次采集会跳过这个停滞控件并继续检查后续楼层，避免深采在一个按钮上无限循环。0.8.19 补齐的
+详情作者头像真实媒体链继续保留：`content_detail` 已取得的 `authorId + authorAvatar`
 会形成独立 `author.avatar` 槽位，继续走原有候选、下载、Blob 与本地 Materialization，
 不把远程头像 URL 直接交给业务页面。Evidence Library 将作品作者与监控目标拆成两个事实区，
 作者区显示受控本地头像；媒体 Inspector 同时列出头像、封面、正文图、视频与派生资源。
@@ -171,7 +173,7 @@ npm run verify:linggan-isolation
 0.8.18 将真实终验发现的 `596/594` 收口为完成：全量深采取得数达到或超过页面公开数即可
 完成，详情附带评论窗口仍保持精确上限。
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.19.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.20.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台
