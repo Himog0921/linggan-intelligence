@@ -5,7 +5,9 @@ import {
   collectComments,
   initializeCollectedComments,
   parseCommentTextTail,
+  resolveCommentContinuationHint,
   resolveXhsCommentTargetIdentity,
+  rewindCommentSurface,
   shouldContinueDomAfterApi,
 } from '../src/platforms/xhs/commentCollector.js';
 import { COMMENT_DEPTH_MODE } from '../src/shared/constants.js';
@@ -79,6 +81,63 @@ test('shouldContinueDomAfterApi keeps reply continuation and visible top-up path
     commentHint: 27,
     hasDomComments: true,
   }), true);
+
+  assert.equal(shouldContinueDomAfterApi({
+    depthMode: COMMENT_DEPTH_MODE.ALL_REPLIES,
+    currentTotal: 17,
+    maxTotal: 0,
+    commentHint: 492,
+    hasDomComments: true,
+  }), true);
+
+  assert.equal(shouldContinueDomAfterApi({
+    depthMode: COMMENT_DEPTH_MODE.ALL_REPLIES,
+    currentTotal: 492,
+    maxTotal: 0,
+    commentHint: 492,
+    hasDomComments: true,
+  }), false);
+});
+
+test('known public count survives when the current DOM heading cannot be parsed', () => {
+  assert.equal(resolveCommentContinuationHint(0, 492), 492);
+  assert.equal(resolveCommentContinuationHint(493, 492), 493);
+  assert.equal(resolveCommentContinuationHint(0, null), 0);
+});
+
+test('DOM fallback rewinds the comment surface before reading a new Attempt', async (t) => {
+  const previousWindow = globalThis.window;
+  const events = [];
+  const scrollParent = {
+    parentElement: null,
+    scrollTop: 640,
+    scrollTo({ top }) {
+      events.push(`scroll:${top}`);
+      this.scrollTop = top;
+    },
+  };
+  globalThis.window = {
+    getComputedStyle() {
+      return { overflow: 'auto', overflowY: 'auto' };
+    },
+  };
+  t.after(() => { globalThis.window = previousWindow; });
+
+  const changed = await rewindCommentSurface({ parentElement: scrollParent }, {
+    actionGate: {
+      async before({ kind }) {
+        events.push(`before:${kind}`);
+        return true;
+      },
+      async after({ kind, changed: didChange }) {
+        events.push(`after:${kind}:${didChange}`);
+      },
+    },
+  });
+
+  assert.equal(changed, true);
+  assert.equal(scrollParent.scrollTop, 0);
+  assert.deepEqual(events, ['before:dom_rewind', 'scroll:0', 'after:dom_rewind:true']);
 });
 
 test('parseCommentTextTail splits visible XHS comment text without mixing metrics into content', () => {
@@ -139,18 +198,21 @@ test('collectComments can use API snapshot before comments container renders', a
       };
     },
     postMessage(message) {
-      if (message?.type !== '__lgboom_xhs_comment_api_request__') return;
-      setTimeout(() => {
-        listeners.forEach((listener) => listener({
-          source: globalThis.window,
-          data: {
-            source: 'lgboom-xhs-api-capture',
-            type: '__lgboom_xhs_comment_api_response__',
-            payload: {
-              requestId: message.payload.requestId,
-              ok: true,
-              pages: [{
-                noteId: 'note_api_only',
+      const responseByRequestType = {
+        __lgboom_xhs_comment_api_reset_request__: {
+          type: '__lgboom_xhs_comment_api_reset_response__',
+          payload: {
+            ok: true,
+            noteId: 'note_api_only',
+            reset: true,
+          },
+        },
+        __lgboom_xhs_page_fetch_request__: {
+          type: '__lgboom_xhs_page_fetch_response__',
+          payload: {
+            ok: true,
+            json: {
+              data: {
                 comments: [{
                   id: 'comment_1',
                   content: '这是一条接口评论',
@@ -159,10 +221,24 @@ test('collectComments can use API snapshot before comments container renders', a
                     user_id: 'user_1',
                   },
                 }],
-                hasMore: false,
-                capturedAt: Date.now(),
-              }],
-              subPages: [],
+                has_more: false,
+                cursor: '',
+              },
+            },
+          },
+        },
+      };
+      const response = responseByRequestType[message?.type];
+      if (!response) return;
+      setTimeout(() => {
+        listeners.forEach((listener) => listener({
+          source: globalThis.window,
+          data: {
+            source: 'lgboom-xhs-api-capture',
+            type: response.type,
+            payload: {
+              requestId: message.payload.requestId,
+              ...response.payload,
             },
           },
         }));

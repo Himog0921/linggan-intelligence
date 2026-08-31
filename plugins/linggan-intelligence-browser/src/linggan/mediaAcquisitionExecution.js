@@ -2,6 +2,15 @@ function text(value) {
   return String(value || '').trim();
 }
 
+export function prioritizeMediaUploads(preferred = null, due = [], limit = 2) {
+  const preferredUploadId = text(preferred?.uploadId);
+  const preferredEligible = preferredUploadId && ['pending', 'retryable'].includes(preferred?.status);
+  return [
+    ...(preferredEligible ? [preferred] : []),
+    ...(Array.isArray(due) ? due : []).filter((upload) => text(upload?.uploadId) !== preferredUploadId),
+  ].slice(0, Math.max(0, Number(limit) || 0));
+}
+
 export function claimedMediaUpload({
   claim = {},
   installKey = '',
@@ -48,7 +57,8 @@ export async function executeClaimedMediaAcquisition({
     upload = claimedMediaUpload({ claim, installKey, allowCandidate });
     await scheduleRecovery(60);
     await outbox.enqueue(upload);
-    await flush();
+    // Give the exact newly leased generation priority over unrelated historical rows.
+    await flush(upload.uploadId);
     const row = typeof outbox.get === 'function' ? await outbox.get(upload.uploadId) : null;
     const acknowledged = row?.status === 'acknowledged';
     const terminal = row?.status === 'terminal';

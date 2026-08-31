@@ -5,7 +5,46 @@ import {
   parseXhsCommentPagePayload,
   buildXhsCommentsFromSnapshot,
   hydrateXhsCommentSnapshot,
+  startFreshXhsCommentSnapshot,
 } from '../src/platforms/xhs/commentApi.js';
+
+test('a new comment Attempt resets prior pages and fetches a fresh first page', async () => {
+  const events = [];
+  let generation = 0;
+  const options = {
+    resetSnapshot: async (noteId) => {
+      events.push(`reset:${noteId}`);
+      return true;
+    },
+    beforeExternalAction: async () => { events.push('before'); },
+    afterExternalAction: async () => { events.push('after'); },
+    fetchJson: async () => {
+      generation += 1;
+      return { data: { comments: [{ id: `fresh_${generation}` }], has_more: true, cursor: `cursor_${generation}` } };
+    },
+  };
+  const first = await startFreshXhsCommentSnapshot('note_1', options);
+  const second = await startFreshXhsCommentSnapshot('note_1', options);
+  assert.deepEqual(first.pages[0].comments.map((comment) => comment.id), ['fresh_1']);
+  assert.deepEqual(second.pages[0].comments.map((comment) => comment.id), ['fresh_2']);
+  assert.deepEqual(second.subPages, []);
+  assert.deepEqual(events, ['reset:note_1', 'before', 'after', 'reset:note_1', 'before', 'after']);
+});
+
+test('a new comment Attempt never fetches when snapshot reset is not confirmed', async () => {
+  let fetchCalled = false;
+  await assert.rejects(
+    startFreshXhsCommentSnapshot('note_1', {
+      resetSnapshot: async () => false,
+      fetchJson: async () => {
+        fetchCalled = true;
+        return {};
+      },
+    }),
+    /comment_snapshot_reset_not_confirmed/,
+  );
+  assert.equal(fetchCalled, false);
+});
 
 test('parseXhsCommentPagePayload reads note id, cursor, hasMore and endpoint from main comment payload', () => {
   const payload = parseXhsCommentPagePayload({

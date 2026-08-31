@@ -10,6 +10,7 @@ import { buildXhsCommentCollectionReceipt } from './captureReceipt.js';
 import {
   buildXhsCommentsFromSnapshot,
   requestXhsCommentSnapshot,
+  startFreshXhsCommentSnapshot,
   hydrateXhsCommentSnapshot,
   mergeXhsCommentSnapshots,
   fetchXhsJsonViaBridge,
@@ -128,6 +129,30 @@ async function loadMoreCommentSurface(container, distance = DEFAULT_COMMENT_SCRO
   return changed;
 }
 
+export async function rewindCommentSurface(container, {
+  actionGate = createCommentActionGate(),
+  shouldStop = () => false,
+  waitIfPaused = async () => {},
+} = {}) {
+  const scrollParent = findScrollParent(container);
+  if (!scrollParent || Number(scrollParent.scrollTop || 0) <= 0) return false;
+  await waitIfPaused();
+  if (shouldStop() || !await actionGate.before({ kind: 'dom_rewind' })) return false;
+  if (typeof scrollParent.scrollTo === 'function') {
+    scrollParent.scrollTo({ top: 0, behavior: 'auto' });
+  } else {
+    scrollParent.scrollTop = 0;
+  }
+  const changed = await waitForCondition(
+    () => Number(scrollParent.scrollTop || 0) <= 1,
+    DEFAULT_DOM_TOP_UP_SETTLE_MS,
+    140,
+  );
+  await actionGate.after({ kind: 'dom_rewind', changed });
+  await waitIfPaused();
+  return changed;
+}
+
 /**
  * 采集单篇笔记的所有评论（含子评论）
  * 技术路径：DOM 解析 + 自动滚动加载 + 子评论展开
@@ -178,6 +203,7 @@ export async function collectComments({
     collectionRunId,
     persist,
     actionGate,
+    publicCommentCount,
   });
   if (apiResult.stopReason === 'risk_control' || (!apiResult.needsDomContinuation && (apiResult.apiObserved || apiResult.total > 0))) {
     const result = withCommentCollectionReceipt({
@@ -313,14 +339,25 @@ export function shouldContinueDomAfterApi({
   const wantsReplyContinuation = String(depthMode || COMMENT_DEPTH_MODE.TWO_LEVEL).trim() === COMMENT_DEPTH_MODE.ALL_REPLIES
     && Boolean(hydrationDegraded)
     && Boolean(hasExpandableReplies);
-  const expectedTotal = Number(maxTotal || 0);
+  const requestedTotal = Number(maxTotal || 0);
   const observedTotal = Number(currentTotal || 0);
   const visibleTotalHint = Number(commentHint || 0);
+  // An unlimited run means “collect the current public set”, not “accept the first API
+  // window”. XHS can expose the initial comments without a reusable API cursor; in that
+  // case the public page count is the concrete target for DOM continuation.
+  const expectedTotal = requestedTotal > 0 ? requestedTotal : visibleTotalHint;
   const needsVisibleTopUp = expectedTotal > 0
     && observedTotal < expectedTotal
     && Boolean(hasDomComments)
-    && (!visibleTotalHint || visibleTotalHint > observedTotal);
+    && (!visibleTotalHint || visibleTotalHint > observedTotal || requestedTotal > 0);
   return wantsReplyContinuation || needsVisibleTopUp;
+}
+
+export function resolveCommentContinuationHint(pageCommentCount = 0, publicCommentCount = null) {
+  const pageCount = Number(pageCommentCount || 0);
+  if (Number.isFinite(pageCount) && pageCount > 0) return Math.floor(pageCount);
+  const suppliedCount = Number(publicCommentCount);
+  return Number.isFinite(suppliedCount) && suppliedCount >= 0 ? Math.floor(suppliedCount) : 0;
 }
 
 async function collectCommentsViaApi({
@@ -336,6 +373,7 @@ async function collectCommentsViaApi({
   collectionRunId = '',
   persist = true,
   actionGate = createCommentActionGate({ shouldStop, waitIfPaused }),
+  publicCommentCount = null,
 } = {}) {
   noteUrl = noteUrl || window.location.href;
   noteId = noteId || noteUrl.split('/').pop()?.split('?')[0] || '';
@@ -355,6 +393,8 @@ async function collectCommentsViaApi({
   let consecutiveHydrationFailures = 0;
   let riskStopped = false;
   let retainedSnapshot = null;
+  let freshAttemptStarted = false;
+  let freshAttemptReady = false;
 
   while (!shouldStop()) {
     container = resolveContainer() || container;
@@ -384,11 +424,34 @@ async function collectCommentsViaApi({
     let foundNew = false;
     let hydrationActionsPerformed = 0;
     let hydrationActionAttempted = false;
-    const observedSnapshot = await requestXhsCommentSnapshot(noteId).catch(() => null);
+    let observedSnapshot = null;
+    if (!freshAttemptStarted) {
+      freshAttemptStarted = true;
+      hydrationActionAttempted = true;
+      observedSnapshot = await startFreshXhsCommentSnapshot(noteId, {
+        fetchJson: fetchXhsJsonViaBridge,
+        beforeExternalAction: async () => {
+          if (!await actionGate.before({ kind: 'api_page' })) throw new Error('comment_collection_stopped');
+        },
+        afterExternalAction: () => actionGate.after({ kind: 'api_page' }),
+      }).then((snapshot) => {
+        hydrationActionsPerformed = 1;
+        freshAttemptReady = true;
+        return snapshot;
+      }).catch(() => {
+        hydrationActionsPerformed = 1;
+        freshAttemptReady = false;
+        hydrationDegradedEver = true;
+        consecutiveHydrationFailures += 1;
+        return null;
+      });
+    } else if (freshAttemptReady) {
+      observedSnapshot = await requestXhsCommentSnapshot(noteId).catch(() => null);
+    }
     if (observedSnapshot) {
       retainedSnapshot = mergeXhsCommentSnapshots(retainedSnapshot || {}, observedSnapshot);
       let hydrationDegraded = false;
-      const hydratedSnapshot = consecutiveHydrationFailures >= 2
+      const hydratedSnapshot = hydrationActionsPerformed > 0 || consecutiveHydrationFailures >= 2
         ? retainedSnapshot
         : await hydrateXhsCommentSnapshot(retainedSnapshot, {
           noteId,
@@ -557,7 +620,7 @@ async function collectCommentsViaApi({
       hasExpandableReplies: finalSignals.hasExpandableReplies,
       currentTotal: allComments.length,
       maxTotal,
-      commentHint: finalSignals.commentHint,
+      commentHint: resolveCommentContinuationHint(finalSignals.commentHint, publicCommentCount),
       hasDomComments,
     }),
     stopReason: riskStopped
@@ -594,6 +657,8 @@ async function collectCommentsFromDom({
   if (!container) {
     throw new Error('未找到评论区域，请确认当前页面有评论');
   }
+
+  await rewindCommentSurface(container, { actionGate, shouldStop, waitIfPaused });
 
   const seeded = initializeCollectedComments(initialComments);
   const allComments = seeded.allComments;

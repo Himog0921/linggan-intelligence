@@ -22,7 +22,8 @@ import {
 } from './detailPageSessionStore.js';
 import { waitForStableTab } from './tabReadiness.js';
 import { buildSignedXhsDetailExecutionUrl } from './xhsExecutionTarget.js';
-import { executeClaimedMediaAcquisition } from './mediaAcquisitionExecution.js';
+import { executeClaimedMediaAcquisition, prioritizeMediaUploads } from './mediaAcquisitionExecution.js';
+import { dispatchedCommentMaxTotal, dispatchedMaximumQuota } from './localExecutionSupport.js';
 
 const PRODUCER_INSTANCE_KEY = 'linggan.localTrusted.producerInstanceId';
 const MAX_MEDIA_BYTES = 256 * 1024 * 1024;
@@ -119,9 +120,11 @@ function flushLocalOutbox() {
   return flushingOutbox;
 }
 
-async function flushMediaOutbox() {
+async function flushMediaOutbox(preferredUploadId = '') {
+  const preferred = preferredUploadId ? await localMediaOutbox.dueById(preferredUploadId) : null;
   const due = await localMediaOutbox.due({ limit: 2 });
-  for (const upload of due) {
+  const uploads = prioritizeMediaUploads(preferred, due, 2);
+  for (const upload of uploads) {
     if (upload.slotSubmissionId) {
       const dependency = await localProducerOutbox.get(upload.slotSubmissionId);
       if (!dependency || dependency.status === 'terminal') {
@@ -221,12 +224,16 @@ async function uploadMediaInChunks({ mediaObservationRef, blob, mimeType, sha256
   return payload;
 }
 
+const MEDIA_CANDIDATE_TIMEOUT_MS = 20000;
+
 async function fetchMediaCandidate(candidateUris = []) {
   let lastError = new Error('media_candidate_unavailable');
   for (const candidate of candidateUris.slice(0, 6)) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort('media_candidate_timeout'), MEDIA_CANDIDATE_TIMEOUT_MS);
     try {
       if (!allowedMediaCandidateUri(candidate)) throw new Error('media_candidate_origin_not_allowed');
-      const response = await fetch(candidate, { credentials: 'omit' });
+      const response = await fetch(candidate, { credentials: 'omit', signal: controller.signal });
       if (!response.ok) throw new Error(`media_download_http_${response.status}`);
       if (!allowedMediaCandidateUri(response.url || candidate)) throw new Error('media_redirect_origin_not_allowed');
       const mimeType = String(response.headers.get('content-type') || '').split(';')[0].trim();
@@ -236,7 +243,11 @@ async function fetchMediaCandidate(candidateUris = []) {
       const bytes = await response.blob();
       if (bytes.size > MAX_MEDIA_BYTES) throw new Error('media_size_limit_exceeded');
       return { bytes, mimeType };
-    } catch (error) { lastError = error; }
+    } catch (error) {
+      lastError = controller.signal.aborted ? new Error('media_candidate_timeout') : error;
+    } finally {
+      clearTimeout(timer);
+    }
   }
   throw lastError;
 }
@@ -682,9 +693,9 @@ async function runDispatchedTask() {
       action,
       mode: capability === 'discovery_search' ? 'search' : 'profile',
       // 配额来自工单，不来自页面对话框：执行端不得自行放宽。
-      maximumQuota: Number(spec.maximumQuota) || 1,
+      maximumQuota: dispatchedMaximumQuota(spec, 1),
       commentLimit: spec.commentLimit,
-      maxTotal: Number(spec.commentLimit) || Number(spec.maximumQuota) || 1,
+      maxTotal: dispatchedCommentMaxTotal(spec, capability),
       maxSubComments: Number(spec.target?.replyExpandLimit) || 0,
       commentDepthMode: capability === 'replies' ? 'allReplies' : 'twoLevel',
       // The page collector must submit against this exact server-issued identity. Rebuilding a

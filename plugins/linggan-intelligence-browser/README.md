@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.8`
+> 版本: `0.8.9`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -108,6 +108,13 @@ Package 与 WorkOrder 范围均未改变。
 人工暂停会把当下真实评论树作为 `PARTIAL / manual_pause` Package 交给 Linggan，继续执行仍沿当前
 Attempt，重新执行仍从评论入口开始。媒体领取会在写入可靠队列前先安排一分钟恢复唤醒，并将
 领取后的入队/执行失败绑定到精确工作代际回报，避免只留下 `lease_expired`。
+0.8.9 根据 0.8.8 的真实长评论验收继续修正：不限数量任务会使用页面公开评论数作为当前
+集合目标，API 首屏不足时必须进入同一 DOM 补采器，而不是在首屏 `no_progress`。
+每个新 Attempt 还会先清除同标签页内旧评论页和楼中楼快照，再从空游标重新请求第一页；不把上一
+Attempt 的缓存当成本次重采结果。新领取的
+媒体工作代次会优先于旧浏览器本地媒体行执行，平台候选下载最长等待 20 秒，避免旧请求悬挂
+并把新封面工作拖过 Lease。0.8.8 已真实证明 `15/492` 人工暂停会形成可接纳的
+`PARTIAL / manual_pause` 评论与回复 Package；完整 492 条与封面物化仍以 0.8.9 重载后复验为准。
 
 实况图片仍是一个逻辑媒体卡槽，但静态图与动态图分别携带候选地址、取得工作和状态；
 普通图片、封面、视频和实况图片都只把远程 URL 当来源观察，长期展示必须使用 Linggan
@@ -133,7 +140,7 @@ npm run release:reproducibility
 npm run verify:linggan-isolation
 ```
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.8.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.9.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

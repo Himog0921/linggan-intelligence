@@ -87,6 +87,43 @@ export function createLocalProducerOutbox(table = database.submissions, now = cu
 export const localProducerOutbox = createLocalProducerOutbox();
 
 export function createLocalMediaOutbox(table = database.mediaUploads, now = currentTime) {
+  function isValidEnvelope(envelope) {
+    const dependency = String(envelope?.slotSubmissionId || envelope?.serverWorkRef || '').trim();
+    const candidateUris = Array.isArray(envelope?.candidateUris) ? envelope.candidateUris : [];
+    const serverGenerationValid = !envelope?.serverWorkRef
+      || (Number.isInteger(Number(envelope?.claimGeneration))
+        && Number(envelope.claimGeneration) >= 1
+        && String(envelope?.installKey || '').trim());
+    return Boolean(
+      String(envelope?.uploadId || '').trim()
+      && dependency
+      && String(envelope?.mediaObservationRef || '').trim()
+      && candidateUris.length > 0
+      && candidateUris.every((candidate) => typeof candidate === 'string' && candidate.trim())
+      && serverGenerationValid,
+    );
+  }
+
+  function isValidStoredRow(row) {
+    return isValidEnvelope(row)
+      && ['pending', 'retryable', 'in_flight', 'acknowledged', 'terminal'].includes(row?.status)
+      && Number.isFinite(Number(row?.nextAttemptAt))
+      && Number.isFinite(Number(row?.createdAt));
+  }
+
+  async function rejectInvalidRows(rows = [], at = now()) {
+    const valid = [];
+    for (const row of rows) {
+      if (isValidStoredRow(row)) valid.push(row);
+      else if (row?.uploadId) {
+        await table.update(row.uploadId, {
+          status: 'terminal', updatedAt: at, error: 'invalid_local_media_upload',
+        });
+      }
+    }
+    return valid;
+  }
+
   async function restoreExpired({ at = now(), limit = 20 } = {}) {
     const rows = await table
       .where('[status+nextAttemptAt+createdAt]')
@@ -102,8 +139,7 @@ export function createLocalMediaOutbox(table = database.mediaUploads, now = curr
   return {
     async get(uploadId) { return table.get(uploadId); },
     async enqueue(envelope) {
-      const dependency = envelope?.slotSubmissionId || envelope?.serverWorkRef;
-      if (!envelope?.uploadId || !dependency || !envelope?.mediaObservationRef || !Array.isArray(envelope?.candidateUris)) throw new Error('invalid_local_media_upload');
+      if (!isValidEnvelope(envelope)) throw new Error('invalid_local_media_upload');
       const existing = await table.get(envelope.uploadId);
       if (existing) return existing;
       const createdAt = now();
@@ -117,7 +153,15 @@ export function createLocalMediaOutbox(table = database.mediaUploads, now = curr
       for (const status of ['pending', 'retryable']) {
         rows.push(...await table.where('[status+nextAttemptAt+createdAt]').between([status, Dexie.minKey, Dexie.minKey], [status, at, Dexie.maxKey]).limit(limit).toArray());
       }
-      return rows.sort((left, right) => left.createdAt - right.createdAt).slice(0, limit);
+      const valid = await rejectInvalidRows(rows, at);
+      return valid.sort((left, right) => left.createdAt - right.createdAt).slice(0, limit);
+    },
+    async dueById(uploadId, { at = now() } = {}) {
+      await restoreExpired({ at, limit: 20 });
+      const row = await table.get(uploadId);
+      if (!row || !['pending', 'retryable'].includes(row.status) || Number(row.nextAttemptAt) > at) return null;
+      const [valid] = await rejectInvalidRows([row], at);
+      return valid || null;
     },
     async markInFlight(uploadId, { at = now(), timeoutMs = 120000 } = {}) { await table.update(uploadId, { status: 'in_flight', nextAttemptAt: at + timeoutMs, updatedAt: at }); },
     async acknowledge(uploadId, receipt, { at = now() } = {}) { await table.update(uploadId, { status: 'acknowledged', receipt, updatedAt: at, error: '' }); },
