@@ -14,7 +14,7 @@
 
 媒体继续使用既有 Slot → Observation → Download → Blob → Materialization → Derivative 事实链，additive `0027_unified_media_resource.sql` 只补一层七类权威关系和统一 Work Resource `media` 读模型，不建立第二套资产。Evidence 列表、Inspector 与 Collection Target 禁止各自拼远程 URL；封面统一按“显式封面 → 首张正文图 → 视频 poster → 无”选择，并只返回 `INLINE_SAFE` 本地句柄。`requestedLimit` 与页面公开数、当前唯一取得数分开贯穿，避免再次产生 `130/53`。
 
-插件 207 项完整测试、合同检查、Rust workspace 测试/检查、隔离 PostgreSQL 全迁移与 47 项相关 proof、production build、发行校验和可复现重建已通过；新增并发 outbox 与远程头像禁止渲染回归也已通过。`v0.8.16` ZIP 当前 SHA-256 为 `b7b57375a20d83145ceabfea59a7ba71b2c313560d04fef006698ffd2ce8b05f`。Webpack 仍报告既有 bundle 体积警告，`npm audit` 仍报告 9 项既有依赖风险，Rust API 测试仍有既有 dead-code warnings。严格 `cargo clippy -D warnings` 在主线基线与终包分支均被同组 11 项既有 lint 阻断；本卡最初新增的 2 项已拆除，没有把全仓历史重构混入终包。
+插件终包门禁 207 项、搜索筛选/下拉联想/探针 13 项聚焦测试、合同检查、Rust workspace 测试/检查、隔离 PostgreSQL 全迁移与 47 项相关 proof、production build、发行校验和可复现重建已通过；新增并发 outbox 与远程头像禁止渲染回归也已通过。`v0.8.16` ZIP 当前 SHA-256 为 `b7b57375a20d83145ceabfea59a7ba71b2c313560d04fef006698ffd2ce8b05f`。Webpack 仍报告既有 bundle 体积警告，`npm audit` 仍报告 9 项既有依赖风险，Rust API 测试仍有既有 dead-code warnings。严格 `cargo clippy -D warnings` 在主线基线与终包分支均被同组 11 项既有 lint 阻断；本卡最初新增的 2 项已拆除，没有把全仓历史重构混入终包。
 
 真实边界没有被自动检查替代：现有运行工位最后上报 0.8.14，0.8.16 尚未被 Chrome 重载；“ADHD的尽头是成瘾”当前只证明跨 Attempt 的部分材料增长，最近一次为 `121/533 PARTIAL / manual_stop`，当前投影为 167 条稳定唯一评论。该作品 8 个媒体槽位仍为 0 个 Materialization，所以 Evidence 无封面仍是当前真实事实。共享持久数据库尚未应用 0027，本机 `:3000` 尚未替换，真实 XHS 全评论、媒体物化、Linggan 接纳和 Mog 业务验收都待精确包重载后的单次验证。
 
