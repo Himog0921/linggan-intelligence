@@ -88,7 +88,7 @@ Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
 |---|---|---|---|---|
 | `EV-S01` | 共享页头与上下文行 | 产品方位、当前职责、关键数量/读取状态 | Shell + read envelope | 页面内再重复标题、显示假实时状态 |
 | `EV-S02` | 语料二级 rail | 当前位于证据库；其他未接通入口保持禁用 | Route capability | 承担材料筛选或对象状态 |
-| `EV-S03` | 查询与范围条 | 本地材料检索、时间视角、lane/状态/媒体/受限筛选 | Query scope / asOf / cursor | 触发平台采集或保存观察规则 |
+| `EV-S03` | 查询与视图工作台 | 本地材料检索、时间视角、lane/状态/媒体/受限筛选；`SYSTEM VIEWS / 系统视图` 承载真实 `view` 预设；`MY VIEWS / 我的视图` 只显示保存能力未接通的诚实空态 | Query scope / asOf / cursor | 触发平台采集；把状态预设做成第三栏导航；伪造已保存视图或可保存能力 |
 | `EV-S04` | 结果上下文 | 结果数、匹配字段、排除/限制、读取水位 | Query receipt | 用总数证明平台总量或完整性 |
 | `EV-S05` | 作品材料集合列表 | 以研读/表格/封面三种排版比较同一批作品身份、作者/目标、时间、lane 和限制 | Work Resource Read | 以 Package/Blob/Slot 作顶层行；布局各走一套数据逻辑 |
 | `EV-S06` | 当前作品 Inspector | 概览、评论/回复、媒体、派生、来源/血缘、限制 | Selected work envelope | 第二搜索器、AI 结论、无来源补值 |
@@ -146,7 +146,7 @@ Inspector 默认停在“概览”，但页面不得只在隐藏 Tab 中提供�
 | 访问/处置 | restricted/withdrawn/bytes cleaned 等 | 当前 display policy | 让筛选绕过权限 |
 | 排序 | 默认最近观察降序；后续可明确切换来源发布时间 | sort key、asOf | 把“最近观察”写成“最新发布” |
 
-排版使用独立 URL 参数 `layout=research|table|cover`；状态筛选继续使用 `view`。切换排版只重排已读取的同一 Work Resource 集合，不重新请求、不改字段资格、不改变当前选择。保存视图、批量选择、发起研究和补采当前继续禁用，直到各自有独立产品/权限/回执合同。
+排版使用独立 URL 参数 `layout=research|table|cover`；状态筛选继续使用 `view`。`view` 是查询预设，必须与其他筛选一起放在主结果上方的 `SYSTEM VIEWS / 系统视图` 横向工作台，不作为左侧导航或独立状态面板；结果数、读取回执和当前选择分别由工作台底栏、inline receipt、选中行/Inspector 承担，不重复做统计栏。`MY VIEWS / 我的视图` 可以保留参考稿的结构位置，但在保存合同缺失时只能显示不可交互的“暂无已保存视图 / SAVED VIEWS NOT CONNECTED”，不得展示假视图或假保存动作。切换排版只重排已读取的同一 Work Resource 集合，不重新请求、不改字段资格、不改变当前选择。保存视图、批量选择、发起研究和补采当前继续禁用，直到各自有独立产品/权限/回执合同。
 
 ## 6. 材料 lane 与数据来源
 
@@ -271,7 +271,7 @@ inspector:
 | 区域 | 来源 | 使用 | 禁止替代 |
 |---|---|---|---|
 | 共享壳层 | `LIDS-PAT-001` shell ownership | 页头、上下文、216px rail | 在页面 CSS 重新定义 runtime shell |
-| 查询条 | `Corpus Explorer` + LIDS Input/Quiet | 检索和筛选已接纳材料 | 平台搜索框、假保存视图 |
+| 查询与视图工作台 | `Corpus Explorer` + LIDS Input/Quiet | 检索和筛选已接纳材料；以系统视图/我的视图区分平台预设与用户保存能力；后者未接通时显示禁用空态 | 平台搜索框、假保存视图、独立状态侧栏 |
 | 作品连续列表 | `Corpus Explorer` | 高密度比较主对象 | 卡片瀑布流、KPI 卡阵列 |
 | 材料 lane 带 | `LIDS-PRI-001` 五轴分责 + MEDIA-RECON | 分开显示每 lane 状态 | 万能 StatusTag、完整度百分比 |
 | Inspector | `Split Evidence Inspector` | 核验当前作品和血缘 | 第二个首页/筛选器/AI summary |
@@ -338,6 +338,7 @@ inspector:
 - 页面沿用 LIDS 与既有 `Corpus Explorer + Split Evidence Inspector`，没有第二套视觉语言；
 - 卡 3 已提供列表、`detailUrl`、详情、评论研究通道、媒体/派生/来源回执与受控本地 asset handle；卡 4 运行页默认只消费这些入口；
 - 列表选择、Inspector Tab、评论通道继续读取、作品列表继续读取与 375px 顺序流均有运行代码和聚焦合同测试。
+- Issue #110 的运行 UI 收口已在隔离只读实例以 13 个本机作品集合完成 1440×900 / 375×812 in-app Browser 检查：重复宣言和独立状态侧栏退出首屏，参考稿的 `SYSTEM VIEWS / MY VIEWS` 双区策略恢复，其中系统视图绑定五项真实 `view` 查询、我的视图明确未接通；表格标题/正文/状态分别提升到 14px、11–12px、10px，页面级无横向溢出；这仍不等于部署或 Mog 最终验收。
 
 ### 13.2 当前页面实现不证明
 

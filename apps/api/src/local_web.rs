@@ -2871,7 +2871,6 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
         <main class="v7-main ev-main" aria-labelledby="page-title">
           <h1 class="v7-sr-only" id="page-title">证据库</h1>
           <section class="ev-command" aria-label="材料检索与筛选">
-            <div class="ev-command-title"><div><span class="ev-kicker">语料 / 证据审查</span><strong>以作品为顶层的多材料证据库</strong></div><p>列表回答拿到了哪些材料通道；右侧核验详情、受限评论、媒体与来源血缘。</p></div>
             <form id="ev-query-form" class="ev-query-form">
               <label class="ev-field ev-field--search"><span>检索作品材料</span><input id="ev-search" name="q" type="search" autocomplete="off" placeholder="标题、作者显示名或已接纳内容"></label>
               <label class="ev-field"><span>读取窗口</span><select id="ev-window" name="window"><option value="latest_accepted_discovery">最新已接纳发现</option><option value="last_7_days">近 7 天来源发布时间</option><option value="last_30_days">近 30 天来源发布时间</option></select></label>
@@ -2880,33 +2879,40 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
               <label class="ev-field"><span>媒体类型</span><select id="ev-media-kind" name="mediaKind"><option value="">全部类型</option><option value="cover">封面</option><option value="image">正文图片</option><option value="video">视频</option><option value="live_photo">实况图片</option></select></label>
               <div class="ev-form-actions"><button class="ev-button ev-button--primary" type="submit">读取材料</button><button class="ev-button ev-button--ghost" id="ev-reset" type="button">重置</button></div>
             </form>
+            <div class="ev-view-strategy">
+              <section class="ev-view-group" aria-labelledby="ev-system-views-title">
+                <h2 class="ev-view-heading" id="ev-system-views-title"><span class="v7-tech-key">SYSTEM VIEWS</span><span class="v7-slash">/</span><strong>系统视图</strong></h2>
+                <div class="ev-view-switch" role="group" aria-label="按材料状态快速筛选">
+                  <button type="button" data-ev-view="all" aria-label="全部作品材料，不添加状态过滤" aria-pressed="true"><i>01</i><span>全部材料</span></button>
+                  <button type="button" data-ev-view="partial" aria-label="只看部分取得的作品材料" aria-pressed="false"><i>02</i><span>部分取得</span></button>
+                  <button type="button" data-ev-view="risk" aria-label="只看因风险控制停止的作品材料" aria-pressed="false"><i>03</i><span>风险停止</span></button>
+                  <button type="button" data-ev-view="cleaned" aria-label="只看媒体字节已清理的作品材料" aria-pressed="false"><i>04</i><span>媒体已清理</span></button>
+                  <button type="button" data-ev-view="restricted" aria-label="只看已经撤回或限制读取的作品材料" aria-pressed="false"><i>05</i><span>撤回或受限</span></button>
+                </div>
+              </section>
+              <section class="ev-view-group ev-view-group--mine" aria-labelledby="ev-my-views-title">
+                <h2 class="ev-view-heading" id="ev-my-views-title"><span class="v7-tech-key">MY VIEWS</span><span class="v7-slash">/</span><strong>我的视图</strong></h2>
+                <div class="ev-my-view-empty" aria-disabled="true"><span>暂无已保存视图</span><small class="v7-tech-key">SAVED VIEWS NOT CONNECTED</small></div>
+              </section>
+            </div>
+            <div class="ev-command-footer">
+              <strong id="ev-results-count">正在读取</strong>
+              <div class="ev-layout-control">
+                <span class="ev-layout-label"><span class="v7-tech-key">VIEW</span><span class="v7-slash">/</span><strong>排版</strong></span>
+                <div class="ev-layout-switch" role="group" aria-label="结果排版">
+                  <button type="button" data-ev-layout="research" aria-pressed="true">研读</button>
+                  <button type="button" data-ev-layout="table" aria-pressed="false">表格</button>
+                  <button type="button" data-ev-layout="cover" aria-pressed="false">封面</button>
+                </div>
+              </div>
+            </div>
           </section>
 
           <div class="ev-read-receipt" id="ev-read-receipt" role="status" aria-live="polite"><span>正在连接本机材料投影……</span><span class="v7-tech-key">LOCAL READ</span></div>
 
           <section class="ev-bench" aria-label="证据审查工作台">
-            <aside class="ev-views" aria-label="证据状态视图">
-              <div class="ev-views-head"><span>状态视图</span><span class="v7-tech-key">STATE VIEWS</span></div>
-              <button type="button" data-ev-view="all" aria-pressed="true"><span>全部作品材料</span><small>不添加状态过滤</small></button>
-              <button type="button" data-ev-view="partial" aria-pressed="false"><span>部分取得</span><small>需判断是否补采</small></button>
-              <button type="button" data-ev-view="risk" aria-pressed="false"><span>风险控制停止</span><small>执行边界明确</small></button>
-              <button type="button" data-ev-view="cleaned" aria-pressed="false"><span>媒体已清理</span><small>保留事实，字节不可用</small></button>
-              <button type="button" data-ev-view="restricted" aria-pressed="false"><span>撤回或受限</span><small>不继续暴露内容</small></button>
-              <dl class="ev-context"><div><dt>当前结果</dt><dd id="ev-context-count">—</dd></div><div><dt>当前选择</dt><dd id="ev-context-selection">—</dd></div><div><dt>读取状态</dt><dd id="ev-context-state">尚未读取</dd></div></dl>
-            </aside>
-
             <section class="ev-results" aria-labelledby="results-title">
-              <header class="ev-results-head">
-                <div><span class="ev-kicker">作品级材料集合</span><h2 id="results-title">多通道真实状态</h2></div>
-                <div class="ev-results-tools">
-                  <strong id="ev-results-count">正在读取</strong>
-                  <div class="ev-layout-switch" role="group" aria-label="结果排版">
-                    <button type="button" data-ev-layout="research" aria-pressed="true">研读</button>
-                    <button type="button" data-ev-layout="table" aria-pressed="false">表格</button>
-                    <button type="button" data-ev-layout="cover" aria-pressed="false">封面</button>
-                  </div>
-                </div>
-              </header>
+              <h2 class="v7-sr-only" id="results-title">作品材料结果</h2>
               <div class="ev-feedback" id="ev-feedback" role="status" aria-live="polite"></div>
               <div class="ev-table-head" id="ev-table-head" aria-hidden="true" hidden><span>作品</span><span>作者与监控目标</span><span>发布时间</span><span>材料状态</span></div>
               <div class="ev-work-list" id="ev-work-list" role="listbox" aria-label="作品材料集合"></div>

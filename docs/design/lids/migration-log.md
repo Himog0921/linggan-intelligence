@@ -202,3 +202,23 @@ Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵�
 - **响应与交互**：作品列表和评论通道按 cursor 有界读取；详情 Tab 使用 roving tabindex，作品行支持方向键/首尾键/确认键；≤900px 转顺序流，≤640px lane 为两列，所有控件至少 40px 并支持 reduced motion。
 - **未新增全局资产**：没有 Token、Primitive、CMP、Scene 或第二前端框架变更；作品行、lane 与 Inspector section 继续是 page-local candidate。
 - **验证与边界**：正式自动检查和一次桌面/375px 浏览器证据记录于 `ACC-EVIDENCE-RUNTIME-001`。它不证明真实平台、历史回填、媒体/OCR/ASR provider、部署、长期稳定性或 Mog 业务验收。
+
+## 2026-08-31 · WORK-RESOURCE-READ-001 Evidence Library 首屏层级收口
+
+- **来源与事项**：Issue #110、`PAGE-EVIDENCE-001` 与 Mog 对当前运行页的直接反馈。用户明确要求删除重复的“语料 / 证据审查”“以作品为顶层的多材料证据库”，质疑左侧状态按钮用途，并指定 V7 原型中“工具条在上、列表为主体、Inspector 稳定”的布局作为参考。
+- **Pattern 修订**：五项状态按钮的真实责任是 `view` 预设查询，不是 rail 或页面导航；因此移入结果头的横向“快速筛选”。三项 `layout` 仍只重排同一 items、选择和 Inspector。独立状态侧栏及其结果/选择/读取重复统计退役，主工作面恢复 `Corpus Explorer + Split Evidence Inspector` 两列结构。
+- **LIDS 影响**：无新 Token、CMP、Scene、颜色、圆角或框架。继续消费现有 `lids_tokens.css`，使用直角编辑网格、signal 选中态、focus-visible、40px 级命中区与 160ms 颜色/按压反馈。查询回执、结果数和选择状态各留在唯一责任面，不通过删除说明而删除事实边界。
+- **验证与边界**：新增 Rust source 断言拒绝 retired copy/旧 context 栏并固定 `view` 映射；隔离只读实例以 13 个本机作品集合完成 1440×900、375×812 in-app Browser 几何/截图和实际按钮切换。未发布到 `:3000`，未做 Chrome/900/390px/Mog 最终验收；隔离实例未接当前运行快照的独立媒体根，因此图片字节不在视觉结论内。
+
+### 2026-08-31 follow-up · 双视图策略与 Table 可读性
+
+- **用户确认**：参考稿红框内的 `SYSTEM VIEWS / 系统视图` 与 `MY VIEWS / 我的视图` 是应保留的产品语言；当前 Table 字号过小。
+- **Pattern 修订**：恢复双区工作台。系统视图绑定五项已有 `view` 查询；我的视图在保存合同缺失时显示不可交互空态，不照搬原型中的假视图、假数量或保存能力。截图红框按评审批注处理，不进入产品边框。
+- **Typography 修订**：Table 标题/上下文/辅助正文/状态提升到 14/12/11/10px，桌面行高提升到 92px；375px 堆叠保持字号。无新 Token、CMP、Pattern 或数据能力。
+- **验证与边界**：1440×900 computed style、440px Inspector、13 行与无横向溢出已核验；375×812 `scrollWidth=clientWidth=375`，系统视图只在自身区域横向滚动。系统视图实际点击写入 `view=partial` 且 `layout=table` 保持；个人视图控件数为 0。仍未发布到 `:3000`，Mog 最终视觉验收待确认。
+
+### 2026-08-31 follow-up · Layout selector tab rail
+
+- **用户确认**：不采用三个独立方格的 `研读 / 表格 / 封面`，改用参考稿的水平文字 tab 形式。
+- **局部修订**：选择器改为上下细线围合的单条 rail；非当前项保持 muted 文字，当前项以 signal 色 4px 下划线表达，不再使用黑底。保持 40px 以上命中区、focus-visible、按压反馈与 `aria-pressed`，不改变 `layout` 行为。
+- **验证与边界**：1440/375 in-app Browser 实拍；rail 上下边线 1px、独立按钮边框 0、当前 signal 下划线 4px、三个命中区高度 44px。375px 三项宽度约 84px，document 无横向溢出；实际点击 `封面 → 表格` 后 URL/DOM 同步。键盘焦点使用灰底与顶部短信号线，不恢复四边框。这是 page-local 样式修订；没有新 Token、Primitive、CMP、数据能力或路由。
