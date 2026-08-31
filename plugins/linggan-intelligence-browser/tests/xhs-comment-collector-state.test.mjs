@@ -9,6 +9,7 @@ import {
   resolveXhsCommentTargetIdentity,
   rewindCommentSurface,
   shouldContinueDomAfterApi,
+  shouldFallbackToDomAfterFreshApiFailure,
 } from '../src/platforms/xhs/commentCollector.js';
 import { COMMENT_DEPTH_MODE } from '../src/shared/constants.js';
 
@@ -96,6 +97,34 @@ test('shouldContinueDomAfterApi keeps reply continuation and visible top-up path
     maxTotal: 0,
     commentHint: 492,
     hasDomComments: true,
+  }), false);
+});
+
+test('a failed fresh API attempt falls through to DOM parsing before all-replies expansion', () => {
+  assert.equal(shouldFallbackToDomAfterFreshApiFailure({
+    freshAttemptStarted: true,
+    freshAttemptReady: false,
+    apiObserved: false,
+    currentTotal: 0,
+  }), true);
+
+  assert.equal(shouldFallbackToDomAfterFreshApiFailure({
+    freshAttemptStarted: true,
+    freshAttemptReady: true,
+    apiObserved: false,
+    currentTotal: 0,
+  }), false);
+  assert.equal(shouldFallbackToDomAfterFreshApiFailure({
+    freshAttemptStarted: true,
+    freshAttemptReady: false,
+    apiObserved: true,
+    currentTotal: 0,
+  }), false);
+  assert.equal(shouldFallbackToDomAfterFreshApiFailure({
+    freshAttemptStarted: true,
+    freshAttemptReady: false,
+    apiObserved: false,
+    currentTotal: 12,
   }), false);
 });
 
