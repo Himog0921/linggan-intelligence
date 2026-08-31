@@ -435,10 +435,20 @@ fn validate_comment_collection_receipt(
     let expected = receipt.get("expectedCount").and_then(Value::as_u64);
     let page_count = receipt.get("pageCommentCount").and_then(Value::as_u64);
     let acquired = count("uniqueCollectedCount");
-    let complete_matches_expected = state != Some("complete") || expected == acquired;
+    let complete_matches_expected = state != Some("complete")
+        || match (scope, expected, acquired) {
+            (Some("all_public_comments"), Some(expected), Some(acquired)) => acquired >= expected,
+            (Some("detail_window"), Some(expected), Some(acquired)) => acquired == expected,
+            _ => false,
+        };
     let complete_all_public_matches_page = state != Some("complete")
         || scope != Some("all_public_comments")
-        || (page_count == expected && expected == acquired);
+        || match (page_count, expected, acquired) {
+            (Some(page_count), Some(expected), Some(acquired)) => {
+                page_count == expected && acquired >= expected
+            }
+            _ => false,
+        };
     let requested_limit = count("requestedLimit");
     let detail_window_limit_is_valid = scope != Some("detail_window")
         || requested_limit.is_some_and(|limit| (1..=30).contains(&limit));
@@ -590,7 +600,7 @@ mod tests {
     }
 
     #[test]
-    fn comment_collection_complete_requires_exact_page_and_unique_count_match() {
+    fn comment_collection_complete_requires_reaching_the_observed_page_count() {
         let valid = r#"{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"11111111-1111-4111-8111-111111111111","packageKind":"comments","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"n","commentCollection":{"version":1,"noteId":"n","scope":"all_public_comments","pageCommentCount":300,"expectedCount":300,"uniqueCollectedCount":300,"state":"complete","analysisUsability":"usable","targetIdentity":"matched","stopReason":"comment_area_end"}},"layers":[{"capability":"comments","observed":300,"attempted":300,"acquired":300,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"comment_area_end"}]},"records":[]}"#;
         assert!(parse_producer_capture_package(valid).is_ok());
 
@@ -602,6 +612,18 @@ mod tests {
             parse_producer_capture_package(&invalid),
             Err(ProducerRuntimeContractError::InvalidCoverage)
         ));
+
+        let above_observed_count = valid
+            .replace(
+                "\"uniqueCollectedCount\":300",
+                "\"uniqueCollectedCount\":302",
+            )
+            .replace(
+                "\"observed\":300,\"attempted\":300,\"acquired\":300",
+                "\"observed\":302,\"attempted\":302,\"acquired\":302",
+            )
+            .replace("comment_area_end", "no_progress");
+        assert!(parse_producer_capture_package(&above_observed_count).is_ok());
 
         let truncated_but_self_consistent = valid
             .replace("\"expectedCount\":300", "\"expectedCount\":200")
