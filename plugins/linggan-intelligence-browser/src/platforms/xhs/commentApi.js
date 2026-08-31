@@ -263,6 +263,19 @@ function mergeSnapshotPages(existingPages = [], nextPage) {
   return filtered;
 }
 
+export function mergeXhsCommentSnapshots(base = {}, observed = {}) {
+  const noteId = normalizeText(observed?.noteId || base?.noteId);
+  let pages = Array.isArray(base?.pages) ? base.pages.map((page) => safeClone(page)).filter(Boolean) : [];
+  let subPages = Array.isArray(base?.subPages) ? base.subPages.map((page) => safeClone(page)).filter(Boolean) : [];
+  for (const page of Array.isArray(observed?.pages) ? observed.pages : []) {
+    pages = mergeSnapshotPages(pages, page);
+  }
+  for (const page of Array.isArray(observed?.subPages) ? observed.subPages : []) {
+    subPages = mergeSnapshotPages(subPages, page);
+  }
+  return { noteId, pages, subPages };
+}
+
 function readXsecTokenFromUrl(url = '') {
   try {
     return normalizeText(new URL(url, 'https://www.xiaohongshu.com').searchParams.get('xsec_token'));
@@ -334,10 +347,16 @@ function buildXhsSubCommentPageRequestUrls(noteId = '', rootCommentId = '', curs
 function shouldHydrateSubReplies(comment = {}, snapshot = {}) {
   const rootCommentId = normalizeText(comment?.id || comment?.comment_id || comment?.commentId);
   if (!rootCommentId) return false;
+  const rootPages = (Array.isArray(snapshot?.subPages) ? snapshot.subPages : [])
+    .filter((page) => normalizeText(page?.rootCommentId) === rootCommentId);
+  const lastRootPage = rootPages[rootPages.length - 1] || null;
+  // The reply-page cursor is the live pagination authority. A root payload can keep a stale
+  // `has_more` bit after its final reply page has explicitly ended.
+  if (lastRootPage && lastRootPage.hasMore === false) return false;
+  if (lastRootPage?.hasMore === true) return true;
   const total = readReplyTotal(comment);
   const inlineCount = readInlineReplies(comment).length;
-  const pagedCount = (Array.isArray(snapshot?.subPages) ? snapshot.subPages : [])
-    .filter((page) => normalizeText(page?.rootCommentId) === rootCommentId)
+  const pagedCount = rootPages
     .reduce((sum, page) => sum + (Array.isArray(page?.comments) ? page.comments.length : 0), 0);
   if (hasMoreReplies(comment)) return true;
   return total > inlineCount + pagedCount;
@@ -537,6 +556,9 @@ export async function hydrateXhsCommentSnapshot(snapshot = {}, {
   waitIfPaused = async () => {},
   maxMainPages = 6,
   maxSubPagesPerRoot = 6,
+  maxExternalActions = Number.POSITIVE_INFINITY,
+  beforeExternalAction = async () => {},
+  afterExternalAction = async () => {},
 } = {}) {
   const normalizedNoteId = normalizeText(noteId || snapshot?.noteId);
   if (!normalizedNoteId) return {
@@ -551,15 +573,35 @@ export async function hydrateXhsCommentSnapshot(snapshot = {}, {
     subPages: Array.isArray(snapshot?.subPages) ? snapshot.subPages.map((page) => safeClone(page)).filter(Boolean) : [],
   };
   const xsecToken = resolveSnapshotXsecToken(hydrated);
+  const actionLimit = Number.isFinite(Number(maxExternalActions))
+    ? Math.max(0, Math.floor(Number(maxExternalActions)))
+    : Number.POSITIVE_INFINITY;
+  let actionsPerformed = 0;
+
+  const mayPerformAction = () => actionsPerformed < actionLimit && !shouldStop();
+  const performFetch = async (action, requestUrls) => {
+    await waitIfPaused();
+    if (!mayPerformAction()) return null;
+    await beforeExternalAction(action);
+    if (shouldStop()) return null;
+    const json = await fetchJson(requestUrls);
+    actionsPerformed += 1;
+    await afterExternalAction(action);
+    await waitIfPaused();
+    return json;
+  };
 
   let mainFetchCount = 0;
-  while (mainFetchCount < maxMainPages && !shouldStop()) {
+  while (mainFetchCount < maxMainPages && mayPerformAction()) {
     const lastPage = hydrated.pages[hydrated.pages.length - 1];
     if (!lastPage?.hasMore) break;
-    await waitIfPaused();
-    if (shouldStop()) break;
     const requestUrls = buildXhsCommentPageRequestUrls(normalizedNoteId, lastPage.cursor, { xsecToken });
-    const json = await fetchJson(requestUrls);
+    const json = await performFetch({
+      kind: 'api_main_page',
+      noteId: normalizedNoteId,
+      cursor: normalizeText(lastPage.cursor),
+    }, requestUrls);
+    if (!json) break;
     const nextPage = parseXhsCommentPagePayload(json, { sourceUrl: requestUrls[0] });
     if (!nextPage.noteId) nextPage.noteId = normalizedNoteId;
     hydrated.pages = mergeSnapshotPages(hydrated.pages, nextPage);
@@ -570,15 +612,14 @@ export async function hydrateXhsCommentSnapshot(snapshot = {}, {
 
   const rootComments = hydrated.pages.flatMap((page) => Array.isArray(page?.comments) ? page.comments : []);
   for (const rootComment of rootComments) {
+    if (!mayPerformAction()) break;
     const rootCommentId = normalizeText(rootComment?.id || rootComment?.comment_id || rootComment?.commentId);
     if (!rootCommentId) continue;
     if (!shouldHydrateSubReplies(rootComment, hydrated)) continue;
 
     let subFetchCount = 0;
     let continueFetch = true;
-    while (continueFetch && subFetchCount < maxSubPagesPerRoot && !shouldStop()) {
-      await waitIfPaused();
-      if (shouldStop()) break;
+    while (continueFetch && subFetchCount < maxSubPagesPerRoot && mayPerformAction()) {
 
       const existingRootPages = hydrated.subPages.filter((page) => normalizeText(page?.rootCommentId) === rootCommentId);
       const lastSubPage = existingRootPages[existingRootPages.length - 1] || null;
@@ -588,7 +629,13 @@ export async function hydrateXhsCommentSnapshot(snapshot = {}, {
       }
 
       const requestUrls = buildXhsSubCommentPageRequestUrls(normalizedNoteId, rootCommentId, requestCursor, { xsecToken });
-      const json = await fetchJson(requestUrls);
+      const json = await performFetch({
+        kind: 'api_reply_page',
+        noteId: normalizedNoteId,
+        rootCommentId,
+        cursor: requestCursor,
+      }, requestUrls);
+      if (!json) break;
       const nextPage = parseXhsCommentPagePayload(json, { sourceUrl: requestUrls[0] });
       nextPage.noteId = nextPage.noteId || normalizedNoteId;
       nextPage.rootCommentId = nextPage.rootCommentId || rootCommentId;
@@ -609,7 +656,18 @@ export async function hydrateXhsCommentSnapshot(snapshot = {}, {
     }
   }
 
-  return hydrated;
+  const lastPage = hydrated.pages[hydrated.pages.length - 1];
+  const hasPendingMainPage = Boolean(lastPage?.hasMore);
+  const hasPendingReplyPage = hydrated.pages
+    .flatMap((page) => Array.isArray(page?.comments) ? page.comments : [])
+    .some((comment) => shouldHydrateSubReplies(comment, hydrated));
+  return {
+    ...hydrated,
+    hydrationMeta: {
+      actionsPerformed,
+      pending: hasPendingMainPage || hasPendingReplyPage,
+    },
+  };
 }
 
 function postBridgeRequest(type, payload, responseType, timeoutMs = 1200) {

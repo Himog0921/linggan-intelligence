@@ -11,12 +11,14 @@ import {
   buildXhsCommentsFromSnapshot,
   requestXhsCommentSnapshot,
   hydrateXhsCommentSnapshot,
+  mergeXhsCommentSnapshots,
   fetchXhsJsonViaBridge,
 } from './commentApi.js';
 
 const DEFAULT_DOM_TOP_UP_MAX_NO_NEW = 3;
-const DEFAULT_DOM_TOP_UP_SETTLE_MS = 800;
-const ALL_REPLIES_EXPAND_ATTEMPTS = 20;
+const DEFAULT_DOM_TOP_UP_SETTLE_MS = 2600;
+const DEFAULT_COMMENT_ACTION_COOLDOWN_MS = 1200;
+const DEFAULT_COMMENT_SCROLL_DISTANCE = 280;
 const TIME_TEXT_RE = /^(刚刚|\d+\s*分钟前|\d+\s*小时前|\d+\s*天前|昨天(?:\s+\d{1,2}:\d{2})?|前天(?:\s+\d{1,2}:\d{2})?|\d{1,2}[-/]\d{1,2}(?:\s+\d{1,2}:\d{2})?|\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2})?(?:日)?(?:\s+\d{1,2}:\d{2})?)$/;
 const INLINE_TIME_TEXT_RE = /(刚刚|\d+\s*分钟前|\d+\s*小时前|\d+\s*天前|昨天\s*\d{0,2}:?\d{0,2}|前天\s*\d{0,2}:?\d{0,2}|\d{1,2}[-/]\d{1,2}(?:\s+\d{1,2}:\d{2})?|\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2})?(?:日)?(?:\s+\d{1,2}:\d{2})?)/;
 
@@ -33,11 +35,49 @@ async function waitForCondition(predicate, timeout = 500, interval = 80) {
   return Boolean(predicate());
 }
 
+export function createCommentActionGate({
+  minimumCooldownMs = DEFAULT_COMMENT_ACTION_COOLDOWN_MS,
+  sleep = waitForPageSettle,
+  now = () => Date.now(),
+  shouldStop = () => false,
+  waitIfPaused = async () => {},
+} = {}) {
+  let lastActionStartedAt = 0;
+  return {
+    async before() {
+      await waitIfPaused();
+      if (shouldStop()) return false;
+      const remaining = lastActionStartedAt > 0
+        ? Math.max(0, Number(minimumCooldownMs || 0) - (now() - lastActionStartedAt))
+        : 0;
+      if (remaining > 0) await sleep(remaining);
+      await waitIfPaused();
+      if (shouldStop()) return false;
+      lastActionStartedAt = now();
+      return true;
+    },
+    async after() {
+      await waitIfPaused();
+      return !shouldStop();
+    },
+  };
+}
+
+function withPageCommentCount(payload = {}, container = null) {
+  const context = getActiveCommentsContext();
+  const signals = readCommentSignalsSafe(context?.container || container);
+  const pageCommentCount = context?.publicCommentCount ?? (signals.commentHint || null);
+  return {
+    ...payload,
+    ...(pageCommentCount == null ? {} : { pageCommentCount }),
+  };
+}
+
 function readCommentSignals(container) {
   const textSource = container?.innerText || document.body?.innerText || '';
   const text = String(textSource || '').slice(0, 6000);
-  const match = text.match(/共\s*(\d+)\s*条评论/);
-  const commentHint = match ? Number(match[1] || 0) : 0;
+  const match = text.match(/共\s*([\d,.]+(?:万|亿)?)\s*条评论/);
+  const commentHint = match ? Math.floor(parseCount(String(match[1] || '').replace(/,/g, ''))) : 0;
   const hasEndMarker = /- THE END -/.test(text);
   const hasExpandableReplies = [...(container?.querySelectorAll?.('div.show-more') || [])]
     .some((el) => isExpandMoreReplyTrigger(el?.textContent));
@@ -66,17 +106,26 @@ function getCommentSurfaceFingerprint(container) {
   return `${items.length}:${ids}:${signals.hasEndMarker ? 'end' : 'open'}`;
 }
 
-async function loadMoreCommentSurface(container, distance = 420) {
+async function loadMoreCommentSurface(container, distance = DEFAULT_COMMENT_SCROLL_DISTANCE, {
+  actionGate = createCommentActionGate(),
+  shouldStop = () => false,
+  waitIfPaused = async () => {},
+} = {}) {
   const scrollParent = findScrollParent(container);
   if (!scrollParent || typeof scrollParent.scrollBy !== 'function') return false;
+  await waitIfPaused();
+  if (shouldStop() || !await actionGate.before({ kind: 'dom_scroll' })) return false;
   const before = getCommentSurfaceFingerprint(container);
   scrollParent.scrollBy({ top: distance, behavior: 'auto' });
-  return waitForCondition(() => {
+  const changed = await waitForCondition(() => {
     if (hasXhsCollectionRiskSignal()) return true;
     const current = getActiveCommentsContext().container || container;
     const signals = readCommentSignalsSafe(current);
     return signals.hasEndMarker || getCommentSurfaceFingerprint(current) !== before;
-  }, DEFAULT_DOM_TOP_UP_SETTLE_MS, 80);
+  }, DEFAULT_DOM_TOP_UP_SETTLE_MS, 140);
+  await actionGate.after({ kind: 'dom_scroll', changed });
+  await waitIfPaused();
+  return changed;
 }
 
 /**
@@ -99,6 +148,7 @@ export async function collectComments({
   maxTotal = 0,
   maxSubComments = BATCH_CONFIG.maxSubComments,
   onProgress = null,
+  onSnapshot = null,
   shouldStop = () => false,
   waitIfPaused = async () => {},
   commentDepthMode = COMMENT_DEPTH_MODE.TWO_LEVEL,
@@ -108,18 +158,26 @@ export async function collectComments({
   taskSpec = undefined,
   publicCommentCount = null,
   observedNoteId = '',
+  executionPolicy = {},
 } = {}) {
+  const actionGate = createCommentActionGate({
+    minimumCooldownMs: executionPolicy.minimumCooldownMs ?? DEFAULT_COMMENT_ACTION_COOLDOWN_MS,
+    shouldStop,
+    waitIfPaused,
+  });
   const apiResult = await collectCommentsViaApi({
     noteId,
     noteUrl,
     maxTotal,
     maxSubComments,
     onProgress,
+    onSnapshot,
     shouldStop,
     waitIfPaused,
     commentDepthMode,
     collectionRunId,
     persist,
+    actionGate,
   });
   if (apiResult.stopReason === 'risk_control' || (!apiResult.needsDomContinuation && (apiResult.apiObserved || apiResult.total > 0))) {
     const result = withCommentCollectionReceipt({
@@ -147,12 +205,14 @@ export async function collectComments({
     maxTotal,
     maxSubComments,
     onProgress,
+    onSnapshot,
     shouldStop,
     waitIfPaused,
     commentDepthMode,
     collectionRunId,
     initialComments: apiResult.comments,
     persist,
+    actionGate,
   });
   const normalizedResult = withCommentCollectionReceipt(result, {
     noteId,
@@ -269,11 +329,13 @@ async function collectCommentsViaApi({
   maxTotal = 0,
   maxSubComments = BATCH_CONFIG.maxSubComments,
   onProgress = null,
+  onSnapshot = null,
   shouldStop = () => false,
   waitIfPaused = async () => {},
   commentDepthMode = COMMENT_DEPTH_MODE.TWO_LEVEL,
   collectionRunId = '',
   persist = true,
+  actionGate = createCommentActionGate({ shouldStop, waitIfPaused }),
 } = {}) {
   noteUrl = noteUrl || window.location.href;
   noteId = noteId || noteUrl.split('/').pop()?.split('?')[0] || '';
@@ -287,10 +349,12 @@ async function collectCommentsViaApi({
   const depthMode = String(commentDepthMode || COMMENT_DEPTH_MODE.TWO_LEVEL).trim() || COMMENT_DEPTH_MODE.TWO_LEVEL;
   let noNewCount = 0;
   const maxNoNew = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 8 : 4;
-  const replyExpandAttempts = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? ALL_REPLIES_EXPAND_ATTEMPTS : 0;
+  const shouldExpandReplies = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES;
   let apiObserved = false;
   let hydrationDegradedEver = false;
+  let consecutiveHydrationFailures = 0;
   let riskStopped = false;
+  let retainedSnapshot = null;
 
   while (!shouldStop()) {
     container = resolveContainer() || container;
@@ -301,36 +365,55 @@ async function collectCommentsViaApi({
       break;
     }
 
-    onProgress?.({
+    onProgress?.(withPageCommentCount({
       status: 'collecting',
       current: allComments.length,
       message: `正在扫描评论区，当前已采集 ${allComments.length} 条评论`,
-    });
+    }, container));
 
     if (hasXhsCollectionRiskSignal()) {
       riskStopped = true;
-      onProgress?.({
+      onProgress?.(withPageCommentCount({
         status: 'blocked',
         current: allComments.length,
         message: `检测到安全验证或访问受限，已停止本次评论采集（当前 ${allComments.length} 条）`,
-      });
+      }, container));
       break;
     }
 
     let foundNew = false;
-    const snapshot = await requestXhsCommentSnapshot(noteId).catch(() => null);
-    if (snapshot) {
+    let hydrationActionsPerformed = 0;
+    let hydrationActionAttempted = false;
+    const observedSnapshot = await requestXhsCommentSnapshot(noteId).catch(() => null);
+    if (observedSnapshot) {
+      retainedSnapshot = mergeXhsCommentSnapshots(retainedSnapshot || {}, observedSnapshot);
       let hydrationDegraded = false;
-      const hydratedSnapshot = await hydrateXhsCommentSnapshot(snapshot, {
-        noteId,
-        fetchJson: fetchXhsJsonViaBridge,
-        shouldStop,
-        waitIfPaused,
-      }).catch(() => {
-        hydrationDegraded = true;
-        hydrationDegradedEver = true;
-        return snapshot;
-      });
+      const hydratedSnapshot = consecutiveHydrationFailures >= 2
+        ? retainedSnapshot
+        : await hydrateXhsCommentSnapshot(retainedSnapshot, {
+          noteId,
+          fetchJson: fetchXhsJsonViaBridge,
+          shouldStop,
+          waitIfPaused,
+          maxExternalActions: 1,
+          beforeExternalAction: async () => {
+            hydrationActionAttempted = true;
+            await actionGate.before({ kind: 'api_page' });
+          },
+          afterExternalAction: async () => {
+            await actionGate.after({ kind: 'api_page' });
+          },
+        }).then((value) => {
+          consecutiveHydrationFailures = 0;
+          return value;
+        }).catch(() => {
+          hydrationDegraded = true;
+          hydrationDegradedEver = true;
+          consecutiveHydrationFailures += 1;
+          return retainedSnapshot;
+        });
+      hydrationActionsPerformed = Number(hydratedSnapshot?.hydrationMeta?.actionsPerformed || 0);
+      retainedSnapshot = mergeXhsCommentSnapshots(retainedSnapshot, hydratedSnapshot);
       apiObserved = apiObserved
         || hydratedSnapshot.pages.length > 0
         || hydratedSnapshot.subPages.length > 0;
@@ -362,39 +445,65 @@ async function collectCommentsViaApi({
         allComments.push(comment);
         foundNew = true;
       }
-    }
-
-    if (container) {
-      const parentComments = container.querySelectorAll('.parent-comment');
-      for (const parentEl of parentComments) {
-        await waitIfPaused();
-        if (shouldStop()) break;
-        if (maxTotal > 0 && allComments.length >= maxTotal) break;
-
-        const scrollParent = findScrollParent(container);
-        await scrollIntoViewIfNeeded(parentEl, scrollParent);
-        await waitForPageSettle(120);
-        if (replyExpandAttempts > 0) {
-          await expandAllReplies(parentEl, replyExpandAttempts);
-        }
+      if (foundNew) {
+        const context = getActiveCommentsContext();
+        onSnapshot?.(withCommentCollectionReceipt({
+          total: allComments.length,
+          comments: [...allComments],
+          stopReason: 'in_progress',
+        }, {
+          noteId,
+          maxTotal,
+          publicCommentCount: context?.publicCommentCount,
+        }));
       }
     }
 
     if (foundNew) {
-      onProgress?.({
+      onProgress?.(withPageCommentCount({
         status: 'collecting',
         current: allComments.length,
         message: `已通过页面 API 同步 ${allComments.length} 条评论${maxTotal > 0 ? `（上限 ${maxTotal}）` : ''}`,
-      });
+      }, container));
+    }
+
+    // The API hydrator is deliberately stepwise: after one network page this loop yields,
+    // re-reads state and chooses the next single action instead of racing DOM scrolling.
+    if (hydrationActionsPerformed > 0 || hydrationActionAttempted) {
+      noNewCount = foundNew ? 0 : noNewCount;
+      continue;
+    }
+
+    if (shouldExpandReplies && hydrationDegradedEver && container) {
+      const expandableParent = [...container.querySelectorAll('.parent-comment')]
+        .find((parentEl) => [...parentEl.querySelectorAll('div.show-more')]
+          .some((el) => isExpandMoreReplyTrigger(el?.textContent)));
+      if (expandableParent) {
+        const expanded = await expandNextReply(expandableParent, {
+          waitIfPaused,
+          shouldStop,
+          waitBeforeAction: () => actionGate.before({ kind: 'dom_expand_reply' }),
+          waitAfterAction: async ({ beforeCount }) => {
+            await waitForCondition(() => {
+              const signals = readCommentSignalsSafe(resolveContainer() || container);
+              return expandableParent.querySelectorAll('.comment-item.comment-item-sub').length > beforeCount
+                || signals.hasEndMarker
+                || !signals.hasExpandableReplies;
+            }, DEFAULT_DOM_TOP_UP_SETTLE_MS, 140);
+            await actionGate.after({ kind: 'dom_expand_reply' });
+          },
+        });
+        if (expanded.acted) continue;
+      }
     }
 
     if (!foundNew) {
       noNewCount++;
-      onProgress?.({
+      onProgress?.(withPageCommentCount({
         status: 'collecting',
         current: allComments.length,
         message: `本轮未同步到新评论，准备继续滚动加载（第 ${noNewCount}/${maxNoNew} 次）`,
-      });
+      }, container));
       if (noNewCount >= maxNoNew) {
         if (!apiObserved && allComments.length === 0) {
           return { total: 0, comments: [], apiObserved: false, stopReason: 'api_unobserved' };
@@ -421,7 +530,11 @@ async function collectCommentsViaApi({
 
     const nextContainer = resolveContainer() || container;
     if (nextContainer) {
-      await loadMoreCommentSurface(nextContainer, 420);
+      await loadMoreCommentSurface(nextContainer, DEFAULT_COMMENT_SCROLL_DISTANCE, {
+        actionGate,
+        shouldStop,
+        waitIfPaused,
+      });
     } else {
       await waitForPageSettle(500);
     }
@@ -463,12 +576,14 @@ async function collectCommentsFromDom({
   maxTotal = 0,
   maxSubComments = BATCH_CONFIG.maxSubComments,
   onProgress = null,
+  onSnapshot = null,
   shouldStop = () => false,
   waitIfPaused = async () => {},
   commentDepthMode = COMMENT_DEPTH_MODE.TWO_LEVEL,
   collectionRunId = '',
   initialComments = [],
   persist = true,
+  actionGate = createCommentActionGate({ shouldStop, waitIfPaused }),
 } = {}) {
   noteUrl = noteUrl || window.location.href;
   noteId = noteId || noteUrl.split('/').pop()?.split('?')[0] || '';
@@ -486,7 +601,7 @@ async function collectCommentsFromDom({
   const depthMode = String(commentDepthMode || COMMENT_DEPTH_MODE.TWO_LEVEL).trim() || COMMENT_DEPTH_MODE.TWO_LEVEL;
   let noNewCount = 0;
   const maxNoNew = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 8 : DEFAULT_DOM_TOP_UP_MAX_NO_NEW;
-  const replyExpandAttempts = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? ALL_REPLIES_EXPAND_ATTEMPTS : 0;
+  const shouldExpandReplies = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES;
   let riskStopped = false;
 
   while (!shouldStop()) {
@@ -499,19 +614,19 @@ async function collectCommentsFromDom({
       break;
     }
 
-    onProgress?.({
+    onProgress?.(withPageCommentCount({
       status: 'collecting',
       current: allComments.length,
       message: `正在扫描评论区，当前已采集 ${allComments.length} 条评论`,
-    });
+    }, container));
 
     if (hasXhsCollectionRiskSignal()) {
       riskStopped = true;
-      onProgress?.({
+      onProgress?.(withPageCommentCount({
         status: 'blocked',
         current: allComments.length,
         message: `检测到安全验证或访问受限，已停止本次评论采集（当前 ${allComments.length} 条）`,
-      });
+      }, container));
       break;
     }
 
@@ -553,18 +668,6 @@ async function collectCommentsFromDom({
         allComments.push(mainComment);
       }
 
-      if (mainComment && replyExpandAttempts > 0) {
-        onProgress?.({
-          status: 'collecting',
-          current: allComments.length,
-          message: `正在展开第 ${allComments.length + 1} 条主评论的回复`,
-        });
-        const scrollParent = findScrollParent(container);
-        await scrollIntoViewIfNeeded(parentEl, scrollParent);
-        await waitForPageSettle(120);
-        await expandAllReplies(parentEl, replyExpandAttempts);
-      }
-
       const subItems = parentEl.querySelectorAll('.comment-item.comment-item-sub');
       let subCount = 0;
 
@@ -600,23 +703,64 @@ async function collectCommentsFromDom({
       }
 
       if (mainIsNew || subCount > 0) {
-        onProgress?.({
+        onProgress?.(withPageCommentCount({
           status: 'collecting',
           current: allComments.length,
           message: `已采集 ${allComments.length} 条评论${maxTotal > 0 ? `（上限 ${maxTotal}）` : ''}`,
-        });
+        }, container));
       }
+    }
 
-      await waitForPageSettle(90);
+    if (foundNew) {
+      const context = getActiveCommentsContext();
+      onSnapshot?.(withCommentCollectionReceipt({
+        total: allComments.length,
+        comments: [...allComments],
+        stopReason: 'in_progress',
+      }, {
+        noteId,
+        maxTotal,
+        publicCommentCount: context?.publicCommentCount,
+      }));
+    }
+
+    if (shouldExpandReplies) {
+      const expandableParent = [...container.querySelectorAll('.parent-comment')]
+        .find((parentEl) => [...parentEl.querySelectorAll('div.show-more')]
+          .some((el) => isExpandMoreReplyTrigger(el?.textContent)));
+      if (expandableParent) {
+        onProgress?.(withPageCommentCount({
+          status: 'collecting',
+          current: allComments.length,
+          message: `正在按页展开回复（当前已取得 ${allComments.length} 条）`,
+        }, container));
+        const expanded = await expandNextReply(expandableParent, {
+          waitIfPaused,
+          shouldStop,
+          waitBeforeAction: () => actionGate.before({ kind: 'dom_expand_reply' }),
+          waitAfterAction: async ({ beforeCount }) => {
+            await waitForCondition(() => {
+              const current = resolveContainer() || container;
+              return expandableParent.querySelectorAll('.comment-item.comment-item-sub').length > beforeCount
+                || !readCommentSignalsSafe(current).hasExpandableReplies;
+            }, DEFAULT_DOM_TOP_UP_SETTLE_MS, 140);
+            await actionGate.after({ kind: 'dom_expand_reply' });
+          },
+        });
+        if (expanded.acted) {
+          noNewCount = foundNew ? 0 : noNewCount;
+          continue;
+        }
+      }
     }
 
     if (!foundNew) {
       noNewCount++;
-      onProgress?.({
+      onProgress?.(withPageCommentCount({
         status: 'collecting',
         current: allComments.length,
         message: `本轮未发现新评论，准备继续滚动加载（第 ${noNewCount}/${maxNoNew} 次）`,
-      });
+      }, container));
       if (noNewCount >= maxNoNew) break;
     } else {
       noNewCount = 0;
@@ -637,7 +781,11 @@ async function collectCommentsFromDom({
     }
 
     const nextContainer = resolveContainer() || container;
-    await loadMoreCommentSurface(nextContainer, 420);
+    await loadMoreCommentSurface(nextContainer, DEFAULT_COMMENT_SCROLL_DISTANCE, {
+      actionGate,
+      shouldStop,
+      waitIfPaused,
+    });
   }
 
   if (persist && allComments.length > 0) {
@@ -1115,38 +1263,63 @@ export function isExpandMoreReplyTrigger(text = '') {
   return /展开/.test(String(text || '').trim());
 }
 
-export async function expandAllReplies(parentCommentEl, maxAttempts = 10) {
+function replyControlIsVisible(button) {
+  if (typeof button?.getBoundingClientRect !== 'function') return true;
+  const rect = button.getBoundingClientRect();
+  const scrollParent = findScrollParent(button);
+  const parentRect = typeof scrollParent?.getBoundingClientRect === 'function'
+    ? scrollParent.getBoundingClientRect()
+    : { top: 0, bottom: globalThis.innerHeight || 0 };
+  return rect.top >= parentRect.top && rect.bottom <= parentRect.bottom;
+}
 
-  while (maxAttempts > 0) {
-    const expandBtns = [...parentCommentEl.querySelectorAll('div.show-more')]
-      .filter((el) => isExpandMoreReplyTrigger(el?.textContent));
+export async function expandNextReply(parentCommentEl, {
+  waitIfPaused = async () => {},
+  shouldStop = () => false,
+  waitBeforeAction = () => waitForPageSettle(90),
+  waitAfterAction = null,
+} = {}) {
+  await waitIfPaused();
+  if (shouldStop()) return { acted: false, reason: 'stopped' };
+  const button = [...parentCommentEl.querySelectorAll('div.show-more')]
+    .find((el) => isExpandMoreReplyTrigger(el?.textContent));
+  if (!button) return { acted: false, reason: 'no_expand_control' };
 
-    if (expandBtns.length === 0) break;
-
-    const beforeCount = parentCommentEl.querySelectorAll('.comment-item.comment-item-sub').length;
-
-    for (const btn of expandBtns) {
-      btn.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-      await waitForPageSettle(90);
-      btn.click();
+  const beforeCount = parentCommentEl.querySelectorAll('.comment-item.comment-item-sub').length;
+  await waitBeforeAction({ kind: 'dom_expand_reply' });
+  await waitIfPaused();
+  if (shouldStop()) return { acted: false, reason: 'stopped' };
+  if (!replyControlIsVisible(button)) {
+    button.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+    if (typeof waitAfterAction === 'function') {
+      await waitAfterAction({ kind: 'dom_reveal_reply', beforeCount });
+    } else {
+      await waitForPageSettle(420);
     }
-
+    await waitIfPaused();
+    return { acted: true, reason: 'reply_control_revealed' };
+  }
+  button.click();
+  if (typeof waitAfterAction === 'function') {
+    await waitAfterAction({ kind: 'dom_expand_reply', beforeCount });
+  } else {
     await waitForCondition(() => {
       const currentCount = parentCommentEl.querySelectorAll('.comment-item.comment-item-sub').length;
       const stillHasExpand = [...parentCommentEl.querySelectorAll('div.show-more')]
         .some((el) => isExpandMoreReplyTrigger(el?.textContent));
       return currentCount > beforeCount || !stillHasExpand;
     }, 800, 70);
-    maxAttempts--;
   }
+  await waitIfPaused();
+  return { acted: true, reason: 'reply_expanded' };
 }
 
-async function scrollIntoViewIfNeeded(el, scrollParent) {
-  const elRect = el.getBoundingClientRect();
-  const parentRect = scrollParent.getBoundingClientRect?.() ?? { top: 0, bottom: window.innerHeight };
-  if (elRect.top < parentRect.top || elRect.bottom > parentRect.bottom) {
-    el.scrollIntoView({ behavior: 'auto', block: 'nearest' });
-    await waitForPageSettle(120);
+export async function expandAllReplies(parentCommentEl, maxAttempts = 10, controls = {}) {
+
+  while (maxAttempts > 0) {
+    const result = await expandNextReply(parentCommentEl, controls);
+    if (!result.acted) break;
+    maxAttempts--;
   }
 }
 

@@ -110,6 +110,7 @@ const xhsPageController = createXhsPageController({
     ensureXhsCommentApiBridge();
     return collectComments(...args);
   },
+  submitCommentCheckpoint: (result, noteId, settings) => runtime.submitComments(result, noteId, settings),
   collectAuthor,
   collectCommentImages: async (...args) => collectCommentImages(...args),
   BatchNoteController: LingganBatchNoteController,

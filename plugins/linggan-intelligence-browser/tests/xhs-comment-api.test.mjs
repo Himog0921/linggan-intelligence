@@ -372,3 +372,83 @@ test('hydrateXhsCommentSnapshot keeps xsec token when fetching sub comment pages
   assert.match(fetchCalls[0][0], /image_formats=jpg%2Cwebp%2Cavif/);
   assert.match(fetchCalls[0][0], /top_comment_id=/);
 });
+
+test('stepwise hydration performs at most one external request per acquisition loop', async () => {
+  const actions = [];
+  let page = 1;
+  const snapshot = {
+    noteId: 'note_1',
+    pages: [{
+      endpoint: 'page',
+      noteId: 'note_1',
+      cursor: 'cursor_1',
+      hasMore: true,
+      capturedAt: 1,
+      comments: [{ id: 'root_1', content: '主评论 1' }],
+    }],
+    subPages: [],
+  };
+  const fetchJson = async () => {
+    page += 1;
+    return {
+      data: {
+        comments: [{ id: `root_${page}`, content: `主评论 ${page}` }],
+        cursor: `cursor_${page}`,
+        has_more: page < 3,
+      },
+    };
+  };
+
+  const first = await hydrateXhsCommentSnapshot(snapshot, {
+    noteId: 'note_1',
+    fetchJson,
+    maxExternalActions: 1,
+    beforeExternalAction: async (action) => actions.push(`before:${action.kind}`),
+    afterExternalAction: async (action) => actions.push(`after:${action.kind}`),
+  });
+  assert.equal(first.pages.length, 2);
+  assert.equal(first.hydrationMeta.actionsPerformed, 1);
+  assert.equal(first.hydrationMeta.pending, true);
+  assert.deepEqual(actions, ['before:api_main_page', 'after:api_main_page']);
+
+  const second = await hydrateXhsCommentSnapshot(first, {
+    noteId: 'note_1',
+    fetchJson,
+    maxExternalActions: 1,
+  });
+  assert.equal(second.pages.length, 3);
+  assert.equal(second.hydrationMeta.actionsPerformed, 1);
+  assert.equal(second.hydrationMeta.pending, false);
+});
+
+test('a final reply page overrides a stale root has-more flag on later acquisition loops', async () => {
+  let fetchCount = 0;
+  const hydrated = await hydrateXhsCommentSnapshot({
+    noteId: 'note_1',
+    pages: [{
+      noteId: 'note_1',
+      cursor: '',
+      hasMore: false,
+      comments: [{
+        id: 'root_1',
+        sub_comment_count: 2,
+        sub_comment_has_more: true,
+        sub_comments: [],
+      }],
+    }],
+    subPages: [{
+      noteId: 'note_1',
+      rootCommentId: 'root_1',
+      cursor: '',
+      hasMore: false,
+      comments: [{ id: 'reply_1' }, { id: 'reply_2' }],
+    }],
+  }, {
+    noteId: 'note_1',
+    maxExternalActions: 1,
+    fetchJson: async () => { fetchCount += 1; return {}; },
+  });
+
+  assert.equal(fetchCount, 0);
+  assert.equal(hydrated.hydrationMeta.pending, false);
+});

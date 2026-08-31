@@ -22,6 +22,7 @@ import {
 } from './detailPageSessionStore.js';
 import { waitForStableTab } from './tabReadiness.js';
 import { buildSignedXhsDetailExecutionUrl } from './xhsExecutionTarget.js';
+import { executeClaimedMediaAcquisition } from './mediaAcquisitionExecution.js';
 
 const PRODUCER_INSTANCE_KEY = 'linggan.localTrusted.producerInstanceId';
 const MAX_MEDIA_BYTES = 256 * 1024 * 1024;
@@ -534,31 +535,15 @@ async function runMediaAcquisitionOnce() {
       nextPollAfterSeconds: claim.nextPollAfterSeconds,
     };
   }
-  const candidateUris = claim.candidateUris
-    .map((value) => String(value || '').trim())
-    .filter(allowedMediaCandidateUri)
-    .slice(0, 6);
-  if (!claim.workRef || !claim.mediaObservationRef || !Number.isInteger(claim.claimGeneration)
-      || claim.claimGeneration < 1 || candidateUris.length === 0) {
-    return { success: false, state: 'media_claim_invalid', nextPollAfterSeconds: 300 };
-  }
-  await localMediaOutbox.enqueue({
-    uploadId: `${claim.workRef}:${claim.claimGeneration}`,
-    serverWorkRef: claim.workRef,
-    claimGeneration: claim.claimGeneration,
+  return executeClaimedMediaAcquisition({
+    claim,
     installKey,
-    mediaObservationRef: claim.mediaObservationRef,
-    componentKind: claim.componentKind,
-    candidateUris,
+    allowCandidate: allowedMediaCandidateUri,
+    outbox: localMediaOutbox,
+    flush: flushMediaOutbox,
+    recordFailure: recordMediaDownloadFailure,
+    scheduleRecovery: scheduleNextClaim,
   });
-  await flushMediaOutbox();
-  return {
-    success: true,
-    state: 'media_generation_executed',
-    executed: true,
-    workRef: claim.workRef,
-    nextPollAfterSeconds: 0,
-  };
 }
 
 chrome.alarms?.onAlarm?.addListener((alarm) => {

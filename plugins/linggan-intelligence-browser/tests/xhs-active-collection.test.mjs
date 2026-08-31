@@ -115,6 +115,131 @@ test('single-note comment UI reports 200 / 300 as partial instead of success', a
   assert.equal(toasts.at(-1).state, 'warning');
 });
 
+test('unlimited comment progress uses the page count and never latches the first collected count as total', async () => {
+  const progress = [];
+  const controller = createCommentTaskController({
+    collectComments: async ({ onProgress }) => {
+      onProgress({ current: 53, pageCommentCount: 452, message: '已采集 53 条评论' });
+      onProgress({ current: 130, pageCommentCount: 452, message: '已采集 130 条评论' });
+      return {
+        total: 130,
+        collectionState: 'partial',
+        stopReason: 'manual_stop',
+        collectionReceipt: { expectedCount: 452, pageCommentCount: 452 },
+      };
+    },
+    showToast() {},
+    syncTaskUI: (value) => progress.push(value),
+    startBatchTask() {},
+    toggleStopButton() {},
+    hideTaskControlBar() {},
+    setActiveTaskType() {},
+  });
+
+  await controller.start({
+    noteId: 'note_long',
+    noteUrl: 'https://www.xiaohongshu.com/explore/note_long',
+    maxTotal: 0,
+  });
+
+  const at130 = progress.find((value) => value.current === 130 && value.taskState === 'running');
+  assert.equal(at130.total, 452);
+  assert.equal(progress.some((value) => value.current === 130 && value.total === 53), false);
+});
+
+test('a stale page denominator smaller than collected comments falls back to an open-ended progress label', async () => {
+  const progress = [];
+  const controller = createCommentTaskController({
+    collectComments: async ({ onProgress }) => {
+      onProgress({ current: 130, pageCommentCount: 53, message: '已采集 130 条评论' });
+      return {
+        total: 130,
+        collectionState: 'partial',
+        stopReason: 'manual_stop',
+        collectionReceipt: { expectedCount: 53, pageCommentCount: 53 },
+      };
+    },
+    showToast() {}, syncTaskUI: (value) => progress.push(value), startBatchTask() {},
+    toggleStopButton() {}, hideTaskControlBar() {}, setActiveTaskType() {},
+  });
+
+  await controller.start({
+    noteId: 'note_stale_total',
+    noteUrl: 'https://www.xiaohongshu.com/explore/note_stale_total',
+    maxTotal: 0,
+  });
+  const at130 = progress.find((value) => value.current === 130 && value.taskState === 'running');
+  assert.equal(at130.total, 0);
+  assert.doesNotMatch(progress.at(-1).message, /130\s*\/\s*53/);
+});
+
+test('pausing a manual deep comment task submits the latest material snapshot as partial data', async () => {
+  const checkpoints = [];
+  let publishSnapshot;
+  let finishCollection;
+  const collectionFinished = new Promise((resolve) => { finishCollection = resolve; });
+  const controller = createCommentTaskController({
+    collectComments: async ({ onSnapshot, waitIfPaused }) => {
+      publishSnapshot = onSnapshot;
+      await collectionFinished;
+      await waitIfPaused();
+      return {
+        total: 2,
+        comments: [{ commentId: 'root_1', level: 1 }, { commentId: 'reply_1', level: 2, rootCommentId: 'root_1' }],
+        collectionState: 'partial',
+        stopReason: 'manual_stop',
+        collectionReceipt: { expectedCount: 10, pageCommentCount: 10 },
+      };
+    },
+    submitCommentCheckpoint: async (result, noteId, settings) => {
+      checkpoints.push({ result, noteId, settings });
+      return { delivery: 'pending' };
+    },
+    showToast() {},
+    syncTaskUI() {},
+    startBatchTask() {},
+    toggleStopButton() {},
+    hideTaskControlBar() {},
+    setActiveTaskType() {},
+  });
+
+  const run = controller.start({
+    noteId: 'note_checkpoint',
+    noteUrl: 'https://www.xiaohongshu.com/explore/note_checkpoint',
+    maxTotal: 0,
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  publishSnapshot({
+    total: 2,
+    comments: [{ commentId: 'root_1', level: 1 }, { commentId: 'reply_1', level: 2, rootCommentId: 'root_1' }],
+    collectionState: 'partial',
+    stopReason: 'in_progress',
+    collectionReceipt: {
+      scope: 'all_public_comments',
+      expectedCount: 10,
+      pageCommentCount: 10,
+      uniqueCollectedCount: 2,
+      state: 'partial',
+      analysisUsability: 'usable',
+      stopReason: 'in_progress',
+    },
+  });
+  controller.pause();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(checkpoints.length, 1);
+  assert.equal(checkpoints[0].noteId, 'note_checkpoint');
+  assert.equal(checkpoints[0].result.total, 2);
+  assert.equal(checkpoints[0].result.stopReason, 'manual_pause');
+  assert.equal(checkpoints[0].result.collectionState, 'partial');
+  assert.equal(checkpoints[0].result.collectionReceipt.stopReason, 'manual_pause');
+  assert.equal(checkpoints[0].result.collectionReceipt.uniqueCollectedCount, 2);
+
+  controller.stop();
+  finishCollection();
+  await run;
+});
+
 test('search target size expands the active DOM-loading plan beyond its old ten-round snapshot', () => {
   const plan = buildDiscoveryPlan('.feeds-container', { expectedCount: 50 });
   assert.equal(plan.maxRounds, 40);

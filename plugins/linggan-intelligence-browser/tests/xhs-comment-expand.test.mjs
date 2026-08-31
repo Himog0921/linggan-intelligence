@@ -2,9 +2,32 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  createCommentActionGate,
   expandAllReplies,
+  expandNextReply,
   isExpandMoreReplyTrigger,
 } from '../src/platforms/xhs/commentCollector.js';
+
+test('comment action gate enforces a minimum interval and pause checks before every action', async () => {
+  let now = 1000;
+  const waits = [];
+  const pauses = [];
+  const gate = createCommentActionGate({
+    minimumCooldownMs: 1200,
+    now: () => now,
+    sleep: async (milliseconds) => {
+      waits.push(milliseconds);
+      now += milliseconds;
+    },
+    waitIfPaused: async () => pauses.push('checked'),
+  });
+
+  assert.equal(await gate.before(), true);
+  now += 200;
+  assert.equal(await gate.before(), true);
+  assert.deepEqual(waits, [1000]);
+  assert.equal(pauses.length, 4);
+});
 
 function createExpandButton(text, onClick) {
   return {
@@ -54,4 +77,84 @@ test('expandAllReplies recursively clicks newly revealed show-more buttons', asy
 
   assert.equal(stage, 2);
   assert.equal(subCount, 4);
+});
+
+test('expandNextReply performs only one click and checks pause boundaries around it', async () => {
+  const events = [];
+  const buttons = [
+    createExpandButton('展开 2 条回复', () => events.push('click:first')),
+    createExpandButton('展开更多回复', () => events.push('click:second')),
+  ];
+  const parentCommentEl = {
+    querySelectorAll(selector) {
+      if (selector === 'div.show-more') return buttons;
+      if (selector === '.comment-item.comment-item-sub') return [];
+      return [];
+    },
+  };
+
+  const result = await expandNextReply(parentCommentEl, {
+    waitIfPaused: async () => events.push('pause-check'),
+    shouldStop: () => false,
+    waitBeforeAction: async () => events.push('cooldown'),
+    waitAfterAction: async () => events.push('stable'),
+  });
+
+  assert.equal(result.acted, true);
+  assert.deepEqual(events, [
+    'pause-check',
+    'cooldown',
+    'pause-check',
+    'click:first',
+    'stable',
+    'pause-check',
+  ]);
+});
+
+test('an offscreen reply control is revealed in one loop and clicked only by a later loop', async () => {
+  let visible = false;
+  let clicks = 0;
+  let scrolls = 0;
+  const button = {
+    textContent: '展开 2 条回复',
+    getBoundingClientRect: () => visible
+      ? ({ top: 10, bottom: 20 })
+      : ({ top: 200, bottom: 220 }),
+    scrollIntoView() { scrolls += 1; visible = true; },
+    click() { clicks += 1; },
+  };
+  const parentCommentEl = {
+    querySelectorAll(selector) {
+      if (selector === 'div.show-more') return [button];
+      if (selector === '.comment-item.comment-item-sub') return [];
+      return [];
+    },
+  };
+  globalThis.window = {
+    innerHeight: 100,
+    getComputedStyle: () => ({ overflow: 'visible', overflowY: 'visible' }),
+  };
+  globalThis.document = {
+    documentElement: {
+      getBoundingClientRect: () => ({ top: 0, bottom: 100 }),
+    },
+  };
+  button.parentElement = null;
+
+  const first = await expandNextReply(parentCommentEl, {
+    waitBeforeAction: async () => {},
+    waitAfterAction: async () => {},
+  });
+  assert.equal(first.reason, 'reply_control_revealed');
+  assert.equal(scrolls, 1);
+  assert.equal(clicks, 0);
+
+  const second = await expandNextReply(parentCommentEl, {
+    waitBeforeAction: async () => {},
+    waitAfterAction: async () => {},
+  });
+  assert.equal(second.reason, 'reply_expanded');
+  assert.equal(clicks, 1);
+  delete globalThis.window;
+  delete globalThis.document;
 });

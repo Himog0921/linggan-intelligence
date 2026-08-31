@@ -49,6 +49,8 @@
 | XHS SSR 详情读取（0.8.5） | 全局 `__INITIAL_STATE__` 被页面水合删除时，从原始页面脚本安全解析序列化 `noteDetailMap`，供详情就绪、完整度和正式采集共用 | 不执行页面脚本、不放宽作品身份校验、不把 SSR 内容冒充 API 或 DOM 观察；无 SSR 时仍走现有运行态/DOM 路径 |
 | 评论回执与当前投影（0.8.6） | 标准 30 条窗口与深采分开；短采保留，重试从评论入口重新遍历；服务端按稳定评论身份形成当前投影 | 不跨 Attempt 累加数量冒充完整，不从旧评论游标续采，不修改历史 Package |
 | 真实评论树接纳修复（0.8.7） | 顶层自指 root 与回复多关系字段在出包前规范到评论/回复唯一合同；自然结束深采使用无数值配额的有界停止条件 | 不从结果反推任务配额，不放宽服务端关系门闸，不改 scheduled TaskSpec |
+| 克制评论执行与暂停交付（0.8.8） | API 分页、DOM 滚动、回复展开每轮三选一；最低冷却、页面稳定、暂停/停止检查共用；暂停提交真实 PARTIAL 评论树；进度区分已取得、页面公开数和请求上限 | 不伪装随机真人轨迹，不把 checkpoint 计数冒充评论材料，不跨 Attempt 累加完整性 |
+| 媒体领取代际保护（0.8.8） | 领取后先安排恢复唤醒，再写可靠队列并执行；入队或执行异常按 workRef/claimGeneration 回报 | 不把来源 URL 当本地封面，不让人工媒体窗口消失，不把排队冒充物化完成 |
 
 ## 新旧运行路径对照
 
@@ -59,7 +61,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.7）
+当前路径（0.8.8）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox
