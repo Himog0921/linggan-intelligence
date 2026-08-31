@@ -55,6 +55,7 @@
 | 新媒体工作优先与超时（0.8.9） | 精确新领取代次优先于旧本地媒体行；候选请求 20 秒超时 | 不绕过三次服务端尝试上限，不删除人工媒体窗口，不把来源 URI 当物化结果 |
 | 真实详情公开数续采（0.8.10） | 详情标题无“共 N 条”文案时，终态判定继续使用详情上下文观察到的公开评论数 | 不把 `18/508` 误判为无目标 `no_progress` |
 | Attempt 公开数持久（0.8.11） | 采集任一轮观察到的公开数在本 Attempt 内保留，供终态续采判定与部分快照共用 | 不依赖虚拟列表终态时仍保留同一 DOM 容器 |
+| 滚动位置进展（0.8.12） | `scrollTop` 能前进或 `scrollHeight` 增长即视为页面加载进展，继续克制下移到新评论或真实底部 | 不把“当前 280px 内没有新节点”误报为 no-progress |
 
 ## 新旧运行路径对照
 
@@ -65,7 +66,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.11）
+当前路径（0.8.12）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox
