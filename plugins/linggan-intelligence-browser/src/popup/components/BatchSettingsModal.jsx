@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { COMMENT_DEPTH_MODE } from '../../shared/constants.js';
+import { BATCH_CONFIG, COMMENT_DEPTH_MODE } from '../../shared/constants.js';
 import { PAGE_MODE, PLATFORM } from '../utils.js';
 import {
   getPopupBatchSettingsStorageKey,
@@ -82,9 +82,14 @@ export default function BatchSettingsModal({
 
   if (!open) return null;
 
+  const numericCount = Number(count);
+  const countIsValid = !showCountOptions
+    || (Number.isInteger(numericCount) && numericCount >= 1 && numericCount <= BATCH_CONFIG.maxPerSession);
+
   const handleConfirm = () => {
+    if (!countIsValid) return;
     const nextSettings = {
-      count,
+      count: numericCount,
       topByLikes: showTopByLikes ? topByLikes : false,
       searchFilters: showXhsSearchFilters ? searchFilters : normalizeXhsSearchFilters(),
       commentLimit: showCommentLimit ? Math.max(0, parseInt(String(commentLimit).trim(), 10) || 0) : 0,
@@ -139,6 +144,23 @@ export default function BatchSettingsModal({
                 </button>
               ))}
             </div>
+            {!isDouyin && (
+              <>
+                <input
+                  id="batchCountInput"
+                  type="number"
+                  min="1"
+                  max={BATCH_CONFIG.maxPerSession}
+                  step="1"
+                  value={count}
+                  onChange={(event) => setCount(event.target.value)}
+                  aria-invalid={!countIsValid}
+                />
+                <small className="batch-helper">
+                  可输入 1–{BATCH_CONFIG.maxPerSession}；超过上限请分批创建，插件不会静默缩小任务。
+                </small>
+              </>
+            )}
           </>
         )}
 
@@ -227,7 +249,7 @@ export default function BatchSettingsModal({
           <button className="popup-btn outline" id="btnBatchCancel" onClick={onCancel}>
             取消
           </button>
-          <button className="popup-btn primary" id="btnBatchConfirm" onClick={handleConfirm}>
+          <button className="popup-btn primary" id="btnBatchConfirm" onClick={handleConfirm} disabled={!countIsValid}>
             {confirmText}
           </button>
         </div>

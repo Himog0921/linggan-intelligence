@@ -26,6 +26,22 @@ function memoryTable() {
       };
     },
     async bulkDelete(keys) { keys.forEach((key) => rows.delete(key)); },
+    async count() { return rows.size; },
+    orderBy(field) {
+      return {
+        limit(size) {
+          return {
+            async primaryKeys() {
+              return [...rows.values()]
+                .sort((left, right) => Number(left[field]) - Number(right[field]))
+                .slice(0, size)
+                .map((row) => row.cacheKey);
+            },
+          };
+        },
+      };
+    },
+    size() { return rows.size; },
   };
 }
 
@@ -110,4 +126,16 @@ test('cached comment and reply lanes keep their content source identity', async 
   const repliesEntry = await store.getForTask({ leaseRef: 'lease-1', taskSpec: repliesTask });
   assert.equal(packageDetailPageSessionLane(commentsEntry, commentsTask).records[0].kind, 'comment');
   assert.equal(packageDetailPageSessionLane(repliesEntry, repliesTask).records[0].kind, 'reply');
+});
+
+test('put prunes expired detail sessions without a separate maintenance action', async () => {
+  let now = 1_000;
+  const table = memoryTable();
+  const store = createDetailPageSessionStore(table, () => now);
+  await store.put({ leaseRef: 'lease-old', plan: { ...plan, cacheTtlSeconds: 1 }, note, commentResult, receipt: {} });
+  now += 2_000;
+  await store.put({ leaseRef: 'lease-new', plan, note, commentResult, receipt: {} });
+  assert.equal(table.size(), 1);
+  assert.equal(await store.getForTask({ leaseRef: 'lease-old', taskSpec: task('content_detail') }), null);
+  assert.ok(await store.getForTask({ leaseRef: 'lease-new', taskSpec: task('content_detail') }));
 });

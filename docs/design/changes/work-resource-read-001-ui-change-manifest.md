@@ -46,6 +46,7 @@
 - 列表同时呈现“作品作者”与“监控目标”；没有平台作者 ID 证明时，不用目标显示名填补作品作者。
 - 发布时间区分精确 `KNOWN`、仅来源文本 `SOURCE_TEXT_ONLY` 和 `UNKNOWN`；Inspector 展示来源字段、类型、精度和 parser version。
 - 来源血缘增加 Target 与 Work Order，并继续保留 Task、Attempt、Package、Receipt。
+- 2026-08-31 封面比例修订：作品行增加只用于排版的 `data-platform`；小红书在研读与封面排版中使用 `3:4` 竖版容器。改动不改变 Work Resource 字段、媒体读取资格、当前选择或 Inspector。
 
 ## LIDS 影响
 

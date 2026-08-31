@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   claimLingganDispatch,
+  decodePageExecutionReceipt,
   dispatchClaimRouteFromHealth,
 } from '../src/linggan/adapter.js';
 
@@ -52,6 +53,20 @@ test('only an explicit permission is treated as permission', async () => {
 });
 
 test('a permitted claim carries the task and its lease', async () => {
+  const taskSpec = {
+    contractVersion: 'linggan.producer.task-spec.v1',
+    taskId: '11111111-1111-4111-8111-111111111111',
+    source: 'scheduled',
+    platform: 'xhs',
+    pageType: 'profile',
+    target: { authorExternalId: 'author-1' },
+    capabilitiesRequested: ['author_profile'],
+    maximumQuota: 1,
+    commentLimit: 'not_requested',
+    acquireMedia: 'not_requested',
+    riskPolicy: 'server_authorized_leased',
+    stopConditions: ['maximum_quota'],
+  };
   const result = await claimLingganDispatch({
     installKey: 'i-1', health: HEALTH,
     fetchImpl: async () => ({
@@ -59,7 +74,7 @@ test('a permitted claim carries the task and its lease', async () => {
       async json() {
         return {
           decision: 'dispatch', mayExecute: true, leaseRef: 'lease-1',
-          taskSpec: { capabilitiesRequested: ['author_profile'], maximumQuota: 1 },
+          taskSpec,
         };
       },
     }),
@@ -67,6 +82,34 @@ test('a permitted claim carries the task and its lease', async () => {
   assert.equal(result.mayExecute, true);
   assert.equal(result.leaseRef, 'lease-1');
   assert.deepEqual(result.taskSpec.capabilitiesRequested, ['author_profile']);
+});
+
+test('a malformed permitted claim is rejected before it controls a page', async () => {
+  const result = await claimLingganDispatch({
+    installKey: 'i-1', health: HEALTH,
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return {
+          decision: 'dispatch', mayExecute: true, leaseRef: 'lease-1',
+          taskSpec: { capabilitiesRequested: ['comments'] },
+        };
+      },
+    }),
+  });
+  assert.equal(result.mayExecute, false);
+  assert.equal(result.decision, 'invalid_dispatch');
+  assert.equal(result.taskSpec, null);
+});
+
+test('page execution requires an explicit receipt with the dispatched identity', () => {
+  const expected = { action: 'collect_comments', capability: 'comments', taskId: 'task-1' };
+  assert.equal(decodePageExecutionReceipt(undefined, expected).state, 'page_receipt_missing');
+  assert.equal(decodePageExecutionReceipt({ success: true }, expected).state, 'page_receipt_identity_mismatch');
+  assert.deepEqual(
+    decodePageExecutionReceipt({ success: true, ...expected, state: 'page_read_started' }, expected),
+    { ok: true, state: 'page_read_started', message: '' },
+  );
 });
 
 test('an unreachable server never reports permission', async () => {

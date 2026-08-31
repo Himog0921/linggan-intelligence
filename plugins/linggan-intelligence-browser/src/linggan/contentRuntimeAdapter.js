@@ -61,8 +61,12 @@ export function commentTaskInstruction(noteId, maxTotal) {
 }
 
 export function createLingganContentRuntime({ platform } = {}) {
-  async function submit(taskSpec, capturePackage) {
-    const response = await sendToBackground(LINGGAN_RUNTIME_ACTION.SUBMIT_CAPTURE_PACKAGE, { taskSpec, capturePackage }, { timeoutMs: 5000 });
+  async function submit(taskSpec, capturePackage, { idempotencyKey = '' } = {}) {
+    const response = await sendToBackground(
+      LINGGAN_RUNTIME_ACTION.SUBMIT_CAPTURE_PACKAGE,
+      { taskSpec, capturePackage, idempotencyKey },
+      { timeoutMs: 5000 },
+    );
     if (!response?.success) throw new Error(response?.message || 'Linggan 未能将采集结果写入本机待交付队列');
     return { ...response, taskSpec };
   }
@@ -92,7 +96,7 @@ export function createLingganContentRuntime({ platform } = {}) {
         'content_detail',
         { contentExternalId: String(note?.noteId || note?.id || '') },
         { acquireMedia: 'not_requested', taskSpec: options.taskSpec },
-      ), packageValue);
+      ), packageValue, { idempotencyKey: options.idempotencyKey });
     },
     async submitComments(result, noteId, settings = {}) {
       const instruction = commentTaskInstruction(noteId, settings.maxTotal);

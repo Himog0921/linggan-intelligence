@@ -1087,7 +1087,8 @@ main {
   min-height: 42px;
 }
 
-#commentLimitInput {
+#commentLimitInput,
+#batchCountInput {
   width: 100%;
   min-height: 40px;
   border: 2px solid var(--ink);

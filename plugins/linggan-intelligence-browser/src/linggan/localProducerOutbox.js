@@ -8,6 +8,10 @@ database.version(2).stores({
   submissions: '&submissionId, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]',
   mediaUploads: '&uploadId, slotSubmissionId, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]',
 });
+database.version(3).stores({
+  submissions: '&submissionId, &idempotencyKey, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]',
+  mediaUploads: '&uploadId, slotSubmissionId, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]',
+});
 
 const RETRYABLE = ['pending', 'retryable', 'in_flight'];
 
@@ -35,9 +39,25 @@ export function createLocalProducerOutbox(table = database.submissions, now = cu
       }
       const existing = await table.get(envelope.submissionId);
       if (existing) return existing;
+      const idempotencyKey = String(envelope?.idempotencyKey || '').trim();
+      if (idempotencyKey) {
+        const replay = await table.where('idempotencyKey').equals(idempotencyKey).first();
+        if (replay) return replay;
+      }
       const createdAt = now();
       const row = { ...envelope, status: 'pending', attempts: 0, nextAttemptAt: createdAt, createdAt, updatedAt: createdAt };
-      await table.add(row);
+      try {
+        await table.add(row);
+      } catch (error) {
+        // Two Service Worker wakeups may both observe an empty idempotency-key lane before
+        // either IndexedDB add commits. The unique index is the final arbiter; the loser must
+        // reuse the committed envelope instead of turning an intentional replay into a failure.
+        if (idempotencyKey && error?.name === 'ConstraintError') {
+          const replay = await table.where('idempotencyKey').equals(idempotencyKey).first();
+          if (replay) return replay;
+        }
+        throw error;
+      }
       return row;
     },
 

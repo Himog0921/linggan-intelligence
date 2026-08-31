@@ -23,6 +23,9 @@ pub struct MaterialLibraryItem {
     pub display: MaterialDisplay,
     pub collection_context: MaterialCollectionContext,
     pub preview: MaterialPreview,
+    /// The one page-independent media resource contract. `preview` remains a compatibility
+    /// projection during migration; business pages must consume this field.
+    pub media: Value,
     pub lane_summaries: Vec<MaterialLaneSummary>,
     pub summary: MaterialSummary,
     pub inspector: Value,
@@ -102,6 +105,7 @@ pub struct MaterialLaneSummary {
     pub failed: Option<i64>,
     pub known_unattempted: Option<i64>,
     pub maximum_quota: Option<i64>,
+    pub requested_limit: Option<i64>,
     pub collection_scope: Option<String>,
     pub expected_count: Option<i64>,
     pub unique_collected_count: Option<i64>,
@@ -149,6 +153,7 @@ pub(crate) fn default_lane_summaries(
         failed: None,
         known_unattempted: None,
         maximum_quota: None,
+        requested_limit: None,
         collection_scope: None,
         expected_count: None,
         unique_collected_count: None,

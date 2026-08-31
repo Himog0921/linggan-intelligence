@@ -1,9 +1,9 @@
 # Linggan 媒体生命周期与材料投影合同
 
 > 状态: 权威当前
-> 最后核对: 2026-08-28
+> 最后核对: 2026-08-31
 > 适用范围: ARC-001 `media-lifecycle-contract`；Browser Producer 媒体观察、字节取得、派生处理、保留/处置，以及 Evidence Library 后续读取投影
-> 事实来源: Mog 已确认的产品运行规则、当前 `main` 的插件 `v0.5.0` / Rust / PostgreSQL 实现、内容工作台 V2 固定参考、历史 PR #15 语义审查
+> 事实来源: Mog 已确认的产品运行规则、Issue #128、Browser Producer `v0.8.16` / Rust / PostgreSQL 当前实现、内容工作台 V2 固定参考、历史 PR #15 语义审查
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、真实运行结果、当前代码/数据库/测试、ACCEPTED 决定；历史 V2 和 PR #15 只提供继承证据
 
 ## 0. 结论与边界
@@ -23,7 +23,7 @@
 - Evidence Library 多材料页面实现；
 - 生产部署、规模化稳定性或用户验收。
 
-本卡不修改 Rust、SQL、API、Web、插件或运行数据，也不授权真实平台访问、回填、处理器调用、部署或清理。
+本合同最初只冻结责任边界；截至 `PLUGIN-XHS-FINALIZATION-001`，相关 Rust、SQL、API、Web 与插件实现已经进入受控分支并通过自动及隔离 PostgreSQL 合成证明。真实平台访问、持久库迁移、部署、真实媒体物化和用户验收仍需分别证明。
 
 ## 1. 不可压缩的责任链
 
@@ -101,11 +101,17 @@ platform
 
 - `subject_kind` 首批为 `content`。评论图片和作者头像只有在各自来源合同、主体身份和 Coverage 完整后才可新增，不能借现有作品槽位兜底。
 - `purpose` 首批至少区分 `cover / body_image / video / live_photo`。技术字段可以继续使用现有 role，但必须能够无损映射到这些产品含义。
-- `display_ordinal` 表达作品内稳定展示顺序，从 1 开始；它不是“每种 role 内的第几个”，也不是 collector 临时数组拼接后的序号。
+- `relationship_ordinal` 表达同一关系类型内的稳定序号，从 1 开始；`content.image[1..N]` 不会因前面存在封面而从 2 或 8 开始。平台全局展示顺序只有在来源明确提供时才写入 `display_ordinal`，否则保持 `UNKNOWN`。
 - 同一个资源同时作为封面和正文第一图时，保留两个不同槽位/用途；二者以后可以指向同一来源身份或 Blob。
 - 来源明确的独立裁切封面与正文首图必须保持不同来源/Blob，不能因为视觉相似或 URL 接近合并。
 
-当前插件 `packageMediaSlots` 按 `images → cover → video → livePhotoStreams` 拼接后生成全局 ordinal，Rust 又以 `(platform, content, role, ordinal)` 唯一化。它已足以证明基础 Slot lane，但尚不足以证明平台展示顺序和复合媒体关系；后续 Producer 合同适配必须显式提交来源展示顺序，不得让服务端猜测。
+当前插件 `packageMediaSlots` 已按 `cover / image / video / live_photo` 各自计数，Rust 在既有 Slot 链上追加 `linggan_media_resource_relation`。旧 Package 不回写；旧数据读取时允许由已保存 purpose 做兼容映射，新接纳数据以关系表为准。没有可靠来源展示顺序时，服务端仍不得猜测 `display_ordinal`。
+
+### 3.2.1 统一关系与读模型
+
+统一关系闭集为：`author.avatar`、`content.cover`、`content.image`、`content.video`、`content.ocr`、`content.transcript`、`comment.image`。它回答“资源属于谁、扮演什么角色”，不复制 Blob、Materialization 或 Derivative。
+
+页面统一消费 `linggan.media-resource.v1`。封面选择只有一条规则：平台显式封面优先，其次首张正文图，再次视频缩略图；没有受控本地句柄时为 `none`。每个页面不得自行把 `image[0]` 当封面、直接读取远程 CDN，或重新拼 OCR/ASR 表。
 
 ### 3.3 多个 `candidateUris`
 
@@ -232,10 +238,10 @@ Package 被接纳只证明 producer 交卷通过运行时最低合同，不自�
 | `discovery_search` | 搜索面实际发现 | Discovery Finding、入口、位置、观察时间与 Coverage | 作品聚合的发现入口；可检索标题/作者候选，但明确仅发现面 | 已类型化进入 discovery 读取投影；PostgreSQL 合成证明存在，真实完整性有限 |
 | `profile_discovery` | 博主页作品发现 | 作者入口下的 Discovery Finding 与 Coverage | 合并到同一作品聚合，同时保留“由哪个作者页发现” | 已类型化进入 discovery 读取投影；不证明详情 |
 | `content_detail` | 作品详情来源材料 | 作品正文/标题/作者/来源时间/互动快照的版本化材料 | 作为作品聚合主体，逐字段保留来源/未知；不得把缺字段清零 | 已进入 `accepted_for_library_content` 的窄投影；不是完整 Observation/Current |
-| `comments` | 顶层评论材料与本 lane Coverage | 稳定评论身份、父作品、原文/时间/作者来源和停止原因 | 评论数量、片段、覆盖、失败/未取尽；无记录不能显示 0 | Package 可保存，但当前多为 `retained_uninterpreted`；材料接纳/读取未实现 |
-| `replies` | 楼中楼回复与独立 Coverage | 回复身份、父评论/根评论关系、层级、材料与停止原因 | 评论树、回复覆盖和“展开最多 2 次/自然结束”等边界 | Package 可保存，但当前多为 `retained_uninterpreted`；父子投影未实现 |
+| `comments` | 顶层评论材料与本 lane Coverage | 稳定评论身份、父作品、原文/时间/作者来源和停止原因 | 评论数量、片段、覆盖、失败/未取尽；无记录不能显示 0 | 已类型化接纳；不可变 Attempt 与稳定评论 ID 当前投影并存，受限研究通道读取正文 |
+| `replies` | 楼中楼回复与独立 Coverage | 回复身份、父评论/根评论关系、层级、材料与停止原因 | 评论树、回复覆盖和“展开最多 2 次/自然结束”等边界 | 已类型化接纳并保留 root/parent 关系；新 Attempt 从评论入口重采，不续旧游标 |
 | `author_profile` | 作者资料观察 | 作者身份与资料字段的版本化来源观察 | 作品 Inspector 的作者上下文或独立作者入口；粉丝等未知不能写 0 | 已用于观察目标档案回填；尚无统一 Evidence Library 材料投影 |
-| `media_slots` | 作品当次媒体清单与来源候选 | Slot、来源观察组、candidate URIs、顺序/用途/组件与 Coverage | 槽位总数、类型、顺序、来源代次和取得状态 | Slot/单一 external URI 已实现并有合成 PostgreSQL proof；多 URI、明确顺序、Live Photo 组件待适配 |
+| `media_slots` | 作品当次媒体清单与来源候选 | Slot、来源观察组、candidate URIs、关系序号、用途/组件与 Coverage | 统一 MediaResource 中的封面、图集、视频及真实字节状态 | 多 URI、Live Photo 组件、per-purpose ordinal 与 content 关系写入已实现并有隔离 PostgreSQL proof；真实平台完整媒体仍未证明 |
 | `media_bytes` | 独立媒体字节 lane 的交付/回执语义 | Download Attempt、Upload Session、Blob、Replica/Materialization | 只显示本地受控副本、完整性和清理状态 | package kind/接口存在；真实字节走独立分块 API，真实平台 bytes 未验证；完整 Replica 模型不足 |
 | OCR / ASR / 抽帧 / embedding | 服务端派生处理，不是 producer 原始内容 Package | ProcessingJob/Event、Derivative、Source Span/Material Transformation | 可检索文字或关键帧，带 processor 版本与来源位置 | Job/Event/Derivative DDL 与 pending 入口存在；provider、真实输出、embedding/关键帧完整模型未实现 |
 | `batch_checkpoint` | 一次独立 checkpoint Attempt 提交时冻结的进度回执 | 当次进度、暂停/恢复位置和任务状态；浏览器可变 `resumeCheckpoint` 仍属于 execution control | **不成为语料卡或正文材料**；只在来源/执行核验区显示 | Package kind 已实现；当前每次提交会创建独立 TaskSpec/Attempt，服务端没有“同一 Attempt 可变 checkpoint”模型；不能作为 Evidence、Coverage 完成或成员清单 |
@@ -308,7 +314,7 @@ UI 不得：
 - 用外部 CDN 做本地封面 fallback；
 - 把 checkpoint 当作语料或内容 Evidence。
 
-## 8. 当前实现与证明矩阵（以 `95c1207` 主线为基线）
+## 8. 当前实现与证明矩阵（以 `v0.8.16` 候选分支为基线）
 
 状态分类：
 
@@ -322,12 +328,13 @@ UI 不得：
 |---|---|---|
 | 九类 Producer Package 的闭集解析、Task/Attempt/Package/Receipt、replay/conflict | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | Rust 合同和隔离 PostgreSQL tests 已覆盖合成链；不证明真实浏览器所有通道 |
 | discovery/profile/detail 的窄 Evidence Library 投影 | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | 当前读投影只消费类型化 discovery/content；页面语言仍以 discovery 为主 |
-| comments/replies 类型化材料与树 | `NOT_IMPLEMENTED` | 当前多为 `retained_uninterpreted`，无统一读取投影 |
+| comments/replies 类型化材料与树 | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | Attempt 历史与稳定 ID 当前投影分开；真实 121/533 PARTIAL 曾证明材料增长，0.8.16 完整深采仍待复验 |
 | author_profile 目标档案回填 | `IMPLEMENTED` | 只证明目标 enrichment；不是统一作者 Evidence/语料投影 |
 | MediaSlot、单 URI Observation、DownloadAttempt | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | 已证明槽位、失败不连坐文字；未证明真实平台顺序/完整媒体清单 |
-| 多 `candidateUris` 来源观察 | `NOT_IMPLEMENTED` | 插件产生数组，Rust 当前只取 `externalUri` |
-| cover/image/video 的槽位适配 | `INTERFACE_ONLY` | role 可保存，但明确展示顺序、封面来源依据和生产正向样本未完整证明 |
-| Live Photo still/motion 配对 | `NOT_IMPLEMENTED` | 插件有 `live_photo` 候选；当前没有组件/bundle 合同和正向真实样本 |
+| 多 `candidateUris` 来源观察 | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | 候选集合与组件类型化保存；真实短期 URL 可用性仍由下载 Attempt 表达 |
+| 七类媒体关系与统一 MediaResource | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | `0027` 在既有资产链上增加关系；Evidence 只读本地句柄，封面回退合成链已证明；avatar/comment image 未有生产方时保持 NOT_OBSERVED |
+| cover/image/video 的槽位适配 | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | 每用途 ordinal 与唯一封面选择已证明；平台全局 display order 未知时仍不猜 |
+| Live Photo still/motion 配对 | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | 组件和 bundle partial 已有合成证明；正向真实样本未验证 |
 | 分块上传、offset fencing、finalize 恢复 | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | session 是运行状态；证明为合成字节/数据库链 |
 | SHA-256 Blob 去重、同 Blob 多 Slot/Materialization、本地 asset path | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | 当前 Blob/Replica 物理分责仍不完整；真实字节未验证 |
 | 本地文件临时写、hash 校验、原子 rename 和读取路由 | `IMPLEMENTED` | 当前 API 有实现与合成测试；未证明真实平台大文件、性能和长期可靠性 |
@@ -337,7 +344,7 @@ UI 不得：
 | 下载/OCR/ASR 独立 worker 队列、跨进程转录限流 | `NOT_IMPLEMENTED` | 产品与架构规则已冻结，等待第一阶段运行时卡实施 |
 | 图片/视频保留期清理、磁盘水位告警 | `NOT_IMPLEMENTED` | 产品规则已冻结；无清理 worker/回执证明 |
 | 撤回/删除/访问限制及全消费者传播 | `NOT_IMPLEMENTED` | PR #15 的语义被继承；当前没有运行链 |
-| 多材料 Evidence Library 聚合、筛选和 Inspector | `NOT_IMPLEMENTED` | 本合同只冻结消费合同，后续页面/读模型卡实现 |
+| 多材料 Evidence Library 聚合、筛选和 Inspector | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | Work Resource 与受限详情通道已实现；统一媒体页面消费已自动验证，未做本轮浏览器视觉和 Mog 验收 |
 
 这里的 `PG_SYNTHETIC_PROVED` 指提交到仓库的隔离 PostgreSQL 测试与进度记录，不表示本卡重新执行了真实数据库、真实媒体或平台链。任何后续完成声明必须对 exact head 重新运行相称证明。
 

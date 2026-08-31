@@ -2023,10 +2023,23 @@ fn evidence_runtime_restores_system_and_personal_view_strategy_without_faking_sa
 fn evidence_runtime_renders_only_controlled_media_handles() {
     assert!(!EVIDENCE_LIBRARY_JS.contains("function observedCoverUrl"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("observedSourceUrl"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("sameOriginPath(item.preview?.localAssetUrl"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("sameOriginPath(cover.localAssetUrl"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("renderMedia(item.media, inspector, channels)"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("item.preview?.localAssetUrl"));
     assert!(EVIDENCE_LIBRARY_JS.contains("node('img')"));
     assert!(EVIDENCE_LIBRARY_JS.contains("本地副本"));
     assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-preview img"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains("aspect-ratio:3/4"));
+}
+
+#[test]
+fn evidence_runtime_uses_the_xhs_portrait_cover_ratio_in_visual_layouts() {
+    assert!(EVIDENCE_LIBRARY_JS.contains(
+        "row.dataset.platform = String(item.identity?.platform || 'unknown').toLowerCase()"
+    ));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(
+        ".ev-work-list .ev-work-row[data-platform=\"xhs\"] .ev-preview{min-height:0;aspect-ratio:3/4;align-self:start}"
+    ));
 }
 
 #[test]

@@ -3,7 +3,7 @@ mod fixture;
 
 use fixture::{coverage_layer, proof_database, submit_custom_package, submit_package};
 use linggan_contracts::EvidenceQuery;
-use linggan_evidence::read_work_resources;
+use linggan_evidence::{admit_media_blob, read_work_resources};
 use sqlx::Row;
 
 #[tokio::test]
@@ -109,6 +109,93 @@ async fn content_detail_submission_forms_a_typed_material_with_field_sources_and
     assert_eq!(
         detail_count, 1,
         "mismatched source identity is not projected"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn work_resource_uses_one_media_contract_and_selects_a_local_cover_fallback() {
+    let database = proof_database("material_unified_media_resource").await;
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"note-media-resource"}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-media-resource"},
+            "payload":{"title":"统一媒体读模型"}
+        }),
+    )
+    .await;
+    let observation_ref = uuid::Uuid::new_v4();
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-media-resource"}),
+        serde_json::json!({
+            "kind":"media_slot",
+            "slotKey":"xhs:note-media-resource:image:1",
+            "slot":{"role":"image","ordinal":1},
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-media-resource"},
+            "observation":{"externalUri":"https://media.example/body-1.jpg","candidateUris":["https://media.example/body-1.jpg"]},
+            "observationRef":observation_ref
+        }),
+    )
+    .await;
+    admit_media_blob(
+        &database,
+        observation_ref,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "image/jpeg",
+        4,
+        "blobs/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    )
+    .await
+    .expect("body image materializes through the existing asset chain");
+
+    let query: EvidenceQuery = serde_json::from_value(serde_json::json!({
+        "scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"
+    }))
+    .expect("shared query validates");
+    let page = read_work_resources(&database, &query)
+        .await
+        .expect("work resource projects one media contract");
+    let media = &page.items[0].media;
+    assert_eq!(
+        media
+            .pointer("/contractVersion")
+            .and_then(serde_json::Value::as_str),
+        Some("linggan.media-resource.v1")
+    );
+    assert_eq!(
+        media
+            .pointer("/cover/selectedBy")
+            .and_then(serde_json::Value::as_str),
+        Some("first_body_image")
+    );
+    assert_eq!(
+        media
+            .pointer("/cover/fallbackUsed")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert!(
+        media
+            .pointer("/cover/localAssetUrl")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| value.starts_with("/api/local/media/"))
+    );
+    assert_eq!(
+        media
+            .pointer("/images/0/relationship")
+            .and_then(serde_json::Value::as_str),
+        Some("content.image")
+    );
+    assert_eq!(
+        media
+            .pointer("/avatar/state")
+            .and_then(serde_json::Value::as_str),
+        Some("NOT_OBSERVED")
     );
 }
 

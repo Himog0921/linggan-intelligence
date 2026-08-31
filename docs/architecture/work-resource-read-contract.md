@@ -1,9 +1,9 @@
 # WORK-RESOURCE-READ-001 · Intelligence 共享作品资源读取合同
 
-> 状态: 草案
+> 状态: 权威当前
 > 最后核对: 2026-08-31
 > 适用范围: Intelligence 中需要展示作品封面、标题、作者、发布时间、互动、材料状态与来源血缘的页面
-> 事实来源: Issue #110、Media V2、当前 Material Projection、Browser Producer detail collector、additive migration `0026_work_resource_read.sql`
+> 事实来源: Issue #110 / #128、Media V2、当前 Material Projection、Browser Producer `v0.8.16`、additive migrations `0026_work_resource_read.sql` / `0027_unified_media_resource.sql`
 > 冲突时以谁为准: 用户最新确认、不可变 Capture Package、类型化材料事实、Media V2、当前代码与数据库约束
 
 ## 1. 唯一公共入口
@@ -36,7 +36,11 @@ WorkResource
 │  ├─ targetRef / targetKind / targetDisplayName + state
 │  ├─ authorIdentityMatchState
 │  └─ workOrderRef
-├─ preview: controlled local asset handle or explicit state; never a remote source URL
+├─ media: linggan.media-resource.v1
+│  ├─ avatar / cover / images / video
+│  ├─ ocr / transcript / commentImages
+│  └─ per-resource relationship, state, local handle and intrinsic facts
+├─ preview: compatibility projection only; business pages must not consume it
 ├─ laneSummaries[] / summary / matchedFields
 └─ detail inspector: field sources, Target/WorkOrder/Task/Attempt/Package/Receipt, media and limitations
 ```
@@ -74,9 +78,19 @@ Browser Producer 的详情解析先返回一个有来源资格的时间断言：
 
 迁移只新增列，不回写、覆盖或重新解释旧 Package。旧行没有精确来源时继续是 `UNKNOWN` 或 `SOURCE_TEXT_ONLY`，不能用 `observedAt/acceptedAt` 代替发布时间。
 
-## 5. Media V2 继承
+## 5. Media V2 与统一媒体资源
 
-封面与正文媒体继续由 Media V2 拥有：slot → source observation/generation → candidate assertion → download attempt → blob → materialization/derivative/disposition。Work Resource Read 只返回当前有资格显示的同源受控 `localAssetUrl` 或明确状态；列表和详情合同都不暴露原始 CDN URI。它不新建 Asset 表、不复制远程 URI、不把 discovery URL 当永久资源，也不允许页面绕过处置读取字节。
+媒体事实继续由 Media V2 拥有：slot → source observation/generation → candidate assertion → download attempt → blob → materialization/derivative/disposition。`0027_unified_media_resource.sql` 没有新建第二套资产表，只在既有链上增加一份 append-only 关系词汇：`author.avatar`、`content.cover`、`content.image`、`content.video`、`content.ocr`、`content.transcript`、`comment.image`。
+
+Work Resource Read 对页面只返回一份 `linggan.media-resource.v1`：
+
+- `cover` 只按 `explicit_cover → first_body_image → video_poster → none` 选择；`selectedBy` 与 `fallbackUsed` 必须可见；
+- `images`、`video.items`、`ocr.resources`、`transcript.resources` 保留各自关系和序号；
+- `intrinsicDimensions` / `durationMs` 是 Blob 事实，3:4 只是 Evidence Cover 布局策略；
+- 只有 `INLINE_SAFE` 的同源 `/api/local/media/` 或 `/api/local/derivative/` 句柄可内联；原始 CDN URI 不进入 DTO；
+- 没有被生产链观察或物化的 avatar、comment image、OCR、transcript 保持 `NOT_OBSERVED`，不造空成功。
+
+`preview` 暂时保留为兼容投影，现有业务页面已禁止读取它。Collection Target 也不再直接渲染 `identity_facts.avatar` 的远程地址；在作者统一资源尚未接通前，头像区域保持不展示。
 
 ## 6. 页面与验证边界
 

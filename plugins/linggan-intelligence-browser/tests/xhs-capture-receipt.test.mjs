@@ -68,7 +68,7 @@ test('detail receipt reports a short nonempty collection without fabricating com
   assert.equal(receipt.comments.stopReason, 'collector_stopped_without_target');
 });
 
-test('a full deep collection is complete exactly when the page count equals this Attempt unique count', () => {
+test('a full deep collection is complete when this Attempt reaches or exceeds the observed page count', () => {
   const complete = buildXhsCommentCollectionReceipt({
     noteId: 'note_300', maxTotal: 0, publicCommentCount: 300, actual: 300,
     stopReason: 'comment_area_end',
@@ -76,6 +76,20 @@ test('a full deep collection is complete exactly when the page count equals this
   assert.equal(complete.scope, XHS_COMMENT_COLLECTION_SCOPE.ALL_PUBLIC_COMMENTS);
   assert.equal(complete.state, XHS_COMMENT_COLLECTION_STATE.COMPLETE);
   assert.equal(complete.analysisUsability, XHS_COMMENT_ANALYSIS_USABILITY.USABLE);
+
+  const overObservedCount = buildXhsCommentCollectionReceipt({
+    noteId: '6a93c543000000002600287a', maxTotal: 0, publicCommentCount: 594, actual: 596,
+    stopReason: 'no_progress',
+  });
+  assert.equal(overObservedCount.state, XHS_COMMENT_COLLECTION_STATE.COMPLETE);
+  assert.equal(overObservedCount.expectedCount, 594);
+  assert.equal(overObservedCount.uniqueCollectedCount, 596);
+
+  const shortNaturalEnd = buildXhsCommentCollectionReceipt({
+    noteId: 'note_300', maxTotal: 0, publicCommentCount: 300, actual: 299,
+    stopReason: 'no_progress',
+  });
+  assert.equal(shortNaturalEnd.state, XHS_COMMENT_COLLECTION_STATE.PARTIAL);
 
   const partial = buildXhsCommentCollectionReceipt({
     noteId: 'note_300', maxTotal: 0, publicCommentCount: 300, actual: 200,

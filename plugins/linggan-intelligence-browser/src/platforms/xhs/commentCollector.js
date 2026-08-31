@@ -20,6 +20,10 @@ const DEFAULT_DOM_TOP_UP_MAX_NO_NEW = 3;
 const DEFAULT_DOM_TOP_UP_SETTLE_MS = 2600;
 const DEFAULT_COMMENT_ACTION_COOLDOWN_MS = 1200;
 const DEFAULT_COMMENT_SCROLL_DISTANCE = 280;
+// CSS layout and device scaling can leave an element a fraction of a pixel beyond the
+// scroll-parent edge even after scrollIntoView({ block: 'nearest' }). Treating that as
+// offscreen makes the collector reveal the same control forever without ever clicking it.
+const REPLY_CONTROL_VISIBILITY_EPSILON_PX = 1;
 const TIME_TEXT_RE = /^(刚刚|\d+\s*分钟前|\d+\s*小时前|\d+\s*天前|昨天(?:\s+\d{1,2}:\d{2})?|前天(?:\s+\d{1,2}:\d{2})?|\d{1,2}[-/]\d{1,2}(?:\s+\d{1,2}:\d{2})?|\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2})?(?:日)?(?:\s+\d{1,2}:\d{2})?)$/;
 const INLINE_TIME_TEXT_RE = /(刚刚|\d+\s*分钟前|\d+\s*小时前|\d+\s*天前|昨天\s*\d{0,2}:?\d{0,2}|前天\s*\d{0,2}:?\d{0,2}|\d{1,2}[-/]\d{1,2}(?:\s+\d{1,2}:\d{2})?|\d{4}[-/年]\d{1,2}(?:[-/月]\d{1,2})?(?:日)?(?:\s+\d{1,2}:\d{2})?)/;
 
@@ -1390,7 +1394,8 @@ function replyControlIsVisible(button) {
   const parentRect = typeof scrollParent?.getBoundingClientRect === 'function'
     ? scrollParent.getBoundingClientRect()
     : { top: 0, bottom: globalThis.innerHeight || 0 };
-  return rect.top >= parentRect.top && rect.bottom <= parentRect.bottom;
+  return rect.top >= parentRect.top - REPLY_CONTROL_VISIBILITY_EPSILON_PX
+    && rect.bottom <= parentRect.bottom + REPLY_CONTROL_VISIBILITY_EPSILON_PX;
 }
 
 export async function expandNextReply(parentCommentEl, {

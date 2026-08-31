@@ -76,6 +76,32 @@ test('media slots retain URL observations but no remote URL becomes a local pres
   assert.equal(packageValue.coverage.layers[0].observed, 2);
   assert.equal(packageValue.records[0].observation.externalUri, 'https://cdn.example/one.jpg');
   assert.equal(Object.hasOwn(packageValue.records[0], 'localAssetUrl'), false);
+  assert.equal(packageValue.records[0].slotKey, 'xhs:note-1:image:1');
+  assert.equal(packageValue.records[1].slotKey, 'xhs:note-1:cover:1');
+  assert.deepEqual(packageValue.records.map((record) => record.slot.ordinal), [1, 1]);
+});
+
+test('media slot ordinals are scoped to each relationship purpose', () => {
+  const packageValue = packageMediaSlots({
+    platform: 'xhs',
+    note: {
+      noteId: 'note-many-images',
+      images: Array.from({ length: 7 }, (_, index) => ({ url: `https://cdn.example/${index + 1}.jpg` })),
+      coverUrl: 'https://cdn.example/cover.jpg',
+      video: { url: 'https://cdn.example/video.mp4' },
+    },
+  });
+  assert.deepEqual(packageValue.records.map((record) => record.slotKey), [
+    'xhs:note-many-images:image:1',
+    'xhs:note-many-images:image:2',
+    'xhs:note-many-images:image:3',
+    'xhs:note-many-images:image:4',
+    'xhs:note-many-images:image:5',
+    'xhs:note-many-images:image:6',
+    'xhs:note-many-images:image:7',
+    'xhs:note-many-images:cover:1',
+    'xhs:note-many-images:video:1',
+  ]);
 });
 
 test('a Live Photo remains one logical slot with independently addressable still and motion candidates', () => {
@@ -478,9 +504,10 @@ test('content message gate admits scheduled profile discovery without dropping d
 test('scheduled page execution propagates a collector failure instead of reporting a false start', () => {
   const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
   const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
-  assert.match(content, /if \(pageResult\?\.success === false\) return pageResult/);
-  assert.match(background, /if \(response\?\.success === false\)/);
-  assert.match(background, /response\.state \|\| 'page_read_failed'/);
+  const adapter = readFileSync(new URL('../src/linggan/adapter.js', import.meta.url), 'utf8');
+  assert.match(content, /if \(pageResult\?\.success !== true\)/);
+  assert.match(background, /decodePageExecutionReceipt\(response/);
+  assert.match(adapter, /page_receipt_identity_mismatch/);
 });
 
 test('producer controls use Linggan runtime commands while manual media remains an explicit separate action', () => {

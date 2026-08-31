@@ -239,21 +239,21 @@
 
   function previewBlock(item) {
     const preview = node('div', 'ev-preview');
-    const controlledHandle = sameOriginPath(item.preview?.localAssetUrl, ['/api/local/media/', '/api/local/derivative/']);
-    const bytesState = item.preview?.bytesState || 'UNKNOWN';
+    const cover = item.media?.cover && typeof item.media.cover === 'object' ? item.media.cover : {};
+    const controlledHandle = sameOriginPath(cover.localAssetUrl, ['/api/local/media/', '/api/local/derivative/']);
+    const coverState = cover.state || 'NOT_OBSERVED';
     if (controlledHandle) {
       const image = node('img');
       image.src = controlledHandle;
-      image.alt = item.preview?.alt || knownText(item.display?.title, item.display?.titleState, '作品封面');
+      image.alt = knownText(item.display?.title, item.display?.titleState, '作品封面');
       image.loading = 'lazy';
       preview.append(image);
-      preview.append(node('span', 'ev-preview-label', '本地副本'));
+      const selection = cover.selectedBy === 'explicit_cover' ? '平台封面' : '统一封面回退';
+      preview.append(node('span', 'ev-preview-label', `${selection} · 本地副本`));
       preview.dataset.tone = 'available';
     } else {
-      const [label] = stateMeta(bytesState);
-      if (bytesState === 'BYTES_CLEANED') preview.dataset.tone = 'cleaned';
-      if (bytesState === 'WITHDRAWN_OR_RESTRICTED') preview.dataset.tone = 'restricted';
-      preview.append(node('strong', null, label), tech(bytesState));
+      const [label] = stateMeta(coverState);
+      preview.append(node('strong', null, label), tech(coverState));
     }
     return preview;
   }
@@ -264,6 +264,7 @@
     row.setAttribute('role', 'option');
     row.tabIndex = -1;
     row.dataset.publicRef = publicRef || '';
+    row.dataset.platform = String(item.identity?.platform || 'unknown').toLowerCase();
     row.setAttribute('aria-selected', String(publicRef === model.selectedRef));
 
     const identity = node('div', 'ev-identity');
@@ -504,7 +505,7 @@
       : '当前主要限制未由来源完整表达。';
     renderOverview(item, inspector);
     renderDiscussion(item, inspector, channels.comments || {});
-    renderMedia(inspector, channels);
+    renderMedia(item.media, inspector, channels);
     renderProvenance(inspector, channels.provenance || {});
   }
 
@@ -716,16 +717,21 @@
     list.append(receipt);
   }
 
-  function renderMedia(inspector, channels) {
+  function renderMedia(mediaResource, inspector, channels) {
     const panel = panels.get('media');
     panel.replaceChildren();
+    const media = mediaResource && typeof mediaResource === 'object' ? mediaResource : {};
     const mediaReceipt = channels.media?.receipt || inspector.mediaSlotsReceipt;
     const derivativeReceipt = channels.derivatives?.receipt || inspector.derivativesReceipt;
     panel.append(receiptBlock('媒体槽位通道', mediaReceipt, channels.media?.url));
-    const mediaSection = section('媒体槽位与本地副本', 'CONTROLLED LOCAL ASSET');
-    const slots = Array.isArray(inspector.mediaSlots) ? inspector.mediaSlots : [];
+    const mediaSection = section('统一媒体资源', media.contractVersion || 'MEDIA RESOURCE NOT OBSERVED');
+    const slots = [
+      ...(Array.isArray(media.coverCandidates) ? media.coverCandidates : []),
+      ...(Array.isArray(media.images) ? media.images : []),
+      ...(Array.isArray(media.video?.items) ? media.video.items : []),
+    ];
     if (slots.length === 0) {
-      mediaSection.append(sourceIncompleteBlock('当前详情没有返回媒体槽位；这不表示作品没有媒体。'));
+      mediaSection.append(sourceIncompleteBlock('统一媒体资源当前没有可读取的内容媒体；这不表示作品没有媒体。'));
     } else {
       const list = node('div', 'ev-slot-list');
       slots.forEach((slot) => list.append(renderSlot(slot)));
@@ -733,10 +739,13 @@
     }
     panel.append(mediaSection, receiptBlock('派生材料通道', derivativeReceipt, channels.derivatives?.url));
 
-    const derivatives = section('OCR / ASR 与其他派生', 'DERIVATIVES');
-    const items = Array.isArray(inspector.derivatives) ? inspector.derivatives : [];
+    const derivatives = section('OCR / ASR 标准资源', 'UNIFIED DERIVATIVES');
+    const items = [
+      ...(Array.isArray(media.ocr?.resources) ? media.ocr.resources : []),
+      ...(Array.isArray(media.transcript?.resources) ? media.transcript.resources : []),
+    ];
     if (items.length === 0) {
-      derivatives.append(sourceIncompleteBlock('当前详情没有返回派生材料；不把缺少记录写成处理成功或失败。'));
+      derivatives.append(sourceIncompleteBlock('统一媒体资源当前没有 OCR / ASR 文件；不把缺少记录写成处理成功或失败。'));
     } else {
       items.forEach((item) => derivatives.append(renderDerivative(item)));
     }

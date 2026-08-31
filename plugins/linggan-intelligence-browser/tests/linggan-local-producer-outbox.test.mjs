@@ -48,6 +48,47 @@ test('outbox preserves one submission across an in-flight timeout and acknowledg
   await database.delete();
 });
 
+test('outbox reuses one envelope for the same detail-session lane idempotency key', async () => {
+  const database = new Dexie(`linggan-idempotency-${crypto.randomUUID()}`);
+  database.version(3).stores({
+    submissions: '&submissionId, &idempotencyKey, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]',
+  });
+  const outbox = createLocalProducerOutbox(database.submissions, () => 100);
+  const base = {
+    producerInstanceId: '22222222-2222-4222-8222-222222222222',
+    taskId: '11111111-1111-4111-8111-111111111111',
+    attemptId: '33333333-3333-4333-8333-333333333333',
+    idempotencyKey: 'detail-session:11111111-1111-4111-8111-111111111111:content_detail',
+  };
+  const first = await outbox.enqueue({ ...base, submissionId: '44444444-4444-4444-8444-444444444444' });
+  const replay = await outbox.enqueue({ ...base, submissionId: '55555555-5555-4555-8555-555555555555' });
+  assert.equal(replay.submissionId, first.submissionId);
+  assert.equal(await database.submissions.count(), 1);
+  await database.delete();
+});
+
+test('outbox resolves concurrent detail-session enqueues to the one committed envelope', async () => {
+  const database = new Dexie(`linggan-idempotency-race-${crypto.randomUUID()}`);
+  database.version(3).stores({
+    submissions: '&submissionId, &idempotencyKey, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]',
+  });
+  const outbox = createLocalProducerOutbox(database.submissions, () => 100);
+  const base = {
+    producerInstanceId: '22222222-2222-4222-8222-222222222222',
+    taskId: '11111111-1111-4111-8111-111111111111',
+    attemptId: '33333333-3333-4333-8333-333333333333',
+    idempotencyKey: 'detail-session:11111111-1111-4111-8111-111111111111:comments',
+  };
+  const [left, right] = await Promise.all([
+    outbox.enqueue({ ...base, submissionId: '44444444-4444-4444-8444-444444444444' }),
+    outbox.enqueue({ ...base, submissionId: '55555555-5555-4555-8555-555555555555' }),
+  ]);
+
+  assert.equal(right.submissionId, left.submissionId);
+  assert.equal(await database.submissions.count(), 1);
+  await database.delete();
+});
+
 test('media outbox restores an interrupted local upload without losing its independent lane', async () => {
   const database = new Dexie(`linggan-media-test-${crypto.randomUUID()}`);
   database.version(1).stores({ mediaUploads: '&uploadId, slotSubmissionId, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]' });

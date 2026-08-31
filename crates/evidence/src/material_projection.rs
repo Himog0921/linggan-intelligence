@@ -402,6 +402,7 @@ pub(crate) async fn enrich_media_material(
     item.preview.local_asset_url = media.preview_url;
     item.preview.slot_purpose = media.preview_purpose;
     item.preview.bytes_state = media.bytes_state;
+    item.media = media.resource;
     if item.preview.local_asset_url.is_some() {
         item.preview.alt = "已验证的本地媒体副本".to_owned();
     }
@@ -516,6 +517,8 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
                         WHERE migration_id = '0025_comment_current_projection') \
                 AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
                             WHERE migration_id = '0026_work_resource_read') \
+                AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
+                            WHERE migration_id = '0027_unified_media_resource') \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_schema=current_schema() \
                               AND table_name='linggan_material_content_detail' \
@@ -606,6 +609,17 @@ pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> M
             bytes_state: "UNKNOWN",
             alt: "没有已验证的本地媒体副本".to_owned(),
         },
+        media: serde_json::json!({
+            "contractVersion":"linggan.media-resource.v1",
+            "state":"NOT_OBSERVED",
+            "avatar":{"state":"NOT_OBSERVED","relationship":"author.avatar"},
+            "cover":{"state":"NOT_OBSERVED","relationship":"content.cover","selectedBy":"none","localAssetUrl":null},
+            "images":[],
+            "video":{"state":"NOT_OBSERVED","relationship":"content.video"},
+            "ocr":{"state":"NOT_OBSERVED","relationship":"content.ocr","resources":[]},
+            "transcript":{"state":"NOT_OBSERVED","relationship":"content.transcript","resources":[]},
+            "commentImages":{"state":"NOT_OBSERVED","relationship":"comment.image","items":[]}
+        }),
         lane_summaries: default_lane_summaries(
             &observed_at,
             row.get::<Option<Uuid>, _>("detail_material_ref").is_some(),
