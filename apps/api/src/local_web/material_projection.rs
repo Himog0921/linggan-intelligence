@@ -7,8 +7,9 @@ use super::*;
 use linggan_contracts::EvidenceQuery;
 use linggan_evidence::{
     ContentReobservationError, WorkResourceReadError, content_reobservation,
-    read_authorized_research_comments, read_content_reobservation, read_work_resource,
-    read_work_resources, work_resource_schema_is_ready,
+    read_authorized_research_comments, read_content_reobservation,
+    read_content_reobservation_eligibility, read_work_resource, read_work_resources,
+    work_resource_schema_is_ready,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -137,14 +138,34 @@ pub(super) async fn detail_json(
         Ok(Some(item)) => {
             let comments_url = format!("/api/local/work-resources/{public_ref}/comments");
             let reobservation_url = format!("/api/local/work-resources/{public_ref}/reobserve");
+            let eligibility =
+                match read_content_reobservation_eligibility(database, public_ref).await {
+                    Ok(Some(eligibility)) => eligibility,
+                    Ok(None) => {
+                        return local_read_json_error(
+                            axum::http::StatusCode::NOT_FOUND,
+                            "material_not_found",
+                        );
+                    }
+                    Err(error) => {
+                        eprintln!("reobservation eligibility unavailable: {error}");
+                        return local_read_json_error(
+                            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                            "reobservation_eligibility_unavailable",
+                        );
+                    }
+                };
             Json(json!({"item":item,"channels":{
                 "comments":{"url":comments_url,"receipt":item.inspector.get("commentsReceipt")},
                 "media":{"receipt":item.inspector.get("mediaSlotsReceipt")},
                 "derivatives":{"receipt":item.inspector.get("derivativesReceipt")},
                 "provenance":{"receipt":item.inspector.pointer("/provenance/receipt")},
                 "reobservation":{
-                    "url":reobservation_url,
-                    "available":item.identity.platform == "xhs",
+                    "url":if eligibility.eligible { Value::String(reobservation_url) } else { Value::Null },
+                    "available":eligibility.eligible,
+                    "supported":eligibility.supported,
+                    "eligible":eligibility.eligible,
+                    "reason":eligibility.reason,
                     "requires":"TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION",
                     "mediaPolicy":"EXISTING_ASSETS_REUSED"
                 }
@@ -195,6 +216,13 @@ pub(super) async fn reobserve_json(
             axum::http::StatusCode::CONFLICT,
             "reobservation_authorization_not_linked",
         ),
+        Err(ContentReobservationError::EquivalentLeaseMissing) => {
+            eprintln!("reobservation strict merge invariant failed");
+            local_read_json_error(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "reobservation_scope_inconsistent",
+            )
+        }
         Err(ContentReobservationError::Acquisition(error)) => {
             eprintln!("reobservation admission unavailable: {error}");
             local_read_json_error(

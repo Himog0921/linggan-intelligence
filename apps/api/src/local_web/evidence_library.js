@@ -81,22 +81,22 @@
     activeLayout: 'research',
     listController: null,
     detailController: null,
-    commentController: null,
-    reobservationController: null,
-    reobservationTimer: null,
-    reobservationUrl: null,
-    reobservationStatusUrl: null,
-    reobservationOperation: null,
-    reobservationError: null,
-    reobservationReadError: null,
     detailItem: null,
-    detailInspector: null,
     detailChannels: null,
     detailUrl: null,
-    commentUrl: null,
-    commentCursor: null,
-    commentItems: [],
   };
+  const observation = window.LingganEvidenceObservation;
+  const reobservation = observation.createController({
+    apiRoot: API_ROOT,
+    sameOriginPath,
+    readJson,
+    onChange: refreshReobservationSection,
+    onTerminal: refreshSelectedDetailAfterReobservation,
+  });
+  const commentResearch = observation.createCommentResearchController({
+    readJson,
+    onChange: refreshCommentResearch,
+  });
 
   function node(tag, className, text) {
     const element = document.createElement(tag);
@@ -170,28 +170,6 @@
     if (!response.ok) {
       const error = new Error(payload?.code || `http_${response.status}`);
       error.code = payload?.code || 'local_read_unavailable';
-      error.status = response.status;
-      throw error;
-    }
-    return payload;
-  }
-
-  async function writeJson(url, signal) {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { Accept: 'application/json' },
-      credentials: 'same-origin',
-      signal,
-    });
-    let payload = null;
-    try {
-      payload = await response.json();
-    } catch (_) {
-      payload = null;
-    }
-    if (!response.ok) {
-      const error = new Error(payload?.code || `http_${response.status}`);
-      error.code = payload?.code || 'reobservation_unavailable';
       error.status = response.status;
       throw error;
     }
@@ -480,32 +458,17 @@
 
   function clearInspector() {
     model.detailController?.abort();
-    model.commentController?.abort();
-    resetReobservation();
+    reobservation.reset();
+    commentResearch.reset();
     model.detailItem = null;
-    model.detailInspector = null;
     model.detailChannels = null;
     model.detailUrl = null;
-    model.commentUrl = null;
-    model.commentCursor = null;
-    model.commentItems = [];
     refs.inspectorRef.textContent = 'SELECTION REQUIRED';
     refs.inspectorTitle.textContent = '请选择一个作品材料集合';
     refs.inspectorSummary.textContent = '右侧只核验当前选择，不补造未读取的详情。';
     refs.inspectorFeedback.hidden = false;
     refs.inspectorFeedback.replaceChildren(node('strong', null, '尚未选择作品'), tech('SELECTION REQUIRED'));
     panels.forEach((panel) => panel.replaceChildren());
-  }
-
-  function resetReobservation() {
-    model.reobservationController?.abort();
-    if (model.reobservationTimer) window.clearTimeout(model.reobservationTimer);
-    model.reobservationTimer = null;
-    model.reobservationUrl = null;
-    model.reobservationStatusUrl = null;
-    model.reobservationOperation = null;
-    model.reobservationError = null;
-    model.reobservationReadError = null;
   }
 
   async function selectItem(item, shouldScroll) {
@@ -515,7 +478,10 @@
       showInspectorSourceIncomplete(item, '列表没有提供可用的同源 detailUrl。');
       return;
     }
-    if (model.selectedRef !== publicRef) resetReobservation();
+    if (model.selectedRef !== publicRef) {
+      reobservation.reset();
+      commentResearch.reset();
+    }
     model.selectedRef = publicRef;
     model.detailUrl = detailUrl;
     [...refs.list.querySelectorAll('[data-public-ref]')].forEach((row) => {
@@ -586,166 +552,30 @@
     return wrapper;
   }
 
-  function reobservationSection(item, channel) {
-    const wrapper = section('立即复观测', 'REOBSERVATION');
-    wrapper.dataset.evReobservation = 'true';
-    const operation = model.reobservationOperation;
-    const actionUrl = sameOriginPath(channel?.url, [`${API_ROOT}/`]);
-    const actionable = item.identity?.platform === 'xhs' && channel?.available === true && actionUrl;
-    const notice = node('div', 'ev-inline-state');
-    notice.dataset.tone = 'warning';
-    notice.append(
-      node('strong', null, '按既有授权链路发起一次标准详情复观测'),
-      node('p', null, '范围固定为详情、评论和回复：评论窗口最多 30 条；不会新建媒体槽位、下载媒体字节或启动 OCR / ASR。执行仍需已有监控目标关联、有效深度归档授权，以及可认领租约的本机 Browser Producer。'),
-      tech(channel?.requires || 'TARGET-LINKED AUTHORIZATION'),
-    );
-    wrapper.append(notice);
-    if (!actionable) {
-      wrapper.append(sourceIncompleteBlock('该作品当前没有可调用的本机复观测入口；页面不会猜测监控目标、授权或平台路径。'));
-      return wrapper;
-    }
-    model.reobservationUrl = actionUrl;
-    const actions = node('div', 'ev-channel-actions');
-    const leaseExists = Boolean(operation?.leaseRef);
-    const button = node('button', 'ev-button ev-button--primary', leaseExists ? '复观测已请求' : '立即复观测');
-    button.type = 'button';
-    button.disabled = leaseExists;
-    button.addEventListener('click', () => requestReobservation());
-    actions.append(button, tech(channel?.mediaPolicy || 'EXISTING ASSETS REUSED'));
-    wrapper.append(actions);
-    if (model.reobservationError) {
-      const failure = node('div', 'ev-inline-state');
-      failure.dataset.tone = 'danger';
-      failure.append(
-        node('strong', null, '未能创建复观测请求'),
-        node('p', null, '没有把此结果写成已排队、已执行或已接纳；请依据返回的授权或运行状态处理。'),
-        tech(model.reobservationError),
-      );
-      wrapper.append(failure);
-    }
-    if (model.reobservationReadError) {
-      const failure = node('div', 'ev-inline-state');
-      failure.dataset.tone = 'danger';
-      failure.append(
-        node('strong', null, '复观测状态已更新，但作品当前事实未重新读取'),
-        node('p', null, '保留已知 Task/Attempt/Package/Receipt；没有把 Inspector 旧快照写成新事实。'),
-        tech(model.reobservationReadError),
-      );
-      wrapper.append(failure);
-    }
-    if (operation) wrapper.append(reobservationOperationBlock(operation));
-    return wrapper;
-  }
+  function observationUi() { return { node, tech, section, factGrid, stateTag, sourceIncompleteBlock, laneLabels, knownMetric }; }
 
-  function reobservationOperationBlock(operation) {
-    const block = node('div', 'ev-reobservation-operation');
-    const leaseState = operation.leaseState || operation.execution || 'NOT_STARTED';
-    const heading = node('div', 'ev-channel-title');
-    heading.append(node('strong', null, '本次复观测执行状态'), stateTag(leaseState));
-    block.append(heading, factGrid([
-      ['准入结果', admissionCopy(operation.admission), operation.admission || 'ADMISSION UNKNOWN'],
-      ['准入决定', operation.decisionRef || '当前未知', 'DECISION REF'],
-      ['准入说明', operation.admissionReason || '状态读取未返回新的准入说明', 'ADMISSION REASON'],
-      ['请求', operation.requestRef || '当前未知', 'REQUEST REF'],
-      ['工单', operation.workOrderRef || '尚未形成', 'WORK ORDER REF'],
-      ['租约', operation.leaseRef || '尚未形成', 'LEASE REF'],
-      ['到期时间', operation.expiresAt || '当前未知', 'LEASE EXPIRES AT'],
-      ['媒体策略', operation.media?.state === 'NOT_REQUESTED' ? '未请求新媒体，复用既有资产' : '当前未知', operation.media?.reason || 'NOT REQUESTED'],
-    ]));
-    const tasks = Array.isArray(operation.tasks) ? operation.tasks : [];
-    if (tasks.length === 0) {
-      block.append(sourceIncompleteBlock('准入已形成记录，但当前没有可读取的执行 lane；这不是平台已读取或执行成功。'));
-      return block;
-    }
-    const list = node('div', 'ev-reobservation-tasks');
-    tasks.forEach((task) => {
-      const row = node('article', 'ev-reobservation-task');
-      const header = node('div', 'ev-slot-head');
-      header.append(
-        node('strong', null, laneLabels[task.capability] || task.capability || '通道当前未知'),
-        stateTag(task.state || 'UNKNOWN'),
-      );
-      row.append(header, factGrid([
-        ['任务', task.taskId || '当前未知', 'TASK ID'],
-        ['评论上限', task.commentLimit === 'not_requested' ? '本详情 lane 不单独请求评论' : (task.commentLimit ?? '当前未知'), 'COMMENT LIMIT'],
-        ['媒体', task.acquireMedia === 'not_requested' ? '未请求' : (task.acquireMedia ?? '当前未知'), 'ACQUIRE MEDIA'],
-        ['认领时间', task.claimedAt || '尚未认领', 'CLAIMED AT'],
-        ['尝试', task.attemptId || '尚未开始', 'ATTEMPT ID'],
-        ['包 / 回执', task.packageRef || task.receiptRef ? `${task.packageRef || '包未知'} / ${task.receiptRef || '回执未见'}` : '尚未形成', 'PACKAGE / RECEIPT'],
-      ]));
-      list.append(row);
-    });
-    block.append(list);
-    return block;
+  function discussionUi() {
+    return {
+      ...observationUi(),
+      apiRoot: API_ROOT,
+      sameOriginPath,
+      stateMeta,
+      laneSummary,
+      receiptBlock,
+      addTextWithTech,
+    };
   }
 
   function refreshReobservationSection() {
     const panel = panels.get('overview');
     const previous = panel?.querySelector('[data-ev-reobservation]');
     if (!previous || !model.detailItem) return;
-    previous.replaceWith(reobservationSection(model.detailItem, model.detailChannels?.reobservation || {}));
-  }
-
-  async function requestReobservation() {
-    if (!model.reobservationUrl || model.reobservationOperation?.leaseRef) return;
-    model.reobservationError = null;
-    model.reobservationReadError = null;
-    model.reobservationController?.abort();
-    model.reobservationController = new AbortController();
-    const panel = panels.get('overview');
-    const action = panel?.querySelector('[data-ev-reobservation] .ev-channel-actions');
-    if (action) action.replaceChildren(node('span', 'ev-loading-copy', '正在请求已有授权下的一次复观测……'), tech('AUTHORIZATION CHECK'));
-    try {
-      const payload = await writeJson(model.reobservationUrl, model.reobservationController.signal);
-      if (!payload?.operation || typeof payload.operation !== 'object') throw new Error('invalid_reobservation_response');
-      model.reobservationOperation = payload.operation;
-      model.reobservationStatusUrl = sameOriginPath(payload.statusUrl, [`${API_ROOT}/`]);
-      refreshReobservationSection();
-      const tasks = model.reobservationOperation.tasks;
-      if (Array.isArray(tasks) && tasks.length > 0 && tasks.every(isReobservationTerminal)) {
-        await refreshSelectedDetailAfterReobservation();
-      } else {
-        scheduleReobservationPoll();
-      }
-    } catch (error) {
-      if (error.name === 'AbortError') return;
-      model.reobservationError = error.code || 'REOBSERVATION UNAVAILABLE';
-      refreshReobservationSection();
-    }
-  }
-
-  function scheduleReobservationPoll() {
-    if (model.reobservationTimer) window.clearTimeout(model.reobservationTimer);
-    const tasks = model.reobservationOperation?.tasks;
-    if (!model.reobservationStatusUrl || !Array.isArray(tasks) || tasks.length === 0 || tasks.every(isReobservationTerminal)) return;
-    model.reobservationTimer = window.setTimeout(() => pollReobservation(), 2500);
-  }
-
-  function isReobservationTerminal(task) {
-    return ['ACCEPTED', 'EXPIRED_WITHOUT_RECEIPT', 'COMPLETED_WITHOUT_RECEIPT'].includes(task?.state);
-  }
-
-  async function pollReobservation() {
-    if (!model.reobservationStatusUrl || !model.reobservationOperation) return;
-    model.reobservationController?.abort();
-    model.reobservationController = new AbortController();
-    try {
-      const payload = await readJson(model.reobservationStatusUrl, model.reobservationController.signal);
-      if (!payload?.operation || typeof payload.operation !== 'object') throw new Error('invalid_reobservation_status');
-      model.reobservationOperation = { ...model.reobservationOperation, ...payload.operation };
-      refreshReobservationSection();
-      const tasks = model.reobservationOperation.tasks;
-      if (Array.isArray(tasks) && tasks.length > 0 && tasks.every(isReobservationTerminal)) {
-        await refreshSelectedDetailAfterReobservation();
-      } else {
-        scheduleReobservationPoll();
-      }
-    } catch (error) {
-      if (error.name !== 'AbortError') {
-        const action = panels.get('overview')?.querySelector('[data-ev-reobservation] .ev-channel-actions');
-        if (action) action.append(tech(error.code || 'REOBSERVATION STATUS UNAVAILABLE'));
-      }
-    }
+    previous.replaceWith(observation.renderReobservationSection(
+      model.detailItem,
+      model.detailChannels?.reobservation || {},
+      reobservation,
+      observationUi(),
+    ));
   }
 
   async function refreshSelectedDetailAfterReobservation() {
@@ -758,31 +588,25 @@
       const payload = await readJson(detailUrl, model.detailController.signal);
       if (!payload?.item || typeof payload.item !== 'object') throw new Error('invalid_material_refresh_response');
       if (model.selectedRef !== selectedRef) return;
-      model.reobservationReadError = null;
+      reobservation.setReadError(null);
       renderDetail(payload.item, payload.channels || {});
     } catch (error) {
       if (error.name === 'AbortError') return;
-      model.reobservationReadError = error.code || 'MATERIAL DETAIL REFRESH UNAVAILABLE';
-      refreshReobservationSection();
+      reobservation.setReadError(error.code || 'MATERIAL_DETAIL_REFRESH_UNAVAILABLE');
     }
   }
 
-  function admissionCopy(admission) {
-    const labels = {
-      ADMITTED: '已按关联授权准入',
-      MERGE: '已合并到覆盖当前作品的在途工作',
-      REUSE: '既有材料已满足请求',
-      DEFERRED: '请求已记录，等待可用资源',
-      REFUSED: '请求已记录，但不在当前可执行范围',
-      DECISION_REQUIRED: '请求已记录，尚需决定',
-    };
-    return labels[admission] || '准入结论当前未知';
+  function refreshCommentResearch() {
+    if (!model.detailItem) return;
+    const inspector = model.detailItem.inspector && typeof model.detailItem.inspector === 'object'
+      ? model.detailItem.inspector
+      : {};
+    renderDiscussion(model.detailItem, inspector, model.detailChannels?.comments || {});
   }
 
   function renderDetail(item, channels) {
     const inspector = item.inspector && typeof item.inspector === 'object' ? item.inspector : {};
     model.detailItem = item;
-    model.detailInspector = inspector;
     model.detailChannels = channels;
     refs.inspectorTitle.textContent = knownText(item.display?.title, item.display?.titleState, '标题当前未知');
     refs.inspectorRef.textContent = `WORK ${item.identity?.publicRef || 'UNKNOWN'}`;
@@ -814,27 +638,32 @@
     ]));
     panel.append(identity);
 
-    panel.append(reobservationSection(item, reobservationChannel));
+    panel.append(observation.renderReobservationSection(
+      item,
+      reobservationChannel,
+      reobservation,
+      observationUi(),
+    ));
 
     const current = section('当前互动状态与变化', 'LATEST KNOWN PER METRIC');
     const currentMetrics = inspector.engagementCurrent?.metrics && typeof inspector.engagementCurrent.metrics === 'object'
       ? inspector.engagementCurrent.metrics
       : {};
     current.append(factGrid([
-      currentMetricFact('点赞', currentMetrics.likeCount, 'LIKE COUNT'),
-      currentMetricFact('评论', currentMetrics.commentCount, 'COMMENT COUNT'),
-      currentMetricFact('收藏', currentMetrics.collectCount, 'COLLECT COUNT'),
-      currentMetricFact('分享', currentMetrics.shareCount, 'SHARE COUNT'),
+      observation.currentMetricFact('点赞', currentMetrics.likeCount, 'LIKE COUNT'),
+      observation.currentMetricFact('评论', currentMetrics.commentCount, 'COMMENT COUNT'),
+      observation.currentMetricFact('收藏', currentMetrics.collectCount, 'COLLECT COUNT'),
+      observation.currentMetricFact('分享', currentMetrics.shareCount, 'SHARE COUNT'),
     ]));
     panel.append(current);
 
     const detailCurrent = section('详情字段当前事实', 'FIELD-WISE PROVENANCE');
     const fields = inspector.detailCurrent && typeof inspector.detailCurrent === 'object' ? inspector.detailCurrent : {};
     detailCurrent.append(factGrid([
-      detailCurrentFact('标题来源', fields.title, 'TITLE'),
-      detailCurrentFact('作者来源', fields.creator, 'CREATOR'),
-      detailCurrentFact('发布时间来源', fields.publishedAt, 'PUBLISHED AT'),
-      detailCurrentFact('正文字段', fields.body, 'RESTRICTED BODY'),
+      observation.detailCurrentFact('标题来源', fields.title, 'TITLE'),
+      observation.detailCurrentFact('作者来源', fields.creator, 'CREATOR'),
+      observation.detailCurrentFact('发布时间来源', fields.publishedAt, 'PUBLISHED AT'),
+      observation.detailCurrentFact('正文字段', fields.body, 'RESTRICTED BODY'),
     ]));
     panel.append(detailCurrent);
 
@@ -847,30 +676,7 @@
     );
     panel.append(identityContext);
 
-    const timeline = section('互动数据观察时间线', 'ENGAGEMENT TIMELINE');
-    const observations = Array.isArray(inspector.engagementTimeline) ? inspector.engagementTimeline : [];
-    if (observations.length === 0) {
-      timeline.append(sourceIncompleteBlock('当前详情没有互动数据观察时点；不把未知写成 0。'));
-    } else {
-      const list = node('div', 'ev-slot-list');
-      observations.forEach((observation) => {
-        const entry = node('article', 'ev-derivative');
-        const metrics = [
-          knownMetric(observation.likeCount, observation.likeCountState, '赞'),
-          knownMetric(observation.commentCount, observation.commentCountState, '评'),
-          knownMetric(observation.collectCount, observation.collectCountState, '藏'),
-          knownMetric(observation.shareCount, observation.shareCountState, '转'),
-        ].filter(Boolean);
-        entry.append(
-          node('strong', null, observation.observedAt || '观察时间当前未知'),
-          node('p', null, metrics.length ? metrics.join(' · ') : '本时点互动字段均为当前未知'),
-          tech((observation.sourceLane || 'source').toUpperCase()),
-        );
-        list.append(entry);
-      });
-      timeline.append(list);
-    }
-    panel.append(timeline);
+    panel.append(observation.engagementTimeline(inspector, observationUi()));
 
     const lanes = section('材料通道状态', 'LANE STATUS');
     const board = node('div', 'ev-detail-lanes');
@@ -909,31 +715,6 @@
     panel.append(author);
   }
 
-  function currentMetricFact(label, metric, code) {
-    const current = metric?.state === 'KNOWN' && metric.current && typeof metric.current === 'object'
-      ? metric.current
-      : null;
-    if (!current) return [label, '当前未知', 'UNKNOWN'];
-    const previous = metric.previous && typeof metric.previous === 'object' && Number.isFinite(Number(metric.previous.value))
-      ? `；前值 ${Number(metric.previous.value).toLocaleString('zh-CN')}`
-      : '；无可比较前值';
-    const delta = metric.deltaState === 'KNOWN' && Number.isFinite(Number(metric.delta))
-      ? `；变化 ${Number(metric.delta) > 0 ? '+' : ''}${Number(metric.delta).toLocaleString('zh-CN')}`
-      : '；变化未知';
-    const observed = current.observedAt ? `（${current.observedAt}）` : '';
-    return [label, `${Number(current.value).toLocaleString('zh-CN')}${observed}${previous}${delta}`, code];
-  }
-
-  function detailCurrentFact(label, field, code) {
-    if (!field || typeof field !== 'object' || field.state === 'UNKNOWN') return [label, '当前未知', 'UNKNOWN'];
-    const source = field.source && typeof field.source === 'object' ? field.source : {};
-    const sourceRef = source.packageRef || source.materialRef || '来源引用未返回';
-    const value = field.state === 'SOURCE_TEXT_ONLY'
-      ? `仅有来源文本：${field.sourceText || '当前未知'}；${sourceRef}`
-      : `${field.value || '已知'}；${sourceRef}`;
-    return [label, value, field.state || code];
-  }
-
   function receiptBlock(title, receipt, channelUrl) {
     const wrapper = node('div', 'ev-channel-receipt');
     const heading = node('div', 'ev-channel-title');
@@ -959,150 +740,14 @@
   }
 
   function renderDiscussion(item, inspector, commentChannel) {
-    const panel = panels.get('discussion');
-    panel.replaceChildren();
-    const commentsCoverage = section('评论与回复覆盖', 'COVERAGE');
-    commentsCoverage.append(factGrid([
-      ['评论状态', stateMeta(laneSummary(item, 'comments')?.state || 'UNKNOWN')[0], laneSummary(item, 'comments')?.state || 'UNKNOWN'],
-      ['评论数量', inspector.commentsCoverage?.countState === 'KNOWN' ? inspector.commentsCoverage?.count : '当前未知', inspector.commentsCoverage?.countState || 'UNKNOWN'],
-      ['回复状态', stateMeta(laneSummary(item, 'replies')?.state || 'UNKNOWN')[0], laneSummary(item, 'replies')?.state || 'UNKNOWN'],
-      ['回复数量', inspector.repliesCoverage?.countState === 'KNOWN' ? inspector.repliesCoverage?.count : '当前未知', inspector.repliesCoverage?.countState || 'UNKNOWN'],
-    ]));
-    panel.append(commentsCoverage);
-
-    const coverageHistory = section('评论 / 回复复观测历史', 'ATTEMPT-LEVEL COVERAGE');
-    coverageHistory.append(
-      coverageHistoryBlock('评论', inspector.commentsCoverageHistory),
-      coverageHistoryBlock('回复', inspector.repliesCoverageHistory),
+    observation.renderDiscussion(
+      item,
+      inspector,
+      commentChannel,
+      commentResearch,
+      panels.get('discussion'),
+      discussionUi(),
     );
-    panel.append(coverageHistory);
-
-    const channelUrl = sameOriginPath(commentChannel?.url, [`${API_ROOT}/`]);
-    panel.append(receiptBlock('评论研究通道', commentChannel?.receipt || inspector.commentsReceipt, channelUrl));
-
-    const access = section('本机授权评论研究', 'LOCAL AUTHORIZED RESEARCH');
-    const accessState = node('div', 'ev-inline-state');
-    accessState.dataset.tone = 'restricted';
-    accessState.append(
-      node('strong', null, '原文只在本机授权详情中按页读取'),
-      node('p', null, '作者只显示匿名上下文；页面不会渲染平台用户标识，也不会把评论原文放回普通列表。'),
-      tech('IDENTITY WITHHELD'),
-    );
-    access.append(accessState);
-    const controls = node('div', 'ev-channel-actions');
-    const load = node('button', 'ev-button ev-button--secondary', '读取评论原文');
-    load.type = 'button';
-    load.disabled = !channelUrl;
-    load.addEventListener('click', () => loadComments(false));
-    controls.append(load);
-    if (!channelUrl) controls.append(tech('SOURCE INCOMPLETE'));
-    access.append(controls, node('div', 'ev-comment-list'));
-    panel.append(access);
-    model.commentUrl = channelUrl;
-    model.commentCursor = null;
-    model.commentItems = [];
-  }
-
-  function coverageHistoryBlock(label, history) {
-    const wrapper = node('section', 'ev-coverage-history');
-    wrapper.append(node('h4', null, `${label}：每条为一个独立 Package / Receipt，不做跨尝试合计`));
-    const entries = Array.isArray(history) ? history : [];
-    if (entries.length === 0) {
-      wrapper.append(sourceIncompleteBlock(`当前没有 ${label} 覆盖历史；这不表示该通道未曾执行。`));
-      return wrapper;
-    }
-    const detailWindow = entries.filter((entry) => entry?.collectionScope === 'detail_window');
-    const independent = entries.filter((entry) => entry?.collectionScope && entry.collectionScope !== 'detail_window');
-    const unclassified = entries.filter((entry) => !entry?.collectionScope);
-    [['详情窗口（最多 30 条）', detailWindow], ['独立全量或其他范围', independent], ['范围未完整表达', unclassified]].forEach(([heading, group]) => {
-      if (!group.length) return;
-      const groupElement = node('div', 'ev-coverage-history-group');
-      groupElement.append(node('strong', null, heading));
-      group.forEach((entry) => groupElement.append(coverageHistoryEntry(entry)));
-      wrapper.append(groupElement);
-    });
-    return wrapper;
-  }
-
-  function coverageHistoryEntry(entry) {
-    const article = node('article', 'ev-derivative ev-history-item');
-    const header = node('div', 'ev-slot-head');
-    header.append(
-      node('strong', null, entry.observedAt || '观察时间当前未知'),
-      stateTag(entry.state || 'UNKNOWN'),
-    );
-    article.append(header, factGrid([
-      ['范围', entry.collectionScope || '当前未知', 'COLLECTION SCOPE'],
-      ['请求上限', entry.requestedLimit ?? '当前未知', 'REQUESTED LIMIT'],
-      ['页面评论数', entry.pageCommentCount ?? '当前未知', 'PAGE COMMENT COUNT'],
-      ['预期 / 去重保留', `${entry.expectedCount ?? '当前未知'} / ${entry.uniqueCollectedCount ?? '当前未知'}`, entry.collectionState || 'UNKNOWN'],
-      ['采集 / 保留 / 失败', `${entry.producerAcquired ?? '当前未知'} / ${entry.retained ?? '当前未知'} / ${entry.failed ?? '当前未知'}`, 'LANE COUNTS'],
-      ['Task / Attempt', `${entry.taskRef || '当前未知'} / ${entry.attemptRef || '当前未知'}`, 'TASK / ATTEMPT'],
-      ['Package / Receipt', `${entry.packageRef || '当前未知'} / ${entry.receiptRef || '未见回执'}`, 'PACKAGE / RECEIPT'],
-    ]));
-    return article;
-  }
-
-  async function loadComments(append) {
-    if (!model.commentUrl) return;
-    model.commentController?.abort();
-    model.commentController = new AbortController();
-    const panel = panels.get('discussion');
-    const list = panel.querySelector('.ev-comment-list');
-    const actions = panel.querySelector('.ev-channel-actions');
-    const url = new URL(model.commentUrl, window.location.origin);
-    if (append && model.commentCursor) url.searchParams.set('cursor', model.commentCursor);
-    actions.replaceChildren(node('span', 'ev-loading-copy', append ? '正在继续读取评论……' : '正在读取评论……'), tech('LOCAL READ'));
-    try {
-      const payload = await readJson(`${url.pathname}${url.search}`, model.commentController.signal);
-      if (!payload || !Array.isArray(payload.items)) throw new Error('invalid_comment_channel_response');
-      model.commentItems = append ? model.commentItems.concat(payload.items) : payload.items;
-      model.commentCursor = payload.nextCursor || null;
-      renderComments(list, payload);
-      actions.replaceChildren();
-      const receipt = node('span', 'ev-channel-inline-receipt');
-      receipt.textContent = `总数 ${payload.total ?? '未知'} · 当前 ${model.commentItems.length} · 本次 ${payload.returned ?? '未知'}`;
-      actions.append(receipt);
-      if (payload.truncated && payload.nextCursor) {
-        const next = node('button', 'ev-button ev-button--secondary', '继续读取评论');
-        next.type = 'button';
-        next.addEventListener('click', () => loadComments(true));
-        actions.append(next);
-      }
-    } catch (error) {
-      if (error.name === 'AbortError') return;
-      actions.replaceChildren();
-      const state = node('div', 'ev-inline-state');
-      state.dataset.tone = 'danger';
-      state.append(node('strong', null, '评论研究通道读取失败'), tech(error.code || 'COMMENT CHANNEL UNAVAILABLE'));
-      actions.append(state);
-    }
-  }
-
-  function renderComments(list, payload) {
-    list.replaceChildren();
-    if (model.commentItems.length === 0) {
-      const empty = node('div', 'ev-inline-state');
-      empty.append(node('strong', null, '当前通道没有返回评论材料'), node('p', null, '这只描述本次授权读取，不表示平台评论为 0。'), tech('NO RETURNED MATERIAL'));
-      list.append(empty);
-      return;
-    }
-    model.commentItems.forEach((comment) => {
-      const article = node('article', 'ev-comment');
-      const header = node('div', 'ev-comment-head');
-      header.append(
-        node('strong', null, comment.relation === 'REPLY' ? '匿名回复' : '匿名评论'),
-        tech(comment.sourceRef ? `SOURCE ${comment.sourceRef}` : 'SOURCE INCOMPLETE'),
-      );
-      const body = node('p', null, comment.bodyState === 'KNOWN' && comment.body !== null ? comment.body : '评论正文当前未知');
-      const meta = node('div', 'ev-comment-meta');
-      addTextWithTech(meta, comment.bodyTruncated ? '本条正文已在读取边界截断' : '本条正文未在通道内截断', comment.bodyTruncated ? 'TRUNCATED' : 'RETURNED');
-      article.append(header, body, meta);
-      list.append(article);
-    });
-    const receipt = node('div', 'ev-comment-receipt');
-    addTextWithTech(receipt, `总数 ${payload.total ?? '未知'} · 返回 ${payload.returned ?? '未知'} · ${payload.truncated ? '可继续读取' : '当前页未截断'}`, 'ANONYMOUS RESEARCH VIEW');
-    list.append(receipt);
   }
 
   function renderMedia(mediaResource, inspector, channels) {

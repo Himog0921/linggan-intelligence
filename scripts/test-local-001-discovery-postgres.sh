@@ -4,6 +4,8 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
 
+node --test apps/api/src/local_web/evidence_observation.test.mjs
+
 # API media proofs intentionally use the same controlled local-media root as the delivery
 # contract. Keep this isolated proof serial so one test's fixture cleanup cannot race another
 # test's file assertion; callers may still request an even smaller explicit thread count.

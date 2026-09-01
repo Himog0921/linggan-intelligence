@@ -210,8 +210,9 @@ inspector:
   provenance: target/task/attempt/package/receipt/producer/station-account lens/coverage/checkpoint
   permissions + displayPolicy + limitations
 action:
-  reobservation: XHS only + target-linked active deep-archive authorization
-  request: actual Work Order → Lease → server-issued Task; detail/comments/replies only; commentLimit=30
+  reobservation: XHS only + canonical supported/eligible/reason from target-linked active deep-archive authorization
+  request: URL exists only when eligible; POST rechecks and atomically writes Work Order → Lease → server-issued Task
+  merge: only same target + authorization + complete frozen material policy; detail/comments/replies only; commentLimit=30
   media: NOT_REQUESTED / EXISTING_ASSETS_REUSED; no new media bytes, OCR, or ASR work
   status: requestRef / workOrderRef / leaseRef / task → attempt → package → receipt
 ```

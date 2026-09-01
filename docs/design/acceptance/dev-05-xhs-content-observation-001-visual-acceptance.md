@@ -14,7 +14,7 @@
 - 页面/组件/状态: `/corpus/evidence` 的 Selected Work Inspector；`detailCurrent`、`engagementCurrent`、`engagementTimeline`、评论/回复 Coverage history 与 `立即复观测`。
 - 关联 PAGE / ACC ID: `PAGE-EVIDENCE-001`、`ACC-DEV-05-XHS-CONTENT-OBSERVATION-001`。
 - 验收日期与环境: 2026-09-01；隔离 PostgreSQL + 临时 API test fixture。未修改正在运行的 main/runtime、插件或共享数据库。
-- 数据/权限前提: 复观测只接受已存在的 target-linked active deep-archive authorization；无关联作品必须被拒绝，不能回退到作者、标题、URL 或监控目标显示名。
+- 数据/权限前提: 复观测只接受已存在的 target-linked active deep-archive authorization；详情 read 与 POST 共享同一 eligibility 定义，且 POST 在同一事务内重新检查。无关联作品必须被拒绝，不能回退到作者、标题、URL 或监控目标显示名。
 
 ## 2. 场景矩阵
 
@@ -23,8 +23,9 @@
 | 已知当前事实 | 查看一篇多次观察的作品 | 每个互动指标取最新 `KNOWN`，同时显示前值与变化 | 当前值、前值、delta 与 Package/观察时点分开 | `material_projection_postgres` 证明最新合格指标和历史来源 | VERIFIED（隔离 proof） |
 | 后续详情不完整 | 查看较早已知标题、作者、发布时间 | 新的未知/缺失字段不得抹掉旧的已知字段 | `detailCurrent` 逐字段来源、未知不伪装为清空 | `material_projection_postgres` 的 field-wise fixture | VERIFIED（隔离 proof） |
 | 两种评论 Coverage | 查看详情窗口与独立全公开观察 | `30/80` 与 `70/70` 分别属于各自 Package/Receipt，不可相加 | 历史分组、每项 refs/窗口/stop reason；无总和 | `material_social_postgres` | VERIFIED（隔离 proof） |
-| 无关联作品点击动作 | 尝试复观测没有 target 授权的 XHS 作品 | 拒绝是授权事实，不是已排队或平台无内容 | inline failure 保留返回 code，按钮不产生乐观成功状态 | API route 测试返回 `409 reobservation_authorization_not_linked` | VERIFIED（自动） |
+| 无关联作品 | 查看没有 target 授权的 XHS 作品 | `eligible=false` 是授权事实，不是已排队或平台无内容 | 页面不渲染可调用 URL/按钮，显示 canonical 原因；直接 POST 仍返回 `409`，不产生乐观成功状态 | API route 测试同时证明 GET eligibility 与 POST `reobservation_authorization_not_linked` | VERIFIED（自动） |
 | 有关联作品请求复观测 | 发起一次标准详情复观测 | 形成真实 Work Order、Lease、三个 server-issued lanes；并非浏览器已读取 | 显示 request/work order/lease、逐 lane Task→Attempt→Package→Receipt；评论最多 30；无媒体 | `content_reobservation_postgres` 实际派发详情并接纳 synthetic Package；任务为 detail/comments/replies | VERIFIED（隔离 proof） |
+| 并发或相近 scope | 两次同时点击；或已有不同媒体/限额策略的 work | 同一 target 的完全相同冻结 scope 只形成一个 lease；任何策略差异是不同授权范围 | 不把“同作品”显示为可合并的充分条件 | 隔离 proof 断言 `ADMITTED + MERGE` 只共享同一 lease，且 media policy 不同必须新建 scope | VERIFIED（隔离 proof） |
 | 浏览器视觉呈现 | 在实际本机运行页操作 Inspector | 只可在部署了本 worktree 的运行时确认 | 排版、焦点、窄屏、真实按钮交互和轮询 | 本次未获授权更新 runtime/reload，未创建截图或录屏 | NOT VERIFIED |
 
 ## 3. 视觉工作条件

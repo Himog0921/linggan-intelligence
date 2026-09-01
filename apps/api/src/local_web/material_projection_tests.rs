@@ -151,15 +151,34 @@ async fn detail_exposes_the_bounded_reobservation_action_and_refuses_targetless_
     seed_detail(&database).await;
     let list = request_json(&database, "/api/local/work-resources").await;
     let detail = fetch_detail(&database, &list).await;
-    let action_url = detail
-        .pointer("/channels/reobservation/url")
-        .and_then(Value::as_str)
-        .expect("XHS work detail publishes its bounded action URL");
+    assert_eq!(
+        detail.pointer("/channels/reobservation/url"),
+        Some(&Value::Null),
+        "a work without an active linked authorization has no actionable URL"
+    );
     assert_eq!(
         detail
             .pointer("/channels/reobservation/available")
             .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        detail
+            .pointer("/channels/reobservation/eligible")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        detail
+            .pointer("/channels/reobservation/supported")
+            .and_then(Value::as_bool),
         Some(true)
+    );
+    assert_eq!(
+        detail
+            .pointer("/channels/reobservation/reason")
+            .and_then(Value::as_str),
+        Some("TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION_REQUIRED")
     );
     assert_eq!(
         detail
@@ -167,11 +186,15 @@ async fn detail_exposes_the_bounded_reobservation_action_and_refuses_targetless_
             .and_then(Value::as_str),
         Some("TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION")
     );
+    let public_ref = detail
+        .pointer("/item/identity/publicRef")
+        .and_then(Value::as_str)
+        .expect("detail keeps the stable work reference");
     let response = app_with_database(database)
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri(action_url)
+                .uri(format!("/api/local/work-resources/{public_ref}/reobserve"))
                 .body(Body::empty())
                 .unwrap(),
         )

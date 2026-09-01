@@ -48,8 +48,9 @@ pub use collection_target::{
     read_target, store_pending_target, transition_target,
 };
 pub use content_reobservation::{
-    ContentReobservation, ContentReobservationError, ContentReobservationStatus,
-    ReobservationMediaPolicy, ReobservationTask, content_reobservation, read_content_reobservation,
+    ContentReobservation, ContentReobservationEligibility, ContentReobservationError,
+    ContentReobservationStatus, ReobservationMediaPolicy, ReobservationTask, content_reobservation,
+    read_content_reobservation, read_content_reobservation_eligibility,
 };
 pub use dispatch::{DispatchDecision, DispatchError, decide_dispatch, dispatch_schema_is_ready};
 pub use execution_station::{

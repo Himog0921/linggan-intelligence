@@ -4,9 +4,16 @@
 //! lease, dispatch and Producer receipt chain. It does not create a second task model and it
 //! never reaches a platform: only a claimed Browser Producer may do that later.
 
+use crate::acquisition_chain::{
+    live_lease_for_exact_material_scope_in_transaction,
+    request_and_admit_material_targets_under_authorization_in_transaction,
+};
+use crate::work_order_lease::{
+    expire_lapsed_leases_in_transaction, issue_work_order_lease_in_transaction,
+};
 use crate::{
-    AcquisitionChainError, LeaseError, MaterialDeepeningTarget, issue_work_order_lease,
-    request_and_admit_material_targets_under_authorization,
+    AcquisitionChainError, LeaseError, MaterialDeepeningTarget, acquisition_chain_schema_is_ready,
+    lease_schema_is_ready,
 };
 use linggan_contracts::AdmissionOutcome;
 use linggan_storage_postgres::Database;
@@ -27,6 +34,8 @@ pub enum ContentReobservationError {
     PlatformNotSupported,
     #[error("this work has no active target-linked deepening authorization")]
     AuthorizedTargetMissing,
+    #[error("the strict reobservation merge no longer has the lease it was admitted against")]
+    EquivalentLeaseMissing,
     #[error(transparent)]
     Acquisition(#[from] AcquisitionChainError),
     #[error(transparent)]
@@ -91,6 +100,17 @@ pub struct ContentReobservationStatus {
     pub tasks: Vec<ReobservationTask>,
 }
 
+/// The single read model used by both the Evidence Library action affordance and the command.
+/// `eligible` never means a platform call has happened; it says only that this exact work can
+/// enter the existing server-authorized reobservation chain at the time of this read.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentReobservationEligibility {
+    pub supported: bool,
+    pub eligible: bool,
+    pub reason: &'static str,
+}
+
 /// Create a fresh, person-requested bounded work order for exactly one stable XHS content ID.
 ///
 /// The target and purpose are derived only from a prior, still-active authorization that is
@@ -100,18 +120,33 @@ pub async fn content_reobservation(
     database: &Database,
     public_ref: Uuid,
 ) -> Result<ContentReobservation, ContentReobservationError> {
-    let platform: Option<String> =
-        sqlx::query_scalar("SELECT platform FROM linggan_material_content WHERE public_ref=$1")
-            .bind(public_ref)
-            .fetch_optional(database.pool())
-            .await?;
+    if !acquisition_chain_schema_is_ready(database).await? {
+        return Err(ContentReobservationError::Acquisition(
+            AcquisitionChainError::SchemaUnavailable,
+        ));
+    }
+    if !lease_schema_is_ready(database).await? {
+        return Err(ContentReobservationError::Lease(
+            LeaseError::SchemaUnavailable,
+        ));
+    }
+
+    let mut transaction = database.pool().begin().await?;
+    let platform: Option<String> = sqlx::query_scalar(
+        "SELECT platform FROM linggan_material_content WHERE public_ref=$1 FOR SHARE",
+    )
+    .bind(public_ref)
+    .fetch_optional(&mut *transaction)
+    .await?;
     let Some(platform) = platform else {
         return Err(ContentReobservationError::WorkResourceNotFound);
     };
     if platform != "xhs" {
         return Err(ContentReobservationError::PlatformNotSupported);
     }
-    let Some(linked_authorization) = linked_authorization(database, public_ref).await? else {
+    let Some(linked_authorization) =
+        linked_authorization_in_transaction(&mut transaction, public_ref).await?
+    else {
         return Err(ContentReobservationError::AuthorizedTargetMissing);
     };
     let targets = [MaterialDeepeningTarget {
@@ -124,8 +159,12 @@ pub async fn content_reobservation(
         allow_ocr: false,
         allow_asr: false,
     }];
-    let outcome = request_and_admit_material_targets_under_authorization(
-        database,
+    // This is one transaction by design.  `request_and_admit…` holds the observation-target lock
+    // and the lease is inserted before that lock is released, so a concurrent click can only see
+    // the fully frozen executable scope and merge into it.
+    expire_lapsed_leases_in_transaction(&mut transaction).await?;
+    let outcome = request_and_admit_material_targets_under_authorization_in_transaction(
+        &mut transaction,
         linked_authorization.target_ref,
         &linked_authorization.purpose,
         "person",
@@ -136,51 +175,61 @@ pub async fn content_reobservation(
     let media = reobservation_media_policy();
     let admission = admission_label(outcome.outcome.code());
     let admission_reason = admission_reason(&outcome.outcome);
-    let Some(work_order_ref) = outcome.work_order_ref else {
-        if matches!(&outcome.outcome, AdmissionOutcome::Merge { .. }) {
-            if let Some(lease_ref) =
-                live_lease_covering_material(database, linked_authorization.target_ref, public_ref)
-                    .await?
-            {
-                let status = read_content_reobservation(database, public_ref, lease_ref)
-                    .await?
-                    .ok_or(ContentReobservationError::WorkResourceNotFound)?;
-                return Ok(ContentReobservation {
-                    public_ref,
-                    target_ref: linked_authorization.target_ref,
-                    request_ref: outcome.request_ref,
-                    decision_ref: outcome.decision_ref,
-                    admission,
-                    admission_reason,
-                    work_order_ref: Some(status.work_order_ref),
-                    lease_ref: Some(status.lease_ref),
-                    expires_at: Some(status.expires_at),
-                    execution: "MERGED",
-                    media,
-                    tasks: status.tasks,
-                });
-            }
-        }
-        return Ok(ContentReobservation {
-            public_ref,
-            target_ref: linked_authorization.target_ref,
-            request_ref: outcome.request_ref,
-            decision_ref: outcome.decision_ref,
-            admission,
-            admission_reason,
-            work_order_ref: None,
-            lease_ref: None,
-            expires_at: None,
-            execution: "NOT_STARTED",
-            media,
-            tasks: Vec::new(),
-        });
+    let (work_order_ref, lease_ref, expires_at, execution) =
+        if let Some(work_order_ref) = outcome.work_order_ref {
+            let lease = issue_work_order_lease_in_transaction(
+                &mut transaction,
+                work_order_ref,
+                REOBSERVATION_LEASE_MINUTES,
+            )
+            .await?;
+            (
+                Some(work_order_ref),
+                Some(lease.lease_ref),
+                Some(lease.expires_at),
+                "LEASED",
+            )
+        } else if matches!(&outcome.outcome, AdmissionOutcome::Merge { .. }) {
+            let lease_ref = live_lease_for_exact_material_scope_in_transaction(
+                &mut transaction,
+                linked_authorization.target_ref,
+                "deep_archive",
+                linked_authorization.authorization_ref,
+                &targets,
+            )
+            .await?
+            .ok_or(ContentReobservationError::EquivalentLeaseMissing)?;
+            let work_order_ref: Uuid = sqlx::query_scalar(
+                "SELECT work_order_ref FROM collection_work_order_lease WHERE lease_ref=$1",
+            )
+            .bind(lease_ref)
+            .fetch_one(&mut *transaction)
+            .await?;
+            let expires_at: String = sqlx::query_scalar(
+                "SELECT expires_at::text FROM collection_work_order_lease WHERE lease_ref=$1",
+            )
+            .bind(lease_ref)
+            .fetch_one(&mut *transaction)
+            .await?;
+            (
+                Some(work_order_ref),
+                Some(lease_ref),
+                Some(expires_at),
+                "MERGED",
+            )
+        } else {
+            (None, None, None, "NOT_STARTED")
+        };
+    transaction.commit().await?;
+
+    let tasks = if let Some(lease_ref) = lease_ref {
+        read_content_reobservation(database, public_ref, lease_ref)
+            .await?
+            .ok_or(ContentReobservationError::WorkResourceNotFound)?
+            .tasks
+    } else {
+        Vec::new()
     };
-    let lease =
-        issue_work_order_lease(database, work_order_ref, REOBSERVATION_LEASE_MINUTES).await?;
-    let status = read_content_reobservation(database, public_ref, lease.lease_ref)
-        .await?
-        .ok_or(ContentReobservationError::WorkResourceNotFound)?;
     Ok(ContentReobservation {
         public_ref,
         target_ref: linked_authorization.target_ref,
@@ -188,13 +237,52 @@ pub async fn content_reobservation(
         decision_ref: outcome.decision_ref,
         admission,
         admission_reason,
-        work_order_ref: Some(work_order_ref),
-        lease_ref: Some(lease.lease_ref),
-        expires_at: Some(lease.expires_at),
-        execution: "LEASED",
+        work_order_ref,
+        lease_ref,
+        expires_at,
+        execution,
         media,
-        tasks: status.tasks,
+        tasks,
     })
+}
+
+/// Read the canonical reobservation eligibility without opening a request.  The command performs
+/// the same authorization lookup again inside its write transaction, so this is never a grant or
+/// a TOCTOU bypass.
+pub async fn read_content_reobservation_eligibility(
+    database: &Database,
+    public_ref: Uuid,
+) -> Result<Option<ContentReobservationEligibility>, ContentReobservationError> {
+    let mut transaction = database.pool().begin().await?;
+    let platform: Option<String> =
+        sqlx::query_scalar("SELECT platform FROM linggan_material_content WHERE public_ref=$1")
+            .bind(public_ref)
+            .fetch_optional(&mut *transaction)
+            .await?;
+    let eligibility = match platform.as_deref() {
+        None => None,
+        Some("xhs") => {
+            let eligible = linked_authorization_in_transaction(&mut transaction, public_ref)
+                .await?
+                .is_some();
+            Some(ContentReobservationEligibility {
+                supported: true,
+                eligible,
+                reason: if eligible {
+                    "TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION"
+                } else {
+                    "TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION_REQUIRED"
+                },
+            })
+        }
+        Some(_) => Some(ContentReobservationEligibility {
+            supported: false,
+            eligible: false,
+            reason: "PLATFORM_NOT_SUPPORTED",
+        }),
+    };
+    transaction.rollback().await?;
+    Ok(eligibility)
 }
 
 /// Read the persisted task/attempt/package/receipt state for one exact reobservation lease.
@@ -276,8 +364,8 @@ struct LinkedAuthorization {
     purpose: String,
 }
 
-async fn linked_authorization(
-    database: &Database,
+async fn linked_authorization_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     public_ref: Uuid,
 ) -> Result<Option<LinkedAuthorization>, sqlx::Error> {
     let row = sqlx::query(
@@ -306,34 +394,13 @@ async fn linked_authorization(
          ORDER BY linked_authority.linked_at DESC LIMIT 1",
     )
     .bind(public_ref)
-    .fetch_optional(database.pool())
+    .fetch_optional(&mut **transaction)
     .await?;
     Ok(row.map(|row| LinkedAuthorization {
         target_ref: row.get("target_ref"),
         authorization_ref: row.get("authorization_ref"),
         purpose: row.get("purpose"),
     }))
-}
-
-async fn live_lease_covering_material(
-    database: &Database,
-    target_ref: Uuid,
-    public_ref: Uuid,
-) -> Result<Option<Uuid>, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT lease.lease_ref \
-         FROM collection_work_order work_order \
-         JOIN collection_work_order_material_target scope ON scope.work_order_ref=work_order.work_order_ref \
-         JOIN collection_work_order_lease lease ON lease.work_order_ref=work_order.work_order_ref \
-         WHERE work_order.target_ref=$1 AND work_order.lane='deep_archive' \
-           AND scope.content_public_ref=$2 AND lease.released_at IS NULL \
-           AND lease.expires_at > scope_001_now() \
-         ORDER BY lease.expires_at DESC,lease.lease_ref DESC LIMIT 1",
-    )
-    .bind(target_ref)
-    .bind(public_ref)
-    .fetch_optional(database.pool())
-    .await
 }
 
 fn task_from_row(row: &sqlx::postgres::PgRow, lease_released: bool) -> ReobservationTask {

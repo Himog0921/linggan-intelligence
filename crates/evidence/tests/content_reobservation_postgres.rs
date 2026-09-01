@@ -7,7 +7,8 @@ use linggan_contracts::{
 };
 use linggan_evidence::{
     DispatchDecision, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, content_reobservation,
-    decide_dispatch, read_content_reobservation, start_producer_attempt, submit_producer_package,
+    decide_dispatch, issue_work_order_lease, read_content_reobservation, start_producer_attempt,
+    submit_producer_package,
 };
 use uuid::Uuid;
 
@@ -185,10 +186,135 @@ async fn reobservation_uses_the_existing_authorized_lease_path_without_new_media
     );
 }
 
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn concurrent_reobservation_is_one_atomic_frozen_scope_and_one_lease() {
+    let database = proof_database("content_reobservation_atomic_concurrency").await;
+    let content_external_id = "note-reobserve-concurrent";
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":content_external_id}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":content_external_id},
+            "payload":{"title":"并发复观测","likes":10,"publicCommentCount":20,"collects":3,"shares":1}
+        }),
+    )
+    .await;
+    submit_profile_discovery(&database, content_external_id).await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let fixture = seed_authorized_material_context(&database, content_public_ref).await;
+
+    let (first, second) = tokio::join!(
+        content_reobservation(&database, content_public_ref),
+        content_reobservation(&database, content_public_ref),
+    );
+    let first = first.expect("first concurrent request completes");
+    let second = second.expect("second concurrent request completes");
+    let mut admissions = vec![first.admission, second.admission];
+    admissions.sort_unstable();
+    assert_eq!(admissions, ["ADMITTED", "MERGE"]);
+    assert_eq!(first.lease_ref, second.lease_ref);
+    assert_eq!(first.work_order_ref, second.work_order_ref);
+    let live_leases: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease lease \
+         JOIN collection_work_order work_order ON work_order.work_order_ref=lease.work_order_ref \
+         JOIN collection_admission_decision decision ON decision.decision_ref=work_order.decision_ref \
+         JOIN collection_work_order_material_target scope ON scope.work_order_ref=work_order.work_order_ref \
+         WHERE work_order.target_ref=$1 AND decision.authorization_ref=$2 \
+           AND scope.content_public_ref=$3 AND lease.released_at IS NULL \
+           AND lease.expires_at>scope_001_now()",
+    )
+    .bind(fixture.target_ref)
+    .bind(fixture.authorization_ref)
+    .bind(content_public_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        live_leases, 1,
+        "the target lock covers admission through lease issue"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn reobservation_never_merges_a_live_lease_with_a_different_frozen_policy() {
+    let database = proof_database("content_reobservation_exact_scope").await;
+    let content_external_id = "note-reobserve-exact-scope";
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":content_external_id}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":content_external_id},
+            "payload":{"title":"策略边界复观测","likes":10,"publicCommentCount":20,"collects":3,"shares":1}
+        }),
+    )
+    .await;
+    submit_profile_discovery(&database, content_external_id).await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let fixture = seed_authorized_material_context(&database, content_public_ref).await;
+    sqlx::query(
+        "UPDATE collection_work_order_material_target SET acquire_media=true \
+         WHERE work_order_ref=$1 AND content_public_ref=$2",
+    )
+    .bind(fixture.work_order_ref)
+    .bind(content_public_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let different_policy_lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("the deliberately broader media policy is a live fixture lease");
+
+    let command = content_reobservation(&database, content_public_ref)
+        .await
+        .expect("the normal no-media reobservation is admitted as a distinct frozen scope");
+    assert_eq!(command.admission, "ADMITTED");
+    assert_ne!(command.lease_ref, Some(different_policy_lease.lease_ref));
+    assert!(
+        command
+            .tasks
+            .iter()
+            .all(|task| task.acquire_media == "not_requested")
+    );
+    let leased_media: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+             SELECT 1 FROM collection_work_order_lease lease \
+             JOIN collection_work_order_material_target scope ON scope.work_order_ref=lease.work_order_ref \
+             WHERE lease.lease_ref=$1 AND scope.acquire_media=true)",
+    )
+    .bind(different_policy_lease.lease_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        leased_media,
+        "the pre-existing lease really differs in policy"
+    );
+}
+
 struct AuthorizedFixture {
     install_key: String,
     producer_instance_id: Uuid,
     authorization_ref: Uuid,
+    target_ref: Uuid,
+    work_order_ref: Uuid,
 }
 
 async fn seed_authorized_material_context(
@@ -224,6 +350,8 @@ async fn seed_authorized_material_context(
         install_key,
         producer_instance_id,
         authorization_ref,
+        target_ref,
+        work_order_ref,
     }
 }
 
