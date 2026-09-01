@@ -1965,6 +1965,14 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
     assert!(EVIDENCE_LIBRARY_JS.contains("const API_ROOT = '/api/local/work-resources'"));
     assert!(EVIDENCE_LIBRARY_JS.contains("params.set('layout', model.activeLayout)"));
     assert!(EVIDENCE_LIBRARY_JS.contains("params.set('view', model.activeView)"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("立即复观测"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("TARGET-LINKED AUTHORIZATION"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("commentsCoverageHistory"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("LATEST KNOWN PER METRIC"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("refreshSelectedDetailAfterReobservation"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("await refreshSelectedDetailAfterReobservation()"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("readJson(detailUrl, model.detailController.signal)"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("已合并到覆盖当前作品的在途工作"));
     assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"cover\"]"));
     assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"table\"]"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("/api/local/evidence-library/legacy"));

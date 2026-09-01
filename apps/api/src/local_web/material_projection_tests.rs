@@ -144,6 +144,49 @@ async fn loopback_comment_lane_hides_sensitive_body_and_external_identity() {
     assert!(!research.to_string().contains("comment-api-1"));
 }
 
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn detail_exposes_the_bounded_reobservation_action_and_refuses_targetless_fallback() {
+    let database = proof_database("material_loopback_reobservation_boundary").await;
+    seed_detail(&database).await;
+    let list = request_json(&database, "/api/local/work-resources").await;
+    let detail = fetch_detail(&database, &list).await;
+    let action_url = detail
+        .pointer("/channels/reobservation/url")
+        .and_then(Value::as_str)
+        .expect("XHS work detail publishes its bounded action URL");
+    assert_eq!(
+        detail
+            .pointer("/channels/reobservation/available")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        detail
+            .pointer("/channels/reobservation/requires")
+            .and_then(Value::as_str),
+        Some("TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION")
+    );
+    let response = app_with_database(database)
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri(action_url)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+    assert_eq!(
+        body.get("code").and_then(Value::as_str),
+        Some("reobservation_authorization_not_linked"),
+        "a work without target-linked authorization never falls back to its author or a guessed target"
+    );
+}
+
 pub(super) async fn fetch_detail(database: &Database, list: &Value) -> Value {
     let url = list
         .pointer("/items/0/detailUrl")

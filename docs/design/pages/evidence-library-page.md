@@ -1,7 +1,7 @@
 # PAGE-EVIDENCE-001 · 多材料证据库
 
 > 状态: 权威当前
-> 最后核对: 2026-08-31
+> 最后核对: 2026-09-01
 > 适用范围: `语料 → 证据库` 的产品任务、页面信息架构、技术呈现要求、状态与验收；运行时入口仍为 `http://localhost:3000/corpus/evidence`
 > 事实来源: Mog 批准的五卡 Evidence Library 垂直交付、Issue #85/#86/#90、MEDIA-RECON-001、MATERIAL-PROJECTION-001、LIDS、UI execution contract 与当前 Rust/HTML/CSS/JS
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；本页规格不让静态原型冒充已接通运行时
@@ -26,14 +26,14 @@
 - 使用情境：桌面工作台中快速检索一篇来源作品，判断系统实际拿到了哪些材料、缺了什么、为什么缺，以及是否值得进入受控核验。
 - 用户任务：以作品为单位检索、比较、阅读脱敏材料，并沿 `Target → Task → Attempt → Package → Receipt → Coverage` 追溯来源。
 - 三秒答案：**这篇作品目前有哪些可核验材料，哪些仍未请求、未观察、部分、失败、风险停止、尚未启用或已清理。**
-- 五秒主动作：选择一篇作品，在右侧 Inspector 查看当前材料 lane、来源、Coverage、限制与允许的下一步。
+- 五秒主动作：选择一篇作品，在右侧 Inspector 查看当前材料 lane、来源、Coverage、限制与允许的下一步；对具备既有目标关联和有效深度归档授权的小红书作品，才可请求一次有界详情复观测。
 - 成功标准：用户不查看数据库或插件日志，也能区分“没有请求”“没有观察到”“拿到一部分”“明确失败”“处理器未启用”“字节曾取得后清理”和“当前未知”。
 
 ### 1.3 页面非目标
 
 本页不负责：
 
-- 直接触发平台搜索、详情、评论或媒体采集；
+- 直接触发平台搜索、泛化详情、评论或媒体采集；唯一例外是本规格第 8 节所定义、已有关联授权的小红书作品详情复观测；
 - 在证据库内创建或批准 Work Order；
 - 把一个含糊“补采”按钮连接到未知范围；
 - 远程 CDN 媒体回退；
@@ -43,6 +43,10 @@
 - 暴露批量原始敏感评论、账号身份、Cookie、令牌或完整 Package payload；
 - 把 checkpoint 当作语料或内容 Evidence；
 - 在本页运行 OCR、ASR、抽帧、embedding 或 Agent 分析。
+
+该唯一例外不创建人工 `Task`，不猜测监控目标，不请求媒体/OCR/ASR，不改变既有资产；它只能沿
+`已关联 Target/Authorization → Work Order → Lease → server-issued Task → Attempt → Package → Receipt`
+发起，并且 `Receipt` 之外的状态不得写成成功。
 
 ## 2. 当前运行事实与目标边界
 
@@ -57,6 +61,7 @@
 | 媒体槽位 | Slot、来源代次、候选断言、Live Photo 组件及有界回执已进入 Material Projection | 槽位存在不等于字节已取得；回执截断但无通道 URL 时显示 `SOURCE_INCOMPLETE` |
 | 媒体字节 | Blob/Materialization/处置与受控本地 asset handle 已进入详情 | 仅 `INLINE_SAFE` 且同源受控句柄可内联；真实平台字节未验证 |
 | OCR/ASR 等派生 | Job/Event/Derivative 生命周期进入详情，provider 当前未由本卡启用 | 原样显示 `QUEUED/PROCESSING/NOT_ENABLED/FAILED/ACQUIRED/UNKNOWN`，不由 UI 推断 |
+| 小红书详情复观测 | 仅可复用既有 target-linked active deep-archive authorization；标准范围为详情、评论、回复，评论窗口最多 30 条 | Inspector 只显示实际 Work Order/Lease/Task/Attempt/Package/Receipt；不把工作请求说成已读取，也不新建媒体、OCR 或 ASR 工作 |
 | 静态原型 | 全部内容均为合成场景 | 首屏和每个材料区持续显示“合成参考 / 非运行数据” |
 
 ## 3. 设计方向锁
@@ -126,8 +131,9 @@ Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
 
 ```text
 当前作品 / 稳定 public ref
-├─ 概览：标题、正文、作品作者（含受控本地头像）、独立监控目标、二者关系、来源时间、逐字段来源/未知
-├─ 评论与回复：脱敏片段、父子关系、各 lane Coverage/停止原因
+├─ 概览：标题、正文、作品作者（含受控本地头像）、独立监控目标、二者关系、来源时间、逐字段当前事实/来源、互动当前值/前值/变化
+├─ 概览内受限动作：仅 XHS + target-linked active deep-archive authorization 才可“立即复观测”；显示租约与逐 lane 真实状态
+├─ 评论与回复：脱敏片段、父子关系、各 lane Coverage/停止原因及每个 Package/Receipt 独立的 Coverage 历史
 ├─ 媒体：槽位顺序、用途、来源代次、组件、字节/副本/清理状态
 ├─ 派生：OCR/ASR/关键帧/embedding 状态、processor 版本、来源位置
 ├─ 来源与血缘：目标、Task、Attempt、Package、Receipt、producer/工位/账号镜头
@@ -148,16 +154,16 @@ Inspector 默认停在“概览”，但页面不得只在隐藏 Tab 中提供�
 | 访问/处置 | restricted/withdrawn/bytes cleaned 等 | 当前 display policy | 让筛选绕过权限 |
 | 排序 | 默认最近观察降序；后续可明确切换来源发布时间 | sort key、asOf | 把“最近观察”写成“最新发布” |
 
-排版使用独立 URL 参数 `layout=research|table|cover`；状态筛选继续使用 `view`。`view` 是查询预设，必须与其他筛选一起放在主结果上方的 `SYSTEM VIEWS / 系统视图` 横向工作台，不作为左侧导航或独立状态面板；结果数、读取回执和当前选择分别由工作台底栏、inline receipt、选中行/Inspector 承担，不重复做统计栏。`MY VIEWS / 我的视图` 可以保留参考稿的结构位置，但在保存合同缺失时只能显示不可交互的“暂无已保存视图 / SAVED VIEWS NOT CONNECTED”，不得展示假视图或假保存动作。切换排版只重排已读取的同一 Work Resource 集合，不重新请求、不改字段资格、不改变当前选择。保存视图、批量选择、发起研究和补采当前继续禁用，直到各自有独立产品/权限/回执合同。
+排版使用独立 URL 参数 `layout=research|table|cover`；状态筛选继续使用 `view`。`view` 是查询预设，必须与其他筛选一起放在主结果上方的 `SYSTEM VIEWS / 系统视图` 横向工作台，不作为左侧导航或独立状态面板；结果数、读取回执和当前选择分别由工作台底栏、inline receipt、选中行/Inspector 承担，不重复做统计栏。`MY VIEWS / 我的视图` 可以保留参考稿的结构位置，但在保存合同缺失时只能显示不可交互的“暂无已保存视图 / SAVED VIEWS NOT CONNECTED”，不得展示假视图或假保存动作。切换排版只重排已读取的同一 Work Resource 集合，不重新请求、不改字段资格、不改变当前选择。保存视图、批量选择、发起研究和泛化“补采”继续禁用，直到各自有独立产品/权限/回执合同。唯一已接通的例外是当前选中作品的受限 `立即复观测`：它只面对小红书、稳定 public ref 和已存在的 target-linked active deep-archive authorization，不能从作者、标题、URL 或监控目标名称推断授权；请求与状态均来自受控 API，不能显示本地伪造成功。
 
 ## 6. 材料 lane 与数据来源
 
 | Lane | 用户看到的材料 | 最小来源/字段 | 当前实现边界 |
 |---|---|---|---|
 | 发现 `discovery` | 从搜索面或作者页发现作品 | platform、content identity、入口、位置、observedAt、Coverage | 已有窄投影；不是详情 |
-| 详情 `detail` | 标题、正文、作者、来源发布时间、互动快照 | 每字段 value/state/sourceRef/version | 当前仅窄投影，不是完整 Observation/Current |
-| 评论 `comments` | 顶层评论脱敏片段、已知数量与覆盖 | comment refs、snippet、count state、Coverage、stop reason | 当前多为未类型化；无记录不得显示 0 |
-| 回复 `replies` | 楼中楼父子关系与脱敏片段 | reply/root/parent refs、tree state、Coverage | 当前父子投影未实现 |
+| 详情 `detail` | 标题、正文、作者、来源发布时间、互动快照 | 每字段 value/state/sourceRef/version；逐字段最新合格当前事实；每指标最新合格 current/previous/delta | 当前事实与时间线分开；时间线有界，不得决定 current；不回填或覆写历史 Package |
+| 评论 `comments` | 顶层评论脱敏片段、已知数量与覆盖 | comment refs、snippet、count state、Coverage、stop reason | 当前投影只展示获准脱敏材料；每个 Package/Receipt 的 Coverage history 独立，缺失不得显示 0 |
+| 回复 `replies` | 楼中楼父子关系与脱敏片段 | reply/root/parent refs、tree state、Coverage | 只展示已验证父子关系；每个 Package/Receipt 的 Coverage history 独立，不从评论历史推断 |
 | 作者 `author` | 该作品的作者上下文 | author ref、字段状态、observedAt、sourceRef | 目标档案回填不等于统一材料投影 |
 | 媒体槽位 `media_slots` | 类型、用途、顺序、来源代次、组件 | slot key、purpose、display ordinal、generation、component state | 单 URI/顺序/Live Photo 适配有限 |
 | 媒体字节 `media_bytes` | 是否取得、校验、本地副本、清理 | download attempt、blob hash ref、replica/materialization、disposition | 只显示本地受控句柄；真实平台 bytes 未验证 |
@@ -182,7 +188,11 @@ item:
   summary: lastObservedAt / primaryLimitation / restrictionState / matchedFields
 inspector:
   overview fields + sourceRefs
+  detailCurrent: field-wise current title/body/creator/publishedAt + source
+  engagementCurrent: latest known per metric + previous + delta
+  engagementTimeline[]: packageRef / sourceLane / observedAt / recordedAt / qualified metric states
   commentThreads + commentsCoverage + repliesCoverage
+  commentsCoverageHistory[] + repliesCoverageHistory[]: one entry per Package/Receipt, never cross-attempt aggregate
   mediaSlots[]:
     slotRef / purpose / displayOrdinal / currentCoverage
     currentOriginGroup:
@@ -199,6 +209,11 @@ inspector:
   derivatives[] + processorVersion + source location
   provenance: target/task/attempt/package/receipt/producer/station-account lens/coverage/checkpoint
   permissions + displayPolicy + limitations
+action:
+  reobservation: XHS only + target-linked active deep-archive authorization
+  request: actual Work Order → Lease → server-issued Task; detail/comments/replies only; commentLimit=30
+  media: NOT_REQUESTED / EXISTING_ASSETS_REUSED; no new media bytes, OCR, or ASR work
+  status: requestRef / workOrderRef / leaseRef / task → attempt → package → receipt
 ```
 
 计数必须带 value state。`null/UNKNOWN`、`0/KNOWN` 与 `N/A` 不得共用一个空值。所有列表和 Inspector 值均来自受控 read model，不允许 UI 自行聚合原始业务表或 Package JSON。普通页面只读取脱敏 `candidateRef` 和上述地址断言元数据，不读取或显示原始 URI。`primary` 只表示 Producer 对本次来源观察的建议，不是永久权威；`expiresAtState=KNOWN` 时必须同时提供 `expiresAt`，未知时为 `UNKNOWN/null`。一次 Package 对同一 slot 只形成一个槽位级来源观察组；declared bundle、still/motion 组件和组件内 candidate assertions 都挂在该父级下。下载尝试必须同时绑定该来源观察组/generation 与精确 `candidateRef`，并交付开始/结束时间、terminal 和失败时的 `failureReason`。跨代来源只能进入明确标识的 `originHistory[]`，不得与本次 Package 的当前来源组摊平混排。
@@ -237,7 +252,20 @@ inspector:
 | `SELECTION_REQUIRED` | 结果存在但未选择作品 | Inspector 尚无对象 | 引导选择一行；不显示伪造详情 |
 | `ACCESS_RESTRICTED` | displayPolicy 不允许当前材料 | 材料可能存在但当前不展示 | 显示限制与用途，不泄漏原文 |
 
-### 7.3 组合规则
+### 7.3 复观测操作状态
+
+| 状态 | 用户应理解 | 不得写成 |
+|---|---|---|
+| `QUEUED` | 有界工作已形成，尚未由工位领取 | 已读取、已观察或已接纳 |
+| `CLAIMED` | 工位已领取，但尚未形成 Attempt | 执行完成 |
+| `RUNNING` | Attempt 已形成，尚未交付回执 | 成功、完整或当前事实已刷新 |
+| `ACCEPTED` | 对应 lane 的 Package 已有接纳回执 | 全 lane 完整、Coverage 完整或平台事实代表性 |
+| `EXPIRED_WITHOUT_RECEIPT` | Lease 到期而该 lane 未见接纳回执 | 失败已可自动重试、平台没有内容 |
+| `COMPLETED_WITHOUT_RECEIPT` | Task 已结束而未见接纳回执 | 成功或已经观察 |
+
+`ACCEPTED` 是回执事实，Coverage 仍按 lane 和每个 Package/Receipt 独立显示；部分 lane 接纳不能遮蔽另一个 lane 的未回执或部分 Coverage。
+
+### 7.4 组合规则
 
 - 作品没有全局 `complete / failed` 状态；只显示 lane 组合和最高优先限制。
 - `PARTIAL + VALID` 是一等状态；列表保留已取得材料，不进入“全部失败”。
@@ -256,7 +284,8 @@ inspector:
 | 展开材料片段 | displayPolicy 允许 | Material fragment read receipt | 展示脱敏片段、来源 ref、访问级别 | 自动获得完整原文权限 |
 | 查看来源/血缘 | 有受控 refs | Provenance read response | 展示 refs、Coverage、限制和 checkpoint execution receipt | checkpoint 是 Evidence、ACK 是完整 |
 | 查看本地媒体 | 可读本地副本且用途允许 | Linggan local asset handle | 固定尺寸预览、alt、bytes/replica 状态 | 使用外部 CDN fallback |
-| 保存视图/批量选择/研究/补采 | 当前无合同 | 无 | disabled + 开放条件 | 伪造成功 toast 或本地计数 |
+| 立即复观测 | 当前选中 XHS 作品有稳定 public ref，且可解析为既有 target-linked active deep-archive authorization | `POST /api/local/work-resources/{publicRef}/reobserve` 创建真实 Work Order/Lease；`GET …/reobserve/{leaseRef}` 读取实际 task/attempt/package/receipt | 显示固定详情/评论/回复范围、30 条评论窗口、无媒体策略和真实操作状态；无授权返回明确拒绝 | 已读取平台、泛化补采、作者/标题/URL/目标名回退、媒体/OCR/ASR 已请求 |
+| 保存视图/批量选择/研究/泛化补采 | 当前无合同 | 无 | disabled + 开放条件 | 伪造成功 toast 或本地计数 |
 
 查询、选择和 Tab 是可恢复 URL/本地视图状态，但不能被写成服务端业务动作。必读失败、限制和部分状态使用结果区或 Inspector inline feedback，不使用 Toast/Tooltip 作为唯一载体。
 

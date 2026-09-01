@@ -89,6 +89,7 @@
 | [design/acceptance/evidence-page-002-multi-material-reference-acceptance.md](design/acceptance/evidence-page-002-multi-material-reference-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-PAGE-002`：多材料 Evidence Library 静态参考的双视口、状态、互动和边界验收 |
 | [design/acceptance/evidence-runtime-001-visual-acceptance.md](design/acceptance/evidence-runtime-001-visual-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-RUNTIME-001`：Issue #90 运行页的自动检查、桌面/375px 浏览器证据与未证明边界 |
 | [design/acceptance/work-resource-read-001-visual-acceptance.md](design/acceptance/work-resource-read-001-visual-acceptance.md) | 一次性报告 | `ACC-WORK-RESOURCE-READ-001`：共享作品资源、目标/作者关系、时间资格和三种排版的分层验收；真实视觉与部署仍未核验 |
+| [design/acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md](design/acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md) | 一次性报告 | `ACC-DEV-05-XHS-CONTENT-OBSERVATION-001`：Issue #133 的当前/历史字段、Coverage 历史与有界复观测分层验收；未重载运行时、未进行真实 XHS 或 Mog 验收 |
 | [design/acceptance/design-009-runtime-capacity-surface-acceptance.md](design/acceptance/design-009-runtime-capacity-surface-acceptance.md) | 一次性报告 | `ACC-RUNTIME-001`：产能判定、状态诚实性与视觉的验收记录 |
 | [design/foundation/topic-intelligence-visual-language.md](design/foundation/topic-intelligence-visual-language.md) | 权威当前 | DESIGN-002 的 DS-001–DS-007：合成 Topic Reference Page 的受限视觉语言 |
 | [design/patterns/evidence-candidate-and-boundary-patterns.md](design/patterns/evidence-candidate-and-boundary-patterns.md) | 权威当前 | DESIGN-002 的 PAT-001–PAT-004：观察、候选、边界与无副作用意图表达 |

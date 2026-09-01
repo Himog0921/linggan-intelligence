@@ -6,7 +6,8 @@
 use super::*;
 use linggan_contracts::EvidenceQuery;
 use linggan_evidence::{
-    WorkResourceReadError, read_authorized_research_comments, read_work_resource,
+    ContentReobservationError, WorkResourceReadError, content_reobservation,
+    read_authorized_research_comments, read_content_reobservation, read_work_resource,
     read_work_resources, work_resource_schema_is_ready,
 };
 use linggan_storage_postgres::Database;
@@ -135,11 +136,18 @@ pub(super) async fn detail_json(
     match read_work_resource(database, public_ref).await {
         Ok(Some(item)) => {
             let comments_url = format!("/api/local/work-resources/{public_ref}/comments");
+            let reobservation_url = format!("/api/local/work-resources/{public_ref}/reobserve");
             Json(json!({"item":item,"channels":{
                 "comments":{"url":comments_url,"receipt":item.inspector.get("commentsReceipt")},
                 "media":{"receipt":item.inspector.get("mediaSlotsReceipt")},
                 "derivatives":{"receipt":item.inspector.get("derivativesReceipt")},
-                "provenance":{"receipt":item.inspector.pointer("/provenance/receipt")}
+                "provenance":{"receipt":item.inspector.pointer("/provenance/receipt")},
+                "reobservation":{
+                    "url":reobservation_url,
+                    "available":item.identity.platform == "xhs",
+                    "requires":"TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION",
+                    "mediaPolicy":"EXISTING_ASSETS_REUSED"
+                }
             }}))
             .into_response()
         }
@@ -149,6 +157,97 @@ pub(super) async fn detail_json(
             local_read_json_error(
                 axum::http::StatusCode::SERVICE_UNAVAILABLE,
                 "material_detail_unavailable",
+            )
+        }
+    }
+}
+
+/// This creates only the existing server-authorized acquisition chain. It never manufactures a
+/// producer task or calls a platform; a claimed Browser Producer may later execute the lease.
+pub(super) async fn reobserve_json(
+    State(state): State<LocalWebState>,
+    Path(public_ref): Path<String>,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(public_ref) = uuid::Uuid::parse_str(&public_ref) else {
+        return local_read_json_error(axum::http::StatusCode::BAD_REQUEST, "invalid_material_ref");
+    };
+    match content_reobservation(database, public_ref).await {
+        Ok(operation) => {
+            let status_url = operation.lease_ref.map(|lease_ref| {
+                format!("/api/local/work-resources/{public_ref}/reobserve/{lease_ref}")
+            });
+            Json(json!({"operation":operation,"statusUrl":status_url})).into_response()
+        }
+        Err(ContentReobservationError::WorkResourceNotFound) => {
+            local_read_json_error(axum::http::StatusCode::NOT_FOUND, "material_not_found")
+        }
+        Err(ContentReobservationError::PlatformNotSupported) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "reobservation_platform_not_supported",
+        ),
+        Err(ContentReobservationError::AuthorizedTargetMissing) => local_read_json_error(
+            axum::http::StatusCode::CONFLICT,
+            "reobservation_authorization_not_linked",
+        ),
+        Err(ContentReobservationError::Acquisition(error)) => {
+            eprintln!("reobservation admission unavailable: {error}");
+            local_read_json_error(
+                axum::http::StatusCode::CONFLICT,
+                "reobservation_admission_unavailable",
+            )
+        }
+        Err(ContentReobservationError::Lease(error)) => {
+            eprintln!("reobservation lease unavailable: {error}");
+            local_read_json_error(
+                axum::http::StatusCode::CONFLICT,
+                "reobservation_lease_unavailable",
+            )
+        }
+        Err(ContentReobservationError::Database(error)) => {
+            eprintln!("reobservation database unavailable: {error}");
+            local_read_json_error(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "reobservation_unavailable",
+            )
+        }
+    }
+}
+
+pub(super) async fn reobservation_status_json(
+    State(state): State<LocalWebState>,
+    Path((public_ref, lease_ref)): Path<(String, String)>,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let (Ok(public_ref), Ok(lease_ref)) = (
+        uuid::Uuid::parse_str(&public_ref),
+        uuid::Uuid::parse_str(&lease_ref),
+    ) else {
+        return local_read_json_error(
+            axum::http::StatusCode::BAD_REQUEST,
+            "invalid_reobservation_reference",
+        );
+    };
+    match read_content_reobservation(database, public_ref, lease_ref).await {
+        Ok(Some(operation)) => Json(json!({"operation":operation})).into_response(),
+        Ok(None) => {
+            local_read_json_error(axum::http::StatusCode::NOT_FOUND, "reobservation_not_found")
+        }
+        Err(error) => {
+            eprintln!("reobservation status unavailable: {error}");
+            local_read_json_error(
+                axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                "reobservation_status_unavailable",
             )
         }
     }

@@ -354,6 +354,14 @@ fn material_api_routes() -> Router<LocalWebState> {
             get(material_projection::research_comments_json),
         )
         .route(
+            "/api/local/work-resources/{public_ref}/reobserve",
+            post(material_projection::reobserve_json),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/reobserve/{lease_ref}",
+            get(material_projection::reobservation_status_json),
+        )
+        .route(
             "/api/local/work-resources/{public_ref}",
             get(material_projection::detail_json),
         )

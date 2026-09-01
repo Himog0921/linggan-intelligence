@@ -4,6 +4,7 @@
 mod acquisition_chain;
 mod archive_completeness;
 mod collection_target;
+mod content_reobservation;
 mod dispatch;
 mod execution_station;
 mod ingress;
@@ -38,13 +39,17 @@ mod work_resource_read;
 pub use acquisition_chain::{
     AcquisitionChainError, AuthorizationGrant, MaterialDeepeningTarget, RequestOutcome,
     acquisition_chain_schema_is_ready, grant_authorization, read_capacity, request_and_admit,
-    request_and_admit_material_targets,
+    request_and_admit_material_targets, request_and_admit_material_targets_under_authorization,
 };
 pub use archive_completeness::{ArchiveCompleteness, read_archive_completeness};
 pub use collection_target::{
     CollectionTargetError, ObservationTarget, StoreOutcome, TargetCounts,
     collection_target_schema_is_ready, count_targets, list_targets, list_targets_in_state,
     read_target, store_pending_target, transition_target,
+};
+pub use content_reobservation::{
+    ContentReobservation, ContentReobservationError, ContentReobservationStatus,
+    ReobservationMediaPolicy, ReobservationTask, content_reobservation, read_content_reobservation,
 };
 pub use dispatch::{DispatchDecision, DispatchError, decide_dispatch, dispatch_schema_is_ready};
 pub use execution_station::{

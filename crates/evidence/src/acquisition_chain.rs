@@ -119,7 +119,7 @@ pub async fn request_and_admit(
     purpose: &str,
     requested_by: &str,
 ) -> Result<RequestOutcome, AcquisitionChainError> {
-    request_and_admit_inner(database, target_ref, lane, purpose, requested_by, &[]).await
+    request_and_admit_inner(database, target_ref, lane, purpose, requested_by, &[], None).await
 }
 
 /// Admit one exact, person-selected set of existing materials for bounded deepening.
@@ -142,6 +142,32 @@ pub async fn request_and_admit_material_targets(
         purpose,
         requested_by,
         material_targets,
+        None,
+    )
+    .await
+}
+
+/// Admit one frozen material set under the exact authorization already linked to that material.
+///
+/// This is intentionally narrower than ordinary admission: a reobservation may not discover a
+/// second, broader grant for the same target class and use it as an authorization fallback.
+pub async fn request_and_admit_material_targets_under_authorization(
+    database: &Database,
+    target_ref: Uuid,
+    purpose: &str,
+    requested_by: &str,
+    material_targets: &[MaterialDeepeningTarget],
+    authorization_ref: Uuid,
+) -> Result<RequestOutcome, AcquisitionChainError> {
+    validate_material_targets(material_targets)?;
+    request_and_admit_inner(
+        database,
+        target_ref,
+        "deep_archive",
+        purpose,
+        requested_by,
+        material_targets,
+        Some(authorization_ref),
     )
     .await
 }
@@ -153,6 +179,7 @@ async fn request_and_admit_inner(
     purpose: &str,
     requested_by: &str,
     material_targets: &[MaterialDeepeningTarget],
+    required_authorization_ref: Option<Uuid>,
 ) -> Result<RequestOutcome, AcquisitionChainError> {
     if !acquisition_chain_schema_is_ready(database).await? {
         return Err(AcquisitionChainError::SchemaUnavailable);
@@ -217,7 +244,8 @@ async fn request_and_admit_inner(
         &target_kind,
         lane,
         target_ref,
-        !material_targets.is_empty(),
+        material_targets,
+        required_authorization_ref,
     )
     .await?;
     let outcome = decide_admission(&facts);
@@ -350,17 +378,20 @@ async fn gather_facts(
     target_kind: &str,
     lane: &str,
     target_ref: Uuid,
-    material_deepening: bool,
+    material_targets: &[MaterialDeepeningTarget],
+    required_authorization_ref: Option<Uuid>,
 ) -> Result<AdmissionFacts, sqlx::Error> {
     let authorization_ref: Option<Uuid> = sqlx::query_scalar(
         "SELECT authorization_ref FROM collection_acquisition_authorization \
          WHERE platform = $1 AND target_kind = $2 AND lane = $3 \
            AND revoked_at IS NULL AND expires_at > scope_001_now() \
+           AND ($4::uuid IS NULL OR authorization_ref=$4) \
          ORDER BY expires_at DESC LIMIT 1",
     )
     .bind(platform)
     .bind(target_kind)
     .bind(lane)
+    .bind(required_authorization_ref)
     .fetch_optional(&mut **transaction)
     .await?;
 
@@ -369,17 +400,37 @@ async fn gather_facts(
     //
     // 此前的判据是「存在一行工单」——而工单从不结束，于是第一次巡检之后，后续每一次都被
     // 合并掉，巡检永远只跑一次。一个只置位、从不复位的状态，等于把功能永久关掉。
-    let in_flight: bool = sqlx::query_scalar(
-        "SELECT EXISTS ( \
-             SELECT 1 FROM collection_work_order w \
-             JOIN collection_work_order_lease l ON l.work_order_ref = w.work_order_ref \
-             WHERE w.target_ref = $1 AND w.lane = $2 \
-               AND l.released_at IS NULL AND l.expires_at > scope_001_now())",
-    )
-    .bind(target_ref)
-    .bind(lane)
-    .fetch_one(&mut **transaction)
-    .await?;
+    let in_flight: bool = if material_targets.is_empty() {
+        sqlx::query_scalar(
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM collection_work_order w \
+                 JOIN collection_work_order_lease l ON l.work_order_ref = w.work_order_ref \
+                 WHERE w.target_ref = $1 AND w.lane = $2 \
+                   AND l.released_at IS NULL AND l.expires_at > scope_001_now())",
+        )
+        .bind(target_ref)
+        .bind(lane)
+        .fetch_one(&mut **transaction)
+        .await?
+    } else {
+        let content_refs: Vec<Uuid> = material_targets
+            .iter()
+            .map(|target| target.content_public_ref)
+            .collect();
+        sqlx::query_scalar(
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM collection_work_order w \
+                 JOIN collection_work_order_material_target scope ON scope.work_order_ref=w.work_order_ref \
+                 JOIN collection_work_order_lease l ON l.work_order_ref=w.work_order_ref \
+                 WHERE w.target_ref=$1 AND w.lane=$2 AND scope.content_public_ref=ANY($3) \
+                   AND l.released_at IS NULL AND l.expires_at > scope_001_now())",
+        )
+        .bind(target_ref)
+        .bind(lane)
+        .bind(&content_refs)
+        .fetch_one(&mut **transaction)
+        .await?
+    };
 
     let capacity = establish_capacity(
         transaction,
@@ -387,7 +438,7 @@ async fn gather_facts(
         target_kind,
         lane,
         Some(target_ref),
-        material_deepening,
+        material_targets,
     )
     .await?;
 
@@ -436,7 +487,7 @@ pub async fn read_capacity(
 ) -> Result<Capacity, sqlx::Error> {
     let mut transaction = database.pool().begin().await?;
     let capacity =
-        establish_capacity(&mut transaction, platform, target_kind, lane, None, false).await?;
+        establish_capacity(&mut transaction, platform, target_kind, lane, None, &[]).await?;
     transaction.rollback().await?;
     Ok(capacity)
 }
@@ -452,7 +503,7 @@ async fn establish_capacity(
     target_kind: &str,
     lane: &str,
     target_ref: Option<Uuid>,
-    material_deepening: bool,
+    material_targets: &[MaterialDeepeningTarget],
 ) -> Result<Capacity, sqlx::Error> {
     // 风险暂停优先：正在停的时候，工位是否充足并不重要。
     let pause: Option<String> = sqlx::query_scalar(
@@ -501,10 +552,17 @@ async fn establish_capacity(
         return Ok(Capacity::NoStaffedStation);
     }
 
-    let required = if material_deepening {
-        &["content_detail", "media_slots", "comments", "replies"][..]
+    let required = if !material_targets.is_empty() {
+        // The selected scope is the authority boundary. A normal reobservation that expressly
+        // says `acquire_media=false` must not be deferred merely because the station lacks a
+        // capability that its Work Order will never request.
+        let mut required = vec!["content_detail", "comments", "replies"];
+        if material_targets.iter().any(|target| target.acquire_media) {
+            required.push("media_slots");
+        }
+        required
     } else {
-        required_capabilities(target_kind, lane)
+        required_capabilities(target_kind, lane).to_vec()
     };
     let mut missing_for_all: Option<Vec<String>> = None;
     let mut quota_blocked: Option<(i32, i32)> = None;
