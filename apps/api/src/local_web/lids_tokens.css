@@ -69,6 +69,18 @@
   /* Typography */
   --lgi-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   --lgi-font-mono: "SFMono-Regular", "JetBrains Mono", "Roboto Mono", "Noto Sans Mono CJK SC", ui-monospace, monospace;
+  /* Three type roles, three jobs. Sans states what the system knows; mono carries the things a
+   * machine assigned — refs, counts, timestamps, state codes; serif is reserved for material
+   * quoted verbatim out of a source. A reader must be able to tell someone's own sentence from
+   * the system's description of it without reading either, so serif is never used for chrome. */
+  --lgi-font-evidence: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", Georgia, serif;
+  --lgi-font-display: "Arial Narrow", "DIN Condensed", "Roboto Condensed", "Helvetica Neue", var(--lgi-font-sans);
+
+  /* Applied to the right edge of a solid Ink action or an active plate, under a fade mask, so
+   * the mark reads as an instrument surface rather than as decoration. It must never sit under
+   * a label: mask the fade so the texture starts after the text ends. */
+  --lgi-mosaic-on-dark: conic-gradient(from 90deg, rgba(255, 255, 255, 0.22) 25%, transparent 0 50%, rgba(255, 255, 255, 0.22) 0 75%, transparent 0);
+  --lgi-mosaic-on-light: conic-gradient(from 90deg, rgba(17, 19, 21, 0.13) 25%, transparent 0 50%, rgba(17, 19, 21, 0.13) 0 75%, transparent 0);
   --lgi-text-display: clamp(3rem, 6vw, 5.5rem);
   --lgi-text-hero: 3rem;
   --lgi-text-page-title: 1.75rem;

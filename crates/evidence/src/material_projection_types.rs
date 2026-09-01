@@ -30,8 +30,43 @@ pub struct MaterialLibraryItem {
     pub summary: MaterialSummary,
     pub inspector: Value,
     pub matched_fields: Vec<&'static str>,
+    /// The one bounded original-voice excerpt this work shows in a list row.
+    ///
+    /// `None` is a real answer, not a missing value: the work has no readable text yet. Callers
+    /// must render that as an explicit state rather than substituting a title or a summary.
+    pub evidence_fragment: Option<MaterialEvidenceFragment>,
     #[serde(skip)]
     pub(crate) author_external_id: Option<String>,
+    /// Raw detail body, kept out of the response by `skip`. It stays on the item only so the
+    /// fragment reader can quote a bounded window of it without a second query; the full text
+    /// remains restricted under `MINIMUM_NECESSARY`.
+    #[serde(skip)]
+    pub(crate) body_text: Option<String>,
+}
+
+/// A verbatim excerpt of one named source, never a summary or a generated sentence.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterialEvidenceFragment {
+    pub text: String,
+    /// `detail_body` | `ocr_text` | `frame_ocr_text` | `asr_text` | `comment_body`. The reader
+    /// must be able to tell the author's own sentence from a comment or from machine-read text,
+    /// so this is never collapsed into a single "content" label in the UI.
+    pub source_kind: &'static str,
+    /// `SEARCH_MATCH` when this excerpt contains the current query, `FIRST_AVAILABLE` when it is
+    /// simply the most authorial text on hand.
+    pub selection_basis: &'static str,
+    /// Whether text was cut off either side. The excerpt already carries ellipses; this lets the
+    /// UI state the boundary without re-parsing the string.
+    pub truncated: bool,
+    pub source_ref: Option<Uuid>,
+    /// The media slot the text was read off, for OCR and transcript excerpts. This is what lets
+    /// the Inspector jump to the exact image a search hit came from.
+    pub slot_key: Option<String>,
+    /// Character offsets into `text`, for highlighting the hit. Absent unless `selection_basis`
+    /// is `SEARCH_MATCH`.
+    pub match_offset: Option<usize>,
+    pub match_length: Option<usize>,
 }
 
 #[derive(Debug, Serialize)]
