@@ -63,6 +63,10 @@
     asr_text: '视频转录',
   };
 
+  const SORT_OPTIONS = [
+    { value: 'latest_discovery', label: '最近观察' },
+    { value: 'relevance', label: '相关度' },
+  ];
   const INSPECTOR_WIDTHS = ['normal', 'wide', 'focus'];
   const WIDTH_STORAGE_KEY = 'linggan.evidence.inspectorWidth';
   const DRAWER_QUERY = '(max-width: 1180px)';
@@ -70,7 +74,9 @@
   const refs = {
     form: document.getElementById('ev-query-form'),
     search: document.getElementById('ev-search'),
-    sort: document.getElementById('ev-sort'),
+    sortToggle: document.getElementById('ev-sort-toggle'),
+    sortValue: document.getElementById('ev-sort-value'),
+    sortList: document.getElementById('ev-sort-list'),
     window: document.getElementById('ev-window'),
     lane: document.getElementById('ev-lane'),
     laneState: document.getElementById('ev-lane-state'),
@@ -82,7 +88,6 @@
     bench: document.getElementById('ev-bench'),
     list: document.getElementById('ev-work-list'),
     feedback: document.getElementById('ev-feedback'),
-    resultsCount: document.getElementById('ev-results-count'),
     resultsLegend: document.getElementById('ev-results-legend'),
     nextList: document.getElementById('ev-next-list'),
     inspector: document.getElementById('ev-inspector'),
@@ -126,6 +131,7 @@
     activeView: 'all',
     activeLayout: 'research',
     activeTab: 'overview',
+    activeSort: 'latest_discovery',
     inspectorWidth: 'normal',
     inspectorClosed: false,
     drawerOpen: false,
@@ -201,6 +207,23 @@
       : null;
   }
 
+  /* Rows show minute precision; the exact instant stays on the element's title and in the
+   * Inspector's fact grid. A scanning row does not need seconds, a `+00` offset or a `Z`, and
+   * an ISO string long enough to wrap costs more than the precision it buys. */
+  function compactMoment(value) {
+    if (typeof value !== 'string' || !value) return null;
+    const match = value.match(/^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/);
+    if (!match) return value;
+    const [, year, month, day, hour, minute] = match;
+    return `${year}-${month}-${day} ${hour}:${minute}`;
+  }
+
+  function compactDay(value) {
+    if (typeof value !== 'string' || !value) return null;
+    const match = value.match(/^(\d{4}-\d{2}-\d{2})/);
+    return match ? match[1] : value;
+  }
+
   function compactCount(value) {
     if (!Number.isFinite(value)) return '未知';
     if (value < 1000) return String(value);
@@ -244,7 +267,7 @@
     const params = new URLSearchParams();
     const query = refs.search.value.trim();
     if (query) params.set('q', query);
-    if (refs.sort.value !== 'latest_discovery') params.set('sort', refs.sort.value);
+    if (model.activeSort !== 'latest_discovery') params.set('sort', model.activeSort);
     if (refs.window.value !== 'latest_accepted_discovery') params.set('window', refs.window.value);
     if (refs.lane.value) params.set('lane', refs.lane.value);
     if (refs.laneState.value) params.set('laneState', refs.laneState.value);
@@ -285,13 +308,48 @@
     }
   }
 
+  /* Both decks' popovers behave the same way: one open at a time, closed by clicking outside,
+   * by Escape, and by choosing something. They are anchored to their button rather than
+   * expanding the deck, so opening one never reflows the results underneath. */
+  function closePopover(toggle, popover) {
+    popover.hidden = true;
+    toggle.setAttribute('aria-expanded', 'false');
+  }
+
+  function openPopover(toggle, popover) {
+    closeAllPopovers();
+    popover.hidden = false;
+    toggle.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeAllPopovers() {
+    closePopover(refs.filterToggle, refs.filterPanel);
+    closePopover(refs.sortToggle, refs.sortList);
+  }
+
+  function togglePopover(toggle, popover) {
+    if (popover.hidden) openPopover(toggle, popover);
+    else closePopover(toggle, popover);
+  }
+
+  function setSort(value) {
+    const option = SORT_OPTIONS.find((candidate) => candidate.value === value) || SORT_OPTIONS[0];
+    model.activeSort = option.value;
+    refs.sortValue.textContent = option.label;
+    [...refs.sortList.querySelectorAll('[data-ev-sort]')].forEach((button) => {
+      button.setAttribute('aria-selected', String(button.dataset.evSort === option.value));
+    });
+  }
+
   function activeFilterCount() {
     return [refs.window.value !== 'latest_accepted_discovery', refs.lane.value, refs.laneState.value, refs.mediaKind.value]
       .filter(Boolean).length;
   }
 
   function syncFilterCount() {
-    refs.filterCount.textContent = String(activeFilterCount());
+    const count = activeFilterCount();
+    refs.filterCount.textContent = String(count);
+    refs.filterToggle.dataset.active = String(count > 0);
   }
 
   /* ---------------------------------------------------------- material rail */
@@ -362,7 +420,9 @@
     const summary = materialSummary(item);
     const wrapper = node('div');
     const headline = node('div', 'ev-material-summary');
-    headline.append(document.createTextNode('材料 '));
+    /* The table already names this column, so the inline label is hidden there by CSS rather
+     * than repeated in every cell. */
+    headline.append(node('span', 'ev-material-label', '材料'));
     const ratio = node('b', null, summary.ready === null
       ? `未知 / ${summary.applicable}`
       : `${summary.ready} / ${summary.applicable}`);
@@ -478,8 +538,12 @@
     return wrapper;
   }
 
-  function publishedCopy(item) {
-    if (item.display?.publishedAtState === 'KNOWN') return item.display?.publishedAt || '发布时间已知';
+  function publishedCopy(item, compact = false) {
+    if (item.display?.publishedAtState === 'KNOWN') {
+      const raw = item.display?.publishedAt;
+      if (!raw) return '发布时间已知';
+      return compact ? compactDay(raw) : raw;
+    }
     if (item.display?.publishedAtState === 'SOURCE_TEXT_ONLY') {
       return `来源时间：${item.display?.publishedAtSourceText || '已观察'}`;
     }
@@ -499,7 +563,7 @@
     const target = item.collectionContext?.targetDisplayState === 'KNOWN'
       ? item.collectionContext.targetDisplayName
       : '监控目标当前未知';
-    const published = publishedCopy(item);
+    const published = publishedCopy(item, true);
 
     const identity = node('div', 'ev-identity');
     const eyebrow = node('div', 'ev-eyebrow');
@@ -523,7 +587,9 @@
     side.append(material.element);
     const detailState = laneSummary(item, 'detail')?.state || 'UNKNOWN';
     side.append(stateLine(detailState));
-    const observed = node('span', 'ev-observed', `最近观察 ${item.summary?.lastObservedAt || '未知'}`);
+    const observedAt = item.summary?.lastObservedAt;
+    const observed = node('span', 'ev-observed', `最近观察 ${compactMoment(observedAt) || '未知'}`);
+    if (observedAt) observed.title = `最近观察 ${observedAt}`;
     side.append(observed);
 
     if (model.activeLayout === 'table') {
@@ -533,7 +599,7 @@
         material.element,
         stateLine(detailState),
         tableCell(published, ''),
-        tableCell(item.summary?.lastObservedAt || '未知', ''),
+        tableCell(compactMoment(item.summary?.lastObservedAt) || '未知', ''),
       );
     } else {
       row.append(previewBlock(item), identity, side);
@@ -585,22 +651,32 @@
     refs.feedback.replaceChildren();
   }
 
+  /* The receipt bar only appears when the read did something the counts above cannot show. A
+   * successful ordinary read is already fully described by the readout and the rows, so
+   * restating "读取成功，当前显示 14 个作品集合" a third time is noise, not honesty. The read
+   * timestamp moves onto the results header as a title, where it stays checkable without
+   * occupying a line of its own. */
   function queryReceipt(payload, appended) {
-    const count = model.items.length;
-    refs.receipt.replaceChildren();
-    const main = node('span');
-    main.append(
-      node('b', null, appended ? `已继续读取，当前显示 ${count} 个作品集合` : `读取成功，当前显示 ${count} 个作品集合`),
-      document.createTextNode(` · 扫描 ${payload.scannedCount ?? '未知'} · 作品级材料投影`),
-    );
-    const meta = node('span', 'ev-receipt-meta');
-    meta.append(tech(`AS OF ${payload.asOf || 'UNKNOWN'}`));
+    const notes = [];
     if (payload.scanLimited) {
-      meta.append(document.createTextNode(' · '));
-      addTextWithTech(meta, '扫描预算已触发，可继续读取', 'SCAN LIMITED');
+      notes.push(['扫描预算已触发，当前结果不是全部匹配；可继续读取', 'SCAN LIMITED']);
     }
-    refs.receipt.append(main, meta);
-    refs.resultsCount.textContent = `${count} 个作品材料`;
+    if (payload.truncated && !payload.cursor) {
+      notes.push(['本次读取已截断，但来源没有给出继续读取的游标', 'TRUNCATED WITHOUT CURSOR']);
+    }
+    refs.receipt.replaceChildren();
+    refs.receipt.hidden = notes.length === 0;
+    if (notes.length) {
+      const main = node('span');
+      notes.forEach(([copy, code], index) => {
+        if (index) main.append(document.createTextNode(' · '));
+        addTextWithTech(main, copy, code);
+      });
+      const meta = node('span', 'ev-receipt-meta');
+      meta.append(tech(`扫描 ${payload.scannedCount ?? '未知'}`));
+      refs.receipt.append(main, meta);
+    }
+    refs.resultsLegend.title = `读取时间 ${payload.asOf || '未知'} · 扫描 ${payload.scannedCount ?? '未知'} 条${appended ? ' · 已继续读取' : ''}`;
     refs.nextList.hidden = !payload.cursor;
     refs.nextList.disabled = !payload.cursor;
     refs.nextList.dataset.cursor = payload.cursor || '';
@@ -620,7 +696,6 @@
       }
       setFeedback('loading', '正在读取本机材料投影', '只读取 Linggan 已接纳的作品级材料；不会触发平台搜索或采集。', 'LOCAL READ');
       refs.list.replaceChildren();
-      refs.resultsCount.textContent = '正在读取';
     }
     refs.nextList.disabled = true;
     try {
@@ -647,10 +722,10 @@
       model.items = [];
       renderRows(false);
       renderReadout();
-      refs.resultsCount.textContent = '读取不可用';
       refs.nextList.hidden = true;
       setFeedback('error', '本机材料读取暂时不可用', '当前没有读取任何作品材料；页面不会回退到旧卡片、远程数据库或平台 CDN。', error.code || 'READ PROJECTION UNAVAILABLE');
       refs.receipt.replaceChildren();
+      refs.receipt.hidden = false;
       addTextWithTech(refs.receipt, '当前未读取任何材料，不能据此判断库为空或来源不存在。', error.code || 'READ PROJECTION UNAVAILABLE');
     }
   }
@@ -770,8 +845,8 @@
     refs.inspectorFeedback.hidden = false;
     refs.inspectorFeedback.replaceChildren(node('strong', null, '正在读取当前作品详情'), tech('DETAIL READ'));
     refs.inspectorTitle.textContent = knownText(item.display?.title, item.display?.titleState, '标题当前未知');
-    refs.inspectorRef.textContent = `${(item.identity?.platform || 'unknown').toUpperCase()} / WORK ${publicRef.slice(0, 8).toUpperCase()}`;
-    refs.inspectorSummary.textContent = '详情、证据、材料与来源分别保留自己的读取回执。';
+    refs.inspectorRef.textContent = publicRef.slice(0, 8).toUpperCase();
+    refs.inspectorSummary.textContent = '正在读取当前作品详情。';
     model.detailController?.abort();
     model.detailController = new AbortController();
     try {
@@ -842,8 +917,16 @@
   function renderDetail(listItem, item, channels) {
     const inspector = item.inspector && typeof item.inspector === 'object' ? item.inspector : {};
     refs.inspectorTitle.textContent = knownText(item.display?.title, item.display?.titleState, '标题当前未知');
-    const creator = knownText(item.display?.creatorDisplayName, item.display?.creatorState, '作者当前未知');
-    refs.inspectorSummary.textContent = `${creator} · 最近观察 ${item.summary?.lastObservedAt || '未知'} · 主要限制 ${item.summary?.primaryLimitation || '未表达'}`;
+    /* The author and the observation time are already on the selected row two columns away.
+     * The header spends its one line on what the row cannot say: what this read is limited by.
+     * When nothing limits it, the line says so rather than printing a raw enum. */
+    const limitation = item.summary?.primaryLimitation;
+    refs.inspectorSummary.replaceChildren();
+    if (limitation && limitation !== 'NONE') {
+      addTextWithTech(refs.inspectorSummary, `当前主要限制：${limitationCopy(limitation)}`, limitation);
+    } else {
+      refs.inspectorSummary.textContent = '当前读取没有记录额外限制。';
+    }
     /* Both actions describe capabilities this build does not have. They stay disabled and say
      * why rather than becoming buttons that quietly do nothing. */
     refs.openSource.disabled = true;
@@ -854,6 +937,21 @@
     renderEvidence(listItem, item, inspector, channels.comments || {});
     renderMaterials(item, inspector, channels);
     renderTrace(inspector, channels.provenance || {});
+  }
+
+  /* Translates the limitation enums this page actually sees. An unmapped code still shows its
+   * raw value as the technical key beside this line, so a new one degrades to honest rather
+   * than to silence. */
+  function limitationCopy(code) {
+    return {
+      OTHER_LANES_NOT_EVALUATED: '其他材料通道尚未评估',
+      SOURCE_INCOMPLETE: '来源信息不完整',
+      ACTUAL_CANDIDATE_NOT_REPORTED_BY_PRODUCER: '采集端没有回报实际使用的候选地址',
+      COMMENTS_NOT_EVALUATED: '评论尚未评估',
+      MEDIA_NOT_EVALUATED: '媒体尚未评估',
+      RAW_BODY_NOT_RETURNED: '正文原文不在本次读取范围内',
+      LANE_NOT_EVALUATED: '该通道尚未评估',
+    }[code] || '来源未完整表达';
   }
 
   function renderOverview(item, inspector) {
@@ -1543,11 +1641,12 @@
         ? value
         : fallback;
     };
-    assign(refs.sort, 'sort', 'latest_discovery');
     assign(refs.window, 'window', 'latest_accepted_discovery');
     assign(refs.lane, 'lane', '');
     assign(refs.laneState, 'laneState', '');
     assign(refs.mediaKind, 'mediaKind', '');
+    const sort = params.get('sort');
+    setSort(SORT_OPTIONS.some((option) => option.value === sort) ? sort : 'latest_discovery');
     const view = params.get('view');
     model.activeView = view && viewFilters[view] ? view : 'all';
     const layout = params.get('layout');
@@ -1563,10 +1662,6 @@
     model.selectedRef = params.get('work') || null;
     viewButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.evView === model.activeView)));
     layoutButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.evLayout === model.activeLayout)));
-    if (activeFilterCount() > 0) {
-      refs.filterPanel.hidden = false;
-      refs.filterToggle.setAttribute('aria-expanded', 'true');
-    }
     syncFilterCount();
   }
 
@@ -1576,10 +1671,9 @@
     viewButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.evView === 'all')));
     loadList({ history: 'push' });
   });
-  refs.filterToggle.addEventListener('click', () => {
-    const open = refs.filterPanel.hidden;
-    refs.filterPanel.hidden = !open;
-    refs.filterToggle.setAttribute('aria-expanded', String(open));
+  refs.filterToggle.addEventListener('click', () => togglePopover(refs.filterToggle, refs.filterPanel));
+  document.addEventListener('pointerdown', (event) => {
+    if (!event.target.closest('.ev-popover-anchor')) closeAllPopovers();
   });
   document.getElementById('ev-reset').addEventListener('click', () => {
     refs.window.value = 'latest_accepted_discovery';
@@ -1595,7 +1689,15 @@
     syncFilterCount();
     loadList({ history: 'push' });
   }));
-  refs.sort.addEventListener('change', () => loadList({ keepSelection: true, history: 'push' }));
+  refs.sortToggle.addEventListener('click', () => togglePopover(refs.sortToggle, refs.sortList));
+  [...refs.sortList.querySelectorAll('[data-ev-sort]')].forEach((option) => {
+    option.addEventListener('click', () => {
+      setSort(option.dataset.evSort);
+      closePopover(refs.sortToggle, refs.sortList);
+      refs.sortToggle.focus();
+      loadList({ keepSelection: true, history: 'push' });
+    });
+  });
   refs.nextList.addEventListener('click', () => loadList({ append: true }));
   viewButtons.forEach((button) => button.addEventListener('click', () => {
     model.activeView = button.dataset.evView;
@@ -1667,6 +1769,13 @@
         const offset = event.shiftKey ? -1 : 1;
         focusable[(index + offset + focusable.length) % focusable.length].focus();
       }
+      return;
+    }
+    if (event.key === 'Escape' && (!refs.filterPanel.hidden || !refs.sortList.hidden)) {
+      event.preventDefault();
+      const toggle = refs.filterPanel.hidden ? refs.sortToggle : refs.filterToggle;
+      closeAllPopovers();
+      toggle.focus();
       return;
     }
     if (event.key === 'Escape' && model.drawerOpen && isDrawerLayout()) {
