@@ -2976,11 +2976,21 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
           <div class="ev-lightbox" id="ev-lightbox" role="dialog" aria-modal="true" aria-labelledby="ev-lightbox-title" hidden>
             <div class="ev-lightbox-head">
               <div><strong id="ev-lightbox-title">本地媒体对象</strong><span class="ev-lightbox-ref" id="ev-lightbox-ref"></span></div>
-              <button class="ev-lightbox-close" id="ev-lightbox-close" type="button"><span aria-hidden="true">×</span><span class="v7-sr-only">关闭查看器 Esc</span></button>
+              <div class="ev-lightbox-tools">
+                <div class="ev-zoom" role="group" aria-label="缩放">
+                  <button type="button" id="ev-zoom-out" aria-label="缩小"><span aria-hidden="true">−</span></button>
+                  <button type="button" id="ev-zoom-reset" class="ev-zoom-value">100%</button>
+                  <button type="button" id="ev-zoom-in" aria-label="放大"><span aria-hidden="true">+</span></button>
+                </div>
+                <button class="ev-lightbox-close" id="ev-lightbox-close" type="button"><span aria-hidden="true">×</span><span class="v7-sr-only">关闭查看器 Esc</span></button>
+              </div>
             </div>
             <div class="ev-lightbox-stage">
               <button class="ev-lightbox-step" id="ev-lightbox-prev" type="button" aria-label="上一张"><span aria-hidden="true">←</span></button>
-              <figure class="ev-lightbox-figure"><img id="ev-lightbox-image" alt=""><figcaption id="ev-lightbox-caption"></figcaption></figure>
+              <figure class="ev-lightbox-figure">
+                <div class="ev-lightbox-frame" id="ev-lightbox-frame"><img id="ev-lightbox-image" alt=""></div>
+                <figcaption id="ev-lightbox-caption"></figcaption>
+              </figure>
               <button class="ev-lightbox-step" id="ev-lightbox-next" type="button" aria-label="下一张"><span aria-hidden="true">→</span></button>
             </div>
           </div>

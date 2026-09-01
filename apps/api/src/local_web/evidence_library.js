@@ -98,7 +98,11 @@
     back: document.getElementById('ev-back-to-list'),
     tableHead: document.getElementById('ev-table-head'),
     lightbox: document.getElementById('ev-lightbox'),
+    lightboxFrame: document.getElementById('ev-lightbox-frame'),
     lightboxImage: document.getElementById('ev-lightbox-image'),
+    zoomIn: document.getElementById('ev-zoom-in'),
+    zoomOut: document.getElementById('ev-zoom-out'),
+    zoomReset: document.getElementById('ev-zoom-reset'),
     lightboxTitle: document.getElementById('ev-lightbox-title'),
     lightboxRef: document.getElementById('ev-lightbox-ref'),
     lightboxCaption: document.getElementById('ev-lightbox-caption'),
@@ -140,6 +144,9 @@
     mediaIndex: 0,
     lightboxIndex: 0,
     lightboxOpener: null,
+    zoom: 1,
+    panX: 0,
+    panY: 0,
   };
 
   function node(tag, className, text) {
@@ -1585,6 +1592,7 @@
   function paintLightbox() {
     const object = model.mediaObjects[model.lightboxIndex];
     if (!object) return;
+    resetZoom();
     refs.lightboxTitle.textContent = `${purposeLabel(object.purpose)} · 第 ${String(object.index + 1).padStart(2, '0')} / ${String(model.mediaObjects.length).padStart(2, '0')} 个`;
     refs.lightboxRef.textContent = object.objectRef
       ? `MED-${String(object.objectRef).slice(0, 8).toUpperCase()} · 采集序号 ${object.ordinal} · 平台排列顺序未经验证`
@@ -1604,6 +1612,57 @@
     refs.lightboxNext.disabled = model.lightboxIndex >= model.mediaObjects.length - 1;
   }
 
+  /* Zoom lives on the image inside the frame; the frame clips. Panning is only meaningful once
+   * the image is larger than its frame, so the offsets are clamped to the actual overflow —
+   * without that the picture can be dragged off screen and the reader has to guess how to get
+   * it back. */
+  const ZOOM_MIN = 1;
+  const ZOOM_MAX = 6;
+
+  function clampPan() {
+    const frame = refs.lightboxFrame.getBoundingClientRect();
+    const naturalWidth = refs.lightboxImage.clientWidth;
+    const naturalHeight = refs.lightboxImage.clientHeight;
+    const overflowX = Math.max(0, naturalWidth * model.zoom - frame.width);
+    const overflowY = Math.max(0, naturalHeight * model.zoom - frame.height);
+    model.panX = Math.min(0, Math.max(-overflowX, model.panX));
+    model.panY = Math.min(0, Math.max(-overflowY, model.panY));
+  }
+
+  function paintZoom() {
+    clampPan();
+    refs.lightboxImage.style.transform = `translate(${model.panX}px, ${model.panY}px) scale(${model.zoom})`;
+    refs.lightboxFrame.dataset.zoomed = String(model.zoom > 1);
+    refs.zoomReset.textContent = `${Math.round(model.zoom * 100)}%`;
+    refs.zoomOut.disabled = model.zoom <= ZOOM_MIN + 0.001;
+    refs.zoomIn.disabled = model.zoom >= ZOOM_MAX - 0.001;
+  }
+
+  /* Zooms about a point so the pixel under the cursor stays under the cursor. Without an anchor
+   * the picture appears to drift away from whatever the reader was looking at. */
+  function setZoom(next, anchorX = null, anchorY = null) {
+    const target = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, next));
+    if (target === model.zoom) return;
+    if (anchorX !== null) {
+      const ratio = target / model.zoom;
+      model.panX = anchorX - ratio * (anchorX - model.panX);
+      model.panY = anchorY - ratio * (anchorY - model.panY);
+    }
+    model.zoom = target;
+    if (target === ZOOM_MIN) {
+      model.panX = 0;
+      model.panY = 0;
+    }
+    paintZoom();
+  }
+
+  function resetZoom() {
+    model.zoom = 1;
+    model.panX = 0;
+    model.panY = 0;
+    paintZoom();
+  }
+
   function stepLightbox(delta) {
     const next = model.lightboxIndex + delta;
     if (next < 0 || next >= model.mediaObjects.length) return;
@@ -1614,6 +1673,7 @@
   function closeLightbox() {
     refs.lightbox.hidden = true;
     document.body.style.overflow = '';
+    resetZoom();
     refs.lightboxImage.removeAttribute('src');
     /* Focus goes back to the card the reader opened, not to the top of the panel. */
     if (model.lightboxOpener && document.contains(model.lightboxOpener)) {
@@ -1811,6 +1871,54 @@
   refs.lightbox.addEventListener('click', (event) => {
     if (event.target === refs.lightbox) closeLightbox();
   });
+  refs.zoomIn.addEventListener('click', () => setZoom(model.zoom * 1.5));
+  refs.zoomOut.addEventListener('click', () => setZoom(model.zoom / 1.5));
+  refs.zoomReset.addEventListener('click', resetZoom);
+
+  function framePoint(event) {
+    const frame = refs.lightboxFrame.getBoundingClientRect();
+    return [event.clientX - frame.left, event.clientY - frame.top];
+  }
+
+  refs.lightboxFrame.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    const [x, y] = framePoint(event);
+    setZoom(model.zoom * (event.deltaY < 0 ? 1.12 : 1 / 1.12), x, y);
+  }, { passive: false });
+
+  /* Double click toggles between fit and a working magnification, anchored where the reader
+   * clicked — the fastest way to inspect one corner of a text card and come back. */
+  refs.lightboxFrame.addEventListener('dblclick', (event) => {
+    const [x, y] = framePoint(event);
+    if (model.zoom > 1) resetZoom();
+    else setZoom(2.5, x, y);
+  });
+
+  let panning = false;
+  let panOrigin = [0, 0];
+  refs.lightboxFrame.addEventListener('pointerdown', (event) => {
+    if (model.zoom <= 1) return;
+    panning = true;
+    panOrigin = [event.clientX - model.panX, event.clientY - model.panY];
+    refs.lightboxFrame.dataset.grabbing = 'true';
+    refs.lightboxFrame.setPointerCapture(event.pointerId);
+  });
+  refs.lightboxFrame.addEventListener('pointermove', (event) => {
+    if (!panning) return;
+    model.panX = event.clientX - panOrigin[0];
+    model.panY = event.clientY - panOrigin[1];
+    paintZoom();
+  });
+  const endPan = (event) => {
+    if (!panning) return;
+    panning = false;
+    delete refs.lightboxFrame.dataset.grabbing;
+    if (refs.lightboxFrame.hasPointerCapture?.(event.pointerId)) {
+      refs.lightboxFrame.releasePointerCapture(event.pointerId);
+    }
+  };
+  refs.lightboxFrame.addEventListener('pointerup', endPan);
+  refs.lightboxFrame.addEventListener('pointercancel', endPan);
 
   /* One key handler owns Escape so the layers unwind in the order the reader sees them: the
    * lightbox first, then the mobile drawer. */
@@ -1825,9 +1933,19 @@
       } else if (event.key === 'ArrowRight') {
         event.preventDefault();
         stepLightbox(1);
+      } else if (event.key === '+' || event.key === '=') {
+        event.preventDefault();
+        setZoom(model.zoom * 1.5);
+      } else if (event.key === '-' || event.key === '_') {
+        event.preventDefault();
+        setZoom(model.zoom / 1.5);
+      } else if (event.key === '0') {
+        event.preventDefault();
+        resetZoom();
       } else if (event.key === 'Tab') {
         /* The dialog keeps focus: only its own controls are reachable while it is open. */
-        const focusable = [refs.lightboxClose, refs.lightboxPrev, refs.lightboxNext].filter((control) => !control.disabled);
+        const focusable = [refs.lightboxClose, refs.zoomOut, refs.zoomReset, refs.zoomIn, refs.lightboxPrev, refs.lightboxNext]
+          .filter((control) => !control.disabled);
         if (!focusable.length) return;
         const index = focusable.indexOf(document.activeElement);
         event.preventDefault();

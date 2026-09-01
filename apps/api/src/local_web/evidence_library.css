@@ -295,17 +295,17 @@
 .ev-media-viewport[data-grabbing="true"]{cursor:grabbing;scroll-snap-type:none;scroll-behavior:auto;user-select:none}
 .ev-media-strip{display:flex;gap:10px;min-width:max-content;padding:2px 1px 6px}
 /* Widening the Inspector shows more objects at once; it must never just enlarge one image. */
-.ev-media-card{position:relative;flex:0 0 clamp(180px,74%,300px);scroll-snap-align:start;padding:0;border:0;background:transparent;text-align:left;cursor:zoom-in}
-.ev-bench[data-inspector="wide"] .ev-media-card{flex-basis:clamp(200px,46%,300px)}
-.ev-bench[data-inspector="focus"] .ev-media-card{flex-basis:clamp(220px,31%,320px)}
+.ev-media-card{position:relative;flex:0 0 clamp(90px,37%,150px);scroll-snap-align:start;padding:0;border:0;background:transparent;text-align:left;cursor:zoom-in}
+.ev-bench[data-inspector="wide"] .ev-media-card{flex-basis:clamp(100px,23%,150px)}
+.ev-bench[data-inspector="focus"] .ev-media-card{flex-basis:clamp(110px,15.5%,160px)}
 .ev-media-frame{position:relative;aspect-ratio:4/5;display:grid;place-items:center;overflow:hidden;border:1px solid var(--v7-line-strong);background:var(--v7-gray)}
 .ev-media-card:hover .ev-media-frame{border-color:var(--v7-black)}
 .ev-media-card[data-current="true"] .ev-media-frame{border:2px solid var(--v7-black)}
 .ev-media-card[data-match="true"] .ev-media-frame{box-shadow:inset 0 4px 0 var(--v7-red)}
 .ev-media-card img{width:100%;height:100%;object-fit:contain;background:var(--v7-white)}
-.ev-media-index{position:absolute;left:7px;top:7px;padding:3px 6px;background:var(--v7-black);color:var(--v7-white);font:700 10px var(--lgi-font-mono);letter-spacing:.05em}
+.ev-media-index{position:absolute;left:5px;top:5px;padding:2px 4px;background:var(--v7-black);color:var(--v7-white);font:700 8.5px var(--lgi-font-mono);letter-spacing:.04em}
 .ev-media-absent{padding:12px;color:var(--v7-muted);font-size:11px;line-height:1.6;text-align:center}
-.ev-media-meta{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:7px;color:var(--v7-ghost);font:650 10.5px var(--lgi-font-mono);letter-spacing:.03em}
+.ev-media-meta{display:grid;gap:2px;margin-top:6px;color:var(--v7-ghost);font:650 9px var(--lgi-font-mono);letter-spacing:.02em}
 .ev-media-meta b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v7-muted);font-weight:650}
 .ev-media-progress{height:3px;margin-top:2px;background:var(--v7-sunken)}
 .ev-media-progress i{display:block;height:100%;background:var(--v7-black);transition:transform 140ms ease;transform-origin:left center}
@@ -327,8 +327,20 @@
 /* The image is framed and centred: most objects here are white text cards, and without a
  * boundary they dissolve into the white canvas and the reader cannot see where the evidence
  * ends. `contain` is non-negotiable — a crop would be a silent edit to evidence. */
-.ev-lightbox-figure{min-height:0;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;margin:0}
-.ev-lightbox-figure img{min-height:0;max-width:100%;max-height:100%;object-fit:contain;border:1px solid var(--v7-line-strong);background:var(--v7-white)}
+.ev-lightbox-figure{min-height:0;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;margin:0;overflow:hidden}
+/* The plate carries the border, not the image: once the image can be scaled and dragged it
+ * would otherwise slide out from under its own frame. The frame clips, the image moves inside. */
+.ev-lightbox-frame{position:relative;min-height:0;max-width:100%;max-height:100%;display:grid;place-items:center;overflow:hidden;border:2px solid var(--v7-black);background:var(--v7-white);box-shadow:var(--v7-brutal)}
+.ev-lightbox-frame img{display:block;max-width:100%;max-height:100%;object-fit:contain;transform-origin:0 0;will-change:transform}
+.ev-lightbox-frame[data-zoomed="true"]{cursor:grab}
+.ev-lightbox-frame[data-grabbing="true"]{cursor:grabbing}
+.ev-lightbox-tools{display:flex;align-items:center;gap:10px}
+.ev-zoom{display:flex;height:34px;border:1px solid var(--v7-black)}
+.ev-zoom button{min-width:34px;padding:0 8px;border:0;border-right:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:700 13px var(--lgi-font-mono);cursor:pointer}
+.ev-zoom button:last-child{border-right:0}
+.ev-zoom button:hover:not(:disabled){background:var(--v7-black);color:var(--v7-white)}
+.ev-zoom button:disabled{opacity:.3;cursor:default}
+.ev-zoom-value{min-width:62px;font-size:11px!important;font-variant-numeric:tabular-nums}
 .ev-lightbox-figure figcaption{color:var(--v7-muted);font:650 9px var(--lgi-font-mono);letter-spacing:.05em;text-align:center}
 
 /* Hover is stated per surface, never as one global colour. A single `color: Ink` rule reads
@@ -342,7 +354,7 @@
   .ev-work-row:hover{background:var(--v7-gray)}
   .ev-work-row[aria-selected="true"]:hover{background:var(--v7-soft-red)}
 }
-.ev-button:focus-visible,.ev-field select:focus-visible,.ev-sort select:focus-visible,.ev-quickviews button:focus-visible,.ev-layout-switch button:focus-visible,.ev-tabs button:focus-visible,.ev-back:focus-visible,.ev-asset-link:focus-visible,.ev-width-switch button:focus-visible,.ev-panel-close:focus-visible,.ev-media-card:focus-visible,.ev-media-nav button:focus-visible,.ev-lightbox-step:focus-visible,.ev-lightbox-close:focus-visible,.ev-inspector-reopen:focus-visible{outline:3px solid var(--v7-red);outline-offset:2px}
+.ev-button:focus-visible,.ev-field select:focus-visible,.ev-sort select:focus-visible,.ev-quickviews button:focus-visible,.ev-layout-switch button:focus-visible,.ev-tabs button:focus-visible,.ev-back:focus-visible,.ev-asset-link:focus-visible,.ev-width-switch button:focus-visible,.ev-panel-close:focus-visible,.ev-media-card:focus-visible,.ev-media-nav button:focus-visible,.ev-lightbox-step:focus-visible,.ev-lightbox-close:focus-visible,.ev-inspector-reopen:focus-visible,.ev-zoom button:focus-visible,.ev-select-toggle:focus-visible,.ev-select-list button:focus-visible{outline:3px solid var(--v7-red);outline-offset:2px}
 
 @media(max-width:1500px){
   .ev-bench[data-inspector="normal"]{--ev-inspector-w:390px}
@@ -386,7 +398,7 @@
   .ev-preview{width:56px;height:74px}
   .ev-side{grid-column:1/-1;padding-left:0;border-left:0;border-top:1px solid var(--v7-line);padding-top:8px}
   .ev-work-list[data-layout="cover"]{grid-template-columns:repeat(2,minmax(0,1fr))}
-  .ev-media-card{flex-basis:min(80vw,290px)}
+  .ev-media-card{flex-basis:min(40vw,145px)}
   .ev-lightbox-stage{grid-template-columns:40px minmax(0,1fr) 40px;padding:12px}
   .ev-lightbox-step{height:48px}
 }
