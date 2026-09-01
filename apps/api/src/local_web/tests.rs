@@ -1956,6 +1956,7 @@ fn the_primary_nav_links_to_entry_routes_never_to_a_sub_surface() {
 fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
     let html = evidence_library_html(None);
 
+    assert!(html.contains("/assets/evidence-observation.js"));
     assert!(html.contains("/assets/evidence-library.js"));
     assert!(html.contains("id=\"ev-work-list\""));
     assert!(html.contains("data-ev-panel=\"provenance\""));
@@ -1965,6 +1966,17 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
     assert!(EVIDENCE_LIBRARY_JS.contains("const API_ROOT = '/api/local/work-resources'"));
     assert!(EVIDENCE_LIBRARY_JS.contains("params.set('layout', model.activeLayout)"));
     assert!(EVIDENCE_LIBRARY_JS.contains("params.set('view', model.activeView)"));
+    assert!(EVIDENCE_OBSERVATION_JS.contains("createController"));
+    assert!(EVIDENCE_OBSERVATION_JS.contains("立即复观测"));
+    assert!(EVIDENCE_OBSERVATION_JS.contains("TARGET-LINKED AUTHORIZATION"));
+    assert!(EVIDENCE_OBSERVATION_JS.contains("commentsCoverageHistory"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("LATEST KNOWN PER METRIC"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("refreshSelectedDetailAfterReobservation"));
+    assert!(EVIDENCE_OBSERVATION_JS.contains("await onTerminal?.()"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("readJson(detailUrl, model.detailController.signal)"));
+    assert!(EVIDENCE_OBSERVATION_JS.contains("已合并到覆盖当前作品的在途工作"));
+    assert!(EVIDENCE_LIBRARY_JS.lines().count() < 1_000);
+    assert!(!EVIDENCE_LIBRARY_JS.contains("reobservationOperation"));
     assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"cover\"]"));
     assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"table\"]"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("/api/local/evidence-library/legacy"));
@@ -2077,10 +2089,11 @@ fn evidence_runtime_preserves_unknown_partial_and_restricted_states() {
 
 #[test]
 fn evidence_runtime_keeps_sensitive_text_and_media_inside_controlled_detail_reads() {
-    assert!(EVIDENCE_LIBRARY_JS.contains("LOCAL AUTHORIZED RESEARCH"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("IDENTITY WITHHELD"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("comment.body"));
+    assert!(EVIDENCE_OBSERVATION_JS.contains("LOCAL AUTHORIZED RESEARCH"));
+    assert!(EVIDENCE_OBSERVATION_JS.contains("IDENTITY WITHHELD"));
+    assert!(EVIDENCE_OBSERVATION_JS.contains("comment.body"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("authorExternalId"));
+    assert!(!EVIDENCE_OBSERVATION_JS.contains("authorExternalId"));
     assert!(EVIDENCE_LIBRARY_JS.contains("blob?.deliveryState === 'INLINE_SAFE'"));
     assert!(EVIDENCE_LIBRARY_JS.contains("'/api/local/media/'"));
     assert!(EVIDENCE_LIBRARY_JS.contains("'/api/local/derivative/'"));
@@ -2100,7 +2113,9 @@ fn evidence_runtime_has_bounded_continuation_keyboard_and_mobile_contracts() {
         "min-height:40px",
     ] {
         assert!(
-            EVIDENCE_LIBRARY_JS.contains(marker) || EVIDENCE_LIBRARY_CSS.contains(marker),
+            EVIDENCE_LIBRARY_JS.contains(marker)
+                || EVIDENCE_OBSERVATION_JS.contains(marker)
+                || EVIDENCE_LIBRARY_CSS.contains(marker),
             "runtime contract marker missing: {marker}"
         );
     }

@@ -65,6 +65,7 @@
 | [acceptance/evidence-page-002-multi-material-reference-acceptance.md](acceptance/evidence-page-002-multi-material-reference-acceptance.md) | ACC-EVIDENCE-PAGE-002：桌面/窄屏、状态、互动与证明边界验收 | 一次性报告 |
 | [changes/evidence-runtime-001-ui-change-manifest.md](changes/evidence-runtime-001-ui-change-manifest.md) | EVIDENCE-RUNTIME-001：Issue #90 运行页的数据、状态、交互、媒体安全与范围清单 | 权威当前 |
 | [acceptance/evidence-runtime-001-visual-acceptance.md](acceptance/evidence-runtime-001-visual-acceptance.md) | ACC-EVIDENCE-RUNTIME-001：运行页自动与桌面/375px 浏览器分层验收 | 一次性报告 |
+| [acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md](acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md) | ACC-DEV-05-XHS-CONTENT-OBSERVATION-001：Issue #133 的当前/历史事实、Coverage 历史与有界复观测分层验收 | 一次性报告；未重载运行时或进行真实 XHS 验收 |
 | [pages/topic-intelligence-reference-page.md](pages/topic-intelligence-reference-page.md) | PAGE-TOPIC-001：Topic Reference Page 的获准组合、状态与验收 | 权威当前 |
 | [changes/design-007-chinese-first-evidence-library-ui-change-manifest.md](changes/design-007-chinese-first-evidence-library-ui-change-manifest.md) | DESIGN-007：Evidence Library 中文优先规则的受限落地清单 | 权威当前 |
 | [changes/design-009-runtime-capacity-surface-ui-change-manifest.md](changes/design-009-runtime-capacity-surface-ui-change-manifest.md) | DESIGN-009：执行工位改为产能判定面，五处写死的接通状态改为实读 | 权威当前 |

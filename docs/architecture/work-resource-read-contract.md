@@ -15,6 +15,19 @@ Intelligence 页面只能消费共享 `Work Resource Read` Interface：
 - 授权评论通道：`GET /api/local/work-resources/{publicRef}/comments`
 - Rust Interface：`read_work_resources`、`read_work_resource`、`work_resource_schema_is_ready`
 
+Issue #133 为已选中的单一 XHS Work Resource 增加一个**受限 command adjunct**，它不改变上述
+read interface 的事实 owner，也不授权任何泛化采集或页面私有事实拼接：
+
+- `POST /api/local/work-resources/{publicRef}/reobserve`：只有既有 target-linked active
+  deep-archive authorization 才会记录新的 admission，并且只能沿 Work Order → Lease →
+  server-issued Task 发起详情/评论/回复（评论最多 30）的无媒体复观测；
+- `GET /api/local/work-resources/{publicRef}/reobserve/{leaseRef}`：只读取该精确 lease 的
+  Task/Attempt/Package/Receipt 状态；`ACCEPTED` 仍不是全 lane Coverage 完整。
+
+该 command 只调用 Linggan domain/acquisition chain；页面不得自己创建 Task、从作者/标题/URL/显示名
+猜测目标或授权，也不得把 command response 当成新的 Work Resource 事实。完成后必须重新读取本节的
+单品 GET，才可展示已接纳 Package 形成的当前/历史事实。
+
 Evidence Library 是首个消费者，不是接口 owner。后续选题、创作者、观察、研究或其他页面不得另写 SQL、另读 Package JSON、另建封面/作者/时间拼接规则，亦不得以页面私有 endpoint 形成第二份事实。
 
 内部的 typed Material Projection、Media V2 slot/origin/blob/materialization、评论与作者版本化读取可以继续拆模块；它们对页面只通过这个小 Interface 暴露。显式 `/api/local/evidence-library/legacy` 仅为旧发现卡兼容读取，不是共享资源入口，不得成为新页面 fallback。
@@ -43,6 +56,7 @@ WorkResource
 ├─ preview: compatibility projection only; business pages must not consume it
 ├─ laneSummaries[] / summary / matchedFields
 └─ detail inspector: field sources, Target/WorkOrder/Task/Attempt/Package/Receipt, media and limitations
+   └─ XHS reobservation operation: exact authorization/admission/lease/task status only; no media request
 ```
 
 列表与详情必须使用同一字段语义。三种布局只改变排版，不改变查询、字段资格、状态或血缘。

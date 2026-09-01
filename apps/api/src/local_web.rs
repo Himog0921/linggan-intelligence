@@ -89,6 +89,7 @@ const SHELL_CSS: &str = include_str!("local_web/shell.css");
 const COLLECTION_WORKSPACE_CSS: &str = include_str!("local_web/collection_workspace.css");
 const COLLECTION_WORKSPACE_JS: &str = include_str!("local_web/collection_workspace.js");
 const EVIDENCE_LIBRARY_CSS: &str = include_str!("local_web/evidence_library.css");
+const EVIDENCE_OBSERVATION_JS: &str = include_str!("local_web/evidence_observation.js");
 const EVIDENCE_LIBRARY_JS: &str = include_str!("local_web/evidence_library.js");
 #[cfg(test)]
 const LIDS_TOKEN_DOCUMENT: &str = include_str!("../../../docs/design/lids/tokens.md");
@@ -325,6 +326,10 @@ fn router(state: LocalWebState) -> Router {
         )
         .route("/collection/runtime/claims", post(collection_runtime_claim))
         .route("/assets/evidence-library.css", get(stylesheet))
+        .route(
+            "/assets/evidence-observation.js",
+            get(evidence_observation_script),
+        )
         .route("/assets/evidence-library.js", get(evidence_library_script))
         .route(
             "/assets/collection-workspace.css",
@@ -352,6 +357,14 @@ fn material_api_routes() -> Router<LocalWebState> {
         .route(
             "/api/local/work-resources/{public_ref}/comments",
             get(material_projection::research_comments_json),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/reobserve",
+            post(material_projection::reobserve_json),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/reobserve/{lease_ref}",
+            get(material_projection::reobservation_status_json),
         )
         .route(
             "/api/local/work-resources/{public_ref}",
@@ -2834,6 +2847,17 @@ async fn evidence_library_script() -> Response {
         .into_response()
 }
 
+async fn evidence_observation_script() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/javascript; charset=utf-8"),
+        )],
+        EVIDENCE_OBSERVATION_JS,
+    )
+        .into_response()
+}
+
 fn evidence_library_header(collection_state: Option<&str>) -> String {
     shell::global_header(
         shell::PrimarySurface::Corpus,
@@ -2853,6 +2877,7 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
     <meta name="color-scheme" content="light">
     <title>证据库 · Linggan Intelligence</title>
     <link rel="stylesheet" href="/assets/evidence-library.css">
+    <script src="/assets/evidence-observation.js" defer></script>
     <script src="/assets/evidence-library.js" defer></script>
   </head>
   <body>

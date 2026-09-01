@@ -99,22 +99,36 @@ pub async fn issue_work_order_lease(
     if !lease_schema_is_ready(database).await? {
         return Err(LeaseError::SchemaUnavailable);
     }
-    // 先把过期租约收回。过期的租约不该挡住新租约，而「它是正常到期还是一直挂着没人管」
-    // 必须留下记录才分得清。
-    expire_lapsed_leases(database).await?;
-
     let mut transaction = database.pool().begin().await?;
+    // 先把过期租约收回。过期的租约不该挡住新租约，而「它是正常到期还是一直挂着没人管」
+    // 必须留下记录才分得清。和接下来的 live-lease 判定放在同一事务，避免在两次读取之间
+    // 由另一个请求看见不同的执行事实。
+    expire_lapsed_leases_in_transaction(&mut transaction).await?;
+    let issued =
+        issue_work_order_lease_in_transaction(&mut transaction, work_order_ref, valid_for_minutes)
+            .await?;
+    transaction.commit().await?;
+    Ok(issued)
+}
 
-    let subject = load_subject(&mut transaction, work_order_ref).await?;
-    reject_if_already_leased(&mut transaction, work_order_ref).await?;
-    reject_if_risk_paused(&mut transaction, &subject).await?;
-    reject_if_station_unstaffed(&mut transaction, subject.station_ref).await?;
-    reject_if_authorization_lapsed(&mut transaction, &subject).await?;
+/// The transaction-aware issue path.  It deliberately does not open or commit a transaction:
+/// callers that create a Work Order and lease it as one domain operation keep the target lock,
+/// admission decision, frozen material scope, lease, and scheduled tasks all-or-nothing.
+pub(crate) async fn issue_work_order_lease_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+    valid_for_minutes: i32,
+) -> Result<IssuedLease, LeaseError> {
+    let subject = load_subject(transaction, work_order_ref).await?;
+    reject_if_already_leased(transaction, work_order_ref).await?;
+    reject_if_risk_paused(transaction, &subject).await?;
+    reject_if_station_unstaffed(transaction, subject.station_ref).await?;
+    reject_if_authorization_lapsed(transaction, &subject).await?;
 
-    let material_targets = load_material_targets(&mut transaction, work_order_ref).await?;
+    let material_targets = load_material_targets(transaction, work_order_ref).await?;
     let tasks = expand_into_tasks(&subject, &material_targets)?;
     for task in &tasks {
-        insert_scheduled_task(&mut transaction, task).await?;
+        insert_scheduled_task(transaction, task).await?;
     }
 
     let lease_ref = Uuid::new_v4();
@@ -130,11 +144,10 @@ pub async fn issue_work_order_lease(
     .bind(subject.station_ref)
     .bind(&capture_identity)
     .bind(valid_for_minutes)
-    .fetch_one(&mut *transaction)
+    .fetch_one(&mut **transaction)
     .await?;
-    insert_lease_tasks(&mut transaction, lease_ref, &tasks).await?;
+    insert_lease_tasks(transaction, lease_ref, &tasks).await?;
 
-    transaction.commit().await?;
     Ok(IssuedLease {
         lease_ref,
         station_ref: subject.station_ref,
@@ -269,12 +282,24 @@ pub async fn expire_lapsed_leases(database: &Database) -> Result<u64, LeaseError
     if !lease_schema_is_ready(database).await? {
         return Err(LeaseError::SchemaUnavailable);
     }
+    let mut transaction = database.pool().begin().await?;
+    let expired = expire_lapsed_leases_in_transaction(&mut transaction).await?;
+    transaction.commit().await?;
+    Ok(expired)
+}
+
+/// Apply expiry while preserving the caller's consistency boundary.  In particular, an admission
+/// that is about to decide whether a frozen scope is already executable must observe the same
+/// expiry result as the lease it may issue immediately afterwards.
+pub(crate) async fn expire_lapsed_leases_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<u64, sqlx::Error> {
     Ok(sqlx::query(
         "UPDATE collection_work_order_lease \
          SET released_at = expires_at, release_reason = 'expired' \
          WHERE released_at IS NULL AND expires_at <= scope_001_now()",
     )
-    .execute(database.pool())
+    .execute(&mut **transaction)
     .await?
     .rows_affected())
 }
@@ -283,13 +308,16 @@ async fn load_subject(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_order_ref: Uuid,
 ) -> Result<LeaseSubject, LeaseError> {
+    // Lock the same target row used by admission.  A pre-existing Work Order may be leased by a
+    // scheduler while a person requests reobservation; without this shared serialization point,
+    // each path could make its live-scope decision before seeing the other's lease.
     let row: Option<SubjectRow> = sqlx::query_as(
         "SELECT w.target_ref, w.station_ref, w.lane, w.max_works, \
                 t.platform, t.target_kind, t.identity_key, d.authorization_ref \
          FROM collection_work_order w \
          JOIN collection_observation_target t ON t.target_ref = w.target_ref \
          JOIN collection_admission_decision d ON d.decision_ref = w.decision_ref \
-         WHERE w.work_order_ref = $1 FOR UPDATE OF w",
+         WHERE w.work_order_ref = $1 FOR UPDATE OF w, t",
     )
     .bind(work_order_ref)
     .fetch_optional(&mut **transaction)
