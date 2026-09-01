@@ -12,35 +12,25 @@
 .ev-bench[data-inspector="focus"]{--ev-inspector-w:min(920px,72vw)}
 .ev-bench[data-inspector="closed"]{--ev-inspector-w:0px}
 
-.ev-main{min-width:0;min-height:0;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto auto minmax(0,1fr);overflow:hidden;background:var(--v7-white);color:var(--v7-black)}
+.ev-main{min-width:0;min-height:0;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr);overflow:hidden;background:var(--v7-white);color:var(--v7-black)}
 
-/* ---- page header + readout ---- */
-.ev-page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:32px;padding:18px 20px 15px;border-bottom:1px solid var(--v7-black);background:var(--v7-white)}
-.ev-page-identity{min-width:0}
-/* DESIGN-003: the breadcrumb and the rail already name this page, so the visible header states
- * the task and the scale instead of the name a third time. The h1 survives for assistive tech. */
-.ev-page-task{margin:0;font:750 21px/1.25 var(--lgi-font-sans);letter-spacing:-.02em;color:var(--v7-black)}
-.ev-page-lede{margin:7px 0 0;max-width:64ch;color:var(--v7-muted);font-size:13px;line-height:1.6}
-.ev-readout{display:grid;grid-auto-flow:column;gap:0;margin:0;flex:0 0 auto;border-left:1px solid var(--v7-line)}
-.ev-readout>div{padding:2px 20px;border-right:1px solid var(--v7-line)}
-.ev-readout>div:last-child{border-right:0;padding-right:0}
-.ev-readout dt{color:var(--v7-body,var(--v7-muted));font:650 12px/1.2 var(--lgi-font-sans);order:2;margin-top:6px}
-.ev-readout dd{margin:0;font:700 30px/1 var(--lgi-font-mono);font-variant-numeric:tabular-nums;color:var(--v7-black);order:1}
-.ev-readout dd.ev-readout-key{order:3;margin-top:3px;font:600 9px/1.2 var(--lgi-font-mono);letter-spacing:.1em;color:var(--v7-ghost)}
-.ev-readout>div{display:flex;flex-direction:column;align-items:flex-start}
+/* The works count rides on the rail entry instead of a header block: the rail is always on
+ * screen, and the number belongs next to the thing it counts. */
+.ev-rail-count{margin-left:auto;padding:1px 6px;background:var(--v7-red);color:var(--v7-white);font:700 11px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.ev-rail-count[hidden]{display:none}
 
 /* ---- query deck ---- */
 .ev-command{padding:13px 20px 0;border-bottom:1px solid var(--v7-black);background:var(--v7-gray)}
 .ev-query-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 14px;align-items:center}
 .ev-find{position:relative;display:flex;align-items:center;min-width:0;border:2px solid var(--v7-black);background:var(--v7-white)}
-.ev-find-mark{flex:0 0 auto;padding:0 11px 0 13px;color:var(--lgi-signal-ink);font:700 10.5px var(--lgi-font-mono);letter-spacing:.1em}
-.ev-find input{width:100%;height:46px;padding:0 13px 0 0;border:0;background:transparent;color:var(--v7-black);font:15px/1.2 var(--lgi-font-sans)}
+.ev-find-mark{align-self:stretch;display:flex;align-items:center;flex:0 0 auto;padding:0 11px;color:var(--lgi-signal-ink);font:700 10px var(--lgi-font-mono);letter-spacing:.1em}
+.ev-find input{width:100%;height:44px;padding:0 13px 0 0;border:0;background:transparent;color:var(--v7-black);font:14px/1.2 var(--lgi-font-sans)}
 .ev-find input:focus{outline:0}
-/* Clicking into the field is not an error, so it does not get the Signal ring: the border
- * already thickens to Ink. The ring is kept for keyboard focus, where a visible target is the
- * only way to know where you are — and it is Ink there too, because Signal means "this needs
- * attention", not "the caret is here". */
-.ev-find:has(input:focus-visible){outline:2px solid var(--v7-black);outline-offset:2px}
+/* Focus is shown inside the existing box, never as a second frame around it. The border grows
+ * inward by one pixel and the FIND mark inverts — perceptible without adding a ring that reads
+ * as a separate element stacked on the field. */
+.ev-find:focus-within{box-shadow:inset 0 0 0 1px var(--v7-black)}
+.ev-find:focus-within .ev-find-mark{background:var(--v7-black);color:var(--v7-white)}
 .ev-query-tools{display:flex;align-items:stretch;gap:8px}
 .ev-popover-anchor{position:relative;display:flex}
 .ev-filter-toggle{display:flex;align-items:center;gap:9px}
@@ -54,7 +44,7 @@
 
 /* Filters and sort hang off their own button instead of pushing the results down. A control
  * that reflows the page every time it opens makes the list jump under the reader's eyes. */
-.ev-popover{position:absolute;top:calc(100% + 6px);right:0;z-index:30;border:1px solid var(--v7-black);background:var(--v7-white);box-shadow:var(--lgi-shadow-overlay)}
+.ev-popover{position:absolute;top:calc(100% + 6px);right:0;z-index:30;border:1px solid var(--v7-black);background:var(--v7-white);box-shadow:var(--v7-brutal)}
 .ev-popover[hidden]{display:none}
 .ev-filter-panel{display:grid;grid-template-columns:repeat(2,minmax(190px,1fr));gap:14px 16px;width:max-content;max-width:min(560px,90vw);padding:16px}
 .ev-sort-list{display:grid;min-width:220px;padding:5px}
@@ -62,11 +52,23 @@
 .ev-sort-list button:hover{background:var(--v7-gray)}
 .ev-sort-list button[aria-selected="true"]{background:var(--v7-black);color:var(--v7-white)}
 .ev-sort-list button[aria-selected="true"] .v7-tech-key{color:rgba(255,255,255,.7)}
-.ev-field{min-width:0;display:grid;gap:6px;color:var(--v7-muted);font-size:12px;font-weight:650}
-.ev-field select{width:100%;height:38px;padding:0 9px;border:1px solid var(--v7-line-strong);border-radius:0;background:var(--v7-white);color:var(--v7-black);font:13px/1.2 var(--lgi-font-sans)}
+.ev-field{min-width:0;display:grid;gap:6px}
+.ev-field-label{color:var(--v7-muted);font:650 11.5px var(--lgi-font-sans)}
+.ev-field .ev-popover-anchor{display:block}
+.ev-select-toggle{width:100%;min-height:36px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 10px;border:1px solid var(--v7-black);border-radius:0;background:var(--v7-white);color:var(--v7-black);font:12.5px/1.2 var(--lgi-font-sans);text-align:left;cursor:pointer}
+.ev-select-toggle:hover{background:var(--v7-gray)}
+.ev-select-toggle[aria-expanded="true"]{background:var(--v7-black);color:var(--v7-white)}
+.ev-field[data-active="true"] .ev-select-toggle{border-color:var(--v7-red);box-shadow:inset 3px 0 0 var(--v7-red)}
+.ev-select-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The list opens flush under its own control, aligned left with it, and is scrollable rather
+ * than growing past the popover it lives in. */
+.ev-select-list{left:0;right:auto;top:calc(100% + 4px);display:grid;min-width:100%;max-height:264px;overflow-y:auto;padding:4px}
+.ev-select-list button{display:block;width:100%;min-height:34px;padding:0 10px;border:0;background:transparent;color:var(--v7-black);font:12.5px/1.2 var(--lgi-font-sans);text-align:left;white-space:nowrap;cursor:pointer}
+.ev-select-list button:hover{background:var(--v7-gray)}
+.ev-select-list button[aria-selected="true"]{background:var(--v7-black);color:var(--v7-white)}
 .ev-filter-foot{grid-column:1/-1;display:flex;align-items:flex-end;justify-content:flex-end}
 
-.ev-button{min-height:46px;padding:0 16px;border:1px solid var(--v7-black);border-radius:0;background:var(--v7-white);color:var(--v7-black);font:650 13px/1 var(--lgi-font-sans);cursor:pointer}
+.ev-button{min-height:44px;padding:0 16px;border:1px solid var(--v7-black);border-radius:0;background:var(--v7-white);color:var(--v7-black);font:650 12px/1 var(--lgi-font-sans);cursor:pointer}
 .ev-button--secondary{background:var(--v7-white)}
 .ev-button--ghost{border-color:var(--v7-line-strong);color:var(--v7-muted)}
 .ev-button:disabled{cursor:not-allowed;opacity:.45}
@@ -78,14 +80,14 @@
 .ev-button--primary:disabled::after{display:none}
 
 .ev-deck-foot{display:flex;align-items:stretch;justify-content:space-between;gap:24px;margin-top:12px}
-.ev-deck-label{align-self:center;color:var(--v7-muted);font:650 11.5px var(--lgi-font-sans);letter-spacing:.02em;white-space:nowrap}
+.ev-deck-label{align-self:center;color:var(--v7-muted);font:650 10.5px var(--lgi-font-sans);letter-spacing:.02em;white-space:nowrap}
 /* Saved views are not connected. The deck says so in place rather than showing a count that
  * would imply the feature exists. */
 .ev-saved-views{margin-right:14px;padding-right:14px;border-right:1px solid var(--v7-line)}
 .ev-quickviews,.ev-layout-control{display:flex;align-items:stretch;gap:2px;min-width:0}
 .ev-quickviews{overflow-x:auto;scrollbar-width:none}
 .ev-quickviews::-webkit-scrollbar{display:none}
-.ev-quickviews button,.ev-layout-switch button{min-height:42px;padding:0 13px;border:0;border-bottom:3px solid transparent;background:transparent;color:var(--v7-muted);font:650 13.5px var(--lgi-font-sans);white-space:nowrap;cursor:pointer}
+.ev-quickviews button,.ev-layout-switch button{min-height:42px;padding:0 13px;border:0;border-bottom:3px solid transparent;background:transparent;color:var(--v7-muted);font:650 12.5px var(--lgi-font-sans);white-space:nowrap;cursor:pointer}
 .ev-quickviews button[aria-pressed="true"],.ev-layout-switch button[aria-pressed="true"]{border-bottom-color:var(--v7-red);color:var(--v7-black);font-weight:750}
 .ev-layout-switch{display:flex;gap:2px}
 
@@ -100,11 +102,11 @@
 .ev-bench[data-inspector="closed"] .ev-inspector{display:none}
 .ev-results-head{position:sticky;top:0;z-index:4;min-height:38px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 16px;border-bottom:1px solid var(--v7-black);background:var(--v7-white)}
 .ev-results-head strong{font:650 11px var(--lgi-font-sans);color:var(--v7-black)}
-.ev-results-legend{color:var(--v7-ghost);font:650 11px var(--lgi-font-sans)}
+.ev-results-legend{color:var(--v7-ghost);font:650 10px var(--lgi-font-sans)}
 .ev-feedback{margin:12px 16px;padding:14px;border:1px solid var(--v7-line-strong);background:var(--v7-gray)}
 .ev-feedback[hidden]{display:none}
-.ev-feedback h2{margin:0 0 6px;font-size:16px}
-.ev-feedback p{margin:0 0 7px;color:var(--v7-muted);font-size:13px;line-height:1.6}
+.ev-feedback h2{margin:0 0 6px;font-size:15px}
+.ev-feedback p{margin:0 0 7px;color:var(--v7-muted);font-size:12px;line-height:1.6}
 .ev-feedback[data-kind="error"]{border-color:var(--v7-red);background:var(--v7-soft-red)}
 .ev-feedback[data-kind="empty"]{border-style:dashed}
 .ev-work-list{min-width:0}
@@ -130,9 +132,9 @@
  * of a metre — technically legible, actually unreadable, and it leaves the row looking stretched.
  * The material rail stays pinned right so the ratios line up down the column while scanning. */
 .ev-identity{min-width:0;max-width:760px}
-.ev-eyebrow{display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--v7-ghost);font:650 10px/1.3 var(--lgi-font-mono);letter-spacing:.05em}
-.ev-identity h2{margin:5px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:18px;font-weight:750;line-height:1.3;letter-spacing:-.015em;color:var(--v7-black)}
-.ev-meta{margin-top:6px;color:var(--v7-muted);font:12px/1.5 var(--lgi-font-sans)}
+.ev-eyebrow{display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--v7-ghost);font:650 9px/1.3 var(--lgi-font-mono);letter-spacing:.05em}
+.ev-identity h2{margin:5px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16.5px;font-weight:750;line-height:1.3;letter-spacing:-.015em;color:var(--v7-black)}
+.ev-meta{margin-top:6px;color:var(--v7-muted);font:10.5px/1.5 var(--lgi-font-sans)}
 .ev-meta b{color:var(--v7-black);font-weight:700}
 .ev-target-line{color:var(--v7-info)}
 
@@ -140,8 +142,8 @@
  * is mono and sits outside the quote, so a machine-read line can never be mistaken for a
  * sentence someone wrote. */
 .ev-evidence{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:baseline;gap:8px;margin-top:8px;padding:6px 10px;border-left:3px solid var(--v7-red);background:var(--lgi-signal-faint)}
-.ev-evidence-source{color:var(--lgi-signal-ink);font:650 11px var(--lgi-font-sans);white-space:nowrap}
-.ev-evidence q{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:15px/1.5 var(--lgi-font-evidence);color:var(--v7-black);quotes:none}
+.ev-evidence-source{color:var(--lgi-signal-ink);font:650 10px var(--lgi-font-sans);white-space:nowrap}
+.ev-evidence q{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:13.5px/1.5 var(--lgi-font-evidence);color:var(--v7-black);quotes:none}
 /* The row clamps its quote to one line because the row is a scanning surface. The Inspector is
  * where the reader came to actually read that quote, so the same block wraps in full there —
  * clamping it twice would hide the evidence inside the evidence panel. */
@@ -150,8 +152,8 @@
 .ev-evidence mark{padding:0 1px;background:var(--v7-red);color:var(--v7-white)}
 .ev-evidence--absent{border-left-color:var(--v7-line-strong);background:var(--v7-gray)}
 .ev-evidence--absent .ev-evidence-source{color:var(--v7-ghost)}
-.ev-evidence--absent span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v7-muted);font-size:12.5px}
-.ev-engagement{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:8px;color:var(--v7-muted);font:650 11.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.ev-evidence--absent span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v7-muted);font-size:11.5px}
+.ev-engagement{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:8px;color:var(--v7-muted);font:650 10.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
 .ev-engagement b{margin-left:3px;color:var(--v7-black);font-weight:750}
 
 /* ---- material summary rail ----
@@ -159,8 +161,8 @@
  * this work is drawn as an outline and excluded from the ratio, so an image note reads 4/4 and
  * never 4/5. Unknown is its own fill and is never drawn as zero. */
 .ev-side{display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding-left:12px;border-left:1px solid var(--v7-line)}
-.ev-material-summary{color:var(--v7-muted);font:650 11px var(--lgi-font-sans)}
-.ev-material-summary b{margin-left:4px;color:var(--v7-black);font:750 15px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.ev-material-summary{color:var(--v7-muted);font:650 10px var(--lgi-font-sans)}
+.ev-material-summary b{margin-left:4px;color:var(--v7-black);font:750 13.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
 .ev-work-list[data-layout="table"] .ev-material-label{display:none}
 .ev-work-list[data-layout="table"] .ev-material-summary b{margin-left:0}
 .ev-material-rail{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin-top:7px}
@@ -171,24 +173,24 @@
 .ev-mat-seg[data-fill="failed"]{background:var(--v7-red)}
 .ev-mat-seg[data-fill="not-applicable"]{background:var(--v7-white);border-color:var(--v7-line-strong)}
 .ev-mat-seg[data-fill="unknown"]{background:var(--v7-sunken)}
-.ev-state-line{display:flex;flex-wrap:wrap;align-items:center;gap:7px;color:var(--v7-muted);font:650 11.5px var(--lgi-font-sans)}
+.ev-state-line{display:flex;flex-wrap:wrap;align-items:center;gap:7px;color:var(--v7-muted);font:650 10.5px var(--lgi-font-sans)}
 .ev-state-dot{width:6px;height:6px;flex:0 0 auto;border-radius:50%;background:var(--v7-unknown)}
 .ev-state-dot[data-tone="success"]{background:var(--v7-ok)}
 .ev-state-dot[data-tone="warning"]{background:var(--v7-warn)}
 .ev-state-dot[data-tone="info"]{background:var(--v7-info)}
 .ev-state-dot[data-tone="danger"]{background:var(--v7-red)}
-.ev-observed{color:var(--v7-ghost);font:650 10.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.ev-observed{color:var(--v7-ghost);font:650 9.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
 
 /* ---- table layout ---- */
-.ev-table-head{position:sticky;top:38px;z-index:3;display:grid;grid-template-columns:minmax(210px,1.5fr) minmax(140px,.85fr) 140px minmax(96px,.6fr) minmax(104px,.62fr) minmax(104px,.62fr);gap:14px;padding:9px 16px;border-bottom:1px solid var(--v7-black);background:var(--v7-gray);color:var(--v7-muted);font:650 11px var(--lgi-font-sans)}
+.ev-table-head{position:sticky;top:38px;z-index:3;display:grid;grid-template-columns:minmax(210px,1.5fr) minmax(140px,.85fr) 140px minmax(96px,.6fr) minmax(104px,.62fr) minmax(104px,.62fr);gap:14px;padding:9px 16px;border-bottom:1px solid var(--v7-black);background:var(--v7-gray);color:var(--v7-muted);font:650 10px var(--lgi-font-sans)}
 .ev-table-head[hidden]{display:none}
 .ev-work-list[data-layout="table"] .ev-work-row{grid-template-columns:minmax(210px,1.5fr) minmax(140px,.85fr) 140px minmax(96px,.6fr) minmax(104px,.62fr) minmax(104px,.62fr);align-items:center;min-height:66px;padding:10px 16px}
 .ev-work-list[data-layout="table"] .ev-preview,.ev-work-list[data-layout="table"] .ev-evidence,.ev-work-list[data-layout="table"] .ev-engagement{display:none}
 .ev-work-list[data-layout="table"] .ev-side{display:contents}
 .ev-work-list[data-layout="table"] .ev-identity{max-width:none}
-.ev-work-list[data-layout="table"] .ev-identity h2{font-size:14px;margin-top:3px}
+.ev-work-list[data-layout="table"] .ev-identity h2{font-size:13px;margin-top:3px}
 .ev-work-list[data-layout="table"] .ev-material-rail{margin-top:4px}
-.ev-table-cell{min-width:0;color:var(--v7-muted);font:11.5px/1.5 var(--lgi-font-sans);font-variant-numeric:tabular-nums}
+.ev-table-cell{min-width:0;color:var(--v7-muted);font:10.5px/1.5 var(--lgi-font-sans);font-variant-numeric:tabular-nums}
 .ev-table-cell b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v7-black);font-weight:650}
 .ev-work-list[data-layout="research"] .ev-table-cell,.ev-work-list[data-layout="cover"] .ev-table-cell{display:none}
 
@@ -204,17 +206,15 @@
 
 /* ---- inspector ---- */
 .ev-inspector{min-width:0;overflow:auto;border-left:0;background:var(--v7-white)}
-.ev-inspector-head{position:sticky;top:0;z-index:5;padding:13px 14px 0;border-bottom:2px solid var(--v7-black);background:var(--v7-white)}
+.ev-inspector-head{position:sticky;top:0;z-index:5;padding:10px 14px 0;border-bottom:2px solid var(--v7-black);background:var(--v7-white)}
 .ev-back{display:none;min-height:40px;margin:0 0 8px;padding:0;border:0;background:transparent;color:var(--v7-info);font-weight:700}
 .ev-inspector-ref{margin-left:auto;color:var(--v7-ghost);font:650 10.5px var(--lgi-font-mono);letter-spacing:.05em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ev-inspector-head h2{margin:0;min-width:0;font-size:22px;line-height:1.25;letter-spacing:-.025em;overflow-wrap:anywhere}
-.ev-inspector-head>p{margin:7px 0 0;color:var(--v7-muted);font:12px/1.55 var(--lgi-font-sans)}
-.ev-inspector-head>p .v7-tech-key{display:block;margin-top:2px;color:var(--v7-ghost);font-size:9.5px;letter-spacing:.04em}
 /* Title and panel controls share one row so the header spends its height on the work's name
  * rather than on a stack of chrome. */
-.ev-inspector-title-row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}
-.ev-action-row{display:flex;align-items:center;gap:8px;min-width:0;margin-top:11px}
-.ev-action-row .ev-button{min-height:34px;padding:0 12px;font-size:12px}
+.ev-inspector-title-row{display:flex;align-items:center;justify-content:flex-end;gap:16px;margin-bottom:8px}
+.ev-action-row{display:flex;align-items:center;gap:8px;min-width:0;margin-top:0}
+.ev-action-row .ev-button{min-height:32px;padding:0 11px;font-size:11.5px}
 .ev-action-row .ev-button--primary{padding-right:40px}
 .ev-panel-tools{display:flex;align-items:center;gap:6px;flex:0 0 auto}
 .ev-width-switch{display:flex;height:32px;border:1px solid var(--v7-black)}
@@ -238,42 +238,42 @@
 .ev-inspector-feedback{display:flex;align-items:center;gap:8px;min-height:34px;margin:9px 0 0;padding:7px 10px;background:var(--v7-gray);font-size:10px}
 .ev-inspector-feedback[hidden]{display:none}
 .ev-tabs{display:grid;grid-template-columns:repeat(4,1fr);margin:11px -14px 0}
-.ev-tabs button{min-height:42px;padding:0 5px;border:0;border-top:1px solid var(--v7-line);border-bottom:3px solid transparent;background:transparent;color:var(--v7-muted);font:600 14px var(--lgi-font-sans);cursor:pointer}
+.ev-tabs button{min-height:42px;padding:0 5px;border:0;border-top:1px solid var(--v7-line);border-bottom:3px solid transparent;background:transparent;color:var(--v7-muted);font:600 12.5px var(--lgi-font-sans);cursor:pointer}
 .ev-tabs button[aria-selected="true"]{border-bottom-color:var(--v7-red);color:var(--v7-black);font-weight:750}
 .ev-inspector-body{padding:14px 14px 40px}
 .ev-inspector-body>[hidden]{display:none}
 .ev-inspect-section{margin-bottom:20px}
-.ev-inspect-section>h3{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 10px;padding-bottom:7px;border-bottom:1px solid var(--v7-black);font-size:14px}
+.ev-inspect-section>h3{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 10px;padding-bottom:7px;border-bottom:1px solid var(--v7-black);font-size:12.5px}
 .ev-facts{display:grid;grid-template-columns:minmax(96px,.66fr) minmax(0,1.34fr);margin:0;border-top:1px solid var(--v7-line)}
-.ev-facts dt,.ev-facts dd{min-height:34px;margin:0;padding:8px 7px;border-bottom:1px solid var(--v7-line);font-size:12.5px;line-height:1.5;overflow-wrap:anywhere}
+.ev-facts dt,.ev-facts dd{min-height:34px;margin:0;padding:8px 7px;border-bottom:1px solid var(--v7-line);font-size:11.5px;line-height:1.5;overflow-wrap:anywhere}
 .ev-facts dt{color:var(--v7-ghost)}
 .ev-facts dd{color:var(--v7-black);font-weight:600}
 .ev-detail-lanes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-top:1px solid var(--v7-black);border-left:1px solid var(--v7-line)}
 .ev-bench[data-inspector="focus"] .ev-detail-lanes,.ev-bench[data-inspector="wide"] .ev-detail-lanes{grid-template-columns:repeat(3,minmax(0,1fr))}
 .ev-lane{min-width:0;display:grid;grid-template-columns:1fr auto;gap:4px;padding:7px 8px;border-right:1px solid var(--v7-line);border-bottom:1px solid var(--v7-line)}
-.ev-lane-name{color:var(--v7-muted);font-size:12px;font-weight:650}
+.ev-lane-name{color:var(--v7-muted);font-size:11px;font-weight:650}
 .ev-lane-count{color:var(--v7-ghost);font:11px var(--lgi-font-mono);text-align:right;font-variant-numeric:tabular-nums}
 .ev-lane .ev-state-line{grid-column:1/-1}
-.ev-inline-state{margin:9px 0;padding:12px;border-left:3px solid var(--v7-line-strong);background:var(--v7-gray);font-size:12.5px}
+.ev-inline-state{margin:9px 0;padding:12px;border-left:3px solid var(--v7-line-strong);background:var(--v7-gray);font-size:11.5px}
 .ev-inline-state strong{display:block;margin-bottom:4px}
 .ev-inline-state p{margin:0 0 6px;color:var(--v7-muted);line-height:1.6}
 .ev-inline-state[data-tone="warning"]{border-color:var(--v7-warn);background:var(--v7-warn-soft)}
 .ev-inline-state[data-tone="danger"],.ev-inline-state[data-tone="restricted"]{border-color:var(--v7-red);background:var(--v7-soft-red)}
 .ev-channel-receipt{margin-bottom:16px;border-top:2px solid var(--v7-black)}
-.ev-channel-title{display:flex;justify-content:space-between;gap:10px;padding:9px 0;font-size:13px}
+.ev-channel-title{display:flex;justify-content:space-between;gap:10px;padding:9px 0;font-size:12px}
 .ev-channel-actions{display:flex;align-items:center;gap:8px}
 .ev-comment{padding:11px 0;border-top:1px solid var(--v7-line)}
 .ev-comment-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.ev-comment q{display:block;margin:8px 0;font:14px/1.75 var(--lgi-font-evidence);color:var(--v7-black);white-space:pre-wrap;quotes:none}
+.ev-comment q{display:block;margin:8px 0;font:13px/1.75 var(--lgi-font-evidence);color:var(--v7-black);white-space:pre-wrap;quotes:none}
 .ev-comment-meta,.ev-comment-receipt,.ev-channel-inline-receipt,.ev-loading-copy{color:var(--v7-ghost);font:11px var(--lgi-font-mono)}
 .ev-derivative{margin-bottom:11px;padding:10px;border:1px solid var(--v7-line-strong);background:var(--v7-white)}
-.ev-derivative-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;font-size:12.5px}
-.ev-derivative q{display:block;font:13.5px/1.75 var(--lgi-font-evidence);color:var(--v7-black);white-space:pre-wrap;quotes:none}
-.ev-provenance-group{display:grid;grid-template-columns:92px minmax(0,1fr);gap:6px;padding:9px 0;border-bottom:1px solid var(--v7-line);font-size:12px}
+.ev-derivative-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;font-size:11.5px}
+.ev-derivative q{display:block;font:12.5px/1.75 var(--lgi-font-evidence);color:var(--v7-black);white-space:pre-wrap;quotes:none}
+.ev-provenance-group{display:grid;grid-template-columns:92px minmax(0,1fr);gap:6px;padding:9px 0;border-bottom:1px solid var(--v7-line);font-size:11px}
 .ev-provenance-group code{grid-column:2;overflow-wrap:anywhere;color:var(--v7-muted);font:9px/1.4 var(--lgi-font-mono)}
 .ev-limit-list{margin:0;padding-left:20px}
-.ev-limit-list li{margin:8px 0;font-size:12.5px}
-.ev-asset-link{min-height:38px;display:inline-flex;align-items:center;color:var(--v7-info);font-size:12.5px;font-weight:700}
+.ev-limit-list li{margin:8px 0;font-size:11.5px}
+.ev-asset-link{min-height:38px;display:inline-flex;align-items:center;color:var(--v7-info);font-size:11.5px;font-weight:700}
 
 /* ---- LOCAL MEDIA rail ----
  * Every object is independently addressable and independently stateful: one failed download
@@ -281,13 +281,13 @@
  * this is evidence, and a crop is a silent edit. */
 .ev-media-module{margin-bottom:18px;border-top:2px solid var(--v7-black)}
 .ev-media-toolbar{min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0}
-.ev-media-summary b{display:block;font:700 13px var(--lgi-font-sans);color:var(--v7-black)}
-.ev-media-summary span{display:block;margin-top:4px;color:var(--v7-ghost);font:11px var(--lgi-font-sans)}
+.ev-media-summary b{display:block;font:700 12px var(--lgi-font-sans);color:var(--v7-black)}
+.ev-media-summary span{display:block;margin-top:4px;color:var(--v7-ghost);font:10px var(--lgi-font-sans)}
 .ev-media-nav{display:flex;align-items:center;gap:6px}
 .ev-media-nav button{width:29px;height:29px;display:grid;place-items:center;border:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:700 12px var(--lgi-font-mono);cursor:pointer}
 .ev-media-nav button:hover:not(:disabled){background:var(--v7-black);color:var(--v7-white)}
 .ev-media-nav button:disabled{opacity:.28;cursor:default}
-.ev-media-position{min-width:58px;text-align:center;color:var(--v7-muted);font:700 11.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.ev-media-position{min-width:58px;text-align:center;color:var(--v7-muted);font:700 10.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
 .ev-media-jump{width:auto!important;padding:0 9px!important;border-color:var(--v7-red)!important;color:var(--lgi-signal-ink);font:700 8px var(--lgi-font-mono)!important;letter-spacing:.05em}
 .ev-media-jump:hover{background:var(--v7-red)!important;color:var(--v7-white)!important}
 .ev-media-viewport{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior-x:contain;scrollbar-width:none;cursor:grab;padding:1px 0 4px}
@@ -304,7 +304,7 @@
 .ev-media-card[data-match="true"] .ev-media-frame{box-shadow:inset 0 4px 0 var(--v7-red)}
 .ev-media-card img{width:100%;height:100%;object-fit:contain;background:var(--v7-white)}
 .ev-media-index{position:absolute;left:7px;top:7px;padding:3px 6px;background:var(--v7-black);color:var(--v7-white);font:700 10px var(--lgi-font-mono);letter-spacing:.05em}
-.ev-media-absent{padding:12px;color:var(--v7-muted);font-size:12px;line-height:1.6;text-align:center}
+.ev-media-absent{padding:12px;color:var(--v7-muted);font-size:11px;line-height:1.6;text-align:center}
 .ev-media-meta{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-top:7px;color:var(--v7-ghost);font:650 10.5px var(--lgi-font-mono);letter-spacing:.03em}
 .ev-media-meta b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v7-muted);font-weight:650}
 .ev-media-progress{height:3px;margin-top:2px;background:var(--v7-sunken)}

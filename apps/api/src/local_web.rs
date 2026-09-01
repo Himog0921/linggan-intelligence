@@ -2860,7 +2860,7 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
       <!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->
       <div class="v7-shell">
         <aside class="v7-side" aria-label="语料导航">
-          <a class="v7-side-nav" href="/corpus/evidence" aria-current="page"><i>01</i><span>证据库</span></a>
+          <a class="v7-side-nav" href="/corpus/evidence" aria-current="page"><i>01</i><span>证据库</span><b class="ev-rail-count" id="ev-rail-count" hidden></b></a>
           <span class="v7-side-nav" aria-disabled="true"><i>02</i><span>评论研究</span></span>
           <span class="v7-side-nav" aria-disabled="true"><i>03</i><span>创作者</span></span>
           <span class="v7-side-nav" aria-disabled="true"><i>04</i><span>已存查询</span></span>
@@ -2868,19 +2868,7 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
         </aside>
 
         <main class="v7-main ev-main" aria-labelledby="page-title">
-          <header class="ev-page-head">
-            <h1 class="v7-sr-only" id="page-title">证据库</h1>
-            <div class="ev-page-identity">
-              <p class="ev-page-task">先找到作品，再看最强证据与材料缺口</p>
-              <p class="ev-page-lede">完整字段留在右侧检查器，不在列表重复。这里只显示 Linggan 已接纳的本机材料，不会触发平台采集。</p>
-            </div>
-            <dl class="ev-readout" id="ev-readout" aria-label="本次读取的量级">
-              <div><dt>作品</dt><dd id="ev-readout-works">—</dd><dd class="ev-readout-key">WORKS</dd></div>
-              <div><dt>已留存评论</dt><dd id="ev-readout-comments">—</dd><dd class="ev-readout-key">COMMENTS RETAINED</dd></div>
-              <div><dt>本地材料</dt><dd id="ev-readout-materials">—</dd><dd class="ev-readout-key">LOCAL MATERIALS</dd></div>
-              <div><dt>部分 / 缺口</dt><dd id="ev-readout-gap">—</dd><dd class="ev-readout-key">PARTIAL / GAP</dd></div>
-            </dl>
-          </header>
+          <h1 class="v7-sr-only" id="page-title">证据库</h1>
 
           <section class="ev-command" aria-label="材料检索与筛选">
             <form id="ev-query-form" class="ev-query-form">
@@ -2894,10 +2882,10 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
                     <span>筛选</span><b id="ev-filter-count">0</b>
                   </button>
                   <div class="ev-popover ev-filter-panel" id="ev-filter-panel" hidden>
-                    <label class="ev-field"><span>读取窗口</span><select id="ev-window" name="window"><option value="latest_accepted_discovery">最新已接纳发现</option><option value="last_7_days">近 7 天来源发布时间</option><option value="last_30_days">近 30 天来源发布时间</option></select></label>
-                    <label class="ev-field"><span>材料通道</span><select id="ev-lane" name="lane"><option value="">全部材料通道</option><option value="discovery">发现</option><option value="detail">详情</option><option value="comments">评论</option><option value="replies">回复</option><option value="author">作者</option><option value="media_slots">媒体槽位</option><option value="media_bytes">媒体字节</option><option value="ocr">图片文字</option><option value="asr">视频转录</option></select></label>
-                    <label class="ev-field"><span>通道状态</span><select id="ev-lane-state" name="laneState"><option value="">全部状态</option><option value="UNKNOWN">当前未知</option><option value="NOT_REQUESTED">尚未请求</option><option value="QUEUED">已排队</option><option value="NOT_OBSERVED">尚未观察</option><option value="OBSERVED">已观察</option><option value="PARTIAL">部分取得</option><option value="ACQUIRED">已取得</option><option value="PROCESSING">处理中</option><option value="NOT_ENABLED">处理器未启用</option><option value="SEARCHABLE">可检索</option><option value="FAILED">执行失败</option><option value="RISK_CONTROL">风险控制停止</option><option value="BYTES_CLEANED">字节已清理</option><option value="WITHDRAWN_OR_RESTRICTED">撤回或受限</option></select></label>
-                    <label class="ev-field"><span>媒体类型</span><select id="ev-media-kind" name="mediaKind"><option value="">全部类型</option><option value="cover">封面</option><option value="image">正文图片</option><option value="video">视频</option><option value="live_photo">实况图片</option></select></label>
+                    <div class="ev-field" data-ev-select="ev-window" data-ev-name="window"><span class="ev-field-label" id="ev-window-label">读取窗口</span><div class="ev-popover-anchor"><button class="ev-select-toggle" id="ev-window" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="ev-window-label ev-window-value" aria-controls="ev-window-list"><span class="ev-select-value" id="ev-window-value">最新已接纳发现</span><i class="ev-caret" aria-hidden="true"></i></button><div class="ev-popover ev-select-list" id="ev-window-list" role="listbox" aria-labelledby="ev-window-label" hidden><button type="button" role="option" data-ev-option="latest_accepted_discovery" aria-selected="true">最新已接纳发现</button><button type="button" role="option" data-ev-option="last_7_days" aria-selected="false">近 7 天来源发布时间</button><button type="button" role="option" data-ev-option="last_30_days" aria-selected="false">近 30 天来源发布时间</button></div></div></div>
+                    <div class="ev-field" data-ev-select="ev-lane" data-ev-name="lane"><span class="ev-field-label" id="ev-lane-label">材料通道</span><div class="ev-popover-anchor"><button class="ev-select-toggle" id="ev-lane" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="ev-lane-label ev-lane-value" aria-controls="ev-lane-list"><span class="ev-select-value" id="ev-lane-value">全部材料通道</span><i class="ev-caret" aria-hidden="true"></i></button><div class="ev-popover ev-select-list" id="ev-lane-list" role="listbox" aria-labelledby="ev-lane-label" hidden><button type="button" role="option" data-ev-option="" aria-selected="true">全部材料通道</button><button type="button" role="option" data-ev-option="discovery" aria-selected="false">发现</button><button type="button" role="option" data-ev-option="detail" aria-selected="false">详情</button><button type="button" role="option" data-ev-option="comments" aria-selected="false">评论</button><button type="button" role="option" data-ev-option="replies" aria-selected="false">回复</button><button type="button" role="option" data-ev-option="author" aria-selected="false">作者</button><button type="button" role="option" data-ev-option="media_slots" aria-selected="false">媒体槽位</button><button type="button" role="option" data-ev-option="media_bytes" aria-selected="false">媒体字节</button><button type="button" role="option" data-ev-option="ocr" aria-selected="false">图片文字</button><button type="button" role="option" data-ev-option="asr" aria-selected="false">视频转录</button></div></div></div>
+                    <div class="ev-field" data-ev-select="ev-lane-state" data-ev-name="laneState"><span class="ev-field-label" id="ev-lane-state-label">通道状态</span><div class="ev-popover-anchor"><button class="ev-select-toggle" id="ev-lane-state" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="ev-lane-state-label ev-lane-state-value" aria-controls="ev-lane-state-list"><span class="ev-select-value" id="ev-lane-state-value">全部状态</span><i class="ev-caret" aria-hidden="true"></i></button><div class="ev-popover ev-select-list" id="ev-lane-state-list" role="listbox" aria-labelledby="ev-lane-state-label" hidden><button type="button" role="option" data-ev-option="" aria-selected="true">全部状态</button><button type="button" role="option" data-ev-option="UNKNOWN" aria-selected="false">当前未知</button><button type="button" role="option" data-ev-option="NOT_REQUESTED" aria-selected="false">尚未请求</button><button type="button" role="option" data-ev-option="QUEUED" aria-selected="false">已排队</button><button type="button" role="option" data-ev-option="NOT_OBSERVED" aria-selected="false">尚未观察</button><button type="button" role="option" data-ev-option="OBSERVED" aria-selected="false">已观察</button><button type="button" role="option" data-ev-option="PARTIAL" aria-selected="false">部分取得</button><button type="button" role="option" data-ev-option="ACQUIRED" aria-selected="false">已取得</button><button type="button" role="option" data-ev-option="PROCESSING" aria-selected="false">处理中</button><button type="button" role="option" data-ev-option="NOT_ENABLED" aria-selected="false">处理器未启用</button><button type="button" role="option" data-ev-option="SEARCHABLE" aria-selected="false">可检索</button><button type="button" role="option" data-ev-option="FAILED" aria-selected="false">执行失败</button><button type="button" role="option" data-ev-option="RISK_CONTROL" aria-selected="false">风险控制停止</button><button type="button" role="option" data-ev-option="BYTES_CLEANED" aria-selected="false">字节已清理</button><button type="button" role="option" data-ev-option="WITHDRAWN_OR_RESTRICTED" aria-selected="false">撤回或受限</button></div></div></div>
+                    <div class="ev-field" data-ev-select="ev-media-kind" data-ev-name="mediaKind"><span class="ev-field-label" id="ev-media-kind-label">媒体类型</span><div class="ev-popover-anchor"><button class="ev-select-toggle" id="ev-media-kind" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="ev-media-kind-label ev-media-kind-value" aria-controls="ev-media-kind-list"><span class="ev-select-value" id="ev-media-kind-value">全部类型</span><i class="ev-caret" aria-hidden="true"></i></button><div class="ev-popover ev-select-list" id="ev-media-kind-list" role="listbox" aria-labelledby="ev-media-kind-label" hidden><button type="button" role="option" data-ev-option="" aria-selected="true">全部类型</button><button type="button" role="option" data-ev-option="cover" aria-selected="false">封面</button><button type="button" role="option" data-ev-option="image" aria-selected="false">正文图片</button><button type="button" role="option" data-ev-option="video" aria-selected="false">视频</button><button type="button" role="option" data-ev-option="live_photo" aria-selected="false">实况图片</button></div></div></div>
                     <div class="ev-filter-foot"><button class="ev-button ev-button--ghost" id="ev-reset" type="button">清空筛选</button></div>
                   </div>
                 </div>
@@ -2953,7 +2941,7 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
               <header class="ev-inspector-head">
                 <button class="ev-back" id="ev-back-to-list" type="button">← 返回当前作品</button>
                 <div class="ev-inspector-title-row">
-                  <h2 id="ev-inspector-title">请选择一个作品材料集合</h2>
+                  <h2 class="v7-sr-only" id="ev-inspector-title">请选择一个作品材料集合</h2>
                   <div class="ev-panel-tools">
                     <div class="ev-width-switch" role="group" aria-label="检查器宽度">
                       <button type="button" data-ev-width="normal" aria-pressed="true" title="标准宽度"><i class="ev-width-glyph ev-width-glyph--normal" aria-hidden="true"></i><span class="v7-sr-only">标准</span></button>
@@ -2963,7 +2951,6 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
                     <button class="ev-panel-close" id="ev-close-inspector" type="button" title="关闭检查器"><span aria-hidden="true">×</span><span class="v7-sr-only">关闭检查器</span></button>
                   </div>
                 </div>
-                <p id="ev-inspector-summary">右侧只核验当前选择，不补造未读取的详情。</p>
                 <div class="ev-action-row">
                   <button class="ev-button ev-button--primary" id="ev-open-source" type="button" disabled><span>打开原文</span></button>
                   <button class="ev-button" id="ev-request-media" type="button" disabled>补采</button>

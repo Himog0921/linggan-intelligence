@@ -77,10 +77,6 @@
     sortToggle: document.getElementById('ev-sort-toggle'),
     sortValue: document.getElementById('ev-sort-value'),
     sortList: document.getElementById('ev-sort-list'),
-    window: document.getElementById('ev-window'),
-    lane: document.getElementById('ev-lane'),
-    laneState: document.getElementById('ev-lane-state'),
-    mediaKind: document.getElementById('ev-media-kind'),
     filterToggle: document.getElementById('ev-filter-toggle'),
     filterPanel: document.getElementById('ev-filter-panel'),
     filterCount: document.getElementById('ev-filter-count'),
@@ -89,10 +85,10 @@
     list: document.getElementById('ev-work-list'),
     feedback: document.getElementById('ev-feedback'),
     resultsLegend: document.getElementById('ev-results-legend'),
+    railCount: document.getElementById('ev-rail-count'),
     nextList: document.getElementById('ev-next-list'),
     inspector: document.getElementById('ev-inspector'),
     inspectorTitle: document.getElementById('ev-inspector-title'),
-    inspectorSummary: document.getElementById('ev-inspector-summary'),
     inspectorRef: document.getElementById('ev-inspector-ref'),
     inspectorFeedback: document.getElementById('ev-inspector-feedback'),
     openSource: document.getElementById('ev-open-source'),
@@ -101,12 +97,6 @@
     reopenInspector: document.getElementById('ev-reopen-inspector'),
     back: document.getElementById('ev-back-to-list'),
     tableHead: document.getElementById('ev-table-head'),
-    readout: {
-      works: document.getElementById('ev-readout-works'),
-      comments: document.getElementById('ev-readout-comments'),
-      materials: document.getElementById('ev-readout-materials'),
-      gap: document.getElementById('ev-readout-gap'),
-    },
     lightbox: document.getElementById('ev-lightbox'),
     lightboxImage: document.getElementById('ev-lightbox-image'),
     lightboxTitle: document.getElementById('ev-lightbox-title'),
@@ -123,6 +113,9 @@
   const viewButtons = [...document.querySelectorAll('[data-ev-view]')];
   const layoutButtons = [...document.querySelectorAll('[data-ev-layout]')];
   const widthButtons = [...document.querySelectorAll('[data-ev-width]')];
+  const filterSelects = [...document.querySelectorAll('[data-ev-select]')].map(createSelect);
+  const selectByName = new Map(filterSelects.map((control) => [control.name, control]));
+  const filterNames = ['window', 'lane', 'laneState', 'mediaKind'];
 
   const model = {
     items: [],
@@ -268,10 +261,12 @@
     const query = refs.search.value.trim();
     if (query) params.set('q', query);
     if (model.activeSort !== 'latest_discovery') params.set('sort', model.activeSort);
-    if (refs.window.value !== 'latest_accepted_discovery') params.set('window', refs.window.value);
-    if (refs.lane.value) params.set('lane', refs.lane.value);
-    if (refs.laneState.value) params.set('laneState', refs.laneState.value);
-    if (refs.mediaKind.value) params.set('mediaKind', refs.mediaKind.value);
+    const windowValue = selectByName.get('window').value;
+    if (windowValue !== 'latest_accepted_discovery') params.set('window', windowValue);
+    ['lane', 'laneState', 'mediaKind'].forEach((name) => {
+      const value = selectByName.get(name).value;
+      if (value) params.set(name, value);
+    });
     if (cursor) params.set('cursor', cursor);
     return params;
   }
@@ -316,20 +311,94 @@
     toggle.setAttribute('aria-expanded', 'false');
   }
 
+  /* Opening one popover closes the others — except the ones it lives inside. The four filter
+   * selects sit within the filter panel, so a blanket close would dismiss the panel the moment
+   * a reader opened a select in it. */
   function openPopover(toggle, popover) {
-    closeAllPopovers();
+    closeAllPopovers(popover);
     popover.hidden = false;
     toggle.setAttribute('aria-expanded', 'true');
   }
 
-  function closeAllPopovers() {
-    closePopover(refs.filterToggle, refs.filterPanel);
-    closePopover(refs.sortToggle, refs.sortList);
+  function allPopovers() {
+    return [
+      [refs.filterToggle, refs.filterPanel],
+      [refs.sortToggle, refs.sortList],
+      ...filterSelects.map((control) => [control.toggle, control.list]),
+    ];
+  }
+
+  function closeAllPopovers(keepAncestorsOf = null) {
+    allPopovers().forEach(([toggle, popover]) => {
+      if (keepAncestorsOf && popover.contains(keepAncestorsOf)) return;
+      closePopover(toggle, popover);
+    });
   }
 
   function togglePopover(toggle, popover) {
     if (popover.hidden) openPopover(toggle, popover);
     else closePopover(toggle, popover);
+  }
+
+  /* A drawn select. The native control cannot be styled past its box — its popup is drawn by
+   * the operating system with its own radius, blue highlight and shadow — so a page with a
+   * hard-edged language ends up with four system-rendered menus inside it. These carry the
+   * same value semantics (a name, a current value, change events) with the page's own surface. */
+  function createSelect(root) {
+    const toggle = root.querySelector('.ev-select-toggle');
+    const list = root.querySelector('.ev-select-list');
+    const value = root.querySelector('.ev-select-value');
+    const options = [...list.querySelectorAll('[data-ev-option]')];
+    /* The first option is the default, not merely the initial value: a filter counts as active
+     * only when it differs from it. Treating any truthy value as active marked 读取窗口 as
+     * filtered permanently, because its default carries a value rather than an empty string. */
+    const fallback = options[0]?.dataset.evOption ?? '';
+    const control = {
+      name: root.dataset.evName,
+      root,
+      toggle,
+      list,
+      fallback,
+      value: fallback,
+      onChange: null,
+    };
+    function paint() {
+      const current = options.find((option) => option.dataset.evOption === control.value) || options[0];
+      value.textContent = current ? current.textContent : '';
+      options.forEach((option) => {
+        option.setAttribute('aria-selected', String(option === current));
+      });
+      root.dataset.active = String(control.value !== control.fallback);
+    }
+    control.set = (next, notify = false) => {
+      const exists = options.some((option) => option.dataset.evOption === next);
+      control.value = exists ? next : fallback;
+      paint();
+      if (notify) control.onChange?.();
+    };
+    toggle.addEventListener('click', (event) => {
+      event.stopPropagation();
+      togglePopover(toggle, list);
+    });
+    options.forEach((option) => {
+      option.addEventListener('click', () => {
+        closePopover(toggle, list);
+        toggle.focus();
+        control.set(option.dataset.evOption, true);
+      });
+    });
+    list.addEventListener('keydown', (event) => {
+      if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const index = options.indexOf(document.activeElement);
+      let next = 0;
+      if (event.key === 'ArrowDown') next = (index + 1) % options.length;
+      if (event.key === 'ArrowUp') next = (index - 1 + options.length) % options.length;
+      if (event.key === 'End') next = options.length - 1;
+      options[next].focus();
+    });
+    paint();
+    return control;
   }
 
   function setSort(value) {
@@ -342,8 +411,10 @@
   }
 
   function activeFilterCount() {
-    return [refs.window.value !== 'latest_accepted_discovery', refs.lane.value, refs.laneState.value, refs.mediaKind.value]
-      .filter(Boolean).length;
+    return filterNames.filter((name) => {
+      const control = selectByName.get(name);
+      return control.value !== control.fallback;
+    }).length;
   }
 
   function syncFilterCount() {
@@ -460,10 +531,11 @@
       localObjects += summary.localObjectCount;
       if (summary.hasGap || summary.failed) gapCount += 1;
     });
-    refs.readout.works.textContent = works ? String(works) : '—';
-    refs.readout.comments.textContent = commentsRetained === null ? '未知' : compactCount(commentsRetained);
-    refs.readout.materials.textContent = works ? String(localObjects) : '—';
-    refs.readout.gap.textContent = works ? String(gapCount) : '—';
+    refs.railCount.textContent = String(works);
+    refs.railCount.hidden = works === 0;
+    /* The other three figures the readout used to carry stay reachable as the entry's tooltip
+     * rather than as a header block: they describe this read, and this read is the list. */
+    refs.railCount.title = `本次读取 ${works} 个作品 · 已留存评论 ${commentsRetained === null ? '未知' : compactCount(commentsRetained)} · 本地材料 ${localObjects} · 部分或缺口 ${gapCount}`;
   }
 
   /* ----------------------------------------------------------- result rows */
@@ -813,9 +885,8 @@
     model.commentItems = [];
     model.mediaObjects = [];
     model.mediaIndex = 0;
-    refs.inspectorRef.textContent = 'SELECTION REQUIRED';
+    refs.inspectorRef.textContent = '';
     refs.inspectorTitle.textContent = '请选择一个作品材料集合';
-    refs.inspectorSummary.textContent = '右侧只核验当前选择，不补造未读取的详情。';
     refs.openSource.disabled = true;
     refs.requestMedia.disabled = true;
     refs.inspectorFeedback.hidden = false;
@@ -846,7 +917,6 @@
     refs.inspectorFeedback.replaceChildren(node('strong', null, '正在读取当前作品详情'), tech('DETAIL READ'));
     refs.inspectorTitle.textContent = knownText(item.display?.title, item.display?.titleState, '标题当前未知');
     refs.inspectorRef.textContent = publicRef.slice(0, 8).toUpperCase();
-    refs.inspectorSummary.textContent = '正在读取当前作品详情。';
     model.detailController?.abort();
     model.detailController = new AbortController();
     try {
@@ -867,9 +937,8 @@
 
   function showInspectorSourceIncomplete(item, detail) {
     model.selectedRef = item?.identity?.publicRef || null;
-    refs.inspectorRef.textContent = model.selectedRef ? `WORK ${model.selectedRef.slice(0, 8).toUpperCase()}` : 'SELECTION REQUIRED';
+    refs.inspectorRef.textContent = model.selectedRef ? model.selectedRef.slice(0, 8).toUpperCase() : '';
     refs.inspectorTitle.textContent = knownText(item?.display?.title, item?.display?.titleState, '标题当前未知');
-    refs.inspectorSummary.textContent = detail;
     refs.inspectorFeedback.hidden = false;
     refs.inspectorFeedback.replaceChildren(node('strong', null, '来源信息不完整'), tech('SOURCE INCOMPLETE'));
     panels.forEach((panel) => panel.replaceChildren(sourceIncompleteBlock(detail)));
@@ -916,17 +985,10 @@
 
   function renderDetail(listItem, item, channels) {
     const inspector = item.inspector && typeof item.inspector === 'object' ? item.inspector : {};
+    /* The header carries no prose at all: the selected row, one column to the left, already
+     * names the work, its author and when it was last observed. The limitation is a fact about
+     * this read, so it goes into the overview's fact grid with everything else. */
     refs.inspectorTitle.textContent = knownText(item.display?.title, item.display?.titleState, '标题当前未知');
-    /* The author and the observation time are already on the selected row two columns away.
-     * The header spends its one line on what the row cannot say: what this read is limited by.
-     * When nothing limits it, the line says so rather than printing a raw enum. */
-    const limitation = item.summary?.primaryLimitation;
-    refs.inspectorSummary.replaceChildren();
-    if (limitation && limitation !== 'NONE') {
-      addTextWithTech(refs.inspectorSummary, `当前主要限制：${limitationCopy(limitation)}`, limitation);
-    } else {
-      refs.inspectorSummary.textContent = '当前读取没有记录额外限制。';
-    }
     /* Both actions describe capabilities this build does not have. They stay disabled and say
      * why rather than becoming buttons that quietly do nothing. */
     refs.openSource.disabled = true;
@@ -983,6 +1045,11 @@
       ['时间来源字段', item.display?.publishedAtSourceField || '当前未知', item.display?.publishedAtSourceKind || 'unknown'],
       ['时间精度', item.display?.publishedAtPrecision || 'unknown', item.display?.publishedAtParserVersion || 'PARSER UNKNOWN'],
       ['最近观察', item.summary?.lastObservedAt || '当前未知', 'OBSERVED AT'],
+      ['当前主要限制',
+        item.summary?.primaryLimitation && item.summary.primaryLimitation !== 'NONE'
+          ? limitationCopy(item.summary.primaryLimitation)
+          : '本次读取没有记录额外限制',
+        item.summary?.primaryLimitation || 'NONE'],
     ]));
     panel.append(identity);
 
@@ -1635,16 +1702,8 @@
   function restoreFromUrl() {
     const params = new URLSearchParams(window.location.search);
     refs.search.value = params.get('q') || '';
-    const assign = (control, key, fallback) => {
-      const value = params.get(key);
-      control.value = value && [...control.options].some((option) => option.value === value)
-        ? value
-        : fallback;
-    };
-    assign(refs.window, 'window', 'latest_accepted_discovery');
-    assign(refs.lane, 'lane', '');
-    assign(refs.laneState, 'laneState', '');
-    assign(refs.mediaKind, 'mediaKind', '');
+    selectByName.get('window').set(params.get('window') || 'latest_accepted_discovery');
+    ['lane', 'laneState', 'mediaKind'].forEach((name) => selectByName.get(name).set(params.get(name) || ''));
     const sort = params.get('sort');
     setSort(SORT_OPTIONS.some((option) => option.value === sort) ? sort : 'latest_discovery');
     const view = params.get('view');
@@ -1673,22 +1732,28 @@
   });
   refs.filterToggle.addEventListener('click', () => togglePopover(refs.filterToggle, refs.filterPanel));
   document.addEventListener('pointerdown', (event) => {
-    if (!event.target.closest('.ev-popover-anchor')) closeAllPopovers();
+    if (event.target.closest('.ev-popover-anchor')) return;
+    /* Clicking inside the filter panel — on a label, on its background — should not dismiss it. */
+    if (event.target.closest('.ev-filter-panel')) {
+      filterSelects.forEach((control) => closePopover(control.toggle, control.list));
+      return;
+    }
+    closeAllPopovers();
   });
   document.getElementById('ev-reset').addEventListener('click', () => {
-    refs.window.value = 'latest_accepted_discovery';
-    refs.lane.value = '';
-    refs.laneState.value = '';
-    refs.mediaKind.value = '';
+    selectByName.get('window').set('latest_accepted_discovery');
+    ['lane', 'laneState', 'mediaKind'].forEach((name) => selectByName.get(name).set(''));
     syncFilterCount();
     model.activeView = 'all';
     viewButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.evView === 'all')));
     loadList({ history: 'push' });
   });
-  [refs.window, refs.lane, refs.laneState, refs.mediaKind].forEach((control) => control.addEventListener('change', () => {
-    syncFilterCount();
-    loadList({ history: 'push' });
-  }));
+  filterNames.forEach((name) => {
+    selectByName.get(name).onChange = () => {
+      syncFilterCount();
+      loadList({ history: 'push' });
+    };
+  });
   refs.sortToggle.addEventListener('click', () => togglePopover(refs.sortToggle, refs.sortList));
   [...refs.sortList.querySelectorAll('[data-ev-sort]')].forEach((option) => {
     option.addEventListener('click', () => {
@@ -1769,6 +1834,13 @@
         const offset = event.shiftKey ? -1 : 1;
         focusable[(index + offset + focusable.length) % focusable.length].focus();
       }
+      return;
+    }
+    const openSelect = filterSelects.find((control) => !control.list.hidden);
+    if (event.key === 'Escape' && openSelect) {
+      event.preventDefault();
+      closePopover(openSelect.toggle, openSelect.list);
+      openSelect.toggle.focus();
       return;
     }
     if (event.key === 'Escape' && (!refs.filterPanel.hidden || !refs.sortList.hidden)) {
