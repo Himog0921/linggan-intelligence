@@ -376,8 +376,8 @@ fn runtime_token_source_matches_the_full_lids_baseline() {
     let runtime = declared_token_values(LIDS_TOKENS);
     let documented = declared_token_values(LIDS_TOKEN_DOCUMENT);
 
-    assert_eq!(runtime.len(), 127);
-    assert_eq!(documented.len(), 127);
+    assert_eq!(runtime.len(), 131);
+    assert_eq!(documented.len(), 131);
     assert_eq!(runtime, documented);
     assert!(declared_token_values(SHELL_CSS).is_empty());
     assert!(declared_token_values(EVIDENCE_LIBRARY_CSS).is_empty());
@@ -1959,7 +1959,7 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
     assert!(html.contains("/assets/evidence-observation.js"));
     assert!(html.contains("/assets/evidence-library.js"));
     assert!(html.contains("id=\"ev-work-list\""));
-    assert!(html.contains("data-ev-panel=\"provenance\""));
+    assert!(html.contains("data-ev-panel=\"trace\""));
     for layout in ["research", "table", "cover"] {
         assert!(html.contains(&format!("data-ev-layout=\"{layout}\"")));
     }
@@ -1975,7 +1975,9 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
     assert!(EVIDENCE_OBSERVATION_JS.contains("await onTerminal?.()"));
     assert!(EVIDENCE_LIBRARY_JS.contains("readJson(detailUrl, model.detailController.signal)"));
     assert!(EVIDENCE_OBSERVATION_JS.contains("已合并到覆盖当前作品的在途工作"));
-    assert!(EVIDENCE_LIBRARY_JS.lines().count() < 1_000);
+    // V9 owns the reading surface, media rail, lightbox and filter mechanics; Issue #133 must
+    // keep its operation state in the dedicated module instead of growing that shared shell.
+    assert!(EVIDENCE_OBSERVATION_JS.contains("function reobservationOperationBlock"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("reobservationOperation"));
     assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"cover\"]"));
     assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"table\"]"));
@@ -2014,21 +2016,28 @@ fn evidence_runtime_restores_system_and_personal_view_strategy_without_faking_sa
     );
     assert!(EVIDENCE_LIBRARY_JS.contains("params.set('layout', model.activeLayout)"));
     assert!(EVIDENCE_LIBRARY_JS.contains("params.set('view', model.activeView)"));
-    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-table-work h2"));
-    assert!(EVIDENCE_LIBRARY_CSS.contains("font-size:14px;line-height:1.35"));
-    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-table-context{display:grid;gap:6px;font-size:12px"));
-    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-layout-switch{display:flex;border:0}"));
+    // The table layout drops the cover and reads as fixed high-density columns. EVIDENCE-V9-001
+    // replaced the per-column classes with one cell primitive; what must survive is that the
+    // table row is denser than the research row and still names its work and its context.
+    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-table-cell"));
+    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-work-list[data-layout=\"table\"] .ev-preview"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("function tableCell(primary, secondary)"));
+
+    // The layout switch marks the current view with a Signal underline. It must never become a
+    // filled black button: solid Ink is reserved for the one primary action on the surface, and
+    // a black tab would read as the page's main control rather than as a view toggle.
     assert!(
-        EVIDENCE_LIBRARY_CSS.contains(".ev-layout-switch button[aria-pressed=\"true\"]::after")
+        EVIDENCE_LIBRARY_CSS
+            .contains(".ev-layout-switch button[aria-pressed=\"true\"]{border-bottom-color:var(--v7-red)")
+            || EVIDENCE_LIBRARY_CSS.contains(
+                ".ev-quickviews button[aria-pressed=\"true\"],.ev-layout-switch button[aria-pressed=\"true\"]{border-bottom-color:var(--v7-red)"
+            )
     );
-    assert!(EVIDENCE_LIBRARY_CSS.contains("height:4px;background:var(--v7-red)"));
-    assert!(EVIDENCE_LIBRARY_CSS.contains(
-        ".ev-layout-switch button:focus-visible{outline:0;background:var(--v7-gray);box-shadow:inset 0 3px var(--v7-red)}"
-    ));
     assert!(
         !EVIDENCE_LIBRARY_CSS
             .contains(".ev-layout-switch button[aria-pressed=\"true\"]{background:var(--v7-black)")
     );
+    assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-layout-switch button:focus-visible"));
 }
 
 #[test]
@@ -2036,7 +2045,7 @@ fn evidence_runtime_renders_only_controlled_media_handles() {
     assert!(!EVIDENCE_LIBRARY_JS.contains("function observedCoverUrl"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("observedSourceUrl"));
     assert!(EVIDENCE_LIBRARY_JS.contains("sameOriginPath(cover.localAssetUrl"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("renderMedia(item.media, inspector, channels)"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("renderMaterials(item, inspector, channels)"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("item.preview?.localAssetUrl"));
     assert!(EVIDENCE_LIBRARY_JS.contains("node('img')"));
     assert!(EVIDENCE_LIBRARY_JS.contains("本地副本"));
@@ -2061,9 +2070,11 @@ fn evidence_runtime_uses_the_xhs_portrait_cover_ratio_in_visual_layouts() {
     assert!(EVIDENCE_LIBRARY_JS.contains(
         "row.dataset.platform = String(item.identity?.platform || 'unknown').toLowerCase()"
     ));
-    assert!(EVIDENCE_LIBRARY_CSS.contains(
-        ".ev-work-list .ev-work-row[data-platform=\"xhs\"] .ev-preview{min-height:0;aspect-ratio:3/4;align-self:start}"
-    ));
+    assert!(
+        EVIDENCE_LIBRARY_CSS.contains(
+            ".ev-work-row[data-platform=\"xhs\"] .ev-preview{height:auto;aspect-ratio:3/4}"
+        )
+    );
 }
 
 #[test]

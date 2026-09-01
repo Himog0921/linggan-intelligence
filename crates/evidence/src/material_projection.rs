@@ -651,6 +651,8 @@ pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> M
             "limitations":["COMMENTS_NOT_EVALUATED","MEDIA_NOT_EVALUATED","RAW_BODY_NOT_RETURNED"]
         }),
         matched_fields,
+        evidence_fragment: None,
         author_external_id: row.get("author_external_id"),
+        body_text: body,
     }
 }

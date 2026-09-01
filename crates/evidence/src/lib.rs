@@ -16,6 +16,7 @@ mod material_contract_validation;
 mod material_cursor;
 mod material_detail_read;
 mod material_disposition;
+mod material_evidence_fragment;
 mod material_media;
 mod material_media_read;
 mod material_processing;

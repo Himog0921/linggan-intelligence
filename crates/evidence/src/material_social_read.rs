@@ -75,6 +75,13 @@ pub(crate) async fn enrich(
             .map(str::to_owned);
     }
 
+    // The row-level excerpt is read after the match flags above, so a search that hit a comment
+    // or an OCR page can be quoted from the same surface it matched on.
+    let body_text = item.body_text.take();
+    item.evidence_fragment =
+        crate::material_evidence_fragment::read(tx, item, body_text.as_deref(), text, as_of)
+            .await?;
+
     let provenance = read_provenance(tx, item, as_of).await?;
     if let Some(inspector) = item.inspector.as_object_mut() {
         inspector.insert("commentThreads".to_owned(), Value::Array(comments));

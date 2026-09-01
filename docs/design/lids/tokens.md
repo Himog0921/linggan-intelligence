@@ -102,6 +102,10 @@ docs/design/lids/tokens.md
   /* Typography */
   --lgi-font-sans: "PingFang SC", "Noto Sans SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
   --lgi-font-mono: "SFMono-Regular", "JetBrains Mono", "Roboto Mono", "Noto Sans Mono CJK SC", ui-monospace, monospace;
+  --lgi-font-evidence: "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", "STSong", Georgia, serif;
+  --lgi-font-display: "Arial Narrow", "DIN Condensed", "Roboto Condensed", "Helvetica Neue", var(--lgi-font-sans);
+  --lgi-mosaic-on-dark: conic-gradient(from 90deg, rgba(255, 255, 255, 0.22) 25%, transparent 0 50%, rgba(255, 255, 255, 0.22) 0 75%, transparent 0);
+  --lgi-mosaic-on-light: conic-gradient(from 90deg, rgba(17, 19, 21, 0.13) 25%, transparent 0 50%, rgba(17, 19, 21, 0.13) 0 75%, transparent 0);
   --lgi-text-display: clamp(3rem, 6vw, 5.5rem);
   --lgi-text-hero: 3rem;
   --lgi-text-page-title: 1.75rem;
@@ -207,7 +211,8 @@ docs/design/lids/tokens.md
 | Ink | `muted` 是功能文字最低灰度；`ghost` 只作不可交互刻度/禁用文字，不能承载关键数据或操作。 |
 | Signal | 品牌活跃/选中/升级；不是 danger/warning/success。浅底小字号只能用 `signal-ink`。 |
 | Semantic | 绿=Valid/Completed，琥珀=Partial/Aging/Retrying，深红=Failed/Invalid/删除，蓝灰=信息/链接；均需文字和图形/定位双通道。 |
-| Type | Sans 承担中文阅读；Mono 承担机器语义。可对比数字要有 tabular nums；不得把 9px 校准刻度用在交互或事实。 |
+| Type | Sans 承担中文阅读；Mono 承担机器语义；**Evidence 只承担逐字引用的来源材料**——正文原文、评论原文、OCR/转录文本，不用于任何界面文字，否则读者无法一眼分辨「谁说的」和「系统说的」。Display 为窄体，只用于页面级强层级。可对比数字要有 tabular nums；不得把 9px 校准刻度用在交互或事实。 |
+| Mosaic | `mosaic-on-dark` / `mosaic-on-light` 只贴在实心墨色主动作或激活块的**右缘**，必须配渐隐遮罩，面积约 35%–45%，绝不覆盖文字。不得铺满、不得作页面背景、不得替换为竖条纹或随机噪点。 |
 | Spacing | 只用 4px 基数；不得新增 13/17/29px 等孤立对齐补丁。 |
 | Radius/Shadow | 默认 0/2/4/8px 和无阴影。`shadow-hard` 只可用于 Tooltip/微型浮层；普通卡、行、表无阴影。 |
 | Layout | L3 最大 1720px；L1/L2 最大 1440px；超宽屏增加外白而非拉宽正文。 |

@@ -1,35 +1,446 @@
-/* EVIDENCE-RUNTIME-001 · page-local layer. Shared shell geometry remains in shell.css. */
+/* EVIDENCE-V9-001 · page-local layer. Shared shell geometry remains in shell.css and every
+ * colour resolves to a LIDS token — this file authors density, rhythm and page-specific
+ * geometry only. The V9 Gold Master's exact hex values are deliberately not reproduced: LIDS
+ * is the single colour source, and the differences (signal #ef4f25 vs #f24a23, ink #111315 vs
+ * #0b0f12) are below perceptual threshold while the token discipline is not. */
+
+/* Inspector width is one variable so the bench, the media rail and the responsive rules all
+ * read the same number. `closed` collapses the column instead of hiding an element, which
+ * keeps the results list a continuous work surface rather than a squeezed one. */
+.ev-bench[data-inspector="normal"]{--ev-inspector-w:408px}
+.ev-bench[data-inspector="wide"]{--ev-inspector-w:640px}
+.ev-bench[data-inspector="focus"]{--ev-inspector-w:min(920px,72vw)}
+.ev-bench[data-inspector="closed"]{--ev-inspector-w:0px}
+
 .ev-main{min-width:0;min-height:0;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto auto minmax(0,1fr);overflow:hidden;background:var(--v7-white);color:var(--v7-black)}
-.ev-command{padding:12px 18px 0;border-bottom:2px solid var(--v7-black);background:var(--v7-white)}
-.ev-query-form{display:grid;grid-template-columns:minmax(250px,1.6fr) repeat(4,minmax(132px,.72fr)) auto;gap:8px;align-items:end}.ev-field{min-width:0;display:grid;gap:5px;color:var(--v7-muted);font-size:10px;font-weight:650}.ev-field input,.ev-field select{width:100%;height:40px;padding:0 10px;border:1px solid var(--v7-black);border-radius:0;background:var(--v7-white);color:var(--v7-black);font:11px/1.2 var(--lgi-font-sans)}.ev-field--search input{border-width:2px}.ev-form-actions,.ev-channel-actions{display:flex;align-items:center;gap:8px;min-height:40px}
-.ev-button{min-height:40px;padding:0 13px;border:1px solid var(--v7-black);border-radius:0;background:var(--v7-white);color:var(--v7-black);font:650 11px/1 var(--lgi-font-sans);cursor:pointer}.ev-button--primary{border-width:2px;background:var(--v7-black);color:var(--v7-white)}.ev-button--secondary{background:var(--v7-white)}.ev-button--ghost{border-color:var(--v7-line-strong);color:var(--v7-muted)}.ev-button:disabled{cursor:not-allowed;opacity:.55}
-.ev-view-strategy{display:grid;grid-template-columns:minmax(520px,1.75fr) minmax(280px,.95fr);gap:28px;margin-top:12px;padding-top:10px;border-top:1px solid var(--v7-black)}.ev-view-group{min-width:0}.ev-view-heading{display:flex;align-items:center;gap:8px;margin:0 0 8px;color:var(--v7-black);font-size:10px;line-height:1}.ev-view-heading .v7-tech-key{color:var(--v7-black);font-size:9px;letter-spacing:.13em}.ev-view-heading strong{font-size:10px}.ev-view-switch{min-width:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));border-top:1px solid var(--v7-line);border-left:1px solid var(--v7-line)}.ev-view-switch button{min-width:0;min-height:44px;display:flex;align-items:center;gap:8px;padding:0 10px;border:0;border-right:1px solid var(--v7-line);border-bottom:1px solid var(--v7-line);background:var(--v7-white);color:var(--v7-muted);font:650 11px/1.2 var(--lgi-font-sans);cursor:pointer;transition:background-color 160ms ease,color 160ms ease,transform 160ms ease}.ev-view-switch button i{flex:0 0 auto;color:var(--v7-ghost);font:650 8px/1 var(--lgi-font-mono);font-style:normal}.ev-view-switch button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ev-view-switch button[aria-pressed="true"]{background:var(--v7-black);color:var(--v7-white)}.ev-view-switch button[aria-pressed="true"] i{color:var(--v7-red)}.ev-view-switch button:active{transform:scale(.96)}.ev-my-view-empty{min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 12px;border:1px solid var(--v7-line);background:var(--v7-gray);color:var(--v7-muted);font-size:11px}.ev-my-view-empty small{color:var(--v7-ghost);font-size:7px;text-align:right}.ev-command-footer{min-height:52px;display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:10px;border-top:1px solid var(--v7-line)}.ev-command-footer>strong{color:var(--v7-muted);font:700 10px var(--lgi-font-mono);font-variant-numeric:tabular-nums}.ev-layout-control{min-height:46px;display:flex;align-items:stretch;gap:0;border-top:1px solid var(--v7-black);border-bottom:1px solid var(--v7-black)}.ev-layout-label{min-width:82px;display:flex;align-items:center;gap:7px;padding:0 14px 0 8px;font-size:10px}.ev-layout-label .v7-tech-key{color:var(--v7-black);font-size:9px;letter-spacing:.12em}.ev-layout-switch{display:flex;border:0}.ev-layout-switch button{position:relative;min-width:72px;min-height:44px;padding:0 14px;border:0;background:transparent;color:var(--v7-muted);font:680 11px var(--lgi-font-sans);cursor:pointer;transition:color 160ms ease,transform 160ms ease}.ev-layout-switch button[aria-pressed="true"]{background:transparent;color:var(--v7-black);font-weight:780}.ev-layout-switch button[aria-pressed="true"]::after{content:"";position:absolute;right:10px;bottom:-1px;left:10px;height:4px;background:var(--v7-red)}.ev-layout-switch button:active{transform:scale(.96)}
-.ev-read-receipt{min-height:36px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:7px 18px;border-bottom:1px solid var(--v7-line);background:var(--v7-white);color:var(--v7-muted);font-size:10px}.ev-receipt-meta{color:var(--v7-ghost);text-align:right}
-.ev-bench{min-height:0;display:grid;grid-template-columns:minmax(620px,1fr) 440px;overflow:hidden}
+
+/* The works count rides on the rail entry instead of a header block: the rail is always on
+ * screen, and the number belongs next to the thing it counts. */
+.ev-rail-count{margin-left:auto;padding:1px 6px;background:var(--v7-red);color:var(--v7-white);font:700 11px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.ev-rail-count[hidden]{display:none}
+
+/* ---- query deck ---- */
+.ev-command{padding:13px 20px 0;border-bottom:1px solid var(--v7-black);background:var(--v7-gray)}
+.ev-query-form{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 14px;align-items:center}
+.ev-find{position:relative;display:flex;align-items:center;min-width:0;border:2px solid var(--v7-black);background:var(--v7-white)}
+.ev-find-mark{align-self:stretch;display:flex;align-items:center;flex:0 0 auto;padding:0 11px;color:var(--lgi-signal-ink);font:700 10px var(--lgi-font-mono);letter-spacing:.1em}
+.ev-find input{width:100%;height:44px;padding:0 13px 0 0;border:0;background:transparent;color:var(--v7-black);font:14px/1.2 var(--lgi-font-sans)}
+.ev-find input:focus{outline:0}
+/* Focus is shown inside the existing box, never as a second frame around it. The border grows
+ * inward by one pixel and the FIND mark inverts — perceptible without adding a ring that reads
+ * as a separate element stacked on the field. */
+.ev-find:focus-within{box-shadow:inset 0 0 0 1px var(--v7-black)}
+.ev-find:focus-within .ev-find-mark{background:var(--v7-black);color:var(--v7-white)}
+.ev-query-tools{display:flex;align-items:stretch;gap:8px}
+.ev-popover-anchor{position:relative;display:flex}
+.ev-filter-toggle{display:flex;align-items:center;gap:9px}
+.ev-filter-toggle b{min-width:18px;padding:1px 5px;background:var(--v7-sunken);color:var(--v7-muted);font:700 10.5px var(--lgi-font-mono);text-align:center}
+.ev-filter-toggle[data-active="true"] b{background:var(--v7-red);color:var(--v7-white)}
+.ev-sort-toggle{display:flex;align-items:center;gap:9px;min-width:132px;justify-content:space-between}
+.ev-caret{width:7px;height:7px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(-2px) rotate(45deg)}
+.ev-button[aria-expanded="true"]{background:var(--v7-black);color:var(--v7-white);border-color:var(--v7-black)}
+.ev-button[aria-expanded="true"] b{background:var(--v7-white);color:var(--v7-black)}
+.ev-button[aria-expanded="true"][data-active="true"] b{background:var(--v7-red);color:var(--v7-white)}
+
+/* Filters and sort hang off their own button instead of pushing the results down. A control
+ * that reflows the page every time it opens makes the list jump under the reader's eyes. */
+.ev-popover{position:absolute;top:calc(100% + 6px);right:0;z-index:30;border:1px solid var(--v7-black);background:var(--v7-white);box-shadow:var(--v7-brutal)}
+.ev-popover[hidden]{display:none}
+.ev-filter-panel{display:grid;grid-template-columns:repeat(2,minmax(190px,1fr));gap:14px 16px;width:max-content;max-width:min(560px,90vw);padding:16px}
+.ev-sort-list{display:grid;min-width:220px;padding:5px}
+.ev-sort-list button{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:38px;padding:0 11px;border:0;background:transparent;color:var(--v7-black);font:650 13px var(--lgi-font-sans);text-align:left;cursor:pointer}
+.ev-sort-list button:hover{background:var(--v7-gray)}
+.ev-sort-list button[aria-selected="true"]{background:var(--v7-black);color:var(--v7-white)}
+.ev-sort-list button[aria-selected="true"] .v7-tech-key{color:rgba(255,255,255,.7)}
+.ev-field{min-width:0;display:grid;gap:6px}
+.ev-field-label{color:var(--v7-muted);font:650 11.5px var(--lgi-font-sans)}
+.ev-field .ev-popover-anchor{display:block}
+.ev-select-toggle{width:100%;min-height:36px;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:0 10px;border:1px solid var(--v7-black);border-radius:0;background:var(--v7-white);color:var(--v7-black);font:12.5px/1.2 var(--lgi-font-sans);text-align:left;cursor:pointer}
+.ev-select-toggle:hover{background:var(--v7-gray)}
+.ev-select-toggle[aria-expanded="true"]{background:var(--v7-black);color:var(--v7-white)}
+.ev-field[data-active="true"] .ev-select-toggle{border-color:var(--v7-red);box-shadow:inset 3px 0 0 var(--v7-red)}
+.ev-select-value{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* The list opens flush under its own control, aligned left with it, and is scrollable rather
+ * than growing past the popover it lives in. */
+.ev-select-list{left:0;right:auto;top:calc(100% + 4px);display:grid;min-width:100%;max-height:264px;overflow-y:auto;padding:4px}
+.ev-select-list button{display:block;width:100%;min-height:34px;padding:0 10px;border:0;background:transparent;color:var(--v7-black);font:12.5px/1.2 var(--lgi-font-sans);text-align:left;white-space:nowrap;cursor:pointer}
+.ev-select-list button:hover{background:var(--v7-gray)}
+.ev-select-list button[aria-selected="true"]{background:var(--v7-black);color:var(--v7-white)}
+.ev-filter-foot{grid-column:1/-1;display:flex;align-items:flex-end;justify-content:flex-end}
+
+.ev-button{min-height:44px;padding:0 16px;border:1px solid var(--v7-black);border-radius:0;background:var(--v7-white);color:var(--v7-black);font:650 12px/1 var(--lgi-font-sans);cursor:pointer}
+.ev-button--secondary{background:var(--v7-white)}
+.ev-button--ghost{border-color:var(--v7-line-strong);color:var(--v7-muted)}
+.ev-button:disabled{cursor:not-allowed;opacity:.45}
+/* The one solid Ink action per surface. The mosaic sits on the right edge under a fade mask,
+ * behind the label's own stacking context, so it never touches the text. */
+.ev-button--primary{position:relative;overflow:hidden;border-width:2px;padding-right:46px;background:var(--v7-black);color:var(--v7-white)}
+.ev-button--primary>span{position:relative;z-index:1}
+.ev-button--primary::after{content:"";position:absolute;top:0;right:0;bottom:0;width:42%;background-image:var(--lgi-mosaic-on-dark);background-size:9px 9px;mask-image:linear-gradient(90deg,transparent,#000 38%);-webkit-mask-image:linear-gradient(90deg,transparent,#000 38%);opacity:.78;pointer-events:none}
+.ev-button--primary:disabled::after{display:none}
+
+.ev-deck-foot{display:flex;align-items:stretch;justify-content:space-between;gap:24px;margin-top:12px}
+.ev-deck-label{align-self:center;color:var(--v7-muted);font:650 10.5px var(--lgi-font-sans);letter-spacing:.02em;white-space:nowrap}
+/* Saved views are not connected. The deck says so in place rather than showing a count that
+ * would imply the feature exists. */
+.ev-saved-views{margin-right:14px;padding-right:14px;border-right:1px solid var(--v7-line)}
+.ev-quickviews,.ev-layout-control{display:flex;align-items:stretch;gap:2px;min-width:0}
+.ev-quickviews{overflow-x:auto;scrollbar-width:none}
+.ev-quickviews::-webkit-scrollbar{display:none}
+.ev-quickviews button,.ev-layout-switch button{min-height:42px;padding:0 13px;border:0;border-bottom:3px solid transparent;background:transparent;color:var(--v7-muted);font:650 12.5px var(--lgi-font-sans);white-space:nowrap;cursor:pointer}
+.ev-quickviews button[aria-pressed="true"],.ev-layout-switch button[aria-pressed="true"]{border-bottom-color:var(--v7-red);color:var(--v7-black);font-weight:750}
+.ev-layout-switch{display:flex;gap:2px}
+
+.ev-read-receipt{min-height:34px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:7px 20px;border-bottom:1px solid var(--v7-line);background:var(--v7-warn-soft);color:var(--v7-black);font-size:12px}
+.ev-read-receipt[hidden]{display:none}
+.ev-receipt-meta{color:var(--v7-ghost);text-align:right}
+
+/* ---- workspace ---- */
+.ev-bench{position:relative;min-height:0;display:grid;grid-template-columns:minmax(0,1fr) var(--ev-inspector-w);overflow:hidden}
 .ev-results{min-width:0;overflow:auto;border-right:2px solid var(--v7-black);background:var(--v7-white)}
-.ev-feedback{margin:12px 14px;padding:14px;border:1px solid var(--v7-line-strong);background:var(--v7-gray)}.ev-feedback[hidden]{display:none}.ev-feedback h2{margin:0 0 5px;font-size:14px}.ev-feedback p{margin:0 0 7px;color:var(--v7-muted);font-size:11px;line-height:1.55}.ev-feedback[data-kind="error"]{border-color:var(--v7-red);background:var(--v7-soft-red)}.ev-feedback[data-kind="empty"]{border-style:dashed}.ev-work-list{min-width:0}
-.ev-work-row{position:relative;display:grid;grid-template-columns:82px minmax(155px,.78fr) minmax(430px,2.2fr);grid-template-areas:"preview identity lanes" "preview limitation observed";gap:10px 14px;min-height:156px;padding:14px;border-bottom:1px solid var(--v7-line);background:var(--v7-white);cursor:pointer}.ev-work-row[aria-selected="true"]{background:color-mix(in srgb,var(--v7-soft-red) 36%,var(--v7-white))}.ev-work-row[aria-selected="true"]::before{content:"";position:absolute;top:0;bottom:0;left:0;width:4px;background:var(--v7-red)}
-.ev-preview{position:relative;grid-area:preview;min-height:118px;display:grid;align-content:center;gap:7px;padding:8px;overflow:hidden;border:1px solid var(--v7-line-strong);background:var(--v7-gray);color:var(--v7-muted);text-align:center}.ev-preview strong{font-size:10px;line-height:1.35}.ev-preview img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:var(--v7-gray)}.ev-preview-label{position:absolute;right:0;bottom:0;left:0;padding:5px 4px;background:color-mix(in srgb,var(--v7-black) 78%,transparent);color:var(--v7-white);font:650 7px/1.25 var(--lgi-font-mono);letter-spacing:.02em}.ev-preview[data-tone="available"]{border-color:var(--v7-info);background:var(--v7-info-fill)}.ev-preview[data-tone="cleaned"]{background:var(--v7-warn-fill)}.ev-preview[data-tone="restricted"]{border-color:var(--v7-red);background:var(--v7-soft-red)}
-.ev-identity{grid-area:identity;min-width:0}.ev-eyebrow{display:flex;flex-wrap:wrap;gap:6px 10px;color:var(--v7-ghost);font:650 8px/1.3 var(--lgi-font-mono);letter-spacing:.07em}.ev-identity h2{margin:7px 0 0;display:-webkit-box;overflow:hidden;-webkit-line-clamp:2;-webkit-box-orient:vertical;font-size:14px;line-height:1.35;letter-spacing:-.01em}.ev-meta{display:grid;gap:5px;margin-top:8px;color:var(--v7-muted);font-size:9px}.ev-context-facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:6px}.ev-identity-fact{min-width:0;min-height:38px;display:flex;align-items:center;gap:8px;padding:6px;border:1px solid var(--v7-line);background:var(--v7-white)}.ev-identity-fact>span:not(.ev-author-avatar){min-width:0;display:grid;gap:2px}.ev-identity-fact small{color:var(--v7-ghost);font:650 7px/1.2 var(--lgi-font-mono);letter-spacing:.05em}.ev-identity-fact strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v7-black);font-size:10px}.ev-target-fact{justify-content:space-between;border-left-color:var(--v7-info)}.ev-target-fact .v7-tech-key{flex:0 0 auto;font-size:6px}.ev-author-avatar{width:28px;height:28px;flex:0 0 28px;display:grid;place-items:center;overflow:hidden;border:1px solid var(--v7-black);border-radius:50%;background:var(--v7-gray);color:var(--v7-ghost);font:650 7px/1 var(--lgi-font-mono)}.ev-author-avatar img{width:100%;height:100%;object-fit:cover}.ev-author-avatar[data-state="acquired"]{border-color:var(--v7-info)}.ev-context-facts--compact{grid-template-columns:1fr;gap:4px}.ev-context-facts--compact .ev-identity-fact{min-height:32px;padding:3px 5px}.ev-context-facts--compact .ev-author-avatar{width:24px;height:24px;flex-basis:24px}.ev-engagement{color:var(--v7-black);font:650 8px/1.35 var(--lgi-font-mono)}
-.ev-lane-board{grid-area:lanes;display:grid;grid-template-columns:repeat(3,minmax(112px,1fr));border-top:1px solid var(--v7-black);border-left:1px solid var(--v7-line)}.ev-lane{min-width:0;display:grid;grid-template-columns:1fr auto;grid-template-areas:"name count" "state state";gap:5px;padding:7px 8px;border-right:1px solid var(--v7-line);border-bottom:1px solid var(--v7-line)}.ev-lane-name{grid-area:name;color:var(--v7-muted);font-size:9px;font-weight:650}.ev-lane-count{grid-area:count;color:var(--v7-ghost);font:8px var(--lgi-font-mono);text-align:right}.ev-lane>.ev-state{grid-area:state}
-.ev-state{min-width:0;display:flex;align-items:center;gap:5px;color:var(--v7-muted);font-size:8px}.ev-state-dot{width:7px;height:7px;flex:0 0 auto;border:1px solid currentColor;border-radius:50%;background:transparent}.ev-state-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ev-state .v7-tech-key{margin-left:auto;font-size:7px}.ev-state--success{color:var(--v7-ok)}.ev-state--success .ev-state-dot{background:currentColor}.ev-state--info{color:var(--v7-info)}.ev-state--info .ev-state-dot{background:currentColor}.ev-state--warning{color:var(--v7-warn)}.ev-state--warning .ev-state-dot{background:currentColor}.ev-state--danger{color:var(--v7-red)}.ev-state--danger .ev-state-dot{background:currentColor}.ev-state--unknown{color:var(--v7-unknown)}
-.ev-limitation{grid-area:limitation;align-self:end;color:var(--v7-muted);font-size:9px}.ev-observed{grid-area:observed;align-self:end;justify-self:end;color:var(--v7-ghost);font-size:8px}.ev-list-footer{min-height:68px;display:grid;place-items:center;padding:14px}
-.ev-table-head{position:sticky;top:0;z-index:3;display:grid;grid-template-columns:minmax(230px,1.45fr) minmax(170px,.9fr) minmax(135px,.7fr) minmax(120px,.65fr);gap:18px;padding:10px 14px;border-bottom:1px solid var(--v7-black);background:var(--v7-gray);color:var(--v7-muted);font:700 10px var(--lgi-font-mono);letter-spacing:.04em}.ev-table-head[hidden]{display:none}.ev-work-list[data-layout="table"] .ev-work-row{min-height:92px;grid-template-columns:minmax(230px,1.45fr) minmax(170px,.9fr) minmax(135px,.7fr) minmax(120px,.65fr);grid-template-areas:none;align-items:center;gap:18px;padding:14px}.ev-table-work,.ev-table-context,.ev-table-time,.ev-table-status{min-width:0}.ev-table-work .ev-eyebrow{font-size:9px}.ev-table-work h2{margin:7px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:14px;line-height:1.35}.ev-table-context{display:grid;gap:6px;font-size:12px;line-height:1.45}.ev-table-context strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ev-table-context span,.ev-table-time{color:var(--v7-muted);font-size:11px;line-height:1.5}.ev-table-status{display:grid;gap:8px}.ev-table-status .ev-state{font-size:10px}.ev-table-status .ev-state .v7-tech-key{font-size:8px}.ev-table-status .ev-observed{justify-self:start;font-size:9px;line-height:1.4}
-.ev-work-list[data-layout="cover"]{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:1px;background:var(--v7-line)}.ev-work-list[data-layout="cover"] .ev-work-row{display:grid;grid-template-columns:1fr;grid-template-areas:"preview" "identity" "observed";gap:10px;min-height:350px;padding:12px;border:0;background:var(--v7-white)}.ev-work-list[data-layout="cover"] .ev-preview{width:100%;min-height:0;aspect-ratio:4/3}.ev-work-list[data-layout="cover"] .ev-lane-board,.ev-work-list[data-layout="cover"] .ev-limitation{display:none}.ev-work-list[data-layout="cover"] .ev-observed{justify-self:start}.ev-work-list[data-layout="cover"] .ev-identity h2{-webkit-line-clamp:3;font-size:15px}.ev-work-list[data-layout="cover"] .ev-context-facts{grid-template-columns:1fr}
-.ev-work-list .ev-work-row[data-platform="xhs"] .ev-preview{min-height:0;aspect-ratio:3/4;align-self:start}
-.ev-inspector{min-width:0;overflow:auto;background:var(--v7-white)}.ev-inspector-head{position:sticky;top:0;z-index:5;padding:14px 14px 0;border-bottom:2px solid var(--v7-black);background:rgba(255,255,255,.98)}.ev-back{display:none;min-height:40px;margin:0 0 8px;padding:0;border:0;background:transparent;color:var(--v7-info);font-weight:700}.ev-inspector-ref{color:var(--v7-ghost);font:700 9px var(--lgi-font-mono);letter-spacing:.07em}.ev-inspector-head h2{margin:5px 0 0;font-size:18px;line-height:1.3;letter-spacing:-.025em}.ev-inspector-head>p{margin:5px 0 10px;color:var(--v7-muted);font-size:10px;line-height:1.45}.ev-inspector-feedback{display:flex;align-items:center;gap:8px;min-height:38px;margin:0 0 9px;padding:8px 10px;background:var(--v7-gray);font-size:10px}.ev-inspector-feedback[hidden]{display:none}
-.ev-tabs{display:grid;grid-template-columns:repeat(4,1fr);margin:0 -14px}.ev-tabs button{min-height:40px;padding:0 5px;border:0;border-top:1px solid var(--v7-line);border-bottom:3px solid transparent;background:transparent;color:var(--v7-muted);font:600 10px var(--lgi-font-sans);cursor:pointer}.ev-tabs button[aria-selected="true"]{border-bottom-color:var(--v7-red);color:var(--v7-black);font-weight:750}.ev-inspector-body{padding:14px 14px 34px}.ev-inspector-body>[hidden]{display:none}
-.ev-inspect-section{margin-bottom:22px}.ev-inspect-section>h3{margin:0 0 9px;padding-bottom:6px;border-bottom:1px solid var(--v7-black);font-size:11px}.ev-inspect-section>h3 .v7-tech-key{float:right}.ev-facts{display:grid;grid-template-columns:minmax(105px,.68fr) minmax(0,1.32fr);margin:0;border-top:1px solid var(--v7-line)}.ev-facts dt,.ev-facts dd{min-height:34px;margin:0;padding:8px 7px;border-bottom:1px solid var(--v7-line);font-size:10px;overflow-wrap:anywhere}.ev-facts dt{color:var(--v7-ghost)}.ev-facts dd{color:var(--v7-black);font-weight:600}.ev-detail-lanes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-top:1px solid var(--v7-black);border-left:1px solid var(--v7-line)}
-.ev-inline-state{margin:8px 0;padding:10px;border-left:3px solid var(--v7-line-strong);background:var(--v7-gray);font-size:10px}.ev-inline-state strong{display:block;margin-bottom:4px}.ev-inline-state p{margin:0 0 5px;color:var(--v7-muted);line-height:1.5}.ev-inline-state[data-tone="warning"]{border-color:var(--v7-warn);background:var(--v7-warn-soft)}.ev-inline-state[data-tone="danger"],.ev-inline-state[data-tone="restricted"]{border-color:var(--v7-red);background:var(--v7-soft-red)}
-.ev-channel-receipt{margin-bottom:16px;border-top:2px solid var(--v7-black)}.ev-channel-title{display:flex;justify-content:space-between;gap:10px;padding:8px 0;font-size:11px}.ev-comment-list{margin-top:10px}.ev-comment{padding:11px 0;border-top:1px solid var(--v7-line)}.ev-comment-head,.ev-slot-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.ev-comment p{margin:8px 0;color:var(--v7-black);font-size:11px;line-height:1.65;white-space:pre-wrap}.ev-comment-meta,.ev-comment-receipt,.ev-channel-inline-receipt,.ev-loading-copy{color:var(--v7-ghost);font-size:9px}
-.ev-reobservation-operation{margin:12px 0;padding:0 10px 10px;border:1px solid var(--v7-black);background:var(--v7-gray)}.ev-reobservation-tasks{display:grid;gap:8px;margin-top:10px}.ev-reobservation-task{padding:9px;border:1px solid var(--v7-line-strong);background:var(--v7-white)}.ev-coverage-history{display:grid;gap:10px}.ev-coverage-history>h4{margin:0;color:var(--v7-muted);font-size:10px;line-height:1.5}.ev-coverage-history-group{display:grid;gap:8px;padding:9px;border-left:3px solid var(--v7-info);background:var(--v7-gray)}.ev-coverage-history-group>strong{font-size:10px}.ev-history-item{margin:0}
-.ev-slot,.ev-derivative{margin-bottom:12px;padding:11px;border:1px solid var(--v7-line-strong);background:var(--v7-white)}.ev-slot-head{margin-bottom:8px;font-size:11px}.ev-controlled-preview{margin-top:10px;padding:8px;background:var(--v7-gray)}.ev-controlled-preview img,.ev-controlled-preview video{display:block;width:100%;max-height:300px;object-fit:contain;background:var(--v7-black)}.ev-asset-link{min-height:40px;display:inline-flex;align-items:center;margin-top:8px;color:var(--v7-info);font-size:10px;font-weight:700}
-.ev-provenance-group{display:grid;grid-template-columns:82px minmax(0,1fr);gap:6px;padding:8px 0;border-bottom:1px solid var(--v7-line);font-size:9px}.ev-provenance-group code{grid-column:2;overflow-wrap:anywhere;color:var(--v7-muted);font:9px/1.4 var(--lgi-font-mono)}.ev-limit-list{margin:0;padding-left:20px}.ev-limit-list li{margin:7px 0;font-size:10px}
-@media (hover:hover){.ev-button:not(:disabled):hover,.ev-view-switch button:hover{background:var(--v7-black);color:var(--v7-white)}.ev-layout-switch button:hover{background:transparent;color:var(--v7-black)}.ev-work-row:hover{background:var(--v7-gray)}}
-.ev-button:focus-visible,.ev-field input:focus-visible,.ev-field select:focus-visible,.ev-view-switch button:focus-visible,.ev-work-row:focus-visible,.ev-tabs button:focus-visible,.ev-back:focus-visible,.ev-asset-link:focus-visible{outline:3px solid var(--v7-red);outline-offset:2px}.ev-layout-switch button:focus-visible{outline:0;background:var(--v7-gray);box-shadow:inset 0 3px var(--v7-red)}
-@media(max-width:1420px){.ev-bench{grid-template-columns:minmax(550px,1fr) 390px}.ev-work-row{grid-template-columns:72px minmax(140px,.68fr) minmax(390px,2fr)}.ev-query-form{grid-template-columns:minmax(240px,1.5fr) repeat(2,minmax(140px,.75fr)) auto}.ev-field:nth-of-type(4),.ev-field:nth-of-type(5){grid-row:2}.ev-form-actions{grid-column:-2}.ev-view-strategy{grid-template-columns:minmax(500px,1.55fr) minmax(260px,.8fr);gap:18px}}
-@media(max-width:1100px){.ev-bench{grid-template-columns:minmax(500px,1fr) 360px}.ev-view-strategy{grid-template-columns:1fr}.ev-table-head{position:static}.ev-work-row{grid-template-columns:70px minmax(0,1fr);grid-template-areas:"preview identity" "lanes lanes" "limitation observed"}.ev-preview{min-height:82px}.ev-lane-board{grid-template-columns:repeat(3,minmax(100px,1fr))}}
-@media(max-width:900px){.ev-main{overflow:auto}.ev-bench{display:block;overflow:visible}.ev-results{overflow:visible;border-right:0;border-bottom:2px solid var(--v7-black)}.ev-inspector{overflow:visible;min-height:500px}.ev-inspector-head{position:relative}.ev-back{display:block}.ev-query-form{grid-template-columns:repeat(2,minmax(0,1fr))}.ev-field--search{grid-column:1/-1}.ev-form-actions{grid-column:auto}}
-@media(max-width:640px){.ev-command{padding:12px 14px 0}.ev-query-form{display:grid;grid-template-columns:1fr}.ev-field--search,.ev-form-actions,.ev-field:nth-of-type(4),.ev-field:nth-of-type(5){grid-column:1;grid-row:auto}.ev-form-actions .ev-button{flex:1}.ev-view-strategy{gap:14px}.ev-view-switch{display:flex;overflow-x:auto}.ev-view-switch button{min-width:116px}.ev-my-view-empty{align-items:flex-start;flex-direction:column;justify-content:center;padding:8px 10px}.ev-my-view-empty small{text-align:left}.ev-command-footer{align-items:flex-start;flex-direction:column;justify-content:center;padding:8px 0 10px}.ev-layout-control{width:100%}.ev-layout-switch{min-width:0;flex:1}.ev-layout-switch button{min-width:0;flex:1;padding:0 8px}.ev-read-receipt{align-items:flex-start;flex-direction:column;padding:8px 14px}.ev-receipt-meta{text-align:left}.ev-work-row{grid-template-columns:62px minmax(0,1fr);gap:10px;padding:12px}.ev-preview{min-height:76px}.ev-context-facts{grid-template-columns:1fr}.ev-lane-board{grid-template-columns:repeat(2,minmax(0,1fr))}.ev-lane{padding:7px 6px}.ev-lane-count{display:none}.ev-state .v7-tech-key{display:none}.ev-limitation,.ev-observed{grid-area:auto;grid-column:1/-1}.ev-observed{justify-self:start}.ev-table-head{display:none!important}.ev-work-list[data-layout="table"] .ev-work-row{display:grid;grid-template-columns:1fr;gap:9px;min-height:0;padding:14px 12px}.ev-table-work h2{white-space:normal}.ev-table-status{grid-template-columns:auto 1fr;align-items:center}.ev-work-list[data-layout="cover"]{grid-template-columns:repeat(2,minmax(0,1fr))}.ev-work-list[data-layout="cover"] .ev-work-row{min-height:300px}.ev-inspector-body{padding:12px 12px 30px}.ev-tabs{overflow:auto;grid-template-columns:repeat(4,minmax(105px,1fr))}.ev-detail-lanes{grid-template-columns:1fr}.ev-facts{grid-template-columns:95px minmax(0,1fr)}}
-@media(max-width:420px){.ev-work-list[data-layout="cover"]{grid-template-columns:1fr}.ev-layout-label{min-width:74px;padding-right:9px}.ev-layout-switch button{padding:0 6px}}
-@media(prefers-reduced-motion:reduce){.ev-main *{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}
+.ev-bench[data-inspector="closed"] .ev-results{border-right:0}
+.ev-bench[data-inspector="closed"] .ev-inspector{display:none}
+.ev-results-head{position:sticky;top:0;z-index:4;min-height:38px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:6px 16px;border-bottom:1px solid var(--v7-black);background:var(--v7-white)}
+.ev-results-head strong{font:650 11px var(--lgi-font-sans);color:var(--v7-black)}
+.ev-results-legend{color:var(--v7-ghost);font:650 10px var(--lgi-font-sans)}
+.ev-feedback{margin:12px 16px;padding:14px;border:1px solid var(--v7-line-strong);background:var(--v7-gray)}
+.ev-feedback[hidden]{display:none}
+.ev-feedback h2{margin:0 0 6px;font-size:15px}
+.ev-feedback p{margin:0 0 7px;color:var(--v7-muted);font-size:12px;line-height:1.6}
+.ev-feedback[data-kind="error"]{border-color:var(--v7-red);background:var(--v7-soft-red)}
+.ev-feedback[data-kind="empty"]{border-style:dashed}
+.ev-work-list{min-width:0}
+.ev-list-footer{min-height:60px;display:grid;place-items:center;padding:14px}
+
+/* ---- research row ----
+ * One continuous work surface, not a stack of cards: a hairline between rows, a Signal rail on
+ * the current one. Everything in the row answers "is this worth opening" — the full material
+ * matrix and the provenance trail live in the Inspector, never here. */
+.ev-work-row{position:relative;display:grid;grid-template-columns:76px minmax(0,1fr) 186px;gap:14px;min-height:124px;padding:15px 18px;border-bottom:1px solid var(--v7-line);background:var(--v7-white);cursor:pointer;text-align:left}
+.ev-work-row:focus-visible{outline:3px solid var(--v7-red);outline-offset:-3px}
+.ev-work-row[aria-selected="true"]{background:var(--v7-soft-red)}
+.ev-work-row[aria-selected="true"]::before{content:"";position:absolute;top:0;bottom:0;left:0;width:4px;background:var(--v7-red)}
+.ev-preview{position:relative;width:76px;height:100px;overflow:hidden;display:grid;place-items:center;padding:5px;border:1px solid var(--v7-line-strong);background:var(--v7-gray);color:var(--v7-ghost);text-align:center}
+.ev-preview strong{font:650 8px/1.3 var(--lgi-font-mono);letter-spacing:.04em}
+.ev-preview img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:var(--v7-gray)}
+.ev-work-row[data-platform="xhs"] .ev-preview{height:auto;aspect-ratio:3/4}
+.ev-preview[data-tone="restricted"]{border-color:var(--v7-red);background:var(--v7-soft-red);color:var(--lgi-signal-ink)}
+.ev-preview[data-tone="cleaned"]{background:var(--v7-warn-fill)}
+
+/* LIDS layout guardrail: a wide screen gets outer white, it does not get wider prose. Without
+ * this the identity column reaches 968px at 1920 and a single quote line runs the better part
+ * of a metre — technically legible, actually unreadable, and it leaves the row looking stretched.
+ * The material rail stays pinned right so the ratios line up down the column while scanning. */
+.ev-identity{min-width:0;max-width:760px}
+.ev-eyebrow{display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--v7-ghost);font:650 9px/1.3 var(--lgi-font-mono);letter-spacing:.05em}
+.ev-identity h2{margin:5px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16.5px;font-weight:750;line-height:1.3;letter-spacing:-.015em;color:var(--v7-black)}
+.ev-meta{display:grid;gap:6px;margin-top:7px;color:var(--v7-muted);font:10.5px/1.5 var(--lgi-font-sans)}
+/* The creator and the monitoring target are two separate facts, so they get two separate
+ * plates rather than one run-on line. Ported from main's XHS-MEDIA-AUTHOR-EVIDENCE-001 and
+ * refitted to this row's type scale. */
+.ev-context-facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:7px}
+.ev-identity-fact{min-width:0;min-height:38px;display:flex;align-items:center;gap:8px;padding:5px 7px;border:1px solid var(--v7-line);background:var(--v7-white)}
+.ev-identity-fact>span:not(.ev-author-avatar){min-width:0;display:grid;gap:2px}
+.ev-identity-fact small{color:var(--v7-ghost);font:650 9px/1.2 var(--lgi-font-sans)}
+.ev-identity-fact strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v7-black);font-size:11.5px}
+.ev-target-fact{justify-content:space-between;border-left:2px solid var(--v7-info)}
+.ev-target-fact .v7-tech-key{flex:0 0 auto;font-size:8px}
+.ev-author-avatar{width:28px;height:28px;flex:0 0 28px;display:grid;place-items:center;overflow:hidden;border:1px solid var(--v7-black);border-radius:50%;background:var(--v7-gray);color:var(--v7-ghost);font:650 8px/1 var(--lgi-font-mono)}
+.ev-author-avatar img{width:100%;height:100%;object-fit:cover}
+.ev-author-avatar[data-state="acquired"]{border-color:var(--v7-info)}
+.ev-context-facts--compact{grid-template-columns:1fr;gap:4px}
+.ev-context-facts--compact .ev-identity-fact{min-height:30px;padding:3px 5px}
+.ev-context-facts--compact .ev-author-avatar{width:22px;height:22px;flex-basis:22px}
+.ev-context-facts--compact .ev-identity-fact strong{font-size:11px}
+.ev-time-line{color:var(--v7-muted)}
+.ev-work-list[data-layout="cover"] .ev-context-facts{grid-template-columns:1fr}
+.ev-meta b{color:var(--v7-black);font-weight:700}
+.ev-target-line{color:var(--v7-info)}
+
+/* The one serif role on the page: material quoted verbatim out of a source. The source label
+ * is mono and sits outside the quote, so a machine-read line can never be mistaken for a
+ * sentence someone wrote. */
+.ev-evidence{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:baseline;gap:8px;margin-top:8px;padding:6px 10px;border-left:3px solid var(--v7-red);background:var(--lgi-signal-faint)}
+.ev-evidence-source{color:var(--lgi-signal-ink);font:650 10px var(--lgi-font-sans);white-space:nowrap}
+.ev-evidence q{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:13.5px/1.5 var(--lgi-font-evidence);color:var(--v7-black);quotes:none}
+/* The row clamps its quote to one line because the row is a scanning surface. The Inspector is
+ * where the reader came to actually read that quote, so the same block wraps in full there —
+ * clamping it twice would hide the evidence inside the evidence panel. */
+.ev-inspector .ev-evidence{align-items:start}
+.ev-inspector .ev-evidence q{overflow:visible;white-space:normal;font-size:13px;line-height:1.65}
+.ev-evidence mark{padding:0 1px;background:var(--v7-red);color:var(--v7-white)}
+.ev-evidence--absent{border-left-color:var(--v7-line-strong);background:var(--v7-gray)}
+.ev-evidence--absent .ev-evidence-source{color:var(--v7-ghost)}
+.ev-evidence--absent span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v7-muted);font-size:11.5px}
+.ev-engagement{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:8px;color:var(--v7-muted);font:650 10.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.ev-engagement b{margin-left:3px;color:var(--v7-black);font-weight:750}
+
+/* ---- material summary rail ----
+ * Five fixed dimensions: 正文 / 评论 / 媒体 / 图片文字 / 转录. A dimension that does not apply to
+ * this work is drawn as an outline and excluded from the ratio, so an image note reads 4/4 and
+ * never 4/5. Unknown is its own fill and is never drawn as zero. */
+.ev-side{display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding-left:12px;border-left:1px solid var(--v7-line)}
+.ev-material-summary{color:var(--v7-muted);font:650 10px var(--lgi-font-sans)}
+.ev-material-summary b{margin-left:4px;color:var(--v7-black);font:750 13.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.ev-work-list[data-layout="table"] .ev-material-label{display:none}
+.ev-work-list[data-layout="table"] .ev-material-summary b{margin-left:0}
+.ev-material-rail{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin-top:7px}
+.ev-mat-seg{position:relative;height:9px;border:1px solid transparent;background:var(--v7-sunken)}
+.ev-mat-seg[data-fill="ready"]{background:var(--v7-ok)}
+.ev-mat-seg[data-fill="partial"]{background:var(--v7-warn)}
+.ev-mat-seg[data-fill="pending"]{background:var(--v7-info)}
+.ev-mat-seg[data-fill="failed"]{background:var(--v7-red)}
+.ev-mat-seg[data-fill="not-applicable"]{background:var(--v7-white);border-color:var(--v7-line-strong)}
+.ev-mat-seg[data-fill="unknown"]{background:var(--v7-sunken)}
+.ev-state-line{display:flex;flex-wrap:wrap;align-items:center;gap:7px;color:var(--v7-muted);font:650 10.5px var(--lgi-font-sans)}
+.ev-state-dot{width:6px;height:6px;flex:0 0 auto;border-radius:50%;background:var(--v7-unknown)}
+.ev-state-dot[data-tone="success"]{background:var(--v7-ok)}
+.ev-state-dot[data-tone="warning"]{background:var(--v7-warn)}
+.ev-state-dot[data-tone="info"]{background:var(--v7-info)}
+.ev-state-dot[data-tone="danger"]{background:var(--v7-red)}
+.ev-observed{color:var(--v7-ghost);font:650 9.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+
+/* ---- table layout ---- */
+.ev-table-head{position:sticky;top:38px;z-index:3;display:grid;grid-template-columns:minmax(210px,1.5fr) minmax(140px,.85fr) 140px minmax(96px,.6fr) minmax(104px,.62fr) minmax(104px,.62fr);gap:14px;padding:9px 16px;border-bottom:1px solid var(--v7-black);background:var(--v7-gray);color:var(--v7-muted);font:650 10px var(--lgi-font-sans)}
+.ev-table-head[hidden]{display:none}
+.ev-work-list[data-layout="table"] .ev-work-row{grid-template-columns:minmax(210px,1.5fr) minmax(140px,.85fr) 140px minmax(96px,.6fr) minmax(104px,.62fr) minmax(104px,.62fr);align-items:center;min-height:66px;padding:10px 16px}
+.ev-work-list[data-layout="table"] .ev-preview,.ev-work-list[data-layout="table"] .ev-evidence,.ev-work-list[data-layout="table"] .ev-engagement{display:none}
+.ev-work-list[data-layout="table"] .ev-side{display:contents}
+.ev-work-list[data-layout="table"] .ev-identity{max-width:none}
+.ev-work-list[data-layout="table"] .ev-identity h2{font-size:13px;margin-top:3px}
+.ev-work-list[data-layout="table"] .ev-material-rail{margin-top:4px}
+.ev-table-cell{min-width:0;color:var(--v7-muted);font:10.5px/1.5 var(--lgi-font-sans);font-variant-numeric:tabular-nums}
+.ev-table-cell b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v7-black);font-weight:650}
+.ev-work-list[data-layout="research"] .ev-table-cell,.ev-work-list[data-layout="cover"] .ev-table-cell{display:none}
+
+/* ---- cover layout ---- */
+.ev-work-list[data-layout="cover"]{display:grid;grid-template-columns:repeat(auto-fill,minmax(248px,1fr));gap:1px;background:var(--v7-line)}
+.ev-work-list[data-layout="cover"] .ev-work-row{display:grid;grid-template-columns:minmax(0,1fr);gap:9px;min-height:0;padding:11px;border-bottom:0;background:var(--v7-white)}
+.ev-work-list[data-layout="cover"] .ev-preview{width:100%;height:auto;aspect-ratio:3/4}
+.ev-work-list[data-layout="cover"] .ev-preview img{object-fit:cover}
+.ev-work-list[data-layout="cover"] .ev-evidence,.ev-work-list[data-layout="cover"] .ev-eyebrow{display:none}
+.ev-work-list[data-layout="cover"] .ev-side{padding-left:0;border-left:0;border-top:1px solid var(--v7-line);padding-top:8px}
+.ev-work-list[data-layout="cover"] .ev-identity{max-width:none}
+.ev-work-list[data-layout="cover"] .ev-identity h2{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+
+/* ---- inspector ---- */
+.ev-inspector{min-width:0;overflow:auto;border-left:0;background:var(--v7-white)}
+.ev-inspector-head{position:sticky;top:0;z-index:5;padding:10px 14px 0;border-bottom:2px solid var(--v7-black);background:var(--v7-white)}
+.ev-back{display:none;min-height:40px;margin:0 0 8px;padding:0;border:0;background:transparent;color:var(--v7-info);font-weight:700}
+.ev-inspector-ref{margin-left:auto;color:var(--v7-ghost);font:650 10.5px var(--lgi-font-mono);letter-spacing:.05em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ev-inspector-head h2{margin:0;min-width:0;font-size:22px;line-height:1.25;letter-spacing:-.025em;overflow-wrap:anywhere}
+/* Every control in the header sits on one line: the two actions, the reference, and the panel
+ * size and close controls. Splitting them across two rows spent a second line of a panel whose
+ * height is the scarce thing here. All of them share one control height so the row reads as a
+ * single band rather than as buttons of assorted sizes. */
+.ev-action-row{display:flex;align-items:center;gap:8px;min-width:0;margin-top:0}
+.ev-action-row .ev-button{min-height:32px;padding:0 11px;font-size:11.5px}
+.ev-action-row .ev-button--primary{padding-right:40px}
+.ev-panel-tools{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.ev-width-switch{display:flex;height:32px;flex:0 0 auto;border:1px solid var(--v7-black)}
+.ev-width-switch button{width:30px;display:grid;place-items:center;border:0;border-right:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);cursor:pointer}
+.ev-width-switch button:last-child{border-right:0}
+.ev-width-switch button[aria-pressed="true"]{background:var(--v7-black);color:var(--v7-white)}
+.ev-width-glyph{position:relative;display:block;width:17px;height:11px;border:1px solid currentColor}
+.ev-width-glyph::after{content:"";position:absolute;top:0;bottom:0;width:1px;background:currentColor}
+.ev-width-glyph--normal::after{left:10px}
+.ev-width-glyph--wide::after{left:7px}
+.ev-width-glyph--focus::after{left:3px}
+.ev-panel-close{width:32px;height:32px;display:grid;place-items:center;border:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:700 15px var(--lgi-font-mono);cursor:pointer}
+.ev-panel-close:hover{background:var(--v7-red);border-color:var(--v7-red);color:var(--v7-white)}
+/* Lives inside the results header rather than floating over the list: a cover grid fills the
+ * full width when the panel is closed, and an absolutely positioned control would sit on top of
+ * a work card. */
+.ev-results-head-tools{display:flex;align-items:center;gap:12px;min-width:0}
+.ev-inspector-reopen{min-height:30px;padding:0 11px;border:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:650 10px var(--lgi-font-sans);white-space:nowrap;cursor:pointer}
+.ev-inspector-reopen:hover{background:var(--v7-black);color:var(--v7-white)}
+.ev-inspector-reopen[hidden]{display:none}
+.ev-inspector-feedback{display:flex;align-items:center;gap:8px;min-height:34px;margin:9px 0 0;padding:7px 10px;background:var(--v7-gray);font-size:10px}
+.ev-inspector-feedback[hidden]{display:none}
+.ev-tabs{display:grid;grid-template-columns:repeat(4,1fr);margin:11px -14px 0}
+.ev-tabs button{min-height:42px;padding:0 5px;border:0;border-top:1px solid var(--v7-line);border-bottom:3px solid transparent;background:transparent;color:var(--v7-muted);font:600 12.5px var(--lgi-font-sans);cursor:pointer}
+.ev-tabs button[aria-selected="true"]{border-bottom-color:var(--v7-red);color:var(--v7-black);font-weight:750}
+.ev-inspector-body{padding:14px 14px 40px}
+.ev-inspector-body>[hidden]{display:none}
+.ev-inspect-section{margin-bottom:20px}
+.ev-inspect-section>h3{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin:0 0 10px;padding-bottom:7px;border-bottom:1px solid var(--v7-black);font-size:12.5px}
+.ev-facts{display:grid;grid-template-columns:minmax(96px,.66fr) minmax(0,1.34fr);margin:0;border-top:1px solid var(--v7-line)}
+.ev-facts dt,.ev-facts dd{min-height:34px;margin:0;padding:8px 7px;border-bottom:1px solid var(--v7-line);font-size:11.5px;line-height:1.5;overflow-wrap:anywhere}
+.ev-facts dt{color:var(--v7-ghost)}
+.ev-facts dd{color:var(--v7-black);font-weight:600}
+.ev-detail-lanes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-top:1px solid var(--v7-black);border-left:1px solid var(--v7-line)}
+.ev-bench[data-inspector="focus"] .ev-detail-lanes,.ev-bench[data-inspector="wide"] .ev-detail-lanes{grid-template-columns:repeat(3,minmax(0,1fr))}
+.ev-lane{min-width:0;display:grid;grid-template-columns:1fr auto;gap:4px;padding:7px 8px;border-right:1px solid var(--v7-line);border-bottom:1px solid var(--v7-line)}
+.ev-lane-name{color:var(--v7-muted);font-size:11px;font-weight:650}
+.ev-lane-count{color:var(--v7-ghost);font:11px var(--lgi-font-mono);text-align:right;font-variant-numeric:tabular-nums}
+.ev-lane .ev-state-line{grid-column:1/-1}
+.ev-inline-state{margin:9px 0;padding:12px;border-left:3px solid var(--v7-line-strong);background:var(--v7-gray);font-size:11.5px}
+.ev-inline-state strong{display:block;margin-bottom:4px}
+.ev-inline-state p{margin:0 0 6px;color:var(--v7-muted);line-height:1.6}
+.ev-inline-state[data-tone="warning"]{border-color:var(--v7-warn);background:var(--v7-warn-soft)}
+.ev-inline-state[data-tone="danger"],.ev-inline-state[data-tone="restricted"]{border-color:var(--v7-red);background:var(--v7-soft-red)}
+.ev-channel-receipt{margin-bottom:16px;border-top:2px solid var(--v7-black)}
+.ev-channel-title{display:flex;justify-content:space-between;gap:10px;padding:9px 0;font-size:12px}
+.ev-channel-actions{display:flex;align-items:center;gap:8px}
+.ev-comment{padding:11px 0;border-top:1px solid var(--v7-line)}
+.ev-comment-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.ev-comment q{display:block;margin:8px 0;font:13px/1.75 var(--lgi-font-evidence);color:var(--v7-black);white-space:pre-wrap;quotes:none}
+.ev-comment-meta,.ev-comment-receipt,.ev-channel-inline-receipt,.ev-loading-copy{color:var(--v7-ghost);font:11px var(--lgi-font-mono)}
+.ev-derivative{margin-bottom:11px;padding:10px;border:1px solid var(--v7-line-strong);background:var(--v7-white)}
+.ev-derivative-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;font-size:11.5px}
+.ev-derivative q{display:block;font:12.5px/1.75 var(--lgi-font-evidence);color:var(--v7-black);white-space:pre-wrap;quotes:none}
+.ev-provenance-group{display:grid;grid-template-columns:92px minmax(0,1fr);gap:6px;padding:9px 0;border-bottom:1px solid var(--v7-line);font-size:11px}
+.ev-provenance-group code{grid-column:2;overflow-wrap:anywhere;color:var(--v7-muted);font:9px/1.4 var(--lgi-font-mono)}
+.ev-limit-list{margin:0;padding-left:20px}
+.ev-limit-list li{margin:8px 0;font-size:11.5px}
+.ev-asset-link{min-height:38px;display:inline-flex;align-items:center;color:var(--v7-info);font-size:11.5px;font-weight:700}
+
+/* ---- LOCAL MEDIA rail ----
+ * Every object is independently addressable and independently stateful: one failed download
+ * must not make a work look like it has no media at all. Images are `contain`, never `cover` —
+ * this is evidence, and a crop is a silent edit. */
+.ev-media-module{margin-bottom:18px;border-top:2px solid var(--v7-black)}
+.ev-media-toolbar{min-height:44px;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:7px 0}
+.ev-media-summary b{display:block;font:700 12px var(--lgi-font-sans);color:var(--v7-black)}
+.ev-media-summary span{display:block;margin-top:4px;color:var(--v7-ghost);font:10px var(--lgi-font-sans)}
+.ev-media-nav{display:flex;align-items:center;gap:6px}
+.ev-media-nav button{width:29px;height:29px;display:grid;place-items:center;border:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:700 12px var(--lgi-font-mono);cursor:pointer}
+.ev-media-nav button:hover:not(:disabled){background:var(--v7-black);color:var(--v7-white)}
+.ev-media-nav button:disabled{opacity:.28;cursor:default}
+.ev-media-position{min-width:58px;text-align:center;color:var(--v7-muted);font:700 10.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.ev-media-jump{width:auto!important;padding:0 9px!important;border-color:var(--v7-red)!important;color:var(--lgi-signal-ink);font:700 8px var(--lgi-font-mono)!important;letter-spacing:.05em}
+.ev-media-jump:hover{background:var(--v7-red)!important;color:var(--v7-white)!important}
+.ev-media-viewport{overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scroll-behavior:smooth;overscroll-behavior-x:contain;scrollbar-width:none;cursor:grab;padding:1px 0 4px}
+.ev-media-viewport::-webkit-scrollbar{display:none}
+.ev-media-viewport[data-grabbing="true"]{cursor:grabbing;scroll-snap-type:none;scroll-behavior:auto;user-select:none}
+.ev-media-strip{display:flex;gap:10px;min-width:max-content;padding:2px 1px 6px}
+/* Widening the Inspector shows more objects at once; it must never just enlarge one image. */
+.ev-media-card{position:relative;flex:0 0 clamp(90px,37%,150px);scroll-snap-align:start;padding:0;border:0;background:transparent;text-align:left;cursor:zoom-in}
+.ev-bench[data-inspector="wide"] .ev-media-card{flex-basis:clamp(100px,23%,150px)}
+.ev-bench[data-inspector="focus"] .ev-media-card{flex-basis:clamp(110px,15.5%,160px)}
+.ev-media-frame{position:relative;aspect-ratio:4/5;display:grid;place-items:center;overflow:hidden;border:1px solid var(--v7-line-strong);background:var(--v7-gray)}
+.ev-media-card:hover .ev-media-frame{border-color:var(--v7-black)}
+.ev-media-card[data-current="true"] .ev-media-frame{border:2px solid var(--v7-black)}
+.ev-media-card[data-match="true"] .ev-media-frame{box-shadow:inset 0 4px 0 var(--v7-red)}
+.ev-media-card img{width:100%;height:100%;object-fit:contain;background:var(--v7-white)}
+.ev-media-index{position:absolute;left:5px;top:5px;padding:2px 4px;background:var(--v7-black);color:var(--v7-white);font:700 8.5px var(--lgi-font-mono);letter-spacing:.04em}
+.ev-media-absent{padding:12px;color:var(--v7-muted);font-size:11px;line-height:1.6;text-align:center}
+.ev-media-meta{display:grid;gap:2px;margin-top:6px;color:var(--v7-ghost);font:650 9px var(--lgi-font-mono);letter-spacing:.02em}
+.ev-media-meta b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v7-muted);font-weight:650}
+.ev-media-progress{height:3px;margin-top:2px;background:var(--v7-sunken)}
+.ev-media-progress i{display:block;height:100%;background:var(--v7-black);transition:transform 140ms ease;transform-origin:left center}
+.ev-media-hint{display:flex;justify-content:space-between;gap:12px;padding:8px 0 0;color:var(--v7-ghost);font:11px var(--lgi-font-sans)}
+.ev-media-hint em{font-style:normal;color:var(--lgi-signal-ink)}
+
+/* ---- lightbox ---- */
+.ev-lightbox{position:fixed;inset:0;z-index:120;display:grid;grid-template-rows:auto minmax(0,1fr);background:var(--v7-white)}
+.ev-lightbox[hidden]{display:none}
+.ev-lightbox-head{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 18px;border-bottom:1px solid var(--v7-black);background:var(--v7-white)}
+.ev-lightbox-head strong{font-size:13px}
+.ev-lightbox-ref{display:block;margin-top:3px;color:var(--v7-ghost);font:650 8.5px var(--lgi-font-mono);letter-spacing:.06em}
+.ev-lightbox-close{width:36px;height:36px;display:grid;place-items:center;border:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:700 17px var(--lgi-font-mono);cursor:pointer}
+.ev-lightbox-close:hover{background:var(--v7-red);border-color:var(--v7-red);color:var(--v7-white)}
+/* The stage centres a fixed-size plate rather than letting the picture grow into every
+ * available pixel. At full height a text card becomes a wall the reader has to scan by moving
+ * their head; the point of this viewer is to see one object whole. Zoom is there for the
+ * moments when a detail matters. */
+.ev-lightbox-stage{display:flex;align-items:center;justify-content:center;gap:20px;min-height:0;padding:20px}
+.ev-lightbox-step{flex:0 0 auto;width:52px;height:72px;display:grid;place-items:center;border:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:700 19px var(--lgi-font-mono);cursor:pointer}
+.ev-lightbox-step:hover:not(:disabled){background:var(--v7-black);color:var(--v7-white)}
+.ev-lightbox-step:disabled{opacity:.25;cursor:default}
+/* The image is framed and centred: most objects here are white text cards, and without a
+ * boundary they dissolve into the white canvas and the reader cannot see where the evidence
+ * ends. `contain` is non-negotiable — a crop would be a silent edit to evidence. */
+.ev-lightbox-figure{min-height:0;max-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;margin:0;overflow:hidden}
+/* The plate carries the border, not the image: once the image can be scaled and dragged it
+ * would otherwise slide out from under its own frame. The frame clips, the image moves inside. */
+.ev-lightbox-frame{position:relative;min-height:0;max-width:min(56vw,760px);max-height:min(76vh,900px);display:grid;place-items:center;overflow:hidden;border:2px solid var(--v7-black);background:var(--v7-white);box-shadow:var(--v7-brutal)}
+.ev-lightbox-frame img{display:block;max-width:min(56vw,760px);max-height:min(76vh,900px);object-fit:contain;transform-origin:0 0;will-change:transform}
+.ev-lightbox-frame[data-zoomed="true"]{cursor:grab}
+.ev-lightbox-frame[data-grabbing="true"]{cursor:grabbing}
+.ev-lightbox-tools{display:flex;align-items:center;gap:10px}
+.ev-zoom{display:flex;height:34px;border:1px solid var(--v7-black)}
+.ev-zoom button{min-width:34px;padding:0 8px;border:0;border-right:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:700 13px var(--lgi-font-mono);cursor:pointer}
+.ev-zoom button:last-child{border-right:0}
+.ev-zoom button:hover:not(:disabled){background:var(--v7-black);color:var(--v7-white)}
+.ev-zoom button:disabled{opacity:.3;cursor:default}
+.ev-zoom-value{min-width:62px;font-size:11px!important;font-variant-numeric:tabular-nums}
+.ev-lightbox-figure figcaption{color:var(--v7-muted);font:650 9px var(--lgi-font-mono);letter-spacing:.05em;text-align:center}
+
+/* Hover is stated per surface, never as one global colour. A single `color: Ink` rule reads
+ * fine on the white buttons and turns the label invisible the moment the button is already
+ * Ink — which is exactly what an open filter popover or the primary action is. */
+@media (hover:hover){
+  .ev-button:not(:disabled):hover{background:var(--v7-gray);color:var(--v7-black)}
+  .ev-button--primary:not(:disabled):hover{background:var(--v7-red);border-color:var(--v7-red);color:var(--v7-white)}
+  .ev-button[aria-expanded="true"]:not(:disabled):hover{background:var(--v7-black);color:var(--v7-white)}
+  .ev-quickviews button:hover,.ev-layout-switch button:hover{color:var(--v7-black)}
+  .ev-work-row:hover{background:var(--v7-gray)}
+  .ev-work-row[aria-selected="true"]:hover{background:var(--v7-soft-red)}
+}
+.ev-button:focus-visible,.ev-field select:focus-visible,.ev-sort select:focus-visible,.ev-quickviews button:focus-visible,.ev-layout-switch button:focus-visible,.ev-tabs button:focus-visible,.ev-back:focus-visible,.ev-asset-link:focus-visible,.ev-width-switch button:focus-visible,.ev-panel-close:focus-visible,.ev-media-card:focus-visible,.ev-media-nav button:focus-visible,.ev-lightbox-step:focus-visible,.ev-lightbox-close:focus-visible,.ev-inspector-reopen:focus-visible,.ev-zoom button:focus-visible,.ev-select-toggle:focus-visible,.ev-select-list button:focus-visible{outline:3px solid var(--v7-red);outline-offset:2px}
+
+@media(max-width:1500px){
+  .ev-bench[data-inspector="normal"]{--ev-inspector-w:390px}
+  .ev-work-row{grid-template-columns:66px minmax(0,1fr) 172px}
+  .ev-preview{width:66px;height:88px}
+  .ev-readout>div{padding:2px 15px}
+  .ev-readout dd{font-size:21px}
+}
+@media(max-width:1180px){
+  .ev-page-head{flex-direction:column;gap:14px}
+  .ev-saved-views{display:none}
+  .ev-readout{border-left:0;border-top:1px solid var(--v7-line);padding-top:10px;width:100%}
+  .ev-readout>div:last-child{padding-right:20px}
+  /* Below this width the Inspector stops being a column and becomes a drawer over the list —
+   * squeezing two columns into a phone would leave neither usable. */
+  .ev-bench,.ev-bench[data-inspector]{grid-template-columns:minmax(0,1fr)}
+  .ev-results{border-right:0}
+  .ev-inspector{position:fixed;top:0;right:0;bottom:0;z-index:110;width:min(680px,94vw);border-left:2px solid var(--v7-black);transform:translateX(100%);transition:transform 200ms ease}
+  .ev-bench[data-drawer="open"] .ev-inspector{transform:none}
+  .ev-bench[data-inspector="closed"] .ev-inspector{display:block}
+  .ev-inspector-reopen{display:none}
+  .ev-back{display:block}
+  .ev-panel-tools{display:none}
+}
+@media(max-width:900px){
+  .ev-main{overflow:auto}
+  .ev-query-form{grid-template-columns:minmax(0,1fr);grid-template-areas:"label" "find" "tools" "panel"}
+  .ev-query-tools{flex-wrap:wrap}
+  .ev-deck-foot{flex-direction:column;gap:6px}
+  .ev-table-head{display:none!important}
+  .ev-work-list[data-layout="table"] .ev-work-row{grid-template-columns:minmax(0,1fr);gap:7px;min-height:0;padding:12px}
+  .ev-work-list[data-layout="table"] .ev-side{display:flex}
+}
+@media(max-width:640px){
+  .ev-page-head{padding:14px}
+  .ev-page-head h1{font-size:22px}
+  .ev-readout{grid-auto-flow:row;grid-template-columns:repeat(2,1fr)}
+  .ev-readout>div{border-right:0;padding:6px 0}
+  .ev-command{padding:12px 14px 0}
+  .ev-work-row{grid-template-columns:56px minmax(0,1fr);padding:12px 14px}
+  .ev-context-facts{grid-template-columns:1fr}
+  .ev-preview{width:56px;height:74px}
+  .ev-side{grid-column:1/-1;padding-left:0;border-left:0;border-top:1px solid var(--v7-line);padding-top:8px}
+  .ev-work-list[data-layout="cover"]{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .ev-media-card{flex-basis:min(40vw,145px)}
+  .ev-lightbox-stage{gap:10px;padding:12px}
+  .ev-lightbox-step{width:38px;height:56px}
+  .ev-lightbox-frame,.ev-lightbox-frame img{max-width:min(74vw,520px);max-height:min(64vh,620px)}
+}
+@media(max-width:420px){.ev-work-list[data-layout="cover"]{grid-template-columns:1fr}}
+@media(prefers-reduced-motion:reduce){.ev-main *,.ev-inspector,.ev-media-viewport{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}
+/* Issue #133 keeps its action and history states inside the V9 Inspector rather than rebuilding a
+ * second detail surface. These styles only describe the new bounded reobservation and per-Attempt
+ * history blocks; the surrounding layout remains the V9 reading surface. */
+.ev-channel-receipt{margin-bottom:16px;border-top:2px solid var(--v7-black)}
+.ev-channel-title{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:8px 0;font-size:11.5px}
+.ev-comment p{margin:8px 0;font:13px/1.75 var(--lgi-font-evidence);color:var(--v7-black);white-space:pre-wrap}
+.ev-reobservation-operation{margin:12px 0;padding:0 10px 10px;border:1px solid var(--v7-black);background:var(--v7-gray)}
+.ev-reobservation-tasks{display:grid;gap:8px;margin-top:10px}
+.ev-reobservation-task{padding:9px;border:1px solid var(--v7-line-strong);background:var(--v7-white)}
+.ev-coverage-history{display:grid;gap:10px}
+.ev-coverage-history>h4{margin:0;color:var(--v7-muted);font-size:10px;line-height:1.5}
+.ev-coverage-history-group{display:grid;gap:8px;padding:9px;border-left:3px solid var(--v7-info);background:var(--v7-gray)}
+.ev-coverage-history-group>strong{font-size:10px}
+.ev-history-item{margin:0}
