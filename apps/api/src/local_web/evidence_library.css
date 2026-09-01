@@ -125,7 +125,11 @@
 .ev-preview[data-tone="restricted"]{border-color:var(--v7-red);background:var(--v7-soft-red);color:var(--lgi-signal-ink)}
 .ev-preview[data-tone="cleaned"]{background:var(--v7-warn-fill)}
 
-.ev-identity{min-width:0}
+/* LIDS layout guardrail: a wide screen gets outer white, it does not get wider prose. Without
+ * this the identity column reaches 968px at 1920 and a single quote line runs the better part
+ * of a metre — technically legible, actually unreadable, and it leaves the row looking stretched.
+ * The material rail stays pinned right so the ratios line up down the column while scanning. */
+.ev-identity{min-width:0;max-width:760px}
 .ev-eyebrow{display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--v7-ghost);font:650 10px/1.3 var(--lgi-font-mono);letter-spacing:.05em}
 .ev-identity h2{margin:5px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:18px;font-weight:750;line-height:1.3;letter-spacing:-.015em;color:var(--v7-black)}
 .ev-meta{margin-top:6px;color:var(--v7-muted);font:12px/1.5 var(--lgi-font-sans)}
@@ -181,6 +185,7 @@
 .ev-work-list[data-layout="table"] .ev-work-row{grid-template-columns:minmax(210px,1.5fr) minmax(140px,.85fr) 140px minmax(96px,.6fr) minmax(104px,.62fr) minmax(104px,.62fr);align-items:center;min-height:66px;padding:10px 16px}
 .ev-work-list[data-layout="table"] .ev-preview,.ev-work-list[data-layout="table"] .ev-evidence,.ev-work-list[data-layout="table"] .ev-engagement{display:none}
 .ev-work-list[data-layout="table"] .ev-side{display:contents}
+.ev-work-list[data-layout="table"] .ev-identity{max-width:none}
 .ev-work-list[data-layout="table"] .ev-identity h2{font-size:14px;margin-top:3px}
 .ev-work-list[data-layout="table"] .ev-material-rail{margin-top:4px}
 .ev-table-cell{min-width:0;color:var(--v7-muted);font:11.5px/1.5 var(--lgi-font-sans);font-variant-numeric:tabular-nums}
@@ -188,12 +193,13 @@
 .ev-work-list[data-layout="research"] .ev-table-cell,.ev-work-list[data-layout="cover"] .ev-table-cell{display:none}
 
 /* ---- cover layout ---- */
-.ev-work-list[data-layout="cover"]{display:grid;grid-template-columns:repeat(auto-fill,minmax(196px,1fr));gap:1px;background:var(--v7-line)}
+.ev-work-list[data-layout="cover"]{display:grid;grid-template-columns:repeat(auto-fill,minmax(248px,1fr));gap:1px;background:var(--v7-line)}
 .ev-work-list[data-layout="cover"] .ev-work-row{display:grid;grid-template-columns:minmax(0,1fr);gap:9px;min-height:0;padding:11px;border-bottom:0;background:var(--v7-white)}
 .ev-work-list[data-layout="cover"] .ev-preview{width:100%;height:auto;aspect-ratio:3/4}
 .ev-work-list[data-layout="cover"] .ev-preview img{object-fit:cover}
 .ev-work-list[data-layout="cover"] .ev-evidence,.ev-work-list[data-layout="cover"] .ev-eyebrow{display:none}
 .ev-work-list[data-layout="cover"] .ev-side{padding-left:0;border-left:0;border-top:1px solid var(--v7-line);padding-top:8px}
+.ev-work-list[data-layout="cover"] .ev-identity{max-width:none}
 .ev-work-list[data-layout="cover"] .ev-identity h2{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 
 /* ---- inspector ---- */
