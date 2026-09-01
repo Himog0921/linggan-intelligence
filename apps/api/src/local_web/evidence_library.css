@@ -210,14 +210,15 @@
 .ev-back{display:none;min-height:40px;margin:0 0 8px;padding:0;border:0;background:transparent;color:var(--v7-info);font-weight:700}
 .ev-inspector-ref{margin-left:auto;color:var(--v7-ghost);font:650 10.5px var(--lgi-font-mono);letter-spacing:.05em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ev-inspector-head h2{margin:0;min-width:0;font-size:22px;line-height:1.25;letter-spacing:-.025em;overflow-wrap:anywhere}
-/* Title and panel controls share one row so the header spends its height on the work's name
- * rather than on a stack of chrome. */
-.ev-inspector-title-row{display:flex;align-items:center;justify-content:flex-end;gap:16px;margin-bottom:8px}
+/* Every control in the header sits on one line: the two actions, the reference, and the panel
+ * size and close controls. Splitting them across two rows spent a second line of a panel whose
+ * height is the scarce thing here. All of them share one control height so the row reads as a
+ * single band rather than as buttons of assorted sizes. */
 .ev-action-row{display:flex;align-items:center;gap:8px;min-width:0;margin-top:0}
 .ev-action-row .ev-button{min-height:32px;padding:0 11px;font-size:11.5px}
 .ev-action-row .ev-button--primary{padding-right:40px}
 .ev-panel-tools{display:flex;align-items:center;gap:6px;flex:0 0 auto}
-.ev-width-switch{display:flex;height:32px;border:1px solid var(--v7-black)}
+.ev-width-switch{display:flex;height:32px;flex:0 0 auto;border:1px solid var(--v7-black)}
 .ev-width-switch button{width:30px;display:grid;place-items:center;border:0;border-right:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);cursor:pointer}
 .ev-width-switch button:last-child{border-right:0}
 .ev-width-switch button[aria-pressed="true"]{background:var(--v7-black);color:var(--v7-white)}
@@ -320,18 +321,22 @@
 .ev-lightbox-ref{display:block;margin-top:3px;color:var(--v7-ghost);font:650 8.5px var(--lgi-font-mono);letter-spacing:.06em}
 .ev-lightbox-close{width:36px;height:36px;display:grid;place-items:center;border:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:700 17px var(--lgi-font-mono);cursor:pointer}
 .ev-lightbox-close:hover{background:var(--v7-red);border-color:var(--v7-red);color:var(--v7-white)}
-.ev-lightbox-stage{display:grid;grid-template-columns:56px minmax(0,1fr) 56px;align-items:center;gap:14px;min-height:0;padding:18px}
-.ev-lightbox-step{height:60px;display:grid;place-items:center;border:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:700 17px var(--lgi-font-mono);cursor:pointer}
+/* The stage centres a fixed-size plate rather than letting the picture grow into every
+ * available pixel. At full height a text card becomes a wall the reader has to scan by moving
+ * their head; the point of this viewer is to see one object whole. Zoom is there for the
+ * moments when a detail matters. */
+.ev-lightbox-stage{display:flex;align-items:center;justify-content:center;gap:20px;min-height:0;padding:20px}
+.ev-lightbox-step{flex:0 0 auto;width:52px;height:72px;display:grid;place-items:center;border:1px solid var(--v7-black);background:var(--v7-white);color:var(--v7-black);font:700 19px var(--lgi-font-mono);cursor:pointer}
 .ev-lightbox-step:hover:not(:disabled){background:var(--v7-black);color:var(--v7-white)}
 .ev-lightbox-step:disabled{opacity:.25;cursor:default}
 /* The image is framed and centred: most objects here are white text cards, and without a
  * boundary they dissolve into the white canvas and the reader cannot see where the evidence
  * ends. `contain` is non-negotiable — a crop would be a silent edit to evidence. */
-.ev-lightbox-figure{min-height:0;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;margin:0;overflow:hidden}
+.ev-lightbox-figure{min-height:0;max-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;margin:0;overflow:hidden}
 /* The plate carries the border, not the image: once the image can be scaled and dragged it
  * would otherwise slide out from under its own frame. The frame clips, the image moves inside. */
-.ev-lightbox-frame{position:relative;min-height:0;max-width:100%;max-height:100%;display:grid;place-items:center;overflow:hidden;border:2px solid var(--v7-black);background:var(--v7-white);box-shadow:var(--v7-brutal)}
-.ev-lightbox-frame img{display:block;max-width:100%;max-height:100%;object-fit:contain;transform-origin:0 0;will-change:transform}
+.ev-lightbox-frame{position:relative;min-height:0;max-width:min(56vw,760px);max-height:min(76vh,900px);display:grid;place-items:center;overflow:hidden;border:2px solid var(--v7-black);background:var(--v7-white);box-shadow:var(--v7-brutal)}
+.ev-lightbox-frame img{display:block;max-width:min(56vw,760px);max-height:min(76vh,900px);object-fit:contain;transform-origin:0 0;will-change:transform}
 .ev-lightbox-frame[data-zoomed="true"]{cursor:grab}
 .ev-lightbox-frame[data-grabbing="true"]{cursor:grabbing}
 .ev-lightbox-tools{display:flex;align-items:center;gap:10px}
@@ -399,8 +404,9 @@
   .ev-side{grid-column:1/-1;padding-left:0;border-left:0;border-top:1px solid var(--v7-line);padding-top:8px}
   .ev-work-list[data-layout="cover"]{grid-template-columns:repeat(2,minmax(0,1fr))}
   .ev-media-card{flex-basis:min(40vw,145px)}
-  .ev-lightbox-stage{grid-template-columns:40px minmax(0,1fr) 40px;padding:12px}
-  .ev-lightbox-step{height:48px}
+  .ev-lightbox-stage{gap:10px;padding:12px}
+  .ev-lightbox-step{width:38px;height:56px}
+  .ev-lightbox-frame,.ev-lightbox-frame img{max-width:min(74vw,520px);max-height:min(64vh,620px)}
 }
 @media(max-width:420px){.ev-work-list[data-layout="cover"]{grid-template-columns:1fr}}
 @media(prefers-reduced-motion:reduce){.ev-main *,.ev-inspector,.ev-media-viewport{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important}}

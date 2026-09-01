@@ -2940,8 +2940,11 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
             <aside class="ev-inspector" id="ev-inspector" aria-labelledby="ev-inspector-title">
               <header class="ev-inspector-head">
                 <button class="ev-back" id="ev-back-to-list" type="button">← 返回当前作品</button>
-                <div class="ev-inspector-title-row">
-                  <h2 class="v7-sr-only" id="ev-inspector-title">请选择一个作品材料集合</h2>
+                <h2 class="v7-sr-only" id="ev-inspector-title">请选择一个作品材料集合</h2>
+                <div class="ev-action-row">
+                  <button class="ev-button ev-button--primary" id="ev-open-source" type="button" disabled><span>打开原文</span></button>
+                  <button class="ev-button" id="ev-request-media" type="button" disabled>补采</button>
+                  <span class="ev-inspector-ref" id="ev-inspector-ref"></span>
                   <div class="ev-panel-tools">
                     <div class="ev-width-switch" role="group" aria-label="检查器宽度">
                       <button type="button" data-ev-width="normal" aria-pressed="true" title="标准宽度"><i class="ev-width-glyph ev-width-glyph--normal" aria-hidden="true"></i><span class="v7-sr-only">标准</span></button>
@@ -2950,11 +2953,6 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
                     </div>
                     <button class="ev-panel-close" id="ev-close-inspector" type="button" title="关闭检查器"><span aria-hidden="true">×</span><span class="v7-sr-only">关闭检查器</span></button>
                   </div>
-                </div>
-                <div class="ev-action-row">
-                  <button class="ev-button ev-button--primary" id="ev-open-source" type="button" disabled><span>打开原文</span></button>
-                  <button class="ev-button" id="ev-request-media" type="button" disabled>补采</button>
-                  <span class="ev-inspector-ref" id="ev-inspector-ref"></span>
                 </div>
                 <div class="ev-inspector-feedback" id="ev-inspector-feedback" role="status"></div>
                 <div class="ev-tabs" role="tablist" aria-label="作品证据详情">
