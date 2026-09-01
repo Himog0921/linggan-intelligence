@@ -4,8 +4,10 @@ use serde_json::Value;
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
-const DETAIL_MEDIA_SLOT_LIMIT: usize = 20;
-const DETAIL_DERIVATIVE_LIMIT: usize = 20;
+// A standard XHS detail Attempt may carry the work media, one author avatar and up to 30
+// comment-image slots. Keep the response bounded while returning that whole normal envelope.
+const DETAIL_MEDIA_SLOT_LIMIT: usize = 64;
+const DETAIL_DERIVATIVE_LIMIT: usize = 256;
 
 pub(crate) struct MediaReadProjection {
     pub slots: Vec<Value>,
@@ -76,7 +78,7 @@ fn build_media_resource(
     ocr_state: &'static str,
     asr_state: &'static str,
 ) -> (Value, Option<String>, Option<String>) {
-    let (avatars, covers, images, videos) = partition_resource_slots(slots);
+    let (avatars, covers, images, videos, comment_images) = partition_resource_slots(slots);
     let avatar = select_avatar(&avatars);
     let cover = select_cover(&covers, &images, &videos, derivatives);
     let (ocr_resources, transcript_resources) = derivative_resources(derivatives);
@@ -102,7 +104,11 @@ fn build_media_resource(
         },
         "ocr":{"state":ocr_state,"relationship":"content.ocr","resources":ocr_resources},
         "transcript":{"state":asr_state,"relationship":"content.transcript","resources":transcript_resources},
-        "commentImages":{"state":"NOT_OBSERVED","relationship":"comment.image","items":[]}
+        "commentImages":{
+            "state":if comment_images.is_empty(){"NOT_OBSERVED"}else{"OBSERVED"},
+            "relationship":"comment.image",
+            "items":comment_images
+        }
     });
     (resource, cover.url, cover.purpose)
 }
@@ -127,6 +133,7 @@ fn resource_slot(slot: &Value) -> Value {
         .and_then(Value::as_str)
         .unwrap_or(match purpose {
             "author_avatar" => "author.avatar",
+            "comment_image" => "comment.image",
             "cover" => "content.cover",
             "video" | "live_photo" => "content.video",
             _ => "content.image",
@@ -156,7 +163,9 @@ fn resource_slot(slot: &Value) -> Value {
     value
 }
 
-fn partition_resource_slots(slots: &[Value]) -> (Vec<Value>, Vec<Value>, Vec<Value>, Vec<Value>) {
+fn partition_resource_slots(
+    slots: &[Value],
+) -> (Vec<Value>, Vec<Value>, Vec<Value>, Vec<Value>, Vec<Value>) {
     let select = |purposes: &[&str]| {
         slots
             .iter()
@@ -173,6 +182,7 @@ fn partition_resource_slots(slots: &[Value]) -> (Vec<Value>, Vec<Value>, Vec<Val
         select(&["cover"]),
         select(&["body_image"]),
         select(&["video", "live_photo"]),
+        select(&["comment_image"]),
     )
 }
 
@@ -325,7 +335,7 @@ async fn read_slots(
              origin.composite_state,origin.live_photo_still_state,origin.live_photo_motion_state,observation.observed_at, \
              (SELECT count(*) FROM linggan_material_media_candidate candidate WHERE candidate.observation_ref=origin.observation_ref) AS candidate_count, \
              replica.materialization_ref,replica.verified_at,replica.materialization_observation_ref, \
-             blob.sha256,blob.mime_type,blob.byte_size,blob.pixel_width,blob.pixel_height,blob.duration_ms,relation.relationship_kind,relation.relationship_ordinal,current_download.download_attempt_ref,current_download.terminal_reason, \
+             blob.sha256,blob.mime_type,blob.byte_size,blob.pixel_width,blob.pixel_height,blob.duration_ms,relation.subject_kind,relation.subject_external_id,relation.relationship_kind,relation.relationship_ordinal,current_download.download_attempt_ref,current_download.terminal_reason, \
              disposition.restricted AS disposition_restricted,disposition.cleaned AS disposition_cleaned,disposition.slot_restricted, \
              excluded.newer_disposed AS newer_disposed,count(*) OVER() AS total_count \
          FROM current_origin origin JOIN linggan_media_observation observation USING (observation_ref) \
@@ -363,10 +373,11 @@ async fn read_slots(
                    OR excluded_event.materialization_ref=excluded_materialization.materialization_ref \
                    OR excluded_event.blob_sha256=excluded_materialization.blob_sha256))) AS newer_disposed \
          ) excluded ON true \
-         ORDER BY origin.producer_ordinal,origin.slot_key LIMIT 21",
+         ORDER BY origin.producer_ordinal,origin.slot_key LIMIT $3",
     )
     .bind(content_ref)
     .bind(as_of)
+    .bind(i64::try_from(DETAIL_MEDIA_SLOT_LIMIT + 1).expect("detail slot limit is bounded"))
     .fetch_all(&mut **tx)
     .await?;
     let total = rows.first().map_or(0_i64, |row| row.get("total_count"));
@@ -514,6 +525,7 @@ impl SlotAccumulator {
         self.slots.push(serde_json::json!({
             "slotKey":row.get::<String,_>("slot_key"),"purpose":purpose,
             "producerOrdinal":row.get::<i32,_>("producer_ordinal"),"displayOrdinal":row.get::<Option<i32>,_>("display_ordinal"),
+            "subjectKind":row.get::<Option<String>,_>("subject_kind"),"subjectExternalId":row.get::<Option<String>,_>("subject_external_id"),
             "relationshipKind":row.get::<Option<String>,_>("relationship_kind"),"relationshipOrdinal":row.get::<Option<i32>,_>("relationship_ordinal"),
             "displayOrderState":row.get::<String,_>("display_order_state"),"displayOrderBasis":row.get::<String,_>("display_order_basis"),
             "origin":{"observationRef":row.get::<Uuid,_>("observation_ref"),"sourceGeneration":row.get::<i32,_>("source_generation"),"observedAt":row.get::<String,_>("observed_at"),"candidateUriCount":candidate_count,"candidateSetState":row.get::<String,_>("candidate_set_state"),"actualDownloadCandidateState":"UNKNOWN"},
@@ -599,9 +611,15 @@ async fn read_derivatives(
          LEFT JOIN LATERAL (SELECT bool_or(disposition.state='WITHDRAWN_OR_RESTRICTED') AS restricted \
              FROM linggan_current_material_media_disposition disposition \
              WHERE (disposition.derivative_ref=derivative.derivative_ref OR disposition.blob_sha256=job.blob_sha256 OR disposition.slot_key=job.slot_key)) disposition ON true \
-         JOIN linggan_material_content content ON content.platform=slot.platform AND content.content_external_id=slot.content_external_id \
-         WHERE content.public_ref=$1 AND job.created_at <= $2::timestamptz ORDER BY job.created_at LIMIT 21",
-    ).bind(content_ref).bind(as_of).fetch_all(&mut **tx).await?;
+         WHERE EXISTS (SELECT 1 FROM linggan_material_media_origin origin \
+                       WHERE origin.slot_key=job.slot_key AND origin.content_public_ref=$1) \
+           AND job.created_at <= $2::timestamptz ORDER BY job.created_at LIMIT $3",
+    )
+    .bind(content_ref)
+    .bind(as_of)
+    .bind(i64::try_from(DETAIL_DERIVATIVE_LIMIT + 1).expect("detail derivative limit is bounded"))
+    .fetch_all(&mut **tx)
+    .await?;
     let total = derivative_rows
         .first()
         .map_or(0_i64, |row| row.get("total_count"));

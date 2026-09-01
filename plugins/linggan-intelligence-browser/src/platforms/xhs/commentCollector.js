@@ -20,6 +20,7 @@ const DEFAULT_DOM_TOP_UP_MAX_NO_NEW = 3;
 const DEFAULT_DOM_TOP_UP_SETTLE_MS = 2600;
 const DEFAULT_COMMENT_ACTION_COOLDOWN_MS = 1200;
 const DEFAULT_COMMENT_SCROLL_DISTANCE = 280;
+const MAX_COMMENT_BOTTOM_NUDGES = 3;
 // CSS layout and device scaling can leave an element a fraction of a pixel beyond the
 // scroll-parent edge even after scrollIntoView({ block: 'nearest' }). Treating that as
 // offscreen makes the collector reveal the same control forever without ever clicking it.
@@ -136,6 +137,53 @@ async function loadMoreCommentSurface(container, distance = DEFAULT_COMMENT_SCRO
       || surfaceExpanded;
   }, DEFAULT_DOM_TOP_UP_SETTLE_MS, 140);
   await actionGate.after({ kind: 'dom_scroll', changed });
+  await waitIfPaused();
+  return changed;
+}
+
+export function shouldNudgeCommentSurfaceFromBottom({
+  scrollTop = 0,
+  clientHeight = 0,
+  scrollHeight = 0,
+  currentTotal = 0,
+  pageCommentCount = null,
+  hasEndMarker = false,
+  nudgeCount = 0,
+  maximumNudges = MAX_COMMENT_BOTTOM_NUDGES,
+} = {}) {
+  const top = Number(scrollTop || 0);
+  const viewport = Number(clientHeight || 0);
+  const height = Number(scrollHeight || 0);
+  const target = Number(pageCommentCount);
+  return !hasEndMarker
+    && height > viewport
+    && top + viewport >= height - 2
+    && Number.isFinite(target)
+    && target > Number(currentTotal || 0)
+    && Number(nudgeCount || 0) < Number(maximumNudges || 0);
+}
+
+async function nudgeCommentSurfaceFromBottom(container, {
+  actionGate = createCommentActionGate(),
+  shouldStop = () => false,
+  waitIfPaused = async () => {},
+} = {}) {
+  const scrollParent = findScrollParent(container);
+  if (!scrollParent || typeof scrollParent.scrollBy !== 'function') return false;
+  const beforeScrollTop = Number(scrollParent.scrollTop || 0);
+  const distance = Math.max(
+    DEFAULT_COMMENT_SCROLL_DISTANCE * 2.5,
+    Math.min(Number(scrollParent.clientHeight || 0) * 0.85, 900),
+  );
+  await waitIfPaused();
+  if (shouldStop() || !await actionGate.before({ kind: 'dom_bottom_nudge' })) return false;
+  scrollParent.scrollBy({ top: -distance, behavior: 'auto' });
+  const changed = await waitForCondition(
+    () => Number(scrollParent.scrollTop || 0) < beforeScrollTop - 1,
+    DEFAULT_DOM_TOP_UP_SETTLE_MS,
+    140,
+  );
+  await actionGate.after({ kind: 'dom_bottom_nudge', changed });
   await waitIfPaused();
   return changed;
 }
@@ -730,6 +778,7 @@ async function collectCommentsFromDom({
   const maxNoNew = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES ? 8 : DEFAULT_DOM_TOP_UP_MAX_NO_NEW;
   const shouldExpandReplies = depthMode === COMMENT_DEPTH_MODE.ALL_REPLIES;
   const stalledReplyControls = new WeakSet();
+  let bottomNudgeCount = 0;
   let riskStopped = false;
 
   while (!shouldStop()) {
@@ -840,6 +889,7 @@ async function collectCommentsFromDom({
     }
 
     if (foundNew) {
+      bottomNudgeCount = 0;
       const context = getActiveCommentsContext();
       onSnapshot?.(withCommentCollectionReceipt({
         total: allComments.length,
@@ -891,6 +941,34 @@ async function collectCommentsFromDom({
     }
 
     if (!foundNew) {
+      const current = resolveContainer() || container;
+      const currentSignals = readCommentSignalsSafe(current);
+      const currentContext = getActiveCommentsContext();
+      const scrollParent = findScrollParent(current);
+      if (shouldNudgeCommentSurfaceFromBottom({
+        scrollTop: scrollParent?.scrollTop,
+        clientHeight: scrollParent?.clientHeight,
+        scrollHeight: scrollParent?.scrollHeight,
+        currentTotal: allComments.length,
+        pageCommentCount: currentContext?.publicCommentCount ?? currentSignals.commentHint,
+        hasEndMarker: currentSignals.hasEndMarker,
+        nudgeCount: bottomNudgeCount,
+      })) {
+        const nudged = await nudgeCommentSurfaceFromBottom(current, {
+          actionGate,
+          shouldStop,
+          waitIfPaused,
+        });
+        if (nudged) {
+          bottomNudgeCount++;
+          onProgress?.(withPageCommentCount({
+            status: 'collecting',
+            current: allComments.length,
+            message: `已到当前底部但目标尚未完成，回拉后继续加载（第 ${bottomNudgeCount}/${MAX_COMMENT_BOTTOM_NUDGES} 次）`,
+          }, current));
+          continue;
+        }
+      }
       noNewCount++;
       onProgress?.(withPageCommentCount({
         status: 'collecting',

@@ -5,8 +5,24 @@ import {
   parseXhsCommentPagePayload,
   buildXhsCommentsFromSnapshot,
   hydrateXhsCommentSnapshot,
+  resolveXhsCommentImageUrls,
   startFreshXhsCommentSnapshot,
 } from '../src/platforms/xhs/commentApi.js';
+
+test('comment image extraction keeps public media candidates and excludes unrelated avatar fields', () => {
+  assert.deepEqual(resolveXhsCommentImageUrls({
+    pictures: [
+      { url_default: '//sns-img.example/comment-a.webp' },
+      { url_list: ['https://sns-img.example/comment-a.webp', 'https://sns-img.example/comment-b.webp'] },
+    ],
+    image_list: [{ origin_url: 'https://sns-img.example/comment-c.webp' }],
+    user_info: { image: 'https://sns-avatar.example/author.webp' },
+  }), [
+    'https://sns-img.example/comment-a.webp',
+    'https://sns-img.example/comment-b.webp',
+    'https://sns-img.example/comment-c.webp',
+  ]);
+});
 
 test('a new comment Attempt resets prior pages and fetches a fresh first page', async () => {
   const events = [];
@@ -79,6 +95,7 @@ test('buildXhsCommentsFromSnapshot maps main comments and replies into normalize
             create_time: 1710000000,
             like_count: 12,
             ip_location: '上海',
+            pictures: [{ url_default: '//sns-img.example/comment-root.webp' }],
             user_info: {
               nickname: '作者甲',
               user_id: 'user_1',
@@ -159,6 +176,7 @@ test('buildXhsCommentsFromSnapshot maps main comments and replies into normalize
   assert.equal(main.dataQuality, 'full');
   assert.equal(main.qualityReason, '');
   assert.equal(main.sourceTier, 'api');
+  assert.deepEqual(main.commentImageUrls, ['https://sns-img.example/comment-root.webp']);
 
   assert.equal(inlineReply.level, 2);
   assert.equal(inlineReply.parentCommentId, 'root_1');

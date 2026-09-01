@@ -191,7 +191,10 @@ async fn insert_slot_and_origin(
     sqlx::query("INSERT INTO linggan_material_media_origin (observation_ref,content_public_ref,slot_key,package_ref,record_ordinal,source_generation,purpose,producer_ordinal,display_ordinal,display_order_state,display_order_basis,candidate_set_state,composite_state,live_photo_still_state,live_photo_motion_state) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NULL,'UNKNOWN','producer_global_sequence_unverified','OBSERVED_SET',$9,$10,$11)")
         .bind(media.observation_ref).bind(content_public_ref).bind(media.slot_key).bind(package.package_ref())
         .bind(i32::try_from(record_ordinal).expect("package record count is bounded")).bind(generation).bind(media.purpose).bind(media.producer_ordinal)
-        .bind(if live && has_still && has_motion { "COMPLETE" } else if live { "PARTIAL" } else { "NOT_APPLICABLE" })
+        // A slot package has observed candidate references; it has not acquired either byte
+        // component yet. Even when both still and motion candidates are present, the immutable
+        // origin therefore remains PARTIAL until the separate acquisition lane materializes them.
+        .bind(if live { "PARTIAL" } else { "NOT_APPLICABLE" })
         .bind(live.then_some(if has_still { "OBSERVED" } else { "UNKNOWN" }))
         .bind(live.then_some(if has_motion { "OBSERVED" } else { "UNKNOWN" }))
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
@@ -258,6 +261,7 @@ async fn insert_resource_relation(
     }
     let relationship_kind = match media.purpose {
         "author_avatar" => "author.avatar",
+        "comment_image" => "comment.image",
         "cover" => "content.cover",
         "body_image" => "content.image",
         "video" | "live_photo" => "content.video",
@@ -424,6 +428,7 @@ fn media_record<'a>(
         "video" => "video",
         "live_photo" => "live_photo",
         "avatar" => "author_avatar",
+        "comment_image" => "comment_image",
         _ => return None,
     };
     let subject_kind = match (role, subject_type) {
@@ -435,6 +440,15 @@ fn media_record<'a>(
                 == target_content_id(package) =>
         {
             "author"
+        }
+        ("comment_image", "comment")
+            if record
+                .get("contextContentExternalId")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                == target_content_id(package) =>
+        {
+            "comment"
         }
         ("image" | "cover" | "video" | "live_photo", "content")
             if Some(subject_external_id) == target_content_id(package) =>
@@ -537,8 +551,8 @@ fn canonical_slot_key(
     ordinal: i32,
 ) -> String {
     let encoded = encode_uri_component(subject_external_id);
-    if subject_kind == "author" {
-        format!("{platform}:author:{encoded}:{role}:{ordinal}")
+    if matches!(subject_kind, "author" | "comment") {
+        format!("{platform}:{subject_kind}:{encoded}:{role}:{ordinal}")
     } else {
         format!("{platform}:{encoded}:{role}:{ordinal}")
     }

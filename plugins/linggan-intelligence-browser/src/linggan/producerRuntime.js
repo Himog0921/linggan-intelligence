@@ -252,8 +252,8 @@ export function packageAuthorProfile({ platform, author, observedAt, capturedAt 
   });
 }
 
-export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {}) {
-  const sources = collectMediaCandidates(note);
+export function packageMediaSlots({ platform, note, commentRecords = [], observedAt, capturedAt } = {}) {
+  const sources = collectMediaCandidates(note, commentRecords);
   const roleOrdinals = new Map();
   const contentSourceObject = normalizeSourceObject(platform, note);
   const contentExternalId = contentSourceObject.externalId;
@@ -267,14 +267,19 @@ export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {
     records: sources.map((candidate) => {
       // Ordinal belongs to the relationship purpose, not the mixed collector output. Seven body
       // images followed by one explicit cover are image:1..7 plus cover:1, never cover:8.
-      const slotOrdinal = (roleOrdinals.get(candidate.role) || 0) + 1;
-      roleOrdinals.set(candidate.role, slotOrdinal);
+      const ordinalScope = candidate.subject
+        ? `${candidate.subject.type}:${candidate.subject.externalId}:${candidate.role}`
+        : `content:${contentExternalId}:${candidate.role}`;
+      const slotOrdinal = (roleOrdinals.get(ordinalScope) || 0) + 1;
+      roleOrdinals.set(ordinalScope, slotOrdinal);
       // Slot identity says "this content's nth image/video". A URL is intentionally only an
       // observation; it can change without replacing the slot or a previously acquired blob.
       const sourceObject = candidate.subject ? { platform, ...candidate.subject } : contentSourceObject;
       const slotKey = candidate.role === 'avatar'
         ? `${platform}:author:${encodeURIComponent(sourceObject.externalId)}:avatar:${slotOrdinal}`
-        : `${platform}:${encodeURIComponent(contentExternalId)}:${candidate.role}:${slotOrdinal}`;
+        : (candidate.role === 'comment_image'
+          ? `${platform}:comment:${encodeURIComponent(sourceObject.externalId)}:comment_image:${slotOrdinal}`
+          : `${platform}:${encodeURIComponent(contentExternalId)}:${candidate.role}:${slotOrdinal}`);
       return {
         kind: 'media_slot',
         slotKey,
@@ -287,7 +292,9 @@ export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {
           observedAt,
         },
         sourceObject,
-        ...(candidate.role === 'avatar' ? { contextContentExternalId: contentExternalId } : {}),
+        ...(['avatar', 'comment_image'].includes(candidate.role)
+          ? { contextContentExternalId: contentExternalId }
+          : {}),
       };
     }),
   });
@@ -394,7 +401,7 @@ function isReplyRecord(value = {}) {
   return Boolean(rootId && (!commentId || rootId !== commentId));
 }
 
-function collectMediaCandidates(note = {}) {
+function collectMediaCandidates(note = {}, commentRecords = []) {
   const output = [];
   const candidateValues = (value) => (typeof value === 'string'
     ? [value]
@@ -436,5 +443,14 @@ function collectMediaCandidates(note = {}) {
       externalId: authorExternalId,
     });
   }
+  asArray(commentRecords).forEach((comment) => {
+    const commentExternalId = String(comment?.commentId || comment?.id || '').trim();
+    if (!commentExternalId) return;
+    const imageValues = asArray(comment?.commentImageUrls || comment?.images || comment?.imageList);
+    imageValues.forEach((value) => push('comment_image', value, {
+      type: 'comment',
+      externalId: commentExternalId,
+    }));
+  });
   return output;
 }

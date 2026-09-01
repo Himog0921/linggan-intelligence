@@ -16,6 +16,7 @@ import { buildDiscoveryExecutionSummary } from '../src/platforms/xhs/noteCollect
 import { requireControlReceipt } from '../src/linggan/controlReceipt.js';
 import { resolveDouyinBatchControlReceipt } from '../src/platforms/douyin/controlReceipt.js';
 import { commentTaskInstruction, taskFor } from '../src/linggan/contentRuntimeAdapter.js';
+import { createLingganContentRuntime } from '../src/linggan/contentRuntimeAdapter.js';
 
 test('one adapter uses the same bounded package shape for every retained collector capability', () => {
   for (const capability of Object.values(PRODUCER_CAPABILITY)) {
@@ -104,6 +105,83 @@ test('content detail media package carries the observed author avatar as an auth
   assert.equal(packageValue.records[1].contextContentExternalId, 'note-with-author-avatar');
   assert.equal(packageValue.records[1].observation.externalUri, 'https://sns-avatar.example/author-42.jpg');
   assert.equal(Object.hasOwn(packageValue.records[1], 'localAssetUrl'), false);
+});
+
+test('standard detail media package carries comment images as comment-owned slots', () => {
+  const packageValue = packageMediaSlots({
+    platform: 'xhs',
+    note: {
+      noteId: 'note-with-comment-images',
+      coverUrl: 'https://sns-img.example/cover.jpg',
+    },
+    commentRecords: [
+      {
+        commentId: 'comment-1',
+        commentImageUrls: [
+          'https://sns-img.example/comment-1-a.jpg',
+          'https://sns-img.example/comment-1-b.jpg',
+        ],
+      },
+      {
+        commentId: 'comment-2',
+        commentImageUrls: ['https://sns-img.example/comment-2-a.jpg'],
+      },
+    ],
+  });
+
+  assert.deepEqual(packageValue.records.map((record) => record.slotKey), [
+    'xhs:note-with-comment-images:cover:1',
+    'xhs:comment:comment-1:comment_image:1',
+    'xhs:comment:comment-1:comment_image:2',
+    'xhs:comment:comment-2:comment_image:1',
+  ]);
+  const commentImage = packageValue.records[1];
+  assert.deepEqual(commentImage.sourceObject, {
+    platform: 'xhs',
+    type: 'comment',
+    externalId: 'comment-1',
+  });
+  assert.equal(commentImage.contextContentExternalId, 'note-with-comment-images');
+  assert.equal(commentImage.slot.role, 'comment_image');
+});
+
+test('a reply queue failure does not rewrite the already queued comments lane', async () => {
+  const originalChrome = globalThis.chrome;
+  const calls = [];
+  globalThis.chrome = {
+    runtime: {
+      id: 'synthetic-extension',
+      lastError: null,
+      sendMessage(message, callback) {
+        calls.push(message.capturePackage.packageKind);
+        if (message.capturePackage.packageKind === 'comments') {
+          callback({ success: true, delivery: 'acknowledged' });
+        } else {
+          callback({ success: false, message: 'reply_outbox_unavailable' });
+        }
+      },
+    },
+  };
+  try {
+    const runtime = createLingganContentRuntime({ platform: 'xhs' });
+    const result = await runtime.submitComments({
+      comments: [
+        { commentId: 'comment-1', text: 'top level' },
+        { commentId: 'reply-1', rootCommentId: 'comment-1', parentCommentId: 'comment-1', text: 'reply' },
+      ],
+      stopReason: 'comment_cap_reached',
+    }, 'note-reply-failure', { maxTotal: 30 });
+
+    assert.deepEqual(calls, ['comments', 'replies']);
+    assert.equal(result.delivery, 'acknowledged');
+    assert.deepEqual(result.replies, {
+      delivery: 'rejected',
+      code: 'replies_queue_failed',
+      message: 'reply_outbox_unavailable',
+    });
+  } finally {
+    globalThis.chrome = originalChrome;
+  }
 });
 
 test('media slot ordinals are scoped to each relationship purpose', () => {
@@ -207,11 +285,11 @@ test('search discovery retains its page receipt in the contract-supported checkp
   assert.equal(JSON.stringify(packageValue.checkpoint.surfaceReceipt.scrollTrace).includes('must_not_leave_the_page'), false);
 });
 
-test('observed media slots request slots rather than media bytes', () => {
+test('standard detail media submits slots and immediately queues the approved byte lane', () => {
   const adapter = readFileSync(new URL('../src/linggan/contentRuntimeAdapter.js', import.meta.url), 'utf8');
   const submitMediaSlots = adapter.slice(adapter.indexOf('async submitMediaSlots'), adapter.indexOf('async acquireMediaSlots'));
-  assert.match(submitMediaSlots, /acquireMedia: 'slots'/);
-  assert.doesNotMatch(submitMediaSlots, /acquireMedia: 'bytes'/);
+  assert.match(submitMediaSlots, /acquireMedia: 'bytes'/);
+  assert.match(submitMediaSlots, /LINGGAN_RUNTIME_ACTION\.SUBMIT_MEDIA_SLOTS/);
 });
 
 test('partial media coverage retains acquired bytes and explicitly keeps unknown/not-attempted distinct', () => {
@@ -395,12 +473,12 @@ test('not-usable wrong-target comment trees keep the receipt but emit no materia
 });
 
 test('media delivery uses its own resumable chunk lane instead of blocking text delivery with one raw upload', () => {
-  const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
-  assert.match(background, /MEDIA_CHUNK_BYTES = 1024 \* 1024/);
-  assert.match(background, /media-observations\/\$\{encodeURIComponent\(mediaObservationRef\)\}\/uploads/);
-  assert.match(background, /media-uploads\/\$\{encodeURIComponent\(sessionRef\)\}\/chunks/);
-  assert.match(background, /media-uploads\/\$\{encodeURIComponent\(sessionRef\)\}\/finalize/);
-  assert.doesNotMatch(background, /media-observations\/\$\{encodeURIComponent\(upload\.mediaObservationRef\)\}\/blob/);
+  const mediaRuntime = readFileSync(new URL('../src/linggan/mediaTransferRuntime.js', import.meta.url), 'utf8');
+  assert.match(mediaRuntime, /MEDIA_CHUNK_BYTES = 1024 \* 1024/);
+  assert.match(mediaRuntime, /media-observations\/\$\{encodeURIComponent\(mediaObservationRef\)\}\/uploads/);
+  assert.match(mediaRuntime, /media-uploads\/\$\{encodeURIComponent\(sessionRef\)\}\/chunks/);
+  assert.match(mediaRuntime, /media-uploads\/\$\{encodeURIComponent\(sessionRef\)\}\/finalize/);
+  assert.doesNotMatch(mediaRuntime, /media-observations\/\$\{encodeURIComponent\(upload\.mediaObservationRef\)\}\/blob/);
 });
 
 test('background forwards the claimed scheduled identity into the content page action', () => {
