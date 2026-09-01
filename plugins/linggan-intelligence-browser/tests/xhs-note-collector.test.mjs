@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   discoverNotesFromDOM,
+  enrichXhsNoteDetailFromDom,
   extractXhsLivePhotoStreams,
   classifyXhsNoteDetail,
   isCollectedNoteUsable,
@@ -242,15 +243,20 @@ test('readXhsNoteDetailFromDom keeps a current detail page usable when the injec
   const description = { textContent: '页面正文' };
   const author = { textContent: '页面作者' };
   const image = { currentSrc: 'https://img.example.com/detail.jpg', getAttribute: () => '' };
+  const duplicateImage = { currentSrc: 'https://img.example.com/detail.jpg', getAttribute: () => '' };
+  const avatar = { currentSrc: 'https://img.example.com/avatar.jpg', getAttribute: () => '' };
+  const authorLink = { getAttribute: (name) => name === 'href' ? '/user/profile/author_dom_1?xsec_source=pc_user' : '' };
   const root = {
     querySelector(selector) {
       if (selector === '.note-title') return title;
       if (selector === '.note-content .desc') return description;
       if (selector === '.author-wrapper .name') return author;
+      if (selector.startsWith('.author-container img')) return avatar;
+      if (selector.startsWith('.author-container a')) return authorLink;
       return null;
     },
     querySelectorAll(selector) {
-      return selector === '.note-slider-img img, .note-slider img' ? [image] : [];
+      return selector.includes('.media-container .swiper-slide img') ? [image, duplicateImage] : [];
     },
   };
   const doc = {
@@ -270,8 +276,51 @@ test('readXhsNoteDetailFromDom keeps a current detail page usable when the injec
     desc: '页面正文',
     type: 'normal',
     imageList: [{ urlDefault: 'https://img.example.com/detail.jpg' }],
-    user: { nickname: '页面作者' },
+    user: {
+      nickname: '页面作者',
+      userId: 'author_dom_1',
+      avatar: 'https://img.example.com/avatar.jpg',
+    },
     interactInfo: {},
     _captureSource: 'xhs.detail_dom',
   });
+});
+
+test('enrichXhsNoteDetailFromDom fills only missing media and author identity fields', () => {
+  const result = enrichXhsNoteDetailFromDom({
+    noteId: 'note_1',
+    title: '结构化标题',
+    imageList: [],
+    user: { nickname: '结构化作者' },
+  }, {
+    noteId: 'note_1',
+    title: '页面标题',
+    imageList: [{ urlDefault: 'https://img.example.com/detail.jpg' }],
+    user: {
+      nickname: '页面作者',
+      userId: 'author_1',
+      avatar: 'https://img.example.com/avatar.jpg',
+    },
+  });
+
+  assert.equal(result.title, '结构化标题');
+  assert.equal(result.user.nickname, '结构化作者');
+  assert.equal(result.user.userId, 'author_1');
+  assert.equal(result.user.avatar, 'https://img.example.com/avatar.jpg');
+  assert.deepEqual(result.imageList, [{ urlDefault: 'https://img.example.com/detail.jpg' }]);
+});
+
+test('enrichXhsNoteDetailFromDom replaces hydrated placeholder objects with observed URLs', () => {
+  const result = enrichXhsNoteDetailFromDom({
+    noteId: 'note_1',
+    imageList: [{ urlDefault: { traceId: 'placeholder' } }],
+    user: { userId: 'author_1', avatar: { traceId: 'placeholder' } },
+  }, {
+    noteId: 'note_1',
+    imageList: [{ urlDefault: 'https://img.example.com/detail.jpg' }],
+    user: { avatar: 'https://img.example.com/avatar.jpg' },
+  });
+
+  assert.deepEqual(result.imageList, [{ urlDefault: 'https://img.example.com/detail.jpg' }]);
+  assert.equal(result.user.avatar, 'https://img.example.com/avatar.jpg');
 });

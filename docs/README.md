@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-08-29
+> 最后核对: 2026-09-01
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -158,6 +158,7 @@
 | [`plans/completed/gov-002-agent-skills-configuration.md`](plans/completed/gov-002-agent-skills-configuration.md) | 已完成计划 | Matt Pocock 工程技能、GitHub Issues、triage 与领域文档适配的配置记录 |
 | [`progress/README.md`](progress/README.md) | 权威当前 | 变更记录规则和月份索引 |
 | [`progress/2026-08.md`](progress/2026-08.md) | 权威当前 | 2026-08 的重要变更记录 |
+| [`progress/2026-09.md`](progress/2026-09.md) | 权威当前 | 2026-09 的重要变更记录 |
 
 ## 仓库外层资料入口
 

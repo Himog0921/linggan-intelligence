@@ -10,6 +10,7 @@ import {
   rewindCommentSurface,
   shouldContinueDomAfterApi,
   shouldFallbackToDomAfterFreshApiFailure,
+  shouldNudgeCommentSurfaceFromBottom,
 } from '../src/platforms/xhs/commentCollector.js';
 import { COMMENT_DEPTH_MODE } from '../src/shared/constants.js';
 
@@ -167,6 +168,23 @@ test('DOM fallback rewinds the comment surface before reading a new Attempt', as
   assert.equal(changed, true);
   assert.equal(scrollParent.scrollTop, 0);
   assert.deepEqual(events, ['before:dom_rewind', 'scroll:0', 'after:dom_rewind:true']);
+});
+
+test('an unfinished comment surface may perform only bounded bottom nudges', () => {
+  const unfinished = {
+    scrollTop: 50709,
+    clientHeight: 647,
+    scrollHeight: 51356,
+    currentTotal: 396,
+    pageCommentCount: 713,
+    hasEndMarker: false,
+    nudgeCount: 0,
+  };
+  assert.equal(shouldNudgeCommentSurfaceFromBottom(unfinished), true);
+  assert.equal(shouldNudgeCommentSurfaceFromBottom({ ...unfinished, currentTotal: 713 }), false);
+  assert.equal(shouldNudgeCommentSurfaceFromBottom({ ...unfinished, hasEndMarker: true }), false);
+  assert.equal(shouldNudgeCommentSurfaceFromBottom({ ...unfinished, scrollTop: 49000 }), false);
+  assert.equal(shouldNudgeCommentSurfaceFromBottom({ ...unfinished, nudgeCount: 3 }), false);
 });
 
 test('parseCommentTextTail splits visible XHS comment text without mixing metrics into content', () => {

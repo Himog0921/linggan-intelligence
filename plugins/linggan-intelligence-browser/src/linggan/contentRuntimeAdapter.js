@@ -65,7 +65,7 @@ export function createLingganContentRuntime({ platform } = {}) {
     const response = await sendToBackground(
       LINGGAN_RUNTIME_ACTION.SUBMIT_CAPTURE_PACKAGE,
       { taskSpec, capturePackage, idempotencyKey },
-      { timeoutMs: 5000 },
+      { timeoutMs: 15000 },
     );
     if (!response?.success) throw new Error(response?.message || 'Linggan 未能将采集结果写入本机待交付队列');
     return { ...response, taskSpec };
@@ -120,11 +120,24 @@ export function createLingganContentRuntime({ platform } = {}) {
         packageValue,
       );
       const repliesPackage = packageReplies({ platform, result, noteId, taskTarget });
-      if (repliesPackage.records.length === 0) return comments;
-      const replies = await submit(
-        taskFor(platform, 'replies', instruction.target, instruction),
-        repliesPackage,
-      );
+      if (repliesPackage.records.length === 0) {
+        return { ...comments, replies: { delivery: 'not_applicable' } };
+      }
+      let replies;
+      try {
+        replies = await submit(
+          taskFor(platform, 'replies', instruction.target, instruction),
+          repliesPackage,
+        );
+      } catch (error) {
+        // The comments Package is already durably queued. A later reply-lane failure must not
+        // rewrite that accepted fact as a comments failure.
+        replies = {
+          delivery: 'rejected',
+          code: 'replies_queue_failed',
+          message: String(error?.message || error || 'replies_queue_failed'),
+        };
+      }
       return { ...comments, replies };
     },
     async submitAuthor(author, options = {}) {
@@ -137,19 +150,39 @@ export function createLingganContentRuntime({ platform } = {}) {
       ), packageValue);
     },
     async submitMediaSlots(note, options = {}) {
-      const packageValue = packageMediaSlots({ platform, note });
+      const packageValue = packageMediaSlots({
+        platform,
+        note,
+        commentRecords: options.commentRecords,
+      });
       const taskSpec = taskFor(
         platform,
         'media_slots',
         { contentExternalId: String(note?.noteId || note?.id || '') },
-        { acquireMedia: 'slots', taskSpec: options.taskSpec },
+        { acquireMedia: 'bytes', taskSpec: options.taskSpec },
       );
-      return submit(taskSpec, packageValue);
+      const response = await sendToBackground(
+        LINGGAN_RUNTIME_ACTION.SUBMIT_MEDIA_SLOTS,
+        { taskSpec, capturePackage: packageValue, idempotencyKey: options.idempotencyKey },
+        { timeoutMs: 15000 },
+      );
+      if (!response?.success) {
+        throw new Error(response?.message || 'Linggan 未能将详情媒体加入本机可靠下载队列');
+      }
+      return {
+        ...response,
+        taskSpec,
+        capturePackage: packageValue,
+        total: packageValue.records.length,
+        success: 0,
+        failed: 0,
+        queued: true,
+      };
     },
     async acquireMediaSlots(note) {
       const packageValue = packageMediaSlots({ platform, note });
       const taskSpec = taskFor(platform, 'media_slots', { contentExternalId: String(note?.noteId || note?.id || '') }, { acquireMedia: 'bytes' });
-      const response = await sendToBackground(LINGGAN_RUNTIME_ACTION.SUBMIT_MEDIA_SLOTS, { taskSpec, capturePackage: packageValue }, { timeoutMs: 5000 });
+      const response = await sendToBackground(LINGGAN_RUNTIME_ACTION.SUBMIT_MEDIA_SLOTS, { taskSpec, capturePackage: packageValue }, { timeoutMs: 15000 });
       if (!response?.success) throw new Error(response?.message || 'Linggan 未能将媒体下载加入本机队列');
       return { ...response, taskSpec, capturePackage: packageValue, total: packageValue.records.length, success: 0, failed: 0, queued: true };
     },

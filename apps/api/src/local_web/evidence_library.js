@@ -258,6 +258,43 @@
     return preview;
   }
 
+  function authorAvatar(media, alt = '作品作者头像') {
+    const avatar = media?.avatar && typeof media.avatar === 'object' ? media.avatar : {};
+    const asset = sameOriginPath(avatar.localAssetUrl, ['/api/local/media/']);
+    const wrapper = node('span', 'ev-author-avatar');
+    if (asset && avatar.blob?.deliveryState === 'INLINE_SAFE') {
+      const image = node('img');
+      image.src = asset;
+      image.alt = alt;
+      image.loading = 'lazy';
+      wrapper.append(image);
+      wrapper.dataset.state = 'acquired';
+    } else {
+      wrapper.append(node('span', null, '作者'));
+      wrapper.dataset.state = String(avatar.state || 'NOT_OBSERVED').toLowerCase();
+      wrapper.setAttribute('aria-label', `作者头像${stateMeta(avatar.state || 'NOT_OBSERVED')[0]}`);
+    }
+    return wrapper;
+  }
+
+  function creatorAndTargetFacts(item, compact = false) {
+    const creator = knownText(item.display?.creatorDisplayName, item.display?.creatorState, '当前未知');
+    const target = item.collectionContext?.targetDisplayState === 'KNOWN'
+      ? item.collectionContext.targetDisplayName
+      : '当前未知';
+    const facts = node('div', compact ? 'ev-context-facts ev-context-facts--compact' : 'ev-context-facts');
+    const creatorFact = node('div', 'ev-identity-fact ev-creator-fact');
+    const creatorCopy = node('span');
+    creatorCopy.append(node('small', null, '作品作者'), node('strong', null, creator));
+    creatorFact.append(authorAvatar(item.media, `${creator}的头像`), creatorCopy);
+    const targetFact = node('div', 'ev-identity-fact ev-target-fact');
+    const targetCopy = node('span');
+    targetCopy.append(node('small', null, '监控目标'), node('strong', null, target));
+    targetFact.append(targetCopy, tech(item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED'));
+    facts.append(creatorFact, targetFact);
+    return facts;
+  }
+
   function rowFor(item) {
     const publicRef = item.identity?.publicRef;
     const row = node('article', `ev-work-row ev-work-row--${model.activeLayout}`);
@@ -275,20 +312,12 @@
     );
     const title = node('h2', null, knownText(item.display?.title, item.display?.titleState, '标题当前未知'));
     const meta = node('div', 'ev-meta');
-    const creator = knownText(item.display?.creatorDisplayName, item.display?.creatorState, '作品作者当前未知');
-    const target = item.collectionContext?.targetDisplayState === 'KNOWN'
-      ? `监控目标：${item.collectionContext.targetDisplayName}`
-      : '监控目标当前未知';
     const published = item.display?.publishedAtState === 'KNOWN'
       ? item.display?.publishedAt || '发布时间已知'
       : (item.display?.publishedAtState === 'SOURCE_TEXT_ONLY'
         ? `来源时间：${item.display?.publishedAtSourceText || '已观察'}`
         : '发布时间当前未知');
-    meta.append(
-      node('span', 'ev-author-line', `作品作者：${creator}`),
-      node('span', 'ev-target-line', target),
-      node('span', 'ev-time-line', published),
-    );
+    meta.append(creatorAndTargetFacts(item), node('span', 'ev-time-line', published));
     const engagement = item.display?.engagement || {};
     const metrics = [
       knownMetric(engagement.likeCount, engagement.likeCountState, '赞'),
@@ -312,7 +341,7 @@
       const work = node('div', 'ev-table-work');
       work.append(eyebrow, title);
       const context = node('div', 'ev-table-context');
-      context.append(node('strong', null, creator), node('span', null, target));
+      context.append(creatorAndTargetFacts(item, true));
       const time = node('div', 'ev-table-time', published);
       const status = node('div', 'ev-table-status');
       status.append(stateTag(laneSummary(item, 'detail')?.state || 'UNKNOWN'), observed);
@@ -517,9 +546,6 @@
       ['稳定引用', item.identity?.publicRef || '当前未知', 'PUBLIC REF'],
       ['平台', item.identity?.platform || '当前未知', 'PLATFORM'],
       ['标题', knownText(item.display?.title, item.display?.titleState), item.display?.titleState || 'UNKNOWN'],
-      ['作品作者', knownText(item.display?.creatorDisplayName, item.display?.creatorState), item.display?.creatorState || 'UNKNOWN'],
-      ['监控目标', item.collectionContext?.targetDisplayState === 'KNOWN' ? item.collectionContext.targetDisplayName : '当前未知', item.collectionContext?.relationshipState || 'UNKNOWN'],
-      ['作者身份关系', item.collectionContext?.authorIdentityMatchState === 'MATCHED' ? '已由平台作者 ID 证明一致' : '尚未证明监控目标就是作品作者', item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED'],
       ['发布时间', item.display?.publishedAtState === 'KNOWN' ? item.display?.publishedAt || '已知' : (item.display?.publishedAtState === 'SOURCE_TEXT_ONLY' ? item.display?.publishedAtSourceText || '仅有来源文本' : '当前未知'), item.display?.publishedAtState || 'UNKNOWN'],
       ['时间来源字段', item.display?.publishedAtSourceField || '当前未知', item.display?.publishedAtSourceKind || 'unknown'],
       ['时间精度', item.display?.publishedAtPrecision || 'unknown', item.display?.publishedAtParserVersion || 'PARSER UNKNOWN'],
@@ -530,6 +556,15 @@
       ['最近观察', item.summary?.lastObservedAt || '当前未知', 'OBSERVED AT'],
     ]));
     panel.append(identity);
+
+    const identityContext = section('作者与监控目标', 'SEPARATE SOURCE FACTS');
+    identityContext.append(
+      creatorAndTargetFacts(item),
+      factGrid([
+        ['作者身份关系', item.collectionContext?.authorIdentityMatchState === 'MATCHED' ? '已由平台作者 ID 证明一致' : '尚未证明监控目标就是作品作者', item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED'],
+      ]),
+    );
+    panel.append(identityContext);
 
     const timeline = section('互动数据观察时间线', 'ENGAGEMENT TIMELINE');
     const observations = Array.isArray(inspector.engagementTimeline) ? inspector.engagementTimeline : [];
@@ -726,6 +761,7 @@
     panel.append(receiptBlock('媒体槽位通道', mediaReceipt, channels.media?.url));
     const mediaSection = section('统一媒体资源', media.contractVersion || 'MEDIA RESOURCE NOT OBSERVED');
     const slots = [
+      ...(media.avatar?.slotKey ? [media.avatar] : []),
       ...(Array.isArray(media.coverCandidates) ? media.coverCandidates : []),
       ...(Array.isArray(media.images) ? media.images : []),
       ...(Array.isArray(media.video?.items) ? media.video.items : []),
@@ -755,7 +791,14 @@
   function renderSlot(slot) {
     const article = node('article', 'ev-slot');
     const title = node('div', 'ev-slot-head');
-    title.append(node('strong', null, slot.purpose || '用途当前未知'), tech(slot.slotKey || 'SLOT UNKNOWN'));
+    const purposeLabels = {
+      author_avatar: '作者头像',
+      cover: '作品封面',
+      body_image: '正文图片',
+      video: '作品视频',
+      live_photo: '动态照片',
+    };
+    title.append(node('strong', null, purposeLabels[slot.purpose] || slot.purpose || '用途当前未知'), tech(slot.slotKey || 'SLOT UNKNOWN'));
     article.append(title, factGrid([
       ['显示顺序', slot.displayOrderState === 'KNOWN' ? slot.displayOrdinal : '当前未知', slot.displayOrderState || 'UNKNOWN'],
       ['来源代次', slot.origin?.sourceGeneration ?? '当前未知', 'GENERATION'],

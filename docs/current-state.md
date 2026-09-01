@@ -1,12 +1,84 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-08-31
+> 最后核对: 2026-09-01
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
 ## 当前阶段
+
+### PLUGIN-XHS-FINALIZATION-001（v0.8.28 终包，自动/隔离/发行已通过，主线收口中）
+
+0.8.20 已在同一授权作品上真实完成标准详情：详情 1 条、媒体槽位 9 个、顶层评论 16 条和回复
+14 条分别被 Linggan 接纳；评论窗口为 `30 / 30 COMPLETE`，页面公开数 713，没有把标准窗口冒充
+全部评论。随后全回复 Attempt 从头取得 `396 / 713`，以 `PARTIAL / no_progress` 接纳 20 条顶层和
+376 条回复。页面实测位于 `.note-scroller` 当前底部、无结束标记、无剩余回复展开控件；只执行一次
+回拉再下滑，顶层评论节点即从 20 增至 30，确认平台无限加载需要底部重触发。
+
+0.8.21 在同一终包内关闭两个断点：无人值守媒体字节由持久 outbox 交给 offscreen 文档完成下载、
+哈希、续传和 finalize，避免 MV3 Service Worker 领取后被回收；评论未达页面公开数且当前底部无
+结束标记时，最多三次回拉后继续下滑，取得新评论即重置预算。动作仍串行、最低冷却 1.2 秒，并在
+每次外部动作前后检查暂停、停止和风险状态。人工媒体下载窗口继续保留。
+
+0.8.21 重载后已改用较小的真实样本“智商131的A娃。”完成全评论正向证明：本次 Attempt 从头
+取得页面显示的 233 条唯一评论，其中顶层 70、回复 163；Linggan 回执为
+`all_public_comments / complete / 233 of 233`。同次标准详情暴露 SSR 在图片和作者头像水合前已
+足以被判为可用，导致正文与互动数被接纳、`media_slots` 却为零。0.8.22 保留 SSR 权威字段，只在
+结构化媒体或作者身份字段缺失时使用当前详情 DOM 补齐，详情图片按 URL 去重，并明确读取详情作者
+头像和主页身份；不得从评论作者或推荐流误取媒体。0.8.22 真实复验进一步发现 SSR 会用非字符串
+占位对象承载尚未水合的媒体字段；0.8.23 因此只有非空字符串 URL 才算“结构化媒体已存在”，
+占位对象不能再阻断当前详情 DOM 的真实 URL 补齐。
+
+0.8.23 重载后，同一作品已真实形成并接纳 6 条媒体槽位：正文图 3、封面 1、Live Photo 1、
+作者头像 1；详情、标准评论和回复也各自形成 Package。此前整包 `submission_invalid` 的根因不是
+页面漏读，而是 Live Photo 同时观察到 still/motion 候选时，Rust 错把尚未取得字节的复合槽位写成
+`COMPLETE`，违反数据库只允许观察阶段 `PARTIAL/UNKNOWN` 的约束，导致整个事务回滚。修复后同一
+真实包已被 `ACCEPTED`；隔离 PostgreSQL 也固定 `PARTIAL / OBSERVED / OBSERVED` 回归。
+
+0.8.24 进一步统一两类使用者：目标驱动后台媒体任务与页面“采集当前笔记到 Linggan”都会在提交
+槽位后立即进入可靠字节队列；旧“人工采集并下载媒体”窗口继续保留，供真人单独操作。真实重载
+确认新包 6/6 槽位接纳，作者头像也完成 Materialization；正文图、封面和 Live Photo 未落地的根因
+是平台在受信 XHS CDN 上返回 `http://` 候选，而下载安全边界只允许 HTTPS。0.8.25 只把无凭据、
+无端口、命中平台白名单的 HTTP 候选规范化为 HTTPS，随后仍执行严格主机与重定向校验；普通 HTTP
+和任意第三方域名继续拒绝。0.8.25 真实标准详情新包再次接纳 6 个媒体槽位，并已物化作者头像和
+3 张正文图；统一 Work Resource 与 Evidence UI 已显示首图封面回退、作者头像以及分离的作品作者 /
+监控目标。终验同时证明首轮离屏唤醒只处理 2 条普通媒体、Live Photo 仍等待全局工作队列，不能
+保证同一标准详情及时带回全部媒体。0.8.26 因此把 Live Photo 拆为 still/motion 两个直接字节单元，
+一次离屏唤醒可串行排空最多 12 条有界任务；最终 7 个组件仍须重载后真实验收。PR 合并、main /
+runtime exact-head 对齐在结果后分别核对。
+
+0.8.26 重载后的单次干净标准详情又暴露出更底层的回执阻塞：页面完成读取后，提交
+`lingganSubmitCapturePackage` 等待 5 秒超时，数据库没有出现新详情、媒体、评论或回复包。根因范围
+收敛到新增 offscreen 媒体上下文与 Service Worker 共用 one-shot runtime message 总线的接缝。
+0.8.27 将离屏媒体改到 `linggan-media-worker-v1` 命名 Port，页面采集回执只由 Service Worker
+接收；可靠队列冷启动窗口统一为 15 秒，标准详情任一 lane 的队列错误会显式回执且不再静默阻断
+后续 lane。重载后的唯一标准详情终验已对“智商131的A娃。”接纳新的 `content_detail`、
+`media_slots`、`comments`、`replies` 四包：详情 1、媒体逻辑槽位 6、顶层评论 15、回复 15；评论
+Coverage 为 `DETAIL_WINDOW / complete / 30 of 30`，页面公开数为 233。6 个槽位的 7 个字节组件
+（作者头像、封面、3 张正文图、Live Photo still/motion）均已完成 Download、Blob 与
+Materialization；Evidence 实际读取本地封面和作者头像，并将作品作者与监控目标分栏。该 Live Photo
+的 OCR/缩略图链已完成；音频抽取与 ASR 因本机音频/Whisper 处理环境失败而明确显示 `FAILED`，不把
+无有效音轨或转录伪装成成功。
+
+最终 Spec Review 发现并在 0.8.28 同包关闭两个阻断：标准详情此前没有把已采评论中的图片交给统一
+媒体链；回复包入队失败会让外层把已经入队的评论包也报成失败。现在评论图片以评论为主体、作品为
+读取上下文进入 `Slot → Candidate → Download → Blob → Materialization → Work Resource`，并返回
+`comment.image + subjectExternalId`；comments/replies 回执完全分栏。additive `0030` 只扩展现有
+媒体 purpose，不建立第二套资产。0.8.28 的最终自动、隔离 PostgreSQL、发行包、提交、PR 合并与
+main/runtime exact-head 对齐按本事项最后一轮完成；0.8.27 已通过的真实详情/评论/媒体链不被重写成
+0.8.28 的评论图片非空真实证明。最终门禁为 231 项插件测试、Rust workspace、49 项隔离 PostgreSQL
+proof、production build、content runtime、运行隔离、发行校验与可复现重建全部通过；发行 ZIP
+SHA-256 为 `015a3de775a55d6ac2be8dac5d6ca833f7d88f3d772d641a73c7bbe91f51184e`。生产依赖审计为
+0 项；完整开发依赖树仍有既有 9 项 audit 提示，Webpack 仍有既有 content bundle 体积警告。
+
+### XHS-MEDIA-AUTHOR-EVIDENCE-001（v0.8.19 候选，自动与隔离 PostgreSQL 已证明，真实重载待执行）
+
+用户已确认“ADHD的尽头是成瘾”仍在平台推流，页面公开评论数随时间增长属于真实进量，不按重复或错误分母处理。本后续只对该已授权作品重新执行详情、评论和媒体链；最新 Attempt 数量、页面公开数与历史累计唯一评论继续分别表达。
+
+0.8.19 已让详情中同时存在的 `authorId + authorAvatar` 形成独立作者媒体槽位。Rust 以当前作品作为观察上下文校验作者主体，写入 `author.avatar` 权威关系，再复用 Slot → Candidate → Download → Blob → Materialization；头像不进入 OCR/ASR。Work Resource 的 `media.avatar` 只返回 `INLINE_SAFE` 本地句柄。Evidence Library 已把作品作者与监控目标拆成两个事实区，作者区支持本地头像，媒体 Inspector 连续列出头像、封面、正文图、视频及派生资源。
+
+插件合同与 209 项聚焦测试、Rust workspace test/check/format、JS 语法、隔离 PostgreSQL author-avatar 真链、0.8.19 production build、发行校验、可复现性和运行隔离已通过。发行 ZIP SHA-256 为 `c8410c08cd981e9cad93945515613db77918adea3589794232ed623d5ba70338`。仍存在既有 Webpack content bundle 体积警告和 npm audit 9 项依赖风险。本机持久库 `0029`、`:3000` Runtime、Chrome 0.8.19 重载、目标作品新 Package/Receipt/Materialization 和 Mog 页面验收尚未执行，当前不得写成真实链完成。
 
 ### PLUGIN-XHS-FINALIZATION-001（v0.8.16 终包候选，代码与隔离验证完成，真实重载待执行）
 

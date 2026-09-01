@@ -155,6 +155,48 @@ function resolveProfileUrl(user = {}) {
   return userId ? `https://www.xiaohongshu.com/user/profile/${encodeURIComponent(userId)}` : '';
 }
 
+export function resolveXhsCommentImageUrls(comment = {}) {
+  const output = [];
+  const seen = new Set();
+  const visit = (value) => {
+    if (typeof value === 'string') {
+      const normalized = normalizeAvatarUrl(value);
+      if (normalized && !seen.has(normalized)) {
+        seen.add(normalized);
+        output.push(normalized);
+      }
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== 'object') return;
+    [
+      value.url,
+      value.url_default,
+      value.urlDefault,
+      value.origin_url,
+      value.originUrl,
+      value.download_url,
+      value.downloadUrl,
+      value.url_list,
+      value.urlList,
+      value.info_list,
+      value.infoList,
+    ].forEach(visit);
+  };
+  [
+    comment?.pictures,
+    comment?.picture_list,
+    comment?.pictureList,
+    comment?.image_list,
+    comment?.imageList,
+    comment?.images,
+  ].forEach(visit);
+  return output;
+}
+
 function resolveReplyTarget(comment = {}) {
   const candidates = [
     comment?.target_comment,
@@ -418,6 +460,7 @@ export function mapXhsCommentRecord(comment = {}, note = {}, {
   const noteId = normalizeText(note?.noteId);
   const contentId = normalizeText(note?.contentId || (noteId ? `xhs_${noteId}` : ''));
   const noteUrl = normalizeText(note?.url || note?.noteUrl);
+  const commentImageUrls = resolveXhsCommentImageUrls(comment);
 
   return {
     platform: 'xhs',
@@ -441,6 +484,7 @@ export function mapXhsCommentRecord(comment = {}, note = {}, {
     level,
     replyToCommentId: level > 1 ? normalizeText(replyTarget.replyToCommentId || parentCommentId) : '',
     replyToUserName: level > 1 ? normalizeText(replyTarget.replyToUserName) : '',
+    commentImageUrls,
     time: formatPublishedAtText(comment?.time || comment?.create_time || comment?.createTime, publishedAt),
     publishedAt,
     publishedAtText: formatPublishedAtText(comment?.time || comment?.create_time || comment?.createTime, publishedAt),

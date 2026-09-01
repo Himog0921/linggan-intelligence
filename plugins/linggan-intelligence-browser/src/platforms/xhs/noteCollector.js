@@ -439,13 +439,22 @@ export function readXhsNoteDetailFromDom(wd = window, { expectedNoteId = '' } = 
   const noteId = String(expectedNoteId || extractNoteId(wd?.location?.href || '')).trim();
   if (!noteId) return null;
 
-  const imageList = Array.from(root.querySelectorAll?.('.note-slider-img img, .note-slider img') || [])
+  const imageUrls = Array.from(root.querySelectorAll?.(
+    '.note-slider-img img, .note-slider img, .media-container .swiper-slide img, .media-container img',
+  ) || [])
     .map((element) => pickImageUrlFromElement(element))
-    .filter(Boolean)
-    .map((urlDefault) => ({ urlDefault }));
+    .filter(Boolean);
+  const imageList = [...new Set(imageUrls)].map((urlDefault) => ({ urlDefault }));
   const title = readDetailText(root, ['.note-title', '[class*="note-title"]']);
   const desc = readDetailText(root, ['.note-content .desc', '[class*="note-content"] [class*="desc"]']);
   const authorName = readDetailText(root, ['.author-wrapper .name', '[class*="author"] [class*="name"]']);
+  const authorAvatar = pickImageUrlFromElement(root.querySelector?.(
+    '.author-container img, .author-wrapper > a img, .author-wrapper img.avatar-item',
+  ));
+  const authorProfileHref = String(root.querySelector?.(
+    '.author-container a[href*="/user/profile/"], .author-wrapper > a[href*="/user/profile/"]',
+  )?.getAttribute?.('href') || '');
+  const authorId = authorProfileHref.match(/\/user\/profile\/([^/?#]+)/)?.[1] || '';
   if (!title && !desc && imageList.length === 0 && !authorName) return null;
 
   return {
@@ -456,10 +465,39 @@ export function readXhsNoteDetailFromDom(wd = window, { expectedNoteId = '' } = 
     imageList,
     user: {
       nickname: authorName,
+      ...(authorId ? { userId: authorId } : {}),
+      ...(authorAvatar ? { avatar: authorAvatar } : {}),
     },
     // DOM fallback intentionally leaves metrics unknown. It must not manufacture zero values.
     interactInfo: {},
     _captureSource: 'xhs.detail_dom',
+  };
+}
+
+export function enrichXhsNoteDetailFromDom(note = {}, domNote = null) {
+  if (!domNote) return note;
+
+  const structuredImages = Array.isArray(note.imageList) ? note.imageList : [];
+  const structuredHasMedia = structuredImages.some((image) => {
+    const value = getXhsImageUrl(image);
+    return typeof value === 'string' && value.trim().length > 0;
+  });
+  const domImages = Array.isArray(domNote.imageList) ? domNote.imageList : [];
+  const user = note.user && typeof note.user === 'object' ? note.user : {};
+  const domUser = domNote.user && typeof domNote.user === 'object' ? domNote.user : {};
+  const structuredAvatar = user.avatar;
+  const structuredHasAvatar = typeof structuredAvatar === 'string'
+    && structuredAvatar.trim().length > 0;
+
+  return {
+    ...note,
+    ...(!structuredHasMedia && domImages.length ? { imageList: domImages } : {}),
+    user: {
+      ...user,
+      ...(!String(user.userId || '').trim() && domUser.userId ? { userId: domUser.userId } : {}),
+      ...(!String(user.nickname || '').trim() && domUser.nickname ? { nickname: domUser.nickname } : {}),
+      ...(!structuredHasAvatar && domUser.avatar ? { avatar: domUser.avatar } : {}),
+    },
   };
 }
 
@@ -537,6 +575,14 @@ export async function collectNote(wd = window, options = {}) {
   if (!note) {
     throw lastErr || new Error('未找到笔记数据，请确认当前页面是笔记详情页');
   }
+
+  // XHS sometimes emits a structurally valid SSR record before hydrating media and
+  // author avatar fields. Preserve the structured facts, but fill those missing
+  // observations from the actual detail surface so media_slots cannot silently vanish.
+  note = enrichXhsNoteDetailFromDom(
+    note,
+    readXhsNoteDetailFromDom(wd, { expectedNoteId }),
+  );
 
   if (!note || (!note.noteId && !note.id && !note.title)) {
     throw new Error('笔记数据解析失败，数据结构异常');

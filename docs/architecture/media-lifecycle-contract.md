@@ -99,7 +99,7 @@ platform
 + display_ordinal
 ```
 
-- `subject_kind` 首批为 `content`。评论图片和作者头像只有在各自来源合同、主体身份和 Coverage 完整后才可新增，不能借现有作品槽位兜底。
+- `subject_kind` 当前支持 `content`，以及由详情 `authorId + authorAvatar` 同时证明的 `author` 头像来源。作者头像使用稳定作者主体和 `author.avatar` 独立槽位，只把当前作品 `content_public_ref` 作为观察上下文；评论图片仍须等待自己的来源合同，不能借作品槽位兜底。
 - `purpose` 首批至少区分 `cover / body_image / video / live_photo`。技术字段可以继续使用现有 role，但必须能够无损映射到这些产品含义。
 - `relationship_ordinal` 表达同一关系类型内的稳定序号，从 1 开始；`content.image[1..N]` 不会因前面存在封面而从 2 或 8 开始。平台全局展示顺序只有在来源明确提供时才写入 `display_ordinal`，否则保持 `UNKNOWN`。
 - 同一个资源同时作为封面和正文第一图时，保留两个不同槽位/用途；二者以后可以指向同一来源身份或 Blob。
@@ -246,7 +246,7 @@ Package 被接纳只证明 producer 交卷通过运行时最低合同，不自�
 | OCR / ASR / 抽帧 / embedding | 服务端派生处理，不是 producer 原始内容 Package | ProcessingJob/Event、Derivative、Source Span/Material Transformation | 可检索文字或关键帧，带 processor 版本与来源位置 | Job/Event/Derivative DDL 与 pending 入口存在；provider、真实输出、embedding/关键帧完整模型未实现 |
 | `batch_checkpoint` | 一次独立 checkpoint Attempt 提交时冻结的进度回执 | 当次进度、暂停/恢复位置和任务状态；浏览器可变 `resumeCheckpoint` 仍属于 execution control | **不成为语料卡或正文材料**；只在来源/执行核验区显示 | Package kind 已实现；当前每次提交会创建独立 TaskSpec/Attempt，服务端没有“同一 Attempt 可变 checkpoint”模型；不能作为 Evidence、Coverage 完成或成员清单 |
 
-评论图片、作者头像和其他新媒体来源不得借作品 `media_slots` 进入。它们需要各自稳定主体、slot、Coverage 和用途合同后再扩展。
+评论图片和其他新媒体来源不得借作品槽位进入。作者头像已经以受限扩展进入同一 `media_slots` Package：只有详情同时提供稳定 `authorId`、非空 `authorAvatar` 与当前 `contentExternalId` 上下文时，Producer 才形成 `sourceObject.type=author`、`role=avatar` 的独立记录；Rust 必须逐项校验这三个身份，写 `author.avatar` 关系并走既有下载/Blob/Materialization 链。头像不进入 OCR/ASR 处理队列。
 
 ## 7. Evidence Library 最低消费合同
 
@@ -332,7 +332,7 @@ UI 不得：
 | author_profile 目标档案回填 | `IMPLEMENTED` | 只证明目标 enrichment；不是统一作者 Evidence/语料投影 |
 | MediaSlot、单 URI Observation、DownloadAttempt | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | 已证明槽位、失败不连坐文字；未证明真实平台顺序/完整媒体清单 |
 | 多 `candidateUris` 来源观察 | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | 候选集合与组件类型化保存；真实短期 URL 可用性仍由下载 Attempt 表达 |
-| 七类媒体关系与统一 MediaResource | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | `0027` 在既有资产链上增加关系；Evidence 只读本地句柄，封面回退合成链已证明；avatar/comment image 未有生产方时保持 NOT_OBSERVED |
+| 七类媒体关系与统一 MediaResource | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | `0027` 在既有资产链上增加关系；`0029` 允许详情作者头像使用同链，Producer/Rust/Work Resource 的 avatar 合成闭环已证明；Evidence 只读本地句柄；comment image 未有生产方时保持 NOT_OBSERVED |
 | cover/image/video 的槽位适配 | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | 每用途 ordinal 与唯一封面选择已证明；平台全局 display order 未知时仍不猜 |
 | Live Photo still/motion 配对 | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | 组件和 bundle partial 已有合成证明；正向真实样本未验证 |
 | 分块上传、offset fencing、finalize 恢复 | `IMPLEMENTED` + `PG_SYNTHETIC_PROVED` | session 是运行状态；证明为合成字节/数据库链 |

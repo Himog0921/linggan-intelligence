@@ -252,11 +252,11 @@ export function packageAuthorProfile({ platform, author, observedAt, capturedAt 
   });
 }
 
-export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {}) {
-  const sources = collectMediaCandidates(note);
+export function packageMediaSlots({ platform, note, commentRecords = [], observedAt, capturedAt } = {}) {
+  const sources = collectMediaCandidates(note, commentRecords);
   const roleOrdinals = new Map();
-  const sourceObject = normalizeSourceObject(platform, note);
-  const contentExternalId = sourceObject.externalId;
+  const contentSourceObject = normalizeSourceObject(platform, note);
+  const contentExternalId = contentSourceObject.externalId;
   return createCapturePackage({
     packageKind: PRODUCER_CAPABILITY.MEDIA_SLOTS,
     platform,
@@ -267,11 +267,19 @@ export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {
     records: sources.map((candidate) => {
       // Ordinal belongs to the relationship purpose, not the mixed collector output. Seven body
       // images followed by one explicit cover are image:1..7 plus cover:1, never cover:8.
-      const slotOrdinal = (roleOrdinals.get(candidate.role) || 0) + 1;
-      roleOrdinals.set(candidate.role, slotOrdinal);
+      const ordinalScope = candidate.subject
+        ? `${candidate.subject.type}:${candidate.subject.externalId}:${candidate.role}`
+        : `content:${contentExternalId}:${candidate.role}`;
+      const slotOrdinal = (roleOrdinals.get(ordinalScope) || 0) + 1;
+      roleOrdinals.set(ordinalScope, slotOrdinal);
       // Slot identity says "this content's nth image/video". A URL is intentionally only an
       // observation; it can change without replacing the slot or a previously acquired blob.
-      const slotKey = `${platform}:${encodeURIComponent(contentExternalId)}:${candidate.role}:${slotOrdinal}`;
+      const sourceObject = candidate.subject ? { platform, ...candidate.subject } : contentSourceObject;
+      const slotKey = candidate.role === 'avatar'
+        ? `${platform}:author:${encodeURIComponent(sourceObject.externalId)}:avatar:${slotOrdinal}`
+        : (candidate.role === 'comment_image'
+          ? `${platform}:comment:${encodeURIComponent(sourceObject.externalId)}:comment_image:${slotOrdinal}`
+          : `${platform}:${encodeURIComponent(contentExternalId)}:${candidate.role}:${slotOrdinal}`);
       return {
         kind: 'media_slot',
         slotKey,
@@ -284,6 +292,9 @@ export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {
           observedAt,
         },
         sourceObject,
+        ...(['avatar', 'comment_image'].includes(candidate.role)
+          ? { contextContentExternalId: contentExternalId }
+          : {}),
       };
     }),
   });
@@ -390,7 +401,7 @@ function isReplyRecord(value = {}) {
   return Boolean(rootId && (!commentId || rootId !== commentId));
 }
 
-function collectMediaCandidates(note = {}) {
+function collectMediaCandidates(note = {}, commentRecords = []) {
   const output = [];
   const candidateValues = (value) => (typeof value === 'string'
     ? [value]
@@ -402,11 +413,11 @@ function collectMediaCandidates(note = {}) {
     .flatMap((candidate) => Array.isArray(candidate) ? candidate : [candidate])
     .map((candidate) => String(candidate || '').trim())
     .filter(Boolean))];
-  const push = (role, value) => {
+  const push = (role, value, subject = null) => {
     const candidateUris = normalizeUris(candidateValues(value));
     if (!candidateUris.length) return;
     if (role !== 'live_photo') {
-      output.push({ role, url: candidateUris[0], candidateUris });
+      output.push({ role, url: candidateUris[0], candidateUris, ...(subject ? { subject } : {}) });
       return;
     }
     const stillCandidates = normalizeUris(candidateValues(value?.coverUrl || value?.still));
@@ -425,5 +436,21 @@ function collectMediaCandidates(note = {}) {
   if (note.cover || note.coverUrl) push('cover', note.cover || note.coverUrl);
   if (note.video) push('video', note.video);
   asArray(note.livePhotoStreams).forEach((value) => push('live_photo', value));
+  const authorExternalId = String(note.authorId || note.authorPlatformId || '').trim();
+  if (authorExternalId && note.authorAvatar) {
+    push('avatar', note.authorAvatar, {
+      type: 'author',
+      externalId: authorExternalId,
+    });
+  }
+  asArray(commentRecords).forEach((comment) => {
+    const commentExternalId = String(comment?.commentId || comment?.id || '').trim();
+    if (!commentExternalId) return;
+    const imageValues = asArray(comment?.commentImageUrls || comment?.images || comment?.imageList);
+    imageValues.forEach((value) => push('comment_image', value, {
+      type: 'comment',
+      externalId: commentExternalId,
+    }));
+  });
   return output;
 }
