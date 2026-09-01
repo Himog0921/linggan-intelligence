@@ -31,6 +31,20 @@ test('claimed media upload keeps the exact server work generation and approved c
   });
 });
 
+test('claimed media upload upgrades an approved raw HTTP candidate before durable enqueue', () => {
+  const rawClaim = {
+    ...claim,
+    candidateUris: ['http://sns-webpic-qc.xhscdn.com/cover.webp'],
+  };
+  const upload = claimedMediaUpload({
+    claim: rawClaim,
+    installKey: 'installation-1',
+    normalizeCandidate: (value) => value.replace(/^http:/, 'https:'),
+    allowCandidate: (value) => value.startsWith('https://') && value.endsWith('.webp'),
+  });
+  assert.deepEqual(upload.candidateUris, ['https://sns-webpic-qc.xhscdn.com/cover.webp']);
+});
+
 test('the freshly claimed media generation is processed before older browser-local rows', () => {
   const preferred = { uploadId: 'fresh', status: 'pending' };
   const historical = [

@@ -15,9 +15,10 @@ export function claimedMediaUpload({
   claim = {},
   installKey = '',
   allowCandidate = () => false,
+  normalizeCandidate = text,
 } = {}) {
   const candidateUris = (Array.isArray(claim?.candidateUris) ? claim.candidateUris : [])
-    .map(text)
+    .map((value) => text(normalizeCandidate(value)))
     .filter((value) => value && allowCandidate(value))
     .slice(0, 6);
   const workRef = text(claim?.workRef);
@@ -47,6 +48,7 @@ export async function executeClaimedMediaAcquisition({
   claim,
   installKey,
   allowCandidate,
+  normalizeCandidate,
   outbox,
   flush,
   recordFailure,
@@ -54,7 +56,7 @@ export async function executeClaimedMediaAcquisition({
 } = {}) {
   let upload = null;
   try {
-    upload = claimedMediaUpload({ claim, installKey, allowCandidate });
+    upload = claimedMediaUpload({ claim, installKey, allowCandidate, normalizeCandidate });
     await scheduleRecovery(60);
     await outbox.enqueue(upload);
     // Give the exact newly leased generation priority over unrelated historical rows.

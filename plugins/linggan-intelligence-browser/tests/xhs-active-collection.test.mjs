@@ -324,14 +324,16 @@ test('page discovery exposes target count and current search filters before acti
   assert.match(controller, /applyXhsSearchFilters\(searchFilters/);
 });
 
-test('page bridge replies and media candidates are bound to the active request and approved HTTPS platform origins', () => {
+test('page bridge replies and media candidates are bound to the active request and approved platform origins upgraded to HTTPS', () => {
   const utils = readFileSync(new URL('../src/shared/utils.js', import.meta.url), 'utf8');
   const noteMap = readFileSync(new URL('../src/injected/noteMap.js', import.meta.url), 'utf8');
   const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
+  const mediaRuntime = readFileSync(new URL('../src/linggan/mediaTransferRuntime.js', import.meta.url), 'utf8');
   assert.match(utils, /const requestId = crypto\.randomUUID\(\)/);
   assert.match(utils, /event\.data\?\.requestId !== requestId/);
   assert.match(noteMap, /requestId: requestId/);
-  assert.match(background, /uri\.protocol !== 'https:'/);
-  assert.match(background, /allowedMediaCandidateUri\(response\.url \|\| candidate\)/);
-  assert.match(background, /filter\(allowedMediaCandidateUri\)/);
+  assert.match(mediaRuntime, /uri\.protocol !== 'https:'/);
+  assert.match(mediaRuntime, /allowedMediaCandidateUri\(response\.url \|\| candidate\)/);
+  assert.match(background, /normalizeCandidate: normalizeMediaCandidateUri/);
+  assert.match(background, /mediaUploadUnitsForRecord\(record\)/);
 });

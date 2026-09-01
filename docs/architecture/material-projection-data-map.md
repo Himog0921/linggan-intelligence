@@ -3,7 +3,7 @@
 > 状态: 权威当前
 > 最后核对: 2026-08-31
 > 适用范围: 当前 Browser Producer 实际产出、服务接纳、Material Projection 与本机 Evidence API
-> 插件运行合同版本: `v0.8.16` 候选；scheduled TaskSpec 身份贯穿、详情/评论/回复/作者/媒体槽位执行、部分材料回执、媒体工作与统一资源读取共用同一受控链。
+> 插件运行合同版本: `v0.8.19` 候选；scheduled TaskSpec 身份贯穿、详情/评论/回复/作者/媒体槽位执行、部分材料回执、媒体工作与统一资源读取共用同一受控链。
 > 事实来源: `plugins/linggan-intelligence-browser/src/linggan/producerRuntime.js`、`contentRuntimeAdapter.js`、Rust 接纳/投影代码、migration 0015–0027 与隔离 PostgreSQL fixture
 > 冲突时以谁为准: 当前插件合同与源码、Rust 运行时校验、数据库约束和真实测试结果
 
@@ -17,7 +17,7 @@
 | `comments` / `comment` | 评论稳定身份；正文和作者字段内部保留；同包重复与冲突单条隔离 | `comments` lane、稳定评论材料、Coverage | 普通列表只显示计数/状态/受限访问；`/{publicRef}/comments` 是本机授权研究通道，最多 20 条一页，返回原文、匿名作者上下文和 cursor，不返回平台用户标识 | `material_social_postgres.rs`、`material_projection_tests.rs` |
 | `replies` / `reply` | reply root/parent 来源字段、自引用和冲突关系通过运行时与 DB 双层约束 | 与评论共表但保留 `is_reply`、root/parent 关系和独立 replies Coverage | 普通列表只给 replies 状态/计数；研究通道以 `ROOT/REPLY` 关系表达，不暴露外部身份 | `material_social_postgres.rs` |
 | `author_profile` / `author_profile` | 作者 sourceObject 与 Task author target 一致 | 作者资料按观察版本追加，不覆盖旧版本 | 详情 Inspector 给当前 as-of 作者上下文与来源引用；外部作者 ID 不作为普通响应字段 | `material_social_postgres.rs` |
-| `media_slots` / `media_slot` | 作品、slot、observationRef、每用途 ordinal、候选集合和组件合同通过；重复/冲突逐 record 隔离 | Slot、来源 generation、多 candidate、Live Photo partial、下载/副本/派生生命周期；新接纳媒体同时建立 `content.cover/content.image/content.video` 权威关系 | Work Resource 统一返回 `media`；封面只按显式封面 → 首张正文图 → 视频 poster → 无封面选择，页面只取得 `INLINE_SAFE` 本地句柄，不读取候选远程 URI | `material_media_postgres.rs`、`material_projection_postgres.rs`、`material_media_delivery_tests.rs`、`material_replica_fallback_tests.rs` |
+| `media_slots` / `media_slot` | 作品媒体按 content 身份校验；详情作者头像还必须同时携带稳定 author 身份和当前 content 上下文；slot、observationRef、每用途 ordinal、候选集合和组件合同通过；重复/冲突逐 record 隔离 | Slot、来源 generation、多 candidate、Live Photo partial、下载/副本/派生生命周期；新接纳媒体建立 `author.avatar/content.cover/content.image/content.video` 权威关系；头像不排 OCR/ASR | Work Resource 统一返回 `media`；avatar 与全部内容槽位只返回 `INLINE_SAFE` 本地句柄；封面只按显式封面 → 首张正文图 → 视频 poster → 无封面选择，不读取候选远程 URI | `linggan-producer-runtime.test.mjs`、`material_projection_postgres.rs`、`material_media_delivery_tests.rs`、`material_replica_fallback_tests.rs` |
 | `acquireMediaSlots` 后台上传（不是新的 Capture Package） | 分块上传使用声明 hash/size；finalize 以流式 hash + 精确 size 验证后原子提升到内容寻址路径，再写 Blob/Materialization | `media_bytes` lane 通过下载、Blob、Materialization 和处理事件表达 | 只返回 Materialization/Derivative 绑定的 loopback handle；GET 有可配置大小上限、流式响应、`no-store`/`nosniff`；未知/SVG/HTML 等声明类型可保存但只能 attachment，标记 `UNSUPPORTED_MEDIA_TYPE` | `material_media_delivery_tests.rs`、`material_asset_route_fixture.rs` |
 | `batch_checkpoint` | 只接纳执行 checkpoint 与 Coverage 来源，不生成 typed content | 不生成作品材料或 overall completeness | 仅在 provenance/checkpoint 血缘使用 | Producer ingress fixture |
 

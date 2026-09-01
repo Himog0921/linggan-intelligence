@@ -1,7 +1,7 @@
 # Linggan Intelligence
 
 > 状态: 权威当前
-> 最后核对: 2026-08-20
+> 最后核对: 2026-09-01
 > 适用范围: 项目总入口
 > 事实来源: 当前仓库、ACCEPTED ADR 与实际验证结果
 > 冲突时以谁为准: `AGENTS.md`、真实代码与运行证据
@@ -36,7 +36,7 @@ Linggan Intelligence 是一个面向垂直领域的持续情报研究系统。�
 
 - 后端与 worker 使用 Rust。
 - 数据库使用全新 PostgreSQL，不带旧表、不回填伪 V2 事实。
-- 浏览器插件以生产验证过的 v2.0.95 为迁移起点。
+- 浏览器插件以旧工作台验证过的 v2.0.95 为迁移起点；当前唯一可发布源为 `plugins/linggan-intelligence-browser/`，已发布 Browser Producer `0.8.28`。
 - 旧工作台与旧数据库只作只读参考。
 - Evidence、Observation、Signal、Intelligence 必须能回溯到来源。
 - 类型、mock 或接口返回值不能单独证明运行成功。
@@ -49,4 +49,4 @@ Linggan Intelligence 是一个面向垂直领域的持续情报研究系统。�
 
 ## 当前状态
 
-`DISC-001` 七道基础设计关口和正式 `SCOPE-001` 的合成切片授权已经完成，Rust 与 Docker PostgreSQL 16 环境基线也已建立。当前处于代码前语义冻结：必须先让 F01–F10 的逐层状态、unknown、正负 Oracle 和证明范围通过 G1–G5，再进入合成 fixture、两份 migration 与 Rust 事实内核 TDD。真实平台访问、AI Agent 内核和插件升级仍未获准开始。具体以 [`docs/current-state.md`](docs/current-state.md) 和完整环境验收脚本的实际结果为准。
+Browser Producer `0.8.28` 已合入 `main@d7e722018f4f4cfa217c9cf5c0cac6fbcdcaacb3`，并与本机 detached runtime exact-head 对齐。当前单工位已正式认领该版本；一条受控真实小红书详情已跑通 `TaskSpec → Attempt → Package → Receipt → Work Resource → Evidence UI`，并完成标准 `30/30` 评论窗口与 6 个逻辑媒体槽位的接纳/物化验收。评论图片的非空真实样本仍为 `NOT_OBSERVED`，本轮也没有重跑全部 233 条评论；历史 `0.8.21` 的 `233/233` 是独立 Attempt 证据，不与本轮相加。具体以 [`docs/current-state.md`](docs/current-state.md)、[小红书能力登记册](docs/platforms/xiaohongshu/capture-capability-registry.md) 和真实运行回执为准。

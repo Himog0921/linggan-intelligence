@@ -201,6 +201,94 @@ async fn work_resource_uses_one_media_contract_and_selects_a_local_cover_fallbac
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn author_avatar_uses_the_media_chain_and_projects_beside_content_media() {
+    let database = proof_database("material_author_avatar_resource").await;
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"note-author-avatar"}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-author-avatar"},
+            "payload":{"title":"头像与作品媒体同链","authorId":"author-avatar-1","authorName":"作品作者"}
+        }),
+    )
+    .await;
+    let avatar_observation_ref = uuid::Uuid::new_v4();
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-author-avatar"}),
+        serde_json::json!({
+            "kind":"media_slot",
+            "slotKey":"xhs:author:author-avatar-1:avatar:1",
+            "slot":{"role":"avatar","ordinal":1},
+            "sourceObject":{"platform":"xhs","type":"author","externalId":"author-avatar-1"},
+            "contextContentExternalId":"note-author-avatar",
+            "observation":{"externalUri":"https://media.example/avatar.jpg","candidateUris":["https://media.example/avatar.jpg"]},
+            "observationRef":avatar_observation_ref
+        }),
+    )
+    .await;
+    admit_media_blob(
+        &database,
+        avatar_observation_ref,
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "image/jpeg",
+        4,
+        "blobs/bb/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    )
+    .await
+    .expect("author avatar materializes through the existing asset chain");
+    let avatar_processing_jobs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_media_processing_job WHERE slot_key='xhs:author:author-avatar-1:avatar:1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("avatar processing queue is readable");
+    assert_eq!(
+        avatar_processing_jobs, 0,
+        "identity avatars do not enter OCR or ASR processing"
+    );
+
+    let query: EvidenceQuery = serde_json::from_value(serde_json::json!({
+        "scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"
+    }))
+    .expect("shared query validates");
+    let page = read_work_resources(&database, &query)
+        .await
+        .expect("work resource projects the author avatar");
+    let avatar = page.items[0]
+        .media
+        .pointer("/avatar")
+        .expect("avatar is part of the unified resource");
+    assert_eq!(
+        avatar
+            .get("relationship")
+            .and_then(serde_json::Value::as_str),
+        Some("author.avatar")
+    );
+    assert_eq!(
+        avatar.get("state").and_then(serde_json::Value::as_str),
+        Some("ACQUIRED")
+    );
+    assert!(
+        avatar
+            .get("localAssetUrl")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| value.starts_with("/api/local/media/"))
+    );
+    let relation: (String, String) = sqlx::query_as(
+        "SELECT subject_kind,relationship_kind FROM linggan_media_resource_relation WHERE slot_key='xhs:author:author-avatar-1:avatar:1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("one authoritative author-avatar relation exists");
+    assert_eq!(relation, ("author".to_owned(), "author.avatar".to_owned()));
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn relative_detail_time_remains_source_text_only_even_with_a_derived_millis_value() {
     let database = proof_database("material_relative_time_slice").await;
     submit_package(

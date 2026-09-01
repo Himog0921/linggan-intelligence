@@ -566,6 +566,49 @@
     return preview;
   }
 
+  /* The author's avatar is a media object like any other: it is shown only from a controlled
+   * local handle, and when there is no verified copy the slot states why rather than falling
+   * back to a platform URL. Ported from main's XHS-MEDIA-AUTHOR-EVIDENCE-001. */
+  function authorAvatar(media, alt = '作品作者头像') {
+    const avatar = media?.avatar && typeof media.avatar === 'object' ? media.avatar : {};
+    const asset = sameOriginPath(avatar.localAssetUrl, ['/api/local/media/']);
+    const wrapper = node('span', 'ev-author-avatar');
+    if (asset && avatar.blob?.deliveryState === 'INLINE_SAFE') {
+      const image = node('img');
+      image.src = asset;
+      image.alt = alt;
+      image.loading = 'lazy';
+      wrapper.append(image);
+      wrapper.dataset.state = 'acquired';
+    } else {
+      wrapper.append(node('span', null, '作者'));
+      wrapper.dataset.state = String(avatar.state || 'NOT_OBSERVED').toLowerCase();
+      wrapper.setAttribute('aria-label', `作者头像${stateMeta(avatar.state || 'NOT_OBSERVED')[0]}`);
+    }
+    return wrapper;
+  }
+
+  /* The work's author and the monitoring target are two different facts and are never merged
+   * into one line: the target is who we chose to watch, the creator is who actually published
+   * this. `authorIdentityMatchState` says whether they have been proven to be the same person. */
+  function creatorAndTargetFacts(item, compact = false) {
+    const creator = knownText(item.display?.creatorDisplayName, item.display?.creatorState, '当前未知');
+    const target = item.collectionContext?.targetDisplayState === 'KNOWN'
+      ? item.collectionContext.targetDisplayName
+      : '当前未知';
+    const facts = node('div', compact ? 'ev-context-facts ev-context-facts--compact' : 'ev-context-facts');
+    const creatorFact = node('div', 'ev-identity-fact ev-creator-fact');
+    const creatorCopy = node('span');
+    creatorCopy.append(node('small', null, '作品作者'), node('strong', null, creator));
+    creatorFact.append(authorAvatar(item.media, `${creator}的头像`), creatorCopy);
+    const targetFact = node('div', 'ev-identity-fact ev-target-fact');
+    const targetCopy = node('span');
+    targetCopy.append(node('small', null, '监控目标'), node('strong', null, target));
+    targetFact.append(targetCopy, tech(item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED'));
+    facts.append(creatorFact, targetFact);
+    return facts;
+  }
+
   /* The one serif quote, used by both the row and the Inspector so a search hit is highlighted
    * in the same place in both. The excerpt is sliced with `Array.from` because the offsets the
    * read model returns are character offsets, and a CJK codepoint is more than one JavaScript
@@ -638,10 +681,6 @@
     row.dataset.platform = String(item.identity?.platform || 'unknown').toLowerCase();
     row.setAttribute('aria-selected', String(publicRef === model.selectedRef));
 
-    const creator = knownText(item.display?.creatorDisplayName, item.display?.creatorState, '作者当前未知');
-    const target = item.collectionContext?.targetDisplayState === 'KNOWN'
-      ? item.collectionContext.targetDisplayName
-      : '监控目标当前未知';
     const published = publishedCopy(item, true);
 
     const identity = node('div', 'ev-identity');
@@ -652,13 +691,7 @@
     );
     const title = node('h2', null, knownText(item.display?.title, item.display?.titleState, '标题当前未知'));
     const meta = node('div', 'ev-meta');
-    meta.append(
-      node('b', null, creator),
-      document.createTextNode(' · '),
-      node('span', 'ev-target-line', target),
-      document.createTextNode(' · '),
-      node('span', null, published),
-    );
+    meta.append(creatorAndTargetFacts(item), node('span', 'ev-time-line', published));
     identity.append(eyebrow, title, meta, evidenceBlock(item.evidenceFragment), engagementBlock(item));
 
     const material = materialBlock(item);
@@ -674,7 +707,11 @@
     if (model.activeLayout === 'table') {
       row.append(
         tableCell(title.textContent, `${item.identity?.platform?.toUpperCase() || ''} ${publicRef ? publicRef.slice(0, 8).toUpperCase() : ''}`.trim()),
-        tableCell(creator, target),
+        (() => {
+          const cell = node('div', 'ev-table-cell');
+          cell.append(creatorAndTargetFacts(item, true));
+          return cell;
+        })(),
         material.element,
         stateLine(detailState),
         tableCell(published, ''),
@@ -1045,9 +1082,6 @@
       ['稳定引用', item.identity?.publicRef || '当前未知', 'PUBLIC REF'],
       ['平台', item.identity?.platform || '当前未知', 'PLATFORM'],
       ['标题', knownText(item.display?.title, item.display?.titleState), item.display?.titleState || 'UNKNOWN'],
-      ['作品作者', knownText(item.display?.creatorDisplayName, item.display?.creatorState), item.display?.creatorState || 'UNKNOWN'],
-      ['监控目标', item.collectionContext?.targetDisplayState === 'KNOWN' ? item.collectionContext.targetDisplayName : '当前未知', item.collectionContext?.relationshipState || 'UNKNOWN'],
-      ['作者身份关系', item.collectionContext?.authorIdentityMatchState === 'MATCHED' ? '已由平台作者 ID 证明一致' : '尚未证明监控目标就是作品作者', item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED'],
       ['发布时间', publishedCopy(item), item.display?.publishedAtState || 'UNKNOWN'],
       ['时间来源字段', item.display?.publishedAtSourceField || '当前未知', item.display?.publishedAtSourceKind || 'unknown'],
       ['时间精度', item.display?.publishedAtPrecision || 'unknown', item.display?.publishedAtParserVersion || 'PARSER UNKNOWN'],
@@ -1059,6 +1093,15 @@
         item.summary?.primaryLimitation || 'NONE'],
     ]));
     panel.append(identity);
+
+    const identityContext = section('作者与监控目标', 'SEPARATE SOURCE FACTS');
+    identityContext.append(
+      creatorAndTargetFacts(item),
+      factGrid([
+        ['作者身份关系', item.collectionContext?.authorIdentityMatchState === 'MATCHED' ? '已由平台作者 ID 证明一致' : '尚未证明监控目标就是作品作者', item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED'],
+      ]),
+    );
+    panel.append(identityContext);
 
     /* Platform-reported counts and locally retained counts are two different facts and are
      * never merged into one number. */
@@ -1264,7 +1307,7 @@
    * not to this work's material. Ordering is by the producer's own sequence, which is the only
    * order the system actually holds; `displayOrderState` is UNKNOWN upstream, so the rail says
    * 采集顺序 and never claims the platform's arrangement. */
-  function mediaObjectsFrom(inspector, fragment) {
+  function mediaObjectsFrom(inspector, fragment, { includeAvatar = false } = {}) {
     const slots = Array.isArray(inspector.mediaSlots) ? inspector.mediaSlots : [];
     const texts = new Map();
     (Array.isArray(inspector.derivatives) ? inspector.derivatives : []).forEach((derivative) => {
@@ -1279,7 +1322,7 @@
       texts.set(derivative.slotKey, existing);
     });
     return slots
-      .filter((slot) => slot?.purpose !== 'author_avatar')
+      .filter((slot) => includeAvatar || slot?.purpose !== 'author_avatar')
       .sort((left, right) => {
         const leftOrdinal = Number(left.producerOrdinal ?? left.relationshipOrdinal ?? 0);
         const rightOrdinal = Number(right.producerOrdinal ?? right.relationshipOrdinal ?? 0);
@@ -1571,7 +1614,11 @@
       ['本次返回', receipt?.returned ?? '当前未知', 'RETURNED'],
       ['是否截断', receipt?.truncated === true ? '是，可继续读取' : receipt?.truncated === false ? '否' : '当前未知', 'TRUNCATED'],
     ]));
-    objects.forEach((object) => {
+    /* The ledger accounts for every local object including the author's avatar; the browsing
+     * rail above deliberately leaves the avatar out, because it belongs to the author rather
+     * than to this work's own sequence of images. */
+    const ledgerObjects = mediaObjectsFrom(inspector, fragment, { includeAvatar: true });
+    ledgerObjects.forEach((object) => {
       const entry = node('article', 'ev-derivative');
       const head = node('div', 'ev-derivative-head');
       head.append(

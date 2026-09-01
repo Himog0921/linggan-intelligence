@@ -5,6 +5,7 @@ import {
   createCommentActionGate,
   expandAllReplies,
   expandNextReply,
+  findNextExpandableReplyTarget,
   isExpandMoreReplyTrigger,
 } from '../src/platforms/xhs/commentCollector.js';
 
@@ -81,8 +82,13 @@ test('expandAllReplies recursively clicks newly revealed show-more buttons', asy
 
 test('expandNextReply performs only one click and checks pause boundaries around it', async () => {
   const events = [];
-  const buttons = [
-    createExpandButton('展开 2 条回复', () => events.push('click:first')),
+  let buttons = [];
+  const first = createExpandButton('展开 2 条回复', () => {
+    events.push('click:first');
+    buttons = buttons.filter((button) => button !== first);
+  });
+  buttons = [
+    first,
     createExpandButton('展开更多回复', () => events.push('click:second')),
   ];
   const parentCommentEl = {
@@ -115,18 +121,19 @@ test('an offscreen reply control is revealed in one loop and clicked only by a l
   let visible = false;
   let clicks = 0;
   let scrolls = 0;
+  let subCount = 0;
   const button = {
     textContent: '展开 2 条回复',
     getBoundingClientRect: () => visible
       ? ({ top: 10, bottom: 20 })
       : ({ top: 200, bottom: 220 }),
     scrollIntoView() { scrolls += 1; visible = true; },
-    click() { clicks += 1; },
+    click() { clicks += 1; subCount = 1; },
   };
   const parentCommentEl = {
     querySelectorAll(selector) {
       if (selector === 'div.show-more') return [button];
-      if (selector === '.comment-item.comment-item-sub') return [];
+      if (selector === '.comment-item.comment-item-sub') return Array.from({ length: subCount });
       return [];
     },
   };
@@ -162,6 +169,7 @@ test('an offscreen reply control is revealed in one loop and clicked only by a l
 test('a reply control within one fractional pixel of the viewport edge is clicked without a reveal loop', async () => {
   let clicks = 0;
   let scrolls = 0;
+  let subCount = 0;
   const scrollParent = {
     parentElement: null,
     getBoundingClientRect: () => ({ top: 121, bottom: 768 }),
@@ -171,12 +179,12 @@ test('a reply control within one fractional pixel of the viewport edge is clicke
     textContent: '展开更多回复',
     getBoundingClientRect: () => ({ top: 736.03125, bottom: 768.03125 }),
     scrollIntoView() { scrolls += 1; },
-    click() { clicks += 1; },
+    click() { clicks += 1; subCount = 1; },
   };
   const parentCommentEl = {
     querySelectorAll(selector) {
       if (selector === 'div.show-more') return [button];
-      if (selector === '.comment-item.comment-item-sub') return [];
+      if (selector === '.comment-item.comment-item-sub') return Array.from({ length: subCount });
       return [];
     },
   };
@@ -205,4 +213,68 @@ test('a reply control within one fractional pixel of the viewport edge is clicke
     delete globalThis.window;
     delete globalThis.document;
   }
+});
+
+test('a reply control that remains without new replies is reported as no progress', async () => {
+  let clicks = 0;
+  const button = createExpandButton('展开更多回复', () => { clicks += 1; });
+  const parentCommentEl = {
+    querySelectorAll(selector) {
+      if (selector === 'div.show-more') return [button];
+      if (selector === '.comment-item.comment-item-sub') return [];
+      return [];
+    },
+  };
+
+  const result = await expandNextReply(parentCommentEl, {
+    waitBeforeAction: async () => {},
+    waitAfterAction: async () => {},
+  });
+
+  assert.equal(clicks, 1);
+  assert.equal(result.acted, false);
+  assert.equal(result.reason, 'reply_expand_no_progress');
+  assert.equal(result.beforeCount, 0);
+  assert.equal(result.afterCount, 0);
+});
+
+test('stalled reply controls are skipped so a later parent can still progress', () => {
+  const stalledControl = createExpandButton('展开更多回复');
+  const healthyControl = createExpandButton('展开 3 条回复');
+  const stalledParent = {
+    querySelectorAll: (selector) => selector === 'div.show-more' ? [stalledControl] : [],
+  };
+  const healthyParent = {
+    querySelectorAll: (selector) => selector === 'div.show-more' ? [healthyControl] : [],
+  };
+  const container = {
+    querySelectorAll: (selector) => selector === '.parent-comment'
+      ? [stalledParent, healthyParent]
+      : [],
+  };
+  const stalledReplyControls = new WeakSet([stalledControl]);
+
+  const target = findNextExpandableReplyTarget(container, { stalledReplyControls });
+
+  assert.equal(target.parentEl, healthyParent);
+  assert.equal(target.control, healthyControl);
+});
+
+test('expandAllReplies stops after one stubborn control instead of looping to its attempt cap', async () => {
+  let clicks = 0;
+  const button = createExpandButton('展开更多回复', () => { clicks += 1; });
+  const parentCommentEl = {
+    querySelectorAll(selector) {
+      if (selector === 'div.show-more') return [button];
+      if (selector === '.comment-item.comment-item-sub') return [];
+      return [];
+    },
+  };
+
+  await expandAllReplies(parentCommentEl, 10, {
+    waitBeforeAction: async () => {},
+    waitAfterAction: async () => {},
+  });
+
+  assert.equal(clicks, 1);
 });

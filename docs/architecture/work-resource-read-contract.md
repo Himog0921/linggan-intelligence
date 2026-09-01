@@ -1,9 +1,9 @@
 # WORK-RESOURCE-READ-001 · Intelligence 共享作品资源读取合同
 
 > 状态: 权威当前
-> 最后核对: 2026-08-31
+> 最后核对: 2026-09-01
 > 适用范围: Intelligence 中需要展示作品封面、标题、作者、发布时间、互动、材料状态与来源血缘的页面
-> 事实来源: Issue #110 / #128、Media V2、当前 Material Projection、Browser Producer `v0.8.16`、additive migrations `0026_work_resource_read.sql` / `0027_unified_media_resource.sql`
+> 事实来源: Issue #110 / #128、PR #132、Media V2、当前 Material Projection、Browser Producer `0.8.28`、additive migrations `0026_work_resource_read.sql` / `0027_unified_media_resource.sql` / `0029_author_avatar_media.sql` / `0030_comment_image_media.sql`
 > 冲突时以谁为准: 用户最新确认、不可变 Capture Package、类型化材料事实、Media V2、当前代码与数据库约束
 
 ## 1. 唯一公共入口
@@ -90,7 +90,9 @@ Work Resource Read 对页面只返回一份 `linggan.media-resource.v1`：
 - 只有 `INLINE_SAFE` 的同源 `/api/local/media/` 或 `/api/local/derivative/` 句柄可内联；原始 CDN URI 不进入 DTO；
 - 没有被生产链观察或物化的 avatar、comment image、OCR、transcript 保持 `NOT_OBSERVED`，不造空成功。
 
-`preview` 暂时保留为兼容投影，现有业务页面已禁止读取它。Collection Target 也不再直接渲染 `identity_facts.avatar` 的远程地址；在作者统一资源尚未接通前，头像区域保持不展示。
+`preview` 暂时保留为兼容投影，现有业务页面已禁止读取它。Collection Target 也不再直接渲染 `identity_facts.avatar` 的远程地址。`0.8.28` 真实标准详情已证明 Work Resource 返回并在 Evidence UI 展示本地封面和本地作者头像；作品作者与监控目标继续是两个独立字段，未证明的目标保持 `NOT_VERIFIED`。
+
+`0030` 只扩展现有媒体 purpose 约束，没有建立第二套资产。评论图片以评论为主体、作品为 Work 读取上下文，经同一 Slot → Candidate → Download → Blob → Materialization 链返回 `comment.image + subjectExternalId`。代码与隔离 PostgreSQL 非空正样本已通过；当前真实样本未观察到非空评论图片，因此真实层仍是 `NOT_OBSERVED`。
 
 ## 6. 页面与验证边界
 
@@ -98,4 +100,4 @@ Work Resource Read 对页面只返回一份 `linggan.media-resource.v1`：
 - 切换布局不重新请求 API，不修改数据，不改变当前选择与 Inspector。
 - `Research` 展示完整 lane 带；`Table` 用于横向比较；`Cover` 用于视觉扫描。
 - 真实签名详情字段探针已在当次明确授权下一次性完成，只读发布时间字段名/类型/值；未保存正文、作者资料、评论或媒体，不得把本次授权延伸为第二条平台请求。
-- 自动测试或 PostgreSQL 合成 proof 不等于真实 XHS、真实浏览器、部署或 Mog 业务验收。
+- 当前已有一次 `0.8.28` 真实 XHS 标准详情、真实浏览器、本机 runtime 与 Evidence UI 验收，但只对当次作品、详情 30 条窗口与已观察媒体成立。自动测试/隔离 PostgreSQL 仍不能替代其他样本、非空评论图片、全量深采或长期业务验收。

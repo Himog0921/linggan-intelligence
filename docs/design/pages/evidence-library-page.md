@@ -53,7 +53,7 @@
 | 作者与监控目标 | profile discovery 可证明作品来自目标表面；详情作者 ID 才能证明作者身份一致 | 分开显示“作品作者”和“监控目标”，以 `MATCHED/NOT_VERIFIED/MISMATCH` 表达关系，不用目标名填补作者 |
 | 发布时间 | detail collector 交付原始字段、值类型、精度、参照时点和 parser version；只有平台 epoch 晋升为精确时间 | `KNOWN / SOURCE_TEXT_ONLY / UNKNOWN` 分开；禁止用 observed/accepted 时间代替发布 |
 | 评论/回复 | 类型化 lane、Coverage 与本机授权评论研究通道已接入详情；普通列表不返回原文 | 原文只在授权详情按页读取，匿名上下文不暴露平台用户标识 |
-| 作者资料 | 详情可返回版本化作者上下文 | 页面不显示 `authorExternalId`，未知字段不补值 |
+| 作者资料 | 详情可返回版本化作者上下文；稳定作者 ID 与头像同时存在时，头像进入统一媒体链 | 页面不显示 `authorExternalId`，未知字段不补值；只内联受控本地头像，不回退远程地址 |
 | 媒体槽位 | Slot、来源代次、候选断言、Live Photo 组件及有界回执已进入 Material Projection | 槽位存在不等于字节已取得；回执截断但无通道 URL 时显示 `SOURCE_INCOMPLETE` |
 | 媒体字节 | Blob/Materialization/处置与受控本地 asset handle 已进入详情 | 仅 `INLINE_SAFE` 且同源受控句柄可内联；真实平台字节未验证 |
 | OCR/ASR 等派生 | Job/Event/Derivative 生命周期进入详情，provider 当前未由本卡启用 | 原样显示 `QUEUED/PROCESSING/NOT_ENABLED/FAILED/ACQUIRED/UNKNOWN`，不由 UI 推断 |
@@ -112,7 +112,7 @@ Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
 每个作品集合按下列顺序呈现：
 
 1. 本地媒体预览，或准确的未取得/已清理/受限状态；
-2. 平台、稳定作品引用、标题、作品作者、监控目标及二者身份关系、来源发布时间及精度；
+2. 平台、稳定作品引用、标题；作品作者与监控目标使用两个独立事实区，作者区可显示受控本地头像，随后表达二者身份关系、来源发布时间及精度；
 3. 脱敏摘要或“尚无可展示摘要”；
 4. 发现、详情、讨论、媒体、派生五组 lane；其中评论/回复和 OCR/ASR 仍可分别展开；
 5. 最近观察时点、主要 Coverage/停止原因、限制；
@@ -126,7 +126,7 @@ Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
 
 ```text
 当前作品 / 稳定 public ref
-├─ 概览：标题、正文、作者、来源时间、逐字段来源/未知
+├─ 概览：标题、正文、作品作者（含受控本地头像）、独立监控目标、二者关系、来源时间、逐字段来源/未知
 ├─ 评论与回复：脱敏片段、父子关系、各 lane Coverage/停止原因
 ├─ 媒体：槽位顺序、用途、来源代次、组件、字节/副本/清理状态
 ├─ 派生：OCR/ASR/关键帧/embedding 状态、processor 版本、来源位置
@@ -176,6 +176,7 @@ item:
   identity: platform / contentExternalId / stablePublicRef
   display: title / creator / publishedAt + source field/kind/precision/reference/parser + each value state
   collectionContext: target / relationshipState / authorIdentityMatchState / workOrderRef
+  media.avatar: relationship / state / purpose / localAssetUrl / blob delivery state
   preview: localAssetUrl / slotPurpose / bytesState / alt
   laneSummaries[]: lane / state / counts-with-value-state / stopReason / limitations / latestObservedAt
   summary: lastObservedAt / primaryLimitation / restrictionState / matchedFields
