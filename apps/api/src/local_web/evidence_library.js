@@ -261,9 +261,14 @@
   }
 
   /* Everything a reader could restore travels in the address: the query, the quick view, the
-   * layout, which work is open, which Inspector tab it is on and how wide the panel is. Back
-   * and forward then return the same screen rather than a reset one. */
-  function syncUrl(replace = true) {
+   * layout, which work is open, which Inspector tab it is on and how wide the panel is.
+   *
+   * Only the moves a person would call "where I was" push a history entry — running a query,
+   * switching quick view or layout, opening a different work. Panel width, the open/closed
+   * state and the Inspector tab replace instead: they are preferences about how the current
+   * screen is displayed, and pushing them would bury the actual navigation under a pile of
+   * back-steps that each undo a 30px width change. */
+  function syncUrl(mode = 'replace') {
     const params = explicitParams();
     if (model.activeView !== 'all') params.set('view', model.activeView);
     if (model.activeLayout !== 'research') params.set('layout', model.activeLayout);
@@ -273,8 +278,11 @@
     else if (model.inspectorWidth !== 'normal') params.set('panel', model.inspectorWidth);
     const query = params.toString();
     const address = query ? `/corpus/evidence?${query}` : '/corpus/evidence';
-    if (replace) history.replaceState(null, '', address);
-    else history.pushState(null, '', address);
+    if (mode === 'push' && address !== `${window.location.pathname}${window.location.search}`) {
+      history.pushState(null, '', address);
+    } else {
+      history.replaceState(null, '', address);
+    }
   }
 
   function activeFilterCount() {
@@ -419,11 +427,11 @@
     return preview;
   }
 
-  /* The one serif line in a row. A search hit is highlighted in place using the character
-   * offsets the read model returned — the excerpt is sliced with `Array.from`, because a CJK
-   * codepoint is more than one JavaScript string index. */
-  function evidenceBlock(item) {
-    const fragment = item.evidenceFragment;
+  /* The one serif quote, used by both the row and the Inspector so a search hit is highlighted
+   * in the same place in both. The excerpt is sliced with `Array.from` because the offsets the
+   * read model returns are character offsets, and a CJK codepoint is more than one JavaScript
+   * string index. Row and panel differ only in CSS: the row clamps to one line, the panel wraps. */
+  function evidenceBlock(fragment) {
     const block = node('div', 'ev-evidence');
     if (!fragment || typeof fragment.text !== 'string' || !fragment.text) {
       block.classList.add('ev-evidence--absent');
@@ -433,8 +441,7 @@
       );
       return block;
     }
-    const label = fragmentSourceLabels[fragment.sourceKind] || '来源未表达';
-    block.append(node('span', 'ev-evidence-source', label));
+    block.append(node('span', 'ev-evidence-source', fragmentSourceLabels[fragment.sourceKind] || '来源未表达'));
     const quote = node('q');
     const characters = Array.from(fragment.text);
     const offset = Number.isInteger(fragment.matchOffset) ? fragment.matchOffset : -1;
@@ -509,7 +516,7 @@
       document.createTextNode(' · '),
       node('span', null, published),
     );
-    identity.append(eyebrow, title, meta, evidenceBlock(item), engagementBlock(item));
+    identity.append(eyebrow, title, meta, evidenceBlock(item.evidenceFragment), engagementBlock(item));
 
     const material = materialBlock(item);
     const side = node('div', 'ev-side');
@@ -599,7 +606,7 @@
     refs.nextList.dataset.cursor = payload.cursor || '';
   }
 
-  async function loadList({ append = false, keepSelection = false } = {}) {
+  async function loadList({ append = false, keepSelection = false, history: historyMode = 'replace' } = {}) {
     model.listController?.abort();
     model.listController = new AbortController();
     const cursor = append ? refs.nextList.dataset.cursor : null;
@@ -625,7 +632,7 @@
       renderRows(append);
       queryReceipt(payload, append);
       renderReadout();
-      syncUrl();
+      syncUrl(append ? 'replace' : historyMode);
       if (model.items.length === 0) {
         setFeedback('empty', '当前查询没有匹配的作品材料', '读取已经成功；这个结果只描述当前本地查询，不证明平台或现实中没有相关内容。', 'NO MATCHING MATERIAL');
         clearInspector();
@@ -704,21 +711,23 @@
     if (row) row.focus({ preventScroll: true });
   }
 
+  /* Does not write history itself. Opening the panel is always part of a larger action —
+   * choosing a work, or reopening after a close — and that action decides the history mode. */
   function openInspector() {
     if (isDrawerLayout()) model.drawerOpen = true;
     model.inspectorClosed = false;
     applyInspectorState();
-    syncUrl();
   }
 
-  function restoreInspectorWidth() {
+  function storedInspectorWidth() {
     let stored = null;
     try {
       stored = window.localStorage.getItem(WIDTH_STORAGE_KEY);
     } catch (_) {
+      /* A private window or blocked site data must not break the panel. */
       stored = null;
     }
-    if (INSPECTOR_WIDTHS.includes(stored)) model.inspectorWidth = stored;
+    return INSPECTOR_WIDTHS.includes(stored) ? stored : 'normal';
   }
 
   function clearInspector() {
@@ -753,9 +762,11 @@
       row.tabIndex = selected ? 0 : -1;
     });
     /* Choosing a work always brings the panel back — a reader who closed it and then clicked a
-     * row is asking to see that work, not to keep the panel shut. */
+     * row is asking to see that work, not to keep the panel shut. A reader's own choice is a
+     * navigation step and pushes; the auto-selection that follows a load only replaces, so one
+     * search does not leave two entries behind. */
     if (fromUser) openInspector();
-    else syncUrl();
+    syncUrl(fromUser ? 'push' : 'replace');
     refs.inspectorFeedback.hidden = false;
     refs.inspectorFeedback.replaceChildren(node('strong', null, '正在读取当前作品详情'), tech('DETAIL READ'));
     refs.inspectorTitle.textContent = knownText(item.display?.title, item.display?.titleState, '标题当前未知');
@@ -951,18 +962,16 @@
     if (!fragment) {
       strongest.append(sourceIncompleteBlock('这个作品还没有可引用的原文、评论或图片文字。这只描述当前已接纳的材料，不表示平台上没有内容。'));
     } else {
-      const quote = node('div', 'ev-evidence');
-      quote.append(
-        node('span', 'ev-evidence-source', fragmentSourceLabels[fragment.sourceKind] || '来源未表达'),
-        node('q', null, fragment.text),
-      );
-      strongest.append(quote);
+      strongest.append(evidenceBlock(fragment));
       strongest.append(factGrid([
         ['来源类型', fragmentSourceLabels[fragment.sourceKind] || '未表达', fragment.sourceKind || 'UNKNOWN'],
         ['选取依据', fragment.selectionBasis === 'SEARCH_MATCH' ? '包含当前检索词' : '当前最具作者性的可读材料', fragment.selectionBasis || 'UNKNOWN'],
         ['是否截断', fragment.truncated ? '是，已按展示边界截断' : '否', fragment.truncated ? 'TRUNCATED' : 'WHOLE'],
-        ['来源引用', fragment.sourceRef || '当前未表达', fragment.slotKey || 'NO SLOT'],
+        ['来源引用', fragment.sourceRef || '当前未表达', fragment.sourceRef ? 'SOURCE REF' : 'UNKNOWN'],
       ]));
+      if (fragment.slotKey) {
+        strongest.append(factGrid([['所在媒体对象', fragment.slotKey, 'SLOT KEY']]));
+      }
     }
     panel.append(strongest);
 
@@ -1521,27 +1530,36 @@
     syncUrl();
   }
 
+  /* The address is authoritative, including by omission: a parameter that is absent means the
+   * control is at its default, not that it keeps whatever it happened to be. Leaving the old
+   * value in place is what makes Back fail — stepping back from `?view=partial` to a bare URL
+   * would otherwise keep the partial filter while the tab strip claimed 全部材料. */
   function restoreFromUrl() {
     const params = new URLSearchParams(window.location.search);
     refs.search.value = params.get('q') || '';
-    const assign = (control, key) => {
+    const assign = (control, key, fallback) => {
       const value = params.get(key);
-      if (value && [...control.options].some((option) => option.value === value)) control.value = value;
+      control.value = value && [...control.options].some((option) => option.value === value)
+        ? value
+        : fallback;
     };
-    assign(refs.sort, 'sort');
-    assign(refs.window, 'window');
-    assign(refs.lane, 'lane');
-    assign(refs.laneState, 'laneState');
-    assign(refs.mediaKind, 'mediaKind');
+    assign(refs.sort, 'sort', 'latest_discovery');
+    assign(refs.window, 'window', 'latest_accepted_discovery');
+    assign(refs.lane, 'lane', '');
+    assign(refs.laneState, 'laneState', '');
+    assign(refs.mediaKind, 'mediaKind', '');
     const view = params.get('view');
-    if (view && viewFilters[view]) model.activeView = view;
+    model.activeView = view && viewFilters[view] ? view : 'all';
     const layout = params.get('layout');
-    if (['research', 'table', 'cover'].includes(layout)) model.activeLayout = layout;
+    model.activeLayout = ['research', 'table', 'cover'].includes(layout) ? layout : 'research';
     const tab = params.get('tab');
-    if (tabs.some((candidate) => candidate.dataset.evTab === tab)) model.activeTab = tab;
+    model.activeTab = tabs.some((candidate) => candidate.dataset.evTab === tab) ? tab : 'overview';
+    /* Width is the one parameter whose default is a stored preference rather than a constant:
+     * the panel size a person chose is meant to survive navigation. */
     const panel = params.get('panel');
-    if (panel === 'closed') model.inspectorClosed = true;
-    else if (INSPECTOR_WIDTHS.includes(panel)) model.inspectorWidth = panel;
+    model.inspectorClosed = panel === 'closed';
+    if (INSPECTOR_WIDTHS.includes(panel)) model.inspectorWidth = panel;
+    else if (panel !== 'closed') model.inspectorWidth = storedInspectorWidth();
     model.selectedRef = params.get('work') || null;
     viewButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.evView === model.activeView)));
     layoutButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.evLayout === model.activeLayout)));
@@ -1556,7 +1574,7 @@
     event.preventDefault();
     model.activeView = 'all';
     viewButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.evView === 'all')));
-    loadList();
+    loadList({ history: 'push' });
   });
   refs.filterToggle.addEventListener('click', () => {
     const open = refs.filterPanel.hidden;
@@ -1571,29 +1589,30 @@
     syncFilterCount();
     model.activeView = 'all';
     viewButtons.forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.evView === 'all')));
-    loadList();
+    loadList({ history: 'push' });
   });
   [refs.window, refs.lane, refs.laneState, refs.mediaKind].forEach((control) => control.addEventListener('change', () => {
     syncFilterCount();
-    loadList();
+    loadList({ history: 'push' });
   }));
-  refs.sort.addEventListener('change', () => loadList({ keepSelection: true }));
+  refs.sort.addEventListener('change', () => loadList({ keepSelection: true, history: 'push' }));
   refs.nextList.addEventListener('click', () => loadList({ append: true }));
   viewButtons.forEach((button) => button.addEventListener('click', () => {
     model.activeView = button.dataset.evView;
     viewButtons.forEach((candidate) => candidate.setAttribute('aria-pressed', String(candidate === button)));
-    loadList();
+    loadList({ history: 'push' });
   }));
   layoutButtons.forEach((button) => button.addEventListener('click', () => {
     model.activeLayout = button.dataset.evLayout;
     layoutButtons.forEach((candidate) => candidate.setAttribute('aria-pressed', String(candidate === button)));
     renderRows(false);
-    syncUrl();
+    syncUrl('push');
   }));
   widthButtons.forEach((button) => button.addEventListener('click', () => setInspectorWidth(button.dataset.evWidth)));
   refs.closeInspector.addEventListener('click', closeInspector);
   refs.reopenInspector.addEventListener('click', () => {
     openInspector();
+    syncUrl();
     refs.inspector.focus?.();
   });
   tabs.forEach((tab) => {
@@ -1659,11 +1678,11 @@
   window.addEventListener('popstate', () => {
     restoreFromUrl();
     applyInspectorState();
+    activateTab(tabs.find((tab) => tab.dataset.evTab === model.activeTab) || tabs[0]);
     loadList({ keepSelection: true });
   });
   window.matchMedia(DRAWER_QUERY).addEventListener('change', applyInspectorState);
 
-  restoreInspectorWidth();
   restoreFromUrl();
   applyInspectorState();
   clearInspector();
