@@ -1465,32 +1465,45 @@
       viewport.scrollLeft += event.deltaY;
     }, { passive: false });
 
+    /* Pointer capture is taken only once the pointer has actually travelled — never on
+     * pointerdown. While an element holds the capture the browser retargets the following
+     * `click` to that element, so capturing up front sent every click to the rail instead of to
+     * the card under the cursor, and opening an image by clicking it silently stopped working.
+     * A press that never moves now stays an ordinary click on the card. */
+    const DRAG_THRESHOLD = 4;
+    let pressed = false;
     let dragging = false;
     let dragOrigin = 0;
     let scrollOrigin = 0;
     let moved = 0;
     viewport.addEventListener('pointerdown', (event) => {
-      if (event.pointerType === 'touch') return;
-      dragging = true;
+      if (event.pointerType === 'touch' || event.button !== 0) return;
+      pressed = true;
+      dragging = false;
       moved = 0;
       dragOrigin = event.clientX;
       scrollOrigin = viewport.scrollLeft;
-      viewport.dataset.grabbing = 'true';
-      viewport.setPointerCapture(event.pointerId);
     });
     viewport.addEventListener('pointermove', (event) => {
-      if (!dragging) return;
+      if (!pressed) return;
       const delta = event.clientX - dragOrigin;
       moved = Math.max(moved, Math.abs(delta));
+      if (!dragging) {
+        if (moved <= DRAG_THRESHOLD) return;
+        dragging = true;
+        viewport.dataset.grabbing = 'true';
+        viewport.setPointerCapture(event.pointerId);
+      }
       viewport.scrollLeft = scrollOrigin - delta;
     });
     const endDrag = (event) => {
-      if (!dragging) return;
-      dragging = false;
-      delete viewport.dataset.grabbing;
-      if (viewport.hasPointerCapture?.(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
-      /* A drag is not a click. Without this a dragged rail would open the lightbox on release. */
-      if (moved > 6) {
+      if (!pressed) return;
+      pressed = false;
+      if (dragging) {
+        dragging = false;
+        delete viewport.dataset.grabbing;
+        if (viewport.hasPointerCapture?.(event.pointerId)) viewport.releasePointerCapture(event.pointerId);
+        /* A drag is not a click. Without this a dragged rail would open the viewer on release. */
         const swallow = (click) => {
           click.preventDefault();
           click.stopPropagation();
