@@ -8,7 +8,24 @@
 
 ## 当前阶段
 
-### PLUGIN-XHS-FINALIZATION-001（v0.8.28 终包，自动/隔离/发行已通过，主线收口中）
+### Browser Producer `0.8.28` 当前权威快照（已合并、已对齐运行时、已真实验收）
+
+- `main` = `origin/main` = 本机 detached runtime = `d7e722018f4f4cfa217c9cf5c0cac6fbcdcaacb3`。PR #132 已合并。
+- 当前发行包为 `plugins/linggan-intelligence-browser/releases/linggan-intelligence-browser-v0.8.28.zip`，SHA-256 为 `015a3de775a55d6ac2be8dac5d6ca833f7d88f3d772d641a73c7bbe91f51184e`。
+- 工位 `1` 已通过正式 API 认领 active installation `9179e6cf-3316-493a-abee-2e7eb162f824` / `0.8.28`，旧 `0.8.23` 被取代。
+- API、巡检 worker 与媒体 worker 均从 `linggan-intelligence-origin-main-d7e7220` 快照运行；`/health` 为 `LINGGAN_BROWSER_PRODUCER_RUNTIME`、`PLUGIN_RUNTIME_002_SCHEMA_READY / READY`、scheduler running。
+- 真实样本“智商131的A娃。”（`contentExternalId=6a2047060000000022027f0e`，Work `b681991d-525a-4332-8fea-e937e7684c15`）在 `0.8.28` 一次有效标准详情执行中接纳详情 1、媒体槽位 6、顶层评论 15、回复 15；详情窗口为 `requested=30 / unique=30 / page=233 / detail_window complete`。
+- 同轮 6 个逻辑媒体槽位、7 个字节组件全部 acquired/materialized：封面 1、正文图 3、Live Photo still+motion、作者头像 1。Evidence UI 已显示本地封面、本地头像、独立“作品作者 / 监控目标”；未证明监控目标时保持 `NOT_VERIFIED`。
+- 当前完成证明为 231 项插件测试、Rust workspace、49 项隔离 PostgreSQL proof、production build、content runtime、运行隔离、release verify/reproducibility；production npm audit 为 0。全 dev 依赖的既有 9 项 audit 提示和 Webpack bundle 体积警告继续保留。
+
+尚未被上述完成声明覆盖的边界：
+
+1. 本轮只证明标准详情附带 `30/30` 评论窗口，没有重新深采全部 233 条。`0.8.21` 的 `233/233` 是独立 Attempt 证据，不与本轮数量相加。
+2. `comment.image` 已有代码与隔离 PostgreSQL 非空正样本，但本轮真实样本没有非空评论图片，真实层仍为 `NOT_OBSERVED`。
+3. Live Photo 原始字节已完整取得；音频提取/ASR 因处理环境失败而保持 `FAILED`，不写成插件媒体缺失。
+4. Evidence 详情 lane 仍因 content-detail Coverage `unknown=3` 显示 `PARTIAL`；标题、正文、作者、发布时间、互动、媒体与评论均可读。这是状态语义差异，不是数据丢失。
+
+### PLUGIN-XHS-FINALIZATION-001 演进记录（`0.8.20–0.8.28`，历史过程不覆盖上述当前快照）
 
 0.8.20 已在同一授权作品上真实完成标准详情：详情 1 条、媒体槽位 9 个、顶层评论 16 条和回复
 14 条分别被 Linggan 接纳；评论窗口为 `30 / 30 COMPLETE`，页面公开数 713，没有把标准窗口冒充
@@ -72,7 +89,14 @@ proof、production build、content runtime、运行隔离、发行校验与可�
 SHA-256 为 `015a3de775a55d6ac2be8dac5d6ca833f7d88f3d772d641a73c7bbe91f51184e`。生产依赖审计为
 0 项；完整开发依赖树仍有既有 9 项 audit 提示，Webpack 仍有既有 content bundle 体积警告。
 
-### XHS-MEDIA-AUTHOR-EVIDENCE-001（v0.8.19 候选，自动与隔离 PostgreSQL 已证明，真实重载待执行）
+## 历史项目快照（仅用于演进追溯）
+
+以下事项保留其各自记录时点的分支、Draft、待部署和未验证结论，不再代表 `2026-09-01 / 0.8.28`
+的当前主线、运行时或真实样本状态。发生冲突时，一律以上方“Browser Producer `0.8.28` 当前权威快照”
+和对应当前架构合同为准；这里降级的只是各事项旧的实施状态与完成声明，不降级其中引用的 ACCEPTED
+决定、领域不变量或仍然有效的合同。后者继续以其各自权威文件为准，这里也不因本轮状态同步而重写历史证据。
+
+### XHS-MEDIA-AUTHOR-EVIDENCE-001（`0.8.19` 历史候选快照，已被上述 `0.8.28` 真实链覆盖）
 
 用户已确认“ADHD的尽头是成瘾”仍在平台推流，页面公开评论数随时间增长属于真实进量，不按重复或错误分母处理。本后续只对该已授权作品重新执行详情、评论和媒体链；最新 Attempt 数量、页面公开数与历史累计唯一评论继续分别表达。
 
@@ -80,7 +104,7 @@ SHA-256 为 `015a3de775a55d6ac2be8dac5d6ca833f7d88f3d772d641a73c7bbe91f51184e`�
 
 插件合同与 209 项聚焦测试、Rust workspace test/check/format、JS 语法、隔离 PostgreSQL author-avatar 真链、0.8.19 production build、发行校验、可复现性和运行隔离已通过。发行 ZIP SHA-256 为 `c8410c08cd981e9cad93945515613db77918adea3589794232ed623d5ba70338`。仍存在既有 Webpack content bundle 体积警告和 npm audit 9 项依赖风险。本机持久库 `0029`、`:3000` Runtime、Chrome 0.8.19 重载、目标作品新 Package/Receipt/Materialization 和 Mog 页面验收尚未执行，当前不得写成真实链完成。
 
-### PLUGIN-XHS-FINALIZATION-001（v0.8.16 终包候选，代码与隔离验证完成，真实重载待执行）
+### PLUGIN-XHS-FINALIZATION-001（`0.8.16` 历史候选快照，已被上述 `0.8.28` 真实链覆盖）
 
 在 `origin/main@62a60404` 上完成一次有界终包，不再按真实页面每暴露一个症状就增加一套旁路。执行面现在对 `TaskSpec → 页面动作回执 → Attempt/Package → outbox` fail-closed：同一详情 lane 以稳定幂等键复用单一提交，包含并发唤醒冲突回读；页面没有携带精确 `taskId/action/capability` 成功回执时不得报执行成功。暂停、停止、restart 和批量单篇 timeout 都等待当前 collector 退出后才允许下一执行者操作页面；scheduled 不限评论保留 `0 = unlimited`，批量数量允许明确输入 1–50 且不再静默缩成 50。
 
@@ -90,7 +114,7 @@ SHA-256 为 `015a3de775a55d6ac2be8dac5d6ca833f7d88f3d772d641a73c7bbe91f51184e`�
 
 真实边界没有被自动检查替代：现有运行工位最后上报 0.8.14，0.8.16 尚未被 Chrome 重载；“ADHD的尽头是成瘾”当前只证明跨 Attempt 的部分材料增长，最近一次为 `121/533 PARTIAL / manual_stop`，当前投影为 167 条稳定唯一评论。该作品 8 个媒体槽位仍为 0 个 Materialization，所以 Evidence 无封面仍是当前真实事实。共享持久数据库尚未应用 0027，本机 `:3000` 尚未替换，真实 XHS 全评论、媒体物化、Linggan 接纳和 Mog 业务验收都待精确包重载后的单次验证。
 
-### PLUGIN-XHS-COMMENT-EXECUTION-MEDIA-001（v0.8.15 候选，真实链复验中）
+### PLUGIN-XHS-COMMENT-EXECUTION-MEDIA-001（`0.8.8–0.8.15` 历史演进记录）
 
 真实长评论样本“ADHD的尽头是成瘾”已证明标准详情的 30 条评论材料被 Linggan 接纳：当前投影为 16 条顶层评论、14 条回复，详情公开评论数为 452。暂停中的单篇深采在浏览器内已取得 130 条，但旧 0.8.7 只在 collector 返回时提交 Package，因此新增 100 条尚未进入 Intelligence；控制面把首轮 53 锁成总数，形成 `130/53`。同一作品已有 8 个媒体槽位和可访问的 XHS 封面候选，但没有本地 Materialization；媒体工作被领取后只留下 `lease_expired`，所以 Evidence Library 不展示远程 CDN 封面是符合边界的，缺陷在媒体执行没有完成而不是页面漏用远程 URL。
 
@@ -237,7 +261,7 @@ REAL-CANARY #52 的聚合结果已确认：本地库存在已接纳的当前可�
 - 2026-08-20 用户进一步确认代码前语义冻结结论：SCOPE-001 采用 Closed World，独立状态不得压成总成功，unknown 不得被默认值吞掉，低层不得越权产生高层 Claim，任何验证声明必须携带未证明范围。四轮攻击与已知 P1 收口后，用户又明确终止重复文档复核并要求进入代码阶段；因此当前为受控 TDD 开工，不改变上述语义或真实范围硬停止线。
 - 2026-08-21 用户逐题确认第一阶段首页情报面形态 `HOME-01`–`HOME-17`，记录在 [`pages/home-intelligence-surface.md`](pages/home-intelligence-surface.md)，并据此收口 `DEC-G7-01`（首页部分）与 `DEC-G7-02`。该确认只固定产品形态与信息语义，**不是实现授权**：首页、常驻 Agent 编队、总编、通知推送、选题卡存储与校准回路全部未实现，也没有真实数据可驱动；当前在办事项仍只有 `SCOPE-001`，要实现其中任何一节必须另立 SCOPE 并经用户确认。
 
-## 事项队列
+## 历史项目队列（未在本次 Browser Producer 现状同步中重审）
 
 | 顺序 | 编号 | 事项 | 状态 | 退出条件 |
 |---|---|---|---|---|
@@ -253,7 +277,7 @@ REAL-CANARY #52 的聚合结果已确认：本地库存在已接纳的当前可�
 
 同一时间默认只允许一个事项处于“执行中”。状态流转为：`待讨论 → 需要决定 → 已确认 → 执行中 → 验证中 → 已完成`。来源不足使用 `SOURCE_INCOMPLETE`；必须由用户决定的边界使用 `DECISION_REQUIRED`；外部条件无法继续时使用 `BLOCKED`。
 
-## 当前下一步
+## 历史下一步记录（不覆盖本页顶部 `0.8.28` 当前快照）
 
 当前主线实施事项仍是 [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md)。它把已确认设计压缩为一条合成/脱敏技术 tracer：终态 Package 接入、逐 Record 处理、最小 Content 身份与 Observation、字段级 Current 来源，以及 API + minimal CLI 的解释结果；它不是用户可见产品切片。与主线并列、且由 Mog 单独授权的唯一受限现实页面工作是 `AUD-XHS-001 / Issue #74`；它只降低小红书字段与插件兼容性的未知，不接入真实材料，也不扩大 SCOPE-001。
 

@@ -1,18 +1,29 @@
 # 采集控制层、有限工位与浏览器插件架构
 
-> 状态: 草案
-> 最后核对: 2026-08-30
+> 状态: 代码事实优先
+> 最后核对: 2026-09-01
 > 适用范围: DISC-001 Gate 6 的采集准入、服务端调度、Work Order、Attempt/lease、浏览器 MV3 插件、离线恢复、终态 Package、部分结果、协议升级与可观测性
-> 事实来源: 已确认 Gate 2–3 边界、Gate 4 固定 V2 只读审计、Gate 5 数据候选、`module-architecture.md`、现役插件源码/fixture/测试参考
+> 事实来源: 已确认 Gate 2–3 边界、当前 Rust/PostgreSQL/插件代码与测试、Browser Producer `0.8.28` 发行包、工位与真实 Package/Receipt/Materialization 回执
 > 冲突时以谁为准: 用户最新确认、真实 producer fixture、协议兼容测试、PostgreSQL 并发副作用与实际插件运行结果；旧插件字段和本文候选参数不自动成为现行合同
 
-本文是 [`module-architecture.md`](module-architecture.md) 中 Capture 模块与浏览器插件接缝的渐进披露子文档。它不授权升级插件、访问真实平台、创建业务表或写 Rust 业务代码。
+本文是 [`module-architecture.md`](module-architecture.md) 中 Capture 模块与浏览器插件接缝的渐进披露子文档。已落地部分以当前代码和真实回执为准；未落地候选仍为草案，本文本身不授权新的平台访问、数据迁移或产品范围。
 
 ## 一句话结论
 
 > **Linggan 与插件之间需要一个服务端采集控制层：它先复用证据、合并需求、判断 Coverage 缺口、时间价值、有限工位、账号风险和授权，再产生有界 Work Order；MV3 插件只领取、续租、执行、暂停、交付和确认，不决定研究意义、任务优先级或下一步扩采。**
 
 它不是普通“先入先出任务队列”，但第一阶段也不引入 Temporal、Camunda、Kafka 或微服务。一个 PostgreSQL 16 durable-work 实现足以承载当前规模，前提是状态、幂等、租约、部分结果和数据库围栏有真实测试。
+
+## `0.8.28` 已落地现状
+
+- 服务端拥有工位、安装身份、认领、TaskSpec、Attempt、Package 接纳、Coverage、Observation 和分析；插件只是受控 Browser Producer。
+- 工位 `1` 已正式认领 `0.8.28`；安装 `9179e6cf-3316-493a-abee-2e7eb162f824` 取代旧 `0.8.23`。
+- 一次真实标准详情任务已将详情、媒体槽位、顶层评论和回复分成四个不可变 Package 并全部接纳；评论窗口为 `30/30 DETAIL_WINDOW COMPLETE`，页面公开数为 233。
+- 标准详情和评论深采共用同一评论采集内核；新深采 Attempt 从评论入口重新开始，不续上一 Attempt 的“第 201 条”。
+- 媒体自动执行使用持久 outbox 与 `linggan-media-worker-v1` offscreen 通道；旧的人工媒体选择/下载窗口继续保留，两类使用者不互相取代。
+- 插件不选择研究目标、不生成搜索词、不分析趋势/需求/爆文；它只带回当前页面/平台事实、媒体原件、Coverage 和失败回执。
+
+当前未完全验收的组合不得被这条真实链扩大：搜索连续滚动/不同筛选端到端、作者页结构化统计、真实非空评论图片仍按能力登记册的 `PARTIAL / SOURCE_INCOMPLETE / NOT_OBSERVED` 管理。
 
 ## 先区分四种责任面
 
@@ -635,9 +646,9 @@ capture/
 
 ### 真实 producer 门
 
-Gate 4 的 `EXP-XHS-01` 至 `EXP-XHS-05` 仍是上线前事实门。fixture 成功不能证明页面字段、账号镜头、生命周期、评论分页、Coverage 或安全访问频率已经成立。
+`0.8.28` 已通过一个受控单工位标准详情真实门，但该结果仅对当次样本与 lane 成立。fixture 成功仍不能替代搜索跨筛选、作者页、账号镜头、真实非空评论图片或其他尚未观察组合的单独证明。
 
-## 插件升级顺序
+## 插件升级顺序（后续新升级仍适用）
 
 插件升级不能先于服务端合同，推荐顺序：
 
@@ -654,7 +665,7 @@ Gate 4 的 `EXP-XHS-01` 至 `EXP-XHS-05` 仍是上线前事实门。fixture 成�
 
 ## 已确认方向与后续真实插件决定
 
-`USER-DEC-01/02/05` 已关闭来源纪律、部分结果和总体技术方向。SCOPE-001 只裁定 synthetic Content 首次接入、合法 replay 和数据库 authority fence；真实插件的恢复窗口、账号镜头、Artifact 处置和 lane 合同仍需真实 producer/隐私/现实授权证据，不能由合成切片外推。
+`USER-DEC-01/02/05` 已关闭来源纪律、部分结果和总体技术方向。当前 `0.8.28` 已在一个受控样本上证明标准详情/媒体/评论窗口链；恢复窗口、账号镜头、Artifact 处置和尚未验收 lane 仍需各自的 producer/隐私/现实授权证据，不能由该样本外推。
 
 | 编号 | 决定 | 当前推荐 | 为什么不能静默决定 |
 |---|---|---|---|
