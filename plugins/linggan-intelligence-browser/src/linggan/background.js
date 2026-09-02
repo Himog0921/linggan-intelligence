@@ -398,10 +398,25 @@ const PATROL_ALARM = 'linggan-patrol';
 // Chrome 对 alarms 的最小周期是 1 分钟，比这更短的退避只能靠下一次事件唤醒。
 const MIN_ALARM_MINUTES = 1;
 
+// Keep a durable repeating alarm instead of a one-shot wakeup.  A manual station claim happens
+// on the local web surface and has no direct channel back into Chrome.  If a MV3 service worker
+// is collected after receiving an `installation_not_claimed` answer, a one-shot alarm can leave
+// the newly claimed install idle until another unrelated browser event.  The next tick always
+// replaces this schedule with the server's newest cadence, so the server remains authoritative.
+export function patrolAlarmSchedule(seconds) {
+  const requestedSeconds = Number(seconds);
+  // `0` is a meaningful server answer: a task was just dispatched and the next task may be
+  // ready immediately.  It must become Chrome's one-minute floor, not the five-minute fallback.
+  const cadenceSeconds = Number.isFinite(requestedSeconds) && requestedSeconds >= 0
+    ? requestedSeconds
+    : 300;
+  const minutes = Math.max(MIN_ALARM_MINUTES, Math.round(cadenceSeconds / 60));
+  return { delayInMinutes: minutes, periodInMinutes: minutes };
+}
+
 async function scheduleNextClaim(seconds) {
   if (!globalThis.chrome?.alarms?.create) return;
-  const minutes = Math.max(MIN_ALARM_MINUTES, Math.round((Number(seconds) || 300) / 60));
-  await globalThis.chrome.alarms.create(PATROL_ALARM, { delayInMinutes: minutes });
+  await globalThis.chrome.alarms.create(PATROL_ALARM, patrolAlarmSchedule(seconds));
 }
 
 let patrolInFlight = null;
