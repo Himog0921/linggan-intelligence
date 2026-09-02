@@ -53,7 +53,11 @@ pub use content_reobservation::{
     ContentReobservationStatus, ReobservationMediaPolicy, ReobservationTask, content_reobservation,
     read_content_reobservation, read_content_reobservation_eligibility,
 };
-pub use dispatch::{DispatchDecision, DispatchError, decide_dispatch, dispatch_schema_is_ready};
+pub use dispatch::{
+    DISPATCH_FAILURE_RETRY_AFTER_SECONDS, DispatchDecision, DispatchError, DispatchFailureCode,
+    DispatchFailureError, DispatchFailureOutcome, decide_dispatch, dispatch_schema_is_ready,
+    requeue_failed_dispatch,
+};
 pub use execution_station::{
     CheckInOutcome, InstallationCheckIn, StationError, check_in_installation, claim_installation,
     close_claim_window, open_claim_window, register_station, retire_station,

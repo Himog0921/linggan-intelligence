@@ -1,4 +1,5 @@
 mod collection;
+mod collection_dispatch;
 mod collection_intake;
 mod collection_targets_view;
 #[cfg(test)]
@@ -42,16 +43,16 @@ use linggan_contracts::{
 };
 use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, CheckInOutcome, DiscoveryIngressError,
-    DispatchDecision, InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
+    InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
     LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget, MediaUploadFinalizeClaim,
     ObservationTargetAvatar, ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeCapacityOverview,
     RuntimeSubmissionOutcome, RuntimeTaskOutcome, StationOverview, StoreOutcome, TargetCounts,
     UnclaimedInstallation, WorkResourceReadError, admit_media_blob, begin_media_upload,
     check_in_installation, claim_installation, claim_media_acquisition,
     claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
-    create_manual_task, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
-    grant_authorization, ingest_discovery_package, issue_work_order_lease, list_targets,
-    list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
+    create_manual_task, create_producer_task, dispatch_schema_is_ready, grant_authorization,
+    ingest_discovery_package, issue_work_order_lease, list_targets, list_targets_in_state,
+    local_discovery_schema_is_ready, local_producer_schema_is_ready,
     media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_archive_completeness, read_discovery_library,
     read_media_upload_session, read_runtime_capacity, read_runtime_library,
@@ -240,7 +241,7 @@ fn collection_api_routes() -> Router<LocalWebState> {
         )
         .route(STATION_CHECK_IN_PATH, post(station_check_in))
         .route("/api/local/stations/claims", post(station_claim))
-        .route(DISPATCH_CLAIM_PATH, post(dispatch_claim))
+        .merge(collection_dispatch::routes())
 }
 
 fn router(state: LocalWebState) -> Router {
@@ -435,7 +436,8 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     // 由 claim 的回答给出。
     let dispatch_routes = match state.database.database() {
         Some(database) if dispatch_schema_is_ready(database).await.unwrap_or(false) => json!({
-            "claim": DISPATCH_CLAIM_PATH
+            "claim": collection_dispatch::CLAIM_PATH,
+            "failure": collection_dispatch::FAILURE_PATH
         }),
         _ => Value::Null,
     };
@@ -2355,9 +2357,6 @@ fn runtime_surface_with_error(code: &str) -> String {
 /// hardcode it.
 const STATION_CHECK_IN_PATH: &str = "/api/local/stations/installations";
 
-/// 工位来问「现在有我能做的活吗」。同样通过 `/health` 通告，插件不写死。
-const DISPATCH_CLAIM_PATH: &str = "/api/local/dispatch/claim";
-
 #[derive(serde::Deserialize)]
 struct StationForm {
     display_name: String,
@@ -2521,93 +2520,6 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
         LeaseError::TaskSpecInvalid(_) => "task_spec_invalid",
         LeaseError::Database(_) => "lease_write_failed",
     }
-}
-
-#[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DispatchClaimBody {
-    install_key: String,
-}
-
-/// COLLECTION-001 · a station asks whether there is work it may run right now.
-///
-/// Only one answer permits a platform to be touched. Every other answer names the specific
-/// gate that stopped it: a flat "nothing for you" cannot distinguish "quota spent" from
-/// "risk paused" from "real execution was never authorised", and those need different acts.
-async fn dispatch_claim(State(state): State<LocalWebState>, body: Bytes) -> Response {
-    let Some(database) = state.database.database() else {
-        return local_read_json_error(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "read_model_not_connected",
-        );
-    };
-    let Ok(request) = serde_json::from_slice::<DispatchClaimBody>(&body) else {
-        return local_read_json_error(
-            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-            "dispatch_claim_invalid",
-        );
-    };
-    match decide_dispatch(database, &request.install_key).await {
-        Ok(decision) => Json(dispatch_payload(&decision)).into_response(),
-        Err(_) => local_read_json_error(
-            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-            "dispatch_claim_rejected",
-        ),
-    }
-}
-
-fn dispatch_payload(decision: &DispatchDecision) -> serde_json::Value {
-    let mut payload = serde_json::json!({
-        "decision": decision.code(),
-        // The plugin must key off this and nothing else. A task body without permission is
-        // still not permission.
-        "mayExecute": decision.permits_execution(),
-        // 节奏由服务端给：插件不自定间隔，否则想调就得重新发一版插件，而十个插件会各自
-        // 按自己的常量敲门，服务端对总量毫无控制。
-        "nextPollAfterSeconds": decision.next_poll_after_seconds(),
-    });
-    match decision {
-        DispatchDecision::Dispatch {
-            task_id,
-            lease_ref,
-            task_spec,
-            execution_source_url,
-            page_session_plan,
-        } => {
-            payload["taskId"] = serde_json::json!(task_id);
-            payload["leaseRef"] = serde_json::json!(lease_ref);
-            payload["taskSpec"] = task_spec.clone();
-            if let Some(url) = execution_source_url {
-                payload["executionSourceUrl"] = serde_json::json!(url);
-            }
-            if let Some(plan) = page_session_plan {
-                payload["pageSessionPlan"] = plan.clone();
-            }
-            // Claim atomically moved this lease task out of pending. A second poll cannot receive
-            // it again while the first producer is opening the platform page.
-            payload["taskState"] = serde_json::json!("in_progress");
-        }
-        DispatchDecision::RiskPaused { reason } => {
-            payload["reason"] = serde_json::json!(reason);
-        }
-        DispatchDecision::DailyQuotaReached { quota, used } => {
-            payload["reason"] = serde_json::json!(format!(
-                "这台工位今天已入库 {used} 篇，达到每日 {quota} 篇上限。工位没有离线，\
-                 明天窗口重置后自然恢复。"
-            ));
-        }
-        DispatchDecision::InstallationNotClaimed => {
-            payload["reason"] =
-                serde_json::json!("这个插件安装还没有归位到任何工位，不属于任何工位的产能。");
-        }
-        DispatchDecision::NothingWaiting => {
-            payload["reason"] = serde_json::json!("没有等待派发的任务。");
-        }
-        DispatchDecision::ExecutionLocatorUnavailable { reason } => {
-            payload["reason"] = serde_json::json!(reason);
-        }
-    }
-    payload
 }
 
 #[derive(serde::Deserialize)]

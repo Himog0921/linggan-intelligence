@@ -199,6 +199,8 @@ Work Order 创建时合理，不代表排队两天后仍值得执行。领取 le
 
 一份 lease 可以按冻结顺序承载多个单能力 TaskSpec。例如创作者巡检先执行 `author_profile（作者资料）`，其回执接纳后才开放 `profile_discovery（作者作品发现）`。lease 与任务的多对一关系、顺序、领取安装和 `pending（待领取）/in_progress（执行中）/completed（已完成）` 必须由服务端持久记录；派发以原子 claim 独占任务，同一安装丢失 claim 响应后必须幂等取回同一 live task，不能领取第二份工作或一直卡到过期。插件只能用原样下发的 scheduled TaskSpec 创建 Attempt，不能在内容页重建一份 manual TaskSpec。Package 接纳时必须再次锁定并复核 live lease 与领取安装，Package、Receipt、task completion 以及必要的 lease completion 在同一事务提交。单个任务完成不结束整份 lease，只有序列全部形成已接纳回执才以 `completed` 收口；手动采集继续是独立的 manual TaskSpec，不借用 scheduled lease 身份。
 
+若插件已经成功领取 scheduled Task、但尚未创建 Producer Attempt 时页面窗口、标签页或页面就绪读取失败，它不得把任务静默留在 `in_progress` 直到 lease 到期。插件只能以一个受控、无来源正文的失败码和幂等 `failureRef` 回报本机 dispatch failure；服务端在同一事务中锁定当前 live claim、追加一条不可变失败审计并把**同一冻结 TaskSpec**恢复为 `pending`。相同 `failureRef` 只重放既有结果；安装、任务、失败码或执行权不匹配则拒绝，绝不改写其他工位的 claim。这个恢复事实不是 Attempt、Package、Receipt 或 Evidence，不能伪造采集结果；一次分钟级退避后仍由服务端重新派发，正常 Package 接纳路径保持不变。
+
 ### 7.2 终态 Package 与部分成功
 
 一个 Attempt 最多形成一个逻辑终态 Package：它包含不可变成员清单、Coverage 来源事实与 canonical hash。传输可分片；分片必须由一个冻结 manifest 统一指向，不能把 Attempt 变成持续追加的事实容器。

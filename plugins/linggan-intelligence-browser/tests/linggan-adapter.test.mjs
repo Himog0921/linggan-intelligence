@@ -5,9 +5,11 @@ import {
   LINGGAN_LOCAL_ORIGIN,
   attemptStartIsAccepted,
   claimLingganMediaAcquisition,
+  dispatchFailureRouteFromHealth,
   formatLingganRuntimeNotice,
   isTerminalLocalDeliveryResult,
   readLingganLocalReadiness,
+  reportLingganDispatchFailure,
   taskCreationIsAccepted,
   unavailableLingganStats,
 } from '../src/linggan/adapter.js';
@@ -47,6 +49,46 @@ test('media acquisition claim only permits an exact server-owned work generation
   assert.deepEqual(result.candidateUris, ['https://sns-img-hw.xhscdn.com/cover.jpg']);
   assert.equal(request.url, `${LINGGAN_LOCAL_ORIGIN}/api/local/producer/media-acquisitions/claim`);
   assert.deepEqual(JSON.parse(request.options.body), { installKey: 'installation-1' });
+});
+
+test('a page-start failure is returned only through the server-advertised local dispatch route', async () => {
+  let request = null;
+  const health = {
+    routes: {
+      dispatch: {
+        claim: '/api/local/dispatch/claim',
+        failure: '/api/local/dispatch/failures',
+      },
+    },
+  };
+  assert.equal(dispatchFailureRouteFromHealth(health), '/api/local/dispatch/failures');
+  assert.equal(dispatchFailureRouteFromHealth({ routes: { dispatch: { failure: '/unsafe?retry=1' } } }), null);
+  const result = await reportLingganDispatchFailure({
+    installKey: 'installation-1',
+    taskId: '11111111-1111-4111-8111-111111111111',
+    failureId: '22222222-2222-4222-8222-222222222222',
+    failureCode: 'page_timeout',
+    health,
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        json: async () => ({
+          outcome: 'requeued',
+          taskState: 'pending',
+          nextPollAfterSeconds: 60,
+        }),
+      };
+    },
+  });
+  assert.deepEqual(result, { reported: true, outcome: 'requeued', nextPollAfterSeconds: 60 });
+  assert.equal(request.url, `${LINGGAN_LOCAL_ORIGIN}/api/local/dispatch/failures`);
+  assert.deepEqual(JSON.parse(request.options.body), {
+    installKey: 'installation-1',
+    taskId: '11111111-1111-4111-8111-111111111111',
+    failureId: '22222222-2222-4222-8222-222222222222',
+    failureCode: 'page_timeout',
+  });
 });
 
 test('runtime notice describes automatic claim without overstating admission', () => {
