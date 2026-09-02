@@ -1,7 +1,7 @@
 # PLUGIN-REHOME-001 · 完整迁入灵感爆爆爆浏览器插件源码基线
 
-> 状态: 活跃计划
-> 最后核对: 2026-08-25
+> 状态: 已完成计划
+> 最后核对: 2026-09-02
 > 适用范围: GitHub Issue #41；将 `linggan-boom v2.0.91` 的完整浏览器端 source / UX 迁入 Linggan，并切断旧内容工作台运行依赖
 > 事实来源: Issue #41、`plugins/linggan-intelligence-browser/` 当前 source、构建/隔离验证输出
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、本计划、当前代码与独立 review；旧插件 source 只为迁入依据
@@ -46,3 +46,9 @@ Linggan Intelligence 拥有一份真正属于自己的、可构建与可安装�
   package` 必须与提交 ZIP 的 SHA-256 完全一致。
 
 这些是迁入包的运行边界修正，不是平台采集、媒体入库或 Linggan backend 已接通的证明。
+
+## 2026-09-02 · 完成记录
+
+PR #42 已于 2026-08-25 合并为 `3ea210dd2bd426750a30c510e233564a9c35a6f9`。已证明范围是 Linggan 自有插件源码、构建与 release 基线，以及旧内容工作台运行路径切断；本计划的 build、隔离扫描和独立审查记录继续作为该结论的证据。
+
+未证明范围保持不变：真实浏览器加载、平台采集、媒体、OCR/ASR、Linggan 后端数据互通、部署和业务验收。本次归档不改变当前 Browser Producer 的后续版本或运行合同。

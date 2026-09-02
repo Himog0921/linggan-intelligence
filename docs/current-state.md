@@ -1,12 +1,16 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-01
+> 最后核对: 2026-09-02
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
 ## 当前阶段
+
+### 2026-09-02 · 已完成计划与历史 Issue 收口
+
+Mog 已明确：媒体生命周期合同决策完成；`LOCAL-001` 不再作为当前路线图总编号；`PLUGIN-REHOME-001` 和 `GOV-005` 的合并后文档收口完成。相应计划已归档至 `docs/plans/completed/`，当前工作只由具体的运行、材料、页面、采集与复观测交付包承接。本次状态同步不把真实媒体字节、OCR/ASR、保留/撤回、真实采集、部署或业务验收写成已完成。下文中早于本记录的 `LOCAL-001`、Issue #41 或 Issue #72 “活跃／待收口”表述仅保留历史上下文，已由本段与归档计划取代。
 
 ### Browser Producer `0.8.28` 当前权威快照（已合并、已对齐运行时、已真实验收）
 
@@ -273,7 +277,7 @@ REAL-CANARY #52 的聚合结果已确认：本地库存在已接纳的当前可�
 | 6 | ARC-001 | 产品与系统架构收口决策图 | 进行中（决策） | `product-shell`、`primary-daily-job`、`first-producer-canary` 已解决；P0 页面形态与各项实施合同仍需收口，最后由 Mog 批准首个用户可见 SCOPE |
 | 7 | GOV-003 | 外部 Agent Issue → worktree → PR 协作闭环 | 修订中（review FAIL） | 同一 PR 新 head 通过独立复核；integrator 合并后重新核验 main/正式文档、记录完成层并手工关闭 Issue；不是第二业务 SCOPE |
 | 8 | DESIGN-002 | Topic Intelligence 合成 Reference Page + LIDS v2.0 | 执行中（设计参考/治理） | Issue #7 将 LIDS 作为全项目设计表达标准，并交付其 L2 合成参考页、规格、组件晋升门和检查；不接入真实数据、Web 产品、运行时主题/组件或真实动作 |
-| 9 | LOCAL-001 | 独立本地产品、Evidence Library V7 与 Local Canary 路线 | 001A 与 001B-001C1 已合并；LOCAL-RUNTIME-001（Issue #38）在 Draft PR 验证中；001C-2–3 未开始 | #34 已接通受控 discovery Package → 本地读取代码；#38 只补持久本地 migration/readiness，不证明真实插件、平台、媒体或 OCR/ASR |
+| 9 | LOCAL-001 | 独立本地产品、Evidence Library V7 与 Local Canary 路线 | 已完成；路线归档（2026-09-02） | 历史父计划已建立并约束后续独立申请；不再作为当前路线图总编号，也不把 001C-2–3 的历史设想或真实媒体 / OCR / ASR 写成已完成 |
 
 同一时间默认只允许一个事项处于“执行中”。状态流转为：`待讨论 → 需要决定 → 已确认 → 执行中 → 验证中 → 已完成`。来源不足使用 `SOURCE_INCOMPLETE`；必须由用户决定的边界使用 `DECISION_REQUIRED`；外部条件无法继续时使用 `BLOCKED`。
 

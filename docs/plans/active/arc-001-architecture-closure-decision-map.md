@@ -143,7 +143,7 @@ Mog 已于 2026-08-24 确认：首批真实 Canary **包含媒体**，并且图�
 → 独立异步 OCR / ASR 派生处理
 ```
 
-前一段只形成发现面与 Coverage，不代表详情、媒体字节或媒体 Canary 已完成。后两段分别等待媒体生命周期、隐私、存储、处理器、队列、撤回传播与最小样本合同；任何一段失败不能连坐安全取得的前一段材料。具体执行顺序、禁止项和验证阶梯以 [`local-001-local-product-evidence-library.md`](local-001-local-product-evidence-library.md) 的 `001C-1`–`001C-3` 为准。
+前一段只形成发现面与 Coverage，不代表详情、媒体字节或媒体 Canary 已完成。后两段分别等待媒体生命周期、隐私、存储、处理器、队列、撤回传播与最小样本合同；任何一段失败不能连坐安全取得的前一段材料。历史执行顺序、禁止项和验证阶梯保留在已归档的 [`LOCAL-001 计划`](../completed/local-001-local-product-evidence-library.md) `001C-1`–`001C-3`；后续能力必须由当前具体交付包重新授权，不能从该历史路线自动开启。
 
 ## capture-control-contract: 真实插件前必须冻结哪些调度责任？
 
