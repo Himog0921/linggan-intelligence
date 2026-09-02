@@ -12,9 +12,11 @@
 
 Mog 已明确：媒体生命周期合同决策完成；`LOCAL-001` 不再作为当前路线图总编号；`PLUGIN-REHOME-001` 和 `GOV-005` 的合并后文档收口完成；旧式页面探针停止，#76 按源码升级完成关闭，#92 不重跑系统切换而以既有分层证据收口。相应计划已归档至 `docs/plans/completed/`，当前工作只由具体的运行、材料、页面、采集与复观测交付包承接。本次状态同步不把真实媒体字节、OCR/ASR、保留/撤回、真实采集、部署或业务验收写成已完成。下文中早于本记录的 `LOCAL-001`、Issue #41、#72、#74 或 #76 “活跃／待收口”表述仅保留历史上下文，已由本段与归档计划取代。
 
+同次清理还处置了旧式合成 F01 / 旧运行发布 / 静态设计 / 远期自主性卡：Issue #3 只保留为 #133 标准详情窗口的历史验收输入，不创建或重用其字面 `0002_scope_001_content_observation.sql`；Issue #4 只描述已退役的 frozen-Work 模型，不以未实现的第三份 migration 继续阻塞当前入口。Issue #64 的 PR #63 特定 loopback 发布已被更晚的 `0.8.28` 已验收运行时快照取代，不重放旧发布。Issue #85 的 Evidence Library 产品规格、静态参考和静态验收资产已完成，运行页由 #90 与当前事实链另行负责。Issue #102 的自主观察控制设计不进入当前路线图；将来如有真实业务需要，必须以新的、当时可验证的 Decision Package 重新提出。以上均不等于修复或证明一条未运行的旧链路。Issue #10 的 `p0-surface-prototype` 仍是当前 ARC-001 未回答的产品问题；Issue #89 仍是量化的有界 N+1 性能债务，均不因本次清理关闭。
+
 ### Browser Producer `0.8.28` 当前权威快照（已合并、已对齐运行时、已真实验收）
 
-- 已验收 Browser Producer 运行时代码快照为 `d7e722018f4f4cfa217c9cf5c0cac6fbcdcaacb3`（PR #132 已合并）；当前 `main` 在其上仅新增本次文档状态提交 `7dbf31d6a5c3fc80daba4c4df9f77a77cdb561a6`，不改变运行时工件或行为。
+- 已验收 Browser Producer 运行时代码快照为 `d7e722018f4f4cfa217c9cf5c0cac6fbcdcaacb3`（PR #132 已合并）；当前 `main` 在其上只有后续的文档／治理状态提交，不改变运行时工件或行为。
 - 当前发行包为 `plugins/linggan-intelligence-browser/releases/linggan-intelligence-browser-v0.8.28.zip`，SHA-256 为 `015a3de775a55d6ac2be8dac5d6ca833f7d88f3d772d641a73c7bbe91f51184e`。
 - 工位 `1` 已通过正式 API 认领 active installation `9179e6cf-3316-493a-abee-2e7eb162f824` / `0.8.28`，旧 `0.8.23` 被取代。
 - API、巡检 worker 与媒体 worker 均从 `linggan-intelligence-origin-main-d7e7220` 快照运行；`/health` 为 `LINGGAN_BROWSER_PRODUCER_RUNTIME`、`PLUGIN_RUNTIME_002_SCHEMA_READY / READY`、scheduler running。
@@ -196,7 +198,7 @@ ARC-001 已同步为“已回答问题不再重复提问”：Capture Control Co
 
 `PATROL-LEASE-SEQUENCE-001` 已把一次 creator 基线的 `author_profile → profile_discovery` 固定为同一 lease 下的顺序任务关系：新 lease 不再双写旧 `task_id` 列；派发以数据库原子 claim 标记领取安装与 `in_progress`，同安装重试会取回同一 live task，后一步必须等待前一步形成已接纳回执；内容页允许 `DISCOVER_SURFACE` runtime 消息，并沿后台下发的 scheduled TaskSpec 与 `linggan_dispatched_task` 来源原样创建 Attempt，不再重建 manual task；Package 接纳时再次锁定 live lease 与领取安装，并把 Package、Receipt、task/必要的 lease completion 放进同一事务。只有全部步骤完成才释放 lease 并记录本轮 patrol 成功。持续博主巡检只执行 `profile_discovery`，关键词目标执行 `discovery_search`；手动页面采集仍走 manual TaskSpec。自动领取与发布版本由 `OBSERVATION-RUNTIME-001` 统一升级至 `v0.6.0`。
 
-Issue #85 / `EVIDENCE-PAGE-002` 已在上述媒体合同上冻结多材料 Evidence Library 的产品手册、技术呈现要求和合成静态高保真参考：主对象为“一个稳定来源作品在当前 Linggan 中可核验的材料集合”，并覆盖 discovery、详情、评论/回复、作者、媒体槽位/字节与 OCR/ASR 派生 lane。该设计明确区分部分可用、风险控制、访问受限、处理中、字节已清理、未知、空结果和读取错误，并静态演示一次 Package 的槽位级来源观察组如何包含 declared Bundle、still/motion 组件、逐地址 candidate assertions 以及绑定精确 `candidateRef` 的下载尝试；checkpoint 只进入来源核验，不成为材料卡。Issue #90 已把现行 API 能承担的部分落到运行页；静态参考仍不证明真实平台、媒体、OCR/ASR 或用户验收。
+Issue #85 / `EVIDENCE-PAGE-002` 已完成多材料 Evidence Library 的产品手册、技术呈现要求和合成静态高保真参考：主对象为“一个稳定来源作品在当前 Linggan 中可核验的材料集合”，并覆盖 discovery、详情、评论/回复、作者、媒体槽位/字节与 OCR/ASR 派生 lane。该设计明确区分部分可用、风险控制、访问受限、处理中、字节已清理、未知、空结果和读取错误，并静态演示一次 Package 的槽位级来源观察组如何包含 declared Bundle、still/motion 组件、逐地址 candidate assertions 以及绑定精确 `candidateRef` 的下载尝试；checkpoint 只进入来源核验，不成为材料卡。Issue #90 已把现行 API 能承担的部分落到运行页；静态参考仍不证明真实平台、媒体、OCR/ASR 或用户验收。
 
 ### AUD-XHS-001 / Issue #74（历史受限页面探针，已治理终止）
 
