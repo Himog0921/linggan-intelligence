@@ -411,6 +411,7 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-tg-btn:hover { transform:none; box-shadow:none; }
 .c-tg-muted { color:var(--v7-ghost); font-size:11px; }
 .c-tg-avatar { width:34px; height:34px; flex:0 0 auto; border-radius:50%; object-fit:cover; background:var(--v7-sunken); }
+.c-tg-avatar-state { display:grid; place-items:center; border:1px solid var(--v7-line-strong); color:var(--v7-muted); font:700 8px/1.05 var(--lgi-font-sans); text-align:center; }
 
 .c-tg-batch { display:flex; align-items:center; gap:9px; flex-wrap:wrap; padding:14px; border-top:2px solid var(--v7-black); }
 .c-tg-batch-label { color:var(--v7-muted); font-size:12px; }

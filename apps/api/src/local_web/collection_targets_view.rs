@@ -8,7 +8,7 @@
 //! What this view may claim is narrow: a row here proves the target was **stored**. It says
 //! nothing about archiving, authorisation or any capture ever running (INV-36).
 
-use linggan_evidence::{ArchiveCompleteness, ObservationTarget};
+use linggan_evidence::{ArchiveCompleteness, ObservationTarget, ObservationTargetAvatar};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -24,6 +24,7 @@ const EMPTY_STATE_CLOSE: &str = "</section>";
 pub fn render_stored_targets(
     base: &str,
     targets: &[ObservationTarget],
+    avatars: &HashMap<uuid::Uuid, ObservationTargetAvatar>,
     completeness: &HashMap<String, ArchiveCompleteness>,
     error: Option<&str>,
 ) -> String {
@@ -44,6 +45,7 @@ pub fn render_stored_targets(
         rows.push_str(&target_row(
             target,
             index,
+            avatars.get(&target.target_ref),
             completeness.get(&target.identity_key),
         ));
     }
@@ -133,6 +135,7 @@ fn failure_markup(error: Option<&str>) -> String {
 fn target_row(
     target: &ObservationTarget,
     index: usize,
+    avatar: Option<&ObservationTargetAvatar>,
     archive: Option<&ArchiveCompleteness>,
 ) -> String {
     let is_creator = target.target_kind == "creator";
@@ -147,6 +150,7 @@ fn target_row(
                 <div class="c-tg-pick"><input type="checkbox" name="target_ref" value="{target_ref}" aria-label="选择 {name}" /></div>
                 <div class="c-tg-index">{index:03}</div>
                 <div class="c-tg-object">
+                  {avatar}
                   <div class="c-tg-object-text">
                     <a class="c-tg-title" href="/collection/targets?drawer={target_ref}">{name}</a>
                     <div class="c-tg-meta">{kind} / {platform} · {handle}</div>
@@ -161,6 +165,7 @@ fn target_row(
               </article>"#,
         target_ref = target.target_ref,
         index = index + 1,
+        avatar = avatar_markup(avatar),
         name = escape(name),
         kind = escape(if is_creator { "创作者" } else { "关键词" }),
         platform = escape(&target.platform.to_uppercase()),
@@ -172,6 +177,24 @@ fn target_row(
         baseline = baseline_cell(archive, is_creator),
         actions = row_actions(target, is_creator, archive),
     )
+}
+
+fn avatar_markup(avatar: Option<&ObservationTargetAvatar>) -> String {
+    match avatar.unwrap_or(&ObservationTargetAvatar::NotObserved) {
+        ObservationTargetAvatar::Local { local_asset_path } => format!(
+            r#"<img class="c-tg-avatar" src="{}" alt="博主头像" referrerpolicy="no-referrer" />"#,
+            escape(local_asset_path),
+        ),
+        ObservationTargetAvatar::Pending => {
+            r#"<span class="c-tg-avatar c-tg-avatar-state" title="头像已观察，等待本机媒体物化">头像<br/>物化中</span>"#.to_owned()
+        }
+        ObservationTargetAvatar::Unavailable => {
+            r#"<span class="c-tg-avatar c-tg-avatar-state" title="头像本机物化未完成或已不可用">头像<br/>不可用</span>"#.to_owned()
+        }
+        ObservationTargetAvatar::NotObserved => {
+            r#"<span class="c-tg-avatar c-tg-avatar-state" title="本次作者资料未观察到头像">头像<br/>未观察</span>"#.to_owned()
+        }
+    }
 }
 
 /// 状态徽记。稿子是 `● BASELINE READY` / `PATROLLING` 这类，此处转中文。
@@ -433,7 +456,7 @@ mod tests {
             let base = format!(
                 "before<section class=\"c-empty c-empty-engineering\">{provisional}</section>after"
             );
-            let html = render_stored_targets(&base, &[], &HashMap::new(), None);
+            let html = render_stored_targets(&base, &[], &HashMap::new(), &HashMap::new(), None);
             assert!(html.contains("当前列表范围没有匹配的观察目标"));
             assert!(html.contains("目标列表读取成功"));
             assert!(!html.contains(provisional));
@@ -446,6 +469,7 @@ mod tests {
         let html = render_stored_targets(
             &base,
             &[target("creator", Some("孩悦"))],
+            &HashMap::new(),
             &HashMap::new(),
             None,
         );
@@ -474,6 +498,7 @@ mod tests {
             base,
             &[target("creator", Some("真实目标"))],
             &HashMap::new(),
+            &HashMap::new(),
             None,
         );
 
@@ -485,7 +510,13 @@ mod tests {
     #[test]
     fn a_target_without_a_name_shows_its_identity_rather_than_an_invented_one() {
         let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
-        let html = render_stored_targets(&base, &[target("keyword", None)], &HashMap::new(), None);
+        let html = render_stored_targets(
+            &base,
+            &[target("keyword", None)],
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+        );
         assert!(html.contains("5ebe6d21"));
         assert!(!html.contains("未命名"));
     }
@@ -496,6 +527,7 @@ mod tests {
         let html = render_stored_targets(
             &base,
             &[target("creator", Some("<script>x</script>"))],
+            &HashMap::new(),
             &HashMap::new(),
             None,
         );
@@ -512,10 +544,28 @@ mod tests {
             "redId": "creator-001"
         }));
 
-        let html = render_stored_targets(&base, &[creator], &HashMap::new(), None);
+        let html = render_stored_targets(&base, &[creator], &HashMap::new(), &HashMap::new(), None);
 
         assert!(html.contains("creator-001"));
         assert!(!html.contains("remote-avatar.jpg"));
         assert!(!html.contains("<img"));
+    }
+
+    #[test]
+    fn stored_target_renders_only_a_qualified_local_avatar_asset() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let creator = target("creator", Some("本机头像作者"));
+        let mut avatars = HashMap::new();
+        avatars.insert(
+            creator.target_ref,
+            ObservationTargetAvatar::Local {
+                local_asset_path: "/api/local/media/11111111-1111-4111-8111-111111111111/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
+            },
+        );
+        let html = render_stored_targets(&base, &[creator], &avatars, &HashMap::new(), None);
+        assert!(html.contains("/api/local/media/11111111-1111-4111-8111-111111111111/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
+        assert!(html.contains("<img class=\"c-tg-avatar\""));
+        assert!(!html.contains("http://"));
+        assert!(!html.contains("https://"));
     }
 }

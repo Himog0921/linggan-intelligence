@@ -44,9 +44,9 @@ pub use acquisition_chain::{
 };
 pub use archive_completeness::{ArchiveCompleteness, read_archive_completeness};
 pub use collection_target::{
-    CollectionTargetError, ObservationTarget, StoreOutcome, TargetCounts,
+    CollectionTargetError, ObservationTarget, ObservationTargetAvatar, StoreOutcome, TargetCounts,
     collection_target_schema_is_ready, count_targets, list_targets, list_targets_in_state,
-    read_target, store_pending_target, transition_target,
+    read_target, read_target_avatars, store_pending_target, transition_target,
 };
 pub use content_reobservation::{
     ContentReobservation, ContentReobservationEligibility, ContentReobservationError,
@@ -111,7 +111,9 @@ pub use runtime_capacity::{
 pub use station_read::{
     StationOverview, UnclaimedInstallation, read_station_overview, station_daily_note_usage,
 };
-pub use target_enrichment::enrich_target_from_author_profile;
+pub use target_enrichment::{
+    TargetEnrichmentError, TargetSyncOutcome, sync_target_from_author_profile,
+};
 pub use work_order_lease::{
     DETAIL_STEP_DEFERRED_REASON, IssuedLease, LeaseError, expire_lapsed_leases,
     issue_work_order_lease, lease_schema_is_ready, release_work_order_lease,

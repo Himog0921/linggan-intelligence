@@ -66,6 +66,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0031_topic_workspace.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0032_author_profile_avatar_media.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -96,5 +98,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0027_unified_media_resource', '70f09bf56fda491665fad0b5c3c534c74da3516fe65ad66416cae140ddee3100'),\n",
     "('0029_author_avatar_media', '72ce163e6696c8e32d543a42b3b786f07067af6713af15798d215ab58dea3b8f'),\n",
     "('0030_comment_image_media', '6f3913dca8ca9bb0cb025dea76cfe2222a39407c4a17898b438d20b355fa2c81'),\n",
-    "('0031_topic_workspace', 'cd7e6a33c5c9203d2fcddc88d246aaa16b2a9de4bebfda21123978315ee6297b');\n",
+    "('0031_topic_workspace', 'cd7e6a33c5c9203d2fcddc88d246aaa16b2a9de4bebfda21123978315ee6297b'),\n",
+    "('0032_author_profile_avatar_media', '0e1b3511c8f306c95d3ca6a829d83362dddeeec42e65114f77ae746b59325b32');\n",
 );

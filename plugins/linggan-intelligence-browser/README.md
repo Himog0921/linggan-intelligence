@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.28`
+> 版本: `0.8.29`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -174,6 +174,13 @@ HTTP CDN 候选在网络请求前升级为 HTTPS；任意 HTTP 与第三方主�
 常规详情读模型有界返回最多 64 个媒体槽位和 256 个派生资源，覆盖作品媒体、头像与 30 条评论窗口。
 旧人工媒体选择/下载窗口继续独立保留。
 
+0.8.29 为 Dashboard 缓存中的已选博主补上明确的“同步到观察目标”动作：它只把已有的作者
+资料重新放入同一份 Linggan TaskSpec、Attempt、不可变 Package 与 durable outbox，不重新访问平台，
+也不直接写目标表。服务端接纳作者 Profile 后按平台稳定作者 ID 创建或字段级补全观察目标；若作者
+资料已观察到头像，则另以作者自身的 `author.avatar` 槽位进入同一受控媒体取得、Blob 与本地
+Materialization 链。Dashboard 只报告“已进入本机交付队列”，目标出现和头像本地可读仍分别以服务端
+Receipt 和媒体物化事实为准。
+
 实况图片仍是一个逻辑媒体卡槽，但静态图与动态图分别携带候选地址、取得工作和状态；
 普通图片、封面、视频和实况图片都只把远程 URL 当来源观察，长期展示必须使用 Linggan
 本地 Materialization。图片 OCR、视频抽帧 OCR、音频提取与 ASR 由本机 Rust worker 调用
@@ -202,7 +209,7 @@ npm run verify:linggan-isolation
 0.8.18 将真实终验发现的 `596/594` 收口为完成：全量深采取得数达到或超过页面公开数即可
 完成，详情附带评论窗口仍保持精确上限。
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.28.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.29.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

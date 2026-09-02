@@ -972,6 +972,80 @@ async fn loopback_runtime_producer_uses_the_three_routes_published_by_health() {
     }
 }
 
+#[tokio::test]
+#[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+async fn accepted_author_profile_creates_a_deduplicated_observation_target_with_target_receipt() {
+    let database = proof_database("author_profile_target_receipt").await;
+    let application = app_with_database(database.clone());
+    for (path, body) in [
+        (
+            "/api/local/producer/tasks",
+            runtime_author_producer_task_spec(),
+        ),
+        (
+            "/api/local/producer/runtime-attempts",
+            runtime_author_producer_attempt(),
+        ),
+    ] {
+        let response = application
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(path)
+                    .header(header::CONTENT_TYPE, "application/json")
+                    .body(Body::from(body))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+    let response = application
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/producer/runtime-submissions")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(runtime_author_producer_submission()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let receipt: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        receipt.pointer("/delivery").and_then(Value::as_str),
+        Some("acknowledged")
+    );
+    assert_eq!(
+        receipt.pointer("/targetSync/state").and_then(Value::as_str),
+        Some("created")
+    );
+    assert_eq!(
+        receipt
+            .pointer("/targetSync/targetRef")
+            .and_then(Value::as_str)
+            .is_some(),
+        true,
+    );
+    let target: (String, String, serde_json::Value) = sqlx::query_as(
+        "SELECT identity_key,display_name,identity_facts \
+         FROM collection_observation_target WHERE platform='xhs' AND target_kind='creator'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(target.0, "author-route-1");
+    assert_eq!(target.1, "路由作者");
+    assert_eq!(
+        target.2["avatar"],
+        "https://media.example/author-route-1.jpg"
+    );
+}
+
 async fn proof_database(schema: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL")
         .expect("test script must provide the isolated proof database URL");
@@ -1555,6 +1629,18 @@ fn runtime_producer_attempt() -> String {
 
 fn runtime_producer_submission() -> String {
     r#"{"contractVersion":"linggan.producer.capture-package.v1","producerInstanceId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","attemptId":"cccccccc-cccc-4ccc-8ccc-cccccccccccc","submissionId":"dddddddd-dddd-4ddd-8ddd-dddddddddddd","capturePackage":{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee","packageKind":"media_slots","platform":"xhs","observedAt":"2026-08-25T00:00:00Z","capturedAt":"2026-08-25T00:00:01Z","coverage":{"target":{"basis":"known_set","contentExternalId":"note-a"},"layers":[{"capability":"media_slots","observed":2,"attempted":2,"acquired":0,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"media_acquisition_not_started"}]},"records":[{"kind":"media_slot","slotKey":"xhs:note-a:image:1","slot":{"role":"image","ordinal":1},"sourceObject":{"externalId":"note-a"},"observation":{"externalUri":"https://fixture.invalid/one.jpg"},"observationRef":"ffffffff-ffff-4fff-8fff-ffffffffffff"},{"kind":"media_slot","slotKey":"xhs:note-a:image:2","slot":{"role":"image","ordinal":2},"sourceObject":{"externalId":"note-a"},"observation":{"externalUri":"https://fixture.invalid/two.jpg"},"observationRef":"11111111-2222-4333-8444-555555555555"}]}}"#.to_owned()
+}
+
+fn runtime_author_producer_task_spec() -> String {
+    r#"{"contractVersion":"linggan.producer.task-spec.v1","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab","source":"manual","platform":"xhs","pageType":"profile","target":{"authorExternalId":"author-route-1"},"capabilitiesRequested":["author_profile"],"maximumQuota":1,"commentLimit":"not_requested","acquireMedia":"not_requested","riskPolicy":"local_trusted_user_initiated","stopConditions":["manual_stop","maximum_quota"]}"#.to_owned()
+}
+
+fn runtime_author_producer_attempt() -> String {
+    r#"{"contractVersion":"linggan.producer.attempt.v1","producerInstanceId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab","attemptId":"cccccccc-cccc-4ccc-8ccc-cccccccccccd"}"#.to_owned()
+}
+
+fn runtime_author_producer_submission() -> String {
+    r#"{"contractVersion":"linggan.producer.capture-package.v1","producerInstanceId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbc","taskId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab","attemptId":"cccccccc-cccc-4ccc-8ccc-cccccccccccd","submissionId":"dddddddd-dddd-4ddd-8ddd-ddddddddddde","capturePackage":{"contractVersion":"linggan.producer.capture-package.v1","packageRef":"eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeef","packageKind":"author_profile","platform":"xhs","observedAt":"2026-09-02T10:00:00Z","capturedAt":"2026-09-02T10:00:01Z","coverage":{"target":{"basis":"known_set","authorExternalId":"author-route-1"},"layers":[{"capability":"author_profile","observed":1,"attempted":1,"acquired":1,"verified":0,"failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"profile_read_complete"}]},"records":[{"kind":"author_profile","sourceObject":{"platform":"xhs","type":"author","externalId":"author-route-1"},"payload":{"userId":"author-route-1","name":"路由作者","avatar":"https://media.example/author-route-1.jpg","description":"从已接纳包建立观察目标"}}]}}"#.to_owned()
 }
 
 fn declared_token_values(stylesheet: &str) -> BTreeMap<&str, &str> {

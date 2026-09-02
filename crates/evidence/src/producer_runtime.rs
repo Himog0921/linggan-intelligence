@@ -725,6 +725,8 @@ pub async fn producer_runtime_schema_is_ready(database: &Database) -> Result<boo
                             WHERE migration_id = '0027_unified_media_resource') \
                 AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
                             WHERE migration_id = '0030_comment_image_media') \
+                AND EXISTS (SELECT 1 FROM linggan_local_schema_migration \
+                            WHERE migration_id = '0032_author_profile_avatar_media') \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_schema=current_schema() \
                               AND table_name='linggan_material_content_detail' \

@@ -252,6 +252,40 @@ export function packageAuthorProfile({ platform, author, observedAt, capturedAt 
   });
 }
 
+// A profile-page avatar belongs to its author, not to an invented content item.  Detail-page
+// avatars retain their real content context in `packageMediaSlots`; this package is the explicit
+// standalone counterpart for a human who collected only a creator profile.
+export function packageAuthorAvatarMediaSlots({ platform, author, observedAt, capturedAt } = {}) {
+  const sourceObject = normalizeSourceObject(platform, author, 'author');
+  const candidateUris = mediaCandidateUris(author?.avatar);
+  if (!sourceObject.externalId || candidateUris.length === 0) return null;
+  const observed = observedAt || new Date().toISOString();
+  return createCapturePackage({
+    packageKind: PRODUCER_CAPABILITY.MEDIA_SLOTS,
+    platform,
+    observedAt: observed,
+    capturedAt,
+    target: { basis: 'known_set', authorExternalId: sourceObject.externalId },
+    coverage: {
+      observed: 1,
+      attempted: 0,
+      acquired: 0,
+      verified: 0,
+      notAttempted: 1,
+      unknown: 0,
+      stoppedReason: 'media_acquisition_not_started',
+    },
+    records: [{
+      kind: 'media_slot',
+      slotKey: `${platform}:author:${encodeURIComponent(sourceObject.externalId)}:avatar:1`,
+      observationRef: crypto.randomUUID(),
+      slot: { role: 'avatar', ordinal: 1 },
+      observation: { externalUri: candidateUris[0], candidateUris, observedAt: observed },
+      sourceObject,
+    }],
+  });
+}
+
 export function packageMediaSlots({ platform, note, commentRecords = [], observedAt, capturedAt } = {}) {
   const sources = collectMediaCandidates(note, commentRecords);
   const roleOrdinals = new Map();
@@ -360,6 +394,19 @@ export function packageDiscovery({ platform, cards = [], query = '', authorExter
 function normalizeSourceObject(platform, value = {}, type = 'content') {
   const externalId = value?.noteId || value?.id || value?.contentId || value?.userId || value?.authorId || '';
   return { platform, type, externalId: String(externalId || '') };
+}
+
+function mediaCandidateUris(value) {
+  const values = typeof value === 'string'
+    ? [value]
+    : [
+      value?.url, value?.urlDefault, value?.originUrl, value?.downloadUrl,
+      value?.urlList, value?.url_list, value?.candidates, value?.uri,
+    ];
+  return [...new Set(values
+    .flatMap((candidate) => Array.isArray(candidate) ? candidate : [candidate])
+    .map((candidate) => String(candidate || '').trim())
+    .filter(Boolean))];
 }
 
 function normalizeDiscussionPayload(value = {}, reply = false) {

@@ -2,17 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { createDashboardBridge } from '../src/content/dashboardBridge.js';
+import { DASHBOARD_BRIDGE_ACTION } from '../src/dashboard/bridgeActions.js';
 
-test('dashboard bridge forwards notes, comments, and authors to background sync handler', async () => {
+test('dashboard bridge submits selected cached authors through the registered Linggan runtime', async () => {
   const sentMessages = [];
   const TEST_NONCE = 'test-nonce-sync';
   globalThis.chrome = {
-    runtime: {
-      async sendMessage(payload) {
-        sentMessages.push(payload);
-        return { success: true, imported: 3, skipped: 0 };
-      },
-    },
     storage: {
       session: {
         async set() {},
@@ -34,22 +29,23 @@ test('dashboard bridge forwards notes, comments, and authors to background sync 
       DELETE_NOTE: 'deleteNote',
       DELETE_COMMENT: 'deleteComment',
       DELETE_AUTHOR: 'deleteAuthor',
-      SYNC_TO_WORKBENCH: 'syncToWorkbench',
     },
     noteStore: {},
     commentStore: {},
     authorStore: {},
     downloadNoteMediaFromRecord: async () => ({}),
+    syncAuthorsToObservationTargets: async (authors) => {
+      sentMessages.push({ authors });
+      return { queued: authors.length, rejected: [], state: 'queued' };
+    },
     _testNonce: TEST_NONCE,
   });
 
   const result = await bridge.handleDashboardMessageEvent({
     data: {
       source: 'lgboom-dashboard',
-      action: 'syncToWorkbench',
+      action: DASHBOARD_BRIDGE_ACTION.SYNC_AUTHORS_TO_OBSERVATION_TARGETS,
       nonce: TEST_NONCE,
-      notes: [{ noteId: 'n1' }],
-      comments: [{ commentId: 'c1' }],
       authors: [{ userId: 'u1' }],
     },
     ports: [{
@@ -61,19 +57,18 @@ test('dashboard bridge forwards notes, comments, and authors to background sync 
 
   assert.equal(result, true);
   assert.deepEqual(sentMessages[0], {
-    action: 'syncToWorkbench',
-    notes: [{ noteId: 'n1' }],
-    comments: [{ commentId: 'c1' }],
     authors: [{ userId: 'u1' }],
   });
   assert.deepEqual(sentMessages[1], {
     portPayload: {
       success: true,
-      imported: 3,
-      skipped: 0,
+      queued: 1,
+      rejected: [],
+      state: 'queued',
       data: {
-        imported: 3,
-        skipped: 0,
+        queued: 1,
+        rejected: [],
+        state: 'queued',
       },
     },
   });
@@ -98,7 +93,6 @@ test('dashboard bridge forwards selected media types into note media download', 
       DELETE_NOTE: 'deleteNote',
       DELETE_COMMENT: 'deleteComment',
       DELETE_AUTHOR: 'deleteAuthor',
-      SYNC_TO_WORKBENCH: 'syncToWorkbench',
     },
     noteStore: {
       getById: async () => ({ noteId: 'n1', title: '测试笔记' }),

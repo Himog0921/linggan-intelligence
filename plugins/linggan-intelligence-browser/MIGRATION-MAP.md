@@ -68,6 +68,7 @@
 | 标准详情媒体组件排空（0.8.26） | 普通媒体按 single、Live Photo 按 still/motion 直接进入本次持久队列；一次离屏唤醒串行处理最多 12 条 | 不把两种 Live Photo 字节合并，不依赖无关历史队列才能完成本次详情，不改人工媒体窗口 |
 | 采集回执与离屏媒体通道隔离（0.8.27） | 页面采集继续通过 one-shot message 交给 Service Worker；媒体执行改用 `linggan-media-worker-v1` 命名 Port | 离屏文档不再注册通用 onMessage；单 lane 队列失败不阻断后续 lane，人工媒体窗口不变 |
 | 评论图片与讨论回执终态收口（0.8.28） | 标准详情把评论图片作为 `comment.image` 送入统一媒体链；comments/replies 分别保留接纳事实 | 不建立第二媒体资产表，不把回复失败改写成评论失败，不移除人工媒体窗口 |
+| 手动作者同步到观察目标（0.8.29） | Dashboard 将选中的已有作者资料重投递到同一 Linggan durable outbox；作者头像以 author-owned `media_slots` 进入已有受控媒体链 | 不重新访问平台，不直写目标表，不把进入本机队列说成服务器接纳、目标出现或头像已物化，不回退远程 CDN 头像 |
 
 ## 新旧运行路径对照
 
@@ -78,11 +79,17 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.28）
+当前路径（0.8.29）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox
   -> localhost receipt / retry / Evidence Material Projection
+
+手动作者资料路径
+Dashboard selected cached author
+  -> same manual TaskSpec / Attempt / durable Submission outbox
+  -> accepted author Profile -> stable observation target
+  -> author.avatar media slot -> local Materialization -> local media URL
 
 自动观察路径
 Observation rule -> WorkOrder -> ordered single-capability steps

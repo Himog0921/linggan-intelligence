@@ -70,6 +70,26 @@ const dashboardBridge = createDashboardBridge({
   // The dashboard is also a human-operated surface, so it preserves the explicit local
   // download workflow instead of reusing the Intelligence observation lane.
   downloadNoteMediaFromRecord: (note, options) => manualMediaDownloadService.downloadNoteMediaFromRecord(note, options),
+  // Selected cache rows re-enter the one Browser Producer outbox.  The Dashboard never posts a
+  // target directly: only a normal author_profile Package may create or enrich a target.
+  syncAuthorsToObservationTargets: async (authors) => {
+    const settled = await Promise.allSettled(authors.map((author) => runtime.submitAuthor(author)));
+    const queued = settled.filter((result) => result.status === 'fulfilled').length;
+    const rejected = settled
+      .map((result, index) => ({ result, author: authors[index] }))
+      .filter(({ result }) => result.status === 'rejected')
+      .map(({ result, author }) => ({
+        authorExternalId: String(author?.userId || author?.id || ''),
+        reason: String(result.reason?.message || result.reason || 'author_target_queue_failed'),
+      }));
+    return {
+      queued,
+      rejected,
+      // Queue admission is deliberately not mislabelled as a server target receipt.  The
+      // server returns that receipt only when the durable outbox reaches it.
+      state: rejected.length === 0 ? 'queued' : (queued > 0 ? 'partial' : 'rejected'),
+    };
+  },
 });
 
 class LingganBatchNoteController extends BatchNoteController {

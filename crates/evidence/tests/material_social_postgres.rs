@@ -16,6 +16,26 @@ async fn runtime_and_material_readiness_require_both_current_projection_migratio
 
     sqlx::query(
         "DELETE FROM linggan_local_schema_migration \
+         WHERE migration_id = '0032_author_profile_avatar_media'",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    assert!(!producer_runtime_schema_is_ready(&database).await.unwrap());
+    assert!(!work_resource_schema_is_ready(&database).await.unwrap());
+
+    sqlx::query(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) \
+         VALUES ('0032_author_profile_avatar_media', \
+                 '0e1b3511c8f306c95d3ca6a829d83362dddeeec42e65114f77ae746b59325b32')",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "DELETE FROM linggan_local_schema_migration \
          WHERE migration_id = '0030_comment_image_media'",
     )
     .execute(database.pool())

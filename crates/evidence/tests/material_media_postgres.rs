@@ -2,7 +2,10 @@
 mod fixture;
 
 use fixture::{coverage_layer, proof_database, submit_custom_package, submit_package};
-use linggan_evidence::{admit_media_blob, read_work_resource, record_media_derivative_completion};
+use linggan_evidence::{
+    ObservationTargetAvatar, admit_media_blob, list_targets, read_target_avatars,
+    read_work_resource, record_media_derivative_completion, sync_target_from_author_profile,
+};
 use sqlx::Row;
 
 #[tokio::test]
@@ -123,6 +126,101 @@ async fn comment_images_use_the_shared_media_chain_and_work_resource_read_model(
     assert_eq!(
         work.media["commentImages"]["items"][0]["subjectExternalId"],
         "comment-image-1"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn standalone_author_avatar_uses_media_lifecycle_without_inventing_a_work() {
+    let database = proof_database("author_profile_avatar_media").await;
+    let author = serde_json::json!({
+        "userId":"author-profile-1",
+        "name":"头像作者",
+        "avatar":"https://media.example/author-profile-1.png",
+        "description":"仅采集了博主页"
+    });
+    submit_package(
+        &database,
+        "author_profile",
+        serde_json::json!({"authorExternalId":"author-profile-1"}),
+        serde_json::json!({
+            "kind":"author_profile",
+            "sourceObject":{"platform":"xhs","type":"author","externalId":"author-profile-1"},
+            "payload":author
+        }),
+    )
+    .await;
+    let target = sync_target_from_author_profile(
+        &database,
+        "author_profile",
+        "xhs",
+        &[serde_json::json!({"payload":author})],
+    )
+    .await
+    .expect("accepted author profile creates observation target");
+    assert!(matches!(
+        target,
+        linggan_evidence::TargetSyncOutcome::Created { .. }
+    ));
+
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"authorExternalId":"author-profile-1"}),
+        author_avatar_record("author-profile-1"),
+    )
+    .await;
+
+    let origin: (Option<uuid::Uuid>, String, String) = sqlx::query_as(
+        "SELECT origin.content_public_ref,origin.purpose,relation.relationship_kind \
+         FROM linggan_material_media_origin origin \
+         JOIN linggan_media_resource_relation relation USING(slot_key) \
+         WHERE origin.slot_key='xhs:author:author-profile-1:avatar:1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        origin.0, None,
+        "profile-only avatar must not fabricate a content context"
+    );
+    assert_eq!(origin.1, "author_avatar");
+    assert_eq!(origin.2, "author.avatar");
+    let fabricated_work_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_material_content WHERE content_external_id='author-profile-1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(fabricated_work_count, 0);
+
+    let targets = list_targets(&database, Some("creator"), 10).await.unwrap();
+    assert_eq!(
+        read_target_avatars(&database, &targets).await.unwrap()[&targets[0].target_ref],
+        ObservationTargetAvatar::Pending,
+    );
+    let observation_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT observation_ref FROM linggan_media_observation \
+         WHERE slot_key='xhs:author:author-profile-1:avatar:1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let asset = admit_media_blob(
+        &database,
+        observation_ref,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "image/png",
+        1,
+        "author-avatar/author-profile-1.png",
+    )
+    .await
+    .expect("author avatar enters existing blob materialization lifecycle");
+    assert_eq!(
+        read_target_avatars(&database, &targets).await.unwrap()[&targets[0].target_ref],
+        ObservationTargetAvatar::Local {
+            local_asset_path: asset.local_asset_path,
+        },
     );
 }
 
@@ -430,6 +528,21 @@ async fn media_owner_seams_preserve_unknown_mime_but_reject_unbounded_asset_size
         .await
         .unwrap();
     assert_eq!(blobs, 1);
+}
+
+fn author_avatar_record(author_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "kind":"media_slot",
+        "slotKey":format!("xhs:author:{author_id}:avatar:1"),
+        "observationRef":uuid::Uuid::new_v4(),
+        "slot":{"role":"avatar","ordinal":1},
+        "observation":{
+            "externalUri":"https://media.example/author-profile-1.png",
+            "candidateUris":["https://media.example/author-profile-1.png"],
+            "observedAt":"2026-08-28T10:00:00Z"
+        },
+        "sourceObject":{"platform":"xhs","type":"author","externalId":author_id}
+    })
 }
 
 fn media_record(content_id: &str, role: &str, ordinal: i32, uri_suffix: &str) -> serde_json::Value {

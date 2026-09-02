@@ -44,30 +44,31 @@ use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, CheckInOutcome, DiscoveryIngressError,
     DispatchDecision, InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
     LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget, MediaUploadFinalizeClaim,
-    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeCapacityOverview, RuntimeSubmissionOutcome,
-    RuntimeTaskOutcome, StationOverview, StoreOutcome, TargetCounts, UnclaimedInstallation,
-    WorkResourceReadError, admit_media_blob, begin_media_upload, check_in_installation,
-    claim_installation, claim_media_acquisition, claim_media_upload_finalize, close_claim_window,
-    complete_media_upload, count_targets, create_manual_task, create_producer_task,
-    decide_dispatch, dispatch_schema_is_ready, enrich_target_from_author_profile,
+    ObservationTargetAvatar, ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeCapacityOverview,
+    RuntimeSubmissionOutcome, RuntimeTaskOutcome, StationOverview, StoreOutcome, TargetCounts,
+    UnclaimedInstallation, WorkResourceReadError, admit_media_blob, begin_media_upload,
+    check_in_installation, claim_installation, claim_media_acquisition,
+    claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
+    create_manual_task, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
     grant_authorization, ingest_discovery_package, issue_work_order_lease, list_targets,
     list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
     media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_archive_completeness, read_discovery_library,
     read_media_upload_session, read_runtime_capacity, read_runtime_library,
-    read_scheduler_heartbeat, read_station_overview, read_target, record_media_acquisition_failure,
-    record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, request_and_admit, request_and_admit_material_targets,
-    retire_station, set_group_for_many, set_monitoring_for_many, set_target_monitoring,
-    start_local_attempt, start_producer_attempt, station_schema_is_ready, store_pending_target,
-    submit_local_package, submit_producer_package, target_monitoring_enabled,
+    read_scheduler_heartbeat, read_station_overview, read_target, read_target_avatars,
+    record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
+    register_station, release_media_upload_finalize, request_and_admit,
+    request_and_admit_material_targets, retire_station, set_group_for_many,
+    set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
+    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
+    sync_target_from_author_profile, target_monitoring_enabled,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     fs,
     io::{BufReader, Error, ErrorKind, Read, Seek, SeekFrom, Write},
     net::{Ipv4Addr, SocketAddr},
@@ -1369,17 +1370,43 @@ async fn submit_producer_package_route(
         Ok(outcome) => {
             // Scheduled task/lease completion was committed with Package and Receipt inside the
             // producer transaction. This route must not create a second completion boundary.
-            // 采到的博主资料回填观察目标：采集与观察目标此前是两条不相交的线，人在列表里
-            // 看着一串十六进制 ID，认不出那是谁。
+            // Package/Receipt has committed first.  The target projection is then derived from
+            // the accepted public author facts; failure is returned as retryable so the browser
+            // outbox never reports the submission delivered while the requested target is absent.
             let package = submission.capture_package();
-            let _ = enrich_target_from_author_profile(
+            let target_sync = match sync_target_from_author_profile(
                 database,
                 package.package_kind(),
                 package.platform(),
                 package.records(),
             )
-            .await;
-            Json(outcome).into_response()
+            .await
+            {
+                Ok(target_sync) => target_sync,
+                Err(_) => {
+                    return local_producer_error(
+                        axum::http::StatusCode::SERVICE_UNAVAILABLE,
+                        "author_target_sync_pending",
+                    );
+                }
+            };
+            let mut response = serde_json::to_value(outcome).unwrap_or_else(|_| {
+                json!({
+                    "delivery": "acknowledged"
+                })
+            });
+            if let Some(object) = response.as_object_mut() {
+                object.insert(
+                    "targetSync".to_owned(),
+                    serde_json::to_value(target_sync).unwrap_or_else(|_| {
+                        json!({
+                            "state": "notApplicable",
+                            "reason": "target_sync_serialization_failed"
+                        })
+                    }),
+                );
+            }
+            Json(response).into_response()
         }
         Err(ProducerRuntimeError::RoutingNotFound) => {
             local_producer_error(axum::http::StatusCode::NOT_FOUND, "attempt_not_found")
@@ -2167,12 +2194,26 @@ async fn collection_targets(
         None => Ok(None),
     };
     let list = match list_targets(database, params.filter.as_deref(), 200).await {
-        Ok(targets) => collection_targets_view::render_stored_targets(
-            &base,
-            &targets,
-            &completeness,
-            params.error.as_deref(),
-        ),
+        Ok(targets) => {
+            let avatars = match read_target_avatars(database, &targets).await {
+                Ok(avatars) => avatars,
+                // A failed avatar read is not evidence that no avatar was observed. Render the
+                // conservative unavailable state instead of quietly falling back to either a
+                // remote URL or an untrue “not observed” label.
+                Err(_) => targets
+                    .iter()
+                    .filter(|target| target.target_kind == "creator")
+                    .map(|target| (target.target_ref, ObservationTargetAvatar::Unavailable))
+                    .collect::<HashMap<_, _>>(),
+            };
+            collection_targets_view::render_stored_targets(
+                &base,
+                &targets,
+                &avatars,
+                &completeness,
+                params.error.as_deref(),
+            )
+        }
         Err(_) => base,
     };
     // The selected target lookup is independent from the list lookup. A filtered or failed

@@ -7,6 +7,7 @@ import {
   PRODUCER_CAPABILITY,
   createCapturePackage,
   createManualRuntimeTask,
+  packageAuthorAvatarMediaSlots,
   packageComments,
   packageDiscovery,
   packageMediaSlots,
@@ -105,6 +106,24 @@ test('content detail media package carries the observed author avatar as an auth
   assert.equal(packageValue.records[1].contextContentExternalId, 'note-with-author-avatar');
   assert.equal(packageValue.records[1].observation.externalUri, 'https://sns-avatar.example/author-42.jpg');
   assert.equal(Object.hasOwn(packageValue.records[1], 'localAssetUrl'), false);
+});
+
+test('profile-only author avatar uses the stable author target without inventing a content context', () => {
+  const packageValue = packageAuthorAvatarMediaSlots({
+    platform: 'xhs',
+    author: { userId: 'author-profile-1', avatar: 'https://cdn.example/author-profile-1.jpg' },
+  });
+  assert.equal(packageValue.packageKind, 'media_slots');
+  assert.deepEqual(packageValue.coverage.target, {
+    basis: 'known_set', authorExternalId: 'author-profile-1',
+  });
+  assert.equal(packageValue.records[0].slotKey, 'xhs:author:author-profile-1:avatar:1');
+  assert.equal(packageValue.records[0].sourceObject.type, 'author');
+  assert.equal(Object.hasOwn(packageValue.records[0], 'contextContentExternalId'), false);
+  assert.equal(
+    taskFor('xhs', 'media_slots', packageValue.coverage.target, { acquireMedia: 'bytes' }).pageType,
+    'profile',
+  );
 });
 
 test('standard detail media package carries comment images as comment-owned slots', () => {
@@ -653,7 +672,9 @@ test('page-read completion is not rendered as Linggan acceptance', () => {
   const dashboard = readFileSync(new URL('../src/dashboard/App.jsx', import.meta.url), 'utf8');
   assert.match(popup, /页面读取已结束；请等待 Linggan 本机交付或接纳状态/);
   assert.doesNotMatch(dashboard, /提交到 Linggan（待接通）/);
-  assert.match(dashboard, /本机交付状态/);
+  assert.match(dashboard, /同步到观察目标/);
+  assert.match(dashboard, /服务端接纳后才会出现在观察目标/);
+  assert.doesNotMatch(dashboard, /不会重复提交或发起平台访问/);
 });
 
 test('every retained Popup control is a Linggan action or an explicit no-side-effect unavailable action', () => {
