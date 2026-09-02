@@ -120,6 +120,17 @@ pub struct TopicWorkspace {
     pub members: Vec<TopicMaterialMember>,
 }
 
+/// The IDs minted for one immutable Definition/Run/Pack version travel together. Keeping
+/// them as one private value prevents the receipt write from depending on a long positional
+/// parameter list whose members must remain in lockstep.
+struct WorkspaceVersionRefs {
+    topic_ref: Uuid,
+    definition_ref: Uuid,
+    run_ref: Uuid,
+    pack_ref: Uuid,
+    version: i32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum TopicWorkspaceError {
     #[error("invalid Topic workspace request: {0}")]
@@ -317,14 +328,21 @@ async fn lock_import_scope(
     transaction: &mut Transaction<'_, Postgres>,
     request: &TopicWorkspaceImport,
 ) -> Result<(), TopicWorkspaceError> {
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
-        .bind(format!(
-            "topic:{}:{}",
-            request.domain_key, request.canonical_key
-        ))
-        .execute(&mut **transaction)
-        .await
-        .map_err(database_error)?;
+    // Both values are global unique identities in the database. Serializing only one leaks
+    // the other unique constraint as a raw database error under concurrent requests. Sorting
+    // gives every import the same lock order, so requests sharing both identities cannot deadlock.
+    let mut identities = [
+        format!("topic:canonical:{}", request.canonical_key),
+        format!("topic:idempotency:{}", request.idempotency_key),
+    ];
+    identities.sort_unstable();
+    for identity in identities {
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+            .bind(identity)
+            .execute(&mut **transaction)
+            .await
+            .map_err(database_error)?;
+    }
     Ok(())
 }
 
@@ -419,40 +437,32 @@ async fn insert_workspace_version(
     version: i32,
     request_sha256: &str,
 ) -> Result<TopicWorkspaceReceipt, TopicWorkspaceError> {
-    let definition_ref = Uuid::new_v4();
-    let run_ref = Uuid::new_v4();
-    let pack_ref = Uuid::new_v4();
-    insert_definition(transaction, request, topic_ref, definition_ref, version).await?;
-    insert_run_and_pack(transaction, request, definition_ref, run_ref, pack_ref).await?;
-    insert_members(transaction, request, run_ref).await?;
-    insert_receipt(
-        transaction,
-        request,
-        request_sha256,
+    let refs = WorkspaceVersionRefs {
         topic_ref,
-        definition_ref,
-        run_ref,
-        pack_ref,
+        definition_ref: Uuid::new_v4(),
+        run_ref: Uuid::new_v4(),
+        pack_ref: Uuid::new_v4(),
         version,
-    )
-    .await
+    };
+    insert_definition(transaction, request, &refs).await?;
+    insert_run_and_pack(transaction, request, &refs).await?;
+    insert_members(transaction, request, refs.run_ref).await?;
+    insert_receipt(transaction, request, request_sha256, &refs).await
 }
 
 async fn insert_definition(
     transaction: &mut Transaction<'_, Postgres>,
     request: &TopicWorkspaceImport,
-    topic_ref: Uuid,
-    definition_ref: Uuid,
-    version: i32,
+    refs: &WorkspaceVersionRefs,
 ) -> Result<(), TopicWorkspaceError> {
     sqlx::query(
         "INSERT INTO linggan_topic_definition \
          (definition_ref,topic_ref,version,display_name,definition_text,lifecycle_state) \
          VALUES($1,$2,$3,$4,$5,'provisional')",
     )
-    .bind(definition_ref)
-    .bind(topic_ref)
-    .bind(version)
+    .bind(refs.definition_ref)
+    .bind(refs.topic_ref)
+    .bind(refs.version)
     .bind(request.display_name.trim())
     .bind(request.definition_text.trim())
     .execute(&mut **transaction)
@@ -464,17 +474,15 @@ async fn insert_definition(
 async fn insert_run_and_pack(
     transaction: &mut Transaction<'_, Postgres>,
     request: &TopicWorkspaceImport,
-    definition_ref: Uuid,
-    run_ref: Uuid,
-    pack_ref: Uuid,
+    refs: &WorkspaceVersionRefs,
 ) -> Result<(), TopicWorkspaceError> {
     sqlx::query(
         "INSERT INTO linggan_topic_classification_run \
          (classification_run_ref,definition_ref,run_kind,run_state,adjudication_note) \
          VALUES($1,$2,'human_adjudicated','completed',$3)",
     )
-    .bind(run_ref)
-    .bind(definition_ref)
+    .bind(refs.run_ref)
+    .bind(refs.definition_ref)
     .bind(request.adjudication_note.trim())
     .execute(&mut **transaction)
     .await
@@ -483,8 +491,8 @@ async fn insert_run_and_pack(
         "INSERT INTO linggan_topic_material_pack \
          (material_pack_ref,classification_run_ref,source_boundary) VALUES($1,$2,$3)",
     )
-    .bind(pack_ref)
-    .bind(run_ref)
+    .bind(refs.pack_ref)
+    .bind(refs.run_ref)
     .bind(request.source_boundary.trim())
     .execute(&mut **transaction)
     .await
@@ -518,16 +526,11 @@ async fn insert_members(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 async fn insert_receipt(
     transaction: &mut Transaction<'_, Postgres>,
     request: &TopicWorkspaceImport,
     request_sha256: &str,
-    topic_ref: Uuid,
-    definition_ref: Uuid,
-    run_ref: Uuid,
-    pack_ref: Uuid,
-    version: i32,
+    refs: &WorkspaceVersionRefs,
 ) -> Result<TopicWorkspaceReceipt, TopicWorkspaceError> {
     let row = sqlx::query(
         "INSERT INTO linggan_topic_import_receipt \
@@ -539,10 +542,10 @@ async fn insert_receipt(
     .bind(Uuid::new_v4())
     .bind(&request.idempotency_key)
     .bind(request_sha256)
-    .bind(topic_ref)
-    .bind(definition_ref)
-    .bind(run_ref)
-    .bind(pack_ref)
+    .bind(refs.topic_ref)
+    .bind(refs.definition_ref)
+    .bind(refs.run_ref)
+    .bind(refs.pack_ref)
     .fetch_one(&mut **transaction)
     .await
     .map_err(database_error)?;
@@ -552,7 +555,7 @@ async fn insert_receipt(
         definition_ref: row.get("definition_ref"),
         classification_run_ref: row.get("classification_run_ref"),
         material_pack_ref: row.get("material_pack_ref"),
-        definition_version: version,
+        definition_version: refs.version,
         imported_at: row.get("imported_at"),
     })
 }

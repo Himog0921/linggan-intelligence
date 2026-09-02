@@ -15,6 +15,7 @@
 - **Component / Pattern / Page**：新增 page-local Definition Header、Classification Lens、Frozen Material Row、Work Resource Inspector 与 Source Boundary；均不晋升全局 CMP。页面为 L2 Research/Analysis，旧 PAGE-TOPIC-001 合成静态 reference 保持独立。
 - **Data Truth**：真实只指本地数据库中不可变 Definition/Run/Pack/Receipt，不等于正式知识。页面固定显示 `PROVISIONAL`、`HUMAN_ADJUDICATED` 和来源不得外推；未读取不写成空/零，角色材料数只描述 frozen pack。
 - **整合约束**：当前 main 的 `0027` 已归 unified media，因此 Topic 新增 migration 为 `0031`；最终验证不得把旧 Draft 的浏览器/数据库证据外推至当前 head。完整清单见 [`../changes/topic-workspace-real-001-ui-change-manifest.md`](../changes/topic-workspace-real-001-ui-change-manifest.md)。
+- **Shared Shell 窄屏收口**：Topic 作为第五个一级职责暴露了 `≤640px` 将每项固定为 86px、要求横向滑动才能到达「采集」的真实可达性缺口。共享 `shell.css` 改为 auto-fit 72px 最小列的网格，并取消 parent global row 的遗留横向 scroller：390px/430px 同屏展示五项，320px 和未来职责自动换下一行。保留真实 link、disabled 语义、中文职责、状态和 visible focus；仅移动端隐藏英文技术旁注。source regression 与隔离浏览器 1440/430/390/320、exact stylesheet 复验均通过；不证明 shared runtime、外部 Chrome/完整辅助技术或业务验收。
 
 ## 2026-08-31 · XHS-MEDIA-AUTHOR-EVIDENCE-001 作者头像与身份分栏
 

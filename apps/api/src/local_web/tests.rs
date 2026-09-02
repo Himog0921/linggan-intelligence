@@ -1729,6 +1729,42 @@ fn both_surfaces_render_the_header_at_one_type_scale() {
 }
 
 #[test]
+fn narrow_primary_navigation_wraps_instead_of_hiding_a_responsibility_offscreen() {
+    // Topic made the fifth first-level responsibility reachable. The prior narrow-shell
+    // rule still kept every item at 86px inside a horizontally scrolling strip, so a 390px
+    // viewport clipped Collection. This regression guard keeps visibility a shell property:
+    // five entries share one row at 390px, while narrower widths or future entries wrap.
+    assert!(
+        SHELL_CSS.contains("grid-template-columns:repeat(auto-fit,minmax(72px,1fr))"),
+        "narrow primary navigation must distribute entries across the available width"
+    );
+    assert!(
+        SHELL_CSS.contains(".v7-primary-nav{grid-column:1/-1;height:auto;display:grid"),
+        "the narrow primary navigation must become a grid rather than stay a horizontal strip"
+    );
+    assert!(
+        SHELL_CSS.contains(
+            ".v7-global-row{display:grid;grid-template-columns:minmax(0,1fr) auto;overflow:visible}"
+        ),
+        "the narrow shared row must not retain the parent horizontal scroller"
+    );
+    assert!(
+        SHELL_CSS.contains(
+            ".v7-primary-nav button,.v7-primary-nav a{width:100%;min-width:0;min-height:58px"
+        ),
+        "each narrow navigation entry must shrink within its grid cell while keeping a usable target"
+    );
+    assert!(
+        SHELL_CSS.contains(".v7-primary-nav .v7-tech-key{display:none}"),
+        "narrow navigation may remove only the technical annotation, never the Chinese responsibility or state"
+    );
+    assert!(
+        !SHELL_CSS.contains(".v7-primary-nav{grid-column:1/-1;overflow-x:auto"),
+        "a hidden horizontal swipe must not be required to reach a first-level responsibility"
+    );
+}
+
+#[test]
 fn the_larger_hard_shadow_only_marks_hover_displacement() {
     // Two resting depths would be two standards. --v7-brutal-lg exists for the 2px hover
     // displacement that DESIGN-003 permits; anything that sits still wears --v7-brutal.

@@ -35,6 +35,10 @@
 4. PROOF GREEN：fixture 增加 typed detail observation 后，4 个 intelligence PostgreSQL 用例 + 1 个 API 组合用例通过；proof container/volume cleanup verified。
 5. 当前主线整合：旧 Draft 的 Topic migration 编号与 main 的 unified-media 0027 冲突；实现迁移为 additive 0031，full-schema fixture 首次仍引用旧路径而编译失败，已同步为 0031 后重跑定向、完整 workspace 与统一 isolated proof。
 6. 最终严格审查：发现 Topic API 把 `rejected`、`conflict`、`not_found` 一律序列化为 `unavailable`。以一个统一的 typed outcome 映射替代隐式默认值，覆盖全部失败类别；不以 HTTP 码近似业务状态。
+7. 浏览器验收根因与授权修复：`390×844` 的 Topic 主工作区已无横向溢出，但共享一级导航在 `≤640px` 仍把五项保持为每项至少 `86px` 的横向条带；第五项「采集」落在 `344–430px` 而被裁断。Mog 已明确授权在 #112 内修复该实际可达性问题：Shell 在窄屏必须让所有一级入口可见、可触达、可键盘到达；未来入口超过一行时自动换行，不能再依赖隐蔽横滑。实现只修改 shared `shell.css`、必要的 source regression test 与本卡记录；不改变路由、状态真值、数据、权限、插件、runtime 或其它页面的业务逻辑。
+8. 浏览器复验：隔离 current integration 在 `1440×900` 核对 Topic 读取和挑战材料筛选；请求 `390×844` 与 `430×932` 时五个一级项均完整可见且 `scrollWidth=clientWidth`，额外 `320×844` 确认自动换行。390px 真实点击「采集」抵达 `/collection/attention`，原生链接与 visible focus 保留；console/error 与外部资源均为零。共享 DB、`:3000` runtime、插件和外部平台均未触碰。
+9. 最终审查写入一致性收口：数据库将 `canonical_key` 与 `idempotency_key` 设为全局唯一，原锁却含 `domain_key` 且只覆盖 canonical，两个不同 domain 的同 canonical 或两个不同 Topic 的同幂等键都可能绕过同一把锁并把业务冲突降级成 raw unique error。锁现在按稳定顺序同时取两类数据库真实 identity；隔离 PostgreSQL 并发回归分别要求一笔成功、另一笔为「Topic domain cannot change」或 idempotency conflict，最终都只形成一条 Topic。
+10. 一次最终严格审查：以 `origin/main...current integration HEAD` 审查整包的结构、文件长度、模块归属、typed outcome、事务原子性、前端状态与回归边界。审查内发现并根治了第 9 条的两种唯一身份竞争，随后移除 `too_many_arguments` 豁免，用私有 `WorkspaceVersionRefs` 让同一不可变版本的 IDs 一起流动。复验后结论为 PASS：没有遗留高置信结构/边界/并发发现；既有 API 16 项 dead-code warning 仍是 main 已有警告，未写作本卡解决。
 
 ## 停止条件
 
@@ -48,7 +52,7 @@
 | 层 | 当前状态 | 退出条件 |
 |---|---|---|
 | 合同/实现 | VERIFIED（current integration head） | types、0031 migration、API、page 与 shared Work Resource composition 完整 |
-| 自动检查 | VERIFIED（current integration head） | format、targeted API/domain、Topic PostgreSQL、workspace 与统一 isolated proof 已通过；治理检查待终包收口 |
-| 浏览器 | NOT VERIFIED（current integration head） | 旧 Draft 浏览器记录保留为历史；现行 runtime 尚无 Topic schema/route，最终只做一次有界前端验收 |
+| 自动检查 | VERIFIED（current integration head） | format、shared Shell regression、Topic PostgreSQL、workspace、JS syntax、治理检查与统一 isolated proof 已通过 |
+| 浏览器 | VERIFIED（isolated current integration） | 1440×900、材料筛选、390×844、430×932、320px 自动换行、入口点击/focus、console 与外部资源边界均已复验；外部 Chrome/完整辅助技术仍未证明 |
 | 部署 | NOT STARTED | 不在本卡自动执行；shared migration/runtime 需另行授权 |
 | 业务验收 | NOT VERIFIED | Mog 明确验收 |

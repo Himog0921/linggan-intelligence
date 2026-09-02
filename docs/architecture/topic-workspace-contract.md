@@ -5,7 +5,7 @@
 > 适用范围: 首个真实但明确暂定的 Topic 定义、人工裁定运行、冻结 Material Pack 与本机读取面
 > 事实来源: 用户本轮授权、DISC-001 Topic 语义、Work Resource Read、当前 migration/Rust/API/tests
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、正式领域语言、不变量、当前代码与真实运行证据
-> 验收状态: Issue #112 current integration 自动证明完成；最终浏览器验收待授权
+> 验收状态: Issue #112 current integration 自动证明与一次隔离浏览器验收已完成；共享数据库、runtime 与 Mog 业务验收仍不在本卡范围
 
 ## 1. 一句话合同
 
@@ -43,7 +43,7 @@ Topic Identity
 `import_topic_workspace(database, request)` 在单个 PostgreSQL 事务中：
 
 1. 验证 key、文字长度、材料数量与角色组合；至少一条支持材料，且至少一条挑战或边界材料。
-2. 对同一 Domain + canonical key 获取事务级 advisory lock。
+2. 按固定顺序对全局唯一的 canonical key 与 idempotency key 获取事务级 advisory lock；不同 Domain 不能并发绕过同一个 Topic identity，重复幂等键也不会泄漏 raw unique error。后到请求明确拒绝 domain 变更或返回 idempotency conflict。
 3. 同 `idempotency_key` 且 exact request hash 相同返回原 Receipt；内容不同返回冲突。
 4. 验证每个 `work_public_ref` 已存在于 `linggan_material_content`；任一未知则整笔不写。
 5. 新 Topic 只接受 `expectedVersion = null`；既有 Topic 只接受当前版本号，成功后递增一版。
@@ -91,5 +91,5 @@ Issue #113 只能读取一个已冻结的 `materialPackRef`。Agent 输入不得
 
 ## 8. 已证明与未证明
 
-- 已证明（current integration head）：Rust validation、PostgreSQL 16 原子接纳、未知引用全回滚、exact replay、异内容幂等冲突、版本竞争、完整 0031 migration、loopback API 与 Work Resource 组合。
-- 未证明：共享本机数据库应用 0031、runtime 切换、真实材料人工裁定质量、长期并发负载、正式 Topic 发布、Agent 执行、current head 的浏览器前端验收与 Mog 业务验收。
+- 已证明（current integration head）：Rust validation、PostgreSQL 16 原子接纳、未知引用全回滚、exact replay、异内容幂等冲突、版本竞争、完整 0031 migration、loopback API 与 Work Resource 组合；隔离浏览器在 1440px 读取/筛选、390px 与 430px 五项一级导航同屏、320px 自动换行和无横向溢出均通过。
+- 未证明：共享本机数据库应用 0031、runtime 切换、真实材料人工裁定质量、外部 Chrome/完整辅助技术、长期并发负载、正式 Topic 发布、Agent 执行与 Mog 业务验收。

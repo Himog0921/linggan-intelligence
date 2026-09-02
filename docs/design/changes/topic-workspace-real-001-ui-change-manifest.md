@@ -48,6 +48,14 @@
 - 选择、筛选与链接反馈使用 100–160ms LIDS motion；Reduced Motion 关闭全部过渡。
 - 无 WebGL、图表、外部字体/脚本或远程资产。
 
+## Shared Shell 窄屏可达性收口（2026-09-02）
+
+- 触发事实：current-head 隔离浏览器在 `390×844` 发现 Topic 主工作区符合单栏要求、document 无横向 overflow，但 shared 一级导航的五个控制项仍各有至少 `86px` 宽度；最后的「采集」为 `344–430px`，超出 390px 视口。横向滚动容器不能替代所有一级职责在初始窄屏视图中可见、可触达的要求。
+- 用户授权与分类：Mog 已授权在本 Issue 内根治该功能缺口；分类为 shared Shell 的展示 + 导航交互/无障碍修复。路由、当前项、禁用项、状态词、数据/权限/操作含义均不得改变。
+- 表面与依赖：唯一实现 owner 是 `shell.css`；`shell.rs` 继续渲染同一语义化 `<nav aria-label="一级导航">`、真实 `<a>` 和 disabled `<button>`。受影响的是所有使用 `global_header` 的 Topic、Corpus 与 Collection 表面，而不是 Topic 页面局部 CSS。
+- 目标行为：`≤640px` 一级导航使用可用宽度的自动分列网格，五项在 390px 同屏；若可用列数不足或将来新增职责，控制项自动换到下一行。不得保留横向滚动作为一级入口可达性的前提；每一项仍保留至少 24×24px 命中区、可见 focus、中文主语义和状态文字。窄屏可隐藏英文技术旁注，但不得隐藏中文职责、当前项或状态事实。
+- 验收结果：source regression test 锁定窄屏 grid/wrap、取消 parent scroller 与无横滑依赖；隔离浏览器在 `390×844`、`430×932`、`1440×900` 核对所有五个一级入口均在可见可点击区域、当前项/禁用态/角色筛选保持。额外 `320px` 触发第二行而不裁断；最后 exact-stylesheet loopback 复验确认 parent global row 与 nav 均为 `overflow-x:visible`。390px 真实点击「采集」抵达 `/collection/attention`；启用原生链接保留 visible focus。console 和外部资源边界均为零；外部辅助技术覆盖仍为 NOT VERIFIED。
+
 ## 停止与交接
 
 - 需要正式 Topic Release、自动分类、Claim、趋势、原文或采集时停止。

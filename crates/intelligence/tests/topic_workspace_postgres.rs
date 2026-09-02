@@ -204,3 +204,87 @@ async fn a_new_definition_version_requires_the_current_expected_version() {
     .expect("current version can advance");
     assert_eq!(second.definition_version, 2);
 }
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn concurrent_domains_with_one_canonical_key_have_a_business_conflict_not_a_unique_error() {
+    let database = proof_database("topic_workspace_canonical_lock").await;
+    let support_ref = Uuid::new_v4();
+    let challenge_ref = Uuid::new_v4();
+    admit_work(&database, support_ref).await;
+    admit_work(&database, challenge_ref).await;
+
+    let first = import_request(
+        "topic-proof:canonical-lock:0001",
+        None,
+        support_ref,
+        challenge_ref,
+    );
+    let mut second = import_request(
+        "topic-proof:canonical-lock:0002",
+        None,
+        support_ref,
+        challenge_ref,
+    );
+    second.domain_key = "executive-function".to_owned();
+
+    let (first_result, second_result) = tokio::join!(
+        import_topic_workspace(&database, &first),
+        import_topic_workspace(&database, &second)
+    );
+    let results = [first_result, second_result];
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert!(results.iter().any(|result| {
+        matches!(
+            result,
+            Err(TopicWorkspaceError::InvalidRequest(
+                "Topic domain cannot change"
+            ))
+        )
+    }));
+
+    let topic_count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_topic_workspace")
+        .fetch_one(database.pool())
+        .await
+        .expect("Topic row count reads");
+    assert_eq!(topic_count, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn concurrent_topics_with_one_idempotency_key_have_an_idempotency_conflict_not_a_unique_error()
+ {
+    let database = proof_database("topic_workspace_idempotency_lock").await;
+    let support_ref = Uuid::new_v4();
+    let challenge_ref = Uuid::new_v4();
+    admit_work(&database, support_ref).await;
+    admit_work(&database, challenge_ref).await;
+
+    let first = import_request(
+        "topic-proof:idempotency-lock:0001",
+        None,
+        support_ref,
+        challenge_ref,
+    );
+    let mut second = first.clone();
+    second.canonical_key = "attention-regulation".to_owned();
+    second.display_name = "注意力调节".to_owned();
+
+    let (first_result, second_result) = tokio::join!(
+        import_topic_workspace(&database, &first),
+        import_topic_workspace(&database, &second)
+    );
+    let results = [first_result, second_result];
+    assert_eq!(results.iter().filter(|result| result.is_ok()).count(), 1);
+    assert!(
+        results
+            .iter()
+            .any(|result| { matches!(result, Err(TopicWorkspaceError::IdempotencyConflict)) })
+    );
+
+    let topic_count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_topic_workspace")
+        .fetch_one(database.pool())
+        .await
+        .expect("Topic row count reads");
+    assert_eq!(topic_count, 1);
+}
