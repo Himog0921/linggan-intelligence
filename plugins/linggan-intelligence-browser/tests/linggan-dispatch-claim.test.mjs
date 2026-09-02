@@ -74,7 +74,7 @@ test('a permitted claim carries the task and its lease', async () => {
       async json() {
         return {
           decision: 'dispatch', mayExecute: true, leaseRef: 'lease-1',
-          taskSpec,
+          taskSpec, nextPollAfterSeconds: 0,
         };
       },
     }),
@@ -82,6 +82,7 @@ test('a permitted claim carries the task and its lease', async () => {
   assert.equal(result.mayExecute, true);
   assert.equal(result.leaseRef, 'lease-1');
   assert.deepEqual(result.taskSpec.capabilitiesRequested, ['author_profile']);
+  assert.equal(result.nextPollAfterSeconds, 0, 'server-authorized immediate follow-up remains valid');
 });
 
 test('a malformed permitted claim is rejected before it controls a page', async () => {

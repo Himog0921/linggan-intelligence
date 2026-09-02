@@ -286,7 +286,11 @@ export async function reportLingganDispatchFailure({
 
 function normalizePollSeconds(value, fallback = 300) {
   const seconds = Number(value ?? fallback);
-  if (!Number.isFinite(seconds) || seconds < 60 || seconds > 86400) {
+  // A dispatch response legitimately returns 0: the server has just handed us work and the
+  // following sequential task may be eligible as soon as its Package is accepted.  Chrome's
+  // alarm floor is applied later by background.js; rejecting 0 here would discard a permitted
+  // task before the Browser Producer can execute it.
+  if (!Number.isFinite(seconds) || seconds < 0 || seconds > 86400) {
     throw new Error('dispatch_poll_interval_invalid');
   }
   return Math.floor(seconds);

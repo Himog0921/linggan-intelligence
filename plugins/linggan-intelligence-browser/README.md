@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.31`
+> 版本: `0.8.32`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -193,6 +193,12 @@ Package 或 Evidence，也不记录平台/浏览器原始错误文本。未归�
 Chrome 所允许的最短一分钟，不会被错误退避成五分钟。它不改变工位认领、授权、TaskSpec 或
 页面访问门闸；`mayExecute=true` 仍是唯一允许接触平台的条件。
 
+0.8.32 补上真实重载验证揭示的两个更早边界：`onInstalled` / `onStartup` 会先持久化一份
+一分钟 bootstrap alarm，再异步报到和领取，避免报到完成后 MV3 worker 被回收时没有任何
+后续唤醒；第一次可完成的 patrol 仍会立刻以服务端 cadence 覆盖该 bootstrap。服务端合法
+返回的 `nextPollAfterSeconds=0` 也会保留到背景调度层，再由 Chrome 的一分钟下限执行，
+而不是把一份已允许的派发判成无效合同。
+
 实况图片仍是一个逻辑媒体卡槽，但静态图与动态图分别携带候选地址、取得工作和状态；
 普通图片、封面、视频和实况图片都只把远程 URL 当来源观察，长期展示必须使用 Linggan
 本地 Materialization。图片 OCR、视频抽帧 OCR、音频提取与 ASR 由本机 Rust worker 调用
@@ -221,7 +227,7 @@ npm run verify:linggan-isolation
 0.8.18 将真实终验发现的 `596/594` 收口为完成：全量深采取得数达到或超过页面公开数即可
 完成，详情附带评论窗口仍保持精确上限。
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.31.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.32.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台
