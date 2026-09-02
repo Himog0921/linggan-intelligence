@@ -22,6 +22,9 @@ pub struct CollectionTaskExecution {
     pub sequence_no: Option<i32>,
     pub queue_state: Option<String>,
     pub claimed_at: Option<String>,
+    /// `false` means the task belongs to a released or expired lease.  That
+    /// is historical queue state, not a producer that is still executing.
+    pub has_live_lease: Option<bool>,
     pub target_display_name: Option<String>,
     pub target_identity_key: Option<String>,
     pub attempt_id: Option<Uuid>,
@@ -46,7 +49,7 @@ pub struct CollectionTaskTimeline {
     pub tasks: Vec<CollectionTaskExecution>,
     pub accepted_count: i64,
     pub active_count: i64,
-    pub recovery_count: i64,
+    pub expired_lease_count: i64,
 }
 
 /// Read the most recently active or changed tasks.  It is a local projection:
@@ -71,6 +74,7 @@ pub async fn read_collection_task_timeline(
             sequence_no: row.get("sequence_no"),
             queue_state: row.get("queue_state"),
             claimed_at: row.get("claimed_at"),
+            has_live_lease: row.get("has_live_lease"),
             target_display_name: row.get("target_display_name"),
             target_identity_key: row.get("target_identity_key"),
             attempt_id: row.get("attempt_id"),
@@ -98,19 +102,27 @@ pub async fn read_collection_task_timeline(
                 && (matches!(
                     task.queue_state.as_deref(),
                     Some("pending") | Some("in_progress")
-                ) || task.attempt_id.is_some())
+                ) && task.has_live_lease == Some(true)
+                    || task.attempt_id.is_some())
         })
         .count() as i64;
-    let recovery_count = tasks
+    let expired_lease_count = tasks
         .iter()
-        .filter(|task| task.last_dispatch_failure_code.is_some() && task.receipt_ref.is_none())
+        .filter(|task| {
+            task.receipt_ref.is_none()
+                && task.has_live_lease == Some(false)
+                && matches!(
+                    task.queue_state.as_deref(),
+                    Some("pending") | Some("in_progress")
+                )
+        })
         .count() as i64;
 
     Ok(CollectionTaskTimeline {
         tasks,
         accepted_count,
         active_count,
-        recovery_count,
+        expired_lease_count,
     })
 }
 
@@ -131,6 +143,10 @@ SELECT
     lease_task.sequence_no,
     lease_task.execution_state AS queue_state,
     lease_task.claimed_at::text AS claimed_at,
+    CASE
+        WHEN lease.lease_ref IS NULL THEN NULL
+        ELSE (lease.released_at IS NULL AND lease.expires_at > scope_001_now())
+    END AS has_live_lease,
     COALESCE(linked_target.display_name, fallback_target.display_name) AS target_display_name,
     COALESCE(linked_target.identity_key, fallback_target.identity_key) AS target_identity_key,
     attempt.attempt_id,
