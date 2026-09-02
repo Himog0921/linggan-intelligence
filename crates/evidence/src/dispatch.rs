@@ -15,6 +15,11 @@ use linggan_storage_postgres::Database;
 use serde_json::Value;
 use uuid::Uuid;
 
+/// The next retry after a locally reported execution-start failure.  Chrome
+/// alarms cannot run more frequently than once per minute, and a retry must
+/// not immediately reopen a page that just failed its readiness probe.
+pub const DISPATCH_FAILURE_RETRY_AFTER_SECONDS: u32 = 60;
+
 #[derive(Debug, thiserror::Error)]
 pub enum DispatchError {
     #[error("dispatch schema is not applied")]
@@ -23,6 +28,73 @@ pub enum DispatchError {
     UnknownInstallation,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
+}
+
+/// A bounded failure vocabulary for a claimed browser task before a producer
+/// Attempt exists.  These are local execution facts, not source Evidence and
+/// never contain raw platform/browser text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchFailureCode {
+    CapabilityNotExecutableHere,
+    TargetIncomplete,
+    TabUnavailable,
+    PageTimeout,
+    PageUnavailable,
+    PageReceiptMissing,
+    PageReceiptIdentityMismatch,
+    PageReadFailed,
+}
+
+impl DispatchFailureCode {
+    pub fn parse(value: &str) -> Option<Self> {
+        match value.trim() {
+            "capability_not_executable_here" => Some(Self::CapabilityNotExecutableHere),
+            "target_incomplete" => Some(Self::TargetIncomplete),
+            "tab_unavailable" => Some(Self::TabUnavailable),
+            "page_timeout" => Some(Self::PageTimeout),
+            "page_unavailable" => Some(Self::PageUnavailable),
+            "page_receipt_missing" => Some(Self::PageReceiptMissing),
+            "page_receipt_identity_mismatch" => Some(Self::PageReceiptIdentityMismatch),
+            "page_read_failed" => Some(Self::PageReadFailed),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::CapabilityNotExecutableHere => "capability_not_executable_here",
+            Self::TargetIncomplete => "target_incomplete",
+            Self::TabUnavailable => "tab_unavailable",
+            Self::PageTimeout => "page_timeout",
+            Self::PageUnavailable => "page_unavailable",
+            Self::PageReceiptMissing => "page_receipt_missing",
+            Self::PageReceiptIdentityMismatch => "page_receipt_identity_mismatch",
+            Self::PageReadFailed => "page_read_failed",
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DispatchFailureError {
+    #[error("dispatch schema is not applied")]
+    SchemaUnavailable,
+    #[error("no active plugin installation with that install key")]
+    UnknownInstallation,
+    #[error("the installation no longer holds that live task claim")]
+    ClaimNotHeld,
+    #[error("failure id was already used for a different task, installation, or failure code")]
+    FailureIdentityConflict,
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+/// A local execution failure has either moved the current task back to the
+/// queue, or replayed a response that had already done so.  Neither variant is
+/// a producer Attempt or a Capture Package outcome.
+#[derive(Debug, PartialEq, Eq)]
+pub enum DispatchFailureOutcome {
+    Requeued { retry_after_seconds: u32 },
+    Replay { retry_after_seconds: u32 },
 }
 
 /// 调度对一次「有活吗」的回答。
@@ -68,8 +140,11 @@ impl DispatchDecision {
             // 触顶要等次日自然日窗口重置，问得再勤也不会变。
             Self::DailyQuotaReached { .. } => 1800,
             Self::RiskPaused { .. } => 900,
-            // 没归位的安装再怎么问也拿不到活，等人认领。
-            Self::InstallationNotClaimed => 900,
+            // A person may claim the installation from the local station page
+            // at any moment, but the page has no channel to wake a Chrome
+            // service worker.  Recheck at Chrome's one-minute minimum so a
+            // newly claimed install does not appear disconnected for 15 min.
+            Self::InstallationNotClaimed => 60,
         }
     }
 
@@ -93,10 +168,101 @@ impl DispatchDecision {
 pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
         "SELECT to_regclass('collection_work_order_lease') IS NOT NULL \
-                AND to_regclass('collection_work_order_lease_task') IS NOT NULL",
+                AND to_regclass('collection_work_order_lease_task') IS NOT NULL \
+                AND to_regclass('collection_work_order_lease_task_dispatch_failure') IS NOT NULL",
     )
     .fetch_one(database.pool())
     .await
+}
+
+/// Release a *current* scheduled-task claim after the plugin could not start
+/// its browser work.  The failure is appended before the task becomes pending
+/// again, so retries keep their frozen TaskSpec while the original failed
+/// claim remains auditable.
+///
+/// Only the active installation that currently holds the live claim may make
+/// this transition.  A delayed failure cannot reopen a task which has since
+/// produced a Package, been superseded, revoked, or expired.
+pub async fn requeue_failed_dispatch(
+    database: &Database,
+    install_key: &str,
+    task_id: Uuid,
+    failure_ref: Uuid,
+    failure_code: DispatchFailureCode,
+) -> Result<DispatchFailureOutcome, DispatchFailureError> {
+    if !dispatch_schema_is_ready(database).await? {
+        return Err(DispatchFailureError::SchemaUnavailable);
+    }
+    let mut transaction = database.pool().begin().await?;
+    let installation_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT installation_ref FROM plugin_installation \
+         WHERE install_key=$1 AND superseded_at IS NULL FOR UPDATE",
+    )
+    .bind(install_key)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some(installation_ref) = installation_ref else {
+        return Err(DispatchFailureError::UnknownInstallation);
+    };
+
+    let replay: Option<(Uuid, Uuid, String)> = sqlx::query_as(
+        "SELECT task_id,installation_ref,failure_code \
+         FROM collection_work_order_lease_task_dispatch_failure \
+         WHERE failure_ref=$1 FOR UPDATE",
+    )
+    .bind(failure_ref)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if let Some((recorded_task_id, recorded_installation_ref, recorded_code)) = replay {
+        if recorded_task_id != task_id
+            || recorded_installation_ref != installation_ref
+            || recorded_code != failure_code.as_str()
+        {
+            return Err(DispatchFailureError::FailureIdentityConflict);
+        }
+        transaction.commit().await?;
+        return Ok(DispatchFailureOutcome::Replay {
+            retry_after_seconds: DISPATCH_FAILURE_RETRY_AFTER_SECONDS,
+        });
+    }
+
+    // Take the task row lock before changing eligibility.  A concurrent
+    // Package receipt finishes the same `in_progress` row instead, causing
+    // this update to affect zero rows; it must never be put back into pending.
+    let requeued: Option<Uuid> = sqlx::query_scalar(
+        "UPDATE collection_work_order_lease_task task \
+         SET execution_state='pending',claimed_at=NULL,claimed_by_installation_ref=NULL \
+         FROM collection_work_order_lease lease \
+         WHERE task.task_id=$1 \
+           AND task.execution_state='in_progress' \
+           AND task.claimed_by_installation_ref=$2 \
+           AND lease.lease_ref=task.lease_ref \
+           AND lease.released_at IS NULL \
+           AND lease.expires_at>scope_001_now() \
+         RETURNING task.task_id",
+    )
+    .bind(task_id)
+    .bind(installation_ref)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if requeued.is_none() {
+        return Err(DispatchFailureError::ClaimNotHeld);
+    }
+    sqlx::query(
+        "INSERT INTO collection_work_order_lease_task_dispatch_failure \
+             (failure_ref,task_id,installation_ref,failure_code) \
+         VALUES ($1,$2,$3,$4)",
+    )
+    .bind(failure_ref)
+    .bind(task_id)
+    .bind(installation_ref)
+    .bind(failure_code.as_str())
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok(DispatchFailureOutcome::Requeued {
+        retry_after_seconds: DISPATCH_FAILURE_RETRY_AFTER_SECONDS,
+    })
 }
 
 /// 回答一次「有活吗」。

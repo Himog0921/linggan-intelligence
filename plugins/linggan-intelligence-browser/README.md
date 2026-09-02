@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.29`
+> 版本: `0.8.30`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -181,6 +181,12 @@ HTTP CDN 候选在网络请求前升级为 HTTPS；任意 HTTP 与第三方主�
 Materialization 链。Dashboard 只报告“已进入本机交付队列”，目标出现和头像本地可读仍分别以服务端
 Receipt 和媒体物化事实为准。
 
+0.8.30 收口了真实本机验收暴露的派发恢复边界：插件已经领取、但无法打开页面、等待最终
+content runtime 或取得一致的页面回执时，会向 Linggan 本机回报一个受限的执行启动失败码。
+服务端追加该失败审计后，把**同一份冻结 TaskSpec**恢复为待领取；它不是 Attempt、Capture
+Package 或 Evidence，也不记录平台/浏览器原始错误文本。未归位安装被本机工位页认领后，
+服务端改为一分钟级重新询问，避免此前 15 分钟退避让“已认领但尚未领活”看起来像断联。
+
 实况图片仍是一个逻辑媒体卡槽，但静态图与动态图分别携带候选地址、取得工作和状态；
 普通图片、封面、视频和实况图片都只把远程 URL 当来源观察，长期展示必须使用 Linggan
 本地 Materialization。图片 OCR、视频抽帧 OCR、音频提取与 ASR 由本机 Rust worker 调用
@@ -209,7 +215,7 @@ npm run verify:linggan-isolation
 0.8.18 将真实终验发现的 `596/594` 收口为完成：全量深采取得数达到或超过页面公开数即可
 完成，详情附带评论窗口仍保持精确上限。
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.29.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.30.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

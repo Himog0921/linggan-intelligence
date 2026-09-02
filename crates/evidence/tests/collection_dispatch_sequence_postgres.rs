@@ -3,10 +3,11 @@ use linggan_contracts::{
     parse_producer_task_spec,
 };
 use linggan_evidence::{
-    CheckInOutcome, DispatchDecision, InstallationCheckIn, ProducerRuntimeError,
-    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, check_in_installation,
-    create_producer_task, decide_dispatch, issue_work_order_lease, open_claim_window,
-    read_work_resources, start_producer_attempt, submit_producer_package,
+    CheckInOutcome, DispatchDecision, DispatchFailureCode, DispatchFailureOutcome,
+    InstallationCheckIn, ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome,
+    RuntimeTaskOutcome, check_in_installation, create_producer_task, decide_dispatch,
+    issue_work_order_lease, open_claim_window, read_work_resources, requeue_failed_dispatch,
+    start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::Row;
@@ -64,6 +65,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0026_work_resource_read.sql"),
     "\n",
     include_str!("../../../database/migrations/0027_unified_media_resource.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0033_dispatch_failure_recovery.sql"),
 );
 
 #[tokio::test]
@@ -249,6 +252,103 @@ async fn creator_lease_claims_and_completes_two_scheduled_tasks_in_order() {
         start_producer_attempt(&database, &manual_attempt).await,
         Ok(RuntimeAttemptOutcome::Started { .. })
     ));
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn failed_browser_start_is_audited_then_requeues_the_same_frozen_task() {
+    let database = proof_database_for("collection_dispatch_failure_recovery").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("creator work order is leased");
+    let first_dispatch = decide_dispatch(&database, &fixture.install_key)
+        .await
+        .expect("first task is claimed before page startup");
+    let first_task_id = task_id(&first_dispatch);
+    assert_task_state(&database, first_task_id, "in_progress").await;
+
+    let failure_ref = Uuid::new_v4();
+    let outcome = requeue_failed_dispatch(
+        &database,
+        &fixture.install_key,
+        first_task_id,
+        failure_ref,
+        DispatchFailureCode::PageTimeout,
+    )
+    .await
+    .expect("the owning installation can return a failed page start to the queue");
+    assert_eq!(
+        outcome,
+        DispatchFailureOutcome::Requeued {
+            retry_after_seconds: 60
+        }
+    );
+    assert_task_state(&database, first_task_id, "pending").await;
+    let claim_owner: Option<Uuid> = sqlx::query_scalar(
+        "SELECT claimed_by_installation_ref FROM collection_work_order_lease_task WHERE task_id=$1",
+    )
+    .bind(first_task_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("requeued task remains readable");
+    assert_eq!(claim_owner, None, "no installation owns a requeued task");
+    let failure: (Uuid, Uuid, String) = sqlx::query_as(
+        "SELECT task_id,installation_ref,failure_code \
+         FROM collection_work_order_lease_task_dispatch_failure WHERE failure_ref=$1",
+    )
+    .bind(failure_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the page-start failure remains auditable");
+    assert_eq!(failure.0, first_task_id);
+    assert_eq!(failure.1, fixture.installation_ref);
+    assert_eq!(failure.2, "page_timeout");
+    let attempt_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_runtime_attempt WHERE task_id=$1")
+            .bind(first_task_id)
+            .fetch_one(database.pool())
+            .await
+            .expect("attempt count is readable");
+    assert_eq!(
+        attempt_count, 0,
+        "a page-start failure is not a producer Attempt"
+    );
+
+    let replay = requeue_failed_dispatch(
+        &database,
+        &fixture.install_key,
+        first_task_id,
+        failure_ref,
+        DispatchFailureCode::PageTimeout,
+    )
+    .await
+    .expect("a lost failure response replays without writing a second failure");
+    assert_eq!(
+        replay,
+        DispatchFailureOutcome::Replay {
+            retry_after_seconds: 60
+        }
+    );
+    let failure_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease_task_dispatch_failure WHERE task_id=$1",
+    )
+    .bind(first_task_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("failure count is readable");
+    assert_eq!(failure_count, 1, "same failure id is an idempotent replay");
+
+    let retry = decide_dispatch(&database, &fixture.install_key)
+        .await
+        .expect("the frozen scheduled task is eligible for a bounded retry");
+    assert_eq!(
+        task_id(&retry),
+        first_task_id,
+        "retry does not manufacture a new task"
+    );
+    assert_task_state(&database, first_task_id, "in_progress").await;
+    assert!(lease_is_live(&database, lease.lease_ref).await);
 }
 
 #[tokio::test]

@@ -11,6 +11,7 @@ import {
   isTerminalLocalDeliveryResult,
   localPost,
   readLingganLocalReadiness,
+  reportLingganDispatchFailure,
   taskCreationIsAccepted,
   unavailableLingganStats,
   validateTaskSpec,
@@ -508,6 +509,41 @@ const SURFACE_CAPABILITIES = new Set([
   'replies',
 ]);
 
+// Keep browser-local detail out of the durable failure history.  The server
+// accepts only this small vocabulary; an unknown page receipt is honestly a
+// generic page-read failure, not a new unreviewed database state.
+const DISPATCH_FAILURE_CODES = new Set([
+  'capability_not_executable_here',
+  'target_incomplete',
+  'tab_unavailable',
+  'page_timeout',
+  'page_unavailable',
+  'page_receipt_missing',
+  'page_receipt_identity_mismatch',
+  'page_read_failed',
+]);
+
+async function requeueClaimedTaskFailure({ claim, installKey, state, message }) {
+  const taskId = String(claim?.taskSpec?.taskId || '').trim();
+  const failureCode = DISPATCH_FAILURE_CODES.has(String(state || ''))
+    ? String(state)
+    : 'page_read_failed';
+  const reported = await reportLingganDispatchFailure({
+    installKey,
+    taskId,
+    failureId: crypto.randomUUID(),
+    failureCode,
+    health: claim?.health,
+  });
+  return {
+    success: false,
+    state: String(state || 'page_read_failed'),
+    message: String(message || '页面未能执行本次派发任务。'),
+    requeued: reported.reported === true,
+    nextPollAfterSeconds: Number(reported.nextPollAfterSeconds || 300),
+  };
+}
+
 async function queueCachedDetailPageSessionLane({ leaseRef, taskSpec } = {}) {
   const entry = await detailPageSessionStore.getForTask({ leaseRef, taskSpec });
   if (!entry) return null;
@@ -558,12 +594,12 @@ async function runDispatchedTask() {
   if (!SURFACE_CAPABILITIES.has(capability)) {
     // Only capabilities with an implemented page reader may run unattended. Deepening is allowed
     // here because the server has already frozen exact material identities in a bounded Work Order.
-    return {
-      success: true,
+    return requeueClaimedTaskFailure({
+      claim: { ...claim, health: readiness.health },
+      installKey,
       state: 'capability_not_executable_here',
-      executed: false,
       message: `派下来的能力「${capability}」当前不在无人值守表层采集范围内。`,
-    };
+    });
   }
 
   const authorExternalId = String(spec.target?.authorExternalId || '').trim();
@@ -573,23 +609,54 @@ async function runDispatchedTask() {
     ? query
     : (['author_profile', 'profile_discovery'].includes(capability) ? authorExternalId : contentExternalId);
   if (!targetValue) {
-    return { success: true, state: 'target_incomplete', executed: false, message: '任务没有指明观察目标。' };
+    return requeueClaimedTaskFailure({
+      claim: { ...claim, health: readiness.health },
+      installKey,
+      state: 'target_incomplete',
+      message: '任务没有指明观察目标。',
+    });
   }
 
   // The first content_detail task opens the signed page and captures the server-approved lanes.
   // Later sequential tasks from the same Work Order reuse those persisted facts, but still form
   // their own Task/Attempt/Package/Receipt only after they are actually claimed.
   if (['content_detail', 'media_slots', 'comments', 'replies'].includes(capability)) {
-    const cached = await queueCachedDetailPageSessionLane({
-      leaseRef: claim.leaseRef,
-      taskSpec: spec,
-    });
+    let cached;
+    try {
+      cached = await queueCachedDetailPageSessionLane({
+        leaseRef: claim.leaseRef,
+        taskSpec: spec,
+      });
+    } catch {
+      return requeueClaimedTaskFailure({
+        claim: { ...claim, health: readiness.health },
+        installKey,
+        state: 'page_read_failed',
+        message: '页面缓存读取未能进入本机可靠队列。',
+      });
+    }
     if (cached) return { ...cached, nextPollAfterSeconds: claim.nextPollAfterSeconds };
   }
-  const { windowId, tabId } = await openTaskWindow(capability, targetValue, claim.executionSourceUrl);
+  let opened;
+  try {
+    opened = await openTaskWindow(capability, targetValue, claim.executionSourceUrl);
+  } catch {
+    return requeueClaimedTaskFailure({
+      claim: { ...claim, health: readiness.health },
+      installKey,
+      state: 'tab_unavailable',
+      message: '无法打开观察页面。',
+    });
+  }
+  const { windowId, tabId } = opened;
   if (!tabId) {
     await closeCollectionWindow(windowId);
-    return { success: false, state: 'tab_unavailable', message: '无法打开观察页面。' };
+    return requeueClaimedTaskFailure({
+      claim: { ...claim, health: readiness.health },
+      installKey,
+      state: 'tab_unavailable',
+      message: '无法打开观察页面。',
+    });
   }
 
   const action = capability === 'author_profile'
@@ -604,7 +671,12 @@ async function runDispatchedTask() {
   try {
     const ready = await waitForTabReady(tabId);
     if (!ready) {
-      return { success: false, state: 'page_timeout', message: '观察页面加载超时，本次未采集。' };
+      return requeueClaimedTaskFailure({
+        claim: { ...claim, health: readiness.health },
+        installKey,
+        state: 'page_timeout',
+        message: '观察页面加载超时，本次未采集。',
+      });
     }
     const response = await chrome.tabs.sendMessage(tabId, {
       action,
@@ -628,11 +700,12 @@ async function runDispatchedTask() {
       taskId: spec.taskId,
     });
     if (!receipt.ok) {
-      return {
-        success: false,
+      return requeueClaimedTaskFailure({
+        claim: { ...claim, health: readiness.health },
+        installKey,
         state: receipt.state,
         message: receipt.message || `页面未能执行「${capability}」。`,
-      };
+      });
     }
     return {
       success: true,
@@ -644,7 +717,12 @@ async function runDispatchedTask() {
       message: receipt.message || `已按派下来的任务执行「${capability}」。`,
     };
   } catch (error) {
-    return { success: false, state: 'page_unavailable', message: '观察页面未能响应，本次未采集。' };
+    return requeueClaimedTaskFailure({
+      claim: { ...claim, health: readiness.health },
+      installKey,
+      state: 'page_unavailable',
+      message: '观察页面未能响应，本次未采集。',
+    });
   } finally {
     // 无论成败都关窗。留下的僵尸窗口会一直吃内存——1000 篇/天会开上百次窗。
     await closeCollectionWindow(windowId);

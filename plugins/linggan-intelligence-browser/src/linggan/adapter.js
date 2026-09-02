@@ -166,6 +166,14 @@ export function dispatchClaimRouteFromHealth(health) {
   return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
 }
 
+/// The failure route belongs to the same local dispatch contract as claim.
+/// Do not infer it from the claim path: the server advertises exactly which
+/// route its currently applied schema can accept.
+export function dispatchFailureRouteFromHealth(health) {
+  const path = String(health?.routes?.dispatch?.failure || '').trim();
+  return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
+}
+
 /**
  * 问 Linggan：现在有我能做的活吗？
  *
@@ -226,6 +234,53 @@ export async function claimLingganDispatch({
   } catch {
     // 连不上时退避得久一些：Linggan 没开着是常态，不该每分钟敲一次。
     return { mayExecute: false, decision: 'unavailable', message: 'Linggan 本机服务当前不可访问。', nextPollAfterSeconds: 900 };
+  }
+}
+
+/**
+ * Record a failed browser start for the installation that currently owns a
+ * scheduled task, then let the server make that frozen task eligible again.
+ *
+ * This is intentionally narrower than a producer submission: there is no
+ * Attempt, Capture Package, Evidence, or raw browser error text in this call.
+ */
+export async function reportLingganDispatchFailure({
+  installKey,
+  taskId,
+  failureId,
+  failureCode,
+  origin = LINGGAN_LOCAL_ORIGIN,
+  fetchImpl = globalThis.fetch,
+  health = null,
+} = {}) {
+  if (typeof fetchImpl !== 'function') {
+    return { reported: false, nextPollAfterSeconds: 300 };
+  }
+  const route = dispatchFailureRouteFromHealth(health);
+  if (!route || !String(installKey || '').trim() || !String(taskId || '').trim()
+      || !String(failureId || '').trim() || !String(failureCode || '').trim()) {
+    return { reported: false, nextPollAfterSeconds: 300 };
+  }
+  try {
+    const response = await fetchImpl(`${origin}${route}`, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ installKey, taskId, failureId, failureCode }),
+    });
+    if (!response.ok) return { reported: false, nextPollAfterSeconds: 300 };
+    const body = await response.json().catch(() => null);
+    const outcome = String(body?.outcome || '');
+    if (!['requeued', 'replay'].includes(outcome) || body?.taskState !== 'pending') {
+      return { reported: false, nextPollAfterSeconds: 300 };
+    }
+    return {
+      reported: true,
+      outcome,
+      nextPollAfterSeconds: normalizePollSeconds(body?.nextPollAfterSeconds),
+    };
+  } catch {
+    return { reported: false, nextPollAfterSeconds: 300 };
   }
 }
 

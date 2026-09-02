@@ -889,7 +889,7 @@ async fn loopback_local_producer_acknowledges_one_partial_package_and_replays_ti
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
-async fn loopback_runtime_producer_uses_the_three_routes_published_by_health() {
+async fn loopback_runtime_producer_uses_the_routes_published_by_health() {
     let database = proof_database("local_api_runtime_route_contract").await;
     let application = app_with_database(database);
     let health_response = application
@@ -925,6 +925,20 @@ async fn loopback_runtime_producer_uses_the_three_routes_published_by_health() {
             .pointer("/routes/workResources")
             .and_then(Value::as_str),
         Some("/api/local/work-resources")
+    );
+    assert_eq!(
+        health
+            .pointer("/routes/dispatch/claim")
+            .and_then(Value::as_str),
+        Some("/api/local/dispatch/claim"),
+        "a ready local runtime publishes the task-claim route"
+    );
+    assert_eq!(
+        health
+            .pointer("/routes/dispatch/failure")
+            .and_then(Value::as_str),
+        Some("/api/local/dispatch/failures"),
+        "a ready local runtime publishes the failure-recovery route with claim"
     );
     let task_path = health
         .pointer("/routes/localProducer/taskCreation")
