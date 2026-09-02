@@ -23,6 +23,9 @@ mod material_replica_fallback_tests;
 mod shell;
 mod station_view;
 mod target_drawer;
+mod topic_workspace;
+#[cfg(test)]
+mod topic_workspace_tests;
 
 use axum::{
     Json, Router,
@@ -290,6 +293,7 @@ fn router(state: LocalWebState) -> Router {
         )
         .merge(material_api_routes())
         .merge(collection_api_routes())
+        .merge(topic_workspace::routes())
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))
@@ -331,6 +335,11 @@ fn router(state: LocalWebState) -> Router {
             get(evidence_observation_script),
         )
         .route("/assets/evidence-library.js", get(evidence_library_script))
+        .route(
+            "/assets/topic-workspace.css",
+            get(topic_workspace::stylesheet),
+        )
+        .route("/assets/topic-workspace.js", get(topic_workspace::script))
         .route(
             "/assets/collection-workspace.css",
             get(collection_stylesheet),

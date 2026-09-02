@@ -66,5 +66,6 @@ cargo test -p linggan-evidence --test content_reobservation_postgres --locked --
 cargo test -p linggan-evidence --test material_projection_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test material_social_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test material_media_postgres --locked -- --ignored
+cargo test -p linggan-intelligence --test topic_workspace_postgres --locked -- --ignored
 cargo test -p linggan-api --bin linggan-api --locked -- --ignored
 echo "LOCAL-001 discovery PostgreSQL proof passed"

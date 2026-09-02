@@ -8,6 +8,12 @@
 
 ## 当前阶段
 
+### TOPIC-WORKSPACE-REAL-001 / Issue #112（当前主线整合中）
+
+Mog 已在 #133 的前端验收后授权推进下一大阶段。现有 Topic Draft 的领域合同、隔离 PostgreSQL proof 与页面候选将整合到 `origin/main@44c9ab6`：新的 additive migration 固定为 `0031_topic_workspace.sql`，因为 `0027` 已由统一媒体占用。Topic 只保存暂定 Definition Version、人工 Classification Run、冻结 Material Pack、精确 Work Resource 引用和 Import Receipt；不复制正文/评论/媒体，不形成正式 Release、Claim、趋势或行动。current integration 已完成自动 proof、一次隔离浏览器验收和一次最终严格审查；其中 shared Shell 在 390px 裁断第五个一级入口的真实缺口已改为自动换行网格并复验，Topic 写入也已收束 canonical/idempotency 的并发唯一身份。当前 live runtime/DB 仍无 Topic route/schema；shared migration、runtime 切换、真实材料导入、部署和 Mog 业务验收均待单独授权。
+
+AGENT-CANDIDATE-ANALYSIS-001 / #113 只能在 #112 的 exact Material Pack 合同已稳定后读取冻结引用，输出仍限于带引用的候选解释、反例、unknown 与 gap；本卡期间不并发写 Agent runtime。
+
 ### 2026-09-02 · 已完成计划与历史 Issue 收口
 
 Mog 已明确：媒体生命周期合同决策完成；`LOCAL-001` 不再作为当前路线图总编号；`PLUGIN-REHOME-001` 和 `GOV-005` 的合并后文档收口完成；旧式页面探针停止，#76 按源码升级完成关闭，#92 不重跑系统切换而以既有分层证据收口。相应计划已归档至 `docs/plans/completed/`，当前工作只由具体的运行、材料、页面、采集与复观测交付包承接。本次状态同步不把真实媒体字节、OCR/ASR、保留/撤回、真实采集、部署或业务验收写成已完成。下文中早于本记录的 `LOCAL-001`、Issue #41、#72、#74 或 #76 “活跃／待收口”表述仅保留历史上下文，已由本段与归档计划取代。

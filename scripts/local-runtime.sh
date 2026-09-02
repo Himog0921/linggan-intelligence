@@ -200,6 +200,7 @@ migrate() {
   apply_migration_once "0027_unified_media_resource" "$project_root/database/migrations/0027_unified_media_resource.sql"
   apply_migration_once "0029_author_avatar_media" "$project_root/database/migrations/0029_author_avatar_media.sql"
   apply_migration_once "0030_comment_image_media" "$project_root/database/migrations/0030_comment_image_media.sql"
+  apply_migration_once "0031_topic_workspace" "$project_root/database/migrations/0031_topic_workspace.sql"
 }
 
 case "$command_name" in

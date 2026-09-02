@@ -41,6 +41,7 @@
 | [`data-contracts/local-001-discovery-evidence-boundary.md`](data-contracts/local-001-discovery-evidence-boundary.md) | 权威当前 | `LOCAL-001 / 001C-0` 与 #34 localhost binding：平台 discovery 与本地 Evidence Library 检索、partial Coverage、DiscoveryOccurrence、接纳回执与本地封面引用的跨边界合同；不证明真实插件或媒体取得 |
 | [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md) | 权威当前；MATERIAL-PROJECTION-001 | 最新 Browser Producer 产出到服务接纳、作品级材料投影与 Evidence 列表/详情/受控媒体读取的逐 lane 映射及代表性 fixture |
 | [`architecture/work-resource-read-contract.md`](architecture/work-resource-read-contract.md) | 权威当前；Issue #110 / #128 | Intelligence 跨页面唯一作品资源读取入口；`0.8.28` 真实链已验收封面/头像/作者-目标分责，评论图片非空真实样本仍未观察 |
+| [`architecture/topic-workspace-contract.md`](architecture/topic-workspace-contract.md) | 验证中；Issue #112 | 暂定 Topic Definition、人工 Classification Run、冻结 Material Pack、版本/幂等与 Agent 准入边界；不复制 Evidence 原文，不形成正式 Topic、Claim 或趋势 |
 | [design/README.md](design/README.md) | 权威当前 | 前端设计手册入口、权威地图、读取路径和当前已建立/未建立边界 |
 | [design/design-governance.md](design/design-governance.md) | 权威当前 | UI 设计来源优先级、闭集执行、变更分类、例外和验收治理 |
 | [design/reference-register.md](design/reference-register.md) | 权威当前 | 设计参考的登记格式与“参考不等于指令”边界；LIDS v2.0 的可继承/不继承边界已登记 |
@@ -62,6 +63,8 @@
 | [design/changes/evidence-v9-001-ui-change-manifest.md](design/changes/evidence-v9-001-ui-change-manifest.md) | 交付分支实现；EVIDENCE-V9-001 | `/corpus/evidence` 的 V9 研读密度、行级原声引用读能力、Inspector 三档宽度与 LOCAL MEDIA 横向材料浏览变更清单，含七处与 V9 的有据偏离 |
 | [design/pages/evidence-library-multi-material-reference.html](design/pages/evidence-library-multi-material-reference.html) | 权威当前；静态参考 | `EVIDENCE-PAGE-002`：多材料 Evidence Library 合成高保真参考；不连接 API、真实平台、媒体或处理器 |
 | [design/pages/collection-workspace-page.md](design/pages/collection-workspace-page.md) | 权威当前；PAGE-COLLECTION-001 | Collection 五个子面的职责、状态诚实性、页面级例外与未证明边界 |
+| [design/pages/topic-workspace-page.md](design/pages/topic-workspace-page.md) | 交付分支权威；PAGE-TOPIC-WORKSPACE-001 | 真实但明确暂定的 L2 Topic 工作区：定义、人工裁定、冻结材料与来源边界 |
+| [design/changes/topic-workspace-real-001-ui-change-manifest.md](design/changes/topic-workspace-real-001-ui-change-manifest.md) | 交付分支实现；Issue #112 | Topic runtime page 的来源回执、LIDS 影响、状态与响应式变更清单 |
 | [design/pages/plugin-producer-popup.md](design/pages/plugin-producer-popup.md) | 权威当前 | `PAGE-PLUGIN-001`：Linggan 自有 Browser Producer popup 的身份、本机接纳准备度与受限手动 Discovery receipt |
 | [design/changes/local-001a-evidence-library-ui-change-manifest.md](design/changes/local-001a-evidence-library-ui-change-manifest.md) | 权威当前；LOCAL-001A | Issue #25 的 UI 来源、范围、例外和证明边界 |
 | [design/changes/local-001d-unknown-published-discovery-ui-change-manifest.md](design/changes/local-001d-unknown-published-discovery-ui-change-manifest.md) | 权威当前；LOCAL-001D / Issue #62 | 默认最新已接纳读取、`PUBLISHED_AT UNKNOWN` 与显式发布时间窗口的来源和范围 |
@@ -90,6 +93,7 @@
 | [design/acceptance/evidence-page-002-multi-material-reference-acceptance.md](design/acceptance/evidence-page-002-multi-material-reference-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-PAGE-002`：多材料 Evidence Library 静态参考的双视口、状态、互动和边界验收 |
 | [design/acceptance/evidence-runtime-001-visual-acceptance.md](design/acceptance/evidence-runtime-001-visual-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-RUNTIME-001`：Issue #90 运行页的自动检查、桌面/375px 浏览器证据与未证明边界 |
 | [design/acceptance/work-resource-read-001-visual-acceptance.md](design/acceptance/work-resource-read-001-visual-acceptance.md) | 一次性报告 | `ACC-WORK-RESOURCE-READ-001`：共享作品资源、目标/作者关系、时间资格和三种排版的分层验收；真实视觉与部署仍未核验 |
+| [design/acceptance/topic-workspace-real-001-visual-acceptance.md](design/acceptance/topic-workspace-real-001-visual-acceptance.md) | 一次性报告；Issue #112 | `ACC-TOPIC-WORKSPACE-REAL-001`：暂定 Topic 事务、API、页面与未证明边界的分层验收 |
 | [design/acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md](design/acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md) | 一次性报告 | `ACC-DEV-05-XHS-CONTENT-OBSERVATION-001`：Issue #133 的当前/历史字段、Coverage 历史与有界复观测分层验收；未重载运行时、未进行真实 XHS 或 Mog 验收 |
 | [design/acceptance/evidence-v9-001-visual-acceptance.md](design/acceptance/evidence-v9-001-visual-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-V9-001`：V9 研读密度、材料完整度口径、Inspector 宽度与 LOCAL MEDIA/Lightbox 的真实数据走查；多图链路只有一个样本，未部署 |
 | [design/acceptance/design-009-runtime-capacity-surface-acceptance.md](design/acceptance/design-009-runtime-capacity-surface-acceptance.md) | 一次性报告 | `ACC-RUNTIME-001`：产能判定、状态诚实性与视觉的验收记录 |
@@ -139,6 +143,7 @@
 | [`proposals/real-canary-002-controlled-discovery-through-authorization-chain.md`](proposals/real-canary-002-controlled-discovery-through-authorization-chain.md) | 草案 | 让一次已获准过的 ADHD 发现面原样再走一遍，但全程经过「授权 → 准入 → 工单 → 租约 → 闸门 → 派发」，用于解锁采集控制合同 §12 第 5 条；不扩大平台足迹，不授权 001C-2/001C-3 |
 | [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) | 活跃计划 | F01 后、首个真实 producer 和用户可见切片前的产品形态、P0 页面、Canary、Capture/Media 与第一阶段运行架构决策图；当前首票为 `product-shell` |
 | [`plans/active/design-002-topic-intelligence-reference-page.md`](plans/active/design-002-topic-intelligence-reference-page.md) | 活跃计划 | 合成 Topic Intelligence Reference Page 的范围、规则、原型与验证计划；不替代完整 P0 或业务 SCOPE |
+| [`plans/active/topic-workspace-real-001.md`](plans/active/topic-workspace-real-001.md) | 验证中；Issue #112 | 首个真实 Topic 工作区垂直切片；只到暂定定义、人工裁定、冻结 Material Pack 与共享 Work Resource Read |
 | [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一获准实施事项：F01 synthetic fact-kernel technical tracer 受控进入 TDD；完成 loopback API + minimal CLI 后 hard stop，不扩入 F02–F10、真实平台/AI/插件/Web |
 | [`plans/active/plugin-runtime-001-full-capability-retrofit.md`](plans/active/plugin-runtime-001-full-capability-retrofit.md) | 活跃计划；Issue #50 | 将灵感爆爆爆的成熟浏览器采集能力一次性适配为 Linggan 自有 Browser Producer Runtime；媒体本地资产与异步处理血缘为本事项第一类约束 |
 | [`plans/completed/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/completed/aud-xhs-001-xiaohongshu-capture-probe-refresh.md) | 已完成；治理终止；Issue #74 | 历史小红书页面字段与能力探针；未确认字段保持 unknown，只有真实链被具体字段阻断时才可另行最小探针 |

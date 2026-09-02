@@ -1,3 +1,13 @@
-//! Features, clusters, signals, intelligence events and outcome feedback.
+//! Domain intelligence interfaces. Topic workspaces are explicit, versioned human research
+//! decisions over Work Resource identities; they never manufacture Evidence or source facts.
 
-pub const INTELLIGENCE_IMPLEMENTED: bool = false;
+mod topic_workspace;
+
+pub use topic_workspace::{
+    TopicClassificationRun, TopicDefinition, TopicMaterialMember, TopicMaterialMemberImport,
+    TopicMaterialPack, TopicMaterialRole, TopicWorkspace, TopicWorkspaceError,
+    TopicWorkspaceImport, TopicWorkspaceReceipt, import_topic_workspace, read_topic_workspace,
+    topic_workspace_schema_is_ready,
+};
+
+pub const INTELLIGENCE_IMPLEMENTED: bool = true;

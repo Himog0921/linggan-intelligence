@@ -8,6 +8,15 @@
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
 
+## 2026-09-02 · TOPIC-WORKSPACE-REAL-001 首个真实 L2 Topic 工作区（当前主线整合）
+
+- **来源与事项**：Mog 明确允许关闭 #133 后推进下一大阶段；Issue #112、PAGE-TOPIC-WORKSPACE-001 与 TOPIC-WORKSPACE-REAL-001。
+- **Token / Primitive**：不新增 token；复用白色 canvas、煤黑结构、Signal 当前选择、semantic soft 状态、共享 focus 与 100–160ms motion。Reduced Motion 关闭过渡。
+- **Component / Pattern / Page**：新增 page-local Definition Header、Classification Lens、Frozen Material Row、Work Resource Inspector 与 Source Boundary；均不晋升全局 CMP。页面为 L2 Research/Analysis，旧 PAGE-TOPIC-001 合成静态 reference 保持独立。
+- **Data Truth**：真实只指本地数据库中不可变 Definition/Run/Pack/Receipt，不等于正式知识。页面固定显示 `PROVISIONAL`、`HUMAN_ADJUDICATED` 和来源不得外推；未读取不写成空/零，角色材料数只描述 frozen pack。
+- **整合约束**：当前 main 的 `0027` 已归 unified media，因此 Topic 新增 migration 为 `0031`；最终验证不得把旧 Draft 的浏览器/数据库证据外推至当前 head。完整清单见 [`../changes/topic-workspace-real-001-ui-change-manifest.md`](../changes/topic-workspace-real-001-ui-change-manifest.md)。
+- **Shared Shell 窄屏收口**：Topic 作为第五个一级职责暴露了 `≤640px` 将每项固定为 86px、要求横向滑动才能到达「采集」的真实可达性缺口。共享 `shell.css` 改为 auto-fit 72px 最小列的网格，并取消 parent global row 的遗留横向 scroller：390px/430px 同屏展示五项，320px 和未来职责自动换下一行。保留真实 link、disabled 语义、中文职责、状态和 visible focus；仅移动端隐藏英文技术旁注。source regression 与隔离浏览器 1440/430/390/320、exact stylesheet 复验均通过；不证明 shared runtime、外部 Chrome/完整辅助技术或业务验收。
+
 ## 2026-08-31 · XHS-MEDIA-AUTHOR-EVIDENCE-001 作者头像与身份分栏
 
 - **来源与事项**：Mog 要求重新采集持续进量样本，并让 Evidence Library 显示全部已取得媒体；作品作者与监控目标必须拆开，作者区显示头像。
