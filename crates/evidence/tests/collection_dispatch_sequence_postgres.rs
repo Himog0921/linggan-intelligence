@@ -6,8 +6,8 @@ use linggan_evidence::{
     CheckInOutcome, DispatchDecision, DispatchFailureCode, DispatchFailureOutcome,
     InstallationCheckIn, ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome,
     RuntimeTaskOutcome, check_in_installation, create_producer_task, decide_dispatch,
-    issue_work_order_lease, open_claim_window, read_work_resources, requeue_failed_dispatch,
-    start_producer_attempt, submit_producer_package,
+    issue_work_order_lease, open_claim_window, read_collection_task_timeline, read_work_resources,
+    requeue_failed_dispatch, start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::Row;
@@ -252,6 +252,89 @@ async fn creator_lease_claims_and_completes_two_scheduled_tasks_in_order() {
         start_producer_attempt(&database, &manual_attempt).await,
         Ok(RuntimeAttemptOutcome::Started { .. })
     ));
+
+    let timeline = read_collection_task_timeline(&database, 100)
+        .await
+        .expect("Task / Attempt / Package / Receipt read projection is available");
+    assert_eq!(timeline.tasks.len(), 3);
+    assert_eq!(timeline.accepted_count, 2);
+    assert_eq!(
+        timeline.active_count, 1,
+        "manual Attempt has no Receipt yet"
+    );
+    assert_eq!(timeline.recovery_count, 0);
+    let completed = timeline
+        .tasks
+        .iter()
+        .find(|row| row.task_id == first_task.task_id())
+        .expect("first scheduled task is listed");
+    assert_eq!(completed.capabilities, "author_profile");
+    assert_eq!(completed.queue_state.as_deref(), Some("completed"));
+    assert_eq!(completed.material_admission.as_deref(), Some("ACCEPTED"));
+    assert_eq!(
+        completed.target_display_name.as_deref(),
+        Some("顺序派发夹具"),
+        "scheduled task retains its collection target instead of inventing an author"
+    );
+    let unreceived = timeline
+        .tasks
+        .iter()
+        .find(|row| row.task_id == manual_task.task_id())
+        .expect("manual task is listed");
+    assert!(unreceived.attempt_id.is_some());
+    assert!(unreceived.receipt_ref.is_none());
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn task_read_projection_keeps_queue_attempt_package_and_receipt_distinct() {
+    let database = proof_database_for("collection_task_read_projection").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("creator work order is leased");
+    let first = decide_dispatch(&database, &fixture.install_key)
+        .await
+        .expect("first task is claimed");
+    let first_task = task_from_dispatch(&first);
+    run_scheduled_task(&database, &first_task, fixture.producer_instance_id).await;
+    assert_task_state(&database, first_task.task_id(), "completed").await;
+    assert!(lease_is_live(&database, lease.lease_ref).await);
+
+    let timeline = read_collection_task_timeline(&database, 100)
+        .await
+        .expect("Task projection is readable");
+    assert_eq!(timeline.tasks.len(), 2);
+    assert_eq!(timeline.accepted_count, 1);
+    assert_eq!(timeline.active_count, 1);
+    assert_eq!(timeline.recovery_count, 0);
+
+    let completed = timeline
+        .tasks
+        .iter()
+        .find(|row| row.task_id == first_task.task_id())
+        .expect("completed first step is present");
+    assert_eq!(completed.capabilities, "author_profile");
+    assert_eq!(completed.queue_state.as_deref(), Some("completed"));
+    assert!(completed.attempt_id.is_some());
+    assert!(completed.package_ref.is_some());
+    assert!(completed.receipt_ref.is_some());
+    assert_eq!(completed.material_admission.as_deref(), Some("ACCEPTED"));
+    assert_eq!(
+        completed.target_display_name.as_deref(),
+        Some("顺序派发夹具")
+    );
+
+    let pending = timeline
+        .tasks
+        .iter()
+        .find(|row| row.task_id != first_task.task_id())
+        .expect("second ordered step is present");
+    assert_eq!(pending.capabilities, "profile_discovery");
+    assert_eq!(pending.queue_state.as_deref(), Some("pending"));
+    assert!(pending.attempt_id.is_none());
+    assert!(pending.package_ref.is_none());
+    assert!(pending.receipt_ref.is_none());
 }
 
 #[tokio::test]
@@ -314,6 +397,22 @@ async fn failed_browser_start_is_audited_then_requeues_the_same_frozen_task() {
         attempt_count, 0,
         "a page-start failure is not a producer Attempt"
     );
+
+    let timeline = read_collection_task_timeline(&database, 100)
+        .await
+        .expect("Task read projection keeps dispatch failures visible");
+    assert_eq!(timeline.recovery_count, 1);
+    let task = timeline
+        .tasks
+        .iter()
+        .find(|row| row.task_id == first_task_id)
+        .expect("requeued task is listed");
+    assert_eq!(task.queue_state.as_deref(), Some("pending"));
+    assert_eq!(
+        task.last_dispatch_failure_code.as_deref(),
+        Some("page_timeout")
+    );
+    assert!(task.attempt_id.is_none());
 
     let replay = requeue_failed_dispatch(
         &database,
