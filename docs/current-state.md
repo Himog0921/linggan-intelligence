@@ -10,11 +10,11 @@
 
 ### 2026-09-02 · 已完成计划与历史 Issue 收口
 
-Mog 已明确：媒体生命周期合同决策完成；`LOCAL-001` 不再作为当前路线图总编号；`PLUGIN-REHOME-001` 和 `GOV-005` 的合并后文档收口完成。相应计划已归档至 `docs/plans/completed/`，当前工作只由具体的运行、材料、页面、采集与复观测交付包承接。本次状态同步不把真实媒体字节、OCR/ASR、保留/撤回、真实采集、部署或业务验收写成已完成。下文中早于本记录的 `LOCAL-001`、Issue #41 或 Issue #72 “活跃／待收口”表述仅保留历史上下文，已由本段与归档计划取代。
+Mog 已明确：媒体生命周期合同决策完成；`LOCAL-001` 不再作为当前路线图总编号；`PLUGIN-REHOME-001` 和 `GOV-005` 的合并后文档收口完成；旧式页面探针停止，#76 按源码升级完成关闭，#92 不重跑系统切换而以既有分层证据收口。相应计划已归档至 `docs/plans/completed/`，当前工作只由具体的运行、材料、页面、采集与复观测交付包承接。本次状态同步不把真实媒体字节、OCR/ASR、保留/撤回、真实采集、部署或业务验收写成已完成。下文中早于本记录的 `LOCAL-001`、Issue #41、#72、#74 或 #76 “活跃／待收口”表述仅保留历史上下文，已由本段与归档计划取代。
 
 ### Browser Producer `0.8.28` 当前权威快照（已合并、已对齐运行时、已真实验收）
 
-- `main` = `origin/main` = 本机 detached runtime = `d7e722018f4f4cfa217c9cf5c0cac6fbcdcaacb3`。PR #132 已合并。
+- 已验收 Browser Producer 运行时代码快照为 `d7e722018f4f4cfa217c9cf5c0cac6fbcdcaacb3`（PR #132 已合并）；当前 `main` 在其上仅新增本次文档状态提交 `7dbf31d6a5c3fc80daba4c4df9f77a77cdb561a6`，不改变运行时工件或行为。
 - 当前发行包为 `plugins/linggan-intelligence-browser/releases/linggan-intelligence-browser-v0.8.28.zip`，SHA-256 为 `015a3de775a55d6ac2be8dac5d6ca833f7d88f3d772d641a73c7bbe91f51184e`。
 - 工位 `1` 已通过正式 API 认领 active installation `9179e6cf-3316-493a-abee-2e7eb162f824` / `0.8.28`，旧 `0.8.23` 被取代。
 - API、巡检 worker 与媒体 worker 均从 `linggan-intelligence-origin-main-d7e7220` 快照运行；`/health` 为 `LINGGAN_BROWSER_PRODUCER_RUNTIME`、`PLUGIN_RUNTIME_002_SCHEMA_READY / READY`、scheduler running。
@@ -192,17 +192,17 @@ Material Projection 已接纳搜索/主页发现面带回的真实标题、作�
 
 Mog 已明确取消“任何仓库写入都必须 Issue + Claim + 独立 worktree + Draft PR”的统一门禁。后续按风险分级：代码、数据库、运行合同、插件/release、部署/生产、真实外部动作、敏感数据/权限、不可逆处置和并行冲突继续走受保护交付；当前对话已明确授权的低风险文档勘误、索引/状态同步、进度记录和被取代卡片收口可以直接维护，但仍须核对工作区、检查 diff、运行适用治理检查并分层报告，不能借机扩成实现或自动 push/deploy。
 
-ARC-001 已同步为“已回答问题不再重复提问”：Capture Control Contract 已由 PR #17 合入；媒体卡已从当前主线完成 V2 语义、PR #15 草案、产品规则、插件 `v0.5.0` 通道、Rust/PostgreSQL 实现和 Evidence Library 消费边界的校准，唯一当前入口为 [`architecture/media-lifecycle-contract.md`](architecture/media-lifecycle-contract.md)，决策卡现为 `resolved`。这只证明合同收口；真实媒体字节、OCR/ASR/抽帧/embedding、保留期清理、撤回传播、多材料读模型、页面实现和用户验收仍未证明。第一阶段运行时只剩当前实现缺口基线，首个用户可见范围只剩正式 SCOPE 冻结。Issue #10 和 #14 保持开放以承接当前交付；旧 Issue #11/#16/#18 与 PR #12/#13/#15/#19 已按“已吸收/已被取代”关闭。
+ARC-001 已同步为“已回答问题不再重复提问”：Capture Control Contract 已由 PR #17 合入；媒体卡已从当前主线完成 V2 语义、PR #15 草案、产品规则、插件 `v0.5.0` 通道、Rust/PostgreSQL 实现和 Evidence Library 消费边界的校准，唯一当前入口为 [`architecture/media-lifecycle-contract.md`](architecture/media-lifecycle-contract.md)，决策卡现为 `resolved`。这只证明合同收口；真实媒体字节、OCR/ASR/抽帧/embedding、保留期清理、撤回传播、多材料读模型、页面实现和用户验收仍未证明。第一阶段运行时只剩当前实现缺口基线，首个用户可见范围只剩正式 SCOPE 冻结。Issue #14 已按“媒体合同决策完成”归档关闭；Issue #10 继续只承接其自身当前交付。旧 Issue #11/#16/#18 与 PR #12/#13/#15/#19 已按“已吸收/已被取代”关闭。
 
 `PATROL-LEASE-SEQUENCE-001` 已把一次 creator 基线的 `author_profile → profile_discovery` 固定为同一 lease 下的顺序任务关系：新 lease 不再双写旧 `task_id` 列；派发以数据库原子 claim 标记领取安装与 `in_progress`，同安装重试会取回同一 live task，后一步必须等待前一步形成已接纳回执；内容页允许 `DISCOVER_SURFACE` runtime 消息，并沿后台下发的 scheduled TaskSpec 与 `linggan_dispatched_task` 来源原样创建 Attempt，不再重建 manual task；Package 接纳时再次锁定 live lease 与领取安装，并把 Package、Receipt、task/必要的 lease completion 放进同一事务。只有全部步骤完成才释放 lease 并记录本轮 patrol 成功。持续博主巡检只执行 `profile_discovery`，关键词目标执行 `discovery_search`；手动页面采集仍走 manual TaskSpec。自动领取与发布版本由 `OBSERVATION-RUNTIME-001` 统一升级至 `v0.6.0`。
 
 Issue #85 / `EVIDENCE-PAGE-002` 已在上述媒体合同上冻结多材料 Evidence Library 的产品手册、技术呈现要求和合成静态高保真参考：主对象为“一个稳定来源作品在当前 Linggan 中可核验的材料集合”，并覆盖 discovery、详情、评论/回复、作者、媒体槽位/字节与 OCR/ASR 派生 lane。该设计明确区分部分可用、风险控制、访问受限、处理中、字节已清理、未知、空结果和读取错误，并静态演示一次 Package 的槽位级来源观察组如何包含 declared Bundle、still/motion 组件、逐地址 candidate assertions 以及绑定精确 `candidateRef` 的下载尝试；checkpoint 只进入来源核验，不成为材料卡。Issue #90 已把现行 API 能承担的部分落到运行页；静态参考仍不证明真实平台、媒体、OCR/ASR 或用户验收。
 
-### AUD-XHS-001 / Issue #74（受限真实页面探针执行中）
+### AUD-XHS-001 / Issue #74（历史受限页面探针，已治理终止）
 
-Mog 已于 2026-08-26 明确授权在已连接 Chrome 中执行最小小红书页面探针，用于回答当前搜索上下文/下拉联想、搜索列表、笔记详情（详情、媒体与当前顺序下最多 30 条评论）和作者页究竟有哪些可见字段、插件能否交付、何时停止。该授权严格限于匿名化的字段存在性、数量、页面状态、顺序和缺口记录：不向 Linggan 提交或持久化真实笔记、评论、作者资料、媒体或原始页面/API 输出；不读取 Cookie、账号秘密或隐藏账户资料；不下载媒体、不调用 OCR/ASR、不绕过验证码或安全限制。它是对 `DEV-03` 的受限预检，不表示 DEV-03、真实 Evidence 接入、插件发布、Canary、平台兼容、分析、部署或用户验收已经通过。唯一登记入口为 [`platforms/xiaohongshu/capture-capability-registry.md`](platforms/xiaohongshu/capture-capability-registry.md)，执行计划为 [`plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md)。
+Mog 曾于 2026-08-26 明确授权在已连接 Chrome 中执行最小小红书页面探针，用于回答当前搜索上下文/下拉联想、搜索列表、笔记详情（详情、媒体与当前顺序下最多 30 条评论）和作者页究竟有哪些可见字段、插件能否交付、何时停止。该授权严格限于匿名化的字段存在性、数量、页面状态、顺序和缺口记录：不向 Linggan 提交或持久化真实笔记、评论、作者资料、媒体或原始页面/API 输出；不读取 Cookie、账号秘密或隐藏账户资料；不下载媒体、不调用 OCR/ASR、不绕过验证码或安全限制。它只是对 `DEV-03` 的受限预检，不表示 DEV-03、真实 Evidence 接入、插件发布、Canary、平台兼容、分析、部署或用户验收已经通过。2026-09-02，Mog 决定停止继续此类旧式探针；既有登记中的 `UNKNOWN`、`PARTIAL` 与 `SOURCE_INCOMPLETE` 保留为未知，不以推断填补。唯一登记入口继续是 [`platforms/xiaohongshu/capture-capability-registry.md`](platforms/xiaohongshu/capture-capability-registry.md)，历史执行计划已归档为 [`AUD-XHS-001`](plans/completed/aud-xhs-001-xiaohongshu-capture-probe-refresh.md)。
 
-首轮实测已确认搜索筛选、下拉结构、搜索卡片和作者页 DOM 的一部分当前事实，但同时暴露详情面漂移：当前详情使用 `.note-detail-mask / .note-container / .note-content / .comments-el`，本次页面未出现旧 `noteDetailMap`。Issue #76 已在源码中实现搜索页面事实回执、详情 DOM 回退和统一的“详情 + 媒体观察 + 最多 30 条评论”逻辑结果；其中 `30` 是标准详情窗口硬上限，空状态、部分结果和停止原因分开记录。Issue #78 `PLUGIN-XHS-ACTIVE-COLLECTION-001` 已获 Mog 授权，负责把搜索/主页发现、单篇评论深采和批量评论升级为目标驱动、主动加载、可暂停恢复的执行能力：`30` 不限制独立深采或批量评论，但每项任务必须保留目标、实际、停止原因和恢复状态。
+首轮实测已确认搜索筛选、下拉结构、搜索卡片和作者页 DOM 的一部分当前事实，但同时暴露详情面漂移：当前详情使用 `.note-detail-mask / .note-container / .note-content / .comments-el`，本次页面未出现旧 `noteDetailMap`。Issue #76 的源码升级（PR #77）已实现搜索页面事实回执、详情 DOM 回退和统一的“详情 + 媒体观察 + 最多 30 条评论”逻辑结果；其中 `30` 是标准详情窗口硬上限，空状态、部分结果和停止原因分开记录。#76 以源码层完成归档，不重跑历史系统切换；真实兼容性、运行时、实际接纳与媒体链仍由 #103、#133 或具体 Bug 承接。Issue #78 `PLUGIN-XHS-ACTIVE-COLLECTION-001` 已获 Mog 授权，负责把搜索/主页发现、单篇评论深采和批量评论升级为目标驱动、主动加载、可暂停恢复的执行能力：`30` 不限制独立深采或批量评论，但每项任务必须保留目标、实际、停止原因和恢复状态。
 
 Issue #80 `PLUGIN-XHS-ADAPTIVE-SCROLL-AND-DETAIL-RECEIPT-001` 已经由 PR #81 合并到 `main`：它把“采集当前笔记到 Linggan”与“人工采集并下载媒体”明确拆分，前者不得弹下载窗口，后者保留旧的人工选择和下载；详情回执按笔记详情、媒体观察、评论与回复三条 lane 如实显示。页面加载收敛为有限、可解释的步骤，`no_progress` 不伪装成页面结束；安全验证或访问受限会结束当前 Attempt。此前在一次明确确认下提交的最小详情样本，仅证明一条当前笔记记录进入 Linggan 当前投影；未下载媒体，未证明三条 lane 各自接纳。**真实新版本安装、不同筛选、非空评论/楼中楼、实际 lane 接纳、部署和用户验收仍为 `SOURCE_INCOMPLETE` / 未验证**；代码检查和合并不替代这些真实链路结论。
 
@@ -283,7 +283,7 @@ REAL-CANARY #52 的聚合结果已确认：本地库存在已接纳的当前可�
 
 ## 历史下一步记录（不覆盖本页顶部 `0.8.28` 当前快照）
 
-当前主线实施事项仍是 [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md)。它把已确认设计压缩为一条合成/脱敏技术 tracer：终态 Package 接入、逐 Record 处理、最小 Content 身份与 Observation、字段级 Current 来源，以及 API + minimal CLI 的解释结果；它不是用户可见产品切片。与主线并列、且由 Mog 单独授权的唯一受限现实页面工作是 `AUD-XHS-001 / Issue #74`；它只降低小红书字段与插件兼容性的未知，不接入真实材料，也不扩大 SCOPE-001。
+当前主线实施事项仍是 [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md)。它把已确认设计压缩为一条合成/脱敏技术 tracer：终态 Package 接入、逐 Record 处理、最小 Content 身份与 Observation、字段级 Current 来源，以及 API + minimal CLI 的解释结果；它不是用户可见产品切片。`AUD-XHS-001 / Issue #74` 已作为历史受限探针归档，不再是进行中现实页面工作；若未来真实链被某一具体字段阻断，必须另行授权最小探针，且不得由本历史卡自动恢复执行。
 
 语义冻结已经经过四次独立只读攻击。第四轮发现的 payload/ingress 分层、pre-routing audit union、动态 ref/time snapshot 和跨 Attempt Satisfaction 已分别用 processor owner、封闭数据库 union、固定 proof clock/ref 与 Work 1:1 Attempt 收口。按用户最新裁定不再进行第五轮文档复核。F01 已完成 contracts tracer、手工静态 manifest Oracle，以及 **TDD 步骤 3 的 Package ingress**：有效 Package 在随机隔离的 PostgreSQL 16 schema 中原子接入，行数逐表对齐 manifest 的 `fresh_seed` 与 `final` 阶段，六个事务故障注入点任一失败都零半写，同 hash replay 与不同 hash conflict 只新增一行 delivery 且不覆盖既有 Package，接入后 Observation/Current/Source 侧表仍不存在。三项主链保护中前两项（接入阶段不提前形成 Observation/Current、接入故障零半写）已有真实数据库证据；第三项（坏 Record 不撤销合格 Record）属于 Record processing，尚未实现。下一步是 TDD 步骤 4 的两条 Record 独立处理与 Observation/Current，需要先创建 `0002` migration；随后才是 loopback API 与只经 API 的 CLI。完成该链后停止实施扩张；其余 canonicalization、完整 envelope、资源上限和 F02–F10 等待 ARC-001 收口及后续明确排期，不从 F01 自动继续。
 

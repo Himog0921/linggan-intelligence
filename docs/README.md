@@ -141,8 +141,8 @@
 | [`plans/active/design-002-topic-intelligence-reference-page.md`](plans/active/design-002-topic-intelligence-reference-page.md) | 活跃计划 | 合成 Topic Intelligence Reference Page 的范围、规则、原型与验证计划；不替代完整 P0 或业务 SCOPE |
 | [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一获准实施事项：F01 synthetic fact-kernel technical tracer 受控进入 TDD；完成 loopback API + minimal CLI 后 hard stop，不扩入 F02–F10、真实平台/AI/插件/Web |
 | [`plans/active/plugin-runtime-001-full-capability-retrofit.md`](plans/active/plugin-runtime-001-full-capability-retrofit.md) | 活跃计划；Issue #50 | 将灵感爆爆爆的成熟浏览器采集能力一次性适配为 Linggan 自有 Browser Producer Runtime；媒体本地资产与异步处理血缘为本事项第一类约束 |
-| [`plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md) | 活跃计划；Issue #74 | 在最小真实页面样本上刷新小红书搜索、详情（含最多 30 条评论）和作者页探针，形成不含真实原文的字段与能力登记；不接入或持久化真实材料 |
-| [`plans/active/plugin-xhs-capture-upgrade-001.md`](plans/active/plugin-xhs-capture-upgrade-001.md) | 活跃计划；Issue #76 | 实现小红书搜索页面事实、详情 DOM 回退与“详情/媒体观察/最多 30 条评论”统一逻辑回执；不分析、不接入真实材料、不发布 |
+| [`plans/completed/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/completed/aud-xhs-001-xiaohongshu-capture-probe-refresh.md) | 已完成；治理终止；Issue #74 | 历史小红书页面字段与能力探针；未确认字段保持 unknown，只有真实链被具体字段阻断时才可另行最小探针 |
+| [`plans/completed/plugin-xhs-capture-upgrade-001.md`](plans/completed/plugin-xhs-capture-upgrade-001.md) | 已完成；源码升级；Issue #76 / PR #77 | 已合入搜索页面事实、详情 DOM 回退与统一详情包回执源码；不证明真实兼容性、运行时或用户验收 |
 | [`plans/active/plugin-xhs-active-collection-001.md`](plans/active/plugin-xhs-active-collection-001.md) | 活跃计划；Issue #78 | 将小红书搜索、标准详情、单篇评论深采与批量评论升级为目标驱动、可恢复的页面执行；不进行真实材料交付、真实页面回归或发布部署 |
 | [`plans/active/plugin-xhs-finalization-001.md`](plans/active/plugin-xhs-finalization-001.md) | 活跃计划；Issue #128 | 一次性收口 Browser Producer 派发/回执/评论 Attempt 可靠性与统一 MediaResource；保留人工媒体窗口，真实链只对当前授权样本运行一次 |
 | [`plans/completed/plugin-xhs-adaptive-scroll-and-detail-receipt-001.md`](plans/completed/plugin-xhs-adaptive-scroll-and-detail-receipt-001.md) | 已完成；Issue #80 / PR #81 | 将 XHS 页面加载滚动收敛为可解释的有限过程；分离 Intelligence 详情交付与人工媒体下载，并逐 lane 显示接纳回执 |
