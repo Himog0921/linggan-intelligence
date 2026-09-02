@@ -31,7 +31,7 @@ pub fn render_tasks(base: &str, timeline: &CollectionTaskTimeline) -> String {
                     <div><b>{total}</b><span>最近任务</span></div>
                     <div><b>{accepted}</b><span>已接纳</span></div>
                     <div><b>{active}</b><span>待完成</span></div>
-                    <div><b>{recovery}</b><span>待重试</span></div>
+                    <div><b>{expired}</b><span>租约失效</span></div>
                   </div>
                   <p class="c-task-boundary">按最近状态读取最多 100 条本机任务。队列资格、Attempt、Package 与 Receipt 分列显示；读取本身不会领取、重试或新建任务。</p>
                   <div class="c-task-list">{rows}</div>
@@ -39,7 +39,7 @@ pub fn render_tasks(base: &str, timeline: &CollectionTaskTimeline) -> String {
             total = timeline.tasks.len(),
             accepted = timeline.accepted_count,
             active = timeline.active_count,
-            recovery = timeline.recovery_count,
+            expired = timeline.expired_lease_count,
             rows = timeline.tasks.iter().map(task_row).collect::<String>(),
         )
     };
@@ -164,6 +164,11 @@ fn task_state(task: &CollectionTaskExecution) -> (&'static str, &'static str, &'
         return ("已接纳", "c-task-state-ok", "Package 与 Receipt 已保存");
     }
     match task.queue_state.as_deref() {
+        Some("in_progress" | "pending") if task.has_live_lease == Some(false) => (
+            "租约已失效",
+            "c-task-state-warn",
+            "租约已经到期；当前没有执行权",
+        ),
         Some("in_progress") => ("执行中", "c-task-state-live", "任务已被独占领取"),
         Some("pending") if task.last_dispatch_failure_code.is_some() => (
             "等待重试",
@@ -222,6 +227,7 @@ mod tests {
             sequence_no: Some(1),
             queue_state: Some("completed".to_owned()),
             claimed_at: Some("2026-09-02T16:57:06Z".to_owned()),
+            has_live_lease: Some(false),
             target_display_name: Some("<真实目标>".to_owned()),
             target_identity_key: Some("creator-001".to_owned()),
             attempt_id: Some(Uuid::new_v4()),
@@ -245,7 +251,7 @@ mod tests {
             tasks: vec![task()],
             accepted_count: 1,
             active_count: 0,
-            recovery_count: 0,
+            expired_lease_count: 0,
         };
         let html = render_tasks(&base, &timeline);
         assert!(html.contains("已接纳"));
@@ -265,17 +271,41 @@ mod tests {
         waiting.receipt_ref = None;
         waiting.material_admission = None;
         waiting.last_dispatch_failure_code = None;
+        waiting.has_live_lease = Some(true);
         let html = render_tasks(
             &base,
             &CollectionTaskTimeline {
                 tasks: vec![waiting],
                 accepted_count: 0,
                 active_count: 1,
-                recovery_count: 0,
+                expired_lease_count: 0,
             },
         );
         assert!(html.contains("等待派发"));
         assert!(html.contains("尚未形成 Attempt"));
         assert!(!html.contains("Package 与 Receipt 已保存"));
+    }
+
+    #[test]
+    fn expired_lease_is_not_rendered_as_a_live_execution() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let mut expired = task();
+        expired.queue_state = Some("in_progress".to_owned());
+        expired.attempt_id = None;
+        expired.receipt_ref = None;
+        expired.material_admission = None;
+        expired.has_live_lease = Some(false);
+        let html = render_tasks(
+            &base,
+            &CollectionTaskTimeline {
+                tasks: vec![expired],
+                accepted_count: 0,
+                active_count: 0,
+                expired_lease_count: 1,
+            },
+        );
+        assert!(html.contains("租约已失效"));
+        assert!(html.contains("租约已经到期；当前没有执行权"));
+        assert!(!html.contains("任务已被独占领取"));
     }
 }
