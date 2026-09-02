@@ -8,9 +8,9 @@
 
 ## 当前阶段
 
-### TOPIC-WORKSPACE-REAL-001 / Issue #112（当前主线整合中）
+### TOPIC-WORKSPACE-REAL-001 / Issue #112（已部署；待 Mog 业务验收）
 
-Mog 已在 #133 的前端验收后授权推进下一大阶段。现有 Topic Draft 的领域合同、隔离 PostgreSQL proof 与页面候选将整合到 `origin/main@44c9ab6`：新的 additive migration 固定为 `0031_topic_workspace.sql`，因为 `0027` 已由统一媒体占用。Topic 只保存暂定 Definition Version、人工 Classification Run、冻结 Material Pack、精确 Work Resource 引用和 Import Receipt；不复制正文/评论/媒体，不形成正式 Release、Claim、趋势或行动。current integration 已完成自动 proof、一次隔离浏览器验收和一次最终严格审查；其中 shared Shell 在 390px 裁断第五个一级入口的真实缺口已改为自动换行网格并复验，Topic 写入也已收束 canonical/idempotency 的并发唯一身份。当前 live runtime/DB 仍无 Topic route/schema；shared migration、runtime 切换、真实材料导入、部署和 Mog 业务验收均待单独授权。
+Mog 已在 #133 的前端验收后授权推进下一大阶段。Topic 已由 PR #115 合入 `main@fa80d8a`；新的 additive migration 固定为 `0031_topic_workspace.sql`，因为 `0027` 已由统一媒体占用。Topic 只保存暂定 Definition Version、人工 Classification Run、冻结 Material Pack、精确 Work Resource 引用和 Import Receipt；不复制正文/评论/媒体，不形成正式 Release、Claim、趋势或行动。自动 proof、一次隔离浏览器验收和一次最终严格审查均已完成；其中 shared Shell 在 390px 裁断第五个一级入口的真实缺口已改为自动换行网格并复验，Topic 写入也已收束 canonical/idempotency 的并发唯一身份。Mog 随后明确授权 shared migration 与 `:3000` runtime 切换：`0031` 已以 checksum `cd7e6a33c5c9203d2fcddc88d246aaa16b2a9de4bebfda21123978315ee6297b` 入账，API、巡检 worker 与媒体 worker 均从 `linggan-intelligence-origin-main-fa80d8a` snapshot 运行，`/topics` 已返回真实页面。当前共享库尚无 Topic/Definition/Material Pack（均为 0），因此默认 Topic API 如实返回 `not_found`；真实材料导入与 Mog 业务验收仍待单独授权。
 
 AGENT-CANDIDATE-ANALYSIS-001 / #113 只能在 #112 的 exact Material Pack 合同已稳定后读取冻结引用，输出仍限于带引用的候选解释、反例、unknown 与 gap；本卡期间不并发写 Agent runtime。
 

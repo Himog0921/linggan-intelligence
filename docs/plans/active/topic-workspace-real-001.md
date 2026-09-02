@@ -1,13 +1,14 @@
 # TOPIC-WORKSPACE-REAL-001 · 实施卡
 
 > 状态: 活跃计划
+> 运行状态: 已部署；待 Mog 业务验收
 > 最后核对: 2026-09-02
 > 适用范围: Issue #112 首个真实但明确暂定的 Topic 工作区垂直切片
 > 事实来源: 用户本轮授权、Issue #112、Topic 领域语言、Work Resource Read、当前分支代码与验证
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、正式领域不变量、当前代码与真实运行证据
 > Issue: #112
 > 分支: `codex/topic-workspace-real-001`
-> 基线: `44c9ab68dee43feaff1e69b15b046ccff0a1810e`
+> 基线: `main@fa80d8afa4c4134b568190a4a2565eb83f993a16`（PR #115 已合并）
 
 ## 目标
 
@@ -25,7 +26,7 @@
 
 - 插件、scheduler、采集/监控、历史材料补录、外部平台访问。
 - 原始正文/评论复制、embedding、聚类、自动分类、统计趋势。
-- A3/A4 Agent、正式知识写回、Claim、Action、部署、合并。
+- A3/A4 Agent、正式知识写回、Claim、Action。
 
 ## TDD 记录
 
@@ -39,12 +40,13 @@
 8. 浏览器复验：隔离 current integration 在 `1440×900` 核对 Topic 读取和挑战材料筛选；请求 `390×844` 与 `430×932` 时五个一级项均完整可见且 `scrollWidth=clientWidth`，额外 `320×844` 确认自动换行。390px 真实点击「采集」抵达 `/collection/attention`，原生链接与 visible focus 保留；console/error 与外部资源均为零。共享 DB、`:3000` runtime、插件和外部平台均未触碰。
 9. 最终审查写入一致性收口：数据库将 `canonical_key` 与 `idempotency_key` 设为全局唯一，原锁却含 `domain_key` 且只覆盖 canonical，两个不同 domain 的同 canonical 或两个不同 Topic 的同幂等键都可能绕过同一把锁并把业务冲突降级成 raw unique error。锁现在按稳定顺序同时取两类数据库真实 identity；隔离 PostgreSQL 并发回归分别要求一笔成功、另一笔为「Topic domain cannot change」或 idempotency conflict，最终都只形成一条 Topic。
 10. 一次最终严格审查：以 `origin/main...current integration HEAD` 审查整包的结构、文件长度、模块归属、typed outcome、事务原子性、前端状态与回归边界。审查内发现并根治了第 9 条的两种唯一身份竞争，随后移除 `too_many_arguments` 豁免，用私有 `WorkspaceVersionRefs` 让同一不可变版本的 IDs 一起流动。复验后结论为 PASS：没有遗留高置信结构/边界/并发发现；既有 API 16 项 dead-code warning 仍是 main 已有警告，未写作本卡解决。
+11. 用户授权部署：PR #115 合入 `main@fa80d8a` 后，建立同 commit 的独立 runtime snapshot；在原运行仍提供服务时锁定构建 API、巡检 worker 与媒体 worker。共享本地数据库的 migration ledger 已在事务中记录 `0031_topic_workspace` 的 checksum `cd7e6a33c5c9203d2fcddc88d246aaa16b2a9de4bebfda21123978315ee6297b`，三项 launchd 服务重启后 cwd 与 executable 均核验来自该 snapshot。`GET /topics` 返回 200；默认 API 对尚未导入的 `task-initiation-difficulty` 如实返回 `404 / outcome=not_found`，未写入 synthetic 或真实业务 Topic。
 
 ## 停止条件
 
 - 需要正式 Definition Release、Claim、趋势或市场事实时停止。
 - 需要复制 Work Resource 字段、读取 raw Package 或展示敏感评论时停止。
-- 需要修改插件、采集、scheduler、共享持久库或部署时停止。
+- 需要修改插件、采集、scheduler，或在本次已授权的 `0031` / loopback runtime 切换之外再改变共享持久库或部署时停止。
 - 与其它卡的共享 Shell/current-state 产生无法重放的冲突时停止并交给 integrator。
 
 ## 验收层
@@ -54,5 +56,5 @@
 | 合同/实现 | VERIFIED（current integration head） | types、0031 migration、API、page 与 shared Work Resource composition 完整 |
 | 自动检查 | VERIFIED（current integration head） | format、shared Shell regression、Topic PostgreSQL、workspace、JS syntax、治理检查与统一 isolated proof 已通过 |
 | 浏览器 | VERIFIED（isolated current integration） | 1440×900、材料筛选、390×844、430×932、320px 自动换行、入口点击/focus、console 与外部资源边界均已复验；外部 Chrome/完整辅助技术仍未证明 |
-| 部署 | NOT STARTED | 不在本卡自动执行；shared migration/runtime 需另行授权 |
+| 部署 | VERIFIED（本机 loopback） | `0031` ledger checksum、三项 launchd runtime cwd/executable、`:3000 /health` 与 `/topics` 已核验；不代表真实业务材料、外部平台或插件发布 |
 | 业务验收 | NOT VERIFIED | Mog 明确验收 |
