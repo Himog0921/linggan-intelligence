@@ -72,6 +72,7 @@
 | 派发启动失败可审计回退（0.8.30） | 已领取但未形成 Attempt 的页面启动失败按受限失败码回报；Linggan 追加审计后将同一冻结 TaskSpec 恢复为 pending；待认领安装被本机认领后一分钟级重新询问 | 不把失败写成 Attempt、Package 或 Evidence，不存原始平台/浏览器报错，不创建替代任务，不放宽工位、授权或平台范围 |
 | MV3 派单唤醒持久化（0.8.31） | 服务端节奏驱动的 `linggan-patrol` alarm 同时带有 delay 与 repeat；每次 tick 会用服务端最新 cadence 重新设定，`0` 映射到 Chrome 一分钟下限 | 不将状态查询变成平台动作，不自动认领新安装，不让插件自行设定服务端之外的授权、范围或长期轮询频率 |
 | 生命周期 bootstrap 与零 cadence 合同（0.8.32） | install/startup 先写可恢复的一分钟 bootstrap alarm，首次可完成 patrol 再覆盖为服务端节奏；允许服务端派发的 `nextPollAfterSeconds=0` 流向 Chrome 的一分钟下限 | 不让 bootstrap 取代服务端长期 cadence，不把 `0` 当成未授权任务，不直连平台或跳过 `mayExecute=true` |
+| 稳定页面身份就绪门（0.8.33） | URL 经安静期后，由同 URL 的内容脚本 `getPageContext` 回应证明可执行；不再等待可能被图片或长连接拖住的浏览器 `complete` | 不跳过重定向或页面身份核验，不把没有内容脚本的页面当作就绪，不改变失败审计或伪造采集交付 |
 
 ## 新旧运行路径对照
 
@@ -82,7 +83,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.32）
+当前路径（0.8.33）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox

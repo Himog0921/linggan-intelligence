@@ -2,12 +2,15 @@ const DEFAULT_STABLE_FOR_MS = 1500;
 const DEFAULT_PROBE_RETRY_MS = 250;
 
 /**
- * Wait until the tab has stopped navigating and the final document's content runtime responds.
+ * Wait until the tab URL has remained quiet and the final document's content runtime responds.
  *
  * Xiaohongshu can finish `/discovery/item/...` and then redirect to `/explore/...`. Treating the
  * first `complete` event as ready sends the collection action into a document that is about to be
- * destroyed. The quiet interval is restarted by every URL/status navigation update; the final
- * probe proves that the content script belongs to the same URL Chrome currently reports.
+ * destroyed. Conversely, a large profile can keep Chrome's top-level status at `loading` while
+ * its document-end content runtime is already able to answer. The quiet interval is restarted by
+ * every URL/status navigation update; the final probe proves that the content script belongs to
+ * the same URL Chrome currently reports. It is that identity proof—not an unrelated image or
+ * long-poll request reaching browser `complete`—that authorizes the next page action.
  */
 export function waitForStableTab({
   tabs,
@@ -21,7 +24,6 @@ export function waitForStableTab({
     let settled = false;
     let timeoutHandle = null;
     let stabilityHandle = null;
-    let latestStatus = '';
     let latestUrl = '';
 
     const clearStabilityTimer = () => {
@@ -41,7 +43,7 @@ export function waitForStableTab({
 
     const armProbe = (delayMs = stableForMs) => {
       clearStabilityTimer();
-      if (settled || latestStatus !== 'complete' || !latestUrl) return;
+      if (settled || !latestUrl) return;
       const candidateUrl = latestUrl;
       stabilityHandle = setTimeout(() => {
         stabilityHandle = null;
@@ -50,7 +52,7 @@ export function waitForStableTab({
     };
 
     const retryProbe = () => {
-      if (settled || latestStatus !== 'complete' || !latestUrl) return;
+      if (settled || !latestUrl) return;
       armProbe(probeRetryMs);
     };
 
@@ -58,11 +60,9 @@ export function waitForStableTab({
       if (settled) return;
       try {
         const tab = await tabs.get(tabId);
-        const currentStatus = String(tab?.status || '');
         const currentUrl = String(tab?.url || '');
-        latestStatus = currentStatus;
         latestUrl = currentUrl;
-        if (currentStatus !== 'complete' || !currentUrl || currentUrl !== candidateUrl) {
+        if (!currentUrl || currentUrl !== candidateUrl) {
           armProbe();
           return;
         }
@@ -87,7 +87,6 @@ export function waitForStableTab({
         || changeInfo.status === 'loading'
         || changeInfo.status === 'complete';
       if (!navigationChanged) return;
-      latestStatus = String(changeInfo.status || tab.status || latestStatus);
       latestUrl = String(changeInfo.url || tab.url || latestUrl);
       armProbe();
     }
@@ -96,7 +95,6 @@ export function waitForStableTab({
     tabs.onUpdated.addListener(listener);
     void tabs.get(tabId)
       .then((tab) => {
-        latestStatus = String(tab?.status || latestStatus);
         latestUrl = String(tab?.url || latestUrl);
         armProbe();
       })

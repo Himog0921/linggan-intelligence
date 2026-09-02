@@ -614,6 +614,36 @@ test('stable tab wait retries a late content-script injection within the bounded
   assert.equal(listeners.size, 0);
 });
 
+test('stable tab wait accepts a quiet profile document before Chrome finishes long-tail loading', async () => {
+  const listeners = new Set();
+  const url = 'https://www.xiaohongshu.com/user/profile/creator-id';
+  let probes = 0;
+  const tabs = {
+    onUpdated: {
+      addListener(listener) { listeners.add(listener); },
+      removeListener(listener) { listeners.delete(listener); },
+    },
+    // XHS profile pages can remain in Chrome's loading state for images and long-polling after
+    // document_end has already installed the content runtime.
+    async get() { return { status: 'loading', url }; },
+    async sendMessage() {
+      probes += 1;
+      return { success: true, context: { url } };
+    },
+  };
+
+  assert.equal(await waitForStableTab({
+    tabs,
+    tabId: 44,
+    readinessAction: 'getPageContext',
+    timeoutMs: 150,
+    stableForMs: 5,
+    probeRetryMs: 5,
+  }), true);
+  assert.equal(probes, 1);
+  assert.equal(listeners.size, 0);
+});
+
 test('scheduled material lanes preserve the server task and submit one capability package', () => {
   const adapter = readFileSync(new URL('../src/linggan/contentRuntimeAdapter.js', import.meta.url), 'utf8');
   const detail = readFileSync(new URL('../src/platforms/xhs/detailPackageCollector.js', import.meta.url), 'utf8');
