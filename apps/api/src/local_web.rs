@@ -2,6 +2,7 @@ mod collection;
 mod collection_dispatch;
 mod collection_intake;
 mod collection_targets_view;
+mod collection_tasks_view;
 #[cfg(test)]
 mod evidence_page;
 #[cfg(test)]
@@ -54,8 +55,8 @@ use linggan_evidence::{
     ingest_discovery_package, issue_work_order_lease, list_targets, list_targets_in_state,
     local_discovery_schema_is_ready, local_producer_schema_is_ready,
     media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
-    producer_runtime_schema_is_ready, read_archive_completeness, read_discovery_library,
-    read_media_upload_session, read_runtime_capacity, read_runtime_library,
+    producer_runtime_schema_is_ready, read_archive_completeness, read_collection_task_timeline,
+    read_discovery_library, read_media_upload_session, read_runtime_capacity, read_runtime_library,
     read_scheduler_heartbeat, read_station_overview, read_target, read_target_avatars,
     record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
     register_station, release_media_upload_finalize, request_and_admit,
@@ -2255,12 +2256,30 @@ async fn collection_attention(State(state): State<LocalWebState>) -> Html<String
 }
 
 async fn collection_tasks(State(state): State<LocalWebState>) -> Html<String> {
-    render_simple_collection_surface(
-        &state,
+    let Some(database) = state.database.database() else {
+        return render_simple_collection_surface(
+            &state,
+            collection::Section::Tasks,
+            collection::OperationsMode::Now,
+        )
+        .await;
+    };
+    let (reads, timeline) = tokio::join!(
+        read_collection_surface(database),
+        read_collection_task_timeline(database, 100),
+    );
+    let base = collection::render(
         collection::Section::Tasks,
         collection::OperationsMode::Now,
-    )
-    .await
+        None,
+        None,
+        Some(&reads.surface_state),
+    );
+    match timeline {
+        Ok(timeline) => Html(collection_tasks_view::render_tasks(&base, &timeline)),
+        // The base says the narrower, truthful thing: this task read model is not available.
+        Err(_) => Html(base),
+    }
 }
 
 #[derive(serde::Deserialize)]

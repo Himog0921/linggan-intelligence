@@ -206,6 +206,46 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-runtime-main { min-width:0; display:flex; flex-direction:column; gap:32px; }
 .c-runtime-aside { min-width:0; display:flex; flex-direction:column; gap:32px; }
 
+/* COLLECTION-TASK-READ-001 · local Task / Attempt / Package / Receipt facts. */
+.c-tasks { padding:24px 20px 40px; }
+.c-task-summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); border-top:2px solid var(--v7-black); border-bottom:1px solid var(--v7-line-strong); }
+.c-task-summary > div { padding:14px 16px 15px 0; }
+.c-task-summary b { display:block; color:var(--v7-black); font-size:24px; line-height:1; letter-spacing:-.05em; }
+.c-task-summary span { display:block; margin-top:6px; color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.1em; }
+.c-task-boundary { margin:14px 0 22px; max-width:780px; color:var(--v7-muted); font-size:12px; line-height:1.65; }
+.c-task-list { border-top:1px solid var(--v7-line-strong); }
+.c-task-row { padding:19px 0 18px; border-bottom:1px solid var(--v7-line); }
+.c-task-head { display:flex; justify-content:space-between; align-items:flex-start; gap:24px; }
+.c-task-kicker, .c-task-created { margin:0; color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.08em; text-transform:uppercase; }
+.c-task-row h2 { margin:6px 0 0; color:var(--v7-black); font-size:17px; font-weight:850; letter-spacing:-.03em; }
+.c-task-target { margin:7px 0 0; color:var(--v7-muted); font-size:12px; }
+.c-task-target b { color:var(--v7-body); }
+.c-task-target code, .c-task-history code { font:700 10px var(--lgi-font-mono); color:var(--v7-ghost); }
+.c-task-state { flex:0 0 172px; padding:9px 11px; border-left:3px solid var(--v7-line-strong); background:var(--v7-gray); }
+.c-task-state b { display:block; color:var(--v7-black); font-size:12px; }
+.c-task-state span { display:block; margin-top:3px; color:var(--v7-muted); font-size:11px; line-height:1.35; }
+.c-task-state-ok { border-color:var(--v7-ok); background:var(--v7-ok-soft); }
+.c-task-state-live { border-color:var(--v7-red); background:var(--v7-soft-red); }
+.c-task-state-warn { border-color:var(--v7-warn); background:var(--v7-warn-soft); }
+.c-task-state-wait { border-color:var(--v7-line-strong); background:var(--v7-gray); }
+.c-task-facts { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin:17px 0 0; }
+.c-task-facts div { min-width:0; }
+.c-task-facts dt { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.1em; }
+.c-task-facts dd { margin:6px 0 0; color:var(--v7-body); font-size:11px; line-height:1.55; overflow-wrap:anywhere; }
+.c-task-effect { display:inline-block; margin:4px 0 0; color:var(--v7-ghost); font:700 9px var(--lgi-font-mono); letter-spacing:.08em; }
+.c-task-history { margin:14px 0 0; padding-left:10px; border-left:2px solid var(--v7-warn); color:var(--v7-muted); font-size:11px; line-height:1.55; }
+.c-task-created { margin-top:14px; }
+.c-task-empty { padding:34px 20px 40px; }
+.c-task-empty h2 { margin:0; color:var(--v7-black); font-size:22px; letter-spacing:-.04em; }
+.c-task-empty p { margin:9px 0 0; max-width:600px; color:var(--v7-muted); font-size:13px; line-height:1.65; }
+
+@media (max-width:900px) {
+  .c-task-summary { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .c-task-head { flex-direction:column; gap:12px; }
+  .c-task-state { width:100%; flex-basis:auto; }
+  .c-task-facts { grid-template-columns:1fr; gap:11px; }
+}
+
 /* 第一层：一个判断，不是一串读数。整块底色，不用侧边色条。 */
 .c-verdict { padding:20px 24px 24px; background:var(--v7-sunken); }
 .c-verdict-partial { background:var(--v7-warn-soft); }

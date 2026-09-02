@@ -4,6 +4,7 @@
 mod acquisition_chain;
 mod archive_completeness;
 mod collection_target;
+mod collection_task_read;
 mod content_reobservation;
 mod dispatch;
 mod execution_station;
@@ -47,6 +48,9 @@ pub use collection_target::{
     CollectionTargetError, ObservationTarget, ObservationTargetAvatar, StoreOutcome, TargetCounts,
     collection_target_schema_is_ready, count_targets, list_targets, list_targets_in_state,
     read_target, read_target_avatars, store_pending_target, transition_target,
+};
+pub use collection_task_read::{
+    CollectionTaskExecution, CollectionTaskTimeline, read_collection_task_timeline,
 };
 pub use content_reobservation::{
     ContentReobservation, ContentReobservationEligibility, ContentReobservationError,
