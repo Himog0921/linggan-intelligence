@@ -1,9 +1,9 @@
 # UI 协作 Agent 执行合同
 
 > 状态: 权威当前
-> 最后核对: 2026-08-21
+> 最后核对: 2026-09-02
 > 适用范围: 所有创建、修改、审查或验收 Linggan 用户可见 UI、前端组件、页面交互、状态文案、视觉资产和 UI 自动验证的 Agent
-> 事实来源: AGENTS.md、docs/governance/、docs/design/、LIDS v2.0、当前 SCOPE、产品/数据合同和用户对 DESIGN-001/DESIGN-002 的授权
+> 事实来源: AGENTS.md、docs/governance/、docs/design/、LIDS v7.0、当前 SCOPE、产品/数据合同和用户对 DESIGN-001/DESIGN-002/DESIGN-010 的授权
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策和当前 SCOPE；本合同不自行扩大任何授权
 
 本合同让 UI Agent 成为已批准设计的执行者和问题发现者，而不是新的产品负责人、视觉总监、权限裁定者或事实来源。
@@ -27,7 +27,18 @@ UI Agent 面向的用户结果是一个交付包，不是一串文件修改。Mo
 
 1. 核对 Issue 分配、Claim、独立 branch/worktree 和文件所有权；
 2. 阅读 AGENTS.md、docs/README.md、docs/current-state.md；
-3. 阅读 [../design/README.md](../design/README.md)、[../design/design-governance.md](../design/design-governance.md) 与 [../design/lids/README.md](../design/lids/README.md)；
+3. 阅读 [../design/README.md](../design/README.md)、[../design/design-governance.md](../design/design-governance.md) 与 [../design/lids/README.md](../design/lids/README.md)；再按本次事项进入相关的 LIDS 分册：
+
+   | 事项涉及 | 必读 |
+   |---|---|
+   | 任何视觉值 | [../design/lids/tokens.md](../design/lids/tokens.md) —— 注意 §2 是目标态、§3 是运行时现状，两者不可互相冒充 |
+   | 背景、纹理、边缘 | [../design/lids/materials.md](../design/lids/materials.md) |
+   | 页头或 Context Bar | [../design/lids/shell-zones.md](../design/lids/shell-zones.md) |
+   | 承载真实数据的组件 | [../design/lids/data-boundaries.md](../design/lids/data-boundaries.md) |
+   | 任何界面文案 | [../design/lids/language-policy.md](../design/lids/language-policy.md) 的 LANG-05 |
+   | 想破一条规则 | [../design/lids/decisions.md](../design/lids/decisions.md) —— 先确认这条是否已被决定过 |
+
+   **读 LIDS 时必须分清「规则已采纳」与「运行时已符合」。** DESIGN-010 之后多数条款是前者：新工作按 v7.0 执行，但现有代码仍停在 v2.0 口径。不得把现有实现当作合规先例，也不得声称代码已符合 v7.0；
 4. 按任务读取相应的 LIDS Token、Primitive、Pattern、Agent guide 或原型审计；先定 `Token → Primitive → Component → Pattern → Page` 和 L1/L2/L3，后写任何视觉实现；
 5. 阅读与本次 UI 事项直接相关的产品页面文档、已批准页面/组件/模式规格、数据/权限/行动合同和当前 SCOPE；
 6. 在 Issue、计划或 PR 中填写 [../design/templates/ui-change-manifest-form.md](../design/templates/ui-change-manifest-form.md) 所要求的读取回执、范围、非目标、分类、文件边界、停止条件和验证计划，并附本交付包的表面、状态、依赖和验收矩阵。

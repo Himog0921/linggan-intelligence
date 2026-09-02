@@ -21,6 +21,11 @@ required_files=(
   "docs/design/lids/primitives.md"
   "docs/design/lids/patterns.md"
   "docs/design/lids/agent-execution-guide.md"
+  "docs/design/lids/language-policy.md"
+  "docs/design/lids/materials.md"
+  "docs/design/lids/shell-zones.md"
+  "docs/design/lids/data-boundaries.md"
+  "docs/design/lids/decisions.md"
   "docs/design/lids/prototype-audit.md"
   "docs/design/lids/migration-log.md"
   "docs/design/templates/page-spec-form.md"
@@ -57,6 +62,11 @@ indexed_paths=(
   "design/lids/primitives.md"
   "design/lids/patterns.md"
   "design/lids/agent-execution-guide.md"
+  "design/lids/language-policy.md"
+  "design/lids/materials.md"
+  "design/lids/shell-zones.md"
+  "design/lids/data-boundaries.md"
+  "design/lids/decisions.md"
   "design/lids/prototype-audit.md"
   "design/lids/migration-log.md"
   "design/templates/page-spec-form.md"
@@ -101,6 +111,59 @@ fi
 
 if ! grep -Fq 'PROPOSED' docs/design/lids/README.md; then
   report_error "LIDS entrypoint must state its current maturity"
+fi
+
+# --- LIDS v7.0 invariants (DESIGN-010) ---
+
+if ! grep -Fq 'LIDS v7.0' docs/design/lids/README.md; then
+  report_error "LIDS entrypoint must declare the adopted standard version (v7.0)"
+fi
+
+# The material system is one lattice in six states, with a measurable budget.
+for needle in '8px' '70%' 'M-05'; do
+  if ! grep -Fq "$needle" docs/design/lids/materials.md; then
+    report_error "material grammar is missing a required invariant: $needle"
+  fi
+done
+
+# The silent zone is the one protected blank in the product. It must stay stated.
+if ! grep -Fq '任何文字、数字、图标、按钮——无例外' docs/design/lids/shell-zones.md; then
+  report_error "shell zones must keep the silent-zone prohibition verbatim"
+fi
+
+# Four data extremes are an admission condition for components, not a nice-to-have.
+if ! grep -Fq '没有跑通这四种情况的组件不算完成' docs/design/lids/data-boundaries.md; then
+  report_error "data boundaries must keep the component admission rule"
+fi
+
+# The ADR ledger must keep rule-state and runtime-state as separate columns,
+# because collapsing them is how "adopted" gets misreported as "shipped".
+for needle in '规则状态' '运行时状态' 'ADR-P01' 'ADR-P02'; do
+  if ! grep -Fq "$needle" docs/design/lids/decisions.md; then
+    report_error "decision ledger is missing a required column or entry: $needle"
+  fi
+done
+
+# English in the UI is budgeted to three Mono categories.
+if ! grep -Fq 'LANG-05' docs/design/lids/language-policy.md; then
+  report_error "language policy must carry the LANG-05 Mono budget"
+fi
+
+# tokens.md now carries a target architecture AND the runtime mirror. Both must stay named,
+# or the next agent will write v7 token names straight into the runtime stylesheet.
+for needle in 'L1 PRIMITIVE' 'L2 SEMANTIC' 'L3 GEOMETRY' 'apps/api/src/local_web/lids_tokens.css'; do
+  if ! grep -Fq "$needle" docs/design/lids/tokens.md; then
+    report_error "token baseline is missing a required layer or runtime source: $needle"
+  fi
+done
+
+# The runtime mirror must stay byte-identical to the runtime source.
+if [[ -f apps/api/src/local_web/lids_tokens.css ]]; then
+  runtime_tokens="$(grep -o '^[[:space:]]*--lgi-[a-z0-9-]*:.*$' apps/api/src/local_web/lids_tokens.css | sed 's/^[[:space:]]*//' | sort)"
+  documented_tokens="$(grep -o '^[[:space:]]*--lgi-[a-z0-9-]*:.*$' docs/design/lids/tokens.md | sed 's/^[[:space:]]*//' | sort)"
+  if [[ "$runtime_tokens" != "$documented_tokens" ]]; then
+    report_error "docs/design/lids/tokens.md is no longer an exact mirror of apps/api/src/local_web/lids_tokens.css"
+  fi
 fi
 
 while IFS= read -r directory; do

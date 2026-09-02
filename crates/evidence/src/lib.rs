@@ -117,7 +117,8 @@ pub use runtime_capacity::{
     RuntimeCapacityOverview, read_runtime_capacity,
 };
 pub use station_read::{
-    StationOverview, UnclaimedInstallation, read_station_overview, station_daily_note_usage,
+    CapabilityState, StationCapability, StationOverview, UnclaimedInstallation,
+    read_station_capabilities, read_station_overview, station_daily_note_usage,
 };
 pub use target_enrichment::{
     TargetEnrichmentError, TargetSyncOutcome, sync_target_from_author_profile,

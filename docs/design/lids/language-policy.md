@@ -1,10 +1,12 @@
 # LIDS-LANG-001 · 中文优先的界面语言规则
 
 > 状态: 权威当前
-> 最后核对: 2026-08-26
+> 最后核对: 2026-09-02
 > 适用范围: Linggan Intelligence 全部面向用户的运行时 Web UI；首个落地页面为 `PAGE-EVIDENCE-001 /corpus/evidence`
-> 事实来源: Mog 对 Evidence Library 的明确确认「中文为主，英文只用来装饰或作为注释」、AGENTS.md、UI 协作 Agent 执行合同、LIDS-SYS-001、LIDS-PRI-001、PAGE-EVIDENCE-001 与 LOCAL-001C0 数据合同
+> 事实来源: Mog 对 Evidence Library 的明确确认「中文为主，英文只用来装饰或作为注释」、Mog 于 2026-09-02 指定的 `linggan-design-system-v7.html`（§03 Mono 预算、§04 壳层违规样本）、AGENTS.md、UI 协作 Agent 执行合同、LIDS-SYS-001、LIDS-PRI-001、PAGE-EVIDENCE-001 与 LOCAL-001C0 数据合同
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策与当前 SCOPE；本规则只约束表达，不改写事实、权限、数据或行动
+
+> **DESIGN-010（2026-09-02）收窄了本规则的执行口径。** 原 LANG-02 允许英文技术键紧邻任何中文出现，实践中扩散为满屏中英成对。v7 把「中英对照并列」明确列为违规，并给出 Mono 预算：只有三类内容可以是英文。新增的 LANG-05 是本规则现在的执行口径，与 LANG-01/03/04 一并生效。
 
 ## 1. 规则与目的
 
@@ -35,6 +37,8 @@
 
 技术键应使用 Mono、小于或等于同层中文正文的视觉权重；它是注释，不是第二语言版页面。不得把大段英文、全大写英文或机器字段名做成比中文更显眼的标题、按钮或状态标签。
 
+**本条自 DESIGN-010 起受 LANG-05 的 Mono 预算约束**：满足 LANG-02 的形式要求（紧邻、Mono、权重更低）只是必要条件，还必须落在 LANG-05 的三类之内。
+
 ### LANG-03 · 数据诚实性优先于翻译整齐
 
 本规则不得改变原始材料、数据合同或状态资格：
@@ -62,9 +66,47 @@
 | 发布时间未知 | `PUBLISHED_AT UNKNOWN` | `PUBLISHED_AT UNKNOWN` |
 | 媒体尚未采集 | `MEDIA NOT ACQUIRED` | `MEDIA NOT ACQUIRED` |
 | 创作者未知 | `CREATOR UNKNOWN` | `CREATOR UNKNOWN` |
-| 已接纳的本机发现材料 | `ACCEPTED RUNTIME MATERIAL` | `ACCEPTED RUNTIME MATERIAL` |
+| 已接纳的本机发现材料 | ~~`ACCEPTED RUNTIME MATERIAL`~~ 见下 | `ACCEPTED RUNTIME MATERIAL` |
 | 搜索位置 #17 | `POSITION #17` | `POSITION #17` |
-| 观察到 / 配额 | `OBSERVED / QUOTA` | `OBSERVED / QUOTA` |
+| 观察到 / 配额 | ~~`OBSERVED / QUOTA`~~ 见下 | `OBSERVED / QUOTA` |
+
+> **DESIGN-010 对本表的修正**：`ACCEPTED RUNTIME MATERIAL` 与 `OBSERVED / QUOTA` 是**描述性标签**，不是状态枚举值，因此按 LANG-05 应整条删除英文，只保留中文——它们在本表中作为"允许的旁注"是 v2.0 时代的口径，已被收窄。`PUBLISHED_AT UNKNOWN`、`MEDIA NOT ACQUIRED`、`CREATOR UNKNOWN` 保留，因为 `UNKNOWN` / `NOT_ACQUIRED` 是数据合同中的字面取值。`POSITION #17` 保留，因为它是结构编号。
+
+### LANG-05 · Mono 预算：三类允许，其余一律中文
+
+英文技术旁注**不是"可以随处加的注释"**，它有预算。它扩散的速度比背景纹理更快，代价是中文用户的扫读成本——每一对中英并列都让用户多读一遍同一件事。
+
+**只有这三类可以是英文：**
+
+| 类别 | 内容 | 例 |
+|---|---|---|
+| 1 · 机器事实 | ID、时间戳、版本号、配额、数值读数 | `WORK-8D0EB837` · `09:42:11` · `UTC+08` |
+| 2 · 系统状态枚举 | **有限且稳定**的状态词 | `PATROLLING` · `PARTIAL` · `INTERRUPTED` · `UNKNOWN` |
+| 3 · 结构编号 | 章节序号、卡片序号、图注编号 | `01` · `FIG 01` · `ES-24-001` |
+
+**第四类——描述性标签——禁止。** 它必须只用中文，不配英文对照：
+
+| 禁止 | 必须写成 |
+|---|---|
+| `MONITOR TARGET` | 监控目标 |
+| `BODY / COMMENT / MEDIA / OCR` | 正文 · 评论 · 媒体 · OCR |
+| `SINCE LAST PATROL` | 距上次巡逻 |
+| `LOCAL MATERIAL PROJECTION` | 本机材料投影 |
+| `NO LEGACY FALLBACK` | （属系统策略，移出界面到设置页） |
+
+判据机械且不需要讨论：**这个英文词，是不是一个可枚举的状态值、一个机器标识、或一个编号？不是，就删掉它，只留中文。**
+
+### 状态枚举的边界
+
+第 2 类之所以允许，是因为状态词是**闭集**——`PARTIAL` 在系统里始终是同一个值，用户学一次就够了，且它与日志、API、审计中出现的是同一个字符串。
+
+这条不适用于"看起来像状态词的描述"。`ACCEPTED DISCOVERY` 不是一个状态枚举值，它是对一批材料的描述，因此走第四类：只写中文。
+
+判断方法：**这个词在数据合同里是不是一个字面取值？** 是则允许，否则禁止。这让规则可以对着合同核对，而不是靠语感。
+
+### 时区与单位
+
+同一事实不得同时写全称与代号。`本机时区 / 中国标准时间 / UTC+08` 三写同一件事，**界面里永远只留代号**。见 [shell-zones.md](shell-zones.md) 的 D 锚点区。
 
 ## 3. 不适用与非目标
 
@@ -80,9 +122,13 @@
 
 1. 全部用户可读操作、状态和空态是否有中文独立表达；
 2. 英文技术键是否紧邻对应中文，且视觉权重不高于中文；
-3. `UNKNOWN`、`NOT_ACQUIRED`、`DISCOVERY_ONLY`、部分 Coverage 等是否仍保留准确合同含义；
-4. 原始用户材料是否未被翻译或改写；
-5. 默认读取、严格发布时间窗口、空态和已有材料卡片是否仍通过原有数据边界测试。
+3. **每一处英文是否落在 LANG-05 的三类之内**——逐条对照数据合同确认它是字面取值、机器标识或编号；不是则删除英文；
+4. 同一事实是否只写了一次（时区不得全称与代号并存，状态不得中英各写一遍）；
+5. `UNKNOWN`、`NOT_ACQUIRED`、`DISCOVERY_ONLY`、部分 Coverage 等是否仍保留准确合同含义；
+6. 原始用户材料是否未被翻译或改写；
+7. 默认读取、严格发布时间窗口、空态和已有材料卡片是否仍通过原有数据边界测试。
+
+第 3 条建议由自动检查执行：扫描渲染产物中的 `.v7-tech-key`（或其后继类名）内容，对照数据合同的字面取值集合与编号正则，不在集合内即失败。当前尚未实现该检查，属 DESIGN-010 欠账。
 
 截图或字符串检查只能证明当前工作条件下的文案与呈现；它们不证明原始材料真实性、媒体取得、平台采集、详情/评论、趋势或业务结论。
 
@@ -93,3 +139,20 @@
 - 数据语义来源：`LOCAL-001C0-DISCOVERY-BOUNDARY-V1`；
 - 视觉来源：`LIDS-SYS-001`、`LIDS-PRI-001` 和既有 Token；不新增 Token、CMP 或页面骨架；
 - 后续页面迁移须另立 Issue、Change Manifest 与验收记录。不得因本规则已建立，就对其他页面进行无界扫改。
+
+## 6. LANG-05 的迁移欠账（DESIGN-010，2026-09-02）
+
+LANG-05 是**规则层**收窄，运行时**尚未迁移**。现有页面中大量 `v7-tech-key` 属于被禁的第四类描述性标签。已知欠账：
+
+| 位置 | 已知违规样例 | 处置 |
+|---|---|---|
+| `apps/api/src/local_web/shell.rs` | 一级导航中英并列、`LOCAL MATERIAL PROJECTION`、时区全称与代号并存 | 按 [shell-zones.md](shell-zones.md) 的区位表一次性收敛 |
+| `apps/api/src/local_web/evidence_page.rs` | `ACCEPTED DISCOVERY`、`LOCAL READ ONLY`、`NO MATERIAL READ`、`LOCAL HOST` 等描述性标签 | 逐条对照数据合同判定，非字面取值者删除英文 |
+
+两处**不在本次范围内**，须各自另立受控事项。在迁移完成前：
+
+- 新写的界面文案一律直接按 LANG-05 执行，不得以"和旁边保持一致"为由继续新增中英对照；
+- 已存在的违规不得被引用为先例；
+- 不得为消除违规而顺手改写状态词、字段名或数据含义——删除的只是英文**描述性标签**，`UNKNOWN` 一类字面取值必须原样保留。
+
+命名冲突提醒：运行时 CSS 类前缀 `v7-*` 来自 `REF-V7-001`（Evidence Library 页面 Gold Master），**与本次的设计系统 v7.0 无关**。迁移时不要把两者当成同一件事。

@@ -47,9 +47,9 @@ use linggan_evidence::{
     InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
     LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget, MediaUploadFinalizeClaim,
     ObservationTargetAvatar, ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeCapacityOverview,
-    RuntimeSubmissionOutcome, RuntimeTaskOutcome, StationOverview, StoreOutcome, TargetCounts,
-    UnclaimedInstallation, WorkResourceReadError, admit_media_blob, begin_media_upload,
-    check_in_installation, claim_installation, claim_media_acquisition,
+    RuntimeSubmissionOutcome, RuntimeTaskOutcome, StationCapability, StationOverview, StoreOutcome,
+    TargetCounts, UnclaimedInstallation, WorkResourceReadError, admit_media_blob,
+    begin_media_upload, check_in_installation, claim_installation, claim_media_acquisition,
     claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
     create_manual_task, create_producer_task, dispatch_schema_is_ready, grant_authorization,
     ingest_discovery_package, issue_work_order_lease, list_targets, list_targets_in_state,
@@ -57,9 +57,9 @@ use linggan_evidence::{
     media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_archive_completeness, read_collection_task_timeline,
     read_discovery_library, read_media_upload_session, read_runtime_capacity, read_runtime_library,
-    read_scheduler_heartbeat, read_station_overview, read_target, read_target_avatars,
-    record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
-    register_station, release_media_upload_finalize, request_and_admit,
+    read_scheduler_heartbeat, read_station_capabilities, read_station_overview, read_target,
+    read_target_avatars, record_media_acquisition_failure, record_media_download_failure,
+    record_media_upload_chunk, register_station, release_media_upload_finalize, request_and_admit,
     request_and_admit_material_targets, retire_station, set_group_for_many,
     set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
     station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
@@ -70,7 +70,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::{BTreeSet, HashMap},
+    collections::{BTreeMap, BTreeSet, HashMap},
     fs,
     io::{BufReader, Error, ErrorKind, Read, Seek, SeekFrom, Write},
     net::{Ipv4Addr, SocketAddr},
@@ -2338,12 +2338,23 @@ async fn collection_runtime(
         None,
         Some(&reads.surface_state),
     );
+    // 能力矩阵按工位逐台读。工位是个位数，一台一次查询换来的是「这一项到底跑成过没有」
+    // 这个问题有据可答；读不到的那台留空，由页面说「读不到」，不冒充「没有能力」。
+    let mut capabilities: BTreeMap<uuid::Uuid, Vec<StationCapability>> = BTreeMap::new();
+    if let Some((stations, _)) = reads.roster.as_ref() {
+        for station in stations.iter() {
+            if let Ok(rows) = read_station_capabilities(database, station.station_ref).await {
+                capabilities.insert(station.station_ref, rows);
+            }
+        }
+    }
     let rendered = match reads.roster.as_ref() {
         Some((stations, unclaimed)) => station_view::render_runtime(
             &base,
             reads.capacity.as_ref(),
             stations,
             unclaimed,
+            &capabilities,
             params.error.as_deref(),
         ),
         None => station_view::render_runtime_with_unreadable_roster(

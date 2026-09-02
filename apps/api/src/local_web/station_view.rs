@@ -13,9 +13,14 @@
 //! 是手写的，全部由 `read_runtime_capacity` 的事实推出。
 
 use linggan_evidence::{
-    ACCOUNT_CHECK_NOT_CONNECTED, LaneVerdict, RuntimeCapacityOverview, StationOverview,
-    UnclaimedInstallation,
+    ACCOUNT_CHECK_NOT_CONNECTED, CapabilityState, LaneVerdict, RuntimeCapacityOverview,
+    StationCapability, StationOverview, UnclaimedInstallation,
 };
+use std::collections::BTreeMap;
+use uuid::Uuid;
+
+/// 工位能力矩阵。缺一台的条目表示这台工位的能力读不到，与「没有能力」不是一回事。
+pub type CapabilityMatrix = BTreeMap<Uuid, Vec<StationCapability>>;
 
 /// 登记工位与认领安装都不消耗任何平台访问——它们只是在本地记下「这台机器是谁」。
 /// 因此这一页允许出现真实可点的按钮，而会触发平台访问的控件仍然不存在。
@@ -34,9 +39,16 @@ pub fn render_runtime(
     overview: Option<&RuntimeCapacityOverview>,
     stations: &[StationOverview],
     unclaimed: &[UnclaimedInstallation],
+    capabilities: &CapabilityMatrix,
     error: Option<&str>,
 ) -> String {
-    render_runtime_with_roster(base, overview, Some((stations, unclaimed)), error)
+    render_runtime_with_roster(
+        base,
+        overview,
+        Some((stations, unclaimed)),
+        capabilities,
+        error,
+    )
 }
 
 /// Capacity and heartbeat can remain readable while the station roster query fails. The
@@ -46,13 +58,14 @@ pub fn render_runtime_with_unreadable_roster(
     overview: Option<&RuntimeCapacityOverview>,
     error: Option<&str>,
 ) -> String {
-    render_runtime_with_roster(base, overview, None, error)
+    render_runtime_with_roster(base, overview, None, &CapabilityMatrix::new(), error)
 }
 
 fn render_runtime_with_roster(
     base: &str,
     overview: Option<&RuntimeCapacityOverview>,
     roster: Option<(&[StationOverview], &[UnclaimedInstallation])>,
+    capabilities: &CapabilityMatrix,
     error: Option<&str>,
 ) -> String {
     let Some(open) = base.find(EMPTY_STATE_OPEN) else {
@@ -73,7 +86,7 @@ fn render_runtime_with_roster(
               </div>
             </div>"#,
         verdict = verdict_markup(overview, stations),
-        roster = roster_markup(roster),
+        roster = roster_markup(roster, capabilities),
         console = console_markup(stations.unwrap_or_default(), error),
         bounds = bounds_markup(overview),
     );
@@ -245,7 +258,10 @@ fn factor_markup(
 // 第三层：构成这些值的对象
 // ---------------------------------------------------------------------------
 
-fn roster_markup(roster: Option<(&[StationOverview], &[UnclaimedInstallation])>) -> String {
+fn roster_markup(
+    roster: Option<(&[StationOverview], &[UnclaimedInstallation])>,
+    capabilities: &CapabilityMatrix,
+) -> String {
     let Some((stations, unclaimed)) = roster else {
         return r#"<section class="c-roster">
               <div class="c-roster-head">
@@ -266,7 +282,10 @@ fn roster_markup(roster: Option<(&[StationOverview], &[UnclaimedInstallation])>)
         &if stations.is_empty() {
             r#"<p class="c-roster-empty">还没有登记任何工位。这不是「等工程」——登记一台是你现在就能做的事，右边就是入口。</p>"#.to_owned()
         } else {
-            stations.iter().map(station_row).collect::<String>()
+            stations
+                .iter()
+                .map(|station| station_row(station, capabilities.get(&station.station_ref)))
+                .collect::<String>()
         },
     ));
 
@@ -309,7 +328,7 @@ fn group(title: &str, count: usize, note: Option<&str>, rows: &str) -> String {
     )
 }
 
-fn station_row(station: &StationOverview) -> String {
+fn station_row(station: &StationOverview, capabilities: Option<&Vec<StationCapability>>) -> String {
     // 在岗与空缺是两件不同的事，不能都渲染成一片灰。
     let (state_label, state_class, plugin_line) = match station.active_plugin_version.as_deref() {
         Some(version) => {
@@ -360,7 +379,9 @@ fn station_row(station: &StationOverview) -> String {
                   <input type="hidden" name="station_ref" value="{station_ref}" />
                   <button class="c-btn-quiet" type="submit">停用</button>
                 </form>
+                {matrix}
               </div>"#,
+        matrix = capability_matrix_markup(capabilities),
         station_ref = station.station_ref,
         name = escape(&station.display_name),
         plugin = escape(&plugin_line),
@@ -369,6 +390,106 @@ fn station_row(station: &StationOverview) -> String {
         used = station.daily_notes_used,
         quota = station.daily_work_quota,
         state = escape(state_label),
+    )
+}
+
+/// 能力的中文名。机器名是合同里的字面取值，中文名是给人读的——两者并存，中文在前。
+///
+/// 未登记的能力名原样显示机器名：编一个中文名出来，等于假装我们知道它是什么。
+fn capability_label(capability: &str) -> &str {
+    match capability {
+        "discovery_search" => "搜索发现",
+        "profile_discovery" => "主页发现",
+        "author_profile" => "作者档案",
+        "content_detail" => "内容详情",
+        "comments" => "评论",
+        "replies" => "评论回复",
+        "media_slots" => "媒体",
+        "xhs.pageAccess" => "页面访问",
+        other => other,
+    }
+}
+
+/// 能力矩阵。
+///
+/// 这一格回答的是「这台工位这项能力，最近还跑得成吗」。它有三个必须分开的判断，
+/// 合并任意两个都会让这一格开始说假话：
+///
+/// - **未验证不是降级。** 声明支持但窗口内没派过活，我们没有证据说它坏了。写成降级
+///   会让人去修一台没坏的机器；写成就绪则是拿没验证过的东西当已验证。
+/// - **执行失败不是能力缺陷。** 页面超时、标签页丢失是这一次没成，不是这项干不了。
+///   只有插件明确回 `capability_not_executable_here` 才是能力级降级。超时次数单独显示，
+///   因为连续超时值得看见，但它不该让「作者档案」这项显示成坏的。
+/// - **读不到不是没有。** 整块读不到时说读不到，不渲染成一排「不支持」。
+fn capability_matrix_markup(capabilities: Option<&Vec<StationCapability>>) -> String {
+    let Some(rows) = capabilities else {
+        return r#"<div class="c-caps c-caps-unreadable">能力矩阵当前读不到。这不表示这台工位没有能力，只表示这一项此刻答不出。</div>"#
+            .to_owned();
+    };
+    if rows.is_empty() {
+        return r#"<div class="c-caps c-caps-unreadable">这台工位还没有能力记录：在岗插件没有声明能力，近 7 天也没有产出或失败。</div>"#
+            .to_owned();
+    }
+
+    let mut cells = String::new();
+    for row in rows {
+        let (state_word, state_class, detail) = match row.state() {
+            CapabilityState::Ready => (
+                "就绪",
+                "c-cap-ready",
+                match row.last_success_at.as_deref() {
+                    Some(at) => format!("{} 次 · 最后 {at}", row.successes),
+                    None => format!("{} 次", row.successes),
+                },
+            ),
+            CapabilityState::Degraded => (
+                "降级",
+                "c-cap-degraded",
+                match row.last_failure_at.as_deref() {
+                    Some(at) => format!("插件回报跑不了 · 最后 {at}"),
+                    None => "插件回报跑不了".to_owned(),
+                },
+            ),
+            // 没有证据时说没有证据。这一格的存在本身就是为了不让它被读成「正常」。
+            CapabilityState::Unverified => (
+                "未验证",
+                "c-cap-unverified",
+                "近 7 天没派过这种活".to_owned(),
+            ),
+            CapabilityState::NotDeclared => (
+                "不支持",
+                "c-cap-undeclared",
+                "在岗插件没有声明这一项".to_owned(),
+            ),
+        };
+        // 执行失败与能力状态分开表达：它是一条附注，不是这一格的判定。
+        let hiccups = if row.execution_failures > 0 {
+            format!(
+                r#"<em class="c-cap-hiccup">另有 {} 次执行失败（超时或标签页不可用），不是能力问题</em>"#,
+                row.execution_failures
+            )
+        } else {
+            String::new()
+        };
+        cells.push_str(&format!(
+            r#"<div class="c-cap {state_class}">
+                  <b>{label}</b>
+                  <span class="c-cap-state">{state_word}</span>
+                  <span class="c-cap-detail">{detail}</span>
+                  <code>{machine}</code>
+                  {hiccups}
+                </div>"#,
+            label = escape(capability_label(&row.capability)),
+            machine = escape(&row.capability),
+            detail = escape(&detail),
+        ));
+    }
+
+    format!(
+        r#"<div class="c-caps">
+              <div class="c-caps-head">能力矩阵<span>近 7 天</span></div>
+              <div class="c-caps-grid">{cells}</div>
+            </div>"#
     )
 }
 
@@ -670,7 +791,7 @@ mod tests {
     fn nothing_registered_still_offers_the_one_thing_the_person_can_do() {
         // The empty state this replaces says "这一栏不需要你做任何事". Registering a station
         // is now a real action, so leaving that text in place would be a lie.
-        let rendered = render_runtime(&base(), None, &[], &[], None);
+        let rendered = render_runtime(&base(), None, &[], &[], &CapabilityMatrix::new(), None);
         assert!(rendered.contains("/collection/runtime/stations"));
         assert!(!rendered.contains("这一栏不需要你做任何事"));
         // Nothing exists to open a window on or claim yet, so neither control is offered.
@@ -687,6 +808,7 @@ mod tests {
             Some(&overview(vec![lane("巡检", available())])),
             &[station(Some("0.5.2"), 0)],
             &[],
+            &CapabilityMatrix::new(),
             None,
         );
         for frozen in [
@@ -716,6 +838,7 @@ mod tests {
             )])),
             &[station(Some("0.5.2"), 0)],
             &[],
+            &CapabilityMatrix::new(),
             None,
         );
         assert!(rendered.contains("接不了活"));
@@ -733,6 +856,7 @@ mod tests {
             ])),
             &[],
             &[],
+            &CapabilityMatrix::new(),
             None,
         );
         assert!(rendered.contains("部分接不了活"));
@@ -747,6 +871,7 @@ mod tests {
             Some(&overview(vec![lane("巡检", available())])),
             &[],
             &[],
+            &CapabilityMatrix::new(),
             None,
         );
         assert!(rendered.contains("不参与判定"));
@@ -756,7 +881,7 @@ mod tests {
     #[test]
     fn unreadable_capacity_is_not_reported_as_no_capacity() {
         // 「读不到」与「接不了活」是两个不同的说法，处置也不同。
-        let rendered = render_runtime(&base(), None, &[], &[], None);
+        let rendered = render_runtime(&base(), None, &[], &[], &CapabilityMatrix::new(), None);
         // 断言判定词本身，不是文案里出现过哪个词：说明句里正写着「这不表示系统接不了活」。
         assert!(rendered.contains(r#"c-verdict-state">读不到"#));
         assert!(!rendered.contains("c-verdict-blocked"));
@@ -780,7 +905,14 @@ mod tests {
     fn many_reinstalls_stay_one_station_with_a_visible_count() {
         // The failure this whole design exists to prevent: 内容工作台 turned 11 reinstalls
         // into 11 zombie stations. Here they must remain one station whose history is stated.
-        let rendered = render_runtime(&base(), None, &[station(Some("0.5.2"), 11)], &[], None);
+        let rendered = render_runtime(
+            &base(),
+            None,
+            &[station(Some("0.5.2"), 11)],
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+        );
         assert_eq!(rendered.matches("c-station-row").count(), 1);
         assert!(rendered.contains("换过 11 次插件"));
         assert!(rendered.contains("在岗"));
@@ -789,15 +921,32 @@ mod tests {
     #[test]
     fn a_failed_action_says_so_instead_of_looking_like_it_worked() {
         // 表单失败后只是跳转回来、什么都不说，会让人以为动作成功了。
-        let rendered = render_runtime(&base(), None, &[], &[], Some("station_rejected"));
+        let rendered = render_runtime(
+            &base(),
+            None,
+            &[],
+            &[],
+            &CapabilityMatrix::new(),
+            Some("station_rejected"),
+        );
         assert!(rendered.contains("没有完成"));
         assert!(rendered.contains("重复"));
-        assert!(!render_runtime(&base(), None, &[], &[], None).contains("没有完成"));
+        assert!(
+            !render_runtime(&base(), None, &[], &[], &CapabilityMatrix::new(), None)
+                .contains("没有完成")
+        );
     }
 
     #[test]
     fn a_station_with_no_plugin_reads_as_vacant_not_broken() {
-        let rendered = render_runtime(&base(), None, &[station(None, 0)], &[], None);
+        let rendered = render_runtime(
+            &base(),
+            None,
+            &[station(None, 0)],
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+        );
         assert!(rendered.contains("空缺"));
         assert!(rendered.contains("当前没有插件安装认领这台工位"));
         // A vacant station must never be dressed up with an invented plugin version.
@@ -812,7 +961,14 @@ mod tests {
             browser_label: None,
             first_seen_at: "2026-08-27 02:58".to_owned(),
         };
-        let rendered = render_runtime(&base(), None, &[], &[unclaimed], None);
+        let rendered = render_runtime(
+            &base(),
+            None,
+            &[],
+            &[unclaimed],
+            &CapabilityMatrix::new(),
+            None,
+        );
         assert!(rendered.contains("未归位"));
         assert!(rendered.contains("未知浏览器"));
     }
@@ -832,6 +988,7 @@ mod tests {
             None,
             &[station(Some("0.5.2"), 0)],
             &[unclaimed],
+            &CapabilityMatrix::new(),
             None,
         );
         assert_eq!(rendered.matches("它们不会被派活").count(), 1);
@@ -848,7 +1005,14 @@ mod tests {
             expires_at: "2026-08-29 09:00".to_owned(),
             has_task: false,
         }];
-        let rendered = render_runtime(&base(), Some(&data), &[], &[], None);
+        let rendered = render_runtime(
+            &base(),
+            Some(&data),
+            &[],
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+        );
         assert!(rendered.contains("尚未展开成任务"));
     }
 
@@ -861,6 +1025,7 @@ mod tests {
             Some(&overview(vec![lane("巡检", available())])),
             &[],
             &[],
+            &CapabilityMatrix::new(),
             None,
         );
         assert!(rendered.contains("没有任何目标开着巡检"));
@@ -875,6 +1040,7 @@ mod tests {
             Some(&overview(vec![lane("巡检", available())])),
             &[],
             &[],
+            &CapabilityMatrix::new(),
             None,
         );
         assert!(rendered.contains("从未"));
@@ -890,7 +1056,14 @@ mod tests {
             paused_by: "person".to_owned(),
             paused_at: "2026-08-29 07:00".to_owned(),
         }];
-        let rendered = render_runtime(&base(), Some(&data), &[], &[], None);
+        let rendered = render_runtime(
+            &base(),
+            Some(&data),
+            &[],
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+        );
         assert!(rendered.contains("1 条生效"));
     }
 }

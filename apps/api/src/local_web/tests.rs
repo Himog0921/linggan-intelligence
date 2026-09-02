@@ -1552,7 +1552,16 @@ fn operations_modes_are_addressable_and_the_stream_stays_honest() {
         None,
         None,
     );
-    assert!(now.contains("LIVE OBSERVATION"));
+    // DESIGN-010 · the panel names itself in Chinese now (LANG-05). The English that stays is
+    // the event-kind filters, which are literal contract values, not descriptive labels.
+    assert!(now.contains("实时观察流"));
+    assert!(!now.contains("LIVE OBSERVATION"));
+    for event_kind in ["DISCOVER", "CHANGE", "EXCEPTION"] {
+        assert!(
+            now.contains(event_kind),
+            "event kinds are contract literals and stay Mono: {event_kind}"
+        );
+    }
     assert!(now.contains("采集状态读不到"));
     assert!(now.contains("COLLECTION STATE UNAVAILABLE"));
     assert!(!now.contains("SCHEDULER NOT CONNECTED"));
@@ -1611,6 +1620,189 @@ fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
     let injected = collection::render_unreadable_target_drawer(Some("<script>alert(1)</script>"));
     assert!(!injected.contains("<script>alert(1)</script>"));
     assert!(injected.contains("&lt;script&gt;"));
+}
+
+/// DESIGN-010 · LIDS v7 on the Operations surface.
+///
+/// Two things this locks. First, the English descriptive labels that used to sit under every
+/// Chinese one are gone and must stay gone: LANG-05 budgets English to machine facts, closed-set
+/// state words and structural numbering, and none of these were any of those. The event-kind
+/// filters are the control case — they are contract literals, so they stay.
+///
+/// Second, the sampling lattice on the dark stream stays clipped to its top strip. An earlier
+/// build let the sweep travel the full panel height and it crossed the body copy, which is the
+/// one thing `materials.md` rules out outright: edges only, never behind running text.
+#[test]
+fn operations_reads_in_chinese_and_keeps_its_material_on_the_edge() {
+    let operations = collection::render(
+        collection::Section::Operations,
+        collection::OperationsMode::Now,
+        None,
+        None,
+        None,
+    );
+
+    for descriptive_english in [
+        "Target Intake",
+        "Baseline",
+        "Event Deepening",
+        "Evidence Retain",
+        "Recovery",
+        "SYSTEM CONCLUSION",
+        "LIVE OBSERVATION",
+        "SEMANTIC EVENTS ONLY",
+        "NO EVENT READ MODEL",
+        "READ MODEL UNAVAILABLE",
+    ] {
+        assert!(
+            !operations.contains(descriptive_english),
+            "descriptive labels read in Chinese only (LANG-05): {descriptive_english}"
+        );
+    }
+
+    // The Chinese that replaced them has to actually be there — deleting English without
+    // putting meaning back would pass the loop above and leave the page mute.
+    // This render passes no surface state, so both the conclusion and the stream resolve to the
+    // unreadable branch. That is the branch worth pinning: it is the one a reader hits when the
+    // system knows least, and the one most likely to decay back into an English status code.
+    for chinese in [
+        "系统结论",
+        "采集状态读不到",
+        "实时观察流",
+        "仅语义事件",
+        "目标接入",
+    ] {
+        assert!(
+            operations.contains(chinese),
+            "missing Chinese meaning: {chinese}"
+        );
+    }
+
+    // Closed-set state words survive as the Mono enum beside the Chinese, not instead of it.
+    assert!(operations.contains(r#"<span class="c-enum">UNKNOWN</span>"#));
+
+    // The lattice lives in a clipped strip. Without the clip the keyframes would carry it
+    // across the copy again, and the animation alone cannot express that boundary.
+    assert!(COLLECTION_WORKSPACE_CSS.contains(".c-stream-sweep { position:absolute;"));
+    assert!(
+        COLLECTION_WORKSPACE_CSS.contains("height:72px; overflow:hidden;"),
+        "the sweep must stay clipped to the top strip"
+    );
+    assert!(COLLECTION_WORKSPACE_CSS.contains("prefers-reduced-motion"));
+
+    // 1.5px borders blur at 1x. The v7 ladder has four widths and this is not one of them.
+    assert!(!COLLECTION_WORKSPACE_CSS.contains("1.5px solid"));
+}
+
+/// DESIGN-011 · 执行工位的能力矩阵与 v7 排版。
+///
+/// 矩阵的四态是这一页最容易退化的地方，因为把「未验证」写成「降级」在代码上只差一个分支，
+/// 在意义上却差了一台需不需要去修的机器。同理，超时是执行没成，不是能力干不了——两者
+/// 合并会让一次网络抖动看起来像插件坏了。这条测试把这两个区分钉住。
+#[test]
+fn station_capability_matrix_separates_unverified_from_degraded() {
+    use linggan_evidence::{CapabilityState, StationCapability};
+
+    let base = |capability: &str| StationCapability {
+        capability: capability.to_owned(),
+        declared: true,
+        successes: 0,
+        last_success_at: None,
+        capability_failures: 0,
+        execution_failures: 0,
+        last_failure_at: None,
+    };
+
+    // 声明支持、窗口内没有任何证据 —— 未验证，不是降级。
+    assert_eq!(
+        base("discovery_search").state(),
+        CapabilityState::Unverified
+    );
+
+    // 有成功产出 —— 就绪。
+    let ready = StationCapability {
+        successes: 3,
+        ..base("comments")
+    };
+    assert_eq!(ready.state(), CapabilityState::Ready);
+
+    // 超时一堆但插件从没说过跑不了 —— 仍然就绪。执行失败不是能力缺陷。
+    let timing_out = StationCapability {
+        successes: 3,
+        execution_failures: 11,
+        ..base("author_profile")
+    };
+    assert_eq!(
+        timing_out.state(),
+        CapabilityState::Ready,
+        "页面超时是这一次没成，不能把能力判成坏的"
+    );
+
+    // 插件明确回报跑不了 —— 降级，且即使有成功记录也降级。
+    let degraded = StationCapability {
+        successes: 3,
+        capability_failures: 1,
+        ..base("media_slots")
+    };
+    assert_eq!(degraded.state(), CapabilityState::Degraded);
+
+    // 没声明 —— 不支持，与「声明了但没验证」是两件事。
+    let undeclared = StationCapability {
+        declared: false,
+        ..base("replies")
+    };
+    assert_eq!(undeclared.state(), CapabilityState::NotDeclared);
+}
+
+/// v7 的两条可量化排版规则在**执行工位这一页**的落地：字号下限 11px（ADR-03）、
+/// 字重只有 400/600/700（ADR-02）。
+///
+/// 范围刻意只到本页的类名。同一张样式表里，目标页、抽屉与检视面板仍有 10px 与 800/850
+/// 字重——那是 DESIGN-011 没有迁移的部分，如实留作欠账，而不是让这条测试假装全表已经合规。
+/// 它们各自迁移时把前缀加进下面这张表即可。
+#[test]
+fn the_runtime_surface_holds_the_v7_type_ladder() {
+    const RUNTIME_SELECTOR_PREFIXES: [&str; 10] = [
+        ".c-verdict",
+        ".c-lane",
+        ".c-factor",
+        ".c-roster",
+        ".c-station",
+        ".c-quota",
+        ".c-caps",
+        ".c-cap",
+        ".c-bounds",
+        ".c-bound",
+    ];
+    const BANNED: [&str; 7] = [
+        "font-size:10px",
+        "font-size:9px",
+        " 10px var(--lgi-font-mono)",
+        "font:800 ",
+        "font:850 ",
+        "font-weight:800",
+        "font-weight:850",
+    ];
+
+    for line in COLLECTION_WORKSPACE_CSS.lines() {
+        let trimmed = line.trim_start();
+        if !RUNTIME_SELECTOR_PREFIXES
+            .iter()
+            .any(|prefix| trimmed.starts_with(prefix))
+        {
+            continue;
+        }
+        for banned in BANNED {
+            assert!(
+                !line.contains(banned),
+                "执行工位的排版必须停在 v7 阶梯上（ADR-02 / ADR-03）: {banned}\n  {trimmed}"
+            );
+        }
+    }
+
+    // 页面局部 v7 阶梯必须仍然存在——上面所有替换都指向它。
+    assert!(COLLECTION_WORKSPACE_CSS.contains("--c-fs-100:11px"));
+    assert!(COLLECTION_WORKSPACE_CSS.contains("--c-fw-bold:700"));
 }
 
 #[test]
