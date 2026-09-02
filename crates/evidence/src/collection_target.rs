@@ -7,6 +7,7 @@
 use linggan_contracts::{CollectionContractError, LifecycleState, TargetIdentity, TargetSource};
 use linggan_storage_postgres::Database;
 use serde_json::Value;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -56,6 +57,88 @@ pub struct ObservationTarget {
 pub enum StoreOutcome {
     Stored,
     AlreadyPresent,
+}
+
+/// Presentation eligibility for a creator avatar. A target may retain its observed source URL
+/// in `identity_facts`, but ordinary UI may only render a qualified local materialization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObservationTargetAvatar {
+    Local { local_asset_path: String },
+    Pending,
+    Unavailable,
+    NotObserved,
+}
+
+/// Resolve creator-avatar state in one read for a target list. Detail-context and standalone
+/// profile avatars share the same canonical author relationship and local asset lifecycle.
+pub async fn read_target_avatars(
+    database: &Database,
+    targets: &[ObservationTarget],
+) -> Result<HashMap<Uuid, ObservationTargetAvatar>, CollectionTargetError> {
+    let creator_refs = targets
+        .iter()
+        .filter(|target| target.target_kind == "creator")
+        .map(|target| target.target_ref)
+        .collect::<Vec<_>>();
+    if creator_refs.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query_as::<_, (Uuid, bool, Option<String>, Option<String>)>(
+        "SELECT target.target_ref, \
+                EXISTS (SELECT 1 FROM linggan_media_resource_relation relation \
+                        WHERE relation.platform=target.platform AND relation.subject_kind='author' \
+                          AND relation.subject_external_id=target.identity_key \
+                          AND relation.relationship_kind='author.avatar') AS observed, \
+                asset.local_asset_path, work.state \
+         FROM collection_observation_target target \
+         LEFT JOIN LATERAL ( \
+             SELECT materialization.local_asset_path \
+             FROM linggan_media_resource_relation relation \
+             JOIN linggan_media_observation observation ON observation.slot_key=relation.slot_key \
+             JOIN linggan_media_download_attempt attempt ON attempt.media_observation_ref=observation.observation_ref \
+             JOIN linggan_media_materialization materialization USING(download_attempt_ref) \
+             JOIN linggan_media_blob blob ON blob.sha256=materialization.blob_sha256 \
+             WHERE relation.platform=target.platform AND relation.subject_kind='author' \
+               AND relation.subject_external_id=target.identity_key \
+               AND relation.relationship_kind='author.avatar' AND blob.mime_type LIKE 'image/%' \
+               AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition disposition \
+                               WHERE disposition.slot_key=relation.slot_key \
+                                  OR disposition.blob_sha256=materialization.blob_sha256 \
+                                  OR disposition.materialization_ref=materialization.materialization_ref) \
+             ORDER BY materialization.verified_at DESC LIMIT 1 \
+         ) asset ON true \
+         LEFT JOIN LATERAL ( \
+             SELECT acquisition.state \
+             FROM linggan_media_resource_relation relation \
+             JOIN linggan_media_observation observation ON observation.slot_key=relation.slot_key \
+             LEFT JOIN linggan_media_acquisition_work acquisition USING(observation_ref) \
+             WHERE relation.platform=target.platform AND relation.subject_kind='author' \
+               AND relation.subject_external_id=target.identity_key \
+               AND relation.relationship_kind='author.avatar' \
+             ORDER BY acquisition.updated_at DESC NULLS LAST LIMIT 1 \
+         ) work ON true \
+         WHERE target.target_ref = ANY($1)",
+    )
+    .bind(creator_refs)
+    .fetch_all(database.pool())
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|(target_ref, observed, local_asset_path, work_state)| {
+            let state = match local_asset_path {
+                Some(local_asset_path) => ObservationTargetAvatar::Local { local_asset_path },
+                None if !observed => ObservationTargetAvatar::NotObserved,
+                // An acquisition that completed without a renderable image (or exhausted its
+                // retries) is not still “materializing”.  Keep it visibly unavailable rather
+                // than promising progress that no worker can make.
+                None if matches!(work_state.as_deref(), Some("completed" | "terminal")) => {
+                    ObservationTargetAvatar::Unavailable
+                }
+                None => ObservationTargetAvatar::Pending,
+            };
+            (target_ref, state)
+        })
+        .collect())
 }
 
 pub async fn collection_target_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {

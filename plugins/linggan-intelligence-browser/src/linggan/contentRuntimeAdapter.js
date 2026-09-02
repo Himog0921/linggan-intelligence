@@ -3,6 +3,7 @@ import { validateTaskSpec } from './adapter.js';
 import { LINGGAN_RUNTIME_ACTION } from './runtimeActions.js';
 import {
   createManualRuntimeTask,
+  packageAuthorAvatarMediaSlots,
   packageAuthorProfile,
   packageBatchCheckpoint,
   packageComments,
@@ -12,8 +13,11 @@ import {
   packageReplies,
 } from './producerRuntime.js';
 
-function pageTypeFor(platform, kind) {
-  if (kind === 'author_profile') return 'profile';
+function pageTypeFor(platform, kind, target = {}) {
+  if (kind === 'author_profile'
+    || (kind === 'media_slots' && target?.authorExternalId && !target?.contentExternalId)) {
+    return 'profile';
+  }
   if (kind === 'discovery_search') return 'search_results';
   return platform === 'douyin' ? 'detail' : 'note_detail';
 }
@@ -29,7 +33,7 @@ export function taskFor(platform, capability, target, options = {}) {
     return scheduled;
   }
   return createManualRuntimeTask({
-    platform, pageType: pageTypeFor(platform, capability), target,
+    platform, pageType: pageTypeFor(platform, capability, target), target,
     capabilitiesRequested: [capability],
     maximumQuota: Object.hasOwn(options, 'maximumQuota') ? options.maximumQuota : 1,
     commentLimit: options.commentLimit ?? 'not_requested', acquireMedia: options.acquireMedia ?? 'not_requested',
@@ -142,12 +146,45 @@ export function createLingganContentRuntime({ platform } = {}) {
     },
     async submitAuthor(author, options = {}) {
       const packageValue = packageAuthorProfile({ platform, author });
-      return submit(taskFor(
+      const profile = await submit(taskFor(
         platform,
         'author_profile',
         { authorExternalId: String(author?.userId || author?.id || '') },
         { taskSpec: options.taskSpec },
       ), packageValue);
+      const avatarPackage = packageAuthorAvatarMediaSlots({ platform, author });
+      if (!avatarPackage) {
+        return { ...profile, authorAvatar: { delivery: 'not_observed' } };
+      }
+      const taskSpec = taskFor(
+        platform,
+        'media_slots',
+        { authorExternalId: String(author?.userId || author?.id || '') },
+        { acquireMedia: 'bytes' },
+      );
+      const avatar = await sendToBackground(
+        LINGGAN_RUNTIME_ACTION.SUBMIT_MEDIA_SLOTS,
+        { taskSpec, capturePackage: avatarPackage },
+        { timeoutMs: 15000 },
+      );
+      if (!avatar?.success) {
+        return {
+          ...profile,
+          authorAvatar: {
+            delivery: 'rejected',
+            code: avatar?.code || 'author_avatar_queue_failed',
+            message: avatar?.message || '作者头像未能进入本机媒体队列',
+          },
+        };
+      }
+      return {
+        ...profile,
+        authorAvatar: {
+          delivery: 'pending',
+          taskId: avatar.taskId,
+          submissionId: avatar.submissionId,
+        },
+      };
     },
     async submitMediaSlots(note, options = {}) {
       const packageValue = packageMediaSlots({

@@ -146,6 +146,7 @@
 | [`plans/active/topic-workspace-real-001.md`](plans/active/topic-workspace-real-001.md) | 活跃计划；已部署、待 Mog 业务验收；Issue #112 | 首个真实 Topic 工作区垂直切片；只到暂定定义、人工裁定、冻结 Material Pack 与共享 Work Resource Read |
 | [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一获准实施事项：F01 synthetic fact-kernel technical tracer 受控进入 TDD；完成 loopback API + minimal CLI 后 hard stop，不扩入 F02–F10、真实平台/AI/插件/Web |
 | [`plans/active/plugin-runtime-001-full-capability-retrofit.md`](plans/active/plugin-runtime-001-full-capability-retrofit.md) | 活跃计划；Issue #50 | 将灵感爆爆爆的成熟浏览器采集能力一次性适配为 Linggan 自有 Browser Producer Runtime；媒体本地资产与异步处理血缘为本事项第一类约束 |
+| [`plans/active/author-target-sync-001.md`](plans/active/author-target-sync-001.md) | 活跃计划 | 已缓存作者资料经既有 Browser Producer outbox 接纳后，幂等同步为观察目标；作者头像经既有媒体管道本地物化并在观察目标页以本机资产展示 |
 | [`plans/completed/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/completed/aud-xhs-001-xiaohongshu-capture-probe-refresh.md) | 已完成；治理终止；Issue #74 | 历史小红书页面字段与能力探针；未确认字段保持 unknown，只有真实链被具体字段阻断时才可另行最小探针 |
 | [`plans/completed/plugin-xhs-capture-upgrade-001.md`](plans/completed/plugin-xhs-capture-upgrade-001.md) | 已完成；源码升级；Issue #76 / PR #77 | 已合入搜索页面事实、详情 DOM 回退与统一详情包回执源码；不证明真实兼容性、运行时或用户验收 |
 | [`plans/active/plugin-xhs-active-collection-001.md`](plans/active/plugin-xhs-active-collection-001.md) | 活跃计划；Issue #78 | 将小红书搜索、标准详情、单篇评论深采与批量评论升级为目标驱动、可恢复的页面执行；不进行真实材料交付、真实页面回归或发布部署 |

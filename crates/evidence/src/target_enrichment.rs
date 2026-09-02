@@ -1,56 +1,126 @@
-//! COLLECTION-001 · 用采回来的博主信息补全观察目标。
+//! COLLECTION-001 · 用接纳的博主资料创建或补全观察目标。
 //!
 //! 采集与观察目标此前是两条不相交的线：插件采到的博主资料进了语料库，观察目标列表却
 //! 还只有一个平台 ID。人看着一串十六进制，认不出那是谁。
 //!
-//! 这里做的事很窄：**一个 `author_profile` 采集包被接纳后，把其中的公开资料写回同一个
-//! 观察目标**。归属靠平台 ID——URL 会变、名字会改，只有平台 ID 是身份。
+//! 这里做的事很窄：**一个 `author_profile` 采集包被接纳后，按其中的平台稳定 ID 创建或
+//! 补全同一个观察目标**。归属靠平台 ID——URL 会变、名字会改，只有平台 ID 是身份。
 //!
 //! **只写页面上已经可见的公开事实**（头像、简介、粉丝数…）。缺的字段保持缺失，不补 0、
 //! 不用旧值顶替：能力登记表明确记着 `userPageData` 可能整个拿不到，那时粉丝数是真的
 //! 「不知道」，而不是「0」。
 
+use crate::{CollectionTargetError, StoreOutcome, store_pending_target};
+use linggan_contracts::{CollectionContractError, TargetIdentity, TargetSource};
 use linggan_storage_postgres::Database;
+use serde::Serialize;
 use serde_json::{Value, json};
+use thiserror::Error;
+use uuid::Uuid;
 
-/// 从一个 `author_profile` 采集包里取出公开资料，回填到对应的观察目标。
+/// The target-side result of an accepted author package.  This is deliberately independent of
+/// the Package Receipt: a Package is Evidence ingress; a target is an observation intent read
+/// model derived from that already accepted public profile.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "state"
+)]
+pub enum TargetSyncOutcome {
+    NotApplicable { reason: &'static str },
+    Created { target_ref: Uuid },
+    Updated { target_ref: Uuid },
+}
+
+#[derive(Debug, Error)]
+pub enum TargetEnrichmentError {
+    #[error(transparent)]
+    Target(#[from] CollectionTargetError),
+    #[error(transparent)]
+    Contract(#[from] CollectionContractError),
+    #[error(transparent)]
+    Database(#[from] sqlx::Error),
+}
+
+/// 从一个已接纳的 `author_profile` 采集包里取出公开资料，创建或补全对应的观察目标。
 ///
-/// 返回是否真的更新了某个目标。找不到对应目标不是错误：人可能还没把这个博主加进观察。
-pub async fn enrich_target_from_author_profile(
+/// The unique constraint remains the authority for concurrent submissions.  An existing target
+/// is enriched field-wise, so an incomplete later collector response cannot erase an already
+/// observed avatar, biography, or count.  A target creation is not an Acquisition Request and
+/// does not authorize any platform access.
+pub async fn sync_target_from_author_profile(
     database: &Database,
     package_kind: &str,
     platform: &str,
     records: &[Value],
-) -> Result<bool, sqlx::Error> {
+) -> Result<TargetSyncOutcome, TargetEnrichmentError> {
     if package_kind != "author_profile" {
-        return Ok(false);
+        return Ok(TargetSyncOutcome::NotApplicable {
+            reason: "package_kind_not_author_profile",
+        });
+    }
+    // Observation targets currently only have an XHS contract.  A valid non-XHS Evidence
+    // package must not be turned into a permanent retry loop merely because target monitoring
+    // for that platform has not been opened.
+    if platform != "xhs" {
+        return Ok(TargetSyncOutcome::NotApplicable {
+            reason: "target_platform_not_supported",
+        });
     }
     let Some(author) = records.first().and_then(|record| record.get("payload")) else {
-        return Ok(false);
+        return Ok(TargetSyncOutcome::NotApplicable {
+            reason: "author_payload_missing",
+        });
     };
     // 平台 ID 才是身份。取不到就不猜——宁可让目标停在只有 ID 的样子。
     let Some(identity_key) = text(author, "userId").or_else(|| text(author, "platformAuthorId"))
     else {
-        return Ok(false);
+        return Ok(TargetSyncOutcome::NotApplicable {
+            reason: "author_identity_missing",
+        });
     };
 
     let facts = public_facts(author);
     let display_name = text(author, "name");
-
-    let affected = sqlx::query(
-        "UPDATE collection_observation_target \
-         SET identity_facts = $3, \
-             display_name = coalesce($4, display_name) \
-         WHERE platform = $1 AND target_kind = 'creator' AND identity_key = $2",
+    let identity = TargetIdentity::creator(platform, &identity_key)?;
+    let facts = facts
+        .as_object()
+        .filter(|facts| !facts.is_empty())
+        .map(|_| &facts);
+    let (target, store_outcome) = store_pending_target(
+        database,
+        &identity,
+        TargetSource::PluginPush,
+        display_name.as_deref(),
+        facts,
     )
-    .bind(platform)
-    .bind(&identity_key)
-    .bind(&facts)
+    .await?;
+
+    if store_outcome == StoreOutcome::Stored {
+        return Ok(TargetSyncOutcome::Created {
+            target_ref: target.target_ref,
+        });
+    }
+
+    // JSONB concatenation retains fields omitted by this collector run and only replaces facts
+    // that this immutable package actually observed.  It never manufactures zero/empty values.
+    let fact_patch = facts.cloned().unwrap_or_else(|| json!({}));
+    sqlx::query(
+        "UPDATE collection_observation_target \
+         SET identity_facts = CASE WHEN $2::jsonb = '{}'::jsonb THEN identity_facts \
+                                   ELSE coalesce(identity_facts, '{}'::jsonb) || $2::jsonb END, \
+             display_name = coalesce($3, display_name) \
+         WHERE target_ref = $1",
+    )
+    .bind(target.target_ref)
+    .bind(fact_patch)
     .bind(display_name.as_deref())
     .execute(database.pool())
-    .await?
-    .rows_affected();
-    Ok(affected > 0)
+    .await?;
+    Ok(TargetSyncOutcome::Updated {
+        target_ref: target.target_ref,
+    })
 }
 
 /// 页面上已经可见的公开资料。

@@ -45,11 +45,21 @@ pub(crate) async fn insert(
     package: &ProducerCapturePackage,
     accepted_ordinals: &HashSet<i32>,
 ) -> Result<(), ProducerRuntimeError> {
-    let Some(content_id) = target_content_id(package) else {
+    let content_id = target_content_id(package);
+    let author_id = target_author_id(package);
+    if content_id.is_none() && author_id.is_none() {
         return Ok(());
+    }
+    let content_public_ref = match content_id {
+        Some(content_id) => {
+            Some(material_admission::ensure_content(tx, package, content_id).await?)
+        }
+        None => None,
     };
-    let content_public_ref = material_admission::ensure_content(tx, package, content_id).await?;
     if package.package_kind() == "media_bytes" {
+        let Some(content_public_ref) = content_public_ref else {
+            return Ok(());
+        };
         return material_admission::insert_lane_observation(
             tx,
             package,
@@ -78,8 +88,8 @@ pub(crate) async fn insert(
         tx,
         package,
         "media_slots",
-        Some(content_public_ref),
-        None,
+        content_public_ref,
+        author_id,
         retained,
     )
     .await
@@ -149,7 +159,7 @@ pub(crate) async fn insert_legacy_only(
 async fn insert_slot_and_origin(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
-    content_public_ref: Uuid,
+    content_public_ref: Option<Uuid>,
     record_ordinal: usize,
     media: MediaRecord<'_>,
 ) -> Result<(), ProducerRuntimeError> {
@@ -248,7 +258,7 @@ async fn insert_slot_and_origin(
 async fn insert_resource_relation(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
-    content_public_ref: Uuid,
+    content_public_ref: Option<Uuid>,
     media: &MediaRecord<'_>,
 ) -> Result<(), ProducerRuntimeError> {
     let table_ready: bool =
@@ -267,7 +277,11 @@ async fn insert_resource_relation(
         "video" | "live_photo" => "content.video",
         _ => return Err(ProducerRuntimeError::MaterialIdentityConflict),
     };
-    let subject_public_ref = (media.subject_kind == "content").then_some(content_public_ref);
+    let subject_public_ref = if media.subject_kind == "content" {
+        content_public_ref
+    } else {
+        None
+    };
     sqlx::query(
         "INSERT INTO linggan_media_resource_relation \
          (relation_ref,platform,subject_kind,subject_external_id,subject_public_ref,relationship_kind,relationship_ordinal,slot_key,source_package_ref) \
@@ -441,6 +455,15 @@ fn media_record<'a>(
         {
             "author"
         }
+        // A profile-page author avatar has no observed work context.  Its package target and
+        // source object must therefore agree on the stable author identity; no synthetic
+        // content resource is created merely to get bytes through the media lifecycle.
+        ("avatar", "author")
+            if record.get("contextContentExternalId").is_none()
+                && Some(subject_external_id) == target_author_id(package) =>
+        {
+            "author"
+        }
         ("comment_image", "comment")
             if record
                 .get("contextContentExternalId")
@@ -538,6 +561,15 @@ fn target_content_id(package: &ProducerCapturePackage) -> Option<&str> {
     package
         .coverage()
         .pointer("/target/contentExternalId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn target_author_id(package: &ProducerCapturePackage) -> Option<&str> {
+    package
+        .coverage()
+        .pointer("/target/authorExternalId")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())

@@ -546,9 +546,11 @@ fn valid_target_for_capability(target: &Value, capability: &str) -> bool {
     match capability {
         "discovery_search" => non_empty("query"),
         "profile_discovery" | "author_profile" => non_empty("authorExternalId"),
-        "content_detail" | "comments" | "replies" | "media_slots" | "media_bytes" => {
-            non_empty("contentExternalId")
-        }
+        "content_detail" | "comments" | "replies" | "media_bytes" => non_empty("contentExternalId"),
+        // A media slot either belongs to a work or to an independently observed creator
+        // profile.  Requiring exactly one prevents a producer from inventing a work context
+        // for an author avatar or from smuggling an ambiguous mixed target through the lane.
+        "media_slots" => non_empty("contentExternalId") ^ non_empty("authorExternalId"),
         "batch_checkpoint" => non_empty("taskType"),
         _ => false,
     }

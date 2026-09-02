@@ -14,6 +14,7 @@ import {
   getItemId, getTabLabel, getColumns, getExportColumns, sendToParent, unwrapParentResponseData,
 } from './utils.js';
 import { formatLingganRuntimeNotice } from '../linggan/adapter.js';
+import { DASHBOARD_BRIDGE_ACTION } from './bridgeActions.js';
 
 const TABS = [
   { key: 'notes', label: '笔记' },
@@ -534,11 +535,39 @@ export default function App() {
     });
   }, [currentTab, showNotice, showConfirm, loadData, withBusyAction]);
 
-  // This dashboard is an execution-cache inspector.  It must not create a second submission
-  // path alongside the page runtime/outbox, nor imply that selected cache rows are Evidence.
-  const handleLocalDeliveryStatus = useCallback(async () => {
-    showNotice('这些是本机执行缓存；Linggan 回传由采集时的本地队列负责。此处不会重复提交或发起平台访问。', 'info');
-  }, [showNotice]);
+  // This action deliberately reuses the active page runtime and its durable outbox.  It does
+  // not make a direct target HTTP request or claim that a selected cache row is already Evidence.
+  const handleSyncAuthorsToObservationTargets = useCallback(async () => {
+    if (currentTab !== 'authors') {
+      showNotice('只有博主记录可以进入观察目标；笔记和评论仍由各自的采集回执处理。', 'warning');
+      return;
+    }
+    const authors = allData.filter((item) => currentSelected.has(getItemId(item, 'authors')));
+    if (authors.length === 0) {
+      showNotice('请先勾选至少一位博主。', 'warning');
+      return;
+    }
+    await withBusyAction('syncAuthorsToTargets', async () => {
+      const response = await sendToParent(
+        DASHBOARD_BRIDGE_ACTION.SYNC_AUTHORS_TO_OBSERVATION_TARGETS,
+        { authors },
+        { timeoutMs: 60000 },
+      );
+      if (!response?.success) {
+        showNotice(`未进入本机交付队列：${response?.error || '本机页面运行时没有返回回执'}`, 'error');
+        return;
+      }
+      const queued = Number(response?.queued || 0);
+      const rejected = Array.isArray(response?.rejected) ? response.rejected.length : 0;
+      if (queued > 0 && rejected === 0) {
+        showNotice(`已将 ${queued} 位博主加入本机交付队列；服务端接纳后才会出现在观察目标，头像随后走本机媒体物化。`, 'success');
+      } else if (queued > 0) {
+        showNotice(`已将 ${queued} 位博主加入交付队列；另有 ${rejected} 位未能入队，未成功部分不会被标记为已同步。`, 'warning');
+      } else {
+        showNotice('没有博主进入交付队列；观察目标没有被写入。', 'error');
+      }
+    });
+  }, [allData, currentSelected, currentTab, showNotice, withBusyAction]);
 
   // ===== Tab 切换 =====
   const handleTabChange = useCallback((tab) => {
@@ -833,14 +862,16 @@ export default function App() {
           >
             {busyActions.deleteSelected ? '删除中...' : '删除选中'}
           </button>
-          <button
-            className="toolbar-btn primary"
-            style={{ display: selectedCount > 0 ? 'inline-block' : 'none' }}
-            onClick={handleLocalDeliveryStatus}
-            disabled={Boolean(busyActions.syncWorkbench)}
-          >
-            {busyActions.syncWorkbench ? '检查中...' : '本机交付状态'}
-          </button>
+          {currentTab === 'authors' && (
+            <button
+              className="toolbar-btn primary"
+              style={{ display: selectedCount > 0 ? 'inline-block' : 'none' }}
+              onClick={handleSyncAuthorsToObservationTargets}
+              disabled={Boolean(busyActions.syncAuthorsToTargets)}
+            >
+              {busyActions.syncAuthorsToTargets ? '加入队列中...' : '同步到观察目标'}
+            </button>
+          )}
           <button className="toolbar-btn" onClick={handleExportCsv} disabled={Boolean(busyActions.exportCsv)}>
             {busyActions.exportCsv ? '导出中...' : '导出 CSV'}
           </button>

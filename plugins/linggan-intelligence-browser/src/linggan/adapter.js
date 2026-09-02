@@ -393,7 +393,12 @@ export function validateTaskSpec(spec = {}) {
   const requireText = (key) => { if (!String(target[key] || '').trim()) throw new Error(`task_spec_target_${key}_required`); };
   if (capability === 'discovery_search') requireText('query');
   if (capability === 'profile_discovery' || capability === 'author_profile') requireText('authorExternalId');
-  if (['content_detail', 'comments', 'replies', 'media_slots', 'media_bytes'].includes(capability)) requireText('contentExternalId');
+  if (['content_detail', 'comments', 'replies', 'media_bytes'].includes(capability)) requireText('contentExternalId');
+  if (capability === 'media_slots') {
+    const hasContent = Boolean(String(target.contentExternalId || '').trim());
+    const hasAuthor = Boolean(String(target.authorExternalId || '').trim());
+    if (hasContent === hasAuthor) throw new Error('task_spec_media_slots_target_invalid');
+  }
   if (capability === 'batch_checkpoint') requireText('taskType');
   if (!(spec.commentLimit === 'not_requested' || (Number.isInteger(spec.commentLimit) && spec.commentLimit > 0))) throw new Error('task_spec_comment_limit_invalid');
   if (!['not_requested', 'slots', 'bytes'].includes(spec.acquireMedia)) throw new Error('task_spec_acquire_media_invalid');

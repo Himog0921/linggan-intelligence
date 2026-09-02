@@ -1,3 +1,5 @@
+import { DASHBOARD_BRIDGE_ACTION } from '../dashboard/bridgeActions.js';
+
 const DASHBOARD_ACTION = {
   GET_ALL_NOTES: 'getAllNotes',
   GET_ALL_COMMENTS: 'getAllComments',
@@ -9,6 +11,7 @@ const DASHBOARD_ACTION = {
   DELETE_NOTE: 'deleteNote',
   DELETE_COMMENT: 'deleteComment',
   DELETE_AUTHOR: 'deleteAuthor',
+  [DASHBOARD_BRIDGE_ACTION.SYNC_AUTHORS_TO_OBSERVATION_TARGETS]: DASHBOARD_BRIDGE_ACTION.SYNC_AUTHORS_TO_OBSERVATION_TARGETS,
 };
 
 function generateNonce() {
@@ -45,6 +48,7 @@ export function createDashboardBridge({
   commentStore,
   authorStore,
   downloadNoteMediaFromRecord,
+  syncAuthorsToObservationTargets,
   _testNonce = null,
   _testDashboardWindow = null,
 } = {}) {
@@ -152,7 +156,18 @@ export function createDashboardBridge({
       if (typeof downloadNoteMediaFromRecord !== 'function') {
         throw new Error('linggan_media_runtime_not_registered');
       }
-      return downloadNoteMediaFromRecord(data?.note || data, data?.options || {});
+      const options = data?.options || (Array.isArray(data?.mediaTypes)
+        ? { mediaTypes: data.mediaTypes }
+        : {});
+      return downloadNoteMediaFromRecord(data?.note || data, options);
+    },
+    [DASHBOARD_BRIDGE_ACTION.SYNC_AUTHORS_TO_OBSERVATION_TARGETS]: (data) => {
+      if (typeof syncAuthorsToObservationTargets !== 'function') {
+        throw new Error('linggan_author_target_runtime_not_registered');
+      }
+      const authors = Array.isArray(data?.authors) ? data.authors : [];
+      if (authors.length === 0) throw new Error('author_target_sync_selection_empty');
+      return syncAuthorsToObservationTargets(authors);
     },
     [DASHBOARD_ACTION.CLEAR_ALL_NOTES]: () => noteStore.clear(),
     [DASHBOARD_ACTION.CLEAR_ALL_COMMENTS]: () => commentStore.clear(),
@@ -171,6 +186,23 @@ export function createDashboardBridge({
     ) {
       if (Array.isArray(result)) return { success: true, data: result };
       return result && typeof result === 'object' ? { success: result.success !== false, ...result } : { success: true, data: [] };
+    }
+    if (normalizedAction === DASHBOARD_ACTION.DOWNLOAD_NOTE_MEDIA) {
+      const data = result && typeof result === 'object' ? result : {};
+      const summary = data.summary || data;
+      const delivery = {};
+      if (Object.hasOwn(data, 'queued')) delivery.queued = data.queued;
+      if (Object.hasOwn(data, 'mediaDelivery')) delivery.mediaDelivery = data.mediaDelivery;
+      return {
+        success: data.success !== false,
+        ...delivery,
+        summary,
+        data: { summary },
+      };
+    }
+    if (normalizedAction === DASHBOARD_BRIDGE_ACTION.SYNC_AUTHORS_TO_OBSERVATION_TARGETS) {
+      const data = result && typeof result === 'object' ? result : {};
+      return { success: data.success !== false, ...data, data };
     }
     if (result && typeof result === 'object') return { success: result.success !== false, ...result };
     return { success: true, data: result };
