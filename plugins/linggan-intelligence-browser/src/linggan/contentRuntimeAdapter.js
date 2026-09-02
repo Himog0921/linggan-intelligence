@@ -30,7 +30,8 @@ export function taskFor(platform, capability, target, options = {}) {
   }
   return createManualRuntimeTask({
     platform, pageType: pageTypeFor(platform, capability), target,
-    capabilitiesRequested: [capability], maximumQuota: options.maximumQuota ?? 1,
+    capabilitiesRequested: [capability],
+    maximumQuota: Object.hasOwn(options, 'maximumQuota') ? options.maximumQuota : 1,
     commentLimit: options.commentLimit ?? 'not_requested', acquireMedia: options.acquireMedia ?? 'not_requested',
     stopConditions: options.stopConditions || ['manual_stop', 'maximum_quota'],
   });
@@ -44,6 +45,9 @@ function positiveCommentLimit(value) {
 export function commentTaskInstruction(noteId, maxTotal) {
   const limited = positiveCommentLimit(maxTotal);
   return {
+    // Natural-end deep collection has no numerical target. Its manual, time and risk stops
+    // bound execution without rewriting the returned count into a fictional prior quota.
+    maximumQuota: limited === 'not_requested' ? null : limited,
     commentLimit: limited,
     target: {
       contentExternalId: String(noteId || ''),
@@ -57,8 +61,12 @@ export function commentTaskInstruction(noteId, maxTotal) {
 }
 
 export function createLingganContentRuntime({ platform } = {}) {
-  async function submit(taskSpec, capturePackage) {
-    const response = await sendToBackground(LINGGAN_RUNTIME_ACTION.SUBMIT_CAPTURE_PACKAGE, { taskSpec, capturePackage }, { timeoutMs: 5000 });
+  async function submit(taskSpec, capturePackage, { idempotencyKey = '' } = {}) {
+    const response = await sendToBackground(
+      LINGGAN_RUNTIME_ACTION.SUBMIT_CAPTURE_PACKAGE,
+      { taskSpec, capturePackage, idempotencyKey },
+      { timeoutMs: 15000 },
+    );
     if (!response?.success) throw new Error(response?.message || 'Linggan 未能将采集结果写入本机待交付队列');
     return { ...response, taskSpec };
   }
@@ -88,15 +96,16 @@ export function createLingganContentRuntime({ platform } = {}) {
         'content_detail',
         { contentExternalId: String(note?.noteId || note?.id || '') },
         { acquireMedia: 'not_requested', taskSpec: options.taskSpec },
-      ), packageValue);
+      ), packageValue, { idempotencyKey: options.idempotencyKey });
     },
     async submitComments(result, noteId, settings = {}) {
       const instruction = commentTaskInstruction(noteId, settings.maxTotal);
+      const taskTarget = settings.taskSpec?.target || instruction.target;
       if (settings.taskSpec) {
         const capability = settings.taskSpec.capabilitiesRequested?.[0];
         const packageValue = capability === 'replies'
-          ? packageReplies({ platform, result, noteId })
-          : packageComments({ platform, result, noteId });
+          ? packageReplies({ platform, result, noteId, taskTarget })
+          : packageComments({ platform, result, noteId, taskTarget });
         return submit(
           taskFor(platform, capability, instruction.target, {
             ...instruction,
@@ -105,17 +114,30 @@ export function createLingganContentRuntime({ platform } = {}) {
           packageValue,
         );
       }
-      const packageValue = packageComments({ platform, result, noteId });
+      const packageValue = packageComments({ platform, result, noteId, taskTarget });
       const comments = await submit(
         taskFor(platform, 'comments', instruction.target, instruction),
         packageValue,
       );
-      const repliesPackage = packageReplies({ platform, result, noteId });
-      if (repliesPackage.records.length === 0) return comments;
-      const replies = await submit(
-        taskFor(platform, 'replies', instruction.target, instruction),
-        repliesPackage,
-      );
+      const repliesPackage = packageReplies({ platform, result, noteId, taskTarget });
+      if (repliesPackage.records.length === 0) {
+        return { ...comments, replies: { delivery: 'not_applicable' } };
+      }
+      let replies;
+      try {
+        replies = await submit(
+          taskFor(platform, 'replies', instruction.target, instruction),
+          repliesPackage,
+        );
+      } catch (error) {
+        // The comments Package is already durably queued. A later reply-lane failure must not
+        // rewrite that accepted fact as a comments failure.
+        replies = {
+          delivery: 'rejected',
+          code: 'replies_queue_failed',
+          message: String(error?.message || error || 'replies_queue_failed'),
+        };
+      }
       return { ...comments, replies };
     },
     async submitAuthor(author, options = {}) {
@@ -128,19 +150,39 @@ export function createLingganContentRuntime({ platform } = {}) {
       ), packageValue);
     },
     async submitMediaSlots(note, options = {}) {
-      const packageValue = packageMediaSlots({ platform, note });
+      const packageValue = packageMediaSlots({
+        platform,
+        note,
+        commentRecords: options.commentRecords,
+      });
       const taskSpec = taskFor(
         platform,
         'media_slots',
         { contentExternalId: String(note?.noteId || note?.id || '') },
-        { acquireMedia: 'slots', taskSpec: options.taskSpec },
+        { acquireMedia: 'bytes', taskSpec: options.taskSpec },
       );
-      return submit(taskSpec, packageValue);
+      const response = await sendToBackground(
+        LINGGAN_RUNTIME_ACTION.SUBMIT_MEDIA_SLOTS,
+        { taskSpec, capturePackage: packageValue, idempotencyKey: options.idempotencyKey },
+        { timeoutMs: 15000 },
+      );
+      if (!response?.success) {
+        throw new Error(response?.message || 'Linggan 未能将详情媒体加入本机可靠下载队列');
+      }
+      return {
+        ...response,
+        taskSpec,
+        capturePackage: packageValue,
+        total: packageValue.records.length,
+        success: 0,
+        failed: 0,
+        queued: true,
+      };
     },
     async acquireMediaSlots(note) {
       const packageValue = packageMediaSlots({ platform, note });
       const taskSpec = taskFor(platform, 'media_slots', { contentExternalId: String(note?.noteId || note?.id || '') }, { acquireMedia: 'bytes' });
-      const response = await sendToBackground(LINGGAN_RUNTIME_ACTION.SUBMIT_MEDIA_SLOTS, { taskSpec, capturePackage: packageValue }, { timeoutMs: 5000 });
+      const response = await sendToBackground(LINGGAN_RUNTIME_ACTION.SUBMIT_MEDIA_SLOTS, { taskSpec, capturePackage: packageValue }, { timeoutMs: 15000 });
       if (!response?.success) throw new Error(response?.message || 'Linggan 未能将媒体下载加入本机队列');
       return { ...response, taskSpec, capturePackage: packageValue, total: packageValue.records.length, success: 0, failed: 0, queued: true };
     },

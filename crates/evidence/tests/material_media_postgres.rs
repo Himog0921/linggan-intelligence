@@ -2,7 +2,7 @@
 mod fixture;
 
 use fixture::{coverage_layer, proof_database, submit_custom_package, submit_package};
-use linggan_evidence::{admit_media_blob, record_media_derivative_completion};
+use linggan_evidence::{admit_media_blob, read_work_resource, record_media_derivative_completion};
 use sqlx::Row;
 
 #[tokio::test]
@@ -30,9 +30,38 @@ async fn media_slots_preserve_candidates_generation_unknown_order_and_concurrenc
     assert_eq!(origin.get::<Option<i32>, _>("display_ordinal"), None);
     assert_eq!(origin.get::<String, _>("display_order_state"), "UNKNOWN");
     assert_eq!(origin.get::<i32, _>("source_generation"), 1);
+    let relationship: (String, i32) = sqlx::query_as(
+        "SELECT relationship_kind,relationship_ordinal \
+         FROM linggan_media_resource_relation WHERE slot_key='xhs:note-media-1:image:1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(relationship, ("content.image".into(), 1));
     let live: (String,String,String) = sqlx::query_as("SELECT composite_state,live_photo_still_state,live_photo_motion_state FROM linggan_material_media_origin WHERE purpose='live_photo'")
         .fetch_one(database.pool()).await.unwrap();
     assert_eq!(live, ("PARTIAL".into(), "UNKNOWN".into(), "UNKNOWN".into()));
+
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-media-live-components"}),
+        live_photo_record_with_components("note-media-live-components"),
+    )
+    .await;
+    let observed_live: (String, String, String) = sqlx::query_as(
+        "SELECT composite_state,live_photo_still_state,live_photo_motion_state \
+         FROM linggan_material_media_origin \
+         WHERE slot_key='xhs:note-media-live-components:live_photo:1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        observed_live,
+        ("PARTIAL".into(), "OBSERVED".into(), "OBSERVED".into()),
+        "observing both Live Photo candidates is not the same as acquiring both byte components",
+    );
 
     let concurrent_a = submit_package(
         &database,
@@ -50,6 +79,51 @@ async fn media_slots_preserve_candidates_generation_unknown_order_and_concurrenc
     let generations: Vec<i32> = sqlx::query_scalar("SELECT source_generation FROM linggan_material_media_origin WHERE slot_key='xhs:note-media-concurrent:image:1' ORDER BY source_generation")
         .fetch_all(database.pool()).await.unwrap();
     assert_eq!(generations, vec![1, 2]);
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn comment_images_use_the_shared_media_chain_and_work_resource_read_model() {
+    let database = proof_database("material_comment_image_chain").await;
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-comment-image"}),
+        comment_image_record("note-comment-image", "comment-image-1", 1),
+    )
+    .await;
+
+    let origin: (String, String) = sqlx::query_as(
+        "SELECT origin.purpose,relation.relationship_kind \
+         FROM linggan_material_media_origin origin \
+         JOIN linggan_media_resource_relation relation USING(slot_key) \
+         WHERE origin.slot_key='xhs:comment:comment-image-1:comment_image:1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(origin, ("comment_image".into(), "comment.image".into()));
+
+    let content_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+         WHERE content_external_id='note-comment-image'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let work = read_work_resource(&database, content_ref)
+        .await
+        .unwrap()
+        .expect("comment image remains readable through the work-level media contract");
+    assert_eq!(work.media["commentImages"]["state"], "OBSERVED");
+    assert_eq!(
+        work.media["commentImages"]["items"][0]["relationship"],
+        "comment.image"
+    );
+    assert_eq!(
+        work.media["commentImages"]["items"][0]["subjectExternalId"],
+        "comment-image-1"
+    );
 }
 
 #[tokio::test]
@@ -360,6 +434,40 @@ async fn media_owner_seams_preserve_unknown_mime_but_reject_unbounded_asset_size
 
 fn media_record(content_id: &str, role: &str, ordinal: i32, uri_suffix: &str) -> serde_json::Value {
     media_record_with_observation(content_id, role, ordinal, uri_suffix, uuid::Uuid::new_v4())
+}
+
+fn comment_image_record(content_id: &str, comment_id: &str, ordinal: i32) -> serde_json::Value {
+    let uri = format!("https://media.example/{comment_id}-{ordinal}.webp");
+    serde_json::json!({
+        "kind":"media_slot",
+        "slotKey":format!("xhs:comment:{comment_id}:comment_image:{ordinal}"),
+        "observationRef":uuid::Uuid::new_v4(),
+        "slot":{"role":"comment_image","ordinal":ordinal},
+        "observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-09-01T08:00:00Z"},
+        "sourceObject":{"platform":"xhs","type":"comment","externalId":comment_id},
+        "contextContentExternalId":content_id
+    })
+}
+
+fn live_photo_record_with_components(content_id: &str) -> serde_json::Value {
+    let still = "https://media.example/live-still.webp";
+    let motion = "https://media.example/live-motion.mp4";
+    serde_json::json!({
+        "kind":"media_slot",
+        "slotKey":format!("xhs:{content_id}:live_photo:1"),
+        "observationRef":uuid::Uuid::new_v4(),
+        "slot":{"role":"live_photo","ordinal":1},
+        "observation":{
+            "externalUri":motion,
+            "candidateUris":[motion,still],
+            "components":{
+                "still":{"candidateUris":[still]},
+                "motion":{"candidateUris":[motion]}
+            },
+            "observedAt":"2026-08-28T10:00:00Z"
+        },
+        "sourceObject":{"platform":"xhs","type":"content","externalId":content_id}
+    })
 }
 
 fn media_record_with_observation(

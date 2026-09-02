@@ -1,10 +1,11 @@
 # TOPIC-WORKSPACE-REAL-001 · Topic Workspace Contract
 
-> 状态: 权威当前
-> 最后核对: 2026-08-31
+> 状态: 草案
+> 最后核对: 2026-09-02
 > 适用范围: 首个真实但明确暂定的 Topic 定义、人工裁定运行、冻结 Material Pack 与本机读取面
 > 事实来源: 用户本轮授权、DISC-001 Topic 语义、Work Resource Read、当前 migration/Rust/API/tests
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、正式领域语言、不变量、当前代码与真实运行证据
+> 验收状态: Issue #112 current integration 自动证明完成；最终浏览器验收待授权
 
 ## 1. 一句话合同
 
@@ -61,6 +62,19 @@ Topic Identity
 
 若 Topic 引用存在但 Work Resource Read 无法履行，API 返回冲突/不可用，不把丢失对象静默过滤，也不返回一个看似完整的缩小材料包。
 
+### 5.1 API 失败语义
+
+每个失败 JSON 都带 `operation=topic_workspace`、机器可读的 `code` 和不与 HTTP 码混淆的 `outcome`。`outcome` 是调用方判断发生了什么的规范字段：
+
+| `outcome` | 场景 | 典型 HTTP / `code` |
+|---|---|---|
+| `rejected` | 请求字段不合法，或成员 Work Resource 尚未接纳 | 400 `invalid_topic_workspace_request`；422 `unknown_work_resource` |
+| `conflict` | 同 idempotency key 的内容不同，或 `expectedVersion` 过期 | 409 `topic_idempotency_conflict`；409 `topic_version_conflict` |
+| `not_found` | 指定 canonical key 没有 Topic | 404 `topic_workspace_not_found` |
+| `unavailable` | Topic schema/read-model 未接通、投影损坏，或冻结 Pack 的 Work Resource 当前无法履行 | 503；Pack 引用当前缺失时为 409 `topic_material_pack_reference_unavailable` |
+
+最后一行保留 409 是为了表达冻结引用与当前 Work Resource 的不一致；它不是调用者应重试的版本竞争，所以 `outcome` 仍为 `unavailable`。任何调用方不得把所有非 2xx 简化成“系统不可用”。
+
 ## 6. 状态与资格
 
 | 轴 | 当前可声明 | 当前不得声明 |
@@ -77,5 +91,5 @@ Issue #113 只能读取一个已冻结的 `materialPackRef`。Agent 输入不得
 
 ## 8. 已证明与未证明
 
-- 已证明：Rust validation、PostgreSQL 16 原子接纳、未知引用全回滚、exact replay、异内容幂等冲突、版本竞争、完整 migration、loopback API 与 Work Resource 组合。
-- 未证明：共享本机数据库应用 `0027`、部署、真实材料人工裁定质量、长期并发负载、正式 Topic 发布、Agent 执行、Mog 业务验收。
+- 已证明（current integration head）：Rust validation、PostgreSQL 16 原子接纳、未知引用全回滚、exact replay、异内容幂等冲突、版本竞争、完整 0031 migration、loopback API 与 Work Resource 组合。
+- 未证明：共享本机数据库应用 0031、runtime 切换、真实材料人工裁定质量、长期并发负载、正式 Topic 发布、Agent 执行、current head 的浏览器前端验收与 Mog 业务验收。

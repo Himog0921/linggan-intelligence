@@ -15,7 +15,8 @@ import {
 import { buildDiscoveryExecutionSummary } from '../src/platforms/xhs/noteCollector.js';
 import { requireControlReceipt } from '../src/linggan/controlReceipt.js';
 import { resolveDouyinBatchControlReceipt } from '../src/platforms/douyin/controlReceipt.js';
-import { taskFor } from '../src/linggan/contentRuntimeAdapter.js';
+import { commentTaskInstruction, taskFor } from '../src/linggan/contentRuntimeAdapter.js';
+import { createLingganContentRuntime } from '../src/linggan/contentRuntimeAdapter.js';
 
 test('one adapter uses the same bounded package shape for every retained collector capability', () => {
   for (const capability of Object.values(PRODUCER_CAPABILITY)) {
@@ -76,6 +77,134 @@ test('media slots retain URL observations but no remote URL becomes a local pres
   assert.equal(packageValue.coverage.layers[0].observed, 2);
   assert.equal(packageValue.records[0].observation.externalUri, 'https://cdn.example/one.jpg');
   assert.equal(Object.hasOwn(packageValue.records[0], 'localAssetUrl'), false);
+  assert.equal(packageValue.records[0].slotKey, 'xhs:note-1:image:1');
+  assert.equal(packageValue.records[1].slotKey, 'xhs:note-1:cover:1');
+  assert.deepEqual(packageValue.records.map((record) => record.slot.ordinal), [1, 1]);
+});
+
+test('content detail media package carries the observed author avatar as an author-owned slot', () => {
+  const packageValue = packageMediaSlots({
+    platform: 'xhs',
+    note: {
+      noteId: 'note-with-author-avatar',
+      authorId: 'author-42',
+      authorAvatar: 'https://sns-avatar.example/author-42.jpg',
+      images: [{ url: 'https://sns-img.example/body.jpg' }],
+    },
+  });
+  assert.equal(packageValue.coverage.layers[0].observed, 2);
+  assert.deepEqual(packageValue.records.map((record) => record.slotKey), [
+    'xhs:note-with-author-avatar:image:1',
+    'xhs:author:author-42:avatar:1',
+  ]);
+  assert.deepEqual(packageValue.records[1].sourceObject, {
+    platform: 'xhs',
+    type: 'author',
+    externalId: 'author-42',
+  });
+  assert.equal(packageValue.records[1].contextContentExternalId, 'note-with-author-avatar');
+  assert.equal(packageValue.records[1].observation.externalUri, 'https://sns-avatar.example/author-42.jpg');
+  assert.equal(Object.hasOwn(packageValue.records[1], 'localAssetUrl'), false);
+});
+
+test('standard detail media package carries comment images as comment-owned slots', () => {
+  const packageValue = packageMediaSlots({
+    platform: 'xhs',
+    note: {
+      noteId: 'note-with-comment-images',
+      coverUrl: 'https://sns-img.example/cover.jpg',
+    },
+    commentRecords: [
+      {
+        commentId: 'comment-1',
+        commentImageUrls: [
+          'https://sns-img.example/comment-1-a.jpg',
+          'https://sns-img.example/comment-1-b.jpg',
+        ],
+      },
+      {
+        commentId: 'comment-2',
+        commentImageUrls: ['https://sns-img.example/comment-2-a.jpg'],
+      },
+    ],
+  });
+
+  assert.deepEqual(packageValue.records.map((record) => record.slotKey), [
+    'xhs:note-with-comment-images:cover:1',
+    'xhs:comment:comment-1:comment_image:1',
+    'xhs:comment:comment-1:comment_image:2',
+    'xhs:comment:comment-2:comment_image:1',
+  ]);
+  const commentImage = packageValue.records[1];
+  assert.deepEqual(commentImage.sourceObject, {
+    platform: 'xhs',
+    type: 'comment',
+    externalId: 'comment-1',
+  });
+  assert.equal(commentImage.contextContentExternalId, 'note-with-comment-images');
+  assert.equal(commentImage.slot.role, 'comment_image');
+});
+
+test('a reply queue failure does not rewrite the already queued comments lane', async () => {
+  const originalChrome = globalThis.chrome;
+  const calls = [];
+  globalThis.chrome = {
+    runtime: {
+      id: 'synthetic-extension',
+      lastError: null,
+      sendMessage(message, callback) {
+        calls.push(message.capturePackage.packageKind);
+        if (message.capturePackage.packageKind === 'comments') {
+          callback({ success: true, delivery: 'acknowledged' });
+        } else {
+          callback({ success: false, message: 'reply_outbox_unavailable' });
+        }
+      },
+    },
+  };
+  try {
+    const runtime = createLingganContentRuntime({ platform: 'xhs' });
+    const result = await runtime.submitComments({
+      comments: [
+        { commentId: 'comment-1', text: 'top level' },
+        { commentId: 'reply-1', rootCommentId: 'comment-1', parentCommentId: 'comment-1', text: 'reply' },
+      ],
+      stopReason: 'comment_cap_reached',
+    }, 'note-reply-failure', { maxTotal: 30 });
+
+    assert.deepEqual(calls, ['comments', 'replies']);
+    assert.equal(result.delivery, 'acknowledged');
+    assert.deepEqual(result.replies, {
+      delivery: 'rejected',
+      code: 'replies_queue_failed',
+      message: 'reply_outbox_unavailable',
+    });
+  } finally {
+    globalThis.chrome = originalChrome;
+  }
+});
+
+test('media slot ordinals are scoped to each relationship purpose', () => {
+  const packageValue = packageMediaSlots({
+    platform: 'xhs',
+    note: {
+      noteId: 'note-many-images',
+      images: Array.from({ length: 7 }, (_, index) => ({ url: `https://cdn.example/${index + 1}.jpg` })),
+      coverUrl: 'https://cdn.example/cover.jpg',
+      video: { url: 'https://cdn.example/video.mp4' },
+    },
+  });
+  assert.deepEqual(packageValue.records.map((record) => record.slotKey), [
+    'xhs:note-many-images:image:1',
+    'xhs:note-many-images:image:2',
+    'xhs:note-many-images:image:3',
+    'xhs:note-many-images:image:4',
+    'xhs:note-many-images:image:5',
+    'xhs:note-many-images:image:6',
+    'xhs:note-many-images:image:7',
+    'xhs:note-many-images:cover:1',
+    'xhs:note-many-images:video:1',
+  ]);
 });
 
 test('a Live Photo remains one logical slot with independently addressable still and motion candidates', () => {
@@ -156,11 +285,11 @@ test('search discovery retains its page receipt in the contract-supported checkp
   assert.equal(JSON.stringify(packageValue.checkpoint.surfaceReceipt.scrollTrace).includes('must_not_leave_the_page'), false);
 });
 
-test('observed media slots request slots rather than media bytes', () => {
+test('standard detail media submits slots and immediately queues the approved byte lane', () => {
   const adapter = readFileSync(new URL('../src/linggan/contentRuntimeAdapter.js', import.meta.url), 'utf8');
   const submitMediaSlots = adapter.slice(adapter.indexOf('async submitMediaSlots'), adapter.indexOf('async acquireMediaSlots'));
-  assert.match(submitMediaSlots, /acquireMedia: 'slots'/);
-  assert.doesNotMatch(submitMediaSlots, /acquireMedia: 'bytes'/);
+  assert.match(submitMediaSlots, /acquireMedia: 'bytes'/);
+  assert.match(submitMediaSlots, /LINGGAN_RUNTIME_ACTION\.SUBMIT_MEDIA_SLOTS/);
 });
 
 test('partial media coverage retains acquired bytes and explicitly keeps unknown/not-attempted distinct', () => {
@@ -190,6 +319,102 @@ test('a retained collector can return one comment tree without flattening replie
   assert.equal(replies.records.length, 1);
   assert.equal(replies.records[0].payload.commentId, 'reply-1');
   assert.equal(replies.coverage.target.commentCollection, undefined);
+});
+
+test('real xhs fallback comment identities stay in the right lane and bind to their manual task', () => {
+  const source = {
+    noteId: 'note-real-shape',
+    comments: [
+      {
+        noteId: 'note-real-shape',
+        commentId: 'comment-root',
+        rootCommentId: 'comment-root',
+        parentCommentId: '',
+        replyToCommentId: '',
+        level: 1,
+        text: 'top level from the live DOM fallback',
+      },
+      {
+        noteId: 'note-real-shape',
+        commentId: 'comment-reply',
+        rootCommentId: 'comment-root',
+        parentCommentId: 'comment-root',
+        replyToCommentId: 'comment-root',
+        level: 2,
+        text: 'reply from the live DOM fallback',
+      },
+    ],
+    collectionReceipt: {
+      version: 1,
+      noteId: 'note-real-shape',
+      scope: 'detail_window',
+      requestedLimit: 30,
+      pageCommentCount: 2,
+      expectedCount: 2,
+      uniqueCollectedCount: 2,
+      state: 'complete',
+      analysisUsability: 'usable',
+      targetIdentity: 'matched',
+      stopReason: 'comment_area_end',
+    },
+  };
+  const instruction = commentTaskInstruction('note-real-shape', 30);
+  const comments = packageComments({
+    platform: 'xhs', result: source, noteId: source.noteId, taskTarget: instruction.target,
+  });
+  const replies = packageReplies({
+    platform: 'xhs', result: source, noteId: source.noteId, taskTarget: instruction.target,
+  });
+  const commentTask = taskFor('xhs', 'comments', instruction.target, instruction);
+  const replyTask = taskFor('xhs', 'replies', instruction.target, instruction);
+
+  assert.equal(comments.records.length, 1);
+  assert.equal(comments.records[0].payload.commentId, 'comment-root');
+  assert.equal(comments.records[0].payload.noteId, 'note-real-shape');
+  assert.equal(Object.hasOwn(comments.records[0].payload, 'rootCommentId'), false);
+  assert.equal(Object.hasOwn(comments.records[0].payload, 'parentCommentId'), false);
+  assert.equal(Object.hasOwn(comments.records[0].payload, 'replyToCommentId'), false);
+  assert.equal(replies.records.length, 1);
+  assert.equal(replies.records[0].payload.commentId, 'comment-reply');
+  assert.equal(replies.records[0].payload.noteId, 'note-real-shape');
+  assert.equal(replies.records[0].payload.rootCommentId, 'comment-root');
+  assert.equal(replies.records[0].payload.parentCommentId, 'comment-root');
+  assert.equal(Object.hasOwn(replies.records[0].payload, 'replyToCommentId'), false);
+  assert.equal(commentTask.maximumQuota, 30);
+  assert.equal(replyTask.maximumQuota, 30);
+  assert.equal(comments.coverage.target.commentScope, instruction.target.commentScope);
+  assert.equal(comments.coverage.target.requestedCommentLimit, 30);
+  assert.equal(replies.coverage.target.commentScope, instruction.target.commentScope);
+  assert.equal(replies.coverage.target.requestedCommentLimit, 30);
+});
+
+test('unlimited deep comments keep a real natural-end target without inventing a result quota', () => {
+  const instruction = commentTaskInstruction('note-deep', 0);
+  const task = taskFor('xhs', 'comments', instruction.target, instruction);
+  assert.equal(instruction.commentLimit, 'not_requested');
+  assert.equal(instruction.maximumQuota, null);
+  assert.equal(task.maximumQuota, null);
+  assert.equal(instruction.target.commentScope, 'all_public_until_natural_end');
+  assert.equal(Object.hasOwn(instruction.target, 'requestedCommentLimit'), false);
+});
+
+test('nested replies retain one exact parent identity for material admission', () => {
+  const result = {
+    noteId: 'note-nested',
+    comments: [{
+      noteId: 'note-nested',
+      commentId: 'reply-child',
+      rootCommentId: 'comment-root',
+      parentCommentId: 'comment-root',
+      replyToCommentId: 'reply-parent',
+      level: 3,
+    }],
+  };
+  const replies = packageReplies({ platform: 'xhs', result, noteId: result.noteId });
+
+  assert.equal(replies.records[0].payload.rootCommentId, 'comment-root');
+  assert.equal(replies.records[0].payload.replyToCommentId, 'reply-parent');
+  assert.equal(Object.hasOwn(replies.records[0].payload, 'parentCommentId'), false);
 });
 
 test('comment packages carry one Attempt receipt instead of adding old and new attempts as a fake total', () => {
@@ -248,12 +473,12 @@ test('not-usable wrong-target comment trees keep the receipt but emit no materia
 });
 
 test('media delivery uses its own resumable chunk lane instead of blocking text delivery with one raw upload', () => {
-  const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
-  assert.match(background, /MEDIA_CHUNK_BYTES = 1024 \* 1024/);
-  assert.match(background, /media-observations\/\$\{encodeURIComponent\(mediaObservationRef\)\}\/uploads/);
-  assert.match(background, /media-uploads\/\$\{encodeURIComponent\(sessionRef\)\}\/chunks/);
-  assert.match(background, /media-uploads\/\$\{encodeURIComponent\(sessionRef\)\}\/finalize/);
-  assert.doesNotMatch(background, /media-observations\/\$\{encodeURIComponent\(upload\.mediaObservationRef\)\}\/blob/);
+  const mediaRuntime = readFileSync(new URL('../src/linggan/mediaTransferRuntime.js', import.meta.url), 'utf8');
+  assert.match(mediaRuntime, /MEDIA_CHUNK_BYTES = 1024 \* 1024/);
+  assert.match(mediaRuntime, /media-observations\/\$\{encodeURIComponent\(mediaObservationRef\)\}\/uploads/);
+  assert.match(mediaRuntime, /media-uploads\/\$\{encodeURIComponent\(sessionRef\)\}\/chunks/);
+  assert.match(mediaRuntime, /media-uploads\/\$\{encodeURIComponent\(sessionRef\)\}\/finalize/);
+  assert.doesNotMatch(mediaRuntime, /media-observations\/\$\{encodeURIComponent\(upload\.mediaObservationRef\)\}\/blob/);
 });
 
 test('background forwards the claimed scheduled identity into the content page action', () => {
@@ -382,9 +607,10 @@ test('content message gate admits scheduled profile discovery without dropping d
 test('scheduled page execution propagates a collector failure instead of reporting a false start', () => {
   const content = readFileSync(new URL('../src/content/index.js', import.meta.url), 'utf8');
   const background = readFileSync(new URL('../src/linggan/background.js', import.meta.url), 'utf8');
-  assert.match(content, /if \(pageResult\?\.success === false\) return pageResult/);
-  assert.match(background, /if \(response\?\.success === false\)/);
-  assert.match(background, /response\.state \|\| 'page_read_failed'/);
+  const adapter = readFileSync(new URL('../src/linggan/adapter.js', import.meta.url), 'utf8');
+  assert.match(content, /if \(pageResult\?\.success !== true\)/);
+  assert.match(background, /decodePageExecutionReceipt\(response/);
+  assert.match(adapter, /page_receipt_identity_mismatch/);
 });
 
 test('producer controls use Linggan runtime commands while manual media remains an explicit separate action', () => {

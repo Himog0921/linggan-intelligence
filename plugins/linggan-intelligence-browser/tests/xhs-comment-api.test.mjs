@@ -5,7 +5,62 @@ import {
   parseXhsCommentPagePayload,
   buildXhsCommentsFromSnapshot,
   hydrateXhsCommentSnapshot,
+  resolveXhsCommentImageUrls,
+  startFreshXhsCommentSnapshot,
 } from '../src/platforms/xhs/commentApi.js';
+
+test('comment image extraction keeps public media candidates and excludes unrelated avatar fields', () => {
+  assert.deepEqual(resolveXhsCommentImageUrls({
+    pictures: [
+      { url_default: '//sns-img.example/comment-a.webp' },
+      { url_list: ['https://sns-img.example/comment-a.webp', 'https://sns-img.example/comment-b.webp'] },
+    ],
+    image_list: [{ origin_url: 'https://sns-img.example/comment-c.webp' }],
+    user_info: { image: 'https://sns-avatar.example/author.webp' },
+  }), [
+    'https://sns-img.example/comment-a.webp',
+    'https://sns-img.example/comment-b.webp',
+    'https://sns-img.example/comment-c.webp',
+  ]);
+});
+
+test('a new comment Attempt resets prior pages and fetches a fresh first page', async () => {
+  const events = [];
+  let generation = 0;
+  const options = {
+    resetSnapshot: async (noteId) => {
+      events.push(`reset:${noteId}`);
+      return true;
+    },
+    beforeExternalAction: async () => { events.push('before'); },
+    afterExternalAction: async () => { events.push('after'); },
+    fetchJson: async () => {
+      generation += 1;
+      return { data: { comments: [{ id: `fresh_${generation}` }], has_more: true, cursor: `cursor_${generation}` } };
+    },
+  };
+  const first = await startFreshXhsCommentSnapshot('note_1', options);
+  const second = await startFreshXhsCommentSnapshot('note_1', options);
+  assert.deepEqual(first.pages[0].comments.map((comment) => comment.id), ['fresh_1']);
+  assert.deepEqual(second.pages[0].comments.map((comment) => comment.id), ['fresh_2']);
+  assert.deepEqual(second.subPages, []);
+  assert.deepEqual(events, ['reset:note_1', 'before', 'after', 'reset:note_1', 'before', 'after']);
+});
+
+test('a new comment Attempt never fetches when snapshot reset is not confirmed', async () => {
+  let fetchCalled = false;
+  await assert.rejects(
+    startFreshXhsCommentSnapshot('note_1', {
+      resetSnapshot: async () => false,
+      fetchJson: async () => {
+        fetchCalled = true;
+        return {};
+      },
+    }),
+    /comment_snapshot_reset_not_confirmed/,
+  );
+  assert.equal(fetchCalled, false);
+});
 
 test('parseXhsCommentPagePayload reads note id, cursor, hasMore and endpoint from main comment payload', () => {
   const payload = parseXhsCommentPagePayload({
@@ -40,6 +95,7 @@ test('buildXhsCommentsFromSnapshot maps main comments and replies into normalize
             create_time: 1710000000,
             like_count: 12,
             ip_location: '上海',
+            pictures: [{ url_default: '//sns-img.example/comment-root.webp' }],
             user_info: {
               nickname: '作者甲',
               user_id: 'user_1',
@@ -120,6 +176,7 @@ test('buildXhsCommentsFromSnapshot maps main comments and replies into normalize
   assert.equal(main.dataQuality, 'full');
   assert.equal(main.qualityReason, '');
   assert.equal(main.sourceTier, 'api');
+  assert.deepEqual(main.commentImageUrls, ['https://sns-img.example/comment-root.webp']);
 
   assert.equal(inlineReply.level, 2);
   assert.equal(inlineReply.parentCommentId, 'root_1');
@@ -371,4 +428,84 @@ test('hydrateXhsCommentSnapshot keeps xsec token when fetching sub comment pages
   assert.match(fetchCalls[0][0], /xsec_token=token_abc/);
   assert.match(fetchCalls[0][0], /image_formats=jpg%2Cwebp%2Cavif/);
   assert.match(fetchCalls[0][0], /top_comment_id=/);
+});
+
+test('stepwise hydration performs at most one external request per acquisition loop', async () => {
+  const actions = [];
+  let page = 1;
+  const snapshot = {
+    noteId: 'note_1',
+    pages: [{
+      endpoint: 'page',
+      noteId: 'note_1',
+      cursor: 'cursor_1',
+      hasMore: true,
+      capturedAt: 1,
+      comments: [{ id: 'root_1', content: '主评论 1' }],
+    }],
+    subPages: [],
+  };
+  const fetchJson = async () => {
+    page += 1;
+    return {
+      data: {
+        comments: [{ id: `root_${page}`, content: `主评论 ${page}` }],
+        cursor: `cursor_${page}`,
+        has_more: page < 3,
+      },
+    };
+  };
+
+  const first = await hydrateXhsCommentSnapshot(snapshot, {
+    noteId: 'note_1',
+    fetchJson,
+    maxExternalActions: 1,
+    beforeExternalAction: async (action) => actions.push(`before:${action.kind}`),
+    afterExternalAction: async (action) => actions.push(`after:${action.kind}`),
+  });
+  assert.equal(first.pages.length, 2);
+  assert.equal(first.hydrationMeta.actionsPerformed, 1);
+  assert.equal(first.hydrationMeta.pending, true);
+  assert.deepEqual(actions, ['before:api_main_page', 'after:api_main_page']);
+
+  const second = await hydrateXhsCommentSnapshot(first, {
+    noteId: 'note_1',
+    fetchJson,
+    maxExternalActions: 1,
+  });
+  assert.equal(second.pages.length, 3);
+  assert.equal(second.hydrationMeta.actionsPerformed, 1);
+  assert.equal(second.hydrationMeta.pending, false);
+});
+
+test('a final reply page overrides a stale root has-more flag on later acquisition loops', async () => {
+  let fetchCount = 0;
+  const hydrated = await hydrateXhsCommentSnapshot({
+    noteId: 'note_1',
+    pages: [{
+      noteId: 'note_1',
+      cursor: '',
+      hasMore: false,
+      comments: [{
+        id: 'root_1',
+        sub_comment_count: 2,
+        sub_comment_has_more: true,
+        sub_comments: [],
+      }],
+    }],
+    subPages: [{
+      noteId: 'note_1',
+      rootCommentId: 'root_1',
+      cursor: '',
+      hasMore: false,
+      comments: [{ id: 'reply_1' }, { id: 'reply_2' }],
+    }],
+  }, {
+    noteId: 'note_1',
+    maxExternalActions: 1,
+    fetchJson: async () => { fetchCount += 1; return {}; },
+  });
+
+  assert.equal(fetchCount, 0);
+  assert.equal(hydrated.hydrationMeta.pending, false);
 });

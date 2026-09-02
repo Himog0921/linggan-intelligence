@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-08-29
+> 最后核对: 2026-09-01
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -40,8 +40,8 @@
 | [`plans/completed/observation-runtime-001-implementation-manual.md`](plans/completed/observation-runtime-001-implementation-manual.md) | 已完成；Issue #94 / PR #95 / PR #96 | 观察规则自动调度、插件无人领取、Package/Receipt、封面材料投影、发布与一次性验收的实施规格和已完成边界 |
 | [`data-contracts/local-001-discovery-evidence-boundary.md`](data-contracts/local-001-discovery-evidence-boundary.md) | 权威当前 | `LOCAL-001 / 001C-0` 与 #34 localhost binding：平台 discovery 与本地 Evidence Library 检索、partial Coverage、DiscoveryOccurrence、接纳回执与本地封面引用的跨边界合同；不证明真实插件或媒体取得 |
 | [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md) | 权威当前；MATERIAL-PROJECTION-001 | 最新 Browser Producer 产出到服务接纳、作品级材料投影与 Evidence 列表/详情/受控媒体读取的逐 lane 映射及代表性 fixture |
-| [`architecture/work-resource-read-contract.md`](architecture/work-resource-read-contract.md) | 交付分支实现；Issue #110 | Intelligence 跨页面唯一作品资源读取入口；作者/监控目标关系、发布时间资格、Media V2 继承和三布局数据一致性 |
-| [`architecture/topic-workspace-contract.md`](architecture/topic-workspace-contract.md) | 交付分支实现；Issue #112 | 暂定 Topic Definition、人工 Classification Run、冻结 Material Pack、版本/幂等与 Agent 准入边界 |
+| [`architecture/work-resource-read-contract.md`](architecture/work-resource-read-contract.md) | 权威当前；Issue #110 / #128 | Intelligence 跨页面唯一作品资源读取入口；`0.8.28` 真实链已验收封面/头像/作者-目标分责，评论图片非空真实样本仍未观察 |
+| [`architecture/topic-workspace-contract.md`](architecture/topic-workspace-contract.md) | 验证中；Issue #112 | 暂定 Topic Definition、人工 Classification Run、冻结 Material Pack、版本/幂等与 Agent 准入边界；不复制 Evidence 原文，不形成正式 Topic、Claim 或趋势 |
 | [design/README.md](design/README.md) | 权威当前 | 前端设计手册入口、权威地图、读取路径和当前已建立/未建立边界 |
 | [design/design-governance.md](design/design-governance.md) | 权威当前 | UI 设计来源优先级、闭集执行、变更分类、例外和验收治理 |
 | [design/reference-register.md](design/reference-register.md) | 权威当前 | 设计参考的登记格式与“参考不等于指令”边界；LIDS v2.0 的可继承/不继承边界已登记 |
@@ -60,6 +60,7 @@
 | [design/templates/visual-acceptance-form.md](design/templates/visual-acceptance-form.md) | 权威当前 | 视觉、任务、状态和真实后果四层验收记录表单 |
 | [design/pages/evidence-library-page.md](design/pages/evidence-library-page.md) | 权威当前 | `PAGE-EVIDENCE-001`：多材料 Evidence Library 产品手册与技术呈现要求；运行页已按现行 Material Projection 落地作品 lane 与 Inspector，真实垂直证明仍未完成 |
 | [design/changes/work-resource-read-001-ui-change-manifest.md](design/changes/work-resource-read-001-ui-change-manifest.md) | 交付分支实现；Issue #110 | Evidence Library 的共享 Work Resource 接口、作者/目标诚实表达、时间来源状态和研读/表格/封面三种排版变更清单 |
+| [design/changes/evidence-v9-001-ui-change-manifest.md](design/changes/evidence-v9-001-ui-change-manifest.md) | 交付分支实现；EVIDENCE-V9-001 | `/corpus/evidence` 的 V9 研读密度、行级原声引用读能力、Inspector 三档宽度与 LOCAL MEDIA 横向材料浏览变更清单，含七处与 V9 的有据偏离 |
 | [design/pages/evidence-library-multi-material-reference.html](design/pages/evidence-library-multi-material-reference.html) | 权威当前；静态参考 | `EVIDENCE-PAGE-002`：多材料 Evidence Library 合成高保真参考；不连接 API、真实平台、媒体或处理器 |
 | [design/pages/collection-workspace-page.md](design/pages/collection-workspace-page.md) | 权威当前；PAGE-COLLECTION-001 | Collection 五个子面的职责、状态诚实性、页面级例外与未证明边界 |
 | [design/pages/topic-workspace-page.md](design/pages/topic-workspace-page.md) | 交付分支权威；PAGE-TOPIC-WORKSPACE-001 | 真实但明确暂定的 L2 Topic 工作区：定义、人工裁定、冻结材料与来源边界 |
@@ -92,7 +93,9 @@
 | [design/acceptance/evidence-page-002-multi-material-reference-acceptance.md](design/acceptance/evidence-page-002-multi-material-reference-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-PAGE-002`：多材料 Evidence Library 静态参考的双视口、状态、互动和边界验收 |
 | [design/acceptance/evidence-runtime-001-visual-acceptance.md](design/acceptance/evidence-runtime-001-visual-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-RUNTIME-001`：Issue #90 运行页的自动检查、桌面/375px 浏览器证据与未证明边界 |
 | [design/acceptance/work-resource-read-001-visual-acceptance.md](design/acceptance/work-resource-read-001-visual-acceptance.md) | 一次性报告 | `ACC-WORK-RESOURCE-READ-001`：共享作品资源、目标/作者关系、时间资格和三种排版的分层验收；真实视觉与部署仍未核验 |
-| [design/acceptance/topic-workspace-real-001-visual-acceptance.md](design/acceptance/topic-workspace-real-001-visual-acceptance.md) | 一次性报告；Issue #112 | `ACC-TOPIC-WORKSPACE-REAL-001`：事务、API、真实页面与未证明边界的分层验收 |
+| [design/acceptance/topic-workspace-real-001-visual-acceptance.md](design/acceptance/topic-workspace-real-001-visual-acceptance.md) | 一次性报告；Issue #112 | `ACC-TOPIC-WORKSPACE-REAL-001`：暂定 Topic 事务、API、页面与未证明边界的分层验收 |
+| [design/acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md](design/acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md) | 一次性报告 | `ACC-DEV-05-XHS-CONTENT-OBSERVATION-001`：Issue #133 的当前/历史字段、Coverage 历史与有界复观测分层验收；未重载运行时、未进行真实 XHS 或 Mog 验收 |
+| [design/acceptance/evidence-v9-001-visual-acceptance.md](design/acceptance/evidence-v9-001-visual-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-V9-001`：V9 研读密度、材料完整度口径、Inspector 宽度与 LOCAL MEDIA/Lightbox 的真实数据走查；多图链路只有一个样本，未部署 |
 | [design/acceptance/design-009-runtime-capacity-surface-acceptance.md](design/acceptance/design-009-runtime-capacity-surface-acceptance.md) | 一次性报告 | `ACC-RUNTIME-001`：产能判定、状态诚实性与视觉的验收记录 |
 | [design/foundation/topic-intelligence-visual-language.md](design/foundation/topic-intelligence-visual-language.md) | 权威当前 | DESIGN-002 的 DS-001–DS-007：合成 Topic Reference Page 的受限视觉语言 |
 | [design/patterns/evidence-candidate-and-boundary-patterns.md](design/patterns/evidence-candidate-and-boundary-patterns.md) | 权威当前 | DESIGN-002 的 PAT-001–PAT-004：观察、候选、边界与无副作用意图表达 |
@@ -107,10 +110,10 @@
 | [`architecture/project-architecture-atlas.html`](architecture/project-architecture-atlas.html) | 代码事实优先；本机快照 2026-08-28 | 面向非技术项目负责人的 AEDS 中文架构全景页；以当前本机代码、PostgreSQL、loopback API 与页面读取核对为主，分层展示独立本地产品、受控浏览器采集、模块化单体、数据/事实边界、界面、运行环境、AI Agent 与路线图；不替代运行、长期采集或生产证明 |
 | [`architecture/module-architecture.md`](architecture/module-architecture.md) | 草案 | Gate 6 Rust 模块、接口、依赖、adapter、测试表面与无巨型文件门禁；不授权创建 crate |
 | [`architecture/agent-architecture.md`](architecture/agent-architecture.md) | 草案 | Gate 6 Agent Invocation、工具权限、预算/停止、恢复、结构化输出、隐私与评测；不选择模型或授权真实原文 |
-| [`architecture/capture-plugin-architecture.md`](architecture/capture-plugin-architecture.md) | 草案 | Gate 6 服务端采集控制层、有限工位/账号、Work Order/Attempt/lease、部分结果、MV3 插件与协议升级 |
+| [`architecture/capture-plugin-architecture.md`](architecture/capture-plugin-architecture.md) | 代码事实优先 | Linggan 采集控制层与受控 Browser Producer 的当前责任边界；`0.8.28` 单工位标准详情真实链已通过，未实现的长期候选仍以草案待决策 |
 | [`architecture/capture-control-contract.md`](architecture/capture-control-contract.md) | 草案 | ARC-001 首批真实 Canary 前的采集控制合同：Need/授权/准入、有限资源、lane、Coverage、部分结果、回执与恢复边界；不授权真实执行 |
-| [`architecture/media-lifecycle-contract.md`](architecture/media-lifecycle-contract.md) | 权威当前 | ARC-001 媒体后继合同：V2 继承矩阵、插件多材料/媒体槽位适配、字节/派生/保留/处置责任与 Evidence Library 最低消费合同；不证明真实媒体链 |
-| [`architecture/runtime-operations-architecture.md`](architecture/runtime-operations-architecture.md) | 草案 | Gate 6 API/worker、Durable Work、scheduler、重试/接管、可观测性、数据库角色、部署与恢复 |
+| [`architecture/media-lifecycle-contract.md`](architecture/media-lifecycle-contract.md) | 权威当前 | 统一 Slot/Origin/Download/Blob/Materialization/Derivative/Relation 合同；`0.8.28` 真实封面、正文图、Live Photo 与作者头像链已验收，ASR 失败与 `comment.image NOT_OBSERVED` 继续如实保留 |
+| [`architecture/runtime-operations-architecture.md`](architecture/runtime-operations-architecture.md) | 代码事实优先 | 当前 loopback API / 巡检 worker / 媒体 worker / PostgreSQL / scheduler 运行拓扑，以及未实现的长期运维候选边界 |
 | [`architecture/data-architecture.md`](architecture/data-architecture.md) | 草案 | Gate 5 数据分类、身份、版本、Current、隐私、统计资格与 PostgreSQL 概念模型；不是 DDL |
 | [`architecture/data-relations.md`](architecture/data-relations.md) | 草案 | `data-architecture.md` 的渐进披露子文档；收敛候选基数、外键责任、类型化关系与并发约束，不是最终表清单 |
 | [`architecture/data-consistency.md`](architecture/data-consistency.md) | 草案 | 数据架构第三层；定义事务、重放、并发、隐私传播和 PostgreSQL 16 可证伪验收，不是 SQL 或 migration |
@@ -134,7 +137,7 @@
 | [`audits/pre-implementation-architecture-audit-2026-08-21.md`](audits/pre-implementation-architecture-audit-2026-08-21.md) | 一次性报告 | `ADV-AUDIT-001` 的独立复核最终处置：保留权威冲突、真实 producer 接缝、产品职责和 dirty worktree 风险，否定当前解除 Attempt 1:1、强加 `attemptRef`、改 crate 或整批提交的危险建议；不改变 F01 代码门 |
 | [`runbooks/development-environment.md`](runbooks/development-environment.md) | 权威当前 | Rust 与 Docker PostgreSQL 16 的统一运行入口 |
 | [`runbooks/local-evidence-library.md`](runbooks/local-evidence-library.md) | 权威当前 | Rust loopback host、health、受控 discovery ingress 与 Evidence Library 本地启动/验证；明确不含真实插件、平台或媒体链路 |
-| [`runbooks/linggan-browser-producer-local.md`](runbooks/linggan-browser-producer-local.md) | 权威当前 | Linggan 自有 Browser Producer 的构建、包审计与未来人工加载边界；不授权平台访问 |
+| [`runbooks/linggan-browser-producer-local.md`](runbooks/linggan-browser-producer-local.md) | 权威当前 | Browser Producer `0.8.28` 构建/发行/加载/工位/真实回执的分层核对步骤；操作授权仍以当次任务为准 |
 | [`platforms/xiaohongshu/capture-capability-registry.md`](platforms/xiaohongshu/capture-capability-registry.md) | 权威当前；AUD-XHS-001 范围内 | 小红书页面字段、探针、插件交付能力、Coverage 与平台漂移的唯一登记入口；不保存真实原文或接入真实材料 |
 | [`decisions/0002-comment-collection-completion-and-retry.md`](decisions/0002-comment-collection-completion-and-retry.md) | ACCEPTED | 小红书评论的标准 30 条窗口、全量深采完成判据、部分材料可用性、重新从详情页采集及当前去重投影规则 |
 | [`proposals/real-canary-002-controlled-discovery-through-authorization-chain.md`](proposals/real-canary-002-controlled-discovery-through-authorization-chain.md) | 草案 | 让一次已获准过的 ADHD 发现面原样再走一遍，但全程经过「授权 → 准入 → 工单 → 租约 → 闸门 → 派发」，用于解锁采集控制合同 §12 第 5 条；不扩大平台足迹，不授权 001C-2/001C-3 |
@@ -143,17 +146,18 @@
 | [`plans/active/topic-workspace-real-001.md`](plans/active/topic-workspace-real-001.md) | 验证中；Issue #112 | 首个真实 Topic 工作区垂直切片；只到暂定定义、人工裁定、冻结 Material Pack 与共享 Work Resource Read |
 | [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一获准实施事项：F01 synthetic fact-kernel technical tracer 受控进入 TDD；完成 loopback API + minimal CLI 后 hard stop，不扩入 F02–F10、真实平台/AI/插件/Web |
 | [`plans/active/plugin-runtime-001-full-capability-retrofit.md`](plans/active/plugin-runtime-001-full-capability-retrofit.md) | 活跃计划；Issue #50 | 将灵感爆爆爆的成熟浏览器采集能力一次性适配为 Linggan 自有 Browser Producer Runtime；媒体本地资产与异步处理血缘为本事项第一类约束 |
-| [`plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md) | 活跃计划；Issue #74 | 在最小真实页面样本上刷新小红书搜索、详情（含最多 30 条评论）和作者页探针，形成不含真实原文的字段与能力登记；不接入或持久化真实材料 |
-| [`plans/active/plugin-xhs-capture-upgrade-001.md`](plans/active/plugin-xhs-capture-upgrade-001.md) | 活跃计划；Issue #76 | 实现小红书搜索页面事实、详情 DOM 回退与“详情/媒体观察/最多 30 条评论”统一逻辑回执；不分析、不接入真实材料、不发布 |
+| [`plans/completed/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/completed/aud-xhs-001-xiaohongshu-capture-probe-refresh.md) | 已完成；治理终止；Issue #74 | 历史小红书页面字段与能力探针；未确认字段保持 unknown，只有真实链被具体字段阻断时才可另行最小探针 |
+| [`plans/completed/plugin-xhs-capture-upgrade-001.md`](plans/completed/plugin-xhs-capture-upgrade-001.md) | 已完成；源码升级；Issue #76 / PR #77 | 已合入搜索页面事实、详情 DOM 回退与统一详情包回执源码；不证明真实兼容性、运行时或用户验收 |
 | [`plans/active/plugin-xhs-active-collection-001.md`](plans/active/plugin-xhs-active-collection-001.md) | 活跃计划；Issue #78 | 将小红书搜索、标准详情、单篇评论深采与批量评论升级为目标驱动、可恢复的页面执行；不进行真实材料交付、真实页面回归或发布部署 |
+| [`plans/active/plugin-xhs-finalization-001.md`](plans/active/plugin-xhs-finalization-001.md) | 活跃计划；Issue #128 | 一次性收口 Browser Producer 派发/回执/评论 Attempt 可靠性与统一 MediaResource；保留人工媒体窗口，真实链只对当前授权样本运行一次 |
 | [`plans/completed/plugin-xhs-adaptive-scroll-and-detail-receipt-001.md`](plans/completed/plugin-xhs-adaptive-scroll-and-detail-receipt-001.md) | 已完成；Issue #80 / PR #81 | 将 XHS 页面加载滚动收敛为可解释的有限过程；分离 Intelligence 详情交付与人工媒体下载，并逐 lane 显示接纳回执 |
-| [`plans/active/local-001-local-product-evidence-library.md`](plans/active/local-001-local-product-evidence-library.md) | 活跃计划 | 本地独立 Linggan 产品的第一个页面与最小真实采集接缝：V7 Evidence Library Gold Master、`http://localhost:3000`、只读投影，以及 discovery → media acquisition → 异步 OCR/ASR 的连续 Canary 路线；不扩张 SCOPE-001 |
+| [`plans/completed/local-001-local-product-evidence-library.md`](plans/completed/local-001-local-product-evidence-library.md) | 已完成；路线归档；Issue #23 | 历史 Local-001 父计划：建立本地产品/受控读取/Canary 的申请边界；不再作为当前路线图总编号，也不把所有后续设想写成已完成 |
 | [`plans/active/local-001d-unknown-published-discovery-view.md`](plans/active/local-001d-unknown-published-discovery-view.md) | 活跃计划；Issue #62 | 修复默认 Evidence Library 把已接纳、来源发布时间未知的 discovery 卡片隐藏的问题；显式 7/30 天发布时间窗口保持严格 |
 | [`plans/active/local-runtime-001-persistent-loopback.md`](plans/active/local-runtime-001-persistent-loopback.md) | 活跃计划 | Issue #38 的持久本地 PostgreSQL migration、loopback readiness 与重启保留证明；不含插件或真实平台 |
 | [`plans/active/plugin-migration-001-linggan-owned-xhs-discovery.md`](plans/active/plugin-migration-001-linggan-owned-xhs-discovery.md) | 活跃计划 | Issue #37：将成熟旧插件的可见 XHS 搜索卡发现规则适配为 Linggan 自有包，且只启用一次手动 `ADHD` / “综合” / 前 20 卡 Discovery → 固定 localhost ingress |
-| [`plans/active/plugin-rehome-001-full-legacy-browser.md`](plans/active/plugin-rehome-001-full-legacy-browser.md) | 合并后文档收口待办 | Issue #41 / PR #42：完整迁入 `linggan-boom v2.0.91` 的浏览器 source/UX 作为 Linggan 自有包，并切断旧内容工作台运行时；不证明真实采集 |
+| [`plans/completed/plugin-rehome-001-full-legacy-browser.md`](plans/completed/plugin-rehome-001-full-legacy-browser.md) | 已完成；Issue #41 / PR #42 | 完整迁入 `linggan-boom v2.0.91` 的浏览器 source/UX 作为 Linggan 自有包，并切断旧内容工作台运行时；不证明真实采集 |
 | [`plans/completed/gov-004-delivery-package-harness-autonomy.md`](plans/completed/gov-004-delivery-package-harness-autonomy.md) | 已完成；已被 GOV-005 替代 | Issue #70：确立交付包、表面/状态/依赖/验收矩阵；其中 Harness 自主编排已由 GOV-005 取代 |
-| [`plans/active/gov-005-human-directed-collaboration.md`](plans/active/gov-005-human-directed-collaboration.md) | 活跃计划；Issue #72 | 将派单、并发、审查和合并的默认控制权交由 Mog；Agent 仅执行明确分配的 Work Package |
+| [`plans/completed/gov-005-human-directed-collaboration.md`](plans/completed/gov-005-human-directed-collaboration.md) | 已完成；Issue #72 / PR #73 | 将派单、并发、审查和合并的默认控制权交由 Mog；Agent 仅执行明确分配的 Work Package |
 | [`plans/completed/plugin-retrofit-local-trusted-001.md`](plans/completed/plugin-retrofit-local-trusted-001.md) | 已完成计划 | Issue #43 / PR #46：已合并的 LOCAL_TRUSTED synthetic manual `TaskSpec → Attempt → durable outbox → loopback receipt`；不证明真实浏览器、平台、媒体、scheduler 或 Evidence Library 真实数据 |
 | [`plans/completed/plugin-001-linggan-owned-producer.md`](plans/completed/plugin-001-linggan-owned-producer.md) | 已完成计划 | `PLUGIN-001`：Linggan 自有 MV3 基础包、loopback 探测与静态可安装 release；后续 Discovery 由 PLUGIN-MIGRATION-001 承接 |
 | [`plans/completed/disc-001-project-foundation-design.md`](plans/completed/disc-001-project-foundation-design.md) | 已完成计划 | 七道项目基础设计关口与 `USER-DEC-01`–`06` 的完成记录 |
@@ -161,7 +165,9 @@
 | [`plans/completed/gov-001-project-file-governance.md`](plans/completed/gov-001-project-file-governance.md) | 已完成计划 | GOV-001 的范围、交付和验收记录 |
 | [`plans/completed/gov-002-agent-skills-configuration.md`](plans/completed/gov-002-agent-skills-configuration.md) | 已完成计划 | Matt Pocock 工程技能、GitHub Issues、triage 与领域文档适配的配置记录 |
 | [`progress/README.md`](progress/README.md) | 权威当前 | 变更记录规则和月份索引 |
+| [`progress/2026-09.md`](progress/2026-09.md) | 权威当前 | 2026-09 的重要变更记录 |
 | [`progress/2026-08.md`](progress/2026-08.md) | 权威当前 | 2026-08 的重要变更记录 |
+| [`progress/2026-09.md`](progress/2026-09.md) | 权威当前 | 2026-09 的重要变更记录 |
 
 ## 仓库外层资料入口
 

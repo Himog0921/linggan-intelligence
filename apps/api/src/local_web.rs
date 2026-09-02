@@ -44,16 +44,17 @@ use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, CheckInOutcome, DiscoveryIngressError,
     DispatchDecision, InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
     LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget, MediaUploadFinalizeClaim,
-    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
-    StoreOutcome, WorkResourceReadError, admit_media_blob, begin_media_upload,
-    check_in_installation, claim_installation, claim_media_acquisition,
-    claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
-    create_manual_task, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
-    enrich_target_from_author_profile, grant_authorization, ingest_discovery_package,
-    issue_work_order_lease, list_targets, list_targets_in_state, local_discovery_schema_is_ready,
-    local_producer_schema_is_ready, media_acquisition_schema_is_ready, open_claim_window,
-    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_archive_completeness,
-    read_discovery_library, read_media_upload_session, read_runtime_capacity, read_runtime_library,
+    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeCapacityOverview, RuntimeSubmissionOutcome,
+    RuntimeTaskOutcome, StationOverview, StoreOutcome, TargetCounts, UnclaimedInstallation,
+    WorkResourceReadError, admit_media_blob, begin_media_upload, check_in_installation,
+    claim_installation, claim_media_acquisition, claim_media_upload_finalize, close_claim_window,
+    complete_media_upload, count_targets, create_manual_task, create_producer_task,
+    decide_dispatch, dispatch_schema_is_ready, enrich_target_from_author_profile,
+    grant_authorization, ingest_discovery_package, issue_work_order_lease, list_targets,
+    list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
+    media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
+    producer_runtime_schema_is_ready, read_archive_completeness, read_discovery_library,
+    read_media_upload_session, read_runtime_capacity, read_runtime_library,
     read_scheduler_heartbeat, read_station_overview, read_target, record_media_acquisition_failure,
     record_media_download_failure, record_media_upload_chunk, register_station,
     release_media_upload_finalize, request_and_admit, request_and_admit_material_targets,
@@ -91,6 +92,7 @@ const SHELL_CSS: &str = include_str!("local_web/shell.css");
 const COLLECTION_WORKSPACE_CSS: &str = include_str!("local_web/collection_workspace.css");
 const COLLECTION_WORKSPACE_JS: &str = include_str!("local_web/collection_workspace.js");
 const EVIDENCE_LIBRARY_CSS: &str = include_str!("local_web/evidence_library.css");
+const EVIDENCE_OBSERVATION_JS: &str = include_str!("local_web/evidence_observation.js");
 const EVIDENCE_LIBRARY_JS: &str = include_str!("local_web/evidence_library.js");
 #[cfg(test)]
 const LIDS_TOKEN_DOCUMENT: &str = include_str!("../../../docs/design/lids/tokens.md");
@@ -328,6 +330,10 @@ fn router(state: LocalWebState) -> Router {
         )
         .route("/collection/runtime/claims", post(collection_runtime_claim))
         .route("/assets/evidence-library.css", get(stylesheet))
+        .route(
+            "/assets/evidence-observation.js",
+            get(evidence_observation_script),
+        )
         .route("/assets/evidence-library.js", get(evidence_library_script))
         .route(
             "/assets/topic-workspace.css",
@@ -360,6 +366,14 @@ fn material_api_routes() -> Router<LocalWebState> {
         .route(
             "/api/local/work-resources/{public_ref}/comments",
             get(material_projection::research_comments_json),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/reobserve",
+            post(material_projection::reobserve_json),
+        )
+        .route(
+            "/api/local/work-resources/{public_ref}/reobserve/{lease_ref}",
+            get(material_projection::reobservation_status_json),
         )
         .route(
             "/api/local/work-resources/{public_ref}",
@@ -487,8 +501,16 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     }))
 }
 
-async fn evidence_library() -> Html<String> {
-    Html(evidence_library_html())
+async fn evidence_library(State(state): State<LocalWebState>) -> Html<String> {
+    let collection_state = match state.database.database() {
+        Some(database) => match count_targets(database).await {
+            Ok(counts) if counts.total > 0 => Some("观察中"),
+            Ok(_) => Some("无观察目标"),
+            Err(_) => Some("状态未知"),
+        },
+        None => None,
+    };
+    Html(evidence_library_html(collection_state))
 }
 
 async fn evidence_library_json(
@@ -2011,12 +2033,12 @@ fn local_read_json_error(status: axum::http::StatusCode, code: &'static str) -> 
 
 #[cfg(test)]
 fn evidence_read_unavailable_html() -> String {
-    evidence_page::render_read_unavailable(&evidence_library_html())
+    evidence_page::render_read_unavailable(&evidence_library_html(None))
 }
 
 #[cfg(test)]
 fn evidence_query_invalid_html() -> String {
-    evidence_page::render_query_invalid(&evidence_library_html())
+    evidence_page::render_query_invalid(&evidence_library_html(None))
 }
 
 async fn stylesheet() -> Response {
@@ -2045,6 +2067,57 @@ struct CollectionParams {
     dtab: Option<String>,
 }
 
+/// Collection 的共享页头只读现有事实，不创造第二套状态口径。每一项独立保留：某个
+/// read model 暂时失败时，页面仍可显示另外三项已知事实，而不是整块退回「未接通」。
+struct CollectionSurfaceReads {
+    surface_state: collection::SurfaceState,
+    counts: Option<TargetCounts>,
+    capacity: Option<RuntimeCapacityOverview>,
+    roster: Option<(Vec<StationOverview>, Vec<UnclaimedInstallation>)>,
+}
+
+async fn read_collection_surface(database: &Database) -> CollectionSurfaceReads {
+    let counts_read = async { count_targets(database).await.ok() };
+    let (counts, heartbeat) = tokio::join!(counts_read, read_scheduler_heartbeat(database));
+    let scheduler_state = match heartbeat {
+        Ok(Some(heartbeat)) if heartbeat.state == "running" => collection::SchedulerState::Running,
+        Ok(Some(_)) => collection::SchedulerState::Stale,
+        Ok(None) | Err(_) => collection::SchedulerState::Unreadable,
+    };
+    let surface_state = collection::SurfaceState {
+        vacant_stations: None,
+        unclaimed_installations: None,
+        total_targets: counts.as_ref().map(|counts| counts.total),
+        monitoring_targets: counts.as_ref().map(|counts| counts.monitoring),
+        archiving_targets: counts.as_ref().map(|counts| counts.archiving),
+        scheduler_state,
+    };
+    CollectionSurfaceReads {
+        surface_state,
+        counts,
+        capacity: None,
+        roster: None,
+    }
+}
+
+async fn render_simple_collection_surface(
+    state: &LocalWebState,
+    section: collection::Section,
+    mode: collection::OperationsMode,
+) -> Html<String> {
+    let reads = match state.database.database() {
+        Some(database) => Some(read_collection_surface(database).await),
+        None => None,
+    };
+    Html(collection::render(
+        section,
+        mode,
+        None,
+        None,
+        reads.as_ref().map(|reads| &reads.surface_state),
+    ))
+}
+
 /// DESIGN-006: the entry lands on the one surface whose contents expire. Arriving on the
 /// target list meant opening with the most static thing in Collection — a list that does not
 /// change for a week — while anything actually waiting sat two tabs away.
@@ -2057,23 +2130,27 @@ async fn collection_targets(
     Query(params): Query<CollectionParams>,
 ) -> Html<String> {
     // 计数不受当前筛选影响：tab 上的数字要回答「切过去有多少」。
-    let counts = match state.database.database() {
-        Some(database) => count_targets(database).await.ok(),
+    let database = state.database.database();
+    let reads = match database {
+        Some(database) => Some(read_collection_surface(database).await),
         None => None,
     };
+    let counts = reads.as_ref().and_then(|reads| reads.counts.as_ref());
     let base = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
-        params.drawer.as_deref(),
         params.filter.as_deref(),
-        counts.as_ref(),
-        None,
+        counts,
+        reads.as_ref().map(|reads| &reads.surface_state),
     );
     // Without a database the page still renders its honest empty state rather than an error:
     // "we cannot read targets right now" and "there are no targets" are different claims, and
     // the empty state already makes only the weaker one.
-    let Some(database) = state.database.database() else {
-        return Html(base);
+    let Some(database) = database else {
+        return Html(format!(
+            "{base}{}",
+            collection::render_unreadable_target_drawer(params.drawer.as_deref())
+        ));
     };
     // 一次查完所有目标的档案完整度：列表最多两百行，逐行发查询会让页面打开一次跑
     // 两百次数据库。
@@ -2086,60 +2163,61 @@ async fn collection_targets(
         .as_deref()
         .and_then(|value| uuid::Uuid::parse_str(value).ok())
     {
-        Some(target_ref) => read_target(database, target_ref).await.ok().flatten(),
-        None => None,
+        Some(target_ref) => read_target(database, target_ref).await.map_err(|_| ()),
+        None => Ok(None),
     };
-    match list_targets(database, params.filter.as_deref(), 200).await {
-        Ok(targets) => {
-            let list = collection_targets_view::render_stored_targets(
-                &base,
-                &targets,
-                &completeness,
-                params.error.as_deref(),
-            );
-            let drawer = target_drawer::render(
-                drawer_target.as_ref(),
-                &completeness,
-                params.drawer.as_deref(),
-                params.dtab.as_deref(),
-            );
-            Html(format!("{list}{drawer}"))
-        }
-        Err(_) => Html(base),
-    }
+    let list = match list_targets(database, params.filter.as_deref(), 200).await {
+        Ok(targets) => collection_targets_view::render_stored_targets(
+            &base,
+            &targets,
+            &completeness,
+            params.error.as_deref(),
+        ),
+        Err(_) => base,
+    };
+    // The selected target lookup is independent from the list lookup. A filtered or failed
+    // list must not erase a target that was read successfully, and an unreadable target must
+    // not be flattened into "not found".
+    let drawer = match drawer_target.as_ref() {
+        Ok(target) => target_drawer::render(
+            target.as_ref(),
+            &completeness,
+            params.drawer.as_deref(),
+            params.dtab.as_deref(),
+        ),
+        Err(()) => collection::render_unreadable_target_drawer(params.drawer.as_deref()),
+    };
+    Html(format!("{list}{drawer}"))
 }
 
-async fn collection_operations(Query(params): Query<CollectionParams>) -> Html<String> {
-    Html(collection::render(
+async fn collection_operations(
+    State(state): State<LocalWebState>,
+    Query(params): Query<CollectionParams>,
+) -> Html<String> {
+    render_simple_collection_surface(
+        &state,
         collection::Section::Operations,
         collection::OperationsMode::parse(params.mode.as_deref()),
-        None,
-        None,
-        None,
-        None,
-    ))
+    )
+    .await
 }
 
-async fn collection_attention() -> Html<String> {
-    Html(collection::render(
+async fn collection_attention(State(state): State<LocalWebState>) -> Html<String> {
+    render_simple_collection_surface(
+        &state,
         collection::Section::Attention,
         collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-        None,
-    ))
+    )
+    .await
 }
 
-async fn collection_tasks() -> Html<String> {
-    Html(collection::render(
+async fn collection_tasks(State(state): State<LocalWebState>) -> Html<String> {
+    render_simple_collection_surface(
+        &state,
         collection::Section::Tasks,
         collection::OperationsMode::Now,
-        None,
-        None,
-        None,
-        None,
-    ))
+    )
+    .await
 }
 
 #[derive(serde::Deserialize)]
@@ -2161,38 +2239,58 @@ async fn collection_runtime(
             None,
             None,
             None,
-            None,
         ));
     };
     // 三份读物一起决定这一页能说什么：工位现状、准入第 5 问的判定、上下文行的事实。
     // 任何一份读不到，对应的那部分就说「读不到」——**不退回写死的「未接通」**，
     // 那是这一页此前最大的问题：一句写下时为真、之后永不更新的状态。
-    let roster = read_station_overview(database).await.ok();
-    let capacity = read_runtime_capacity(database).await.ok();
-    let surface_state = capacity.as_ref().map(|capacity| collection::SurfaceState {
-        vacant_stations: capacity.registered_stations - capacity.staffed_stations,
-        unclaimed_installations: roster
+    let (mut reads, capacity, roster) = tokio::join!(
+        read_collection_surface(database),
+        read_runtime_capacity(database),
+        read_station_overview(database),
+    );
+    reads.capacity = capacity.ok();
+    reads.roster = roster.ok();
+    reads.surface_state.vacant_stations = reads
+        .capacity
+        .as_ref()
+        .map(|capacity| capacity.registered_stations - capacity.staffed_stations);
+    reads.surface_state.unclaimed_installations = reads
+        .roster
+        .as_ref()
+        .map(|(_, unclaimed)| unclaimed.len() as i64);
+    if reads.surface_state.total_targets.is_none() {
+        reads.surface_state.total_targets = reads
+            .capacity
             .as_ref()
-            .map_or(0, |(_, unclaimed)| unclaimed.len() as i64),
-        total_targets: capacity.patrol.total_targets,
-        monitoring_targets: capacity.patrol.monitoring_targets,
-    });
+            .map(|capacity| capacity.patrol.total_targets);
+        reads.surface_state.monitoring_targets = reads
+            .capacity
+            .as_ref()
+            .map(|capacity| capacity.patrol.monitoring_targets);
+    }
     let base = collection::render(
         collection::Section::Runtime,
         collection::OperationsMode::Now,
         None,
         None,
-        None,
-        surface_state.as_ref(),
+        Some(&reads.surface_state),
     );
-    let (stations, unclaimed) = roster.unwrap_or_default();
-    Html(station_view::render_runtime(
-        &base,
-        capacity.as_ref(),
-        &stations,
-        &unclaimed,
-        params.error.as_deref(),
-    ))
+    let rendered = match reads.roster.as_ref() {
+        Some((stations, unclaimed)) => station_view::render_runtime(
+            &base,
+            reads.capacity.as_ref(),
+            stations,
+            unclaimed,
+            params.error.as_deref(),
+        ),
+        None => station_view::render_runtime_with_unreadable_roster(
+            &base,
+            reads.capacity.as_ref(),
+            params.error.as_deref(),
+        ),
+    };
+    Html(rendered)
 }
 
 /// COLLECTION-001 · the person-facing station actions on the 执行工位 surface.
@@ -2758,7 +2856,28 @@ async fn evidence_library_script() -> Response {
         .into_response()
 }
 
-fn evidence_library_html() -> String {
+async fn evidence_observation_script() -> Response {
+    (
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/javascript; charset=utf-8"),
+        )],
+        EVIDENCE_OBSERVATION_JS,
+    )
+        .into_response()
+}
+
+fn evidence_library_header(collection_state: Option<&str>) -> String {
+    shell::global_header(
+        shell::PrimarySurface::Corpus,
+        "本机材料投影 <span class=\"v7-tech-key\">LOCAL MATERIAL PROJECTION</span>",
+        "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">作品材料集合</span>",
+        "<span class=\"v7-kpi\"><em>事实层</em><b>只读</b></span><span class=\"v7-kpi\"><em>材料入口</em><b>默认投影</b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span class=\"v7-query-meta\">不混读旧发现卡片 <span class=\"v7-tech-key\">NO LEGACY FALLBACK</span></span><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
+        collection_state,
+    )
+}
+
+fn evidence_library_html(collection_state: Option<&str>) -> String {
     let base = r#"<!doctype html>
 <html lang="zh-CN" data-theme="linggan-intelligence">
   <head>
@@ -2767,6 +2886,7 @@ fn evidence_library_html() -> String {
     <meta name="color-scheme" content="light">
     <title>证据库 · Linggan Intelligence</title>
     <link rel="stylesheet" href="/assets/evidence-library.css">
+    <script src="/assets/evidence-observation.js" defer></script>
     <script src="/assets/evidence-library.js" defer></script>
   </head>
   <body>
@@ -2774,8 +2894,7 @@ fn evidence_library_html() -> String {
       <!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->
       <div class="v7-shell">
         <aside class="v7-side" aria-label="语料导航">
-          <div class="v7-nav-label" data-readout="CORPUS">语料与证据</div>
-          <a class="v7-side-nav" href="/corpus/evidence" aria-current="page"><i>01</i><span>证据库</span></a>
+          <a class="v7-side-nav" href="/corpus/evidence" aria-current="page"><i>01</i><span>证据库</span><b class="ev-rail-count" id="ev-rail-count" hidden></b></a>
           <span class="v7-side-nav" aria-disabled="true"><i>02</i><span>评论研究</span></span>
           <span class="v7-side-nav" aria-disabled="true"><i>03</i><span>创作者</span></span>
           <span class="v7-side-nav" aria-disabled="true"><i>04</i><span>已存查询</span></span>
@@ -2784,45 +2903,70 @@ fn evidence_library_html() -> String {
 
         <main class="v7-main ev-main" aria-labelledby="page-title">
           <h1 class="v7-sr-only" id="page-title">证据库</h1>
+
           <section class="ev-command" aria-label="材料检索与筛选">
-            <div class="ev-command-title"><div><span class="ev-kicker">语料 / 证据审查</span><strong>以作品为顶层的多材料证据库</strong></div><p>列表回答拿到了哪些材料通道；右侧核验详情、受限评论、媒体与来源血缘。</p></div>
             <form id="ev-query-form" class="ev-query-form">
-              <label class="ev-field ev-field--search"><span>检索作品材料</span><input id="ev-search" name="q" type="search" autocomplete="off" placeholder="标题、作者显示名或已接纳内容"></label>
-              <label class="ev-field"><span>读取窗口</span><select id="ev-window" name="window"><option value="latest_accepted_discovery">最新已接纳发现</option><option value="last_7_days">近 7 天来源发布时间</option><option value="last_30_days">近 30 天来源发布时间</option></select></label>
-              <label class="ev-field"><span>材料通道</span><select id="ev-lane" name="lane"><option value="">全部材料通道</option><option value="discovery">发现</option><option value="detail">详情</option><option value="comments">评论</option><option value="replies">回复</option><option value="author">作者</option><option value="media_slots">媒体槽位</option><option value="media_bytes">媒体字节</option><option value="ocr">图片文字</option><option value="asr">视频转录</option></select></label>
-              <label class="ev-field"><span>通道状态</span><select id="ev-lane-state" name="laneState"><option value="">全部状态</option><option value="UNKNOWN">当前未知</option><option value="NOT_REQUESTED">尚未请求</option><option value="QUEUED">已排队</option><option value="NOT_OBSERVED">尚未观察</option><option value="OBSERVED">已观察</option><option value="PARTIAL">部分取得</option><option value="ACQUIRED">已取得</option><option value="PROCESSING">处理中</option><option value="NOT_ENABLED">处理器未启用</option><option value="SEARCHABLE">可检索</option><option value="FAILED">执行失败</option><option value="RISK_CONTROL">风险控制停止</option><option value="BYTES_CLEANED">字节已清理</option><option value="WITHDRAWN_OR_RESTRICTED">撤回或受限</option></select></label>
-              <label class="ev-field"><span>媒体类型</span><select id="ev-media-kind" name="mediaKind"><option value="">全部类型</option><option value="cover">封面</option><option value="image">正文图片</option><option value="video">视频</option><option value="live_photo">实况图片</option></select></label>
-              <div class="ev-form-actions"><button class="ev-button ev-button--primary" type="submit">读取材料</button><button class="ev-button ev-button--ghost" id="ev-reset" type="button">重置</button></div>
-            </form>
-          </section>
-
-          <div class="ev-read-receipt" id="ev-read-receipt" role="status" aria-live="polite"><span>正在连接本机材料投影……</span><span class="v7-tech-key">LOCAL READ</span></div>
-
-          <section class="ev-bench" aria-label="证据审查工作台">
-            <aside class="ev-views" aria-label="证据状态视图">
-              <div class="ev-views-head"><span>状态视图</span><span class="v7-tech-key">STATE VIEWS</span></div>
-              <button type="button" data-ev-view="all" aria-pressed="true"><span>全部作品材料</span><small>不添加状态过滤</small></button>
-              <button type="button" data-ev-view="partial" aria-pressed="false"><span>部分取得</span><small>需判断是否补采</small></button>
-              <button type="button" data-ev-view="risk" aria-pressed="false"><span>风险控制停止</span><small>执行边界明确</small></button>
-              <button type="button" data-ev-view="cleaned" aria-pressed="false"><span>媒体已清理</span><small>保留事实，字节不可用</small></button>
-              <button type="button" data-ev-view="restricted" aria-pressed="false"><span>撤回或受限</span><small>不继续暴露内容</small></button>
-              <dl class="ev-context"><div><dt>当前结果</dt><dd id="ev-context-count">—</dd></div><div><dt>当前选择</dt><dd id="ev-context-selection">—</dd></div><div><dt>读取状态</dt><dd id="ev-context-state">尚未读取</dd></div></dl>
-            </aside>
-
-            <section class="ev-results" aria-labelledby="results-title">
-              <header class="ev-results-head">
-                <div><span class="ev-kicker">作品级材料集合</span><h2 id="results-title">多通道真实状态</h2></div>
-                <div class="ev-results-tools">
-                  <strong id="ev-results-count">正在读取</strong>
-                  <div class="ev-layout-switch" role="group" aria-label="结果排版">
-                    <button type="button" data-ev-layout="research" aria-pressed="true">研读</button>
-                    <button type="button" data-ev-layout="table" aria-pressed="false">表格</button>
-                    <button type="button" data-ev-layout="cover" aria-pressed="false">封面</button>
+              <div class="ev-find">
+                <span class="ev-find-mark" aria-hidden="true">FIND</span>
+                <input id="ev-search" name="q" type="search" autocomplete="off" aria-label="检索作品与证据" placeholder="标题、作者、监控目标或原声片段……">
+              </div>
+              <div class="ev-query-tools">
+                <div class="ev-popover-anchor">
+                  <button class="ev-button ev-filter-toggle" id="ev-filter-toggle" type="button" aria-expanded="false" aria-controls="ev-filter-panel">
+                    <span>筛选</span><b id="ev-filter-count">0</b>
+                  </button>
+                  <div class="ev-popover ev-filter-panel" id="ev-filter-panel" hidden>
+                    <div class="ev-field" data-ev-select="ev-window" data-ev-name="window"><span class="ev-field-label" id="ev-window-label">读取窗口</span><div class="ev-popover-anchor"><button class="ev-select-toggle" id="ev-window" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="ev-window-label ev-window-value" aria-controls="ev-window-list"><span class="ev-select-value" id="ev-window-value">最新已接纳发现</span><i class="ev-caret" aria-hidden="true"></i></button><div class="ev-popover ev-select-list" id="ev-window-list" role="listbox" aria-labelledby="ev-window-label" hidden><button type="button" role="option" data-ev-option="latest_accepted_discovery" aria-selected="true">最新已接纳发现</button><button type="button" role="option" data-ev-option="last_7_days" aria-selected="false">近 7 天来源发布时间</button><button type="button" role="option" data-ev-option="last_30_days" aria-selected="false">近 30 天来源发布时间</button></div></div></div>
+                    <div class="ev-field" data-ev-select="ev-lane" data-ev-name="lane"><span class="ev-field-label" id="ev-lane-label">材料通道</span><div class="ev-popover-anchor"><button class="ev-select-toggle" id="ev-lane" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="ev-lane-label ev-lane-value" aria-controls="ev-lane-list"><span class="ev-select-value" id="ev-lane-value">全部材料通道</span><i class="ev-caret" aria-hidden="true"></i></button><div class="ev-popover ev-select-list" id="ev-lane-list" role="listbox" aria-labelledby="ev-lane-label" hidden><button type="button" role="option" data-ev-option="" aria-selected="true">全部材料通道</button><button type="button" role="option" data-ev-option="discovery" aria-selected="false">发现</button><button type="button" role="option" data-ev-option="detail" aria-selected="false">详情</button><button type="button" role="option" data-ev-option="comments" aria-selected="false">评论</button><button type="button" role="option" data-ev-option="replies" aria-selected="false">回复</button><button type="button" role="option" data-ev-option="author" aria-selected="false">作者</button><button type="button" role="option" data-ev-option="media_slots" aria-selected="false">媒体槽位</button><button type="button" role="option" data-ev-option="media_bytes" aria-selected="false">媒体字节</button><button type="button" role="option" data-ev-option="ocr" aria-selected="false">图片文字</button><button type="button" role="option" data-ev-option="asr" aria-selected="false">视频转录</button></div></div></div>
+                    <div class="ev-field" data-ev-select="ev-lane-state" data-ev-name="laneState"><span class="ev-field-label" id="ev-lane-state-label">通道状态</span><div class="ev-popover-anchor"><button class="ev-select-toggle" id="ev-lane-state" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="ev-lane-state-label ev-lane-state-value" aria-controls="ev-lane-state-list"><span class="ev-select-value" id="ev-lane-state-value">全部状态</span><i class="ev-caret" aria-hidden="true"></i></button><div class="ev-popover ev-select-list" id="ev-lane-state-list" role="listbox" aria-labelledby="ev-lane-state-label" hidden><button type="button" role="option" data-ev-option="" aria-selected="true">全部状态</button><button type="button" role="option" data-ev-option="UNKNOWN" aria-selected="false">当前未知</button><button type="button" role="option" data-ev-option="NOT_REQUESTED" aria-selected="false">尚未请求</button><button type="button" role="option" data-ev-option="QUEUED" aria-selected="false">已排队</button><button type="button" role="option" data-ev-option="NOT_OBSERVED" aria-selected="false">尚未观察</button><button type="button" role="option" data-ev-option="OBSERVED" aria-selected="false">已观察</button><button type="button" role="option" data-ev-option="PARTIAL" aria-selected="false">部分取得</button><button type="button" role="option" data-ev-option="ACQUIRED" aria-selected="false">已取得</button><button type="button" role="option" data-ev-option="PROCESSING" aria-selected="false">处理中</button><button type="button" role="option" data-ev-option="NOT_ENABLED" aria-selected="false">处理器未启用</button><button type="button" role="option" data-ev-option="SEARCHABLE" aria-selected="false">可检索</button><button type="button" role="option" data-ev-option="FAILED" aria-selected="false">执行失败</button><button type="button" role="option" data-ev-option="RISK_CONTROL" aria-selected="false">风险控制停止</button><button type="button" role="option" data-ev-option="BYTES_CLEANED" aria-selected="false">字节已清理</button><button type="button" role="option" data-ev-option="WITHDRAWN_OR_RESTRICTED" aria-selected="false">撤回或受限</button></div></div></div>
+                    <div class="ev-field" data-ev-select="ev-media-kind" data-ev-name="mediaKind"><span class="ev-field-label" id="ev-media-kind-label">媒体类型</span><div class="ev-popover-anchor"><button class="ev-select-toggle" id="ev-media-kind" type="button" aria-expanded="false" aria-haspopup="listbox" aria-labelledby="ev-media-kind-label ev-media-kind-value" aria-controls="ev-media-kind-list"><span class="ev-select-value" id="ev-media-kind-value">全部类型</span><i class="ev-caret" aria-hidden="true"></i></button><div class="ev-popover ev-select-list" id="ev-media-kind-list" role="listbox" aria-labelledby="ev-media-kind-label" hidden><button type="button" role="option" data-ev-option="" aria-selected="true">全部类型</button><button type="button" role="option" data-ev-option="cover" aria-selected="false">封面</button><button type="button" role="option" data-ev-option="image" aria-selected="false">正文图片</button><button type="button" role="option" data-ev-option="video" aria-selected="false">视频</button><button type="button" role="option" data-ev-option="live_photo" aria-selected="false">实况图片</button></div></div></div>
+                    <div class="ev-filter-foot"><button class="ev-button ev-button--ghost" id="ev-reset" type="button">清空筛选</button></div>
                   </div>
                 </div>
-              </header>
+                <div class="ev-popover-anchor">
+                  <button class="ev-button ev-sort-toggle" id="ev-sort-toggle" type="button" aria-expanded="false" aria-haspopup="listbox" aria-controls="ev-sort-list">
+                    <span class="ev-sort-value" id="ev-sort-value">最近观察</span><i class="ev-caret" aria-hidden="true"></i>
+                  </button>
+                  <div class="ev-popover ev-sort-list" id="ev-sort-list" role="listbox" aria-label="结果排序" hidden>
+                    <button type="button" role="option" data-ev-sort="latest_discovery" aria-selected="true">最近观察 <span class="v7-tech-key">LATEST DISCOVERY</span></button>
+                    <button type="button" role="option" data-ev-sort="relevance" aria-selected="false">相关度 <span class="v7-tech-key">RELEVANCE</span></button>
+                  </div>
+                </div>
+                <button class="ev-button ev-button--primary" type="submit"><span>读取材料</span></button>
+              </div>
+            </form>
+
+            <div class="ev-deck-foot">
+              <div class="ev-quickviews" role="group" aria-label="按材料状态快速筛选">
+                <span class="ev-deck-label">系统视图 <span class="v7-tech-key">SYSTEM VIEWS</span></span>
+                <button type="button" data-ev-view="all" aria-pressed="true">全部材料</button>
+                <button type="button" data-ev-view="partial" aria-pressed="false">部分取得</button>
+                <button type="button" data-ev-view="risk" aria-pressed="false">风险停止</button>
+                <button type="button" data-ev-view="cleaned" aria-pressed="false">媒体已清理</button>
+                <button type="button" data-ev-view="restricted" aria-pressed="false">撤回或受限</button>
+              </div>
+              <div class="ev-layout-control">
+                <span class="ev-deck-label ev-saved-views" aria-disabled="true">我的视图 <span class="v7-tech-key">MY VIEWS</span> · 暂无已保存视图 <span class="v7-tech-key">SAVED VIEWS NOT CONNECTED</span></span>
+                <div class="ev-layout-switch" role="group" aria-label="结果排版">
+                  <button type="button" data-ev-layout="research" aria-pressed="true">研读</button>
+                  <button type="button" data-ev-layout="table" aria-pressed="false">表格</button>
+                  <button type="button" data-ev-layout="cover" aria-pressed="false">封面</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div class="ev-read-receipt" id="ev-read-receipt" role="status" aria-live="polite" hidden></div>
+
+          <section class="ev-bench" id="ev-bench" data-inspector="normal" aria-label="证据审查工作台">
+            <section class="ev-results" aria-labelledby="results-title">
+              <h2 class="v7-sr-only" id="results-title">作品材料结果</h2>
+              <div class="ev-results-head">
+                <span class="ev-results-legend" id="ev-results-legend">缩略图 · 最强证据 · 材料摘要</span>
+                <button class="ev-inspector-reopen" id="ev-reopen-inspector" type="button" hidden>打开检查器 <span class="v7-tech-key">INSPECTOR</span></button>
+              </div>
               <div class="ev-feedback" id="ev-feedback" role="status" aria-live="polite"></div>
-              <div class="ev-table-head" id="ev-table-head" aria-hidden="true" hidden><span>作品</span><span>作者与监控目标</span><span>发布时间</span><span>材料状态</span></div>
+              <div class="ev-table-head" id="ev-table-head" aria-hidden="true" hidden><span>作品</span><span>作者与监控目标</span><span>材料</span><span>状态</span><span>发布时间</span><span>最近观察</span></div>
               <div class="ev-work-list" id="ev-work-list" role="listbox" aria-label="作品材料集合"></div>
               <div class="ev-list-footer"><button class="ev-button ev-button--secondary" id="ev-next-list" type="button" hidden>继续读取作品</button></div>
             </section>
@@ -2830,39 +2974,64 @@ fn evidence_library_html() -> String {
             <aside class="ev-inspector" id="ev-inspector" aria-labelledby="ev-inspector-title">
               <header class="ev-inspector-head">
                 <button class="ev-back" id="ev-back-to-list" type="button">← 返回当前作品</button>
-                <span class="ev-inspector-ref" id="ev-inspector-ref">SELECTION REQUIRED</span>
-                <h2 id="ev-inspector-title">请选择一个作品材料集合</h2>
-                <p id="ev-inspector-summary">右侧只核验当前选择，不补造未读取的详情。</p>
+                <h2 class="v7-sr-only" id="ev-inspector-title">请选择一个作品材料集合</h2>
+                <div class="ev-action-row">
+                  <button class="ev-button ev-button--primary" id="ev-open-source" type="button" disabled><span>打开原文</span></button>
+                  <button class="ev-button" id="ev-request-media" type="button" disabled>补采</button>
+                  <span class="ev-inspector-ref" id="ev-inspector-ref"></span>
+                  <div class="ev-panel-tools">
+                    <div class="ev-width-switch" role="group" aria-label="检查器宽度">
+                      <button type="button" data-ev-width="normal" aria-pressed="true" title="标准宽度"><i class="ev-width-glyph ev-width-glyph--normal" aria-hidden="true"></i><span class="v7-sr-only">标准</span></button>
+                      <button type="button" data-ev-width="wide" aria-pressed="false" title="加宽"><i class="ev-width-glyph ev-width-glyph--wide" aria-hidden="true"></i><span class="v7-sr-only">加宽</span></button>
+                      <button type="button" data-ev-width="focus" aria-pressed="false" title="专注"><i class="ev-width-glyph ev-width-glyph--focus" aria-hidden="true"></i><span class="v7-sr-only">专注</span></button>
+                    </div>
+                    <button class="ev-panel-close" id="ev-close-inspector" type="button" title="关闭检查器"><span aria-hidden="true">×</span><span class="v7-sr-only">关闭检查器</span></button>
+                  </div>
+                </div>
                 <div class="ev-inspector-feedback" id="ev-inspector-feedback" role="status"></div>
                 <div class="ev-tabs" role="tablist" aria-label="作品证据详情">
                   <button type="button" role="tab" id="ev-tab-overview" data-ev-tab="overview" aria-controls="ev-panel-overview" aria-selected="true">概览</button>
-                  <button type="button" role="tab" id="ev-tab-discussion" data-ev-tab="discussion" aria-controls="ev-panel-discussion" aria-selected="false" tabindex="-1">评论研究</button>
-                  <button type="button" role="tab" id="ev-tab-media" data-ev-tab="media" aria-controls="ev-panel-media" aria-selected="false" tabindex="-1">媒体与派生</button>
-                  <button type="button" role="tab" id="ev-tab-provenance" data-ev-tab="provenance" aria-controls="ev-panel-provenance" aria-selected="false" tabindex="-1">来源血缘</button>
+                  <button type="button" role="tab" id="ev-tab-evidence" data-ev-tab="evidence" aria-controls="ev-panel-evidence" aria-selected="false" tabindex="-1">证据</button>
+                  <button type="button" role="tab" id="ev-tab-materials" data-ev-tab="materials" aria-controls="ev-panel-materials" aria-selected="false" tabindex="-1">材料</button>
+                  <button type="button" role="tab" id="ev-tab-trace" data-ev-tab="trace" aria-controls="ev-panel-trace" aria-selected="false" tabindex="-1">来源轨迹</button>
                 </div>
               </header>
               <div class="ev-inspector-body">
                 <div role="tabpanel" id="ev-panel-overview" data-ev-panel="overview" aria-labelledby="ev-tab-overview"></div>
-                <div role="tabpanel" id="ev-panel-discussion" data-ev-panel="discussion" aria-labelledby="ev-tab-discussion" hidden></div>
-                <div role="tabpanel" id="ev-panel-media" data-ev-panel="media" aria-labelledby="ev-tab-media" hidden></div>
-                <div role="tabpanel" id="ev-panel-provenance" data-ev-panel="provenance" aria-labelledby="ev-tab-provenance" hidden></div>
+                <div role="tabpanel" id="ev-panel-evidence" data-ev-panel="evidence" aria-labelledby="ev-tab-evidence" hidden></div>
+                <div role="tabpanel" id="ev-panel-materials" data-ev-panel="materials" aria-labelledby="ev-tab-materials" hidden></div>
+                <div role="tabpanel" id="ev-panel-trace" data-ev-panel="trace" aria-labelledby="ev-tab-trace" hidden></div>
               </div>
             </aside>
           </section>
+
+          <div class="ev-lightbox" id="ev-lightbox" role="dialog" aria-modal="true" aria-labelledby="ev-lightbox-title" hidden>
+            <div class="ev-lightbox-head">
+              <div><strong id="ev-lightbox-title">本地媒体对象</strong><span class="ev-lightbox-ref" id="ev-lightbox-ref"></span></div>
+              <div class="ev-lightbox-tools">
+                <div class="ev-zoom" role="group" aria-label="缩放">
+                  <button type="button" id="ev-zoom-out" aria-label="缩小"><span aria-hidden="true">−</span></button>
+                  <button type="button" id="ev-zoom-reset" class="ev-zoom-value">100%</button>
+                  <button type="button" id="ev-zoom-in" aria-label="放大"><span aria-hidden="true">+</span></button>
+                </div>
+                <button class="ev-lightbox-close" id="ev-lightbox-close" type="button"><span aria-hidden="true">×</span><span class="v7-sr-only">关闭查看器 Esc</span></button>
+              </div>
+            </div>
+            <div class="ev-lightbox-stage">
+              <button class="ev-lightbox-step" id="ev-lightbox-prev" type="button" aria-label="上一张"><span aria-hidden="true">←</span></button>
+              <figure class="ev-lightbox-figure">
+                <div class="ev-lightbox-frame" id="ev-lightbox-frame"><img id="ev-lightbox-image" alt=""></div>
+                <figcaption id="ev-lightbox-caption"></figcaption>
+              </figure>
+              <button class="ev-lightbox-step" id="ev-lightbox-next" type="button" aria-label="下一张"><span aria-hidden="true">→</span></button>
+            </div>
+          </div>
         </main>
       </div>
     </div>
   </body>
 </html>"#;
-    let header = shell::global_header(
-        shell::PrimarySurface::Corpus,
-        "本机材料投影 <span class=\"v7-tech-key\">LOCAL MATERIAL PROJECTION</span>",
-        "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">作品材料集合</span>",
-        "<span class=\"v7-kpi\"><em>事实层</em><b>只读</b></span><span class=\"v7-kpi\"><em>材料入口</em><b>默认投影</b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span class=\"v7-query-meta\">不混读旧发现卡片 <span class=\"v7-tech-key\">NO LEGACY FALLBACK</span></span><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
-        // 语料页读不到采集的事实，因此不覆盖那个状态词：读不到时保留原话，
-        // 绝不因为读不到就宣布已接通。
-        None,
-    );
+    let header = evidence_library_header(collection_state);
     base.replace(
         "<!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->",
         &header,

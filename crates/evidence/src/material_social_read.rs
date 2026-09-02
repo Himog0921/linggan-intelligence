@@ -13,6 +13,7 @@ pub(crate) async fn enrich(
     as_of: &str,
 ) -> Result<(), sqlx::Error> {
     let mut coverage = read_lane_coverage(tx, item, as_of).await?;
+    let mut coverage_history = read_lane_coverage_history(tx, item, as_of).await?;
     let comments = read_comments(item, text);
     let comments_receipt = read_comment_receipt(tx, item, as_of).await?;
     let author_context = read_author_context(tx, item, as_of).await?;
@@ -74,6 +75,13 @@ pub(crate) async fn enrich(
             .map(str::to_owned);
     }
 
+    // The row-level excerpt is read after the match flags above, so a search that hit a comment
+    // or an OCR page can be quoted from the same surface it matched on.
+    let body_text = item.body_text.take();
+    item.evidence_fragment =
+        crate::material_evidence_fragment::read(tx, item, body_text.as_deref(), text, as_of)
+            .await?;
+
     let provenance = read_provenance(tx, item, as_of).await?;
     if let Some(inspector) = item.inspector.as_object_mut() {
         inspector.insert("commentThreads".to_owned(), Value::Array(comments));
@@ -89,15 +97,106 @@ pub(crate) async fn enrich(
             "commentsCoverage".to_owned(),
             coverage.remove("comments").unwrap_or(Value::Null),
         );
+        inspector.insert(
+            "commentsCoverageHistory".to_owned(),
+            coverage_history
+                .remove("comments")
+                .unwrap_or_else(|| Value::Array(Vec::new())),
+        );
         inspector.insert("commentsReceipt".to_owned(), comments_receipt);
         inspector.insert(
             "repliesCoverage".to_owned(),
             coverage.remove("replies").unwrap_or(Value::Null),
         );
+        inspector.insert(
+            "repliesCoverageHistory".to_owned(),
+            coverage_history
+                .remove("replies")
+                .unwrap_or_else(|| Value::Array(Vec::new())),
+        );
         inspector.insert("authorContext".to_owned(), author_context);
         inspector.insert("provenance".to_owned(), provenance);
     }
     Ok(())
+}
+
+/// Historical lane evidence stays a list of individual package receipts. The projection must
+/// never add a detail-window sample to an all-public-comments run, nor copy page counts between
+/// attempts just to present a larger-looking total.
+async fn read_lane_coverage_history(
+    tx: &mut Transaction<'_, Postgres>,
+    item: &MaterialLibraryItem,
+    as_of: &str,
+) -> Result<serde_json::Map<String, Value>, sqlx::Error> {
+    let rows = sqlx::query(
+        "SELECT lane.lane,lane.observed,lane.producer_acquired,lane.retained,lane.failed,lane.known_unattempted,lane.unknown_count,lane.maximum_quota,lane.stopped_reason,lane.observed_at,lane.created_at::text AS recorded_at,lane.package_ref,package.coverage,package.task_id,package.attempt_id,receipt.receipt_ref \
+         FROM linggan_material_lane_observation lane \
+         JOIN linggan_runtime_capture_package package USING(package_ref) \
+         LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
+         WHERE lane.content_public_ref=$1 AND lane.lane IN ('comments','replies') AND package.accepted_at <= $2::timestamptz \
+         ORDER BY lane.lane,lane.observed_at::timestamptz DESC,lane.created_at DESC",
+    )
+    .bind(item.identity.public_ref)
+    .bind(as_of)
+    .fetch_all(&mut **tx)
+    .await?;
+    let mut history = serde_json::Map::new();
+    for lane in ["comments", "replies"] {
+        let entries = rows
+            .iter()
+            .filter(|row| row.get::<String, _>("lane") == lane)
+            .map(coverage_history_entry)
+            .collect::<Vec<_>>();
+        history.insert(lane.to_owned(), Value::Array(entries));
+    }
+    Ok(history)
+}
+
+fn coverage_history_entry(row: &sqlx::postgres::PgRow) -> Value {
+    let lane: String = row.get("lane");
+    let retained: Option<i32> = row.get("retained");
+    let producer_acquired: Option<i32> = row.get("producer_acquired");
+    let failed: Option<i32> = row.get("failed");
+    let known_unattempted: Option<i32> = row.get("known_unattempted");
+    let unknown: Option<i32> = row.get("unknown_count");
+    let stopped_reason: Option<String> = row.get("stopped_reason");
+    let coverage: Value = row.get("coverage");
+    let receipt = comment_collection_receipt(&coverage, &lane);
+    let state = receipt.as_ref().map_or_else(
+        || {
+            lane_state(
+                retained,
+                producer_acquired,
+                failed,
+                known_unattempted,
+                unknown,
+                stopped_reason.as_deref(),
+            )
+        },
+        |receipt| comment_collection_lane_state(receipt),
+    );
+    serde_json::json!({
+        "lane":lane,"state":state,
+        "observed":row.get::<Option<i32>,_>("observed"),
+        "producerAcquired":producer_acquired,"retained":retained,"failed":failed,
+        "knownUnattempted":known_unattempted,"unknown":unknown,
+        "maximumQuota":row.get::<Option<i32>,_>("maximum_quota"),
+        "stoppedReason":stopped_reason,
+        "observedAt":row.get::<String,_>("observed_at"),
+        "recordedAt":row.get::<String,_>("recorded_at"),
+        "packageRef":row.get::<Uuid,_>("package_ref"),
+        "taskRef":row.get::<Uuid,_>("task_id"),
+        "attemptRef":row.get::<Option<Uuid>,_>("attempt_id"),
+        "receiptRef":row.get::<Option<Uuid>,_>("receipt_ref"),
+        "collectionScope":receipt.as_ref().and_then(|value| receipt_string(value,"scope")),
+        "requestedLimit":receipt.as_ref().and_then(|value| receipt_count(value,"requestedLimit")),
+        "pageCommentCount":receipt.as_ref().and_then(|value| receipt_count(value,"pageCommentCount")),
+        "expectedCount":receipt.as_ref().and_then(|value| receipt_count(value,"expectedCount")),
+        "uniqueCollectedCount":receipt.as_ref().and_then(|value| receipt_count(value,"uniqueCollectedCount")),
+        "collectionState":receipt.as_ref().and_then(|value| receipt_string(value,"state")),
+        "analysisUsability":receipt.as_ref().and_then(|value| receipt_string(value,"analysisUsability")),
+        "targetIdentity":receipt.as_ref().and_then(|value| receipt_string(value,"targetIdentity"))
+    })
 }
 
 async fn read_comment_receipt(
@@ -173,6 +272,9 @@ async fn read_lane_coverage(
             summary.failed = failed.map(i64::from);
             summary.known_unattempted = unattempted.map(i64::from);
             summary.maximum_quota = row.get::<Option<i32>, _>("maximum_quota").map(i64::from);
+            summary.requested_limit = receipt
+                .as_ref()
+                .and_then(|receipt| receipt_count(receipt, "requestedLimit"));
             summary.collection_scope = receipt
                 .as_ref()
                 .and_then(|receipt| receipt_string(receipt, "scope"));
@@ -243,6 +345,7 @@ async fn read_lane_coverage(
                     "knownUnattempted":unattempted,"unknown":unknown,
                     "stoppedReason":stopped_reason,"sourceRef":row.get::<Uuid,_>("package_ref"),
                     "collectionScope":receipt.as_ref().and_then(|receipt| receipt_string(receipt,"scope")),
+                    "requestedLimit":receipt.as_ref().and_then(|receipt| receipt_count(receipt,"requestedLimit")),
                     "pageCommentCount":receipt.as_ref().and_then(|receipt| receipt_count(receipt,"pageCommentCount")),
                     "expectedCount":receipt.as_ref().and_then(|receipt| receipt_count(receipt,"expectedCount")),
                     "uniqueCollectedCount":receipt.as_ref().and_then(|receipt| receipt_count(receipt,"uniqueCollectedCount")),

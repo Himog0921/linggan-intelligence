@@ -8,7 +8,7 @@
 
 ## 1. 结论
 
-Issue #90 获准范围通过：运行页不再 server-render legacy discovery cards，默认只消费 `/api/local/evidence-library` Material Projection；页面具有作品级九材料通道、按 `detailUrl` 更新的 Inspector、本机授权评论研究读取、受控媒体安全内联、有界 continuation、键盘 Tab/作品行合同与 375px 顺序流。
+Issue #90 获准范围通过：运行页不再 server-render legacy discovery cards，当前默认只消费 `/api/local/work-resources` 共享作品资源投影；页面具有作品级九材料通道、按 `detailUrl` 更新的 Inspector、本机授权评论研究读取、受控媒体安全内联、有界 continuation、键盘 Tab/作品行合同与 375px 顺序流。
 
 本次本机持久库没有 0015–0018 Material Projection schema，真实 API 返回 `503 material_projection_schema_unavailable`。页面正确显示“未读取任何作品材料”并明确无 legacy/远程 CDN fallback；因此本次浏览器证据证明运行页面和失败状态，不证明该库中的作品 lane/评论/媒体已经真实读出。没有为截图迁移或改写共享数据库。
 

@@ -68,6 +68,32 @@ async fn topic_assets_are_served_as_dedicated_lids_consumers() {
 }
 
 #[tokio::test]
+async fn topic_import_rejects_malformed_json_with_the_topic_error_contract() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/local/topic-workspaces")
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from("{not-json"))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let body: Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        body,
+        json!({
+            "operation":"topic_workspace",
+            "outcome":"rejected",
+            "code":"invalid_topic_workspace_request"
+        })
+    );
+}
+
+#[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn topic_import_and_read_compose_exact_work_resources_without_copying_them() {
     let database = proof_database("topic_api_exact_pack").await;

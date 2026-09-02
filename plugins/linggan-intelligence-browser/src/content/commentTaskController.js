@@ -6,37 +6,105 @@ export function createCommentTaskController({
   toggleStopButton,
   hideTaskControlBar,
   setActiveTaskType,
+  submitCommentCheckpoint,
 } = {}) {
   let task = null;
 
-  function cleanup() {
+  function nonNegativeInteger(value, fallback = 0) {
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0 ? Math.floor(number) : fallback;
+  }
+
+  function progressTotal(current = task?.collectedCount || 0, activeTask = task) {
+    if (!activeTask) return 0;
+    const requested = nonNegativeInteger(activeTask.requestedLimit);
+    const pageCount = activeTask.pageCommentCount == null
+      ? null
+      : nonNegativeInteger(activeTask.pageCommentCount);
+    const candidate = pageCount == null
+      ? requested
+      : (requested > 0 ? Math.min(requested, pageCount) : pageCount);
+    // A stale or misread denominator must never produce an impossible 130/53 display.
+    return candidate >= nonNegativeInteger(current) ? candidate : 0;
+  }
+
+  function pausedCheckpoint(snapshot = {}) {
+    const count = nonNegativeInteger(snapshot.total, Array.isArray(snapshot.comments) ? snapshot.comments.length : 0);
+    const receipt = snapshot.collectionReceipt && typeof snapshot.collectionReceipt === 'object'
+      ? snapshot.collectionReceipt
+      : {};
+    return {
+      ...snapshot,
+      total: count,
+      collectionState: 'partial',
+      analysisUsability: count > 0 ? 'usable' : 'empty',
+      stopReason: 'manual_pause',
+      collectionReceipt: {
+        ...receipt,
+        uniqueCollectedCount: count,
+        state: 'partial',
+        analysisUsability: count > 0 ? 'usable' : 'empty',
+        stopReason: 'manual_pause',
+      },
+    };
+  }
+
+  async function submitLatestPauseCheckpoint(activeTask) {
+    if (!activeTask || typeof submitCommentCheckpoint !== 'function') return;
+    const snapshot = activeTask.latestSnapshot;
+    const count = nonNegativeInteger(snapshot?.total, Array.isArray(snapshot?.comments) ? snapshot.comments.length : 0);
+    if (!snapshot || count <= 0 || count <= activeTask.lastCheckpointCount
+        || count <= activeTask.checkpointInFlightCount) return;
+    activeTask.checkpointInFlightCount = count;
+    try {
+      await submitCommentCheckpoint(pausedCheckpoint(snapshot), activeTask.noteId, {
+        maxTotal: activeTask.requestedLimit,
+        maxSubComments: activeTask.maxSubComments,
+        commentDepthMode: activeTask.commentDepthMode,
+        taskSpec: activeTask.taskSpec,
+      });
+      if (task === activeTask) activeTask.lastCheckpointCount = count;
+      showToast(`已暂停；当前 ${count} 条评论已写入 Linggan 本机交付队列`, 'info');
+    } catch (error) {
+      showToast(`评论已暂停，但当前数据交付失败：${error?.message || 'unknown'}`, 'warning');
+    } finally {
+      if (task === activeTask && activeTask.checkpointInFlightCount === count) {
+        activeTask.checkpointInFlightCount = 0;
+      }
+    }
+  }
+
+  function cleanup(activeTask = task) {
+    if (task !== activeTask) return false;
     task = null;
     hideTaskControlBar();
     setActiveTaskType(null);
     toggleStopButton(false);
+    return true;
   }
 
-  function buildProgress(partial = {}) {
-    if (!task) return null;
+  function buildProgress(partial = {}, activeTask = task) {
+    if (!activeTask || task !== activeTask) return null;
     return {
       taskType: 'singleComments',
-      taskState: partial.taskState || (task.isPaused ? 'paused' : 'running'),
-      current: Number(partial.current ?? task.current ?? 0),
-      total: Number(partial.total ?? task.total ?? 0),
+      taskState: partial.taskState || (activeTask.isPaused ? 'paused' : 'running'),
+      current: nonNegativeInteger(partial.current ?? activeTask.collectedCount),
+      total: nonNegativeInteger(partial.total ?? progressTotal(partial.current ?? activeTask.collectedCount, activeTask)),
       message: partial.message || '',
     };
   }
 
-  function publishProgress(partial = {}) {
-    const progress = buildProgress(partial);
+  function publishProgress(partial = {}, activeTask = task) {
+    const progress = buildProgress(partial, activeTask);
     if (progress) syncTaskUI(progress);
     return progress;
   }
 
-  async function waitIfPaused() {
-    if (!task?.isPaused) return;
+  async function waitIfPaused(activeTask = task) {
+    if (!activeTask?.isPaused || activeTask?.stopRequested || task !== activeTask) return;
     await new Promise((resolve) => {
-      if (task) task.pauseResolve = resolve;
+      if (task === activeTask) activeTask.pauseResolve = resolve;
+      else resolve();
     });
   }
 
@@ -50,10 +118,12 @@ export function createCommentTaskController({
     pause() {
       if (!task?.isRunning) return;
       task.isPaused = true;
+      const activeTask = task;
       publishProgress({
         taskState: 'paused',
         message: '评论采集已暂停',
       });
+      void submitLatestPauseCheckpoint(activeTask);
     },
 
     resume() {
@@ -72,7 +142,7 @@ export function createCommentTaskController({
     stop() {
       if (!task?.isRunning) return;
       task.stopRequested = true;
-      task.isRunning = false;
+      task.isStopping = true;
       if (task.pauseResolve) {
         task.pauseResolve();
         task.pauseResolve = null;
@@ -105,14 +175,21 @@ export function createCommentTaskController({
         isRunning: true,
         isPaused: false,
         stopRequested: false,
+        isStopping: false,
         pauseResolve: null,
-        current: 0,
-        total: safeMaxTotal,
+        collectedCount: 0,
+        requestedLimit: safeMaxTotal,
+        pageCommentCount: null,
+        latestSnapshot: null,
+        lastCheckpointCount: 0,
+        checkpointInFlightCount: 0,
         noteId: safeNoteId,
         noteUrl: safeNoteUrl,
         commentDepthMode,
         maxSubComments: safeMaxSubComments,
+        taskSpec,
       };
+      const activeTask = task;
 
       startBatchTask('singleComments');
       showToast('正在采集评论...', 'info');
@@ -124,7 +201,7 @@ export function createCommentTaskController({
       });
 
       let lastToastAt = 0;
-      const shouldStop = () => Boolean(task?.stopRequested);
+      const shouldStop = () => Boolean(activeTask.stopRequested || task !== activeTask);
 
       try {
         const result = await collectComments({
@@ -132,32 +209,53 @@ export function createCommentTaskController({
           noteUrl: safeNoteUrl,
           maxTotal: safeMaxTotal,
           maxSubComments: safeMaxSubComments,
+          commentDepthMode,
           shouldStop,
-          waitIfPaused,
+          waitIfPaused: () => waitIfPaused(activeTask),
           onProgress: (progress) => {
-            if (!task) return;
-            task.current = Number(progress.current || task.current || 0);
-            task.total = safeMaxTotal || task.total || task.current || 0;
+            if (task !== activeTask) return;
+            activeTask.collectedCount = nonNegativeInteger(progress.current, activeTask.collectedCount);
+            if (progress.pageCommentCount != null && Number.isFinite(Number(progress.pageCommentCount))) {
+              activeTask.pageCommentCount = nonNegativeInteger(progress.pageCommentCount);
+            }
             const next = publishProgress({
-              taskState: task.isPaused ? 'paused' : 'running',
-              current: task.current,
-              total: task.total,
-              message: progress.message || `已采集 ${task.current} 条评论`,
-            });
+              taskState: activeTask.isPaused ? 'paused' : 'running',
+              current: activeTask.collectedCount,
+              total: progressTotal(activeTask.collectedCount, activeTask),
+              message: progress.message || `已采集 ${activeTask.collectedCount} 条评论`,
+            }, activeTask);
             if (next && Date.now() - lastToastAt > 1200) {
-              showToast(progress.message || `已采集 ${task.current} 条评论`, 'info');
+              showToast(progress.message || `已采集 ${task.collectedCount} 条评论`, 'info');
               lastToastAt = Date.now();
             }
+          },
+          onSnapshot: (snapshot) => {
+            if (task !== activeTask || !snapshot || typeof snapshot !== 'object') return;
+            activeTask.latestSnapshot = snapshot;
+            activeTask.collectedCount = nonNegativeInteger(snapshot.total, activeTask.collectedCount);
+            const pageCount = snapshot.collectionReceipt?.pageCommentCount ?? snapshot.publicCommentCount;
+            if (pageCount != null && Number.isFinite(Number(pageCount))) {
+              activeTask.pageCommentCount = nonNegativeInteger(pageCount);
+            }
+            if (activeTask.isPaused) void submitLatestPauseCheckpoint(activeTask);
           },
           taskSpec,
         });
 
         const total = Number(result?.total || 0);
+        if (task === activeTask) {
+          activeTask.collectedCount = nonNegativeInteger(total);
+          const resultPageCount = result?.collectionReceipt?.pageCommentCount ?? result?.publicCommentCount;
+          if (resultPageCount != null && Number.isFinite(Number(resultPageCount))) {
+            activeTask.pageCommentCount = nonNegativeInteger(resultPageCount);
+          }
+        }
+        const finalProgressTotal = progressTotal(total, activeTask);
         if (shouldStop()) {
           publishProgress({
             taskState: 'idle',
             current: total,
-            total: safeMaxTotal || total,
+            total: finalProgressTotal,
             message: total > 0 ? `评论采集已停止：共 ${total} 条` : '评论采集已停止',
           });
           showToast(total > 0 ? `评论采集已停止，已采集 ${total} 条` : '评论采集已停止', 'warning');
@@ -166,7 +264,9 @@ export function createCommentTaskController({
           const expected = Number.isFinite(Number(result?.collectionReceipt?.expectedCount))
             ? Number(result.collectionReceipt.expectedCount)
             : null;
-          const countText = expected === null ? `已取得 ${total} 条` : `${total} / ${expected}`;
+          const countText = expected === null || expected < total
+            ? `已取得 ${total} 条`
+            : `${total} / ${expected}`;
           const complete = collectionState === 'complete';
           const invalidTarget = collectionState === 'invalid_target';
           const completion = complete
@@ -177,7 +277,7 @@ export function createCommentTaskController({
           publishProgress({
             taskState: 'done',
             current: total,
-            total: expected ?? (safeMaxTotal || total),
+            total: finalProgressTotal,
             message: `${complete ? '评论采集完成' : (invalidTarget ? '评论采集未接纳' : '评论部分采集')}：${completion}`,
           });
           showToast(
@@ -185,10 +285,10 @@ export function createCommentTaskController({
             complete ? 'success' : (invalidTarget ? 'error' : 'warning'),
           );
         }
-        cleanup();
+        cleanup(activeTask);
         return result;
       } catch (err) {
-        cleanup();
+        cleanup(activeTask);
         throw err;
       }
     },

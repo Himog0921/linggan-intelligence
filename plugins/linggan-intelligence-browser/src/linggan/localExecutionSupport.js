@@ -31,6 +31,18 @@ function positive(value, fallback = 0) {
   const number = nonNegative(value);
   return number && number > 0 ? number : fallback;
 }
+
+export function dispatchedMaximumQuota(taskSpec = {}, fallback = 1) {
+  if (taskSpec?.maximumQuota === null) return null;
+  return positive(taskSpec?.maximumQuota, fallback);
+}
+
+export function dispatchedCommentMaxTotal(taskSpec = {}, capability = '') {
+  const explicitLimit = positive(taskSpec?.commentLimit, 0);
+  if (explicitLimit > 0) return explicitLimit;
+  const quota = dispatchedMaximumQuota(taskSpec, 0);
+  return ['comments', 'replies'].includes(text(capability)) ? (quota ?? 0) : (quota || 1);
+}
 function normalizedTargetId(value = '') {
   return text(value).replace(/^(xhs_|dy_|douyin_)/i, '').toLowerCase();
 }

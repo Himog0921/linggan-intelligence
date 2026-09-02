@@ -9,7 +9,7 @@ const TOPIC_PROOF_SCHEMA: &str = concat!(
     "CREATE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql STABLE AS $$ SELECT clock_timestamp() $$;\n",
     "CREATE FUNCTION linggan_plugin_runtime_forbid_mutation() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'append-only relation'; END $$;\n",
     "CREATE TABLE linggan_material_content (public_ref uuid NOT NULL UNIQUE);\n",
-    include_str!("../../../database/migrations/0027_topic_workspace.sql")
+    include_str!("../../../database/migrations/0031_topic_workspace.sql")
 );
 
 async fn proof_database(schema: &str) -> Database {

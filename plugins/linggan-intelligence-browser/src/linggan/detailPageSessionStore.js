@@ -14,6 +14,8 @@ database.version(1).stores({
 const PLAN_VERSION = 'linggan.detail-page-session.v1';
 const ALLOWED_LANES = new Set(['content_detail', 'media_slots', 'comments', 'replies']);
 const MAX_CACHE_TTL_SECONDS = 6 * 60 * 60;
+const MAX_CACHE_ROWS = 24;
+const MAX_SESSION_JSON_CHARS = 8 * 1024 * 1024;
 
 function text(value = '') {
   return String(value || '').trim();
@@ -95,8 +97,24 @@ export function packageDetailPageSessionLane(entry = {}, taskSpec = {}) {
 }
 
 export function createDetailPageSessionStore(table = database.sessions, now = () => Date.now()) {
+  async function pruneExpiredAndOverflow() {
+    const expired = await table.where('expiresAt').belowOrEqual(now()).primaryKeys();
+    if (expired.length > 0) await table.bulkDelete(expired);
+    let overflow = 0;
+    if (typeof table.count === 'function' && typeof table.orderBy === 'function') {
+      const count = await table.count();
+      overflow = Math.max(0, count - MAX_CACHE_ROWS);
+      if (overflow > 0) {
+        const oldest = await table.orderBy('updatedAt').limit(overflow).primaryKeys();
+        if (oldest.length > 0) await table.bulkDelete(oldest);
+      }
+    }
+    return expired.length + overflow;
+  }
+
   return {
     async put({ leaseRef, plan, note, commentResult, receipt } = {}) {
+      await pruneExpiredAndOverflow();
       const contentExternalId = text(note?.noteId || note?.platformContentId || note?.contentId);
       const normalizedPlan = validateDetailPageSessionPlan(plan, contentExternalId);
       const cacheKey = detailPageSessionCacheKey(leaseRef, contentExternalId);
@@ -119,7 +137,11 @@ export function createDetailPageSessionStore(table = database.sessions, now = ()
         createdAt: existing?.createdAt || timestamp,
         updatedAt: timestamp,
       };
+      if (JSON.stringify(row).length > MAX_SESSION_JSON_CHARS) {
+        throw new Error('detail_page_session_too_large');
+      }
       await table.put(row);
+      await pruneExpiredAndOverflow();
       return row;
     },
 
@@ -154,9 +176,7 @@ export function createDetailPageSessionStore(table = database.sessions, now = ()
     },
 
     async pruneExpired() {
-      const expired = await table.where('expiresAt').belowOrEqual(now()).primaryKeys();
-      if (expired.length > 0) await table.bulkDelete(expired);
-      return expired.length;
+      return pruneExpiredAndOverflow();
     },
   };
 }

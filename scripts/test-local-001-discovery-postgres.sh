@@ -4,6 +4,13 @@ set -euo pipefail
 project_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$project_root"
 
+node --test apps/api/src/local_web/evidence_observation.test.mjs
+
+# API media proofs intentionally use the same controlled local-media root as the delivery
+# contract. Keep this isolated proof serial so one test's fixture cleanup cannot race another
+# test's file assertion; callers may still request an even smaller explicit thread count.
+export RUST_TEST_THREADS="${RUST_TEST_THREADS:-1}"
+
 proof_suffix="$(date -u +%Y%m%d%H%M%S)_$$_$(openssl rand -hex 4)"
 proof_database="linggan_intelligence_local_001_${proof_suffix}"
 proof_container="linggan-intelligence-local-001-proof-${proof_suffix}"
@@ -55,6 +62,7 @@ proof_database_created=1
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 cargo test -p linggan-evidence --test local_discovery_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test local_producer_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test content_reobservation_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test material_projection_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test material_social_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test material_media_postgres --locked -- --ignored

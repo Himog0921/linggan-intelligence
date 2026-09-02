@@ -1,24 +1,158 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-08-31
+> 最后核对: 2026-09-02
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
 ## 当前阶段
 
-### TOPIC-WORKSPACE-REAL-001 / Issue #112（交付分支验证中）
+### TOPIC-WORKSPACE-REAL-001 / Issue #112（当前主线整合中）
 
-用户已授权开始推进「领域探索 / Topic 工作区」与后续单一受控 Agent 切片。当前 Topic 分支从 `main@3366a09` 隔离实施 additive `0027_topic_workspace.sql`、`linggan-intelligence::TopicWorkspace`、loopback import/read 与 `/topics/{canonical_key}`：只保存暂定 Definition Version、人工 Classification Run、冻结 Material Pack 和 Work Resource 引用，不复制原文，不形成正式 Release、Claim、趋势或行动。4 个 intelligence PostgreSQL 用例和 1 个完整 migration/API/Work Resource 组合用例已通过，proof container/volume 已清理；静态页面测试已通过。共享本机数据库尚未迁移，浏览器视觉、PR 审查、合并、部署和 Mog 业务验收仍未完成。
+Mog 已在 #133 的前端验收后授权推进下一大阶段。现有 Topic Draft 的领域合同、隔离 PostgreSQL proof 与页面候选将整合到 `origin/main@44c9ab6`：新的 additive migration 固定为 `0031_topic_workspace.sql`，因为 `0027` 已由统一媒体占用。Topic 只保存暂定 Definition Version、人工 Classification Run、冻结 Material Pack、精确 Work Resource 引用和 Import Receipt；不复制正文/评论/媒体，不形成正式 Release、Claim、趋势或行动。当前 live runtime/DB 尚无 Topic route/schema；本卡仅使用 isolated proof，最终 shared migration、runtime 切换、真实材料导入、部署和 Mog 业务验收均待单独授权。
 
-AGENT-CANDIDATE-ANALYSIS-001 已登记为 Issue #113，但它只能读取 #112 固定的 exact Material Pack，并且输出只到带引用的候选解释、反例、unknown 与 gap。Topic 合同和浏览器/自动验收未稳定前，#113 保持 `needs-info`，不并发写 Agent runtime。
+AGENT-CANDIDATE-ANALYSIS-001 / #113 只能在 #112 的 exact Material Pack 合同已稳定后读取冻结引用，输出仍限于带引用的候选解释、反例、unknown 与 gap；本卡期间不并发写 Agent runtime。
+
+### 2026-09-02 · 已完成计划与历史 Issue 收口
+
+Mog 已明确：媒体生命周期合同决策完成；`LOCAL-001` 不再作为当前路线图总编号；`PLUGIN-REHOME-001` 和 `GOV-005` 的合并后文档收口完成；旧式页面探针停止，#76 按源码升级完成关闭，#92 不重跑系统切换而以既有分层证据收口。相应计划已归档至 `docs/plans/completed/`，当前工作只由具体的运行、材料、页面、采集与复观测交付包承接。本次状态同步不把真实媒体字节、OCR/ASR、保留/撤回、真实采集、部署或业务验收写成已完成。下文中早于本记录的 `LOCAL-001`、Issue #41、#72、#74 或 #76 “活跃／待收口”表述仅保留历史上下文，已由本段与归档计划取代。
+
+同次清理还处置了旧式合成 F01 / 旧运行发布 / 静态设计 / 远期自主性卡：Issue #3 只保留为 #133 标准详情窗口的历史验收输入，不创建或重用其字面 `0002_scope_001_content_observation.sql`；Issue #4 只描述已退役的 frozen-Work 模型，不以未实现的第三份 migration 继续阻塞当前入口。Issue #64 的 PR #63 特定 loopback 发布已被更晚的 `0.8.28` 已验收运行时快照取代，不重放旧发布。Issue #85 的 Evidence Library 产品规格、静态参考和静态验收资产已完成，运行页由 #90 与当前事实链另行负责。Issue #102 的自主观察控制设计不进入当前路线图；将来如有真实业务需要，必须以新的、当时可验证的 Decision Package 重新提出。以上均不等于修复或证明一条未运行的旧链路。Issue #10 的 `p0-surface-prototype` 仍是当前 ARC-001 未回答的产品问题；Issue #89 仍是量化的有界 N+1 性能债务，均不因本次清理关闭。
+
+### Browser Producer `0.8.28` 当前权威快照（已合并、已对齐运行时、已真实验收）
+
+- 已验收 Browser Producer 运行时代码快照为 `d7e722018f4f4cfa217c9cf5c0cac6fbcdcaacb3`（PR #132 已合并）；当前 `main` 在其上只有后续的文档／治理状态提交，不改变运行时工件或行为。
+- 当前发行包为 `plugins/linggan-intelligence-browser/releases/linggan-intelligence-browser-v0.8.28.zip`，SHA-256 为 `015a3de775a55d6ac2be8dac5d6ca833f7d88f3d772d641a73c7bbe91f51184e`。
+- 工位 `1` 已通过正式 API 认领 active installation `9179e6cf-3316-493a-abee-2e7eb162f824` / `0.8.28`，旧 `0.8.23` 被取代。
+- API、巡检 worker 与媒体 worker 均从 `linggan-intelligence-origin-main-d7e7220` 快照运行；`/health` 为 `LINGGAN_BROWSER_PRODUCER_RUNTIME`、`PLUGIN_RUNTIME_002_SCHEMA_READY / READY`、scheduler running。
+- 真实样本“智商131的A娃。”（`contentExternalId=6a2047060000000022027f0e`，Work `b681991d-525a-4332-8fea-e937e7684c15`）在 `0.8.28` 一次有效标准详情执行中接纳详情 1、媒体槽位 6、顶层评论 15、回复 15；详情窗口为 `requested=30 / unique=30 / page=233 / detail_window complete`。
+- 同轮 6 个逻辑媒体槽位、7 个字节组件全部 acquired/materialized：封面 1、正文图 3、Live Photo still+motion、作者头像 1。Evidence UI 已显示本地封面、本地头像、独立“作品作者 / 监控目标”；未证明监控目标时保持 `NOT_VERIFIED`。
+- 当前完成证明为 231 项插件测试、Rust workspace、49 项隔离 PostgreSQL proof、production build、content runtime、运行隔离、release verify/reproducibility；production npm audit 为 0。全 dev 依赖的既有 9 项 audit 提示和 Webpack bundle 体积警告继续保留。
+
+尚未被上述完成声明覆盖的边界：
+
+1. 本轮只证明标准详情附带 `30/30` 评论窗口，没有重新深采全部 233 条。`0.8.21` 的 `233/233` 是独立 Attempt 证据，不与本轮数量相加。
+2. `comment.image` 已有代码与隔离 PostgreSQL 非空正样本，但本轮真实样本没有非空评论图片，真实层仍为 `NOT_OBSERVED`。
+3. Live Photo 原始字节已完整取得；音频提取/ASR 因处理环境失败而保持 `FAILED`，不写成插件媒体缺失。
+4. Evidence 详情 lane 仍因 content-detail Coverage `unknown=3` 显示 `PARTIAL`；标题、正文、作者、发布时间、互动、媒体与评论均可读。这是状态语义差异，不是数据丢失。
+
+### PLUGIN-XHS-FINALIZATION-001 演进记录（`0.8.20–0.8.28`，历史过程不覆盖上述当前快照）
+
+0.8.20 已在同一授权作品上真实完成标准详情：详情 1 条、媒体槽位 9 个、顶层评论 16 条和回复
+14 条分别被 Linggan 接纳；评论窗口为 `30 / 30 COMPLETE`，页面公开数 713，没有把标准窗口冒充
+全部评论。随后全回复 Attempt 从头取得 `396 / 713`，以 `PARTIAL / no_progress` 接纳 20 条顶层和
+376 条回复。页面实测位于 `.note-scroller` 当前底部、无结束标记、无剩余回复展开控件；只执行一次
+回拉再下滑，顶层评论节点即从 20 增至 30，确认平台无限加载需要底部重触发。
+
+0.8.21 在同一终包内关闭两个断点：无人值守媒体字节由持久 outbox 交给 offscreen 文档完成下载、
+哈希、续传和 finalize，避免 MV3 Service Worker 领取后被回收；评论未达页面公开数且当前底部无
+结束标记时，最多三次回拉后继续下滑，取得新评论即重置预算。动作仍串行、最低冷却 1.2 秒，并在
+每次外部动作前后检查暂停、停止和风险状态。人工媒体下载窗口继续保留。
+
+0.8.21 重载后已改用较小的真实样本“智商131的A娃。”完成全评论正向证明：本次 Attempt 从头
+取得页面显示的 233 条唯一评论，其中顶层 70、回复 163；Linggan 回执为
+`all_public_comments / complete / 233 of 233`。同次标准详情暴露 SSR 在图片和作者头像水合前已
+足以被判为可用，导致正文与互动数被接纳、`media_slots` 却为零。0.8.22 保留 SSR 权威字段，只在
+结构化媒体或作者身份字段缺失时使用当前详情 DOM 补齐，详情图片按 URL 去重，并明确读取详情作者
+头像和主页身份；不得从评论作者或推荐流误取媒体。0.8.22 真实复验进一步发现 SSR 会用非字符串
+占位对象承载尚未水合的媒体字段；0.8.23 因此只有非空字符串 URL 才算“结构化媒体已存在”，
+占位对象不能再阻断当前详情 DOM 的真实 URL 补齐。
+
+0.8.23 重载后，同一作品已真实形成并接纳 6 条媒体槽位：正文图 3、封面 1、Live Photo 1、
+作者头像 1；详情、标准评论和回复也各自形成 Package。此前整包 `submission_invalid` 的根因不是
+页面漏读，而是 Live Photo 同时观察到 still/motion 候选时，Rust 错把尚未取得字节的复合槽位写成
+`COMPLETE`，违反数据库只允许观察阶段 `PARTIAL/UNKNOWN` 的约束，导致整个事务回滚。修复后同一
+真实包已被 `ACCEPTED`；隔离 PostgreSQL 也固定 `PARTIAL / OBSERVED / OBSERVED` 回归。
+
+0.8.24 进一步统一两类使用者：目标驱动后台媒体任务与页面“采集当前笔记到 Linggan”都会在提交
+槽位后立即进入可靠字节队列；旧“人工采集并下载媒体”窗口继续保留，供真人单独操作。真实重载
+确认新包 6/6 槽位接纳，作者头像也完成 Materialization；正文图、封面和 Live Photo 未落地的根因
+是平台在受信 XHS CDN 上返回 `http://` 候选，而下载安全边界只允许 HTTPS。0.8.25 只把无凭据、
+无端口、命中平台白名单的 HTTP 候选规范化为 HTTPS，随后仍执行严格主机与重定向校验；普通 HTTP
+和任意第三方域名继续拒绝。0.8.25 真实标准详情新包再次接纳 6 个媒体槽位，并已物化作者头像和
+3 张正文图；统一 Work Resource 与 Evidence UI 已显示首图封面回退、作者头像以及分离的作品作者 /
+监控目标。终验同时证明首轮离屏唤醒只处理 2 条普通媒体、Live Photo 仍等待全局工作队列，不能
+保证同一标准详情及时带回全部媒体。0.8.26 因此把 Live Photo 拆为 still/motion 两个直接字节单元，
+一次离屏唤醒可串行排空最多 12 条有界任务；最终 7 个组件仍须重载后真实验收。PR 合并、main /
+runtime exact-head 对齐在结果后分别核对。
+
+0.8.26 重载后的单次干净标准详情又暴露出更底层的回执阻塞：页面完成读取后，提交
+`lingganSubmitCapturePackage` 等待 5 秒超时，数据库没有出现新详情、媒体、评论或回复包。根因范围
+收敛到新增 offscreen 媒体上下文与 Service Worker 共用 one-shot runtime message 总线的接缝。
+0.8.27 将离屏媒体改到 `linggan-media-worker-v1` 命名 Port，页面采集回执只由 Service Worker
+接收；可靠队列冷启动窗口统一为 15 秒，标准详情任一 lane 的队列错误会显式回执且不再静默阻断
+后续 lane。重载后的唯一标准详情终验已对“智商131的A娃。”接纳新的 `content_detail`、
+`media_slots`、`comments`、`replies` 四包：详情 1、媒体逻辑槽位 6、顶层评论 15、回复 15；评论
+Coverage 为 `DETAIL_WINDOW / complete / 30 of 30`，页面公开数为 233。6 个槽位的 7 个字节组件
+（作者头像、封面、3 张正文图、Live Photo still/motion）均已完成 Download、Blob 与
+Materialization；Evidence 实际读取本地封面和作者头像，并将作品作者与监控目标分栏。该 Live Photo
+的 OCR/缩略图链已完成；音频抽取与 ASR 因本机音频/Whisper 处理环境失败而明确显示 `FAILED`，不把
+无有效音轨或转录伪装成成功。
+
+最终 Spec Review 发现并在 0.8.28 同包关闭两个阻断：标准详情此前没有把已采评论中的图片交给统一
+媒体链；回复包入队失败会让外层把已经入队的评论包也报成失败。现在评论图片以评论为主体、作品为
+读取上下文进入 `Slot → Candidate → Download → Blob → Materialization → Work Resource`，并返回
+`comment.image + subjectExternalId`；comments/replies 回执完全分栏。additive `0030` 只扩展现有
+媒体 purpose，不建立第二套资产。0.8.28 的最终自动、隔离 PostgreSQL、发行包、提交、PR 合并与
+main/runtime exact-head 对齐按本事项最后一轮完成；0.8.27 已通过的真实详情/评论/媒体链不被重写成
+0.8.28 的评论图片非空真实证明。最终门禁为 231 项插件测试、Rust workspace、49 项隔离 PostgreSQL
+proof、production build、content runtime、运行隔离、发行校验与可复现重建全部通过；发行 ZIP
+SHA-256 为 `015a3de775a55d6ac2be8dac5d6ca833f7d88f3d772d641a73c7bbe91f51184e`。生产依赖审计为
+0 项；完整开发依赖树仍有既有 9 项 audit 提示，Webpack 仍有既有 content bundle 体积警告。
+
+## 历史项目快照（仅用于演进追溯）
+
+以下事项保留其各自记录时点的分支、Draft、待部署和未验证结论，不再代表 `2026-09-01 / 0.8.28`
+的当前主线、运行时或真实样本状态。发生冲突时，一律以上方“Browser Producer `0.8.28` 当前权威快照”
+和对应当前架构合同为准；这里降级的只是各事项旧的实施状态与完成声明，不降级其中引用的 ACCEPTED
+决定、领域不变量或仍然有效的合同。后者继续以其各自权威文件为准，这里也不因本轮状态同步而重写历史证据。
+
+### XHS-MEDIA-AUTHOR-EVIDENCE-001（`0.8.19` 历史候选快照，已被上述 `0.8.28` 真实链覆盖）
+
+用户已确认“ADHD的尽头是成瘾”仍在平台推流，页面公开评论数随时间增长属于真实进量，不按重复或错误分母处理。本后续只对该已授权作品重新执行详情、评论和媒体链；最新 Attempt 数量、页面公开数与历史累计唯一评论继续分别表达。
+
+0.8.19 已让详情中同时存在的 `authorId + authorAvatar` 形成独立作者媒体槽位。Rust 以当前作品作为观察上下文校验作者主体，写入 `author.avatar` 权威关系，再复用 Slot → Candidate → Download → Blob → Materialization；头像不进入 OCR/ASR。Work Resource 的 `media.avatar` 只返回 `INLINE_SAFE` 本地句柄。Evidence Library 已把作品作者与监控目标拆成两个事实区，作者区支持本地头像，媒体 Inspector 连续列出头像、封面、正文图、视频及派生资源。
+
+插件合同与 209 项聚焦测试、Rust workspace test/check/format、JS 语法、隔离 PostgreSQL author-avatar 真链、0.8.19 production build、发行校验、可复现性和运行隔离已通过。发行 ZIP SHA-256 为 `c8410c08cd981e9cad93945515613db77918adea3589794232ed623d5ba70338`。仍存在既有 Webpack content bundle 体积警告和 npm audit 9 项依赖风险。本机持久库 `0029`、`:3000` Runtime、Chrome 0.8.19 重载、目标作品新 Package/Receipt/Materialization 和 Mog 页面验收尚未执行，当前不得写成真实链完成。
+
+### PLUGIN-XHS-FINALIZATION-001（`0.8.16` 历史候选快照，已被上述 `0.8.28` 真实链覆盖）
+
+在 `origin/main@62a60404` 上完成一次有界终包，不再按真实页面每暴露一个症状就增加一套旁路。执行面现在对 `TaskSpec → 页面动作回执 → Attempt/Package → outbox` fail-closed：同一详情 lane 以稳定幂等键复用单一提交，包含并发唤醒冲突回读；页面没有携带精确 `taskId/action/capability` 成功回执时不得报执行成功。暂停、停止、restart 和批量单篇 timeout 都等待当前 collector 退出后才允许下一执行者操作页面；scheduled 不限评论保留 `0 = unlimited`，批量数量允许明确输入 1–50 且不再静默缩成 50。
+
+媒体继续使用既有 Slot → Observation → Download → Blob → Materialization → Derivative 事实链，additive `0027_unified_media_resource.sql` 只补一层七类权威关系和统一 Work Resource `media` 读模型，不建立第二套资产。Evidence 列表、Inspector 与 Collection Target 禁止各自拼远程 URL；封面统一按“显式封面 → 首张正文图 → 视频 poster → 无”选择，并只返回 `INLINE_SAFE` 本地句柄。`requestedLimit` 与页面公开数、当前唯一取得数分开贯穿，避免再次产生 `130/53`。
+
+插件终包门禁 207 项、搜索筛选/下拉联想/探针 13 项聚焦测试、合同检查、Rust workspace 测试/检查、隔离 PostgreSQL 全迁移与 47 项相关 proof、production build、发行校验和可复现重建已通过；新增并发 outbox 与远程头像禁止渲染回归也已通过。`v0.8.16` ZIP 当前 SHA-256 为 `b7b57375a20d83145ceabfea59a7ba71b2c313560d04fef006698ffd2ce8b05f`。Webpack 仍报告既有 bundle 体积警告，`npm audit` 仍报告 9 项既有依赖风险，Rust API 测试仍有既有 dead-code warnings。严格 `cargo clippy -D warnings` 在主线基线与终包分支均被同组 11 项既有 lint 阻断；本卡最初新增的 2 项已拆除，没有把全仓历史重构混入终包。
+
+真实边界没有被自动检查替代：现有运行工位最后上报 0.8.14，0.8.16 尚未被 Chrome 重载；“ADHD的尽头是成瘾”当前只证明跨 Attempt 的部分材料增长，最近一次为 `121/533 PARTIAL / manual_stop`，当前投影为 167 条稳定唯一评论。该作品 8 个媒体槽位仍为 0 个 Materialization，所以 Evidence 无封面仍是当前真实事实。共享持久数据库尚未应用 0027，本机 `:3000` 尚未替换，真实 XHS 全评论、媒体物化、Linggan 接纳和 Mog 业务验收都待精确包重载后的单次验证。
+
+### PLUGIN-XHS-COMMENT-EXECUTION-MEDIA-001（`0.8.8–0.8.15` 历史演进记录）
+
+真实长评论样本“ADHD的尽头是成瘾”已证明标准详情的 30 条评论材料被 Linggan 接纳：当前投影为 16 条顶层评论、14 条回复，详情公开评论数为 452。暂停中的单篇深采在浏览器内已取得 130 条，但旧 0.8.7 只在 collector 返回时提交 Package，因此新增 100 条尚未进入 Intelligence；控制面把首轮 53 锁成总数，形成 `130/53`。同一作品已有 8 个媒体槽位和可访问的 XHS 封面候选，但没有本地 Materialization；媒体工作被领取后只留下 `lease_expired`，所以 Evidence Library 不展示远程 CDN 封面是符合边界的，缺陷在媒体执行没有完成而不是页面漏用远程 URL。
+
+Chrome 已真实重载 0.8.8 并报到；目标页当前公开评论数为 492。首个全回复 Attempt 正确显示 `17/492`，以 `PARTIAL / no_progress` 接纳 10 条顶层和 7 条回复，使当前唯一评论从 30 增至 47；第二个 Attempt 在 `15/492` 人工暂停后，以 `PARTIAL / manual_pause` 接纳 10 条顶层和 5 条回复，使当前唯一评论增至 58。由此已证明错误分母、暂停丢材料和 Intelligence 未收到评论三项修复有效。真实链同时发现不限数量被当成无目标，API 首屏后没有进入 DOM 补采；媒体侧仍未产生封面 Materialization，代码审查进一步发现新领取媒体行可能被历史本地队列和无超时请求阻塞，这与租约持续过期的运行事实一致，但须由 0.8.9 复验确认根因已经关闭。
+
+0.8.9 候选让不限评论任务以页面公开数作为当前集合目标，API 首屏不足时进入共用 DOM 补采器；每个新 Attempt 先删除同页上一轮主评论/楼中楼快照，再从空游标重拉第一页，防止把旧页面缓存冒充本轮重采。新媒体代次优先于历史本地行执行，候选下载 20 秒超时。单动作、1.2 秒最低冷却、暂停/停止边界、真实 PARTIAL 交付和人工媒体窗口保持不变。完整 492 条评论树与封面本地物化仍须在 0.8.9 发布重载后证明，当前不能宣称整卡完成。
+
+0.8.9 重载后的真实页面已确认公开数为 508，但首屏仍在 `18/508 / no_progress` 停止。根因已收敛为终态续采判定只读容器标题和入参，没有使用同一详情上下文已观察的 508。0.8.10 直接补齐该传递断点，不改其他执行策略。
+
+0.8.10 重载后目标页公开数增至 514，仍在 `20/514 / no_progress` 停止，无风控。这证明 514 确实在进度轮次被读到，但虚拟列表终态选中的容器不再带该元数据。0.8.11 因此在 Attempt 内持久任一轮已观察公开数，不再要求终态 DOM 重复提供同一值。
+
+0.8.11 复验仍在 `18/532 / no_progress` 停止，无风控。真实滚动探针确认 `.note-scroller` 为正确容器：从 `scrollTop=560` 移动到 1960 时节点仍为 18，到底加载后节点增至 38，`scrollHeight` 从 2989 增至 5958。0.8.12 因此把滚动位置和高度的真实前进纳入进展判定，不再在尚未到底时累计 no-progress。
+
+0.8.12 重载后的真实两级评论 Attempt 已从旧停点 18 条推进到 `121/533`，滚动到底、无验证码或访问异常，并以 `PARTIAL / no_progress` 形成真实回执，证明自适应滚动与部分材料交付有效。继续验证“全部楼层回复”时，设置弹窗已明确显示选中，但单篇任务控制器只保存 `commentDepthMode`、没有把它传入 collector，运行日志仍显示两级模式的 `1/3` 停止预算，页面保留 27 个未展开入口。0.8.13 只补齐该参数透传及回归测试；完整 `533/533` 仍须重载后从新 Attempt 证明。
+
+0.8.14 将另一会话已合并的 Work Resource Read / Evidence Library 平台改动、0.8.13 评论执行修复和一条用户授权的 XHS 详情时间字段回归收口为同一发行快照。真实探针确认现有 `xhs-detail-time-v2` 映射正确，因此不新增另一套时间解析。197 项插件测试、TypeScript 合同、production build、content runtime / Linggan isolation、release 校验与全新依赖可复现重建已通过，ZIP SHA-256 为 `28acbf796468ba416dcffeea801ba34fea7686c6b532e2bc54913b20d999376a`。浏览器重载和新 Attempt 的全回复真实链验证仍待执行。
+
+0.8.14 重载后工位已真实上报新版本。新的不限数量/全部楼层回复 Attempt 正确重置为 `0/552`，页面从 19 个评论节点加载到 29 个且无验证码或访问受限，但约 70 秒后仍停在 0。根因是首轮 API 获取失败后，`allReplies` 分支在 DOM 评论解析前反复尝试同一展开入口并直接 `continue`。0.8.15 改为首轮 API 失败即转交共享 DOM 采集器，由同一条路径完成解析、去重、1.2 秒动作冷却、回复展开、滚动和部分快照交付。本轮 0.8.14 Attempt 已人工暂停为 `0/552`，不宣称已取得评论。198 项插件测试、TypeScript 合同、production build、content runtime / Linggan isolation、release 校验与全新依赖可复现重建已通过，0.8.15 ZIP SHA-256 为 `37fe88bdcf7cf948eb490cd76454d5d93134b3669d4cb34a856ff8a9bbf38e3b`；浏览器重载后的真实链复验仍需执行。
 
 ### WORK-RESOURCE-READ-001 / Issue #110（实现与集成验证完成，部署待完成）
 
 为避免 Intelligence 各页各自拼封面、标题、作者与时间，当前交付分支新增中立 `Work Resource Read` Interface 与 `/api/local/work-resources`；Evidence Library 只是首个消费者。Media V2 继续拥有媒体事实，页面不能绕过共享接口另读 SQL/Package。profile discovery 的监控目标作为 collection context 单独返回，作品作者保持独立；没有详情 author ID 时明确 `NOT_VERIFIED`，不再把目标显示名填成作者。
 
-详情发布时间链修复了“插件算出 `publishedAt`、服务接纳却只存文本”的断点：additive `0026_work_resource_read.sql` 保存实际字段、source kind、precision、reference 与 parser version，只有合格 platform epoch 晋升为精确 `published_at`；相对/日历文本为 `SOURCE_TEXT_ONLY`。资料库增加 `layout=research|table|cover` 三种只改变排版的视图，继续共享查询、字段资格、当前选择和 Inspector。与评论接纳升级合并后，Rust workspace、插件 153 项聚焦测试、发布包校验/可复现性、51 项隔离 PostgreSQL proof 与调度序列均通过；共享本机库只记录到 `0025_comment_current_projection`，尚未应用 `0026`，运行时尚未发布，一条真实签名详情字段探针和三视口人工验收也仍未完成。
+详情发布时间链修复了“插件算出 `publishedAt`、服务接纳却只存文本”的断点：additive `0026_work_resource_read.sql` 保存实际字段、source kind、precision、reference 与 parser version，只有合格 platform epoch 晋升为精确 `published_at`；相对/日历文本为 `SOURCE_TEXT_ONLY`。资料库增加 `layout=research|table|cover` 三种只改变排版的视图，继续共享查询、字段资格、当前选择和 Inspector。与评论接纳升级合并后，Rust workspace、插件聚焦测试、发布包校验/可复现性、51 项隔离 PostgreSQL proof、调度序列与完整 local-runtime proof 均通过。2026-08-31 的一条用户授权 XHS 签名详情探针已确认 SSR 顶层 `time` 为 `number` 型 13 位毫秒 epoch，精确命中现有 `xhs-detail-time-v2`；未保存正文、作者资料、评论或媒体。探针不产生 content_detail Package/Receipt，不证明共享投影已收到该真实时间；运行发布与 Mog 最终业务验收仍未由本次探针完成。
+
+Mog 对当前 Evidence Library 首屏指出重复定位文案、左侧 `STATE VIEWS` 用途不清和主内容失焦，并确认参考稿红框内的 `SYSTEM VIEWS / 系统视图`、`MY VIEWS / 我的视图` 是希望保留的设计语言。交付分支已删除重复宣言和第三栏，把五项真实查询预设放入系统视图；我的视图因保存合同未接通，只显示诚实禁用空态。Table 标题/上下文/辅助正文/状态提升到 14/12/11/10px，桌面行高 92px。隔离 `127.0.0.1:3300` 只读实例以本机 13 个作品集合完成 1440×900 与 375×812 的 in-app Browser 几何、截图、computed style 和系统视图实际点击检查；没有改 `:3000`、数据库、媒体根、插件或采集，Mog 对本轮最终视觉仍待确认。
 
 ### MATERIAL-DEEPENING-001 / Issue #103（真实 canary 执行中）
 
@@ -28,9 +162,17 @@ Browser Producer 已沿真实 canary 升至 `0.8.4` 并进入 `main` 与本机�
 
 共享数据库已应用 additive `0022`–`0024`，API、调度 worker 和媒体 worker 已切到 `origin/main@8fe531e` 冻结快照。Chrome 已加载并认领 0.8.4；首个 `content_detail` Task 自动打开了带 `xsec_token` 的目标详情页，但页面水合后全局 `__INITIAL_STATE__` 已被删除、当前 DOM 又没有旧详情容器，导致详情采集在浏览器内失败，任务保持 `in_progress` 且仍为 0 Attempt / 0 Package，服务端接纳尚未发生。该现象与内容工作台 2.0.93 的真实热修根因一致。0.8.5 候选补回安全 SSR `noteDetailMap` 解析，并让详情就绪、完整度判断、正式单篇采集和启动探针共用这一路径；只解析有界 JSON 对象，不执行页面脚本。123 项 Browser Producer 测试、合同检查、生产构建、发布包校验、可复现性与旧工作台隔离已一次通过；发行 SHA-256 为 `62d17c53e0fd6153e3c28aaaa66351002b1de05a576942fd3f687483534f8676`。数据库、WorkOrder/Task、签名 URL、12 条固定范围和原 canary 均不改变。真实 12 作品穿过详情/评论/媒体/OCR/ASR 与 Evidence Library 的最终验收仍未完成，下一步是 0.8.5 精确 head 合并、发布、重载后继续同一 canary。
 
-### COMMENT-COLLECTION-RECEIPT-001（v0.8.6 发布候选已生成，待人工加载/真实复验）
+### COMMENT-COLLECTION-RECEIPT-001（v0.8.7 已合入，Chrome 实际执行版本仍待切换）
 
-已按 ADR-0002 完成代码级收口：标准详情回执与全量深采回执分开；深采以“页面显示数 = 本次唯一采回数”判定 `COMPLETE`，`200 / 300` 等短采为 `PARTIAL` 但保留 `usable`；新的深采从笔记评论入口重新开始，而非续用旧页码。新增 `0025_comment_current_projection.sql` 使不可变 Attempt 评论历史与按稳定评论 ID 去重的当前检索投影并存；本机持久数据库 ledger 已只读确认记录该迁移。合并 #110 后的插件 153 项聚焦测试、生产构建、内容运行时/隔离、v0.8.6 ZIP 校验与可复现性通过，最终候选 SHA-256 为 `4ff1ed8ff05ce380c946edd048c6d569d974b7ec143450b2bf17c67fd1406040`；**Chrome 尚未加载该候选，真实非空评论/楼中楼、真实 Linggan 接纳和业务验收尚未复验**，所以这不是已部署或业务验收完成。
+已按 ADR-0002 完成代码级收口：标准详情回执与全量深采回执分开；深采以“页面显示数 = 本次唯一采回数”判定 `COMPLETE`，`200 / 300` 等短采为 `PARTIAL` 但保留 `usable`；新的深采从笔记评论入口重新开始，而非续用旧页码。`0025_comment_current_projection.sql` 使不可变 Attempt 评论历史与按稳定评论 ID 去重的当前检索投影并存；本机 runtime 已切到 `main@b8bf0f0`，持久数据库已备份并应用 `0026_work_resource_read`，API、调度 worker、媒体 worker、health 和 Work Resource 路由均已核对。
+
+Chrome 原已加载 0.8.6，并在一个获准真实 XHS 详情样本读到 3 条顶层评论和 3 条回复；页面显示 6、本 Attempt 唯一采回 6、自然结束，详情与媒体 Package 已接纳。评论材料没有进入语料：旧插件把顶层自指 root 误分为回复、把页面的 parent 与 reply-to 双字段原样出包，且手工任务错误带 `maximumQuota=1`，服务端因此按合同隔离，没有伪装为成功。0.8.7 在出包前规范评论关系，有限任务保留事前配额，自然结束深采使用 `maximumQuota: null` 与人工/时间/风险/自然结束条件，Package 与 TaskSpec 共享同一 target；167 项插件测试、构建、隔离、ZIP 校验与可复现性通过，ZIP SHA-256 为 `4cc80ac66762c82bb09f2e729a42afd4c6c5690d0ad0e03cf892fa7fdfe836b7`，旧 0.8.6 ZIP 仍保持 `4ff1ed8ff05ce380c946edd048c6d569d974b7ec143450b2bf17c67fd1406040`。修复已由 PR #117 合入 `main@ebcac83`，磁盘上的 Chrome 加载目录也与 0.8.7 `dist` 完全一致；但重载后一次真实点击的最新工位报到仍明确上报 `plugin_version=0.8.6`，新 TaskSpec 仍是 `maximumQuota=1`，说明 Chrome 后台 Service Worker 实际没有切到新版本。该次回复包继续按旧合同隔离，不能拿它否定 0.8.7，也不能宣称 0.8.7 已真实通过。**修复后 comments/replies 接纳、Work Resource 评论树、单篇深采、批量评论和业务验收仍未证明**。
+
+### COLLECTION-SURFACE-TRUTH-001（真实状态硬化候选，待合并与发布）
+
+`/collection/targets` 已有 2 个真实目标、常驻 worker 也持续写入 scheduler heartbeat，但已部署页面仍同时显示“采集运行时未接通、调度器未接通、暂无观察目标”；`/collection/runtime` 也继续显示 `SCHEDULER HEARTBEAT UNREADABLE`。根因不是数据库缺事实，而是 DESIGN-009 当年只给执行工位页传入部分容量状态，其余四个子面和语料页一级导航保留了静态占位文案；后来新增的 scheduler heartbeat 从未接回页面。
+
+当前交付分支只复用现有 `count_targets`、`read_runtime_capacity`、`read_station_overview` 与 `read_scheduler_heartbeat`，把目标数、巡检数、建档数、空缺工位、未归位安装和调度状态按字段独立显示；任何一项读不到只让该项变成未知，不连坐其余已知事实。调度明确区分运行、心跳过期和读不到；任务、待处理、观察历史、周期复盘与语义事件读模型尚未接入时，页面无论目标数是多少都明确写“当前未知”，不再伪造空列表或零。Corpus 一级导航同样从真实目标计数显示“观察中 / 无观察目标 / 状态未知”。`cargo test -p linggan-api` 为 59 passed、14 个需隔离 PostgreSQL 的测试按设计 ignored、0 failed；隔离 PostgreSQL proof harness 另有 46 passed、0 failed。候选 API 在 3101 端口连接本机持久数据库只读实测显示 2 个目标、1 个巡检、1 个建档、0 个空缺工位、1 个未归位安装和 scheduler running，且目标页、生产流与 Corpus 不再出现相反状态。**该候选尚未合并，也未替换 3000 端口冻结运行快照；浏览器视觉和 Mog 业务验收仍待发布后完成。**
 
 ### OBSERVATION-RUNTIME-001 / Issue #94 与 MEDIA-ACQUISITION-001 / Issue #98（已完成并运行）
 
@@ -42,7 +184,7 @@ Material Projection 已接纳搜索/主页发现面带回的真实标题、作�
 
 ### MATERIAL-PROJECTION-001 / Issue #86（Draft stacked 实现）
 
-基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope。默认 `/api/local/evidence-library` 只返回 Material Projection；旧 `cards` 仅由显式 `/api/local/evidence-library/legacy` 兼容入口提供，不再默认混读。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。插件到页面的现行映射见 [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md)。
+基于 `MEDIA-RECON-001`，新的 accepted Package 已有作品级类型化材料投影：发现、详情、评论、回复、作者、媒体槽位、媒体字节状态及 OCR/ASR 生命周期共用一个 `items` 读取 envelope。默认 `/api/local/work-resources` 返回共享作品资源投影；旧 `cards` 仅由显式 `/api/local/evidence-library/legacy` 兼容入口提供，不再默认混读。逐字段未知不补值；评论/回复保留稳定身份、根/父关系与各自 Coverage；作者资料按观察版本追加；媒体保留 Producer 顺序与未知展示顺序、多候选来源、generation、Live Photo partial、Blob/本地 Materialization、处理事件/派生和处置状态。普通 API 不返回远程候选 URI、storage key 或临时上传状态，`batch_checkpoint` 不生成材料或整体完成声明。插件到页面的现行映射见 [`architecture/material-projection-data-map.md`](architecture/material-projection-data-map.md)。
 
 独立审查后的隔离 PostgreSQL 16 proof 已覆盖 Task/Package/Record/Coverage 的平台、能力与目标绑定，逐 Record 隔离且健康 sibling 不连坐，评论/回复数据库关系约束，媒体 `observationRef` 历史冲突与同包重复隔离，首次同槽位并发 generation，作品级查询，以及固定 `asOf` 的 50 项 keyset cursor。读取会先把 lane/media-kind 存在性下推，再在单次最多扫描 200 个作品的预算内补页；预算触发时返回 `scanLimited + cursor`，后续从最后扫描键继续，不重复扫描已排除对象。这个预算只关闭了无界事务风险，没有关闭 enrichment 的有界 N+1：当前最坏仍可达到每个候选 7 次、单响应最多 1,404 次 enrichment/base 查询，批量化债务由 Issue #89 单独承接。
 
@@ -50,7 +192,7 @@ Material Projection 已接纳搜索/主页发现面带回的真实标题、作�
 
 ### EVIDENCE-RUNTIME-001 / Issue #90（Draft stacked 实现）
 
-`/corpus/evidence` 已从 server-rendered discovery cards 切换为客户端只读 Material Projection：默认只请求 `/api/local/evidence-library`，以作品集合为结果行显示 discovery/detail/comments/replies/author/media slots/media bytes/OCR/ASR 九条 lane；选择作品后只沿列表给出的同源 `detailUrl` 更新右侧 Inspector。评论原文只在本机授权详情通道按页读取并显示匿名上下文；普通列表不显示评论原文、平台用户标识或 `contentExternalId`。媒体只在详情同时具备受控同源 `localAssetUrl` 与 `INLINE_SAFE` delivery 时内联，未知类型、受限、已清理或不安全 delivery 不回退 CDN。作品列表和评论通道支持 `nextCursor`；媒体、派生、来源回执若已截断但 API 未给通道 URL，页面明确显示 `SOURCE_INCOMPLETE`，不猜路由或扩大卡 3 合同。
+`/corpus/evidence` 已从 server-rendered discovery cards 切换为客户端只读 Work Resource Read：默认只请求 `/api/local/work-resources`，以作品集合为结果行显示 discovery/detail/comments/replies/author/media slots/media bytes/OCR/ASR 九条 lane；选择作品后只沿列表给出的同源 `detailUrl` 更新右侧 Inspector。评论原文只在本机授权详情通道按页读取并显示匿名上下文；普通列表不显示评论原文、平台用户标识或 `contentExternalId`。媒体只在详情同时具备受控同源 `localAssetUrl` 与 `INLINE_SAFE` delivery 时内联，未知类型、受限、已清理或不安全 delivery 不回退 CDN。作品列表和评论通道支持 `nextCursor`；媒体、派生、来源回执若已截断但 API 未给通道 URL，页面明确显示 `SOURCE_INCOMPLETE`，不猜路由或扩大卡 3 合同。
 
 本卡没有修改数据库、接纳、Material Projection 字段/SQL、媒体资格/处置、插件、采集调度或 OCR/ASR provider。它也不证明历史 Package 已回填、真实平台材料/媒体、部署、长期稳定性或 Mog 业务验收；这些边界仍由后续真实垂直证明承担。
 
@@ -58,17 +200,17 @@ Material Projection 已接纳搜索/主页发现面带回的真实标题、作�
 
 Mog 已明确取消“任何仓库写入都必须 Issue + Claim + 独立 worktree + Draft PR”的统一门禁。后续按风险分级：代码、数据库、运行合同、插件/release、部署/生产、真实外部动作、敏感数据/权限、不可逆处置和并行冲突继续走受保护交付；当前对话已明确授权的低风险文档勘误、索引/状态同步、进度记录和被取代卡片收口可以直接维护，但仍须核对工作区、检查 diff、运行适用治理检查并分层报告，不能借机扩成实现或自动 push/deploy。
 
-ARC-001 已同步为“已回答问题不再重复提问”：Capture Control Contract 已由 PR #17 合入；媒体卡已从当前主线完成 V2 语义、PR #15 草案、产品规则、插件 `v0.5.0` 通道、Rust/PostgreSQL 实现和 Evidence Library 消费边界的校准，唯一当前入口为 [`architecture/media-lifecycle-contract.md`](architecture/media-lifecycle-contract.md)，决策卡现为 `resolved`。这只证明合同收口；真实媒体字节、OCR/ASR/抽帧/embedding、保留期清理、撤回传播、多材料读模型、页面实现和用户验收仍未证明。第一阶段运行时只剩当前实现缺口基线，首个用户可见范围只剩正式 SCOPE 冻结。Issue #10 和 #14 保持开放以承接当前交付；旧 Issue #11/#16/#18 与 PR #12/#13/#15/#19 已按“已吸收/已被取代”关闭。
+ARC-001 已同步为“已回答问题不再重复提问”：Capture Control Contract 已由 PR #17 合入；媒体卡已从当前主线完成 V2 语义、PR #15 草案、产品规则、插件 `v0.5.0` 通道、Rust/PostgreSQL 实现和 Evidence Library 消费边界的校准，唯一当前入口为 [`architecture/media-lifecycle-contract.md`](architecture/media-lifecycle-contract.md)，决策卡现为 `resolved`。这只证明合同收口；真实媒体字节、OCR/ASR/抽帧/embedding、保留期清理、撤回传播、多材料读模型、页面实现和用户验收仍未证明。第一阶段运行时只剩当前实现缺口基线，首个用户可见范围只剩正式 SCOPE 冻结。Issue #14 已按“媒体合同决策完成”归档关闭；Issue #10 继续只承接其自身当前交付。旧 Issue #11/#16/#18 与 PR #12/#13/#15/#19 已按“已吸收/已被取代”关闭。
 
 `PATROL-LEASE-SEQUENCE-001` 已把一次 creator 基线的 `author_profile → profile_discovery` 固定为同一 lease 下的顺序任务关系：新 lease 不再双写旧 `task_id` 列；派发以数据库原子 claim 标记领取安装与 `in_progress`，同安装重试会取回同一 live task，后一步必须等待前一步形成已接纳回执；内容页允许 `DISCOVER_SURFACE` runtime 消息，并沿后台下发的 scheduled TaskSpec 与 `linggan_dispatched_task` 来源原样创建 Attempt，不再重建 manual task；Package 接纳时再次锁定 live lease 与领取安装，并把 Package、Receipt、task/必要的 lease completion 放进同一事务。只有全部步骤完成才释放 lease 并记录本轮 patrol 成功。持续博主巡检只执行 `profile_discovery`，关键词目标执行 `discovery_search`；手动页面采集仍走 manual TaskSpec。自动领取与发布版本由 `OBSERVATION-RUNTIME-001` 统一升级至 `v0.6.0`。
 
-Issue #85 / `EVIDENCE-PAGE-002` 已在上述媒体合同上冻结多材料 Evidence Library 的产品手册、技术呈现要求和合成静态高保真参考：主对象为“一个稳定来源作品在当前 Linggan 中可核验的材料集合”，并覆盖 discovery、详情、评论/回复、作者、媒体槽位/字节与 OCR/ASR 派生 lane。该设计明确区分部分可用、风险控制、访问受限、处理中、字节已清理、未知、空结果和读取错误，并静态演示一次 Package 的槽位级来源观察组如何包含 declared Bundle、still/motion 组件、逐地址 candidate assertions 以及绑定精确 `candidateRef` 的下载尝试；checkpoint 只进入来源核验，不成为材料卡。Issue #90 已把现行 API 能承担的部分落到运行页；静态参考仍不证明真实平台、媒体、OCR/ASR 或用户验收。
+Issue #85 / `EVIDENCE-PAGE-002` 已完成多材料 Evidence Library 的产品手册、技术呈现要求和合成静态高保真参考：主对象为“一个稳定来源作品在当前 Linggan 中可核验的材料集合”，并覆盖 discovery、详情、评论/回复、作者、媒体槽位/字节与 OCR/ASR 派生 lane。该设计明确区分部分可用、风险控制、访问受限、处理中、字节已清理、未知、空结果和读取错误，并静态演示一次 Package 的槽位级来源观察组如何包含 declared Bundle、still/motion 组件、逐地址 candidate assertions 以及绑定精确 `candidateRef` 的下载尝试；checkpoint 只进入来源核验，不成为材料卡。Issue #90 已把现行 API 能承担的部分落到运行页；静态参考仍不证明真实平台、媒体、OCR/ASR 或用户验收。
 
-### AUD-XHS-001 / Issue #74（受限真实页面探针执行中）
+### AUD-XHS-001 / Issue #74（历史受限页面探针，已治理终止）
 
-Mog 已于 2026-08-26 明确授权在已连接 Chrome 中执行最小小红书页面探针，用于回答当前搜索上下文/下拉联想、搜索列表、笔记详情（详情、媒体与当前顺序下最多 30 条评论）和作者页究竟有哪些可见字段、插件能否交付、何时停止。该授权严格限于匿名化的字段存在性、数量、页面状态、顺序和缺口记录：不向 Linggan 提交或持久化真实笔记、评论、作者资料、媒体或原始页面/API 输出；不读取 Cookie、账号秘密或隐藏账户资料；不下载媒体、不调用 OCR/ASR、不绕过验证码或安全限制。它是对 `DEV-03` 的受限预检，不表示 DEV-03、真实 Evidence 接入、插件发布、Canary、平台兼容、分析、部署或用户验收已经通过。唯一登记入口为 [`platforms/xiaohongshu/capture-capability-registry.md`](platforms/xiaohongshu/capture-capability-registry.md)，执行计划为 [`plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md)。
+Mog 曾于 2026-08-26 明确授权在已连接 Chrome 中执行最小小红书页面探针，用于回答当前搜索上下文/下拉联想、搜索列表、笔记详情（详情、媒体与当前顺序下最多 30 条评论）和作者页究竟有哪些可见字段、插件能否交付、何时停止。该授权严格限于匿名化的字段存在性、数量、页面状态、顺序和缺口记录：不向 Linggan 提交或持久化真实笔记、评论、作者资料、媒体或原始页面/API 输出；不读取 Cookie、账号秘密或隐藏账户资料；不下载媒体、不调用 OCR/ASR、不绕过验证码或安全限制。它只是对 `DEV-03` 的受限预检，不表示 DEV-03、真实 Evidence 接入、插件发布、Canary、平台兼容、分析、部署或用户验收已经通过。2026-09-02，Mog 决定停止继续此类旧式探针；既有登记中的 `UNKNOWN`、`PARTIAL` 与 `SOURCE_INCOMPLETE` 保留为未知，不以推断填补。唯一登记入口继续是 [`platforms/xiaohongshu/capture-capability-registry.md`](platforms/xiaohongshu/capture-capability-registry.md)，历史执行计划已归档为 [`AUD-XHS-001`](plans/completed/aud-xhs-001-xiaohongshu-capture-probe-refresh.md)。
 
-首轮实测已确认搜索筛选、下拉结构、搜索卡片和作者页 DOM 的一部分当前事实，但同时暴露详情面漂移：当前详情使用 `.note-detail-mask / .note-container / .note-content / .comments-el`，本次页面未出现旧 `noteDetailMap`。Issue #76 已在源码中实现搜索页面事实回执、详情 DOM 回退和统一的“详情 + 媒体观察 + 最多 30 条评论”逻辑结果；其中 `30` 是标准详情窗口硬上限，空状态、部分结果和停止原因分开记录。Issue #78 `PLUGIN-XHS-ACTIVE-COLLECTION-001` 已获 Mog 授权，负责把搜索/主页发现、单篇评论深采和批量评论升级为目标驱动、主动加载、可暂停恢复的执行能力：`30` 不限制独立深采或批量评论，但每项任务必须保留目标、实际、停止原因和恢复状态。
+首轮实测已确认搜索筛选、下拉结构、搜索卡片和作者页 DOM 的一部分当前事实，但同时暴露详情面漂移：当前详情使用 `.note-detail-mask / .note-container / .note-content / .comments-el`，本次页面未出现旧 `noteDetailMap`。Issue #76 的源码升级（PR #77）已实现搜索页面事实回执、详情 DOM 回退和统一的“详情 + 媒体观察 + 最多 30 条评论”逻辑结果；其中 `30` 是标准详情窗口硬上限，空状态、部分结果和停止原因分开记录。#76 以源码层完成归档，不重跑历史系统切换；真实兼容性、运行时、实际接纳与媒体链仍由 #103、#133 或具体 Bug 承接。Issue #78 `PLUGIN-XHS-ACTIVE-COLLECTION-001` 已获 Mog 授权，负责把搜索/主页发现、单篇评论深采和批量评论升级为目标驱动、主动加载、可暂停恢复的执行能力：`30` 不限制独立深采或批量评论，但每项任务必须保留目标、实际、停止原因和恢复状态。
 
 Issue #80 `PLUGIN-XHS-ADAPTIVE-SCROLL-AND-DETAIL-RECEIPT-001` 已经由 PR #81 合并到 `main`：它把“采集当前笔记到 Linggan”与“人工采集并下载媒体”明确拆分，前者不得弹下载窗口，后者保留旧的人工选择和下载；详情回执按笔记详情、媒体观察、评论与回复三条 lane 如实显示。页面加载收敛为有限、可解释的步骤，`no_progress` 不伪装成页面结束；安全验证或访问受限会结束当前 Attempt。此前在一次明确确认下提交的最小详情样本，仅证明一条当前笔记记录进入 Linggan 当前投影；未下载媒体，未证明三条 lane 各自接纳。**真实新版本安装、不同筛选、非空评论/楼中楼、实际 lane 接纳、部署和用户验收仍为 `SOURCE_INCOMPLETE` / 未验证**；代码检查和合并不替代这些真实链路结论。
 
@@ -131,7 +273,7 @@ REAL-CANARY #52 的聚合结果已确认：本地库存在已接纳的当前可�
 - 2026-08-20 用户进一步确认代码前语义冻结结论：SCOPE-001 采用 Closed World，独立状态不得压成总成功，unknown 不得被默认值吞掉，低层不得越权产生高层 Claim，任何验证声明必须携带未证明范围。四轮攻击与已知 P1 收口后，用户又明确终止重复文档复核并要求进入代码阶段；因此当前为受控 TDD 开工，不改变上述语义或真实范围硬停止线。
 - 2026-08-21 用户逐题确认第一阶段首页情报面形态 `HOME-01`–`HOME-17`，记录在 [`pages/home-intelligence-surface.md`](pages/home-intelligence-surface.md)，并据此收口 `DEC-G7-01`（首页部分）与 `DEC-G7-02`。该确认只固定产品形态与信息语义，**不是实现授权**：首页、常驻 Agent 编队、总编、通知推送、选题卡存储与校准回路全部未实现，也没有真实数据可驱动；当前在办事项仍只有 `SCOPE-001`，要实现其中任何一节必须另立 SCOPE 并经用户确认。
 
-## 事项队列
+## 历史项目队列（未在本次 Browser Producer 现状同步中重审）
 
 | 顺序 | 编号 | 事项 | 状态 | 退出条件 |
 |---|---|---|---|---|
@@ -143,13 +285,13 @@ REAL-CANARY #52 的聚合结果已确认：本地库存在已接纳的当前可�
 | 6 | ARC-001 | 产品与系统架构收口决策图 | 进行中（决策） | `product-shell`、`primary-daily-job`、`first-producer-canary` 已解决；P0 页面形态与各项实施合同仍需收口，最后由 Mog 批准首个用户可见 SCOPE |
 | 7 | GOV-003 | 外部 Agent Issue → worktree → PR 协作闭环 | 修订中（review FAIL） | 同一 PR 新 head 通过独立复核；integrator 合并后重新核验 main/正式文档、记录完成层并手工关闭 Issue；不是第二业务 SCOPE |
 | 8 | DESIGN-002 | Topic Intelligence 合成 Reference Page + LIDS v2.0 | 执行中（设计参考/治理） | Issue #7 将 LIDS 作为全项目设计表达标准，并交付其 L2 合成参考页、规格、组件晋升门和检查；不接入真实数据、Web 产品、运行时主题/组件或真实动作 |
-| 9 | LOCAL-001 | 独立本地产品、Evidence Library V7 与 Local Canary 路线 | 001A 与 001B-001C1 已合并；LOCAL-RUNTIME-001（Issue #38）在 Draft PR 验证中；001C-2–3 未开始 | #34 已接通受控 discovery Package → 本地读取代码；#38 只补持久本地 migration/readiness，不证明真实插件、平台、媒体或 OCR/ASR |
+| 9 | LOCAL-001 | 独立本地产品、Evidence Library V7 与 Local Canary 路线 | 已完成；路线归档（2026-09-02） | 历史父计划已建立并约束后续独立申请；不再作为当前路线图总编号，也不把 001C-2–3 的历史设想或真实媒体 / OCR / ASR 写成已完成 |
 
 同一时间默认只允许一个事项处于“执行中”。状态流转为：`待讨论 → 需要决定 → 已确认 → 执行中 → 验证中 → 已完成`。来源不足使用 `SOURCE_INCOMPLETE`；必须由用户决定的边界使用 `DECISION_REQUIRED`；外部条件无法继续时使用 `BLOCKED`。
 
-## 当前下一步
+## 历史下一步记录（不覆盖本页顶部 `0.8.28` 当前快照）
 
-当前主线实施事项仍是 [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md)。它把已确认设计压缩为一条合成/脱敏技术 tracer：终态 Package 接入、逐 Record 处理、最小 Content 身份与 Observation、字段级 Current 来源，以及 API + minimal CLI 的解释结果；它不是用户可见产品切片。与主线并列、且由 Mog 单独授权的唯一受限现实页面工作是 `AUD-XHS-001 / Issue #74`；它只降低小红书字段与插件兼容性的未知，不接入真实材料，也不扩大 SCOPE-001。
+当前主线实施事项仍是 [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md)。它把已确认设计压缩为一条合成/脱敏技术 tracer：终态 Package 接入、逐 Record 处理、最小 Content 身份与 Observation、字段级 Current 来源，以及 API + minimal CLI 的解释结果；它不是用户可见产品切片。`AUD-XHS-001 / Issue #74` 已作为历史受限探针归档，不再是进行中现实页面工作；若未来真实链被某一具体字段阻断，必须另行授权最小探针，且不得由本历史卡自动恢复执行。
 
 语义冻结已经经过四次独立只读攻击。第四轮发现的 payload/ingress 分层、pre-routing audit union、动态 ref/time snapshot 和跨 Attempt Satisfaction 已分别用 processor owner、封闭数据库 union、固定 proof clock/ref 与 Work 1:1 Attempt 收口。按用户最新裁定不再进行第五轮文档复核。F01 已完成 contracts tracer、手工静态 manifest Oracle，以及 **TDD 步骤 3 的 Package ingress**：有效 Package 在随机隔离的 PostgreSQL 16 schema 中原子接入，行数逐表对齐 manifest 的 `fresh_seed` 与 `final` 阶段，六个事务故障注入点任一失败都零半写，同 hash replay 与不同 hash conflict 只新增一行 delivery 且不覆盖既有 Package，接入后 Observation/Current/Source 侧表仍不存在。三项主链保护中前两项（接入阶段不提前形成 Observation/Current、接入故障零半写）已有真实数据库证据；第三项（坏 Record 不撤销合格 Record）属于 Record processing，尚未实现。下一步是 TDD 步骤 4 的两条 Record 独立处理与 Observation/Current，需要先创建 `0002` migration；随后才是 loopback API 与只经 API 的 CLI。完成该链后停止实施扩张；其余 canonicalization、完整 envelope、资源上限和 F02–F10 等待 ARC-001 收口及后续明确排期，不从 F01 自动继续。
 

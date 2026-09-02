@@ -1,8 +1,8 @@
 # DESIGN-009 · 执行工位改为产能判定面 · UI 变更清单
 
 > 状态: 权威当前
-> 最后核对: 2026-08-29
-> 适用范围: `/collection/runtime`，以及它所使用的共享外壳入参
+> 最后核对: 2026-08-31
+> 适用范围: `/collection/*` 的共享运行状态、`/collection/runtime` 与 Corpus 一级导航
 > 事实来源: Mog 于 2026-08-29 的直接指定与三项裁定、真实运行结果、`PAGE-COLLECTION-001`、LIDS、`linggan-contracts` 的 `Capacity` 合同
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定
 
@@ -14,7 +14,7 @@
 
 ## 1. 事项
 
-- 事项 ID: `DESIGN-009`（无 GitHub Issue，Mog 直接指定）
+- 事项 ID: `DESIGN-009`。原始变更由 Mog 直接指定、当时没有 GitHub Issue；2026-08-31 的共享状态硬化续作已在重新打开并指派的 [Issue #94](https://github.com/Himog0921/linggan-intelligence/issues/94) 下实施。首轮 Claim 的候选文件范围不足，独立审查后已补充 [Claim amendment](https://github.com/Himog0921/linggan-intelligence/issues/94#issuecomment-5470459730)，逐项列明 exclusive/shared/forbidden 文件。
 - 关联: `PAGE-COLLECTION-001`、`LIDS-SYS-001`、`LIDS-PAT-001`、`LIDS-PRI-001`、`DECISION-04`、`INV-36`
 - 触发: Mog 要求规划 `/collection/runtime` 的 UX/UI。调研中发现的不是排版问题，而是**这一页在系统性地说假话**。
 
@@ -88,3 +88,51 @@
 ## 6. 交接
 
 三项待 Mog 裁定，见 `ACC-RUNTIME-001` §5。
+
+## 7. 2026-08-31 · 真实运行状态硬化与 `DESIGN-009-UI-EX-01` 关闭
+
+Mog 已要求在同一交付中把观察目标、工位管理和语料展示地基做成可靠运行面。真实
+`main@b8bf0f0` 运行时已经有 `collection_scheduler_heartbeat`，`/health` 可读
+`scheduler.state=running`，观察目标页也实际读取到 2 个目标；因此 §4 当时保留的
+`DESIGN-009-UI-EX-01` 已经满足复核触发条件。继续显示“调度器未接通 / 暂无观察目标”
+不再是保守，而是与同一服务的真实读数冲突。
+
+### 表面地图
+
+| 表面 | 本次只修什么 | 不改什么 |
+|---|---|---|
+| `/collection/targets` | Header、上下文读数和导轨底部使用现有目标/调度事实 | 目标创建、筛选、巡检和建档动作 |
+| `/collection/runtime` | 心跳状态与 `/health` 使用同一 `read_scheduler_heartbeat` | 产能判定、工位认领、租约与准入规则 |
+| `/collection/attention`、`operations`、`tasks` | 共享 Header 不再显示过时的全局未接通状态；缺少业务读模型的正文统一明确为“当前未知” | 各子面尚未实现的业务列表与操作 |
+| `/corpus/evidence` | 共享一级导航中的“采集”状态读取同一事实 | Work Resource、列表、Inspector、材料状态和隐私边界 |
+
+### 状态词典
+
+| 事实 | 用户表达 | 禁止替代 |
+|---|---|---|
+| heartbeat `running` | 调度运行中 | 心跳读不到、系统全部正常 |
+| heartbeat `stale` | 调度心跳已过期 | 调度运行中、调度器未接通 |
+| 无 heartbeat / 读取失败 | 调度心跳读不到 | 运行中、停止 |
+| 目标/巡检/建档计数已读 | 显示真实计数 | UNKNOWN、0 的推测 |
+| 数据库或对应读模型失败 | 未知 / 读不到 | 暂无、未接通、已接通 |
+
+数据库整体不可用时，目标正文、导轨、生产流、执行工位、上下文状态、系统边界与一级导航全部使用“未知 / 读不到”；任何一个表面都不得单独退回历史静态词。
+
+### 依赖地图
+
+只复用 `count_targets`、`read_runtime_capacity`、`read_station_overview` 与
+`read_scheduler_heartbeat`；四者均为当前 Rust/PostgreSQL 只读事实。共享 Header 继续由
+`shell.rs` 唯一渲染，不新增 CSS、Token、组件或前端状态。任何一项读取失败只降级该项，
+不能把其它已读事实一起降成“未接通”。
+
+### 验收矩阵
+
+| 验收 | 自动证据 | 运行证据 |
+|---|---|---|
+| running / stale / unreadable 不互相冒充 | `collection.rs` 聚焦单测 | `/health` 与三个页面 DOM 文案对账 |
+| 2 个目标不再显示“暂无观察目标” | API 页面测试 | 本机 `/collection/targets` |
+| 工位页与 health 心跳一致 | API 页面测试 | 本机 `/collection/runtime` + `/health` |
+| 语料列表不受影响 | 既有 Work Resource / UI tests | Chrome 仍显示 12 个作品集合及逐 lane 状态 |
+
+变更分类仍是**状态/语义**；不新增权限、动作、页面、数据字段、数据库 migration 或平台访问。
+本节关闭 `DESIGN-009-UI-EX-01`，但不把待处理/生产流/采集任务的业务数据面写成已实现。

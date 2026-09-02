@@ -12,6 +12,7 @@ import { BATCH_CONFIG, COLLECT_MODE, COMMENT_DEPTH_MODE, MSG, TASK_STATE } from 
 import { extractProfileIdentityFromUrl } from '../../shared/targetIdentity.js';
 import { looksLikeDeadPageTitle } from '../../shared/deadPageSignals.js';
 import { parseCount, extractNoteId } from '../../shared/utils.js';
+import { requireBatchTargetCount } from '../../shared/batchLimits.js';
 import { noteStore } from '../../db/noteStore.js';
 import { localExecutionStore } from '../../linggan/localExecutionStore.js';
 import {
@@ -367,6 +368,7 @@ export class BatchNoteController extends BaseBatchController {
   }
 
   async start(mode, onProgress, settings = {}) {
+    const requestedCount = requireBatchTargetCount(settings.count ?? 10);
     this.isRunning = true;
     this.isPaused = false;
     this._stoppedByUser = false;
@@ -417,7 +419,8 @@ export class BatchNoteController extends BaseBatchController {
       throw error;
     }
 
-    const { count = 10, topByLikes = false } = settings;
+    const { topByLikes = false } = settings;
+    const count = this.targetNoteId ? 1 : requestedCount;
     this._topByLikes = Boolean(topByLikes);
     this._includeComments = Boolean(settings.includeComments || settings.collectComments) && !this.surfaceOnly;
     const configuredCommentLimit = Number(settings.commentLimit ?? 30);

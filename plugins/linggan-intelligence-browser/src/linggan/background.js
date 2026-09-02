@@ -7,11 +7,13 @@ import {
   createLocalAttempt,
   createLocalSubmission,
   createTaskSpec,
+  decodePageExecutionReceipt,
   isTerminalLocalDeliveryResult,
   localPost,
   readLingganLocalReadiness,
   taskCreationIsAccepted,
   unavailableLingganStats,
+  validateTaskSpec,
 } from './adapter.js';
 import { LINGGAN_RUNTIME_ACTION } from './runtimeActions.js';
 import { localMediaOutbox, localProducerOutbox } from './localProducerOutbox.js';
@@ -22,27 +24,19 @@ import {
 } from './detailPageSessionStore.js';
 import { waitForStableTab } from './tabReadiness.js';
 import { buildSignedXhsDetailExecutionUrl } from './xhsExecutionTarget.js';
+import { executeClaimedMediaAcquisition } from './mediaAcquisitionExecution.js';
+import {
+  allowedMediaCandidateUri,
+  mediaUploadUnitsForRecord,
+  normalizeMediaCandidateUri,
+  recordMediaDownloadFailure,
+} from './mediaTransferRuntime.js';
+import { requestMediaWorker } from './mediaWorkerChannel.js';
+import { dispatchedCommentMaxTotal, dispatchedMaximumQuota } from './localExecutionSupport.js';
 
 const PRODUCER_INSTANCE_KEY = 'linggan.localTrusted.producerInstanceId';
-const MAX_MEDIA_BYTES = 256 * 1024 * 1024;
-const MEDIA_CHUNK_BYTES = 1024 * 1024;
 let flushingOutbox = null;
-
-const PLATFORM_MEDIA_HOST_SUFFIXES = Object.freeze([
-  '.xhscdn.com', '.xiaohongshu.com', '.byteimg.com', '.bytevcloudcdn.com',
-  '.douyinpic.com', '.douyinstatic.com', '.douyinvod.com', '.amemv.com',
-]);
-
-function allowedMediaCandidateUri(value) {
-  try {
-    const uri = new URL(String(value || '').trim());
-    if (uri.protocol !== 'https:' || uri.username || uri.password || uri.port) return false;
-    const hostname = uri.hostname.toLowerCase();
-    return PLATFORM_MEDIA_HOST_SUFFIXES.some((suffix) => hostname.endsWith(suffix));
-  } catch {
-    return false;
-  }
-}
+let creatingMediaWorker = null;
 
 async function producerInstanceId() {
   const stored = await chrome.storage.local.get(PRODUCER_INSTANCE_KEY);
@@ -118,131 +112,37 @@ function flushLocalOutbox() {
   return flushingOutbox;
 }
 
-async function flushMediaOutbox() {
-  const due = await localMediaOutbox.due({ limit: 2 });
-  for (const upload of due) {
-    if (upload.slotSubmissionId) {
-      const dependency = await localProducerOutbox.get(upload.slotSubmissionId);
-      if (!dependency || dependency.status === 'terminal') {
-        await localMediaOutbox.terminal(upload.uploadId, 'media_slot_delivery_not_accepted');
-        continue;
-      }
-      if (dependency.status !== 'acknowledged') continue;
-    }
-    await localMediaOutbox.markInFlight(upload.uploadId);
-    try {
-      const response = await fetchMediaCandidate(upload.candidateUris);
-      const sha256 = await sha256Hex(await response.bytes.arrayBuffer());
-      const uploaded = await uploadMediaInChunks({
-        mediaObservationRef: upload.mediaObservationRef,
-        blob: response.bytes,
-        mimeType: response.mimeType,
-        sha256,
-      });
-      await localMediaOutbox.acknowledge(upload.uploadId, uploaded);
-    } catch (error) {
-      // Failure is a media-lane fact, not a reason to invalidate already accepted text/discovery.
-      // It is best effort because the failed candidate may be retried after an offline interval.
-      const failure = await recordMediaDownloadFailure(upload, error).catch(() => null);
-      if (upload.serverWorkRef) {
-        // A server-owned work generation is attempted once. The server decides whether another
-        // generation may be leased; retaining this generation locally would create two retry
-        // authorities and could exceed the three-attempt limit.
-        await localMediaOutbox.terminal(
-          upload.uploadId,
-          failure?.work?.state || 'media_acquisition_generation_finished',
-        );
-      } else {
-        await localMediaOutbox.retry(upload.uploadId, error?.message || error);
-      }
-    }
-  }
+async function flushMediaOutbox(preferredUploadId = '') {
+  await ensureMediaWorker();
+  const response = await requestMediaWorker({
+    runtime: chrome.runtime,
+    preferredUploadId,
+  });
+  if (response?.success !== true) throw new Error(response?.code || 'media_worker_unavailable');
+  return response;
 }
 
-async function recordMediaDownloadFailure(upload, error) {
-  const attemptedUri = String(upload?.candidateUris?.[0] || '').trim();
-  const observationRef = String(upload?.mediaObservationRef || '').trim();
-  if (!attemptedUri || !observationRef) return;
-  const message = String(error?.message || error || 'unknown');
-  const terminalReason = /mime/i.test(message) ? 'mime_mismatch'
-    : /size/i.test(message) ? 'size_limit'
-      : /http_404|expired/i.test(message) ? 'expired_url'
-        : /cancel/i.test(message) ? 'cancelled' : 'network_error';
-  const response = await fetch(`${LINGGAN_LOCAL_ORIGIN}/api/local/producer/media-observations/${encodeURIComponent(observationRef)}/download-failures`, {
-    method: 'POST', credentials: 'omit', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      attemptedUri,
-      terminalReason,
-      ...(upload?.serverWorkRef ? {
-        workRef: upload.serverWorkRef,
-        claimGeneration: upload.claimGeneration,
-        installKey: upload.installKey,
-      } : {}),
-    }),
-  });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(payload?.code || 'media_download_failure_not_recorded');
-  return payload;
-}
-
-async function uploadMediaInChunks({ mediaObservationRef, blob, mimeType, sha256 }) {
-  const start = await fetch(`${LINGGAN_LOCAL_ORIGIN}/api/local/producer/media-observations/${encodeURIComponent(mediaObservationRef)}/uploads`, {
-    method: 'POST', credentials: 'omit',
-    headers: {
-      'x-linggan-media-sha256': sha256,
-      'x-linggan-media-mime': mimeType,
-      'x-linggan-media-size': String(blob.size),
-    },
-  });
-  const startPayload = await start.json().catch(() => ({}));
-  if (!start.ok) throw new Error(startPayload.code || 'media_upload_not_started');
-  const sessionRef = String(startPayload.sessionRef || '').trim();
-  let offset = Number(startPayload.nextOffset);
-  if (!sessionRef || !Number.isInteger(offset) || offset < 0 || offset > blob.size) throw new Error('media_upload_resume_invalid');
-  while (offset < blob.size) {
-    const chunk = blob.slice(offset, Math.min(blob.size, offset + MEDIA_CHUNK_BYTES));
-    const written = await fetch(`${LINGGAN_LOCAL_ORIGIN}/api/local/producer/media-uploads/${encodeURIComponent(sessionRef)}/chunks`, {
-      method: 'PATCH', credentials: 'omit',
-      headers: { 'content-type': 'application/octet-stream', 'x-linggan-media-offset': String(offset) },
-      body: chunk,
+async function ensureMediaWorker() {
+  if (!chrome.offscreen?.createDocument) throw new Error('media_offscreen_unavailable');
+  const offscreenUrl = chrome.runtime.getURL('media-worker.html');
+  if (typeof chrome.runtime.getContexts === 'function') {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT'],
+      documentUrls: [offscreenUrl],
     });
-    const writtenPayload = await written.json().catch(() => ({}));
-    if (!written.ok) throw new Error(writtenPayload.code || 'media_chunk_not_acknowledged');
-    const nextOffset = Number(writtenPayload.nextOffset);
-    if (!Number.isInteger(nextOffset) || nextOffset <= offset || nextOffset > blob.size) throw new Error('media_chunk_progress_invalid');
-    offset = nextOffset;
+    if (contexts.length > 0) return;
+  } else if (typeof chrome.offscreen.hasDocument === 'function' && await chrome.offscreen.hasDocument()) {
+    return;
   }
-  const finalized = await fetch(`${LINGGAN_LOCAL_ORIGIN}/api/local/producer/media-uploads/${encodeURIComponent(sessionRef)}/finalize`, {
-    method: 'POST', credentials: 'omit',
-  });
-  const payload = await finalized.json().catch(() => ({}));
-  if (!finalized.ok) throw new Error(payload.code || 'media_upload_not_finalized');
-  return payload;
-}
-
-async function fetchMediaCandidate(candidateUris = []) {
-  let lastError = new Error('media_candidate_unavailable');
-  for (const candidate of candidateUris.slice(0, 6)) {
-    try {
-      if (!allowedMediaCandidateUri(candidate)) throw new Error('media_candidate_origin_not_allowed');
-      const response = await fetch(candidate, { credentials: 'omit' });
-      if (!response.ok) throw new Error(`media_download_http_${response.status}`);
-      if (!allowedMediaCandidateUri(response.url || candidate)) throw new Error('media_redirect_origin_not_allowed');
-      const mimeType = String(response.headers.get('content-type') || '').split(';')[0].trim();
-      if (!mimeType.startsWith('image/') && !mimeType.startsWith('video/') && !mimeType.startsWith('audio/')) throw new Error('media_mime_not_allowed');
-      const declaredSize = Number(response.headers.get('content-length'));
-      if (Number.isFinite(declaredSize) && declaredSize > MAX_MEDIA_BYTES) throw new Error('media_size_limit_exceeded');
-      const bytes = await response.blob();
-      if (bytes.size > MAX_MEDIA_BYTES) throw new Error('media_size_limit_exceeded');
-      return { bytes, mimeType };
-    } catch (error) { lastError = error; }
-  }
-  throw lastError;
-}
-
-async function sha256Hex(arrayBuffer) {
-  const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', arrayBuffer));
-  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+  if (creatingMediaWorker) return creatingMediaWorker;
+  creatingMediaWorker = chrome.offscreen.createDocument({
+    url: 'media-worker.html',
+    reasons: ['BLOBS'],
+    justification: 'Fetch approved public media and complete resumable uploads without MV3 worker interruption.',
+  }).catch((error) => {
+    if (!/single offscreen document|already exists/i.test(String(error?.message || error))) throw error;
+  }).finally(() => { creatingMediaWorker = null; });
+  return creatingMediaWorker;
 }
 
 async function queueManualDiscovery(discoveryPackage) {
@@ -271,7 +171,19 @@ async function queueManualDiscovery(discoveryPackage) {
   });
 }
 
-async function queueCapturePackage({ taskSpec, capturePackage } = {}) {
+async function deterministicUuid(seed) {
+  const digest = new Uint8Array(await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(String(seed || '')),
+  ));
+  const bytes = digest.slice(0, 16);
+  bytes[6] = (bytes[6] & 0x0f) | 0x50;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+async function queueCapturePackage({ taskSpec, capturePackage, idempotencyKey = '' } = {}) {
   // Keep the stable-instance lookup callable.  Naming the local result
   // `producerInstanceId` shadows the helper for this whole block, which turns
   // the first current-surface delivery into a temporal-dead-zone failure.
@@ -279,14 +191,30 @@ async function queueCapturePackage({ taskSpec, capturePackage } = {}) {
   if (!taskSpec || !capturePackage) {
     throw new Error('linggan_capture_package_required');
   }
-  const attempt = createLocalAttempt({ producerInstanceId: instanceId, taskId: taskSpec.taskId });
+  validateTaskSpec(taskSpec);
+  const stableKey = String(idempotencyKey || '').trim();
+  const attemptId = stableKey
+    ? await deterministicUuid(`attempt:${instanceId}:${taskSpec.taskId}:${stableKey}`)
+    : crypto.randomUUID();
+  const submissionId = stableKey
+    ? await deterministicUuid(`submission:${instanceId}:${taskSpec.taskId}:${stableKey}`)
+    : crypto.randomUUID();
+  const attempt = createLocalAttempt({
+    producerInstanceId: instanceId,
+    taskId: taskSpec.taskId,
+    attemptId,
+  });
   const submission = createLocalSubmission({
     producerInstanceId: instanceId,
     taskId: taskSpec.taskId,
     attemptId: attempt.attemptId,
     capturePackage,
+    submissionId,
   });
-  await localProducerOutbox.enqueue({ ...submission, taskSpec, attempt });
+  const queuedEnvelope = stableKey
+    ? { ...submission, taskSpec, attempt, idempotencyKey: stableKey }
+    : { ...submission, taskSpec, attempt };
+  const queuedRow = await localProducerOutbox.enqueue(queuedEnvelope);
   // The capture boundary ends once the durable browser outbox has accepted this envelope.
   // Network delivery happens behind it so a slow or unavailable Linggan service never holds
   // the page-side capture path hostage.
@@ -295,33 +223,32 @@ async function queueCapturePackage({ taskSpec, capturePackage } = {}) {
     success: true,
     queued: true,
     delivery: 'pending',
-    submissionId: submission.submissionId,
+    submissionId: queuedRow.submissionId,
     taskId: taskSpec.taskId,
-    attemptId: attempt.attemptId,
+    attemptId: queuedRow.attemptId,
   };
 }
 
-async function queueMediaSlots({ taskSpec, capturePackage } = {}) {
-  const queued = await queueCapturePackage({ taskSpec, capturePackage });
+async function queueMediaSlots({ taskSpec, capturePackage, idempotencyKey = '' } = {}) {
+  const queued = await queueCapturePackage({ taskSpec, capturePackage, idempotencyKey });
   const records = Array.isArray(capturePackage?.records) ? capturePackage.records : [];
+  let mediaQueued = 0;
   for (const record of records) {
-    const candidateUris = Array.isArray(record?.observation?.candidateUris)
-      ? record.observation.candidateUris
-      : [record?.observation?.externalUri];
     const observationRef = String(record?.observationRef || '').trim();
-    const allowedCandidates = candidateUris
-      .map((value) => String(value || '').trim())
-      .filter(allowedMediaCandidateUri)
-      .slice(0, 6);
-    if (allowedCandidates.length === 0 || !observationRef) continue;
-    await localMediaOutbox.enqueue({
-      uploadId: crypto.randomUUID(), slotSubmissionId: queued.submissionId,
-      mediaObservationRef: observationRef,
-      candidateUris: allowedCandidates,
-    });
+    if (!observationRef) continue;
+    for (const unit of mediaUploadUnitsForRecord(record)) {
+      await localMediaOutbox.enqueue({
+        uploadId: await deterministicUuid(`media:${queued.submissionId}:${observationRef}:${unit.componentKind}`),
+        slotSubmissionId: queued.submissionId,
+        mediaObservationRef: observationRef,
+        componentKind: unit.componentKind,
+        candidateUris: unit.candidateUris,
+      });
+      mediaQueued += 1;
+    }
   }
   void flushLocalOutbox();
-  return { ...queued, mediaQueued: records.length, mediaDelivery: 'pending' };
+  return { ...queued, mediaQueued, mediaDelivery: 'pending' };
 }
 
 async function openDashboard() {
@@ -534,31 +461,16 @@ async function runMediaAcquisitionOnce() {
       nextPollAfterSeconds: claim.nextPollAfterSeconds,
     };
   }
-  const candidateUris = claim.candidateUris
-    .map((value) => String(value || '').trim())
-    .filter(allowedMediaCandidateUri)
-    .slice(0, 6);
-  if (!claim.workRef || !claim.mediaObservationRef || !Number.isInteger(claim.claimGeneration)
-      || claim.claimGeneration < 1 || candidateUris.length === 0) {
-    return { success: false, state: 'media_claim_invalid', nextPollAfterSeconds: 300 };
-  }
-  await localMediaOutbox.enqueue({
-    uploadId: `${claim.workRef}:${claim.claimGeneration}`,
-    serverWorkRef: claim.workRef,
-    claimGeneration: claim.claimGeneration,
+  return executeClaimedMediaAcquisition({
+    claim,
     installKey,
-    mediaObservationRef: claim.mediaObservationRef,
-    componentKind: claim.componentKind,
-    candidateUris,
+    allowCandidate: allowedMediaCandidateUri,
+    normalizeCandidate: normalizeMediaCandidateUri,
+    outbox: localMediaOutbox,
+    flush: flushMediaOutbox,
+    recordFailure: recordMediaDownloadFailure,
+    scheduleRecovery: scheduleNextClaim,
   });
-  await flushMediaOutbox();
-  return {
-    success: true,
-    state: 'media_generation_executed',
-    executed: true,
-    workRef: claim.workRef,
-    nextPollAfterSeconds: 0,
-  };
 }
 
 chrome.alarms?.onAlarm?.addListener((alarm) => {
@@ -613,9 +525,10 @@ async function queueCachedDetailPageSessionLane({ leaseRef, taskSpec } = {}) {
     };
   }
   const capturePackage = packageDetailPageSessionLane(entry, taskSpec);
+  const idempotencyKey = `detail-session:${taskSpec.taskId}:${entry.capability}`;
   const queued = entry.capability === 'media_slots'
-    ? await queueMediaSlots({ taskSpec, capturePackage })
-    : await queueCapturePackage({ taskSpec, capturePackage });
+    ? await queueMediaSlots({ taskSpec, capturePackage, idempotencyKey })
+    : await queueCapturePackage({ taskSpec, capturePackage, idempotencyKey });
   await detailPageSessionStore.markTaskQueued(entry.cacheKey, entry.capability, taskSpec.taskId);
   return {
     success: true,
@@ -697,9 +610,9 @@ async function runDispatchedTask() {
       action,
       mode: capability === 'discovery_search' ? 'search' : 'profile',
       // 配额来自工单，不来自页面对话框：执行端不得自行放宽。
-      maximumQuota: Number(spec.maximumQuota) || 1,
+      maximumQuota: dispatchedMaximumQuota(spec, 1),
       commentLimit: spec.commentLimit,
-      maxTotal: Number(spec.commentLimit) || Number(spec.maximumQuota) || 1,
+      maxTotal: dispatchedCommentMaxTotal(spec, capability),
       maxSubComments: Number(spec.target?.replyExpandLimit) || 0,
       commentDepthMode: capability === 'replies' ? 'allReplies' : 'twoLevel',
       // The page collector must submit against this exact server-issued identity. Rebuilding a
@@ -709,11 +622,16 @@ async function runDispatchedTask() {
       pageSessionPlan: claim.pageSessionPlan,
       triggerSource: 'linggan_dispatched_task',
     });
-    if (response?.success === false) {
+    const receipt = decodePageExecutionReceipt(response, {
+      action,
+      capability,
+      taskId: spec.taskId,
+    });
+    if (!receipt.ok) {
       return {
         success: false,
-        state: response.state || 'page_read_failed',
-        message: response.message || `页面未能执行「${capability}」。`,
+        state: receipt.state,
+        message: receipt.message || `页面未能执行「${capability}」。`,
       };
     }
     return {
@@ -723,7 +641,7 @@ async function runDispatchedTask() {
       capability,
       leaseRef: claim.leaseRef,
       nextPollAfterSeconds: claim.nextPollAfterSeconds,
-      message: response?.message || `已按派下来的任务执行「${capability}」。`,
+      message: receipt.message || `已按派下来的任务执行「${capability}」。`,
     };
   } catch (error) {
     return { success: false, state: 'page_unavailable', message: '观察页面未能响应，本次未采集。' };
@@ -792,10 +710,18 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
       return queueManualDiscovery(message.discoveryPackage);
     }
     if (action === LINGGAN_RUNTIME_ACTION.SUBMIT_CAPTURE_PACKAGE) {
-      return queueCapturePackage({ taskSpec: message.taskSpec, capturePackage: message.capturePackage });
+      return queueCapturePackage({
+        taskSpec: message.taskSpec,
+        capturePackage: message.capturePackage,
+        idempotencyKey: message.idempotencyKey,
+      });
     }
     if (action === LINGGAN_RUNTIME_ACTION.SUBMIT_MEDIA_SLOTS) {
-      return queueMediaSlots({ taskSpec: message.taskSpec, capturePackage: message.capturePackage });
+      return queueMediaSlots({
+        taskSpec: message.taskSpec,
+        capturePackage: message.capturePackage,
+        idempotencyKey: message.idempotencyKey,
+      });
     }
     if (action === LINGGAN_RUNTIME_ACTION.FLUSH_LOCAL_OUTBOX) return flushLocalOutbox();
     if (action === LINGGAN_RUNTIME_ACTION.CREATE_MANUAL_TASK) {

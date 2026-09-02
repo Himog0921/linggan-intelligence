@@ -1,7 +1,7 @@
 # PLUGIN-REHOME-001 · 旧插件迁入与运行边界映射
 
 > 状态: 当前迁移与自动执行边界
-> 最后核对: 2026-08-30
+> 最后核对: 2026-08-31
 > 适用范围: `linggan-boom@8a00cc1` / `v2.0.91` 到 Linggan 自有浏览器包的第一条垂直迁入边界
 > 事实来源: `plugins/linggan-intelligence-browser/` 当前 source、Manifest、Webpack active entries 和 isolation check
 > 冲突时以谁为准: 当前可构建 source 和实际运行证明；旧插件只说明迁入来源，不是 Linggan 运行规格
@@ -33,7 +33,7 @@
 | XHS 能力 | 当前处置 | 不构成的承诺 |
 |---|---|---|
 | 搜索/博主页发现 | 以有限页面加载、稳定内容去重和目标数为执行边界；记录实际数、轮次、页面加载事实与停止原因 | 不调用旧 API snapshot，不宣称平台全量或调度已接通；不以随机化或规避机制替代页面结束判断 |
-| 标准详情 | “采集当前笔记到 Linggan”交付详情、媒体槽位观察和最多 30 条评论，三条 lane 分别显示接纳状态 | 单一 lane 的接纳不代表全部接纳；该入口不打开媒体选择窗口、不下载媒体原件 |
+| 标准详情 | “采集当前笔记到 Linggan”交付详情、媒体槽位观察和最多 30 条评论；媒体槽位接纳后立即进入与 scheduled 相同的可靠字节队列 | 单一 lane 的接纳不代表全部接纳；该入口不打开人工媒体选择窗口，字节完成仍以 Materialization 回执为准 |
 | 人工媒体下载 | “人工采集并下载媒体”保留原有媒体选择窗口和本地下载服务 | 只在人工显式操作后下载；不把人工下载结果写成 Linggan 自动接纳或媒体理解完成 |
 | 单篇/批量评论 | 深采可明确设定上限或“公开自然结束”，批量逐篇 checkpoint、空态成功、失败隔离 | 不做内容分析、不绕过验证、不中断时不生成真实 Evidence |
 | 本机恢复与媒体 | 使用独立 `LingganIntelligenceBrowserLocalStaging`；媒体仅允许受限 HTTPS 平台域名 | 不复用 `LingganBoomDB`，不允许任意页面消息/本机 URL 作为下载来源 |
@@ -47,6 +47,27 @@
 | XHS 最终页面稳定（0.8.3） | 首次 `complete` 后继续观察 URL/加载变化；保持 1.5 秒稳定且最终 content script 回应同一 URL 才下发采集动作 | 总等待最多 20 秒；不新建 Task/Attempt，不把页面可响应冒充 Package 或 Receipt |
 | XHS 部分详情与同页执行（0.8.4） | 结构化详情已取得内容/作者/媒体时允许互动字段部分未知；首个详情 Task 按服务端已批准范围一次读取详情、媒体候选与有界评论树，后续单能力 Task 复用持久缓存 | 不以未知补 0；不合并 Task/Attempt/Package/Receipt；缓存不授权新 lane、不跨 Lease，缺失或过期时回退原 lane 执行 |
 | XHS SSR 详情读取（0.8.5） | 全局 `__INITIAL_STATE__` 被页面水合删除时，从原始页面脚本安全解析序列化 `noteDetailMap`，供详情就绪、完整度和正式采集共用 | 不执行页面脚本、不放宽作品身份校验、不把 SSR 内容冒充 API 或 DOM 观察；无 SSR 时仍走现有运行态/DOM 路径 |
+| 评论回执与当前投影（0.8.6） | 标准 30 条窗口与深采分开；短采保留，重试从评论入口重新遍历；服务端按稳定评论身份形成当前投影 | 不跨 Attempt 累加数量冒充完整，不从旧评论游标续采，不修改历史 Package |
+| 真实评论树接纳修复（0.8.7） | 顶层自指 root 与回复多关系字段在出包前规范到评论/回复唯一合同；自然结束深采使用无数值配额的有界停止条件 | 不从结果反推任务配额，不放宽服务端关系门闸，不改 scheduled TaskSpec |
+| 克制评论执行与暂停交付（0.8.8） | API 分页、DOM 滚动、回复展开每轮三选一；最低冷却、页面稳定、暂停/停止检查共用；暂停提交真实 PARTIAL 评论树；进度区分已取得、页面公开数和请求上限 | 不伪装随机真人轨迹，不把 checkpoint 计数冒充评论材料，不跨 Attempt 累加完整性 |
+| 媒体领取代际保护（0.8.8） | 领取后先安排恢复唤醒，再写可靠队列并执行；入队或执行异常按 workRef/claimGeneration 回报 | 不把来源 URL 当本地封面，不让人工媒体窗口消失，不把排队冒充物化完成 |
+| 长评论首屏续采（0.8.9） | 不限任务以页面公开数作为当前集合目标；API 首屏不足时进入共用 DOM 补采器；新 Attempt 清空同页旧快照并从空游标重拉第一页 | 不把首屏 `no_progress` 冒充自然结束，不续用上一 Attempt 分页，不跨 Attempt 累加完成度 |
+| 新媒体工作优先与超时（0.8.9） | 精确新领取代次优先于旧本地媒体行；候选请求 20 秒超时 | 不绕过三次服务端尝试上限，不删除人工媒体窗口，不把来源 URI 当物化结果 |
+| 真实详情公开数续采（0.8.10） | 详情标题无“共 N 条”文案时，终态判定继续使用详情上下文观察到的公开评论数 | 不把 `18/508` 误判为无目标 `no_progress` |
+| Attempt 公开数持久（0.8.11） | 采集任一轮观察到的公开数在本 Attempt 内保留，供终态续采判定与部分快照共用 | 不依赖虚拟列表终态时仍保留同一 DOM 容器 |
+| 滚动位置进展（0.8.12） | `scrollTop` 能前进或 `scrollHeight` 增长即视为页面加载进展，继续克制下移到新评论或真实底部 | 不把“当前 280px 内没有新节点”误报为 no-progress |
+| 单篇全回复参数贯通（0.8.13） | 人工设置的 `allReplies` 与回复上限从单篇任务控制器传入共享评论采集器 | 不把界面已选“全部展开”静默降级成默认两级模式 |
+| 平台与插件发行收口（0.8.14） | 合并 Work Resource Read / Evidence Library 主线后，以真实 `time:number` 毫秒 epoch 回归固定 `xhs-detail-time-v2` | 不为已验证映射建立第二分支，不把字段探针写成内容 Package/Receipt |
+| 首轮 API 失败转 DOM（0.8.15） | 新 Attempt 的首个 API 页未返回评论时，立即转交共享 DOM 采集器解析、去重、展开和滚动 | 不在 `allReplies` 模式中反复点击同一展开入口，不让页面已有评论时进度永久留在 0 |
+| 执行与媒体终包（0.8.18） | 严格派发/页面回执、详情 lane 幂等、评论 stop/restart 互斥、批量 timeout drain、缓存回收、显式批量数量、回复按钮亚像素边界容错、全量深采达到或超过页面公开数即完成，以及统一 MediaResource/七类关系/唯一封面选择 | 不把页面读成接纳，不并发控制同页，不静默缩小目标，不让回复展开困在重复显露循环，不把 `596/594` 误判为失败，不让业务页面绕过本地媒体资源读取远程 URL |
+| 详情头像与证据身份分栏（0.8.19） | 详情作者头像形成 `author.avatar` 媒体槽位并进入受控本地副本；Evidence 分开显示作品作者和监控目标，并连续列出全部媒体资源 | 不用监控目标回填作者，不直接展示远程头像，不把头像送入 OCR，不建立第二媒体模型 |
+| 楼中楼展开无进展保护（0.8.20） | 区分“已点击”和“页面真的新增回复”；停滞控件在本次采集中只尝试一次，随后继续检查其他楼层并由既有无进展门闸收口 | 不把停滞点击记作采集进展，不从上次评论序号续采，不丢弃已取得的部分数据 |
+| 媒体离屏执行与评论底部重触发（0.8.21） | 媒体工作先持久入队，再由扩展 offscreen 文档完成平台候选下载、哈希、续传、finalize 与精确代次失败回报；评论未达公开数且当前底部没有结束标记时，最多三次回拉后继续下滑以重触发平台加载 | 不以页面或 Service Worker 存活冒充执行保证，不改变服务端三次尝试权威，不移除人工媒体窗口；不无限上下抖动、不绕过冷却与风险门闸 |
+| 详情媒体自动入队与 Live Photo 接纳修正（0.8.24） | 标准详情与 scheduled 媒体 lane 都在槽位持久提交后立即排入字节执行；同时观察到 still/motion 只证明候选存在，复合槽位保持 `PARTIAL` 直到独立字节链完成 | 不把候选观察冒充本地字节，不移除人工选择/下载窗口，不让一条 Live Photo 约束错误回滚同包其他图片、封面或头像 |
+| 受信 CDN 协议规范化（0.8.25） | 仅将无凭据、无端口且命中平台主机白名单的 HTTP 媒体候选升级为 HTTPS，再进入同一离屏字节执行器 | 不允许任意 HTTP，不放宽第三方域名，不跳过重定向后的 HTTPS 与主机复验 |
+| 标准详情媒体组件排空（0.8.26） | 普通媒体按 single、Live Photo 按 still/motion 直接进入本次持久队列；一次离屏唤醒串行处理最多 12 条 | 不把两种 Live Photo 字节合并，不依赖无关历史队列才能完成本次详情，不改人工媒体窗口 |
+| 采集回执与离屏媒体通道隔离（0.8.27） | 页面采集继续通过 one-shot message 交给 Service Worker；媒体执行改用 `linggan-media-worker-v1` 命名 Port | 离屏文档不再注册通用 onMessage；单 lane 队列失败不阻断后续 lane，人工媒体窗口不变 |
+| 评论图片与讨论回执终态收口（0.8.28） | 标准详情把评论图片作为 `comment.image` 送入统一媒体链；comments/replies 分别保留接纳事实 | 不建立第二媒体资产表，不把回复失败改写成评论失败，不移除人工媒体窗口 |
 
 ## 新旧运行路径对照
 
@@ -57,7 +78,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.5）
+当前路径（0.8.28）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox
@@ -67,7 +88,7 @@ Popup / Dashboard / injected control
 Observation rule -> WorkOrder -> ordered single-capability steps
   -> first signed detail page read -> lease-scoped persistent page cache
   -> each claimed lane -> its own immutable Package -> Receipt
-  -> local media bytes -> local processors -> Evidence Library
+  -> durable media outbox -> offscreen bytes transfer -> local processors -> Evidence Library
 ```
 
 ## 发布前可验证项与未验证项

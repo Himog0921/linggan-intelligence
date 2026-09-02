@@ -48,6 +48,7 @@ function collectionScope(maxTotal = 0) {
 function terminalCollectionStop(stopReason = '') {
   return new Set([
     'risk_control',
+    'manual_pause',
     'manual_stop',
     'comment_collection_failed',
     'target_identity_mismatch',
@@ -82,10 +83,17 @@ export function buildXhsCommentCollectionReceipt({
     || (explicitEmptyState ? 'explicit_empty_state' : 'unknown');
   const identityMatched = targetIdentity === 'matched';
   const identityMismatched = targetIdentity === 'mismatched';
+  // The public count is a page observation, not a quota that forbids returning more facts.
+  // During a long Attempt the page may remain at 594 while 596 stable comment identities are
+  // enumerated.  Reaching or exceeding that observed count completes the all-public target;
+  // the bounded detail window still has to match its requested window exactly.
+  const receivedSatisfiesExpected = expected !== null
+    && (scope === XHS_COMMENT_COLLECTION_SCOPE.ALL_PUBLIC_COMMENTS
+      ? received >= expected
+      : received === expected);
   const complete = identityMatched
     && !terminalCollectionStop(reason)
-    && expected !== null
-    && received === expected;
+    && receivedSatisfiesExpected;
   const state = identityMismatched
     ? XHS_COMMENT_COLLECTION_STATE.INVALID_TARGET
     : (complete ? XHS_COMMENT_COLLECTION_STATE.COMPLETE : XHS_COMMENT_COLLECTION_STATE.PARTIAL);

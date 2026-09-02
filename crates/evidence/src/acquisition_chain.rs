@@ -10,6 +10,7 @@ use crate::station_read::station_daily_note_usage_in;
 use linggan_contracts::{AdmissionFacts, AdmissionOutcome, Capacity, decide_admission};
 use linggan_storage_postgres::Database;
 use serde_json::json;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -40,7 +41,7 @@ pub struct RequestOutcome {
 ///
 /// This is deliberately not a discovery remainder.  Supplying the identities here is the act
 /// that prevents a normal profile scan from silently fanning out into detail/comment/media work.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaterialDeepeningTarget {
     pub content_public_ref: Uuid,
     pub comment_limit: i32,
@@ -119,7 +120,7 @@ pub async fn request_and_admit(
     purpose: &str,
     requested_by: &str,
 ) -> Result<RequestOutcome, AcquisitionChainError> {
-    request_and_admit_inner(database, target_ref, lane, purpose, requested_by, &[]).await
+    request_and_admit_inner(database, target_ref, lane, purpose, requested_by, &[], None).await
 }
 
 /// Admit one exact, person-selected set of existing materials for bounded deepening.
@@ -142,6 +143,60 @@ pub async fn request_and_admit_material_targets(
         purpose,
         requested_by,
         material_targets,
+        None,
+    )
+    .await
+}
+
+/// Admit one frozen material set under the exact authorization already linked to that material.
+///
+/// This is intentionally narrower than ordinary admission: a reobservation may not discover a
+/// second, broader grant for the same target class and use it as an authorization fallback.
+pub async fn request_and_admit_material_targets_under_authorization(
+    database: &Database,
+    target_ref: Uuid,
+    purpose: &str,
+    requested_by: &str,
+    material_targets: &[MaterialDeepeningTarget],
+    authorization_ref: Uuid,
+) -> Result<RequestOutcome, AcquisitionChainError> {
+    validate_material_targets(material_targets)?;
+    request_and_admit_inner(
+        database,
+        target_ref,
+        "deep_archive",
+        purpose,
+        requested_by,
+        material_targets,
+        Some(authorization_ref),
+    )
+    .await
+}
+
+/// The transaction-aware form used when the caller must make admission and the next durable
+/// execution step indivisible.  Reobservation is such an operation: committing a new Work Order
+/// before its Lease exists leaves a window in which another request cannot distinguish a pending
+/// instruction from an executable scope.
+///
+/// The caller owns the surrounding transaction and must have checked the schema before it began.
+/// This keeps the target row lock acquired below through the subsequent lease issue.
+pub(crate) async fn request_and_admit_material_targets_under_authorization_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    purpose: &str,
+    requested_by: &str,
+    material_targets: &[MaterialDeepeningTarget],
+    authorization_ref: Uuid,
+) -> Result<RequestOutcome, AcquisitionChainError> {
+    validate_material_targets(material_targets)?;
+    request_and_admit_in_transaction(
+        transaction,
+        target_ref,
+        "deep_archive",
+        purpose,
+        requested_by,
+        material_targets,
+        Some(authorization_ref),
     )
     .await
 }
@@ -153,18 +208,42 @@ async fn request_and_admit_inner(
     purpose: &str,
     requested_by: &str,
     material_targets: &[MaterialDeepeningTarget],
+    required_authorization_ref: Option<Uuid>,
 ) -> Result<RequestOutcome, AcquisitionChainError> {
     if !acquisition_chain_schema_is_ready(database).await? {
         return Err(AcquisitionChainError::SchemaUnavailable);
     }
     let mut transaction = database.pool().begin().await?;
 
+    let outcome = request_and_admit_in_transaction(
+        &mut transaction,
+        target_ref,
+        lane,
+        purpose,
+        requested_by,
+        material_targets,
+        required_authorization_ref,
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(outcome)
+}
+
+async fn request_and_admit_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    lane: &str,
+    purpose: &str,
+    requested_by: &str,
+    material_targets: &[MaterialDeepeningTarget],
+    required_authorization_ref: Option<Uuid>,
+) -> Result<RequestOutcome, AcquisitionChainError> {
     let target: Option<(String, String, String)> = sqlx::query_as(
         "SELECT platform, target_kind, lifecycle_state \
          FROM collection_observation_target WHERE target_ref = $1 FOR UPDATE",
     )
     .bind(target_ref)
-    .fetch_optional(&mut *transaction)
+    .fetch_optional(&mut **transaction)
     .await?;
     let Some((platform, target_kind, lifecycle_state)) = target else {
         return Err(AcquisitionChainError::UnknownTarget);
@@ -206,18 +285,19 @@ async fn request_and_admit_inner(
     .bind(lane)
     .bind(purpose)
     .bind(requested_by)
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await?;
 
-    ensure_material_targets_belong_to_platform(&mut transaction, &platform, material_targets)
+    ensure_material_targets_belong_to_platform(&mut *transaction, &platform, material_targets)
         .await?;
     let facts = gather_facts(
-        &mut transaction,
+        &mut *transaction,
         &platform,
         &target_kind,
         lane,
         target_ref,
-        !material_targets.is_empty(),
+        material_targets,
+        required_authorization_ref,
     )
     .await?;
     let outcome = decide_admission(&facts);
@@ -225,6 +305,10 @@ async fn request_and_admit_inner(
     let decision_ref = Uuid::new_v4();
     let authorization_ref = match &outcome {
         AdmissionOutcome::Admitted { authorization_ref } => Uuid::parse_str(authorization_ref).ok(),
+        // A merge points at an existing Work Order rather than creating a new authorization
+        // decision.  The persisted decision contract therefore requires this field to remain
+        // empty; strict matching is done against that live Work Order's authorization and its
+        // complete frozen material scope before `decide_admission` is called.
         _ => None,
     };
     sqlx::query(
@@ -240,7 +324,7 @@ async fn request_and_admit_inner(
     .bind(reason_code(&outcome))
     .bind(reason_text(&outcome))
     .bind(authorization_ref)
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await?;
 
     let work_order_ref = if outcome.permits_work_order() {
@@ -250,7 +334,7 @@ async fn request_and_admit_inner(
             .station_ref()
             .and_then(|value| Uuid::parse_str(value).ok());
         let work_order_ref = write_work_order(
-            &mut transaction,
+            &mut *transaction,
             decision_ref,
             target_ref,
             lane,
@@ -259,13 +343,12 @@ async fn request_and_admit_inner(
             requested_by,
         )
         .await?;
-        write_material_targets(&mut transaction, work_order_ref, material_targets).await?;
+        write_material_targets(&mut *transaction, work_order_ref, material_targets).await?;
         Some(work_order_ref)
     } else {
         None
     };
 
-    transaction.commit().await?;
     Ok(RequestOutcome {
         request_ref,
         decision_ref,
@@ -350,17 +433,20 @@ async fn gather_facts(
     target_kind: &str,
     lane: &str,
     target_ref: Uuid,
-    material_deepening: bool,
+    material_targets: &[MaterialDeepeningTarget],
+    required_authorization_ref: Option<Uuid>,
 ) -> Result<AdmissionFacts, sqlx::Error> {
     let authorization_ref: Option<Uuid> = sqlx::query_scalar(
         "SELECT authorization_ref FROM collection_acquisition_authorization \
          WHERE platform = $1 AND target_kind = $2 AND lane = $3 \
            AND revoked_at IS NULL AND expires_at > scope_001_now() \
+           AND ($4::uuid IS NULL OR authorization_ref=$4) \
          ORDER BY expires_at DESC LIMIT 1",
     )
     .bind(platform)
     .bind(target_kind)
     .bind(lane)
+    .bind(required_authorization_ref)
     .fetch_optional(&mut **transaction)
     .await?;
 
@@ -369,17 +455,47 @@ async fn gather_facts(
     //
     // 此前的判据是「存在一行工单」——而工单从不结束，于是第一次巡检之后，后续每一次都被
     // 合并掉，巡检永远只跑一次。一个只置位、从不复位的状态，等于把功能永久关掉。
-    let in_flight: bool = sqlx::query_scalar(
-        "SELECT EXISTS ( \
-             SELECT 1 FROM collection_work_order w \
-             JOIN collection_work_order_lease l ON l.work_order_ref = w.work_order_ref \
-             WHERE w.target_ref = $1 AND w.lane = $2 \
-               AND l.released_at IS NULL AND l.expires_at > scope_001_now())",
-    )
-    .bind(target_ref)
-    .bind(lane)
-    .fetch_one(&mut **transaction)
-    .await?;
+    let in_flight: bool = if material_targets.is_empty() {
+        sqlx::query_scalar(
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM collection_work_order w \
+                 JOIN collection_work_order_lease l ON l.work_order_ref = w.work_order_ref \
+                 WHERE w.target_ref = $1 AND w.lane = $2 \
+                   AND l.released_at IS NULL AND l.expires_at > scope_001_now())",
+        )
+        .bind(target_ref)
+        .bind(lane)
+        .fetch_one(&mut **transaction)
+        .await?
+    } else if let Some(authorization_ref) = required_authorization_ref {
+        live_lease_for_exact_material_scope_in_transaction(
+            transaction,
+            target_ref,
+            lane,
+            authorization_ref,
+            material_targets,
+        )
+        .await?
+        .is_some()
+    } else {
+        let content_refs: Vec<Uuid> = material_targets
+            .iter()
+            .map(|target| target.content_public_ref)
+            .collect();
+        sqlx::query_scalar(
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM collection_work_order w \
+                 JOIN collection_work_order_material_target scope ON scope.work_order_ref=w.work_order_ref \
+                 JOIN collection_work_order_lease l ON l.work_order_ref=w.work_order_ref \
+                 WHERE w.target_ref=$1 AND w.lane=$2 AND scope.content_public_ref=ANY($3) \
+                   AND l.released_at IS NULL AND l.expires_at > scope_001_now())",
+        )
+        .bind(target_ref)
+        .bind(lane)
+        .bind(&content_refs)
+        .fetch_one(&mut **transaction)
+        .await?
+    };
 
     let capacity = establish_capacity(
         transaction,
@@ -387,7 +503,7 @@ async fn gather_facts(
         target_kind,
         lane,
         Some(target_ref),
-        material_deepening,
+        material_targets,
     )
     .await?;
 
@@ -400,6 +516,75 @@ async fn gather_facts(
         capacity,
         stop_conditions_expressible: true,
     })
+}
+
+/// Find a currently executable lease only when its frozen authorization and full material policy
+/// are identical to the requested scope.  A shared work ID or a shared content ID is deliberately
+/// insufficient: changing comment/reply bounds or media/OCR/ASR policy changes what execution is
+/// authorized to do.
+pub(crate) async fn live_lease_for_exact_material_scope_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    lane: &str,
+    authorization_ref: Uuid,
+    material_targets: &[MaterialDeepeningTarget],
+) -> Result<Option<Uuid>, sqlx::Error> {
+    let rows: Vec<(Uuid, Uuid, i32, i32, bool, bool, bool)> = sqlx::query_as(
+        "SELECT lease.lease_ref,scope.content_public_ref,scope.comment_limit, \
+                scope.reply_expand_limit,scope.acquire_media,scope.allow_ocr,scope.allow_asr \
+         FROM collection_work_order work_order \
+         JOIN collection_admission_decision decision \
+           ON decision.decision_ref=work_order.decision_ref \
+         JOIN collection_work_order_lease lease \
+           ON lease.work_order_ref=work_order.work_order_ref \
+         JOIN collection_work_order_material_target scope \
+           ON scope.work_order_ref=work_order.work_order_ref \
+         WHERE work_order.target_ref=$1 AND work_order.lane=$2 \
+           AND decision.authorization_ref=$3 \
+           AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
+         ORDER BY lease.lease_ref,scope.ordinal",
+    )
+    .bind(target_ref)
+    .bind(lane)
+    .bind(authorization_ref)
+    .fetch_all(&mut **transaction)
+    .await?;
+
+    let requested = normalized_material_scope(material_targets);
+    let mut candidates: BTreeMap<Uuid, Vec<MaterialDeepeningTarget>> = BTreeMap::new();
+    for (
+        lease_ref,
+        content_public_ref,
+        comment_limit,
+        reply_expand_limit,
+        acquire_media,
+        allow_ocr,
+        allow_asr,
+    ) in rows
+    {
+        candidates
+            .entry(lease_ref)
+            .or_default()
+            .push(MaterialDeepeningTarget {
+                content_public_ref,
+                comment_limit,
+                reply_expand_limit,
+                acquire_media,
+                allow_ocr,
+                allow_asr,
+            });
+    }
+    Ok(candidates.into_iter().find_map(|(lease_ref, scope)| {
+        (normalized_material_scope(&scope) == requested).then_some(lease_ref)
+    }))
+}
+
+fn normalized_material_scope(
+    material_targets: &[MaterialDeepeningTarget],
+) -> Vec<MaterialDeepeningTarget> {
+    let mut normalized = material_targets.to_vec();
+    normalized.sort_by_key(|target| target.content_public_ref);
+    normalized
 }
 
 /// What each lane actually needs a plugin to be able to do.
@@ -436,7 +621,7 @@ pub async fn read_capacity(
 ) -> Result<Capacity, sqlx::Error> {
     let mut transaction = database.pool().begin().await?;
     let capacity =
-        establish_capacity(&mut transaction, platform, target_kind, lane, None, false).await?;
+        establish_capacity(&mut transaction, platform, target_kind, lane, None, &[]).await?;
     transaction.rollback().await?;
     Ok(capacity)
 }
@@ -452,7 +637,7 @@ async fn establish_capacity(
     target_kind: &str,
     lane: &str,
     target_ref: Option<Uuid>,
-    material_deepening: bool,
+    material_targets: &[MaterialDeepeningTarget],
 ) -> Result<Capacity, sqlx::Error> {
     // 风险暂停优先：正在停的时候，工位是否充足并不重要。
     let pause: Option<String> = sqlx::query_scalar(
@@ -501,10 +686,17 @@ async fn establish_capacity(
         return Ok(Capacity::NoStaffedStation);
     }
 
-    let required = if material_deepening {
-        &["content_detail", "media_slots", "comments", "replies"][..]
+    let required = if !material_targets.is_empty() {
+        // The selected scope is the authority boundary. A normal reobservation that expressly
+        // says `acquire_media=false` must not be deferred merely because the station lacks a
+        // capability that its Work Order will never request.
+        let mut required = vec!["content_detail", "comments", "replies"];
+        if material_targets.iter().any(|target| target.acquire_media) {
+            required.push("media_slots");
+        }
+        required
     } else {
-        required_capabilities(target_kind, lane)
+        required_capabilities(target_kind, lane).to_vec()
     };
     let mut missing_for_all: Option<Vec<String>> = None;
     let mut quota_blocked: Option<(i32, i32)> = None;

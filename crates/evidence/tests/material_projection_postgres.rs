@@ -3,7 +3,7 @@ mod fixture;
 
 use fixture::{coverage_layer, proof_database, submit_custom_package, submit_package};
 use linggan_contracts::EvidenceQuery;
-use linggan_evidence::read_work_resources;
+use linggan_evidence::{admit_media_blob, read_work_resource, read_work_resources};
 use sqlx::Row;
 
 #[tokio::test]
@@ -31,7 +31,6 @@ async fn content_detail_submission_forms_a_typed_material_with_field_sources_and
         }),
     )
     .await;
-
     let row = sqlx::query(
         "SELECT title, title_state, body_text, body_state, creator_display_name_state, \
                 published_at::text AS published_at,published_at_source_field, \
@@ -110,6 +109,375 @@ async fn content_detail_submission_forms_a_typed_material_with_field_sources_and
         detail_count, 1,
         "mismatched source identity is not projected"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn newer_partial_detail_keeps_prior_known_fields_and_current_metrics_are_field_wise() {
+    let database = proof_database("material_field_wise_current").await;
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT timestamptz '2026-08-30T10:00:00Z' $$",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let first_package = submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"note-field-wise-current"}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-field-wise-current"},
+            "payload":{
+                "title":"首次已知标题","bodyText":"首次已知正文","authorId":"author-field-wise","authorName":"首次作者",
+                "likes":10,"comments":20,"collects":3,"shares":1,
+                "publishedAt":1713501296000_i64,"publishedAtText":"1713501296",
+                "publishedAtSourceField":"publishTime","publishedAtSourceKind":"platform_epoch",
+                "publishedAtPrecision":"second","publishedAtParserVersion":"xhs-detail-time-v2"
+            }
+        }),
+    )
+    .await;
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT timestamptz '2026-08-30T11:00:00Z' $$",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"note-field-wise-current"}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-field-wise-current"},
+            "payload":{"likes":12}
+        }),
+    )
+    .await;
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT timestamptz '2026-08-30T12:00:00Z' $$",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"note-field-wise-current"}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-field-wise-current"},
+            "payload":{"comments":24}
+        }),
+    )
+    .await;
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"note-field-wise-current"}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-field-wise-current"},
+            "payload":{
+                "publishedAt":1787283600000_i64,"publishedAtText":"3小时前",
+                "publishedAtSourceField":"time","publishedAtSourceKind":"visible_text",
+                "publishedAtPrecision":"relative","publishedAtReferenceObservedAt":"2026-08-30T12:00:00Z",
+                "publishedAtParserVersion":"xhs-detail-time-v2"
+            }
+        }),
+    )
+    .await;
+
+    let content_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id='note-field-wise-current'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let material = read_work_resource(&database, content_ref)
+        .await
+        .unwrap()
+        .expect("the append-only versions project as one stable work");
+    assert_eq!(material.display.title.as_deref(), Some("首次已知标题"));
+    assert_eq!(
+        material.display.creator_display_name.as_deref(),
+        Some("首次作者")
+    );
+    assert!(material.display.published_at.is_some());
+    assert_eq!(material.display.engagement.like_count, Some(12));
+    assert_eq!(material.display.engagement.comment_count, Some(24));
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/detailCurrent/title/source/packageRef"),
+        Some(&serde_json::json!(first_package)),
+        "the preserved title remains traceable to its own earlier package"
+    );
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/engagementCurrent/metrics/likeCount/current/value"),
+        Some(&serde_json::json!(12)),
+    );
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/engagementCurrent/metrics/likeCount/previous/value"),
+        Some(&serde_json::json!(10)),
+    );
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/engagementCurrent/metrics/likeCount/delta"),
+        Some(&serde_json::json!(2)),
+    );
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/detailCurrent/publishedAt/state"),
+        Some(&serde_json::json!("KNOWN")),
+        "a newer relative source text must not downgrade an earlier qualified platform epoch"
+    );
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/detailCurrent/publishedAt/source/packageRef"),
+        Some(&serde_json::json!(first_package)),
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn engagement_current_uses_full_history_not_the_bounded_timeline_window() {
+    let database = proof_database("material_engagement_current_long_history").await;
+    let content_external_id = "note-long-engagement-history";
+    for likes in 1_i64..=101 {
+        submit_package(
+            &database,
+            "content_detail",
+            serde_json::json!({"contentExternalId":content_external_id}),
+            serde_json::json!({
+                "kind":"content_detail",
+                "sourceObject":{"platform":"xhs","type":"content","externalId":content_external_id},
+                "payload":{"likes":likes}
+            }),
+        )
+        .await;
+    }
+    let content_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let material = read_work_resource(&database, content_ref)
+        .await
+        .unwrap()
+        .expect("one stable work survives more than 100 observations");
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/engagementTimeline")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(100),
+        "the historical presentation remains bounded from its newest edge"
+    );
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/engagementCurrent/metrics/likeCount/current/value"),
+        Some(&serde_json::json!(101)),
+    );
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/engagementCurrent/metrics/likeCount/previous/value"),
+        Some(&serde_json::json!(100)),
+    );
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/engagementCurrent/metrics/likeCount/delta"),
+        Some(&serde_json::json!(1)),
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn work_resource_uses_one_media_contract_and_selects_a_local_cover_fallback() {
+    let database = proof_database("material_unified_media_resource").await;
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"note-media-resource"}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-media-resource"},
+            "payload":{"title":"统一媒体读模型"}
+        }),
+    )
+    .await;
+    let observation_ref = uuid::Uuid::new_v4();
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-media-resource"}),
+        serde_json::json!({
+            "kind":"media_slot",
+            "slotKey":"xhs:note-media-resource:image:1",
+            "slot":{"role":"image","ordinal":1},
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-media-resource"},
+            "observation":{"externalUri":"https://media.example/body-1.jpg","candidateUris":["https://media.example/body-1.jpg"]},
+            "observationRef":observation_ref
+        }),
+    )
+    .await;
+    admit_media_blob(
+        &database,
+        observation_ref,
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "image/jpeg",
+        4,
+        "blobs/aa/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    )
+    .await
+    .expect("body image materializes through the existing asset chain");
+
+    let query: EvidenceQuery = serde_json::from_value(serde_json::json!({
+        "scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"
+    }))
+    .expect("shared query validates");
+    let page = read_work_resources(&database, &query)
+        .await
+        .expect("work resource projects one media contract");
+    let media = &page.items[0].media;
+    assert_eq!(
+        media
+            .pointer("/contractVersion")
+            .and_then(serde_json::Value::as_str),
+        Some("linggan.media-resource.v1")
+    );
+    assert_eq!(
+        media
+            .pointer("/cover/selectedBy")
+            .and_then(serde_json::Value::as_str),
+        Some("first_body_image")
+    );
+    assert_eq!(
+        media
+            .pointer("/cover/fallbackUsed")
+            .and_then(serde_json::Value::as_bool),
+        Some(true)
+    );
+    assert!(
+        media
+            .pointer("/cover/localAssetUrl")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| value.starts_with("/api/local/media/"))
+    );
+    assert_eq!(
+        media
+            .pointer("/images/0/relationship")
+            .and_then(serde_json::Value::as_str),
+        Some("content.image")
+    );
+    assert_eq!(
+        media
+            .pointer("/avatar/state")
+            .and_then(serde_json::Value::as_str),
+        Some("NOT_OBSERVED")
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn author_avatar_uses_the_media_chain_and_projects_beside_content_media() {
+    let database = proof_database("material_author_avatar_resource").await;
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"note-author-avatar"}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-author-avatar"},
+            "payload":{"title":"头像与作品媒体同链","authorId":"author-avatar-1","authorName":"作品作者"}
+        }),
+    )
+    .await;
+    let avatar_observation_ref = uuid::Uuid::new_v4();
+    submit_package(
+        &database,
+        "media_slots",
+        serde_json::json!({"contentExternalId":"note-author-avatar"}),
+        serde_json::json!({
+            "kind":"media_slot",
+            "slotKey":"xhs:author:author-avatar-1:avatar:1",
+            "slot":{"role":"avatar","ordinal":1},
+            "sourceObject":{"platform":"xhs","type":"author","externalId":"author-avatar-1"},
+            "contextContentExternalId":"note-author-avatar",
+            "observation":{"externalUri":"https://media.example/avatar.jpg","candidateUris":["https://media.example/avatar.jpg"]},
+            "observationRef":avatar_observation_ref
+        }),
+    )
+    .await;
+    admit_media_blob(
+        &database,
+        avatar_observation_ref,
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "image/jpeg",
+        4,
+        "blobs/bb/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    )
+    .await
+    .expect("author avatar materializes through the existing asset chain");
+    let avatar_processing_jobs: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_media_processing_job WHERE slot_key='xhs:author:author-avatar-1:avatar:1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("avatar processing queue is readable");
+    assert_eq!(
+        avatar_processing_jobs, 0,
+        "identity avatars do not enter OCR or ASR processing"
+    );
+
+    let query: EvidenceQuery = serde_json::from_value(serde_json::json!({
+        "scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"
+    }))
+    .expect("shared query validates");
+    let page = read_work_resources(&database, &query)
+        .await
+        .expect("work resource projects the author avatar");
+    let avatar = page.items[0]
+        .media
+        .pointer("/avatar")
+        .expect("avatar is part of the unified resource");
+    assert_eq!(
+        avatar
+            .get("relationship")
+            .and_then(serde_json::Value::as_str),
+        Some("author.avatar")
+    );
+    assert_eq!(
+        avatar.get("state").and_then(serde_json::Value::as_str),
+        Some("ACQUIRED")
+    );
+    assert!(
+        avatar
+            .get("localAssetUrl")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| value.starts_with("/api/local/media/"))
+    );
+    let relation: (String, String) = sqlx::query_as(
+        "SELECT subject_kind,relationship_kind FROM linggan_media_resource_relation WHERE slot_key='xhs:author:author-avatar-1:avatar:1'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("one authoritative author-avatar relation exists");
+    assert_eq!(relation, ("author".to_owned(), "author.avatar".to_owned()));
 }
 
 #[tokio::test]

@@ -3,7 +3,7 @@
 > 状态: 权威当前
 > 最后核对: 2026-08-25
 > 适用范围: `LOCAL-001 / 001C-0` 的 Rust 合同、后续 001B 读投影与 001C-1 小红书 discovery ingress 的共同边界
-> 事实来源: Mog 的 2026-08-25 明确确认、Issue #31、[LOCAL-001 活跃计划](../plans/active/local-001-local-product-evidence-library.md)、`AGENTS.md` 与 `domain-invariants.md`
+> 事实来源: Mog 的 2026-08-25 明确确认、Issue #31、[LOCAL-001 已完成计划](../plans/completed/local-001-local-product-evidence-library.md)、`AGENTS.md` 与 `domain-invariants.md`
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、真实运行/代码/合同、ACCEPTED 决定；本合同不授予真实平台访问或媒体取得
 
 ## 1. 这张卡固定的边界

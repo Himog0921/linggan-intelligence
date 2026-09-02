@@ -9,10 +9,70 @@ use sqlx::Row;
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn runtime_and_material_readiness_require_the_comment_current_projection_migration() {
+async fn runtime_and_material_readiness_require_both_current_projection_migrations() {
     let database = proof_database("comment_projection_readiness_gate").await;
     assert!(producer_runtime_schema_is_ready(&database).await.unwrap());
     assert!(work_resource_schema_is_ready(&database).await.unwrap());
+
+    sqlx::query(
+        "DELETE FROM linggan_local_schema_migration \
+         WHERE migration_id = '0030_comment_image_media'",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    assert!(!producer_runtime_schema_is_ready(&database).await.unwrap());
+    assert!(!work_resource_schema_is_ready(&database).await.unwrap());
+
+    sqlx::query(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) \
+         VALUES ('0030_comment_image_media', \
+                 '6f3913dca8ca9bb0cb025dea76cfe2222a39407c4a17898b438d20b355fa2c81')",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "DELETE FROM linggan_local_schema_migration \
+         WHERE migration_id = '0027_unified_media_resource'",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    assert!(!producer_runtime_schema_is_ready(&database).await.unwrap());
+    assert!(!work_resource_schema_is_ready(&database).await.unwrap());
+
+    sqlx::query(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) \
+         VALUES ('0027_unified_media_resource', \
+                 '70f09bf56fda491665fad0b5c3c534c74da3516fe65ad66416cae140ddee3100')",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    sqlx::query(
+        "DELETE FROM linggan_local_schema_migration \
+         WHERE migration_id = '0026_work_resource_read'",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    assert!(!producer_runtime_schema_is_ready(&database).await.unwrap());
+    assert!(!work_resource_schema_is_ready(&database).await.unwrap());
+
+    sqlx::query(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) \
+         VALUES ('0026_work_resource_read', \
+                 '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd')",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
 
     sqlx::query(
         "DELETE FROM linggan_local_schema_migration \
@@ -224,6 +284,175 @@ async fn retrying_a_note_keeps_attempt_history_but_current_comments_are_idempote
         material.inspector["commentsReceipt"]["total"],
         serde_json::json!(1),
         "a later Attempt accepted after as-of must not hide the earlier stable comment"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn comment_coverage_history_keeps_detail_window_and_independent_runs_separate() {
+    let database = proof_database("material_comment_coverage_history").await;
+    let content_external_id = "note-coverage-history";
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":content_external_id}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":content_external_id},
+            "payload":{"title":"覆盖历史作品"}
+        }),
+    )
+    .await;
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT timestamptz '2026-08-30T10:00:00Z' $$",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let detail_window_target = serde_json::json!({
+        "basis":"known_set","contentExternalId":content_external_id,
+        "commentCollection":{
+            "version":1,"noteId":content_external_id,"scope":"detail_window","requestedLimit":30,
+            "pageCommentCount":80,"expectedCount":30,"uniqueCollectedCount":30,"state":"complete",
+            "analysisUsability":"usable","targetIdentity":"matched","stopReason":"target_reached"
+        }
+    });
+    submit_custom_package(
+        &database,
+        "xhs",
+        &["comments"],
+        serde_json::json!({"contentExternalId":content_external_id}),
+        "comments",
+        "xhs",
+        serde_json::json!({"target":detail_window_target,"layers":[coverage_layer("comments",30)]}),
+        Vec::new(),
+    )
+    .await;
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT timestamptz '2026-08-30T11:00:00Z' $$",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let independent_target = serde_json::json!({
+        "basis":"known_set","contentExternalId":content_external_id,
+        "commentCollection":{
+            "version":1,"noteId":content_external_id,"scope":"all_public_comments",
+            "pageCommentCount":70,"expectedCount":70,"uniqueCollectedCount":70,"state":"complete",
+            "analysisUsability":"usable","targetIdentity":"matched","stopReason":"comment_area_end"
+        }
+    });
+    submit_custom_package(
+        &database,
+        "xhs",
+        &["comments"],
+        serde_json::json!({"contentExternalId":content_external_id}),
+        "comments",
+        "xhs",
+        serde_json::json!({"target":independent_target,"layers":[coverage_layer("comments",70)]}),
+        Vec::new(),
+    )
+    .await;
+
+    let content_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let material = read_work_resource(&database, content_ref)
+        .await
+        .unwrap()
+        .expect("the stable work keeps both accepted comment observations");
+    let history = material
+        .inspector
+        .get("commentsCoverageHistory")
+        .and_then(serde_json::Value::as_array)
+        .expect("coverage history is an attempt-level array");
+    assert_eq!(history.len(), 2);
+    assert_eq!(history[0]["collectionScope"], "all_public_comments");
+    assert_eq!(history[0]["pageCommentCount"], 70);
+    assert_eq!(history[0]["uniqueCollectedCount"], 70);
+    assert_eq!(history[1]["collectionScope"], "detail_window");
+    assert_eq!(history[1]["requestedLimit"], 30);
+    assert_eq!(history[1]["pageCommentCount"], 80);
+    assert_eq!(history[1]["uniqueCollectedCount"], 30);
+    assert_eq!(
+        material.inspector["commentsCoverage"]["uniqueCollectedCount"], 70,
+        "the current lane is the newest independent receipt, not a 30+70 aggregate"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn coverage_history_never_lets_many_comments_hide_a_reply_lane() {
+    let database = proof_database("material_coverage_history_per_lane").await;
+    let content_external_id = "note-coverage-history-per-lane";
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":content_external_id}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":content_external_id},
+            "payload":{"title":"每 lane 历史"}
+        }),
+    )
+    .await;
+    for _ in 0..201 {
+        let target = serde_json::json!({"contentExternalId":content_external_id});
+        submit_custom_package(
+            &database,
+            "xhs",
+            &["comments"],
+            target.clone(),
+            "comments",
+            "xhs",
+            serde_json::json!({"target":target,"layers":[coverage_layer("comments",0)]}),
+            Vec::new(),
+        )
+        .await;
+    }
+    let target = serde_json::json!({"contentExternalId":content_external_id});
+    submit_custom_package(
+        &database,
+        "xhs",
+        &["replies"],
+        target.clone(),
+        "replies",
+        "xhs",
+        serde_json::json!({"target":target,"layers":[coverage_layer("replies",0)]}),
+        Vec::new(),
+    )
+    .await;
+    let content_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let material = read_work_resource(&database, content_ref)
+        .await
+        .unwrap()
+        .expect("the stable work has both social histories");
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/commentsCoverageHistory")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(201),
+    );
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/repliesCoverageHistory")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(1),
+        "a comment-heavy history must not be presented as no replies history"
     );
 }
 

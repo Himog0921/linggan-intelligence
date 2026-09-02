@@ -5,7 +5,9 @@ import { buildXhsDetailCaptureReceipt, normalizeXhsDetailCommentLimit } from './
 import { collectNote } from './noteCollector.js';
 
 function deliveryState(deliveries = []) {
-  const states = deliveries.map((value) => String(value?.delivery || value || '')).filter(Boolean);
+  const states = deliveries
+    .map((value) => String(value?.delivery || value || ''))
+    .filter((value) => value && value !== 'not_applicable');
   if (states.length > 0 && states.every((state) => state === 'acknowledged')) return 'acknowledged';
   if (states.some((state) => state === 'rejected' || state === 'terminal')) return 'partial_delivery_failure';
   return 'pending';
@@ -22,20 +24,44 @@ export function aggregateCommentAndReplyDelivery(commentDelivery = {}) {
   return 'pending';
 }
 
+export function separateCommentAndReplyDelivery(commentDelivery = {}) {
+  return {
+    comments: String(commentDelivery?.delivery || 'unknown'),
+    replies: String(commentDelivery?.replies?.delivery || 'not_applicable'),
+  };
+}
+
 function detailDeliveryMessage(lanes = {}) {
   const laneSummary = [
     ['content', '笔记详情'],
     ['mediaSlots', '媒体观察'],
-    ['comments', '评论与回复'],
+    ['comments', '评论'],
+    ['replies', '回复'],
   ].map(([key, label]) => {
     const value = String(lanes[key] || 'unknown');
     const status = value === 'acknowledged'
       ? '已接纳'
-      : (value === 'pending' || value === 'queued' ? '待本机交付' : (value === 'rejected' || value === 'terminal' ? '未接纳' : '状态未知'));
+      : (value === 'pending' || value === 'queued'
+        ? '待本机交付'
+        : (value === 'rejected' || value === 'terminal'
+          ? '未接纳'
+          : (value === 'not_applicable' ? '本次无记录' : '状态未知')));
     return `${label}：${status}`;
   }).join('；');
 
   return `Linggan 接纳回执：${laneSummary}`;
+}
+
+export async function attemptDetailLaneDelivery(lane, deliver) {
+  try {
+    return await deliver();
+  } catch (error) {
+    return {
+      delivery: 'rejected',
+      code: `${lane}_queue_failed`,
+      message: String(error?.message || error || `${lane}_queue_failed`),
+    };
+  }
 }
 
 // This composes one user-visible collection intent. Delivery still uses the established
@@ -103,28 +129,37 @@ export async function collectXhsNoteDetailPackage(wd = window, options = {}) {
 
   if (options.deferLingganDelivery !== true) {
     if (!scheduledCapability || scheduledCapability === 'content_detail') {
-      note.lingganDelivery = await emitCollectorReceipt('contentDetail', note, { platform: 'xhs', options });
+      note.lingganDelivery = await attemptDetailLaneDelivery('content_detail', () => (
+        emitCollectorReceipt('contentDetail', note, { platform: 'xhs', options })
+      ));
     }
     if (!scheduledCapability || scheduledCapability === 'media_slots') {
-      note.lingganMediaDelivery = await emitCollectorReceipt('mediaSlots', note, { platform: 'xhs', options });
+      note.lingganMediaDelivery = await attemptDetailLaneDelivery('media_slots', () => (
+        emitCollectorReceipt('mediaSlots', note, {
+          platform: 'xhs',
+          options: { ...options, commentRecords: commentResult.comments },
+        })
+      ));
     }
     if (!scheduledCapability) {
-      commentResult.lingganDelivery = await emitCollectorReceipt('comments', commentResult, {
+      commentResult.lingganDelivery = await attemptDetailLaneDelivery('comments', () => emitCollectorReceipt('comments', commentResult, {
         platform: 'xhs',
         noteId: note.noteId,
         options: { maxTotal: commentLimit, maxSubComments: options.maxSubComments, commentDepthMode: options.commentDepthMode },
-      });
+      }));
     }
-    const commentAndReplyDelivery = aggregateCommentAndReplyDelivery(commentResult.lingganDelivery);
+    const discussionDelivery = separateCommentAndReplyDelivery(commentResult.lingganDelivery);
     const state = deliveryState([
       note.lingganDelivery,
       note.lingganMediaDelivery,
-      commentAndReplyDelivery,
+      discussionDelivery.comments,
+      discussionDelivery.replies,
     ]);
     const lanes = {
       content: note.lingganDelivery?.delivery || 'unknown',
       mediaSlots: note.lingganMediaDelivery?.delivery || 'unknown',
-      comments: commentAndReplyDelivery,
+      comments: discussionDelivery.comments,
+      replies: discussionDelivery.replies,
     };
     note.lingganDetailPackageDelivery = {
       state,

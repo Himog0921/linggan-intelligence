@@ -197,7 +197,10 @@ migrate() {
   apply_migration_once "0024_media_processing_runtime" "$project_root/database/migrations/0024_media_processing_runtime.sql"
   apply_migration_once "0025_comment_current_projection" "$project_root/database/migrations/0025_comment_current_projection.sql"
   apply_migration_once "0026_work_resource_read" "$project_root/database/migrations/0026_work_resource_read.sql"
-  apply_migration_once "0027_topic_workspace" "$project_root/database/migrations/0027_topic_workspace.sql"
+  apply_migration_once "0027_unified_media_resource" "$project_root/database/migrations/0027_unified_media_resource.sql"
+  apply_migration_once "0029_author_avatar_media" "$project_root/database/migrations/0029_author_avatar_media.sql"
+  apply_migration_once "0030_comment_image_media" "$project_root/database/migrations/0030_comment_image_media.sql"
+  apply_migration_once "0031_topic_workspace" "$project_root/database/migrations/0031_topic_workspace.sql"
 }
 
 case "$command_name" in
@@ -227,13 +230,15 @@ case "$command_name" in
     scheduler_pid=$!
     "$project_root/target/debug/linggan-media-worker" &
     media_worker_pid=$!
+    "$project_root/target/debug/linggan-api" &
+    api_pid=$!
     cleanup_runtime_children() {
-      kill "$scheduler_pid" "$media_worker_pid" 2>/dev/null || true
-      wait "$scheduler_pid" "$media_worker_pid" 2>/dev/null || true
+      kill "$scheduler_pid" "$media_worker_pid" "$api_pid" 2>/dev/null || true
+      wait "$scheduler_pid" "$media_worker_pid" "$api_pid" 2>/dev/null || true
     }
     trap cleanup_runtime_children EXIT
     trap 'exit 143' INT TERM
-    "$project_root/target/debug/linggan-api"
+    wait "$api_pid"
     ;;
   *)
     usage

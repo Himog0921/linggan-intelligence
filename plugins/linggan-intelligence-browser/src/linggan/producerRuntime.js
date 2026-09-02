@@ -136,7 +136,9 @@ export function packageContentDetail({ platform, note, observedAt, capturedAt } 
   });
 }
 
-export function packageComments({ platform, result, noteId, observedAt, capturedAt } = {}) {
+export function packageComments({
+  platform, result, noteId, observedAt, capturedAt, taskTarget = {},
+} = {}) {
   const collection = normalizedCommentCollectionReceipt(result, noteId);
   const comments = collection?.analysisUsability === 'not_usable'
     ? []
@@ -147,6 +149,7 @@ export function packageComments({ platform, result, noteId, observedAt, captured
     observedAt,
     capturedAt,
     target: {
+      ...taskTarget,
       basis: 'known_set',
       contentExternalId: String(noteId || result?.noteId || ''),
       ...(collection ? { commentCollection: collection } : {}),
@@ -163,7 +166,7 @@ export function packageComments({ platform, result, noteId, observedAt, captured
     records: comments.map((comment) => ({
       kind: 'comment',
       sourceObject: { platform, type: 'content', externalId: String(noteId || result?.noteId || '') },
-      payload: comment,
+      payload: normalizeDiscussionPayload(comment, false),
     })),
   });
 }
@@ -171,7 +174,9 @@ export function packageComments({ platform, result, noteId, observedAt, captured
 // Replies are a distinct producer capability even when the retained page reader returns them
 // in the same array as top-level comments.  This keeps a parent/reply relationship from being
 // silently flattened into a generic comment count or a second Content observation.
-export function packageReplies({ platform, result, noteId, observedAt, capturedAt } = {}) {
+export function packageReplies({
+  platform, result, noteId, observedAt, capturedAt, taskTarget = {},
+} = {}) {
   const collection = normalizedCommentCollectionReceipt(result, noteId);
   const replies = collection?.analysisUsability === 'not_usable'
     ? []
@@ -182,6 +187,7 @@ export function packageReplies({ platform, result, noteId, observedAt, capturedA
     observedAt,
     capturedAt,
     target: {
+      ...taskTarget,
       basis: 'known_set',
       contentExternalId: String(noteId || result?.noteId || ''),
     },
@@ -201,7 +207,7 @@ export function packageReplies({ platform, result, noteId, observedAt, capturedA
     records: replies.map((reply) => ({
       kind: 'reply',
       sourceObject: { platform, type: 'content', externalId: String(noteId || result?.noteId || '') },
-      payload: reply,
+      payload: normalizeDiscussionPayload(reply, true),
     })),
   });
 }
@@ -246,10 +252,11 @@ export function packageAuthorProfile({ platform, author, observedAt, capturedAt 
   });
 }
 
-export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {}) {
-  const sources = collectMediaCandidates(note);
-  const sourceObject = normalizeSourceObject(platform, note);
-  const contentExternalId = sourceObject.externalId;
+export function packageMediaSlots({ platform, note, commentRecords = [], observedAt, capturedAt } = {}) {
+  const sources = collectMediaCandidates(note, commentRecords);
+  const roleOrdinals = new Map();
+  const contentSourceObject = normalizeSourceObject(platform, note);
+  const contentExternalId = contentSourceObject.externalId;
   return createCapturePackage({
     packageKind: PRODUCER_CAPABILITY.MEDIA_SLOTS,
     platform,
@@ -257,11 +264,22 @@ export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {
     capturedAt,
     target: { basis: 'known_set', contentExternalId: String(note?.noteId || note?.id || '') },
     coverage: { observed: sources.length, attempted: 0, acquired: 0, verified: 0, notAttempted: sources.length, unknown: 0, stoppedReason: 'media_acquisition_not_started' },
-    records: sources.map((candidate, ordinal) => {
-      const slotOrdinal = ordinal + 1;
+    records: sources.map((candidate) => {
+      // Ordinal belongs to the relationship purpose, not the mixed collector output. Seven body
+      // images followed by one explicit cover are image:1..7 plus cover:1, never cover:8.
+      const ordinalScope = candidate.subject
+        ? `${candidate.subject.type}:${candidate.subject.externalId}:${candidate.role}`
+        : `content:${contentExternalId}:${candidate.role}`;
+      const slotOrdinal = (roleOrdinals.get(ordinalScope) || 0) + 1;
+      roleOrdinals.set(ordinalScope, slotOrdinal);
       // Slot identity says "this content's nth image/video". A URL is intentionally only an
       // observation; it can change without replacing the slot or a previously acquired blob.
-      const slotKey = `${platform}:${encodeURIComponent(contentExternalId)}:${candidate.role}:${slotOrdinal}`;
+      const sourceObject = candidate.subject ? { platform, ...candidate.subject } : contentSourceObject;
+      const slotKey = candidate.role === 'avatar'
+        ? `${platform}:author:${encodeURIComponent(sourceObject.externalId)}:avatar:${slotOrdinal}`
+        : (candidate.role === 'comment_image'
+          ? `${platform}:comment:${encodeURIComponent(sourceObject.externalId)}:comment_image:${slotOrdinal}`
+          : `${platform}:${encodeURIComponent(contentExternalId)}:${candidate.role}:${slotOrdinal}`);
       return {
         kind: 'media_slot',
         slotKey,
@@ -274,6 +292,9 @@ export function packageMediaSlots({ platform, note, observedAt, capturedAt } = {
           observedAt,
         },
         sourceObject,
+        ...(['avatar', 'comment_image'].includes(candidate.role)
+          ? { contextContentExternalId: contentExternalId }
+          : {}),
       };
     }),
   });
@@ -341,13 +362,46 @@ function normalizeSourceObject(platform, value = {}, type = 'content') {
   return { platform, type, externalId: String(externalId || '') };
 }
 
-function isReplyRecord(value = {}) {
-  return Boolean(
-    String(value?.replyToCommentId || value?.parentCommentId || value?.rootCommentId || '').trim(),
-  );
+function normalizeDiscussionPayload(value = {}, reply = false) {
+  const {
+    rootCommentId: rawRootId,
+    parentCommentId: rawParentId,
+    replyToCommentId: rawReplyToId,
+    ...payload
+  } = value && typeof value === 'object' ? value : {};
+  if (!reply) return payload;
+
+  const rootId = String(rawRootId || '').trim();
+  const parentId = String(rawParentId || '').trim();
+  const replyToId = String(rawReplyToId || '').trim();
+  // The material contract retains one parent identity. Prefer a distinct reply target for a
+  // nested reply; otherwise keep the collector's direct parent. rootCommentId remains the
+  // top-level thread identity and is never inferred from a post-collection record count.
+  const parent = replyToId && replyToId !== rootId
+    ? { replyToCommentId: replyToId }
+    : (parentId ? { parentCommentId: parentId } : (replyToId ? { replyToCommentId: replyToId } : {}));
+  return {
+    ...payload,
+    ...(rootId ? { rootCommentId: rootId } : {}),
+    ...parent,
+  };
 }
 
-function collectMediaCandidates(note = {}) {
+function isReplyRecord(value = {}) {
+  const commentId = String(value?.commentId || value?.id || '').trim();
+  const parentId = String(value?.replyToCommentId || value?.parentCommentId || '').trim();
+  if (parentId) return true;
+
+  const level = Number(value?.level);
+  if (Number.isFinite(level) && level > 1) return true;
+
+  // The live XHS DOM fallback assigns every top-level comment its own identity as
+  // rootCommentId.  Presence alone therefore does not make a record a reply.
+  const rootId = String(value?.rootCommentId || '').trim();
+  return Boolean(rootId && (!commentId || rootId !== commentId));
+}
+
+function collectMediaCandidates(note = {}, commentRecords = []) {
   const output = [];
   const candidateValues = (value) => (typeof value === 'string'
     ? [value]
@@ -359,11 +413,11 @@ function collectMediaCandidates(note = {}) {
     .flatMap((candidate) => Array.isArray(candidate) ? candidate : [candidate])
     .map((candidate) => String(candidate || '').trim())
     .filter(Boolean))];
-  const push = (role, value) => {
+  const push = (role, value, subject = null) => {
     const candidateUris = normalizeUris(candidateValues(value));
     if (!candidateUris.length) return;
     if (role !== 'live_photo') {
-      output.push({ role, url: candidateUris[0], candidateUris });
+      output.push({ role, url: candidateUris[0], candidateUris, ...(subject ? { subject } : {}) });
       return;
     }
     const stillCandidates = normalizeUris(candidateValues(value?.coverUrl || value?.still));
@@ -382,5 +436,21 @@ function collectMediaCandidates(note = {}) {
   if (note.cover || note.coverUrl) push('cover', note.cover || note.coverUrl);
   if (note.video) push('video', note.video);
   asArray(note.livePhotoStreams).forEach((value) => push('live_photo', value));
+  const authorExternalId = String(note.authorId || note.authorPlatformId || '').trim();
+  if (authorExternalId && note.authorAvatar) {
+    push('avatar', note.authorAvatar, {
+      type: 'author',
+      externalId: authorExternalId,
+    });
+  }
+  asArray(commentRecords).forEach((comment) => {
+    const commentExternalId = String(comment?.commentId || comment?.id || '').trim();
+    if (!commentExternalId) return;
+    const imageValues = asArray(comment?.commentImageUrls || comment?.images || comment?.imageList);
+    imageValues.forEach((value) => push('comment_image', value, {
+      type: 'comment',
+      externalId: commentExternalId,
+    }));
+  });
   return output;
 }

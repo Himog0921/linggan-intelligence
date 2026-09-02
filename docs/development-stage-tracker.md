@@ -1,7 +1,7 @@
 # 开发阶段跟踪总表
 
 > 状态: 权威当前
-> 最后核对: 2026-08-25
+> 最后核对: 2026-09-01
 > 适用范围: Linggan Intelligence 从开发基线、合成事实链到真实运行与业务验收的阶段级跟踪
 > 事实来源: `current-state.md`、已确认决定、当前活跃 SCOPE、真实代码/测试/数据库副作用与阶段计划
 > 冲突时以谁为准: `AGENTS.md` 是最高约束；实现状态以可复现代码、测试、数据库副作用和真实运行结果为准；产品含义与授权边界以用户最新确认、ACCEPTED ADR 和当前活跃 SCOPE 为准；本表不替代任务级合同
@@ -29,14 +29,12 @@
 
 ## 当前阶段
 
-> **当前处于 `DEV-02 / SCOPE-001：synthetic fact-kernel technical tracer`，状态为“执行中”；`ARC-001` 同时进行产品与系统架构决策，但不授权代码扩张。**
+> **当前阶段不是一条必须等 `DEV-02` 全部结束后才能观察后续能力的线性闸。并行 LOCAL / PLUGIN 工作已经在本机真实运行中证明 `DEV-03/04` 的一个 XHS 标准详情子范围；但本轮没有重新裁定 `DEV-02 / SCOPE-001` 的正式阶段完成状态，阶段表继续保留其原有“执行中”。其他平台、页面组合、生产部署和业务分析也不随该子范围完成而自动完成。**
 
-- 已完成：项目治理、开发环境、产品/领域/架构基础设计和代码前语义冻结。
-- 已开始：只使用合成/脱敏材料的 `F01` 合同 TDD；已有 Package/Record hash、三类 canonicalization 攻击、RFC 8785 golden、F01 静态 manifest Oracle，以及**在真实 PostgreSQL 16 上通过的 Package atomic ingress**（accepted / 六点事务故障零半写 / replay / conflict / 逐表行数）。
-- 尚未完成：two Records 的独立处理、Observation/Current、loopback API、worker、minimal CLI、`0002` migration、运行角色权限负例和本 tracer 验证门。
-- 已有受限例外：`LOCAL-001A` 已独立合并并证明 loopback Rust host、根入口重定向、一个 `/corpus/evidence` 诚实空态页面和唯一运行时 Token 值源；它不接通 Materials read model、真实数据、数据库、插件/平台、媒体/OCR/ASR、Agent 或部署。
-- 当前硬停止线：F01 完成后停止；除已完成的 `LOCAL-001A` 受限本地入口、Issue #74 的最小匿名化页面探针与 Issue #76 的受控插件源码升级外，F02–F10、真实原文接入、媒体原件、AI Agent crew、Topic/Corpus/Signal、其余 Web 产品能力、生产部署和旧系统迁移均不开始，直到相应 Local/产品 Scope、Issue 和验证门明确开放。#76 不开放真实 Evidence 接入、Canary 或发布。
-- 当前权威执行文件：[`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md)。
+- 已完成：Browser Producer `0.8.28` 已合入 `main@d7e7220`，本机 API/巡检/媒体 worker 与该 exact head 对齐，工位 `1` 已正式认领。
+- 真实最小闭环：一条 XHS 标准详情已通过 `TaskSpec → Attempt → Package → Receipt → Media Materialization → Work Resource → Evidence UI`；详情窗口 `30/30`，6 个逻辑媒体槽位/7 个字节组件已物化。
+- 仍未外推：搜索跨筛选/连续滚动、作者页结构化统计、非空评论图片、普通视频有效音轨/ASR、生产规模和其他平台。
+- 当前权威读取入口：[`current-state.md`](current-state.md)、[`architecture/capture-plugin-architecture.md`](architecture/capture-plugin-architecture.md) 与 [`platforms/xiaohongshu/capture-capability-registry.md`](platforms/xiaohongshu/capture-capability-registry.md)。
 
 ## `ARC-001` 架构收口门
 
@@ -81,8 +79,8 @@
 | `DEV-00` 项目治理与开发底座 | 仓库可被新机器和 Agent 安全接手，环境和文档有唯一入口 | 已完成 | 项目启动 | GOV-001/002、ENV-001 的治理、Issue 跟踪、Rust/PostgreSQL 环境和验证均完成 | [`current-state.md`](current-state.md)、[`plans/completed/`](plans/completed/) | 无当前决策 |
 | `DEV-01` 产品定义与领域不变量基线 | 确定 Linggan 要解决什么、相信什么、能说到哪一步 | 已完成 | 治理底座可用 | DISC-001 与 `USER-DEC-01`–`06` 确认产品内核、领域语言、责任和不变量 | [`product/domain-invariants.md`](product/domain-invariants.md)、[`plans/completed/disc-001-project-foundation-design.md`](plans/completed/disc-001-project-foundation-design.md) | 不代表第一版产品形态、页面数量或完整前端/后端/数据库/插件/媒体/Agent 架构已完成；这些由 ARC-001 收口 |
 | `DEV-02` synthetic fact-kernel technical tracer | 在不接触真实平台数据的情况下，证明 Package → Record → Observation → Current → API/CLI 的最小事实内核可运行、可追溯 | 执行中 | SCOPE-001 已批准；代码门受控开放 | F01 的随机隔离 PostgreSQL atomic ingress、two Records、Observation/Current、loopback API、worker、minimal CLI 和三项主链保护全部通过 | [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 不是用户可见产品切片；完成即 hard stop，F02–F10 不自动继续 |
-| `DEV-03` 真实 producer 事实审计 | 知道插件在真实搜索页、作者页、详情和评论场景究竟能看到什么、缺什么、何时停止 | 受限探针与源码升级执行中 | 完整 DEV-03 仍等待 DEV-02 与对应 Capture/处置合同；Mog 已于 2026-08-26 对 #74 授权最小、只读、无接入页面探针，并对 #76 授权实现其页面事实采集升级 | 完成低风险探查；字段、时间、身份、终态、Coverage、账号差异和风控报告有真实证据；形成受限 Capture Contract | [`plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md`](plans/active/aud-xhs-001-xiaohongshu-capture-probe-refresh.md)、[`plans/active/plugin-xhs-capture-upgrade-001.md`](plans/active/plugin-xhs-capture-upgrade-001.md)、[`architecture/capture-plugin-architecture.md`](architecture/capture-plugin-architecture.md) | #74/#76 不提交或持久化真实材料；#76 的源码测试不使 DEV-03、Canary、平台兼容、发布或接入自动通过 |
-| `DEV-04` 采集控制层与插件 Canary | 有限工位下先复用、去重、准入和拆解任务，插件只安全执行有界 Work Order | 未开始 | DEV-03 真实合同通过；插件升级 SCOPE 和单工位 Canary 获批 | 发现与深采分离；lease/reconcile/claim/renew/submit 链可恢复；部分结果入库且 Coverage 如实；单工位真实 Canary 通过 | [`architecture/capture-plugin-architecture.md`](architecture/capture-plugin-architecture.md) | 插件升级、账号/工位和真实平台访问均需单独授权 |
+| `DEV-03` 真实 producer 事实审计 | 知道插件在真实搜索页、作者页、详情和评论场景究竟能看到什么、缺什么、何时停止 | XHS 详情/评论/媒体子范围已完成；搜索/作者页组合仍部分 | 用户已授权并完成受控真实详情样本 | 当前 XHS 详情字段、30 条窗口、全量评论独立 Attempt、媒体原件与停止/Coverage 有真实证据 | [`platforms/xiaohongshu/capture-capability-registry.md`](platforms/xiaohongshu/capture-capability-registry.md)、[`architecture/capture-plugin-architecture.md`](architecture/capture-plugin-architecture.md) | 搜索跨筛选/连续滚动、作者页结构化统计、非空评论图片仍按登记册单独证明 |
+| `DEV-04` 采集控制层与插件 Canary | 有限工位下先复用、去重、准入和拆解任务，插件只安全执行有界 Work Order | 单工位 XHS 标准详情子范围已完成 | Browser Producer `0.8.28`、工位 1、runtime exact-head 与当次真实授权已对齐 | 分 lane Package/Receipt、标准 30 条窗口、媒体物化和 Work Resource/Evidence UI 单工位真实 Canary 通过 | [`current-state.md`](current-state.md)、[`architecture/capture-plugin-architecture.md`](architecture/capture-plugin-architecture.md) | 该完成只对已授权子范围成立；新平台、账号、工位或扩大真实访问仍须单独授权 |
 | `DEV-05` 真实 Observation 数据底座 | 对具有稳定来源身份的真实 Content/Author/Comment 等建立对象、历史 Observation、Current 和访问边界；身份不足材料保持 unresolved 或受限材料 | 未开始 | DEV-03/04 证明真实合同；按对象分切 SCOPE | 稳定身份对象的正常/失败/迟到/冲突/隐私处置可追溯；身份不足材料不产生 Source Object/Observation；Current 不覆盖历史；查询不把未知变成 0；真实 PostgreSQL 负例通过 | [`architecture/data-architecture.md`](architecture/data-architecture.md)、[`migration/action-plan.md`](migration/action-plan.md) | 禁止用 target、payload、昵称或文本 hash 兜底升级身份；物理模型逐 SCOPE 确认，不得整体迁入旧 schema |
 | `DEV-06` 语义分析与受控 AI Agent | AI 能在固定材料、权限、预算和版本下分类、聚类、找反例并提出候选，不自行制造正式知识或扩采 | 未开始 | DEV-05 有可用真实材料；首个高价值 Agent 场景、材料权限和模型适配器获批 | 确定性分析与 Agent 解释分责；输出有引用/反例/未知；工具逐次授权；候选不自动发布；真实评测证明有用 | [`architecture/agent-architecture.md`](architecture/agent-architecture.md)、[`audits/pi-agent-kernel-upstream-assessment-2026-08-20.md`](audits/pi-agent-kernel-upstream-assessment-2026-08-20.md) | Pi 只是条件性 Adapter 候选；真实原文送第三方模型仍未授权 |
 | `DEV-07` 情报应用工作台 | Mog 能从“今日关注”进入 Topic，查看原声、内容叙事、近期观察、依据/反例并决定下一步 | 未开始 | DEV-05/06 的读取合同和候选资格稳定；首个页面切片获批 | 页面通过同一 API 展示真实状态；Corpus/Topic Map/Radar/Claim/Brief/内容行动不复制第二真相；真实 5–10 分钟任务通过可用性验收 | [`pages/product-interface-architecture.md`](pages/product-interface-architecture.md)、[`product/PRD.md`](product/PRD.md) | 页面名和首切片仍是草案；需按业务优先级逐项授权 |
@@ -158,11 +156,11 @@ Mog 只处理会改变下面任一事项的决定包：
 
 ## 当前未授权或未验证清单
 
-- 未验证真实小红书搜索、作者、详情、评论、账号差异、排序和七天生命周期规律；
-- 未授权真实账号/工位、真实原文或单工位 Canary；Issue #76 仅授权受控插件源码升级，未授权真实交付或发布；
-- 未完成 SCOPE-001 的 PostgreSQL、API、worker、CLI 和 F02–F10；
+- 已验证一条受控小红书标准详情/评论窗口/媒体原件/Evidence UI 链；搜索跨筛选与连续滚动、作者页结构化统计、账号差异和长期生命周期规律仍未完整验证；
+- 工位 `1` 已在当次授权下认领 `0.8.28`；这不授权新账号/工位、新样本或扩大真实交付；
+- `DEV-02 / SCOPE-001` 的正式阶段状态本轮未重新裁定，继续保持“执行中”；既有 PostgreSQL、API、worker、CLI 证明与后续 F02–F10 的完成边界仍按原 SCOPE 和阶段表分别判断；
 - 未实现 Topic、Corpus、Signal、Claim/Brief、语义聚类、AI Agent Runtime 或 Web 工作台；
 - Pi 仅为条件性执行 Adapter 候选，不是已引入的 Agent 内核；
 - 未接通深度评论、私信、咨询、销售、访谈和产品行为等 Outcome 渠道；
-- 未部署新产品，未完成用户/业务验收；
+- 已对齐本机 detached runtime 并完成上述受控样本 UI 验收；这不等于生产部署、全产品用户验收或长期运行验收；
 - 未授权生产部署、旧数据迁移、双写、旧系统关闭或删除。

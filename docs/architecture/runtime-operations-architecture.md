@@ -1,18 +1,31 @@
 # 后台运行、Durable Work、可观测性与安全运维架构
 
-> 状态: 草案
-> 最后核对: 2026-08-20
+> 状态: 代码事实优先
+> 最后核对: 2026-09-01
 > 适用范围: DISC-001 Gate 6 的 API/worker 组合、持久工作、调度、重试/接管、外部副作用、运行可观测性、数据库角色、部署与恢复
-> 事实来源: Gate 3–5 已确认/候选边界、固定 V2 durable worker 参考、`module-architecture.md`、`capture-plugin-architecture.md`、`agent-architecture.md`
+> 事实来源: 当前 Rust/PostgreSQL/LaunchAgent 代码与运行回执、`/health`、`capture-plugin-architecture.md`、已确认 Gate 3–5 边界
 > 冲突时以谁为准: 用户最新确认、ACCEPTED ADR、真实 PostgreSQL 16 并发/故障测试、实际部署与恢复结果；本文状态名和候选参数不是最终物理合同
 
-本文是 [`module-architecture.md`](module-architecture.md) 的运行层渐进披露。它不创建队列表、定时任务、数据库角色、部署配置或监控服务。
+本文是 [`module-architecture.md`](module-architecture.md) 的运行层渐进披露。已实现部分以当前代码与真实运行为准；候选数据库角色、备份/RPO/RTO 和长期可观测方案仍是待独立证明的目标边界。
 
 ## 一句话结论
 
 > **第一阶段用一个 API 进程、一个 worker 进程和一个 PostgreSQL 16 主库构成可恢复模块化单体；业务模块拥有自己的工作语义，通用 runner 只提供领取、租约、围栏、有限重试、接管、停止和运行观测，不建立万能 Workflow 或第二业务状态机。**
 
 当前规模不需要 Kafka、Temporal、Camunda、Redis Queue、Kubernetes 或微服务。若 PostgreSQL durable work 后续出现真实吞吐、隔离或运维瓶颈，再用测量证据决定演进。
+
+## 2026-09-01 本机运行拓扑快照
+
+| 责任 | 当前运行事实 |
+|---|---|
+| 代码快照 | detached runtime `linggan-intelligence-origin-main-d7e7220`，对应 `main@d7e722018f4f4cfa217c9cf5c0cac6fbcdcaacb3` |
+| API | loopback API 从上述快照运行，`/health` 报告 `LINGGAN_BROWSER_PRODUCER_RUNTIME` |
+| 调度/巡检 | 巡检 worker 从同一快照运行，scheduler = `running` |
+| 媒体 | 媒体 worker 从同一快照运行；媒体原件/派生的业务状态不与 worker 进程存活混用 |
+| PostgreSQL | `PLUGIN_RUNTIME_002_SCHEMA_READY / READY`，additive `0030` 已进入当前 readiness 门 |
+| Browser Producer | 工位 `1` 已正式认领 `0.8.28`；插件通过服务端批准的 TaskSpec/Attempt 执行，不是调度或分析权威 |
+
+该快照证明当前本机 loopback 运行链与一次受控真实标准详情可以通过，不等于多工位、生产环境、备份恢复、长期稳定性或所有平台/lane 已验收。
 
 ## 三种不同的“工作”
 

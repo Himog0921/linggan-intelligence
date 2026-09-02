@@ -11,6 +11,8 @@
   const REQUEST_SOURCE = 'lgboom-xhs-content';
   const SNAPSHOT_REQUEST_TYPE = '__lgboom_xhs_comment_api_request__';
   const SNAPSHOT_RESPONSE_TYPE = '__lgboom_xhs_comment_api_response__';
+  const SNAPSHOT_RESET_REQUEST_TYPE = '__lgboom_xhs_comment_api_reset_request__';
+  const SNAPSHOT_RESET_RESPONSE_TYPE = '__lgboom_xhs_comment_api_reset_response__';
   const PROFILE_NOTES_REQUEST_TYPE = '__lgboom_xhs_profile_notes_request__';
   const PROFILE_NOTES_RESPONSE_TYPE = '__lgboom_xhs_profile_notes_response__';
   const SEARCH_NOTES_REQUEST_TYPE = '__lgboom_xhs_search_notes_request__';
@@ -399,6 +401,22 @@
           noteId,
           pages,
           subPages,
+        });
+        return;
+      }
+
+      if (data.type === SNAPSHOT_RESET_REQUEST_TYPE) {
+        const requestId = normalizeText(data.payload?.requestId);
+        const noteId = normalizeText(data.payload?.noteId);
+        delete window.__lgboom_xhs_comment_pages[noteId];
+        Object.keys(window.__lgboom_xhs_sub_comment_pages || {})
+          .filter((key) => key.startsWith(`${noteId}::`))
+          .forEach((key) => { delete window.__lgboom_xhs_sub_comment_pages[key]; });
+        respond(SNAPSHOT_RESET_RESPONSE_TYPE, {
+          requestId,
+          ok: true,
+          noteId,
+          reset: true,
         });
         return;
       }

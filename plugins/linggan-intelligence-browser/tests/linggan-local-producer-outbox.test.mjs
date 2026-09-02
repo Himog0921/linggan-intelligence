@@ -48,6 +48,47 @@ test('outbox preserves one submission across an in-flight timeout and acknowledg
   await database.delete();
 });
 
+test('outbox reuses one envelope for the same detail-session lane idempotency key', async () => {
+  const database = new Dexie(`linggan-idempotency-${crypto.randomUUID()}`);
+  database.version(3).stores({
+    submissions: '&submissionId, &idempotencyKey, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]',
+  });
+  const outbox = createLocalProducerOutbox(database.submissions, () => 100);
+  const base = {
+    producerInstanceId: '22222222-2222-4222-8222-222222222222',
+    taskId: '11111111-1111-4111-8111-111111111111',
+    attemptId: '33333333-3333-4333-8333-333333333333',
+    idempotencyKey: 'detail-session:11111111-1111-4111-8111-111111111111:content_detail',
+  };
+  const first = await outbox.enqueue({ ...base, submissionId: '44444444-4444-4444-8444-444444444444' });
+  const replay = await outbox.enqueue({ ...base, submissionId: '55555555-5555-4555-8555-555555555555' });
+  assert.equal(replay.submissionId, first.submissionId);
+  assert.equal(await database.submissions.count(), 1);
+  await database.delete();
+});
+
+test('outbox resolves concurrent detail-session enqueues to the one committed envelope', async () => {
+  const database = new Dexie(`linggan-idempotency-race-${crypto.randomUUID()}`);
+  database.version(3).stores({
+    submissions: '&submissionId, &idempotencyKey, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]',
+  });
+  const outbox = createLocalProducerOutbox(database.submissions, () => 100);
+  const base = {
+    producerInstanceId: '22222222-2222-4222-8222-222222222222',
+    taskId: '11111111-1111-4111-8111-111111111111',
+    attemptId: '33333333-3333-4333-8333-333333333333',
+    idempotencyKey: 'detail-session:11111111-1111-4111-8111-111111111111:comments',
+  };
+  const [left, right] = await Promise.all([
+    outbox.enqueue({ ...base, submissionId: '44444444-4444-4444-8444-444444444444' }),
+    outbox.enqueue({ ...base, submissionId: '55555555-5555-4555-8555-555555555555' }),
+  ]);
+
+  assert.equal(right.submissionId, left.submissionId);
+  assert.equal(await database.submissions.count(), 1);
+  await database.delete();
+});
+
 test('media outbox restores an interrupted local upload without losing its independent lane', async () => {
   const database = new Dexie(`linggan-media-test-${crypto.randomUUID()}`);
   database.version(1).stores({ mediaUploads: '&uploadId, slotSubmissionId, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]' });
@@ -73,7 +114,7 @@ test('media outbox stops a local-only delivery after three failed attempts', asy
   const outbox = createLocalMediaOutbox(database.mediaUploads, () => 100);
   await outbox.enqueue({
     uploadId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd',
-    serverWorkRef: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
+    slotSubmissionId: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee',
     mediaObservationRef: 'ffffffff-ffff-4fff-8fff-ffffffffffff',
     candidateUris: ['https://sns-img-hw.xhscdn.com/cover.jpg'],
   });
@@ -83,5 +124,35 @@ test('media outbox stops a local-only delivery after three failed attempts', asy
   const row = await outbox.get('dddddddd-dddd-4ddd-8ddd-dddddddddddd');
   assert.equal(row.status, 'terminal');
   assert.equal(row.attempts, 3);
+  await database.delete();
+});
+
+test('media outbox priority reads only validated rows whose retry time is due', async () => {
+  const database = new Dexie(`linggan-media-priority-${crypto.randomUUID()}`);
+  database.version(1).stores({ mediaUploads: '&uploadId, slotSubmissionId, status, nextAttemptAt, createdAt, [status+nextAttemptAt+createdAt]' });
+  let timestamp = 100;
+  const outbox = createLocalMediaOutbox(database.mediaUploads, () => timestamp);
+  const upload = {
+    uploadId: '11111111-1111-4111-8111-111111111111:2',
+    serverWorkRef: '11111111-1111-4111-8111-111111111111',
+    claimGeneration: 2,
+    installKey: '22222222-2222-4222-8222-222222222222',
+    mediaObservationRef: '33333333-3333-4333-8333-333333333333',
+    candidateUris: ['https://sns-img-hw.xhscdn.com/cover.jpg'],
+  };
+  await outbox.enqueue(upload);
+  assert.equal((await outbox.dueById(upload.uploadId))?.uploadId, upload.uploadId);
+  await database.mediaUploads.update(upload.uploadId, { status: 'retryable', nextAttemptAt: 200 });
+  assert.equal(await outbox.dueById(upload.uploadId), null);
+  timestamp = 200;
+  assert.equal((await outbox.dueById(upload.uploadId))?.uploadId, upload.uploadId);
+
+  await database.mediaUploads.add({
+    uploadId: 'invalid-row', status: 'pending', nextAttemptAt: 1, createdAt: 1,
+    serverWorkRef: 'work-without-generation', mediaObservationRef: 'observation',
+    candidateUris: ['https://sns-img-hw.xhscdn.com/cover.jpg'],
+  });
+  assert.equal(await outbox.dueById('invalid-row', { at: 200 }), null);
+  assert.equal((await database.mediaUploads.get('invalid-row')).status, 'terminal');
   await database.delete();
 });
