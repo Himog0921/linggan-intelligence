@@ -3,7 +3,7 @@
 > 状态: 代码事实优先
 > 最后核对: 2026-09-02
 > 适用范围: DISC-001 Gate 6 的采集准入、服务端调度、Work Order、Attempt/lease、浏览器 MV3 插件、离线恢复、终态 Package、部分结果、协议升级与可观测性
-> 事实来源: 已确认 Gate 2–3 边界、当前 Rust/PostgreSQL/插件代码与测试、已部署 Browser Producer `0.8.30`、候选 `0.8.31` 发行包、工位与真实 Package/Receipt/Materialization 回执
+> 事实来源: 已确认 Gate 2–3 边界、当前 Rust/PostgreSQL/插件代码与测试、已部署 Browser Producer `0.8.31`、候选 `0.8.32` 发行包、工位与真实 Package/Receipt/Materialization 回执
 > 冲突时以谁为准: 用户最新确认、真实 producer fixture、协议兼容测试、PostgreSQL 并发副作用与实际插件运行结果；旧插件字段和本文候选参数不自动成为现行合同
 
 本文是 [`module-architecture.md`](module-architecture.md) 中 Capture 模块与浏览器插件接缝的渐进披露子文档。已落地部分以当前代码和真实回执为准；未落地候选仍为草案，本文本身不授权新的平台访问、数据迁移或产品范围。
@@ -14,16 +14,17 @@
 
 它不是普通“先入先出任务队列”，但第一阶段也不引入 Temporal、Camunda、Kafka 或微服务。一个 PostgreSQL 16 durable-work 实现足以承载当前规模，前提是状态、幂等、租约、部分结果和数据库围栏有真实测试。
 
-## `0.8.30` 运行基线与 `0.8.31` 调度唤醒候选
+## `0.8.31` 运行基线与 `0.8.32` 调度唤醒候选
 
 - 服务端拥有工位、安装身份、认领、TaskSpec、Attempt、Package 接纳、Coverage、Observation 和分析；插件只是受控 Browser Producer。
-- 当前已认领运行安装是 `0.8.30`；旧安装只保留为历史运行事实，不能依据旧 launchd 静态字段判断正在执行的版本。
+- 当前已认领运行安装是 `0.8.31`；旧安装只保留为历史运行事实，不能依据旧 launchd 静态字段判断正在执行的版本。
 - 一次真实标准详情任务已将详情、媒体槽位、顶层评论和回复分成四个不可变 Package 并全部接纳；评论窗口为 `30/30 DETAIL_WINDOW COMPLETE`，页面公开数为 233。
 - 标准详情和评论深采共用同一评论采集内核；新深采 Attempt 从评论入口重新开始，不续上一 Attempt 的“第 201 条”。
 - 媒体自动执行使用持久 outbox 与 `linggan-media-worker-v1` offscreen 通道；旧的人工媒体选择/下载窗口继续保留，两类使用者不互相取代。
 - 插件不选择研究目标、不生成搜索词、不分析趋势/需求/爆文；它只带回当前页面/平台事实、媒体原件、Coverage 和失败回执。
 - `0.8.30` 已补上一个严格位于 **Attempt 之前** 的恢复接缝：任务已领取但页面窗口/标签页/就绪检查失败时，插件仅上传受控的本机失败码与幂等 `failureRef`；服务端追加 dispatch-failure 审计并原子把同一个 frozen TaskSpec 退回 `pending`，一分钟后再由服务端派发。它不新建 Attempt、Package、Receipt、Evidence 或来源错误正文，也不生成第二份任务。未持有 live claim、安装已换代或 failure identity 冲突时，服务端拒绝重排而不是猜测恢复。
-- `0.8.31` 候选将服务端给出的重试节奏写成 MV3 可恢复的周期 alarm；每次 tick 仍按服务端最新返回值替换 alarm，`0` 仍受 Chrome 最短一分钟约束。它解决的是“安装先待认领、随后被人工认领，但 service worker 已被回收”的唤醒缺口，不将任何状态页面或安装重载变成自动认领或未授权平台访问。
+- `0.8.31` 将服务端给出的重试节奏写成 MV3 可恢复的周期 alarm；每次 tick 仍按服务端最新返回值替换 alarm。真实 Chrome reload 随后证明，仅在异步 patrol 结束时写 alarm 仍不足以跨越 install/startup handler 后的 worker 回收。
+- `0.8.32` 候选因此在 install/startup handler 内先写一分钟可恢复 bootstrap alarm，再报到并领取；首次完成的 patrol 立即以服务端最近 cadence 覆盖 bootstrap。服务端 `nextPollAfterSeconds=0` 被明确作为合法“可立即检查后续”的返回保留到背景层，最终仍受 Chrome 的一分钟下限。它不将任何状态页面或安装重载变成自动认领或未授权平台访问。
 
 当前未完全验收的组合不得被这条真实链扩大：搜索连续滚动/不同筛选端到端、作者页结构化统计、真实非空评论图片仍按能力登记册的 `PARTIAL / SOURCE_INCOMPLETE / NOT_OBSERVED` 管理。
 

@@ -397,6 +397,7 @@ async function checkInStationOnce() {
 const PATROL_ALARM = 'linggan-patrol';
 // Chrome 对 alarms 的最小周期是 1 分钟，比这更短的退避只能靠下一次事件唤醒。
 const MIN_ALARM_MINUTES = 1;
+const PATROL_BOOTSTRAP_SECONDS = 60;
 
 // Keep a durable repeating alarm instead of a one-shot wakeup.  A manual station claim happens
 // on the local web surface and has no direct channel back into Chrome.  If a MV3 service worker
@@ -493,12 +494,21 @@ chrome.alarms?.onAlarm?.addListener((alarm) => {
   if (alarm.name === PATROL_ALARM) void patrolTick();
 });
 
-chrome.runtime.onInstalled?.addListener(() => {
-  // 安装、升级或开发者重载后立即报到并领活；不再要求用户打开弹窗点击「领取」。
+export function recoverPatrolWakeAfterLifecycleRestart() {
+  // Schedule before the asynchronous check-in begins.  `onInstalled` / `onStartup` handlers
+  // are short-lived MV3 events: if Chrome collects the worker after its check-in, this durable
+  // minute-level bootstrap is still present and will wake it to make the first server claim.
+  // A completed patrolTick immediately replaces this bootstrap cadence with the server answer.
+  void scheduleNextClaim(PATROL_BOOTSTRAP_SECONDS);
   void checkInStationOnce().then(() => patrolTick());
+}
+
+chrome.runtime.onInstalled?.addListener(() => {
+  // 安装、升级或开发者重载后先持久化一次最短唤醒，再报到并领活；不再要求用户打开弹窗点击「领取」。
+  recoverPatrolWakeAfterLifecycleRestart();
 });
 chrome.runtime.onStartup?.addListener(() => {
-  void checkInStationOnce().then(() => patrolTick());
+  recoverPatrolWakeAfterLifecycleRestart();
 });
 // service worker 每次被唤醒都会执行到这里：先签到，再领一次。alarm 事件可能紧接着到达，
 // `patrolInFlight` 会把两次入口合并为同一个领取请求。
@@ -601,7 +611,13 @@ async function runDispatchedTask() {
   const claim = await claimLingganDispatch({ installKey, health: readiness.health });
   if (!claim.mayExecute) {
     // 不许执行不是故障：闸门默认关着就是正常状态。原样把服务端的判断带回去。
-    return { success: true, state: claim.decision, executed: false, message: claim.message };
+    return {
+      success: true,
+      state: claim.decision,
+      executed: false,
+      message: claim.message,
+      nextPollAfterSeconds: claim.nextPollAfterSeconds,
+    };
   }
 
   const spec = claim.taskSpec || {};
