@@ -62,7 +62,13 @@
 
 按 LANG-05 判据逐条对照数据合同：**是可枚举状态值、机器标识或编号则保留，否则删除英文只留中文。**
 
-删除（第四类描述性标签，19 处）：
+**首轮盘点只覆盖了区块标题，实际范围更大。** 逐条对照数据合同扫过整个表面后，事实网格的字段代码（`PLATFORM`、`OBSERVED AT`、`PUBLIC REF`、`RETAINED LOCALLY`、`LIKE COUNT` 一类）、通道回执四行（`TOTAL` / `RETURNED` / `TRUNCATED` / `NEXT CURSOR`）、复观测操作块的全部 REF 标签、页面状态提示码（`SCAN LIMITED`、`NO MATCHING MATERIAL`、`READ PROJECTION UNAVAILABLE` 等）同样属第四类，一并清除。判据是机械的：不在数据合同的字面取值集合里、不是机器标识、不是编号，就删。
+
+清除后运行时残余的英文只有：`UNKNOWN` / `PARTIAL` / `ACQUIRED` / `SEARCHABLE` / `COMPLETE` / `KNOWN` / `OBSERVED` / `NOT_OBSERVED` / `KNOWN_EMPTY` / `MATCHED` / `NOT_VERIFIED` / `FAILED` / `QUEUED` / `PROCESSING` / `ACCEPTED` / `AVAILABLE` / `SOURCE INCOMPLETE` / `NOT_REQUESTED` 等合同字面取值，加上 slotKey、ref、时间戳与编号。
+
+`GO TO MATCH` 是按钮名，按 LANG-01「英文不能作为唯一按钮名」改为「跳到命中」。
+
+删除的区块标题（首轮盘点）：
 
 | 位置 | 英文标签 | 判定 |
 |---|---|---|
@@ -158,6 +164,17 @@
 | 折叠不改写事实 | 展开后文案与状态码与折叠前逐字一致 |
 | 边界带收口 | Inspector 内 `tone="warning"` 米色框数量由 5+ 降为 1 |
 | 真实数据走查 | 本机 `:3100` 开发实例对同一作品（`80685d45`）逐 Tab 比对 |
+
+### 走查结果（2026-09-03，`:3100` 对生产库只读）
+
+| 验收点 | 结果 |
+|---|---|
+| provenance 合并写入 | `:3000`（旧码）`targetRefs=None`、`workOrderRefs=None`、producers 重复两次；`:3100`（本次）`targetRefs=['9e6478e5-…']`、`workOrderRefs=['1dfee4d8-…']`、producers 去重为一条，packageRefs 仍为 2 条未丢数据。**来源轨迹页面上 Target 与 Work Order 从「来源信息不完整」变为真实 UUID** |
+| 未知项折叠 | 概览三处折叠条「尚未取得 4 项 / 4 项 / 5 项」，原本 13 行逐条 `UNKNOWN` 收起 |
+| 时间线合并 | 两条同值观察合为「2026-09-02T16:58:16.848Z — 2026-09-02T16:59:31.745Z · 连续 2 次观察结果相同」 |
+| 结论行 | 「已取得 发现·媒体槽位·媒体字节·图片文字 / 尚未取得 详情·评论·回复·作者·视频转录」，与九个 lane cell 的状态一致 |
+| 边界带 | Inspector 内米色 `tone="warning"` 框归零，顶部一条边界带 |
+| 卡片身份关系 | 列表每行显示「未证实为作者 NOT_VERIFIED」；已匹配的作品显示「已证实为作者 MATCHED」 |
 
 ## 未做与已知边界
 

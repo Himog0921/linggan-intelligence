@@ -193,13 +193,13 @@
     const heading = node('div', 'ev-channel-title');
     heading.append(node('strong', null, '本次复观测执行状态'), stateTag(leaseState));
     block.append(heading, factGrid([
-      ['准入结果', admissionCopy(operation.admission), operation.admission || 'ADMISSION UNKNOWN'],
-      ['准入决定', operation.decisionRef || '当前未知', 'DECISION REF'],
-      ['准入说明', operation.admissionReason || '状态读取未返回新的准入说明', 'ADMISSION REASON'],
-      ['请求', operation.requestRef || '当前未知', 'REQUEST REF'],
-      ['工单', operation.workOrderRef || '尚未形成', 'WORK ORDER REF'],
-      ['租约', operation.leaseRef || '尚未形成', 'LEASE REF'],
-      ['到期时间', operation.expiresAt || '当前未知', 'LEASE EXPIRES AT'],
+      ['准入结果', admissionCopy(operation.admission), operation.admission || null],
+      ['准入决定', operation.decisionRef || '当前未知'],
+      ['准入说明', operation.admissionReason || '状态读取未返回新的准入说明'],
+      ['请求', operation.requestRef || '当前未知'],
+      ['工单', operation.workOrderRef || '尚未形成'],
+      ['租约', operation.leaseRef || '尚未形成'],
+      ['到期时间', operation.expiresAt || '当前未知'],
       ['媒体策略', operation.media?.state === 'NOT_REQUESTED' ? '未请求新媒体，复用既有资产' : '当前未知', operation.media?.reason || 'NOT REQUESTED'],
     ]));
     const tasks = Array.isArray(operation.tasks) ? operation.tasks : [];
@@ -213,11 +213,11 @@
       const header = node('div', 'ev-slot-head');
       header.append(node('strong', null, laneLabels[task.capability] || task.capability || '通道当前未知'), stateTag(task.state || 'UNKNOWN'));
       row.append(header, factGrid([
-        ['任务', task.taskId || '当前未知', 'TASK ID'],
-        ['评论上限', task.commentLimit === 'not_requested' ? '本详情 lane 不单独请求评论' : (task.commentLimit ?? '当前未知'), 'COMMENT LIMIT'],
-        ['媒体', task.acquireMedia === 'not_requested' ? '未请求' : (task.acquireMedia ?? '当前未知'), 'ACQUIRE MEDIA'],
-        ['认领时间', task.claimedAt || '尚未认领', 'CLAIMED AT'],
-        ['尝试', task.attemptId || '尚未开始', 'ATTEMPT ID'],
+        ['任务', task.taskId || '当前未知'],
+        ['评论上限', task.commentLimit === 'not_requested' ? '本详情 lane 不单独请求评论' : (task.commentLimit ?? '当前未知')],
+        ['媒体', task.acquireMedia === 'not_requested' ? '未请求' : (task.acquireMedia ?? '当前未知')],
+        ['认领时间', task.claimedAt || '尚未认领'],
+        ['尝试', task.attemptId || '尚未开始'],
         ['包 / 回执', task.packageRef || task.receiptRef ? `${task.packageRef || '包未知'} / ${task.receiptRef || '回执未见'}` : '尚未形成', 'PACKAGE / RECEIPT'],
       ]));
       list.append(row);
@@ -329,9 +329,9 @@
     const header = node('div', 'ev-slot-head');
     header.append(node('strong', null, entry.observedAt || '观察时间当前未知'), stateTag(entry.state || 'UNKNOWN'));
     article.append(header, factGrid([
-      ['范围', entry.collectionScope || '当前未知', 'COLLECTION SCOPE'], ['请求上限', entry.requestedLimit ?? '当前未知', 'REQUESTED LIMIT'],
-      ['页面评论数', entry.pageCommentCount ?? '当前未知', 'PAGE COMMENT COUNT'], ['预期 / 去重保留', `${entry.expectedCount ?? '当前未知'} / ${entry.uniqueCollectedCount ?? '当前未知'}`, entry.collectionState || 'UNKNOWN'],
-      ['采集 / 保留 / 失败', `${entry.producerAcquired ?? '当前未知'} / ${entry.retained ?? '当前未知'} / ${entry.failed ?? '当前未知'}`, 'LANE COUNTS'],
+      ['范围', entry.collectionScope || '当前未知'], ['请求上限', entry.requestedLimit ?? '当前未知'],
+      ['页面评论数', entry.pageCommentCount ?? '当前未知'], ['预期 / 去重保留', `${entry.expectedCount ?? '当前未知'} / ${entry.uniqueCollectedCount ?? '当前未知'}`, entry.collectionState || 'UNKNOWN'],
+      ['采集 / 保留 / 失败', `${entry.producerAcquired ?? '当前未知'} / ${entry.retained ?? '当前未知'} / ${entry.failed ?? '当前未知'}`],
       ['Task / Attempt', `${entry.taskRef || '当前未知'} / ${entry.attemptRef || '当前未知'}`, 'TASK / ATTEMPT'], ['Package / Receipt', `${entry.packageRef || '当前未知'} / ${entry.receiptRef || '未见回执'}`, 'PACKAGE / RECEIPT'],
     ]));
     return article;
@@ -454,12 +454,12 @@
       header.append(node('strong', null, comment.relation === 'REPLY' ? '匿名回复' : '匿名评论'), tech(comment.sourceRef || 'SOURCE INCOMPLETE'));
       const body = node('p', null, comment.bodyState === 'KNOWN' && comment.body !== null ? comment.body : '评论正文当前未知');
       const meta = node('div', 'ev-comment-meta');
-      addTextWithTech(meta, comment.bodyTruncated ? '本条正文已在读取边界截断' : '本条正文未在通道内截断', comment.bodyTruncated ? 'TRUNCATED' : 'RETURNED');
+      addTextWithTech(meta, comment.bodyTruncated ? '本条正文已在读取边界截断' : '本条正文未在通道内截断', null);
       article.append(header, body, meta);
       list.append(article);
     });
     const receipt = node('div', 'ev-comment-receipt');
-    addTextWithTech(receipt, `总数 ${snapshot.total ?? '未知'} · 当前 ${snapshot.items.length} · 本次 ${snapshot.returned ?? '未知'}${snapshot.truncated ? '；本页已截断，可继续读取' : snapshot.cursor ? '；可继续读取' : ''}`, 'ANONYMOUS RESEARCH VIEW');
+    addTextWithTech(receipt, `总数 ${snapshot.total ?? '未知'} · 当前 ${snapshot.items.length} · 本次 ${snapshot.returned ?? '未知'}${snapshot.truncated ? '；本页已截断，可继续读取' : snapshot.cursor ? '；可继续读取' : ''}`);
     list.append(receipt);
     if (snapshot.cursor) {
       const next = node('button', 'ev-button ev-button--secondary', '继续读取评论');

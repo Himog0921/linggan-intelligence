@@ -725,8 +725,8 @@
     const identity = node('div', 'ev-identity');
     const eyebrow = node('div', 'ev-eyebrow');
     eyebrow.append(
-      node('span', null, item.identity?.platform?.toUpperCase() || 'PLATFORM UNKNOWN'),
-      node('span', null, publicRef ? `WORK ${publicRef.slice(0, 8).toUpperCase()}` : 'PUBLIC REF UNKNOWN'),
+      node('span', null, item.identity?.platform?.toUpperCase() || '平台未知'),
+      node('span', null, publicRef ? publicRef.slice(0, 8).toUpperCase() : '引用未知'),
     );
     const title = node('h2', null, knownText(item.display?.title, item.display?.titleState, '标题当前未知'));
     const meta = node('div', 'ev-meta');
@@ -814,10 +814,10 @@
   function queryReceipt(payload, appended) {
     const notes = [];
     if (payload.scanLimited) {
-      notes.push(['扫描预算已触发，当前结果不是全部匹配；可继续读取', 'SCAN LIMITED']);
+      notes.push(['扫描预算已触发，当前结果不是全部匹配；可继续读取']);
     }
     if (payload.truncated && !payload.cursor) {
-      notes.push(['本次读取已截断，但来源没有给出继续读取的游标', 'TRUNCATED WITHOUT CURSOR']);
+      notes.push(['本次读取已截断，但来源没有给出继续读取的游标']);
     }
     refs.receipt.replaceChildren();
     refs.receipt.hidden = notes.length === 0;
@@ -849,7 +849,7 @@
         model.selectedRef = null;
         clearInspector();
       }
-      setFeedback('loading', '正在读取本机材料投影', '只读取 Linggan 已接纳的作品级材料；不会触发平台搜索或采集。', 'LOCAL READ');
+      setFeedback('loading', '正在读取本机材料投影', '只读取 Linggan 已接纳的作品级材料；不会触发平台搜索或采集。');
       refs.list.replaceChildren();
     }
     refs.nextList.disabled = true;
@@ -864,7 +864,7 @@
       renderReadout();
       syncUrl(append ? 'replace' : historyMode);
       if (model.items.length === 0) {
-        setFeedback('empty', '当前查询没有匹配的作品材料', '读取已经成功；这个结果只描述当前本地查询，不证明平台或现实中没有相关内容。', 'NO MATCHING MATERIAL');
+        setFeedback('empty', '当前查询没有匹配的作品材料', '读取已经成功；这个结果只描述当前本地查询，不证明平台或现实中没有相关内容。');
         clearInspector();
       } else {
         clearFeedback();
@@ -878,10 +878,10 @@
       renderRows(false);
       renderReadout();
       refs.nextList.hidden = true;
-      setFeedback('error', '本机材料读取暂时不可用', '当前没有读取任何作品材料；页面不会回退到旧卡片、远程数据库或平台 CDN。', error.code || 'READ PROJECTION UNAVAILABLE');
+      setFeedback('error', '本机材料读取暂时不可用', '当前没有读取任何作品材料；页面不会回退到旧卡片、远程数据库或平台 CDN。', error.code || null);
       refs.receipt.replaceChildren();
       refs.receipt.hidden = false;
-      addTextWithTech(refs.receipt, '当前未读取任何材料，不能据此判断库为空或来源不存在。', error.code || 'READ PROJECTION UNAVAILABLE');
+      addTextWithTech(refs.receipt, '当前未读取任何材料，不能据此判断库为空或来源不存在。', error.code || null);
     }
   }
 
@@ -1110,10 +1110,10 @@
       return wrapper;
     }
     wrapper.append(factGrid([
-      ['总数', receipt.total ?? '当前未知', receipt.total === null || receipt.total === undefined ? 'UNKNOWN' : 'TOTAL'],
-      ['本次返回', receipt.returned ?? '当前未知', receipt.returned === null || receipt.returned === undefined ? 'UNKNOWN' : 'RETURNED'],
-      ['是否截断', receipt.truncated === true ? '是，可继续读取' : receipt.truncated === false ? '否' : '当前未知', 'TRUNCATED'],
-      ['下一游标', receipt.nextCursor || '无', 'NEXT CURSOR'],
+      ['总数', receipt.total ?? '当前未知', receipt.total === null || receipt.total === undefined ? 'UNKNOWN' : null],
+      ['本次返回', receipt.returned ?? '当前未知', receipt.returned === null || receipt.returned === undefined ? 'UNKNOWN' : null],
+      ['是否截断', receipt.truncated === true ? '是，可继续读取' : receipt.truncated === false ? '否' : '当前未知'],
+      ['下一游标', receipt.nextCursor || '无'],
     ]));
     if (receipt.truncated && !channelUrl) {
       const note = node('div', 'ev-inline-state');
@@ -1281,17 +1281,17 @@
     const identity = section('作品字段与来源');
     identity.append(factGrid([
       ['稳定引用', item.identity?.publicRef || '当前未知'],
-      ['平台', item.identity?.platform || '当前未知', 'PLATFORM'],
+      ['平台', item.identity?.platform || '当前未知'],
       ['标题', knownText(item.display?.title, item.display?.titleState), item.display?.titleState || 'UNKNOWN'],
       ['发布时间', publishedCopy(item), item.display?.publishedAtState || 'UNKNOWN'],
       ['时间来源字段', item.display?.publishedAtSourceField || '当前未知', item.display?.publishedAtSourceKind || 'unknown'],
       ['时间精度', item.display?.publishedAtPrecision || 'unknown', item.display?.publishedAtParserVersion || null],
-      ['最近观察', item.summary?.lastObservedAt || '当前未知', 'OBSERVED AT'],
+      ['最近观察', item.summary?.lastObservedAt || '当前未知'],
       ['当前主要限制',
         item.summary?.primaryLimitation && item.summary.primaryLimitation !== 'NONE'
           ? limitationCopy(item.summary.primaryLimitation)
           : '本次读取没有记录额外限制',
-        item.summary?.primaryLimitation || 'NONE'],
+        item.summary?.primaryLimitation || null],
     ]));
     panel.append(identity);
 
@@ -1316,20 +1316,20 @@
       ? inspector.engagementCurrent.metrics
       : {};
     current.append(factGrid([
-      observation.currentMetricFact('点赞', currentMetrics.likeCount, 'LIKE COUNT'),
-      observation.currentMetricFact('评论', currentMetrics.commentCount, 'COMMENT COUNT'),
-      observation.currentMetricFact('收藏', currentMetrics.collectCount, 'COLLECT COUNT'),
-      observation.currentMetricFact('分享', currentMetrics.shareCount, 'SHARE COUNT'),
+      observation.currentMetricFact('点赞', currentMetrics.likeCount),
+      observation.currentMetricFact('评论', currentMetrics.commentCount),
+      observation.currentMetricFact('收藏', currentMetrics.collectCount),
+      observation.currentMetricFact('分享', currentMetrics.shareCount),
     ]));
     panel.append(current);
 
     const detailCurrent = section('详情字段当前事实');
     const fields = inspector.detailCurrent && typeof inspector.detailCurrent === 'object' ? inspector.detailCurrent : {};
     detailCurrent.append(factGrid([
-      observation.detailCurrentFact('标题来源', fields.title, 'TITLE'),
-      observation.detailCurrentFact('作者来源', fields.creator, 'CREATOR'),
-      observation.detailCurrentFact('发布时间来源', fields.publishedAt, 'PUBLISHED AT'),
-      observation.detailCurrentFact('正文字段', fields.body, 'RESTRICTED BODY'),
+      observation.detailCurrentFact('标题来源', fields.title),
+      observation.detailCurrentFact('作者来源', fields.creator),
+      observation.detailCurrentFact('发布时间来源', fields.publishedAt),
+      observation.detailCurrentFact('正文字段', fields.body),
     ]));
     panel.append(detailCurrent);
 
@@ -1519,7 +1519,7 @@
     nav.append(previous, position, next);
     const matchIndex = objects.findIndex((object) => object.isMatch);
     if (matchIndex >= 0) {
-      const jump = node('button', 'ev-media-jump', 'GO TO MATCH');
+      const jump = node('button', 'ev-media-jump', '跳到命中');
       jump.type = 'button';
       jump.addEventListener('click', () => scrollToObject(matchIndex, true));
       nav.insertBefore(jump, previous);
@@ -1753,9 +1753,9 @@
     const ledger = section('材料处理台账');
     const receipt = channels.media?.receipt || inspector.mediaSlotsReceipt;
     ledger.append(factGrid([
-      ['槽位总数', receipt?.total ?? '当前未知', 'TOTAL SLOTS'],
-      ['本次返回', receipt?.returned ?? '当前未知', 'RETURNED'],
-      ['是否截断', receipt?.truncated === true ? '是，可继续读取' : receipt?.truncated === false ? '否' : '当前未知', 'TRUNCATED'],
+      ['槽位总数', receipt?.total ?? '当前未知'],
+      ['本次返回', receipt?.returned ?? '当前未知'],
+      ['是否截断', receipt?.truncated === true ? '是，可继续读取' : receipt?.truncated === false ? '否' : '当前未知'],
     ]));
     /* The ledger accounts for every local object including the author's avatar; the browsing
      * rail above deliberately leaves the avatar out, because it belongs to the author rather
@@ -1769,10 +1769,10 @@
         tech(object.slotKey || '槽位未知'),
       );
       entry.append(head, factGrid([
-        ['本地对象', object.objectRef || '当前未表达', 'MATERIALIZATION REF'],
+        ['本地对象', object.objectRef || '当前未表达'],
         ['字节状态', stateMeta(object.bytesState)[0], object.bytesState],
-        ['文字处理', object.derivedState ? stateMeta(object.derivedState)[0] : '未处理', object.derivedState || 'NOT PROCESSED'],
-        ['采集序号', object.ordinal, object.slot.displayOrderState === 'KNOWN' ? 'DISPLAY ORDER KNOWN' : 'DISPLAY ORDER UNVERIFIED'],
+        ['文字处理', object.derivedState ? stateMeta(object.derivedState)[0] : '未处理', object.derivedState || null],
+        ['采集序号', object.ordinal, object.slot.displayOrderState],
         ['副本状态', object.slot.replicaState || '当前未知', object.slot.replicaState || 'UNKNOWN'],
       ]));
       ledger.append(entry);
@@ -1894,9 +1894,9 @@
     const receipt = provenanceChannel.receipt || provenance?.receipt;
     const channel = section('来源轨迹通道');
     channel.append(factGrid([
-      ['总数', receipt?.total ?? '当前未知', 'TOTAL'],
-      ['本次返回', receipt?.returned ?? '当前未知', 'RETURNED'],
-      ['是否截断', receipt?.truncated === true ? '是，可继续读取' : receipt?.truncated === false ? '否' : '当前未知', 'TRUNCATED'],
+      ['总数', receipt?.total ?? '当前未知'],
+      ['本次返回', receipt?.returned ?? '当前未知'],
+      ['是否截断', receipt?.truncated === true ? '是，可继续读取' : receipt?.truncated === false ? '否' : '当前未知'],
     ]));
     panel.append(channel);
 
