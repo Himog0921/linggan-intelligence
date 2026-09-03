@@ -539,7 +539,7 @@
       rail.append(cell);
     });
     wrapper.append(rail);
-    return { element: wrapper, summary };
+    return { element: wrapper, rail, summary };
   }
 
   /* ------------------------------------------------------------- readout */
@@ -774,9 +774,12 @@
           cell.append(authorFact(item));
           return cell;
         })(),
-        material.element,
+        (() => {
+          const cell = node('div', 'ev-table-material');
+          cell.append(material.rail, stateLine(detailState));
+          return cell;
+        })(),
         engagementBlock(item, { numbersOnly: true }),
-        stateLine(detailState),
         tableCell(publishedCopy(item, true, false), ''),
         tableCell(compactMoment(item.summary?.lastObservedAt) || '未知', ''),
       );
@@ -829,7 +832,7 @@
     refs.tableHead.hidden = model.activeLayout !== 'table';
     refs.tableHead.setAttribute('aria-hidden', String(model.activeLayout !== 'table'));
     refs.resultsLegend.textContent = model.activeLayout === 'table'
-      ? '无封面 · 7 列 · 适合批量核查'
+      ? '无封面 · 6 列 · 适合批量核查'
       : (model.activeLayout === 'cover' ? '图片主导 · 视觉供给研究' : '缩略图 · 最强证据 · 材料摘要');
     const existing = new Set([...refs.list.querySelectorAll('[data-public-ref]')].map((row) => row.dataset.publicRef));
     model.items.forEach((item) => {

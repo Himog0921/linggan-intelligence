@@ -201,9 +201,9 @@
 .ev-observed{color:var(--v7-ghost);font:650 9.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
 
 /* ---- table layout ---- */
-.ev-table-head{position:sticky;top:38px;z-index:3;display:grid;grid-template-columns:minmax(150px,1fr) minmax(96px,.5fr) 112px minmax(206px,.9fr) minmax(82px,.45fr) minmax(88px,.5fr) minmax(92px,.5fr);gap:12px;padding:7px 16px;border-bottom:1px solid var(--v7-black);background:var(--v7-gray);color:var(--v7-muted);font:650 10px var(--lgi-font-sans)}
+.ev-table-head{position:sticky;top:38px;z-index:3;display:grid;grid-template-columns:minmax(150px,1fr) minmax(96px,.5fr) minmax(176px,.8fr) minmax(206px,.9fr) minmax(88px,.5fr) minmax(92px,.5fr);gap:12px;padding:7px 16px;border-bottom:1px solid var(--v7-black);background:var(--v7-gray);color:var(--v7-muted);font:650 10px var(--lgi-font-sans)}
 .ev-table-head[hidden]{display:none}
-.ev-work-list[data-layout="table"] .ev-work-row{grid-template-columns:minmax(150px,1fr) minmax(96px,.5fr) 112px minmax(206px,.9fr) minmax(82px,.45fr) minmax(88px,.5fr) minmax(92px,.5fr);align-items:center;min-height:0;padding:7px 16px;gap:12px}
+.ev-work-list[data-layout="table"] .ev-work-row{grid-template-columns:minmax(150px,1fr) minmax(96px,.5fr) minmax(176px,.8fr) minmax(206px,.9fr) minmax(88px,.5fr) minmax(92px,.5fr);align-items:center;min-height:0;padding:7px 16px;gap:12px}
 .ev-work-list[data-layout="table"] .ev-preview,.ev-work-list[data-layout="table"] .ev-evidence{display:none}
 .ev-work-list[data-layout="table"] .ev-side{display:contents}
 .ev-work-list[data-layout="table"] .ev-identity{max-width:none}
@@ -286,6 +286,9 @@
 .ev-work-list[data-layout="table"] .ev-author-fact strong{font-size:11.5px}
 .ev-work-list[data-layout="table"] .ev-engagement{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-size:11px;white-space:nowrap}
 .ev-work-list[data-layout="table"] .ev-engagement span{justify-content:center}
+.ev-table-material{display:flex;align-items:center;gap:10px;min-width:0}
+.ev-table-material .ev-material-rail{flex:1 1 auto;min-width:64px;margin-top:0}
+.ev-table-material .ev-state-line{flex:0 0 auto}
 .ev-head-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;justify-items:center;align-items:center}
 .ev-head-metrics svg{color:var(--v7-muted)}
 .ev-engagement span{display:inline-flex;align-items:center;gap:4px}
