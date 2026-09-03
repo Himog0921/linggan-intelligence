@@ -3,6 +3,9 @@ mod collection_dispatch;
 mod collection_intake;
 mod collection_targets_view;
 mod collection_tasks_view;
+mod creator_lifecycle_api;
+#[cfg(test)]
+mod creator_lifecycle_tests;
 #[cfg(test)]
 mod evidence_page;
 #[cfg(test)]
@@ -43,23 +46,25 @@ use linggan_contracts::{
     parse_producer_task_spec,
 };
 use linggan_evidence::{
-    AcquisitionChainError, AuthorizationGrant, CheckInOutcome, DiscoveryIngressError,
-    InstallationCheckIn, LeaseError, LocalAttemptOutcome, LocalProducerError,
-    LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget, MediaUploadFinalizeClaim,
-    ObservationTargetAvatar, ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeCapacityOverview,
-    RuntimeSubmissionOutcome, RuntimeTaskOutcome, StationCapability, StationOverview, StoreOutcome,
-    TargetCounts, UnclaimedInstallation, WorkResourceReadError, admit_media_blob,
-    begin_media_upload, check_in_installation, claim_installation, claim_media_acquisition,
+    AcquisitionChainError, AuthorizationGrant, CheckInOutcome, CreatorLifecycleMetric,
+    CreatorLifecycleQuery, CreatorLifecycleWindow, DiscoveryIngressError, InstallationCheckIn,
+    LeaseError, LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome,
+    MaterialDeepeningTarget, MediaUploadFinalizeClaim, ObservationTarget, ObservationTargetAvatar,
+    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeCapacityOverview, RuntimeSubmissionOutcome,
+    RuntimeTaskOutcome, StationCapability, StationOverview, StoreOutcome, TargetCounts,
+    UnclaimedInstallation, WorkResourceReadError, admit_media_blob, begin_media_upload,
+    check_in_installation, claim_installation, claim_media_acquisition,
     claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
     create_manual_task, create_producer_task, dispatch_schema_is_ready, grant_authorization,
     ingest_discovery_package, issue_work_order_lease, list_targets, list_targets_in_state,
     local_discovery_schema_is_ready, local_producer_schema_is_ready,
     media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_archive_completeness, read_collection_task_timeline,
-    read_discovery_library, read_media_upload_session, read_runtime_capacity, read_runtime_library,
-    read_scheduler_heartbeat, read_station_capabilities, read_station_overview, read_target,
-    read_target_avatars, record_media_acquisition_failure, record_media_download_failure,
-    record_media_upload_chunk, register_station, release_media_upload_finalize, request_and_admit,
+    read_creator_lifecycle, read_discovery_library, read_media_upload_session,
+    read_runtime_capacity, read_runtime_library, read_scheduler_heartbeat,
+    read_station_capabilities, read_station_overview, read_target, read_target_avatars,
+    record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
+    register_station, release_media_upload_finalize, request_and_admit,
     request_and_admit_material_targets, retire_station, set_group_for_many,
     set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
     station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
@@ -93,6 +98,7 @@ const MEDIA_ACQUISITION_CLAIM_PATH: &str = "/api/local/producer/media-acquisitio
 const LIDS_TOKENS: &str = include_str!("local_web/lids_tokens.css");
 const SHELL_CSS: &str = include_str!("local_web/shell.css");
 const COLLECTION_WORKSPACE_CSS: &str = include_str!("local_web/collection_workspace.css");
+const TARGET_DRAWER_CSS: &str = include_str!("local_web/target_drawer.css");
 const COLLECTION_WORKSPACE_JS: &str = include_str!("local_web/collection_workspace.js");
 const EVIDENCE_LIBRARY_CSS: &str = include_str!("local_web/evidence_library.css");
 const EVIDENCE_OBSERVATION_JS: &str = include_str!("local_web/evidence_observation.js");
@@ -296,6 +302,7 @@ fn router(state: LocalWebState) -> Router {
         )
         .merge(material_api_routes())
         .merge(collection_api_routes())
+        .merge(creator_lifecycle_api::routes())
         .merge(topic_workspace::routes())
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
@@ -2095,6 +2102,10 @@ struct CollectionParams {
     /// 抽屉打开的是哪个目标，以及停在哪个 tab。**放在 URL 里而不是 JS 状态里**：
     /// 刷新与分享都不丢，而这一页的用途正是「打开一个目标细看，然后发给别人」。
     dtab: Option<String>,
+    /// Lifecycle 只按窗口与指标读取。选中作品仅是页面状态，不进入 Rust read query。
+    life_window: Option<String>,
+    life_metric: Option<String>,
+    life_work: Option<String>,
 }
 
 /// Collection 的共享页头只读现有事实，不创造第二套状态口径。每一项独立保留：某个
@@ -2188,13 +2199,38 @@ async fn collection_targets(
         .await
         .unwrap_or_default();
     // 抽屉独立查目标，不从筛过的列表里找——被筛掉的目标不该显示成「未找到」。
-    let drawer_target = match params
+    let drawer_target_ref = params
         .drawer
         .as_deref()
-        .and_then(|value| uuid::Uuid::parse_str(value).ok())
-    {
+        .and_then(|value| uuid::Uuid::parse_str(value).ok());
+    let drawer_target = match drawer_target_ref {
         Some(target_ref) => read_target(database, target_ref).await.map_err(|_| ()),
         None => Ok(None),
+    };
+    let lifecycle_query = CreatorLifecycleQuery {
+        window: params
+            .life_window
+            .as_deref()
+            .and_then(CreatorLifecycleWindow::parse)
+            .unwrap_or(CreatorLifecycleWindow::Recent90Days),
+        metric: params
+            .life_metric
+            .as_deref()
+            .and_then(CreatorLifecycleMetric::parse)
+            .unwrap_or(CreatorLifecycleMetric::Likes),
+    };
+    let lifecycle = if should_read_target_lifecycle(
+        drawer_target.as_ref().ok().and_then(Option::as_ref),
+        params.dtab.as_deref(),
+    ) {
+        match drawer_target_ref {
+            Some(target_ref) => {
+                read_creator_lifecycle(database, target_ref, &lifecycle_query).await
+            }
+            None => Ok(None),
+        }
+    } else {
+        Ok(None)
     };
     let list = match list_targets(database, params.filter.as_deref(), 200).await {
         Ok(targets) => {
@@ -2228,10 +2264,38 @@ async fn collection_targets(
             &completeness,
             params.drawer.as_deref(),
             params.dtab.as_deref(),
+            if should_read_target_lifecycle(target.as_ref(), params.dtab.as_deref()) {
+                match lifecycle.as_ref() {
+                    Ok(Some(projection)) => target_drawer::LifecycleView::Projection(projection),
+                    Ok(None) | Err(_) => target_drawer::LifecycleView::ReadUnavailable {
+                        window: lifecycle_query.window,
+                        metric: lifecycle_query.metric,
+                    },
+                }
+            } else {
+                target_drawer::LifecycleView::NotRead {
+                    window: lifecycle_query.window,
+                    metric: lifecycle_query.metric,
+                }
+            },
+            params.life_work.as_deref(),
         ),
         Err(()) => collection::render_unreadable_target_drawer(params.drawer.as_deref()),
     };
     Html(format!("{list}{drawer}"))
+}
+
+/// The lifecycle query can inspect up to its explicit scan budget, so the Collection page only
+/// issues it for the one surface that consumes the result. The independent JSON API stays
+/// available for intentional reads.
+fn should_read_target_lifecycle(
+    target: Option<&ObservationTarget>,
+    active_tab: Option<&str>,
+) -> bool {
+    target
+        .map(|target| target.target_kind == "creator")
+        .unwrap_or(false)
+        && matches!(active_tab, None | Some("overview"))
 }
 
 async fn collection_operations(
@@ -2812,7 +2876,7 @@ async fn collection_stylesheet() -> Response {
             header::CONTENT_TYPE,
             HeaderValue::from_static("text/css; charset=utf-8"),
         )],
-        format!("{LIDS_TOKENS}\n{SHELL_CSS}\n{COLLECTION_WORKSPACE_CSS}"),
+        format!("{LIDS_TOKENS}\n{SHELL_CSS}\n{COLLECTION_WORKSPACE_CSS}\n{TARGET_DRAWER_CSS}"),
     )
         .into_response()
 }

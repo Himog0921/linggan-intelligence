@@ -885,6 +885,22 @@
     refs.nextList.dataset.cursor = payload.cursor || '';
   }
 
+  /* A `?work=` link addresses the stable Work directly. The first list page is only a browsing
+   * window and must not be treated as the set of Works that exist: a lifecycle point can name an
+   * older Work that is outside that page. This shell contains identity plus the same-origin
+   * detail handle only; the detail response remains the sole source for Inspector facts. */
+  function directWorkItem(publicRef) {
+    if (typeof publicRef !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(publicRef)) {
+      return null;
+    }
+    return {
+      identity: { publicRef },
+      detailUrl: `${API_ROOT}/${encodeURIComponent(publicRef)}`,
+      display: { title: null, titleState: 'UNKNOWN' },
+    };
+  }
+
   async function loadList({ append = false, keepSelection = false, history: historyMode = 'replace' } = {}) {
     model.listController?.abort();
     model.listController = new AbortController();
@@ -911,14 +927,19 @@
       queryReceipt(payload, append);
       renderReadout();
       syncUrl(append ? 'replace' : historyMode);
+      const requestedRef = restoreRef || model.selectedRef;
+      const requestedItem = requestedRef
+        ? model.items.find((item) => item.identity?.publicRef === requestedRef)
+        : null;
       if (model.items.length === 0) {
         setFeedback('empty', '当前查询没有匹配的作品材料', '读取已经成功；这个结果只描述当前本地查询，不证明平台或现实中没有相关内容。');
-        clearInspector();
+        if (directWorkItem(requestedRef)) await selectItem(directWorkItem(requestedRef), false);
+        else clearInspector();
       } else {
         clearFeedback();
-        const selected = model.items.find((item) => item.identity?.publicRef === (restoreRef || model.selectedRef))
-          || model.items[0];
-        await selectItem(selected, false);
+        if (requestedItem) await selectItem(requestedItem, false);
+        else if (directWorkItem(requestedRef)) await selectItem(directWorkItem(requestedRef), false);
+        else await selectItem(model.items[0], false);
       }
     } catch (error) {
       if (error.name === 'AbortError') return;

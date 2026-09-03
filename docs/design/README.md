@@ -77,6 +77,8 @@
 | [changes/design-009-runtime-capacity-surface-ui-change-manifest.md](changes/design-009-runtime-capacity-surface-ui-change-manifest.md) | DESIGN-009：执行工位改为产能判定面，五处写死的接通状态改为实读 | 权威当前 |
 | [changes/design-010-lids-v7-adoption-ui-change-manifest.md](changes/design-010-lids-v7-adoption-ui-change-manifest.md) | DESIGN-010：LIDS 升级到 v7.0 的范围、逐条差异、运行时欠账与明确非目标 | 权威当前 |
 | [changes/design-011-collection-surfaces-v7-ui-change-manifest.md](changes/design-011-collection-surfaces-v7-ui-change-manifest.md) | DESIGN-011：生产流与执行工位落地 v7、能力矩阵四态与已知限制 | 权威当前 |
+| [changes/collection-lifecycle-001-ui-change-manifest.md](changes/collection-lifecycle-001-ui-change-manifest.md) | COLLECTION-LIFECYCLE-001：Issue #148 creator 生命周期、四职责抽屉与 Corpus 精确深链 | 权威当前 |
+| [acceptance/collection-lifecycle-001-visual-acceptance.md](acceptance/collection-lifecycle-001-visual-acceptance.md) | ACC-COLLECTION-LIFECYCLE-001：Issue #148 自动、隔离视口与未部署边界 | 一次性报告 |
 | [acceptance/design-009-runtime-capacity-surface-acceptance.md](acceptance/design-009-runtime-capacity-surface-acceptance.md) | ACC-RUNTIME-001：产能判定、状态诚实性与视觉的验收记录 | 一次性报告 |
 | [pages/topic-intelligence-reference.html](pages/topic-intelligence-reference.html) | 可本地打开的合成静态参考实现；不读取、写入或声称真实系统事实 | 权威当前 |
 | [pages/topic-intelligence-reference-acceptance.md](pages/topic-intelligence-reference-acceptance.md) | ACC-TOPIC-001：静态视觉、互动和证明边界的实际验收记录 | 权威当前 |

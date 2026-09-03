@@ -1,12 +1,18 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-02
+> 最后核对: 2026-09-03
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
 ## 当前阶段
+
+### COLLECTION-READ-MODEL-CLOSURE-001 / Issue #148（Draft PR 候选完成）
+
+当前唯一交付包在独立 worktree `codex/collection-read-model-closure-001` 上收口 Collection 目标读面。新增 target-scoped creator Work 生命周期，不新增事实表：稳定作者 ID 必须精确匹配，横轴只接受 qualified platform epoch，互动字段逐项选择 as-of 前 latest KNOWN；真实 `KNOWN 0` 保留，UNKNOWN、作者未确认/不匹配、时间不合格、窗外和扫描截断均分项回执。近 90 天固定为 `Asia/Shanghai` 90 个含首尾日历日；分析版本为 `creator-percentile-v1` 与服务端 `trailing-5-work-median-v1` / 5，前端不二次计算。Collection 页面仅在 creator overview 执行有界扫描，API 保持独立读取。
+
+目标抽屉现收为概览/基线/巡检策略/追踪四职责，Evidence tab 已退役；生命周期只提供最小选中作品摘要并精确进入 `/corpus/evidence?work=<public-ref>`，首批列表外 Work 也不回退第一项。监控价值、机会评分、趋势预测与 Evidence 正文/评论/媒体复制均明确排除。候选 branch 已通过 workspace、治理、隔离 PostgreSQL 16 与隔离 1440/1280/CDP 390 页面证明；fixture 为脱敏合成数据，不代表当前真实数据密度。shared DB/runtime/deploy、真实平台访问、merge 与 Mog 业务验收均未授权或未验证。Package 2 Collection Control 与 Package 3 Creator Dossier 必须等本包合并并复核最新 main 后另立 Claim。
 
 ### TOPIC-WORKSPACE-REAL-001 / Issue #112（已部署；待 Mog 业务验收）
 

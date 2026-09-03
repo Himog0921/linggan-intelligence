@@ -1,12 +1,21 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-09-02
+> 最后核对: 2026-09-03
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
+
+## 2026-09-03 · COLLECTION-LIFECYCLE-001 creator 生命周期成为目标抽屉默认核心
+
+- **来源与范围**：Issue #148 与 Mog 最新决定将 Evidence 呈现留在 Corpus；creator target 抽屉只做生命周期决策面与精确跳转，不保留 Evidence tab，不引入监控价值、机会评分或趋势预测。
+- **Pattern / Page**：Collection L1 Operations 不变，右抽屉保持受限 L2。四个职责为概览、基线、巡检策略、追踪；creator 概览以真实发布时间散点为单一视觉核心，keyword 明示不适用。完整清单见 [`../changes/collection-lifecycle-001-ui-change-manifest.md`](../changes/collection-lifecycle-001-ui-change-manifest.md)。
+- **Token / Motion / A11y**：新增 page-local `target_drawer.css`，只消费已有 `--lgi-*`；无新 token、字面颜色、渐变或全局 CMP。控件至少 40px，点为具名 SVG 链接，focus-visible 与 reduced-motion 有显式分支，390px 收为单栏。
+- **Data Truth**：stable author exact match、qualified platform epoch、field-wise latest KNOWN 和 `KNOWN 0` 由服务端读模型负责。90 天是 `Asia/Shanghai` 90 个含首尾日历日。分析版本冻结为 `creator-percentile-v1` 与 `trailing-5-work-median-v1` / 5；前端不重复计算。
+- **读取预算**：最多扫描 2000 + 1 探针并显式回执；Collection 只在 creator overview 执行，baseline/patrol/trace 与 keyword 不读，独立 API 保留。
+- **证明边界**：branch 自动与隔离 PostgreSQL 证据以 [`../acceptance/collection-lifecycle-001-visual-acceptance.md`](../acceptance/collection-lifecycle-001-visual-acceptance.md) 为准。未应用 shared migration、未切 runtime、未部署、未访问外部平台、未取得 Mog 业务验收。
 
 ## 2026-09-03 · DESIGN-011 生产流与执行工位落地 v7（首个运行时迁移）
 
