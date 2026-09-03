@@ -25,7 +25,7 @@ Mog 已明确：媒体生命周期合同决策完成；`LOCAL-001` 不再作为�
 - 已验收 Browser Producer 运行时代码快照为 `d7e722018f4f4cfa217c9cf5c0cac6fbcdcaacb3`（PR #132 已合并）；当前 `main` 在其上只有后续的文档／治理状态提交，不改变运行时工件或行为。
 - 当前发行包为 `plugins/linggan-intelligence-browser/releases/linggan-intelligence-browser-v0.8.28.zip`，SHA-256 为 `015a3de775a55d6ac2be8dac5d6ca833f7d88f3d772d641a73c7bbe91f51184e`。
 - 工位 `1` 已通过正式 API 认领 active installation `9179e6cf-3316-493a-abee-2e7eb162f824` / `0.8.28`，旧 `0.8.23` 被取代。
-- API、巡检 worker 与媒体 worker 均从 `linggan-intelligence-origin-main-d7e7220` 快照运行；`/health` 为 `LINGGAN_BROWSER_PRODUCER_RUNTIME`、`PLUGIN_RUNTIME_002_SCHEMA_READY / READY`、scheduler running。
+- API、巡检 worker 与媒体 worker 当时从 `linggan-intelligence-origin-main-d7e7220` 快照运行。**该部署模型已于 2026-09-03 废弃**：三个服务现在统一从跟随 `origin/main` 的 `runtime-main` 运行，见 [`runbooks/local-runtime-deployment.md`](runbooks/local-runtime-deployment.md)。此处保留当时的 `/health` 结论（`LINGGAN_BROWSER_PRODUCER_RUNTIME`、`PLUGIN_RUNTIME_002_SCHEMA_READY / READY`、scheduler running），但运行来源的描述不再成立。
 - 真实样本“智商131的A娃。”（`contentExternalId=6a2047060000000022027f0e`，Work `b681991d-525a-4332-8fea-e937e7684c15`）在 `0.8.28` 一次有效标准详情执行中接纳详情 1、媒体槽位 6、顶层评论 15、回复 15；详情窗口为 `requested=30 / unique=30 / page=233 / detail_window complete`。
 - 同轮 6 个逻辑媒体槽位、7 个字节组件全部 acquired/materialized：封面 1、正文图 3、Live Photo still+motion、作者头像 1。Evidence UI 已显示本地封面、本地头像、独立“作品作者 / 监控目标”；未证明监控目标时保持 `NOT_VERIFIED`。
 - 当前完成证明为 231 项插件测试、Rust workspace、49 项隔离 PostgreSQL proof、production build、content runtime、运行隔离、release verify/reproducibility；production npm audit 为 0。全 dev 依赖的既有 9 项 audit 提示和 Webpack bundle 体积警告继续保留。
