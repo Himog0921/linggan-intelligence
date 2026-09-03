@@ -2881,7 +2881,7 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
           <span class="v7-side-nav" aria-disabled="true"><i>02</i><span>评论研究</span></span>
           <span class="v7-side-nav" aria-disabled="true"><i>03</i><span>创作者</span></span>
           <span class="v7-side-nav" aria-disabled="true"><i>04</i><span>已存查询</span></span>
-          <div class="v7-side-foot"><span class="v7-side-dot"></span><span class="v7-zh-status">只读本机材料投影</span> <span class="v7-tech-key">MATERIAL PROJECTION</span><br><span class="v7-zh-status">不会触发平台采集</span> <span class="v7-tech-key">LOCAL READ ONLY</span></div>
+          <div class="v7-side-foot"><span class="v7-side-dot"></span><span class="v7-zh-status">只读本机材料投影</span><br><span class="v7-zh-status">列表与详情不触发采集</span></div>
         </aside>
 
         <main class="v7-main ev-main" aria-labelledby="page-title">
@@ -2949,7 +2949,7 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
                 <button class="ev-inspector-reopen" id="ev-reopen-inspector" type="button" hidden>打开检查器 <span class="v7-tech-key">INSPECTOR</span></button>
               </div>
               <div class="ev-feedback" id="ev-feedback" role="status" aria-live="polite"></div>
-              <div class="ev-table-head" id="ev-table-head" aria-hidden="true" hidden><span>作品</span><span>作者与监控目标</span><span>材料</span><span>状态</span><span>发布时间</span><span>最近观察</span></div>
+              <div class="ev-table-head" id="ev-table-head" aria-hidden="true" hidden><span>作品</span><span>作者</span><span>材料</span><span class="ev-head-metrics" id="ev-head-metrics" aria-label="互动数据"></span><span>发布时间</span><span>最近观察</span></div>
               <div class="ev-work-list" id="ev-work-list" role="listbox" aria-label="作品材料集合"></div>
               <div class="ev-list-footer"><button class="ev-button ev-button--secondary" id="ev-next-list" type="button" hidden>继续读取作品</button></div>
             </section>

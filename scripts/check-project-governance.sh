@@ -119,12 +119,18 @@ fi
 # 散落的真正代价不是磁盘，是没人答得上来「哪些工作还没推」。
 #
 # 唯一例外是常驻服务的运行目录，它的生命周期与部署绑定，不是交付用的 worktree。
-repo_root="$(git rev-parse --show-toplevel)"
+# The sanctioned path is anchored on the MAIN worktree, not on whichever worktree is running
+# this check. `git rev-parse --show-toplevel` returns the current worktree, so running the check
+# from inside .worktrees/<slug>/ reported the main repository as a stray worktree -- failing the
+# check in exactly the situation AGENTS.md requires (protected delivery works in a worktree and
+# must run this script before committing). The first entry of `git worktree list` is the main
+# worktree.
+main_worktree="$(git worktree list --porcelain | awk '/^worktree /{print substr($0,10); exit}')"
 runtime_worktree="$HOME/Library/Application Support/Linggan Intelligence/runtime-main"
 while IFS= read -r worktree_path; do
-  [[ "$worktree_path" == "$repo_root" ]] && continue
+  [[ "$worktree_path" == "$main_worktree" ]] && continue
   [[ "$worktree_path" == "$runtime_worktree" ]] && continue
-  [[ "$worktree_path" == "$repo_root/.worktrees/"* ]] && continue
+  [[ "$worktree_path" == "$main_worktree/.worktrees/"* ]] && continue
   report_error "worktree outside the sanctioned path (see AGENTS.md): $worktree_path"
 done < <(git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}')
 

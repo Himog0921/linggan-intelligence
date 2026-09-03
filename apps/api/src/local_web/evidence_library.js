@@ -100,6 +100,7 @@
     inspector: document.getElementById('ev-inspector'),
     inspectorTitle: document.getElementById('ev-inspector-title'),
     inspectorRef: document.getElementById('ev-inspector-ref'),
+    headMetrics: document.getElementById('ev-head-metrics'),
     inspectorFeedback: document.getElementById('ev-inspector-feedback'),
     openSource: document.getElementById('ev-open-source'),
     requestMedia: document.getElementById('ev-request-media'),
@@ -518,16 +519,6 @@
 
   function materialBlock(item) {
     const summary = materialSummary(item);
-    const wrapper = node('div');
-    const headline = node('div', 'ev-material-summary');
-    /* The table already names this column, so the inline label is hidden there by CSS rather
-     * than repeated in every cell. */
-    headline.append(node('span', 'ev-material-label', '材料'));
-    const ratio = node('b', null, summary.ready === null
-      ? `未知 / ${summary.applicable}`
-      : `${summary.ready} / ${summary.applicable}`);
-    headline.append(ratio);
-    wrapper.append(headline);
     const rail = node('div', 'ev-material-rail');
     summary.segments.forEach((segment) => {
       const cell = node('i', 'ev-mat-seg');
@@ -537,8 +528,7 @@
         : `${segment.label}：本作品不适用，不计入分母`;
       rail.append(cell);
     });
-    wrapper.append(rail);
-    return { element: wrapper, summary };
+    return { rail, summary };
   }
 
   /* ------------------------------------------------------------- readout */
@@ -613,12 +603,42 @@
   /* The work's author and the monitoring target are two different facts and are never merged
    * into one line: the target is who we chose to watch, the creator is who actually published
    * this. `authorIdentityMatchState` says whether they have been proven to be the same person. */
-  function creatorAndTargetFacts(item, compact = false) {
+  // LANG-01: Chinese has to carry the meaning on its own. The bare NOT_VERIFIED sat beside the
+  // target name and read as "this target is unverified", which is the opposite of what it says.
+  // This block is the only place both facts still appear side by side — the list and the table
+  // show one author name — so the relation label rides along with it.
+  const identityRelationLabels = {
+    MATCHED: '已证实为作者',
+    MISMATCH: '与作者不一致',
+    NOT_VERIFIED: '未证实为作者',
+    NOT_APPLICABLE: '不适用',
+  };
+
+  function effectiveAuthor(item) {
+    if (item.display?.creatorState === 'KNOWN' && item.display?.creatorDisplayName) {
+      return item.display.creatorDisplayName;
+    }
+    const context = item.collectionContext || {};
+    const matched = context.authorIdentityMatchState !== 'MISMATCH';
+    if (matched && context.targetKind === 'creator' && context.targetDisplayState === 'KNOWN' && context.targetDisplayName) {
+      return context.targetDisplayName;
+    }
+    return '当前未知';
+  }
+
+  function authorFact(item) {
+    const name = effectiveAuthor(item);
+    const fact = node('div', 'ev-author-fact');
+    fact.append(authorAvatar(item.media, `${name}的头像`), node('strong', null, name));
+    return fact;
+  }
+
+  function creatorAndTargetFacts(item) {
     const creator = knownText(item.display?.creatorDisplayName, item.display?.creatorState, '当前未知');
     const target = item.collectionContext?.targetDisplayState === 'KNOWN'
       ? item.collectionContext.targetDisplayName
       : '当前未知';
-    const facts = node('div', compact ? 'ev-context-facts ev-context-facts--compact' : 'ev-context-facts');
+    const facts = node('div', 'ev-context-facts');
     const creatorFact = node('div', 'ev-identity-fact ev-creator-fact');
     const creatorCopy = node('span');
     creatorCopy.append(node('small', null, '作品作者'), node('strong', null, creator));
@@ -626,7 +646,12 @@
     const targetFact = node('div', 'ev-identity-fact ev-target-fact');
     const targetCopy = node('span');
     targetCopy.append(node('small', null, '监控目标'), node('strong', null, target));
-    targetFact.append(targetCopy, tech(item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED'));
+    const matchState = item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED';
+    targetFact.append(
+      targetCopy,
+      node('small', 'ev-identity-relation', identityRelationLabels[matchState] || '身份关系当前未知'),
+      tech(matchState),
+    );
     facts.append(creatorFact, targetFact);
     return facts;
   }
@@ -663,26 +688,37 @@
     return block;
   }
 
-  function engagementBlock(item) {
+  const ENGAGEMENT_METRICS = [
+    ['like', '点赞'], ['comment', '评论'], ['collect', '收藏'], ['share', '分享'],
+  ];
+
+  function engagementBlock(item, { numbersOnly = false } = {}) {
     const engagement = item.display?.engagement || {};
     const metrics = [
-      ['赞', engagement.likeCount, engagement.likeCountState],
-      ['评', engagement.commentCount, engagement.commentCountState],
-      ['藏', engagement.collectCount, engagement.collectCountState],
-      ['转', engagement.shareCount, engagement.shareCountState],
+      ['like', '点赞', engagement.likeCount, engagement.likeCountState],
+      ['comment', '评论', engagement.commentCount, engagement.commentCountState],
+      ['collect', '收藏', engagement.collectCount, engagement.collectCountState],
+      ['share', '分享', engagement.shareCount, engagement.shareCountState],
     ];
     const wrapper = node('div', 'ev-engagement');
-    metrics.forEach(([label, value, state]) => {
-      const cell = node('span', null, label);
-      cell.append(node('b', null, state === 'KNOWN' && Number.isFinite(Number(value))
+    metrics.forEach(([kind, label, value, state]) => {
+      const cell = node('span');
+      const reading = state === 'KNOWN' && Number.isFinite(Number(value))
         ? Number(value).toLocaleString('zh-CN')
-        : '未知'));
+        : '未知';
+      // In the table the icon is in the column header, so a row carries the number alone. The
+      // accessible name has to carry both: an aria-label on this span replaces its text in the
+      // row's computed name, and the header icons cannot fill the gap because ev-table-head is
+      // aria-hidden.
+      if (numbersOnly) cell.setAttribute('aria-label', `${label} ${reading}`);
+      else cell.append(metricIcon(kind, label));
+      cell.append(node('b', null, reading));
       wrapper.append(cell);
     });
     return wrapper;
   }
 
-  function publishedCopy(item, compact = false) {
+  function publishedCopy(item, compact = false, withFieldName = true) {
     if (item.display?.publishedAtState === 'KNOWN') {
       const raw = item.display?.publishedAt;
       if (!raw) return '发布时间已知';
@@ -691,7 +727,7 @@
     if (item.display?.publishedAtState === 'SOURCE_TEXT_ONLY') {
       return `来源时间：${item.display?.publishedAtSourceText || '已观察'}`;
     }
-    return '发布时间当前未知';
+    return withFieldName ? '发布时间当前未知' : '当前未知';
   }
 
   function rowFor(item) {
@@ -707,18 +743,15 @@
 
     const identity = node('div', 'ev-identity');
     const eyebrow = node('div', 'ev-eyebrow');
-    eyebrow.append(
-      node('span', null, item.identity?.platform?.toUpperCase() || 'PLATFORM UNKNOWN'),
-      node('span', null, publicRef ? `WORK ${publicRef.slice(0, 8).toUpperCase()}` : 'PUBLIC REF UNKNOWN'),
-    );
+    eyebrow.append(node('span', null, item.identity?.platform?.toUpperCase() || '平台未知'));
     const title = node('h2', null, knownText(item.display?.title, item.display?.titleState, '标题当前未知'));
     const meta = node('div', 'ev-meta');
-    meta.append(creatorAndTargetFacts(item), node('span', 'ev-time-line', published));
+    meta.append(authorFact(item), node('span', 'ev-time-line', published));
     identity.append(eyebrow, title, meta, evidenceBlock(item.evidenceFragment), engagementBlock(item));
 
     const material = materialBlock(item);
     const side = node('div', 'ev-side');
-    side.append(material.element);
+    side.append(material.rail);
     const detailState = laneSummary(item, 'detail')?.state || 'UNKNOWN';
     side.append(stateLine(detailState));
     const observedAt = item.summary?.lastObservedAt;
@@ -728,15 +761,19 @@
 
     if (model.activeLayout === 'table') {
       row.append(
-        tableCell(title.textContent, `${item.identity?.platform?.toUpperCase() || ''} ${publicRef ? publicRef.slice(0, 8).toUpperCase() : ''}`.trim()),
+        tableCell(title.textContent, ''),
         (() => {
           const cell = node('div', 'ev-table-cell');
-          cell.append(creatorAndTargetFacts(item, true));
+          cell.append(authorFact(item));
           return cell;
         })(),
-        material.element,
-        stateLine(detailState),
-        tableCell(published, ''),
+        (() => {
+          const cell = node('div', 'ev-table-material');
+          cell.append(material.rail, stateLine(detailState));
+          return cell;
+        })(),
+        engagementBlock(item, { numbersOnly: true }),
+        tableCell(publishedCopy(item, true, false), ''),
         tableCell(compactMoment(item.summary?.lastObservedAt) || '未知', ''),
       );
     } else {
@@ -747,6 +784,31 @@
     return row;
   }
 
+  /* LIDS icon system: 24 grid, 1.5 stroke, currentColor, sized 16/20/24. Character glyphs are
+   * forbidden -- they render differently per platform, cannot control stroke weight and will not
+   * align to the text beside them. Each icon keeps an accessible name: the number next to it says
+   * nothing on its own. */
+  const METRIC_ICON_PATHS = {
+    like: 'M12 20.5C12 20.5 3.5 15.4 3.5 9.9A4.9 4.9 0 0 1 12 6.6a4.9 4.9 0 0 1 8.5 3.3c0 5.5-8.5 10.6-8.5 10.6z',
+    comment: 'M4 3.5h16a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H9.2L4 20.2V3.5z',
+    collect: 'M6.5 2.5h11a1 1 0 0 1 1 1v18l-6.5-4.8-6.5 4.8v-18a1 1 0 0 1 1-1z',
+    share: 'M21.6 2.6 2.9 9.9a.6.6 0 0 0 .05 1.13l4.6 1.5 1.6 4.9a.6.6 0 0 0 1.06.18l2.2-2.9 4.4 3.2a.6.6 0 0 0 .94-.33l4-14.2a.6.6 0 0 0-.15-.78z',
+  };
+
+  function metricIcon(kind, label) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('fill', 'currentColor');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', label);
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', METRIC_ICON_PATHS[kind]);
+    svg.append(path);
+    return svg;
+  }
+
   function tableCell(primary, secondary) {
     const cell = node('div', 'ev-table-cell');
     cell.append(node('b', null, primary));
@@ -755,6 +817,9 @@
   }
 
   function renderRows(appended) {
+    if (refs.headMetrics && !refs.headMetrics.childElementCount) {
+      ENGAGEMENT_METRICS.forEach(([kind, label]) => refs.headMetrics.append(metricIcon(kind, label)));
+    }
     if (!appended) refs.list.replaceChildren();
     refs.list.dataset.layout = model.activeLayout;
     refs.tableHead.hidden = model.activeLayout !== 'table';
@@ -797,10 +862,10 @@
   function queryReceipt(payload, appended) {
     const notes = [];
     if (payload.scanLimited) {
-      notes.push(['扫描预算已触发，当前结果不是全部匹配；可继续读取', 'SCAN LIMITED']);
+      notes.push(['扫描预算已触发，当前结果不是全部匹配；可继续读取']);
     }
     if (payload.truncated && !payload.cursor) {
-      notes.push(['本次读取已截断，但来源没有给出继续读取的游标', 'TRUNCATED WITHOUT CURSOR']);
+      notes.push(['本次读取已截断，但来源没有给出继续读取的游标']);
     }
     refs.receipt.replaceChildren();
     refs.receipt.hidden = notes.length === 0;
@@ -832,7 +897,7 @@
         model.selectedRef = null;
         clearInspector();
       }
-      setFeedback('loading', '正在读取本机材料投影', '只读取 Linggan 已接纳的作品级材料；不会触发平台搜索或采集。', 'LOCAL READ');
+      setFeedback('loading', '正在读取本机材料投影', '只读取 Linggan 已接纳的作品级材料；不会触发平台搜索或采集。');
       refs.list.replaceChildren();
     }
     refs.nextList.disabled = true;
@@ -847,7 +912,7 @@
       renderReadout();
       syncUrl(append ? 'replace' : historyMode);
       if (model.items.length === 0) {
-        setFeedback('empty', '当前查询没有匹配的作品材料', '读取已经成功；这个结果只描述当前本地查询，不证明平台或现实中没有相关内容。', 'NO MATCHING MATERIAL');
+        setFeedback('empty', '当前查询没有匹配的作品材料', '读取已经成功；这个结果只描述当前本地查询，不证明平台或现实中没有相关内容。');
         clearInspector();
       } else {
         clearFeedback();
@@ -861,10 +926,10 @@
       renderRows(false);
       renderReadout();
       refs.nextList.hidden = true;
-      setFeedback('error', '本机材料读取暂时不可用', '当前没有读取任何作品材料；页面不会回退到旧卡片、远程数据库或平台 CDN。', error.code || 'READ PROJECTION UNAVAILABLE');
+      setFeedback('error', '本机材料读取暂时不可用', '当前没有读取任何作品材料；页面不会回退到旧卡片、远程数据库或平台 CDN。', error.code || null);
       refs.receipt.replaceChildren();
       refs.receipt.hidden = false;
-      addTextWithTech(refs.receipt, '当前未读取任何材料，不能据此判断库为空或来源不存在。', error.code || 'READ PROJECTION UNAVAILABLE');
+      addTextWithTech(refs.receipt, '当前未读取任何材料，不能据此判断库为空或来源不存在。', error.code || null);
     }
   }
 
@@ -958,7 +1023,7 @@
     refs.openSource.disabled = true;
     refs.requestMedia.disabled = true;
     refs.inspectorFeedback.hidden = false;
-    refs.inspectorFeedback.replaceChildren(node('strong', null, '尚未选择作品'), tech('SELECTION REQUIRED'));
+    refs.inspectorFeedback.replaceChildren(node('strong', null, '尚未选择作品'));
     panels.forEach((panel) => panel.replaceChildren());
   }
 
@@ -987,7 +1052,7 @@
     if (fromUser) openInspector();
     syncUrl(fromUser ? 'push' : 'replace');
     refs.inspectorFeedback.hidden = false;
-    refs.inspectorFeedback.replaceChildren(node('strong', null, '正在读取当前作品详情'), tech('DETAIL READ'));
+    refs.inspectorFeedback.replaceChildren(node('strong', null, '正在读取当前作品详情'));
     refs.inspectorTitle.textContent = knownText(item.display?.title, item.display?.titleState, '标题当前未知');
     refs.inspectorRef.textContent = publicRef.slice(0, 8).toUpperCase();
     model.detailController?.abort();
@@ -1000,10 +1065,10 @@
     } catch (error) {
       if (error.name === 'AbortError') return;
       refs.inspectorFeedback.hidden = false;
-      refs.inspectorFeedback.replaceChildren(
-        node('strong', null, '当前作品详情读取失败'),
-        tech(error.code || 'MATERIAL DETAIL UNAVAILABLE'),
-      );
+      // error.code is a contract value and keeps its technical rendering; the invented English
+      // fallback does not, so an unlabelled failure just says so in Chinese.
+      refs.inspectorFeedback.replaceChildren(node('strong', null, '当前作品详情读取失败'));
+      if (error.code) refs.inspectorFeedback.append(tech(error.code));
       panels.forEach((panel) => panel.replaceChildren(sourceIncompleteBlock('当前详情未读取，列表通道仍可查看，但不能据此补造 Inspector。')));
     }
   }
@@ -1017,22 +1082,57 @@
     panels.forEach((panel) => panel.replaceChildren(sourceIncompleteBlock(detail)));
   }
 
+  // PAT-003 places the boundary band in front of a region once. This used to render a warning
+  // panel per empty block, so a single inspector carried the same sentence five or more times
+  // and the warning colour stopped meaning anything. The specific sentence stays -- it says
+  // something the band cannot -- but it no longer competes with real failures for attention.
   function sourceIncompleteBlock(detail) {
-    const block = node('section', 'ev-inline-state');
-    block.dataset.tone = 'warning';
-    block.append(node('strong', null, '来源信息不完整'), node('p', null, detail), tech('SOURCE INCOMPLETE'));
+    const block = node('p', 'ev-source-note');
+    block.append(node('span', null, detail), tech('SOURCE INCOMPLETE'));
     return block;
   }
 
-  function factGrid(rows) {
-    const list = node('dl', 'ev-facts');
+  /* Collapsing is layout, not rewriting. A row that moves inside the disclosure keeps its exact
+   * label, its exact copy and its exact state code; expanding restores the previous rendering
+   * character for character. It exists because a grid where eight of eleven rows read UNKNOWN
+   * buries the three rows that carry an answer. Below three unknowns there is nothing to gain,
+   * so the grid renders flat. */
+  const UNKNOWN_COLLAPSE_THRESHOLD = 3;
+
+  function appendFactRows(list, rows) {
     rows.forEach(([label, value, code]) => {
       list.append(node('dt', null, label));
       const value_ = node('dd');
       addTextWithTech(value_, value, code);
       list.append(value_);
     });
-    return list;
+  }
+
+  function isUnknownRow([, value, code]) {
+    return code === 'UNKNOWN' && typeof value === 'string' && value.includes('未知');
+  }
+
+  function factGrid(rows) {
+    const unknown = rows.filter(isUnknownRow);
+    if (unknown.length < UNKNOWN_COLLAPSE_THRESHOLD) {
+      const list = node('dl', 'ev-facts');
+      appendFactRows(list, rows);
+      return list;
+    }
+    const fragment = document.createDocumentFragment();
+    const known = rows.filter((row) => !isUnknownRow(row));
+    if (known.length > 0) {
+      const list = node('dl', 'ev-facts');
+      appendFactRows(list, known);
+      fragment.append(list);
+    }
+    const details = node('details', 'ev-facts-collapsed');
+    details.append(node('summary', null, `尚未取得 ${unknown.length} 项`));
+    const hidden = node('dl', 'ev-facts');
+    appendFactRows(hidden, unknown);
+    details.append(hidden);
+    fragment.append(details);
+    return fragment;
   }
 
   function section(title, code) {
@@ -1055,17 +1155,17 @@
   function receiptBlock(title, receipt, channelUrl) {
     const wrapper = node('div', 'ev-channel-receipt');
     const heading = node('div', 'ev-channel-title');
-    heading.append(node('strong', null, title), tech('BOUNDED CHANNEL'));
+    heading.append(node('strong', null, title));
     wrapper.append(heading);
     if (!receipt || typeof receipt !== 'object') {
       wrapper.append(sourceIncompleteBlock('当前详情没有提供该通道的读取回执。'));
       return wrapper;
     }
     wrapper.append(factGrid([
-      ['总数', receipt.total ?? '当前未知', receipt.total === null || receipt.total === undefined ? 'UNKNOWN' : 'TOTAL'],
-      ['本次返回', receipt.returned ?? '当前未知', receipt.returned === null || receipt.returned === undefined ? 'UNKNOWN' : 'RETURNED'],
-      ['是否截断', receipt.truncated === true ? '是，可继续读取' : receipt.truncated === false ? '否' : '当前未知', 'TRUNCATED'],
-      ['下一游标', receipt.nextCursor || '无', 'NEXT CURSOR'],
+      ['总数', receipt.total ?? '当前未知', receipt.total === null || receipt.total === undefined ? 'UNKNOWN' : null],
+      ['本次返回', receipt.returned ?? '当前未知', receipt.returned === null || receipt.returned === undefined ? 'UNKNOWN' : null],
+      ['是否截断', receipt.truncated === true ? '是，可继续读取' : receipt.truncated === false ? '否' : '当前未知'],
+      ['下一游标', receipt.nextCursor || '无'],
     ]));
     if (receipt.truncated && !channelUrl) {
       const note = node('div', 'ev-inline-state');
@@ -1174,37 +1274,49 @@
     }[code] || '来源未完整表达';
   }
 
+  /* Names each dimension by the state its segment is drawn in. The rail already carries this,
+   * but only to a mouse: without hovering every cell there was no way to tell which of the five
+   * is the filled one. Stating it turns the legend into the answer, which is why there is no
+   * separate summary line above it saying the same thing again. */
+  function completenessLegend(summary) {
+    const legend = node('div', 'ev-completeness-legend');
+    summary.segments.forEach((segment) => {
+      const cell = node('span', null, segment.label);
+      cell.dataset.fill = segment.fill;
+      cell.title = segment.applicable
+        ? `${segment.label}：${stateMeta(segment.state)[0]}`
+        : `${segment.label}：本作品不适用，不计入分母`;
+      legend.append(cell);
+    });
+    return legend;
+  }
+
   function renderOverview(item, inspector, reobservationChannel) {
     const panel = panels.get('overview');
     panel.replaceChildren();
 
+    // The ratio goes the same way it went in the table: the rail draws each dimension's state
+    // and the labels under it name them, so 2 / 5 is a third encoding of what is already there.
     const summaryBlock = materialBlock(item);
-    const overview = section('材料完整度', 'MATERIAL SUMMARY');
-    overview.append(summaryBlock.element);
-    const legend = node('div', 'ev-media-hint');
-    legend.append(
-      node('span', null, materialDimensions.map((dimension) => dimension.label).join(' · ')),
-      node('span', null, summaryBlock.summary.segments.some((segment) => !segment.applicable)
-        ? '空心格为本作品不适用，不计入分母'
-        : '五个维度全部适用于本作品'),
-    );
-    overview.append(legend);
+    const overview = section('材料完整度');
+    overview.append(summaryBlock.rail);
+    overview.append(completenessLegend(summaryBlock.summary));
     panel.append(overview);
 
-    const identity = section('作品字段与来源', 'WORK MATERIAL');
+    const identity = section('作品字段与来源');
     identity.append(factGrid([
-      ['稳定引用', item.identity?.publicRef || '当前未知', 'PUBLIC REF'],
-      ['平台', item.identity?.platform || '当前未知', 'PLATFORM'],
+      ['稳定引用', item.identity?.publicRef || '当前未知'],
+      ['平台', item.identity?.platform || '当前未知'],
       ['标题', knownText(item.display?.title, item.display?.titleState), item.display?.titleState || 'UNKNOWN'],
-      ['发布时间', publishedCopy(item), item.display?.publishedAtState || 'UNKNOWN'],
+      ['发布时间', publishedCopy(item, false, false), item.display?.publishedAtState || 'UNKNOWN'],
       ['时间来源字段', item.display?.publishedAtSourceField || '当前未知', item.display?.publishedAtSourceKind || 'unknown'],
-      ['时间精度', item.display?.publishedAtPrecision || 'unknown', item.display?.publishedAtParserVersion || 'PARSER UNKNOWN'],
-      ['最近观察', item.summary?.lastObservedAt || '当前未知', 'OBSERVED AT'],
+      ['时间精度', item.display?.publishedAtPrecision || 'unknown', item.display?.publishedAtParserVersion || null],
+      ['最近观察', item.summary?.lastObservedAt || '当前未知'],
       ['当前主要限制',
         item.summary?.primaryLimitation && item.summary.primaryLimitation !== 'NONE'
           ? limitationCopy(item.summary.primaryLimitation)
           : '本次读取没有记录额外限制',
-        item.summary?.primaryLimitation || 'NONE'],
+        item.summary?.primaryLimitation || null],
     ]));
     panel.append(identity);
 
@@ -1215,53 +1327,48 @@
       observationUi(),
     ));
 
-    const identityContext = section('作者与监控目标', 'SEPARATE SOURCE FACTS');
-    identityContext.append(
-      creatorAndTargetFacts(item),
-      factGrid([
-        ['作者身份关系', item.collectionContext?.authorIdentityMatchState === 'MATCHED' ? '已由平台作者 ID 证明一致' : '尚未证明监控目标就是作品作者', item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED'],
-      ]),
-    );
+    const identityContext = section('作者与监控目标');
+    identityContext.append(creatorAndTargetFacts(item));
     panel.append(identityContext);
 
-    const current = section('当前互动状态与变化', 'LATEST KNOWN PER METRIC');
+    const current = section('当前互动状态与变化');
     const currentMetrics = inspector.engagementCurrent?.metrics && typeof inspector.engagementCurrent.metrics === 'object'
       ? inspector.engagementCurrent.metrics
       : {};
     current.append(factGrid([
-      observation.currentMetricFact('点赞', currentMetrics.likeCount, 'LIKE COUNT'),
-      observation.currentMetricFact('评论', currentMetrics.commentCount, 'COMMENT COUNT'),
-      observation.currentMetricFact('收藏', currentMetrics.collectCount, 'COLLECT COUNT'),
-      observation.currentMetricFact('分享', currentMetrics.shareCount, 'SHARE COUNT'),
+      observation.currentMetricFact('点赞', currentMetrics.likeCount),
+      observation.currentMetricFact('评论', currentMetrics.commentCount),
+      observation.currentMetricFact('收藏', currentMetrics.collectCount),
+      observation.currentMetricFact('分享', currentMetrics.shareCount),
     ]));
     panel.append(current);
 
-    const detailCurrent = section('详情字段当前事实', 'FIELD-WISE PROVENANCE');
+    const detailCurrent = section('详情字段当前事实');
     const fields = inspector.detailCurrent && typeof inspector.detailCurrent === 'object' ? inspector.detailCurrent : {};
     detailCurrent.append(factGrid([
-      observation.detailCurrentFact('标题来源', fields.title, 'TITLE'),
-      observation.detailCurrentFact('作者来源', fields.creator, 'CREATOR'),
-      observation.detailCurrentFact('发布时间来源', fields.publishedAt, 'PUBLISHED AT'),
-      observation.detailCurrentFact('正文字段', fields.body, 'RESTRICTED BODY'),
+      observation.detailCurrentFact('标题来源', fields.title),
+      observation.detailCurrentFact('作者来源', fields.creator),
+      observation.detailCurrentFact('发布时间来源', fields.publishedAt),
+      observation.detailCurrentFact('正文字段', fields.body),
     ]));
     panel.append(detailCurrent);
 
     /* Platform-reported counts and locally retained counts are two different facts and are
      * never merged into one number. */
-    const platform = section('平台计数与本地留存', 'PLATFORM VS LOCAL');
+    const platform = section('平台计数与本地留存');
     const comments = inspector.commentsCoverage || {};
     platform.append(factGrid([
       ['平台点赞', knownText(item.display?.engagement?.likeCount, item.display?.engagement?.likeCountState), item.display?.engagement?.likeCountState || 'UNKNOWN'],
       ['平台评论数', knownText(item.display?.engagement?.commentCount, item.display?.engagement?.commentCountState), item.display?.engagement?.commentCountState || 'UNKNOWN'],
       ['平台收藏', knownText(item.display?.engagement?.collectCount, item.display?.engagement?.collectCountState), item.display?.engagement?.collectCountState || 'UNKNOWN'],
       ['平台分享', knownText(item.display?.engagement?.shareCount, item.display?.engagement?.shareCountState), item.display?.engagement?.shareCountState || 'UNKNOWN'],
-      ['本地留存评论', Number.isFinite(Number(comments.retained)) ? comments.retained : '当前未知', 'RETAINED LOCALLY'],
-      ['已去重评论身份', Number.isFinite(Number(comments.uniqueCollectedCount)) ? comments.uniqueCollectedCount : '当前未知', 'UNIQUE COLLECTED'],
+      ['本地留存评论', Number.isFinite(Number(comments.retained)) ? comments.retained : '当前未知'],
+      ['已去重评论身份', Number.isFinite(Number(comments.uniqueCollectedCount)) ? comments.uniqueCollectedCount : '当前未知', ],
       ['本地留存边界', comments.stoppedReason ? `停止原因 ${comments.stoppedReason}` : '当前未表达', comments.collectionState || 'UNKNOWN'],
     ]));
     panel.append(platform);
 
-    const lanes = section('材料通道状态', 'LANE STATUS');
+    const lanes = section('材料通道状态');
     const board = node('div', 'ev-detail-lanes');
     laneOrder.forEach((lane) => board.append(laneCell(item, lane)));
     lanes.append(board);
@@ -1269,7 +1376,7 @@
 
     panel.append(observation.engagementTimeline(inspector, observationUi()));
 
-    const author = section('作者上下文', 'VERSIONED CONTEXT');
+    const author = section('作者上下文');
     const context = inspector.authorContext;
     if (!context || typeof context !== 'object') {
       author.append(sourceIncompleteBlock('当前详情没有合格作者上下文；这不表示作者不存在。'));
@@ -1278,7 +1385,7 @@
         ['显示名', knownText(context.displayName, context.displayNameState), context.displayNameState || 'UNKNOWN'],
         ['简介', context.biographyState === 'KNOWN' ? '已形成状态化上下文' : '当前未知', context.biographyState || 'UNKNOWN'],
         ['关注者数', context.followerCountState === 'KNOWN' && context.followerCount !== null ? context.followerCount : '当前未知', context.followerCountState || 'UNKNOWN'],
-        ['观察时间', context.observedAt || '当前未知', 'OBSERVED AT'],
+        ['观察时间', context.observedAt || '当前未知'],
       ]));
     }
     panel.append(author);
@@ -1296,7 +1403,7 @@
     const panel = panels.get('evidence');
     panel.replaceChildren();
 
-    const strongest = section('列表引用的原声', 'ROW EXCERPT');
+    const strongest = section('列表引用的原声');
     const fragment = listItem?.evidenceFragment;
     if (!fragment) {
       strongest.append(sourceIncompleteBlock('这个作品还没有可引用的原文、评论或图片文字。这只描述当前已接纳的材料，不表示平台上没有内容。'));
@@ -1305,11 +1412,11 @@
       strongest.append(factGrid([
         ['来源类型', fragmentSourceLabels[fragment.sourceKind] || '未表达', fragment.sourceKind || 'UNKNOWN'],
         ['选取依据', fragment.selectionBasis === 'SEARCH_MATCH' ? '包含当前检索词' : '当前最具作者性的可读材料', fragment.selectionBasis || 'UNKNOWN'],
-        ['是否截断', fragment.truncated ? '是，已按展示边界截断' : '否', fragment.truncated ? 'TRUNCATED' : 'WHOLE'],
-        ['来源引用', fragment.sourceRef || '当前未表达', fragment.sourceRef ? 'SOURCE REF' : 'UNKNOWN'],
+        ['是否截断', fragment.truncated ? '是，已按展示边界截断' : '否'],
+        ['来源引用', fragment.sourceRef || '当前未表达', fragment.sourceRef ? null : 'UNKNOWN'],
       ]));
       if (fragment.slotKey) {
-        strongest.append(factGrid([['所在媒体对象', fragment.slotKey, 'SLOT KEY']]));
+        strongest.append(factGrid([['所在媒体对象', fragment.slotKey]]));
       }
     }
     panel.append(strongest);
@@ -1317,18 +1424,34 @@
     /* Raw material is shown as-is. Nothing on this page replaces an original sentence with a
      * generated summary of it. */
     const texts = derivedTexts(inspector);
-    const machine = section('图片文字与转录原文', 'MACHINE READ');
+    const machine = section('图片文字与转录原文');
     if (texts.length === 0) {
       machine.append(sourceIncompleteBlock('当前详情没有已识别的图片文字或转录文本；不把缺少记录写成处理成功或失败。'));
     } else {
+      // material_evidence_fragment.rs already excludes cover OCR from row-level quotation: a
+      // cover is a designed graphic, and OCR of one comes back as noise. That judgement existed
+      // only in the read model, so this surface presented the same noise as acquired evidence.
+      // The text is still shown -- it is real material -- but it is no longer presented as
+      // something a reader can quote.
+      machine.append(node('p', 'ev-section-note', '以下为机器识别结果，与原图可能有出入。'));
+      const coverSlotKeys = new Set(
+        (Array.isArray(inspector.mediaSlots) ? inspector.mediaSlots : [])
+          .filter((slot) => slot?.purpose === 'cover' && slot.slotKey)
+          .map((slot) => slot.slotKey),
+      );
       texts.forEach((derivative) => {
         const entry = node('article', 'ev-derivative');
+        const isCover = coverSlotKeys.has(derivative.slotKey);
         const head = node('div', 'ev-derivative-head');
         head.append(
           node('strong', null, fragmentSourceLabels[derivative.kind] || derivative.kind || '派生类型当前未知'),
-          tech(derivative.slotKey || 'SLOT UNKNOWN'),
+          tech(derivative.slotKey || '槽位未知'),
         );
+        if (isCover) head.append(node('span', 'ev-inline-note', '封面图 · 不宜直接引用'));
         entry.append(head, node('q', null, derivative.displayText), stateLine(derivative.state || 'UNKNOWN'));
+        if (isCover) {
+          entry.append(node('p', 'ev-section-note', '封面是设计排版，机器识别结果常为噪声；列表引用的原声不采用它。'));
+        }
         machine.append(entry);
       });
     }
@@ -1421,7 +1544,7 @@
     nav.append(previous, position, next);
     const matchIndex = objects.findIndex((object) => object.isMatch);
     if (matchIndex >= 0) {
-      const jump = node('button', 'ev-media-jump', 'GO TO MATCH');
+      const jump = node('button', 'ev-media-jump', '跳到命中');
       jump.type = 'button';
       jump.addEventListener('click', () => scrollToObject(matchIndex, true));
       nav.insertBefore(jump, previous);
@@ -1630,21 +1753,20 @@
     model.mediaObjects = objects;
     model.mediaIndex = 0;
 
-    const local = section('LOCAL MEDIA', `PROJECTED / ${String(objects.length).padStart(2, '0')} OBJECTS`);
+    const local = section('本机媒体材料', String(objects.length).padStart(2, '0'));
     if (objects.length === 0) {
       const empty = node('div', 'ev-inline-state');
       empty.dataset.tone = 'warning';
       empty.append(
         node('strong', null, '当前没有本地媒体对象'),
         node('p', null, '这只说明本机还没有留存这个作品的媒体副本；这不表示作品没有媒体。'),
-        tech('NO LOCAL MEDIA'),
       );
       const action = node('div', 'ev-channel-actions');
       const request = node('button', 'ev-button ev-button--secondary', '补采媒体');
       request.type = 'button';
       request.disabled = true;
       request.title = '补采需要采集授权，本页只读，不触发平台访问。';
-      action.append(request, tech('ACQUISITION NOT AUTHORIZED HERE'));
+      action.append(request, node('span', 'ev-inline-note', '本页不授权采集'));
       empty.append(action);
       local.append(empty);
     } else {
@@ -1652,12 +1774,12 @@
     }
     panel.append(local);
 
-    const ledger = section('材料处理台账', 'PROCESSING LEDGER');
+    const ledger = section('材料处理台账');
     const receipt = channels.media?.receipt || inspector.mediaSlotsReceipt;
     ledger.append(factGrid([
-      ['槽位总数', receipt?.total ?? '当前未知', 'TOTAL SLOTS'],
-      ['本次返回', receipt?.returned ?? '当前未知', 'RETURNED'],
-      ['是否截断', receipt?.truncated === true ? '是，可继续读取' : receipt?.truncated === false ? '否' : '当前未知', 'TRUNCATED'],
+      ['槽位总数', receipt?.total ?? '当前未知'],
+      ['本次返回', receipt?.returned ?? '当前未知'],
+      ['是否截断', receipt?.truncated === true ? '是，可继续读取' : receipt?.truncated === false ? '否' : '当前未知'],
     ]));
     /* The ledger accounts for every local object including the author's avatar; the browsing
      * rail above deliberately leaves the avatar out, because it belongs to the author rather
@@ -1668,13 +1790,15 @@
       const head = node('div', 'ev-derivative-head');
       head.append(
         node('strong', null, `${String(object.index + 1).padStart(2, '0')} · ${purposeLabel(object.purpose)}`),
-        tech(object.slotKey || 'SLOT UNKNOWN'),
+        tech(object.slotKey || '槽位未知'),
       );
       entry.append(head, factGrid([
-        ['本地对象', object.objectRef || '当前未表达', 'MATERIALIZATION REF'],
+        ['本地对象', object.objectRef || '当前未表达'],
         ['字节状态', stateMeta(object.bytesState)[0], object.bytesState],
-        ['文字处理', object.derivedState ? stateMeta(object.derivedState)[0] : '未处理', object.derivedState || 'NOT PROCESSED'],
-        ['采集序号', object.ordinal, object.slot.displayOrderState === 'KNOWN' ? 'DISPLAY ORDER KNOWN' : 'DISPLAY ORDER UNVERIFIED'],
+        ['文字处理', object.derivedState ? stateMeta(object.derivedState)[0] : '未处理', object.derivedState || null],
+        ['采集序号', object.slot.displayOrderState === 'KNOWN'
+          ? String(object.ordinal)
+          : `${object.ordinal}（平台排列顺序未经验证）`],
         ['副本状态', object.slot.replicaState || '当前未知', object.slot.replicaState || 'UNKNOWN'],
       ]));
       ledger.append(entry);
@@ -1794,15 +1918,15 @@
     panel.replaceChildren();
     const provenance = inspector.provenance && typeof inspector.provenance === 'object' ? inspector.provenance : null;
     const receipt = provenanceChannel.receipt || provenance?.receipt;
-    const channel = section('来源轨迹通道', 'BOUNDED CHANNEL');
+    const channel = section('来源轨迹通道');
     channel.append(factGrid([
-      ['总数', receipt?.total ?? '当前未知', 'TOTAL'],
-      ['本次返回', receipt?.returned ?? '当前未知', 'RETURNED'],
-      ['是否截断', receipt?.truncated === true ? '是，可继续读取' : receipt?.truncated === false ? '否' : '当前未知', 'TRUNCATED'],
+      ['总数', receipt?.total ?? '当前未知'],
+      ['本次返回', receipt?.returned ?? '当前未知'],
+      ['是否截断', receipt?.truncated === true ? '是，可继续读取' : receipt?.truncated === false ? '否' : '当前未知'],
     ]));
     panel.append(channel);
 
-    const refsSection = section('来源与执行血缘', 'PROVENANCE');
+    const refsSection = section('来源与执行血缘');
     if (!provenance) {
       refsSection.append(sourceIncompleteBlock('当前详情没有返回来源血缘。'));
     } else {
@@ -1830,7 +1954,7 @@
     }
     panel.append(refsSection);
 
-    const limits = section('限制与访问边界', 'LIMITATIONS');
+    const limits = section('限制与访问边界');
     const values = Array.isArray(inspector.limitations) ? inspector.limitations : [];
     if (!values.length) {
       limits.append(sourceIncompleteBlock('当前详情没有返回限制列表；页面不据此推断没有限制。'));
