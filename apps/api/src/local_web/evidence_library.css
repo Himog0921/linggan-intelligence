@@ -130,7 +130,7 @@
 /* LIDS layout guardrail: a wide screen gets outer white, it does not get wider prose. Without
  * this the identity column reaches 968px at 1920 and a single quote line runs the better part
  * of a metre — technically legible, actually unreadable, and it leaves the row looking stretched.
- * The material rail stays pinned right so the ratios line up down the column while scanning. */
+ * The material rail stays pinned right so the segments line up down the column while scanning. */
 .ev-identity{min-width:0;max-width:760px}
 .ev-eyebrow{display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--v7-ghost);font:650 9px/1.3 var(--lgi-font-mono);letter-spacing:.05em}
 .ev-identity h2{margin:5px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16.5px;font-weight:750;line-height:1.3;letter-spacing:-.015em;color:var(--v7-black)}
@@ -180,10 +180,6 @@
  * this work is drawn as an outline and excluded from the ratio, so an image note reads 4/4 and
  * never 4/5. Unknown is its own fill and is never drawn as zero. */
 .ev-side{display:flex;flex-direction:column;justify-content:space-between;gap:8px;padding-left:12px;border-left:1px solid var(--v7-line)}
-.ev-material-summary{color:var(--v7-muted);font:650 10px var(--lgi-font-sans)}
-.ev-material-summary b{margin-left:4px;color:var(--v7-black);font:750 13.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
-.ev-work-list[data-layout="table"] .ev-material-label{display:none}
-.ev-work-list[data-layout="table"] .ev-material-summary b{margin-left:0}
 .ev-material-rail{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin-top:7px}
 .ev-mat-seg{position:relative;height:9px;border:1px solid transparent;background:var(--v7-sunken)}
 .ev-mat-seg[data-fill="ready"]{background:var(--v7-ok)}

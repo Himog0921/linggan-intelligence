@@ -519,16 +519,6 @@
 
   function materialBlock(item) {
     const summary = materialSummary(item);
-    const wrapper = node('div');
-    const headline = node('div', 'ev-material-summary');
-    /* The table already names this column, so the inline label is hidden there by CSS rather
-     * than repeated in every cell. */
-    headline.append(node('span', 'ev-material-label', '材料'));
-    const ratio = node('b', null, summary.ready === null
-      ? `未知 / ${summary.applicable}`
-      : `${summary.ready} / ${summary.applicable}`);
-    headline.append(ratio);
-    wrapper.append(headline);
     const rail = node('div', 'ev-material-rail');
     summary.segments.forEach((segment) => {
       const cell = node('i', 'ev-mat-seg');
@@ -538,8 +528,7 @@
         : `${segment.label}：本作品不适用，不计入分母`;
       rail.append(cell);
     });
-    wrapper.append(rail);
-    return { element: wrapper, rail, summary };
+    return { rail, summary };
   }
 
   /* ------------------------------------------------------------- readout */
@@ -758,7 +747,7 @@
 
     const material = materialBlock(item);
     const side = node('div', 'ev-side');
-    side.append(material.element);
+    side.append(material.rail);
     const detailState = laneSummary(item, 'detail')?.state || 'UNKNOWN';
     side.append(stateLine(detailState));
     const observedAt = item.summary?.lastObservedAt;
