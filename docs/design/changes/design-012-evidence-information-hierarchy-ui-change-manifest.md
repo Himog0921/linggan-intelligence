@@ -245,6 +245,23 @@ Mog 问「材料 2/4 的价值跟意义是什么，告诉用户什么信息」�
 
 研读视图未动：卡片空间足够，且比值紧邻进度条不构成扫读负担。
 
+## Code review 与修复（2026-09-03）
+
+对 `main...HEAD` 全量 diff 做了一次高强度 code review，8 条发现全部修复：
+
+| 级别 | 问题 | 修复 |
+|---|---|---|
+| **HIGH** | `effectiveAuthor` 在 `authorIdentityMatchState === 'MISMATCH'` 时仍回退到监控目标名。MISMATCH 的含义正是「已取得作者 ID 且证明与目标不同」（`material_projection.rs:376`）——转发/合作作品若作者显示名恰好未知，列表会把 B 发的作品署名成 A，且旁边配的是 B 的头像 | 回退加门：仅在**非** MISMATCH 时使用监控目标名。本库当前 MISMATCH 为 0，属防御性修复 |
+| **MEDIUM** | `factGrid` 折叠把第三个元素（技术键槽位）当作「本行值未知」的信号，但多处调用点在该槽位放的是**另一个事实**的状态。`['本地留存边界','停止原因 risk_control', collectionState]`、`['预期 / 去重保留','30 / 28', collectionState]` 这类**已知值**会被折进「尚未取得 N 项」 | 折叠判据改为双重条件：技术键为 `UNKNOWN` **且**值本身读作未知 |
+| **MEDIUM** | `['采集序号', ordinal, displayOrderState]` 使页面断言「这个序号未取得」，而序号是已知的；`displayOrderState` 描述的是「是否与平台排列一致」，是另一件事。叠加上一条还会被误折叠 | 改为 `序号（平台排列顺序未经验证）`，不再借用技术键槽位 |
+| **LOW** | 复观测范围说明只存活在 `button.title`。租约存在时按钮 `disabled`，Chrome/Firefox 抑制其指针事件使 tooltip 永不触发；键盘与触屏用户任何状态下都拿不到。违反 LIDS「Tooltip 不得承载必读内容」 | 改为按钮上方一行 `ev-section-note` 灰字，精简为一句。这是页面上唯一会发起真实平台采集的动作，范围必须可达；但不恢复 Mog 已删除的米色说明面板 |
+| **LOW** | 表格互动数字的 `aria-label` 设在同时包含数值的 `<span>` 上，会在行的可访问名计算中**替换掉**数值——屏幕阅读器只读「点赞 评论 收藏 分享」而没有数字；列头图标无法补偿，因为 `ev-table-head` 带 `aria-hidden="true"` | `aria-label` 改为同时包含指标名与读数 |
+| **LOW** | `isCover` 以 slotKey 是否含 `:cover:` 判定封面。槽位可以 `purpose='cover'` 而键名不含该串（见 `material_media_postgres.rs:271`），这类封面的 OCR 噪声会被当作可引用材料呈现——正是该改动要防止的信念 | 改用槽位自身的 `purpose === 'cover'`（`mediaSlots` 已提供该字段），按 slotKey 关联。无需扩后端合同 |
+| **LOW** | 删除 `tech('NO LOCAL MEDIA')` 后残留空参数行 | 清理 |
+| **LOW** | `creatorAndTargetFacts` 的注释描述了本次同一 diff 已删除的 Inspector 整句；`compact` 与 `withRelationLabel` 成为死参数（唯一调用点固定传 `(item,false,true)`），`.ev-context-facts--compact` 等 5 条 CSS 不可达 | 更新注释；两个死参数与 5 条死 CSS 一并删除 |
+
+Review 同时核实通过的部分：provenance 合并的键覆盖顺序与 `renderTrace` 读取一致、`dedupe_preserving_order` 在 20 行硬上限下正确、治理脚本的 worktree 锚点修复有效、时间线合并的时序方向正确、表格列头与行的 grid 定义一致、`tests.rs` 中 52 条字符串断言（含否定断言）全部成立。
+
 ## 未做与已知边界
 
 - **`primary_limitation` 是写死的默认值**：`material_projection.rs:633` 把 `OTHER_LANES_NOT_EVALUATED` 设为初始常量，全代码库只有 `enrich_media_material`（`:446-448`）在媒体侧三种限制下会覆盖它；评论、详情、作者、OCR 通道跑没跑过从不参与计算。因此它**不等价于**「只跑过发现通道」，一篇采全的作品照样显示「尚未评估」。修正它需要先定义「主要限制」的产品语义，属 Mog 决定 → **本次登记为 `DECISION_REQUIRED`，UI 侧停止把它当结论展示。**（首轮由结论行承担该职责；结论行第二轮删除后，改由材料完整度的色块与维度标签承担。）

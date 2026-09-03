@@ -148,12 +148,7 @@
 .ev-author-avatar{width:28px;height:28px;flex:0 0 28px;display:grid;place-items:center;overflow:hidden;border:1px solid var(--v7-black);border-radius:50%;background:var(--v7-gray);color:var(--v7-ghost);font:650 8px/1 var(--lgi-font-mono)}
 .ev-author-avatar img{width:100%;height:100%;object-fit:cover}
 .ev-author-avatar[data-state="acquired"]{border-color:var(--v7-info)}
-.ev-context-facts--compact{grid-template-columns:1fr;gap:4px}
-.ev-context-facts--compact .ev-identity-fact{min-height:30px;padding:3px 5px}
-.ev-context-facts--compact .ev-author-avatar{width:22px;height:22px;flex-basis:22px}
-.ev-context-facts--compact .ev-identity-fact strong{font-size:11px}
 .ev-time-line{color:var(--v7-muted)}
-.ev-work-list[data-layout="cover"] .ev-context-facts{grid-template-columns:1fr}
 .ev-meta b{color:var(--v7-black);font-weight:700}
 .ev-target-line{color:var(--v7-info)}
 

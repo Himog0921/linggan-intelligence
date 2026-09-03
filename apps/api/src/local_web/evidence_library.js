@@ -603,10 +603,10 @@
   /* The work's author and the monitoring target are two different facts and are never merged
    * into one line: the target is who we chose to watch, the creator is who actually published
    * this. `authorIdentityMatchState` says whether they have been proven to be the same person. */
-  // LANG-01: Chinese has to carry the meaning on its own. On a card the bare NOT_VERIFIED sat
-  // beside the target name and read as "this target is unverified", which is the opposite of
-  // what it says. The Inspector spells the relation out in a full sentence below the block, so
-  // it passes withRelationLabel = false rather than saying the same thing twice.
+  // LANG-01: Chinese has to carry the meaning on its own. The bare NOT_VERIFIED sat beside the
+  // target name and read as "this target is unverified", which is the opposite of what it says.
+  // This block is the only place both facts still appear side by side — the list and the table
+  // show one author name — so the relation label rides along with it.
   const identityRelationLabels = {
     MATCHED: '已证实为作者',
     MISMATCH: '与作者不一致',
@@ -619,7 +619,8 @@
       return item.display.creatorDisplayName;
     }
     const context = item.collectionContext || {};
-    if (context.targetKind === 'creator' && context.targetDisplayState === 'KNOWN' && context.targetDisplayName) {
+    const matched = context.authorIdentityMatchState !== 'MISMATCH';
+    if (matched && context.targetKind === 'creator' && context.targetDisplayState === 'KNOWN' && context.targetDisplayName) {
       return context.targetDisplayName;
     }
     return '当前未知';
@@ -632,12 +633,12 @@
     return fact;
   }
 
-  function creatorAndTargetFacts(item, compact = false, withRelationLabel = true) {
+  function creatorAndTargetFacts(item) {
     const creator = knownText(item.display?.creatorDisplayName, item.display?.creatorState, '当前未知');
     const target = item.collectionContext?.targetDisplayState === 'KNOWN'
       ? item.collectionContext.targetDisplayName
       : '当前未知';
-    const facts = node('div', compact ? 'ev-context-facts ev-context-facts--compact' : 'ev-context-facts');
+    const facts = node('div', 'ev-context-facts');
     const creatorFact = node('div', 'ev-identity-fact ev-creator-fact');
     const creatorCopy = node('span');
     creatorCopy.append(node('small', null, '作品作者'), node('strong', null, creator));
@@ -646,11 +647,11 @@
     const targetCopy = node('span');
     targetCopy.append(node('small', null, '监控目标'), node('strong', null, target));
     const matchState = item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED';
-    targetFact.append(targetCopy);
-    if (withRelationLabel) {
-      targetFact.append(node('small', 'ev-identity-relation', identityRelationLabels[matchState] || '身份关系当前未知'));
-    }
-    targetFact.append(tech(matchState));
+    targetFact.append(
+      targetCopy,
+      node('small', 'ev-identity-relation', identityRelationLabels[matchState] || '身份关系当前未知'),
+      tech(matchState),
+    );
     facts.append(creatorFact, targetFact);
     return facts;
   }
@@ -702,13 +703,16 @@
     const wrapper = node('div', 'ev-engagement');
     metrics.forEach(([kind, label, value, state]) => {
       const cell = node('span');
-      // In the table the icon is in the column header, so a row carries the number alone. The
-      // metric name stays reachable: without it a bare number says nothing about what it counts.
-      if (numbersOnly) cell.setAttribute('aria-label', label);
-      else cell.append(metricIcon(kind, label));
-      cell.append(node('b', null, state === 'KNOWN' && Number.isFinite(Number(value))
+      const reading = state === 'KNOWN' && Number.isFinite(Number(value))
         ? Number(value).toLocaleString('zh-CN')
-        : '未知'));
+        : '未知';
+      // In the table the icon is in the column header, so a row carries the number alone. The
+      // accessible name has to carry both: an aria-label on this span replaces its text in the
+      // row's computed name, and the header icons cannot fill the gap because ev-table-head is
+      // aria-hidden.
+      if (numbersOnly) cell.setAttribute('aria-label', `${label} ${reading}`);
+      else cell.append(metricIcon(kind, label));
+      cell.append(node('b', null, reading));
       wrapper.append(cell);
     });
     return wrapper;
@@ -1104,15 +1108,19 @@
     });
   }
 
+  function isUnknownRow([, value, code]) {
+    return code === 'UNKNOWN' && typeof value === 'string' && value.includes('未知');
+  }
+
   function factGrid(rows) {
-    const unknown = rows.filter(([, , code]) => code === 'UNKNOWN');
+    const unknown = rows.filter(isUnknownRow);
     if (unknown.length < UNKNOWN_COLLAPSE_THRESHOLD) {
       const list = node('dl', 'ev-facts');
       appendFactRows(list, rows);
       return list;
     }
     const fragment = document.createDocumentFragment();
-    const known = rows.filter(([, , code]) => code !== 'UNKNOWN');
+    const known = rows.filter((row) => !isUnknownRow(row));
     if (known.length > 0) {
       const list = node('dl', 'ev-facts');
       appendFactRows(list, known);
@@ -1320,7 +1328,7 @@
     ));
 
     const identityContext = section('作者与监控目标');
-    identityContext.append(creatorAndTargetFacts(item, false, true));
+    identityContext.append(creatorAndTargetFacts(item));
     panel.append(identityContext);
 
     const current = section('当前互动状态与变化');
@@ -1426,9 +1434,14 @@
       // The text is still shown -- it is real material -- but it is no longer presented as
       // something a reader can quote.
       machine.append(node('p', 'ev-section-note', '以下为机器识别结果，与原图可能有出入。'));
+      const coverSlotKeys = new Set(
+        (Array.isArray(inspector.mediaSlots) ? inspector.mediaSlots : [])
+          .filter((slot) => slot?.purpose === 'cover' && slot.slotKey)
+          .map((slot) => slot.slotKey),
+      );
       texts.forEach((derivative) => {
         const entry = node('article', 'ev-derivative');
-        const isCover = String(derivative.slotKey || '').includes(':cover:');
+        const isCover = coverSlotKeys.has(derivative.slotKey);
         const head = node('div', 'ev-derivative-head');
         head.append(
           node('strong', null, fragmentSourceLabels[derivative.kind] || derivative.kind || '派生类型当前未知'),
@@ -1747,7 +1760,6 @@
       empty.append(
         node('strong', null, '当前没有本地媒体对象'),
         node('p', null, '这只说明本机还没有留存这个作品的媒体副本；这不表示作品没有媒体。'),
-        
       );
       const action = node('div', 'ev-channel-actions');
       const request = node('button', 'ev-button ev-button--secondary', '补采媒体');
@@ -1784,7 +1796,9 @@
         ['本地对象', object.objectRef || '当前未表达'],
         ['字节状态', stateMeta(object.bytesState)[0], object.bytesState],
         ['文字处理', object.derivedState ? stateMeta(object.derivedState)[0] : '未处理', object.derivedState || null],
-        ['采集序号', object.ordinal, object.slot.displayOrderState],
+        ['采集序号', object.slot.displayOrderState === 'KNOWN'
+          ? String(object.ordinal)
+          : `${object.ordinal}（平台排列顺序未经验证）`],
         ['副本状态', object.slot.replicaState || '当前未知', object.slot.replicaState || 'UNKNOWN'],
       ]));
       ledger.append(entry);

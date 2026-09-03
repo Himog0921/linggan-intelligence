@@ -160,11 +160,11 @@
       wrapper.append(sourceIncompleteBlock(detail), tech(access.reason));
       return wrapper;
     }
+    wrapper.append(node('p', 'ev-section-note', '范围：详情、评论（最多 30 条）与回复；不下载媒体、不跑 OCR / 转录。'));
     const actions = node('div', 'ev-channel-actions');
     const leaseExists = Boolean(view.operation?.leaseRef);
     const button = node('button', 'ev-button ev-button--primary', leaseExists ? '复观测已请求' : '立即复观测');
     button.type = 'button';
-    button.title = '范围固定为详情、评论和回复：评论窗口最多 30 条；不新建媒体槽位、不下载媒体字节、不启动 OCR / ASR。';
     button.disabled = leaseExists;
     button.addEventListener('click', () => { void controller.request(access.actionUrl); });
     actions.append(button, tech(channel?.mediaPolicy || '媒体策略未知'));
