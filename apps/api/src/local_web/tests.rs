@@ -2307,7 +2307,9 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
     assert!(EVIDENCE_LIBRARY_JS.contains("params.set('view', model.activeView)"));
     assert!(EVIDENCE_OBSERVATION_JS.contains("createController"));
     assert!(EVIDENCE_OBSERVATION_JS.contains("立即复观测"));
-    assert!(EVIDENCE_OBSERVATION_JS.contains("channel?.requires"));
+    // The authorization requirement is stated where it is actionable information: when the
+    // action cannot run. Once it can, saying what it needed is history.
+    assert!(EVIDENCE_OBSERVATION_JS.contains("尚未具备监控目标关联的有效深度归档授权"));
     assert!(EVIDENCE_OBSERVATION_JS.contains("commentsCoverageHistory"));
     assert!(EVIDENCE_LIBRARY_JS.contains("当前互动状态与变化"));
     assert!(EVIDENCE_LIBRARY_JS.contains("refreshSelectedDetailAfterReobservation"));

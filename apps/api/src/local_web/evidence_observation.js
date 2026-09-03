@@ -148,14 +148,9 @@
     const access = controller.availability(item, channel);
     const wrapper = section('立即复观测');
     wrapper.dataset.evReobservation = 'true';
-    const notice = node('div', 'ev-inline-state');
-    notice.dataset.tone = 'warning';
-    notice.append(
-      node('strong', null, '按既有授权链路发起一次标准详情复观测'),
-      node('p', null, '范围固定为详情、评论和回复：评论窗口最多 30 条；不会新建媒体槽位、下载媒体字节或启动 OCR / ASR。执行仍需已有监控目标关联、有效深度归档授权，以及可认领租约的本机 Browser Producer。'),
-      tech(channel?.requires || '授权条件未知'),
-    );
-    wrapper.append(notice);
+    // The scope prose was a permanent warning panel on a section whose button already names the
+    // action. It moves to the button's title: the scope is context, not something a reader has
+    // to clear before acting, and a run that fails still reports its own reason below.
     if (!access.actionable) {
       const detail = !access.supported
         ? '该作品的平台当前不支持复观测；页面没有创建可调用入口。'
@@ -169,6 +164,7 @@
     const leaseExists = Boolean(view.operation?.leaseRef);
     const button = node('button', 'ev-button ev-button--primary', leaseExists ? '复观测已请求' : '立即复观测');
     button.type = 'button';
+    button.title = '范围固定为详情、评论和回复：评论窗口最多 30 条；不新建媒体槽位、不下载媒体字节、不启动 OCR / ASR。';
     button.disabled = leaseExists;
     button.addEventListener('click', () => { void controller.request(access.actionUrl); });
     actions.append(button, tech(channel?.mediaPolicy || '媒体策略未知'));

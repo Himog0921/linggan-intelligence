@@ -700,14 +700,15 @@
   function engagementBlock(item) {
     const engagement = item.display?.engagement || {};
     const metrics = [
-      ['赞', engagement.likeCount, engagement.likeCountState],
-      ['评', engagement.commentCount, engagement.commentCountState],
-      ['藏', engagement.collectCount, engagement.collectCountState],
-      ['转', engagement.shareCount, engagement.shareCountState],
+      ['like', '点赞', engagement.likeCount, engagement.likeCountState],
+      ['comment', '评论', engagement.commentCount, engagement.commentCountState],
+      ['collect', '收藏', engagement.collectCount, engagement.collectCountState],
+      ['share', '分享', engagement.shareCount, engagement.shareCountState],
     ];
     const wrapper = node('div', 'ev-engagement');
-    metrics.forEach(([label, value, state]) => {
-      const cell = node('span', null, label);
+    metrics.forEach(([kind, label, value, state]) => {
+      const cell = node('span');
+      cell.append(metricIcon(kind, label));
       cell.append(node('b', null, state === 'KNOWN' && Number.isFinite(Number(value))
         ? Number(value).toLocaleString('zh-CN')
         : '未知'));
@@ -741,10 +742,7 @@
 
     const identity = node('div', 'ev-identity');
     const eyebrow = node('div', 'ev-eyebrow');
-    eyebrow.append(
-      node('span', null, item.identity?.platform?.toUpperCase() || '平台未知'),
-      node('span', null, publicRef ? publicRef.slice(0, 8).toUpperCase() : '引用未知'),
-    );
+    eyebrow.append(node('span', null, item.identity?.platform?.toUpperCase() || '平台未知'));
     const title = node('h2', null, knownText(item.display?.title, item.display?.titleState, '标题当前未知'));
     const meta = node('div', 'ev-meta');
     meta.append(authorFact(item), node('span', 'ev-time-line', published));
@@ -762,7 +760,7 @@
 
     if (model.activeLayout === 'table') {
       row.append(
-        tableCell(title.textContent, `${item.identity?.platform?.toUpperCase() || ''} ${publicRef ? publicRef.slice(0, 8).toUpperCase() : ''}`.trim()),
+        tableCell(title.textContent, ''),
         (() => {
           const cell = node('div', 'ev-table-cell');
           cell.append(authorFact(item));
@@ -780,6 +778,35 @@
     row.addEventListener('click', () => selectItem(item, true));
     row.addEventListener('keydown', (event) => onRowKeydown(event, item));
     return row;
+  }
+
+  /* LIDS icon system: 24 grid, 1.5 stroke, currentColor, sized 16/20/24. Character glyphs are
+   * forbidden -- they render differently per platform, cannot control stroke weight and will not
+   * align to the text beside them. Each icon keeps an accessible name: the number next to it says
+   * nothing on its own. */
+  const METRIC_ICON_PATHS = {
+    like: 'M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5c0 5.15-7 9.5-7 9.5z',
+    comment: 'M4 5h16v11H9l-5 4z',
+    collect: 'M6 3h12v18l-6-4.5L6 21z',
+    share: 'M4 13v6h16v-6M12 15V4M8 8l4-4 4 4',
+  };
+
+  function metricIcon(kind, label) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24');
+    svg.setAttribute('width', '16');
+    svg.setAttribute('height', '16');
+    svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor');
+    svg.setAttribute('stroke-width', '1.5');
+    svg.setAttribute('stroke-linecap', 'round');
+    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', label);
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', METRIC_ICON_PATHS[kind]);
+    svg.append(path);
+    return svg;
   }
 
   function tableCell(primary, secondary) {
@@ -1245,18 +1272,14 @@
    * is the filled one. Stating it turns the legend into the answer, which is why there is no
    * separate summary line above it saying the same thing again. */
   function completenessLegend(summary) {
-    const groups = [
-      ['已取得', summary.segments.filter((s) => s.applicable && s.fill === 'ready')],
-      ['处理中', summary.segments.filter((s) => s.applicable && s.fill === 'pending')],
-      ['尚未取得', summary.segments.filter((s) => s.applicable && s.fill === 'unknown')],
-      ['不适用', summary.segments.filter((s) => !s.applicable)],
-    ];
     const legend = node('div', 'ev-completeness-legend');
-    groups.forEach(([label, segments]) => {
-      if (segments.length === 0) return;
-      const line = node('p');
-      line.append(node('em', null, label), node('span', null, segments.map((s) => s.label).join(' · ')));
-      legend.append(line);
+    summary.segments.forEach((segment) => {
+      const cell = node('span', null, segment.label);
+      cell.dataset.fill = segment.fill;
+      cell.title = segment.applicable
+        ? `${segment.label}：${stateMeta(segment.state)[0]}`
+        : `${segment.label}：本作品不适用，不计入分母`;
+      legend.append(cell);
     });
     return legend;
   }
@@ -1296,12 +1319,7 @@
     ));
 
     const identityContext = section('作者与监控目标');
-    identityContext.append(
-      creatorAndTargetFacts(item, false, false),
-      factGrid([
-        ['作者身份关系', item.collectionContext?.authorIdentityMatchState === 'MATCHED' ? '已由平台作者 ID 证明一致' : '尚未证明监控目标就是作品作者', item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED'],
-      ]),
-    );
+    identityContext.append(creatorAndTargetFacts(item, false, true));
     panel.append(identityContext);
 
     const current = section('当前互动状态与变化');
