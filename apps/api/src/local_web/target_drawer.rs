@@ -15,13 +15,115 @@ use linggan_evidence::{
     CreatorLifecycleStatus, CreatorLifecycleWindow, ObservationTarget,
 };
 
-/// Collection 目标抽屉的四个职责。Evidence 已退回唯一的 Corpus 表面。
-const TABS: &[(&str, &str)] = &[
-    ("overview", "概览"),
-    ("baseline", "基线"),
-    ("patrol", "巡检策略"),
-    ("trace", "追踪"),
+/// Collection 目标抽屉的四个职责。Evidence 已退回唯一的 Corpus 表面。退役或未知
+/// 值统一归一到 Overview；读取守卫和渲染都只消费这个闭集，不能各自猜一次。
+const TABS: &[(TargetDrawerTab, &str)] = &[
+    (TargetDrawerTab::Overview, "概览"),
+    (TargetDrawerTab::Baseline, "基线"),
+    (TargetDrawerTab::Patrol, "巡检策略"),
+    (TargetDrawerTab::Trace, "追踪"),
 ];
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TargetDrawerTab {
+    Overview,
+    Baseline,
+    Patrol,
+    Trace,
+}
+
+impl TargetDrawerTab {
+    pub fn parse(value: Option<&str>) -> Self {
+        match value {
+            Some("baseline") => Self::Baseline,
+            Some("patrol") => Self::Patrol,
+            Some("trace") => Self::Trace,
+            // `evidence` is retired and any future/unknown spelling has the same explicit
+            // compatibility policy: open the safe default Overview and actually read it.
+            None | Some("overview") | Some("evidence") | Some(_) => Self::Overview,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Overview => "overview",
+            Self::Baseline => "baseline",
+            Self::Patrol => "patrol",
+            Self::Trace => "trace",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct TargetListContext<'a> {
+    pub filter: Option<&'a str>,
+    pub sort: Option<&'a str>,
+}
+
+impl<'a> TargetListContext<'a> {
+    fn pairs(self) -> Vec<(&'static str, &'a str)> {
+        let mut pairs = Vec::new();
+        if let Some(filter @ ("creator" | "keyword" | "archiving" | "monitoring")) = self.filter {
+            pairs.push(("filter", filter));
+        }
+        if let Some(sort @ "last") = self.sort {
+            pairs.push(("sort", sort));
+        }
+        pairs
+    }
+
+    pub fn list_href(self, focus_id: Option<&str>) -> String {
+        let pairs = self.pairs();
+        let mut href = "/collection/targets".to_owned();
+        if !pairs.is_empty() {
+            href.push('?');
+            href.push_str(
+                &pairs
+                    .iter()
+                    .map(|(key, value)| format!("{key}={value}"))
+                    .collect::<Vec<_>>()
+                    .join("&amp;"),
+            );
+        }
+        if let Some(focus_id) = focus_id {
+            href.push('#');
+            href.push_str(focus_id);
+        }
+        href
+    }
+
+    pub fn drawer_href(
+        self,
+        target_ref: uuid::Uuid,
+        params: &[(&str, &str)],
+        fragment: Option<&str>,
+    ) -> String {
+        let mut pairs = self
+            .pairs()
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect::<Vec<_>>();
+        pairs.push(("drawer".to_owned(), target_ref.to_string()));
+        pairs.extend(
+            params
+                .iter()
+                .map(|(key, value)| ((*key).to_owned(), (*value).to_owned())),
+        );
+        let mut href = format!(
+            "/collection/targets?{}",
+            pairs
+                .iter()
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect::<Vec<_>>()
+                .join("&amp;")
+        );
+        if let Some(fragment) = fragment {
+            href.push('#');
+            href.push_str(fragment);
+        }
+        href
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum LifecycleView<'a> {
@@ -34,6 +136,26 @@ pub enum LifecycleView<'a> {
         window: CreatorLifecycleWindow,
         metric: CreatorLifecycleMetric,
     },
+    QueryInvalid,
+}
+
+/// Collection's base renderer owns the closing document and script tag. Mount the drawer before
+/// that script so the behavior module can bind Escape on first parse; appending after `</html>`
+/// produces invalid markup and makes the drawer invisible to the script at execution time.
+pub fn attach_to_collection_document(document: &str, drawer: &str) -> String {
+    if drawer.is_empty() {
+        return document.to_owned();
+    }
+    const SCRIPT: &str = r#"<script src="/assets/collection-workspace.js"></script>"#;
+    let Some(script_at) = document.rfind(SCRIPT) else {
+        return document.to_owned();
+    };
+    format!(
+        "{}{}{}",
+        &document[..script_at],
+        drawer,
+        &document[script_at..]
+    )
 }
 
 /// 渲染抽屉。`drawer` 为空时整块不渲染——没有选中目标时不该有一个空壳挂在那里。
@@ -41,9 +163,10 @@ pub fn render(
     target: Option<&ObservationTarget>,
     completeness: &std::collections::HashMap<String, ArchiveCompleteness>,
     drawer: Option<&str>,
-    active_tab: Option<&str>,
+    active_tab: TargetDrawerTab,
     lifecycle: LifecycleView<'_>,
     selected_work: Option<&str>,
+    list_context: TargetListContext<'_>,
 ) -> String {
     let Some(drawer) = drawer else {
         return String::new();
@@ -53,29 +176,37 @@ pub fn render(
     // 目标由调用方**独立查询**得到，不从当前列表里找：列表是筛过的，一个被筛掉的目标
     // 会让这里说「未找到」，而它其实好好地在库里——那是在撒谎。
     let Some(target) = target else {
+        let return_href = list_context.list_href(
+            uuid::Uuid::parse_str(drawer)
+                .ok()
+                .map(|target_ref| format!("target-{target_ref}"))
+                .as_deref(),
+        );
         return format!(
-            r#"<aside class="c-dw" aria-label="观察目标工作区">
+            r#"<aside id="c-drawer" class="c-dw" aria-label="观察目标工作区" data-return-url="{return_url}">
                  <div class="c-dw-head">
                    <div class="c-dw-kicker">目标工作区</div>
                    <div class="c-dw-title-row">
                      <div><div class="c-dw-title">未找到该观察目标</div>
                        <div class="c-dw-meta">#{drawer}</div></div>
-                     <div class="c-dw-actions"><a class="c-btn-quiet" href="/collection/targets">关闭 ×</a></div>
+                     <div class="c-dw-actions"><a class="c-btn-quiet" href="{return_href}">关闭 ×</a></div>
                    </div>
                  </div>
                  <div class="c-dw-body"><p class="c-dw-empty">这个标识没有对应的观察目标。它可能已被删除，或链接来自另一台机器的库。</p></div>
                </aside>"#,
             drawer = escape(drawer),
+            return_url = list_context.list_href(None),
         );
     };
 
-    let tab = active_tab.filter(|value| TABS.iter().any(|(key, _)| key == value));
-    let tab = tab.unwrap_or("overview");
+    let tab = active_tab;
     let archive = completeness.get(&target.identity_key);
     let is_creator = target.target_kind == "creator";
+    let return_focus = format!("target-{}", target.target_ref);
+    let return_href = list_context.list_href(Some(&return_focus));
 
     format!(
-        r#"<aside class="c-dw" aria-label="观察目标工作区">
+        r#"<aside id="c-drawer" class="c-dw" aria-label="观察目标工作区" data-return-url="{return_url}" data-return-focus="{return_focus}">
              <div class="c-dw-head">
                <div class="c-dw-kicker">目标工作区 / {kind}</div>
                <div class="c-dw-title-row">
@@ -85,7 +216,7 @@ pub fn render(
                  </div>
                  <div class="c-dw-actions">
                    {source_link}
-                   <a class="c-btn-quiet" href="/collection/targets">关闭 ×</a>
+                   <a class="c-btn-quiet" href="{return_href}">关闭 ×</a>
                  </div>
                </div>
                <div class="c-dw-statusline">{statusline}</div>
@@ -97,10 +228,19 @@ pub fn render(
         name = escape(display_name(target)),
         platform = escape(&target.platform.to_uppercase()),
         handle = escape(&target.identity_key),
+        return_url = list_context.list_href(None),
         source_link = source_link(target, is_creator),
         statusline = statusline(target),
-        tabs = tab_bar(target, tab, lifecycle, selected_work),
-        body = body(target, archive, is_creator, tab, lifecycle, selected_work),
+        tabs = tab_bar(target, tab, lifecycle, selected_work, list_context),
+        body = body(
+            target,
+            archive,
+            is_creator,
+            tab,
+            lifecycle,
+            selected_work,
+            list_context,
+        ),
     )
 }
 
@@ -143,9 +283,10 @@ fn statusline(target: &ObservationTarget) -> String {
 
 fn tab_bar(
     target: &ObservationTarget,
-    active: &str,
+    active: TargetDrawerTab,
     lifecycle: LifecycleView<'_>,
     selected_work: Option<&str>,
+    list_context: TargetListContext<'_>,
 ) -> String {
     let lifecycle_state = lifecycle_query_state(lifecycle, selected_work);
     TABS.iter()
@@ -156,10 +297,14 @@ fn tab_bar(
             } else {
                 ""
             };
-            format!(
-                r#"<a class="c-dw-tab{class}" href="/collection/targets?drawer={id}&amp;dtab={key}{lifecycle_state}"{current}>{label}</a>"#,
-                id = target.target_ref,
-            )
+            let lifecycle_state = lifecycle_state
+                .iter()
+                .map(|(key, value)| (*key, value.as_str()))
+                .collect::<Vec<_>>();
+            let mut params = vec![("dtab", key.as_str())];
+            params.extend(lifecycle_state);
+            let href = list_context.drawer_href(target.target_ref, &params, None);
+            format!(r#"<a class="c-dw-tab{class}" href="{href}"{current}>{label}</a>"#,)
         })
         .collect()
 }
@@ -168,20 +313,28 @@ fn body(
     target: &ObservationTarget,
     archive: Option<&ArchiveCompleteness>,
     is_creator: bool,
-    tab: &str,
+    tab: TargetDrawerTab,
     lifecycle: LifecycleView<'_>,
     selected_work: Option<&str>,
+    list_context: TargetListContext<'_>,
 ) -> String {
     match tab {
-        "baseline" => baseline_tab(target, archive, is_creator),
-        "patrol" => patrol_tab(target),
+        TargetDrawerTab::Baseline => baseline_tab(target, archive, is_creator),
+        TargetDrawerTab::Patrol => patrol_tab(target),
         // 追踪背后暂时没有东西。**如实说尚未接通，而不是画一个空壳**——
         // 一个有标题、有格子、没有数的面板，会让人以为「查过了，是空的」。
-        "trace" => not_connected(
+        TargetDrawerTab::Trace => not_connected(
             "追踪",
             "语义事件流尚未实现。执行留痕目前只到工单与租约这一层，可在「执行工位」查看。",
         ),
-        _ => overview_tab(target, archive, is_creator, lifecycle, selected_work),
+        TargetDrawerTab::Overview => overview_tab(
+            target,
+            archive,
+            is_creator,
+            lifecycle,
+            selected_work,
+            list_context,
+        ),
     }
 }
 
@@ -195,6 +348,7 @@ fn overview_tab(
     is_creator: bool,
     lifecycle: LifecycleView<'_>,
     selected_work: Option<&str>,
+    list_context: TargetListContext<'_>,
 ) -> String {
     let facts = target.identity_facts.as_ref();
     let bio = facts
@@ -204,7 +358,7 @@ fn overview_tab(
 
     format!(
         r#"{lifecycle}{bio_block}"#,
-        lifecycle = lifecycle_overview(target, is_creator, lifecycle, selected_work),
+        lifecycle = lifecycle_overview(target, is_creator, lifecycle, selected_work, list_context,),
         bio_block = if bio.is_empty() {
             String::new()
         } else {
@@ -216,7 +370,10 @@ fn overview_tab(
     )
 }
 
-fn lifecycle_query_state(lifecycle: LifecycleView<'_>, selected_work: Option<&str>) -> String {
+fn lifecycle_query_state(
+    lifecycle: LifecycleView<'_>,
+    selected_work: Option<&str>,
+) -> Vec<(&'static str, String)> {
     let (window, metric, validate_selection) = match lifecycle {
         LifecycleView::Projection(projection) => (
             projection.window,
@@ -225,6 +382,7 @@ fn lifecycle_query_state(lifecycle: LifecycleView<'_>, selected_work: Option<&st
         ),
         LifecycleView::ReadUnavailable { window, metric }
         | LifecycleView::NotRead { window, metric } => (window, metric, None),
+        LifecycleView::QueryInvalid => return Vec::new(),
     };
     let selected = selected_work
         .filter(|candidate| {
@@ -236,14 +394,15 @@ fn lifecycle_query_state(lifecycle: LifecycleView<'_>, selected_work: Option<&st
                 })
                 .unwrap_or(true)
         })
-        .map(|candidate| format!("&amp;life_work={}", escape(candidate)))
-        .unwrap_or_default();
-    format!(
-        "&amp;life_window={}&amp;life_metric={}{}",
-        window.as_str(),
-        metric.as_str(),
-        selected
-    )
+        .map(str::to_owned);
+    let mut params = vec![
+        ("life_window", window.as_str().to_owned()),
+        ("life_metric", metric.as_str().to_owned()),
+    ];
+    if let Some(selected) = selected {
+        params.push(("life_work", selected));
+    }
+    params
 }
 
 fn lifecycle_overview(
@@ -251,7 +410,14 @@ fn lifecycle_overview(
     is_creator: bool,
     lifecycle: LifecycleView<'_>,
     selected_work: Option<&str>,
+    list_context: TargetListContext<'_>,
 ) -> String {
+    if matches!(lifecycle, LifecycleView::QueryInvalid) {
+        return lifecycle_state(
+            "生命周期查询无效 / QUERY_INVALID",
+            "URL 中的时间窗或指标不在闭集合同内；本页没有回落到默认口径，也没有发起生命周期读取。",
+        );
+    }
     if !is_creator {
         return lifecycle_state(
             "不适用于关键词目标",
@@ -260,7 +426,9 @@ fn lifecycle_overview(
     }
     let projection = match lifecycle {
         LifecycleView::Projection(projection) => projection,
-        LifecycleView::ReadUnavailable { .. } | LifecycleView::NotRead { .. } => {
+        LifecycleView::ReadUnavailable { .. }
+        | LifecycleView::NotRead { .. }
+        | LifecycleView::QueryInvalid => {
             return lifecycle_state(
                 "生命周期当前读不到",
                 "这是读取状态未知，不表示创作者没有作品，也不表示表现为零。",
@@ -274,14 +442,20 @@ fn lifecycle_overview(
         );
     }
 
-    let controls = lifecycle_controls(target, projection);
+    let controls = lifecycle_controls(target, projection, list_context);
+    let (linked, linked_label) = match projection.summary.linked_work_count {
+        Some(count) => (count.to_string(), "关联作品"),
+        None => (
+            format!("≥{}", projection.summary.linked_work_count_lower_bound),
+            "关联作品下限",
+        ),
+    };
     let summary = format!(
         r#"<div class="life-summary" aria-label="生命周期覆盖摘要">
-              <div><b>{linked}</b><span>关联作品</span></div>
-              <div><b>{confirmed}</b><span>作者已确认</span></div>
-              <div><b>{eligible}</b><span>当前可绘制</span></div>
+              <div><b>{linked}</b><span>{linked_label}</span></div>
+              <div><b>{confirmed}</b><span>扫描内作者确认</span></div>
+              <div><b>{eligible}</b><span>返回可绘制</span></div>
             </div>"#,
-        linked = projection.summary.linked_work_count,
         confirmed = projection.summary.confirmed_author_work_count,
         eligible = projection.summary.eligible_point_count,
     );
@@ -291,7 +465,7 @@ fn lifecycle_overview(
             "作品必须同时具备稳定作者归属、合格真实发布时间和当前指标的 KNOWN 值。UNKNOWN 不会被当成 0。",
         )
     } else {
-        lifecycle_chart(target, projection, selected_work)
+        lifecycle_chart(target, projection, selected_work, list_context)
     };
     let selected = selected_work
         .and_then(|selected| {
@@ -311,14 +485,16 @@ fn lifecycle_overview(
               </div>
               {controls}{summary}{chart}
               <div class="life-receipt">
-                <span>扫描 {scanned}/{limit}；{receipt_state}</span>
+                <span>探测 {probed} · 扫描 {scanned}/{limit} · 返回 {returned}；{receipt_state}</span>
                 <span class="life-version">{median_version} · {percentile_version}</span>
               </div>
               {exclusions}{selected}
             </section>"#,
         as_of = escape(&projection.as_of),
+        probed = projection.receipt.probed_count,
         scanned = projection.receipt.scanned_count,
         limit = projection.receipt.scan_limit,
+        returned = projection.receipt.returned_count,
         receipt_state = if projection.receipt.truncated {
             "已触及扫描上限，当前不是完整历史"
         } else {
@@ -333,6 +509,7 @@ fn lifecycle_overview(
 fn lifecycle_controls(
     target: &ObservationTarget,
     projection: &CreatorLifecycleProjection,
+    list_context: TargetListContext<'_>,
 ) -> String {
     let windows = [
         (CreatorLifecycleWindow::Recent90Days, "近 90 天"),
@@ -345,12 +522,15 @@ fn lifecycle_controls(
         } else {
             ""
         };
-        format!(
-            r#"<a class="life-chip"{current} href="/collection/targets?drawer={target}&amp;life_window={window}&amp;life_metric={metric}#creator-lifecycle">{label}</a>"#,
-            target = target.target_ref,
-            window = window.as_str(),
-            metric = projection.metric.as_str(),
-        )
+        let href = list_context.drawer_href(
+            target.target_ref,
+            &[
+                ("life_window", window.as_str()),
+                ("life_metric", projection.metric.as_str()),
+            ],
+            Some("creator-lifecycle"),
+        );
+        format!(r#"<a class="life-chip"{current} href="{href}">{label}</a>"#)
     })
     .collect::<String>();
     let metrics = [
@@ -367,12 +547,15 @@ fn lifecycle_controls(
         } else {
             ""
         };
-        format!(
-            r#"<a class="life-chip"{current} href="/collection/targets?drawer={target}&amp;life_window={window}&amp;life_metric={metric}#creator-lifecycle">{label}</a>"#,
-            target = target.target_ref,
-            window = projection.window.as_str(),
-            metric = metric.as_str(),
-        )
+        let href = list_context.drawer_href(
+            target.target_ref,
+            &[
+                ("life_window", projection.window.as_str()),
+                ("life_metric", metric.as_str()),
+            ],
+            Some("creator-lifecycle"),
+        );
+        format!(r#"<a class="life-chip"{current} href="{href}">{label}</a>"#)
     })
     .collect::<String>();
     format!(
@@ -387,6 +570,7 @@ fn lifecycle_chart(
     target: &ObservationTarget,
     projection: &CreatorLifecycleProjection,
     selected_work: Option<&str>,
+    list_context: TargetListContext<'_>,
 ) -> String {
     const WIDTH: f64 = 800.0;
     const HEIGHT: f64 = 300.0;
@@ -434,12 +618,18 @@ fn lifecycle_chart(
                 ""
             };
             let title = point.title.as_deref().unwrap_or("标题未知");
+            let work = point.work_public_ref.to_string();
+            let href = list_context.drawer_href(
+                target.target_ref,
+                &[
+                    ("life_window", projection.window.as_str()),
+                    ("life_metric", projection.metric.as_str()),
+                    ("life_work", work.as_str()),
+                ],
+                Some("creator-lifecycle"),
+            );
             format!(
-                r#"<a class="life-point{selected_class}" href="/collection/targets?drawer={target}&amp;life_window={window}&amp;life_metric={metric}&amp;life_work={work}#creator-lifecycle" aria-label="{title}，{published}，{metric_label} {value}，创作者内分位 {percentile:.1}%"><circle cx="{x:.1}" cy="{y:.1}" r="5"/></a>"#,
-                target = target.target_ref,
-                window = projection.window.as_str(),
-                metric = projection.metric.as_str(),
-                work = point.work_public_ref,
+                r#"<a class="life-point{selected_class}" href="{href}" aria-label="{title}，{published}，{metric_label} {value}，创作者内分位 {percentile:.1}%"><circle cx="{x:.1}" cy="{y:.1}" r="5"/></a>"#,
                 title = escape(title),
                 published = escape(&point.published_local_date),
                 metric_label = metric_label(projection.metric),
@@ -460,6 +650,10 @@ fn lifecycle_chart(
         .last()
         .map(|point| point.published_local_date.as_str())
         .unwrap_or("—");
+    let window_caption = match projection.window {
+        CreatorLifecycleWindow::Recent90Days => "Asia/Shanghai 近 90 个日历日（含首尾）",
+        CreatorLifecycleWindow::All => "Asia/Shanghai 全部合格历史",
+    };
     format!(
         r#"<figure class="life-figure">
               <svg class="life-chart" viewBox="0 0 800 300" role="img" aria-labelledby="life-chart-title life-chart-desc">
@@ -473,7 +667,7 @@ fn lifecycle_chart(
                 <text class="life-axis-copy" x="782" y="284" text-anchor="end">{end}</text>
                 <text class="life-axis-copy" x="14" y="142" transform="rotate(-90 14 142)" text-anchor="middle">log(1 + 指标)</text>
               </svg>
-              <figcaption class="life-caption"><span>横轴：合格真实发布时间（Asia/Shanghai 90 日口径）</span><span>纵轴为 log(1 + 指标)；数值摘要仍显示原值</span></figcaption>
+              <figcaption class="life-caption"><span>横轴：合格真实发布时间（{window_caption}）</span><span>纵轴为 log(1 + 指标)；数值摘要仍显示原值</span></figcaption>
             </figure>"#,
         start = escape(start),
         end = escape(end),

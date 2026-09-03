@@ -46,25 +46,24 @@ use linggan_contracts::{
     parse_producer_task_spec,
 };
 use linggan_evidence::{
-    AcquisitionChainError, AuthorizationGrant, CheckInOutcome, CreatorLifecycleMetric,
-    CreatorLifecycleQuery, CreatorLifecycleWindow, DiscoveryIngressError, InstallationCheckIn,
-    LeaseError, LocalAttemptOutcome, LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome,
-    MaterialDeepeningTarget, MediaUploadFinalizeClaim, ObservationTarget, ObservationTargetAvatar,
-    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeCapacityOverview, RuntimeSubmissionOutcome,
-    RuntimeTaskOutcome, StationCapability, StationOverview, StoreOutcome, TargetCounts,
-    UnclaimedInstallation, WorkResourceReadError, admit_media_blob, begin_media_upload,
-    check_in_installation, claim_installation, claim_media_acquisition,
-    claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
-    create_manual_task, create_producer_task, dispatch_schema_is_ready, grant_authorization,
-    ingest_discovery_package, issue_work_order_lease, list_targets, list_targets_in_state,
-    local_discovery_schema_is_ready, local_producer_schema_is_ready,
-    media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
-    producer_runtime_schema_is_ready, read_archive_completeness, read_collection_task_timeline,
-    read_creator_lifecycle, read_discovery_library, read_media_upload_session,
-    read_runtime_capacity, read_runtime_library, read_scheduler_heartbeat,
-    read_station_capabilities, read_station_overview, read_target, read_target_avatars,
-    record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
-    register_station, release_media_upload_finalize, request_and_admit,
+    AcquisitionChainError, AuthorizationGrant, CheckInOutcome, CreatorLifecycleQuery,
+    DiscoveryIngressError, InstallationCheckIn, LeaseError, LocalAttemptOutcome,
+    LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget,
+    MediaUploadFinalizeClaim, ObservationTarget, ObservationTargetAvatar, ProducerRuntimeError,
+    RuntimeAttemptOutcome, RuntimeCapacityOverview, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
+    StationCapability, StationOverview, StoreOutcome, TargetCounts, UnclaimedInstallation,
+    WorkResourceReadError, admit_media_blob, begin_media_upload, check_in_installation,
+    claim_installation, claim_media_acquisition, claim_media_upload_finalize, close_claim_window,
+    complete_media_upload, count_targets, create_manual_task, create_producer_task,
+    dispatch_schema_is_ready, grant_authorization, ingest_discovery_package,
+    issue_work_order_lease, list_targets, list_targets_in_state, local_discovery_schema_is_ready,
+    local_producer_schema_is_ready, media_acquisition_schema_is_ready, open_claim_window,
+    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_archive_completeness,
+    read_collection_task_timeline, read_creator_lifecycle, read_discovery_library,
+    read_media_upload_session, read_runtime_capacity, read_runtime_library,
+    read_scheduler_heartbeat, read_station_capabilities, read_station_overview, read_target,
+    read_target_avatars, record_media_acquisition_failure, record_media_download_failure,
+    record_media_upload_chunk, register_station, release_media_upload_finalize, request_and_admit,
     request_and_admit_material_targets, retire_station, set_group_for_many,
     set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
     station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
@@ -2097,6 +2096,8 @@ struct CollectionParams {
     drawer: Option<String>,
     /// 观察目标的筛选。只改读取范围，不消耗任何平台访问。
     filter: Option<String>,
+    /// 当前唯一排序口径也属于列表返回上下文；打开/关闭抽屉不得把它丢掉。
+    sort: Option<String>,
     /// 上一次动作的失败原因。失败必须看得见，否则跳转回来什么都不说，会让人以为成功了。
     error: Option<String>,
     /// 抽屉打开的是哪个目标，以及停在哪个 tab。**放在 URL 里而不是 JS 状态里**：
@@ -2188,10 +2189,8 @@ async fn collection_targets(
     // "we cannot read targets right now" and "there are no targets" are different claims, and
     // the empty state already makes only the weaker one.
     let Some(database) = database else {
-        return Html(format!(
-            "{base}{}",
-            collection::render_unreadable_target_drawer(params.drawer.as_deref())
-        ));
+        let drawer = collection::render_unreadable_target_drawer(params.drawer.as_deref());
+        return Html(target_drawer::attach_to_collection_document(&base, &drawer));
     };
     // 一次查完所有目标的档案完整度：列表最多两百行，逐行发查询会让页面打开一次跑
     // 两百次数据库。
@@ -2207,27 +2206,20 @@ async fn collection_targets(
         Some(target_ref) => read_target(database, target_ref).await.map_err(|_| ()),
         None => Ok(None),
     };
-    let lifecycle_query = CreatorLifecycleQuery {
-        window: params
-            .life_window
-            .as_deref()
-            .and_then(CreatorLifecycleWindow::parse)
-            .unwrap_or(CreatorLifecycleWindow::Recent90Days),
-        metric: params
-            .life_metric
-            .as_deref()
-            .and_then(CreatorLifecycleMetric::parse)
-            .unwrap_or(CreatorLifecycleMetric::Likes),
-    };
+    let drawer_tab = target_drawer::TargetDrawerTab::parse(params.dtab.as_deref());
+    let lifecycle_query = CreatorLifecycleQuery::parse_optional(
+        params.life_window.as_deref(),
+        params.life_metric.as_deref(),
+    );
     let lifecycle = if should_read_target_lifecycle(
         drawer_target.as_ref().ok().and_then(Option::as_ref),
-        params.dtab.as_deref(),
+        drawer_tab,
     ) {
-        match drawer_target_ref {
-            Some(target_ref) => {
-                read_creator_lifecycle(database, target_ref, &lifecycle_query).await
+        match (drawer_target_ref, lifecycle_query.as_ref()) {
+            (Some(target_ref), Ok(query)) => {
+                read_creator_lifecycle(database, target_ref, query).await
             }
-            None => Ok(None),
+            (None, _) | (_, Err(_)) => Ok(None),
         }
     } else {
         Ok(None)
@@ -2251,6 +2243,10 @@ async fn collection_targets(
                 &avatars,
                 &completeness,
                 params.error.as_deref(),
+                target_drawer::TargetListContext {
+                    filter: params.filter.as_deref(),
+                    sort: params.sort.as_deref(),
+                },
             )
         }
         Err(_) => base,
@@ -2263,26 +2259,34 @@ async fn collection_targets(
             target.as_ref(),
             &completeness,
             params.drawer.as_deref(),
-            params.dtab.as_deref(),
-            if should_read_target_lifecycle(target.as_ref(), params.dtab.as_deref()) {
-                match lifecycle.as_ref() {
-                    Ok(Some(projection)) => target_drawer::LifecycleView::Projection(projection),
-                    Ok(None) | Err(_) => target_drawer::LifecycleView::ReadUnavailable {
-                        window: lifecycle_query.window,
-                        metric: lifecycle_query.metric,
-                    },
+            drawer_tab,
+            match lifecycle_query.as_ref() {
+                Err(_) => target_drawer::LifecycleView::QueryInvalid,
+                Ok(query) if should_read_target_lifecycle(target.as_ref(), drawer_tab) => {
+                    match lifecycle.as_ref() {
+                        Ok(Some(projection)) => {
+                            target_drawer::LifecycleView::Projection(projection)
+                        }
+                        Ok(None) | Err(_) => target_drawer::LifecycleView::ReadUnavailable {
+                            window: query.window,
+                            metric: query.metric,
+                        },
+                    }
                 }
-            } else {
-                target_drawer::LifecycleView::NotRead {
-                    window: lifecycle_query.window,
-                    metric: lifecycle_query.metric,
-                }
+                Ok(query) => target_drawer::LifecycleView::NotRead {
+                    window: query.window,
+                    metric: query.metric,
+                },
             },
             params.life_work.as_deref(),
+            target_drawer::TargetListContext {
+                filter: params.filter.as_deref(),
+                sort: params.sort.as_deref(),
+            },
         ),
         Err(()) => collection::render_unreadable_target_drawer(params.drawer.as_deref()),
     };
-    Html(format!("{list}{drawer}"))
+    Html(target_drawer::attach_to_collection_document(&list, &drawer))
 }
 
 /// The lifecycle query can inspect up to its explicit scan budget, so the Collection page only
@@ -2290,12 +2294,12 @@ async fn collection_targets(
 /// available for intentional reads.
 fn should_read_target_lifecycle(
     target: Option<&ObservationTarget>,
-    active_tab: Option<&str>,
+    active_tab: target_drawer::TargetDrawerTab,
 ) -> bool {
     target
         .map(|target| target.target_kind == "creator")
         .unwrap_or(false)
-        && matches!(active_tab, None | Some("overview"))
+        && active_tab == target_drawer::TargetDrawerTab::Overview
 }
 
 async fn collection_operations(

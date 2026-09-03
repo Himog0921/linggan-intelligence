@@ -1,10 +1,10 @@
 #[path = "support/material_fixture.rs"]
 mod fixture;
 
-use fixture::{proof_database, submit_package};
+use fixture::{proof_database, submit_package, submit_package_at};
 use linggan_evidence::{
     CreatorLifecycleMetric, CreatorLifecycleQuery, CreatorLifecycleStatus, CreatorLifecycleWindow,
-    read_creator_lifecycle,
+    read_creator_lifecycle, read_work_resource,
 };
 
 #[tokio::test]
@@ -77,7 +77,6 @@ async fn creator_lifecycle_isolates_same_named_targets_by_stable_author_identity
         }),
     )
     .await;
-
     let projection = read_creator_lifecycle(
         &database,
         target_a,
@@ -93,7 +92,8 @@ async fn creator_lifecycle_isolates_same_named_targets_by_stable_author_identity
     assert_eq!(projection.status, CreatorLifecycleStatus::Ready);
     assert_eq!(projection.target_ref, target_a);
     assert_eq!(projection.as_of, "2026-09-03 12:00:00+00");
-    assert_eq!(projection.summary.linked_work_count, 1);
+    assert_eq!(projection.summary.linked_work_count, Some(1));
+    assert_eq!(projection.summary.linked_work_count_lower_bound, 1);
     assert_eq!(projection.summary.confirmed_author_work_count, 1);
     assert_eq!(projection.summary.eligible_point_count, 1);
     assert_eq!(projection.points.len(), 1);
@@ -246,7 +246,8 @@ async fn creator_lifecycle_preserves_unknown_zero_and_exclusion_reasons() {
     .unwrap()
     .unwrap();
 
-    assert_eq!(projection.summary.linked_work_count, 5);
+    assert_eq!(projection.summary.linked_work_count, Some(5));
+    assert_eq!(projection.summary.linked_work_count_lower_bound, 5);
     assert_eq!(projection.summary.confirmed_author_work_count, 3);
     assert_eq!(projection.summary.eligible_point_count, 1);
     assert_eq!(projection.exclusions.author_not_verified, 1);
@@ -268,6 +269,145 @@ async fn creator_lifecycle_preserves_unknown_zero_and_exclusion_reasons() {
         "trailing-5-work-median-v1"
     );
     assert_eq!(projection.analysis.rolling_median_window, 5);
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn lifecycle_and_work_resource_share_one_field_wise_current_owner() {
+    let database = proof_database("creator_lifecycle_work_resource_parity").await;
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE \
+         AS $$ SELECT timestamptz '2026-09-03T12:00:00Z' $$",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let target_ref = uuid::Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+         (target_ref,platform,target_kind,identity_key,display_name,source) \
+         VALUES ($1,'xhs','creator','author-current-owner','Current owner 作者','manual')",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    submit_package_at(
+        &database,
+        "profile_discovery",
+        serde_json::json!({"authorExternalId":"author-current-owner"}),
+        serde_json::json!({
+            "kind":"profile_discovery_card",
+            "resultPosition":1,
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"current-owner-work"},
+            "payload":{"title":"更晚观察到的发现标题"}
+        }),
+        "2026-08-29T10:00:00Z",
+    )
+    .await;
+    let first_detail_package = submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"current-owner-work"}),
+        qualified_detail_at(
+            "current-owner-work",
+            "author-current-owner",
+            Some(11),
+            1_785_542_400_000,
+        ),
+    )
+    .await;
+    let second_detail_package = submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"current-owner-work"}),
+        qualified_detail_at(
+            "current-owner-work",
+            "author-current-owner",
+            Some(37),
+            1_785_628_800_000,
+        ),
+    )
+    .await;
+    let tied_observed_at_count: i64 = sqlx::query_scalar(
+        "SELECT count(DISTINCT observed_at)::bigint \
+         FROM linggan_material_content_detail WHERE package_ref=ANY($1::uuid[])",
+    )
+    .bind(vec![first_detail_package, second_detail_package])
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        tied_observed_at_count, 1,
+        "the parity fixture must exercise the owner's deterministic tie-break, not two timestamps",
+    );
+    let (expected_package, expected_metric, expected_local_date) =
+        if second_detail_package > first_detail_package {
+            (second_detail_package, 37, "2026-08-02")
+        } else {
+            (first_detail_package, 11, "2026-08-01")
+        };
+    let expected_package = expected_package.to_string();
+    let work_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+         WHERE platform='xhs' AND content_external_id='current-owner-work'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+
+    let work = read_work_resource(&database, work_ref)
+        .await
+        .unwrap()
+        .expect("the shared Work Resource exists");
+    let lifecycle = read_creator_lifecycle(
+        &database,
+        target_ref,
+        &CreatorLifecycleQuery {
+            window: CreatorLifecycleWindow::All,
+            metric: CreatorLifecycleMetric::Likes,
+        },
+    )
+    .await
+    .unwrap()
+    .expect("the creator target exists");
+    let point = lifecycle
+        .points
+        .iter()
+        .find(|point| point.work_public_ref == work_ref)
+        .expect("the Work Resource current author is the selected creator");
+
+    assert_eq!(
+        work.collection_context.author_identity_match_state,
+        "MATCHED"
+    );
+    assert_eq!(point.title, work.display.title);
+    assert_eq!(point.title_state, work.display.title_state);
+    assert_eq!(
+        Some(point.published_at.as_str()),
+        work.display.published_at.as_deref()
+    );
+    assert_eq!(Some(point.metric_value), work.display.engagement.like_count);
+    assert_eq!(
+        point.title.as_deref(),
+        Some("详情 current-owner-work"),
+        "a later discovery observation must not replace Work Resource's qualified detail title",
+    );
+    assert_eq!(point.metric_value, expected_metric);
+    assert_eq!(point.published_local_date, expected_local_date);
+    assert_eq!(
+        work.inspector
+            .pointer("/engagementCurrent/metrics/likeCount/current/packageRef")
+            .and_then(serde_json::Value::as_str),
+        Some(expected_package.as_str()),
+    );
+    assert_eq!(
+        work.inspector
+            .pointer("/detailCurrent/publishedAt/source/packageRef")
+            .and_then(serde_json::Value::as_str),
+        Some(expected_package.as_str()),
+    );
 }
 
 #[tokio::test]
@@ -322,7 +462,8 @@ async fn recent_window_uses_inclusive_asia_shanghai_calendar_dates() {
     .await
     .unwrap()
     .unwrap();
-    assert_eq!(recent.summary.linked_work_count, 3);
+    assert_eq!(recent.summary.linked_work_count, Some(3));
+    assert_eq!(recent.summary.linked_work_count_lower_bound, 3);
     assert_eq!(recent.summary.eligible_point_count, 2);
     assert_eq!(recent.exclusions.outside_window, 1);
     assert_eq!(
@@ -450,9 +591,12 @@ async fn creator_lifecycle_reports_its_bounded_scan_receipt() {
     .await
     .unwrap()
     .unwrap();
-    assert_eq!(projection.summary.linked_work_count, 2_000);
+    assert_eq!(projection.summary.linked_work_count, None);
+    assert_eq!(projection.summary.linked_work_count_lower_bound, 2_001);
     assert_eq!(projection.receipt.scan_limit, 2_000);
+    assert_eq!(projection.receipt.probed_count, 2_001);
     assert_eq!(projection.receipt.scanned_count, 2_000);
+    assert_eq!(projection.receipt.returned_count, 0);
     assert!(projection.receipt.truncated);
     assert!(projection.exclusions.scan_truncated);
     assert_eq!(projection.exclusions.author_not_verified, 2_000);

@@ -376,8 +376,8 @@ fn runtime_token_source_matches_the_full_lids_baseline() {
     let runtime = declared_token_values(LIDS_TOKENS);
     let documented = declared_token_values(LIDS_TOKEN_DOCUMENT);
 
-    assert_eq!(runtime.len(), 131);
-    assert_eq!(documented.len(), 131);
+    assert_eq!(runtime.len(), 132);
+    assert_eq!(documented.len(), 132);
     assert_eq!(runtime, documented);
     assert!(declared_token_values(SHELL_CSS).is_empty());
     assert!(declared_token_values(EVIDENCE_LIBRARY_CSS).is_empty());

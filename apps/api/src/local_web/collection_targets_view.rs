@@ -27,6 +27,7 @@ pub fn render_stored_targets(
     avatars: &HashMap<uuid::Uuid, ObservationTargetAvatar>,
     completeness: &HashMap<String, ArchiveCompleteness>,
     error: Option<&str>,
+    list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
     if targets.is_empty() {
         return replace_target_state(
@@ -47,6 +48,7 @@ pub fn render_stored_targets(
             index,
             avatars.get(&target.target_ref),
             completeness.get(&target.identity_key),
+            list_context,
         ));
     }
 
@@ -137,6 +139,7 @@ fn target_row(
     index: usize,
     avatar: Option<&ObservationTargetAvatar>,
     archive: Option<&ArchiveCompleteness>,
+    list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
     let is_creator = target.target_kind == "creator";
     let name = target
@@ -144,6 +147,8 @@ fn target_row(
         .as_deref()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or(&target.identity_key);
+    let opener_href = list_context.drawer_href(target.target_ref, &[], None);
+    let opener_id = format!("target-{}", target.target_ref);
 
     format!(
         r#"<article class="c-tg-item">
@@ -152,7 +157,7 @@ fn target_row(
                 <div class="c-tg-object">
                   {avatar}
                   <div class="c-tg-object-text">
-                    <a class="c-tg-title" href="/collection/targets?drawer={target_ref}">{name}</a>
+                    <a id="{opener_id}" class="c-tg-title" data-drawer-trigger="{target_ref}" href="{opener_href}">{name}</a>
                     <div class="c-tg-meta">{kind} / {platform} · {handle}</div>
                     <div class="c-tg-states">{states}</div>
                   </div>
@@ -428,6 +433,7 @@ fn escape(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use super::super::target_drawer::TargetListContext;
     use super::*;
     use uuid::Uuid;
 
@@ -456,7 +462,14 @@ mod tests {
             let base = format!(
                 "before<section class=\"c-empty c-empty-engineering\">{provisional}</section>after"
             );
-            let html = render_stored_targets(&base, &[], &HashMap::new(), &HashMap::new(), None);
+            let html = render_stored_targets(
+                &base,
+                &[],
+                &HashMap::new(),
+                &HashMap::new(),
+                None,
+                TargetListContext::default(),
+            );
             assert!(html.contains("当前列表范围没有匹配的观察目标"));
             assert!(html.contains("目标列表读取成功"));
             assert!(!html.contains(provisional));
@@ -472,6 +485,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             None,
+            TargetListContext::default(),
         );
 
         assert!(html.contains("孩悦"));
@@ -500,6 +514,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             None,
+            TargetListContext::default(),
         );
 
         assert!(html.contains("真实目标"));
@@ -516,6 +531,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             None,
+            TargetListContext::default(),
         );
         assert!(html.contains("5ebe6d21"));
         assert!(!html.contains("未命名"));
@@ -530,6 +546,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             None,
+            TargetListContext::default(),
         );
         assert!(html.contains("&lt;script&gt;"));
         assert!(!html.contains("<script>x"));
@@ -544,7 +561,14 @@ mod tests {
             "redId": "creator-001"
         }));
 
-        let html = render_stored_targets(&base, &[creator], &HashMap::new(), &HashMap::new(), None);
+        let html = render_stored_targets(
+            &base,
+            &[creator],
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+            TargetListContext::default(),
+        );
 
         assert!(html.contains("creator-001"));
         assert!(!html.contains("remote-avatar.jpg"));
@@ -562,10 +586,40 @@ mod tests {
                 local_asset_path: "/api/local/media/11111111-1111-4111-8111-111111111111/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
             },
         );
-        let html = render_stored_targets(&base, &[creator], &avatars, &HashMap::new(), None);
+        let html = render_stored_targets(
+            &base,
+            &[creator],
+            &avatars,
+            &HashMap::new(),
+            None,
+            TargetListContext::default(),
+        );
         assert!(html.contains("/api/local/media/11111111-1111-4111-8111-111111111111/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"));
         assert!(html.contains("<img class=\"c-tg-avatar\""));
         assert!(!html.contains("http://"));
         assert!(!html.contains("https://"));
+    }
+
+    #[test]
+    fn target_opener_keeps_the_filtered_list_context_and_has_a_focus_return_anchor() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let creator = target("creator", Some("筛选内作者"));
+        let html = render_stored_targets(
+            &base,
+            std::slice::from_ref(&creator),
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+            TargetListContext {
+                filter: Some("creator"),
+                sort: Some("last"),
+            },
+        );
+        assert!(html.contains(&format!("id=\"target-{}\"", creator.target_ref)));
+        assert!(html.contains(&format!("data-drawer-trigger=\"{}\"", creator.target_ref)));
+        assert!(html.contains(&format!(
+            "href=\"/collection/targets?filter=creator&amp;sort=last&amp;drawer={}\"",
+            creator.target_ref
+        )));
     }
 }

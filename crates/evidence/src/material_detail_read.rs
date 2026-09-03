@@ -4,8 +4,11 @@ use crate::material_projection::{
     MaterialLibraryItem, MaterialReadError, enrich_discovery_material, enrich_media_material,
     material_item,
 };
+use crate::work_resource_current::{
+    WorkResourceCurrent, WorkResourceCurrentSource, read_work_resource_currents,
+};
 use linggan_storage_postgres::Database;
-use serde_json::{Map, Value};
+use serde_json::Value;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -20,22 +23,14 @@ pub async fn read_material_detail(
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(&mut *tx)
         .await?;
-    let row = sqlx::query(crate::material_query_sql::MATERIAL_PAGE_SQL)
-        .bind(None::<String>)
-        .bind(&as_of)
-        .bind(None::<String>)
-        .bind(None::<String>)
-        .bind(None::<String>)
-        .bind(None::<String>)
-        .bind(None::<String>)
-        .bind(Some(public_ref))
-        .fetch_optional(&mut *tx)
-        .await?;
-    let Some(row) = row else {
+    let current = read_work_resource_currents(&mut tx, &[public_ref], &as_of)
+        .await?
+        .pop();
+    let Some(current) = current else {
         tx.commit().await?;
         return Ok(None);
     };
-    let mut item = material_item(row, None);
+    let mut item = material_item(&current, None);
     enrich_discovery_material(&mut tx, &mut item, &as_of).await?;
     crate::material_social_read::enrich(&mut tx, &mut item, None, &as_of).await?;
     enrich_media_material(&mut tx, &mut item, &as_of).await?;
@@ -59,8 +54,8 @@ pub async fn read_material_detail(
         .map(engagement_row)
         .collect::<Vec<_>>();
     engagement_rows.reverse();
-    let engagement_current = read_engagement_current(&mut tx, public_ref, &as_of).await?;
-    let detail_current = read_detail_current(&mut tx, public_ref, &as_of).await?;
+    let engagement_current = read_engagement_current(&mut tx, &current, &as_of).await?;
+    let detail_current = read_detail_current(&current);
     if let Some(inspector) = item.inspector.as_object_mut() {
         inspector.insert(
             "engagementTimeline".to_owned(),
@@ -101,14 +96,14 @@ fn engagement_row(row: &sqlx::postgres::PgRow) -> Value {
 /// a stale value or make the latest valid fact disappear after the timeline's display limit.
 async fn read_engagement_current(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    public_ref: Uuid,
+    current: &WorkResourceCurrent,
     as_of: &str,
 ) -> Result<Value, sqlx::Error> {
     Ok(serde_json::json!({
-        "likeCount":read_metric_current(tx, public_ref, as_of, EngagementMetric::Like).await?,
-        "commentCount":read_metric_current(tx, public_ref, as_of, EngagementMetric::Comment).await?,
-        "collectCount":read_metric_current(tx, public_ref, as_of, EngagementMetric::Collect).await?,
-        "shareCount":read_metric_current(tx, public_ref, as_of, EngagementMetric::Share).await?
+        "likeCount":read_metric_history(tx, current.public_ref, as_of, EngagementMetric::Like, current.like_count, &current.like_source).await?,
+        "commentCount":read_metric_history(tx, current.public_ref, as_of, EngagementMetric::Comment, current.comment_count, &current.comment_source).await?,
+        "collectCount":read_metric_history(tx, current.public_ref, as_of, EngagementMetric::Collect, current.collect_count, &current.collect_source).await?,
+        "shareCount":read_metric_history(tx, current.public_ref, as_of, EngagementMetric::Share, current.share_count, &current.share_source).await?
     }))
 }
 
@@ -120,51 +115,71 @@ enum EngagementMetric {
     Share,
 }
 
-async fn read_metric_current(
+async fn read_metric_history(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     public_ref: Uuid,
     as_of: &str,
     metric: EngagementMetric,
+    current_value: Option<i64>,
+    current_source: &WorkResourceCurrentSource,
 ) -> Result<Value, sqlx::Error> {
-    let query = match metric {
-        EngagementMetric::Like => {
-            "SELECT observation.package_ref,observation.source_lane,observation.observed_at, observation.created_at::text AS created_at,observation.like_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.like_count_state='KNOWN' AND observation.like_count IS NOT NULL ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC LIMIT 2"
-        }
-        EngagementMetric::Comment => {
-            "SELECT observation.package_ref,observation.source_lane,observation.observed_at, observation.created_at::text AS created_at,observation.comment_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.comment_count_state='KNOWN' AND observation.comment_count IS NOT NULL ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC LIMIT 2"
-        }
-        EngagementMetric::Collect => {
-            "SELECT observation.package_ref,observation.source_lane,observation.observed_at, observation.created_at::text AS created_at,observation.collect_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.collect_count_state='KNOWN' AND observation.collect_count IS NOT NULL ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC LIMIT 2"
-        }
-        EngagementMetric::Share => {
-            "SELECT observation.package_ref,observation.source_lane,observation.observed_at, observation.created_at::text AS created_at,observation.share_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.share_count_state='KNOWN' AND observation.share_count IS NOT NULL ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC LIMIT 2"
-        }
-    };
-    let known = sqlx::query(query)
-        .bind(public_ref)
-        .bind(as_of)
-        .fetch_all(&mut **tx)
-        .await?
-        .iter()
-        .map(metric_point_row)
-        .collect::<Vec<_>>();
-    let Some(current) = known.first() else {
+    let Some(current_value) = current_value else {
         return Ok(serde_json::json!({
             "state":"UNKNOWN","current":Value::Null,"previous":Value::Null,
             "delta":Value::Null,"deltaState":"UNKNOWN"
         }));
     };
-    let previous = known.get(1).cloned().unwrap_or(Value::Null);
+    let query = match metric {
+        EngagementMetric::Like => {
+            "SELECT observation.package_ref,observation.source_lane,observation.observed_at,observation.created_at::text AS created_at,observation.like_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.like_count_state='KNOWN' AND observation.like_count IS NOT NULL AND NOT (observation.package_ref=$3 AND observation.source_lane=$4) ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC LIMIT 1"
+        }
+        EngagementMetric::Comment => {
+            "SELECT observation.package_ref,observation.source_lane,observation.observed_at,observation.created_at::text AS created_at,observation.comment_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.comment_count_state='KNOWN' AND observation.comment_count IS NOT NULL AND NOT (observation.package_ref=$3 AND observation.source_lane=$4) ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC LIMIT 1"
+        }
+        EngagementMetric::Collect => {
+            "SELECT observation.package_ref,observation.source_lane,observation.observed_at,observation.created_at::text AS created_at,observation.collect_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.collect_count_state='KNOWN' AND observation.collect_count IS NOT NULL AND NOT (observation.package_ref=$3 AND observation.source_lane=$4) ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC LIMIT 1"
+        }
+        EngagementMetric::Share => {
+            "SELECT observation.package_ref,observation.source_lane,observation.observed_at,observation.created_at::text AS created_at,observation.share_count AS value FROM linggan_material_engagement_observation observation JOIN linggan_runtime_capture_package package USING(package_ref) WHERE observation.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz AND observation.share_count_state='KNOWN' AND observation.share_count IS NOT NULL AND NOT (observation.package_ref=$3 AND observation.source_lane=$4) ORDER BY observation.observed_at::timestamptz DESC,observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC LIMIT 1"
+        }
+    };
+    let (Some(current_package_ref), Some(current_source_lane)) = (
+        current_source.package_ref,
+        current_source.source_lane.as_deref(),
+    ) else {
+        return Err(sqlx::Error::Protocol(
+            "Work Resource Current returned a KNOWN engagement value without provenance".into(),
+        ));
+    };
+    let previous = sqlx::query(query)
+        .bind(public_ref)
+        .bind(as_of)
+        .bind(current_package_ref)
+        .bind(current_source_lane)
+        .fetch_optional(&mut **tx)
+        .await?
+        .as_ref()
+        .map(metric_point_row)
+        .unwrap_or(Value::Null);
+    let current = metric_point(current_value, current_source);
     let delta = previous
         .get("value")
         .and_then(Value::as_i64)
-        .map(|previous_value| {
-            current.get("value").and_then(Value::as_i64).unwrap_or(0) - previous_value
-        });
+        .map(|previous_value| current_value - previous_value);
     Ok(serde_json::json!({
         "state":"KNOWN","current":current,"previous":previous,
         "delta":delta,"deltaState":if delta.is_some() { "KNOWN" } else { "UNKNOWN" }
     }))
+}
+
+fn metric_point(value: i64, source: &WorkResourceCurrentSource) -> Value {
+    serde_json::json!({
+        "value":value,
+        "packageRef":source.package_ref,
+        "sourceLane":source.source_lane,
+        "observedAt":source.observed_at,
+        "recordedAt":source.recorded_at
+    })
 }
 
 fn metric_point_row(row: &sqlx::postgres::PgRow) -> Value {
@@ -177,106 +192,49 @@ fn metric_point_row(row: &sqlx::postgres::PgRow) -> Value {
     })
 }
 
-async fn read_detail_current(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    public_ref: Uuid,
-    as_of: &str,
-) -> Result<Value, sqlx::Error> {
-    let rows = sqlx::query(
-        "SELECT detail.material_ref,detail.package_ref,detail.observed_at,detail.created_at::text AS created_at, \
-                detail.title,detail.title_state,detail.body_text,detail.body_state, \
-                detail.creator_display_name,detail.creator_display_name_state, \
-                detail.published_at::text AS published_at,detail.published_at_source_text,detail.published_at_source_text_state, \
-                detail.published_at_source_field,detail.published_at_source_kind,detail.published_at_precision, \
-                detail.published_at_reference_observed_at::text AS published_at_reference_observed_at,detail.published_at_parser_version \
-         FROM linggan_material_content_detail detail \
-         JOIN linggan_runtime_capture_package package USING(package_ref) \
-         WHERE detail.content_public_ref=$1 AND package.accepted_at <= $2::timestamptz \
-         ORDER BY detail.observed_at::timestamptz DESC,detail.created_at DESC",
-    )
-    .bind(public_ref)
-    .bind(as_of)
-    .fetch_all(&mut **tx)
-    .await?;
-    let mut fields = Map::new();
-    let mut exact_published = None;
-    let mut source_text_published = None;
-    for row in rows {
-        let source = serde_json::json!({
-            "materialRef":row.get::<Uuid,_>("material_ref"),
-            "packageRef":row.get::<Uuid,_>("package_ref"),
-            "observedAt":row.get::<String,_>("observed_at"),
-            "recordedAt":row.get::<String,_>("created_at")
-        });
-        insert_known_field(
-            &mut fields,
-            "title",
-            row.get::<Option<String>, _>("title"),
-            row.get::<String, _>("title_state") == "KNOWN",
-            &source,
-        );
-        insert_known_field(
-            &mut fields,
-            "body",
-            row.get::<Option<String>, _>("body_text"),
-            row.get::<String, _>("body_state") == "KNOWN",
-            &source,
-        );
-        insert_known_field(
-            &mut fields,
-            "creator",
-            row.get::<Option<String>, _>("creator_display_name"),
-            row.get::<String, _>("creator_display_name_state") == "KNOWN",
-            &source,
-        );
-        let published_at: Option<String> = row.get("published_at");
-        let source_text: Option<String> = row.get("published_at_source_text");
-        let source_text_known = row.get::<String, _>("published_at_source_text_state") == "KNOWN";
-        if exact_published.is_none() && published_at.is_some() {
-            exact_published = Some(serde_json::json!({
-                "state":"KNOWN","value":published_at,"sourceText":source_text.clone(),
-                "sourceField":row.get::<Option<String>,_>("published_at_source_field"),
-                "sourceKind":row.get::<String,_>("published_at_source_kind"),
-                "precision":row.get::<String,_>("published_at_precision"),
-                "referenceObservedAt":row.get::<Option<String>,_>("published_at_reference_observed_at"),
-                "parserVersion":row.get::<Option<String>,_>("published_at_parser_version"),
-                "source":source.clone()
-            }));
-        }
-        if source_text_published.is_none() && source_text_known && source_text.is_some() {
-            source_text_published = Some(serde_json::json!({
-                "state":"SOURCE_TEXT_ONLY","value":Value::Null,"sourceText":source_text,
-                "sourceField":row.get::<Option<String>,_>("published_at_source_field"),
-                "sourceKind":row.get::<String,_>("published_at_source_kind"),
-                "precision":row.get::<String,_>("published_at_precision"),
-                "referenceObservedAt":row.get::<Option<String>,_>("published_at_reference_observed_at"),
-                "parserVersion":row.get::<Option<String>,_>("published_at_parser_version"),
-                "source":source
-            }));
-        }
-    }
-    if let Some(published) = exact_published.or(source_text_published) {
-        fields.insert("publishedAt".to_owned(), published);
-    }
-    for field in ["title", "body", "creator", "publishedAt"] {
-        fields
-            .entry(field.to_owned())
-            .or_insert_with(|| serde_json::json!({"state":"UNKNOWN","value":Value::Null}));
-    }
-    Ok(Value::Object(fields))
+fn read_detail_current(current: &WorkResourceCurrent) -> Value {
+    serde_json::json!({
+        "title":text_current(&current.title, &current.title_state, &current.title_source),
+        "body":text_current(&current.body_text, &current.body_state, &current.body_source),
+        "creator":text_current(&current.creator_display_name, &current.creator_display_name_state, &current.creator_source),
+        "publishedAt":published_current(current)
+    })
 }
 
-fn insert_known_field(
-    fields: &mut Map<String, Value>,
-    name: &str,
-    value: Option<String>,
-    known: bool,
-    source: &Value,
-) {
-    if known && value.is_some() && !fields.contains_key(name) {
-        fields.insert(
-            name.to_owned(),
-            serde_json::json!({"state":"KNOWN","value":value,"source":source}),
-        );
+fn text_current(value: &Option<String>, state: &str, source: &WorkResourceCurrentSource) -> Value {
+    match value {
+        Some(value) if state == "KNOWN" => serde_json::json!({
+            "state":"KNOWN","value":value,"source":detail_source(source)
+        }),
+        _ => serde_json::json!({"state":"UNKNOWN","value":Value::Null}),
     }
+}
+
+fn published_current(current: &WorkResourceCurrent) -> Value {
+    let state = if current.published_at.is_some() {
+        "KNOWN"
+    } else if current.published_at_source_text.is_some() {
+        "SOURCE_TEXT_ONLY"
+    } else {
+        return serde_json::json!({"state":"UNKNOWN","value":Value::Null});
+    };
+    serde_json::json!({
+        "state":state,"value":current.published_at,
+        "sourceText":current.published_at_source_text,
+        "sourceField":current.published_at_source_field,
+        "sourceKind":current.published_at_source_kind,
+        "precision":current.published_at_precision,
+        "referenceObservedAt":current.published_at_reference_observed_at,
+        "parserVersion":current.published_at_parser_version,
+        "source":detail_source(&current.published_source)
+    })
+}
+
+fn detail_source(source: &WorkResourceCurrentSource) -> Value {
+    serde_json::json!({
+        "materialRef":source.material_ref,
+        "packageRef":source.package_ref,
+        "observedAt":source.observed_at,
+        "recordedAt":source.recorded_at
+    })
 }

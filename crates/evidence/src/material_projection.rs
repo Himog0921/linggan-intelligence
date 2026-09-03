@@ -12,6 +12,9 @@ pub use crate::material_projection_types::{
     MaterialLibraryItem, MaterialLibraryProjection, MaterialPreview, MaterialSummary,
 };
 use crate::material_social_read;
+use crate::work_resource_current::{
+    WorkResourceCurrent, WorkResourceCurrentPageQuery, read_work_resource_current_page,
+};
 use linggan_contracts::{EvidenceQuery, EvidenceQuerySort};
 use linggan_storage_postgres::Database;
 use serde_json::Value;
@@ -90,17 +93,20 @@ async fn read_latest_material_page(
     let mut scanned_count = 0;
     let mut scan_limited = false;
     'scan: loop {
-        let rows = sqlx::query(crate::material_query_sql::MATERIAL_PAGE_SQL)
-            .bind(text)
-            .bind(&as_of)
-            .bind(scan_observed_at.as_deref())
-            .bind(scan_platform.as_deref())
-            .bind(scan_content_external_id.as_deref())
-            .bind(query.lane().map(|lane| lane.as_str()))
-            .bind(query.media_kind().map(|kind| kind.as_purpose()))
-            .bind(None::<Uuid>)
-            .fetch_all(&mut *tx)
-            .await?;
+        let rows = read_work_resource_current_page(
+            &mut tx,
+            WorkResourceCurrentPageQuery {
+                text,
+                as_of: &as_of,
+                observed_before: scan_observed_at.as_deref(),
+                platform_after: scan_platform.as_deref(),
+                content_external_id_after: scan_content_external_id.as_deref(),
+                lane: query.lane().map(|lane| lane.as_str()),
+                media_kind: query.media_kind().map(|kind| kind.as_purpose()),
+                one_public_ref: None,
+            },
+        )
+        .await?;
         let exhausted = rows.len() < MATERIAL_PAGE_SIZE + 1;
         if rows.is_empty() {
             break;
@@ -110,11 +116,11 @@ async fn read_latest_material_page(
                 scan_limited = true;
                 break 'scan;
             }
-            scan_observed_at = Some(row.get("observed_at"));
-            scan_platform = Some(row.get("platform"));
-            scan_content_external_id = Some(row.get("content_external_id"));
+            scan_observed_at = Some(row.observed_at.clone());
+            scan_platform = Some(row.platform.clone());
+            scan_content_external_id = Some(row.content_external_id.clone());
             scanned_count += 1;
-            let mut item = material_item(row, text);
+            let mut item = material_item(&row, text);
             enrich_discovery_material(&mut tx, &mut item, &as_of).await?;
             material_social_read::enrich(&mut tx, &mut item, text, &as_of).await?;
             enrich_media_material(&mut tx, &mut item, &as_of).await?;
@@ -532,16 +538,19 @@ pub async fn material_projection_schema_is_ready(database: &Database) -> Result<
     .await
 }
 
-pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> MaterialLibraryItem {
-    let title: Option<String> = row.get("title");
-    let body: Option<String> = row.get("body_text");
-    let creator: Option<String> = row.get("creator_display_name");
-    let published_at: Option<String> = row.get("published_at");
-    let published_at_source_text: Option<String> = row.get("published_at_source_text");
-    let observed_at: String = row.get("observed_at");
-    let material_ref: Option<Uuid> = row.get("material_ref");
-    let package_ref: Option<Uuid> = row.get("package_ref");
-    let record_ordinal: Option<i32> = row.get("record_ordinal");
+pub(crate) fn material_item(
+    current: &WorkResourceCurrent,
+    text: Option<&str>,
+) -> MaterialLibraryItem {
+    let title = current.title.clone();
+    let body = current.body_text.clone();
+    let creator = current.creator_display_name.clone();
+    let published_at = current.published_at.clone();
+    let published_at_source_text = current.published_at_source_text.clone();
+    let observed_at = current.observed_at.clone();
+    let material_ref = current.material_ref;
+    let package_ref = current.package_ref;
+    let record_ordinal = current.record_ordinal;
     let matched_fields = match text {
         None => Vec::new(),
         Some(text) => {
@@ -562,15 +571,15 @@ pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> M
     };
     MaterialLibraryItem {
         identity: MaterialIdentity {
-            platform: row.get("platform"),
-            content_external_id: row.get("content_external_id"),
-            public_ref: row.get("public_ref"),
+            platform: current.platform.clone(),
+            content_external_id: current.content_external_id.clone(),
+            public_ref: current.public_ref,
         },
         display: MaterialDisplay {
             title,
-            title_state: row.get("title_state"),
+            title_state: current.title_state.clone(),
             creator_display_name: creator,
-            creator_state: row.get("creator_display_name_state"),
+            creator_state: current.creator_display_name_state.clone(),
             published_at: published_at.clone(),
             published_at_source_text: published_at_source_text.clone(),
             published_at_state: if published_at.is_some() {
@@ -581,20 +590,20 @@ pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> M
                 "UNKNOWN"
             }
             .to_owned(),
-            published_at_source_field: row.get("published_at_source_field"),
-            published_at_source_kind: row.get("published_at_source_kind"),
-            published_at_precision: row.get("published_at_precision"),
-            published_at_reference_observed_at: row.get("published_at_reference_observed_at"),
-            published_at_parser_version: row.get("published_at_parser_version"),
+            published_at_source_field: current.published_at_source_field.clone(),
+            published_at_source_kind: current.published_at_source_kind.clone(),
+            published_at_precision: current.published_at_precision.clone(),
+            published_at_reference_observed_at: current.published_at_reference_observed_at.clone(),
+            published_at_parser_version: current.published_at_parser_version.clone(),
             engagement: MaterialEngagement {
-                like_count: row.get("like_count"),
-                like_count_state: row.get("like_count_state"),
-                comment_count: row.get("comment_count"),
-                comment_count_state: row.get("comment_count_state"),
-                collect_count: row.get("collect_count"),
-                collect_count_state: row.get("collect_count_state"),
-                share_count: row.get("share_count"),
-                share_count_state: row.get("share_count_state"),
+                like_count: current.like_count,
+                like_count_state: current.like_count_state.clone(),
+                comment_count: current.comment_count,
+                comment_count_state: current.comment_count_state.clone(),
+                collect_count: current.collect_count,
+                collect_count_state: current.collect_count_state.clone(),
+                share_count: current.share_count,
+                share_count_state: current.share_count_state.clone(),
             },
         },
         collection_context: MaterialCollectionContext {
@@ -608,7 +617,7 @@ pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> M
         },
         preview: MaterialPreview {
             local_asset_url: None,
-            observed_source_state: row.get("cover_source_state"),
+            observed_source_state: current.cover_source_state.clone(),
             slot_purpose: None,
             bytes_state: "UNKNOWN",
             alt: "没有已验证的本地媒体副本".to_owned(),
@@ -624,10 +633,7 @@ pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> M
             "transcript":{"state":"NOT_OBSERVED","relationship":"content.transcript","resources":[]},
             "commentImages":{"state":"NOT_OBSERVED","relationship":"comment.image","items":[]}
         }),
-        lane_summaries: default_lane_summaries(
-            &observed_at,
-            row.get::<Option<Uuid>, _>("detail_material_ref").is_some(),
-        ),
+        lane_summaries: default_lane_summaries(&observed_at, current.detail_material_ref.is_some()),
         summary: MaterialSummary {
             last_observed_at: observed_at.clone(),
             primary_limitation: "OTHER_LANES_NOT_EVALUATED",
@@ -636,9 +642,9 @@ pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> M
         inspector: serde_json::json!({
             "overview": {
                 "fields": [
-                    {"field":"title","state":row.get::<String,_>("title_state"),"sourceRefs":[material_ref]},
-                    {"field":"body","state":row.get::<String,_>("body_state"),"value":null,"accessLevel":"RESTRICTED_SOURCE","sourceRefs":[material_ref]},
-                    {"field":"creator","state":row.get::<String,_>("creator_display_name_state"),"sourceRefs":[material_ref]}
+                    {"field":"title","state":current.title_state,"sourceRefs":[material_ref]},
+                    {"field":"body","state":current.body_state,"value":null,"accessLevel":"RESTRICTED_SOURCE","sourceRefs":[material_ref]},
+                    {"field":"creator","state":current.creator_display_name_state,"sourceRefs":[material_ref]}
                 ]
             },
             "commentThreads": [],
@@ -654,7 +660,7 @@ pub(crate) fn material_item(row: sqlx::postgres::PgRow, text: Option<&str>) -> M
         }),
         matched_fields,
         evidence_fragment: None,
-        author_external_id: row.get("author_external_id"),
+        author_external_id: current.author_external_id.clone(),
         body_text: body,
     }
 }

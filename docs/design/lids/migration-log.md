@@ -1,7 +1,7 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-09-03
+> 最后核对: 2026-09-04
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
@@ -12,7 +12,7 @@
 
 - **来源与范围**：Issue #148 与 Mog 最新决定将 Evidence 呈现留在 Corpus；creator target 抽屉只做生命周期决策面与精确跳转，不保留 Evidence tab，不引入监控价值、机会评分或趋势预测。
 - **Pattern / Page**：Collection L1 Operations 不变，右抽屉保持受限 L2。四个职责为概览、基线、巡检策略、追踪；creator 概览以真实发布时间散点为单一视觉核心，keyword 明示不适用。完整清单见 [`../changes/collection-lifecycle-001-ui-change-manifest.md`](../changes/collection-lifecycle-001-ui-change-manifest.md)。
-- **Token / Motion / A11y**：新增 page-local `target_drawer.css`，只消费已有 `--lgi-*`；无新 token、字面颜色、渐变或全局 CMP。控件至少 40px，点为具名 SVG 链接，focus-visible 与 reduced-motion 有显式分支，390px 收为单栏。
+- **Token / Motion / A11y**：新增 page-local `target_drawer.css`，只消费 `--lgi-*`；review remediation 在唯一真源新增 `--lgi-focus: #335e72` 并同步 132 项文档镜像，用全局 2px outline/2px offset 替代 drawer 的 Signal 焦点和 SVG `outline:none`。控件至少 40px，点为具名 SVG 链接并另有 4px stroke/scale 非纯颜色提示；reduced-motion 有显式分支，390px 收为单栏。token/全局 selector 会影响所有 LIDS 页面，当前只对目标抽屉完成真实 Tab 证明，完整站点焦点回归仍不由本卡宣称。
 - **Data Truth**：stable author exact match、qualified platform epoch、field-wise latest KNOWN 和 `KNOWN 0` 由服务端读模型负责。90 天是 `Asia/Shanghai` 90 个含首尾日历日。分析版本冻结为 `creator-percentile-v1` 与 `trailing-5-work-median-v1` / 5；前端不重复计算。
 - **读取预算**：最多扫描 2000 + 1 探针并显式回执；Collection 只在 creator overview 执行，baseline/patrol/trace 与 keyword 不读，独立 API 保留。
 - **证明边界**：branch 自动与隔离 PostgreSQL 证据以 [`../acceptance/collection-lifecycle-001-visual-acceptance.md`](../acceptance/collection-lifecycle-001-visual-acceptance.md) 为准。未应用 shared migration、未切 runtime、未部署、未访问外部平台、未取得 Mog 业务验收。

@@ -1,7 +1,7 @@
 # COLLECTION-LIFECYCLE-001 · Creator 生命周期抽屉 UI 变更清单
 
 > 状态: 权威当前
-> 最后核对: 2026-09-03
+> 最后核对: 2026-09-04
 > 适用范围: Issue #148 的 `/collection/targets` creator drawer、lifecycle JSON API 与 `/corpus/evidence?work=` 精确定位
 > 事实来源: 用户最新决定、Issue #148 Claim、`PAGE-COLLECTION-001`、LIDS v7、当前 Work Resource/Collection 代码与隔离 PostgreSQL 测试
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实代码/数据库/测试、ACCEPTED 决定与 Issue #148 Claim
@@ -32,18 +32,20 @@
 | keyword overview | 明示 `NOT_APPLICABLE`，不读 2000 点生命周期 | 伪造空曲线 |
 | baseline / patrol / trace | 保留既有职责与 URL 状态；不执行生命周期扫描 | 生命周期重复读取 |
 | drawer tabs | `overview / baseline / patrol / trace` 四个职责 | Evidence tab |
-| lifecycle API | target、as-of、window/metric、summary/exclusions/receipt/analysis/points | `selected_work`、Corpus Inspector 或敏感材料 |
+| lifecycle API | target、as-of、window/metric、summary/exclusions/receipt、规则版本及 `workPublicRef` + percentile/median 派生点 | title/author/published/engagement Current、`selected_work`、Corpus Inspector 或敏感材料 |
 | Corpus deep link | 首批列表外的稳定 Work 仍直读 detail seam | 回退第一条或复制详情到 Collection |
 
-关键状态：`READY`、`INSUFFICIENT_OBSERVATION`、`NOT_APPLICABLE`、`READ_UNAVAILABLE`、`SCAN_LIMITED`。真实 `KNOWN 0` 是点；UNKNOWN 是排除原因。
+关键状态：`READY`、`INSUFFICIENT_OBSERVATION`、`NOT_APPLICABLE`、`READ_UNAVAILABLE`、`SCAN_LIMITED`、`QUERY_INVALID`。真实 `KNOWN 0` 是点；UNKNOWN 是排除原因。`linkedWorkCount` 只在未截断时为精确总量；截断时显示下限与 probe/scanned/returned，不把 2000 冒充完整总数。
 
 ## 4. 实现边界
 
-- 新增 `target_drawer.css`，只消费已有 `--lgi-*`；无 token 声明、字面颜色、渐变、玻璃或图标库。
+- 新增 `target_drawer.css`，只消费 `--lgi-*`；共享 Token 真源新增 `--lgi-focus`，由全局 `:focus-visible` 规则统一消费，page-local CSS 不声明颜色。该 token 影响所有 LIDS 页面焦点环；回退需同步删除 token、镜像项与 alias，不得只改本页。
 - SVG 每个作品点都是有 `aria-label` 的真实链接；鼠标和键盘走同一 URL。选中点只显示标题、发布时间、当前指标、创作者内分位与 Corpus 链接。
 - 图表使用 `log(1 + metric)` 视觉纵轴，原始值在可访问名和摘要中保留；一篇、零值、并列与极值不会因对数轴消失。
 - 服务端返回并渲染 `creator-percentile-v1` 与 `trailing-5-work-median-v1`；浏览器不重算分析值。
-- 页面仅在 creator + overview 读取 lifecycle。API 保持独立可读，窗口/指标闭集验证，未知参数被拒绝。
+- 页面以同一闭集 parser 将缺省、退役 `evidence` 和未知 `dtab` 归一 Overview，并在 creator Overview 真正读取；其它 tab/keyword 不读。非法 lifecycle window/metric 不回落默认值，HTML 显示 `QUERY_INVALID`，API 返回 422。
+- Escape、关闭链接与 tab/control URL 保留受支持的列表 `filter` 和既有 `sort=last` 上下文；`sort` 只回传、不进入查询。关闭后用 URL fragment 把焦点还给原 target opener。
+- 生命周期 Current 来自 Work Resource crate-private typed batch owner；页面模块只做候选/窗口/派生。独立 API 是瘦 derived DTO，不是第二份 Work facts API。
 
 ## 5. 证明边界
 
@@ -51,14 +53,14 @@
 |---|---|---|
 | 领域/数据库 | Rust unit + isolated PostgreSQL 16 | stable author、qualified time、KNOWN、上海 90 日、2000+1 receipt 已覆盖 |
 | API | Axum route tests + isolated PostgreSQL | 闭集、404/503、最小响应、敏感字段负向断言已覆盖 |
-| UI/交互 | Rust render/source tests | 四 tab、默认图、SVG a11y、无监控价值、server-owned median、深链已覆盖 |
+| UI/交互 | Rust render/source + 390 浏览器 | 四 tab、默认图、非法查询、all caption、Escape/focus return、SVG a11y、无监控价值、server-owned median、深链已覆盖 |
 | CSS | page-local source guard + 隔离视口 | 以 `ACC-COLLECTION-LIFECYCLE-001` 最终记录为准 |
 | 现实世界 | 未执行 shared runtime、平台访问或部署 | NOT VERIFIED；不由自动检查替代 |
 | Mog 业务验收 | Draft PR 后待用户检查 exact head | NOT VERIFIED |
 
 ## 6. 文件与交接
 
-- 主要实现：`crates/evidence/src/creator_lifecycle.rs`、`apps/api/src/local_web/creator_lifecycle_api.rs`、`apps/api/src/local_web/target_drawer.rs`、`apps/api/src/local_web/target_drawer.css`、`apps/api/src/local_web/evidence_library.js`。
+- 主要实现：`crates/evidence/src/work_resource_current.rs`、`material_query_sql.rs`、`material_projection.rs`、`material_detail_read.rs`、`creator_lifecycle.rs`、`apps/api/src/local_web/creator_lifecycle_api.rs`、`target_drawer.rs`、`target_drawer.css`、`collection_workspace.js`。
 - 测试：`crates/evidence/tests/creator_lifecycle_postgres.rs`、`apps/api/src/local_web/creator_lifecycle_tests.rs`。
 - 规格与验收：`PAGE-COLLECTION-001`、本清单、`ACC-COLLECTION-LIFECYCLE-001`、LIDS migration log。
 - 无设计例外、无新 CMP、无 schema/migration、无外部副作用。

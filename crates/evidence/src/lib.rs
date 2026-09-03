@@ -37,6 +37,7 @@ mod station_read;
 mod target_enrichment;
 mod work_order;
 mod work_order_lease;
+mod work_resource_current;
 mod work_resource_read;
 
 pub use acquisition_chain::{
@@ -61,8 +62,9 @@ pub use content_reobservation::{
 pub use creator_lifecycle::{
     CreatorLifecycleAnalysis, CreatorLifecycleExclusions, CreatorLifecycleMetric,
     CreatorLifecyclePoint, CreatorLifecycleProjection, CreatorLifecycleQuery,
-    CreatorLifecycleReadError, CreatorLifecycleReceipt, CreatorLifecycleStatus,
-    CreatorLifecycleSummary, CreatorLifecycleWindow, read_creator_lifecycle,
+    CreatorLifecycleQueryError, CreatorLifecycleReadError, CreatorLifecycleReceipt,
+    CreatorLifecycleStatus, CreatorLifecycleSummary, CreatorLifecycleWindow,
+    read_creator_lifecycle,
 };
 pub use dispatch::{
     DISPATCH_FAILURE_RETRY_AFTER_SECONDS, DispatchDecision, DispatchError, DispatchFailureCode,

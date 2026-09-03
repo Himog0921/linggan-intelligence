@@ -7,8 +7,22 @@
 (function () {
   "use strict";
 
+  function restoreDrawerTriggerFocus() {
+    var focusId = window.location.hash.slice(1);
+    if (!focusId || focusId.indexOf("target-") !== 0) {
+      return;
+    }
+    var trigger = document.getElementById(focusId);
+    if (trigger) {
+      window.requestAnimationFrame(function () {
+        trigger.focus();
+      });
+    }
+  }
+
   var drawer = document.getElementById("c-drawer");
   if (!drawer) {
+    restoreDrawerTriggerFocus();
     return;
   }
 
@@ -62,7 +76,12 @@
 
   document.addEventListener("keydown", function (event) {
     if (event.key === "Escape") {
-      window.location.href = "/collection/targets";
+      var returnUrl = drawer.dataset.returnUrl || "/collection/targets";
+      var returnFocus = drawer.dataset.returnFocus;
+      if (returnFocus) {
+        returnUrl += "#" + returnFocus;
+      }
+      window.location.assign(returnUrl);
     }
   });
 

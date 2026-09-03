@@ -1,7 +1,7 @@
 # COLLECTION-READ-MODEL-CLOSURE-001 · Collection 三包串行收口计划
 
 > 状态: 活跃计划
-> 最后核对: 2026-09-03
+> 最后核对: 2026-09-04
 > 适用范围: Issue #148 及其完成后才可开始的 Package 2 / Package 3
 > 事实来源: Mog 2026-09-03 最新决定、Issue #148 正文与 Claim、当前 `origin/main@d5b7886`、现有 PostgreSQL migration / Rust read model / Collection 与 Corpus 运行代码、LIDS v7
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、真实代码/数据库/测试、ACCEPTED 决定、权威当前产品与设计合同；历史内容工作台只作行为证据，不作实现指令
@@ -29,9 +29,11 @@ Package 3 · Creator Dossier
 
 - Issue: `#148 COLLECTION-READ-MODEL-CLOSURE-001`
 - Stable task-id: `collection-read-model-closure-001-p1`
+- Review remediation task-id: `collection-read-model-closure-001-p1-review-fixes-1`
 - Coordinator: Codex root `/root`
 - Execution subagent: `/root/current_drawer_audit`
 - Exact base: `d5b78863d8d56ad39664314229db02942fa4fd5d`
+- PR #151 review baseline: `e386cce2f6b08b602881a233fbd8b4de6c0595e5`
 - Branch: `codex/collection-read-model-closure-001`
 - Worktree: `/Users/moglenny/proma/linggan-intelligence/.worktrees/collection-read-model-closure-001`
 - 当前 preflight: branch/HEAD/目录与 Claim 一致；工作树起始干净。共享 checkout、`runtime-main` 和 `main-preview` 均不作为写入位置。
@@ -70,10 +72,10 @@ Package 3 · Creator Dossier
 - 滚动中位线冻结旧服务端领域口径 `trailing-5-work-median-v1` / `window=5`；前端只渲染服务端返回值，不得用旧前端的 15 点或新造窗口重复计算。
 - `life_work` 只属于页面选择状态；Rust/HTTP lifecycle read query 不接受、不消费 `selected_work`，避免把未消费字段伪装成查询能力。
 
-本包确认的公共测试 seam：
+本包确认的测试与公共 seam：
 
-1. Rust: `creator_lifecycle` 暴露 target-scoped window/metric query、result 类型及只读 PostgreSQL read function；选中作品不是读查询参数。
-2. HTTP: `GET /api/local/collection/targets/{target_ref}/lifecycle`，查询参数只接受冻结的窗口与指标枚举。
+1. Rust: `material_query_sql + WorkResourceCurrent` 是 crate-private typed batch Current owner；列表、单品、详情 Inspector 与 lifecycle 在同一 `as_of` 规则下复用。`creator_lifecycle` 只做 target-scoped 候选、窗口与派生计算；选中作品不是读查询参数。
+2. HTTP: `GET /api/local/collection/targets/{target_ref}/lifecycle`，查询参数只接受冻结的窗口与指标枚举；响应是瘦 derived DTO，不公开 title/author/published/engagement Current。
 3. Page: `/collection/targets?drawer=<target-ref>&life_window=<recent_90_days|all>&life_metric=<metric>&life_work=<public-ref>`；地址拥有抽屉、筛选与选中点状态。
 4. Corpus: `/corpus/evidence?work=<public-ref>` 必须在目标 Work 不在首批列表时仍精确打开该 Work。
 
@@ -128,7 +130,7 @@ Package 3 · Creator Dossier
 | creator target drawer overview | 默认直接显示生命周期核心、摘要、图表、排除回执与最小选中摘要 | 不复制 Corpus Inspector，不做作者 Dossier |
 | keyword target drawer | 明确“创作者生命周期不适用”，保留其它既有职责 | 不画空的伪曲线 |
 | drawer baseline / patrol / trace | 保留基线、巡检、追踪四职责；Evidence tab 退役 | 不新增控制动作或价值频率 |
-| lifecycle JSON API | 提供有界、as-of、只读 target projection | 不返回正文、评论身份、媒体、原始 payload、Evidence fragment |
+| lifecycle JSON API | 提供有界、as-of 的 target/window/规则/coverage/排除/scan receipt 与 percentile/median | 不返回 title、author、published/engagement Current、正文、评论身份、媒体、原始 payload、Evidence fragment |
 | `/corpus/evidence?work=` | 精确定位生命周期选中的 Work | 不改变 Evidence 产品含义或复制事实 |
 | `/collection/attention` | 只在既有可证明异常/限制 seam 能直接复用时同步 | 不凭生命周期分数制造待处理事项 |
 
@@ -147,7 +149,7 @@ Package 3 · Creator Dossier
 | `TARGET_NOT_FOUND` | target ref 不存在 | 本机读模型找不到标识 | 平台对象不存在 |
 | `READ_UNAVAILABLE` | 数据库/投影读取失败 | 现在无法读取 | 空集或成功 |
 
-## 8. Reality Matrix（实施前）
+## 8. Reality Matrix（实施前基线）
 
 | Claim | 状态 | 当前证据 | 本包动作 |
 |---|---|---|---|
@@ -168,11 +170,27 @@ Package 3 · Creator Dossier
 | 监控价值不在本包 | VERIFIED BY DECISION | Issue/Claim 明确排除 | 源码与响应负向断言 |
 | 自动、浏览器、部署、Mog 验收 | NOT VERIFIED | 尚未实现/运行 | 分层验证；未发生者保持 NOT VERIFIED |
 
+### 8.1 PR #151 review remediation 现况
+
+| Finding | 当前 branch 处置 | 证明 |
+|---|---|---|
+| Work facts 第二套裁定 | `WorkResourceCurrent` typed batch + 单一 CTE/列合同；列表、单品、Inspector、lifecycle 同 owner、同 transaction/as-of | 同 Work parity，含相同 `observed_at` tie；Inspector/长历史回归 |
+| Signal focus / SVG `outline:none` | 全局 `--lgi-focus` 与统一 2px/2px focus；点另有 4px stroke + scale | 真实 Tab 走查与 CSS 合同 |
+| HTML 非法 lifecycle query 静默回落 | 缺省与非法分离；非法为 `QUERY_INVALID`，不标记默认项 | render/API 422 回归 |
+| all caption 写成 90 日 | caption 由实际 window 输出 | all render 回归 |
+| Escape/focus/列表上下文 | drawer 在脚本前挂载，Escape 返回原 filter/既有 `sort=last` 上下文并 focus opener | 390 浏览器回归；`sort` 不进入列表查询 |
+| retired/unknown tab 读渲染分叉 | 单一 `TargetDrawerTab` 闭集解析；统一归一 Overview 并真的读取 | HTML 路由回归 |
+| 截断总量冒充精确 | exact total 为空，另给 `>=2001` 下限及 probe/scanned/returned | 2001 fixture 与 UI 回归 |
+
+公共 lifecycle route 已瘦身为 derived DTO；内部 server render 的 Work facts 继续来自共享 Current owner，
+不会形成可替代 Work Resource 的第二份 API。Evidence 仍只在 Corpus，监控价值仍排除。
+
 ## 9. 依赖与文件边界
 
 ### 9.1 Exclusive
 
 - `crates/evidence/src/creator_lifecycle.rs`（新增）
+- `crates/evidence/src/work_resource_current.rs`（review remediation 新增；crate-private shared owner）
 - `crates/evidence/tests/creator_lifecycle_postgres.rs`（新增）
 - `apps/api/src/local_web/target_drawer.rs`
 - `apps/api/src/local_web/target_drawer.css`（新增）
@@ -183,6 +201,7 @@ Package 3 · Creator Dossier
 ### 9.2 Shared，限完成本包的最小改动
 
 - `crates/evidence/src/lib.rs`
+- `crates/evidence/src/material_query_sql.rs`、`material_projection.rs`、`material_detail_read.rs`（共享 Current 消费方）
 - `apps/api/src/local_web.rs`
 - `apps/api/src/local_web/tests.rs`
 - `apps/api/src/local_web/evidence_library.js`
@@ -266,10 +285,10 @@ Package 3 · Creator Dossier
 | 层 | 当前状态 | 完成证明 |
 |---|---|---|
 | Plan / Claim / Reality Matrix | VERIFIED | 本计划与 `docs/README.md` 索引 |
-| Work Package A | VERIFIED（branch） | RED→GREEN；隔离 PostgreSQL lifecycle 4/4、API 1/1；无 migration |
+| Work Package A | VERIFIED（branch） | RED→GREEN；隔离 PostgreSQL lifecycle 5/5、API full-path 1/1；共享 Current/Inspector parity；无 migration |
 | Work Package B | VERIFIED（branch） | 四职责抽屉、默认生命周期、Evidence tab 退役；1440/1280 与 CDP 390 验证 |
 | Work Package C | VERIFIED（branch） | 首批列表外 Work 精确 Corpus detail；未复制 Evidence |
-| focused/workspace/governance | VERIFIED | workspace test/check、fmt、JS syntax、diff 与两项 governance 全通过 |
+| focused/workspace/governance | VERIFIED（branch） | lifecycle 5/5、API full-path、Work Resource/Inspector focused、workspace test/check、fmt、双 JS syntax、diff 与两项 governance 全通过 |
 | commit/push/Draft PR | PENDING | Draft PR body 必须 `Refs #148` |
 | independent exact-head review | NOT VERIFIED | 由 Mog/Coordinator 安排 |
 | main merge | NOT AUTHORIZED / NOT VERIFIED | 不在 Claim 内 |

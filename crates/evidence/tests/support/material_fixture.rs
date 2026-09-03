@@ -100,11 +100,21 @@ pub async fn submit_package(
     target: serde_json::Value,
     record: serde_json::Value,
 ) -> uuid::Uuid {
+    submit_package_at(database, capability, target, record, "2026-08-28T10:00:00Z").await
+}
+
+pub async fn submit_package_at(
+    database: &Database,
+    capability: &str,
+    target: serde_json::Value,
+    record: serde_json::Value,
+    observed_at: &str,
+) -> uuid::Uuid {
     let coverage = serde_json::json!({
         "target":target.clone(),
         "layers":[coverage_layer(capability,1)]
     });
-    submit_custom_package(
+    submit_custom_package_at(
         database,
         "xhs",
         &[capability],
@@ -113,11 +123,13 @@ pub async fn submit_package(
         "xhs",
         coverage,
         vec![record],
+        observed_at,
     )
     .await
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 pub async fn submit_custom_package(
     database: &Database,
     task_platform: &str,
@@ -127,6 +139,32 @@ pub async fn submit_custom_package(
     package_platform: &str,
     coverage: serde_json::Value,
     records: Vec<serde_json::Value>,
+) -> uuid::Uuid {
+    submit_custom_package_at(
+        database,
+        task_platform,
+        capabilities,
+        task_target,
+        package_kind,
+        package_platform,
+        coverage,
+        records,
+        "2026-08-28T10:00:00Z",
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn submit_custom_package_at(
+    database: &Database,
+    task_platform: &str,
+    capabilities: &[&str],
+    task_target: serde_json::Value,
+    package_kind: &str,
+    package_platform: &str,
+    coverage: serde_json::Value,
+    records: Vec<serde_json::Value>,
+    observed_at: &str,
 ) -> uuid::Uuid {
     let task_id = uuid::Uuid::new_v4();
     let producer_instance_id = uuid::Uuid::new_v4();
@@ -156,7 +194,7 @@ pub async fn submit_custom_package(
     let package = serde_json::json!({
         "contractVersion":"linggan.producer.capture-package.v1","packageRef":package_ref,
         "packageKind":package_kind,"platform":package_platform,
-        "observedAt":"2026-08-28T10:00:00Z","capturedAt":"2026-08-28T10:00:01Z",
+        "observedAt":observed_at,"capturedAt":observed_at,
         "coverage":coverage,"records":records
     });
     let submission = serde_json::json!({

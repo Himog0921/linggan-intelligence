@@ -1,7 +1,7 @@
 # PAGE-COLLECTION-001 · Collection Workspace 本地页面族
 
 > 状态: 权威当前
-> 最后核对: 2026-09-03
+> 最后核对: 2026-09-04
 > 适用范围: `http://localhost:3000/collection/*` 的五个子面
 > 事实来源: Mog 于 2026-08-26 的直接指定与逐项裁定、`REF-V4-001`、LIDS、领域不变量、当前 SCOPE 与真实 Rust 实现
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；V4 为本页族受限的视觉与骨架 Gold Master
@@ -40,6 +40,7 @@
 | `INSUFFICIENT_OBSERVATION` | 作者、时间或指标资格不足 | 观察不足以成图 | 没有作品或表现为 0 |
 | `NOT_APPLICABLE` | keyword target | 创作者生命周期不适用 | 空曲线或 keyword 表现为 0 |
 | `READ_UNAVAILABLE` | 生命周期查询失败 | 当前读取状态未知 | 目标不存在或作品为空 |
+| `QUERY_INVALID` | `life_window` 或 `life_metric` 不是闭集值 | 地址查询无效，需选择受支持口径 | 已按 90 日/点赞读取成功 |
 | `SCAN_LIMITED` | 扫描命中 2000 + 1 探针 | 当前历史可能不完整 | 已扫描目标全部历史 |
 | `TARGET_NOT_FOUND` | 抽屉标识无法解析 | 这个标识没有对应的观察目标 | 该对象在平台上不存在；它曾被删除 |
 | `UNKNOWN` | 所有读数 | 尚未获得或无法验证 | 数值为零；运行正常；运行失败 |
@@ -49,8 +50,8 @@
 ## 4. 已批准的设计组合
 
 - 全局页头由 `apps/api/src/local_web/shell.rs` 统一生成，Corpus 与 Collection 共用同一实现；`shell.css` 承载页头、上下文行与 216px 导轨，两页共用。
-- 页面局部样式在 `collection_workspace.css`；Issue #148 的生命周期与抽屉增量隔离在 `target_drawer.css`，只消费 `--lgi-*`，不新增 token、字面色值或渐变。
-- 深色实时观察流是全产品唯一的深色面，色值以 `--lgi-stream-*` 十项 token 进入唯一色值源（117 → 127 项）。
+- 页面局部样式在 `collection_workspace.css`；Issue #148 的生命周期与抽屉增量隔离在 `target_drawer.css`，只消费 `--lgi-*`，不写字面色值或渐变。review remediation 在唯一 Token 真源新增共享 `--lgi-focus`，所有 LIDS 页面由同一全局 2px/2px focus 规则消费。
+- 深色实时观察流是全产品唯一的深色面，色值以 `--lgi-stream-*` 十项 token 进入唯一色值源（当时 117 → 127 项；当前真源随后演进为 132 项）。
 - 目标抽屉与生命周期全部由服务端和 URL 状态渲染。散点、对数 y 轴、创作者内分位与 `trailing-5-work-median-v1` 均由服务端投影提供或计算；前端不二次计算滚动中位线。
 
 ### 页面级例外 `DESIGN-005-UI-EX-01`
@@ -66,6 +67,7 @@ Mog 于 2026-08-26 确认保留 V4 的深色终端配色。它与 `system.md` §
 | 用地址打开目标抽屉、切四个职责 tab | 可用 | 仅本机读取与地址变化；Evidence tab 不存在 |
 | 切换生命周期 `recent_90_days/all` 与五指标 | creator 概览可用 | target-scoped bounded read；不访问平台 |
 | 选择散点并进入语料 | 可用 | `life_work` 仅为 UI 状态；Corpus 精确读取该 Work，不复制 Evidence |
+| Escape 或关闭抽屉 | 可用 | 保留列表 filter 与既有 `sort=last` 上下文；焦点返回原 target opener |
 | 基线/巡检/追踪或 keyword drawer | 可用 | 不执行 lifecycle 大查询；keyword 明示不适用 |
 
 **自动恢复开关未实现是有意的**：它在 Gold Master 里是一个 toolbar 开关，但它意味着系统在无人确认的情况下自动重新访问平台。在采集授权模型存在之前，本页族不提供这个开关。
