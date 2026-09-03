@@ -101,7 +101,6 @@
     inspectorTitle: document.getElementById('ev-inspector-title'),
     inspectorRef: document.getElementById('ev-inspector-ref'),
     inspectorFeedback: document.getElementById('ev-inspector-feedback'),
-    boundaryBand: document.getElementById('ev-boundary-band'),
     openSource: document.getElementById('ev-open-source'),
     requestMedia: document.getElementById('ev-request-media'),
     closeInspector: document.getElementById('ev-close-inspector'),
@@ -625,6 +624,24 @@
     NOT_APPLICABLE: '不适用',
   };
 
+  function effectiveAuthor(item) {
+    if (item.display?.creatorState === 'KNOWN' && item.display?.creatorDisplayName) {
+      return item.display.creatorDisplayName;
+    }
+    const context = item.collectionContext || {};
+    if (context.targetKind === 'creator' && context.targetDisplayState === 'KNOWN' && context.targetDisplayName) {
+      return context.targetDisplayName;
+    }
+    return '当前未知';
+  }
+
+  function authorFact(item) {
+    const name = effectiveAuthor(item);
+    const fact = node('div', 'ev-author-fact');
+    fact.append(authorAvatar(item.media, `${name}的头像`), node('strong', null, name));
+    return fact;
+  }
+
   function creatorAndTargetFacts(item, compact = false, withRelationLabel = true) {
     const creator = knownText(item.display?.creatorDisplayName, item.display?.creatorState, '当前未知');
     const target = item.collectionContext?.targetDisplayState === 'KNOWN'
@@ -699,7 +716,7 @@
     return wrapper;
   }
 
-  function publishedCopy(item, compact = false) {
+  function publishedCopy(item, compact = false, withFieldName = true) {
     if (item.display?.publishedAtState === 'KNOWN') {
       const raw = item.display?.publishedAt;
       if (!raw) return '发布时间已知';
@@ -708,7 +725,7 @@
     if (item.display?.publishedAtState === 'SOURCE_TEXT_ONLY') {
       return `来源时间：${item.display?.publishedAtSourceText || '已观察'}`;
     }
-    return '发布时间当前未知';
+    return withFieldName ? '发布时间当前未知' : '当前未知';
   }
 
   function rowFor(item) {
@@ -730,7 +747,7 @@
     );
     const title = node('h2', null, knownText(item.display?.title, item.display?.titleState, '标题当前未知'));
     const meta = node('div', 'ev-meta');
-    meta.append(creatorAndTargetFacts(item), node('span', 'ev-time-line', published));
+    meta.append(authorFact(item), node('span', 'ev-time-line', published));
     identity.append(eyebrow, title, meta, evidenceBlock(item.evidenceFragment), engagementBlock(item));
 
     const material = materialBlock(item);
@@ -748,12 +765,13 @@
         tableCell(title.textContent, `${item.identity?.platform?.toUpperCase() || ''} ${publicRef ? publicRef.slice(0, 8).toUpperCase() : ''}`.trim()),
         (() => {
           const cell = node('div', 'ev-table-cell');
-          cell.append(creatorAndTargetFacts(item, true));
+          cell.append(authorFact(item));
           return cell;
         })(),
         material.element,
+        engagementBlock(item),
         stateLine(detailState),
-        tableCell(published, ''),
+        tableCell(publishedCopy(item, true, false), ''),
         tableCell(compactMoment(item.summary?.lastObservedAt) || '未知', ''),
       );
     } else {
@@ -777,7 +795,7 @@
     refs.tableHead.hidden = model.activeLayout !== 'table';
     refs.tableHead.setAttribute('aria-hidden', String(model.activeLayout !== 'table'));
     refs.resultsLegend.textContent = model.activeLayout === 'table'
-      ? '无封面 · 6 列 · 适合批量核查'
+      ? '无封面 · 7 列 · 适合批量核查'
       : (model.activeLayout === 'cover' ? '图片主导 · 视觉供给研究' : '缩略图 · 最强证据 · 材料摘要');
     const existing = new Set([...refs.list.querySelectorAll('[data-public-ref]')].map((row) => row.dataset.publicRef));
     model.items.forEach((item) => {
@@ -1201,10 +1219,6 @@
     refs.openSource.title = '本机只读投影不保存平台原始地址，无法从这里跳转。';
     refs.requestMedia.disabled = true;
     refs.requestMedia.title = '补采需要采集授权，本页只读，不触发平台访问。';
-    if (refs.boundaryBand) {
-      refs.boundaryBand.textContent = '本面板只显示本机已接纳的材料。标注为尚未取得或当前未知的项目，不表示平台上没有内容。';
-      refs.boundaryBand.hidden = false;
-    }
     renderOverview(item, inspector, channels.reobservation || {});
     renderEvidence(listItem, item, inspector, channels.comments || {});
     renderMaterials(item, inspector, channels);
@@ -1226,56 +1240,35 @@
     }[code] || '来源未完整表达';
   }
 
-  /* The reading summary restates lane state and adds nothing to it. A lane that has not been
-   * read is reported as not yet acquired; the page never turns that into a claim about what
-   * exists on the platform. Without this line the same fact is only available by reading nine
-   * lane cells and four screens of UNKNOWN rows. */
-  function readingSummary(item) {
-    const acquired = [];
-    const pending = [];
-    laneOrder.forEach((lane) => {
-      const state = laneSummary(item, lane)?.state || 'UNKNOWN';
-      if (state === 'UNKNOWN') pending.push(laneLabels[lane] || lane);
-      else if (readyStates.has(state) || partialStates.has(state) || state === 'OBSERVED') acquired.push(laneLabels[lane] || lane);
-    });
-    return { acquired, pending };
-  }
-
-  function readingSummaryBlock(item) {
-    const { acquired, pending } = readingSummary(item);
-    const block = node('div', 'ev-reading-summary');
-    if (acquired.length === 0) {
-      block.append(node('strong', null, '本作品当前没有已取得的材料通道'));
-    } else {
+  /* Names each dimension by the state its segment is drawn in. The rail already carries this,
+   * but only to a mouse: without hovering every cell there was no way to tell which of the five
+   * is the filled one. Stating it turns the legend into the answer, which is why there is no
+   * separate summary line above it saying the same thing again. */
+  function completenessLegend(summary) {
+    const groups = [
+      ['已取得', summary.segments.filter((s) => s.applicable && s.fill === 'ready')],
+      ['处理中', summary.segments.filter((s) => s.applicable && s.fill === 'pending')],
+      ['尚未取得', summary.segments.filter((s) => s.applicable && s.fill === 'unknown')],
+      ['不适用', summary.segments.filter((s) => !s.applicable)],
+    ];
+    const legend = node('div', 'ev-completeness-legend');
+    groups.forEach(([label, segments]) => {
+      if (segments.length === 0) return;
       const line = node('p');
-      line.append(node('em', null, '已取得'), node('span', null, acquired.join(' · ')));
-      block.append(line);
-    }
-    if (pending.length > 0) {
-      const line = node('p', 'ev-reading-pending');
-      line.append(node('em', null, '尚未取得'), node('span', null, pending.join(' · ')));
-      block.append(line);
-    }
-    return block;
+      line.append(node('em', null, label), node('span', null, segments.map((s) => s.label).join(' · ')));
+      legend.append(line);
+    });
+    return legend;
   }
 
   function renderOverview(item, inspector, reobservationChannel) {
     const panel = panels.get('overview');
     panel.replaceChildren();
 
-    panel.append(readingSummaryBlock(item));
-
     const summaryBlock = materialBlock(item);
     const overview = section('材料完整度');
     overview.append(summaryBlock.element);
-    const legend = node('div', 'ev-media-hint');
-    legend.append(
-      node('span', null, materialDimensions.map((dimension) => dimension.label).join(' · ')),
-      node('span', null, summaryBlock.summary.segments.some((segment) => !segment.applicable)
-        ? '空心格为本作品不适用，不计入分母'
-        : '五个维度全部适用于本作品'),
-    );
-    overview.append(legend);
+    overview.append(completenessLegend(summaryBlock.summary));
     panel.append(overview);
 
     const identity = section('作品字段与来源');
@@ -1283,7 +1276,7 @@
       ['稳定引用', item.identity?.publicRef || '当前未知'],
       ['平台', item.identity?.platform || '当前未知'],
       ['标题', knownText(item.display?.title, item.display?.titleState), item.display?.titleState || 'UNKNOWN'],
-      ['发布时间', publishedCopy(item), item.display?.publishedAtState || 'UNKNOWN'],
+      ['发布时间', publishedCopy(item, false, false), item.display?.publishedAtState || 'UNKNOWN'],
       ['时间来源字段', item.display?.publishedAtSourceField || '当前未知', item.display?.publishedAtSourceKind || 'unknown'],
       ['时间精度', item.display?.publishedAtPrecision || 'unknown', item.display?.publishedAtParserVersion || null],
       ['最近观察', item.summary?.lastObservedAt || '当前未知'],
