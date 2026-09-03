@@ -1298,9 +1298,11 @@
     const panel = panels.get('overview');
     panel.replaceChildren();
 
+    // The ratio goes the same way it went in the table: the rail draws each dimension's state
+    // and the labels under it name them, so 2 / 5 is a third encoding of what is already there.
     const summaryBlock = materialBlock(item);
     const overview = section('材料完整度');
-    overview.append(summaryBlock.element);
+    overview.append(summaryBlock.rail);
     overview.append(completenessLegend(summaryBlock.summary));
     panel.append(overview);
 

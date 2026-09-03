@@ -293,6 +293,7 @@
 .ev-head-metrics svg{color:var(--v7-muted)}
 .ev-engagement span{display:inline-flex;align-items:center;gap:4px}
 .ev-engagement svg{flex:0 0 auto;color:var(--v7-ghost)}
+.ev-inspect-section > .ev-material-rail{margin-top:0}
 .ev-completeness-legend{display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin:5px 0 0}
 .ev-completeness-legend span{overflow:hidden;color:var(--v7-muted);font-size:10.5px;line-height:1.5;text-align:center;text-overflow:ellipsis;white-space:nowrap}
 .ev-completeness-legend span[data-fill="ready"]{color:var(--v7-black)}
