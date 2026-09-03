@@ -100,6 +100,7 @@
     inspector: document.getElementById('ev-inspector'),
     inspectorTitle: document.getElementById('ev-inspector-title'),
     inspectorRef: document.getElementById('ev-inspector-ref'),
+    headMetrics: document.getElementById('ev-head-metrics'),
     inspectorFeedback: document.getElementById('ev-inspector-feedback'),
     openSource: document.getElementById('ev-open-source'),
     requestMedia: document.getElementById('ev-request-media'),
@@ -697,7 +698,11 @@
     return block;
   }
 
-  function engagementBlock(item) {
+  const ENGAGEMENT_METRICS = [
+    ['like', '点赞'], ['comment', '评论'], ['collect', '收藏'], ['share', '分享'],
+  ];
+
+  function engagementBlock(item, { numbersOnly = false } = {}) {
     const engagement = item.display?.engagement || {};
     const metrics = [
       ['like', '点赞', engagement.likeCount, engagement.likeCountState],
@@ -708,7 +713,10 @@
     const wrapper = node('div', 'ev-engagement');
     metrics.forEach(([kind, label, value, state]) => {
       const cell = node('span');
-      cell.append(metricIcon(kind, label));
+      // In the table the icon is in the column header, so a row carries the number alone. The
+      // metric name stays reachable: without it a bare number says nothing about what it counts.
+      if (numbersOnly) cell.setAttribute('aria-label', label);
+      else cell.append(metricIcon(kind, label));
       cell.append(node('b', null, state === 'KNOWN' && Number.isFinite(Number(value))
         ? Number(value).toLocaleString('zh-CN')
         : '未知'));
@@ -767,7 +775,7 @@
           return cell;
         })(),
         material.element,
-        engagementBlock(item),
+        engagementBlock(item, { numbersOnly: true }),
         stateLine(detailState),
         tableCell(publishedCopy(item, true, false), ''),
         tableCell(compactMoment(item.summary?.lastObservedAt) || '未知', ''),
@@ -813,6 +821,9 @@
   }
 
   function renderRows(appended) {
+    if (refs.headMetrics && !refs.headMetrics.childElementCount) {
+      ENGAGEMENT_METRICS.forEach(([kind, label]) => refs.headMetrics.append(metricIcon(kind, label)));
+    }
     if (!appended) refs.list.replaceChildren();
     refs.list.dataset.layout = model.activeLayout;
     refs.tableHead.hidden = model.activeLayout !== 'table';

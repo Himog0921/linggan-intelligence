@@ -2949,7 +2949,7 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
                 <button class="ev-inspector-reopen" id="ev-reopen-inspector" type="button" hidden>打开检查器 <span class="v7-tech-key">INSPECTOR</span></button>
               </div>
               <div class="ev-feedback" id="ev-feedback" role="status" aria-live="polite"></div>
-              <div class="ev-table-head" id="ev-table-head" aria-hidden="true" hidden><span>作品</span><span>作者</span><span>材料</span><span>互动</span><span>状态</span><span>发布时间</span><span>最近观察</span></div>
+              <div class="ev-table-head" id="ev-table-head" aria-hidden="true" hidden><span>作品</span><span>作者</span><span>材料</span><span class="ev-head-metrics" id="ev-head-metrics" aria-label="互动数据"></span><span>状态</span><span>发布时间</span><span>最近观察</span></div>
               <div class="ev-work-list" id="ev-work-list" role="listbox" aria-label="作品材料集合"></div>
               <div class="ev-list-footer"><button class="ev-button ev-button--secondary" id="ev-next-list" type="button" hidden>继续读取作品</button></div>
             </section>
