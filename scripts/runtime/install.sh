@@ -25,13 +25,23 @@ mkdir -p "$log_dir" "$agents_dir"
 
 # 运行目录是一个 detached worktree，跟随 origin/main。detached 是必须的：main 分支已由
 # 开发目录 checkout，同一个分支不能在两处。
+git -C "$repo_root" fetch --quiet origin main
 if [[ -d "$runtime_dir/.git" ]] || git -C "$repo_root" worktree list --porcelain | grep -qxF "worktree $runtime_dir"; then
   log "运行目录已存在：$runtime_dir"
 else
   log "创建运行目录：$runtime_dir"
-  git -C "$repo_root" fetch --quiet origin main
   git -C "$repo_root" worktree add --detach "$runtime_dir" origin/main
 fi
+
+# 装之前必须先把运行目录同步到 origin/main。plist 指向的是运行目录里的 launch.sh，
+# 而把它带进来的正是运行目录自己的同步——先写 plist 再指望服务自己同步是循环依赖。
+# 首次安装时新建的 worktree 已经在 origin/main 上，这一步是空转；在已有的旧运行目录上
+# 重装时它是必需的：2026-09-03 就因为漏了这一步，三个服务以 127 全挂
+# （`can't open input file: .../scripts/runtime/launch.sh`）。
+log "同步运行目录到 origin/main"
+git -C "$runtime_dir" reset --quiet --hard origin/main
+[[ -x "$runtime_dir/scripts/runtime/launch.sh" ]] \
+  || { print -r -- "同步后仍找不到 $runtime_dir/scripts/runtime/launch.sh" >&2; exit 1; }
 
 # .env 不进版本库，因此从开发目录复制一份。两边必须是同一个数据库。
 cp "$repo_root/.env" "$runtime_dir/.env"
