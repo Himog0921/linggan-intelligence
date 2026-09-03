@@ -28,6 +28,7 @@ const sourceFiles = [
   "manifest.json",
   "service-worker.js",
   "discovery-contract.js",
+  "xhs-search-discovery-adapter.js",
   "popup.html",
   "popup.css",
   "popup.js"
