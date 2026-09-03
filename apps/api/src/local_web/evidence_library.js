@@ -785,10 +785,10 @@
    * align to the text beside them. Each icon keeps an accessible name: the number next to it says
    * nothing on its own. */
   const METRIC_ICON_PATHS = {
-    like: 'M12 20s-7-4.35-7-9.5A4.5 4.5 0 0 1 12 7a4.5 4.5 0 0 1 7 3.5c0 5.15-7 9.5-7 9.5z',
-    comment: 'M4 5h16v11H9l-5 4z',
-    collect: 'M6 3h12v18l-6-4.5L6 21z',
-    share: 'M4 13v6h16v-6M12 15V4M8 8l4-4 4 4',
+    like: 'M12 20.5C12 20.5 3.5 15.4 3.5 9.9A4.9 4.9 0 0 1 12 6.6a4.9 4.9 0 0 1 8.5 3.3c0 5.5-8.5 10.6-8.5 10.6z',
+    comment: 'M4 3.5h16a1.5 1.5 0 0 1 1.5 1.5v9a1.5 1.5 0 0 1-1.5 1.5H9.2L4 20.2V3.5z',
+    collect: 'M6.5 2.5h11a1 1 0 0 1 1 1v18l-6.5-4.8-6.5 4.8v-18a1 1 0 0 1 1-1z',
+    share: 'M21.6 2.6 2.9 9.9a.6.6 0 0 0 .05 1.13l4.6 1.5 1.6 4.9a.6.6 0 0 0 1.06.18l2.2-2.9 4.4 3.2a.6.6 0 0 0 .94-.33l4-14.2a.6.6 0 0 0-.15-.78z',
   };
 
   function metricIcon(kind, label) {
@@ -796,11 +796,7 @@
     svg.setAttribute('viewBox', '0 0 24 24');
     svg.setAttribute('width', '16');
     svg.setAttribute('height', '16');
-    svg.setAttribute('fill', 'none');
-    svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '1.5');
-    svg.setAttribute('stroke-linecap', 'round');
-    svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('fill', 'currentColor');
     svg.setAttribute('role', 'img');
     svg.setAttribute('aria-label', label);
     const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
