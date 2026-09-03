@@ -112,6 +112,22 @@ elif upstream_ref="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream
 else
   base_ref="HEAD"
 fi
+# worktree 只能建在 <仓库>/.worktrees/ 下。
+#
+# 受保护交付要求专属 worktree，但从不说建在哪，于是每个 Agent 工具按自己的默认值散建。
+# 2026-09-03 清理时是 31 个 worktree、六个位置、33GB，其中多个分支只存在于本地——
+# 散落的真正代价不是磁盘，是没人答得上来「哪些工作还没推」。
+#
+# 唯一例外是常驻服务的运行目录，它的生命周期与部署绑定，不是交付用的 worktree。
+repo_root="$(git rev-parse --show-toplevel)"
+runtime_worktree="$HOME/Library/Application Support/Linggan Intelligence/runtime-main"
+while IFS= read -r worktree_path; do
+  [[ "$worktree_path" == "$repo_root" ]] && continue
+  [[ "$worktree_path" == "$runtime_worktree" ]] && continue
+  [[ "$worktree_path" == "$repo_root/.worktrees/"* ]] && continue
+  report_error "worktree outside the sanctioned path (see AGENTS.md): $worktree_path"
+done < <(git worktree list --porcelain | awk '/^worktree /{print substr($0,10)}')
+
 if ! git rev-parse --verify "$base_ref" >/dev/null 2>&1; then
   report_error "unknown comparison ref: $base_ref"
 else

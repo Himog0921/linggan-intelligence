@@ -10,3 +10,6 @@
 *.pem
 *.key
 .DS_Store
+
+# Agent 交付用的 worktree 固定建在这里（见 AGENTS.md）。不进版本库，可整目录删除。
+/.worktrees/

@@ -36,6 +36,28 @@
 - **受保护交付**必须有 Mog 明确派定的 Issue/交付包，并使用 Claim、专属 branch/worktree 和 PR。它包括代码、migration/schema、运行合同、插件与发布包、部署/生产、真实外部动作、敏感数据/权限、不可逆处置，以及存在并行冲突或较大权威面改写的事项。编码 Agent 仍禁止直接在共享 `main` 上实施这类改动。
 - **低风险直接维护**在 Mog 当前对话已明确授权、工作区干净且无并行冲突时，可以不预建 Issue、Claim、独立 worktree 或 PR。它只包括文档勘误、索引/链接、已确认决定的状态同步、进度记录、对已被取代卡片的说明与关闭，以及不改变产品/领域/运行/权限/数据语义的小型治理整理。必须检查 diff、运行适用治理检查、留下可追溯记录，并分别报告修改、验证、提交、推送和部署；未经明确授权不得借此扩展到实现、push、deploy 或真实外部动作。
 
+#### worktree 只能建在一个地方
+
+受保护交付要求专属 worktree，但此前从未规定它建在哪。结果是 2026-09-03 清理时发现 31 个
+worktree 散在六个位置（各 Agent 工具的默认值：`~/.codex/worktrees/`、`~/.proma/agent-workspaces/`、
+`~/proma/.worktrees/`、`~/proma/worktrees/`，以及直接建的同级目录），共 33GB，其中多个分支
+只存在于本地。散落本身不是洁癖问题：它让「哪些工作还没推」这个问题没人答得上来。
+
+**唯一允许的位置**：
+
+```
+<仓库>/.worktrees/<branch-slug>/
+```
+
+- 不使用任何 Agent 工具的默认 worktree 路径。工具若有默认值，在建之前显式覆盖为上述路径。
+- 该目录已在 `.gitignore` 中，不进版本库，也不进 Cargo workspace。
+- **PR 合并后立即 `git worktree remove`**，不留到"以后再清"。删除前确认该分支已推送到 origin。
+- 由 `scripts/check-project-governance.sh` 自动执行：出现在约定路径之外的 worktree 会使检查失败。
+
+例外只有一个：本机常驻服务的运行目录
+`~/Library/Application Support/Linggan Intelligence/runtime-main`。它不是交付用的 worktree，
+生命周期与部署绑定，见 [`docs/runbooks/local-runtime-deployment.md`](docs/runbooks/local-runtime-deployment.md)。
+
 Mog 决定受保护交付的执行、并行、审查、集成与 exact-head 合并授权；当前交付包可以明确授权连续处理一组低风险治理项，不需要为每个状态修正重复建卡。具体分级与升级条件见 `docs/agents/issue-tracker.md` 和 [`docs/governance/agent-collaboration.md`](docs/governance/agent-collaboration.md)。
 
 ### 协作权力边界：Mog 指挥协作，Harness 在任务内执行
