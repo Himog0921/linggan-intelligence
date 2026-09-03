@@ -322,13 +322,17 @@ pub fn render_unreadable_target_drawer(drawer: Option<&str>) -> String {
 fn operations_body(mode: OperationsMode, state: Option<&SurfaceState>) -> String {
     match mode {
         OperationsMode::Now => {
+            // DESIGN-010 · LIDS v7 LANG-05. The English second line on every stage was a
+            // descriptive label, not a data-contract literal, so it carried no auditable
+            // value and cost every Chinese reader a second pass down the same column.
+            // Stage numbers stay Mono — they are structural numbering, which the budget allows.
             let stages = [
-                ("01", "目标接入", "Target Intake"),
-                ("02", "首次建档", "Baseline"),
-                ("03", "日常巡逻", "Patrol"),
-                ("04", "触发式深采", "Event Deepening"),
-                ("05", "事实资产保留", "Evidence Retain"),
-                ("06", "恢复与重排", "Recovery"),
+                ("01", "目标接入"),
+                ("02", "首次建档"),
+                ("03", "日常巡逻"),
+                ("04", "触发式深采"),
+                ("05", "事实资产保留"),
+                ("06", "恢复与重排"),
             ];
             // DESIGN-006 · the six stage names are the domain model and carry information;
             // a counter reading UNKNOWN six times over carries none. The stage counts do not
@@ -338,34 +342,43 @@ fn operations_body(mode: OperationsMode, state: Option<&SurfaceState>) -> String
             // would only teach the eye to skip UNKNOWN, which is the one word here that must
             // never become invisible.
             let mut flow = String::new();
-            for (no, zh, en) in stages {
+            for (no, zh) in stages {
                 flow.push_str(&format!(
                     r#"<div class="c-flow-stage">
                     <div class="c-flow-no">{no}</div>
-                    <div class="c-flow-name"><b>{zh}</b><span>{en}</span></div>
+                    <div class="c-flow-name"><b>{zh}</b></div>
                   </div>"#
                 ));
             }
-            let (conclusion, explanation, flow_note) = match state
+            // DESIGN-010 · LIDS v7. The conclusion used to be an English sentence set at
+            // 30px/850 — a descriptive label wearing the visual weight of a headline. Under
+            // LANG-05 the sentence becomes Chinese and the machine-readable part shrinks to
+            // the one closed-set state word, which is what the data boundary rule asks for:
+            // an unknown reads as UNKNOWN plus a next step, never as a red error.
+            let (conclusion, conclusion_enum, explanation, flow_note) = match state
                 .map(|state| state.scheduler_state)
             {
                 Some(SchedulerState::Running) => (
-                    "READ MODEL UNAVAILABLE",
+                    "结论读模型尚未接入",
+                    "UNKNOWN",
                     "调度器正在运行，但这一页尚未接入「最近一轮观察」的结论读模型，因此不能编造系统判断。",
                     "下面是观察生产的六个固定阶段。调度已经接通，但阶段计数读模型尚未接入；这里不把未知写成零。",
                 ),
                 Some(SchedulerState::Stale) => (
-                    "SCHEDULER STALE",
+                    "调度心跳已过期",
+                    "STALE",
                     "调度心跳已经过期，当前没有可信的「最近一轮观察」结论可供判断。",
                     "下面是观察生产的六个固定阶段。心跳恢复并接入阶段计数读模型之前，这里不显示虚假数字。",
                 ),
                 Some(SchedulerState::Unreadable) => (
-                    "HEARTBEAT UNREADABLE",
+                    "调度心跳读不到",
+                    "UNREADABLE",
                     "目标读模型有响应，但调度心跳当前读不到，因此不能判断最近一轮观察。",
                     "下面是观察生产的六个固定阶段。阶段计数仍未知，这里不把未知写成零。",
                 ),
                 None => (
-                    "COLLECTION STATE UNAVAILABLE",
+                    "采集状态读不到",
+                    "UNKNOWN",
                     "调度与「最近一轮观察」的状态当前读不到。这里不把未知翻译成已接通、未接通或没有运行。",
                     "下面是观察生产的六个固定阶段。各阶段的数字读模型尚未接入，因此这里不放数字。",
                 ),
@@ -374,8 +387,8 @@ fn operations_body(mode: OperationsMode, state: Option<&SurfaceState>) -> String
                 r#"<div class="c-now">
               <div class="c-now-main">
                 <div class="c-conclusion">
-                  <div class="c-conclusion-label">系统结论 / SYSTEM CONCLUSION</div>
-                  <div class="c-conclusion-state">{conclusion}</div>
+                  <div class="c-conclusion-label">系统结论</div>
+                  <div class="c-conclusion-state"><b>{conclusion}</b><span class="c-enum">{conclusion_enum}</span></div>
                   <p>{explanation}</p>
                 </div>
                 <div class="c-flow"><p class="c-flow-note">{flow_note}</p>{flow}</div>
@@ -426,34 +439,45 @@ fn operations_body(mode: OperationsMode, state: Option<&SurfaceState>) -> String
 /// rather than inventing events on a timer, and its pause control would only ever pause the
 /// view — never the real scheduler.
 fn stream_markup(state: Option<&SurfaceState>) -> String {
-    let (heading, explanation, footer) = match state.map(|state| state.scheduler_state) {
+    // DESIGN-010 · LIDS v7 LANG-05. Headings and the footer state were English descriptive
+    // phrases; they now read in Chinese, with the closed-set state word kept as the Mono
+    // enum beside them. The event-type filters below stay English on purpose — DISCOVER /
+    // CHANGE / EXCEPTION are literal event kinds, which the Mono budget explicitly allows.
+    let (heading, heading_enum, explanation, footer) = match state
+        .map(|state| state.scheduler_state)
+    {
         Some(SchedulerState::Running) => (
-            "NO EVENT READ MODEL",
+            "语义事件读模型尚未接入",
+            "UNKNOWN",
             "调度器正在运行，但这里尚未接入语义事件读模型，因此不能声称当前没有事件。",
-            "SCHEDULER RUNNING",
+            "调度运行中",
         ),
         Some(SchedulerState::Stale) => (
-            "SCHEDULER STALE",
+            "调度心跳已过期",
+            "STALE",
             "调度心跳已经过期，实时观察流当前不可判定。",
-            "SCHEDULER STALE",
+            "调度心跳已过期",
         ),
         Some(SchedulerState::Unreadable) => (
-            "HEARTBEAT UNREADABLE",
+            "调度心跳读不到",
+            "UNREADABLE",
             "调度心跳当前读不到，实时观察流当前不可判定。",
-            "SCHEDULER HEARTBEAT UNREADABLE",
+            "调度心跳读不到",
         ),
         None => (
-            "COLLECTION STATE UNAVAILABLE",
+            "采集状态读不到",
+            "UNKNOWN",
             "调度与语义事件状态当前读不到；未知不代表没有事件，也不代表调度器已接通或未接通。这里不会用计时器伪造事件来证明系统在运行。",
-            "COLLECTION STATE UNAVAILABLE",
+            "采集状态读不到",
         ),
     };
     format!(
         r#"<aside class="c-stream" aria-label="实时观察流">
+              <div class="c-stream-sweep" aria-hidden="true"></div>
               <div class="c-stream-toolbar">
-                <div class="c-stream-id"><span class="c-stream-dot"></span><b>LIVE OBSERVATION</b></div>
+                <div class="c-stream-id"><span class="c-stream-dot"></span><b>实时观察流</b></div>
                 <div class="c-stream-filters">
-                  <button type="button" class="c-on" disabled aria-disabled="true">ALL</button>
+                  <button type="button" class="c-on" disabled aria-disabled="true">全部</button>
                   <button type="button" disabled aria-disabled="true">DISCOVER</button>
                   <button type="button" disabled aria-disabled="true">CHANGE</button>
                   <button type="button" disabled aria-disabled="true">EXCEPTION</button>
@@ -461,7 +485,7 @@ fn stream_markup(state: Option<&SurfaceState>) -> String {
               </div>
               <div class="c-stream-feed">
                 <div class="c-stream-empty">
-                  <b>{heading}</b>
+                  <b>{heading}</b><span class="c-enum c-enum-dark">{heading_enum}</span>
                   <p>{explanation}</p>
                   <dl>
                     <div><dt>会出现什么</dt><dd>发现、变化、状态与异常这类有业务含义的观察事件，低层事件先聚合再出现。</dd></div>
@@ -470,7 +494,7 @@ fn stream_markup(state: Option<&SurfaceState>) -> String {
                   </dl>
                 </div>
               </div>
-              <div class="c-stream-foot"><span>SEMANTIC EVENTS ONLY</span><span>{footer}</span></div>
+              <div class="c-stream-foot"><span>仅语义事件</span><span>{footer}</span></div>
             </aside>"#
     )
 }
@@ -744,19 +768,17 @@ fn second_bar(
                     label = candidate.label(),
                 ));
             }
-            let (scheduler_zh, scheduler) = state.map_or(
-                ("调度状态未知", "COLLECTION STATE UNAVAILABLE"),
-                |state| {
-                    (
-                        scheduler_zh(state.scheduler_state),
-                        scheduler_code(state.scheduler_state),
-                    )
-                },
-            );
+            // DESIGN-010 · LIDS v7 LANG-05. The mode bar printed the scheduler state twice —
+            // once in Chinese, once as an English tech key saying the same thing. The English
+            // half was a description, not a contract value, so it goes; the Chinese half now
+            // carries the meaning alone.
+            let scheduler_zh = state.map_or("调度状态未知", |state| {
+                scheduler_zh(state.scheduler_state)
+            });
             format!(
                 r#"<div class="c-modebar">
               <div class="c-tabs">{tabs}</div>
-              <div class="c-mode-meta">{scheduler_zh} <span class="v7-tech-key">{scheduler}</span></div>
+              <div class="c-mode-meta">{scheduler_zh}</div>
             </div>"#,
             )
         }

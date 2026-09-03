@@ -9,6 +9,34 @@
   --c-drawer-width: min(1120px, 72vw); --c-drawer-wide: min(1380px, 86vw);
   --c-now-aside: 450px; --c-stream-feed: 472px; --c-inspector: 430px; }
 
+/* DESIGN-010 · LIDS v7 preview, scoped to this page.
+ *
+ * Registered page-local exception `DESIGN-010-UI-EX-01`. The v7 geometry ladders and the
+ * split signal role are declared here, not in `lids_tokens.css`, because ADR-P02 keeps the
+ * runtime token source on the v2.0 baseline until a dedicated migration event runs. When
+ * that event lands, every declaration below resolves to a global token and this block is
+ * deleted — nothing else on the page changes. Do not copy it into another stylesheet.
+ *
+ * ADR-04 · the current global signal carries white text at 3.6:1, which fails AA. v7 splits
+ * it into two roles: a darkened fill that carries text, and a mark that never does. */
+.c-page {
+  /* Type: 7 steps, floor 11px (ADR-03). Weights: 3 only (ADR-02). */
+  --c-fs-100:11px; --c-fs-200:12px; --c-fs-300:13px; --c-fs-400:15px;
+  --c-fs-500:17px; --c-fs-600:21px; --c-fs-700:27px;
+  --c-fw-regular:400; --c-fw-medium:600; --c-fw-bold:700;
+  /* Line widths: 4 tiers, each bound to one meaning. No 1.5px anywhere (half-pixel blur at 1x). */
+  --c-line-hair:1px; --c-line-rail:2px; --c-line-mode:3px; --c-line-signal:5px;
+  /* 8px sampling lattice — one geometry, six states (ADR-08). M-05 is the only one used here. */
+  --c-cell:8px; --c-cell2:16px;
+  /* ADR-04 splits the signal into fill (carries text, 5.4:1) and mark (blocks only). That split
+   * cannot happen here: `collection_stylesheet_authors_no_colour_of_its_own` forbids this sheet
+   * from authoring any raw colour, and it is right to — a page-local corrected orange is exactly
+   * how a second colour system starts. So the mark role below still resolves to the current
+   * global signal, and the fill role waits for the token migration. Where this page uses signal
+   * today it is only ever a block or a rule, never text, so nothing here fails AA in the
+   * meantime; what is missing is the corrected fill, not a fix for a live contrast bug. */
+  --c-signal-mark:var(--v7-red); }
+
 /* Page scaffolding. DESIGN-003 header reclaim: there is no title block here at all. The
  * breadcrumb and the rail already name this page, the h1 survives only as .v7-sr-only for
  * assistive tech, and the counts moved into the context row. Column flex rather than fixed
@@ -20,12 +48,14 @@
  * connected; none of them may imply an authorised platform action. */
 .c-toolbar { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 20px; border-bottom:1px solid var(--v7-black); background:var(--v7-white); }
 .c-tabs { display:flex; align-items:stretch; }
-.c-tabs a,.c-tabs button { position:relative; height:46px; display:flex; align-items:center; gap:7px; padding:0 15px; border:0; background:transparent; color:var(--v7-muted); font-size:12px; font-weight:600; text-decoration:none; transition:color var(--v7-t-state) var(--v7-ease); }
+/* ADR-11 · text tabs, not a segmented control. Selection is carried by weight plus one
+ * 3px signal rule — never by a filled box, which reads as "this button does something". */
+.c-tabs a,.c-tabs button { position:relative; height:46px; display:flex; align-items:center; gap:7px; padding:0 15px; border:0; background:transparent; color:var(--v7-muted); font-size:var(--c-fs-300); font-weight:var(--c-fw-regular); text-decoration:none; transition:color var(--v7-t-state) var(--v7-ease); }
 .c-tabs a:first-child,.c-tabs button:first-child { padding-left:0; }
-.c-tabs small { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-tabs small { color:var(--v7-ghost); font:var(--c-fw-medium) var(--c-fs-100) var(--lgi-font-mono); letter-spacing:.05em; }
 .c-tabs a:hover,.c-tabs button:not([disabled]):hover { color:var(--v7-black); }
-.c-tabs [aria-current="page"],.c-tabs .c-on { color:var(--v7-black); }
-.c-tabs [aria-current="page"]::after,.c-tabs .c-on::after { content:""; position:absolute; left:0; right:15px; bottom:0; height:3px; background:var(--v7-red); }
+.c-tabs [aria-current="page"],.c-tabs .c-on { color:var(--v7-black); font-weight:var(--c-fw-medium); }
+.c-tabs [aria-current="page"]::after,.c-tabs .c-on::after { content:""; position:absolute; left:0; right:15px; bottom:0; height:var(--c-line-mode); background:var(--c-signal-mark); }
 .c-tabs a:first-child[aria-current="page"]::after,.c-tabs .c-on:first-child::after { left:0; }
 .c-actions { display:flex; align-items:center; gap:8px; }
 .c-text-command { border:0; background:transparent; color:var(--v7-muted); font:700 10px var(--lgi-font-mono); letter-spacing:.06em; }
@@ -61,25 +91,40 @@
 /* Operations mode bar sits directly under the page head; NOW / TRACE / REVIEW are routes,
  * not client-side tabs, so refresh and share both land on the same view. */
 .c-modebar { display:flex; align-items:center; justify-content:space-between; gap:20px; padding:0 20px; border-bottom:1px solid var(--v7-black); background:var(--v7-white); }
-.c-mode-meta { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.06em; }
+/* Chinese now carries this alone (LANG-05), so it reads as UI text, not as a machine code. */
+.c-mode-meta { color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-200)/1.4 var(--lgi-font-sans); }
 
 /* Operations NOW: flow on the left, the one dark surface on the right. */
 .c-now { display:grid; grid-template-columns:minmax(680px,1fr) var(--c-now-aside); min-height:0; }
 .c-now-main { min-width:0; padding:0 0 24px; border-right:2px solid var(--v7-black); }
-.c-conclusion { padding:20px 20px 18px; border-bottom:1px solid var(--v7-line-strong); }
-.c-conclusion-label { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.13em; }
-.c-conclusion-state { margin-top:9px; color:var(--v7-unknown); font-size:30px; font-weight:850; letter-spacing:-.04em; }
-.c-conclusion p { margin:9px 0 0; max-width:620px; color:var(--v7-muted); font-size:12px; line-height:1.6; }
+/* DESIGN-010 · the conclusion used to be a 30px/850 English sentence. Two problems: 850 does
+ * not exist in PingFang SC or Noto Sans SC so the browser synthesised the weight (ADR-02),
+ * and an English sentence at headline size made the page's single most important reading
+ * unavailable to anyone not reading English. The Chinese statement now carries the meaning at
+ * 21px/700; the closed-set state word sits beside it as a Mono tag, which is the one thing
+ * here that genuinely belongs to the machine. */
+.c-conclusion { padding:24px 20px 20px; border-bottom:var(--c-line-hair) solid var(--v7-line-strong); }
+.c-conclusion-label { color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-200)/1.4 var(--lgi-font-sans); }
+.c-conclusion-state { margin-top:10px; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
+.c-conclusion-state b { color:var(--v7-black); font-size:var(--c-fs-600); font-weight:var(--c-fw-bold); letter-spacing:-.01em; }
+.c-conclusion p { margin:12px 0 0; max-width:62ch; color:var(--v7-body); font-size:var(--c-fs-300); line-height:1.6; }
+
+/* The one machine-readable token in a Chinese sentence. Data boundary rule: an unknown reads
+ * as UNKNOWN plus a next step — never as a red error, so this stays neutral grey. */
+.c-enum { display:inline-block; padding:3px 8px; border:var(--c-line-hair) solid var(--v7-line-strong);
+  background:var(--v7-white); color:var(--v7-muted);
+  font:var(--c-fw-bold) var(--c-fs-100)/1 var(--lgi-font-mono); letter-spacing:.06em; }
 
 /* The prototype drew six flow stages as one table whose columns silently changed meaning
  * three times. Stages are rendered as their own rows with their own labelled readouts. */
 .c-flow { padding:6px 20px 0; }
-.c-flow-note { padding:14px 0 2px; color:var(--v7-muted); font-size:12px; line-height:1.6; }
-.c-flow-stage { padding:15px 0; border-bottom:1px solid var(--v7-line); display:grid; grid-template-columns:34px minmax(150px,1fr) auto; align-items:center; gap:16px; }
+.c-flow-note { padding:16px 0 4px; max-width:62ch; color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.6; }
+/* Stage rows lost their English line, so the row can breathe instead of stacking two
+ * baselines. The number is structural numbering — allowed to stay Mono under LANG-05. */
+.c-flow-stage { padding:14px 0; border-bottom:var(--c-line-hair) solid var(--v7-line); display:grid; grid-template-columns:34px minmax(150px,1fr) auto; align-items:center; gap:16px; }
 .c-flow-stage:last-child { border-bottom:0; }
-.c-flow-no { color:var(--v7-ghost); font:700 11px var(--lgi-font-mono); }
-.c-flow-name b { display:block; color:var(--v7-black); font-size:13px; font-weight:750; }
-.c-flow-name span { display:block; margin-top:3px; color:var(--v7-muted); font-size:11px; }
+.c-flow-no { color:var(--c-signal-mark); font:var(--c-fw-bold) var(--c-fs-100) var(--lgi-font-mono); letter-spacing:.04em; }
+.c-flow-name b { display:block; color:var(--v7-black); font-size:var(--c-fs-400); font-weight:var(--c-fw-medium); }
 .c-flow-metrics { display:flex; gap:20px; }
 .c-flow-metrics > div { min-width:104px; text-align:right; }
 .c-flow-metrics b { display:block; color:var(--v7-unknown); font:800 15px/1 var(--lgi-font-mono); }
@@ -92,28 +137,59 @@
   background:linear-gradient(color-mix(in srgb, var(--lgi-stream-mint) 2.5%, transparent) 1px, transparent 1px) 0 0/100% 4px,
     radial-gradient(circle at 88% 0%, color-mix(in srgb, var(--lgi-stream-mint) 7%, transparent), transparent 34%),
     linear-gradient(180deg, var(--lgi-stream-bg-raised), var(--lgi-stream-bg)); }
-.c-stream-toolbar { height:52px; flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:1px solid var(--lgi-stream-line); }
+/* M-05 · low-luminance sensor face. The lattice is the same 8px geometry as every other v7
+ * material; this is its "lit" state. It stays on the top edge and covers well under the 35%
+ * ceiling, so it reads as an instrument edge rather than as this panel's wallpaper. The sweep
+ * steps by cell instead of sliding: sensing is discrete sampling, and a smooth slide would
+ * read as decoration (ADR-09). */
+.c-stream::before { content:""; position:absolute; left:0; right:0; top:0; height:72px; pointer-events:none;
+  background-image:repeating-conic-gradient(color-mix(in srgb, var(--lgi-stream-mint) 55%, transparent) 0% 25%, transparent 0% 50%);
+  background-size:var(--c-cell2) var(--c-cell2); opacity:.05;
+  -webkit-mask-image:linear-gradient(180deg,black,transparent);
+  mask-image:linear-gradient(180deg,black,transparent); }
+/* The sweep is clipped to a 72px strip at the top edge and never leaves it. An earlier build
+ * let it travel the full height and it crossed the body copy — which is the exact thing
+ * `materials.md` forbids: no texture behind running text, edges only. The clip is the rule,
+ * not a taste call, so it lives on the container rather than in the keyframes. */
+.c-stream-sweep { position:absolute; left:0; right:0; top:0; height:72px; overflow:hidden; pointer-events:none; z-index:1; }
+.c-stream-sweep::after { content:""; position:absolute; left:0; right:0; top:0; height:26px;
+  background-image:repeating-conic-gradient(color-mix(in srgb, var(--lgi-stream-mint) 70%, transparent) 0% 25%, transparent 0% 50%);
+  background-size:var(--c-cell2) var(--c-cell2); opacity:.22;
+  -webkit-mask-image:linear-gradient(180deg,transparent,black 40%,black 60%,transparent);
+  mask-image:linear-gradient(180deg,transparent,black 40%,black 60%,transparent);
+  animation:c-lattice-sweep 4.4s steps(9) infinite; }
+@keyframes c-lattice-sweep { from { transform:translateY(-26px); } to { transform:translateY(72px); } }
+@media (prefers-reduced-motion: reduce) { .c-stream-sweep::after { animation:none; opacity:.10; } }
+
+.c-stream-toolbar { position:relative; z-index:2; height:52px; flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:12px; border-bottom:var(--c-line-hair) solid var(--lgi-stream-line); }
 .c-stream-id { display:flex; align-items:center; gap:9px; min-width:0; }
-.c-stream-dot { width:7px; height:7px; flex:0 0 auto; background:var(--lgi-stream-dim); }
-.c-stream-id b { color:var(--lgi-stream-ink); font:800 11px var(--lgi-font-mono); letter-spacing:.07em; white-space:nowrap; }
-.c-stream-filters { display:flex; align-items:center; gap:11px; }
-.c-stream-filters button { border:0; background:transparent; color:var(--lgi-stream-dim); padding:0; font:700 11px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-stream-dot { width:7px; height:7px; flex:0 0 auto; background:var(--lgi-stream-mint); }
+/* Chinese label in Sans: this is a panel name, not a machine reading (LANG-05). */
+.c-stream-id b { color:var(--lgi-stream-ink); font:var(--c-fw-medium) var(--c-fs-300)/1.4 var(--lgi-font-sans); white-space:nowrap; }
+.c-stream-filters { display:flex; align-items:center; gap:14px; }
+/* DISCOVER / CHANGE / EXCEPTION stay Mono: they are literal event kinds in the contract.
+ * 全部 is a filter label, so it reads in Sans like every other piece of UI text. */
+.c-stream-filters button { border:0; background:transparent; color:var(--lgi-stream-dim); padding:0 0 4px; font:var(--c-fw-medium) var(--c-fs-100) var(--lgi-font-mono); letter-spacing:.05em; }
+.c-stream-filters button:first-child { font-family:var(--lgi-font-sans); letter-spacing:0; font-size:var(--c-fs-200); }
 .c-stream-filters button:not([disabled]) { color:var(--lgi-stream-muted); }
 .c-stream-filters button:not([disabled]):hover,.c-stream-filters button.c-on { color:var(--lgi-stream-ink); }
-.c-stream-filters button.c-on::after { content:""; display:block; height:1px; margin-top:3px; background:var(--lgi-stream-mint); }
-.c-stream-feed { flex:1 1 auto; min-height:var(--c-stream-feed); overflow:auto; padding:4px 0 8px; scrollbar-width:none; }
+.c-stream-filters button.c-on { position:relative; }
+.c-stream-filters button.c-on::after { content:""; position:absolute; left:0; right:0; bottom:0; height:var(--c-line-mode); background:var(--lgi-stream-mint); }
+.c-stream-feed { position:relative; z-index:2; flex:1 1 auto; min-height:var(--c-stream-feed); overflow:auto; padding:4px 0 8px; scrollbar-width:none; }
 .c-stream-feed::-webkit-scrollbar { display:none; }
 .c-stream-empty { padding:30px 0 0; }
-.c-stream-empty b { display:block; color:var(--lgi-stream-ink); font:800 12px var(--lgi-font-mono); letter-spacing:.09em; }
-.c-stream-empty p { margin:11px 0 0; max-width:330px; color:var(--lgi-stream-muted); font-size:12px; line-height:1.65; }
-.c-stream-empty dl { margin:20px 0 0; display:grid; gap:11px; }
-.c-stream-empty dt { color:var(--lgi-stream-muted); font:700 11px var(--lgi-font-mono); letter-spacing:.08em; }
-.c-stream-empty dd { margin:4px 0 0; color:var(--lgi-stream-muted); font-size:11px; line-height:1.55; }
+.c-stream-empty b { color:var(--lgi-stream-ink); font:var(--c-fw-bold) var(--c-fs-400)/1.4 var(--lgi-font-sans); }
+.c-stream-empty p { margin:12px 0 0; max-width:42ch; color:var(--lgi-stream-muted); font-size:var(--c-fs-200); line-height:1.65; }
+.c-stream-empty dl { margin:22px 0 0; display:grid; gap:13px; }
+.c-stream-empty dt { color:var(--lgi-stream-ink); font:var(--c-fw-medium) var(--c-fs-200)/1.4 var(--lgi-font-sans); }
+.c-stream-empty dd { margin:5px 0 0; color:var(--lgi-stream-muted); font-size:var(--c-fs-100); line-height:1.6; }
+/* On the dark face the enum inverts, but it is still the same neutral tag: unknown is not an error. */
+.c-enum-dark { margin-left:10px; border-color:var(--lgi-stream-line); background:transparent; color:var(--lgi-stream-muted); vertical-align:2px; }
 .c-stream-readout { flex:0 0 auto; height:78px; display:grid; grid-template-columns:repeat(3,1fr); border-top:2px solid var(--lgi-stream-line); border-bottom:1px solid var(--lgi-stream-line); }
 .c-stream-readout > div { display:flex; flex-direction:column; justify-content:center; }
 .c-stream-readout b { color:var(--lgi-stream-muted); font:800 16px var(--lgi-font-mono); }
 .c-stream-readout span { margin-top:4px; color:var(--lgi-stream-dim); font:700 11px var(--lgi-font-mono); letter-spacing:.07em; }
-.c-stream-foot { flex:0 0 auto; height:34px; display:flex; align-items:flex-end; justify-content:space-between; color:var(--lgi-stream-dim); font:700 11px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-stream-foot { position:relative; z-index:2; flex:0 0 auto; height:34px; display:flex; align-items:flex-end; justify-content:space-between; gap:12px; color:var(--lgi-stream-muted); font:var(--c-fw-regular) var(--c-fs-100)/1.4 var(--lgi-font-sans); }
 
 /* Split workspace shared by Attention / Tasks / Runtime. */
 .c-split { display:grid; grid-template-columns:minmax(0,1fr) var(--c-inspector); min-height:0; }
@@ -147,7 +223,7 @@
 .c-btn:not([disabled]):hover { background:var(--v7-gray); transform:translate(-2px,-2px); box-shadow:var(--v7-brutal-lg); }
 .c-btn:not([disabled]):active { transform:translate(1px,1px); box-shadow:2px 2px 0 var(--v7-black); }
 .c-btn[disabled] { box-shadow:none; border-color:var(--v7-line-strong); color:var(--v7-ghost); }
-.c-btn-quiet { height:34px; padding:0 11px; border:1px solid var(--v7-line-strong); background:var(--v7-white); color:var(--v7-muted); font:700 11px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-btn-quiet { height:34px; padding:0 11px; border:var(--c-line-hair) solid var(--v7-line-strong); background:var(--v7-white); color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-200)/1 var(--lgi-font-sans); }
 .c-btn-quiet[disabled] { color:var(--v7-ghost); }
 a.c-btn-quiet { display:inline-flex; align-items:center; text-decoration:none; }
 a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-black); color:var(--v7-black); }
@@ -252,95 +328,133 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-verdict-blocked { background:var(--v7-bad-soft); }
 .c-verdict-unknown { background:var(--v7-gray); }
 .c-verdict-head { display:flex; align-items:baseline; gap:20px; flex-wrap:wrap; }
-.c-verdict-state { flex:0 0 auto; color:var(--v7-black); font:700 24px/1.15 var(--lgi-font-sans); letter-spacing:-.01em; }
-.c-verdict-why { margin:0; flex:1 1 320px; min-width:0; max-width:70ch; color:var(--v7-body); font-size:13px; line-height:1.7; }
+.c-verdict-state { flex:0 0 auto; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-600)/1.2 var(--lgi-font-sans); letter-spacing:-.01em; }
+.c-verdict-why { margin:0; flex:1 1 320px; min-width:0; max-width:70ch; color:var(--v7-body); font-size:var(--c-fs-300); line-height:1.7; }
 .c-verdict-why-list { margin:0; padding:0; flex:1 1 320px; min-width:0; max-width:70ch; list-style:none; display:flex; flex-direction:column; gap:5px; }
-.c-verdict-why-list li { color:var(--v7-body); font-size:13px; line-height:1.65; }
-.c-verdict-why-list b { margin-right:9px; color:var(--v7-black); font:800 10px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-verdict-why-list li { color:var(--v7-body); font-size:var(--c-fs-300); line-height:1.65; }
+.c-verdict-why-list b { margin-right:9px; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-100) var(--lgi-font-mono); letter-spacing:.06em; }
 
 /* 两条 lane 分开判定：深度建档接不了、巡检还能跑，是真实情况。 */
 /* auto-fill 而非 auto-fit：宽屏下补空轨道，不把两条 lane 拉成 400px 宽——
  * 拉宽会让「深度建档」和它的判定词隔着半屏，眼睛得来回找。 */
-.c-lanes { margin-top:18px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,400px)); gap:0 48px; justify-content:start; border-top:1px solid var(--v7-line-strong); }
-.c-lane { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:11px 0; border-bottom:1px solid var(--v7-line); }
-.c-lane-name b { display:block; color:var(--v7-black); font-size:13px; font-weight:600; }
-.c-lane-name span { display:block; margin-top:2px; color:var(--v7-ghost); font:10px var(--lgi-font-mono); letter-spacing:.04em; }
-.c-lane-state { flex:0 0 auto; font:700 11px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-lanes { margin-top:18px; display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,400px)); gap:0 48px; justify-content:start; border-top:var(--c-line-hair) solid var(--v7-line-strong); }
+.c-lane { display:flex; align-items:center; justify-content:space-between; gap:16px; padding:12px 0; border-bottom:var(--c-line-hair) solid var(--v7-line); }
+.c-lane-name b { display:block; color:var(--v7-black); font-size:var(--c-fs-300); font-weight:var(--c-fw-medium); }
+.c-lane-name span { display:block; margin-top:3px; color:var(--v7-muted); font-size:var(--c-fs-100); }
+.c-lane-state { flex:0 0 auto; font:var(--c-fw-bold) var(--c-fs-100) var(--lgi-font-mono); letter-spacing:.05em; }
 .c-lane-ok { color:var(--v7-black); }
 .c-lane-blocked { color:var(--v7-red); }
 
 /* 第二层：第 5 问的四个分项。账号那一项永远是「不参与判定」。 */
 /* 分项是竖排的（标签在上、值在下），铺满宽度不伤阅读；lane 是左右对照的，拉宽会让
  * 名字和判定词隔着半屏，所以两者用不同的伸缩策略。 */
-.c-factors { margin:20px 0 0; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; border-top:1px solid var(--v7-line-strong); }
+.c-factors { margin:20px 0 0; display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:0; border-top:var(--c-line-hair) solid var(--v7-line-strong); }
 .c-factor { padding:13px 20px 13px 0; }
-.c-factor dt { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
-.c-factor dd { margin:5px 0 0; color:var(--v7-black); font:700 17px/1.1 var(--lgi-font-mono); letter-spacing:-.02em; }
-.c-factor p { margin:5px 0 0; color:var(--v7-muted); font-size:11px; line-height:1.5; }
+.c-factor dt { color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-200)/1.4 var(--lgi-font-sans); }
+.c-factor dd { margin:6px 0 0; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-500)/1.2 var(--lgi-font-mono); letter-spacing:-.02em; }
+.c-factor p { margin:6px 0 0; color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.5; }
 /* 没有被检查的那一项不能与被检查过的看起来一样：显示成四项齐备就是改写资格。 */
-.c-factor-unchecked dd { color:var(--v7-muted); font-size:13px; font-weight:600; letter-spacing:0; }
-.c-factors-caveat { margin:14px 0 0; max-width:74ch; color:var(--v7-muted); font-size:11px; line-height:1.65; }
+.c-factor-unchecked dd { color:var(--v7-muted); font-family:var(--lgi-font-sans); font-size:var(--c-fs-300); font-weight:var(--c-fw-medium); letter-spacing:0; }
+.c-factors-caveat { margin:16px 0 0; max-width:74ch; color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.65; }
 
 /* 第三层：构成这些值的对象。 */
-.c-roster-head { padding-bottom:14px; border-bottom:2px solid var(--v7-black); }
+.c-roster-head { padding-bottom:14px; border-bottom:var(--c-line-rail) solid var(--v7-black); }
 .c-roster-count { display:flex; align-items:baseline; gap:9px; }
-.c-roster-count b { color:var(--v7-black); font:800 26px/1 var(--lgi-font-mono); letter-spacing:-.04em; }
-.c-roster-count span { color:var(--v7-muted); font-size:13px; }
-.c-roster-note { margin:10px 0 0; max-width:66ch; color:var(--v7-muted); font-size:12px; line-height:1.7; }
-.c-roster-empty { margin:16px 0 0; max-width:66ch; color:var(--v7-muted); font-size:13px; line-height:1.7; }
-.c-station-row { display:grid; grid-template-columns:64px minmax(0,1fr) 108px auto 64px; align-items:center; gap:16px; padding:15px 0; border-bottom:1px solid var(--v7-line); }
-.c-station-row-unclaimed { grid-template-columns:64px minmax(0,1fr) auto; }
-.c-station-state { font:700 11px var(--lgi-font-mono); letter-spacing:.05em; }
+.c-roster-count b { color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-700)/1 var(--lgi-font-mono); letter-spacing:-.03em; }
+.c-roster-count span { color:var(--v7-muted); font-size:var(--c-fs-300); }
+.c-roster-note { margin:10px 0 0; max-width:66ch; color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.7; }
+.c-roster-empty { margin:16px 0 0; max-width:66ch; color:var(--v7-muted); font-size:var(--c-fs-300); line-height:1.7; }
+/* M-03 序列索引轨。v7 的六种材料共用同一套 8px 点阵，这是它被压成一维的那一态，语义是
+ * 「身份 · 溯源 · 仅窄轨」。工位正是这一页唯一的身份对象——它要活得比插件长，而插件版本
+ * 每天都在换。所以轨只画在已登记的工位行上，待认领安装没有轨：它们还不是身份。
+ *
+ * 轨宽 3px，只在行的左缘，不进正文区。这不是装饰条：它把「这台机器在册」这件事画成了
+ * 一个看得见的事实，而不是又一行文字。 */
+.c-station-row { position:relative; display:grid; grid-template-columns:64px minmax(0,1fr) 108px auto 64px; align-items:center; gap:16px; padding:15px 0 15px 14px; border-bottom:var(--c-line-hair) solid var(--v7-line); }
+.c-station-row::before { content:""; position:absolute; left:0; top:15px; height:44px; width:3px;
+  background-image:repeating-linear-gradient(180deg, var(--v7-black) 0 var(--c-cell), transparent var(--c-cell) calc(var(--c-cell) * 2));
+  opacity:.55; }
+/* 空缺工位的轨降到虚位：身份还在册，但现在没有插件连着它。 */
+.c-station-row:has(.c-state-vacant)::before { opacity:.2; }
+
+/* DESIGN-011 · 能力矩阵。v7 的工站组件要求每台工位显示分项就绪，这是它的落地。
+ *
+ * 四态各有自己的视觉重量，顺序是刻意的：降级最重（要人去看），就绪最轻（不需要注意），
+ * 未验证在中间偏轻——它不是坏消息，只是还没有消息。把未验证做成警告色会让一屏全是黄，
+ * 而真正坏掉的那一格反而淹没在里面。 */
+.c-caps { grid-column:1 / -1; margin-top:4px; padding:14px 0 4px; border-top:var(--c-line-hair) dashed var(--v7-line-strong); }
+.c-caps-head { display:flex; align-items:baseline; gap:10px; color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-200)/1.4 var(--lgi-font-sans); }
+.c-caps-head span { color:var(--v7-ghost); font:var(--c-fw-regular) var(--c-fs-100) var(--lgi-font-mono); }
+.c-caps-unreadable { grid-column:1 / -1; margin-top:4px; padding:12px 0 4px; border-top:var(--c-line-hair) dashed var(--v7-line-strong); color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.6; }
+.c-caps-grid { margin-top:10px; display:grid; grid-template-columns:repeat(auto-fit,minmax(196px,1fr)); gap:0; border-top:var(--c-line-hair) solid var(--v7-line); }
+.c-cap { padding:10px 14px 11px 0; border-bottom:var(--c-line-hair) solid var(--v7-line); }
+.c-cap b { display:block; color:var(--v7-black); font-size:var(--c-fs-300); font-weight:var(--c-fw-medium); }
+/* 状态词是这一格的判定，用 Mono 是因为它是闭集枚举里的一个值，不是一句描述。 */
+.c-cap-state { display:inline-block; margin-top:5px; padding:2px 7px; font:var(--c-fw-bold) var(--c-fs-100)/1.4 var(--lgi-font-mono); letter-spacing:.05em; }
+.c-cap-detail { display:block; margin-top:6px; color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.5; }
+/* 机器名紧邻中文名，权重更低——它是给审计用的，不是给人读的。 */
+.c-cap code { display:block; margin-top:4px; color:var(--v7-ghost); font:var(--c-fw-regular) var(--c-fs-100) var(--lgi-font-mono); }
+.c-cap-hiccup { display:block; margin-top:6px; color:var(--v7-warn); font-style:normal; font-size:var(--c-fs-100); line-height:1.5; }
+
+.c-cap-ready .c-cap-state { background:var(--v7-ok-soft); color:var(--v7-ok); }
+.c-cap-degraded .c-cap-state { background:var(--v7-bad-fill); color:var(--v7-white); }
+/* 未验证是中性灰，不是警告色：它表示没有证据，不表示出了问题。 */
+.c-cap-unverified .c-cap-state { background:var(--v7-unknown-soft); color:var(--v7-unknown); }
+.c-cap-undeclared .c-cap-state { background:transparent; color:var(--v7-ghost); border:var(--c-line-hair) dashed var(--v7-line-strong); }
+.c-cap-degraded b { color:var(--v7-bad); }
+.c-station-row-unclaimed { grid-template-columns:64px minmax(0,1fr) auto; padding-left:0; }
+.c-station-row-unclaimed::before { content:none; }
+.c-station-state { font:var(--c-fw-bold) var(--c-fs-100) var(--lgi-font-mono); letter-spacing:.05em; }
 .c-state-staffed { color:var(--v7-black); }
 .c-state-vacant { color:var(--v7-muted); }
 .c-state-waiting { color:var(--v7-warn); }
 .c-station-name { min-width:0; }
-.c-station-name b { display:block; color:var(--v7-black); font-size:14px; font-weight:600; }
-.c-station-name span { display:block; margin-top:3px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-ghost); font:11px var(--lgi-font-mono); }
+.c-station-name b { display:block; color:var(--v7-black); font-size:var(--c-fs-400); font-weight:var(--c-fw-medium); }
+.c-station-name span { display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-100) var(--lgi-font-mono); }
 /* 额度是这一行唯一回答「今天还能干多少活」的数，因此是第二视觉重量。 */
-.c-quota b { color:var(--v7-black); font:800 17px/1 var(--lgi-font-mono); letter-spacing:-.02em; }
-.c-quota span { color:var(--v7-muted); font:12px var(--lgi-font-mono); }
-.c-quota em { display:block; margin-top:3px; color:var(--v7-ghost); font:normal 10px var(--lgi-font-mono); letter-spacing:.04em; }
+.c-quota b { color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-500)/1 var(--lgi-font-mono); letter-spacing:-.02em; }
+.c-quota span { color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-200) var(--lgi-font-mono); }
+.c-quota em { display:block; margin-top:4px; color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-100)/1.4 var(--lgi-font-sans); font-style:normal; }
 .c-quota-full b,.c-quota-full span { color:var(--v7-red); }
-.c-station-meta { display:flex; flex-direction:column; gap:3px; color:var(--v7-muted); font:10px var(--lgi-font-mono); letter-spacing:.04em; text-align:right; }
+.c-station-meta { display:flex; flex-direction:column; gap:4px; color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-100)/1.4 var(--lgi-font-sans); text-align:right; }
 .c-station-retire { display:flex; justify-content:flex-end; }
 .c-station-claim { display:flex; align-items:center; gap:7px; }
-.c-station-claim select { height:34px; padding:0 9px; border:1px solid var(--v7-line-strong); border-radius:4px; background:var(--v7-white); color:var(--v7-black); font-size:12px; }
+.c-station-claim select { height:34px; padding:0 9px; border:var(--c-line-hair) solid var(--v7-line-strong); border-radius:4px; background:var(--v7-white); color:var(--v7-black); font-size:var(--c-fs-200); }
 
 /* 右栏主动作。登记一台工位是这一页唯一的真实主动作。 */
 .c-console { padding:20px; background:var(--v7-sunken); }
-.c-console-title { margin:0; color:var(--v7-black); font-size:14px; font-weight:600; }
+.c-console-title { margin:0; color:var(--v7-black); font-size:var(--c-fs-400); font-weight:var(--c-fw-medium); }
 .c-console-form { margin-top:14px; display:flex; flex-wrap:wrap; align-items:center; gap:9px; }
-.c-console-form label { flex:0 0 100%; color:var(--v7-ghost); font-size:11px; line-height:1.5; }
+.c-console-form label { flex:0 0 100%; color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.5; }
 .c-console-form input,.c-console-form select {
   height:40px; padding:0 11px; border:1px solid var(--v7-line-strong); border-radius:4px;
   background:var(--v7-white); color:var(--v7-black); font-size:13px;
 }
 .c-console-form input { flex:1 1 200px; min-width:0; }
-.c-console-note { margin:12px 0 0; color:var(--v7-muted); font-size:11px; line-height:1.6; }
+.c-console-note { margin:12px 0 0; color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.6; }
 /* 开发期用的东西不与主动作同级：默认折叠。 */
-.c-dev-tools { margin-top:18px; border-top:1px solid var(--v7-line-strong); padding-top:12px; }
-.c-dev-tools summary { color:var(--v7-muted); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; cursor:pointer; }
+.c-dev-tools { margin-top:18px; border-top:var(--c-line-hair) solid var(--v7-line-strong); padding-top:12px; }
+.c-dev-tools summary { color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-200)/1.4 var(--lgi-font-sans); cursor:pointer; }
 .c-dev-tools summary:focus-visible { outline:2px solid var(--v7-black); outline-offset:2px; }
-.c-console-form-quiet label { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
-.c-console-form-quiet select { height:34px; font-size:12px; }
-.c-console-failure { margin:12px 0 0; padding:9px 12px; background:var(--v7-bad-soft); color:var(--v7-black); font-size:12px; line-height:1.65; }
-.c-console-failure b { margin-right:9px; padding:2px 7px; background:var(--v7-bad-fill); color:var(--v7-white); font:800 10px var(--lgi-font-mono); letter-spacing:.09em; }
+.c-console-form-quiet label { color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-100)/1.4 var(--lgi-font-sans); }
+.c-console-form-quiet select { height:34px; font-size:var(--c-fs-200); }
+.c-console-failure { margin:12px 0 0; padding:10px 12px; background:var(--v7-bad-soft); color:var(--v7-black); font-size:var(--c-fs-200); line-height:1.65; }
+.c-console-failure b { margin-right:9px; padding:2px 7px; background:var(--v7-bad-fill); color:var(--v7-white); font:var(--c-fw-bold) var(--c-fs-100) var(--lgi-font-mono); letter-spacing:.06em; }
 
 /* 第四层：正在按什么边界跑。租约是许可，不是活。 */
-.c-bounds-title { margin:0 0 4px; color:var(--v7-black); font-size:14px; font-weight:600; }
+.c-bounds-title { margin:0 0 4px; color:var(--v7-black); font-size:var(--c-fs-400); font-weight:var(--c-fw-medium); }
 .c-bounds-group { margin-top:20px; }
-.c-bounds-group h3 { margin:0 0 2px; padding-bottom:8px; border-bottom:2px solid var(--v7-black); color:var(--v7-black); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
-.c-bound-row { display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:11px 0; border-bottom:1px solid var(--v7-line); }
-.c-bound-name b { display:block; color:var(--v7-black); font-size:13px; font-weight:600; }
-.c-bound-name span { display:block; margin-top:2px; color:var(--v7-ghost); font:10px var(--lgi-font-mono); letter-spacing:.04em; }
-.c-bound-meta { display:flex; flex-direction:column; gap:3px; color:var(--v7-muted); font:10px var(--lgi-font-mono); letter-spacing:.04em; text-align:right; }
-.c-bounds-empty { margin:12px 0 0; color:var(--v7-muted); font-size:12px; line-height:1.65; }
+.c-bounds-group h3 { margin:0 0 2px; padding-bottom:8px; border-bottom:var(--c-line-rail) solid var(--v7-black); color:var(--v7-black); font:var(--c-fw-medium) var(--c-fs-200)/1.4 var(--lgi-font-sans); }
+.c-bound-row { display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:12px 0; border-bottom:var(--c-line-hair) solid var(--v7-line); }
+.c-bound-name b { display:block; color:var(--v7-black); font-size:var(--c-fs-300); font-weight:var(--c-fw-medium); }
+.c-bound-name span { display:block; margin-top:3px; color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-100) var(--lgi-font-mono); }
+.c-bound-meta { display:flex; flex-direction:column; gap:4px; color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-100)/1.4 var(--lgi-font-sans); text-align:right; }
+.c-bounds-empty { margin:12px 0 0; color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.65; }
 .c-bounds-grid { margin:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0; }
-.c-bounds-grid div { padding:11px 12px 11px 0; border-bottom:1px solid var(--v7-line); }
-.c-bounds-grid dt { color:var(--v7-ghost); font:700 10px var(--lgi-font-mono); letter-spacing:.09em; }
-.c-bounds-grid dd { margin:4px 0 0; color:var(--v7-black); font:700 13px var(--lgi-font-mono); }
-.c-bounds-note { margin:12px 0 0; color:var(--v7-muted); font-size:11px; line-height:1.6; }
+.c-bounds-grid div { padding:12px 12px 12px 0; border-bottom:var(--c-line-hair) solid var(--v7-line); }
+.c-bounds-grid dt { color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-200)/1.4 var(--lgi-font-sans); }
+.c-bounds-grid dd { margin:5px 0 0; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-300) var(--lgi-font-mono); }
+.c-bounds-note { margin:12px 0 0; color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.6; }
 
 .c-console-form input:focus-visible,.c-console-form select:focus-visible,.c-station-claim select:focus-visible,
 .c-btn-primary:focus-visible,.c-btn-secondary:focus-visible {
@@ -349,15 +463,15 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 
 /* Primary：本区域唯一真实主动作。实底 + Ink 边框 + 实色硬阴影，无模糊。 */
 .c-btn-primary {
-  height:40px; padding:0 18px; border:2px solid var(--v7-black); background:var(--v7-red);
-  color:var(--v7-white); font:800 12px var(--lgi-font-mono); letter-spacing:.05em; cursor:pointer;
+  height:40px; padding:0 18px; border:var(--c-line-rail) solid var(--v7-black); background:var(--v7-red);
+  color:var(--v7-white); font:var(--c-fw-medium) var(--c-fs-300)/1 var(--lgi-font-sans); cursor:pointer;
   box-shadow:var(--v7-brutal); transition:transform var(--v7-t-press) var(--v7-ease),box-shadow var(--v7-t-press) var(--v7-ease);
 }
 .c-btn-primary:hover { background:var(--v7-red-hover); transform:translate(-2px,-2px); box-shadow:var(--v7-brutal-lg); }
 .c-btn-primary:active { transform:translate(1px,1px); box-shadow:var(--v7-brutal); }
 .c-btn-secondary {
-  height:40px; padding:0 16px; border:2px solid var(--v7-black); background:var(--v7-white);
-  color:var(--v7-black); font:800 12px var(--lgi-font-mono); letter-spacing:.05em; cursor:pointer;
+  height:40px; padding:0 16px; border:var(--c-line-rail) solid var(--v7-black); background:var(--v7-white);
+  color:var(--v7-black); font:var(--c-fw-medium) var(--c-fs-300)/1 var(--lgi-font-sans); cursor:pointer;
 }
 .c-btn-secondary:hover { background:var(--v7-sunken); }
 

@@ -1,7 +1,7 @@
 # 前端设计治理协议
 
 > 状态: 权威当前
-> 最后核对: 2026-08-21
+> 最后核对: 2026-09-02
 > 适用范围: Linggan Intelligence 的 UI 设计规则、页面/组件规格、实施变更、评审与例外处理
 > 事实来源: AGENTS.md、docs/governance/、docs/agents/ui-execution-contract.md、用户确认的 DESIGN-001 范围和已确认产品/领域边界
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策与当前 SCOPE；冲突时停止受影响工作
@@ -19,9 +19,11 @@
 
 ## LIDS 的治理地位
 
-[LIDS v2.0](lids/README.md) 是 Linggan 的唯一设计表达标准。所有未来 UI 工作必须按 `Token → Primitive → Component → Pattern → Page` 选择和记录设计决策，Motion / Scene / Data Truth 为横向约束。它已是执行约束，但成熟度保持 `PROPOSED`：不得把标准存在误写为主题 CSS、组件、真实页面、真实状态、3D、部署或用户验收已经存在。
+[LIDS v7.0](lids/README.md) 是 Linggan 的唯一设计表达标准。所有未来 UI 工作必须按 `Token → Primitive → Component → Pattern → Page` 选择和记录设计决策，Motion / Scene / Data Truth / 材料 / 壳层区位 / 数据边界为横向约束。它已是执行约束，但成熟度保持 `PROPOSED`：不得把标准存在误写为主题 CSS、组件、真实页面、真实状态、3D、部署或用户验收已经存在。
 
-LIDS 只能回答“在已获批准的产品含义下如何一致表达”。来源包及其 V3 原型中的模拟内容、技术建议、文件路径、动态效果、数据数值和运行状态都不是本仓库的事实或实现许可。真实代码/合同优先，未来运行时 Token 只在获得授权后成为数值唯一真源；在此之前以 `lids/tokens.md` 的冻结基线为准。
+**规则状态与运行时状态必须分开陈述。** DESIGN-010（2026-09-02）把标准升级到 v7.0，但运行时代码未迁移。任何文档、Issue、PR 描述或验收记录在引用 LIDS 条款时，必须能回答"这条是规则已采纳，还是代码已符合"——两者混写是本项目已记录的失真方式，见 [lids/decisions.md](lids/decisions.md) 的两栏状态表。
+
+LIDS 只能回答“在已获批准的产品含义下如何一致表达”。来源包及其 V3 原型中的模拟内容、技术建议、文件路径、动态效果、数据数值和运行状态都不是本仓库的事实或实现许可。真实代码/合同优先。运行时 Token 唯一真源为 `apps/api/src/local_web/lids_tokens.css`；`lids/tokens.md` 第 3 节是其受校验镜像，第 2 节的 v7 三层架构是新工作的选值依据但尚未进入运行时，两者不可互相冒充。
 
 ## 两类问题，两个优先级
 

@@ -2,9 +2,9 @@
 
 > 状态: 权威当前
 > 运行时状态: 定义页面组合约束；LOCAL-001A 已有受限 L1 Evidence Library 页面，但本文件不把它声明为通用 Pattern 实现
-> 最后核对: 2026-08-26
+> 最后核对: 2026-09-02
 > 适用范围: Linggan Intelligence 已获批准页面的结构、信息顺序、视觉强度和 Pattern 选择
-> 事实来源: Mog 指定的 LIDS v2.0 `patterns.md`（SHA-256: `94fe15b47e7d38b1be15b0369c143f51859a1aa79a1ca6c2dba0db9dfa2a2719`）、[system.md](system.md)、已批准产品页面与 PAGE 规格
+> 事实来源: Mog 于 2026-09-02 指定的 `linggan-design-system-v7.html`（§04 壳层区位、§12 页面模式、ADR-10/11）、Mog 指定的 LIDS v2.0 `patterns.md`（SHA-256: `94fe15b47e7d38b1be15b0369c143f51859a1aa79a1ca6c2dba0db9dfa2a2719`）、[system.md](system.md)、已批准产品页面与 PAGE 规格
 > 冲突时以谁为准: 用户最新确认、当前产品任务、真实数据/权限/行动合同与 SCOPE；Pattern 不能自行增加模块或操作
 
 Pattern 是页面级组合而非可任意拼贴的组件清单。每个新页面先确定 L3/L2/L1，再选择唯一主 Pattern；只可参数化或轻度组合，不能自造第二种页面骨架。
@@ -100,6 +100,25 @@ Sticky Save / Validation Summary
 
 不放大型等距动画或海报标题。规则用编号目录；保存范围、生效时间与影响范围直接可见；危险设置放独立 Danger Zone。
 
+## 页面模式：一个世界，不同仪器
+
+相同的全局语言下，不同业务域拥有不同画面。四种模式各自绑定一个域的真实工作方式，**不是四套可以自由挑选的皮肤**：
+
+| 域 | 模式 | 主 Pattern | 首屏必须先回答 |
+|---|---|---|---|
+| 证据库 | 连续档案 | Corpus Explorer | 库里有什么、这批受什么限制 |
+| 采集运行 | 控制 + 实时 | Collection Control | 什么坏了、什么在跑 |
+| 目标档案 | 身份 + 基线 | Topic Intelligence Detail | 这个对象是谁、基线是什么、变了多少 |
+| 编年记忆 | 事件脊柱 | Signal Review Queue 的时间轴变体 | 何时发生了什么、按时间倒序 |
+
+选择模式的依据是这个域的用户任务，不是"换个样子好看"。同一个域内不得并存两种模式。
+
+## 壳层区位：见 LIDS-SHELL-001
+
+页头与 Context Bar 的**区位划分、内容类型与数量上限**由 [shell-zones.md](shell-zones.md) 冻结（`ADR-10`）。所有 Pattern 都在这两条带之下工作，没有 Pattern 可以要求增加区位或加第二行。
+
+下一节的"外壳所有权"规定外壳样式**写在哪**；shell-zones.md 规定外壳里**能放什么、放几个**。两者配套，缺一条另一条就会被绕开。
+
 ## 外壳组件的所有权：页头与二级导航不属于任何一个页面（2026-08-26）
 
 全局页头（品牌区、一级导航、系统边界、命令入口）、上下文行、左侧二级导航，由 `shell.rs` 为**所有**页面渲染同一份结构。**它们的样式必须整份住在 `shell.css`，任何单页样式表都不得声明它们。**
@@ -172,3 +191,6 @@ Sticky Save / Validation Summary
 - 不自由新增第二套 Header、Primary、状态、Command Dock、Evidence Chain、临时场景或容器语法。
 - 页头已收回：没有视觉可见的页面标题块，`h1` 仅以 `.v7-sr-only` 存在，计数在上下文行。
 - 紧凑桌面无横向滚动；移动端不是简单缩放桌面结构。
+- 壳层通过 [shell-zones.md](shell-zones.md) 的七条验收：区位数、导航项辅助行单一信息、系统区恰好 2 元素、路径 ≤3 级、约束 ≤2 项且无数字、**静默区零文字零数字**、锚点区仅时间 + 时区代号。
+- 视图切换使用文字 Tab + 信号下划线，页面内不存在方格分段控件（`ADR-11`）。
+- 材料预算成立：白场约 70%，连续阅读区背后为纯白，校准场只出现在 Context Bar 静默区（[materials.md](materials.md)）。

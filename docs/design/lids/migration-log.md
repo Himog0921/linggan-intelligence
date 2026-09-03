@@ -1,13 +1,33 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-08-26
+> 最后核对: 2026-09-02
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
 
+## 2026-09-03 · DESIGN-011 生产流与执行工位落地 v7（首个运行时迁移）
+
+- **来源与事项**：Mog 于 2026-09-02 指定「用这个设计标准修改 `/collection/operations`」，09-03 指定「同样的，构建执行工位页」并裁定先接能力矩阵数据再做页面。这是 DESIGN-010 之后 v7 的**首个运行时落地**。
+- **表达迁移**：两页删除全部英文描述性标签（阶段副标题、`SYSTEM CONCLUSION`、`LIVE OBSERVATION`、`SEMANTIC EVENTS ONLY` 等），保留 `DISCOVER`/`CHANGE`/`EXCEPTION` 与能力机器名——它们是数据合同的字面取值（`LANG-05` 第 2 类）。字号下限提到 11px、字重收到 400/600/700、按钮中文改回 Sans。
+- **材料**：`/collection/operations` 深色实时流顶边使用 `M-05` 低亮传感面（`steps()` 按格跳）；`/collection/runtime` 已登记工位行使用 `M-03` 序列索引轨。两处均只在边缘，待认领安装不画轨——它们尚未成为身份。**第一版 `M-05` 曾扫过正文并被本次自查推翻**，改为裁剪在顶部 72px 内，该约束已写入测试。
+- **新读模型**：`crates/evidence` 新增 `StationCapability` / `CapabilityState` / `read_station_capabilities`，合成声明、成功与失败三源。三条判断分开：未验证不是降级、执行失败不是能力缺陷、读不到不是没有。
+- **Token**：不改任何 `--lgi-*` 值；页面局部 v7 阶梯以 `--c-*` 承载，属 `DESIGN-010-UI-EX-01`。`ADR-04` 信号色拆分仍未落地——页面样式表的无色值护栏拦下了它，且拦得对。
+- **未做**：共享壳层未动，`ADR-10` 的页头/上下文行区位收口仍是欠账；同一样式表中目标页、抽屉与检视面板的 10px 与 800 字重未迁移，护栏测试范围因此只到本页类名。
+- **验证与边界**：72 项测试通过、`cargo fmt` 干净、token 镜像 131/131、能力矩阵 SQL 先在生产库直连验证再写入 Rust、1440 下浏览器计量（<11px 元素 0、非法字重 0、无横向滚动）。**390×844 未实测**（resize 本轮不生效）；降级分支在真实库中无数据，只有单元测试覆盖。完整清单见 [`../changes/design-011-collection-surfaces-v7-ui-change-manifest.md`](../changes/design-011-collection-surfaces-v7-ui-change-manifest.md)。
+
+## 2026-09-02 · DESIGN-010 LIDS 升级到 v7.0（规则层换代，运行时未迁移）
+
+- **来源与事项**：Mog 于 2026-09-02 指定 `/Users/moglenny/Downloads/linggan-design-system-v7.html`（SHA-256 `1093462bcea81c10584e18119a92ae6b51645d1b480667e161d993e863ca4e36`），并明确裁定本次范围为「只改治理文档 + 记录迁移欠账」。来源登记见 [`../reference-register.md`](../reference-register.md) 的 `REF-DS-V7-001`。
+- **规则层**：新增 [materials.md](materials.md)（8px 采样点阵六态、材料预算 70/20/10）、[shell-zones.md](shell-zones.md)（页头 3 区 + Context Bar 4 区冻结、静默区保护）、[data-boundaries.md](data-boundaries.md)（四态渲染契约，组件准入条件）、[decisions.md](decisions.md)（11 条 v7 ADR + 2 条项目 ADR）。修订 system / tokens / primitives / patterns / language-policy / README / agent-execution-guide 及外层三份治理文件。
+- **Token**：[tokens.md](tokens.md) 重构为两层——§2 v7 三层架构（L1 PRIMITIVE → L2 SEMANTIC → L3 GEOMETRY，组件只引用 L2/L3）为**目标态与新工作选值依据**；§3 的 127 项 `--lgi-*` 仍是**唯一运行时值源**，逐字节未改。§4 给出差异表与五步迁移顺序（加不减 → 换值 → 换引用 → 删别名 → 材料与密度）。
+- **语言**：新增 `LANG-05` Mono 预算——英文只允许机器事实、系统状态枚举、结构编号三类；**描述性标签一律只用中文，不配英文对照**。判据为"这个词在数据合同里是不是一个字面取值"。这是对 `LIDS-LANG-001` 的执行口径收紧（`ADR-P01`），不是推翻。
+- **不改事实**：本次没有修改任何 `.rs` / `.css` / `.js` / 测试；没有改动路由、权限、状态判定、数据合同、API、采集或媒体。所有状态轴定义、`PARTIAL + VALID`、`UNKNOWN` 语义原样保留。
+- **已登记欠账**：运行时 token（信号色/字重/字号下限/线宽/圆角）、材料与密度机制、壳层区位违规（`shell.rs`）、文案中英对照（`shell.rs` / `evidence_page.rs`）、静默区与英文预算的自动检查——五项均未实现，各需独立受控事项。清单见 [`../changes/design-010-lids-v7-adoption-ui-change-manifest.md`](../changes/design-010-lids-v7-adoption-ui-change-manifest.md) 第 3 节。
+- **命名冲突**：运行时 CSS 类前缀 `v7-*` 来自 `REF-V7-001`（Evidence Library 页面 Gold Master，2026-08-24），与设计系统 v7.0 无关，已在两处登记以防误读。
+- **验证与边界**：Token 镜像逐项比对 127/127 相等；`scripts/verify-ui-design-handbook.sh` 通过（含本次新增的门禁项）。它**不证明**任何页面呈现发生变化、不证明现有页面符合 v7、不证明来源文件标注的对比度在本项目实际组合下全部达标（本次未复算），也不构成 Mog 的视觉验收。LIDS 成熟度仍为 `PROPOSED`。
 ## 2026-09-02 · TOPIC-WORKSPACE-REAL-001 首个真实 L2 Topic 工作区（当前主线整合）
 
 - **来源与事项**：Mog 明确允许关闭 #133 后推进下一大阶段；Issue #112、PAGE-TOPIC-WORKSPACE-001 与 TOPIC-WORKSPACE-REAL-001。

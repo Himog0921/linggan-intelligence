@@ -45,13 +45,17 @@
 | [design/README.md](design/README.md) | 权威当前 | 前端设计手册入口、权威地图、读取路径和当前已建立/未建立边界 |
 | [design/design-governance.md](design/design-governance.md) | 权威当前 | UI 设计来源优先级、闭集执行、变更分类、例外和验收治理 |
 | [design/reference-register.md](design/reference-register.md) | 权威当前 | 设计参考的登记格式与“参考不等于指令”边界；LIDS v2.0 的可继承/不继承边界已登记 |
-| [design/lids/README.md](design/lids/README.md) | 权威当前；Proposed | LIDS v2.0 全项目设计表达标准的入口、来源回执、权威边界和成熟度 |
+| [design/lids/README.md](design/lids/README.md) | 权威当前；Proposed | LIDS v7.0 全项目设计表达标准的入口、来源回执、权威边界和成熟度 |
 | [design/lids/system.md](design/lids/system.md) | 权威当前；Proposed | LIDS-SYS-001：Token→Primitive→Component→Pattern→Page、L1/L2/L3、状态、动效、场景、a11y 与治理 |
-| [design/lids/tokens.md](design/lids/tokens.md) | 权威当前 | LIDS-TOK-001：完整 `--lgi-*` 数值基线与未来唯一 Token 真源迁移规则 |
+| [design/lids/tokens.md](design/lids/tokens.md) | 权威当前 | LIDS-TOK-001：v7 三层 Token 架构（目标态）、完整 `--lgi-*` 运行时基线、差异表与分步迁移顺序 |
+| [design/lids/materials.md](design/lids/materials.md) | 权威当前 | LIDS-MAT-001：8px 采样点阵六态、材料预算 70/20/10 与区位限制 |
+| [design/lids/shell-zones.md](design/lids/shell-zones.md) | 权威当前 | LIDS-SHELL-001：页头 3 区、Context Bar 4 区的容量上限、禁止清单与静默区保护 |
+| [design/lids/data-boundaries.md](design/lids/data-boundaries.md) | 权威当前 | LIDS-BOUND-001：超长/缺失/零值与极大值/未知四态的渲染契约，组件准入条件 |
+| [design/lids/decisions.md](design/lids/decisions.md) | 权威当前 | LIDS-ADR-001：v7 全部结构性决定台账，规则状态与运行时状态分列 |
 | [design/lids/primitives.md](design/lids/primitives.md) | 权威当前 | LIDS-PRI-001：文字、按钮、状态、Surface、Readout、反馈和 Focus 的基础契约 |
 | [design/lids/patterns.md](design/lids/patterns.md) | 权威当前 | LIDS-PAT-001：L1/L2/L3 页面 Pattern、结构与组合限制 |
 | [design/lids/agent-execution-guide.md](design/lids/agent-execution-guide.md) | 权威当前 | LIDS-AGENT-001：UI Agent 强制决策树、禁止项和交付前检查 |
-| [design/lids/language-policy.md](design/lids/language-policy.md) | 权威当前 | LIDS-LANG-001：中文主表达、英文技术旁注、状态诚实性和有界页面迁移规则 |
+| [design/lids/language-policy.md](design/lids/language-policy.md) | 权威当前 | LIDS-LANG-001：中文主表达、英文 Mono 三类预算（LANG-05）、状态诚实性和有界页面迁移规则 |
 | [design/lids/prototype-audit.md](design/lids/prototype-audit.md) | 权威当前 | LIDS-AUD-001：Observatory V3 原型的品牌母题与非授权边界 |
 | [design/lids/migration-log.md](design/lids/migration-log.md) | 权威当前 | LIDS-LOG-001：设计系统迁移、替代、例外与验证记录 |
 | [design/templates/page-spec-form.md](design/templates/page-spec-form.md) | 权威当前 | 获准页面的设计执行规格表单 |
@@ -77,6 +81,8 @@
 | [design/changes/evidence-runtime-001-ui-change-manifest.md](design/changes/evidence-runtime-001-ui-change-manifest.md) | 权威当前；EVIDENCE-RUNTIME-001 / Issue #90 | Material Projection 运行页的唯一数据入口、作品 lane、Inspector、敏感材料与一次性验收边界 |
 | [design/changes/design-008-shared-shell-chinese-first-ui-change-manifest.md](design/changes/design-008-shared-shell-chinese-first-ui-change-manifest.md) | 权威当前；DESIGN-008 / Issue #68 | 共享 local-web shell 的中文主语义、英文技术旁注与 Corpus/Collection 双页面验收边界 |
 | [design/changes/design-009-runtime-capacity-surface-ui-change-manifest.md](design/changes/design-009-runtime-capacity-surface-ui-change-manifest.md) | 权威当前；DESIGN-009 | 执行工位改为产能判定面，运行状态由真实容量读取而非写死文案 |
+| [design/changes/design-010-lids-v7-adoption-ui-change-manifest.md](design/changes/design-010-lids-v7-adoption-ui-change-manifest.md) | 权威当前；DESIGN-010 | LIDS 升级 v7.0 的范围、逐条差异、运行时欠账与明确非目标；本次零运行时改动 |
+| [design/changes/design-011-collection-surfaces-v7-ui-change-manifest.md](design/changes/design-011-collection-surfaces-v7-ui-change-manifest.md) | 权威当前；DESIGN-011 | 生产流与执行工位落地 v7、工位能力矩阵读模型、四态判定与已知限制 |
 | [design/changes/plugin-001-producer-popup-ui-change-manifest.md](design/changes/plugin-001-producer-popup-ui-change-manifest.md) | 已被替代；PLUGIN-001 | Issue #33 popup 的历史 UI 边界；不再约束当前实现 |
 | [design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md](design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-MIGRATION-001 | Issue #37 popup 的 Discovery 行动与状态边界；启动恢复由 Issue #53 文档补充 |
 | [design/changes/plugin-popup-recovery-001-ui-change-manifest.md](design/changes/plugin-popup-recovery-001-ui-change-manifest.md) | 权威当前；PLUGIN-POPUP-RECOVERY-001 | Issue #53 popup 启动恢复、无副作用 fallback 与 v0.4.2 release 边界；Issue #55 的运行时修订见当月进度记录 |

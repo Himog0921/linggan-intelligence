@@ -178,3 +178,156 @@ impl From<UnclaimedRow> for UnclaimedInstallation {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// 能力矩阵：这台工位的每一项能力，现在是什么状态
+// ---------------------------------------------------------------------------
+
+/// 判定窗口。七天是当前全部运行数据的跨度量级；窗口必须显式，因为「就绪」的意思
+/// 是「最近还在跑」，不是「历史上跑成过一次」。
+const CAPABILITY_WINDOW_DAYS: i32 = 7;
+
+/// 一项能力在一台工位上的当前状态。
+///
+/// 四态而不是三态，因为「声明支持但窗口内没跑过」既不是就绪也不是降级——它是**没有证据**。
+/// 把它显示成降级，就是把「没派过这种活」说成「这台机器坏了」；显示成就绪，则是拿
+/// 一次都没验证过的东西当已验证。两种都是用视觉便利改写事实。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityState {
+    /// 窗口内有成功产出，且没有能力级失败。
+    Ready,
+    /// 窗口内出现过 `capability_not_executable_here`——插件明确说这里跑不了这项。
+    Degraded,
+    /// 插件声明支持，但窗口内既无成功也无能力级失败。没有证据，不下结论。
+    Unverified,
+    /// 当前在岗插件没有声明这项能力。
+    NotDeclared,
+}
+
+/// 一台工位的一项能力读数。
+///
+/// `execution_failures` 与 `capability_failures` 分开计，因为两者含义完全不同：
+/// 页面超时、标签页丢失是**这一次**执行没成，能力本身没问题；
+/// `capability_not_executable_here` 才是插件在说「这项我干不了」。
+/// 合成一个「失败数」会让一次网络抖动看起来像能力缺陷。
+#[derive(Debug, Clone)]
+pub struct StationCapability {
+    /// 机器名，如 `author_profile`。它是合同里的字面取值，界面上按 LIDS-LANG-001
+    /// 的 Mono 预算可以原样显示，但必须有中文名相邻。
+    pub capability: String,
+    pub declared: bool,
+    pub successes: i64,
+    pub last_success_at: Option<String>,
+    /// 能力级失败：插件声明这里跑不了这一项。
+    pub capability_failures: i64,
+    /// 执行级失败：超时、标签页不可用等。不翻转能力状态。
+    pub execution_failures: i64,
+    pub last_failure_at: Option<String>,
+}
+
+impl StationCapability {
+    pub fn state(&self) -> CapabilityState {
+        if !self.declared {
+            return CapabilityState::NotDeclared;
+        }
+        if self.capability_failures > 0 {
+            return CapabilityState::Degraded;
+        }
+        if self.successes > 0 {
+            return CapabilityState::Ready;
+        }
+        CapabilityState::Unverified
+    }
+}
+
+/// 读一台工位的能力矩阵。纯读。
+///
+/// 三个来源合成，每一个都有它自己的口径问题，都在这里一次说清：
+///
+/// 1. **声明**来自当前在岗安装的 `capabilities`。它回答「这个插件版本支持什么」，
+///    与跑得成跑不成无关；所有安装报的是同一份清单。
+/// 2. **成功**来自 `linggan_runtime_capture_package`。它与工位的连接靠
+///    `producer_instance_id = plugin_installation.install_key`——**这是约定不是外键**，
+///    库里现有约 6% 的包连不上（那些插件从未被认领到任何工位）。连不上的不计入任何
+///    工位，而不是摊到某一台头上。
+/// 3. **失败**来自 `collection_work_order_lease_task_dispatch_failure`，经 task 反查
+///    `capabilitiesRequested`。这条链有正经外键。
+pub async fn read_station_capabilities(
+    database: &Database,
+    station_ref: Uuid,
+) -> Result<Vec<StationCapability>, StationError> {
+    if !station_schema_is_ready(database).await? {
+        return Err(StationError::SchemaUnavailable);
+    }
+    let rows = sqlx::query_as::<_, CapabilityRow>(
+        "WITH active_declared AS ( \
+             SELECT jsonb_array_elements_text(pi.capabilities) AS capability \
+             FROM plugin_installation pi \
+             WHERE pi.station_ref = $1 AND pi.superseded_at IS NULL \
+         ), \
+         successes AS ( \
+             SELECT p.package_kind AS capability, count(*) AS successes, \
+                    max(p.accepted_at) AS last_success_at \
+             FROM linggan_runtime_capture_package p \
+             JOIN plugin_installation pi ON pi.install_key = p.producer_instance_id::text \
+             WHERE pi.station_ref = $1 \
+               AND p.accepted_at > scope_001_now() - make_interval(days => $2) \
+             GROUP BY 1 \
+         ), \
+         failures AS ( \
+             SELECT tk.task_spec->'capabilitiesRequested'->>0 AS capability, \
+                    count(*) FILTER (WHERE f.failure_code = 'capability_not_executable_here') \
+                        AS capability_failures, \
+                    count(*) FILTER (WHERE f.failure_code <> 'capability_not_executable_here') \
+                        AS execution_failures, \
+                    max(f.occurred_at) AS last_failure_at \
+             FROM collection_work_order_lease_task_dispatch_failure f \
+             JOIN plugin_installation pi ON pi.installation_ref = f.installation_ref \
+             JOIN linggan_runtime_task tk ON tk.task_id = f.task_id \
+             WHERE pi.station_ref = $1 \
+               AND f.occurred_at > scope_001_now() - make_interval(days => $2) \
+             GROUP BY 1 \
+         ) \
+         SELECT COALESCE(d.capability, s.capability, fl.capability) AS capability, \
+                (d.capability IS NOT NULL) AS declared, \
+                COALESCE(s.successes, 0) AS successes, \
+                to_char(s.last_success_at, 'MM-DD HH24:MI') AS last_success_at, \
+                COALESCE(fl.capability_failures, 0) AS capability_failures, \
+                COALESCE(fl.execution_failures, 0) AS execution_failures, \
+                to_char(fl.last_failure_at, 'MM-DD HH24:MI') AS last_failure_at \
+         FROM active_declared d \
+         FULL OUTER JOIN successes s ON s.capability = d.capability \
+         FULL OUTER JOIN failures fl ON fl.capability = COALESCE(d.capability, s.capability) \
+         ORDER BY 1",
+    )
+    .bind(station_ref)
+    .bind(CAPABILITY_WINDOW_DAYS)
+    .fetch_all(database.pool())
+    .await?;
+
+    Ok(rows.into_iter().map(StationCapability::from).collect())
+}
+
+type CapabilityRow = (
+    Option<String>,
+    Option<bool>,
+    i64,
+    Option<String>,
+    i64,
+    i64,
+    Option<String>,
+);
+
+impl From<CapabilityRow> for StationCapability {
+    fn from(row: CapabilityRow) -> Self {
+        Self {
+            capability: row.0.unwrap_or_default(),
+            declared: row.1.unwrap_or(false),
+            successes: row.2,
+            last_success_at: row.3,
+            capability_failures: row.4,
+            execution_failures: row.5,
+            last_failure_at: row.6,
+        }
+    }
+}

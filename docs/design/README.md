@@ -1,14 +1,16 @@
 # 前端设计手册
 
 > 状态: 权威当前
-> 最后核对: 2026-08-29
+> 最后核对: 2026-09-02
 > 适用范围: Linggan Intelligence 未来用户可见 Web UI 的设计规则、页面/组件规格、协作入口与验收追踪
 > 事实来源: 用户对 DESIGN-001 / DESIGN-002 的明确授权、AGENTS.md、docs/governance/、docs/agents/ui-execution-contract.md、已确认产品边界与当前文件树
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策与当前 SCOPE；本手册不覆盖这些来源
 
 本目录是未来 UI 工作的唯一设计入口。它的作用不是替产品决定页面要做什么，也不是把一组视觉偏好变成无需验证的实现命令；它把已经获准的界面规则、它们的来源、适用范围、验收方式和未决空白整理成 Agent 可以执行与复核的合同。
 
-当前已有三层内容：DESIGN-001 建立设计治理骨架；Mog 指定的 LIDS v2.0 已吸收为全项目唯一设计表达标准；DESIGN-002 用一个明确标为合成、非运行时的 Topic Reference Page 验证 LIDS 的 L2 局部表达、事实边界和组件晋升门。它们不构成通用 Web 技术选型、真实数据合同或完整前端实现授权。
+当前已有三层内容：DESIGN-001 建立设计治理骨架；Mog 指定的 LIDS 已吸收为全项目唯一设计表达标准，并于 2026-09-02 由 DESIGN-010 升级到 **v7.0**；DESIGN-002 用一个明确标为合成、非运行时的 Topic Reference Page 验证 LIDS 的 L2 局部表达、事实边界和组件晋升门。它们不构成通用 Web 技术选型、真实数据合同或完整前端实现授权。
+
+**v7.0 升级只改治理文档。** 运行时 token、样式表、页面模板与文案仍停在 v2.0 口径，逐项欠账登记在 [lids/decisions.md](lids/decisions.md)、[lids/tokens.md](lids/tokens.md) 第 4 节与 [lids/language-policy.md](lids/language-policy.md) 第 6 节。读本手册时，「已采纳」= 新工作必须这样做，不等于现有代码已经这样。
 
 ## 固定读取路径
 
@@ -17,7 +19,7 @@
 1. 根目录 AGENTS.md、docs/README.md 与 docs/current-state.md；
 2. docs/agents/ui-execution-contract.md；
 3. 对应的产品页面文档；它回答用户任务、事实含义、权限、状态与行动后果；
-4. [lids/README.md](lids/README.md)，再进入与事项直接相关的 Token、Primitive、Pattern、Agent guide 或原型审计；
+4. [lids/README.md](lids/README.md)，再进入与事项直接相关的 Token、Primitive、Pattern、材料、壳层区位、数据边界、语言规则、ADR 台账、Agent guide 或原型审计；
 5. 本目录中状态为“权威当前”的相关基础规则、模式、组件或页面规格；
 6. 已确认的数据合同、当前 SCOPE、真实代码或测试；只有要核对实际事实时才读取；
 7. 明确登记的设计参考。参考只能辅助提出候选，不能覆盖前六层。
@@ -43,9 +45,13 @@
 | [design-governance.md](design-governance.md) | 来源优先级、闭集执行、变更分类、例外、追踪与验收规则 | 权威当前 |
 | [reference-register.md](reference-register.md) | 设计参考登记与引用边界 | 权威当前 |
 | [../agents/ui-execution-contract.md](../agents/ui-execution-contract.md) | UI 协作 Agent 的强制工作合同 | 权威当前 |
-| [lids/README.md](lids/README.md) | LIDS v2.0 的项目内入口、来源回执、权威边界和成熟度 | 权威当前；标准成熟度 Proposed |
+| [lids/README.md](lids/README.md) | LIDS v7.0 的项目内入口、来源回执、权威边界和成熟度 | 权威当前；标准成熟度 Proposed |
 | [lids/system.md](lids/system.md) | LIDS-SYS-001：五层架构、L1/L2/L3、数据真实性、动效、场景、a11y 与治理 | 权威当前 |
-| [lids/tokens.md](lids/tokens.md) | LIDS-TOK-001：完整 `--lgi-*` 数值基线与唯一数值来源规则 | 权威当前 |
+| [lids/tokens.md](lids/tokens.md) | LIDS-TOK-001：v7 三层 Token 架构（目标态）+ 完整 `--lgi-*` 运行时基线 + 差异与分步迁移顺序 | 权威当前 |
+| [lids/materials.md](lids/materials.md) | LIDS-MAT-001：8px 采样点阵的六种状态、材料预算（70/20/10）与区位限制 | 权威当前 |
+| [lids/shell-zones.md](lids/shell-zones.md) | LIDS-SHELL-001：页头 3 区、Context Bar 4 区的容量上限、禁止清单与静默区保护 | 权威当前 |
+| [lids/data-boundaries.md](lids/data-boundaries.md) | LIDS-BOUND-001：超长/缺失/零值与极大值/未知四态的渲染契约，组件准入条件 | 权威当前 |
+| [lids/decisions.md](lids/decisions.md) | LIDS-ADR-001：v7 全部结构性决定台账，规则状态与运行时状态分列 | 权威当前 |
 | [lids/primitives.md](lids/primitives.md) | LIDS-PRI-001：文本、按钮、状态、Surface、Readout、反馈和 Focus 契约 | 权威当前 |
 | [lids/patterns.md](lids/patterns.md) | LIDS-PAT-001：L1/L2/L3 的唯一页面 Pattern 与组合限制 | 权威当前 |
 | [lids/agent-execution-guide.md](lids/agent-execution-guide.md) | LIDS-AGENT-001：协作 Agent 决策树与交付前检查 | 权威当前 |
@@ -69,6 +75,8 @@
 | [pages/topic-intelligence-reference-page.md](pages/topic-intelligence-reference-page.md) | PAGE-TOPIC-001：Topic Reference Page 的获准组合、状态与验收 | 权威当前 |
 | [changes/design-007-chinese-first-evidence-library-ui-change-manifest.md](changes/design-007-chinese-first-evidence-library-ui-change-manifest.md) | DESIGN-007：Evidence Library 中文优先规则的受限落地清单 | 权威当前 |
 | [changes/design-009-runtime-capacity-surface-ui-change-manifest.md](changes/design-009-runtime-capacity-surface-ui-change-manifest.md) | DESIGN-009：执行工位改为产能判定面，五处写死的接通状态改为实读 | 权威当前 |
+| [changes/design-010-lids-v7-adoption-ui-change-manifest.md](changes/design-010-lids-v7-adoption-ui-change-manifest.md) | DESIGN-010：LIDS 升级到 v7.0 的范围、逐条差异、运行时欠账与明确非目标 | 权威当前 |
+| [changes/design-011-collection-surfaces-v7-ui-change-manifest.md](changes/design-011-collection-surfaces-v7-ui-change-manifest.md) | DESIGN-011：生产流与执行工位落地 v7、能力矩阵四态与已知限制 | 权威当前 |
 | [acceptance/design-009-runtime-capacity-surface-acceptance.md](acceptance/design-009-runtime-capacity-surface-acceptance.md) | ACC-RUNTIME-001：产能判定、状态诚实性与视觉的验收记录 | 一次性报告 |
 | [pages/topic-intelligence-reference.html](pages/topic-intelligence-reference.html) | 可本地打开的合成静态参考实现；不读取、写入或声称真实系统事实 | 权威当前 |
 | [pages/topic-intelligence-reference-acceptance.md](pages/topic-intelligence-reference-acceptance.md) | ACC-TOPIC-001：静态视觉、互动和证明边界的实际验收记录 | 权威当前 |
