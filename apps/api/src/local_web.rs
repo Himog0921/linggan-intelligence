@@ -2881,7 +2881,7 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
           <span class="v7-side-nav" aria-disabled="true"><i>02</i><span>评论研究</span></span>
           <span class="v7-side-nav" aria-disabled="true"><i>03</i><span>创作者</span></span>
           <span class="v7-side-nav" aria-disabled="true"><i>04</i><span>已存查询</span></span>
-          <div class="v7-side-foot"><span class="v7-side-dot"></span><span class="v7-zh-status">只读本机材料投影</span> <span class="v7-tech-key">MATERIAL PROJECTION</span><br><span class="v7-zh-status">不会触发平台采集</span> <span class="v7-tech-key">LOCAL READ ONLY</span></div>
+          <div class="v7-side-foot"><span class="v7-side-dot"></span><span class="v7-zh-status">只读本机材料投影</span><br><span class="v7-zh-status">列表与详情不触发采集</span></div>
         </aside>
 
         <main class="v7-main ev-main" aria-labelledby="page-title">
@@ -2980,6 +2980,7 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
                 </div>
               </header>
               <div class="ev-inspector-body">
+                <p class="ev-boundary-band" id="ev-boundary-band" hidden></p>
                 <div role="tabpanel" id="ev-panel-overview" data-ev-panel="overview" aria-labelledby="ev-tab-overview"></div>
                 <div role="tabpanel" id="ev-panel-evidence" data-ev-panel="evidence" aria-labelledby="ev-tab-evidence" hidden></div>
                 <div role="tabpanel" id="ev-panel-materials" data-ev-panel="materials" aria-labelledby="ev-tab-materials" hidden></div>

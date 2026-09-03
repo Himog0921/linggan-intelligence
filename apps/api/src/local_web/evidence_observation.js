@@ -146,14 +146,14 @@
     const { node, tech, section, factGrid, stateTag, sourceIncompleteBlock, laneLabels } = ui;
     const view = controller.snapshot();
     const access = controller.availability(item, channel);
-    const wrapper = section('立即复观测', 'REOBSERVATION');
+    const wrapper = section('立即复观测');
     wrapper.dataset.evReobservation = 'true';
     const notice = node('div', 'ev-inline-state');
     notice.dataset.tone = 'warning';
     notice.append(
       node('strong', null, '按既有授权链路发起一次标准详情复观测'),
       node('p', null, '范围固定为详情、评论和回复：评论窗口最多 30 条；不会新建媒体槽位、下载媒体字节或启动 OCR / ASR。执行仍需已有监控目标关联、有效深度归档授权，以及可认领租约的本机 Browser Producer。'),
-      tech(channel?.requires || 'TARGET-LINKED AUTHORIZATION'),
+      tech(channel?.requires || '授权条件未知'),
     );
     wrapper.append(notice);
     if (!access.actionable) {
@@ -171,7 +171,7 @@
     button.type = 'button';
     button.disabled = leaseExists;
     button.addEventListener('click', () => { void controller.request(access.actionUrl); });
-    actions.append(button, tech(channel?.mediaPolicy || 'EXISTING ASSETS REUSED'));
+    actions.append(button, tech(channel?.mediaPolicy || '媒体策略未知'));
     wrapper.append(actions);
     if (view.error) wrapper.append(failureBlock('未能创建复观测请求', '没有把此结果写成已排队、已执行或已接纳；请依据返回的授权或运行状态处理。', view.error, ui));
     if (view.readError) wrapper.append(failureBlock('复观测状态已更新，但作品当前事实未重新读取', '保留已知 Task/Attempt/Package/Receipt；没有把 Inspector 旧快照写成新事实。', view.readError, ui));
@@ -252,20 +252,43 @@
   }
 
   function engagementTimeline(inspector, { node, tech, section, sourceIncompleteBlock, knownMetric }) {
-    const timeline = section('互动数据观察时间线', 'ENGAGEMENT TIMELINE');
+    const timeline = section('互动数据观察时间线');
     const observations = Array.isArray(inspector.engagementTimeline) ? inspector.engagementTimeline : [];
     if (observations.length === 0) {
       timeline.append(sourceIncompleteBlock('当前详情没有互动数据观察时点；不把未知写成 0。'));
       return timeline;
     }
-    const list = node('div', 'ev-slot-list');
+    /* This is a timeline of change, so consecutive observations that read identically are one
+     * fact observed more than once, not several facts. Listing each one separately made two
+     * reads that both found nothing look like a rendering repeat and hid the thing actually
+     * worth knowing: it was attempted twice and returned nothing both times. Each run keeps its
+     * first and last observation time, so no observation is dropped from the record. */
+    const runs = [];
     observations.forEach((observation) => {
-      const entry = node('article', 'ev-derivative');
       const metrics = [
         knownMetric(observation.likeCount, observation.likeCountState, '赞'), knownMetric(observation.commentCount, observation.commentCountState, '评'),
         knownMetric(observation.collectCount, observation.collectCountState, '藏'), knownMetric(observation.shareCount, observation.shareCountState, '转'),
       ].filter(Boolean);
-      entry.append(node('strong', null, observation.observedAt || '观察时间当前未知'), node('p', null, metrics.length ? metrics.join(' · ') : '本时点互动字段均为当前未知'), tech((observation.sourceLane || 'source').toUpperCase()));
+      const copy = metrics.length ? metrics.join(' · ') : '本时点互动字段均为当前未知';
+      const lane = (observation.sourceLane || 'source').toUpperCase();
+      const observedAt = observation.observedAt || '观察时间当前未知';
+      const previous = runs[runs.length - 1];
+      if (previous && previous.copy === copy && previous.lane === lane) {
+        previous.lastObservedAt = observedAt;
+        previous.count += 1;
+        return;
+      }
+      runs.push({ copy, lane, firstObservedAt: observedAt, lastObservedAt: observedAt, count: 1 });
+    });
+    const list = node('div', 'ev-slot-list');
+    runs.forEach((run) => {
+      const entry = node('article', 'ev-derivative');
+      const when = run.count === 1
+        ? run.firstObservedAt
+        : `${run.firstObservedAt} — ${run.lastObservedAt}`;
+      entry.append(node('strong', null, when));
+      if (run.count > 1) entry.append(node('span', 'ev-inline-note', `连续 ${run.count} 次观察结果相同`));
+      entry.append(node('p', null, run.copy), tech(run.lane));
       list.append(entry);
     });
     timeline.append(list);
@@ -273,7 +296,7 @@
   }
 
   function coverageHistorySection(inspector, { node, section, factGrid, stateTag, sourceIncompleteBlock }) {
-    const history = section('评论 / 回复复观测历史', 'ATTEMPT-LEVEL COVERAGE');
+    const history = section('评论 / 回复复观测历史');
     history.append(coverageHistoryBlock('评论', inspector.commentsCoverageHistory, { node, factGrid, stateTag, sourceIncompleteBlock }), coverageHistoryBlock('回复', inspector.repliesCoverageHistory, { node, factGrid, stateTag, sourceIncompleteBlock }));
     return history;
   }
@@ -380,7 +403,7 @@
   function renderDiscussion(item, inspector, commentChannel, controller, panel, ui) {
     const { apiRoot, sameOriginPath, node, tech, section, factGrid, stateMeta, laneSummary, receiptBlock } = ui;
     panel.replaceChildren();
-    const commentsCoverage = section('评论与回复覆盖', 'COVERAGE');
+    const commentsCoverage = section('评论与回复覆盖');
     commentsCoverage.append(factGrid([
       ['评论状态', stateMeta(laneSummary(item, 'comments')?.state || 'UNKNOWN')[0], laneSummary(item, 'comments')?.state || 'UNKNOWN'],
       ['评论数量', inspector.commentsCoverage?.countState === 'KNOWN' ? inspector.commentsCoverage?.count : '当前未知', inspector.commentsCoverage?.countState || 'UNKNOWN'],
@@ -392,10 +415,10 @@
     const channelUrl = sameOriginPath(commentChannel?.url, [`${apiRoot}/`]);
     controller.setSource(channelUrl);
     panel.append(receiptBlock('评论研究通道', commentChannel?.receipt || inspector.commentsReceipt, channelUrl));
-    const access = section('本机授权评论研究', 'LOCAL AUTHORIZED RESEARCH');
+    const access = section('本机授权评论研究');
     const accessState = node('div', 'ev-inline-state');
     accessState.dataset.tone = 'restricted';
-    accessState.append(node('strong', null, '原文只在本机授权详情中按页读取'), node('p', null, '作者只显示匿名上下文；页面不会渲染平台用户标识，也不会把评论原文放回普通列表。'), tech('IDENTITY WITHHELD'));
+    accessState.append(node('strong', null, '原文只在本机授权详情中按页读取'), node('p', null, '作者只显示匿名上下文；页面不会渲染平台用户标识，也不会把评论原文放回普通列表。'));
     const controls = node('div', 'ev-channel-actions');
     const snapshot = controller.snapshot();
     const load = node('button', 'ev-button ev-button--secondary', snapshot.loading ? '正在读取评论' : '读取评论原文');
@@ -420,7 +443,7 @@
     if (snapshot.items.length === 0) {
       if (snapshot.loaded) {
         const empty = node('div', 'ev-inline-state');
-        empty.append(node('strong', null, '当前通道没有返回评论材料'), node('p', null, '这只描述本次授权读取，不表示平台评论为 0。'), tech('NO RETURNED MATERIAL'));
+        empty.append(node('strong', null, '当前通道没有返回评论材料'), node('p', null, '这只描述本次授权读取，不表示平台评论为 0。'), node('span', 'ev-inline-note', '本次未返回材料'));
         list.append(empty);
       }
       return list;
@@ -428,7 +451,7 @@
     snapshot.items.forEach((comment) => {
       const article = node('article', 'ev-comment');
       const header = node('div', 'ev-comment-head');
-      header.append(node('strong', null, comment.relation === 'REPLY' ? '匿名回复' : '匿名评论'), tech(comment.sourceRef ? `SOURCE ${comment.sourceRef}` : 'SOURCE INCOMPLETE'));
+      header.append(node('strong', null, comment.relation === 'REPLY' ? '匿名回复' : '匿名评论'), tech(comment.sourceRef || 'SOURCE INCOMPLETE'));
       const body = node('p', null, comment.bodyState === 'KNOWN' && comment.body !== null ? comment.body : '评论正文当前未知');
       const meta = node('div', 'ev-comment-meta');
       addTextWithTech(meta, comment.bodyTruncated ? '本条正文已在读取边界截断' : '本条正文未在通道内截断', comment.bodyTruncated ? 'TRUNCATED' : 'RETURNED');

@@ -83,6 +83,7 @@
 | [design/changes/design-009-runtime-capacity-surface-ui-change-manifest.md](design/changes/design-009-runtime-capacity-surface-ui-change-manifest.md) | 权威当前；DESIGN-009 | 执行工位改为产能判定面，运行状态由真实容量读取而非写死文案 |
 | [design/changes/design-010-lids-v7-adoption-ui-change-manifest.md](design/changes/design-010-lids-v7-adoption-ui-change-manifest.md) | 权威当前；DESIGN-010 | LIDS 升级 v7.0 的范围、逐条差异、运行时欠账与明确非目标；本次零运行时改动 |
 | [design/changes/design-011-collection-surfaces-v7-ui-change-manifest.md](design/changes/design-011-collection-surfaces-v7-ui-change-manifest.md) | 权威当前；DESIGN-011 | 生产流与执行工位落地 v7、工位能力矩阵读模型、四态判定与已知限制 |
+| [design/changes/design-012-evidence-information-hierarchy-ui-change-manifest.md](design/changes/design-012-evidence-information-hierarchy-ui-change-manifest.md) | 权威当前；DESIGN-012 | `/corpus/evidence` 信息层级四层、LANG-05 运行时迁移、边界带收口，以及 provenance 覆盖等三处错误信念的修复 |
 | [design/changes/plugin-001-producer-popup-ui-change-manifest.md](design/changes/plugin-001-producer-popup-ui-change-manifest.md) | 已被替代；PLUGIN-001 | Issue #33 popup 的历史 UI 边界；不再约束当前实现 |
 | [design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md](design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-MIGRATION-001 | Issue #37 popup 的 Discovery 行动与状态边界；启动恢复由 Issue #53 文档补充 |
 | [design/changes/plugin-popup-recovery-001-ui-change-manifest.md](design/changes/plugin-popup-recovery-001-ui-change-manifest.md) | 权威当前；PLUGIN-POPUP-RECOVERY-001 | Issue #53 popup 启动恢复、无副作用 fallback 与 v0.4.2 release 边界；Issue #55 的运行时修订见当月进度记录 |

@@ -115,7 +115,23 @@ pub(crate) async fn enrich(
                 .unwrap_or_else(|| Value::Array(Vec::new())),
         );
         inspector.insert("authorContext".to_owned(), author_context);
-        inspector.insert("provenance".to_owned(), provenance);
+        // The collection context already wrote targetRefs and workOrderRefs into provenance
+        // before this enrichment runs. Replacing the object wholesale dropped them, so the page
+        // reported SOURCE INCOMPLETE for a target that is in fact linked -- and a reader used
+        // that to conclude the authorization chain was broken. Merge instead of replace.
+        match inspector
+            .get_mut("provenance")
+            .and_then(Value::as_object_mut)
+        {
+            Some(existing) => {
+                if let Value::Object(read) = provenance {
+                    existing.extend(read);
+                }
+            }
+            None => {
+                inspector.insert("provenance".to_owned(), provenance);
+            }
+        }
     }
     Ok(())
 }
@@ -427,6 +443,19 @@ async fn read_author_context(
     })))
 }
 
+/// One row per package means a producer that produced two packages is listed twice. That reads
+/// as duplicated data rather than as "the same station did both", so collapse it while keeping
+/// acceptance order. The list is capped at 20 rows, so a linear scan is the right shape here.
+fn dedupe_preserving_order(refs: impl Iterator<Item = Uuid>) -> Vec<Uuid> {
+    let mut seen: Vec<Uuid> = Vec::new();
+    for candidate in refs {
+        if !seen.contains(&candidate) {
+            seen.push(candidate);
+        }
+    }
+    seen
+}
+
 async fn read_provenance(
     tx: &mut Transaction<'_, Postgres>,
     item: &MaterialLibraryItem,
@@ -463,7 +492,7 @@ async fn read_provenance(
         "taskRefs":rows.iter().map(|row| row.get::<Uuid,_>("task_id")).collect::<Vec<_>>(),
         "attemptRefs":rows.iter().map(|row| row.get::<Uuid,_>("attempt_id")).collect::<Vec<_>>(),
         "receiptRefs":rows.iter().filter_map(|row| row.get::<Option<Uuid>,_>("receipt_ref")).collect::<Vec<_>>(),
-        "producers":rows.iter().map(|row| row.get::<Uuid,_>("producer_instance_id")).collect::<Vec<_>>(),
+        "producers":dedupe_preserving_order(rows.iter().map(|row| row.get::<Uuid,_>("producer_instance_id"))),
         "stationAccountLens":{"state":"UNKNOWN"},"coverageRefs":rows.iter().map(|row| row.get::<Uuid,_>("package_ref")).collect::<Vec<_>>(),
         "receipt":{"total":total,"returned":rows.len(),"truncated":truncated,"nextCursor":next_cursor,"limit":20}
     }))

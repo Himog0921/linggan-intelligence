@@ -2307,9 +2307,9 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
     assert!(EVIDENCE_LIBRARY_JS.contains("params.set('view', model.activeView)"));
     assert!(EVIDENCE_OBSERVATION_JS.contains("createController"));
     assert!(EVIDENCE_OBSERVATION_JS.contains("立即复观测"));
-    assert!(EVIDENCE_OBSERVATION_JS.contains("TARGET-LINKED AUTHORIZATION"));
+    assert!(EVIDENCE_OBSERVATION_JS.contains("channel?.requires"));
     assert!(EVIDENCE_OBSERVATION_JS.contains("commentsCoverageHistory"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("LATEST KNOWN PER METRIC"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("当前互动状态与变化"));
     assert!(EVIDENCE_LIBRARY_JS.contains("refreshSelectedDetailAfterReobservation"));
     assert!(EVIDENCE_OBSERVATION_JS.contains("await onTerminal?.()"));
     assert!(EVIDENCE_LIBRARY_JS.contains("readJson(detailUrl, model.detailController.signal)"));
@@ -2439,8 +2439,8 @@ fn evidence_runtime_preserves_unknown_partial_and_restricted_states() {
 
 #[test]
 fn evidence_runtime_keeps_sensitive_text_and_media_inside_controlled_detail_reads() {
-    assert!(EVIDENCE_OBSERVATION_JS.contains("LOCAL AUTHORIZED RESEARCH"));
-    assert!(EVIDENCE_OBSERVATION_JS.contains("IDENTITY WITHHELD"));
+    assert!(EVIDENCE_OBSERVATION_JS.contains("本机授权评论研究"));
+    assert!(EVIDENCE_OBSERVATION_JS.contains("作者只显示匿名上下文"));
     assert!(EVIDENCE_OBSERVATION_JS.contains("comment.body"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("authorExternalId"));
     assert!(!EVIDENCE_OBSERVATION_JS.contains("authorExternalId"));
