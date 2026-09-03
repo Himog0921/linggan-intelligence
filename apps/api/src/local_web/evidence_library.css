@@ -284,7 +284,7 @@
 .ev-author-fact{display:flex;align-items:center;gap:7px;min-width:0}
 .ev-author-fact strong{overflow:hidden;font-size:12px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 .ev-work-list[data-layout="table"] .ev-author-fact strong{font-size:11.5px}
-.ev-work-list[data-layout="table"] .ev-engagement{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;font-size:11px;white-space:nowrap}
+.ev-work-list[data-layout="table"] .ev-engagement{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:0;font-size:11px;white-space:nowrap}
 .ev-work-list[data-layout="table"] .ev-engagement span{justify-content:center}
 .ev-table-material{display:flex;align-items:center;gap:10px;min-width:0}
 .ev-table-material .ev-material-rail{flex:1 1 auto;min-width:64px;margin-top:0}
