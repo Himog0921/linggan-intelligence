@@ -22,7 +22,21 @@
 开发目录之所以与运行目录分开，只有一个理由：**开发时的未提交改动不应该影响常驻服务**。
 运行目录永远不接受手工编辑，每次启动都会被 `git reset --hard` 覆盖。
 
-## 2. 更新方式
+## 2. 安装（重装机器或换机器）
+
+部署脚本住在仓库 `scripts/runtime/`，不是散在 `~/Library` 里的手写副本。全新机器上：
+
+```bash
+git clone <repo> && cd linggan-intelligence
+cp env.example .env && $EDITOR .env      # 填数据库口令
+./scripts/dev-db.sh up                   # 起 PostgreSQL
+./scripts/local-runtime.sh migrate       # 应用迁移
+./scripts/runtime/install.sh             # 建运行目录、写 launchd、启动三个服务
+```
+
+`install.sh` 幂等：已装好时重跑只刷新 plist 并重启。它**不**跑迁移、不装依赖、不碰远端环境。
+
+## 3. 更新方式
 
 **重启服务即更新。** 没有第二个步骤。
 
@@ -30,7 +44,9 @@
 launchctl kickstart -k gui/$(id -u)/com.linggan-intelligence.local-runtime
 ```
 
-启动时 `runtime-launchers/sync-runtime-main.sh` 依次做：
+部署脚本本身也跟着 `origin/main` 走——`launch.sh` 与 `sync.sh` 都在运行目录里，同步时一并更新，不需要重跑 `install.sh`。只有 launchd 配置（plist）变化时才需要。
+
+启动时 `scripts/runtime/sync.sh` 依次做：
 
 1. 取同步锁（三个服务同时启动时串行化）；
 2. `git fetch origin main` 并 `git reset --hard origin/main`；
@@ -40,7 +56,7 @@ launchctl kickstart -k gui/$(id -u)/com.linggan-intelligence.local-runtime
 
 拿不到网络时不会让服务起不来：fetch 失败会记录一行并继续用当前 revision。
 
-## 3. 迁移仍然不由服务执行
+## 4. 迁移仍然不由服务执行
 
 这条约束从旧模式沿用，理由没变：**一个开机自启的服务不该顺手改数据库结构**。
 
@@ -57,19 +73,19 @@ cd /Users/moglenny/proma/linggan-intelligence
 「读不到迁移台账」并**跳过检查继续启动**——硬拦会让服务在数据库没起来时永远起不来。
 因此开机后第一次启动不保证迁移检查生效；手工重启一次即可获得完整检查。
 
-## 4. 三个服务
+## 5. 三个服务
 
-| 服务 | launchd label | 启动脚本 | 二进制 |
-|---|---|---|---|
-| API（3000 端口） | `com.linggan-intelligence.local-runtime` | `run-linggan-api-worktree.sh` | `linggan-api` |
-| 巡检调度 | `com.linggan-intelligence.patrol-worker` | `run-linggan-worker-worktree.sh` | `linggan-worker` |
-| 媒体处理 | `com.linggan-intelligence.media-worker` | `run-linggan-media-worker.sh` | `linggan-media-worker` |
+| 服务 | launchd label | 二进制 |
+|---|---|---|
+| API（3000 端口） | `com.linggan-intelligence.local-runtime` | `linggan-api` |
+| 巡检调度 | `com.linggan-intelligence.patrol-worker` | `linggan-worker` |
+| 媒体处理 | `com.linggan-intelligence.media-worker` | `linggan-media-worker` |
 
-三者共用同一份 `sync-runtime-main.sh`，因此**永远跑同一个 revision**。
+三者由同一个 `scripts/runtime/launch.sh <binary>` 启动、共用同一份 `sync.sh`，因此**永远跑同一个 revision**。
 
 日志在 `runtime-logs/{api,worker,media-worker}.{out,err}.log`。
 
-## 5. 处置
+## 6. 处置
 
 ### 服务起不来，且日志里一行都没有
 
@@ -101,8 +117,8 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.linggan-intelligence
 `runtime-main/.sync.lock` 是目录锁。超过 5 分钟的锁会被下次启动自动清理；要手工清就
 `rmdir` 它。
 
-## 6. 本手册不证明什么
+## 7. 本手册不证明什么
 
 - 不证明部署机（Mac mini）或任何远端环境采用同一模型——这里只描述本机；
 - 不授权服务自行执行迁移、访问平台或修改数据库；
-- 不保证开机首次启动时迁移检查一定生效（见第 3 节的已知边界）。
+- 不保证开机首次启动时迁移检查一定生效（见第 4 节的已知边界）。
