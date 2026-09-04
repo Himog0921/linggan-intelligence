@@ -15,6 +15,14 @@ use super::shell::{PrimarySurface, global_header};
 use super::target_drawer::TargetListContext;
 use linggan_evidence::TargetCounts;
 
+pub mod collection_control_rule_view {
+    include!("collection_control_rule_view.rs");
+}
+
+pub mod collection_control_surface_view {
+    include!("collection_control_surface_view.rs");
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Section {
     Targets,

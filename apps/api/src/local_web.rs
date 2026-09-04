@@ -49,25 +49,28 @@ use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, CheckInOutcome, CreatorLifecycleQuery,
     DiscoveryIngressError, InstallationCheckIn, LeaseError, LocalAttemptOutcome,
     LocalProducerError, LocalSubmissionOutcome, LocalTaskOutcome, MaterialDeepeningTarget,
-    MediaUploadFinalizeClaim, ObservationTarget, ObservationTargetAvatar, ProducerRuntimeError,
-    RuntimeAttemptOutcome, RuntimeCapacityOverview, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
-    StationCapability, StationOverview, StoreOutcome, TargetCounts, UnclaimedInstallation,
-    WorkResourceReadError, admit_media_blob, begin_media_upload, check_in_installation,
-    claim_installation, claim_media_acquisition, claim_media_upload_finalize, close_claim_window,
-    complete_media_upload, count_targets, create_manual_task, create_producer_task,
-    dispatch_schema_is_ready, grant_authorization, ingest_discovery_package,
-    issue_work_order_lease, list_targets, list_targets_in_state, local_discovery_schema_is_ready,
-    local_producer_schema_is_ready, media_acquisition_schema_is_ready, open_claim_window,
-    producer_runtime_has_packages, producer_runtime_schema_is_ready, read_archive_completeness,
-    read_collection_task_timeline, read_creator_lifecycle, read_discovery_library,
-    read_media_upload_session, read_runtime_capacity, read_runtime_library,
-    read_scheduler_heartbeat, read_station_capabilities, read_station_overview, read_target,
-    read_target_avatars, record_media_acquisition_failure, record_media_download_failure,
-    record_media_upload_chunk, register_station, release_media_upload_finalize, request_and_admit,
-    request_and_admit_material_targets, retire_station, set_group_for_many,
-    set_monitoring_for_many, set_target_monitoring, start_local_attempt, start_producer_attempt,
-    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
-    sync_target_from_author_profile, target_monitoring_enabled,
+    MediaUploadFinalizeClaim, MonitorCommandActor, MonitorCommandKind, MonitorRuleCommand,
+    MonitorRuleCommandError, MonitorRuleDraft, MonitorRuleMode, ObservationTarget,
+    ObservationTargetAvatar, ProducerRuntimeError, RequestLeaseError, RuntimeAttemptOutcome,
+    RuntimeCapacityOverview, RuntimeSubmissionOutcome, RuntimeTaskOutcome, StationCapability,
+    StationOverview, StoreOutcome, TargetCounts, UnclaimedInstallation, WorkResourceReadError,
+    admit_media_blob, apply_monitor_rule_command, begin_media_upload, bind_observation_account,
+    check_in_installation, claim_installation, claim_media_acquisition,
+    claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
+    create_manual_task, create_producer_task, dispatch_schema_is_ready, grant_authorization,
+    ingest_discovery_package, issue_work_order_lease, list_targets, list_targets_in_state,
+    local_discovery_schema_is_ready, local_producer_schema_is_ready,
+    media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
+    producer_runtime_schema_is_ready, read_archive_completeness, read_collection_task_timeline,
+    read_creator_lifecycle, read_discovery_library, read_media_upload_session,
+    read_runtime_capacity, read_runtime_library, read_scheduler_heartbeat,
+    read_station_capabilities, read_station_overview, read_target, read_target_avatars,
+    record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
+    register_station, release_media_upload_finalize, request_admit_and_lease,
+    request_admit_material_targets_and_lease, request_and_admit, retire_station,
+    set_group_for_many, set_monitoring_for_many, set_station_accepting, start_local_attempt,
+    start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
+    submit_producer_package, sync_target_from_author_profile,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -109,6 +112,7 @@ const LIDS_TOKEN_DOCUMENT: &str = include_str!("../../../docs/design/lids/tokens
 struct LocalWebState {
     database: LocalDatabaseState,
     active_media_sessions: Arc<tokio::sync::Mutex<BTreeSet<uuid::Uuid>>>,
+    account_digest_key: Option<Arc<Vec<u8>>>,
 }
 
 #[derive(Clone)]
@@ -204,6 +208,7 @@ fn app() -> Router {
     router(LocalWebState {
         database: LocalDatabaseState::NotConfigured,
         active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
+        account_digest_key: None,
     })
 }
 
@@ -212,6 +217,9 @@ fn app_with_database(database: Database) -> Router {
     router(LocalWebState {
         database: LocalDatabaseState::Ready(Arc::new(database)),
         active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
+        account_digest_key: Some(Arc::new(
+            b"local-web-test-account-digest-key-32-plus".to_vec(),
+        )),
     })
 }
 
@@ -309,6 +317,10 @@ fn router(state: LocalWebState) -> Router {
         .route("/collection/targets", get(collection_targets))
         .route("/collection/targets/new", post(collection_target_create))
         .route(
+            "/collection/targets/rules",
+            post(collection_target_rule_command),
+        )
+        .route(
             "/collection/targets/monitoring",
             post(collection_target_toggle_monitoring),
         )
@@ -338,6 +350,14 @@ fn router(state: LocalWebState) -> Router {
             post(collection_runtime_retire_station),
         )
         .route("/collection/runtime/claims", post(collection_runtime_claim))
+        .route(
+            "/collection/runtime/accepting",
+            post(collection_runtime_set_accepting),
+        )
+        .route(
+            "/collection/runtime/account-bindings",
+            post(collection_runtime_bind_account),
+        )
         .route("/assets/evidence-library.css", get(stylesheet))
         .route(
             "/assets/evidence-observation.js",
@@ -406,6 +426,7 @@ pub async fn serve() -> Result<(), std::io::Error> {
     let application = router(LocalWebState {
         database: configured_database_state().await,
         active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),
+        account_digest_key: configured_account_digest_key(),
     });
     let local_port = configured_local_port()?;
     let address = SocketAddr::from((LOCAL_HOST, local_port));
@@ -427,6 +448,12 @@ fn configured_local_port() -> Result<u16, std::io::Error> {
     }
 }
 
+fn configured_account_digest_key() -> Option<Arc<Vec<u8>>> {
+    let value = std::env::var("LINGGAN_ACCOUNT_DIGEST_KEY").ok()?;
+    let bytes = value.into_bytes();
+    (bytes.len() >= 32).then(|| Arc::new(bytes))
+}
+
 async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     let (data_state, evidence_read_model, database_state, schema_state) =
         state.database.health_state().await;
@@ -434,9 +461,22 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     // same way it already learns the producer routes. A route is advertised only once its
     // schema is applied: advertising it earlier would invite a call that cannot succeed.
     let station_routes = match state.database.database() {
-        Some(database) if station_schema_is_ready(database).await.unwrap_or(false) => json!({
-            "checkIn": STATION_CHECK_IN_PATH
-        }),
+        Some(database) if station_schema_is_ready(database).await.unwrap_or(false) => {
+            let eligibility_report = if state.account_digest_key.is_some()
+                && linggan_evidence::collection_control_schema_is_ready(database)
+                    .await
+                    .unwrap_or(false)
+            {
+                Value::String(collection_dispatch::ACCOUNT_ELIGIBILITY_PATH.to_owned())
+            } else {
+                Value::Null
+            };
+            json!({
+                "checkIn": STATION_CHECK_IN_PATH,
+                "eligibilityReport": eligibility_report,
+                "credentialActivation": collection_dispatch::CREDENTIAL_ACTIVATION_PATH
+            })
+        }
         _ => Value::Null,
     };
     // 派发路由同样只在其 schema 就绪后通告。通告它不等于闸门开着——闸门是另一回事，
@@ -769,6 +809,8 @@ struct CheckInBody {
     install_key: String,
     plugin_version: String,
     #[serde(default)]
+    installation_credential: Option<String>,
+    #[serde(default)]
     browser_label: Option<String>,
     #[serde(default)]
     capabilities: Vec<String>,
@@ -798,11 +840,18 @@ async fn station_check_in(State(state): State<LocalWebState>, body: Bytes) -> Re
             plugin_version: &check_in.plugin_version,
             browser_label: check_in.browser_label.as_deref(),
             capabilities: serde_json::json!(check_in.capabilities),
+            installation_credential: check_in.installation_credential.as_deref(),
         },
     )
     .await;
     match result {
         Ok(outcome) => Json(check_in_payload(&outcome)).into_response(),
+        Err(linggan_evidence::StationError::Control(
+            linggan_evidence::CollectionControlError::InvalidCredential,
+        )) => local_read_json_error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "installation_credential_invalid",
+        ),
         Err(_) => local_read_json_error(
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             "check_in_rejected",
@@ -816,6 +865,7 @@ fn check_in_payload(outcome: &CheckInOutcome) -> serde_json::Value {
             installation_ref,
             station_ref,
             superseded,
+            credential,
         } => serde_json::json!({
             "installationRef": installation_ref,
             "state": "claimed",
@@ -824,17 +874,29 @@ fn check_in_payload(outcome: &CheckInOutcome) -> serde_json::Value {
             // A reinstall replaces the previous install on the same station rather than
             // registering a second station. The replaced one stays visible on purpose.
             "supersededInstallationRef": superseded,
+            "installationCredentialRef": credential.as_ref().map(|value| value.credential_ref),
+            "installationCredential": credential.as_ref().map(|value| value.raw_credential.expose_once()),
             "execution": "NOT_STARTED",
         }),
-        CheckInOutcome::AwaitingClaim { installation_ref } => serde_json::json!({
+        CheckInOutcome::AwaitingClaim {
+            installation_ref,
+            credential,
+        } => serde_json::json!({
             "installationRef": installation_ref,
             "state": "awaiting_claim",
             "stationRef": serde_json::Value::Null,
+            "installationCredentialRef": credential.as_ref().map(|value| value.credential_ref),
+            "installationCredential": credential.as_ref().map(|value| value.raw_credential.expose_once()),
             "execution": "NOT_STARTED",
         }),
-        CheckInOutcome::Heartbeat { installation_ref } => serde_json::json!({
+        CheckInOutcome::Heartbeat {
+            installation_ref,
+            credential,
+        } => serde_json::json!({
             "installationRef": installation_ref,
             "state": "heartbeat",
+            "installationCredentialRef": credential.as_ref().map(|value| value.credential_ref),
+            "installationCredential": credential.as_ref().map(|value| value.raw_credential.expose_once()),
             "execution": "NOT_STARTED",
         }),
     }
@@ -961,28 +1023,38 @@ async fn collection_material_deepening(
             allow_asr: material.allow_asr,
         })
         .collect();
-    let outcome = match request_and_admit_material_targets(
+    let lease_minutes = request.lease_minutes.unwrap_or(360).clamp(30, 360);
+    let execution = match request_admit_material_targets_and_lease(
         database,
         request.target_ref,
         &request.purpose,
         "person",
         &targets,
+        lease_minutes,
     )
     .await
     {
-        Ok(outcome) => outcome,
+        Ok(execution) => execution,
         Err(error) => {
             let code = match error {
-                AcquisitionChainError::UnknownTarget => "unknown_target",
-                AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
-                AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
-                AcquisitionChainError::SchemaUnavailable | AcquisitionChainError::Database(_) => {
-                    "acquisition_chain_unavailable"
+                RequestLeaseError::Acquisition(AcquisitionChainError::UnknownTarget) => {
+                    "unknown_target"
                 }
+                RequestLeaseError::Acquisition(AcquisitionChainError::TargetNotRequestable {
+                    ..
+                }) => "target_not_requestable",
+                RequestLeaseError::Acquisition(AcquisitionChainError::InvalidMaterialTargets) => {
+                    "material_targets_invalid"
+                }
+                RequestLeaseError::Acquisition(
+                    AcquisitionChainError::SchemaUnavailable | AcquisitionChainError::Database(_),
+                ) => "acquisition_chain_unavailable",
+                RequestLeaseError::Lease(_) => "material_deepening_lease_failed",
             };
             return local_read_json_error(axum::http::StatusCode::UNPROCESSABLE_ENTITY, code);
         }
     };
+    let outcome = execution.request;
     let Some(work_order_ref) = outcome.work_order_ref else {
         return Json(json!({
             "requestRef": outcome.request_ref,
@@ -993,9 +1065,8 @@ async fn collection_material_deepening(
         }))
         .into_response();
     };
-    let lease_minutes = request.lease_minutes.unwrap_or(360).clamp(30, 360);
-    match issue_work_order_lease(database, work_order_ref, lease_minutes).await {
-        Ok(lease) => Json(json!({
+    match execution.lease {
+        Some(lease) => Json(json!({
             "requestRef": outcome.request_ref,
             "decisionRef": outcome.decision_ref,
             "admission": outcome.outcome.code(),
@@ -1008,7 +1079,7 @@ async fn collection_material_deepening(
             "execution": "LEASED",
         }))
         .into_response(),
-        Err(_) => local_read_json_error(
+        None => local_read_json_error(
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             "material_deepening_lease_failed",
         ),
@@ -1446,6 +1517,7 @@ async fn submit_producer_package_route(
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct MediaAcquisitionClaimWire {
     install_key: String,
+    installation_credential: String,
 }
 
 async fn claim_media_acquisition_route(
@@ -1464,8 +1536,14 @@ async fn claim_media_acquisition_route(
             "media_acquisition_claim_invalid",
         );
     }
-    match claim_media_acquisition(database, &input.install_key).await {
+    match claim_media_acquisition(database, &input.install_key, &input.installation_credential)
+        .await
+    {
         Ok(decision) => Json(decision).into_response(),
+        Err(linggan_evidence::MediaAcquisitionError::InvalidCredential) => local_producer_error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "installation_credential_invalid",
+        ),
         Err(_) => local_producer_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "media_acquisition_unavailable",
@@ -1536,6 +1614,7 @@ struct MediaDownloadFailureWire {
     work_ref: Option<uuid::Uuid>,
     claim_generation: Option<i32>,
     install_key: Option<String>,
+    installation_credential: Option<String>,
 }
 
 async fn record_media_download_failure_route(
@@ -1573,13 +1652,15 @@ async fn record_media_download_failure_route(
             input.work_ref,
             input.claim_generation,
             input.install_key.as_deref(),
+            input.installation_credential.as_deref(),
         ) {
-            (Some(work_ref), Some(claim_generation), Some(install_key)) => {
+            (Some(work_ref), Some(claim_generation), Some(install_key), Some(credential)) => {
                 match record_media_acquisition_failure(
                     database,
                     work_ref,
                     observation_ref,
                     install_key,
+                    credential,
                     claim_generation,
                     &input.terminal_reason,
                 )
@@ -1591,12 +1672,22 @@ async fn record_media_download_failure_route(
                         "work": work,
                     }))
                     .into_response(),
+                    Err(linggan_evidence::MediaAcquisitionError::InvalidCredential) => {
+                        local_producer_error(
+                            axum::http::StatusCode::UNAUTHORIZED,
+                            "installation_credential_invalid",
+                        )
+                    }
                     Err(_) => local_producer_error(
                         axum::http::StatusCode::SERVICE_UNAVAILABLE,
                         "media_acquisition_failure_not_recorded",
                     ),
                 }
             }
+            (Some(_), Some(_), _, _) => local_producer_error(
+                axum::http::StatusCode::UNAUTHORIZED,
+                "installation_credential_required",
+            ),
             _ => Json(json!({
                 "downloadAttemptRef": download_attempt_ref,
                 "delivery": "acknowledged"
@@ -2107,6 +2198,24 @@ struct CollectionParams {
     life_window: Option<String>,
     life_metric: Option<String>,
     life_work: Option<String>,
+    /// 规则 modal 的 target ref；与 drawer 并列，避免把规则命令状态塞进 JS。
+    rule: Option<String>,
+    /// 成功命令的 durable receipt ref，用于刷新后仍显示刚刚的回执。
+    rule_receipt: Option<String>,
+    /// 规则提交失败后，服务端将用户刚刚提交的受限字段值带回 modal；这些值只用于
+    /// 修复表单，不参与任何读取或执行事实。
+    rule_mode: Option<String>,
+    rule_automatic_enabled: Option<String>,
+    rule_run_on_weekdays: Option<String>,
+    rule_run_on_weekends: Option<String>,
+    rule_all_day: Option<String>,
+    rule_window_start: Option<String>,
+    rule_window_end: Option<String>,
+    rule_fixed_interval_seconds: Option<String>,
+    rule_fallback_interval_seconds: Option<String>,
+    rule_surface_key: Option<String>,
+    rule_ranking_key: Option<String>,
+    rule_task_contract_version: Option<String>,
 }
 
 /// Collection 的共享页头只读现有事实，不创造第二套状态口径。每一项独立保留：某个
@@ -2195,7 +2304,22 @@ async fn collection_targets(
     let Some(database) = database else {
         let drawer =
             collection::render_unreadable_target_drawer(params.drawer.as_deref(), list_context);
-        return Html(target_drawer::attach_to_collection_document(&base, &drawer));
+        let rule_overlay = params
+            .rule
+            .as_deref()
+            .and_then(|value| uuid::Uuid::parse_str(value).ok())
+            .map(|target_ref| {
+                collection::collection_control_rule_view::render_monitor_rule_unavailable(
+                    target_ref,
+                    collection::collection_control_rule_view::MonitorRuleUnavailableState::SchemaUnavailable,
+                    list_context,
+                )
+            })
+            .unwrap_or_default();
+        return Html(target_drawer::attach_to_collection_document(
+            &base,
+            &format!("{drawer}{rule_overlay}"),
+        ));
     };
     // 一次查完所有目标的档案完整度：列表最多两百行，逐行发查询会让页面打开一次跑
     // 两百次数据库。
@@ -2287,7 +2411,60 @@ async fn collection_targets(
             collection::render_unreadable_target_drawer(params.drawer.as_deref(), list_context)
         }
     };
-    Html(target_drawer::attach_to_collection_document(&list, &drawer))
+    let rule_overlay = match params
+        .rule
+        .as_deref()
+        .and_then(|value| uuid::Uuid::parse_str(value).ok())
+    {
+        Some(target_ref) => match collection::collection_control_rule_view::read_monitor_rule_panel(
+            database,
+            target_ref,
+            params
+                .rule_receipt
+                .as_deref()
+                .and_then(|value| uuid::Uuid::parse_str(value).ok()),
+        )
+        .await
+        {
+            Ok(collection::collection_control_rule_view::MonitorRulePanelRead::Found(panel)) => {
+                let form = rule_form_from_query(&panel, &params);
+                let form = if params.error.is_some() {
+                    form.with_new_command_identity()
+                } else {
+                    form
+                };
+                let form_error = monitor_rule_form_error(params.error.as_deref());
+                collection::collection_control_rule_view::render_monitor_rule_modal(
+                    &panel,
+                    &form,
+                    form_error.as_ref(),
+                    list_context,
+                )
+            }
+            Ok(collection::collection_control_rule_view::MonitorRulePanelRead::TargetNotFound) =>
+                collection::collection_control_rule_view::render_monitor_rule_unavailable(
+                    target_ref,
+                    collection::collection_control_rule_view::MonitorRuleUnavailableState::TargetNotFound,
+                    list_context,
+                ),
+            Ok(collection::collection_control_rule_view::MonitorRulePanelRead::SchemaUnavailable) =>
+                collection::collection_control_rule_view::render_monitor_rule_unavailable(
+                    target_ref,
+                    collection::collection_control_rule_view::MonitorRuleUnavailableState::SchemaUnavailable,
+                    list_context,
+                ),
+            Err(_) => collection::collection_control_rule_view::render_monitor_rule_unavailable(
+                target_ref,
+                collection::collection_control_rule_view::MonitorRuleUnavailableState::ReadUnavailable,
+                list_context,
+            ),
+        },
+        None => String::new(),
+    };
+    Html(target_drawer::attach_to_collection_document(
+        &list,
+        &format!("{drawer}{rule_overlay}"),
+    ))
 }
 
 /// The lifecycle query can inspect up to its explicit scan budget, so the Collection page only
@@ -2307,21 +2484,50 @@ async fn collection_operations(
     State(state): State<LocalWebState>,
     Query(params): Query<CollectionParams>,
 ) -> Html<String> {
-    render_simple_collection_surface(
-        &state,
+    let mode = collection::OperationsMode::parse(params.mode.as_deref());
+    let Some(database) = state.database.database() else {
+        return render_simple_collection_surface(&state, collection::Section::Operations, mode)
+            .await;
+    };
+    let reads = read_collection_surface(database).await;
+    let base = collection::render(
         collection::Section::Operations,
-        collection::OperationsMode::parse(params.mode.as_deref()),
-    )
-    .await
+        mode,
+        None,
+        None,
+        Some(&reads.surface_state),
+    );
+    match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
+        Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
+            Html(collection::collection_control_surface_view::render_operations(&base, &projection)),
+        Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::SchemaUnavailable)
+        | Err(_) => Html(base),
+    }
 }
 
 async fn collection_attention(State(state): State<LocalWebState>) -> Html<String> {
-    render_simple_collection_surface(
-        &state,
+    let Some(database) = state.database.database() else {
+        return render_simple_collection_surface(
+            &state,
+            collection::Section::Attention,
+            collection::OperationsMode::Now,
+        )
+        .await;
+    };
+    let reads = read_collection_surface(database).await;
+    let base = collection::render(
         collection::Section::Attention,
         collection::OperationsMode::Now,
-    )
-    .await
+        None,
+        None,
+        Some(&reads.surface_state),
+    );
+    match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
+        Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
+            Html(collection::collection_control_surface_view::render_attention(&base, &projection)),
+        Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::SchemaUnavailable)
+        | Err(_) => Html(base),
+    }
 }
 
 async fn collection_tasks(State(state): State<LocalWebState>) -> Html<String> {
@@ -2345,7 +2551,15 @@ async fn collection_tasks(State(state): State<LocalWebState>) -> Html<String> {
         Some(&reads.surface_state),
     );
     match timeline {
-        Ok(timeline) => Html(collection_tasks_view::render_tasks(&base, &timeline)),
+        Ok(timeline) => {
+            let tasks = collection_tasks_view::render_tasks(&base, &timeline);
+            match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
+                Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
+                    Html(collection::collection_control_surface_view::render_tasks_control(&tasks, &projection)),
+                Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::SchemaUnavailable)
+                | Err(_) => Html(tasks),
+            }
+        }
         // The base says the narrower, truthful thing: this task read model is not available.
         Err(_) => Html(base),
     }
@@ -2432,7 +2646,12 @@ async fn collection_runtime(
             params.error.as_deref(),
         ),
     };
-    Html(rendered)
+    match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
+        Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
+            Html(collection::collection_control_surface_view::render_runtime_control(&rendered, &projection)),
+        Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::SchemaUnavailable)
+        | Err(_) => Html(rendered),
+    }
 }
 
 /// COLLECTION-001 · the person-facing station actions on the 执行工位 surface.
@@ -2465,15 +2684,16 @@ async fn collection_runtime_register_station(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<StationForm>,
 ) -> Redirect {
-    if let Some(database) = state.database.database() {
-        // 200 notes per station per day (Mog's decision), held on the station so a plugin
-        // reinstall never resets it.
-        if register_station(database, form.display_name.trim(), 200)
-            .await
-            .is_err()
-        {
-            return Redirect::to(&runtime_surface_with_error("station_rejected"));
-        }
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&runtime_surface_with_error("read_model_not_connected"));
+    };
+    // 200 notes per station per day (Mog's decision), held on the station so a plugin
+    // reinstall never resets it.
+    if register_station(database, form.display_name.trim(), 200)
+        .await
+        .is_err()
+    {
+        return Redirect::to(&runtime_surface_with_error("station_rejected"));
     }
     Redirect::to(RUNTIME_SURFACE)
 }
@@ -2488,10 +2708,12 @@ async fn collection_runtime_open_window(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<ClaimWindowForm>,
 ) -> Redirect {
-    if let Some(database) = state.database.database()
-        && open_claim_window(database, form.station_ref, form.valid_for_hours)
-            .await
-            .is_err()
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&runtime_surface_with_error("read_model_not_connected"));
+    };
+    if open_claim_window(database, form.station_ref, form.valid_for_hours)
+        .await
+        .is_err()
     {
         return Redirect::to(&runtime_surface_with_error("claim_window_rejected"));
     }
@@ -2507,10 +2729,12 @@ async fn collection_runtime_close_window(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<CloseWindowForm>,
 ) -> Redirect {
-    if let Some(database) = state.database.database()
-        && close_claim_window(database, form.station_ref)
-            .await
-            .is_err()
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&runtime_surface_with_error("read_model_not_connected"));
+    };
+    if close_claim_window(database, form.station_ref)
+        .await
+        .is_err()
     {
         return Redirect::to(&runtime_surface_with_error("close_window_rejected"));
     }
@@ -2526,10 +2750,12 @@ async fn collection_runtime_retire_station(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<RetireForm>,
 ) -> Redirect {
-    if let Some(database) = state.database.database()
-        && retire_station(database, form.station_ref, "在执行工位页停用")
-            .await
-            .is_err()
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&runtime_surface_with_error("read_model_not_connected"));
+    };
+    if retire_station(database, form.station_ref, "在执行工位页停用")
+        .await
+        .is_err()
     {
         return Redirect::to(&runtime_surface_with_error("retire_rejected"));
     }
@@ -2546,14 +2772,56 @@ async fn collection_runtime_claim(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<ClaimForm>,
 ) -> Redirect {
-    if let Some(database) = state.database.database()
-        && claim_installation(database, form.installation_ref, form.station_ref)
-            .await
-            .is_err()
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&runtime_surface_with_error("read_model_not_connected"));
+    };
+    if claim_installation(database, form.installation_ref, form.station_ref)
+        .await
+        .is_err()
     {
         return Redirect::to(&runtime_surface_with_error("claim_rejected"));
     }
     Redirect::to(RUNTIME_SURFACE)
+}
+
+#[derive(serde::Deserialize)]
+struct AcceptingForm {
+    station_ref: uuid::Uuid,
+    accepting: bool,
+}
+
+async fn collection_runtime_set_accepting(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<AcceptingForm>,
+) -> Redirect {
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&runtime_surface_with_error("read_model_not_connected"));
+    };
+    match set_station_accepting(database, form.station_ref, form.accepting, "person").await {
+        Ok(()) => Redirect::to(RUNTIME_SURFACE),
+        Err(_) => Redirect::to(&runtime_surface_with_error("station_acceptance_rejected")),
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct AccountBindingForm {
+    installation_ref: uuid::Uuid,
+    account_ref: uuid::Uuid,
+}
+
+async fn collection_runtime_bind_account(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<AccountBindingForm>,
+) -> Redirect {
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&runtime_surface_with_error("read_model_not_connected"));
+    };
+    match bind_observation_account(database, form.account_ref, form.installation_ref, "person")
+        .await
+    {
+        Ok(_) => Redirect::to(RUNTIME_SURFACE),
+        Err(_) => Redirect::to(&runtime_surface_with_error("account_binding_rejected")),
+    }
 }
 
 #[derive(serde::Deserialize)]
@@ -2614,6 +2882,30 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
         LeaseError::AlreadyLeased => "work_order_already_leased",
         LeaseError::NoStation => "work_order_names_no_station",
         LeaseError::StationUnavailable => "station_unavailable",
+        LeaseError::FrozenControlMissing => "lease_frozen_control_missing",
+        LeaseError::ControlBlocked { reason_code } => match reason_code.as_str() {
+            "risk_paused" => "risk_paused",
+            "station_unavailable" => "station_unavailable",
+            "station_not_accepting" => "station_not_accepting",
+            "installation_credential_missing" => "installation_credential_missing",
+            "plugin_version_unsupported" => "plugin_version_unsupported",
+            "installation_stale" => "installation_stale",
+            "capability_missing" => "capability_missing",
+            "account_unbound" => "account_unbound",
+            "account_binding_changed" => "account_binding_changed",
+            "account_binding_expired" => "account_binding_expired",
+            "account_eligibility_stale" => "account_eligibility_stale",
+            "account_cooling" => "account_cooling",
+            "account_needs_login" => "account_needs_login",
+            "account_restricted" => "account_restricted",
+            "account_unknown" => "account_unknown",
+            "account_busy" => "account_busy",
+            "station_daily_budget_reached" => "station_daily_budget_reached",
+            "rule_missing" => "rule_missing",
+            "rule_revision_changed" => "rule_revision_changed",
+            "monitoring_paused" => "monitoring_paused",
+            _ => "capacity_unknown",
+        },
         LeaseError::AuthorizationLapsed => "authorization_lapsed",
         LeaseError::RiskPaused { .. } => "risk_paused",
         LeaseError::TaskSpecInvalid(_) => "task_spec_invalid",
@@ -2677,6 +2969,320 @@ async fn collection_target_create(
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct MonitorRuleWire {
+    target_ref: uuid::Uuid,
+    expected_revision: i32,
+    idempotency_key: uuid::Uuid,
+    command_kind: String,
+    mode: Option<String>,
+    automatic_enabled: Option<String>,
+    run_on_weekdays: Option<String>,
+    run_on_weekends: Option<String>,
+    all_day: Option<String>,
+    window_start: Option<String>,
+    window_end: Option<String>,
+    fixed_interval_seconds: Option<String>,
+    fallback_interval_seconds: Option<String>,
+    surface_key: Option<String>,
+    ranking_key: Option<String>,
+    task_contract_version: Option<String>,
+    return_filter: Option<String>,
+    return_sort: Option<String>,
+}
+
+fn monitor_rule_redirect(
+    form: &MonitorRuleWire,
+    error: Option<&str>,
+    receipt_ref: Option<uuid::Uuid>,
+) -> Redirect {
+    let mut params = vec![format!("rule={}", form.target_ref)];
+    if let Some(receipt_ref) = receipt_ref {
+        params.push(format!("rule_receipt={receipt_ref}"));
+    }
+    if let Some(filter @ ("creator" | "keyword" | "archiving" | "monitoring")) =
+        form.return_filter.as_deref()
+    {
+        params.push(format!("filter={filter}"));
+    }
+    if form.return_sort.as_deref() == Some("last") {
+        params.push("sort=last".to_owned());
+    }
+    if let Some(error) = error {
+        // Keep the bounded form snapshot only after a rejected command. A successful
+        // pause/resume/manual command must reload the server-owned active rule, rather than
+        // letting its submitted checkbox values shadow the durable result on the next GET.
+        push_rule_query(&mut params, "rule_mode", form.mode.as_deref());
+        push_rule_query(
+            &mut params,
+            "rule_automatic_enabled",
+            Some(if form.automatic_enabled.is_some() {
+                "1"
+            } else {
+                "0"
+            }),
+        );
+        push_rule_query(
+            &mut params,
+            "rule_run_on_weekdays",
+            Some(if form.run_on_weekdays.is_some() {
+                "1"
+            } else {
+                "0"
+            }),
+        );
+        push_rule_query(
+            &mut params,
+            "rule_run_on_weekends",
+            Some(if form.run_on_weekends.is_some() {
+                "1"
+            } else {
+                "0"
+            }),
+        );
+        push_rule_query(
+            &mut params,
+            "rule_all_day",
+            Some(if form.all_day.is_some() { "1" } else { "0" }),
+        );
+        push_rule_query(
+            &mut params,
+            "rule_window_start",
+            form.window_start.as_deref(),
+        );
+        push_rule_query(&mut params, "rule_window_end", form.window_end.as_deref());
+        push_rule_query(
+            &mut params,
+            "rule_fixed_interval_seconds",
+            form.fixed_interval_seconds.as_deref(),
+        );
+        push_rule_query(
+            &mut params,
+            "rule_fallback_interval_seconds",
+            form.fallback_interval_seconds.as_deref(),
+        );
+        push_rule_query(&mut params, "rule_surface_key", form.surface_key.as_deref());
+        push_rule_query(&mut params, "rule_ranking_key", form.ranking_key.as_deref());
+        push_rule_query(
+            &mut params,
+            "rule_task_contract_version",
+            form.task_contract_version.as_deref(),
+        );
+        params.push(format!("error={error}"));
+    }
+    let fragment = format!("#monitor-rule-{}", form.target_ref);
+    Redirect::to(&format!(
+        "/collection/targets?{}{}",
+        params.join("&"),
+        fragment
+    ))
+}
+
+fn push_rule_query(params: &mut Vec<String>, key: &str, value: Option<&str>) {
+    let Some(value) = value else {
+        return;
+    };
+    params.push(format!("{key}={}", encode_query_value(value)));
+}
+
+fn encode_query_value(value: &str) -> String {
+    value
+        .bytes()
+        .flat_map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+                vec![byte as char]
+            } else {
+                let hex = format!("%{byte:02X}");
+                hex.chars().collect()
+            }
+        })
+        .collect()
+}
+
+fn rule_bool_query(value: Option<&str>, fallback: bool) -> bool {
+    value.map_or(fallback, |value| matches!(value, "1" | "true" | "on"))
+}
+
+fn rule_form_from_query(
+    panel: &collection::collection_control_rule_view::MonitorRulePanel,
+    params: &CollectionParams,
+) -> collection::collection_control_rule_view::MonitorRuleFormState {
+    let mut form =
+        collection::collection_control_rule_view::MonitorRuleFormState::from_panel(panel);
+    if let Some(value) = params.rule_mode.as_deref() {
+        form.mode = value.to_owned();
+    }
+    form.automatic_enabled = rule_bool_query(
+        params.rule_automatic_enabled.as_deref(),
+        form.automatic_enabled,
+    );
+    form.run_on_weekdays =
+        rule_bool_query(params.rule_run_on_weekdays.as_deref(), form.run_on_weekdays);
+    form.run_on_weekends =
+        rule_bool_query(params.rule_run_on_weekends.as_deref(), form.run_on_weekends);
+    form.all_day = rule_bool_query(params.rule_all_day.as_deref(), form.all_day);
+    if let Some(value) = params.rule_window_start.as_deref() {
+        form.window_start = value.to_owned();
+    }
+    if let Some(value) = params.rule_window_end.as_deref() {
+        form.window_end = value.to_owned();
+    }
+    if let Some(value) = params.rule_fixed_interval_seconds.as_deref() {
+        form.fixed_interval_seconds = value.to_owned();
+    }
+    if let Some(value) = params.rule_fallback_interval_seconds.as_deref() {
+        form.fallback_interval_seconds = value.to_owned();
+    }
+    if let Some(value) = params.rule_surface_key.as_deref() {
+        form.surface_key = value.to_owned();
+    }
+    if let Some(value) = params.rule_ranking_key.as_deref() {
+        form.ranking_key = value.to_owned();
+    }
+    if let Some(value) = params.rule_task_contract_version.as_deref() {
+        form.task_contract_version = value.to_owned();
+    }
+    form
+}
+
+fn monitor_rule_form_error(
+    code: Option<&str>,
+) -> Option<collection::collection_control_rule_view::MonitorRuleFormError> {
+    let code = code?;
+    let (code, fields) = match code {
+        "invalid_mode" => (
+            "invalid_mode",
+            vec![
+                collection::collection_control_rule_view::MonitorRuleFieldError {
+                    field: "mode",
+                    message: "请选择一个受支持的运行方式。",
+                },
+            ],
+        ),
+        "read_model_not_connected" => ("read_model_not_connected", Vec::new()),
+        "target_not_found" => ("target_not_found", Vec::new()),
+        "baseline_not_ready" => ("baseline_not_ready", Vec::new()),
+        "stale_revision" => ("stale_revision", Vec::new()),
+        "identity_conflict" => ("identity_conflict", Vec::new()),
+        "authorization_missing" => ("authorization_missing", Vec::new()),
+        "authorization_expired_or_revoked" => ("authorization_expired_or_revoked", Vec::new()),
+        "station_not_accepting" => ("station_not_accepting", Vec::new()),
+        "account_needs_login" => ("account_needs_login", Vec::new()),
+        "target_not_requestable" => ("target_not_requestable", Vec::new()),
+        "database_unavailable" => ("database_unavailable", Vec::new()),
+        "manual_observe_rejected" => ("manual_observe_rejected", Vec::new()),
+        _ => ("command_rejected", Vec::new()),
+    };
+    Some(collection::collection_control_rule_view::MonitorRuleFormError { code, fields })
+}
+
+fn parse_rule_mode(raw: Option<&str>) -> Option<MonitorRuleMode> {
+    match raw.unwrap_or("fixed") {
+        "manual_only" => Some(MonitorRuleMode::ManualOnly),
+        "fixed" => Some(MonitorRuleMode::Fixed),
+        "dynamic" => Some(MonitorRuleMode::Dynamic),
+        _ => None,
+    }
+}
+
+fn parse_rule_minute(raw: Option<&str>) -> Option<i16> {
+    let value = raw?.trim();
+    let (hour, minute) = value.split_once(':')?;
+    let hour: i16 = hour.parse().ok()?;
+    let minute: i16 = minute.parse().ok()?;
+    (0..=23).contains(&hour).then_some(())?;
+    (0..=59).contains(&minute).then_some(())?;
+    Some(hour * 60 + minute)
+}
+
+fn parse_rule_interval(raw: Option<&str>) -> Option<i32> {
+    raw?.trim().parse().ok()
+}
+
+fn monitor_rule_error_code(error: &MonitorRuleCommandError) -> &'static str {
+    match error {
+        MonitorRuleCommandError::SchemaUnavailable => "read_model_not_connected",
+        MonitorRuleCommandError::UnknownTarget => "target_not_found",
+        MonitorRuleCommandError::InvalidManualObserveCommand => "target_not_requestable",
+        MonitorRuleCommandError::ManualObserveNotAdmitted { reason_code } => {
+            match reason_code.as_str() {
+                "authorization_missing" => "authorization_missing",
+                "authorization_expired_or_revoked" => "authorization_expired_or_revoked",
+                "station_not_accepting" => "station_not_accepting",
+                "account_needs_login" => "account_needs_login",
+                _ => "manual_observe_rejected",
+            }
+        }
+        MonitorRuleCommandError::Acquisition(_) => "manual_observe_rejected",
+        MonitorRuleCommandError::Lease(error) => lease_error_code(error),
+        MonitorRuleCommandError::Database(_) => "database_unavailable",
+    }
+}
+
+/// Versioned rule commands are the only UI write path for monitoring. The old boolean route is
+/// retained only as a compatibility redirect below; it never mutates the target directly.
+async fn collection_target_rule_command(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<MonitorRuleWire>,
+) -> Redirect {
+    let Some(database) = state.database.database() else {
+        return monitor_rule_redirect(&form, Some("read_model_not_connected"), None);
+    };
+    let Ok(kind) = (match form.command_kind.as_str() {
+        "save_rule" => Ok(MonitorCommandKind::SaveRule),
+        "pause" => Ok(MonitorCommandKind::Pause),
+        "resume" => Ok(MonitorCommandKind::Resume),
+        "stop" => Ok(MonitorCommandKind::Stop),
+        "manual_observe" => Ok(MonitorCommandKind::ManualObserve),
+        _ => Err(()),
+    }) else {
+        return monitor_rule_redirect(&form, Some("invalid_mode"), None);
+    };
+    let draft = if kind == MonitorCommandKind::ManualObserve {
+        None
+    } else {
+        let Some(mode) = parse_rule_mode(form.mode.as_deref()) else {
+            return monitor_rule_redirect(&form, Some("invalid_mode"), None);
+        };
+        Some(MonitorRuleDraft {
+            mode,
+            automatic_enabled: form.automatic_enabled.is_some(),
+            run_on_weekdays: form.run_on_weekdays.is_some(),
+            run_on_weekends: form.run_on_weekends.is_some(),
+            all_day: form.all_day.is_some(),
+            window_start_minute: parse_rule_minute(form.window_start.as_deref()),
+            window_end_minute: parse_rule_minute(form.window_end.as_deref()),
+            fixed_interval_seconds: parse_rule_interval(form.fixed_interval_seconds.as_deref()),
+            fallback_interval_seconds: parse_rule_interval(
+                form.fallback_interval_seconds.as_deref(),
+            )
+            .unwrap_or(linggan_evidence::DEFAULT_MONITOR_INTERVAL_SECONDS),
+            surface_key: form.surface_key.clone().unwrap_or_default(),
+            ranking_key: form
+                .ranking_key
+                .clone()
+                .filter(|value| !value.trim().is_empty()),
+            task_contract_version: form
+                .task_contract_version
+                .clone()
+                .unwrap_or_else(|| linggan_contracts::PRODUCER_TASK_SPEC_VERSION.to_owned()),
+        })
+    };
+    let command = MonitorRuleCommand {
+        target_ref: form.target_ref,
+        expected_revision: form.expected_revision,
+        idempotency_key: form.idempotency_key,
+        kind,
+        actor: MonitorCommandActor::Person,
+        source: "targets_ui",
+        draft,
+    };
+    match apply_monitor_rule_command(database, &command).await {
+        Ok(receipt) => monitor_rule_redirect(&form, None, Some(receipt.receipt_ref)),
+        Err(error) => monitor_rule_redirect(&form, Some(monitor_rule_error_code(&error)), None),
+    }
+}
+
 /// 从小红书创作者主页链接里取出平台 ID。
 ///
 /// 链接形如 `https://www.xiaohongshu.com/user/profile/<24 位十六进制>?...`。**平台 ID 才是
@@ -2712,18 +3318,14 @@ async fn collection_target_toggle_monitoring(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<MonitoringForm>,
 ) -> Redirect {
-    if let Some(database) = state.database.database() {
-        let enabled = target_monitoring_enabled(database, form.row_target_ref)
-            .await
-            .unwrap_or(false);
-        if set_target_monitoring(database, form.row_target_ref, !enabled, None)
-            .await
-            .is_err()
-        {
-            return Redirect::to("/collection/targets?error=monitoring_toggle_failed");
-        }
-    }
-    Redirect::to("/collection/targets")
+    let _ = state;
+    // The pre-Package-2 boolean endpoint must not remain a second authority for monitoring.
+    // Send old bookmarks to the versioned control surface where expected_revision and
+    // idempotency are required; no state is changed by this compatibility path.
+    Redirect::to(&format!(
+        "/collection/targets?rule={}&error=rule_command_required#monitor-rule-{}",
+        form.row_target_ref, form.row_target_ref
+    ))
 }
 
 /// COLLECTION-001 · 从页面发起一次深度建档。
@@ -2740,29 +3342,27 @@ async fn collection_target_deep_archive(
     let Some(database) = state.database.database() else {
         return Redirect::to("/collection/targets?error=read_model_not_connected");
     };
-    let outcome = request_and_admit(
+    let execution = request_admit_and_lease(
         database,
         form.row_target_ref,
         "deep_archive",
         "从观察目标页发起深度建档",
         "person",
+        60,
     )
     .await;
-    let Ok(outcome) = outcome else {
+    let Ok(execution) = execution else {
         return Redirect::to("/collection/targets?error=archive_not_requestable");
     };
-    let Some(work_order_ref) = outcome.work_order_ref else {
+    let outcome = execution.request;
+    let Some(_work_order_ref) = outcome.work_order_ref else {
         // 准入没通过。把它的结论原样带回去——refuse 与 defer 的处置完全不同。
         return Redirect::to(&format!(
             "/collection/targets?error=archive_{}",
             outcome.outcome.code()
         ));
     };
-    // 深度建档给 60 分钟：200 条作品的清单加逐篇详情，比一次巡检重得多。
-    if issue_work_order_lease(database, work_order_ref, 60)
-        .await
-        .is_err()
-    {
+    if execution.lease.is_none() {
         return Redirect::to("/collection/targets?error=archive_lease_failed");
     }
     Redirect::to("/collection/targets")

@@ -65,8 +65,6 @@ pub fn render_stored_targets(
                 <div class="c-tg-list">{rows}</div>
                 <div class="c-tg-batch">
                   <span class="c-tg-batch-label">对勾选的目标：</span>
-                  <button class="c-btn-quiet" type="submit" name="action" value="monitor_on">开启巡检</button>
-                  <button class="c-btn-quiet" type="submit" name="action" value="monitor_off">暂停巡检</button>
                   <input name="group_name" maxlength="40" placeholder="分组名（留空取消分组）" />
                   <button class="c-btn-quiet" type="submit" name="action" value="set_group">设置分组</button>
                 </div>
@@ -180,7 +178,7 @@ fn target_row(
         signals = signals_cell(),
         times = times_cell(target),
         baseline = baseline_cell(archive, is_creator),
-        actions = row_actions(target, is_creator, archive),
+        actions = row_actions(target, is_creator, archive, list_context),
     )
 }
 
@@ -373,7 +371,7 @@ fn health_ticks(percent: i64) -> String {
         .collect()
 }
 
-/// 行尾操作：深度建档 + 巡检开关。
+/// 行尾操作：一次性深度建档 + 永久可发现的监控规则入口。
 ///
 /// 深度建档已建过就不再显示按钮——重复全量建档只会把当天额度吃光，增量是巡检在做的事。
 /// 两者都**不绕过授权链**：走的是与定时巡检、与 API 完全相同的一条路。
@@ -381,9 +379,16 @@ fn row_actions(
     target: &ObservationTarget,
     is_creator: bool,
     archive: Option<&ArchiveCompleteness>,
+    list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
+    let opener_id = format!("monitor-rule-{}", target.target_ref);
+    let rule_href = list_context.monitor_rule_href(target.target_ref, &opener_id);
+    let rule_entry = format!(
+        r#"<a id="{opener_id}" class="c-btn-quiet c-tg-btn" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">监控规则</a>"#,
+        target_ref = target.target_ref,
+    );
     if !is_creator {
-        return r#"<span class="c-tg-muted">—</span>"#.to_owned();
+        return rule_entry;
     }
     let archived = archive.is_some_and(|value| value.works_listed > 0);
     let archive_button = if archived {
@@ -395,19 +400,10 @@ fn row_actions(
             target_ref = target.target_ref,
         )
     };
-    format!(
-        r#"{archive_button}<button class="c-btn-quiet c-tg-btn" type="submit"
-                  formaction="/collection/targets/monitoring" name="row_target_ref" value="{target_ref}">{action}</button>"#,
-        target_ref = target.target_ref,
-        action = if target.monitoring_enabled {
-            "暂停巡检"
-        } else {
-            "开启巡检"
-        },
-    )
+    format!(r#"{archive_button}{rule_entry}"#)
 }
 
-/// 小红书号优先/// 小红书号优先/// 小红书号优先/// 小红书号优先，采不到才退回平台 ID——小红书号是人能对上的那个。
+/// 小红书号优先，采不到才退回平台 ID——小红书号是人能对上的那个。
 fn identity_display(target: &ObservationTarget) -> String {
     fact_text(target.identity_facts.as_ref(), "redId")
         .unwrap_or_else(|| target.identity_key.clone())
@@ -621,5 +617,25 @@ mod tests {
             "href=\"/collection/targets?filter=creator&amp;sort=last&amp;drawer={}\"",
             creator.target_ref
         )));
+    }
+
+    #[test]
+    fn creator_and_keyword_rows_have_one_permanent_rule_entry_without_legacy_toggles() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let creator = target("creator", Some("作者"));
+        let keyword = target("keyword", Some("关键词"));
+        let html = render_stored_targets(
+            &base,
+            &[creator, keyword],
+            &HashMap::new(),
+            &HashMap::new(),
+            None,
+            TargetListContext::default(),
+        );
+        assert_eq!(html.matches("data-monitor-rule-trigger").count(), 2);
+        assert_eq!(html.matches(">监控规则</a>").count(), 2);
+        assert!(!html.contains("/collection/targets/monitoring"));
+        assert!(!html.contains("name=\"action\" value=\"monitor_on\""));
+        assert!(!html.contains("name=\"action\" value=\"monitor_off\""));
     }
 }

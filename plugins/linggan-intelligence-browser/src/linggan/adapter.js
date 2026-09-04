@@ -100,6 +100,7 @@ export function stationCheckInRouteFromHealth(health) {
  */
 export async function checkInLingganStation({
   installKey,
+  installationCredential = '',
   pluginVersion,
   browserLabel = '',
   capabilities = [],
@@ -128,6 +129,7 @@ export async function checkInLingganStation({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         installKey,
+        installationCredential: String(installationCredential || '').trim() || null,
         pluginVersion,
         browserLabel,
         capabilities: Array.isArray(capabilities) ? capabilities : [],
@@ -143,6 +145,10 @@ export async function checkInLingganStation({
       state,
       installationRef: String(body?.installationRef || '').trim(),
       stationRef: String(body?.stationRef || '').trim(),
+      installationCredentialRef: String(body?.installationCredentialRef || '').trim(),
+      // This value is consumed immediately by the MV3 background worker and is never included
+      // in a notice, UI response, log or durable outbox entry.
+      installationCredential: String(body?.installationCredential || '').trim(),
       message: stationStateMessage(state),
     };
   } catch {
@@ -174,6 +180,122 @@ export function dispatchFailureRouteFromHealth(health) {
   return path.startsWith('/api/local/dispatch/') && !/[?#]/.test(path) ? path : null;
 }
 
+export function accountEligibilityRouteFromHealth(health) {
+  const path = String(health?.routes?.station?.eligibilityReport || '').trim();
+  return path.startsWith('/api/local/stations/') && !/[?#]/.test(path) ? path : null;
+}
+
+export function credentialActivationRouteFromHealth(health) {
+  const path = String(health?.routes?.station?.credentialActivation || '').trim();
+  return path.startsWith('/api/local/stations/') && !/[?#]/.test(path) ? path : null;
+}
+
+/**
+ * Acknowledge a pending, hash-only credential only after chrome.storage.local has durably stored
+ * the one-time value. The service keeps a previous active credential usable until this succeeds.
+ */
+export async function activateLingganInstallationCredential({
+  installationRef,
+  credentialRef,
+  installationCredential,
+  origin = LINGGAN_LOCAL_ORIGIN,
+  fetchImpl = globalThis.fetch,
+  health = null,
+} = {}) {
+  const route = credentialActivationRouteFromHealth(health);
+  if (typeof fetchImpl !== 'function'
+      || !route
+      || !String(installationRef || '').trim()
+      || !String(credentialRef || '').trim()
+      || !String(installationCredential || '').trim()) {
+    return { activated: false, reasonCode: 'installation_credential_activation_not_ready' };
+  }
+  try {
+    const response = await fetchImpl(`${origin}${route}`, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        installationRef,
+        credentialRef,
+        installationCredential,
+      }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      return {
+        activated: false,
+        reasonCode: String(body?.code || 'installation_credential_activation_rejected'),
+      };
+    }
+    return { activated: body?.outcome === 'activated' };
+  } catch {
+    return { activated: false, reasonCode: 'installation_credential_activation_unavailable' };
+  }
+}
+
+const ACCOUNT_ELIGIBILITY_SIGNALS = new Set([
+  'authenticated_observed',
+  'cooldown_observed',
+  'login_required',
+  'access_restricted',
+  'signal_incomplete',
+]);
+
+/**
+ * Report one passive account observation. The producer never declares a final eligibility
+ * state; the service owns that projection. A raw platform id, when an already-open page exposes
+ * it, exists only in this request body and is not returned or cached.
+ */
+export async function reportLingganAccountEligibility({
+  installationRef,
+  installationCredential,
+  rawPlatformAccountId = '',
+  signal = 'signal_incomplete',
+  origin = LINGGAN_LOCAL_ORIGIN,
+  fetchImpl = globalThis.fetch,
+  health = null,
+} = {}) {
+  const route = accountEligibilityRouteFromHealth(health);
+  const normalizedSignal = String(signal || '').trim();
+  if (typeof fetchImpl !== 'function'
+      || !route
+      || !String(installationRef || '').trim()
+      || !String(installationCredential || '').trim()
+      || !ACCOUNT_ELIGIBILITY_SIGNALS.has(normalizedSignal)) {
+    return { reported: false, reasonCode: 'account_observation_not_ready' };
+  }
+  const rawIdentity = String(rawPlatformAccountId || '').trim();
+  try {
+    const response = await fetchImpl(`${origin}${route}`, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        installationRef,
+        installationCredential,
+        rawPlatformAccountId: rawIdentity || null,
+        signal: normalizedSignal,
+      }),
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      return {
+        reported: false,
+        reasonCode: String(body?.code || 'account_observation_rejected'),
+      };
+    }
+    return {
+      reported: body?.outcome === 'observed',
+      accountRef: String(body?.accountRef || '').trim(),
+      eligibilityState: String(body?.eligibilityState || 'unknown'),
+      bindingRequired: body?.bindingRequired === true,
+    };
+  } catch {
+    return { reported: false, reasonCode: 'account_observation_unavailable' };
+  }
+}
+
 /**
  * 问 Linggan：现在有我能做的活吗？
  *
@@ -182,12 +304,16 @@ export function dispatchFailureRouteFromHealth(health) {
  */
 export async function claimLingganDispatch({
   installKey,
+  installationCredential,
   origin = LINGGAN_LOCAL_ORIGIN,
   fetchImpl = globalThis.fetch,
   health = null,
 } = {}) {
   if (typeof fetchImpl !== 'function') {
     return { mayExecute: false, decision: 'unavailable', message: '浏览器当前无法连接 Linggan。', nextPollAfterSeconds: 900 };
+  }
+  if (!String(installationCredential || '').trim()) {
+    return { mayExecute: false, decision: 'installation_credential_missing', message: '本次安装尚未取得服务端凭据。', nextPollAfterSeconds: 300 };
   }
   const route = dispatchClaimRouteFromHealth(health);
   if (!route) {
@@ -198,12 +324,17 @@ export async function claimLingganDispatch({
       method: 'POST',
       credentials: 'omit',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ installKey }),
+      body: JSON.stringify({ installKey, installationCredential }),
     });
-    if (!response.ok) {
-      return { mayExecute: false, decision: 'unavailable', message: `Linggan 返回 ${response.status}。`, nextPollAfterSeconds: 900 };
-    }
     const body = await response.json().catch(() => null);
+    if (!response.ok) {
+      return {
+        mayExecute: false,
+        decision: String(body?.code || 'unavailable'),
+        message: `Linggan 返回 ${response.status}。`,
+        nextPollAfterSeconds: response.status === 401 ? 300 : 900,
+      };
+    }
     if (body?.mayExecute !== true) {
       return {
         mayExecute: false,
@@ -246,6 +377,7 @@ export async function claimLingganDispatch({
  */
 export async function reportLingganDispatchFailure({
   installKey,
+  installationCredential,
   taskId,
   failureId,
   failureCode,
@@ -257,7 +389,7 @@ export async function reportLingganDispatchFailure({
     return { reported: false, nextPollAfterSeconds: 300 };
   }
   const route = dispatchFailureRouteFromHealth(health);
-  if (!route || !String(installKey || '').trim() || !String(taskId || '').trim()
+  if (!route || !String(installKey || '').trim() || !String(installationCredential || '').trim() || !String(taskId || '').trim()
       || !String(failureId || '').trim() || !String(failureCode || '').trim()) {
     return { reported: false, nextPollAfterSeconds: 300 };
   }
@@ -266,7 +398,7 @@ export async function reportLingganDispatchFailure({
       method: 'POST',
       credentials: 'omit',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ installKey, taskId, failureId, failureCode }),
+      body: JSON.stringify({ installKey, installationCredential, taskId, failureId, failureCode }),
     });
     if (!response.ok) return { reported: false, nextPollAfterSeconds: 300 };
     const body = await response.json().catch(() => null);
@@ -363,6 +495,7 @@ export function decodePageExecutionReceipt(response, expected = {}) {
 /// admission; this permission only authorizes fetching its candidate bytes and uploading them.
 export async function claimLingganMediaAcquisition({
   installKey,
+  installationCredential,
   origin = LINGGAN_LOCAL_ORIGIN,
   fetchImpl = globalThis.fetch,
   health = null,
@@ -371,7 +504,7 @@ export async function claimLingganMediaAcquisition({
     return { mayExecute: false, decision: 'unavailable', nextPollAfterSeconds: 900 };
   }
   const route = producerRoutesFromHealth(health)?.mediaAcquisitionClaim;
-  if (!route) {
+  if (!route || !String(installKey || '').trim() || !String(installationCredential || '').trim()) {
     return { mayExecute: false, decision: 'unavailable', nextPollAfterSeconds: 900 };
   }
   try {
@@ -379,7 +512,7 @@ export async function claimLingganMediaAcquisition({
       method: 'POST',
       credentials: 'omit',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ installKey }),
+      body: JSON.stringify({ installKey, installationCredential }),
     });
     if (!response.ok) {
       return { mayExecute: false, decision: 'unavailable', nextPollAfterSeconds: 300 };

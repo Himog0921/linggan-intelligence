@@ -2,14 +2,14 @@
 //
 // Navigation state belongs to the URL and is rendered on the server, so the first paint is
 // already the right view — there is no client-side page switch and no flash of a wrong page.
-// This file only owns behaviour that cannot be expressed by a link: the drawer's tab
-// selection, its width toggle, and closing it with Escape.
+// This file only owns behaviour that cannot be expressed by a link: focus containment for
+// the rule modal, the drawer's tab selection and width toggle, and Escape dismissal.
 (function () {
   "use strict";
 
-  function restoreDrawerTriggerFocus() {
+  function restoreTriggerFocus() {
     var focusId = window.location.hash.slice(1);
-    if (!focusId || focusId.indexOf("target-") !== 0) {
+    if (!focusId || (focusId.indexOf("target-") !== 0 && focusId.indexOf("monitor-rule-") !== 0)) {
       return;
     }
     var trigger = document.getElementById(focusId);
@@ -20,9 +20,113 @@
     }
   }
 
+  function returnFromOverlay(overlay) {
+    var returnUrl = overlay.dataset.returnUrl || "/collection/targets";
+    // Keep the drawer's focus-return contract explicit for both the browser and the
+    // server-rendered Collection tests. The rule modal remains a sibling overlay.
+    if (typeof drawer !== "undefined" && overlay === drawer) {
+      returnUrl = drawer.dataset.returnUrl || "/collection/targets";
+    }
+    var returnFocus = overlay.dataset.returnFocus;
+    if (!returnFocus && typeof drawer !== "undefined" && overlay === drawer) {
+      returnFocus = drawer.dataset.returnFocus;
+    }
+    if (returnFocus) {
+      returnUrl += "#" + returnFocus;
+    }
+    window.location.assign(returnUrl);
+  }
+
+  function modalFocusable(modal) {
+    return Array.prototype.slice.call(modal.querySelectorAll(
+      "a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex='-1'])"
+    )).filter(function (element) {
+      return !element.hidden && element.getAttribute("aria-hidden") !== "true";
+    });
+  }
+
+  var ruleModal = document.getElementById("c-monitor-rule");
+  if (ruleModal) {
+    var initialFocus = ruleModal.querySelector("[data-monitor-rule-initial-focus]");
+    if (initialFocus) {
+      window.requestAnimationFrame(function () {
+        initialFocus.focus();
+      });
+    }
+
+    ruleModal.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        returnFromOverlay(ruleModal);
+        return;
+      }
+      if (event.key !== "Tab") {
+        return;
+      }
+      var focusable = modalFocusable(ruleModal);
+      if (!focusable.length) {
+        event.preventDefault();
+        return;
+      }
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (focusable.indexOf(document.activeElement) === -1) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+
+    var ruleForm = ruleModal.querySelector("[data-monitor-rule-form]");
+    if (ruleForm) {
+      var modeInputs = Array.prototype.slice.call(ruleForm.querySelectorAll("input[name='mode']"));
+      var automatic = ruleForm.querySelector("input[name='automatic_enabled']");
+      var fixed = ruleForm.querySelector("select[name='fixed_interval_seconds']");
+      var allDay = ruleForm.querySelector("input[name='all_day']");
+      var windowInputs = Array.prototype.slice.call(ruleForm.querySelectorAll("[data-monitor-rule-window] input"));
+      var dynamic = ruleForm.querySelector("[data-monitor-dynamic]");
+      var readOnly = ruleForm.dataset.readonly === "true";
+
+      function syncRuleControls() {
+        var selected = modeInputs.find(function (input) { return input.checked; });
+        var mode = selected ? selected.value : "";
+        if (automatic) {
+          automatic.disabled = readOnly || mode === "manual_only";
+          if (automatic.disabled) {
+            automatic.checked = false;
+          }
+        }
+        if (fixed) {
+          fixed.disabled = readOnly || mode !== "fixed";
+        }
+        if (dynamic) {
+          dynamic.hidden = mode !== "dynamic";
+        }
+        windowInputs.forEach(function (input) {
+          input.disabled = readOnly || Boolean(allDay && allDay.checked);
+        });
+      }
+
+      modeInputs.forEach(function (input) {
+        input.addEventListener("change", syncRuleControls);
+      });
+      if (allDay) {
+        allDay.addEventListener("change", syncRuleControls);
+      }
+      syncRuleControls();
+    }
+  }
+
   var drawer = document.getElementById("c-drawer");
   if (!drawer) {
-    restoreDrawerTriggerFocus();
+    if (!ruleModal) {
+      restoreTriggerFocus();
+    }
     return;
   }
 
@@ -75,13 +179,8 @@
   }
 
   document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape") {
-      var returnUrl = drawer.dataset.returnUrl || "/collection/targets";
-      var returnFocus = drawer.dataset.returnFocus;
-      if (returnFocus) {
-        returnUrl += "#" + returnFocus;
-      }
-      window.location.assign(returnUrl);
+    if (event.key === "Escape" && !ruleModal) {
+      returnFromOverlay(drawer);
     }
   });
 

@@ -9,6 +9,7 @@ export const LINGGAN_RUNTIME_ACTION = {
   SAVE_FLYWHEEL_CONFIG: 'saveFlywheelConfig',
   TEST_FLYWHEEL_CONNECTION: 'testFlywheelConnection',
   GET_EXECUTION_STATION_STATUS: 'getExecutionStationStatus',
+  REPORT_ACCOUNT_ELIGIBILITY: 'lingganReportAccountEligibility',
   CREATE_MANUAL_TASK: 'lingganCreateManualTask',
   GET_PRODUCER_INSTANCE: 'lingganGetProducerInstance',
   SUBMIT_DISCOVERY_PACKAGE: 'lingganSubmitDiscoveryPackage',

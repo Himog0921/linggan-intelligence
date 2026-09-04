@@ -28,6 +28,7 @@ test('media acquisition claim only permits an exact server-owned work generation
   };
   const result = await claimLingganMediaAcquisition({
     installKey: 'installation-1',
+    installationCredential: 'credential-1',
     health,
     fetchImpl: async (url, options) => {
       request = { url, options };
@@ -48,7 +49,10 @@ test('media acquisition claim only permits an exact server-owned work generation
   assert.equal(result.claimGeneration, 2);
   assert.deepEqual(result.candidateUris, ['https://sns-img-hw.xhscdn.com/cover.jpg']);
   assert.equal(request.url, `${LINGGAN_LOCAL_ORIGIN}/api/local/producer/media-acquisitions/claim`);
-  assert.deepEqual(JSON.parse(request.options.body), { installKey: 'installation-1' });
+  assert.deepEqual(JSON.parse(request.options.body), {
+    installKey: 'installation-1',
+    installationCredential: 'credential-1',
+  });
 });
 
 test('a page-start failure is returned only through the server-advertised local dispatch route', async () => {
@@ -65,6 +69,7 @@ test('a page-start failure is returned only through the server-advertised local 
   assert.equal(dispatchFailureRouteFromHealth({ routes: { dispatch: { failure: '/unsafe?retry=1' } } }), null);
   const result = await reportLingganDispatchFailure({
     installKey: 'installation-1',
+    installationCredential: 'credential-1',
     taskId: '11111111-1111-4111-8111-111111111111',
     failureId: '22222222-2222-4222-8222-222222222222',
     failureCode: 'page_timeout',
@@ -85,6 +90,7 @@ test('a page-start failure is returned only through the server-advertised local 
   assert.equal(request.url, `${LINGGAN_LOCAL_ORIGIN}/api/local/dispatch/failures`);
   assert.deepEqual(JSON.parse(request.options.body), {
     installKey: 'installation-1',
+    installationCredential: 'credential-1',
     taskId: '11111111-1111-4111-8111-111111111111',
     failureId: '22222222-2222-4222-8222-222222222222',
     failureCode: 'page_timeout',

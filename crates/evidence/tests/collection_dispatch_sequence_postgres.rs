@@ -3,11 +3,14 @@ use linggan_contracts::{
     parse_producer_task_spec,
 };
 use linggan_evidence::{
-    CheckInOutcome, DispatchDecision, DispatchFailureCode, DispatchFailureOutcome,
-    InstallationCheckIn, ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome,
-    RuntimeTaskOutcome, check_in_installation, create_producer_task, decide_dispatch,
+    AccountEligibilitySignal, CheckInOutcome, DispatchDecision, DispatchFailureCode,
+    DispatchFailureOutcome, InstallationCheckIn, ProducerRuntimeError, RuntimeAttemptOutcome,
+    RuntimeSubmissionOutcome, RuntimeTaskOutcome, activate_installation_credential,
+    bind_observation_account, check_in_installation, create_producer_task, decide_dispatch,
     expire_lapsed_leases, issue_work_order_lease, open_claim_window, read_collection_task_timeline,
-    read_work_resources, requeue_failed_dispatch, start_producer_attempt, submit_producer_package,
+    read_work_resources, report_account_eligibility, requeue_failed_dispatch,
+    rotate_installation_credential, set_station_accepting, start_producer_attempt,
+    submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::Row;
@@ -40,6 +43,8 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0013_drop_execution_gate.sql"),
     "\n",
+    include_str!("../../../database/migrations/0014_target_group.sql"),
+    "\n",
     include_str!("../../../database/migrations/0015_material_projection.sql"),
     "\n",
     include_str!("../../../database/migrations/0016_material_social_lanes.sql"),
@@ -66,7 +71,15 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0027_unified_media_resource.sql"),
     "\n",
+    include_str!("../../../database/migrations/0029_author_avatar_media.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0030_comment_image_media.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0032_author_profile_avatar_media.sql"),
+    "\n",
     include_str!("../../../database/migrations/0033_dispatch_failure_recovery.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0034_collection_control_closure.sql"),
 );
 
 #[tokio::test]
@@ -196,8 +209,16 @@ async fn creator_lease_claims_and_completes_two_scheduled_tasks_in_order() {
     );
 
     let (left, right) = tokio::join!(
-        decide_dispatch(&database, &fixture.install_key),
-        decide_dispatch(&database, &fixture.install_key),
+        decide_dispatch(
+            &database,
+            &fixture.install_key,
+            &fixture.installation_credential
+        ),
+        decide_dispatch(
+            &database,
+            &fixture.install_key,
+            &fixture.installation_credential
+        ),
     );
     let (first, first_replay) = same_dispatch(
         left.expect("first concurrent dispatch decides"),
@@ -206,9 +227,13 @@ async fn creator_lease_claims_and_completes_two_scheduled_tasks_in_order() {
     assert_eq!(capability(&first), "author_profile");
     assert_eq!(task_id(&first), task_id(&first_replay));
 
-    let response_loss_replay = decide_dispatch(&database, &fixture.install_key)
-        .await
-        .expect("lost response retry decides");
+    let response_loss_replay = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("lost response retry decides");
     assert_eq!(task_id(&first), task_id(&response_loss_replay));
 
     let first_task = task_from_dispatch(&first);
@@ -221,13 +246,21 @@ async fn creator_lease_claims_and_completes_two_scheduled_tasks_in_order() {
     assert_task_state(&database, first_task.task_id(), "completed").await;
     assert!(lease_is_live(&database, lease.lease_ref).await);
 
-    let second = decide_dispatch(&database, &fixture.install_key)
-        .await
-        .expect("second sequence dispatch decides");
+    let second = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("second sequence dispatch decides");
     assert_eq!(capability(&second), "profile_discovery");
-    let second_replay = decide_dispatch(&database, &fixture.install_key)
-        .await
-        .expect("second response replay decides");
+    let second_replay = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("second response replay decides");
     assert_eq!(task_id(&second), task_id(&second_replay));
     let second_task = task_from_dispatch(&second);
     run_scheduled_task(&database, &second_task, fixture.producer_instance_id).await;
@@ -294,9 +327,13 @@ async fn task_read_projection_keeps_queue_attempt_package_and_receipt_distinct()
     let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
         .await
         .expect("creator work order is leased");
-    let first = decide_dispatch(&database, &fixture.install_key)
-        .await
-        .expect("first task is claimed");
+    let first = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("first task is claimed");
     let first_task = task_from_dispatch(&first);
     run_scheduled_task(&database, &first_task, fixture.producer_instance_id).await;
     assert_task_state(&database, first_task.task_id(), "completed").await;
@@ -348,9 +385,13 @@ async fn expired_scheduled_lease_is_historical_not_active_in_task_projection() {
     let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
         .await
         .expect("creator work order is leased");
-    let dispatch = decide_dispatch(&database, &fixture.install_key)
-        .await
-        .expect("first task is claimed before the lease expires");
+    let dispatch = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("first task is claimed before the lease expires");
     let claimed_task_id = task_id(&dispatch);
     assert_task_state(&database, claimed_task_id, "in_progress").await;
 
@@ -400,9 +441,13 @@ async fn failed_browser_start_is_audited_then_requeues_the_same_frozen_task() {
     let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
         .await
         .expect("creator work order is leased");
-    let first_dispatch = decide_dispatch(&database, &fixture.install_key)
-        .await
-        .expect("first task is claimed before page startup");
+    let first_dispatch = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("first task is claimed before page startup");
     let first_task_id = task_id(&first_dispatch);
     assert_task_state(&database, first_task_id, "in_progress").await;
 
@@ -410,6 +455,7 @@ async fn failed_browser_start_is_audited_then_requeues_the_same_frozen_task() {
     let outcome = requeue_failed_dispatch(
         &database,
         &fixture.install_key,
+        &fixture.installation_credential,
         first_task_id,
         failure_ref,
         DispatchFailureCode::PageTimeout,
@@ -473,6 +519,7 @@ async fn failed_browser_start_is_audited_then_requeues_the_same_frozen_task() {
     let replay = requeue_failed_dispatch(
         &database,
         &fixture.install_key,
+        &fixture.installation_credential,
         first_task_id,
         failure_ref,
         DispatchFailureCode::PageTimeout,
@@ -494,9 +541,13 @@ async fn failed_browser_start_is_audited_then_requeues_the_same_frozen_task() {
     .expect("failure count is readable");
     assert_eq!(failure_count, 1, "same failure id is an idempotent replay");
 
-    let retry = decide_dispatch(&database, &fixture.install_key)
-        .await
-        .expect("the frozen scheduled task is eligible for a bounded retry");
+    let retry = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the frozen scheduled task is eligible for a bounded retry");
     assert_eq!(
         task_id(&retry),
         first_task_id,
@@ -514,9 +565,13 @@ async fn late_scheduled_submission_keeps_material_without_advancing_revoked_exec
     let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
         .await
         .expect("creator work order is leased");
-    let dispatch = decide_dispatch(&database, &fixture.install_key)
-        .await
-        .expect("task is claimed");
+    let dispatch = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("task is claimed");
     let task = task_from_dispatch(&dispatch);
     let attempt = attempt(task.task_id(), fixture.producer_instance_id);
     assert!(matches!(
@@ -561,15 +616,19 @@ async fn late_scheduled_submission_keeps_material_without_advancing_revoked_exec
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn replacement_installation_adopts_a_stale_two_generation_task_without_recreating_it() {
+async fn replacement_installation_releases_stale_work_instead_of_adopting_it() {
     let database = proof_database_for("collection_dispatch_installation_takeover").await;
     let fixture = seed_creator_work_order(&database).await;
     let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
         .await
         .expect("creator work order is leased");
-    let old_dispatch = decide_dispatch(&database, &fixture.install_key)
-        .await
-        .expect("old installation claims the first task");
+    let old_dispatch = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("old installation claims the first task");
     let original_task_id = task_id(&old_dispatch);
 
     open_claim_window(&database, fixture.station_ref, 1)
@@ -581,9 +640,10 @@ async fn replacement_installation_adopts_a_stale_two_generation_task_without_rec
         &database,
         &InstallationCheckIn {
             install_key: &intermediate_install_key,
-            plugin_version: "0.8.1",
+            plugin_version: "0.8.34",
             browser_label: Some("intermediate fixture"),
             capabilities: serde_json::json!(["author_profile", "profile_discovery"]),
+            installation_credential: None,
         },
     )
     .await
@@ -599,16 +659,10 @@ async fn replacement_installation_adopts_a_stale_two_generation_task_without_rec
         }
         other => panic!("intermediate install must claim the station; got {other:?}"),
     };
-    // Recreate the already-observed pre-fix state: 0.8.1 is active, while the live task still
-    // names 0.8.0. The next version must not depend on an intermediate heartbeat to repair it.
-    sqlx::query(
-        "UPDATE collection_work_order_lease_task SET claimed_by_installation_ref=$2 WHERE task_id=$1",
-    )
-    .bind(original_task_id)
-    .bind(fixture.installation_ref)
-    .execute(database.pool())
-    .await
-    .expect("stale two-generation ownership is recreated");
+    assert!(
+        !lease_is_live(&database, lease.lease_ref).await,
+        "superseding an installation releases its old frozen lease instead of silently adopting it"
+    );
 
     let replacement_instance_id = Uuid::new_v4();
     let replacement_install_key = replacement_instance_id.to_string();
@@ -616,7 +670,7 @@ async fn replacement_installation_adopts_a_stale_two_generation_task_without_rec
         &database,
         &InstallationCheckIn {
             install_key: &replacement_install_key,
-            plugin_version: "0.8.2",
+            plugin_version: "0.8.34",
             browser_label: Some("replacement fixture"),
             capabilities: serde_json::json!([
                 "author_profile",
@@ -626,42 +680,37 @@ async fn replacement_installation_adopts_a_stale_two_generation_task_without_rec
                 "comments",
                 "replies"
             ]),
+            installation_credential: None,
         },
     )
     .await
     .expect("replacement installation checks in");
-    let replacement_installation_ref = match outcome {
+    let replacement_installation_ref = match &outcome {
         CheckInOutcome::Claimed {
             installation_ref,
             station_ref,
             superseded,
+            ..
         } => {
-            assert_eq!(station_ref, fixture.station_ref);
-            assert_eq!(superseded, Some(intermediate_installation_ref));
-            installation_ref
+            assert_eq!(*station_ref, fixture.station_ref);
+            assert_eq!(*superseded, Some(intermediate_installation_ref));
+            *installation_ref
         }
         other => panic!("replacement must claim the open station; got {other:?}"),
     };
-
-    let replacement_dispatch = decide_dispatch(&database, &replacement_install_key)
-        .await
-        .expect("replacement installation receives the live task");
-    assert_eq!(task_id(&replacement_dispatch), original_task_id);
-    let owner: Uuid = sqlx::query_scalar(
+    let owner: Option<Uuid> = sqlx::query_scalar(
         "SELECT claimed_by_installation_ref FROM collection_work_order_lease_task WHERE task_id=$1",
     )
     .bind(original_task_id)
     .fetch_one(database.pool())
     .await
     .expect("task owner is readable");
-    assert_eq!(owner, replacement_installation_ref);
-    let task = task_from_dispatch(&replacement_dispatch);
-    let replacement_attempt = attempt(task.task_id(), replacement_instance_id);
-    assert!(matches!(
-        start_producer_attempt(&database, &replacement_attempt).await,
-        Ok(RuntimeAttemptOutcome::Started { .. })
-    ));
-    assert!(lease_is_live(&database, lease.lease_ref).await);
+    assert_ne!(owner, Some(replacement_installation_ref));
+    assert_eq!(task_id(&old_dispatch), original_task_id);
+    assert!(
+        !lease_is_live(&database, lease.lease_ref).await,
+        "a replacement requires a fresh account binding, admission and lease"
+    );
 }
 
 #[tokio::test]
@@ -718,9 +767,13 @@ async fn detail_dispatch_uses_the_latest_accepted_signed_discovery_url_outside_t
     issue_work_order_lease(&database, fixture.work_order_ref, 60)
         .await
         .expect("material deepening lease is issued");
-    let dispatch = decide_dispatch(&database, &fixture.install_key)
-        .await
-        .expect("detail dispatch is decided");
+    let dispatch = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("detail dispatch is decided");
     match dispatch {
         DispatchDecision::Dispatch {
             task_spec,
@@ -763,6 +816,7 @@ struct Fixture {
     installation_ref: Uuid,
     producer_instance_id: Uuid,
     install_key: String,
+    installation_credential: String,
 }
 
 async fn proof_database() -> Database {
@@ -840,7 +894,7 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     sqlx::query(
         "INSERT INTO plugin_installation \
              (installation_ref, install_key, station_ref, claim_kind, claimed_at, plugin_version, capabilities) \
-         VALUES ($1, $2, $3, 'person', scope_001_now(), '0.5.1', \
+         VALUES ($1, $2, $3, 'person', scope_001_now(), '0.8.34', \
                  '[\"author_profile\",\"profile_discovery\",\"content_detail\",\"media_slots\",\"comments\",\"replies\"]'::jsonb)",
     )
     .bind(installation_ref)
@@ -849,15 +903,60 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     .execute(database.pool())
     .await
     .expect("installation is seeded");
+    set_station_accepting(database, station_ref, true, "person")
+        .await
+        .expect("fixture station explicitly accepts new work");
+    let credential = rotate_installation_credential(database, installation_ref)
+        .await
+        .expect("fixture installation receives a high-entropy credential");
+    let installation_credential = credential.raw_credential.expose_once().to_owned();
+    activate_installation_credential(
+        database,
+        installation_ref,
+        credential.credential_ref,
+        &installation_credential,
+    )
+    .await
+    .expect("fixture activates the pending credential before reporting account state");
+    let account = report_account_eligibility(
+        database,
+        installation_ref,
+        &installation_credential,
+        Some("xhs-account-dispatch-fixture"),
+        AccountEligibilitySignal::AuthenticatedObserved,
+        b"collection-dispatch-fixture-digest-key-32-plus",
+    )
+    .await
+    .expect("fixture account observation is accepted");
+    let account_ref = account.account_ref.expect("fixture account is projected");
+    bind_observation_account(database, account_ref, installation_ref, "person")
+        .await
+        .expect("fixture account is explicitly bound");
+    sqlx::query(
+        "UPDATE collection_admission_decision \
+         SET target_ref=$2,station_ref=$3,installation_ref=$4,account_ref=$5 \
+         WHERE decision_ref=$1",
+    )
+    .bind(decision_ref)
+    .bind(target_ref)
+    .bind(station_ref)
+    .bind(installation_ref)
+    .bind(account_ref)
+    .execute(database.pool())
+    .await
+    .expect("fixture admission freezes the selected control tuple");
     sqlx::query(
         "INSERT INTO collection_work_order \
-             (work_order_ref, decision_ref, target_ref, lane, max_works, stop_conditions, station_ref) \
-         VALUES ($1, $2, $3, 'deep_archive', 10, '[\"maximum_quota\",\"time_budget\"]'::jsonb, $4)",
+             (work_order_ref, decision_ref, target_ref, lane, max_works, stop_conditions, \
+              station_ref,installation_ref,account_ref) \
+         VALUES ($1, $2, $3, 'deep_archive', 10, '[\"maximum_quota\",\"time_budget\"]'::jsonb, $4,$5,$6)",
     )
     .bind(work_order_ref)
     .bind(decision_ref)
     .bind(target_ref)
     .bind(station_ref)
+    .bind(installation_ref)
+    .bind(account_ref)
     .execute(database.pool())
     .await
     .expect("work order is seeded");
@@ -868,6 +967,7 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
         installation_ref,
         producer_instance_id,
         install_key,
+        installation_credential,
     }
 }
 

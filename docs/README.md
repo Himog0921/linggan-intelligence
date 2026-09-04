@@ -70,6 +70,7 @@
 | [design/pages/topic-workspace-page.md](design/pages/topic-workspace-page.md) | 交付分支权威；PAGE-TOPIC-WORKSPACE-001 | 真实但明确暂定的 L2 Topic 工作区：定义、人工裁定、冻结材料与来源边界 |
 | [design/changes/topic-workspace-real-001-ui-change-manifest.md](design/changes/topic-workspace-real-001-ui-change-manifest.md) | 交付分支实现；Issue #112 | Topic runtime page 的来源回执、LIDS 影响、状态与响应式变更清单 |
 | [design/changes/collection-lifecycle-001-ui-change-manifest.md](design/changes/collection-lifecycle-001-ui-change-manifest.md) | 交付分支实现；Issue #148 | creator 生命周期读模型、四职责目标抽屉、Evidence tab 退役与 Corpus 精确深链的变更清单 |
+| [design/changes/collection-control-closure-001-ui-change-manifest.md](design/changes/collection-control-closure-001-ui-change-manifest.md) | 交付分支实现；Issue #149 / Package 2 | Collection Control 规则 modal、账号准入与五面控制事实表达的变更清单 |
 | [design/pages/plugin-producer-popup.md](design/pages/plugin-producer-popup.md) | 权威当前 | `PAGE-PLUGIN-001`：Linggan 自有 Browser Producer popup 的身份、本机接纳准备度与受限手动 Discovery receipt |
 | [design/changes/local-001a-evidence-library-ui-change-manifest.md](design/changes/local-001a-evidence-library-ui-change-manifest.md) | 权威当前；LOCAL-001A | Issue #25 的 UI 来源、范围、例外和证明边界 |
 | [design/changes/local-001d-unknown-published-discovery-ui-change-manifest.md](design/changes/local-001d-unknown-published-discovery-ui-change-manifest.md) | 权威当前；LOCAL-001D / Issue #62 | 默认最新已接纳读取、`PUBLISHED_AT UNKNOWN` 与显式发布时间窗口的来源和范围 |
@@ -153,6 +154,7 @@
 | [`proposals/real-canary-002-controlled-discovery-through-authorization-chain.md`](proposals/real-canary-002-controlled-discovery-through-authorization-chain.md) | 草案 | 让一次已获准过的 ADHD 发现面原样再走一遍，但全程经过「授权 → 准入 → 工单 → 租约 → 闸门 → 派发」，用于解锁采集控制合同 §12 第 5 条；不扩大平台足迹，不授权 001C-2/001C-3 |
 | [`plans/active/arc-001-architecture-closure-decision-map.md`](plans/active/arc-001-architecture-closure-decision-map.md) | 活跃计划 | F01 后、首个真实 producer 和用户可见切片前的产品形态、P0 页面、Canary、Capture/Media 与第一阶段运行架构决策图；当前首票为 `product-shell` |
 | [`plans/active/collection-three-package-closure-001.md`](plans/active/collection-three-package-closure-001.md) | 活跃计划；Package 1 / Issue #148 候选实现已验证 | Collection 三包串行收口：当前只实施目标级生命周期只读投影、LIDS v7 抽屉与精确 Corpus 深链；Package 2/3 必须等待本包合并核验后的最新主线 |
+| [`plans/active/collection-control-closure-001.md`](plans/active/collection-control-closure-001.md) | 交付分支计划；Package 2 / Issue #149 | 平台账号准入、安装凭证、版本化巡检规则、调度回执与 Collection 五面控制事实；隔离证明已完成，待 PR review |
 | [`plans/active/design-002-topic-intelligence-reference-page.md`](plans/active/design-002-topic-intelligence-reference-page.md) | 活跃计划 | 合成 Topic Intelligence Reference Page 的范围、规则、原型与验证计划；不替代完整 P0 或业务 SCOPE |
 | [`plans/active/topic-workspace-real-001.md`](plans/active/topic-workspace-real-001.md) | 活跃计划；已部署、待 Mog 业务验收；Issue #112 | 首个真实 Topic 工作区垂直切片；只到暂定定义、人工裁定、冻结 Material Pack 与共享 Work Resource Read |
 | [`plans/active/scope-001-content-evidence-vertical-slice.md`](plans/active/scope-001-content-evidence-vertical-slice.md) | 活跃计划 | 当前唯一获准实施事项：F01 synthetic fact-kernel technical tracer 受控进入 TDD；完成 loopback API + minimal CLI 后 hard stop，不扩入 F02–F10、真实平台/AI/插件/Web |

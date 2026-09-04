@@ -6,9 +6,11 @@ use linggan_contracts::{
     parse_producer_attempt, parse_producer_submission, parse_producer_task_spec,
 };
 use linggan_evidence::{
-    DispatchDecision, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, content_reobservation,
-    decide_dispatch, issue_work_order_lease, read_content_reobservation, start_producer_attempt,
-    submit_producer_package,
+    AccountEligibilitySignal, DispatchDecision, RuntimeAttemptOutcome, RuntimeSubmissionOutcome,
+    activate_installation_credential, bind_observation_account, content_reobservation,
+    decide_dispatch, issue_work_order_lease, read_content_reobservation,
+    report_account_eligibility, rotate_installation_credential, set_station_accepting,
+    start_producer_attempt, submit_producer_package,
 };
 use uuid::Uuid;
 
@@ -98,9 +100,13 @@ async fn reobservation_uses_the_existing_authorized_lease_path_without_new_media
     assert_eq!(queued.tasks.len(), 3);
     assert!(queued.tasks.iter().all(|task| task.state == "QUEUED"));
 
-    let dispatch = decide_dispatch(&database, &fixture.install_key)
-        .await
-        .expect("the first bounded lane is dispatchable");
+    let dispatch = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the first bounded lane is dispatchable");
     let detail = scheduled_task(&dispatch);
     assert_eq!(detail.raw()["capabilitiesRequested"][0], "content_detail");
     assert_eq!(detail.raw()["commentLimit"], "not_requested");
@@ -285,13 +291,12 @@ async fn reobservation_never_merges_a_live_lease_with_a_different_frozen_policy(
     let command = content_reobservation(&database, content_public_ref)
         .await
         .expect("the normal no-media reobservation is admitted as a distinct frozen scope");
-    assert_eq!(command.admission, "ADMITTED");
-    assert_ne!(command.lease_ref, Some(different_policy_lease.lease_ref));
-    assert!(
-        command
-            .tasks
-            .iter()
-            .all(|task| task.acquire_media == "not_requested")
+    assert_eq!(command.admission, "DEFERRED");
+    assert_eq!(command.lease_ref, None);
+    assert_eq!(command.work_order_ref, None);
+    assert_eq!(
+        command.admission_reason, "观察账号已有一份有效 Lease。",
+        "a live lease on the same observed account blocks a second policy, rather than merging it"
     );
     let leased_media: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
@@ -311,6 +316,7 @@ async fn reobservation_never_merges_a_live_lease_with_a_different_frozen_policy(
 
 struct AuthorizedFixture {
     install_key: String,
+    installation_credential: String,
     producer_instance_id: Uuid,
     authorization_ref: Uuid,
     target_ref: Uuid,
@@ -340,14 +346,47 @@ async fn seed_authorized_material_context(
         .bind(decision_ref).bind(request_ref).bind(authorization_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO execution_station (station_ref,display_name,daily_work_quota) VALUES ($1,'复观测夹具工位',200)")
         .bind(station_ref).execute(database.pool()).await.unwrap();
-    sqlx::query("INSERT INTO plugin_installation (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version,capabilities) VALUES ($1,$2,$3,'person',scope_001_now(),'0.8.28','[\"content_detail\",\"comments\",\"replies\"]'::jsonb)")
+    sqlx::query("INSERT INTO plugin_installation (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version,capabilities) VALUES ($1,$2,$3,'person',scope_001_now(),'0.8.34','[\"content_detail\",\"comments\",\"replies\",\"media_slots\",\"media_bytes\"]'::jsonb)")
         .bind(installation_ref).bind(&install_key).bind(station_ref).execute(database.pool()).await.unwrap();
-    sqlx::query("INSERT INTO collection_work_order (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions,station_ref) VALUES ($1,$2,$3,'deep_archive',20,'[\"maximum_quota\",\"time_budget\"]'::jsonb,$4)")
-        .bind(work_order_ref).bind(decision_ref).bind(target_ref).bind(station_ref).execute(database.pool()).await.unwrap();
+    set_station_accepting(database, station_ref, true, "person")
+        .await
+        .unwrap();
+    let credential = rotate_installation_credential(database, installation_ref)
+        .await
+        .unwrap();
+    let installation_credential = credential.raw_credential.expose_once().to_owned();
+    activate_installation_credential(
+        database,
+        installation_ref,
+        credential.credential_ref,
+        &installation_credential,
+    )
+    .await
+    .unwrap();
+    let account = report_account_eligibility(
+        database,
+        installation_ref,
+        &installation_credential,
+        Some("xhs-account-reobservation-fixture"),
+        AccountEligibilitySignal::AuthenticatedObserved,
+        b"reobservation-fixture-digest-key-at-least-32",
+    )
+    .await
+    .unwrap();
+    let account_ref = account.account_ref.unwrap();
+    bind_observation_account(database, account_ref, installation_ref, "person")
+        .await
+        .unwrap();
+    sqlx::query("UPDATE collection_admission_decision SET target_ref=$2,station_ref=$3,installation_ref=$4,account_ref=$5 WHERE decision_ref=$1")
+        .bind(decision_ref).bind(target_ref).bind(station_ref).bind(installation_ref).bind(account_ref)
+        .execute(database.pool()).await.unwrap();
+    sqlx::query("INSERT INTO collection_work_order (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions,station_ref,installation_ref,account_ref) VALUES ($1,$2,$3,'deep_archive',20,'[\"maximum_quota\",\"time_budget\"]'::jsonb,$4,$5,$6)")
+        .bind(work_order_ref).bind(decision_ref).bind(target_ref).bind(station_ref).bind(installation_ref).bind(account_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO collection_work_order_material_target (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media,allow_ocr,allow_asr) VALUES ($1,$2,1,30,2,false,false,false)")
         .bind(work_order_ref).bind(content_public_ref).execute(database.pool()).await.unwrap();
     AuthorizedFixture {
         install_key,
+        installation_credential,
         producer_instance_id,
         authorization_ref,
         target_ref,

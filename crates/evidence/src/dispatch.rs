@@ -10,7 +10,9 @@
 //! 装不进一个必须无人值守运行的系统。稳态的控制是每日额度、风险暂停与授权到期，它们
 //! 默认允许、有界、自己复位。
 
-use crate::station_read::station_daily_note_usage_in;
+use crate::collection_control::{
+    revalidate_frozen_capacity_in, validate_installation_credential_in,
+};
 use linggan_storage_postgres::Database;
 use serde_json::Value;
 use uuid::Uuid;
@@ -26,6 +28,8 @@ pub enum DispatchError {
     SchemaUnavailable,
     #[error("no plugin installation with that install key")]
     UnknownInstallation,
+    #[error("installation credential is invalid")]
+    InvalidCredential,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -80,6 +84,8 @@ pub enum DispatchFailureError {
     SchemaUnavailable,
     #[error("no active plugin installation with that install key")]
     UnknownInstallation,
+    #[error("installation credential is invalid")]
+    InvalidCredential,
     #[error("the installation no longer holds that live task claim")]
     ClaimNotHeld,
     #[error("failure id was already used for a different task, installation, or failure code")]
@@ -121,6 +127,8 @@ pub enum DispatchDecision {
     NothingWaiting,
     /// 任务存在，但当下没有符合资格的页面执行定位信息。
     ExecutionLocatorUnavailable { reason: String },
+    /// A frozen control fact changed after the Lease was issued.
+    ControlBlocked { reason_code: String },
 }
 
 impl DispatchDecision {
@@ -137,6 +145,7 @@ impl DispatchDecision {
             Self::Dispatch { .. } => 0,
             Self::NothingWaiting => 300,
             Self::ExecutionLocatorUnavailable { .. } => 300,
+            Self::ControlBlocked { .. } => 300,
             // 触顶要等次日自然日窗口重置，问得再勤也不会变。
             Self::DailyQuotaReached { .. } => 1800,
             Self::RiskPaused { .. } => 900,
@@ -156,6 +165,29 @@ impl DispatchDecision {
             Self::DailyQuotaReached { .. } => "daily_quota_reached",
             Self::NothingWaiting => "nothing_waiting",
             Self::ExecutionLocatorUnavailable { .. } => "execution_locator_unavailable",
+            Self::ControlBlocked { reason_code } => match reason_code.as_str() {
+                "risk_paused" => "risk_paused",
+                "station_unavailable" => "station_unavailable",
+                "installation_credential_missing" => "installation_credential_missing",
+                "plugin_version_unsupported" => "plugin_version_unsupported",
+                "installation_stale" => "installation_stale",
+                "capability_missing" => "capability_missing",
+                "account_unbound" => "account_unbound",
+                "account_binding_changed" => "account_binding_changed",
+                "account_binding_expired" => "account_binding_expired",
+                "account_eligibility_stale" => "account_eligibility_stale",
+                "account_cooling" => "account_cooling",
+                "account_needs_login" => "account_needs_login",
+                "account_restricted" => "account_restricted",
+                "account_unknown" => "account_unknown",
+                "account_busy" => "account_busy",
+                "station_daily_budget_reached" => "station_daily_budget_reached",
+                "rule_revision_changed" => "rule_revision_changed",
+                "monitoring_paused" => "monitoring_paused",
+                "authorization_expired_or_revoked" => "authorization_expired_or_revoked",
+                "target_not_requestable" => "target_not_requestable",
+                _ => "capacity_unknown",
+            },
         }
     }
 
@@ -186,6 +218,7 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
 pub async fn requeue_failed_dispatch(
     database: &Database,
     install_key: &str,
+    installation_credential: &str,
     task_id: Uuid,
     failure_ref: Uuid,
     failure_code: DispatchFailureCode,
@@ -204,6 +237,15 @@ pub async fn requeue_failed_dispatch(
     let Some(installation_ref) = installation_ref else {
         return Err(DispatchFailureError::UnknownInstallation);
     };
+    if !validate_installation_credential_in(
+        &mut transaction,
+        installation_ref,
+        installation_credential,
+    )
+    .await?
+    {
+        return Err(DispatchFailureError::InvalidCredential);
+    }
 
     let replay: Option<(Uuid, Uuid, String)> = sqlx::query_as(
         "SELECT task_id,installation_ref,failure_code \
@@ -272,6 +314,7 @@ pub async fn requeue_failed_dispatch(
 pub async fn decide_dispatch(
     database: &Database,
     install_key: &str,
+    installation_credential: &str,
 ) -> Result<DispatchDecision, DispatchError> {
     if !dispatch_schema_is_ready(database).await? {
         return Err(DispatchError::SchemaUnavailable);
@@ -292,7 +335,16 @@ pub async fn decide_dispatch(
     let Some((installation_ref, station_ref, quota)) = station else {
         return Err(DispatchError::UnknownInstallation);
     };
-    let (Some(station_ref), Some(quota)) = (station_ref, quota) else {
+    if !validate_installation_credential_in(
+        &mut transaction,
+        installation_ref,
+        installation_credential,
+    )
+    .await?
+    {
+        return Err(DispatchError::InvalidCredential);
+    }
+    let (Some(station_ref), Some(_quota)) = (station_ref, quota) else {
         return Ok(DispatchDecision::InstallationNotClaimed);
     };
 
@@ -315,6 +367,12 @@ pub async fn decide_dispatch(
     .fetch_optional(&mut *transaction)
     .await?;
     if let Some((task_id, lease_ref, task_spec)) = in_progress {
+        if let Some(reason_code) =
+            revalidate_dispatch_task(&mut transaction, installation_ref, lease_ref, &task_spec)
+                .await?
+        {
+            return Ok(DispatchDecision::ControlBlocked { reason_code });
+        }
         let execution_source_url =
             execution_source_url_for_task(&mut transaction, &task_spec).await?;
         if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
@@ -333,12 +391,6 @@ pub async fn decide_dispatch(
             execution_source_url,
             page_session_plan,
         });
-    }
-
-    let used = station_daily_note_usage_in(&mut transaction, station_ref).await?;
-    if used >= i64::from(quota) {
-        // 触顶的是产能，不是工位。工位仍在线，明天窗口重置后自然恢复（规则文档 §6.3）。
-        return Ok(DispatchDecision::DailyQuotaReached { quota, used });
     }
 
     // 先取候选，因为风险暂停是**按平台与 lane 限定范围**的：不知道这次要做的是哪条
@@ -368,12 +420,14 @@ pub async fn decide_dispatch(
     .fetch_optional(&mut *transaction)
     .await?;
 
-    let Some((task_id, lease_ref, task_spec, platform, lane)) = waiting else {
+    let Some((task_id, lease_ref, task_spec, _platform, _lane)) = waiting else {
         return Ok(DispatchDecision::NothingWaiting);
     };
 
-    if let Some(reason) = active_risk_pause(&mut transaction, &platform, &lane).await? {
-        return Ok(DispatchDecision::RiskPaused { reason });
+    if let Some(reason_code) =
+        revalidate_dispatch_task(&mut transaction, installation_ref, lease_ref, &task_spec).await?
+    {
+        return Ok(DispatchDecision::ControlBlocked { reason_code });
     }
 
     let execution_source_url = execution_source_url_for_task(&mut transaction, &task_spec).await?;
@@ -408,6 +462,122 @@ pub async fn decide_dispatch(
         execution_source_url,
         page_session_plan,
     })
+}
+
+async fn revalidate_dispatch_task(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    caller_installation_ref: Uuid,
+    lease_ref: Uuid,
+    task_spec: &Value,
+) -> Result<Option<String>, sqlx::Error> {
+    type DispatchControlRow = (
+        String,
+        String,
+        Uuid,
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<bool>,
+        String,
+        String,
+        Option<Uuid>,
+    );
+    let control: Option<DispatchControlRow> = sqlx::query_as(
+        "SELECT target.platform,work_order.lane,lease.station_ref, \
+                work_order.installation_ref,work_order.account_ref, \
+                work_order.monitor_rule_revision_ref,target.active_monitor_rule_revision_ref, \
+                active_rule.automatic_enabled,target.lifecycle_state,request.requested_by, \
+                decision.authorization_ref \
+         FROM collection_work_order_lease lease \
+         JOIN collection_work_order work_order USING(work_order_ref) \
+         JOIN collection_observation_target target USING(target_ref) \
+         JOIN collection_admission_decision decision USING(decision_ref) \
+         JOIN collection_acquisition_request request USING(request_ref) \
+         LEFT JOIN collection_monitor_rule_revision active_rule \
+           ON active_rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+         WHERE lease.lease_ref=$1 AND lease.released_at IS NULL \
+           AND lease.expires_at>scope_001_now() FOR UPDATE OF lease,target",
+    )
+    .bind(lease_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some((
+        platform,
+        lane,
+        station_ref,
+        installation_ref,
+        account_ref,
+        frozen_rule_ref,
+        active_rule_ref,
+        automatic_enabled,
+        lifecycle_state,
+        requested_by,
+        authorization_ref,
+    )) = control
+    else {
+        return Ok(Some("station_unavailable".to_owned()));
+    };
+    let (Some(installation_ref), Some(account_ref)) = (installation_ref, account_ref) else {
+        return Ok(Some("station_unavailable".to_owned()));
+    };
+    if installation_ref != caller_installation_ref {
+        return Ok(Some("station_unavailable".to_owned()));
+    }
+    let authorization_valid: bool = if let Some(authorization_ref) = authorization_ref {
+        sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM collection_acquisition_authorization \
+             WHERE authorization_ref=$1 AND revoked_at IS NULL \
+               AND expires_at>scope_001_now())",
+        )
+        .bind(authorization_ref)
+        .fetch_one(&mut **transaction)
+        .await?
+    } else {
+        false
+    };
+    if !authorization_valid {
+        return Ok(Some("authorization_expired_or_revoked".to_owned()));
+    }
+    if requested_by == "agent" && frozen_rule_ref != active_rule_ref {
+        return Ok(Some("rule_revision_changed".to_owned()));
+    }
+    if requested_by == "agent"
+        && lane == "patrol"
+        && (frozen_rule_ref.is_none()
+            || automatic_enabled != Some(true)
+            || lifecycle_state != "monitoring")
+    {
+        return Ok(Some("monitoring_paused".to_owned()));
+    }
+    if requested_by == "person" && lifecycle_state == "dismissed" {
+        return Ok(Some("target_not_requestable".to_owned()));
+    }
+    let Some(capability) = task_spec
+        .get("capabilitiesRequested")
+        .and_then(Value::as_array)
+        .and_then(|values| values.first())
+        .and_then(Value::as_str)
+    else {
+        return Ok(Some("capability_missing".to_owned()));
+    };
+    let capacity = revalidate_frozen_capacity_in(
+        transaction,
+        &platform,
+        &lane,
+        &[capability],
+        station_ref,
+        installation_ref,
+        account_ref,
+        Some(lease_ref),
+        false,
+    )
+    .await?;
+    Ok((!matches!(
+        capacity.capacity,
+        linggan_contracts::Capacity::Available { .. }
+    ))
+    .then(|| capacity.capacity.reason_code().to_owned()))
 }
 
 /// 把已经冻结在 Work Order 中的同页读取范围交给 `content_detail` 执行。
@@ -521,25 +691,6 @@ async fn execution_source_url_for_task(
          ORDER BY package.accepted_at DESC,finding.created_at DESC LIMIT 1",
     )
     .bind(content_external_id)
-    .fetch_optional(&mut **transaction)
-    .await
-}
-
-/// 覆盖这个平台与 lane 的风险暂停。判据与准入、发租处保持一致——同一条规则有三份实现
-/// 而判据不同，正是旧项目「页面显示已达上限但仍在派单」那类故障的来源。
-async fn active_risk_pause(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    platform: &str,
-    lane: &str,
-) -> Result<Option<String>, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT reason FROM collection_risk_pause \
-         WHERE lifted_at IS NULL \
-           AND (platform IS NULL OR platform = $1) \
-           AND (lane IS NULL OR lane = $2) LIMIT 1",
-    )
-    .bind(platform)
-    .bind(lane)
     .fetch_optional(&mut **transaction)
     .await
 }

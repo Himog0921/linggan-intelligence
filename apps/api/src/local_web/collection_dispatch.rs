@@ -13,8 +13,9 @@ use axum::{
     routing::post,
 };
 use linggan_evidence::{
-    DispatchDecision, DispatchFailureCode, DispatchFailureError, DispatchFailureOutcome,
-    decide_dispatch, requeue_failed_dispatch,
+    AccountEligibilitySignal, CollectionControlError, DispatchDecision, DispatchFailureCode,
+    DispatchFailureError, DispatchFailureOutcome, activate_installation_credential,
+    decide_dispatch, report_account_eligibility, requeue_failed_dispatch,
 };
 
 /// The station asks whether it may execute a bounded task. Published through
@@ -25,16 +26,144 @@ pub(super) const CLAIM_PATH: &str = "/api/local/dispatch/claim";
 /// execution failure before the frozen task may be retried.
 pub(super) const FAILURE_PATH: &str = "/api/local/dispatch/failures";
 
+pub(super) const ACCOUNT_ELIGIBILITY_PATH: &str =
+    "/api/local/stations/account-eligibility-observations";
+pub(super) const CREDENTIAL_ACTIVATION_PATH: &str =
+    "/api/local/stations/installation-credentials/activate";
+
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route(CLAIM_PATH, post(claim))
         .route(FAILURE_PATH, post(failure))
+        .route(ACCOUNT_ELIGIBILITY_PATH, post(report_account))
+        .route(CREDENTIAL_ACTIVATION_PATH, post(activate_credential))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CredentialActivationBody {
+    installation_ref: uuid::Uuid,
+    credential_ref: uuid::Uuid,
+    installation_credential: String,
+}
+
+async fn activate_credential(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Ok(request) = serde_json::from_slice::<CredentialActivationBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "installation_credential_activation_invalid",
+        );
+    };
+    match activate_installation_credential(
+        database,
+        request.installation_ref,
+        request.credential_ref,
+        &request.installation_credential,
+    )
+    .await
+    {
+        Ok(()) => Json(serde_json::json!({"outcome":"activated"})).into_response(),
+        Err(CollectionControlError::InvalidCredential) => local_read_json_error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "installation_credential_invalid",
+        ),
+        Err(CollectionControlError::SchemaUnavailable)
+        | Err(CollectionControlError::Database(_)) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "installation_credential_activation_unavailable",
+        ),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "installation_credential_activation_rejected",
+        ),
+    }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AccountEligibilityBody {
+    installation_ref: uuid::Uuid,
+    installation_credential: String,
+    raw_platform_account_id: Option<String>,
+    signal: String,
+}
+
+/// Consume one closed producer observation. The raw platform id never leaves this stack frame;
+/// the evidence layer stores only its keyed digest and a server-owned eligibility projection.
+async fn report_account(State(state): State<LocalWebState>, body: Bytes) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    let Some(digest_key) = state.account_digest_key.as_deref() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "account_digest_key_unavailable",
+        );
+    };
+    let Ok(request) = serde_json::from_slice::<AccountEligibilityBody>(&body) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "account_eligibility_observation_invalid",
+        );
+    };
+    let Some(signal) = AccountEligibilitySignal::parse(&request.signal) else {
+        return local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "account_eligibility_signal_invalid",
+        );
+    };
+    match report_account_eligibility(
+        database,
+        request.installation_ref,
+        &request.installation_credential,
+        request.raw_platform_account_id.as_deref(),
+        signal,
+        digest_key,
+    )
+    .await
+    {
+        Ok(receipt) => Json(serde_json::json!({
+            "outcome": "observed",
+            "installationRef": receipt.installation_ref,
+            "accountRef": receipt.account_ref,
+            "eligibilityState": receipt.state.as_str(),
+            "bindingRequired": receipt.binding_required,
+        }))
+        .into_response(),
+        Err(CollectionControlError::InvalidCredential) => local_read_json_error(
+            axum::http::StatusCode::UNAUTHORIZED,
+            "installation_credential_invalid",
+        ),
+        Err(CollectionControlError::SchemaUnavailable)
+        | Err(CollectionControlError::MissingDigestKey) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "account_control_unavailable",
+        ),
+        Err(CollectionControlError::Database(_)) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "account_eligibility_observation_failed",
+        ),
+        Err(_) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "account_eligibility_observation_rejected",
+        ),
+    }
 }
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ClaimBody {
     install_key: String,
+    installation_credential: String,
 }
 
 /// A station asks whether there is work it may run right now.
@@ -55,7 +184,13 @@ async fn claim(State(state): State<LocalWebState>, body: Bytes) -> Response {
             "dispatch_claim_invalid",
         );
     };
-    match decide_dispatch(database, &request.install_key).await {
+    match decide_dispatch(
+        database,
+        &request.install_key,
+        &request.installation_credential,
+    )
+    .await
+    {
         Ok(decision) => Json(payload(&decision)).into_response(),
         Err(_) => local_read_json_error(
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
@@ -68,6 +203,7 @@ async fn claim(State(state): State<LocalWebState>, body: Bytes) -> Response {
 #[serde(rename_all = "camelCase")]
 struct FailureBody {
     install_key: String,
+    installation_credential: String,
     task_id: uuid::Uuid,
     failure_id: uuid::Uuid,
     failure_code: String,
@@ -100,6 +236,7 @@ async fn failure(State(state): State<LocalWebState>, body: Bytes) -> Response {
     match requeue_failed_dispatch(
         database,
         &request.install_key,
+        &request.installation_credential,
         request.task_id,
         request.failure_id,
         failure_code,
@@ -133,6 +270,7 @@ fn failure_error_code(error: &DispatchFailureError) -> &'static str {
     match error {
         DispatchFailureError::SchemaUnavailable => "dispatch_schema_unavailable",
         DispatchFailureError::UnknownInstallation => "dispatch_failure_installation_unknown",
+        DispatchFailureError::InvalidCredential => "dispatch_failure_credential_invalid",
         DispatchFailureError::ClaimNotHeld => "dispatch_failure_claim_not_held",
         DispatchFailureError::FailureIdentityConflict => "dispatch_failure_identity_conflict",
         DispatchFailureError::Database(_) => "dispatch_failure_write_failed",
@@ -188,6 +326,10 @@ fn payload(decision: &DispatchDecision) -> serde_json::Value {
         }
         DispatchDecision::ExecutionLocatorUnavailable { reason } => {
             payload["reason"] = serde_json::json!(reason);
+        }
+        DispatchDecision::ControlBlocked { reason_code } => {
+            payload["reasonCode"] = serde_json::json!(reason_code);
+            payload["reason"] = serde_json::json!("当前控制资格已变化，任务保持等待。");
         }
     }
     payload

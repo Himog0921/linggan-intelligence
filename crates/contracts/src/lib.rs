@@ -10,7 +10,8 @@ mod local_producer;
 mod producer_runtime;
 
 pub use admission::{
-    AdmissionFacts, AdmissionOutcome, AdmissionQuestion, Capacity, decide_admission,
+    AdmissionFacts, AdmissionOutcome, AdmissionQuestion, AuthorizationBoundaryFailure, Capacity,
+    CapacityReasonCode, decide_admission,
 };
 pub use capture::{
     CapturePackage, CaptureRecord, ContractError, Coverage, KnownSetTarget, KnownTargetOutcome,

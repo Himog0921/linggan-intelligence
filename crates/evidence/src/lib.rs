@@ -3,6 +3,7 @@
 
 mod acquisition_chain;
 mod archive_completeness;
+mod collection_control;
 mod collection_target;
 mod collection_task_read;
 mod content_reobservation;
@@ -41,11 +42,25 @@ mod work_resource_current;
 mod work_resource_read;
 
 pub use acquisition_chain::{
-    AcquisitionChainError, AuthorizationGrant, MaterialDeepeningTarget, RequestOutcome,
-    acquisition_chain_schema_is_ready, grant_authorization, read_capacity, request_and_admit,
-    request_and_admit_material_targets, request_and_admit_material_targets_under_authorization,
+    AcquisitionChainError, AuthorizationGrant, MaterialDeepeningTarget, RequestLeaseError,
+    RequestLeaseOutcome, RequestOutcome, acquisition_chain_schema_is_ready, grant_authorization,
+    read_capacity, request_admit_and_lease, request_admit_material_targets_and_lease,
+    request_and_admit, request_and_admit_material_targets,
+    request_and_admit_material_targets_under_authorization,
 };
 pub use archive_completeness::{ArchiveCompleteness, read_archive_completeness};
+pub use collection_control::{
+    AccountEligibilityReceipt, AccountEligibilitySignal, AccountEligibilityState,
+    CapacitySelection, CollectionControlError, ComparableObservationRound,
+    DEFAULT_MONITOR_INTERVAL_SECONDS, DynamicCadence, InstallationCredentialSecret,
+    IssuedInstallationCredential, MAXIMUM_MONITOR_INTERVAL_SECONDS,
+    MINIMUM_MONITOR_INTERVAL_SECONDS, MINIMUM_PLUGIN_VERSION, MonitorCommandActor,
+    MonitorCommandKind, MonitorCommandOutcomeKind, MonitorRuleCommand, MonitorRuleCommandError,
+    MonitorRuleCommandReceipt, MonitorRuleDraft, MonitorRuleMode, activate_installation_credential,
+    apply_manual_observe_command, apply_monitor_rule_command, bind_observation_account,
+    collection_control_schema_is_ready, dynamic_cadence, report_account_eligibility,
+    rotate_installation_credential, set_station_accepting, version_at_least,
+};
 pub use collection_target::{
     CollectionTargetError, ObservationTarget, ObservationTargetAvatar, StoreOutcome, TargetCounts,
     collection_target_schema_is_ready, count_targets, list_targets, list_targets_in_state,
@@ -108,9 +123,9 @@ pub use media_acquisition::{
     record_media_acquisition_failure,
 };
 pub use patrol_scheduler::{
-    PatrolTickSummary, SchedulerHeartbeat, patrol_schema_is_ready, read_scheduler_heartbeat,
-    record_scheduler_started, run_due_patrols, set_group_for_many, set_monitoring_for_many,
-    set_target_monitoring, target_monitoring_enabled,
+    PatrolTickSummary, SchedulerHeartbeat, patrol_schema_is_ready, read_dynamic_cadence_for_rule,
+    read_scheduler_heartbeat, record_scheduler_started, run_due_patrols, set_group_for_many,
+    set_monitoring_for_many, set_target_monitoring, target_monitoring_enabled,
 };
 pub use producer_runtime::{
     MediaBlobAdmission, MediaUploadFinalizeClaim, MediaUploadSession, ProducerRuntimeError,

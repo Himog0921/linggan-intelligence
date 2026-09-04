@@ -74,10 +74,16 @@ impl LifecycleState {
         }
     }
 
-    /// The only legal moves. Monitoring is deliberately unreachable from `PendingDecision`:
-    /// without a baseline the first patrol would treat every work it sees as new, and the
-    /// surge baseline would have no distribution to compare against.
+    /// Creator-default legal moves. Creator monitoring is deliberately unreachable from
+    /// `PendingDecision`; callers that know the target kind must use [`Self::may_move_to_for`].
     pub fn may_move_to(self, next: Self) -> bool {
+        self.may_move_to_for(next, TargetKind::Creator)
+    }
+
+    /// Kind-aware legal moves. Keywords have no creator-profile deep baseline, so a valid rule
+    /// may move them from pending directly into monitoring or paused. Creators retain the strict
+    /// pending → archiving → archived → monitoring sequence.
+    pub fn may_move_to_for(self, next: Self, kind: TargetKind) -> bool {
         matches!(
             (self, next),
             (Self::PendingDecision, Self::Archiving)
@@ -91,6 +97,13 @@ impl LifecycleState {
                 | (Self::Paused, Self::Monitoring)
                 | (Self::Paused, Self::Dismissed)
                 | (Self::Dismissed, Self::PendingDecision)
+        ) || matches!(
+            (kind, self, next),
+            (
+                TargetKind::Keyword,
+                Self::PendingDecision,
+                Self::Monitoring | Self::Paused
+            )
         )
     }
 }
@@ -131,6 +144,7 @@ pub enum CollectionContractError {
     UnknownSource,
     UnsupportedPlatform,
     EmptyIdentity,
+    InvalidCreatorIdentity,
     IllegalTransition,
 }
 
@@ -142,6 +156,9 @@ impl fmt::Display for CollectionContractError {
             Self::UnknownSource => "target source must be plugin_push or manual",
             Self::UnsupportedPlatform => "only xhs has a controlled verification base",
             Self::EmptyIdentity => "a target must carry a non-empty normalised identity",
+            Self::InvalidCreatorIdentity => {
+                "creator identity must be a stable platform id, never a URL"
+            }
             Self::IllegalTransition => "that lifecycle move is not allowed",
         };
         formatter.write_str(message)
@@ -168,7 +185,18 @@ impl TargetIdentity {
         platform: &str,
         platform_creator_id: &str,
     ) -> Result<Self, CollectionContractError> {
-        Self::build(platform, TargetKind::Creator, platform_creator_id.trim())
+        let platform_creator_id = platform_creator_id.trim();
+        if platform_creator_id.is_empty() {
+            return Err(CollectionContractError::EmptyIdentity);
+        }
+        if platform_creator_id.len() > 128
+            || !platform_creator_id.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '_' | '-')
+            })
+        {
+            return Err(CollectionContractError::InvalidCreatorIdentity);
+        }
+        Self::build(platform, TargetKind::Creator, platform_creator_id)
     }
 
     /// `ranking` is part of the identity on purpose: searching one term by "comprehensive" and
@@ -226,6 +254,14 @@ mod tests {
         assert!(LifecycleState::PendingDecision.may_move_to(LifecycleState::Archiving));
         assert!(LifecycleState::Archiving.may_move_to(LifecycleState::Archived));
         assert!(LifecycleState::Archived.may_move_to(LifecycleState::Monitoring));
+        assert!(
+            LifecycleState::PendingDecision
+                .may_move_to_for(LifecycleState::Monitoring, TargetKind::Keyword)
+        );
+        assert!(
+            LifecycleState::PendingDecision
+                .may_move_to_for(LifecycleState::Paused, TargetKind::Keyword)
+        );
     }
 
     #[test]
@@ -234,10 +270,11 @@ mod tests {
         assert_eq!(from_id.key(), "5ebe6d210000000001000afe");
         // A URL is not an identity: the same creator has several URL forms, so accepting one
         // would let the same person enter twice under different keys.
-        let from_url =
+        assert_eq!(
             TargetIdentity::creator("xhs", "https://www.xiaohongshu.com/user/profile/5ebe6d21")
-                .unwrap();
-        assert_ne!(from_id.key(), from_url.key());
+                .unwrap_err(),
+            CollectionContractError::InvalidCreatorIdentity
+        );
     }
 
     #[test]

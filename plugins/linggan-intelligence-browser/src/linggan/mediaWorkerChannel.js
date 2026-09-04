@@ -16,6 +16,7 @@ function asErrorMessage(value, fallback) {
 export function requestMediaWorker({
   runtime = chrome.runtime,
   preferredUploadId = '',
+  installationCredential = '',
   timeoutMs = 120000,
   requestId = crypto.randomUUID(),
 } = {}) {
@@ -48,6 +49,7 @@ export function requestMediaWorker({
       action: PROCESS_MEDIA_OUTBOX,
       requestId,
       preferredUploadId: String(preferredUploadId || ''),
+      installationCredential: String(installationCredential || ''),
     });
   });
 }

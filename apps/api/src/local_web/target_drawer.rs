@@ -123,6 +123,28 @@ impl<'a> TargetListContext<'a> {
         }
         href
     }
+
+    /// Open the target-scoped monitoring rule overlay without carrying drawer state into it.
+    /// The list filter and sort remain in the URL so closing the overlay returns to the same
+    /// working set. `opener_id` is a fragment only: it restores keyboard focus and never
+    /// participates in target identity.
+    pub fn monitor_rule_href(self, target_ref: uuid::Uuid, opener_id: &str) -> String {
+        let mut pairs = self
+            .pairs()
+            .into_iter()
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect::<Vec<_>>();
+        pairs.push(("rule".to_owned(), target_ref.to_string()));
+        format!(
+            "/collection/targets?{}#{}",
+            pairs
+                .iter()
+                .map(|(key, value)| format!("{key}={value}"))
+                .collect::<Vec<_>>()
+                .join("&amp;"),
+            opener_id,
+        )
+    }
 }
 
 #[derive(Clone, Copy)]

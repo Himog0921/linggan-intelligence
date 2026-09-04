@@ -23,6 +23,7 @@ test('a task body without permission is not carried out of the claim', async () 
   // 就跑」——那绕过的正是整条授权链。因此不许执行时任务体不带出去。
   const result = await claimLingganDispatch({
     installKey: 'i-1',
+    installationCredential: 'credential-1',
     health: HEALTH,
     fetchImpl: async () => ({
       ok: true,
@@ -44,7 +45,7 @@ test('a task body without permission is not carried out of the claim', async () 
 test('only an explicit permission is treated as permission', async () => {
   for (const body of [{ decision: 'dispatch' }, { decision: 'dispatch', mayExecute: 'true' }]) {
     const result = await claimLingganDispatch({
-      installKey: 'i-1', health: HEALTH,
+      installKey: 'i-1', installationCredential: 'credential-1', health: HEALTH,
       fetchImpl: async () => ({ ok: true, async json() { return body; } }),
     });
     // 缺字段、字符串 'true' 都不算许可——只认布尔真。
@@ -68,7 +69,7 @@ test('a permitted claim carries the task and its lease', async () => {
     stopConditions: ['maximum_quota'],
   };
   const result = await claimLingganDispatch({
-    installKey: 'i-1', health: HEALTH,
+    installKey: 'i-1', installationCredential: 'credential-1', health: HEALTH,
     fetchImpl: async () => ({
       ok: true,
       async json() {
@@ -87,7 +88,7 @@ test('a permitted claim carries the task and its lease', async () => {
 
 test('a malformed permitted claim is rejected before it controls a page', async () => {
   const result = await claimLingganDispatch({
-    installKey: 'i-1', health: HEALTH,
+    installKey: 'i-1', installationCredential: 'credential-1', health: HEALTH,
     fetchImpl: async () => ({
       ok: true,
       async json() {
@@ -115,7 +116,7 @@ test('page execution requires an explicit receipt with the dispatched identity',
 
 test('an unreachable server never reports permission', async () => {
   const result = await claimLingganDispatch({
-    installKey: 'i-1', health: HEALTH,
+    installKey: 'i-1', installationCredential: 'credential-1', health: HEALTH,
     fetchImpl: async () => { throw new Error('offline'); },
   });
   assert.equal(result.mayExecute, false);
