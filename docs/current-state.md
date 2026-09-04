@@ -35,7 +35,7 @@ Mog 已明确：媒体生命周期合同决策完成；`LOCAL-001` 不再作为�
 - 工位 `1` 已通过正式 API 认领 active installation `9179e6cf-3316-493a-abee-2e7eb162f824` / `0.8.28`，旧 `0.8.23` 被取代。
 - API、巡检 worker 与媒体 worker 当时从 `linggan-intelligence-origin-main-d7e7220` 快照运行。**该部署模型已于 2026-09-03 废弃**：三个服务现在统一从跟随 `origin/main` 的 `runtime-main` 运行，见 [`runbooks/local-runtime-deployment.md`](runbooks/local-runtime-deployment.md)。此处保留当时的 `/health` 结论（`LINGGAN_BROWSER_PRODUCER_RUNTIME`、`PLUGIN_RUNTIME_002_SCHEMA_READY / READY`、scheduler running），但运行来源的描述不再成立。
 - 真实样本“智商131的A娃。”（`contentExternalId=6a2047060000000022027f0e`，Work `b681991d-525a-4332-8fea-e937e7684c15`）在 `0.8.28` 一次有效标准详情执行中接纳详情 1、媒体槽位 6、顶层评论 15、回复 15；详情窗口为 `requested=30 / unique=30 / page=233 / detail_window complete`。
-- 同轮 6 个逻辑媒体槽位、7 个字节组件全部 acquired/materialized：封面 1、正文图 3、Live Photo still+motion、作者头像 1。Evidence UI 已显示本地封面、本地头像、独立“作品作者 / 监控目标”；未证明监控目标时保持 `NOT_VERIFIED`。
+- 同轮 6 个逻辑媒体槽位、7 个字节组件全部 acquired/materialized：封面 1、正文图 3、Live Photo still+motion、作者头像 1。Evidence UI 已显示本地封面、本地头像与单一“作者”字段（2026-09-04 DEC-作者合并）。
 - 当前完成证明为 231 项插件测试、Rust workspace、49 项隔离 PostgreSQL proof、production build、content runtime、运行隔离、release verify/reproducibility；production npm audit 为 0。全 dev 依赖的既有 9 项 audit 提示和 Webpack bundle 体积警告继续保留。
 
 尚未被上述完成声明覆盖的边界：
@@ -79,8 +79,7 @@ Mog 已明确：媒体生命周期合同决策完成；`LOCAL-001` 不再作为�
 是平台在受信 XHS CDN 上返回 `http://` 候选，而下载安全边界只允许 HTTPS。0.8.25 只把无凭据、
 无端口、命中平台白名单的 HTTP 候选规范化为 HTTPS，随后仍执行严格主机与重定向校验；普通 HTTP
 和任意第三方域名继续拒绝。0.8.25 真实标准详情新包再次接纳 6 个媒体槽位，并已物化作者头像和
-3 张正文图；统一 Work Resource 与 Evidence UI 已显示首图封面回退、作者头像以及分离的作品作者 /
-监控目标。终验同时证明首轮离屏唤醒只处理 2 条普通媒体、Live Photo 仍等待全局工作队列，不能
+3 张正文图；统一 Work Resource 与 Evidence UI 已显示首图封面回退、作者头像以及单一作者字段。终验同时证明首轮离屏唤醒只处理 2 条普通媒体、Live Photo 仍等待全局工作队列，不能
 保证同一标准详情及时带回全部媒体。0.8.26 因此把 Live Photo 拆为 still/motion 两个直接字节单元，
 一次离屏唤醒可串行排空最多 12 条有界任务；最终 7 个组件仍须重载后真实验收。PR 合并、main /
 runtime exact-head 对齐在结果后分别核对。
@@ -94,7 +93,7 @@ runtime exact-head 对齐在结果后分别核对。
 `media_slots`、`comments`、`replies` 四包：详情 1、媒体逻辑槽位 6、顶层评论 15、回复 15；评论
 Coverage 为 `DETAIL_WINDOW / complete / 30 of 30`，页面公开数为 233。6 个槽位的 7 个字节组件
 （作者头像、封面、3 张正文图、Live Photo still/motion）均已完成 Download、Blob 与
-Materialization；Evidence 实际读取本地封面和作者头像，并将作品作者与监控目标分栏。该 Live Photo
+Materialization；Evidence 实际读取本地封面和作者头像，并以单一作者字段呈现。该 Live Photo
 的 OCR/缩略图链已完成；音频抽取与 ASR 因本机音频/Whisper 处理环境失败而明确显示 `FAILED`，不把
 无有效音轨或转录伪装成成功。
 
@@ -120,7 +119,7 @@ SHA-256 为 `015a3de775a55d6ac2be8dac5d6ca833f7d88f3d772d641a73c7bbe91f51184e`�
 
 用户已确认“ADHD的尽头是成瘾”仍在平台推流，页面公开评论数随时间增长属于真实进量，不按重复或错误分母处理。本后续只对该已授权作品重新执行详情、评论和媒体链；最新 Attempt 数量、页面公开数与历史累计唯一评论继续分别表达。
 
-0.8.19 已让详情中同时存在的 `authorId + authorAvatar` 形成独立作者媒体槽位。Rust 以当前作品作为观察上下文校验作者主体，写入 `author.avatar` 权威关系，再复用 Slot → Candidate → Download → Blob → Materialization；头像不进入 OCR/ASR。Work Resource 的 `media.avatar` 只返回 `INLINE_SAFE` 本地句柄。Evidence Library 已把作品作者与监控目标拆成两个事实区，作者区支持本地头像，媒体 Inspector 连续列出头像、封面、正文图、视频及派生资源。
+0.8.19 已让详情中同时存在的 `authorId + authorAvatar` 形成独立作者媒体槽位。Rust 以当前作品作为观察上下文校验作者主体，写入 `author.avatar` 权威关系，再复用 Slot → Candidate → Download → Blob → Materialization；头像不进入 OCR/ASR。Work Resource 的 `media.avatar` 只返回 `INLINE_SAFE` 本地句柄。Evidence Library 以单一作者事实区呈现并支持本地头像，媒体 Inspector 连续列出头像、封面、正文图、视频及派生资源。
 
 插件合同与 209 项聚焦测试、Rust workspace test/check/format、JS 语法、隔离 PostgreSQL author-avatar 真链、0.8.19 production build、发行校验、可复现性和运行隔离已通过。发行 ZIP SHA-256 为 `c8410c08cd981e9cad93945515613db77918adea3589794232ed623d5ba70338`。仍存在既有 Webpack content bundle 体积警告和 npm audit 9 项依赖风险。本机持久库 `0029`、`:3000` Runtime、Chrome 0.8.19 重载、目标作品新 Package/Receipt/Materialization 和 Mog 页面验收尚未执行，当前不得写成真实链完成。
 
@@ -156,7 +155,7 @@ Chrome 已真实重载 0.8.8 并报到；目标页当前公开评论数为 492�
 
 ### WORK-RESOURCE-READ-001 / Issue #110（实现与集成验证完成，部署待完成）
 
-为避免 Intelligence 各页各自拼封面、标题、作者与时间，当前交付分支新增中立 `Work Resource Read` Interface 与 `/api/local/work-resources`；Evidence Library 只是首个消费者。Media V2 继续拥有媒体事实，页面不能绕过共享接口另读 SQL/Package。profile discovery 的监控目标作为 collection context 单独返回，作品作者保持独立；没有详情 author ID 时明确 `NOT_VERIFIED`，不再把目标显示名填成作者。
+为避免 Intelligence 各页各自拼封面、标题、作者与时间，当前交付分支新增中立 `Work Resource Read` Interface 与 `/api/local/work-resources`；Evidence Library 只是首个消费者。Media V2 继续拥有媒体事实，页面不能绕过共享接口另读 SQL/Package。profile discovery 的监控目标作为 collection context 单独返回。**2026-09-04 DEC-作者合并**：所有表面只显示一个作者字段——详情 `creatorDisplayName` 优先，其次 `targetKind = creator` 且非 `MISMATCH` 的目标显示名，皆无则“当前未知”；关键词目标永不填补作者。采集来源移入 Inspector「来源与溯源」。
 
 详情发布时间链修复了“插件算出 `publishedAt`、服务接纳却只存文本”的断点：additive `0026_work_resource_read.sql` 保存实际字段、source kind、precision、reference 与 parser version，只有合格 platform epoch 晋升为精确 `published_at`；相对/日历文本为 `SOURCE_TEXT_ONLY`。资料库增加 `layout=research|table|cover` 三种只改变排版的视图，继续共享查询、字段资格、当前选择和 Inspector。与评论接纳升级合并后，Rust workspace、插件聚焦测试、发布包校验/可复现性、51 项隔离 PostgreSQL proof、调度序列与完整 local-runtime proof 均通过。2026-08-31 的一条用户授权 XHS 签名详情探针已确认 SSR 顶层 `time` 为 `number` 型 13 位毫秒 epoch，精确命中现有 `xhs-detail-time-v2`；未保存正文、作者资料、评论或媒体。探针不产生 content_detail Package/Receipt，不证明共享投影已收到该真实时间；运行发布与 Mog 最终业务验收仍未由本次探针完成。
 

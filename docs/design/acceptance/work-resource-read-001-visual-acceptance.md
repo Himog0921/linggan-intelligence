@@ -21,7 +21,7 @@
 |---|---|---|---|---|
 | 精确详情时间 | 查看作品发布时间 | platform epoch 显示 `KNOWN`，带 field/kind/precision/parser | PostgreSQL proof 通过；真实字段回归通过 | VERIFIED：`time` / `number` / 13 位毫秒 epoch，可见文本“4天前 广东” |
 | 相对时间文本 | 避免把“3小时前”当精确历史时间 | `publishedAt=null`、`SOURCE_TEXT_ONLY`、保留参照时间 | PostgreSQL 负向 proof 通过 | NOT VERIFIED |
-| 创作者目标发现 | 看出内容从哪个监控目标来 | 显示目标；作品作者在没有 ID 时仍未知，关系 `NOT_VERIFIED` | collection dispatch proof 通过 | NOT VERIFIED |
+| 创作者目标发现 | 一眼看到作者是谁 | 只显示一个作者：详情作者名优先，未采到详情时用 creator 目标显示名；采集来源在 Inspector | collection dispatch proof 通过 | KNOWN |
 | 三种排版 | 在研读、表格、封面间切换 | 同一 items、同一选择、同一 Inspector；不重新 fetch | JS/source test 通过 | VERIFIED：实际点击写入 `layout`，三种 DOM 布局切换且选择不变 |
 | 排版选择器 | 在三种排版间快速辨认当前项 | 单条文字 tab rail；无独立方格、无黑底选中块；signal 下划线只标当前项 | CSS 正负断言通过 | VERIFIED：1440/375 实拍；上下边线 1px、当前下划线 4px、三个命中区高度 44px；点击仍写入 `layout` |
 | 状态快速筛选 | 理解并使用全部/部分取得/风险停止/媒体已清理/撤回或受限 | 它们是 `view` 预设查询，不是页面导航或 layout | Rust/source test 通过 | VERIFIED：横向工具条实际点击写入 `view` 并返回读取回执 |
@@ -56,7 +56,7 @@
 
 ## 2026-08-31 · 作者头像与作者/目标分栏增量验收
 
-- 代码合同：研读、表格、封面与 Inspector 概览均消费两个独立事实区；作品作者使用 `media.avatar`，监控目标使用 `collectionContext`。页面不读取 `identity_facts.avatar`，也不接受远程媒体地址。
+- 代码合同（2026-09-04 修订）：研读、表格、封面与 Inspector 概览均消费**单一**作者事实区，头像使用 `media.avatar`；`collectionContext` 只在 Inspector「来源与溯源」区消费。页面不读取 `identity_facts.avatar`，也不接受远程媒体地址。
 - 数据合同：隔离 PostgreSQL 已证明详情作者头像从 author-owned slot 进入既有媒体链、物化后返回 `/api/local/media/...`，同时写入唯一 `author.avatar` 关系；头像不创建派生处理工作。
 - 自动结果：Evidence source guard、Rust workspace、插件 209 项与 0.8.19 可复现发行通过。
 - 尚未证明：本机 `:3000` 的 1440/390 实际视觉、Chrome 0.8.19 真实目标重采、头像/封面/正文图 Materialization 和 Mog 视觉验收。完成这些证据前，本段状态为 `AUTOMATED_AND_PG_VERIFIED / REAL_UI_PENDING`。

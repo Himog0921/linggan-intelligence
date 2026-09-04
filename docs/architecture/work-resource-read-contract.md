@@ -88,18 +88,28 @@ WorkResource
 
 列表与详情必须使用同一字段语义。三种布局只改变排版，不改变查询、字段资格、状态或血缘。
 
-## 3. 作者与监控目标不是同一字段
+## 3. 作者与采集来源
 
-来自创作者主页监控的作品可以证明“这条作品是在该监控目标表面被观察到”，但只有作品详情中的平台作者 ID 与目标稳定 ID 一致，才能证明“该监控目标就是作品作者”。因此：
+**2026-09-04 产品决策（DEC-作者合并）**：创作者监控的入口就是该创作者本人的主页 URL，从这个入口取回的作品即视为该创作者所发。所有表面（列表、表格、封面、Inspector）只展示一个**作者**字段，不再并列"作品作者"与"监控目标"两个身份。
 
-| 情况 | `relationshipState` | `authorIdentityMatchState` | UI |
-|---|---|---|---|
-| 创作者主页发现，详情尚无作者 ID | `OBSERVED_ON_TARGET_SURFACE` | `NOT_VERIFIED` | 显示“监控目标：木可可同学”；作品作者仍是“当前未知” |
-| 详情作者 ID 与目标稳定 ID 相等 | `OBSERVED_ON_TARGET_SURFACE` | `MATCHED` | 分别显示作者和监控目标，并写明平台 ID 已证明一致 |
-| 详情作者 ID 不同 | `OBSERVED_ON_TARGET_SURFACE` | `MISMATCH` | 保留两者并突出不一致，禁止覆盖作者 |
-| 关键词发现 | `DISCOVERED_FOR_TARGET` | `NOT_APPLICABLE` | 显示关键词目标，不把关键词当作者 |
+作者名的取值顺序：
 
-血缘优先使用 `Task → LeaseTask → Lease → WorkOrder → Target`；旧的手动 profile discovery 没有 lease 关系时，只允许用 TaskSpec 的稳定 `authorExternalId` 与同平台 creator target 精确匹配。显示名只作 UI 文案，不参与身份匹配。
+| 顺序 | 来源 | 说明 |
+|---|---|---|
+| 1 | 作品详情 `creatorDisplayName`（`creatorState = KNOWN`） | 平台自己给出的作者名，最精确 |
+| 2 | `targetKind = creator`、`targetDisplayState = KNOWN` 且 `authorIdentityMatchState != MISMATCH` 时的 `targetDisplayName` | 创作者监控目标本人，详情尚未采到时作为作者名 |
+| 3 | `当前未知` | 关键词监控且详情未采到、平台已报告 `MISMATCH`，或两者皆无 |
+
+两条边界必须保留：
+
+- **关键词目标永不填补作者。** `targetKind = keyword` 时监控目标是一个检索词而非人，作者只能来自作品详情。
+- **平台报告 `MISMATCH` 时不回退。** 详情作者 ID 与目标稳定 ID 明确不同时，不能用目标名去断言一个平台已否认的作者身份。
+
+采集血缘不因此丢失：`relationshipState`、`targetRef`、`targetKind`、`targetDisplayName` 仍由读接口原样返回，Evidence Library 在 Inspector 的「来源与溯源」区以单行"来源监控"表达，列表、表格、封面三种布局不再出现第二个身份。
+
+`authorIdentityMatchState` 仍由投影计算并保留在读模型中，除上述 `MISMATCH` 闸门外不再驱动任何 UI 文案；页面不得再以 `MATCHED / NOT_VERIFIED / MISMATCH` 向用户表达"是否已证明监控目标就是作者"。
+
+血缘优先使用 `Task → LeaseTask → Lease → WorkOrder → Target`；旧的手动 profile discovery 没有 lease 关系时，只允许用 TaskSpec 的稳定 `authorExternalId` 与同平台 creator target 精确匹配。
 
 ## 4. 发布时间资格
 
@@ -131,7 +141,7 @@ Work Resource Read 对页面只返回一份 `linggan.media-resource.v1`：
 - 只有 `INLINE_SAFE` 的同源 `/api/local/media/` 或 `/api/local/derivative/` 句柄可内联；原始 CDN URI 不进入 DTO；
 - 没有被生产链观察或物化的 avatar、comment image、OCR、transcript 保持 `NOT_OBSERVED`，不造空成功。
 
-`preview` 暂时保留为兼容投影，现有业务页面已禁止读取它。Collection Target 也不再直接渲染 `identity_facts.avatar` 的远程地址。`0.8.28` 真实标准详情已证明 Work Resource 返回并在 Evidence UI 展示本地封面和本地作者头像；作品作者与监控目标继续是两个独立字段，未证明的目标保持 `NOT_VERIFIED`。
+`preview` 暂时保留为兼容投影，现有业务页面已禁止读取它。Collection Target 也不再直接渲染 `identity_facts.avatar` 的远程地址。`0.8.28` 真实标准详情已证明 Work Resource 返回并在 Evidence UI 展示本地封面和本地作者头像；作者按第 3 节的取值顺序解析为单一字段；采集来源保留在读模型并只在 Inspector 表达。
 
 `0030` 只扩展现有媒体 purpose 约束，没有建立第二套资产。评论图片以评论为主体、作品为 Work 读取上下文，经同一 Slot → Candidate → Download → Blob → Materialization 链返回 `comment.image + subjectExternalId`。代码与隔离 PostgreSQL 非空正样本已通过；当前真实样本未观察到非空评论图片，因此真实层仍是 `NOT_OBSERVED`。
 
