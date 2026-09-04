@@ -281,7 +281,7 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
     .bind(lease_ref)
     .execute(&mut **transaction)
     .await?;
-    if lane == "patrol" {
+    if lane == "patrol" && patrol_completion_qualified(transaction, lease_ref, target_ref).await? {
         sqlx::query(
             "UPDATE collection_observation_target \
              SET last_patrol_succeeded_at = scope_001_now() WHERE target_ref = $1",
@@ -332,6 +332,57 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
         }
     }
     Ok(true)
+}
+
+/// A patrol lease completing is an operation fact; a successful patrol additionally requires a
+/// target-bound, live Receipt with complete Coverage. Zero new records is valid when the producer
+/// proves the surface ended. Quarantine, unknown scope and risk stops remain completed attempts,
+/// but must not advance the target's last-success clock.
+async fn patrol_completion_qualified(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    lease_ref: Uuid,
+    target_ref: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM collection_work_order_lease lease \
+           JOIN collection_work_order work_order USING(work_order_ref) \
+           JOIN collection_observation_target target USING(target_ref) \
+           JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+           JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+           JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
+           JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+           CROSS JOIN LATERAL jsonb_array_elements( \
+             CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
+                  THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
+           WHERE lease.lease_ref=$1 AND work_order.target_ref=$2 AND work_order.lane='patrol' \
+             AND package.package_kind=CASE WHEN target.target_kind='creator' \
+                                           THEN 'profile_discovery' ELSE 'discovery_search' END \
+             AND package.platform=task.platform \
+             AND task.task_spec->'capabilitiesRequested' ? package.package_kind \
+             AND (package.coverage->'target') @> (task.task_spec->'target') \
+             AND receipt.material_admission='ACCEPTED' \
+             AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+             AND layer->>'capability'=package.package_kind \
+             AND COALESCE((layer->>'failed')::integer,0)=0 \
+             AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
+             AND COALESCE((layer->>'unknown')::integer,0)=0 \
+             AND (layer->>'stoppedReason'='surface_ended' OR ( \
+                  layer->>'stoppedReason'='maximum_quota' \
+                  AND COALESCE((layer->>'acquired')::integer,-1)= \
+                      COALESCE((task.task_spec->>'maximumQuota')::integer,-2))) \
+             AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
+                             WHERE disposition.package_ref=package.package_ref \
+                               AND disposition.disposition='quarantined') \
+             AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition \
+                  WHERE disposition.package_ref=package.package_ref \
+                    AND disposition.disposition='accepted_for_library_discovery') = \
+                 COALESCE((layer->>'acquired')::integer,-1))",
+    )
+    .bind(lease_ref)
+    .bind(target_ref)
+    .fetch_one(&mut **transaction)
+    .await
 }
 
 /// 把已过期但仍标为未结束的租约收回。

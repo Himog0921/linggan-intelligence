@@ -13,7 +13,7 @@
 use linggan_evidence::{
     ArchiveCompleteness, CreatorLifecycleAssociation, CreatorLifecycleMetric,
     CreatorLifecyclePoint, CreatorLifecycleProjection, CreatorLifecycleStatus,
-    CreatorLifecycleWindow, ObservationTarget,
+    CreatorLifecycleWindow, ObservationTarget, ObservationTargetAvatar,
 };
 
 /// Collection 目标抽屉的三个职责。Evidence 已退回唯一的 Corpus 表面。退役或未知
@@ -77,16 +77,22 @@ impl<'a> TargetListContext<'a> {
             href.push_str(
                 &pairs
                     .iter()
-                    .map(|(key, value)| format!("{key}={value}"))
+                    .map(|(key, value)| {
+                        format!(
+                            "{}={}",
+                            percent_encode_component(key),
+                            percent_encode_component(value)
+                        )
+                    })
                     .collect::<Vec<_>>()
-                    .join("&amp;"),
+                    .join("&"),
             );
         }
         if let Some(focus_id) = focus_id {
             href.push('#');
-            href.push_str(focus_id);
+            href.push_str(&percent_encode_component(focus_id));
         }
-        href
+        escape(&href)
     }
 
     pub fn drawer_href(
@@ -110,15 +116,21 @@ impl<'a> TargetListContext<'a> {
             "/collection/targets?{}",
             pairs
                 .iter()
-                .map(|(key, value)| format!("{key}={value}"))
+                .map(|(key, value)| {
+                    format!(
+                        "{}={}",
+                        percent_encode_component(key),
+                        percent_encode_component(value)
+                    )
+                })
                 .collect::<Vec<_>>()
-                .join("&amp;")
+                .join("&")
         );
         if let Some(fragment) = fragment {
             href.push('#');
-            href.push_str(fragment);
+            href.push_str(&percent_encode_component(fragment));
         }
-        href
+        escape(&href)
     }
 
     /// Open the target-scoped monitoring rule overlay without carrying drawer state into it.
@@ -132,16 +144,148 @@ impl<'a> TargetListContext<'a> {
             .map(|(key, value)| (key.to_owned(), value.to_owned()))
             .collect::<Vec<_>>();
         pairs.push(("rule".to_owned(), target_ref.to_string()));
-        format!(
+        escape(&format!(
             "/collection/targets?{}#{}",
             pairs
                 .iter()
-                .map(|(key, value)| format!("{key}={value}"))
+                .map(|(key, value)| {
+                    format!(
+                        "{}={}",
+                        percent_encode_component(key),
+                        percent_encode_component(value)
+                    )
+                })
                 .collect::<Vec<_>>()
-                .join("&amp;"),
-            opener_id,
-        )
+                .join("&"),
+            percent_encode_component(opener_id),
+        ))
     }
+
+    /// A POST may return only to this closed list context. These are individual, validated
+    /// fields rather than an arbitrary return URL, so the action cannot become an open redirect.
+    pub fn return_fields(
+        self,
+        drawer: Option<uuid::Uuid>,
+        tab: Option<TargetDrawerTab>,
+        focus_id: Option<&str>,
+    ) -> String {
+        let mut fields = self
+            .pairs()
+            .into_iter()
+            .map(|(key, value)| {
+                format!(
+                    r#"<input type="hidden" name="return_{key}" value="{}"/>"#,
+                    escape(value)
+                )
+            })
+            .collect::<String>();
+        if let Some(drawer) = drawer {
+            fields.push_str(&format!(
+                r#"<input type="hidden" name="return_drawer" value="{drawer}"/>"#
+            ));
+        }
+        if let Some(tab) = tab {
+            fields.push_str(&format!(
+                r#"<input type="hidden" name="return_dtab" value="{}"/>"#,
+                tab.as_str()
+            ));
+        }
+        if let Some(focus_id) = focus_id {
+            fields.push_str(&format!(
+                r#"<input type="hidden" name="return_focus" value="{}"/>"#,
+                escape(focus_id)
+            ));
+        }
+        fields
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(crate) enum TargetArchiveRead<'a> {
+    Unavailable,
+    Known(Option<&'a ArchiveCompleteness>),
+}
+
+impl<'a> TargetArchiveRead<'a> {
+    pub(crate) fn from_map(
+        completeness: Option<&'a std::collections::HashMap<String, ArchiveCompleteness>>,
+        identity_key: &str,
+    ) -> Self {
+        match completeness {
+            Some(completeness) => Self::Known(completeness.get(identity_key)),
+            None => Self::Unavailable,
+        }
+    }
+
+    fn value(self) -> Option<&'a ArchiveCompleteness> {
+        match self {
+            Self::Unavailable => None,
+            Self::Known(value) => value,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum TargetPrimaryAction {
+    EstablishArchive,
+    ContinueArchive,
+    ViewArchiveProgress,
+    ViewArchiveProblems,
+    ViewArchiveUnavailable,
+    OpenPatrol(&'static str),
+    ViewCreator,
+    ViewKeyword,
+}
+
+pub(crate) fn target_primary_action(
+    target: &ObservationTarget,
+    is_creator: bool,
+    archive: TargetArchiveRead<'_>,
+) -> TargetPrimaryAction {
+    if !is_creator {
+        return if target.monitoring_enabled && target.lifecycle_state != "paused" {
+            TargetPrimaryAction::ViewKeyword
+        } else if target.lifecycle_state == "paused" {
+            TargetPrimaryAction::OpenPatrol("恢复巡查")
+        } else {
+            TargetPrimaryAction::OpenPatrol("设置巡查")
+        };
+    }
+    let archive = match archive {
+        TargetArchiveRead::Unavailable => return TargetPrimaryAction::ViewArchiveUnavailable,
+        TargetArchiveRead::Known(archive) => archive,
+    };
+    if archive.is_some_and(|value| value.work_in_progress) {
+        return TargetPrimaryAction::ViewArchiveProgress;
+    }
+    if archive.is_some_and(|value| value.quarantined > 0) {
+        return TargetPrimaryAction::ViewArchiveProblems;
+    }
+    if target.lifecycle_state == "dismissed" {
+        return TargetPrimaryAction::ViewCreator;
+    }
+    let untouched = archive.is_none_or(ArchiveCompleteness::is_untouched);
+    let needs_details = archive
+        .is_some_and(|value| value.works_listed > 0 && value.details_captured < value.works_listed);
+    if untouched {
+        return TargetPrimaryAction::EstablishArchive;
+    }
+    if needs_details {
+        return TargetPrimaryAction::ContinueArchive;
+    }
+    let baseline_ready = matches!(
+        target.lifecycle_state.as_str(),
+        "archived" | "monitoring" | "paused"
+    );
+    if !baseline_ready {
+        // A Work Order or even some rows do not prove that the bounded baseline completed.
+        // Keep the user on the archive problem state; never offer patrol from equal counters alone.
+        return TargetPrimaryAction::ViewArchiveProblems;
+    }
+    if !target.monitoring_enabled {
+        return TargetPrimaryAction::OpenPatrol("开启巡查");
+    }
+    TargetPrimaryAction::ViewCreator
 }
 
 #[derive(Clone, Copy)]
@@ -180,7 +324,8 @@ pub fn attach_to_collection_document(document: &str, drawer: &str) -> String {
 /// 渲染抽屉。`drawer` 为空时整块不渲染——没有选中目标时不该有一个空壳挂在那里。
 pub fn render(
     target: Option<&ObservationTarget>,
-    completeness: &std::collections::HashMap<String, ArchiveCompleteness>,
+    avatar: Option<&ObservationTargetAvatar>,
+    completeness: Option<&std::collections::HashMap<String, ArchiveCompleteness>>,
     drawer: Option<&str>,
     active_tab: TargetDrawerTab,
     lifecycle: LifecycleView<'_>,
@@ -204,11 +349,11 @@ pub fn render(
             .map(|focus| format!(r#" data-return-focus="{focus}""#))
             .unwrap_or_default();
         return format!(
-            r#"<aside id="c-drawer" class="c-dw" aria-label="观察目标工作区" data-return-url="{return_url}"{return_focus_attr}>
+            r#"<aside id="c-drawer" class="c-dw" aria-labelledby="c-drawer-title" data-return-url="{return_url}"{return_focus_attr}>
                  <div class="c-dw-head">
                    <div class="c-dw-kicker">观察档案</div>
                    <div class="c-dw-title-row">
-                     <div><div class="c-dw-title">未找到该观察目标</div>
+                     <div><h2 id="c-drawer-title" class="c-dw-title" tabindex="-1" data-drawer-initial-focus>未找到该观察目标</h2>
                        <div class="c-dw-meta">#{drawer}</div></div>
                      <div class="c-dw-actions"><a class="c-btn-quiet" href="{return_href}">关闭</a></div>
                    </div>
@@ -220,7 +365,7 @@ pub fn render(
         );
     };
 
-    let archive = completeness.get(&target.identity_key);
+    let archive = TargetArchiveRead::from_map(completeness, &target.identity_key);
     let is_creator = target.target_kind == "creator";
     let tab = if !is_creator && active_tab == TargetDrawerTab::Baseline {
         TargetDrawerTab::Overview
@@ -231,13 +376,17 @@ pub fn render(
     let return_href = list_context.list_href(Some(&return_focus));
 
     format!(
-        r#"<aside id="c-drawer" class="c-dw" aria-label="观察目标工作区" data-return-url="{return_url}" data-return-focus="{return_focus}">
+        r#"<aside id="c-drawer" class="c-dw" aria-labelledby="c-drawer-title" data-return-url="{return_url}" data-return-focus="{return_focus}">
              <div class="c-dw-head">
                <div class="c-dw-kicker">{workspace}</div>
                <div class="c-dw-title-row">
-                 <div>
-                   <div class="c-dw-title">{name}</div>
-                   <div class="c-dw-meta">{platform}{handle}</div>
+                 <div class="c-dw-identity">
+                   {avatar}
+                   <div class="c-dw-identity-copy">
+                     <h2 id="c-drawer-title" class="c-dw-title" tabindex="-1" data-drawer-initial-focus>{name}</h2>
+                     <div class="c-dw-meta">{platform}{handle}</div>
+                     {bio}
+                   </div>
                  </div>
                  <div class="c-dw-actions">
                    {source_link}
@@ -245,6 +394,10 @@ pub fn render(
                  </div>
                </div>
                <div class="c-dw-statusline">{statusline}</div>
+               <div class="c-dw-head-overview">
+                 <div class="c-dw-head-facts">{head_facts}</div>
+                 <div class="c-dw-head-primary">{primary_action}</div>
+               </div>
              </div>
              <nav class="c-dw-tabs">{tabs}</nav>
              <div class="c-dw-body">{body}</div>
@@ -255,6 +408,7 @@ pub fn render(
             "关键词观察"
         }),
         name = escape(display_name(target)),
+        avatar = drawer_avatar_markup(avatar, display_name(target)),
         platform = escape(platform_label(&target.platform)),
         handle = identity_handle(target)
             .map(|handle| format!(" · {}", escape(handle)))
@@ -262,6 +416,9 @@ pub fn render(
         return_url = list_context.list_href(None),
         source_link = source_link(target, is_creator),
         statusline = statusline(target, archive),
+        bio = drawer_bio(target),
+        head_facts = drawer_head_facts(target, archive, is_creator),
+        primary_action = drawer_primary_action(target, archive, is_creator, list_context),
         tabs = tab_bar(target, tab, lifecycle, selected_work, list_context),
         body = body(
             target,
@@ -291,6 +448,42 @@ fn identity_handle(target: &ObservationTarget) -> Option<&str> {
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+fn drawer_bio(target: &ObservationTarget) -> String {
+    let Some(bio) = target
+        .identity_facts
+        .as_ref()
+        .and_then(|value| value.get("description"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return String::new();
+    };
+    format!(r#"<p class="c-dw-head-bio">{}</p>"#, escape(bio))
+}
+
+fn drawer_avatar_markup(avatar: Option<&ObservationTargetAvatar>, name: &str) -> String {
+    match avatar.unwrap_or(&ObservationTargetAvatar::NotObserved) {
+        ObservationTargetAvatar::Local { local_asset_path } => format!(
+            r#"<img class="c-dw-avatar" src="{}" alt="" width="48" height="48" referrerpolicy="no-referrer"/>"#,
+            escape(local_asset_path),
+        ),
+        ObservationTargetAvatar::Pending
+        | ObservationTargetAvatar::Unavailable
+        | ObservationTargetAvatar::NotObserved => format!(
+            r#"<span class="c-dw-avatar c-dw-avatar-placeholder" aria-hidden="true">{}</span>"#,
+            escape(&name_initial(name))
+        ),
+    }
+}
+
+fn name_initial(name: &str) -> String {
+    name.chars()
+        .find(|character| !character.is_whitespace())
+        .unwrap_or('创')
+        .to_string()
 }
 
 fn platform_label(platform: &str) -> &str {
@@ -335,27 +528,151 @@ fn source_link(target: &ObservationTarget, is_creator: bool) -> String {
     if !is_creator {
         return String::new();
     }
+    let href = format!(
+        "https://www.xiaohongshu.com/user/profile/{}",
+        percent_encode_component(&target.identity_key)
+    );
     format!(
-        r#"<a class="c-btn-quiet" href="https://www.xiaohongshu.com/user/profile/{id}" target="_blank" rel="noreferrer">打开原页</a>"#,
-        id = escape(&target.identity_key),
+        r#"<a class="c-btn-quiet" href="{}" target="_blank" rel="noreferrer">打开原页</a>"#,
+        escape(&href),
     )
 }
 
-fn statusline(target: &ObservationTarget, completeness: Option<&ArchiveCompleteness>) -> String {
+fn statusline(target: &ObservationTarget, completeness: TargetArchiveRead<'_>) -> String {
     let archive = if target.target_kind != "creator" {
         lifecycle_primary_copy(&target.target_kind, &target.lifecycle_state).1
-    } else if completeness.is_some_and(|value| value.work_in_progress) {
-        "建档中"
-    } else if completeness.is_none_or(ArchiveCompleteness::is_untouched) {
-        "尚未建档"
     } else {
-        "档案已建立"
+        match completeness {
+            TargetArchiveRead::Unavailable => "档案状态暂时无法读取",
+            TargetArchiveRead::Known(Some(value)) if value.work_in_progress => "建档中",
+            TargetArchiveRead::Known(Some(value)) if value.quarantined > 0 => "档案有问题",
+            TargetArchiveRead::Known(None) => "尚未建档",
+            TargetArchiveRead::Known(Some(value)) if value.is_untouched() => "尚未建档",
+            TargetArchiveRead::Known(Some(value))
+                if value.works_listed > 0 && value.details_captured < value.works_listed =>
+            {
+                "档案待完善"
+            }
+            TargetArchiveRead::Known(Some(_))
+                if matches!(
+                    target.lifecycle_state.as_str(),
+                    "archived" | "monitoring" | "paused"
+                ) =>
+            {
+                "档案已建立"
+            }
+            TargetArchiveRead::Known(Some(_)) => "档案有问题",
+        }
     };
     let (_, patrol) = lifecycle_patrol_copy(target);
     format!(
         "{archive} · {patrol} · {group}",
         group = escape(target.group_name.as_deref().unwrap_or("未分组")),
     )
+}
+
+fn drawer_head_facts(
+    target: &ObservationTarget,
+    archive: TargetArchiveRead<'_>,
+    is_creator: bool,
+) -> String {
+    let first = if is_creator {
+        let progress = match archive {
+            TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
+            TargetArchiveRead::Known(None) => "尚未建立".to_owned(),
+            TargetArchiveRead::Known(Some(value)) if value.is_untouched() => "尚未建立".to_owned(),
+            TargetArchiveRead::Known(Some(value)) if value.works_listed > 0 => format!(
+                "{} / {}",
+                value.details_captured.min(value.works_listed),
+                value.works_listed
+            ),
+            TargetArchiveRead::Known(Some(_)) => "等待作品目录".to_owned(),
+        };
+        format!(
+            r#"<div><b>{}</b><span>详情 / 作品目录</span></div>"#,
+            escape(&progress)
+        )
+    } else {
+        let (_, patrol) = lifecycle_patrol_copy(target);
+        format!(
+            r#"<div><b>{}</b><span>巡查状态</span></div>"#,
+            escape(patrol)
+        )
+    };
+    let last = target
+        .last_patrol_succeeded_at
+        .as_deref()
+        .unwrap_or("尚未巡查");
+    let next = if target.monitoring_enabled {
+        target.next_patrol_at.as_deref().unwrap_or("待排定")
+    } else {
+        "—"
+    };
+    format!(
+        r#"{first}<div><b>{last}</b><span>上次巡查</span></div><div><b>{next}</b><span>下次巡查</span></div>"#,
+        last = escape(last),
+        next = escape(next),
+    )
+}
+
+fn drawer_primary_action(
+    target: &ObservationTarget,
+    archive: TargetArchiveRead<'_>,
+    is_creator: bool,
+    list_context: TargetListContext<'_>,
+) -> String {
+    let action = target_primary_action(target, is_creator, archive);
+    match action {
+        TargetPrimaryAction::EstablishArchive | TargetPrimaryAction::ContinueArchive => {
+            let label = if action == TargetPrimaryAction::EstablishArchive {
+                "建立档案"
+            } else {
+                "继续完善"
+            };
+            let fields = list_context.return_fields(
+                Some(target.target_ref),
+                Some(TargetDrawerTab::Baseline),
+                Some("target-archive"),
+            );
+            format!(
+                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                target_ref = target.target_ref,
+            )
+        }
+        TargetPrimaryAction::OpenPatrol(label) => {
+            let opener_id = format!("drawer-header-monitor-rule-{}", target.target_ref);
+            let href = list_context.monitor_rule_href(target.target_ref, &opener_id);
+            format!(
+                r#"<a id="{opener_id}" class="c-btn-primary" data-monitor-rule-trigger="{target_ref}" href="{href}">{label}</a>"#,
+                target_ref = target.target_ref,
+            )
+        }
+        TargetPrimaryAction::ViewKeyword => {
+            let href = list_context.drawer_href(target.target_ref, &[], None);
+            format!(r#"<a class="c-btn-primary" href="{href}">查看观察</a>"#)
+        }
+        TargetPrimaryAction::ViewCreator => {
+            let href = list_context.drawer_href(
+                target.target_ref,
+                &[("dtab", "overview")],
+                Some("creator-lifecycle"),
+            );
+            format!(r#"<a class="c-btn-primary" href="{href}">查看档案</a>"#)
+        }
+        TargetPrimaryAction::ViewArchiveProgress
+        | TargetPrimaryAction::ViewArchiveProblems
+        | TargetPrimaryAction::ViewArchiveUnavailable => {
+            let (label, fragment) = match action {
+                TargetPrimaryAction::ViewArchiveProgress => ("查看进度", "target-archive"),
+                TargetPrimaryAction::ViewArchiveProblems => ("查看档案问题", "archive-problems"),
+                TargetPrimaryAction::ViewArchiveUnavailable => ("查看档案", "target-archive"),
+                _ => unreachable!(),
+            };
+            let href =
+                list_context.drawer_href(target.target_ref, &[("dtab", "archive")], Some(fragment));
+            format!(r#"<a class="c-btn-primary" href="{href}">{label}</a>"#)
+        }
+    }
 }
 
 fn tab_bar(
@@ -389,7 +706,7 @@ fn tab_bar(
 
 fn body(
     target: &ObservationTarget,
-    archive: Option<&ArchiveCompleteness>,
+    archive: TargetArchiveRead<'_>,
     is_creator: bool,
     tab: TargetDrawerTab,
     lifecycle: LifecycleView<'_>,
@@ -397,7 +714,9 @@ fn body(
     list_context: TargetListContext<'_>,
 ) -> String {
     match tab {
-        TargetDrawerTab::Baseline => archive_tab(target, archive, is_creator, list_context),
+        TargetDrawerTab::Baseline => {
+            archive_tab(target, archive, is_creator, lifecycle, list_context)
+        }
         TargetDrawerTab::Patrol => patrol_tab(target, list_context),
         TargetDrawerTab::Overview => overview_tab(
             target,
@@ -414,7 +733,7 @@ fn body(
 /// 缺失的最近变化统计直接表达为尚未取得，不用零值或工程诊断语言填充。
 fn overview_tab(
     target: &ObservationTarget,
-    archive: Option<&ArchiveCompleteness>,
+    archive: TargetArchiveRead<'_>,
     is_creator: bool,
     lifecycle: LifecycleView<'_>,
     selected_work: Option<&str>,
@@ -429,22 +748,8 @@ fn overview_tab(
             recent_activity(target),
         );
     }
-    let facts = target.identity_facts.as_ref();
-    let bio = facts
-        .and_then(|value| value.get("description"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("");
-
     format!(
-        r#"{bio_block}{recent}{lifecycle}{gaps}"#,
-        bio_block = if bio.is_empty() {
-            String::new()
-        } else {
-            format!(
-                r#"<section class="c-dw-section c-dw-profile"><div class="c-dw-section-head"><b>创作者简介</b><span>平台公开资料</span></div><p class="c-dw-bio">{bio}</p></section>"#,
-                bio = escape(bio),
-            )
-        },
+        r#"{recent}{lifecycle}{gaps}"#,
         recent = recent_activity(target),
         lifecycle = lifecycle_overview(target, is_creator, lifecycle, selected_work, list_context,),
         gaps = archive_gap_overview(archive, is_creator, lifecycle),
@@ -493,16 +798,17 @@ fn lifecycle_query_state(
         LifecycleView::QueryInvalid => return Vec::new(),
     };
     let selected = selected_work
+        .and_then(|selected| uuid::Uuid::parse_str(selected).ok())
+        .map(|selected| selected.to_string())
         .filter(|candidate| {
             validate_selection
                 .map(|points| {
                     points
                         .iter()
-                        .any(|point| point.work_public_ref.to_string() == *candidate)
+                        .any(|point| point.work_public_ref.to_string() == candidate.as_str())
                 })
                 .unwrap_or(true)
-        })
-        .map(str::to_owned);
+        });
     let mut params = vec![
         ("life_window", window.as_str().to_owned()),
         ("life_metric", metric.as_str().to_owned()),
@@ -561,7 +867,7 @@ fn lifecycle_overview(
     let summary = format!(
         r#"<div class="life-summary" aria-label="生命周期覆盖摘要">
               <div><b>{linked}</b><span>{linked_label}</span></div>
-              <div><b>{confirmed}</b><span>详情已确认</span></div>
+              <div><b>{confirmed}</b><span>作者已确认</span></div>
               <div><b>{eligible}</b><span>当前可分析</span></div>
             </div>"#,
         confirmed = projection.summary.confirmed_author_work_count,
@@ -569,7 +875,7 @@ fn lifecycle_overview(
     );
     let legend = r#"<div class="life-legend" aria-label="散点含义">
           <span><i class="life-legend-dot life-legend-directory"></i>主页目录，详情待确认</span>
-          <span><i class="life-legend-dot life-legend-confirmed"></i>详情作者已确认</span>
+          <span><i class="life-legend-dot life-legend-confirmed"></i>作者已确认</span>
           <span><i class="life-legend-dot life-legend-new"></i>最近巡查新增</span>
         </div>"#;
     let chart = if projection.points.is_empty() {
@@ -700,11 +1006,16 @@ fn lifecycle_chart(
         .points
         .iter()
         .map(|point| {
-            let selected_class = if selected_work
+            let is_selected = selected_work
                 .map(|selected| point.work_public_ref.to_string() == selected)
-                .unwrap_or(false)
-            {
+                .unwrap_or(false);
+            let selected_class = if is_selected {
                 " life-point-selected"
+            } else {
+                ""
+            };
+            let current = if is_selected {
+                r#" aria-current="true""#
             } else {
                 ""
             };
@@ -713,7 +1024,7 @@ fn lifecycle_chart(
                     (" life-point-directory", "来自主页作品目录，详情作者待确认")
                 }
                 CreatorLifecycleAssociation::AuthorConfirmed => {
-                    (" life-point-confirmed", "详情作者已确认")
+                    (" life-point-confirmed", "作者已确认")
                 }
             };
             let (new_class, new_label, new_ring) = if point.new_in_latest_patrol {
@@ -741,7 +1052,7 @@ fn lifecycle_chart(
                 Some("creator-lifecycle"),
             );
             format!(
-                r#"<a class="life-point{association_class}{new_class}{selected_class}" href="{href}" aria-label="{title}，{published}，{metric_label} {value}，{association_label}{new_label}">{new_ring}<circle class="life-point-hit" cx="{x:.1}" cy="{y:.1}" r="6" aria-hidden="true"/><circle class="life-point-visible" cx="{x:.1}" cy="{y:.1}" r="5" aria-hidden="true"/></a>"#,
+                r#"<a class="life-point{association_class}{new_class}{selected_class}" href="{href}" aria-label="{title}，{published}，{metric_label} {value}，{association_label}{new_label}"{current}>{new_ring}<circle class="life-point-hit" cx="{x:.1}" cy="{y:.1}" r="6" aria-hidden="true"/><circle class="life-point-visible" cx="{x:.1}" cy="{y:.1}" r="5" aria-hidden="true"/></a>"#,
                 title = escape(title),
                 published = escape(&point.published_local_date),
                 metric_label = metric_label(projection.metric),
@@ -767,7 +1078,7 @@ fn lifecycle_chart(
     };
     format!(
         r#"<figure class="life-figure">
-              <svg class="life-chart" viewBox="0 0 800 300" role="img" aria-labelledby="life-chart-title life-chart-desc">
+              <svg class="life-chart" viewBox="0 0 800 300" role="group" aria-labelledby="life-chart-title life-chart-desc">
                 <title id="life-chart-title">创作者作品生命周期散点图</title>
                 <desc id="life-chart-desc">横轴为合格作品发布时间，纵轴压缩互动量差距。每个点代表一篇当前可分析作品。</desc>
                 <line class="life-axis" x1="54" y1="260" x2="782" y2="260"/>
@@ -848,32 +1159,41 @@ fn metric_label(metric: CreatorLifecycleMetric) -> &'static str {
 }
 
 fn archive_gap_overview(
-    archive: Option<&ArchiveCompleteness>,
+    archive: TargetArchiveRead<'_>,
     is_creator: bool,
     lifecycle: LifecycleView<'_>,
 ) -> String {
     if !is_creator {
         return String::new();
     }
-    let directory = archive
-        .filter(|value| !value.is_untouched())
-        .map(|value| value.works_listed.to_string())
-        .unwrap_or_else(|| "—".to_owned());
-    let detail = archive
-        .filter(|value| value.works_listed > 0)
-        .map(|value| format!("{} / {}", value.details_captured, value.works_listed))
-        .unwrap_or_else(|| "—".to_owned());
+    let directory = match archive {
+        TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
+        TargetArchiveRead::Known(value) => value
+            .filter(|value| !value.is_untouched())
+            .map(|value| value.works_listed.to_string())
+            .unwrap_or_else(|| "—".to_owned()),
+    };
+    let detail = match archive {
+        TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
+        TargetArchiveRead::Known(value) => value
+            .filter(|value| value.works_listed > 0)
+            .map(|value| format!("{} / {}", value.details_captured, value.works_listed))
+            .unwrap_or_else(|| "—".to_owned()),
+    };
     let analyzable = match lifecycle {
         LifecycleView::Projection(projection) => {
             projection.summary.eligible_point_count.to_string()
         }
-        _ => "—".to_owned(),
+        LifecycleView::ReadUnavailable { .. }
+        | LifecycleView::NotRead { .. }
+        | LifecycleView::QueryInvalid => "当前读不到".to_owned(),
     };
     let mut gaps = match lifecycle {
         LifecycleView::Projection(projection) => lifecycle_exclusions(projection),
         _ => String::new(),
     };
     if let Some(count) = archive
+        .value()
         .map(|value| value.quarantined)
         .filter(|count| *count > 0)
     {
@@ -881,7 +1201,9 @@ fn archive_gap_overview(
             r#"<ul class="life-exclusions" aria-label="档案待处理项"><li>待处理记录 {count}</li></ul>"#
         ));
     }
-    if gaps.is_empty() {
+    if matches!(archive, TargetArchiveRead::Unavailable) {
+        gaps = r#"<p class="c-dw-note">档案状态暂时无法读取；这里不会把未知显示成零或“尚未建立”。</p>"#.to_owned();
+    } else if gaps.is_empty() {
         gaps = r#"<p class="c-dw-note">当前读取没有给出额外缺口；这只描述已建立的作品目录，不代表平台全部作品。</p>"#.to_owned();
     }
     format!(
@@ -891,7 +1213,6 @@ fn archive_gap_overview(
                 <div><b>{directory}</b><span>作品目录</span></div>
                 <div><b>{detail}</b><span>详情进度</span></div>
                 <div><b>{analyzable}</b><span>当前可分析</span></div>
-                <div><b>语料页</b><span>评论与深层材料</span></div>
               </div>
               {gaps}
             </section>"#,
@@ -901,8 +1222,9 @@ fn archive_gap_overview(
 /// 档案把目录、详情、可分析和深层材料分开，不能把不同分母压成一个完成百分比。
 fn archive_tab(
     target: &ObservationTarget,
-    archive: Option<&ArchiveCompleteness>,
+    archive: TargetArchiveRead<'_>,
     is_creator: bool,
+    lifecycle: LifecycleView<'_>,
     list_context: TargetListContext<'_>,
 ) -> String {
     if !is_creator {
@@ -911,52 +1233,80 @@ fn archive_tab(
             "关键词观察记录搜索命中与巡查变化，不扫描某个创作者的作品目录，也不显示创作者作品分布。",
         );
     }
-    let untouched = archive.is_none_or(ArchiveCompleteness::is_untouched);
-    let directory = archive
-        .filter(|value| !value.is_untouched())
-        .map(|value| value.works_listed.to_string())
-        .unwrap_or_else(|| "—".to_owned());
-    let detail = archive
-        .filter(|value| value.works_listed > 0)
-        .map(|value| format!("{} / {}", value.details_captured, value.works_listed))
-        .unwrap_or_else(|| "—".to_owned());
-    let missing = archive
-        .filter(|value| value.works_listed > value.details_captured)
-        .map(|value| value.works_listed - value.details_captured)
-        .unwrap_or(0);
-    let action = if archive.is_some_and(|value| value.work_in_progress) {
-        r#"<span class="c-dw-action-note">档案正在建立，完成范围和待补缺口以实际采集结果为准。</span>"#
-            .to_owned()
-    } else if untouched || missing > 0 || archive.is_some_and(|value| value.works_listed == 0) {
-        let label = if untouched {
-            "建立档案"
-        } else {
-            "继续完善"
-        };
-        format!(
-            r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">
-                  <button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button>
-                </form>"#,
-            target_ref = target.target_ref,
-        )
-    } else {
-        let href = list_context.drawer_href(
-            target.target_ref,
-            &[("dtab", "overview")],
-            Some("creator-lifecycle"),
-        );
-        format!(r#"<a class="c-btn-secondary" href="{href}">查看作品分布</a>"#)
+    let directory = match archive {
+        TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
+        TargetArchiveRead::Known(value) => value
+            .filter(|value| !value.is_untouched())
+            .map(|value| value.works_listed.to_string())
+            .unwrap_or_else(|| "—".to_owned()),
+    };
+    let detail = match archive {
+        TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
+        TargetArchiveRead::Known(value) => value
+            .filter(|value| value.works_listed > 0)
+            .map(|value| format!("{} / {}", value.details_captured, value.works_listed))
+            .unwrap_or_else(|| "—".to_owned()),
+    };
+    let analyzable = match lifecycle {
+        LifecycleView::Projection(projection) => {
+            projection.summary.eligible_point_count.to_string()
+        }
+        LifecycleView::ReadUnavailable { .. }
+        | LifecycleView::NotRead { .. }
+        | LifecycleView::QueryInvalid => "当前读不到".to_owned(),
+    };
+    let primary_action = target_primary_action(target, true, archive);
+    let problems = match (archive.value(), primary_action) {
+        (Some(value), _) if value.quarantined > 0 => format!(
+            r#"<div id="archive-problems" class="c-dw-problem" tabindex="-1"><b>{} 条记录需要处理</b><p>这些记录已被隔离，没有计入作品目录或详情进度。先查看原因，再决定是否重新采集。</p></div>"#,
+            value.quarantined
+        ),
+        (Some(value), TargetPrimaryAction::ViewArchiveProblems)
+            if value.started || value.attempted =>
+        {
+            r#"<div id="archive-problems" class="c-dw-problem" tabindex="-1"><b>本次建档尚未形成可用基线</b><p>系统已经尝试建立档案，但当前作品目录或覆盖结果还不足以开启巡查；这里不会把已发起误写成已完成。</p></div>"#.to_owned()
+        }
+        _ => String::new(),
+    };
+    let action = match primary_action {
+        TargetPrimaryAction::ViewArchiveProgress => r#"<span class="c-dw-action-note">档案正在建立，当前范围和待补缺口会随真实采集结果更新。</span>"#.to_owned(),
+        TargetPrimaryAction::ViewArchiveProblems => r#"<span class="c-dw-action-note">当前先处理上面的隔离记录；页面不会把它们算成已完成。</span>"#.to_owned(),
+        TargetPrimaryAction::ViewArchiveUnavailable => r#"<span class="c-dw-action-note">档案状态暂时无法读取，本页不会在未知状态下发起写操作。</span>"#.to_owned(),
+        TargetPrimaryAction::EstablishArchive | TargetPrimaryAction::ContinueArchive => {
+            let action = target_primary_action(target, true, archive);
+            let label = if action == TargetPrimaryAction::EstablishArchive { "建立档案" } else { "继续完善" };
+            let fields = list_context.return_fields(
+                Some(target.target_ref),
+                Some(TargetDrawerTab::Baseline),
+                Some("target-archive"),
+            );
+            format!(
+                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                target_ref = target.target_ref,
+            )
+        }
+        TargetPrimaryAction::OpenPatrol(_)
+        | TargetPrimaryAction::ViewCreator
+        | TargetPrimaryAction::ViewKeyword => {
+            let href = list_context.drawer_href(
+                target.target_ref,
+                &[("dtab", "overview")],
+                Some("creator-lifecycle"),
+            );
+            format!(r#"<a class="c-btn-secondary" href="{href}">查看作品分布</a>"#)
+        }
     };
     format!(
-        r#"<section class="c-dw-section">
+        r#"<section id="target-archive" class="c-dw-section" tabindex="-1">
              <div class="c-dw-section-head"><b>作品档案</b><span>当前已取得范围</span></div>
              <div class="c-dw-readouts c-dw-archive-readouts">
                <div><b>{directory}</b><span>作品目录</span></div>
                <div><b>{detail}</b><span>详情进度</span></div>
-               <div><b>—</b><span>当前可分析</span></div>
-               <div><b>语料页</b><span>评论与深层材料</span></div>
+               <div><b>{analyzable}</b><span>当前可分析</span></div>
              </div>
              <p class="c-dw-note">建立档案会读取创作者主页当前可见的前 200 篇作品链接作为上限，先建立去重目录，再逐步补齐详情与已授权的数据化处理。200 不是平台总作品数。</p>
+             <div class="c-dw-material-boundary"><b>评论与深层材料</b><p>评论正文、媒体、OCR 与 ASR 结果仍在语料页按具体作品查看，不在这里合成完成数字。</p></div>
+             {problems}
              {action}
            </section>"#,
     )
@@ -1003,6 +1353,19 @@ fn escape(value: &str) -> String {
         .replace('\'', "&#x27;")
 }
 
+fn percent_encode_component(value: &str) -> String {
+    let mut encoded = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+            encoded.push(byte as char);
+        } else {
+            use std::fmt::Write as _;
+            let _ = write!(encoded, "%{byte:02X}");
+        }
+    }
+    encoded
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1028,8 +1391,8 @@ mod tests {
 
     #[test]
     fn drawer_statusline_uses_durable_archive_progress() {
-        let target = target("archiving");
-        let untouched = statusline(&target, None);
+        let archiving_target = target("archiving");
+        let untouched = statusline(&archiving_target, TargetArchiveRead::Known(None));
         assert!(untouched.contains("尚未建档"));
         assert!(!untouched.contains("建档中"));
 
@@ -1037,15 +1400,67 @@ mod tests {
             work_in_progress: true,
             ..ArchiveCompleteness::default()
         };
-        assert!(statusline(&target, Some(&in_progress)).contains("建档中"));
+        assert!(
+            statusline(
+                &archiving_target,
+                TargetArchiveRead::Known(Some(&in_progress))
+            )
+            .contains("建档中")
+        );
 
-        let established = ArchiveCompleteness {
+        let partial = ArchiveCompleteness {
+            started: true,
+            attempted: true,
             work_in_progress: false,
             author_profile_captures: 1,
             works_listed: 12,
             details_captured: 5,
             quarantined: 0,
         };
-        assert!(statusline(&target, Some(&established)).contains("档案已建立"));
+        assert!(
+            statusline(&archiving_target, TargetArchiveRead::Known(Some(&partial)))
+                .contains("档案待完善")
+        );
+
+        let mut established_target = target("archived");
+        established_target.monitoring_enabled = false;
+        let established = ArchiveCompleteness {
+            details_captured: 12,
+            ..partial
+        };
+        assert!(
+            statusline(
+                &established_target,
+                TargetArchiveRead::Known(Some(&established))
+            )
+            .contains("档案已建立")
+        );
+        assert_eq!(
+            target_primary_action(
+                &archiving_target,
+                true,
+                TargetArchiveRead::Known(Some(&established))
+            ),
+            TargetPrimaryAction::ViewArchiveProblems,
+            "equal counters do not authorize patrol while the bounded baseline is still archiving"
+        );
+        assert!(
+            statusline(&archiving_target, TargetArchiveRead::Unavailable)
+                .contains("档案状态暂时无法读取")
+        );
+    }
+
+    #[test]
+    fn drawer_href_encodes_each_query_component_and_fragment() {
+        let target_ref = uuid::Uuid::from_u128(44);
+        let href = TargetListContext::default().drawer_href(
+            target_ref,
+            &[("life_work", "\"><svg onload=alert(1)>")],
+            Some("archive problems#1"),
+        );
+        assert!(href.contains("life_work=%22%3E%3Csvg%20onload%3Dalert%281%29%3E"));
+        assert!(href.ends_with("#archive%20problems%231"));
+        assert!(!href.contains("<svg"));
+        assert!(!href.contains('"'));
     }
 }

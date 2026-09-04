@@ -1753,6 +1753,7 @@ pub(crate) async fn creator_baseline_qualified(
              SELECT 1 FROM collection_work_order work_order \
              JOIN collection_work_order_lease lease USING(work_order_ref) \
              JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+             JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
              JOIN linggan_runtime_capture_package package ON package.task_id=lease_task.task_id \
              JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
              CROSS JOIN LATERAL jsonb_array_elements( \
@@ -1761,6 +1762,7 @@ pub(crate) async fn creator_baseline_qualified(
              WHERE work_order.target_ref=$1 AND work_order.lane='deep_archive' \
                AND package.package_kind='author_profile' \
                AND receipt.material_admission='ACCEPTED' \
+               AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
                AND layer->>'capability'='author_profile' \
                AND COALESCE((layer->>'observed')::integer,0)>0 \
                AND COALESCE((layer->>'attempted')::integer,0)>0 \
@@ -1771,11 +1773,15 @@ pub(crate) async fn creator_baseline_qualified(
                AND layer->>'stoppedReason' IN ('surface_ended','maximum_quota') \
                AND EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
                            WHERE disposition.package_ref=package.package_ref \
-                             AND disposition.disposition<>'quarantined')) \
+                             AND disposition.disposition='accepted_for_library_content') \
+               AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
+                               WHERE disposition.package_ref=package.package_ref \
+                                 AND disposition.disposition='quarantined')) \
            AND EXISTS ( \
              SELECT 1 FROM collection_work_order work_order \
              JOIN collection_work_order_lease lease USING(work_order_ref) \
              JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+             JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
              JOIN linggan_runtime_capture_package package ON package.task_id=lease_task.task_id \
              JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
              CROSS JOIN LATERAL jsonb_array_elements( \
@@ -1784,6 +1790,7 @@ pub(crate) async fn creator_baseline_qualified(
              WHERE work_order.target_ref=$1 AND work_order.lane='deep_archive' \
                AND package.package_kind='profile_discovery' \
                AND receipt.material_admission='ACCEPTED' \
+               AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
                AND layer->>'capability'='profile_discovery' \
                AND COALESCE((layer->>'observed')::integer,0)>0 \
                AND COALESCE((layer->>'attempted')::integer,0)>0 \
@@ -1791,10 +1798,19 @@ pub(crate) async fn creator_baseline_qualified(
                AND COALESCE((layer->>'failed')::integer,0)=0 \
                AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
                AND COALESCE((layer->>'unknown')::integer,0)=0 \
-               AND layer->>'stoppedReason'='surface_ended' \
+               AND (layer->>'stoppedReason'='surface_ended' OR ( \
+                 layer->>'stoppedReason'='maximum_quota' \
+                 AND work_order.stop_conditions #>> '{progressiveArchive,version}'='1' \
+                 AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order.work_order_ref::text \
+                 AND COALESCE((work_order.stop_conditions #>> '{progressiveArchive,maxDirectoryWorks}')::integer,-1)=200 \
+                 AND COALESCE((task.task_spec->>'maximumQuota')::integer,-1)=200 \
+                 AND COALESCE((layer->>'acquired')::integer,-1)=200)) \
                AND EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
                            WHERE disposition.package_ref=package.package_ref \
-                             AND disposition.disposition<>'quarantined'))",
+                             AND disposition.disposition<>'quarantined') \
+               AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
+                               WHERE disposition.package_ref=package.package_ref \
+                                 AND disposition.disposition='quarantined'))",
     )
     .bind(target_ref)
     .fetch_one(&mut **transaction)

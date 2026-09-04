@@ -25,7 +25,7 @@ pub fn render_stored_targets(
     base: &str,
     targets: &[ObservationTarget],
     avatars: &HashMap<uuid::Uuid, ObservationTargetAvatar>,
-    completeness: &HashMap<String, ArchiveCompleteness>,
+    completeness: Option<&HashMap<String, ArchiveCompleteness>>,
     error: Option<&str>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
@@ -35,7 +35,7 @@ pub fn render_stored_targets(
             r#"<section class="c-empty c-empty-known-view">
                  <div class="c-empty-rule"></div>
                  <h2>当前列表范围没有匹配的观察目标</h2>
-                 <p>目标列表读取成功，当前筛选范围返回零项；这不表示其他筛选范围为空，也不表示平台没有可观察对象。</p>
+                 <p>当前筛选下没有观察目标。可以切换上方分类查看其他目标；这不表示平台上没有可观察对象。</p>
                  <div class="c-empty-foot"></div>
                </section>"#,
         );
@@ -65,7 +65,7 @@ pub fn render_stored_targets(
               {failure}
               <div class="c-tg-list-head">
                 <span>{count} 个观察目标</span>
-                <span class="c-tg-list-hint">点击一行查看完整档案</span>
+                <span class="c-tg-list-hint">点击一行查看详情</span>
               </div>
               <div class="c-tg-directory">{creator_table}{keyword_table}</div>
             </section>"#,
@@ -80,7 +80,7 @@ fn target_table(
     title: &str,
     targets: &[ObservationTarget],
     avatars: &HashMap<uuid::Uuid, ObservationTargetAvatar>,
-    completeness: &HashMap<String, ArchiveCompleteness>,
+    completeness: Option<&HashMap<String, ArchiveCompleteness>>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
     let matching = targets
@@ -98,7 +98,7 @@ fn target_table(
             target,
             index,
             avatars.get(&target.target_ref),
-            completeness.get(&target.identity_key),
+            super::target_drawer::TargetArchiveRead::from_map(completeness, &target.identity_key),
             list_context,
         ));
     }
@@ -151,22 +151,20 @@ fn failure_markup(error: Option<&str>) -> String {
         "archive_not_requestable" => {
             "现在不能建立或继续完善档案。目标可能已有同类工作在进行，或当前状态不允许再次发起。"
         }
-        "archive_refuse" => "深度建档被拒绝：没有覆盖「创作者 · 深度建档」的有效采集授权。",
-        "archive_defer" => {
-            "深度建档暂缓：资源不够（没有在岗工位、能力不匹配、当天额度已满，或风险暂停生效中）。"
-        }
-        "archive_merge" => {
-            "深度建档暂缓：已经有一份在途的工作覆盖同一目标，等它跑完而不是再开一个。"
-        }
-        "archive_lease_failed" => "工单已建立但没能发出租约。工位可能刚刚掉线。",
+        "archive_in_progress" => "已有一批作品正在补齐，请先查看当前进度。",
+        "archive_nothing_to_continue" => "当前作品目录没有待补详情，无需重复发起。",
+        "archive_refuse" => "当前没有覆盖本次范围的采集授权，请完成授权后再试。",
+        "archive_defer" => "当前暂无可用采集能力，或今天的采集额度已用完；稍后可以重试。",
+        "archive_merge" => "已有相同建档正在进行，系统不会重复发起。",
+        "archive_lease_failed" => "建档已完成准备，但暂时没有可用执行资源；稍后可以重试。",
         "archive_authorization_below_200" => {
             "当前采集授权不足以支持前 200 篇作品的有界建档。本次没有缩小范围后静默开始。"
         }
-        "batch_nothing_selected" => "没有勾选任何来源。先在左侧勾上要操作的行，再点批量动作。",
-        "batch_unknown_action" => "这个批量动作系统不认识。",
-        "batch_failed" => "批量操作没有完成，没有任何来源被改动。",
+        "batch_nothing_selected" => "没有选中任何观察目标。",
+        "batch_unknown_action" => "当前不支持这个操作。",
+        "batch_failed" => "这次操作没有完成，也没有改动任何观察目标。",
         "monitoring_toggle_failed" => "巡查开关没有切换成功。",
-        "read_model_not_connected" => "本机读投影未接通，这次没有写入任何东西。",
+        "read_model_not_connected" => "当前无法读取目标状态，这次没有产生任何改动。",
         _ => "上一次动作没有完成。",
     };
     format!(
@@ -182,7 +180,7 @@ fn target_row(
     target: &ObservationTarget,
     index: usize,
     avatar: Option<&ObservationTargetAvatar>,
-    archive: Option<&ArchiveCompleteness>,
+    archive: super::target_drawer::TargetArchiveRead<'_>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
     let is_creator = target.target_kind == "creator";
@@ -194,14 +192,19 @@ fn target_row(
     let opener_href = list_context.drawer_href(target.target_ref, &[], None);
     let opener_id = format!("target-{}", target.target_ref);
 
+    let opener_label = if is_creator {
+        format!("打开{name}的创作者档案")
+    } else {
+        format!("打开{name}的关键词观察")
+    };
     let shared_start = format!(
         r#"<div class="c-tg-number" role="cell"><span class="c-tg-index">{index:03}</span></div>
-            <div class="c-tg-object" role="cell">{avatar}<div class="c-tg-object-text"><span class="c-tg-title">{name}</span>{identity}</div></div>
+            <div class="c-tg-object" role="cell">{avatar}<div class="c-tg-object-text"><a id="{opener_id}" class="c-tg-title c-tg-object-link" data-row-opener data-drawer-trigger="{target_ref}" href="{opener_href}" aria-label="{opener_label}">{name}</a>{identity}</div></div>
             <div class="c-tg-cell c-tg-platform" role="cell">{platform}</div>
             <div class="c-tg-cell c-tg-group" role="cell" title="{group}">{group}</div>"#,
         index = index + 1,
         avatar = if is_creator {
-            avatar_markup(avatar)
+            avatar_markup(avatar, name)
         } else {
             String::new()
         },
@@ -217,6 +220,8 @@ fn target_row(
         },
         platform = escape(platform_label(&target.platform)),
         group = escape(target.group_name.as_deref().unwrap_or("未分组")),
+        target_ref = target.target_ref,
+        opener_label = escape(&opener_label),
     );
     let last = target
         .last_patrol_succeeded_at
@@ -236,8 +241,8 @@ fn target_row(
                 <div class="c-tg-cell c-tg-unknown" role="cell" title="当前尚未取得最近巡查的新作品或数据更新统计">尚未取得</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last}</time>
                 <time class="c-tg-cell c-tg-time" role="cell">{next}</time>
-                <div class="c-tg-actions" role="cell">{actions}</div>"#,
-            archive_state = archive_state(archive),
+                <div class="c-tg-actions" role="cell" data-row-no-open>{actions}</div>"#,
+            archive_state = archive_state(target, archive),
             works = archive_count(archive),
             details = detail_count(archive),
             patrol = patrol_state(target),
@@ -252,7 +257,7 @@ fn target_row(
                 <div class="c-tg-cell c-tg-unknown" role="cell" title="当前尚未取得命中作品的数据更新统计">尚未取得</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last}</time>
                 <time class="c-tg-cell c-tg-time" role="cell">{next}</time>
-                <div class="c-tg-actions" role="cell">{actions}</div>"#,
+                <div class="c-tg-actions" role="cell" data-row-no-open>{actions}</div>"#,
             patrol = patrol_state(target),
             last = escape(last),
             next = escape(next),
@@ -265,31 +270,34 @@ fn target_row(
         "c-tg-keyword-grid"
     };
     format!(
-        r#"<article class="c-tg-item {grid}" role="row">
-              <a id="{opener_id}" class="c-tg-row-open" data-drawer-trigger="{target_ref}" href="{opener_href}" aria-label="打开{name}的观察档案"></a>
+        r#"<article class="c-tg-item {grid}" role="row" data-target-row>
               {shared_start}{cells}
             </article>"#,
-        target_ref = target.target_ref,
-        name = escape(name),
     )
 }
 
-fn avatar_markup(avatar: Option<&ObservationTargetAvatar>) -> String {
+fn avatar_markup(avatar: Option<&ObservationTargetAvatar>, name: &str) -> String {
     match avatar.unwrap_or(&ObservationTargetAvatar::NotObserved) {
         ObservationTargetAvatar::Local { local_asset_path } => format!(
-            r#"<img class="c-tg-avatar" src="{}" alt="博主头像" referrerpolicy="no-referrer" />"#,
+            r#"<img class="c-tg-avatar" src="{}" alt="" width="40" height="40" referrerpolicy="no-referrer" />"#,
             escape(local_asset_path),
         ),
-        ObservationTargetAvatar::Pending => {
-            r#"<span class="c-tg-avatar c-tg-avatar-state" title="头像已观察，等待本机媒体物化">头像<br/>物化中</span>"#.to_owned()
-        }
-        ObservationTargetAvatar::Unavailable => {
-            r#"<span class="c-tg-avatar c-tg-avatar-state" title="头像本机物化未完成或已不可用">头像<br/>不可用</span>"#.to_owned()
-        }
-        ObservationTargetAvatar::NotObserved => {
-            r#"<span class="c-tg-avatar c-tg-avatar-state" title="本次作者资料未观察到头像">头像<br/>未观察</span>"#.to_owned()
-        }
+        ObservationTargetAvatar::Pending => avatar_initial(name, "头像正在准备"),
+        ObservationTargetAvatar::Unavailable => avatar_initial(name, "头像当前不可用"),
+        ObservationTargetAvatar::NotObserved => avatar_initial(name, "尚未取得头像"),
     }
+}
+
+fn avatar_initial(name: &str, title: &str) -> String {
+    let initial = name
+        .chars()
+        .find(|character| !character.is_whitespace())
+        .unwrap_or('创');
+    format!(
+        r#"<span class="c-tg-avatar c-tg-avatar-state" title="{}" aria-hidden="true">{}</span>"#,
+        escape(title),
+        escape(&initial.to_string())
+    )
 }
 
 fn platform_label(platform: &str) -> &str {
@@ -299,21 +307,36 @@ fn platform_label(platform: &str) -> &str {
     }
 }
 
-fn archive_state(archive: Option<&ArchiveCompleteness>) -> String {
-    let (tone, label) = if archive.is_some_and(|value| value.work_in_progress) {
-        ("warn", "建档中")
-    } else if archive.is_none_or(ArchiveCompleteness::is_untouched) {
-        ("neutral", "尚未建立")
-    } else if archive.is_some_and(|value| value.quarantined > 0) {
-        ("warn", "档案有问题")
-    } else if archive
-        .is_some_and(|value| value.works_listed > 0 && value.details_captured < value.works_listed)
-    {
-        ("warn", "待完善")
-    } else if archive.is_some_and(|value| value.works_listed > 0) {
-        ("ok", "当前范围已齐")
-    } else {
-        ("neutral", "等待作品目录")
+fn archive_state(
+    target: &ObservationTarget,
+    archive: super::target_drawer::TargetArchiveRead<'_>,
+) -> String {
+    use super::target_drawer::TargetArchiveRead;
+    let (tone, label) = match archive {
+        TargetArchiveRead::Unavailable => ("neutral", "档案暂不可读"),
+        TargetArchiveRead::Known(Some(value)) if value.work_in_progress => ("warn", "建档中"),
+        TargetArchiveRead::Known(Some(value)) if value.quarantined > 0 => ("warn", "档案有问题"),
+        TargetArchiveRead::Known(None) => ("neutral", "尚未建立"),
+        TargetArchiveRead::Known(Some(value)) if value.is_untouched() => ("neutral", "尚未建立"),
+        TargetArchiveRead::Known(Some(value))
+            if value.works_listed > 0 && value.details_captured < value.works_listed =>
+        {
+            ("warn", "待完善")
+        }
+        TargetArchiveRead::Known(Some(value))
+            if value.works_listed > 0
+                && matches!(
+                    target.lifecycle_state.as_str(),
+                    "archived" | "monitoring" | "paused"
+                ) =>
+        {
+            ("ok", "档案已建立")
+        }
+        TargetArchiveRead::Known(Some(value)) if value.started || value.attempted => {
+            ("warn", "档案有问题")
+        }
+        TargetArchiveRead::Known(Some(value)) if value.works_listed > 0 => ("warn", "待完善"),
+        TargetArchiveRead::Known(Some(_)) => ("neutral", "等待作品目录"),
     };
     format!(r#"<span class="c-tg-truth c-tg-{tone}">{label}</span>"#)
 }
@@ -323,24 +346,30 @@ fn patrol_state(target: &ObservationTarget) -> String {
     format!(r#"<span class="c-tg-truth c-tg-{tone}">{label}</span>"#)
 }
 
-fn archive_count(archive: Option<&ArchiveCompleteness>) -> String {
-    archive
-        .filter(|value| !value.is_untouched())
-        .map(|value| format!("{} 篇", value.works_listed))
-        .unwrap_or_else(|| "—".to_owned())
+fn archive_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String {
+    match archive {
+        super::target_drawer::TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
+        super::target_drawer::TargetArchiveRead::Known(value) => value
+            .filter(|value| !value.is_untouched())
+            .map(|value| format!("{} 篇", value.works_listed))
+            .unwrap_or_else(|| "—".to_owned()),
+    }
 }
 
-fn detail_count(archive: Option<&ArchiveCompleteness>) -> String {
-    archive
-        .filter(|value| value.works_listed > 0)
-        .map(|value| {
-            let missing = (value.works_listed - value.details_captured).max(0);
-            format!(
-                "{} / {} · 缺 {}",
-                value.details_captured, value.works_listed, missing
-            )
-        })
-        .unwrap_or_else(|| "—".to_owned())
+fn detail_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String {
+    match archive {
+        super::target_drawer::TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
+        super::target_drawer::TargetArchiveRead::Known(value) => value
+            .filter(|value| value.works_listed > 0)
+            .map(|value| {
+                let missing = (value.works_listed - value.details_captured).max(0);
+                format!(
+                    "{} / {} · 缺 {}",
+                    value.details_captured, value.works_listed, missing
+                )
+            })
+            .unwrap_or_else(|| "—".to_owned()),
+    }
 }
 
 /// 每行只提供一个主要动作。详情抽屉和巡查规则只是导航；建档/继续完善仍走同一条受控
@@ -348,68 +377,59 @@ fn detail_count(archive: Option<&ArchiveCompleteness>) -> String {
 fn row_action(
     target: &ObservationTarget,
     is_creator: bool,
-    archive: Option<&ArchiveCompleteness>,
+    archive: super::target_drawer::TargetArchiveRead<'_>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
-    let opener_id = format!("monitor-rule-{}", target.target_ref);
-    let rule_href = list_context.monitor_rule_href(target.target_ref, &opener_id);
-    let rule_label = if target.lifecycle_state == "paused" {
-        "恢复巡查"
-    } else if target.monitoring_enabled {
-        "管理巡查"
-    } else if is_creator {
-        "开启巡查"
-    } else {
-        "设置巡查"
-    };
-    let rule_entry = format!(
-        r#"<a id="{opener_id}" class="c-btn-secondary c-tg-btn" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">{rule_label}</a>"#,
-        target_ref = target.target_ref,
-    );
-    if !is_creator {
-        if target.monitoring_enabled && target.lifecycle_state != "paused" {
+    use super::target_drawer::TargetPrimaryAction;
+    let action = super::target_drawer::target_primary_action(target, is_creator, archive);
+    match action {
+        TargetPrimaryAction::ViewKeyword => {
             let drawer_href = list_context.drawer_href(target.target_ref, &[], None);
-            return format!(
-                r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看观察</a>"#
-            );
+            format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看观察</a>"#)
         }
-        return rule_entry;
+        TargetPrimaryAction::ViewCreator => {
+            let drawer_href = list_context.drawer_href(
+                target.target_ref,
+                &[("dtab", "overview")],
+                Some("creator-lifecycle"),
+            );
+            format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看档案</a>"#)
+        }
+        TargetPrimaryAction::ViewArchiveProgress
+        | TargetPrimaryAction::ViewArchiveProblems
+        | TargetPrimaryAction::ViewArchiveUnavailable => {
+            let (label, fragment) = match action {
+                TargetPrimaryAction::ViewArchiveProgress => ("查看进度", "target-archive"),
+                TargetPrimaryAction::ViewArchiveProblems => ("查看档案问题", "archive-problems"),
+                TargetPrimaryAction::ViewArchiveUnavailable => ("查看档案", "target-archive"),
+                _ => unreachable!(),
+            };
+            let drawer_href =
+                list_context.drawer_href(target.target_ref, &[("dtab", "archive")], Some(fragment));
+            format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">{label}</a>"#)
+        }
+        TargetPrimaryAction::OpenPatrol(label) => {
+            let opener_id = format!("monitor-rule-{}", target.target_ref);
+            let rule_href = list_context.monitor_rule_href(target.target_ref, &opener_id);
+            format!(
+                r#"<a id="{opener_id}" class="c-btn-secondary c-tg-btn" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">{label}</a>"#,
+                target_ref = target.target_ref,
+            )
+        }
+        action @ (TargetPrimaryAction::EstablishArchive | TargetPrimaryAction::ContinueArchive) => {
+            let label = if action == TargetPrimaryAction::EstablishArchive {
+                "建立档案"
+            } else {
+                "继续完善"
+            };
+            let focus_id = format!("target-{}", target.target_ref);
+            let fields = list_context.return_fields(None, None, Some(&focus_id));
+            format!(
+                r#"<form method="post" action="/collection/targets/archive">{fields}<button class="c-btn-primary c-tg-btn" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                target_ref = target.target_ref,
+            )
+        }
     }
-    let drawer_href = list_context.drawer_href(
-        target.target_ref,
-        &[("dtab", "archive")],
-        Some("target-archive"),
-    );
-    if archive.is_some_and(|value| value.work_in_progress) {
-        return format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看进度</a>"#);
-    }
-    if archive.is_some_and(|value| value.quarantined > 0) {
-        return format!(
-            r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看档案问题</a>"#
-        );
-    }
-    if target.lifecycle_state == "dismissed" {
-        return format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看档案</a>"#);
-    }
-    let untouched = archive.is_none_or(ArchiveCompleteness::is_untouched);
-    let needs_details = archive.is_some_and(|value| {
-        value.works_listed == 0 || value.details_captured < value.works_listed
-    });
-    if untouched || needs_details {
-        let label = if untouched {
-            "建立档案"
-        } else {
-            "继续完善"
-        };
-        return format!(
-            r#"<form method="post" action="/collection/targets/archive"><button class="c-btn-primary c-tg-btn" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
-            target_ref = target.target_ref,
-        );
-    }
-    if !target.monitoring_enabled {
-        return rule_entry;
-    }
-    format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看档案</a>"#)
 }
 
 /// 小红书号优先，采不到才退回平台 ID——小红书号是人能对上的那个。
@@ -472,12 +492,12 @@ mod tests {
                 &base,
                 &[],
                 &HashMap::new(),
-                &HashMap::new(),
+                Some(&HashMap::new()),
                 None,
                 TargetListContext::default(),
             );
             assert!(html.contains("当前列表范围没有匹配的观察目标"));
-            assert!(html.contains("目标列表读取成功"));
+            assert!(html.contains("当前筛选下没有观察目标"));
             assert!(!html.contains(provisional));
         }
     }
@@ -489,7 +509,7 @@ mod tests {
             &base,
             &[target("creator", Some("孩悦"))],
             &HashMap::new(),
-            &HashMap::new(),
+            Some(&HashMap::new()),
             None,
             TargetListContext::default(),
         );
@@ -511,7 +531,7 @@ mod tests {
             base,
             &[target("creator", Some("真实目标"))],
             &HashMap::new(),
-            &HashMap::new(),
+            Some(&HashMap::new()),
             None,
             TargetListContext::default(),
         );
@@ -528,7 +548,7 @@ mod tests {
             &base,
             &[target("keyword", None)],
             &HashMap::new(),
-            &HashMap::new(),
+            Some(&HashMap::new()),
             None,
             TargetListContext::default(),
         );
@@ -543,7 +563,7 @@ mod tests {
             &base,
             &[target("creator", Some("<script>x</script>"))],
             &HashMap::new(),
-            &HashMap::new(),
+            Some(&HashMap::new()),
             None,
             TargetListContext::default(),
         );
@@ -564,7 +584,7 @@ mod tests {
             &base,
             &[creator],
             &HashMap::new(),
-            &HashMap::new(),
+            Some(&HashMap::new()),
             None,
             TargetListContext::default(),
         );
@@ -589,7 +609,7 @@ mod tests {
             &base,
             &[creator],
             &avatars,
-            &HashMap::new(),
+            Some(&HashMap::new()),
             None,
             TargetListContext::default(),
         );
@@ -607,7 +627,7 @@ mod tests {
             &base,
             std::slice::from_ref(&creator),
             &HashMap::new(),
-            &HashMap::new(),
+            Some(&HashMap::new()),
             None,
             TargetListContext {
                 filter: Some("creator"),
@@ -620,6 +640,78 @@ mod tests {
             "href=\"/collection/targets?filter=creator&amp;sort=last&amp;drawer={}\"",
             creator.target_ref
         )));
+        assert!(html.contains(r#"name="return_filter" value="creator""#));
+        assert!(html.contains(r#"name="return_sort" value="last""#));
+        assert!(html.contains(&format!(
+            r#"name="return_focus" value="target-{}""#,
+            creator.target_ref
+        )));
+        assert!(html.contains(r#"<div class="c-tg-object" role="cell">"#));
+        assert!(html.contains("data-row-opener"));
+        assert!(!html.contains("c-tg-row-open"));
+    }
+
+    #[test]
+    fn unreadable_archive_state_never_becomes_an_unbuilt_archive_or_write_action() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let creator = target("creator", Some("读取失败作者"));
+        let html = render_stored_targets(
+            &base,
+            &[creator],
+            &HashMap::new(),
+            None,
+            None,
+            TargetListContext::default(),
+        );
+
+        assert!(html.contains("档案暂不可读"));
+        assert_eq!(html.matches("当前读不到").count(), 2);
+        assert!(html.contains(">查看档案</a>"));
+        assert!(!html.contains(">建立档案</button>"));
+        assert!(!html.contains(">继续完善</button>"));
+        assert!(!html.contains(r#"action="/collection/targets/archive""#));
+    }
+
+    #[test]
+    fn quarantined_archive_opens_its_real_problem_section_without_a_write_action() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let creator = target("creator", Some("待处理作者"));
+        let mut completeness = HashMap::new();
+        completeness.insert(
+            creator.identity_key.clone(),
+            ArchiveCompleteness {
+                started: true,
+                attempted: true,
+                work_in_progress: false,
+                author_profile_captures: 0,
+                works_listed: 0,
+                details_captured: 0,
+                quarantined: 1,
+            },
+        );
+        let html = render_stored_targets(
+            &base,
+            &[creator],
+            &HashMap::new(),
+            Some(&completeness),
+            None,
+            TargetListContext::default(),
+        );
+
+        assert!(html.contains("档案有问题"));
+        assert!(html.contains(">查看档案问题</a>"));
+        assert!(html.contains("#archive-problems"));
+        assert!(!html.contains(">建立档案</button>"));
+        assert!(!html.contains(">继续完善</button>"));
+    }
+
+    #[test]
+    fn archive_progress_failures_use_business_language() {
+        assert!(failure_markup(Some("archive_in_progress")).contains("已有一批作品正在补齐"));
+        assert!(
+            failure_markup(Some("archive_nothing_to_continue"))
+                .contains("当前作品目录没有待补详情")
+        );
     }
 
     #[test]
@@ -631,7 +723,7 @@ mod tests {
             &base,
             &[creator, keyword],
             &HashMap::new(),
-            &HashMap::new(),
+            Some(&HashMap::new()),
             None,
             TargetListContext::default(),
         );
@@ -641,6 +733,9 @@ mod tests {
         assert!(html.contains("c-tg-keyword-grid"));
         assert!(html.contains(r#"作品目录</span><span role="columnheader">详情进度"#));
         assert!(html.contains(r#"最近命中</span><span role="columnheader">数据更新"#));
+        assert!(html.contains("打开作者的创作者档案"));
+        assert!(html.contains("打开关键词的关键词观察"));
+        assert!(!html.contains("关键词档案"));
         assert_eq!(html.matches("c-tg-actions").count(), 2);
         assert_eq!(html.matches("c-tg-btn").count(), 2);
         assert_eq!(html.matches("data-monitor-rule-trigger").count(), 1);
@@ -666,6 +761,8 @@ mod tests {
         completeness.insert(
             creator.identity_key.clone(),
             ArchiveCompleteness {
+                started: true,
+                attempted: true,
                 work_in_progress: false,
                 author_profile_captures: 1,
                 works_listed: 12,
@@ -677,7 +774,7 @@ mod tests {
             &base,
             &[creator],
             &HashMap::new(),
-            &completeness,
+            Some(&completeness),
             None,
             TargetListContext::default(),
         );

@@ -34,6 +34,12 @@ pub enum AcquisitionChainError {
         "progressive creator archiving requires an authorization that permits 200 works; current bound is {current_bound}"
     )]
     ProgressiveArchiveAuthorizationTooSmall { current_bound: i32 },
+    #[error("progressive creator archiving requires an active matching authorization")]
+    ProgressiveArchiveAuthorizationMissing,
+    #[error("the existing progressive creator archive has a different purpose")]
+    ProgressiveArchivePurposeMismatch,
+    #[error("the progressive creator archive cannot advance: {reason}")]
+    ProgressiveArchiveNotReady { reason: &'static str },
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -210,8 +216,11 @@ pub async fn request_progressive_archive_and_lease(
         .begin()
         .await
         .map_err(AcquisitionChainError::from)?;
+    // Every progressive path locks Target before Authorization. The worker uses the same order;
+    // keeping it here prevents a person clicking Continue from deadlocking the minute tick.
     let target: Option<(String, String)> = sqlx::query_as(
-        "SELECT platform,target_kind FROM collection_observation_target WHERE target_ref=$1",
+        "SELECT platform,target_kind FROM collection_observation_target \
+         WHERE target_ref=$1 FOR UPDATE",
     )
     .bind(target_ref)
     .fetch_optional(&mut *transaction)
@@ -220,33 +229,17 @@ pub async fn request_progressive_archive_and_lease(
     let Some((platform, target_kind)) = target else {
         return Err(AcquisitionChainError::UnknownTarget.into());
     };
-    let qualifying_authorization: Option<Uuid> = sqlx::query_scalar(
-        "SELECT authorization_ref FROM collection_acquisition_authorization \
-         WHERE platform=$1 AND target_kind=$2 AND lane='deep_archive' AND purpose=$3 \
-           AND revoked_at IS NULL AND expires_at>scope_001_now() \
-           AND (max_works_per_target IS NULL OR max_works_per_target >= $4) \
-         ORDER BY expires_at DESC LIMIT 1 FOR UPDATE",
+    let qualifying_authorization = match progressive_authorization_in_transaction(
+        &mut transaction,
+        &platform,
+        &target_kind,
+        purpose,
     )
-    .bind(&platform)
-    .bind(&target_kind)
-    .bind(purpose)
-    .bind(PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT)
-    .fetch_optional(&mut *transaction)
     .await
-    .map_err(AcquisitionChainError::from)?;
-    if qualifying_authorization.is_none() {
-        let smaller_bound: Option<i32> = sqlx::query_scalar(
-            "SELECT max(max_works_per_target) FROM collection_acquisition_authorization \
-             WHERE platform=$1 AND target_kind=$2 AND lane='deep_archive' AND purpose=$3 \
-               AND revoked_at IS NULL AND expires_at>scope_001_now()",
-        )
-        .bind(&platform)
-        .bind(&target_kind)
-        .bind(purpose)
-        .fetch_one(&mut *transaction)
-        .await
-        .map_err(AcquisitionChainError::from)?;
-        if let Some(current_bound) = smaller_bound {
+    .map_err(AcquisitionChainError::from)?
+    {
+        ProgressiveAuthorization::Qualified(authorization_ref) => authorization_ref,
+        ProgressiveAuthorization::TooSmall(current_bound) => {
             transaction
                 .rollback()
                 .await
@@ -256,6 +249,59 @@ pub async fn request_progressive_archive_and_lease(
                     .into(),
             );
         }
+        ProgressiveAuthorization::Missing => {
+            transaction
+                .rollback()
+                .await
+                .map_err(AcquisitionChainError::from)?;
+            return Err(AcquisitionChainError::ProgressiveArchiveAuthorizationMissing.into());
+        }
+    };
+    if let Some((root_work_order_ref, root_purpose)) =
+        canonical_progressive_root_in_transaction(&mut transaction, target_ref)
+            .await
+            .map_err(AcquisitionChainError::from)?
+    {
+        if root_purpose != purpose {
+            transaction
+                .rollback()
+                .await
+                .map_err(AcquisitionChainError::from)?;
+            return Err(AcquisitionChainError::ProgressiveArchivePurposeMismatch.into());
+        }
+        let monitoring_enabled: bool = sqlx::query_scalar(
+            "SELECT monitoring_enabled FROM collection_observation_target WHERE target_ref=$1",
+        )
+        .bind(target_ref)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(AcquisitionChainError::from)?;
+        let result = match advance_progressive_archive_in_transaction(
+            &mut transaction,
+            target_ref,
+            root_work_order_ref,
+            qualifying_authorization,
+            purpose,
+            requested_by,
+            monitoring_enabled,
+            valid_for_minutes,
+        )
+        .await?
+        {
+            ProgressiveAdvance::Outcome(outcome) => outcome,
+            ProgressiveAdvance::Skipped(reason) => {
+                transaction
+                    .rollback()
+                    .await
+                    .map_err(AcquisitionChainError::from)?;
+                return Err(AcquisitionChainError::ProgressiveArchiveNotReady { reason }.into());
+            }
+        };
+        transaction
+            .commit()
+            .await
+            .map_err(AcquisitionChainError::from)?;
+        return Ok(result);
     }
     let request = request_and_admit_in_transaction_with_progressive_resume(
         &mut transaction,
@@ -264,7 +310,7 @@ pub async fn request_progressive_archive_and_lease(
         purpose,
         requested_by,
         &[],
-        qualifying_authorization,
+        Some(qualifying_authorization),
         true,
     )
     .await?;
@@ -1177,6 +1223,190 @@ async fn write_progressive_marker(
     Ok(())
 }
 
+enum ProgressiveAuthorization {
+    Qualified(Uuid),
+    TooSmall(i32),
+    Missing,
+}
+
+async fn progressive_authorization_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    platform: &str,
+    target_kind: &str,
+    purpose: &str,
+) -> Result<ProgressiveAuthorization, sqlx::Error> {
+    let qualified: Option<Uuid> = sqlx::query_scalar(
+        "SELECT authorization_ref FROM collection_acquisition_authorization \
+         WHERE platform=$1 AND target_kind=$2 AND lane='deep_archive' AND purpose=$3 \
+           AND revoked_at IS NULL AND expires_at>scope_001_now() \
+           AND (max_works_per_target IS NULL OR max_works_per_target >= $4) \
+         ORDER BY expires_at DESC,authorization_ref LIMIT 1 FOR UPDATE",
+    )
+    .bind(platform)
+    .bind(target_kind)
+    .bind(purpose)
+    .bind(PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    if let Some(authorization_ref) = qualified {
+        return Ok(ProgressiveAuthorization::Qualified(authorization_ref));
+    }
+    let smaller_bound: Option<i32> = sqlx::query_scalar(
+        "SELECT max(max_works_per_target) FROM collection_acquisition_authorization \
+         WHERE platform=$1 AND target_kind=$2 AND lane='deep_archive' AND purpose=$3 \
+           AND revoked_at IS NULL AND expires_at>scope_001_now()",
+    )
+    .bind(platform)
+    .bind(target_kind)
+    .bind(purpose)
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(smaller_bound.map_or(
+        ProgressiveAuthorization::Missing,
+        ProgressiveAuthorization::TooSmall,
+    ))
+}
+
+async fn canonical_progressive_root_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+) -> Result<Option<(Uuid, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT work_order.work_order_ref,request.purpose \
+         FROM collection_work_order work_order \
+         JOIN collection_admission_decision decision USING(decision_ref) \
+         JOIN collection_acquisition_request request USING(request_ref) \
+         WHERE work_order.target_ref=$1 AND work_order.lane='deep_archive' \
+           AND work_order.stop_conditions #>> '{progressiveArchive,version}'=$2 \
+           AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order.work_order_ref::text \
+         ORDER BY work_order.created_at,work_order.work_order_ref \
+         LIMIT 1 FOR UPDATE OF work_order",
+    )
+    .bind(target_ref)
+    .bind(PROGRESSIVE_ARCHIVE_VERSION.to_string())
+    .fetch_optional(&mut **transaction)
+    .await
+}
+
+enum ProgressiveAdvance {
+    Outcome(RequestLeaseOutcome),
+    Skipped(&'static str),
+}
+
+async fn advance_progressive_archive_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    root_work_order_ref: Uuid,
+    authorization_ref: Uuid,
+    purpose: &str,
+    requested_by: &str,
+    monitoring_enabled: bool,
+    valid_for_minutes: i32,
+) -> Result<ProgressiveAdvance, RequestLeaseError> {
+    let live_material_scope: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM collection_work_order candidate \
+           JOIN collection_work_order_material_target scope USING (work_order_ref) \
+           JOIN collection_work_order_lease lease USING (work_order_ref) \
+           WHERE candidate.target_ref=$1 AND candidate.lane='deep_archive' \
+             AND lease.released_at IS NULL AND lease.expires_at>scope_001_now())",
+    )
+    .bind(target_ref)
+    .fetch_one(&mut **transaction)
+    .await
+    .map_err(AcquisitionChainError::from)?;
+    if live_material_scope {
+        return Ok(ProgressiveAdvance::Skipped("detail_batch_in_flight"));
+    }
+
+    let content_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT discovered.content_public_ref FROM ( \
+           SELECT finding.content_public_ref,min(finding.created_at) AS first_seen \
+           FROM linggan_material_discovery_finding finding \
+           JOIN linggan_runtime_capture_package package USING (package_ref) \
+           JOIN linggan_runtime_submission_receipt receipt USING (package_ref) \
+           JOIN linggan_runtime_record_disposition disposition \
+             ON disposition.package_ref=finding.package_ref \
+            AND disposition.record_ordinal=finding.record_ordinal \
+           JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+           JOIN collection_work_order_lease lease USING (lease_ref) \
+           JOIN collection_work_order source_order USING (work_order_ref) \
+           WHERE source_order.target_ref=$1 \
+             AND finding.discovery_kind='profile_discovery' \
+             AND (source_order.lane='deep_archive' OR $2) \
+             AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+             AND receipt.material_admission='ACCEPTED' \
+             AND disposition.disposition <> 'quarantined' \
+             AND NOT EXISTS ( \
+               SELECT 1 FROM linggan_material_content_detail detail \
+               WHERE detail.content_public_ref=finding.content_public_ref) \
+             AND NOT EXISTS ( \
+               SELECT 1 FROM collection_work_order scoped_order \
+               JOIN collection_work_order_material_target scope USING (work_order_ref) \
+               JOIN collection_work_order_lease scoped_lease USING (work_order_ref) \
+               WHERE scoped_order.target_ref=$1 \
+                 AND scope.content_public_ref=finding.content_public_ref \
+                 AND scoped_lease.released_at IS NULL \
+                 AND scoped_lease.expires_at>scope_001_now()) \
+           GROUP BY finding.content_public_ref \
+         ) discovered \
+         ORDER BY discovered.first_seen,discovered.content_public_ref \
+         LIMIT $3",
+    )
+    .bind(target_ref)
+    .bind(monitoring_enabled)
+    .bind(PROGRESSIVE_ARCHIVE_BATCH_SIZE)
+    .fetch_all(&mut **transaction)
+    .await
+    .map_err(AcquisitionChainError::from)?;
+    if content_refs.is_empty() {
+        return Ok(ProgressiveAdvance::Skipped("no_missing_accepted_work"));
+    }
+    let material_targets = content_refs
+        .iter()
+        .map(|content_public_ref| MaterialDeepeningTarget {
+            content_public_ref: *content_public_ref,
+            comment_limit: 30,
+            reply_expand_limit: 2,
+            acquire_media: true,
+            allow_ocr: true,
+            allow_asr: true,
+        })
+        .collect::<Vec<_>>();
+    let request = request_and_admit_in_transaction_with_progressive_resume(
+        transaction,
+        target_ref,
+        "deep_archive",
+        purpose,
+        requested_by,
+        &material_targets,
+        Some(authorization_ref),
+        true,
+    )
+    .await?;
+    let Some(work_order_ref) = request.work_order_ref else {
+        return Ok(ProgressiveAdvance::Outcome(RequestLeaseOutcome {
+            request,
+            lease: None,
+        }));
+    };
+    write_progressive_marker(
+        transaction,
+        work_order_ref,
+        root_work_order_ref,
+        i32::try_from(content_refs.len()).unwrap_or(i32::MAX),
+    )
+    .await
+    .map_err(AcquisitionChainError::from)?;
+    let lease =
+        issue_work_order_lease_in_transaction(transaction, work_order_ref, valid_for_minutes)
+            .await?;
+    Ok(ProgressiveAdvance::Outcome(RequestLeaseOutcome {
+        request,
+        lease: Some(lease),
+    }))
+}
+
 /// Advance versioned creator dossier plans by one small, frozen material batch per target.
 ///
 /// The scheduler never downloads or parses platform data. It only turns already accepted,
@@ -1195,19 +1425,22 @@ pub async fn run_progressive_archives(
     {
         return Err(AcquisitionChainError::SchemaUnavailable.into());
     }
-    let plans: Vec<(Uuid, Uuid, Uuid, String)> = sqlx::query_as(
-        "SELECT work_order.target_ref,work_order.work_order_ref,decision.authorization_ref,request.purpose \
-         FROM collection_work_order work_order \
-         JOIN collection_admission_decision decision USING (decision_ref) \
-         JOIN collection_acquisition_request request USING (request_ref) \
-         JOIN collection_observation_target target USING (target_ref) \
-         WHERE work_order.lane='deep_archive' \
-           AND work_order.stop_conditions #>> '{progressiveArchive,version}'=$1 \
-           AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order.work_order_ref::text \
-           AND decision.authorization_ref IS NOT NULL \
-           AND target.lifecycle_state <> 'dismissed' \
-         ORDER BY work_order.created_at \
-         LIMIT 50",
+    let plans: Vec<(Uuid, Uuid, String)> = sqlx::query_as(
+        "WITH roots AS ( \
+           SELECT work_order.target_ref,work_order.work_order_ref,request.purpose,work_order.created_at, \
+                  row_number() OVER (PARTITION BY work_order.target_ref \
+                                     ORDER BY work_order.created_at,work_order.work_order_ref) AS root_rank \
+           FROM collection_work_order work_order \
+           JOIN collection_admission_decision decision USING (decision_ref) \
+           JOIN collection_acquisition_request request USING (request_ref) \
+           JOIN collection_observation_target target USING (target_ref) \
+           WHERE work_order.lane='deep_archive' \
+             AND work_order.stop_conditions #>> '{progressiveArchive,version}'=$1 \
+             AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order.work_order_ref::text \
+             AND decision.authorization_ref IS NOT NULL \
+             AND target.lifecycle_state <> 'dismissed') \
+         SELECT target_ref,work_order_ref,purpose FROM roots WHERE root_rank=1 \
+         ORDER BY created_at,work_order_ref LIMIT 50",
     )
     .bind(PROGRESSIVE_ARCHIVE_VERSION.to_string())
     .fetch_all(database.pool())
@@ -1215,21 +1448,22 @@ pub async fn run_progressive_archives(
     .map_err(AcquisitionChainError::from)?;
 
     let mut summary = ProgressiveArchiveTickSummary::default();
-    for (target_ref, root_work_order_ref, authorization_ref, purpose) in plans {
+    for (target_ref, root_work_order_ref, purpose) in plans {
         let mut transaction = database
             .pool()
             .begin()
             .await
             .map_err(AcquisitionChainError::from)?;
-        let state: Option<(String, bool)> = sqlx::query_as(
-            "SELECT lifecycle_state,monitoring_enabled FROM collection_observation_target \
+        let state: Option<(String, String, String, bool)> = sqlx::query_as(
+            "SELECT platform,target_kind,lifecycle_state,monitoring_enabled \
+             FROM collection_observation_target \
              WHERE target_ref=$1 FOR UPDATE",
         )
         .bind(target_ref)
         .fetch_optional(&mut *transaction)
         .await
         .map_err(AcquisitionChainError::from)?;
-        let Some((lifecycle_state, monitoring_enabled)) = state else {
+        let Some((platform, target_kind, lifecycle_state, monitoring_enabled)) = state else {
             transaction
                 .rollback()
                 .await
@@ -1249,140 +1483,62 @@ pub async fn run_progressive_archives(
                 .push((target_ref, "target_dismissed".to_owned()));
             continue;
         }
-        let authorization_valid: bool = sqlx::query_scalar(
-            "SELECT EXISTS (SELECT 1 FROM collection_acquisition_authorization \
-             WHERE authorization_ref=$1 AND revoked_at IS NULL AND expires_at>scope_001_now() \
-               AND (max_works_per_target IS NULL OR max_works_per_target >= $2))",
+        let authorization_ref = match progressive_authorization_in_transaction(
+            &mut transaction,
+            &platform,
+            &target_kind,
+            &purpose,
         )
-        .bind(authorization_ref)
-        .bind(PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT)
-        .fetch_one(&mut *transaction)
         .await
-        .map_err(AcquisitionChainError::from)?;
-        if !authorization_valid {
-            transaction
-                .rollback()
-                .await
-                .map_err(AcquisitionChainError::from)?;
-            summary
-                .skipped
-                .push((target_ref, "authorization_expired_or_too_small".to_owned()));
-            continue;
-        }
-        let live_material_scope: bool = sqlx::query_scalar(
-            "SELECT EXISTS ( \
-               SELECT 1 FROM collection_work_order candidate \
-               JOIN collection_work_order_material_target scope USING (work_order_ref) \
-               JOIN collection_work_order_lease lease USING (work_order_ref) \
-               WHERE candidate.target_ref=$1 AND candidate.lane='deep_archive' \
-                 AND lease.released_at IS NULL AND lease.expires_at>scope_001_now())",
-        )
-        .bind(target_ref)
-        .fetch_one(&mut *transaction)
-        .await
-        .map_err(AcquisitionChainError::from)?;
-        if live_material_scope {
-            transaction
-                .rollback()
-                .await
-                .map_err(AcquisitionChainError::from)?;
-            summary
-                .skipped
-                .push((target_ref, "detail_batch_in_flight".to_owned()));
-            continue;
-        }
-        let content_refs: Vec<Uuid> = sqlx::query_scalar(
-            "SELECT discovered.content_public_ref FROM ( \
-               SELECT finding.content_public_ref,min(finding.created_at) AS first_seen \
-               FROM linggan_material_discovery_finding finding \
-               JOIN linggan_runtime_capture_package package USING (package_ref) \
-               JOIN linggan_runtime_submission_receipt receipt USING (package_ref) \
-               JOIN linggan_runtime_record_disposition disposition \
-                 ON disposition.package_ref=finding.package_ref \
-                AND disposition.record_ordinal=finding.record_ordinal \
-               JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
-               JOIN collection_work_order_lease lease USING (lease_ref) \
-               JOIN collection_work_order source_order USING (work_order_ref) \
-               WHERE source_order.target_ref=$1 \
-                 AND finding.discovery_kind='profile_discovery' \
-                 AND (source_order.lane='deep_archive' OR $2) \
-                 AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
-                 AND receipt.material_admission='ACCEPTED' \
-                 AND disposition.disposition <> 'quarantined' \
-                 AND NOT EXISTS ( \
-                   SELECT 1 FROM linggan_material_content_detail detail \
-                   WHERE detail.content_public_ref=finding.content_public_ref) \
-                 AND NOT EXISTS ( \
-                   SELECT 1 FROM collection_work_order scoped_order \
-                   JOIN collection_work_order_material_target scope USING (work_order_ref) \
-                   JOIN collection_work_order_lease scoped_lease USING (work_order_ref) \
-                   WHERE scoped_order.target_ref=$1 \
-                     AND scope.content_public_ref=finding.content_public_ref \
-                     AND scoped_lease.released_at IS NULL \
-                     AND scoped_lease.expires_at>scope_001_now()) \
-               GROUP BY finding.content_public_ref \
-             ) discovered \
-             ORDER BY discovered.first_seen,discovered.content_public_ref \
-             LIMIT $3",
-        )
-        .bind(target_ref)
-        .bind(monitoring_enabled)
-        .bind(PROGRESSIVE_ARCHIVE_BATCH_SIZE)
-        .fetch_all(&mut *transaction)
-        .await
-        .map_err(AcquisitionChainError::from)?;
-        if content_refs.is_empty() {
-            transaction
-                .rollback()
-                .await
-                .map_err(AcquisitionChainError::from)?;
-            continue;
-        }
-        let material_targets = content_refs
-            .iter()
-            .map(|content_public_ref| MaterialDeepeningTarget {
-                content_public_ref: *content_public_ref,
-                comment_limit: 30,
-                reply_expand_limit: 2,
-                acquire_media: true,
-                allow_ocr: true,
-                allow_asr: true,
-            })
-            .collect::<Vec<_>>();
-        let request = request_and_admit_in_transaction_with_progressive_resume(
+        .map_err(AcquisitionChainError::from)?
+        {
+            ProgressiveAuthorization::Qualified(authorization_ref) => authorization_ref,
+            ProgressiveAuthorization::TooSmall(_) | ProgressiveAuthorization::Missing => {
+                transaction
+                    .rollback()
+                    .await
+                    .map_err(AcquisitionChainError::from)?;
+                summary
+                    .skipped
+                    .push((target_ref, "authorization_expired_or_too_small".to_owned()));
+                continue;
+            }
+        };
+        let advance = advance_progressive_archive_in_transaction(
             &mut transaction,
             target_ref,
-            "deep_archive",
+            root_work_order_ref,
+            authorization_ref,
             &purpose,
             "agent",
-            &material_targets,
-            Some(authorization_ref),
-            true,
+            monitoring_enabled,
+            180,
         )
         .await?;
-        let Some(work_order_ref) = request.work_order_ref else {
-            let reason = request.reason_code.to_owned();
-            transaction
-                .commit()
-                .await
-                .map_err(AcquisitionChainError::from)?;
-            summary.skipped.push((target_ref, reason));
-            continue;
-        };
-        write_progressive_marker(
-            &mut transaction,
-            work_order_ref,
-            root_work_order_ref,
-            i32::try_from(content_refs.len()).unwrap_or(i32::MAX),
-        )
-        .await
-        .map_err(AcquisitionChainError::from)?;
-        issue_work_order_lease_in_transaction(&mut transaction, work_order_ref, 180).await?;
-        transaction
-            .commit()
-            .await
-            .map_err(AcquisitionChainError::from)?;
-        summary.dispatched.push(target_ref);
+        match advance {
+            ProgressiveAdvance::Skipped(reason) => {
+                transaction
+                    .rollback()
+                    .await
+                    .map_err(AcquisitionChainError::from)?;
+                summary.skipped.push((target_ref, reason.to_owned()));
+            }
+            ProgressiveAdvance::Outcome(outcome) if outcome.lease.is_some() => {
+                transaction
+                    .commit()
+                    .await
+                    .map_err(AcquisitionChainError::from)?;
+                summary.dispatched.push(target_ref);
+            }
+            ProgressiveAdvance::Outcome(outcome) => {
+                let reason = outcome.request.reason_code.to_owned();
+                transaction
+                    .commit()
+                    .await
+                    .map_err(AcquisitionChainError::from)?;
+                summary.skipped.push((target_ref, reason));
+            }
+        }
     }
     Ok(summary)
 }

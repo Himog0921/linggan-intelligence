@@ -479,6 +479,44 @@ WITH selected_target AS (
     FROM collection_observation_target
     WHERE target_ref=$1 AND target_kind='creator'
 ),
+qualified_patrols AS (
+    SELECT work_order.work_order_ref,package.accepted_at,package.package_ref
+    FROM selected_target target
+    JOIN collection_work_order work_order ON work_order.target_ref=target.target_ref
+    JOIN collection_work_order_lease lease USING(work_order_ref)
+    JOIN collection_work_order_lease_task lease_task USING(lease_ref)
+    JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id
+    JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id
+    JOIN linggan_runtime_submission_receipt receipt USING(package_ref)
+    CROSS JOIN LATERAL jsonb_array_elements(
+      CASE WHEN jsonb_typeof(package.coverage->'layers')='array'
+           THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer
+    WHERE work_order.lane='patrol'
+      AND package.package_kind='profile_discovery'
+      AND package.accepted_at <= $2::timestamptz
+      AND package.platform=task.platform
+      AND task.task_spec->'capabilitiesRequested' ? package.package_kind
+      AND (package.coverage->'target') @> (task.task_spec->'target')
+      AND receipt.material_admission='ACCEPTED'
+      AND receipt.execution_effect='COMPLETED_LIVE_STEP'
+      AND layer->>'capability'='profile_discovery'
+      AND COALESCE((layer->>'failed')::integer,0)=0
+      AND COALESCE((layer->>'notAttempted')::integer,0)=0
+      AND COALESCE((layer->>'unknown')::integer,0)=0
+      AND (layer->>'stoppedReason'='surface_ended' OR (
+           layer->>'stoppedReason'='maximum_quota'
+           AND COALESCE((layer->>'acquired')::integer,-1)=
+               COALESCE((task.task_spec->>'maximumQuota')::integer,-2)))
+      AND NOT EXISTS (
+        SELECT 1 FROM linggan_runtime_record_disposition disposition
+        WHERE disposition.package_ref=package.package_ref
+          AND disposition.disposition='quarantined'
+      )
+      AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition
+           WHERE disposition.package_ref=package.package_ref
+             AND disposition.disposition='accepted_for_library_discovery') =
+          COALESCE((layer->>'acquired')::integer,-1)
+),
 surface_observations AS (
     SELECT finding.content_public_ref,work_order.work_order_ref,package.accepted_at,
            package.package_ref,receipt.execution_effect
@@ -503,12 +541,9 @@ surface_observations AS (
       AND disposition.disposition <> 'quarantined'
 ),
 latest_patrol AS (
-    SELECT observation.work_order_ref
-    FROM surface_observations observation
-    JOIN collection_work_order work_order USING (work_order_ref)
-    WHERE work_order.lane='patrol'
-      AND observation.execution_effect='COMPLETED_LIVE_STEP'
-    ORDER BY observation.accepted_at DESC,observation.package_ref DESC
+    SELECT patrol.work_order_ref
+    FROM qualified_patrols patrol
+    ORDER BY patrol.accepted_at DESC,patrol.package_ref DESC
     LIMIT 1
 ),
 surface_candidates AS (

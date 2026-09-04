@@ -3,17 +3,22 @@
 mod fixture;
 
 use fixture::proof_database;
-use linggan_contracts::AdmissionOutcome;
+use linggan_contracts::{
+    AdmissionOutcome, ProducerTaskSpec, parse_producer_attempt, parse_producer_submission,
+    parse_producer_task_spec,
+};
 use linggan_evidence::{
     AccountEligibilitySignal, AcquisitionChainError, AuthorizationGrant, CheckInOutcome,
     CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecycleQuery,
     CreatorLifecycleStatus, CreatorLifecycleWindow, InstallationCheckIn, RequestLeaseError,
-    activate_installation_credential, bind_observation_account, check_in_installation,
-    grant_authorization, open_claim_window, read_archive_completeness, read_creator_lifecycle,
-    register_station, report_account_eligibility, request_progressive_archive_and_lease,
-    set_station_accepting,
+    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, activate_installation_credential,
+    bind_observation_account, check_in_installation, decide_dispatch, grant_authorization,
+    open_claim_window, read_archive_completeness, read_creator_lifecycle, register_station,
+    report_account_eligibility, request_admit_and_lease, request_progressive_archive_and_lease,
+    set_station_accepting, start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
+use std::time::Duration;
 use uuid::Uuid;
 
 const DIGEST_KEY: &[u8] = b"observation-target-dossier-postgres-proof-v1";
@@ -107,6 +112,145 @@ async fn progressive_archive_requires_200_and_freezes_the_root_directory_contrac
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn clean_200_work_progressive_root_establishes_the_bounded_creator_baseline() {
+    let database = proof_database("dossier_progressive_bounded_baseline").await;
+    let installation = ready_installation(&database, "dossier-bounded-baseline").await;
+    let target_ref = seed_creator_target(&database, "creator-bounded-baseline").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
+        .await
+        .unwrap();
+
+    complete_progressive_root_at_the_200_work_bound(&database, &installation).await;
+
+    let state: String = sqlx::query_scalar(
+        "SELECT lifecycle_state FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        state, "archived",
+        "a clean, explicitly bounded 200-Work directory is established without claiming the platform surface ended",
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn concurrent_continue_reuses_one_root_and_freezes_one_three_work_child_under_renewed_authorization()
+ {
+    let database = proof_database("dossier_progressive_continue_mutex").await;
+    let installation = ready_installation(&database, "dossier-continue-mutex").await;
+    let target_ref = seed_creator_target(&database, "creator-continue-mutex").await;
+    let original_authorization = grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let original = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap();
+    let original_root = original.request.work_order_ref.unwrap();
+    complete_progressive_root_at_the_200_work_bound(&database, &installation).await;
+    sqlx::query(
+        "UPDATE collection_acquisition_authorization \
+         SET granted_at=scope_001_now()-interval '2 days', \
+             expires_at=scope_001_now()-interval '1 second' WHERE authorization_ref=$1",
+    )
+    .bind(original_authorization)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let renewed_authorization = grant_deep_archive(&database, "建立创作者档案", 200).await;
+
+    let (left, right) = tokio::time::timeout(Duration::from_secs(10), async {
+        tokio::join!(
+            request_progressive_archive_and_lease(
+                &database,
+                target_ref,
+                "建立创作者档案",
+                "person",
+                30,
+            ),
+            request_progressive_archive_and_lease(
+                &database,
+                target_ref,
+                "建立创作者档案",
+                "person",
+                30,
+            )
+        )
+    })
+    .await
+    .expect("target-to-authorization lock ordering must not deadlock");
+    assert_eq!(
+        [left.as_ref(), right.as_ref()]
+            .into_iter()
+            .filter(|outcome| outcome.is_ok_and(|value| value.lease.is_some()))
+            .count(),
+        1,
+        "exactly one concurrent continue action may freeze a live child batch",
+    );
+
+    let root_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order \
+         WHERE target_ref=$1 AND lane='deep_archive' \
+           AND stop_conditions #>> '{progressiveArchive,version}'='1' \
+           AND stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order_ref::text",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        root_count, 1,
+        "continue must not rescan the creator profile"
+    );
+    let child: (Uuid, Uuid, i32, i64) = sqlx::query_as(
+        "SELECT work_order.work_order_ref,decision.authorization_ref,work_order.max_works, \
+                count(scope.content_public_ref) \
+         FROM collection_work_order work_order \
+         JOIN collection_admission_decision decision USING(decision_ref) \
+         JOIN collection_work_order_material_target scope USING(work_order_ref) \
+         WHERE work_order.target_ref=$1 \
+           AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=$2 \
+           AND work_order.work_order_ref<>$3 \
+         GROUP BY work_order.work_order_ref,decision.authorization_ref,work_order.max_works",
+    )
+    .bind(target_ref)
+    .bind(original_root.to_string())
+    .bind(original_root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(child.1, renewed_authorization);
+    assert_eq!(child.2, 3);
+    assert_eq!(child.3, 3);
+    let child_capabilities: Vec<String> = sqlx::query_scalar(
+        "SELECT task.task_spec #>> '{capabilitiesRequested,0}' \
+         FROM collection_work_order_lease lease \
+         JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+         JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+         WHERE lease.work_order_ref=$1 ORDER BY lease_task.sequence_no",
+    )
+    .bind(child.0)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(child_capabilities.len(), 12);
+    assert!(
+        child_capabilities.iter().all(|capability| !matches!(
+            capability.as_str(),
+            "author_profile" | "profile_discovery"
+        ))
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
 async fn progressive_archive_rejects_a_smaller_grant_without_writing_a_request_or_work() {
     let database = proof_database("dossier_progressive_narrow_grant").await;
     let target_ref = seed_creator_target(&database, "creator-narrow-grant").await;
@@ -151,6 +295,65 @@ async fn progressive_archive_rejects_a_smaller_grant_without_writing_a_request_o
     .await
     .unwrap();
     assert_eq!(lifecycle_state, "pending_decision");
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn archive_completeness_distinguishes_started_attempted_and_quarantined_from_untouched() {
+    let database = proof_database("dossier_archive_started_attempted").await;
+    ready_installation(&database, "dossier-started-attempted").await;
+    let target_ref = seed_creator_target(&database, "creator-started-attempted").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap();
+    let lease_ref = root.lease.unwrap().lease_ref;
+
+    let started = read_archive_completeness(&database, "xhs").await.unwrap();
+    let started = started.get("creator-started-attempted").unwrap();
+    assert!(started.started);
+    assert!(!started.attempted);
+    assert!(!started.is_untouched());
+
+    let author_task_id: Uuid = sqlx::query_scalar(
+        "SELECT lease_task.task_id FROM collection_work_order_lease_task lease_task \
+         JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+         WHERE lease_task.lease_ref=$1 \
+           AND task.task_spec #>> '{capabilitiesRequested,0}'='author_profile'",
+    )
+    .bind(lease_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let package_ref = seed_runtime_package(
+        &database,
+        author_task_id,
+        "author_profile",
+        "2026-09-04T01:00:00Z",
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO linggan_runtime_record_disposition \
+           (package_ref,record_ordinal,disposition,reason) \
+         VALUES ($1,0,'quarantined','started/attempted proof')",
+    )
+    .bind(package_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let attempted = read_archive_completeness(&database, "xhs").await.unwrap();
+    let attempted = attempted.get("creator-started-attempted").unwrap();
+    assert!(attempted.started);
+    assert!(attempted.attempted);
+    assert_eq!(attempted.quarantined, 1);
+    assert!(!attempted.is_untouched());
 }
 
 #[tokio::test]
@@ -429,6 +632,132 @@ async fn lifecycle_distinguishes_directory_confirmed_and_latest_patrol_points() 
     assert!(!confirmed.new_in_latest_patrol);
 }
 
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn patrol_success_and_latest_new_ring_share_one_qualified_target_level_round() {
+    let database = proof_database("dossier_patrol_success_round").await;
+    set_proof_clock(&database, "2026-09-04T08:00:00Z").await;
+    let installation = ready_installation(&database, "dossier-patrol-success").await;
+    refresh_installation_at_proof_clock(&database, &installation).await;
+    let target_ref = seed_creator_target(&database, "creator-patrol-success").await;
+    sqlx::query(
+        "UPDATE collection_observation_target SET lifecycle_state='archived' WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    grant_patrol(&database, "巡查建档创作者").await;
+
+    submit_patrol_round(
+        &database,
+        &installation,
+        target_ref,
+        "巡查建档创作者",
+        PatrolRound::OneUsableWork,
+    )
+    .await;
+    let work_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content \
+         WHERE platform='xhs' AND content_external_id='creator-patrol-success-new-work'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    seed_detail_observation(
+        &database,
+        work_ref,
+        "creator-patrol-success-new-work",
+        Some("creator-patrol-success"),
+        31,
+        "2026-08-03T00:00:00Z",
+    )
+    .await;
+
+    set_proof_clock(&database, "2026-09-04T09:00:00Z").await;
+    refresh_installation_at_proof_clock(&database, &installation).await;
+    submit_patrol_round(
+        &database,
+        &installation,
+        target_ref,
+        "巡查建档创作者",
+        PatrolRound::ValidZeroNew,
+    )
+    .await;
+    let after_zero: String = sqlx::query_scalar(
+        "SELECT to_char(last_patrol_succeeded_at,'YYYY-MM-DD HH24:MI') \
+         FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(after_zero, "2026-09-04 09:00");
+    let lifecycle = read_creator_lifecycle(
+        &database,
+        target_ref,
+        &CreatorLifecycleQuery {
+            window: CreatorLifecycleWindow::All,
+            metric: CreatorLifecycleMetric::Likes,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        lifecycle
+            .points
+            .iter()
+            .all(|point| !point.new_in_latest_patrol),
+        "a valid zero-new patrol is the latest successful round and clears the old new-work ring",
+    );
+
+    for (at, round) in [
+        ("2026-09-04T10:00:00Z", PatrolRound::AllQuarantined),
+        ("2026-09-04T11:00:00Z", PatrolRound::UnknownRiskStop),
+    ] {
+        set_proof_clock(&database, at).await;
+        refresh_installation_at_proof_clock(&database, &installation).await;
+        submit_patrol_round(
+            &database,
+            &installation,
+            target_ref,
+            "巡查建档创作者",
+            round,
+        )
+        .await;
+    }
+    let after_unqualified: String = sqlx::query_scalar(
+        "SELECT to_char(last_patrol_succeeded_at,'YYYY-MM-DD HH24:MI') \
+         FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        after_unqualified, "2026-09-04 09:00",
+        "quarantined and unknown/risk-stopped patrols complete their leases without claiming success",
+    );
+    let lifecycle = read_creator_lifecycle(
+        &database,
+        target_ref,
+        &CreatorLifecycleQuery {
+            window: CreatorLifecycleWindow::All,
+            metric: CreatorLifecycleMetric::Likes,
+        },
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    assert!(
+        lifecycle
+            .points
+            .iter()
+            .all(|point| !point.new_in_latest_patrol)
+    );
+}
+
 async fn seed_creator_target(database: &Database, identity_key: &str) -> Uuid {
     let target_ref = Uuid::new_v4();
     sqlx::query(
@@ -461,8 +790,173 @@ async fn grant_deep_archive(database: &Database, purpose: &str, max_works: i32) 
     .unwrap()
 }
 
-async fn ready_installation(database: &Database, label: &str) {
-    let station_ref = register_station(database, label, 200).await.unwrap();
+async fn grant_patrol(database: &Database, purpose: &str) -> Uuid {
+    grant_authorization(
+        database,
+        &AuthorizationGrant {
+            platform: "xhs",
+            target_kind: "creator",
+            lane: "patrol",
+            purpose,
+            max_targets: Some(1),
+            max_works_per_target: Some(20),
+            valid_for_days: 1,
+        },
+    )
+    .await
+    .unwrap()
+}
+
+async fn set_proof_clock(database: &Database, at: &str) {
+    let sql: &'static str = match at {
+        "2026-09-04T08:00:00Z" => {
+            "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE \
+             AS $$ SELECT timestamptz '2026-09-04T08:00:00Z' $$"
+        }
+        "2026-09-04T09:00:00Z" => {
+            "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE \
+             AS $$ SELECT timestamptz '2026-09-04T09:00:00Z' $$"
+        }
+        "2026-09-04T10:00:00Z" => {
+            "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE \
+             AS $$ SELECT timestamptz '2026-09-04T10:00:00Z' $$"
+        }
+        "2026-09-04T11:00:00Z" => {
+            "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE \
+             AS $$ SELECT timestamptz '2026-09-04T11:00:00Z' $$"
+        }
+        other => panic!("unsupported fixed proof clock {other}"),
+    };
+    sqlx::query(sql).execute(database.pool()).await.unwrap();
+}
+
+#[derive(Clone, Copy)]
+enum PatrolRound {
+    OneUsableWork,
+    ValidZeroNew,
+    AllQuarantined,
+    UnknownRiskStop,
+}
+
+async fn submit_patrol_round(
+    database: &Database,
+    installation: &Installed,
+    target_ref: Uuid,
+    purpose: &str,
+    round: PatrolRound,
+) {
+    let request = request_admit_and_lease(database, target_ref, "patrol", purpose, "person", 30)
+        .await
+        .unwrap();
+    assert!(
+        request.lease.is_some(),
+        "patrol must be leased: {request:?}"
+    );
+    let decision = decide_dispatch(database, &installation.install_key, &installation.secret)
+        .await
+        .unwrap();
+    let task_spec = match decision {
+        linggan_evidence::DispatchDecision::Dispatch { task_spec, .. } => task_spec,
+        other => panic!("expected a dispatched patrol task, got {other:?}"),
+    };
+    let task = parse_producer_task_spec(&task_spec.to_string()).unwrap();
+    let producer_instance_id = Uuid::parse_str(&installation.install_key).unwrap();
+    let attempt = parse_producer_attempt(
+        &serde_json::json!({
+            "contractVersion":"linggan.producer.attempt.v1",
+            "producerInstanceId":producer_instance_id,
+            "taskId":task.task_id(),
+            "attemptId":Uuid::new_v4(),
+        })
+        .to_string(),
+    )
+    .unwrap();
+    assert!(matches!(
+        start_producer_attempt(database, &attempt).await,
+        Ok(RuntimeAttemptOutcome::Started { .. })
+    ));
+    let identity = task.raw()["target"]["authorExternalId"].as_str().unwrap();
+    let (observed, attempted, acquired, unknown, stopped_reason, records) = match round {
+        PatrolRound::OneUsableWork => (
+            1,
+            1,
+            1,
+            0,
+            "surface_ended",
+            vec![serde_json::json!({
+                "kind":"profile_discovery_card",
+                "resultPosition":1,
+                "sourceObject":{
+                    "platform":"xhs","type":"content",
+                    "externalId":"creator-patrol-success-new-work"
+                },
+                "payload":{"title":"patrol success work"}
+            })],
+        ),
+        PatrolRound::ValidZeroNew => (0, 0, 0, 0, "surface_ended", Vec::new()),
+        PatrolRound::AllQuarantined => (
+            1,
+            1,
+            1,
+            0,
+            "surface_ended",
+            vec![serde_json::json!({
+                "kind":"profile_discovery_card",
+                "resultPosition":1,
+                "sourceObject":{
+                    "platform":"xhs","type":"author","externalId":"invalid-discovery-identity"
+                },
+                "payload":{"title":"must quarantine"}
+            })],
+        ),
+        PatrolRound::UnknownRiskStop => (1, 1, 0, 1, "risk_budget", Vec::new()),
+    };
+    let submission = parse_producer_submission(
+        &serde_json::json!({
+            "contractVersion":"linggan.producer.capture-package.v1",
+            "producerInstanceId":producer_instance_id,
+            "taskId":task.task_id(),
+            "attemptId":attempt.attempt_id(),
+            "submissionId":Uuid::new_v4(),
+            "capturePackage":{
+                "contractVersion":"linggan.producer.capture-package.v1",
+                "packageRef":Uuid::new_v4(),
+                "packageKind":"profile_discovery",
+                "platform":"xhs",
+                "observedAt":"2026-09-04T00:00:00Z",
+                "capturedAt":"2026-09-04T00:00:01Z",
+                "coverage":{
+                    "target":{"basis":"known_set","authorExternalId":identity},
+                    "layers":[{
+                        "capability":"profile_discovery",
+                        "observed":observed,"attempted":attempted,"acquired":acquired,
+                        "verified":0,"failed":0,"notAttempted":0,"unknown":unknown,
+                        "stoppedReason":stopped_reason
+                    }]
+                },
+                "records":records
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
+    let outcome = submit_producer_package(database, &submission).await;
+    assert!(
+        matches!(outcome, Ok(RuntimeSubmissionOutcome::Acknowledged { .. })),
+        "patrol submission must be durably acknowledged: {outcome:?}",
+    );
+}
+
+#[derive(Debug)]
+struct Installed {
+    installation_ref: Uuid,
+    account_ref: Uuid,
+    install_key: String,
+    secret: String,
+}
+
+async fn ready_installation(database: &Database, label: &str) -> Installed {
+    let station_ref = register_station(database, label, 1_000).await.unwrap();
     open_claim_window(database, station_ref, 1).await.unwrap();
     let install_key = Uuid::new_v4().to_string();
     let outcome = check_in_installation(
@@ -512,14 +1006,135 @@ async fn ready_installation(database: &Database, label: &str) {
     )
     .await
     .unwrap();
-    bind_observation_account(
-        database,
-        receipt.account_ref.unwrap(),
+    let account_ref = receipt.account_ref.unwrap();
+    bind_observation_account(database, account_ref, installation_ref, "person")
+        .await
+        .unwrap();
+    Installed {
         installation_ref,
-        "person",
+        account_ref,
+        install_key,
+        secret,
+    }
+}
+
+async fn refresh_installation_at_proof_clock(database: &Database, installation: &Installed) {
+    sqlx::query(
+        "UPDATE plugin_installation SET last_seen_at=scope_001_now() WHERE installation_ref=$1",
     )
+    .bind(installation.installation_ref)
+    .execute(database.pool())
     .await
     .unwrap();
+    sqlx::query(
+        "UPDATE platform_observation_account_eligibility_observation \
+         SET observed_at=scope_001_now(),expires_at=scope_001_now()+interval '20 minutes' \
+         WHERE account_ref=$1 AND installation_ref=$2",
+    )
+    .bind(installation.account_ref)
+    .bind(installation.installation_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+}
+
+async fn complete_progressive_root_at_the_200_work_bound(
+    database: &Database,
+    installation: &Installed,
+) {
+    for _ in 0..2 {
+        let decision = decide_dispatch(database, &installation.install_key, &installation.secret)
+            .await
+            .unwrap();
+        let task_spec = match decision {
+            linggan_evidence::DispatchDecision::Dispatch { task_spec, .. } => task_spec,
+            other => panic!("expected a dispatched progressive root task, got {other:?}"),
+        };
+        let task = parse_producer_task_spec(&task_spec.to_string()).unwrap();
+        let producer_instance_id = Uuid::parse_str(&installation.install_key).unwrap();
+        let attempt = parse_producer_attempt(
+            &serde_json::json!({
+                "contractVersion":"linggan.producer.attempt.v1",
+                "producerInstanceId":producer_instance_id,
+                "taskId":task.task_id(),
+                "attemptId":Uuid::new_v4(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(matches!(
+            start_producer_attempt(database, &attempt).await,
+            Ok(RuntimeAttemptOutcome::Started { .. })
+        ));
+        let submission = bounded_root_submission(&task, &attempt, producer_instance_id);
+        let outcome = submit_producer_package(database, &submission).await;
+        assert!(
+            matches!(outcome, Ok(RuntimeSubmissionOutcome::Acknowledged { .. })),
+            "bounded root submission must be acknowledged: {outcome:?}",
+        );
+    }
+}
+
+fn bounded_root_submission(
+    task: &ProducerTaskSpec,
+    attempt: &linggan_contracts::ProducerAttempt,
+    producer_instance_id: Uuid,
+) -> linggan_contracts::ProducerSubmission {
+    let capability = task.raw()["capabilitiesRequested"][0].as_str().unwrap();
+    let identity = task.raw()["target"]["authorExternalId"].as_str().unwrap();
+    let maximum_quota = task.raw()["maximumQuota"].as_i64().unwrap();
+    let records = if capability == "author_profile" {
+        vec![serde_json::json!({
+            "kind":"author_profile",
+            "sourceObject":{"platform":"xhs","type":"author","externalId":identity},
+            "payload":{"userId":identity,"nickname":"bounded baseline proof"}
+        })]
+    } else {
+        (0..maximum_quota)
+            .map(|ordinal| {
+                serde_json::json!({
+                    "kind":"profile_discovery_card",
+                    "resultPosition":ordinal + 1,
+                    "sourceObject":{
+                        "platform":"xhs",
+                        "type":"content",
+                        "externalId":format!("{identity}-work-{ordinal}")
+                    },
+                    "payload":{"title":format!("bounded work {ordinal}")}
+                })
+            })
+            .collect()
+    };
+    let acquired = i64::try_from(records.len()).unwrap();
+    parse_producer_submission(
+        &serde_json::json!({
+            "contractVersion":"linggan.producer.capture-package.v1",
+            "producerInstanceId":producer_instance_id,
+            "taskId":task.task_id(),
+            "attemptId":attempt.attempt_id(),
+            "submissionId":Uuid::new_v4(),
+            "capturePackage":{
+                "contractVersion":"linggan.producer.capture-package.v1",
+                "packageRef":Uuid::new_v4(),
+                "packageKind":capability,
+                "platform":"xhs",
+                "observedAt":"2026-09-04T00:00:00Z",
+                "capturedAt":"2026-09-04T00:00:01Z",
+                "coverage":{
+                    "target":{"basis":"known_set","authorExternalId":identity},
+                    "layers":[{
+                        "capability":capability,
+                        "observed":acquired,"attempted":acquired,"acquired":acquired,
+                        "verified":0,"failed":0,"notAttempted":0,"unknown":0,
+                        "stoppedReason":"maximum_quota"
+                    }]
+                },
+                "records":records
+            }
+        })
+        .to_string(),
+    )
+    .unwrap()
 }
 
 async fn seed_bound_task(
@@ -598,6 +1213,20 @@ async fn seed_runtime_package(
     package_kind: &str,
     accepted_at: &str,
 ) -> Uuid {
+    let task_target: serde_json::Value =
+        sqlx::query_scalar("SELECT task_spec->'target' FROM linggan_runtime_task WHERE task_id=$1")
+            .bind(task_id)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    let coverage = serde_json::json!({
+        "target":task_target,
+        "layers":[{
+            "capability":package_kind,
+            "observed":1,"attempted":1,"acquired":1,"verified":0,
+            "failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"surface_ended"
+        }]
+    });
     let attempt_id = Uuid::new_v4();
     let producer_instance_id = Uuid::new_v4();
     let package_ref = Uuid::new_v4();
@@ -617,7 +1246,7 @@ async fn seed_runtime_package(
         "INSERT INTO linggan_runtime_capture_package \
            (package_ref,attempt_id,task_id,producer_instance_id,package_kind,platform, \
             package_hash,observed_at,captured_at,coverage,payload,accepted_at) \
-         VALUES ($1,$2,$3,$4,$5,'xhs',$6,$7,$7,'{}','{}',$7::timestamptz)",
+         VALUES ($1,$2,$3,$4,$5,'xhs',$6,$7,$7,$8,'{}',$7::timestamptz)",
     )
     .bind(package_ref)
     .bind(attempt_id)
@@ -626,6 +1255,7 @@ async fn seed_runtime_package(
     .bind(package_kind)
     .bind(&package_hash)
     .bind(accepted_at)
+    .bind(coverage)
     .execute(database.pool())
     .await
     .unwrap();

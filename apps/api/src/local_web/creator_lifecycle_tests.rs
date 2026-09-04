@@ -196,8 +196,9 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
         CreatorLifecycleAssociation, CreatorLifecycleExclusions, CreatorLifecycleMetric,
         CreatorLifecyclePoint, CreatorLifecycleProjection, CreatorLifecycleReceipt,
         CreatorLifecycleStatus, CreatorLifecycleSummary, CreatorLifecycleWindow, ObservationTarget,
+        ObservationTargetAvatar,
     };
-    let target = ObservationTarget {
+    let mut target = ObservationTarget {
         target_ref: uuid::Uuid::from_u128(11),
         platform: "xhs".to_owned(),
         target_kind: "creator".to_owned(),
@@ -212,6 +213,13 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
         last_patrol_dispatched_at: Some("2026-09-04 15:00:00+08".to_owned()),
         last_patrol_succeeded_at: Some("2026-09-04 15:30:00+08".to_owned()),
         next_patrol_at: None,
+    };
+    target.identity_facts = Some(serde_json::json!({
+        "redId": "creator-red-id",
+        "description": "记录神经多样性的真实创作日常"
+    }));
+    let avatar = ObservationTargetAvatar::Local {
+        local_asset_path: "/api/local/media/11111111-1111-4111-8111-111111111111/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_owned(),
     };
     let selected_ref = uuid::Uuid::from_u128(101);
     let projection = CreatorLifecycleProjection {
@@ -299,7 +307,8 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     }
     let html = target_drawer::render(
         Some(&target),
-        &std::collections::HashMap::new(),
+        Some(&avatar),
+        Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
         target_drawer::TargetDrawerTab::Overview,
         target_drawer::LifecycleView::Projection(&projection),
@@ -317,20 +326,26 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     assert!(!html.contains("dtab=evidence"));
     assert!(!html.contains(">证据</a>"));
     assert!(html.contains("作品生命周期"));
+    assert!(html.contains(r#"id="c-drawer-title""#));
+    assert!(html.contains("data-drawer-initial-focus"));
+    assert!(html.contains(r#"class="c-dw-avatar""#));
+    assert!(html.contains("creator-red-id"));
+    assert!(html.contains("记录神经多样性的真实创作日常"));
     assert!(html.contains("作品目录"));
-    assert!(html.contains("详情已确认"));
+    assert!(html.contains("作者已确认"));
     assert!(html.contains("当前可分析"));
-    assert!(html.contains("role=\"img\""));
+    assert!(html.contains("role=\"group\""));
     assert!(html.contains("纵轴压缩互动量差距"));
     assert!(html.contains("主页目录，详情待确认"));
-    assert!(html.contains("详情作者已确认"));
+    assert!(html.contains("作者已确认"));
     assert!(html.contains("最近巡查新增"));
     assert!(html.contains("life-point-directory"));
     assert!(html.contains("life-point-confirmed"));
     assert!(html.contains("life-point-new"));
     assert_eq!(html.matches("life-point-new-ring").count(), 1);
     assert!(html.contains("发布时间</dt><dd>2026-08-02</dd>"));
-    assert!(html.contains(r#"aria-current="page""#));
+    assert!(html.contains(r#"aria-current="true""#));
+    assert!(html.contains(r#"life-point-confirmed life-point-selected""#));
     assert!(html.contains(&format!("life_work={selected_ref}")));
     assert!(html.contains(&format!("/corpus/evidence?work={selected_ref}")));
     assert!(html.contains("第二篇"));
@@ -339,6 +354,12 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     assert_eq!(html.matches(r#"class="life-point-hit" cx="#).count(), 2);
     assert_eq!(html.matches(r#"r="6" aria-hidden="true""#).count(), 2);
     assert_eq!(html.matches(r#"r="5" aria-hidden="true""#).count(), 2);
+    let recent_at = html.find("最近变化").expect("recent activity is shown");
+    let chart_at = html
+        .find("id=\"creator-lifecycle\"")
+        .expect("lifecycle is shown");
+    let gaps_at = html.find("档案缺口").expect("archive gaps are shown");
+    assert!(recent_at < chart_at && chart_at < gaps_at);
     assert!(
         html.contains(r#"class="life-point-hit" cx="764.0""#),
         "the right plot inset must leave the hit target inside the desktop plot"
@@ -365,7 +386,8 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     all_projection.window = CreatorLifecycleWindow::All;
     let all_html = target_drawer::render(
         Some(&target),
-        &std::collections::HashMap::new(),
+        None,
+        Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
         target_drawer::TargetDrawerTab::Overview,
         target_drawer::LifecycleView::Projection(&all_projection),
@@ -384,7 +406,8 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     truncated_projection.receipt.truncated = true;
     let truncated_html = target_drawer::render(
         Some(&target),
-        &std::collections::HashMap::new(),
+        None,
+        Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
         target_drawer::TargetDrawerTab::Overview,
         target_drawer::LifecycleView::Projection(&truncated_projection),
@@ -406,6 +429,11 @@ fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
     assert!(TARGET_DRAWER_CSS.contains(".c-tg-table-head.c-tg-keyword-grid"));
     assert!(TARGET_DRAWER_CSS.contains("overflow-x:auto"));
     assert!(TARGET_DRAWER_CSS.contains("white-space:nowrap"));
+    assert!(
+        TARGET_DRAWER_CSS.contains(".c-tg-cell{min-width:0;overflow:hidden;text-overflow:ellipsis")
+    );
+    assert!(TARGET_DRAWER_CSS.contains(".c-tg-actions form{width:100%;min-width:0}"));
+    assert!(!TARGET_DRAWER_CSS.contains(".c-tg-row-open"));
     assert!(TARGET_DRAWER_CSS.contains(".life-control-row{min-width:0;"));
     assert!(TARGET_DRAWER_CSS.contains(".life-figure{min-width:0;"));
     assert!(!TARGET_DRAWER_CSS.contains("gradient"));
@@ -436,7 +464,8 @@ fn invalid_lifecycle_query_is_visible_and_never_claims_defaults() {
     let target = sample_target("creator");
     let html = target_drawer::render(
         Some(&target),
-        &std::collections::HashMap::new(),
+        None,
+        Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
         target_drawer::TargetDrawerTab::Overview,
         target_drawer::LifecycleView::QueryInvalid,
@@ -481,7 +510,7 @@ fn corpus_work_deep_link_does_not_fall_back_when_the_work_is_off_page() {
 }
 
 #[test]
-fn collection_reads_lifecycle_only_for_the_creator_overview() {
+fn collection_reads_lifecycle_only_for_creator_tabs_that_show_analyzable_counts() {
     let mut target = sample_target("creator");
     assert!(should_read_target_lifecycle(
         Some(&target),
@@ -491,7 +520,7 @@ fn collection_reads_lifecycle_only_for_the_creator_overview() {
         Some(&target),
         target_drawer::TargetDrawerTab::parse(Some("overview"))
     ));
-    assert!(!should_read_target_lifecycle(
+    assert!(should_read_target_lifecycle(
         Some(&target),
         target_drawer::TargetDrawerTab::parse(Some("baseline"))
     ));
@@ -536,6 +565,11 @@ fn target_drawer_escape_and_focus_return_keep_list_context() {
     assert!(COLLECTION_WORKSPACE_JS.contains("drawer.dataset.returnFocus"));
     assert!(COLLECTION_WORKSPACE_JS.contains("window.location.assign(returnUrl)"));
     assert!(COLLECTION_WORKSPACE_JS.contains("window.location.hash.slice(1)"));
+    assert!(COLLECTION_WORKSPACE_JS.contains("[data-target-row]"));
+    assert!(COLLECTION_WORKSPACE_JS.contains("[data-row-opener]"));
+    assert!(COLLECTION_WORKSPACE_JS.contains("[data-row-no-open]"));
+    assert!(COLLECTION_WORKSPACE_JS.contains("[data-drawer-initial-focus]"));
+    assert!(COLLECTION_WORKSPACE_JS.contains("if (!window.location.hash)"));
     assert!(!COLLECTION_WORKSPACE_JS.contains("window.location.href = \"/collection/targets\""));
 
     let target = sample_target("creator");
@@ -545,7 +579,8 @@ fn target_drawer_escape_and_focus_return_keep_list_context() {
     };
     let html = target_drawer::render(
         Some(&target),
-        &std::collections::HashMap::new(),
+        None,
+        Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
         target_drawer::TargetDrawerTab::Overview,
         target_drawer::LifecycleView::NotRead {
@@ -589,7 +624,8 @@ fn missing_target_drawer_keeps_return_focus_and_list_context() {
     };
     let html = target_drawer::render(
         None,
-        &std::collections::HashMap::new(),
+        None,
+        Some(&std::collections::HashMap::new()),
         Some(&target_ref.to_string()),
         target_drawer::TargetDrawerTab::Overview,
         target_drawer::LifecycleView::NotRead {
@@ -609,11 +645,138 @@ fn missing_target_drawer_keeps_return_focus_and_list_context() {
 }
 
 #[test]
+fn invalid_selected_work_is_dropped_and_drawer_identity_stays_encoded() {
+    let mut target = sample_target("creator");
+    target.identity_key = "creator\"><svg onload=alert(1)>".to_owned();
+    let html = target_drawer::render(
+        Some(&target),
+        None,
+        Some(&std::collections::HashMap::new()),
+        Some(&target.target_ref.to_string()),
+        target_drawer::TargetDrawerTab::Overview,
+        target_drawer::LifecycleView::NotRead {
+            window: linggan_evidence::CreatorLifecycleWindow::Recent90Days,
+            metric: linggan_evidence::CreatorLifecycleMetric::Likes,
+        },
+        Some("\"><svg onload=alert(1)>"),
+        target_drawer::TargetListContext::default(),
+    );
+
+    assert!(html.contains("creator%22%3E%3Csvg%20onload%3Dalert%281%29%3E"));
+    assert!(!html.contains("life_work="));
+    assert!(!html.contains("\"><svg"));
+    assert!(!html.contains("onload=alert"));
+}
+
+#[tokio::test]
+async fn target_route_never_reflects_an_invalid_selected_work() {
+    let response = app()
+        .oneshot(
+            Request::builder()
+                .uri("/collection/targets?drawer=00000000-0000-0000-0000-000000000001&life_work=%22%3E%3Csvg%20onload%3Dalert%281%29%3E")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let html = String::from_utf8(body.to_vec()).unwrap();
+    assert!(!html.contains("life_work="));
+    assert!(!html.contains("onload=alert"));
+    assert!(!html.contains("\"><svg onload"));
+}
+
+#[test]
+fn archive_return_path_drops_untrusted_navigation_fields() {
+    let target_ref = uuid::Uuid::from_u128(606);
+    let unsafe_form = TargetArchiveForm {
+        row_target_ref: target_ref,
+        return_filter: Some("\"><svg onload=alert(1)>".to_owned()),
+        return_sort: Some("https://example.invalid".to_owned()),
+    };
+    assert_eq!(
+        target_archive_return_path(&unsafe_form, Some("archive_not_requestable")),
+        format!(
+            "/collection/targets?drawer={target_ref}&dtab=archive&error=archive_not_requestable#target-archive"
+        )
+    );
+
+    let valid_form = TargetArchiveForm {
+        row_target_ref: target_ref,
+        return_filter: Some("creator".to_owned()),
+        return_sort: Some("last".to_owned()),
+    };
+    assert_eq!(
+        target_archive_return_path(&valid_form, None),
+        format!(
+            "/collection/targets?filter=creator&sort=last&drawer={target_ref}&dtab=archive#target-archive"
+        )
+    );
+}
+
+#[test]
+fn unreadable_drawer_archive_never_offers_a_write_action() {
+    let target = sample_target("creator");
+    let html = target_drawer::render(
+        Some(&target),
+        None,
+        None,
+        Some(&target.target_ref.to_string()),
+        target_drawer::TargetDrawerTab::Baseline,
+        target_drawer::LifecycleView::NotRead {
+            window: linggan_evidence::CreatorLifecycleWindow::Recent90Days,
+            metric: linggan_evidence::CreatorLifecycleMetric::Likes,
+        },
+        None,
+        target_drawer::TargetListContext::default(),
+    );
+
+    assert!(html.contains("档案状态暂时无法读取"));
+    assert!(html.contains("当前读不到"));
+    assert!(html.contains("未知状态下发起写操作"));
+    assert!(!html.contains(r#"action="/collection/targets/archive""#));
+    assert!(!html.contains(">建立档案</button>"));
+    assert!(!html.contains(">继续完善</button>"));
+}
+
+#[test]
+fn drawer_archive_post_preserves_validated_list_and_focus_context() {
+    let target = sample_target("creator");
+    let html = target_drawer::render(
+        Some(&target),
+        None,
+        Some(&std::collections::HashMap::new()),
+        Some(&target.target_ref.to_string()),
+        target_drawer::TargetDrawerTab::Baseline,
+        target_drawer::LifecycleView::NotRead {
+            window: linggan_evidence::CreatorLifecycleWindow::Recent90Days,
+            metric: linggan_evidence::CreatorLifecycleMetric::Likes,
+        },
+        None,
+        target_drawer::TargetListContext {
+            filter: Some("creator"),
+            sort: Some("last"),
+        },
+    );
+
+    assert!(html.contains(r#"name="return_filter" value="creator""#));
+    assert!(html.contains(r#"name="return_sort" value="last""#));
+    assert!(html.contains(&format!(
+        r#"name="return_drawer" value="{}""#,
+        target.target_ref
+    )));
+    assert!(html.contains(r#"name="return_dtab" value="archive""#));
+    assert!(html.contains(r#"name="return_focus" value="target-archive""#));
+}
+
+#[test]
 fn keyword_drawer_has_only_keyword_overview_and_patrol_without_a_creator_chart_shell() {
     let target = sample_target("keyword");
     let html = target_drawer::render(
         Some(&target),
-        &std::collections::HashMap::new(),
+        None,
+        Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
         target_drawer::TargetDrawerTab::Overview,
         target_drawer::LifecycleView::NotRead {
@@ -641,6 +804,8 @@ fn archive_tab_explains_the_first_two_hundred_boundary_without_a_fake_score() {
     completeness.insert(
         target.identity_key.clone(),
         linggan_evidence::ArchiveCompleteness {
+            started: true,
+            attempted: true,
             work_in_progress: false,
             author_profile_captures: 1,
             works_listed: 12,
@@ -650,7 +815,8 @@ fn archive_tab_explains_the_first_two_hundred_boundary_without_a_fake_score() {
     );
     let html = target_drawer::render(
         Some(&target),
-        &completeness,
+        None,
+        Some(&completeness),
         Some(&target.target_ref.to_string()),
         target_drawer::TargetDrawerTab::Baseline,
         target_drawer::LifecycleView::NotRead {
@@ -662,8 +828,15 @@ fn archive_tab_explains_the_first_two_hundred_boundary_without_a_fake_score() {
     );
 
     assert!(html.contains("前 200 篇作品链接作为上限"));
-    assert!(html.contains("继续完善"));
+    assert!(html.contains(r#"id="target-archive""#));
+    assert!(html.contains(r#"id="archive-problems""#));
+    assert!(html.contains("1 条记录需要处理"));
+    assert!(html.contains("当前先处理上面的隔离记录"));
     assert!(html.contains("5 / 12"));
+    assert!(html.contains("当前读不到</b><span>当前可分析"));
+    assert!(!html.contains("语料页</b><span>评论与深层材料"));
+    assert!(!html.contains(">继续完善</button>"));
+    assert!(!html.contains(">建立档案</button>"));
     assert!(!html.contains('%'));
     assert!(!html.contains("ARCHIVE HEALTH"));
     assert!(!html.contains("持久回执"));
@@ -678,7 +851,8 @@ fn patrol_tab_uses_the_last_successful_result_not_the_last_dispatch() {
     target.next_patrol_at = Some("2026-09-05 09:00:00+08".to_owned());
     let html = target_drawer::render(
         Some(&target),
-        &std::collections::HashMap::new(),
+        None,
+        Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
         target_drawer::TargetDrawerTab::Patrol,
         target_drawer::LifecycleView::NotRead {

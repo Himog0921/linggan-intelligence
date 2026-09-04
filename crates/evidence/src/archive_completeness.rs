@@ -16,6 +16,10 @@ use std::collections::HashMap;
 /// 每一层都可能是「没做过」，那与「做了但一条都没拿到」不同，因此用计数而不是布尔。
 #[derive(Debug, Default, Clone)]
 pub struct ArchiveCompleteness {
+    /// 是否已经形成过一张受控 deep-archive Work Order。
+    pub started: bool,
+    /// 是否有执行 Attempt 已经从这张目标自己的 deep-archive Lease Task 开始。
+    pub attempted: bool,
     /// 是否存在仍有效且尚未释放的建档/完善租约。
     ///
     /// 这是「查看进度」的 durable 依据；不能用目标生命周期或一次按钮点击猜测在途状态。
@@ -33,7 +37,13 @@ pub struct ArchiveCompleteness {
 impl ArchiveCompleteness {
     /// 一层都没有过。用它来区分「还没开始」与「开始了但结果为空」。
     pub fn is_untouched(&self) -> bool {
-        self.author_profile_captures == 0 && self.works_listed == 0 && self.details_captured == 0
+        !self.started
+            && !self.attempted
+            && !self.work_in_progress
+            && self.author_profile_captures == 0
+            && self.works_listed == 0
+            && self.details_captured == 0
+            && self.quarantined == 0
     }
 }
 
@@ -44,7 +54,7 @@ pub async fn read_archive_completeness(
     database: &Database,
     platform: &str,
 ) -> Result<HashMap<String, ArchiveCompleteness>, sqlx::Error> {
-    let rows: Vec<(String, bool, i64, i64, i64, i64)> = sqlx::query_as(
+    let rows: Vec<(String, bool, bool, bool, i64, i64, i64, i64)> = sqlx::query_as(
         "WITH target_records AS ( \
              SELECT target.identity_key AS author_external_id, \
                     p.package_ref, p.package_kind, d.record_ordinal, d.disposition \
@@ -90,12 +100,28 @@ pub async fn read_archive_completeness(
                AND target.target_kind='creator' \
                AND lease.released_at IS NULL \
                AND lease.expires_at > scope_001_now() \
+         ), archive_progress AS ( \
+             SELECT target.identity_key AS author_external_id, \
+                    true AS started, \
+                    bool_or(attempt.attempt_id IS NOT NULL) AS attempted \
+             FROM collection_observation_target target \
+             JOIN collection_work_order work_order USING(target_ref) \
+             LEFT JOIN collection_work_order_lease lease USING(work_order_ref) \
+             LEFT JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+             LEFT JOIN linggan_runtime_attempt attempt ON attempt.task_id=lease_task.task_id \
+             WHERE target.platform=$1 AND target.target_kind='creator' \
+               AND work_order.lane='deep_archive' \
+             GROUP BY target.identity_key \
          ), target_keys AS ( \
              SELECT author_external_id FROM record_totals \
              UNION \
              SELECT author_external_id FROM live_archive \
+             UNION \
+             SELECT author_external_id FROM archive_progress \
          ) \
          SELECT keys.author_external_id, \
+                coalesce(progress.started, false), \
+                coalesce(progress.attempted, false), \
                 live.author_external_id IS NOT NULL AS work_in_progress, \
                 coalesce(totals.author_profile_captures, 0), \
                 coalesce(totals.works_listed, 0), \
@@ -103,17 +129,30 @@ pub async fn read_archive_completeness(
                 coalesce(totals.quarantined, 0) \
          FROM target_keys keys \
          LEFT JOIN record_totals totals USING (author_external_id) \
-         LEFT JOIN live_archive live USING (author_external_id)",
+         LEFT JOIN live_archive live USING (author_external_id) \
+         LEFT JOIN archive_progress progress USING (author_external_id)",
     )
     .bind(platform)
     .fetch_all(database.pool())
     .await?;
 
     let mut totals: HashMap<String, ArchiveCompleteness> = HashMap::new();
-    for (author_external_id, work_in_progress, profiles, works, details, quarantined) in rows {
+    for (
+        author_external_id,
+        started,
+        attempted,
+        work_in_progress,
+        profiles,
+        works,
+        details,
+        quarantined,
+    ) in rows
+    {
         totals.insert(
             author_external_id,
             ArchiveCompleteness {
+                started,
+                attempted,
                 work_in_progress,
                 author_profile_captures: profiles,
                 works_listed: works,
