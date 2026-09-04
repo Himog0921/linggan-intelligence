@@ -75,7 +75,7 @@ exact head `fd6cb533e4fb5872d708bf0e73d3ec1298c1de90` 已建立结构、数据�
 - focus 与 console：无 fragment 打开 creator 抽屉时焦点进入 `#c-drawer-title`；带 `#creator-lifecycle` 的作品深链尊重目标锚点。最终 creator 页面 console warning/error/exception 为 0。独立 Chrome 截图进程出现 macOS headless `CVDisplayLink` 与 GCM 环境日志，它们不是页面 console 事件。
 - 清理：最终证据形成后停止一次性 `:3318` API、Chrome CDP/profile、PostgreSQL database/container/volume；清理状态记录在本 Package 的 Issue/PR 回执中。
 
-最终提交在本节形成后产生；浏览器验证对应同一源代码树，exact correction source head 由随后一笔文档回执记录。
+浏览器与最终自动验证对应 exact correction source head `8e80b74a87d923a940b0eca598cb205e1a0a0678`；随后只有本行验收回执发生变化，没有再修改产品源码或测试。
 
 ## 7. 未证明与不支持
 
