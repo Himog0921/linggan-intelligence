@@ -2,7 +2,7 @@
 
 > 状态: 一次性报告
 > 最后核对: 2026-09-04
-> 适用范围: `codex/collection-five-page-v4-ui`；原始基线 `84fd9498e18164011621ffabc81a2a421a52f7a1`，待提交前并入当前 `origin/main@e5c5ec5f9bab62f25bea9798fd9abb127df03956`
+> 适用范围: `codex/collection-five-page-v4-ui`；原始基线 `84fd9498e18164011621ffabc81a2a421a52f7a1`，分支已并入 `origin/main@e5c5ec5f9bab62f25bea9798fd9abb127df03956`
 > 事实来源: 当前分支代码与测试、一次性 PostgreSQL 16；首版隔离 `:3311` / 1440×900 浏览器证据只属于已被复审拒绝的首版 head
 > 冲突时以谁为准: 用户最新确认、真实代码/数据库/运行结果、PAGE-COLLECTION-001、Package 1/2 合同与 LIDS
 
@@ -16,7 +16,7 @@
 
 | 项目 | 本次事实 |
 |---|---|
-| Git base | 原始 `origin/main@84fd9498e18164011621ffabc81a2a421a52f7a1`；当前 main `e5c5ec5f9bab62f25bea9798fd9abb127df03956` 待集成 |
+| Git base | 原始 `origin/main@84fd9498e18164011621ffabc81a2a421a52f7a1`；当前 main `e5c5ec5f9bab62f25bea9798fd9abb127df03956` 已合并到交付分支 |
 | 分支 | `codex/collection-five-page-v4-ui`；第二轮复审修正进行中，Mog 已授权 commit/push/merge 与本机 `:3000` 刷新 |
 | PostgreSQL | 一次性 `postgres:16-alpine`；按当前顺序应用 33 个 migration |
 | Fixture | synthetic：2 targets、2 scheduler decisions、3 tasks；不是共享库或真实平台数据 |

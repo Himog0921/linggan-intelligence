@@ -10,7 +10,7 @@
 
 ### COLLECTION-FIVE-PAGE-V4-UI-001 / Issue #149（独立分支已实现，已获提交、合并与本机刷新授权）
 
-Package 1 已由 PR #151 合入 `c5158b14f5fc2313dbd3dc94670083500e767ced`；Package 2 已由 PR #153 合入 `84fd9498e18164011621ffabc81a2a421a52f7a1`。当前 `origin/main@e5c5ec5f9bab62f25bea9798fd9abb127df03956` 又包含独立插件修复；V4 分支必须在最终复审前并入该 head。当前唯一实施项是 Mog 对五个 Collection 页面提出的 V4 UI 验收反馈，工作位于独立分支 `codex/collection-five-page-v4-ui`，不改变既有数据库或控制合同。
+Package 1 已由 PR #151 合入 `c5158b14f5fc2313dbd3dc94670083500e767ced`；Package 2 已由 PR #153 合入 `84fd9498e18164011621ffabc81a2a421a52f7a1`。当前 `origin/main@e5c5ec5f9bab62f25bea9798fd9abb127df03956` 又包含独立插件修复，V4 分支已在最终复审前并入该 head。当前唯一实施项是 Mog 对五个 Collection 页面提出的 V4 UI 验收反馈，工作位于独立分支 `codex/collection-five-page-v4-ui`，不改变既有数据库或控制合同。
 
 五页已统一为“共享 Context Bar 的两个有范围读数 → 页内控制条 → 主工作区”，页面名只保留唯一读屏 `h1`：待处理为恢复事项 ledger + 事实 Inspector；观察目标为高密度目录 + URL 所有的宽幅抽屉；生产流为阶段 ledger + 单一 dark durable-decision instrument；采集任务为 Task ledger + Attempt/Package/Receipt/冻结资源 Inspector；执行工位保留单一 capacity evaluator，并强化判定、资源关系、登记与认领层级。Package 2 原先只在空态替换 Operations/Attention 的接线缺口同时修复，现在真实 projection 会替换页面 body slot。creator 与 keyword 使用同一份 kind-aware 生命周期文案；Task 的冻结资源按当前 `task_id` 隔离；恢复数只统计存在明确恢复动作的 durable reason。
 

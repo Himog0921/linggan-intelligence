@@ -16,11 +16,14 @@ import {
 import { initThemeManager } from '../themes/themeManager.js';
 import { createXhsPageController } from './xhsPageController.js';
 import { isContextValid, reportDone, sendToBackground } from '../shared/messaging.js';
-import { extractNoteId, getByInject } from '../shared/utils.js';
+import { extractNoteId } from '../shared/utils.js';
 import { createLingganContentRuntime } from '../linggan/contentRuntimeAdapter.js';
 import { LINGGAN_RUNTIME_ACTION } from '../linggan/runtimeActions.js';
 import { unavailableLingganStats } from '../linggan/adapter.js';
-import { reportPassiveAccountEligibility } from '../linggan/accountEligibilityProbe.js';
+import {
+  currentAccountHrefFromDocument,
+  reportPassiveAccountEligibility,
+} from '../linggan/accountEligibilityProbe.js';
 import {
   detailPageSessionStore,
   validateDetailPageSessionPlan,
@@ -197,7 +200,7 @@ async function initXhs() {
   dashboardBridge.registerDashboardBridge();
   xhsPageController.initPage();
   void reportPassiveAccountEligibility({
-    readPageUser: () => getByInject(window, 'user'),
+    readCurrentAccountHref: () => currentAccountHrefFromDocument(document),
     sendMessage: (message) => chrome.runtime.sendMessage(message),
   }).catch(() => {});
   console.info('[Linggan Intelligence Browser] XHS collector runtime active.');
