@@ -1,7 +1,9 @@
 #[path = "support/material_fixture.rs"]
 mod fixture;
 
-use fixture::{coverage_layer, proof_database, submit_custom_package, submit_package};
+use fixture::{
+    coverage_layer, proof_database, submit_custom_package, submit_package, submit_package_at,
+};
 use linggan_contracts::EvidenceQuery;
 use linggan_evidence::{admit_media_blob, read_work_resource, read_work_resources};
 use sqlx::Row;
@@ -208,6 +210,17 @@ async fn newer_partial_detail_keeps_prior_known_fields_and_current_metrics_are_f
     assert_eq!(material.display.engagement.like_count, Some(12));
     assert_eq!(material.display.engagement.comment_count, Some(24));
     assert_eq!(
+        material.display.published_at_source_text.as_deref(),
+        Some("1713501296"),
+        "a qualified exact Published Current must retain the source text from that same row"
+    );
+    assert_eq!(material.display.published_at_source_kind, "platform_epoch");
+    assert_eq!(material.display.published_at_precision, "second");
+    assert_eq!(
+        material.display.published_at_parser_version.as_deref(),
+        Some("xhs-detail-time-v2")
+    );
+    assert_eq!(
         material
             .inspector
             .pointer("/detailCurrent/title/source/packageRef"),
@@ -245,6 +258,158 @@ async fn newer_partial_detail_keeps_prior_known_fields_and_current_metrics_are_f
             .pointer("/detailCurrent/publishedAt/source/packageRef"),
         Some(&serde_json::json!(first_package)),
     );
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/detailCurrent/publishedAt/sourceText"),
+        Some(&serde_json::json!("1713501296")),
+        "Inspector must not combine an older exact value with newer relative source text"
+    );
+    let exact_material_ref: uuid::Uuid = sqlx::query_scalar(
+        "SELECT material_ref FROM linggan_material_content_detail WHERE package_ref=$1 AND record_ordinal=0",
+    )
+    .bind(first_package)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        material
+            .inspector
+            .pointer("/detailCurrent/publishedAt/source/materialRef"),
+        Some(&serde_json::json!(exact_material_ref)),
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn work_resource_list_detail_and_inspector_keep_each_field_on_its_typed_source() {
+    let database = proof_database("material_field_source_parity").await;
+    let external_id = "note-field-source-parity";
+    let title_package = submit_package_at(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":external_id}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":external_id},
+            "payload":{"title":"逐字段标题"}
+        }),
+        "2026-08-28T08:00:00Z",
+    )
+    .await;
+    let body_package = submit_package_at(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":external_id}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":external_id},
+            "payload":{"bodyText":"逐字段正文"}
+        }),
+        "2026-08-28T09:00:00Z",
+    )
+    .await;
+    let creator_package = submit_package_at(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":external_id}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":external_id},
+            "payload":{"authorId":"author-source-parity","authorName":"逐字段作者"}
+        }),
+        "2026-08-28T10:00:00Z",
+    )
+    .await;
+    submit_package_at(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":external_id}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":external_id},
+            "payload":{"likes":7}
+        }),
+        "2026-08-28T11:00:00Z",
+    )
+    .await;
+
+    let source_rows = sqlx::query(
+        "SELECT package_ref,material_ref,record_ordinal FROM linggan_material_content_detail \
+         WHERE package_ref=ANY($1::uuid[]) ORDER BY package_ref",
+    )
+    .bind(vec![title_package, body_package, creator_package])
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    let source_material = |package_ref| {
+        source_rows
+            .iter()
+            .find(|row| row.get::<uuid::Uuid, _>("package_ref") == package_ref)
+            .map(|row| row.get::<uuid::Uuid, _>("material_ref"))
+            .expect("each typed field source is retained")
+    };
+    let title_material = source_material(title_package);
+    let body_material = source_material(body_package);
+    let creator_material = source_material(creator_package);
+
+    let query: EvidenceQuery = serde_json::from_value(serde_json::json!({
+        "scope":"all_accepted_material","window":"latest_accepted_discovery","sort":"latest_discovery"
+    }))
+    .unwrap();
+    let list = read_work_resources(&database, &query).await.unwrap();
+    let list_item = list
+        .items
+        .iter()
+        .find(|item| item.identity.content_external_id == external_id)
+        .expect("the Work appears in the shared list");
+    let detail = read_work_resource(&database, list_item.identity.public_ref)
+        .await
+        .unwrap()
+        .expect("the same Work appears in detail");
+
+    assert_eq!(detail.display.title, list_item.display.title);
+    assert_eq!(
+        detail.display.creator_display_name,
+        list_item.display.creator_display_name
+    );
+    assert_eq!(detail.display.engagement.like_count, Some(7));
+    for (index, expected) in [title_material, body_material, creator_material]
+        .into_iter()
+        .enumerate()
+    {
+        let pointer = format!("/overview/fields/{index}/sourceRefs/0");
+        assert_eq!(
+            list_item.inspector.pointer(&pointer),
+            Some(&serde_json::json!(expected)),
+            "list Inspector field source {index} must follow its typed Current source"
+        );
+        assert_eq!(
+            detail.inspector.pointer(&pointer),
+            Some(&serde_json::json!(expected)),
+            "detail Inspector field source {index} must match the list"
+        );
+    }
+    for package_ref in [title_package, body_package, creator_package] {
+        assert!(
+            detail
+                .inspector
+                .pointer("/provenance/packageRefs")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|refs| refs.contains(&serde_json::json!(package_ref))),
+            "aggregate provenance must include the package owning each displayed field"
+        );
+        assert!(
+            detail
+                .inspector
+                .pointer("/provenance/recordRefs")
+                .and_then(serde_json::Value::as_array)
+                .is_some_and(|refs| refs.contains(&serde_json::json!({
+                    "packageRef":package_ref,"recordOrdinal":0
+                }))),
+            "aggregate provenance must include the record owning each displayed field"
+        );
+    }
 }
 
 #[tokio::test]

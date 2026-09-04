@@ -6,6 +6,7 @@ mod archive_completeness;
 mod collection_target;
 mod collection_task_read;
 mod content_reobservation;
+mod creator_lifecycle;
 mod dispatch;
 mod execution_station;
 mod ingress;
@@ -36,6 +37,7 @@ mod station_read;
 mod target_enrichment;
 mod work_order;
 mod work_order_lease;
+mod work_resource_current;
 mod work_resource_read;
 
 pub use acquisition_chain::{
@@ -56,6 +58,13 @@ pub use content_reobservation::{
     ContentReobservation, ContentReobservationEligibility, ContentReobservationError,
     ContentReobservationStatus, ReobservationMediaPolicy, ReobservationTask, content_reobservation,
     read_content_reobservation, read_content_reobservation_eligibility,
+};
+pub use creator_lifecycle::{
+    CreatorLifecycleAnalysis, CreatorLifecycleExclusions, CreatorLifecycleMetric,
+    CreatorLifecyclePoint, CreatorLifecycleProjection, CreatorLifecycleQuery,
+    CreatorLifecycleQueryError, CreatorLifecycleReadError, CreatorLifecycleReceipt,
+    CreatorLifecycleStatus, CreatorLifecycleSummary, CreatorLifecycleWindow,
+    read_creator_lifecycle,
 };
 pub use dispatch::{
     DISPATCH_FAILURE_RETRY_AFTER_SECONDS, DispatchDecision, DispatchError, DispatchFailureCode,

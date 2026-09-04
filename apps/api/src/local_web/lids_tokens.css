@@ -20,6 +20,8 @@
   --lgi-signal-ink: #a73317;
   --lgi-signal-soft: rgba(239, 79, 37, 0.10);
   --lgi-signal-faint: rgba(239, 79, 37, 0.05);
+  /* Shared keyboard focus ring; distinct from the product signal state. */
+  --lgi-focus: #335e72;
 
   /* Semantic: five axes, each carries text / fill / soft.
    * Fill values stay saturated for solid badges; text values are darkened

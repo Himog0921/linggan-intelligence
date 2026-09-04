@@ -1,8 +1,8 @@
 # LIDS-TOK-001 · Token 基线与唯一数值来源
 
 > 状态: 权威当前
-> 运行时状态: 第 3 节的 127 项 `--lgi-*` 是当前**唯一运行时值源**；第 2 节的 v7 三层架构是**目标态与新工作的选值依据**，尚未进入运行时
-> 最后核对: 2026-09-02
+> 运行时状态: 第 3 节的 132 项 `--lgi-*` 是当前**唯一运行时值源**；第 2 节的 v7 三层架构是**目标态与新工作的选值依据**，尚未进入运行时
+> 最后核对: 2026-09-04
 > 适用范围: Linggan Intelligence 主题、Primitive、Component、Pattern、Page、动效和受控场景的颜色、排版、间距、边界、层级与性能数值
 > 事实来源: Mog 于 2026-09-02 指定的 `linggan-design-system-v7.html`（§01 Tokens、ADR-02/03/04）、Mog 指定的 LIDS v2.0 `tokens.md`（SHA-256: `97fac0fb590c7f349f5fe7bfc2e2e423c6c8145b03cec9ffdd80d4494f757e77`）、[system.md](system.md)、LOCAL-001A 运行时 Token 源与对应 Rust 校验
 > 冲突时以谁为准: 已获准运行时的唯一 Token 文件 `apps/api/src/local_web/lids_tokens.css` 优先于本文件第 3 节；第 2 节的 v7 架构优先于第 3 节**作为新工作的选值依据**，但不得被写进运行时而不走迁移治理。产品/数据/权限冲突不由 Token 解决
@@ -14,7 +14,7 @@ DESIGN-010（2026-09-02）把 LIDS 的表达标准升级到 v7.0，但按 Mog �
 | 节 | 是什么 | 谁消费它 |
 |---|---|---|
 | **§2 v7 三层架构** | 目标态。新页面、新组件的**选值依据**与命名结构 | 设计规格、CMP、PAGE、评审 |
-| **§3 `--lgi-*` 基线** | 运行时现状。127 项精确值，受 Rust 逐项校验 | 现有运行页 CSS |
+| **§3 `--lgi-*` 基线** | 运行时现状。132 项精确值，受 Rust 逐项校验 | 现有运行页 CSS |
 
 **不要把 §2 的名字写进运行时 CSS，也不要把 §3 的值当成 v7 合规。** 两者的差异是已登记的欠账，不是可以随手抹平的漂移。迁移触发条件见 §4。
 
@@ -25,12 +25,12 @@ DESIGN-010（2026-09-02）把 LIDS 的表达标准升级到 v7.0，但按 Mog �
 apps/api/src/local_web/lids_tokens.css
         ↓ 同一提交内同步为镜像
 docs/design/lids/tokens.md §3
-        ↓ Rust 逐项名称和值校验（127 项）
+        ↓ Rust 逐项名称和值校验（132 项）
 运行时页面与版本化规范
 ```
 
 - 后续 Agent 要改变某个运行时 token 值时，只能先修改 `apps/api/src/local_web/lids_tokens.css`；不得先在页面 CSS、组件 CSS 或本 Markdown 中创造不同值。
-- 同一提交必须把 §3 的基线清单同步为运行时源的精确镜像，并通过 Rust 的 127 项名称→值比对。校验失败即表示变更未完成，不能用"名称一致"掩盖值漂移。
+- 同一提交必须把 §3 的基线清单同步为运行时源的精确镜像，并通过 Rust 的 132 项名称→值比对。校验失败即表示变更未完成，不能用"名称一致"掩盖值漂移。
 - 任何 token 值的改变仍是跨页面设计变更：必须按 UI Change Manifest、迁移记录、影响页面和回退规则完成治理。
 - 页面 CSS 只消费 `var(--lgi-*)`，不得声明 `--lgi-*`；页面局部例外必须按 PAGE/Manifest/LIDS migration log 另行登记，不能反向写入 Token 真源。
 
@@ -115,7 +115,7 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
 
 材料强度是密度的**附带效果**，不是它的目的。切换密度后如果一屏能看的条数没变，这个实现就是错的。
 
-## 3. 完整运行时基线（127 项 `--lgi-*`）
+## 3. 完整运行时基线（132 项 `--lgi-*`）
 
 本节是 `apps/api/src/local_web/lids_tokens.css` 的精确镜像，受 Rust 逐项校验。**它是运行时现状，不是 v7 合规基线。**
 
@@ -142,6 +142,8 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   --lgi-signal-ink: #a73317;
   --lgi-signal-soft: rgba(239, 79, 37, 0.10);
   --lgi-signal-faint: rgba(239, 79, 37, 0.05);
+  /* Shared keyboard focus ring; distinct from the product signal state. */
+  --lgi-focus: #335e72;
 
   /* Semantic: five axes, each carries text / fill / soft.
    * Fill values stay saturated for solid badges; text values are darkened

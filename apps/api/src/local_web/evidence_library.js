@@ -779,7 +779,7 @@
     } else {
       row.append(previewBlock(item), identity, side);
     }
-    row.addEventListener('click', () => selectItem(item, true));
+    row.addEventListener('click', () => selectItem(item, 'user'));
     row.addEventListener('keydown', (event) => onRowKeydown(event, item));
     return row;
   }
@@ -885,7 +885,28 @@
     refs.nextList.dataset.cursor = payload.cursor || '';
   }
 
-  async function loadList({ append = false, keepSelection = false, history: historyMode = 'replace' } = {}) {
+  /* A `?work=` link addresses the stable Work directly. The first list page is only a browsing
+   * window and must not be treated as the set of Works that exist: a lifecycle point can name an
+   * older Work that is outside that page. This shell contains identity plus the same-origin
+   * detail handle only; the detail response remains the sole source for Inspector facts. */
+  function directWorkItem(publicRef) {
+    if (typeof publicRef !== 'string'
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(publicRef)) {
+      return null;
+    }
+    return {
+      identity: { publicRef },
+      detailUrl: `${API_ROOT}/${encodeURIComponent(publicRef)}`,
+      display: { title: null, titleState: 'UNKNOWN' },
+    };
+  }
+
+  async function loadList({
+    append = false,
+    keepSelection = false,
+    revealUrlSelection = false,
+    history: historyMode = 'replace',
+  } = {}) {
     model.listController?.abort();
     model.listController = new AbortController();
     const cursor = append ? refs.nextList.dataset.cursor : null;
@@ -911,14 +932,20 @@
       queryReceipt(payload, append);
       renderReadout();
       syncUrl(append ? 'replace' : historyMode);
+      const requestedRef = restoreRef || model.selectedRef;
+      const requestedItem = requestedRef
+        ? model.items.find((item) => item.identity?.publicRef === requestedRef)
+        : null;
+      const selectionSource = revealUrlSelection && requestedRef ? 'url' : 'auto';
       if (model.items.length === 0) {
         setFeedback('empty', '当前查询没有匹配的作品材料', '读取已经成功；这个结果只描述当前本地查询，不证明平台或现实中没有相关内容。');
-        clearInspector();
+        if (directWorkItem(requestedRef)) await selectItem(directWorkItem(requestedRef), selectionSource);
+        else clearInspector();
       } else {
         clearFeedback();
-        const selected = model.items.find((item) => item.identity?.publicRef === (restoreRef || model.selectedRef))
-          || model.items[0];
-        await selectItem(selected, false);
+        if (requestedItem) await selectItem(requestedItem, selectionSource);
+        else if (directWorkItem(requestedRef)) await selectItem(directWorkItem(requestedRef), selectionSource);
+        else await selectItem(model.items[0], 'auto');
       }
     } catch (error) {
       if (error.name === 'AbortError') return;
@@ -939,7 +966,7 @@
     const index = rows.indexOf(current);
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      selectItem(item, true);
+      selectItem(item, 'user');
       return;
     }
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
@@ -950,7 +977,7 @@
     if (event.key === 'ArrowDown') next = rows[(index + 1) % rows.length];
     if (event.key === 'ArrowUp') next = rows[(index - 1 + rows.length) % rows.length];
     const nextItem = model.items.find((candidate) => candidate.identity?.publicRef === next.dataset.publicRef);
-    if (nextItem) selectItem(nextItem, false).then(() => next.focus());
+    if (nextItem) selectItem(nextItem, 'auto').then(() => next.focus());
   }
 
   /* -------------------------------------------------------- inspector shell */
@@ -1027,7 +1054,7 @@
     panels.forEach((panel) => panel.replaceChildren());
   }
 
-  async function selectItem(item, fromUser) {
+  async function selectItem(item, selectionSource) {
     const publicRef = item?.identity?.publicRef;
     const detailUrl = sameOriginPath(item?.detailUrl, [`${API_ROOT}/`]);
     if (!publicRef || !detailUrl || detailUrl.endsWith('/comments')) {
@@ -1045,12 +1072,12 @@
       row.setAttribute('aria-selected', String(selected));
       row.tabIndex = selected ? 0 : -1;
     });
-    /* Choosing a work always brings the panel back — a reader who closed it and then clicked a
-     * row is asking to see that work, not to keep the panel shut. A reader's own choice is a
-     * navigation step and pushes; the auto-selection that follows a load only replaces, so one
-     * search does not leave two entries behind. */
-    if (fromUser) openInspector();
-    syncUrl(fromUser ? 'push' : 'replace');
+    /* A reader click and a successful `?work=` restoration both promise a visible Inspector.
+     * Only the click is a new navigation step and pushes history; URL restoration and automatic
+     * list selection replace the current entry. This keeps a direct mobile link visible without
+     * manufacturing a second Back step or changing the addressed Work ref. */
+    if (selectionSource === 'user' || selectionSource === 'url') openInspector();
+    syncUrl(selectionSource === 'user' ? 'push' : 'replace');
     refs.inspectorFeedback.hidden = false;
     refs.inspectorFeedback.replaceChildren(node('strong', null, '正在读取当前作品详情'));
     refs.inspectorTitle.textContent = knownText(item.display?.title, item.display?.titleState, '标题当前未知');
@@ -2207,7 +2234,7 @@
     restoreFromUrl();
     applyInspectorState();
     activateTab(tabs.find((tab) => tab.dataset.evTab === model.activeTab) || tabs[0]);
-    loadList({ keepSelection: true });
+    loadList({ keepSelection: true, revealUrlSelection: true });
   });
   window.matchMedia(DRAWER_QUERY).addEventListener('change', applyInspectorState);
 
@@ -2215,5 +2242,5 @@
   applyInspectorState();
   clearInspector();
   activateTab(tabs.find((tab) => tab.dataset.evTab === model.activeTab) || tabs[0]);
-  loadList({ keepSelection: true });
+  loadList({ keepSelection: true, revealUrlSelection: true });
 })();

@@ -1,12 +1,20 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-02
+> 最后核对: 2026-09-04
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
 ## 当前阶段
+
+### COLLECTION-READ-MODEL-CLOSURE-001 / Issue #148（Draft PR #151 review remediation）
+
+当前唯一交付包在独立 worktree `codex/collection-read-model-closure-001` 上收口 Collection 目标读面。新增 target-scoped creator Work 生命周期，不新增事实表：稳定作者 ID 必须精确匹配，横轴只接受 qualified platform epoch，互动字段逐项选择 as-of 前 latest KNOWN；真实 `KNOWN 0` 保留，UNKNOWN、作者未确认/不匹配、时间不合格、窗外和扫描截断均分项回执。近 90 天固定为 `Asia/Shanghai` 90 个含首尾日历日；分析版本为 `creator-percentile-v1` 与服务端 `trailing-5-work-median-v1` / 5，前端不二次计算。Collection 页面仅在 creator overview 执行有界扫描。公开 lifecycle API 已收为 derived DTO，不包含 title/author/published/engagement Current；列表、单品、详情 Inspector 与 lifecycle 在同事务同 `as_of` 下复用 crate-private typed batch Current owner，target 查询只选择候选范围。
+
+目标抽屉现收为概览/基线/巡检策略/追踪四职责，Evidence tab 已退役；生命周期只提供最小选中作品摘要并精确进入 `/corpus/evidence?work=<public-ref>`。首批列表外 Work 不回退第一项；既有 390px 诊断走查证明直接 URL 或刷新会在精确详情恢复成功后自动打开 Inspector，且不新增 history；桌面继续使用原 Inspector 列。非法 lifecycle query 显式 `QUERY_INVALID`，`all` caption 不再冒充 90 日，退役/未知 tab 统一归一并读取 Overview；截断时只报 `>=2001` 下限及 probe/scanned/returned。Escape/关闭保留 filter 与既有 `sort=last` 上下文并将焦点还给 target opener。共享 focus owner 覆盖主题文档内的 link/button/input/Work row 及固定 drawer SVG link；Corpus 与 Collection 的既有 1440/390 真实键盘走查均得到 `#335e72` 2px/2px ring，不改变非焦点或错误状态。监控价值、机会评分、趋势预测与 Evidence 正文/评论/媒体复制均明确排除。review remediation focused、隔离 PostgreSQL、workspace test/check/fmt/JS/governance 与浏览器页面证据均已通过；fixture 为脱敏合成数据，不代表当前真实数据密度。
+
+Mog 于 2026-09-04 接受本包的当前支持边界与残余风险：**Package 1 的验收基线是 1440 CSS px 桌面全屏；1280 与 390 不属于本 Package 验收范围**。“不在手机或小于 13 寸屏幕运行”描述的是使用场景，不是可测试的 CSS 断点，因此合同只以 viewport 宽度表达。既有 1280/390 结果继续作为诊断证据，不提升为支持承诺；一次隔离 1280 测量中 Inspector 右缘超出 viewport 约 49.83 CSS px 的裁切已被明确接受并移出当前范围。后加载页面仍保留局部 focus 声明，这是已接受技术债；共享 owner 在已验证表面上的 computed focus 仍为 2px/2px。原 reviewer FAIL 作为历史发现保留，本决定是验收范围与风险接受，不是将其改写为 reviewer PASS。核心事实链、数据库读模型与代码检查已通过；merge、`:3000` runtime 刷新和 Mog 实际验收仍待后续执行与证明。Package 2 Collection Control 与 Package 3 Creator Dossier 必须等本包合并并复核最新 main 后另立 Claim。
 
 ### TOPIC-WORKSPACE-REAL-001 / Issue #112（已部署；待 Mog 业务验收）
 

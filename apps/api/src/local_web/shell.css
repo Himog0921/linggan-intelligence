@@ -9,7 +9,7 @@
   * page cannot drift from the single source in lids_tokens.css. Geometry stays local. */
  --v7-black:var(--lgi-ink); --v7-white:var(--lgi-canvas); --v7-gray:var(--lgi-canvas-low);
  --v7-sunken:var(--lgi-canvas-sunken); --v7-line:var(--lgi-hairline); --v7-line-strong:var(--lgi-border);
- --v7-red:var(--lgi-signal); --v7-red-hover:var(--lgi-signal-hover); --v7-soft-red:var(--lgi-signal-soft);
+ --v7-red:var(--lgi-signal); --v7-red-hover:var(--lgi-signal-hover); --v7-soft-red:var(--lgi-signal-soft); --v7-focus:var(--lgi-focus);
  --v7-muted:var(--lgi-muted); --v7-ghost:var(--lgi-ghost);
  --v7-ok:var(--lgi-success); --v7-ok-fill:var(--lgi-success-dot); --v7-ok-soft:var(--lgi-success-soft);
  --v7-warn:var(--lgi-warning); --v7-warn-fill:var(--lgi-warning-dot); --v7-warn-soft:var(--lgi-warning-soft);
@@ -33,8 +33,11 @@
 .v7-nav-zh { font:600 13px/1 var(--lgi-font-sans); letter-spacing:.01em; }
 .v7-side-nav span { font-family:var(--lgi-font-sans); }
 
-/* Focus is a state, not decoration: every reachable control shows it. */
-.v7-app :is(button,input,select,textarea,a):focus-visible { outline:2px solid var(--v7-red); outline-offset:2px; }
+/* Focus is a state, not decoration: every reachable control in the themed document shows the
+ * same ring, including fixed drawers rendered beside `.v7-app` and SVG links inside them.
+ * The theme + interactive-set + state specificity deliberately outranks older page-local class
+ * rules that load later, without !important or changing any non-focus/error styling. */
+[data-theme="linggan-intelligence"] :is(a,button,input,select,textarea,summary,[tabindex]):focus-visible { outline:2px solid var(--v7-focus); outline-offset:2px; }
 @media (prefers-reduced-motion:reduce) { .v7-app * { transition:none !important; animation:none !important; } .v7-side-nav[aria-current="page"] { transform:none; } }
 
 /* ── DESIGN-003 · Header reclaim, shared by every page ──────────────────────
@@ -55,7 +58,7 @@
 .v7-app { height:100vh; min-height:0; display:grid; grid-template-rows:var(--v7-header-height) minmax(0,1fr); overflow:hidden; }.v7-global-header { height:var(--v7-header-height); background:var(--v7-white); position:relative; z-index:10; }.v7-global-row { height:var(--v7-global-row); display:flex; align-items:stretch; border-bottom:2px solid var(--v7-black); background:var(--v7-white); }.v7-global-brand { width:340px; flex:0 0 340px; display:flex; align-items:center; gap:13px; padding:0 24px; border-right:1px solid var(--v7-line-strong); }.v7-li-mark { width:38px; height:38px; display:grid; place-items:center; background:var(--v7-red); color:var(--v7-white); border:2px solid var(--v7-black); box-shadow:var(--v7-brutal); font:900 15px/1 var(--lgi-font-mono); letter-spacing:.02em; transition:transform var(--v7-t-state) var(--v7-ease), box-shadow var(--v7-t-state) var(--v7-ease); }
 .v7-global-brand:hover .v7-li-mark { transform:translate(-2px,-2px); box-shadow:var(--v7-brutal-lg); }.v7-global-brand-copy { min-width:0; }.v7-global-brand-name { font-size:15px; font-weight:850; letter-spacing:-.02em; white-space:nowrap; }.v7-global-brand-sub { display:flex; align-items:baseline; gap:6px; margin-top:4px; white-space:nowrap; }.v7-brand-sub-zh { color:var(--v7-muted); font:600 11px/1.2 var(--lgi-font-sans); letter-spacing:.01em; }
 .v7-primary-nav { height:100%; display:flex; align-items:stretch; flex:0 0 auto; }.v7-primary-nav button,.v7-primary-nav a { position:relative; min-width:118px; padding:0 22px; border:0; background:var(--v7-white); display:flex; flex-direction:column; align-items:center; justify-content:center; gap:5px; color:var(--v7-black); font-size:13px; font-weight:740; text-decoration:none; transition:background var(--v7-t-press) var(--v7-ease); }
-.v7-primary-nav a:focus-visible { outline:2px solid var(--v7-red); outline-offset:-2px; }
+.v7-primary-nav a:focus-visible { outline:2px solid var(--v7-focus); outline-offset:2px; }
 .v7-primary-nav button:not([disabled]):hover,.v7-primary-nav a:not([aria-current="page"]):hover { background:var(--v7-gray); }.v7-primary-nav button[aria-current="page"]::after,.v7-primary-nav a[aria-current="page"]::after { content:""; position:absolute; left:18px; right:18px; bottom:0; height:5px; background:var(--v7-red); }/* One readout scale and one colour across the whole row. The current entry is marked by
  * the signal rule under it, not by darkening its readout: at this size a colour change
  * reads as a size change, so an inked current readout made the row look like it carried
@@ -68,7 +71,7 @@
 /* V7 216px Corpus rail */
 .v7-shell { min-height:0; display:grid; grid-template-columns:var(--v7-side-width) minmax(0,1fr); background:var(--v7-white); }.v7-side { min-height:0; overflow:auto; padding:18px 12px 14px; border-right:2px solid var(--v7-black); background:var(--v7-white); display:flex; flex-direction:column; }.v7-nav-label { padding:0 9px 10px; color:var(--v7-black); font:800 10px var(--lgi-font-mono); letter-spacing:.13em; }.v7-nav-label::after { content:attr(data-readout); display:block; margin-top:5px; color:var(--v7-ghost); font:500 11px var(--lgi-font-mono); letter-spacing:.11em; }.v7-nav-label[data-readout="CORPUS"]::after { content:"语料库"; font:600 11px/1 var(--lgi-font-sans); letter-spacing:.01em; }.v7-nav-label[data-readout="COLLECTION"]::after { content:"采集"; font:600 11px/1 var(--lgi-font-sans); letter-spacing:.01em; }.v7-side-nav { position:relative; width:100%; padding:12px 9px; border:0; background:transparent; display:flex; align-items:center; gap:9px; color:var(--v7-muted); text-align:left; font-size:12px; transition:background var(--v7-t-state) var(--v7-ease), color var(--v7-t-state) var(--v7-ease); }
 .v7-side-nav > i,.v7-side-nav > span { position:relative; }
-.v7-side-nav:focus-visible { outline:2px solid var(--v7-red); outline-offset:2px; }
+.v7-side-nav:focus-visible { outline:2px solid var(--v7-focus); outline-offset:2px; }
 /* Hover is the invitation to leave the current page, so it must never repaint the page
  * you are already on: the selected item keeps its inked block. Excluding aria-current here
  * rather than restating the selected colours after this rule keeps one owner per state. */
