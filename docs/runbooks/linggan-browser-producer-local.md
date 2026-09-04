@@ -70,6 +70,13 @@ npm run verify:linggan-isolation
 - 候选 ZIP 为 `releases/linggan-intelligence-browser-v0.8.36.zip`，SHA-256 `1b0d2832b7483d4efb3c7d13f94bef37018fb1455edfac9434575ca89ee3313c`。它仅代表本分支 source/build/release 候选；不代表已经合入 `main`、替换本机 runtime、被 Chrome 加载、成功产生账号 Observation、完成账号绑定或取得任务。
 - 合入后仍需一次由 Mog 明确授权的受控运行验证：精确更新 runtime 与 Chrome 已解压扩展，刷新已登录页面以形成资格 Observation，在 Collection Runtime 人工绑定账号，并确认 `account_eligibility` 与 station capacity 后，才可对一项明确授权的手动复采或已配置规则验证 `WorkOrder → Lease → Attempt → Package → Receipt`。这一步不能由构建或 ZIP 校验替代。
 
+## 2026-09-04 · `0.8.37` 认领默认接活与工位名候选
+
+- 候选 ZIP 为 `releases/linggan-intelligence-browser-v0.8.37.zip`，SHA-256 `1492f8d9fd454ca52aa5b7e324f83fb791696897fe36604ff97f1d89f91ad3fd`。它包含 `0035_claimed_station_auto_acceptance` 对应的 Producer 回显协议：claim 或 heartbeat 会返回服务端确认的 `stationDisplayName` 和 `stationAccepting`。
+- 正常语义是：成功认领把 station 默认置为自动接活；但仍须通过心跳、凭证、版本、能力、账号、风险、预算、并发和待执行队列的全部 server-side 门禁。Runtime 的人类暂停是持久覆盖，不能由新安装或心跳自动重开。
+- 名称在 Collection Runtime 人工维护，新建工位预填“本机 Chrome”；Popup 只镜像服务器名称和自动接活/已暂停/待认领，不把名称作为安装身份或账号绑定。
+- 本候选尚不是当前现场状态：未合入 `main`、未切换 runtime/共享迁移、未 reload Chrome，且不授权实际采集。安装/重载后若要让真实工位接活，仍须在 Runtime 看到正确名称和账号资格，并由 Mog 明确决定是否把当前人类暂停改为“恢复自动接活”。
+
 ## 错误处理
 
 | 现象 | 影响 | 下一步 |

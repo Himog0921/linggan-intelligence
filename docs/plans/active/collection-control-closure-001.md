@@ -6,6 +6,18 @@
 > 事实来源: Issue #149 Claim、`origin/main@c5158b14f5fc2313dbd3dc94670083500e767ced` 的 migration/Rust/Collection/Browser Producer、PAGE-COLLECTION-001 与 LIDS v7
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实代码/数据库/测试、ACCEPTED 决定与 Issue #149 冻结合同
 
+## 0. 2026-09-04 范围修正 · 认领即自动接活、工位名是服务端真相
+
+本段按 Mog 最新产品决定，修正本计划旧 Package 2 中“新工位默认关闭”的交付语义。实施任务为 `collection-control-closure-001-p2-auto-acceptance-station-name`，exact base 为 `origin/main@e5c5ec5f9bab62f25bea9798fd9abb127df03956`，专属分支为 `codex/collection-station-auto-acceptance-name`；详细授权留在 [Issue #149 comment](https://github.com/Himog0921/linggan-intelligence/issues/149#issuecomment-5541694126)。
+
+- 人在 Runtime 注册工位后，它仍是“待认领”的资源，不表示有插件可执行；成功 `claim` 的有效安装会把该工位默认切为**自动接活**，并追加 `installation_claimed_auto_enabled` 审计。
+- 自动接活不是绕过门禁。只有心跳新鲜、安装凭证/最低版本/能力合格、账号已绑定且资格新鲜、风险/并发/预算允许，并且队列存在合格任务时，才会获得 Lease 并执行。
+- 人在 Runtime 显式暂停后，`person_disabled` 是持久安全覆盖：后续心跳、重装、替换安装和 claim window 都不得自行重开；只有人显式恢复自动接活才写新的转换。
+- `execution_station.display_name` 是唯一的可读工位名真相。Runtime 新建工位预填“本机 Chrome”，且可由人改名；check-in 只回显该服务端名称和当前接活状态。插件不保存/编辑本地别名，不以显示名做身份或配对键。
+- additive `0035_claimed_station_auto_acceptance` 只把旧 `migration_closed` 或 `registered_closed` 默认态且已认领的历史工位迁为自动接活；人工暂停的历史工位保持暂停。
+
+这项源码/隔离 proof 不授权共享 migration、`:3000` runtime 切换、Chrome reload、真实平台访问或实际采集；当前现场暂停状态不会因为本修正被自动解除。
+
 ## 1. 用户结果与串行门
 
 Package 1 已合并并核验到本计划的 exact base。Package 2 要让同一份服务端 durable truth 同时回答：哪台工位、哪个安装、哪个平台观察账号现在可以接活；某个目标按哪一版规则自动巡检；一次保存、跳过、准入、租约、派发或失败到底发生了什么。Package 3 / Creator Dossier 在本包合并复核前继续等待。

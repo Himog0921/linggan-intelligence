@@ -8,8 +8,8 @@ use linggan_evidence::{
     activate_installation_credential, apply_monitor_rule_command, bind_observation_account,
     check_in_installation, collection_control_schema_is_ready, dynamic_cadence,
     grant_authorization, issue_work_order_lease, open_claim_window, read_capacity,
-    register_station, release_work_order_lease, report_account_eligibility, request_and_admit,
-    retire_station, rotate_installation_credential, set_station_accepting,
+    register_station, release_work_order_lease, rename_station, report_account_eligibility,
+    request_and_admit, retire_station, rotate_installation_credential, set_station_accepting,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::Row;
@@ -83,11 +83,13 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0033_dispatch_failure_recovery.sql"),
     "\n",
     include_str!("../../../database/migrations/0034_collection_control_closure.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0035_claimed_station_auto_acceptance.sql"),
 );
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn complete_migration_set_applies_collection_control_0034() {
+async fn complete_migration_set_applies_collection_control_0035() {
     let database = proof_database("collection_control_full_migrations").await;
 
     assert!(
@@ -120,6 +122,152 @@ async fn complete_migration_set_applies_collection_control_0034() {
     .await
     .expect("station acceptance gate exists");
     assert_eq!(accepting_default, "false");
+    let transition_constraint: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_constraint \
+         WHERE conname='execution_station_acceptance_transition_reason_code_check')",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("0035 transition contract is inspectable");
+    assert!(transition_constraint);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn claimed_installation_auto_accepts_but_a_person_pause_survives_replacement() {
+    let database = proof_database("control_claim_auto_accept").await;
+    let station_ref = register_station(&database, "临时工位名", 200)
+        .await
+        .expect("person registers the station");
+    rename_station(&database, station_ref, "本机 Chrome")
+        .await
+        .expect("person sets the canonical station name in Runtime");
+    open_claim_window(&database, station_ref, 1)
+        .await
+        .expect("claim window opens");
+
+    let first = check_in_installation(
+        &database,
+        &InstallationCheckIn {
+            install_key: "auto-accept-first",
+            installation_credential: None,
+            plugin_version: "0.8.36",
+            browser_label: Some("Chrome"),
+            capabilities: serde_json::json!(["author_profile"]),
+        },
+    )
+    .await
+    .expect("claimed installation checks in");
+    let first_installation = match first {
+        CheckInOutcome::Claimed {
+            installation_ref,
+            station_ref: claimed_station_ref,
+            station_display_name,
+            accepting_tasks,
+            ..
+        } => {
+            assert_eq!(claimed_station_ref, station_ref);
+            assert_eq!(station_display_name, "本机 Chrome");
+            assert!(accepting_tasks, "claim enables the default acceptance mode");
+            installation_ref
+        }
+        other => panic!("claim window must match the first installation; got {other:?}"),
+    };
+    let accepting: bool =
+        sqlx::query_scalar("SELECT accepting_tasks FROM execution_station WHERE station_ref=$1")
+            .bind(station_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("acceptance state is readable");
+    assert!(accepting);
+
+    set_station_accepting(&database, station_ref, false, "person")
+        .await
+        .expect("person can explicitly pause future work");
+    let replacement = check_in_installation(
+        &database,
+        &InstallationCheckIn {
+            install_key: "auto-accept-replacement",
+            installation_credential: None,
+            plugin_version: "0.8.36",
+            browser_label: Some("Chrome"),
+            capabilities: serde_json::json!(["author_profile"]),
+        },
+    )
+    .await
+    .expect("replacement checks in through the still-open claim window");
+    match replacement {
+        CheckInOutcome::Claimed {
+            station_display_name,
+            accepting_tasks,
+            superseded,
+            ..
+        } => {
+            assert_eq!(station_display_name, "本机 Chrome");
+            assert!(
+                !accepting_tasks,
+                "a replacement must not undo person_disabled"
+            );
+            assert_eq!(superseded, Some(first_installation));
+        }
+        other => panic!("replacement must remain matched; got {other:?}"),
+    }
+    let latest_reason: String = sqlx::query_scalar(
+        "SELECT reason_code FROM execution_station_acceptance_transition \
+         WHERE station_ref=$1 ORDER BY occurred_at DESC,transition_ref DESC LIMIT 1",
+    )
+    .bind(station_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("acceptance audit trail is readable");
+    assert_eq!(latest_reason, "person_disabled");
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn legacy_registered_closed_default_also_auto_accepts_when_claimed() {
+    let database = proof_database("control_legacy_claim_default").await;
+    let station_ref = register_station(&database, "旧版本机 Chrome", 200)
+        .await
+        .expect("person registers the legacy default station");
+    sqlx::query(
+        "UPDATE execution_station_acceptance_transition \
+         SET reason_code='registered_closed' WHERE station_ref=$1",
+    )
+    .bind(station_ref)
+    .execute(database.pool())
+    .await
+    .expect("fixture represents the pre-0035 registered default");
+    open_claim_window(&database, station_ref, 1)
+        .await
+        .expect("claim window opens");
+
+    let outcome = check_in_installation(
+        &database,
+        &InstallationCheckIn {
+            install_key: "legacy-default-claim",
+            installation_credential: None,
+            plugin_version: "0.8.36",
+            browser_label: Some("Chrome"),
+            capabilities: serde_json::json!(["author_profile"]),
+        },
+    )
+    .await
+    .expect("legacy default station checks in");
+    match outcome {
+        CheckInOutcome::Claimed {
+            station_display_name,
+            accepting_tasks,
+            ..
+        } => {
+            assert_eq!(station_display_name, "旧版本机 Chrome");
+            assert!(
+                accepting_tasks,
+                "the historical default was never a person pause"
+            );
+        }
+        other => panic!("claim window must match the legacy station; got {other:?}"),
+    }
 }
 
 #[tokio::test]
@@ -479,6 +627,9 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
         .expect("current installation has a credential")
         .to_owned();
 
+    set_station_accepting(&database, installation.station_ref, false, "person")
+        .await
+        .expect("person explicitly pauses the otherwise automatic station");
     assert_capacity_reason(&database, "station_not_accepting").await;
     set_station_accepting(&database, installation.station_ref, true, "person")
         .await

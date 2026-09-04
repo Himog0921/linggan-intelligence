@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.34`
+> 版本: `0.8.37`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -48,6 +48,17 @@ outbox 只保存待交付材料，不是 Evidence、也不代表平台采集已�
 一个终态 package：相同 submission 只能 replay，新的 package 必须创建新的 attempt。
 scheduler 由 Linggan 服务端常驻 worker 负责。插件以 MV3 alarm、安装/启动唤醒和单飞锁
 自动签到、领取并执行已批准任务；Popup 的人工按钮不再是正常调度路径。
+
+### 执行工位：认领即自动接活，名称以 Intelligence 为准
+
+工位的可读名称只有服务端 `execution_station.display_name` 一份真相。人在 Collection Runtime
+注册或更名（注册提示为“本机 Chrome”）后，插件通过 check-in 取得该名称和 `stationAccepting`，
+并在 Popup 原样回显；插件不保存/编辑本地别名，也不把名称当作安装身份或配对键。
+
+未被 claim 的工位只是待认领资源；一个安装成功 claim 后，服务端写入审计并默认开启“自动接活”。
+这不等于立即采集：服务端仍逐一核对最新心跳、凭证、最低版本、能力、账号绑定/资格、风险、
+并发 Lease 和 station 预算，且必须确有合格排队任务，才会派 Lease。人通过 Runtime 显式暂停
+后，`person_disabled` 是持久覆盖；心跳、重装或替换安装都不能自行恢复，只有人显式恢复才会重开。
 
 交付前，插件只信任 `GET /health` 在 `routes.localProducer` 中同时公布的
 `taskCreation`、`attemptStart` 与 `submission` 三条本机路径；后台会按这一份 route bundle
@@ -218,6 +229,10 @@ TaskSpec 的页面执行和受限媒体候选取得。
 判定；媒体取得和失败回报也必须携带当前安装凭据。凭据原文只在本机存储，服务端只保留
 摘要，账号原始身份只在回报请求内短暂存在并以 keyed digest 入库。
 
+0.8.37 将认领后的 station acceptance 从旧的默认关闭改为默认自动接活，并把人工暂停作为
+不可被重装/心跳覆盖的安全状态；check-in 同时回显服务端确认的工位名称和接活状态。它不把
+Popup 名称变成身份，也不绕过账号、凭证、风险、配额、并发或 TaskSpec 门禁。
+
 完整逐项清单见 [MIGRATION-MAP.md](MIGRATION-MAP.md)。
 
 ## Build 与可复现发行包
@@ -237,7 +252,7 @@ npm run verify:linggan-isolation
 0.8.18 将真实终验发现的 `596/594` 收口为完成：全量深采取得数达到或超过页面公开数即可
 完成，详情附带评论窗口仍保持精确上限。
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.34.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.37.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

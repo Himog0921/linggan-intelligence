@@ -887,7 +887,7 @@ fn candidate_block_reason(
     if require_accepting_tasks && !candidate.2 {
         Some((
             CapacityReasonCode::StationNotAccepting,
-            "工位尚未由人开启接活。",
+            "工位已由人显式暂停未来接活。",
         ))
     } else if !candidate.7 {
         Some((

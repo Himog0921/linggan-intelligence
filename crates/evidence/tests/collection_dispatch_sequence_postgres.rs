@@ -80,6 +80,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0033_dispatch_failure_recovery.sql"),
     "\n",
     include_str!("../../../database/migrations/0034_collection_control_closure.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0035_claimed_station_auto_acceptance.sql"),
 );
 
 #[tokio::test]

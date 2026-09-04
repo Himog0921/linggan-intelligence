@@ -12,6 +12,30 @@ use tower::ServiceExt;
 
 const LOCAL_001_MIGRATIONS: &str = full_schema_fixture::FULL_MIGRATIONS;
 
+#[test]
+fn check_in_payload_returns_the_server_canonical_station_name_and_pause_state() {
+    let station_ref = uuid::Uuid::new_v4();
+    let payload = check_in_payload(&CheckInOutcome::Heartbeat {
+        installation_ref: uuid::Uuid::new_v4(),
+        station_ref: Some(station_ref),
+        station_display_name: Some("本机 Chrome".to_owned()),
+        accepting_tasks: Some(false),
+        credential: None,
+    });
+    assert_eq!(
+        payload.pointer("/stationRef"),
+        Some(&serde_json::Value::String(station_ref.to_string()))
+    );
+    assert_eq!(
+        payload.pointer("/stationDisplayName"),
+        Some(&serde_json::Value::String("本机 Chrome".to_owned()))
+    );
+    assert_eq!(
+        payload.pointer("/stationAccepting"),
+        Some(&serde_json::Value::Bool(false))
+    );
+}
+
 #[tokio::test]
 async fn health_route_returns_machine_readable_local_state() {
     let response = app()
