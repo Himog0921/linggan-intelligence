@@ -203,19 +203,9 @@ fn avatar_markup(avatar: Option<&ObservationTargetAvatar>) -> String {
 
 /// 状态徽记。稿子是 `● BASELINE READY` / `PATROLLING` 这类，此处转中文。
 fn state_chips(target: &ObservationTarget) -> String {
-    let (archive_tone, archive_label) = match target.lifecycle_state.as_str() {
-        "pending_decision" => ("neutral", "尚未建档"),
-        "archiving" => ("warn", "▲ 建档中"),
-        "archived" | "monitoring" | "paused" => ("ok", "● 基线就绪"),
-        "dismissed" => ("neutral", "已停止观察"),
-        _ => ("neutral", "状态未知"),
-    };
-    let (patrol_tone, patrol_label) = match target.lifecycle_state.as_str() {
-        "paused" => ("warn", "巡检已暂停"),
-        "dismissed" => ("neutral", "已停止观察"),
-        _ if target.monitoring_enabled => ("info", "巡检中"),
-        _ => ("neutral", "未开启巡检"),
-    };
+    let (archive_tone, archive_label) =
+        super::target_drawer::lifecycle_primary_copy(&target.target_kind, &target.lifecycle_state);
+    let (patrol_tone, patrol_label) = super::target_drawer::lifecycle_patrol_copy(target);
     format!(
         r#"<span class="c-tg-truth c-tg-{archive_tone}">{archive_label}</span>
            <span class="c-tg-truth c-tg-{patrol_tone}">{patrol_label}</span>
@@ -660,5 +650,35 @@ mod tests {
             assert!(html.contains(label), "{state} must read as {label}");
             assert!(!html.contains("状态未知"), "{state} is a legal state");
         }
+    }
+
+    #[test]
+    fn lifecycle_copy_is_kind_aware_and_dismissed_axes_do_not_duplicate() {
+        let cases = [
+            ("creator", "archived", false, "基线就绪"),
+            ("creator", "monitoring", true, "基线就绪"),
+            ("creator", "paused", false, "巡检已暂停"),
+            ("keyword", "monitoring", true, "规则已生效"),
+            ("keyword", "paused", false, "规则已暂停"),
+        ];
+        for (kind, state, monitoring, expected) in cases {
+            let mut target = target(kind, Some("状态对象"));
+            target.lifecycle_state = state.to_owned();
+            target.monitoring_enabled = monitoring;
+            let html = state_chips(&target);
+            assert!(
+                html.contains(expected),
+                "{kind}/{state} must read as {expected}"
+            );
+            if kind == "keyword" {
+                assert!(!html.contains("基线就绪"));
+            }
+        }
+
+        let mut dismissed = target("creator", Some("停止观察对象"));
+        dismissed.lifecycle_state = "dismissed".to_owned();
+        let html = state_chips(&dismissed);
+        assert_eq!(html.matches("已停止观察").count(), 1);
+        assert!(html.contains("不再调度"));
     }
 }

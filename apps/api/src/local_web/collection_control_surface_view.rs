@@ -11,13 +11,16 @@ use linggan_storage_postgres::Database;
 use sqlx::Row;
 use uuid::Uuid;
 
+use super::{
+    OperationsMode, READOUT_SLOT_END, READOUT_SLOT_START, context_readout,
+    replace_bounded_slot,
+};
+
 const EMPTY_STATE_OPEN: &str = "<section class=\"c-empty c-empty-engineering\">";
 const EMPTY_STATE_CLOSE: &str = "</section>";
 const BODY_OPEN: &str = "<div class=\"c-body\">";
 const BODY_SLOT_START: &str = "<!-- collection-body:start -->";
 const BODY_SLOT_END: &str = "<!-- collection-body:end -->";
-const READOUT_SLOT_START: &str = "<!-- collection-readout:start -->";
-const READOUT_SLOT_END: &str = "<!-- collection-readout:end -->";
 
 #[derive(Debug, Clone)]
 pub enum CollectionControlSurfaceRead {
@@ -420,14 +423,21 @@ fn blocked_lane(
     }
 }
 
-pub fn render_operations(base: &str, projection: &CollectionControlSurfaceProjection) -> String {
+pub fn render_operations(
+    base: &str,
+    projection: &CollectionControlSurfaceProjection,
+    mode: OperationsMode,
+) -> String {
+    if mode != OperationsMode::Now {
+        return base.to_owned();
+    }
     let content = operations_markup(projection);
     let rendered = if base.contains(BODY_SLOT_START) {
-        replace_slot(base, BODY_SLOT_START, BODY_SLOT_END, &content)
+        replace_bounded_slot(base, BODY_SLOT_START, BODY_SLOT_END, &content)
     } else {
         replace_empty(base, &content)
     };
-    replace_slot(
+    replace_bounded_slot(
         &rendered,
         READOUT_SLOT_START,
         READOUT_SLOT_END,
@@ -438,11 +448,11 @@ pub fn render_operations(base: &str, projection: &CollectionControlSurfaceProjec
 pub fn render_attention(base: &str, projection: &CollectionControlSurfaceProjection) -> String {
     let content = attention_markup(projection);
     let rendered = if base.contains(BODY_SLOT_START) {
-        replace_slot(base, BODY_SLOT_START, BODY_SLOT_END, &content)
+        replace_bounded_slot(base, BODY_SLOT_START, BODY_SLOT_END, &content)
     } else {
         replace_empty(base, &content)
     };
-    replace_slot(
+    replace_bounded_slot(
         &rendered,
         READOUT_SLOT_START,
         READOUT_SLOT_END,
@@ -451,20 +461,20 @@ pub fn render_attention(base: &str, projection: &CollectionControlSurfaceProject
 }
 
 pub fn render_tasks_control(base: &str, projection: &CollectionControlSurfaceProjection) -> String {
-    let frozen = frozen_work_markup(&projection.works);
-    if base.contains("<!-- frozen-work:start -->") {
-        replace_slot(
-            &base.replace(
-                "<!-- frozen-work-count -->UNKNOWN",
-                &format!("<!-- frozen-work-count -->{}", projection.works.len()),
-            ),
-            "<!-- frozen-work:start -->",
-            "<!-- frozen-work:end -->",
-            &frozen,
-        )
-    } else {
-        prepend_body(base, &frozen)
-    }
+    let templates = frozen_work_templates(&projection.works);
+    let rendered = selected_task_id(base).map_or_else(
+        || base.to_owned(),
+        |task_id| {
+            let works = works_for_task(&projection.works, task_id);
+            replace_bounded_slot(
+                base,
+                "<!-- frozen-work:start -->",
+                "<!-- frozen-work:end -->",
+                &frozen_work_markup(&works),
+            )
+        },
+    );
+    prepend_body(&rendered, &templates)
 }
 
 pub fn render_runtime_control(
@@ -508,7 +518,7 @@ fn operations_markup(projection: &CollectionControlSurfaceProjection) -> String 
              {run}
              <div class="c-operations-workspace">
                <div class="c-flow-ledger">
-                 <div class="c-control-section-head"><div><p>Collection production / bounded read</p><h2>观察生产流</h2></div><span>不是转化漏斗</span></div>
+                 <div class="c-control-section-head"><div><p>最近持久投影</p><h2>观察生产流</h2></div><span>不是转化漏斗</span></div>
                  <p class="c-control-boundary">各阶段读数分别来自最近的 decision 与 Work 冻结投影；它们不是同一批对象的完成率，也不代表平台全量。</p>
                  <div class="c-flow-v4">{flow}</div>
                </div>
@@ -525,28 +535,16 @@ fn operations_markup(projection: &CollectionControlSurfaceProjection) -> String 
 }
 
 fn operations_readout(projection: &CollectionControlSurfaceProjection) -> String {
-    let (runs, considered, dispatched) = projection.latest_run.as_ref().map_or(
-        ("—".to_owned(), "—".to_owned(), "—".to_owned()),
-        |run| {
-            (
-                "1".to_owned(),
-                run.considered_count.to_string(),
-                run.dispatched_count.to_string(),
-            )
-        },
-    );
-    let blocked = projection
+    let runs = if projection.latest_run.is_some() { "1" } else { "—" };
+    let recoverable = projection
         .decisions
         .iter()
-        .filter(|decision| decision.work_order_ref.is_none())
+        .filter(|decision| recovery_for(&decision.reason_code).is_some())
         .count()
         .to_string();
-    readout_markup(&[
-        (&runs, "最近轮次", ""),
-        (&considered, "考虑目标", ""),
-        (&dispatched, "已派出", ""),
-        (&blocked, "有阻断", "warn"),
-        (&projection.decisions.len().to_string(), "持久决定", ""),
+    context_readout(&[
+        (runs, "最近一轮", "最近持久调度读取范围"),
+        (&recoverable, "有恢复动作", "仅计入存在明确恢复责任的决定"),
     ])
 }
 
@@ -600,7 +598,7 @@ fn flow_stage_markup(projection: &CollectionControlSurfaceProjection) -> String 
             projection
                 .decisions
                 .iter()
-                .filter(|decision| decision.work_order_ref.is_none())
+                .filter(|decision| recovery_for(&decision.reason_code).is_some())
                 .count(),
         ),
     ];
@@ -608,7 +606,7 @@ fn flow_stage_markup(projection: &CollectionControlSurfaceProjection) -> String 
         .into_iter()
         .map(|(number, name, note, count)| {
             format!(
-                r#"<article class="c-flow-v4-row"><span class="c-flow-v4-no">{number}</span><div><h3>{name}</h3><p>{note}</p></div><div class="c-flow-v4-state"><b>{count}</b><span>最近读取</span></div><i aria-hidden="true">→</i></article>"#,
+                r#"<article class="c-flow-v4-row"><span class="c-flow-v4-no">{number}</span><div><h3>{name}</h3><p>{note}</p></div><div class="c-flow-v4-state"><b>{count}</b><span>最近读取</span></div></article>"#,
             )
         })
         .collect()
@@ -660,7 +658,7 @@ fn attention_markup(projection: &CollectionControlSurfaceProjection) -> String {
     );
     format!(
         r#"<section class="c-control-surface" data-collection-control="attention">
-             <div class="c-control-section-head"><div><p>Needs attention / durable only</p><h2>有恢复动作的阻断</h2></div><span>{count} 项</span></div>
+             <div class="c-control-section-head"><div><p>仅持久控制事实</p><h2>有恢复动作的阻断</h2></div><span>{count} 项</span></div>
              <div class="c-attention-workspace">
                <div class="c-attention-ledger">
                  <div class="c-attention-head"><span>来源</span><span>对象</span><span>阻断</span><span>责任</span><span>观察时间</span></div>
@@ -676,12 +674,9 @@ fn attention_markup(projection: &CollectionControlSurfaceProjection) -> String {
 fn attention_readout(projection: &CollectionControlSurfaceProjection) -> String {
     let entries = attention_entries(projection);
     let count_owner = |owner: &str| entries.iter().filter(|entry| entry.owner == owner).count();
-    readout_markup(&[
-        (&entries.len().to_string(), "需要处理", "hot"),
-        (&count_owner("你").to_string(), "你负责", ""),
-        (&count_owner("执行工位").to_string(), "工位负责", ""),
-        (&count_owner("调度").to_string(), "调度负责", ""),
-        (&count_owner("工程").to_string(), "工程负责", "warn"),
+    context_readout(&[
+        (&entries.len().to_string(), "需要处理", "当前有明确恢复动作的持久阻断"),
+        (&count_owner("你").to_string(), "你负责", "当前需要人工处理的恢复事项"),
     ])
 }
 
@@ -860,18 +855,49 @@ fn attention_inspector(entry: &AttentionEntry) -> String {
 
 fn frozen_work_markup(works: &[FrozenWorkView]) -> String {
     let rows = if works.is_empty() {
-        r#"<p class="c-control-none">工单冻结投影读取成功，当前范围没有 WorkOrder。</p>"#.to_owned()
+        r#"<p class="c-control-none">该任务没有关联的冻结 Work 投影。</p>"#.to_owned()
     } else {
         works.iter().map(frozen_work_row).collect::<String>()
     };
     format!(
         r#"<section class="c-control-surface c-frozen-works" data-collection-control="tasks">
-             <div class="c-control-section-head"><div><p>Work / frozen provenance</p><h2>工单冻结资源</h2></div><span>最近 {count} 张</span></div>
+             <div class="c-control-section-head"><div><p>冻结来源链</p><h2>工单冻结资源</h2></div><span>当前任务 {count} 张</span></div>
              <p class="c-control-boundary">冻结引用说明准入当时依赖什么；“当前不同”不会覆盖旧 Work、Attempt 或 Receipt。</p>
              <div class="c-control-list">{rows}</div>
            </section>"#,
         count = works.len(),
     )
+}
+
+fn works_for_task(works: &[FrozenWorkView], task_id: Uuid) -> Vec<FrozenWorkView> {
+    works
+        .iter()
+        .filter(|work| work.task_id == Some(task_id))
+        .cloned()
+        .collect()
+}
+
+fn selected_task_id(base: &str) -> Option<Uuid> {
+    const ATTRIBUTE: &str = "data-task-id=\"";
+    let start = base.find(ATTRIBUTE)? + ATTRIBUTE.len();
+    let end = base[start..].find('"')? + start;
+    Uuid::parse_str(&base[start..end]).ok()
+}
+
+fn frozen_work_templates(works: &[FrozenWorkView]) -> String {
+    let mut task_ids = works.iter().filter_map(|work| work.task_id).collect::<Vec<_>>();
+    task_ids.sort_unstable();
+    task_ids.dedup();
+    task_ids
+        .into_iter()
+        .map(|task_id| {
+            let scoped = works_for_task(works, task_id);
+            format!(
+                r#"<template data-task-frozen-template="{task_id}">{content}</template>"#,
+                content = frozen_work_markup(&scoped),
+            )
+        })
+        .collect()
 }
 
 fn frozen_work_row(work: &FrozenWorkView) -> String {
@@ -957,9 +983,9 @@ fn runtime_control_markup(projection: &CollectionControlSurfaceProjection) -> St
     };
     format!(
         r#"<section class="c-control-surface c-runtime-control" data-collection-control="runtime">
-             <div class="c-control-section-head"><div><p>Admission question 5 / same evaluator</p><h2>当前控制资格</h2></div><span>实时重算</span></div>
+             <div class="c-control-section-head"><div><p>准入第 5 问・同一评估器</p><h2>当前控制资格</h2></div><span>实时重算</span></div>
              <div class="c-runtime-lanes">{lanes}</div>
-             <div class="c-control-section-head c-control-subhead"><div><p>Bounded control facts</p><h2>工位 / 安装 / 观察账号</h2></div><span>不含原始账号身份</span></div>
+             <div class="c-control-section-head c-control-subhead"><div><p>有界控制事实</p><h2>工位 / 安装 / 观察账号</h2></div><span>不含原始账号身份</span></div>
              <div class="c-runtime-resources">{resources}</div>
            </section>"#,
     )
@@ -1097,39 +1123,6 @@ fn replace_empty(base: &str, content: &str) -> String {
     };
     let close = open + close_offset + EMPTY_STATE_CLOSE.len();
     format!("{}{content}{}", &base[..open], &base[close..])
-}
-
-fn replace_slot(base: &str, start: &str, end: &str, content: &str) -> String {
-    let Some(open) = base.find(start) else {
-        return base.to_owned();
-    };
-    let content_start = open + start.len();
-    let Some(close_offset) = base[content_start..].find(end) else {
-        return base.to_owned();
-    };
-    let close = content_start + close_offset;
-    format!(
-        "{}{}{}{}{}",
-        &base[..open],
-        start,
-        content,
-        end,
-        &base[close + end.len()..]
-    )
-}
-
-fn readout_markup(entries: &[(&str, &str, &str)]) -> String {
-    let cells = entries
-        .iter()
-        .map(|(value, label, tone)| {
-            format!(
-                r#"<div class="c-readout {tone}"><b>{value}</b><span>{label}</span></div>"#,
-                value = escape(value),
-                label = escape(label),
-            )
-        })
-        .collect::<String>();
-    format!(r#"<div class="c-readout-strip" data-collection-readout>{cells}</div>"#)
 }
 
 fn prepend_body(base: &str, content: &str) -> String {
@@ -1296,7 +1289,7 @@ mod tests {
     fn four_surfaces_share_stable_reason_and_frozen_reference_selectors() {
         let projection = projection();
         let empty = format!("{EMPTY_STATE_OPEN}old{EMPTY_STATE_CLOSE}");
-        let operations = render_operations(&empty, &projection);
+        let operations = render_operations(&empty, &projection, OperationsMode::Now);
         let attention = render_attention(&empty, &projection);
         let body = format!("{BODY_OPEN}old</div>");
         let tasks = render_tasks_control(&body, &projection);
@@ -1330,17 +1323,14 @@ mod tests {
             "<main>{READOUT_SLOT_START}<div>placeholder readout</div>{READOUT_SLOT_END}<div class=\"c-body\">{BODY_SLOT_START}<section>placeholder body</section>{BODY_SLOT_END}</div></main>"
         );
 
-        let operations = render_operations(&base, &projection);
+        let operations = render_operations(&base, &projection, OperationsMode::Now);
         assert!(operations.contains("c-operations-workspace"));
         assert!(operations.contains("c-decision-stream"));
         assert!(operations.contains("data-control-reason=\"account_needs_login\""));
         assert!(!operations.contains("placeholder body"));
         assert!(!operations.contains("placeholder readout"));
-        assert_eq!(
-            operations.matches("<div class=\"c-readout").count()
-                - operations.matches("c-readout-strip").count(),
-            5
-        );
+        assert_eq!(operations.matches("class=\"v7-kpi\"").count(), 2);
+        assert!(!operations.contains("c-readout-strip"));
 
         let attention = render_attention(&base, &projection);
         assert!(attention.contains("c-attention-workspace"));
@@ -1349,11 +1339,22 @@ mod tests {
         assert!(attention.contains("data-owner=\"你\""));
         assert!(!attention.contains("placeholder body"));
         assert!(!attention.contains("placeholder readout"));
-        assert_eq!(
-            attention.matches("<div class=\"c-readout").count()
-                - attention.matches("c-readout-strip").count(),
-            5
-        );
+        assert_eq!(attention.matches("class=\"v7-kpi\"").count(), 2);
+        assert!(!attention.contains("c-readout-strip"));
+    }
+
+    #[test]
+    fn trace_and_review_keep_their_mode_specific_base_instead_of_mounting_now() {
+        let projection = projection();
+        for (mode, marker) in [
+            (OperationsMode::Trace, "trace-mode-body"),
+            (OperationsMode::Review, "review-mode-body"),
+        ] {
+            let base = format!("<main>{marker}</main>");
+            let rendered = render_operations(&base, &projection, mode);
+            assert_eq!(rendered, base);
+            assert!(!rendered.contains("c-operations-workspace"));
+        }
     }
 
     #[test]
@@ -1364,7 +1365,7 @@ mod tests {
         );
         let html = format!(
             "{}{}",
-            render_operations(&base, &projection),
+            render_operations(&base, &projection, OperationsMode::Now),
             render_attention(&base, &projection)
         );
         for forbidden in ["Evidence", "监控价值", "代表证据", "机会评分"] {
@@ -1383,6 +1384,73 @@ mod tests {
         assert!(recovery_for("manual_only").is_none());
         assert!(recovery_for("monitoring_paused").is_none());
         assert!(recovery_for("account_needs_login").is_some());
+        assert!(recovery_for("lease_issue_failed").is_some());
+    }
+
+    #[test]
+    fn operations_recovery_count_excludes_ordinary_non_dispatch_decisions() {
+        let mut projection = projection();
+        let template = projection.decisions[0].clone();
+        projection.decisions = [
+            "not_due",
+            "manual_only",
+            "monitoring_paused",
+            "dynamic_unavailable",
+            "account_needs_login",
+            "lease_issue_failed",
+        ]
+        .into_iter()
+        .map(|reason| SchedulerDecisionView {
+            target_decision_ref: Uuid::new_v4(),
+            reason_code: reason.to_owned(),
+            ..template.clone()
+        })
+        .collect();
+        let html = operations_readout(&projection);
+        assert!(html.contains("有恢复动作 2"));
+        let flow = flow_stage_markup(&projection);
+        let recovery = flow
+            .split("恢复与重排")
+            .nth(1)
+            .expect("recovery stage exists");
+        assert!(recovery.contains("<b>2</b>"));
+        assert!(!recovery.contains("<b>6</b>"));
+    }
+
+    #[test]
+    fn frozen_work_projection_is_scoped_to_the_selected_task() {
+        let mut first = projection().works.remove(0);
+        let first_task = Uuid::new_v4();
+        first.task_id = Some(first_task);
+        first.work_order_ref = Uuid::new_v4();
+        let mut second = first.clone();
+        let second_task = Uuid::new_v4();
+        second.task_id = Some(second_task);
+        second.work_order_ref = Uuid::new_v4();
+        second.target_name = "另一个目标".to_owned();
+        let works = vec![first.clone(), second.clone()];
+
+        let first_only = works_for_task(&works, first_task);
+        assert_eq!(first_only.len(), 1);
+        assert_eq!(first_only[0].work_order_ref, first.work_order_ref);
+        let templates = frozen_work_templates(&works);
+        let first_marker = format!("data-task-frozen-template=\"{first_task}\"");
+        let second_marker = format!("data-task-frozen-template=\"{second_task}\"");
+        let first_start = templates.find(&first_marker).expect("first template");
+        let second_start = templates.find(&second_marker).expect("second template");
+        let (first_fragment, second_fragment) = if first_start < second_start {
+            (&templates[first_start..second_start], &templates[second_start..])
+        } else {
+            (&templates[first_start..], &templates[second_start..first_start])
+        };
+        assert!(first_fragment.contains(&first.work_order_ref.to_string()));
+        assert!(!first_fragment.contains(&second.work_order_ref.to_string()));
+        assert!(second_fragment.contains(&second.work_order_ref.to_string()));
+        assert!(!second_fragment.contains(&first.work_order_ref.to_string()));
+
+        let script = include_str!("collection_workspace.js");
+        assert!(script.contains("candidate.dataset.taskFrozenTemplate === row.dataset.taskId"));
+        assert!(script.contains("该任务没有关联的冻结 Work 投影"));
     }
 
     #[test]

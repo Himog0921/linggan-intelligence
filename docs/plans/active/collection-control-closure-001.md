@@ -124,10 +124,10 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 
 ### 10.2 用户结果与设计方向
 
-- 五页继续回答各自真实问题，但统一采用 V4 的桌面信息架构：明确页标题、五格事实读数、页内控制条和主工作区。
+- 五页继续回答各自真实问题，并采用 V4 的桌面密度、ledger/Inspector 关系、页内控制条和主工作区。页面名只保留读屏 `h1`，页面读数只进共享 Context Bar；V4 的可见大标题与第二条五格读数不继承。
 - 观察目标点击后仍打开右侧宽幅抽屉，默认核心继续是已交付的创作者生命周期；不恢复参考稿里的 Evidence tab、代表证据、监控价值或假档案分。
 - 视觉 thesis: LIDS 白场研究仪器面，以硬边界、高密度表格、克制 signal 和右侧事实检查区形成采集运营工作站。
-- 内容 thesis: 页标题与可验证读数 → 筛选/模式 → 主列表或生产流 → 选中对象的解释/恢复区。
+- 内容 thesis: Context Bar 中的可验证读数 → 筛选/模式 → 主列表或生产流 → 选中对象的解释/恢复区。
 - 交互 thesis: URL 持有路由、筛选、抽屉与规则 modal；键盘/点击等价，动作只使用 80–160ms transform/opacity 反馈。
 - CSS 策略: 只维护现有 `collection_workspace.css`、`target_drawer.css` 与 `collection_workspace.js`，消费现有 `--lgi-*` / 兼容 `--v7-*` token；不引入 Tailwind、CSS-in-JS、字体、图标库或第二套 token。
 
@@ -136,7 +136,7 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 | Claim / surface | 实施前状态 | 当前证据 | 本扩展动作 |
 |---|---|---|---|
 | 五个真实 Collection route | VERIFIED | `/collection/attention|targets|operations|tasks|runtime` 均由当前 Rust binary 服务 | 保留 route/URL，不改成 hash-only prototype |
-| V4 全局 header / context / 206px rail | PARTIAL | 当前共享 shell 已有同类结构，但 Collection 页没有 V4 的页标题与分层读数 | 只在 Collection page scope 对齐几何与密度，不复制第二个全站 header |
+| V4 全局 header / context / rail | LIDS OVERRIDES | 共享 shell 已是唯一 owner；LIDS 要求隐藏 `h1`、读数仅在 Context Bar | 只采用 Collection page scope 几何/密度，不复制或局部重写 shell，不采用参考的可见标题/第二读数条 |
 | 待处理 ledger + inspector | ABSENT | durable recovery rows 已接通，但当前是整行平铺 | 用同一 projection 渲染左 ledger 与右事实 inspector；无选择时也不伪造默认事实 |
 | 观察目标目录 + 右抽屉 | PARTIAL | 真实列表、规则 modal、生命周期抽屉已接通；页面缺 V4 标题/读数层级 | 重排真实字段与操作，保留 lifecycle、provenance、UNKNOWN 与 Coverage |
 | 生产流 + 实时观测面 | PARTIAL | scheduler run/decision/Work/Lease 真实投影已接通；视觉仍是普通列表 | 映射为 V4 flow + dark instrument，但不制造 live event 或趋势 |
@@ -151,7 +151,7 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 
 | 表面 | 自动证明 | 1440 隔离浏览器 | 人工验收 |
 |---|---|---|---|
-| 共享页层级 | 五页均有唯一 h1、事实读数与真实 route；无第二 header | 无横向溢出、标题/动作/rail 清晰 | Mog 对 V4 视觉接近度判断 |
+| 共享页层级 | 五页均有唯一读屏 h1、两个有范围 Context KPI 与真实 route；无可见标题或第二 header | 1440 无横向溢出，工具条/rail/主工作区清晰 | Mog 对 V4 视觉接近度判断 |
 | Attention | durable reason/owner/action 与 inspector 一致 | 行选择、键盘焦点、未知/空态可读 | 恢复责任是否直观 |
 | Targets / drawer / rule modal | 真实计数、UNKNOWN/0 分离、lifecycle 与 modal 合同回归 | 点击行开抽屉、Esc/focus return、生命周期首屏可见 | 生命周期是否成为抽屉核心 |
 | Operations | run/decision/Work/Lease 来源不变，无模拟事件 | flow 与 dark instrument 同屏，无假实时滚动 | 生产状态是否一眼可判 |
@@ -162,10 +162,10 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 
 ### 10.5 实施与验证回执
 
-- 五个 Collection route 均新增唯一可见 h1 与五格有界事实读数；共享 shell、全局 token 与 Corpus 页面未被重写。
+- 五个 Collection route 均保留唯一读屏 h1，并在共享 Context Bar 中只显示两个有范围 KPI；可见大标题与第二五格读数已按 LIDS 复审结论删除，共享 shell、全局 token 与 Corpus 页面未被重写。
 - Attention 以 durable reason/owner/action 组成 ledger + Inspector；Tasks 以 Task/Attempt/Package/Receipt 与 frozen Work refs 组成 ledger + tabs；Operations 真实替换 body slot，并以 scheduler decision / Work / Lease 投影组成 flow + dark instrument。
 - Targets 保留 URL-owned drawer、monitor-rule modal、focus return 与 creator lifecycle；合法 `archived | monitoring | paused | dismissed` 状态不再错误显示为 UNKNOWN。
 - Runtime 继续使用同一 capacity evaluator，并以真实 station/install/account/claim-window 读数替换 provisional readout。
-- 自动检查覆盖五页结构、5 格读数、control body slot、ledger/Inspector、task tabs、生命周期状态与 Evidence/监控价值模块负向；页面 JS 通过语法检查。
+- 自动检查覆盖五页隐藏 h1 + 2 个 Context KPI、control body slot、Operations 模式隔离/恢复计数、ledger/Inspector、Task-scoped Frozen Work、tab ARIA/键盘、kind-aware lifecycle 与 Evidence/监控价值模块负向；页面 JS 通过语法检查。
 - 一次性 PostgreSQL 16 应用当前全部 33 个 migration，并只写入脱敏 synthetic fixture。隔离 `:3311`、1440×900 浏览器逐页证明无横向溢出，Attention 行选择、Tasks tab、Targets lifecycle drawer 成立，console warning/error 为空。
 - 未证明：真实数据密度、共享数据库、Browser Producer/真实平台与 Mog 业务验收。本扩展不修改 migration/schema，也不处理窄屏；commit/push/merge 与本机 `:3000` 刷新的实际证据将在授权动作完成后补记。

@@ -29,8 +29,6 @@ const NO_PLATFORM_ACCESS_NOTE: &str =
 
 const EMPTY_STATE_OPEN: &str = "<section class=\"c-empty c-empty-engineering\">";
 const EMPTY_STATE_CLOSE: &str = "</section>";
-const READOUT_SLOT_START: &str = "<!-- collection-readout:start -->";
-const READOUT_SLOT_END: &str = "<!-- collection-readout:end -->";
 
 /// 渲染整页工作区，替换掉原来的空态。
 ///
@@ -93,101 +91,10 @@ fn render_runtime_with_roster(
         bounds = bounds_markup(overview),
     );
 
-    let rendered = format!(
+    format!(
         "{before}{body}{after}",
         before = &base[..open],
         after = &base[close..],
-    );
-    replace_slot(
-        &rendered,
-        READOUT_SLOT_START,
-        READOUT_SLOT_END,
-        &runtime_readout(overview, roster),
-    )
-}
-
-fn runtime_readout(
-    _overview: Option<&RuntimeCapacityOverview>,
-    roster: Option<(&[StationOverview], &[UnclaimedInstallation])>,
-) -> String {
-    let Some((stations, unclaimed)) = roster else {
-        return readout_markup(&[
-            ("UNKNOWN", "在线工位", ""),
-            ("UNKNOWN", "待认领安装", "warn"),
-            ("UNKNOWN", "今日额度", ""),
-            ("UNKNOWN", "最近确认", ""),
-            ("UNKNOWN", "已开窗口", ""),
-        ]);
-    };
-    let staffed = stations
-        .iter()
-        .filter(|station| station.active_plugin_version.is_some())
-        .count();
-    let online = format!("{staffed}/{}", stations.len());
-    let pending = unclaimed.len().to_string();
-    let quota = match stations {
-        [] => "—".to_owned(),
-        [station] => format!("{}/{}", station.daily_notes_used, station.daily_work_quota),
-        _ => format!("{} 台分计", stations.len()),
-    };
-    let quota_tone = if stations
-        .iter()
-        .any(|station| station.daily_notes_used >= i64::from(station.daily_work_quota))
-    {
-        "hot"
-    } else {
-        ""
-    };
-    let latest = stations
-        .iter()
-        .filter_map(|station| station.active_last_seen_at.as_deref())
-        .max()
-        .unwrap_or("—")
-        .to_owned();
-    let windows = stations
-        .iter()
-        .filter(|station| station.claim_window_open)
-        .count()
-        .to_string();
-    readout_markup(&[
-        (&online, "在线工位", ""),
-        (&pending, "待认领安装", "warn"),
-        (&quota, "今日额度", quota_tone),
-        (&latest, "最近确认", ""),
-        (&windows, "已开窗口", ""),
-    ])
-}
-
-fn readout_markup(entries: &[(&str, &str, &str)]) -> String {
-    let cells = entries
-        .iter()
-        .map(|(value, label, tone)| {
-            format!(
-                r#"<div class="c-readout {tone}"><b>{value}</b><span>{label}</span></div>"#,
-                value = escape(value),
-                label = escape(label),
-            )
-        })
-        .collect::<String>();
-    format!(r#"<div class="c-readout-strip" data-collection-readout>{cells}</div>"#)
-}
-
-fn replace_slot(base: &str, start: &str, end: &str, content: &str) -> String {
-    let Some(open) = base.find(start) else {
-        return base.to_owned();
-    };
-    let content_start = open + start.len();
-    let Some(close_offset) = base[content_start..].find(end) else {
-        return base.to_owned();
-    };
-    let close = content_start + close_offset;
-    format!(
-        "{}{}{}{}{}",
-        &base[..open],
-        start,
-        content,
-        end,
-        &base[close + end.len()..]
     )
 }
 

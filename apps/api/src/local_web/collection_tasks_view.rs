@@ -6,10 +6,12 @@
 
 use linggan_evidence::{CollectionTaskExecution, CollectionTaskTimeline};
 
+use super::collection::{
+    READOUT_SLOT_END, READOUT_SLOT_START, context_readout, replace_bounded_slot,
+};
+
 const EMPTY_STATE_OPEN: &str = "<section class=\"c-empty c-empty-engineering\">";
 const EMPTY_STATE_CLOSE: &str = "</section>";
-const READOUT_SLOT_START: &str = "<!-- collection-readout:start -->";
-const READOUT_SLOT_END: &str = "<!-- collection-readout:end -->";
 
 pub fn render_tasks(base: &str, timeline: &CollectionTaskTimeline) -> String {
     let Some(open) = base.find(EMPTY_STATE_OPEN) else {
@@ -49,7 +51,7 @@ pub fn render_tasks(base: &str, timeline: &CollectionTaskTimeline) -> String {
         )
     };
     let rendered = format!("{}{body}{}", &base[..open], &base[close..]);
-    replace_slot(
+    replace_bounded_slot(
         &rendered,
         READOUT_SLOT_START,
         READOUT_SLOT_END,
@@ -137,7 +139,7 @@ fn task_row(task: &CollectionTaskExecution, selected: bool) -> String {
         sequence
     );
     format!(
-        r#"<button type="button" class="c-task-row{selected_class}" data-task-row data-task-title="{target}" data-task-ref="{task_ref}" data-task-meta="{meta}" data-task-state="{state}" data-task-state-note="{state_note}" data-task-attempt="{attempt}" data-task-package="{package}" data-task-receipt="{receipt}" data-task-effect="{effect_text}" data-task-failure="{previous_failure}" data-task-created="{created}" data-task-capabilities="{capabilities}" aria-pressed="{pressed}">
+        r#"<button type="button" class="c-task-row{selected_class}" data-task-row data-task-id="{task_id}" data-task-title="{target}" data-task-ref="{task_ref}" data-task-meta="{meta}" data-task-state="{state}" data-task-state-note="{state_note}" data-task-attempt="{attempt}" data-task-package="{package}" data-task-receipt="{receipt}" data-task-effect="{effect_text}" data-task-failure="{previous_failure}" data-task-created="{created}" data-task-capabilities="{capabilities}" aria-pressed="{pressed}">
               <span class="c-task-id">#{task_ref}</span>
               <span class="c-task-target"><b>{target}</b><small>{source}</small></span>
               <span class="c-task-stage">{capabilities}</span>
@@ -153,6 +155,7 @@ fn task_row(task: &CollectionTaskExecution, selected: bool) -> String {
         capabilities = escape(&task.capabilities),
         target = escape(target),
         task_ref = escape(task_ref),
+        task_id = task.task_id,
         state = state,
         state_class = state_class,
         state_note = escape(state_note),
@@ -236,13 +239,13 @@ fn task_inspector(task: &CollectionTaskExecution) -> String {
     format!(
         r#"<aside class="c-task-inspector" data-task-inspector aria-live="polite">
              <div class="c-task-inspector-head"><span data-task-inspector-ref>任务 #{task_ref}</span><h2 data-task-inspector-title>{target}</h2><p data-task-inspector-meta>{source} · {platform} · {page_type}</p></div>
-             <nav class="c-task-inspector-tabs" aria-label="任务详情"><button type="button" class="is-active" data-task-tab="overview">概览</button><button type="button" data-task-tab="attempt">Attempt</button><button type="button" data-task-tab="package">Package</button><button type="button" data-task-tab="receipt">Receipt</button><button type="button" data-task-tab="frozen">冻结资源</button></nav>
+             <nav class="c-task-inspector-tabs" aria-label="任务详情" role="tablist"><button type="button" class="is-active" id="task-tab-overview" data-task-tab="overview" role="tab" aria-selected="true" aria-controls="task-panel-overview" tabindex="0">概览</button><button type="button" id="task-tab-attempt" data-task-tab="attempt" role="tab" aria-selected="false" aria-controls="task-panel-attempt" tabindex="-1">Attempt</button><button type="button" id="task-tab-package" data-task-tab="package" role="tab" aria-selected="false" aria-controls="task-panel-package" tabindex="-1">Package</button><button type="button" id="task-tab-receipt" data-task-tab="receipt" role="tab" aria-selected="false" aria-controls="task-panel-receipt" tabindex="-1">Receipt</button><button type="button" id="task-tab-frozen" data-task-tab="frozen" role="tab" aria-selected="false" aria-controls="task-panel-frozen" tabindex="-1">冻结资源</button></nav>
              <div class="c-task-inspector-body">
-               <section class="c-task-panel is-active" data-task-panel="overview"><div class="c-state-line"><span><i></i><b data-task-inspector-state>{state}</b></span><span data-task-inspector-state-note>{state_note}</span></div><dl><div><dt>阶段</dt><dd data-task-inspector-capabilities>{capabilities}</dd></div><div><dt>创建时间</dt><dd data-task-inspector-created>{created}</dd></div><div><dt>历史</dt><dd data-task-inspector-failure>{failure}</dd></div></dl></section>
-               <section class="c-task-panel" data-task-panel="attempt"><h3>Attempt</h3><p data-task-inspector-attempt>{attempt}</p></section>
-               <section class="c-task-panel" data-task-panel="package"><h3>Package</h3><p data-task-inspector-package>{package}</p></section>
-               <section class="c-task-panel" data-task-panel="receipt"><h3>Receipt</h3><p data-task-inspector-receipt>{receipt}</p><p data-task-inspector-effect>{effect}</p></section>
-               <section class="c-task-panel" data-task-panel="frozen"><!-- frozen-work:start --><p class="c-control-none">工单冻结资源正在读取。</p><!-- frozen-work:end --></section>
+               <section class="c-task-panel is-active" id="task-panel-overview" data-task-panel="overview" role="tabpanel" aria-labelledby="task-tab-overview"><div class="c-state-line"><span><i></i><b data-task-inspector-state>{state}</b></span><span data-task-inspector-state-note>{state_note}</span></div><dl><div><dt>阶段</dt><dd data-task-inspector-capabilities>{capabilities}</dd></div><div><dt>创建时间</dt><dd data-task-inspector-created>{created}</dd></div><div><dt>历史</dt><dd data-task-inspector-failure>{failure}</dd></div></dl></section>
+               <section class="c-task-panel" id="task-panel-attempt" data-task-panel="attempt" role="tabpanel" aria-labelledby="task-tab-attempt" hidden><h3>Attempt</h3><p data-task-inspector-attempt>{attempt}</p></section>
+               <section class="c-task-panel" id="task-panel-package" data-task-panel="package" role="tabpanel" aria-labelledby="task-tab-package" hidden><h3>Package</h3><p data-task-inspector-package>{package}</p></section>
+               <section class="c-task-panel" id="task-panel-receipt" data-task-panel="receipt" role="tabpanel" aria-labelledby="task-tab-receipt" hidden><h3>Receipt</h3><p data-task-inspector-receipt>{receipt}</p><p data-task-inspector-effect>{effect}</p></section>
+               <section class="c-task-panel" id="task-panel-frozen" data-task-panel="frozen" role="tabpanel" aria-labelledby="task-tab-frozen" hidden><div data-task-inspector-frozen><!-- frozen-work:start --><p class="c-control-none">该任务的冻结 Work 投影正在读取。</p><!-- frozen-work:end --></div></section>
              </div>
            </aside>"#,
         task_ref = escape(task_ref),
@@ -267,32 +270,12 @@ fn task_inspector(task: &CollectionTaskExecution) -> String {
 }
 
 fn task_readout(timeline: &CollectionTaskTimeline) -> String {
-    format!(
-        r#"<div class="c-readout-strip" data-collection-readout><div class="c-readout"><b>{total}</b><span>最近任务</span></div><div class="c-readout"><b>{accepted}</b><span>已接纳</span></div><div class="c-readout"><b>{active}</b><span>待完成</span></div><div class="c-readout warn"><b>{expired}</b><span>租约失效</span></div><div class="c-readout"><b><!-- frozen-work-count -->UNKNOWN</b><span>冻结工单</span></div></div>"#,
-        total = timeline.tasks.len(),
-        accepted = timeline.accepted_count,
-        active = timeline.active_count,
-        expired = timeline.expired_lease_count,
-    )
-}
-
-fn replace_slot(base: &str, start: &str, end: &str, content: &str) -> String {
-    let Some(open) = base.find(start) else {
-        return base.to_owned();
-    };
-    let content_start = open + start.len();
-    let Some(close_offset) = base[content_start..].find(end) else {
-        return base.to_owned();
-    };
-    let close = content_start + close_offset;
-    format!(
-        "{}{}{}{}{}",
-        &base[..open],
-        start,
-        content,
-        end,
-        &base[close + end.len()..]
-    )
+    let active = timeline.active_count.to_string();
+    let expired = timeline.expired_lease_count.to_string();
+    context_readout(&[
+        (&active, "待完成", "最近 100 条任务投影的待完成数"),
+        (&expired, "租约失效", "最近 100 条任务投影的失效租约数"),
+    ])
 }
 
 fn task_state(task: &CollectionTaskExecution) -> (&'static str, &'static str, &'static str) {
@@ -466,14 +449,22 @@ mod tests {
         for tab in ["overview", "attempt", "package", "receipt", "frozen"] {
             assert!(html.contains(&format!("data-task-tab=\"{tab}\"")));
             assert!(html.contains(&format!("data-task-panel=\"{tab}\"")));
+            assert!(html.contains(&format!("aria-controls=\"task-panel-{tab}\"")));
+            assert!(html.contains(&format!("aria-labelledby=\"task-tab-{tab}\"")));
         }
+        assert!(html.contains("role=\"tablist\""));
+        assert!(html.contains("role=\"tab\""));
+        assert!(html.contains("role=\"tabpanel\""));
+        assert!(html.contains(&format!("data-task-id=\"{}\"", task().task_id)));
         assert!(html.contains("<!-- frozen-work:start -->"));
-        assert!(html.contains("<!-- frozen-work-count -->UNKNOWN"));
         assert!(!html.contains("old readout"));
-        assert_eq!(
-            html.matches("<div class=\"c-readout").count()
-                - html.matches("c-readout-strip").count(),
-            5
-        );
+        assert_eq!(html.matches("class=\"v7-kpi\"").count(), 2);
+        assert!(!html.contains("c-readout-strip"));
+        let script = include_str!("collection_workspace.js");
+        for key in ["ArrowRight", "ArrowLeft", "Home", "End"] {
+            assert!(script.contains(key));
+        }
+        assert!(script.contains("candidate.setAttribute(\"aria-selected\""));
+        assert!(script.contains("panel.hidden = !selected"));
     }
 }

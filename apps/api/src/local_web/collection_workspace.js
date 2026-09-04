@@ -152,6 +152,7 @@
 
   var taskRows = Array.prototype.slice.call(document.querySelectorAll("[data-task-row]"));
   var taskInspector = document.querySelector("[data-task-inspector]");
+  var taskFrozenTemplates = Array.prototype.slice.call(document.querySelectorAll("[data-task-frozen-template]"));
   if (taskRows.length && taskInspector) {
     function setTaskText(selector, value) {
       var element = taskInspector.querySelector(selector);
@@ -177,6 +178,20 @@
       setTaskText("[data-task-inspector-package]", row.dataset.taskPackage);
       setTaskText("[data-task-inspector-receipt]", row.dataset.taskReceipt);
       setTaskText("[data-task-inspector-effect]", row.dataset.taskEffect);
+      var frozen = taskInspector.querySelector("[data-task-inspector-frozen]");
+      if (frozen) {
+        var template = taskFrozenTemplates.find(function (candidate) {
+          return candidate.dataset.taskFrozenTemplate === row.dataset.taskId;
+        });
+        if (template) {
+          frozen.replaceChildren(template.content.cloneNode(true));
+        } else {
+          var empty = document.createElement("p");
+          empty.className = "c-control-none";
+          empty.textContent = "该任务没有关联的冻结 Work 投影。";
+          frozen.replaceChildren(empty);
+        }
+      }
     }
     taskRows.forEach(function (row) {
       row.addEventListener("click", function () { selectTask(row); });
@@ -186,14 +201,42 @@
 
   var taskTabs = Array.prototype.slice.call(document.querySelectorAll("[data-task-tab]"));
   var taskPanels = Array.prototype.slice.call(document.querySelectorAll("[data-task-panel]"));
+  function selectTaskTab(tab, moveFocus) {
+    taskTabs.forEach(function (candidate) {
+      var selected = candidate === tab;
+      candidate.classList.toggle("is-active", selected);
+      candidate.setAttribute("aria-selected", selected ? "true" : "false");
+      candidate.tabIndex = selected ? 0 : -1;
+    });
+    taskPanels.forEach(function (panel) {
+      var selected = panel.dataset.taskPanel === tab.dataset.taskTab;
+      panel.classList.toggle("is-active", selected);
+      panel.hidden = !selected;
+    });
+    if (moveFocus) {
+      tab.focus();
+    }
+  }
   taskTabs.forEach(function (tab) {
     tab.addEventListener("click", function () {
-      taskTabs.forEach(function (candidate) {
-        candidate.classList.toggle("is-active", candidate === tab);
-      });
-      taskPanels.forEach(function (panel) {
-        panel.classList.toggle("is-active", panel.dataset.taskPanel === tab.dataset.taskTab);
-      });
+      selectTaskTab(tab, false);
+    });
+    tab.addEventListener("keydown", function (event) {
+      var current = taskTabs.indexOf(tab);
+      var next = null;
+      if (event.key === "ArrowRight") {
+        next = (current + 1) % taskTabs.length;
+      } else if (event.key === "ArrowLeft") {
+        next = (current - 1 + taskTabs.length) % taskTabs.length;
+      } else if (event.key === "Home") {
+        next = 0;
+      } else if (event.key === "End") {
+        next = taskTabs.length - 1;
+      }
+      if (next !== null) {
+        event.preventDefault();
+        selectTaskTab(taskTabs[next], true);
+      }
     });
   });
 

@@ -55,6 +55,19 @@ DESIGN-002 原先的“未来感 + ASCII + 新粗野主义 + 情报系统感”�
 | 已记录的冲突 | ① 品牌红 `#e8003f`：V4 要求保留并升级 token 真源，而同日稍晚合并的 DESIGN-003 已使其退役、签名色收敛为 `--lgi-signal`。② 四轴语义色与 LIDS 现值均不同。③ 深色终端面与 LIDS「不使用黑底荧光绿终端」冲突。④ 上下文行 32px 划线网格已被 DESIGN-003 的双层点阵取代。以上四项的当前处置见 `DESIGN-005`。 |
 | 不构成什么 | 它不能单独授权真实数据接入、观察目标的创建、任何平台访问、调度器接通、插件改动、数据库/migration、实时传输通道、部署或用户验收。 |
 
+## `REF-V4-IA-CN-001` · Collection 五页面中文桌面工作区参考
+
+| 字段 | 内容 |
+|---|---|
+| 参考 ID 与名称 | `REF-V4-IA-CN-001` · Linggan Collection Field Workspace V4 IA CN |
+| 来源与核对时间 | Mog 指定的本地文件 `/Users/moglenny/Downloads/linggan-collection-field-workspace-v4-ia-cn.html`；2026-09-04 核对，285 行。SHA-256：`723a085173eb9fd51b2fa67f8a6f457bd7c30e3a7e5290da8139868bc2463645`。 |
+| 参考性质 | 用户指定的 Collection 五个子面中文桌面 UI 与交互对标；是 synthetic prototype，不是运行证据或产品事实。 |
+| 可借鉴范围 | 仅用于 `/collection/attention|targets|operations|tasks|runtime` 的桌面密度、ledger + Inspector 关系、页内工具条、目标宽抽屉、生产流与单一深色控制仪表面。 |
+| 明确不继承 | 可见大标题、第二条五格读数、模拟数字/人名/事件、Evidence 内容、监控价值/机会评分、假健康度、字符图标、渐变、非 token 几何、假动作与 hash-only 路由。参考与 LIDS 冲突时，以 LIDS 的隐藏 `h1` 与共享 Context Bar 为准。 |
+| 关联事项 | Issue #149 扩展 `COLLECTION-FIVE-PAGE-V4-UI-001`；Draft PR #154。 |
+| 时效与风险 | 本地文件可变且不在 Git；SHA 只证明本次核对的精确版本。其中演示数据和状态不得被带入真实页面。 |
+| 不构成什么 | 不授权新业务字段、数据库/migration、共享壳层/token 换代、Evidence/Corpus 语义、插件/真实平台、外部部署、窄屏支持或 Mog 验收。 |
+
 ## `REF-DS-V7-001` · Linggan Intelligence Design System v7.0
 
 > 本条为**已吸收标准**的来源登记，不是普通参考条目。它的约束力来自 [lids/README.md](lids/README.md)，本表只保存来源校验与不继承边界。

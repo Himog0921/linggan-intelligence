@@ -276,6 +276,36 @@ fn display_name(target: &ObservationTarget) -> &str {
         .unwrap_or(&target.identity_key)
 }
 
+/// One kind-aware lifecycle vocabulary is shared by the target ledger and drawer. Keyword
+/// targets never run creator baseline archiving, so a monitoring keyword must not inherit the
+/// creator-only "baseline ready" claim merely because the state spelling is shared.
+pub(crate) fn lifecycle_primary_copy(
+    target_kind: &str,
+    lifecycle_state: &str,
+) -> (&'static str, &'static str) {
+    match (target_kind, lifecycle_state) {
+        ("creator", "pending_decision") => ("neutral", "尚未建档"),
+        ("creator", "archiving") => ("warn", "▲ 建档中"),
+        ("creator", "archived" | "monitoring" | "paused") => ("ok", "● 基线就绪"),
+        ("creator", "dismissed") => ("neutral", "已停止观察"),
+        ("keyword", "pending_decision") => ("neutral", "等待决定"),
+        ("keyword", "monitoring") => ("ok", "规则已生效"),
+        ("keyword", "paused") => ("warn", "规则已暂停"),
+        ("keyword", "dismissed") => ("neutral", "已停止观察"),
+        ("keyword", "archiving" | "archived") => ("warn", "状态与目标类型冲突"),
+        _ => ("neutral", "状态未知"),
+    }
+}
+
+pub(crate) fn lifecycle_patrol_copy(target: &ObservationTarget) -> (&'static str, &'static str) {
+    match target.lifecycle_state.as_str() {
+        "paused" => ("warn", "巡检已暂停"),
+        "dismissed" => ("neutral", "不再调度"),
+        _ if target.monitoring_enabled => ("info", "巡检中"),
+        _ => ("neutral", "未开启巡检"),
+    }
+}
+
 /// 打开平台原页。只有创作者给得出链接——关键词没有一个「主页」。
 fn source_link(target: &ObservationTarget, is_creator: bool) -> String {
     if !is_creator {
@@ -288,19 +318,8 @@ fn source_link(target: &ObservationTarget, is_creator: bool) -> String {
 }
 
 fn statusline(target: &ObservationTarget) -> String {
-    let archive = match target.lifecycle_state.as_str() {
-        "pending_decision" => "尚未建档",
-        "archiving" => "建档中",
-        "archived" | "monitoring" => "基线就绪",
-        "paused" => "巡检已暂停",
-        "dismissed" => "已停止观察",
-        _ => "状态未知",
-    };
-    let patrol = if target.monitoring_enabled {
-        "巡检中"
-    } else {
-        "未开启巡检"
-    };
+    let (_, archive) = lifecycle_primary_copy(&target.target_kind, &target.lifecycle_state);
+    let (_, patrol) = lifecycle_patrol_copy(target);
     format!(
         "{archive} · {patrol} · {group}",
         group = escape(target.group_name.as_deref().unwrap_or("未分组")),

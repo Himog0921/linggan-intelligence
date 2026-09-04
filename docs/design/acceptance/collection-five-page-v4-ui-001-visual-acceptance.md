@@ -28,17 +28,18 @@
 
 | 页面 | 可见结构 | 数据与状态诚实性 | 浏览器结果 |
 |---|---|---|---|
-| 待处理 | 标题、5 readouts、恢复 ledger、右侧 Inspector | 只列可恢复 durable reason；owner/action 与选中行一致 | 行选择实测更新 Inspector；无横向溢出 |
-| 观察目标 | 标题、5 readouts、筛选/新增、密集目录、宽幅抽屉 | UNKNOWN/0 分开；合法 lifecycle 不降级；不呈现语料或价值模块 | 列表和 lifecycle drawer 可见；无横向溢出 |
-| 生产流 | 标题、5 readouts、stage ledger、dark decision instrument | stage 不是漏斗；只显示 scheduler decision / Work / Lease 控制事实 | 真实 projection 成功替换 body slot；无横向溢出 |
-| 采集任务 | 标题、5 readouts、Task ledger、右侧多 tab Inspector | Task/Attempt/Package/Receipt/frozen Work 分责，不把 queue 当完成 | 行选中首态成立；“冻结资源”tab 实测切换；无横向溢出 |
-| 执行工位 | 标题、5 readouts、capacity 判定、资源关系、登记/认领区 | 使用服务端同一 capacity evaluator；UNKNOWN 不冒充可用 | `#runtime-register` 与三条 lane 判定可见；无横向溢出 |
+| 待处理 | 2 个 Context KPI、恢复 ledger、右侧 Inspector | 只列可恢复 durable reason；owner/action 与选中行一致 | 行选择实测更新 Inspector；无横向溢出 |
+| 观察目标 | 2 个 Context KPI、筛选/新增、密集目录、宽幅抽屉 | UNKNOWN/0 分开；creator/keyword lifecycle 分开；不呈现语料或价值模块 | 列表和 lifecycle drawer 可见；无横向溢出 |
+| 生产流 | 2 个 Context KPI、stage ledger、dark decision instrument | stage 不是漏斗；恢复数不包含普通等待态；trace/review 不被 now 覆盖 | 真实 projection 成功替换 now body slot；无横向溢出 |
+| 采集任务 | 2 个 Context KPI、Task ledger、右侧多 tab Inspector | Task/Attempt/Package/Receipt/frozen Work 分责；Frozen Work 按当前 `task_id` 隔离 | 行选中、tab click/Arrow/Home/End 与 ARIA 合同成立 |
+| 执行工位 | 2 个 Context KPI、capacity 判定、资源关系、登记/认领区 | 使用服务端同一 capacity evaluator；不把存在插件版本冒充在线 | `#runtime-register` 与三条 lane 判定可见；无横向溢出 |
 
-五页逐页测得 `document.documentElement.scrollWidth = clientWidth = 1440`，每页恰有 5 个 `.c-readout`，页面关键结构选择器均存在；浏览器 console warning/error 为 0。
+首轮五页逐页测得 `document.documentElement.scrollWidth = clientWidth = 1440`，浏览器 console warning/error 为 0。exact-head 独立复审随后拒绝了首版的可见标题/五格读数；当前修正合同要求每页恰有 2 个 `.v7-kpi`、无 `.c-readout-strip`、`h1.v7-sr-only` 唯一。修正版的最终 1440 证据在 exact head 稳定后补记。
 
 ## 4. 关键取舍
 
 - 不复制参考稿的第二套全局 header/context/rail；共享 shell 是 Intelligence 的唯一壳层 owner。
+- 不复制参考稿的可见大标题与第二条五格读数；两者与 LIDS 页头收回规则冲突，Intelligence 标准优先。
 - 不引入参考稿模拟数字、Evidence tab/卡片、代表证据、监控价值、机会评分或假健康分。
 - 目标抽屉默认仍是 creator lifecycle。当前 synthetic fixture 没有合格作品，因此生命周期诚实显示“观察不足，暂时无法成图”；这证明空态，不证明有数据曲线的真实密度。
 - Production flow 的 dark instrument 只显示持久 scheduler decision，不使用 timer 伪造实时事件。
@@ -48,10 +49,11 @@
 
 - `cargo fmt --all -- --check`：通过。
 - `cargo check --workspace --all-targets --locked`：通过；仅保留既有 dead-code warning。
-- `cargo test --workspace --all-targets --locked`：通过；API 102 passed / 18 ignored，其他 workspace targets 全部通过。ignored 项需要独立 PostgreSQL harness，本次以完整迁移后的隔离 SSR/browser proof 覆盖本 UI 组合面，不把 ignored 写成已执行。
+- `cargo test --workspace --all-targets --locked`：修正版通过；API `106 passed / 18 ignored`，其余 workspace 目标全绿。
 - `node --check apps/api/src/local_web/collection_workspace.js`：通过。
 - `scripts/verify-ui-design-handbook.sh`：通过。
-- 独立 PostgreSQL + 浏览器 proof：33 migrations；五页 1440×900；Attention 行、Tasks tab、Targets lifecycle drawer；0 console warning/error。
+- 独立 PostgreSQL：完整 Work Resource/Material/Corpus 68 项，以及 Collection Control `8 + 11` 项通过；数据库、container、volume 已清理。
+- 隔离浏览器：首版 33 migrations + synthetic fixture 的五页 1440×900、Attention 行、Tasks tab、Targets lifecycle drawer、0 console warning/error 已成立；修正版最终 1440 回执待稳定 exact head 后补记。
 
 ## 6. 分层结论
 

@@ -1,6 +1,6 @@
 //! Collection Workspace — the continuous observation execution layer.
 //!
-//! Five sub-surfaces. The V4 Gold Master froze the set; DESIGN-006 reordered and renamed
+//! Five sub-surfaces. The V4 field-workspace reference froze the set; DESIGN-006 reordered and renamed
 //! them so the row reads by urgency rather than by pipeline stage:
 //! 待处理 / 观察目标 / 生产流 / 采集任务 / 执行工位.
 //! The slugs behind them are unchanged and remain the URL contract.
@@ -13,6 +13,9 @@
 use super::shell::{PrimarySurface, global_header};
 use super::target_drawer::TargetListContext;
 use linggan_evidence::TargetCounts;
+
+pub(super) const READOUT_SLOT_START: &str = "<!-- collection-readout:start -->";
+pub(super) const READOUT_SLOT_END: &str = "<!-- collection-readout:end -->";
 
 pub mod collection_control_rule_view {
     include!("collection_control_rule_view.rs");
@@ -188,105 +191,41 @@ fn rail(active: Section, state: Option<&SurfaceState>) -> String {
 /// get a title block of their own: they join the system state in the context row. Each
 /// reading stays a separate `.v7-kpi` and they are never summed, because two unknowns do
 /// not add up to a known total.
-fn readout(entries: &[(&str, &str)]) -> String {
+pub(super) fn context_readout(entries: &[(&str, &str, &str)]) -> String {
     let mut cells = String::new();
-    for (value, label) in entries {
+    for (value, label, scope) in entries {
+        // `global_header` localizes visible closed-set codes after this markup is built.
+        // Attributes cannot contain those codes because blind string localization would inject
+        // elements into an attribute value, so assistive text carries the Chinese meaning now.
+        let aria_value = if *value == "UNKNOWN" { "未知" } else { value };
         cells.push_str(&format!(
-            "<span class=\"v7-kpi\"><em>{label}</em><b>{value}</b></span>"
+            "<span class=\"v7-kpi\" title=\"{scope}\" aria-label=\"{label} {aria_value}；{scope}\"><em>{label}</em><b aria-hidden=\"true\">{value}</b></span>",
+            value = escape(value),
+            label = escape(label),
+            scope = escape(scope),
+            aria_value = escape(aria_value),
         ));
     }
     cells
 }
 
-/// The V4 field workspace keeps page identity and bounded readings inside the work surface.
-/// Values still come from the same server-side projections; this is not a second summary model.
-fn page_readout(
-    section: Section,
-    counts: Option<&TargetCounts>,
-    state: Option<&SurfaceState>,
-) -> String {
-    let entries: Vec<(String, &'static str)> = match section {
-        Section::Targets => match counts {
-            Some(counts) => vec![
-                (counts.total.to_string(), "全部目标"),
-                (counts.creator.to_string(), "创作者"),
-                (counts.keyword.to_string(), "关键词"),
-                (counts.archiving.to_string(), "建档中"),
-                (counts.monitoring.to_string(), "巡检已开"),
-            ],
-            None => vec![
-                ("UNKNOWN".to_owned(), "全部目标"),
-                ("UNKNOWN".to_owned(), "创作者"),
-                ("UNKNOWN".to_owned(), "关键词"),
-                ("UNKNOWN".to_owned(), "建档中"),
-                ("UNKNOWN".to_owned(), "巡检已开"),
-            ],
-        },
-        Section::Runtime => vec![
-            (
-                display_count(state.and_then(|value| value.vacant_stations)),
-                "空缺工位",
-            ),
-            (
-                display_count(state.and_then(|value| value.unclaimed_installations)),
-                "未归位安装",
-            ),
-            ("UNKNOWN".to_owned(), "当前容量"),
-            ("UNKNOWN".to_owned(), "最近确认"),
-            ("UNKNOWN".to_owned(), "接活窗口"),
-        ],
-        Section::Attention => vec![
-            ("UNKNOWN".to_owned(), "需要处理"),
-            ("UNKNOWN".to_owned(), "你负责"),
-            ("UNKNOWN".to_owned(), "工位负责"),
-            ("UNKNOWN".to_owned(), "调度负责"),
-            ("UNKNOWN".to_owned(), "工程负责"),
-        ],
-        Section::Operations => vec![
-            ("UNKNOWN".to_owned(), "最近轮次"),
-            ("UNKNOWN".to_owned(), "考虑目标"),
-            ("UNKNOWN".to_owned(), "已派出"),
-            ("UNKNOWN".to_owned(), "有阻断"),
-            ("UNKNOWN".to_owned(), "持久决定"),
-        ],
-        Section::Tasks => vec![
-            ("UNKNOWN".to_owned(), "最近任务"),
-            ("UNKNOWN".to_owned(), "已接纳"),
-            ("UNKNOWN".to_owned(), "待完成"),
-            ("UNKNOWN".to_owned(), "租约失效"),
-            ("UNKNOWN".to_owned(), "冻结工单"),
-        ],
+pub(super) fn replace_bounded_slot(base: &str, start: &str, end: &str, content: &str) -> String {
+    let Some(open) = base.find(start) else {
+        return base.to_owned();
     };
-    entries
-        .into_iter()
-        .map(|(value, label)| {
-            format!(
-                r#"<div class="c-readout"><b>{value}</b><span>{label}</span></div>"#,
-                value = escape(&value),
-            )
-        })
-        .collect()
-}
-
-fn page_actions(section: Section, mode: OperationsMode) -> String {
-    match section {
-        Section::Attention => {
-            r#"<a class="c-page-action" href="/collection/attention">刷新</a>"#.to_owned()
-        }
-        Section::Targets => {
-            r##"<a class="c-page-action c-page-action-primary" href="#collection-target-create">新建观察目标</a>"##.to_owned()
-        }
-        Section::Operations => format!(
-            r#"<a class="c-page-action" href="/collection/operations?mode={}">刷新</a>"#,
-            mode.slug(),
-        ),
-        Section::Tasks => {
-            r#"<a class="c-page-action" href="/collection/tasks">刷新</a>"#.to_owned()
-        }
-        Section::Runtime => {
-            r##"<a class="c-page-action c-page-action-primary" href="#runtime-register">登记工位</a>"##.to_owned()
-        }
-    }
+    let content_start = open + start.len();
+    let Some(close_offset) = base[content_start..].find(end) else {
+        return base.to_owned();
+    };
+    let close = content_start + close_offset;
+    format!(
+        "{}{}{}{}{}",
+        &base[..open],
+        start,
+        content,
+        end,
+        &base[close + end.len()..]
+    )
 }
 
 /// DESIGN-006 · Collection has five empty surfaces but only two actionable kinds of empty, and only
@@ -745,18 +684,39 @@ fn head_readout(section: Section, state: Option<&SurfaceState>) -> String {
         (Section::Runtime, Some(state)) => {
             let vacant = display_count(state.vacant_stations);
             let unclaimed = display_count(state.unclaimed_installations);
-            readout(&[(&vacant, "空缺工位"), (&unclaimed, "未归位安装")])
+            context_readout(&[
+                (&vacant, "空缺工位", "当前工位投影；空缺不等于离线"),
+                (&unclaimed, "未归位安装", "当前未认领安装投影"),
+            ])
         }
-        (Section::Attention, _) => readout(&[("UNKNOWN", "待处理"), ("UNKNOWN", "数据缺失")]),
+        (Section::Attention, _) => context_readout(&[
+            ("UNKNOWN", "待处理", "当前恢复事项投影尚未读取"),
+            ("UNKNOWN", "数据缺失", "当前缺失投影尚未读取"),
+        ]),
         (Section::Targets, Some(state)) => {
             let monitoring = display_count(state.monitoring_targets);
             let archiving = display_count(state.archiving_targets);
-            readout(&[(&monitoring, "巡检已开"), (&archiving, "建档中")])
+            context_readout(&[
+                (&monitoring, "巡检已开", "当前观察目标投影"),
+                (&archiving, "建档中", "当前观察目标投影"),
+            ])
         }
-        (Section::Targets, None) => readout(&[("UNKNOWN", "巡检已开"), ("UNKNOWN", "建档中")]),
-        (Section::Operations, _) => readout(&[("UNKNOWN", "异常阶段"), ("UNKNOWN", "最近一轮")]),
-        (Section::Tasks, _) => readout(&[("UNKNOWN", "失败"), ("UNKNOWN", "部分完成")]),
-        (Section::Runtime, None) => readout(&[("UNKNOWN", "空缺工位"), ("UNKNOWN", "未归位安装")]),
+        (Section::Targets, None) => context_readout(&[
+            ("UNKNOWN", "巡检已开", "当前观察目标投影尚未读取"),
+            ("UNKNOWN", "建档中", "当前观察目标投影尚未读取"),
+        ]),
+        (Section::Operations, _) => context_readout(&[
+            ("UNKNOWN", "异常阶段", "当前持久调度投影尚未读取"),
+            ("UNKNOWN", "最近一轮", "当前持久调度投影尚未读取"),
+        ]),
+        (Section::Tasks, _) => context_readout(&[
+            ("UNKNOWN", "失败", "最近任务投影尚未读取"),
+            ("UNKNOWN", "部分完成", "最近任务投影尚未读取"),
+        ]),
+        (Section::Runtime, None) => context_readout(&[
+            ("UNKNOWN", "空缺工位", "当前工位投影尚未读取"),
+            ("UNKNOWN", "未归位安装", "当前安装投影尚未读取"),
+        ]),
     }
 }
 
@@ -922,7 +882,9 @@ pub fn render(
     // DESIGN-003 header reclaim: this surface's own counts ride in the context row next to
     // the system state, so the page can start at its content instead of restating its name.
     let meta_row = format!(
-        "{counts}<i class=\"v7-vr\" aria-hidden=\"true\"></i>{system}",
+        "{slot_start}{counts}{slot_end}<i class=\"v7-vr\" aria-hidden=\"true\"></i>{system}",
+        slot_start = READOUT_SLOT_START,
+        slot_end = READOUT_SLOT_END,
         counts = head_readout(section, state),
         system = system_words(state),
     );
@@ -963,11 +925,7 @@ pub fn render(
       <div class="v7-shell">
         {rail}
         <main class="c-page" aria-labelledby="page-title">
-          <div class="c-page-titlebar">
-            <h1 id="page-title">{title}</h1>
-            <div class="c-page-actions">{page_actions}</div>
-          </div>
-          <!-- collection-readout:start --><div class="c-readout-strip" data-collection-readout>{page_readout}</div><!-- collection-readout:end -->
+          <h1 class="v7-sr-only" id="page-title">{title}</h1>
           {second_bar}
           <div class="c-body"><!-- collection-body:start -->{body}<!-- collection-body:end --></div>
         </main>
@@ -979,8 +937,6 @@ pub fn render(
 "#,
         title = entry.title,
         rail = rail(section, state),
-        page_actions = page_actions(section, mode),
-        page_readout = page_readout(section, counts, state),
         second_bar = second_bar(section, mode, filter, counts, state),
         body = body(section, mode, state),
     )

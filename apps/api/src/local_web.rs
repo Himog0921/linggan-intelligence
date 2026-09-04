@@ -2499,7 +2499,7 @@ async fn collection_operations(
     );
     match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
         Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
-            Html(collection::collection_control_surface_view::render_operations(&base, &projection)),
+            Html(collection::collection_control_surface_view::render_operations(&base, &projection, mode)),
         Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::SchemaUnavailable)
         | Err(_) => Html(base),
     }

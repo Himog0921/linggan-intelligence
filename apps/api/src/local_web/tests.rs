@@ -1179,10 +1179,10 @@ fn collection_serves_all_five_sub_surfaces_from_the_shared_shell() {
 }
 
 #[test]
-fn collection_v4_restores_a_visible_work_surface_title_without_forking_the_global_shell() {
-    // COLLECTION-FIVE-PAGE-V4-UI-001: the user's V4 field-workspace reference restores a
-    // visible title inside each Collection work surface. Corpus keeps DESIGN-003's reclaimed
-    // title; both still share the one global shell and one semantic h1.
+fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
+    // COLLECTION-FIVE-PAGE-V4-UI-001: the V4 reference supplies the desktop work-area
+    // hierarchy, but LIDS owns the shell. Page identity remains a single reader-only h1 and
+    // the only page readings stay in the shared context row.
     let corpus = evidence_library_html(None);
     assert!(corpus.contains("<h1 class=\"v7-sr-only\" id=\"page-title\">"));
 
@@ -1205,16 +1205,17 @@ fn collection_v4_restores_a_visible_work_surface_title_without_forking_the_globa
 
     for html in &pages {
         assert!(
-            html.contains("<div class=\"c-page-titlebar\">")
-                && html.contains("<h1 id=\"page-title\">"),
-            "each Collection work surface must render the V4 visible h1"
+            html.contains("<h1 class=\"v7-sr-only\" id=\"page-title\">"),
+            "each Collection surface must keep one reader-only h1"
         );
         assert_eq!(html.matches("id=\"page-title\"").count(), 1);
         assert_eq!(
-            html.matches("class=\"c-readout\"").count(),
-            5,
-            "each Collection page must expose exactly five bounded field readouts"
+            html.matches("class=\"v7-kpi\"").count(),
+            2,
+            "each Collection page must expose exactly two scoped context readings"
         );
+        assert!(!html.contains("c-page-titlebar"));
+        assert!(!html.contains("c-readout-strip"));
         for restated in ["c-eyebrow", "c-head", "v7-title", "v7-eyebrow"] {
             assert!(
                 !html.contains(restated),
@@ -1245,15 +1246,14 @@ fn collection_v4_restores_a_visible_work_surface_title_without_forking_the_globa
         .split_once("v7-context-meta")
         .expect("collection pages render the context row")
         .1;
-    for kpi in [
-        "<span class=\"v7-kpi\"><em>巡检已开</em><b><span class=\"v7-status-main\">未知</span><small class=\"v7-tech-key\">UNKNOWN</small></b></span>",
-        "<span class=\"v7-kpi\"><em>建档中</em><b><span class=\"v7-status-main\">未知</span><small class=\"v7-tech-key\">UNKNOWN</small></b></span>",
-    ] {
+    for label in ["巡检已开", "建档中"] {
         assert!(
-            context_row.contains(kpi),
-            "count missing from context row: {kpi}"
+            context_row.contains(&format!("<em>{label}</em>")),
+            "count missing from context row: {label}"
         );
     }
+    assert!(context_row.contains("title=\"当前观察目标投影尚未读取\""));
+    assert!(!context_row.contains("aria-label=\"<span"));
 }
 
 #[test]
@@ -1283,8 +1283,10 @@ fn connected_collection_surfaces_render_real_targets_and_scheduler_state() {
 
     assert!(targets.contains("调度运行中"));
     assert!(targets.contains("SCHEDULER RUNNING"));
-    assert!(targets.contains("<em>巡检已开</em><b>1</b>"));
-    assert!(targets.contains("<em>建档中</em><b>1</b>"));
+    assert!(targets.contains("aria-label=\"巡检已开 1；当前观察目标投影\""));
+    assert!(targets.contains("<em>巡检已开</em><b aria-hidden=\"true\">1</b>"));
+    assert!(targets.contains("aria-label=\"建档中 1；当前观察目标投影\""));
+    assert!(targets.contains("<em>建档中</em><b aria-hidden=\"true\">1</b>"));
     assert!(targets.contains("<span class=\"v7-nav-state\">观察中</span>"));
     assert!(!targets.contains("调度器未接通"));
     assert!(!targets.contains("<span class=\"v7-status-main\">暂无观察目标</span>"));
@@ -1370,7 +1372,11 @@ fn context_row_counts_read_in_chinese_so_one_row_holds_one_english_scale() {
         collection::Section::Runtime,
     ] {
         let html = collection::render(section, collection::OperationsMode::Now, None, None, None);
-        for fragment in html.split("<span class=\"v7-kpi\"><em>").skip(1) {
+        for fragment in html.split("class=\"v7-kpi\"").skip(1) {
+            let fragment = fragment
+                .split_once("<em>")
+                .expect("a kpi contains its label")
+                .1;
             labels.push(
                 fragment
                     .split_once("</em>")
