@@ -216,6 +216,39 @@ async fn authorization_revoke_or_expiry_after_lease_blocks_dispatch() {
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn station_closed_after_lease_issuance_blocks_dispatch() {
+    let database = proof_database("control_runtime_station_closes_after_lease").await;
+    let (installation, _target_ref, _authorization_ref) = leased_creator(
+        &database,
+        "station-close-after-lease",
+        "station close purpose",
+    )
+    .await;
+
+    set_station_accepting(&database, installation.station_ref, false, "person")
+        .await
+        .expect("person closes station acceptance");
+
+    let decision = decide_dispatch(&database, &installation.install_key, &installation.secret)
+        .await
+        .expect("dispatch returns a closed control decision");
+    assert!(matches!(
+        decision,
+        DispatchDecision::ControlBlocked { ref reason_code }
+            if reason_code == "station_not_accepting"
+    ));
+    let pending: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease_task \
+         WHERE execution_state='pending'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("closed station leaves the task pending");
+    assert_eq!(pending, 2);
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
 async fn creator_baseline_requires_nonempty_positive_and_complete_coverage() {
     let cases = [
         ("empty_records", CoverageCase::EmptyRecords, "archiving"),

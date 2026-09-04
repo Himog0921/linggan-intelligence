@@ -387,7 +387,9 @@ async fn run_due_patrols_inner(database: &Database) -> Result<PatrolTickSummary,
 /// Read the exact, durable observations that are eligible to teach a dynamic cadence. The
 /// package observation timestamp is deliberately not a publication-time substitute. Until two
 /// distinct completed rounds under the same frozen rule/account lens qualify, callers receive
-/// `dynamic_unavailable` and use the rule's explicit fixed fallback.
+/// `dynamic_unavailable` and use the rule's explicit fixed fallback. A round may contain several
+/// records; `dynamic_cadence` collapses those records to one latest exact publication timestamp
+/// before calculating gaps between rounds.
 pub async fn read_dynamic_cadence_for_rule(
     database: &Database,
     target_ref: Uuid,
@@ -409,7 +411,7 @@ pub async fn read_dynamic_cadence_for_rule(
     };
     let rows: Vec<(Uuid, Uuid, i64)> = sqlx::query_as(
         "SELECT work_order.work_order_ref,work_order.account_ref, \
-                (record.value #>> '{payload,publishedAt}')::bigint \
+                MAX((record.value #>> '{payload,publishedAt}')::bigint) \
          FROM collection_work_order work_order \
          JOIN collection_work_order_lease lease USING(work_order_ref) \
          JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
@@ -447,7 +449,8 @@ pub async fn read_dynamic_cadence_for_rule(
            AND record.value #>> '{payload,publishedAtPrecision}' IN ('second','millisecond') \
            AND COALESCE(record.value #>> '{payload,publishedAt}','') ~ '^[0-9]+$' \
            AND (record.value #>> '{payload,publishedAt}')::numeric>0 \
-         ORDER BY package.accepted_at DESC,work_order.work_order_ref,record.ordinality",
+         GROUP BY work_order.work_order_ref,work_order.account_ref \
+         ORDER BY work_order.work_order_ref",
     )
     .bind(target_ref)
     .bind(rule_revision_ref)

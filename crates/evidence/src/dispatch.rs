@@ -570,7 +570,7 @@ async fn revalidate_dispatch_task(
         installation_ref,
         account_ref,
         Some(lease_ref),
-        false,
+        true,
     )
     .await?;
     Ok((!matches!(

@@ -2177,10 +2177,18 @@ pub fn dynamic_cadence(
             reason_code: "dynamic_unavailable",
         };
     }
-    let mut moments: Vec<i64> = qualified
-        .into_iter()
-        .map(|round| round.publication_epoch_seconds)
-        .collect();
+    // A single observation round can return several records. Keep one timestamp per round so
+    // publication gaps inside that response cannot masquerade as the interval between patrols.
+    // The latest exact publication in a round is the stable round timestamp: it represents the
+    // newest item the comparable observation actually saw without substituting package time.
+    let mut round_moments = std::collections::HashMap::<Uuid, i64>::new();
+    for round in qualified {
+        round_moments
+            .entry(round.observation_round_ref)
+            .and_modify(|latest| *latest = (*latest).max(round.publication_epoch_seconds))
+            .or_insert(round.publication_epoch_seconds);
+    }
+    let mut moments: Vec<i64> = round_moments.into_values().collect();
     moments.sort_unstable();
     moments.dedup();
     if moments.len() < 2 {
@@ -2339,6 +2347,45 @@ mod tests {
             ),
             DynamicCadence::Available {
                 interval_seconds: 64_800,
+            }
+        );
+    }
+
+    #[test]
+    fn dynamic_uses_one_latest_publication_timestamp_per_round() {
+        let account_ref = Uuid::new_v4();
+        let rule_revision_ref = Uuid::new_v4();
+        let first_round_ref = Uuid::new_v4();
+        let second_round_ref = Uuid::new_v4();
+        let base = 1_700_000_000;
+        let round = |observation_round_ref, publication_epoch_seconds| ComparableObservationRound {
+            observation_round_ref,
+            rule_revision_ref,
+            publication_epoch_seconds,
+            exact_publication_time: true,
+            accepted_receipt: true,
+            coverage_qualified: true,
+            surface_key: "creator_profile".to_owned(),
+            ranking_key: None,
+            task_contract_version: "v1".to_owned(),
+            account_ref,
+        };
+        assert_eq!(
+            dynamic_cadence(
+                &[
+                    round(first_round_ref, base),
+                    round(first_round_ref, base + 100),
+                    round(second_round_ref, base + 86_400),
+                    round(second_round_ref, base + 86_500),
+                ],
+                "creator_profile",
+                None,
+                "v1",
+                account_ref,
+                rule_revision_ref,
+            ),
+            DynamicCadence::Available {
+                interval_seconds: 43_200,
             }
         );
     }
