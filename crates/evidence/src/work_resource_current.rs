@@ -11,6 +11,7 @@ use uuid::Uuid;
 pub(crate) struct WorkResourceCurrentSource {
     pub material_ref: Option<Uuid>,
     pub package_ref: Option<Uuid>,
+    pub record_ordinal: Option<i32>,
     pub source_lane: Option<String>,
     pub observed_at: Option<String>,
     pub recorded_at: Option<String>,
@@ -22,7 +23,6 @@ pub(crate) struct WorkResourceCurrent {
     pub content_external_id: String,
     pub public_ref: Uuid,
     pub detail_material_ref: Option<Uuid>,
-    pub material_ref: Option<Uuid>,
     pub package_ref: Option<Uuid>,
     pub record_ordinal: Option<i32>,
     pub observed_at: String,
@@ -116,7 +116,6 @@ fn map_current(row: PgRow) -> WorkResourceCurrent {
         content_external_id: row.get("content_external_id"),
         public_ref: row.get("public_ref"),
         detail_material_ref: row.get("detail_material_ref"),
-        material_ref: row.get("material_ref"),
         package_ref: row.get("package_ref"),
         record_ordinal: row.get("record_ordinal"),
         observed_at: row.get("observed_at"),
@@ -160,6 +159,7 @@ fn detail_source(row: &PgRow, prefix: &str) -> WorkResourceCurrentSource {
     WorkResourceCurrentSource {
         material_ref: row.get(format!("{prefix}_source_material_ref").as_str()),
         package_ref: row.get(format!("{prefix}_source_package_ref").as_str()),
+        record_ordinal: row.get(format!("{prefix}_source_record_ordinal").as_str()),
         source_lane: None,
         observed_at: row.get(format!("{prefix}_source_observed_at").as_str()),
         recorded_at: row.get(format!("{prefix}_source_recorded_at").as_str()),
@@ -170,6 +170,7 @@ fn engagement_source(row: &PgRow, prefix: &str) -> WorkResourceCurrentSource {
     WorkResourceCurrentSource {
         material_ref: None,
         package_ref: row.get(format!("{prefix}_source_package_ref").as_str()),
+        record_ordinal: None,
         source_lane: row.get(format!("{prefix}_source_lane").as_str()),
         observed_at: row.get(format!("{prefix}_source_observed_at").as_str()),
         recorded_at: row.get(format!("{prefix}_source_recorded_at").as_str()),

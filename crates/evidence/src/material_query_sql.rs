@@ -18,7 +18,7 @@ latest_detail AS (
 ), latest_detail_title AS (
   SELECT DISTINCT ON (detail.content_public_ref)
     detail.content_public_ref,detail.title,detail.title_state,detail.material_ref,
-    detail.package_ref,detail.observed_at,detail.created_at
+    detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at
   FROM linggan_material_content_detail detail
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND detail.title_state='KNOWN'
@@ -27,7 +27,7 @@ latest_detail AS (
 ), latest_detail_body AS (
   SELECT DISTINCT ON (detail.content_public_ref)
     detail.content_public_ref,detail.body_text,detail.body_state,detail.material_ref,
-    detail.package_ref,detail.observed_at,detail.created_at
+    detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at
   FROM linggan_material_content_detail detail
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND detail.body_state='KNOWN'
@@ -36,7 +36,7 @@ latest_detail AS (
 ), latest_detail_creator AS (
   SELECT DISTINCT ON (detail.content_public_ref)
     detail.content_public_ref,detail.creator_display_name,detail.creator_display_name_state,
-    detail.material_ref,detail.package_ref,detail.observed_at,detail.created_at
+    detail.material_ref,detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at
   FROM linggan_material_content_detail detail
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE package.accepted_at <= $2::timestamptz AND detail.creator_display_name_state='KNOWN'
@@ -53,8 +53,9 @@ latest_detail AS (
            detail.created_at DESC,detail.package_ref DESC,detail.material_ref DESC
 ), latest_detail_published_at AS (
   SELECT DISTINCT ON (detail.content_public_ref)
-    detail.content_public_ref,detail.published_at,detail.material_ref,detail.package_ref,
-    detail.observed_at,detail.created_at,
+    detail.content_public_ref,detail.published_at,detail.published_at_source_text,
+    detail.published_at_source_text_state,detail.material_ref,detail.package_ref,
+    detail.record_ordinal,detail.observed_at,detail.created_at,
     detail.published_at_source_field,detail.published_at_source_kind,
     detail.published_at_precision,detail.published_at_reference_observed_at,
     detail.published_at_parser_version
@@ -66,7 +67,7 @@ latest_detail AS (
 ), latest_detail_published_text AS (
   SELECT DISTINCT ON (detail.content_public_ref)
     detail.content_public_ref,detail.published_at_source_text,detail.material_ref,
-    detail.package_ref,detail.observed_at,detail.created_at,
+    detail.package_ref,detail.record_ordinal,detail.observed_at,detail.created_at,
     detail.published_at_source_text_state,detail.published_at_source_field,
     detail.published_at_source_kind,detail.published_at_precision,
     detail.published_at_reference_observed_at,detail.published_at_parser_version
@@ -136,17 +137,20 @@ latest_detail AS (
     COALESCE(detail_title.title_state,discovery.title_state,'UNKNOWN') AS title_state,
     COALESCE(detail_title.material_ref,discovery.material_ref) AS title_source_material_ref,
     COALESCE(detail_title.package_ref,discovery.package_ref) AS title_source_package_ref,
+    COALESCE(detail_title.record_ordinal,discovery.record_ordinal) AS title_source_record_ordinal,
     COALESCE(detail_title.observed_at,discovery.observed_at) AS title_source_observed_at,
     COALESCE(detail_title.created_at,discovery.created_at)::text AS title_source_recorded_at,
     detail_body.body_text,COALESCE(detail_body.body_state,'UNKNOWN') AS body_state,
     detail_body.material_ref AS body_source_material_ref,
     detail_body.package_ref AS body_source_package_ref,
+    detail_body.record_ordinal AS body_source_record_ordinal,
     detail_body.observed_at AS body_source_observed_at,
     detail_body.created_at::text AS body_source_recorded_at,
     COALESCE(detail_creator.creator_display_name,discovery.creator_display_name) AS creator_display_name,
     COALESCE(detail_creator.creator_display_name_state,discovery.creator_state,'UNKNOWN') AS creator_display_name_state,
     COALESCE(detail_creator.material_ref,discovery.material_ref) AS creator_source_material_ref,
     COALESCE(detail_creator.package_ref,discovery.package_ref) AS creator_source_package_ref,
+    COALESCE(detail_creator.record_ordinal,discovery.record_ordinal) AS creator_source_record_ordinal,
     COALESCE(detail_creator.observed_at,discovery.observed_at) AS creator_source_observed_at,
     COALESCE(detail_creator.created_at,discovery.created_at)::text AS creator_source_recorded_at,
     detail_published_at.published_at::text AS published_at,
@@ -154,17 +158,42 @@ latest_detail AS (
          ELSE (detail_published_at.published_at AT TIME ZONE 'Asia/Shanghai')::date::text END AS published_local_date,
     CASE WHEN detail_published_at.published_at IS NULL THEN NULL
          ELSE (extract(epoch FROM detail_published_at.published_at)*1000)::bigint END AS published_at_epoch_ms,
-    COALESCE(detail_published_text.published_at_source_text,discovery.published_at_source_text) AS published_at_source_text,
-    COALESCE(detail_published_text.published_at_source_text_state,discovery.published_at_source_text_state,'UNKNOWN') AS published_at_source_text_state,
-    COALESCE(detail_published_at.published_at_source_field,detail_published_text.published_at_source_field) AS published_at_source_field,
-    COALESCE(detail_published_at.published_at_source_kind,detail_published_text.published_at_source_kind,'unknown') AS published_at_source_kind,
-    COALESCE(detail_published_at.published_at_precision,detail_published_text.published_at_precision,'unknown') AS published_at_precision,
-    COALESCE(detail_published_at.published_at_reference_observed_at,detail_published_text.published_at_reference_observed_at)::text AS published_at_reference_observed_at,
-    COALESCE(detail_published_at.published_at_parser_version,detail_published_text.published_at_parser_version) AS published_at_parser_version,
-    COALESCE(detail_published_at.material_ref,detail_published_text.material_ref,discovery.material_ref) AS published_source_material_ref,
-    COALESCE(detail_published_at.package_ref,detail_published_text.package_ref,discovery.package_ref) AS published_source_package_ref,
-    COALESCE(detail_published_at.observed_at,detail_published_text.observed_at,discovery.observed_at) AS published_source_observed_at,
-    COALESCE(detail_published_at.created_at,detail_published_text.created_at,discovery.created_at)::text AS published_source_recorded_at,
+    CASE WHEN detail_published_at.published_at IS NOT NULL
+         THEN detail_published_at.published_at_source_text
+         ELSE COALESCE(detail_published_text.published_at_source_text,discovery.published_at_source_text) END AS published_at_source_text,
+    CASE WHEN detail_published_at.published_at IS NOT NULL
+         THEN detail_published_at.published_at_source_text_state
+         ELSE COALESCE(detail_published_text.published_at_source_text_state,discovery.published_at_source_text_state,'UNKNOWN') END AS published_at_source_text_state,
+    CASE WHEN detail_published_at.published_at IS NOT NULL
+         THEN detail_published_at.published_at_source_field
+         ELSE detail_published_text.published_at_source_field END AS published_at_source_field,
+    CASE WHEN detail_published_at.published_at IS NOT NULL
+         THEN detail_published_at.published_at_source_kind
+         ELSE COALESCE(detail_published_text.published_at_source_kind,'unknown') END AS published_at_source_kind,
+    CASE WHEN detail_published_at.published_at IS NOT NULL
+         THEN detail_published_at.published_at_precision
+         ELSE COALESCE(detail_published_text.published_at_precision,'unknown') END AS published_at_precision,
+    CASE WHEN detail_published_at.published_at IS NOT NULL
+         THEN detail_published_at.published_at_reference_observed_at
+         ELSE detail_published_text.published_at_reference_observed_at END::text AS published_at_reference_observed_at,
+    CASE WHEN detail_published_at.published_at IS NOT NULL
+         THEN detail_published_at.published_at_parser_version
+         ELSE detail_published_text.published_at_parser_version END AS published_at_parser_version,
+    CASE WHEN detail_published_at.published_at IS NOT NULL
+         THEN detail_published_at.material_ref
+         ELSE COALESCE(detail_published_text.material_ref,discovery.material_ref) END AS published_source_material_ref,
+    CASE WHEN detail_published_at.published_at IS NOT NULL
+         THEN detail_published_at.package_ref
+         ELSE COALESCE(detail_published_text.package_ref,discovery.package_ref) END AS published_source_package_ref,
+    CASE WHEN detail_published_at.published_at IS NOT NULL
+         THEN detail_published_at.record_ordinal
+         ELSE COALESCE(detail_published_text.record_ordinal,discovery.record_ordinal) END AS published_source_record_ordinal,
+    CASE WHEN detail_published_at.published_at IS NOT NULL
+         THEN detail_published_at.observed_at
+         ELSE COALESCE(detail_published_text.observed_at,discovery.observed_at) END AS published_source_observed_at,
+    CASE WHEN detail_published_at.published_at IS NOT NULL
+         THEN detail_published_at.created_at
+         ELSE COALESCE(detail_published_text.created_at,discovery.created_at) END::text AS published_source_recorded_at,
     detail_author.author_external_id,
     detail_author.package_ref AS author_source_package_ref,
     detail_author.observed_at AS author_source_observed_at,

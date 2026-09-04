@@ -234,6 +234,7 @@ fn detail_source(source: &WorkResourceCurrentSource) -> Value {
     serde_json::json!({
         "materialRef":source.material_ref,
         "packageRef":source.package_ref,
+        "recordOrdinal":source.record_ordinal,
         "observedAt":source.observed_at,
         "recordedAt":source.recorded_at
     })

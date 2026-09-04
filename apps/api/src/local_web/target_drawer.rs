@@ -176,14 +176,16 @@ pub fn render(
     // 目标由调用方**独立查询**得到，不从当前列表里找：列表是筛过的，一个被筛掉的目标
     // 会让这里说「未找到」，而它其实好好地在库里——那是在撒谎。
     let Some(target) = target else {
-        let return_href = list_context.list_href(
-            uuid::Uuid::parse_str(drawer)
-                .ok()
-                .map(|target_ref| format!("target-{target_ref}"))
-                .as_deref(),
-        );
+        let return_focus = uuid::Uuid::parse_str(drawer)
+            .ok()
+            .map(|target_ref| format!("target-{target_ref}"));
+        let return_href = list_context.list_href(return_focus.as_deref());
+        let return_focus_attr = return_focus
+            .as_deref()
+            .map(|focus| format!(r#" data-return-focus="{focus}""#))
+            .unwrap_or_default();
         return format!(
-            r#"<aside id="c-drawer" class="c-dw" aria-label="观察目标工作区" data-return-url="{return_url}">
+            r#"<aside id="c-drawer" class="c-dw" aria-label="观察目标工作区" data-return-url="{return_url}"{return_focus_attr}>
                  <div class="c-dw-head">
                    <div class="c-dw-kicker">目标工作区</div>
                    <div class="c-dw-title-row">
@@ -575,7 +577,10 @@ fn lifecycle_chart(
     const WIDTH: f64 = 800.0;
     const HEIGHT: f64 = 300.0;
     const LEFT: f64 = 54.0;
-    const RIGHT: f64 = 18.0;
+    // At the 390px drawer width, 36 viewBox units leave just over 16 CSS pixels between
+    // the last point's centre and the SVG edge. That keeps the non-scaling 24px hit ring
+    // inside the plot instead of clipping its right half.
+    const RIGHT: f64 = 36.0;
     const TOP: f64 = 20.0;
     const BOTTOM: f64 = 40.0;
     let min_x = projection
@@ -629,7 +634,7 @@ fn lifecycle_chart(
                 Some("creator-lifecycle"),
             );
             format!(
-                r#"<a class="life-point{selected_class}" href="{href}" aria-label="{title}，{published}，{metric_label} {value}，创作者内分位 {percentile:.1}%"><circle cx="{x:.1}" cy="{y:.1}" r="5"/></a>"#,
+                r#"<a class="life-point{selected_class}" href="{href}" aria-label="{title}，{published}，{metric_label} {value}，创作者内分位 {percentile:.1}%"><circle class="life-point-hit" cx="{x:.1}" cy="{y:.1}" r="6" aria-hidden="true"/><circle class="life-point-visible" cx="{x:.1}" cy="{y:.1}" r="5" aria-hidden="true"/></a>"#,
                 title = escape(title),
                 published = escape(&point.published_local_date),
                 metric_label = metric_label(projection.metric),

@@ -12,6 +12,7 @@
 //! substitutes a zero, a percentage, or a prototype figure for the missing fact.
 
 use super::shell::{PrimarySurface, global_header};
+use super::target_drawer::TargetListContext;
 use linggan_evidence::TargetCounts;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -282,29 +283,39 @@ fn targets_body(state: Option<&SurfaceState>) -> String {
 /// The target identity cannot be resolved while its database read is unavailable. This is
 /// deliberately separate from `target_drawer::render(None, ...)`, which means a successful
 /// lookup proved that the identifier does not exist.
-pub fn render_unreadable_target_drawer(drawer: Option<&str>) -> String {
+pub fn render_unreadable_target_drawer(
+    drawer: Option<&str>,
+    list_context: TargetListContext<'_>,
+) -> String {
     let Some(raw) = drawer else {
         return String::new();
     };
     let identifier = escape(raw);
+    let return_focus = uuid::Uuid::parse_str(raw)
+        .ok()
+        .map(|target_ref| format!("target-{target_ref}"));
+    let return_url = list_context.list_href(None);
+    let return_href = list_context.list_href(return_focus.as_deref());
+    let return_focus_attr = return_focus
+        .as_deref()
+        .map(|focus| format!(r#" data-return-focus="{focus}""#))
+        .unwrap_or_default();
     format!(
-        r#"<aside class="c-drawer" id="c-drawer" aria-label="观察目标工作区">
-          <div class="c-drawer-head">
-            <div class="c-drawer-top">
+        r#"<aside id="c-drawer" class="c-dw" aria-label="观察目标工作区" data-return-url="{return_url}"{return_focus_attr}>
+          <div class="c-dw-head">
+            <div class="c-dw-kicker">目标工作区</div>
+            <div class="c-dw-title-row">
               <div>
-                <div class="c-drawer-kind">TARGET WORKSPACE</div>
-                <div class="c-drawer-name">观察目标读取状态当前未知</div>
-                <div class="c-drawer-id">#{identifier}</div>
+                <div class="c-dw-title">观察目标读取状态当前未知</div>
+                <div class="c-dw-meta">#{identifier}</div>
               </div>
-              <div class="c-drawer-controls">
-                <a class="c-btn-quiet" href="/collection/targets">CLOSE ×</a>
+              <div class="c-dw-actions">
+                <a class="c-btn-quiet" href="{return_href}">关闭 ×</a>
               </div>
             </div>
           </div>
-          <div class="c-drawer-body">
-            <div class="c-drawer-panel" data-panel="overview">
-              {unknown}
-            </div>
+          <div class="c-dw-body">
+            {unknown}
           </div>
         </aside>"#,
         unknown = empty_state(

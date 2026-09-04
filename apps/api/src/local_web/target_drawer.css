@@ -23,10 +23,11 @@
 .life-chart{display:block;width:100%;max-width:100%;height:auto;min-height:260px}
 .life-axis{stroke:var(--lgi-border-strong);stroke-width:1;vector-effect:non-scaling-stroke}
 .life-median{fill:none;stroke:var(--lgi-signal);stroke-width:2;vector-effect:non-scaling-stroke}
-.life-point circle{fill:var(--lgi-ink);stroke:var(--lgi-canvas);stroke-width:2;vector-effect:non-scaling-stroke;transition:transform var(--lgi-duration-press) var(--lgi-ease-ui),fill var(--lgi-duration-state) var(--lgi-ease-ui);transform-box:fill-box;transform-origin:center}
-.life-point:hover circle,.life-point:focus-visible circle{fill:var(--lgi-signal);transform:scale(1.35)}
-.life-point:focus-visible circle{stroke:var(--lgi-focus);stroke-width:4}
-.life-point-selected circle{fill:var(--lgi-signal);stroke:var(--lgi-ink);stroke-width:3}
+.life-point-hit{fill:transparent;stroke:transparent;stroke-width:24;vector-effect:non-scaling-stroke;pointer-events:all}
+.life-point-visible{fill:var(--lgi-ink);stroke:var(--lgi-canvas);stroke-width:2;vector-effect:non-scaling-stroke;pointer-events:none;transition:transform var(--lgi-duration-press) var(--lgi-ease-ui),fill var(--lgi-duration-state) var(--lgi-ease-ui);transform-box:fill-box;transform-origin:center}
+.life-point:hover .life-point-visible,.life-point:focus-visible .life-point-visible{fill:var(--lgi-signal);transform:scale(1.35)}
+.life-point:focus-visible .life-point-visible{stroke:var(--lgi-focus);stroke-width:4}
+.life-point-selected .life-point-visible{fill:var(--lgi-signal);stroke:var(--lgi-ink);stroke-width:3}
 .life-axis-copy{fill:var(--lgi-muted);font:var(--lgi-weight-regular) 11px var(--lgi-font-mono)}
 .life-caption{display:flex;justify-content:space-between;gap:var(--lgi-space-3);padding:var(--lgi-space-3) var(--lgi-space-4);border-top:1px solid var(--lgi-hairline);color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data)}
 .life-receipt{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--lgi-space-4);padding:var(--lgi-space-3) 0;border-bottom:1px solid var(--lgi-hairline);color:var(--lgi-muted);font-size:var(--lgi-text-data);line-height:var(--lgi-lh-body)}
@@ -56,5 +57,5 @@
   .life-selected dl{grid-template-columns:1fr}
 }
 @media (prefers-reduced-motion: reduce){
-  .life-chip,.life-point circle{transition:none}
+  .life-chip,.life-point-visible{transition:none}
 }

@@ -13,7 +13,8 @@ pub use crate::material_projection_types::{
 };
 use crate::material_social_read;
 use crate::work_resource_current::{
-    WorkResourceCurrent, WorkResourceCurrentPageQuery, read_work_resource_current_page,
+    WorkResourceCurrent, WorkResourceCurrentPageQuery, WorkResourceCurrentSource,
+    read_work_resource_current_page,
 };
 use linggan_contracts::{EvidenceQuery, EvidenceQuerySort};
 use linggan_storage_postgres::Database;
@@ -548,9 +549,11 @@ pub(crate) fn material_item(
     let published_at = current.published_at.clone();
     let published_at_source_text = current.published_at_source_text.clone();
     let observed_at = current.observed_at.clone();
-    let material_ref = current.material_ref;
     let package_ref = current.package_ref;
-    let record_ordinal = current.record_ordinal;
+    let title_source_refs = material_source_refs(&current.title_source);
+    let body_source_refs = material_source_refs(&current.body_source);
+    let creator_source_refs = material_source_refs(&current.creator_source);
+    let (package_refs, record_refs) = current_detail_provenance(current);
     let matched_fields = match text {
         None => Vec::new(),
         Some(text) => {
@@ -642,17 +645,17 @@ pub(crate) fn material_item(
         inspector: serde_json::json!({
             "overview": {
                 "fields": [
-                    {"field":"title","state":current.title_state,"sourceRefs":[material_ref]},
-                    {"field":"body","state":current.body_state,"value":null,"accessLevel":"RESTRICTED_SOURCE","sourceRefs":[material_ref]},
-                    {"field":"creator","state":current.creator_display_name_state,"sourceRefs":[material_ref]}
+                    {"field":"title","state":current.title_state,"sourceRefs":title_source_refs},
+                    {"field":"body","state":current.body_state,"value":null,"accessLevel":"RESTRICTED_SOURCE","sourceRefs":body_source_refs},
+                    {"field":"creator","state":current.creator_display_name_state,"sourceRefs":creator_source_refs}
                 ]
             },
             "commentThreads": [],
             "mediaSlots": [],
             "derivatives": [],
             "provenance": {
-                "packageRefs":package_ref.into_iter().collect::<Vec<_>>(),
-                "recordRefs":[{"packageRef":package_ref,"recordOrdinal":record_ordinal}],
+                "packageRefs":package_refs,
+                "recordRefs":record_refs,
                 "coverageRefs":package_ref.into_iter().collect::<Vec<_>>()
             },
             "displayPolicy":"MINIMUM_NECESSARY",
@@ -663,4 +666,41 @@ pub(crate) fn material_item(
         author_external_id: current.author_external_id.clone(),
         body_text: body,
     }
+}
+
+fn material_source_refs(source: &WorkResourceCurrentSource) -> Vec<Uuid> {
+    source.material_ref.into_iter().collect()
+}
+
+fn current_detail_provenance(current: &WorkResourceCurrent) -> (Vec<Uuid>, Vec<Value>) {
+    let mut package_refs = Vec::new();
+    let mut record_refs = Vec::new();
+    let mut include = |package_ref: Option<Uuid>, record_ordinal: Option<i32>| {
+        if let Some(package_ref) = package_ref
+            && !package_refs.contains(&package_ref)
+        {
+            package_refs.push(package_ref);
+        }
+        if let (Some(package_ref), Some(record_ordinal)) = (package_ref, record_ordinal)
+            && !record_refs.iter().any(|record: &Value| {
+                record.get("packageRef") == Some(&serde_json::json!(package_ref))
+                    && record.get("recordOrdinal") == Some(&serde_json::json!(record_ordinal))
+            })
+        {
+            record_refs.push(serde_json::json!({
+                "packageRef":package_ref,
+                "recordOrdinal":record_ordinal
+            }));
+        }
+    };
+    include(current.package_ref, current.record_ordinal);
+    for source in [
+        &current.title_source,
+        &current.body_source,
+        &current.creator_source,
+        &current.published_source,
+    ] {
+        include(source.package_ref, source.record_ordinal);
+    }
+    (package_refs, record_refs)
 }

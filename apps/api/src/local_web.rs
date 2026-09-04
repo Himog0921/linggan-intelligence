@@ -2185,11 +2185,16 @@ async fn collection_targets(
         counts,
         reads.as_ref().map(|reads| &reads.surface_state),
     );
+    let list_context = target_drawer::TargetListContext {
+        filter: params.filter.as_deref(),
+        sort: params.sort.as_deref(),
+    };
     // Without a database the page still renders its honest empty state rather than an error:
     // "we cannot read targets right now" and "there are no targets" are different claims, and
     // the empty state already makes only the weaker one.
     let Some(database) = database else {
-        let drawer = collection::render_unreadable_target_drawer(params.drawer.as_deref());
+        let drawer =
+            collection::render_unreadable_target_drawer(params.drawer.as_deref(), list_context);
         return Html(target_drawer::attach_to_collection_document(&base, &drawer));
     };
     // 一次查完所有目标的档案完整度：列表最多两百行，逐行发查询会让页面打开一次跑
@@ -2243,10 +2248,7 @@ async fn collection_targets(
                 &avatars,
                 &completeness,
                 params.error.as_deref(),
-                target_drawer::TargetListContext {
-                    filter: params.filter.as_deref(),
-                    sort: params.sort.as_deref(),
-                },
+                list_context,
             )
         }
         Err(_) => base,
@@ -2279,12 +2281,11 @@ async fn collection_targets(
                 },
             },
             params.life_work.as_deref(),
-            target_drawer::TargetListContext {
-                filter: params.filter.as_deref(),
-                sort: params.sort.as_deref(),
-            },
+            list_context,
         ),
-        Err(()) => collection::render_unreadable_target_drawer(params.drawer.as_deref()),
+        Err(()) => {
+            collection::render_unreadable_target_drawer(params.drawer.as_deref(), list_context)
+        }
     };
     Html(target_drawer::attach_to_collection_document(&list, &drawer))
 }

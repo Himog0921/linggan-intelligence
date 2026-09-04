@@ -324,6 +324,15 @@ fn creator_drawer_defaults_to_the_server_owned_lifecycle_in_four_tabs() {
     assert!(html.contains(&format!("life_work={selected_ref}")));
     assert!(html.contains(&format!("/corpus/evidence?work={selected_ref}")));
     assert!(html.contains("第二篇"));
+    assert_eq!(html.matches(r#"class="life-point-hit""#).count(), 2);
+    assert_eq!(html.matches(r#"class="life-point-visible""#).count(), 2);
+    assert_eq!(html.matches(r#"class="life-point-hit" cx="#).count(), 2);
+    assert_eq!(html.matches(r#"r="6" aria-hidden="true""#).count(), 2);
+    assert_eq!(html.matches(r#"r="5" aria-hidden="true""#).count(), 2);
+    assert!(
+        html.contains(r#"class="life-point-hit" cx="764.0""#),
+        "the right plot inset must leave the non-scaling 24px hit ring unclipped at 390px"
+    );
     for forbidden in ["监控价值", "机会评分", "产出分", "稀缺分", "趋势预测"] {
         assert!(!html.contains(forbidden));
     }
@@ -384,9 +393,13 @@ fn target_drawer_lifecycle_styles_are_lids_bounded_and_mobile_safe() {
     assert!(SHELL_CSS.contains("outline:2px solid var(--v7-focus); outline-offset:2px"));
     assert!(!TARGET_DRAWER_CSS.contains("outline:none"));
     assert!(!TARGET_DRAWER_CSS.contains("outline:2px solid var(--lgi-signal)"));
-    assert!(TARGET_DRAWER_CSS.contains(".life-point:focus-visible circle"));
+    assert!(TARGET_DRAWER_CSS.contains(
+        ".life-point-hit{fill:transparent;stroke:transparent;stroke-width:24;vector-effect:non-scaling-stroke;pointer-events:all}"
+    ));
+    assert!(TARGET_DRAWER_CSS.contains(".life-point:focus-visible .life-point-visible"));
     assert!(TARGET_DRAWER_CSS.contains("stroke:var(--lgi-focus)"));
     assert!(TARGET_DRAWER_CSS.contains("stroke-width:4"));
+    assert!(!TARGET_DRAWER_CSS.contains(".life-point circle"));
 }
 
 #[test]
@@ -515,6 +528,34 @@ fn target_drawer_escape_and_focus_return_keep_list_context() {
     let body_end = document.find("</body>").unwrap();
     assert!(drawer_at < script_at && script_at < body_end);
     assert!(document.ends_with("</html>"));
+}
+
+#[test]
+fn missing_target_drawer_keeps_return_focus_and_list_context() {
+    let target_ref = uuid::Uuid::from_u128(777);
+    let context = target_drawer::TargetListContext {
+        filter: Some("creator"),
+        sort: Some("last"),
+    };
+    let html = target_drawer::render(
+        None,
+        &std::collections::HashMap::new(),
+        Some(&target_ref.to_string()),
+        target_drawer::TargetDrawerTab::Overview,
+        target_drawer::LifecycleView::NotRead {
+            window: linggan_evidence::CreatorLifecycleWindow::Recent90Days,
+            metric: linggan_evidence::CreatorLifecycleMetric::Likes,
+        },
+        None,
+        context,
+    );
+
+    assert!(html.contains("class=\"c-dw\""));
+    assert!(html.contains("data-return-url=\"/collection/targets?filter=creator&amp;sort=last\""));
+    assert!(html.contains(&format!("data-return-focus=\"target-{target_ref}\"")));
+    assert!(html.contains(&format!(
+        "href=\"/collection/targets?filter=creator&amp;sort=last#target-{target_ref}\""
+    )));
 }
 
 #[test]

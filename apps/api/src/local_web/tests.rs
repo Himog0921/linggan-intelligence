@@ -1603,10 +1603,19 @@ fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
     );
     assert!(!closed.contains("c-drawer"));
 
-    let open = collection::render_unreadable_target_drawer(Some("T-CR-019"));
+    let open = collection::render_unreadable_target_drawer(
+        Some("T-CR-019"),
+        target_drawer::TargetListContext {
+            filter: Some("creator"),
+            sort: Some("last"),
+        },
+    );
     assert!(open.contains("id=\"c-drawer\""));
     assert!(open.contains("#T-CR-019"));
     assert!(open.contains("观察目标读取状态当前未知"));
+    assert!(open.contains("class=\"c-dw\""));
+    assert!(open.contains("data-return-url=\"/collection/targets?filter=creator&amp;sort=last\""));
+    assert!(open.contains("href=\"/collection/targets?filter=creator&amp;sort=last\""));
     for false_empty in [
         "未找到该观察目标",
         "没有建档基线",
@@ -1617,9 +1626,29 @@ fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
         assert!(!open.contains(false_empty));
     }
 
-    let injected = collection::render_unreadable_target_drawer(Some("<script>alert(1)</script>"));
+    let injected = collection::render_unreadable_target_drawer(
+        Some("<script>alert(1)</script>"),
+        target_drawer::TargetListContext::default(),
+    );
     assert!(!injected.contains("<script>alert(1)</script>"));
     assert!(injected.contains("&lt;script&gt;"));
+}
+
+#[tokio::test]
+async fn unreadable_target_drawer_http_keeps_list_context_and_focus_contract() {
+    let target_ref = uuid::Uuid::from_u128(778);
+    let html = get_successful_utf8_response(
+        app(),
+        &format!("/collection/targets?filter=creator&sort=last&drawer={target_ref}"),
+    )
+    .await;
+
+    assert!(html.contains("id=\"c-drawer\" class=\"c-dw\""));
+    assert!(html.contains("data-return-url=\"/collection/targets?filter=creator&amp;sort=last\""));
+    assert!(html.contains(&format!("data-return-focus=\"target-{target_ref}\"")));
+    assert!(html.contains(&format!(
+        "href=\"/collection/targets?filter=creator&amp;sort=last#target-{target_ref}\""
+    )));
 }
 
 /// DESIGN-010 · LIDS v7 on the Operations surface.

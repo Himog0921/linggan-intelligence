@@ -21,6 +21,17 @@ projection 上。它由 `material_query_sql` 中同一份 CTE/列合同逐字段
 creator lifecycle 都消费该裁定结果，不得各自复制 `ORDER BY`/fallback。batch seam 在调用方的同一
 repeatable-read/read-only transaction 与同一 `as_of` 中读取，避免 HTTP/N+1 和不同时间切片。
 
+`published_at` 不是可以逐列混搭的展示组：一旦选中 qualified exact 详情行，
+exact value、source text/state、source field/kind、precision、reference observed-at、parser version
+以及 source material/package/record 必须全部来自该行。只有当 exact Current 不存在时，才可整组选择
+source-text-only 行或 discovery fallback；禁止把旧 exact value 与更新 relative text/parser/provenance
+组成一个从未被观察过的混合 Current。
+
+Inspector 的 title/body/creator/published 字段来源同样是 typed Current 的一部分：
+`sourceRefs` 必须指向该字段真实的 material，总 provenance 必须去重聚合所有已展示字段的真实
+package/record refs。最新聚合 package 可以作为其中一条追溯线索，但不得代替每个字段各自的来源。
+列表与单品 Inspector 必须对同一 Work 保持字段值和字段来源一致。
+
 Creator lifecycle 可以先用 target relationship 与详情 stable author ID 选择有界候选 Work ref，
 但候选查询只决定范围；页面需要展示的标题、作者、发布时间与互动 Current 必须来自上述共享 owner。
 生命周期模块只派生窗口排除、分位、中位、composite 与 scan receipt。
@@ -102,7 +113,7 @@ Browser Producer 的详情解析先返回一个有来源资格的时间断言：
 - `publishedAtReferenceObservedAt`：相对文本的观察参照时点；
 - `publishedAtParserVersion`：当前为 `xhs-detail-time-v2`。
 
-服务端只有在 `sourceKind=platform_epoch`、精度为秒/毫秒、字段名命中已支持的详情字段清单，且 parser version 精确为 `xhs-detail-time-v2` 时，才把值写入 `published_at`。可见的“3 小时前”“4 月 17 日”仍保留为 `SOURCE_TEXT_ONLY`；即使插件为了当前页面体验算出了一个毫秒值，服务端也不得把该派生值晋升成历史精确发布时间。
+服务端只有在 `sourceKind=platform_epoch`、精度为秒/毫秒、字段名命中已支持的详情字段清单，且 parser version 精确为 `xhs-detail-time-v2` 时，才把值写入 `published_at`。可见的“3 小时前”“4 月 17 日”仍保留为 `SOURCE_TEXT_ONLY`；即使插件为了当前页面体验算出了一个毫秒值，服务端也不得把该派生值晋升成历史精确发布时间。这个资格判定与上节“整组同行”的选择共同构成 Published Current：前者决定哪些行可候选，后者保证对外值和来源不分叉。
 
 2026-08-31 的一条用户授权签名详情探针已完成：作品身份精确匹配，SSR `noteDetailMap` 顶层字段为 `time`，JavaScript 类型为 `number`，值为 13 位毫秒 epoch `1787747429000`，对应 `2026-08-26T12:30:29Z` / 北京时间 `2026-08-26 20:30:29 +08:00`；页面可见文本为“4天前 广东”。该结果精确命中现有 `time + platform_epoch + millisecond + xhs-detail-time-v2` 合同，不需要改动 Producer 映射。探针未保留签名 token、正文、作者资料、评论或媒体。
 

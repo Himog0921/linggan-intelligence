@@ -30,6 +30,7 @@ Package 3 · Creator Dossier
 - Issue: `#148 COLLECTION-READ-MODEL-CLOSURE-001`
 - Stable task-id: `collection-read-model-closure-001-p1`
 - Review remediation task-id: `collection-read-model-closure-001-p1-review-fixes-1`
+- Review remediation 2 task-id: `collection-read-model-closure-001-p1-remediation-2`
 - Coordinator: Codex root `/root`
 - Execution subagent: `/root/current_drawer_audit`
 - Exact base: `d5b78863d8d56ad39664314229db02942fa4fd5d`
@@ -185,6 +186,39 @@ Package 3 · Creator Dossier
 公共 lifecycle route 已瘦身为 derived DTO；内部 server render 的 Work facts 继续来自共享 Current owner，
 不会形成可替代 Work Resource 的第二份 API。Evidence 仍只在 Corpus，监控价值仍排除。
 
+### 8.2 PR #151 remediation 2 · 实施前 Reality Matrix
+
+本轮只修复 Issue #148 扩展 Claim 中已经点名的同类别缺口；起始
+`HEAD=e3aaa05af6ee44a8b58317608a3f410b54484bfb`，本地与远端分支一致且工作树干净。
+
+| Claim / risk | 实施前状态 | 当前证据 | 本轮可证伪动作 |
+|---|---|---|---|
+| Published Current 的 exact value、source text、field/kind/precision/parser 与 source package/record 必须来自同一来源行 | **FAIL** | `latest_detail_published_at` 选 exact 行，但 `published_at_source_text` 优先选择独立的更新 text 行；会拼出旧 exact + 新 relative | 先用隔离 PostgreSQL 回归制造“旧 exact、更新 relative”，要求整组 published provenance 仍锁定旧 exact 行，再收敛共享 Current SQL |
+| Inspector 的 title/body/creator 字段来源必须跟随各自 typed Current source | **FAIL** | Current 已有逐字段 source ref，`material_item` 仍用聚合 material/package ref 生成多字段 `fieldSources` | 先写 Work Resource list/detail/Inspector parity 回归，再让 Inspector 逐字段消费 typed source，并把真实 package/record refs 去重聚合 |
+| Lifecycle SVG point 的可交互命中区至少 24×24 | **FAIL** | 当前唯一 `<circle r="5">` 的几何命中区为 10×10；虽有键盘链接与共享 focus ring，触控目标不足 | 先写 render/CSS 合同要求透明 hit circle + `24px` non-scaling stroke，并保留独立可见点，再做 390/1280/1440 DOM geometry、Tab/ARIA/focus 实测 |
+| no-DB / target read error 抽屉必须消费与正常态相同的列表上下文 | **FAIL** | `render_unreadable_target_drawer` 关闭链接硬编码 `/collection/targets`，无 `data-return-url` / `data-return-focus`，会丢 filter/sort/fragment | 先写 failure HTTP/render 回归，再复用 `TargetListContext`；浏览器验证 Escape/close 保留上下文，正常可恢复 opener focus，失败页无 opener 时保持准确 URL 而不伪造焦点成功 |
+| Lifecycle 公共 API 仍为 slim derived DTO | VERIFIED；需回归 | 当前 API 不暴露 title/author/published/engagement Current | 负向 JSON/route 测试与源码扫描 |
+| Corpus `?work=` 仍精确定位，Evidence 只在 Corpus | VERIFIED；需回归 | 当前首批外 detail seam 与 Collection 负向文案测试 | JS/HTTP focused 回归；抽屉不得新增 Evidence 结果区 |
+| 监控价值继续排除 | VERIFIED BY DECISION；需回归 | Issue/Claim、PAGE 与 HTML 负向断言 | HTML/JSON/source 负向扫描 |
+| migration/schema/shared DB/runtime/plugin/platform/deploy | FORBIDDEN | 扩展 Claim 明确不授权 | 若实现必须触及任一项则停止；验证只用一次性隔离 PostgreSQL 与 loopback runtime |
+
+本轮依赖仍是同一条责任链：`material_query_sql` 拥有 typed Current 裁定，
+`material_projection` 只把已裁定字段及其来源投影到 Work Resource/Inspector，
+`creator_lifecycle` 只做 target/window/derived 计算；Target Drawer 只渲染最小摘要并跳转 Corpus。
+这不是新增 Package 2/3，也不改变 Evidence 或监控价值边界。
+
+### 8.3 PR #151 remediation 2 · 实施结果
+
+| Finding | branch 处置 | 隔离证明 |
+|---|---|---|
+| Published Current 来源行可能拼接 | exact 发布时间的 value、source text/state、field/kind/precision、parser、material/package/record ref 与时间戳整组由同一 exact typed row 产生；只有不存在 exact 时才走 discovery/text fallback | PostgreSQL 回归构造“旧 exact + 更新 relative”，Material suite 11/11 通过 |
+| Inspector 字段来源使用聚合 ref | title/body/creator 分别消费 typed Current source；Inspector provenance 去重聚合真实展示字段的 package/record refs | Work Resource list/detail/Inspector parity 覆盖独立 package 与 record，Material suite 11/11 通过 |
+| SVG point 命中区不足 | 每点拆为透明 hit circle 与可见 circle；hit circle 使用 `24px` non-scaling stroke，交互仍由具名 link 承载，focus 继续使用全局 token | 390 实测两点水平/垂直命中跨度均 29px；首次右端裁切后增加 plot inset，终轮右端余量 16.02px |
+| failure drawer 丢列表上下文 | 正常、target-not-found、read-error 与 no-DB 统一消费 `TargetListContext` / data attributes；Escape/close 保留 filter、只作返回上下文的 sort 与 fragment | 正常态 Escape 精确恢复 URL 与 opener focus；no-DB 390 保留 URL/fragment、无横向溢出；no-DB 列表没有 opener，未伪报焦点成功 |
+| 生命周期 API / Corpus / Evidence 边界回归 | lifecycle route 继续只返回 derived DTO；选中 Work 仍精确跳 `/corpus/evidence?work=`；Collection 不复制 Evidence，监控价值继续排除 | API full-path 1/1；Corpus DOM 精确选择目标 Work；HTML/DOM 无 Evidence tab 与监控价值模块 |
+
+本轮未修改 migration/schema、共享数据库、共享 runtime、插件、真实平台或部署；浏览器数据来自一次性隔离 fixture，不能充当当前真实数据运行证明。
+
 ## 9. 依赖与文件边界
 
 ### 9.1 Exclusive
@@ -286,9 +320,9 @@ Package 3 · Creator Dossier
 |---|---|---|
 | Plan / Claim / Reality Matrix | VERIFIED | 本计划与 `docs/README.md` 索引 |
 | Work Package A | VERIFIED（branch） | RED→GREEN；隔离 PostgreSQL lifecycle 5/5、API full-path 1/1；共享 Current/Inspector parity；无 migration |
-| Work Package B | VERIFIED（branch） | 四职责抽屉、默认生命周期、Evidence tab 退役；1440/1280 与 CDP 390 验证 |
+| Work Package B | VERIFIED（branch） | 四职责抽屉、默认生命周期、Evidence tab 退役；1440/1280/390 隔离浏览器验证，390 点命中区实测 29×29px |
 | Work Package C | VERIFIED（branch） | 首批列表外 Work 精确 Corpus detail；未复制 Evidence |
-| focused/workspace/governance | VERIFIED（branch） | lifecycle 5/5、API full-path、Work Resource/Inspector focused、workspace test/check、fmt、双 JS syntax、diff 与两项 governance 全通过 |
+| focused/workspace/governance | VERIFIED（branch） | Material 11/11、lifecycle 5/5、API full-path 1/1、workspace 155 passed / 0 failed / 86 ignored、JS 2/2；workspace check（15 条既存 dead-code warning）、fmt、diff、project governance 与 UI handbook 通过 |
 | commit/push/Draft PR | PENDING | Draft PR body 必须 `Refs #148` |
 | independent exact-head review | NOT VERIFIED | 由 Mog/Coordinator 安排 |
 | main merge | NOT AUTHORIZED / NOT VERIFIED | 不在 Claim 内 |
