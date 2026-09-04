@@ -19,7 +19,7 @@
 ## 2. 来源回执与方向锁
 
 - 采用 `PAGE-COLLECTION-001` 的五个 Collection 工作面和受限右抽屉，不建第六个页面。
-- 采用 LIDS v7 白场、结构线、Signal 选择、中文主表达、40px 控件、400/600/700 字重、0/4/8 圆角、390px 与 reduced-motion。
+- 采用 LIDS v7 白场、结构线、Signal 选择、中文主表达、40px 控件、400/600/700 字重、0/4/8 圆角与 reduced-motion。当前 Package 验收基线为 1440 CSS px 桌面全屏；既有 1280/390 适配结果只作为诊断证据，不形成支持承诺。
 - 历史内容工作台只提供行为对标；旧服务端的 `trailing-5-work-median-v1` / `window=5` 是冻结领域口径。旧前端 15 点重复计算不继承，也不新造 7 点口径。
 - 近 90 天固定为 `Asia/Shanghai` 90 个含首尾日历日；不是 `as_of - interval '90 days'` 的滚动 2160 小时。
 - `life_work` 只是 URL/UI 选择；Rust lifecycle query 与 HTTP query 不接受 `selected_work`。
@@ -33,7 +33,7 @@
 | baseline / patrol / trace | 保留既有职责与 URL 状态；不执行生命周期扫描 | 生命周期重复读取 |
 | drawer tabs | `overview / baseline / patrol / trace` 四个职责 | Evidence tab |
 | lifecycle API | target、as-of、window/metric、summary/exclusions/receipt、规则版本及 `workPublicRef` + percentile/median 派生点 | title/author/published/engagement Current、`selected_work`、Corpus Inspector 或敏感材料 |
-| Corpus deep link | 首批列表外的稳定 Work 仍直读 detail seam；390px 直接 URL/刷新在成功恢复后自动打开 Inspector，URL 恢复只 replace history | 回退第一条、隐藏在视口外、制造额外 Back 步骤或复制详情到 Collection |
+| Corpus deep link | 首批列表外的稳定 Work 仍直读 detail seam；既有 390px 诊断证明直接 URL/刷新在成功恢复后自动打开 Inspector，URL 恢复只 replace history | 回退第一条、制造额外 Back 步骤或复制详情到 Collection；390 不属于当前 Package 验收范围 |
 
 关键状态：`READY`、`INSUFFICIENT_OBSERVATION`、`NOT_APPLICABLE`、`READ_UNAVAILABLE`、`SCAN_LIMITED`、`QUERY_INVALID`。真实 `KNOWN 0` 是点；UNKNOWN 是排除原因。`linkedWorkCount` 只在未截断时为精确总量；截断时显示下限与 probe/scanned/returned，不把 2000 冒充完整总数。
 
@@ -55,12 +55,15 @@
 | API | Axum route tests + isolated PostgreSQL | 闭集、404/503、最小响应、敏感字段负向断言已覆盖 |
 | UI/交互 | Rust render/source + 1440/1280/390 浏览器 | 四 tab、默认图、非法查询、all caption、Escape/focus return、SVG a11y、无监控价值、server-owned median、首批外 Work 直接 URL/刷新/Back/Forward 已覆盖 |
 | CSS | page-local source guard + 隔离视口 | 以 `ACC-COLLECTION-LIFECYCLE-001` 最终记录为准 |
-| 现实世界 | 未执行 shared runtime、平台访问或部署 | NOT VERIFIED；不由自动检查替代 |
+| 本地运行 | `:3000` refresh 已授权但尚未执行 | NOT VERIFIED；待 root 在 merge 后给出运行证明 |
+| 外部现实世界 | 未执行 shared DB/migration、平台访问或外部部署 | NOT VERIFIED / 未授权；不由自动检查替代 |
 | Mog 业务验收 | Draft PR 后待用户检查 exact head | NOT VERIFIED |
+
+本表中的 1440 为当前验收基线；1280/390 是既有诊断覆盖，不是 Package 支持承诺。一次隔离 1280 测量中 Inspector 右缘约超出 viewport 49.83 CSS px，Mog 已接受并移出当前范围。“不在手机或小于 13 寸屏幕运行”不被解释为 CSS breakpoint。页面局部 focus 声明仍是已接受技术债；共享 owner 在已验证表面上的 computed focus 保持 `#335e72` 2px/2px。原 reviewer FAIL 不改写为 PASS。
 
 ## 6. 文件与交接
 
 - 主要实现：`crates/evidence/src/work_resource_current.rs`、`material_query_sql.rs`、`material_projection.rs`、`material_detail_read.rs`、`creator_lifecycle.rs`、`apps/api/src/local_web/creator_lifecycle_api.rs`、`target_drawer.rs`、`target_drawer.css`、`collection_workspace.js`。
 - 测试：`crates/evidence/tests/creator_lifecycle_postgres.rs`、`apps/api/src/local_web/creator_lifecycle_tests.rs`。
 - 规格与验收：`PAGE-COLLECTION-001`、本清单、`ACC-COLLECTION-LIFECYCLE-001`、LIDS migration log。
-- 无设计例外、无新 CMP、无 schema/migration、无外部副作用。
+- 无新 CMP、无 schema/migration、无外部副作用。当前仅有上述经 Mog 接受的支持范围与技术债，不将其伪装为已修复或 reviewer PASS。

@@ -17,6 +17,7 @@
 - 三秒答案: 目标列表回答观察对象；creator 抽屉默认概览回答已接纳作品的生命周期、当前可绘制范围和被排除原因。
 - 五秒主动作: 选择时间窗或互动指标、选择作品点、跳到 `/corpus/evidence?work=<public-ref>`；页面选择不触发平台访问。
 - 明确非目标: Evidence 结果复制、监控价值/机会评分/趋势预测、真实平台访问、插件改动、新事实表或 migration、Agent、部署。
+- 当前 Package 支持合同: 验收基线为 **1440 CSS px 桌面全屏**；1280/390 不属于本 Package 验收。“不在手机或小于 13 寸屏幕运行”只描述使用场景，不定义 CSS breakpoint。
 
 ## 2. 信息架构（顺序与名称冻结）
 
@@ -50,7 +51,7 @@
 ## 4. 已批准的设计组合
 
 - 全局页头由 `apps/api/src/local_web/shell.rs` 统一生成，Corpus 与 Collection 共用同一实现；`shell.css` 承载页头、上下文行与 216px 导轨，两页共用。
-- 页面局部样式在 `collection_workspace.css`；Issue #148 的生命周期与抽屉增量隔离在 `target_drawer.css`，只消费 `--lgi-*`，不写字面色值或渐变。review remediation 在唯一 Token 真源新增共享 `--lgi-focus`，由主题文档级交互元素 selector 统一提供 2px/2px focus；它同时覆盖 `.v7-app` 与作为 sibling 的固定 drawer，不依赖页面 CSS 或 `!important`。
+- 页面局部样式在 `collection_workspace.css`；Issue #148 的生命周期与抽屉增量隔离在 `target_drawer.css`，只消费 `--lgi-*`，不写字面色值或渐变。review remediation 在唯一 Token 真源新增共享 `--lgi-focus`，由主题文档级交互元素 selector 统一提供 2px/2px focus；它同时覆盖 `.v7-app` 与作为 sibling 的固定 drawer，不使用 `!important`。后加载页面仍保留局部 focus 声明；已验证表面的 computed focus 正确，Mog 接受该声明为本包外技术债，原 reviewer FAIL 不改写为 PASS。
 - 深色实时观察流是全产品唯一的深色面，色值以 `--lgi-stream-*` 十项 token 进入唯一色值源（当时 117 → 127 项；当前真源随后演进为 132 项）。
 - 目标抽屉与生命周期全部由服务端和 URL 状态渲染。散点、对数 y 轴、创作者内分位与 `trailing-5-work-median-v1` 均由服务端投影提供或计算；前端不二次计算滚动中位线。
 
@@ -66,7 +67,7 @@ Mog 于 2026-08-26 确认保留 V4 的深色终端配色。它与 `system.md` §
 | 切换运行态三模式 | 可用 | 仅页面跳转 |
 | 用地址打开目标抽屉、切四个职责 tab | 可用 | 仅本机读取与地址变化；Evidence tab 不存在 |
 | 切换生命周期 `recent_90_days/all` 与五指标 | creator 概览可用 | target-scoped bounded read；不访问平台 |
-| 选择散点并进入语料 | 可用 | `life_work` 仅为 UI 状态；Corpus 精确读取该 Work，不复制 Evidence；390px 直接 URL/刷新在读取成功后自动打开 Inspector，不新增 history |
+| 选择散点并进入语料 | 可用 | `life_work` 仅为 UI 状态；Corpus 精确读取该 Work，不复制 Evidence；既有 390px 诊断证明直接 URL/刷新可打开 Inspector 且不新增 history，但窄屏不属于当前验收合同 |
 | Escape 或关闭抽屉 | 可用 | 保留列表 filter 与既有 `sort=last` 上下文；焦点返回原 target opener |
 | 基线/巡检/追踪或 keyword drawer | 可用 | 不执行 lifecycle 大查询；keyword 明示不适用 |
 
@@ -76,5 +77,6 @@ Mog 于 2026-08-26 确认保留 V4 的深色终端配色。它与 `system.md` §
 
 - Issue #148 自动检查覆盖稳定作者匹配、qualified `published_at`、field-wise latest KNOWN、KNOWN 0/UNKNOWN、上海日历 90 日边界、5 点中位线、scan receipt、API 闭集、四 tab、可访问 SVG、负向敏感字段与 Corpus 首批外 Work 深链。
 - 视觉验收记录见 `ACC-COLLECTION-LIFECYCLE-001`；只登记实际完成的隔离视口与源码检查。
-- 本次证明: branch 源码、隔离 PostgreSQL、API/HTML/CSS/JS seam 与受控视口走查（以验收记录最终结果为准）。
-- 本次未证明: shared migration/runtime/deploy、真实平台访问、完整辅助技术组合、Mog 业务验收或 `origin/main` 合并。
+- 本次证明: branch 源码、隔离 PostgreSQL、API/HTML/CSS/JS seam 与 1440 CSS px 桌面全屏受控视口走查；1280/390 历史结果仅为诊断证据（以验收记录最终结果为准）。
+- 已接受风险: 一次隔离 1280 测量中 Inspector 右缘约超出 viewport 49.83 CSS px，移出当前 Package；页面局部 focus 声明保留为技术债，已验证表面的 computed focus 仍正确。
+- 本次未证明: 已获授权但待 root 执行的 `origin/main` 合并与本地 `:3000` runtime 刷新；仍未授权的 shared DB/migration、外部部署与真实平台访问；完整辅助技术组合及 Mog 业务验收。范围接受不是 reviewer PASS，也不等于 runtime 已刷新。

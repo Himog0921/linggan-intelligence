@@ -23,7 +23,7 @@ Package 3 · Creator Dossier
 
 - 当前只授权 Package 1 的实现、测试、提交、push 与 Draft PR。
 - Package 2、Package 3 不在本 Claim 内；不得预建它们的 schema、API、页面或动作。
-- 本包未经 Mog 对 exact head 的后续授权不 merge，不应用共享 migration，不切换 runtime，不部署，不关闭 Issue。
+- Mog 已于 2026-09-04 授权本包在 docs-only 风险接受记录提交后，由 root 合并并刷新本地 `:3000`；实现 subagent 仍不执行 merge/runtime。共享 migration/DB、真实平台与外部部署继续禁止，Issue 不关闭；本计划在 root 后续动作与实际验收完成前保持活跃。
 
 ## 2. Claim 与固定工作区
 
@@ -255,6 +255,19 @@ desktop/390 证明 `data-drawer=open`、可见 Inspector、精确 selected ref�
 与 UI handbook 全通过。`:3116/:56690`、browser tab/viewport、container 与 volume 已清理。本轮不修改
 `evidence_library.css` / `collection_workspace.css`，也未触碰 schema/migration、shared runtime/DB、plugin、平台或部署。
 
+### 8.6 当前支持边界与风险接受 · docs-only closure
+
+Mog 于 2026-09-04 明确当前项目不用于手机或小于 13 寸的屏幕。物理尺寸不能稳定映射为 CSS
+viewport，因此本 Package 的可测试验收合同保守冻结为 **1440 CSS px 桌面全屏**；1280 与 390 均不
+属于当前 Package 验收。既有 1280/390 浏览器结果仍是可追溯的诊断证据，但不再充当本包退出门槛或
+未来支持承诺。
+
+- 一次隔离 1280 测量中，Inspector 右缘超出 `documentElement.clientWidth=1280` 约 49.83 CSS px；Mog 接受该裁切并将其移出当前范围。
+- 后加载页面仍保留局部 focus 声明，形成可维护性技术债；共享 focus owner 在已验证表面上的 computed ring 仍为 `#335e72`、2px outline、2px offset。Mog 接受此债务留待后续独立事项。
+- 双轴 reviewer 的原 FAIL 是历史审查事实，不因支持范围变化而改写成 PASS。本节只记录用户的范围裁定与风险接受。
+- 核心事实选择、隔离 PostgreSQL 读模型、focused/workspace/code checks 已完成；docs-only closure 不修改 Rust、JS、CSS 或测试。
+- 下一阶段仍由 root 执行并证明：feature branch merge、`:3000` runtime 刷新与 Mog 实际验收。在此之前本计划保持 `活跃计划`，Issue #148 不关闭。
+
 ## 9. 依赖与文件边界
 
 ### 9.1 Exclusive
@@ -307,7 +320,7 @@ desktop/390 证明 `data-drawer=open`、可见 Inspector、精确 selected ref�
 1. RED: render tests 固定四 tab、Evidence tab 退役、creator overview 默认生命周期、keyword NOT_APPLICABLE、无监控价值词。
 2. GREEN: drawer 接入生命周期 projection；overview 以图表为唯一视觉核心，辅助职责退后。
 3. RED/GREEN: 90 天/全部、五指标、选中点 URL；SVG 点可键盘选择并有 `aria-label` 与文本摘要；中位线只消费 `trailing-5-work-median-v1`，前端不二次计算。
-4. CSS: 新 page-local stylesheet，只消费 token；390/1280/1440 几何、无渐变、字号/字重/圆角/触控区/reduced-motion 检查。
+4. CSS: 新 page-local stylesheet，只消费 token；1440 CSS px 桌面全屏为当前验收基线；既有 390/1280 几何结果留作诊断；无渐变、字号/字重/圆角/触控区/reduced-motion 检查。
 5. 状态: loading 不适用于 server render；READ_UNAVAILABLE、INSUFFICIENT、SCAN_LIMITED、NOT_APPLICABLE、1 点/0 点分别渲染。
 
 退出条件: 默认 creator 抽屉无需进入二级 tab 即看见真实生命周期；所有非目标词与 Evidence 结果区均不存在。
@@ -318,7 +331,7 @@ desktop/390 证明 `data-drawer=open`、可见 Inspector、精确 selected ref�
 2. GREEN: 使用既有 Work Resource detail seam 精确定位，不扩大 Evidence 数据或产品语义。
 3. 核对 `/collection/attention`: 只有现成读模型能直接证明的异常/限制可投影；否则保持现有诚实状态，不新造事项。
 4. 同步 PAGE-COLLECTION-001、UI change manifest、LIDS migration log、索引、current-state、月度 progress 与验收记录。
-5. 浏览器只在隔离只读实例验证 1440、1280、390；不触碰 `:3000`、共享库、插件或采集。
+5. 浏览器只在隔离只读实例验证 1440 当前基线；既有 1280、390 结果作为诊断记录保留；不触碰 `:3000`、共享库、插件或采集。
 
 退出条件: 生命周期点准确进入唯一 Corpus Evidence 面；Collection 没有 Evidence 复制品。
 
@@ -330,7 +343,7 @@ desktop/390 证明 `data-drawer=open`、可见 Inspector、精确 selected ref�
 | qualified time、KNOWN/0/UNKNOWN | PostgreSQL worked examples | 单一 as-of transaction | 图表状态文本走查 |
 | 90 天/全部/跨年/排序/极值 | Rust query tests | 固定 clock/as-of | 轴标签与 summary |
 | 敏感字段与监控价值不泄漏 | response/render negative tests | JSON/HTML source scan | 页面首屏扫描 |
-| creator/keyword/失败/稀疏/截断 | render tests | synthetic/de-identified fixtures | 1440/1280/390 |
+| creator/keyword/失败/稀疏/截断 | render tests | synthetic/de-identified fixtures | 1440 验收；1280/390 仅诊断 |
 | 键盘、ARIA、reduced motion | source/DOM tests | 隔离页面 | Tab/方向键/Enter/Escape |
 | Corpus precise deep link | JS/Rust integration tests | 首批列表外 Work | 刷新/返回/窄屏 |
 | LIDS v7 | token/style/governance checks | page-local asset served | 白场、无横滚、无渐变 |
@@ -356,11 +369,12 @@ desktop/390 证明 `data-drawer=open`、可见 Inspector、精确 selected ref�
 |---|---|---|
 | Plan / Claim / Reality Matrix | VERIFIED | 本计划与 `docs/README.md` 索引 |
 | Work Package A | VERIFIED（branch） | RED→GREEN；隔离 PostgreSQL lifecycle 5/5、API full-path 1/1；共享 Current/Inspector parity；无 migration |
-| Work Package B | VERIFIED（branch） | 四职责抽屉、默认生命周期、Evidence tab 退役；1440/1280/390 隔离浏览器验证，390 点命中区实测 29×29px |
+| Work Package B | VERIFIED（branch） | 四职责抽屉、默认生命周期、Evidence tab 退役；1440 CSS px 验收基线通过；1280/390 历史诊断保留，1280 裁切风险已接受 |
 | Work Package C | VERIFIED（branch） | 首批列表外 Work 精确 Corpus detail；未复制 Evidence |
 | focused/workspace/governance | VERIFIED（branch） | Material 11/11、lifecycle 5/5、API full-path 1/1、workspace 155 passed / 0 failed / 86 ignored、JS 2/2；workspace check（15 条既存 dead-code warning）、fmt、diff、project governance 与 UI handbook 通过 |
 | commit/push/Draft PR | VERIFIED（delivery） | 修正提交已 push 到既有 OPEN/DRAFT PR #151；PR body 保留 `Refs #148`，未 merge、未改 Draft 状态 |
 | independent exact-head review | NOT VERIFIED | 由 Mog/Coordinator 安排 |
-| main merge | NOT AUTHORIZED / NOT VERIFIED | 不在 Claim 内 |
-| shared DB/runtime/deploy | NOT AUTHORIZED / NOT VERIFIED | 不在 Claim 内 |
+| main merge | AUTHORIZED / NOT VERIFIED | Mog 已授权由 root 在 docs closure 后执行；本 subagent 不 merge |
+| local `:3000` runtime refresh | AUTHORIZED / NOT VERIFIED | Mog 已授权由 root 在 merge 后执行；本 subagent 不切换 runtime |
+| shared DB / migration / external deploy | NOT AUTHORIZED / NOT VERIFIED | 不在 Claim 内 |
 | Mog 业务验收 | NOT VERIFIED | PR 不能替代 |
