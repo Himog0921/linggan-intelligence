@@ -388,9 +388,11 @@ fn target_drawer_lifecycle_styles_are_lids_bounded_and_mobile_safe() {
     assert!(LIDS_TOKENS.contains("--lgi-focus: #335e72"));
     assert!(SHELL_CSS.contains("--v7-focus:var(--lgi-focus)"));
     assert!(SHELL_CSS.contains(
-        "[data-theme=\"linggan-intelligence\"] :is(button,input,select,textarea,a,[href]):focus-visible"
+        "[data-theme=\"linggan-intelligence\"] :is(a,button,input,select,textarea,summary,[tabindex]):focus-visible"
     ));
+    assert!(!SHELL_CSS.contains("[data-theme=\"linggan-intelligence\"] .v7-app :focus-visible"));
     assert!(SHELL_CSS.contains("outline:2px solid var(--v7-focus); outline-offset:2px"));
+    assert!(!SHELL_CSS.contains("!important; outline"));
     assert!(!TARGET_DRAWER_CSS.contains("outline:none"));
     assert!(!TARGET_DRAWER_CSS.contains("outline:2px solid var(--lgi-signal)"));
     assert!(TARGET_DRAWER_CSS.contains(
@@ -423,7 +425,28 @@ fn invalid_lifecycle_query_is_visible_and_never_claims_defaults() {
 #[test]
 fn corpus_work_deep_link_does_not_fall_back_when_the_work_is_off_page() {
     assert!(EVIDENCE_LIBRARY_JS.contains("function directWorkItem(publicRef)"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("await selectItem(directWorkItem(requestedRef), false)"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("revealUrlSelection = false"));
+    assert!(
+        EVIDENCE_LIBRARY_JS.contains(
+            "const selectionSource = revealUrlSelection && requestedRef ? 'url' : 'auto'"
+        )
+    );
+    assert!(
+        EVIDENCE_LIBRARY_JS
+            .contains("await selectItem(directWorkItem(requestedRef), selectionSource)")
+    );
+    assert!(
+        EVIDENCE_LIBRARY_JS.contains(
+            "if (selectionSource === 'user' || selectionSource === 'url') openInspector()"
+        )
+    );
+    assert_eq!(
+        EVIDENCE_LIBRARY_JS
+            .matches("loadList({ keepSelection: true, revealUrlSelection: true })")
+            .count(),
+        2,
+        "initial URL restoration and popstate must reveal the addressed Work without adding history"
+    );
     assert!(EVIDENCE_LIBRARY_JS.contains("const requestedRef = restoreRef || model.selectedRef"));
     assert!(!EVIDENCE_LIBRARY_JS.contains(
         "model.items.find((item) => item.identity?.publicRef === (restoreRef || model.selectedRef))\n          || model.items[0]"

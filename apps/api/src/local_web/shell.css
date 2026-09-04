@@ -33,8 +33,11 @@
 .v7-nav-zh { font:600 13px/1 var(--lgi-font-sans); letter-spacing:.01em; }
 .v7-side-nav span { font-family:var(--lgi-font-sans); }
 
-/* Focus is a state, not decoration: every reachable control shows it. */
-[data-theme="linggan-intelligence"] :is(button,input,select,textarea,a,[href]):focus-visible { outline:2px solid var(--v7-focus); outline-offset:2px; }
+/* Focus is a state, not decoration: every reachable control in the themed document shows the
+ * same ring, including fixed drawers rendered beside `.v7-app` and SVG links inside them.
+ * The theme + interactive-set + state specificity deliberately outranks older page-local class
+ * rules that load later, without !important or changing any non-focus/error styling. */
+[data-theme="linggan-intelligence"] :is(a,button,input,select,textarea,summary,[tabindex]):focus-visible { outline:2px solid var(--v7-focus); outline-offset:2px; }
 @media (prefers-reduced-motion:reduce) { .v7-app * { transition:none !important; animation:none !important; } .v7-side-nav[aria-current="page"] { transform:none; } }
 
 /* ── DESIGN-003 · Header reclaim, shared by every page ──────────────────────

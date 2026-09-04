@@ -219,6 +219,42 @@ Package 3 · Creator Dossier
 
 本轮未修改 migration/schema、共享数据库、共享 runtime、插件、真实平台或部署；浏览器数据来自一次性隔离 fixture，不能充当当前真实数据运行证明。
 
+### 8.4 PR #151 remediation 3 · 实施前 Reality Matrix
+
+本轮起始 `HEAD=1c81393e2c4ddd2e490a87a2a1dcf58918c4c2d8`，本地、远端与
+PR #151 head 一致且工作树干净。继续使用 Issue #148 Claim expansion 的文件白名单；
+`evidence_library.css` 与 `collection_workspace.css` 明确禁止修改。
+
+| Claim / risk | 实施前状态 | 当前证据 | 本轮可证伪动作 |
+|---|---|---|---|
+| 390px 直接打开首批外 `/corpus/evidence?work=` 后必须看见指定 Work Inspector | **FAIL** | detail seam 能精确读取 Work，但 URL 恢复调用 `selectItem(..., false)`；移动 drawer 保持 closed，Inspector 被移出视口 | 先用 source contract 与真实 390px direct-URL/refresh 复现；只让 URL 恢复成功打开 drawer，不新增 history、不改 work ref，并验证桌面布局不回归 |
+| 全站所有可聚焦控件必须得到同一 computed focus | **FAIL** | `shell.css` 的旧 owner 未覆盖可聚焦作品 `<article>`；第一版 remediation 只以 `.v7-app` 定界，又漏掉作为 sibling 渲染的固定 drawer 与 SVG link；后加载局部 CSS 仍声明 3px Signal 或 2px Ink outline | 在 `shell.css` 建立主题文档级、明确交互元素集合与足够 cascade specificity 的 owner；不用 `!important`，不改两个局部 CSS；浏览器逐项读取 computed outline/offset |
+| 非 focus 与 error 状态不得被 focus 修正破坏 | **需回归** | 本轮只应改变 `:focus-visible` 的 outline，不应覆盖 background/border/状态色 | 在 Corpus/Collection 桌面与 390px 记录 focus 前后 background/border；检查失败态仍保留原语义与样式 |
+| Claim 外 CSS / schema / runtime /平台动作 | **FORBIDDEN** | 当前 Claim 与 coordinator 指令明确禁止 | 若需要改 `evidence_library.css` / `collection_workspace.css` 或其它未列文件则停止；运行证明只用一次性隔离 DB 与 loopback runtime |
+
+本轮表面地图只有 `/corpus/evidence?work=` 的列表、390px Inspector drawer，以及 Corpus / Collection
+共享壳内的代表性 link、button、input 与生命周期 SVG point。状态只覆盖 URL 恢复、drawer open/closed、
+focus-visible、非 focus 与既有 error；不新增内容、事实、权限或行动状态。依赖方向固定为
+`lids_tokens.css → shell.css themed-document focus owner → 后加载页面 CSS`，以及
+`URL restore → selectItem → existing detail seam → Inspector`。
+
+验收矩阵：Rust/source test 固定恢复与全局 owner 合同；JS syntax 与完整 workspace 防回归；隔离浏览器在
+desktop/390 证明 `data-drawer=open`、可见 Inspector、精确 selected ref、无新增 history，并读取 Corpus / Collection
+代表控件与生命周期 SVG 的 computed focus；治理与 UI handbook 证明文档和 LIDS 边界。
+
+### 8.5 PR #151 remediation 3 · 实施结果
+
+| Finding | branch 处置 | 隔离证明 |
+|---|---|---|
+| 390px 首批外 Work 恢复后 Inspector 不可见 | `selectItem` 使用 `url / user / auto` 来源；成功 URL 恢复与用户选择都打开移动 drawer，但只用户选择 push history，URL/auto 继续 replace | 63-Work fixture 中首批 50 外 `…0048` direct + refresh 均精确显示「补充作品 48」；Inspector rect `23.41–390px`、document `390/390`；单次 Back 返回 Collection 标记，Forward 精确恢复 |
+| 后加载页面 focus 规则覆盖共享 LIDS ring | `shell.css` owner 改为主题文档内明确交互元素集合，specificity `0,3,0`；覆盖 `.v7-app` 与 fixed drawer sibling，不改禁止 CSS、不用 `!important` | Corpus/Collection link/button/input/Work row/lifecycle SVG 在 1440/390 真实键盘下均为 `2px solid rgb(51,94,114)`、offset 2；SVG hit circle 有效外径 36px |
+| 非 focus / error 状态回归 | 规则只写 `:focus-visible` outline/offset，不重写 background、border 或语义色 | selected Work 仍为 Signal-soft；390 `QUERY_INVALID` 仍为灰底/原边框、0 point，关闭链接得到统一 ring；console logs `[]` |
+
+本轮 isolated PostgreSQL lifecycle 5/5、Material/Inspector 11/11、API/UI focused 10/10；workspace
+155 passed / 0 failed / 86 ignored，check 仅 15 条既存 dead-code warning；fmt、JS 2/2、diff、project governance
+与 UI handbook 全通过。`:3116/:56690`、browser tab/viewport、container 与 volume 已清理。本轮不修改
+`evidence_library.css` / `collection_workspace.css`，也未触碰 schema/migration、shared runtime/DB、plugin、平台或部署。
+
 ## 9. 依赖与文件边界
 
 ### 9.1 Exclusive

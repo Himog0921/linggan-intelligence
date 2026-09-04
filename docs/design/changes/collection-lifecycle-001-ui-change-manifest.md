@@ -33,13 +33,13 @@
 | baseline / patrol / trace | 保留既有职责与 URL 状态；不执行生命周期扫描 | 生命周期重复读取 |
 | drawer tabs | `overview / baseline / patrol / trace` 四个职责 | Evidence tab |
 | lifecycle API | target、as-of、window/metric、summary/exclusions/receipt、规则版本及 `workPublicRef` + percentile/median 派生点 | title/author/published/engagement Current、`selected_work`、Corpus Inspector 或敏感材料 |
-| Corpus deep link | 首批列表外的稳定 Work 仍直读 detail seam | 回退第一条或复制详情到 Collection |
+| Corpus deep link | 首批列表外的稳定 Work 仍直读 detail seam；390px 直接 URL/刷新在成功恢复后自动打开 Inspector，URL 恢复只 replace history | 回退第一条、隐藏在视口外、制造额外 Back 步骤或复制详情到 Collection |
 
 关键状态：`READY`、`INSUFFICIENT_OBSERVATION`、`NOT_APPLICABLE`、`READ_UNAVAILABLE`、`SCAN_LIMITED`、`QUERY_INVALID`。真实 `KNOWN 0` 是点；UNKNOWN 是排除原因。`linkedWorkCount` 只在未截断时为精确总量；截断时显示下限与 probe/scanned/returned，不把 2000 冒充完整总数。
 
 ## 4. 实现边界
 
-- 新增 `target_drawer.css`，只消费 `--lgi-*`；共享 Token 真源新增 `--lgi-focus`，由全局 `:focus-visible` 规则统一消费，page-local CSS 不声明颜色。该 token 影响所有 LIDS 页面焦点环；回退需同步删除 token、镜像项与 alias，不得只改本页。
+- 新增 `target_drawer.css`，只消费 `--lgi-*`；共享 Token 真源新增 `--lgi-focus`，由主题文档内明确的交互元素集合统一消费。该 owner 自然 specificity 为 `0,3,0`，覆盖 `.v7-app` 外的固定 drawer 和 SVG link，并越过后加载页面规则，不使用 `!important`、不改变非 focus/error 样式。该 token 影响所有 LIDS 页面焦点环；回退需同步删除 token、镜像项与 alias，不得只改本页。
 - SVG 每个作品点都是有 `aria-label` 的真实链接；鼠标和键盘走同一 URL。选中点只显示标题、发布时间、当前指标、创作者内分位与 Corpus 链接。
 - 图表使用 `log(1 + metric)` 视觉纵轴，原始值在可访问名和摘要中保留；一篇、零值、并列与极值不会因对数轴消失。
 - 服务端返回并渲染 `creator-percentile-v1` 与 `trailing-5-work-median-v1`；浏览器不重算分析值。
@@ -53,7 +53,7 @@
 |---|---|---|
 | 领域/数据库 | Rust unit + isolated PostgreSQL 16 | stable author、qualified time、KNOWN、上海 90 日、2000+1 receipt 已覆盖 |
 | API | Axum route tests + isolated PostgreSQL | 闭集、404/503、最小响应、敏感字段负向断言已覆盖 |
-| UI/交互 | Rust render/source + 390 浏览器 | 四 tab、默认图、非法查询、all caption、Escape/focus return、SVG a11y、无监控价值、server-owned median、深链已覆盖 |
+| UI/交互 | Rust render/source + 1440/1280/390 浏览器 | 四 tab、默认图、非法查询、all caption、Escape/focus return、SVG a11y、无监控价值、server-owned median、首批外 Work 直接 URL/刷新/Back/Forward 已覆盖 |
 | CSS | page-local source guard + 隔离视口 | 以 `ACC-COLLECTION-LIFECYCLE-001` 最终记录为准 |
 | 现实世界 | 未执行 shared runtime、平台访问或部署 | NOT VERIFIED；不由自动检查替代 |
 | Mog 业务验收 | Draft PR 后待用户检查 exact head | NOT VERIFIED |

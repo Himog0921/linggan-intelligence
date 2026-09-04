@@ -50,7 +50,7 @@
 ## 4. 已批准的设计组合
 
 - 全局页头由 `apps/api/src/local_web/shell.rs` 统一生成，Corpus 与 Collection 共用同一实现；`shell.css` 承载页头、上下文行与 216px 导轨，两页共用。
-- 页面局部样式在 `collection_workspace.css`；Issue #148 的生命周期与抽屉增量隔离在 `target_drawer.css`，只消费 `--lgi-*`，不写字面色值或渐变。review remediation 在唯一 Token 真源新增共享 `--lgi-focus`，所有 LIDS 页面由同一全局 2px/2px focus 规则消费。
+- 页面局部样式在 `collection_workspace.css`；Issue #148 的生命周期与抽屉增量隔离在 `target_drawer.css`，只消费 `--lgi-*`，不写字面色值或渐变。review remediation 在唯一 Token 真源新增共享 `--lgi-focus`，由主题文档级交互元素 selector 统一提供 2px/2px focus；它同时覆盖 `.v7-app` 与作为 sibling 的固定 drawer，不依赖页面 CSS 或 `!important`。
 - 深色实时观察流是全产品唯一的深色面，色值以 `--lgi-stream-*` 十项 token 进入唯一色值源（当时 117 → 127 项；当前真源随后演进为 132 项）。
 - 目标抽屉与生命周期全部由服务端和 URL 状态渲染。散点、对数 y 轴、创作者内分位与 `trailing-5-work-median-v1` 均由服务端投影提供或计算；前端不二次计算滚动中位线。
 
@@ -66,7 +66,7 @@ Mog 于 2026-08-26 确认保留 V4 的深色终端配色。它与 `system.md` §
 | 切换运行态三模式 | 可用 | 仅页面跳转 |
 | 用地址打开目标抽屉、切四个职责 tab | 可用 | 仅本机读取与地址变化；Evidence tab 不存在 |
 | 切换生命周期 `recent_90_days/all` 与五指标 | creator 概览可用 | target-scoped bounded read；不访问平台 |
-| 选择散点并进入语料 | 可用 | `life_work` 仅为 UI 状态；Corpus 精确读取该 Work，不复制 Evidence |
+| 选择散点并进入语料 | 可用 | `life_work` 仅为 UI 状态；Corpus 精确读取该 Work，不复制 Evidence；390px 直接 URL/刷新在读取成功后自动打开 Inspector，不新增 history |
 | Escape 或关闭抽屉 | 可用 | 保留列表 filter 与既有 `sort=last` 上下文；焦点返回原 target opener |
 | 基线/巡检/追踪或 keyword drawer | 可用 | 不执行 lifecycle 大查询；keyword 明示不适用 |
 

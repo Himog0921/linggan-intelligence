@@ -29,7 +29,7 @@
 | `all` 窗口 | caption 明示全部合格历史 | VERIFIED | render seam VERIFIED |
 | 退役/未知 `dtab` | 同一 parser 归一 Overview 并实际读取 | VERIFIED | `dtab=evidence` 隔离页面 VERIFIED |
 | 选中作品 | 只显示最小摘要并跳 Corpus | VERIFIED | 390 DOM：point link `tabIndex=0`、具名、精确 deep link |
-| Work 不在首批列表 | 直读目标 detail，不回退第一项 | VERIFIED | JS source contract VERIFIED |
+| Work 不在首批列表 | 直读目标 detail，不回退第一项；390px 自动打开 Inspector，不新增 history | VERIFIED | 63-Work fixture 的第 51–63 范围对象：direct/refresh/Back/Forward VERIFIED |
 | 读取失败 | 说读不到，不说没有作品 | VERIFIED | server-rendered fallback VERIFIED |
 | Escape / 返回焦点 | 保留 filter 与既有 `sort=last`，关闭后回原 target | VERIFIED | 390 浏览器键盘 VERIFIED |
 
@@ -37,7 +37,7 @@
 
 - 设计方向: LIDS v7 白场研究仪器；生命周期是唯一视觉核心；无渐变/玻璃/永久动画。
 - 响应式: 隔离 loopback 在 1440/1280 截图走查通过；CDP 强制 390×844 后 `document/body/drawer` 均为 `scrollWidth=clientWidth=390`，drawer body 为 `390/390`，panel 为 `358/358`，figure 为 `356/356`，receipt/controls 为 `358/358`。
-- 可访问性: 四个真实 tab link；40px lifecycle controls；SVG `role=img`、title/desc；每点为具名链接。390 实际 Tab 到 chip 与 SVG point 均得到共享 `#335e72`、2px outline、2px offset；点同时有 4px stroke 与 scale，不以颜色为唯一指示；reduced-motion 关闭过渡。
+- 可访问性: 四个真实 tab link；40px lifecycle controls；SVG `role=img`、title/desc；每点为具名链接。Corpus/Collection 代表 link、button、input、Work row 与 SVG point 在 1440/390 实际键盘遍历中均得到共享 `#335e72`、2px outline、2px offset。SVG 透明 hit circle 为 `r=6 + 24px non-scaling stroke`，有效外径 36px；可见点另有 4px stroke 与 scale，不以颜色为唯一指示；reduced-motion 关闭过渡。
 - Data Truth: `READY / INSUFFICIENT_OBSERVATION / NOT_APPLICABLE / READ_UNAVAILABLE / SCAN_LIMITED` 分开；UNKNOWN 不显示成 0。
 - 截图/录屏: 仅保存在系统临时目录，不提交 Git。
 - 视口说明: Chrome headless 的 `--window-size=390` 实际 `innerWidth` 下限为 500，不能作为 390 证明；最终窄屏证据来自 CDP `Emulation.setDeviceMetricsOverride(390×844)` 的 DOM 几何。首次窄屏走查发现并修复 grid/flex min-content 与 receipt 长串换行问题。
@@ -49,7 +49,7 @@
 | 设计规格一致 | VERIFIED（源码/测试） | 四 tab、page-local token CSS、无禁用模块 | 仍待 Mog 视觉判断 |
 | 前端/组件实现 | VERIFIED（branch） | server-rendered SVG + Corpus deep link | 不等于 shared runtime |
 | 自动检查 | VERIFIED（branch） | `cargo test/check --workspace --all-targets --locked`、fmt、双 JS syntax、diff 与两项 governance 全通过 | PostgreSQL ignore suites 另以本卡隔离运行 |
-| 隔离真实页面 | VERIFIED（脱敏 fixture） | PostgreSQL 16 + loopback `:3108`；既有 1440/1280 走查及 remediation 后 CDP 390 DOM/overflow/Tab/Escape/query-invalid/tab normalization | 不是当前真实数据或 shared runtime 证明；`:3108` 与专用 browser DB 已清理 |
+| 隔离真实页面 | VERIFIED（脱敏 fixture） | PostgreSQL 16 + loopback `:3108/:3116`；1440/1280/390 DOM/overflow、direct/refresh/history、Tab/focus、query-invalid 与 lifecycle hit target | 不是当前真实数据或 shared runtime 证明；两个 runtime、browser tab/viewport 与专用数据库均已清理 |
 | shared DB/runtime/deploy | NOT VERIFIED / 未授权 | 未执行 | Claim 明确排除 |
 | Mog / 业务验收 | NOT VERIFIED | Draft PR 后由 Mog 验收 exact head | 不由本报告替代 |
 
@@ -60,6 +60,7 @@
 - 生命周期查询最多扫描 2000 + 1 探针，因此页面只在 creator overview 调用；其它 tab/keyword 不放大读取。
 - 隔离 PostgreSQL 16：lifecycle 5/5、API full-path 1/1 通过；固定上海边界同时验证投影展示为 `2026-06-07` 与 `2026-09-04`，共享 Current parity 覆盖相同 `observed_at` tie。
 - Remediation 390 实测：document/body/drawer `390/390`、panel `358/358`、figure `356/356`；Escape 返回 `?filter=creator&sort=last#target-…` 并恢复 opener 焦点；非法 query 无 active 默认项；`dtab=evidence` 显示 Overview 且有点；console warn/error 0。
+- Remediation 3 以 63 个脱敏 Work 构造首批外 detail：`30000000-0000-4000-8000-000000000048` 在 390 direct/refresh 后均显示「补充作品 48」，drawer open、Inspector rect `23.41–390px`、document `390/390`；从 Collection 标记进入后单次 Back 立即返回，Forward 精确恢复。Corpus/Collection desktop+390 computed focus 全部为 2px solid `rgb(51,94,114)` / offset 2；`QUERY_INVALID` 非焦点状态样式未变；console logs `[]`。
 - Workspace：`cargo test --workspace --all-targets --locked`、`cargo check --workspace --all-targets --locked`、`cargo fmt --all -- --check`、`git diff --check`、两个 JS syntax、`scripts/check-project-governance.sh`、`scripts/verify-ui-design-handbook.sh` 全通过；既有 API 16 项 dead-code warning 保留。
-- `:3108`、浏览器 tab、专用 browser DB 与 isolated PostgreSQL container 已清理。
+- `:3108/:3116`、浏览器 tab/viewport、专用 browser DB 与 isolated PostgreSQL container/volume 已清理。
 - 不得由本报告推断真实平台历史完整、共享运行时已切换、Issue 已关闭或 Mog 已验收。
