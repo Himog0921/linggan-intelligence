@@ -71,6 +71,7 @@
 | [design/pages/topic-workspace-page.md](design/pages/topic-workspace-page.md) | 交付分支权威；PAGE-TOPIC-WORKSPACE-001 | 真实但明确暂定的 L2 Topic 工作区：定义、人工裁定、冻结材料与来源边界 |
 | [design/changes/topic-workspace-real-001-ui-change-manifest.md](design/changes/topic-workspace-real-001-ui-change-manifest.md) | 交付分支实现；Issue #112 | Topic runtime page 的来源回执、LIDS 影响、状态与响应式变更清单 |
 | [design/changes/collection-lifecycle-001-ui-change-manifest.md](design/changes/collection-lifecycle-001-ui-change-manifest.md) | 交付分支实现；Issue #148 | creator 生命周期读模型、四职责目标抽屉、Evidence tab 退役与 Corpus 精确深链的变更清单 |
+| [design/changes/observation-target-dossier-ui-001-ui-change-manifest.md](design/changes/observation-target-dossier-ui-001-ui-change-manifest.md) | 交付分支实现；Issue #158 | 观察目标 creator/keyword 宽表、200 篇上限渐进建档、三职责档案工作区与两级生命周期散点合同 |
 | [design/changes/collection-control-closure-001-ui-change-manifest.md](design/changes/collection-control-closure-001-ui-change-manifest.md) | 交付分支实现；Issue #149 / Package 2 + V4 UI 扩展 | Collection Control 规则 modal、账号准入、五面控制事实与 V4 桌面工作区复刻的变更清单 |
 | [design/pages/plugin-producer-popup.md](design/pages/plugin-producer-popup.md) | 权威当前 | `PAGE-PLUGIN-001`：Linggan 自有 Browser Producer popup 的身份、本机接纳准备度与受限手动 Discovery receipt |
 | [design/changes/local-001a-evidence-library-ui-change-manifest.md](design/changes/local-001a-evidence-library-ui-change-manifest.md) | 权威当前；LOCAL-001A | Issue #25 的 UI 来源、范围、例外和证明边界 |
@@ -105,6 +106,7 @@
 | [design/acceptance/work-resource-read-001-visual-acceptance.md](design/acceptance/work-resource-read-001-visual-acceptance.md) | 一次性报告 | `ACC-WORK-RESOURCE-READ-001`：共享作品资源、目标/作者关系、时间资格和三种排版的分层验收；真实视觉与部署仍未核验 |
 | [design/acceptance/topic-workspace-real-001-visual-acceptance.md](design/acceptance/topic-workspace-real-001-visual-acceptance.md) | 一次性报告；Issue #112 | `ACC-TOPIC-WORKSPACE-REAL-001`：暂定 Topic 事务、API、页面与未证明边界的分层验收 |
 | [design/acceptance/collection-lifecycle-001-visual-acceptance.md](design/acceptance/collection-lifecycle-001-visual-acceptance.md) | 一次性报告；Issue #148 | `ACC-COLLECTION-LIFECYCLE-001`：生命周期读模型、隔离浏览器视口、精确深链与未部署边界的分层验收 |
+| [design/acceptance/observation-target-dossier-ui-001-visual-acceptance.md](design/acceptance/observation-target-dossier-ui-001-visual-acceptance.md) | 一次性报告；Issue #158 | `ACC-OBSERVATION-TARGET-DOSSIER-UI-001`：creator/keyword 目录、档案工作区、渐进建档后果与 1440 桌面分层验收 |
 | [design/acceptance/collection-five-page-v4-ui-001-visual-acceptance.md](design/acceptance/collection-five-page-v4-ui-001-visual-acceptance.md) | 一次性报告；Issue #149 V4 UI 扩展 | `ACC-COLLECTION-FIVE-PAGE-V4-UI-001`：五页结构、隔离 PostgreSQL、1440×900 浏览器互动与未部署边界 |
 | [design/acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md](design/acceptance/dev-05-xhs-content-observation-001-visual-acceptance.md) | 一次性报告 | `ACC-DEV-05-XHS-CONTENT-OBSERVATION-001`：Issue #133 的当前/历史字段、Coverage 历史与有界复观测分层验收；未重载运行时、未进行真实 XHS 或 Mog 验收 |
 | [design/acceptance/evidence-v9-001-visual-acceptance.md](design/acceptance/evidence-v9-001-visual-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-V9-001`：V9 研读密度、材料完整度口径、Inspector 宽度与 LOCAL MEDIA/Lightbox 的真实数据走查；多图链路只有一个样本，未部署 |

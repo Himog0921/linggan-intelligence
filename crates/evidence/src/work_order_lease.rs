@@ -311,8 +311,7 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
             };
             sqlx::query(
                 "UPDATE collection_observation_target SET lifecycle_state=$2, \
-                     lifecycle_changed_at=scope_001_now(), \
-                     last_patrol_succeeded_at=scope_001_now() \
+                     lifecycle_changed_at=scope_001_now() \
                  WHERE target_ref=$1 AND lifecycle_state='archiving'",
             )
             .bind(target_ref)

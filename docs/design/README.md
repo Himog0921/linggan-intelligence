@@ -81,6 +81,8 @@
 | [changes/design-011-collection-surfaces-v7-ui-change-manifest.md](changes/design-011-collection-surfaces-v7-ui-change-manifest.md) | DESIGN-011：生产流与执行工位落地 v7、能力矩阵四态与已知限制 | 权威当前 |
 | [changes/collection-lifecycle-001-ui-change-manifest.md](changes/collection-lifecycle-001-ui-change-manifest.md) | COLLECTION-LIFECYCLE-001：Issue #148 creator 生命周期、四职责抽屉与 Corpus 精确深链 | 权威当前 |
 | [acceptance/collection-lifecycle-001-visual-acceptance.md](acceptance/collection-lifecycle-001-visual-acceptance.md) | ACC-COLLECTION-LIFECYCLE-001：Issue #148 自动、隔离视口与未部署边界 | 一次性报告 |
+| [changes/observation-target-dossier-ui-001-ui-change-manifest.md](changes/observation-target-dossier-ui-001-ui-change-manifest.md) | OBSERVATION-TARGET-DOSSIER-UI-001：creator/keyword 宽表、200 篇上限渐进建档与三职责档案工作区 | 交付分支实现；Issue #158 |
+| [acceptance/observation-target-dossier-ui-001-visual-acceptance.md](acceptance/observation-target-dossier-ui-001-visual-acceptance.md) | ACC-OBSERVATION-TARGET-DOSSIER-UI-001：Issue #158 的自动、隔离 PostgreSQL、1440 浏览器与未部署边界 | 一次性报告 |
 | [acceptance/collection-five-page-v4-ui-001-visual-acceptance.md](acceptance/collection-five-page-v4-ui-001-visual-acceptance.md) | ACC-COLLECTION-FIVE-PAGE-V4-UI-001：五页结构、隔离 PostgreSQL、1440×900 浏览器互动与未部署边界 | 一次性报告 |
 | [acceptance/design-009-runtime-capacity-surface-acceptance.md](acceptance/design-009-runtime-capacity-surface-acceptance.md) | ACC-RUNTIME-001：产能判定、状态诚实性与视觉的验收记录 | 一次性报告 |
 | [pages/topic-intelligence-reference.html](pages/topic-intelligence-reference.html) | 可本地打开的合成静态参考实现；不读取、写入或声称真实系统事实 | 权威当前 |

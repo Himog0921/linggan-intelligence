@@ -30,6 +30,10 @@ pub enum AcquisitionChainError {
     TargetNotRequestable { state: String },
     #[error("material deepening needs between 1 and 200 distinct content targets")]
     InvalidMaterialTargets,
+    #[error(
+        "progressive creator archiving requires an authorization that permits 200 works; current bound is {current_bound}"
+    )]
+    ProgressiveArchiveAuthorizationTooSmall { current_bound: i32 },
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -60,6 +64,16 @@ pub struct RequestLeaseOutcome {
     pub request: RequestOutcome,
     pub lease: Option<IssuedLease>,
 }
+
+#[derive(Debug, Default)]
+pub struct ProgressiveArchiveTickSummary {
+    pub dispatched: Vec<Uuid>,
+    pub skipped: Vec<(Uuid, String)>,
+}
+
+const PROGRESSIVE_ARCHIVE_VERSION: i32 = 1;
+const PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT: i32 = 200;
+const PROGRESSIVE_ARCHIVE_BATCH_SIZE: i64 = 3;
 
 /// One already-admitted material identity that a person has explicitly selected for deepening.
 ///
@@ -168,6 +182,117 @@ pub async fn request_admit_and_lease(
         valid_for_minutes,
     )
     .await
+}
+
+/// Start or resume the creator dossier contract used by the Observation Target page.
+///
+/// This is deliberately separate from the generic deep-archive request.  The visible action
+/// promises a 200-Work directory ceiling and subsequent bounded detail batches, so a narrower
+/// grant must be reported instead of silently turning that promise into 10 or 20 Works.
+pub async fn request_progressive_archive_and_lease(
+    database: &Database,
+    target_ref: Uuid,
+    purpose: &str,
+    requested_by: &str,
+    valid_for_minutes: i32,
+) -> Result<RequestLeaseOutcome, RequestLeaseError> {
+    if !acquisition_chain_schema_is_ready(database)
+        .await
+        .map_err(AcquisitionChainError::from)?
+        || !lease_schema_is_ready(database)
+            .await
+            .map_err(AcquisitionChainError::from)?
+    {
+        return Err(AcquisitionChainError::SchemaUnavailable.into());
+    }
+    let mut transaction = database
+        .pool()
+        .begin()
+        .await
+        .map_err(AcquisitionChainError::from)?;
+    let target: Option<(String, String)> = sqlx::query_as(
+        "SELECT platform,target_kind FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(AcquisitionChainError::from)?;
+    let Some((platform, target_kind)) = target else {
+        return Err(AcquisitionChainError::UnknownTarget.into());
+    };
+    let qualifying_authorization: Option<Uuid> = sqlx::query_scalar(
+        "SELECT authorization_ref FROM collection_acquisition_authorization \
+         WHERE platform=$1 AND target_kind=$2 AND lane='deep_archive' AND purpose=$3 \
+           AND revoked_at IS NULL AND expires_at>scope_001_now() \
+           AND (max_works_per_target IS NULL OR max_works_per_target >= $4) \
+         ORDER BY expires_at DESC LIMIT 1 FOR UPDATE",
+    )
+    .bind(&platform)
+    .bind(&target_kind)
+    .bind(purpose)
+    .bind(PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT)
+    .fetch_optional(&mut *transaction)
+    .await
+    .map_err(AcquisitionChainError::from)?;
+    if qualifying_authorization.is_none() {
+        let smaller_bound: Option<i32> = sqlx::query_scalar(
+            "SELECT max(max_works_per_target) FROM collection_acquisition_authorization \
+             WHERE platform=$1 AND target_kind=$2 AND lane='deep_archive' AND purpose=$3 \
+               AND revoked_at IS NULL AND expires_at>scope_001_now()",
+        )
+        .bind(&platform)
+        .bind(&target_kind)
+        .bind(purpose)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(AcquisitionChainError::from)?;
+        if let Some(current_bound) = smaller_bound {
+            transaction
+                .rollback()
+                .await
+                .map_err(AcquisitionChainError::from)?;
+            return Err(
+                AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { current_bound }
+                    .into(),
+            );
+        }
+    }
+    let request = request_and_admit_in_transaction_with_progressive_resume(
+        &mut transaction,
+        target_ref,
+        "deep_archive",
+        purpose,
+        requested_by,
+        &[],
+        qualifying_authorization,
+        true,
+    )
+    .await?;
+    let lease = if let Some(work_order_ref) = request.work_order_ref {
+        write_progressive_marker(
+            &mut transaction,
+            work_order_ref,
+            work_order_ref,
+            PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT,
+        )
+        .await
+        .map_err(AcquisitionChainError::from)?;
+        Some(
+            issue_work_order_lease_in_transaction(
+                &mut transaction,
+                work_order_ref,
+                valid_for_minutes,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    transaction
+        .commit()
+        .await
+        .map_err(AcquisitionChainError::from)?;
+    Ok(RequestLeaseOutcome { request, lease })
 }
 
 /// Admit one exact, person-selected set of existing materials for bounded deepening.
@@ -371,6 +496,30 @@ pub(crate) async fn request_and_admit_in_transaction(
     material_targets: &[MaterialDeepeningTarget],
     required_authorization_ref: Option<Uuid>,
 ) -> Result<RequestOutcome, AcquisitionChainError> {
+    request_and_admit_in_transaction_with_progressive_resume(
+        transaction,
+        target_ref,
+        lane,
+        purpose,
+        requested_by,
+        material_targets,
+        required_authorization_ref,
+        false,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn request_and_admit_in_transaction_with_progressive_resume(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    lane: &str,
+    purpose: &str,
+    requested_by: &str,
+    material_targets: &[MaterialDeepeningTarget],
+    required_authorization_ref: Option<Uuid>,
+    allow_progressive_resume: bool,
+) -> Result<RequestOutcome, AcquisitionChainError> {
     let target: Option<(String, String, String)> = sqlx::query_as(
         "SELECT platform, target_kind, lifecycle_state \
          FROM collection_observation_target WHERE target_ref = $1 FOR UPDATE",
@@ -395,6 +544,10 @@ pub(crate) async fn request_and_admit_in_transaction(
         "deep_archive" if !material_targets.is_empty() => matches!(
             lifecycle_state.as_str(),
             "archiving" | "archived" | "monitoring" | "paused"
+        ),
+        "deep_archive" if allow_progressive_resume && target_kind == "creator" => matches!(
+            lifecycle_state.as_str(),
+            "pending_decision" | "archiving" | "archived" | "monitoring" | "paused"
         ),
         // `archiving` is accepted only so the scheduler can recover an expired bounded baseline.
         // Admission still merges a live lease and the scheduler caps the number of Work Orders.
@@ -599,6 +752,7 @@ async fn gather_facts(
          WHERE platform = $1 AND target_kind = $2 AND lane = $3 \
            AND revoked_at IS NULL AND expires_at > scope_001_now() \
            AND purpose=$4 AND ($5::uuid IS NULL OR authorization_ref=$5) \
+           AND ($6::integer=0 OR max_works_per_target IS NULL OR max_works_per_target >= $6) \
          ORDER BY expires_at DESC LIMIT 1 FOR UPDATE",
     )
     .bind(platform)
@@ -606,6 +760,7 @@ async fn gather_facts(
     .bind(lane)
     .bind(purpose)
     .bind(required_authorization_ref)
+    .bind(i32::try_from(material_targets.len()).unwrap_or(i32::MAX))
     .fetch_optional(&mut **transaction)
     .await?;
 
@@ -656,51 +811,55 @@ async fn gather_facts(
         .await?
     };
 
-    let (authorization_ref, authorization_failure) =
-        if let Some((authorization_ref, max_targets)) = authorization {
-            let target_count: i64 = sqlx::query_scalar(
-                "SELECT count(DISTINCT work_order.target_ref) \
+    let (authorization_ref, authorization_failure) = if let Some((authorization_ref, max_targets)) =
+        authorization
+    {
+        let target_count: i64 = sqlx::query_scalar(
+            "SELECT count(DISTINCT work_order.target_ref) \
              FROM collection_work_order work_order \
              JOIN collection_admission_decision decision USING(decision_ref) \
              WHERE decision.authorization_ref=$1 AND work_order.target_ref<>$2",
-            )
-            .bind(authorization_ref)
-            .bind(target_ref)
-            .fetch_one(&mut **transaction)
-            .await?;
-            if max_targets.is_some_and(|limit| target_count >= i64::from(limit)) {
-                (None, Some(AuthorizationBoundaryFailure::TargetLimitReached))
-            } else {
-                (Some(authorization_ref), None)
-            }
+        )
+        .bind(authorization_ref)
+        .bind(target_ref)
+        .fetch_one(&mut **transaction)
+        .await?;
+        if max_targets.is_some_and(|limit| target_count >= i64::from(limit)) {
+            (None, Some(AuthorizationBoundaryFailure::TargetLimitReached))
         } else {
-            let status: (bool, bool) = sqlx::query_as(
+            (Some(authorization_ref), None)
+        }
+    } else {
+        let status: (bool, bool) = sqlx::query_as(
                 "SELECT \
                  EXISTS (SELECT 1 FROM collection_acquisition_authorization \
                          WHERE platform=$1 AND target_kind=$2 AND lane=$3 \
                            AND revoked_at IS NULL AND expires_at>scope_001_now() \
                            AND purpose<>$4 \
-                           AND ($5::uuid IS NULL OR authorization_ref=$5)), \
+                           AND ($5::uuid IS NULL OR authorization_ref=$5) \
+                           AND ($6::integer=0 OR max_works_per_target IS NULL OR max_works_per_target >= $6)), \
                  EXISTS (SELECT 1 FROM collection_acquisition_authorization \
                          WHERE platform=$1 AND target_kind=$2 AND lane=$3 \
-                           AND ($5::uuid IS NULL OR authorization_ref=$5))",
+                           AND ($5::uuid IS NULL OR authorization_ref=$5) \
+                           AND ($6::integer=0 OR max_works_per_target IS NULL OR max_works_per_target >= $6))",
             )
             .bind(platform)
             .bind(target_kind)
             .bind(lane)
             .bind(purpose)
             .bind(required_authorization_ref)
+            .bind(i32::try_from(material_targets.len()).unwrap_or(i32::MAX))
             .fetch_one(&mut **transaction)
             .await?;
-            let failure = if status.0 {
-                AuthorizationBoundaryFailure::PurposeMismatch
-            } else if status.1 {
-                AuthorizationBoundaryFailure::ExpiredOrRevoked
-            } else {
-                AuthorizationBoundaryFailure::Missing
-            };
-            (None, Some(failure))
+        let failure = if status.0 {
+            AuthorizationBoundaryFailure::PurposeMismatch
+        } else if status.1 {
+            AuthorizationBoundaryFailure::ExpiredOrRevoked
+        } else {
+            AuthorizationBoundaryFailure::Missing
         };
+        (None, Some(failure))
+    };
 
     let capacity = establish_capacity(
         transaction,
@@ -712,7 +871,7 @@ async fn gather_facts(
     )
     .await?;
 
-    let monitor_rule_revision_ref = if requested_by == "agent" {
+    let monitor_rule_revision_ref = if requested_by == "agent" && lane == "patrol" {
         sqlx::query_scalar(
             "SELECT active_monitor_rule_revision_ref FROM collection_observation_target \
              WHERE target_ref=$1",
@@ -983,4 +1142,247 @@ async fn write_work_order(
     }
 
     Ok(work_order_ref)
+}
+
+async fn write_progressive_marker(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+    root_work_order_ref: Uuid,
+    work_order_limit: i32,
+) -> Result<(), sqlx::Error> {
+    let marker = json!({
+        "version": PROGRESSIVE_ARCHIVE_VERSION,
+        "rootWorkOrderRef": root_work_order_ref,
+        "maxDirectoryWorks": PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT,
+        "batchSize": PROGRESSIVE_ARCHIVE_BATCH_SIZE,
+        "commentLimit": 30,
+        "replyExpandLimit": 2,
+        "acquireMedia": true,
+        "allowOcr": true,
+        "allowAsr": true,
+    });
+    sqlx::query(
+        "UPDATE collection_work_order \
+         SET max_works=$2, \
+             stop_conditions=jsonb_set( \
+               jsonb_set(stop_conditions,'{maximumQuota}',to_jsonb($2::integer),true), \
+               '{progressiveArchive}',$3::jsonb,true) \
+         WHERE work_order_ref=$1",
+    )
+    .bind(work_order_ref)
+    .bind(work_order_limit)
+    .bind(marker)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+/// Advance versioned creator dossier plans by one small, frozen material batch per target.
+///
+/// The scheduler never downloads or parses platform data. It only turns already accepted,
+/// target-scoped directory facts into the next explicitly bounded Work Order. Re-running it is
+/// safe: the target row lock and the live-scope exclusion are held in the same transaction that
+/// writes the child scope and Lease.
+pub async fn run_progressive_archives(
+    database: &Database,
+) -> Result<ProgressiveArchiveTickSummary, RequestLeaseError> {
+    if !acquisition_chain_schema_is_ready(database)
+        .await
+        .map_err(AcquisitionChainError::from)?
+        || !lease_schema_is_ready(database)
+            .await
+            .map_err(AcquisitionChainError::from)?
+    {
+        return Err(AcquisitionChainError::SchemaUnavailable.into());
+    }
+    let plans: Vec<(Uuid, Uuid, Uuid, String)> = sqlx::query_as(
+        "SELECT work_order.target_ref,work_order.work_order_ref,decision.authorization_ref,request.purpose \
+         FROM collection_work_order work_order \
+         JOIN collection_admission_decision decision USING (decision_ref) \
+         JOIN collection_acquisition_request request USING (request_ref) \
+         JOIN collection_observation_target target USING (target_ref) \
+         WHERE work_order.lane='deep_archive' \
+           AND work_order.stop_conditions #>> '{progressiveArchive,version}'=$1 \
+           AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order.work_order_ref::text \
+           AND decision.authorization_ref IS NOT NULL \
+           AND target.lifecycle_state <> 'dismissed' \
+         ORDER BY work_order.created_at \
+         LIMIT 50",
+    )
+    .bind(PROGRESSIVE_ARCHIVE_VERSION.to_string())
+    .fetch_all(database.pool())
+    .await
+    .map_err(AcquisitionChainError::from)?;
+
+    let mut summary = ProgressiveArchiveTickSummary::default();
+    for (target_ref, root_work_order_ref, authorization_ref, purpose) in plans {
+        let mut transaction = database
+            .pool()
+            .begin()
+            .await
+            .map_err(AcquisitionChainError::from)?;
+        let state: Option<(String, bool)> = sqlx::query_as(
+            "SELECT lifecycle_state,monitoring_enabled FROM collection_observation_target \
+             WHERE target_ref=$1 FOR UPDATE",
+        )
+        .bind(target_ref)
+        .fetch_optional(&mut *transaction)
+        .await
+        .map_err(AcquisitionChainError::from)?;
+        let Some((lifecycle_state, monitoring_enabled)) = state else {
+            transaction
+                .rollback()
+                .await
+                .map_err(AcquisitionChainError::from)?;
+            summary
+                .skipped
+                .push((target_ref, "target_not_found".to_owned()));
+            continue;
+        };
+        if lifecycle_state == "dismissed" {
+            transaction
+                .rollback()
+                .await
+                .map_err(AcquisitionChainError::from)?;
+            summary
+                .skipped
+                .push((target_ref, "target_dismissed".to_owned()));
+            continue;
+        }
+        let authorization_valid: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM collection_acquisition_authorization \
+             WHERE authorization_ref=$1 AND revoked_at IS NULL AND expires_at>scope_001_now() \
+               AND (max_works_per_target IS NULL OR max_works_per_target >= $2))",
+        )
+        .bind(authorization_ref)
+        .bind(PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(AcquisitionChainError::from)?;
+        if !authorization_valid {
+            transaction
+                .rollback()
+                .await
+                .map_err(AcquisitionChainError::from)?;
+            summary
+                .skipped
+                .push((target_ref, "authorization_expired_or_too_small".to_owned()));
+            continue;
+        }
+        let live_material_scope: bool = sqlx::query_scalar(
+            "SELECT EXISTS ( \
+               SELECT 1 FROM collection_work_order candidate \
+               JOIN collection_work_order_material_target scope USING (work_order_ref) \
+               JOIN collection_work_order_lease lease USING (work_order_ref) \
+               WHERE candidate.target_ref=$1 AND candidate.lane='deep_archive' \
+                 AND lease.released_at IS NULL AND lease.expires_at>scope_001_now())",
+        )
+        .bind(target_ref)
+        .fetch_one(&mut *transaction)
+        .await
+        .map_err(AcquisitionChainError::from)?;
+        if live_material_scope {
+            transaction
+                .rollback()
+                .await
+                .map_err(AcquisitionChainError::from)?;
+            summary
+                .skipped
+                .push((target_ref, "detail_batch_in_flight".to_owned()));
+            continue;
+        }
+        let content_refs: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT discovered.content_public_ref FROM ( \
+               SELECT finding.content_public_ref,min(finding.created_at) AS first_seen \
+               FROM linggan_material_discovery_finding finding \
+               JOIN linggan_runtime_capture_package package USING (package_ref) \
+               JOIN linggan_runtime_submission_receipt receipt USING (package_ref) \
+               JOIN linggan_runtime_record_disposition disposition \
+                 ON disposition.package_ref=finding.package_ref \
+                AND disposition.record_ordinal=finding.record_ordinal \
+               JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+               JOIN collection_work_order_lease lease USING (lease_ref) \
+               JOIN collection_work_order source_order USING (work_order_ref) \
+               WHERE source_order.target_ref=$1 \
+                 AND finding.discovery_kind='profile_discovery' \
+                 AND (source_order.lane='deep_archive' OR $2) \
+                 AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+                 AND receipt.material_admission='ACCEPTED' \
+                 AND disposition.disposition <> 'quarantined' \
+                 AND NOT EXISTS ( \
+                   SELECT 1 FROM linggan_material_content_detail detail \
+                   WHERE detail.content_public_ref=finding.content_public_ref) \
+                 AND NOT EXISTS ( \
+                   SELECT 1 FROM collection_work_order scoped_order \
+                   JOIN collection_work_order_material_target scope USING (work_order_ref) \
+                   JOIN collection_work_order_lease scoped_lease USING (work_order_ref) \
+                   WHERE scoped_order.target_ref=$1 \
+                     AND scope.content_public_ref=finding.content_public_ref \
+                     AND scoped_lease.released_at IS NULL \
+                     AND scoped_lease.expires_at>scope_001_now()) \
+               GROUP BY finding.content_public_ref \
+             ) discovered \
+             ORDER BY discovered.first_seen,discovered.content_public_ref \
+             LIMIT $3",
+        )
+        .bind(target_ref)
+        .bind(monitoring_enabled)
+        .bind(PROGRESSIVE_ARCHIVE_BATCH_SIZE)
+        .fetch_all(&mut *transaction)
+        .await
+        .map_err(AcquisitionChainError::from)?;
+        if content_refs.is_empty() {
+            transaction
+                .rollback()
+                .await
+                .map_err(AcquisitionChainError::from)?;
+            continue;
+        }
+        let material_targets = content_refs
+            .iter()
+            .map(|content_public_ref| MaterialDeepeningTarget {
+                content_public_ref: *content_public_ref,
+                comment_limit: 30,
+                reply_expand_limit: 2,
+                acquire_media: true,
+                allow_ocr: true,
+                allow_asr: true,
+            })
+            .collect::<Vec<_>>();
+        let request = request_and_admit_in_transaction_with_progressive_resume(
+            &mut transaction,
+            target_ref,
+            "deep_archive",
+            &purpose,
+            "agent",
+            &material_targets,
+            Some(authorization_ref),
+            true,
+        )
+        .await?;
+        let Some(work_order_ref) = request.work_order_ref else {
+            let reason = request.reason_code.to_owned();
+            transaction
+                .commit()
+                .await
+                .map_err(AcquisitionChainError::from)?;
+            summary.skipped.push((target_ref, reason));
+            continue;
+        };
+        write_progressive_marker(
+            &mut transaction,
+            work_order_ref,
+            root_work_order_ref,
+            i32::try_from(content_refs.len()).unwrap_or(i32::MAX),
+        )
+        .await
+        .map_err(AcquisitionChainError::from)?;
+        issue_work_order_lease_in_transaction(&mut transaction, work_order_ref, 180).await?;
+        transaction
+            .commit()
+            .await
+            .map_err(AcquisitionChainError::from)?;
+        summary.dispatched.push(target_ref);
+    }
+    Ok(summary)
 }

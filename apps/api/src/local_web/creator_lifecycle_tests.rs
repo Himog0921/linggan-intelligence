@@ -75,18 +75,7 @@ async fn lifecycle_api_returns_a_minimal_target_projection() {
         payload.pointer("/status").and_then(Value::as_str),
         Some("NOT_APPLICABLE")
     );
-    assert_eq!(
-        payload
-            .pointer("/analysis/rollingMedianVersion")
-            .and_then(Value::as_str),
-        Some("trailing-5-work-median-v1")
-    );
-    assert_eq!(
-        payload
-            .pointer("/analysis/rollingMedianWindow")
-            .and_then(Value::as_u64),
-        Some(5)
-    );
+    assert!(payload.pointer("/analysis").is_none());
     for forbidden in [
         "bodyText",
         "commentId",
@@ -160,7 +149,8 @@ async fn lifecycle_api_returns_a_minimal_target_projection() {
             .to_vec(),
     )
     .unwrap();
-    assert!(invalid_html.contains("生命周期查询无效 / QUERY_INVALID"));
+    assert!(invalid_html.contains("作品分布的查询条件无效"));
+    assert!(!invalid_html.contains("QUERY_INVALID"));
     assert!(!invalid_html.contains("aria-current=\"true\""));
 
     let missing = app_with_database(database)
@@ -201,9 +191,9 @@ fn assert_no_json_key(value: &Value, forbidden: &str) {
 }
 
 #[test]
-fn creator_drawer_defaults_to_the_server_owned_lifecycle_in_four_tabs() {
+fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     use linggan_evidence::{
-        CreatorLifecycleAnalysis, CreatorLifecycleExclusions, CreatorLifecycleMetric,
+        CreatorLifecycleAssociation, CreatorLifecycleExclusions, CreatorLifecycleMetric,
         CreatorLifecyclePoint, CreatorLifecycleProjection, CreatorLifecycleReceipt,
         CreatorLifecycleStatus, CreatorLifecycleSummary, CreatorLifecycleWindow, ObservationTarget,
     };
@@ -219,7 +209,8 @@ fn creator_drawer_defaults_to_the_server_owned_lifecycle_in_four_tabs() {
         first_stored_at: "2026-08-01 00:00:00+00".to_owned(),
         monitoring_enabled: true,
         group_name: None,
-        last_patrol_dispatched_at: None,
+        last_patrol_dispatched_at: Some("2026-09-04 15:00:00+08".to_owned()),
+        last_patrol_succeeded_at: Some("2026-09-04 15:30:00+08".to_owned()),
         next_patrol_at: None,
     };
     let selected_ref = uuid::Uuid::from_u128(101);
@@ -251,12 +242,6 @@ fn creator_drawer_defaults_to_the_server_owned_lifecycle_in_four_tabs() {
             returned_count: 2,
             truncated: false,
         },
-        analysis: CreatorLifecycleAnalysis {
-            percentile_version: "creator-percentile-v1",
-            rolling_median_version: "trailing-5-work-median-v1",
-            rolling_median_window: 5,
-            composite_version: "composite-v1",
-        },
         points: vec![
             CreatorLifecyclePoint {
                 work_public_ref: uuid::Uuid::from_u128(100),
@@ -266,8 +251,8 @@ fn creator_drawer_defaults_to_the_server_owned_lifecycle_in_four_tabs() {
                 published_local_date: "2026-08-01".to_owned(),
                 published_at_epoch_ms: 1_785_542_400_000,
                 metric_value: 10,
-                creator_percentile: 50.0,
-                rolling_median: 10.0,
+                association_state: CreatorLifecycleAssociation::DirectoryLinked,
+                new_in_latest_patrol: true,
             },
             CreatorLifecyclePoint {
                 work_public_ref: selected_ref,
@@ -277,8 +262,8 @@ fn creator_drawer_defaults_to_the_server_owned_lifecycle_in_four_tabs() {
                 published_local_date: "2026-08-02".to_owned(),
                 published_at_epoch_ms: 1_785_628_800_000,
                 metric_value: 100,
-                creator_percentile: 100.0,
-                rolling_median: 55.0,
+                association_state: CreatorLifecycleAssociation::AuthorConfirmed,
+                new_in_latest_patrol: false,
             },
         ],
     };
@@ -289,6 +274,18 @@ fn creator_drawer_defaults_to_the_server_owned_lifecycle_in_four_tabs() {
             .pointer("/points/1/workPublicRef")
             .and_then(Value::as_str),
         Some(selected_ref.to_string().as_str())
+    );
+    assert_eq!(
+        api_payload
+            .pointer("/points/0/associationState")
+            .and_then(Value::as_str),
+        Some("DIRECTORY_LINKED")
+    );
+    assert_eq!(
+        api_payload
+            .pointer("/points/0/newInLatestPatrol")
+            .and_then(Value::as_bool),
+        Some(true)
     );
     for work_fact in [
         "title",
@@ -310,15 +307,28 @@ fn creator_drawer_defaults_to_the_server_owned_lifecycle_in_four_tabs() {
         target_drawer::TargetListContext::default(),
     );
 
-    for tab in ["概览", "基线", "巡检策略", "追踪"] {
+    for tab in ["概览", "档案", "巡查"] {
         assert!(html.contains(tab));
     }
+    assert_eq!(html.matches(r#"<a class="c-dw-tab"#).count(), 3);
+    assert_eq!(html.matches(r#"<a class="c-dw-tab c-dw-tab-on"#).count(), 1);
+    assert!(!html.contains("追踪"));
+    assert!(!html.contains("巡检策略"));
     assert!(!html.contains("dtab=evidence"));
     assert!(!html.contains(">证据</a>"));
-    assert!(html.contains("创作者生命周期"));
+    assert!(html.contains("作品生命周期"));
+    assert!(html.contains("作品目录"));
+    assert!(html.contains("详情已确认"));
+    assert!(html.contains("当前可分析"));
     assert!(html.contains("role=\"img\""));
-    assert!(html.contains("纵轴为 log(1 + 指标)"));
-    assert!(html.contains("trailing-5-work-median-v1"));
+    assert!(html.contains("纵轴压缩互动量差距"));
+    assert!(html.contains("主页目录，详情待确认"));
+    assert!(html.contains("详情作者已确认"));
+    assert!(html.contains("最近巡查新增"));
+    assert!(html.contains("life-point-directory"));
+    assert!(html.contains("life-point-confirmed"));
+    assert!(html.contains("life-point-new"));
+    assert_eq!(html.matches("life-point-new-ring").count(), 1);
     assert!(html.contains("发布时间</dt><dd>2026-08-02</dd>"));
     assert!(html.contains(r#"aria-current="page""#));
     assert!(html.contains(&format!("life_work={selected_ref}")));
@@ -331,9 +341,23 @@ fn creator_drawer_defaults_to_the_server_owned_lifecycle_in_four_tabs() {
     assert_eq!(html.matches(r#"r="5" aria-hidden="true""#).count(), 2);
     assert!(
         html.contains(r#"class="life-point-hit" cx="764.0""#),
-        "the right plot inset must leave the non-scaling 24px hit ring unclipped at 390px"
+        "the right plot inset must leave the hit target inside the desktop plot"
     );
-    for forbidden in ["监控价值", "机会评分", "产出分", "稀缺分", "趋势预测"] {
+    for forbidden in [
+        "监控价值",
+        "机会评分",
+        "产出分",
+        "稀缺分",
+        "趋势预测",
+        "ARCHIVE HEALTH",
+        "NO WORK SET",
+        "扫描内作者确认",
+        "返回可绘制",
+        "复合指标",
+        "创作者内分位",
+        "creator-percentile",
+        "trailing-5-work-median-v1",
+    ] {
         assert!(!html.contains(forbidden));
     }
 
@@ -348,8 +372,8 @@ fn creator_drawer_defaults_to_the_server_owned_lifecycle_in_four_tabs() {
         None,
         target_drawer::TargetListContext::default(),
     );
-    assert!(all_html.contains("Asia/Shanghai 全部合格历史"));
-    assert!(!all_html.contains("Asia/Shanghai 90 日口径"));
+    assert!(all_html.contains("UTC+08 全部合格历史"));
+    assert!(!all_html.contains("UTC+08 近 90 个日历日"));
 
     let mut truncated_projection = projection.clone();
     truncated_projection.summary.linked_work_count = None;
@@ -367,21 +391,23 @@ fn creator_drawer_defaults_to_the_server_owned_lifecycle_in_four_tabs() {
         None,
         target_drawer::TargetListContext::default(),
     );
-    assert!(truncated_html.contains("≥2001</b><span>关联作品下限"));
-    assert!(truncated_html.contains("探测 2001 · 扫描 2000/2000 · 返回 2"));
-    assert!(!truncated_html.contains("2000</b><span>关联作品"));
+    assert!(truncated_html.contains("≥2001</b><span>作品目录下限"));
+    assert!(truncated_html.contains("当前作品范围仍有后续内容"));
+    assert!(!truncated_html.contains("探测 2001"));
+    assert!(!truncated_html.contains("返回 2"));
 }
 
 #[test]
-fn target_drawer_lifecycle_styles_are_lids_bounded_and_mobile_safe() {
-    assert!(TARGET_DRAWER_CSS.contains("@media (max-width: 640px)"));
-    assert!(TARGET_DRAWER_CSS.contains("@media (prefers-reduced-motion: reduce)"));
+fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
+    assert!(!TARGET_DRAWER_CSS.contains("@media (max-width"));
+    assert!(TARGET_DRAWER_CSS.contains("@media (prefers-reduced-motion:reduce)"));
     assert!(TARGET_DRAWER_CSS.contains("min-height:40px"));
+    assert!(TARGET_DRAWER_CSS.contains(".c-tg-table-head.c-tg-creator-grid"));
+    assert!(TARGET_DRAWER_CSS.contains(".c-tg-table-head.c-tg-keyword-grid"));
+    assert!(TARGET_DRAWER_CSS.contains("overflow-x:auto"));
+    assert!(TARGET_DRAWER_CSS.contains("white-space:nowrap"));
     assert!(TARGET_DRAWER_CSS.contains(".life-control-row{min-width:0;"));
-    assert!(TARGET_DRAWER_CSS.contains(".life-control-label{flex:0 0 100%}"));
-    assert!(TARGET_DRAWER_CSS.contains(".life-receipt{grid-template-columns:minmax(0,1fr)}"));
     assert!(TARGET_DRAWER_CSS.contains(".life-figure{min-width:0;"));
-    assert!(TARGET_DRAWER_CSS.contains("overflow-wrap:anywhere"));
     assert!(!TARGET_DRAWER_CSS.contains("gradient"));
     assert!(!TARGET_DRAWER_CSS.contains("#fff"));
     assert!(!TARGET_DRAWER_CSS.contains("#000"));
@@ -394,6 +420,7 @@ fn target_drawer_lifecycle_styles_are_lids_bounded_and_mobile_safe() {
     assert!(SHELL_CSS.contains("outline:2px solid var(--v7-focus); outline-offset:2px"));
     assert!(!SHELL_CSS.contains("!important; outline"));
     assert!(!TARGET_DRAWER_CSS.contains("outline:none"));
+    assert!(!TARGET_DRAWER_CSS.contains("!important"));
     assert!(!TARGET_DRAWER_CSS.contains("outline:2px solid var(--lgi-signal)"));
     assert!(TARGET_DRAWER_CSS.contains(
         ".life-point-hit{fill:transparent;stroke:transparent;stroke-width:24;vector-effect:non-scaling-stroke;pointer-events:all}"
@@ -416,8 +443,8 @@ fn invalid_lifecycle_query_is_visible_and_never_claims_defaults() {
         None,
         target_drawer::TargetListContext::default(),
     );
-    assert!(html.contains("生命周期查询无效"));
-    assert!(html.contains("QUERY_INVALID"));
+    assert!(html.contains("作品分布的查询条件无效"));
+    assert!(!html.contains("QUERY_INVALID"));
     assert!(!html.contains("aria-current=\"true\""));
     assert!(!html.contains("近 90 天口径"));
 }
@@ -472,7 +499,7 @@ fn collection_reads_lifecycle_only_for_the_creator_overview() {
         Some(&target),
         target_drawer::TargetDrawerTab::parse(Some("patrol"))
     ));
-    assert!(!should_read_target_lifecycle(
+    assert!(should_read_target_lifecycle(
         Some(&target),
         target_drawer::TargetDrawerTab::parse(Some("trace"))
     ));
@@ -582,7 +609,7 @@ fn missing_target_drawer_keeps_return_focus_and_list_context() {
 }
 
 #[test]
-fn keyword_drawer_names_lifecycle_as_not_applicable_without_a_chart() {
+fn keyword_drawer_has_only_keyword_overview_and_patrol_without_a_creator_chart_shell() {
     let target = sample_target("keyword");
     let html = target_drawer::render(
         Some(&target),
@@ -596,9 +623,76 @@ fn keyword_drawer_names_lifecycle_as_not_applicable_without_a_chart() {
         None,
         target_drawer::TargetListContext::default(),
     );
-    assert!(html.contains("不适用于关键词目标"));
+    assert!(html.contains("关键词观察"));
+    assert!(html.contains("关键词不建立创作者作品档案"));
+    assert!(html.contains(">概览</a>"));
+    assert!(html.contains(">巡查</a>"));
+    assert!(!html.contains(">档案</a>"));
+    assert_eq!(html.matches(r#"<a class="c-dw-tab"#).count(), 2);
     assert!(!html.contains("class=\"life-chart\""));
     assert!(!html.contains("class=\"life-point"));
+    assert!(!html.contains("作品生命周期"));
+}
+
+#[test]
+fn archive_tab_explains_the_first_two_hundred_boundary_without_a_fake_score() {
+    let target = sample_target("creator");
+    let mut completeness = std::collections::HashMap::new();
+    completeness.insert(
+        target.identity_key.clone(),
+        linggan_evidence::ArchiveCompleteness {
+            work_in_progress: false,
+            author_profile_captures: 1,
+            works_listed: 12,
+            details_captured: 5,
+            quarantined: 1,
+        },
+    );
+    let html = target_drawer::render(
+        Some(&target),
+        &completeness,
+        Some(&target.target_ref.to_string()),
+        target_drawer::TargetDrawerTab::Baseline,
+        target_drawer::LifecycleView::NotRead {
+            window: linggan_evidence::CreatorLifecycleWindow::Recent90Days,
+            metric: linggan_evidence::CreatorLifecycleMetric::Likes,
+        },
+        None,
+        target_drawer::TargetListContext::default(),
+    );
+
+    assert!(html.contains("前 200 篇作品链接作为上限"));
+    assert!(html.contains("继续完善"));
+    assert!(html.contains("5 / 12"));
+    assert!(!html.contains('%'));
+    assert!(!html.contains("ARCHIVE HEALTH"));
+    assert!(!html.contains("持久回执"));
+}
+
+#[test]
+fn patrol_tab_uses_the_last_successful_result_not_the_last_dispatch() {
+    let mut target = sample_target("creator");
+    target.monitoring_enabled = true;
+    target.last_patrol_dispatched_at = Some("2026-09-04 09:00:00+08".to_owned());
+    target.last_patrol_succeeded_at = Some("2026-09-04 08:30:00+08".to_owned());
+    target.next_patrol_at = Some("2026-09-05 09:00:00+08".to_owned());
+    let html = target_drawer::render(
+        Some(&target),
+        &std::collections::HashMap::new(),
+        Some(&target.target_ref.to_string()),
+        target_drawer::TargetDrawerTab::Patrol,
+        target_drawer::LifecycleView::NotRead {
+            window: linggan_evidence::CreatorLifecycleWindow::Recent90Days,
+            metric: linggan_evidence::CreatorLifecycleMetric::Likes,
+        },
+        None,
+        target_drawer::TargetListContext::default(),
+    );
+
+    assert!(html.contains("2026-09-04 08:30:00+08"));
+    assert!(html.contains("2026-09-05 09:00:00+08"));
+    assert!(!html.contains("2026-09-04 09:00:00+08"));
+    assert!(html.contains("尚未取得</b><span>最近结果"));
 }
 
 fn sample_target(target_kind: &str) -> linggan_evidence::ObservationTarget {
@@ -615,6 +709,7 @@ fn sample_target(target_kind: &str) -> linggan_evidence::ObservationTarget {
         monitoring_enabled: false,
         group_name: None,
         last_patrol_dispatched_at: None,
+        last_patrol_succeeded_at: None,
         next_patrol_at: None,
     }
 }

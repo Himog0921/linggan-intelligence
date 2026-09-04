@@ -8,6 +8,16 @@
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
 
+## 2026-09-04 · OBSERVATION-TARGET-DOSSIER-UI-001 creator 档案工作区替代旧控制表
+
+- **来源与范围**：Issue #158 与 Mog 最新确认把观察目标定义为“持续观察的创作者及其不断生长的作品档案”。旧内容工作台只贡献生命周期曲线与深度建档的行为对标；V4 synthetic 文件只贡献内容数据库式密度。事实、权限和视觉标准仍归 Intelligence 当前合同与 LIDS。
+- **Pattern / Page**：Collection L1 仍为五个子面，creator drawer 保持受限 L2；首层改为 creator / keyword 各自适用的宽表，creator 工作区收敛为 `概览｜档案｜巡查`，keyword 只保留 `概览｜巡查`。默认目录不再显示批量复选框、总健康分、工程回执或常驻双动作。
+- **视觉方向**：采用白色连续阅读场、黑灰硬结构和内容数据库密度；真实头像与生命周期散点成为内容，Signal 只用于主要行动、选中和最近巡查新增。未增加 token、CMP、颜色、字体、图标库、渐变或移动端分支。
+- **Data Truth**：stable Work 去重目录、详情进度、live deep-archive Lease、成功巡查时间、目录关联/作者确认和 latest accepted patrol 分责。空心点、实心点与 Signal 外圈分别表达这三个事实；UNKNOWN 不画成 0。复合指标、创作者内分位、滚动中位线、算法版本和扫描工程回执退出默认 UI。
+- **真实行动**：“建立档案”不再只是文案。它要求至少 200 Works 的有效授权，冻结 200 篇主页链接扫描上限与版本 marker，再由 worker 以每批 3 篇推进详情、最多 30 条评论、媒体及已授权数据化；旧无 marker 的 WorkOrder 不自动扩权。
+- **支持与证明边界**：只验收 1440 CSS px 桌面全屏；1280/390/手机和小于 13 寸屏幕不进入本包。自动、隔离 PostgreSQL、浏览器与 exact-head 审查以 [`../acceptance/observation-target-dossier-ui-001-visual-acceptance.md`](../acceptance/observation-target-dossier-ui-001-visual-acceptance.md) 为准。共享数据库、`:3000`、插件、真实平台、部署、merge 与 Mog 验收不由本记录证明。
+- **完整清单**：[`../changes/observation-target-dossier-ui-001-ui-change-manifest.md`](../changes/observation-target-dossier-ui-001-ui-change-manifest.md)。Issue #148 的四职责/算法展示只保留历史演进，不再约束当前观察目标页面。
+
 ## 2026-09-03 · COLLECTION-LIFECYCLE-001 creator 生命周期成为目标抽屉默认核心
 
 - **来源与范围**：Issue #148 与 Mog 最新决定将 Evidence 呈现留在 Corpus；creator target 抽屉只做生命周期决策面与精确跳转，不保留 Evidence tab，不引入监控价值、机会评分或趋势预测。

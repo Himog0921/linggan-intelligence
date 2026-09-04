@@ -66,11 +66,12 @@ use linggan_evidence::{
     read_runtime_capacity, read_runtime_library, read_scheduler_heartbeat,
     read_station_capabilities, read_station_overview, read_target, read_target_avatars,
     record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
-    register_station, release_media_upload_finalize, rename_station, request_admit_and_lease,
-    request_admit_material_targets_and_lease, request_and_admit, retire_station,
-    set_group_for_many, set_monitoring_for_many, set_station_accepting, start_local_attempt,
-    start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
-    submit_producer_package, sync_target_from_author_profile,
+    register_station, release_media_upload_finalize, rename_station,
+    request_admit_material_targets_and_lease, request_and_admit,
+    request_progressive_archive_and_lease, retire_station, set_group_for_many,
+    set_monitoring_for_many, set_station_accepting, start_local_attempt, start_producer_attempt,
+    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
+    sync_target_from_author_profile,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -1065,6 +1066,9 @@ async fn collection_material_deepening(
                     "material_targets_invalid"
                 }
                 RequestLeaseError::Acquisition(
+                    AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. },
+                ) => "progressive_archive_authorization_too_small",
+                RequestLeaseError::Acquisition(
                     AcquisitionChainError::SchemaUnavailable | AcquisitionChainError::Database(_),
                 ) => "acquisition_chain_unavailable",
                 RequestLeaseError::Lease(_) => "material_deepening_lease_failed",
@@ -1149,6 +1153,9 @@ async fn collection_archive_request(State(state): State<LocalWebState>, body: By
                 AcquisitionChainError::UnknownTarget => "unknown_target",
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
                 AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
+                AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
+                    "progressive_archive_authorization_too_small"
+                }
                 AcquisitionChainError::SchemaUnavailable => "acquisition_chain_unavailable",
                 AcquisitionChainError::Database(_) => "acquisition_chain_unavailable",
             },
@@ -3392,17 +3399,24 @@ async fn collection_target_deep_archive(
     let Some(database) = state.database.database() else {
         return Redirect::to("/collection/targets?error=read_model_not_connected");
     };
-    let execution = request_admit_and_lease(
+    let execution = request_progressive_archive_and_lease(
         database,
         form.row_target_ref,
-        "deep_archive",
         "从观察目标页发起深度建档",
         "person",
         60,
     )
     .await;
-    let Ok(execution) = execution else {
-        return Redirect::to("/collection/targets?error=archive_not_requestable");
+    let execution = match execution {
+        Ok(execution) => execution,
+        Err(RequestLeaseError::Acquisition(
+            AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. },
+        )) => {
+            return Redirect::to("/collection/targets?error=archive_authorization_below_200");
+        }
+        Err(_) => {
+            return Redirect::to("/collection/targets?error=archive_not_requestable");
+        }
     };
     let outcome = execution.request;
     let Some(_work_order_ref) = outcome.work_order_ref else {

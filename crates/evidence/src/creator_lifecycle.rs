@@ -1,8 +1,8 @@
 //! Target-scoped, reconstructable creator-work lifecycle projection.
 //!
 //! A lifecycle point is not a second material fact. It is a read-time combination of one stable
-//! Work, an author identity that exactly matches the selected creator target, a producer-qualified
-//! publication instant and the latest `KNOWN` engagement value at one repeatable-read `as_of`.
+//! Work, a target-scoped directory or exact-author association, a producer-qualified publication
+//! instant and the latest `KNOWN` engagement value at one repeatable-read `as_of`.
 
 use linggan_storage_postgres::Database;
 use serde::Serialize;
@@ -45,7 +45,6 @@ pub enum CreatorLifecycleMetric {
     Comments,
     Collects,
     Shares,
-    CompositeV1,
 }
 
 impl CreatorLifecycleMetric {
@@ -55,7 +54,6 @@ impl CreatorLifecycleMetric {
             "comments" => Some(Self::Comments),
             "collects" => Some(Self::Collects),
             "shares" => Some(Self::Shares),
-            "composite_v1" => Some(Self::CompositeV1),
             _ => None,
         }
     }
@@ -66,7 +64,6 @@ impl CreatorLifecycleMetric {
             Self::Comments => "comments",
             Self::Collects => "collects",
             Self::Shares => "shares",
-            Self::CompositeV1 => "composite_v1",
         }
     }
 }
@@ -80,7 +77,7 @@ pub struct CreatorLifecycleQuery {
 impl Default for CreatorLifecycleQuery {
     fn default() -> Self {
         Self {
-            window: CreatorLifecycleWindow::Recent90Days,
+            window: CreatorLifecycleWindow::All,
             metric: CreatorLifecycleMetric::Likes,
         }
     }
@@ -106,7 +103,7 @@ impl CreatorLifecycleQuery {
             Some(value) => {
                 CreatorLifecycleWindow::parse(value).ok_or(CreatorLifecycleQueryError::Window)?
             }
-            None => CreatorLifecycleWindow::Recent90Days,
+            None => CreatorLifecycleWindow::All,
         };
         let metric = match metric {
             Some(value) => {
@@ -171,24 +168,15 @@ pub struct CreatorLifecycleReceipt {
     pub truncated: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct CreatorLifecycleAnalysis {
-    pub percentile_version: &'static str,
-    pub rolling_median_version: &'static str,
-    pub rolling_median_window: usize,
-    pub composite_version: &'static str,
-}
-
-impl CreatorLifecycleAnalysis {
-    fn current() -> Self {
-        Self {
-            percentile_version: "creator-percentile-v1",
-            rolling_median_version: "trailing-5-work-median-v1",
-            rolling_median_window: 5,
-            composite_version: "composite-v1",
-        }
-    }
+/// Why one Work is allowed to appear in this creator's distribution.
+///
+/// Directory association is weaker than an exact detail-author match, but it is still a durable
+/// target-scoped fact: this Work was found by a profile discovery Work Order owned by this target.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum CreatorLifecycleAssociation {
+    DirectoryLinked,
+    AuthorConfirmed,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -200,8 +188,8 @@ pub struct CreatorLifecyclePoint {
     pub published_local_date: String,
     pub published_at_epoch_ms: i64,
     pub metric_value: i64,
-    pub creator_percentile: f64,
-    pub rolling_median: f64,
+    pub association_state: CreatorLifecycleAssociation,
+    pub new_in_latest_patrol: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -215,7 +203,6 @@ pub struct CreatorLifecycleProjection {
     pub summary: CreatorLifecycleSummary,
     pub exclusions: CreatorLifecycleExclusions,
     pub receipt: CreatorLifecycleReceipt,
-    pub analysis: CreatorLifecycleAnalysis,
     pub points: Vec<CreatorLifecyclePoint>,
 }
 
@@ -300,13 +287,27 @@ pub async fn read_creator_lifecycle(
         .fetch_all(&mut *tx)
         .await
         .map_err(map_schema_error)?;
-    let mut candidate_refs = rows
+    let mut candidate_membership = rows
         .into_iter()
-        .map(|row| row.get::<Uuid, _>("work_public_ref"))
+        .map(|row| {
+            (
+                row.get::<Uuid, _>("work_public_ref"),
+                (
+                    row.get::<bool, _>("surface_linked"),
+                    row.get::<bool, _>("new_in_latest_patrol"),
+                ),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut candidate_refs = candidate_membership
+        .iter()
+        .map(|(work_public_ref, _)| *work_public_ref)
         .collect::<Vec<_>>();
     let probed_count = candidate_refs.len();
     let truncated = probed_count > CREATOR_LIFECYCLE_SCAN_LIMIT;
     candidate_refs.truncate(CREATOR_LIFECYCLE_SCAN_LIMIT);
+    candidate_membership.truncate(CREATOR_LIFECYCLE_SCAN_LIMIT);
+    let membership = candidate_membership.into_iter().collect::<HashMap<_, _>>();
     let scanned_count = candidate_refs.len();
     let mut currents = read_work_resource_currents(&mut tx, &candidate_refs, &clock.as_of)
         .await
@@ -323,7 +324,12 @@ pub async fn read_creator_lifecycle(
         let Some(candidate) = currents.remove(&work_public_ref) else {
             continue;
         };
-        match candidate.author_external_id.as_deref() {
+        let (surface_linked, new_in_latest_patrol) = membership
+            .get(&work_public_ref)
+            .copied()
+            .unwrap_or((false, false));
+        let association_state = match candidate.author_external_id.as_deref() {
+            None if surface_linked => CreatorLifecycleAssociation::DirectoryLinked,
             None => {
                 exclusions.author_not_verified += 1;
                 continue;
@@ -332,8 +338,11 @@ pub async fn read_creator_lifecycle(
                 exclusions.author_mismatch += 1;
                 continue;
             }
-            Some(_) => confirmed_author_work_count += 1,
-        }
+            Some(_) => {
+                confirmed_author_work_count += 1;
+                CreatorLifecycleAssociation::AuthorConfirmed
+            }
+        };
         let metric_value = metric_value(
             candidate.like_count,
             candidate.comment_count,
@@ -372,15 +381,11 @@ pub async fn read_creator_lifecycle(
             published_local_date: published_local_date.clone(),
             published_at_epoch_ms,
             metric_value,
-            creator_percentile: 0.0,
-            rolling_median: 0.0,
+            association_state,
+            new_in_latest_patrol,
         });
     }
     points.sort_by_key(|point| (point.published_at_epoch_ms, point.work_public_ref));
-    add_analysis_values(
-        &mut points,
-        CreatorLifecycleAnalysis::current().rolling_median_window,
-    );
     let status = if points.is_empty() {
         CreatorLifecycleStatus::InsufficientObservation
     } else {
@@ -407,7 +412,6 @@ pub async fn read_creator_lifecycle(
             returned_count: points.len(),
             truncated,
         },
-        analysis: CreatorLifecycleAnalysis::current(),
         points,
     }))
 }
@@ -439,7 +443,6 @@ fn empty_projection(
             returned_count: 0,
             truncated: false,
         },
-        analysis: CreatorLifecycleAnalysis::current(),
         points: Vec::new(),
     }
 }
@@ -456,38 +459,6 @@ fn metric_value(
         CreatorLifecycleMetric::Comments => comment_count,
         CreatorLifecycleMetric::Collects => collect_count,
         CreatorLifecycleMetric::Shares => share_count,
-        CreatorLifecycleMetric::CompositeV1 => like_count?
-            .checked_add(collect_count?.checked_mul(2)?)?
-            .checked_add(comment_count?.checked_mul(3)?)?
-            .checked_add(share_count?.checked_mul(4)?),
-    }
-}
-
-fn add_analysis_values(points: &mut [CreatorLifecyclePoint], rolling_window: usize) {
-    let all_values = points
-        .iter()
-        .map(|point| point.metric_value)
-        .collect::<Vec<_>>();
-    let point_count = all_values.len();
-    for index in 0..points.len() {
-        let at_or_below = all_values
-            .iter()
-            .filter(|value| **value <= points[index].metric_value)
-            .count();
-        points[index].creator_percentile = if point_count == 0 {
-            0.0
-        } else {
-            at_or_below as f64 * 100.0 / point_count as f64
-        };
-        let start = (index + 1).saturating_sub(rolling_window);
-        let mut trailing = all_values[start..=index].to_vec();
-        trailing.sort_unstable();
-        let middle = trailing.len() / 2;
-        points[index].rolling_median = if trailing.len() % 2 == 0 {
-            (trailing[middle - 1] as f64 + trailing[middle] as f64) / 2.0
-        } else {
-            trailing[middle] as f64
-        };
     }
 }
 
@@ -508,17 +479,49 @@ WITH selected_target AS (
     FROM collection_observation_target
     WHERE target_ref=$1 AND target_kind='creator'
 ),
-surface_candidates AS (
-    SELECT DISTINCT finding.content_public_ref
+surface_observations AS (
+    SELECT finding.content_public_ref,work_order.work_order_ref,package.accepted_at,
+           package.package_ref,receipt.execution_effect
     FROM linggan_material_discovery_finding finding
     JOIN linggan_runtime_capture_package package USING (package_ref)
+    JOIN linggan_runtime_submission_receipt receipt USING (package_ref)
+    JOIN linggan_runtime_record_disposition disposition
+      ON disposition.package_ref=finding.package_ref
+     AND disposition.record_ordinal=finding.record_ordinal
     JOIN linggan_runtime_task task ON task.task_id=package.task_id
+    LEFT JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id
+    LEFT JOIN collection_work_order_lease lease USING (lease_ref)
+    LEFT JOIN collection_work_order work_order USING (work_order_ref)
     JOIN selected_target target
       ON target.platform=package.platform
-     AND task.task_spec #>> '{target,authorExternalId}'=target.identity_key
+     AND (work_order.target_ref=target.target_ref
+          OR task.task_spec #>> '{target,authorExternalId}'=target.identity_key)
     WHERE finding.discovery_kind='profile_discovery'
       AND finding.created_at <= $2::timestamptz
       AND package.accepted_at <= $2::timestamptz
+      AND receipt.material_admission='ACCEPTED'
+      AND disposition.disposition <> 'quarantined'
+),
+latest_patrol AS (
+    SELECT observation.work_order_ref
+    FROM surface_observations observation
+    JOIN collection_work_order work_order USING (work_order_ref)
+    WHERE work_order.lane='patrol'
+      AND observation.execution_effect='COMPLETED_LIVE_STEP'
+    ORDER BY observation.accepted_at DESC,observation.package_ref DESC
+    LIMIT 1
+),
+surface_candidates AS (
+    SELECT observation.content_public_ref,
+           true AS surface_linked,
+           COALESCE(
+             (array_agg(observation.work_order_ref
+                        ORDER BY observation.accepted_at,observation.package_ref))[1]
+               = (SELECT work_order_ref FROM latest_patrol),
+             false
+           ) AS new_in_latest_patrol
+    FROM surface_observations observation
+    GROUP BY observation.content_public_ref
 ),
 author_candidates AS (
     SELECT DISTINCT detail.content_public_ref
@@ -528,22 +531,34 @@ author_candidates AS (
       ON target.platform=content.platform
      AND target.identity_key=detail.author_external_id
     JOIN linggan_runtime_capture_package package USING (package_ref)
+    JOIN linggan_runtime_submission_receipt receipt USING (package_ref)
+    JOIN linggan_runtime_record_disposition disposition
+      ON disposition.package_ref=detail.package_ref
+     AND disposition.record_ordinal=detail.record_ordinal
     WHERE package.accepted_at <= $2::timestamptz
+      AND receipt.material_admission='ACCEPTED'
+      AND disposition.disposition <> 'quarantined'
 ),
 candidates AS (
-    SELECT content_public_ref FROM surface_candidates
-    UNION
-    SELECT content_public_ref FROM author_candidates
+    SELECT content_public_ref,surface_linked,new_in_latest_patrol FROM surface_candidates
+    UNION ALL
+    SELECT author.content_public_ref,false,false
+    FROM author_candidates author
+    WHERE NOT EXISTS (
+        SELECT 1 FROM surface_candidates surface
+        WHERE surface.content_public_ref=author.content_public_ref
+    )
 ),
 bounded_candidates AS (
-    SELECT content.public_ref AS work_public_ref,content.created_at
+    SELECT content.public_ref AS work_public_ref,content.created_at,
+           candidates.surface_linked,candidates.new_in_latest_patrol
     FROM candidates
     JOIN linggan_material_content content ON content.public_ref=candidates.content_public_ref
     JOIN selected_target target ON target.platform=content.platform
     ORDER BY content.created_at DESC,content.public_ref DESC
     LIMIT $3
 )
-SELECT bounded.work_public_ref
+SELECT bounded.work_public_ref,bounded.surface_linked,bounded.new_in_latest_patrol
 FROM bounded_candidates bounded
 ORDER BY bounded.created_at DESC,bounded.work_public_ref DESC
 "#;
@@ -563,10 +578,7 @@ mod tests {
             Some(CreatorLifecycleWindow::All)
         );
         assert_eq!(CreatorLifecycleWindow::parse("last_2160_hours"), None);
-        assert_eq!(
-            CreatorLifecycleMetric::parse("composite_v1"),
-            Some(CreatorLifecycleMetric::CompositeV1)
-        );
+        assert_eq!(CreatorLifecycleMetric::parse("composite_v1"), None);
         assert_eq!(CreatorLifecycleMetric::parse("monitoring_value"), None);
     }
 
@@ -590,70 +602,6 @@ mod tests {
         assert_eq!(
             CreatorLifecycleQuery::parse_optional(None, Some("monitoring_value")),
             Err(CreatorLifecycleQueryError::Metric)
-        );
-    }
-
-    #[test]
-    fn composite_requires_every_known_field_and_checks_overflow() {
-        assert_eq!(
-            metric_value(
-                Some(10),
-                Some(2),
-                Some(3),
-                Some(4),
-                CreatorLifecycleMetric::CompositeV1
-            ),
-            Some(38)
-        );
-        assert_eq!(
-            metric_value(
-                Some(10),
-                Some(2),
-                Some(3),
-                None,
-                CreatorLifecycleMetric::CompositeV1
-            ),
-            None
-        );
-        assert_eq!(
-            metric_value(
-                Some(i64::MAX),
-                Some(1),
-                Some(1),
-                Some(1),
-                CreatorLifecycleMetric::CompositeV1
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn server_analysis_owns_the_trailing_five_work_median() {
-        let mut points = [1, 100, 2, 99, 3, 98]
-            .into_iter()
-            .enumerate()
-            .map(|(index, metric_value)| CreatorLifecyclePoint {
-                work_public_ref: Uuid::from_u128(index as u128 + 1),
-                title: None,
-                title_state: "UNKNOWN",
-                published_at: format!("2026-08-{:02} 00:00:00+00", index + 1),
-                published_local_date: format!("2026-08-{:02}", index + 1),
-                published_at_epoch_ms: index as i64,
-                metric_value,
-                creator_percentile: 0.0,
-                rolling_median: 0.0,
-            })
-            .collect::<Vec<_>>();
-        let analysis = CreatorLifecycleAnalysis::current();
-        assert_eq!(analysis.rolling_median_version, "trailing-5-work-median-v1");
-        assert_eq!(analysis.rolling_median_window, 5);
-        add_analysis_values(&mut points, analysis.rolling_median_window);
-        assert_eq!(
-            points
-                .iter()
-                .map(|point| point.rolling_median)
-                .collect::<Vec<_>>(),
-            vec![1.0, 50.5, 2.0, 50.5, 3.0, 98.0]
         );
     }
 }

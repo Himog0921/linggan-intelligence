@@ -45,6 +45,9 @@ pub struct ObservationTarget {
     pub group_name: Option<String>,
     /// 上一次真的派出巡检的时间。没派过就是 `None`，不是「很久以前」。
     pub last_patrol_dispatched_at: Option<String>,
+    /// 上一次已经产生并接纳可用结果的巡查时间。用户看到的「上次巡查」只能用
+    /// 这个字段，不能拿上面的派出时间冒充成功结果。
+    pub last_patrol_succeeded_at: Option<String>,
     /// 下一次到期时间，由「上次派出 + 间隔」算出。**巡检没开时不算**——算一个永远不会
     /// 到来的时间，会让人以为它排上队了。
     pub next_patrol_at: Option<String>,
@@ -256,6 +259,7 @@ pub async fn read_target(
         "SELECT target_ref, platform, target_kind, identity_key, display_name, identity_facts, \
                 source, lifecycle_state, first_stored_at::text, monitoring_enabled, group_name, \
                 to_char(last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
+                to_char(last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
                 CASE WHEN monitoring_enabled AND last_patrol_dispatched_at IS NOT NULL \
                      THEN to_char(last_patrol_dispatched_at \
                                   + make_interval(secs => patrol_interval_seconds), \
@@ -317,6 +321,7 @@ pub async fn list_targets(
         "SELECT target_ref, platform, target_kind, identity_key, display_name, identity_facts, \
                 source, lifecycle_state, first_stored_at::text, monitoring_enabled, group_name, \
                 to_char(last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
+                to_char(last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
                 CASE WHEN monitoring_enabled AND last_patrol_dispatched_at IS NOT NULL \
                      THEN to_char(last_patrol_dispatched_at \
                                   + make_interval(secs => patrol_interval_seconds), \
@@ -342,7 +347,8 @@ fn listed_target(row: ListedTargetRow) -> ObservationTarget {
         monitoring_enabled: row.9,
         group_name: row.10,
         last_patrol_dispatched_at: row.11,
-        next_patrol_at: row.12,
+        last_patrol_succeeded_at: row.12,
+        next_patrol_at: row.13,
         ..ObservationTarget::from((
             row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8,
         ))
@@ -360,6 +366,7 @@ type ListedTargetRow = (
     String,
     Option<String>,
     bool,
+    Option<String>,
     Option<String>,
     Option<String>,
     Option<String>,
@@ -524,6 +531,7 @@ impl From<TargetRow> for ObservationTarget {
             monitoring_enabled: false,
             group_name: None,
             last_patrol_dispatched_at: None,
+            last_patrol_succeeded_at: None,
             next_patrol_at: None,
         }
     }

@@ -1,9 +1,9 @@
 //! COLLECTION-001 · 观察目标的宽幅研究抽屉。
 //!
-//! 四个职责 tab（概览 / 基线 / 巡检策略 / 追踪）留在 Collection；Evidence 结果只在
-//! Corpus。创作者概览的视觉核心是 target-scoped Work 生命周期，不是监控价值评分。
+//! 三个职责 tab（概览 / 档案 / 巡查）留在 Collection；作品正文、评论和媒体结果只在
+//! Corpus。创作者概览的视觉核心是作品生命周期分布，不是工程回执或监控价值评分。
 //!
-//! **用 URL 参数驱动，不用 JS**：`?drawer=<target_ref>&dtab=baseline`。稿子那 142 行
+//! **用 URL 参数驱动，不用 JS**：`?drawer=<target_ref>&dtab=archive`。稿子那 142 行
 //! 脚本换来的是「点击不刷新」，代价是刷新即丢状态、链接分享不过去。URL 版两样都不丢，
 //! 而这一页的用途正是「打开一个目标细看，然后把它发给别人」。
 //!
@@ -11,17 +11,17 @@
 //! 选定方案 A），不填假数。
 
 use linggan_evidence::{
-    ArchiveCompleteness, CreatorLifecycleMetric, CreatorLifecyclePoint, CreatorLifecycleProjection,
-    CreatorLifecycleStatus, CreatorLifecycleWindow, ObservationTarget,
+    ArchiveCompleteness, CreatorLifecycleAssociation, CreatorLifecycleMetric,
+    CreatorLifecyclePoint, CreatorLifecycleProjection, CreatorLifecycleStatus,
+    CreatorLifecycleWindow, ObservationTarget,
 };
 
-/// Collection 目标抽屉的四个职责。Evidence 已退回唯一的 Corpus 表面。退役或未知
+/// Collection 目标抽屉的三个职责。Evidence 已退回唯一的 Corpus 表面。退役或未知
 /// 值统一归一到 Overview；读取守卫和渲染都只消费这个闭集，不能各自猜一次。
 const TABS: &[(TargetDrawerTab, &str)] = &[
     (TargetDrawerTab::Overview, "概览"),
-    (TargetDrawerTab::Baseline, "基线"),
-    (TargetDrawerTab::Patrol, "巡检策略"),
-    (TargetDrawerTab::Trace, "追踪"),
+    (TargetDrawerTab::Baseline, "档案"),
+    (TargetDrawerTab::Patrol, "巡查"),
 ];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -29,27 +29,24 @@ pub enum TargetDrawerTab {
     Overview,
     Baseline,
     Patrol,
-    Trace,
 }
 
 impl TargetDrawerTab {
     pub fn parse(value: Option<&str>) -> Self {
         match value {
-            Some("baseline") => Self::Baseline,
+            Some("archive" | "baseline") => Self::Baseline,
             Some("patrol") => Self::Patrol,
-            Some("trace") => Self::Trace,
-            // `evidence` is retired and any future/unknown spelling has the same explicit
-            // compatibility policy: open the safe default Overview and actually read it.
-            None | Some("overview") | Some("evidence") | Some(_) => Self::Overview,
+            // `baseline` remains a compatibility alias. Retired `evidence` / `trace` and any
+            // future spelling open the safe default Overview and actually read it.
+            None | Some("overview") | Some("evidence") | Some("trace") | Some(_) => Self::Overview,
         }
     }
 
     fn as_str(self) -> &'static str {
         match self {
             Self::Overview => "overview",
-            Self::Baseline => "baseline",
+            Self::Baseline => "archive",
             Self::Patrol => "patrol",
-            Self::Trace => "trace",
         }
     }
 }
@@ -209,11 +206,11 @@ pub fn render(
         return format!(
             r#"<aside id="c-drawer" class="c-dw" aria-label="观察目标工作区" data-return-url="{return_url}"{return_focus_attr}>
                  <div class="c-dw-head">
-                   <div class="c-dw-kicker">目标工作区</div>
+                   <div class="c-dw-kicker">观察档案</div>
                    <div class="c-dw-title-row">
                      <div><div class="c-dw-title">未找到该观察目标</div>
                        <div class="c-dw-meta">#{drawer}</div></div>
-                     <div class="c-dw-actions"><a class="c-btn-quiet" href="{return_href}">关闭 ×</a></div>
+                     <div class="c-dw-actions"><a class="c-btn-quiet" href="{return_href}">关闭</a></div>
                    </div>
                  </div>
                  <div class="c-dw-body"><p class="c-dw-empty">这个标识没有对应的观察目标。它可能已被删除，或链接来自另一台机器的库。</p></div>
@@ -223,24 +220,28 @@ pub fn render(
         );
     };
 
-    let tab = active_tab;
     let archive = completeness.get(&target.identity_key);
     let is_creator = target.target_kind == "creator";
+    let tab = if !is_creator && active_tab == TargetDrawerTab::Baseline {
+        TargetDrawerTab::Overview
+    } else {
+        active_tab
+    };
     let return_focus = format!("target-{}", target.target_ref);
     let return_href = list_context.list_href(Some(&return_focus));
 
     format!(
         r#"<aside id="c-drawer" class="c-dw" aria-label="观察目标工作区" data-return-url="{return_url}" data-return-focus="{return_focus}">
              <div class="c-dw-head">
-               <div class="c-dw-kicker">目标工作区 / {kind}</div>
+               <div class="c-dw-kicker">{workspace}</div>
                <div class="c-dw-title-row">
                  <div>
                    <div class="c-dw-title">{name}</div>
-                   <div class="c-dw-meta">{platform} · {handle}</div>
+                   <div class="c-dw-meta">{platform}{handle}</div>
                  </div>
                  <div class="c-dw-actions">
                    {source_link}
-                   <a class="c-btn-quiet" href="{return_href}">关闭 ×</a>
+                   <a class="c-btn-quiet" href="{return_href}">关闭</a>
                  </div>
                </div>
                <div class="c-dw-statusline">{statusline}</div>
@@ -248,13 +249,19 @@ pub fn render(
              <nav class="c-dw-tabs">{tabs}</nav>
              <div class="c-dw-body">{body}</div>
            </aside>"#,
-        kind = escape(if is_creator { "创作者" } else { "关键词" }),
+        workspace = escape(if is_creator {
+            "创作者档案"
+        } else {
+            "关键词观察"
+        }),
         name = escape(display_name(target)),
-        platform = escape(&target.platform.to_uppercase()),
-        handle = escape(&target.identity_key),
+        platform = escape(platform_label(&target.platform)),
+        handle = identity_handle(target)
+            .map(|handle| format!(" · {}", escape(handle)))
+            .unwrap_or_default(),
         return_url = list_context.list_href(None),
         source_link = source_link(target, is_creator),
-        statusline = statusline(target),
+        statusline = statusline(target, archive),
         tabs = tab_bar(target, tab, lifecycle, selected_work, list_context),
         body = body(
             target,
@@ -276,6 +283,23 @@ fn display_name(target: &ObservationTarget) -> &str {
         .unwrap_or(&target.identity_key)
 }
 
+fn identity_handle(target: &ObservationTarget) -> Option<&str> {
+    target
+        .identity_facts
+        .as_ref()
+        .and_then(|facts| facts.get("redId"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+}
+
+fn platform_label(platform: &str) -> &str {
+    match platform {
+        "xhs" => "小红书",
+        other => other,
+    }
+}
+
 /// One kind-aware lifecycle vocabulary is shared by the target ledger and drawer. Keyword
 /// targets never run creator baseline archiving, so a monitoring keyword must not inherit the
 /// creator-only "baseline ready" claim merely because the state spelling is shared.
@@ -286,7 +310,7 @@ pub(crate) fn lifecycle_primary_copy(
     match (target_kind, lifecycle_state) {
         ("creator", "pending_decision") => ("neutral", "尚未建档"),
         ("creator", "archiving") => ("warn", "建档中"),
-        ("creator", "archived" | "monitoring" | "paused") => ("ok", "基线就绪"),
+        ("creator", "archived" | "monitoring" | "paused") => ("ok", "档案已建立"),
         ("creator", "dismissed") => ("neutral", "已停止观察"),
         ("keyword", "pending_decision") => ("neutral", "等待决定"),
         ("keyword", "monitoring") => ("ok", "规则已生效"),
@@ -299,10 +323,10 @@ pub(crate) fn lifecycle_primary_copy(
 
 pub(crate) fn lifecycle_patrol_copy(target: &ObservationTarget) -> (&'static str, &'static str) {
     match target.lifecycle_state.as_str() {
-        "paused" => ("warn", "巡检已暂停"),
+        "paused" => ("warn", "巡查已暂停"),
         "dismissed" => ("neutral", "不再调度"),
-        _ if target.monitoring_enabled => ("info", "巡检中"),
-        _ => ("neutral", "未开启巡检"),
+        _ if target.monitoring_enabled => ("info", "巡查中"),
+        _ => ("neutral", "未开启巡查"),
     }
 }
 
@@ -312,13 +336,21 @@ fn source_link(target: &ObservationTarget, is_creator: bool) -> String {
         return String::new();
     }
     format!(
-        r#"<a class="c-btn-quiet" href="https://www.xiaohongshu.com/user/profile/{id}" target="_blank" rel="noreferrer">打开原页 ↗</a>"#,
+        r#"<a class="c-btn-quiet" href="https://www.xiaohongshu.com/user/profile/{id}" target="_blank" rel="noreferrer">打开原页</a>"#,
         id = escape(&target.identity_key),
     )
 }
 
-fn statusline(target: &ObservationTarget) -> String {
-    let (_, archive) = lifecycle_primary_copy(&target.target_kind, &target.lifecycle_state);
+fn statusline(target: &ObservationTarget, completeness: Option<&ArchiveCompleteness>) -> String {
+    let archive = if target.target_kind != "creator" {
+        lifecycle_primary_copy(&target.target_kind, &target.lifecycle_state).1
+    } else if completeness.is_some_and(|value| value.work_in_progress) {
+        "建档中"
+    } else if completeness.is_none_or(ArchiveCompleteness::is_untouched) {
+        "尚未建档"
+    } else {
+        "档案已建立"
+    };
     let (_, patrol) = lifecycle_patrol_copy(target);
     format!(
         "{archive} · {patrol} · {group}",
@@ -335,6 +367,7 @@ fn tab_bar(
 ) -> String {
     let lifecycle_state = lifecycle_query_state(lifecycle, selected_work);
     TABS.iter()
+        .filter(|(key, _)| target.target_kind == "creator" || *key != TargetDrawerTab::Baseline)
         .map(|(key, label)| {
             let class = if *key == active { " c-dw-tab-on" } else { "" };
             let current = if *key == active {
@@ -364,14 +397,8 @@ fn body(
     list_context: TargetListContext<'_>,
 ) -> String {
     match tab {
-        TargetDrawerTab::Baseline => baseline_tab(target, archive, is_creator),
-        TargetDrawerTab::Patrol => patrol_tab(target),
-        // 追踪背后暂时没有东西。**如实说尚未接通，而不是画一个空壳**——
-        // 一个有标题、有格子、没有数的面板，会让人以为「查过了，是空的」。
-        TargetDrawerTab::Trace => not_connected(
-            "追踪",
-            "语义事件流尚未实现。执行留痕目前只到工单与租约这一层，可在「执行工位」查看。",
-        ),
+        TargetDrawerTab::Baseline => archive_tab(target, archive, is_creator, list_context),
+        TargetDrawerTab::Patrol => patrol_tab(target, list_context),
         TargetDrawerTab::Overview => overview_tab(
             target,
             archive,
@@ -383,18 +410,25 @@ fn body(
     }
 }
 
-/// 概览。稿子有粉丝／内容量／中位表现／峰值四格与两张图表。
-///
-/// **中位表现与峰值需要逐篇互动数据，系统里没有**；图表同理。因此只给有真实来源的那些，
-/// 缺的整格写「未采集」——留一个空图表框比不画更糟，它看起来像「数据为零」。
+/// 概览只回答对象是谁、最近发生了什么、作品如何分布、档案还缺什么。
+/// 缺失的最近变化统计直接表达为尚未取得，不用零值或工程诊断语言填充。
 fn overview_tab(
     target: &ObservationTarget,
-    _archive: Option<&ArchiveCompleteness>,
+    archive: Option<&ArchiveCompleteness>,
     is_creator: bool,
     lifecycle: LifecycleView<'_>,
     selected_work: Option<&str>,
     list_context: TargetListContext<'_>,
 ) -> String {
+    if !is_creator {
+        return format!(
+            r#"<section class="c-dw-section">
+                  <div class="c-dw-section-head"><b>关键词观察</b><span>持续搜索</span></div>
+                  <p class="c-dw-note">这里用于查看关键词巡查是否运行、何时有结果，以及后续接通的新命中与数据更新。关键词不建立创作者作品档案。</p>
+                </section>{}"#,
+            recent_activity(target),
+        );
+    }
     let facts = target.identity_facts.as_ref();
     let bio = facts
         .and_then(|value| value.get("description"))
@@ -402,16 +436,45 @@ fn overview_tab(
         .unwrap_or("");
 
     format!(
-        r#"{lifecycle}{bio_block}"#,
-        lifecycle = lifecycle_overview(target, is_creator, lifecycle, selected_work, list_context,),
+        r#"{bio_block}{recent}{lifecycle}{gaps}"#,
         bio_block = if bio.is_empty() {
             String::new()
         } else {
             format!(
-                r#"<section class="c-dw-section"><div class="c-dw-section-head"><b>简介</b><span>平台公开资料</span></div><p class="c-dw-bio">{bio}</p></section>"#,
+                r#"<section class="c-dw-section c-dw-profile"><div class="c-dw-section-head"><b>创作者简介</b><span>平台公开资料</span></div><p class="c-dw-bio">{bio}</p></section>"#,
                 bio = escape(bio),
             )
         },
+        recent = recent_activity(target),
+        lifecycle = lifecycle_overview(target, is_creator, lifecycle, selected_work, list_context,),
+        gaps = archive_gap_overview(archive, is_creator, lifecycle),
+    )
+}
+
+fn recent_activity(target: &ObservationTarget) -> String {
+    let (headline, note) = match target.last_patrol_succeeded_at.as_deref() {
+        Some(last) => (
+            format!("最近一次有效巡查完成于 {}", escape(last)),
+            "当前还没有可显示的本轮新增作品和数据更新汇总。已接纳的新作品和指标会自动进入下面的作品生命周期。",
+        ),
+        None if target.monitoring_enabled => (
+            "尚无巡查结果".to_owned(),
+            "巡查已经开启，但还没有成功结果；这里不会把未知写成零变化。",
+        ),
+        None if target.target_kind == "keyword" => (
+            "尚未开始关键词巡查".to_owned(),
+            "设置巡查后，这里会显示最近一次取得有效结果的时间；没有结果时不会写成零命中。",
+        ),
+        None => (
+            "尚未开始持续巡查".to_owned(),
+            "当前档案只会在手动建立或继续完善时更新。",
+        ),
+    };
+    format!(
+        r#"<section class="c-dw-section c-dw-activity">
+              <div class="c-dw-section-head"><b>最近变化</b><span>巡查结果</span></div>
+              <strong>{headline}</strong><p>{note}</p>
+            </section>"#,
     )
 }
 
@@ -459,14 +522,14 @@ fn lifecycle_overview(
 ) -> String {
     if matches!(lifecycle, LifecycleView::QueryInvalid) {
         return lifecycle_state(
-            "生命周期查询无效 / QUERY_INVALID",
-            "URL 中的时间窗或指标不在闭集合同内；本页没有回落到默认口径，也没有发起生命周期读取。",
+            "作品分布的查询条件无效",
+            "地址里的时间范围或指标不受支持。页面没有改用默认条件，也没有把失败读取成空数据。",
         );
     }
     if !is_creator {
         return lifecycle_state(
             "不适用于关键词目标",
-            "创作者生命周期按稳定作者身份组织作品；关键词观察面不能伪装成作者曲线。",
+            "关键词按搜索命中持续观察，不拥有创作者作品档案，因此这里不显示创作者生命周期图。",
         );
     }
     let projection = match lifecycle {
@@ -475,39 +538,44 @@ fn lifecycle_overview(
         | LifecycleView::NotRead { .. }
         | LifecycleView::QueryInvalid => {
             return lifecycle_state(
-                "生命周期当前读不到",
-                "这是读取状态未知，不表示创作者没有作品，也不表示表现为零。",
+                "作品分布当前读不到",
+                "当前读取状态未知，不表示创作者没有作品，也不表示互动数据为零。",
             );
         }
     };
     if projection.status == CreatorLifecycleStatus::NotApplicable {
         return lifecycle_state(
             "不适用于当前目标",
-            "只有稳定 creator target 能生成创作者生命周期。",
+            "只有已确认身份的创作者目标才能生成作品生命周期。",
         );
     }
 
     let controls = lifecycle_controls(target, projection, list_context);
     let (linked, linked_label) = match projection.summary.linked_work_count {
-        Some(count) => (count.to_string(), "关联作品"),
+        Some(count) => (count.to_string(), "作品目录"),
         None => (
             format!("≥{}", projection.summary.linked_work_count_lower_bound),
-            "关联作品下限",
+            "作品目录下限",
         ),
     };
     let summary = format!(
         r#"<div class="life-summary" aria-label="生命周期覆盖摘要">
               <div><b>{linked}</b><span>{linked_label}</span></div>
-              <div><b>{confirmed}</b><span>扫描内作者确认</span></div>
-              <div><b>{eligible}</b><span>返回可绘制</span></div>
+              <div><b>{confirmed}</b><span>详情已确认</span></div>
+              <div><b>{eligible}</b><span>当前可分析</span></div>
             </div>"#,
         confirmed = projection.summary.confirmed_author_work_count,
         eligible = projection.summary.eligible_point_count,
     );
+    let legend = r#"<div class="life-legend" aria-label="散点含义">
+          <span><i class="life-legend-dot life-legend-directory"></i>主页目录，详情待确认</span>
+          <span><i class="life-legend-dot life-legend-confirmed"></i>详情作者已确认</span>
+          <span><i class="life-legend-dot life-legend-new"></i>最近巡查新增</span>
+        </div>"#;
     let chart = if projection.points.is_empty() {
         lifecycle_state(
             "观察不足，暂时无法成图",
-            "作品必须同时具备稳定作者归属、合格真实发布时间和当前指标的 KNOWN 值。UNKNOWN 不会被当成 0。",
+            "作品必须同时具备可确认的作者归属、真实发布时间和当前互动数据。未知值不会按零计算。",
         )
     } else {
         lifecycle_chart(target, projection, selected_work, list_context)
@@ -525,29 +593,13 @@ fn lifecycle_overview(
     format!(
         r#"<section class="c-dw-section life-panel" id="creator-lifecycle">
               <div class="life-heading">
-                <div><h2>创作者生命周期</h2><p>按作品真实发布时间，不是账号粉丝增长曲线</p></div>
-                <p>截至 {as_of}</p>
+                <div><h2>作品生命周期</h2><p>横轴是作品发布时间，纵轴是所选互动数据</p></div>
+                <p>数据截至 {as_of}</p>
               </div>
-              {controls}{summary}{chart}
-              <div class="life-receipt">
-                <span>探测 {probed} · 扫描 {scanned}/{limit} · 返回 {returned}；{receipt_state}</span>
-                <span class="life-version">{median_version} · {percentile_version}</span>
-              </div>
-              {exclusions}{selected}
+              {controls}{summary}{legend}{chart}
+              {selected}
             </section>"#,
         as_of = escape(&projection.as_of),
-        probed = projection.receipt.probed_count,
-        scanned = projection.receipt.scanned_count,
-        limit = projection.receipt.scan_limit,
-        returned = projection.receipt.returned_count,
-        receipt_state = if projection.receipt.truncated {
-            "已触及扫描上限，当前不是完整历史"
-        } else {
-            "本次有界扫描未截断"
-        },
-        median_version = escape(projection.analysis.rolling_median_version),
-        percentile_version = escape(projection.analysis.percentile_version),
-        exclusions = lifecycle_exclusions(projection),
     )
 }
 
@@ -583,7 +635,6 @@ fn lifecycle_controls(
         (CreatorLifecycleMetric::Comments, "评论"),
         (CreatorLifecycleMetric::Collects, "收藏"),
         (CreatorLifecycleMetric::Shares, "转发"),
-        (CreatorLifecycleMetric::CompositeV1, "复合指标 v1"),
     ]
     .into_iter()
     .map(|(metric, label)| {
@@ -620,9 +671,7 @@ fn lifecycle_chart(
     const WIDTH: f64 = 800.0;
     const HEIGHT: f64 = 300.0;
     const LEFT: f64 = 54.0;
-    // At the 390px drawer width, 36 viewBox units leave just over 16 CSS pixels between
-    // the last point's centre and the SVG edge. That keeps the non-scaling 24px hit ring
-    // inside the plot instead of clipping its right half.
+    // Keep the non-scaling hit ring inside the plot at the supported desktop drawer width.
     const RIGHT: f64 = 36.0;
     const TOP: f64 = 20.0;
     const BOTTOM: f64 = 40.0;
@@ -647,12 +696,6 @@ fn lifecycle_chart(
         LEFT + (point.published_at_epoch_ms - min_x) as f64 / x_span * (WIDTH - LEFT - RIGHT)
     };
     let y_for = |value: f64| TOP + (1.0 - value.ln_1p() / max_y) * (HEIGHT - TOP - BOTTOM);
-    let median = projection
-        .points
-        .iter()
-        .map(|point| format!("{:.1},{:.1}", x_for(point), y_for(point.rolling_median)))
-        .collect::<Vec<_>>()
-        .join(" ");
     let points = projection
         .points
         .iter()
@@ -664,6 +707,27 @@ fn lifecycle_chart(
                 " life-point-selected"
             } else {
                 ""
+            };
+            let (association_class, association_label) = match point.association_state {
+                CreatorLifecycleAssociation::DirectoryLinked => {
+                    (" life-point-directory", "来自主页作品目录，详情作者待确认")
+                }
+                CreatorLifecycleAssociation::AuthorConfirmed => {
+                    (" life-point-confirmed", "详情作者已确认")
+                }
+            };
+            let (new_class, new_label, new_ring) = if point.new_in_latest_patrol {
+                (
+                    " life-point-new",
+                    "，最近一次巡查新增",
+                    format!(
+                        r#"<circle class="life-point-new-ring" cx="{:.1}" cy="{:.1}" r="9" aria-hidden="true"/>"#,
+                        x_for(point),
+                        y_for(point.metric_value as f64),
+                    ),
+                )
+            } else {
+                ("", "", String::new())
             };
             let title = point.title.as_deref().unwrap_or("标题未知");
             let work = point.work_public_ref.to_string();
@@ -677,12 +741,11 @@ fn lifecycle_chart(
                 Some("creator-lifecycle"),
             );
             format!(
-                r#"<a class="life-point{selected_class}" href="{href}" aria-label="{title}，{published}，{metric_label} {value}，创作者内分位 {percentile:.1}%"><circle class="life-point-hit" cx="{x:.1}" cy="{y:.1}" r="6" aria-hidden="true"/><circle class="life-point-visible" cx="{x:.1}" cy="{y:.1}" r="5" aria-hidden="true"/></a>"#,
+                r#"<a class="life-point{association_class}{new_class}{selected_class}" href="{href}" aria-label="{title}，{published}，{metric_label} {value}，{association_label}{new_label}">{new_ring}<circle class="life-point-hit" cx="{x:.1}" cy="{y:.1}" r="6" aria-hidden="true"/><circle class="life-point-visible" cx="{x:.1}" cy="{y:.1}" r="5" aria-hidden="true"/></a>"#,
                 title = escape(title),
                 published = escape(&point.published_local_date),
                 metric_label = metric_label(projection.metric),
                 value = point.metric_value,
-                percentile = point.creator_percentile,
                 x = x_for(point),
                 y = y_for(point.metric_value as f64),
             )
@@ -699,23 +762,22 @@ fn lifecycle_chart(
         .map(|point| point.published_local_date.as_str())
         .unwrap_or("—");
     let window_caption = match projection.window {
-        CreatorLifecycleWindow::Recent90Days => "Asia/Shanghai 近 90 个日历日（含首尾）",
-        CreatorLifecycleWindow::All => "Asia/Shanghai 全部合格历史",
+        CreatorLifecycleWindow::Recent90Days => "UTC+08 近 90 个日历日（含首尾）",
+        CreatorLifecycleWindow::All => "UTC+08 全部合格历史",
     };
     format!(
         r#"<figure class="life-figure">
               <svg class="life-chart" viewBox="0 0 800 300" role="img" aria-labelledby="life-chart-title life-chart-desc">
                 <title id="life-chart-title">创作者作品生命周期散点图</title>
-                <desc id="life-chart-desc">横轴为合格真实发布时间，纵轴为 log(1 + 指标)。黑点是作品，橙线是服务端 trailing 5 work median。</desc>
+                <desc id="life-chart-desc">横轴为合格作品发布时间，纵轴压缩互动量差距。每个点代表一篇当前可分析作品。</desc>
                 <line class="life-axis" x1="54" y1="260" x2="782" y2="260"/>
                 <line class="life-axis" x1="54" y1="20" x2="54" y2="260"/>
-                <polyline class="life-median" points="{median}"/>
                 {points}
                 <text class="life-axis-copy" x="54" y="284">{start}</text>
                 <text class="life-axis-copy" x="782" y="284" text-anchor="end">{end}</text>
-                <text class="life-axis-copy" x="14" y="142" transform="rotate(-90 14 142)" text-anchor="middle">log(1 + 指标)</text>
+                <text class="life-axis-copy" x="14" y="142" transform="rotate(-90 14 142)" text-anchor="middle">互动量</text>
               </svg>
-              <figcaption class="life-caption"><span>横轴：合格真实发布时间（{window_caption}）</span><span>纵轴为 log(1 + 指标)；数值摘要仍显示原值</span></figcaption>
+              <figcaption class="life-caption"><span>作品发布时间 · {window_caption}</span><span>纵轴压缩差距，选中作品仍显示原始数值</span></figcaption>
             </figure>"#,
         start = escape(start),
         end = escape(end),
@@ -741,7 +803,7 @@ fn lifecycle_exclusions(projection: &CreatorLifecycleProjection) -> String {
         return String::new();
     }
     let truncated = if projection.receipt.truncated {
-        "<li>扫描已截断</li>"
+        "<li>当前作品范围仍有后续内容</li>"
     } else {
         ""
     };
@@ -757,22 +819,20 @@ fn selected_work_summary(point: &CreatorLifecyclePoint, metric: CreatorLifecycle
               <dl>
                 <div><dt>发布时间</dt><dd>{published}</dd></div>
                 <div><dt>{metric}</dt><dd>{value}</dd></div>
-                <div><dt>创作者内分位</dt><dd>{percentile:.1}%</dd></div>
               </dl>
-              <a class="life-corpus-link" href="/corpus/evidence?work={work}">到语料页查看这篇作品 →</a>
+              <a class="life-corpus-link" href="/corpus/evidence?work={work}">到语料页查看这篇作品</a>
             </section>"#,
         title = escape(point.title.as_deref().unwrap_or("标题未知")),
         published = escape(&point.published_local_date),
         metric = metric_label(metric),
         value = point.metric_value,
-        percentile = point.creator_percentile,
         work = point.work_public_ref,
     )
 }
 
 fn lifecycle_state(title: &str, body: &str) -> String {
     format!(
-        r#"<section class="c-dw-section life-panel"><div class="life-heading"><h2>创作者生命周期</h2></div><div class="life-state"><b>{title}</b><p>{body}</p></div></section>"#,
+        r#"<section class="c-dw-section life-panel"><div class="life-heading"><h2>作品生命周期</h2></div><div class="life-state"><b>{title}</b><p>{body}</p></div></section>"#,
         title = escape(title),
         body = escape(body),
     )
@@ -784,66 +844,139 @@ fn metric_label(metric: CreatorLifecycleMetric) -> &'static str {
         CreatorLifecycleMetric::Comments => "评论",
         CreatorLifecycleMetric::Collects => "收藏",
         CreatorLifecycleMetric::Shares => "转发",
-        CreatorLifecycleMetric::CompositeV1 => "复合指标 v1",
     }
 }
 
-/// 基线。稿子四格：上次观察 / 下次到期 / 状态 / 缺口。
-fn baseline_tab(
-    target: &ObservationTarget,
+fn archive_gap_overview(
     archive: Option<&ArchiveCompleteness>,
     is_creator: bool,
+    lifecycle: LifecycleView<'_>,
 ) -> String {
-    let (state, gap) = match archive {
-        Some(value) if value.works_listed > 0 => {
-            let missing = value.works_listed - value.details_captured.min(value.works_listed);
-            ("有作品清单".to_owned(), format!("缺详情 {missing}"))
+    if !is_creator {
+        return String::new();
+    }
+    let directory = archive
+        .filter(|value| !value.is_untouched())
+        .map(|value| value.works_listed.to_string())
+        .unwrap_or_else(|| "—".to_owned());
+    let detail = archive
+        .filter(|value| value.works_listed > 0)
+        .map(|value| format!("{} / {}", value.details_captured, value.works_listed))
+        .unwrap_or_else(|| "—".to_owned());
+    let analyzable = match lifecycle {
+        LifecycleView::Projection(projection) => {
+            projection.summary.eligible_point_count.to_string()
         }
-        Some(value) if value.author_profile_captures > 0 => {
-            ("仅作者档案".to_owned(), "无作品清单".to_owned())
-        }
-        _ => ("尚未采集".to_owned(), "—".to_owned()),
+        _ => "—".to_owned(),
     };
+    let mut gaps = match lifecycle {
+        LifecycleView::Projection(projection) => lifecycle_exclusions(projection),
+        _ => String::new(),
+    };
+    if let Some(count) = archive
+        .map(|value| value.quarantined)
+        .filter(|count| *count > 0)
+    {
+        gaps.push_str(&format!(
+            r#"<ul class="life-exclusions" aria-label="档案待处理项"><li>待处理记录 {count}</li></ul>"#
+        ));
+    }
+    if gaps.is_empty() {
+        gaps = r#"<p class="c-dw-note">当前读取没有给出额外缺口；这只描述已建立的作品目录，不代表平台全部作品。</p>"#.to_owned();
+    }
     format!(
-        r#"<section class="c-dw-section">
-             <div class="c-dw-section-head"><b>基线 ≠ 平台全量</b><span>基线只覆盖已观察到的部分</span></div>
-             <div class="c-dw-readouts">
-               <div><b>{last}</b><span>上次观察</span></div>
-               <div><b>{next}</b><span>下次到期</span></div>
-               <div><b>{state}</b><span>状态</span></div>
-               <div><b>{gap}</b><span>缺口</span></div>
-             </div>
-             <p class="c-dw-note">{note}</p>
-           </section>"#,
-        last = escape(
-            target
-                .last_patrol_dispatched_at
-                .as_deref()
-                .unwrap_or("未派过")
-        ),
-        next = escape(target.next_patrol_at.as_deref().unwrap_or("—")),
-        state = escape(&state),
-        gap = escape(&gap),
-        note = if is_creator {
-            "基线是「我们看到过什么」，不是「平台上有什么」。缺口指的是清单里已知、但还没取到详情的那些。"
-        } else {
-            "关键词的基线是一次搜索面的可见范围，平台上的其余部分始终未知。"
-        },
+        r#"<section class="c-dw-section c-dw-archive-summary" id="target-archive">
+              <div class="c-dw-section-head"><b>档案缺口</b><span>分别看，不合成总分</span></div>
+              <div class="c-dw-readouts c-dw-archive-readouts">
+                <div><b>{directory}</b><span>作品目录</span></div>
+                <div><b>{detail}</b><span>详情进度</span></div>
+                <div><b>{analyzable}</b><span>当前可分析</span></div>
+                <div><b>语料页</b><span>评论与深层材料</span></div>
+              </div>
+              {gaps}
+            </section>"#,
     )
 }
 
-/// 巡检策略。系统里目前只有「开关 + 间隔」两项，稿子上是一整套策略面板。
-fn patrol_tab(target: &ObservationTarget) -> String {
+/// 档案把目录、详情、可分析和深层材料分开，不能把不同分母压成一个完成百分比。
+fn archive_tab(
+    target: &ObservationTarget,
+    archive: Option<&ArchiveCompleteness>,
+    is_creator: bool,
+    list_context: TargetListContext<'_>,
+) -> String {
+    if !is_creator {
+        return lifecycle_state(
+            "关键词不建立创作者档案",
+            "关键词观察记录搜索命中与巡查变化，不扫描某个创作者的作品目录，也不显示创作者作品分布。",
+        );
+    }
+    let untouched = archive.is_none_or(ArchiveCompleteness::is_untouched);
+    let directory = archive
+        .filter(|value| !value.is_untouched())
+        .map(|value| value.works_listed.to_string())
+        .unwrap_or_else(|| "—".to_owned());
+    let detail = archive
+        .filter(|value| value.works_listed > 0)
+        .map(|value| format!("{} / {}", value.details_captured, value.works_listed))
+        .unwrap_or_else(|| "—".to_owned());
+    let missing = archive
+        .filter(|value| value.works_listed > value.details_captured)
+        .map(|value| value.works_listed - value.details_captured)
+        .unwrap_or(0);
+    let action = if archive.is_some_and(|value| value.work_in_progress) {
+        r#"<span class="c-dw-action-note">档案正在建立，完成范围和待补缺口以实际采集结果为准。</span>"#
+            .to_owned()
+    } else if untouched || missing > 0 || archive.is_some_and(|value| value.works_listed == 0) {
+        let label = if untouched {
+            "建立档案"
+        } else {
+            "继续完善"
+        };
+        format!(
+            r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">
+                  <button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button>
+                </form>"#,
+            target_ref = target.target_ref,
+        )
+    } else {
+        let href = list_context.drawer_href(
+            target.target_ref,
+            &[("dtab", "overview")],
+            Some("creator-lifecycle"),
+        );
+        format!(r#"<a class="c-btn-secondary" href="{href}">查看作品分布</a>"#)
+    };
     format!(
         r#"<section class="c-dw-section">
-             <div class="c-dw-section-head"><b>巡检策略</b><span>当前只有开关与间隔两项</span></div>
-             <div class="c-dw-readouts">
-               <div><b>{enabled}</b><span>巡检</span></div>
-               <div><b>{last}</b><span>上次派出</span></div>
-               <div><b>{next}</b><span>下次到期</span></div>
-               <div><b>未接通</b><span>动态频率</span></div>
+             <div class="c-dw-section-head"><b>作品档案</b><span>当前已取得范围</span></div>
+             <div class="c-dw-readouts c-dw-archive-readouts">
+               <div><b>{directory}</b><span>作品目录</span></div>
+               <div><b>{detail}</b><span>详情进度</span></div>
+               <div><b>—</b><span>当前可分析</span></div>
+               <div><b>语料页</b><span>评论与深层材料</span></div>
              </div>
-             <p class="c-dw-note">产品规则定的是「频率由新内容出现的速率决定」，那需要连续几轮的采集结果才算得出来。在有真实速率之前，间隔是一个固定值，不是一个算出来的值——这里如实写「未接通」而不是显示一个看起来像算过的数字。</p>
+             <p class="c-dw-note">建立档案会读取创作者主页当前可见的前 200 篇作品链接作为上限，先建立去重目录，再逐步补齐详情与已授权的数据化处理。200 不是平台总作品数。</p>
+             {action}
+           </section>"#,
+    )
+}
+
+/// 巡查只展示当前可读的开关与时间，完整规则通过已有版本化规则入口管理。
+fn patrol_tab(target: &ObservationTarget, list_context: TargetListContext<'_>) -> String {
+    let opener_id = format!("drawer-monitor-rule-{}", target.target_ref);
+    let rule_href = list_context.monitor_rule_href(target.target_ref, &opener_id);
+    format!(
+        r#"<section class="c-dw-section">
+             <div class="c-dw-section-head"><b>持续巡查</b><span>当前规则与时间</span></div>
+             <div class="c-dw-readouts">
+               <div><b>{enabled}</b><span>巡查</span></div>
+               <div><b>{last}</b><span>上次巡查</span></div>
+               <div><b>{next}</b><span>下次巡查</span></div>
+               <div><b>尚未取得</b><span>最近结果</span></div>
+             </div>
+             <p class="c-dw-note">巡查发现的新作品和后续互动数据，在接纳后会进入同一作品目录与生命周期。当前还没有可显示的本轮新增和数据更新汇总。</p>
+             <a id="{opener_id}" class="c-btn-secondary" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">管理巡查</a>
            </section>"#,
         enabled = if target.monitoring_enabled {
             "已开启"
@@ -852,23 +985,12 @@ fn patrol_tab(target: &ObservationTarget) -> String {
         },
         last = escape(
             target
-                .last_patrol_dispatched_at
+                .last_patrol_succeeded_at
                 .as_deref()
-                .unwrap_or("未派过")
+                .unwrap_or("尚未巡查")
         ),
         next = escape(target.next_patrol_at.as_deref().unwrap_or("—")),
-    )
-}
-
-/// 尚未接通的 tab。**说清楚缺什么、以及现在能去哪看**，而不是一句「暂无数据」。
-fn not_connected(title: &str, reason: &str) -> String {
-    format!(
-        r#"<section class="c-dw-section">
-             <div class="c-dw-section-head"><b>{title}</b><span>尚未接通</span></div>
-             <p class="c-dw-note">{reason}</p>
-           </section>"#,
-        title = escape(title),
-        reason = escape(reason),
+        target_ref = target.target_ref,
     )
 }
 
@@ -899,29 +1021,31 @@ mod tests {
             monitoring_enabled: state == "monitoring",
             group_name: None,
             last_patrol_dispatched_at: None,
+            last_patrol_succeeded_at: None,
             next_patrol_at: None,
         }
     }
 
     #[test]
-    fn drawer_statusline_names_every_legal_lifecycle_state() {
-        for (state, label) in [
-            ("pending_decision", "尚未建档"),
-            ("archiving", "建档中"),
-            ("archived", "基线就绪"),
-            ("monitoring", "基线就绪"),
-            ("paused", "巡检已暂停"),
-            ("dismissed", "已停止观察"),
-        ] {
-            let line = statusline(&target(state));
-            assert!(line.contains(label), "{state} must read as {label}");
-            assert!(!line.contains("状态未知"), "{state} is a legal state");
-            for forbidden in ['▲', '●'] {
-                assert!(
-                    !line.contains(forbidden),
-                    "lifecycle copy must use text and semantic styling, not {forbidden}"
-                );
-            }
-        }
+    fn drawer_statusline_uses_durable_archive_progress() {
+        let target = target("archiving");
+        let untouched = statusline(&target, None);
+        assert!(untouched.contains("尚未建档"));
+        assert!(!untouched.contains("建档中"));
+
+        let in_progress = ArchiveCompleteness {
+            work_in_progress: true,
+            ..ArchiveCompleteness::default()
+        };
+        assert!(statusline(&target, Some(&in_progress)).contains("建档中"));
+
+        let established = ArchiveCompleteness {
+            work_in_progress: false,
+            author_profile_captures: 1,
+            works_listed: 12,
+            details_captured: 5,
+            quarantined: 0,
+        };
+        assert!(statusline(&target, Some(&established)).contains("档案已建立"));
     }
 }
