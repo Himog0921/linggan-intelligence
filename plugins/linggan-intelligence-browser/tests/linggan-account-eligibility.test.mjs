@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  accountObservationFromUserInfo,
+  accountObservationFromCurrentAccountHref,
+  currentAccountHrefFromDocument,
   reportPassiveAccountEligibility,
 } from '../src/linggan/accountEligibilityProbe.js';
 import {
@@ -18,28 +19,57 @@ const HEALTH = {
   },
 };
 
-test('a passive page probe distinguishes authenticated identity from unknown', () => {
-  assert.deepEqual(accountObservationFromUserInfo(null), {
+test('a passive account probe accepts only the explicitly marked current-account profile', () => {
+  assert.deepEqual(accountObservationFromCurrentAccountHref(''), {
     signal: 'signal_incomplete', rawPlatformAccountId: '',
   });
-  assert.deepEqual(accountObservationFromUserInfo({ userId: 'stable-user-1' }), {
-    signal: 'authenticated_observed', rawPlatformAccountId: 'stable-user-1',
+  assert.deepEqual(accountObservationFromCurrentAccountHref('/user/profile/111111111111111111111111'), {
+    signal: 'authenticated_observed', rawPlatformAccountId: '111111111111111111111111',
   });
-  assert.deepEqual(accountObservationFromUserInfo({ nickname: 'not-an-identity' }), {
+  assert.deepEqual(accountObservationFromCurrentAccountHref('/user/profile/not-a-valid-xhs-id'), {
     signal: 'signal_incomplete', rawPlatformAccountId: '',
   });
+});
+
+test('the passive account probe never mistakes the viewed creator for the logged-in account', () => {
+  const links = [
+    {
+      textContent: 'ADHD好爸正念成长记',
+      getAttribute(name) {
+        return name === 'href' ? '/user/profile/aaaaaaaaaaaaaaaaaaaaaaaa' : '';
+      },
+    },
+    {
+      textContent: '我',
+      getAttribute(name) {
+        return name === 'href' ? '/user/profile/bbbbbbbbbbbbbbbbbbbbbbbb' : '';
+      },
+    },
+  ];
+  const doc = { querySelectorAll: () => links };
+  assert.equal(
+    currentAccountHrefFromDocument(doc),
+    '/user/profile/bbbbbbbbbbbbbbbbbbbbbbbb',
+  );
+  assert.deepEqual(
+    accountObservationFromCurrentAccountHref(currentAccountHrefFromDocument(doc)),
+    {
+      signal: 'authenticated_observed',
+      rawPlatformAccountId: 'bbbbbbbbbbbbbbbbbbbbbbbb',
+    },
+  );
 });
 
 test('the passive probe emits a closed signal without caching or logging identity', async () => {
   let message;
   await reportPassiveAccountEligibility({
-    readPageUser: async () => ({ userInfo: { user_id: 'stable-user-2' } }),
+    readCurrentAccountHref: async () => '/user/profile/cccccccccccccccccccccccc',
     sendMessage: async (value) => { message = value; return { reported: true }; },
   });
   assert.deepEqual(message, {
     action: 'lingganReportAccountEligibility',
     signal: 'authenticated_observed',
-    rawPlatformAccountId: 'stable-user-2',
+    rawPlatformAccountId: 'cccccccccccccccccccccccc',
   });
 });
 
@@ -86,7 +116,7 @@ test('eligibility reporting uses only the health-advertised station route', asyn
 test('an unavailable page reports unknown without inventing a usable identity', async () => {
   let message;
   await reportPassiveAccountEligibility({
-    readPageUser: async () => { throw new Error('page state unavailable'); },
+    readCurrentAccountHref: async () => { throw new Error('page state unavailable'); },
     sendMessage: async (value) => { message = value; return { reported: false }; },
   });
   assert.equal(message.signal, 'signal_incomplete');
