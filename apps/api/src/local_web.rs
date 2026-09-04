@@ -2499,7 +2499,7 @@ async fn collection_operations(
     );
     match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
         Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
-            Html(collection::collection_control_surface_view::render_operations(&base, &projection)),
+            Html(collection::collection_control_surface_view::render_operations(&base, &projection, mode)),
         Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::SchemaUnavailable)
         | Err(_) => Html(base),
     }
@@ -2556,8 +2556,15 @@ async fn collection_tasks(State(state): State<LocalWebState>) -> Html<String> {
             match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
                 Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
                     Html(collection::collection_control_surface_view::render_tasks_control(&tasks, &projection)),
-                Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::SchemaUnavailable)
-                | Err(_) => Html(tasks),
+                Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::SchemaUnavailable) =>
+                    Html(collection::collection_control_surface_view::render_tasks_control_unavailable(
+                        &tasks,
+                        collection::collection_control_surface_view::TaskControlUnavailable::SchemaUnavailable,
+                    )),
+                Err(_) => Html(collection::collection_control_surface_view::render_tasks_control_unavailable(
+                    &tasks,
+                    collection::collection_control_surface_view::TaskControlUnavailable::ReadFailed,
+                )),
             }
         }
         // The base says the narrower, truthful thing: this task read model is not available.

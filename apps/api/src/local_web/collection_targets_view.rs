@@ -61,6 +61,7 @@ pub fn render_stored_targets(
                 <span>{count} 个观察目标</span>
                 <span class="c-tg-list-hint">点击一行 → 打开宽幅研究抽屉</span>
               </div>
+              <div class="c-tg-table-head" aria-hidden="true"><span></span><span>编号</span><span>观察目标</span><span>内容量</span><span>本轮变化</span><span>时间</span><span>基线与档案</span><span>操作</span></div>
               <form class="c-tg-form" method="post" action="/collection/targets/batch">
                 <div class="c-tg-list">{rows}</div>
                 <div class="c-tg-batch">
@@ -202,17 +203,9 @@ fn avatar_markup(avatar: Option<&ObservationTargetAvatar>) -> String {
 
 /// 状态徽记。稿子是 `● BASELINE READY` / `PATROLLING` 这类，此处转中文。
 fn state_chips(target: &ObservationTarget) -> String {
-    let (archive_tone, archive_label) = match target.lifecycle_state.as_str() {
-        "pending_decision" => ("neutral", "尚未建档"),
-        "archiving" => ("warn", "▲ 建档中"),
-        "monitoring" => ("ok", "● 基线就绪"),
-        _ => ("neutral", "状态未知"),
-    };
-    let (patrol_tone, patrol_label) = if target.monitoring_enabled {
-        ("info", "巡检中")
-    } else {
-        ("neutral", "未开启巡检")
-    };
+    let (archive_tone, archive_label) =
+        super::target_drawer::lifecycle_primary_copy(&target.target_kind, &target.lifecycle_state);
+    let (patrol_tone, patrol_label) = super::target_drawer::lifecycle_patrol_copy(target);
     format!(
         r#"<span class="c-tg-truth c-tg-{archive_tone}">{archive_label}</span>
            <span class="c-tg-truth c-tg-{patrol_tone}">{patrol_label}</span>
@@ -637,5 +630,55 @@ mod tests {
         assert!(!html.contains("/collection/targets/monitoring"));
         assert!(!html.contains("name=\"action\" value=\"monitor_on\""));
         assert!(!html.contains("name=\"action\" value=\"monitor_off\""));
+    }
+
+    #[test]
+    fn every_legal_lifecycle_state_has_a_human_label() {
+        let expected = [
+            ("pending_decision", "尚未建档"),
+            ("archiving", "建档中"),
+            ("archived", "基线就绪"),
+            ("monitoring", "基线就绪"),
+            ("paused", "巡检已暂停"),
+            ("dismissed", "已停止观察"),
+        ];
+        for (state, label) in expected {
+            let mut creator = target("creator", Some("生命周期作者"));
+            creator.lifecycle_state = state.to_owned();
+            creator.monitoring_enabled = state == "monitoring";
+            let html = state_chips(&creator);
+            assert!(html.contains(label), "{state} must read as {label}");
+            assert!(!html.contains("状态未知"), "{state} is a legal state");
+        }
+    }
+
+    #[test]
+    fn lifecycle_copy_is_kind_aware_and_dismissed_axes_do_not_duplicate() {
+        let cases = [
+            ("creator", "archived", false, "基线就绪"),
+            ("creator", "monitoring", true, "基线就绪"),
+            ("creator", "paused", false, "巡检已暂停"),
+            ("keyword", "monitoring", true, "规则已生效"),
+            ("keyword", "paused", false, "规则已暂停"),
+        ];
+        for (kind, state, monitoring, expected) in cases {
+            let mut target = target(kind, Some("状态对象"));
+            target.lifecycle_state = state.to_owned();
+            target.monitoring_enabled = monitoring;
+            let html = state_chips(&target);
+            assert!(
+                html.contains(expected),
+                "{kind}/{state} must read as {expected}"
+            );
+            if kind == "keyword" {
+                assert!(!html.contains("基线就绪"));
+            }
+        }
+
+        let mut dismissed = target("creator", Some("停止观察对象"));
+        dismissed.lifecycle_state = "dismissed".to_owned();
+        let html = state_chips(&dismissed);
+        assert_eq!(html.matches("已停止观察").count(), 1);
+        assert!(html.contains("不再调度"));
     }
 }

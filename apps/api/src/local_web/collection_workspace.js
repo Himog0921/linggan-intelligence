@@ -122,6 +122,130 @@
     }
   }
 
+  var attentionRows = Array.prototype.slice.call(document.querySelectorAll("[data-attention-row]"));
+  var attentionInspector = document.querySelector("[data-attention-inspector]");
+  if (attentionRows.length && attentionInspector) {
+    function setAttentionText(selector, value) {
+      var element = attentionInspector.querySelector(selector);
+      if (element) {
+        element.textContent = value || "UNKNOWN";
+      }
+    }
+    function selectAttention(row) {
+      attentionRows.forEach(function (candidate) {
+        var selected = candidate === row;
+        candidate.classList.toggle("is-selected", selected);
+        candidate.setAttribute("aria-pressed", selected ? "true" : "false");
+      });
+      setAttentionText("[data-attention-reason]", row.dataset.controlReason);
+      setAttentionText("[data-attention-title]", row.dataset.title);
+      setAttentionText("[data-attention-observed]", row.dataset.observed);
+      setAttentionText("[data-attention-detail]", row.dataset.detail);
+      setAttentionText("[data-attention-owner]", row.dataset.owner);
+      setAttentionText("[data-attention-action]", row.dataset.action);
+    }
+    attentionRows.forEach(function (row) {
+      row.addEventListener("click", function () { selectAttention(row); });
+    });
+    selectAttention(attentionRows[0]);
+  }
+
+  var taskRows = Array.prototype.slice.call(document.querySelectorAll("[data-task-row]"));
+  var taskInspector = document.querySelector("[data-task-inspector]");
+  var taskFrozenTemplates = Array.prototype.slice.call(document.querySelectorAll("[data-task-frozen-template]"));
+  if (taskRows.length && taskInspector) {
+    function setTaskText(selector, value) {
+      var element = taskInspector.querySelector(selector);
+      if (element) {
+        element.textContent = value || "UNKNOWN";
+      }
+    }
+    function selectTask(row) {
+      taskRows.forEach(function (candidate) {
+        var selected = candidate === row;
+        candidate.classList.toggle("is-selected", selected);
+        candidate.setAttribute("aria-pressed", selected ? "true" : "false");
+      });
+      setTaskText("[data-task-inspector-ref]", "任务 #" + row.dataset.taskRef);
+      setTaskText("[data-task-inspector-title]", row.dataset.taskTitle);
+      setTaskText("[data-task-inspector-meta]", row.dataset.taskMeta);
+      setTaskText("[data-task-inspector-state]", row.dataset.taskState);
+      setTaskText("[data-task-inspector-state-note]", row.dataset.taskStateNote);
+      var stateView = taskInspector.querySelector("[data-task-inspector-state-view]");
+      var stateClasses = ["c-task-state-ok", "c-task-state-live", "c-task-state-warn", "c-task-state-wait"];
+      if (stateView) {
+        stateClasses.forEach(function (className) { stateView.classList.remove(className); });
+        stateView.classList.add(stateClasses.indexOf(row.dataset.taskStateClass) >= 0 ? row.dataset.taskStateClass : "c-task-state-wait");
+      }
+      setTaskText("[data-task-inspector-capabilities]", row.dataset.taskCapabilities);
+      setTaskText("[data-task-inspector-created]", row.dataset.taskCreated);
+      setTaskText("[data-task-inspector-failure]", row.dataset.taskFailure);
+      setTaskText("[data-task-inspector-attempt]", row.dataset.taskAttempt);
+      setTaskText("[data-task-inspector-package]", row.dataset.taskPackage);
+      setTaskText("[data-task-inspector-receipt]", row.dataset.taskReceipt);
+      setTaskText("[data-task-inspector-effect]", row.dataset.taskEffect);
+      var frozen = taskInspector.querySelector("[data-task-inspector-frozen]");
+      if (frozen) {
+        var template = taskFrozenTemplates.find(function (candidate) {
+          return candidate.dataset.taskFrozenTemplate === row.dataset.taskId;
+        });
+        if (template) {
+          frozen.replaceChildren(template.content.cloneNode(true));
+        } else {
+          var empty = document.createElement("p");
+          empty.className = "c-control-none";
+          empty.textContent = "该任务没有关联的冻结 Work 投影。";
+          frozen.replaceChildren(empty);
+        }
+      }
+    }
+    taskRows.forEach(function (row) {
+      row.addEventListener("click", function () { selectTask(row); });
+    });
+    selectTask(taskRows[0]);
+  }
+
+  var taskTabs = Array.prototype.slice.call(document.querySelectorAll("[data-task-tab]"));
+  var taskPanels = Array.prototype.slice.call(document.querySelectorAll("[data-task-panel]"));
+  function selectTaskTab(tab, moveFocus) {
+    taskTabs.forEach(function (candidate) {
+      var selected = candidate === tab;
+      candidate.classList.toggle("is-active", selected);
+      candidate.setAttribute("aria-selected", selected ? "true" : "false");
+      candidate.tabIndex = selected ? 0 : -1;
+    });
+    taskPanels.forEach(function (panel) {
+      var selected = panel.dataset.taskPanel === tab.dataset.taskTab;
+      panel.classList.toggle("is-active", selected);
+      panel.hidden = !selected;
+    });
+    if (moveFocus) {
+      tab.focus();
+    }
+  }
+  taskTabs.forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      selectTaskTab(tab, false);
+    });
+    tab.addEventListener("keydown", function (event) {
+      var current = taskTabs.indexOf(tab);
+      var next = null;
+      if (event.key === "ArrowRight") {
+        next = (current + 1) % taskTabs.length;
+      } else if (event.key === "ArrowLeft") {
+        next = (current - 1 + taskTabs.length) % taskTabs.length;
+      } else if (event.key === "Home") {
+        next = 0;
+      } else if (event.key === "End") {
+        next = taskTabs.length - 1;
+      }
+      if (next !== null) {
+        event.preventDefault();
+        selectTaskTab(taskTabs[next], true);
+      }
+    });
+  });
+
   var drawer = document.getElementById("c-drawer");
   if (!drawer) {
     if (!ruleModal) {

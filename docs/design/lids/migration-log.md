@@ -268,3 +268,11 @@ Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵�
 - **用户确认**：不采用三个独立方格的 `研读 / 表格 / 封面`，改用参考稿的水平文字 tab 形式。
 - **局部修订**：选择器改为上下细线围合的单条 rail；非当前项保持 muted 文字，当前项以 signal 色 4px 下划线表达，不再使用黑底。保持 40px 以上命中区、focus-visible、按压反馈与 `aria-pressed`，不改变 `layout` 行为。
 - **验证与边界**：1440/375 in-app Browser 实拍；rail 上下边线 1px、独立按钮边框 0、当前 signal 下划线 4px、三个命中区高度 44px。375px 三项宽度约 84px，document 无横向溢出；实际点击 `封面 → 表格` 后 URL/DOM 同步。键盘焦点使用灰底与顶部短信号线，不恢复四边框。这是 page-local 样式修订；没有新 Token、Primitive、CMP、数据能力或路由。
+
+## 2026-09-04 · COLLECTION-FIVE-PAGE-V4-UI-001 五页面桌面工作区采用与复审修正
+
+- **来源与事项**：Issue #149 扩展、`REF-V4-IA-CN-001`、Draft PR #154。参考只提供五个 Collection 子面的桌面密度、ledger/Inspector 关系与工作区层级，不继承演示事实或产品能力。
+- **Pattern / Page 影响**：五页继续使用唯一 `Collection Control` Pattern；Targets 保留 URL-owned lifecycle drawer，Attention/Tasks 采用 ledger + 右侧事实 Inspector，Operations 采用有界阶段 ledger + 唯一深色持久决定面，Runtime 继续消费单一 capacity evaluator。没有新 Pattern、CMP、Scene、Token 或全局 shell。
+- **LIDS 冲突裁定**：首版照搬了参考的可见页标题与第二条五格读数，经 exact-head 独立复审判定与 `LIDS-PAT-001 / DESIGN-003` 冲突。修正后每页只保留 `.v7-sr-only` `h1`，两个读数只进共享 Context Bar，并直接显示 scope/source；共享 `shell.css` 仍是 KPI 样式唯一 owner。删除新增渐变与字符图标，新增 spacing 只使用 4/8/12/16/24/32px ladder，新增 focus 不在页面层重声明。
+- **Data Truth / 交互修正**：Operations `trace/review` 不再被 `now` 投影覆盖；恢复数只计入 `recovery_for` 有明确动作的原因；Runtime 不再把存在插件版本冒充在线工位；creator/keyword 共用同一份 kind-aware lifecycle 文案。Task Frozen Work 先选最近 Work / Lease，再展开该 Lease 全部 Task，并继续按选中 `task_id` 注入；Inspector 状态 class 与文案同步，零任务/schema 不可用/读取失败均为明确终态；tab 补齐 ARIA、`hidden` 与方向/Home/End 键。
+- **验证边界**：main 集成后的 format、workspace check/test、JavaScript、UI handbook、governance、完整 Work/Material/Corpus/Topic/API PostgreSQL 69 项、dispatch 8 项与 Collection Control `8 + 11` 项已通过；一次性数据库、container、volume 已清理。当前 source tree 的无数据库 Chrome 152 / 1440×900 五页终态为 0 overflow、2 个直接显示 scope/source 的 KPI、唯一 1×1 读屏 h1、0 第二读数条、0 loading 与 0 应用 console issue。有数据交互由 PostgreSQL/source tests 而非已拒绝首版浏览器结果证明；exact-head 复审、main 合并与 `:3000` 运行时证据按实际动作另记。不包含共享 DB、Worker、插件、真实平台、外部部署或窄屏支持。

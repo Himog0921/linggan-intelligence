@@ -539,7 +539,7 @@ fn unclaimed_row(installation: &UnclaimedInstallation, stations: &[StationOvervi
 
 fn console_markup(stations: &[StationOverview], error: Option<&str>) -> String {
     format!(
-        r#"<section class="c-console">
+        r#"<section id="runtime-register" class="c-console">
               <h2 class="c-console-title">登记一台工位</h2>
               {failure}
               <form class="c-console-form" method="post" action="/collection/runtime/stations">

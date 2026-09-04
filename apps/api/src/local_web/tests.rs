@@ -1179,11 +1179,14 @@ fn collection_serves_all_five_sub_surfaces_from_the_shared_shell() {
 }
 
 #[test]
-fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
-    // DESIGN-003: breadcrumb and rail already name the page, so the h1 survives only for
-    // assistive tech and the vertical space returns to the content. A page that grows a
-    // visible title block back is restating its name for the third time.
-    let mut pages = vec![evidence_library_html(None)];
+fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
+    // COLLECTION-FIVE-PAGE-V4-UI-001: the V4 reference supplies the desktop work-area
+    // hierarchy, but LIDS owns the shell. Page identity remains a single reader-only h1 and
+    // the only page readings stay in the shared context row.
+    let corpus = evidence_library_html(None);
+    assert!(corpus.contains("<h1 class=\"v7-sr-only\" id=\"page-title\">"));
+
+    let mut pages = Vec::new();
     for section in [
         collection::Section::Targets,
         collection::Section::Operations,
@@ -1203,12 +1206,91 @@ fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
     for html in &pages {
         assert!(
             html.contains("<h1 class=\"v7-sr-only\" id=\"page-title\">"),
-            "the page title must survive as the visually hidden h1"
+            "each Collection surface must keep one reader-only h1"
         );
-        for restated in ["c-title", "c-eyebrow", "c-head", "v7-title", "v7-eyebrow"] {
+        assert_eq!(html.matches("id=\"page-title\"").count(), 1);
+        assert_eq!(
+            html.matches("class=\"v7-kpi\"").count(),
+            2,
+            "each Collection page must expose exactly two scoped context readings"
+        );
+        assert_eq!(
+            html.matches("</b><small>").count(),
+            2,
+            "each Collection readout must show its source or scope without relying on a tooltip"
+        );
+        assert!(!html.contains("c-page-titlebar"));
+        assert!(!html.contains("c-readout-strip"));
+        for restated in ["c-eyebrow", "c-head", "v7-title", "v7-eyebrow"] {
             assert!(
                 !html.contains(restated),
-                "reclaimed header must not return as {restated}"
+                "the V4 titlebar must not create another title system as {restated}"
+            );
+        }
+    }
+
+    let stylesheet = include_str!("collection_workspace.css");
+    for local_focus_owner in [
+        ".c-tg-item:has(.c-tg-title:focus-visible)",
+        ".c-tg-title:focus-visible",
+        ".c-attention-row:focus-visible",
+        ".c-task-row:focus-visible",
+        ".c-task-inspector-tabs button:focus-visible",
+    ] {
+        assert!(
+            !stylesheet.contains(local_focus_owner),
+            "the shared shell must remain the only focus-ring owner: {local_focus_owner}"
+        );
+    }
+
+    let v4_stylesheet = stylesheet
+        .split_once("/* COLLECTION-FIVE-PAGE-V4-UI-001")
+        .expect("the V4 page-local stylesheet block exists")
+        .1;
+    for declaration in v4_stylesheet.split(';') {
+        let declaration = declaration
+            .rsplit(['{', '}'])
+            .next()
+            .unwrap_or_default()
+            .trim();
+        let Some((property, value)) = declaration.split_once(':') else {
+            continue;
+        };
+        let property = property.trim();
+        if !(property.starts_with("margin")
+            || property.starts_with("padding")
+            || property == "gap"
+            || property == "row-gap"
+            || property == "column-gap")
+        {
+            continue;
+        }
+        assert!(
+            !value.contains("px"),
+            "V4 spacing must consume the LIDS ladder instead of a raw pixel value: {property}:{value}"
+        );
+        let mut remaining = value;
+        const CELL_MULTIPLIER: &str = "calc(var(--c-cell) * ";
+        while let Some(start) = remaining.find(CELL_MULTIPLIER) {
+            let multiplier = &remaining[start + CELL_MULTIPLIER.len()..];
+            let multiplier = multiplier
+                .split_once(')')
+                .expect("a cell multiplier closes")
+                .0
+                .trim();
+            assert!(
+                [".5", "1", "1.5", "2", "3", "4"].contains(&multiplier),
+                "V4 spacing multiplier must stay on the approved 4/8/12/16/24/32px ladder: {property}:{value}"
+            );
+            remaining = &remaining[start + CELL_MULTIPLIER.len()..];
+        }
+    }
+
+    for html in &pages {
+        for forbidden in ["监控价值", "代表证据", "机会评分"] {
+            assert!(
+                !html.contains(forbidden),
+                "the five Collection shells must not restore the retired {forbidden} module"
             );
         }
     }
@@ -1226,15 +1308,14 @@ fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
         .split_once("v7-context-meta")
         .expect("collection pages render the context row")
         .1;
-    for kpi in [
-        "<span class=\"v7-kpi\"><em>巡检已开</em><b><span class=\"v7-status-main\">未知</span><small class=\"v7-tech-key\">UNKNOWN</small></b></span>",
-        "<span class=\"v7-kpi\"><em>建档中</em><b><span class=\"v7-status-main\">未知</span><small class=\"v7-tech-key\">UNKNOWN</small></b></span>",
-    ] {
+    for label in ["巡检已开", "建档中"] {
         assert!(
-            context_row.contains(kpi),
-            "count missing from context row: {kpi}"
+            context_row.contains(&format!("<em>{label}</em>")),
+            "count missing from context row: {label}"
         );
     }
+    assert!(context_row.contains("title=\"当前观察目标投影尚未读取\""));
+    assert!(!context_row.contains("aria-label=\"<span"));
 }
 
 #[test]
@@ -1264,8 +1345,10 @@ fn connected_collection_surfaces_render_real_targets_and_scheduler_state() {
 
     assert!(targets.contains("调度运行中"));
     assert!(targets.contains("SCHEDULER RUNNING"));
-    assert!(targets.contains("<em>巡检已开</em><b>1</b>"));
-    assert!(targets.contains("<em>建档中</em><b>1</b>"));
+    assert!(targets.contains("aria-label=\"巡检已开 1；当前观察目标投影\""));
+    assert!(targets.contains("<em>巡检已开</em><b aria-hidden=\"true\">1</b>"));
+    assert!(targets.contains("aria-label=\"建档中 1；当前观察目标投影\""));
+    assert!(targets.contains("<em>建档中</em><b aria-hidden=\"true\">1</b>"));
     assert!(targets.contains("<span class=\"v7-nav-state\">观察中</span>"));
     assert!(!targets.contains("调度器未接通"));
     assert!(!targets.contains("<span class=\"v7-status-main\">暂无观察目标</span>"));
@@ -1351,7 +1434,11 @@ fn context_row_counts_read_in_chinese_so_one_row_holds_one_english_scale() {
         collection::Section::Runtime,
     ] {
         let html = collection::render(section, collection::OperationsMode::Now, None, None, None);
-        for fragment in html.split("<span class=\"v7-kpi\"><em>").skip(1) {
+        for fragment in html.split("class=\"v7-kpi\"").skip(1) {
+            let fragment = fragment
+                .split_once("<em>")
+                .expect("a kpi contains its label")
+                .1;
             labels.push(
                 fragment
                     .split_once("</em>")

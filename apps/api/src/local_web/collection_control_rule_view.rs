@@ -550,7 +550,7 @@ fn dynamic_markup(dynamic: &DynamicCadenceView, form: &MonitorRuleFormState) -> 
         ),
         DynamicCadenceView::Unavailable { .. } => (
             "动态间隔不可用",
-            "当前没有可审计的合格可比轮次投影；不会用作者价值、Evidence 内容或推测值代替。"
+            "当前没有可审计的合格可比轮次投影；不会用作者价值、语料内容或推测值代替。"
                 .to_owned(),
             "DYNAMIC_UNAVAILABLE".to_owned(),
         ),

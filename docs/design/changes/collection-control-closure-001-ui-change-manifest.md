@@ -37,3 +37,24 @@
 ## 验收边界
 
 自动检查覆盖表单闭集、revision/idempotency、错误保留、敏感字段负向、规则不创建执行事实、五面 reason 一致。隔离 1440 浏览器覆盖首焦点、Tab trap、Esc、focus return、刷新后 receipt/state、无横向溢出和 console error。真实平台、Chrome loaded extension、共享 runtime/DB、部署与业务验收保持 NOT VERIFIED。
+
+## V4 五页面视觉复刻扩展（2026-09-04）
+
+Mog 以本地 `linggan-collection-field-workspace-v4-ia-cn.html` 作为五个 Collection 页面新的视觉与交互对标。该文件是 synthetic prototype，只提供几何、层级、密度和交互关系，不提供事实、权限或产品语义；其中模拟数字、Evidence tab/卡片、监控价值式健康分和未接通动作均不进入实现。
+
+- 使用者与上下文: 产品负责人和小团队在 1440 CSS px 桌面全屏中处理采集运营。
+- 审美方向: LIDS 白场研究仪器工作站；硬结构线、高密度 ledger、克制 signal、单一 dark observation instrument。
+- 第一记忆点: 五页一致的“共享 Context 读数 → 页内控制条 → 高密度主工作区”，以及对象选择后右侧事实区。V4 参考的可见标题/五格读数与 LIDS 冲突，不采用。
+- 硬约束: Rust SSR + page-local vanilla CSS/JS；只消费现有 token；中文独立成立；UNKNOWN 与 0 分开；不做窄屏。
+- 签名交互: ledger 行选择更新 inspector；目标行继续由 URL 打开宽幅 lifecycle drawer；Esc 返回 opener。
+- CSS 策略: 复用现有 `collection_workspace.css`、`target_drawer.css` 与 `collection_workspace.js`；共享 `shell.css` 仅由既有 Context KPI owner 增加 scope/source 子行。没有新增 framework、字体、图标库、全局 header 或第二套 token。
+
+用户表面、Reality Matrix、依赖、停止条件和 1440 验收矩阵登记在 `docs/plans/active/collection-control-closure-001.md` 的 `COLLECTION-FIVE-PAGE-V4-UI-001` 扩展中。
+
+## V4 实施回执
+
+- 共享壳层仍由 `shell.rs` / `shell.css` 所有；V4 没有复制 header/context/rail 或新建 token。共享 CSS 只在 owner 内为 Context KPI 的第三行 scope/source 提供已有 token 样式。
+- `collection.rs` 按 LIDS 只提供读屏 `h1`、每页 2 个带可见范围/来源的 Context KPI 与稳定 body/readout slot；各真实 projection 在读取成功后替换相应 slot。
+- Attention、Tasks 的行选择只更新右侧事实区，不提交写入；Operations dark instrument 只显示持久 scheduler decision；Targets drawer 仍由 URL 持有，默认展示 creator lifecycle；Runtime 继续以服务端 capacity 为唯一准入结论。
+- 页面可见文案不包含 Evidence 或“监控价值”模块；语料内容与价值判断继续归属 Corpus。合法 lifecycle 状态均有中文标签。
+- 首轮带 synthetic fixture 的 1440 结果属于随后被独立复审拒绝的 head，不替代当前证明。第二轮复审要求的 scope/source 可见、多 Task Lease 完整展开、Inspector 语义 class 同步、失败/空态终结、global focus sole owner、LIDS spacing ladder 与诚实验收文档均已修正。main 集成后的 workspace、完整 Work/Material/Corpus/Topic/API PostgreSQL 69 项、dispatch 8 项与 Collection Control `8 + 11` 项通过并清理；当前 source tree 的无数据库 Chrome 152 / 1440×900 五页终态为 0 overflow、2 个可见 scope/source KPI、唯一 1×1 读屏 h1、0 第二读数条、0 loading 与 0 应用 console issue。有数据行为由 exact PostgreSQL/source tests 证明，真实密度、shared runtime/DB、平台和 Mog 验收不在该回执内；第三轮独立复审待最终提交。

@@ -1,19 +1,21 @@
 //! Collection Workspace — the continuous observation execution layer.
 //!
-//! Five sub-surfaces. The V4 Gold Master froze the set; DESIGN-006 reordered and renamed
+//! Five sub-surfaces. The V4 field-workspace reference froze the set; DESIGN-006 reordered and renamed
 //! them so the row reads by urgency rather than by pipeline stage:
 //! 待处理 / 观察目标 / 生产流 / 采集任务 / 执行工位.
 //! The slugs behind them are unchanged and remain the URL contract.
 //!
-//! Every surface here is structurally complete and factually empty. Collection's domain
-//! objects (ObservationTarget, plan, capture task, attempt, observation event, worker)
-//! do not exist in this project yet, and the only authorised platform access is the single
-//! first canary spec. So each surface states what it cannot show and why, and never
-//! substitutes a zero, a percentage, or a prototype figure for the missing fact.
+//! Every surface here is structurally complete and remains honest about the projection it
+//! can read. Collection domain objects now exist, but a route can still be unavailable or
+//! legitimately empty. In either case the surface states what it can prove and never
+//! substitutes a zero, a percentage, or a prototype figure for a missing fact.
 
 use super::shell::{PrimarySurface, global_header};
 use super::target_drawer::TargetListContext;
 use linggan_evidence::TargetCounts;
+
+pub(super) const READOUT_SLOT_START: &str = "<!-- collection-readout:start -->";
+pub(super) const READOUT_SLOT_END: &str = "<!-- collection-readout:end -->";
 
 pub mod collection_control_rule_view {
     include!("collection_control_rule_view.rs");
@@ -189,14 +191,41 @@ fn rail(active: Section, state: Option<&SurfaceState>) -> String {
 /// get a title block of their own: they join the system state in the context row. Each
 /// reading stays a separate `.v7-kpi` and they are never summed, because two unknowns do
 /// not add up to a known total.
-fn readout(entries: &[(&str, &str)]) -> String {
+pub(super) fn context_readout(entries: &[(&str, &str, &str)]) -> String {
     let mut cells = String::new();
-    for (value, label) in entries {
+    for (value, label, scope) in entries {
+        // `global_header` localizes visible closed-set codes after this markup is built.
+        // Attributes cannot contain those codes because blind string localization would inject
+        // elements into an attribute value, so assistive text carries the Chinese meaning now.
+        let aria_value = if *value == "UNKNOWN" { "未知" } else { value };
         cells.push_str(&format!(
-            "<span class=\"v7-kpi\"><em>{label}</em><b>{value}</b></span>"
+            "<span class=\"v7-kpi\" title=\"{scope}\" aria-label=\"{label} {aria_value}；{scope}\"><em>{label}</em><b aria-hidden=\"true\">{value}</b><small>{scope}</small></span>",
+            value = escape(value),
+            label = escape(label),
+            scope = escape(scope),
+            aria_value = escape(aria_value),
         ));
     }
     cells
+}
+
+pub(super) fn replace_bounded_slot(base: &str, start: &str, end: &str, content: &str) -> String {
+    let Some(open) = base.find(start) else {
+        return base.to_owned();
+    };
+    let content_start = open + start.len();
+    let Some(close_offset) = base[content_start..].find(end) else {
+        return base.to_owned();
+    };
+    let close = content_start + close_offset;
+    format!(
+        "{}{}{}{}{}",
+        &base[..open],
+        start,
+        content,
+        end,
+        &base[close + end.len()..]
+    )
 }
 
 /// DESIGN-006 · Collection has five empty surfaces but only two actionable kinds of empty, and only
@@ -655,18 +684,39 @@ fn head_readout(section: Section, state: Option<&SurfaceState>) -> String {
         (Section::Runtime, Some(state)) => {
             let vacant = display_count(state.vacant_stations);
             let unclaimed = display_count(state.unclaimed_installations);
-            readout(&[(&vacant, "空缺工位"), (&unclaimed, "未归位安装")])
+            context_readout(&[
+                (&vacant, "空缺工位", "当前工位投影；空缺不等于离线"),
+                (&unclaimed, "未归位安装", "当前未认领安装投影"),
+            ])
         }
-        (Section::Attention, _) => readout(&[("UNKNOWN", "待处理"), ("UNKNOWN", "数据缺失")]),
+        (Section::Attention, _) => context_readout(&[
+            ("UNKNOWN", "待处理", "当前恢复事项投影尚未读取"),
+            ("UNKNOWN", "数据缺失", "当前缺失投影尚未读取"),
+        ]),
         (Section::Targets, Some(state)) => {
             let monitoring = display_count(state.monitoring_targets);
             let archiving = display_count(state.archiving_targets);
-            readout(&[(&monitoring, "巡检已开"), (&archiving, "建档中")])
+            context_readout(&[
+                (&monitoring, "巡检已开", "当前观察目标投影"),
+                (&archiving, "建档中", "当前观察目标投影"),
+            ])
         }
-        (Section::Targets, None) => readout(&[("UNKNOWN", "巡检已开"), ("UNKNOWN", "建档中")]),
-        (Section::Operations, _) => readout(&[("UNKNOWN", "异常阶段"), ("UNKNOWN", "最近一轮")]),
-        (Section::Tasks, _) => readout(&[("UNKNOWN", "失败"), ("UNKNOWN", "部分完成")]),
-        (Section::Runtime, None) => readout(&[("UNKNOWN", "空缺工位"), ("UNKNOWN", "未归位安装")]),
+        (Section::Targets, None) => context_readout(&[
+            ("UNKNOWN", "巡检已开", "当前观察目标投影尚未读取"),
+            ("UNKNOWN", "建档中", "当前观察目标投影尚未读取"),
+        ]),
+        (Section::Operations, _) => context_readout(&[
+            ("UNKNOWN", "异常阶段", "当前持久调度投影尚未读取"),
+            ("UNKNOWN", "最近一轮", "当前持久调度投影尚未读取"),
+        ]),
+        (Section::Tasks, _) => context_readout(&[
+            ("UNKNOWN", "失败", "最近任务投影尚未读取"),
+            ("UNKNOWN", "部分完成", "最近任务投影尚未读取"),
+        ]),
+        (Section::Runtime, None) => context_readout(&[
+            ("UNKNOWN", "空缺工位", "当前工位投影尚未读取"),
+            ("UNKNOWN", "未归位安装", "当前安装投影尚未读取"),
+        ]),
     }
 }
 
@@ -756,7 +806,7 @@ fn second_bar(
           <div class="c-tabs c-tg-views">{target_filters}</div>
           <div class="c-actions c-tg-toolbar">
             <a class="c-btn-quiet" href="/collection/targets?sort=last">排序 / 最近观察 ↓</a>
-            <form class="c-target-add" method="post" action="/collection/targets/new">
+            <form id="collection-target-create" class="c-target-add" method="post" action="/collection/targets/new">
               <select name="target_kind" aria-label="目标类型">
                 <option value="creator">创作者</option>
                 <option value="keyword">关键词</option>
@@ -832,7 +882,9 @@ pub fn render(
     // DESIGN-003 header reclaim: this surface's own counts ride in the context row next to
     // the system state, so the page can start at its content instead of restating its name.
     let meta_row = format!(
-        "{counts}<i class=\"v7-vr\" aria-hidden=\"true\"></i>{system}",
+        "{slot_start}{counts}{slot_end}<i class=\"v7-vr\" aria-hidden=\"true\"></i>{system}",
+        slot_start = READOUT_SLOT_START,
+        slot_end = READOUT_SLOT_END,
         counts = head_readout(section, state),
         system = system_words(state),
     );
@@ -875,7 +927,7 @@ pub fn render(
         <main class="c-page" aria-labelledby="page-title">
           <h1 class="v7-sr-only" id="page-title">{title}</h1>
           {second_bar}
-          <div class="c-body">{body}</div>
+          <div class="c-body"><!-- collection-body:start -->{body}<!-- collection-body:end --></div>
         </main>
       </div>
     </div>

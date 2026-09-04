@@ -1,7 +1,7 @@
 # 前端设计手册
 
 > 状态: 权威当前
-> 最后核对: 2026-09-02
+> 最后核对: 2026-09-04
 > 适用范围: Linggan Intelligence 未来用户可见 Web UI 的设计规则、页面/组件规格、协作入口与验收追踪
 > 事实来源: 用户对 DESIGN-001 / DESIGN-002 的明确授权、AGENTS.md、docs/governance/、docs/agents/ui-execution-contract.md、已确认产品边界与当前文件树
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决策与当前 SCOPE；本手册不覆盖这些来源
@@ -67,6 +67,8 @@
 | [components/component-promotion.md](components/component-promotion.md) | Reference Page 局部块如何经第二页面验证后才可晋升为 CMP | 权威当前 |
 | [pages/evidence-library-page.md](pages/evidence-library-page.md) | PAGE-EVIDENCE-001：Evidence Library 多材料产品手册、技术呈现要求、表面地图、状态与回执合同 | 权威当前；运行页已按现行 Material Projection 落地，真实垂直证明未完成 |
 | [pages/evidence-library-multi-material-reference.html](pages/evidence-library-multi-material-reference.html) | EVIDENCE-PAGE-002：多材料 Evidence Library 合成静态高保真参考；不连接运行时或真实材料 | 权威当前；静态参考 |
+| [pages/collection-workspace-page.md](pages/collection-workspace-page.md) | PAGE-COLLECTION-001：Collection 五个子面的职责、状态、事实边界与验收规则 | 权威当前 |
+| [pages/collection-operations-html-prototype-brief.md](pages/collection-operations-html-prototype-brief.md) | COLLECTION-HTML-BRIEF-001：外部模型可直接使用的自包含静态原型委托书 | 权威当前；不是运行实现 |
 | [changes/evidence-page-002-multi-material-ui-change-manifest.md](changes/evidence-page-002-multi-material-ui-change-manifest.md) | EVIDENCE-PAGE-002：本次产品与静态参考变更清单及越权边界 | 权威当前 |
 | [acceptance/evidence-page-002-multi-material-reference-acceptance.md](acceptance/evidence-page-002-multi-material-reference-acceptance.md) | ACC-EVIDENCE-PAGE-002：桌面/窄屏、状态、互动与证明边界验收 | 一次性报告 |
 | [changes/evidence-runtime-001-ui-change-manifest.md](changes/evidence-runtime-001-ui-change-manifest.md) | EVIDENCE-RUNTIME-001：Issue #90 运行页的数据、状态、交互、媒体安全与范围清单 | 权威当前 |
@@ -79,6 +81,7 @@
 | [changes/design-011-collection-surfaces-v7-ui-change-manifest.md](changes/design-011-collection-surfaces-v7-ui-change-manifest.md) | DESIGN-011：生产流与执行工位落地 v7、能力矩阵四态与已知限制 | 权威当前 |
 | [changes/collection-lifecycle-001-ui-change-manifest.md](changes/collection-lifecycle-001-ui-change-manifest.md) | COLLECTION-LIFECYCLE-001：Issue #148 creator 生命周期、四职责抽屉与 Corpus 精确深链 | 权威当前 |
 | [acceptance/collection-lifecycle-001-visual-acceptance.md](acceptance/collection-lifecycle-001-visual-acceptance.md) | ACC-COLLECTION-LIFECYCLE-001：Issue #148 自动、隔离视口与未部署边界 | 一次性报告 |
+| [acceptance/collection-five-page-v4-ui-001-visual-acceptance.md](acceptance/collection-five-page-v4-ui-001-visual-acceptance.md) | ACC-COLLECTION-FIVE-PAGE-V4-UI-001：五页结构、隔离 PostgreSQL、1440×900 浏览器互动与未部署边界 | 一次性报告 |
 | [acceptance/design-009-runtime-capacity-surface-acceptance.md](acceptance/design-009-runtime-capacity-surface-acceptance.md) | ACC-RUNTIME-001：产能判定、状态诚实性与视觉的验收记录 | 一次性报告 |
 | [pages/topic-intelligence-reference.html](pages/topic-intelligence-reference.html) | 可本地打开的合成静态参考实现；不读取、写入或声称真实系统事实 | 权威当前 |
 | [pages/topic-intelligence-reference-acceptance.md](pages/topic-intelligence-reference-acceptance.md) | ACC-TOPIC-001：静态视觉、互动和证明边界的实际验收记录 | 权威当前 |

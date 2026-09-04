@@ -84,7 +84,7 @@ const MIGRATIONS: &str = concat!(
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn enabled_pending_target_is_automatically_dispatched_once_and_heartbeat_is_visible() {
+async fn enabled_pending_target_without_a_rule_is_skipped_and_heartbeat_is_visible() {
     let database = proof_database_for("collection_scheduler_enabled_target").await;
     let target_ref = Uuid::new_v4();
     let authorization_ref = Uuid::new_v4();
@@ -134,7 +134,16 @@ async fn enabled_pending_target_is_automatically_dispatched_once_and_heartbeat_i
         .await
         .unwrap();
     let first = linggan_evidence::run_due_patrols(&database).await.unwrap();
-    assert_eq!(first.dispatched, vec![target_ref]);
+    assert!(first.dispatched.is_empty());
+    assert_eq!(first.skipped, vec![(target_ref, "rule_missing".to_owned())]);
+    let first_heartbeat = linggan_evidence::read_scheduler_heartbeat(&database)
+        .await
+        .unwrap()
+        .expect("scheduler heartbeat exists after a skipped decision");
+    assert_eq!(first_heartbeat.state, "running");
+    assert_eq!(first_heartbeat.last_outcome, "partial");
+    assert_eq!(first_heartbeat.dispatched_count, 0);
+    assert_eq!(first_heartbeat.skipped_count, 1);
     let work_order_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_work_order WHERE target_ref=$1 AND lane='deep_archive'",
     )
@@ -142,7 +151,7 @@ async fn enabled_pending_target_is_automatically_dispatched_once_and_heartbeat_i
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(work_order_count, 1);
+    assert_eq!(work_order_count, 0);
     let live_lease_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_work_order w JOIN collection_work_order_lease l USING(work_order_ref) \
          WHERE w.target_ref=$1 AND l.released_at IS NULL",
@@ -151,7 +160,7 @@ async fn enabled_pending_target_is_automatically_dispatched_once_and_heartbeat_i
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(live_lease_count, 1);
+    assert_eq!(live_lease_count, 0);
 
     let second = linggan_evidence::run_due_patrols(&database).await.unwrap();
     assert!(second.dispatched.is_empty());
@@ -162,13 +171,18 @@ async fn enabled_pending_target_is_automatically_dispatched_once_and_heartbeat_i
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(work_order_count_after, 1, "a live lease is not duplicated");
+    assert_eq!(
+        work_order_count_after, 0,
+        "an enabled flag does not bypass the versioned rule and capacity gates"
+    );
     let heartbeat = linggan_evidence::read_scheduler_heartbeat(&database)
         .await
         .unwrap()
         .expect("scheduler heartbeat exists");
     assert_eq!(heartbeat.state, "running");
-    assert_eq!(heartbeat.last_outcome, "partial");
+    assert_eq!(heartbeat.last_outcome, "idle");
+    assert_eq!(heartbeat.dispatched_count, 0);
+    assert_eq!(heartbeat.skipped_count, 0);
 }
 
 #[tokio::test]
@@ -273,7 +287,10 @@ async fn creator_lease_claims_and_completes_two_scheduled_tasks_in_order() {
     .fetch_one(database.pool())
     .await
     .expect("completed baseline advances target lifecycle");
-    assert_eq!(lifecycle_state, "archived");
+    assert_eq!(
+        lifecycle_state, "archiving",
+        "two accepted empty packages complete the lease but cannot manufacture a qualified baseline"
+    );
 
     let manual_task = manual_task();
     assert!(matches!(

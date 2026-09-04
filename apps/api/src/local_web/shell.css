@@ -49,9 +49,10 @@
  * because the context row itself is rendered by shell.rs for every page. */
 .v7-sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
   clip:rect(0 0 0 0); clip-path:inset(50%); white-space:nowrap; border:0; }
-.v7-kpi { display:inline-flex; align-items:baseline; gap:6px; }
+.v7-kpi { display:inline-flex; align-items:baseline; gap:var(--lgi-space-2); }
 .v7-kpi em { color:var(--v7-muted); font:500 11px var(--lgi-font-sans); font-style:normal; letter-spacing:0; }
 .v7-kpi b { color:var(--v7-black); font:700 12px var(--lgi-font-mono); letter-spacing:.03em; }
+.v7-kpi small { color:var(--v7-ghost); font:var(--lgi-weight-regular) var(--lgi-text-label)/1.2 var(--lgi-font-sans); letter-spacing:0; }
 .v7-vr { width:1px; height:16px; background:var(--v7-line-strong); }
 
 /* V7 standardized 78px global row + 50px context row */
