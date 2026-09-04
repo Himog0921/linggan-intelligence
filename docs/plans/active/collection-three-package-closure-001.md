@@ -323,7 +323,7 @@ Package 3 · Creator Dossier
 | Work Package B | VERIFIED（branch） | 四职责抽屉、默认生命周期、Evidence tab 退役；1440/1280/390 隔离浏览器验证，390 点命中区实测 29×29px |
 | Work Package C | VERIFIED（branch） | 首批列表外 Work 精确 Corpus detail；未复制 Evidence |
 | focused/workspace/governance | VERIFIED（branch） | Material 11/11、lifecycle 5/5、API full-path 1/1、workspace 155 passed / 0 failed / 86 ignored、JS 2/2；workspace check（15 条既存 dead-code warning）、fmt、diff、project governance 与 UI handbook 通过 |
-| commit/push/Draft PR | PENDING | Draft PR body 必须 `Refs #148` |
+| commit/push/Draft PR | VERIFIED（delivery） | 修正提交已 push 到既有 OPEN/DRAFT PR #151；PR body 保留 `Refs #148`，未 merge、未改 Draft 状态 |
 | independent exact-head review | NOT VERIFIED | 由 Mog/Coordinator 安排 |
 | main merge | NOT AUTHORIZED / NOT VERIFIED | 不在 Claim 内 |
 | shared DB/runtime/deploy | NOT AUTHORIZED / NOT VERIFIED | 不在 Claim 内 |
