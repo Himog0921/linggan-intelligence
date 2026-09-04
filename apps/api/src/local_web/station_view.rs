@@ -13,8 +13,8 @@
 //! 是手写的，全部由 `read_runtime_capacity` 的事实推出。
 
 use linggan_evidence::{
-    ACCOUNT_CHECK_NOT_CONNECTED, CapabilityState, LaneVerdict, RuntimeCapacityOverview,
-    StationCapability, StationOverview, UnclaimedInstallation,
+    CapabilityState, LaneVerdict, RuntimeCapacityOverview, StationCapability, StationOverview,
+    UnclaimedInstallation,
 };
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -222,9 +222,9 @@ fn factor_markup(
         ("工位", station_value, "在岗 / 已登记", true),
         (
             "账号",
-            "不参与判定".to_owned(),
-            "独立立项 · DECISION-04",
-            false,
+            "见上方控制资格".to_owned(),
+            "账号绑定与资格由 Collection Control 实时判定",
+            true,
         ),
         ("今日预算", budget_value, "已入库 / 每日上限", true),
         ("风险余量", risk_value, "生效中的风险暂停", true),
@@ -250,7 +250,7 @@ fn factor_markup(
     format!(
         r#"<dl class="c-factors">{rendered}</dl>
            <p class="c-factors-caveat">{caveat}</p>"#,
-        caveat = escape(ACCOUNT_CHECK_NOT_CONNECTED),
+        caveat = escape("账号不会由插件自行宣布可用；上方控制资格是唯一准入口径。"),
     )
 }
 
@@ -863,9 +863,10 @@ mod tests {
     }
 
     #[test]
-    fn the_account_half_of_question_five_is_never_shown_as_checked() {
-        // establish_capacity 检查风险、工位、能力、预算四样，账号不在其中
-        // （DECISION-04 独立立项）。显示成四项齐备就是用视觉便利改写资格。
+    fn the_account_half_of_question_five_is_owned_by_collection_control() {
+        // Package 2 moves account binding and eligibility into the single Collection Control
+        // evaluator. The station factors must point at that fact instead of claiming the
+        // account is outside admission.
         let rendered = render_runtime(
             &base(),
             Some(&overview(vec![lane("巡检", available())])),
@@ -874,8 +875,8 @@ mod tests {
             &CapabilityMatrix::new(),
             None,
         );
-        assert!(rendered.contains("不参与判定"));
-        assert!(rendered.contains("c-factor-unchecked"));
+        assert!(rendered.contains("见上方控制资格"));
+        assert!(!rendered.contains("不参与判定"));
     }
 
     #[test]

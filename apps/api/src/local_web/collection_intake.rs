@@ -41,6 +41,7 @@ pub enum IntakeRejection {
     UnsupportedPlatform,
     UnknownTargetKind,
     EmptyIdentity,
+    CreatorIdentityMustBePlatformId,
     KeywordNeedsRanking,
 }
 
@@ -50,6 +51,7 @@ impl IntakeRejection {
             Self::UnsupportedPlatform => "unsupported_platform",
             Self::UnknownTargetKind => "unknown_target_kind",
             Self::EmptyIdentity => "empty_identity",
+            Self::CreatorIdentityMustBePlatformId => "creator_identity_must_be_platform_id",
             Self::KeywordNeedsRanking => "keyword_needs_ranking",
         }
     }
@@ -60,6 +62,9 @@ impl From<CollectionContractError> for IntakeRejection {
         match error {
             CollectionContractError::UnsupportedPlatform => Self::UnsupportedPlatform,
             CollectionContractError::UnknownTargetKind => Self::UnknownTargetKind,
+            CollectionContractError::InvalidCreatorIdentity => {
+                Self::CreatorIdentityMustBePlatformId
+            }
             _ => Self::EmptyIdentity,
         }
     }
@@ -146,6 +151,19 @@ mod tests {
         assert_eq!(
             parse_intake(&intake("creator", "   ", None)).unwrap_err(),
             IntakeRejection::EmptyIdentity
+        );
+    }
+
+    #[test]
+    fn creator_url_is_rejected_before_storage() {
+        assert_eq!(
+            parse_intake(&intake(
+                "creator",
+                "https://www.xiaohongshu.com/user/profile/5ebe6d21",
+                None
+            ))
+            .unwrap_err(),
+            IntakeRejection::CreatorIdentityMustBePlatformId
         );
     }
 }

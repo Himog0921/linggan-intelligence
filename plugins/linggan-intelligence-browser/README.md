@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.33`
+> 版本: `0.8.34`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -214,6 +214,10 @@ Tesseract、FFmpeg 和本地 Whisper 处理，插件不执行语义分析。
 自动签到、受控领取与媒体工作，不成为本地授权来源。平台 host permission 只服务已批准
 TaskSpec 的页面执行和受限媒体候选取得。
 
+0.8.34 增加安装凭据的 pending→activate 两阶段交付、账号资格最小信号回报与服务端准入
+判定；媒体取得和失败回报也必须携带当前安装凭据。凭据原文只在本机存储，服务端只保留
+摘要，账号原始身份只在回报请求内短暂存在并以 keyed digest 入库。
+
 完整逐项清单见 [MIGRATION-MAP.md](MIGRATION-MAP.md)。
 
 ## Build 与可复现发行包
@@ -233,7 +237,7 @@ npm run verify:linggan-isolation
 0.8.18 将真实终验发现的 `596/594` 收口为完成：全量深采取得数达到或超过页面公开数即可
 完成，详情附带评论窗口仍保持精确上限。
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.33.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.34.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

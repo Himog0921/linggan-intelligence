@@ -1,0 +1,1129 @@
+// Durable Package 2 control projections for Operations, Attention, Tasks and Runtime.
+//
+// The scheduler decision and frozen resource references are history. Current Runtime capacity
+// is read through `read_capacity`, the same evaluator Admission uses. The resource rows below
+// only expose bounded control facts; they never select a credential hash, account digest,
+// platform identity, Cookie, HTML, payload, Evidence content or free-form platform error.
+
+use linggan_contracts::Capacity;
+use linggan_evidence::{collection_control_schema_is_ready, read_capacity};
+use linggan_storage_postgres::Database;
+use sqlx::Row;
+use uuid::Uuid;
+
+const EMPTY_STATE_OPEN: &str = "<section class=\"c-empty c-empty-engineering\">";
+const EMPTY_STATE_CLOSE: &str = "</section>";
+const BODY_OPEN: &str = "<div class=\"c-body\">";
+
+#[derive(Debug, Clone)]
+pub enum CollectionControlSurfaceRead {
+    Ready(CollectionControlSurfaceProjection),
+    SchemaUnavailable,
+}
+
+#[derive(Debug, Clone)]
+pub struct CollectionControlSurfaceProjection {
+    pub latest_run: Option<SchedulerRunView>,
+    pub decisions: Vec<SchedulerDecisionView>,
+    pub works: Vec<FrozenWorkView>,
+    pub runtime_lanes: Vec<RuntimeLaneControlView>,
+    pub runtime_resources: Vec<RuntimeResourceView>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchedulerRunView {
+    pub scheduler_run_ref: Uuid,
+    pub outcome: Option<String>,
+    pub considered_count: i32,
+    pub dispatched_count: i32,
+    pub started_at: String,
+    pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SchedulerDecisionView {
+    pub target_decision_ref: Uuid,
+    pub scheduler_run_ref: Uuid,
+    pub target_ref: Uuid,
+    pub target_name: String,
+    pub target_kind: String,
+    pub rule_revision_ref: Option<Uuid>,
+    pub outcome: String,
+    pub reason_code: String,
+    pub next_eligible_at: Option<String>,
+    pub work_order_ref: Option<Uuid>,
+    pub lease_ref: Option<Uuid>,
+    pub decided_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrozenWorkView {
+    pub work_order_ref: Uuid,
+    pub target_ref: Uuid,
+    pub target_name: String,
+    pub lane: String,
+    pub station_ref: Option<Uuid>,
+    pub installation_ref: Option<Uuid>,
+    pub account_ref: Option<Uuid>,
+    pub eligibility_ref: Option<Uuid>,
+    pub monitor_rule_revision_ref: Option<Uuid>,
+    pub lease_ref: Option<Uuid>,
+    pub lease_state: String,
+    pub task_id: Option<Uuid>,
+    pub task_state: Option<String>,
+    pub station_is_current: Option<bool>,
+    pub installation_is_current: Option<bool>,
+    pub account_is_current: Option<bool>,
+    pub rule_is_current: Option<bool>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeLaneControlView {
+    pub label: &'static str,
+    pub target_kind: &'static str,
+    pub lane: &'static str,
+    pub available: bool,
+    pub reason_code: Option<&'static str>,
+    pub reason: Option<String>,
+    pub station_ref: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeResourceView {
+    pub station_ref: Uuid,
+    pub station_name: String,
+    pub accepting_tasks: bool,
+    pub installation_ref: Option<Uuid>,
+    pub plugin_version: Option<String>,
+    pub last_seen_at: Option<String>,
+    pub has_valid_credential: bool,
+    pub account_ref: Option<Uuid>,
+    pub bound_account_ref: Option<Uuid>,
+    pub binding_state: String,
+    pub binding_confirmed_until: Option<String>,
+    pub eligibility_ref: Option<Uuid>,
+    pub eligibility_state: Option<String>,
+    pub eligibility_reason_code: Option<String>,
+    pub eligibility_observed_at: Option<String>,
+    pub eligibility_expires_at: Option<String>,
+    pub account_has_live_lease: bool,
+}
+
+pub async fn read_collection_control_surface(
+    database: &Database,
+    limit: i64,
+) -> Result<CollectionControlSurfaceRead, sqlx::Error> {
+    if !collection_control_schema_is_ready(database).await? {
+        return Ok(CollectionControlSurfaceRead::SchemaUnavailable);
+    }
+    let limit = limit.clamp(1, 100);
+    let latest_run = read_latest_run(database).await?;
+    let decisions = read_recent_decisions(database, limit).await?;
+    let works = read_frozen_works(database, limit).await?;
+    let runtime_resources = read_runtime_resources(database).await?;
+    let mut runtime_lanes = Vec::with_capacity(3);
+    for (label, target_kind, lane) in [
+        ("创作者基线", "creator", "deep_archive"),
+        ("创作者巡检", "creator", "patrol"),
+        ("关键词巡检", "keyword", "patrol"),
+    ] {
+        let capacity = read_capacity(database, "xhs", target_kind, lane).await?;
+        runtime_lanes.push(runtime_lane(label, target_kind, lane, capacity));
+    }
+    Ok(CollectionControlSurfaceRead::Ready(
+        CollectionControlSurfaceProjection {
+            latest_run,
+            decisions,
+            works,
+            runtime_lanes,
+            runtime_resources,
+        },
+    ))
+}
+
+async fn read_latest_run(database: &Database) -> Result<Option<SchedulerRunView>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT scheduler_run_ref,outcome,considered_count,dispatched_count, \
+                started_at::text AS started_at,completed_at::text AS completed_at \
+         FROM collection_scheduler_run ORDER BY started_at DESC LIMIT 1",
+    )
+    .fetch_optional(database.pool())
+    .await?;
+    row.map(|row| {
+        Ok(SchedulerRunView {
+            scheduler_run_ref: row.try_get("scheduler_run_ref")?,
+            outcome: row.try_get("outcome")?,
+            considered_count: row.try_get("considered_count")?,
+            dispatched_count: row.try_get("dispatched_count")?,
+            started_at: row.try_get("started_at")?,
+            completed_at: row.try_get("completed_at")?,
+        })
+    })
+    .transpose()
+}
+
+async fn read_recent_decisions(
+    database: &Database,
+    limit: i64,
+) -> Result<Vec<SchedulerDecisionView>, sqlx::Error> {
+    sqlx::query(
+        "SELECT decision.target_decision_ref,decision.scheduler_run_ref,decision.target_ref, \
+                COALESCE(NULLIF(btrim(target.display_name),''),target.identity_key) AS target_name, \
+                target.target_kind,decision.rule_revision_ref,decision.outcome,decision.reason_code, \
+                decision.next_eligible_at::text AS next_eligible_at,decision.work_order_ref, \
+                decision.lease_ref,decision.decided_at::text AS decided_at \
+         FROM collection_scheduler_target_decision decision \
+         JOIN collection_observation_target target USING(target_ref) \
+         ORDER BY decision.decided_at DESC,decision.target_decision_ref LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(database.pool())
+    .await?
+    .into_iter()
+    .map(|row| {
+        Ok(SchedulerDecisionView {
+            target_decision_ref: row.try_get("target_decision_ref")?,
+            scheduler_run_ref: row.try_get("scheduler_run_ref")?,
+            target_ref: row.try_get("target_ref")?,
+            target_name: row.try_get("target_name")?,
+            target_kind: row.try_get("target_kind")?,
+            rule_revision_ref: row.try_get("rule_revision_ref")?,
+            outcome: row.try_get("outcome")?,
+            reason_code: row.try_get("reason_code")?,
+            next_eligible_at: row.try_get("next_eligible_at")?,
+            work_order_ref: row.try_get("work_order_ref")?,
+            lease_ref: row.try_get("lease_ref")?,
+            decided_at: row.try_get("decided_at")?,
+        })
+    })
+    .collect()
+}
+
+async fn read_frozen_works(
+    database: &Database,
+    limit: i64,
+) -> Result<Vec<FrozenWorkView>, sqlx::Error> {
+    sqlx::query(
+        "SELECT work.work_order_ref,work.target_ref, \
+                COALESCE(NULLIF(btrim(target.display_name),''),target.identity_key) AS target_name, \
+                work.lane,work.station_ref,work.installation_ref,work.account_ref,work.eligibility_ref, \
+                work.monitor_rule_revision_ref,lease.lease_ref, \
+                CASE WHEN lease.lease_ref IS NULL THEN 'not_issued' \
+                     WHEN lease.released_at IS NOT NULL THEN 'released' \
+                     WHEN lease.expires_at<=scope_001_now() THEN 'expired' ELSE 'live' END AS lease_state, \
+                task.task_id,task.execution_state AS task_state, \
+                CASE WHEN work.station_ref IS NULL THEN NULL \
+                     ELSE station.retired_at IS NULL END AS station_is_current, \
+                CASE WHEN work.installation_ref IS NULL THEN NULL ELSE EXISTS ( \
+                    SELECT 1 FROM plugin_installation current_installation \
+                    WHERE current_installation.installation_ref=work.installation_ref \
+                      AND current_installation.station_ref=work.station_ref \
+                      AND current_installation.superseded_at IS NULL) END AS installation_is_current, \
+                CASE WHEN work.account_ref IS NULL THEN NULL ELSE EXISTS ( \
+                    SELECT 1 FROM platform_observation_account_binding current_binding \
+                    WHERE current_binding.account_ref=work.account_ref \
+                      AND current_binding.installation_ref=work.installation_ref \
+                      AND current_binding.ended_at IS NULL \
+                      AND current_binding.confirmed_until>scope_001_now()) END AS account_is_current, \
+                CASE WHEN work.monitor_rule_revision_ref IS NULL THEN NULL \
+                     ELSE target.active_monitor_rule_revision_ref=work.monitor_rule_revision_ref \
+                     END AS rule_is_current,work.created_at::text AS created_at \
+         FROM collection_work_order work \
+         JOIN collection_observation_target target USING(target_ref) \
+         LEFT JOIN execution_station station ON station.station_ref=work.station_ref \
+         LEFT JOIN LATERAL ( \
+             SELECT candidate.lease_ref,candidate.expires_at,candidate.released_at,candidate.issued_at \
+             FROM collection_work_order_lease candidate \
+             WHERE candidate.work_order_ref=work.work_order_ref \
+             ORDER BY candidate.issued_at DESC LIMIT 1) lease ON true \
+         LEFT JOIN LATERAL ( \
+             SELECT candidate.task_id,candidate.execution_state,candidate.sequence_no \
+             FROM collection_work_order_lease_task candidate \
+             WHERE candidate.lease_ref=lease.lease_ref \
+             ORDER BY candidate.sequence_no DESC LIMIT 1) task ON true \
+         ORDER BY work.created_at DESC,work.work_order_ref LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(database.pool())
+    .await?
+    .into_iter()
+    .map(|row| {
+        Ok(FrozenWorkView {
+            work_order_ref: row.try_get("work_order_ref")?,
+            target_ref: row.try_get("target_ref")?,
+            target_name: row.try_get("target_name")?,
+            lane: row.try_get("lane")?,
+            station_ref: row.try_get("station_ref")?,
+            installation_ref: row.try_get("installation_ref")?,
+            account_ref: row.try_get("account_ref")?,
+            eligibility_ref: row.try_get("eligibility_ref")?,
+            monitor_rule_revision_ref: row.try_get("monitor_rule_revision_ref")?,
+            lease_ref: row.try_get("lease_ref")?,
+            lease_state: row.try_get("lease_state")?,
+            task_id: row.try_get("task_id")?,
+            task_state: row.try_get("task_state")?,
+            station_is_current: row.try_get("station_is_current")?,
+            installation_is_current: row.try_get("installation_is_current")?,
+            account_is_current: row.try_get("account_is_current")?,
+            rule_is_current: row.try_get("rule_is_current")?,
+            created_at: row.try_get("created_at")?,
+        })
+    })
+    .collect()
+}
+
+async fn read_runtime_resources(
+    database: &Database,
+) -> Result<Vec<RuntimeResourceView>, sqlx::Error> {
+    sqlx::query(
+        "SELECT station.station_ref,station.display_name AS station_name,station.accepting_tasks, \
+                installation.installation_ref,installation.plugin_version, \
+                installation.last_seen_at::text AS last_seen_at, \
+                COALESCE(EXISTS (SELECT 1 FROM installation_credential credential \
+                    WHERE credential.installation_ref=installation.installation_ref \
+                      AND credential.revoked_at IS NULL AND credential.activated_at IS NOT NULL \
+                      AND credential.expires_at>scope_001_now()),false) AS has_valid_credential, \
+                COALESCE(eligibility.account_ref,binding.account_ref) AS account_ref, \
+                binding.account_ref AS bound_account_ref, \
+                CASE WHEN eligibility.account_ref IS NULL AND binding.account_ref IS NULL THEN 'missing' \
+                     WHEN eligibility.account_ref IS NULL THEN 'bound_without_eligibility' \
+                     WHEN binding.account_ref IS NULL THEN 'unconfirmed' \
+                     WHEN binding.account_ref<>eligibility.account_ref THEN 'changed' \
+                     WHEN binding.confirmed_until<=scope_001_now() THEN 'expired' \
+                     ELSE 'current' END AS binding_state, \
+                binding.confirmed_until::text AS binding_confirmed_until, \
+                eligibility.eligibility_ref, \
+                eligibility.eligibility_state,eligibility.reason_code AS eligibility_reason_code, \
+                eligibility.observed_at::text AS eligibility_observed_at, \
+                eligibility.expires_at::text AS eligibility_expires_at, \
+                COALESCE(CASE WHEN COALESCE(eligibility.account_ref,binding.account_ref) IS NULL THEN false ELSE EXISTS ( \
+                    SELECT 1 FROM collection_work_order busy_work \
+                    JOIN collection_work_order_lease busy_lease USING(work_order_ref) \
+                    WHERE busy_work.account_ref=COALESCE(eligibility.account_ref,binding.account_ref) \
+                      AND busy_lease.released_at IS NULL \
+                      AND busy_lease.expires_at>scope_001_now()) END,false) AS account_has_live_lease \
+         FROM execution_station station \
+         LEFT JOIN plugin_installation installation \
+           ON installation.station_ref=station.station_ref AND installation.superseded_at IS NULL \
+         LEFT JOIN LATERAL ( \
+             SELECT observation.eligibility_ref,observation.account_ref, \
+                    observation.eligibility_state,observation.reason_code, \
+                    observation.observed_at,observation.expires_at \
+             FROM platform_observation_account_eligibility_observation observation \
+             WHERE observation.installation_ref=installation.installation_ref \
+             ORDER BY observation.observed_at DESC LIMIT 1) eligibility ON true \
+         LEFT JOIN LATERAL ( \
+             SELECT candidate.account_ref,candidate.confirmed_until \
+             FROM platform_observation_account_binding candidate \
+             WHERE candidate.installation_ref=installation.installation_ref \
+               AND candidate.ended_at IS NULL LIMIT 1) binding ON true \
+         WHERE station.retired_at IS NULL ORDER BY station.registered_at,station.station_ref",
+    )
+    .fetch_all(database.pool())
+    .await?
+    .into_iter()
+    .map(|row| {
+        Ok(RuntimeResourceView {
+            station_ref: row.try_get("station_ref")?,
+            station_name: row.try_get("station_name")?,
+            accepting_tasks: row.try_get("accepting_tasks")?,
+            installation_ref: row.try_get("installation_ref")?,
+            plugin_version: row.try_get("plugin_version")?,
+            last_seen_at: row.try_get("last_seen_at")?,
+            has_valid_credential: row.try_get("has_valid_credential")?,
+            account_ref: row.try_get("account_ref")?,
+            bound_account_ref: row.try_get("bound_account_ref")?,
+            binding_state: row.try_get("binding_state")?,
+            binding_confirmed_until: row.try_get("binding_confirmed_until")?,
+            eligibility_ref: row.try_get("eligibility_ref")?,
+            eligibility_state: row.try_get("eligibility_state")?,
+            eligibility_reason_code: row.try_get("eligibility_reason_code")?,
+            eligibility_observed_at: row.try_get("eligibility_observed_at")?,
+            eligibility_expires_at: row.try_get("eligibility_expires_at")?,
+            account_has_live_lease: row.try_get("account_has_live_lease")?,
+        })
+    })
+    .collect()
+}
+
+fn runtime_lane(
+    label: &'static str,
+    target_kind: &'static str,
+    lane: &'static str,
+    capacity: Capacity,
+) -> RuntimeLaneControlView {
+    match capacity {
+        Capacity::Available { station_ref } => RuntimeLaneControlView {
+            label,
+            target_kind,
+            lane,
+            available: true,
+            reason_code: None,
+            reason: None,
+            station_ref: Some(station_ref),
+        },
+        Capacity::NoStaffedStation => blocked_lane(
+            label,
+            target_kind,
+            lane,
+            "station_unavailable",
+            "没有任何登记工位拥有在岗安装。".to_owned(),
+        ),
+        Capacity::MissingCapabilities { missing } => blocked_lane(
+            label,
+            target_kind,
+            lane,
+            "capability_missing",
+            format!("在岗安装缺少本次 lane 所需能力：{}。", missing.join("、")),
+        ),
+        Capacity::DailyQuotaCommitted { quota, committed } => blocked_lane(
+            label,
+            target_kind,
+            lane,
+            "station_daily_budget_reached",
+            format!("当天额度已被既有工单占满：每日 {quota} 篇，已下发 {committed} 篇。"),
+        ),
+        Capacity::RiskPaused { reason } => blocked_lane(
+            label,
+            target_kind,
+            lane,
+            "risk_paused",
+            format!("风险暂停仍在生效：{reason}"),
+        ),
+        Capacity::Unavailable {
+            reason_code,
+            reason,
+        } => blocked_lane(label, target_kind, lane, reason_code.as_str(), reason),
+    }
+}
+
+fn blocked_lane(
+    label: &'static str,
+    target_kind: &'static str,
+    lane: &'static str,
+    reason_code: &'static str,
+    reason: String,
+) -> RuntimeLaneControlView {
+    RuntimeLaneControlView {
+        label,
+        target_kind,
+        lane,
+        available: false,
+        reason_code: Some(reason_code),
+        reason: Some(reason),
+        station_ref: None,
+    }
+}
+
+pub fn render_operations(base: &str, projection: &CollectionControlSurfaceProjection) -> String {
+    replace_empty(base, &operations_markup(projection))
+}
+
+pub fn render_attention(base: &str, projection: &CollectionControlSurfaceProjection) -> String {
+    replace_empty(base, &attention_markup(projection))
+}
+
+pub fn render_tasks_control(base: &str, projection: &CollectionControlSurfaceProjection) -> String {
+    prepend_body(base, &frozen_work_markup(&projection.works))
+}
+
+pub fn render_runtime_control(
+    base: &str,
+    projection: &CollectionControlSurfaceProjection,
+) -> String {
+    prepend_body(base, &runtime_control_markup(projection))
+}
+
+fn operations_markup(projection: &CollectionControlSurfaceProjection) -> String {
+    let run = projection.latest_run.as_ref().map_or_else(
+        || {
+            r#"<section class="c-control-empty"><h2>尚无调度轮次</h2><p>调度轮次读模型已接通，当前读取范围没有持久 scheduler run；这不是失败，也不触发采集。</p></section>"#.to_owned()
+        },
+        |run| {
+            format!(
+                r#"<section class="c-control-run" data-scheduler-run="{run_ref}">
+                     <div><p>最近一轮 · {started}</p><h2>{outcome}</h2></div>
+                     <dl><div><dt>考虑目标</dt><dd>{considered}</dd></div><div><dt>派出</dt><dd>{dispatched}</dd></div><div><dt>完成</dt><dd>{completed}</dd></div></dl>
+                   </section>"#,
+                run_ref = run.scheduler_run_ref,
+                started = escape(&run.started_at),
+                outcome = escape(run.outcome.as_deref().unwrap_or("RUNNING")),
+                considered = run.considered_count,
+                dispatched = run.dispatched_count,
+                completed = escape(run.completed_at.as_deref().unwrap_or("尚未完成")),
+            )
+        },
+    );
+    let decisions = if projection.decisions.is_empty() {
+        r#"<p class="c-control-none">当前读取范围没有持久目标决定。</p>"#.to_owned()
+    } else {
+        projection
+            .decisions
+            .iter()
+            .map(decision_row)
+            .collect::<String>()
+    };
+    format!(
+        r#"<section class="c-control-surface" data-collection-control="operations">
+             {run}
+             <div class="c-control-section-head"><div><p>Scheduler / durable decisions</p><h2>目标决定</h2></div><span>最近 {count} 条</span></div>
+             <div class="c-control-list">{decisions}</div>
+             <p class="c-control-boundary">这里只投影 scheduler、decision、Work 与 Lease 控制事实；不包含 Evidence 内容、监控价值、机会或 Dossier。</p>
+           </section>"#,
+        count = projection.decisions.len(),
+    )
+}
+
+fn decision_row(decision: &SchedulerDecisionView) -> String {
+    let refs = match (decision.work_order_ref, decision.lease_ref) {
+        (Some(work), Some(lease)) => {
+            format!("Work {} · Lease {}", short_ref(work), short_ref(lease))
+        }
+        (Some(work), None) => format!("Work {} · 尚无 Lease", short_ref(work)),
+        _ => "未建立 Work / Lease".to_owned(),
+    };
+    format!(
+        r#"<article class="c-control-row" data-decision-outcome="{outcome}" data-control-reason="{reason}">
+             <div><p>{kind} · {time}</p><h3>{target}</h3><span>{refs}</span></div>
+             <div class="c-control-outcome"><b>{outcome}</b><code>{reason}</code><span>{next}</span></div>
+             <span class="v7-sr-only" data-rule-revision-ref>{rule_ref}</span>
+           </article>"#,
+        outcome = escape(&decision.outcome),
+        reason = escape(&decision.reason_code),
+        kind = target_kind_label(&decision.target_kind),
+        time = escape(&decision.decided_at),
+        target = escape(&decision.target_name),
+        refs = escape(&refs),
+        next = escape(
+            decision
+                .next_eligible_at
+                .as_deref()
+                .map_or("没有下一次资格时间", |value| value)
+        ),
+        rule_ref = optional_ref(decision.rule_revision_ref),
+    )
+}
+
+fn attention_markup(projection: &CollectionControlSurfaceProjection) -> String {
+    let mut entries = Vec::new();
+    for lane in &projection.runtime_lanes {
+        if let Some(reason_code) = lane.reason_code
+            && let Some(recovery) = recovery_for(reason_code)
+        {
+            entries.push(attention_row(
+                lane.label,
+                reason_code,
+                lane.reason.as_deref().unwrap_or("控制闸门关闭。"),
+                recovery,
+                "当前 capacity",
+            ));
+        }
+    }
+    for decision in &projection.decisions {
+        if let Some(recovery) = recovery_for(&decision.reason_code) {
+            entries.push(attention_row(
+                &decision.target_name,
+                &decision.reason_code,
+                decision_reason(&decision.reason_code),
+                recovery,
+                &decision.decided_at,
+            ));
+        }
+    }
+    let body = if entries.is_empty() {
+        r#"<section class="c-control-empty"><h2>当前没有可恢复的真实阻断</h2><p>控制投影读取成功，当前范围没有带恢复动作的阻断。DYNAMIC_UNAVAILABLE、not_due、manual_only 与 PARTIAL + VALID 不会被冒充为失败。</p></section>"#.to_owned()
+    } else {
+        entries.join("")
+    };
+    format!(
+        r#"<section class="c-control-surface" data-collection-control="attention">
+             <div class="c-control-section-head"><div><p>Needs attention / durable only</p><h2>有恢复动作的阻断</h2></div><span>{count} 项</span></div>
+             <div class="c-attention-list">{body}</div>
+           </section>"#,
+        count = entries.len(),
+    )
+}
+
+#[derive(Clone, Copy)]
+struct Recovery {
+    owner: &'static str,
+    action: &'static str,
+}
+
+fn recovery_for(reason: &str) -> Option<Recovery> {
+    match reason {
+        "rule_missing" => Some(Recovery {
+            owner: "你",
+            action: "打开目标的监控规则并保存首个版本。",
+        }),
+        "baseline_not_ready" => Some(Recovery {
+            owner: "采集",
+            action: "先完成创作者基线，再由后续轮次重判。",
+        }),
+        "risk_paused" => Some(Recovery {
+            owner: "你",
+            action: "核对风险暂停；确认风险解除后再恢复。",
+        }),
+        "station_unavailable" => Some(Recovery {
+            owner: "你",
+            action: "登记或认领一台在岗执行工位。",
+        }),
+        "station_not_accepting" => Some(Recovery {
+            owner: "你",
+            action: "在执行工位页明确开启接活。",
+        }),
+        "installation_credential_missing" => Some(Recovery {
+            owner: "你",
+            action: "让在岗安装重新报到并完成服务端凭据激活。",
+        }),
+        "plugin_version_unsupported" => Some(Recovery {
+            owner: "你",
+            action: "更新插件到当前最低合同版本。",
+        }),
+        "installation_stale" => Some(Recovery {
+            owner: "执行工位",
+            action: "恢复插件心跳；过期状态不会自动当成健康。",
+        }),
+        "capability_missing" => Some(Recovery {
+            owner: "你",
+            action: "换到具备该 lane 能力的在岗安装。",
+        }),
+        "account_unbound" => Some(Recovery {
+            owner: "你",
+            action: "把安装绑定到一个平台观察账号。",
+        }),
+        "account_binding_changed" | "account_binding_expired" => Some(Recovery {
+            owner: "你",
+            action: "重新核对并确认安装的观察账号绑定。",
+        }),
+        "account_eligibility_stale" => Some(Recovery {
+            owner: "执行工位",
+            action: "重新上报版本化账号资格信号。",
+        }),
+        "account_cooling" => Some(Recovery {
+            owner: "账号",
+            action: "等待冷却解除后由新鲜信号重判。",
+        }),
+        "account_needs_login" => Some(Recovery {
+            owner: "你",
+            action: "在受控浏览器中重新登录该观察账号。",
+        }),
+        "account_restricted" => Some(Recovery {
+            owner: "你",
+            action: "停止使用受限账号，核对平台侧限制。",
+        }),
+        "account_unknown" => Some(Recovery {
+            owner: "执行工位",
+            action: "补充可判定的账号资格信号；UNKNOWN 保持关闭。",
+        }),
+        "account_busy" => Some(Recovery {
+            owner: "调度",
+            action: "等待这个账号的当前 Lease 结束。",
+        }),
+        "station_daily_budget_reached" => Some(Recovery {
+            owner: "调度",
+            action: "等待下一个自然日预算窗口。",
+        }),
+        "admission_refused" | "lease_issue_failed" | "database_error" => Some(Recovery {
+            owner: "工程",
+            action: "沿 durable decision / Work / Lease 引用排查，不在页面重试写事实。",
+        }),
+        _ => None,
+    }
+}
+
+fn attention_row(
+    title: &str,
+    reason: &str,
+    detail: &str,
+    recovery: Recovery,
+    observed: &str,
+) -> String {
+    format!(
+        r#"<article class="c-attention-row" data-control-reason="{reason}">
+             <div><p>{observed}</p><h3>{title}</h3><code>{reason}</code></div>
+             <p>{detail}</p>
+             <dl><div><dt>责任</dt><dd>{owner}</dd></div><div><dt>恢复动作</dt><dd>{action}</dd></div></dl>
+           </article>"#,
+        reason = escape(reason),
+        observed = escape(observed),
+        title = escape(title),
+        detail = escape(detail),
+        owner = recovery.owner,
+        action = recovery.action,
+    )
+}
+
+fn frozen_work_markup(works: &[FrozenWorkView]) -> String {
+    let rows = if works.is_empty() {
+        r#"<p class="c-control-none">工单冻结投影读取成功，当前范围没有 WorkOrder。</p>"#.to_owned()
+    } else {
+        works.iter().map(frozen_work_row).collect::<String>()
+    };
+    format!(
+        r#"<section class="c-control-surface c-frozen-works" data-collection-control="tasks">
+             <div class="c-control-section-head"><div><p>Work / frozen provenance</p><h2>工单冻结资源</h2></div><span>最近 {count} 张</span></div>
+             <p class="c-control-boundary">冻结引用说明准入当时依赖什么；“当前不同”不会覆盖旧 Work、Attempt 或 Receipt。</p>
+             <div class="c-control-list">{rows}</div>
+           </section>"#,
+        count = works.len(),
+    )
+}
+
+fn frozen_work_row(work: &FrozenWorkView) -> String {
+    format!(
+        r#"<article class="c-frozen-row" data-work-order-ref="{work_ref}">
+             <div class="c-frozen-head"><div><p>{lane} · {created}</p><h3>{target}</h3></div><span>{lease_state}{task_state}</span></div>
+             <dl class="c-frozen-grid">
+               {station}{installation}{account}{eligibility}{rule}
+             </dl>
+             <p class="c-frozen-links">Work {work_short} · Lease {lease_ref} · Task {task_ref}</p>
+           </article>"#,
+        work_ref = work.work_order_ref,
+        lane = escape(lane_label(&work.lane)),
+        created = escape(&work.created_at),
+        target = escape(&work.target_name),
+        lease_state = escape(lease_label(&work.lease_state)),
+        task_state = work
+            .task_state
+            .as_deref()
+            .map_or(String::new(), |state| format!(" · {}", escape(state))),
+        station = frozen_cell(
+            "工位",
+            "data-frozen-station-ref",
+            work.station_ref,
+            work.station_is_current
+        ),
+        installation = frozen_cell(
+            "安装",
+            "data-frozen-installation-ref",
+            work.installation_ref,
+            work.installation_is_current
+        ),
+        account = frozen_cell(
+            "观察账号",
+            "data-frozen-account-ref",
+            work.account_ref,
+            work.account_is_current
+        ),
+        eligibility = frozen_cell(
+            "资格回执",
+            "data-frozen-eligibility-ref",
+            work.eligibility_ref,
+            None,
+        ),
+        rule = frozen_cell(
+            "规则版本",
+            "data-frozen-rule-ref",
+            work.monitor_rule_revision_ref,
+            work.rule_is_current
+        ),
+        work_short = short_ref(work.work_order_ref),
+        lease_ref = optional_short_ref(work.lease_ref),
+        task_ref = optional_short_ref(work.task_id),
+    )
+}
+
+fn frozen_cell(label: &str, selector: &str, value: Option<Uuid>, current: Option<bool>) -> String {
+    let state = match current {
+        Some(true) => "当前一致",
+        Some(false) => "当前已变化",
+        None => "当时未冻结",
+    };
+    format!(
+        r#"<div {selector}><dt>{label}</dt><dd>{value}</dd><span>{state}</span></div>"#,
+        value = optional_short_ref(value),
+    )
+}
+
+fn runtime_control_markup(projection: &CollectionControlSurfaceProjection) -> String {
+    let lanes = projection
+        .runtime_lanes
+        .iter()
+        .map(runtime_lane_row)
+        .collect::<String>();
+    let resources = if projection.runtime_resources.is_empty() {
+        r#"<p class="c-control-none">当前没有未退役工位；这不是账号健康结论。</p>"#.to_owned()
+    } else {
+        projection
+            .runtime_resources
+            .iter()
+            .map(runtime_resource_row)
+            .collect::<String>()
+    };
+    format!(
+        r#"<section class="c-control-surface c-runtime-control" data-collection-control="runtime">
+             <div class="c-control-section-head"><div><p>Admission question 5 / same evaluator</p><h2>当前控制资格</h2></div><span>实时重算</span></div>
+             <div class="c-runtime-lanes">{lanes}</div>
+             <div class="c-control-section-head c-control-subhead"><div><p>Bounded control facts</p><h2>工位 / 安装 / 观察账号</h2></div><span>不含原始账号身份</span></div>
+             <div class="c-runtime-resources">{resources}</div>
+           </section>"#,
+    )
+}
+
+fn runtime_lane_row(lane: &RuntimeLaneControlView) -> String {
+    let (state, reason) = if lane.available {
+        ("可接活", "capacity_available")
+    } else {
+        ("关闭", lane.reason_code.unwrap_or("capacity_unknown"))
+    };
+    format!(
+        r#"<article class="c-runtime-lane" data-capacity-state="{available}" data-control-reason="{reason}">
+             <div><p>{kind} / {lane}</p><h3>{label}</h3></div>
+             <div><b>{state}</b><code>{reason}</code><span>{detail}</span></div>
+           </article>"#,
+        available = if lane.available {
+            "available"
+        } else {
+            "blocked"
+        },
+        reason = escape(reason),
+        kind = target_kind_label(lane.target_kind),
+        lane = escape(lane_label(lane.lane)),
+        label = lane.label,
+        state = state,
+        detail = escape(
+            lane.reason
+                .as_deref()
+                .or(lane.station_ref.as_deref())
+                .unwrap_or("当前判定没有返回详情。")
+        ),
+    )
+}
+
+fn runtime_resource_row(resource: &RuntimeResourceView) -> String {
+    let eligibility_reason = resource
+        .eligibility_reason_code
+        .as_deref()
+        .unwrap_or("account_eligibility_stale");
+    let account_state = resource.eligibility_state.as_deref().unwrap_or("UNKNOWN");
+    let acceptance_form = format!(
+        r#"<form class="c-runtime-control-form" method="post" action="/collection/runtime/accepting" data-station-accepting-form>
+             <input type="hidden" name="station_ref" value="{station_ref}">
+             <button class="c-btn-quiet" type="submit" name="accepting" value="{next}">{label}</button>
+           </form>"#,
+        station_ref = resource.station_ref,
+        next = !resource.accepting_tasks,
+        label = if resource.accepting_tasks {
+            "关闭未来接活"
+        } else {
+            "开启接活"
+        },
+    );
+    let binding_form = match (
+        resource.installation_ref,
+        resource.account_ref,
+        resource.binding_state.as_str(),
+    ) {
+        (Some(installation_ref), Some(account_ref), state) if binding_required(state) => format!(
+            r#"<form class="c-runtime-control-form" method="post" action="/collection/runtime/account-bindings" data-account-binding-form>
+                 <input type="hidden" name="installation_ref" value="{installation_ref}">
+                 <input type="hidden" name="account_ref" value="{account_ref}">
+                 <button class="c-btn-quiet" type="submit">确认这个观察账号</button>
+               </form>"#,
+        ),
+        _ => String::new(),
+    };
+    format!(
+        r#"<article class="c-runtime-resource" data-station-ref="{station_ref}" data-control-fact="runtime-resource">
+             <div class="c-runtime-resource-head"><div><p>工位</p><h3>{name}</h3></div><div><b>{accepting}</b>{acceptance_form}</div></div>
+             <dl>
+               <div><dt>安装</dt><dd>{installation}</dd><span>{version} · 心跳 {last_seen}</span></div>
+               <div><dt>服务端凭据</dt><dd>{credential}</dd><span>只显示有效性，不显示密钥或摘要</span></div>
+               <div data-account-binding-required="{binding_required}"><dt>观察账号</dt><dd>{account}</dd><span>{binding_state} · 当前绑定 {bound_account} · 确认至 {binding_until}</span>{binding_form}</div>
+               <div data-account-eligibility-reason="{reason}"><dt>账号资格</dt><dd>{account_state}</dd><span>{reason} · 观察 {observed} · 到期 {expires}{busy} · Eligibility {eligibility_ref}</span></div>
+             </dl>
+           </article>"#,
+        station_ref = resource.station_ref,
+        reason = escape(eligibility_reason),
+        name = escape(&resource.station_name),
+        accepting = if resource.accepting_tasks {
+            "接活已开"
+        } else {
+            "接活关闭"
+        },
+        acceptance_form = acceptance_form,
+        installation = optional_short_ref(resource.installation_ref),
+        version = escape(resource.plugin_version.as_deref().unwrap_or("版本未知")),
+        last_seen = escape(resource.last_seen_at.as_deref().unwrap_or("UNKNOWN")),
+        credential = if resource.has_valid_credential {
+            "有效"
+        } else {
+            "缺失 / 失效"
+        },
+        account = optional_short_ref(resource.account_ref),
+        bound_account = optional_short_ref(resource.bound_account_ref),
+        binding_state = escape(binding_state_label(&resource.binding_state)),
+        binding_required = binding_required(&resource.binding_state),
+        binding_until = escape(
+            resource
+                .binding_confirmed_until
+                .as_deref()
+                .unwrap_or("UNKNOWN")
+        ),
+        account_state = escape(account_state),
+        observed = escape(
+            resource
+                .eligibility_observed_at
+                .as_deref()
+                .unwrap_or("UNKNOWN")
+        ),
+        expires = escape(
+            resource
+                .eligibility_expires_at
+                .as_deref()
+                .unwrap_or("UNKNOWN")
+        ),
+        busy = if resource.account_has_live_lease {
+            " · 已有有效 Lease"
+        } else {
+            ""
+        },
+        eligibility_ref = optional_short_ref(resource.eligibility_ref),
+        binding_form = binding_form,
+    )
+}
+
+fn replace_empty(base: &str, content: &str) -> String {
+    let Some(open) = base.find(EMPTY_STATE_OPEN) else {
+        return base.to_owned();
+    };
+    let Some(close_offset) = base[open..].find(EMPTY_STATE_CLOSE) else {
+        return base.to_owned();
+    };
+    let close = open + close_offset + EMPTY_STATE_CLOSE.len();
+    format!("{}{content}{}", &base[..open], &base[close..])
+}
+
+fn prepend_body(base: &str, content: &str) -> String {
+    let Some(body) = base.find(BODY_OPEN) else {
+        return base.to_owned();
+    };
+    let at = body + BODY_OPEN.len();
+    format!("{}{content}{}", &base[..at], &base[at..])
+}
+
+fn target_kind_label(value: &str) -> &'static str {
+    if value == "keyword" {
+        "关键词"
+    } else {
+        "创作者"
+    }
+}
+
+fn lane_label(value: &str) -> &'static str {
+    match value {
+        "deep_archive" => "基线建档",
+        "patrol" => "巡检",
+        _ => "未知 lane",
+    }
+}
+
+fn lease_label(value: &str) -> &'static str {
+    match value {
+        "live" => "Lease 有效",
+        "released" => "Lease 已结束",
+        "expired" => "Lease 已过期",
+        _ => "尚无 Lease",
+    }
+}
+
+fn decision_reason(value: &str) -> &'static str {
+    match value {
+        "rule_missing" => "目标还没有活动规则版本。",
+        "baseline_not_ready" => "创作者基线未满足自动巡检资格。",
+        "station_not_accepting" => "工位尚未由人明确开启接活。",
+        "account_needs_login" => "观察账号需要重新登录。",
+        "account_restricted" => "观察账号受到访问限制。",
+        "account_cooling" => "观察账号当前处于冷却状态。",
+        "account_unknown" => "观察账号资格是 UNKNOWN，控制层按关闭处理。",
+        "database_error" => "scheduler 写下了数据库错误决定，没有伪造成功。",
+        _ => "scheduler 写下了一个有明确恢复责任的控制阻断。",
+    }
+}
+
+fn binding_state_label(value: &str) -> &'static str {
+    match value {
+        "current" => "当前一致",
+        "unconfirmed" => "未确认",
+        "changed" => "观察账号已变化",
+        "expired" => "确认已过期",
+        "bound_without_eligibility" => "已绑定，资格信号缺失",
+        _ => "尚无观察账号",
+    }
+}
+
+fn binding_required(value: &str) -> bool {
+    matches!(value, "unconfirmed" | "changed" | "expired")
+}
+
+fn optional_ref(value: Option<Uuid>) -> String {
+    value.map_or_else(|| "NONE".to_owned(), |value| value.to_string())
+}
+
+fn optional_short_ref(value: Option<Uuid>) -> String {
+    value.map_or_else(|| "—".to_owned(), short_ref)
+}
+
+fn short_ref(value: Uuid) -> String {
+    value.to_string().chars().take(8).collect()
+}
+
+fn escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#x27;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn projection() -> CollectionControlSurfaceProjection {
+        CollectionControlSurfaceProjection {
+            latest_run: Some(SchedulerRunView {
+                scheduler_run_ref: Uuid::new_v4(),
+                outcome: Some("partial".to_owned()),
+                considered_count: 2,
+                dispatched_count: 1,
+                started_at: "2026-09-04 09:00:00+08".to_owned(),
+                completed_at: Some("2026-09-04 09:00:01+08".to_owned()),
+            }),
+            decisions: vec![SchedulerDecisionView {
+                target_decision_ref: Uuid::new_v4(),
+                scheduler_run_ref: Uuid::new_v4(),
+                target_ref: Uuid::new_v4(),
+                target_name: "目标 <一>".to_owned(),
+                target_kind: "creator".to_owned(),
+                rule_revision_ref: Some(Uuid::new_v4()),
+                outcome: "deferred".to_owned(),
+                reason_code: "account_needs_login".to_owned(),
+                next_eligible_at: None,
+                work_order_ref: None,
+                lease_ref: None,
+                decided_at: "2026-09-04 09:00:00+08".to_owned(),
+            }],
+            works: vec![FrozenWorkView {
+                work_order_ref: Uuid::new_v4(),
+                target_ref: Uuid::new_v4(),
+                target_name: "目标 <一>".to_owned(),
+                lane: "patrol".to_owned(),
+                station_ref: Some(Uuid::new_v4()),
+                installation_ref: Some(Uuid::new_v4()),
+                account_ref: Some(Uuid::new_v4()),
+                eligibility_ref: Some(Uuid::new_v4()),
+                monitor_rule_revision_ref: Some(Uuid::new_v4()),
+                lease_ref: Some(Uuid::new_v4()),
+                lease_state: "live".to_owned(),
+                task_id: Some(Uuid::new_v4()),
+                task_state: Some("in_progress".to_owned()),
+                station_is_current: Some(true),
+                installation_is_current: Some(false),
+                account_is_current: Some(false),
+                rule_is_current: Some(true),
+                created_at: "2026-09-04 09:00:00+08".to_owned(),
+            }],
+            runtime_lanes: vec![blocked_lane(
+                "创作者巡检",
+                "creator",
+                "patrol",
+                "account_needs_login",
+                "观察账号需要重新登录。".to_owned(),
+            )],
+            runtime_resources: vec![RuntimeResourceView {
+                station_ref: Uuid::new_v4(),
+                station_name: "Mac mini <主机>".to_owned(),
+                accepting_tasks: true,
+                installation_ref: Some(Uuid::new_v4()),
+                plugin_version: Some("0.8.34".to_owned()),
+                last_seen_at: Some("2026-09-04 09:00:00+08".to_owned()),
+                has_valid_credential: true,
+                account_ref: Some(Uuid::new_v4()),
+                bound_account_ref: None,
+                binding_state: "unconfirmed".to_owned(),
+                binding_confirmed_until: Some("2026-10-04 09:00:00+08".to_owned()),
+                eligibility_ref: Some(Uuid::new_v4()),
+                eligibility_state: Some("needs_login".to_owned()),
+                eligibility_reason_code: Some("login_required".to_owned()),
+                eligibility_observed_at: Some("2026-09-04 09:00:00+08".to_owned()),
+                eligibility_expires_at: Some("2026-09-04 09:20:00+08".to_owned()),
+                account_has_live_lease: false,
+            }],
+        }
+    }
+
+    #[test]
+    fn four_surfaces_share_stable_reason_and_frozen_reference_selectors() {
+        let projection = projection();
+        let empty = format!("{EMPTY_STATE_OPEN}old{EMPTY_STATE_CLOSE}");
+        let operations = render_operations(&empty, &projection);
+        let attention = render_attention(&empty, &projection);
+        let body = format!("{BODY_OPEN}old</div>");
+        let tasks = render_tasks_control(&body, &projection);
+        let runtime = render_runtime_control(&body, &projection);
+
+        assert!(operations.contains("data-control-reason=\"account_needs_login\""));
+        assert!(operations.contains("data-rule-revision-ref"));
+        assert!(attention.contains("data-control-reason=\"account_needs_login\""));
+        for selector in [
+            "data-frozen-station-ref",
+            "data-frozen-installation-ref",
+            "data-frozen-account-ref",
+            "data-frozen-rule-ref",
+        ] {
+            assert!(tasks.contains(selector), "missing {selector}");
+        }
+        assert!(tasks.contains("当前已变化"));
+        assert!(runtime.contains("data-capacity-state=\"blocked\""));
+        assert!(runtime.contains("login_required"));
+        assert!(runtime.contains("data-station-accepting-form"));
+        assert!(runtime.contains("action=\"/collection/runtime/accepting\""));
+        assert!(runtime.contains("data-account-binding-form"));
+        assert!(runtime.contains("action=\"/collection/runtime/account-bindings\""));
+        assert!(runtime.contains("data-account-binding-required=\"true\""));
+    }
+
+    #[test]
+    fn attention_excludes_non_actionable_dynamic_and_ordinary_wait_states() {
+        assert!(recovery_for("dynamic_unavailable").is_none());
+        assert!(recovery_for("not_due").is_none());
+        assert!(recovery_for("manual_only").is_none());
+        assert!(recovery_for("monitoring_paused").is_none());
+        assert!(recovery_for("account_needs_login").is_some());
+    }
+
+    #[test]
+    fn binding_action_is_only_shown_for_an_observed_candidate_needing_confirmation() {
+        let mut projection = projection();
+        let base = format!("{BODY_OPEN}old</div>");
+        let candidate = render_runtime_control(&base, &projection);
+        assert!(candidate.contains("data-account-binding-form"));
+
+        projection.runtime_resources[0].binding_state = "bound_without_eligibility".to_owned();
+        projection.runtime_resources[0].eligibility_state = None;
+        projection.runtime_resources[0].eligibility_reason_code = None;
+        let already_bound = render_runtime_control(&base, &projection);
+        assert!(!already_bound.contains("data-account-binding-form"));
+        assert!(already_bound.contains("已绑定，资格信号缺失"));
+    }
+
+    #[test]
+    fn renderers_escape_names_and_never_expose_forbidden_payload_fields() {
+        let projection = projection();
+        let base = format!("{BODY_OPEN}old</div>");
+        let html = format!(
+            "{}{}",
+            render_tasks_control(&base, &projection),
+            render_runtime_control(&base, &projection)
+        );
+        assert!(html.contains("&lt;一&gt;"));
+        assert!(html.contains("Mac mini &lt;主机&gt;"));
+        for forbidden in ["credential_hash", "identity_digest", "Cookie", "payload"] {
+            assert!(!html.contains(forbidden), "leaked {forbidden}");
+        }
+    }
+}

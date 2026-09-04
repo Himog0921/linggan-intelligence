@@ -10,6 +10,83 @@
 
 use std::fmt;
 
+/// Stable control reason shared by Admission, Lease, dispatch and read models.
+/// There is deliberately no free-form/platform-provided variant.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CapacityReasonCode {
+    RiskPaused,
+    StationUnavailable,
+    StationNotAccepting,
+    InstallationCredentialMissing,
+    PluginVersionUnsupported,
+    InstallationStale,
+    CapabilityMissing,
+    AccountUnbound,
+    AccountBindingChanged,
+    AccountBindingExpired,
+    AccountEligibilityStale,
+    AccountCooling,
+    AccountNeedsLogin,
+    AccountRestricted,
+    AccountUnknown,
+    AccountBusy,
+    StationDailyBudgetReached,
+    CapacityUnknown,
+}
+
+impl CapacityReasonCode {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::RiskPaused => "risk_paused",
+            Self::StationUnavailable => "station_unavailable",
+            Self::StationNotAccepting => "station_not_accepting",
+            Self::InstallationCredentialMissing => "installation_credential_missing",
+            Self::PluginVersionUnsupported => "plugin_version_unsupported",
+            Self::InstallationStale => "installation_stale",
+            Self::CapabilityMissing => "capability_missing",
+            Self::AccountUnbound => "account_unbound",
+            Self::AccountBindingChanged => "account_binding_changed",
+            Self::AccountBindingExpired => "account_binding_expired",
+            Self::AccountEligibilityStale => "account_eligibility_stale",
+            Self::AccountCooling => "account_cooling",
+            Self::AccountNeedsLogin => "account_needs_login",
+            Self::AccountRestricted => "account_restricted",
+            Self::AccountUnknown => "account_unknown",
+            Self::AccountBusy => "account_busy",
+            Self::StationDailyBudgetReached => "station_daily_budget_reached",
+            Self::CapacityUnknown => "capacity_unknown",
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum AuthorizationBoundaryFailure {
+    Missing,
+    PurposeMismatch,
+    TargetLimitReached,
+    ExpiredOrRevoked,
+}
+
+impl AuthorizationBoundaryFailure {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Missing => "authorization_missing",
+            Self::PurposeMismatch => "authorization_purpose_mismatch",
+            Self::TargetLimitReached => "authorization_target_limit_reached",
+            Self::ExpiredOrRevoked => "authorization_expired_or_revoked",
+        }
+    }
+
+    pub const fn zh_reason(self) -> &'static str {
+        match self {
+            Self::Missing => "没有覆盖该平台、目标类型与 lane 的采集授权",
+            Self::PurposeMismatch => "请求用途与现有授权用途不一致",
+            Self::TargetLimitReached => "授权允许的目标数量已经用尽",
+            Self::ExpiredOrRevoked => "匹配授权已经过期或被撤销",
+        }
+    }
+}
+
 /// What question 5 established about resources and risk.
 ///
 /// The contract asks about worker, account, budget and risk headroom together. Keeping them
@@ -27,6 +104,14 @@ pub enum Capacity {
     DailyQuotaCommitted { quota: i32, committed: i32 },
     /// A risk pause covering this platform or lane is still in effect.
     RiskPaused { reason: String },
+    /// The collection-control evaluator closed the gate with one stable machine reason.
+    ///
+    /// Package 2 keeps legacy variants readable, while every new account, credential,
+    /// freshness and station-acceptance gate flows through this bounded reason code.
+    Unavailable {
+        reason_code: CapacityReasonCode,
+        reason: String,
+    },
 }
 
 impl Capacity {
@@ -45,6 +130,7 @@ impl Capacity {
                 "当天额度已被既有工单占满：每日 {quota} 篇，已下发 {committed} 篇"
             )),
             Self::RiskPaused { reason } => Some(format!("风险暂停仍在生效：{reason}")),
+            Self::Unavailable { reason, .. } => Some(reason.clone()),
         }
     }
 
@@ -52,6 +138,17 @@ impl Capacity {
         match self {
             Self::Available { station_ref } => Some(station_ref),
             _ => None,
+        }
+    }
+
+    pub fn reason_code(&self) -> &'static str {
+        match self {
+            Self::Available { .. } => "available",
+            Self::NoStaffedStation => "station_unavailable",
+            Self::MissingCapabilities { .. } => "capability_missing",
+            Self::DailyQuotaCommitted { .. } => "station_daily_budget_reached",
+            Self::RiskPaused { .. } => "risk_paused",
+            Self::Unavailable { reason_code, .. } => reason_code.as_str(),
         }
     }
 }
@@ -148,6 +245,8 @@ impl AdmissionOutcome {
 pub struct AdmissionFacts {
     /// Is there a live, unexpired, unrevoked grant covering this platform/kind/lane?
     pub authorization_ref: Option<String>,
+    /// Closed explanation when no authorization reference is usable.
+    pub authorization_failure: Option<AuthorizationBoundaryFailure>,
     /// Does an in-flight Work already cover this target and lane?
     pub in_flight_work_exists: bool,
     /// Has this target already been archived to the standard the purpose needs?
@@ -186,7 +285,11 @@ pub fn decide_admission(facts: &AdmissionFacts) -> AdmissionOutcome {
     // 4 边界
     let Some(authorization_ref) = facts.authorization_ref.clone() else {
         return AdmissionOutcome::Refuse {
-            reason: "没有覆盖该平台、目标类型与 lane 的有效采集授权".to_owned(),
+            reason: facts
+                .authorization_failure
+                .unwrap_or(AuthorizationBoundaryFailure::Missing)
+                .zh_reason()
+                .to_owned(),
         };
     };
 
@@ -222,6 +325,7 @@ mod tests {
     fn facts() -> AdmissionFacts {
         AdmissionFacts {
             authorization_ref: Some("auth-1".to_owned()),
+            authorization_failure: None,
             in_flight_work_exists: false,
             need_already_satisfied: false,
             capacity: Capacity::Available {

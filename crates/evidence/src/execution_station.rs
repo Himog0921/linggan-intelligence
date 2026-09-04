@@ -5,6 +5,10 @@
 //!
 //! 这里没有任何平台访问。一条在岗安装只说明「有个插件报到了」，不说明它跑过任何东西。
 
+use crate::collection_control::{
+    IssuedInstallationCredential, MINIMUM_PLUGIN_VERSION, authenticate_installation_check_in_in,
+    issue_installation_credential_if_absent_in, version_at_least,
+};
 use linggan_storage_postgres::Database;
 use serde_json::Value;
 use uuid::Uuid;
@@ -20,28 +24,38 @@ pub enum StationError {
     #[error("that station is retired")]
     StationRetired,
     #[error(transparent)]
+    Control(#[from] crate::collection_control::CollectionControlError),
+    #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
 
 /// 一次安装报到的结果。
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum CheckInOutcome {
     /// 认领窗口开着，自动绑到工位；同工位上一个安装被取代。
     Claimed {
         installation_ref: Uuid,
         station_ref: Uuid,
         superseded: Option<Uuid>,
+        credential: Option<IssuedInstallationCredential>,
     },
     /// 插件在，但还没人说它是哪台工位。它不会被派活。
-    AwaitingClaim { installation_ref: Uuid },
+    AwaitingClaim {
+        installation_ref: Uuid,
+        credential: Option<IssuedInstallationCredential>,
+    },
     /// 同一个安装再次报到，只更新心跳。
-    Heartbeat { installation_ref: Uuid },
+    Heartbeat {
+        installation_ref: Uuid,
+        credential: Option<IssuedInstallationCredential>,
+    },
 }
 
 pub async fn station_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
         "SELECT to_regclass('execution_station') IS NOT NULL \
-             AND to_regclass('plugin_installation') IS NOT NULL",
+             AND to_regclass('plugin_installation') IS NOT NULL \
+             AND to_regclass('installation_credential') IS NOT NULL",
     )
     .fetch_one(database.pool())
     .await
@@ -57,6 +71,7 @@ pub async fn register_station(
         return Err(StationError::SchemaUnavailable);
     }
     let station_ref = Uuid::new_v4();
+    let mut transaction = database.pool().begin().await?;
     sqlx::query(
         "INSERT INTO execution_station (station_ref, display_name, daily_work_quota) \
          VALUES ($1, $2, $3)",
@@ -64,8 +79,18 @@ pub async fn register_station(
     .bind(station_ref)
     .bind(display_name)
     .bind(daily_work_quota)
-    .execute(database.pool())
+    .execute(&mut *transaction)
     .await?;
+    sqlx::query(
+        "INSERT INTO execution_station_acceptance_transition \
+             (transition_ref,station_ref,from_accepting,to_accepting,actor,reason_code) \
+         VALUES ($1,$2,NULL,false,'person','registered_closed')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(station_ref)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
     Ok(station_ref)
 }
 
@@ -137,10 +162,21 @@ pub async fn retire_station(
         return Err(StationError::SchemaUnavailable);
     }
     let mut transaction = database.pool().begin().await?;
+    let previous_accepting: Option<bool> = sqlx::query_scalar(
+        "SELECT accepting_tasks FROM execution_station \
+         WHERE station_ref=$1 AND retired_at IS NULL FOR UPDATE",
+    )
+    .bind(station_ref)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some(previous_accepting) = previous_accepting else {
+        return Err(StationError::UnknownStation);
+    };
     let affected = sqlx::query(
         "UPDATE execution_station \
          SET retired_at = scope_001_now(), retire_reason = $2, \
-             claim_window_opens_at = NULL, claim_window_expires_at = NULL \
+             claim_window_opens_at = NULL, claim_window_expires_at = NULL, \
+             accepting_tasks=false \
          WHERE station_ref = $1 AND retired_at IS NULL",
     )
     .bind(station_ref)
@@ -148,18 +184,29 @@ pub async fn retire_station(
     .execute(&mut *transaction)
     .await?
     .rows_affected();
-    if affected == 0 {
-        return Err(StationError::UnknownStation);
-    }
-    // 安装记录保留，只解除在岗关系：插件历史不因工位停用而消失。
+    debug_assert_eq!(affected, 1);
     sqlx::query(
-        "UPDATE plugin_installation \
-         SET superseded_at = scope_001_now(), superseded_by = installation_ref \
-         WHERE station_ref = $1 AND superseded_at IS NULL",
+        "INSERT INTO execution_station_acceptance_transition \
+             (transition_ref,station_ref,from_accepting,to_accepting,actor,reason_code) \
+         VALUES ($1,$2,$3,false,'person','station_retired')",
     )
+    .bind(Uuid::new_v4())
     .bind(station_ref)
+    .bind(previous_accepting)
     .execute(&mut *transaction)
     .await?;
+    // 安装记录保留，只解除在岗关系：插件历史不因工位停用而消失。
+    let retired_installations: Vec<Uuid> = sqlx::query_scalar(
+        "UPDATE plugin_installation \
+         SET superseded_at = scope_001_now(), superseded_by = installation_ref \
+         WHERE station_ref = $1 AND superseded_at IS NULL RETURNING installation_ref",
+    )
+    .bind(station_ref)
+    .fetch_all(&mut *transaction)
+    .await?;
+    for installation_ref in retired_installations {
+        teardown_installation(&mut transaction, installation_ref, "station_retired").await?;
+    }
     transaction.commit().await?;
     Ok(())
 }
@@ -173,6 +220,9 @@ pub struct InstallationCheckIn<'a> {
     pub plugin_version: &'a str,
     pub browser_label: Option<&'a str>,
     pub capabilities: Value,
+    /// Required once this installation has an activated credential. It is omitted only for a
+    /// first bootstrap or replacement of an unactivated pending issuance.
+    pub installation_credential: Option<&'a str>,
 }
 
 /// 插件报到。
@@ -198,6 +248,17 @@ pub async fn check_in_installation(
     .fetch_optional(&mut *transaction)
     .await?;
     if let Some((installation_ref, station_ref)) = existing {
+        if !authenticate_installation_check_in_in(
+            &mut transaction,
+            installation_ref,
+            check_in.installation_credential,
+        )
+        .await?
+        {
+            return Err(
+                crate::collection_control::CollectionControlError::InvalidCredential.into(),
+            );
+        }
         sqlx::query(
             "UPDATE plugin_installation \
              SET last_seen_at = scope_001_now(), plugin_version = $2, capabilities = $3 \
@@ -208,9 +269,12 @@ pub async fn check_in_installation(
         .bind(&check_in.capabilities)
         .execute(&mut *transaction)
         .await?;
-        if let Some(station_ref) = station_ref {
-            adopt_predecessor_live_claims(&mut transaction, station_ref, installation_ref).await?;
-        }
+        let credential = issue_compatible_credential(
+            &mut transaction,
+            installation_ref,
+            check_in.plugin_version,
+        )
+        .await?;
         // 已归位的安装只更新心跳。**未归位的必须再试一次认领**：它上次报到时窗口可能
         // 还关着，之后人才把窗口打开。不重试的话，这个安装会永远停在待认领——而使用者
         // 看到的是「窗口开着，插件却始终不归位」，无从判断哪里出了问题。
@@ -229,16 +293,19 @@ pub async fn check_in_installation(
             .bind(open_station)
             .execute(&mut *transaction)
             .await?;
-            adopt_predecessor_live_claims(&mut transaction, open_station, installation_ref).await?;
             transaction.commit().await?;
             return Ok(CheckInOutcome::Claimed {
                 installation_ref,
                 station_ref: open_station,
                 superseded,
+                credential,
             });
         }
         transaction.commit().await?;
-        return Ok(CheckInOutcome::Heartbeat { installation_ref });
+        return Ok(CheckInOutcome::Heartbeat {
+            installation_ref,
+            credential,
+        });
     }
 
     let open_station = open_claim_station(&mut transaction).await?;
@@ -256,20 +323,46 @@ pub async fn check_in_installation(
                 Some(station_ref),
             )
             .await?;
-            adopt_predecessor_live_claims(&mut transaction, station_ref, installation_ref).await?;
+            let credential = issue_compatible_credential(
+                &mut transaction,
+                installation_ref,
+                check_in.plugin_version,
+            )
+            .await?;
             CheckInOutcome::Claimed {
                 installation_ref,
                 station_ref,
                 superseded,
+                credential,
             }
         }
         None => {
             insert_installation(&mut transaction, installation_ref, check_in, None).await?;
-            CheckInOutcome::AwaitingClaim { installation_ref }
+            let credential = issue_compatible_credential(
+                &mut transaction,
+                installation_ref,
+                check_in.plugin_version,
+            )
+            .await?;
+            CheckInOutcome::AwaitingClaim {
+                installation_ref,
+                credential,
+            }
         }
     };
     transaction.commit().await?;
     Ok(outcome)
+}
+
+async fn issue_compatible_credential(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    installation_ref: Uuid,
+    plugin_version: &str,
+) -> Result<Option<IssuedInstallationCredential>, StationError> {
+    if !version_at_least(plugin_version, MINIMUM_PLUGIN_VERSION) {
+        return Ok(None);
+    }
+    Ok(issue_installation_credential_if_absent_in(transaction, installation_ref).await?)
 }
 
 /// 找一台认领窗口还开着的工位。窗口是人开的，过期自动关上。
@@ -323,7 +416,6 @@ pub async fn claim_installation(
     if affected == 0 {
         return Err(StationError::UnknownInstallation);
     }
-    adopt_predecessor_live_claims(&mut transaction, station_ref, installation_ref).await?;
     transaction.commit().await?;
     Ok(superseded)
 }
@@ -347,34 +439,55 @@ async fn supersede_active_installation(
     .bind(replacement)
     .fetch_optional(&mut **transaction)
     .await?;
+    if let Some(previous) = previous {
+        // A replacement never inherits account identity or live execution ownership. The old
+        // Lease is ended and ordinary recovery must establish a fresh Admission/Lease against
+        // a newly person-confirmed account binding.
+        teardown_installation(transaction, previous, "installation_superseded").await?;
+    }
     Ok(previous)
 }
 
-/// 新安装已经在同一工位取代旧安装时，承接这个工位所有已被取代安装尚在有效租约内的
-/// 执行权。不能只看直接前任：连续重载时，任务所有者可能仍停在更早一代安装。
-/// 旧安装已标记 superseded，Attempt/Submission 闸门会拒绝它继续改任务状态；这里只转移
-/// 所有权，不重建 Task，不改已完成步骤。
-async fn adopt_predecessor_live_claims(
+async fn teardown_installation(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    station_ref: Uuid,
-    replacement: Uuid,
-) -> Result<u64, sqlx::Error> {
-    Ok(sqlx::query(
-        "UPDATE collection_work_order_lease_task task \
-         SET claimed_by_installation_ref=$2,claimed_at=scope_001_now() \
-         FROM plugin_installation previous,collection_work_order_lease lease \
-         WHERE task.claimed_by_installation_ref=previous.installation_ref \
-           AND previous.station_ref=$1 AND previous.superseded_at IS NOT NULL \
-           AND previous.installation_ref<>$2 \
-           AND task.lease_ref=lease.lease_ref \
-           AND task.execution_state='in_progress' \
-           AND lease.released_at IS NULL AND lease.expires_at>scope_001_now()",
+    installation_ref: Uuid,
+    reason_code: &str,
+) -> Result<(), sqlx::Error> {
+    let credential_reason = if reason_code == "station_retired" {
+        "station_retired"
+    } else {
+        "installation_superseded"
+    };
+    sqlx::query(
+        "UPDATE installation_credential SET revoked_at=scope_001_now(), \
+                revoke_reason_code=$2 \
+         WHERE installation_ref=$1 AND revoked_at IS NULL",
     )
-    .bind(station_ref)
-    .bind(replacement)
+    .bind(installation_ref)
+    .bind(credential_reason)
     .execute(&mut **transaction)
-    .await?
-    .rows_affected())
+    .await?;
+    sqlx::query(
+        "UPDATE platform_observation_account_binding \
+         SET ended_at=scope_001_now(),end_reason_code=$2 \
+         WHERE installation_ref=$1 AND ended_at IS NULL",
+    )
+    .bind(installation_ref)
+    .bind(reason_code)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE collection_work_order_lease lease \
+         SET released_at=scope_001_now(),release_reason='station_unavailable' \
+         FROM collection_work_order work_order \
+         WHERE lease.work_order_ref=work_order.work_order_ref \
+           AND work_order.installation_ref=$1 \
+           AND lease.released_at IS NULL",
+    )
+    .bind(installation_ref)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 async fn insert_installation(

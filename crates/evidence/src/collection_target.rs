@@ -4,7 +4,9 @@
 //! Authorization, and not a claim that any capture will run (INV-36). Nothing in this module
 //! reaches a platform, and nothing here creates a Work Order.
 
-use linggan_contracts::{CollectionContractError, LifecycleState, TargetIdentity, TargetSource};
+use linggan_contracts::{
+    CollectionContractError, LifecycleState, TargetIdentity, TargetKind, TargetSource,
+};
 use linggan_storage_postgres::Database;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -400,8 +402,8 @@ pub async fn transition_target(
 ) -> Result<ObservationTarget, CollectionTargetError> {
     let mut transaction = database.pool().begin().await?;
 
-    let current: String = sqlx::query_scalar(
-        "SELECT lifecycle_state FROM collection_observation_target \
+    let current: (String, String) = sqlx::query_as(
+        "SELECT lifecycle_state,target_kind FROM collection_observation_target \
          WHERE target_ref = $1 FOR UPDATE",
     )
     .bind(target_ref)
@@ -409,12 +411,13 @@ pub async fn transition_target(
     .await?
     .ok_or(CollectionTargetError::UnknownTarget)?;
 
-    let from = LifecycleState::parse(&current)?;
+    let from = LifecycleState::parse(&current.0)?;
+    let target_kind = TargetKind::parse(&current.1)?;
     if from == to {
         transaction.rollback().await?;
         return read_target_by_ref(database, target_ref).await;
     }
-    if !from.may_move_to(to) {
+    if !from.may_move_to_for(to, target_kind) {
         transaction.rollback().await?;
         return Err(CollectionTargetError::IllegalTransition {
             from: from.as_str().to_owned(),

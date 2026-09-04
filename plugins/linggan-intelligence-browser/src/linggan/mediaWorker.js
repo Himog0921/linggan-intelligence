@@ -13,8 +13,9 @@ const mediaOutbox = {
 
 registerMediaWorkerPort({
   runtime: chrome.runtime,
-  processMedia: ({ preferredUploadId }) => flushMediaOutboxInExecutionContext({
+  processMedia: ({ preferredUploadId, installationCredential }) => flushMediaOutboxInExecutionContext({
     outbox: mediaOutbox,
     preferredUploadId,
+    installationCredential,
   }),
 });

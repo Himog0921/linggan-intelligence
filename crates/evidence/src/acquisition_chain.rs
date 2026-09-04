@@ -6,8 +6,15 @@
 //! Nothing here reaches a platform. A Work Order row is a written instruction; execution is
 //! a later stage that does not exist yet.
 
-use crate::station_read::station_daily_note_usage_in;
-use linggan_contracts::{AdmissionFacts, AdmissionOutcome, Capacity, decide_admission};
+use crate::collection_control::{
+    CapacitySelection, evaluate_capacity_in, required_capabilities_for,
+};
+use crate::work_order_lease::{
+    IssuedLease, LeaseError, issue_work_order_lease_in_transaction, lease_schema_is_ready,
+};
+use linggan_contracts::{
+    AdmissionFacts, AdmissionOutcome, AuthorizationBoundaryFailure, Capacity, decide_admission,
+};
 use linggan_storage_postgres::Database;
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -33,8 +40,25 @@ pub struct RequestOutcome {
     pub request_ref: Uuid,
     pub decision_ref: Uuid,
     pub outcome: AdmissionOutcome,
+    /// Closed machine reason persisted on the Admission decision. Callers must not collapse a
+    /// capacity, purpose or authorization boundary into a generic refusal.
+    pub reason_code: &'static str,
     /// Present only when the decision admitted the request.
     pub work_order_ref: Option<Uuid>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RequestLeaseError {
+    #[error(transparent)]
+    Acquisition(#[from] AcquisitionChainError),
+    #[error(transparent)]
+    Lease(#[from] LeaseError),
+}
+
+#[derive(Debug)]
+pub struct RequestLeaseOutcome {
+    pub request: RequestOutcome,
+    pub lease: Option<IssuedLease>,
 }
 
 /// One already-admitted material identity that a person has explicitly selected for deepening.
@@ -123,6 +147,29 @@ pub async fn request_and_admit(
     request_and_admit_inner(database, target_ref, lane, purpose, requested_by, &[], None).await
 }
 
+/// Create Request → Decision → Work Order → Lease under one transaction. A failed Lease check
+/// rolls the preceding writes back, so an "admitted" row cannot be mistaken for executable work.
+pub async fn request_admit_and_lease(
+    database: &Database,
+    target_ref: Uuid,
+    lane: &str,
+    purpose: &str,
+    requested_by: &str,
+    valid_for_minutes: i32,
+) -> Result<RequestLeaseOutcome, RequestLeaseError> {
+    request_admit_and_lease_inner(
+        database,
+        target_ref,
+        lane,
+        purpose,
+        requested_by,
+        &[],
+        None,
+        valid_for_minutes,
+    )
+    .await
+}
+
 /// Admit one exact, person-selected set of existing materials for bounded deepening.
 ///
 /// It shares the ordinary authorization/admission/work-order chain.  The only extra fact is the
@@ -146,6 +193,92 @@ pub async fn request_and_admit_material_targets(
         None,
     )
     .await
+}
+
+pub async fn request_admit_material_targets_and_lease(
+    database: &Database,
+    target_ref: Uuid,
+    purpose: &str,
+    requested_by: &str,
+    material_targets: &[MaterialDeepeningTarget],
+    valid_for_minutes: i32,
+) -> Result<RequestLeaseOutcome, RequestLeaseError> {
+    validate_material_targets(material_targets)?;
+    request_admit_and_lease_inner(
+        database,
+        target_ref,
+        "deep_archive",
+        purpose,
+        requested_by,
+        material_targets,
+        None,
+        valid_for_minutes,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn request_admit_and_lease_inner(
+    database: &Database,
+    target_ref: Uuid,
+    lane: &str,
+    purpose: &str,
+    requested_by: &str,
+    material_targets: &[MaterialDeepeningTarget],
+    required_authorization_ref: Option<Uuid>,
+    valid_for_minutes: i32,
+) -> Result<RequestLeaseOutcome, RequestLeaseError> {
+    if !acquisition_chain_schema_is_ready(database)
+        .await
+        .map_err(AcquisitionChainError::from)?
+        || !lease_schema_is_ready(database)
+            .await
+            .map_err(AcquisitionChainError::from)?
+    {
+        return Err(AcquisitionChainError::SchemaUnavailable.into());
+    }
+    let mut transaction = database
+        .pool()
+        .begin()
+        .await
+        .map_err(AcquisitionChainError::from)?;
+    let request = request_and_admit_in_transaction(
+        &mut transaction,
+        target_ref,
+        lane,
+        purpose,
+        requested_by,
+        material_targets,
+        required_authorization_ref,
+    )
+    .await?;
+    let lease = if let Some(work_order_ref) = request.work_order_ref {
+        Some(
+            issue_work_order_lease_in_transaction(
+                &mut transaction,
+                work_order_ref,
+                valid_for_minutes,
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
+    if requested_by == "agent" && lane == "patrol" && lease.is_some() {
+        sqlx::query(
+            "UPDATE collection_observation_target \
+             SET last_patrol_dispatched_at=scope_001_now() WHERE target_ref=$1",
+        )
+        .bind(target_ref)
+        .execute(&mut *transaction)
+        .await
+        .map_err(AcquisitionChainError::from)?;
+    }
+    transaction
+        .commit()
+        .await
+        .map_err(AcquisitionChainError::from)?;
+    Ok(RequestLeaseOutcome { request, lease })
 }
 
 /// Admit one frozen material set under the exact authorization already linked to that material.
@@ -229,7 +362,7 @@ async fn request_and_admit_inner(
     Ok(outcome)
 }
 
-async fn request_and_admit_in_transaction(
+pub(crate) async fn request_and_admit_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
     lane: &str,
@@ -266,6 +399,12 @@ async fn request_and_admit_in_transaction(
         // `archiving` is accepted only so the scheduler can recover an expired bounded baseline.
         // Admission still merges a live lease and the scheduler caps the number of Work Orders.
         "deep_archive" => matches!(lifecycle_state.as_str(), "pending_decision" | "archiving"),
+        "patrol" if requested_by == "person" => {
+            matches!(
+                lifecycle_state.as_str(),
+                "archived" | "monitoring" | "paused"
+            ) || (target_kind == "keyword" && lifecycle_state == "pending_decision")
+        }
         _ => matches!(lifecycle_state.as_str(), "archiving" | "monitoring"),
     };
     if !requestable {
@@ -295,12 +434,15 @@ async fn request_and_admit_in_transaction(
         &platform,
         &target_kind,
         lane,
+        purpose,
+        requested_by,
         target_ref,
         material_targets,
         required_authorization_ref,
     )
     .await?;
-    let outcome = decide_admission(&facts);
+    let outcome = decide_admission(&facts.admission);
+    let decision_reason_code = reason_code(&outcome, &facts.admission);
 
     let decision_ref = Uuid::new_v4();
     let authorization_ref = match &outcome {
@@ -314,25 +456,28 @@ async fn request_and_admit_in_transaction(
     sqlx::query(
         "INSERT INTO collection_admission_decision \
              (decision_ref, request_ref, outcome, unanswered_question, reason_code, reason, \
-              authorization_ref) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+              authorization_ref,target_ref,station_ref,installation_ref,account_ref,eligibility_ref,monitor_rule_revision_ref) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7,$8,$9,$10,$11,$12,$13)",
     )
     .bind(decision_ref)
     .bind(request_ref)
     .bind(outcome.code())
     .bind(outcome.unanswered_question().map(|q| q.number()))
-    .bind(reason_code(&outcome))
+    .bind(decision_reason_code)
     .bind(reason_text(&outcome))
     .bind(authorization_ref)
+    .bind(target_ref)
+    .bind(facts.capacity.station_ref)
+    .bind(facts.capacity.installation_ref)
+    .bind(facts.capacity.account_ref)
+    .bind(facts.capacity.eligibility_ref)
+    .bind(facts.monitor_rule_revision_ref)
     .execute(&mut **transaction)
     .await?;
 
     let work_order_ref = if outcome.permits_work_order() {
         // 准入认定了哪台工位，工单就记哪台。没有这一步，每日额度算不出来。
-        let station_ref = facts
-            .capacity
-            .station_ref()
-            .and_then(|value| Uuid::parse_str(value).ok());
+        let station_ref = facts.capacity.station_ref;
         let work_order_ref = write_work_order(
             &mut *transaction,
             decision_ref,
@@ -340,6 +485,10 @@ async fn request_and_admit_in_transaction(
             lane,
             authorization_ref,
             station_ref,
+            facts.capacity.installation_ref,
+            facts.capacity.account_ref,
+            facts.capacity.eligibility_ref,
+            facts.monitor_rule_revision_ref,
             requested_by,
         )
         .await?;
@@ -353,6 +502,7 @@ async fn request_and_admit_in_transaction(
         request_ref,
         decision_ref,
         outcome,
+        reason_code: decision_reason_code,
         work_order_ref,
     })
 }
@@ -427,25 +577,34 @@ async fn write_material_targets(
 }
 
 /// Collect only facts the server can actually establish.
+struct GatheredFacts {
+    admission: AdmissionFacts,
+    capacity: CapacitySelection,
+    monitor_rule_revision_ref: Option<Uuid>,
+}
+
 async fn gather_facts(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     platform: &str,
     target_kind: &str,
     lane: &str,
+    purpose: &str,
+    requested_by: &str,
     target_ref: Uuid,
     material_targets: &[MaterialDeepeningTarget],
     required_authorization_ref: Option<Uuid>,
-) -> Result<AdmissionFacts, sqlx::Error> {
-    let authorization_ref: Option<Uuid> = sqlx::query_scalar(
-        "SELECT authorization_ref FROM collection_acquisition_authorization \
+) -> Result<GatheredFacts, sqlx::Error> {
+    let authorization: Option<(Uuid, Option<i32>)> = sqlx::query_as(
+        "SELECT authorization_ref,max_targets FROM collection_acquisition_authorization \
          WHERE platform = $1 AND target_kind = $2 AND lane = $3 \
            AND revoked_at IS NULL AND expires_at > scope_001_now() \
-           AND ($4::uuid IS NULL OR authorization_ref=$4) \
-         ORDER BY expires_at DESC LIMIT 1",
+           AND purpose=$4 AND ($5::uuid IS NULL OR authorization_ref=$5) \
+         ORDER BY expires_at DESC LIMIT 1 FOR UPDATE",
     )
     .bind(platform)
     .bind(target_kind)
     .bind(lane)
+    .bind(purpose)
     .bind(required_authorization_ref)
     .fetch_optional(&mut **transaction)
     .await?;
@@ -497,6 +656,52 @@ async fn gather_facts(
         .await?
     };
 
+    let (authorization_ref, authorization_failure) =
+        if let Some((authorization_ref, max_targets)) = authorization {
+            let target_count: i64 = sqlx::query_scalar(
+                "SELECT count(DISTINCT work_order.target_ref) \
+             FROM collection_work_order work_order \
+             JOIN collection_admission_decision decision USING(decision_ref) \
+             WHERE decision.authorization_ref=$1 AND work_order.target_ref<>$2",
+            )
+            .bind(authorization_ref)
+            .bind(target_ref)
+            .fetch_one(&mut **transaction)
+            .await?;
+            if max_targets.is_some_and(|limit| target_count >= i64::from(limit)) {
+                (None, Some(AuthorizationBoundaryFailure::TargetLimitReached))
+            } else {
+                (Some(authorization_ref), None)
+            }
+        } else {
+            let status: (bool, bool) = sqlx::query_as(
+                "SELECT \
+                 EXISTS (SELECT 1 FROM collection_acquisition_authorization \
+                         WHERE platform=$1 AND target_kind=$2 AND lane=$3 \
+                           AND revoked_at IS NULL AND expires_at>scope_001_now() \
+                           AND purpose<>$4 \
+                           AND ($5::uuid IS NULL OR authorization_ref=$5)), \
+                 EXISTS (SELECT 1 FROM collection_acquisition_authorization \
+                         WHERE platform=$1 AND target_kind=$2 AND lane=$3 \
+                           AND ($5::uuid IS NULL OR authorization_ref=$5))",
+            )
+            .bind(platform)
+            .bind(target_kind)
+            .bind(lane)
+            .bind(purpose)
+            .bind(required_authorization_ref)
+            .fetch_one(&mut **transaction)
+            .await?;
+            let failure = if status.0 {
+                AuthorizationBoundaryFailure::PurposeMismatch
+            } else if status.1 {
+                AuthorizationBoundaryFailure::ExpiredOrRevoked
+            } else {
+                AuthorizationBoundaryFailure::Missing
+            };
+            (None, Some(failure))
+        };
+
     let capacity = establish_capacity(
         transaction,
         platform,
@@ -507,14 +712,31 @@ async fn gather_facts(
     )
     .await?;
 
-    Ok(AdmissionFacts {
-        authorization_ref: authorization_ref.map(|value| value.to_string()),
-        in_flight_work_exists: in_flight,
-        // No archive exists yet, so no need can already be satisfied. This becomes a real
-        // query once archiving produces results.
-        need_already_satisfied: false,
+    let monitor_rule_revision_ref = if requested_by == "agent" {
+        sqlx::query_scalar(
+            "SELECT active_monitor_rule_revision_ref FROM collection_observation_target \
+             WHERE target_ref=$1",
+        )
+        .bind(target_ref)
+        .fetch_one(&mut **transaction)
+        .await?
+    } else {
+        None
+    };
+
+    Ok(GatheredFacts {
+        admission: AdmissionFacts {
+            authorization_ref: authorization_ref.map(|value| value.to_string()),
+            authorization_failure,
+            in_flight_work_exists: in_flight,
+            // No archive exists yet, so no need can already be satisfied. This becomes a real
+            // query once archiving produces results.
+            need_already_satisfied: false,
+            capacity: capacity.capacity.clone(),
+            stop_conditions_expressible: true,
+        },
         capacity,
-        stop_conditions_expressible: true,
+        monitor_rule_revision_ref,
     })
 }
 
@@ -587,24 +809,6 @@ fn normalized_material_scope(
     normalized
 }
 
-/// What each lane actually needs a plugin to be able to do.
-///
-/// These strings are the plugin's own capability vocabulary, taken from what the Linggan
-/// browser path really implements — not invented for this check. Requiring a capability the
-/// plugin never declares would make the gate unpassable; inventing a name the plugin happens
-/// to echo back would make it theatre.
-fn required_capabilities(target_kind: &str, lane: &str) -> &'static [&'static str] {
-    match (target_kind, lane) {
-        // The automatic baseline records identity plus the bounded discovery surface. Detail,
-        // comments and media-byte acquisition remain explicit follow-up work: discovering a
-        // hundred works must not silently authorize a hundred deep scans.
-        ("creator", "deep_archive") => &["author_profile", "profile_discovery"],
-        ("keyword", "deep_archive") => &["discovery_search"],
-        ("creator", _) => &["profile_discovery"],
-        _ => &["discovery_search"],
-    }
-}
-
 /// 只读地问一次第 5 问。不写任何东西，也不产生任何决定。
 ///
 /// 执行工位页用它回答「系统现在有没有能力接活」。**页面与准入必须读同一个
@@ -623,7 +827,7 @@ pub async fn read_capacity(
     let capacity =
         establish_capacity(&mut transaction, platform, target_kind, lane, None, &[]).await?;
     transaction.rollback().await?;
-    Ok(capacity)
+    Ok(capacity.capacity)
 }
 
 /// Answer question 5 against real rows: staffed station, capabilities, budget, risk pause.
@@ -638,115 +842,22 @@ async fn establish_capacity(
     lane: &str,
     target_ref: Option<Uuid>,
     material_targets: &[MaterialDeepeningTarget],
-) -> Result<Capacity, sqlx::Error> {
-    // 风险暂停优先：正在停的时候，工位是否充足并不重要。
-    let pause: Option<String> = sqlx::query_scalar(
-        "SELECT reason FROM collection_risk_pause \
-         WHERE lifted_at IS NULL \
-           AND (platform IS NULL OR platform = $1) \
-           AND (lane IS NULL OR lane = $2) \
-         ORDER BY paused_at DESC LIMIT 1",
+) -> Result<CapacitySelection, sqlx::Error> {
+    let required = required_capabilities_for(
+        target_kind,
+        lane,
+        !material_targets.is_empty(),
+        material_targets.iter().any(|target| target.acquire_media),
+    );
+    evaluate_capacity_in(
+        transaction,
+        platform,
+        target_kind,
+        lane,
+        &required,
+        target_ref,
     )
-    .bind(platform)
-    .bind(lane)
-    .fetch_optional(&mut **transaction)
-    .await?;
-    if let Some(reason) = pause {
-        return Ok(Capacity::RiskPaused { reason });
-    }
-
-    // 在岗 = 已登记且未停用的工位上，有一个未被取代的插件安装。
-    let last_failed_station: Option<Uuid> = sqlx::query_scalar(
-        "SELECT w.station_ref FROM collection_work_order w \
-         JOIN collection_work_order_lease l USING(work_order_ref) \
-         WHERE $1::uuid IS NOT NULL AND w.target_ref=$1 AND w.lane=$2 \
-           AND l.release_reason IN ('expired','station_unavailable','revoked') \
-         ORDER BY l.released_at DESC LIMIT 1",
-    )
-    .bind(target_ref)
-    .bind(lane)
-    .fetch_optional(&mut **transaction)
-    .await?
-    .flatten();
-
-    let mut staffed: Vec<(Uuid, serde_json::Value, i32)> = sqlx::query_as(
-        "SELECT s.station_ref, i.capabilities, s.daily_work_quota \
-         FROM execution_station s \
-         JOIN plugin_installation i \
-           ON i.station_ref = s.station_ref AND i.superseded_at IS NULL \
-         WHERE s.retired_at IS NULL \
-         ORDER BY s.registered_at",
-    )
-    .fetch_all(&mut **transaction)
-    .await?;
-    // When another compatible station exists, do not send the recovery straight back to the
-    // station whose lease just expired. Stable registration order breaks remaining ties.
-    staffed.sort_by_key(|row| row.0 == last_failed_station.unwrap_or(Uuid::nil()));
-    if staffed.is_empty() {
-        return Ok(Capacity::NoStaffedStation);
-    }
-
-    let required = if !material_targets.is_empty() {
-        // The selected scope is the authority boundary. A normal reobservation that expressly
-        // says `acquire_media=false` must not be deferred merely because the station lacks a
-        // capability that its Work Order will never request.
-        let mut required = vec!["content_detail", "comments", "replies"];
-        if material_targets.iter().any(|target| target.acquire_media) {
-            required.push("media_slots");
-        }
-        required
-    } else {
-        required_capabilities(target_kind, lane).to_vec()
-    };
-    let mut missing_for_all: Option<Vec<String>> = None;
-    let mut quota_blocked: Option<(i32, i32)> = None;
-
-    for (station_ref, capabilities, quota) in staffed {
-        let declared: Vec<String> = capabilities
-            .as_array()
-            .map(|values| {
-                values
-                    .iter()
-                    .filter_map(|value| value.as_str().map(str::to_owned))
-                    .collect()
-            })
-            .unwrap_or_default();
-        let missing: Vec<String> = required
-            .iter()
-            .filter(|needed| !declared.iter().any(|have| have == *needed))
-            .map(|needed| (*needed).to_owned())
-            .collect();
-        if !missing.is_empty() {
-            // 记下缺得最少的那台，报给人看的应该是「最接近可用的工位差什么」。
-            if missing_for_all
-                .as_ref()
-                .is_none_or(|current| missing.len() < current.len())
-            {
-                missing_for_all = Some(missing);
-            }
-            continue;
-        }
-
-        // 计数单位是**实际入库的笔记条数**，不是任务数或已下发的承诺数：一次建档可能
-        // 入库 200 条却只算一个任务（规则文档 §单工位每日上限）。查询与页面展示共用同
-        // 一段 SQL，两处口径才不会漂移——旧项目两份 200 判据不同，出现过「页面显示已达
-        // 上限但仍在派单」。
-        let used = station_daily_note_usage_in(transaction, station_ref).await?;
-        let used = i32::try_from(used).unwrap_or(i32::MAX);
-        if used >= quota {
-            quota_blocked = Some((quota, used));
-            continue;
-        }
-        return Ok(Capacity::Available {
-            station_ref: station_ref.to_string(),
-        });
-    }
-
-    if let Some(missing) = missing_for_all {
-        return Ok(Capacity::MissingCapabilities { missing });
-    }
-    let (quota, committed) = quota_blocked.unwrap_or((0, 0));
-    Ok(Capacity::DailyQuotaCommitted { quota, committed })
+    .await
 }
 
 async fn max_works_for(
@@ -770,13 +881,16 @@ async fn max_works_for(
 /// The deep-archive ceiling from the product rules (§3.1): an upper bound, never a target.
 const DEFAULT_MAX_WORKS: i32 = 200;
 
-fn reason_code(outcome: &AdmissionOutcome) -> &'static str {
+fn reason_code(outcome: &AdmissionOutcome, facts: &AdmissionFacts) -> &'static str {
     match outcome {
         AdmissionOutcome::Admitted { .. } => "within_authorization",
         AdmissionOutcome::Reuse { .. } => "need_already_satisfied",
         AdmissionOutcome::Merge { .. } => "in_flight_work_covers_it",
-        AdmissionOutcome::Defer { .. } => "deferred",
-        AdmissionOutcome::Refuse { .. } => "no_valid_authorization",
+        AdmissionOutcome::Defer { .. } => facts.capacity.reason_code(),
+        AdmissionOutcome::Refuse { .. } => facts
+            .authorization_failure
+            .map(AuthorizationBoundaryFailure::as_str)
+            .unwrap_or("authorization_missing"),
         AdmissionOutcome::DecisionRequired { .. } => "question_unanswerable",
     }
 }
@@ -804,6 +918,10 @@ async fn write_work_order(
     lane: &str,
     authorization_ref: Option<Uuid>,
     station_ref: Option<Uuid>,
+    installation_ref: Option<Uuid>,
+    account_ref: Option<Uuid>,
+    eligibility_ref: Option<Uuid>,
+    monitor_rule_revision_ref: Option<Uuid>,
     requested_by: &str,
 ) -> Result<Uuid, sqlx::Error> {
     let work_order_ref = Uuid::new_v4();
@@ -811,8 +929,8 @@ async fn write_work_order(
     sqlx::query(
         "INSERT INTO collection_work_order \
              (work_order_ref, decision_ref, target_ref, lane, max_works, station_ref, \
-              stop_conditions) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+             installation_ref,account_ref,eligibility_ref,monitor_rule_revision_ref,stop_conditions) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7,$8,$9,$10,$11)",
     )
     .bind(work_order_ref)
     .bind(decision_ref)
@@ -820,6 +938,10 @@ async fn write_work_order(
     .bind(lane)
     .bind(max_works)
     .bind(station_ref)
+    .bind(installation_ref)
+    .bind(account_ref)
+    .bind(eligibility_ref)
+    .bind(monitor_rule_revision_ref)
     .bind(json!({
         "maximumQuota": max_works,
         // A quota's shortfall is not a set of real objects (contract §3.1), so the order

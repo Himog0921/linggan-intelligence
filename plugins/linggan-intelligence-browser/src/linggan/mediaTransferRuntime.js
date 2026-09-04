@@ -137,7 +137,7 @@ async function uploadMediaInChunks({ mediaObservationRef, blob, mimeType, sha256
   return payload;
 }
 
-export async function recordMediaDownloadFailure(upload, error, fetchImpl = fetch) {
+export async function recordMediaDownloadFailure(upload, error, fetchImpl = fetch, installationCredential = '') {
   const attemptedUri = String(upload?.candidateUris?.[0] || '').trim();
   const observationRef = String(upload?.mediaObservationRef || '').trim();
   if (!attemptedUri || !observationRef) return null;
@@ -155,6 +155,7 @@ export async function recordMediaDownloadFailure(upload, error, fetchImpl = fetc
         workRef: upload.serverWorkRef,
         claimGeneration: upload.claimGeneration,
         installKey: upload.installKey,
+        ...(installationCredential ? { installationCredential } : {}),
       } : {}),
     }),
   });
@@ -169,6 +170,7 @@ export async function flushMediaOutboxInExecutionContext({
   fetchImpl = fetch,
   cryptoImpl = crypto,
   limit = 12,
+  installationCredential = '',
 } = {}) {
   const preferred = preferredUploadId ? await outbox.dueById(preferredUploadId) : null;
   const due = await outbox.due({ limit });
@@ -197,7 +199,7 @@ export async function flushMediaOutboxInExecutionContext({
       await outbox.acknowledge(upload.uploadId, uploaded);
       results.push({ uploadId: upload.uploadId, status: 'acknowledged' });
     } catch (error) {
-      const failure = await recordMediaDownloadFailure(upload, error, fetchImpl).catch(() => null);
+      const failure = await recordMediaDownloadFailure(upload, error, fetchImpl, installationCredential).catch(() => null);
       if (upload.serverWorkRef) {
         await outbox.terminal(upload.uploadId, failure?.work?.state || 'media_acquisition_generation_finished');
         results.push({ uploadId: upload.uploadId, status: 'terminal' });

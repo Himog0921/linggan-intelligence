@@ -6,6 +6,9 @@
 //! 授权在发租那一刻**重新检查**，而不是沿用准入时的结论：准入与执行之间隔着时间，
 //! 工位可能已经掉线、授权可能已经撤销、风险暂停可能已经生效。
 
+use crate::collection_control::{
+    creator_baseline_qualified, required_capabilities_for, revalidate_frozen_capacity_in,
+};
 use linggan_contracts::{
     PRODUCER_TASK_SPEC_VERSION, ProducerTaskSpec, SERVER_LEASED_RISK_POLICY,
     parse_producer_task_spec,
@@ -27,6 +30,10 @@ pub enum LeaseError {
     NoStation,
     #[error("that station no longer has a live plugin installation")]
     StationUnavailable,
+    #[error("the work order did not freeze an installation and observation account")]
+    FrozenControlMissing,
+    #[error("collection control closed lease issuance: {reason_code}")]
+    ControlBlocked { reason_code: String },
     #[error("the authorization behind this work order is no longer valid")]
     AuthorizationLapsed,
     #[error("a risk pause covering this work is in effect: {reason}")]
@@ -67,6 +74,13 @@ type SubjectRow = (
     String,
     String,
     Option<Uuid>,
+    Option<Uuid>,
+    Option<Uuid>,
+    Option<Uuid>,
+    Option<Uuid>,
+    Option<bool>,
+    String,
+    String,
 );
 
 /// 工单发租所需的、发租那一刻的事实。
@@ -79,6 +93,13 @@ struct LeaseSubject {
     target_kind: String,
     identity_key: String,
     authorization_ref: Option<Uuid>,
+    installation_ref: Uuid,
+    account_ref: Uuid,
+    monitor_rule_revision_ref: Option<Uuid>,
+    active_monitor_rule_revision_ref: Option<Uuid>,
+    active_rule_automatic_enabled: Option<bool>,
+    lifecycle_state: String,
+    requested_by: String,
 }
 
 struct MaterialTarget {
@@ -121,11 +142,45 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
 ) -> Result<IssuedLease, LeaseError> {
     let subject = load_subject(transaction, work_order_ref).await?;
     reject_if_already_leased(transaction, work_order_ref).await?;
-    reject_if_risk_paused(transaction, &subject).await?;
-    reject_if_station_unstaffed(transaction, subject.station_ref).await?;
     reject_if_authorization_lapsed(transaction, &subject).await?;
+    reject_if_rule_changed(&subject)?;
+
+    // Busy is a cross-lease predicate. Serializing on the exact frozen account makes the later
+    // recheck a hard exclusion: two concurrent issuers cannot both observe the account as idle.
+    sqlx::query(
+        "SELECT account_ref FROM platform_observation_account WHERE account_ref=$1 FOR UPDATE",
+    )
+    .bind(subject.account_ref)
+    .execute(&mut **transaction)
+    .await?;
 
     let material_targets = load_material_targets(transaction, work_order_ref).await?;
+    let required_capabilities = required_capabilities_for(
+        &subject.target_kind,
+        &subject.lane,
+        !material_targets.is_empty(),
+        material_targets.iter().any(|target| target.acquire_media),
+    );
+    let capacity = revalidate_frozen_capacity_in(
+        transaction,
+        &subject.platform,
+        &subject.lane,
+        &required_capabilities,
+        subject.station_ref,
+        subject.installation_ref,
+        subject.account_ref,
+        None,
+        true,
+    )
+    .await?;
+    if !matches!(
+        capacity.capacity,
+        linggan_contracts::Capacity::Available { .. }
+    ) {
+        return Err(LeaseError::ControlBlocked {
+            reason_code: capacity.capacity.reason_code().to_owned(),
+        });
+    }
     let tasks = expand_into_tasks(&subject, &material_targets)?;
     for task in &tasks {
         insert_scheduled_task(transaction, task).await?;
@@ -235,6 +290,12 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
         .execute(&mut **transaction)
         .await?;
     } else if lane == "deep_archive" {
+        if !creator_baseline_qualified(transaction, target_ref).await? {
+            // Task/Package/Receipt completion remains durable, but empty, zero, unknown,
+            // scan-limited or quarantined coverage is not a creator baseline. Keeping the target
+            // in archiving makes the partial result explicit and recoverable.
+            return Ok(true);
+        }
         let monitoring_enabled: Option<bool> = sqlx::query_scalar(
             "SELECT monitoring_enabled FROM collection_observation_target \
              WHERE target_ref=$1 AND lifecycle_state='archiving' FOR UPDATE",
@@ -313,10 +374,16 @@ async fn load_subject(
     // each path could make its live-scope decision before seeing the other's lease.
     let row: Option<SubjectRow> = sqlx::query_as(
         "SELECT w.target_ref, w.station_ref, w.lane, w.max_works, \
-                t.platform, t.target_kind, t.identity_key, d.authorization_ref \
+                t.platform, t.target_kind, t.identity_key, d.authorization_ref, \
+                w.installation_ref,w.account_ref,w.monitor_rule_revision_ref, \
+                t.active_monitor_rule_revision_ref,active_rule.automatic_enabled,t.lifecycle_state, \
+                request.requested_by \
          FROM collection_work_order w \
          JOIN collection_observation_target t ON t.target_ref = w.target_ref \
          JOIN collection_admission_decision d ON d.decision_ref = w.decision_ref \
+         JOIN collection_acquisition_request request ON request.request_ref=d.request_ref \
+         LEFT JOIN collection_monitor_rule_revision active_rule \
+           ON active_rule.rule_revision_ref=t.active_monitor_rule_revision_ref \
          WHERE w.work_order_ref = $1 FOR UPDATE OF w, t",
     )
     .bind(work_order_ref)
@@ -328,6 +395,9 @@ async fn load_subject(
     let Some(station_ref) = row.1 else {
         return Err(LeaseError::NoStation);
     };
+    let (Some(installation_ref), Some(account_ref)) = (row.8, row.9) else {
+        return Err(LeaseError::FrozenControlMissing);
+    };
     Ok(LeaseSubject {
         target_ref: row.0,
         station_ref,
@@ -337,7 +407,44 @@ async fn load_subject(
         target_kind: row.5,
         identity_key: row.6,
         authorization_ref: row.7,
+        installation_ref,
+        account_ref,
+        monitor_rule_revision_ref: row.10,
+        active_monitor_rule_revision_ref: row.11,
+        active_rule_automatic_enabled: row.12,
+        lifecycle_state: row.13,
+        requested_by: row.14,
     })
+}
+
+fn reject_if_rule_changed(subject: &LeaseSubject) -> Result<(), LeaseError> {
+    if subject.requested_by == "agent"
+        && subject.monitor_rule_revision_ref.is_some()
+        && subject.monitor_rule_revision_ref != subject.active_monitor_rule_revision_ref
+    {
+        return Err(LeaseError::ControlBlocked {
+            reason_code: "rule_revision_changed".to_owned(),
+        });
+    }
+    if subject.requested_by == "agent" && subject.lane == "patrol" {
+        if subject.monitor_rule_revision_ref.is_none() {
+            return Err(LeaseError::ControlBlocked {
+                reason_code: "rule_missing".to_owned(),
+            });
+        }
+        if subject.active_rule_automatic_enabled != Some(true)
+            || subject.lifecycle_state != "monitoring"
+        {
+            return Err(LeaseError::ControlBlocked {
+                reason_code: "monitoring_paused".to_owned(),
+            });
+        }
+    } else if subject.requested_by == "person" && subject.lifecycle_state == "dismissed" {
+        return Err(LeaseError::ControlBlocked {
+            reason_code: "target_not_requestable".to_owned(),
+        });
+    }
+    Ok(())
 }
 
 async fn reject_if_already_leased(
@@ -354,45 +461,6 @@ async fn reject_if_already_leased(
     .await?;
     if live {
         return Err(LeaseError::AlreadyLeased);
-    }
-    Ok(())
-}
-
-async fn reject_if_risk_paused(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    subject: &LeaseSubject,
-) -> Result<(), LeaseError> {
-    let pause: Option<String> = sqlx::query_scalar(
-        "SELECT reason FROM collection_risk_pause \
-         WHERE lifted_at IS NULL \
-           AND (platform IS NULL OR platform = $1) \
-           AND (lane IS NULL OR lane = $2) LIMIT 1",
-    )
-    .bind(&subject.platform)
-    .bind(&subject.lane)
-    .fetch_optional(&mut **transaction)
-    .await?;
-    match pause {
-        Some(reason) => Err(LeaseError::RiskPaused { reason }),
-        None => Ok(()),
-    }
-}
-
-async fn reject_if_station_unstaffed(
-    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    station_ref: Uuid,
-) -> Result<(), LeaseError> {
-    let staffed: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM execution_station s \
-                        JOIN plugin_installation i ON i.station_ref = s.station_ref \
-                                                  AND i.superseded_at IS NULL \
-                        WHERE s.station_ref = $1 AND s.retired_at IS NULL)",
-    )
-    .bind(station_ref)
-    .fetch_one(&mut **transaction)
-    .await?;
-    if !staffed {
-        return Err(LeaseError::StationUnavailable);
     }
     Ok(())
 }
@@ -662,6 +730,13 @@ mod tests {
             target_kind: "creator".to_owned(),
             identity_key: "creator-fixture".to_owned(),
             authorization_ref: Some(Uuid::new_v4()),
+            installation_ref: Uuid::new_v4(),
+            account_ref: Uuid::new_v4(),
+            monitor_rule_revision_ref: None,
+            active_monitor_rule_revision_ref: None,
+            active_rule_automatic_enabled: None,
+            lifecycle_state: "archived".to_owned(),
+            requested_by: "person".to_owned(),
         }
     }
 

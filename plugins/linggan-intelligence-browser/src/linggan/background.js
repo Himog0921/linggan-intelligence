@@ -1,6 +1,7 @@
 import {
   LINGGAN_LOCAL_ORIGIN,
   attemptStartIsAccepted,
+  activateLingganInstallationCredential,
   checkInLingganStation,
   claimLingganDispatch,
   claimLingganMediaAcquisition,
@@ -11,6 +12,7 @@ import {
   isTerminalLocalDeliveryResult,
   localPost,
   readLingganLocalReadiness,
+  reportLingganAccountEligibility,
   reportLingganDispatchFailure,
   taskCreationIsAccepted,
   unavailableLingganStats,
@@ -34,6 +36,12 @@ import {
 } from './mediaTransferRuntime.js';
 import { requestMediaWorker } from './mediaWorkerChannel.js';
 import { dispatchedCommentMaxTotal, dispatchedMaximumQuota } from './localExecutionSupport.js';
+import {
+  activatePendingInstallationCredential,
+  persistPendingInstallationCredential,
+  readInstallationCredential,
+  readInstallationCredentialRecord,
+} from './installationCredentialStore.js';
 
 const PRODUCER_INSTANCE_KEY = 'linggan.localTrusted.producerInstanceId';
 let flushingOutbox = null;
@@ -46,6 +54,10 @@ async function producerInstanceId() {
   const created = crypto.randomUUID();
   await chrome.storage.local.set({ [PRODUCER_INSTANCE_KEY]: created });
   return created;
+}
+
+async function installationCredentialFor(installKey) {
+  return readInstallationCredential(chrome.storage.local, installKey);
 }
 
 export async function flushLocalOutboxOnce({
@@ -115,9 +127,12 @@ function flushLocalOutbox() {
 
 async function flushMediaOutbox(preferredUploadId = '') {
   await ensureMediaWorker();
+  const installKey = await producerInstanceId();
+  const installationCredential = await installationCredentialFor(installKey);
   const response = await requestMediaWorker({
     runtime: chrome.runtime,
     preferredUploadId,
+    installationCredential,
   });
   if (response?.success !== true) throw new Error(response?.code || 'media_worker_unavailable');
   return response;
@@ -300,13 +315,57 @@ async function reportStationStatus() {
     };
   }
   const installKey = await producerInstanceId();
+  const storedBeforeCheckIn = await readInstallationCredentialRecord(
+    chrome.storage.local,
+    installKey,
+  );
+  if (storedBeforeCheckIn?.pending && storedBeforeCheckIn.installationRef) {
+    const activation = await activateLingganInstallationCredential({
+      installationRef: storedBeforeCheckIn.installationRef,
+      credentialRef: storedBeforeCheckIn.pending.credentialRef,
+      installationCredential: storedBeforeCheckIn.pending.credential,
+      health: readiness.health,
+    });
+    if (activation.activated) {
+      await activatePendingInstallationCredential(
+        chrome.storage.local,
+        installKey,
+        storedBeforeCheckIn.pending.credentialRef,
+      );
+    }
+  }
+  const activeCredential = await installationCredentialFor(installKey);
   const checkIn = await checkInLingganStation({
     installKey,
+    installationCredential: activeCredential,
     pluginVersion,
     browserLabel: browserLabel(),
     capabilities: await declaredCapabilities(),
     health: readiness.health,
   });
+  if (checkIn.installationCredential
+      && checkIn.installationCredentialRef
+      && checkIn.installationRef) {
+    await persistPendingInstallationCredential(chrome.storage.local, {
+      installKey,
+      installationRef: checkIn.installationRef,
+      credentialRef: checkIn.installationCredentialRef,
+      credential: checkIn.installationCredential,
+    });
+    const activation = await activateLingganInstallationCredential({
+      installationRef: checkIn.installationRef,
+      credentialRef: checkIn.installationCredentialRef,
+      installationCredential: checkIn.installationCredential,
+      health: readiness.health,
+    });
+    if (activation.activated) {
+      await activatePendingInstallationCredential(
+        chrome.storage.local,
+        installKey,
+        checkIn.installationCredentialRef,
+      );
+    }
+  }
   return {
     success: true,
     registered: checkIn.state === 'claimed' || checkIn.state === 'heartbeat',
@@ -466,8 +525,10 @@ async function runMediaAcquisitionOnce() {
     return { success: false, state: 'unreachable', nextPollAfterSeconds: 900 };
   }
   const installKey = await producerInstanceId();
+  const installationCredential = await installationCredentialFor(installKey);
   const claim = await claimLingganMediaAcquisition({
     installKey,
+    installationCredential,
     health: readiness.health,
   });
   if (!claim.mayExecute) {
@@ -555,6 +616,7 @@ async function requeueClaimedTaskFailure({ claim, installKey, state, message }) 
     : 'page_read_failed';
   const reported = await reportLingganDispatchFailure({
     installKey,
+    installationCredential: await installationCredentialFor(installKey),
     taskId,
     failureId: crypto.randomUUID(),
     failureCode,
@@ -608,7 +670,16 @@ async function runDispatchedTask() {
     return { success: false, state: 'unreachable', message: readiness.message };
   }
   const installKey = await producerInstanceId();
-  const claim = await claimLingganDispatch({ installKey, health: readiness.health });
+  let installationCredential = await installationCredentialFor(installKey);
+  if (!installationCredential) {
+    await checkInStationOnce();
+    installationCredential = await installationCredentialFor(installKey);
+  }
+  const claim = await claimLingganDispatch({
+    installKey,
+    installationCredential,
+    health: readiness.health,
+  });
   if (!claim.mayExecute) {
     // 不许执行不是故障：闸门默认关着就是正常状态。原样把服务端的判断带回去。
     return {
@@ -805,7 +876,7 @@ function waitForTabReady(tabId, timeoutMs = 20000) {
   });
 }
 
-chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message = {}, sender, sendResponse) => {
   const action = String(message.action || '').trim();
   Promise.resolve().then(async () => {
     if (action === LINGGAN_RUNTIME_ACTION.TOGGLE_DASHBOARD) return openDashboard();
@@ -813,6 +884,22 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
     if (action === LINGGAN_RUNTIME_ACTION.RUN_DISPATCHED_TASK) return runDispatchedTask();
     if (action === LINGGAN_RUNTIME_ACTION.GET_EXECUTION_STATION_STATUS) {
       return reportStationStatus();
+    }
+    if (action === LINGGAN_RUNTIME_ACTION.REPORT_ACCOUNT_ELIGIBILITY) {
+      const senderUrl = String(sender?.tab?.url || sender?.url || '');
+      if (!/^https:\/\/([^.]+\.)?xiaohongshu\.com\//i.test(senderUrl)) {
+        return { reported: false, reasonCode: 'account_observation_source_invalid' };
+      }
+      const station = await reportStationStatus();
+      const installKey = await producerInstanceId();
+      const installationCredential = await installationCredentialFor(installKey);
+      return reportLingganAccountEligibility({
+        installationRef: station.installationRef,
+        installationCredential,
+        rawPlatformAccountId: message.rawPlatformAccountId,
+        signal: message.signal,
+        health: (await readLingganLocalReadiness()).health,
+      });
     }
     if (action === LINGGAN_RUNTIME_ACTION.TEST_FLYWHEEL_CONNECTION) return getLingganStatus();
     if (action === LINGGAN_RUNTIME_ACTION.SUBMIT_DISCOVERY_PACKAGE) {

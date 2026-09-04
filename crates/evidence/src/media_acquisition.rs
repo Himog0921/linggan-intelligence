@@ -3,6 +3,9 @@
 //! The work row is mutable orchestration state.  It never replaces the append-only source
 //! observation, download-attempt, blob or materialization facts.
 
+use crate::collection_control::{
+    collection_control_schema_is_ready, validate_installation_credential_in,
+};
 use crate::producer_runtime::ProducerRuntimeError;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
@@ -16,6 +19,8 @@ const MAX_ATTEMPTS: i32 = 3;
 pub enum MediaAcquisitionError {
     #[error("media acquisition schema is unavailable")]
     SchemaUnavailable,
+    #[error("installation credential is invalid")]
+    InvalidCredential,
     #[error("database operation failed")]
     Database(#[from] sqlx::Error),
 }
@@ -293,6 +298,7 @@ pub(crate) async fn project_discovery_cover(
 pub async fn claim_media_acquisition(
     database: &Database,
     install_key: &str,
+    installation_credential: &str,
 ) -> Result<MediaAcquisitionDecision, MediaAcquisitionError> {
     if !media_acquisition_schema_is_ready(database).await? {
         return Err(MediaAcquisitionError::SchemaUnavailable);
@@ -316,6 +322,16 @@ pub async fn claim_media_acquisition(
         });
     };
     let installation_ref: Uuid = installation.get("installation_ref");
+    if !collection_control_schema_is_ready(database).await? {
+        tx.commit().await?;
+        return Err(MediaAcquisitionError::SchemaUnavailable);
+    }
+    if !validate_installation_credential_in(&mut tx, installation_ref, installation_credential)
+        .await?
+    {
+        tx.commit().await?;
+        return Err(MediaAcquisitionError::InvalidCredential);
+    }
     let capabilities: serde_json::Value = installation.get("capabilities");
     if !capabilities
         .as_array()
@@ -405,12 +421,14 @@ pub async fn record_media_acquisition_failure(
     work_ref: Uuid,
     observation_ref: Uuid,
     install_key: &str,
+    installation_credential: &str,
     claim_generation: i32,
     error: &str,
 ) -> Result<MediaAcquisitionFailureOutcome, MediaAcquisitionError> {
     let mut tx = database.pool().begin().await?;
     let row = sqlx::query(
-        "SELECT work.attempt_count,work.claim_generation,work.state,installation.install_key \
+        "SELECT work.attempt_count,work.claim_generation,work.state,installation.install_key, \
+                installation.installation_ref \
          FROM linggan_media_acquisition_work work \
          LEFT JOIN plugin_installation installation \
            ON installation.installation_ref=work.claimed_by_installation_ref \
@@ -429,9 +447,25 @@ pub async fn record_media_acquisition_failure(
         });
     };
     let attempt_count: i32 = row.get("attempt_count");
+    let installation_ref: Option<Uuid> = row.get("installation_ref");
     let live = row.get::<String, _>("state") == "leased"
         && row.get::<i32, _>("claim_generation") == claim_generation
         && row.get::<Option<String>, _>("install_key").as_deref() == Some(install_key);
+    let credential_valid = match installation_ref {
+        Some(installation_ref) => {
+            crate::collection_control::validate_installation_credential_in(
+                &mut tx,
+                installation_ref,
+                installation_credential,
+            )
+            .await?
+        }
+        None => false,
+    };
+    if !credential_valid {
+        tx.commit().await?;
+        return Err(MediaAcquisitionError::InvalidCredential);
+    }
     if !live {
         tx.commit().await?;
         return Ok(MediaAcquisitionFailureOutcome {
@@ -442,6 +476,10 @@ pub async fn record_media_acquisition_failure(
     }
     let terminal = attempt_count >= MAX_ATTEMPTS;
     let state = if terminal { "terminal" } else { "retry_wait" };
+    let canonical_error = match error {
+        "expired_url" | "mime_mismatch" | "size_limit" | "cancelled" | "network_error" => error,
+        _ => "unknown",
+    };
     sqlx::query(
         "UPDATE linggan_media_acquisition_work SET state=$2,claimed_by_installation_ref=NULL, \
          lease_expires_at=NULL,next_attempt_at=scope_001_now() + \
@@ -450,7 +488,7 @@ pub async fn record_media_acquisition_failure(
     )
     .bind(work_ref)
     .bind(state)
-    .bind(error)
+    .bind(canonical_error)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;

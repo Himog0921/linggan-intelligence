@@ -60,6 +60,7 @@ impl LaneVerdict {
             Capacity::MissingCapabilities { .. } => "能力不匹配",
             Capacity::DailyQuotaCommitted { .. } => "今日额度已满",
             Capacity::RiskPaused { .. } => "风险暂停中",
+            Capacity::Unavailable { .. } => "控制闸门关闭",
         }
     }
 }
