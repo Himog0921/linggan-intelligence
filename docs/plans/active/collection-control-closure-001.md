@@ -103,5 +103,5 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 | Plan/Claim/Reality Matrix | VERIFIED |
 | Code/schema/UI/plugin source | VERIFIED；exact-head 复审修正了 Lease→dispatch 的 `station_not_accepting` 闸门与 dynamic cadence 的 round 聚合 |
 | Automated/disposable PostgreSQL/1440 browser/release | VERIFIED（隔离范围；本轮追加 station-close/dynamic-round 回归；当前浏览器直接复核为 1920 CSS px，1440 基线沿用既有验收证据） |
-| commit/push/Draft PR | VERIFIED：commit `807b297`、修正 commit 待推送；Draft PR [#153](https://github.com/Himog0921/linggan-intelligence/pull/153) 已创建 |
+| commit/push/Draft PR | VERIFIED：commits `807b297`、`b40e71d` 已推送；Draft PR [#153](https://github.com/Himog0921/linggan-intelligence/pull/153) 已创建 |
 | shared migration/runtime/Chrome/真实平台/deploy/merge/Mog acceptance | NOT AUTHORIZED / NOT VERIFIED |
