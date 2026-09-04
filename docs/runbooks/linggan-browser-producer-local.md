@@ -63,11 +63,11 @@ npm run verify:linggan-isolation
 - 封面、3 张正文图、Live Photo still/motion 和作者头像共 7 个字节组件均已物化，Evidence UI 已读取本地封面/头像。
 - 非空评论图片未在该真实样本观察；音频/ASR 保持真实 `FAILED`。
 
-## 2026-09-04 当前诊断与 `0.8.35` 发布候选
+## 2026-09-04 当前诊断与 `0.8.36` 发布候选
 
 - `origin/main@84fd9498e18164011621ffabc81a2a421a52f7a1` 的本机运行时、Chrome 已加载的 `0.8.34` 和已认领工位都已逐层核对；该安装凭证有效，但运行时仍以 `account_unbound` fail closed。它不是“插件没加载”的同义词，而是尚无可供人工绑定的当前登录账号 Observation。
-- 根因在 `0.8.34` 的被动账号探针：博主页的 injected `user` 状态描述的是正在查看的创作者，不能作为执行账号；当前实际已登录页面也没有由该路径形成账号 Observation。`0.8.35` 候选只接受已验证 XHS 全局导航容器内明确标为「我」或「我的」的 profile link；该容器还必须同时含首页、通知和消息路由，并验证同站 HTTPS `/user/profile/<hex-id>` 形状。它对 SPA hydration 最多等待 8 次、每次 500ms；找不到或不合法一律提交 `signal_incomplete`，绝不猜测、回退至博主、读取 Cookie 或持久化原始账号标识。
-- 候选 ZIP 为 `releases/linggan-intelligence-browser-v0.8.35.zip`，SHA-256 `2d6276b97b82c568d2fe2b0ca8cd5b2741429aa84308c7709ca99c856d3b3314`。它仅代表本分支 source/build/release 候选；不代表已经合入 `main`、替换本机 runtime、被 Chrome 加载、成功产生账号 Observation、完成账号绑定或取得任务。
+- 根因在 `0.8.34` 的被动账号探针：博主页的 injected `user` 状态描述的是正在查看的创作者，不能作为执行账号；当前实际已登录页面也没有由该路径形成账号 Observation。`0.8.36` 候选只接受已验证 XHS 全局导航容器内明确标为「我」或「我的」的 profile link；该容器还必须同时含首页、通知和消息路由，并验证同站 HTTPS `/user/profile/<hex-id>` 形状。它对 SPA hydration 最多等待 8 次、每次 500ms；找不到或不合法一律提交 `signal_incomplete`，绝不猜测、回退至博主、读取 Cookie 或持久化原始账号标识。
+- 候选 ZIP 为 `releases/linggan-intelligence-browser-v0.8.36.zip`，SHA-256 `1b0d2832b7483d4efb3c7d13f94bef37018fb1455edfac9434575ca89ee3313c`。它仅代表本分支 source/build/release 候选；不代表已经合入 `main`、替换本机 runtime、被 Chrome 加载、成功产生账号 Observation、完成账号绑定或取得任务。
 - 合入后仍需一次由 Mog 明确授权的受控运行验证：精确更新 runtime 与 Chrome 已解压扩展，刷新已登录页面以形成资格 Observation，在 Collection Runtime 人工绑定账号，并确认 `account_eligibility` 与 station capacity 后，才可对一项明确授权的手动复采或已配置规则验证 `WorkOrder → Lease → Attempt → Package → Receipt`。这一步不能由构建或 ZIP 校验替代。
 
 ## 错误处理
@@ -84,4 +84,4 @@ npm run verify:linggan-isolation
 
 ## 明确不证明
 
-构建检查本身不证明插件已加载、工位已认领、Package 已接纳或 Evidence UI 已读取。历史 `0.8.28` 有一笔标准详情真实链，但仍不证明小红书全平台总量/趋势、所有筛选搜索、所有作者页、真实非空评论图片、长期稳定性或未实测媒体/处理组合；也不证明 `0.8.35` 候选已经在真实 Chrome 或平台生效。
+构建检查本身不证明插件已加载、工位已认领、Package 已接纳或 Evidence UI 已读取。历史 `0.8.28` 有一笔标准详情真实链，但仍不证明小红书全平台总量/趋势、所有筛选搜索、所有作者页、真实非空评论图片、长期稳定性或未实测媒体/处理组合；也不证明 `0.8.36` 候选已经在真实 Chrome 或平台生效。
