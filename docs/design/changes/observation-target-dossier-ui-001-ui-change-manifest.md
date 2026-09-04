@@ -80,8 +80,8 @@
 3. 初始目录只扫描主页当前可见作品链接，按 stable Work 去重。只有两种结果能称为“基线可用”：`maximum_quota=200` 的清洁 Coverage 已完成，或 producer 明确抵达主页当前可见末端。
 4. 200 是当次基线的上限，不是必须凑满的目标、平台总作品数或完成率。表面末端只有 30 篇时，30 篇就是该次完整的有界基线。
 5. 因风险、时间、配额、读取或执行故障在到达 200 或表面末端前停止，只能显示“基线受限”与原因；不冒充已建成，不用 `200-已发现` 伪造失败或剩余作品。
-6. “继续完善”只复用首次建档的 canonical root 和原 Authorization；每次冻结不超过 3 篇已知缺详情 Work，不重新派发 `author_profile` 或 `profile_discovery`，不重扫主页。
-7. 每篇固定详情、最多 30 条评论、回复展开最多 2 次；媒体及 OCR/ASR 只在原授权已允许时进入该小批次。
+6. “继续完善”只复用首次建档的 canonical root；旧 Authorization 仍有效时继续使用，过期后只接受新的同目的、同目标类型且上限不小于 200 的有效 Authorization。每次冻结不超过 3 篇已知缺详情 Work，不重新派发 `author_profile` 或 `profile_discovery`，不重扫主页。
+7. 每篇固定详情、最多 30 条评论、回复展开最多 2 次；媒体及 OCR/ASR 只在当前有效授权已允许时进入该小批次。
 8. target row lock、live material-scope 排除、子 WorkOrder 与 Lease 在同一事务，避免并发 tick 重复深化。没有 marker 的历史 WorkOrder 不会被自动扩大权限。
 9. 档案读取不可用时，页面只告知“当前无法读取档案状态”，建档与完善写入入口禁用；不用缺失读数猜测“未建立”。
 10. 巡查新作品只有经精确 `Package → LeaseTask → Lease → WorkOrder → Target` 链、有效回执且目标仍允许持续观察，才进入后续自动补齐。
@@ -120,6 +120,6 @@
 | 任务可用 | SSR/source tests + 1440 browser | 字段可扫读、上/下次独立、动作唯一、creator/keyword 分开 | Mog 实际使用验收 |
 | 状态诚实 | unit + isolated PostgreSQL | stable Work 去重、基线 clean Coverage/表面末端、读取失败禁写、两级关联、UNKNOWN/0、成功巡查与外圈同源 | 真实平台总量 |
 | 视觉一致 | 1440 CSS px desktop | 无文档级横向溢出，散点为唯一主视觉，LIDS/focus 成立 | 1280/390/手机 |
-| 真实后果 | isolated PostgreSQL | 首次 `maximumQuota=200`、canonical root、继续完善不重扫且每次≤3篇、原授权、真实 Lease | shared DB/runtime、插件与平台执行 |
+| 真实后果 | isolated PostgreSQL | 首次 `maximumQuota=200`、canonical root、继续完善不重扫且每次≤3篇、同目的有效授权、真实 Lease | shared DB/runtime、插件与平台执行 |
 
 本 Package 的唯一一次 exact-head 产品/数据/代码联合审查已结束且拒绝首版。审查发现按类别合并为本冻结合同，随后只进行一次集中整改与最终验证；不再发起第二轮代码 review。
