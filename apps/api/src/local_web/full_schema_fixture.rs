@@ -71,6 +71,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0033_dispatch_failure_recovery.sql"),
     "\n",
     include_str!("../../../../database/migrations/0034_collection_control_closure.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0035_claimed_station_auto_acceptance.sql"),
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -104,5 +106,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0031_topic_workspace', 'cd7e6a33c5c9203d2fcddc88d246aaa16b2a9de4bebfda21123978315ee6297b'),\n",
     "('0032_author_profile_avatar_media', '0e1b3511c8f306c95d3ca6a829d83362dddeeec42e65114f77ae746b59325b32'),\n",
     "('0033_dispatch_failure_recovery', 'd5a24915664c1660eb0a46ff302c9c324c95b11c5c3d9804269ab02b09b10ecb'),\n",
-    "('0034_collection_control_closure', 'a45cfab5a9e9ee31ab221655ba662bacf9794fdb148ee9da0e54a5e7baed9a0c');\n",
+    "('0034_collection_control_closure', 'a45cfab5a9e9ee31ab221655ba662bacf9794fdb148ee9da0e54a5e7baed9a0c'),\n",
+    "('0035_claimed_station_auto_acceptance', 'feed87adc4fe8090975a0c1150b08d862c0975e80ed71bcb88188053ea7e3a36');\n",
 );

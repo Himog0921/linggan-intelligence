@@ -73,6 +73,7 @@
 | MV3 派单唤醒持久化（0.8.31） | 服务端节奏驱动的 `linggan-patrol` alarm 同时带有 delay 与 repeat；每次 tick 会用服务端最新 cadence 重新设定，`0` 映射到 Chrome 一分钟下限 | 不将状态查询变成平台动作，不自动认领新安装，不让插件自行设定服务端之外的授权、范围或长期轮询频率 |
 | 生命周期 bootstrap 与零 cadence 合同（0.8.32） | install/startup 先写可恢复的一分钟 bootstrap alarm，首次可完成 patrol 再覆盖为服务端节奏；允许服务端派发的 `nextPollAfterSeconds=0` 流向 Chrome 的一分钟下限 | 不让 bootstrap 取代服务端长期 cadence，不把 `0` 当成未授权任务，不直连平台或跳过 `mayExecute=true` |
 | 稳定页面身份就绪门（0.8.33） | URL 经安静期后，由同 URL 的内容脚本 `getPageContext` 回应证明可执行；不再等待可能被图片或长连接拖住的浏览器 `complete` | 不跳过重定向或页面身份核验，不把没有内容脚本的页面当作就绪，不改变失败审计或伪造采集交付 |
+| 认领默认自动接活与工位名称回显（0.8.37） | 成功 claim 的 server-owned station 默认切为 `stationAccepting=true`；check-in 回显服务端 `display_name` 与接活状态，Popup 只读显示“自动接活 / 已暂停 / 待认领” | 不把名称作为安装身份/配对键，不在插件保存或编辑别名，不以自动接活绕过心跳、凭证、账号、风险、预算、并发或 TaskSpec 门禁；人暂停不得被替换安装覆盖 |
 
 ## 新旧运行路径对照
 
@@ -83,7 +84,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.34）
+当前路径（0.8.37）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox

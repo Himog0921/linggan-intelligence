@@ -781,7 +781,7 @@ fn recovery_for(reason: &str) -> Option<Recovery> {
         }),
         "station_not_accepting" => Some(Recovery {
             owner: "你",
-            action: "在执行工位页明确开启接活。",
+            action: "该工位被显式暂停；确认后在执行工位页恢复自动接活。",
         }),
         "installation_credential_missing" => Some(Recovery {
             owner: "你",
@@ -1059,9 +1059,9 @@ fn runtime_resource_row(resource: &RuntimeResourceView) -> String {
         station_ref = resource.station_ref,
         next = !resource.accepting_tasks,
         label = if resource.accepting_tasks {
-            "关闭未来接活"
+            "暂停未来接活"
         } else {
-            "开启接活"
+            "恢复自动接活"
         },
     );
     let binding_form = match (
@@ -1092,9 +1092,9 @@ fn runtime_resource_row(resource: &RuntimeResourceView) -> String {
         reason = escape(eligibility_reason),
         name = escape(&resource.station_name),
         accepting = if resource.accepting_tasks {
-            "接活已开"
+            "自动接活"
         } else {
-            "接活关闭"
+            "已暂停"
         },
         acceptance_form = acceptance_form,
         installation = optional_short_ref(resource.installation_ref),
@@ -1186,7 +1186,7 @@ fn decision_reason(value: &str) -> &'static str {
     match value {
         "rule_missing" => "目标还没有活动规则版本。",
         "baseline_not_ready" => "创作者基线未满足自动巡检资格。",
-        "station_not_accepting" => "工位尚未由人明确开启接活。",
+        "station_not_accepting" => "工位已由人显式暂停未来接活。",
         "account_needs_login" => "观察账号需要重新登录。",
         "account_restricted" => "观察账号受到访问限制。",
         "account_cooling" => "观察账号当前处于冷却状态。",

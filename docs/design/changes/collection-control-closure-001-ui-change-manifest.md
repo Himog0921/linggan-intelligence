@@ -19,6 +19,15 @@
 - 不新增: 独立规则页、Evidence/Corpus 内容、监控价值、Opportunity、Dossier、Agent、移动/窄屏适配。
 - 支持条件: 1440 CSS px desktop fullscreen only。
 
+## 2026-09-04 工位自动接活与名称契约修正
+
+Runtime 在既有 `Collection Control` Pattern 内新增两项受控表达，而不是再建一个插件设置页：
+
+- **服务端真源名称**：工位名称来自 `execution_station.display_name`；Runtime 新建表单预填“本机 Chrome”，且可提交人类可读的新名称。插件 Popup 只能回显 check-in 返回的同一名称，不能以名称做身份、配对或本地编辑。
+- **自动接活状态**：成功认领默认显示“自动接活”；人显式暂停后显示“已暂停”并把恢复责任留给 Runtime 的同一动作。未认领安装只显示“待认领”，不伪装为暂停或可派发。
+
+`自动接活` 只是 station acceptance 这一层：Runtime 仍同时显示由 capacity evaluator 给出的 credential/version/freshness/account/risk/quota/busy 等真实阻断原因。名称读取和状态回显是 loopback check-in，不是平台访问或采集动作。
+
 ## 表面与状态
 
 | 表面 | 状态来源 | 呈现责任 |
@@ -27,7 +36,8 @@
 | modal form | rule revision + command receipt | 中文独立表达；expected revision/idempotency 隐藏但真实提交 |
 | modal feedback | durable receipt outcome/reason | success/replay/stale/conflict/rejected 分开；失败保留输入 |
 | dynamic | comparable-round qualification | `DYNAMIC_UNAVAILABLE` 与 24h fixed fallback 同时可见，不渲染假计算 |
-| Runtime | capacity evaluator | 每个阻断 reason、freshness、来源和恢复责任可解释 |
+| Runtime | `execution_station.display_name` + capacity evaluator | 显示并可人工修正服务器工位名；每个阻断 reason、接活状态、freshness、来源和恢复责任可解释 |
+| Browser Producer Popup | check-in 的 server-confirmed `stationDisplayName`/`stationAccepting` | 只回显同一工位名称与自动接活/已暂停/待认领，不保存本地别名、不提供配对或采集按钮 |
 | Operations/Attention/Tasks | scheduler/decision/work/lease/task/receipt | 只显示 durable fact；UNKNOWN 不是 0/失败，PARTIAL+VALID 不进失败区 |
 
 ## 交互与 a11y

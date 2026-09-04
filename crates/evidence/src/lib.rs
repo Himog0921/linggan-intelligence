@@ -87,9 +87,9 @@ pub use dispatch::{
     requeue_failed_dispatch,
 };
 pub use execution_station::{
-    CheckInOutcome, InstallationCheckIn, StationError, check_in_installation, claim_installation,
-    close_claim_window, open_claim_window, register_station, retire_station,
-    station_schema_is_ready,
+    CheckInOutcome, InstallationCheckIn, InstallationClaimOutcome, StationError,
+    check_in_installation, claim_installation, close_claim_window, open_claim_window,
+    register_station, rename_station, retire_station, station_schema_is_ready,
 };
 pub use ingress::{
     IngressError, IngressFault, IngressOptions, PreRoutingCode, ingest_capture_package,

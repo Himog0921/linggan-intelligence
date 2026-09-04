@@ -411,6 +411,9 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-station-name { min-width:0; }
 .c-station-name b { display:block; color:var(--v7-black); font-size:var(--c-fs-400); font-weight:var(--c-fw-medium); }
 .c-station-name span { display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-100) var(--lgi-font-mono); }
+.c-station-rename { display:flex; align-items:center; gap:6px; margin-top:8px; }
+.c-station-rename input { min-width:0; width:150px; height:28px; padding:0 7px; border:var(--c-line-hair) solid var(--v7-line-strong); border-radius:4px; background:var(--v7-white); color:var(--v7-black); font:var(--c-fw-regular) var(--c-fs-100) var(--lgi-font-sans); }
+.c-station-rename .c-btn-quiet { min-height:28px; padding:4px 7px; font-size:var(--c-fs-100); }
 /* 额度是这一行唯一回答「今天还能干多少活」的数，因此是第二视觉重量。 */
 .c-quota b { color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-500)/1 var(--lgi-font-mono); letter-spacing:-.02em; }
 .c-quota span { color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-200) var(--lgi-font-mono); }

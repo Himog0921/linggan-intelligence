@@ -372,7 +372,14 @@ fn station_row(station: &StationOverview, capabilities: Option<&Vec<StationCapab
     format!(
         r#"<div class="c-station-row">
                 <div class="c-station-state {state_class}">{state}</div>
-                <div class="c-station-name"><b>{name}</b><span>{plugin}</span></div>
+                <div class="c-station-name"><b>{name}</b><span>{plugin}</span>
+                  <form class="c-station-rename" method="post" action="/collection/runtime/stations/name" data-station-name-form>
+                    <input type="hidden" name="station_ref" value="{station_ref}" />
+                    <label class="sr-only" for="station-name-{station_ref}">工位名称</label>
+                    <input id="station-name-{station_ref}" name="display_name" required maxlength="60" value="{name}" />
+                    <button class="c-btn-quiet" type="submit">更名</button>
+                  </form>
+                </div>
                 <div class="{quota_class}"><b>{used}</b><span>/{quota} 篇</span><em>今日已入库</em></div>
                 <div class="c-station-meta"><span>{history}</span><span>{window}</span></div>
                 <form class="c-station-retire" method="post" action="/collection/runtime/retire">
@@ -545,7 +552,7 @@ fn console_markup(stations: &[StationOverview], error: Option<&str>) -> String {
               <form class="c-console-form" method="post" action="/collection/runtime/stations">
                 <label for="station-name">名字要能让你一眼认出是哪台机器</label>
                 <input id="station-name" name="display_name" required maxlength="60"
-                       placeholder="例如：MacBook Chrome" />
+                       value="本机 Chrome" />
                 <button class="c-btn-primary" type="submit">登记</button>
               </form>
               <p class="c-console-note">{note}</p>
@@ -569,6 +576,7 @@ fn failure_markup(error: Option<&str>) -> String {
         "station_rejected" => {
             "工位没有登记成功。最常见的原因是名字与某台在册工位重复——名字要能让你一眼认出是哪台机器，因此不允许重名。"
         }
+        "station_name_rejected" => "工位名称没有更新。名字不能为空，且不能与另一台在册工位重复。",
         "claim_window_rejected" => "认领窗口没有打开。该工位可能已被停用。",
         "close_window_rejected" => "认领窗口没有关闭。它可能已经自己过期了。",
         "retire_rejected" => "工位没有停用成功。它可能已经处于停用状态。",

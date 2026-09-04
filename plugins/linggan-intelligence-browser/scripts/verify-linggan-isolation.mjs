@@ -74,6 +74,10 @@ assert(dashboardBridgeSource.includes('downloadNoteMediaFromRecord'), 'dashboard
 assert(!dashboardBridgeSource.includes('createLingganPendingResult'), 'dashboard media action must not report a long-lived pending capability');
 const popupSource = read(path.join(root, 'src/popup/App.jsx'));
 assert(popupSource.includes('ensureLocalTrustedRuntime'), 'popup must use the LOCAL_TRUSTED runtime boundary');
+// `GET_EXECUTION_STATION_STATUS` is the current Linggan-only, read-only message
+// that mirrors server-confirmed display name and acceptance state. It does not
+// perform any former workbench registration, authorization, pairing, or action.
+assert(popupSource.includes('GET_EXECUTION_STATION_STATUS'), 'popup must read the server-confirmed Linggan station status');
 for (const retiredPopupAction of [
   'AUTHORIZE_PLUGIN_ACCESS',
   'REQUEST_PLUGIN_AUTHORIZATION',
@@ -81,7 +85,6 @@ for (const retiredPopupAction of [
   'CLEAR_PLUGIN_AUTHORIZATION',
   'GET_PLATFORM_COOKIES',
   'GET_STORED_PLATFORM_COOKIES',
-  'GET_EXECUTION_STATION_STATUS',
   'GET_ACCOUNTS',
   'ADD_ACCOUNT',
   'REMOVE_ACCOUNT',
@@ -104,7 +107,6 @@ for (const retiredPopupTransport of [
   'clearPluginAuthorization',
   'getPlatformCookies',
   'getStoredPlatformCookies',
-  'getExecutionStationStatus',
   'plugin_authorization_required',
 ]) {
   assert(!popupBundle.includes(retiredPopupTransport), `built popup must not retain retired management transport: ${retiredPopupTransport}`);

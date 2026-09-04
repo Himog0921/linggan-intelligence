@@ -66,7 +66,7 @@ use linggan_evidence::{
     read_runtime_capacity, read_runtime_library, read_scheduler_heartbeat,
     read_station_capabilities, read_station_overview, read_target, read_target_avatars,
     record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
-    register_station, release_media_upload_finalize, request_admit_and_lease,
+    register_station, release_media_upload_finalize, rename_station, request_admit_and_lease,
     request_admit_material_targets_and_lease, request_and_admit, retire_station,
     set_group_for_many, set_monitoring_for_many, set_station_accepting, start_local_attempt,
     start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
@@ -336,6 +336,10 @@ fn router(state: LocalWebState) -> Router {
         .route(
             "/collection/runtime/stations",
             post(collection_runtime_register_station),
+        )
+        .route(
+            "/collection/runtime/stations/name",
+            post(collection_runtime_rename_station),
         )
         .route(
             "/collection/runtime/claim-window",
@@ -864,6 +868,8 @@ fn check_in_payload(outcome: &CheckInOutcome) -> serde_json::Value {
         CheckInOutcome::Claimed {
             installation_ref,
             station_ref,
+            station_display_name,
+            accepting_tasks,
             superseded,
             credential,
         } => serde_json::json!({
@@ -871,6 +877,8 @@ fn check_in_payload(outcome: &CheckInOutcome) -> serde_json::Value {
             "state": "claimed",
             "claimKind": "claim_window",
             "stationRef": station_ref,
+            "stationDisplayName": station_display_name,
+            "stationAccepting": accepting_tasks,
             // A reinstall replaces the previous install on the same station rather than
             // registering a second station. The replaced one stays visible on purpose.
             "supersededInstallationRef": superseded,
@@ -885,16 +893,24 @@ fn check_in_payload(outcome: &CheckInOutcome) -> serde_json::Value {
             "installationRef": installation_ref,
             "state": "awaiting_claim",
             "stationRef": serde_json::Value::Null,
+            "stationDisplayName": serde_json::Value::Null,
+            "stationAccepting": serde_json::Value::Null,
             "installationCredentialRef": credential.as_ref().map(|value| value.credential_ref),
             "installationCredential": credential.as_ref().map(|value| value.raw_credential.expose_once()),
             "execution": "NOT_STARTED",
         }),
         CheckInOutcome::Heartbeat {
             installation_ref,
+            station_ref,
+            station_display_name,
+            accepting_tasks,
             credential,
         } => serde_json::json!({
             "installationRef": installation_ref,
             "state": "heartbeat",
+            "stationRef": station_ref,
+            "stationDisplayName": station_display_name,
+            "stationAccepting": accepting_tasks,
             "installationCredentialRef": credential.as_ref().map(|value| value.credential_ref),
             "installationCredential": credential.as_ref().map(|value| value.raw_credential.expose_once()),
             "execution": "NOT_STARTED",
@@ -924,11 +940,13 @@ async fn station_claim(State(state): State<LocalWebState>, body: Bytes) -> Respo
         );
     };
     match claim_installation(database, claim.installation_ref, claim.station_ref).await {
-        Ok(superseded) => Json(serde_json::json!({
+        Ok(outcome) => Json(serde_json::json!({
             "installationRef": claim.installation_ref,
             "stationRef": claim.station_ref,
+            "stationDisplayName": outcome.station_display_name,
+            "stationAccepting": outcome.accepting_tasks,
             "claimKind": "person",
-            "supersededInstallationRef": superseded,
+            "supersededInstallationRef": outcome.superseded,
             "execution": "NOT_STARTED",
         }))
         .into_response(),
@@ -2701,6 +2719,31 @@ async fn collection_runtime_register_station(
         .is_err()
     {
         return Redirect::to(&runtime_surface_with_error("station_rejected"));
+    }
+    Redirect::to(RUNTIME_SURFACE)
+}
+
+#[derive(serde::Deserialize)]
+struct StationNameForm {
+    station_ref: uuid::Uuid,
+    display_name: String,
+}
+
+/// The Runtime owns the one canonical station name. A matched plugin receives
+/// that name only through a later check-in response; it never proposes or
+/// changes its own identity.
+async fn collection_runtime_rename_station(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<StationNameForm>,
+) -> Redirect {
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&runtime_surface_with_error("read_model_not_connected"));
+    };
+    if rename_station(database, form.station_ref, &form.display_name)
+        .await
+        .is_err()
+    {
+        return Redirect::to(&runtime_surface_with_error("station_name_rejected"));
     }
     Redirect::to(RUNTIME_SURFACE)
 }

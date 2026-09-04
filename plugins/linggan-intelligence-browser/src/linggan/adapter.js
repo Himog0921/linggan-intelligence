@@ -145,6 +145,13 @@ export async function checkInLingganStation({
       state,
       installationRef: String(body?.installationRef || '').trim(),
       stationRef: String(body?.stationRef || '').trim(),
+      // The display name is server-confirmed presentation data, never a local
+      // identity or a claim key. It lets the matched plugin panel show the
+      // exact same durable station name as Collection Runtime.
+      stationDisplayName: String(body?.stationDisplayName || '').trim(),
+      stationAccepting: typeof body?.stationAccepting === 'boolean'
+        ? body.stationAccepting
+        : null,
       installationCredentialRef: String(body?.installationCredentialRef || '').trim(),
       // This value is consumed immediately by the MV3 background worker and is never included
       // in a notice, UI response, log or durable outbox entry.

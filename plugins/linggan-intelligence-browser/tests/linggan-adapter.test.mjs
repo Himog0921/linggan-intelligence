@@ -5,6 +5,7 @@ import {
   LINGGAN_LOCAL_ORIGIN,
   attemptStartIsAccepted,
   claimLingganMediaAcquisition,
+  checkInLingganStation,
   dispatchFailureRouteFromHealth,
   formatLingganRuntimeNotice,
   isTerminalLocalDeliveryResult,
@@ -101,6 +102,42 @@ test('runtime notice describes automatic claim without overstating admission', (
   assert.match(formatLingganRuntimeNotice(), /本机可靠队列/);
   assert.match(formatLingganRuntimeNotice(), /自动领取/);
   assert.match(formatLingganRuntimeNotice(), /再由 Linggan 接纳/);
+});
+
+test('station check-in only echoes the server-confirmed canonical station name', async () => {
+  let request = null;
+  const result = await checkInLingganStation({
+    installKey: 'installation-1',
+    installationCredential: 'credential-1',
+    pluginVersion: '0.8.37',
+    browserLabel: 'Chrome',
+    capabilities: ['author_profile'],
+    health: { routes: { station: { checkIn: '/api/local/stations/installations' } } },
+    fetchImpl: async (url, options) => {
+      request = { url, options };
+      return {
+        ok: true,
+        json: async () => ({
+          state: 'heartbeat',
+          installationRef: 'server-installation-ref',
+          stationRef: 'server-station-ref',
+          stationDisplayName: '本机 Chrome',
+          stationAccepting: true,
+        }),
+      };
+    },
+  });
+  assert.equal(request.url, `${LINGGAN_LOCAL_ORIGIN}/api/local/stations/installations`);
+  assert.deepEqual(JSON.parse(request.options.body), {
+    installKey: 'installation-1',
+    installationCredential: 'credential-1',
+    pluginVersion: '0.8.37',
+    browserLabel: 'Chrome',
+    capabilities: ['author_profile'],
+  });
+  assert.equal(result.stationRef, 'server-station-ref');
+  assert.equal(result.stationDisplayName, '本机 Chrome');
+  assert.equal(result.stationAccepting, true);
 });
 
 test('unread Linggan stats stay explicitly unavailable instead of becoming zero', () => {

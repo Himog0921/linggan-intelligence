@@ -1,7 +1,7 @@
 # PAGE-PLUGIN-001 · Linggan Browser Producer Popup
 
 > 状态: 权威当前
-> 最后核对: 2026-08-25
+> 最后核对: 2026-09-04
 > 适用范围: `PLUGIN-MIGRATION-001` 自有 MV3 Browser Producer popup；只表达身份、本机接纳准备度和用户手势触发的受限 Discovery
 > 事实来源: Issue #37、`LOCAL-001C0-DISCOVERY-BOUNDARY-V1`、`LIDS-PAT-001`、`LIDS-PRI-001` 与 `PLUGIN-MIGRATION-001` 活跃计划
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、当前 Discovery 合同和实际 plugin/runtime receipt；本页不扩大采集权限
@@ -15,6 +15,17 @@
 | `POPUP_STARTUP_FAILURE` | `App` 初始渲染或后续渲染错误；显示版本、启动失败、`本机状态目前未知` 和本提示未发起新的采集或传输 | 此提示自身没有新 collector 或交付动作；本机状态未知 | 失败前 `App` 未读取 tab/context/storage；host 已就绪；任务成功；任何材料已接纳或入库 | 在 Chrome 扩展程序页面重新加载明确版本后重新打开；无 receipt、无按钮行动 |
 
 此路由不是 Dashboard fallback，也不得改变已有 popup、内容页浮条、Collector、TaskSpec、回传、权限、host permission、API、数据库或真实浏览器配置。若实现需要任一上述变化，停止并另立事项。
+
+## Issue #149 · `0.8.37` 执行工位状态补充
+
+Popup 新增一个只读的「Linggan 执行工位」状态组，补充而不替换下文的 Discovery 边界。它通过既有服务器广告的 station check-in 取得 `stationDisplayName` 与 `stationAccepting`：显示服务端确认的工位名称及“自动接活 / 已暂停 / 待认领”。这个 check-in 不访问平台、不打开页面、不创建 Task/Attempt/Package/Receipt。
+
+| 字段 | 唯一来源 | Popup 可以说明 | Popup 不能说明 |
+|---|---|---|---|
+| 工位名称 | `execution_station.display_name` 的 check-in 回显 | 当前插件被服务器匹配到的同名工位 | 名称是浏览器身份、插件可自行改名或已与账号配对 |
+| 接活状态 | `stationAccepting` 的 check-in 回显 | 工位当前是自动接活、已被人暂停，或尚待认领 | 已经存在可执行任务、已经通过全部准入，或已发起平台采集 |
+
+名称由 Collection Runtime 的人类工位表单管理；插件不持久化别名，也不按名称做 claim。即便显示“自动接活”，服务端仍必须通过 station/install/credential/version/freshness/capability/account/risk/quota/live-Lease 等全部门禁，才可能派发执行。
 
 ## 用户任务与 3 秒答案
 

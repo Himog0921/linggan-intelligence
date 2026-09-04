@@ -368,10 +368,13 @@ async function reportStationStatus() {
   }
   return {
     success: true,
-    registered: checkIn.state === 'claimed' || checkIn.state === 'heartbeat',
+    registered: (checkIn.state === 'claimed' || checkIn.state === 'heartbeat')
+      && Boolean(checkIn.stationRef),
     authorized: Boolean(checkIn.checkedIn),
     pluginVersion,
     stationState: checkIn.state || 'unknown',
+    stationName: checkIn.stationDisplayName || '',
+    stationAccepting: checkIn.stationAccepting,
     installationRef: checkIn.installationRef || '',
     authorizationMessage: checkIn.message,
   };

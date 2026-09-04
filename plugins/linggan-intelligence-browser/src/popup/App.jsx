@@ -80,6 +80,13 @@ export default function App() {
   const [idleClaimSnapshot, setIdleClaimSnapshot] = useState(null);
 
   const [flywheelStatus, setFlywheelStatus] = useState('unconfigured');
+  const [executionStation, setExecutionStation] = useState({
+    registered: false,
+    stationState: 'unknown',
+    stationName: '',
+    stationAccepting: null,
+    authorizationMessage: '尚未读取 Linggan 工位状态。',
+  });
 
   const [batchModalOpen, setBatchModalOpen] = useState(false);
   const [batchModalType, setBatchModalType] = useState('notes');
@@ -171,6 +178,34 @@ export default function App() {
     }
 
     init();
+    return () => { mounted = false; };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    const readExecutionStation = async () => {
+      try {
+        const status = await sendToBackground(LINGGAN_RUNTIME_ACTION.GET_EXECUTION_STATION_STATUS);
+        if (!mounted) return;
+        setExecutionStation({
+          registered: status?.registered === true,
+          stationState: String(status?.stationState || 'unknown'),
+          stationName: String(status?.stationName || '').trim(),
+          stationAccepting: typeof status?.stationAccepting === 'boolean'
+            ? status.stationAccepting
+            : null,
+          authorizationMessage: String(status?.authorizationMessage || 'Linggan 工位状态当前未读取。'),
+        });
+      } catch {
+        if (mounted) {
+          setExecutionStation((current) => ({
+            ...current,
+            authorizationMessage: 'Linggan 工位状态当前未读取。',
+          }));
+        }
+      }
+    };
+    readExecutionStation();
     return () => { mounted = false; };
   }, []);
 
@@ -856,6 +891,7 @@ export default function App() {
           <div id="panel-config" className="tab-panel" role="tabpanel" aria-labelledby="tab-config">
             <FlywheelSection
               flywheelStatus={flywheelStatus}
+              executionStation={executionStation}
               onTest={handleFlywheelTest}
               testing={Boolean(busyActions.flywheelTest)}
             />

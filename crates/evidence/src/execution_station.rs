@@ -23,6 +23,8 @@ pub enum StationError {
     UnknownInstallation,
     #[error("that station is retired")]
     StationRetired,
+    #[error("station display name must not be blank")]
+    InvalidDisplayName,
     #[error(transparent)]
     Control(#[from] crate::collection_control::CollectionControlError),
     #[error(transparent)]
@@ -36,6 +38,8 @@ pub enum CheckInOutcome {
     Claimed {
         installation_ref: Uuid,
         station_ref: Uuid,
+        station_display_name: String,
+        accepting_tasks: bool,
         superseded: Option<Uuid>,
         credential: Option<IssuedInstallationCredential>,
     },
@@ -47,8 +51,21 @@ pub enum CheckInOutcome {
     /// 同一个安装再次报到，只更新心跳。
     Heartbeat {
         installation_ref: Uuid,
+        station_ref: Option<Uuid>,
+        station_display_name: Option<String>,
+        accepting_tasks: Option<bool>,
         credential: Option<IssuedInstallationCredential>,
     },
+}
+
+/// The server-confirmed outcome of a person matching one waiting installation
+/// to one station. The plugin never supplies this name and cannot use it as an
+/// identity key; it is the durable station name that both surfaces display.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InstallationClaimOutcome {
+    pub superseded: Option<Uuid>,
+    pub station_display_name: String,
+    pub accepting_tasks: bool,
 }
 
 pub async fn station_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
@@ -70,6 +87,10 @@ pub async fn register_station(
     if !station_schema_is_ready(database).await? {
         return Err(StationError::SchemaUnavailable);
     }
+    let display_name = display_name.trim();
+    if display_name.is_empty() {
+        return Err(StationError::InvalidDisplayName);
+    }
     let station_ref = Uuid::new_v4();
     let mut transaction = database.pool().begin().await?;
     sqlx::query(
@@ -84,7 +105,7 @@ pub async fn register_station(
     sqlx::query(
         "INSERT INTO execution_station_acceptance_transition \
              (transition_ref,station_ref,from_accepting,to_accepting,actor,reason_code) \
-         VALUES ($1,$2,NULL,false,'person','registered_closed')",
+         VALUES ($1,$2,NULL,false,'person','registered_awaiting_claim')",
     )
     .bind(Uuid::new_v4())
     .bind(station_ref)
@@ -279,31 +300,46 @@ pub async fn check_in_installation(
         // 还关着，之后人才把窗口打开。不重试的话，这个安装会永远停在待认领——而使用者
         // 看到的是「窗口开着，插件却始终不归位」，无从判断哪里出了问题。
         if station_ref.is_none()
-            && let Some(open_station) = open_claim_station(&mut transaction).await?
+            && let Some(mut open_station) = open_claim_station(&mut transaction).await?
         {
-            let superseded =
-                supersede_active_installation(&mut transaction, open_station, installation_ref)
-                    .await?;
+            let superseded = supersede_active_installation(
+                &mut transaction,
+                open_station.station_ref,
+                installation_ref,
+            )
+            .await?;
             sqlx::query(
                 "UPDATE plugin_installation \
                  SET station_ref = $2, claim_kind = 'claim_window', claimed_at = scope_001_now() \
                  WHERE installation_ref = $1",
             )
             .bind(installation_ref)
-            .bind(open_station)
+            .bind(open_station.station_ref)
             .execute(&mut *transaction)
             .await?;
+            open_station.accepting_tasks =
+                enable_default_acceptance_after_claim(&mut transaction, open_station.station_ref)
+                    .await?;
             transaction.commit().await?;
             return Ok(CheckInOutcome::Claimed {
                 installation_ref,
-                station_ref: open_station,
+                station_ref: open_station.station_ref,
+                station_display_name: open_station.display_name,
+                accepting_tasks: open_station.accepting_tasks,
                 superseded,
                 credential,
             });
         }
+        let station = match station_ref {
+            Some(station_ref) => Some(read_active_station(&mut transaction, station_ref).await?),
+            None => None,
+        };
         transaction.commit().await?;
         return Ok(CheckInOutcome::Heartbeat {
             installation_ref,
+            station_ref: station.as_ref().map(|station| station.station_ref),
+            station_display_name: station.as_ref().map(|station| station.display_name.clone()),
+            accepting_tasks: station.as_ref().map(|station| station.accepting_tasks),
             credential,
         });
     }
@@ -312,15 +348,18 @@ pub async fn check_in_installation(
 
     let installation_ref = Uuid::new_v4();
     let outcome = match open_station {
-        Some(station_ref) => {
-            let superseded =
-                supersede_active_installation(&mut transaction, station_ref, installation_ref)
-                    .await?;
+        Some(mut station) => {
+            let superseded = supersede_active_installation(
+                &mut transaction,
+                station.station_ref,
+                installation_ref,
+            )
+            .await?;
             insert_installation(
                 &mut transaction,
                 installation_ref,
                 check_in,
-                Some(station_ref),
+                Some(station.station_ref),
             )
             .await?;
             let credential = issue_compatible_credential(
@@ -329,9 +368,14 @@ pub async fn check_in_installation(
                 check_in.plugin_version,
             )
             .await?;
+            station.accepting_tasks =
+                enable_default_acceptance_after_claim(&mut transaction, station.station_ref)
+                    .await?;
             CheckInOutcome::Claimed {
                 installation_ref,
-                station_ref,
+                station_ref: station.station_ref,
+                station_display_name: station.display_name,
+                accepting_tasks: station.accepting_tasks,
                 superseded,
                 credential,
             }
@@ -365,17 +409,31 @@ async fn issue_compatible_credential(
     Ok(issue_installation_credential_if_absent_in(transaction, installation_ref).await?)
 }
 
+#[derive(Debug, Clone)]
+struct ActiveStation {
+    station_ref: Uuid,
+    display_name: String,
+    accepting_tasks: bool,
+}
+
 /// 找一台认领窗口还开着的工位。窗口是人开的，过期自动关上。
 async fn open_claim_station(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-) -> Result<Option<Uuid>, sqlx::Error> {
-    sqlx::query_scalar(
-        "SELECT station_ref FROM execution_station \
+) -> Result<Option<ActiveStation>, sqlx::Error> {
+    let row: Option<(Uuid, String, bool)> = sqlx::query_as(
+        "SELECT station_ref,display_name,accepting_tasks FROM execution_station \
          WHERE retired_at IS NULL AND claim_window_expires_at > scope_001_now() \
          ORDER BY claim_window_opens_at DESC LIMIT 1 FOR UPDATE",
     )
     .fetch_optional(&mut **transaction)
-    .await
+    .await?;
+    Ok(row.map(
+        |(station_ref, display_name, accepting_tasks)| ActiveStation {
+            station_ref,
+            display_name,
+            accepting_tasks,
+        },
+    ))
 }
 
 /// 人手动把一个待认领的安装指到某台工位。窗口关着时走这条路。
@@ -383,23 +441,24 @@ pub async fn claim_installation(
     database: &Database,
     installation_ref: Uuid,
     station_ref: Uuid,
-) -> Result<Option<Uuid>, StationError> {
+) -> Result<InstallationClaimOutcome, StationError> {
     if !station_schema_is_ready(database).await? {
         return Err(StationError::SchemaUnavailable);
     }
     let mut transaction = database.pool().begin().await?;
 
-    let retired: Option<bool> = sqlx::query_scalar(
-        "SELECT retired_at IS NOT NULL FROM execution_station WHERE station_ref = $1 FOR UPDATE",
+    let station: Option<(String, bool, bool)> = sqlx::query_as(
+        "SELECT display_name,accepting_tasks,retired_at IS NOT NULL \
+         FROM execution_station WHERE station_ref = $1 FOR UPDATE",
     )
     .bind(station_ref)
     .fetch_optional(&mut *transaction)
     .await?;
-    match retired {
+    let (display_name, accepting_tasks, _retired) = match station {
         None => return Err(StationError::UnknownStation),
-        Some(true) => return Err(StationError::StationRetired),
-        Some(false) => {}
-    }
+        Some((_, _, true)) => return Err(StationError::StationRetired),
+        Some(station) => station,
+    };
 
     let superseded =
         supersede_active_installation(&mut transaction, station_ref, installation_ref).await?;
@@ -416,8 +475,113 @@ pub async fn claim_installation(
     if affected == 0 {
         return Err(StationError::UnknownInstallation);
     }
+    let accepting_tasks = if accepting_tasks {
+        true
+    } else {
+        enable_default_acceptance_after_claim(&mut transaction, station_ref).await?
+    };
     transaction.commit().await?;
-    Ok(superseded)
+    Ok(InstallationClaimOutcome {
+        superseded,
+        station_display_name: display_name,
+        accepting_tasks,
+    })
+}
+
+/// A server-owned station name may be changed by a person so that the Runtime
+/// page and its matched plugin panel stay recognisable. The installation is
+/// deliberately not involved: it has no authority over station identity.
+pub async fn rename_station(
+    database: &Database,
+    station_ref: Uuid,
+    display_name: &str,
+) -> Result<(), StationError> {
+    if !station_schema_is_ready(database).await? {
+        return Err(StationError::SchemaUnavailable);
+    }
+    let display_name = display_name.trim();
+    if display_name.is_empty() {
+        return Err(StationError::InvalidDisplayName);
+    }
+    let affected = sqlx::query(
+        "UPDATE execution_station SET display_name=$2 \
+         WHERE station_ref=$1 AND retired_at IS NULL",
+    )
+    .bind(station_ref)
+    .bind(display_name)
+    .execute(database.pool())
+    .await?
+    .rows_affected();
+    if affected == 0 {
+        return Err(StationError::UnknownStation);
+    }
+    Ok(())
+}
+
+/// Enables the automatic default only when the last acceptance fact is the
+/// pre-claim default. `person_disabled` stays false across every later
+/// heartbeat, replacement or reinstallation.
+async fn enable_default_acceptance_after_claim(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    station_ref: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let state: Option<(bool, Option<String>)> = sqlx::query_as(
+        "SELECT station.accepting_tasks,( \
+             SELECT transition.reason_code \
+             FROM execution_station_acceptance_transition transition \
+             WHERE transition.station_ref=station.station_ref \
+             ORDER BY transition.occurred_at DESC,transition.transition_ref DESC LIMIT 1 \
+         ) AS latest_reason \
+         FROM execution_station station \
+         WHERE station.station_ref=$1 AND station.retired_at IS NULL FOR UPDATE",
+    )
+    .bind(station_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some((accepting_tasks, latest_reason)) = state else {
+        return Ok(false);
+    };
+    if accepting_tasks {
+        return Ok(true);
+    }
+    if !matches!(
+        latest_reason.as_deref(),
+        Some("registered_closed") | Some("registered_awaiting_claim") | Some("migration_closed")
+    ) {
+        return Ok(false);
+    }
+    sqlx::query("UPDATE execution_station SET accepting_tasks=true WHERE station_ref=$1")
+        .bind(station_ref)
+        .execute(&mut **transaction)
+        .await?;
+    sqlx::query(
+        "INSERT INTO execution_station_acceptance_transition \
+             (transition_ref,station_ref,from_accepting,to_accepting,actor,reason_code) \
+         VALUES ($1,$2,false,true,'system','installation_claimed_auto_enabled')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(station_ref)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(true)
+}
+
+async fn read_active_station(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    station_ref: Uuid,
+) -> Result<ActiveStation, sqlx::Error> {
+    let (station_ref, display_name, accepting_tasks): (Uuid, String, bool) = sqlx::query_as(
+        "SELECT station_ref,display_name,accepting_tasks FROM execution_station \
+         WHERE station_ref=$1 AND retired_at IS NULL",
+    )
+    .bind(station_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(ActiveStation {
+        station_ref,
+        display_name,
+        accepting_tasks,
+    })
 }
 
 /// 把该工位当前在岗的安装标记为被取代。

@@ -4,6 +4,7 @@ const LOCAL_ORIGIN = 'http://localhost:3000';
 
 export default function FlywheelSection({
   flywheelStatus,
+  executionStation,
   testing = false,
   onTest,
 }) {
@@ -15,6 +16,15 @@ export default function FlywheelSection({
     producer_not_ready: '本机可访问 / 未升级',
     disconnected: '本机不可访问',
   }[flywheelStatus] || '待检查';
+  const stationName = String(executionStation?.stationName || '').trim();
+  const stationMatched = executionStation?.registered === true && Boolean(stationName);
+  const stationState = String(executionStation?.stationState || 'unknown');
+  const stationBadge = stationMatched
+    ? (executionStation?.stationAccepting === true ? '自动接活' : '已暂停')
+    : (stationState === 'awaiting_claim' ? '待认领' : '未确认');
+  const stationHint = stationMatched
+    ? `这台插件已匹配 Intelligence 工位「${stationName}」。名称由服务端确认；插件只回显，不用本地名称建立身份。`
+    : String(executionStation?.authorizationMessage || 'Linggan 工位状态当前未读取。');
 
   return (
     <div className="flywheel-section">
@@ -42,16 +52,16 @@ export default function FlywheelSection({
 
       <div className="station-panel">
         <div className="station-title-row">
-          <span style={{ fontSize: '12px', fontWeight: 900 }}>Linggan 适配状态</span>
-          <span id="pluginAuthorizationStatus" className="flywheel-status configured">LOCAL_TRUSTED</span>
+          <span style={{ fontSize: '12px', fontWeight: 900 }}>Linggan 执行工位</span>
+          <span id="pluginAuthorizationStatus" className={`flywheel-status ${stationMatched ? 'configured' : 'unconfigured'}`}>{stationBadge}</span>
         </div>
-        <p id="pluginAuthorizationHint" className="station-hint">测试阶段仅向本机 Linggan 交付已读取的页面材料；不使用内容工作台账号、工位、租约或人工授权。</p>
+        <p id="pluginAuthorizationHint" className="station-hint">{stationHint}</p>
         <div className="station-diagnostics" aria-label="Linggan adapter status">
           <div className="station-diagnostic-grid">
-            <div className="station-diagnostic-item"><span>迁入界面</span><strong>已保留</strong></div>
+            <div className="station-diagnostic-item"><span>匹配工位名</span><strong data-linggan-station-name>{stationMatched ? stationName : '尚未匹配'}</strong></div>
+            <div className="station-diagnostic-item"><span>接活模式</span><strong>{executionStation?.stationAccepting === true ? '认领后自动接活' : executionStation?.stationAccepting === false ? '人工暂停' : '未知'}</strong></div>
             <div className="station-diagnostic-item"><span>旧工作台连接</span><strong>已切断</strong></div>
-            <div className="station-diagnostic-item"><span>执行模式</span><strong>手动采集</strong></div>
-            <div className="station-diagnostic-item"><span>交付方式</span><strong>本机回执</strong></div>
+            <div className="station-diagnostic-item"><span>名称真源</span><strong>Intelligence 工位</strong></div>
           </div>
         </div>
       </div>
