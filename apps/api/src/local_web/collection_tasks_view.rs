@@ -26,7 +26,7 @@ pub fn render_tasks(base: &str, timeline: &CollectionTaskTimeline) -> String {
         r#"<section class="c-task-empty">
               <h2>当前读取范围没有采集任务</h2>
               <p>任务投影读取成功，最近 100 条范围返回零项；这不表示历史从未存在，也不会触发任何平台访问。</p>
-              <!-- frozen-work:start --><p class="c-control-none">工单冻结资源正在读取。</p><!-- frozen-work:end -->
+              <p class="c-control-none">当前没有任务，因此没有可核对的冻结 Work 引用。</p>
             </section>"#
             .to_owned()
     } else {
@@ -60,7 +60,7 @@ pub fn render_tasks(base: &str, timeline: &CollectionTaskTimeline) -> String {
 }
 
 fn task_row(task: &CollectionTaskExecution, selected: bool) -> String {
-    let (state, state_class, state_note) = task_state(task);
+    let state = task_state(task);
     let target = task
         .target_display_name
         .as_deref()
@@ -139,7 +139,7 @@ fn task_row(task: &CollectionTaskExecution, selected: bool) -> String {
         sequence
     );
     format!(
-        r#"<button type="button" class="c-task-row{selected_class}" data-task-row data-task-id="{task_id}" data-task-title="{target}" data-task-ref="{task_ref}" data-task-meta="{meta}" data-task-state="{state}" data-task-state-note="{state_note}" data-task-attempt="{attempt}" data-task-package="{package}" data-task-receipt="{receipt}" data-task-effect="{effect_text}" data-task-failure="{previous_failure}" data-task-created="{created}" data-task-capabilities="{capabilities}" aria-pressed="{pressed}">
+        r#"<button type="button" class="c-task-row{selected_class}" data-task-row data-task-id="{task_id}" data-task-title="{target}" data-task-ref="{task_ref}" data-task-meta="{meta}" data-task-state="{state}" data-task-state-class="{state_class}" data-task-state-note="{state_note}" data-task-attempt="{attempt}" data-task-package="{package}" data-task-receipt="{receipt}" data-task-effect="{effect_text}" data-task-failure="{previous_failure}" data-task-created="{created}" data-task-capabilities="{capabilities}" aria-pressed="{pressed}">
               <span class="c-task-id">#{task_ref}</span>
               <span class="c-task-target"><b>{target}</b><small>{source}</small></span>
               <span class="c-task-stage">{capabilities}</span>
@@ -156,9 +156,9 @@ fn task_row(task: &CollectionTaskExecution, selected: bool) -> String {
         target = escape(target),
         task_ref = escape(task_ref),
         task_id = task.task_id,
-        state = state,
-        state_class = state_class,
-        state_note = escape(state_note),
+        state = state.label,
+        state_class = state.class_name,
+        state_note = escape(state.note),
         attempt = escape(&attempt),
         package = escape(&package),
         receipt = escape(&receipt),
@@ -175,7 +175,7 @@ fn task_row(task: &CollectionTaskExecution, selected: bool) -> String {
 }
 
 fn task_inspector(task: &CollectionTaskExecution) -> String {
-    let (state, _, state_note) = task_state(task);
+    let state = task_state(task);
     let target = task
         .target_display_name
         .as_deref()
@@ -241,7 +241,7 @@ fn task_inspector(task: &CollectionTaskExecution) -> String {
              <div class="c-task-inspector-head"><span data-task-inspector-ref>任务 #{task_ref}</span><h2 data-task-inspector-title>{target}</h2><p data-task-inspector-meta>{source} · {platform} · {page_type}</p></div>
              <nav class="c-task-inspector-tabs" aria-label="任务详情" role="tablist"><button type="button" class="is-active" id="task-tab-overview" data-task-tab="overview" role="tab" aria-selected="true" aria-controls="task-panel-overview" tabindex="0">概览</button><button type="button" id="task-tab-attempt" data-task-tab="attempt" role="tab" aria-selected="false" aria-controls="task-panel-attempt" tabindex="-1">Attempt</button><button type="button" id="task-tab-package" data-task-tab="package" role="tab" aria-selected="false" aria-controls="task-panel-package" tabindex="-1">Package</button><button type="button" id="task-tab-receipt" data-task-tab="receipt" role="tab" aria-selected="false" aria-controls="task-panel-receipt" tabindex="-1">Receipt</button><button type="button" id="task-tab-frozen" data-task-tab="frozen" role="tab" aria-selected="false" aria-controls="task-panel-frozen" tabindex="-1">冻结资源</button></nav>
              <div class="c-task-inspector-body">
-               <section class="c-task-panel is-active" id="task-panel-overview" data-task-panel="overview" role="tabpanel" aria-labelledby="task-tab-overview"><div class="c-state-line"><span><i></i><b data-task-inspector-state>{state}</b></span><span data-task-inspector-state-note>{state_note}</span></div><dl><div><dt>阶段</dt><dd data-task-inspector-capabilities>{capabilities}</dd></div><div><dt>创建时间</dt><dd data-task-inspector-created>{created}</dd></div><div><dt>历史</dt><dd data-task-inspector-failure>{failure}</dd></div></dl></section>
+               <section class="c-task-panel is-active" id="task-panel-overview" data-task-panel="overview" role="tabpanel" aria-labelledby="task-tab-overview"><div class="c-state-line {state_class}" data-task-inspector-state-view><span><i></i><b data-task-inspector-state>{state}</b></span><span data-task-inspector-state-note>{state_note}</span></div><dl><div><dt>阶段</dt><dd data-task-inspector-capabilities>{capabilities}</dd></div><div><dt>创建时间</dt><dd data-task-inspector-created>{created}</dd></div><div><dt>历史</dt><dd data-task-inspector-failure>{failure}</dd></div></dl></section>
                <section class="c-task-panel" id="task-panel-attempt" data-task-panel="attempt" role="tabpanel" aria-labelledby="task-tab-attempt" hidden><h3>Attempt</h3><p data-task-inspector-attempt>{attempt}</p></section>
                <section class="c-task-panel" id="task-panel-package" data-task-panel="package" role="tabpanel" aria-labelledby="task-tab-package" hidden><h3>Package</h3><p data-task-inspector-package>{package}</p></section>
                <section class="c-task-panel" id="task-panel-receipt" data-task-panel="receipt" role="tabpanel" aria-labelledby="task-tab-receipt" hidden><h3>Receipt</h3><p data-task-inspector-receipt>{receipt}</p><p data-task-inspector-effect>{effect}</p></section>
@@ -253,8 +253,9 @@ fn task_inspector(task: &CollectionTaskExecution) -> String {
         source = escape(source_label(&task.source)),
         platform = escape(&task.platform),
         page_type = escape(&task.page_type),
-        state = state,
-        state_note = escape(state_note),
+        state = state.label,
+        state_class = state.class_name,
+        state_note = escape(state.note),
         capabilities = escape(&task.capabilities),
         created = escape(&task.created_at),
         failure = escape(&failure),
@@ -278,11 +279,21 @@ fn task_readout(timeline: &CollectionTaskTimeline) -> String {
     ])
 }
 
-fn task_state(task: &CollectionTaskExecution) -> (&'static str, &'static str, &'static str) {
+struct TaskStateView {
+    label: &'static str,
+    class_name: &'static str,
+    note: &'static str,
+}
+
+fn task_state(task: &CollectionTaskExecution) -> TaskStateView {
     if task.material_admission.as_deref() == Some("ACCEPTED") {
-        return ("已接纳", "c-task-state-ok", "Package 与 Receipt 已保存");
+        return TaskStateView {
+            label: "已接纳",
+            class_name: "c-task-state-ok",
+            note: "Package 与 Receipt 已保存",
+        };
     }
-    match task.queue_state.as_deref() {
+    let (label, class_name, note) = match task.queue_state.as_deref() {
         Some("in_progress" | "pending") if task.has_live_lease == Some(false) => (
             "租约已失效",
             "c-task-state-warn",
@@ -306,6 +317,11 @@ fn task_state(task: &CollectionTaskExecution) -> (&'static str, &'static str, &'
             "已有 Attempt，尚未收到 Receipt",
         ),
         _ => ("尚未启动", "c-task-state-wait", "本机任务已保存"),
+    };
+    TaskStateView {
+        label,
+        class_name,
+        note,
     }
 }
 
@@ -401,6 +417,8 @@ mod tests {
             },
         );
         assert!(html.contains("等待派发"));
+        assert!(html.contains("data-task-state-class=\"c-task-state-wait\""));
+        assert!(html.contains("class=\"c-state-line c-task-state-wait\""));
         assert!(html.contains("尚未形成 Attempt"));
         assert!(!html.contains("Package 与 Receipt 已保存"));
     }
@@ -424,8 +442,30 @@ mod tests {
             },
         );
         assert!(html.contains("租约已失效"));
+        assert!(html.contains("data-task-state-class=\"c-task-state-warn\""));
+        assert!(html.contains("class=\"c-state-line c-task-state-warn\""));
         assert!(html.contains("租约已经到期；当前没有执行权"));
         assert!(!html.contains("任务已被独占领取"));
+    }
+
+    #[test]
+    fn an_empty_successful_timeline_closes_the_frozen_work_read() {
+        let base = format!(
+            "<!-- collection-readout:start --><div>old readout</div><!-- collection-readout:end -->{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}"
+        );
+        let html = render_tasks(
+            &base,
+            &CollectionTaskTimeline {
+                tasks: Vec::new(),
+                accepted_count: 0,
+                active_count: 0,
+                expired_lease_count: 0,
+            },
+        );
+
+        assert!(html.contains("当前没有任务，因此没有可核对的冻结 Work 引用"));
+        assert!(!html.contains("冻结资源正在读取"));
+        assert!(!html.contains("<!-- frozen-work:start -->"));
     }
 
     #[test]
@@ -466,5 +506,7 @@ mod tests {
         }
         assert!(script.contains("candidate.setAttribute(\"aria-selected\""));
         assert!(script.contains("panel.hidden = !selected"));
+        assert!(script.contains("row.dataset.taskStateClass"));
+        assert!(script.contains("stateView.classList.remove"));
     }
 }

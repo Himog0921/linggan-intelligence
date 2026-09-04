@@ -1214,6 +1214,11 @@ fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
             2,
             "each Collection page must expose exactly two scoped context readings"
         );
+        assert_eq!(
+            html.matches("</b><small>").count(),
+            2,
+            "each Collection readout must show its source or scope without relying on a tooltip"
+        );
         assert!(!html.contains("c-page-titlebar"));
         assert!(!html.contains("c-readout-strip"));
         for restated in ["c-eyebrow", "c-head", "v7-title", "v7-eyebrow"] {
@@ -1221,6 +1226,63 @@ fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
                 !html.contains(restated),
                 "the V4 titlebar must not create another title system as {restated}"
             );
+        }
+    }
+
+    let stylesheet = include_str!("collection_workspace.css");
+    for local_focus_owner in [
+        ".c-tg-item:has(.c-tg-title:focus-visible)",
+        ".c-tg-title:focus-visible",
+        ".c-attention-row:focus-visible",
+        ".c-task-row:focus-visible",
+        ".c-task-inspector-tabs button:focus-visible",
+    ] {
+        assert!(
+            !stylesheet.contains(local_focus_owner),
+            "the shared shell must remain the only focus-ring owner: {local_focus_owner}"
+        );
+    }
+
+    let v4_stylesheet = stylesheet
+        .split_once("/* COLLECTION-FIVE-PAGE-V4-UI-001")
+        .expect("the V4 page-local stylesheet block exists")
+        .1;
+    for declaration in v4_stylesheet.split(';') {
+        let declaration = declaration
+            .rsplit(['{', '}'])
+            .next()
+            .unwrap_or_default()
+            .trim();
+        let Some((property, value)) = declaration.split_once(':') else {
+            continue;
+        };
+        let property = property.trim();
+        if !(property.starts_with("margin")
+            || property.starts_with("padding")
+            || property == "gap"
+            || property == "row-gap"
+            || property == "column-gap")
+        {
+            continue;
+        }
+        assert!(
+            !value.contains("px"),
+            "V4 spacing must consume the LIDS ladder instead of a raw pixel value: {property}:{value}"
+        );
+        let mut remaining = value;
+        const CELL_MULTIPLIER: &str = "calc(var(--c-cell) * ";
+        while let Some(start) = remaining.find(CELL_MULTIPLIER) {
+            let multiplier = &remaining[start + CELL_MULTIPLIER.len()..];
+            let multiplier = multiplier
+                .split_once(')')
+                .expect("a cell multiplier closes")
+                .0
+                .trim();
+            assert!(
+                [".5", "1", "1.5", "2", "3", "4"].contains(&multiplier),
+                "V4 spacing multiplier must stay on the approved 4/8/12/16/24/32px ladder: {property}:{value}"
+            );
+            remaining = &remaining[start + CELL_MULTIPLIER.len()..];
         }
     }
 

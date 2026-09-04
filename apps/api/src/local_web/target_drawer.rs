@@ -285,8 +285,8 @@ pub(crate) fn lifecycle_primary_copy(
 ) -> (&'static str, &'static str) {
     match (target_kind, lifecycle_state) {
         ("creator", "pending_decision") => ("neutral", "尚未建档"),
-        ("creator", "archiving") => ("warn", "▲ 建档中"),
-        ("creator", "archived" | "monitoring" | "paused") => ("ok", "● 基线就绪"),
+        ("creator", "archiving") => ("warn", "建档中"),
+        ("creator", "archived" | "monitoring" | "paused") => ("ok", "基线就绪"),
         ("creator", "dismissed") => ("neutral", "已停止观察"),
         ("keyword", "pending_decision") => ("neutral", "等待决定"),
         ("keyword", "monitoring") => ("ok", "规则已生效"),
@@ -916,6 +916,12 @@ mod tests {
             let line = statusline(&target(state));
             assert!(line.contains(label), "{state} must read as {label}");
             assert!(!line.contains("状态未知"), "{state} is a legal state");
+            for forbidden in ['▲', '●'] {
+                assert!(
+                    !line.contains(forbidden),
+                    "lifecycle copy must use text and semantic styling, not {forbidden}"
+                );
+            }
         }
     }
 }

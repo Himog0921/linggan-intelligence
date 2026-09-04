@@ -10,13 +10,13 @@
 
 ### COLLECTION-FIVE-PAGE-V4-UI-001 / Issue #149（独立分支已实现，已获提交、合并与本机刷新授权）
 
-Package 1 已由 PR #151 合入 `c5158b14f5fc2313dbd3dc94670083500e767ced`；Package 2 已由 PR #153 合入当前 `origin/main@84fd9498e18164011621ffabc81a2a421a52f7a1`。当前唯一实施项是 Mog 对五个 Collection 页面提出的 V4 UI 验收反馈，工作位于独立分支 `codex/collection-five-page-v4-ui`，不改变既有数据库或控制合同。
+Package 1 已由 PR #151 合入 `c5158b14f5fc2313dbd3dc94670083500e767ced`；Package 2 已由 PR #153 合入 `84fd9498e18164011621ffabc81a2a421a52f7a1`。当前 `origin/main@e5c5ec5f9bab62f25bea9798fd9abb127df03956` 又包含独立插件修复；V4 分支必须在最终复审前并入该 head。当前唯一实施项是 Mog 对五个 Collection 页面提出的 V4 UI 验收反馈，工作位于独立分支 `codex/collection-five-page-v4-ui`，不改变既有数据库或控制合同。
 
 五页已统一为“共享 Context Bar 的两个有范围读数 → 页内控制条 → 主工作区”，页面名只保留唯一读屏 `h1`：待处理为恢复事项 ledger + 事实 Inspector；观察目标为高密度目录 + URL 所有的宽幅抽屉；生产流为阶段 ledger + 单一 dark durable-decision instrument；采集任务为 Task ledger + Attempt/Package/Receipt/冻结资源 Inspector；执行工位保留单一 capacity evaluator，并强化判定、资源关系、登记与认领层级。Package 2 原先只在空态替换 Operations/Attention 的接线缺口同时修复，现在真实 projection 会替换页面 body slot。creator 与 keyword 使用同一份 kind-aware 生命周期文案；Task 的冻结资源按当前 `task_id` 隔离；恢复数只统计存在明确恢复动作的 durable reason。
 
 参考文件 `/Users/moglenny/Downloads/linggan-collection-field-workspace-v4-ia-cn.html` 仅作为 synthetic UI 对标；全局 header/context/rail 继续由 Intelligence 共享 shell 所有，不复制第二套壳层。Collection 页面不展示语料内容、Evidence tab、代表证据、监控价值或机会评分；目标抽屉默认核心仍是服务端 creator lifecycle，并只通过精确 Work 深链进入 Corpus。支持合同继续固定为 1440 CSS px 桌面全屏，不投入 1280/390/手机或小于 13 寸屏幕适配。
 
-首版分支曾在一次性 PostgreSQL 16（33 个迁移、纯合成 2 targets / 2 decisions / 3 tasks）与隔离 `:3311` 完成五页 1440×900 浏览器走查：五页均 `scrollWidth=clientWidth=1440`，关键双栏/flow/registration 结构、待处理行、任务 tab 与生命周期抽屉可见，浏览器 console warning/error 为 0。随后 exact-head 双轴独立复审拒绝了首版的可见页标题、第二条五格读数及若干数据语义/交互缺口；当前修正版已删除冲突表达并补齐 mode、recovery、runtime、kind-aware lifecycle、Task-scoped Frozen Work 与 tab a11y 合同。修正版 workspace 全量为 API `106 passed / 18 ignored`，且独立 PostgreSQL 完整 Work Resource/Material/Corpus 68 项与 Collection Control `8 + 11` 项均通过并清理；最终 1440 浏览器和第二轮 exact-head 复审回执仍待稳定 head 后补记。该证明不代表真实数据密度。Mog 已于 2026-09-04 授权提交、推送、合并到 `main` 并刷新本机 `:3000`；执行仍须以 exact-head 检查、独立复审、合并后 main 与 live PID 来源复验为门。共享 PostgreSQL、两个 worker、插件和真实平台不在该运行授权内，Mog 业务视觉验收仍待本机页面刷新后进行。Package 3 仍未启动。
+首版分支曾在一次性 PostgreSQL 16（33 个迁移、纯合成 2 targets / 2 decisions / 3 tasks）与隔离 `:3311` 完成五页 1440×900 浏览器走查：五页均 `scrollWidth=clientWidth=1440`，关键双栏/flow/registration 结构、待处理行、任务 tab 与生命周期抽屉可见，浏览器 console warning/error 为 0。随后两轮 exact-head 双轴独立复审先后拒绝首版的壳层冲突与上一修正版的字段来源可见性、多 Task frozen projection、Inspector 状态、非终态失败/空态、局部 focus/spacing 和文档证据错配。当前工作树已继续修正这些阻断项：两个 Context KPI 直接显示 scope/source；最近 Lease 展开全部 Task；Inspector 同步状态 class；零任务/schema 不可用/读取失败均为终态；新增 V4 spacing 固定在 LIDS ladder，新增 focus 只归共享 owner，生命周期不再使用字符图标。上一修正版 workspace 全量为 API `106 passed / 18 ignored`，独立 PostgreSQL 完整 Work Resource/Material/Corpus 68 项与 Collection Control `8 + 11` 项均通过并清理；这些不能替代本轮修正及 main 集成后的 exact-head 回归。最终 workspace、PostgreSQL、1440 浏览器与第三轮 exact-head 双轴复审仍待执行。Mog 已于 2026-09-04 授权提交、推送、合并到 `main` 并刷新本机 `:3000`；执行仍须以 exact-head 检查、独立复审、合并后 main 与 live PID 来源复验为门。共享 PostgreSQL、两个 worker、插件和真实平台不在该运行授权内，Mog 业务视觉验收仍待本机页面刷新后进行。Package 3 仍未启动。
 
 ### TOPIC-WORKSPACE-REAL-001 / Issue #112（已部署；待 Mog 业务验收）
 

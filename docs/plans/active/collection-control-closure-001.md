@@ -108,7 +108,7 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 
 ## 10. COLLECTION-FIVE-PAGE-V4-UI-001 · UI 验收反馈扩展
 
-> 状态: 独立分支实现与隔离验收完成；已获 commit/push/merge 与本机 `:3000` 刷新授权
+> 状态: 独立分支第二轮复审修正中；已获 commit/push/merge 与本机 `:3000` 刷新授权
 > 最后核对: 2026-09-04
 > 用户输入: `/Users/moglenny/Downloads/linggan-collection-field-workspace-v4-ia-cn.html#targets`
 
@@ -129,7 +129,7 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 - 视觉 thesis: LIDS 白场研究仪器面，以硬边界、高密度表格、克制 signal 和右侧事实检查区形成采集运营工作站。
 - 内容 thesis: Context Bar 中的可验证读数 → 筛选/模式 → 主列表或生产流 → 选中对象的解释/恢复区。
 - 交互 thesis: URL 持有路由、筛选、抽屉与规则 modal；键盘/点击等价，动作只使用 80–160ms transform/opacity 反馈。
-- CSS 策略: 只维护现有 `collection_workspace.css`、`target_drawer.css` 与 `collection_workspace.js`，消费现有 `--lgi-*` / 兼容 `--v7-*` token；不引入 Tailwind、CSS-in-JS、字体、图标库或第二套 token。
+- CSS 策略: 页面几何只维护现有 `collection_workspace.css`、`target_drawer.css` 与 `collection_workspace.js`；共享 `shell.css` 仅由 Context KPI owner 增加可见 scope/source 子行。全部消费现有 `--lgi-*` / 兼容 `--v7-*` token，不引入 Tailwind、CSS-in-JS、字体、图标库或第二套 token。
 
 ### 10.3 Reality Matrix
 
@@ -162,10 +162,12 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 
 ### 10.5 实施与验证回执
 
-- 五个 Collection route 均保留唯一读屏 h1，并在共享 Context Bar 中只显示两个有范围 KPI；可见大标题与第二五格读数已按 LIDS 复审结论删除，共享 shell、全局 token 与 Corpus 页面未被重写。
+- 五个 Collection route 均保留唯一读屏 h1，并在共享 Context Bar 中只显示两个带可见 scope/source 的 KPI；可见大标题与第二五格读数已按 LIDS 复审结论删除。共享 `shell.css` 只由既有 KPI owner 承担子行样式，全局 token、header/rail 与 Corpus 页面未被重写。
 - Attention 以 durable reason/owner/action 组成 ledger + Inspector；Tasks 以 Task/Attempt/Package/Receipt 与 frozen Work refs 组成 ledger + tabs；Operations 真实替换 body slot，并以 scheduler decision / Work / Lease 投影组成 flow + dark instrument。
 - Targets 保留 URL-owned drawer、monitor-rule modal、focus return 与 creator lifecycle；合法 `archived | monitoring | paused | dismissed` 状态不再错误显示为 UNKNOWN。
 - Runtime 继续使用同一 capacity evaluator，并以真实 station/install/account/claim-window 读数替换 provisional readout。
-- 自动检查覆盖五页隐藏 h1 + 2 个 Context KPI、control body slot、Operations 模式隔离/恢复计数、ledger/Inspector、Task-scoped Frozen Work、tab ARIA/键盘、kind-aware lifecycle 与 Evidence/监控价值模块负向；页面 JS 通过语法检查。
-- 一次性 PostgreSQL 16 应用当前全部 33 个 migration，并只写入脱敏 synthetic fixture。隔离 `:3311`、1440×900 浏览器逐页证明无横向溢出，Attention 行选择、Tasks tab、Targets lifecycle drawer 成立，console warning/error 为空。
-- 未证明：真实数据密度、共享数据库、Browser Producer/真实平台与 Mog 业务验收。本扩展不修改 migration/schema，也不处理窄屏；commit/push/merge 与本机 `:3000` 刷新的实际证据将在授权动作完成后补记。
+- 第二轮复审修正继续固定：Context scope/source 必须可见；新增 V4 spacing 只走 4/8/12/16/24/32px LIDS ladder；global LIDS focus 是新增控件的唯一 owner；生命周期辅助文案不使用字符图标。
+- Task Inspector 的状态文案与语义 class 随选择同时更新；零任务、控制 schema 不可用与读取失败均进入明确终态，不保留“正在读取”。Frozen Work 先选最近 Work / Lease，再展开该 Lease 的全部 Task，因此同一 Work 的两个 Task 各有精确 frozen tab；Operations 的 Work/Lease 阶段仍由 decision 计数，不被 Task 展开重复。
+- 自动检查覆盖五页隐藏 h1 + 2 个带可见 scope/source 的 Context KPI、control body slot、Operations 模式隔离/恢复计数、ledger/Inspector、Task-scoped Frozen Work、tab ARIA/键盘、kind-aware lifecycle、spacing/focus owner 与 Evidence/监控价值模块负向；页面 JS 通过语法检查。
+- 首版一次性 PostgreSQL 16 / 隔离 `:3311` / 1440×900 浏览器证明只属于后来被 exact-head 复审拒绝的首版，不是当前修正版证明。当前第二轮修正仍须在并入最新 `origin/main` 后重跑完整 workspace、一次性 PostgreSQL、最终 1440 浏览器与双轴 exact-head 复审。
+- 未证明：当前修正版的最终 1440 结果、真实数据密度、共享数据库、Browser Producer/真实平台与 Mog 业务验收。本扩展不修改 migration/schema，也不处理窄屏；commit/push/merge 与本机 `:3000` 刷新的实际证据将在授权动作完成后补记。

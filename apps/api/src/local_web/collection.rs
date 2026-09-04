@@ -199,7 +199,7 @@ pub(super) fn context_readout(entries: &[(&str, &str, &str)]) -> String {
         // elements into an attribute value, so assistive text carries the Chinese meaning now.
         let aria_value = if *value == "UNKNOWN" { "未知" } else { value };
         cells.push_str(&format!(
-            "<span class=\"v7-kpi\" title=\"{scope}\" aria-label=\"{label} {aria_value}；{scope}\"><em>{label}</em><b aria-hidden=\"true\">{value}</b></span>",
+            "<span class=\"v7-kpi\" title=\"{scope}\" aria-label=\"{label} {aria_value}；{scope}\"><em>{label}</em><b aria-hidden=\"true\">{value}</b><small>{scope}</small></span>",
             value = escape(value),
             label = escape(label),
             scope = escape(scope),

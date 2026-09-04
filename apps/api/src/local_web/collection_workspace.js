@@ -171,6 +171,12 @@
       setTaskText("[data-task-inspector-meta]", row.dataset.taskMeta);
       setTaskText("[data-task-inspector-state]", row.dataset.taskState);
       setTaskText("[data-task-inspector-state-note]", row.dataset.taskStateNote);
+      var stateView = taskInspector.querySelector("[data-task-inspector-state-view]");
+      var stateClasses = ["c-task-state-ok", "c-task-state-live", "c-task-state-warn", "c-task-state-wait"];
+      if (stateView) {
+        stateClasses.forEach(function (className) { stateView.classList.remove(className); });
+        stateView.classList.add(stateClasses.indexOf(row.dataset.taskStateClass) >= 0 ? row.dataset.taskStateClass : "c-task-state-wait");
+      }
       setTaskText("[data-task-inspector-capabilities]", row.dataset.taskCapabilities);
       setTaskText("[data-task-inspector-created]", row.dataset.taskCreated);
       setTaskText("[data-task-inspector-failure]", row.dataset.taskFailure);

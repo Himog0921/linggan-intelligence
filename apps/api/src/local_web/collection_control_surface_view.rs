@@ -28,6 +28,12 @@ pub enum CollectionControlSurfaceRead {
     SchemaUnavailable,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskControlUnavailable {
+    SchemaUnavailable,
+    ReadFailed,
+}
+
 #[derive(Debug, Clone)]
 pub struct CollectionControlSurfaceProjection {
     pub latest_run: Option<SchedulerRunView>,
@@ -212,7 +218,10 @@ async fn read_frozen_works(
     limit: i64,
 ) -> Result<Vec<FrozenWorkView>, sqlx::Error> {
     sqlx::query(
-        "SELECT work.work_order_ref,work.target_ref, \
+        "WITH recent_work AS ( \
+             SELECT candidate.* FROM collection_work_order candidate \
+             ORDER BY candidate.created_at DESC,candidate.work_order_ref LIMIT $1) \
+         SELECT work.work_order_ref,work.target_ref, \
                 COALESCE(NULLIF(btrim(target.display_name),''),target.identity_key) AS target_name, \
                 work.lane,work.station_ref,work.installation_ref,work.account_ref,work.eligibility_ref, \
                 work.monitor_rule_revision_ref,lease.lease_ref, \
@@ -236,7 +245,7 @@ async fn read_frozen_works(
                 CASE WHEN work.monitor_rule_revision_ref IS NULL THEN NULL \
                      ELSE target.active_monitor_rule_revision_ref=work.monitor_rule_revision_ref \
                      END AS rule_is_current,work.created_at::text AS created_at \
-         FROM collection_work_order work \
+         FROM recent_work work \
          JOIN collection_observation_target target USING(target_ref) \
          LEFT JOIN execution_station station ON station.station_ref=work.station_ref \
          LEFT JOIN LATERAL ( \
@@ -244,12 +253,8 @@ async fn read_frozen_works(
              FROM collection_work_order_lease candidate \
              WHERE candidate.work_order_ref=work.work_order_ref \
              ORDER BY candidate.issued_at DESC LIMIT 1) lease ON true \
-         LEFT JOIN LATERAL ( \
-             SELECT candidate.task_id,candidate.execution_state,candidate.sequence_no \
-             FROM collection_work_order_lease_task candidate \
-             WHERE candidate.lease_ref=lease.lease_ref \
-             ORDER BY candidate.sequence_no DESC LIMIT 1) task ON true \
-         ORDER BY work.created_at DESC,work.work_order_ref LIMIT $1",
+         LEFT JOIN collection_work_order_lease_task task ON task.lease_ref=lease.lease_ref \
+         ORDER BY work.created_at DESC,work.work_order_ref,task.sequence_no",
     )
     .bind(limit)
     .fetch_all(database.pool())
@@ -475,6 +480,25 @@ pub fn render_tasks_control(base: &str, projection: &CollectionControlSurfacePro
         },
     );
     prepend_body(&rendered, &templates)
+}
+
+pub fn render_tasks_control_unavailable(base: &str, state: TaskControlUnavailable) -> String {
+    let detail = match state {
+        TaskControlUnavailable::SchemaUnavailable => {
+            "冻结 Work 所需的控制 schema 尚未就绪；当前任务、Attempt、Package 与 Receipt 仍可读，但不能核对准入时冻结的资源引用。请先完成受控 schema 就绪检查。"
+        }
+        TaskControlUnavailable::ReadFailed => {
+            "冻结 Work 控制投影本次读取失败；当前任务、Attempt、Package 与 Receipt 仍可读，但不能核对准入时冻结的资源引用。请恢复本机数据库读取后重试。"
+        }
+    };
+    replace_bounded_slot(
+        base,
+        "<!-- frozen-work:start -->",
+        "<!-- frozen-work:end -->",
+        &format!(
+            r#"<section class="c-control-empty" data-task-control-unavailable><h2>冻结 Work 投影当前不可用</h2><p>{detail}</p></section>"#
+        ),
+    )
 }
 
 pub fn render_runtime_control(
@@ -1451,6 +1475,162 @@ mod tests {
         let script = include_str!("collection_workspace.js");
         assert!(script.contains("candidate.dataset.taskFrozenTemplate === row.dataset.taskId"));
         assert!(script.contains("该任务没有关联的冻结 Work 投影"));
+    }
+
+    #[test]
+    fn one_work_order_keeps_a_frozen_projection_for_each_lease_task() {
+        let mut first = projection().works.remove(0);
+        let shared_work = Uuid::new_v4();
+        let first_task = Uuid::new_v4();
+        first.work_order_ref = shared_work;
+        first.task_id = Some(first_task);
+        first.task_state = Some("completed".to_owned());
+        let mut second = first.clone();
+        let second_task = Uuid::new_v4();
+        second.task_id = Some(second_task);
+        second.task_state = Some("pending".to_owned());
+
+        let templates = frozen_work_templates(&[first, second]);
+        assert!(templates.contains(&format!("data-task-frozen-template=\"{first_task}\"")));
+        assert!(templates.contains(&format!("data-task-frozen-template=\"{second_task}\"")));
+        assert_eq!(templates.matches(&shared_work.to_string()).count(), 2);
+        assert!(templates.contains("completed"));
+        assert!(templates.contains("pending"));
+    }
+
+    #[test]
+    fn multi_task_work_does_not_duplicate_work_or_lease_stage_counts() {
+        let mut projection = projection();
+        let shared_work = Uuid::new_v4();
+        let shared_lease = Uuid::new_v4();
+        let mut first = projection.works.remove(0);
+        first.work_order_ref = shared_work;
+        first.lease_ref = Some(shared_lease);
+        first.task_id = Some(Uuid::new_v4());
+        let mut second = first.clone();
+        second.task_id = Some(Uuid::new_v4());
+        projection.works = vec![first, second];
+        projection.decisions[0].work_order_ref = Some(shared_work);
+        projection.decisions[0].lease_ref = Some(shared_lease);
+
+        let flow = flow_stage_markup(&projection);
+        let work_stage = flow.split("建立工单").nth(1).expect("work stage exists");
+        let lease_stage = flow.split("签发租约").nth(1).expect("lease stage exists");
+        let task_stage = flow.split("任务执行").nth(1).expect("task stage exists");
+        assert!(work_stage.contains("<b>1</b>"));
+        assert!(lease_stage.contains("<b>1</b>"));
+        assert!(task_stage.contains("<b>2</b>"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires ./scripts/test-local-001-discovery-postgres.sh and an isolated PostgreSQL proof database"]
+    async fn postgres_frozen_projection_expands_one_latest_lease_to_both_tasks() {
+        use linggan_storage_postgres::testing::isolated_proof_schema;
+
+        let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL")
+            .expect("the isolated proof script provides a database URL");
+        let database = isolated_proof_schema(
+            &url,
+            "collection_v4_multi_task_frozen",
+            crate::local_web::full_schema_fixture::FULL_MIGRATIONS,
+        )
+        .await
+        .expect("the full isolated schema applies");
+        sqlx::raw_sql(
+            "INSERT INTO collection_observation_target \
+                 (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) \
+             VALUES ('a1000000-0000-4000-8000-000000000001','xhs','creator','v4-multi-task','双任务冻结证明','manual','archiving'); \
+             INSERT INTO execution_station (station_ref,display_name) \
+             VALUES ('a5000000-0000-4000-8000-000000000001','双任务冻结工位'); \
+             INSERT INTO collection_acquisition_authorization \
+                 (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,purpose,granted_by,expires_at) \
+             VALUES ('a2000000-0000-4000-8000-000000000001','xhs','creator','deep_archive',1,20,'双任务冻结读取证明','person',scope_001_now()+interval '1 day'); \
+             INSERT INTO collection_acquisition_request \
+                 (request_ref,target_ref,lane,purpose,requested_by) \
+             VALUES ('a3000000-0000-4000-8000-000000000001','a1000000-0000-4000-8000-000000000001','deep_archive','双任务冻结读取证明','person'); \
+             INSERT INTO collection_admission_decision \
+                 (decision_ref,request_ref,outcome,reason_code,authorization_ref,target_ref,station_ref) \
+             VALUES ('a4000000-0000-4000-8000-000000000001','a3000000-0000-4000-8000-000000000001','admitted','proof_admitted','a2000000-0000-4000-8000-000000000001','a1000000-0000-4000-8000-000000000001','a5000000-0000-4000-8000-000000000001'); \
+             INSERT INTO collection_work_order \
+                 (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions,station_ref) \
+             VALUES ('a8000000-0000-4000-8000-000000000001','a4000000-0000-4000-8000-000000000001','a1000000-0000-4000-8000-000000000001','deep_archive',20,'{}','a5000000-0000-4000-8000-000000000001'); \
+             INSERT INTO linggan_runtime_task \
+                 (task_id,task_spec_hash,task_spec,source,platform,page_type) VALUES \
+                 ('a6000000-0000-4000-8000-000000000001',repeat('1',64),'{}','scheduled','xhs','author_profile'), \
+                 ('a7000000-0000-4000-8000-000000000001',repeat('2',64),'{}','scheduled','xhs','profile_discovery'); \
+             INSERT INTO collection_work_order_lease \
+                 (lease_ref,work_order_ref,station_ref,capture_identity,expires_at) \
+             VALUES ('a9000000-0000-4000-8000-000000000001','a8000000-0000-4000-8000-000000000001','a5000000-0000-4000-8000-000000000001','{}',scope_001_now()+interval '1 hour'); \
+             INSERT INTO collection_work_order_lease_task \
+                 (lease_ref,task_id,sequence_no,execution_state) VALUES \
+                 ('a9000000-0000-4000-8000-000000000001','a6000000-0000-4000-8000-000000000001',1,'pending'), \
+                 ('a9000000-0000-4000-8000-000000000001','a7000000-0000-4000-8000-000000000001',2,'pending');",
+        )
+        .execute(database.pool())
+        .await
+        .expect("the synthetic multi-task Work is stored");
+
+        let projection = read_collection_control_surface(&database, 100)
+            .await
+            .expect("the control projection reads");
+        let CollectionControlSurfaceRead::Ready(projection) = projection else {
+            panic!("the complete isolated schema must be ready");
+        };
+        let work_ref = Uuid::parse_str("a8000000-0000-4000-8000-000000000001").unwrap();
+        let first_task = Uuid::parse_str("a6000000-0000-4000-8000-000000000001").unwrap();
+        let second_task = Uuid::parse_str("a7000000-0000-4000-8000-000000000001").unwrap();
+        let works = projection
+            .works
+            .iter()
+            .filter(|work| work.work_order_ref == work_ref)
+            .collect::<Vec<_>>();
+        assert_eq!(works.len(), 2);
+        assert_eq!(works[0].task_id, Some(first_task));
+        assert_eq!(works[1].task_id, Some(second_task));
+
+        let templates = frozen_work_templates(&projection.works);
+        assert!(templates.contains(&format!("data-task-frozen-template=\"{first_task}\"")));
+        assert!(templates.contains(&format!("data-task-frozen-template=\"{second_task}\"")));
+        assert_eq!(templates.matches(&work_ref.to_string()).count(), 2);
+    }
+
+    #[test]
+    fn a_ready_control_projection_does_not_reopen_empty_task_loading() {
+        let base = format!(
+            "{READOUT_SLOT_START}{READOUT_SLOT_END}{EMPTY_STATE_OPEN}old{EMPTY_STATE_CLOSE}"
+        );
+        let tasks = crate::local_web::collection_tasks_view::render_tasks(
+            &base,
+            &linggan_evidence::CollectionTaskTimeline {
+                tasks: Vec::new(),
+                accepted_count: 0,
+                active_count: 0,
+                expired_lease_count: 0,
+            },
+        );
+        let rendered = render_tasks_control(&tasks, &projection());
+
+        assert!(rendered.contains("当前没有任务，因此没有可核对的冻结 Work 引用"));
+        assert!(!rendered.contains("冻结资源正在读取"));
+    }
+
+    #[test]
+    fn unavailable_task_control_reads_are_terminal_not_loading() {
+        let task_id = Uuid::new_v4();
+        let base = format!(
+            r#"<div data-task-id="{task_id}"><!-- frozen-work:start --><p>该任务的冻结 Work 投影正在读取。</p><!-- frozen-work:end --></div>"#
+        );
+
+        for (state, expected) in [
+            (TaskControlUnavailable::SchemaUnavailable, "控制 schema 尚未就绪"),
+            (TaskControlUnavailable::ReadFailed, "本次读取失败"),
+        ] {
+            let rendered = render_tasks_control_unavailable(&base, state);
+            assert!(rendered.contains("冻结 Work 投影当前不可用"));
+            assert!(rendered.contains(expected));
+            assert!(rendered.contains("当前任务、Attempt、Package 与 Receipt 仍可读"));
+            assert!(!rendered.contains("正在读取"));
+        }
     }
 
     #[test]
