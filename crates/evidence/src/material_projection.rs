@@ -449,6 +449,7 @@ pub(crate) async fn enrich_media_material(
             }
         }
     }
+    apply_observation_target_avatar(tx, item).await?;
     item.summary.restriction_state = media.restriction_state;
     if let Some(first) = media.limitations.first() {
         item.summary.primary_limitation = first;
@@ -464,6 +465,97 @@ pub(crate) async fn enrich_media_material(
             serde_json::to_value(media.limitations).expect("limitations serialize"),
         );
     }
+    Ok(())
+}
+
+/// Show the observation target's avatar when the work's own author avatar has not been observed.
+///
+/// A work discovered on a creator target's surface normally carries no author avatar until its
+/// detail is captured, so the row would render an empty avatar next to a name that the page has
+/// already fallen back to the target for. That is an inconsistency in the page, not in the data:
+/// the name falls back and the picture does not.
+///
+/// The fallback is a *presentation* handle only. `state` keeps saying `NOT_OBSERVED`, because
+/// this work's author avatar genuinely has not been observed, and `authorIdentityMatchState`
+/// still governs whether the author is confirmed. Callers that need the confirmed-author picture
+/// must read `fallbackUsed`; this mirrors how `cover` already falls back to a body image.
+async fn apply_observation_target_avatar(
+    tx: &mut Transaction<'_, Postgres>,
+    item: &mut MaterialLibraryItem,
+) -> Result<(), sqlx::Error> {
+    if item.collection_context.target_kind.as_deref() != Some("creator") {
+        return Ok(());
+    }
+    let Some(target_ref) = item.collection_context.target_ref else {
+        return Ok(());
+    };
+    // Only fill a genuinely empty avatar. An observed author avatar — even one whose bytes are
+    // still pending — is the work's own fact and must never be replaced by the target's picture.
+    if item
+        .media
+        .pointer("/avatar/localAssetUrl")
+        .is_some_and(|url| !url.is_null())
+    {
+        return Ok(());
+    }
+    let schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('collection_observation_target') IS NOT NULL \
+         AND to_regclass('linggan_media_resource_relation') IS NOT NULL",
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    if !schema_ready {
+        return Ok(());
+    }
+    // Same canonical author-avatar relationship and local asset lifecycle the Collection target
+    // list reads, including its withdrawal/restriction exclusion. Only a verified local
+    // materialization of an image blob may be rendered.
+    let row = sqlx::query(
+        "SELECT materialization.local_asset_path,blob.mime_type,blob.byte_size \
+         FROM collection_observation_target target \
+         JOIN linggan_media_resource_relation relation \
+              ON relation.platform=target.platform AND relation.subject_kind='author' \
+             AND relation.subject_external_id=target.identity_key \
+             AND relation.relationship_kind='author.avatar' \
+         JOIN linggan_media_observation observation ON observation.slot_key=relation.slot_key \
+         JOIN linggan_media_download_attempt attempt \
+              ON attempt.media_observation_ref=observation.observation_ref \
+         JOIN linggan_media_materialization materialization USING(download_attempt_ref) \
+         JOIN linggan_media_blob blob ON blob.sha256=materialization.blob_sha256 \
+         WHERE target.target_ref=$1 AND blob.mime_type LIKE 'image/%' \
+           AND NOT EXISTS (SELECT 1 FROM linggan_current_material_media_disposition disposition \
+                           WHERE disposition.slot_key=relation.slot_key \
+                              OR disposition.blob_sha256=materialization.blob_sha256 \
+                              OR disposition.materialization_ref=materialization.materialization_ref) \
+         ORDER BY materialization.verified_at DESC LIMIT 1",
+    )
+    .bind(target_ref)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let Some(row) = row else {
+        return Ok(());
+    };
+    let local_asset_path: String = row.get("local_asset_path");
+    let mime_type: String = row.get("mime_type");
+    let byte_size: i64 = row.get("byte_size");
+    let Some(avatar) = item.media.get_mut("avatar").and_then(Value::as_object_mut) else {
+        return Ok(());
+    };
+    avatar.insert("localAssetUrl".to_owned(), Value::String(local_asset_path));
+    avatar.insert("fallbackUsed".to_owned(), Value::Bool(true));
+    avatar.insert(
+        "fallbackSource".to_owned(),
+        Value::String("observation_target".to_owned()),
+    );
+    avatar.insert(
+        "blob".to_owned(),
+        serde_json::json!({
+            "deliveryState":"INLINE_SAFE",
+            "declaredMimeType":mime_type,
+            "deliveryMimeType":mime_type,
+            "byteSize":byte_size
+        }),
+    );
     Ok(())
 }
 
