@@ -169,5 +169,6 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 - 第二轮复审修正继续固定：Context scope/source 必须可见；新增 V4 spacing 只走 4/8/12/16/24/32px LIDS ladder；global LIDS focus 是新增控件的唯一 owner；生命周期辅助文案不使用字符图标。
 - Task Inspector 的状态文案与语义 class 随选择同时更新；零任务、控制 schema 不可用与读取失败均进入明确终态，不保留“正在读取”。Frozen Work 先选最近 Work / Lease，再展开该 Lease 的全部 Task，因此同一 Work 的两个 Task 各有精确 frozen tab；Operations 的 Work/Lease 阶段仍由 decision 计数，不被 Task 展开重复。
 - 自动检查覆盖五页隐藏 h1 + 2 个带可见 scope/source 的 Context KPI、control body slot、Operations 模式隔离/恢复计数、ledger/Inspector、Task-scoped Frozen Work、tab ARIA/键盘、kind-aware lifecycle、spacing/focus owner 与 Evidence/监控价值模块负向；页面 JS 通过语法检查。
-- 首版一次性 PostgreSQL 16 / 隔离 `:3311` / 1440×900 浏览器证明只属于后来被 exact-head 复审拒绝的首版，不是当前修正版证明。当前第二轮修正仍须在并入最新 `origin/main` 后重跑完整 workspace、一次性 PostgreSQL、最终 1440 浏览器与双轴 exact-head 复审。
-- 未证明：当前修正版的最终 1440 结果、真实数据密度、共享数据库、Browser Producer/真实平台与 Mog 业务验收。本扩展不修改 migration/schema，也不处理窄屏；commit/push/merge 与本机 `:3000` 刷新的实际证据将在授权动作完成后补记。
+- 首版一次性 PostgreSQL 16 / 隔离 `:3311` / 1440×900 浏览器证明只属于后来被 exact-head 复审拒绝的首版，不是当前修正版证明。当前修正版已并入 `origin/main@e5c5ec5`，workspace 全量、完整 Work/Material/Corpus/Topic/API PostgreSQL 69 项、dispatch 8 项、Collection Control `8 + 11` 项通过；每套临时数据库、container、volume 均已清理。
+- 当前修正版无数据库隔离 API `:3311` + Chrome 152 强制 1440×900，五页均 `clientWidth=scrollWidth=1440`，每页 2 个带直接 scope/source 的 KPI、1 个 1×1 absolute 读屏 h1、0 个第二 readout strip、0 条 loading 残留，应用页面 console warning/error/exception 为 0。它只证明当前 head 的桌面几何与终态；有数据交互由 exact PostgreSQL/source tests 证明，不沿用已拒绝首版的浏览器结果。
+- 未证明：真实数据密度、共享数据库、Browser Producer/真实平台与 Mog 业务验收。本扩展不修改 migration/schema，也不处理窄屏；第三轮双轴 exact-head 复审、commit/push/merge 与本机 `:3000` 刷新的实际证据仍须按动作补记。
