@@ -12,7 +12,7 @@
 | 插件实际产出 | 服务接纳条件与去向 | Material Projection | Evidence 列表 / 详情表达 | 代表性 fixture |
 |---|---|---|---|---|
 | `discovery_search` / `discovery_card` | Task、Package、Record 的平台/能力/目标/sourceObject 一致；不合格 record 单条隔离 | 稳定作品身份 + `discovery` lane + append-only discovery finding | 默认列表可检索标题/作者与发现时间；50 条 keyset；不混入 legacy cards | `material_projection_postgres.rs`、`material_cursor_tests.rs` |
-| `profile_discovery` / `profile_discovery_card` | 目标作者与 record 来源身份一致；只接纳当前可证明的作品卡 | 与搜索发现共用作品身份；`Task/Lease/WorkOrder/Target` 或稳定 author target 精确匹配形成 collection context | 显示“来自监控目标”但不把目标名写成作品作者；身份一致必须等待详情 author ID | `collection_dispatch_sequence_postgres.rs` |
+| `profile_discovery` / `profile_discovery_card` | 目标作者与 record 来源身份一致；只接纳当前可证明的作品卡 | 与搜索发现共用作品身份；`Task/Lease/WorkOrder/Target` 或稳定 author target 精确匹配形成 collection context | creator 目标在详情作者名缺失且非 `MISMATCH` 时即作为作者显示名（2026-09-04 DEC-作者合并）；采集来源只在 Inspector 表达 | `collection_dispatch_sequence_postgres.rs` |
 | `content_detail` / `content_detail` | 作品 sourceObject 必须稳定且与 Task target 一致；时间断言必须携带实际字段、kind、precision 与 parser version | 逐字段状态化标题、正文、作者；平台 epoch 可形成精确 `published_at`，可见时间文本单独保留 | 列表只给摘要字段；`/{publicRef}` 返回详情与字段来源；`SOURCE_TEXT_ONLY` 不进入严格时间窗 | `material_projection_postgres.rs`、`material_projection_tests.rs` |
 | `comments` / `comment` | 评论稳定身份；正文和作者字段内部保留；同包重复与冲突单条隔离 | `comments` lane、稳定评论材料、Coverage | 普通列表只显示计数/状态/受限访问；`/{publicRef}/comments` 是本机授权研究通道，最多 20 条一页，返回原文、匿名作者上下文和 cursor，不返回平台用户标识 | `material_social_postgres.rs`、`material_projection_tests.rs` |
 | `replies` / `reply` | reply root/parent 来源字段、自引用和冲突关系通过运行时与 DB 双层约束 | 与评论共表但保留 `is_reply`、root/parent 关系和独立 replies Coverage | 普通列表只给 replies 状态/计数；研究通道以 `ROOT/REPLY` 关系表达，不暴露外部身份 | `material_social_postgres.rs` |

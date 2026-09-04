@@ -2960,7 +2960,7 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
             <form id="ev-query-form" class="ev-query-form">
               <div class="ev-find">
                 <span class="ev-find-mark" aria-hidden="true">FIND</span>
-                <input id="ev-search" name="q" type="search" autocomplete="off" aria-label="检索作品与证据" placeholder="标题、作者、监控目标或原声片段……">
+                <input id="ev-search" name="q" type="search" autocomplete="off" aria-label="检索作品与证据" placeholder="标题、作者或原声片段……">
               </div>
               <div class="ev-query-tools">
                 <div class="ev-popover-anchor">

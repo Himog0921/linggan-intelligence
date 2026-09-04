@@ -54,7 +54,7 @@
 |---|---|---|
 | 产品与设计 | 本规格和静态原型已冻结多材料职责 | 继续约束运行页，但原型内容不得冒充运行数据 |
 | 当前交付分支 | `/corpus/evidence` 只消费共享 `/api/local/work-resources`，列表与 Inspector 共用 Work Resource Read Interface | Evidence Library 不是接口 owner；后续页面不得另写 SQL/API/字段推断；不混读 legacy cards |
-| 作者与监控目标 | profile discovery 可证明作品来自目标表面；详情作者 ID 才能证明作者身份一致 | 分开显示“作品作者”和“监控目标”，以 `MATCHED/NOT_VERIFIED/MISMATCH` 表达关系，不用目标名填补作者 |
+| 作者与采集来源 | 2026-09-04 产品决策：创作者监控的入口即该创作者主页，从该入口取回的作品视为其所发 | 只显示一个“作者”字段：详情 `creatorDisplayName` 优先，其次 creator 目标显示名（`MISMATCH` 时不回退），皆无则“当前未知”；关键词目标永不填补作者；采集来源移入 Inspector「来源与溯源」 |
 | 发布时间 | detail collector 交付原始字段、值类型、精度、参照时点和 parser version；只有平台 epoch 晋升为精确时间 | `KNOWN / SOURCE_TEXT_ONLY / UNKNOWN` 分开；禁止用 observed/accepted 时间代替发布 |
 | 评论/回复 | 类型化 lane、Coverage 与本机授权评论研究通道已接入详情；普通列表不返回原文 | 原文只在授权详情按页读取，匿名上下文不暴露平台用户标识 |
 | 作者资料 | 详情可返回版本化作者上下文；稳定作者 ID 与头像同时存在时，头像进入统一媒体链 | 页面不显示 `authorExternalId`，未知字段不补值；只内联受控本地头像，不回退远程地址 |
@@ -117,7 +117,7 @@ Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
 每个作品集合按下列顺序呈现：
 
 1. 本地媒体预览，或准确的未取得/已清理/受限状态；
-2. 平台、稳定作品引用、标题；作品作者与监控目标使用两个独立事实区，作者区可显示受控本地头像，随后表达二者身份关系、来源发布时间及精度；
+2. 平台、稳定作品引用、标题；作者使用单一事实区并可显示受控本地头像，随后是来源发布时间及精度；采集来源只在 Inspector「来源与溯源」区表达；
 3. 脱敏摘要或“尚无可展示摘要”；
 4. 发现、详情、讨论、媒体、派生五组 lane；其中评论/回复和 OCR/ASR 仍可分别展开；
 5. 最近观察时点、主要 Coverage/停止原因、限制；
@@ -131,7 +131,7 @@ Issue #85 沿用已确认项目方向，不重新向用户提出视觉选择。
 
 ```text
 当前作品 / 稳定 public ref
-├─ 概览：标题、正文、作品作者（含受控本地头像）、独立监控目标、二者关系、来源时间、逐字段当前事实/来源、互动当前值/前值/变化
+├─ 概览：标题、正文、作者（含受控本地头像）、来源与溯源（单行来源监控）、来源时间、逐字段当前事实/来源、互动当前值/前值/变化
 ├─ 概览内受限动作：仅 XHS + target-linked active deep-archive authorization 才可“立即复观测”；显示租约与逐 lane 真实状态
 ├─ 评论与回复：脱敏片段、父子关系、各 lane Coverage/停止原因及每个 Package/Receipt 独立的 Coverage 历史
 ├─ 媒体：槽位顺序、用途、来源代次、组件、字节/副本/清理状态
@@ -154,7 +154,7 @@ Inspector 默认停在“概览”，但页面不得只在隐藏 Tab 中提供�
 | 访问/处置 | restricted/withdrawn/bytes cleaned 等 | 当前 display policy | 让筛选绕过权限 |
 | 排序 | 默认最近观察降序；后续可明确切换来源发布时间 | sort key、asOf | 把“最近观察”写成“最新发布” |
 
-排版使用独立 URL 参数 `layout=research|table|cover`；状态筛选继续使用 `view`。`view` 是查询预设，必须与其他筛选一起放在主结果上方的 `SYSTEM VIEWS / 系统视图` 横向工作台，不作为左侧导航或独立状态面板；结果数、读取回执和当前选择分别由工作台底栏、inline receipt、选中行/Inspector 承担，不重复做统计栏。`MY VIEWS / 我的视图` 可以保留参考稿的结构位置，但在保存合同缺失时只能显示不可交互的“暂无已保存视图 / SAVED VIEWS NOT CONNECTED”，不得展示假视图或假保存动作。切换排版只重排已读取的同一 Work Resource 集合，不重新请求、不改字段资格、不改变当前选择。保存视图、批量选择、发起研究和泛化“补采”继续禁用，直到各自有独立产品/权限/回执合同。唯一已接通的例外是当前选中作品的受限 `立即复观测`：它只面对小红书、稳定 public ref 和已存在的 target-linked active deep-archive authorization，不能从作者、标题、URL 或监控目标名称推断授权；请求与状态均来自受控 API，不能显示本地伪造成功。
+排版使用独立 URL 参数 `layout=research|table|cover`；状态筛选继续使用 `view`。`view` 是查询预设，必须与其他筛选一起放在主结果上方的 `SYSTEM VIEWS / 系统视图` 横向工作台，不作为左侧导航或独立状态面板；结果数、读取回执和当前选择分别由工作台底栏、inline receipt、选中行/Inspector 承担，不重复做统计栏。`MY VIEWS / 我的视图` 可以保留参考稿的结构位置，但在保存合同缺失时只能显示不可交互的“暂无已保存视图 / SAVED VIEWS NOT CONNECTED”，不得展示假视图或假保存动作。切换排版只重排已读取的同一 Work Resource 集合，不重新请求、不改字段资格、不改变当前选择。保存视图、批量选择、发起研究和泛化“补采”继续禁用，直到各自有独立产品/权限/回执合同。唯一已接通的例外是当前选中作品的受限 `立即复观测`：它只面对小红书、稳定 public ref 和已存在的 target-linked active deep-archive authorization，不能从作者、标题、URL 或采集来源名称推断授权；请求与状态均来自受控 API，不能显示本地伪造成功。
 
 ## 6. 材料 lane 与数据来源
 

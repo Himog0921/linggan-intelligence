@@ -138,13 +138,6 @@
 /* The creator and the monitoring target are two separate facts, so they get two separate
  * plates rather than one run-on line. Ported from main's XHS-MEDIA-AUTHOR-EVIDENCE-001 and
  * refitted to this row's type scale. */
-.ev-context-facts{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:7px}
-.ev-identity-fact{min-width:0;min-height:38px;display:flex;align-items:center;gap:8px;padding:5px 7px;border:1px solid var(--v7-line);background:var(--v7-white)}
-.ev-identity-fact>span:not(.ev-author-avatar){min-width:0;display:grid;gap:2px}
-.ev-identity-fact small{color:var(--v7-ghost);font:650 9px/1.2 var(--lgi-font-sans)}
-.ev-identity-fact strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v7-black);font-size:11.5px}
-.ev-target-fact{justify-content:space-between;border-left:2px solid var(--v7-info)}
-.ev-target-fact .v7-tech-key{flex:0 0 auto;font-size:8px}
 .ev-author-avatar{width:28px;height:28px;flex:0 0 28px;display:grid;place-items:center;overflow:hidden;border:1px solid var(--v7-black);border-radius:50%;background:var(--v7-gray);color:var(--v7-ghost);font:650 8px/1 var(--lgi-font-mono)}
 .ev-author-avatar img{width:100%;height:100%;object-fit:cover}
 .ev-author-avatar[data-state="acquired"]{border-color:var(--v7-info)}
@@ -296,7 +289,6 @@
 .ev-source-note .v7-tech-key{margin-left:6px}
 .ev-section-note{margin:6px 0 10px;color:var(--v7-ghost);font-size:11px;line-height:1.6}
 .ev-inline-note{color:var(--v7-ghost);font:10px var(--lgi-font-mono)}
-.ev-identity-relation{color:var(--v7-muted);font-size:10px}
 .ev-channel-receipt{margin-bottom:16px;border-top:2px solid var(--v7-black)}
 .ev-channel-title{display:flex;justify-content:space-between;gap:10px;padding:9px 0;font-size:12px}
 .ev-channel-actions{display:flex;align-items:center;gap:8px}
@@ -437,7 +429,6 @@
   .ev-readout>div{border-right:0;padding:6px 0}
   .ev-command{padding:12px 14px 0}
   .ev-work-row{grid-template-columns:56px minmax(0,1fr);padding:12px 14px}
-  .ev-context-facts{grid-template-columns:1fr}
   .ev-preview{width:56px;height:74px}
   .ev-side{grid-column:1/-1;padding-left:0;border-left:0;border-top:1px solid var(--v7-line);padding-top:8px}
   .ev-work-list[data-layout="cover"]{grid-template-columns:repeat(2,minmax(0,1fr))}

@@ -2423,16 +2423,32 @@ fn evidence_runtime_renders_only_controlled_media_handles() {
     assert!(EVIDENCE_LIBRARY_CSS.contains("aspect-ratio:3/4"));
 }
 
+/* DEC-作者合并 (2026-09-04): one author field on every surface, the Inspector included. */
 #[test]
-fn evidence_runtime_separates_creator_and_monitoring_target_and_renders_avatar_from_media() {
-    assert!(EVIDENCE_LIBRARY_JS.contains("ev-creator-fact"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("ev-target-fact"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("作品作者"));
-    assert!(EVIDENCE_LIBRARY_JS.contains("监控目标"));
+fn evidence_runtime_shows_one_author_field_and_renders_avatar_from_media() {
+    assert!(EVIDENCE_LIBRARY_JS.contains("ev-author-fact"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("function effectiveAuthor"));
     assert!(EVIDENCE_LIBRARY_JS.contains("media.avatar"));
     assert!(EVIDENCE_LIBRARY_JS.contains("sameOriginPath(avatar.localAssetUrl"));
     assert!(EVIDENCE_LIBRARY_CSS.contains(".ev-author-avatar"));
     assert!(!EVIDENCE_LIBRARY_JS.contains("identity_facts.avatar"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("ev-target-fact"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("作品作者"));
+    assert!(!EVIDENCE_LIBRARY_CSS.contains(".ev-target-fact"));
+    assert!(!EVIDENCE_LIBRARY_CSS.contains(".ev-identity-fact"));
+}
+
+/* A creator target only fills the author when the detail has not delivered one, a reported
+ * MISMATCH still blocks that fallback, and a keyword target never fills it. The lineage the row
+ * no longer shows lives in the Inspector as a single 来源监控 row. */
+#[test]
+fn evidence_runtime_keeps_collection_lineage_in_the_inspector_only() {
+    assert!(EVIDENCE_LIBRARY_JS.contains("来源与溯源"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("来源监控"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("keyword: '关键词监控'"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("context.authorIdentityMatchState !== 'MISMATCH'"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("作者与监控目标"));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("identityRelationLabels"));
 }
 
 #[test]

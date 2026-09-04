@@ -43,11 +43,11 @@
 - 删除左栏重复的当前结果、当前选择与读取状态：结果数保留在控制工作台底栏，读取状态保留在 inline receipt，选择由选中行与 Inspector 直接表达。结果区因此只保留连续作品列表 + 右侧 Inspector。
 - Table 可读性升级：标题 12→14px、作者上下文 9→12px、辅助正文 9→11px、状态 8→10px，桌面行高 76→92px；窄屏堆叠保持同一字号。
 - `研读 / 表格 / 封面` 不再使用三个独立描边方格或黑底选中块；改为参考稿中的单条 tab rail，上下黑色细线维持编辑网格，当前排版只以 signal 下划线标记。语义、URL 参数和点击目标不变。
-- 列表同时呈现“作品作者”与“监控目标”；没有平台作者 ID 证明时，不用目标显示名填补作品作者。
+- 2026-09-04 产品决策（DEC-作者合并）取代本行原规定：所有表面只呈现一个“作者”字段。详情 `creatorDisplayName` 优先，其次 `targetKind = creator` 且非 `MISMATCH` 的目标显示名，皆无则“当前未知”；关键词目标永不填补作者。
 - 发布时间区分精确 `KNOWN`、仅来源文本 `SOURCE_TEXT_ONLY` 和 `UNKNOWN`；Inspector 展示来源字段、类型、精度和 parser version。
 - 来源血缘增加 Target 与 Work Order，并继续保留 Task、Attempt、Package、Receipt。
 - 2026-08-31 封面比例修订：作品行增加只用于排版的 `data-platform`；小红书在研读与封面排版中使用 `3:4` 竖版容器。改动不改变 Work Resource 字段、媒体读取资格、当前选择或 Inspector。
-- 2026-08-31 作者头像后续：作品作者与监控目标不再只作为同一 meta 行中的两个文本；研读、表格、封面和 Inspector 概览均使用两个独立事实区。作品作者区从 `media.avatar` 读取 `INLINE_SAFE` 本地头像，未取得时显示准确状态；监控目标区只读 collection context。媒体 Inspector 把 avatar 与 cover/images/video/derivatives 连续列出，不新增页面私有媒体选择逻辑。
+- 2026-08-31 作者头像后续（2026-09-04 修订）：研读、表格、封面和 Inspector 概览均使用**单一**作者事实区，从 `media.avatar` 读取 `INLINE_SAFE` 本地头像，未取得时显示准确状态。采集来源只在 Inspector「来源与溯源」区读 collection context 表达。媒体 Inspector 把 avatar 与 cover/images/video/derivatives 连续列出，不新增页面私有媒体选择逻辑。
 
 ## LIDS 影响
 

@@ -581,7 +581,7 @@
   /* The author's avatar is a media object like any other: it is shown only from a controlled
    * local handle, and when there is no verified copy the slot states why rather than falling
    * back to a platform URL. Ported from main's XHS-MEDIA-AUTHOR-EVIDENCE-001. */
-  function authorAvatar(media, alt = '作品作者头像') {
+  function authorAvatar(media, alt = '作者头像') {
     const avatar = media?.avatar && typeof media.avatar === 'object' ? media.avatar : {};
     const asset = sameOriginPath(avatar.localAssetUrl, ['/api/local/media/']);
     const wrapper = node('span', 'ev-author-avatar');
@@ -600,20 +600,11 @@
     return wrapper;
   }
 
-  /* The work's author and the monitoring target are two different facts and are never merged
-   * into one line: the target is who we chose to watch, the creator is who actually published
-   * this. `authorIdentityMatchState` says whether they have been proven to be the same person. */
-  // LANG-01: Chinese has to carry the meaning on its own. The bare NOT_VERIFIED sat beside the
-  // target name and read as "this target is unverified", which is the opposite of what it says.
-  // This block is the only place both facts still appear side by side — the list and the table
-  // show one author name — so the relation label rides along with it.
-  const identityRelationLabels = {
-    MATCHED: '已证实为作者',
-    MISMATCH: '与作者不一致',
-    NOT_VERIFIED: '未证实为作者',
-    NOT_APPLICABLE: '不适用',
-  };
-
+  /* DEC-作者合并 (2026-09-04): a creator target is watched through its own profile URL, so the
+   * works collected there are that creator's — target and author are one field, everywhere. The
+   * platform author name from the work detail still wins when present, and a reported MISMATCH
+   * still blocks the fallback rather than asserting an authorship the platform denies. A keyword
+   * target is a search term, not a person, and never fills the author. */
   function effectiveAuthor(item) {
     if (item.display?.creatorState === 'KNOWN' && item.display?.creatorDisplayName) {
       return item.display.creatorDisplayName;
@@ -633,27 +624,15 @@
     return fact;
   }
 
-  function creatorAndTargetFacts(item) {
-    const creator = knownText(item.display?.creatorDisplayName, item.display?.creatorState, '当前未知');
-    const target = item.collectionContext?.targetDisplayState === 'KNOWN'
-      ? item.collectionContext.targetDisplayName
-      : '当前未知';
-    const facts = node('div', 'ev-context-facts');
-    const creatorFact = node('div', 'ev-identity-fact ev-creator-fact');
-    const creatorCopy = node('span');
-    creatorCopy.append(node('small', null, '作品作者'), node('strong', null, creator));
-    creatorFact.append(authorAvatar(item.media, `${creator}的头像`), creatorCopy);
-    const targetFact = node('div', 'ev-identity-fact ev-target-fact');
-    const targetCopy = node('span');
-    targetCopy.append(node('small', null, '监控目标'), node('strong', null, target));
-    const matchState = item.collectionContext?.authorIdentityMatchState || 'NOT_VERIFIED';
-    targetFact.append(
-      targetCopy,
-      node('small', 'ev-identity-relation', identityRelationLabels[matchState] || '身份关系当前未知'),
-      tech(matchState),
-    );
-    facts.append(creatorFact, targetFact);
-    return facts;
+  const targetKindLabels = { creator: '博主监控', keyword: '关键词监控' };
+
+  /* The row shows one author; the Inspector keeps the collection lineage so "how did this work
+   * get here" stays answerable without putting a second identity back on the list. */
+  function monitoringOriginCopy(item) {
+    const context = item.collectionContext || {};
+    if (context.targetDisplayState !== 'KNOWN' || !context.targetDisplayName) return '当前未知';
+    const kind = targetKindLabels[context.targetKind];
+    return kind ? `${context.targetDisplayName}（${kind}）` : context.targetDisplayName;
   }
 
   /* The one serif quote, used by both the row and the Inspector so a search hit is highlighted
@@ -1354,9 +1333,12 @@
       observationUi(),
     ));
 
-    const identityContext = section('作者与监控目标');
-    identityContext.append(creatorAndTargetFacts(item));
-    panel.append(identityContext);
+    const originContext = section('来源与溯源');
+    originContext.append(
+      authorFact(item),
+      factGrid([['来源监控', monitoringOriginCopy(item)]]),
+    );
+    panel.append(originContext);
 
     const current = section('当前互动状态与变化');
     const currentMetrics = inspector.engagementCurrent?.metrics && typeof inspector.engagementCurrent.metrics === 'object'
