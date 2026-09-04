@@ -291,7 +291,9 @@ fn statusline(target: &ObservationTarget) -> String {
     let archive = match target.lifecycle_state.as_str() {
         "pending_decision" => "尚未建档",
         "archiving" => "建档中",
-        "monitoring" => "基线就绪",
+        "archived" | "monitoring" => "基线就绪",
+        "paused" => "巡检已暂停",
+        "dismissed" => "已停止观察",
         _ => "状态未知",
     };
     let patrol = if target.monitoring_enabled {
@@ -858,4 +860,43 @@ fn escape(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn target(state: &str) -> ObservationTarget {
+        ObservationTarget {
+            target_ref: uuid::Uuid::new_v4(),
+            platform: "xhs".to_owned(),
+            target_kind: "creator".to_owned(),
+            identity_key: "creator-lifecycle-test".to_owned(),
+            display_name: Some("生命周期作者".to_owned()),
+            identity_facts: None,
+            source: "manual".to_owned(),
+            lifecycle_state: state.to_owned(),
+            first_stored_at: "2026-09-04T09:00:00+08".to_owned(),
+            monitoring_enabled: state == "monitoring",
+            group_name: None,
+            last_patrol_dispatched_at: None,
+            next_patrol_at: None,
+        }
+    }
+
+    #[test]
+    fn drawer_statusline_names_every_legal_lifecycle_state() {
+        for (state, label) in [
+            ("pending_decision", "尚未建档"),
+            ("archiving", "建档中"),
+            ("archived", "基线就绪"),
+            ("monitoring", "基线就绪"),
+            ("paused", "巡检已暂停"),
+            ("dismissed", "已停止观察"),
+        ] {
+            let line = statusline(&target(state));
+            assert!(line.contains(label), "{state} must read as {label}");
+            assert!(!line.contains("状态未知"), "{state} is a legal state");
+        }
+    }
 }

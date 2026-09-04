@@ -5,11 +5,10 @@
 //! 待处理 / 观察目标 / 生产流 / 采集任务 / 执行工位.
 //! The slugs behind them are unchanged and remain the URL contract.
 //!
-//! Every surface here is structurally complete and factually empty. Collection's domain
-//! objects (ObservationTarget, plan, capture task, attempt, observation event, worker)
-//! do not exist in this project yet, and the only authorised platform access is the single
-//! first canary spec. So each surface states what it cannot show and why, and never
-//! substitutes a zero, a percentage, or a prototype figure for the missing fact.
+//! Every surface here is structurally complete and remains honest about the projection it
+//! can read. Collection domain objects now exist, but a route can still be unavailable or
+//! legitimately empty. In either case the surface states what it can prove and never
+//! substitutes a zero, a percentage, or a prototype figure for a missing fact.
 
 use super::shell::{PrimarySurface, global_header};
 use super::target_drawer::TargetListContext;
@@ -197,6 +196,97 @@ fn readout(entries: &[(&str, &str)]) -> String {
         ));
     }
     cells
+}
+
+/// The V4 field workspace keeps page identity and bounded readings inside the work surface.
+/// Values still come from the same server-side projections; this is not a second summary model.
+fn page_readout(
+    section: Section,
+    counts: Option<&TargetCounts>,
+    state: Option<&SurfaceState>,
+) -> String {
+    let entries: Vec<(String, &'static str)> = match section {
+        Section::Targets => match counts {
+            Some(counts) => vec![
+                (counts.total.to_string(), "全部目标"),
+                (counts.creator.to_string(), "创作者"),
+                (counts.keyword.to_string(), "关键词"),
+                (counts.archiving.to_string(), "建档中"),
+                (counts.monitoring.to_string(), "巡检已开"),
+            ],
+            None => vec![
+                ("UNKNOWN".to_owned(), "全部目标"),
+                ("UNKNOWN".to_owned(), "创作者"),
+                ("UNKNOWN".to_owned(), "关键词"),
+                ("UNKNOWN".to_owned(), "建档中"),
+                ("UNKNOWN".to_owned(), "巡检已开"),
+            ],
+        },
+        Section::Runtime => vec![
+            (
+                display_count(state.and_then(|value| value.vacant_stations)),
+                "空缺工位",
+            ),
+            (
+                display_count(state.and_then(|value| value.unclaimed_installations)),
+                "未归位安装",
+            ),
+            ("UNKNOWN".to_owned(), "当前容量"),
+            ("UNKNOWN".to_owned(), "最近确认"),
+            ("UNKNOWN".to_owned(), "接活窗口"),
+        ],
+        Section::Attention => vec![
+            ("UNKNOWN".to_owned(), "需要处理"),
+            ("UNKNOWN".to_owned(), "你负责"),
+            ("UNKNOWN".to_owned(), "工位负责"),
+            ("UNKNOWN".to_owned(), "调度负责"),
+            ("UNKNOWN".to_owned(), "工程负责"),
+        ],
+        Section::Operations => vec![
+            ("UNKNOWN".to_owned(), "最近轮次"),
+            ("UNKNOWN".to_owned(), "考虑目标"),
+            ("UNKNOWN".to_owned(), "已派出"),
+            ("UNKNOWN".to_owned(), "有阻断"),
+            ("UNKNOWN".to_owned(), "持久决定"),
+        ],
+        Section::Tasks => vec![
+            ("UNKNOWN".to_owned(), "最近任务"),
+            ("UNKNOWN".to_owned(), "已接纳"),
+            ("UNKNOWN".to_owned(), "待完成"),
+            ("UNKNOWN".to_owned(), "租约失效"),
+            ("UNKNOWN".to_owned(), "冻结工单"),
+        ],
+    };
+    entries
+        .into_iter()
+        .map(|(value, label)| {
+            format!(
+                r#"<div class="c-readout"><b>{value}</b><span>{label}</span></div>"#,
+                value = escape(&value),
+            )
+        })
+        .collect()
+}
+
+fn page_actions(section: Section, mode: OperationsMode) -> String {
+    match section {
+        Section::Attention => {
+            r#"<a class="c-page-action" href="/collection/attention">刷新</a>"#.to_owned()
+        }
+        Section::Targets => {
+            r##"<a class="c-page-action c-page-action-primary" href="#collection-target-create">新建观察目标</a>"##.to_owned()
+        }
+        Section::Operations => format!(
+            r#"<a class="c-page-action" href="/collection/operations?mode={}">刷新</a>"#,
+            mode.slug(),
+        ),
+        Section::Tasks => {
+            r#"<a class="c-page-action" href="/collection/tasks">刷新</a>"#.to_owned()
+        }
+        Section::Runtime => {
+            r##"<a class="c-page-action c-page-action-primary" href="#runtime-register">登记工位</a>"##.to_owned()
+        }
+    }
 }
 
 /// DESIGN-006 · Collection has five empty surfaces but only two actionable kinds of empty, and only
@@ -756,7 +846,7 @@ fn second_bar(
           <div class="c-tabs c-tg-views">{target_filters}</div>
           <div class="c-actions c-tg-toolbar">
             <a class="c-btn-quiet" href="/collection/targets?sort=last">排序 / 最近观察 ↓</a>
-            <form class="c-target-add" method="post" action="/collection/targets/new">
+            <form id="collection-target-create" class="c-target-add" method="post" action="/collection/targets/new">
               <select name="target_kind" aria-label="目标类型">
                 <option value="creator">创作者</option>
                 <option value="keyword">关键词</option>
@@ -873,9 +963,13 @@ pub fn render(
       <div class="v7-shell">
         {rail}
         <main class="c-page" aria-labelledby="page-title">
-          <h1 class="v7-sr-only" id="page-title">{title}</h1>
+          <div class="c-page-titlebar">
+            <h1 id="page-title">{title}</h1>
+            <div class="c-page-actions">{page_actions}</div>
+          </div>
+          <!-- collection-readout:start --><div class="c-readout-strip" data-collection-readout>{page_readout}</div><!-- collection-readout:end -->
           {second_bar}
-          <div class="c-body">{body}</div>
+          <div class="c-body"><!-- collection-body:start -->{body}<!-- collection-body:end --></div>
         </main>
       </div>
     </div>
@@ -885,6 +979,8 @@ pub fn render(
 "#,
         title = entry.title,
         rail = rail(section, state),
+        page_actions = page_actions(section, mode),
+        page_readout = page_readout(section, counts, state),
         second_bar = second_bar(section, mode, filter, counts, state),
         body = body(section, mode, state),
     )

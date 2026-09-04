@@ -8,6 +8,8 @@ use linggan_evidence::{CollectionTaskExecution, CollectionTaskTimeline};
 
 const EMPTY_STATE_OPEN: &str = "<section class=\"c-empty c-empty-engineering\">";
 const EMPTY_STATE_CLOSE: &str = "</section>";
+const READOUT_SLOT_START: &str = "<!-- collection-readout:start -->";
+const READOUT_SLOT_END: &str = "<!-- collection-readout:end -->";
 
 pub fn render_tasks(base: &str, timeline: &CollectionTaskTimeline) -> String {
     let Some(open) = base.find(EMPTY_STATE_OPEN) else {
@@ -22,31 +24,40 @@ pub fn render_tasks(base: &str, timeline: &CollectionTaskTimeline) -> String {
         r#"<section class="c-task-empty">
               <h2>当前读取范围没有采集任务</h2>
               <p>任务投影读取成功，最近 100 条范围返回零项；这不表示历史从未存在，也不会触发任何平台访问。</p>
+              <!-- frozen-work:start --><p class="c-control-none">工单冻结资源正在读取。</p><!-- frozen-work:end -->
             </section>"#
             .to_owned()
     } else {
+        let selected = task_inspector(&timeline.tasks[0]);
         format!(
-            r#"<section class="c-tasks">
-                  <div class="c-task-summary">
-                    <div><b>{total}</b><span>最近任务</span></div>
-                    <div><b>{accepted}</b><span>已接纳</span></div>
-                    <div><b>{active}</b><span>待完成</span></div>
-                    <div><b>{expired}</b><span>租约失效</span></div>
-                  </div>
+            r#"<section class="c-tasks c-tasks-v4">
                   <p class="c-task-boundary">按最近状态读取最多 100 条本机任务。队列资格、Attempt、Package 与 Receipt 分列显示；读取本身不会领取、重试或新建任务。</p>
-                  <div class="c-task-list">{rows}</div>
+                  <div class="c-task-workspace">
+                    <div class="c-task-ledger">
+                      <div class="c-task-ledger-head"><span>任务</span><span>目标 / 来源</span><span>阶段</span><span>状态</span><span>回执</span><span>尝试</span><span>创建时间</span></div>
+                      <div class="c-task-list">{rows}</div>
+                    </div>
+                    {selected}
+                  </div>
                 </section>"#,
-            total = timeline.tasks.len(),
-            accepted = timeline.accepted_count,
-            active = timeline.active_count,
-            expired = timeline.expired_lease_count,
-            rows = timeline.tasks.iter().map(task_row).collect::<String>(),
+            rows = timeline
+                .tasks
+                .iter()
+                .enumerate()
+                .map(|(index, task)| task_row(task, index == 0))
+                .collect::<String>(),
         )
     };
-    format!("{}{body}{}", &base[..open], &base[close..])
+    let rendered = format!("{}{body}{}", &base[..open], &base[close..]);
+    replace_slot(
+        &rendered,
+        READOUT_SLOT_START,
+        READOUT_SLOT_END,
+        &task_readout(timeline),
+    )
 }
 
-fn task_row(task: &CollectionTaskExecution) -> String {
+fn task_row(task: &CollectionTaskExecution, selected: bool) -> String {
     let (state, state_class, state_note) = task_state(task);
     let target = task
         .target_display_name
@@ -96,54 +107,49 @@ fn task_row(task: &CollectionTaskExecution) -> String {
             )
         },
     );
-    let previous_failure =
-        task.last_dispatch_failure_code
-            .as_ref()
-            .map_or_else(String::new, |code| {
-                let when = task
-                    .last_dispatch_failure_at
-                    .as_deref()
-                    .unwrap_or("时间未知");
-                format!(
-                    r#"<p class="c-task-history">此前启动失败：<code>{}</code> · {}；{}。</p>"#,
-                    escape(code),
-                    escape(when),
-                    if task.receipt_ref.is_some() {
-                        "后续回执已保留"
-                    } else {
-                        "当前尚未有 Receipt"
-                    },
-                )
-            });
-    let effect = task
-        .execution_effect
-        .as_deref()
-        .map_or_else(String::new, |effect| {
-            format!(r#"<span class="c-task-effect">{}</span>"#, escape(effect))
-        });
-
+    let previous_failure = task.last_dispatch_failure_code.as_ref().map_or_else(
+        || "没有已记录的启动失败".to_owned(),
+        |code| {
+            let when = task
+                .last_dispatch_failure_at
+                .as_deref()
+                .unwrap_or("时间未知");
+            format!(
+                "此前启动失败：{code} · {when}；{}。",
+                if task.receipt_ref.is_some() {
+                    "后续回执已保留"
+                } else {
+                    "当前尚未有 Receipt"
+                },
+            )
+        },
+    );
+    let receipt_state = task.material_admission.as_deref().unwrap_or("—");
+    let attempt_short = task.attempt_id.as_ref().map_or_else(
+        || "—".to_owned(),
+        |value| short_ref(&value.to_string()).to_owned(),
+    );
+    let meta = format!(
+        "{} · {} · {}{}",
+        source_label(&task.source),
+        task.platform,
+        task.page_type,
+        sequence
+    );
     format!(
-        r#"<article class="c-task-row">
-              <div class="c-task-head">
-                <div>
-                  <p class="c-task-kicker">{source} · {platform} · {page_type}{sequence}</p>
-                  <h2>{capabilities}</h2>
-                  <p class="c-task-target">目标：<b>{target}</b> <code>{task_ref}</code></p>
-                </div>
-                <div class="c-task-state {state_class}"><b>{state}</b><span>{state_note}</span></div>
-              </div>
-              <dl class="c-task-facts">
-                <div><dt>Attempt</dt><dd>{attempt}</dd></div>
-                <div><dt>Package</dt><dd>{package}</dd></div>
-                <div><dt>Receipt</dt><dd>{receipt} {effect}</dd></div>
-              </dl>
-              {previous_failure}
-              <p class="c-task-created">创建于 {created}</p>
-            </article>"#,
+        r#"<button type="button" class="c-task-row{selected_class}" data-task-row data-task-title="{target}" data-task-ref="{task_ref}" data-task-meta="{meta}" data-task-state="{state}" data-task-state-note="{state_note}" data-task-attempt="{attempt}" data-task-package="{package}" data-task-receipt="{receipt}" data-task-effect="{effect_text}" data-task-failure="{previous_failure}" data-task-created="{created}" data-task-capabilities="{capabilities}" aria-pressed="{pressed}">
+              <span class="c-task-id">#{task_ref}</span>
+              <span class="c-task-target"><b>{target}</b><small>{source}</small></span>
+              <span class="c-task-stage">{capabilities}</span>
+              <span class="c-task-state {state_class}"><b>{state}</b><small>{state_note}</small></span>
+              <span class="c-task-receipt">{receipt_state}</span>
+              <span class="c-task-attempt">{attempt_short}</span>
+              <time>{created}</time>
+            </button>"#,
+        selected_class = if selected { " is-selected" } else { "" },
+        pressed = if selected { "true" } else { "false" },
         source = escape(source_label(&task.source)),
-        platform = escape(&task.platform),
-        page_type = escape(&task.page_type),
-        sequence = sequence,
+        meta = escape(&meta),
         capabilities = escape(&task.capabilities),
         target = escape(target),
         task_ref = escape(task_ref),
@@ -153,9 +159,139 @@ fn task_row(task: &CollectionTaskExecution) -> String {
         attempt = escape(&attempt),
         package = escape(&package),
         receipt = escape(&receipt),
-        effect = effect,
-        previous_failure = previous_failure,
+        effect_text = escape(
+            task.execution_effect
+                .as_deref()
+                .unwrap_or("没有执行 effect")
+        ),
+        previous_failure = escape(&previous_failure),
+        receipt_state = escape(receipt_state),
+        attempt_short = escape(&attempt_short),
         created = escape(&task.created_at),
+    )
+}
+
+fn task_inspector(task: &CollectionTaskExecution) -> String {
+    let (state, _, state_note) = task_state(task);
+    let target = task
+        .target_display_name
+        .as_deref()
+        .or(task.target_identity_key.as_deref())
+        .unwrap_or("目标关联当前未知");
+    let task_id = task.task_id.to_string();
+    let task_ref = short_ref(&task_id);
+    let attempt = task.attempt_id.as_ref().map_or_else(
+        || "尚未形成 Attempt".to_owned(),
+        |attempt_id| {
+            format!(
+                "Attempt {} · {}",
+                short_ref(&attempt_id.to_string()),
+                task.attempt_started_at.as_deref().unwrap_or("时间未知")
+            )
+        },
+    );
+    let package = task.package_ref.as_ref().map_or_else(
+        || "尚未形成 Package".to_owned(),
+        |package_ref| {
+            format!(
+                "{} · Package {} · {}",
+                task.package_kind.as_deref().unwrap_or("类型未知"),
+                short_ref(&package_ref.to_string()),
+                task.package_accepted_at
+                    .as_deref()
+                    .unwrap_or("接纳时间未知")
+            )
+        },
+    );
+    let receipt = task.receipt_ref.as_ref().map_or_else(
+        || "尚未收到 Receipt".to_owned(),
+        |receipt_ref| {
+            format!(
+                "Receipt {} · {} · {}",
+                short_ref(&receipt_ref.to_string()),
+                task.material_admission.as_deref().unwrap_or("UNKNOWN"),
+                task.receipt_received_at
+                    .as_deref()
+                    .unwrap_or("接收时间未知")
+            )
+        },
+    );
+    let failure = task.last_dispatch_failure_code.as_ref().map_or_else(
+        || "没有已记录的启动失败。".to_owned(),
+        |code| {
+            format!(
+                "此前启动失败：{} · {}；{}。",
+                code,
+                task.last_dispatch_failure_at
+                    .as_deref()
+                    .unwrap_or("时间未知"),
+                if task.receipt_ref.is_some() {
+                    "后续回执已保留"
+                } else {
+                    "当前尚未有 Receipt"
+                }
+            )
+        },
+    );
+    format!(
+        r#"<aside class="c-task-inspector" data-task-inspector aria-live="polite">
+             <div class="c-task-inspector-head"><span data-task-inspector-ref>任务 #{task_ref}</span><h2 data-task-inspector-title>{target}</h2><p data-task-inspector-meta>{source} · {platform} · {page_type}</p></div>
+             <nav class="c-task-inspector-tabs" aria-label="任务详情"><button type="button" class="is-active" data-task-tab="overview">概览</button><button type="button" data-task-tab="attempt">Attempt</button><button type="button" data-task-tab="package">Package</button><button type="button" data-task-tab="receipt">Receipt</button><button type="button" data-task-tab="frozen">冻结资源</button></nav>
+             <div class="c-task-inspector-body">
+               <section class="c-task-panel is-active" data-task-panel="overview"><div class="c-state-line"><span><i></i><b data-task-inspector-state>{state}</b></span><span data-task-inspector-state-note>{state_note}</span></div><dl><div><dt>阶段</dt><dd data-task-inspector-capabilities>{capabilities}</dd></div><div><dt>创建时间</dt><dd data-task-inspector-created>{created}</dd></div><div><dt>历史</dt><dd data-task-inspector-failure>{failure}</dd></div></dl></section>
+               <section class="c-task-panel" data-task-panel="attempt"><h3>Attempt</h3><p data-task-inspector-attempt>{attempt}</p></section>
+               <section class="c-task-panel" data-task-panel="package"><h3>Package</h3><p data-task-inspector-package>{package}</p></section>
+               <section class="c-task-panel" data-task-panel="receipt"><h3>Receipt</h3><p data-task-inspector-receipt>{receipt}</p><p data-task-inspector-effect>{effect}</p></section>
+               <section class="c-task-panel" data-task-panel="frozen"><!-- frozen-work:start --><p class="c-control-none">工单冻结资源正在读取。</p><!-- frozen-work:end --></section>
+             </div>
+           </aside>"#,
+        task_ref = escape(task_ref),
+        target = escape(target),
+        source = escape(source_label(&task.source)),
+        platform = escape(&task.platform),
+        page_type = escape(&task.page_type),
+        state = state,
+        state_note = escape(state_note),
+        capabilities = escape(&task.capabilities),
+        created = escape(&task.created_at),
+        failure = escape(&failure),
+        attempt = escape(&attempt),
+        package = escape(&package),
+        receipt = escape(&receipt),
+        effect = escape(
+            task.execution_effect
+                .as_deref()
+                .unwrap_or("没有执行 effect")
+        ),
+    )
+}
+
+fn task_readout(timeline: &CollectionTaskTimeline) -> String {
+    format!(
+        r#"<div class="c-readout-strip" data-collection-readout><div class="c-readout"><b>{total}</b><span>最近任务</span></div><div class="c-readout"><b>{accepted}</b><span>已接纳</span></div><div class="c-readout"><b>{active}</b><span>待完成</span></div><div class="c-readout warn"><b>{expired}</b><span>租约失效</span></div><div class="c-readout"><b><!-- frozen-work-count -->UNKNOWN</b><span>冻结工单</span></div></div>"#,
+        total = timeline.tasks.len(),
+        accepted = timeline.accepted_count,
+        active = timeline.active_count,
+        expired = timeline.expired_lease_count,
+    )
+}
+
+fn replace_slot(base: &str, start: &str, end: &str, content: &str) -> String {
+    let Some(open) = base.find(start) else {
+        return base.to_owned();
+    };
+    let content_start = open + start.len();
+    let Some(close_offset) = base[content_start..].find(end) else {
+        return base.to_owned();
+    };
+    let close = content_start + close_offset;
+    format!(
+        "{}{}{}{}{}",
+        &base[..open],
+        start,
+        content,
+        end,
+        &base[close + end.len()..]
     )
 }
 
@@ -307,5 +443,37 @@ mod tests {
         assert!(html.contains("租约已失效"));
         assert!(html.contains("租约已经到期；当前没有执行权"));
         assert!(!html.contains("任务已被独占领取"));
+    }
+
+    #[test]
+    fn v4_task_ledger_and_inspector_preserve_the_execution_chain() {
+        let base = format!(
+            "<!-- collection-readout:start --><div>old readout</div><!-- collection-readout:end -->{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}"
+        );
+        let html = render_tasks(
+            &base,
+            &CollectionTaskTimeline {
+                tasks: vec![task()],
+                accepted_count: 1,
+                active_count: 0,
+                expired_lease_count: 0,
+            },
+        );
+
+        assert!(html.contains("c-task-workspace"));
+        assert!(html.contains("data-task-row"));
+        assert!(html.contains("data-task-inspector"));
+        for tab in ["overview", "attempt", "package", "receipt", "frozen"] {
+            assert!(html.contains(&format!("data-task-tab=\"{tab}\"")));
+            assert!(html.contains(&format!("data-task-panel=\"{tab}\"")));
+        }
+        assert!(html.contains("<!-- frozen-work:start -->"));
+        assert!(html.contains("<!-- frozen-work-count -->UNKNOWN"));
+        assert!(!html.contains("old readout"));
+        assert_eq!(
+            html.matches("<div class=\"c-readout").count()
+                - html.matches("c-readout-strip").count(),
+            5
+        );
     }
 }

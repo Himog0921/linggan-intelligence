@@ -1179,11 +1179,14 @@ fn collection_serves_all_five_sub_surfaces_from_the_shared_shell() {
 }
 
 #[test]
-fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
-    // DESIGN-003: breadcrumb and rail already name the page, so the h1 survives only for
-    // assistive tech and the vertical space returns to the content. A page that grows a
-    // visible title block back is restating its name for the third time.
-    let mut pages = vec![evidence_library_html(None)];
+fn collection_v4_restores_a_visible_work_surface_title_without_forking_the_global_shell() {
+    // COLLECTION-FIVE-PAGE-V4-UI-001: the user's V4 field-workspace reference restores a
+    // visible title inside each Collection work surface. Corpus keeps DESIGN-003's reclaimed
+    // title; both still share the one global shell and one semantic h1.
+    let corpus = evidence_library_html(None);
+    assert!(corpus.contains("<h1 class=\"v7-sr-only\" id=\"page-title\">"));
+
+    let mut pages = Vec::new();
     for section in [
         collection::Section::Targets,
         collection::Section::Operations,
@@ -1202,13 +1205,29 @@ fn every_surface_reclaims_its_header_instead_of_restating_its_own_name() {
 
     for html in &pages {
         assert!(
-            html.contains("<h1 class=\"v7-sr-only\" id=\"page-title\">"),
-            "the page title must survive as the visually hidden h1"
+            html.contains("<div class=\"c-page-titlebar\">")
+                && html.contains("<h1 id=\"page-title\">"),
+            "each Collection work surface must render the V4 visible h1"
         );
-        for restated in ["c-title", "c-eyebrow", "c-head", "v7-title", "v7-eyebrow"] {
+        assert_eq!(html.matches("id=\"page-title\"").count(), 1);
+        assert_eq!(
+            html.matches("class=\"c-readout\"").count(),
+            5,
+            "each Collection page must expose exactly five bounded field readouts"
+        );
+        for restated in ["c-eyebrow", "c-head", "v7-title", "v7-eyebrow"] {
             assert!(
                 !html.contains(restated),
-                "reclaimed header must not return as {restated}"
+                "the V4 titlebar must not create another title system as {restated}"
+            );
+        }
+    }
+
+    for html in &pages {
+        for forbidden in ["监控价值", "代表证据", "机会评分"] {
+            assert!(
+                !html.contains(forbidden),
+                "the five Collection shells must not restore the retired {forbidden} module"
             );
         }
     }

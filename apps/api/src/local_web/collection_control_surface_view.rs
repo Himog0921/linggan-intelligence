@@ -14,6 +14,10 @@ use uuid::Uuid;
 const EMPTY_STATE_OPEN: &str = "<section class=\"c-empty c-empty-engineering\">";
 const EMPTY_STATE_CLOSE: &str = "</section>";
 const BODY_OPEN: &str = "<div class=\"c-body\">";
+const BODY_SLOT_START: &str = "<!-- collection-body:start -->";
+const BODY_SLOT_END: &str = "<!-- collection-body:end -->";
+const READOUT_SLOT_START: &str = "<!-- collection-readout:start -->";
+const READOUT_SLOT_END: &str = "<!-- collection-readout:end -->";
 
 #[derive(Debug, Clone)]
 pub enum CollectionControlSurfaceRead {
@@ -417,15 +421,50 @@ fn blocked_lane(
 }
 
 pub fn render_operations(base: &str, projection: &CollectionControlSurfaceProjection) -> String {
-    replace_empty(base, &operations_markup(projection))
+    let content = operations_markup(projection);
+    let rendered = if base.contains(BODY_SLOT_START) {
+        replace_slot(base, BODY_SLOT_START, BODY_SLOT_END, &content)
+    } else {
+        replace_empty(base, &content)
+    };
+    replace_slot(
+        &rendered,
+        READOUT_SLOT_START,
+        READOUT_SLOT_END,
+        &operations_readout(projection),
+    )
 }
 
 pub fn render_attention(base: &str, projection: &CollectionControlSurfaceProjection) -> String {
-    replace_empty(base, &attention_markup(projection))
+    let content = attention_markup(projection);
+    let rendered = if base.contains(BODY_SLOT_START) {
+        replace_slot(base, BODY_SLOT_START, BODY_SLOT_END, &content)
+    } else {
+        replace_empty(base, &content)
+    };
+    replace_slot(
+        &rendered,
+        READOUT_SLOT_START,
+        READOUT_SLOT_END,
+        &attention_readout(projection),
+    )
 }
 
 pub fn render_tasks_control(base: &str, projection: &CollectionControlSurfaceProjection) -> String {
-    prepend_body(base, &frozen_work_markup(&projection.works))
+    let frozen = frozen_work_markup(&projection.works);
+    if base.contains("<!-- frozen-work:start -->") {
+        replace_slot(
+            &base.replace(
+                "<!-- frozen-work-count -->UNKNOWN",
+                &format!("<!-- frozen-work-count -->{}", projection.works.len()),
+            ),
+            "<!-- frozen-work:start -->",
+            "<!-- frozen-work:end -->",
+            &frozen,
+        )
+    } else {
+        prepend_body(base, &frozen)
+    }
 }
 
 pub fn render_runtime_control(
@@ -456,7 +495,7 @@ fn operations_markup(projection: &CollectionControlSurfaceProjection) -> String 
         },
     );
     let decisions = if projection.decisions.is_empty() {
-        r#"<p class="c-control-none">当前读取范围没有持久目标决定。</p>"#.to_owned()
+        r#"<div class="c-decision-stream-empty"><b>当前读取范围没有持久目标决定</b><p>这不是“世界没有变化”，只表示最近的 scheduler decision 投影为空。</p></div>"#.to_owned()
     } else {
         projection
             .decisions
@@ -465,14 +504,114 @@ fn operations_markup(projection: &CollectionControlSurfaceProjection) -> String 
             .collect::<String>()
     };
     format!(
-        r#"<section class="c-control-surface" data-collection-control="operations">
+        r#"<section class="c-control-surface c-operations-v4" data-collection-control="operations">
              {run}
-             <div class="c-control-section-head"><div><p>Scheduler / durable decisions</p><h2>目标决定</h2></div><span>最近 {count} 条</span></div>
-             <div class="c-control-list">{decisions}</div>
-             <p class="c-control-boundary">这里只投影 scheduler、decision、Work 与 Lease 控制事实；不包含 Evidence 内容、监控价值、机会或 Dossier。</p>
+             <div class="c-operations-workspace">
+               <div class="c-flow-ledger">
+                 <div class="c-control-section-head"><div><p>Collection production / bounded read</p><h2>观察生产流</h2></div><span>不是转化漏斗</span></div>
+                 <p class="c-control-boundary">各阶段读数分别来自最近的 decision 与 Work 冻结投影；它们不是同一批对象的完成率，也不代表平台全量。</p>
+                 <div class="c-flow-v4">{flow}</div>
+               </div>
+               <aside class="c-decision-stream" aria-label="持久调度决定流">
+                 <div class="c-decision-stream-head"><div><i></i><b>调度决定流</b></div><span>最近 {count} 条持久记录</span></div>
+                 <div class="c-decision-stream-feed">{decisions}</div>
+                 <div class="c-decision-stream-foot"><span>仅控制事实</span><span>语料内容与价值评分归属语料页</span></div>
+               </aside>
+             </div>
            </section>"#,
         count = projection.decisions.len(),
+        flow = flow_stage_markup(projection),
     )
+}
+
+fn operations_readout(projection: &CollectionControlSurfaceProjection) -> String {
+    let (runs, considered, dispatched) = projection.latest_run.as_ref().map_or(
+        ("—".to_owned(), "—".to_owned(), "—".to_owned()),
+        |run| {
+            (
+                "1".to_owned(),
+                run.considered_count.to_string(),
+                run.dispatched_count.to_string(),
+            )
+        },
+    );
+    let blocked = projection
+        .decisions
+        .iter()
+        .filter(|decision| decision.work_order_ref.is_none())
+        .count()
+        .to_string();
+    readout_markup(&[
+        (&runs, "最近轮次", ""),
+        (&considered, "考虑目标", ""),
+        (&dispatched, "已派出", ""),
+        (&blocked, "有阻断", "warn"),
+        (&projection.decisions.len().to_string(), "持久决定", ""),
+    ])
+}
+
+fn flow_stage_markup(projection: &CollectionControlSurfaceProjection) -> String {
+    let stages = [
+        ("01", "目标判定", "调度为目标写下决定", projection.decisions.len()),
+        (
+            "02",
+            "规则准入",
+            "决定冻结规则版本",
+            projection
+                .decisions
+                .iter()
+                .filter(|decision| decision.rule_revision_ref.is_some())
+                .count(),
+        ),
+        (
+            "03",
+            "建立工单",
+            "准入后形成 WorkOrder",
+            projection
+                .decisions
+                .iter()
+                .filter(|decision| decision.work_order_ref.is_some())
+                .count(),
+        ),
+        (
+            "04",
+            "签发租约",
+            "Work 获得独占 Lease",
+            projection
+                .decisions
+                .iter()
+                .filter(|decision| decision.lease_ref.is_some())
+                .count(),
+        ),
+        (
+            "05",
+            "任务执行",
+            "Lease 已映射到 Task",
+            projection
+                .works
+                .iter()
+                .filter(|work| work.task_id.is_some())
+                .count(),
+        ),
+        (
+            "06",
+            "恢复与重排",
+            "决定存在但尚无 Work",
+            projection
+                .decisions
+                .iter()
+                .filter(|decision| decision.work_order_ref.is_none())
+                .count(),
+        ),
+    ];
+    stages
+        .into_iter()
+        .map(|(number, name, note, count)| {
+            format!(
+                r#"<article class="c-flow-v4-row"><span class="c-flow-v4-no">{number}</span><div><h3>{name}</h3><p>{note}</p></div><div class="c-flow-v4-state"><b>{count}</b><span>最近读取</span></div><i aria-hidden="true">→</i></article>"#,
+            )
+        })
+        .collect()
 }
 
 fn decision_row(decision: &SchedulerDecisionView) -> String {
@@ -484,9 +623,10 @@ fn decision_row(decision: &SchedulerDecisionView) -> String {
         _ => "未建立 Work / Lease".to_owned(),
     };
     format!(
-        r#"<article class="c-control-row" data-decision-outcome="{outcome}" data-control-reason="{reason}">
-             <div><p>{kind} · {time}</p><h3>{target}</h3><span>{refs}</span></div>
-             <div class="c-control-outcome"><b>{outcome}</b><code>{reason}</code><span>{next}</span></div>
+        r#"<article class="c-decision-event" data-decision-outcome="{outcome}" data-control-reason="{reason}">
+             <time>{time}</time><div class="c-decision-kind">{kind}</div>
+             <div class="c-decision-copy"><h3>{target}</h3><p>{refs}</p><span>{next}</span></div>
+             <div class="c-control-outcome"><b>{outcome}</b><code>{reason}</code></div>
              <span class="v7-sr-only" data-rule-revision-ref>{rule_ref}</span>
            </article>"#,
         outcome = escape(&decision.outcome),
@@ -506,12 +646,52 @@ fn decision_row(decision: &SchedulerDecisionView) -> String {
 }
 
 fn attention_markup(projection: &CollectionControlSurfaceProjection) -> String {
+    let entries = attention_entries(projection);
+    let body = if entries.is_empty() {
+        r#"<section class="c-control-empty"><h2>当前没有可恢复的真实阻断</h2><p>控制投影读取成功，当前范围没有带恢复动作的阻断。DYNAMIC_UNAVAILABLE、not_due、manual_only 与 PARTIAL + VALID 不会被冒充为失败。</p></section>"#.to_owned()
+    } else {
+        entries.iter().map(attention_row).collect::<String>()
+    };
+    let inspector = entries.first().map_or_else(
+        || {
+            r#"<aside class="c-attention-inspector c-attention-inspector-empty"><p>当前没有可选择的阻断。</p></aside>"#.to_owned()
+        },
+        attention_inspector,
+    );
+    format!(
+        r#"<section class="c-control-surface" data-collection-control="attention">
+             <div class="c-control-section-head"><div><p>Needs attention / durable only</p><h2>有恢复动作的阻断</h2></div><span>{count} 项</span></div>
+             <div class="c-attention-workspace">
+               <div class="c-attention-ledger">
+                 <div class="c-attention-head"><span>来源</span><span>对象</span><span>阻断</span><span>责任</span><span>观察时间</span></div>
+                 <div class="c-attention-list">{body}</div>
+               </div>
+               {inspector}
+             </div>
+           </section>"#,
+        count = entries.len(),
+    )
+}
+
+fn attention_readout(projection: &CollectionControlSurfaceProjection) -> String {
+    let entries = attention_entries(projection);
+    let count_owner = |owner: &str| entries.iter().filter(|entry| entry.owner == owner).count();
+    readout_markup(&[
+        (&entries.len().to_string(), "需要处理", "hot"),
+        (&count_owner("你").to_string(), "你负责", ""),
+        (&count_owner("执行工位").to_string(), "工位负责", ""),
+        (&count_owner("调度").to_string(), "调度负责", ""),
+        (&count_owner("工程").to_string(), "工程负责", "warn"),
+    ])
+}
+
+fn attention_entries(projection: &CollectionControlSurfaceProjection) -> Vec<AttentionEntry> {
     let mut entries = Vec::new();
     for lane in &projection.runtime_lanes {
         if let Some(reason_code) = lane.reason_code
             && let Some(recovery) = recovery_for(reason_code)
         {
-            entries.push(attention_row(
+            entries.push(AttentionEntry::new(
                 lane.label,
                 reason_code,
                 lane.reason.as_deref().unwrap_or("控制闸门关闭。"),
@@ -522,7 +702,7 @@ fn attention_markup(projection: &CollectionControlSurfaceProjection) -> String {
     }
     for decision in &projection.decisions {
         if let Some(recovery) = recovery_for(&decision.reason_code) {
-            entries.push(attention_row(
+            entries.push(AttentionEntry::new(
                 &decision.target_name,
                 &decision.reason_code,
                 decision_reason(&decision.reason_code),
@@ -531,24 +711,35 @@ fn attention_markup(projection: &CollectionControlSurfaceProjection) -> String {
             ));
         }
     }
-    let body = if entries.is_empty() {
-        r#"<section class="c-control-empty"><h2>当前没有可恢复的真实阻断</h2><p>控制投影读取成功，当前范围没有带恢复动作的阻断。DYNAMIC_UNAVAILABLE、not_due、manual_only 与 PARTIAL + VALID 不会被冒充为失败。</p></section>"#.to_owned()
-    } else {
-        entries.join("")
-    };
-    format!(
-        r#"<section class="c-control-surface" data-collection-control="attention">
-             <div class="c-control-section-head"><div><p>Needs attention / durable only</p><h2>有恢复动作的阻断</h2></div><span>{count} 项</span></div>
-             <div class="c-attention-list">{body}</div>
-           </section>"#,
-        count = entries.len(),
-    )
+    entries
 }
 
 #[derive(Clone, Copy)]
 struct Recovery {
     owner: &'static str,
     action: &'static str,
+}
+
+struct AttentionEntry {
+    title: String,
+    reason: String,
+    detail: String,
+    owner: &'static str,
+    action: &'static str,
+    observed: String,
+}
+
+impl AttentionEntry {
+    fn new(title: &str, reason: &str, detail: &str, recovery: Recovery, observed: &str) -> Self {
+        Self {
+            title: title.to_owned(),
+            reason: reason.to_owned(),
+            detail: detail.to_owned(),
+            owner: recovery.owner,
+            action: recovery.action,
+            observed: observed.to_owned(),
+        }
+    }
 }
 
 fn recovery_for(reason: &str) -> Option<Recovery> {
@@ -633,25 +824,37 @@ fn recovery_for(reason: &str) -> Option<Recovery> {
     }
 }
 
-fn attention_row(
-    title: &str,
-    reason: &str,
-    detail: &str,
-    recovery: Recovery,
-    observed: &str,
-) -> String {
+fn attention_row(entry: &AttentionEntry) -> String {
     format!(
-        r#"<article class="c-attention-row" data-control-reason="{reason}">
-             <div><p>{observed}</p><h3>{title}</h3><code>{reason}</code></div>
-             <p>{detail}</p>
-             <dl><div><dt>责任</dt><dd>{owner}</dd></div><div><dt>恢复动作</dt><dd>{action}</dd></div></dl>
-           </article>"#,
-        reason = escape(reason),
-        observed = escape(observed),
-        title = escape(title),
-        detail = escape(detail),
-        owner = recovery.owner,
-        action = recovery.action,
+        r#"<button type="button" class="c-attention-row" data-attention-row data-control-reason="{reason}" data-title="{title}" data-detail="{detail}" data-owner="{owner}" data-action="{action}" data-observed="{observed}">
+             <span class="c-attention-source"><i></i>控制阻断</span><span class="c-attention-target">{title}</span><code>{reason}</code><b>{owner}</b><time>{observed}</time>
+           </button>"#,
+        reason = escape(&entry.reason),
+        observed = escape(&entry.observed),
+        title = escape(&entry.title),
+        detail = escape(&entry.detail),
+        owner = entry.owner,
+        action = escape(entry.action),
+    )
+}
+
+fn attention_inspector(entry: &AttentionEntry) -> String {
+    format!(
+        r#"<aside class="c-attention-inspector" data-attention-inspector aria-live="polite">
+             <div class="c-attention-inspector-head"><span data-attention-reason>{reason}</span><h2 data-attention-title>{title}</h2><p data-attention-observed>{observed}</p></div>
+             <div class="c-attention-inspector-body">
+               <div class="c-state-line"><span><i></i>有恢复动作</span><span>{owner}负责</span></div>
+               <section><h3>为什么需要处理</h3><p data-attention-detail>{detail}</p></section>
+               <section><h3>恢复责任</h3><dl><div><dt>责任</dt><dd data-attention-owner>{owner}</dd></div><div><dt>下一步</dt><dd data-attention-action>{action}</dd></div></dl></section>
+               <section class="c-attention-boundary"><h3>边界</h3><p>这里仅显示持久控制阻断；语料内容、价值评分与影响数量不属于这个页面。</p></section>
+             </div>
+           </aside>"#,
+        reason = escape(&entry.reason),
+        title = escape(&entry.title),
+        observed = escape(&entry.observed),
+        owner = entry.owner,
+        detail = escape(&entry.detail),
+        action = escape(entry.action),
     )
 }
 
@@ -896,6 +1099,39 @@ fn replace_empty(base: &str, content: &str) -> String {
     format!("{}{content}{}", &base[..open], &base[close..])
 }
 
+fn replace_slot(base: &str, start: &str, end: &str, content: &str) -> String {
+    let Some(open) = base.find(start) else {
+        return base.to_owned();
+    };
+    let content_start = open + start.len();
+    let Some(close_offset) = base[content_start..].find(end) else {
+        return base.to_owned();
+    };
+    let close = content_start + close_offset;
+    format!(
+        "{}{}{}{}{}",
+        &base[..open],
+        start,
+        content,
+        end,
+        &base[close + end.len()..]
+    )
+}
+
+fn readout_markup(entries: &[(&str, &str, &str)]) -> String {
+    let cells = entries
+        .iter()
+        .map(|(value, label, tone)| {
+            format!(
+                r#"<div class="c-readout {tone}"><b>{value}</b><span>{label}</span></div>"#,
+                value = escape(value),
+                label = escape(label),
+            )
+        })
+        .collect::<String>();
+    format!(r#"<div class="c-readout-strip" data-collection-readout>{cells}</div>"#)
+}
+
 fn prepend_body(base: &str, content: &str) -> String {
     let Some(body) = base.find(BODY_OPEN) else {
         return base.to_owned();
@@ -1085,6 +1321,59 @@ mod tests {
         assert!(runtime.contains("data-account-binding-form"));
         assert!(runtime.contains("action=\"/collection/runtime/account-bindings\""));
         assert!(runtime.contains("data-account-binding-required=\"true\""));
+    }
+
+    #[test]
+    fn v4_control_surfaces_replace_the_workspace_slots_with_bounded_real_projections() {
+        let projection = projection();
+        let base = format!(
+            "<main>{READOUT_SLOT_START}<div>placeholder readout</div>{READOUT_SLOT_END}<div class=\"c-body\">{BODY_SLOT_START}<section>placeholder body</section>{BODY_SLOT_END}</div></main>"
+        );
+
+        let operations = render_operations(&base, &projection);
+        assert!(operations.contains("c-operations-workspace"));
+        assert!(operations.contains("c-decision-stream"));
+        assert!(operations.contains("data-control-reason=\"account_needs_login\""));
+        assert!(!operations.contains("placeholder body"));
+        assert!(!operations.contains("placeholder readout"));
+        assert_eq!(
+            operations.matches("<div class=\"c-readout").count()
+                - operations.matches("c-readout-strip").count(),
+            5
+        );
+
+        let attention = render_attention(&base, &projection);
+        assert!(attention.contains("c-attention-workspace"));
+        assert!(attention.contains("data-attention-row"));
+        assert!(attention.contains("data-attention-inspector"));
+        assert!(attention.contains("data-owner=\"你\""));
+        assert!(!attention.contains("placeholder body"));
+        assert!(!attention.contains("placeholder readout"));
+        assert_eq!(
+            attention.matches("<div class=\"c-readout").count()
+                - attention.matches("c-readout-strip").count(),
+            5
+        );
+    }
+
+    #[test]
+    fn collection_control_ui_has_no_evidence_or_monitoring_value_module_copy() {
+        let projection = projection();
+        let base = format!(
+            "<main>{READOUT_SLOT_START}{READOUT_SLOT_END}<div class=\"c-body\">{BODY_SLOT_START}{BODY_SLOT_END}</div></main>"
+        );
+        let html = format!(
+            "{}{}",
+            render_operations(&base, &projection),
+            render_attention(&base, &projection)
+        );
+        for forbidden in ["Evidence", "监控价值", "代表证据", "机会评分"] {
+            assert!(
+                !html.contains(forbidden),
+                "Collection control UI must not expose the retired {forbidden} module"
+            );
+        }
+        assert!(html.contains("语料内容与价值评分归属语料页"));
     }
 
     #[test]

@@ -8,13 +8,15 @@
 
 ## 当前阶段
 
-### COLLECTION-READ-MODEL-CLOSURE-001 / Issue #148（Draft PR #151 review remediation）
+### COLLECTION-FIVE-PAGE-V4-UI-001 / Issue #149（独立分支已实现，已获提交、合并与本机刷新授权）
 
-当前唯一交付包在独立 worktree `codex/collection-read-model-closure-001` 上收口 Collection 目标读面。新增 target-scoped creator Work 生命周期，不新增事实表：稳定作者 ID 必须精确匹配，横轴只接受 qualified platform epoch，互动字段逐项选择 as-of 前 latest KNOWN；真实 `KNOWN 0` 保留，UNKNOWN、作者未确认/不匹配、时间不合格、窗外和扫描截断均分项回执。近 90 天固定为 `Asia/Shanghai` 90 个含首尾日历日；分析版本为 `creator-percentile-v1` 与服务端 `trailing-5-work-median-v1` / 5，前端不二次计算。Collection 页面仅在 creator overview 执行有界扫描。公开 lifecycle API 已收为 derived DTO，不包含 title/author/published/engagement Current；列表、单品、详情 Inspector 与 lifecycle 在同事务同 `as_of` 下复用 crate-private typed batch Current owner，target 查询只选择候选范围。
+Package 1 已由 PR #151 合入 `c5158b14f5fc2313dbd3dc94670083500e767ced`；Package 2 已由 PR #153 合入当前 `origin/main@84fd9498e18164011621ffabc81a2a421a52f7a1`。当前唯一实施项是 Mog 对五个 Collection 页面提出的 V4 UI 验收反馈，工作位于独立分支 `codex/collection-five-page-v4-ui`，不改变既有数据库或控制合同。
 
-目标抽屉现收为概览/基线/巡检策略/追踪四职责，Evidence tab 已退役；生命周期只提供最小选中作品摘要并精确进入 `/corpus/evidence?work=<public-ref>`。首批列表外 Work 不回退第一项；既有 390px 诊断走查证明直接 URL 或刷新会在精确详情恢复成功后自动打开 Inspector，且不新增 history；桌面继续使用原 Inspector 列。非法 lifecycle query 显式 `QUERY_INVALID`，`all` caption 不再冒充 90 日，退役/未知 tab 统一归一并读取 Overview；截断时只报 `>=2001` 下限及 probe/scanned/returned。Escape/关闭保留 filter 与既有 `sort=last` 上下文并将焦点还给 target opener。共享 focus owner 覆盖主题文档内的 link/button/input/Work row 及固定 drawer SVG link；Corpus 与 Collection 的既有 1440/390 真实键盘走查均得到 `#335e72` 2px/2px ring，不改变非焦点或错误状态。监控价值、机会评分、趋势预测与 Evidence 正文/评论/媒体复制均明确排除。review remediation focused、隔离 PostgreSQL、workspace test/check/fmt/JS/governance 与浏览器页面证据均已通过；fixture 为脱敏合成数据，不代表当前真实数据密度。
+五页已统一为“可见页标题 → 五格有界读数 → 页内控制条 → 主工作区”：待处理为恢复事项 ledger + 事实 Inspector；观察目标为高密度目录 + URL 所有的宽幅抽屉；生产流为阶段 ledger + 单一 dark durable-decision instrument；采集任务为 Task ledger + Attempt/Package/Receipt/冻结资源 Inspector；执行工位保留单一 capacity evaluator，并强化判定、资源关系、登记与认领层级。Package 2 原先只在空态替换 Operations/Attention 的接线缺口同时修复，现在真实 projection 会替换页面 body slot。`archived`、`paused`、`dismissed` 等合法目标生命周期均有中文标签，不再降级成“状态未知”。
 
-Mog 于 2026-09-04 接受本包的当前支持边界与残余风险：**Package 1 的验收基线是 1440 CSS px 桌面全屏；1280 与 390 不属于本 Package 验收范围**。“不在手机或小于 13 寸屏幕运行”描述的是使用场景，不是可测试的 CSS 断点，因此合同只以 viewport 宽度表达。既有 1280/390 结果继续作为诊断证据，不提升为支持承诺；一次隔离 1280 测量中 Inspector 右缘超出 viewport 约 49.83 CSS px 的裁切已被明确接受并移出当前范围。后加载页面仍保留局部 focus 声明，这是已接受技术债；共享 owner 在已验证表面上的 computed focus 仍为 2px/2px。原 reviewer FAIL 作为历史发现保留，本决定是验收范围与风险接受，不是将其改写为 reviewer PASS。核心事实链、数据库读模型与代码检查已通过；merge、`:3000` runtime 刷新和 Mog 实际验收仍待后续执行与证明。Package 2 Collection Control 与 Package 3 Creator Dossier 必须等本包合并并复核最新 main 后另立 Claim。
+参考文件 `/Users/moglenny/Downloads/linggan-collection-field-workspace-v4-ia-cn.html` 仅作为 synthetic UI 对标；全局 header/context/rail 继续由 Intelligence 共享 shell 所有，不复制第二套壳层。Collection 页面不展示语料内容、Evidence tab、代表证据、监控价值或机会评分；目标抽屉默认核心仍是服务端 creator lifecycle，并只通过精确 Work 深链进入 Corpus。支持合同继续固定为 1440 CSS px 桌面全屏，不投入 1280/390/手机或小于 13 寸屏幕适配。
+
+本分支已在一次性 PostgreSQL 16（33 个迁移、纯合成 2 targets / 2 decisions / 3 tasks）与隔离 `:3311` 完成五页 1440×900 浏览器走查：五页均 `scrollWidth=clientWidth=1440`、每页 5 个读数、关键双栏/flow/registration 结构存在，待处理行与任务 tab 互动成立，生命周期抽屉可见，浏览器 console warning/error 为 0。该证明不代表真实数据密度。Mog 已于 2026-09-04 授权提交、推送、合并到 `main` 并刷新本机 `:3000`；执行仍须以 exact-head 检查、独立复审、合并后 main 与 live PID 来源复验为门。共享 PostgreSQL、两个 worker、插件和真实平台不在该运行授权内，Mog 业务视觉验收仍待本机页面刷新后进行。Package 3 仍未启动。
 
 ### TOPIC-WORKSPACE-REAL-001 / Issue #112（已部署；待 Mog 业务验收）
 

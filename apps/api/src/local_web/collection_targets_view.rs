@@ -61,6 +61,7 @@ pub fn render_stored_targets(
                 <span>{count} 个观察目标</span>
                 <span class="c-tg-list-hint">点击一行 → 打开宽幅研究抽屉</span>
               </div>
+              <div class="c-tg-table-head" aria-hidden="true"><span></span><span>编号</span><span>观察目标</span><span>内容量</span><span>本轮变化</span><span>时间</span><span>基线与档案</span><span>操作</span></div>
               <form class="c-tg-form" method="post" action="/collection/targets/batch">
                 <div class="c-tg-list">{rows}</div>
                 <div class="c-tg-batch">
@@ -205,13 +206,15 @@ fn state_chips(target: &ObservationTarget) -> String {
     let (archive_tone, archive_label) = match target.lifecycle_state.as_str() {
         "pending_decision" => ("neutral", "尚未建档"),
         "archiving" => ("warn", "▲ 建档中"),
-        "monitoring" => ("ok", "● 基线就绪"),
+        "archived" | "monitoring" | "paused" => ("ok", "● 基线就绪"),
+        "dismissed" => ("neutral", "已停止观察"),
         _ => ("neutral", "状态未知"),
     };
-    let (patrol_tone, patrol_label) = if target.monitoring_enabled {
-        ("info", "巡检中")
-    } else {
-        ("neutral", "未开启巡检")
+    let (patrol_tone, patrol_label) = match target.lifecycle_state.as_str() {
+        "paused" => ("warn", "巡检已暂停"),
+        "dismissed" => ("neutral", "已停止观察"),
+        _ if target.monitoring_enabled => ("info", "巡检中"),
+        _ => ("neutral", "未开启巡检"),
     };
     format!(
         r#"<span class="c-tg-truth c-tg-{archive_tone}">{archive_label}</span>
@@ -637,5 +640,25 @@ mod tests {
         assert!(!html.contains("/collection/targets/monitoring"));
         assert!(!html.contains("name=\"action\" value=\"monitor_on\""));
         assert!(!html.contains("name=\"action\" value=\"monitor_off\""));
+    }
+
+    #[test]
+    fn every_legal_lifecycle_state_has_a_human_label() {
+        let expected = [
+            ("pending_decision", "尚未建档"),
+            ("archiving", "建档中"),
+            ("archived", "基线就绪"),
+            ("monitoring", "基线就绪"),
+            ("paused", "巡检已暂停"),
+            ("dismissed", "已停止观察"),
+        ];
+        for (state, label) in expected {
+            let mut creator = target("creator", Some("生命周期作者"));
+            creator.lifecycle_state = state.to_owned();
+            creator.monitoring_enabled = state == "monitoring";
+            let html = state_chips(&creator);
+            assert!(html.contains(label), "{state} must read as {label}");
+            assert!(!html.contains("状态未知"), "{state} is a legal state");
+        }
     }
 }

@@ -122,6 +122,81 @@
     }
   }
 
+  var attentionRows = Array.prototype.slice.call(document.querySelectorAll("[data-attention-row]"));
+  var attentionInspector = document.querySelector("[data-attention-inspector]");
+  if (attentionRows.length && attentionInspector) {
+    function setAttentionText(selector, value) {
+      var element = attentionInspector.querySelector(selector);
+      if (element) {
+        element.textContent = value || "UNKNOWN";
+      }
+    }
+    function selectAttention(row) {
+      attentionRows.forEach(function (candidate) {
+        var selected = candidate === row;
+        candidate.classList.toggle("is-selected", selected);
+        candidate.setAttribute("aria-pressed", selected ? "true" : "false");
+      });
+      setAttentionText("[data-attention-reason]", row.dataset.controlReason);
+      setAttentionText("[data-attention-title]", row.dataset.title);
+      setAttentionText("[data-attention-observed]", row.dataset.observed);
+      setAttentionText("[data-attention-detail]", row.dataset.detail);
+      setAttentionText("[data-attention-owner]", row.dataset.owner);
+      setAttentionText("[data-attention-action]", row.dataset.action);
+    }
+    attentionRows.forEach(function (row) {
+      row.addEventListener("click", function () { selectAttention(row); });
+    });
+    selectAttention(attentionRows[0]);
+  }
+
+  var taskRows = Array.prototype.slice.call(document.querySelectorAll("[data-task-row]"));
+  var taskInspector = document.querySelector("[data-task-inspector]");
+  if (taskRows.length && taskInspector) {
+    function setTaskText(selector, value) {
+      var element = taskInspector.querySelector(selector);
+      if (element) {
+        element.textContent = value || "UNKNOWN";
+      }
+    }
+    function selectTask(row) {
+      taskRows.forEach(function (candidate) {
+        var selected = candidate === row;
+        candidate.classList.toggle("is-selected", selected);
+        candidate.setAttribute("aria-pressed", selected ? "true" : "false");
+      });
+      setTaskText("[data-task-inspector-ref]", "任务 #" + row.dataset.taskRef);
+      setTaskText("[data-task-inspector-title]", row.dataset.taskTitle);
+      setTaskText("[data-task-inspector-meta]", row.dataset.taskMeta);
+      setTaskText("[data-task-inspector-state]", row.dataset.taskState);
+      setTaskText("[data-task-inspector-state-note]", row.dataset.taskStateNote);
+      setTaskText("[data-task-inspector-capabilities]", row.dataset.taskCapabilities);
+      setTaskText("[data-task-inspector-created]", row.dataset.taskCreated);
+      setTaskText("[data-task-inspector-failure]", row.dataset.taskFailure);
+      setTaskText("[data-task-inspector-attempt]", row.dataset.taskAttempt);
+      setTaskText("[data-task-inspector-package]", row.dataset.taskPackage);
+      setTaskText("[data-task-inspector-receipt]", row.dataset.taskReceipt);
+      setTaskText("[data-task-inspector-effect]", row.dataset.taskEffect);
+    }
+    taskRows.forEach(function (row) {
+      row.addEventListener("click", function () { selectTask(row); });
+    });
+    selectTask(taskRows[0]);
+  }
+
+  var taskTabs = Array.prototype.slice.call(document.querySelectorAll("[data-task-tab]"));
+  var taskPanels = Array.prototype.slice.call(document.querySelectorAll("[data-task-panel]"));
+  taskTabs.forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      taskTabs.forEach(function (candidate) {
+        candidate.classList.toggle("is-active", candidate === tab);
+      });
+      taskPanels.forEach(function (panel) {
+        panel.classList.toggle("is-active", panel.dataset.taskPanel === tab.dataset.taskTab);
+      });
+    });
+  });
+
   var drawer = document.getElementById("c-drawer");
   if (!drawer) {
     if (!ruleModal) {
