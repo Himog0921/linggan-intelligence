@@ -130,9 +130,43 @@ function firstPresentValue(source = {}, keys = []) {
   return null;
 }
 
+// XHS reports a zero interaction count as an empty string, not as "0". Every count key that
+// can carry that representation has to be listed here, because a hydrated `interactInfo` is
+// the only thing that separates a real zero from a field the page has not filled in yet.
+const XHS_INTERACT_COUNT_KEYS = [
+  'likedCount', 'likeCount', 'likes',
+  'collectedCount', 'collectCount', 'collects', 'favoriteCount',
+  'commentCount', 'comments',
+  'shareCount', 'shares',
+];
+
+/// Has this `interactInfo` been filled in at all?
+///
+/// One populated count proves the object is hydrated. Before that, every key reads as an empty
+/// string and no key can be told apart from a real zero.
+function xhsInteractInfoIsHydrated(interactInfo) {
+  if (!interactInfo || typeof interactInfo !== 'object') return false;
+  return XHS_INTERACT_COUNT_KEYS.some((key) => {
+    const value = interactInfo[key];
+    if (typeof value === 'number') return Number.isFinite(value);
+    return typeof value === 'string' && value.trim() !== '';
+  });
+}
+
+/// Read one interaction count, telling a real zero apart from an unobserved field.
+///
+/// A note with no comments returns `commentCount: ""` alongside a populated `likedCount`.
+/// Reading that as "unknown" downgrades a known fact, and the projection then cannot say the
+/// work has zero comments. Reading *every* empty string as zero would be the opposite error:
+/// an unhydrated page would be published as a confirmed zero. Hydration is what separates them.
 export function parseXhsInteractCount(interactInfo = {}, keys = []) {
   const value = firstPresentValue(interactInfo, keys);
-  return value == null ? null : parseCount(value);
+  if (value != null) return parseCount(value);
+  if (!xhsInteractInfoIsHydrated(interactInfo)) return null;
+  const emptyStringPresent = keys.some(
+    (key) => typeof interactInfo?.[key] === 'string' && interactInfo[key].trim() === '',
+  );
+  return emptyStringPresent ? 0 : null;
 }
 
 export function isCollectedNoteUsable(note = {}, expectedNoteId = '', { requireStats = false } = {}) {
@@ -601,8 +635,9 @@ export async function collectNote(wd = window, options = {}) {
 
   const platformContentId = note.noteId || note.id || noteKey;
   const collectedAt = Date.now();
-  const rawPublicCommentCount = firstPresentValue(note.interactInfo, ['commentCount', 'comments']);
-  const publicCommentCount = rawPublicCommentCount == null ? null : parseCount(rawPublicCommentCount);
+  // Same hydration rule as every other interaction count: a note with no comments reports an
+  // empty string, and that is a known zero rather than an unobserved field.
+  const publicCommentCount = parseXhsInteractCount(note.interactInfo, ['commentCount', 'comments']);
   const publishedAtEvidence = readXhsPublishedAtEvidence(note, { now: collectedAt });
 
   const noteInfo = withLocalReadMeta({
