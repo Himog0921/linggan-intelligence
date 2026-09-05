@@ -852,29 +852,45 @@ async fn submit_patrol_round(
         request.lease.is_some(),
         "patrol must be leased: {request:?}"
     );
-    let decision = decide_dispatch(database, &installation.install_key, &installation.secret)
-        .await
-        .unwrap();
-    let task_spec = match decision {
-        linggan_evidence::DispatchDecision::Dispatch { task_spec, .. } => task_spec,
-        other => panic!("expected a dispatched patrol task, got {other:?}"),
-    };
-    let task = parse_producer_task_spec(&task_spec.to_string()).unwrap();
     let producer_instance_id = Uuid::parse_str(&installation.install_key).unwrap();
-    let attempt = parse_producer_attempt(
-        &serde_json::json!({
-            "contractVersion":"linggan.producer.attempt.v1",
-            "producerInstanceId":producer_instance_id,
-            "taskId":task.task_id(),
-            "attemptId":Uuid::new_v4(),
-        })
-        .to_string(),
-    )
-    .unwrap();
-    assert!(matches!(
-        start_producer_attempt(database, &attempt).await,
-        Ok(RuntimeAttemptOutcome::Started { .. })
-    ));
+    // A creator patrol is deliberately two browser steps.  The author-profile receipt must
+    // complete before the same Lease exposes the profile-discovery task that supplies this
+    // round's Work cards; never submit a discovery package against the author task.
+    let (task, attempt) = loop {
+        let decision = decide_dispatch(database, &installation.install_key, &installation.secret)
+            .await
+            .unwrap();
+        let task_spec = match decision {
+            linggan_evidence::DispatchDecision::Dispatch { task_spec, .. } => task_spec,
+            other => panic!("expected a dispatched patrol task, got {other:?}"),
+        };
+        let task = parse_producer_task_spec(&task_spec.to_string()).unwrap();
+        let attempt = parse_producer_attempt(
+            &serde_json::json!({
+                "contractVersion":"linggan.producer.attempt.v1",
+                "producerInstanceId":producer_instance_id,
+                "taskId":task.task_id(),
+                "attemptId":Uuid::new_v4(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(matches!(
+            start_producer_attempt(database, &attempt).await,
+            Ok(RuntimeAttemptOutcome::Started { .. })
+        ));
+        let capability = task.raw()["capabilitiesRequested"][0].as_str().unwrap();
+        if capability == "author_profile" {
+            let author_submission = bounded_root_submission(&task, &attempt, producer_instance_id);
+            assert!(matches!(
+                submit_producer_package(database, &author_submission).await,
+                Ok(RuntimeSubmissionOutcome::Acknowledged { .. })
+            ));
+            continue;
+        }
+        assert_eq!(capability, "profile_discovery");
+        break (task, attempt);
+    };
     let identity = task.raw()["target"]["authorExternalId"].as_str().unwrap();
     let (observed, attempted, acquired, unknown, stopped_reason, records) = match round {
         PatrolRound::OneUsableWork => (
@@ -1305,8 +1321,10 @@ async fn seed_historical_patrol(
     sqlx::query(
         "INSERT INTO collection_acquisition_authorization \
            (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target, \
+            allowed_task_templates,allowed_dispatch_lanes,max_work_units, \
             purpose,granted_by,granted_at,expires_at) \
-         VALUES ($1,'xhs','creator','patrol',1,20,'历史巡查','person', \
+         VALUES ($1,'xhs','creator','patrol',1,20, \
+                 ARRAY['creator_patrol'],ARRAY['immediate','scheduled'],20,'历史巡查','person', \
                  $2::timestamptz,$2::timestamptz + interval '30 days')",
     )
     .bind(authorization_ref)

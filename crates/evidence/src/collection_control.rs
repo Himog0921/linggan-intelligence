@@ -7,7 +7,7 @@
 
 use crate::acquisition_chain::{AcquisitionChainError, request_and_admit_in_transaction};
 use crate::station_read::station_daily_note_usage_in;
-use crate::work_order_lease::{LeaseError, issue_work_order_lease_in_transaction};
+use crate::work_order_lease::LeaseError;
 use linggan_contracts::{Capacity, CapacityReasonCode};
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
@@ -878,6 +878,49 @@ pub(crate) async fn revalidate_frozen_capacity_in(
     ))
 }
 
+/// Evaluate a *specific* plugin installation as a Work-Order claimant. This
+/// is deliberately separate from admission's old “pick any healthy station”
+/// lookup: a queue consumer must never silently substitute another station for
+/// the plugin that made the claim request.
+pub(crate) async fn evaluate_claiming_installation_capacity_in(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    installation_ref: Uuid,
+    platform: &str,
+    lane: &str,
+    required_capabilities: &[&str],
+) -> Result<CapacitySelection, sqlx::Error> {
+    let claimant: Option<(Option<Uuid>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT i.station_ref,binding.account_ref \
+         FROM plugin_installation i \
+         LEFT JOIN LATERAL ( \
+             SELECT account_ref FROM platform_observation_account_binding \
+             WHERE installation_ref=i.installation_ref AND ended_at IS NULL \
+             LIMIT 1) binding ON true \
+         WHERE i.installation_ref=$1 AND i.superseded_at IS NULL",
+    )
+    .bind(installation_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some((Some(station_ref), Some(account_ref))) = claimant else {
+        return Ok(CapacitySelection::blocked(
+            CapacityReasonCode::StationUnavailable,
+            "当前插件安装没有可用工位或已绑定观察账号。",
+        ));
+    };
+    revalidate_frozen_capacity_in(
+        transaction,
+        platform,
+        lane,
+        required_capabilities,
+        station_ref,
+        installation_ref,
+        account_ref,
+        None,
+        true,
+    )
+    .await
+}
+
 fn candidate_block_reason(
     candidate: &CapacityCandidate,
     required_capabilities: &[&str],
@@ -1340,32 +1383,6 @@ pub async fn apply_monitor_rule_command(
         .await;
     }
 
-    let automatic_requested = match command.kind {
-        MonitorCommandKind::SaveRule => command
-            .draft
-            .as_ref()
-            .is_some_and(|draft| draft.automatic_enabled),
-        MonitorCommandKind::Resume => true,
-        _ => false,
-    };
-    if automatic_requested
-        && target_kind == "creator"
-        && !creator_baseline_qualified(&mut transaction, command.target_ref).await?
-    {
-        return finish_monitor_command(
-            transaction,
-            command,
-            &payload_digest,
-            "baseline_not_ready",
-            MonitorCommandOutcomeKind::Rejected,
-            current_revision,
-            None,
-            None,
-            None,
-        )
-        .await;
-    }
-
     let next_revision = current_revision + 1;
     let rule_revision_ref = Uuid::new_v4();
     match command.kind {
@@ -1384,8 +1401,6 @@ pub async fn apply_monitor_rule_command(
         }
         MonitorCommandKind::Pause | MonitorCommandKind::Resume | MonitorCommandKind::Stop => {
             let automatic_enabled = matches!(command.kind, MonitorCommandKind::Resume);
-            let mode_override = matches!(command.kind, MonitorCommandKind::Stop)
-                .then_some(MonitorRuleMode::ManualOnly);
             copy_monitor_rule_revision(
                 &mut transaction,
                 command.target_ref,
@@ -1393,7 +1408,7 @@ pub async fn apply_monitor_rule_command(
                 rule_revision_ref,
                 next_revision,
                 automatic_enabled,
-                mode_override,
+                None,
                 &payload_digest,
                 command.actor,
             )
@@ -1424,7 +1439,13 @@ pub async fn apply_monitor_rule_command(
                  patrol_interval_seconds=COALESCE((SELECT CASE \
                      WHEN mode='fixed' THEN fixed_interval_seconds \
                      ELSE fallback_interval_seconds END \
-                     FROM collection_monitor_rule_revision WHERE rule_revision_ref=$2),86400) \
+                     FROM collection_monitor_rule_revision WHERE rule_revision_ref=$2),86400), \
+                 monitor_schedule_anchor_at=CASE WHEN $3 THEN scope_001_now() ELSE NULL END, \
+                 monitor_next_run_at=CASE WHEN $3 THEN scope_001_now() + make_interval(secs => \
+                     COALESCE((SELECT fixed_interval_seconds \
+                       FROM collection_monitor_rule_revision WHERE rule_revision_ref=$2),86400)) \
+                     ELSE NULL END, \
+                 monitor_missed_run_count=0 \
              WHERE target_ref=$1",
         )
         .bind(command.target_ref)
@@ -1469,7 +1490,7 @@ pub async fn apply_monitor_rule_command(
 pub async fn apply_manual_observe_command(
     database: &Database,
     command: &MonitorRuleCommand,
-    valid_for_minutes: i32,
+    _valid_for_minutes: i32,
 ) -> Result<MonitorRuleCommandReceipt, MonitorRuleCommandError> {
     if command.kind != MonitorCommandKind::ManualObserve {
         return Err(MonitorRuleCommandError::InvalidManualObserveCommand);
@@ -1626,30 +1647,10 @@ pub async fn apply_manual_observe_command(
                 )
                 .await;
             };
-            let lease = match issue_work_order_lease_in_transaction(
-                &mut transaction,
-                work_order_ref,
-                valid_for_minutes,
-            )
-            .await
-            {
-                Ok(lease) => lease,
-                Err(error) => {
-                    return finish_monitor_command(
-                        transaction,
-                        command,
-                        &payload_digest,
-                        manual_observe_lease_error_reason(&error),
-                        MonitorCommandOutcomeKind::Rejected,
-                        current_revision,
-                        None,
-                        None,
-                        None,
-                    )
-                    .await;
-                }
-            };
-            ("manual_observe_created", work_order_ref, lease.lease_ref)
+            // A manual observation joins the same durable Work-Order pool as a
+            // scheduled patrol. It must not pin work to whichever station was
+            // healthy at click time; an eligible plugin claims it atomically.
+            ("manual_observe_created", work_order_ref, None)
         };
     finish_monitor_command(
         transaction,
@@ -1660,7 +1661,7 @@ pub async fn apply_manual_observe_command(
         current_revision,
         None,
         Some(work_order_ref),
-        Some(lease_ref),
+        lease_ref,
     )
     .await
 }
@@ -1673,28 +1674,22 @@ fn manual_observe_error_reason(error: &AcquisitionChainError) -> &'static str {
     }
 }
 
-fn manual_observe_lease_error_reason(error: &LeaseError) -> &'static str {
-    match error {
-        LeaseError::ControlBlocked { reason_code } => closed_monitor_reason(reason_code),
-        LeaseError::AuthorizationLapsed => "authorization_expired_or_revoked",
-        LeaseError::UnknownWorkOrder => "target_not_requestable",
-        LeaseError::AlreadyLeased => "account_busy",
-        LeaseError::Database(_) => "database_unavailable",
-        _ => "capacity_unknown",
-    }
-}
-
 async fn live_patrol_execution_in(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
-) -> Result<Option<(Uuid, Uuid)>, sqlx::Error> {
+) -> Result<Option<(Uuid, Option<Uuid>)>, sqlx::Error> {
     sqlx::query_as(
         "SELECT work_order.work_order_ref,lease.lease_ref \
          FROM collection_work_order work_order \
-         JOIN collection_work_order_lease lease USING(work_order_ref) \
+         LEFT JOIN LATERAL ( \
+           SELECT lease_ref FROM collection_work_order_lease \
+           WHERE work_order_ref=work_order.work_order_ref \
+             AND released_at IS NULL AND expires_at>scope_001_now() \
+           ORDER BY issued_at DESC LIMIT 1) lease ON true \
          WHERE work_order.target_ref=$1 AND work_order.lane='patrol' \
-           AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
-         ORDER BY lease.issued_at DESC LIMIT 1",
+           AND work_order.queue_state IN ('queued','leased') \
+         ORDER BY CASE work_order.queue_state WHEN 'leased' THEN 0 ELSE 1 END, \
+                  work_order.created_at DESC LIMIT 1",
     )
     .bind(target_ref)
     .fetch_optional(&mut **transaction)
@@ -1718,8 +1713,10 @@ fn closed_monitor_reason(value: &str) -> &'static str {
         "target_not_requestable" => "target_not_requestable",
         "database_unavailable" => "database_unavailable",
         "authorization_missing" => "authorization_missing",
+        "authorization_scope_mismatch" => "authorization_scope_mismatch",
         "authorization_purpose_mismatch" => "authorization_purpose_mismatch",
         "authorization_target_limit_reached" => "authorization_target_limit_reached",
+        "authorization_work_unit_limit_reached" => "authorization_work_unit_limit_reached",
         "authorization_expired_or_revoked" => "authorization_expired_or_revoked",
         "risk_paused" => "risk_paused",
         "station_unavailable" => "station_unavailable",
@@ -1849,40 +1846,28 @@ fn validate_monitor_command(
     if draft.surface_key.trim().is_empty() || draft.task_contract_version.trim().is_empty() {
         return Err("invalid_mode");
     }
-    if draft.mode == MonitorRuleMode::ManualOnly
-        && (draft.automatic_enabled || draft.fixed_interval_seconds.is_some())
-    {
+    // The first delivery deliberately exposes one unambiguous cadence: fixed
+    // interval anchored at enable/resume. Weekday, window, fallback and dynamic
+    // combinations used to form a second scheduler hidden behind the same rule.
+    if draft.mode != MonitorRuleMode::Fixed {
         return Err("invalid_mode");
     }
-    if draft.mode == MonitorRuleMode::Fixed
-        && !draft.fixed_interval_seconds.is_some_and(valid_interval)
-    {
+    let Some(interval) = draft.fixed_interval_seconds else {
+        return Err("invalid_interval");
+    };
+    if !valid_interval(interval) || draft.fallback_interval_seconds != interval {
         return Err("invalid_interval");
     }
-    if draft.mode == MonitorRuleMode::Dynamic && draft.fixed_interval_seconds.is_some() {
-        return Err("invalid_interval");
-    }
-    if !valid_interval(draft.fallback_interval_seconds) {
-        return Err("invalid_interval");
-    }
-    if draft.mode != MonitorRuleMode::ManualOnly && !draft.run_on_weekdays && !draft.run_on_weekends
-    {
+    if !draft.run_on_weekdays || !draft.run_on_weekends || !draft.all_day {
         return Err("invalid_schedule");
     }
-    let valid_window = if draft.all_day {
-        draft.window_start_minute.is_none() && draft.window_end_minute.is_none()
-    } else {
-        matches!(
-            (draft.window_start_minute, draft.window_end_minute),
-            (Some(start), Some(end)) if (0..=1439).contains(&start)
-                && (1..=1440).contains(&end) && start < end
-        )
-    };
-    valid_window.then_some(()).ok_or("invalid_schedule")
+    (draft.window_start_minute.is_none() && draft.window_end_minute.is_none())
+        .then_some(())
+        .ok_or("invalid_schedule")
 }
 
 fn valid_interval(value: i32) -> bool {
-    (MINIMUM_MONITOR_INTERVAL_SECONDS..=MAXIMUM_MONITOR_INTERVAL_SECONDS).contains(&value)
+    matches!(value, 21_600 | 43_200 | 86_400 | 172_800 | 604_800)
 }
 
 fn monitor_command_digest(command: &MonitorRuleCommand) -> String {
@@ -1986,7 +1971,7 @@ async fn copy_monitor_rule_revision(
 async fn apply_monitor_lifecycle_transition(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
-    target_kind: &str,
+    _target_kind: &str,
     lifecycle_state: &str,
     kind: MonitorCommandKind,
     automatic_enabled: bool,
@@ -1994,17 +1979,16 @@ async fn apply_monitor_lifecycle_transition(
     actor: MonitorCommandActor,
 ) -> Result<(), sqlx::Error> {
     let next_state = match kind {
+        // Observing a known target and historically archiving it are separate
+        // capabilities. A creator need not first prove a complete archive in
+        // order to enter ordinary automatic observation.
         MonitorCommandKind::SaveRule
-            if target_kind == "keyword"
-                && automatic_enabled
-                && lifecycle_state == "pending_decision" =>
+            if automatic_enabled && lifecycle_state == "pending_decision" =>
         {
             Some("monitoring")
         }
         MonitorCommandKind::SaveRule
-            if target_kind == "keyword"
-                && !automatic_enabled
-                && lifecycle_state == "pending_decision" =>
+            if !automatic_enabled && lifecycle_state == "pending_decision" =>
         {
             Some("paused")
         }
@@ -2018,8 +2002,7 @@ async fn apply_monitor_lifecycle_transition(
         }
         MonitorCommandKind::Pause if lifecycle_state == "monitoring" => Some("paused"),
         MonitorCommandKind::Resume
-            if matches!(lifecycle_state, "paused" | "archived")
-                || (target_kind == "keyword" && lifecycle_state == "pending_decision") =>
+            if matches!(lifecycle_state, "paused" | "archived" | "pending_decision") =>
         {
             Some("monitoring")
         }

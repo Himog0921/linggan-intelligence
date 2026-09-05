@@ -26,6 +26,8 @@ pub enum LeaseError {
     UnknownWorkOrder,
     #[error("that work order already has a live lease")]
     AlreadyLeased,
+    #[error("a work order lease must have a positive duration")]
+    InvalidLeaseDuration,
     #[error("the work order names no station, so there is nothing to lease to")]
     NoStation,
     #[error("that station no longer has a live plugin installation")]
@@ -140,6 +142,9 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
     work_order_ref: Uuid,
     valid_for_minutes: i32,
 ) -> Result<IssuedLease, LeaseError> {
+    if valid_for_minutes <= 0 {
+        return Err(LeaseError::InvalidLeaseDuration);
+    }
     let subject = load_subject(transaction, work_order_ref).await?;
     reject_if_already_leased(transaction, work_order_ref).await?;
     reject_if_authorization_lapsed(transaction, &subject).await?;
@@ -181,6 +186,20 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
             reason_code: capacity.capacity.reason_code().to_owned(),
         });
     }
+    // Pre-0036 callers may still create a legacy Work Order and issue a Lease
+    // directly. Record that it is leased as soon as the same control checks
+    // succeed, so completion/expiry/failure recovery use one queue lifecycle.
+    sqlx::query(
+        "UPDATE collection_work_order SET queue_state='leased', \
+             dispatch_lane=CASE WHEN dispatch_lane='legacy' \
+                                THEN CASE WHEN lane='patrol' THEN 'immediate' ELSE 'batch' END \
+                                ELSE dispatch_lane END, \
+             scheduled_for=COALESCE(scheduled_for,scope_001_now()) \
+         WHERE work_order_ref=$1 AND queue_state IN ('legacy','queued')",
+    )
+    .bind(work_order_ref)
+    .execute(&mut **transaction)
+    .await?;
     let tasks = expand_into_tasks(&subject, &material_targets)?;
     for task in &tasks {
         insert_scheduled_task(transaction, task).await?;
@@ -209,6 +228,42 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
         expires_at,
         task_ids: tasks.iter().map(ProducerTaskSpec::task_id).collect(),
     })
+}
+
+/// Materialise the Lease for a Work Order claimed from the shared queue.
+///
+/// The caller has already locked the queued Work Order and evaluated the
+/// *calling* installation. Updating the frozen route and changing
+/// `queued → leased` happen before task expansion, in the same transaction;
+/// no scheduler can accidentally reserve a station on behalf of a plugin that
+/// did not claim this order.
+pub(crate) async fn claim_queued_work_order_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+    station_ref: Uuid,
+    installation_ref: Uuid,
+    account_ref: Uuid,
+    eligibility_ref: Option<Uuid>,
+    valid_for_minutes: i32,
+) -> Result<IssuedLease, LeaseError> {
+    let claimed = sqlx::query(
+        "UPDATE collection_work_order \
+         SET station_ref=$2,installation_ref=$3,account_ref=$4,eligibility_ref=$5, \
+             queue_state='leased' \
+         WHERE work_order_ref=$1 AND queue_state='queued'",
+    )
+    .bind(work_order_ref)
+    .bind(station_ref)
+    .bind(installation_ref)
+    .bind(account_ref)
+    .bind(eligibility_ref)
+    .execute(&mut **transaction)
+    .await?
+    .rows_affected();
+    if claimed != 1 {
+        return Err(LeaseError::AlreadyLeased);
+    }
+    issue_work_order_lease_in_transaction(transaction, work_order_ref, valid_for_minutes).await
 }
 
 /// 结束一份租约。到期与被撤销分开记：前者是正常边界，后者是有人踩了刹车。
@@ -245,7 +300,7 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     task_id: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    let completed: Option<(Uuid, Uuid, String)> = sqlx::query_as(
+    let completed: Option<(Uuid, Uuid, Uuid, String)> = sqlx::query_as(
         "UPDATE collection_work_order_lease_task task \
          SET execution_state = 'completed', completed_at = scope_001_now() \
          FROM collection_work_order_lease lease, collection_work_order work_order \
@@ -254,12 +309,12 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
            AND lease.lease_ref = task.lease_ref \
            AND lease.released_at IS NULL \
            AND work_order.work_order_ref = lease.work_order_ref \
-         RETURNING lease.lease_ref, work_order.target_ref, work_order.lane",
+         RETURNING lease.lease_ref, lease.work_order_ref, work_order.target_ref, work_order.lane",
     )
     .bind(task_id)
     .fetch_optional(&mut **transaction)
     .await?;
-    let Some((lease_ref, target_ref, lane)) = completed else {
+    let Some((lease_ref, work_order_ref, target_ref, lane)) = completed else {
         return Ok(false);
     };
     let all_completed: bool = sqlx::query_scalar(
@@ -279,6 +334,13 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
          WHERE lease_ref = $1 AND released_at IS NULL",
     )
     .bind(lease_ref)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE collection_work_order SET queue_state='completed' \
+         WHERE work_order_ref=$1 AND queue_state='leased'",
+    )
+    .bind(work_order_ref)
     .execute(&mut **transaction)
     .await?;
     if lane == "patrol" && patrol_completion_qualified(transaction, lease_ref, target_ref).await? {
@@ -405,14 +467,28 @@ pub async fn expire_lapsed_leases(database: &Database) -> Result<u64, LeaseError
 pub(crate) async fn expire_lapsed_leases_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64, sqlx::Error> {
-    Ok(sqlx::query(
+    let expired: Vec<Uuid> = sqlx::query_scalar(
         "UPDATE collection_work_order_lease \
          SET released_at = expires_at, release_reason = 'expired' \
-         WHERE released_at IS NULL AND expires_at <= scope_001_now()",
+         WHERE released_at IS NULL AND expires_at <= scope_001_now() \
+         RETURNING work_order_ref",
     )
-    .execute(&mut **transaction)
-    .await?
-    .rows_affected())
+    .fetch_all(&mut **transaction)
+    .await?;
+    if !expired.is_empty() {
+        // The expired Lease and its scheduled tasks stay immutable history. The
+        // Work Order returns to the shared pool so a later eligible station
+        // creates a new Lease/Task/Attempt rather than overwriting that record.
+        sqlx::query(
+            "UPDATE collection_work_order SET queue_state='queued',station_ref=NULL, \
+                 installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL \
+             WHERE work_order_ref=ANY($1) AND queue_state='leased'",
+        )
+        .bind(&expired)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(u64::try_from(expired.len()).unwrap_or(u64::MAX))
 }
 
 async fn load_subject(
@@ -610,8 +686,21 @@ fn expand_into_tasks(
                 subject.max_works,
             ),
         ],
-        // Recurring creator patrols only need the current discovery surface. Re-reading the
-        // stable profile every cycle adds platform load without improving change detection.
+        // The first product contract for a creator patrol is intentionally
+        // fixed and small: verify the author profile, then inspect a bounded
+        // current directory. Historical completeness is not inferred here.
+        ("creator", "patrol") => vec![
+            (
+                "author_profile",
+                json!({ "authorExternalId": subject.identity_key }),
+                1,
+            ),
+            (
+                "profile_discovery",
+                json!({ "authorExternalId": subject.identity_key }),
+                subject.max_works.min(30),
+            ),
+        ],
         ("creator", _) => vec![(
             "profile_discovery",
             json!({ "authorExternalId": subject.identity_key }),

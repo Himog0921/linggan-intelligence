@@ -96,6 +96,9 @@ pub struct RuntimeLaneControlView {
     pub label: &'static str,
     pub target_kind: &'static str,
     pub lane: &'static str,
+    /// A request is admissible and can enter the common queue, but no specific station is
+    /// selected until a later eligible installation claims it.
+    pub queueable: bool,
     pub available: bool,
     pub reason_code: Option<&'static str>,
     pub reason: Option<String>,
@@ -366,10 +369,21 @@ fn runtime_lane(
     capacity: Capacity,
 ) -> RuntimeLaneControlView {
     match capacity {
+        Capacity::Queueable => RuntimeLaneControlView {
+            label,
+            target_kind,
+            lane,
+            queueable: true,
+            available: false,
+            reason_code: None,
+            reason: Some("准入允许入队；等待满足资格的工位主动认领。".to_owned()),
+            station_ref: None,
+        },
         Capacity::Available { station_ref } => RuntimeLaneControlView {
             label,
             target_kind,
             lane,
+            queueable: false,
             available: true,
             reason_code: None,
             reason: None,
@@ -421,6 +435,7 @@ fn blocked_lane(
         label,
         target_kind,
         lane,
+        queueable: false,
         available: false,
         reason_code: Some(reason_code),
         reason: Some(reason),
@@ -767,10 +782,9 @@ fn recovery_for(reason: &str) -> Option<Recovery> {
             owner: "你",
             action: "打开目标的监控规则并保存首个版本。",
         }),
-        "baseline_not_ready" => Some(Recovery {
-            owner: "采集",
-            action: "先完成创作者基线，再由后续轮次重判。",
-        }),
+        // Retained historical decision vocabulary.  It has no recovery action
+        // in the current product: archive coverage no longer gates observation.
+        "baseline_not_ready" => None,
         "risk_paused" => Some(Recovery {
             owner: "你",
             action: "核对风险暂停；确认风险解除后再恢复。",
@@ -1016,21 +1030,23 @@ fn runtime_control_markup(projection: &CollectionControlSurfaceProjection) -> St
 }
 
 fn runtime_lane_row(lane: &RuntimeLaneControlView) -> String {
-    let (state, reason) = if lane.available {
-        ("可接活", "capacity_available")
+    let (state, reason, capacity_state) = if lane.available {
+        ("可接活", "capacity_available", "available")
+    } else if lane.queueable {
+        ("可入队，待工位认领", "capacity_queueable", "queueable")
     } else {
-        ("关闭", lane.reason_code.unwrap_or("capacity_unknown"))
+        (
+            "关闭",
+            lane.reason_code.unwrap_or("capacity_unknown"),
+            "blocked",
+        )
     };
     format!(
         r#"<article class="c-runtime-lane" data-capacity-state="{available}" data-control-reason="{reason}">
              <div><p>{kind} / {lane}</p><h3>{label}</h3></div>
              <div><b>{state}</b><code>{reason}</code><span>{detail}</span></div>
            </article>"#,
-        available = if lane.available {
-            "available"
-        } else {
-            "blocked"
-        },
+        available = capacity_state,
         reason = escape(reason),
         kind = target_kind_label(lane.target_kind),
         lane = escape(lane_label(lane.lane)),
@@ -1185,7 +1201,7 @@ fn lease_label(value: &str) -> &'static str {
 fn decision_reason(value: &str) -> &'static str {
     match value {
         "rule_missing" => "目标还没有活动规则版本。",
-        "baseline_not_ready" => "创作者基线未满足自动巡检资格。",
+        "baseline_not_ready" => "历史基线门禁记录；当前规则不会因建档完整度而停止观察。",
         "station_not_accepting" => "工位已由人显式暂停未来接活。",
         "account_needs_login" => "观察账号需要重新登录。",
         "account_restricted" => "观察账号受到访问限制。",
@@ -1543,8 +1559,12 @@ mod tests {
              INSERT INTO execution_station (station_ref,display_name) \
              VALUES ('a5000000-0000-4000-8000-000000000001','双任务冻结工位'); \
              INSERT INTO collection_acquisition_authorization \
-                 (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,purpose,granted_by,expires_at) \
-             VALUES ('a2000000-0000-4000-8000-000000000001','xhs','creator','deep_archive',1,20,'双任务冻结读取证明','person',scope_001_now()+interval '1 day'); \
+                 (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target, \
+                  allowed_task_templates,allowed_dispatch_lanes,max_work_units, \
+                  purpose,granted_by,expires_at) \
+             VALUES ('a2000000-0000-4000-8000-000000000001','xhs','creator','deep_archive',1,20, \
+                     ARRAY['creator_archive','material_deepening'],ARRAY['immediate','batch'],20, \
+                     '双任务冻结读取证明','person',scope_001_now()+interval '1 day'); \
              INSERT INTO collection_acquisition_request \
                  (request_ref,target_ref,lane,purpose,requested_by) \
              VALUES ('a3000000-0000-4000-8000-000000000001','a1000000-0000-4000-8000-000000000001','deep_archive','双任务冻结读取证明','person'); \

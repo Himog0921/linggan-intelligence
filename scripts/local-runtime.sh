@@ -205,6 +205,7 @@ migrate() {
   apply_migration_once "0033_dispatch_failure_recovery" "$project_root/database/migrations/0033_dispatch_failure_recovery.sql"
   apply_migration_once "0034_collection_control_closure" "$project_root/database/migrations/0034_collection_control_closure.sql"
   apply_migration_once "0035_claimed_station_auto_acceptance" "$project_root/database/migrations/0035_claimed_station_auto_acceptance.sql"
+  apply_migration_once "0036_monitor_scheduling_clarity" "$project_root/database/migrations/0036_monitor_scheduling_clarity.sql"
 }
 
 case "$command_name" in

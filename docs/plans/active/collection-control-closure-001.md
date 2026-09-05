@@ -18,6 +18,18 @@
 
 这项源码/隔离 proof 不授权共享 migration、`:3000` runtime 切换、Chrome reload、真实平台访问或实际采集；当前现场暂停状态不会因为本修正被自动解除。
 
+## 0.1 2026-09-05 范围修正 · 建档不再是观察门槛，工位只认领统一队列
+
+本段由 Mog 对“自动监测基线设计”的确认产生，覆盖本计划旧 §4.2 的 `baseline_required`、dynamic cadence 与“scheduler 直接派发到工位”的语义。实施任务为 `monitor-scheduling-clarity-001`，exact base `origin/main@33e6623b2d5baa070ee18ebd0813178a57c6c8ca`，分支 `codex/monitor-scheduling-clarity-001`，worktree 为 `/Users/moglenny/proma/linggan-intelligence/.worktrees/monitor-scheduling-clarity-001`；范围修正与文件 claim 记录在 Issue #149。
+
+- `UNKNOWN`、`PARTIAL`、历史目录缺失和未建立深度档案是结果/覆盖事实，不是创建或启用观察规则的门槛。一个有效 Target + Rule 必须能持续产生未来观察；`monitoring + no active automatic rule` 是数据库拒绝、迁移修复的非法状态。
+- rule revision、active pointer、target monitoring/lifecycle、anchor/next schedule 同一事务写入。首版只提供固定全天间隔（6h / 12h / 24h / 2d / 7d）；调度只读 `next_run_at`，一次 missed schedule 只补一张 Work Order。
+- Scheduler 只创建 `queued` Work Order，**不**选择 station 或宣称派发。所有浏览器需求进入同一 durable pool，并按 `immediate`、`scheduled`、`batch` 三个技术 lane 排程；station heartbeat/claim 在资格、账号、额度、风险、能力和授权 scope 合格后用原子 Lease 认领。
+- `creator_patrol` 固定为作者主页资格核验加最近 30 条作品观察。`deep_archive` 是 batch lane，既不阻断也不暂停有效 patrol rule；OCR/ASR/媒体不占浏览器队列。
+- `0036_monitor_scheduling_clarity` 为 additive migration；本实现只允许 disposable PostgreSQL 证明，**不**授权共享 migration、`:3000` Runtime 切换、插件重载、真实平台访问、部署、push 或 merge。
+
+**阅读规则：** 下文 §3–§9 保留的是 2026-09-04 Package 2 的交付快照，用于追溯当时 PR 的边界；其中出现的 `baseline_required`、dynamic cadence、窗口/fallback 和 scheduler 预先创建 Lease 均已被本节取代，不能作为当前实现或验收依据。
+
 ## 1. 用户结果与串行门
 
 Package 1 已合并并核验到本计划的 exact base。Package 2 要让同一份服务端 durable truth 同时回答：哪台工位、哪个安装、哪个平台观察账号现在可以接活；某个目标按哪一版规则自动巡检；一次保存、跳过、准入、租约、派发或失败到底发生了什么。Package 3 / Creator Dossier 在本包合并复核前继续等待。
@@ -44,10 +56,10 @@ Package 1 已合并并核验到本计划的 exact base。Package 2 要让同一�
 | platform account | ABSENT | 没有身份、binding、eligibility | keyed digest only；append-only observation/current；五态 fail closed |
 | installation credential | ABSENT | `install_key` 被当身份，不是秘密 | 一次返回、只存 hash、轮换/撤销、claim/report 验证 |
 | monitoring rule | PARTIAL | target bool + fixed seconds，无 revision/receipt | append-only rule revision + active pointer + expected revision/idempotency receipt |
-| dynamic cadence | ABSENT | 无两轮 comparable qualification | `<2` 或 lens/Coverage/time 不合格均 `DYNAMIC_UNAVAILABLE`，显式 24h fallback |
+| dynamic cadence | HISTORICAL / SUPERSEDED | 旧快照中的两轮 comparable qualification | 当前首版不提供动态频率或 fallback；见 §0.1 |
 | scheduler | PARTIAL | 每 tick `LIMIT 50` 且无 target receipt | cursor/fair scan + 每目标 durable decision receipt/backoff |
 | Collection read surfaces | PARTIAL | Tasks 真实；Operations/Attention 仍多为空壳 | 只投影 scheduler/decision/WorkOrder/Lease/Task/Receipt/account capacity 事实 |
-| target baseline | PARTIAL | 零 record/空 Coverage 仍可能推进 | 空 Coverage 不得 baseline ready |
+| target baseline | HISTORICAL / SUPERSEDED | 旧快照把 Coverage 用作规则门槛 | 当前 UNKNOWN/PARTIAL 只限制覆盖结论，不阻断规则；见 §0.1 |
 | shared DB/runtime/Chrome/真实平台 | NOT VERIFIED | 本 Claim 禁止 | 只用 disposable PostgreSQL 与隔离非 3000 browser |
 
 ## 4. 冻结合同
@@ -58,13 +70,11 @@ Package 1 已合并并核验到本计划的 exact base。Package 2 要让同一�
 
 账号 eligibility 闭集为 `usable | cooling | needs_login | restricted | unknown`。Producer 只提交版本化 signal 与 raw account identity 的瞬时 loopback body；服务端使用部署密钥计算 versioned keyed digest，raw identity 绝不持久化或返回。账号 binding 与 eligibility history 只追加；current 是重算读取责任。
 
-### 4.2 巡检规则 v1
+### 4.2 巡检规则 v1（已由 §0.1 修正）
 
-每个 target 的规则 revision 只追加；active pointer 与当前 monitoring/lifecycle 同事务变化。命令携带 expected revision、idempotency key、payload digest、actor/source；相同 key+payload replay，不同 payload conflict，stale revision 拒绝。模式闭集 `manual_only | fixed | dynamic`；时区只接受 `Asia/Shanghai`；fixed/fallback `6h–7d`、默认 24h；v1 拒绝跨午夜窗口；默认全天并包含周末。
+每个 target 的规则 revision 只追加；active pointer、`monitoring_enabled`、lifecycle 和 `anchor/next_run_at` 同事务变化。命令携带 expected revision、idempotency key、payload digest、actor/source；相同 key+payload replay，不同 payload conflict，stale revision 拒绝。
 
-暂停只停止未来自动调度，人工检查仍可申请；dismissed/停止目标禁止新工作，历史保留。creator 无合格 baseline 时返回 `baseline_required`；keyword 不套 creator baseline。保存规则不创建 Work/Lease/Attempt。
-
-dynamic 只消费同 target/surface/ranking/task contract/rule revision/account lens 下至少两轮 accepted、Coverage 合格且 exact publication time 可比的事实。任何相对/未知时间、scan limit、Coverage 不足或 lens 变化都为 `DYNAMIC_UNAVAILABLE`，调度按规则中显式 fixed fallback 运行；首版不从监控价值、Dossier、Evidence 或 Opportunity 读取任何输入。
+当前规则只有固定、全天间隔（6h / 12h / 24h / 2d / 7d）。没有 dynamic、窗口、工作日/周末选择或 fallback 这套第二调度语言。暂停只停止未来自动调度，人工检查仍可申请；dismissed 目标禁止新工作，历史保留。`UNKNOWN` 或 `PARTIAL` archive coverage 不再产生 `baseline_required`，保存规则不创建 Work/Lease/Attempt。
 
 ### 4.3 页面与支持范围
 
@@ -86,7 +96,7 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 
 | 表面 | 常用态 | 失败/受限/部分态 | 验收 |
 |---|---|---|---|
-| Targets 行与规则 modal | current revision、模式、窗口、fallback、save receipt | DB unavailable、stale、conflict、validation、baseline required、dynamic unavailable | Rust render/HTTP + 1440 keyboard/browser |
+| Targets 行与规则 modal | current revision、自动观察、固定间隔、下一计划点、save receipt | DB unavailable、stale、conflict、validation | Rust render/HTTP + 1440 keyboard/browser |
 | Runtime | station/install/account/capacity reason 与恢复责任 | not accepting、stale、version、unbound、unknown/cooling/login/restricted、quota/risk/busy | 同一 evaluator PostgreSQL tests + page equality |
 | Operations | scheduler run/target decision、WorkOrder/Lease/Task/Receipt | skipped/deferred/rejected/retrying | durable rows only，刷新后不消失 |
 | Attention | 只列有恢复动作的真实阻断 | reason code + owner/action | 不把 PARTIAL+VALID 或 DYNAMIC_UNAVAILABLE 当失败 |
@@ -99,7 +109,7 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 
 1. RED→GREEN：`0034` 空库 migration、privacy/uniqueness/history/credential/rule receipt 约束。
 2. RED→GREEN：单一 capacity evaluator；Authorization purpose/max_targets；Admission frozen refs；Lease/dispatch 时点重查。
-3. RED→GREEN：rule command、baseline Coverage、scheduler cursor/target receipt、失败/cancel/recovery。
+3. RED→GREEN：rule command、固定 next-run schedule、scheduler queue/target receipt、失败/cancel/recovery。
 4. HTTP/UI：规则 modal 与 durable receipt；Operations/Attention/Tasks/Runtime 共用读模型。
 5. Producer：0.8.34 credential/report/claim contract，只上报最小 signal；build/package/verify/reproducibility。
 6. disposable PostgreSQL、Rust workspace、1440 browser、plugin 与治理验证。
@@ -113,7 +123,7 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 | 层 | 当前状态 |
 |---|---|
 | Plan/Claim/Reality Matrix | VERIFIED |
-| Code/schema/UI/plugin source | VERIFIED；exact-head 复审修正了 Lease→dispatch 的 `station_not_accepting` 闸门与 dynamic cadence 的 round 聚合 |
+| Code/schema/UI/plugin source | 已有 Package 2 来源已验证；本次 `0036` 源码只在 `codex/monitor-scheduling-clarity-001` 独立 worktree，尚未 merge |
 | Automated/disposable PostgreSQL/1440 browser/release | VERIFIED（隔离范围；本轮追加 station-close/dynamic-round 回归；独立 headless Chrome 以 1440 CSS px 直接复核五面与规则失败 modal） |
 | commit/push/PR/merge | VERIFIED：PR [#153](https://github.com/Himog0921/linggan-intelligence/pull/153) 已合入 `origin/main@84fd9498e18164011621ffabc81a2a421a52f7a1` |
 | shared migration/runtime/Chrome/真实平台/deploy/Mog acceptance | 不由本次 V4 UI 扩展重新声明；须按各自实际证据单独核对 |

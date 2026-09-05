@@ -55,6 +55,7 @@ impl LaneVerdict {
     /// 判定的短标签。与 `Capacity` 的变体一一对应，页面不另造第二套状态词。
     pub fn verdict_label(&self) -> &'static str {
         match self.capacity {
+            Capacity::Queueable => "可入队，待工位认领",
             Capacity::Available { .. } => "可接活",
             Capacity::NoStaffedStation => "无在岗工位",
             Capacity::MissingCapabilities { .. } => "能力不匹配",
@@ -148,7 +149,7 @@ pub async fn read_runtime_capacity(
     // 巡检还能跑」这种真实情况消失。
     let mut lanes = Vec::new();
     for (zh, lane, needs) in [
-        ("观察基线", "deep_archive", "作者档案 · 有界作品清单"),
+        ("批量建档", "deep_archive", "作者档案 · 有界作品清单"),
         ("巡检", "patrol", "作品清单"),
     ] {
         lanes.push(LaneVerdict {
@@ -183,19 +184,21 @@ pub async fn read_runtime_capacity(
     .fetch_one(database.pool())
     .await?;
 
-    // 到期判据与 `run_due_patrols` 用同一个式子：派出时间 + 间隔 <= 现在，从未派过即到期。
-    // 页面另写一份「差不多的」判据，会让人看到「显示 1 个到期」却一轮都没派出去。
+    // 到期判据与 `run_due_patrols` 读同一个已持久化的 `monitor_next_run_at`。页面不能
+    // 用上次派出时间和旧间隔反推，否则规则修订、一次 catch-up 或暂停恢复后会显示另一套事实。
     let patrol = sqlx::query_as::<_, PatrolRow>(
         "SELECT count(*), \
-                count(*) FILTER (WHERE monitoring_enabled), \
-                count(*) FILTER (WHERE monitoring_enabled AND ( \
-                    last_patrol_dispatched_at IS NULL \
-                    OR last_patrol_dispatched_at \
-                       + make_interval(secs => patrol_interval_seconds) <= scope_001_now())), \
-                to_char(max(last_patrol_dispatched_at), 'YYYY-MM-DD HH24:MI'), \
-                to_char(max(last_patrol_succeeded_at), 'YYYY-MM-DD HH24:MI') \
-         FROM collection_observation_target \
-         WHERE lifecycle_state <> 'dismissed'",
+                count(*) FILTER (WHERE target.monitoring_enabled \
+                    AND COALESCE(rule.automatic_enabled,false)), \
+                count(*) FILTER (WHERE target.monitoring_enabled \
+                    AND COALESCE(rule.automatic_enabled,false) \
+                    AND target.monitor_next_run_at <= scope_001_now()), \
+                to_char(max(target.last_patrol_dispatched_at), 'YYYY-MM-DD HH24:MI'), \
+                to_char(max(target.last_patrol_succeeded_at), 'YYYY-MM-DD HH24:MI') \
+         FROM collection_observation_target target \
+         LEFT JOIN collection_monitor_rule_revision rule \
+           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+         WHERE target.lifecycle_state <> 'dismissed'",
     )
     .fetch_one(database.pool())
     .await

@@ -12,7 +12,9 @@
 //! 3. **调度不绕过授权链**。它做的事与人点一次按钮完全一样——申请、准入、工单、租约，
 //!    一步不少。自动化不是豁免权：如果准入说资源不够，调度也只能等。
 
-use crate::acquisition_chain::{RequestLeaseError, request_admit_and_lease};
+use crate::acquisition_chain::{
+    RequestLeaseError, request_admit_and_lease, request_and_admit_in_transaction,
+};
 use crate::collection_control::{ComparableObservationRound, DynamicCadence, dynamic_cadence};
 use crate::work_order_lease::LeaseError;
 use linggan_contracts::AdmissionOutcome;
@@ -22,6 +24,11 @@ use uuid::Uuid;
 /// 一次 tick 的结果。**派了什么与没派什么同样重要。**
 #[derive(Debug, Default)]
 pub struct PatrolTickSummary {
+    /// Work Orders durably queued in this tick. A queued order is intentionally
+    /// not reported as a browser dispatch: the plugin has not claimed it yet.
+    pub queued: Vec<Uuid>,
+    /// Retained for API compatibility with older readers. New scheduling never
+    /// writes this field because lease/task creation belongs to station claim.
     pub dispatched: Vec<Uuid>,
     /// 每个被跳过的目标，以及具体原因。
     pub skipped: Vec<(Uuid, String)>,
@@ -37,15 +44,12 @@ pub struct SchedulerHeartbeat {
     pub last_error: Option<String>,
 }
 
-/// 租约时长：一次巡检该在多久内跑完。
-///
-/// 比巡检间隔短得多——租约是「这次允许你跑多久」，不是「下次什么时候再跑」。给得过长，
-/// 一次卡住的执行会一直占着工单，直到下一轮都无法重派。
-const PATROL_LEASE_MINUTES: i32 = 30;
-
-/// 一次扫描最多处理多少个目标。分页是为了让 tick 保持轻量（规则文档：tick 只做轻量
-/// 状态推进与入队，重活另开进程）。
+/// A tick does only due-rule selection and durable queueing. Browser execution
+/// happens later at station claim, so this bounded scan is intentionally light.
 const PATROL_PAGE_SIZE: i64 = 50;
+// Retained only while the pre-0036 scheduler helper remains compiled for
+// historical test fixtures; the live path above does not pre-lease work.
+const PATROL_LEASE_MINUTES: i32 = 30;
 const PATROL_MAX_CONSIDERED_PER_TICK: usize = 500;
 
 pub async fn patrol_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
@@ -129,18 +133,18 @@ pub async fn run_due_patrols(database: &Database) -> Result<PatrolTickSummary, s
     let result = run_due_patrols_inner(database).await;
     if heartbeat_ready {
         let (outcome, dispatched, skipped, error) = match &result {
-            Ok(summary) if summary.dispatched.is_empty() && summary.skipped.is_empty() => {
+            Ok(summary) if summary.queued.is_empty() && summary.skipped.is_empty() => {
                 ("idle", 0, 0, None)
             }
             Ok(summary) if summary.skipped.is_empty() => (
-                "dispatched",
-                i32::try_from(summary.dispatched.len()).unwrap_or(i32::MAX),
+                "queued",
+                i32::try_from(summary.queued.len()).unwrap_or(i32::MAX),
                 0,
                 None,
             ),
             Ok(summary) => (
                 "partial",
-                i32::try_from(summary.dispatched.len()).unwrap_or(i32::MAX),
+                i32::try_from(summary.queued.len()).unwrap_or(i32::MAX),
                 i32::try_from(summary.skipped.len()).unwrap_or(i32::MAX),
                 None,
             ),
@@ -165,7 +169,214 @@ pub async fn run_due_patrols(database: &Database) -> Result<PatrolTickSummary, s
     result
 }
 
+/// Queue only rules that are valid *and already due*. In particular, this never
+/// scans arbitrary `monitoring_enabled` targets and then emits `rule_missing`:
+/// that was an implementation leak from a state the database now forbids.
+///
+/// The rule's mutable `next_run_at` advances in the same transaction as the
+/// Work Order. A delayed scheduler therefore produces one catch-up order and
+/// records the number of missed intervals rather than emitting an accidental
+/// backlog of browser work.
 async fn run_due_patrols_inner(database: &Database) -> Result<PatrolTickSummary, sqlx::Error> {
+    if !patrol_schema_is_ready(database).await? {
+        return Ok(PatrolTickSummary::default());
+    }
+    let scheduler_run_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_scheduler_run (scheduler_run_ref,scheduler_key) VALUES ($1,'patrol')",
+    )
+    .bind(scheduler_run_ref)
+    .execute(database.pool())
+    .await?;
+
+    let due_targets: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT target.target_ref \
+         FROM collection_observation_target target \
+         JOIN collection_monitor_rule_revision rule \
+           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+         WHERE target.monitoring_enabled \
+           AND target.lifecycle_state='monitoring' \
+           AND rule.automatic_enabled \
+           AND rule.mode='fixed' \
+           AND target.monitor_next_run_at IS NOT NULL \
+           AND target.monitor_next_run_at<=scope_001_now() \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM collection_scheduler_target_decision prior \
+             WHERE prior.target_ref=target.target_ref \
+               AND prior.next_eligible_at>scope_001_now()) \
+         ORDER BY target.monitor_next_run_at,target.target_ref LIMIT $1",
+    )
+    .bind(PATROL_PAGE_SIZE)
+    .fetch_all(database.pool())
+    .await?;
+
+    let mut summary = PatrolTickSummary::default();
+    for target_ref in &due_targets {
+        let (outcome, reason, work_order_ref) =
+            queue_one_due_rule(database, scheduler_run_ref, *target_ref).await?;
+        if outcome == "queued" {
+            summary.queued.push(*target_ref);
+        } else {
+            summary.skipped.push((*target_ref, reason.to_owned()));
+        }
+        let _ = work_order_ref;
+    }
+
+    let run_outcome = if summary.queued.is_empty() && summary.skipped.is_empty() {
+        "idle"
+    } else if summary.skipped.is_empty() {
+        "queued"
+    } else {
+        "partial"
+    };
+    sqlx::query(
+        "UPDATE collection_scheduler_run SET completed_at=scope_001_now(),outcome=$2, \
+             considered_count=$3,dispatched_count=$4 WHERE scheduler_run_ref=$1",
+    )
+    .bind(scheduler_run_ref)
+    .bind(run_outcome)
+    .bind(i32::try_from(due_targets.len()).unwrap_or(i32::MAX))
+    // The legacy column is retained for projection compatibility. It means
+    // “orders queued by this scheduler run”, never “browser collection ran”.
+    .bind(i32::try_from(summary.queued.len()).unwrap_or(i32::MAX))
+    .execute(database.pool())
+    .await?;
+    Ok(summary)
+}
+
+/// Lock one due target, admit its bounded patrol and atomically move schedule
+/// time. The transaction owns the Target lock through Request → Decision → Work
+/// Order so a second tick cannot create the same scheduled order.
+async fn queue_one_due_rule(
+    database: &Database,
+    scheduler_run_ref: Uuid,
+    target_ref: Uuid,
+) -> Result<(&'static str, &'static str, Option<Uuid>), sqlx::Error> {
+    let mut transaction = database.pool().begin().await?;
+    let due: Option<(Uuid, i32)> = sqlx::query_as(
+        "SELECT rule.rule_revision_ref,rule.fixed_interval_seconds \
+         FROM collection_observation_target target \
+         JOIN collection_monitor_rule_revision rule \
+           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+         WHERE target.target_ref=$1 \
+           AND target.monitoring_enabled AND target.lifecycle_state='monitoring' \
+           AND rule.automatic_enabled AND rule.mode='fixed' \
+           AND target.monitor_next_run_at IS NOT NULL \
+           AND target.monitor_next_run_at<=scope_001_now() \
+         FOR UPDATE OF target",
+    )
+    .bind(target_ref)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let Some((rule_revision_ref, interval_seconds)) = due else {
+        transaction.rollback().await?;
+        return Ok(("deferred", "not_due", None));
+    };
+
+    let request = request_and_admit_in_transaction(
+        &mut transaction,
+        target_ref,
+        "patrol",
+        "定时巡检",
+        "agent",
+        &[],
+        None,
+    )
+    .await;
+    let (outcome, reason_code, work_order_ref, advance_schedule) = match request {
+        Ok(request) => match request.outcome {
+            AdmissionOutcome::Admitted { .. } => (
+                "queued",
+                "queued",
+                request.work_order_ref,
+                request.work_order_ref.is_some(),
+            ),
+            AdmissionOutcome::Merge { .. } => ("deferred", "in_flight_work_covers_it", None, true),
+            _ => (
+                "rejected",
+                scheduler_decision_reason(request.reason_code),
+                None,
+                false,
+            ),
+        },
+        Err(crate::acquisition_chain::AcquisitionChainError::Database(error)) => return Err(error),
+        Err(_) => ("rejected", "target_not_requestable", None, false),
+    };
+
+    if let Some(work_order_ref) = work_order_ref {
+        // The generic request has a queue identity before scheduler context is
+        // known. Freeze the due timestamp into this scheduled identity now.
+        sqlx::query(
+            "UPDATE collection_work_order SET scheduled_for=( \
+                 SELECT monitor_next_run_at FROM collection_observation_target WHERE target_ref=$2), \
+                 dedupe_key=concat('scheduled:', $2::text, ':', $3::text, ':', \
+                   (SELECT monitor_next_run_at::text FROM collection_observation_target WHERE target_ref=$2)) \
+             WHERE work_order_ref=$1 AND queue_state='queued'",
+        )
+        .bind(work_order_ref)
+        .bind(target_ref)
+        .bind(rule_revision_ref)
+        .execute(&mut *transaction)
+        .await?;
+    }
+
+    if advance_schedule {
+        sqlx::query(
+            "UPDATE collection_observation_target \
+             SET monitor_missed_run_count=monitor_missed_run_count + GREATEST(0, \
+                   FLOOR(EXTRACT(EPOCH FROM (scope_001_now()-monitor_next_run_at))/$2)::integer), \
+                 monitor_next_run_at=monitor_next_run_at + make_interval(secs => $2 * \
+                   (GREATEST(0,FLOOR(EXTRACT(EPOCH FROM \
+                       (scope_001_now()-monitor_next_run_at))/$2)::integer)+1)), \
+                 last_patrol_dispatched_at=scope_001_now(), \
+                 last_scheduler_considered_at=scope_001_now() \
+             WHERE target_ref=$1",
+        )
+        .bind(target_ref)
+        .bind(interval_seconds)
+        .execute(&mut *transaction)
+        .await?;
+    } else {
+        sqlx::query(
+            "UPDATE collection_observation_target SET last_scheduler_considered_at=scope_001_now() \
+             WHERE target_ref=$1",
+        )
+        .bind(target_ref)
+        .execute(&mut *transaction)
+        .await?;
+    }
+
+    let retry_after_seconds = if advance_schedule {
+        interval_seconds
+    } else {
+        300
+    };
+    sqlx::query(
+        "INSERT INTO collection_scheduler_target_decision \
+             (target_decision_ref,scheduler_run_ref,target_ref,rule_revision_ref,outcome,reason_code, \
+              cadence_source,effective_interval_seconds,next_eligible_at,work_order_ref,lease_ref) \
+         VALUES ($1,$2,$3,$4,$5,$6,'fixed',$7, \
+                 scope_001_now()+make_interval(secs=>$8),$9,NULL)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(scheduler_run_ref)
+    .bind(target_ref)
+    .bind(rule_revision_ref)
+    .bind(outcome)
+    .bind(reason_code)
+    .bind(interval_seconds)
+    .bind(retry_after_seconds)
+    .bind(work_order_ref)
+    .execute(&mut *transaction)
+    .await?;
+    transaction.commit().await?;
+    Ok((outcome, reason_code, work_order_ref))
+}
+
+#[allow(dead_code)]
+async fn legacy_run_due_patrols_inner(
+    database: &Database,
+) -> Result<PatrolTickSummary, sqlx::Error> {
     if !patrol_schema_is_ready(database).await? {
         return Ok(PatrolTickSummary::default());
     }
@@ -567,8 +778,10 @@ fn scheduler_error_code(error: RequestLeaseError) -> &'static str {
 fn scheduler_decision_reason(value: &str) -> &'static str {
     match value {
         "authorization_missing" => "authorization_missing",
+        "authorization_scope_mismatch" => "authorization_scope_mismatch",
         "authorization_purpose_mismatch" => "authorization_purpose_mismatch",
         "authorization_target_limit_reached" => "authorization_target_limit_reached",
+        "authorization_work_unit_limit_reached" => "authorization_work_unit_limit_reached",
         "authorization_expired_or_revoked" => "authorization_expired_or_revoked",
         "risk_paused" => "risk_paused",
         "station_unavailable" => "station_unavailable",
@@ -592,10 +805,11 @@ fn scheduler_decision_reason(value: &str) -> &'static str {
     }
 }
 
-/// 批量设置巡检开关。
+/// Legacy compatibility helper for disabling a current rule or restoring a *valid* active rule.
 ///
-/// 批量是**明确指定开或关**，不是逐个取反：取反会让一次操作里有的开有的关，人点了
-/// 「批量开启巡检」却得到一半关掉，那不是他要的。
+/// New product paths must use `apply_monitor_rule_command`, which writes the immutable revision,
+/// target pointer and schedule atomically with a durable command receipt.  This helper cannot
+/// manufacture monitoring for a target with no active automatic rule.
 pub async fn set_monitoring_for_many(
     database: &Database,
     target_refs: &[Uuid],
@@ -604,15 +818,32 @@ pub async fn set_monitoring_for_many(
     if target_refs.is_empty() {
         return Ok(0);
     }
-    Ok(sqlx::query(
-        "UPDATE collection_observation_target SET monitoring_enabled = $2 \
-         WHERE target_ref = ANY($1)",
-    )
-    .bind(target_refs)
-    .bind(enabled)
-    .execute(database.pool())
-    .await?
-    .rows_affected())
+    let query = if enabled {
+        "UPDATE collection_observation_target target \
+         SET monitoring_enabled=true, lifecycle_state='monitoring', \
+             lifecycle_changed_at=scope_001_now(), \
+             monitor_schedule_anchor_at=COALESCE(monitor_schedule_anchor_at,scope_001_now()), \
+             monitor_next_run_at=COALESCE( \
+                 monitor_next_run_at,scope_001_now()+make_interval(secs=>patrol_interval_seconds)) \
+         FROM collection_monitor_rule_revision rule \
+         WHERE target.target_ref=ANY($1) \
+           AND rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+           AND rule.automatic_enabled \
+           AND target.lifecycle_state <> 'dismissed'"
+    } else {
+        "UPDATE collection_observation_target \
+         SET monitoring_enabled=false, \
+             lifecycle_state=CASE WHEN lifecycle_state='monitoring' THEN 'paused' ELSE lifecycle_state END, \
+             lifecycle_changed_at=CASE WHEN lifecycle_state='monitoring' THEN scope_001_now() \
+                                       ELSE lifecycle_changed_at END, \
+             monitor_next_run_at=NULL \
+         WHERE target_ref=ANY($1)"
+    };
+    Ok(sqlx::query(query)
+        .bind(target_refs)
+        .execute(database.pool())
+        .await?
+        .rows_affected())
 }
 
 /// 批量设置分组。空名字表示取消分组——那是一个正常操作，不是错误输入。
@@ -649,27 +880,45 @@ pub async fn target_monitoring_enabled(
     .map(|value| value.unwrap_or(false))
 }
 
-/// 开或关一个目标的巡检，并设定间隔。
-///
-/// 间隔由人给定或由建档数据算出（产品规则 §4.2：发布间隔中位数 ÷ 2），上下限
-/// 6 小时 ~ 7 天由数据库 CHECK 保证——**边界写在库上，不写在调用方**，否则每个新入口
-/// 都要重新记得校验一次。
+/// Legacy compatibility helper. It cannot alter an immutable rule's interval or create a rule;
+/// use the versioned rule command for any new UI or integration path.
 pub async fn set_target_monitoring(
     database: &Database,
     target_ref: Uuid,
     enabled: bool,
     interval_seconds: Option<i32>,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE collection_observation_target \
-         SET monitoring_enabled = $2, \
-             patrol_interval_seconds = coalesce($3, patrol_interval_seconds) \
-         WHERE target_ref = $1",
-    )
-    .bind(target_ref)
-    .bind(enabled)
-    .bind(interval_seconds)
-    .execute(database.pool())
-    .await?;
+    let _ = interval_seconds;
+    if enabled {
+        sqlx::query(
+            "UPDATE collection_observation_target target \
+             SET monitoring_enabled=true,lifecycle_state='monitoring', \
+                 lifecycle_changed_at=scope_001_now(), \
+                 monitor_schedule_anchor_at=COALESCE(monitor_schedule_anchor_at,scope_001_now()), \
+                 monitor_next_run_at=COALESCE( \
+                     monitor_next_run_at,scope_001_now()+make_interval(secs=>patrol_interval_seconds)) \
+             FROM collection_monitor_rule_revision rule \
+             WHERE target.target_ref=$1 \
+               AND rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+               AND rule.automatic_enabled \
+               AND target.lifecycle_state <> 'dismissed'",
+        )
+        .bind(target_ref)
+        .execute(database.pool())
+        .await?;
+    } else {
+        sqlx::query(
+            "UPDATE collection_observation_target \
+             SET monitoring_enabled=false, \
+                 lifecycle_state=CASE WHEN lifecycle_state='monitoring' THEN 'paused' ELSE lifecycle_state END, \
+                 lifecycle_changed_at=CASE WHEN lifecycle_state='monitoring' THEN scope_001_now() \
+                                           ELSE lifecycle_changed_at END, \
+                 monitor_next_run_at=NULL \
+             WHERE target_ref=$1",
+        )
+        .bind(target_ref)
+        .execute(database.pool())
+        .await?;
+    }
     Ok(())
 }

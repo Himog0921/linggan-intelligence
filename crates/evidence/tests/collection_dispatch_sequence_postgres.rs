@@ -3,11 +3,13 @@ use linggan_contracts::{
     parse_producer_task_spec,
 };
 use linggan_evidence::{
-    AccountEligibilitySignal, CheckInOutcome, DispatchDecision, DispatchFailureCode,
-    DispatchFailureOutcome, InstallationCheckIn, ProducerRuntimeError, RuntimeAttemptOutcome,
-    RuntimeSubmissionOutcome, RuntimeTaskOutcome, activate_installation_credential,
-    bind_observation_account, check_in_installation, create_producer_task, decide_dispatch,
-    expire_lapsed_leases, issue_work_order_lease, open_claim_window, read_collection_task_timeline,
+    AccountEligibilitySignal, AuthorizationGrant, CheckInOutcome, DispatchDecision,
+    DispatchFailureCode, DispatchFailureOutcome, InstallationCheckIn, MonitorCommandActor,
+    MonitorCommandKind, MonitorRuleCommand, MonitorRuleDraft, MonitorRuleMode,
+    ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
+    activate_installation_credential, apply_monitor_rule_command, bind_observation_account,
+    check_in_installation, create_producer_task, decide_dispatch, expire_lapsed_leases,
+    grant_authorization, issue_work_order_lease, open_claim_window, read_collection_task_timeline,
     read_work_resources, report_account_eligibility, requeue_failed_dispatch,
     rotate_installation_credential, set_station_accepting, start_producer_attempt,
     submit_producer_package,
@@ -82,70 +84,43 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0034_collection_control_closure.sql"),
     "\n",
     include_str!("../../../database/migrations/0035_claimed_station_auto_acceptance.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0036_monitor_scheduling_clarity.sql"),
 );
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn enabled_pending_target_without_a_rule_is_skipped_and_heartbeat_is_visible() {
+async fn target_cannot_claim_monitoring_without_a_rule_and_scheduler_stays_idle() {
     let database = proof_database_for("collection_scheduler_enabled_target").await;
     let target_ref = Uuid::new_v4();
-    let authorization_ref = Uuid::new_v4();
-    let station_ref = Uuid::new_v4();
-    let installation_ref = Uuid::new_v4();
-
-    sqlx::query(
+    let invalid = sqlx::query(
         "INSERT INTO collection_observation_target \
              (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state,monitoring_enabled) \
-         VALUES ($1,'xhs','creator','creator-auto-proof','自动调度证明','manual','pending_decision',true)",
+         VALUES ($1,'xhs','creator','creator-auto-proof','自动调度证明','manual','monitoring',true)",
     )
     .bind(target_ref)
     .execute(database.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO collection_acquisition_authorization \
-             (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,purpose,granted_by,expires_at) \
-         VALUES ($1,'xhs','creator','deep_archive',10,20,'automatic baseline proof','person',scope_001_now()+interval '1 day')",
-    )
-    .bind(authorization_ref)
-    .execute(database.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO execution_station (station_ref,display_name,daily_work_quota) \
-         VALUES ($1,'automatic scheduler station',200)",
-    )
-    .bind(station_ref)
-    .execute(database.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO plugin_installation \
-             (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version,capabilities) \
-         VALUES ($1,$2,$3,'person',scope_001_now(),'0.6.0', \
-                 '[\"author_profile\",\"profile_discovery\",\"discovery_search\"]'::jsonb)",
-    )
-    .bind(installation_ref)
-    .bind(Uuid::new_v4().to_string())
-    .bind(station_ref)
-    .execute(database.pool())
-    .await
-    .unwrap();
+    .await;
+    assert!(
+        invalid.is_err(),
+        "0036 rejects monitoring without an active rule"
+    );
 
     linggan_evidence::record_scheduler_started(&database, Uuid::new_v4())
         .await
         .unwrap();
     let first = linggan_evidence::run_due_patrols(&database).await.unwrap();
+    assert!(first.queued.is_empty());
     assert!(first.dispatched.is_empty());
-    assert_eq!(first.skipped, vec![(target_ref, "rule_missing".to_owned())]);
+    assert!(first.skipped.is_empty());
     let first_heartbeat = linggan_evidence::read_scheduler_heartbeat(&database)
         .await
         .unwrap()
-        .expect("scheduler heartbeat exists after a skipped decision");
+        .expect("scheduler heartbeat exists after an idle tick");
     assert_eq!(first_heartbeat.state, "running");
-    assert_eq!(first_heartbeat.last_outcome, "partial");
+    assert_eq!(first_heartbeat.last_outcome, "idle");
     assert_eq!(first_heartbeat.dispatched_count, 0);
-    assert_eq!(first_heartbeat.skipped_count, 1);
+    assert_eq!(first_heartbeat.skipped_count, 0);
     let work_order_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_work_order WHERE target_ref=$1 AND lane='deep_archive'",
     )
@@ -165,6 +140,7 @@ async fn enabled_pending_target_without_a_rule_is_skipped_and_heartbeat_is_visib
     assert_eq!(live_lease_count, 0);
 
     let second = linggan_evidence::run_due_patrols(&database).await.unwrap();
+    assert!(second.queued.is_empty());
     assert!(second.dispatched.is_empty());
     let work_order_count_after: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_work_order WHERE target_ref=$1 AND lane='deep_archive'",
@@ -185,6 +161,144 @@ async fn enabled_pending_target_without_a_rule_is_skipped_and_heartbeat_is_visib
     assert_eq!(heartbeat.last_outcome, "idle");
     assert_eq!(heartbeat.dispatched_count, 0);
     assert_eq!(heartbeat.skipped_count, 0);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn creator_rule_queues_once_without_a_baseline_or_a_preassigned_station() {
+    let database = proof_database_for("collection_scheduler_creator_queue").await;
+    let target_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) \
+         VALUES ($1,'xhs','creator','creator-rule-proof','规则入队证明','manual','pending_decision')",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("creator target is seeded without any archive receipt");
+    grant_authorization(
+        &database,
+        &AuthorizationGrant {
+            platform: "xhs",
+            target_kind: "creator",
+            lane: "patrol",
+            purpose: "creator patrol proof",
+            max_targets: Some(10),
+            max_works_per_target: Some(30),
+            valid_for_days: 1,
+        },
+    )
+    .await
+    .expect("structured patrol authorization is granted");
+    let saved = apply_monitor_rule_command(
+        &database,
+        &MonitorRuleCommand {
+            target_ref,
+            expected_revision: 0,
+            idempotency_key: Uuid::new_v4(),
+            kind: MonitorCommandKind::SaveRule,
+            actor: MonitorCommandActor::Person,
+            source: "targets_ui",
+            draft: Some(MonitorRuleDraft {
+                mode: MonitorRuleMode::Fixed,
+                automatic_enabled: true,
+                run_on_weekdays: true,
+                run_on_weekends: true,
+                all_day: true,
+                window_start_minute: None,
+                window_end_minute: None,
+                fixed_interval_seconds: Some(21_600),
+                fallback_interval_seconds: 21_600,
+                surface_key: "creator_patrol".to_owned(),
+                ranking_key: None,
+                task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
+            }),
+        },
+    )
+    .await
+    .expect("baseline completeness does not block creator rule save");
+    assert_eq!(saved.reason_code, "rule_saved");
+    sqlx::query(
+        "UPDATE collection_observation_target \
+         SET monitor_next_run_at=scope_001_now()-interval '1 second' WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the isolated clock makes the rule due");
+
+    let tick = linggan_evidence::run_due_patrols(&database)
+        .await
+        .expect("due rule is queued");
+    assert_eq!(tick.queued, vec![target_ref]);
+    assert!(tick.dispatched.is_empty());
+    assert!(tick.skipped.is_empty());
+    let queued: (
+        String,
+        String,
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<Uuid>,
+    ) = sqlx::query_as(
+        "SELECT queue_state,dispatch_lane,station_ref,installation_ref,account_ref, \
+                    monitor_rule_revision_ref \
+             FROM collection_work_order WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the durable queued work order exists");
+    assert_eq!(queued.0, "queued");
+    assert_eq!(queued.1, "scheduled");
+    assert_eq!((queued.2, queued.3, queued.4), (None, None, None));
+    assert_eq!(queued.5, saved.applied_rule_revision_ref);
+    let schedule: (bool, Option<String>, i32) = sqlx::query_as(
+        "SELECT monitoring_enabled,monitor_next_run_at::text,monitor_missed_run_count \
+         FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the next schedule advances atomically with queueing");
+    assert!(schedule.0);
+    assert!(schedule.1.is_some());
+    assert_eq!(schedule.2, 0);
+    let active_lease_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease WHERE work_order_ref=( \
+             SELECT work_order_ref FROM collection_work_order WHERE target_ref=$1)",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("scheduler did not pre-lease browser work");
+    assert_eq!(active_lease_count, 0);
+
+    // A later plugin poll, not the scheduler tick, supplies the actual station
+    // and account. The fixture's own legacy order stays unqueued and therefore
+    // cannot be chosen instead of this scheduled Work Order.
+    let claimant = seed_creator_work_order(&database).await;
+    let claimed = decide_dispatch(
+        &database,
+        &claimant.install_key,
+        &claimant.installation_credential,
+    )
+    .await
+    .expect("eligible station claims the queued creator patrol");
+    assert_eq!(capability(&claimed), "author_profile");
+    let leased: (String, Option<Uuid>, Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+        "SELECT queue_state,station_ref,installation_ref,account_ref \
+         FROM collection_work_order WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("claim freezes the actual station route only now");
+    assert_eq!(leased.0, "leased");
+    assert_eq!(leased.1, Some(claimant.station_ref));
+    assert_eq!(leased.2, Some(claimant.installation_ref));
+    assert!(leased.3.is_some());
 }
 
 #[tokio::test]
@@ -454,7 +568,7 @@ async fn expired_scheduled_lease_is_historical_not_active_in_task_projection() {
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn failed_browser_start_is_audited_then_requeues_the_same_frozen_task() {
+async fn failed_browser_start_is_audited_then_returns_work_order_to_shared_queue() {
     let database = proof_database_for("collection_dispatch_failure_recovery").await;
     let fixture = seed_creator_work_order(&database).await;
     let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
@@ -521,14 +635,14 @@ async fn failed_browser_start_is_audited_then_requeues_the_same_frozen_task() {
     let timeline = read_collection_task_timeline(&database, 100)
         .await
         .expect("Task read projection keeps dispatch failures visible");
-    assert_eq!(timeline.expired_lease_count, 0);
+    assert_eq!(timeline.expired_lease_count, 2);
     let task = timeline
         .tasks
         .iter()
         .find(|row| row.task_id == first_task_id)
         .expect("requeued task is listed");
     assert_eq!(task.queue_state.as_deref(), Some("pending"));
-    assert_eq!(task.has_live_lease, Some(true));
+    assert_eq!(task.has_live_lease, Some(false));
     assert_eq!(
         task.last_dispatch_failure_code.as_deref(),
         Some("page_timeout")
@@ -566,14 +680,14 @@ async fn failed_browser_start_is_audited_then_requeues_the_same_frozen_task() {
         &fixture.installation_credential,
     )
     .await
-    .expect("the frozen scheduled task is eligible for a bounded retry");
-    assert_eq!(
+    .expect("a fresh eligible claim is made from the shared work-order queue");
+    assert_ne!(
         task_id(&retry),
         first_task_id,
-        "retry does not manufacture a new task"
+        "a new Lease makes a fresh immutable RuntimeTask; the failed one stays history"
     );
-    assert_task_state(&database, first_task_id, "in_progress").await;
-    assert!(lease_is_live(&database, lease.lease_ref).await);
+    assert_task_state(&database, first_task_id, "pending").await;
+    assert!(!lease_is_live(&database, lease.lease_ref).await);
 }
 
 #[tokio::test]
@@ -873,9 +987,10 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     sqlx::query(
         "INSERT INTO collection_acquisition_authorization \
              (authorization_ref, platform, target_kind, lane, max_targets, max_works_per_target, \
-              purpose, granted_by, expires_at) \
-         VALUES ($1, 'xhs', 'creator', 'deep_archive', 1, 10, 'focused sequence proof', 'person', \
-                 scope_001_now() + interval '1 day')",
+              allowed_task_templates,allowed_dispatch_lanes,max_work_units,purpose,granted_by,expires_at) \
+         VALUES ($1, 'xhs', 'creator', 'deep_archive', 1, 10, \
+                 ARRAY['creator_archive','material_deepening'],ARRAY['immediate','batch'],10, \
+                 'focused sequence proof', 'person',scope_001_now() + interval '1 day')",
     )
     .bind(authorization_ref)
     .execute(database.pool())
