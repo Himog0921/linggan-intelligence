@@ -96,6 +96,34 @@ export function packageDetailPageSessionLane(entry = {}, taskSpec = {}) {
   return packageReplies({ ...common, result: entry.commentResult, noteId: contentExternalId });
 }
 
+/**
+ * Return the bounded page receipt for the first, page-owning detail lane.
+ *
+ * The background may only treat a page action as started when the response
+ * echoes the exact action/capability/task identity it dispatched.  A detail
+ * session is no exception: it persists the page result for later separately
+ * claimed lanes, but its own `content_detail` task still has to identify
+ * itself before its outbox submission can be delivered.
+ */
+export function detailPageSessionExecutionReceipt({ action, taskSpec = {}, delivery, submissionId } = {}) {
+  const normalizedAction = text(action);
+  const taskId = text(taskSpec.taskId);
+  const capability = capabilityFromTask(taskSpec);
+  if (!normalizedAction || !taskId || capability !== 'content_detail') {
+    throw new Error('detail_page_session_receipt_identity_invalid');
+  }
+  return {
+    success: true,
+    state: 'detail_page_session_queued',
+    delivery: text(delivery) || 'pending',
+    submissionId: text(submissionId),
+    action: normalizedAction,
+    capability,
+    taskId,
+    message: '当前详情页已完整读取；详情已进入待交付队列，其余已批准通道将复用本次页面结果。',
+  };
+}
+
 export function createDetailPageSessionStore(table = database.sessions, now = () => Date.now()) {
   async function pruneExpiredAndOverflow() {
     const expired = await table.where('expiresAt').belowOrEqual(now()).primaryKeys();

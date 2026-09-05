@@ -75,6 +75,7 @@
 | 稳定页面身份就绪门（0.8.33） | URL 经安静期后，由同 URL 的内容脚本 `getPageContext` 回应证明可执行；不再等待可能被图片或长连接拖住的浏览器 `complete` | 不跳过重定向或页面身份核验，不把没有内容脚本的页面当作就绪，不改变失败审计或伪造采集交付 |
 | 认领默认自动接活与工位名称回显（0.8.37） | 成功 claim 的 server-owned station 默认切为 `stationAccepting=true`；check-in 回显服务端 `display_name` 与接活状态，Popup 只读显示“自动接活 / 已暂停 / 待认领” | 不把名称作为安装身份/配对键，不在插件保存或编辑别名，不以自动接活绕过心跳、凭证、账号、风险、预算、并发或 TaskSpec 门禁；人暂停不得被替换安装覆盖 |
 | 自动工位心跳与精确详情范围（0.8.38） | 每个 `linggan-patrol` alarm 先 check-in 再 claim；仅当服务端返回账号事实已过期/未绑定/登录失效，才向已打开 XHS 页请求同一被动导航观察并重试一次；固定材料可声明 detail-only | 不打开、刷新或导航 XHS 页面；不读 Cookie/存储，不把所查看博主当账号；不因“详情”自动采评论、回复或媒体 |
+| 详情页派发回执身份（0.8.39） | 首个同页 `content_detail` 读取入本机可靠 outbox 后，回显原派发的 action、capability、taskId；后台保持严格比对后才继续交付 | 不因一个页面读取合并后续 lane；不将缺身份回执当作成功；不扩大 WorkOrder、页面访问或采集范围 |
 
 ## 新旧运行路径对照
 
@@ -85,7 +86,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.38）
+当前路径（0.8.39）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox

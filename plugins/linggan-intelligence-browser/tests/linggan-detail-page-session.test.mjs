@@ -3,9 +3,11 @@ import test from 'node:test';
 
 import {
   createDetailPageSessionStore,
+  detailPageSessionExecutionReceipt,
   packageDetailPageSessionLane,
   validateDetailPageSessionPlan,
 } from '../src/linggan/detailPageSessionStore.js';
+import { decodePageExecutionReceipt } from '../src/linggan/adapter.js';
 
 function memoryTable() {
   const rows = new Map();
@@ -89,6 +91,26 @@ test('detail page plan is bounded to one content and the approved closed lane se
   assert.throws(
     () => validateDetailPageSessionPlan({ ...plan, lanes: [...plan.lanes, 'author_profile'] }, 'note-1'),
     /lanes_invalid/,
+  );
+});
+
+test('the first detail lane returns the exact dispatched page identity', () => {
+  const taskSpec = task('content_detail', 'detail-task-1');
+  const receipt = detailPageSessionExecutionReceipt({
+    action: 'lingganCollectNoteFull',
+    taskSpec,
+    delivery: 'pending',
+    submissionId: 'submission-1',
+  });
+  assert.deepEqual(
+    decodePageExecutionReceipt(receipt, {
+      action: 'lingganCollectNoteFull', capability: 'content_detail', taskId: 'detail-task-1',
+    }),
+    { ok: true, state: 'detail_page_session_queued', message: receipt.message },
+  );
+  assert.throws(
+    () => detailPageSessionExecutionReceipt({ action: 'lingganCollectNoteFull', taskSpec: task('comments') }),
+    /receipt_identity_invalid/,
   );
 });
 
