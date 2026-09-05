@@ -7,7 +7,7 @@
 //! a later stage that does not exist yet.
 
 use crate::collection_control::{
-    CapacitySelection, evaluate_capacity_in, required_capabilities_for,
+    CapacitySelection, evaluate_capacity_in, ready_batch_claim_slots_in, required_capabilities_for,
 };
 use crate::work_order_lease::{
     IssuedLease, LeaseError, issue_work_order_lease_in_transaction, lease_schema_is_ready,
@@ -17,6 +17,7 @@ use linggan_contracts::{
 };
 use linggan_storage_postgres::Database;
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -84,6 +85,7 @@ pub struct ProgressiveArchiveTickSummary {
 const PROGRESSIVE_ARCHIVE_VERSION: i32 = 1;
 const PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT: i32 = 200;
 const PROGRESSIVE_ARCHIVE_BATCH_SIZE: i64 = 3;
+const PROGRESSIVE_ARCHIVE_MAX_GENERATION_PER_TICK: usize = 100;
 
 /// One already-admitted material identity that a person has explicitly selected for deepening.
 ///
@@ -763,6 +765,7 @@ async fn request_and_admit_in_transaction_with_progressive_resume(
             facts.dispatch_lane,
             facts.task_template,
             facts.estimated_work_units,
+            material_targets,
         )
         .await?;
         write_material_targets(&mut *transaction, work_order_ref, material_targets).await?;
@@ -1350,20 +1353,24 @@ async fn write_work_order(
     dispatch_lane: &str,
     task_template: &str,
     estimated_work_units: i32,
+    material_targets: &[MaterialDeepeningTarget],
 ) -> Result<Uuid, sqlx::Error> {
     let work_order_ref = Uuid::new_v4();
     let max_works = max_works_for(transaction, authorization_ref).await?;
     let dedupe_key = format!(
-        "{dispatch_lane}:{target_ref}:{task_template}:{}",
-        monitor_rule_revision_ref.unwrap_or(Uuid::nil())
+        "{dispatch_lane}:{target_ref}:{task_template}:{}:{}",
+        monitor_rule_revision_ref.unwrap_or(Uuid::nil()),
+        material_scope_dedupe_fragment(material_targets),
     );
+    let dispatch_group_key = (dispatch_lane == "batch").then(|| format!("target:{target_ref}"));
     sqlx::query(
         "INSERT INTO collection_work_order \
              (work_order_ref, decision_ref, target_ref, lane, max_works, station_ref, \
              installation_ref,account_ref,eligibility_ref,monitor_rule_revision_ref,stop_conditions, \
-             dispatch_lane,queue_state,scheduled_for,dedupe_key,estimated_work_units) \
+             dispatch_lane,queue_state,scheduled_for,dedupe_key,estimated_work_units, \
+             dispatch_group_key,retry_not_before_at) \
          VALUES ($1, $2, $3, $4, $5, NULL, NULL,NULL,NULL,$6,$7,$8,'queued', \
-                 scope_001_now(),$9,$10)",
+                 scope_001_now(),$9,$10,$11,scope_001_now())",
     )
     .bind(work_order_ref)
     .bind(decision_ref)
@@ -1380,6 +1387,7 @@ async fn write_work_order(
     .bind(dispatch_lane)
     .bind(dedupe_key)
     .bind(estimated_work_units)
+    .bind(dispatch_group_key)
     .execute(&mut **transaction)
     .await?;
 
@@ -1415,6 +1423,36 @@ async fn write_work_order(
     }
 
     Ok(work_order_ref)
+}
+
+/// The active WorkOrder dedupe index protects an exact browser read scope, not
+/// every future batch for the same target.  Persisting a digest keeps the key
+/// compact while still separating different content/comment/media contracts.
+fn material_scope_dedupe_fragment(material_targets: &[MaterialDeepeningTarget]) -> String {
+    if material_targets.is_empty() {
+        return "target".to_owned();
+    }
+    let mut normalized = material_targets.to_vec();
+    normalized.sort_by_key(|target| target.content_public_ref);
+    let input = normalized
+        .iter()
+        .map(|target| {
+            format!(
+                "{}:{}:{}:{}:{}:{}",
+                target.content_public_ref,
+                target.comment_limit,
+                target.reply_expand_limit,
+                target.acquire_media,
+                target.allow_ocr,
+                target.allow_asr
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    Sha256::digest(input.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 async fn write_progressive_marker(
@@ -1531,23 +1569,6 @@ async fn advance_progressive_archive_in_transaction(
     valid_for_minutes: i32,
     issue_lease: bool,
 ) -> Result<ProgressiveAdvance, RequestLeaseError> {
-    let live_material_scope: bool = sqlx::query_scalar(
-        "SELECT EXISTS ( \
-           SELECT 1 FROM collection_work_order candidate \
-           JOIN collection_work_order_material_target scope USING (work_order_ref) \
-           LEFT JOIN collection_work_order_lease lease USING (work_order_ref) \
-           WHERE candidate.target_ref=$1 AND candidate.lane='deep_archive' \
-             AND (candidate.queue_state='queued' \
-                  OR (lease.released_at IS NULL AND lease.expires_at>scope_001_now())))",
-    )
-    .bind(target_ref)
-    .fetch_one(&mut **transaction)
-    .await
-    .map_err(AcquisitionChainError::from)?;
-    if live_material_scope {
-        return Ok(ProgressiveAdvance::Skipped("detail_batch_in_flight"));
-    }
-
     let content_refs: Vec<Uuid> = sqlx::query_scalar(
         "SELECT discovered.content_public_ref FROM ( \
            SELECT finding.content_public_ref,min(finding.created_at) AS first_seen \
@@ -1650,13 +1671,13 @@ async fn advance_progressive_archive_in_transaction(
     }))
 }
 
-/// Advance versioned creator dossier plans by one small, frozen material batch per target.
+/// Keep versioned creator dossier plans supplied with bounded material batches.
 ///
 /// The scheduler never downloads or parses platform data. It only turns already accepted,
-/// target-scoped directory facts into the next explicitly bounded Work Order. Re-running it is
-/// safe: the target row lock and the live-scope exclusion are held in the same transaction that
-/// writes the child scope and queued Work Order. Browser execution is a later station claim,
-/// not work performed by this scheduler tick.
+/// target-scoped directory facts into explicitly bounded WorkOrders. Exact content scopes still
+/// dedupe under the target-row transaction. A source may keep at most `currently eligible
+/// claimants × lane policy multiplier` queued or leased batch orders, so the worker neither
+/// starves ten ready stations nor builds an unbounded archive backlog.
 pub async fn run_progressive_archives(
     database: &Database,
 ) -> Result<ProgressiveArchiveTickSummary, RequestLeaseError> {
@@ -1672,6 +1693,7 @@ pub async fn run_progressive_archives(
     let plans: Vec<(Uuid, Uuid, String)> = sqlx::query_as(
         "WITH roots AS ( \
            SELECT work_order.target_ref,work_order.work_order_ref,request.purpose,work_order.created_at, \
+                  target.last_scheduler_considered_at, \
                   row_number() OVER (PARTITION BY work_order.target_ref \
                                      ORDER BY work_order.created_at,work_order.work_order_ref) AS root_rank \
            FROM collection_work_order work_order \
@@ -1687,7 +1709,7 @@ pub async fn run_progressive_archives(
              AND decision.authorization_ref IS NOT NULL \
              AND target.lifecycle_state <> 'dismissed') \
          SELECT target_ref,work_order_ref,purpose FROM roots WHERE root_rank=1 \
-         ORDER BY created_at,work_order_ref LIMIT 50",
+         ORDER BY last_scheduler_considered_at NULLS FIRST,created_at,work_order_ref LIMIT 50",
     )
     .bind(PROGRESSIVE_ARCHIVE_VERSION.to_string())
     .fetch_all(database.pool())
@@ -1695,97 +1717,162 @@ pub async fn run_progressive_archives(
     .map_err(AcquisitionChainError::from)?;
 
     let mut summary = ProgressiveArchiveTickSummary::default();
-    for (target_ref, root_work_order_ref, purpose) in plans {
-        let mut transaction = database
-            .pool()
-            .begin()
+    let mut generated = 0_usize;
+    while generated < PROGRESSIVE_ARCHIVE_MAX_GENERATION_PER_TICK {
+        let mut advanced_any = false;
+        // A pass takes at most one batch per source. Repeating passes only
+        // while a source remains below its persisted cap yields round-robin
+        // production without an in-memory source cursor.
+        for (target_ref, root_work_order_ref, purpose) in &plans {
+            if generated >= PROGRESSIVE_ARCHIVE_MAX_GENERATION_PER_TICK {
+                break;
+            }
+            let mut transaction = database
+                .pool()
+                .begin()
+                .await
+                .map_err(AcquisitionChainError::from)?;
+            let state: Option<(String, String, String, bool)> = sqlx::query_as(
+                "SELECT platform,target_kind,lifecycle_state,monitoring_enabled \
+                 FROM collection_observation_target \
+                 WHERE target_ref=$1 FOR UPDATE",
+            )
+            .bind(*target_ref)
+            .fetch_optional(&mut *transaction)
             .await
             .map_err(AcquisitionChainError::from)?;
-        let state: Option<(String, String, String, bool)> = sqlx::query_as(
-            "SELECT platform,target_kind,lifecycle_state,monitoring_enabled \
-             FROM collection_observation_target \
-             WHERE target_ref=$1 FOR UPDATE",
-        )
-        .bind(target_ref)
-        .fetch_optional(&mut *transaction)
-        .await
-        .map_err(AcquisitionChainError::from)?;
-        let Some((platform, target_kind, lifecycle_state, monitoring_enabled)) = state else {
-            transaction
-                .rollback()
-                .await
-                .map_err(AcquisitionChainError::from)?;
-            summary
-                .skipped
-                .push((target_ref, "target_not_found".to_owned()));
-            continue;
-        };
-        if lifecycle_state == "dismissed" {
-            transaction
-                .rollback()
-                .await
-                .map_err(AcquisitionChainError::from)?;
-            summary
-                .skipped
-                .push((target_ref, "target_dismissed".to_owned()));
-            continue;
-        }
-        let authorization_ref = match progressive_authorization_in_transaction(
-            &mut transaction,
-            &platform,
-            &target_kind,
-            &purpose,
-        )
-        .await
-        .map_err(AcquisitionChainError::from)?
-        {
-            ProgressiveAuthorization::Qualified(authorization_ref) => authorization_ref,
-            ProgressiveAuthorization::TooSmall(_) | ProgressiveAuthorization::Missing => {
+            let Some((platform, target_kind, lifecycle_state, monitoring_enabled)) = state else {
                 transaction
                     .rollback()
                     .await
                     .map_err(AcquisitionChainError::from)?;
                 summary
                     .skipped
-                    .push((target_ref, "authorization_expired_or_too_small".to_owned()));
+                    .push((*target_ref, "target_not_found".to_owned()));
                 continue;
-            }
-        };
-        let advance = advance_progressive_archive_in_transaction(
-            &mut transaction,
-            target_ref,
-            root_work_order_ref,
-            authorization_ref,
-            &purpose,
-            "agent",
-            monitoring_enabled,
-            180,
-            false,
-        )
-        .await?;
-        match advance {
-            ProgressiveAdvance::Skipped(reason) => {
+            };
+            // Reuse the Target's existing scheduler fairness fact.  A bounded
+            // root page must not keep selecting its first fifty sources while
+            // later dossiers wait forever; writing this under the same target
+            // lock makes the next tick start with sources considered least
+            // recently, without inventing a progressive-only cursor object.
+            sqlx::query(
+                "UPDATE collection_observation_target \
+                 SET last_scheduler_considered_at=scope_001_now() WHERE target_ref=$1",
+            )
+            .bind(*target_ref)
+            .execute(&mut *transaction)
+            .await
+            .map_err(AcquisitionChainError::from)?;
+            if lifecycle_state == "dismissed" {
                 transaction
                     .rollback()
                     .await
                     .map_err(AcquisitionChainError::from)?;
-                summary.skipped.push((target_ref, reason.to_owned()));
+                summary
+                    .skipped
+                    .push((*target_ref, "target_dismissed".to_owned()));
+                continue;
             }
-            ProgressiveAdvance::Outcome(outcome) if outcome.request.work_order_ref.is_some() => {
-                transaction
-                    .commit()
+            let authorization_ref = match progressive_authorization_in_transaction(
+                &mut transaction,
+                &platform,
+                &target_kind,
+                purpose,
+            )
+            .await
+            .map_err(AcquisitionChainError::from)?
+            {
+                ProgressiveAuthorization::Qualified(authorization_ref) => authorization_ref,
+                ProgressiveAuthorization::TooSmall(_) | ProgressiveAuthorization::Missing => {
+                    transaction
+                        .rollback()
+                        .await
+                        .map_err(AcquisitionChainError::from)?;
+                    summary
+                        .skipped
+                        .push((*target_ref, "authorization_expired_or_too_small".to_owned()));
+                    continue;
+                }
+            };
+            let required = required_capabilities_for(&target_kind, "deep_archive", true, true);
+            let (ready_claimants, ready_work_multiplier) =
+                ready_batch_claim_slots_in(&mut transaction, &platform, &required)
                     .await
                     .map_err(AcquisitionChainError::from)?;
-                summary.queued.push(target_ref);
-            }
-            ProgressiveAdvance::Outcome(outcome) => {
-                let reason = outcome.request.reason_code.to_owned();
+            let ready_cap = ready_claimants.saturating_mul(i64::from(ready_work_multiplier));
+            let active_group_work: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM collection_work_order \
+                 WHERE dispatch_lane='batch' AND dispatch_group_key=$1 \
+                   AND queue_state IN ('queued','leased')",
+            )
+            .bind(format!("target:{target_ref}"))
+            .fetch_one(&mut *transaction)
+            .await
+            .map_err(AcquisitionChainError::from)?;
+            if ready_cap == 0 || active_group_work >= ready_cap {
                 transaction
-                    .commit()
+                    .rollback()
                     .await
                     .map_err(AcquisitionChainError::from)?;
-                summary.skipped.push((target_ref, reason));
+                // Capacity is a deliberate scheduler decision, not an
+                // invisible absence of the root.  Persisted ready capacity
+                // can be zero while every compatible station is busy or
+                // unavailable; reporting this lets the Runtime distinguish
+                // it from a malformed or missing progressive plan.
+                summary.skipped.push((
+                    *target_ref,
+                    if ready_cap == 0 {
+                        "no_ready_batch_capacity".to_owned()
+                    } else {
+                        "batch_source_cap_reached".to_owned()
+                    },
+                ));
+                continue;
             }
+            let advance = advance_progressive_archive_in_transaction(
+                &mut transaction,
+                *target_ref,
+                *root_work_order_ref,
+                authorization_ref,
+                purpose,
+                "agent",
+                monitoring_enabled,
+                180,
+                false,
+            )
+            .await?;
+            match advance {
+                ProgressiveAdvance::Skipped(reason) => {
+                    transaction
+                        .rollback()
+                        .await
+                        .map_err(AcquisitionChainError::from)?;
+                    summary.skipped.push((*target_ref, reason.to_owned()));
+                }
+                ProgressiveAdvance::Outcome(outcome)
+                    if outcome.request.work_order_ref.is_some() =>
+                {
+                    transaction
+                        .commit()
+                        .await
+                        .map_err(AcquisitionChainError::from)?;
+                    summary.queued.push(*target_ref);
+                    generated += 1;
+                    advanced_any = true;
+                }
+                ProgressiveAdvance::Outcome(outcome) => {
+                    let reason = outcome.request.reason_code.to_owned();
+                    transaction
+                        .commit()
+                        .await
+                        .map_err(AcquisitionChainError::from)?;
+                    summary.skipped.push((*target_ref, reason));
+                }
+            }
+        }
+        if !advanced_any {
+            break;
         }
     }
     Ok(summary)

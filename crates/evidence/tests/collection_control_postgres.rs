@@ -87,11 +87,13 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0035_claimed_station_auto_acceptance.sql"),
     "\n",
     include_str!("../../../database/migrations/0036_monitor_scheduling_clarity.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0037_collection_scheduler_scale.sql"),
 );
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn complete_migration_set_applies_collection_control_0036() {
+async fn complete_migration_set_applies_collection_control_0037() {
     let database = proof_database("collection_control_full_migrations").await;
 
     assert!(

@@ -680,13 +680,78 @@ fn bounds_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
                 format!(
                     r#"<div class="c-bound-row">
                         <div class="c-bound-name"><b>{target}</b><span>{lane} · {station}</span></div>
-                        <div class="c-bound-meta"><span>{stage}</span><span>到期 {expires}</span></div>
+                        <div class="c-bound-meta"><span>{stage}</span><span>开始 {started}</span><span>预计 {units} 单元</span><span>到期 {expires}</span></div>
                       </div>"#,
                     target = escape(&lease.target_label),
                     lane = escape(&lease.lane),
                     station = escape(&lease.station_name),
                     stage = escape(stage),
+                    started = escape(&lease.started_at),
+                    units = lease.estimated_work_units,
                     expires = escape(&lease.expires_at),
+                )
+            })
+            .collect::<String>()
+    };
+
+    let platform_dispatch = if overview.platform_dispatch.is_empty() {
+        "<p class=\"c-bounds-empty\">平台并发策略尚未读取到；这不等于平台没有余量。</p>".to_owned()
+    } else {
+        overview
+            .platform_dispatch
+            .iter()
+            .map(|capacity| {
+                format!(
+                    r#"<div class="c-bound-row"><div class="c-bound-name"><b>{platform}</b><span>平台全局并发</span></div><div class="c-bound-meta"><span>活跃 Lease {live}/{cap}</span><span>余量 {remaining}</span></div></div>"#,
+                    platform = escape(&capacity.platform),
+                    live = capacity.live_leases,
+                    cap = capacity.concurrent_cap,
+                    remaining = capacity.remaining(),
+                )
+            })
+            .collect::<String>()
+    };
+
+    let dispatch_backlog = if overview.dispatch_backlog.is_empty() {
+        "<p class=\"c-bounds-empty\">调度通道尚未读取到；这不等于当前队列为空。</p>".to_owned()
+    } else {
+        overview
+            .dispatch_backlog
+            .iter()
+            .map(|lane| {
+                let cap = lane
+                    .concurrent_cap
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "可借用空闲工位".to_owned());
+                format!(
+                    r#"<div class="c-bound-row"><div class="c-bound-name"><b>{lane}</b><span>等待 {queued} · 租用 {leased} · 冷却 {cooling}</span></div><div class="c-bound-meta"><span>lane 上限 {cap}</span><span>最老可领 {oldest}</span></div></div>"#,
+                    lane = escape(&dispatch_lane_label(&lane.dispatch_lane)),
+                    queued = lane.queued_work_orders,
+                    leased = lane.leased_work_orders,
+                    cooling = lane.retry_cooling_work_orders,
+                    cap = escape(&cap),
+                    oldest = escape(lane.oldest_ready_at.as_deref().unwrap_or("暂无")),
+                )
+            })
+            .collect::<String>()
+    };
+
+    let rule_schedules = if overview.monitor_rule_schedules.is_empty() {
+        "<p class=\"c-bounds-empty\">当前没有有效自动观察规则。</p>".to_owned()
+    } else {
+        overview
+            .monitor_rule_schedules
+            .iter()
+            .map(|rule| {
+                format!(
+                    r#"<div class="c-bound-row"><div class="c-bound-name"><b>{target}</b><span>每 {interval}</span></div><div class="c-bound-meta"><span>{state}</span><span>上次计划 {planned}</span><span>上次 Attempt {attempt}</span><span>下次 {next}</span><span>回执 {receipt}</span></div></div>"#,
+                    target = escape(&rule.target_label),
+                    interval = escape(&interval_label(rule.interval_seconds)),
+                    state = escape(&work_order_state_label(rule.latest_work_order_state.as_deref())),
+                    planned = escape(rule.last_scheduled_for.as_deref().unwrap_or("从未")),
+                    attempt = escape(rule.last_attempt_started_at.as_deref().unwrap_or("从未")),
+                    next = escape(rule.next_run_at.as_deref().unwrap_or("暂无")),
+                    receipt = escape(rule.last_receipt_at.as_deref().unwrap_or("从未")),
                 )
             })
             .collect::<String>()
@@ -709,24 +774,74 @@ fn bounds_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
                 {leases}
               </div>
               <div class="c-bounds-group">
+                <h3>平台并发</h3>
+                {platform_dispatch}
+              </div>
+              <div class="c-bounds-group">
+                <h3>调度通道</h3>
+                {dispatch_backlog}
+              </div>
+              <div class="c-bounds-group">
                 <h3>巡检</h3>
                 <dl class="c-bounds-grid">
                   <div><dt>开着巡检</dt><dd>{monitoring}/{total}</dd></div>
                   <div><dt>此刻到期</dt><dd>{due}</dd></div>
+                  <div><dt>已逾期</dt><dd>{overdue}</dd></div>
+                  <div><dt>最早到期</dt><dd>{oldest_due}</dd></div>
                   <div><dt>最近派出</dt><dd>{dispatched}</dd></div>
                   <div><dt>最近成功</dt><dd>{succeeded}</dd></div>
                 </dl>
                 <p class="c-bounds-note">{patrol_note}</p>
               </div>
+              <div class="c-bounds-group">
+                <h3>规则排程</h3>
+                {rule_schedules}
+              </div>
             </section>"#,
         monitoring = patrol.monitoring_targets,
         total = patrol.total_targets,
         due = patrol.due_now,
+        overdue = patrol.overdue_rules,
+        oldest_due = escape(patrol.oldest_due_at.as_deref().unwrap_or("暂无")),
         // 从未派出与派出过是两个事实，前者不是 0 也不是未知，是「从未」。
         dispatched = escape(patrol.last_dispatched_at.as_deref().unwrap_or("从未")),
         succeeded = escape(patrol.last_succeeded_at.as_deref().unwrap_or("从未")),
         patrol_note = escape(patrol_note),
+        platform_dispatch = platform_dispatch,
+        dispatch_backlog = dispatch_backlog,
+        rule_schedules = rule_schedules,
     )
+}
+
+fn dispatch_lane_label(value: &str) -> String {
+    match value {
+        "immediate" => "即时任务".to_owned(),
+        "scheduled" => "定时任务".to_owned(),
+        "batch" => "批量任务".to_owned(),
+        _ => value.to_owned(),
+    }
+}
+
+fn work_order_state_label(value: Option<&str>) -> &'static str {
+    match value {
+        Some("queued") => "等待领取",
+        Some("leased") => "执行中",
+        Some("completed") => "最近一单已完成",
+        Some("cancelled") => "最近一单已取消",
+        Some("legacy") => "历史状态",
+        _ => "尚未产生 WorkOrder",
+    }
+}
+
+fn interval_label(seconds: i32) -> String {
+    match seconds {
+        21_600 => "6 小时".to_owned(),
+        43_200 => "12 小时".to_owned(),
+        86_400 => "24 小时".to_owned(),
+        172_800 => "2 天".to_owned(),
+        604_800 => "7 天".to_owned(),
+        _ => "未知间隔".to_owned(),
+    }
 }
 
 fn escape(value: &str) -> String {
@@ -742,7 +857,10 @@ fn escape(value: &str) -> String {
 mod tests {
     use super::*;
     use linggan_contracts::Capacity;
-    use linggan_evidence::{ActiveRiskPause, LiveLease, PatrolOutlook};
+    use linggan_evidence::{
+        ActiveRiskPause, DispatchLaneBacklog, LiveLease, MonitorRuleSchedule, PatrolOutlook,
+        PlatformDispatchCapacity,
+    };
     use uuid::Uuid;
 
     fn base() -> String {
@@ -773,10 +891,15 @@ mod tests {
                 total_targets: 0,
                 monitoring_targets: 0,
                 due_now: 0,
+                overdue_rules: 0,
+                oldest_due_at: None,
                 last_dispatched_at: None,
                 last_succeeded_at: None,
             },
             live_leases: Vec::new(),
+            platform_dispatch: Vec::new(),
+            dispatch_backlog: Vec::new(),
+            monitor_rule_schedules: Vec::new(),
         }
     }
 
@@ -1011,7 +1134,9 @@ mod tests {
             station_name: "MacBook Chrome".to_owned(),
             lane: "patrol".to_owned(),
             target_label: "某创作者".to_owned(),
+            started_at: "暂无".to_owned(),
             expires_at: "2026-08-29 09:00".to_owned(),
+            estimated_work_units: 2,
             has_task: false,
         }];
         let rendered = render_runtime(
@@ -1023,6 +1148,52 @@ mod tests {
             None,
         );
         assert!(rendered.contains("尚未展开成任务"));
+    }
+
+    #[test]
+    fn runtime_scale_sections_render_only_persisted_scheduler_facts() {
+        let mut data = overview(vec![lane("巡检", available())]);
+        data.platform_dispatch = vec![PlatformDispatchCapacity {
+            platform: "xhs".to_owned(),
+            concurrent_cap: 10,
+            live_leases: 3,
+        }];
+        data.dispatch_backlog = vec![DispatchLaneBacklog {
+            dispatch_lane: "scheduled".to_owned(),
+            queued_work_orders: 4,
+            leased_work_orders: 3,
+            retry_cooling_work_orders: 1,
+            oldest_ready_at: Some("2026-09-05 09:00".to_owned()),
+            concurrent_cap: None,
+        }];
+        data.monitor_rule_schedules = vec![MonitorRuleSchedule {
+            target_label: "稳定相位目标".to_owned(),
+            interval_seconds: 86_400,
+            last_scheduled_for: Some("2026-09-04 09:00".to_owned()),
+            last_attempt_started_at: Some("2026-09-04 09:01".to_owned()),
+            latest_work_order_state: Some("queued".to_owned()),
+            next_run_at: Some("2026-09-05 12:00".to_owned()),
+            last_receipt_at: None,
+        }];
+        let rendered = render_runtime(
+            &base(),
+            Some(&data),
+            &[],
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+        );
+        assert!(rendered.contains("平台并发"));
+        assert!(rendered.contains("活跃 Lease 3/10"));
+        assert!(rendered.contains("调度通道"));
+        assert!(rendered.contains("定时任务"));
+        assert!(rendered.contains("规则排程"));
+        assert!(rendered.contains("稳定相位目标"));
+        assert!(rendered.contains("等待领取"));
+        assert!(
+            !rendered.contains("成功率"),
+            "no inferred success-rate is rendered"
+        );
     }
 
     #[test]

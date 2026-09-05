@@ -3,7 +3,7 @@
 > 状态: 权威当前
 > 最后核对: 2026-09-05
 > 适用范围: 观察目标的生命周期、深度建档、固定间隔观察、统一浏览器任务调度、爆款追踪与插件推送协同
-> 事实来源: Mog 于 2026-09-05 的“自动监测基线设计”确认、`domain-invariants.md`、采集控制合同与当前 `COLLECTION-SCHEDULING-CLARITY-001` 源码/隔离 PostgreSQL 合同
+> 事实来源: Mog 于 2026-09-05 的“自动监测基线设计”确认、`domain-invariants.md`、采集控制合同与当前 `COLLECTION-SCHEDULER-SCALE-001` 源码/隔离 PostgreSQL 合同
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、`domain-invariants.md`、采集控制合同；本文件不授权任何真实采集执行
 
 **本文件不是真实采集授权。** 它定义产品规则与代码合同；共享数据库迁移、Runtime 切换、插件重载和真实平台访问仍须分别授权与证明。
@@ -42,11 +42,11 @@ target.monitoring_enabled = true
 active automatic rule = none
 ```
 
-保存/暂停/恢复规则时，immutable rule revision、target 的 active pointer、`monitoring_enabled`、lifecycle、`monitor_schedule_anchor_at` 与 `monitor_next_run_at` 同一事务更新。页面只能读该耐久计划点，不能用“上次派出 + 某个旧间隔”自行推算。
+保存/暂停/恢复规则时，immutable rule revision、target 的 active pointer、`monitoring_enabled`、lifecycle、`monitor_schedule_anchor_at`、稳定的 `monitor_schedule_slot_seconds` 与 `monitor_next_run_at` 同一事务更新。页面只能读该耐久计划点，不能用“上次派出 + 某个旧间隔”自行推算。
 
 ### 0.3 简单、确定的定时规则
 
-首版规则只接受一个固定全天间隔：6 小时、12 小时、24 小时、2 天或 7 天。启用时记录 `anchor_at`；调度器只查询 `automatic_enabled && next_run_at <= now` 的有效规则，在写入 Work Order 的同一事务把下次计划从先前计划点推进。漏过多个周期时只补一张 Work Order，并累计 missed count，不回填 N 张历史任务；人工观察不改未来计划点。
+首版规则只接受一个固定全天间隔：6 小时、12 小时、24 小时、2 天或 7 天。启用或恢复时记录 `anchor_at`，并由目标稳定 UUID 计算该间隔内的持久相位；因此同一批保存的规则会均匀分散，首次自动运行也仍发生在完整间隔之后，绝不绕过为即时采集。调度器只查询 `automatic_enabled && next_run_at <= now` 的有效规则，在写入 Work Order 的同一事务把下次计划从先前计划点推进。漏过多个周期时只补一张 Work Order，并累计 missed count，不回填 N 张历史任务；人工观察不改未来计划点。
 
 每个创作者巡查 Work Order 固定为 `creator_patrol`：作者主页资格核验加最近 30 条作品观察。规则 UI 只配置“是否自动观察 + 间隔”，不暴露日历、工作日/周末、窗口、fallback 或动态频率。
 
@@ -58,9 +58,11 @@ active automatic rule = none
 |---|---|---|
 | immediate | 用户等待的立即复采/人工观察 | 最多 3 个工位，空闲时优先 |
 | scheduled | 到期的创作者或关键词规则 | 可使用全部其余空闲工位 |
-| batch | 深度建档、缺口补采、研究批次 | 最多 3 个工位；其中深度建档初期可另限 1 |
+| batch | 深度建档、缺口补采、研究批次 | 最多 3 个工位；每个来源/任务组最多保留“当前合资格工位数 × 2”的 queued/leased ready WorkOrder |
 
-这不是静态工位分组。工位每次 claim 前都要过：任务到期、工位接活/新鲜度/最低版本/能力、账号绑定与资格、额度、风险/节流、授权 scope、目标冲突。合格候选按 lane 的权重与虚拟完成量公平选择，并用 `FOR UPDATE SKIP LOCKED` 原子抢占；一个工位初期最多执行一个有效浏览器任务。OCR、ASR、媒体下载和分析是后续独立 worker，不占浏览器 claim。
+这不是静态工位分组。工位每次 claim 前都要过：任务到期与 `retry_not_before_at`、工位接活/新鲜度/最低版本/能力、账号绑定与资格、额度、风险/节流、授权 scope、目标冲突，以及平台全局活跃 Lease cap。合格候选按 lane 的权重与虚拟完成量公平选择：即时 lane FIFO、定时 lane 最早计划、batch lane 按最近最少被领取的 group 轮转；认领使用 `FOR UPDATE SKIP LOCKED` 原子抢占。一个工位初期最多执行一个有效浏览器任务；平台 cap 由数据库策略行锁定并跨 Runtime 进程裁决。OCR、ASR、媒体下载和分析是后续独立 worker，不占浏览器 claim。
+
+可恢复的浏览器启动失败或运行超时不会删改旧 Lease/Task/Attempt/Package/Receipt：服务端追加失败账本、释放旧 Lease，并以 60、120、240、480、900 秒封顶的持久退避重新开放同一 WorkOrder。缺失签名执行 locator 发生在浏览器 Attempt 之前，也必须走同样的释放与冷却，不能以一张无效 Lease 占住工位、账号或平台并发。Runtime 页只读展示平台余量、lane 等待/冷却、活着的 Lease 与 Rule 排程；它不声称未被账本定义的“成功率”。
 
 ---
 

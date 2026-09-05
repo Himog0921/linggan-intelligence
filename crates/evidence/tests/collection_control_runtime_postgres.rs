@@ -9,9 +9,9 @@ use linggan_evidence::{
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, StationError,
     activate_installation_credential, apply_monitor_rule_command, bind_observation_account,
     check_in_installation, decide_dispatch, grant_authorization, open_claim_window, read_capacity,
-    register_station, report_account_eligibility, request_admit_and_lease, request_and_admit,
-    retire_station, rotate_installation_credential, run_due_patrols, set_station_accepting,
-    start_producer_attempt, submit_producer_package,
+    read_runtime_capacity, register_station, report_account_eligibility, request_admit_and_lease,
+    request_and_admit, retire_station, rotate_installation_credential, run_due_patrols,
+    set_station_accepting, start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::Row;
@@ -89,6 +89,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0035_claimed_station_auto_acceptance.sql"),
     "\n",
     include_str!("../../../database/migrations/0036_monitor_scheduling_clarity.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0037_collection_scheduler_scale.sql"),
 );
 
 #[tokio::test]
@@ -171,6 +173,68 @@ async fn concurrent_station_claims_create_at_most_one_live_lease_for_one_account
     .fetch_one(database.pool())
     .await
     .expect("live account leases are inspectable");
+    assert_eq!(live, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn platform_dispatch_cap_is_a_cross_station_hard_lease_limit() {
+    let database = proof_database("control_runtime_platform_cap").await;
+    sqlx::query(
+        "UPDATE collection_platform_dispatch_policy SET concurrent_cap=1 WHERE platform='xhs'",
+    )
+    .execute(database.pool())
+    .await
+    .expect("proof narrows only its isolated platform cap");
+    let first_installation = ready_installation(&database, "platform-cap-first").await;
+    let second_installation = ready_installation(&database, "platform-cap-second").await;
+    let first = seed_target(
+        &database,
+        "creator",
+        "pending_decision",
+        "platform-cap-first",
+    )
+    .await;
+    let second = seed_target(
+        &database,
+        "creator",
+        "pending_decision",
+        "platform-cap-second",
+    )
+    .await;
+    authorize(&database, "deep_archive", "platform cap purpose", 2).await;
+    admitted_work(&database, first, "platform cap purpose").await;
+    admitted_work(&database, second, "platform cap purpose").await;
+
+    assert!(matches!(
+        decide_dispatch(
+            &database,
+            &first_installation.install_key,
+            &first_installation.secret
+        )
+        .await
+        .expect("first eligible station claims one work order"),
+        DispatchDecision::Dispatch { .. }
+    ));
+    let blocked = decide_dispatch(
+        &database,
+        &second_installation.install_key,
+        &second_installation.secret,
+    )
+    .await
+    .expect("second station receives a durable capacity decision");
+    assert!(matches!(
+        blocked,
+        DispatchDecision::ControlBlocked { ref reason_code }
+            if reason_code == "platform_concurrency_reached"
+    ));
+    let live: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease \
+         WHERE released_at IS NULL AND expires_at>scope_001_now()",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("live platform leases are inspectable");
     assert_eq!(live, 1);
 }
 
@@ -299,6 +363,48 @@ async fn automatic_save_rule_moves_a_paused_keyword_target_to_monitoring() {
             .expect("automatic rule is saved");
     assert_eq!(second.outcome, MonitorCommandOutcomeKind::Applied);
     assert_target_state(&database, target_ref, "monitoring", true).await;
+    let (slot, interval_seconds, first_delay_seconds): (i32, i32, i64) = sqlx::query_as(
+        "SELECT monitor_schedule_slot_seconds,patrol_interval_seconds, \
+                EXTRACT(EPOCH FROM (monitor_next_run_at-monitor_schedule_anchor_at))::bigint \
+         FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("stable schedule phase and first next run are persisted together");
+    assert!((0..interval_seconds).contains(&slot));
+    assert_eq!(first_delay_seconds, i64::from(interval_seconds + slot));
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn runtime_scale_projection_reads_policy_lanes_and_persisted_rule_schedule() {
+    let database = proof_database("control_runtime_scale_projection").await;
+    let target_ref = seed_target(&database, "keyword", "paused", "runtime-scale-rule").await;
+    apply_monitor_rule_command(&database, &save_rule(target_ref, 0, true, Uuid::new_v4()))
+        .await
+        .expect("automatic fixed rule is persisted before a read-only runtime projection");
+
+    let overview = read_runtime_capacity(&database)
+        .await
+        .expect("runtime read projects source-of-truth scheduling rows");
+    assert_eq!(overview.platform_dispatch.len(), 1);
+    assert_eq!(overview.platform_dispatch[0].platform, "xhs");
+    assert_eq!(overview.dispatch_backlog.len(), 3);
+    assert_eq!(
+        overview
+            .dispatch_backlog
+            .iter()
+            .map(|lane| lane.dispatch_lane.as_str())
+            .collect::<Vec<_>>(),
+        vec!["immediate", "scheduled", "batch"]
+    );
+    assert_eq!(overview.monitor_rule_schedules.len(), 1);
+    assert_eq!(
+        overview.monitor_rule_schedules[0].target_label,
+        "runtime-scale-rule"
+    );
+    assert!(overview.monitor_rule_schedules[0].next_run_at.is_some());
 }
 
 #[tokio::test]

@@ -1,14 +1,24 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-04
+> 最后核对: 2026-09-05
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
 ## 当前阶段
 
-### OBSERVATION-TARGET-DOSSIER-UI-001 / Issue #158（当前唯一实施项）
+### COLLECTION-SCHEDULER-SCALE-001（当前源码实施项；尚未进入共享运行态）
+
+Mog 已明确本轮目标不是临时证明一条采集链，而是把已有的自动观察能力收束为能在大量目标、多个工位和多种任务来源下持续运行的统一调度系统。实施位于独立 worktree 的
+`codex/collection-scheduler-scale-001`，基于 `origin/main@4864edd466d379dc7c9d0e7000e4e5cb3ec3d111`；冻结合同、边界和验收条件见
+[`COLLECTION-SCHEDULER-SCALE-001`](plans/active/collection-scheduler-scale-001.md)。
+
+本包只改变源码和隔离测试：Rule 使用持久稳定相位避免集中到期；所有浏览器工作继续共用 WorkOrder 队列，并按 immediate/scheduled/batch 三个技术 lane、公平领取和批量滚动蓄水推进；工位、账号、平台三级并发及可恢复失败冷却均由 PostgreSQL 事实约束；`/collection/runtime` 只读呈现 lane、平台、Lease 与 Rule 排程事实。历史档案 `UNKNOWN/PARTIAL` 不再作为持续观察门禁，不新增 baseline/readiness/recovery 生命周期。
+
+`0037_collection_scheduler_scale.sql` 仍只在源码中，尚未应用到共享数据库；本轮完整隔离 PostgreSQL harness 已通过 116 个 Rust/PostgreSQL/API proof 与 2 个 Node proof，并清理随机数据库、container 和 volume。`:3000` Runtime、worker revision、插件加载、观察 Rule、真实 WorkOrder、外部平台访问、真实 Attempt/Package/Receipt/Evidence、源码 merge 与 Mog 业务验收均未执行或验证；隔离 proof 不能被写成这些真实运行结果。
+
+### OBSERVATION-TARGET-DOSSIER-UI-001 / Issue #158（独立 UI 实施项）
 
 Mog 已把观察目标重新定义为“持续观察的创作者及其不断生长的作品档案”，并明确要求首层按语料库式宽表回答对象、档案、巡查、变化和下一步；点击 creator 后进入以作品生命周期散点为核心的宽幅档案工作区。当前工作位于 exact `origin/main@bfe5d7e623b70e314cc6697269e291c3d5f5b3ef` 建立的 `codex/observation-target-dossier-ui-001`，Issue #158 已建 Claim；只验收 1440 CSS px 桌面全屏。
 
