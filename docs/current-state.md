@@ -16,7 +16,7 @@ Mog 已明确本轮目标不是临时证明一条采集链，而是把已有的�
 
 本包只改变源码和隔离测试：Rule 使用持久稳定相位避免集中到期；所有浏览器工作继续共用 WorkOrder 队列，并按 immediate/scheduled/batch 三个技术 lane、公平领取和批量滚动蓄水推进；工位、账号、平台三级并发及可恢复失败冷却均由 PostgreSQL 事实约束；`/collection/runtime` 只读呈现 lane、平台、Lease 与 Rule 排程事实。历史档案 `UNKNOWN/PARTIAL` 不再作为持续观察门禁，不新增 baseline/readiness/recovery 生命周期。
 
-`0037_collection_scheduler_scale.sql` 仍只在源码中，尚未应用到共享数据库；本轮完整隔离 PostgreSQL harness 已通过 116 个 Rust/PostgreSQL/API proof 与 2 个 Node proof，并清理随机数据库、container 和 volume。`:3000` Runtime、worker revision、插件加载、观察 Rule、真实 WorkOrder、外部平台访问、真实 Attempt/Package/Receipt/Evidence、源码 merge 与 Mog 业务验收均未执行或验证；隔离 proof 不能被写成这些真实运行结果。
+源码已提交为 `ded6e6f9cf574b8ea846d932cedb1337ab517fa8` 并推送为 PR #162，仍未合并。`0037_collection_scheduler_scale.sql` 仍只在源码中，尚未应用到共享数据库；本轮完整隔离 PostgreSQL harness 已通过 116 个 Rust/PostgreSQL/API proof 与 2 个 Node proof，并清理随机数据库、container 和 volume。`:3000` Runtime、worker revision、插件加载、观察 Rule、真实 WorkOrder、外部平台访问、真实 Attempt/Package/Receipt/Evidence、源码 merge 与 Mog 业务验收均未执行或验证；隔离 proof 不能被写成这些真实运行结果。
 
 ### OBSERVATION-TARGET-DOSSIER-UI-001 / Issue #158（独立 UI 实施项）
 
