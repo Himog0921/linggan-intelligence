@@ -138,8 +138,9 @@ pub use producer_runtime::{
 };
 pub use receipt::{IngressOutcome, RejectionCode};
 pub use runtime_capacity::{
-    ACCOUNT_CHECK_NOT_CONNECTED, ActiveRiskPause, LaneVerdict, LiveLease, PatrolOutlook,
-    RuntimeCapacityOverview, read_runtime_capacity,
+    ACCOUNT_CHECK_NOT_CONNECTED, ActiveRiskPause, DispatchLaneBacklog, LaneVerdict, LiveLease,
+    MonitorRuleSchedule, PatrolOutlook, PlatformDispatchCapacity, RuntimeCapacityOverview,
+    read_runtime_capacity,
 };
 pub use station_read::{
     CapabilityState, StationCapability, StationOverview, UnclaimedInstallation,

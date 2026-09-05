@@ -83,6 +83,8 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0036_monitor_scheduling_clarity.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0037_collection_scheduler_scale.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
     "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd'), ",
@@ -92,7 +94,8 @@ const MIGRATIONS: &str = concat!(
     "('0032_author_profile_avatar_media', '0e1b3511c8f306c95d3ca6a829d83362dddeeec42e65114f77ae746b59325b32'), ",
     "('0033_dispatch_failure_recovery', 'd5a24915664c1660eb0a46ff302c9c324c95b11c5c3d9804269ab02b09b10ecb'), ",
     "('0035_claimed_station_auto_acceptance', 'feed87adc4fe8090975a0c1150b08d862c0975e80ed71bcb88188053ea7e3a36'), ",
-    "('0036_monitor_scheduling_clarity', '0b2d3c9ed8525d27ce3cac56d620596210d41512b6acaad0cc98c803c1b84c47');\n",
+    "('0036_monitor_scheduling_clarity', '0b2d3c9ed8525d27ce3cac56d620596210d41512b6acaad0cc98c803c1b84c47'), ",
+    "('0037_collection_scheduler_scale', 'e1a9acf277243391032263a24a900771b5e8b3d967890e7c4b58d82632c5a4b0');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

@@ -25,6 +25,7 @@ use uuid::Uuid;
 /// alarms cannot run more frequently than once per minute, and a retry must
 /// not immediately reopen a page that just failed its readiness probe.
 pub const DISPATCH_FAILURE_RETRY_AFTER_SECONDS: u32 = 60;
+const MAX_DISPATCH_FAILURE_RETRY_AFTER_SECONDS: u32 = 900;
 const CLAIM_LEASE_MINUTES: i32 = 30;
 
 #[derive(Debug, thiserror::Error)]
@@ -187,6 +188,7 @@ impl DispatchDecision {
                 "account_unknown" => "account_unknown",
                 "account_busy" => "account_busy",
                 "station_daily_budget_reached" => "station_daily_budget_reached",
+                "platform_concurrency_reached" => "platform_concurrency_reached",
                 "rule_revision_changed" => "rule_revision_changed",
                 "monitoring_paused" => "monitoring_paused",
                 "authorization_expired_or_revoked" => "authorization_expired_or_revoked",
@@ -208,9 +210,10 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
                 AND to_regclass('collection_work_order_lease_task') IS NOT NULL \
                 AND to_regclass('collection_work_order_lease_task_dispatch_failure') IS NOT NULL \
                 AND to_regclass('collection_dispatch_lane_fairness') IS NOT NULL \
+                AND to_regclass('collection_platform_dispatch_policy') IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_name='collection_work_order' \
-                              AND column_name='queue_state')",
+                              AND column_name='retry_not_before_at')",
     )
     .fetch_one(database.pool())
     .await
@@ -256,15 +259,17 @@ pub async fn requeue_failed_dispatch(
         return Err(DispatchFailureError::InvalidCredential);
     }
 
-    let replay: Option<(Uuid, Uuid, String)> = sqlx::query_as(
-        "SELECT task_id,installation_ref,failure_code \
+    let replay: Option<(Uuid, Uuid, String, i32)> = sqlx::query_as(
+        "SELECT task_id,installation_ref,failure_code,retry_after_seconds \
          FROM collection_work_order_lease_task_dispatch_failure \
          WHERE failure_ref=$1 FOR UPDATE",
     )
     .bind(failure_ref)
     .fetch_optional(&mut *transaction)
     .await?;
-    if let Some((recorded_task_id, recorded_installation_ref, recorded_code)) = replay {
+    if let Some((recorded_task_id, recorded_installation_ref, recorded_code, retry_after_seconds)) =
+        replay
+    {
         if recorded_task_id != task_id
             || recorded_installation_ref != installation_ref
             || recorded_code != failure_code.as_str()
@@ -273,7 +278,8 @@ pub async fn requeue_failed_dispatch(
         }
         transaction.commit().await?;
         return Ok(DispatchFailureOutcome::Replay {
-            retry_after_seconds: DISPATCH_FAILURE_RETRY_AFTER_SECONDS,
+            retry_after_seconds: u32::try_from(retry_after_seconds)
+                .unwrap_or(DISPATCH_FAILURE_RETRY_AFTER_SECONDS),
         });
     }
 
@@ -299,37 +305,83 @@ pub async fn requeue_failed_dispatch(
     let Some((_task_id, lease_ref, work_order_ref)) = requeued else {
         return Err(DispatchFailureError::ClaimNotHeld);
     };
+    let retry_after_seconds = record_recoverable_dispatch_failure_in_transaction(
+        &mut transaction,
+        failure_ref,
+        task_id,
+        installation_ref,
+        lease_ref,
+        work_order_ref,
+        failure_code.as_str(),
+        "dispatch_start_failed",
+    )
+    .await?;
+    transaction.commit().await?;
+    Ok(DispatchFailureOutcome::Requeued {
+        retry_after_seconds,
+    })
+}
+
+/// Return the same WorkOrder to the common queue without erasing the old
+/// Lease/Task.  Both producer-reported failures and a server-detected missing
+/// locator use this path, so neither leaves a deceptive live permission behind.
+async fn record_recoverable_dispatch_failure_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    failure_ref: Uuid,
+    task_id: Uuid,
+    installation_ref: Uuid,
+    lease_ref: Uuid,
+    work_order_ref: Uuid,
+    failure_code: &str,
+    release_reason: &str,
+) -> Result<u32, sqlx::Error> {
+    let failure_count: i32 = sqlx::query_scalar(
+        "UPDATE collection_work_order \
+         SET dispatch_failure_count=dispatch_failure_count+1 \
+         WHERE work_order_ref=$1 AND queue_state='leased' \
+         RETURNING dispatch_failure_count",
+    )
+    .bind(work_order_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let retry_after_seconds = retry_after_seconds_for_failure_count(failure_count);
     sqlx::query(
         "INSERT INTO collection_work_order_lease_task_dispatch_failure \
-             (failure_ref,task_id,installation_ref,failure_code) \
-         VALUES ($1,$2,$3,$4)",
+             (failure_ref,task_id,installation_ref,failure_code,retry_after_seconds) \
+         VALUES ($1,$2,$3,$4,$5)",
     )
     .bind(failure_ref)
     .bind(task_id)
     .bind(installation_ref)
-    .bind(failure_code.as_str())
-    .execute(&mut *transaction)
+    .bind(failure_code)
+    .bind(i32::try_from(retry_after_seconds).unwrap_or(i32::MAX))
+    .execute(&mut **transaction)
     .await?;
     sqlx::query(
         "UPDATE collection_work_order_lease SET released_at=scope_001_now(), \
-             release_reason='dispatch_start_failed' \
-         WHERE lease_ref=$1 AND released_at IS NULL",
+             release_reason=$2 WHERE lease_ref=$1 AND released_at IS NULL",
     )
     .bind(lease_ref)
-    .execute(&mut *transaction)
+    .bind(release_reason)
+    .execute(&mut **transaction)
     .await?;
     sqlx::query(
         "UPDATE collection_work_order SET queue_state='queued',station_ref=NULL, \
-             installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL \
+             installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL, \
+             retry_not_before_at=scope_001_now()+make_interval(secs=>$2) \
          WHERE work_order_ref=$1 AND queue_state='leased'",
     )
     .bind(work_order_ref)
-    .execute(&mut *transaction)
+    .bind(i32::try_from(retry_after_seconds).unwrap_or(i32::MAX))
+    .execute(&mut **transaction)
     .await?;
-    transaction.commit().await?;
-    Ok(DispatchFailureOutcome::Requeued {
-        retry_after_seconds: DISPATCH_FAILURE_RETRY_AFTER_SECONDS,
-    })
+    Ok(retry_after_seconds)
+}
+
+fn retry_after_seconds_for_failure_count(failure_count: i32) -> u32 {
+    let exponent = u32::try_from((failure_count - 1).clamp(0, 4)).unwrap_or(0);
+    (DISPATCH_FAILURE_RETRY_AFTER_SECONDS.saturating_mul(1_u32 << exponent))
+        .min(MAX_DISPATCH_FAILURE_RETRY_AFTER_SECONDS)
 }
 
 /// 回答一次「有活吗」。
@@ -373,6 +425,11 @@ pub async fn decide_dispatch(
     // the queue entry. Requeue it before this installation evaluates new work.
     expire_lapsed_leases_in_transaction(&mut transaction).await?;
     let (Some(station_ref), Some(_quota)) = (station_ref, quota) else {
+        // Expiry recovery above is durable even when this caller has not yet
+        // claimed a station.  Returning without a commit would silently roll
+        // that recovery back whenever an unclaimed installation happened to
+        // be the next poller.
+        transaction.commit().await?;
         return Ok(DispatchDecision::InstallationNotClaimed);
     };
 
@@ -399,11 +456,16 @@ pub async fn decide_dispatch(
             revalidate_dispatch_task(&mut transaction, installation_ref, lease_ref, &task_spec)
                 .await?
         {
+            transaction.commit().await?;
             return Ok(DispatchDecision::ControlBlocked { reason_code });
         }
         let execution_source_url =
             execution_source_url_for_task(&mut transaction, &task_spec).await?;
         if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
+            // Do not release an in-progress task: an earlier response may
+            // have been lost after the browser actually began its Attempt.
+            // We still commit any unrelated expired-lease recovery above.
+            transaction.commit().await?;
             return Ok(DispatchDecision::ExecutionLocatorUnavailable {
                 reason: "这篇作品当前没有带 xsec_token 的已接纳发现链接，未交给插件执行。"
                     .to_owned(),
@@ -455,19 +517,43 @@ pub async fn decide_dispatch(
             transaction.commit().await?;
             return Ok(decision);
         }
+        transaction.commit().await?;
         return Ok(DispatchDecision::NothingWaiting);
     };
 
     if let Some(reason_code) =
         revalidate_dispatch_task(&mut transaction, installation_ref, lease_ref, &task_spec).await?
     {
+        transaction.commit().await?;
         return Ok(DispatchDecision::ControlBlocked { reason_code });
     }
 
     let execution_source_url = execution_source_url_for_task(&mut transaction, &task_spec).await?;
     if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
+        // This task is still pending: no browser Attempt has begun.  Release
+        // the permission now rather than allowing a locator defect to consume
+        // the station/account/platform slot until the lease naturally expires.
+        let work_order_ref: Uuid = sqlx::query_scalar(
+            "SELECT work_order_ref FROM collection_work_order_lease WHERE lease_ref=$1",
+        )
+        .bind(lease_ref)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let _retry_after_seconds = record_recoverable_dispatch_failure_in_transaction(
+            &mut transaction,
+            Uuid::new_v4(),
+            task_id,
+            installation_ref,
+            lease_ref,
+            work_order_ref,
+            "execution_locator_unavailable",
+            "execution_locator_unavailable",
+        )
+        .await?;
+        transaction.commit().await?;
         return Ok(DispatchDecision::ExecutionLocatorUnavailable {
-            reason: "这篇作品当前没有带 xsec_token 的已接纳发现链接，任务保持等待。".to_owned(),
+            reason: "这篇作品当前没有带 xsec_token 的已接纳发现链接；已释放许可并进入冷却重试。"
+                .to_owned(),
         });
     }
     let page_session_plan =
@@ -485,6 +571,7 @@ pub async fn decide_dispatch(
     .await?
     .rows_affected();
     if claimed != 1 {
+        transaction.commit().await?;
         return Ok(DispatchDecision::NothingWaiting);
     }
 
@@ -507,7 +594,7 @@ async fn claim_next_queued_work_order(
     caller_station_ref: Uuid,
 ) -> Result<Option<DispatchDecision>, sqlx::Error> {
     type Lane = (String, i32, Option<i32>, f64);
-    type Candidate = (Uuid, String, String, String, bool, bool, i32);
+    type Candidate = (Uuid, String, String, String, bool, bool, i32, String);
     let mut lanes: Vec<Lane> = sqlx::query_as(
         "SELECT dispatch_lane,weight,concurrent_cap,virtual_finish \
          FROM collection_dispatch_lane_fairness FOR UPDATE",
@@ -526,10 +613,19 @@ async fn claim_next_queued_work_order(
     let active_by_lane = active
         .into_iter()
         .collect::<std::collections::BTreeMap<_, _>>();
+    // `virtual_finish` already stores estimated work / weight. Dividing by
+    // weight again made high-weight lanes receive a double preference.
     lanes.sort_by(|left, right| {
-        (left.3 / f64::from(left.1)).total_cmp(&(right.3 / f64::from(right.1)))
+        left.3
+            .total_cmp(&right.3)
+            .then_with(|| left.0.cmp(&right.0))
     });
 
+    // A ready WorkOrder which this exact installation cannot claim is not the
+    // same thing as an empty queue.  Keep the first stable control reason as
+    // a fallback, but continue looking: another lane/platform may still be
+    // runnable by this worker during the same poll.
+    let mut deferred_control_block: Option<String> = None;
     for (dispatch_lane, weight, concurrent_cap, _virtual_finish) in lanes {
         if concurrent_cap.is_some_and(|cap| {
             active_by_lane.get(&dispatch_lane).copied().unwrap_or(0) >= i64::from(cap)
@@ -546,18 +642,29 @@ async fn claim_next_queued_work_order(
                     EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
                             WHERE scope.work_order_ref=work_order.work_order_ref \
                               AND scope.acquire_media), \
-                    work_order.estimated_work_units \
+                    work_order.estimated_work_units, \
+                    COALESCE(work_order.dispatch_group_key, \
+                             concat('work:',work_order.work_order_ref::text)) \
              FROM collection_work_order work_order \
              JOIN collection_observation_target target USING(target_ref) \
              WHERE work_order.queue_state='queued' \
                AND work_order.dispatch_lane=$1 \
+               AND work_order.retry_not_before_at<=scope_001_now() \
                AND work_order.scheduled_for<=scope_001_now() \
-             ORDER BY work_order.scheduled_for,work_order.created_at,work_order.work_order_ref \
-             LIMIT 8 FOR UPDATE OF work_order SKIP LOCKED",
+             ORDER BY CASE WHEN $1='batch' THEN COALESCE(( \
+                        SELECT EXTRACT(EPOCH FROM max(prior_lease.issued_at))::bigint \
+                        FROM collection_work_order prior \
+                        JOIN collection_work_order_lease prior_lease USING(work_order_ref) \
+                        WHERE prior.dispatch_lane='batch' \
+                          AND prior.dispatch_group_key=work_order.dispatch_group_key \
+                    ),-1) ELSE 0 END, \
+                    work_order.scheduled_for,work_order.created_at,work_order.work_order_ref \
+             LIMIT 64 FOR UPDATE OF work_order SKIP LOCKED",
         )
         .bind(&dispatch_lane)
         .fetch_all(&mut **transaction)
         .await?;
+        let mut seen_batch_groups = std::collections::BTreeSet::new();
         for (
             work_order_ref,
             platform,
@@ -566,8 +673,16 @@ async fn claim_next_queued_work_order(
             has_material_scope,
             acquires_media,
             units,
+            dispatch_group_key,
         ) in candidates
         {
+            // A bounded locked probe may contain several ready batches from
+            // one source. Consider only its oldest here; next claim starts at
+            // the least-recently leased group, yielding durable round-robin
+            // without another queue or in-memory cursor.
+            if dispatch_lane == "batch" && !seen_batch_groups.insert(dispatch_group_key) {
+                continue;
+            }
             let required =
                 required_capabilities_for(&target_kind, &lane, has_material_scope, acquires_media);
             let selection = evaluate_claiming_installation_capacity_in(
@@ -583,6 +698,8 @@ async fn claim_next_queued_work_order(
                 selection.installation_ref,
                 selection.account_ref,
             ) else {
+                deferred_control_block
+                    .get_or_insert_with(|| selection.capacity.reason_code().to_owned());
                 continue;
             };
             if station_ref != caller_station_ref || bound_installation_ref != installation_ref {
@@ -629,8 +746,20 @@ async fn claim_next_queued_work_order(
             let execution_source_url =
                 execution_source_url_for_task(transaction, &task_spec).await?;
             if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
+                let _retry_after_seconds = record_recoverable_dispatch_failure_in_transaction(
+                    transaction,
+                    Uuid::new_v4(),
+                    task_id,
+                    installation_ref,
+                    lease.lease_ref,
+                    work_order_ref,
+                    "execution_locator_unavailable",
+                    "execution_locator_unavailable",
+                )
+                .await?;
                 return Ok(Some(DispatchDecision::ExecutionLocatorUnavailable {
-                    reason: "已认领的详情任务缺少仍有效的签名执行链接。".to_owned(),
+                    reason: "已认领的详情任务缺少仍有效的签名执行链接；许可已释放并进入冷却重试。"
+                        .to_owned(),
                 }));
             }
             let page_session_plan =
@@ -668,7 +797,9 @@ async fn claim_next_queued_work_order(
             }));
         }
     }
-    Ok(None)
+    Ok(deferred_control_block
+        .map(|reason_code| Some(DispatchDecision::ControlBlocked { reason_code }))
+        .unwrap_or(None))
 }
 
 async fn undo_failed_queue_claim(
@@ -917,4 +1048,19 @@ async fn execution_source_url_for_task(
     .bind(content_external_id)
     .fetch_optional(&mut **transaction)
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_backoff_is_persistent_bounded_and_never_immediate() {
+        assert_eq!(retry_after_seconds_for_failure_count(1), 60);
+        assert_eq!(retry_after_seconds_for_failure_count(2), 120);
+        assert_eq!(retry_after_seconds_for_failure_count(3), 240);
+        assert_eq!(retry_after_seconds_for_failure_count(4), 480);
+        assert_eq!(retry_after_seconds_for_failure_count(5), 900);
+        assert_eq!(retry_after_seconds_for_failure_count(999), 900);
+    }
 }

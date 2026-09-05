@@ -31,6 +31,7 @@ pub enum CapacityReasonCode {
     AccountUnknown,
     AccountBusy,
     StationDailyBudgetReached,
+    PlatformConcurrentLimitReached,
     CapacityUnknown,
 }
 
@@ -54,6 +55,7 @@ impl CapacityReasonCode {
             Self::AccountUnknown => "account_unknown",
             Self::AccountBusy => "account_busy",
             Self::StationDailyBudgetReached => "station_daily_budget_reached",
+            Self::PlatformConcurrentLimitReached => "platform_concurrency_reached",
             Self::CapacityUnknown => "capacity_unknown",
         }
     }

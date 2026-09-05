@@ -60,6 +60,12 @@ proof_port="$(docker port "$proof_container" 5432/tcp | sed -n 's/^127\.0\.0\.1:
 docker exec "$proof_container" createdb -U "$proof_user" "$proof_database"
 proof_database_created=1
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
+# Collection Control predates the unified LOCAL-001 runner and its focused
+# suites retain their explicit proof variable for direct invocation.  Point
+# all aliases at this one disposable database so the full harness exercises
+# the exact same migration ledger rather than silently skipping them.
+export COLLECTION_CONTROL_PROOF_DATABASE_URL="$LOCAL_001_PROOF_DATABASE_URL"
+export COLLECTION_DISPATCH_PROOF_DATABASE_URL="$LOCAL_001_PROOF_DATABASE_URL"
 cargo test -p linggan-evidence --test local_discovery_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test local_producer_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test content_reobservation_postgres --locked -- --ignored
@@ -68,6 +74,9 @@ cargo test -p linggan-evidence --test material_social_postgres --locked -- --ign
 cargo test -p linggan-evidence --test material_media_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test creator_lifecycle_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test observation_target_dossier_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test collection_control_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test collection_control_runtime_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test collection_dispatch_sequence_postgres --locked -- --ignored
 cargo test -p linggan-intelligence --test topic_workspace_postgres --locked -- --ignored
 cargo test -p linggan-api --bin linggan-api --locked -- --ignored
 echo "LOCAL-001 discovery PostgreSQL proof passed"

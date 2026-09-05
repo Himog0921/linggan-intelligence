@@ -163,6 +163,130 @@ async fn clean_200_work_progressive_root_establishes_the_bounded_creator_baselin
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn progressive_archive_rolls_each_source_to_the_ready_claimant_batch_cap() {
+    let database = proof_database("dossier_progressive_batch_ready_cap").await;
+    let first_installation = ready_installation(&database, "dossier-batch-cap-first").await;
+    ready_installation(&database, "dossier-batch-cap-second").await;
+    let first_target = seed_creator_target(&database, "creator-batch-cap-first").await;
+    let second_target = seed_creator_target(&database, "creator-batch-cap-second").await;
+    let authorization_ref = grant_authorization(
+        &database,
+        &AuthorizationGrant {
+            platform: "xhs",
+            target_kind: "creator",
+            lane: "deep_archive",
+            purpose: "批量滚动容量证明",
+            max_targets: Some(2),
+            max_works_per_target: Some(200),
+            valid_for_days: 1,
+        },
+    )
+    .await
+    .expect("one bounded authorization covers the two isolated targets");
+
+    let first_root = request_progressive_archive_and_lease(
+        &database,
+        first_target,
+        "批量滚动容量证明",
+        "person",
+        30,
+    )
+    .await
+    .expect("first root is leased");
+    let first_root_ref = first_root
+        .request
+        .work_order_ref
+        .expect("first root reference");
+    complete_progressive_root_at_the_200_work_bound(&database, &first_installation).await;
+    let second_root = request_progressive_archive_and_lease(
+        &database,
+        second_target,
+        "批量滚动容量证明",
+        "person",
+        30,
+    )
+    .await
+    .expect("second root is leased after the first completes");
+    let second_root_ref = second_root
+        .request
+        .work_order_ref
+        .expect("second root reference");
+    complete_progressive_root_at_the_200_work_bound(&database, &first_installation).await;
+
+    let summary = run_progressive_archives(&database)
+        .await
+        .expect("scheduler produces bounded child batches from accepted directories");
+    assert_eq!(
+        summary.queued,
+        vec![
+            first_target,
+            second_target,
+            first_target,
+            second_target,
+            first_target,
+            second_target,
+            first_target,
+            second_target,
+        ],
+        "two ready claimants and multiplier two yield four batches per source in durable round-robin order",
+    );
+
+    let children: Vec<(Uuid, String, i64)> = sqlx::query_as(
+        "SELECT work_order.target_ref,work_order.dispatch_group_key,count(scope.content_public_ref) \
+         FROM collection_work_order work_order \
+         JOIN collection_work_order_material_target scope USING(work_order_ref) \
+         WHERE work_order.target_ref IN ($1,$2) \
+           AND work_order.work_order_ref<>ALL(ARRAY[$3,$4]::uuid[]) \
+           AND work_order.queue_state='queued' \
+         GROUP BY work_order.target_ref,work_order.dispatch_group_key \
+         ORDER BY work_order.target_ref",
+    )
+    .bind(first_target)
+    .bind(second_target)
+    .bind(first_root_ref)
+    .bind(second_root_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("queued child WorkOrders are inspectable");
+    assert_eq!(children.len(), 2);
+    for (target_ref, dispatch_group_key, scoped_work_count) in children {
+        assert!(matches!(target_ref, value if value == first_target || value == second_target));
+        assert_eq!(dispatch_group_key, format!("target:{target_ref}"));
+        assert_eq!(
+            scoped_work_count, 12,
+            "each source has four 3-work batches, never an unbounded material backlog"
+        );
+    }
+    let considered_target_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_observation_target \
+         WHERE target_ref IN ($1,$2) AND last_scheduler_considered_at IS NOT NULL",
+    )
+    .bind(first_target)
+    .bind(second_target)
+    .fetch_one(database.pool())
+    .await
+    .expect("each source records its scheduler-fairness turn");
+    assert_eq!(considered_target_count, 2);
+    let accepted_authorizations: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT decision.authorization_ref \
+         FROM collection_work_order work_order \
+         JOIN collection_admission_decision decision USING(decision_ref) \
+         WHERE work_order.target_ref IN ($1,$2) \
+           AND work_order.work_order_ref<>ALL(ARRAY[$3,$4]::uuid[]) \
+           AND work_order.queue_state='queued'",
+    )
+    .bind(first_target)
+    .bind(second_target)
+    .bind(first_root_ref)
+    .bind(second_root_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("child batches retain their bounded authorization provenance");
+    assert_eq!(accepted_authorizations, vec![authorization_ref]);
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
 async fn concurrent_continue_reuses_one_root_and_freezes_one_three_work_child_under_renewed_authorization()
  {
     let database = proof_database("dossier_progressive_continue_mutex").await;

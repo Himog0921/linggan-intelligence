@@ -206,9 +206,13 @@ pub async fn collection_control_schema_is_ready(database: &Database) -> Result<b
         "SELECT to_regclass('installation_credential') IS NOT NULL \
                 AND to_regclass('platform_observation_account') IS NOT NULL \
                 AND to_regclass('collection_monitor_rule_revision') IS NOT NULL \
+                AND to_regclass('collection_platform_dispatch_policy') IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_name='execution_station' \
-                              AND column_name='accepting_tasks')",
+                              AND column_name='accepting_tasks') \
+                AND EXISTS (SELECT 1 FROM information_schema.columns \
+                            WHERE table_name='collection_work_order' \
+                              AND column_name='retry_not_before_at')",
     )
     .fetch_one(database.pool())
     .await
@@ -671,6 +675,22 @@ pub(crate) async fn evaluate_capacity_in(
         ));
     }
 
+    if let Some((active, cap)) =
+        platform_dispatch_capacity_in(transaction, platform, None, false).await?
+    {
+        if active >= i64::from(cap) {
+            return Ok(CapacitySelection::blocked(
+                CapacityReasonCode::PlatformConcurrentLimitReached,
+                "平台当前活跃 Lease 已达到并发上限，等待任一执行许可释放。",
+            ));
+        }
+    } else {
+        return Ok(CapacitySelection::blocked(
+            CapacityReasonCode::CapacityUnknown,
+            "平台并发策略缺失，控制层按关闭处理。",
+        ));
+    }
+
     let last_failed_station: Option<Uuid> = sqlx::query_scalar(
         "SELECT work_order.station_ref FROM collection_work_order work_order \
          JOIN collection_work_order_lease lease USING(work_order_ref) \
@@ -800,6 +820,24 @@ pub(crate) async fn revalidate_frozen_capacity_in(
             "风险暂停仍在生效，当前 Lease 不再允许派发。",
         ));
     }
+    // A policy-row lock serializes every new Lease across stations and Runtime
+    // processes.  `current_lease_ref` is excluded during revalidation so the
+    // live lease being replayed does not consume a second slot.
+    if let Some((active, cap)) =
+        platform_dispatch_capacity_in(transaction, platform, current_lease_ref, true).await?
+    {
+        if active >= i64::from(cap) {
+            return Ok(CapacitySelection::blocked(
+                CapacityReasonCode::PlatformConcurrentLimitReached,
+                "平台当前活跃 Lease 已达到并发上限，等待任一执行许可释放。",
+            ));
+        }
+    } else {
+        return Ok(CapacitySelection::blocked(
+            CapacityReasonCode::CapacityUnknown,
+            "平台并发策略缺失，控制层按关闭处理。",
+        ));
+    }
     let candidate: Option<CapacityCandidate> = sqlx::query_as(
         "SELECT s.station_ref,i.installation_ref,s.accepting_tasks,i.plugin_version, \
                 i.capabilities,s.daily_work_quota, \
@@ -919,6 +957,128 @@ pub(crate) async fn evaluate_claiming_installation_capacity_in(
         true,
     )
     .await
+}
+
+/// Return `(live_leases, cap)` for one platform.  A caller which is about to
+/// issue a Lease must request `lock_policy=true`; the policy row then provides
+/// one database-wide serialization point for all account/station combinations.
+/// A plain admission read can use the same source of truth without holding the
+/// policy lock for longer than its transaction.
+async fn platform_dispatch_capacity_in(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    platform: &str,
+    current_lease_ref: Option<Uuid>,
+    lock_policy: bool,
+) -> Result<Option<(i64, i32)>, sqlx::Error> {
+    let cap: Option<i32> = if lock_policy {
+        sqlx::query_scalar(
+            "SELECT concurrent_cap FROM collection_platform_dispatch_policy \
+             WHERE platform=$1 FOR UPDATE",
+        )
+        .bind(platform)
+        .fetch_optional(&mut **transaction)
+        .await?
+    } else {
+        sqlx::query_scalar(
+            "SELECT concurrent_cap FROM collection_platform_dispatch_policy WHERE platform=$1",
+        )
+        .bind(platform)
+        .fetch_optional(&mut **transaction)
+        .await?
+    };
+    let Some(cap) = cap else {
+        return Ok(None);
+    };
+    let active: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease lease \
+         JOIN collection_work_order work_order USING(work_order_ref) \
+         JOIN collection_observation_target target USING(target_ref) \
+         WHERE target.platform=$1 AND lease.released_at IS NULL \
+           AND lease.expires_at>scope_001_now() \
+           AND ($2::uuid IS NULL OR lease.lease_ref<>$2)",
+    )
+    .bind(platform)
+    .bind(current_lease_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(Some((active, cap)))
+}
+
+/// Count currently eligible *idle* claimants for bounded batch generation.
+/// This is deliberately a capacity read, not a reservation: actual ownership
+/// is still established only by `revalidate_frozen_capacity_in` during Lease
+/// issuance.  The count prevents a batch source from producing an unbounded
+/// backlog while keeping enough ready work for the current station fleet.
+pub(crate) async fn ready_batch_claim_slots_in(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    platform: &str,
+    required_capabilities: &[&str],
+) -> Result<(i64, i32), sqlx::Error> {
+    let multiplier: Option<i32> = sqlx::query_scalar(
+        "SELECT ready_work_multiplier FROM collection_dispatch_lane_fairness \
+         WHERE dispatch_lane='batch'",
+    )
+    .fetch_optional(&mut **transaction)
+    .await?;
+    let Some(multiplier) = multiplier else {
+        return Ok((0, 1));
+    };
+    let Some((active, cap)) =
+        platform_dispatch_capacity_in(transaction, platform, None, false).await?
+    else {
+        return Ok((0, multiplier));
+    };
+    let platform_remaining = (i64::from(cap) - active).max(0);
+    if platform_remaining == 0 {
+        return Ok((0, multiplier));
+    }
+    let candidates: Vec<CapacityCandidate> = sqlx::query_as(
+        "SELECT s.station_ref,i.installation_ref,s.accepting_tasks,i.plugin_version, \
+                i.capabilities,s.daily_work_quota, \
+                i.last_seen_at>=scope_001_now()-make_interval(mins=>$1), \
+                EXISTS (SELECT 1 FROM installation_credential credential \
+                        WHERE credential.installation_ref=i.installation_ref \
+                          AND credential.revoked_at IS NULL \
+                          AND credential.activated_at IS NOT NULL \
+                          AND credential.expires_at>scope_001_now()), \
+                binding.account_ref,COALESCE(binding.confirmed_until>scope_001_now(),false), \
+                eligibility.eligibility_state, \
+                COALESCE(eligibility.expires_at>scope_001_now(),false), \
+                CASE WHEN binding.account_ref IS NULL THEN false ELSE EXISTS ( \
+                    SELECT 1 FROM collection_work_order work_order \
+                    JOIN collection_work_order_lease lease \
+                      ON lease.work_order_ref=work_order.work_order_ref \
+                    WHERE work_order.account_ref=binding.account_ref \
+                      AND lease.released_at IS NULL AND lease.expires_at>scope_001_now()) END \
+         FROM execution_station s \
+         JOIN plugin_installation i ON i.station_ref=s.station_ref AND i.superseded_at IS NULL \
+         LEFT JOIN LATERAL ( \
+             SELECT candidate.account_ref,candidate.confirmed_until \
+             FROM platform_observation_account_binding candidate \
+             WHERE candidate.installation_ref=i.installation_ref AND candidate.ended_at IS NULL \
+             LIMIT 1) binding ON true \
+         LEFT JOIN LATERAL ( \
+             SELECT observation.eligibility_state,observation.expires_at \
+             FROM platform_observation_account_eligibility_observation observation \
+             WHERE observation.account_ref=binding.account_ref \
+               AND observation.installation_ref=i.installation_ref \
+             ORDER BY observation.observed_at DESC LIMIT 1) eligibility ON true \
+         WHERE s.retired_at IS NULL",
+    )
+    .bind(CONTROL_FRESHNESS_MINUTES)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let mut ready = 0_i64;
+    for candidate in candidates {
+        if candidate_block_reason(&candidate, required_capabilities, None, true).is_some() {
+            continue;
+        }
+        if station_daily_note_usage_in(transaction, candidate.0).await? >= i64::from(candidate.5) {
+            continue;
+        }
+        ready += 1;
+    }
+    Ok((ready.min(platform_remaining), multiplier))
 }
 
 fn candidate_block_reason(
@@ -1433,6 +1593,28 @@ pub async fn apply_monitor_rule_command(
             MonitorCommandKind::Pause | MonitorCommandKind::Stop => false,
             MonitorCommandKind::ManualObserve => false,
         };
+        let interval_seconds = match command.kind {
+            MonitorCommandKind::SaveRule => command
+                .draft
+                .as_ref()
+                .and_then(|draft| draft.fixed_interval_seconds)
+                .unwrap_or(DEFAULT_MONITOR_INTERVAL_SECONDS),
+            MonitorCommandKind::Resume => {
+                sqlx::query_scalar::<_, i32>(
+                    "SELECT COALESCE(fixed_interval_seconds,fallback_interval_seconds) \
+                 FROM collection_monitor_rule_revision WHERE rule_revision_ref=$1",
+                )
+                .bind(applied_rule_ref)
+                .fetch_one(&mut *transaction)
+                .await?
+            }
+            MonitorCommandKind::Pause
+            | MonitorCommandKind::Stop
+            | MonitorCommandKind::ManualObserve => DEFAULT_MONITOR_INTERVAL_SECONDS,
+        };
+        let schedule_slot_seconds = automatic_enabled
+            .then(|| monitor_schedule_slot_seconds(command.target_ref, interval_seconds))
+            .unwrap_or(0);
         sqlx::query(
             "UPDATE collection_observation_target \
              SET active_monitor_rule_revision_ref=$2,monitoring_enabled=$3, \
@@ -1441,9 +1623,10 @@ pub async fn apply_monitor_rule_command(
                      ELSE fallback_interval_seconds END \
                      FROM collection_monitor_rule_revision WHERE rule_revision_ref=$2),86400), \
                  monitor_schedule_anchor_at=CASE WHEN $3 THEN scope_001_now() ELSE NULL END, \
+                 monitor_schedule_slot_seconds=CASE WHEN $3 THEN $4 ELSE 0 END, \
                  monitor_next_run_at=CASE WHEN $3 THEN scope_001_now() + make_interval(secs => \
                      COALESCE((SELECT fixed_interval_seconds \
-                       FROM collection_monitor_rule_revision WHERE rule_revision_ref=$2),86400)) \
+                       FROM collection_monitor_rule_revision WHERE rule_revision_ref=$2),86400) + $4) \
                      ELSE NULL END, \
                  monitor_missed_run_count=0 \
              WHERE target_ref=$1",
@@ -1451,6 +1634,7 @@ pub async fn apply_monitor_rule_command(
         .bind(command.target_ref)
         .bind(applied_rule_ref)
         .bind(automatic_enabled)
+        .bind(schedule_slot_seconds)
         .execute(&mut *transaction)
         .await?;
         apply_monitor_lifecycle_transition(
@@ -1483,6 +1667,17 @@ pub async fn apply_monitor_rule_command(
         None,
     )
     .await
+}
+
+/// Stable scheduling phase derived directly from the target UUID.  Rust's
+/// default hash is intentionally process-randomized, so it must not be used
+/// for a value persisted in a Rule's scheduling contract.
+fn monitor_schedule_slot_seconds(target_ref: Uuid, interval_seconds: i32) -> i32 {
+    debug_assert!(interval_seconds > 0);
+    let mut prefix = [0_u8; 8];
+    prefix.copy_from_slice(&target_ref.as_bytes()[..8]);
+    let phase = u64::from_be_bytes(prefix) % u64::try_from(interval_seconds).unwrap_or(1);
+    i32::try_from(phase).unwrap_or(0)
 }
 
 /// Create or reuse one manual patrol under the same transaction as its idempotent command
@@ -2387,5 +2582,16 @@ mod tests {
                 interval_seconds: 43_200,
             }
         );
+    }
+
+    #[test]
+    fn monitor_schedule_slot_is_stable_and_bounded_by_the_selected_interval() {
+        let target_ref =
+            Uuid::parse_str("018f0d5e-7e57-7b7d-8f99-5f9f12345678").expect("fixture UUID is valid");
+        let first = monitor_schedule_slot_seconds(target_ref, 86_400);
+        let replay = monitor_schedule_slot_seconds(target_ref, 86_400);
+        assert_eq!(first, replay, "same target must not drift across processes");
+        assert!((0..86_400).contains(&first));
+        assert!((0..21_600).contains(&monitor_schedule_slot_seconds(target_ref, 21_600)));
     }
 }

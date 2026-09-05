@@ -82,7 +82,9 @@ pub struct LiveLease {
     pub station_name: String,
     pub lane: String,
     pub target_label: String,
+    pub started_at: String,
     pub expires_at: String,
+    pub estimated_work_units: i32,
     /// 租约是否已经展开成插件可领的任务。为假时租约是许可，还没有活。
     pub has_task: bool,
 }
@@ -96,10 +98,50 @@ pub struct PatrolOutlook {
     pub total_targets: i64,
     pub monitoring_targets: i64,
     pub due_now: i64,
+    /// 当前已经越过持久 next_run_at 的规则数；不从最近完成时间反推。
+    pub overdue_rules: i64,
+    pub oldest_due_at: Option<String>,
     /// 全系统最近一次真的派出巡检的时间。
     pub last_dispatched_at: Option<String>,
     /// 全系统最近一次真的拿回材料的时间。与上一条分开，因为「派过」与「成了」是两个事实。
     pub last_succeeded_at: Option<String>,
+}
+
+/// 平台全局并发是第三层硬上限，和单工位、单账号的资格不同。
+#[derive(Debug, Clone)]
+pub struct PlatformDispatchCapacity {
+    pub platform: String,
+    pub concurrent_cap: i32,
+    pub live_leases: i64,
+}
+
+impl PlatformDispatchCapacity {
+    pub fn remaining(&self) -> i64 {
+        (i64::from(self.concurrent_cap) - self.live_leases).max(0)
+    }
+}
+
+/// 一个技术 lane 的队列事实。它不按业务模块分队列。
+#[derive(Debug, Clone)]
+pub struct DispatchLaneBacklog {
+    pub dispatch_lane: String,
+    pub queued_work_orders: i64,
+    pub leased_work_orders: i64,
+    pub retry_cooling_work_orders: i64,
+    pub oldest_ready_at: Option<String>,
+    pub concurrent_cap: Option<i32>,
+}
+
+/// 有效观察 Rule 的调度痕迹。所有字段都来自 Rule、WorkOrder、Task、Attempt 或 Receipt。
+#[derive(Debug, Clone)]
+pub struct MonitorRuleSchedule {
+    pub target_label: String,
+    pub interval_seconds: i32,
+    pub last_scheduled_for: Option<String>,
+    pub last_attempt_started_at: Option<String>,
+    pub latest_work_order_state: Option<String>,
+    pub next_run_at: Option<String>,
+    pub last_receipt_at: Option<String>,
 }
 
 impl PatrolOutlook {
@@ -121,6 +163,9 @@ pub struct RuntimeCapacityOverview {
     pub staffed_stations: i64,
     pub patrol: PatrolOutlook,
     pub live_leases: Vec<LiveLease>,
+    pub platform_dispatch: Vec<PlatformDispatchCapacity>,
+    pub dispatch_backlog: Vec<DispatchLaneBacklog>,
+    pub monitor_rule_schedules: Vec<MonitorRuleSchedule>,
 }
 
 impl RuntimeCapacityOverview {
@@ -193,6 +238,12 @@ pub async fn read_runtime_capacity(
                 count(*) FILTER (WHERE target.monitoring_enabled \
                     AND COALESCE(rule.automatic_enabled,false) \
                     AND target.monitor_next_run_at <= scope_001_now()), \
+                count(*) FILTER (WHERE target.monitoring_enabled \
+                    AND COALESCE(rule.automatic_enabled,false) \
+                    AND target.monitor_next_run_at < scope_001_now()), \
+                to_char(min(target.monitor_next_run_at) FILTER (WHERE target.monitoring_enabled \
+                    AND COALESCE(rule.automatic_enabled,false) \
+                    AND target.monitor_next_run_at <= scope_001_now()), 'YYYY-MM-DD HH24:MI'), \
                 to_char(max(target.last_patrol_dispatched_at), 'YYYY-MM-DD HH24:MI'), \
                 to_char(max(target.last_patrol_succeeded_at), 'YYYY-MM-DD HH24:MI') \
          FROM collection_observation_target target \
@@ -207,7 +258,11 @@ pub async fn read_runtime_capacity(
     let live_leases = sqlx::query_as::<_, LeaseRow>(
         "SELECT s.display_name, o.lane, \
                 coalesce(t.display_name, t.identity_key), \
+                to_char(COALESCE((SELECT min(task.claimed_at) \
+                                  FROM collection_work_order_lease_task task \
+                                  WHERE task.lease_ref=l.lease_ref),l.issued_at), 'YYYY-MM-DD HH24:MI'), \
                 to_char(l.expires_at, 'YYYY-MM-DD HH24:MI'), \
+                o.estimated_work_units, \
                 (l.task_id IS NOT NULL) \
          FROM collection_work_order_lease l \
          JOIN collection_work_order o ON o.work_order_ref = l.work_order_ref \
@@ -222,6 +277,80 @@ pub async fn read_runtime_capacity(
     .map(LiveLease::from)
     .collect();
 
+    let platform_dispatch = sqlx::query_as::<_, PlatformDispatchRow>(
+        "SELECT policy.platform,policy.concurrent_cap, \
+                (SELECT count(*) FROM collection_work_order_lease lease \
+                 JOIN collection_work_order work_order USING(work_order_ref) \
+                 JOIN collection_observation_target target USING(target_ref) \
+                 WHERE target.platform=policy.platform AND lease.released_at IS NULL \
+                   AND lease.expires_at>scope_001_now()) \
+         FROM collection_platform_dispatch_policy policy ORDER BY policy.platform",
+    )
+    .fetch_all(database.pool())
+    .await?
+    .into_iter()
+    .map(PlatformDispatchCapacity::from)
+    .collect();
+
+    let dispatch_backlog = sqlx::query_as::<_, DispatchLaneRow>(
+        "SELECT policy.dispatch_lane,policy.concurrent_cap, \
+                count(work_order.work_order_ref) FILTER (WHERE work_order.queue_state='queued'), \
+                count(work_order.work_order_ref) FILTER (WHERE work_order.queue_state='leased'), \
+                count(work_order.work_order_ref) FILTER (WHERE work_order.queue_state='queued' \
+                    AND work_order.retry_not_before_at>scope_001_now()), \
+                to_char(min(work_order.scheduled_for) FILTER (WHERE work_order.queue_state='queued' \
+                    AND work_order.retry_not_before_at<=scope_001_now() \
+                    AND work_order.scheduled_for<=scope_001_now()), 'YYYY-MM-DD HH24:MI') \
+         FROM collection_dispatch_lane_fairness policy \
+         LEFT JOIN collection_work_order work_order \
+           ON work_order.dispatch_lane=policy.dispatch_lane \
+         GROUP BY policy.dispatch_lane,policy.concurrent_cap,policy.virtual_finish \
+         ORDER BY CASE policy.dispatch_lane WHEN 'immediate' THEN 1 WHEN 'scheduled' THEN 2 ELSE 3 END",
+    )
+    .fetch_all(database.pool())
+    .await?
+    .into_iter()
+    .map(DispatchLaneBacklog::from)
+    .collect();
+
+    let monitor_rule_schedules = sqlx::query_as::<_, MonitorRuleScheduleRow>(
+        "SELECT coalesce(target.display_name,target.identity_key),rule.fixed_interval_seconds, \
+                to_char((SELECT max(work_order.scheduled_for) FROM collection_work_order work_order \
+                         WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref), \
+                        'YYYY-MM-DD HH24:MI'), \
+                to_char((SELECT max(attempt.started_at) FROM linggan_runtime_attempt attempt \
+                         JOIN collection_work_order_lease_task lease_task \
+                           ON lease_task.task_id=attempt.task_id \
+                         JOIN collection_work_order_lease lease USING(lease_ref) \
+                         JOIN collection_work_order work_order USING(work_order_ref) \
+                         WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref), \
+                        'YYYY-MM-DD HH24:MI'), \
+                (SELECT work_order.queue_state FROM collection_work_order work_order \
+                 WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref \
+                 ORDER BY work_order.scheduled_for DESC NULLS LAST,work_order.created_at DESC \
+                 LIMIT 1), \
+                to_char(target.monitor_next_run_at,'YYYY-MM-DD HH24:MI'), \
+                to_char((SELECT max(receipt.received_at) \
+                         FROM linggan_runtime_submission_receipt receipt \
+                         JOIN linggan_runtime_capture_package package USING(package_ref) \
+                         JOIN collection_work_order_lease_task lease_task \
+                           ON lease_task.task_id=package.task_id \
+                         JOIN collection_work_order_lease lease USING(lease_ref) \
+                         JOIN collection_work_order work_order USING(work_order_ref) \
+                         WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref), \
+                        'YYYY-MM-DD HH24:MI') \
+         FROM collection_observation_target target \
+         JOIN collection_monitor_rule_revision rule \
+           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+         WHERE target.monitoring_enabled AND rule.automatic_enabled AND rule.mode='fixed' \
+         ORDER BY target.monitor_next_run_at,target.target_ref LIMIT 100",
+    )
+    .fetch_all(database.pool())
+    .await?
+    .into_iter()
+    .map(MonitorRuleSchedule::from)
+    .collect();
+
     Ok(RuntimeCapacityOverview {
         lanes,
         risk_pauses,
@@ -229,6 +358,9 @@ pub async fn read_runtime_capacity(
         staffed_stations,
         patrol,
         live_leases,
+        platform_dispatch,
+        dispatch_backlog,
+        monitor_rule_schedules,
     })
 }
 
@@ -252,7 +384,15 @@ impl From<RiskPauseRow> for ActiveRiskPause {
     }
 }
 
-type PatrolRow = (i64, i64, i64, Option<String>, Option<String>);
+type PatrolRow = (
+    i64,
+    i64,
+    i64,
+    i64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 impl From<PatrolRow> for PatrolOutlook {
     fn from(row: PatrolRow) -> Self {
@@ -260,13 +400,23 @@ impl From<PatrolRow> for PatrolOutlook {
             total_targets: row.0,
             monitoring_targets: row.1,
             due_now: row.2,
-            last_dispatched_at: row.3,
-            last_succeeded_at: row.4,
+            overdue_rules: row.3,
+            oldest_due_at: row.4,
+            last_dispatched_at: row.5,
+            last_succeeded_at: row.6,
         }
     }
 }
 
-type LeaseRow = (String, String, String, Option<String>, Option<bool>);
+type LeaseRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    i32,
+    Option<bool>,
+);
 
 impl From<LeaseRow> for LiveLease {
     fn from(row: LeaseRow) -> Self {
@@ -274,8 +424,61 @@ impl From<LeaseRow> for LiveLease {
             station_name: row.0,
             lane: row.1,
             target_label: row.2,
-            expires_at: row.3.unwrap_or_else(|| "UNKNOWN".to_owned()),
-            has_task: row.4.unwrap_or(false),
+            started_at: row.3.unwrap_or_else(|| "暂无".to_owned()),
+            expires_at: row.4.unwrap_or_else(|| "UNKNOWN".to_owned()),
+            estimated_work_units: row.5,
+            has_task: row.6.unwrap_or(false),
+        }
+    }
+}
+
+type PlatformDispatchRow = (String, i32, i64);
+
+impl From<PlatformDispatchRow> for PlatformDispatchCapacity {
+    fn from(row: PlatformDispatchRow) -> Self {
+        Self {
+            platform: row.0,
+            concurrent_cap: row.1,
+            live_leases: row.2,
+        }
+    }
+}
+
+type DispatchLaneRow = (String, Option<i32>, i64, i64, i64, Option<String>);
+
+impl From<DispatchLaneRow> for DispatchLaneBacklog {
+    fn from(row: DispatchLaneRow) -> Self {
+        Self {
+            dispatch_lane: row.0,
+            concurrent_cap: row.1,
+            queued_work_orders: row.2,
+            leased_work_orders: row.3,
+            retry_cooling_work_orders: row.4,
+            oldest_ready_at: row.5,
+        }
+    }
+}
+
+type MonitorRuleScheduleRow = (
+    String,
+    Option<i32>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
+impl From<MonitorRuleScheduleRow> for MonitorRuleSchedule {
+    fn from(row: MonitorRuleScheduleRow) -> Self {
+        Self {
+            target_label: row.0,
+            interval_seconds: row.1.unwrap_or(0),
+            last_scheduled_for: row.2,
+            last_attempt_started_at: row.3,
+            latest_work_order_state: row.4,
+            next_run_at: row.5,
+            last_receipt_at: row.6,
         }
     }
 }

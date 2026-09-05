@@ -18,6 +18,8 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+const EXPIRED_LEASE_RETRY_AFTER_SECONDS: i32 = 60;
+
 #[derive(Debug, thiserror::Error)]
 pub enum LeaseError {
     #[error("work order lease schema is not applied")]
@@ -49,7 +51,10 @@ pub enum LeaseError {
 pub async fn lease_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
         "SELECT to_regclass('collection_work_order_lease') IS NOT NULL \
-                AND to_regclass('collection_work_order_lease_task') IS NOT NULL",
+                AND to_regclass('collection_work_order_lease_task') IS NOT NULL \
+                AND EXISTS (SELECT 1 FROM information_schema.columns \
+                            WHERE table_name='collection_work_order' \
+                              AND column_name='retry_not_before_at')",
     )
     .fetch_one(database.pool())
     .await
@@ -479,12 +484,17 @@ pub(crate) async fn expire_lapsed_leases_in_transaction(
         // The expired Lease and its scheduled tasks stay immutable history. The
         // Work Order returns to the shared pool so a later eligible station
         // creates a new Lease/Task/Attempt rather than overwriting that record.
+        // A one-minute persisted delay prevents a dead browser from consuming
+        // a fresh account/platform slot in a tight claim-expire loop.
         sqlx::query(
             "UPDATE collection_work_order SET queue_state='queued',station_ref=NULL, \
-                 installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL \
+                 installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL, \
+                 retry_not_before_at=GREATEST(retry_not_before_at, \
+                    scope_001_now()+make_interval(secs=>$2)) \
              WHERE work_order_ref=ANY($1) AND queue_state='leased'",
         )
         .bind(&expired)
+        .bind(EXPIRED_LEASE_RETRY_AFTER_SECONDS)
         .execute(&mut **transaction)
         .await?;
     }

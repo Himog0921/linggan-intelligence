@@ -86,6 +86,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0035_claimed_station_auto_acceptance.sql"),
     "\n",
     include_str!("../../../database/migrations/0036_monitor_scheduling_clarity.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0037_collection_scheduler_scale.sql"),
 );
 
 #[tokio::test]
@@ -674,13 +676,41 @@ async fn failed_browser_start_is_audited_then_returns_work_order_to_shared_queue
     .expect("failure count is readable");
     assert_eq!(failure_count, 1, "same failure id is an idempotent replay");
 
+    let cooling: bool = sqlx::query_scalar(
+        "SELECT retry_not_before_at>scope_001_now() AND dispatch_failure_count=1 \
+         FROM collection_work_order WHERE work_order_ref=$1",
+    )
+    .bind(fixture.work_order_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the retry delay is a persisted work-order fact");
+    assert!(
+        cooling,
+        "a different station cannot immediately reopen the same failed page"
+    );
+    let during_cooling = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the shared queue remains readable while cooling");
+    assert!(matches!(during_cooling, DispatchDecision::NothingWaiting));
+    sqlx::query(
+        "UPDATE collection_work_order SET retry_not_before_at=scope_001_now()-interval '1 second' \
+         WHERE work_order_ref=$1",
+    )
+    .bind(fixture.work_order_ref)
+    .execute(database.pool())
+    .await
+    .expect("proof advances only the isolated retry clock");
     let retry = decide_dispatch(
         &database,
         &fixture.install_key,
         &fixture.installation_credential,
     )
     .await
-    .expect("a fresh eligible claim is made from the shared work-order queue");
+    .expect("a fresh eligible claim is made after persistent cooling expires");
     assert_ne!(
         task_id(&retry),
         first_task_id,
