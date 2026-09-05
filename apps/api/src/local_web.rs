@@ -66,11 +66,12 @@ use linggan_evidence::{
     read_runtime_capacity, read_runtime_library, read_scheduler_heartbeat,
     read_station_capabilities, read_station_overview, read_target, read_target_avatars,
     record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
-    register_station, release_media_upload_finalize, rename_station, request_admit_and_lease,
-    request_admit_material_targets_and_lease, request_and_admit, retire_station,
-    set_group_for_many, set_monitoring_for_many, set_station_accepting, start_local_attempt,
-    start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
-    submit_producer_package, sync_target_from_author_profile,
+    register_station, release_media_upload_finalize, rename_station,
+    request_admit_material_targets_and_lease, request_and_admit,
+    request_progressive_archive_and_lease, retire_station, set_group_for_many,
+    set_monitoring_for_many, set_station_accepting, start_local_attempt, start_producer_attempt,
+    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
+    sync_target_from_author_profile,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -1065,7 +1066,14 @@ async fn collection_material_deepening(
                     "material_targets_invalid"
                 }
                 RequestLeaseError::Acquisition(
-                    AcquisitionChainError::SchemaUnavailable | AcquisitionChainError::Database(_),
+                    AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. },
+                ) => "progressive_archive_authorization_too_small",
+                RequestLeaseError::Acquisition(
+                    AcquisitionChainError::SchemaUnavailable
+                    | AcquisitionChainError::Database(_)
+                    | AcquisitionChainError::ProgressiveArchiveAuthorizationMissing
+                    | AcquisitionChainError::ProgressiveArchivePurposeMismatch
+                    | AcquisitionChainError::ProgressiveArchiveNotReady { .. },
                 ) => "acquisition_chain_unavailable",
                 RequestLeaseError::Lease(_) => "material_deepening_lease_failed",
             };
@@ -1149,6 +1157,14 @@ async fn collection_archive_request(State(state): State<LocalWebState>, body: By
                 AcquisitionChainError::UnknownTarget => "unknown_target",
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
                 AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
+                AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
+                    "progressive_archive_authorization_too_small"
+                }
+                AcquisitionChainError::ProgressiveArchiveAuthorizationMissing
+                | AcquisitionChainError::ProgressiveArchivePurposeMismatch
+                | AcquisitionChainError::ProgressiveArchiveNotReady { .. } => {
+                    "acquisition_chain_unavailable"
+                }
                 AcquisitionChainError::SchemaUnavailable => "acquisition_chain_unavailable",
                 AcquisitionChainError::Database(_) => "acquisition_chain_unavailable",
             },
@@ -2343,7 +2359,7 @@ async fn collection_targets(
     // 两百次数据库。
     let completeness = read_archive_completeness(database, linggan_contracts::OPEN_PLATFORM)
         .await
-        .unwrap_or_default();
+        .ok();
     // 抽屉独立查目标，不从筛过的列表里找——被筛掉的目标不该显示成「未找到」。
     let drawer_target_ref = params
         .drawer
@@ -2353,11 +2369,30 @@ async fn collection_targets(
         Some(target_ref) => read_target(database, target_ref).await.map_err(|_| ()),
         None => Ok(None),
     };
+    let drawer_avatar = match drawer_target.as_ref() {
+        Ok(Some(target)) if target.target_kind == "creator" => {
+            match read_target_avatars(database, std::slice::from_ref(target)).await {
+                Ok(mut avatars) => avatars
+                    .remove(&target.target_ref)
+                    .or(Some(ObservationTargetAvatar::NotObserved)),
+                Err(_) => Some(ObservationTargetAvatar::Unavailable),
+            }
+        }
+        Ok(Some(_)) | Ok(None) | Err(()) => None,
+    };
     let drawer_tab = target_drawer::TargetDrawerTab::parse(params.dtab.as_deref());
     let lifecycle_query = CreatorLifecycleQuery::parse_optional(
         params.life_window.as_deref(),
         params.life_metric.as_deref(),
     );
+    // A selected Work is display state only, but it is still reflected into generated links.
+    // Keep it in the UUID contract before any renderer sees it; arbitrary query text must never
+    // become an HTML attribute through a refresh-safe drawer URL.
+    let selected_lifecycle_work = params
+        .life_work
+        .as_deref()
+        .and_then(|value| uuid::Uuid::parse_str(value).ok())
+        .map(|value| value.to_string());
     let lifecycle = if should_read_target_lifecycle(
         drawer_target.as_ref().ok().and_then(Option::as_ref),
         drawer_tab,
@@ -2388,7 +2423,7 @@ async fn collection_targets(
                 &base,
                 &targets,
                 &avatars,
-                &completeness,
+                completeness.as_ref(),
                 params.error.as_deref(),
                 list_context,
             )
@@ -2401,7 +2436,8 @@ async fn collection_targets(
     let drawer = match drawer_target.as_ref() {
         Ok(target) => target_drawer::render(
             target.as_ref(),
-            &completeness,
+            drawer_avatar.as_ref(),
+            completeness.as_ref(),
             params.drawer.as_deref(),
             drawer_tab,
             match lifecycle_query.as_ref() {
@@ -2422,7 +2458,7 @@ async fn collection_targets(
                     metric: query.metric,
                 },
             },
-            params.life_work.as_deref(),
+            selected_lifecycle_work.as_deref(),
             list_context,
         ),
         Err(()) => {
@@ -2495,7 +2531,10 @@ fn should_read_target_lifecycle(
     target
         .map(|target| target.target_kind == "creator")
         .unwrap_or(false)
-        && active_tab == target_drawer::TargetDrawerTab::Overview
+        && matches!(
+            active_tab,
+            target_drawer::TargetDrawerTab::Overview | target_drawer::TargetDrawerTab::Baseline
+        )
 }
 
 async fn collection_operations(
@@ -3360,6 +3399,32 @@ struct MonitoringForm {
     row_target_ref: uuid::Uuid,
 }
 
+#[derive(serde::Deserialize)]
+struct TargetArchiveForm {
+    row_target_ref: uuid::Uuid,
+    /// Closed list state only. These fields are navigation context, never acquisition input.
+    return_filter: Option<String>,
+    return_sort: Option<String>,
+}
+
+fn target_archive_return_path(form: &TargetArchiveForm, error: Option<&str>) -> String {
+    let mut pairs = Vec::new();
+    if let Some(filter @ ("creator" | "keyword" | "archiving" | "monitoring")) =
+        form.return_filter.as_deref()
+    {
+        pairs.push(format!("filter={filter}"));
+    }
+    if matches!(form.return_sort.as_deref(), Some("last")) {
+        pairs.push("sort=last".to_owned());
+    }
+    pairs.push(format!("drawer={}", form.row_target_ref));
+    pairs.push("dtab=archive".to_owned());
+    if let Some(error) = error {
+        pairs.push(format!("error={error}"));
+    }
+    format!("/collection/targets?{}#target-archive", pairs.join("&"))
+}
+
 /// COLLECTION-001 · 切换一个观察目标的巡检开关。
 ///
 /// 只写本机记录：打开巡检不等于立刻采集——调度器仍要按间隔到期、准入仍要过六问、
@@ -3387,35 +3452,69 @@ async fn collection_target_toggle_monitoring(
 /// 情况的处置完全不同，压成一句「失败」等于让人自己去猜。
 async fn collection_target_deep_archive(
     State(state): State<LocalWebState>,
-    axum::extract::Form(form): axum::extract::Form<MonitoringForm>,
+    axum::extract::Form(form): axum::extract::Form<TargetArchiveForm>,
 ) -> Redirect {
     let Some(database) = state.database.database() else {
-        return Redirect::to("/collection/targets?error=read_model_not_connected");
+        return Redirect::to(&target_archive_return_path(
+            &form,
+            Some("read_model_not_connected"),
+        ));
     };
-    let execution = request_admit_and_lease(
+    let execution = request_progressive_archive_and_lease(
         database,
         form.row_target_ref,
-        "deep_archive",
         "从观察目标页发起深度建档",
         "person",
         60,
     )
     .await;
-    let Ok(execution) = execution else {
-        return Redirect::to("/collection/targets?error=archive_not_requestable");
+    let execution = match execution {
+        Ok(execution) => execution,
+        Err(RequestLeaseError::Acquisition(
+            AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. },
+        )) => {
+            return Redirect::to(&target_archive_return_path(
+                &form,
+                Some("archive_authorization_below_200"),
+            ));
+        }
+        Err(RequestLeaseError::Acquisition(
+            AcquisitionChainError::ProgressiveArchiveAuthorizationMissing,
+        )) => {
+            return Redirect::to(&target_archive_return_path(&form, Some("archive_refuse")));
+        }
+        Err(RequestLeaseError::Acquisition(
+            AcquisitionChainError::ProgressiveArchiveNotReady { reason },
+        )) => {
+            let code = if reason == "detail_batch_in_flight" {
+                "archive_in_progress"
+            } else if reason == "no_missing_accepted_work" {
+                "archive_nothing_to_continue"
+            } else {
+                "archive_not_requestable"
+            };
+            return Redirect::to(&target_archive_return_path(&form, Some(code)));
+        }
+        Err(_) => {
+            return Redirect::to(&target_archive_return_path(
+                &form,
+                Some("archive_not_requestable"),
+            ));
+        }
     };
     let outcome = execution.request;
     let Some(_work_order_ref) = outcome.work_order_ref else {
         // 准入没通过。把它的结论原样带回去——refuse 与 defer 的处置完全不同。
-        return Redirect::to(&format!(
-            "/collection/targets?error=archive_{}",
-            outcome.outcome.code()
-        ));
+        let code = format!("archive_{}", outcome.outcome.code());
+        return Redirect::to(&target_archive_return_path(&form, Some(&code)));
     };
     if execution.lease.is_none() {
-        return Redirect::to("/collection/targets?error=archive_lease_failed");
+        return Redirect::to(&target_archive_return_path(
+            &form,
+            Some("archive_lease_failed"),
+        ));
     }
-    Redirect::to("/collection/targets")
+    Redirect::to(&target_archive_return_path(&form, None))
 }
 
 /// COLLECTION-001 · 对勾选的来源做批量操作。

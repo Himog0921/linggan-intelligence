@@ -9,7 +9,7 @@ use axum::{
     routing::get,
 };
 use linggan_evidence::{
-    CreatorLifecycleAnalysis, CreatorLifecycleExclusions, CreatorLifecycleMetric,
+    CreatorLifecycleAssociation, CreatorLifecycleExclusions, CreatorLifecycleMetric,
     CreatorLifecycleProjection, CreatorLifecycleQuery, CreatorLifecycleReadError,
     CreatorLifecycleReceipt, CreatorLifecycleStatus, CreatorLifecycleSummary,
     CreatorLifecycleWindow, read_creator_lifecycle,
@@ -27,7 +27,6 @@ pub(super) struct LifecycleApiProjection<'a> {
     summary: &'a CreatorLifecycleSummary,
     exclusions: &'a CreatorLifecycleExclusions,
     receipt: &'a CreatorLifecycleReceipt,
-    analysis: &'a CreatorLifecycleAnalysis,
     points: Vec<LifecycleApiPoint>,
 }
 
@@ -35,8 +34,8 @@ pub(super) struct LifecycleApiProjection<'a> {
 #[serde(rename_all = "camelCase")]
 struct LifecycleApiPoint {
     work_public_ref: uuid::Uuid,
-    creator_percentile: f64,
-    rolling_median: f64,
+    association_state: CreatorLifecycleAssociation,
+    new_in_latest_patrol: bool,
 }
 
 /// The public target lifecycle API is intentionally a derived result, not a second Work facts
@@ -55,14 +54,13 @@ pub(super) fn api_projection(
         summary: &projection.summary,
         exclusions: &projection.exclusions,
         receipt: &projection.receipt,
-        analysis: &projection.analysis,
         points: projection
             .points
             .iter()
             .map(|point| LifecycleApiPoint {
                 work_public_ref: point.work_public_ref,
-                creator_percentile: point.creator_percentile,
-                rolling_median: point.rolling_median,
+                association_state: point.association_state,
+                new_in_latest_patrol: point.new_in_latest_patrol,
             })
             .collect(),
     }

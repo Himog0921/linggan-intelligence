@@ -57,6 +57,17 @@ async fn main() {
         if let Err(error) = linggan_evidence::ensure_discovery_cover_media_work(&database).await {
             println!("linggan worker: media acquisition projection failed: {error}");
         }
+        match linggan_evidence::run_progressive_archives(&database).await {
+            Ok(summary) if !summary.dispatched.is_empty() || !summary.skipped.is_empty() => {
+                println!(
+                    "linggan worker: progressive dossiers dispatched {}, skipped {}",
+                    summary.dispatched.len(),
+                    summary.skipped.len()
+                );
+            }
+            Ok(_) => {}
+            Err(error) => println!("linggan worker: progressive dossier tick failed: {error}"),
+        }
         match linggan_evidence::run_due_patrols(&database).await {
             Ok(summary) => {
                 // 只在真的发生了什么时说话。一个每分钟打印「本轮 0 个」的 tick 会让日志

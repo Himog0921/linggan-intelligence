@@ -42,11 +42,12 @@ mod work_resource_current;
 mod work_resource_read;
 
 pub use acquisition_chain::{
-    AcquisitionChainError, AuthorizationGrant, MaterialDeepeningTarget, RequestLeaseError,
-    RequestLeaseOutcome, RequestOutcome, acquisition_chain_schema_is_ready, grant_authorization,
-    read_capacity, request_admit_and_lease, request_admit_material_targets_and_lease,
-    request_and_admit, request_and_admit_material_targets,
-    request_and_admit_material_targets_under_authorization,
+    AcquisitionChainError, AuthorizationGrant, MaterialDeepeningTarget,
+    ProgressiveArchiveTickSummary, RequestLeaseError, RequestLeaseOutcome, RequestOutcome,
+    acquisition_chain_schema_is_ready, grant_authorization, read_capacity, request_admit_and_lease,
+    request_admit_material_targets_and_lease, request_and_admit,
+    request_and_admit_material_targets, request_and_admit_material_targets_under_authorization,
+    request_progressive_archive_and_lease, run_progressive_archives,
 };
 pub use archive_completeness::{ArchiveCompleteness, read_archive_completeness};
 pub use collection_control::{
@@ -75,7 +76,7 @@ pub use content_reobservation::{
     read_content_reobservation, read_content_reobservation_eligibility,
 };
 pub use creator_lifecycle::{
-    CreatorLifecycleAnalysis, CreatorLifecycleExclusions, CreatorLifecycleMetric,
+    CreatorLifecycleAssociation, CreatorLifecycleExclusions, CreatorLifecycleMetric,
     CreatorLifecyclePoint, CreatorLifecycleProjection, CreatorLifecycleQuery,
     CreatorLifecycleQueryError, CreatorLifecycleReadError, CreatorLifecycleReceipt,
     CreatorLifecycleStatus, CreatorLifecycleSummary, CreatorLifecycleWindow,

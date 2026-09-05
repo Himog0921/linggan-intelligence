@@ -3,8 +3,8 @@ mod fixture;
 
 use fixture::{proof_database, submit_package, submit_package_at};
 use linggan_evidence::{
-    CreatorLifecycleMetric, CreatorLifecycleQuery, CreatorLifecycleStatus, CreatorLifecycleWindow,
-    read_creator_lifecycle, read_work_resource,
+    CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecycleQuery,
+    CreatorLifecycleStatus, CreatorLifecycleWindow, read_creator_lifecycle, read_work_resource,
 };
 
 #[tokio::test]
@@ -98,6 +98,10 @@ async fn creator_lifecycle_isolates_same_named_targets_by_stable_author_identity
     assert_eq!(projection.summary.eligible_point_count, 1);
     assert_eq!(projection.points.len(), 1);
     assert_eq!(projection.points[0].metric_value, 17);
+    assert_eq!(
+        projection.points[0].association_state,
+        CreatorLifecycleAssociation::AuthorConfirmed
+    );
     assert_eq!(projection.points[0].title.as_deref(), Some("A 的真实作品"));
     assert_eq!(projection.exclusions.author_not_verified, 0);
     assert_eq!(projection.exclusions.author_mismatch, 0);
@@ -250,25 +254,18 @@ async fn creator_lifecycle_preserves_unknown_zero_and_exclusion_reasons() {
     assert_eq!(projection.summary.linked_work_count_lower_bound, 5);
     assert_eq!(projection.summary.confirmed_author_work_count, 3);
     assert_eq!(projection.summary.eligible_point_count, 1);
-    assert_eq!(projection.exclusions.author_not_verified, 1);
+    assert_eq!(projection.exclusions.author_not_verified, 0);
     assert_eq!(projection.exclusions.author_mismatch, 1);
-    assert_eq!(projection.exclusions.published_at_not_qualified, 1);
+    assert_eq!(projection.exclusions.published_at_not_qualified, 2);
     assert_eq!(projection.exclusions.metric_unknown, 1);
     assert_eq!(
         projection.points[0].metric_value, 0,
         "KNOWN zero is a real point"
     );
-    assert_eq!(projection.points[0].creator_percentile, 100.0);
-    assert_eq!(projection.points[0].rolling_median, 0.0);
     assert_eq!(
-        projection.analysis.percentile_version,
-        "creator-percentile-v1"
+        projection.points[0].association_state,
+        CreatorLifecycleAssociation::AuthorConfirmed
     );
-    assert_eq!(
-        projection.analysis.rolling_median_version,
-        "trailing-5-work-median-v1"
-    );
-    assert_eq!(projection.analysis.rolling_median_window, 5);
 }
 
 #[tokio::test]
@@ -549,6 +546,21 @@ async fn creator_lifecycle_reports_its_bounded_scan_receipt() {
     .await
     .unwrap();
     sqlx::query(
+        "INSERT INTO linggan_runtime_submission_receipt \
+           (submission_id,task_id,attempt_id,producer_instance_id,package_hash,package_ref, \
+            receipt_ref,execution_effect,material_admission) \
+         VALUES ($1,$2,$3,$4,repeat('2',64),$5,$6,'NOT_APPLICABLE','ACCEPTED')",
+    )
+    .bind(uuid::Uuid::new_v4())
+    .bind(task_id)
+    .bind(attempt_id)
+    .bind(producer_id)
+    .bind(package_ref)
+    .bind(uuid::Uuid::new_v4())
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
         "INSERT INTO linggan_runtime_record_disposition \
            (package_ref,record_ordinal,disposition,reason) \
          SELECT $1,ordinal,'accepted_for_library_discovery','synthetic scan receipt proof' \
@@ -599,7 +611,8 @@ async fn creator_lifecycle_reports_its_bounded_scan_receipt() {
     assert_eq!(projection.receipt.returned_count, 0);
     assert!(projection.receipt.truncated);
     assert!(projection.exclusions.scan_truncated);
-    assert_eq!(projection.exclusions.author_not_verified, 2_000);
+    assert_eq!(projection.exclusions.author_not_verified, 0);
+    assert_eq!(projection.exclusions.published_at_not_qualified, 2_000);
     assert_eq!(
         projection.status,
         CreatorLifecycleStatus::InsufficientObservation

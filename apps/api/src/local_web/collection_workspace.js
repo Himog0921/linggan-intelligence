@@ -246,12 +246,39 @@
     });
   });
 
+  // The object name is the row's one real link. Mouse users may also click any
+  // non-interactive data cell without turning the whole ARIA row into a nested link.
+  var targetRows = Array.prototype.slice.call(document.querySelectorAll("[data-target-row]"));
+  targetRows.forEach(function (row) {
+    row.addEventListener("click", function (event) {
+      var origin = event.target && event.target.closest ? event.target : null;
+      if (origin && origin.closest("a,button,input,select,textarea,label,summary,[data-row-no-open]")) {
+        return;
+      }
+      var opener = row.querySelector("[data-row-opener]");
+      if (opener) {
+        opener.click();
+      }
+    });
+  });
+
   var drawer = document.getElementById("c-drawer");
   if (!drawer) {
     if (!ruleModal) {
       restoreTriggerFocus();
     }
     return;
+  }
+
+  // A deep link with a fragment owns focus (for example a selected Work or an
+  // archive problem). A first-open drawer without one starts at its labelled title.
+  if (!window.location.hash) {
+    var drawerInitialFocus = drawer.querySelector("[data-drawer-initial-focus]");
+    if (drawerInitialFocus) {
+      window.requestAnimationFrame(function () {
+        drawerInitialFocus.focus();
+      });
+    }
   }
 
   var tabs = Array.prototype.slice.call(
