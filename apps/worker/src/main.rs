@@ -58,10 +58,10 @@ async fn main() {
             println!("linggan worker: media acquisition projection failed: {error}");
         }
         match linggan_evidence::run_progressive_archives(&database).await {
-            Ok(summary) if !summary.dispatched.is_empty() || !summary.skipped.is_empty() => {
+            Ok(summary) if !summary.queued.is_empty() || !summary.skipped.is_empty() => {
                 println!(
-                    "linggan worker: progressive dossiers dispatched {}, skipped {}",
-                    summary.dispatched.len(),
+                    "linggan worker: progressive dossiers queued {}, skipped {}",
+                    summary.queued.len(),
                     summary.skipped.len()
                 );
             }

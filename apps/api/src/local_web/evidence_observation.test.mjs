@@ -22,17 +22,16 @@ function loadObservationModule() {
   return { observation: window.LingganEvidenceObservation, scheduled };
 }
 
-test('reobservation controller only starts canonical eligible actions and refreshes on a terminal receipt', async () => {
+test('reobservation controller queues canonical eligible actions without inventing a lease poll', async () => {
   const { observation, scheduled } = loadObservationModule();
   const changes = [];
   let terminalRefreshes = 0;
   const controller = observation.createController({
     apiRoot: '/api/local/work-resources',
     sameOriginPath: (url) => url || null,
-    readJson: async () => ({ operation: { tasks: [{ state: 'ACCEPTED' }], leaseRef: 'lease-1' } }),
     postJson: async () => ({
-      statusUrl: '/api/local/work-resources/work-1/reobserve/lease-1',
-      operation: { tasks: [{ state: 'QUEUED' }], leaseRef: 'lease-1' },
+      statusUrl: null,
+      operation: { tasks: [], workOrderRef: 'work-1', execution: 'QUEUED' },
     }),
     onChange: (state) => changes.push(state),
     onTerminal: async () => { terminalRefreshes += 1; },
@@ -59,13 +58,11 @@ test('reobservation controller only starts canonical eligible actions and refres
   assert.equal(ineligible.reason, 'TARGET_LINKED_ACTIVE_DEEP_ARCHIVE_AUTHORIZATION_REQUIRED');
 
   await controller.request('/api/local/work-resources/work-1/reobserve');
-  assert.equal(controller.snapshot().operation.tasks[0].state, 'QUEUED');
-  assert.equal(scheduled.length, 1);
-  assert.equal(scheduled[0].delay, 2500);
-  scheduled[0].callback();
-  await new Promise((resolve) => setImmediate(resolve));
-  assert.equal(controller.snapshot().operation.tasks[0].state, 'ACCEPTED');
-  assert.equal(terminalRefreshes, 1);
+  assert.equal(controller.snapshot().operation.execution, 'QUEUED');
+  assert.equal(controller.snapshot().operation.workOrderRef, 'work-1');
+  assert.equal(controller.snapshot().statusUrl, null);
+  assert.equal(scheduled.length, 0);
+  assert.equal(terminalRefreshes, 0);
   assert.equal(changes.at(-1).pollError, null);
 });
 

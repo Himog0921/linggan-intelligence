@@ -4,14 +4,14 @@ use linggan_contracts::{
 };
 use linggan_evidence::{
     AccountEligibilitySignal, AuthorizationGrant, CheckInOutcome, CollectionControlError,
-    DispatchDecision, InstallationCheckIn, LeaseError, MonitorCommandActor, MonitorCommandKind,
+    DispatchDecision, InstallationCheckIn, MonitorCommandActor, MonitorCommandKind,
     MonitorCommandOutcomeKind, MonitorRuleCommand, MonitorRuleDraft, MonitorRuleMode,
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, StationError,
     activate_installation_credential, apply_monitor_rule_command, bind_observation_account,
-    check_in_installation, decide_dispatch, grant_authorization, issue_work_order_lease,
-    open_claim_window, read_capacity, register_station, report_account_eligibility,
-    request_admit_and_lease, request_and_admit, retire_station, rotate_installation_credential,
-    run_due_patrols, set_station_accepting, start_producer_attempt, submit_producer_package,
+    check_in_installation, decide_dispatch, grant_authorization, open_claim_window, read_capacity,
+    register_station, report_account_eligibility, request_admit_and_lease, request_and_admit,
+    retire_station, rotate_installation_credential, run_due_patrols, set_station_accepting,
+    start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::Row;
@@ -87,6 +87,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0034_collection_control_closure.sql"),
     "\n",
     include_str!("../../../database/migrations/0035_claimed_station_auto_acceptance.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0036_monitor_scheduling_clarity.sql"),
 );
 
 #[tokio::test]
@@ -132,29 +134,33 @@ async fn failed_lease_rolls_back_request_decision_work_and_target_transition() {
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn concurrent_issuers_create_at_most_one_live_lease_for_one_account() {
+async fn concurrent_station_claims_create_at_most_one_live_lease_for_one_account() {
     let database = proof_database("control_runtime_account_mutex").await;
     let installation = ready_installation(&database, "account-mutex").await;
     let first = seed_target(&database, "creator", "pending_decision", "mutex-first").await;
     let second = seed_target(&database, "creator", "pending_decision", "mutex-second").await;
     authorize(&database, "deep_archive", "mutex purpose", 2).await;
-    let first_work = admitted_work(&database, first, "mutex purpose").await;
-    let second_work = admitted_work(&database, second, "mutex purpose").await;
+    admitted_work(&database, first, "mutex purpose").await;
+    admitted_work(&database, second, "mutex purpose").await;
 
     let (left, right) = tokio::join!(
-        issue_work_order_lease(&database, first_work, 30),
-        issue_work_order_lease(&database, second_work, 30),
+        decide_dispatch(&database, &installation.install_key, &installation.secret),
+        decide_dispatch(&database, &installation.install_key, &installation.secret),
     );
-    assert_eq!(usize::from(left.is_ok()) + usize::from(right.is_ok()), 1);
-    let loser = if left.is_err() {
-        left.err()
-    } else {
-        right.err()
-    };
-    assert!(matches!(
-        loser,
-        Some(LeaseError::ControlBlocked { reason_code }) if reason_code == "account_busy"
-    ));
+    let decisions = [
+        left.expect("first concurrent poll returns a durable decision"),
+        right.expect("second concurrent poll returns a durable decision"),
+    ];
+    let claims = decisions.map(|decision| match decision {
+        DispatchDecision::Dispatch {
+            task_id, lease_ref, ..
+        } => (task_id, lease_ref),
+        other => panic!("a concurrent poll must replay the one in-progress claim; got {other:?}"),
+    });
+    assert_eq!(
+        claims[0], claims[1],
+        "concurrent polls replay one claimed task instead of creating two browser tasks"
+    );
     let live: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_work_order_lease lease \
          JOIN collection_work_order work_order USING(work_order_ref) \
@@ -251,7 +257,7 @@ async fn station_closed_after_lease_issuance_blocks_dispatch() {
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn creator_baseline_requires_nonempty_positive_and_complete_coverage() {
+async fn creator_archive_completion_tracks_coverage_without_blocking_observation_rules() {
     let cases = [
         ("empty_records", CoverageCase::EmptyRecords, "archiving"),
         ("zero", CoverageCase::Zero, "archiving"),
@@ -297,7 +303,7 @@ async fn automatic_save_rule_moves_a_paused_keyword_target_to_monitoring() {
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn paused_target_allows_atomic_person_observe_while_dismissed_target_is_rejected() {
+async fn paused_target_queues_person_observation_while_dismissed_target_is_rejected() {
     let database = proof_database("control_runtime_manual_observe").await;
     let _installation = ready_installation(&database, "manual-observe").await;
     authorize(&database, "patrol", "人工立即观察", 2).await;
@@ -311,23 +317,23 @@ async fn paused_target_allows_atomic_person_observe_while_dismissed_target_is_re
     assert_eq!(applied.reason_code, "manual_observe_created");
     assert!(applied.applied_rule_revision_ref.is_none());
     let work_order_ref = applied.work_order_ref.expect("receipt links real work");
-    let lease_ref = applied.lease_ref.expect("receipt links real lease");
-    let linked: bool = sqlx::query_scalar(
+    assert_eq!(
+        applied.lease_ref, None,
+        "a click queues work; a station claim creates the lease"
+    );
+    let queued: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
            SELECT 1 FROM collection_monitor_rule_command_receipt receipt \
            JOIN collection_work_order work_order ON work_order.work_order_ref=receipt.work_order_ref \
-           JOIN collection_work_order_lease lease ON lease.lease_ref=receipt.lease_ref \
            WHERE receipt.command_receipt_ref=$1 AND work_order.work_order_ref=$2 \
-             AND lease.lease_ref=$3 AND lease.work_order_ref=work_order.work_order_ref \
-             AND lease.released_at IS NULL)",
+             AND receipt.lease_ref IS NULL AND work_order.queue_state='queued')",
     )
     .bind(applied.receipt_ref)
     .bind(work_order_ref)
-    .bind(lease_ref)
     .fetch_one(database.pool())
     .await
-    .expect("receipt/work/lease linkage is inspectable");
-    assert!(linked);
+    .expect("receipt/work queue linkage is inspectable");
+    assert!(queued);
     assert_target_state(&database, paused, "paused", false).await;
 
     let replay = apply_monitor_rule_command(&database, &manual_observe(paused, first_key))
@@ -336,7 +342,7 @@ async fn paused_target_allows_atomic_person_observe_while_dismissed_target_is_re
     assert_eq!(replay.outcome, MonitorCommandOutcomeKind::Replay);
     assert_eq!(replay.reason_code, "manual_observe_created");
     assert_eq!(replay.work_order_ref, Some(work_order_ref));
-    assert_eq!(replay.lease_ref, Some(lease_ref));
+    assert_eq!(replay.lease_ref, None);
     assert!(replay.applied_rule_revision_ref.is_none());
 
     let reused = apply_monitor_rule_command(&database, &manual_observe(paused, Uuid::new_v4()))
@@ -345,7 +351,7 @@ async fn paused_target_allows_atomic_person_observe_while_dismissed_target_is_re
     assert_eq!(reused.outcome, MonitorCommandOutcomeKind::Applied);
     assert_eq!(reused.reason_code, "manual_observe_reused");
     assert_eq!(reused.work_order_ref, Some(work_order_ref));
-    assert_eq!(reused.lease_ref, Some(lease_ref));
+    assert_eq!(reused.lease_ref, None);
     assert!(reused.applied_rule_revision_ref.is_none());
     let rule_revisions: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_monitor_rule_revision WHERE target_ref=$1",
@@ -472,31 +478,38 @@ async fn retiring_station_atomically_ends_control_and_execution_ownership() {
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn scheduler_pages_past_fifty_blocked_targets_and_records_backoff_for_every_target() {
+async fn scheduler_scans_due_valid_rules_in_bounded_pages_without_rule_missing() {
     let database = proof_database("control_runtime_scheduler_fairness").await;
     let mut targets = Vec::new();
     for ordinal in 0..75 {
         let target_ref = seed_target(
             &database,
             "keyword",
-            "monitoring",
+            "paused",
             &format!("scheduler-{ordinal:03}"),
         )
         .await;
+        let applied =
+            apply_monitor_rule_command(&database, &save_rule(target_ref, 0, true, Uuid::new_v4()))
+                .await
+                .expect("a fixed automatic rule is saved before scheduling");
+        assert_eq!(applied.outcome, MonitorCommandOutcomeKind::Applied);
         sqlx::query(
-            "UPDATE collection_observation_target SET monitoring_enabled=true WHERE target_ref=$1",
+            "UPDATE collection_observation_target \
+             SET monitor_next_run_at=scope_001_now()-interval '1 second' WHERE target_ref=$1",
         )
         .bind(target_ref)
         .execute(database.pool())
         .await
-        .expect("scheduler target is enabled");
+        .expect("valid scheduler target is due");
         targets.push(target_ref);
     }
     let summary = run_due_patrols(&database)
         .await
         .expect("bounded scheduler tick completes");
+    assert!(summary.queued.is_empty());
     assert_eq!(summary.dispatched.len(), 0);
-    assert_eq!(summary.skipped.len(), 75);
+    assert_eq!(summary.skipped.len(), 50);
     let run = sqlx::query(
         "SELECT scheduler_run_ref,considered_count FROM collection_scheduler_run \
          ORDER BY started_at DESC LIMIT 1",
@@ -504,17 +517,17 @@ async fn scheduler_pages_past_fifty_blocked_targets_and_records_backoff_for_ever
     .fetch_one(database.pool())
     .await
     .expect("scheduler run is durable");
-    assert_eq!(run.get::<i32, _>("considered_count"), 75);
+    assert_eq!(run.get::<i32, _>("considered_count"), 50);
     let decisions: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_scheduler_target_decision \
-         WHERE scheduler_run_ref=$1 AND reason_code='rule_missing' \
+         WHERE scheduler_run_ref=$1 AND reason_code='authorization_missing' \
            AND next_eligible_at>decided_at",
     )
     .bind(run.get::<Uuid, _>("scheduler_run_ref"))
     .fetch_one(database.pool())
     .await
     .expect("per-target decisions and backoff are inspectable");
-    assert_eq!(decisions, 75);
+    assert_eq!(decisions, 50);
     let considered: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_observation_target \
          WHERE target_ref=ANY($1) AND last_scheduler_considered_at IS NOT NULL",
@@ -523,7 +536,16 @@ async fn scheduler_pages_past_fifty_blocked_targets_and_records_backoff_for_ever
     .fetch_one(database.pool())
     .await
     .expect("all target cursors are inspectable");
-    assert_eq!(considered, 75);
+    assert_eq!(considered, 50);
+    let untouched: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_observation_target \
+         WHERE target_ref=ANY($1) AND last_scheduler_considered_at IS NULL",
+    )
+    .bind(&targets)
+    .fetch_one(database.pool())
+    .await
+    .expect("the next bounded page remains for a later tick");
+    assert_eq!(untouched, 25);
 }
 
 #[tokio::test]
@@ -1045,7 +1067,7 @@ fn save_rule(
             window_start_minute: None,
             window_end_minute: None,
             fixed_interval_seconds: Some(43_200),
-            fallback_interval_seconds: 86_400,
+            fallback_interval_seconds: 43_200,
             surface_key: "keyword_search".to_owned(),
             ranking_key: Some("default".to_owned()),
             task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
@@ -1124,5 +1146,5 @@ async fn proof_database(schema: &str) -> Database {
         .expect("a disposable PostgreSQL proof URL is supplied");
     isolated_proof_schema(&url, schema, MIGRATIONS)
         .await
-        .expect("complete migrations through 0034 apply")
+        .expect("complete migrations through 0036 apply")
 }

@@ -67,11 +67,10 @@ use linggan_evidence::{
     read_station_capabilities, read_station_overview, read_target, read_target_avatars,
     record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
     register_station, release_media_upload_finalize, rename_station,
-    request_admit_material_targets_and_lease, request_and_admit,
-    request_progressive_archive_and_lease, retire_station, set_group_for_many,
-    set_monitoring_for_many, set_station_accepting, start_local_attempt, start_producer_attempt,
-    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
-    sync_target_from_author_profile,
+    request_admit_material_targets_and_lease, request_and_admit, request_progressive_archive,
+    retire_station, set_group_for_many, set_station_accepting, start_local_attempt,
+    start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
+    submit_producer_package, sync_target_from_author_profile,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -2238,15 +2237,8 @@ struct CollectionParams {
     rule_receipt: Option<String>,
     /// 规则提交失败后，服务端将用户刚刚提交的受限字段值带回 modal；这些值只用于
     /// 修复表单，不参与任何读取或执行事实。
-    rule_mode: Option<String>,
     rule_automatic_enabled: Option<String>,
-    rule_run_on_weekdays: Option<String>,
-    rule_run_on_weekends: Option<String>,
-    rule_all_day: Option<String>,
-    rule_window_start: Option<String>,
-    rule_window_end: Option<String>,
     rule_fixed_interval_seconds: Option<String>,
-    rule_fallback_interval_seconds: Option<String>,
     rule_surface_key: Option<String>,
     rule_ranking_key: Option<String>,
     rule_task_contract_version: Option<String>,
@@ -2969,6 +2961,7 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
         LeaseError::SchemaUnavailable => "lease_schema_unavailable",
         LeaseError::UnknownWorkOrder => "work_order_not_found",
         LeaseError::AlreadyLeased => "work_order_already_leased",
+        LeaseError::InvalidLeaseDuration => "lease_duration_invalid",
         LeaseError::NoStation => "work_order_names_no_station",
         LeaseError::StationUnavailable => "station_unavailable",
         LeaseError::FrozenControlMissing => "lease_frozen_control_missing",
@@ -3064,15 +3057,8 @@ struct MonitorRuleWire {
     expected_revision: i32,
     idempotency_key: uuid::Uuid,
     command_kind: String,
-    mode: Option<String>,
     automatic_enabled: Option<String>,
-    run_on_weekdays: Option<String>,
-    run_on_weekends: Option<String>,
-    all_day: Option<String>,
-    window_start: Option<String>,
-    window_end: Option<String>,
     fixed_interval_seconds: Option<String>,
-    fallback_interval_seconds: Option<String>,
     surface_key: Option<String>,
     ranking_key: Option<String>,
     task_contract_version: Option<String>,
@@ -3101,7 +3087,8 @@ fn monitor_rule_redirect(
         // Keep the bounded form snapshot only after a rejected command. A successful
         // pause/resume/manual command must reload the server-owned active rule, rather than
         // letting its submitted checkbox values shadow the durable result on the next GET.
-        push_rule_query(&mut params, "rule_mode", form.mode.as_deref());
+        // The current form has only one cadence control; do not retain compatibility fields
+        // for hidden modes, calendars, or fallback intervals in the address bar.
         push_rule_query(
             &mut params,
             "rule_automatic_enabled",
@@ -3113,42 +3100,8 @@ fn monitor_rule_redirect(
         );
         push_rule_query(
             &mut params,
-            "rule_run_on_weekdays",
-            Some(if form.run_on_weekdays.is_some() {
-                "1"
-            } else {
-                "0"
-            }),
-        );
-        push_rule_query(
-            &mut params,
-            "rule_run_on_weekends",
-            Some(if form.run_on_weekends.is_some() {
-                "1"
-            } else {
-                "0"
-            }),
-        );
-        push_rule_query(
-            &mut params,
-            "rule_all_day",
-            Some(if form.all_day.is_some() { "1" } else { "0" }),
-        );
-        push_rule_query(
-            &mut params,
-            "rule_window_start",
-            form.window_start.as_deref(),
-        );
-        push_rule_query(&mut params, "rule_window_end", form.window_end.as_deref());
-        push_rule_query(
-            &mut params,
             "rule_fixed_interval_seconds",
             form.fixed_interval_seconds.as_deref(),
-        );
-        push_rule_query(
-            &mut params,
-            "rule_fallback_interval_seconds",
-            form.fallback_interval_seconds.as_deref(),
         );
         push_rule_query(&mut params, "rule_surface_key", form.surface_key.as_deref());
         push_rule_query(&mut params, "rule_ranking_key", form.ranking_key.as_deref());
@@ -3198,29 +3151,12 @@ fn rule_form_from_query(
 ) -> collection::collection_control_rule_view::MonitorRuleFormState {
     let mut form =
         collection::collection_control_rule_view::MonitorRuleFormState::from_panel(panel);
-    if let Some(value) = params.rule_mode.as_deref() {
-        form.mode = value.to_owned();
-    }
     form.automatic_enabled = rule_bool_query(
         params.rule_automatic_enabled.as_deref(),
         form.automatic_enabled,
     );
-    form.run_on_weekdays =
-        rule_bool_query(params.rule_run_on_weekdays.as_deref(), form.run_on_weekdays);
-    form.run_on_weekends =
-        rule_bool_query(params.rule_run_on_weekends.as_deref(), form.run_on_weekends);
-    form.all_day = rule_bool_query(params.rule_all_day.as_deref(), form.all_day);
-    if let Some(value) = params.rule_window_start.as_deref() {
-        form.window_start = value.to_owned();
-    }
-    if let Some(value) = params.rule_window_end.as_deref() {
-        form.window_end = value.to_owned();
-    }
     if let Some(value) = params.rule_fixed_interval_seconds.as_deref() {
         form.fixed_interval_seconds = value.to_owned();
-    }
-    if let Some(value) = params.rule_fallback_interval_seconds.as_deref() {
-        form.fallback_interval_seconds = value.to_owned();
     }
     if let Some(value) = params.rule_surface_key.as_deref() {
         form.surface_key = value.to_owned();
@@ -3263,25 +3199,6 @@ fn monitor_rule_form_error(
         _ => ("command_rejected", Vec::new()),
     };
     Some(collection::collection_control_rule_view::MonitorRuleFormError { code, fields })
-}
-
-fn parse_rule_mode(raw: Option<&str>) -> Option<MonitorRuleMode> {
-    match raw.unwrap_or("fixed") {
-        "manual_only" => Some(MonitorRuleMode::ManualOnly),
-        "fixed" => Some(MonitorRuleMode::Fixed),
-        "dynamic" => Some(MonitorRuleMode::Dynamic),
-        _ => None,
-    }
-}
-
-fn parse_rule_minute(raw: Option<&str>) -> Option<i16> {
-    let value = raw?.trim();
-    let (hour, minute) = value.split_once(':')?;
-    let hour: i16 = hour.parse().ok()?;
-    let minute: i16 = minute.parse().ok()?;
-    (0..=23).contains(&hour).then_some(())?;
-    (0..=59).contains(&minute).then_some(())?;
-    Some(hour * 60 + minute)
 }
 
 fn parse_rule_interval(raw: Option<&str>) -> Option<i32> {
@@ -3330,22 +3247,21 @@ async fn collection_target_rule_command(
     let draft = if kind == MonitorCommandKind::ManualObserve {
         None
     } else {
-        let Some(mode) = parse_rule_mode(form.mode.as_deref()) else {
-            return monitor_rule_redirect(&form, Some("invalid_mode"), None);
-        };
+        let interval = parse_rule_interval(form.fixed_interval_seconds.as_deref());
+        // The page has one scheduling control: an anchored fixed interval.
+        // Legacy wire fields are deliberately ignored instead of letting a
+        // hidden weekday/window/fallback combination create a second cadence.
         Some(MonitorRuleDraft {
-            mode,
+            mode: MonitorRuleMode::Fixed,
             automatic_enabled: form.automatic_enabled.is_some(),
-            run_on_weekdays: form.run_on_weekdays.is_some(),
-            run_on_weekends: form.run_on_weekends.is_some(),
-            all_day: form.all_day.is_some(),
-            window_start_minute: parse_rule_minute(form.window_start.as_deref()),
-            window_end_minute: parse_rule_minute(form.window_end.as_deref()),
-            fixed_interval_seconds: parse_rule_interval(form.fixed_interval_seconds.as_deref()),
-            fallback_interval_seconds: parse_rule_interval(
-                form.fallback_interval_seconds.as_deref(),
-            )
-            .unwrap_or(linggan_evidence::DEFAULT_MONITOR_INTERVAL_SECONDS),
+            run_on_weekdays: true,
+            run_on_weekends: true,
+            all_day: true,
+            window_start_minute: None,
+            window_end_minute: None,
+            fixed_interval_seconds: interval,
+            fallback_interval_seconds: interval
+                .unwrap_or(linggan_evidence::DEFAULT_MONITOR_INTERVAL_SECONDS),
             surface_key: form.surface_key.clone().unwrap_or_default(),
             ranking_key: form
                 .ranking_key
@@ -3460,16 +3376,15 @@ async fn collection_target_deep_archive(
             Some("read_model_not_connected"),
         ));
     };
-    let execution = request_progressive_archive_and_lease(
+    let outcome = request_progressive_archive(
         database,
         form.row_target_ref,
         "从观察目标页发起深度建档",
         "person",
-        60,
     )
     .await;
-    let execution = match execution {
-        Ok(execution) => execution,
+    let outcome = match outcome {
+        Ok(outcome) => outcome,
         Err(RequestLeaseError::Acquisition(
             AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. },
         )) => {
@@ -3502,18 +3417,11 @@ async fn collection_target_deep_archive(
             ));
         }
     };
-    let outcome = execution.request;
     let Some(_work_order_ref) = outcome.work_order_ref else {
         // 准入没通过。把它的结论原样带回去——refuse 与 defer 的处置完全不同。
         let code = format!("archive_{}", outcome.outcome.code());
         return Redirect::to(&target_archive_return_path(&form, Some(&code)));
     };
-    if execution.lease.is_none() {
-        return Redirect::to(&target_archive_return_path(
-            &form,
-            Some("archive_lease_failed"),
-        ));
-    }
     Redirect::to(&target_archive_return_path(&form, None))
 }
 
@@ -3523,10 +3431,8 @@ async fn collection_target_deep_archive(
 /// （已知限制，不是用法问题），而勾选框正是靠重复的 `target_ref` 表达「选了哪几行」。
 /// 与其为此引一个新依赖，不如就地解析这一个请求。
 ///
-/// 批量是**明确指定开或关**，不是逐个取反：取反会让一次操作里有的开有的关，人点了
-/// 「批量开启巡检」却得到一半被关掉，那不是他要的。
-///
-/// 分组只写本机记录，不影响任何采集行为——它是人自己的分类方式。
+/// 规则只由目标级的版本化命令保存；批量入口不改巡检状态。分组只写本机记录，
+/// 不影响任何采集行为——它是人自己的分类方式。
 /// 解析 `application/x-www-form-urlencoded`，**保留同名字段的全部取值**。
 ///
 /// 只做这一件事，因此不引新依赖：`serde_urlencoded` 丢掉重复键，而勾选框正是靠重复键
@@ -3613,8 +3519,6 @@ async fn collection_targets_batch(State(state): State<LocalWebState>, body: Byte
         return Redirect::to("/collection/targets?error=batch_nothing_selected");
     }
     let outcome = match action.as_str() {
-        "monitor_on" => set_monitoring_for_many(database, &target_refs, true).await,
-        "monitor_off" => set_monitoring_for_many(database, &target_refs, false).await,
         "set_group" => set_group_for_many(database, &target_refs, group_name.as_deref()).await,
         _ => return Redirect::to("/collection/targets?error=batch_unknown_action"),
     };

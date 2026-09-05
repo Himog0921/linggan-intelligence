@@ -57,7 +57,7 @@
     }
 
     async function request(actionUrl) {
-      if (!actionUrl || state.operation?.leaseRef) return;
+      if (!actionUrl || state.operation?.workOrderRef || state.operation?.leaseRef) return;
       state.actionUrl = actionUrl;
       state.error = null;
       state.readError = null;
@@ -162,10 +162,10 @@
     }
     wrapper.append(node('p', 'ev-section-note', '范围：详情、评论（最多 30 条）与回复；不下载媒体、不跑 OCR / 转录。'));
     const actions = node('div', 'ev-channel-actions');
-    const leaseExists = Boolean(view.operation?.leaseRef);
-    const button = node('button', 'ev-button ev-button--primary', leaseExists ? '复观测已请求' : '立即复观测');
+    const workQueued = Boolean(view.operation?.workOrderRef || view.operation?.leaseRef);
+    const button = node('button', 'ev-button ev-button--primary', workQueued ? '复观测已入队' : '立即复观测');
     button.type = 'button';
-    button.disabled = leaseExists;
+    button.disabled = workQueued;
     button.addEventListener('click', () => { void controller.request(access.actionUrl); });
     actions.append(button, tech(channel?.mediaPolicy || '媒体策略未知'));
     wrapper.append(actions);
@@ -200,7 +200,10 @@
     ]));
     const tasks = Array.isArray(operation.tasks) ? operation.tasks : [];
     if (tasks.length === 0) {
-      block.append(sourceIncompleteBlock('准入已形成记录，但当前没有可读取的执行 lane；这不是平台已读取或执行成功。'));
+      const queued = operation.execution === 'QUEUED';
+      block.append(sourceIncompleteBlock(queued
+        ? '工单已进入立即队列，尚未被合格工位认领；这不是平台已读取、执行或采集成功。'
+        : '准入已形成记录，但当前没有可读取的执行 lane；这不是平台已读取或执行成功。'));
       return block;
     }
     const list = node('div', 'ev-reobservation-tasks');

@@ -5,12 +5,10 @@
 //! never reaches a platform: only a claimed Browser Producer may do that later.
 
 use crate::acquisition_chain::{
-    live_lease_for_exact_material_scope_in_transaction,
+    in_flight_work_for_exact_material_scope_in_transaction,
     request_and_admit_material_targets_under_authorization_in_transaction,
 };
-use crate::work_order_lease::{
-    expire_lapsed_leases_in_transaction, issue_work_order_lease_in_transaction,
-};
+use crate::work_order_lease::expire_lapsed_leases_in_transaction;
 use crate::{
     AcquisitionChainError, LeaseError, MaterialDeepeningTarget, acquisition_chain_schema_is_ready,
     lease_schema_is_ready,
@@ -24,7 +22,6 @@ use uuid::Uuid;
 
 const DEFAULT_COMMENT_LIMIT: i32 = 30;
 const DEFAULT_REPLY_EXPAND_LIMIT: i32 = 2;
-const REOBSERVATION_LEASE_MINUTES: i32 = 60;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ContentReobservationError {
@@ -159,9 +156,10 @@ pub async fn content_reobservation(
         allow_ocr: false,
         allow_asr: false,
     }];
-    // This is one transaction by design.  `request_and_admit…` holds the observation-target lock
-    // and the lease is inserted before that lock is released, so a concurrent click can only see
-    // the fully frozen executable scope and merge into it.
+    // This is one transaction by design. `request_and_admit…` holds the observation-target lock
+    // while it writes the exact queued scope, so a concurrent click sees that durable Work Order
+    // and merges instead of producing a parallel immediate request. A later eligible station is
+    // the only owner allowed to turn it into a Lease.
     expire_lapsed_leases_in_transaction(&mut transaction).await?;
     let outcome = request_and_admit_material_targets_under_authorization_in_transaction(
         &mut transaction,
@@ -177,20 +175,9 @@ pub async fn content_reobservation(
     let admission_reason = admission_reason(&outcome.outcome);
     let (work_order_ref, lease_ref, expires_at, execution) =
         if let Some(work_order_ref) = outcome.work_order_ref {
-            let lease = issue_work_order_lease_in_transaction(
-                &mut transaction,
-                work_order_ref,
-                REOBSERVATION_LEASE_MINUTES,
-            )
-            .await?;
-            (
-                Some(work_order_ref),
-                Some(lease.lease_ref),
-                Some(lease.expires_at),
-                "LEASED",
-            )
+            (Some(work_order_ref), None, None, "QUEUED")
         } else if matches!(&outcome.outcome, AdmissionOutcome::Merge { .. }) {
-            let lease_ref = live_lease_for_exact_material_scope_in_transaction(
+            let existing = in_flight_work_for_exact_material_scope_in_transaction(
                 &mut transaction,
                 linked_authorization.target_ref,
                 "deep_archive",
@@ -199,23 +186,16 @@ pub async fn content_reobservation(
             )
             .await?
             .ok_or(ContentReobservationError::EquivalentLeaseMissing)?;
-            let work_order_ref: Uuid = sqlx::query_scalar(
-                "SELECT work_order_ref FROM collection_work_order_lease WHERE lease_ref=$1",
-            )
-            .bind(lease_ref)
-            .fetch_one(&mut *transaction)
-            .await?;
-            let expires_at: String = sqlx::query_scalar(
-                "SELECT expires_at::text FROM collection_work_order_lease WHERE lease_ref=$1",
-            )
-            .bind(lease_ref)
-            .fetch_one(&mut *transaction)
-            .await?;
+            let execution = if existing.lease_ref.is_some() {
+                "MERGED"
+            } else {
+                "QUEUED"
+            };
             (
-                Some(work_order_ref),
-                Some(lease_ref),
-                Some(expires_at),
-                "MERGED",
+                Some(existing.work_order_ref),
+                existing.lease_ref,
+                existing.expires_at,
+                execution,
             )
         } else {
             (None, None, None, "NOT_STARTED")

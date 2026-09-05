@@ -84,41 +84,14 @@
 
     var ruleForm = ruleModal.querySelector("[data-monitor-rule-form]");
     if (ruleForm) {
-      var modeInputs = Array.prototype.slice.call(ruleForm.querySelectorAll("input[name='mode']"));
       var automatic = ruleForm.querySelector("input[name='automatic_enabled']");
       var fixed = ruleForm.querySelector("select[name='fixed_interval_seconds']");
-      var allDay = ruleForm.querySelector("input[name='all_day']");
-      var windowInputs = Array.prototype.slice.call(ruleForm.querySelectorAll("[data-monitor-rule-window] input"));
-      var dynamic = ruleForm.querySelector("[data-monitor-dynamic]");
       var readOnly = ruleForm.dataset.readonly === "true";
-
-      function syncRuleControls() {
-        var selected = modeInputs.find(function (input) { return input.checked; });
-        var mode = selected ? selected.value : "";
-        if (automatic) {
-          automatic.disabled = readOnly || mode === "manual_only";
-          if (automatic.disabled) {
-            automatic.checked = false;
-          }
-        }
-        if (fixed) {
-          fixed.disabled = readOnly || mode !== "fixed";
-        }
-        if (dynamic) {
-          dynamic.hidden = mode !== "dynamic";
-        }
-        windowInputs.forEach(function (input) {
-          input.disabled = readOnly || Boolean(allDay && allDay.checked);
-        });
-      }
-
-      modeInputs.forEach(function (input) {
-        input.addEventListener("change", syncRuleControls);
-      });
-      if (allDay) {
-        allDay.addEventListener("change", syncRuleControls);
-      }
-      syncRuleControls();
+      // The server accepts exactly one all-day fixed cadence.  Keep this
+      // client script intentionally dull: it only applies the target's
+      // read-only state and never reconstructs hidden calendar/mode logic.
+      if (automatic) automatic.disabled = readOnly;
+      if (fixed) fixed.disabled = readOnly;
     }
   }
 

@@ -41,7 +41,7 @@ async fn reobservation_uses_the_existing_authorized_lease_path_without_new_media
     .unwrap();
     let fixture = seed_authorized_material_context(&database, content_public_ref).await;
     let shadow_authorization_ref = Uuid::new_v4();
-    sqlx::query("INSERT INTO collection_acquisition_authorization (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,purpose,granted_by,expires_at) VALUES ($1,'xhs','creator','deep_archive',100,200,'unlinked broader grant','person',scope_001_now()+interval '7 days')")
+    sqlx::query("INSERT INTO collection_acquisition_authorization (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,allowed_task_templates,allowed_dispatch_lanes,max_work_units,purpose,granted_by,expires_at) VALUES ($1,'xhs','creator','deep_archive',100,200,ARRAY['creator_archive','material_deepening'],ARRAY['immediate','batch'],200,'unlinked broader grant','person',scope_001_now()+interval '7 days')")
         .bind(shadow_authorization_ref).execute(database.pool()).await.unwrap();
 
     let command = content_reobservation(&database, content_public_ref)
@@ -62,43 +62,22 @@ async fn reobservation_uses_the_existing_authorized_lease_path_without_new_media
     assert_ne!(admitted_authorization_ref, shadow_authorization_ref);
     assert_eq!(command.media.state, "NOT_REQUESTED");
     assert_eq!(command.media.reason, "EXISTING_ASSETS_REUSED");
-    assert_eq!(
-        command
-            .tasks
-            .iter()
-            .map(|task| task.capability.as_str())
-            .collect::<Vec<_>>(),
-        ["content_detail", "comments", "replies"]
-    );
-    assert!(command.tasks.iter().all(|task| task.state == "QUEUED"));
+    assert_eq!(command.execution, "QUEUED");
+    assert!(command.work_order_ref.is_some());
+    assert_eq!(command.lease_ref, None);
     assert!(
-        command
-            .tasks
-            .iter()
-            .all(|task| task.acquire_media == "not_requested")
+        command.tasks.is_empty(),
+        "tasks form only after station claim"
     );
-    assert_eq!(command.tasks[1].comment_limit, serde_json::json!(30));
-    assert_eq!(command.tasks[2].comment_limit, serde_json::json!(30));
-    let lease_ref = command
-        .lease_ref
-        .expect("an admitted request issues one lease");
 
     let merged = content_reobservation(&database, content_public_ref)
         .await
-        .expect("the same material under the live lease merges into that exact execution");
+        .expect("the same material merges into the exact queued work order");
     assert_eq!(merged.admission, "MERGE");
-    assert_eq!(merged.execution, "MERGED");
+    assert_eq!(merged.execution, "QUEUED");
     assert_eq!(merged.work_order_ref, command.work_order_ref);
-    assert_eq!(merged.lease_ref, command.lease_ref);
-    assert_eq!(merged.tasks.len(), 3);
-    assert!(merged.tasks.iter().all(|task| task.state == "QUEUED"));
-
-    let queued = read_content_reobservation(&database, content_public_ref, lease_ref)
-        .await
-        .expect("the persisted lease state is readable")
-        .expect("the issued lease remains linked to this work");
-    assert_eq!(queued.tasks.len(), 3);
-    assert!(queued.tasks.iter().all(|task| task.state == "QUEUED"));
+    assert_eq!(merged.lease_ref, None);
+    assert!(merged.tasks.is_empty());
 
     let dispatch = decide_dispatch(
         &database,
@@ -131,6 +110,37 @@ async fn reobservation_uses_the_existing_authorized_lease_path_without_new_media
             .any(|lane| lane == "media_slots" || lane == "media_bytes"),
         "the same-page read plan must not add any media lane"
     );
+    let lease_ref: Uuid = sqlx::query_scalar(
+        "SELECT lease_ref FROM collection_work_order_lease WHERE work_order_ref=$1 \
+         AND released_at IS NULL",
+    )
+    .bind(command.work_order_ref.expect("admitted work order"))
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let queued = read_content_reobservation(&database, content_public_ref, lease_ref)
+        .await
+        .expect("the claimed lease state is readable")
+        .expect("the claimed lease remains linked to this work");
+    assert_eq!(queued.tasks.len(), 3);
+    assert_eq!(queued.tasks[0].state, "CLAIMED");
+    assert!(queued.tasks[1..].iter().all(|task| task.state == "QUEUED"));
+    assert!(
+        queued
+            .tasks
+            .iter()
+            .all(|task| task.acquire_media == "not_requested")
+    );
+    assert_eq!(queued.tasks[1].comment_limit, serde_json::json!(30));
+    assert_eq!(queued.tasks[2].comment_limit, serde_json::json!(30));
+
+    let live_merged = content_reobservation(&database, content_public_ref)
+        .await
+        .expect("a live exact scope still merges rather than creating parallel work");
+    assert_eq!(live_merged.admission, "MERGE");
+    assert_eq!(live_merged.execution, "MERGED");
+    assert_eq!(live_merged.lease_ref, Some(lease_ref));
+    assert_eq!(live_merged.tasks.len(), 3);
 
     let attempt = parse_producer_attempt(
         &serde_json::json!({
@@ -194,7 +204,7 @@ async fn reobservation_uses_the_existing_authorized_lease_path_without_new_media
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn concurrent_reobservation_is_one_atomic_frozen_scope_and_one_lease() {
+async fn concurrent_reobservation_is_one_atomic_frozen_scope_and_one_queued_work_order() {
     let database = proof_database("content_reobservation_atomic_concurrency").await;
     let content_external_id = "note-reobserve-concurrent";
     submit_package(
@@ -227,16 +237,17 @@ async fn concurrent_reobservation_is_one_atomic_frozen_scope_and_one_lease() {
     let mut admissions = vec![first.admission, second.admission];
     admissions.sort_unstable();
     assert_eq!(admissions, ["ADMITTED", "MERGE"]);
-    assert_eq!(first.lease_ref, second.lease_ref);
+    assert_eq!(first.execution, "QUEUED");
+    assert_eq!(second.execution, "QUEUED");
+    assert_eq!(first.lease_ref, None);
+    assert_eq!(second.lease_ref, None);
     assert_eq!(first.work_order_ref, second.work_order_ref);
-    let live_leases: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM collection_work_order_lease lease \
-         JOIN collection_work_order work_order ON work_order.work_order_ref=lease.work_order_ref \
+    let queued_work_orders: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order work_order \
          JOIN collection_admission_decision decision ON decision.decision_ref=work_order.decision_ref \
          JOIN collection_work_order_material_target scope ON scope.work_order_ref=work_order.work_order_ref \
          WHERE work_order.target_ref=$1 AND decision.authorization_ref=$2 \
-           AND scope.content_public_ref=$3 AND lease.released_at IS NULL \
-           AND lease.expires_at>scope_001_now()",
+           AND scope.content_public_ref=$3 AND work_order.queue_state='queued'",
     )
     .bind(fixture.target_ref)
     .bind(fixture.authorization_ref)
@@ -245,8 +256,8 @@ async fn concurrent_reobservation_is_one_atomic_frozen_scope_and_one_lease() {
     .await
     .unwrap();
     assert_eq!(
-        live_leases, 1,
-        "the target lock covers admission through lease issue"
+        queued_work_orders, 1,
+        "the target lock covers admission through exact queued scope creation"
     );
 }
 
@@ -291,12 +302,13 @@ async fn reobservation_never_merges_a_live_lease_with_a_different_frozen_policy(
     let command = content_reobservation(&database, content_public_ref)
         .await
         .expect("the normal no-media reobservation is admitted as a distinct frozen scope");
-    assert_eq!(command.admission, "DEFERRED");
+    assert_eq!(command.admission, "ADMITTED");
     assert_eq!(command.lease_ref, None);
-    assert_eq!(command.work_order_ref, None);
+    assert!(command.work_order_ref.is_some());
+    assert_eq!(command.execution, "QUEUED");
     assert_eq!(
-        command.admission_reason, "观察账号已有一份有效 Lease。",
-        "a live lease on the same observed account blocks a second policy, rather than merging it"
+        command.admission_reason, "已在作品原先关联的有效授权范围内准入",
+        "a live different-policy lease does not bypass the queue or erase a newly requested scope"
     );
     let leased_media: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
@@ -338,7 +350,7 @@ async fn seed_authorized_material_context(
     let install_key = producer_instance_id.to_string();
     sqlx::query("INSERT INTO collection_observation_target (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) VALUES ($1,'xhs','creator','creator-reobserve','复观测夹具','manual','archived')")
         .bind(target_ref).execute(database.pool()).await.unwrap();
-    sqlx::query("INSERT INTO collection_acquisition_authorization (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,purpose,granted_by,expires_at) VALUES ($1,'xhs','creator','deep_archive',10,20,'content reobservation proof','person',scope_001_now()+interval '1 day')")
+    sqlx::query("INSERT INTO collection_acquisition_authorization (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,allowed_task_templates,allowed_dispatch_lanes,max_work_units,purpose,granted_by,expires_at) VALUES ($1,'xhs','creator','deep_archive',10,20,ARRAY['creator_archive','material_deepening'],ARRAY['immediate','batch'],20,'content reobservation proof','person',scope_001_now()+interval '1 day')")
         .bind(authorization_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO collection_acquisition_request (request_ref,target_ref,lane,purpose,requested_by) VALUES ($1,$2,'deep_archive','content reobservation proof','person')")
         .bind(request_ref).bind(target_ref).execute(database.pool()).await.unwrap();

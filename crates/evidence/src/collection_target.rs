@@ -48,8 +48,8 @@ pub struct ObservationTarget {
     /// 上一次已经产生并接纳可用结果的巡查时间。用户看到的「上次巡查」只能用
     /// 这个字段，不能拿上面的派出时间冒充成功结果。
     pub last_patrol_succeeded_at: Option<String>,
-    /// 下一次到期时间，由「上次派出 + 间隔」算出。**巡检没开时不算**——算一个永远不会
-    /// 到来的时间，会让人以为它排上队了。
+    /// 下一次到期时间是调度器与规则命令共同维护的真实计划点，而不是页面从上次派出
+    /// 时间反推的猜测。**巡检没开时不读**——算一个永远不会到来的时间，会让人以为它排上队了。
     pub next_patrol_at: Option<String>,
 }
 
@@ -256,15 +256,19 @@ pub async fn read_target(
         return Ok(None);
     }
     let row: Option<ListedTargetRow> = sqlx::query_as(
-        "SELECT target_ref, platform, target_kind, identity_key, display_name, identity_facts, \
-                source, lifecycle_state, first_stored_at::text, monitoring_enabled, group_name, \
-                to_char(last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
-                to_char(last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
-                CASE WHEN monitoring_enabled AND last_patrol_dispatched_at IS NOT NULL \
-                     THEN to_char(last_patrol_dispatched_at \
-                                  + make_interval(secs => patrol_interval_seconds), \
-                                  'MM-DD HH24:MI') END \
-         FROM collection_observation_target WHERE target_ref = $1",
+        "SELECT target.target_ref, target.platform, target.target_kind, target.identity_key, \
+                target.display_name, target.identity_facts, target.source, target.lifecycle_state, \
+                target.first_stored_at::text, \
+                (target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false)), \
+                target.group_name, \
+                to_char(target.last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
+                to_char(target.last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
+                CASE WHEN target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false) \
+                     THEN to_char(target.monitor_next_run_at, 'MM-DD HH24:MI') END \
+         FROM collection_observation_target target \
+         LEFT JOIN collection_monitor_rule_revision rule \
+           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+         WHERE target.target_ref = $1",
     )
     .bind(target_ref)
     .fetch_optional(database.pool())
@@ -280,11 +284,14 @@ pub async fn count_targets(database: &Database) -> Result<TargetCounts, Collecti
     }
     let row: (i64, i64, i64, i64, i64) = sqlx::query_as(
         "SELECT count(*), \
-                count(*) FILTER (WHERE target_kind = 'creator'), \
-                count(*) FILTER (WHERE target_kind = 'keyword'), \
-                count(*) FILTER (WHERE lifecycle_state = 'archiving'), \
-                count(*) FILTER (WHERE monitoring_enabled) \
-         FROM collection_observation_target",
+                count(*) FILTER (WHERE target.target_kind = 'creator'), \
+                count(*) FILTER (WHERE target.target_kind = 'keyword'), \
+                count(*) FILTER (WHERE target.lifecycle_state = 'archiving'), \
+                count(*) FILTER (WHERE target.monitoring_enabled \
+                    AND COALESCE(rule.automatic_enabled,false)) \
+         FROM collection_observation_target target \
+         LEFT JOIN collection_monitor_rule_revision rule \
+           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref",
     )
     .fetch_one(database.pool())
     .await?;
@@ -318,18 +325,21 @@ pub async fn list_targets(
         _ => (None, None),
     };
     let rows = sqlx::query_as::<_, ListedTargetRow>(
-        "SELECT target_ref, platform, target_kind, identity_key, display_name, identity_facts, \
-                source, lifecycle_state, first_stored_at::text, monitoring_enabled, group_name, \
-                to_char(last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
-                to_char(last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
-                CASE WHEN monitoring_enabled AND last_patrol_dispatched_at IS NOT NULL \
-                     THEN to_char(last_patrol_dispatched_at \
-                                  + make_interval(secs => patrol_interval_seconds), \
-                                  'MM-DD HH24:MI') END \
-         FROM collection_observation_target \
-         WHERE ($1::text IS NULL OR target_kind = $1) \
-           AND ($2::text IS NULL OR lifecycle_state = $2) \
-         ORDER BY first_stored_at DESC LIMIT $3",
+        "SELECT target.target_ref, target.platform, target.target_kind, target.identity_key, \
+                target.display_name, target.identity_facts, target.source, target.lifecycle_state, \
+                target.first_stored_at::text, \
+                (target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false)), \
+                target.group_name, \
+                to_char(target.last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
+                to_char(target.last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
+                CASE WHEN target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false) \
+                     THEN to_char(target.monitor_next_run_at, 'MM-DD HH24:MI') END \
+         FROM collection_observation_target target \
+         LEFT JOIN collection_monitor_rule_revision rule \
+           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+         WHERE ($1::text IS NULL OR target.target_kind = $1) \
+           AND ($2::text IS NULL OR target.lifecycle_state = $2) \
+         ORDER BY target.first_stored_at DESC LIMIT $3",
     )
     .bind(kind)
     .bind(state)

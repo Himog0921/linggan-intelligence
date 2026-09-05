@@ -73,6 +73,10 @@ pub struct RequestLeaseOutcome {
 
 #[derive(Debug, Default)]
 pub struct ProgressiveArchiveTickSummary {
+    /// Newly admitted deep-archive batches waiting in the common browser-work queue.
+    pub queued: Vec<Uuid>,
+    /// Historical field retained for callers built before batch work entered the shared queue.
+    /// New code never records a browser dispatch here; only an eligible installation can do so.
     pub dispatched: Vec<Uuid>,
     pub skipped: Vec<(Uuid, String)>,
 }
@@ -134,11 +138,16 @@ pub async fn grant_authorization(
         return Err(AcquisitionChainError::SchemaUnavailable);
     }
     let authorization_ref = Uuid::new_v4();
+    let task_templates = authorization_task_templates(grant.target_kind, grant.lane);
+    let dispatch_lanes = authorization_dispatch_lanes(grant.lane);
+    let max_work_units = grant.max_works_per_target.unwrap_or(DEFAULT_MAX_WORKS);
     sqlx::query(
         "INSERT INTO collection_acquisition_authorization \
              (authorization_ref, platform, target_kind, lane, purpose, max_targets, \
-              max_works_per_target, granted_by, expires_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'person', scope_001_now() + make_interval(days => $8))",
+              max_works_per_target, allowed_task_templates,allowed_dispatch_lanes,max_work_units, \
+              granted_by, expires_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7,$8,$9,$10, \
+                 'person', scope_001_now() + make_interval(days => $11))",
     )
     .bind(authorization_ref)
     .bind(grant.platform)
@@ -147,6 +156,9 @@ pub async fn grant_authorization(
     .bind(grant.purpose)
     .bind(grant.max_targets)
     .bind(grant.max_works_per_target)
+    .bind(task_templates)
+    .bind(dispatch_lanes)
+    .bind(max_work_units)
     .bind(grant.valid_for_days)
     .execute(database.pool())
     .await?;
@@ -167,8 +179,12 @@ pub async fn request_and_admit(
     request_and_admit_inner(database, target_ref, lane, purpose, requested_by, &[], None).await
 }
 
-/// Create Request → Decision → Work Order → Lease under one transaction. A failed Lease check
-/// rolls the preceding writes back, so an "admitted" row cannot be mistaken for executable work.
+/// Legacy convenience path that additionally tries to claim the just-created queued Work Order.
+///
+/// New browser work must normally stop after `request_and_admit`: the eligible plugin claims the
+/// shared Work Order later.  This helper remains for the bounded progressive-archive callers while
+/// they are migrated; it still materialises the same Work Order first and then explicitly changes
+/// it to `leased` in the same transaction.
 pub async fn request_admit_and_lease(
     database: &Database,
     target_ref: Uuid,
@@ -194,13 +210,50 @@ pub async fn request_admit_and_lease(
 ///
 /// This is deliberately separate from the generic deep-archive request.  The visible action
 /// promises a 200-Work directory ceiling and subsequent bounded detail batches, so a narrower
-/// grant must be reported instead of silently turning that promise into 10 or 20 Works.
+/// grant must be reported instead of silently turning that promise into 10 or 20 Works.  It
+/// writes an admitted **batch** Work Order and stops there; a plugin installation claims it later
+/// through the same fairness and eligibility path as every other browser task.
+pub async fn request_progressive_archive(
+    database: &Database,
+    target_ref: Uuid,
+    purpose: &str,
+    requested_by: &str,
+) -> Result<RequestOutcome, RequestLeaseError> {
+    Ok(
+        request_progressive_archive_inner(database, target_ref, purpose, requested_by, 0, false)
+            .await?
+            .request,
+    )
+}
+
+/// Legacy convenience path that immediately attaches current capacity after writing a Work
+/// Order.  Product routes must use [`request_progressive_archive`] instead so batch work cannot
+/// bypass the common queue.  It remains temporarily for protocol-compatibility test fixtures.
 pub async fn request_progressive_archive_and_lease(
     database: &Database,
     target_ref: Uuid,
     purpose: &str,
     requested_by: &str,
     valid_for_minutes: i32,
+) -> Result<RequestLeaseOutcome, RequestLeaseError> {
+    request_progressive_archive_inner(
+        database,
+        target_ref,
+        purpose,
+        requested_by,
+        valid_for_minutes,
+        true,
+    )
+    .await
+}
+
+async fn request_progressive_archive_inner(
+    database: &Database,
+    target_ref: Uuid,
+    purpose: &str,
+    requested_by: &str,
+    valid_for_minutes: i32,
+    issue_lease: bool,
 ) -> Result<RequestLeaseOutcome, RequestLeaseError> {
     if !acquisition_chain_schema_is_ready(database)
         .await
@@ -285,6 +338,7 @@ pub async fn request_progressive_archive_and_lease(
             requested_by,
             monitoring_enabled,
             valid_for_minutes,
+            issue_lease,
         )
         .await?
         {
@@ -323,14 +377,26 @@ pub async fn request_progressive_archive_and_lease(
         )
         .await
         .map_err(AcquisitionChainError::from)?;
-        Some(
-            issue_work_order_lease_in_transaction(
+        if issue_lease {
+            assign_current_capacity_to_queued_work_order(
                 &mut transaction,
                 work_order_ref,
-                valid_for_minutes,
+                target_ref,
+                "deep_archive",
+                &[],
             )
-            .await?,
-        )
+            .await?;
+            Some(
+                issue_work_order_lease_in_transaction(
+                    &mut transaction,
+                    work_order_ref,
+                    valid_for_minutes,
+                )
+                .await?,
+            )
+        } else {
+            None
+        }
     } else {
         None
     };
@@ -424,6 +490,14 @@ async fn request_admit_and_lease_inner(
     )
     .await?;
     let lease = if let Some(work_order_ref) = request.work_order_ref {
+        assign_current_capacity_to_queued_work_order(
+            &mut transaction,
+            work_order_ref,
+            target_ref,
+            lane,
+            material_targets,
+        )
+        .await?;
         Some(
             issue_work_order_lease_in_transaction(
                 &mut transaction,
@@ -598,12 +672,13 @@ async fn request_and_admit_in_transaction_with_progressive_resume(
         // `archiving` is accepted only so the scheduler can recover an expired bounded baseline.
         // Admission still merges a live lease and the scheduler caps the number of Work Orders.
         "deep_archive" => matches!(lifecycle_state.as_str(), "pending_decision" | "archiving"),
-        "patrol" if requested_by == "person" => {
-            matches!(
-                lifecycle_state.as_str(),
-                "archived" | "monitoring" | "paused"
-            ) || (target_kind == "keyword" && lifecycle_state == "pending_decision")
-        }
+        // Manual observation is an ordinary bounded observation of a resolved
+        // target. It may be useful before historical archiving is complete; only
+        // an explicitly dismissed target is out of scope.
+        "patrol" if requested_by == "person" => lifecycle_state != "dismissed",
+        // The scheduler reaches this only through an enabled due rule. The
+        // lifecycle check keeps a stopped or dismissed target from running.
+        "patrol" => lifecycle_state == "monitoring",
         _ => matches!(lifecycle_state.as_str(), "archiving" | "monitoring"),
     };
     if !requestable {
@@ -666,29 +741,28 @@ async fn request_and_admit_in_transaction_with_progressive_resume(
     .bind(reason_text(&outcome))
     .bind(authorization_ref)
     .bind(target_ref)
-    .bind(facts.capacity.station_ref)
-    .bind(facts.capacity.installation_ref)
-    .bind(facts.capacity.account_ref)
-    .bind(facts.capacity.eligibility_ref)
+    // A Request/Decision records no fictional assigned station.  Station, account,
+    // quota, risk and capability are facts of the later atomic claim.
+    .bind(Option::<Uuid>::None)
+    .bind(Option::<Uuid>::None)
+    .bind(Option::<Uuid>::None)
+    .bind(Option::<Uuid>::None)
     .bind(facts.monitor_rule_revision_ref)
     .execute(&mut **transaction)
     .await?;
 
     let work_order_ref = if outcome.permits_work_order() {
-        // 准入认定了哪台工位，工单就记哪台。没有这一步，每日额度算不出来。
-        let station_ref = facts.capacity.station_ref;
         let work_order_ref = write_work_order(
             &mut *transaction,
             decision_ref,
             target_ref,
             lane,
             authorization_ref,
-            station_ref,
-            facts.capacity.installation_ref,
-            facts.capacity.account_ref,
-            facts.capacity.eligibility_ref,
             facts.monitor_rule_revision_ref,
             requested_by,
+            facts.dispatch_lane,
+            facts.task_template,
+            facts.estimated_work_units,
         )
         .await?;
         write_material_targets(&mut *transaction, work_order_ref, material_targets).await?;
@@ -778,8 +852,10 @@ async fn write_material_targets(
 /// Collect only facts the server can actually establish.
 struct GatheredFacts {
     admission: AdmissionFacts,
-    capacity: CapacitySelection,
     monitor_rule_revision_ref: Option<Uuid>,
+    dispatch_lane: &'static str,
+    task_template: &'static str,
+    estimated_work_units: i32,
 }
 
 async fn gather_facts(
@@ -787,26 +863,33 @@ async fn gather_facts(
     platform: &str,
     target_kind: &str,
     lane: &str,
-    purpose: &str,
+    _purpose: &str,
     requested_by: &str,
     target_ref: Uuid,
     material_targets: &[MaterialDeepeningTarget],
     required_authorization_ref: Option<Uuid>,
 ) -> Result<GatheredFacts, sqlx::Error> {
+    let dispatch_lane = dispatch_lane_for(lane, requested_by);
+    let task_template = task_template_for(target_kind, lane, !material_targets.is_empty());
+    let estimated_work_units = estimated_work_units_for(task_template, material_targets.len());
     let authorization: Option<(Uuid, Option<i32>)> = sqlx::query_as(
         "SELECT authorization_ref,max_targets FROM collection_acquisition_authorization \
          WHERE platform = $1 AND target_kind = $2 AND lane = $3 \
            AND revoked_at IS NULL AND expires_at > scope_001_now() \
-           AND purpose=$4 AND ($5::uuid IS NULL OR authorization_ref=$5) \
-           AND ($6::integer=0 OR max_works_per_target IS NULL OR max_works_per_target >= $6) \
+           AND $4=ANY(allowed_task_templates) AND $5=ANY(allowed_dispatch_lanes) \
+           AND ($6::uuid IS NULL OR authorization_ref=$6) \
+           AND ($7::integer=0 OR max_works_per_target IS NULL OR max_works_per_target >= $7) \
+           AND max_work_units >= $8 \
          ORDER BY expires_at DESC LIMIT 1 FOR UPDATE",
     )
     .bind(platform)
     .bind(target_kind)
     .bind(lane)
-    .bind(purpose)
+    .bind(task_template)
+    .bind(dispatch_lane)
     .bind(required_authorization_ref)
     .bind(i32::try_from(material_targets.len()).unwrap_or(i32::MAX))
+    .bind(estimated_work_units)
     .fetch_optional(&mut **transaction)
     .await?;
 
@@ -819,16 +902,19 @@ async fn gather_facts(
         sqlx::query_scalar(
             "SELECT EXISTS ( \
                  SELECT 1 FROM collection_work_order w \
-                 JOIN collection_work_order_lease l ON l.work_order_ref = w.work_order_ref \
-                 WHERE w.target_ref = $1 AND w.lane = $2 \
-                   AND l.released_at IS NULL AND l.expires_at > scope_001_now())",
+                 WHERE w.target_ref = $1 AND w.lane = $2 AND w.dispatch_lane=$3 \
+                   AND (w.queue_state IN ('queued','leased') OR EXISTS ( \
+                       SELECT 1 FROM collection_work_order_lease l \
+                       WHERE l.work_order_ref=w.work_order_ref \
+                         AND l.released_at IS NULL AND l.expires_at>scope_001_now())))",
         )
         .bind(target_ref)
         .bind(lane)
+        .bind(dispatch_lane)
         .fetch_one(&mut **transaction)
         .await?
     } else if let Some(authorization_ref) = required_authorization_ref {
-        live_lease_for_exact_material_scope_in_transaction(
+        in_flight_work_for_exact_material_scope_in_transaction(
             transaction,
             target_ref,
             lane,
@@ -846,12 +932,16 @@ async fn gather_facts(
             "SELECT EXISTS ( \
                  SELECT 1 FROM collection_work_order w \
                  JOIN collection_work_order_material_target scope ON scope.work_order_ref=w.work_order_ref \
-                 JOIN collection_work_order_lease l ON l.work_order_ref=w.work_order_ref \
-                 WHERE w.target_ref=$1 AND w.lane=$2 AND scope.content_public_ref=ANY($3) \
-                   AND l.released_at IS NULL AND l.expires_at > scope_001_now())",
+                 WHERE w.target_ref=$1 AND w.lane=$2 AND w.dispatch_lane=$3 \
+                   AND scope.content_public_ref=ANY($4) \
+                   AND (w.queue_state IN ('queued','leased') OR EXISTS ( \
+                       SELECT 1 FROM collection_work_order_lease l \
+                       WHERE l.work_order_ref=w.work_order_ref \
+                         AND l.released_at IS NULL AND l.expires_at>scope_001_now())))",
         )
         .bind(target_ref)
         .bind(lane)
+        .bind(dispatch_lane)
         .bind(&content_refs)
         .fetch_one(&mut **transaction)
         .await?
@@ -876,46 +966,50 @@ async fn gather_facts(
             (Some(authorization_ref), None)
         }
     } else {
-        let status: (bool, bool) = sqlx::query_as(
+        let status: (bool, bool, bool, bool) = sqlx::query_as(
                 "SELECT \
                  EXISTS (SELECT 1 FROM collection_acquisition_authorization \
                          WHERE platform=$1 AND target_kind=$2 AND lane=$3 \
                            AND revoked_at IS NULL AND expires_at>scope_001_now() \
-                           AND purpose<>$4 \
-                           AND ($5::uuid IS NULL OR authorization_ref=$5) \
-                           AND ($6::integer=0 OR max_works_per_target IS NULL OR max_works_per_target >= $6)), \
+                           AND ($4::uuid IS NULL OR authorization_ref=$4)), \
                  EXISTS (SELECT 1 FROM collection_acquisition_authorization \
                          WHERE platform=$1 AND target_kind=$2 AND lane=$3 \
-                           AND ($5::uuid IS NULL OR authorization_ref=$5) \
-                           AND ($6::integer=0 OR max_works_per_target IS NULL OR max_works_per_target >= $6))",
+                           AND revoked_at IS NULL AND expires_at>scope_001_now() \
+                           AND $5=ANY(allowed_task_templates) AND $6=ANY(allowed_dispatch_lanes) \
+                           AND ($4::uuid IS NULL OR authorization_ref=$4) \
+                           AND ($7::integer=0 OR max_works_per_target IS NULL OR max_works_per_target >= $7)), \
+                 EXISTS (SELECT 1 FROM collection_acquisition_authorization \
+                         WHERE platform=$1 AND target_kind=$2 AND lane=$3 \
+                           AND revoked_at IS NULL AND expires_at>scope_001_now() \
+                           AND $5=ANY(allowed_task_templates) AND $6=ANY(allowed_dispatch_lanes) \
+                           AND ($4::uuid IS NULL OR authorization_ref=$4) \
+                           AND ($7::integer=0 OR max_works_per_target IS NULL OR max_works_per_target >= $7) \
+                           AND max_work_units >= $8), \
+                 EXISTS (SELECT 1 FROM collection_acquisition_authorization \
+                         WHERE platform=$1 AND target_kind=$2 AND lane=$3 \
+                           AND ($4::uuid IS NULL OR authorization_ref=$4))",
             )
             .bind(platform)
             .bind(target_kind)
             .bind(lane)
-            .bind(purpose)
             .bind(required_authorization_ref)
+            .bind(task_template)
+            .bind(dispatch_lane)
             .bind(i32::try_from(material_targets.len()).unwrap_or(i32::MAX))
+            .bind(estimated_work_units)
             .fetch_one(&mut **transaction)
             .await?;
-        let failure = if status.0 {
-            AuthorizationBoundaryFailure::PurposeMismatch
-        } else if status.1 {
+        let failure = if status.0 && !status.1 {
+            AuthorizationBoundaryFailure::ScopeMismatch
+        } else if status.1 && !status.2 {
+            AuthorizationBoundaryFailure::WorkUnitLimitReached
+        } else if status.3 {
             AuthorizationBoundaryFailure::ExpiredOrRevoked
         } else {
             AuthorizationBoundaryFailure::Missing
         };
         (None, Some(failure))
     };
-
-    let capacity = establish_capacity(
-        transaction,
-        platform,
-        target_kind,
-        lane,
-        Some(target_ref),
-        material_targets,
-    )
-    .await?;
 
     let monitor_rule_revision_ref = if requested_by == "agent" && lane == "patrol" {
         sqlx::query_scalar(
@@ -937,50 +1031,71 @@ async fn gather_facts(
             // No archive exists yet, so no need can already be satisfied. This becomes a real
             // query once archiving produces results.
             need_already_satisfied: false,
-            capacity: capacity.capacity.clone(),
+            // The Work Order is queued without selecting a station.  Claim is
+            // the atomic point that tests live account/station/risk/quota facts.
+            capacity: Capacity::Queueable,
             stop_conditions_expressible: true,
         },
-        capacity,
         monitor_rule_revision_ref,
+        dispatch_lane,
+        task_template,
+        estimated_work_units,
     })
 }
 
-/// Find a currently executable lease only when its frozen authorization and full material policy
-/// are identical to the requested scope.  A shared work ID or a shared content ID is deliberately
-/// insufficient: changing comment/reply bounds or media/OCR/ASR policy changes what execution is
-/// authorized to do.
-pub(crate) async fn live_lease_for_exact_material_scope_in_transaction(
+/// One exact material scope that is either queued or still leased. A shared work ID or a shared
+/// content ID is deliberately insufficient: changing comment/reply bounds or media/OCR/ASR policy
+/// changes what execution is authorized to do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct InFlightMaterialScope {
+    pub work_order_ref: Uuid,
+    pub lease_ref: Option<Uuid>,
+    pub expires_at: Option<String>,
+}
+
+/// Find an exact frozen material scope in the common queue or under a live lease. A queued work
+/// is already sufficient to merge a duplicate person request; requiring a lease here would let
+/// two clicks create parallel work during the period before any station claims the first one.
+pub(crate) async fn in_flight_work_for_exact_material_scope_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
     lane: &str,
     authorization_ref: Uuid,
     material_targets: &[MaterialDeepeningTarget],
-) -> Result<Option<Uuid>, sqlx::Error> {
-    let rows: Vec<(Uuid, Uuid, i32, i32, bool, bool, bool)> = sqlx::query_as(
-        "SELECT lease.lease_ref,scope.content_public_ref,scope.comment_limit, \
-                scope.reply_expand_limit,scope.acquire_media,scope.allow_ocr,scope.allow_asr \
-         FROM collection_work_order work_order \
-         JOIN collection_admission_decision decision \
-           ON decision.decision_ref=work_order.decision_ref \
-         JOIN collection_work_order_lease lease \
-           ON lease.work_order_ref=work_order.work_order_ref \
-         JOIN collection_work_order_material_target scope \
-           ON scope.work_order_ref=work_order.work_order_ref \
-         WHERE work_order.target_ref=$1 AND work_order.lane=$2 \
-           AND decision.authorization_ref=$3 \
-           AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
-         ORDER BY lease.lease_ref,scope.ordinal",
-    )
-    .bind(target_ref)
-    .bind(lane)
-    .bind(authorization_ref)
-    .fetch_all(&mut **transaction)
-    .await?;
+) -> Result<Option<InFlightMaterialScope>, sqlx::Error> {
+    let rows: Vec<(Uuid, Option<Uuid>, Option<String>, Uuid, i32, i32, bool, bool, bool)> =
+        sqlx::query_as(
+            "SELECT work_order.work_order_ref,lease.lease_ref,lease.expires_at::text, \
+                    scope.content_public_ref,scope.comment_limit,scope.reply_expand_limit, \
+                    scope.acquire_media,scope.allow_ocr,scope.allow_asr \
+             FROM collection_work_order work_order \
+             JOIN collection_admission_decision decision \
+               ON decision.decision_ref=work_order.decision_ref \
+             LEFT JOIN collection_work_order_lease lease \
+               ON lease.work_order_ref=work_order.work_order_ref \
+              AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
+             JOIN collection_work_order_material_target scope \
+               ON scope.work_order_ref=work_order.work_order_ref \
+             WHERE work_order.target_ref=$1 AND work_order.lane=$2 \
+               AND decision.authorization_ref=$3 \
+               AND (work_order.queue_state='queued' OR lease.lease_ref IS NOT NULL) \
+             ORDER BY work_order.created_at,work_order.work_order_ref,lease.lease_ref,scope.ordinal",
+        )
+        .bind(target_ref)
+        .bind(lane)
+        .bind(authorization_ref)
+        .fetch_all(&mut **transaction)
+        .await?;
 
     let requested = normalized_material_scope(material_targets);
-    let mut candidates: BTreeMap<Uuid, Vec<MaterialDeepeningTarget>> = BTreeMap::new();
+    let mut candidates: BTreeMap<
+        (Uuid, Option<Uuid>, Option<String>),
+        Vec<MaterialDeepeningTarget>,
+    > = BTreeMap::new();
     for (
+        work_order_ref,
         lease_ref,
+        expires_at,
         content_public_ref,
         comment_limit,
         reply_expand_limit,
@@ -990,7 +1105,7 @@ pub(crate) async fn live_lease_for_exact_material_scope_in_transaction(
     ) in rows
     {
         candidates
-            .entry(lease_ref)
+            .entry((work_order_ref, lease_ref, expires_at))
             .or_default()
             .push(MaterialDeepeningTarget {
                 content_public_ref,
@@ -1001,9 +1116,15 @@ pub(crate) async fn live_lease_for_exact_material_scope_in_transaction(
                 allow_asr,
             });
     }
-    Ok(candidates.into_iter().find_map(|(lease_ref, scope)| {
-        (normalized_material_scope(&scope) == requested).then_some(lease_ref)
-    }))
+    Ok(candidates
+        .into_iter()
+        .find_map(|((work_order_ref, lease_ref, expires_at), scope)| {
+            (normalized_material_scope(&scope) == requested).then_some(InFlightMaterialScope {
+                work_order_ref,
+                lease_ref,
+                expires_at,
+            })
+        }))
 }
 
 fn normalized_material_scope(
@@ -1065,6 +1186,60 @@ async fn establish_capacity(
     .await
 }
 
+/// Transitional compatibility for callers that still ask for immediate leasing.
+/// The durable instruction is already queued at this point; this helper makes a
+/// separate, explicit claim decision before the old lease materialisation API is
+/// called. Normal manual and scheduled flows intentionally do not use it.
+async fn assign_current_capacity_to_queued_work_order(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+    target_ref: Uuid,
+    lane: &str,
+    material_targets: &[MaterialDeepeningTarget],
+) -> Result<(), LeaseError> {
+    let (platform, target_kind): (String, String) = sqlx::query_as(
+        "SELECT platform,target_kind FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let selection = establish_capacity(
+        transaction,
+        &platform,
+        &target_kind,
+        lane,
+        Some(target_ref),
+        material_targets,
+    )
+    .await?;
+    let (Some(station_ref), Some(installation_ref), Some(account_ref)) = (
+        selection.station_ref,
+        selection.installation_ref,
+        selection.account_ref,
+    ) else {
+        return Err(LeaseError::ControlBlocked {
+            reason_code: selection.capacity.reason_code().to_owned(),
+        });
+    };
+    let changed = sqlx::query(
+        "UPDATE collection_work_order SET station_ref=$2,installation_ref=$3,account_ref=$4, \
+             eligibility_ref=$5,queue_state='leased' \
+         WHERE work_order_ref=$1 AND queue_state='queued'",
+    )
+    .bind(work_order_ref)
+    .bind(station_ref)
+    .bind(installation_ref)
+    .bind(account_ref)
+    .bind(selection.eligibility_ref)
+    .execute(&mut **transaction)
+    .await?
+    .rows_affected();
+    if changed != 1 {
+        return Err(LeaseError::AlreadyLeased);
+    }
+    Ok(())
+}
+
 async fn max_works_for(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     authorization_ref: Option<Uuid>,
@@ -1085,6 +1260,54 @@ async fn max_works_for(
 
 /// The deep-archive ceiling from the product rules (§3.1): an upper bound, never a target.
 const DEFAULT_MAX_WORKS: i32 = 200;
+
+/// Authorizations name stable execution scope. `purpose` stays on the request
+/// and grant for audit; it is not a fragile exact-match switch for scheduling.
+fn authorization_task_templates(target_kind: &str, lane: &str) -> Vec<&'static str> {
+    match (target_kind, lane) {
+        ("creator", "patrol") => vec!["creator_patrol"],
+        ("keyword", "patrol") => vec!["keyword_patrol"],
+        ("creator", "deep_archive") => vec!["creator_archive", "material_deepening"],
+        _ => vec!["keyword_archive", "material_deepening"],
+    }
+}
+
+fn authorization_dispatch_lanes(lane: &str) -> Vec<&'static str> {
+    match lane {
+        "patrol" => vec!["immediate", "scheduled"],
+        _ => vec!["immediate", "batch"],
+    }
+}
+
+fn dispatch_lane_for(lane: &str, requested_by: &str) -> &'static str {
+    match (lane, requested_by) {
+        ("patrol", "agent") => "scheduled",
+        ("deep_archive", "agent") => "batch",
+        _ => "immediate",
+    }
+}
+
+fn task_template_for(target_kind: &str, lane: &str, has_material_targets: bool) -> &'static str {
+    if has_material_targets {
+        return "material_deepening";
+    }
+    match (target_kind, lane) {
+        ("creator", "patrol") => "creator_patrol",
+        ("keyword", "patrol") => "keyword_patrol",
+        ("creator", "deep_archive") => "creator_archive",
+        _ => "keyword_archive",
+    }
+}
+
+fn estimated_work_units_for(task_template: &str, material_count: usize) -> i32 {
+    match task_template {
+        // Profile identity + one bounded profile-discovery scan. It is not an
+        // implicit historic archive.
+        "creator_patrol" => 2,
+        "material_deepening" => i32::try_from(material_count).unwrap_or(i32::MAX).max(1),
+        _ => 1,
+    }
+}
 
 fn reason_code(outcome: &AdmissionOutcome, facts: &AdmissionFacts) -> &'static str {
     match outcome {
@@ -1122,30 +1345,31 @@ async fn write_work_order(
     target_ref: Uuid,
     lane: &str,
     authorization_ref: Option<Uuid>,
-    station_ref: Option<Uuid>,
-    installation_ref: Option<Uuid>,
-    account_ref: Option<Uuid>,
-    eligibility_ref: Option<Uuid>,
     monitor_rule_revision_ref: Option<Uuid>,
     requested_by: &str,
+    dispatch_lane: &str,
+    task_template: &str,
+    estimated_work_units: i32,
 ) -> Result<Uuid, sqlx::Error> {
     let work_order_ref = Uuid::new_v4();
     let max_works = max_works_for(transaction, authorization_ref).await?;
+    let dedupe_key = format!(
+        "{dispatch_lane}:{target_ref}:{task_template}:{}",
+        monitor_rule_revision_ref.unwrap_or(Uuid::nil())
+    );
     sqlx::query(
         "INSERT INTO collection_work_order \
              (work_order_ref, decision_ref, target_ref, lane, max_works, station_ref, \
-             installation_ref,account_ref,eligibility_ref,monitor_rule_revision_ref,stop_conditions) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7,$8,$9,$10,$11)",
+             installation_ref,account_ref,eligibility_ref,monitor_rule_revision_ref,stop_conditions, \
+             dispatch_lane,queue_state,scheduled_for,dedupe_key,estimated_work_units) \
+         VALUES ($1, $2, $3, $4, $5, NULL, NULL,NULL,NULL,$6,$7,$8,'queued', \
+                 scope_001_now(),$9,$10)",
     )
     .bind(work_order_ref)
     .bind(decision_ref)
     .bind(target_ref)
     .bind(lane)
     .bind(max_works)
-    .bind(station_ref)
-    .bind(installation_ref)
-    .bind(account_ref)
-    .bind(eligibility_ref)
     .bind(monitor_rule_revision_ref)
     .bind(json!({
         "maximumQuota": max_works,
@@ -1153,6 +1377,9 @@ async fn write_work_order(
         // states what stops it rather than what it expects to find.
         "stopOn": ["maximum_quota", "surface_ended", "risk_stop", "time_budget"],
     }))
+    .bind(dispatch_lane)
+    .bind(dedupe_key)
+    .bind(estimated_work_units)
     .execute(&mut **transaction)
     .await?;
 
@@ -1302,14 +1529,16 @@ async fn advance_progressive_archive_in_transaction(
     requested_by: &str,
     monitoring_enabled: bool,
     valid_for_minutes: i32,
+    issue_lease: bool,
 ) -> Result<ProgressiveAdvance, RequestLeaseError> {
     let live_material_scope: bool = sqlx::query_scalar(
         "SELECT EXISTS ( \
            SELECT 1 FROM collection_work_order candidate \
            JOIN collection_work_order_material_target scope USING (work_order_ref) \
-           JOIN collection_work_order_lease lease USING (work_order_ref) \
+           LEFT JOIN collection_work_order_lease lease USING (work_order_ref) \
            WHERE candidate.target_ref=$1 AND candidate.lane='deep_archive' \
-             AND lease.released_at IS NULL AND lease.expires_at>scope_001_now())",
+             AND (candidate.queue_state='queued' \
+                  OR (lease.released_at IS NULL AND lease.expires_at>scope_001_now())))",
     )
     .bind(target_ref)
     .fetch_one(&mut **transaction)
@@ -1340,14 +1569,15 @@ async fn advance_progressive_archive_in_transaction(
              AND NOT EXISTS ( \
                SELECT 1 FROM linggan_material_content_detail detail \
                WHERE detail.content_public_ref=finding.content_public_ref) \
-             AND NOT EXISTS ( \
+            AND NOT EXISTS ( \
                SELECT 1 FROM collection_work_order scoped_order \
                JOIN collection_work_order_material_target scope USING (work_order_ref) \
-               JOIN collection_work_order_lease scoped_lease USING (work_order_ref) \
+               LEFT JOIN collection_work_order_lease scoped_lease USING (work_order_ref) \
                WHERE scoped_order.target_ref=$1 \
                  AND scope.content_public_ref=finding.content_public_ref \
-                 AND scoped_lease.released_at IS NULL \
-                 AND scoped_lease.expires_at>scope_001_now()) \
+                 AND (scoped_order.queue_state='queued' \
+                      OR (scoped_lease.released_at IS NULL \
+                          AND scoped_lease.expires_at>scope_001_now()))) \
            GROUP BY finding.content_public_ref \
          ) discovered \
          ORDER BY discovered.first_seen,discovered.content_public_ref \
@@ -1398,12 +1628,25 @@ async fn advance_progressive_archive_in_transaction(
     )
     .await
     .map_err(AcquisitionChainError::from)?;
-    let lease =
-        issue_work_order_lease_in_transaction(transaction, work_order_ref, valid_for_minutes)
-            .await?;
+    let lease = if issue_lease {
+        assign_current_capacity_to_queued_work_order(
+            transaction,
+            work_order_ref,
+            target_ref,
+            "deep_archive",
+            &material_targets,
+        )
+        .await?;
+        Some(
+            issue_work_order_lease_in_transaction(transaction, work_order_ref, valid_for_minutes)
+                .await?,
+        )
+    } else {
+        None
+    };
     Ok(ProgressiveAdvance::Outcome(RequestLeaseOutcome {
         request,
-        lease: Some(lease),
+        lease,
     }))
 }
 
@@ -1412,7 +1655,8 @@ async fn advance_progressive_archive_in_transaction(
 /// The scheduler never downloads or parses platform data. It only turns already accepted,
 /// target-scoped directory facts into the next explicitly bounded Work Order. Re-running it is
 /// safe: the target row lock and the live-scope exclusion are held in the same transaction that
-/// writes the child scope and Lease.
+/// writes the child scope and queued Work Order. Browser execution is a later station claim,
+/// not work performed by this scheduler tick.
 pub async fn run_progressive_archives(
     database: &Database,
 ) -> Result<ProgressiveArchiveTickSummary, RequestLeaseError> {
@@ -1513,6 +1757,7 @@ pub async fn run_progressive_archives(
             "agent",
             monitoring_enabled,
             180,
+            false,
         )
         .await?;
         match advance {
@@ -1523,12 +1768,12 @@ pub async fn run_progressive_archives(
                     .map_err(AcquisitionChainError::from)?;
                 summary.skipped.push((target_ref, reason.to_owned()));
             }
-            ProgressiveAdvance::Outcome(outcome) if outcome.lease.is_some() => {
+            ProgressiveAdvance::Outcome(outcome) if outcome.request.work_order_ref.is_some() => {
                 transaction
                     .commit()
                     .await
                     .map_err(AcquisitionChainError::from)?;
-                summary.dispatched.push(target_ref);
+                summary.queued.push(target_ref);
             }
             ProgressiveAdvance::Outcome(outcome) => {
                 let reason = outcome.request.reason_code.to_owned();

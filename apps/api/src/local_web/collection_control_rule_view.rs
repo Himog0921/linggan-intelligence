@@ -6,12 +6,11 @@
 // success; only a later Work/Lease/Task/Receipt chain may make that claim.
 use super::super::target_drawer::TargetListContext;
 use linggan_contracts::PRODUCER_TASK_SPEC_VERSION;
-use linggan_evidence::{MonitorRuleMode, collection_control_schema_is_ready};
+use linggan_evidence::collection_control_schema_is_ready;
 use linggan_storage_postgres::Database;
 use sqlx::Row;
 use uuid::Uuid;
 
-const COLLECTION_SCRIPT: &str = r#"<script src="/assets/collection-workspace.js"></script>"#;
 const DEFAULT_INTERVAL_SECONDS: i32 = 86_400;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,20 +28,13 @@ pub struct MonitorRulePanel {
     pub lifecycle_state: String,
     pub active_rule: Option<ActiveMonitorRule>,
     pub receipt: Option<MonitorRuleReceiptView>,
-    pub dynamic_cadence: DynamicCadenceView,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveMonitorRule {
     pub rule_revision_ref: Uuid,
     pub revision: i32,
-    pub mode: MonitorRuleMode,
     pub automatic_enabled: bool,
-    pub run_on_weekdays: bool,
-    pub run_on_weekends: bool,
-    pub all_day: bool,
-    pub window_start_minute: Option<i16>,
-    pub window_end_minute: Option<i16>,
     pub fixed_interval_seconds: Option<i32>,
     pub fallback_interval_seconds: i32,
     pub surface_key: String,
@@ -62,40 +54,14 @@ pub struct MonitorRuleReceiptView {
     pub recorded_at: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DynamicCadenceView {
-    Available {
-        interval_seconds: i32,
-        qualified_rounds: usize,
-    },
-    Unavailable {
-        reason_code: &'static str,
-    },
-}
-
-impl Default for DynamicCadenceView {
-    fn default() -> Self {
-        Self::Unavailable {
-            reason_code: "comparable_rounds_not_projected",
-        }
-    }
-}
-
 /// Raw strings are retained only in the in-memory failed form. The route handler is
 /// responsible for parsing the closed set before it calls the evidence command owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MonitorRuleFormState {
     pub expected_revision: i32,
     pub idempotency_key: Uuid,
-    pub mode: String,
     pub automatic_enabled: bool,
-    pub run_on_weekdays: bool,
-    pub run_on_weekends: bool,
-    pub all_day: bool,
-    pub window_start: String,
-    pub window_end: String,
     pub fixed_interval_seconds: String,
-    pub fallback_interval_seconds: String,
     pub surface_key: String,
     pub ranking_key: String,
     pub task_contract_version: String,
@@ -117,15 +83,8 @@ impl MonitorRuleFormState {
             return Self {
                 expected_revision: 0,
                 idempotency_key: Uuid::new_v4(),
-                mode: "fixed".to_owned(),
                 automatic_enabled: false,
-                run_on_weekdays: true,
-                run_on_weekends: true,
-                all_day: true,
-                window_start: String::new(),
-                window_end: String::new(),
                 fixed_interval_seconds: DEFAULT_INTERVAL_SECONDS.to_string(),
-                fallback_interval_seconds: DEFAULT_INTERVAL_SECONDS.to_string(),
                 surface_key: default_surface.to_owned(),
                 ranking_key: default_ranking.to_owned(),
                 task_contract_version: PRODUCER_TASK_SPEC_VERSION.to_owned(),
@@ -134,17 +93,15 @@ impl MonitorRuleFormState {
         Self {
             expected_revision: rule.revision,
             idempotency_key: Uuid::new_v4(),
-            mode: rule.mode.as_str().to_owned(),
+            // The current surface has one schedule meaning: an all-day fixed
+            // interval.  A historical dynamic/window revision remains readable
+            // in the immutable rule table, but opening it must not silently
+            // retain a second scheduling language through hidden inputs.
             automatic_enabled: rule.automatic_enabled,
-            run_on_weekdays: rule.run_on_weekdays,
-            run_on_weekends: rule.run_on_weekends,
-            all_day: rule.all_day,
-            window_start: minute_as_time(rule.window_start_minute),
-            window_end: minute_as_time(rule.window_end_minute),
             fixed_interval_seconds: rule
                 .fixed_interval_seconds
-                .map_or_else(String::new, |value| value.to_string()),
-            fallback_interval_seconds: rule.fallback_interval_seconds.to_string(),
+                .unwrap_or(rule.fallback_interval_seconds)
+                .to_string(),
             surface_key: rule.surface_key.clone(),
             ranking_key: rule.ranking_key.clone().unwrap_or_default(),
             task_contract_version: rule.task_contract_version.clone(),
@@ -207,10 +164,6 @@ pub async fn read_monitor_rule_panel(
         lifecycle_state: target.try_get("lifecycle_state")?,
         active_rule,
         receipt,
-        // The current schema stores rule inputs and per-target decisions, but no durable
-        // qualified-comparable-round projection. The UI therefore cannot recompute or imply
-        // cadence availability. The scheduler may still use the explicit fixed fallback.
-        dynamic_cadence: DynamicCadenceView::default(),
     }))
 }
 
@@ -220,9 +173,8 @@ async fn read_active_rule(
     rule_ref: Uuid,
 ) -> Result<Option<ActiveMonitorRule>, sqlx::Error> {
     let row = sqlx::query(
-        "SELECT rule_revision_ref,revision,mode,automatic_enabled,run_on_weekdays, \
-                run_on_weekends,all_day,window_start_minute,window_end_minute, \
-                fixed_interval_seconds,fallback_interval_seconds,surface_key,ranking_key, \
+        "SELECT rule_revision_ref,revision,automatic_enabled,fixed_interval_seconds, \
+                fallback_interval_seconds,surface_key,ranking_key, \
                 task_contract_version,created_at::text AS created_at \
          FROM collection_monitor_rule_revision \
          WHERE target_ref=$1 AND rule_revision_ref=$2",
@@ -232,17 +184,10 @@ async fn read_active_rule(
     .fetch_optional(database.pool())
     .await?;
     row.map(|row| {
-        let mode: String = row.try_get("mode")?;
         Ok(ActiveMonitorRule {
             rule_revision_ref: row.try_get("rule_revision_ref")?,
             revision: row.try_get("revision")?,
-            mode: parse_mode(&mode),
             automatic_enabled: row.try_get("automatic_enabled")?,
-            run_on_weekdays: row.try_get("run_on_weekdays")?,
-            run_on_weekends: row.try_get("run_on_weekends")?,
-            all_day: row.try_get("all_day")?,
-            window_start_minute: row.try_get("window_start_minute")?,
-            window_end_minute: row.try_get("window_end_minute")?,
             fixed_interval_seconds: row.try_get("fixed_interval_seconds")?,
             fallback_interval_seconds: row.try_get("fallback_interval_seconds")?,
             surface_key: row.try_get("surface_key")?,
@@ -284,14 +229,10 @@ async fn read_receipt(
     .transpose()
 }
 
-fn parse_mode(value: &str) -> MonitorRuleMode {
-    match value {
-        "manual_only" => MonitorRuleMode::ManualOnly,
-        "dynamic" => MonitorRuleMode::Dynamic,
-        _ => MonitorRuleMode::Fixed,
-    }
-}
+#[cfg(test)]
+const COLLECTION_SCRIPT: &str = r#"<script src="/assets/collection-workspace.js"></script>"#;
 
+#[cfg(test)]
 pub fn attach_to_collection_document(document: &str, overlay: &str) -> String {
     if overlay.is_empty() {
         return document.to_owned();
@@ -349,45 +290,19 @@ pub fn render_monitor_rule_modal(
               <input type="hidden" name="return_sort" value="{return_sort}">
               <div class="c-rule-body">
                 {errors}
-                <section class="c-rule-section" aria-labelledby="c-rule-mode-title">
+                <section class="c-rule-section" aria-labelledby="c-rule-cadence-title">
                   <div class="c-rule-section-head">
-                    <h3 id="c-rule-mode-title">运行方式</h3>
-                    <span>时区固定为 Asia/Shanghai</span>
+                    <h3 id="c-rule-cadence-title">自动观察</h3>
+                    <span>Asia/Shanghai · 从启用时刻开始计时</span>
                   </div>
                   <label class="c-rule-switch">
                     <input type="checkbox" name="automatic_enabled" value="true"{automatic_checked}{disabled_attr}>
-                    <span><b>自动巡检</b><small>关掉后规则仍保留，人工观察不受影响。</small></span>
+                    <span><b>按规则自动观察</b><small>关闭后不再产生未来定时工单；人工观察仍可申请。</small></span>
                   </label>
-                  <fieldset class="c-rule-options">
-                    <legend>频率模式</legend>
-                    {mode_options}
-                  </fieldset>
-                  {dynamic}
-                </section>
-                <section class="c-rule-section" aria-labelledby="c-rule-calendar-title">
-                  <div class="c-rule-section-head">
-                    <h3 id="c-rule-calendar-title">日历与时间窗</h3>
-                    <span>首版不接受跨午夜窗口</span>
-                  </div>
-                  <div class="c-rule-checks">
-                    {checkbox_weekdays}
-                    {checkbox_weekends}
-                    {checkbox_all_day}
-                  </div>
-                  <div class="c-rule-grid c-rule-window" data-monitor-rule-window>
-                    {time_start}
-                    {time_end}
-                  </div>
-                </section>
-                <section class="c-rule-section" aria-labelledby="c-rule-cadence-title">
-                  <div class="c-rule-section-head">
-                    <h3 id="c-rule-cadence-title">间隔</h3>
-                    <span>闭集范围 6 小时至 7 天</span>
-                  </div>
                   <div class="c-rule-grid">
-                    {fixed_interval}
-                    {fallback_interval}
+                    {interval}
                   </div>
+                  <p class="c-rule-hint">每次运行固定执行：作者主页资格核验 + 最近 30 条作品观察。历史建档完整度不会阻断后续观察。</p>
                 </section>
               </div>
               <footer class="c-rule-actions">
@@ -424,33 +339,10 @@ pub fn render_monitor_rule_modal(
         automatic_checked = checked(form.automatic_enabled),
         disabled_attr = if disabled { " disabled" } else { "" },
         readonly = disabled,
-        mode_options = mode_options(form, disabled),
-        dynamic = dynamic_markup(&panel.dynamic_cadence, form),
-        checkbox_weekdays = checkbox("run_on_weekdays", "工作日", form.run_on_weekdays, disabled),
-        checkbox_weekends = checkbox("run_on_weekends", "周末", form.run_on_weekends, disabled),
-        checkbox_all_day = checkbox("all_day", "全天", form.all_day, disabled),
-        time_start = time_input(
-            "window_start",
-            "开始时间",
-            &form.window_start,
-            form.all_day || disabled
-        ),
-        time_end = time_input(
-            "window_end",
-            "结束时间",
-            &form.window_end,
-            form.all_day || disabled
-        ),
-        fixed_interval = interval_select(
+        interval = interval_select(
             "fixed_interval_seconds",
-            "固定间隔",
+            "观察间隔（仅可选择下列 5 档）",
             &form.fixed_interval_seconds,
-            form.mode != "fixed" || disabled,
-        ),
-        fallback_interval = interval_select(
-            "fallback_interval_seconds",
-            "动态不可用时兜底",
-            &form.fallback_interval_seconds,
             disabled,
         ),
         pause_or_resume = pause_or_resume(panel, disabled),
@@ -510,74 +402,6 @@ pub enum MonitorRuleUnavailableState {
     ReadUnavailable,
 }
 
-fn mode_options(form: &MonitorRuleFormState, disabled: bool) -> String {
-    [
-        (
-            "manual_only",
-            "仅人工",
-            "不进入自动调度；规则与历史仍保留。",
-        ),
-        ("fixed", "固定间隔", "按明确间隔进入调度候选。"),
-        (
-            "dynamic",
-            "动态间隔",
-            "仅在可比轮次合格时计算，否则使用兜底值。",
-        ),
-    ]
-    .iter()
-    .map(|(value, title, note)| {
-        format!(
-            r#"<label class="c-rule-option">
-                 <input type="radio" name="mode" value="{value}"{checked}{disabled}>
-                 <span><b>{title}</b><small>{note}</small></span>
-               </label>"#,
-            checked = checked(form.mode == *value),
-            disabled = if disabled { " disabled" } else { "" },
-        )
-    })
-    .collect()
-}
-
-fn dynamic_markup(dynamic: &DynamicCadenceView, form: &MonitorRuleFormState) -> String {
-    let (state, body, interval) = match dynamic {
-        DynamicCadenceView::Available {
-            interval_seconds,
-            qualified_rounds,
-        } => (
-            "动态间隔可用",
-            format!("由 {qualified_rounds} 轮合格、可比观察计算。"),
-            interval_label(*interval_seconds),
-        ),
-        DynamicCadenceView::Unavailable { .. } => (
-            "动态间隔不可用",
-            "当前没有可审计的合格可比轮次投影；不会用作者价值、语料内容或推测值代替。"
-                .to_owned(),
-            "DYNAMIC_UNAVAILABLE".to_owned(),
-        ),
-    };
-    let hidden = if form.mode == "dynamic" {
-        ""
-    } else {
-        " hidden"
-    };
-    let reason = match dynamic {
-        DynamicCadenceView::Available { .. } => String::new(),
-        DynamicCadenceView::Unavailable { reason_code } => format!(
-            r#"<code data-control-reason>{}</code>"#,
-            escape(reason_code),
-        ),
-    };
-    format!(
-        r#"<div class="c-rule-dynamic" data-monitor-dynamic{hidden}>
-             <div><b>{state}</b><span>{interval}</span></div>
-             <p>{body} 当前兜底值为 {fallback}。</p>{reason}
-           </div>"#,
-        fallback = escape(&interval_label(parse_interval(
-            &form.fallback_interval_seconds
-        ))),
-    )
-}
-
 fn feedback_markup(receipt: Option<&MonitorRuleReceiptView>) -> String {
     let Some(receipt) = receipt else {
         return String::new();
@@ -618,14 +442,16 @@ fn receipt_meaning(outcome: &str, reason: &str) -> &'static str {
         ("applied", "monitor_paused") => "未来自动调度已暂停；人工观察仍可申请。",
         ("applied", "monitor_resumed") => "自动调度已恢复；尚未据此声称已经派出任务。",
         ("applied", "monitor_stopped") => "目标已停止新增工作，既有历史仍保留。",
-        ("applied", "manual_observe_created") => "人工观察请求已建立；这不是执行或采集回执。",
+        ("applied", "manual_observe_created") => {
+            "人工观察工单已入队，尚未被插件认领；这不是执行或采集回执。"
+        }
         ("applied", "manual_observe_reused") => "已有工作覆盖这次人工观察，没有重复创建。",
         ("replay", _) => "相同命令已处理过；这里显示的是耐久重放结果。",
         ("stale_revision", _) => "页面基于旧版本提交，没有覆盖当前规则。请核对当前值后重试。",
         ("identity_conflict", _) => "同一命令标识携带了不同内容，没有覆盖原命令。",
-        (_, "baseline_not_ready") => "创作者基线尚未满足自动巡检资格；关键词不使用这条基线。",
-        (_, "invalid_interval") => "固定或兜底间隔不在 6 小时至 7 天的闭集范围内。",
-        (_, "invalid_schedule") => "日历或时间窗不符合首版规则；跨午夜窗口不会静默改写。",
+        (_, "baseline_not_ready") => "这是旧版本记录的历史原因；当前规则不再以建档完整度作为自动观察门槛。",
+        (_, "invalid_interval") => "观察间隔只支持 6 小时、12 小时、24 小时、2 天或 7 天。",
+        (_, "invalid_schedule") => "当前版本只接受固定、全天的单一观察间隔。",
         (_, "target_not_requestable") => "这个目标当前不允许新增观察工作。",
         _ => "命令没有改变当前规则，也没有创建采集事实。",
     }
@@ -661,7 +487,7 @@ fn error_summary(code: &str) -> &'static str {
     match code {
         "stale_revision" => "规则版本已变化；下面保留了你提交的值，没有覆盖当前版本。",
         "identity_conflict" => "命令标识冲突；原命令仍保留，下面的值尚未应用。",
-        "baseline_not_ready" => "创作者基线尚未满足自动巡检资格。你可以先保存为仅人工。",
+        "baseline_not_ready" => "这是旧版本记录的历史原因；当前规则不再以建档完整度作为自动观察门槛。",
         "read_model_not_connected" => "本机规则读写当前不可用；没有写入规则或采集工作。",
         _ => "请修正标出的字段后再提交；当前规则没有改变。",
     }
@@ -685,22 +511,6 @@ fn pause_or_resume(panel: &MonitorRulePanel, disabled: bool) -> String {
     };
     format!(
         r#"<button class="c-btn-quiet" type="submit" name="command_kind" value="{kind}"{disabled}>{label}</button>"#,
-        disabled = if disabled { " disabled" } else { "" },
-    )
-}
-
-fn checkbox(name: &str, label: &str, value: bool, disabled: bool) -> String {
-    format!(
-        r#"<label class="c-rule-check"><input type="checkbox" name="{name}" value="true"{checked}{disabled}><span>{label}</span></label>"#,
-        checked = checked(value),
-        disabled = if disabled { " disabled" } else { "" },
-    )
-}
-
-fn time_input(name: &str, label: &str, value: &str, disabled: bool) -> String {
-    format!(
-        r#"<label for="{name}"><span>{label}</span><input id="{name}" type="time" name="{name}" value="{value}"{disabled}></label>"#,
-        value = escape(value),
         disabled = if disabled { " disabled" } else { "" },
     )
 }
@@ -735,28 +545,6 @@ fn checked(value: bool) -> &'static str {
     if value { " checked" } else { "" }
 }
 
-fn minute_as_time(value: Option<i16>) -> String {
-    value.map_or_else(String::new, |value| {
-        format!("{:02}:{:02}", value / 60, value % 60)
-    })
-}
-
-fn parse_interval(value: &str) -> i32 {
-    value.parse().unwrap_or(DEFAULT_INTERVAL_SECONDS)
-}
-
-fn interval_label(seconds: i32) -> String {
-    match seconds {
-        21_600 => "6 小时".to_owned(),
-        43_200 => "12 小时".to_owned(),
-        86_400 => "24 小时".to_owned(),
-        172_800 => "2 天".to_owned(),
-        604_800 => "7 天".to_owned(),
-        value if value % 86_400 == 0 => format!("{} 天", value / 86_400),
-        value => format!("{} 小时", value / 3_600),
-    }
-}
-
 fn short_ref(value: Uuid) -> String {
     value.to_string().chars().take(8).collect()
 }
@@ -783,14 +571,8 @@ mod tests {
             active_rule: Some(ActiveMonitorRule {
                 rule_revision_ref: Uuid::parse_str("0da99cb2-0f4a-4da5-ac1b-c99e10bb64ed").unwrap(),
                 revision: 3,
-                mode: MonitorRuleMode::Dynamic,
                 automatic_enabled: true,
-                run_on_weekdays: true,
-                run_on_weekends: true,
-                all_day: false,
-                window_start_minute: Some(480),
-                window_end_minute: Some(1320),
-                fixed_interval_seconds: None,
+                fixed_interval_seconds: Some(86_400),
                 fallback_interval_seconds: 86_400,
                 surface_key: "creator_profile".to_owned(),
                 ranking_key: None,
@@ -808,7 +590,6 @@ mod tests {
                 ),
                 recorded_at: "2026-09-04 09:00:00+08".to_owned(),
             }),
-            dynamic_cadence: DynamicCadenceView::default(),
         }
     }
 
@@ -830,18 +611,17 @@ mod tests {
             "data-monitor-rule-form",
             "data-monitor-rule-receipt",
             "data-monitor-rule-outcome",
-            "data-monitor-dynamic",
-            "data-control-reason",
             "name=\"expected_revision\"",
             "name=\"idempotency_key\"",
             "name=\"return_filter\" value=\"creator\"",
             "name=\"return_sort\" value=\"last\"",
-            "DYNAMIC_UNAVAILABLE",
-            "当前兜底值为 24 小时",
+            "观察间隔（仅可选择下列 5 档）",
+            "最近 30 条作品观察",
         ] {
             assert!(html.contains(marker), "missing {marker}");
         }
         assert!(html.contains("边界测试 &lt;创作者&gt;"));
+        assert!(!html.contains("动态间隔"));
         assert!(!html.contains("采集成功"));
         assert!(!html.contains("Cookie"));
         assert!(!html.contains("account identity"));
@@ -853,26 +633,22 @@ mod tests {
         let original = MonitorRuleFormState::from_panel(&panel);
         let original_key = original.idempotency_key;
         let mut retained = original.with_new_command_identity();
-        retained.mode = "dynamic".to_owned();
-        retained.window_start = "22:00".to_owned();
-        retained.window_end = "06:00".to_owned();
+        retained.fixed_interval_seconds = "1".to_owned();
         let html = render_monitor_rule_modal(
             &panel,
             &retained,
             Some(&MonitorRuleFormError {
-                code: "invalid_schedule",
+                code: "invalid_interval",
                 fields: vec![MonitorRuleFieldError {
-                    field: "window_end",
-                    message: "结束时间必须晚于开始时间；首版不接受跨午夜。",
+                    field: "fixed_interval_seconds",
+                    message: "观察间隔只支持 6 小时、12 小时、24 小时、2 天或 7 天。",
                 }],
             }),
             TargetListContext::default(),
         );
         assert_ne!(original_key, retained.idempotency_key);
-        assert!(html.contains("value=\"22:00\""));
-        assert!(html.contains("value=\"06:00\""));
-        assert!(html.contains("data-error-code=\"invalid_schedule\""));
-        assert!(html.contains("href=\"#window_end\""));
+        assert!(html.contains("data-error-code=\"invalid_interval\""));
+        assert!(html.contains("href=\"#fixed_interval_seconds\""));
     }
 
     #[test]

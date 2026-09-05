@@ -1,15 +1,15 @@
 use linggan_contracts::{AdmissionOutcome, Capacity};
 use linggan_evidence::{
     AccountEligibilitySignal, AccountEligibilityState, AuthorizationGrant, CheckInOutcome,
-    CollectionControlError, ComparableObservationRound, DEFAULT_MONITOR_INTERVAL_SECONDS,
-    DynamicCadence, InstallationCheckIn, MAXIMUM_MONITOR_INTERVAL_SECONDS,
-    MINIMUM_MONITOR_INTERVAL_SECONDS, MonitorCommandActor, MonitorCommandKind,
-    MonitorCommandOutcomeKind, MonitorRuleCommand, MonitorRuleDraft, MonitorRuleMode,
-    activate_installation_credential, apply_monitor_rule_command, bind_observation_account,
-    check_in_installation, collection_control_schema_is_ready, dynamic_cadence,
-    grant_authorization, issue_work_order_lease, open_claim_window, read_capacity,
-    register_station, release_work_order_lease, rename_station, report_account_eligibility,
-    request_and_admit, retire_station, rotate_installation_credential, set_station_accepting,
+    CollectionControlError, ComparableObservationRound, DispatchDecision, DynamicCadence,
+    InstallationCheckIn, MAXIMUM_MONITOR_INTERVAL_SECONDS, MINIMUM_MONITOR_INTERVAL_SECONDS,
+    MonitorCommandActor, MonitorCommandKind, MonitorCommandOutcomeKind, MonitorRuleCommand,
+    MonitorRuleDraft, MonitorRuleMode, activate_installation_credential,
+    apply_monitor_rule_command, bind_observation_account, check_in_installation,
+    collection_control_schema_is_ready, decide_dispatch, dynamic_cadence, grant_authorization,
+    open_claim_window, read_capacity, register_station, release_work_order_lease, rename_station,
+    report_account_eligibility, request_and_admit, retire_station, rotate_installation_credential,
+    set_station_accepting,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::Row;
@@ -85,11 +85,13 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0034_collection_control_closure.sql"),
     "\n",
     include_str!("../../../database/migrations/0035_claimed_station_auto_acceptance.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0036_monitor_scheduling_clarity.sql"),
 );
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn complete_migration_set_applies_collection_control_0035() {
+async fn complete_migration_set_applies_collection_control_0036() {
     let database = proof_database("collection_control_full_migrations").await;
 
     assert!(
@@ -128,7 +130,7 @@ async fn complete_migration_set_applies_collection_control_0035() {
     )
     .fetch_one(database.pool())
     .await
-    .expect("0035 transition contract is inspectable");
+    .expect("0035 transition contract remains inspectable after 0036");
     assert!(transition_constraint);
 }
 
@@ -752,15 +754,19 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
         admitted.outcome,
         AdmissionOutcome::Admitted { .. }
     ));
-    let lease = issue_work_order_lease(
-        &database,
-        admitted.work_order_ref.expect("admission creates work"),
-        60,
-    )
-    .await
-    .expect("work receives a live lease");
+    assert!(
+        admitted.work_order_ref.is_some(),
+        "admission creates queued work"
+    );
+    let lease_ref = match decide_dispatch(&database, &installation.install_key, &secret)
+        .await
+        .expect("the claimed installation atomically selects and claims queued work")
+    {
+        DispatchDecision::Dispatch { lease_ref, .. } => lease_ref,
+        other => panic!("ready claimed installation must receive the queued work; got {other:?}"),
+    };
     assert_capacity_reason(&database, "account_busy").await;
-    release_work_order_lease(&database, lease.lease_ref, "revoked")
+    release_work_order_lease(&database, lease_ref, "revoked")
         .await
         .expect("proof releases the busy lease");
 
@@ -770,7 +776,7 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn authorization_purpose_and_concurrent_target_limit_are_enforced() {
+async fn authorization_is_bounded_by_scope_and_targets_not_purpose_text() {
     let database = proof_database("collection_control_authorization_bounds").await;
     let installation = ready_installation_without_account(&database, "authorization-bounds").await;
     make_account_usable(&database, &installation, "authorization-account").await;
@@ -781,7 +787,7 @@ async fn authorization_purpose_and_concurrent_target_limit_are_enforced() {
             target_kind: "creator",
             lane: "deep_archive",
             purpose: "bounded baseline",
-            max_targets: Some(1),
+            max_targets: Some(2),
             max_works_per_target: Some(20),
             valid_for_days: 1,
         },
@@ -796,14 +802,14 @@ async fn authorization_purpose_and_concurrent_target_limit_are_enforced() {
             &database,
             first_target,
             "deep_archive",
-            "bounded baseline",
+            "first audit annotation",
             "person"
         ),
         request_and_admit(
             &database,
             second_target,
             "deep_archive",
-            "bounded baseline",
+            "different audit annotation",
             "person"
         )
     );
@@ -816,8 +822,8 @@ async fn authorization_purpose_and_concurrent_target_limit_are_enforced() {
             .iter()
             .filter(|outcome| outcome.work_order_ref.is_some())
             .count(),
-        1,
-        "a one-target authorization cannot admit two targets concurrently"
+        2,
+        "purpose is audit text; two in-scope targets are admitted within the explicit bound"
     );
     let authorized_work_count: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM collection_work_order work_order \
@@ -828,28 +834,28 @@ async fn authorization_purpose_and_concurrent_target_limit_are_enforced() {
     .fetch_one(database.pool())
     .await
     .expect("authorized work count is readable");
-    assert_eq!(authorized_work_count, 1);
+    assert_eq!(authorized_work_count, 2);
 
-    let mismatch_target =
-        seed_target(&database, "creator", "pending_decision", "purpose-mismatch").await;
-    let mismatch = request_and_admit(
+    let bounded_target =
+        seed_target(&database, "creator", "pending_decision", "target-limit").await;
+    let bounded = request_and_admit(
         &database,
-        mismatch_target,
+        bounded_target,
         "deep_archive",
-        "different purpose",
+        "third audit annotation",
         "person",
     )
     .await
-    .expect("purpose mismatch produces a durable decision");
-    assert!(mismatch.work_order_ref.is_none());
-    let mismatch_reason: String = sqlx::query_scalar(
+    .expect("target limit produces a durable decision");
+    assert!(bounded.work_order_ref.is_none());
+    let bounded_reason: String = sqlx::query_scalar(
         "SELECT reason_code FROM collection_admission_decision WHERE decision_ref=$1",
     )
-    .bind(mismatch.decision_ref)
+    .bind(bounded.decision_ref)
     .fetch_one(database.pool())
     .await
-    .expect("purpose mismatch reason is readable");
-    assert_eq!(mismatch_reason, "authorization_purpose_mismatch");
+    .expect("target-limit reason is readable");
+    assert_eq!(bounded_reason, "authorization_target_limit_reached");
 }
 
 #[tokio::test]
@@ -934,6 +940,36 @@ async fn monitor_rule_commands_are_revisioned_idempotent_and_side_effect_bounded
     assert_eq!(invalid.outcome, MonitorCommandOutcomeKind::Rejected);
     assert_eq!(invalid.reason_code, "invalid_schedule");
 
+    let unsupported_interval_target = seed_target(
+        &database,
+        "keyword",
+        "pending_decision",
+        "unsupported-interval",
+    )
+    .await;
+    let mut unsupported_interval = fixed_rule(None);
+    unsupported_interval.fixed_interval_seconds = Some(43_201);
+    unsupported_interval.fallback_interval_seconds = 43_201;
+    let unsupported_interval = apply_monitor_rule_command(
+        &database,
+        &MonitorRuleCommand {
+            target_ref: unsupported_interval_target,
+            expected_revision: 0,
+            idempotency_key: Uuid::new_v4(),
+            kind: MonitorCommandKind::SaveRule,
+            actor: MonitorCommandActor::Person,
+            source: "targets_ui",
+            draft: Some(unsupported_interval),
+        },
+    )
+    .await
+    .expect("an unsupported fixed interval is durably rejected");
+    assert_eq!(
+        unsupported_interval.outcome,
+        MonitorCommandOutcomeKind::Rejected
+    );
+    assert_eq!(unsupported_interval.reason_code, "invalid_interval");
+
     let creator_ref = seed_target(
         &database,
         "creator",
@@ -954,9 +990,20 @@ async fn monitor_rule_commands_are_revisioned_idempotent_and_side_effect_bounded
         },
     )
     .await
-    .expect("creator baseline gate produces a durable result");
-    assert_eq!(creator.outcome, MonitorCommandOutcomeKind::Rejected);
-    assert_eq!(creator.reason_code, "baseline_not_ready");
+    .expect("creator observation rule does not require a historic baseline");
+    assert_eq!(creator.outcome, MonitorCommandOutcomeKind::Applied);
+    assert_eq!(creator.reason_code, "rule_saved");
+    let creator_schedule: (String, bool, Option<String>) = sqlx::query_as(
+        "SELECT lifecycle_state,monitoring_enabled,monitor_next_run_at::text \
+         FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(creator_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("creator rule and schedule update atomically");
+    assert_eq!(creator_schedule.0, "monitoring");
+    assert!(creator_schedule.1);
+    assert!(creator_schedule.2.is_some());
 
     let side_effect_counts: (i64, i64, i64) = sqlx::query_as(
         "SELECT (SELECT count(*) FROM collection_work_order), \
@@ -1270,7 +1317,7 @@ fn fixed_rule(ranking_key: Option<&str>) -> MonitorRuleDraft {
         window_start_minute: None,
         window_end_minute: None,
         fixed_interval_seconds: Some(43_200),
-        fallback_interval_seconds: DEFAULT_MONITOR_INTERVAL_SECONDS,
+        fallback_interval_seconds: 43_200,
         surface_key: "keyword_search".to_owned(),
         ranking_key: ranking_key.map(str::to_owned),
         task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
@@ -1303,5 +1350,5 @@ async fn proof_database(schema: &str) -> Database {
         .expect("an isolated proof database URL is supplied");
     isolated_proof_schema(&url, schema, MIGRATIONS)
         .await
-        .expect("complete migrations through 0034 apply")
+        .expect("complete migrations through 0036 apply")
 }

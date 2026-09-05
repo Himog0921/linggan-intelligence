@@ -62,8 +62,10 @@ impl CapacityReasonCode {
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum AuthorizationBoundaryFailure {
     Missing,
+    ScopeMismatch,
     PurposeMismatch,
     TargetLimitReached,
+    WorkUnitLimitReached,
     ExpiredOrRevoked,
 }
 
@@ -71,8 +73,10 @@ impl AuthorizationBoundaryFailure {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Missing => "authorization_missing",
+            Self::ScopeMismatch => "authorization_scope_mismatch",
             Self::PurposeMismatch => "authorization_purpose_mismatch",
             Self::TargetLimitReached => "authorization_target_limit_reached",
+            Self::WorkUnitLimitReached => "authorization_work_unit_limit_reached",
             Self::ExpiredOrRevoked => "authorization_expired_or_revoked",
         }
     }
@@ -80,8 +84,10 @@ impl AuthorizationBoundaryFailure {
     pub const fn zh_reason(self) -> &'static str {
         match self {
             Self::Missing => "没有覆盖该平台、目标类型与 lane 的采集授权",
+            Self::ScopeMismatch => "现有授权不覆盖这类任务或派发通道",
             Self::PurposeMismatch => "请求用途与现有授权用途不一致",
             Self::TargetLimitReached => "授权允许的目标数量已经用尽",
+            Self::WorkUnitLimitReached => "授权允许的工作单元不足以覆盖这次任务",
             Self::ExpiredOrRevoked => "匹配授权已经过期或被撤销",
         }
     }
@@ -94,6 +100,11 @@ impl AuthorizationBoundaryFailure {
 /// reporting a vague "no capacity".
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Capacity {
+    /// Admission may write a bounded Work Order into the shared queue.  Station,
+    /// account, quota, risk and capability are re-evaluated by the installation
+    /// that later claims the order; this is not a claim that a particular
+    /// station is available now.
+    Queueable,
     /// A compatible station is in place, within budget, with no risk pause in effect.
     Available { station_ref: String },
     /// No station has a live plugin installation claimed to it.
@@ -118,6 +129,7 @@ impl Capacity {
     /// `None` when question 5 can be answered "yes".
     pub fn blocking_reason(&self) -> Option<String> {
         match self {
+            Self::Queueable => None,
             Self::Available { .. } => None,
             Self::NoStaffedStation => {
                 Some("没有任何工位有在岗插件安装，因此没有可执行这次采集的资源".to_owned())
@@ -143,6 +155,7 @@ impl Capacity {
 
     pub fn reason_code(&self) -> &'static str {
         match self {
+            Self::Queueable => "queueable",
             Self::Available { .. } => "available",
             Self::NoStaffedStation => "station_unavailable",
             Self::MissingCapabilities { .. } => "capability_missing",
@@ -251,8 +264,9 @@ pub struct AdmissionFacts {
     pub in_flight_work_exists: bool,
     /// Has this target already been archived to the standard the purpose needs?
     pub need_already_satisfied: bool,
-    /// What question 5 found. Not a bare boolean: a refusal that cannot say *which* resource
-    /// is missing sends the reader looking through four different subsystems.
+    /// What question 5 found. A queued order deliberately defers this check to
+    /// the atomic station claim; otherwise a scheduler would have to bind work
+    /// to whichever station happened to be healthy when it woke up.
     pub capacity: Capacity,
     /// Whether stop conditions and coverage semantics can be written into the order.
     pub stop_conditions_expressible: bool,
@@ -358,6 +372,16 @@ mod tests {
         // becomes runnable once a station is staffed.
         assert_eq!(outcome.code(), "defer");
         assert!(!outcome.permits_work_order());
+    }
+
+    #[test]
+    fn queueable_admission_does_not_fabricate_a_station() {
+        let outcome = decide_admission(&AdmissionFacts {
+            capacity: Capacity::Queueable,
+            ..facts()
+        });
+        assert!(outcome.permits_work_order());
+        assert_eq!(Capacity::Queueable.station_ref(), None);
     }
 
     #[test]

@@ -11,7 +11,11 @@
 //! 默认允许、有界、自己复位。
 
 use crate::collection_control::{
+    evaluate_claiming_installation_capacity_in, required_capabilities_for,
     revalidate_frozen_capacity_in, validate_installation_credential_in,
+};
+use crate::work_order_lease::{
+    LeaseError, claim_queued_work_order_in_transaction, expire_lapsed_leases_in_transaction,
 };
 use linggan_storage_postgres::Database;
 use serde_json::Value;
@@ -21,6 +25,7 @@ use uuid::Uuid;
 /// alarms cannot run more frequently than once per minute, and a retry must
 /// not immediately reopen a page that just failed its readiness probe.
 pub const DISPATCH_FAILURE_RETRY_AFTER_SECONDS: u32 = 60;
+const CLAIM_LEASE_MINUTES: i32 = 30;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DispatchError {
@@ -201,7 +206,11 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
     sqlx::query_scalar::<_, bool>(
         "SELECT to_regclass('collection_work_order_lease') IS NOT NULL \
                 AND to_regclass('collection_work_order_lease_task') IS NOT NULL \
-                AND to_regclass('collection_work_order_lease_task_dispatch_failure') IS NOT NULL",
+                AND to_regclass('collection_work_order_lease_task_dispatch_failure') IS NOT NULL \
+                AND to_regclass('collection_dispatch_lane_fairness') IS NOT NULL \
+                AND EXISTS (SELECT 1 FROM information_schema.columns \
+                            WHERE table_name='collection_work_order' \
+                              AND column_name='queue_state')",
     )
     .fetch_one(database.pool())
     .await
@@ -271,7 +280,7 @@ pub async fn requeue_failed_dispatch(
     // Take the task row lock before changing eligibility.  A concurrent
     // Package receipt finishes the same `in_progress` row instead, causing
     // this update to affect zero rows; it must never be put back into pending.
-    let requeued: Option<Uuid> = sqlx::query_scalar(
+    let requeued: Option<(Uuid, Uuid, Uuid)> = sqlx::query_as(
         "UPDATE collection_work_order_lease_task task \
          SET execution_state='pending',claimed_at=NULL,claimed_by_installation_ref=NULL \
          FROM collection_work_order_lease lease \
@@ -281,15 +290,15 @@ pub async fn requeue_failed_dispatch(
            AND lease.lease_ref=task.lease_ref \
            AND lease.released_at IS NULL \
            AND lease.expires_at>scope_001_now() \
-         RETURNING task.task_id",
+         RETURNING task.task_id,lease.lease_ref,lease.work_order_ref",
     )
     .bind(task_id)
     .bind(installation_ref)
     .fetch_optional(&mut *transaction)
     .await?;
-    if requeued.is_none() {
+    let Some((_task_id, lease_ref, work_order_ref)) = requeued else {
         return Err(DispatchFailureError::ClaimNotHeld);
-    }
+    };
     sqlx::query(
         "INSERT INTO collection_work_order_lease_task_dispatch_failure \
              (failure_ref,task_id,installation_ref,failure_code) \
@@ -299,6 +308,22 @@ pub async fn requeue_failed_dispatch(
     .bind(task_id)
     .bind(installation_ref)
     .bind(failure_code.as_str())
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE collection_work_order_lease SET released_at=scope_001_now(), \
+             release_reason='dispatch_start_failed' \
+         WHERE lease_ref=$1 AND released_at IS NULL",
+    )
+    .bind(lease_ref)
+    .execute(&mut *transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE collection_work_order SET queue_state='queued',station_ref=NULL, \
+             installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL \
+         WHERE work_order_ref=$1 AND queue_state='leased'",
+    )
+    .bind(work_order_ref)
     .execute(&mut *transaction)
     .await?;
     transaction.commit().await?;
@@ -344,6 +369,9 @@ pub async fn decide_dispatch(
     {
         return Err(DispatchError::InvalidCredential);
     }
+    // A lapsed lease is historical execution state, not permanent ownership of
+    // the queue entry. Requeue it before this installation evaluates new work.
+    expire_lapsed_leases_in_transaction(&mut transaction).await?;
     let (Some(station_ref), Some(_quota)) = (station_ref, quota) else {
         return Ok(DispatchDecision::InstallationNotClaimed);
     };
@@ -421,6 +449,12 @@ pub async fn decide_dispatch(
     .await?;
 
     let Some((task_id, lease_ref, task_spec, _platform, _lane)) = waiting else {
+        if let Some(decision) =
+            claim_next_queued_work_order(&mut transaction, installation_ref, station_ref).await?
+        {
+            transaction.commit().await?;
+            return Ok(decision);
+        }
         return Ok(DispatchDecision::NothingWaiting);
     };
 
@@ -462,6 +496,196 @@ pub async fn decide_dispatch(
         execution_source_url,
         page_session_plan,
     })
+}
+
+/// Claim one compatible Work Order from the shared queue. The lane fairness
+/// rows are a scheduling policy only; the Work Order remains the one durable
+/// queue authority and a Lease/RuntimeTask exists only after this succeeds.
+async fn claim_next_queued_work_order(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    installation_ref: Uuid,
+    caller_station_ref: Uuid,
+) -> Result<Option<DispatchDecision>, sqlx::Error> {
+    type Lane = (String, i32, Option<i32>, f64);
+    type Candidate = (Uuid, String, String, String, bool, bool, i32);
+    let mut lanes: Vec<Lane> = sqlx::query_as(
+        "SELECT dispatch_lane,weight,concurrent_cap,virtual_finish \
+         FROM collection_dispatch_lane_fairness FOR UPDATE",
+    )
+    .fetch_all(&mut **transaction)
+    .await?;
+    if lanes.is_empty() {
+        return Ok(None);
+    }
+    let active: Vec<(String, i64)> = sqlx::query_as(
+        "SELECT dispatch_lane,count(*) FROM collection_work_order \
+         WHERE queue_state='leased' GROUP BY dispatch_lane",
+    )
+    .fetch_all(&mut **transaction)
+    .await?;
+    let active_by_lane = active
+        .into_iter()
+        .collect::<std::collections::BTreeMap<_, _>>();
+    lanes.sort_by(|left, right| {
+        (left.3 / f64::from(left.1)).total_cmp(&(right.3 / f64::from(right.1)))
+    });
+
+    for (dispatch_lane, weight, concurrent_cap, _virtual_finish) in lanes {
+        if concurrent_cap.is_some_and(|cap| {
+            active_by_lane.get(&dispatch_lane).copied().unwrap_or(0) >= i64::from(cap)
+        }) {
+            continue;
+        }
+        // This is a bounded eligibility probe, not a module queue. A station
+        // that cannot run one candidate continues through the lane and then
+        // through the other lanes rather than making all later work invisible.
+        let candidates: Vec<Candidate> = sqlx::query_as(
+            "SELECT work_order.work_order_ref,target.platform,target.target_kind,work_order.lane, \
+                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                            WHERE scope.work_order_ref=work_order.work_order_ref), \
+                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                            WHERE scope.work_order_ref=work_order.work_order_ref \
+                              AND scope.acquire_media), \
+                    work_order.estimated_work_units \
+             FROM collection_work_order work_order \
+             JOIN collection_observation_target target USING(target_ref) \
+             WHERE work_order.queue_state='queued' \
+               AND work_order.dispatch_lane=$1 \
+               AND work_order.scheduled_for<=scope_001_now() \
+             ORDER BY work_order.scheduled_for,work_order.created_at,work_order.work_order_ref \
+             LIMIT 8 FOR UPDATE OF work_order SKIP LOCKED",
+        )
+        .bind(&dispatch_lane)
+        .fetch_all(&mut **transaction)
+        .await?;
+        for (
+            work_order_ref,
+            platform,
+            target_kind,
+            lane,
+            has_material_scope,
+            acquires_media,
+            units,
+        ) in candidates
+        {
+            let required =
+                required_capabilities_for(&target_kind, &lane, has_material_scope, acquires_media);
+            let selection = evaluate_claiming_installation_capacity_in(
+                transaction,
+                installation_ref,
+                &platform,
+                &lane,
+                &required,
+            )
+            .await?;
+            let (Some(station_ref), Some(bound_installation_ref), Some(account_ref)) = (
+                selection.station_ref,
+                selection.installation_ref,
+                selection.account_ref,
+            ) else {
+                continue;
+            };
+            if station_ref != caller_station_ref || bound_installation_ref != installation_ref {
+                continue;
+            }
+            let lease = match claim_queued_work_order_in_transaction(
+                transaction,
+                work_order_ref,
+                station_ref,
+                installation_ref,
+                account_ref,
+                selection.eligibility_ref,
+                CLAIM_LEASE_MINUTES,
+            )
+            .await
+            {
+                Ok(lease) => lease,
+                Err(LeaseError::ControlBlocked { reason_code }) => {
+                    undo_failed_queue_claim(transaction, work_order_ref).await?;
+                    return Ok(Some(DispatchDecision::ControlBlocked { reason_code }));
+                }
+                Err(LeaseError::AuthorizationLapsed) => {
+                    undo_failed_queue_claim(transaction, work_order_ref).await?;
+                    return Ok(Some(DispatchDecision::ControlBlocked {
+                        reason_code: "authorization_expired_or_revoked".to_owned(),
+                    }));
+                }
+                Err(LeaseError::Database(error)) => return Err(error),
+                Err(_) => {
+                    undo_failed_queue_claim(transaction, work_order_ref).await?;
+                    continue;
+                }
+            };
+            let Some(task_id) = lease.task_ids.first().copied() else {
+                return Ok(Some(DispatchDecision::ControlBlocked {
+                    reason_code: "capability_missing".to_owned(),
+                }));
+            };
+            let task_spec: Value =
+                sqlx::query_scalar("SELECT task_spec FROM linggan_runtime_task WHERE task_id=$1")
+                    .bind(task_id)
+                    .fetch_one(&mut **transaction)
+                    .await?;
+            let execution_source_url =
+                execution_source_url_for_task(transaction, &task_spec).await?;
+            if requires_signed_execution_source(&task_spec) && execution_source_url.is_none() {
+                return Ok(Some(DispatchDecision::ExecutionLocatorUnavailable {
+                    reason: "已认领的详情任务缺少仍有效的签名执行链接。".to_owned(),
+                }));
+            }
+            let page_session_plan =
+                page_session_plan_for_task(transaction, lease.lease_ref, &task_spec).await?;
+            let claimed = sqlx::query(
+                "UPDATE collection_work_order_lease_task \
+                 SET execution_state='in_progress',claimed_at=scope_001_now(), \
+                     claimed_by_installation_ref=$2 \
+                 WHERE task_id=$1 AND execution_state='pending'",
+            )
+            .bind(task_id)
+            .bind(installation_ref)
+            .execute(&mut **transaction)
+            .await?
+            .rows_affected();
+            if claimed != 1 {
+                return Ok(None);
+            }
+            sqlx::query(
+                "UPDATE collection_dispatch_lane_fairness \
+                 SET virtual_finish=virtual_finish + ($2::double precision/$3::double precision), \
+                     updated_at=scope_001_now() WHERE dispatch_lane=$1",
+            )
+            .bind(&dispatch_lane)
+            .bind(units)
+            .bind(weight)
+            .execute(&mut **transaction)
+            .await?;
+            return Ok(Some(DispatchDecision::Dispatch {
+                task_id,
+                lease_ref: lease.lease_ref,
+                task_spec,
+                execution_source_url,
+                page_session_plan,
+            }));
+        }
+    }
+    Ok(None)
+}
+
+async fn undo_failed_queue_claim(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE collection_work_order SET queue_state='queued',station_ref=NULL, \
+             installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL \
+         WHERE work_order_ref=$1 AND queue_state='leased' \
+           AND NOT EXISTS (SELECT 1 FROM collection_work_order_lease \
+                           WHERE work_order_ref=$1 AND released_at IS NULL)",
+    )
+    .bind(work_order_ref)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 async fn revalidate_dispatch_task(
