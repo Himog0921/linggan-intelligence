@@ -26,6 +26,7 @@ import {
 } from '../linggan/accountEligibilityProbe.js';
 import {
   detailPageSessionStore,
+  detailPageSessionExecutionReceipt,
   validateDetailPageSessionPlan,
 } from '../linggan/detailPageSessionStore.js';
 import { loadDouyinRuntime } from './douyinRuntime.js';
@@ -285,13 +286,12 @@ async function collectApprovedDetailPageSession(message = {}) {
     idempotencyKey: `detail-session:${taskSpec.taskId}:content_detail`,
   });
   await detailPageSessionStore.markTaskQueued(entry.cacheKey, 'content_detail', taskSpec.taskId);
-  return {
-    success: true,
-    state: 'detail_page_session_queued',
-    delivery: queued.delivery || 'pending',
+  return detailPageSessionExecutionReceipt({
+    action: LINGGAN_RUNTIME_ACTION.COLLECT_NOTE_FULL,
+    taskSpec,
+    delivery: queued.delivery,
     submissionId: queued.submissionId,
-    message: '当前详情页已完整读取；详情已进入待交付队列，其余已批准通道将复用本次页面结果。',
-  };
+  });
 }
 
 async function dispatchProducerRuntimeAction(action, message) {

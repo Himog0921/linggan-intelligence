@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.38`
+> 版本: `0.8.39`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -258,7 +258,12 @@ npm run verify:linggan-isolation
 0.8.18 将真实终验发现的 `596/594` 收口为完成：全量深采取得数达到或超过页面公开数即可
 完成，详情附带评论窗口仍保持精确上限。
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.38.zip`。打包器以
+0.8.39 修正固定材料详情同页读取的派发回执：首个 `content_detail` Task 在页面读取完成并进入
+本机 outbox 后，会回显原派发的 `action`、`capability` 与 `taskId`。后台继续以这三项精确
+核验，不会把缺失身份的页面“成功”当成可交付结果；这不改变 WorkOrder 范围、不新增页面访问、
+也不改变后续评论、回复或媒体 lane 的独立 claim/Package/Receipt。
+
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.39.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台
