@@ -60,6 +60,37 @@ test('parseXhsInteractCount accepts xhs detail metric aliases', () => {
   assert.equal(parseXhsInteractCount(interactInfo, ['shareCount', 'shares']), 6);
 });
 
+test('parseXhsInteractCount reads an empty string as a real zero once interactInfo is hydrated', () => {
+  // A real note with no comments: XHS reports "" for the zero counts and populates the rest.
+  const hydrated = {
+    likedCount: '84',
+    collectedCount: '55',
+    shareCount: '6',
+    commentCount: '',
+    niceCount: '',
+  };
+
+  assert.equal(parseXhsInteractCount(hydrated, ['commentCount', 'comments']), 0);
+  assert.equal(parseXhsInteractCount(hydrated, ['likedCount', 'likeCount', 'likes']), 84);
+});
+
+test('parseXhsInteractCount keeps an unhydrated interactInfo unknown instead of reporting zero', () => {
+  // Before hydration every count is an empty string. Publishing that as a confirmed zero is
+  // the opposite error and would be indistinguishable from a note that truly has none.
+  assert.equal(parseXhsInteractCount({
+    likedCount: '',
+    collectedCount: '',
+    commentCount: '',
+  }, ['commentCount', 'comments']), null);
+  assert.equal(parseXhsInteractCount({}, ['commentCount', 'comments']), null);
+  assert.equal(parseXhsInteractCount(undefined, ['commentCount', 'comments']), null);
+});
+
+test('parseXhsInteractCount stays unknown for a key absent from a hydrated interactInfo', () => {
+  // Hydration alone must not invent a zero for a metric the platform never reported.
+  assert.equal(parseXhsInteractCount({ likedCount: '84' }, ['shareCount', 'shares']), null);
+});
+
 test('isCollectedNoteUsable treats aliased xhs metrics as complete stats', () => {
   assert.equal(isCollectedNoteUsable({
     noteId: 'note_alias_metrics',

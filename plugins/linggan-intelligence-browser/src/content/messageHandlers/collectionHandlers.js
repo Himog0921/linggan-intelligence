@@ -31,6 +31,9 @@ const buildAuthorBaselineShortfallNote = ({
 
 const getMonitorMetaFromMessage = (msg = {}) => msg.monitorMeta || msg.externalTaskMeta?.monitorMeta || null;
 
+// The hand-run baseline batch reads the same top comment window a standard detail page carries.
+const BASELINE_BATCH_COMMENT_LIMIT = 30;
+
 const FINAL_RESULT_PACKAGE_ONLY_PROFILES = new Set([
   'author_links',
   'author_profile',
@@ -806,6 +809,14 @@ export function createCollectionHandlers({
             collectionRunId: remoteRun?.collectionRunId || '',
             monitorMeta,
             surfaceOnly: false,
+            // A note-detail package is meant to carry its attached comments, and the detail
+            // collector already defaults to that for non-scheduled work. This call previously
+            // passed no comment settings at all, so the controller's own `false` default won
+            // and every batch-built note arrived with `comments_not_requested`. This is the
+            // hand-run collection surface only; Linggan's own deep archive does not come
+            // through here — it dispatches per-work lanes with a server-issued comment limit.
+            includeComments: true,
+            commentLimit: BASELINE_BATCH_COMMENT_LIMIT,
           });
         } finally {
           if (stopWatcher) clearInterval(stopWatcher);
