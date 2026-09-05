@@ -1174,10 +1174,21 @@ pub(crate) fn required_capabilities_for(
     target_kind: &str,
     lane: &str,
     material_scope: bool,
+    collects_comments: bool,
+    collects_replies: bool,
     acquire_media: bool,
 ) -> Vec<&'static str> {
     if material_scope {
-        let mut required = vec!["content_detail", "comments", "replies"];
+        // A frozen material scope is not automatically a request for every detail-adjacent
+        // capability. `comment_limit = 0` means that only the note detail was approved, so a
+        // detail-only station must be eligible to take it even when it cannot read comments.
+        let mut required = vec!["content_detail"];
+        if collects_comments || collects_replies {
+            required.push("comments");
+        }
+        if collects_replies {
+            required.push("replies");
+        }
         if acquire_media {
             required.push("media_slots");
         }
@@ -1185,6 +1196,7 @@ pub(crate) fn required_capabilities_for(
     }
     match (target_kind, lane) {
         ("creator", "deep_archive") => vec!["author_profile", "profile_discovery"],
+        ("creator", "patrol") => vec!["author_profile", "profile_discovery"],
         ("keyword", "deep_archive") => vec!["discovery_search"],
         ("creator", _) => vec!["profile_discovery"],
         _ => vec!["discovery_search"],
@@ -2426,6 +2438,28 @@ mod tests {
         assert!(version_at_least("v0.9.0", MINIMUM_PLUGIN_VERSION));
         assert!(!version_at_least("0.8.34-beta.1", MINIMUM_PLUGIN_VERSION));
         assert!(!version_at_least("current", MINIMUM_PLUGIN_VERSION));
+    }
+
+    #[test]
+    fn required_capabilities_follow_the_frozen_scope_not_a_broader_template() {
+        assert_eq!(
+            required_capabilities_for("creator", "deep_archive", true, false, false, false),
+            vec!["content_detail"],
+            "a detail-only scope must not require unapproved comment or media access"
+        );
+        assert_eq!(
+            required_capabilities_for("creator", "deep_archive", true, true, false, false),
+            vec!["content_detail", "comments"],
+        );
+        assert_eq!(
+            required_capabilities_for("creator", "deep_archive", true, true, true, true),
+            vec!["content_detail", "comments", "replies", "media_slots"],
+        );
+        assert_eq!(
+            required_capabilities_for("creator", "patrol", false, false, false, false),
+            vec!["author_profile", "profile_discovery"],
+            "patrol readiness must cover every step the Work Order actually emits"
+        );
     }
 
     #[test]

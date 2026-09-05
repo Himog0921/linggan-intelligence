@@ -1,6 +1,6 @@
 {
   "name": "linggan-intelligence-browser",
-  "version": "0.8.37",
+  "version": "0.8.38",
   "type": "module",
   "description": "Linggan Intelligence 浏览器执行端（由灵感爆爆爆 v2.0.91 迁入）",
   "private": true,

@@ -792,8 +792,9 @@ fn validate_material_targets(
     let mut identities = std::collections::HashSet::new();
     if material_targets.iter().any(|target| {
         !identities.insert(target.content_public_ref)
-            || !(1..=30).contains(&target.comment_limit)
+            || !(0..=30).contains(&target.comment_limit)
             || !(0..=2).contains(&target.reply_expand_limit)
+            || (target.comment_limit == 0 && target.reply_expand_limit != 0)
     }) {
         return Err(AcquisitionChainError::InvalidMaterialTargets);
     }
@@ -1176,6 +1177,12 @@ async fn establish_capacity(
         target_kind,
         lane,
         !material_targets.is_empty(),
+        material_targets
+            .iter()
+            .any(|target| target.comment_limit > 0),
+        material_targets
+            .iter()
+            .any(|target| target.reply_expand_limit > 0),
         material_targets.iter().any(|target| target.acquire_media),
     );
     evaluate_capacity_in(
@@ -1795,7 +1802,8 @@ pub async fn run_progressive_archives(
                     continue;
                 }
             };
-            let required = required_capabilities_for(&target_kind, "deep_archive", true, true);
+            let required =
+                required_capabilities_for(&target_kind, "deep_archive", true, true, true, true);
             let (ready_claimants, ready_work_multiplier) =
                 ready_batch_claim_slots_in(&mut transaction, &platform, &required)
                     .await

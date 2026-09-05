@@ -10,6 +10,9 @@ export const LINGGAN_RUNTIME_ACTION = {
   TEST_FLYWHEEL_CONNECTION: 'testFlywheelConnection',
   GET_EXECUTION_STATION_STATUS: 'getExecutionStationStatus',
   REPORT_ACCOUNT_ELIGIBILITY: 'lingganReportAccountEligibility',
+  // Ask an already-open XHS document to repeat the narrow, passive account observation. The
+  // background never reads a viewed creator profile as an execution-account identity.
+  PROBE_CURRENT_ACCOUNT_ELIGIBILITY: 'lingganProbeCurrentAccountEligibility',
   CREATE_MANUAL_TASK: 'lingganCreateManualTask',
   GET_PRODUCER_INSTANCE: 'lingganGetProducerInstance',
   SUBMIT_DISCOVERY_PACKAGE: 'lingganSubmitDiscoveryPackage',

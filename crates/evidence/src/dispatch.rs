@@ -594,7 +594,18 @@ async fn claim_next_queued_work_order(
     caller_station_ref: Uuid,
 ) -> Result<Option<DispatchDecision>, sqlx::Error> {
     type Lane = (String, i32, Option<i32>, f64);
-    type Candidate = (Uuid, String, String, String, bool, bool, i32, String);
+    type Candidate = (
+        Uuid,
+        String,
+        String,
+        String,
+        bool,
+        bool,
+        bool,
+        bool,
+        i32,
+        String,
+    );
     let mut lanes: Vec<Lane> = sqlx::query_as(
         "SELECT dispatch_lane,weight,concurrent_cap,virtual_finish \
          FROM collection_dispatch_lane_fairness FOR UPDATE",
@@ -641,6 +652,12 @@ async fn claim_next_queued_work_order(
                             WHERE scope.work_order_ref=work_order.work_order_ref), \
                     EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
                             WHERE scope.work_order_ref=work_order.work_order_ref \
+                              AND scope.comment_limit>0), \
+                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                            WHERE scope.work_order_ref=work_order.work_order_ref \
+                              AND scope.reply_expand_limit>0), \
+                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                            WHERE scope.work_order_ref=work_order.work_order_ref \
                               AND scope.acquire_media), \
                     work_order.estimated_work_units, \
                     COALESCE(work_order.dispatch_group_key, \
@@ -671,6 +688,8 @@ async fn claim_next_queued_work_order(
             target_kind,
             lane,
             has_material_scope,
+            collects_comments,
+            collects_replies,
             acquires_media,
             units,
             dispatch_group_key,
@@ -683,8 +702,14 @@ async fn claim_next_queued_work_order(
             if dispatch_lane == "batch" && !seen_batch_groups.insert(dispatch_group_key) {
                 continue;
             }
-            let required =
-                required_capabilities_for(&target_kind, &lane, has_material_scope, acquires_media);
+            let required = required_capabilities_for(
+                &target_kind,
+                &lane,
+                has_material_scope,
+                collects_comments,
+                collects_replies,
+                acquires_media,
+            );
             let selection = evaluate_claiming_installation_capacity_in(
                 transaction,
                 installation_ref,

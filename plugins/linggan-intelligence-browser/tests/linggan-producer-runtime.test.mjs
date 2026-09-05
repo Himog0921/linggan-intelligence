@@ -539,6 +539,9 @@ test('background immediately auto-claims and executes bounded baseline plus fixe
   assert.match(background, /queueCachedDetailPageSessionLane/);
   assert.match(background, /COLLECT_NOTE_FULL/);
   assert.match(background, /pageSessionPlan: claim\.pageSessionPlan/);
+  assert.match(background, /const station = await checkInStationOnce\(\)/);
+  assert.match(background, /refreshPassiveAccountEligibilityFromOpenXhsTab/);
+  assert.match(background, /PROBE_CURRENT_ACCOUNT_ELIGIBILITY/);
 });
 
 test('task window readiness delegates final-document stability and content-runtime probing', () => {

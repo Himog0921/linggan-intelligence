@@ -169,6 +169,12 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
         &subject.target_kind,
         &subject.lane,
         !material_targets.is_empty(),
+        material_targets
+            .iter()
+            .any(|target| target.comment_limit > 0),
+        material_targets
+            .iter()
+            .any(|target| target.reply_expand_limit > 0),
         material_targets.iter().any(|target| target.acquire_media),
     );
     let capacity = revalidate_frozen_capacity_in(
@@ -655,14 +661,18 @@ fn expand_into_tasks(
                     json!("slots"),
                 )?);
             }
-            tasks.push(build_task_spec(
-                subject,
-                "comments",
-                target.clone(),
-                material.comment_limit,
-                json!(material.comment_limit),
-                json!("not_requested"),
-            )?);
+            // `comment_limit = 0` is an explicit detail-only authorization, not an empty
+            // comment result.  Creating an empty comments task would widen the Work Order.
+            if material.comment_limit > 0 {
+                tasks.push(build_task_spec(
+                    subject,
+                    "comments",
+                    target.clone(),
+                    material.comment_limit,
+                    json!(material.comment_limit),
+                    json!("not_requested"),
+                )?);
+            }
             if material.reply_expand_limit > 0 {
                 let reply_target = json!({
                     "contentExternalId": material.content_external_id,
@@ -939,5 +949,23 @@ mod tests {
         assert_eq!(tasks.len(), 2);
         assert_eq!(tasks[0].raw()["capabilitiesRequested"][0], "content_detail");
         assert_eq!(tasks[1].raw()["capabilitiesRequested"][0], "comments");
+    }
+
+    #[test]
+    fn fixed_material_policy_can_authorize_detail_without_comments() {
+        let tasks = expand_into_tasks(
+            &subject(),
+            &[MaterialTarget {
+                content_external_id: "note-detail-only".to_owned(),
+                comment_limit: 0,
+                reply_expand_limit: 0,
+                acquire_media: false,
+            }],
+        )
+        .expect("detail-only fixed scope must be valid");
+
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].raw()["capabilitiesRequested"][0], "content_detail");
+        assert_eq!(tasks[0].raw()["commentLimit"], "not_requested");
     }
 }

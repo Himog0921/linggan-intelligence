@@ -6,6 +6,13 @@ const CURRENT_ACCOUNT_NAVIGATION_SELECTOR = 'nav, [role="navigation"], ul, ol, [
 const REQUIRED_GLOBAL_NAVIGATION_PATHS = new Set(['/explore', '/notification', '/chat']);
 const ACCOUNT_PROBE_ATTEMPTS = 8;
 const ACCOUNT_PROBE_RETRY_DELAY_MS = 500;
+const DISPATCH_STATES_REQUIRING_FRESH_ACCOUNT_OBSERVATION = new Set([
+  'account_unbound',
+  'account_binding_changed',
+  'account_binding_expired',
+  'account_eligibility_stale',
+  'account_needs_login',
+]);
 
 function normalizeMarker(value) {
   return String(value || '').replace(/\s+/g, '').trim();
@@ -73,6 +80,16 @@ export function accountObservationFromCurrentAccountHref(href) {
   const rawPlatformAccountId = String(match?.[1] || '').trim();
   if (!rawPlatformAccountId) return { signal: 'signal_incomplete', rawPlatformAccountId: '' };
   return { signal: 'authenticated_observed', rawPlatformAccountId };
+}
+
+/**
+ * A stale account fact is not repaired from a cached creator page or browser storage. The only
+ * allowed recovery is a new passive read of an already open XHS global-navigation marker.
+ */
+export function dispatchStateRequiresFreshPassiveAccountObservation(state = '') {
+  return DISPATCH_STATES_REQUIRING_FRESH_ACCOUNT_OBSERVATION.has(
+    String(state || '').trim(),
+  );
 }
 
 /**

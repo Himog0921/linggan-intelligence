@@ -66,11 +66,11 @@ use linggan_evidence::{
     read_runtime_capacity, read_runtime_library, read_scheduler_heartbeat,
     read_station_capabilities, read_station_overview, read_target, read_target_avatars,
     record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
-    register_station, release_media_upload_finalize, rename_station,
-    request_admit_material_targets_and_lease, request_and_admit, request_progressive_archive,
-    retire_station, set_group_for_many, set_station_accepting, start_local_attempt,
-    start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
-    submit_producer_package, sync_target_from_author_profile,
+    register_station, release_media_upload_finalize, rename_station, request_and_admit,
+    request_and_admit_material_targets, request_progressive_archive, retire_station,
+    set_group_for_many, set_station_accepting, start_local_attempt, start_producer_attempt,
+    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
+    sync_target_from_author_profile,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -976,8 +976,6 @@ struct MaterialDeepeningRequestBody {
     target_ref: uuid::Uuid,
     purpose: String,
     materials: Vec<MaterialDeepeningRequestItem>,
-    #[serde(default)]
-    lease_minutes: Option<i32>,
 }
 
 #[derive(serde::Deserialize)]
@@ -1008,11 +1006,12 @@ const fn default_true() -> bool {
     true
 }
 
-/// Freeze and start one exact material-deepening run.
+/// Freeze and queue one exact material-deepening run.
 ///
 /// The endpoint is loopback-only with the rest of this API.  It deliberately accepts public
 /// material identities rather than a search such as "latest 12": the selected set must not drift
-/// between approval, Work Order creation and lease expansion.
+/// between approval and Work Order creation. It never assigns a station or issues a Lease: the
+/// shared claim queue is the only authority that turns queued work into browser execution.
 async fn collection_material_deepening(
     State(state): State<LocalWebState>,
     body: Bytes,
@@ -1041,45 +1040,35 @@ async fn collection_material_deepening(
             allow_asr: material.allow_asr,
         })
         .collect();
-    let lease_minutes = request.lease_minutes.unwrap_or(360).clamp(30, 360);
-    let execution = match request_admit_material_targets_and_lease(
+    let outcome = match request_and_admit_material_targets(
         database,
         request.target_ref,
         &request.purpose,
         "person",
         &targets,
-        lease_minutes,
     )
     .await
     {
-        Ok(execution) => execution,
+        Ok(outcome) => outcome,
         Err(error) => {
             let code = match error {
-                RequestLeaseError::Acquisition(AcquisitionChainError::UnknownTarget) => {
-                    "unknown_target"
+                AcquisitionChainError::UnknownTarget => "unknown_target",
+                AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
+                AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
+                AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
+                    "progressive_archive_authorization_too_small"
                 }
-                RequestLeaseError::Acquisition(AcquisitionChainError::TargetNotRequestable {
-                    ..
-                }) => "target_not_requestable",
-                RequestLeaseError::Acquisition(AcquisitionChainError::InvalidMaterialTargets) => {
-                    "material_targets_invalid"
+                AcquisitionChainError::SchemaUnavailable
+                | AcquisitionChainError::Database(_)
+                | AcquisitionChainError::ProgressiveArchiveAuthorizationMissing
+                | AcquisitionChainError::ProgressiveArchivePurposeMismatch
+                | AcquisitionChainError::ProgressiveArchiveNotReady { .. } => {
+                    "acquisition_chain_unavailable"
                 }
-                RequestLeaseError::Acquisition(
-                    AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. },
-                ) => "progressive_archive_authorization_too_small",
-                RequestLeaseError::Acquisition(
-                    AcquisitionChainError::SchemaUnavailable
-                    | AcquisitionChainError::Database(_)
-                    | AcquisitionChainError::ProgressiveArchiveAuthorizationMissing
-                    | AcquisitionChainError::ProgressiveArchivePurposeMismatch
-                    | AcquisitionChainError::ProgressiveArchiveNotReady { .. },
-                ) => "acquisition_chain_unavailable",
-                RequestLeaseError::Lease(_) => "material_deepening_lease_failed",
             };
             return local_read_json_error(axum::http::StatusCode::UNPROCESSABLE_ENTITY, code);
         }
     };
-    let outcome = execution.request;
     let Some(work_order_ref) = outcome.work_order_ref else {
         return Json(json!({
             "requestRef": outcome.request_ref,
@@ -1090,25 +1079,15 @@ async fn collection_material_deepening(
         }))
         .into_response();
     };
-    match execution.lease {
-        Some(lease) => Json(json!({
-            "requestRef": outcome.request_ref,
-            "decisionRef": outcome.decision_ref,
-            "admission": outcome.outcome.code(),
-            "workOrderRef": work_order_ref,
-            "leaseRef": lease.lease_ref,
-            "taskIds": lease.task_ids,
-            "stationRef": lease.station_ref,
-            "expiresAt": lease.expires_at,
-            "materialCount": targets.len(),
-            "execution": "LEASED",
-        }))
-        .into_response(),
-        None => local_read_json_error(
-            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-            "material_deepening_lease_failed",
-        ),
-    }
+    Json(json!({
+        "requestRef": outcome.request_ref,
+        "decisionRef": outcome.decision_ref,
+        "admission": outcome.outcome.code(),
+        "workOrderRef": work_order_ref,
+        "materialCount": targets.len(),
+        "execution": "QUEUED",
+    }))
+    .into_response()
 }
 
 /// COLLECTION-001 · request deep archiving for one target, and run admission on it.

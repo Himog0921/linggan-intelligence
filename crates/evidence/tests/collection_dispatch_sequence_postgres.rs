@@ -88,6 +88,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0036_monitor_scheduling_clarity.sql"),
     "\n",
     include_str!("../../../database/migrations/0037_collection_scheduler_scale.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0038_detail_only_material_scope.sql"),
 );
 
 #[tokio::test]
@@ -970,6 +972,78 @@ async fn detail_dispatch_uses_the_latest_accepted_signed_discovery_url_outside_t
             );
         }
         other => panic!("signed discovery must produce a detail dispatch; got {other:?}"),
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn detail_only_scope_claims_only_detail_and_rejects_orphaned_replies() {
+    let database = proof_database_for("collection_dispatch_detail_only_scope").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let content_external_id = "note-detail-only-execution";
+    submit_profile_discovery(
+        &database,
+        content_external_id,
+        "https://www.xiaohongshu.com/user/profile/creator-fixture/note-detail-only-execution?xsec_token=SIGNED_DETAIL_ONLY%3D&xsec_source=pc_user",
+    )
+    .await;
+    let content_public_ref: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE platform='xhs' AND content_external_id=$1",
+    )
+    .bind(content_external_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("accepted discovery creates the stable content identity");
+    sqlx::query(
+        "INSERT INTO collection_work_order_material_target \
+         (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) \
+         VALUES ($1,$2,1,0,0,false)",
+    )
+    .bind(fixture.work_order_ref)
+    .bind(content_public_ref)
+    .execute(database.pool())
+    .await
+    .expect("detail-only is an accepted frozen scope");
+    let invalid_reply_scope = sqlx::query(
+        "INSERT INTO collection_work_order_material_target \
+         (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) \
+         VALUES ($1,$2,2,0,1,false)",
+    )
+    .bind(fixture.work_order_ref)
+    .bind(content_public_ref)
+    .execute(database.pool())
+    .await;
+    assert!(
+        invalid_reply_scope.is_err(),
+        "0038 refuses replies when the approved comment scope is zero"
+    );
+
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("a content-detail-capable station can lease the narrow scope");
+    let dispatch = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("one narrow task is claimed through the shared dispatcher");
+    match dispatch {
+        DispatchDecision::Dispatch {
+            task_spec,
+            page_session_plan,
+            ..
+        } => {
+            assert_eq!(
+                task_spec["capabilitiesRequested"],
+                serde_json::json!(["content_detail"])
+            );
+            let plan = page_session_plan.expect("detail work carries its bounded same-page plan");
+            assert_eq!(plan["lanes"], serde_json::json!(["content_detail"]));
+            assert_eq!(plan["commentLimit"], 0);
+            assert_eq!(plan["replyExpandLimit"], 0);
+        }
+        other => panic!("detail-only scope must dispatch detail first; got {other:?}"),
     }
 }
 

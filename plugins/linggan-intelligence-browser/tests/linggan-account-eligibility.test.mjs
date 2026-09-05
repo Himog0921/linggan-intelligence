@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   accountObservationFromCurrentAccountHref,
   currentAccountHrefFromDocument,
+  dispatchStateRequiresFreshPassiveAccountObservation,
   reportPassiveAccountEligibility,
 } from '../src/linggan/accountEligibilityProbe.js';
 import {
@@ -35,6 +36,13 @@ test('a passive account probe accepts only the explicitly marked current-account
     ),
     { signal: 'signal_incomplete', rawPlatformAccountId: '' },
   );
+});
+
+test('only account freshness decisions may trigger an automatic passive re-observation', () => {
+  assert.equal(dispatchStateRequiresFreshPassiveAccountObservation('account_eligibility_stale'), true);
+  assert.equal(dispatchStateRequiresFreshPassiveAccountObservation('account_needs_login'), true);
+  assert.equal(dispatchStateRequiresFreshPassiveAccountObservation('installation_stale'), false);
+  assert.equal(dispatchStateRequiresFreshPassiveAccountObservation('nothing_waiting'), false);
 });
 
 test('the passive account probe never mistakes the viewed creator for the logged-in account', () => {
