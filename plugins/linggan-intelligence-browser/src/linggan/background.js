@@ -29,6 +29,9 @@ import { waitForStableTab } from './tabReadiness.js';
 import { buildSignedXhsDetailExecutionUrl } from './xhsExecutionTarget.js';
 import { executeClaimedMediaAcquisition } from './mediaAcquisitionExecution.js';
 import {
+  dispatchStateRequiresFreshPassiveAccountObservation,
+} from './accountEligibilityProbe.js';
+import {
   allowedMediaCandidateUri,
   mediaUploadUnitsForRecord,
   normalizeMediaCandidateUri,
@@ -486,7 +489,28 @@ let patrolInFlight = null;
 async function patrolTick() {
   if (patrolInFlight) return patrolInFlight;
   patrolInFlight = (async () => {
-    const result = await runDispatchedTask().catch(() => null);
+    // A claimed station is automatic, not perpetually assumed alive. Every durable alarm wake
+    // refreshes only the local installation heartbeat before it asks the server for work.
+    const station = await checkInStationOnce();
+    let result = station?.authorized && station?.registered
+      ? await runDispatchedTask().catch(() => null)
+      : {
+          success: false,
+          state: 'station_check_in_unavailable',
+          executed: false,
+          nextPollAfterSeconds: 300,
+        };
+
+    // Account eligibility is short-lived by design. If the server asks for fresher evidence,
+    // ask one already-open XHS document for its explicit global-navigation marker and retry the
+    // same claim once. No tab is opened, reloaded, navigated, or inspected through cookies.
+    if (dispatchStateRequiresFreshPassiveAccountObservation(result?.state)) {
+      const observation = await refreshPassiveAccountEligibilityFromOpenXhsTab();
+      if (observation.reported) {
+        await checkInStationOnce();
+        result = await runDispatchedTask().catch(() => null);
+      }
+    }
     // Finish delivery of the just-captured discovery package before asking for its derived cover
     // work. The media lane remains separate: a slow CDN does not hold the discovery receipt open.
     await flushLocalOutbox().catch(() => null);
@@ -503,6 +527,35 @@ async function patrolTick() {
     return await patrolInFlight;
   } finally {
     patrolInFlight = null;
+  }
+}
+
+async function refreshPassiveAccountEligibilityFromOpenXhsTab() {
+  if (!chrome.tabs?.query || !chrome.tabs?.sendMessage) {
+    return { reported: false, reason: 'tabs_api_unavailable' };
+  }
+  let tabs;
+  try {
+    tabs = await chrome.tabs.query({
+      url: [
+        'https://xiaohongshu.com/*',
+        'https://*.xiaohongshu.com/*',
+      ],
+    });
+  } catch {
+    return { reported: false, reason: 'xhs_tab_query_failed' };
+  }
+  const tab = tabs
+    .filter((candidate) => Number.isInteger(candidate?.id) && candidate.id > 0)
+    .sort((left, right) => Number(Boolean(right.active)) - Number(Boolean(left.active)))[0];
+  if (!tab?.id) return { reported: false, reason: 'no_open_xhs_tab' };
+  try {
+    const result = await chrome.tabs.sendMessage(tab.id, {
+      action: LINGGAN_RUNTIME_ACTION.PROBE_CURRENT_ACCOUNT_ELIGIBILITY,
+    });
+    return { reported: result?.reported === true };
+  } catch {
+    return { reported: false, reason: 'xhs_content_runtime_unavailable' };
   }
 }
 

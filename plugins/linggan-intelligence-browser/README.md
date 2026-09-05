@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.37`
+> 版本: `0.8.38`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -233,6 +233,12 @@ TaskSpec 的页面执行和受限媒体候选取得。
 不可被重装/心跳覆盖的安全状态；check-in 同时回显服务端确认的工位名称和接活状态。它不把
 Popup 名称变成身份，也不绕过账号、凭证、风险、配额、并发或 TaskSpec 门禁。
 
+0.8.38 让每个 MV3 `linggan-patrol` alarm 在 claim 前先刷新本机安装心跳；工位已认领且未被
+人工暂停时不再因 service worker 空闲被误判失联。只有服务端明确回答账号资格已过期、未绑定或
+登录失效时，插件才会向一张**已经打开**的小红书页面请求同一份被动全局导航观察，并对同一 claim
+重试一次；不会打开、刷新或导航页面，不读取 Cookie/存储，也不把被查看的博主当成执行账号。固定
+作品深化现可冻结为 `detail-only`（评论数为 0），因此不会把“补齐详情”悄然扩大为评论、回复或媒体采集。
+
 完整逐项清单见 [MIGRATION-MAP.md](MIGRATION-MAP.md)。
 
 ## Build 与可复现发行包
@@ -252,7 +258,7 @@ npm run verify:linggan-isolation
 0.8.18 将真实终验发现的 `596/594` 收口为完成：全量深采取得数达到或超过页面公开数即可
 完成，详情附带评论窗口仍保持精确上限。
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.37.zip`。打包器以
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.38.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台
