@@ -1675,9 +1675,12 @@ pub async fn run_progressive_archives(
                   row_number() OVER (PARTITION BY work_order.target_ref \
                                      ORDER BY work_order.created_at,work_order.work_order_ref) AS root_rank \
            FROM collection_work_order work_order \
-           JOIN collection_admission_decision decision USING (decision_ref) \
-           JOIN collection_acquisition_request request USING (request_ref) \
-           JOIN collection_observation_target target USING (target_ref) \
+           JOIN collection_admission_decision decision \
+             ON decision.decision_ref=work_order.decision_ref \
+           JOIN collection_acquisition_request request \
+             ON request.request_ref=decision.request_ref \
+           JOIN collection_observation_target target \
+             ON target.target_ref=work_order.target_ref \
            WHERE work_order.lane='deep_archive' \
              AND work_order.stop_conditions #>> '{progressiveArchive,version}'=$1 \
              AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order.work_order_ref::text \

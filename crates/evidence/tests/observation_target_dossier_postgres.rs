@@ -15,13 +15,38 @@ use linggan_evidence::{
     bind_observation_account, check_in_installation, decide_dispatch, grant_authorization,
     open_claim_window, read_archive_completeness, read_creator_lifecycle, register_station,
     report_account_eligibility, request_admit_and_lease, request_progressive_archive_and_lease,
-    set_station_accepting, start_producer_attempt, submit_producer_package,
+    run_progressive_archives, set_station_accepting, start_producer_attempt,
+    submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use std::time::Duration;
 use uuid::Uuid;
 
 const DIGEST_KEY: &[u8] = b"observation-target-dossier-postgres-proof-v1";
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn progressive_archive_tick_reads_a_root_without_ambiguous_target_ref_join() {
+    let database = proof_database("dossier_progressive_tick_root_join").await;
+    ready_installation(&database, "dossier-tick-root-join").await;
+    let target_ref = seed_creator_target(&database, "creator-progressive-tick-root-join").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
+        .await
+        .expect("a progressive root is present for the worker tick");
+
+    let summary = run_progressive_archives(&database)
+        .await
+        .expect("the worker can read a progressive root after joining request and decision facts");
+    assert!(
+        summary.queued.contains(&target_ref)
+            || summary
+                .skipped
+                .iter()
+                .any(|(skipped_target, _)| *skipped_target == target_ref),
+        "the root is evaluated instead of being hidden by an ambiguous SQL join: {summary:?}"
+    );
+}
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
