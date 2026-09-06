@@ -2950,6 +2950,9 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
         LeaseError::NoStation => "work_order_names_no_station",
         LeaseError::StationUnavailable => "station_unavailable",
         LeaseError::FrozenControlMissing => "lease_frozen_control_missing",
+        // Not a refusal: every step this order froze has already been done, so it was closed
+        // instead of being handed a permit with no work behind it.
+        LeaseError::WorkOrderAlreadySatisfied => "work_order_already_satisfied",
         LeaseError::ControlBlocked { reason_code } => match reason_code.as_str() {
             "risk_paused" => "risk_paused",
             "station_unavailable" => "station_unavailable",

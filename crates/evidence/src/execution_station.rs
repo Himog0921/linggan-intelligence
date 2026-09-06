@@ -640,17 +640,21 @@ async fn teardown_installation(
     .bind(reason_code)
     .execute(&mut **transaction)
     .await?;
-    sqlx::query(
+    // 释放租约与交还工单必须一起做。只释放租约会把工单永久留在 `leased` 且名下无活租约，
+    // 共享 claim 只找 `queued`，于是没有任何工位能再接手它，也没有巡检会回收它。
+    let released: Vec<Uuid> = sqlx::query_scalar(
         "UPDATE collection_work_order_lease lease \
          SET released_at=scope_001_now(),release_reason='station_unavailable' \
          FROM collection_work_order work_order \
          WHERE lease.work_order_ref=work_order.work_order_ref \
            AND work_order.installation_ref=$1 \
-           AND lease.released_at IS NULL",
+           AND lease.released_at IS NULL \
+         RETURNING lease.work_order_ref",
     )
     .bind(installation_ref)
-    .execute(&mut **transaction)
+    .fetch_all(&mut **transaction)
     .await?;
+    crate::work_order_lease::requeue_work_orders_after_release(transaction, &released).await?;
     Ok(())
 }
 

@@ -7,15 +7,15 @@ use crate::execution_station::{StationError, station_schema_is_ready};
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
 
-/// 一台工位当天已入库的笔记条数。
+/// 一台工位当天碰过的**笔记篇数**。
 ///
 /// **配额的权威实现只有这一个函数**，准入判定与页面展示都读它。旧项目有两份 200——一份
 /// 管派单硬编码、一份管页面显示读插件上报值，判据还不同，于是出现「页面显示已达上限但
 /// 仍在派单」。两处口径必然漂移，只留一处才不会。
 ///
-/// 计数单位是**实际入库的笔记条数**，不是任务数：一次建档可能入库 200 条却只算一个任务，
-/// 按任务数计会算错（规则文档 §单工位每日上限）。隔离与未解释的记录不计入——它们没有
-/// 成为可用材料，占用配额就等于让失败的采集吃掉当天的额度。
+/// 计数单位是**去重后的笔记篇数**：一篇笔记当天无论被读过几次、读回多少评论与回复，都
+/// 只占一格。按记录条数计会被评论吞掉——见 [`DAILY_NOTE_USAGE_SQL`] 的说明。隔离与未解释
+/// 的记录不计入：它们没有成为可用材料，占用配额就等于让失败的采集吃掉当天的额度。
 ///
 /// 窗口按 **Asia/Shanghai 自然日**，与规则文档一致。
 pub async fn station_daily_note_usage(
@@ -44,14 +44,34 @@ pub(crate) async fn station_daily_note_usage_in(
     Ok(used.unwrap_or(0))
 }
 
-/// 配额的唯一判据。两个入口共用它，口径才不会漂移。
-const DAILY_NOTE_USAGE_SQL: &str = "SELECT count(*) \
+/// 配额的唯一判据。每个入口共用它，口径才不会漂移。
+///
+/// 单位是**笔记篇数**，不是记录条数。一篇笔记当天无论被读过几次、读回多少评论与回复，
+/// 都只占一格。
+///
+/// 按条数计会让配额被评论吞掉：实测本库 accepted 记录里回复占 54%、评论占 26%，正文详情
+/// 只有 4%。一次「三篇带评论」的建档，正文算 3 条，评论与回复可能算掉一两百条 —— 于是
+/// 「今天最多两百篇」实际变成「今天最多两三篇」。配额守的是平台访问，而读评论发生在
+/// 那篇笔记已经打开的页面上，不是又一次访问。
+///
+/// 只统计需要打开笔记详情页的采集（`content_detail` / `comments` / `replies`）。发现面
+/// （`discovery_search` / `profile_discovery`）一次列表访问就能带回几十篇，把它按篇计费
+/// 等于用一次访问的风险扣掉几十格；作者资料同理，它读的是作者页。
+///
+/// `sourceObject.type='content'` 是笔记身份的判据：评论记录的 sourceObject 指向它所属的
+/// 那篇笔记而非评论自身，因此按 externalId 去重天然得到「碰过几篇笔记」。
+const DAILY_NOTE_USAGE_SQL: &str = "SELECT count(DISTINCT record.value -> 'sourceObject' ->> 'externalId') \
      FROM linggan_runtime_record_disposition d \
      JOIN linggan_runtime_capture_package p ON p.package_ref = d.package_ref \
      JOIN plugin_installation i ON i.install_key = p.producer_instance_id::text \
+     CROSS JOIN LATERAL jsonb_array_elements(p.payload -> 'records') \
+          WITH ORDINALITY AS record(value, ordinality) \
      WHERE i.station_ref = $1 \
+       AND record.ordinality = d.record_ordinal + 1 \
        AND d.disposition IN \
            ('accepted_for_library_discovery', 'accepted_for_library_content') \
+       AND p.payload ->> 'packageKind' IN ('content_detail', 'comments', 'replies') \
+       AND record.value -> 'sourceObject' ->> 'type' = 'content' \
        AND d.created_at >= \
            date_trunc('day', scope_001_now() AT TIME ZONE 'Asia/Shanghai') \
                AT TIME ZONE 'Asia/Shanghai'";
@@ -69,7 +89,7 @@ pub struct StationOverview {
     pub active_last_seen_at: Option<String>,
     /// 这台工位换过几次插件。内容工作台正是把这个数字变成了 11 台僵尸工位。
     pub superseded_count: i64,
-    /// 当天已入库的笔记条数。与准入判定读同一段 SQL——旧项目两处口径不同，出现过
+    /// 当天碰过的笔记篇数（去重）。与准入判定读同一段 SQL——旧项目两处口径不同，出现过
     /// 「页面显示已达上限但仍在派单」。
     pub daily_notes_used: i64,
 }
@@ -329,5 +349,31 @@ impl From<CapabilityRow> for StationCapability {
             execution_failures: row.5,
             last_failure_at: row.6,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 配额守的是「碰过几篇笔记」，不是「入库了几条记录」。
+    ///
+    /// 按条数计会被评论吞掉——实测本库 accepted 记录里回复 54%、评论 26%，正文详情只有 4%。
+    /// 这三条断言分别钉住：按笔记去重、只算详情页上的采集、只认笔记身份。
+    #[test]
+    fn daily_quota_counts_notes_not_records() {
+        assert!(
+            DAILY_NOTE_USAGE_SQL
+                .contains("count(DISTINCT record.value -> 'sourceObject' ->> 'externalId')"),
+            "配额必须按笔记去重，一篇笔记读回多少评论都只占一格",
+        );
+        assert!(
+            DAILY_NOTE_USAGE_SQL.contains("'content_detail', 'comments', 'replies'"),
+            "只统计需要打开笔记详情页的采集；发现面一次列表访问带回几十篇，不该按篇计费",
+        );
+        assert!(
+            DAILY_NOTE_USAGE_SQL.contains("'sourceObject' ->> 'type' = 'content'"),
+            "评论记录的 sourceObject 指向它所属的笔记，按 type 收窄才不会把作者页算进来",
+        );
     }
 }
