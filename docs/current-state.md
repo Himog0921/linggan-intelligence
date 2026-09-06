@@ -1,26 +1,26 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-05
+> 最后核对: 2026-09-06
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
 ## 当前阶段
 
-### MODEL-PI-001 / Issue #169（当前交付分支；依赖 #168）
+### MODEL-PI-001 / Issue #169（已合并 main；共享运行待授权）
 
-Mog 授权单一实施者继续完成模型与 AI 四区设置、Pi 正式适配和评论首次分析链。base 为已审核 `911b1c1afa3eadb5fd1b671cb10edc6a49ef4cc3`；分支 `codex/model-pi-001`，后续 Draft PR 以 `codex/comment-research-001` 为 base。当前新增 `/settings/models`、后端 Keychain、固定 Pi 0.85.1、不可变连接/配置、显式来源计划、并发预算/有限重试、持续评论 worker 与真实用量回执。具体能力与边界见 [MODEL-PI-001 合同](plans/active/model-pi-001.md) 和 [验收记录](design/acceptance/model-pi-001-acceptance.md)。
+Mog 授权单一实施者完成模型与 AI 四区设置、Pi 正式适配和评论首次分析链。#168 已先合并，#170 随后合并；当前 `main@f97968e6697063e33c55b09879b8f24b3f77769f` 包含 `/settings/models`、后端 Keychain、固定 Pi 0.85.1、不可变连接/配置、显式来源计划、并发预算/有限重试、持续评论 worker 与真实用量回执。具体能力与边界见 [MODEL-PI-001 合同](plans/active/model-pi-001.md) 和 [验收记录](design/acceptance/model-pi-001-acceptance.md)。
 
-真实 SDK 对本地三种协议、隔离 PostgreSQL/HTTP、随机 Keychain 已验证；这不是外部供应商或真实语义质量验收。0040 只应用在隔离 proof；共享 DB、当前 :3000、现有 worker、merge/deploy 未操作。#168 以下记录是其冻结基线状态，当前模型接入增量以本包说明为准。根代理在唯一固定 HEAD 集中审查，verdict 只记 PR 评论，不提交 PASS 时间戳。
+真实 SDK 对本地三种协议、隔离 PostgreSQL/HTTP、随机 Keychain 和合成预览浏览器操作已验证；这不是外部供应商或真实语义质量验收。0040 只应用在隔离 proof；共享 DB、当前 :3000、现有 worker、部署与真实 provider 未操作。#168 是已合并的评论基础包，模型接入增量由本包说明为准。根代理集中审核记录于 [PR #170](https://github.com/Himog0921/linggan-intelligence/pull/170) 评论，不提交审核时间戳代码。
 
-Draft PR #170 的首轮固定 ff95268 后，唯一 R1/R2/R3 清单已在实施分支修复：原计划显式恢复和重复来源定位、自动选源按全局幂等条件推进、中断维护在无新调用时按冻结次数上限持久化。29 项隔离 PostgreSQL 与扩展 HTTP 通过；根代理后续只复验这份清单及直接影响，完整浏览器操作仍未验证。修复没有重置历史额度/次数或增加外部调用授权。
+最终固定 head `1803083` 完成 R1/R2/R3 修复及根代理定向复验：原计划显式恢复和重复来源定位、自动选源按全局幂等条件推进、中断维护在无新调用时按冻结次数上限持久化。29 项隔离 PostgreSQL、扩展 HTTP 和浏览器操作通过；浏览器补充记录见 [PR 评论](https://github.com/Himog0921/linggan-intelligence/pull/170#issuecomment-5559371754)。修复没有重置历史额度/次数或增加外部调用授权。
 
-### COMMENT-RESEARCH-001 / Issue #167（当前交付分支；模型接入未完成）
+### COMMENT-RESEARCH-001 / Issue #167（已合并 main；模型执行已由 #169 接入）
 
 Mog 已授权一个子代理实施、根代理集中审核，先推进 P00 直接依赖与 P01 评论研究，尚不启动后续产品包。实施基线 `be1e6fb83650b376ee22e6fdec07241b8f604614`，分支 `codex/comment-research-001`；自包含合同见 [comment-research-001.md](plans/active/comment-research-001.md)。源码接入原声浏览、问题分组、语料资产与服务端已存查询，人工收存不再依赖 AI。资产理由、单集合归属与撤销、查询名称/条件/删除通过追加修订维护，旧请求不能覆盖新版本或复活已撤销项。`0039_comment_research.sql` 仅在隔离 PostgreSQL 验证，已登记迁移脚本但未应用共享库。
 
-评论分析有持久队列、租约恢复、最多 60 秒本地等待及严格候选接纳接口，独立 `linggan-comment-worker --queue-only [--once]` 只入队。真实模型/费用/敏感材料处理许可未收口；没有真实 provider 消费器、语义聚类或真实质量证明，P01-C 和全包不能因此标为完成。固定 HEAD 后由根代理一次集中审核；当前未 merge、未部署、未启动共享 worker，Mog 业务验收未发生。
+评论分析有持久队列、租约恢复、最多 60 秒本地等待及严格候选接纳接口，独立 `linggan-comment-worker --queue-only [--once]` 只入队；#170 已为其接入受控 Pi 消费器。真实模型/费用/敏感材料处理许可未收口；没有语义聚类或真实质量证明，P01-C 和全包不能因此标为完成。共享 migration、当前 :3000、现有 worker、真实采集与 Mog 业务验收仍未发生。
 
 
 ### COLLECTION-SCHEDULER-SCALE-001（当前源码实施项；尚未进入共享运行态）

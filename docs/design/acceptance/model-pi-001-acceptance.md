@@ -15,9 +15,9 @@
 | Keychain | `model_keychain` ignored 独立测试实跑 1 项通过 | 随机 service/account 合成凭据写、读、更换、删除；不枚举或读取原有项、不证明用户当前真实凭据有效 |
 | HTTP | 扩展后的 `verify-model-pi-api.mjs` 通过真实 API / 独立常驻评论 worker / PostgreSQL / 官方 SDK | 连接/发现/独立 probe/用途/两条来源/标注和问题组/用量/暂停/显式恢复/过期恢复冲突/所属计划定位/旧请求/Origin；测试要求明确合成 store 与来源 |
 | 依赖准备 | 固定 Node 24.13.0、lock 安装与 `--check` 通过 | 只在实现 checkout 安装 npm 依赖，没有调用实际 runtime install/sync 或重启服务 |
-| UI 浏览器 | NOT VERIFIED；根代理首轮后遇 macOS 锁屏，后续由根代理验证 | 实施侧 JS 语法、HTTP 与页面接缝不冒充浏览器视觉/操作通过 |
+| UI 浏览器 | PASS；Mog 解锁后根代理在同一固定 head 完成真实操作与 1440×900 / 390×844 走查 | 仅证明合成隔离预览中的页面操作、状态表达和布局 |
 | 真实外部模型 | 未执行 | 没有真实 provider/key/材料预算授权；合成 SDK proof 不证明模型理解或候选质量 |
-| Merge / deploy / shared DB / Mog | 未执行或未验收 | Draft 交付不代表这些层完成 |
+| Merge / deploy / shared DB / Mog | #168、#170 已合并到 main；共享迁移、部署和真实业务验收未执行 | 合并不代表共享运行或真实外部质量完成 |
 
 原有 6 项模型 PostgreSQL 证明覆盖：设置不分析、明确单源计划→真实 SDK→严格引用/候选→用量；旧请求幂等；启用后新源与历史分界；更换默认只影响新任务；停用不派发；未知用量保留预留、并发预留不能超用/重复；错误格式仍计消耗、成功无信号、两次配置上限重试；旧配置/连接请求不恢复当前默认或停用权限；真实 SDK 无限流在配置的 1 秒等待上限停止并留下未知用量，撤回来源不发起调用。原评论 20 项覆盖父评论/源限制传播、中文与 emoji 精确片段、人工修订优先、失效租约及查询/资产不复活等。
 
@@ -37,4 +37,4 @@ Rust boundaries 的冻结基线已有 35 errors / 15 warnings，本包最终为 
 
 最终格式、JS 语法、CSS Token 引用、bash/zsh 语法、diff 空白、项目治理及 UI 手册检查通过；审核 verdict 仅由根代理写在 PR 对应 HEAD 评论，本文件不写尚未发生的 PASS，也不为审核时间戳制造新提交。
 
-可复现隔离运行见 [model-pi-runtime](../../runbooks/model-pi-runtime.md)。浏览器从空设置验收请重建 `preview-model-pi.sh`，不要复用 HTTP 验证已填入配置的预览。测试中没有真实材料外发、共享迁移、现有 worker 启停、插件或采集副作用。完整智能化仍不包含语义聚类、代表/边缘样本评估与真实业务质量。
+可复现隔离运行见 [model-pi-runtime](../../runbooks/model-pi-runtime.md)。本次浏览器验收从空设置重建 `preview-model-pi.sh`，未复用 HTTP 验证已填入配置的预览。测试中没有真实材料外发、共享迁移、现有 worker 启停、插件或采集副作用。完整智能化仍不包含语义聚类、代表/边缘样本评估与真实业务质量。

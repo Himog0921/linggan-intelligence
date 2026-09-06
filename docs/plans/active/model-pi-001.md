@@ -27,7 +27,7 @@ Linggan 持有配置、用途/来源资格、预算、持久 comment work、租�
 
 ## 实施与所有权
 
-唯一实施 `/root/comment_research_impl`，唯一审核/integration owner `/root`；Issue Claim 记录完整 exclusive/shared/forbidden。源码在 model-pi-001 worktree，Draft PR base codex/comment-research-001。必要共享接缝是 API/shell、评论运行/读取、专用 worker、Cargo/exports、0040 及 migration/fixture 登记、docs 索引/LIDS/进度。其他包不动。
+唯一实施 `/root/comment_research_impl`，唯一审核/integration owner `/root`；Issue Claim 记录完整 exclusive/shared/forbidden。实现已由 PR #168、#170 按依赖顺序合并到 `main@f97968e`；必要共享接缝是 API/shell、评论运行/读取、专用 worker、Cargo/exports、0040 及 migration/fixture 登记、docs 索引/LIDS/进度。其他包不动。
 
 验收采用固定 HEAD 一次集中审核、一批实质清单整改、只复验清单及直接影响；最终 verdict 放 PR 评论，不提交 PASS 时间戳。
 
@@ -35,4 +35,4 @@ Linggan 持有配置、用途/来源资格、预算、持久 comment work、租�
 
 ## 证明与停止点
 
-独立 PostgreSQL、官方真实 SDK 对本地合成协议、无秘密泄露、有限超时/重试/预算、停用/切换/重放和 UI HTTP 自检完成后冻结 HEAD；根代理做浏览器审核。真实外部模型调用等待 Mog 填写凭据并明确材料与预算，不以未配置阻断其余完整实现。语义聚类、真实质量、merge/deploy/shared DB 和 Mog 验收独立报告，不把合成 proof 冒充真实外部能力。
+独立 PostgreSQL、官方真实 SDK 对本地合成协议、无秘密泄露、有限超时/重试/预算、停用/切换/重放、UI HTTP 自检和浏览器审核均已完成，最终实现已合并到 `main@f97968e`。真实外部模型调用等待 Mog 填写凭据并明确材料与预算，不以未配置阻断其余完整实现。语义聚类、真实质量、shared DB/deploy 和 Mog 业务验收独立报告，不把合成 proof 冒充真实外部能力。
