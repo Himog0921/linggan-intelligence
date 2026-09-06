@@ -33,6 +33,8 @@ pub enum ModelError {
     Budget,
     #[error("model_not_qualified")]
     NotQualified,
+    #[error("model_schema_missing")]
+    SchemaMissing,
     #[error("model_database_unavailable")]
     Database(#[from] sqlx::Error),
     #[error("model_source_unavailable")]
@@ -62,13 +64,23 @@ impl ModelError {
             Self::InvalidOutput => "model_invalid_output",
             Self::Budget => "model_budget_exhausted",
             Self::NotQualified => "model_not_qualified",
+            Self::SchemaMissing => "model_schema_missing",
             Self::Database(_) => "model_database_unavailable",
             Self::Source => "model_source_unavailable",
         }
     }
 }
 
+pub async fn ensure_model_schema(db: &Database) -> Result<(), ModelError> {
+    let ready: bool = sqlx::query_scalar("SELECT to_regclass('linggan_model_workspace') IS NOT NULL AND to_regclass('linggan_comment_analysis_work') IS NOT NULL")
+        .fetch_one(db.pool()).await?;
+    if !ready {
+        return Err(ModelError::SchemaMissing);
+    }
+    Ok(())
+}
 pub async fn workspace_ref(db: &Database) -> Result<Uuid, ModelError> {
+    ensure_model_schema(db).await?;
     Ok(
         sqlx::query_scalar("SELECT workspace_ref FROM linggan_model_workspace WHERE singleton")
             .fetch_one(db.pool())
@@ -91,6 +103,32 @@ pub fn validate_endpoint(base: &str, local: bool) -> Result<(), ModelError> {
         return Err(ModelError::Invalid);
     }
     Ok(())
+}
+/// Normalize only known protocol suffixes; custom gateway prefixes remain explicit.
+pub fn normalize_model_endpoint(base: &str, api: &str, local: bool) -> Result<String, ModelError> {
+    let base = base.trim();
+    validate_endpoint(base, local)?;
+    let mut url = url::Url::parse(base).map_err(|_| ModelError::Invalid)?;
+    let path = url.path().trim_end_matches('/');
+    let normalized = match api {
+        "openai-completions" | "openai-responses" => {
+            let suffix = if api == "openai-completions" {
+                "/chat/completions"
+            } else {
+                "/responses"
+            };
+            let prefix = path.strip_suffix(suffix).unwrap_or(path);
+            if prefix.is_empty() { "/v1" } else { prefix }
+        }
+        "anthropic-messages" => path
+            .strip_suffix("/v1/messages")
+            .or_else(|| path.strip_suffix("/v1"))
+            .unwrap_or(path),
+        _ => return Err(ModelError::Invalid),
+    }
+    .to_owned();
+    url.set_path(&normalized);
+    Ok(url.to_string().trim_end_matches('/').to_owned())
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -118,11 +156,10 @@ pub async fn save_model_connection(
         || r.expected_revision < 0
         || r.expected_revision == i32::MAX
         || r.api_key.len() > 4096
-        || (!r.local_endpoint && r.api_key.trim().is_empty())
     {
         return Err(ModelError::Invalid);
     }
-    validate_endpoint(&r.base_url, r.local_endpoint)?;
+    let base_url = normalize_model_endpoint(&r.base_url, &r.api, r.local_endpoint)?;
     if store.is_synthetic() && !(r.local_endpoint && r.base_url.starts_with("http://127.0.0.1:")) {
         return Err(ModelError::Invalid);
     }
@@ -150,9 +187,9 @@ pub async fn save_model_connection(
             || row.get::<i32, _>("revision") != r.expected_revision + 1
             || row.get::<String, _>("name") != r.name
             || row.get::<String, _>("api") != r.api
-            || row.get::<String, _>("base_url") != r.base_url
+            || row.get::<String, _>("base_url") != base_url
             || row.get::<bool, _>("local_endpoint") != r.local_endpoint
-            || store.get(workspace, row.get("secret_ref"))? != r.api_key
+            || (!r.api_key.is_empty() && store.get(workspace, row.get("secret_ref"))? != r.api_key)
         {
             return Err(ModelError::Conflict);
         }
@@ -163,11 +200,27 @@ pub async fn save_model_connection(
     if revision != r.expected_revision {
         return Err(ModelError::Conflict);
     }
+    let api_key = if r.api_key.is_empty() && r.expected_revision > 0 {
+        let previous = sqlx::query("SELECT base_url,api,local_endpoint,secret_ref FROM linggan_model_connection_version WHERE connection_ref=$1 ORDER BY revision DESC LIMIT 1")
+            .bind(r.connection_ref).fetch_one(&mut *tx).await?;
+        if previous.get::<String, _>("base_url") != base_url
+            || previous.get::<String, _>("api") != r.api
+            || previous.get::<bool, _>("local_endpoint") != r.local_endpoint
+        {
+            return Err(ModelError::Invalid);
+        }
+        store.get(workspace, previous.get("secret_ref"))?
+    } else {
+        r.api_key.clone()
+    };
+    if !r.local_endpoint && api_key.trim().is_empty() {
+        return Err(ModelError::Invalid);
+    }
     let secret_ref = Uuid::new_v4();
-    store.put(workspace, secret_ref, &r.api_key)?;
+    store.put(workspace, secret_ref, &api_key)?;
     let result=async{
         sqlx::query("INSERT INTO linggan_model_connection_version(version_ref,connection_ref,revision,name,api,base_url,local_endpoint,secret_ref) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
-            .bind(r.version_ref).bind(r.connection_ref).bind(revision+1).bind(&r.name).bind(&r.api).bind(&r.base_url).bind(r.local_endpoint).bind(secret_ref).execute(&mut *tx).await?;
+            .bind(r.version_ref).bind(r.connection_ref).bind(revision+1).bind(&r.name).bind(&r.api).bind(&base_url).bind(r.local_endpoint).bind(secret_ref).execute(&mut *tx).await?;
         sqlx::query("UPDATE linggan_model_connection SET revision=revision+1 WHERE connection_ref=$1").bind(r.connection_ref).execute(&mut *tx).await?;
         tx.commit().await?;Ok::<(),sqlx::Error>(())
     }.await;

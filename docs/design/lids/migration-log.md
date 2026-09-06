@@ -298,3 +298,7 @@ Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵�
 ## 2026-09-06 · COMMENT-RESEARCH-001
 
 Issue #167 在交付分支新增 L1 评论研究三视图和已存查询，复用共享 shell 和 token，Serif 原声、连续表格、文字 Tab 与受控 dialog；Evidence 侧栏仅接通两个真实入口。无 3D、新主题、旧系统样式、生产选题或虚构模型结果。API/PostgreSQL 证明及未验证层见 [评论研究验收](../acceptance/comment-research-001-acceptance.md)。真实模型、部署与用户验收仍未发生；根代理固定 HEAD 审核以 PR 评论为准。
+
+### MODEL-PI-001 同包返修
+
+Mog 明确将四区常驻设置改为单页+关键配置弹窗。复用 L1 Settings Pattern、现有 dialog 与 `--lgi-*`，没有新增 Token/导航。API 地址预览、测试中/失败/数据库未初始化状态就地显示。来源与验证见 `docs/design/changes/model-pi-001-ui-change-manifest.md`。

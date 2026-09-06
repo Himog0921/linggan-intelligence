@@ -32,7 +32,7 @@ function scopedFetch(base,signal,usage,failure) {
     const prefix=base.pathname.replace(/\/$/,'');
     if(url.origin!==base.origin||!(url.pathname===prefix||url.pathname.startsWith(prefix+'/')))throw new Rejected('endpoint_rejected');
     const response=await fetch(input,{...init,redirect:'manual',signal:AbortSignal.any([signal,...(init.signal?[init.signal]:[])])});
-    if(!response.ok){failure.code=response.status>=300&&response.status<400?'provider_redirect_rejected':response.status===401||response.status===403?'authentication_failed':response.status===429?'provider_rate_limited':'provider_failed';await response.body?.cancel();throw new Rejected(failure.code);}
+    if(!response.ok){failure.code=response.status>=300&&response.status<400?'provider_redirect_rejected':response.status===401||response.status===403?'authentication_failed':response.status===429?'provider_rate_limited':response.status===404?(url.pathname.endsWith('/models')?'catalog_unavailable':'provider_endpoint_not_found'):'provider_failed';await response.body?.cancel();throw new Rejected(failure.code);}
     if(!response.body)return response;
     let bytes=0,buffer='';const decoder=new TextDecoder();
     const body=response.body.pipeThrough(new TransformStream({transform(chunk,controller){

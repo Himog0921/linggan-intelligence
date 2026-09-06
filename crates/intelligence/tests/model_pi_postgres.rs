@@ -687,3 +687,151 @@ async fn maintenance_commits_without_dispatch_and_honors_each_frozen_attempt_cap
         5
     );
 }
+
+#[test]
+fn api_address_normalization_preserves_gateway_prefix_and_rejects_embedded_secrets() {
+    for (api, input, expected) in [
+        (
+            "openai-completions",
+            " https://example.com/ ",
+            "https://example.com/v1",
+        ),
+        (
+            "openai-completions",
+            "https://example.com/v1/chat/completions",
+            "https://example.com/v1",
+        ),
+        (
+            "openai-responses",
+            "https://example.com/gateway/v2/responses/",
+            "https://example.com/gateway/v2",
+        ),
+        (
+            "anthropic-messages",
+            "https://example.com/v1/messages",
+            "https://example.com",
+        ),
+        (
+            "anthropic-messages",
+            "https://example.com/gateway/v1/",
+            "https://example.com/gateway",
+        ),
+    ] {
+        assert_eq!(
+            normalize_model_endpoint(input, api, false).unwrap(),
+            expected
+        );
+    }
+    for input in [
+        "https://user:key@example.com",
+        "https://example.com?key=secret",
+        "http://remote.example.com/v1",
+    ] {
+        assert!(normalize_model_endpoint(input, "openai-completions", false).is_err());
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
+async fn full_api_address_and_retained_key_reach_model_without_catalog() {
+    let db = fixture::proof_database("model_pi_repair_connection").await;
+    let (_server, url) = fixture_server().await;
+    let mut connection = SaveModelConnection {
+        version_ref: Uuid::new_v4(),
+        connection_ref: Uuid::new_v4(),
+        expected_revision: 0,
+        name: "合成连接修复".into(),
+        api: "openai-completions".into(),
+        base_url: format!("{url}/chat/completions"),
+        local_endpoint: true,
+        api_key: "SYNTHETIC-NOT-A-CREDENTIAL".into(),
+    };
+    save_model_connection(&db, &SyntheticModelSecrets, &connection)
+        .await
+        .unwrap();
+    let read = read_model_settings(&db, true).await.unwrap();
+    assert_eq!(read["connections"][0]["baseUrl"], url);
+    connection.version_ref = Uuid::new_v4();
+    connection.expected_revision = 1;
+    connection.base_url = url.clone();
+    connection.api_key.clear();
+    connection.name = "更名后沿用凭据".into();
+    save_model_connection(&db, &SyntheticModelSecrets, &connection)
+        .await
+        .unwrap();
+    assert!(
+        save_model_connection(&db, &SyntheticModelSecrets, &connection)
+            .await
+            .unwrap()["replayed"]
+            .as_bool()
+            .unwrap()
+    );
+    let model_ref = Uuid::new_v4();
+    save_model_entry(
+        &db,
+        &SaveModelEntry {
+            model_ref,
+            connection_version_ref: connection.version_ref,
+            model_id: "synthetic-good".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let result = probe_model(
+        &db,
+        &SyntheticModelSecrets,
+        &PiAdapter::configured(),
+        &ProbeModel {
+            invocation_ref: Uuid::new_v4(),
+            connection_version_ref: connection.version_ref,
+            model_ref: Some(model_ref),
+            operation: "probe".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["modelCallable"], true);
+    assert_eq!(result["commentQualified"], true);
+    assert_eq!(sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_model_invocation WHERE operation IN ('connect','discover')").fetch_one(db.pool()).await.unwrap(), 0);
+    connection.version_ref = Uuid::new_v4();
+    connection.expected_revision = 2;
+    connection.base_url = format!("{url}/different");
+    assert!(matches!(
+        save_model_connection(&db, &SyntheticModelSecrets, &connection).await,
+        Err(ModelError::Invalid)
+    ));
+    assert_eq!(
+        read_model_settings(&db, true).await.unwrap()["connections"][0]["revision"],
+        2
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_comment_model_work")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires isolated PostgreSQL proof harness"]
+async fn missing_model_schema_has_a_specific_recoverable_error() {
+    let db = fixture::proof_database("model_pi_repair_schema").await;
+    sqlx::query(
+        "ALTER TABLE linggan_model_workspace RENAME TO repair_temporarily_missing_workspace",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    assert!(matches!(
+        read_model_settings(&db, true).await,
+        Err(ModelError::SchemaMissing)
+    ));
+    sqlx::query(
+        "ALTER TABLE repair_temporarily_missing_workspace RENAME TO linggan_model_workspace",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    assert!(read_model_settings(&db, true).await.is_ok());
+}
