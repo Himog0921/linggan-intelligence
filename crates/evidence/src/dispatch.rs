@@ -919,7 +919,7 @@ async fn revalidate_dispatch_task(
     if !authorization_valid {
         return Ok(Some("authorization_expired_or_revoked".to_owned()));
     }
-    if requested_by == "agent" && frozen_rule_ref != active_rule_ref {
+    if rule_revision_blocks_dispatch(&requested_by, &lane, frozen_rule_ref, active_rule_ref) {
         return Ok(Some("rule_revision_changed".to_owned()));
     }
     if requested_by == "agent"
@@ -1075,6 +1075,31 @@ async fn execution_source_url_for_task(
     .await
 }
 
+/// Does a changed monitor rule revision stop this dispatch?
+///
+/// Only a patrol freezes a rule revision, so only a patrol can be compared against one. The
+/// write side (`acquisition_chain`) has always frozen `monitor_rule_revision_ref` for `agent`
+/// + `patrol` alone; this check omitted the lane, so every agent-issued deep archive carried
+/// NULL, never equalled the target's active revision, and was blocked forever. No retry could
+/// clear it, because a rule revision does not travel backwards.
+///
+/// Observed on 2026-09-06: a progressive archive finished its person-issued directory step and
+/// then stalled indefinitely on every agent-issued batch behind it. The person-issued
+/// "continue" button also appeared dead, because the stuck batches still held those works.
+///
+/// A rule revision describes patrol cadence. A deep archive's scope is a frozen list of works,
+/// decided when the batch was admitted; changing how often a profile is swept says nothing
+/// about whether those works may still be captured. The adjacent `monitoring_paused` check
+/// scopes itself to `patrol` for the same reason.
+fn rule_revision_blocks_dispatch(
+    requested_by: &str,
+    lane: &str,
+    frozen_rule_ref: Option<Uuid>,
+    active_rule_ref: Option<Uuid>,
+) -> bool {
+    requested_by == "agent" && lane == "patrol" && frozen_rule_ref != active_rule_ref
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1087,5 +1112,46 @@ mod tests {
         assert_eq!(retry_after_seconds_for_failure_count(4), 480);
         assert_eq!(retry_after_seconds_for_failure_count(5), 900);
         assert_eq!(retry_after_seconds_for_failure_count(999), 900);
+    }
+
+    /// An agent-issued deep archive never freezes a rule revision, so comparing it against one
+    /// can only ever block it. This is the 2026-09-06 stall: a progressive archive that could
+    /// not advance a single batch, with no retry able to clear it.
+    #[test]
+    fn a_changed_rule_revision_only_stops_a_patrol() {
+        let active = Some(Uuid::new_v4());
+
+        // The regression: agent deep archives carry NULL and must still dispatch.
+        assert!(!rule_revision_blocks_dispatch(
+            "agent",
+            "deep_archive",
+            None,
+            active
+        ));
+        assert!(!rule_revision_blocks_dispatch(
+            "agent",
+            "deep_archive",
+            Some(Uuid::new_v4()),
+            active,
+        ));
+
+        // Patrol keeps the guard: a superseded rule must not keep sweeping on old cadence.
+        assert!(rule_revision_blocks_dispatch(
+            "agent", "patrol", None, active
+        ));
+        assert!(rule_revision_blocks_dispatch(
+            "agent",
+            "patrol",
+            Some(Uuid::new_v4()),
+            active,
+        ));
+        assert!(!rule_revision_blocks_dispatch(
+            "agent", "patrol", active, active
+        ));
+
+        // A person acts under their own authority and is never gated on rule cadence.
+        assert!(!rule_revision_blocks_dispatch(
+            "person", "patrol", None, active
+        ));
     }
 }
