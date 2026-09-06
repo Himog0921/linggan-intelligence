@@ -9,7 +9,7 @@ set -euo pipefail
 # 一次 `./scripts/local-runtime.sh migrate` 就是全部步骤。
 #
 # 它不做的事：不跑迁移（服务不该改数据库结构，见 sync.sh），不装 Docker/Rust/PostgreSQL，
-# 不配置任何远端环境。
+# 不配置任何远端环境。MODEL-PI-001 要求先按 .nvmrc 装 Node；首次同步会按 lock 安装 Pi SDK。
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
 support_dir="${LINGGAN_SUPPORT_DIR:-$HOME/Library/Application Support/Linggan Intelligence}"

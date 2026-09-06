@@ -154,7 +154,10 @@ async fn search(
             .as_ref()
             .map(|body| body.chars().take(350).collect());
     }
-    Json(json!({"page":page,"works":works,"modelConnected":false,"modelState":"NOT_CONFIGURED","scope":"ACCEPTED_READABLE_COMMENT_SAMPLE"})).into_response()
+    let model = linggan_intelligence::model_settings_read::current_comment_model_state(db)
+        .await
+        .unwrap_or_else(|_| json!({"modelConnected":false,"modelState":"UNAVAILABLE"}));
+    Json(json!({"page":page,"works":works,"modelConnected":model["modelConnected"],"modelState":model["modelState"],"scope":"ACCEPTED_READABLE_COMMENT_SAMPLE"})).into_response()
 }
 
 async fn source(State(state): State<LocalWebState>, Path(source_ref): Path<Uuid>) -> Response {
@@ -281,7 +284,12 @@ async fn groups(State(state): State<LocalWebState>) -> Response {
     let Some(db) = state.database.database() else {
         return unavailable();
     };
-    respond(read_comment_problem_groups(db, UNCONFIGURED_MODEL).await)
+    let version = linggan_intelligence::model_settings_read::current_model_version(db)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(|| UNCONFIGURED_MODEL.into());
+    respond(read_comment_problem_groups(db, &version).await)
 }
 async fn retry(State(state): State<LocalWebState>, Path(work_ref): Path<Uuid>) -> Response {
     let Some(db) = state.database.database() else {

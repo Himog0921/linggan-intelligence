@@ -108,3 +108,6 @@ a.v7-side-nav { text-decoration:none; }
   .v7-context-main{min-height:50px;padding:0 14px}
   .v7-context-meta{display:none}
 }
+
+/* MODEL-PI-001: the user menu occupies the existing command slot. */
+.v7-personal-menu{position:relative}.v7-personal-menu summary{cursor:pointer;list-style:none;color:var(--lgi-ink);font-size:13px}.v7-personal-menu summary:focus-visible{outline:2px solid var(--lgi-focus);outline-offset:2px}.v7-personal-menu summary::-webkit-details-marker{display:none}.v7-personal-menu nav{position:absolute;right:0;top:100%;z-index:60;min-width:160px;padding:8px;background:var(--lgi-canvas);border:1px solid var(--lgi-border-strong)}.v7-personal-menu nav a{display:block;padding:12px;color:var(--lgi-ink);font-size:15px;text-decoration:none}.v7-personal-menu nav a:focus-visible{outline:2px solid var(--lgi-ink)}

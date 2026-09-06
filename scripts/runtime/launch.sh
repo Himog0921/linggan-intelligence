@@ -37,5 +37,9 @@ export LINGGAN_LOCAL_MEDIA_ROOT="${LINGGAN_SUPPORT_DIR}/media"
 : "${LINGGAN_LOCAL_PORT:=3000}"
 export LINGGAN_LOCAL_PORT
 
+# Resolve the fixed Node executable independently of launchd PATH.
+: "${LINGGAN_PI_NODE:=$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin/node}"
+export LINGGAN_PI_NODE
+./scripts/runtime/prepare-pi-adapter.sh --check
 exec "./target/debug/${binary}"
 }

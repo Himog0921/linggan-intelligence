@@ -26,6 +26,7 @@ mod material_projection_media_fixture;
 mod material_projection_tests;
 #[cfg(test)]
 mod material_replica_fallback_tests;
+mod model_settings;
 mod shell;
 mod station_view;
 mod target_drawer;
@@ -313,6 +314,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(creator_lifecycle_api::routes())
         .merge(topic_workspace::routes())
         .merge(comment_research::routes())
+        .merge(model_settings::routes())
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))

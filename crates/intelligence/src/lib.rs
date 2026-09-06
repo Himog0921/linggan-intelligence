@@ -16,3 +16,15 @@ pub use topic_workspace::{
 pub const INTELLIGENCE_IMPLEMENTED: bool = true;
 
 pub mod comment_research_management;
+
+pub mod model_secrets;
+pub mod model_settings;
+pub mod pi_adapter;
+
+pub mod model_invocation;
+
+pub mod model_plans;
+
+pub mod model_runner;
+
+pub mod model_settings_read;

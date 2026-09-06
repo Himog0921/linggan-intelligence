@@ -23,7 +23,7 @@
 | 位置 | 允许内容 |
 |---|---|
 | 根目录 | 入口文件和工具配置，例如 `README.md`、`AGENTS.md`、Cargo/Git 配置 |
-| `apps/` | Rust 可执行程序组合入口，不存放计划或报告 |
+| `apps/` | Rust 可执行程序组合入口；MODEL-PI-001 明确授权 `apps/pi-adapter/` 为固定官方 Pi 的窄 Node 适配入口，不承担业务/持久主账。均不存放计划或报告 |
 | `crates/` | Rust 模块源码，不存放一次性分析材料 |
 | `database/` | 全新 PostgreSQL migration、脱敏 fixture、数据库边界说明 |
 | `docs/agents/` | Agent 工程技能的仓库级配置、任务追踪规则、标签映射和领域文档消费规则；不得复制产品或架构真相 |
