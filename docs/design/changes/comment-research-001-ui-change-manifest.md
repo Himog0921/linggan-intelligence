@@ -9,7 +9,7 @@
 - 来源：用户确定语料库为基石，评论取得即研究；旧工作台只继承精确语料选择和研究语义，未复制导航、Prisma、样式或聚类阈值。
 - 表面：新增 `/corpus/comments` 三视图、`/corpus/queries` 评论查询入口；Evidence 侧栏只把对应两个入口从禁用变为真实链接。创作者继续未接通。
 - 数据：页面消费 Evidence 读取接缝、Work Resource owner、Intelligence 选择/分析记录；没有原型样例进入生产页面。
-- 交互：查询、分页、源详情、精确片段收存、集合创建/筛选、人工标注修订。初次收存可选集合；集合改名/旧资产移动/导出未实现并已在产品页说明。
+- 交互：查询、分页、源详情、精确片段收存、集合创建/筛选、人工标注修订。资产整理 dialog 支持修改理由、加入/移出/移动单集合、撤销误收存和查看修订；查询 dialog 支持改名、条件修改和删除。集合改名/跨集合复用/导出仍未实现。
 - 样式：L1 Corpus Explorer、共享壳层、LIDS token、中文主表达、Serif 原声与文字 Tab；页面前缀 `lgi-research`，无新主题或全局样式覆盖。
 - 权限：本机研究 Host/Origin 校验、no-store、来源资格收缩沿源/资产/分析读取传播；不新增敏感材料外发许可。
 - 验证：见 [验收记录](../acceptance/comment-research-001-acceptance.md)。合成 UI 来源均显式含 SYNTHETIC / NOT EVIDENCE；未发生真实模型访问、共享迁移、部署或用户验收。

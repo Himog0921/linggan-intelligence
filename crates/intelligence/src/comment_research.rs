@@ -134,7 +134,15 @@ pub async fn save_comment_asset(
         return Err(CommentResearchError::IdempotencyConflict);
     }
     tx.commit().await?;
-    Ok(json!({"assetRef":request.asset_ref,"state":"SAVED","purpose":"internal_research"}))
+    let current = sqlx::query(
+        "SELECT revision,withdrawn FROM linggan_comment_asset_current WHERE asset_ref=$1",
+    )
+    .bind(request.asset_ref)
+    .fetch_one(database.pool())
+    .await?;
+    Ok(
+        json!({"assetRef":request.asset_ref,"state":if current.get::<bool,_>("withdrawn"){"WITHDRAWN"}else{"SAVED"},"revision":current.get::<i32,_>("revision"),"purpose":"internal_research"}),
+    )
 }
 
 #[derive(Debug, Deserialize)]
@@ -167,15 +175,23 @@ pub async fn save_research_query(
         return Err(CommentResearchError::IdempotencyConflict);
     }
     tx.commit().await?;
-    Ok(json!({"queryRef":request.query_ref,"state":"SAVED","execution":"LATEST_ALLOWED_MATERIAL"}))
+    let current = sqlx::query(
+        "SELECT revision,deleted FROM linggan_comment_query_current WHERE query_ref=$1",
+    )
+    .bind(request.query_ref)
+    .fetch_one(database.pool())
+    .await?;
+    Ok(
+        json!({"queryRef":request.query_ref,"state":if current.get::<bool,_>("deleted"){"DELETED"}else{"SAVED"},"revision":current.get::<i32,_>("revision"),"execution":"LATEST_ALLOWED_MATERIAL"}),
+    )
 }
 
 pub async fn read_research_queries(database: &Database) -> Result<Value, CommentResearchError> {
-    let rows=sqlx::query("SELECT *,created_at::text AS saved_at FROM linggan_comment_saved_query ORDER BY created_at DESC,query_ref")
+    let rows=sqlx::query("SELECT *,created_at::text AS saved_at FROM linggan_comment_query_current WHERE NOT deleted ORDER BY created_at DESC,query_ref")
         .fetch_all(database.pool()).await?;
     Ok(
         json!({"items":rows.iter().map(|r|json!({"queryRef":r.get::<Uuid,_>("query_ref"),"name":r.get::<String,_>("name"),
-        "text":r.get::<String,_>("query_text"),"workRef":r.get::<Option<Uuid>,_>("work_public_ref"),"createdAt":r.get::<String,_>("saved_at")})).collect::<Vec<_>>() }),
+        "text":r.get::<String,_>("query_text"),"workRef":r.get::<Option<Uuid>,_>("work_public_ref"),"revision":r.get::<i32,_>("revision"),"createdAt":r.get::<String,_>("saved_at")})).collect::<Vec<_>>() }),
     )
 }
 
@@ -210,7 +226,7 @@ pub async fn save_research_collection(
 
 pub async fn read_research_collections(database: &Database) -> Result<Value, CommentResearchError> {
     let rows=sqlx::query("SELECT collection.*,count(asset.asset_ref) AS asset_count FROM linggan_comment_collection collection
-        LEFT JOIN linggan_comment_asset asset USING(collection_ref) GROUP BY collection.collection_ref ORDER BY collection.created_at DESC,collection.collection_ref")
+        LEFT JOIN linggan_comment_asset_current asset ON asset.collection_ref=collection.collection_ref AND NOT asset.withdrawn GROUP BY collection.collection_ref ORDER BY collection.created_at DESC,collection.collection_ref")
         .fetch_all(database.pool()).await?;
     Ok(
         json!({"items":rows.iter().map(|r|json!({"collectionRef":r.get::<Uuid,_>("collection_ref"),"name":r.get::<String,_>("name"),"savedCount":r.get::<i64,_>("asset_count")})).collect::<Vec<_>>() }),
@@ -223,12 +239,12 @@ pub async fn read_comment_assets(
     after: Option<Uuid>,
 ) -> Result<Value, CommentResearchError> {
     let total: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_comment_asset WHERE ($1::uuid IS NULL OR collection_ref=$1)",
+        "SELECT count(*) FROM linggan_comment_asset_current WHERE NOT withdrawn AND ($1::uuid IS NULL OR collection_ref=$1)",
     )
     .bind(collection_ref)
     .fetch_one(database.pool())
     .await?;
-    let mut rows=sqlx::query("SELECT *,created_at::text AS saved_at FROM linggan_comment_asset WHERE ($1::uuid IS NULL OR collection_ref=$1)
+    let mut rows=sqlx::query("SELECT *,created_at::text AS saved_at FROM linggan_comment_asset_current WHERE NOT withdrawn AND ($1::uuid IS NULL OR collection_ref=$1)
         AND ($2::uuid IS NULL OR asset_ref>$2) ORDER BY asset_ref LIMIT 21")
         .bind(collection_ref).bind(after).fetch_all(database.pool()).await?;
     let more = rows.len() > 20;
@@ -249,7 +265,7 @@ pub async fn read_comment_assets(
             .transpose()?;
         items.push(json!({"assetRef":row.get::<Uuid,_>("asset_ref"),"sourceRef":source_ref,"quote":quote,
             "reason":if source.is_some(){Some(row.get::<String,_>("reason"))}else{None},
-            "collectionRef":row.get::<Option<Uuid>,_>("collection_ref"),"createdAt":row.get::<String,_>("saved_at"),
+            "collectionRef":row.get::<Option<Uuid>,_>("collection_ref"),"revision":row.get::<i32,_>("revision"),"createdAt":row.get::<String,_>("saved_at"),
             "eligibility":if source.is_some(){"READABLE"}else{"SOURCE_UNAVAILABLE"},"isCurrentSource":source.as_ref().map(|s|s.is_current)}));
     }
     Ok(

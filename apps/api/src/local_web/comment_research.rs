@@ -10,7 +10,8 @@ use axum::{
 };
 use linggan_evidence::comment_research_read::*;
 use linggan_intelligence::{
-    comment_analysis::*, comment_research::*, comment_research_projection::*,
+    comment_analysis::*, comment_research::*, comment_research_management::*,
+    comment_research_projection::*,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -42,6 +43,18 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route(
             "/api/local/comment-research/annotations",
             post(correct_annotation),
+        )
+        .route(
+            "/api/local/comment-research/assets/revisions",
+            post(revise_asset),
+        )
+        .route(
+            "/api/local/comment-research/assets/{asset_ref}/history",
+            get(asset_history),
+        )
+        .route(
+            "/api/local/comment-research/queries/revisions",
+            post(revise_query),
         )
         .route("/api/local/comment-research/groups", get(groups))
         .route(
@@ -227,6 +240,33 @@ async fn save_asset(
         return unavailable();
     };
     respond(save_comment_asset(db, &request).await)
+}
+async fn revise_asset(
+    State(state): State<LocalWebState>,
+    Json(request): Json<ReviseCommentAsset>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return unavailable();
+    };
+    respond(revise_comment_asset(db, &request).await)
+}
+async fn asset_history(
+    State(state): State<LocalWebState>,
+    Path(asset_ref): Path<Uuid>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return unavailable();
+    };
+    respond(read_comment_asset_history(db, asset_ref).await)
+}
+async fn revise_query(
+    State(state): State<LocalWebState>,
+    Json(request): Json<ReviseResearchQuery>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return unavailable();
+    };
+    respond(revise_research_query(db, &request).await)
 }
 async fn correct_annotation(
     State(state): State<LocalWebState>,

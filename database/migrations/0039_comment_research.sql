@@ -51,7 +51,7 @@ CREATE TABLE linggan_comment_analysis_work (
     lease_ref uuid,
     lease_until timestamptz,
     attempts integer NOT NULL DEFAULT 0 CHECK(attempts BETWEEN 0 AND 3),
-    failure_code text CHECK(failure_code IN ('provider_unavailable','invalid_output','source_unavailable','lease_expired')),
+    failure_code text CHECK(failure_code IN ('provider_unavailable','provider_timeout','invalid_output','source_unavailable','lease_expired')),
     result jsonb,
     created_at timestamptz NOT NULL DEFAULT scope_001_now(),
     updated_at timestamptz NOT NULL DEFAULT scope_001_now(),
@@ -83,4 +83,49 @@ WHERE package.accepted_at <= scope_001_now() AND NOT EXISTS (
 CREATE TRIGGER linggan_comment_asset_immutable BEFORE UPDATE OR DELETE ON linggan_comment_asset
 FOR EACH ROW EXECUTE FUNCTION linggan_plugin_runtime_forbid_mutation();
 CREATE TRIGGER linggan_comment_annotation_immutable BEFORE UPDATE OR DELETE ON linggan_comment_annotation
+FOR EACH ROW EXECUTE FUNCTION linggan_plugin_runtime_forbid_mutation();
+
+-- Original creation requests remain immutable; later edits never rewrite source references.
+CREATE TABLE linggan_comment_asset_revision (
+    revision_ref uuid PRIMARY KEY,
+    asset_ref uuid NOT NULL REFERENCES linggan_comment_asset(asset_ref),
+    revision integer NOT NULL CHECK(revision > 0),
+    reason text CHECK(char_length(reason) BETWEEN 1 AND 1000),
+    collection_ref uuid REFERENCES linggan_comment_collection(collection_ref),
+    withdrawn boolean NOT NULL,
+    change_reason text NOT NULL CHECK(char_length(change_reason) BETWEEN 1 AND 1000),
+    created_at timestamptz NOT NULL DEFAULT scope_001_now(),
+    CHECK(withdrawn OR reason IS NOT NULL),
+    UNIQUE(asset_ref,revision)
+);
+CREATE TABLE linggan_comment_query_revision (
+    revision_ref uuid PRIMARY KEY,
+    query_ref uuid NOT NULL REFERENCES linggan_comment_saved_query(query_ref),
+    revision integer NOT NULL CHECK(revision > 0),
+    name text NOT NULL CHECK(char_length(name) BETWEEN 1 AND 100),
+    query_text text NOT NULL CHECK(char_length(query_text) <= 200),
+    work_public_ref uuid REFERENCES linggan_material_content(public_ref),
+    deleted boolean NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT scope_001_now(),
+    UNIQUE(query_ref,revision)
+);
+CREATE VIEW linggan_comment_asset_current AS
+SELECT asset.asset_ref,asset.source_ref,asset.start_char,asset.end_char,asset.source_sha256,asset.created_at,
+ CASE WHEN edit.revision IS NULL THEN asset.reason ELSE edit.reason END AS reason,
+ CASE WHEN edit.revision IS NULL THEN asset.collection_ref ELSE edit.collection_ref END AS collection_ref,
+ COALESCE(edit.revision,0) AS revision,COALESCE(edit.withdrawn,false) AS withdrawn
+FROM linggan_comment_asset asset LEFT JOIN LATERAL
+ (SELECT * FROM linggan_comment_asset_revision WHERE asset_ref=asset.asset_ref ORDER BY revision DESC LIMIT 1) edit ON true;
+CREATE VIEW linggan_comment_query_current AS
+SELECT original.query_ref,original.created_at,COALESCE(edit.name,original.name) AS name,
+ COALESCE(edit.query_text,original.query_text) AS query_text,
+ CASE WHEN edit.revision IS NULL THEN original.work_public_ref ELSE edit.work_public_ref END AS work_public_ref,
+ COALESCE(edit.revision,0) AS revision,COALESCE(edit.deleted,false) AS deleted
+FROM linggan_comment_saved_query original LEFT JOIN LATERAL
+ (SELECT * FROM linggan_comment_query_revision WHERE query_ref=original.query_ref ORDER BY revision DESC LIMIT 1) edit ON true;
+CREATE TRIGGER linggan_comment_asset_revision_immutable BEFORE UPDATE OR DELETE ON linggan_comment_asset_revision
+FOR EACH ROW EXECUTE FUNCTION linggan_plugin_runtime_forbid_mutation();
+CREATE TRIGGER linggan_comment_saved_query_immutable BEFORE UPDATE OR DELETE ON linggan_comment_saved_query
+FOR EACH ROW EXECUTE FUNCTION linggan_plugin_runtime_forbid_mutation();
+CREATE TRIGGER linggan_comment_query_revision_immutable BEFORE UPDATE OR DELETE ON linggan_comment_query_revision
 FOR EACH ROW EXECUTE FUNCTION linggan_plugin_runtime_forbid_mutation();

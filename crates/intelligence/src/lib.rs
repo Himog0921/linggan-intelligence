@@ -14,3 +14,5 @@ pub use topic_workspace::{
 };
 
 pub const INTELLIGENCE_IMPLEMENTED: bool = true;
+
+pub mod comment_research_management;

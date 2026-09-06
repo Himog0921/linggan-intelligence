@@ -15,6 +15,7 @@ use sqlx::Row;
 use uuid::Uuid;
 
 pub const COMMENT_RULE_VERSION: &str = "comment-research.v1";
+pub const MAX_PROVIDER_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 pub const UNCONFIGURED_MODEL: &str = "not_configured";
 
 #[derive(Debug, Serialize)]
@@ -61,6 +62,7 @@ pub trait CommentModelPort {
 #[derive(Debug, Clone, Copy)]
 pub enum CommentAnalysisFailure {
     ProviderUnavailable,
+    ProviderTimeout,
     InvalidOutput,
     SourceUnavailable,
 }
@@ -68,6 +70,7 @@ pub enum CommentAnalysisFailure {
 impl CommentAnalysisFailure {
     fn code(self) -> &'static str {
         match self {
+            Self::ProviderTimeout => "provider_timeout",
             Self::ProviderUnavailable => "provider_unavailable",
             Self::InvalidOutput => "invalid_output",
             Self::SourceUnavailable => "source_unavailable",
@@ -257,10 +260,33 @@ pub async fn run_comment_analysis_once<P: CommentModelPort>(
     model_version: &str,
     provider: &P,
 ) -> Result<bool, CommentResearchError> {
+    run_comment_analysis_once_with_timeout(database, model_version, provider, MAX_PROVIDER_TIMEOUT)
+        .await
+}
+
+/// Callers may reduce the budget, never extend it beyond half of the 120-second lease.
+/// Timeout stops local waiting and drops the future. It cannot undo remote billing;
+/// transports must not detach local requests, and real provider budgets need their own grant.
+pub async fn run_comment_analysis_once_with_timeout<P: CommentModelPort>(
+    database: &Database,
+    model_version: &str,
+    provider: &P,
+    timeout: std::time::Duration,
+) -> Result<bool, CommentResearchError> {
+    if timeout.is_zero() || timeout > MAX_PROVIDER_TIMEOUT {
+        return Err(CommentResearchError::InvalidCommand);
+    }
+    let deadline = tokio::time::Instant::now() + timeout;
     let Some(input) = claim_comment_analysis(database, model_version).await? else {
         return Ok(false);
     };
-    match provider.analyze(&input).await {
+    let mut result = tokio::time::timeout_at(deadline, provider.analyze(&input))
+        .await
+        .unwrap_or(Err(CommentAnalysisFailure::ProviderTimeout));
+    if tokio::time::Instant::now() >= deadline {
+        result = Err(CommentAnalysisFailure::ProviderTimeout);
+    }
+    match result {
         Ok(output) => match validate_comment_analysis(&input, &output) {
             Ok(_) => complete_comment_analysis(database, &input, &output).await?,
             Err(_) => {

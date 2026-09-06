@@ -533,3 +533,6 @@ async fn assert_analysis_lease_recovery(db: &Database, source_ref: Uuid) {
             .is_err()
     );
 }
+
+#[path = "support/comment_research_management_tests.rs"]
+mod management_tests;
