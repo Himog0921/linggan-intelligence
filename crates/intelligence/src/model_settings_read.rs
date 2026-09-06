@@ -12,6 +12,7 @@ pub async fn read_model_settings_with_plan(
     synthetic: bool,
     focused_plan: Option<Uuid>,
 ) -> Result<Value, ModelError> {
+    ensure_model_schema(db).await?;
     let workspace=sqlx::query("SELECT workspace_ref,default_config_ref,active_auto_plan_ref,worker_last_seen_at::text AS worker_seen,worker_last_seen_at>scope_001_now()-interval '90 seconds' AS worker_recent,worker_state,worker_last_error FROM linggan_model_workspace WHERE singleton").fetch_one(db.pool()).await?;
     let connections=sqlx::query("SELECT c.connection_ref,c.enabled,c.revision,v.version_ref,v.name,v.api,v.base_url,v.local_endpoint,(SELECT result FROM linggan_model_invocation i WHERE i.connection_version_ref=v.version_ref AND operation IN ('connect','discover') ORDER BY i.created_at DESC LIMIT 1) AS test FROM linggan_model_connection c JOIN LATERAL(SELECT * FROM linggan_model_connection_version WHERE connection_ref=c.connection_ref ORDER BY revision DESC LIMIT 1)v ON true ORDER BY c.created_at")
         .fetch_all(db.pool()).await?;

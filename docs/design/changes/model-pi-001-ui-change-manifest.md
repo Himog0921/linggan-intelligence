@@ -17,3 +17,7 @@
 - 权限：loopback Host/Origin/no-store 复用；秘密 Keychain，仅有界 stdin；受控 fixture 是显式隔离模式。保存不调用；显式试运行、自动启用、独立历史范围；停用不派新调用，进行中的远端取消不保证。
 - 非目标/停止：不部署、迁移共享库、读其他凭据、真实外发材料或擅自启动现有服务；真实外部质量和语义聚类不能用 SDK/fixture 证明。没有新 reviewer；审核 verdict 在 PR，不写入代码分支产生循环。
 - 验收矩阵：设置→Pi→工作→严格输出/标注、未知用量/失败/暂停/切模型/重放、Source 资格、HTTP/静态页面、随机 Keychain、真实 SDK 三协议分别在 [验收记录](../acceptance/model-pi-001-acceptance.md) 标明层次。浏览器最终验收由根代理完成。
+
+## 同包返修
+
+用户最新决定为单页面+单连接弹窗，替代四区常驻导航。表面、状态、依赖和验收矩阵见实施计划的同包返修章节。复用 L1 Form Surface、既有原生 dialog、LIDS token 与中文错误；单实施者为根代理，工作树 `model-settings-repair`。

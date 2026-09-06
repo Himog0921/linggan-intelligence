@@ -74,3 +74,14 @@ test('provider credential echoes are rejected before model or catalog output is 
   const s=await server((req,res)=>{if(req.url.endsWith('/models')){res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({data:[{id:'synthetic-credential-only'}]}));}else success(res,'{"label":"synthetic-credential-only"}');});
   try{for(const operation of ['probe','discover']){const r=await execute(request(s.url,{operation}));assert.equal(r.failureCode,'secret_echo_rejected');assert.ok(!JSON.stringify(r).includes('synthetic-credential-only'));}}finally{await s.close();}
 });
+
+test('model calls work without a model catalog and endpoint failures remain actionable',async()=>{
+  const seen=[];
+  const s=await server((req,res)=>{seen.push(req.url);if(req.url==='/v1/chat/completions')success(res);else{res.writeHead(404);res.end('not found');}});
+  try {
+    assert.equal((await execute(request(s.url,{operation:'discover'}))).failureCode,'catalog_unavailable');
+    assert.equal((await execute(request(s.url))).ok,true);
+    assert.equal((await execute(request(s.url+'/wrong'))).failureCode,'provider_endpoint_not_found');
+    assert.deepEqual(seen,['/v1/models','/v1/chat/completions','/v1/wrong/chat/completions']);
+  }finally{await s.close();}
+});
