@@ -36,6 +36,8 @@ pub enum LeaseError {
     StationUnavailable,
     #[error("the work order did not freeze an installation and observation account")]
     FrozenControlMissing,
+    #[error("every step this work order froze is already done")]
+    WorkOrderAlreadySatisfied,
     #[error("collection control closed lease issuance: {reason_code}")]
     ControlBlocked { reason_code: String },
     #[error("the authorization behind this work order is no longer valid")]
@@ -211,7 +213,23 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
     .bind(work_order_ref)
     .execute(&mut **transaction)
     .await?;
-    let tasks = expand_into_tasks(&subject, &material_targets)?;
+    let tasks =
+        remaining_steps_for_work_order(transaction, work_order_ref, &subject, &material_targets)
+            .await?;
+    if tasks.is_empty() {
+        // Nothing left to do. Issuing an empty Lease would hand a station a permit with no work,
+        // and it would sit there until it expired — putting the Work Order straight back into the
+        // queue to be claimed again. Close it instead; `undo_failed_queue_claim` is guarded on
+        // `queue_state='leased'`, so this completion survives the caller's rollback.
+        sqlx::query(
+            "UPDATE collection_work_order SET queue_state='completed' \
+             WHERE work_order_ref=$1 AND queue_state='leased'",
+        )
+        .bind(work_order_ref)
+        .execute(&mut **transaction)
+        .await?;
+        return Err(LeaseError::WorkOrderAlreadySatisfied);
+    }
     for task in &tasks {
         insert_scheduled_task(transaction, task).await?;
     }
@@ -486,25 +504,44 @@ pub(crate) async fn expire_lapsed_leases_in_transaction(
     )
     .fetch_all(&mut **transaction)
     .await?;
-    if !expired.is_empty() {
-        // The expired Lease and its scheduled tasks stay immutable history. The
-        // Work Order returns to the shared pool so a later eligible station
-        // creates a new Lease/Task/Attempt rather than overwriting that record.
-        // A one-minute persisted delay prevents a dead browser from consuming
-        // a fresh account/platform slot in a tight claim-expire loop.
-        sqlx::query(
-            "UPDATE collection_work_order SET queue_state='queued',station_ref=NULL, \
-                 installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL, \
-                 retry_not_before_at=GREATEST(retry_not_before_at, \
-                    scope_001_now()+make_interval(secs=>$2)) \
-             WHERE work_order_ref=ANY($1) AND queue_state='leased'",
-        )
-        .bind(&expired)
-        .bind(EXPIRED_LEASE_RETRY_AFTER_SECONDS)
-        .execute(&mut **transaction)
-        .await?;
-    }
+    requeue_work_orders_after_release(transaction, &expired).await?;
     Ok(u64::try_from(expired.len()).unwrap_or(u64::MAX))
+}
+
+/// 释放一份租约之后，把它的工单交还给共享队列。
+///
+/// **每一条释放租约的路径都必须走这里。** 释放租约和交还工单是同一件事的两半：只做前一半，
+/// 工单就永远停在 `leased`、名下却没有活租约——共享 claim 只找 `queued`，于是没有任何一台
+/// 工位能再碰它，也没有任何巡检会回收它。它成为永久僵尸，还继续占着该来源的批量并发额度。
+///
+/// 2026-09-06 实测过这个后果：插件顶替（`teardown_installation`）当时只释放了租约，工单
+/// `f7942504` 就此卡死；渐进建档的候选查询只排除「排队中」和「有活租约」两种状态，看不见
+/// 这第三种，于是它冻结的作品被重新选进了新工单——同两篇作品因此被冻结了两次。
+///
+/// 过期与顶替共用同一条延迟：一个已经死掉的浏览器不该在 claim/expire 的紧循环里反复吃掉
+/// 账号与平台名额。租约本身和它名下的任务都保持为不可变历史，这里只动工单的队列态。
+pub(crate) async fn requeue_work_orders_after_release(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_refs: &[Uuid],
+) -> Result<(), sqlx::Error> {
+    if work_order_refs.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(
+        "UPDATE collection_work_order SET queue_state='queued',station_ref=NULL, \
+             installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL, \
+             retry_not_before_at=GREATEST(retry_not_before_at, \
+                scope_001_now()+make_interval(secs=>$2)) \
+         WHERE work_order_ref=ANY($1) AND queue_state='leased' \
+           AND NOT EXISTS (SELECT 1 FROM collection_work_order_lease live \
+                           WHERE live.work_order_ref=collection_work_order.work_order_ref \
+                             AND live.released_at IS NULL)",
+    )
+    .bind(work_order_refs)
+    .bind(EXPIRED_LEASE_RETRY_AFTER_SECONDS)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
 }
 
 async fn load_subject(
@@ -626,6 +663,66 @@ async fn reject_if_authorization_lapsed(
         return Err(LeaseError::AuthorizationLapsed);
     }
     Ok(())
+}
+
+/// 这张工单还剩哪些步骤没做完。
+///
+/// 任务在模型上属于**租约**（主键 `(lease_ref, sequence_no)`），而租约一旦释放，它名下的
+/// pending 任务就永久失效——派发查询硬性要求租约仍然存活。所以重新发租只能重造一套任务，
+/// 这是模型选择的结果，不是遗漏。
+///
+/// 但「重造」不等于「重做」。工单冻结的作品清单不会变，已完成的步骤是不可变历史；两者
+/// 相减才是这次租约真正要干的事。此前这里无条件全量展开，于是每次租约过期都把整批步骤
+/// 原样再跑一遍：2026-09-06 实测一张三篇作品的工单发了 9 次租约、生成 108 个步骤去完成
+/// 本该 12 步的活，同一篇正文被真实重复抓取 9 次——每一次都真的访问了平台、真的扣了配额。
+///
+/// 去重的键是「作品 + 能力」而不是任务 id：任务 id 每次生成都是新的随机值，正因如此
+/// `linggan_runtime_task` 上那条 `UNIQUE(task_spec_hash)` 约束从来拦不住重复（哈希的
+/// 输入里就含着这个随机 id）。
+///
+/// 不带作品身份的步骤（`author_profile` / `profile_discovery` / `discovery_search`）不参与
+/// 去重：它们描述的是「再看一眼当前的发现面」，本就该每轮重做。
+async fn remaining_steps_for_work_order(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+    subject: &LeaseSubject,
+    material_targets: &[MaterialTarget],
+) -> Result<Vec<ProducerTaskSpec>, LeaseError> {
+    let finished: Vec<(Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT DISTINCT runtime.task_spec->'target'->>'contentExternalId', \
+                runtime.task_spec->'capabilitiesRequested'->>0 \
+         FROM collection_work_order_lease lease \
+         JOIN collection_work_order_lease_task task USING(lease_ref) \
+         JOIN linggan_runtime_task runtime ON runtime.task_id = task.task_id \
+         WHERE lease.work_order_ref = $1 AND task.execution_state = 'completed'",
+    )
+    .bind(work_order_ref)
+    .fetch_all(&mut **transaction)
+    .await?;
+    let done: std::collections::HashSet<(String, String)> = finished
+        .into_iter()
+        .filter_map(|(content, capability)| Some((content?, capability?)))
+        .collect();
+
+    Ok(expand_into_tasks(subject, material_targets)?
+        .into_iter()
+        .filter(|task| {
+            let content = task
+                .raw()
+                .pointer("/target/contentExternalId")
+                .and_then(Value::as_str);
+            let capability = task
+                .raw()
+                .pointer("/capabilitiesRequested/0")
+                .and_then(Value::as_str);
+            match (content, capability) {
+                (Some(content), Some(capability)) => {
+                    !done.contains(&(content.to_owned(), capability.to_owned()))
+                }
+                _ => true,
+            }
+        })
+        .collect())
 }
 
 /// 把一张工单展开成派发任务序列。
@@ -877,6 +974,8 @@ fn freeze_capture_identity(subject: &LeaseSubject) -> Value {
 #[cfg(test)]
 mod tests {
     use super::{LeaseSubject, MaterialTarget, expand_into_tasks};
+    use linggan_contracts::ProducerTaskSpec;
+    use serde_json::Value;
     use uuid::Uuid;
 
     fn subject() -> LeaseSubject {
@@ -967,5 +1066,62 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].raw()["capabilitiesRequested"][0], "content_detail");
         assert_eq!(tasks[0].raw()["commentLimit"], "not_requested");
+    }
+
+    /// 重新发租只补未完成的步骤，不把整批重跑一遍。
+    ///
+    /// 任务属于租约，租约释放后它名下的 pending 任务就永久失效，所以重新发租必须重造一套。
+    /// 但「重造」不等于「重做」：已完成的步骤是不可变历史，减掉它们才是这次真正要干的活。
+    /// 2026-09-06 实测缺这一步的后果：一张三篇作品的工单发了 9 次租约、生成 108 个步骤去
+    /// 完成本该 12 步的活，同一篇正文被真实重复抓取 9 次，每次都实扣平台配额。
+    #[test]
+    fn remaining_steps_skip_what_this_work_order_already_finished() {
+        let subject = subject();
+        let targets = [MaterialTarget {
+            content_external_id: "note-fixture".to_owned(),
+            comment_limit: 20,
+            reply_expand_limit: 2,
+            acquire_media: true,
+        }];
+        let all = expand_into_tasks(&subject, &targets).expect("tasks");
+        assert_eq!(all.len(), 4, "一篇作品展开为四个 lane");
+
+        let step = |task: &ProducerTaskSpec| {
+            (
+                task.raw()
+                    .pointer("/target/contentExternalId")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+                task.raw()
+                    .pointer("/capabilitiesRequested/0")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            )
+        };
+        // 每一步都带得出「作品 + 能力」——这正是去重用的键。用任务 id 做不到：它每次生成
+        // 都是新的随机值，`UNIQUE(task_spec_hash)` 也因此从来拦不住重复。
+        for task in &all {
+            let (content, capability) = step(task);
+            assert_eq!(content.as_deref(), Some("note-fixture"));
+            assert!(capability.is_some(), "每一步只请求一个能力");
+        }
+        let capabilities: Vec<_> = all.iter().filter_map(|task| step(task).1).collect();
+        assert_eq!(
+            capabilities,
+            ["content_detail", "media_slots", "comments", "replies"],
+        );
+
+        // 模拟「详情已完成」：按同一个键过滤，应当只剩后三步，且顺序不变。
+        let done: std::collections::HashSet<(String, String)> =
+            [("note-fixture".to_owned(), "content_detail".to_owned())].into();
+        let remaining: Vec<_> = all
+            .iter()
+            .filter(|task| match step(task) {
+                (Some(content), Some(capability)) => !done.contains(&(content, capability)),
+                _ => true,
+            })
+            .filter_map(|task| step(task).1)
+            .collect();
+        assert_eq!(remaining, ["media_slots", "comments", "replies"]);
     }
 }

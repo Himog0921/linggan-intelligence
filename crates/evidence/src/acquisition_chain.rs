@@ -1618,7 +1618,31 @@ async fn advance_progressive_archive_in_transaction(
     .await
     .map_err(AcquisitionChainError::from)?;
     if content_refs.is_empty() {
-        return Ok(ProgressiveAdvance::Skipped("no_missing_accepted_work"));
+        // 「一篇都挑不出来」有两种完全不同的原因，必须分开告诉用户。
+        //
+        // 候选查询同时排除了「已经有详情的」和「已经在别的批次里在途的」。若只报
+        // `no_missing_accepted_work`，正在跑的批次会被说成「没有可继续的内容」——人看到的
+        // 是「点了没反应」，而实际上活正在进行。此前 `detail_batch_in_flight` 这个理由在
+        // 全仓库没有任何一处会产生，页面上那条「建档进行中」的提示永远不会出现。
+        let in_flight: bool = sqlx::query_scalar(
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM collection_work_order work_order \
+                 JOIN collection_work_order_material_target scope USING (work_order_ref) \
+                 LEFT JOIN collection_work_order_lease lease USING (work_order_ref) \
+                 WHERE work_order.target_ref=$1 \
+                   AND (work_order.queue_state='queued' \
+                        OR (lease.released_at IS NULL \
+                            AND lease.expires_at>scope_001_now())))",
+        )
+        .bind(target_ref)
+        .fetch_one(&mut **transaction)
+        .await
+        .map_err(AcquisitionChainError::from)?;
+        return Ok(ProgressiveAdvance::Skipped(if in_flight {
+            "detail_batch_in_flight"
+        } else {
+            "no_missing_accepted_work"
+        }));
     }
     let material_targets = content_refs
         .iter()
