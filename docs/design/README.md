@@ -113,3 +113,7 @@
 LIDS 现在统一约束全项目的设计表达，但其成熟度仍为 Proposed。DESIGN-002 只在 Topic 合成参考页的边界内验证 L2 采用记录、PAT-001–PAT-004 和 PAGE-TOPIC-001。它不证明或决定完整组件库、字体资产、前端技术路径、真实数据字段、权限/行动合同、完整 P0 或任何生产页面实现。它同样不把现有页面草案、首页形态、架构图、旧工作台或外部产品转化为实现许可。
 
 当首个 UI 切片进入明确的产品原型和 SCOPE 后，先创建最小的页面规格以及它实际依赖的基础/模式/组件规则，再开始编码。
+
+## COMMENT-RESEARCH-001 交付分支
+
+[页面规格](pages/comment-research-page.md)、[变更清单](changes/comment-research-001-ui-change-manifest.md)、[实施验收](acceptance/comment-research-001-acceptance.md) 记录本包三视图及真实模型缺口；不把源码页当作部署或用户验收。

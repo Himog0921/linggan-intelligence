@@ -774,6 +774,8 @@ dependencies = [
 name = "linggan-intelligence"
 version = "0.1.0"
 dependencies = [
+ "linggan-contracts",
+ "linggan-evidence",
  "linggan-storage-postgres",
  "serde",
  "serde_json",
@@ -801,6 +803,7 @@ name = "linggan-worker"
 version = "0.1.0"
 dependencies = [
  "linggan-evidence",
+ "linggan-intelligence",
  "linggan-storage-postgres",
  "sha2 0.11.0",
  "tokio",

@@ -7,6 +7,7 @@ publish.workspace = true
 default-run = "linggan-worker"
 
 [dependencies]
+linggan-intelligence = { path = "../../crates/intelligence" }
 linggan-evidence = { path = "../../crates/evidence" }
 linggan-storage-postgres = { path = "../../crates/storage-postgres" }
 sha2 = "0.11.0"
@@ -16,6 +17,10 @@ uuid = { workspace = true, features = ["v4"] }
 [[bin]]
 name = "linggan-media-worker"
 path = "src/bin/media_worker.rs"
+
+[[bin]]
+name = "linggan-comment-worker"
+path = "src/bin/comment_worker.rs"
 
 [lints]
 workspace = true

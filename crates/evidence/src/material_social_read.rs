@@ -508,7 +508,7 @@ pub async fn read_authorized_research_comments(
         "SELECT comment.material_ref,comment.is_reply,left(comment.body_text,4000) AS body_text, \
              char_length(comment.body_text)>4000 AS body_truncated,comment.body_state,comment.observed_at, \
              count(*) OVER() AS total_count \
-         FROM linggan_material_comment_current comment JOIN linggan_runtime_capture_package package USING(package_ref) \
+         FROM linggan_material_comment_current comment JOIN linggan_comment_research_readable readable USING(material_ref) JOIN linggan_runtime_capture_package package ON package.package_ref=comment.package_ref \
          WHERE comment.content_public_ref=$1 AND package.accepted_at <= scope_001_now() \
            AND ($2::uuid IS NULL OR comment.material_ref > $2) \
            AND ($3::text IS NULL OR lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($3) || '%') \
@@ -521,7 +521,8 @@ pub async fn read_authorized_research_comments(
     .await?;
     let total = sqlx::query_scalar::<_, i64>(
         "SELECT count(*) FROM linggan_material_comment_current comment \
-         JOIN linggan_runtime_capture_package package USING(package_ref) \
+         JOIN linggan_comment_research_readable readable USING(material_ref) \
+         JOIN linggan_runtime_capture_package package ON package.package_ref=comment.package_ref \
          WHERE comment.content_public_ref=$1 AND package.accepted_at <= scope_001_now() \
            AND ($2::text IS NULL OR lower(COALESCE(comment.body_text,'')) LIKE '%' || lower($2) || '%')",
     )

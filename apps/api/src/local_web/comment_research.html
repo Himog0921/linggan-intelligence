@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="linggan-intelligence">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{TITLE}} · Linggan Intelligence</title>
+<link rel="stylesheet" href="/assets/comment-research.css"><script src="/assets/comment-research.js" defer></script></head>
+<body><div class="v7-app">{{HEADER}}<div class="v7-shell">
+<aside class="v7-side" aria-label="语料导航">
+<a class="v7-side-nav" href="/corpus/evidence"><i>01</i><span>证据库</span></a>
+<a class="v7-side-nav" href="/corpus/comments" {{COMMENT_CURRENT}}><i>02</i><span>评论研究</span></a>
+<span class="v7-side-nav" aria-disabled="true"><i>03</i><span>创作者</span></span>
+<a class="v7-side-nav" href="/corpus/queries" {{QUERY_CURRENT}}><i>04</i><span>已存查询</span></a>
+<div class="v7-side-foot">材料到达即可研究<br>内部受限研究入口</div></aside>
+<main class="lgi-research" data-initial-view="{{VIEW}}">
+<div class="lgi-research-heading"><div><h1>{{TITLE}}</h1><p>从真实表达理解问题，保留每一次选择的来源。</p></div><span id="model-state" class="lgi-research-status">模型尚未接入</span></div>
+<nav class="lgi-research-tabs" aria-label="评论研究视图"><a href="?view=voices" data-view="voices">原声浏览</a><a href="?view=groups" data-view="groups">问题分组</a><a href="?view=assets" data-view="assets">语料资产</a></nav>
+<p class="lgi-research-boundary">仅包含已经接纳、当前允许研究的观察样本。评论用户身份隐藏；数量不代表平台总体或需求规模。</p>
+<form id="search-form" class="lgi-research-tools"><label class="lgi-research-grow">检索原声<input id="search-text" type="search" maxlength="200" placeholder="查找一句表达、一个困扰或关键词"></label><button type="submit">查询</button><button type="button" id="save-query-open">保存查询</button></form>
+<div id="asset-tools" class="lgi-research-tools" hidden><label>集合<select id="collection-filter"><option value="">全部集合</option></select></label><button type="button" id="collection-open">新建集合</button></div>
+<div class="lgi-research-result-heading"><h2 id="result-title">原声浏览</h2><span id="result-count"></span><button type="button" id="reload">刷新</button></div>
+<p id="feedback" role="status" aria-live="polite"></p><div id="results" aria-busy="true"></div>
+<div class="lgi-research-pagination"><button type="button" id="previous" hidden>上一页</button><button type="button" id="next" hidden>下一页</button></div>
+</main></div></div>
+<dialog id="research-detail" class="lgi-research-dialog"><div class="lgi-research-dialog-heading"><h2>原声与研究记录</h2><button type="button" data-close="research-detail">关闭</button></div><div id="detail-content"></div></dialog>
+<dialog id="research-form-dialog" class="lgi-research-dialog lgi-research-form-dialog"><form id="research-command-form"><div class="lgi-research-dialog-heading"><h2 id="command-title"></h2><button type="button" data-close="research-form-dialog">取消</button></div><div id="command-fields"></div><p id="command-feedback" role="status"></p><button type="submit" id="command-submit">保存</button></form></dialog>
+</body></html>

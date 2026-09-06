@@ -19,6 +19,11 @@
 
 | 文档 | 状态 | 用途 |
 |---|---|---|
+| [plans/active/comment-research-001.md](plans/active/comment-research-001.md) | 活跃计划 | Issue #167 评论研究 A/B/C 的首包实施合同与明确模型缺口 |
+| [pages/comment-research.md](pages/comment-research.md) | 权威当前；交付分支 | 原声、问题分组、语料资产与已存查询的用户语义和代码数据入口 |
+| [design/pages/comment-research-page.md](design/pages/comment-research-page.md) | 权威当前；交付分支 | 评论研究的 L1 Corpus Explorer 规格与状态/交互边界 |
+| [design/changes/comment-research-001-ui-change-manifest.md](design/changes/comment-research-001-ui-change-manifest.md) | 权威当前；交付分支 | 评论研究三视图、共享导航和内部研究权限的 UI 变更清单 |
+| [design/acceptance/comment-research-001-acceptance.md](design/acceptance/comment-research-001-acceptance.md) | 一次性报告 | 本包自动、隔离 PostgreSQL/API/UI 与真实模型的分层验收记录 |
 | [`current-state.md`](current-state.md) | 权威当前 | 当前阶段、事项队列和决策缺口 |
 | [`development-stage-tracker.md`](development-stage-tracker.md) | 权威当前 | 从开发基线到真实运行与业务验收的全项目阶段总表、阶段证据和 Mog 跟进入口 |
 | [`governance/file-placement-standard.md`](governance/file-placement-standard.md) | 权威当前 | 文件分类、命名、放置、归档与生成物规则 |

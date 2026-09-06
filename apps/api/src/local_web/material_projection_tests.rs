@@ -220,7 +220,13 @@ pub(super) async fn fetch_detail(database: &Database, list: &Value) -> Value {
 
 async fn request_json(database: &Database, url: &str) -> Value {
     let response = app_with_database(database.clone())
-        .oneshot(Request::builder().uri(url).body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri(url)
+                .header("Host", "127.0.0.1:3000")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
