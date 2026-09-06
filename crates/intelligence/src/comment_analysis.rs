@@ -98,6 +98,14 @@ pub async fn claim_comment_analysis(
     database: &Database,
     model_version: &str,
 ) -> Result<Option<CommentAnalysisInput>, CommentResearchError> {
+    claim_selected_comment_analysis(database, model_version, None).await
+}
+
+pub async fn claim_selected_comment_analysis(
+    database: &Database,
+    model_version: &str,
+    selected_work: Option<Uuid>,
+) -> Result<Option<CommentAnalysisInput>, CommentResearchError> {
     if model_version == UNCONFIGURED_MODEL || !valid_text(model_version, 100) {
         return Err(CommentResearchError::InvalidCommand);
     }
@@ -107,10 +115,10 @@ pub async fn claim_comment_analysis(
         WHERE state='running' AND lease_until<=scope_001_now()")
         .execute(&mut *tx).await?;
     let row=sqlx::query("SELECT work_ref,source_ref FROM linggan_comment_analysis_work work
-        WHERE state='pending' AND attempts<3 AND rule_version=$1 AND model_version=$2
+        WHERE state='pending' AND attempts<3 AND rule_version=$1 AND model_version=$2 AND ($3::uuid IS NULL OR work_ref=$3)
         AND EXISTS(SELECT 1 FROM linggan_comment_research_readable source WHERE source.material_ref=work.source_ref)
         ORDER BY created_at,work_ref FOR UPDATE SKIP LOCKED LIMIT 1")
-        .bind(COMMENT_RULE_VERSION).bind(model_version).fetch_optional(&mut *tx).await?;
+        .bind(COMMENT_RULE_VERSION).bind(model_version).bind(selected_work).fetch_optional(&mut *tx).await?;
     let Some(row) = row else {
         tx.commit().await?;
         return Ok(None);

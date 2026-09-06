@@ -19,6 +19,12 @@
 
 | 文档 | 状态 | 用途 |
 |---|---|---|
+| [plans/active/model-pi-001.md](plans/active/model-pi-001.md) | 活跃计划 | Issue #169 模型设置与真实 Pi 适配，依赖 #168 |
+| [pages/model-ai-settings.md](pages/model-ai-settings.md) | 权威当前；交付分支 | 个人设置四区、明确来源授权及调用/用量语义 |
+| [design/pages/model-ai-settings-page.md](design/pages/model-ai-settings-page.md) | 权威当前；交付分支 | L1 模型与 AI 页面/状态/交互规格 |
+| [design/changes/model-pi-001-ui-change-manifest.md](design/changes/model-pi-001-ui-change-manifest.md) | 权威当前；交付分支 | 模型设置及个人菜单的授权、共享接缝和验证矩阵 |
+| [design/acceptance/model-pi-001-acceptance.md](design/acceptance/model-pi-001-acceptance.md) | 一次性报告 | 真实 SDK/隔离 PG/HTTP/Keychain 与未证实层 |
+| [runbooks/model-pi-runtime.md](runbooks/model-pi-runtime.md) | 权威当前；交付分支 | 固定 Node/lock、worker、隔离预览与真实试验前提 |
 | [plans/active/comment-research-001.md](plans/active/comment-research-001.md) | 活跃计划 | Issue #167 评论研究 A/B/C 的首包实施合同与明确模型缺口 |
 | [pages/comment-research.md](pages/comment-research.md) | 权威当前；交付分支 | 原声、问题分组、语料资产与已存查询的用户语义和代码数据入口 |
 | [design/pages/comment-research-page.md](design/pages/comment-research-page.md) | 权威当前；交付分支 | 评论研究的 L1 Corpus Explorer 规格与状态/交互边界 |

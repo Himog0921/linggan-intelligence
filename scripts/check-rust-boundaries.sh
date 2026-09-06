@@ -46,7 +46,7 @@ done < <(find crates apps -name '*.rs' -not -path '*/target/*' | sort)
 # No unowned dumping grounds.
 while IFS= read -r directory; do
   report_error "$directory is an unowned catch-all directory"
-done < <(find crates apps -type d \( -name common -o -name utils -o -name helpers \) -not -path '*/target/*')
+done < <(find crates apps -type d -name node_modules -prune -o -type d \( -name common -o -name utils -o -name helpers \) -not -path '*/target/*' -print)
 
 # Dependency direction: contracts owns boundary contracts and depends on no storage or
 # business crate.

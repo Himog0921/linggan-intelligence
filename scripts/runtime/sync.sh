@@ -88,5 +88,9 @@ for binary in linggan-api linggan-worker linggan-media-worker; do
   [[ -x "target/debug/${binary}" ]] || { log "构建后仍找不到 target/debug/${binary}"; exit 1; }
 done
 
+# The independent comment loop runs inside linggan-worker. It needs the real SDK even
+# when launchd has no nvm shell initialization. This installs only fixed local packages.
+./scripts/runtime/prepare-pi-adapter.sh --install
+
 log "revision ${current} 就绪"
 }

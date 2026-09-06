@@ -7,6 +7,9 @@
 //! 这里不下载、不转录、不访问任何平台——它只判断「谁到期了」，然后走一遍与人点按钮
 //! 完全相同的授权链。
 //!
+//! MODEL-PI-001 additionally composes an independent asynchronous comment model loop.
+//! Its bounded external calls never run inside or block the patrol tick below.
+//!
 //! **自动化不是豁免权**：准入若说资源不够、风险暂停生效或额度触顶，tick 也只能记下理由
 //! 然后等下一轮。
 
@@ -33,6 +36,9 @@ async fn main() {
             return;
         }
     };
+    tokio::spawn(linggan_intelligence::model_runner::run_model_worker(
+        database.clone(),
+    ));
     println!(
         "linggan worker: patrol tick every {}s",
         TICK_INTERVAL.as_secs()

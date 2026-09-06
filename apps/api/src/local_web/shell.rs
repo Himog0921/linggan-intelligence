@@ -8,6 +8,7 @@ pub enum PrimarySurface {
     Corpus,
     Collection,
     Topic,
+    Settings,
 }
 
 struct PrimaryEntry {
@@ -187,7 +188,7 @@ pub fn global_header(
           <div class="v7-global-flex" aria-hidden="true"></div>
           <div class="v7-global-system">
             <div class="v7-system-boundary">{boundary_label}</div>
-            <button class="v7-global-command" disabled aria-disabled="true"><span>&gt; 输入命令</span><kbd>/</kbd></button>
+            <details class="v7-personal-menu"><summary class="v7-global-command">个人菜单</summary><nav aria-label="个人菜单"><a href="/settings">设置</a></nav></details>
           </div>
         </div>
         <div class="v7-context-row">
