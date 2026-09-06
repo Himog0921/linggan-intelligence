@@ -16,7 +16,29 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 pub const MINIMUM_PLUGIN_VERSION: &str = "0.8.34";
+/// How recently an installation must have checked in to be considered on duty.
+///
+/// This is a liveness question — is that browser still there — and it stays short. A worker
+/// that has been silent for twenty minutes cannot be handed platform work.
 pub const CONTROL_FRESHNESS_MINUTES: i32 = 20;
+/// How long one passive account-eligibility observation stays usable.
+///
+/// This answers a different question from [`CONTROL_FRESHNESS_MINUTES`]: not "is the browser
+/// alive" but "is this platform account still in a state we may work with". The two shared one
+/// constant until 2026-09-06, which silently coupled them.
+///
+/// Twenty minutes was far too short for the second question, because the only way to refresh
+/// this observation is to read an *already open* XHS document — the producer will not open,
+/// reload, or navigate a tab to get it. Closing the last XHS tab therefore stopped every deep
+/// archive within twenty minutes, with no error recorded anywhere: capacity selection simply
+/// skipped every work order and the queue looked empty. Observed on 2026-09-06, where a target
+/// sat with twenty-two ready tasks for eight hours while all nine other control checks passed.
+///
+/// A platform login survives for days, so six hours is still a conservative claim about it. The
+/// window only decides how long we may act on the last real observation; it never invents one.
+/// Any dispatch that comes back with an account state still forces a fresh passive read, and a
+/// real failure still ends the run — this widens patience, not trust.
+pub const ACCOUNT_ELIGIBILITY_TTL_MINUTES: i32 = 360;
 pub const DEFAULT_MONITOR_INTERVAL_SECONDS: i32 = 86_400;
 pub const MINIMUM_MONITOR_INTERVAL_SECONDS: i32 = 21_600;
 pub const MAXIMUM_MONITOR_INTERVAL_SECONDS: i32 = 604_800;
@@ -504,7 +526,7 @@ pub async fn report_account_eligibility(
     .bind(installation_ref)
     .bind(state.as_str())
     .bind(state.reason_code())
-    .bind(CONTROL_FRESHNESS_MINUTES)
+    .bind(ACCOUNT_ELIGIBILITY_TTL_MINUTES)
     .execute(&mut *transaction)
     .await?;
     let binding_required: bool = sqlx::query_scalar(
@@ -2627,5 +2649,22 @@ mod tests {
         assert_eq!(first, replay, "same target must not drift across processes");
         assert!((0..86_400).contains(&first));
         assert!((0..21_600).contains(&monitor_schedule_slot_seconds(target_ref, 21_600)));
+    }
+
+    /// Account eligibility and installation liveness answer different questions and must not
+    /// share one window again. They were the same constant until 2026-09-06, and the coupling
+    /// meant that closing the last XHS tab stopped every deep archive within twenty minutes
+    /// while nothing was recorded as failing.
+    #[test]
+    fn account_eligibility_outlives_installation_liveness() {
+        assert!(
+            ACCOUNT_ELIGIBILITY_TTL_MINUTES > CONTROL_FRESHNESS_MINUTES,
+            "an eligibility observation must stay usable longer than a heartbeat window; \
+             refreshing it requires an already-open platform document, a heartbeat does not",
+        );
+        // Liveness stays short on purpose: a silent browser cannot be given platform work.
+        assert_eq!(CONTROL_FRESHNESS_MINUTES, 20);
+        // Still far shorter than a real platform login, so this remains a conservative claim.
+        assert_eq!(ACCOUNT_ELIGIBILITY_TTL_MINUTES, 360);
     }
 }
