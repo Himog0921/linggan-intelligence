@@ -8,6 +8,13 @@
 
 ## 当前阶段
 
+### COMMENT-RESEARCH-001 / Issue #167（当前交付分支；模型接入未完成）
+
+Mog 已授权一个子代理实施、根代理集中审核，先推进 P00 直接依赖与 P01 评论研究，尚不启动后续产品包。实施基线 `be1e6fb83650b376ee22e6fdec07241b8f604614`，分支 `codex/comment-research-001`；自包含合同见 [comment-research-001.md](plans/active/comment-research-001.md)。源码接入原声浏览、问题分组、语料资产与服务端已存查询，人工收存不再依赖 AI。`0039_comment_research.sql` 仅在隔离 PostgreSQL 验证，已登记迁移脚本但未应用共享库。
+
+评论分析有持久队列、租约恢复与严格候选接纳接口，独立 `linggan-comment-worker --queue-only [--once]` 只入队。真实模型/费用/敏感材料处理许可未收口；没有真实 provider 消费器、语义聚类或真实质量证明，P01-C 和全包不能因此标为完成。固定 HEAD 后由根代理一次集中审核；当前未 merge、未部署、未启动共享 worker，Mog 业务验收未发生。
+
+
 ### COLLECTION-SCHEDULER-SCALE-001（当前源码实施项；尚未进入共享运行态）
 
 Mog 已明确本轮目标不是临时证明一条采集链，而是把已有的自动观察能力收束为能在大量目标、多个工位和多种任务来源下持续运行的统一调度系统。实施位于独立 worktree 的

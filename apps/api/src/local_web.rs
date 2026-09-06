@@ -3,6 +3,7 @@ mod collection_dispatch;
 mod collection_intake;
 mod collection_targets_view;
 mod collection_tasks_view;
+mod comment_research;
 mod creator_lifecycle_api;
 #[cfg(test)]
 mod creator_lifecycle_tests;
@@ -311,6 +312,7 @@ fn router(state: LocalWebState) -> Router {
         .merge(collection_api_routes())
         .merge(creator_lifecycle_api::routes())
         .merge(topic_workspace::routes())
+        .merge(comment_research::routes())
         .route("/corpus", get(corpus_entry))
         .route("/corpus/evidence", get(evidence_library))
         .route("/collection", get(collection_entry))
@@ -398,7 +400,9 @@ fn material_api_routes() -> Router<LocalWebState> {
         )
         .route(
             "/api/local/work-resources/{public_ref}/comments",
-            get(material_projection::research_comments_json),
+            get(material_projection::research_comments_json).layer(axum::middleware::from_fn(
+                comment_research::local_research_guard,
+            )),
         )
         .route(
             "/api/local/work-resources/{public_ref}/reobserve",
@@ -3579,9 +3583,9 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
       <div class="v7-shell">
         <aside class="v7-side" aria-label="语料导航">
           <a class="v7-side-nav" href="/corpus/evidence" aria-current="page"><i>01</i><span>证据库</span><b class="ev-rail-count" id="ev-rail-count" hidden></b></a>
-          <span class="v7-side-nav" aria-disabled="true"><i>02</i><span>评论研究</span></span>
+          <a class="v7-side-nav" href="/corpus/comments"><i>02</i><span>评论研究</span></a>
           <span class="v7-side-nav" aria-disabled="true"><i>03</i><span>创作者</span></span>
-          <span class="v7-side-nav" aria-disabled="true"><i>04</i><span>已存查询</span></span>
+          <a class="v7-side-nav" href="/corpus/queries"><i>04</i><span>已存查询</span></a>
           <div class="v7-side-foot"><span class="v7-side-dot"></span><span class="v7-zh-status">只读本机材料投影</span><br><span class="v7-zh-status">列表与详情不触发采集</span></div>
         </aside>
 

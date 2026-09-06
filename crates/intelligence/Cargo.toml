@@ -9,6 +9,7 @@ publish.workspace = true
 workspace = true
 
 [dependencies]
+linggan-evidence = { path = "../evidence" }
 linggan-storage-postgres = { path = "../storage-postgres" }
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
@@ -18,4 +19,5 @@ thiserror.workspace = true
 uuid = { workspace = true, features = ["serde", "v4"] }
 
 [dev-dependencies]
+linggan-contracts = { path = "../contracts" }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }

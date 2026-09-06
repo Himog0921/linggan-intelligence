@@ -208,6 +208,7 @@ migrate() {
   apply_migration_once "0036_monitor_scheduling_clarity" "$project_root/database/migrations/0036_monitor_scheduling_clarity.sql"
   apply_migration_once "0037_collection_scheduler_scale" "$project_root/database/migrations/0037_collection_scheduler_scale.sql"
   apply_migration_once "0038_detail_only_material_scope" "$project_root/database/migrations/0038_detail_only_material_scope.sql"
+  apply_migration_once "0039_comment_research" "$project_root/database/migrations/0039_comment_research.sql"
 }
 
 case "$command_name" in

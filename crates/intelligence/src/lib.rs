@@ -1,6 +1,9 @@
 //! Domain intelligence interfaces. Topic workspaces are explicit, versioned human research
 //! decisions over Work Resource identities; they never manufacture Evidence or source facts.
 
+pub mod comment_analysis;
+pub mod comment_research;
+pub mod comment_research_projection;
 mod topic_workspace;
 
 pub use topic_workspace::{

@@ -286,3 +286,7 @@ Mog 在实际页面上判定：rail 复用与上下文行完全相同的点阵�
 - **LIDS 冲突裁定**：首版照搬了参考的可见页标题与第二条五格读数，经 exact-head 独立复审判定与 `LIDS-PAT-001 / DESIGN-003` 冲突。修正后每页只保留 `.v7-sr-only` `h1`，两个读数只进共享 Context Bar，并直接显示 scope/source；共享 `shell.css` 仍是 KPI 样式唯一 owner。删除新增渐变与字符图标，新增 spacing 只使用 4/8/12/16/24/32px ladder，新增 focus 不在页面层重声明。
 - **Data Truth / 交互修正**：Operations `trace/review` 不再被 `now` 投影覆盖；恢复数只计入 `recovery_for` 有明确动作的原因；Runtime 不再把存在插件版本冒充在线工位；creator/keyword 共用同一份 kind-aware lifecycle 文案。Task Frozen Work 先选最近 Work / Lease，再展开该 Lease 全部 Task，并继续按选中 `task_id` 注入；Inspector 状态 class 与文案同步，零任务/schema 不可用/读取失败均为明确终态；tab 补齐 ARIA、`hidden` 与方向/Home/End 键。
 - **验证边界**：main 集成后的 format、workspace check/test、JavaScript、UI handbook、governance、完整 Work/Material/Corpus/Topic/API PostgreSQL 69 项、dispatch 8 项与 Collection Control `8 + 11` 项已通过；一次性数据库、container、volume 已清理。当前 source tree 的无数据库 Chrome 152 / 1440×900 五页终态为 0 overflow、2 个直接显示 scope/source 的 KPI、唯一 1×1 读屏 h1、0 第二读数条、0 loading 与 0 应用 console issue。有数据交互由 PostgreSQL/source tests 而非已拒绝首版浏览器结果证明；exact-head 复审、main 合并与 `:3000` 运行时证据按实际动作另记。不包含共享 DB、Worker、插件、真实平台、外部部署或窄屏支持。
+
+## 2026-09-06 · COMMENT-RESEARCH-001
+
+Issue #167 在交付分支新增 L1 评论研究三视图和已存查询，复用共享 shell 和 token，Serif 原声、连续表格、文字 Tab 与受控 dialog；Evidence 侧栏仅接通两个真实入口。无 3D、新主题、旧系统样式、生产选题或虚构模型结果。API/PostgreSQL 证明及未验证层见 [评论研究验收](../acceptance/comment-research-001-acceptance.md)。真实模型、部署与用户验收仍未发生；根代理固定 HEAD 审核以 PR 评论为准。

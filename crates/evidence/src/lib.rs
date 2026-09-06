@@ -6,6 +6,7 @@ mod archive_completeness;
 mod collection_control;
 mod collection_target;
 mod collection_task_read;
+pub mod comment_research_read;
 mod content_reobservation;
 mod creator_lifecycle;
 mod dispatch;
