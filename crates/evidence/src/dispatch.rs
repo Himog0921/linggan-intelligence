@@ -1122,7 +1122,12 @@ mod tests {
         let active = Some(Uuid::new_v4());
 
         // The regression: agent deep archives carry NULL and must still dispatch.
-        assert!(!rule_revision_blocks_dispatch("agent", "deep_archive", None, active));
+        assert!(!rule_revision_blocks_dispatch(
+            "agent",
+            "deep_archive",
+            None,
+            active
+        ));
         assert!(!rule_revision_blocks_dispatch(
             "agent",
             "deep_archive",
@@ -1131,16 +1136,22 @@ mod tests {
         ));
 
         // Patrol keeps the guard: a superseded rule must not keep sweeping on old cadence.
-        assert!(rule_revision_blocks_dispatch("agent", "patrol", None, active));
+        assert!(rule_revision_blocks_dispatch(
+            "agent", "patrol", None, active
+        ));
         assert!(rule_revision_blocks_dispatch(
             "agent",
             "patrol",
             Some(Uuid::new_v4()),
             active,
         ));
-        assert!(!rule_revision_blocks_dispatch("agent", "patrol", active, active));
+        assert!(!rule_revision_blocks_dispatch(
+            "agent", "patrol", active, active
+        ));
 
         // A person acts under their own authority and is never gated on rule cadence.
-        assert!(!rule_revision_blocks_dispatch("person", "patrol", None, active));
+        assert!(!rule_revision_blocks_dispatch(
+            "person", "patrol", None, active
+        ));
     }
 }
