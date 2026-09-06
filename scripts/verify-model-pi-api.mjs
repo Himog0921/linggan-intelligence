@@ -34,9 +34,26 @@ const run=state.runs.find(r=>r.operation==='analyze');assert.equal(run.state,'su
 const detail=await call('/api/local/comment-research/sources/'+sources[0].sourceRef);assert.equal(detail.annotations.analysis[0].state,'succeeded');
 const groups=await call('/api/local/comment-research/groups');assert.ok(groups.items.some(i=>i.label==='合成执行精力'));
 assert.equal((await call('/api/local/comment-research')).modelState,'CONFIGURED');
-const backfill={...plan,planRef:randomUUID(),kind:'backfill',sourceRefs:[sources[1].sourceRef],sourceLimit:1};await call(api+'/plans',backfill);await call(api+'/plans/'+backfill.planRef+'/stop',{});assert.equal((await call(api+'/plans',backfill)).enabled,false);
-const automatic={...plan,planRef:randomUUID(),kind:'automatic',sourceRefs:[],sourceLimit:2};await call(api+'/plans',automatic);await call(api+'/plans/'+automatic.planRef+'/stop',{});assert.equal((await call(api+'/plans',automatic)).enabled,false);
+// Keep the connection disabled throughout the resume/replay checks. Deterministic
+// pending-work execution and quota preservation are covered by the PostgreSQL proof.
 await call(api+'/connections/state',{connectionRef:connection.connectionRef,expectedRevision:1,enabled:false});
+const backfill={...plan,planRef:randomUUID(),kind:'backfill',sourceRefs:[sources[1].sourceRef],sourceLimit:1};
+// A new grant requires an enabled connection; disable it again immediately afterward.
+await call(api+'/connections/state',{connectionRef:connection.connectionRef,expectedRevision:2,enabled:true});
+await call(api+'/plans',backfill);await call(api+'/connections/state',{connectionRef:connection.connectionRef,expectedRevision:3,enabled:false});await call(api+'/plans/'+backfill.planRef+'/stop',{});
+assert.equal((await call(api+'/plans',backfill)).enabled,false);
+// Existing request replay is read-only even while the connection is disabled.
+let paused=(await call(api+'?planRef='+backfill.planRef)).plans[0];assert.equal(paused.planRef,backfill.planRef);assert.equal(paused.enabled,false);
+const resume={expectedRevision:paused.revision};await call(api+'/plans/'+backfill.planRef+'/resume',resume);
+await call(api+'/plans/'+backfill.planRef+'/stop',{});await call(api+'/plans/'+backfill.planRef+'/resume',resume,409);
+paused=(await call(api+'?planRef='+backfill.planRef)).plans[0];await call(api+'/plans/'+backfill.planRef+'/resume',{expectedRevision:paused.revision});
+await call(api+'/connections/state',{connectionRef:connection.connectionRef,expectedRevision:4,enabled:true});
+const overlap=await call(api+'/plans',{...backfill,planRef:randomUUID()});assert.equal(overlap.queued,0);assert.equal(overlap.existingPlans[0].planRef,backfill.planRef);
+for(let step=0;step<40;step++){state=await call(api);if(state.runs.some(r=>r.sourceRef===sources[1].sourceRef&&r.state==='succeeded'))break;await new Promise(r=>setTimeout(r,500));}
+assert.equal(state.runs.filter(r=>r.sourceRef===sources[1].sourceRef&&r.operation==='analyze').length,1);
+assert.equal(state.runs.find(r=>r.sourceRef===sources[1].sourceRef).state,'succeeded');
+const automatic={...plan,planRef:randomUUID(),kind:'automatic',sourceRefs:[],sourceLimit:2};await call(api+'/plans',automatic);await call(api+'/plans/'+automatic.planRef+'/stop',{});assert.equal((await call(api+'/plans',automatic)).enabled,false);
+await call(api+'/connections/state',{connectionRef:connection.connectionRef,expectedRevision:5,enabled:false});
 assert.equal((await call('/api/local/comment-research')).modelState,'PAUSED');
 await call(api+'/connections/state',{connectionRef:connection.connectionRef,expectedRevision:1,enabled:true},409);
 console.log('Model Pi isolated HTTP proof passed: settings, probes, defaults, real SDK worker, source output, usage, scope, pause and replay.');

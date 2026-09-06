@@ -445,3 +445,245 @@ async fn configured_deadline_stops_real_sdk_wait_and_restricted_sources_never_di
             .unwrap()
     );
 }
+
+#[tokio::test]
+#[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
+async fn paused_owner_is_locatable_and_only_a_new_revision_command_resumes_its_remaining_work() {
+    let db = fixture::proof_database("model_pi_resume_owner").await;
+    let (_server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    let refs = vec![
+        source(&db, "resume-one").await,
+        source(&db, "resume-two").await,
+    ];
+    let original = plan(config, "backfill", refs.clone(), 2, 36000);
+    start_model_plan(&db, &original).await.unwrap();
+    assert!(
+        run_model_work_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
+            .await
+            .unwrap()
+    );
+    stop_model_plan(&db, original.plan_ref).await.unwrap();
+    let duplicate = plan(config, "backfill", refs, 2, 36000);
+    let result = start_model_plan(&db, &duplicate).await.unwrap();
+    assert_eq!(result["queued"], 0);
+    assert_eq!(
+        result["existingPlans"][0]["planRef"],
+        original.plan_ref.to_string()
+    );
+    let focused = read_model_settings_with_plan(&db, true, Some(original.plan_ref))
+        .await
+        .unwrap();
+    assert_eq!(
+        focused["plans"][0]["planRef"],
+        original.plan_ref.to_string()
+    );
+    assert_eq!(focused["plans"][0]["budgetUsed"], 900);
+    assert_eq!(focused["plans"][0]["revision"], 1);
+    assert_eq!(
+        start_model_plan(&db, &original).await.unwrap()["enabled"],
+        false
+    );
+    // A later default must not rewrite the paused plan's frozen tasks.
+    configured(&db, &url, "synthetic-no-usage", Some(config)).await;
+    let resume = ResumeModelPlan {
+        expected_revision: 1,
+    };
+    resume_model_plan(&db, original.plan_ref, &resume)
+        .await
+        .unwrap();
+    stop_model_plan(&db, original.plan_ref).await.unwrap();
+    assert!(matches!(
+        resume_model_plan(&db, original.plan_ref, &resume).await,
+        Err(ModelError::Conflict)
+    ));
+    assert_eq!(
+        start_model_plan(&db, &original).await.unwrap()["enabled"],
+        false
+    );
+    resume_model_plan(
+        &db,
+        original.plan_ref,
+        &ResumeModelPlan {
+            expected_revision: 3,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        run_model_work_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
+            .await
+            .unwrap()
+    );
+    assert!(
+        !run_model_work_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
+            .await
+            .unwrap()
+    );
+    let snapshot = read_model_settings_with_plan(&db, true, Some(original.plan_ref))
+        .await
+        .unwrap();
+    assert_eq!(snapshot["plans"][0]["sourceCount"], 2);
+    assert_eq!(snapshot["plans"][0]["budgetUsed"], 1800);
+    assert_eq!(snapshot["plans"][0]["tokenLimit"], 36000);
+    assert_eq!(snapshot["plans"][0]["finishedCount"], 2);
+    let work:Vec<(Uuid,i32,String)>=sqlx::query_as("SELECT b.config_ref,w.attempts,w.state FROM linggan_comment_model_work b JOIN linggan_comment_analysis_work w USING(work_ref) WHERE plan_ref=$1").bind(original.plan_ref).fetch_all(db.pool()).await.unwrap();
+    assert!(
+        work.iter()
+            .all(|(c, a, s)| *c == config && *a == 1 && s == "succeeded")
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
+async fn automatic_selection_skips_global_trial_work_before_its_one_source_limit() {
+    let db = fixture::proof_database("model_pi_global_selection").await;
+    let (_server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    for n in 0..24 {
+        source(&db, &format!("adjacent-{n}")).await;
+    }
+    let ordered:Vec<Uuid>=sqlx::query_scalar("SELECT material_ref FROM linggan_comment_research_readable ORDER BY created_at,material_ref").fetch_all(db.pool()).await.unwrap();
+    let trial = plan(config, "trial", vec![ordered[0]], 1, 18000);
+    start_model_plan(&db, &trial).await.unwrap();
+    stop_model_plan(&db, trial.plan_ref).await.unwrap();
+    let automatic = plan(config, "automatic", vec![], 1, 18000);
+    start_model_plan(&db, &automatic).await.unwrap();
+    // Only this isolated plan's activation is shifted; Evidence remains immutable.
+    sqlx::query("UPDATE linggan_model_plan SET created_at='1970-01-01' WHERE plan_ref=$1")
+        .bind(automatic.plan_ref)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(sync_automatic_model_work(&db).await.unwrap(), 1);
+    assert_eq!(sync_automatic_model_work(&db).await.unwrap(), 0);
+    let chosen:Uuid=sqlx::query_scalar("SELECT w.source_ref FROM linggan_comment_model_work b JOIN linggan_comment_analysis_work w USING(work_ref) WHERE b.plan_ref=$1").bind(automatic.plan_ref).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(chosen, ordered[1]);
+    assert!(
+        run_model_work_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
+            .await
+            .unwrap()
+    );
+    assert!(
+        !run_model_work_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        read_model_settings_with_plan(&db, true, Some(automatic.plan_ref))
+            .await
+            .unwrap()["plans"][0]["sourceCount"],
+        1
+    );
+}
+
+async fn interrupted_fixture(
+    db: &Database,
+    config: Uuid,
+    cap: i32,
+    budget: i64,
+    success: bool,
+    key: &str,
+) -> Uuid {
+    use linggan_intelligence::comment_analysis::*;
+    let reference = source(db, key).await;
+    let grant = plan(config, "trial", vec![reference], 1, budget);
+    start_model_plan(db, &grant).await.unwrap();
+    let work: Uuid =
+        sqlx::query_scalar("SELECT work_ref FROM linggan_comment_model_work WHERE plan_ref=$1")
+            .bind(grant.plan_ref)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    if success {
+        let input = claim_selected_comment_analysis(db, &model_version(config), Some(work))
+            .await
+            .unwrap()
+            .unwrap();
+        complete_comment_analysis(
+            db,
+            &input,
+            &CommentAnalysisOutput {
+                source_ref: input.source_ref,
+                source_sha256: input.source_sha256.clone(),
+                spans: vec![],
+                limitations: vec![],
+            },
+        )
+        .await
+        .unwrap();
+    } else {
+        sqlx::query("UPDATE linggan_comment_analysis_work SET state='running',attempts=$2,lease_ref=gen_random_uuid(),lease_until=scope_001_now()-interval '1 second' WHERE work_ref=$1").bind(work).bind(cap).execute(db.pool()).await.unwrap();
+    }
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,work_ref,plan_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,created_at,result) SELECT gen_random_uuid(),m.connection_version_ref,m.model_ref,$1,$2,c.config_ref,'analyze','synthetic interruption','running',18000,18000,scope_001_now()-interval '121 seconds','{\"validationPending\":true}'::jsonb FROM linggan_model_config c JOIN linggan_model_entry m USING(model_ref) WHERE c.config_ref=$3")
+        .bind(work).bind(grant.plan_ref).bind(config).execute(db.pool()).await.unwrap();
+    grant.plan_ref
+}
+
+#[tokio::test]
+#[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
+async fn maintenance_commits_without_dispatch_and_honors_each_frozen_attempt_cap() {
+    let db = fixture::proof_database("model_pi_recovery_idle").await;
+    let (_server, url) = fixture_server().await;
+    let (initial, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    let current = read_model_settings(&db, true).await.unwrap();
+    let model_ref = Uuid::parse_str(current["config"]["modelRef"].as_str().unwrap()).unwrap();
+    let mut previous = initial;
+    for (key, max, attempts, budget, success, expected) in [
+        ("cap-one", 1, 1, 36000, false, "failed"),
+        ("cap-two", 2, 2, 36000, false, "failed"),
+        ("no-budget", 2, 1, 18000, false, "pending"),
+        ("completed", 1, 1, 18000, true, "no_signal"),
+        ("legacy-pending", 1, 1, 36000, false, "failed"),
+    ] {
+        let config = SaveModelConfig {
+            config_ref: Uuid::new_v4(),
+            expected_config_ref: Some(previous),
+            model_ref,
+            input_token_limit: 16000,
+            output_token_limit: 2000,
+            timeout_seconds: 1,
+            max_attempts: max,
+            auto_source_limit: 1,
+            auto_token_limit: 36000,
+        };
+        save_model_config(&db, &config).await.unwrap();
+        previous = config.config_ref;
+        let grant =
+            interrupted_fixture(&db, config.config_ref, attempts, budget, success, key).await;
+        if key == "legacy-pending" {
+            sqlx::query("UPDATE linggan_comment_analysis_work SET state='pending',lease_ref=NULL,lease_until=NULL,failure_code='lease_expired' WHERE work_ref IN(SELECT work_ref FROM linggan_comment_model_work WHERE plan_ref=$1)").bind(grant).execute(db.pool()).await.unwrap();
+        }
+        assert!(
+            !run_model_work_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
+                .await
+                .unwrap()
+        );
+        let state = read_model_settings_with_plan(&db, true, Some(grant))
+            .await
+            .unwrap();
+        assert_eq!(state["plans"][0]["runningCount"], 0);
+        assert_eq!(state["plans"][0]["budgetUsed"], 18000);
+        let work:(String,i32)=sqlx::query_as("SELECT w.state,w.attempts FROM linggan_comment_analysis_work w JOIN linggan_comment_model_work b USING(work_ref) WHERE b.plan_ref=$1").bind(grant).fetch_one(db.pool()).await.unwrap();
+        assert_eq!(work, (expected.into(), attempts));
+        let receipt:(String,Option<i64>,i64,serde_json::Value)=sqlx::query_as("SELECT state,input_tokens,charged_tokens,result FROM linggan_model_invocation WHERE plan_ref=$1").bind(grant).fetch_one(db.pool()).await.unwrap();
+        assert_eq!(receipt.0, if success { "succeeded" } else { "failed" });
+        assert!(receipt.1.is_none());
+        assert_eq!(receipt.2, 18000);
+        assert!(receipt.3.get("validationPending").is_none());
+    }
+    assert!(
+        !run_model_work_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
+            .await
+            .unwrap()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_model_invocation WHERE operation='analyze'"
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap(),
+        5
+    );
+}

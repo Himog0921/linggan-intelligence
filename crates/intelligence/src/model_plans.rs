@@ -42,7 +42,7 @@ pub async fn start_model_plan(db: &Database, r: &StartModelPlan) -> Result<Value
             return Err(ModelError::Conflict);
         }
         return Ok(
-            json!({"planRef":r.plan_ref,"enabled":row.get::<bool,_>("enabled"),"replayed":true}),
+            json!({"planRef":r.plan_ref,"enabled":row.get::<bool,_>("enabled"),"replayed":true,"existingPlans":existing_plan_owners(&mut tx,r).await?}),
         );
     }
     if workspace.get::<Option<Uuid>, _>("default_config_ref") != Some(r.config_ref) {
@@ -80,8 +80,8 @@ pub async fn start_model_plan(db: &Database, r: &StartModelPlan) -> Result<Value
         .bind(r.plan_ref).bind(r.config_ref).bind(&r.kind).bind(r.source_limit).bind(r.token_limit).bind(request).execute(&mut *tx).await?;
     if r.kind == "automatic" {
         sqlx::query(
-            "UPDATE linggan_model_plan SET enabled=false WHERE kind='automatic' AND enabled",
-        )
+            "UPDATE linggan_model_plan SET enabled=false,revision=revision+1 WHERE kind='automatic' AND enabled AND plan_ref<>$1",
+        ).bind(r.plan_ref)
         .execute(&mut *tx)
         .await?;
         sqlx::query("UPDATE linggan_model_plan SET enabled=true WHERE plan_ref=$1")
@@ -97,8 +97,11 @@ pub async fn start_model_plan(db: &Database, r: &StartModelPlan) -> Result<Value
     for source in &r.source_refs {
         added += insert_model_work(&mut tx, r.plan_ref, r.config_ref, *source).await?;
     }
+    let existing = existing_plan_owners(&mut tx, r).await?;
     tx.commit().await?;
-    Ok(json!({"planRef":r.plan_ref,"queued":added,"state":"GRANTED","kind":r.kind}))
+    Ok(
+        json!({"planRef":r.plan_ref,"queued":added,"state":"GRANTED","kind":r.kind,"existingPlans":existing}),
+    )
 }
 async fn insert_model_work(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -126,7 +129,7 @@ pub fn model_version(config: Uuid) -> String {
     format!("model-config.{config}")
 }
 pub async fn stop_model_plan(db: &Database, plan: Uuid) -> Result<Value, ModelError> {
-    let result = sqlx::query("UPDATE linggan_model_plan SET enabled=false WHERE plan_ref=$1")
+    let result = sqlx::query("UPDATE linggan_model_plan SET enabled=false,revision=revision+CASE WHEN enabled THEN 1 ELSE 0 END WHERE plan_ref=$1")
         .bind(plan)
         .execute(db.pool())
         .await?;
@@ -137,6 +140,9 @@ pub async fn stop_model_plan(db: &Database, plan: Uuid) -> Result<Value, ModelEr
 }
 pub async fn sync_automatic_model_work(db: &Database) -> Result<u64, ModelError> {
     let mut tx = db.pool().begin().await?;
+    sqlx::query("SELECT singleton FROM linggan_model_workspace WHERE singleton FOR UPDATE")
+        .fetch_one(&mut *tx)
+        .await?;
     let row=sqlx::query("SELECT p.plan_ref,w.default_config_ref AS config_ref,p.source_limit FROM linggan_model_workspace w JOIN linggan_model_plan p ON p.plan_ref=w.active_auto_plan_ref WHERE w.singleton AND p.enabled FOR UPDATE OF p")
         .fetch_optional(&mut *tx).await?;
     let Some(row) = row else {
@@ -153,12 +159,45 @@ pub async fn sync_automatic_model_work(db: &Database) -> Result<u64, ModelError>
     if remaining <= 0 {
         return Ok(0);
     }
-    let sources:Vec<Uuid>=sqlx::query_scalar("SELECT source.material_ref FROM linggan_material_comment_current source JOIN linggan_comment_research_readable readable USING(material_ref) JOIN linggan_model_plan p ON p.plan_ref=$1 WHERE source.created_at>=p.created_at AND source.body_state='KNOWN' AND NOT EXISTS(SELECT 1 FROM linggan_comment_model_work binding JOIN linggan_comment_analysis_work work USING(work_ref) WHERE binding.plan_ref=$1 AND work.source_ref=source.material_ref) ORDER BY source.created_at,source.material_ref LIMIT $2")
-        .bind(plan).bind(remaining.min(100)).fetch_all(&mut *tx).await?;
+    let sources:Vec<Uuid>=sqlx::query_scalar("SELECT source.material_ref FROM linggan_material_comment_current source JOIN linggan_comment_research_readable readable USING(material_ref) JOIN linggan_model_plan p ON p.plan_ref=$1 WHERE source.created_at>=p.created_at AND source.body_state='KNOWN' AND NOT EXISTS(SELECT 1 FROM linggan_comment_model_work binding JOIN linggan_comment_analysis_work work USING(work_ref) WHERE binding.plan_ref=$1 AND work.source_ref=source.material_ref) AND NOT EXISTS(SELECT 1 FROM linggan_comment_analysis_work work WHERE work.source_ref=source.material_ref AND work.rule_version=$3 AND work.model_version=$4) ORDER BY source.created_at,source.material_ref LIMIT $2")
+        .bind(plan).bind(remaining.min(100)).bind(COMMENT_RULE_VERSION).bind(model_version(config)).fetch_all(&mut *tx).await?;
     let mut added = 0;
     for source in sources {
         added += insert_model_work(&mut tx, plan, config, source).await?;
     }
     tx.commit().await?;
     Ok(added)
+}
+
+async fn existing_plan_owners(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    request: &StartModelPlan,
+) -> Result<Vec<Value>, ModelError> {
+    let rows=sqlx::query("SELECT DISTINCT p.plan_ref,p.kind,p.enabled FROM linggan_comment_analysis_work w JOIN linggan_comment_model_work b USING(work_ref) JOIN linggan_model_plan p ON p.plan_ref=b.plan_ref WHERE w.source_ref=ANY($1) AND w.rule_version=$2 AND w.model_version=$3 AND p.plan_ref<>$4 ORDER BY p.plan_ref")
+        .bind(&request.source_refs).bind(COMMENT_RULE_VERSION).bind(model_version(request.config_ref)).bind(request.plan_ref).fetch_all(&mut **tx).await?;
+    Ok(rows.iter().map(|r|json!({"planRef":r.get::<Uuid,_>("plan_ref"),"kind":r.get::<String,_>("kind"),"enabled":r.get::<bool,_>("enabled")})).collect())
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResumeModelPlan {
+    pub expected_revision: i32,
+}
+/// An explicit current-revision command restores permission; it never changes work identity,
+/// config, attempts, activation time or consumed quota. Old command replay cannot unpause again.
+pub async fn resume_model_plan(
+    db: &Database,
+    plan: Uuid,
+    request: &ResumeModelPlan,
+) -> Result<Value, ModelError> {
+    if request.expected_revision < 0 {
+        return Err(ModelError::Invalid);
+    }
+    let mut tx = db.pool().begin().await?;
+    sqlx::query("SELECT singleton FROM linggan_model_workspace WHERE singleton FOR UPDATE")
+        .fetch_one(&mut *tx)
+        .await?;
+    let row=sqlx::query("UPDATE linggan_model_plan SET enabled=true,revision=revision+1 WHERE plan_ref=$1 AND revision=$2 AND NOT enabled RETURNING revision")
+        .bind(plan).bind(request.expected_revision).fetch_optional(&mut *tx).await?.ok_or(ModelError::Conflict)?;
+    tx.commit().await?;
+    Ok(json!({"planRef":plan,"enabled":true,"revision":row.get::<i32,_>("revision")}))
 }

@@ -50,6 +50,7 @@ CREATE TABLE linggan_model_plan (
     plan_ref uuid PRIMARY KEY,
     config_ref uuid NOT NULL REFERENCES linggan_model_config,
     kind text NOT NULL CHECK(kind IN ('trial','automatic','backfill')),
+    revision integer NOT NULL DEFAULT 0 CHECK(revision>=0),
     enabled boolean NOT NULL,
     source_limit integer NOT NULL CHECK(source_limit BETWEEN 1 AND 1000),
     token_limit bigint NOT NULL CHECK(token_limit BETWEEN 1024 AND 10000000),

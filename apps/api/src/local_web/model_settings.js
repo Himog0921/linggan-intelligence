@@ -6,6 +6,7 @@
   const explain=c=>errors[c]||({model_not_found:'该模型或连接已不存在。',claim_conflict:'任务已被其他执行者接续。',result_validation_pending:'已取得调用回执，结果仍待确认。'}[c])||c||'未测试';
   const kinds={trial:'单条试运行',automatic:'自动新增',backfill:'历史补跑'}, ops={connect:'连接测试',discover:'发现模型',probe:'模型能力测试',analyze:'评论分析'};
   let data=null, command=null, busy=false;
+  let focusedPlan=new URLSearchParams(location.search).get('planRef');
   async function request(path,body){
     const r=await fetch(path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});
     const v=await r.json();if(!r.ok)throw new Error(explain(v.error));return v;
@@ -16,7 +17,7 @@
   function connectionStatus(c){return !c.enabled?'已停用':!c.test?'已保存，尚未测试':c.test.ok?'目录连接成功':explain(c.test.failureCode);}
   function modelStatus(m){return !m.enabled?'连接已停用':!m.test?'尚未测试':m.test.commentQualified?'可调用 · 评论输出通过校验':m.test.modelCallable?'可调用 · 评论输出未通过校验':explain(m.test.failureCode);}
   async function load(){
-    data=await request(api);
+    data=await request(api+(focusedPlan?'?planRef='+encodeURIComponent(focusedPlan):''));
     $('storage-state').textContent=data.secretStorage==='SYNTHETIC_PREVIEW_ONLY'?'合成隔离预览 · 凭据仅为测试标记 · 非真实模型质量验收':'本机工作空间 · 凭据保存于 macOS Keychain';
     $('connection-list').innerHTML=data.connections.length?table(['连接','状态','操作'],data.connections.map(c=>`<tr><td>${esc(c.name)}${note(c.baseUrl)}${note(c.api)}</td><td>${esc(connectionStatus(c))}${note(`配置修订 ${c.revision} · 凭据不回显`)}</td><td>${button('connect',c.connectionRef,'测试连接',!c.enabled)} ${button('discover',c.connectionRef,'发现模型',!c.enabled)} ${button('edit-connection',c.connectionRef,'更换连接配置')} ${button('toggle',c.connectionRef,c.enabled?'停用':'启用')}</td></tr>`)):note('先添加供应商连接。保存不会发送评论。');
     $('model-list').innerHTML=data.models.length?table(['模型 ID','调用与输出','操作'],data.models.map(m=>`<tr><td>${esc(m.modelId)}${note(m.connectionName)}</td><td>${esc(modelStatus(m))}</td><td>${button('probe',m.modelRef,'测试模型能力',!m.enabled)}</td></tr>`)):note('从连接发现模型，或添加准确的模型 ID。');
@@ -25,12 +26,13 @@
     if(data.config)for(const [key,value]of Object.entries(data.config)){const field=$('config-form').elements.namedItem(key);if(field)field.value=value;}
     ['trial','automatic','backfill'].forEach(id=>$(id).disabled=!data.config);
     renderActivity();
+    if(focusedPlan)$('plan-'+focusedPlan)?.scrollIntoView({block:'center'});
   }
   function renderActivity(){
     const auto=data.plans.find(p=>p.planRef===data.activeAutoPlanRef),worker=data.worker;
     $('automatic-state').textContent=auto?.enabled?`自动新增已启用：只纳入 ${auto.createdAt} 后新接纳的可读来源，已纳入 ${auto.sourceCount}/${auto.sourceLimit} 条。换默认模型不会重置这份累计额度。`:'自动新增已暂停或尚未启用。保存设置不改变此状态。';
     $('worker-state').textContent=!worker?.recent?'执行循环暂无近期心跳。提交的计划会保留，待本机 worker 启动后接续。':worker.lastError?`执行循环最近失败：${explain(worker.lastError)}`:`执行循环在线 · ${worker.state==='running'?'正在处理一项调用':'等待可执行任务'} · 最近心跳 ${worker.lastSeenAt}`;
-    $('plan-list').innerHTML=data.plans.length?table(['处理计划','来源与额度','状态'],data.plans.map(p=>`<tr><td>${kinds[p.kind]}${note(p.createdAt)}</td><td>已纳入 ${p.sourceCount}/${p.sourceLimit} 条${note(`额度占用 ${p.budgetUsed.toLocaleString()} / ${p.tokenLimit.toLocaleString()} token（含 ${p.unknownUsageCount} 次用量未知）`)}</td><td>${!p.enabled?'已暂停':p.nextReservation!=null&&p.tokenLimit-p.budgetUsed<p.nextReservation?'余额不足以预留下次调用':'允许派发'}${p.disabledCount?note(`${p.disabledCount} 条等待的连接已停用`):''}${note(`待处理 ${p.pendingCount??0} · 执行中 ${p.runningCount??0} · 已结束 ${p.finishedCount??0}`)}${p.enabled?button('stop',p.planRef,'暂停此计划'):''}</td></tr>`)):note('没有评论分析计划。先选择一条可读原声试运行。');
+    $('plan-list').innerHTML=data.plans.length?table(['处理计划','来源与额度','状态'],data.plans.map(p=>`<tr id="plan-${p.planRef}"><td>${kinds[p.kind]}${note(p.createdAt)}</td><td>已纳入 ${p.sourceCount}/${p.sourceLimit} 条${note(`额度占用 ${p.budgetUsed.toLocaleString()} / ${p.tokenLimit.toLocaleString()} token（含 ${p.unknownUsageCount} 次用量未知）`)}</td><td>${!p.enabled?'已暂停':p.nextReservation!=null&&p.tokenLimit-p.budgetUsed<p.nextReservation?'余额不足以预留下次调用':'允许派发'}${p.disabledCount?note(`${p.disabledCount} 条等待的连接已停用`):''}${note(`待处理 ${p.pendingCount??0} · 执行中 ${p.runningCount??0} · 已结束 ${p.finishedCount??0}`)}${p.enabled?button('stop',p.planRef,'暂停此计划'):button('resume',p.planRef,'恢复此计划')}</td></tr>`)):note('没有评论分析计划。先选择一条可读原声试运行。');
     $('run-list').innerHTML=data.runs.length?table(['最近调用','状态与原因','用量'],data.runs.map(r=>`<tr><td>${ops[r.operation]}${note(r.modelId||'模型目录请求')}${note(r.createdAt)}${r.sourceRef?`<a href="/corpus/comments?source=${r.sourceRef}">查看来源与标注</a>`:''}</td><td>${r.state==='running'?'执行中':r.state==='succeeded'?'已完成':'失败'}${r.failureCode?note(explain(r.failureCode)):''}${r.attempts?note(`此任务已尝试 ${r.attempts} 次`):''}${r.configRef?`<details><summary>配置版本</summary>${note(r.configRef)}</details>`:''}</td><td>输入 ${r.inputTokens??'未知'} · 输出 ${r.outputTokens??'未知'}${note(`本机额度计入 ${r.budgetAccounted} token · 金额待供应商核对`)}${r.elapsedMs!=null?note(`耗时 ${r.elapsedMs} ms`):''}</td></tr>`)):note('没有调用回执。');
   }
   function open(title,fields,action,label='保存'){
@@ -57,6 +59,10 @@
     const c=data.config;
     open('启用自动新增',note(`启用后，仅处理本次启用时间之后新接纳且可读的来源。数量上限 ${c.autoSourceLimit} 条，累计 ${c.autoTokenLimit} token。每次调用先预留 ${c.inputTokenLimit+c.outputTokenLimit} token；最多尝试 ${c.maxAttempts} 次。`)+note('此操作会替换原自动计划；原计划未开始的调用暂停。历史评论不会自动补跑。保存新默认模型后，新任务使用新配置，剩余累计额度不变。'),{kind:'automatic',configRef:c.configRef,expectedAutoPlanRef:data.activeAutoPlanRef,sourceLimit:c.autoSourceLimit,tokenLimit:c.autoTokenLimit},'确认启用');
   }
+  function resumePlan(p){
+    const automaticNote=p.kind==='automatic'?(p.planRef===data.activeAutoPlanRef?'当前自动计划会沿原启用时间继续纳入可读来源，包括暂停期间新增，保留原数量上限与剩余额度。':'这份自动计划已被替代；仅恢复已经归入它的工作，不抢占当前自动计划，也不再纳入新来源。'):'仅接续此计划已有的未完成工作。';
+    open('恢复原计划',note(`${kinds[p.kind]} · 已纳入 ${p.sourceCount}/${p.sourceLimit} 条 · 已占用 ${p.budgetUsed}/${p.tokenLimit} token。`)+note(automaticNote)+note('已有工作保留原模型配置、来源、尝试次数及用量；已完成来源不会重跑。余额不足或连接停用仍会阻止新调用。'),{kind:'resume',planRef:p.planRef,revision:p.revision},'确认恢复');
+  }
   async function chooseSources(kind,sourceRef){
     const c=data.config;
     open(kind==='trial'?'选择一条原声试运行':'选择历史评论补跑',note('仅发送所选来源及其有限可读上下文。提交前可查看原文与作品；读取范围之外的历史评论不会被追加。')+`<div class="lgi-model-search"><input id="source-search" aria-label="筛选可读评论" placeholder="输入原声关键词"><button type="button" id="find-sources">查找</button></div><p id="source-count"></p><div id="source-options"></div>`+textField('tokenLimit','本次累计 token 上限',c.inputTokenLimit+c.outputTokenLimit,`type="number" min="${c.inputTokenLimit+c.outputTokenLimit}" max="10000000" required`)+note(`当前模型：${data.models.find(m=>m.modelRef===c.modelRef)?.modelId}。每次预留 ${c.inputTokenLimit+c.outputTokenLimit} token，最多尝试 ${c.maxAttempts} 次；用量未知时保留预留。`),{kind,configRef:c.configRef},kind==='trial'?'提交这条试运行':'提交所选历史补跑');
@@ -73,12 +79,13 @@
     try{
       const f=new FormData($('model-command')),c=command;let result;
       if(c.kind==='connection')result=await request(api+'/connections',{versionRef:c.id,connectionRef:c.connectionRef,expectedRevision:c.connection?.revision||0,name:f.get('name'),api:f.get('api'),baseUrl:f.get('baseUrl'),apiKey:f.get('apiKey'),localEndpoint:f.has('localEndpoint')});
+      else if(c.kind==='resume')result=await request(api+'/plans/'+c.planRef+'/resume',{expectedRevision:c.revision});
       else if(c.kind==='model')result=await request(api+'/models',{modelRef:c.id,connectionVersionRef:f.get('connectionVersionRef'),modelId:f.get('modelId')});
       else{
         const refs=f.getAll('sourceRefs');if(c.kind!=='automatic'&&(refs.length===0||(c.kind==='trial'&&refs.length!==1)))throw new Error('请先选择要分析的原声。');
         result=await request(api+'/plans',{planRef:c.id,configRef:c.configRef,kind:c.kind,sourceRefs:refs,sourceLimit:c.sourceLimit||refs.length,tokenLimit:c.tokenLimit||Number(f.get('tokenLimit')),expectedAutoPlanRef:c.kind==='automatic'?c.expectedAutoPlanRef:null});
       }
-      busy=false;close();await load();$('settings-feedback').textContent=result?.queued===0?'请求已保存；相同来源与配置已有任务，未重复调用。':'已保存。评论计划由执行循环接续，调用结果显示在额度与运行中。';
+      busy=false;close();await load();$('existing-plans').innerHTML=(result?.existingPlans||[]).map(p=>`<p>所选来源已有${esc(kinds[p.kind])}：<a href="/settings/models?planRef=${p.planRef}">查看所属计划${p.enabled?'':'并恢复'}</a>。本次未为它另建任务或补充额度。</p>`).join('');$('settings-feedback').textContent=result?.queued===0?'请求已保存；相同来源与配置已有任务，未重复调用。':'已保存。评论计划由执行循环接续，调用结果显示在额度与运行中。';
     }catch(e){$('dialog-feedback').textContent=e.message;}finally{busy=false;$('dialog-submit').disabled=false;}
   }
   $('config-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;try{const f=new FormData(e.currentTarget),body={configRef:crypto.randomUUID(),expectedConfigRef:data.config?.configRef||null};for(const[k,v]of f)body[k]=k==='modelRef'?v:Number(v);await request(api+'/config',body);await load();$('settings-feedback').textContent='用途配置已保存，没有发起分析。';}catch(e){$('settings-feedback').textContent=e.message;}finally{button.disabled=false;}});
@@ -91,6 +98,7 @@
     try{const ref=b.dataset.ref,action=b.dataset.action;if(['connect','discover','probe'].includes(action))await probe(action,ref);
       else if(action==='edit-connection')editConnection(data.connections.find(c=>c.connectionRef===ref));
       else if(action==='toggle'){const c=data.connections.find(c=>c.connectionRef===ref);await request(api+'/connections/state',{connectionRef:ref,expectedRevision:c.revision,enabled:!c.enabled});await load();}
+      else if(action==='resume')resumePlan(data.plans.find(p=>p.planRef===ref));
       else if(action==='stop'){await request(api+'/plans/'+ref+'/stop',{});await load();}
     }catch(e){showError(e);}finally{b.disabled=false;}
   });

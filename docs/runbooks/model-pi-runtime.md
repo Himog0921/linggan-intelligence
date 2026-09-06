@@ -16,6 +16,8 @@ migration 0040 已登记 `local-runtime.sh migrate`；它依赖 #168 的 0039。
 
 `linggan-comment-worker --execute [--once]` 为单独入口，消费相同账本，受同一并发/预算检查；`--queue-only [--once]` 保留旧无模型同步行为。在正常服务已经执行时无需另起一个常驻评论进程。
 
+恢复暂停计划：进入「额度与运行」找到原计划，点击「恢复此计划」并确认；重复选择已有来源时，回执中的所属计划链接可直接定位原计划。恢复使用当前修订号，旧页面或旧请求冲突时先刷新；不重置尝试、配置、来源、额度或时间起点。若连接仍停用须单独启用连接。当前自动计划接续原时间范围，被替代的旧自动计划仅接续已排工作，不重新接管新增。额度不足或达到次数上限不能靠恢复绕过；已完成来源不会重跑。worker 的维护恢复即使没有可派发工作也会提交，未知消耗仍占用原预留。
+
 ## 隔离验证
 
 1. `./scripts/runtime/prepare-pi-adapter.sh --install`（仅本 checkout 的 npm 依赖）。
@@ -23,7 +25,7 @@ migration 0040 已登记 `local-runtime.sh migrate`；它依赖 #168 的 0039。
 3. `./scripts/test-model-pi-postgres.sh`：随机独立 PostgreSQL/container/volume，完整 migration 与合成材料；trap 清理。无需项目 `.env` 或共享数据库。
 4. `cargo test -p linggan-intelligence --test model_keychain --locked -- --ignored`：只写读更换删除随机 service/account 的合成 secret，不枚举/读取已有项。
 5. `./scripts/preview-model-pi.sh`：创建独立 PG、合成评论、真实 API、独立评论 worker 和本地合成供应商，输出设置 URL/provider URL/PID。明确 `LINGGAN_MODEL_SYNTHETIC_PREVIEW=SYNTHETIC-NOT-EVIDENCE`，只接纳公开 marker `SYNTHETIC-NOT-A-CREDENTIAL` 和本机地址。这个 store 不接受真实 key。
-6. 在新预览上运行 `node scripts/verify-model-pi-api.mjs <origin> <provider URL>`；脚本先验证合成存储与每条来源标识才写入。它配置一个模型并执行一条合成来源；要做从空设置开始的浏览器验收，应重建预览。
+6. 在新预览上运行 `node scripts/verify-model-pi-api.mjs <origin> <provider URL>`；脚本先验证合成存储与每条来源标识才写入。它配置一个模型，验证两条合成来源的执行、暂停/显式恢复、过期恢复冲突和所属计划定位；要做从空设置开始的浏览器验收，应重建预览。
 
 关闭预览所属 API PID 会让脚本退出并清理它拥有的 worker、fixture、container、volume。脚本保留 `/tmp` 下的合成日志，供审核定位。不要用 shared `:3000` 或真实库 URL 代替。
 

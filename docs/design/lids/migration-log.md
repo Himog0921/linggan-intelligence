@@ -13,6 +13,7 @@
 - L1 Settings / Governance、一个外层 Form Surface、四区索引及原生 dialog，复用当前 LIDS Token，不新增 3D 或内核一级页。
 - 用户明确要求个人菜单→设置，原系统区的未实现 command 槽替换为个人菜单；两个系统槽数量不变。该适配按最新用户授权覆盖旧 command-only 用途，未扩大其它导航整改。
 - 当前模型状态、来源试运行、真实调用和用量回执接到评论研究。合成 preview 有独立存储模式说明；未知用量/金额不显示零，人工研究与模型结果分责。
+- 集中整改补齐计划表格内「恢复此计划」及确认窗口，保留原来源/配置/次数/额度；重复来源回执可跳转真正所属计划，旧修订有冲突提示。复用既有 dialog/表格，HTTP 与隔离状态验证通过，完整浏览器验证仍由根代理完成。
 - [变更清单](../changes/model-pi-001-ui-change-manifest.md) 和 [验收记录](../acceptance/model-pi-001-acceptance.md) 列出代码/真实 SDK/隔离 PG/HTTP 与根代理浏览器、Mog 验收的差别。
 
 ## 2026-09-04 · OBSERVATION-TARGET-DOSSIER-UI-001 creator 档案工作区替代旧控制表
