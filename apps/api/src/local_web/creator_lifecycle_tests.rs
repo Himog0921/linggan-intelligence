@@ -436,7 +436,16 @@ fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
     assert!(
         TARGET_DRAWER_CSS.contains(".c-tg-cell{min-width:0;overflow:hidden;text-overflow:ellipsis")
     );
-    assert!(TARGET_DRAWER_CSS.contains(".c-tg-actions form{width:100%;min-width:0}"));
+    assert!(
+        TARGET_DRAWER_CSS
+            .contains(".c-tg-actions{display:flex;align-items:center;justify-content:flex-end")
+    );
+    assert!(TARGET_DRAWER_CSS.contains(".c-tg-actions form{width:auto;min-width:0;margin:0}"));
+    assert!(!TARGET_DRAWER_CSS.contains(".c-tg-btn{width:100%"));
+    assert!(
+        TARGET_DRAWER_CSS
+            .contains(".c-tg-creator-grid>:nth-child(7){margin-left:var(--lgi-space-3)}")
+    );
     assert!(!TARGET_DRAWER_CSS.contains(".c-tg-row-open"));
     assert!(TARGET_DRAWER_CSS.contains(".life-control-row{min-width:0;"));
     assert!(TARGET_DRAWER_CSS.contains(".life-figure{min-width:0;"));

@@ -8,17 +8,22 @@
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
 
+## 2026-09-07 · OBSERVATION-TARGET-SEMANTIC-FEEDBACK-001
+
+- Targets 目录仍是 L1 `Collection Control`：creator / keyword 共享编号、对象、平台、分组的列起点；creator 的“作品目录”和“详情进度”以既有 12px token 间距分开；最后“操作”列改为剩余空间且右对齐，行内按钮恢复既有主/次组件的 40px 命中区和状态样式。
+- 建档回执使用现有 success/warning token 组合；不新增 token、CMP、Scene 或全局壳层。历史目录、待建标准目录、待处理建档任务分别有可读中文，不用颜色或按钮状态替代事实。
+
 ## 2026-09-07 · Collection Targets creator 宽表布局回归
 
 - **范围**：只修复 `Collection Control` L1 的 creator 12 列网格；不改变 Pattern、Token 定义、CMP、状态、动作、数据合同或页面结构。
 - **原因与表达**：未声明的 `--lgi-space-64` 令 CSS `grid-template-columns` 失效，浏览器退回单列自动布局。改为已声明 spacing token 组合，继续让 creator 身份列有界，避免挤占 platform 及后续事实列。
 - **验证边界**：样式源回归断言、creator lifecycle / target list 自动测试及治理检查覆盖；真实 `:3000` 视觉核验、合并和 Mog 业务验收不由本条目证明。
 
-## 2026-09-07 · OBSERVATION-TARGET-DOSSIER-UI-001 目录基线与首层密度修正
+## 2026-09-07 · OBSERVATION-TARGET-DOSSIER-UI-001 目录基线与首层密度修正（已被后续语义修正）
 
 - **来源与范围**：Issue #158 与 Mog 对图妈 Vita 历史 31 篇误读的直接反馈。只修正 Collection Targets 的 current-directory 事实口径和既有首层 creator/platform 栅格间距；不创建版本化“200 篇档案”，不修改 Pattern、Token、CMP、路由或平台访问。
-- **Data Truth**：目录和详情分母只来自最新 canonical root 的一份合格、已接纳目录 Package；它必须在 `maximumQuota=200` 合同下确证到达 200 或主页表面末端。旧 partial/retry 记录保留历史但不混入当前分母；合格巡查新 Work 通过既有精确链路加入集合，详情只对集合内 Work 计数。UNKNOWN、旧历史和真实零值仍不互相替代。
-- **Pattern / Page**：仍是 Collection Control 的 L1 宽表与受限 L2 creator drawer；基线不合格时唯一主动作明确为“重建目录”，不显示假精确目录/详情数字。creator 身份字段收紧为内容优先宽度，未引入新视觉值或页面结构。
+- **已替代的 Data Truth**：后续 `OBSERVATION-TARGET-SEMANTIC-FEEDBACK-001` 纠正了“旧历史一律不显示”的误读。已接纳、target-scoped 且详情完整的历史目录是当前在库事实，必须显示真实目录/详情；它并不自动证明 200 篇或主页末端，也不宣称平台全量。partial/retry 仍不混入受当前标准证明的目录边界。
+- **已替代的 Pattern / Page**：面向不满足当前边界证明的恢复动作统一叫“建立标准目录”，不再使用暗示数据被破坏的“重建目录”；完整的历史目录不展示该动作。creator / keyword 栅格和操作组件的后续细化见本日志首条。
 - **验证与未证明**：源代码 format、针对列表/抽屉/证据的测试、隔离 PostgreSQL 目录重建和巡查新增证明及治理检查分别运行；真实图妈重建、共享 `:3000`、插件、平台和 Mog 业务验收不由本记录证明。
 
 ## 2026-09-06 · MODEL-PI-001 模型设置
