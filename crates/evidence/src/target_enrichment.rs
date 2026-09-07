@@ -94,6 +94,8 @@ pub async fn sync_target_from_author_profile(
         TargetSource::PluginPush,
         display_name.as_deref(),
         facts,
+        // 插件不知道领域的存在，也不该知道：它推来的目标按既有处置回落本领域。
+        None,
     )
     .await?;
 

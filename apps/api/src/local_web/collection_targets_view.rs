@@ -645,6 +645,8 @@ mod tests {
             last_patrol_dispatched_at: None,
             last_patrol_succeeded_at: None,
             next_patrol_at: None,
+            domain_name: None,
+            domain_is_own: None,
         }
     }
 
@@ -799,6 +801,7 @@ mod tests {
             TargetListContext {
                 filter: Some("creator"),
                 sort: Some("last"),
+                domain: None,
             },
         );
         assert!(html.contains(&format!("id=\"target-{}\"", creator.target_ref)));

@@ -604,6 +604,7 @@ mod tests {
             TargetListContext {
                 filter: Some("creator"),
                 sort: Some("last"),
+                domain: None,
             },
         );
         for marker in [

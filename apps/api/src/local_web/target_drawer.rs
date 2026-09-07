@@ -63,11 +63,18 @@ impl TargetDrawerTab {
 pub struct TargetListContext<'a> {
     pub filter: Option<&'a str>,
     pub sort: Option<&'a str>,
+    /// 当前观察领域。抽屉、规则、返回列表的地址都由这里重建，漏掉它就会在打开一个
+    /// 目标细看之后把人送回别的领域——与本模块修过的那类缺陷同源。
+    pub domain: Option<&'a str>,
 }
 
 impl<'a> TargetListContext<'a> {
     fn pairs(self) -> Vec<(&'static str, &'a str)> {
         let mut pairs = Vec::new();
+        // 领域排在最前：它是这一页的观察对象，不是筛选条件之一。
+        if let Some(domain) = self.domain.filter(|value| !value.is_empty()) {
+            pairs.push(("domain", domain));
+        }
         if let Some(filter @ ("creator" | "keyword" | "archiving" | "monitoring")) = self.filter {
             pairs.push(("filter", filter));
         }
@@ -1660,7 +1667,7 @@ fn escape(value: &str) -> String {
         .replace('\'', "&#x27;")
 }
 
-fn percent_encode_component(value: &str) -> String {
+pub(super) fn percent_encode_component(value: &str) -> String {
     let mut encoded = String::with_capacity(value.len());
     for byte in value.bytes() {
         if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
@@ -1693,6 +1700,8 @@ mod tests {
             last_patrol_dispatched_at: None,
             last_patrol_succeeded_at: None,
             next_patrol_at: None,
+            domain_name: None,
+            domain_is_own: None,
         }
     }
 

@@ -213,6 +213,8 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
         last_patrol_dispatched_at: Some("2026-09-04 15:00:00+08".to_owned()),
         last_patrol_succeeded_at: Some("2026-09-04 15:30:00+08".to_owned()),
         next_patrol_at: None,
+        domain_name: None,
+        domain_is_own: None,
     };
     target.identity_facts = Some(serde_json::json!({
         "redId": "creator-red-id",
@@ -592,6 +594,7 @@ fn target_drawer_escape_and_focus_return_keep_list_context() {
     let context = target_drawer::TargetListContext {
         filter: Some("creator"),
         sort: Some("last"),
+        domain: None,
     };
     let html = target_drawer::render(
         Some(&target),
@@ -637,6 +640,7 @@ fn missing_target_drawer_keeps_return_focus_and_list_context() {
     let context = target_drawer::TargetListContext {
         filter: Some("creator"),
         sort: Some("last"),
+        domain: None,
     };
     let html = target_drawer::render(
         None,
@@ -773,6 +777,7 @@ fn drawer_archive_post_preserves_validated_list_and_focus_context() {
         target_drawer::TargetListContext {
             filter: Some("creator"),
             sort: Some("last"),
+            domain: None,
         },
     );
 
@@ -902,5 +907,7 @@ fn sample_target(target_kind: &str) -> linggan_evidence::ObservationTarget {
         last_patrol_dispatched_at: None,
         last_patrol_succeeded_at: None,
         next_patrol_at: None,
+        domain_name: None,
+        domain_is_own: None,
     }
 }

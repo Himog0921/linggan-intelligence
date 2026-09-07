@@ -142,7 +142,7 @@ fn meta(section: Section) -> &'static SectionMeta {
 
 /// The rail. Unlike the Corpus rail, every entry here is a real connected route, so these
 /// are links rather than disabled buttons.
-fn rail(active: Section, state: Option<&SurfaceState>) -> String {
+fn rail(active: Section, state: Option<&SurfaceState>, nav_domain: Option<&str>) -> String {
     // 导轨底部此前写死 `NO OBSERVATION TARGETS · scheduler not connected`，两句都已不成立。
     let foot = match state {
         Some(state) if state.total_targets.is_some_and(|total| total > 0) => format!(
@@ -170,8 +170,14 @@ fn rail(active: Section, state: Option<&SurfaceState>) -> String {
         } else {
             ""
         };
+        // 领域原样带上，即使目标页之外的子页暂时还不按领域过滤内容——链接丢掉它，
+        // 去一趟别的子页再回来当前领域就没了，与语料侧修过的那类缺陷同源。
+        let query = match nav_domain {
+            Some(domain) => format!("?domain={domain}"),
+            None => String::new(),
+        };
         items.push_str(&format!(
-            "<a class=\"v7-side-nav\" href=\"/collection/{slug}\"{current}><i>{index}</i><span>{zh}</span></a>",
+            "<a class=\"v7-side-nav\" href=\"/collection/{slug}{query}\"{current}><i>{index}</i><span>{zh}</span></a>",
             slug = entry.slug,
             index = entry.index,
             zh = entry.zh,
@@ -754,7 +760,11 @@ fn system_words(state: Option<&SurfaceState>) -> String {
 ///
 /// 这些页签此前一律 disabled，理由是「没有目标就没有可筛的」。但目标现在真的能建了，
 /// 继续禁用就变成了「有东西却不让看」。改为真链接：筛选只改读取范围，不消耗任何平台访问。
-fn target_filter_tabs(active: Option<&str>, counts: Option<&TargetCounts>) -> String {
+fn target_filter_tabs(
+    active: Option<&str>,
+    counts: Option<&TargetCounts>,
+    nav_domain: Option<&str>,
+) -> String {
     // 计数跟着标签走（内容工作台：`全部来源 88 / 博主 84 / 关键词 4`），而不是在列表
     // 上方再摆一排带计数的按钮——那会让同一组筛选在一屏里出现两遍。
     let labels: Vec<(&str, String)> = match counts {
@@ -783,10 +793,15 @@ fn target_filter_tabs(active: Option<&str>, counts: Option<&TargetCounts>) -> St
             } else {
                 ""
             };
-            let href = if value.is_empty() {
-                "/collection/targets".to_owned()
-            } else {
-                format!("/collection/targets?filter={value}")
+            // 领域与筛选是两个维度，切换筛选不该把当前领域一起换掉。写死的链接是这一类
+            // 缺陷的常见来源：本页每一处生成的地址都得自己把领域带上。
+            let href = match (value.is_empty(), nav_domain) {
+                (true, None) => "/collection/targets".to_owned(),
+                (true, Some(domain)) => format!("/collection/targets?domain={domain}"),
+                (false, None) => format!("/collection/targets?filter={value}"),
+                (false, Some(domain)) => {
+                    format!("/collection/targets?domain={domain}&amp;filter={value}")
+                }
             };
             format!(r#"<a{class} href="{href}">{label}</a>"#)
         })
@@ -799,14 +814,30 @@ fn second_bar(
     filter: Option<&str>,
     counts: Option<&TargetCounts>,
     state: Option<&SurfaceState>,
+    nav_domain: Option<&str>,
 ) -> String {
     match section {
-        Section::Targets => format!(
-            r#"<div class="c-toolbar">
+        Section::Targets => {
+            let sort_href = match nav_domain {
+                Some(domain) => format!("/collection/targets?domain={domain}&amp;sort=last"),
+                None => "/collection/targets?sort=last".to_owned(),
+            };
+            // 新目标归到当前正在看的领域。站在「考研自习」下建的目标落进 ADHD，是个
+            // 无声的错误——它会让一条外部领域的采集把材料写进证据侧。看全部领域时不带，
+            // 由服务端按本领域处置（那是既有行为）。
+            let domain_field = match nav_domain {
+                Some(domain) if domain != linggan_evidence::observation_domain::ALL_DOMAINS => {
+                    format!(r#"<input type="hidden" name="domain" value="{domain}">"#)
+                }
+                _ => String::new(),
+            };
+            format!(
+                r#"<div class="c-toolbar">
           <div class="c-tabs c-tg-views">{target_filters}</div>
           <div class="c-actions c-tg-toolbar">
-            <a class="c-btn-quiet" href="/collection/targets?sort=last">排序 / 最近观察 ↓</a>
+            <a class="c-btn-quiet" href="{sort_href}">排序 / 最近观察 ↓</a>
             <form id="collection-target-create" class="c-target-add" method="post" action="/collection/targets/new">
+              {domain_field}
               <select name="target_kind" aria-label="目标类型">
                 <option value="creator">创作者</option>
                 <option value="keyword">关键词</option>
@@ -818,8 +849,9 @@ fn second_bar(
             </form>
           </div>
         </div>"#,
-            target_filters = target_filter_tabs(filter, counts),
-        ),
+                target_filters = target_filter_tabs(filter, counts, nav_domain),
+            )
+        }
         Section::Operations => {
             let mut tabs = String::new();
             for candidate in [
@@ -856,7 +888,7 @@ fn second_bar(
     }
 }
 
-fn crumb(section: Section, mode: OperationsMode) -> String {
+fn crumb(section: Section, mode: OperationsMode, picker: &str) -> String {
     let entry = meta(section);
     let tail = if section == Section::Operations {
         format!(
@@ -866,10 +898,28 @@ fn crumb(section: Section, mode: OperationsMode) -> String {
     } else {
         String::new()
     };
+    // 选择器坐在「采集」与子页名之间，与语料侧同一位置：它管的是整个模块的观察对象，
+    // 不是本页的一个筛选条件。子页还不认领域时不渲染——一个点了不起作用的控件比没有更糟。
+    let domain = if picker.is_empty() {
+        String::new()
+    } else {
+        format!(" <span class=\"v7-slash\">/</span> {picker}")
+    };
     format!(
-        "采集 <span class=\"v7-slash\">/</span> <b>{zh}</b>{tail}",
+        "采集{domain} <span class=\"v7-slash\">/</span> <b>{zh}</b>{tail}",
         zh = entry.zh,
     )
+}
+
+/// 采集页的领域上下文。
+///
+/// 两项分开：`picker` 决定这一页显不显示选择器，`nav_domain` 决定链接带不带领域。
+/// 一个还不按领域过滤内容的子页应当只带后者——渲染选择器等于承诺了它做不到的事，
+/// 而丢掉链接参数会让人在子页之间走一圈就失去当前领域。
+#[derive(Default, Clone, Copy)]
+pub struct DomainBar<'a> {
+    pub picker: &'a str,
+    pub nav_domain: Option<&'a str>,
 }
 
 pub fn render(
@@ -878,6 +928,17 @@ pub fn render(
     filter: Option<&str>,
     counts: Option<&TargetCounts>,
     state: Option<&SurfaceState>,
+) -> String {
+    render_in_domain(section, mode, filter, counts, state, DomainBar::default())
+}
+
+pub fn render_in_domain(
+    section: Section,
+    mode: OperationsMode,
+    filter: Option<&str>,
+    counts: Option<&TargetCounts>,
+    state: Option<&SurfaceState>,
+    domain: DomainBar<'_>,
 ) -> String {
     let entry = meta(section);
     // DESIGN-003 header reclaim: this surface's own counts ride in the context row next to
@@ -906,7 +967,7 @@ pub fn render(
     let header = global_header(
         PrimarySurface::Collection,
         boundary,
-        &crumb(section, mode),
+        &crumb(section, mode, domain.picker),
         &meta_row,
         collection_state,
     );
@@ -937,8 +998,8 @@ pub fn render(
 </html>
 "#,
         title = entry.title,
-        rail = rail(section, state),
-        second_bar = second_bar(section, mode, filter, counts, state),
+        rail = rail(section, state, domain.nav_domain),
+        second_bar = second_bar(section, mode, filter, counts, state, domain.nav_domain),
         body = body(section, mode, state),
     )
 }
@@ -950,4 +1011,63 @@ fn escape(value: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#x27;")
+}
+
+#[cfg(test)]
+mod domain_bar_tests {
+    use super::*;
+
+    /// 这一条守的是与语料侧同源的一类缺陷：写死的导航链接把当前领域丢掉。采集侧的
+    /// 子页大多还不按领域过滤内容，但它们必须把领域原样带走——否则从观察目标去一趟
+    /// 采集任务再回来，当前领域就没了。
+    #[test]
+    fn every_collection_link_carries_the_domain_even_where_the_page_ignores_it() {
+        let html = render_in_domain(
+            Section::Tasks,
+            OperationsMode::Now,
+            None,
+            None,
+            None,
+            DomainBar {
+                picker: "",
+                nav_domain: Some("all"),
+            },
+        );
+        for slug in ["attention", "targets", "operations", "tasks", "runtime"] {
+            assert!(
+                html.contains(&format!(r#"href="/collection/{slug}?domain=all""#)),
+                "{slug} 丢掉了当前领域"
+            );
+        }
+        // 这一页还不按领域过滤内容，就不该显示选择器——点了不起作用的控件比没有更糟。
+        assert!(!html.contains("v7-domain-picker"));
+    }
+
+    /// 没有领域上下文时链接保持裸路径：带一个空参数会让地址假装有得选。
+    #[test]
+    fn without_a_domain_the_links_stay_bare() {
+        let html = render(Section::Targets, OperationsMode::Now, None, None, None);
+        assert!(html.contains(r#"href="/collection/targets""#));
+        assert!(!html.contains("?domain="));
+    }
+
+    /// 选择器坐在「采集」与子页名之间，管的是整个模块的观察对象，不是本页的筛选条件。
+    #[test]
+    fn the_picker_sits_between_the_module_and_the_page_name() {
+        let html = render_in_domain(
+            Section::Targets,
+            OperationsMode::Now,
+            None,
+            None,
+            None,
+            DomainBar {
+                picker: r#"<form class="v7-domain-picker"></form>"#,
+                nav_domain: Some("all"),
+            },
+        );
+        let crumb_start = html.find("采集").expect("面包屑以模块名开头");
+        let picker_at = html.find("v7-domain-picker").expect("选择器已渲染");
+        let page_at = html.find("<b>观察目标</b>").expect("子页名在面包屑里");
+        assert!(crumb_start < picker_at && picker_at < page_at);
+    }
 }
