@@ -106,7 +106,7 @@ async fn read_catalog(
          SELECT first_discovery.content_public_ref,first_discovery.content_external_id, \
                 CASE WHEN first_discovery.title_state='KNOWN' THEN first_discovery.title END AS discovery_title, \
                 CASE WHEN first_discovery.creator_state='KNOWN' THEN first_discovery.creator_display_name END AS creator_display_name, \
-                first_discovery.result_position, \
+                first_discovery.result_position::bigint AS result_position, \
                 first_discovery.published_at_source_text,first_discovery.lane, \
                 detail.title AS detail_title,detail.published_at::text AS detail_published_at, \
                 detail.observed_at::text AS detail_observed_at, \
