@@ -813,6 +813,7 @@ fn second_bar(
               </select>
               <input name="identity" required maxlength="120"
                      placeholder="创作者主页链接或 ID／关键词" />
+              <button class="c-btn-secondary c-tg-batch-open" type="button" data-target-batch-open aria-controls="target-batch-modal" disabled>批量编辑</button>
               <button class="c-btn-primary" type="submit">＋ 新建目标</button>
             </form>
           </div>

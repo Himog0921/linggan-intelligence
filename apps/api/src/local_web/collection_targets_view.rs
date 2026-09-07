@@ -83,19 +83,20 @@ pub fn render_stored_targets_with_observation(
         list_context,
     );
 
-    // Creator 与 keyword 的事实不同，但列表管理动作相同。选择只进入批量编辑弹窗，
-    // 不会改变行点击进入详情的语义。
+    // Creator 与 keyword 的事实不同，但列表管理动作相同。选择由表格提供，主动作
+    // 固定在顶栏；两者以 HTML form 属性关联，不能把行操作 form 嵌进一个外层 form。
+    // 否则浏览器会纠正无效嵌套，导致后续复选框和批量提交失去共同的表单归属。
     let list = format!(
         r#"<section class="c-tg-workspace">
               {failure}
-              <form class="c-tg-batch" method="post" action="/collection/targets/batch">
-                <div class="c-tg-list-head">
-                  <span>{count} 个观察目标</span>
-                  <div class="c-tg-list-tools"><span class="c-tg-list-hint">勾选后可批量编辑；点击一行查看详情</span><button class="c-btn-secondary c-tg-batch-open" type="button" data-target-batch-open disabled>批量编辑</button></div>
-                </div>
-                <div class="c-tg-directory">{creator_table}{keyword_table}</div>
+              <div class="c-tg-list-head">
+                <span>{count} 个观察目标</span>
+                <span class="c-tg-list-hint">勾选后可在顶部批量编辑；点击一行查看详情</span>
+              </div>
+              <div class="c-tg-directory">{creator_table}{keyword_table}</div>
+              <form id="target-batch-modal-form" class="c-tg-batch" method="post" action="/collection/targets/batch">
                 <div class="c-tg-batch-overlay" data-target-batch-modal hidden>
-                  <section class="c-tg-batch-dialog" role="dialog" aria-modal="true" aria-labelledby="target-batch-title">
+                  <section id="target-batch-modal" class="c-tg-batch-dialog" role="dialog" aria-modal="true" aria-labelledby="target-batch-title">
                     <div><h2 id="target-batch-title">批量编辑观察目标</h2><p data-target-batch-count>已选择 0 个目标</p></div>
                     <label>分组<input name="group_name" type="text" maxlength="80" placeholder="例如：ADHD 主力" required/></label>
                     <p>保存后会为所选目标设置同一分组。备注将在具备独立事实字段后接入，当前不会把自由文本冒充为已有备注。</p>
@@ -283,7 +284,7 @@ fn target_row(
         format!("打开{name}的关键词观察")
     };
     let shared_start = format!(
-        r#"<div class="c-tg-select" role="cell"><input type="checkbox" name="target_ref" value="{target_ref}" data-target-select aria-label="选择{opener_label}"/></div>
+        r#"<div class="c-tg-select" role="cell"><input type="checkbox" name="target_ref" value="{target_ref}" form="target-batch-modal-form" data-target-select aria-label="选择{opener_label}"/></div>
             <div class="c-tg-number" role="cell"><span class="c-tg-index">{index:03}</span></div>
             <div class="c-tg-object" role="cell">{avatar}<div class="c-tg-object-text"><a id="{opener_id}" class="c-tg-title c-tg-object-link" data-row-opener data-drawer-trigger="{target_ref}" href="{opener_href}" aria-label="{opener_label}">{name}</a>{identity}</div></div>
             <div class="c-tg-cell c-tg-platform" role="cell">{platform}</div>
@@ -1037,7 +1038,9 @@ mod tests {
         assert_eq!(html.matches(">建立档案</button>").count(), 1);
         assert_eq!(html.matches(">设置巡查</a>").count(), 1);
         assert_eq!(html.matches("type=\"checkbox\"").count(), 4);
-        assert!(html.contains("c-tg-batch"));
+        assert!(html.contains("id=\"target-batch-modal-form\""));
+        assert!(html.contains("form=\"target-batch-modal-form\" data-target-select"));
+        assert!(!html.contains("data-target-batch-open"));
         assert!(html.contains("批量编辑观察目标"));
         assert!(html.contains("name=\"action\" value=\"set_group\""));
         assert!(!html.contains("/collection/targets/monitoring"));
