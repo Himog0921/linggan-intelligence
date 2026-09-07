@@ -3620,8 +3620,10 @@ fn corpus_domain_picker(
             name = html_escape(&domain.name),
         ));
     }
+    // 提交时只带 domain：换领域是换观察对象，此前那个领域下的检索词、筛选、选中的作品
+    // 都不该跟着过来——它们说的是另一批材料。地址由服务端重新给，页面从干净状态开始。
     format!(
-        r#"<form class="v7-domain-picker" method="get" aria-label="当前观察领域">
+        r#"<form class="v7-domain-picker" method="get" action="/corpus/evidence" aria-label="当前观察领域">
              <label class="v7-sr-only" for="corpus-domain">当前观察领域</label>
              <select id="corpus-domain" name="domain" onchange="this.form.submit()">{options}</select>
              <noscript><button type="submit">切换</button></noscript>

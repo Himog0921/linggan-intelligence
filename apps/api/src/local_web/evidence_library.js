@@ -318,6 +318,11 @@
    * back-steps that each undo a 30px width change. */
   function syncUrl(mode = 'replace') {
     const params = explicitParams();
+    // 当前观察领域由地址承载，且不归这个页面管——它是整个语料模块的观察对象，切到哪个
+    // 领域，语料下每个子页都跟着走。这里若不原样带回，每一次列表刷新都会把它抹掉，
+    // 领域就变成了「选一次、下一次交互即失效」。
+    const domain = new URLSearchParams(window.location.search).get('domain');
+    if (domain) params.set('domain', domain);
     if (model.activeView !== 'all') params.set('view', model.activeView);
     if (model.activeLayout !== 'research') params.set('layout', model.activeLayout);
     if (model.selectedRef) params.set('work', model.selectedRef);
