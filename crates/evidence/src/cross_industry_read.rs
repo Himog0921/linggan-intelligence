@@ -88,6 +88,106 @@ pub async fn read_cross_industry_samples(
     }))
 }
 
+/// 一条评论正文最多返回多少字符。
+///
+/// 按**字符**而非字节切，中文一个字是 3 字节，按字节切会把一个汉字劈成半个。证据侧
+/// 的有界摘录早已踩过这一条。
+const CROSS_INDUSTRY_BODY_CHARS: usize = 500;
+
+/// 读一个外部领域的评论原声。
+///
+/// 返回形状刻意与评论研究页现有的原声列表对齐（`page.items[]` + `works[]`），同一套
+/// 渲染因此可以直接吃两种领域的数据——**界面统一，数据不合并**。这里读的是
+/// `cross_industry_comment`，一个字段都不经过证据侧接口。
+pub async fn read_cross_industry_comments(
+    database: &Database,
+    domain_ref: Uuid,
+) -> Result<Value, CrossIndustryReadError> {
+    let schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('cross_industry_comment') IS NOT NULL \
+                AND to_regclass('observation_domain') IS NOT NULL",
+    )
+    .fetch_one(database.pool())
+    .await?;
+    if !schema_ready {
+        return Err(CrossIndustryReadError::SchemaUnavailable);
+    }
+
+    let is_own_domain: Option<bool> =
+        sqlx::query_scalar("SELECT is_own_domain FROM observation_domain WHERE domain_ref = $1")
+            .bind(domain_ref)
+            .fetch_optional(database.pool())
+            .await?;
+    if is_own_domain == Some(true) {
+        return Err(CrossIndustryReadError::HomeDomainHasNoSamples);
+    }
+
+    let total: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM cross_industry_comment WHERE domain_ref = $1")
+            .bind(domain_ref)
+            .fetch_one(database.pool())
+            .await?;
+
+    let rows: Vec<CrossIndustryCommentRow> = sqlx::query_as(
+        "SELECT comment.comment_ref, comment.sample_ref, comment.body_text, comment.is_reply, \
+                to_char(comment.observed_at, 'YYYY-MM-DD HH24:MI') AS observed_at, \
+                sample.title, sample.author_name \
+         FROM cross_industry_comment comment \
+         JOIN cross_industry_sample sample ON sample.sample_ref = comment.sample_ref \
+         WHERE comment.domain_ref = $1 \
+         ORDER BY comment.observed_at DESC, comment.comment_ref \
+         LIMIT $2",
+    )
+    .bind(domain_ref)
+    .bind(CROSS_INDUSTRY_PAGE_SIZE)
+    .fetch_all(database.pool())
+    .await?;
+
+    let truncated = rows.len() as i64 == CROSS_INDUSTRY_PAGE_SIZE;
+    let mut works: Vec<Value> = Vec::new();
+    let mut seen: Vec<Uuid> = Vec::new();
+    let mut items: Vec<Value> = Vec::new();
+    for (comment_ref, sample_ref, body_text, is_reply, observed_at, title, author_name) in rows {
+        if !seen.contains(&sample_ref) {
+            seen.push(sample_ref);
+            works.push(json!({
+                "workRef": sample_ref,
+                "title": title,
+                "creatorDisplayName": author_name,
+            }));
+        }
+        let full = body_text.unwrap_or_default();
+        let clipped: String = full.chars().take(CROSS_INDUSTRY_BODY_CHARS).collect();
+        let body_truncated = clipped.chars().count() < full.chars().count();
+        items.push(json!({
+            "sourceRef": comment_ref,
+            "workRef": sample_ref,
+            // 正文缺失给 null 而不是空串：「没取到」与「是一条空评论」不是一件事。
+            "body": if clipped.is_empty() { Value::Null } else { Value::String(clipped) },
+            "isReply": is_reply,
+            "bodyTruncated": body_truncated,
+            "observedAt": observed_at,
+        }));
+    }
+
+    Ok(json!({
+        "queryScope": "cross_industry_comment",
+        "page": { "total": total, "items": items, "nextCursor": Value::Null },
+        "works": works,
+        "truncated": truncated,
+    }))
+}
+
+type CrossIndustryCommentRow = (
+    Uuid,
+    Uuid,
+    Option<String>,
+    bool,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
+
 type CrossIndustrySampleRow = (
     Uuid,
     String,

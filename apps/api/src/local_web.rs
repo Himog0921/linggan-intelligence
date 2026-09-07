@@ -48,7 +48,9 @@ use linggan_contracts::{
     parse_local_task_spec, parse_producer_attempt, parse_producer_submission,
     parse_producer_task_spec,
 };
-use linggan_evidence::cross_industry_read::{CrossIndustryReadError, read_cross_industry_samples};
+use linggan_evidence::cross_industry_read::{
+    CrossIndustryReadError, read_cross_industry_comments, read_cross_industry_samples,
+};
 use linggan_evidence::observation_domain::{
     ObservationDomain, read_observation_domains, resolve_current_domain,
 };
@@ -410,6 +412,10 @@ fn material_api_routes() -> Router<LocalWebState> {
             get(cross_industry_samples_json),
         )
         .route(
+            "/api/local/cross-industry/comments",
+            get(cross_industry_comments_json),
+        )
+        .route(
             "/api/local/evidence-library/legacy",
             get(material_projection::legacy_json),
         )
@@ -613,6 +619,37 @@ struct CrossIndustryQuery {
 ///
 /// 本领域走的是 `/api/local/work-resources`，不是这里。传入本领域会得到一个明确的
 /// 拒绝而不是空列表：空列表会被读成「这个领域还没采过」，而真相是问错了地方。
+/// 读一个外部领域的评论原声。
+///
+/// 本领域的评论在证据侧（`/api/local/comment-research`），不在这里。两条查询路径不
+/// 共享接口，隔离因此不依赖任何人记得在某处加条件。
+async fn cross_industry_comments_json(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CrossIndustryQuery>,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    match read_cross_industry_comments(database, query.domain).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(CrossIndustryReadError::HomeDomainHasNoSamples) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "home_domain_reads_evidence",
+        ),
+        Err(CrossIndustryReadError::SchemaUnavailable) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "cross_industry_schema_unavailable",
+        ),
+        Err(CrossIndustryReadError::Database(_)) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "cross_industry_read_unavailable",
+        ),
+    }
+}
+
 async fn cross_industry_samples_json(
     State(state): State<LocalWebState>,
     Query(query): Query<CrossIndustryQuery>,
