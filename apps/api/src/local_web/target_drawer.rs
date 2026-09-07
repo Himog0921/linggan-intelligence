@@ -285,6 +285,12 @@ pub(crate) fn target_primary_action(
     if needs_details {
         return TargetPrimaryAction::ContinueArchive;
     }
+    if archive.is_some_and(|value| !value.has_displayable_directory()) {
+        // A stored archive attempt without a current directory is neither a usable dossier nor
+        // a live task.  Do not send the person to "查看档案" and make them infer the failure
+        // from a contradictory status label; the next action is to inspect and handle it.
+        return TargetPrimaryAction::ViewArchiveProblems;
+    }
     let baseline_ready = matches!(
         target.lifecycle_state.as_str(),
         "archived" | "monitoring" | "paused"

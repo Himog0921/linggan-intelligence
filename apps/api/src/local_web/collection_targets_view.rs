@@ -980,6 +980,36 @@ mod tests {
     }
 
     #[test]
+    fn non_live_unusable_archive_never_pairs_an_error_state_with_view_archive() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let mut creator = target("creator", Some("停滞建档作者"));
+        creator.lifecycle_state = "monitoring".to_owned();
+        creator.monitoring_enabled = true;
+        let mut completeness = HashMap::new();
+        completeness.insert(
+            creator.identity_key.clone(),
+            ArchiveCompleteness {
+                started: true,
+                attempted: true,
+                directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Building,
+                ..ArchiveCompleteness::default()
+            },
+        );
+        let html = render_stored_targets(
+            &base,
+            &[creator],
+            &HashMap::new(),
+            Some(&completeness),
+            None,
+            TargetListContext::default(),
+        );
+
+        assert!(html.contains("档案有问题"));
+        assert!(html.contains(">处理异常</a>"));
+        assert!(!html.contains(">查看档案</a>"));
+    }
+
+    #[test]
     fn creator_and_keyword_use_distinct_columns_and_one_primary_action_per_row() {
         let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
         let creator = target("creator", Some("作者"));
