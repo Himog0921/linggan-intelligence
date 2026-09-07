@@ -304,8 +304,8 @@ pub(crate) async fn ensure_content(
     package: &ProducerCapturePackage,
     content_id: &str,
 ) -> Result<Uuid, ProducerRuntimeError> {
-    // 不填 domain_ref：证据表只装本领域作品是表的性质，由 0044 的触发器兜住，写入点
-    // 不必记得带上它——要求每处都记得，就是漏一次即破。
+    // 不填 domain_ref：证据表只装本领域作品是表的性质，由 0044 给该列的默认值兜住，
+    // 写入点不必记得带上它——要求每处都记得，就是漏一次即破。
     sqlx::query("INSERT INTO linggan_material_content (platform,content_external_id,public_ref,first_package_ref) VALUES ($1,$2,$3,$4) ON CONFLICT (platform,content_external_id) DO NOTHING")
         .bind(package.platform()).bind(content_id).bind(Uuid::new_v4()).bind(package.package_ref())
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;

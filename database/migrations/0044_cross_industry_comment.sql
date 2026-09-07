@@ -73,45 +73,23 @@ ALTER TABLE cross_industry_sample
 
 -- 2. 证据侧的对称隔离。
 --
--- 既有 107 行作品全部回填为本领域：它们是在只有 ADHD 的时候采进来的，标成别的
--- 会改写历史。这里与 0041 对观察目标的处置不同——那边保持可空 + 读取时回落，因为
--- 「没标过」与「标了本领域」是两件不同的事；而这张表要承担隔离职责，可空的外键在
--- SQL 里根本不触发检查（任一列为 NULL 即放行），隔离就成了摆设。所以此列 NOT NULL。
+-- **不能用 UPDATE 回填**：`linggan_material_content` 是 append-only 事实表，
+-- `linggan_material_content_is_append_only` 触发器禁止一切 UPDATE 与 DELETE
+-- （「Linggan Browser Producer Runtime facts are append-only」）。任何回填式写法在
+-- 真实数据上都会被它拒绝——空库上试不出来，因为没有行需要回填。
+--
+-- 改用 `ADD COLUMN ... DEFAULT`：PostgreSQL 11 起这是元数据操作，不重写表也不产生
+-- 行级 UPDATE，既有 107 行读到默认值，将来新插入的行也自动得到它。历史与将来一次
+-- 解决，连补默认值的触发器都不需要。
+--
+-- 默认值引用 `0041` 硬编码插入的本领域 ADHD。那三个领域的 uuid 是迁移里写死的常量，
+-- 不是随机生成的；且 `observation_domain_own_idx`（partial unique）保证本领域只有一个。
 ALTER TABLE linggan_material_content
-    ADD COLUMN domain_ref uuid,
+    ADD COLUMN domain_ref uuid NOT NULL
+        DEFAULT '00000000-0000-4000-8000-000000000001',
     ADD COLUMN is_own_domain boolean NOT NULL DEFAULT true;
 
-UPDATE linggan_material_content
-SET domain_ref = (SELECT domain_ref FROM observation_domain WHERE is_own_domain)
-WHERE domain_ref IS NULL;
-
--- 归属由数据库自己填，不要求每个写入点记得带上。
---
--- 让 domain_ref 成为一个必须由调用方提供的列，等于要求「所有写证据表的地方都记得
--- 填本领域」——那正是本卡反复拒绝的那种约定：漏一次即破。证据表只装本领域作品是
--- **表的性质**，不是某次调用的选择，所以由表自己兜住。
---
--- 隔离并没有因此变松：下面的 CHECK 与复合外键照旧。触发器只负责补上省略的那一半，
--- 显式写入外部领域仍然会被拒绝。
-CREATE FUNCTION linggan_material_content_home_domain()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    IF NEW.domain_ref IS NULL THEN
-        NEW.domain_ref := (SELECT domain_ref FROM observation_domain WHERE is_own_domain);
-    END IF;
-    RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER linggan_material_content_home_domain_default
-    BEFORE INSERT ON linggan_material_content
-    FOR EACH ROW
-    EXECUTE FUNCTION linggan_material_content_home_domain();
-
 ALTER TABLE linggan_material_content
-    ALTER COLUMN domain_ref SET NOT NULL,
     -- 证据表只装本领域的作品。跨行业内容有自己的表，共用一张表等于把参照物混进证据。
     ADD CONSTRAINT linggan_material_content_home_domain_only
         CHECK (is_own_domain = true),
