@@ -422,7 +422,7 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
 
 #[test]
 fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
-    assert!(!TARGET_DRAWER_CSS.contains("@media (max-width"));
+    assert!(TARGET_DRAWER_CSS.contains("@media (max-width:900px)"));
     assert!(TARGET_DRAWER_CSS.contains("@media (prefers-reduced-motion:reduce)"));
     assert!(TARGET_DRAWER_CSS.contains("min-height:40px"));
     assert!(TARGET_DRAWER_CSS.contains(".c-tg-table-head.c-tg-creator-grid"));

@@ -69,11 +69,12 @@ use linggan_evidence::{
     local_discovery_schema_is_ready, local_producer_schema_is_ready,
     media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_archive_completeness, read_collection_task_timeline,
-    read_creator_lifecycle, read_discovery_library, read_media_upload_session,
-    read_runtime_capacity, read_runtime_library, read_scheduler_heartbeat,
-    read_station_capabilities, read_station_overview, read_target, read_target_avatars,
-    record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
-    register_station, release_media_upload_finalize, rename_station, request_and_admit,
+    read_creator_directory, read_creator_lifecycle, read_discovery_library, read_keyword_hits,
+    read_media_upload_session, read_runtime_capacity, read_runtime_library,
+    read_scheduler_heartbeat, read_station_capabilities, read_station_overview, read_target,
+    read_target_avatars, read_target_observation_summaries, record_media_acquisition_failure,
+    record_media_download_failure, record_media_upload_chunk, register_station,
+    release_media_upload_finalize, rename_station, request_and_admit,
     request_and_admit_material_targets, request_progressive_archive, retire_station,
     set_group_for_many, set_station_accepting, start_local_attempt, start_producer_attempt,
     station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
@@ -2283,6 +2284,9 @@ struct CollectionParams {
     life_window: Option<String>,
     life_metric: Option<String>,
     life_work: Option<String>,
+    /// The target drawer owns this bounded, read-only catalogue filter.
+    catalog_query: Option<String>,
+    catalog_filter: Option<String>,
     /// 规则 modal 的 target ref；与 drawer 并列，避免把规则命令状态塞进 JS。
     rule: Option<String>,
     /// 成功命令的 durable receipt ref，用于刷新后仍显示刚刚的回执。
@@ -2450,6 +2454,20 @@ async fn collection_targets(
     } else {
         Ok(None)
     };
+    let creator_catalog = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
+        Some(target) if target.target_kind == "creator" => {
+            read_creator_directory(database, target.target_ref)
+                .await
+                .ok()
+        }
+        _ => None,
+    };
+    let keyword_catalog = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
+        Some(target) if target.target_kind == "keyword" => {
+            read_keyword_hits(database, target.target_ref).await.ok()
+        }
+        _ => None,
+    };
     let list = match list_targets(database, params.filter.as_deref(), 200).await {
         Ok(targets) => {
             let avatars = match read_target_avatars(database, &targets).await {
@@ -2463,11 +2481,15 @@ async fn collection_targets(
                     .map(|target| (target.target_ref, ObservationTargetAvatar::Unavailable))
                     .collect::<HashMap<_, _>>(),
             };
-            collection_targets_view::render_stored_targets(
+            let observation = read_target_observation_summaries(database, &targets)
+                .await
+                .ok();
+            collection_targets_view::render_stored_targets_with_observation(
                 &base,
                 &targets,
                 &avatars,
                 completeness.as_ref(),
+                observation.as_ref(),
                 params.error.as_deref(),
                 list_context,
             )
@@ -2478,7 +2500,7 @@ async fn collection_targets(
     // list must not erase a target that was read successfully, and an unreadable target must
     // not be flattened into "not found".
     let drawer = match drawer_target.as_ref() {
-        Ok(target) => target_drawer::render(
+        Ok(target) => target_drawer::render_with_catalog(
             target.as_ref(),
             drawer_avatar.as_ref(),
             completeness.as_ref(),
@@ -2502,6 +2524,17 @@ async fn collection_targets(
                     metric: query.metric,
                 },
             },
+            match target.as_ref().map(|target| target.target_kind.as_str()) {
+                Some("creator") => target_drawer::TargetCatalogView::Creator(
+                    creator_catalog.as_ref().and_then(Option::as_ref),
+                ),
+                Some("keyword") => target_drawer::TargetCatalogView::Keyword(
+                    keyword_catalog.as_ref().and_then(Option::as_ref),
+                ),
+                _ => target_drawer::TargetCatalogView::Unavailable,
+            },
+            params.catalog_query.as_deref(),
+            params.catalog_filter.as_deref(),
             selected_lifecycle_work.as_deref(),
             list_context,
         ),

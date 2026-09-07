@@ -33,11 +33,13 @@ mod material_social_read;
 mod material_storage_key;
 mod media_acquisition;
 pub mod observation_domain;
+mod observation_summary;
 mod patrol_scheduler;
 mod producer_runtime;
 mod receipt;
 mod runtime_capacity;
 mod station_read;
+mod target_catalog;
 mod target_enrichment;
 mod work_order;
 mod work_order_lease;
@@ -128,6 +130,9 @@ pub use media_acquisition::{
     claim_media_acquisition, ensure_discovery_cover_media_work, media_acquisition_schema_is_ready,
     record_media_acquisition_failure,
 };
+pub use observation_summary::{
+    PatrolReadState, TargetObservationSummary, read_target_observation_summaries,
+};
 pub use patrol_scheduler::{
     PatrolTickSummary, SchedulerHeartbeat, patrol_schema_is_ready, read_dynamic_cadence_for_rule,
     read_scheduler_heartbeat, record_scheduler_started, run_due_patrols, set_group_for_many,
@@ -150,6 +155,10 @@ pub use runtime_capacity::{
 pub use station_read::{
     CapabilityState, StationCapability, StationOverview, UnclaimedInstallation,
     read_station_capabilities, read_station_overview, station_daily_note_usage,
+};
+pub use target_catalog::{
+    CatalogDetailState, CatalogSource, CatalogWork, CreatorDirectoryProjection,
+    KeywordHitProjection, read_creator_directory, read_keyword_hits,
 };
 pub use target_enrichment::{
     TargetEnrichmentError, TargetSyncOutcome, sync_target_from_author_profile,
