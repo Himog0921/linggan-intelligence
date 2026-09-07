@@ -89,7 +89,6 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0039_comment_research.sql"),
     include_str!("../../../../database/migrations/0040_model_pi.sql"),
-    include_str!("../../../../database/migrations/0043_comment_daily.sql"),
     "\n",
     include_str!("../../../../database/migrations/0041_observation_domain.sql"),
     "\n",

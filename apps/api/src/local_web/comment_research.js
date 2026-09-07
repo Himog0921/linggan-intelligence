@@ -51,6 +51,7 @@
     // 写入口一并收起：外部领域下没有可引用的来源，留着按钮只会存出一条归属不明的记录。
     $('search-form').hidden=true;
     $('asset-tools').hidden=true;
+    $('daily-tools').hidden=true;
     if(state.view!=='voices') { outsideDomainEmpty(); return; }
     try {
       const data=await request(`/api/local/cross-industry/comments?domain=${encodeURIComponent(domainRef)}`);
@@ -68,7 +69,7 @@
   // 用后者会把「一条都还没采过」说成「你筛掉了」。
   function outsideDomainEmpty() {
     const where = domainName ? `「${domainName}」` : '这个领域';
-    const what = ({voices:'评论原声',groups:'问题分组',assets:'语料资产',queries:'已存查询'})[state.view];
+    const what = ({voices:'评论原声',groups:'问题分组',assets:'语料资产',queries:'已存查询',daily:'每日研究'})[state.view];
     $('results').innerHTML=empty(`${where}还没有${what}。跨行业内容与本领域材料分开存放，这里只显示当前领域自己的内容。`);
     $('results').setAttribute('aria-busy','false');
     $('result-count').textContent='';
