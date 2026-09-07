@@ -433,7 +433,15 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
   ].includes(action)) {
     dispatchProducerRuntimeAction(action, message)
       .then((result) => sendResponse(result || { success: false, code: 'linggan_page_action_unavailable' }))
-      .catch((error) => sendResponse({ success: false, code: 'linggan_page_action_failed', message: String(error?.message || error) }));
+      .catch((error) => {
+        // A detail session that cannot yield the exact server-approved note is
+        // not a generic selector or extension failure.  Report the bounded
+        // page-unavailable fact; background.js never transmits the raw error.
+        const code = String(error?.message || '') === 'detail_page_session_content_not_collected'
+          ? 'page_unavailable'
+          : 'linggan_page_action_failed';
+        sendResponse({ success: false, code, message: String(error?.message || error) });
+      });
     return true;
   }
   return false;

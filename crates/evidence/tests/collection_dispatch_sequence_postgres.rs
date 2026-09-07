@@ -10,9 +10,9 @@ use linggan_evidence::{
     activate_installation_credential, apply_monitor_rule_command, bind_observation_account,
     check_in_installation, create_producer_task, decide_dispatch, expire_lapsed_leases,
     grant_authorization, issue_work_order_lease, open_claim_window, read_collection_task_timeline,
-    read_work_resources, report_account_eligibility, requeue_failed_dispatch,
-    rotate_installation_credential, set_station_accepting, start_producer_attempt,
-    submit_producer_package,
+    read_work_resources, recover_released_orphaned_work_orders, report_account_eligibility,
+    requeue_failed_dispatch, rotate_installation_credential, set_station_accepting,
+    start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::Row;
@@ -90,6 +90,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0037_collection_scheduler_scale.sql"),
     "\n",
     include_str!("../../../database/migrations/0038_detail_only_material_scope.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0045_deep_archive_recovery.sql"),
 );
 
 #[tokio::test]
@@ -719,6 +721,164 @@ async fn failed_browser_start_is_audited_then_returns_work_order_to_shared_queue
         "a new Lease makes a fresh immutable RuntimeTask; the failed one stays history"
     );
     assert_task_state(&database, first_task_id, "pending").await;
+    assert!(!lease_is_live(&database, lease.lease_ref).await);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn unavailable_detail_is_audited_without_blocking_later_materials() {
+    let database = proof_database_for("collection_dispatch_page_unavailable").await;
+    let fixture = seed_creator_work_order(&database).await;
+    for (ordinal, content_external_id) in [(1, "unavailable-first"), (2, "available-second")] {
+        submit_profile_discovery(
+            &database,
+            content_external_id,
+            &format!(
+                "https://www.xiaohongshu.com/explore/{content_external_id}?xsec_token=SIGNED_FIXTURE&xsec_source=pc_user"
+            ),
+        )
+        .await;
+        let content_public_ref: Uuid = sqlx::query_scalar(
+            "SELECT public_ref FROM linggan_material_content \
+             WHERE platform='xhs' AND content_external_id=$1",
+        )
+        .bind(content_external_id)
+        .fetch_one(database.pool())
+        .await
+        .expect("accepted discovery creates the stable material identity");
+        sqlx::query(
+            "INSERT INTO collection_work_order_material_target \
+                 (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) \
+             VALUES ($1,$2,$3,30,2,true)",
+        )
+        .bind(fixture.work_order_ref)
+        .bind(content_public_ref)
+        .bind(ordinal)
+        .execute(database.pool())
+        .await
+        .expect("both exact materials are frozen by the same approved WorkOrder");
+    }
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("deepening lease is issued");
+    let first = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("first detail work is claimed");
+    let first_task_id = task_id(&first);
+    assert_eq!(
+        task_from_dispatch(&first).raw()["target"]["contentExternalId"],
+        "unavailable-first"
+    );
+
+    let unavailable_failure_ref = Uuid::new_v4();
+    let outcome = requeue_failed_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        first_task_id,
+        unavailable_failure_ref,
+        DispatchFailureCode::PageUnavailable,
+    )
+    .await
+    .expect("a producer-confirmed unavailable page is recorded");
+    assert_eq!(outcome, DispatchFailureOutcome::Unavailable);
+    let unavailable_lanes: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease_task task \
+         JOIN linggan_runtime_task runtime USING(task_id) \
+         WHERE runtime.task_spec #>> '{target,contentExternalId}'='unavailable-first' \
+           AND task.execution_state='unavailable'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("all dependent lanes remain readable");
+    assert_eq!(
+        unavailable_lanes, 4,
+        "one unreadable work closes only its own lanes"
+    );
+    let attempts: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_runtime_attempt WHERE task_id=$1")
+            .bind(first_task_id)
+            .fetch_one(database.pool())
+            .await
+            .expect("attempt history is readable");
+    assert_eq!(attempts, 0, "page unavailability is not a producer Attempt");
+
+    let next = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the next independent material is still eligible");
+    assert_eq!(
+        task_from_dispatch(&next).raw()["target"]["contentExternalId"],
+        "available-second"
+    );
+    let failure_code: String = sqlx::query_scalar(
+        "SELECT failure_code FROM collection_work_order_lease_task_dispatch_failure \
+         WHERE task_id=$1",
+    )
+    .bind(first_task_id)
+    .fetch_one(database.pool())
+    .await
+    .expect("unavailability remains an append-only dispatch fact");
+    assert_eq!(failure_code, "page_unavailable");
+    let replay = requeue_failed_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        first_task_id,
+        unavailable_failure_ref,
+        DispatchFailureCode::PageUnavailable,
+    )
+    .await
+    .expect("a lost terminal acknowledgement remains idempotent");
+    assert_eq!(replay, DispatchFailureOutcome::Unavailable);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn released_orphaned_work_order_is_recovered_without_rewriting_old_lease_history() {
+    let database = proof_database_for("collection_dispatch_orphaned_work_order").await;
+    let fixture = seed_creator_work_order(&database).await;
+    let lease = issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("fixture work is leased once");
+    let claimed = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("first historical task is claimed");
+    let historical_task_id = task_id(&claimed);
+    sqlx::query(
+        "UPDATE collection_work_order_lease \
+         SET released_at=scope_001_now(),release_reason='station_unavailable' \
+         WHERE lease_ref=$1",
+    )
+    .bind(lease.lease_ref)
+    .execute(database.pool())
+    .await
+    .expect("simulate the pre-recovery release defect");
+    assert_eq!(
+        recover_released_orphaned_work_orders(&database)
+            .await
+            .expect("released orphan is safely returned to the queue"),
+        1
+    );
+    let state: String =
+        sqlx::query_scalar("SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(fixture.work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("recovered work order is readable");
+    assert_eq!(state, "queued");
+    assert_task_state(&database, historical_task_id, "in_progress").await;
     assert!(!lease_is_live(&database, lease.lease_ref).await);
 }
 

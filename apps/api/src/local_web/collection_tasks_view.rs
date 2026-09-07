@@ -306,6 +306,11 @@ fn task_state(task: &CollectionTaskExecution) -> TaskStateView {
             "上次页面启动未形成 Attempt",
         ),
         Some("pending") => ("等待派发", "c-task-state-wait", "尚未领取"),
+        Some("unavailable") => (
+            "页面暂不可读",
+            "c-task-state-warn",
+            "平台当前未提供该作品；未生成 Attempt、Package 或详情",
+        ),
         Some("completed") => (
             "步骤完成",
             "c-task-state-ok",

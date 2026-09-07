@@ -1664,47 +1664,107 @@ async fn advance_progressive_archive_in_transaction(
     authorization_ref: Uuid,
     purpose: &str,
     requested_by: &str,
-    monitoring_enabled: bool,
+    _monitoring_enabled: bool,
     valid_for_minutes: i32,
     issue_lease: bool,
 ) -> Result<ProgressiveAdvance, RequestLeaseError> {
     let content_refs: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT discovered.content_public_ref FROM ( \
-           SELECT finding.content_public_ref,min(finding.created_at) AS first_seen \
-           FROM linggan_material_discovery_finding finding \
-           JOIN linggan_runtime_capture_package package USING (package_ref) \
-           JOIN linggan_runtime_submission_receipt receipt USING (package_ref) \
-           JOIN linggan_runtime_record_disposition disposition \
-             ON disposition.package_ref=finding.package_ref \
-            AND disposition.record_ordinal=finding.record_ordinal \
-           JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
-           JOIN collection_work_order_lease lease USING (lease_ref) \
-           JOIN collection_work_order source_order USING (work_order_ref) \
-           WHERE source_order.target_ref=$1 \
-             AND finding.discovery_kind='profile_discovery' \
-             AND (source_order.lane='deep_archive' OR $2) \
-             AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
-             AND receipt.material_admission='ACCEPTED' \
-             AND disposition.disposition <> 'quarantined' \
-             AND NOT EXISTS ( \
-               SELECT 1 FROM linggan_material_content_detail detail \
-               WHERE detail.content_public_ref=finding.content_public_ref) \
-            AND NOT EXISTS ( \
-               SELECT 1 FROM collection_work_order scoped_order \
-               JOIN collection_work_order_material_target scope USING (work_order_ref) \
-               LEFT JOIN collection_work_order_lease scoped_lease USING (work_order_ref) \
-               WHERE scoped_order.target_ref=$1 \
-                 AND scope.content_public_ref=finding.content_public_ref \
-                 AND (scoped_order.queue_state='queued' \
-                      OR (scoped_lease.released_at IS NULL \
-                          AND scoped_lease.expires_at>scope_001_now()))) \
-           GROUP BY finding.content_public_ref \
-         ) discovered \
-         ORDER BY discovered.first_seen,discovered.content_public_ref \
+        "WITH canonical_directory_package AS ( \
+             SELECT package.package_ref,package.accepted_at \
+             FROM collection_work_order root_order \
+             JOIN collection_work_order_lease lease USING(work_order_ref) \
+             JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+             JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+             JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
+             JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+             WHERE root_order.work_order_ref=$2 \
+               AND package.package_kind='profile_discovery' \
+               AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+               AND receipt.material_admission='ACCEPTED' \
+             ORDER BY package.accepted_at DESC,package.package_ref DESC LIMIT 1 \
+         ), canonical_directory AS ( \
+             SELECT finding.content_public_ref,directory.accepted_at AS first_seen \
+             FROM canonical_directory_package directory \
+             JOIN linggan_material_discovery_finding finding USING(package_ref) \
+             JOIN linggan_runtime_record_disposition disposition \
+               ON disposition.package_ref=finding.package_ref \
+              AND disposition.record_ordinal=finding.record_ordinal \
+             WHERE finding.discovery_kind='profile_discovery' \
+               AND disposition.disposition='accepted_for_library_discovery' \
+         ), qualified_patrol_packages AS ( \
+             SELECT DISTINCT package.package_ref,package.accepted_at \
+             FROM collection_work_order patrol_order \
+             JOIN collection_work_order_lease lease USING(work_order_ref) \
+             JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+             JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+             JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
+             JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+             CROSS JOIN LATERAL jsonb_array_elements( \
+               CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
+                    THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
+             WHERE patrol_order.target_ref=$1 AND patrol_order.lane='patrol' \
+               AND package.package_kind='profile_discovery' \
+               AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+               AND receipt.material_admission='ACCEPTED' \
+               AND layer->>'capability'='profile_discovery' \
+               AND COALESCE((layer->>'failed')::integer,0)=0 \
+               AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
+               AND COALESCE((layer->>'unknown')::integer,0)=0 \
+               AND (layer->>'stoppedReason'='surface_ended' OR ( \
+                    layer->>'stoppedReason'='maximum_quota' \
+                    AND COALESCE((layer->>'acquired')::integer,-1)= \
+                        COALESCE((task.task_spec->>'maximumQuota')::integer,-2))) \
+               AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
+                               WHERE disposition.package_ref=package.package_ref \
+                                 AND disposition.disposition='quarantined') \
+         ), patrol_additions AS ( \
+             SELECT finding.content_public_ref,patrol.accepted_at AS first_seen \
+             FROM qualified_patrol_packages patrol \
+             JOIN linggan_material_discovery_finding finding USING(package_ref) \
+             JOIN linggan_runtime_record_disposition disposition \
+               ON disposition.package_ref=finding.package_ref \
+              AND disposition.record_ordinal=finding.record_ordinal \
+             WHERE finding.discovery_kind='profile_discovery' \
+               AND disposition.disposition='accepted_for_library_discovery' \
+         ), current_directory AS ( \
+             SELECT content_public_ref,min(first_seen) AS first_seen FROM ( \
+               SELECT * FROM canonical_directory UNION ALL SELECT * FROM patrol_additions \
+             ) works GROUP BY content_public_ref \
+         ) \
+         SELECT current_directory.content_public_ref FROM current_directory \
+         WHERE NOT EXISTS ( \
+             SELECT 1 FROM linggan_material_content_detail detail \
+             WHERE detail.content_public_ref=current_directory.content_public_ref) \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM collection_work_order scoped_order \
+             JOIN collection_work_order_material_target scope USING(work_order_ref) \
+             LEFT JOIN collection_work_order_lease scoped_lease USING(work_order_ref) \
+             WHERE scoped_order.target_ref=$1 \
+               AND scope.content_public_ref=current_directory.content_public_ref \
+               AND (scoped_order.queue_state='queued' \
+                    OR (scoped_lease.released_at IS NULL \
+                        AND scoped_lease.expires_at>scope_001_now()))) \
+           AND NOT EXISTS ( \
+             SELECT 1 FROM collection_work_order unavailable_order \
+             JOIN collection_work_order_material_target unavailable_scope \
+               ON unavailable_scope.work_order_ref=unavailable_order.work_order_ref \
+             JOIN linggan_material_content unavailable_content \
+               ON unavailable_content.public_ref=unavailable_scope.content_public_ref \
+             JOIN collection_work_order_lease unavailable_lease \
+               ON unavailable_lease.work_order_ref=unavailable_order.work_order_ref \
+             JOIN collection_work_order_lease_task unavailable_task \
+               ON unavailable_task.lease_ref=unavailable_lease.lease_ref \
+             JOIN linggan_runtime_task unavailable_runtime \
+               ON unavailable_runtime.task_id=unavailable_task.task_id \
+             WHERE unavailable_order.target_ref=$1 \
+               AND unavailable_content.public_ref=current_directory.content_public_ref \
+               AND unavailable_task.execution_state='unavailable' \
+               AND unavailable_runtime.task_spec #>> '{target,contentExternalId}'=unavailable_content.content_external_id) \
+         ORDER BY current_directory.first_seen,current_directory.content_public_ref \
          LIMIT $3",
     )
     .bind(target_ref)
-    .bind(monitoring_enabled)
+    .bind(root_work_order_ref)
     .bind(PROGRESSIVE_ARCHIVE_BATCH_SIZE)
     .fetch_all(&mut **transaction)
     .await

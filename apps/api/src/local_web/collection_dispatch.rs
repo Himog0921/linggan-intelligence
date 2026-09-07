@@ -251,6 +251,14 @@ async fn failure(State(state): State<LocalWebState>, body: Bytes) -> Response {
             "nextPollAfterSeconds": retry_after_seconds,
         }))
         .into_response(),
+        Ok(DispatchFailureOutcome::Unavailable) => Json(serde_json::json!({
+            "outcome": "unavailable",
+            "taskState": "unavailable",
+            // The current material is terminal, so immediately ask for the
+            // next sequentially eligible task rather than holding the batch.
+            "nextPollAfterSeconds": 0,
+        }))
+        .into_response(),
         Ok(DispatchFailureOutcome::Replay {
             retry_after_seconds,
         }) => Json(serde_json::json!({

@@ -16,6 +16,7 @@ use crate::collection_control::{
 };
 use crate::work_order_lease::{
     LeaseError, claim_queued_work_order_in_transaction, expire_lapsed_leases_in_transaction,
+    recover_released_orphaned_work_orders_in_transaction,
 };
 use linggan_storage_postgres::Database;
 use serde_json::Value;
@@ -105,8 +106,17 @@ pub enum DispatchFailureError {
 /// a producer Attempt or a Capture Package outcome.
 #[derive(Debug, PartialEq, Eq)]
 pub enum DispatchFailureOutcome {
-    Requeued { retry_after_seconds: u32 },
-    Replay { retry_after_seconds: u32 },
+    Requeued {
+        retry_after_seconds: u32,
+    },
+    /// The claimed `content_detail` page was explicitly unavailable.  The
+    /// approved material remains missing; only the dependent lanes for that
+    /// same material become terminal so later works in the bounded batch can
+    /// still proceed.
+    Unavailable,
+    Replay {
+        retry_after_seconds: u32,
+    },
 }
 
 /// 调度对一次「有活吗」的回答。
@@ -277,6 +287,9 @@ pub async fn requeue_failed_dispatch(
             return Err(DispatchFailureError::FailureIdentityConflict);
         }
         transaction.commit().await?;
+        if recorded_code == DispatchFailureCode::PageUnavailable.as_str() {
+            return Ok(DispatchFailureOutcome::Unavailable);
+        }
         return Ok(DispatchFailureOutcome::Replay {
             retry_after_seconds: u32::try_from(retry_after_seconds)
                 .unwrap_or(DISPATCH_FAILURE_RETRY_AFTER_SECONDS),
@@ -286,25 +299,67 @@ pub async fn requeue_failed_dispatch(
     // Take the task row lock before changing eligibility.  A concurrent
     // Package receipt finishes the same `in_progress` row instead, causing
     // this update to affect zero rows; it must never be put back into pending.
-    let requeued: Option<(Uuid, Uuid, Uuid)> = sqlx::query_as(
+    let requeued: Option<(Uuid, Uuid, Uuid, String, Option<String>)> = sqlx::query_as(
         "UPDATE collection_work_order_lease_task task \
          SET execution_state='pending',claimed_at=NULL,claimed_by_installation_ref=NULL \
-         FROM collection_work_order_lease lease \
+         FROM collection_work_order_lease lease, linggan_runtime_task runtime \
          WHERE task.task_id=$1 \
            AND task.execution_state='in_progress' \
            AND task.claimed_by_installation_ref=$2 \
            AND lease.lease_ref=task.lease_ref \
+           AND runtime.task_id=task.task_id \
            AND lease.released_at IS NULL \
            AND lease.expires_at>scope_001_now() \
-         RETURNING task.task_id,lease.lease_ref,lease.work_order_ref",
+         RETURNING task.task_id,lease.lease_ref,lease.work_order_ref, \
+                   runtime.task_spec #>> '{capabilitiesRequested,0}', \
+                   NULLIF(runtime.task_spec #>> '{target,contentExternalId}','')",
     )
     .bind(task_id)
     .bind(installation_ref)
     .fetch_optional(&mut *transaction)
     .await?;
-    let Some((_task_id, lease_ref, work_order_ref)) = requeued else {
+    let Some((_task_id, lease_ref, work_order_ref, capability, content_external_id)) = requeued
+    else {
         return Err(DispatchFailureError::ClaimNotHeld);
     };
+    if failure_code == DispatchFailureCode::PageUnavailable
+        && capability == "content_detail"
+        && content_external_id.is_some()
+    {
+        let content_external_id = content_external_id.expect("checked above");
+        // First restore the current row from the generic pending update above,
+        // then make every not-yet-run lane for this *same frozen material*
+        // terminal.  The failure event below is the durable reason; no raw
+        // browser/platform text becomes Evidence.
+        let unavailable = sqlx::query(
+            "UPDATE collection_work_order_lease_task sibling \
+             SET execution_state='unavailable',claimed_at=NULL,claimed_by_installation_ref=NULL \
+             FROM linggan_runtime_task sibling_runtime \
+             WHERE sibling.lease_ref=$1 \
+               AND sibling.task_id=sibling_runtime.task_id \
+               AND sibling.execution_state='pending' \
+               AND sibling_runtime.task_spec #>> '{target,contentExternalId}'=$2",
+        )
+        .bind(lease_ref)
+        .bind(&content_external_id)
+        .execute(&mut *transaction)
+        .await?;
+        if unavailable.rows_affected() == 0 {
+            return Err(DispatchFailureError::ClaimNotHeld);
+        }
+        record_terminal_dispatch_failure_in_transaction(
+            &mut transaction,
+            failure_ref,
+            task_id,
+            installation_ref,
+            lease_ref,
+            work_order_ref,
+            failure_code.as_str(),
+        )
+        .await?;
+        transaction.commit().await?;
+        return Ok(DispatchFailureOutcome::Unavailable);
+    }
     let retry_after_seconds = record_recoverable_dispatch_failure_in_transaction(
         &mut transaction,
         failure_ref,
@@ -320,6 +375,54 @@ pub async fn requeue_failed_dispatch(
     Ok(DispatchFailureOutcome::Requeued {
         retry_after_seconds,
     })
+}
+
+async fn record_terminal_dispatch_failure_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    failure_ref: Uuid,
+    task_id: Uuid,
+    installation_ref: Uuid,
+    lease_ref: Uuid,
+    work_order_ref: Uuid,
+    failure_code: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO collection_work_order_lease_task_dispatch_failure \
+             (failure_ref,task_id,installation_ref,failure_code,retry_after_seconds) \
+         VALUES ($1,$2,$3,$4,1)",
+    )
+    .bind(failure_ref)
+    .bind(task_id)
+    .bind(installation_ref)
+    .bind(failure_code)
+    .execute(&mut **transaction)
+    .await?;
+    let all_terminal: bool = sqlx::query_scalar(
+        "SELECT NOT EXISTS ( \
+             SELECT 1 FROM collection_work_order_lease_task \
+             WHERE lease_ref=$1 AND execution_state NOT IN ('completed','unavailable'))",
+    )
+    .bind(lease_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if all_terminal {
+        sqlx::query(
+            "UPDATE collection_work_order_lease \
+             SET released_at=scope_001_now(),release_reason='partial' \
+             WHERE lease_ref=$1 AND released_at IS NULL",
+        )
+        .bind(lease_ref)
+        .execute(&mut **transaction)
+        .await?;
+        sqlx::query(
+            "UPDATE collection_work_order SET queue_state='completed' \
+             WHERE work_order_ref=$1 AND queue_state='leased'",
+        )
+        .bind(work_order_ref)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
 }
 
 /// Return the same WorkOrder to the common queue without erasing the old
@@ -424,6 +527,10 @@ pub async fn decide_dispatch(
     // A lapsed lease is historical execution state, not permanent ownership of
     // the queue entry. Requeue it before this installation evaluates new work.
     expire_lapsed_leases_in_transaction(&mut transaction).await?;
+    // Older releases created before the common release/requeue boundary can
+    // have no live lease but still be marked `leased`.  Recover only orders
+    // with runnable work; terminal historical orders never reopen.
+    recover_released_orphaned_work_orders_in_transaction(&mut transaction).await?;
     let (Some(station_ref), Some(_quota)) = (station_ref, quota) else {
         // Expiry recovery above is durable even when this caller has not yet
         // claimed a station.  Returning without a commit would silently roll
@@ -502,7 +609,7 @@ pub async fn decide_dispatch(
                SELECT 1 FROM collection_work_order_lease_task prior \
                WHERE prior.lease_ref = task.lease_ref \
                  AND prior.sequence_no < task.sequence_no \
-                 AND prior.execution_state <> 'completed') \
+                 AND prior.execution_state NOT IN ('completed','unavailable')) \
          ORDER BY lease.issued_at, task.sequence_no \
          LIMIT 1 FOR UPDATE OF task SKIP LOCKED",
     )
