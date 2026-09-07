@@ -1,7 +1,7 @@
 # PAGE-COLLECTION-001 · Collection Workspace 本地页面族
 
 > 状态: 权威当前
-> 最后核对: 2026-09-04
+> 最后核对: 2026-09-07
 > 适用范围: `http://localhost:3000/collection/*` 的五个子面
 > 事实来源: Mog 于 2026-08-26 的直接指定与逐项裁定、`REF-V4-001`、LIDS、领域不变量、当前 SCOPE 与真实 Rust 实现
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；V4 为本页族受限的视觉与骨架 Gold Master
@@ -15,7 +15,7 @@
 - LIDS 主 Pattern: Collection Control；抽屉复用同一工作面，不建立第二首页
 - 用户任务: 找到我正在观察的创作者，判断档案建到什么程度、巡查是否有效、最近发生了什么，并通过作品生命周期分布进入唯一 Corpus 页研读。
 - 三秒答案: creator 宽表单行同时回答对象、档案、目录/详情、巡查、最近变化、上次/下次巡查与下一步。
-- 五秒主动作: 建立/继续完善档案，或打开宽幅档案工作区看最近变化、散点分布和具体缺口。
+- 五秒主动作: 建立/重建目录/继续完善档案，或打开宽幅档案工作区看最近变化、散点分布和具体缺口。
 - 明确非目标: Evidence 结果复制、监控价值/机会评分/趋势预测、真实平台访问、插件改动、新事实表或 migration、Agent、部署。
 - 当前 Package 支持合同: 验收基线为 **1440 CSS px 桌面全屏**；1280/390 不属于本 Package 验收。“不在手机或小于 13 寸屏幕运行”只描述使用场景，不定义 CSS breakpoint。
 
@@ -68,8 +68,8 @@ Mog 于 2026-08-26 确认保留 V4 的深色终端配色。它与 `system.md` §
 | 在五个子面之间导航 | 可用 | 仅页面跳转 |
 | 切换运行态三模式 | 可用 | 仅页面跳转 |
 | 用地址打开目标工作区 | 可用 | creator 仅「概览｜档案｜巡查」；keyword 仅「概览｜巡查」 |
-| 点「建立档案 / 继续完善」 | 受控写入 | 通过 Request → Authorization → Admission → Work Order → Lease 发起 200 篇上限的目录扫描；有效授权上限低于 200 时明确拒绝，不静默降级 |
-| 渐进建档 worker tick | 受控写入 | 只对有版本 marker 的目标，每批 3 篇，使用原 deep-archive 授权与 purpose，任务严格冻结具体 Work |
+| 点「建立档案 / 重建目录 / 继续完善」 | 受控写入 | 通过 Request → Authorization → Admission → Work Order → Lease 发起 200 篇上限的目录扫描；只有证明达到 200 或主页表面末端的当前根能作为目录。旧根不合格时保留历史并重建目录；有效授权上限低于 200 时明确拒绝，不静默降级 |
+| 渐进建档 worker tick | 受控写入 | 只对有版本 marker 的目标，每批 3 篇，使用原 deep-archive 授权与 purpose，任务严格冻结具体 Work；已成功且完整的巡查发现并入当前目录和详情分母 |
 | 切换生命周期 `all/recent_90_days` 与四指标 | creator 概览可用 | target-scoped bounded read；不访问平台 |
 | 选择散点并进入语料 | 可用 | `life_work` 仅为 UI 状态；Corpus 精确读取该 Work，不复制 Evidence；既有 390px 诊断证明直接 URL/刷新可打开 Inspector 且不新增 history，但窄屏不属于当前验收合同 |
 | Escape 或关闭抽屉 | 可用 | 保留列表 filter 与既有 `sort=last` 上下文；焦点返回原 target opener |

@@ -426,6 +426,10 @@ fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
     assert!(TARGET_DRAWER_CSS.contains("@media (prefers-reduced-motion:reduce)"));
     assert!(TARGET_DRAWER_CSS.contains("min-height:40px"));
     assert!(TARGET_DRAWER_CSS.contains(".c-tg-table-head.c-tg-creator-grid"));
+    assert!(
+        !TARGET_DRAWER_CSS.contains("--lgi-space-64"),
+        "the creator table must only use declared LIDS spacing tokens"
+    );
     assert!(TARGET_DRAWER_CSS.contains(".c-tg-table-head.c-tg-keyword-grid"));
     assert!(TARGET_DRAWER_CSS.contains("overflow-x:auto"));
     assert!(TARGET_DRAWER_CSS.contains("white-space:nowrap"));
@@ -811,6 +815,7 @@ fn archive_tab_explains_the_first_two_hundred_boundary_without_a_fake_score() {
             works_listed: 12,
             details_captured: 5,
             quarantined: 1,
+            directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Ready,
         },
     );
     let html = target_drawer::render(

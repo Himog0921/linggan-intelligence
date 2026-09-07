@@ -12,10 +12,12 @@ use linggan_evidence::{
     set_station_accepting,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
-use sqlx::Row;
+use sqlx::{AssertSqlSafe, Row};
 use uuid::Uuid;
 
 const DIGEST_KEY: &[u8] = b"collection-control-proof-digest-key-v1";
+const KEYWORD_LIFECYCLE_MIGRATION: &str =
+    include_str!("../../../database/migrations/0042_keyword_monitoring_lifecycle.sql");
 
 const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0001_scope_001_capture_evidence.sql"),
@@ -91,6 +93,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0037_collection_scheduler_scale.sql"),
     "\n",
     include_str!("../../../database/migrations/0038_detail_only_material_scope.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0042_keyword_monitoring_lifecycle.sql"),
 );
 
 #[tokio::test]
@@ -1029,6 +1033,75 @@ async fn monitor_rule_commands_are_revisioned_idempotent_and_side_effect_bounded
     assert_eq!(keyword_state, ("monitoring".to_owned(), true));
 }
 
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn keyword_lifecycle_migration_repairs_legacy_state_and_closes_the_write_path() {
+    let database = proof_database_before_keyword_lifecycle("keyword_lifecycle_0042").await;
+    let target_ref = seed_target(&database, "keyword", "archiving", "legacy-keyword-state").await;
+    let rule_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_monitor_rule_revision \
+             (rule_revision_ref,target_ref,revision,mode,automatic_enabled,timezone, \
+              run_on_weekdays,run_on_weekends,all_day,fixed_interval_seconds, \
+              fallback_interval_seconds,surface_key,task_contract_version,rule_payload_digest,created_by) \
+         VALUES ($1,$2,1,'fixed',true,'Asia/Shanghai',true,true,true,86400,86400, \
+                 'keyword_search','linggan.producer.task-spec.v1',repeat('a',64),'person')",
+    )
+    .bind(rule_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("legacy target is given the active automatic rule it already held in production");
+    sqlx::query(
+        "UPDATE collection_observation_target \
+         SET active_monitor_rule_revision_ref=$2,monitoring_enabled=true, \
+             monitor_schedule_anchor_at=scope_001_now(),monitor_next_run_at=scope_001_now() \
+         WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .bind(rule_ref)
+    .execute(database.pool())
+    .await
+    .expect("legacy contradictory state is seeded before 0042");
+
+    sqlx::raw_sql(AssertSqlSafe(KEYWORD_LIFECYCLE_MIGRATION.to_owned()))
+        .execute(database.pool())
+        .await
+        .expect("0042 repairs the historical keyword state before enforcing its invariant");
+
+    let repaired: (String, bool, String) = sqlx::query_as(
+        "SELECT target.lifecycle_state,target.monitoring_enabled,transition.reason_code \
+         FROM collection_observation_target target \
+         JOIN collection_observation_target_transition transition \
+           ON transition.target_ref=target.target_ref \
+         WHERE target.target_ref=$1 \
+         ORDER BY transition.occurred_at DESC LIMIT 1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("repaired target and its audit transition are readable");
+    assert_eq!(
+        repaired,
+        (
+            "monitoring".to_owned(),
+            true,
+            "keyword_lifecycle_repaired_0042".to_owned()
+        )
+    );
+
+    let invalid_write = sqlx::query(
+        "UPDATE collection_observation_target SET lifecycle_state='archiving' WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await;
+    assert!(
+        invalid_write.is_err(),
+        "the database now rejects keyword archive states"
+    );
+}
+
 #[test]
 fn dynamic_cadence_requires_distinct_comparable_rounds_and_clamps_median_half() {
     let account_ref = Uuid::new_v4();
@@ -1355,4 +1428,19 @@ async fn proof_database(schema: &str) -> Database {
     isolated_proof_schema(&url, schema, MIGRATIONS)
         .await
         .expect("complete migrations through 0036 apply")
+}
+
+async fn proof_database_before_keyword_lifecycle(schema: &str) -> Database {
+    let url = std::env::var("COLLECTION_CONTROL_PROOF_DATABASE_URL")
+        .or_else(|_| std::env::var("COLLECTION_DISPATCH_PROOF_DATABASE_URL"))
+        .expect("an isolated proof database URL is supplied");
+    let migrations_before_0042 = MIGRATIONS
+        .strip_suffix(concat!(
+            "\n",
+            include_str!("../../../database/migrations/0042_keyword_monitoring_lifecycle.sql")
+        ))
+        .expect("the complete proof migrations end with 0042");
+    isolated_proof_schema(&url, schema, migrations_before_0042)
+        .await
+        .expect("complete migrations before 0042 apply")
 }

@@ -32,11 +32,11 @@
 
 ## 实施位置与验证
 
-Evidence 读取/批次选源；Intelligence cleaner、packet、daily、runner/read 模块；新 0041 migration；API 评论页专用 daily 组合；现有 worker 调用接缝；schema fixture/migration 登记；Pi 本地 fixture 和隔离 PostgreSQL 证明。共享接缝属于已授权结果直接依赖，禁止修改插件、采集控制、首页或其他分支。
+Evidence 读取/批次选源；Intelligence cleaner、packet、daily、runner/read 模块；新 0043 migration；API 评论页专用 daily 组合；现有 worker 调用接缝；schema fixture/migration 登记；Pi 本地 fixture 和隔离 PostgreSQL 证明。共享接缝属于已授权结果直接依赖，禁止修改插件、采集控制、首页或其他分支。
 
 回退：不应用新迁移、不切换共享运行时；部署后可暂停每日计划而保留来源与已产生审计。生成证据用系统临时目录，来源不进日志。
 
-当前：源码、隔离 PostgreSQL 及合成 HTTP 主链已实现并验证，浏览器与集中自检证据见 [验收记录](../../design/acceptance/comment-research-001-acceptance.md)。未合并、未应用共享 0041、未更新 3000、未发送真实评论，Mog 使用验收待完成。
+当前：源码、隔离 PostgreSQL 及合成 HTTP 主链已实现并验证，浏览器与集中自检证据见 [验收记录](../../design/acceptance/comment-research-001-acceptance.md)。未合并、未应用共享 0043、未更新 3000、未发送真实评论，Mog 使用验收待完成。
 
 ## 当前运行细节与边界
 

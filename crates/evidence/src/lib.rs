@@ -9,6 +9,7 @@ mod collection_task_read;
 pub mod comment_research_read;
 mod content_reobservation;
 mod creator_lifecycle;
+pub mod cross_industry_read;
 mod dispatch;
 mod execution_station;
 mod ingress;
@@ -51,7 +52,9 @@ pub use acquisition_chain::{
     request_and_admit_material_targets, request_and_admit_material_targets_under_authorization,
     request_progressive_archive, request_progressive_archive_and_lease, run_progressive_archives,
 };
-pub use archive_completeness::{ArchiveCompleteness, read_archive_completeness};
+pub use archive_completeness::{
+    ArchiveCompleteness, ArchiveDirectoryBaseline, read_archive_completeness,
+};
 pub use collection_control::{
     AccountEligibilityReceipt, AccountEligibilitySignal, AccountEligibilityState,
     CapacitySelection, CollectionControlError, ComparableObservationRound,

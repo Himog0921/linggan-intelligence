@@ -228,6 +228,7 @@ impl<'a> TargetArchiveRead<'a> {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum TargetPrimaryAction {
     EstablishArchive,
+    RebuildDirectory,
     ContinueArchive,
     ViewArchiveProgress,
     ViewArchiveProblems,
@@ -269,6 +270,9 @@ pub(crate) fn target_primary_action(
         .is_some_and(|value| value.works_listed > 0 && value.details_captured < value.works_listed);
     if untouched {
         return TargetPrimaryAction::EstablishArchive;
+    }
+    if archive.is_some_and(ArchiveCompleteness::requires_directory_rebuild) {
+        return TargetPrimaryAction::RebuildDirectory;
     }
     if needs_details {
         return TargetPrimaryAction::ContinueArchive;
@@ -515,6 +519,9 @@ pub(crate) fn lifecycle_primary_copy(
 }
 
 pub(crate) fn lifecycle_patrol_copy(target: &ObservationTarget) -> (&'static str, &'static str) {
+    if target.monitoring_enabled && target.lifecycle_state != "monitoring" {
+        return ("warn", "状态异常，未调度");
+    }
     match target.lifecycle_state.as_str() {
         "paused" => ("warn", "巡查已暂停"),
         "dismissed" => ("neutral", "不再调度"),
@@ -546,6 +553,9 @@ fn statusline(target: &ObservationTarget, completeness: TargetArchiveRead<'_>) -
             TargetArchiveRead::Unavailable => "档案状态暂时无法读取",
             TargetArchiveRead::Known(Some(value)) if value.work_in_progress => "建档中",
             TargetArchiveRead::Known(Some(value)) if value.quarantined > 0 => "档案有问题",
+            TargetArchiveRead::Known(Some(value)) if value.requires_directory_rebuild() => {
+                "目录待重建"
+            }
             TargetArchiveRead::Known(None) => "尚未建档",
             TargetArchiveRead::Known(Some(value)) if value.is_untouched() => "尚未建档",
             TargetArchiveRead::Known(Some(value))
@@ -581,6 +591,9 @@ fn drawer_head_facts(
             TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
             TargetArchiveRead::Known(None) => "尚未建立".to_owned(),
             TargetArchiveRead::Known(Some(value)) if value.is_untouched() => "尚未建立".to_owned(),
+            TargetArchiveRead::Known(Some(value)) if value.requires_directory_rebuild() => {
+                "目录待重建".to_owned()
+            }
             TargetArchiveRead::Known(Some(value)) if value.works_listed > 0 => format!(
                 "{} / {}",
                 value.details_captured.min(value.works_listed),
@@ -623,12 +636,10 @@ fn drawer_primary_action(
 ) -> String {
     let action = target_primary_action(target, is_creator, archive);
     match action {
-        TargetPrimaryAction::EstablishArchive | TargetPrimaryAction::ContinueArchive => {
-            let label = if action == TargetPrimaryAction::EstablishArchive {
-                "建立档案"
-            } else {
-                "继续完善"
-            };
+        TargetPrimaryAction::EstablishArchive
+        | TargetPrimaryAction::RebuildDirectory
+        | TargetPrimaryAction::ContinueArchive => {
+            let label = archive_action_label(action);
             let fields = list_context.return_fields(
                 Some(target.target_ref),
                 Some(TargetDrawerTab::Baseline),
@@ -1169,14 +1180,14 @@ fn archive_gap_overview(
     let directory = match archive {
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(value) => value
-            .filter(|value| !value.is_untouched())
+            .filter(|value| value.has_displayable_directory())
             .map(|value| value.works_listed.to_string())
             .unwrap_or_else(|| "—".to_owned()),
     };
     let detail = match archive {
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(value) => value
-            .filter(|value| value.works_listed > 0)
+            .filter(|value| value.has_displayable_directory() && value.works_listed > 0)
             .map(|value| format!("{} / {}", value.details_captured, value.works_listed))
             .unwrap_or_else(|| "—".to_owned()),
     };
@@ -1236,14 +1247,14 @@ fn archive_tab(
     let directory = match archive {
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(value) => value
-            .filter(|value| !value.is_untouched())
+            .filter(|value| value.has_displayable_directory())
             .map(|value| value.works_listed.to_string())
             .unwrap_or_else(|| "—".to_owned()),
     };
     let detail = match archive {
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(value) => value
-            .filter(|value| value.works_listed > 0)
+            .filter(|value| value.has_displayable_directory() && value.works_listed > 0)
             .map(|value| format!("{} / {}", value.details_captured, value.works_listed))
             .unwrap_or_else(|| "—".to_owned()),
     };
@@ -1266,15 +1277,21 @@ fn archive_tab(
         {
             r#"<div id="archive-problems" class="c-dw-problem" tabindex="-1"><b>本次建档尚未形成可用基线</b><p>系统已经尝试建立档案，但当前作品目录或覆盖结果还不足以开启巡查；这里不会把已发起误写成已完成。</p></div>"#.to_owned()
         }
+        (Some(value), TargetPrimaryAction::RebuildDirectory)
+            if value.requires_directory_rebuild() =>
+        {
+            r#"<div id="archive-problems" class="c-dw-problem" tabindex="-1"><b>现有记录不是可用的作品目录基线</b><p>旧的采集记录会保留为历史，但不会再拿来当作品目录或详情分母。先重新获取主页作品链接（最多 200 篇；页面结束则按实际结束），再逐篇补齐详情。</p></div>"#.to_owned()
+        }
         _ => String::new(),
     };
     let action = match primary_action {
         TargetPrimaryAction::ViewArchiveProgress => r#"<span class="c-dw-action-note">档案正在建立，当前范围和待补缺口会随真实采集结果更新。</span>"#.to_owned(),
         TargetPrimaryAction::ViewArchiveProblems => r#"<span class="c-dw-action-note">当前先处理上面的隔离记录；页面不会把它们算成已完成。</span>"#.to_owned(),
         TargetPrimaryAction::ViewArchiveUnavailable => r#"<span class="c-dw-action-note">档案状态暂时无法读取，本页不会在未知状态下发起写操作。</span>"#.to_owned(),
-        TargetPrimaryAction::EstablishArchive | TargetPrimaryAction::ContinueArchive => {
-            let action = target_primary_action(target, true, archive);
-            let label = if action == TargetPrimaryAction::EstablishArchive { "建立档案" } else { "继续完善" };
+        TargetPrimaryAction::EstablishArchive
+        | TargetPrimaryAction::RebuildDirectory
+        | TargetPrimaryAction::ContinueArchive => {
+            let label = archive_action_label(primary_action);
             let fields = list_context.return_fields(
                 Some(target.target_ref),
                 Some(TargetDrawerTab::Baseline),
@@ -1312,6 +1329,15 @@ fn archive_tab(
     )
 }
 
+fn archive_action_label(action: TargetPrimaryAction) -> &'static str {
+    match action {
+        TargetPrimaryAction::EstablishArchive => "建立档案",
+        TargetPrimaryAction::RebuildDirectory => "重建目录",
+        TargetPrimaryAction::ContinueArchive => "继续完善",
+        _ => unreachable!("only archive write actions have labels"),
+    }
+}
+
 /// 巡查只展示当前可读的开关与时间，完整规则通过已有版本化规则入口管理。
 fn patrol_tab(target: &ObservationTarget, list_context: TargetListContext<'_>) -> String {
     let opener_id = format!("drawer-monitor-rule-{}", target.target_ref);
@@ -1328,18 +1354,22 @@ fn patrol_tab(target: &ObservationTarget, list_context: TargetListContext<'_>) -
              <p class="c-dw-note">巡查发现的新作品和后续互动数据，在接纳后会进入同一作品目录与生命周期。当前还没有可显示的本轮新增和数据更新汇总。</p>
              <a id="{opener_id}" class="c-btn-secondary" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">管理巡查</a>
            </section>"#,
-        enabled = if target.monitoring_enabled {
-            "已开启"
-        } else {
-            "未开启"
-        },
+        enabled = lifecycle_patrol_copy(target).1,
         last = escape(
             target
                 .last_patrol_succeeded_at
                 .as_deref()
                 .unwrap_or("尚未巡查")
         ),
-        next = escape(target.next_patrol_at.as_deref().unwrap_or("—")),
+        next = escape(
+            if target.monitoring_enabled && target.lifecycle_state == "monitoring" {
+                target.next_patrol_at.as_deref().unwrap_or("待排定")
+            } else if target.monitoring_enabled {
+                "待状态修复"
+            } else {
+                "—"
+            }
+        ),
         target_ref = target.target_ref,
     )
 }
@@ -1416,6 +1446,7 @@ mod tests {
             works_listed: 12,
             details_captured: 5,
             quarantined: 0,
+            directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Ready,
         };
         assert!(
             statusline(&archiving_target, TargetArchiveRead::Known(Some(&partial)))
@@ -1448,6 +1479,62 @@ mod tests {
             statusline(&archiving_target, TargetArchiveRead::Unavailable)
                 .contains("档案状态暂时无法读取")
         );
+    }
+
+    #[test]
+    fn enabled_but_non_monitoring_target_is_never_presented_as_patrolling() {
+        let mut corrupted_keyword = target("archiving");
+        corrupted_keyword.target_kind = "keyword".to_owned();
+        corrupted_keyword.monitoring_enabled = true;
+        corrupted_keyword.next_patrol_at = Some("09-08 20:07".to_owned());
+
+        assert_eq!(
+            lifecycle_patrol_copy(&corrupted_keyword),
+            ("warn", "状态异常，未调度")
+        );
+        assert!(
+            statusline(&corrupted_keyword, TargetArchiveRead::Unavailable)
+                .contains("状态异常，未调度")
+        );
+        assert!(!statusline(&corrupted_keyword, TargetArchiveRead::Unavailable).contains("巡查中"));
+        let patrol = patrol_tab(&corrupted_keyword, TargetListContext::default());
+        assert!(patrol.contains("待状态修复"));
+        assert!(!patrol.contains("已开启"));
+    }
+
+    #[test]
+    fn rebuild_directory_explains_that_partial_history_is_preserved_but_not_current_scope() {
+        let target = target("monitoring");
+        let partial = ArchiveCompleteness {
+            started: true,
+            attempted: true,
+            author_profile_captures: 1,
+            works_listed: 31,
+            details_captured: 27,
+            directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::RebuildRequired,
+            ..ArchiveCompleteness::default()
+        };
+        let mut completeness = std::collections::HashMap::new();
+        completeness.insert(target.identity_key.clone(), partial);
+        let html = render(
+            Some(&target),
+            None,
+            Some(&completeness),
+            Some(&target.target_ref.to_string()),
+            TargetDrawerTab::Baseline,
+            LifecycleView::NotRead {
+                window: CreatorLifecycleWindow::Recent90Days,
+                metric: CreatorLifecycleMetric::Likes,
+            },
+            None,
+            TargetListContext::default(),
+        );
+
+        assert!(html.contains(">重建目录</button>"));
+        assert!(html.contains("旧的采集记录会保留为历史"));
+        assert!(html.contains("目录待重建"));
+        assert!(!html.contains(">31</b><span>作品目录"));
+        assert!(!html.contains(">27 / 31</b><span>详情进度"));
     }
 
     #[test]

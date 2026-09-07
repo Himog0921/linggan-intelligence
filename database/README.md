@@ -53,6 +53,6 @@ ENV-001 的 proof 数据库只用于环境验证，验证后必须删除；它�
 
 ## COMMENT-DAILY-001
 
-`0041_comment_daily.sql` 依赖 0039/0040。它新增带版本清洗、单日计划、冻结来源批次、逐条状态、分包调用引用及幂等重试命令，复用既有模型配置和 invocation 账本。数据库 trigger 禁止修改已冻结范围或删除研究执行审计；原始 Evidence 不覆盖。迁移暂停旧即时 automatic 并清除自动指针，不启用新每日计划。
+`0043_comment_daily.sql` 依赖 0039/0040。它新增带版本清洗、单日计划、冻结来源批次、逐条状态、分包调用引用及幂等重试命令，复用既有模型配置和 invocation 账本。数据库 trigger 禁止修改已冻结范围或删除研究执行审计；原始 Evidence 不覆盖。迁移暂停旧即时 automatic 并清除自动指针，不启用新每日计划。
 
 当前只在 `test-model-pi-postgres.sh` 的随机隔离 PostgreSQL 验证。已登记 `local-runtime.sh migrate`，未应用共享库。新包边界与证明见 [COMMENT-DAILY-001](../docs/plans/active/comment-daily-001.md)。

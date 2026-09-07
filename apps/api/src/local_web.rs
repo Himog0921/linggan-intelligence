@@ -48,6 +48,7 @@ use linggan_contracts::{
     parse_local_task_spec, parse_producer_attempt, parse_producer_submission,
     parse_producer_task_spec,
 };
+use linggan_evidence::cross_industry_read::{CrossIndustryReadError, read_cross_industry_samples};
 use linggan_evidence::observation_domain::{
     ObservationDomain, read_observation_domains, resolve_current_domain,
 };
@@ -400,6 +401,13 @@ fn material_api_routes() -> Router<LocalWebState> {
             get(local_media_routes::derivative),
         )
         .route("/api/local/work-resources", get(evidence_library_json))
+        // 跨行业是**另一条查询路径**，不是给上面那个接口加参数。规格的接口红线：
+        // 不得为跨行业给证据库接口增加任何参数或字段——两条路不共享，隔离才不
+        // 依赖任何人记得在某处加一个条件。
+        .route(
+            "/api/local/cross-industry/samples",
+            get(cross_industry_samples_json),
+        )
         .route(
             "/api/local/evidence-library/legacy",
             get(material_projection::legacy_json),
@@ -592,6 +600,43 @@ async fn evidence_library(
     };
     let current = resolve_current_domain(&domains, params.domain.as_deref());
     Html(evidence_library_html(collection_state, &domains, current))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CrossIndustryQuery {
+    domain: uuid::Uuid,
+}
+
+/// 读一个外部领域的样本。
+///
+/// 本领域走的是 `/api/local/work-resources`，不是这里。传入本领域会得到一个明确的
+/// 拒绝而不是空列表：空列表会被读成「这个领域还没采过」，而真相是问错了地方。
+async fn cross_industry_samples_json(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CrossIndustryQuery>,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "read_model_not_connected",
+        );
+    };
+    match read_cross_industry_samples(database, query.domain).await {
+        Ok(payload) => Json(payload).into_response(),
+        Err(CrossIndustryReadError::HomeDomainHasNoSamples) => local_read_json_error(
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY,
+            "home_domain_reads_evidence",
+        ),
+        Err(CrossIndustryReadError::SchemaUnavailable) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "cross_industry_schema_unavailable",
+        ),
+        Err(CrossIndustryReadError::Database(_)) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "cross_industry_read_unavailable",
+        ),
+    }
 }
 
 async fn evidence_library_json(
@@ -3678,7 +3723,7 @@ fn evidence_library_html(
     <script src="/assets/evidence-observation.js" defer></script>
     <script src="/assets/evidence-library.js" defer></script>
   </head>
-  <body>
+  <body data-corpus-domain="__CORPUS_DOMAIN_REF__" data-corpus-domain-own="__CORPUS_DOMAIN_OWN__" data-corpus-domain-name="__CORPUS_DOMAIN_NAME__">
     <div class="v7-app">
       <!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->
       <div class="v7-shell">
@@ -3821,9 +3866,30 @@ fn evidence_library_html(
   </body>
 </html>"#;
     let header = evidence_library_header(collection_state, domains, current);
+    // 当前领域随页面一起下发，前端据此决定读哪条查询路径。放在 body 属性上而不是
+    // 让前端自己解析地址：地址里的 domain 可能是无效值，回落判定由服务端做过一次了，
+    // 前端再判一次就会出现两处规则，早晚不一致。
     base.replace(
         "<!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->",
         &header,
+    )
+    .replace(
+        "__CORPUS_DOMAIN_REF__",
+        &current
+            .map(|d| d.domain_ref.to_string())
+            .unwrap_or_default(),
+    )
+    .replace(
+        "__CORPUS_DOMAIN_OWN__",
+        if current.is_none_or(|d| d.is_own_domain) {
+            "true"
+        } else {
+            "false"
+        },
+    )
+    .replace(
+        "__CORPUS_DOMAIN_NAME__",
+        &current.map(|d| html_escape(&d.name)).unwrap_or_default(),
     )
 }
 
