@@ -302,3 +302,5 @@ Issue #167 在交付分支新增 L1 评论研究三视图和已存查询，复�
 ### MODEL-PI-001 同包返修
 
 Mog 明确将四区常驻设置改为单页+关键配置弹窗。复用 L1 Settings Pattern、现有 dialog 与 `--lgi-*`，没有新增 Token/导航。API 地址预览、测试中/失败/数据库未初始化状态就地显示。来源与验证见 `docs/design/changes/model-pi-001-ui-change-manifest.md`。
+
+2026-09-07 MODEL-PI-001：输出上限失败反馈区分“模型已响应”与“评论结果不完整”，沿用原 L1 状态组件、布局和 token，无新增视觉值。

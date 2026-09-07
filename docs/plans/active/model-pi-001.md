@@ -47,3 +47,11 @@ Linggan 持有配置、用途/来源资格、预算、持久 comment work、租�
 - 地址：接收基础地址或对应协议完整调用地址，后端规范化；可见预览与实际请求一致。协议错误不猜测切换。编辑空凭据仅同地址同协议沿用，改目标要求明确提供凭据。
 - 验收：隔离 PostgreSQL 保存/读回/修订及错误状态；真实 Pi SDK + 本机 HTTP/SSE 成功、无目录、认证/404/限流/超时；浏览器单弹窗保存/测试/失败保留/加载失败不可提交。
 - 共享事实：只读确认迁移台账至 0038，模型 API 503；共享 0039/0040 迁移尚未获授权。源码与隔离验证先完成，迁移及运行发布以具体结果取得最终授权。
+
+## 2026-09-07 DeepSeek 测试返修（同 Issue #169）
+
+- Claim：`/root` 在 `codex/model-deepseek-test-fix` 单一执行；基线 main `7e14db5`。Mog 报告 DeepSeek 绑定后的输出上限错误，继续本包基础调用修复。
+- 事实：共享两次 Responses probe 均返回 459 输入 / 1024 输出 token、output_limit。已响应不能标成未连通。官方 DeepSeek V4 默认启用思考，当前适配 model.reasoning=false 没有显式禁用上游默认思考；实际思考占比未留存，故具体消耗构成仍未知。
+- 范围：Pi adapter 对 api.deepseek.com 的已知 V4 模型落实当前无思考文本调用约束，probe/analyze 使用同一参数；保留 10 秒/1024 probe 上限和无重试。修正输出截断的 modelCallable 与可见提示，commentQualified 仍 false、不接纳不完整结果。原始历史回执不回写。
+- 文件：adapter/test fixture、model_invocation 与其 PostgreSQL proof、model_settings.js、既有页面/验收/当月记录。无新 migration、无新一级入口、无新外部调用、无密钥读取/导出、无预算增加。
+- 验证：真实 Pi SDK 对本机 SSE 重现省略 thinking 控制导致截断，显式关闭后成功；负例不影响其它域名/模型。PG 截断仍计费且不能设为默认，重放不重复调用；编译与治理检查。真实供应商复测尚未执行。

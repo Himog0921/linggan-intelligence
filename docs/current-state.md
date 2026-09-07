@@ -8,19 +8,17 @@
 
 ## 当前阶段
 
-### MODEL-PI-001 / Issue #169（已合并 main；共享运行待授权）
+### MODEL-PI-001 / Issue #169（共享基础运行已接通；DeepSeek 测试返修）
 
-Mog 授权单一实施者完成模型与 AI 四区设置、Pi 正式适配和评论首次分析链。#168 已先合并，#170 随后合并；当前 `main@f97968e6697063e33c55b09879b8f24b3f77769f` 包含 `/settings/models`、后端 Keychain、固定 Pi 0.85.1、不可变连接/配置、显式来源计划、并发预算/有限重试、持续评论 worker 与真实用量回执。具体能力与边界见 [MODEL-PI-001 合同](plans/active/model-pi-001.md) 和 [验收记录](design/acceptance/model-pi-001-acceptance.md)。
+#168、#170、#172 已合并。Mog 于 2026-09-06 明确授权后，0039/0040 已应用到本机共享库，3000 模型设置 API 从 503 恢复为 200，评论 worker 已有有效心跳。部署回执见 [PR #172](https://github.com/Himog0921/linggan-intelligence/pull/172)。单页+单供应商弹窗是当前交互，不再采用旧四区常驻布局。
 
-真实 SDK 对本地三种协议、隔离 PostgreSQL/HTTP、随机 Keychain 和合成预览浏览器操作已验证；这不是外部供应商或真实语义质量验收。0040 只应用在隔离 proof；共享 DB、当前 :3000、现有 worker、部署与真实 provider 未操作。#168 是已合并的评论基础包，模型接入增量由本包说明为准。根代理集中审核记录于 [PR #170](https://github.com/Himog0921/linggan-intelligence/pull/170) 评论，不提交审核时间戳代码。
-
-最终固定 head `1803083` 完成 R1/R2/R3 修复及根代理定向复验：原计划显式恢复和重复来源定位、自动选源按全局幂等条件推进、中断维护在无新调用时按冻结次数上限持久化。29 项隔离 PostgreSQL、扩展 HTTP 和浏览器操作通过；浏览器补充记录见 [PR 评论](https://github.com/Himog0921/linggan-intelligence/pull/170#issuecomment-5559371754)。修复没有重置历史额度/次数或增加外部调用授权。
+2026-09-07 Mog 的 DeepSeek Responses 测试两次达到 1024 token 上限。当前同包返修明确关闭已知官方 V4 模型的默认思考，落实原纯文本合同，区分模型已响应和评论输出资格；保持预算/超时/历史回执。SDK 11 项、隔离 PostgreSQL 32 项及合成浏览器验证通过，真实供应商修复后复测尚未执行。具体范围见 [MODEL-PI-001 合同](plans/active/model-pi-001.md) 和 [验收记录](design/acceptance/model-pi-001-acceptance.md)。
 
 ### COMMENT-RESEARCH-001 / Issue #167（已合并 main；模型执行已由 #169 接入）
 
-Mog 已授权一个子代理实施、根代理集中审核，先推进 P00 直接依赖与 P01 评论研究，尚不启动后续产品包。实施基线 `be1e6fb83650b376ee22e6fdec07241b8f604614`，分支 `codex/comment-research-001`；自包含合同见 [comment-research-001.md](plans/active/comment-research-001.md)。源码接入原声浏览、问题分组、语料资产与服务端已存查询，人工收存不再依赖 AI。资产理由、单集合归属与撤销、查询名称/条件/删除通过追加修订维护，旧请求不能覆盖新版本或复活已撤销项。`0039_comment_research.sql` 仅在隔离 PostgreSQL 验证，已登记迁移脚本但未应用共享库。
+Mog 已授权一个子代理实施、根代理集中审核，先推进 P00 直接依赖与 P01 评论研究，尚不启动后续产品包。实施基线 `be1e6fb83650b376ee22e6fdec07241b8f604614`，分支 `codex/comment-research-001`；自包含合同见 [comment-research-001.md](plans/active/comment-research-001.md)。源码接入原声浏览、问题分组、语料资产与服务端已存查询，人工收存不再依赖 AI。资产理由、单集合归属与撤销、查询名称/条件/删除通过追加修订维护，旧请求不能覆盖新版本或复活已撤销项。`0039_comment_research.sql` 已在 2026-09-06 按 Mog 授权应用共享库，见 #172 部署回执。
 
-评论分析有持久队列、租约恢复、最多 60 秒本地等待及严格候选接纳接口，独立 `linggan-comment-worker --queue-only [--once]` 只入队；#170 已为其接入受控 Pi 消费器。真实模型/费用/敏感材料处理许可未收口；没有语义聚类或真实质量证明，P01-C 和全包不能因此标为完成。共享 migration、当前 :3000、现有 worker、真实采集与 Mog 业务验收仍未发生。
+评论分析有持久队列、租约恢复、最多 60 秒本地等待及严格候选接纳接口，独立 `linggan-comment-worker --queue-only [--once]` 只入队；#170 已为其接入受控 Pi 消费器。真实模型/费用/敏感材料处理许可未收口；没有语义聚类或真实质量证明，P01-C 和全包不能因此标为完成。共享 migration、3000 与评论 worker 已完成 #172 运行更新；真实采集与 Mog 对评论分析质量的验收不由该部署证明。
 
 
 ### COLLECTION-SCHEDULER-SCALE-001（当前源码实施项；尚未进入共享运行态）

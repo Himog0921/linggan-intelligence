@@ -50,3 +50,12 @@ Rust boundaries 的冻结基线已有 35 errors / 15 warnings，本包最终为 
 - 浏览器：CUA 在独立合成预览验证完整 `/v1/chat/completions` 地址保存为 `/v1`，直接调用成功；错误模型失败并保留输入；留空凭据继续测试；仅保存不调用；临时移走并恢复隔离 schema 后检查禁用和恢复文案。实际截图检查了单页宽度及弹窗，修正移除侧栏后遗留的 grid 占位，弹窗固定显示标题及保存/测试按钮，字段区独立滚动。
 - 基线：同日 main 边界扫描 35 errors / 16 warnings，返修 35 / 17。新增 `model_settings.rs` 364 行超过 350 软阈值，未超过 500 硬阈值；测试文件从 689 增至 837 行，仍在 900 硬阈值内。不把既有 35 项错误报告成通过，也未借本修复扩展全仓重构。
 - 运行事实：共享库 migration ledger 截至 0038，缺少现有 0039/0040，3000 模型设置 API 返回 503。此次未迁移共享数据库、未更新 3000、未调用真实外部供应商或真实评论。源码、合成证明和 Mog 实际验收分别记录。
+
+## 2026-09-07 DeepSeek 输出上限返修（同 #169）
+
+共享只读回执确认：deepseek-v4-flash / Responses 的两次 probe 分别耗时 8881/7620 ms，均为 459 输入、1024 输出、output_limit；未保存思考 token 分项，不能声称已证明 1024 token 全用于思考。官方默认思考与本机 reasoning=false 未发送关闭参数的缺口有代码及官方文档依据。
+
+- SDK 回归：新增本机 HTTP fixture 拦截官方域名请求，不发往外网。修复前真实 Pi 得到同类 output_limit/459/1024；修复后 Responses probe/analyze 发送 reasoning.effort=none 并完成。Chat Completions probe/analyze 发送 thinking.type=disabled。未知模型、相似域名不套用，1024 上限及单次调用保持。全部 11 项通过。
+- PostgreSQL：原 31 项 + 新截断语义 1 项，共 32 项通过，独立容器/卷清理已验证。即使返回可解析 JSON，只要结束为 length 仍拒绝接纳；modelCallable=true、commentQualified=false、1824 token 用量留存、重放不新增调用、不能保存为默认。
+- CUA：独立合成预览的 synthetic-limit 实际通过 API/SDK 返回截断；弹窗与供应商行显示“模型已响应，但输出达到本次上限，评论分析结果不完整”，默认选择中没有该模型，输入保留。没有打开或代填真实凭据、没有外部复测。
+- Cargo 编译由完整 proof/preview 构建实际执行；JS 语法、fmt、diff、项目治理检查通过。证明的是已支持官方 V4 文本调用参数及截断保护，不是通用推理配置或真实模型分析质量。

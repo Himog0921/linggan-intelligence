@@ -34,3 +34,9 @@ API 地址允许服务根地址、基础地址或对应协议完整调用地址�
 常驻入口是在既有 `linggan-worker` 中独立异步运行的评论循环，10 秒调度一次；模型调用不在巡检 tick 内。单独 `linggan-comment-worker --execute [--once]` 供隔离验证/明确运行；原 `--queue-only` 不调用任何模型。保存开关不是运行证明，页面心跳和调用回执才说明这一层实际发生了什么。
 
 真实供应商尚未配置。本包的本地协议 fixture 明确标记 SYNTHETIC / NOT EVIDENCE，验证真实 Pi SDK 和运行边界；真实外部材料、成本和语义效果仍须 Mog 在可用配置页确定后验收。运行准备见 [运行说明](../runbooks/model-pi-runtime.md)，实施证据见 [分层验收](../design/acceptance/model-pi-001-acceptance.md)。
+
+## DeepSeek V4 的文本调用约束（2026-09-07）
+
+当前功能只接纳最终文本，不提供思考模式配置。对官方 `api.deepseek.com` 的已知 V4 模型，Responses 请求显式设置 `reasoning.effort=none`，Chat Completions 设置 `thinking.type=disabled`；测试与正式评论分析一致。未知模型与自定义网关不猜测其兼容参数。依据 [DeepSeek Thinking Mode](https://api-docs.deepseek.com/guides/thinking_mode/)，V4 默认开启思考，本机 `reasoning:false` 元数据本身不能关闭供应商默认行为。
+
+输出到达上限时，回执仍为失败，评论输出未通过校验，保留实际用量；但 `modelCallable=true` 表示已取得模型生成响应，不能显示成地址或密钥不可用。历史回执不回写。该修复不增加测试 token、等待上限或重试，不授予真实语料处理或外部复测权限。
