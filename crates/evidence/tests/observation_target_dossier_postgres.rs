@@ -163,6 +163,303 @@ async fn clean_200_work_progressive_root_establishes_the_bounded_creator_baselin
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn incomplete_directory_is_rebuilt_as_a_new_current_baseline_without_mutating_history() {
+    let database = proof_database("dossier_rebuild_incomplete_directory").await;
+    let installation = ready_installation(&database, "dossier-rebuild-incomplete").await;
+    let target_ref = seed_creator_target(&database, "creator-rebuild-incomplete").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let old_root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 31, "risk_control")
+        .await;
+
+    let before = read_archive_completeness(&database, "xhs").await.unwrap();
+    let before = before.get("creator-rebuild-incomplete").unwrap();
+    assert_eq!(
+        before.works_listed, 0,
+        "a partial historical directory cannot become the current detail denominator"
+    );
+    assert!(before.requires_directory_rebuild());
+    assert!(!before.has_displayable_directory());
+
+    let historical_package_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_runtime_capture_package package \
+         JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+         JOIN collection_work_order_lease lease USING(lease_ref) \
+         WHERE lease.work_order_ref=$1",
+    )
+    .bind(old_root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+
+    let rebuilt = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .expect("a non-baseline partial directory starts a normal new homepage directory request");
+    let new_root = rebuilt.request.work_order_ref.unwrap();
+    assert_ne!(new_root, old_root);
+
+    let roots: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order \
+         WHERE target_ref=$1 AND lane='deep_archive' \
+           AND stop_conditions #>> '{progressiveArchive,version}'='1' \
+           AND stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order_ref::text",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        roots, 2,
+        "the former incomplete root remains immutable history"
+    );
+    let historical_package_count_after: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_runtime_capture_package package \
+         JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+         JOIN collection_work_order_lease lease USING(lease_ref) \
+         WHERE lease.work_order_ref=$1",
+    )
+    .bind(old_root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(historical_package_count_after, historical_package_count);
+
+    let current = read_archive_completeness(&database, "xhs").await.unwrap();
+    let current = current.get("creator-rebuild-incomplete").unwrap();
+    assert!(current.work_in_progress);
+    assert_eq!(
+        current.works_listed, 0,
+        "old partial links are not the new directory denominator"
+    );
+    assert!(!current.has_displayable_directory());
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn surface_ended_directory_below_200_remains_a_valid_current_baseline() {
+    let database = proof_database("dossier_surface_ended_directory").await;
+    let installation = ready_installation(&database, "dossier-surface-ended-directory").await;
+    let target_ref = seed_creator_target(&database, "creator-surface-ended-directory").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 31, "surface_ended")
+        .await;
+
+    let baseline = read_archive_completeness(&database, "xhs").await.unwrap();
+    let baseline = baseline.get("creator-surface-ended-directory").unwrap();
+    assert!(baseline.has_displayable_directory());
+    assert_eq!(baseline.works_listed, 31);
+
+    let continuation = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .expect("a valid surface-ended directory only queues a small detail continuation");
+    assert_ne!(continuation.request.work_order_ref.unwrap(), root);
+    let root_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order \
+         WHERE target_ref=$1 AND lane='deep_archive' \
+           AND stop_conditions #>> '{progressiveArchive,version}'='1' \
+           AND stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order_ref::text",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(root_count, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn surface_ended_directory_from_a_legacy_smaller_quota_requires_rebuild() {
+    let database = proof_database("dossier_surface_ended_legacy_quota").await;
+    let installation = ready_installation(&database, "dossier-surface-ended-legacy-quota").await;
+    let target_ref = seed_creator_target(&database, "creator-surface-ended-legacy-quota").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let old_root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 31, "surface_ended")
+        .await;
+    // This synthetic fixture represents a pre-contract immutable runtime task.  Disable only
+    // its append-only trigger long enough to express the historical smaller quota, then restore
+    // it before exercising the current read/action contract.
+    sqlx::query(
+        "ALTER TABLE linggan_runtime_task DISABLE TRIGGER linggan_runtime_task_is_append_only",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_runtime_task task \
+         SET task_spec=jsonb_set(task.task_spec,'{maximumQuota}','31'::jsonb) \
+         FROM collection_work_order_lease_task lease_task \
+         JOIN collection_work_order_lease lease USING(lease_ref) \
+         WHERE task.task_id=lease_task.task_id AND lease.work_order_ref=$1",
+    )
+    .bind(old_root)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "ALTER TABLE linggan_runtime_task ENABLE TRIGGER linggan_runtime_task_is_append_only",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let baseline = read_archive_completeness(&database, "xhs").await.unwrap();
+    let baseline = baseline.get("creator-surface-ended-legacy-quota").unwrap();
+    assert!(!baseline.has_displayable_directory());
+    assert!(baseline.requires_directory_rebuild());
+
+    let rebuilt = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .expect("a legacy smaller quota must create a new current root");
+    assert_ne!(rebuilt.request.work_order_ref.unwrap(), old_root);
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn quarantined_directory_record_remains_an_archive_problem() {
+    let database = proof_database("dossier_quarantined_directory").await;
+    let installation = ready_installation(&database, "dossier-quarantined-directory").await;
+    let target_ref = seed_creator_target(&database, "creator-quarantined-directory").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 31, "surface_ended")
+        .await;
+    let directory_package: Uuid = sqlx::query_scalar(
+        "SELECT package.package_ref \
+         FROM linggan_runtime_capture_package package \
+         JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+         JOIN collection_work_order_lease lease USING(lease_ref) \
+         WHERE lease.work_order_ref=$1 AND package.package_kind='profile_discovery'",
+    )
+    .bind(root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_runtime_record_disposition \
+           (package_ref,record_ordinal,disposition,reason) \
+         VALUES ($1,999,'quarantined','synthetic directory conflict')",
+    )
+    .bind(directory_package)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let baseline = read_archive_completeness(&database, "xhs").await.unwrap();
+    let baseline = baseline.get("creator-quarantined-directory").unwrap();
+    assert!(!baseline.has_displayable_directory());
+    assert!(baseline.requires_directory_rebuild());
+    assert_eq!(baseline.quarantined, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn successful_patrol_adds_new_work_to_the_current_directory_and_detail_denominator() {
+    let database = proof_database("dossier_patrol_extends_directory").await;
+    let installation = ready_installation(&database, "dossier-patrol-extends-directory").await;
+    let target_ref = seed_creator_target(&database, "creator-patrol-extends-directory").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
+        .await
+        .unwrap();
+    complete_progressive_root_at_the_200_work_bound(&database, &installation).await;
+    grant_patrol(&database, "巡查建档创作者").await;
+
+    submit_patrol_round(
+        &database,
+        &installation,
+        target_ref,
+        "巡查建档创作者",
+        PatrolRound::OneUsableWork,
+    )
+    .await;
+    let after_new = read_archive_completeness(&database, "xhs").await.unwrap();
+    let after_new = after_new.get("creator-patrol-extends-directory").unwrap();
+    assert!(after_new.has_displayable_directory());
+    assert_eq!(after_new.works_listed, 201);
+    assert_eq!(after_new.details_captured, 0);
+
+    submit_patrol_round(
+        &database,
+        &installation,
+        target_ref,
+        "巡查建档创作者",
+        PatrolRound::ValidZeroNew,
+    )
+    .await;
+    let after_zero = read_archive_completeness(&database, "xhs").await.unwrap();
+    let after_zero = after_zero.get("creator-patrol-extends-directory").unwrap();
+    assert_eq!(
+        after_zero.works_listed, 201,
+        "a qualified zero-new patrol does not inflate the directory"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
 async fn progressive_archive_rolls_each_source_to_the_ready_claimant_batch_cap() {
     let database = proof_database("dossier_progressive_batch_ready_cap").await;
     let first_installation = ready_installation(&database, "dossier-batch-cap-first").await;
@@ -655,8 +952,14 @@ async fn archive_completeness_deduplicates_work_and_follows_the_exact_lease_targ
         .expect("the exact Work Order target owns every bound package");
     assert!(completeness.work_in_progress);
     assert_eq!(completeness.author_profile_captures, 0);
-    assert_eq!(completeness.works_listed, 1);
-    assert_eq!(completeness.details_captured, 1);
+    assert_eq!(
+        completeness.works_listed, 0,
+        "a still-building root does not expose partial links as a current directory"
+    );
+    assert_eq!(
+        completeness.details_captured, 0,
+        "details are not a visible denominator before the current directory is proven"
+    );
     assert_eq!(completeness.quarantined, 0);
 }
 
@@ -1238,6 +1541,104 @@ async fn complete_progressive_root_at_the_200_work_bound(
             "bounded root submission must be acknowledged: {outcome:?}",
         );
     }
+}
+
+async fn complete_progressive_root_with_partial_directory(
+    database: &Database,
+    installation: &Installed,
+    directory_size: i64,
+    stopped_reason: &str,
+) {
+    for _ in 0..2 {
+        let decision = decide_dispatch(database, &installation.install_key, &installation.secret)
+            .await
+            .unwrap();
+        let task_spec = match decision {
+            linggan_evidence::DispatchDecision::Dispatch { task_spec, .. } => task_spec,
+            other => panic!("expected a dispatched progressive root task, got {other:?}"),
+        };
+        let task = parse_producer_task_spec(&task_spec.to_string()).unwrap();
+        let producer_instance_id = Uuid::parse_str(&installation.install_key).unwrap();
+        let attempt = parse_producer_attempt(
+            &serde_json::json!({
+                "contractVersion":"linggan.producer.attempt.v1",
+                "producerInstanceId":producer_instance_id,
+                "taskId":task.task_id(),
+                "attemptId":Uuid::new_v4(),
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert!(matches!(
+            start_producer_attempt(database, &attempt).await,
+            Ok(RuntimeAttemptOutcome::Started { .. })
+        ));
+        let submission = if task.raw()["capabilitiesRequested"][0] == "profile_discovery" {
+            partial_directory_submission(
+                &task,
+                &attempt,
+                producer_instance_id,
+                directory_size,
+                stopped_reason,
+            )
+        } else {
+            bounded_root_submission(&task, &attempt, producer_instance_id)
+        };
+        let outcome = submit_producer_package(database, &submission).await;
+        assert!(
+            matches!(outcome, Ok(RuntimeSubmissionOutcome::Acknowledged { .. })),
+            "partial root submission must remain accepted history: {outcome:?}",
+        );
+    }
+}
+
+fn partial_directory_submission(
+    task: &ProducerTaskSpec,
+    attempt: &linggan_contracts::ProducerAttempt,
+    producer_instance_id: Uuid,
+    directory_size: i64,
+    stopped_reason: &str,
+) -> linggan_contracts::ProducerSubmission {
+    let identity = task.raw()["target"]["authorExternalId"].as_str().unwrap();
+    let records = (0..directory_size)
+        .map(|ordinal| {
+            serde_json::json!({
+                "kind":"profile_discovery_card",
+                "resultPosition":ordinal + 1,
+                "sourceObject":{"platform":"xhs","type":"content","externalId":format!("{identity}-partial-{ordinal}")},
+                "payload":{"title":format!("partial work {ordinal}")}
+            })
+        })
+        .collect::<Vec<_>>();
+    parse_producer_submission(
+        &serde_json::json!({
+            "contractVersion":"linggan.producer.capture-package.v1",
+            "producerInstanceId":producer_instance_id,
+            "taskId":task.task_id(),
+            "attemptId":attempt.attempt_id(),
+            "submissionId":Uuid::new_v4(),
+            "capturePackage":{
+                "contractVersion":"linggan.producer.capture-package.v1",
+                "packageRef":Uuid::new_v4(),
+                "packageKind":"profile_discovery",
+                "platform":"xhs",
+                "observedAt":"2026-09-04T00:00:00Z",
+                "capturedAt":"2026-09-04T00:00:01Z",
+                "coverage":{
+                    "target":{"basis":"known_set","authorExternalId":identity},
+                    "layers":[{
+                        "capability":"profile_discovery",
+                        "observed":directory_size,"attempted":directory_size,"acquired":directory_size,
+                        "verified":0,"failed":0,"notAttempted":0,"unknown":0,
+                        "stoppedReason":stopped_reason
+                    }]
+                },
+                "records":records
+            }
+        })
+        .to_string(),
+    )
+    .unwrap()
 }
 
 fn bounded_root_submission(

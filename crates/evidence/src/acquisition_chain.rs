@@ -317,47 +317,78 @@ async fn request_progressive_archive_inner(
             .await
             .map_err(AcquisitionChainError::from)?
     {
-        if root_purpose != purpose {
-            transaction
-                .rollback()
+        match progressive_root_directory_state_in_transaction(&mut transaction, root_work_order_ref)
+            .await
+            .map_err(AcquisitionChainError::from)?
+        {
+            ProgressiveRootDirectoryState::Ready => {
+                if root_purpose != purpose {
+                    transaction
+                        .rollback()
+                        .await
+                        .map_err(AcquisitionChainError::from)?;
+                    return Err(AcquisitionChainError::ProgressiveArchivePurposeMismatch.into());
+                }
+                let monitoring_enabled: bool = sqlx::query_scalar(
+                    "SELECT monitoring_enabled FROM collection_observation_target WHERE target_ref=$1",
+                )
+                .bind(target_ref)
+                .fetch_one(&mut *transaction)
                 .await
                 .map_err(AcquisitionChainError::from)?;
-            return Err(AcquisitionChainError::ProgressiveArchivePurposeMismatch.into());
-        }
-        let monitoring_enabled: bool = sqlx::query_scalar(
-            "SELECT monitoring_enabled FROM collection_observation_target WHERE target_ref=$1",
-        )
-        .bind(target_ref)
-        .fetch_one(&mut *transaction)
-        .await
-        .map_err(AcquisitionChainError::from)?;
-        let result = match advance_progressive_archive_in_transaction(
-            &mut transaction,
-            target_ref,
-            root_work_order_ref,
-            qualifying_authorization,
-            purpose,
-            requested_by,
-            monitoring_enabled,
-            valid_for_minutes,
-            issue_lease,
-        )
-        .await?
-        {
-            ProgressiveAdvance::Outcome(outcome) => outcome,
-            ProgressiveAdvance::Skipped(reason) => {
+                let result = match advance_progressive_archive_in_transaction(
+                    &mut transaction,
+                    target_ref,
+                    root_work_order_ref,
+                    qualifying_authorization,
+                    purpose,
+                    requested_by,
+                    monitoring_enabled,
+                    valid_for_minutes,
+                    issue_lease,
+                )
+                .await?
+                {
+                    ProgressiveAdvance::Outcome(outcome) => outcome,
+                    ProgressiveAdvance::Skipped(reason) => {
+                        transaction
+                            .rollback()
+                            .await
+                            .map_err(AcquisitionChainError::from)?;
+                        return Err(
+                            AcquisitionChainError::ProgressiveArchiveNotReady { reason }.into()
+                        );
+                    }
+                };
+                transaction
+                    .commit()
+                    .await
+                    .map_err(AcquisitionChainError::from)?;
+                return Ok(result);
+            }
+            ProgressiveRootDirectoryState::InProgress => {
+                if root_purpose != purpose {
+                    transaction
+                        .rollback()
+                        .await
+                        .map_err(AcquisitionChainError::from)?;
+                    return Err(AcquisitionChainError::ProgressiveArchivePurposeMismatch.into());
+                }
                 transaction
                     .rollback()
                     .await
                     .map_err(AcquisitionChainError::from)?;
-                return Err(AcquisitionChainError::ProgressiveArchiveNotReady { reason }.into());
+                return Err(AcquisitionChainError::ProgressiveArchiveNotReady {
+                    reason: "detail_batch_in_flight",
+                }
+                .into());
             }
-        };
-        transaction
-            .commit()
-            .await
-            .map_err(AcquisitionChainError::from)?;
-        return Ok(result);
+            ProgressiveRootDirectoryState::RebuildRequired => {
+                // Keep the old root and its Packages immutable.  It never proved the bounded
+                // homepage directory, so the next admitted root is a normal first directory
+                // collection, not a continuation of its partial detail batches.
+            }
+        }
     }
     let request = request_and_admit_in_transaction_with_progressive_resume(
         &mut transaction,
@@ -1551,13 +1582,74 @@ async fn canonical_progressive_root_in_transaction(
          WHERE work_order.target_ref=$1 AND work_order.lane='deep_archive' \
            AND work_order.stop_conditions #>> '{progressiveArchive,version}'=$2 \
            AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order.work_order_ref::text \
-         ORDER BY work_order.created_at,work_order.work_order_ref \
+         ORDER BY work_order.created_at DESC,work_order.work_order_ref DESC \
          LIMIT 1 FOR UPDATE OF work_order",
     )
     .bind(target_ref)
     .bind(PROGRESSIVE_ARCHIVE_VERSION.to_string())
     .fetch_optional(&mut **transaction)
     .await
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProgressiveRootDirectoryState {
+    Ready,
+    InProgress,
+    RebuildRequired,
+}
+
+/// A root is a usable directory only when its own accepted discovery Package says that the
+/// producer reached the page end, or that it actually acquired the contract's 200 entries.
+/// A partial package with a 200 limit is evidence, but it is not a directory baseline.
+async fn progressive_root_directory_state_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    root_work_order_ref: Uuid,
+) -> Result<ProgressiveRootDirectoryState, sqlx::Error> {
+    let (directory_ready, work_in_progress): (bool, bool) = sqlx::query_as(
+        "SELECT \
+           EXISTS ( \
+             SELECT 1 FROM collection_work_order root_order \
+             JOIN collection_work_order_lease lease USING(work_order_ref) \
+             JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+             JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+             JOIN linggan_runtime_capture_package package ON package.task_id=lease_task.task_id \
+             JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
+             CROSS JOIN LATERAL jsonb_array_elements( \
+               CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
+                    THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
+             WHERE root_order.work_order_ref=$1 \
+               AND package.package_kind='profile_discovery' \
+               AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+               AND receipt.material_admission='ACCEPTED' \
+               AND layer->>'capability'='profile_discovery' \
+               AND COALESCE((layer->>'observed')::integer,0)>0 \
+               AND COALESCE((layer->>'attempted')::integer,0)>0 \
+               AND COALESCE((layer->>'acquired')::integer,0)>0 \
+               AND COALESCE((layer->>'failed')::integer,0)=0 \
+               AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
+               AND COALESCE((layer->>'unknown')::integer,0)=0 \
+               AND COALESCE((task.task_spec->>'maximumQuota')::integer,-1)=200 \
+               AND (layer->>'stoppedReason'='surface_ended' OR ( \
+                 layer->>'stoppedReason'='maximum_quota' \
+                 AND COALESCE((layer->>'acquired')::integer,-1)=200))) AS directory_ready, \
+           EXISTS ( \
+             SELECT 1 FROM collection_work_order work_order \
+             LEFT JOIN collection_work_order_lease lease USING(work_order_ref) \
+             WHERE (work_order.work_order_ref=$1 \
+                    OR work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=$1::text) \
+               AND (work_order.queue_state='queued' \
+                    OR (lease.released_at IS NULL AND lease.expires_at>scope_001_now()))) AS work_in_progress",
+    )
+    .bind(root_work_order_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(if directory_ready {
+        ProgressiveRootDirectoryState::Ready
+    } else if work_in_progress {
+        ProgressiveRootDirectoryState::InProgress
+    } else {
+        ProgressiveRootDirectoryState::RebuildRequired
+    })
 }
 
 enum ProgressiveAdvance {
@@ -1726,7 +1818,7 @@ pub async fn run_progressive_archives(
            SELECT work_order.target_ref,work_order.work_order_ref,request.purpose,work_order.created_at, \
                   target.last_scheduler_considered_at, \
                   row_number() OVER (PARTITION BY work_order.target_ref \
-                                     ORDER BY work_order.created_at,work_order.work_order_ref) AS root_rank \
+                                     ORDER BY work_order.created_at DESC,work_order.work_order_ref DESC) AS root_rank \
            FROM collection_work_order work_order \
            JOIN collection_admission_decision decision \
              ON decision.decision_ref=work_order.decision_ref \
@@ -1803,6 +1895,23 @@ pub async fn run_progressive_archives(
                 summary
                     .skipped
                     .push((*target_ref, "target_dismissed".to_owned()));
+                continue;
+            }
+            if progressive_root_directory_state_in_transaction(
+                &mut transaction,
+                *root_work_order_ref,
+            )
+            .await
+            .map_err(AcquisitionChainError::from)?
+                != ProgressiveRootDirectoryState::Ready
+            {
+                transaction
+                    .rollback()
+                    .await
+                    .map_err(AcquisitionChainError::from)?;
+                summary
+                    .skipped
+                    .push((*target_ref, "directory_baseline_not_ready".to_owned()));
                 continue;
             }
             let authorization_ref = match progressive_authorization_in_transaction(
