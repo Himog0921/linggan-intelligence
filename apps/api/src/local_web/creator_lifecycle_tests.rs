@@ -811,6 +811,7 @@ fn archive_tab_explains_the_first_two_hundred_boundary_without_a_fake_score() {
             works_listed: 12,
             details_captured: 5,
             quarantined: 1,
+            directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Ready,
         },
     );
     let html = target_drawer::render(

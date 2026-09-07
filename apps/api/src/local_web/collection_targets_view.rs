@@ -316,6 +316,9 @@ fn archive_state(
         TargetArchiveRead::Unavailable => ("neutral", "档案暂不可读"),
         TargetArchiveRead::Known(Some(value)) if value.work_in_progress => ("warn", "建档中"),
         TargetArchiveRead::Known(Some(value)) if value.quarantined > 0 => ("warn", "档案有问题"),
+        TargetArchiveRead::Known(Some(value)) if value.requires_directory_rebuild() => {
+            ("warn", "目录待重建")
+        }
         TargetArchiveRead::Known(None) => ("neutral", "尚未建立"),
         TargetArchiveRead::Known(Some(value)) if value.is_untouched() => ("neutral", "尚未建立"),
         TargetArchiveRead::Known(Some(value))
@@ -350,7 +353,7 @@ fn archive_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String
     match archive {
         super::target_drawer::TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         super::target_drawer::TargetArchiveRead::Known(value) => value
-            .filter(|value| !value.is_untouched())
+            .filter(|value| value.has_displayable_directory())
             .map(|value| format!("{} 篇", value.works_listed))
             .unwrap_or_else(|| "—".to_owned()),
     }
@@ -360,7 +363,7 @@ fn detail_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String 
     match archive {
         super::target_drawer::TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         super::target_drawer::TargetArchiveRead::Known(value) => value
-            .filter(|value| value.works_listed > 0)
+            .filter(|value| value.has_displayable_directory() && value.works_listed > 0)
             .map(|value| {
                 let missing = (value.works_listed - value.details_captured).max(0);
                 format!(
@@ -416,11 +419,14 @@ fn row_action(
                 target_ref = target.target_ref,
             )
         }
-        action @ (TargetPrimaryAction::EstablishArchive | TargetPrimaryAction::ContinueArchive) => {
-            let label = if action == TargetPrimaryAction::EstablishArchive {
-                "建立档案"
-            } else {
-                "继续完善"
+        action @ (TargetPrimaryAction::EstablishArchive
+        | TargetPrimaryAction::RebuildDirectory
+        | TargetPrimaryAction::ContinueArchive) => {
+            let label = match action {
+                TargetPrimaryAction::EstablishArchive => "建立档案",
+                TargetPrimaryAction::RebuildDirectory => "重建目录",
+                TargetPrimaryAction::ContinueArchive => "继续完善",
+                _ => unreachable!(),
             };
             let focus_id = format!("target-{}", target.target_ref);
             let fields = list_context.return_fields(None, None, Some(&focus_id));
@@ -687,6 +693,7 @@ mod tests {
                 works_listed: 0,
                 details_captured: 0,
                 quarantined: 1,
+                ..ArchiveCompleteness::default()
             },
         );
         let html = render_stored_targets(
@@ -712,6 +719,38 @@ mod tests {
             failure_markup(Some("archive_nothing_to_continue"))
                 .contains("当前作品目录没有待补详情")
         );
+    }
+
+    #[test]
+    fn partial_historical_directory_is_not_rendered_as_a_detail_denominator() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let creator = target("creator", Some("目录待重建作者"));
+        let mut completeness = HashMap::new();
+        completeness.insert(
+            creator.identity_key.clone(),
+            ArchiveCompleteness {
+                started: true,
+                attempted: true,
+                author_profile_captures: 1,
+                works_listed: 31,
+                details_captured: 27,
+                directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::RebuildRequired,
+                ..ArchiveCompleteness::default()
+            },
+        );
+        let html = render_stored_targets(
+            &base,
+            &[creator],
+            &HashMap::new(),
+            Some(&completeness),
+            None,
+            TargetListContext::default(),
+        );
+
+        assert!(html.contains("目录待重建"));
+        assert!(html.contains(">重建目录</button>"));
+        assert!(!html.contains("31 篇"));
+        assert!(!html.contains("27 / 31"));
     }
 
     #[test]
@@ -768,6 +807,7 @@ mod tests {
                 works_listed: 12,
                 details_captured: 5,
                 quarantined: 0,
+                directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Ready,
             },
         );
         let html = render_stored_targets(
