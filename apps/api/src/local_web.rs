@@ -47,6 +47,9 @@ use linggan_contracts::{
     parse_local_task_spec, parse_producer_attempt, parse_producer_submission,
     parse_producer_task_spec,
 };
+use linggan_evidence::observation_domain::{
+    ObservationDomain, read_observation_domains, resolve_current_domain,
+};
 use linggan_evidence::{
     AcquisitionChainError, AuthorizationGrant, CheckInOutcome, CreatorLifecycleQuery,
     DiscoveryIngressError, InstallationCheckIn, LeaseError, LocalAttemptOutcome,
@@ -561,7 +564,17 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     }))
 }
 
-async fn evidence_library(State(state): State<LocalWebState>) -> Html<String> {
+#[derive(serde::Deserialize)]
+struct CorpusSurfaceParams {
+    /// 当前观察领域。语料页每个子页共用这一个参数——换领域是换观察对象，不是换页面。
+    #[serde(default)]
+    domain: Option<String>,
+}
+
+async fn evidence_library(
+    State(state): State<LocalWebState>,
+    Query(params): Query<CorpusSurfaceParams>,
+) -> Html<String> {
     let collection_state = match state.database.database() {
         Some(database) => match count_targets(database).await {
             Ok(counts) if counts.total > 0 => Some("观察中"),
@@ -570,7 +583,14 @@ async fn evidence_library(State(state): State<LocalWebState>) -> Html<String> {
         },
         None => None,
     };
-    Html(evidence_library_html(collection_state))
+    // 领域读不出来时给空列表：切换器随之隐藏，页面照常以本领域呈现。缺一个切换器远好过
+    // 显示一个点不动的假控件。
+    let domains = match state.database.database() {
+        Some(database) => read_observation_domains(database).await.unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let current = resolve_current_domain(&domains, params.domain.as_deref());
+    Html(evidence_library_html(collection_state, &domains, current))
 }
 
 async fn evidence_library_json(
@@ -2178,12 +2198,13 @@ fn local_read_json_error(status: axum::http::StatusCode, code: &'static str) -> 
 
 #[cfg(test)]
 fn evidence_read_unavailable_html() -> String {
-    evidence_page::render_read_unavailable(&evidence_library_html(None))
+    // 读不到领域时页面仍以本领域呈现，选择器不渲染——这两个错误页正是那个状态。
+    evidence_page::render_read_unavailable(&evidence_library_html(None, &[], None))
 }
 
 #[cfg(test)]
 fn evidence_query_invalid_html() -> String {
-    evidence_page::render_query_invalid(&evidence_library_html(None))
+    evidence_page::render_query_invalid(&evidence_library_html(None, &[], None))
 }
 
 async fn stylesheet() -> Response {
@@ -3560,17 +3581,89 @@ async fn evidence_observation_script() -> Response {
         .into_response()
 }
 
-fn evidence_library_header(collection_state: Option<&str>) -> String {
+/// 面包屑里的领域选择器。
+///
+/// 它站在面包屑那一层，而不是内容区里，因为领域是**当前观察对象**而非页面内的一个筛选项：
+/// 选中它，语料下的每个子页都跟着换数据源，页面结构一律不变。
+///
+/// 只有一个领域（或读不出来）时整个控件不渲染——一个永远只有一项的下拉是噪音。
+fn corpus_domain_picker(
+    domains: &[ObservationDomain],
+    current: Option<&ObservationDomain>,
+) -> String {
+    let Some(current) = current else {
+        return String::new();
+    };
+    if domains.len() < 2 {
+        return String::new();
+    }
+    let mut options = String::new();
+    for domain in domains {
+        let selected = if domain.domain_ref == current.domain_ref {
+            " selected"
+        } else {
+            ""
+        };
+        // 本领域只带一个角标，不单列一类：它在这个列表里是普通一项。
+        let own = if domain.is_own_domain {
+            "（本领域）"
+        } else {
+            ""
+        };
+        let count = match domain.sample_count {
+            Some(count) if !domain.is_own_domain => format!(" · {count}"),
+            _ => String::new(),
+        };
+        options.push_str(&format!(
+            r#"<option value="{domain_ref}"{selected}>{name}{own}{count}</option>"#,
+            domain_ref = domain.domain_ref,
+            name = html_escape(&domain.name),
+        ));
+    }
+    format!(
+        r#"<form class="v7-domain-picker" method="get" aria-label="当前观察领域">
+             <label class="v7-sr-only" for="corpus-domain">当前观察领域</label>
+             <select id="corpus-domain" name="domain" onchange="this.form.submit()">{options}</select>
+             <noscript><button type="submit">切换</button></noscript>
+           </form>"#
+    )
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn evidence_library_header(
+    collection_state: Option<&str>,
+    domains: &[ObservationDomain],
+    current: Option<&ObservationDomain>,
+) -> String {
+    let picker = corpus_domain_picker(domains, current);
+    let crumb = if picker.is_empty() {
+        "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">作品材料集合</span>".to_owned()
+    } else {
+        format!(
+            "语料 <span class=\"v7-slash\">/</span> {picker} <span class=\"v7-slash\">/</span> <b>证据库</b>"
+        )
+    };
     shell::global_header(
         shell::PrimarySurface::Corpus,
         "本机材料投影 <span class=\"v7-tech-key\">LOCAL MATERIAL PROJECTION</span>",
-        "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">作品材料集合</span>",
+        &crumb,
         "<span class=\"v7-kpi\"><em>事实层</em><b>只读</b></span><span class=\"v7-kpi\"><em>材料入口</em><b>默认投影</b></span><i class=\"v7-vr\" aria-hidden=\"true\"></i><span class=\"v7-query-meta\">不混读旧发现卡片 <span class=\"v7-tech-key\">NO LEGACY FALLBACK</span></span><span>本机时区 <span class=\"v7-tech-key\">UTC+08</span></span>",
         collection_state,
     )
 }
 
-fn evidence_library_html(collection_state: Option<&str>) -> String {
+fn evidence_library_html(
+    collection_state: Option<&str>,
+    domains: &[ObservationDomain],
+    current: Option<&ObservationDomain>,
+) -> String {
     let base = r#"<!doctype html>
 <html lang="zh-CN" data-theme="linggan-intelligence">
   <head>
@@ -3724,7 +3817,7 @@ fn evidence_library_html(collection_state: Option<&str>) -> String {
     </div>
   </body>
 </html>"#;
-    let header = evidence_library_header(collection_state);
+    let header = evidence_library_header(collection_state, domains, current);
     base.replace(
         "<!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->",
         &header,

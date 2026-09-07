@@ -90,23 +90,23 @@ async fn evidence_route_returns_the_honest_empty_state() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::OK);
-    assert!(evidence_library_html(None).contains("来源材料尚未完整接通"));
-    assert!(evidence_library_html(None).contains("SOURCE INCOMPLETE"));
-    assert!(evidence_library_html(None).contains("没有可展示的本地材料"));
-    assert!(!evidence_library_html(None).contains(&["SYSTEM", "LIVE"].join(" ")));
+    assert!(evidence_library_html(None, &[], None).contains("来源材料尚未完整接通"));
+    assert!(evidence_library_html(None, &[], None).contains("SOURCE INCOMPLETE"));
+    assert!(evidence_library_html(None, &[], None).contains("没有可展示的本地材料"));
+    assert!(!evidence_library_html(None, &[], None).contains(&["SYSTEM", "LIVE"].join(" ")));
 }
 
 #[test]
 #[cfg(any())] // superseded server-rendered discovery page
 fn evidence_page_does_not_replace_unknown_with_zero() {
-    assert!(evidence_library_html(None).contains("覆盖情况 <strong>未知"));
-    assert!(!evidence_library_html(None).contains("评论 0"));
+    assert!(evidence_library_html(None, &[], None).contains("覆盖情况 <strong>未知"));
+    assert!(!evidence_library_html(None, &[], None).contains("评论 0"));
 }
 
 #[test]
 #[cfg(any())] // superseded server-rendered discovery page
 fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_keys() {
-    let base = evidence_library_html(None);
+    let base = evidence_library_html(None, &[], None);
 
     for required in [
         "事实层 / 证据",
@@ -208,7 +208,7 @@ fn evidence_library_uses_chinese_for_user_meaning_and_english_only_as_technical_
 #[test]
 #[cfg(any())] // superseded server-rendered discovery page
 fn base_no_db_header_and_nested_technical_keys_remain_chinese_first() {
-    let base = evidence_library_html(None);
+    let base = evidence_library_html(None, &[], None);
     assert!(base.contains("<!-- EVIDENCE_HEADER_BOUNDARY_START -->"));
     assert!(base.contains("<!-- EVIDENCE_HEADER_META_STATE_START -->"));
     assert!(base.contains(
@@ -325,7 +325,7 @@ fn discovery_stop_reasons_keep_raw_codes_but_lead_with_truthful_chinese_meaning(
 #[test]
 #[cfg(any())] // superseded server-rendered discovery page
 fn evidence_page_keeps_the_v7_shell_and_three_column_geometry() {
-    let html = evidence_library_html(None);
+    let html = evidence_library_html(None, &[], None);
 
     for required in [
         "v7-global-header",
@@ -369,7 +369,7 @@ fn evidence_page_keeps_the_v7_shell_and_three_column_geometry() {
 #[test]
 #[cfg(any())] // superseded server-rendered discovery page
 fn evidence_page_has_no_fabricated_v7_runtime_material_or_actions() {
-    let html = evidence_library_html(None);
+    let html = evidence_library_html(None, &[], None);
 
     let prohibited = [
         ["SYSTEM", "LIVE"].join(" "),
@@ -432,7 +432,7 @@ fn read_projection_escapes_source_text_and_never_emits_a_remote_cover_url() {
         time_view: "last_30_days",
     };
     let html = evidence_page::render_read_projection(
-        &evidence_library_html(None),
+        &evidence_library_html(None, &[], None),
         &projection,
         Some("A娃"),
     );
@@ -470,8 +470,11 @@ fn default_read_view_surfaces_unknown_published_time_without_a_surrogate_date() 
         time_view: "latest_accepted_discovery",
     };
 
-    let html =
-        evidence_page::render_read_projection(&evidence_library_html(None), &projection, None);
+    let html = evidence_page::render_read_projection(
+        &evidence_library_html(None, &[], None),
+        &projection,
+        None,
+    );
 
     assert!(html.contains("PUBLISHED_AT UNKNOWN"));
     assert!(html.contains("未用首次发现、观察或接收时间替代"));
@@ -503,7 +506,7 @@ fn strict_published_window_reports_unknown_exclusions_even_with_visible_cards() 
         cover_local_asset_url: None,
     };
     let strict_html = evidence_page::render_read_projection(
-        &evidence_library_html(None),
+        &evidence_library_html(None, &[], None),
         &DiscoveryLibraryProjection {
             cards: vec![known_card()],
             excluded_unknown_published_at: 1,
@@ -515,7 +518,7 @@ fn strict_published_window_reports_unknown_exclusions_even_with_visible_cards() 
     assert!(strict_html.contains("synthetic known discovery"));
 
     let default_html = evidence_page::render_read_projection(
-        &evidence_library_html(None),
+        &evidence_library_html(None, &[], None),
         &DiscoveryLibraryProjection {
             cards: vec![known_card()],
             excluded_unknown_published_at: 0,
@@ -535,8 +538,11 @@ fn default_empty_read_view_is_not_misdescribed_as_an_empty_published_window() {
         time_view: "latest_accepted_discovery",
     };
 
-    let html =
-        evidence_page::render_read_projection(&evidence_library_html(None), &projection, None);
+    let html = evidence_page::render_read_projection(
+        &evidence_library_html(None, &[], None),
+        &projection,
+        None,
+    );
 
     assert!(html.contains("当前视角没有可展示卡片"));
     assert!(html.contains("最新已接纳不是发布时间窗口"));
@@ -1207,7 +1213,7 @@ fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
     // COLLECTION-FIVE-PAGE-V4-UI-001: the V4 reference supplies the desktop work-area
     // hierarchy, but LIDS owns the shell. Page identity remains a single reader-only h1 and
     // the only page readings stay in the shared context row.
-    let corpus = evidence_library_html(None);
+    let corpus = evidence_library_html(None, &[], None);
     assert!(corpus.contains("<h1 class=\"v7-sr-only\" id=\"page-title\">"));
 
     let mut pages = Vec::new();
@@ -1426,7 +1432,7 @@ fn scheduler_stale_and_unreadable_remain_distinct_facts() {
 
 #[test]
 fn corpus_header_can_reflect_the_connected_collection_read_model() {
-    let html = evidence_library_html(Some("观察中"));
+    let html = evidence_library_html(Some("观察中"), &[], None);
     let collection_entry = html
         .split_once("v7-tech-key\">COLLECTION")
         .expect("the collection primary entry exists")
@@ -1436,7 +1442,7 @@ fn corpus_header_can_reflect_the_connected_collection_read_model() {
 
 #[test]
 fn corpus_header_can_preserve_an_unreadable_collection_state() {
-    let html = evidence_library_html(Some("状态未知"));
+    let html = evidence_library_html(Some("状态未知"), &[], None);
     let collection_entry = html
         .split_once("v7-tech-key\">COLLECTION")
         .expect("the collection primary entry exists")
@@ -1524,7 +1530,7 @@ fn the_primary_nav_readouts_all_share_one_type_scale_and_one_colour() {
     );
 
     // Both surfaces render the same five entries from the one shared header.
-    let mut pages = vec![evidence_library_html(None)];
+    let mut pages = vec![evidence_library_html(None, &[], None)];
     pages.push(collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
@@ -2004,7 +2010,7 @@ fn declared_token_values(stylesheet: &str) -> BTreeMap<&str, &str> {
 fn served_primary_surfaces_link_to_each_other_and_unserved_ones_stay_disabled() {
     // A responsibility whose route this binary actually serves must be reachable from every
     // other served surface. An operator standing on either page can always leave it.
-    let evidence = evidence_library_html(None);
+    let evidence = evidence_library_html(None, &[], None);
     let collection = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
@@ -2123,7 +2129,7 @@ fn no_page_stylesheet_restyles_a_component_the_shell_owns() {
 #[test]
 fn both_surfaces_render_the_header_at_one_type_scale() {
     // The regression this locks: same markup, same stylesheet layer, same declarations.
-    let corpus = evidence_library_html(None);
+    let corpus = evidence_library_html(None, &[], None);
     let collection = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
@@ -2403,7 +2409,7 @@ fn the_primary_nav_links_to_entry_routes_never_to_a_sub_surface() {
     // decision, and the two drift the first time the default moves — which is exactly what
     // happened when Collection's default became /collection/attention while the header
     // still pointed at /collection/targets.
-    let html = evidence_library_html(None);
+    let html = evidence_library_html(None, &[], None);
     let nav = html
         .split_once("v7-primary-nav")
         .expect("every page renders the primary nav")
@@ -2433,7 +2439,7 @@ fn the_primary_nav_links_to_entry_routes_never_to_a_sub_surface() {
 
 #[test]
 fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
-    let html = evidence_library_html(None);
+    let html = evidence_library_html(None, &[], None);
 
     assert!(html.contains("/assets/evidence-observation.js"));
     assert!(html.contains("/assets/evidence-library.js"));
@@ -2468,7 +2474,7 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
 
 #[test]
 fn evidence_runtime_restores_system_and_personal_view_strategy_without_faking_saved_views() {
-    let html = evidence_library_html(None);
+    let html = evidence_library_html(None, &[], None);
 
     assert!(html.contains("aria-label=\"按材料状态快速筛选\""));
     assert!(html.contains("SYSTEM VIEWS"));

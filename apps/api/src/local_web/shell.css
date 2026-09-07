@@ -111,3 +111,18 @@ a.v7-side-nav { text-decoration:none; }
 
 /* MODEL-PI-001: the user menu occupies the existing command slot. */
 .v7-personal-menu{position:relative}.v7-personal-menu summary{cursor:pointer;list-style:none;color:var(--lgi-ink);font-size:13px}.v7-personal-menu summary:focus-visible{outline:2px solid var(--lgi-focus);outline-offset:2px}.v7-personal-menu summary::-webkit-details-marker{display:none}.v7-personal-menu nav{position:absolute;right:0;top:100%;z-index:60;min-width:160px;padding:8px;background:var(--lgi-canvas);border:1px solid var(--lgi-border-strong)}.v7-personal-menu nav a{display:block;padding:12px;color:var(--lgi-ink);font-size:15px;text-decoration:none}.v7-personal-menu nav a:focus-visible{outline:2px solid var(--lgi-ink)}
+
+/* 面包屑里的领域选择器。它是当前观察对象，不是页面内的筛选控件，所以坐在面包屑行内、
+   与两侧的斜杠同一基线，而不是另起一块。原生 select 的弹层由系统绘制（圆角、蓝底高亮
+   都改不掉），所以只统一收起态的外形，不假装能完全接管它。 */
+.v7-domain-picker { display:inline-flex; align-items:center; margin:0; }
+.v7-domain-picker select {
+  appearance:none; -webkit-appearance:none;
+  border:1px solid var(--v7-black); background:var(--v7-black); color:#fff;
+  font:800 10px var(--lgi-font-mono); letter-spacing:.055em;
+  padding:2px 22px 2px 8px; border-radius:0; cursor:pointer; line-height:1.6;
+  background-image:linear-gradient(45deg,transparent 50%,#fff 50%),linear-gradient(135deg,#fff 50%,transparent 50%);
+  background-position:calc(100% - 11px) 50%, calc(100% - 7px) 50%;
+  background-size:4px 4px, 4px 4px; background-repeat:no-repeat;
+}
+.v7-domain-picker select:focus-visible { outline:2px solid var(--lgi-focus,#335e72); outline-offset:2px; }
