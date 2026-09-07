@@ -129,7 +129,7 @@ async fn read_catalog(
              ORDER BY package.accepted_at DESC,candidate.created_at DESC LIMIT 1 \
          ) detail ON true \
          LEFT JOIN LATERAL ( \
-             SELECT count(*)::bigint AS comment_count FROM linggan_current_material_comment comment \
+             SELECT count(*)::bigint AS comment_count FROM linggan_material_comment_current comment \
              WHERE comment.content_public_ref=first_discovery.content_public_ref \
          ) comments ON true \
          ORDER BY COALESCE(detail.published_at::text,first_discovery.published_at_source_text) DESC NULLS LAST, \

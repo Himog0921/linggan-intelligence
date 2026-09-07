@@ -370,7 +370,9 @@ pub async fn read_archive_completeness(
          LEFT JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
          WHERE target.platform=$1 AND target.target_kind='creator' \
            AND work_order.lane='deep_archive' \
-           AND (work_order.queue_state='queued' OR lease_task.execution_state IN ('pending','in_progress'))",
+           AND (work_order.queue_state='queued' \
+                OR (lease_task.execution_state IN ('pending','in_progress') \
+                    AND lease.released_at IS NULL AND lease.expires_at>scope_001_now()))",
     )
     .bind(platform)
     .fetch_all(database.pool())

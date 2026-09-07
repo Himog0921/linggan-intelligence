@@ -452,7 +452,10 @@ pub fn render_with_catalog(
         return_url = list_context.list_href(None),
         source_link = source_link(target, is_creator),
         statusline = statusline(target, archive),
-        bio = drawer_bio(target),
+        // Description facts may contain email addresses, tags and other unstructured profile
+        // text. They are evidence, not drawer chrome: keeping them out of the header makes the
+        // target identity and the three operational facts scannable at a glance.
+        bio = "",
         head_facts = drawer_head_facts(target, archive, is_creator),
         primary_action = drawer_primary_action(target, archive, is_creator, list_context),
         tabs = tab_bar(target, tab, lifecycle, selected_work, list_context),
@@ -487,20 +490,6 @@ fn identity_handle(target: &ObservationTarget) -> Option<&str> {
         .and_then(serde_json::Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
-}
-
-fn drawer_bio(target: &ObservationTarget) -> String {
-    let Some(bio) = target
-        .identity_facts
-        .as_ref()
-        .and_then(|value| value.get("description"))
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
-        return String::new();
-    };
-    format!(r#"<p class="c-dw-head-bio">{}</p>"#, escape(bio))
 }
 
 fn drawer_avatar_markup(avatar: Option<&ObservationTargetAvatar>, name: &str) -> String {
@@ -802,10 +791,7 @@ fn works_tab(
         | TargetCatalogView::Unavailable => (&[][..], true),
     };
     if read_error {
-        return lifecycle_state(
-            "当前读不到作品记录",
-            "这里不会用主表中的总数拼出一张作品表。恢复读取后，作品目录或关键词命中会显示每条真实记录。",
-        );
+        return catalog_unavailable_state(target);
     }
     let normalized_query = query.map(str::trim).filter(|value| !value.is_empty());
     let selected_filter = match filter {
@@ -952,6 +938,20 @@ fn works_tab(
         },
         rows = rows,
         empty = empty,
+    )
+}
+
+/// A catalogue failure is not a lifecycle fact. In particular, it must not reuse the retired
+/// lifecycle empty shell: that made a failed work read look like an empty "作品生命周期" view.
+fn catalog_unavailable_state(target: &ObservationTarget) -> String {
+    let heading = if target.target_kind == "creator" {
+        "作品目录"
+    } else {
+        "命中作品"
+    };
+    format!(
+        r#"<section class="c-dw-section c-dw-works"><div class="c-dw-section-head"><b>{heading}</b><span>读取暂不可用</span></div><div class="c-dw-note"><b>当前读不到可核验的作品记录</b><p>这里不会用主表中的总数拼出一张作品表。恢复读取后，会显示每条真实记录。</p></div></section>"#,
+        heading = heading,
     )
 }
 
@@ -1802,7 +1802,9 @@ mod tests {
         );
 
         assert!(html.contains(">处理异常</button>"));
-        assert!(html.contains("当前读不到作品记录"));
+        assert!(html.contains("当前读不到可核验的作品记录"));
+        assert!(html.contains("作品目录"));
+        assert!(!html.contains("作品生命周期"));
         assert!(!html.contains(">31</b><span>作品目录"));
         assert!(!html.contains(">27 / 31</b><span>详情进度"));
     }

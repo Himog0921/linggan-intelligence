@@ -330,7 +330,7 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     assert!(html.contains("data-drawer-initial-focus"));
     assert!(html.contains(r#"class="c-dw-avatar""#));
     assert!(html.contains("creator-red-id"));
-    assert!(html.contains("记录神经多样性的真实创作日常"));
+    assert!(!html.contains("记录神经多样性的真实创作日常"));
     assert!(html.contains("作品目录"));
     assert!(html.contains("作者已确认"));
     assert!(html.contains("当前可分析"));
@@ -447,7 +447,7 @@ fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
     assert!(!TARGET_DRAWER_CSS.contains(".c-tg-btn{width:100%"));
     assert!(
         TARGET_DRAWER_CSS
-            .contains(".c-tg-creator-grid>:nth-child(7){margin-left:var(--lgi-space-3)}")
+            .contains(".c-tg-creator-grid>:nth-child(8){margin-left:var(--lgi-space-3)}")
     );
     assert!(!TARGET_DRAWER_CSS.contains(".c-tg-row-open"));
     assert!(TARGET_DRAWER_CSS.contains(".life-control-row{min-width:0;"));

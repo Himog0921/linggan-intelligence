@@ -235,6 +235,71 @@
     });
   });
 
+  // Selection is deliberately separate from row navigation. A selected target is only a
+  // candidate for the existing batch command; checking a box must never open its drawer.
+  var targetSelections = Array.prototype.slice.call(document.querySelectorAll("[data-target-select]"));
+  var targetSelectAll = Array.prototype.slice.call(document.querySelectorAll("[data-target-select-all]"));
+  var targetBatchOpen = document.querySelector("[data-target-batch-open]");
+  var targetBatchModal = document.querySelector("[data-target-batch-modal]");
+  var targetBatchCount = document.querySelector("[data-target-batch-count]");
+  var targetBatchClose = document.querySelector("[data-target-batch-close]");
+  var targetBatchGroup = targetBatchModal && targetBatchModal.querySelector("input[name='group_name']");
+
+  function selectedTargetCount() {
+    return targetSelections.filter(function (input) { return input.checked; }).length;
+  }
+
+  function selectionsForHeader(input) {
+    var section = input.closest(".c-tg-kind");
+    return section ? Array.prototype.slice.call(section.querySelectorAll("[data-target-select]")) : targetSelections;
+  }
+
+  function syncTargetSelection() {
+    var selected = selectedTargetCount();
+    if (targetBatchOpen) targetBatchOpen.disabled = selected === 0;
+    if (targetBatchCount) targetBatchCount.textContent = "已选择 " + selected + " 个目标";
+    targetSelectAll.forEach(function (input) {
+      var scoped = selectionsForHeader(input);
+      var scopedSelected = scoped.filter(function (candidate) { return candidate.checked; }).length;
+      input.checked = scoped.length > 0 && scopedSelected === scoped.length;
+      input.indeterminate = scopedSelected > 0 && scopedSelected < scoped.length;
+    });
+  }
+
+  function closeTargetBatchModal() {
+    if (!targetBatchModal) return;
+    targetBatchModal.hidden = true;
+    if (targetBatchOpen) targetBatchOpen.focus();
+  }
+
+  targetSelections.forEach(function (input) {
+    input.addEventListener("change", syncTargetSelection);
+  });
+  targetSelectAll.forEach(function (input) {
+    input.addEventListener("change", function () {
+      selectionsForHeader(input).forEach(function (candidate) { candidate.checked = input.checked; });
+      syncTargetSelection();
+    });
+  });
+  if (targetBatchOpen && targetBatchModal) {
+    targetBatchOpen.addEventListener("click", function () {
+      if (selectedTargetCount() === 0) return;
+      targetBatchModal.hidden = false;
+      if (targetBatchGroup) targetBatchGroup.focus();
+    });
+    targetBatchModal.addEventListener("click", function (event) {
+      if (event.target === targetBatchModal) closeTargetBatchModal();
+    });
+    targetBatchModal.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeTargetBatchModal();
+      }
+    });
+  }
+  if (targetBatchClose) targetBatchClose.addEventListener("click", closeTargetBatchModal);
+  syncTargetSelection();
+
   var drawer = document.getElementById("c-drawer");
   if (!drawer) {
     if (!ruleModal) {

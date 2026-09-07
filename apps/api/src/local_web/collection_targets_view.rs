@@ -83,16 +83,26 @@ pub fn render_stored_targets_with_observation(
         list_context,
     );
 
-    // Creator 与 keyword 的问题不同，不能再共享一套含糊表头。默认目录不显示选择框或
-    // 批量操作；用户在这里先判断对象状态和下一步，而不是先进入管理模式。
+    // Creator 与 keyword 的事实不同，但列表管理动作相同。选择只进入批量编辑弹窗，
+    // 不会改变行点击进入详情的语义。
     let list = format!(
         r#"<section class="c-tg-workspace">
               {failure}
-              <div class="c-tg-list-head">
-                <span>{count} 个观察目标</span>
-                <span class="c-tg-list-hint">点击一行查看详情</span>
-              </div>
-              <div class="c-tg-directory">{creator_table}{keyword_table}</div>
+              <form class="c-tg-batch" method="post" action="/collection/targets/batch">
+                <div class="c-tg-list-head">
+                  <span>{count} 个观察目标</span>
+                  <div class="c-tg-list-tools"><span class="c-tg-list-hint">勾选后可批量编辑；点击一行查看详情</span><button class="c-btn-secondary c-tg-batch-open" type="button" data-target-batch-open disabled>批量编辑</button></div>
+                </div>
+                <div class="c-tg-directory">{creator_table}{keyword_table}</div>
+                <div class="c-tg-batch-overlay" data-target-batch-modal hidden>
+                  <section class="c-tg-batch-dialog" role="dialog" aria-modal="true" aria-labelledby="target-batch-title">
+                    <div><h2 id="target-batch-title">批量编辑观察目标</h2><p data-target-batch-count>已选择 0 个目标</p></div>
+                    <label>分组<input name="group_name" type="text" maxlength="80" placeholder="例如：ADHD 主力" required/></label>
+                    <p>保存后会为所选目标设置同一分组。备注将在具备独立事实字段后接入，当前不会把自由文本冒充为已有备注。</p>
+                    <div class="c-tg-batch-dialog-actions"><button class="c-btn-secondary" type="button" data-target-batch-close>取消</button><button class="c-btn-primary" type="submit" name="action" value="set_group">保存分组</button></div>
+                  </section>
+                </div>
+              </form>
             </section>"#,
         count = targets.len(),
         failure = action_feedback_markup(error),
@@ -130,9 +140,9 @@ fn target_table(
         ));
     }
     let columns = if is_creator {
-        r#"<span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span role="columnheader">作品目录</span><span role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近变化</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader"><input type="checkbox" data-target-select-all aria-label="选择全部创作者目标"/></span><span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span role="columnheader">作品目录</span><span role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近变化</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     } else {
-        r#"<span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span role="columnheader">巡查状态</span><span role="columnheader">最近命中</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span role="columnheader">最近命中</span><span role="columnheader">最近新增</span><span role="columnheader">巡查状态</span><span role="columnheader">数据更新</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     };
     let grid = if is_creator {
         "c-tg-creator-grid"
@@ -273,7 +283,8 @@ fn target_row(
         format!("打开{name}的关键词观察")
     };
     let shared_start = format!(
-        r#"<div class="c-tg-number" role="cell"><span class="c-tg-index">{index:03}</span></div>
+        r#"<div class="c-tg-select" role="cell"><input type="checkbox" name="target_ref" value="{target_ref}" data-target-select aria-label="选择{opener_label}"/></div>
+            <div class="c-tg-number" role="cell"><span class="c-tg-index">{index:03}</span></div>
             <div class="c-tg-object" role="cell">{avatar}<div class="c-tg-object-text"><a id="{opener_id}" class="c-tg-title c-tg-object-link" data-row-opener data-drawer-trigger="{target_ref}" href="{opener_href}" aria-label="{opener_label}">{name}</a>{identity}</div></div>
             <div class="c-tg-cell c-tg-platform" role="cell">{platform}</div>
             <div class="c-tg-cell c-tg-group" role="cell" title="{group}">{group}</div>"#,
@@ -329,9 +340,10 @@ fn target_row(
     } else {
         format!(
             r#"<div class="c-tg-cell c-tg-rule" role="cell">{rule}</div>
-                <div class="c-tg-cell" role="cell">{patrol}</div>
                 <div class="c-tg-cell c-tg-number-value" role="cell">{hits}</div>
                 <div class="c-tg-cell c-tg-change" role="cell">{recent_change}</div>
+                <div class="c-tg-cell" role="cell">{patrol}</div>
+                <div class="c-tg-cell c-tg-unknown" role="cell">尚未取得</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last}</time>
                 <time class="c-tg-cell c-tg-time" role="cell">{next}</time>
                 <div class="c-tg-actions" role="cell" data-row-no-open>{actions}</div>"#,
@@ -994,8 +1006,10 @@ mod tests {
         assert_eq!(html.matches("data-monitor-rule-trigger").count(), 1);
         assert_eq!(html.matches(">建立档案</button>").count(), 1);
         assert_eq!(html.matches(">设置巡查</a>").count(), 1);
-        assert!(!html.contains("type=\"checkbox\""));
-        assert!(!html.contains("c-tg-batch"));
+        assert_eq!(html.matches("type=\"checkbox\"").count(), 4);
+        assert!(html.contains("c-tg-batch"));
+        assert!(html.contains("批量编辑观察目标"));
+        assert!(html.contains("name=\"action\" value=\"set_group\""));
         assert!(!html.contains("/collection/targets/monitoring"));
         assert!(!html.contains("name=\"action\" value=\"monitor_on\""));
         assert!(!html.contains("name=\"action\" value=\"monitor_off\""));
