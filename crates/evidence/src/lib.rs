@@ -9,6 +9,7 @@ mod collection_task_read;
 pub mod comment_research_read;
 mod content_reobservation;
 mod creator_lifecycle;
+pub mod cross_industry_read;
 mod dispatch;
 mod execution_station;
 mod ingress;

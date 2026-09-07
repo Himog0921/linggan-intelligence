@@ -2,6 +2,16 @@
   'use strict';
 
   const API_ROOT = '/api/local/work-resources';
+  // 跨行业是另一条查询路径，不是给上面那个接口加参数。规格的接口红线：不得为跨行业
+  // 给证据库接口增加任何参数或字段——两条路不共享，隔离才不依赖谁记得加条件。
+  const CROSS_INDUSTRY_ROOT = '/api/local/cross-industry/samples';
+  // 当前领域由服务端随页面下发。地址里的 domain 可能无效，回落判定服务端已经做过一次，
+  // 前端再判一次就会出现两处规则，早晚不一致。
+  const CORPUS_DOMAIN = {
+    ref: document.body.dataset.corpusDomain || '',
+    name: document.body.dataset.corpusDomainName || '',
+    isOwn: document.body.dataset.corpusDomainOwn !== 'false',
+  };
   const laneOrder = [
     'discovery', 'detail', 'comments', 'replies', 'author',
     'media_slots', 'media_bytes', 'ocr', 'asr',
@@ -907,8 +917,17 @@
     }
     refs.nextList.disabled = true;
     try {
-      const params = currentParams(cursor);
-      const payload = await readJson(`${API_ROOT}?${params.toString()}`, model.listController.signal);
+      let payload;
+      if (CORPUS_DOMAIN.isOwn) {
+        const params = currentParams(cursor);
+        payload = await readJson(`${API_ROOT}?${params.toString()}`, model.listController.signal);
+      } else {
+        // 外部领域读的是自己那套样本，与证据侧不共用查询。本页面的检索词与筛选描述的是
+        // 证据侧的字段，对样本侧无意义，因此不带过去——带一个不会生效的条件过去，
+        // 比不带更容易让人误以为筛过了。
+        const params = new URLSearchParams({ domain: CORPUS_DOMAIN.ref });
+        payload = await readJson(`${CROSS_INDUSTRY_ROOT}?${params.toString()}`, model.listController.signal);
+      }
       if (!payload || !Array.isArray(payload.items)) throw new Error('invalid_material_projection_response');
       model.items = append ? model.items.concat(payload.items) : payload.items;
       model.cursor = payload.cursor || null;
@@ -922,7 +941,17 @@
         : null;
       const selectionSource = revealUrlSelection && requestedRef ? 'url' : 'auto';
       if (model.items.length === 0) {
-        setFeedback('empty', '当前查询没有匹配的作品材料', '读取已经成功；这个结果只描述当前本地查询，不证明平台或现实中没有相关内容。');
+        if (CORPUS_DOMAIN.isOwn) {
+          setFeedback('empty', '当前查询没有匹配的作品材料', '读取已经成功；这个结果只描述当前本地查询，不证明平台或现实中没有相关内容。');
+        } else {
+          // 外部领域的空是「还没采过」，不是「查询没匹配」。用证据侧那句文案会把
+          // 「这个领域一条都还没有」说成「你筛掉了」，两件事的下一步动作完全不同。
+          setFeedback(
+            'empty',
+            `「${CORPUS_DOMAIN.name}」还没有采集过内容`,
+            '读取已经成功。这个领域的观察目标建立并跑过一轮采集后，样本会出现在这里；它们是参照物，不参与本领域的判断。',
+          );
+        }
         if (directWorkItem(requestedRef)) await selectItem(directWorkItem(requestedRef), selectionSource);
         else clearInspector();
       } else {
