@@ -27,6 +27,11 @@ use uuid::Uuid;
 /// not immediately reopen a page that just failed its readiness probe.
 pub const DISPATCH_FAILURE_RETRY_AFTER_SECONDS: u32 = 60;
 const MAX_DISPATCH_FAILURE_RETRY_AFTER_SECONDS: u32 = 900;
+/// A browser page-read failure has no producer Attempt, so repeated automatic
+/// retries only repeat the same uncertain pre-execution state.  Keep two
+/// bounded recoveries, then make that exact frozen detail material visibly
+/// blocked until a later, explicit recovery decision is made.
+const MAX_PAGE_READ_FAILURES_PER_DETAIL: i64 = 3;
 const CLAIM_LEASE_MINUTES: i32 = 30;
 
 #[derive(Debug, thiserror::Error)]
@@ -114,6 +119,10 @@ pub enum DispatchFailureOutcome {
     /// same material become terminal so later works in the bounded batch can
     /// still proceed.
     Unavailable,
+    /// The same frozen detail material reached its bounded page-read retry
+    /// limit.  This is not page unavailability and does not create an
+    /// Attempt, CapturePackage, Receipt, or Evidence.
+    Blocked,
     Replay {
         retry_after_seconds: u32,
     },
@@ -223,7 +232,10 @@ pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx:
                 AND to_regclass('collection_platform_dispatch_policy') IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_name='collection_work_order' \
-                              AND column_name='retry_not_before_at')",
+                              AND column_name='retry_not_before_at') \
+                AND EXISTS (SELECT 1 FROM information_schema.columns \
+                            WHERE table_name='collection_work_order_lease_task_dispatch_failure' \
+                              AND column_name='failure_disposition')",
     )
     .fetch_one(database.pool())
     .await
@@ -269,16 +281,21 @@ pub async fn requeue_failed_dispatch(
         return Err(DispatchFailureError::InvalidCredential);
     }
 
-    let replay: Option<(Uuid, Uuid, String, i32)> = sqlx::query_as(
-        "SELECT task_id,installation_ref,failure_code,retry_after_seconds \
+    let replay: Option<(Uuid, Uuid, String, i32, String)> = sqlx::query_as(
+        "SELECT task_id,installation_ref,failure_code,retry_after_seconds,failure_disposition \
          FROM collection_work_order_lease_task_dispatch_failure \
          WHERE failure_ref=$1 FOR UPDATE",
     )
     .bind(failure_ref)
     .fetch_optional(&mut *transaction)
     .await?;
-    if let Some((recorded_task_id, recorded_installation_ref, recorded_code, retry_after_seconds)) =
-        replay
+    if let Some((
+        recorded_task_id,
+        recorded_installation_ref,
+        recorded_code,
+        retry_after_seconds,
+        recorded_disposition,
+    )) = replay
     {
         if recorded_task_id != task_id
             || recorded_installation_ref != installation_ref
@@ -287,8 +304,11 @@ pub async fn requeue_failed_dispatch(
             return Err(DispatchFailureError::FailureIdentityConflict);
         }
         transaction.commit().await?;
-        if recorded_code == DispatchFailureCode::PageUnavailable.as_str() {
-            return Ok(DispatchFailureOutcome::Unavailable);
+        match recorded_disposition.as_str() {
+            "unavailable" => return Ok(DispatchFailureOutcome::Unavailable),
+            "blocked" => return Ok(DispatchFailureOutcome::Blocked),
+            "requeued" => {}
+            _ => return Err(DispatchFailureError::FailureIdentityConflict),
         }
         return Ok(DispatchFailureOutcome::Replay {
             retry_after_seconds: u32::try_from(retry_after_seconds)
@@ -322,18 +342,38 @@ pub async fn requeue_failed_dispatch(
     else {
         return Err(DispatchFailureError::ClaimNotHeld);
     };
-    if failure_code == DispatchFailureCode::PageUnavailable
-        && capability == "content_detail"
-        && content_external_id.is_some()
-    {
-        let content_external_id = content_external_id.expect("checked above");
-        // First restore the current row from the generic pending update above,
-        // then make every not-yet-run lane for this *same frozen material*
-        // terminal.  The failure event below is the durable reason; no raw
-        // browser/platform text becomes Evidence.
-        let unavailable = sqlx::query(
+    let terminal_disposition = if capability == "content_detail" {
+        match (failure_code, content_external_id.as_deref()) {
+            (DispatchFailureCode::PageUnavailable, Some(content_external_id)) => {
+                Some(("unavailable", content_external_id))
+            }
+            (DispatchFailureCode::PageReadFailed, Some(content_external_id)) => {
+                let prior_failures = page_read_failure_count_for_detail_in_transaction(
+                    &mut transaction,
+                    work_order_ref,
+                    content_external_id,
+                )
+                .await?;
+                if prior_failures + 1 >= MAX_PAGE_READ_FAILURES_PER_DETAIL {
+                    Some(("blocked", content_external_id))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
+    } else {
+        None
+    };
+    if let Some((disposition, content_external_id)) = terminal_disposition {
+        // The generic update above restores the current task to `pending`.
+        // Terminalizing all still-pending lanes for the same frozen material
+        // prevents its auxiliary work from trapping later, unrelated material
+        // behind an unresolved detail read. The failure record below contains
+        // only our bounded code/disposition, never raw browser text.
+        let terminalized = sqlx::query(
             "UPDATE collection_work_order_lease_task sibling \
-             SET execution_state='unavailable',claimed_at=NULL,claimed_by_installation_ref=NULL \
+             SET execution_state=$3,claimed_at=NULL,claimed_by_installation_ref=NULL \
              FROM linggan_runtime_task sibling_runtime \
              WHERE sibling.lease_ref=$1 \
                AND sibling.task_id=sibling_runtime.task_id \
@@ -341,10 +381,11 @@ pub async fn requeue_failed_dispatch(
                AND sibling_runtime.task_spec #>> '{target,contentExternalId}'=$2",
         )
         .bind(lease_ref)
-        .bind(&content_external_id)
+        .bind(content_external_id)
+        .bind(disposition)
         .execute(&mut *transaction)
         .await?;
-        if unavailable.rows_affected() == 0 {
+        if terminalized.rows_affected() == 0 {
             return Err(DispatchFailureError::ClaimNotHeld);
         }
         record_terminal_dispatch_failure_in_transaction(
@@ -355,10 +396,15 @@ pub async fn requeue_failed_dispatch(
             lease_ref,
             work_order_ref,
             failure_code.as_str(),
+            disposition,
         )
         .await?;
         transaction.commit().await?;
-        return Ok(DispatchFailureOutcome::Unavailable);
+        return Ok(if disposition == "unavailable" {
+            DispatchFailureOutcome::Unavailable
+        } else {
+            DispatchFailureOutcome::Blocked
+        });
     }
     let retry_after_seconds = record_recoverable_dispatch_failure_in_transaction(
         &mut transaction,
@@ -385,22 +431,24 @@ async fn record_terminal_dispatch_failure_in_transaction(
     lease_ref: Uuid,
     work_order_ref: Uuid,
     failure_code: &str,
+    failure_disposition: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO collection_work_order_lease_task_dispatch_failure \
-             (failure_ref,task_id,installation_ref,failure_code,retry_after_seconds) \
-         VALUES ($1,$2,$3,$4,1)",
+             (failure_ref,task_id,installation_ref,failure_code,retry_after_seconds,failure_disposition) \
+         VALUES ($1,$2,$3,$4,1,$5)",
     )
     .bind(failure_ref)
     .bind(task_id)
     .bind(installation_ref)
     .bind(failure_code)
+    .bind(failure_disposition)
     .execute(&mut **transaction)
     .await?;
     let all_terminal: bool = sqlx::query_scalar(
         "SELECT NOT EXISTS ( \
              SELECT 1 FROM collection_work_order_lease_task \
-             WHERE lease_ref=$1 AND execution_state NOT IN ('completed','unavailable'))",
+             WHERE lease_ref=$1 AND execution_state NOT IN ('completed','unavailable','blocked'))",
     )
     .bind(lease_ref)
     .fetch_one(&mut **transaction)
@@ -423,6 +471,32 @@ async fn record_terminal_dispatch_failure_in_transaction(
         .await?;
     }
     Ok(())
+}
+
+/// Count only the pre-Attempt `page_read_failed` events for one frozen detail
+/// material in one WorkOrder.  A batch may contain many works and several
+/// lanes per work: failures for other works, other lanes, or another request
+/// must not consume this material's retry budget.
+async fn page_read_failure_count_for_detail_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+    content_external_id: &str,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT COUNT(*) \
+         FROM collection_work_order_lease_task_dispatch_failure failure \
+         JOIN collection_work_order_lease_task task ON task.task_id=failure.task_id \
+         JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
+         JOIN linggan_runtime_task runtime ON runtime.task_id=task.task_id \
+         WHERE lease.work_order_ref=$1 \
+           AND failure.failure_code='page_read_failed' \
+           AND runtime.task_spec #>> '{capabilitiesRequested,0}'='content_detail' \
+           AND runtime.task_spec #>> '{target,contentExternalId}'=$2",
+    )
+    .bind(work_order_ref)
+    .bind(content_external_id)
+    .fetch_one(&mut **transaction)
+    .await
 }
 
 /// Return the same WorkOrder to the common queue without erasing the old
@@ -450,8 +524,8 @@ async fn record_recoverable_dispatch_failure_in_transaction(
     let retry_after_seconds = retry_after_seconds_for_failure_count(failure_count);
     sqlx::query(
         "INSERT INTO collection_work_order_lease_task_dispatch_failure \
-             (failure_ref,task_id,installation_ref,failure_code,retry_after_seconds) \
-         VALUES ($1,$2,$3,$4,$5)",
+             (failure_ref,task_id,installation_ref,failure_code,retry_after_seconds,failure_disposition) \
+         VALUES ($1,$2,$3,$4,$5,'requeued')",
     )
     .bind(failure_ref)
     .bind(task_id)
@@ -609,7 +683,7 @@ pub async fn decide_dispatch(
                SELECT 1 FROM collection_work_order_lease_task prior \
                WHERE prior.lease_ref = task.lease_ref \
                  AND prior.sequence_no < task.sequence_no \
-                 AND prior.execution_state NOT IN ('completed','unavailable')) \
+                 AND prior.execution_state NOT IN ('completed','unavailable','blocked')) \
          ORDER BY lease.issued_at, task.sequence_no \
          LIMIT 1 FOR UPDATE OF task SKIP LOCKED",
     )

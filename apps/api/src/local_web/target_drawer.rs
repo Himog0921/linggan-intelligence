@@ -271,11 +271,11 @@ pub(crate) fn target_primary_action(
         TargetArchiveRead::Unavailable => return TargetPrimaryAction::ViewArchiveUnavailable,
         TargetArchiveRead::Known(archive) => archive,
     };
+    if archive.is_some_and(ArchiveCompleteness::has_actionable_problems) {
+        return TargetPrimaryAction::ViewArchiveProblems;
+    }
     if archive.is_some_and(|value| value.work_in_progress) {
         return TargetPrimaryAction::ViewArchiveProgress;
-    }
-    if archive.is_some_and(|value| value.quarantined > 0) {
-        return TargetPrimaryAction::ViewArchiveProblems;
     }
     if target.lifecycle_state == "dismissed" {
         return TargetPrimaryAction::ViewCreator;
@@ -588,8 +588,10 @@ fn statusline(target: &ObservationTarget, completeness: TargetArchiveRead<'_>) -
     } else {
         match completeness {
             TargetArchiveRead::Unavailable => "档案状态暂时无法读取",
+            TargetArchiveRead::Known(Some(value)) if value.has_actionable_problems() => {
+                "档案有问题"
+            }
             TargetArchiveRead::Known(Some(value)) if value.work_in_progress => "建档待处理",
-            TargetArchiveRead::Known(Some(value)) if value.quarantined > 0 => "档案有问题",
             TargetArchiveRead::Known(Some(value)) if value.requires_directory_rebuild() => {
                 "待建标准目录"
             }
@@ -1030,10 +1032,18 @@ fn overview_tab(
         }
         _ => "",
     };
+    let blocked = match archive.value() {
+        Some(value) if value.blocked_details > 0 => format!(
+            r#"<section id="archive-problem" class="c-dw-section"><div class="c-dw-section-head"><b>详情读取受阻</b><span>{count} 条</span></div><p class="c-dw-note">这些作品连续读取失败后已停止自动重试；它们不是“页面不存在”，也没有生成 Attempt、Package、Receipt 或详情。其余作品仍可继续推进。</p></section>"#,
+            count = value.blocked_details,
+        ),
+        _ => String::new(),
+    };
     format!(
-        r#"{recent}{task}<section class="c-dw-section"><div class="c-dw-section-head"><b>档案情况</b><span>{boundary}</span></div><div class="c-dw-readouts c-dw-archive-readouts"><div><b>{directory}</b><span>作品目录</span></div><div><b>{detail}</b><span>详情进度</span></div></div><p class="c-dw-note">媒体处理独立于详情进度；作品逐条状态请在作品页查证。</p><a class="c-btn-secondary" href="{works_href}">查看作品</a></section>"#,
+        r#"{recent}{task}{blocked}<section class="c-dw-section"><div class="c-dw-section-head"><b>档案情况</b><span>{boundary}</span></div><div class="c-dw-readouts c-dw-archive-readouts"><div><b>{directory}</b><span>作品目录</span></div><div><b>{detail}</b><span>详情进度</span></div></div><p class="c-dw-note">媒体处理独立于详情进度；作品逐条状态请在作品页查证。</p><a class="c-btn-secondary" href="{works_href}">查看作品</a></section>"#,
         recent = recent_activity(target),
         task = task,
+        blocked = blocked,
         boundary = boundary,
         directory = directory,
         detail = detail,
@@ -1486,6 +1496,15 @@ fn archive_gap_overview(
             r#"<ul class="life-exclusions" aria-label="档案待处理项"><li>待处理记录 {count}</li></ul>"#
         ));
     }
+    if let Some(count) = archive
+        .value()
+        .map(|value| value.blocked_details)
+        .filter(|count| *count > 0)
+    {
+        gaps.push_str(&format!(
+            r#"<ul class="life-exclusions" aria-label="档案待处理项"><li>详情读取受阻 {count} 条（已停止自动重试）</li></ul>"#
+        ));
+    }
     if matches!(archive, TargetArchiveRead::Unavailable) {
         gaps = r#"<p class="c-dw-note">档案状态暂时无法读取；这里不会把未知显示成零或“尚未建立”。</p>"#.to_owned();
     } else if gaps.is_empty() {
@@ -1542,10 +1561,21 @@ fn archive_tab(
     };
     let primary_action = target_primary_action(target, true, archive);
     let problems = match (archive.value(), primary_action) {
-        (Some(value), _) if value.quarantined > 0 => format!(
-            r#"<div id="archive-problems" class="c-dw-problem" tabindex="-1"><b>{} 条记录需要处理</b><p>这些记录已被隔离，没有计入作品目录或详情进度。先查看原因，再决定是否重新采集。</p></div>"#,
-            value.quarantined
-        ),
+        (Some(value), _) if value.has_actionable_problems() => {
+            let quarantined = if value.quarantined > 0 {
+                format!("<li>{} 条记录已被隔离，未计入作品目录或详情进度。</li>", value.quarantined)
+            } else {
+                String::new()
+            };
+            let blocked = if value.blocked_details > 0 {
+                format!("<li>{} 条作品详情连续读取失败，已停止自动重试；它们不是页面不存在，也没有生成 Attempt、Package、Receipt 或详情。</li>", value.blocked_details)
+            } else {
+                String::new()
+            };
+            format!(
+                r#"<div id="archive-problems" class="c-dw-problem" tabindex="-1"><b>档案有待处理项</b><ul>{quarantined}{blocked}</ul><p>其余材料可继续推进；处理这类问题必须发起一个新的、受控的采集决定。</p></div>"#
+            )
+        }
         (Some(value), TargetPrimaryAction::ViewArchiveProblems)
             if value.started || value.attempted =>
         {
@@ -1569,7 +1599,7 @@ fn archive_tab(
     };
     let action = match primary_action {
         TargetPrimaryAction::ViewArchiveProgress => r#"<span class="c-dw-action-note">已有建档任务等待处理或执行中；本页不会重复提交。目录和详情只会随真实采集回执更新。</span>"#.to_owned(),
-        TargetPrimaryAction::ViewArchiveProblems => r#"<span class="c-dw-action-note">当前先处理上面的隔离记录；页面不会把它们算成已完成。</span>"#.to_owned(),
+        TargetPrimaryAction::ViewArchiveProblems => r#"<span class="c-dw-action-note">当前先查看上面的档案待处理项；页面不会把隔离记录或读取受阻详情算成已完成。</span>"#.to_owned(),
         TargetPrimaryAction::ViewArchiveUnavailable => r#"<span class="c-dw-action-note">档案状态暂时无法读取，本页不会在未知状态下发起写操作。</span>"#.to_owned(),
         TargetPrimaryAction::EstablishArchive
         | TargetPrimaryAction::RebuildDirectory
@@ -1732,6 +1762,7 @@ mod tests {
             works_listed: 12,
             details_captured: 5,
             quarantined: 0,
+            blocked_details: 0,
             directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Ready,
         };
         assert!(

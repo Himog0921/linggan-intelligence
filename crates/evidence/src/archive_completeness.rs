@@ -49,6 +49,9 @@ pub struct ArchiveCompleteness {
     pub details_captured: i64,
     /// 被隔离的记录条数——它们采到了但没进语料库，必须看得见。
     pub quarantined: i64,
+    /// 当前根建档中因连续页面读取失败而停止自动重试的作品详情数。它不是页面
+    /// 不存在，也没有形成 Attempt、Package、Receipt 或 Evidence。
+    pub blocked_details: i64,
     /// 当前目录根的边界是否已经由受接纳 Package 证明。
     pub directory_baseline: ArchiveDirectoryBaseline,
 }
@@ -63,6 +66,7 @@ impl ArchiveCompleteness {
             && self.works_listed == 0
             && self.details_captured == 0
             && self.quarantined == 0
+            && self.blocked_details == 0
             && self.directory_baseline == ArchiveDirectoryBaseline::NotStarted
     }
 
@@ -76,6 +80,10 @@ impl ArchiveCompleteness {
     pub fn requires_directory_rebuild(&self) -> bool {
         self.directory_baseline == ArchiveDirectoryBaseline::RebuildRequired
     }
+
+    pub fn has_actionable_problems(&self) -> bool {
+        self.quarantined > 0 || self.blocked_details > 0
+    }
 }
 
 /// 读一批创作者的档案完整度。
@@ -85,7 +93,7 @@ pub async fn read_archive_completeness(
     database: &Database,
     platform: &str,
 ) -> Result<HashMap<String, ArchiveCompleteness>, sqlx::Error> {
-    let rows: Vec<(String, bool, bool, bool, i64, i64, i64, i64, bool)> = sqlx::query_as(
+    let rows: Vec<(String, bool, bool, bool, i64, i64, i64, i64, i64, bool)> = sqlx::query_as(
         "WITH ranked_roots AS ( \
              SELECT target.target_ref,target.identity_key AS author_external_id, \
                     work_order.work_order_ref AS root_work_order_ref, \
@@ -261,14 +269,27 @@ pub async fn read_archive_completeness(
              LEFT JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
              LEFT JOIN linggan_runtime_attempt attempt ON attempt.task_id=lease_task.task_id \
              GROUP BY roots.author_external_id \
+         ), blocked_details AS ( \
+             SELECT scoped.author_external_id, \
+                    count(DISTINCT runtime.task_spec #>> '{target,contentExternalId}') AS blocked_details \
+             FROM scoped_orders scoped \
+             JOIN collection_work_order_lease lease USING(work_order_ref) \
+             JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+             JOIN linggan_runtime_task runtime ON runtime.task_id=lease_task.task_id \
+             WHERE lease_task.execution_state='blocked' \
+               AND runtime.task_spec #>> '{capabilitiesRequested,0}'='content_detail' \
+               AND NULLIF(runtime.task_spec #>> '{target,contentExternalId}','') IS NOT NULL \
+             GROUP BY scoped.author_external_id \
          ) \
          SELECT roots.author_external_id,coalesce(progress.started,false),coalesce(progress.attempted,false), \
                 coalesce(progress.work_in_progress,false),coalesce(totals.author_profile_captures,0), \
                 coalesce(totals.works_listed,0),coalesce(totals.details_captured,0),coalesce(totals.quarantined,0), \
+                coalesce(blocked_details.blocked_details,0), \
                 directories.package_ref IS NOT NULL \
          FROM active_roots roots \
          LEFT JOIN record_totals totals USING(author_external_id) \
          LEFT JOIN archive_progress progress USING(author_external_id) \
+         LEFT JOIN blocked_details USING(author_external_id) \
          LEFT JOIN directory_packages directories USING(author_external_id)",
     )
     .bind(platform)
@@ -285,6 +306,7 @@ pub async fn read_archive_completeness(
         works,
         details,
         quarantined,
+        blocked_details,
         directory_ready,
     ) in rows
     {
@@ -298,6 +320,7 @@ pub async fn read_archive_completeness(
                 works_listed: works,
                 details_captured: details,
                 quarantined,
+                blocked_details,
                 directory_baseline: if directory_ready {
                     ArchiveDirectoryBaseline::Ready
                 } else if work_in_progress {

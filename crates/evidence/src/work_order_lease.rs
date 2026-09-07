@@ -349,7 +349,7 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
     let all_terminal: bool = sqlx::query_scalar(
         "SELECT NOT EXISTS ( \
              SELECT 1 FROM collection_work_order_lease_task \
-             WHERE lease_ref = $1 AND execution_state NOT IN ('completed','unavailable'))",
+             WHERE lease_ref = $1 AND execution_state NOT IN ('completed','unavailable','blocked'))",
     )
     .bind(lease_ref)
     .fetch_one(&mut **transaction)
@@ -357,9 +357,9 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
     if !all_terminal {
         return Ok(true);
     }
-    let has_unavailable: bool = sqlx::query_scalar(
+    let has_non_completed_terminal: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM collection_work_order_lease_task \
-           WHERE lease_ref=$1 AND execution_state='unavailable')",
+           WHERE lease_ref=$1 AND execution_state IN ('unavailable','blocked'))",
     )
     .bind(lease_ref)
     .fetch_one(&mut **transaction)
@@ -370,7 +370,7 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
          WHERE lease_ref = $1 AND released_at IS NULL",
     )
     .bind(lease_ref)
-    .bind(if has_unavailable {
+    .bind(if has_non_completed_terminal {
         "partial"
     } else {
         "completed"

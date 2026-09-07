@@ -259,6 +259,15 @@ async fn failure(State(state): State<LocalWebState>, body: Bytes) -> Response {
             "nextPollAfterSeconds": 0,
         }))
         .into_response(),
+        Ok(DispatchFailureOutcome::Blocked) => Json(serde_json::json!({
+            "outcome": "blocked",
+            "taskState": "blocked",
+            // This material exhausted its bounded pre-Attempt retry budget.
+            // It no longer holds the sequential batch, so ask for another
+            // eligible frozen material immediately.
+            "nextPollAfterSeconds": 0,
+        }))
+        .into_response(),
         Ok(DispatchFailureOutcome::Replay {
             retry_after_seconds,
         }) => Json(serde_json::json!({

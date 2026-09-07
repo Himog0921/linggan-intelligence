@@ -92,6 +92,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0038_detail_only_material_scope.sql"),
     "\n",
     include_str!("../../../database/migrations/0045_deep_archive_recovery.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0047_collection_detail_failure_boundary.sql"),
 );
 
 #[tokio::test]
@@ -838,6 +840,183 @@ async fn unavailable_detail_is_audited_without_blocking_later_materials() {
     .await
     .expect("a lost terminal acknowledgement remains idempotent");
     assert_eq!(replay, DispatchFailureOutcome::Unavailable);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn repeated_detail_read_failure_becomes_blocked_without_stalling_later_materials() {
+    let database = proof_database_for("collection_dispatch_page_read_boundary").await;
+    let fixture = seed_creator_work_order(&database).await;
+    for (ordinal, content_external_id) in [(1, "blocked-first"), (2, "eligible-second")] {
+        submit_profile_discovery(
+            &database,
+            content_external_id,
+            &format!(
+                "https://www.xiaohongshu.com/explore/{content_external_id}?xsec_token=SIGNED_FIXTURE&xsec_source=pc_user"
+            ),
+        )
+        .await;
+        let content_public_ref: Uuid = sqlx::query_scalar(
+            "SELECT public_ref FROM linggan_material_content \
+             WHERE platform='xhs' AND content_external_id=$1",
+        )
+        .bind(content_external_id)
+        .fetch_one(database.pool())
+        .await
+        .expect("accepted discovery creates the stable material identity");
+        sqlx::query(
+            "INSERT INTO collection_work_order_material_target \
+                 (work_order_ref,content_public_ref,ordinal,comment_limit,reply_expand_limit,acquire_media) \
+             VALUES ($1,$2,$3,30,2,true)",
+        )
+        .bind(fixture.work_order_ref)
+        .bind(content_public_ref)
+        .bind(ordinal)
+        .execute(database.pool())
+        .await
+        .expect("both exact materials are frozen by the same approved WorkOrder");
+    }
+
+    issue_work_order_lease(&database, fixture.work_order_ref, 60)
+        .await
+        .expect("deepening lease is issued");
+    let mut failure_task_ids = Vec::new();
+    for retry in 1..=2 {
+        let decision = decide_dispatch(
+            &database,
+            &fixture.install_key,
+            &fixture.installation_credential,
+        )
+        .await
+        .expect("the frozen first detail is eligible until its bounded retry limit");
+        assert_eq!(
+            task_from_dispatch(&decision).raw()["target"]["contentExternalId"],
+            "blocked-first"
+        );
+        let task_id = task_id(&decision);
+        failure_task_ids.push(task_id);
+        let outcome = requeue_failed_dispatch(
+            &database,
+            &fixture.install_key,
+            &fixture.installation_credential,
+            task_id,
+            Uuid::new_v4(),
+            DispatchFailureCode::PageReadFailed,
+        )
+        .await
+        .expect("the first two page-read failures are bounded recoveries");
+        assert_eq!(
+            outcome,
+            DispatchFailureOutcome::Requeued {
+                retry_after_seconds: 60 * (1 << (retry - 1))
+            }
+        );
+        sqlx::query(
+            "UPDATE collection_work_order SET retry_not_before_at=scope_001_now()-interval '1 second' \
+             WHERE work_order_ref=$1",
+        )
+        .bind(fixture.work_order_ref)
+        .execute(database.pool())
+        .await
+        .expect("only the isolated proof clock advances between recoveries");
+    }
+
+    let third = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the exact same frozen material receives its final bounded attempt");
+    assert_eq!(
+        task_from_dispatch(&third).raw()["target"]["contentExternalId"],
+        "blocked-first"
+    );
+    let third_task_id = task_id(&third);
+    failure_task_ids.push(third_task_id);
+    let blocked_failure_ref = Uuid::new_v4();
+    let outcome = requeue_failed_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        third_task_id,
+        blocked_failure_ref,
+        DispatchFailureCode::PageReadFailed,
+    )
+    .await
+    .expect("the third identical detail read failure becomes an explicit terminal boundary");
+    assert_eq!(outcome, DispatchFailureOutcome::Blocked);
+
+    let blocked_lanes: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease_task task \
+         JOIN linggan_runtime_task runtime USING(task_id) \
+         WHERE runtime.task_spec #>> '{target,contentExternalId}'='blocked-first' \
+           AND task.execution_state='blocked'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("blocked detail lanes remain visible as current execution facts");
+    assert_eq!(
+        blocked_lanes, 4,
+        "only this material's four frozen lanes stop"
+    );
+
+    let failure_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease_task_dispatch_failure failure \
+         JOIN linggan_runtime_task runtime ON runtime.task_id=failure.task_id \
+         WHERE failure.failure_code='page_read_failed' \
+           AND runtime.task_spec #>> '{target,contentExternalId}'='blocked-first'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("every pre-Attempt failure is retained in the ledger");
+    assert_eq!(failure_count, 3);
+    let disposition: String = sqlx::query_scalar(
+        "SELECT failure_disposition FROM collection_work_order_lease_task_dispatch_failure \
+         WHERE failure_ref=$1",
+    )
+    .bind(blocked_failure_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the terminal acknowledgement has a durable replay disposition");
+    assert_eq!(disposition, "blocked");
+    let attempts: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_runtime_attempt attempt \
+         JOIN linggan_runtime_task runtime ON runtime.task_id=attempt.task_id \
+         WHERE runtime.task_spec #>> '{target,contentExternalId}'='blocked-first'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("attempt ledger is readable");
+    assert_eq!(
+        attempts, 0,
+        "a page-read boundary is not a producer Attempt"
+    );
+
+    let replay = requeue_failed_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+        third_task_id,
+        blocked_failure_ref,
+        DispatchFailureCode::PageReadFailed,
+    )
+    .await
+    .expect("a lost terminal acknowledgement replays its real disposition");
+    assert_eq!(replay, DispatchFailureOutcome::Blocked);
+
+    let next = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("later independent frozen material is not held behind the blocked one");
+    assert_eq!(
+        task_from_dispatch(&next).raw()["target"]["contentExternalId"],
+        "eligible-second"
+    );
+    assert_eq!(failure_task_ids.len(), 3);
 }
 
 #[tokio::test]

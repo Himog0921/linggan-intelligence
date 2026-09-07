@@ -13,16 +13,41 @@ use linggan_evidence::{
     CreatorLifecycleStatus, CreatorLifecycleWindow, InstallationCheckIn, RequestLeaseError,
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, activate_installation_credential,
     bind_observation_account, check_in_installation, decide_dispatch, grant_authorization,
-    open_claim_window, read_archive_completeness, read_creator_lifecycle, register_station,
-    report_account_eligibility, request_admit_and_lease, request_progressive_archive_and_lease,
-    run_progressive_archives, set_station_accepting, start_producer_attempt,
-    submit_producer_package,
+    list_targets, open_claim_window, read_archive_completeness, read_creator_lifecycle,
+    read_target, register_station, report_account_eligibility, request_admit_and_lease,
+    request_progressive_archive_and_lease, run_progressive_archives, set_station_accepting,
+    start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use std::time::Duration;
 use uuid::Uuid;
 
 const DIGEST_KEY: &[u8] = b"observation-target-dossier-postgres-proof-v1";
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn target_drawer_read_uses_the_same_full_projection_as_the_target_list() {
+    let database = proof_database("dossier_target_drawer_projection").await;
+    let target_ref = seed_creator_target(&database, "creator-drawer-projection").await;
+
+    let drawer_target = read_target(&database, target_ref)
+        .await
+        .expect("the target drawer query is available")
+        .expect("the newly stored target is readable by exact reference");
+    let list_target = list_targets(&database, Some("creator"), None, 10)
+        .await
+        .expect("the targets list query is available")
+        .into_iter()
+        .find(|target| target.target_ref == target_ref)
+        .expect("the exact target appears in the matching list");
+
+    assert_eq!(drawer_target.target_ref, list_target.target_ref);
+    assert_eq!(drawer_target.identity_key, list_target.identity_key);
+    assert_eq!(drawer_target.domain_name, list_target.domain_name);
+    assert_eq!(drawer_target.domain_is_own, list_target.domain_is_own);
+    assert_eq!(drawer_target.domain_name.as_deref(), Some("ADHD"));
+    assert_eq!(drawer_target.domain_is_own, Some(true));
+}
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
@@ -921,6 +946,92 @@ async fn archive_completeness_distinguishes_started_attempted_and_quarantined_fr
     assert!(attempted.attempted);
     assert_eq!(attempted.quarantined, 1);
     assert!(!attempted.is_untouched());
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn archive_completeness_exposes_a_blocked_detail_as_a_problem_without_counting_it_as_captured()
+ {
+    let database = proof_database("dossier_archive_blocked_detail").await;
+    let installation = ready_installation(&database, "dossier-blocked-detail").await;
+    let target_ref = seed_creator_target(&database, "creator-blocked-detail").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
+        .await
+        .unwrap();
+    complete_progressive_root_at_the_200_work_bound(&database, &installation).await;
+    let child = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .expect("a bounded detail child is leased from the accepted current directory");
+    let lease_ref = child.lease.unwrap().lease_ref;
+    let child_work_order_ref = child.request.work_order_ref.unwrap();
+    let blocked_material_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT content_public_ref FROM collection_work_order_material_target \
+         WHERE work_order_ref=$1 ORDER BY ordinal",
+    )
+    .bind(child_work_order_ref)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(blocked_material_refs.len(), 3);
+    // The dispatch proof owns the transition. This read-model proof uses a
+    // genuine frozen detail child produced by progressive archiving and sets
+    // only its mutable execution state; Runtime TaskSpec remains immutable.
+    sqlx::query(
+        "UPDATE collection_work_order_lease_task \
+         SET execution_state='blocked',claimed_at=NULL,claimed_by_installation_ref=NULL \
+         WHERE lease_ref=$1",
+    )
+    .bind(lease_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE collection_work_order_lease \
+         SET released_at=scope_001_now(),release_reason='partial' WHERE lease_ref=$1",
+    )
+    .bind(lease_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE collection_work_order SET queue_state='completed' WHERE work_order_ref=$1")
+        .bind(child_work_order_ref)
+        .execute(database.pool())
+        .await
+        .unwrap();
+
+    let completeness = read_archive_completeness(&database, "xhs").await.unwrap();
+    let completeness = completeness.get("creator-blocked-detail").unwrap();
+    assert_eq!(completeness.blocked_details, 3);
+    assert_eq!(completeness.details_captured, 0);
+    assert!(completeness.has_actionable_problems());
+    assert!(!completeness.is_untouched());
+
+    let summary = run_progressive_archives(&database)
+        .await
+        .expect("the automatic worker can continue with other accepted material");
+    assert!(summary.queued.contains(&target_ref));
+    let reintroduced: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order work_order \
+         JOIN collection_work_order_material_target scope USING(work_order_ref) \
+         WHERE work_order.target_ref=$1 AND work_order.queue_state='queued' \
+           AND scope.content_public_ref=ANY($2)",
+    )
+    .bind(target_ref)
+    .bind(&blocked_material_refs)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        reintroduced, 0,
+        "automatic progressive scheduling never silently revives blocked details"
+    );
 }
 
 #[tokio::test]

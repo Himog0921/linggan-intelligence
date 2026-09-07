@@ -407,8 +407,10 @@ fn archive_state(
     use super::target_drawer::TargetArchiveRead;
     let (tone, label) = match archive {
         TargetArchiveRead::Unavailable => ("neutral", "档案暂不可读"),
+        TargetArchiveRead::Known(Some(value)) if value.has_actionable_problems() => {
+            ("warn", "档案有问题")
+        }
         TargetArchiveRead::Known(Some(value)) if value.work_in_progress => ("warn", "建档中"),
-        TargetArchiveRead::Known(Some(value)) if value.quarantined > 0 => ("warn", "档案有问题"),
         TargetArchiveRead::Known(Some(value))
             if value.directory_baseline
                 == linggan_evidence::ArchiveDirectoryBaseline::HistoricalDirectory =>
@@ -877,6 +879,39 @@ mod tests {
     }
 
     #[test]
+    fn blocked_detail_is_a_visible_archive_problem_not_a_missing_page_or_completed_detail() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let creator = target("creator", Some("读取受阻作者"));
+        let mut completeness = HashMap::new();
+        completeness.insert(
+            creator.identity_key.clone(),
+            ArchiveCompleteness {
+                started: true,
+                attempted: false,
+                work_in_progress: true,
+                works_listed: 8,
+                details_captured: 5,
+                blocked_details: 1,
+                ..ArchiveCompleteness::default()
+            },
+        );
+        let html = render_stored_targets(
+            &base,
+            &[creator],
+            &HashMap::new(),
+            Some(&completeness),
+            None,
+            TargetListContext::default(),
+        );
+
+        assert!(html.contains("档案有问题"));
+        assert!(html.contains(">处理异常</a>"));
+        assert!(html.contains("#archive-problems"));
+        assert!(!html.contains("页面暂不可读"));
+        assert!(!html.contains(">继续完善</button>"));
+    }
+
+    #[test]
     fn archive_progress_failures_use_business_language() {
         assert!(
             action_feedback_markup(Some("archive_in_progress")).contains("已有一批作品正在补齐")
@@ -1071,6 +1106,7 @@ mod tests {
                 works_listed: 12,
                 details_captured: 5,
                 quarantined: 0,
+                blocked_details: 0,
                 directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Ready,
             },
         );
