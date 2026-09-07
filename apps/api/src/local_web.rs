@@ -3343,6 +3343,10 @@ struct MonitorRuleWire {
     fixed_interval_seconds: Option<String>,
     surface_key: Option<String>,
     ranking_key: Option<String>,
+    /// 采样口径。原始字符串，解析在 handler 里做——失败时把人填过的字面值原样送回。
+    scroll_rounds: Option<String>,
+    top_by_likes: Option<String>,
+    published_within_days: Option<String>,
     task_contract_version: Option<String>,
     return_filter: Option<String>,
     return_sort: Option<String>,
@@ -3487,6 +3491,18 @@ fn parse_rule_interval(raw: Option<&str>) -> Option<i32> {
     raw?.trim().parse().ok()
 }
 
+/// 解析一项采样口径。
+///
+/// 空白表示「不设这一项」，与 0 是两件事：0 次下拉是一个真实的口径（只看首屏），
+/// 不填则是没有约定。解析不出来的也按不填处理——数据库的范围 CHECK 会挡住越界值，
+/// 这里不复述那套边界，免得两处规则日后各说各话。
+fn parse_sampling_value(raw: Option<&str>) -> Option<i32> {
+    raw.map(str::trim)
+        .filter(|value| !value.is_empty())?
+        .parse()
+        .ok()
+}
+
 fn monitor_rule_error_code(error: &MonitorRuleCommandError) -> &'static str {
     match error {
         MonitorRuleCommandError::SchemaUnavailable => "read_model_not_connected",
@@ -3530,6 +3546,7 @@ async fn collection_target_rule_command(
         None
     } else {
         let interval = parse_rule_interval(form.fixed_interval_seconds.as_deref());
+        let sampling = form.surface_key.as_deref().map(str::trim) == Some("keyword_search");
         // The page has one scheduling control: an anchored fixed interval.
         // Legacy wire fields are deliberately ignored instead of letting a
         // hidden weekday/window/fallback combination create a second cadence.
@@ -3549,6 +3566,17 @@ async fn collection_target_rule_command(
                 .ranking_key
                 .clone()
                 .filter(|value| !value.trim().is_empty()),
+            // 口径只属于关键词搜索面。创作者主页没有排序也没有「取前 N」可言——即使表单
+            // 里塞了值也丢掉，不让它写进去等着被数据库的 CHECK 拒绝。
+            scroll_rounds: sampling
+                .then(|| parse_sampling_value(form.scroll_rounds.as_deref()))
+                .flatten(),
+            top_by_likes: sampling
+                .then(|| parse_sampling_value(form.top_by_likes.as_deref()))
+                .flatten(),
+            published_within_days: sampling
+                .then(|| parse_sampling_value(form.published_within_days.as_deref()))
+                .flatten(),
             task_contract_version: form
                 .task_contract_version
                 .clone()

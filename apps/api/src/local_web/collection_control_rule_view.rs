@@ -25,6 +25,9 @@ pub struct MonitorRulePanel {
     pub target_ref: Uuid,
     pub target_name: String,
     pub target_kind: String,
+    /// 目标的身份键。关键词是 `{词}::{排序}`——新建规则时的排序默认值从它来，
+    /// 否则一个身份写着「最多点赞」的目标会默认配上综合排序，界面与身份各说各话。
+    pub identity_key: String,
     pub lifecycle_state: String,
     pub active_rule: Option<ActiveMonitorRule>,
     pub receipt: Option<MonitorRuleReceiptView>,
@@ -39,6 +42,10 @@ pub struct ActiveMonitorRule {
     pub fallback_interval_seconds: i32,
     pub surface_key: String,
     pub ranking_key: Option<String>,
+    /// 采样口径。只有关键词搜索面才有；创作者主页恒为 `None`。
+    pub scroll_rounds: Option<i32>,
+    pub top_by_likes: Option<i32>,
+    pub published_within_days: Option<i32>,
     pub task_contract_version: String,
     pub created_at: String,
 }
@@ -64,6 +71,11 @@ pub struct MonitorRuleFormState {
     pub fixed_interval_seconds: String,
     pub surface_key: String,
     pub ranking_key: String,
+    /// 采样口径，保持原始输入。解析与范围判定交给 handler，与间隔同一处置——
+    /// 失败时把人填过的字面值原样送回表单，不要悄悄换成一个能通过校验的数。
+    pub scroll_rounds: String,
+    pub top_by_likes: String,
+    pub published_within_days: String,
     pub task_contract_version: String,
 }
 
@@ -74,10 +86,23 @@ impl MonitorRuleFormState {
         } else {
             "creator_profile"
         };
+        // 默认排序从目标身份里取，而不是一律给综合排序：身份写着「最多点赞」的目标
+        // 默认配上综合排序，等于界面与身份各说各话。身份里读不出来才回落——回落到
+        // 综合排序是既有行为，不在这一步改它（规格说跨行业不采综合，那要在建目标时解决）。
         let default_ranking = if panel.target_kind == "keyword" {
-            "comprehensive"
+            panel
+                .identity_key
+                .rsplit_once("::")
+                .map_or("comprehensive", |(_, ranking)| ranking)
         } else {
             ""
+        };
+        // 关键词面的默认口径就是规格里那套统一采集动作：下拉 3 次、取点赞前 20。
+        // 发布时间默认不限——写死一周会让本领域那条一直在采全部时间的关键词说假话。
+        let (default_scroll, default_top) = if panel.target_kind == "keyword" {
+            ("3", "20")
+        } else {
+            ("", "")
         };
         let Some(rule) = panel.active_rule.as_ref() else {
             return Self {
@@ -87,6 +112,9 @@ impl MonitorRuleFormState {
                 fixed_interval_seconds: DEFAULT_INTERVAL_SECONDS.to_string(),
                 surface_key: default_surface.to_owned(),
                 ranking_key: default_ranking.to_owned(),
+                scroll_rounds: default_scroll.to_owned(),
+                top_by_likes: default_top.to_owned(),
+                published_within_days: String::new(),
                 task_contract_version: PRODUCER_TASK_SPEC_VERSION.to_owned(),
             };
         };
@@ -104,6 +132,13 @@ impl MonitorRuleFormState {
                 .to_string(),
             surface_key: rule.surface_key.clone(),
             ranking_key: rule.ranking_key.clone().unwrap_or_default(),
+            // 空表示「没记录过口径」，不是 0。既有规则由 0046 补过，新规则从上面的默认来。
+            scroll_rounds: rule.scroll_rounds.map(|v| v.to_string()).unwrap_or_default(),
+            top_by_likes: rule.top_by_likes.map(|v| v.to_string()).unwrap_or_default(),
+            published_within_days: rule
+                .published_within_days
+                .map(|v| v.to_string())
+                .unwrap_or_default(),
             task_contract_version: rule.task_contract_version.clone(),
         }
     }
@@ -140,7 +175,7 @@ pub async fn read_monitor_rule_panel(
         return Ok(MonitorRulePanelRead::SchemaUnavailable);
     }
     let target = sqlx::query(
-        "SELECT target_ref,target_kind,COALESCE(NULLIF(btrim(display_name),''),identity_key) AS target_name, \
+        "SELECT target_ref,target_kind,identity_key,COALESCE(NULLIF(btrim(display_name),''),identity_key) AS target_name, \
                 lifecycle_state,active_monitor_rule_revision_ref \
          FROM collection_observation_target WHERE target_ref=$1",
     )
@@ -160,6 +195,7 @@ pub async fn read_monitor_rule_panel(
     Ok(MonitorRulePanelRead::Found(MonitorRulePanel {
         target_ref: target.try_get("target_ref")?,
         target_name: target.try_get("target_name")?,
+        identity_key: target.try_get("identity_key")?,
         target_kind: target.try_get("target_kind")?,
         lifecycle_state: target.try_get("lifecycle_state")?,
         active_rule,
@@ -175,6 +211,7 @@ async fn read_active_rule(
     let row = sqlx::query(
         "SELECT rule_revision_ref,revision,automatic_enabled,fixed_interval_seconds, \
                 fallback_interval_seconds,surface_key,ranking_key, \
+                scroll_rounds,top_by_likes,published_within_days, \
                 task_contract_version,created_at::text AS created_at \
          FROM collection_monitor_rule_revision \
          WHERE target_ref=$1 AND rule_revision_ref=$2",
@@ -192,6 +229,9 @@ async fn read_active_rule(
             fallback_interval_seconds: row.try_get("fallback_interval_seconds")?,
             surface_key: row.try_get("surface_key")?,
             ranking_key: row.try_get("ranking_key")?,
+            scroll_rounds: row.try_get("scroll_rounds")?,
+            top_by_likes: row.try_get("top_by_likes")?,
+            published_within_days: row.try_get("published_within_days")?,
             task_contract_version: row.try_get("task_contract_version")?,
             created_at: row.try_get("created_at")?,
         })
@@ -284,7 +324,7 @@ pub fn render_monitor_rule_modal(
               <input type="hidden" name="expected_revision" value="{expected_revision}">
               <input type="hidden" name="idempotency_key" value="{idempotency_key}">
               <input type="hidden" name="surface_key" value="{surface_key}">
-              <input type="hidden" name="ranking_key" value="{ranking_key}">
+              {ranking_hidden}
               <input type="hidden" name="task_contract_version" value="{task_contract_version}">
               <input type="hidden" name="return_filter" value="{return_filter}">
               <input type="hidden" name="return_sort" value="{return_sort}">
@@ -302,8 +342,9 @@ pub fn render_monitor_rule_modal(
                   <div class="c-rule-grid">
                     {interval}
                   </div>
-                  <p class="c-rule-hint">每次运行固定执行：作者主页资格核验 + 最近 30 条作品观察。历史建档完整度不会阻断后续观察。</p>
+                  <p class="c-rule-hint">{cadence_hint}</p>
                 </section>
+                {sampling}
               </div>
               <footer class="c-rule-actions">
                 <div class="c-rule-secondary-actions">
@@ -329,7 +370,6 @@ pub fn render_monitor_rule_modal(
         expected_revision = form.expected_revision,
         idempotency_key = form.idempotency_key,
         surface_key = escape(&form.surface_key),
-        ranking_key = escape(&form.ranking_key),
         task_contract_version = escape(&form.task_contract_version),
         return_filter = escape(return_filter),
         return_sort = escape(return_sort),
@@ -346,6 +386,22 @@ pub fn render_monitor_rule_modal(
             disabled,
         ),
         pause_or_resume = pause_or_resume(panel, disabled),
+        sampling = sampling_policy_section(form, disabled),
+        // 关键词的排序移进了采样口径那一节，不再藏在 hidden 里；创作者没有那一节，
+        // 它的 ranking 仍按原样透传（恒为空）。少一个隐藏输入就少一处能和界面说法不一致的地方。
+        ranking_hidden = if form.surface_key.trim() == "keyword_search" {
+            String::new()
+        } else {
+            format!(
+                r#"<input type="hidden" name="ranking_key" value="{}">"#,
+                escape(&form.ranking_key)
+            )
+        },
+        cadence_hint = if form.surface_key.trim() == "keyword_search" {
+            "每次运行按下面的采样口径搜一轮。关键词观察不做作者资格核验——那是创作者档案的事。"
+        } else {
+            "每次运行固定执行：作者主页资格核验 + 最近 30 条作品观察。历史建档完整度不会阻断后续观察。"
+        },
     )
 }
 
@@ -515,6 +571,57 @@ fn pause_or_resume(panel: &MonitorRulePanel, disabled: bool) -> String {
     )
 }
 
+/// 关键词观察的采样口径。
+///
+/// 这一节回答的是「这一轮的 20 篇是怎么来的」：按什么排序、翻了几次页、从中取几篇、
+/// 只要多新的内容。没有它，采回来的数字无法复核——而复核不了的数字不该拿去比较。
+///
+/// 只对关键词目标渲染。创作者主页没有排序也没有「取前 N」可言，给它一组输入框，
+/// 等于请人填一份不存在的事实。
+fn sampling_policy_section(form: &MonitorRuleFormState, disabled: bool) -> String {
+    if form.surface_key.trim() != "keyword_search" {
+        return String::new();
+    }
+    let disabled_attr = if disabled { " disabled" } else { "" };
+    let rankings = [
+        ("most_liked", "最多点赞"),
+        ("most_collected", "最多收藏"),
+        ("most_commented", "最多评论"),
+        ("latest", "最新"),
+        ("comprehensive", "综合排序"),
+    ]
+    .iter()
+    .map(|(value, text)| {
+        format!(
+            r#"<option value="{value}"{selected}>{text}</option>"#,
+            selected = if form.ranking_key.trim() == *value {
+                " selected"
+            } else {
+                ""
+            },
+        )
+    })
+    .collect::<String>();
+    format!(
+        r#"<section class="c-rule-section" aria-labelledby="c-rule-sampling-title">
+                  <div class="c-rule-section-head">
+                    <h3 id="c-rule-sampling-title">采样口径</h3>
+                    <span>决定每一轮怎么取样，随样本一起留痕</span>
+                  </div>
+                  <div class="c-rule-grid">
+                    <label for="ranking_key"><span>排序依据</span><select id="ranking_key" name="ranking_key"{disabled_attr}>{rankings}</select></label>
+                    <label for="scroll_rounds"><span>下拉刷新次数</span><input id="scroll_rounds" name="scroll_rounds" type="number" min="0" max="20" value="{scroll_rounds}"{disabled_attr}></label>
+                    <label for="top_by_likes"><span>取点赞前几篇</span><input id="top_by_likes" name="top_by_likes" type="number" min="1" max="200" value="{top_by_likes}"{disabled_attr}></label>
+                    <label for="published_within_days"><span>只要几天内发布的</span><input id="published_within_days" name="published_within_days" type="number" min="1" max="365" placeholder="不限" value="{published_within_days}"{disabled_attr}></label>
+                  </div>
+                  <p class="c-rule-hint">按下拉次数控制，不按条数控制——页面每次加载出多少条不由我们决定，只有「拉了几次」是能说准的事实。「只要几天内」留空表示不限；这批样本的点赞数不可跨时间比较。综合排序掺入个性化推荐，采回来的是平台认为这个账号会喜欢的内容，不是这个领域客观最好的内容。</p>
+                </section>"#,
+        scroll_rounds = escape(&form.scroll_rounds),
+        top_by_likes = escape(&form.top_by_likes),
+        published_within_days = escape(&form.published_within_days),
+    )
+}
+
 fn interval_select(name: &str, label: &str, selected: &str, disabled: bool) -> String {
     let options = [
         (21_600, "6 小时"),
@@ -567,6 +674,7 @@ mod tests {
             target_ref: Uuid::parse_str("d87b17da-f93c-42de-8051-8b21b2c1e90d").unwrap(),
             target_name: "边界测试 <创作者>".to_owned(),
             target_kind: "creator".to_owned(),
+            identity_key: "creator-boundary".to_owned(),
             lifecycle_state: "archived".to_owned(),
             active_rule: Some(ActiveMonitorRule {
                 rule_revision_ref: Uuid::parse_str("0da99cb2-0f4a-4da5-ac1b-c99e10bb64ed").unwrap(),
@@ -576,6 +684,9 @@ mod tests {
                 fallback_interval_seconds: 86_400,
                 surface_key: "creator_profile".to_owned(),
                 ranking_key: None,
+                scroll_rounds: None,
+                top_by_likes: None,
+                published_within_days: None,
                 task_contract_version: PRODUCER_TASK_SPEC_VERSION.to_owned(),
                 created_at: "2026-09-04 09:00:00+08".to_owned(),
             }),
@@ -672,5 +783,57 @@ mod tests {
         assert!(html.contains("规则状态当前未知"));
         assert!(!html.contains("没有监控规则"));
         assert!(!html.contains("采集失败"));
+    }
+}
+
+#[cfg(test)]
+mod sampling_policy_tests {
+    use super::*;
+
+    fn keyword_panel(identity_key: &str) -> MonitorRulePanel {
+        MonitorRulePanel {
+            target_ref: Uuid::nil(),
+            target_name: "考研自习".to_owned(),
+            target_kind: "keyword".to_owned(),
+            identity_key: identity_key.to_owned(),
+            lifecycle_state: "paused".to_owned(),
+            active_rule: None,
+            receipt: None,
+        }
+    }
+
+    /// 身份写着「最多点赞」的目标，默认不该配上综合排序——那会让界面与身份各说各话。
+    #[test]
+    fn a_new_rule_defaults_to_the_ranking_in_the_target_identity() {
+        let form = MonitorRuleFormState::from_panel(&keyword_panel("考研自习::most_liked"));
+        assert_eq!(form.ranking_key, "most_liked");
+        // 规格里那套统一采集动作就是关键词面的默认口径。
+        assert_eq!(form.scroll_rounds, "3");
+        assert_eq!(form.top_by_likes, "20");
+        // 发布时间默认不限：写死一周会让一直在采全部时间的关键词说假话。
+        assert_eq!(form.published_within_days, "");
+    }
+
+    /// 创作者主页没有排序也没有取样口径可言，一项都不该预填。
+    #[test]
+    fn a_creator_rule_carries_no_sampling_policy() {
+        let mut panel = keyword_panel("creator-1");
+        panel.target_kind = "creator".to_owned();
+        let form = MonitorRuleFormState::from_panel(&panel);
+        assert_eq!(form.ranking_key, "");
+        assert_eq!(form.scroll_rounds, "");
+        assert_eq!(form.top_by_likes, "");
+        assert!(sampling_policy_section(&form, false).is_empty());
+    }
+
+    /// 关键词面渲染出那一节，且四项都在。
+    #[test]
+    fn the_keyword_surface_renders_every_sampling_input() {
+        let form = MonitorRuleFormState::from_panel(&keyword_panel("考研自习::latest"));
+        let html = sampling_policy_section(&form, false);
+        for field in ["ranking_key", "scroll_rounds", "top_by_likes", "published_within_days"] {
+            assert!(html.contains(&format!(r#"name="{field}""#)), "{field} 缺失");
+        }
+        assert!(html.contains(r#"<option value="latest" selected>"#));
     }
 }

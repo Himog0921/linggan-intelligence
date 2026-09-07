@@ -93,6 +93,8 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0045_deep_archive_recovery.sql"),
     "\n",
+    include_str!("../../../database/migrations/0046_keyword_sampling_policy.sql"),
+    "\n",
     include_str!("../../../database/migrations/0047_collection_detail_failure_boundary.sql"),
 );
 
@@ -220,6 +222,9 @@ async fn creator_rule_queues_once_without_a_baseline_or_a_preassigned_station() 
                 fallback_interval_seconds: 21_600,
                 surface_key: "creator_patrol".to_owned(),
                 ranking_key: None,
+                scroll_rounds: None,
+                top_by_likes: None,
+                published_within_days: None,
                 task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
             }),
         },

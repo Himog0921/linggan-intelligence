@@ -109,6 +109,19 @@ struct LeaseSubject {
     active_rule_automatic_enabled: Option<bool>,
     lifecycle_state: String,
     requested_by: String,
+    /// 这次采集的采样口径，取自**工单冻结的那一版规则**而不是目标当前的活跃版本。
+    /// 工单发出时约定的口径才是这一轮的依据；中途有人改了规则，也不该改写已发出的这一单。
+    sampling: SamplingPolicy,
+}
+
+/// 一次关键词搜索的取样方式。四项都可能缺失——缺了就不往任务里写那一项，
+/// 让插件按自己的默认走，而不是替它编一个数。
+#[derive(Default)]
+struct SamplingPolicy {
+    ranking: Option<String>,
+    scroll_rounds: Option<i32>,
+    top_by_likes: Option<i32>,
+    published_within_days: Option<i32>,
 }
 
 struct MaterialTarget {
@@ -646,7 +659,90 @@ async fn load_subject(
         active_rule_automatic_enabled: row.12,
         lifecycle_state: row.13,
         requested_by: row.14,
+        sampling: load_sampling_policy(transaction, row.10).await?,
     })
+}
+
+/// 读工单冻结的那一版规则里的采样口径。
+///
+/// 单独一次查询而不是并进上面那条：主查询的列已经到了 sqlx 元组绑定的上限，更重要的是
+/// 口径本来就是规则的属性，从规则读它比从工单那条大 JOIN 里捎带出来更说得清。
+///
+/// 工单没有绑定规则（人工发起的一次性请求）时没有口径，返回全空——那是真话，不是缺省值。
+/// 一次关键词搜索要告诉插件的东西。
+///
+/// **`query` 此前传的是身份键原文**（`adhd::comprehensive`）——那是「词 + 排序」拼出来的
+/// 内部标识，不是一个能拿去搜索框搜的词。插件因此从来不按它搜，只读当前页面上碰巧
+/// 可见的内容，采回来的东西没有可信的采样口径。这里把它拆开：`query` 只放真正的词，
+/// 排序与取样方式各自成字段。
+///
+/// 保留 `query` 这个键名而不是改叫 `keyword`：`discovery_search` 的契约校验要求它非空，
+/// 且旧版插件仍靠它搜索。新增的几项是纯追加，认不出它们的插件行为不变。
+///
+/// 口径缺失的项一概不写进去，让插件按自己的默认走——编一个数会让回执里出现一份
+/// 从未被约定过的口径。
+fn keyword_search_target(subject: &LeaseSubject) -> Value {
+    let mut target = serde_json::Map::new();
+    target.insert(
+        "query".to_owned(),
+        json!(search_term(
+            &subject.identity_key,
+            subject.sampling.ranking.as_deref()
+        )),
+    );
+    if let Some(ranking) = subject.sampling.ranking.as_deref() {
+        target.insert("ranking".to_owned(), json!(ranking));
+    }
+    if let Some(rounds) = subject.sampling.scroll_rounds {
+        target.insert("scrollRounds".to_owned(), json!(rounds));
+    }
+    if let Some(top) = subject.sampling.top_by_likes {
+        target.insert("topByLikes".to_owned(), json!(top));
+    }
+    if let Some(days) = subject.sampling.published_within_days {
+        target.insert("publishedWithinDays".to_owned(), json!(days));
+    }
+    Value::Object(target)
+}
+
+/// 从关键词目标的身份键里取出真正的搜索词。
+///
+/// 身份键由 `TargetIdentity::keyword` 拼成 `{词}::{排序}`。优先按规则里的排序去掉后缀——
+/// 两处对得上才剥，对不上就用 `rsplit_once` 兜底（排序不含 `::`，所以从右边切是对的）。
+/// 两者都不成立时原样返回：宁可搜一个怪词，也不要凭空猜出半截。
+fn search_term(identity_key: &str, ranking: Option<&str>) -> String {
+    if let Some(ranking) = ranking.map(str::trim).filter(|value| !value.is_empty()) {
+        if let Some(term) = identity_key.strip_suffix(&format!("::{ranking}")) {
+            return term.to_owned();
+        }
+    }
+    identity_key
+        .rsplit_once("::")
+        .map_or_else(|| identity_key.to_owned(), |(term, _)| term.to_owned())
+}
+
+async fn load_sampling_policy(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    rule_revision_ref: Option<Uuid>,
+) -> Result<SamplingPolicy, LeaseError> {
+    let Some(rule_revision_ref) = rule_revision_ref else {
+        return Ok(SamplingPolicy::default());
+    };
+    let row: Option<(Option<String>, Option<i32>, Option<i32>, Option<i32>)> = sqlx::query_as(
+        "SELECT ranking_key,scroll_rounds,top_by_likes,published_within_days \
+         FROM collection_monitor_rule_revision WHERE rule_revision_ref=$1",
+    )
+    .bind(rule_revision_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    Ok(
+        row.map_or_else(SamplingPolicy::default, |row| SamplingPolicy {
+            ranking: row.0,
+            scroll_rounds: row.1,
+            top_by_likes: row.2,
+            published_within_days: row.3,
+        }),
+    )
 }
 
 fn reject_if_rule_changed(subject: &LeaseSubject) -> Result<(), LeaseError> {
@@ -878,7 +974,7 @@ fn expand_into_tasks(
         )],
         _ => vec![(
             "discovery_search",
-            json!({ "query": subject.identity_key }),
+            keyword_search_target(subject),
             subject.max_works,
         )],
     };
@@ -1048,6 +1144,7 @@ mod tests {
             active_rule_automatic_enabled: None,
             lifecycle_state: "archived".to_owned(),
             requested_by: "person".to_owned(),
+            sampling: super::SamplingPolicy::default(),
         }
     }
 
@@ -1176,5 +1273,80 @@ mod tests {
             .filter_map(|task| step(task).1)
             .collect();
         assert_eq!(remaining, ["media_slots", "comments", "replies"]);
+    }
+}
+
+#[cfg(test)]
+mod keyword_search_target_tests {
+    use super::*;
+
+    fn subject(identity_key: &str, sampling: SamplingPolicy) -> LeaseSubject {
+        LeaseSubject {
+            target_ref: Uuid::nil(),
+            station_ref: Uuid::nil(),
+            lane: "patrol".to_owned(),
+            max_works: 20,
+            platform: "xhs".to_owned(),
+            target_kind: "keyword".to_owned(),
+            identity_key: identity_key.to_owned(),
+            authorization_ref: None,
+            installation_ref: Uuid::nil(),
+            account_ref: Uuid::nil(),
+            monitor_rule_revision_ref: None,
+            active_monitor_rule_revision_ref: None,
+            active_rule_automatic_enabled: None,
+            lifecycle_state: "monitoring".to_owned(),
+            requested_by: "person".to_owned(),
+            sampling,
+        }
+    }
+
+    /// 此前 `query` 传的是身份键原文，插件拿它根本搜不出东西。
+    #[test]
+    fn the_query_carries_the_term_alone_not_the_identity_key() {
+        let target = keyword_search_target(&subject(
+            "考研自习::most_liked",
+            SamplingPolicy {
+                ranking: Some("most_liked".to_owned()),
+                scroll_rounds: Some(3),
+                top_by_likes: Some(20),
+                published_within_days: Some(7),
+            },
+        ));
+        assert_eq!(target["query"], json!("考研自习"));
+        assert_eq!(target["ranking"], json!("most_liked"));
+        assert_eq!(target["scrollRounds"], json!(3));
+        assert_eq!(target["topByLikes"], json!(20));
+        assert_eq!(target["publishedWithinDays"], json!(7));
+    }
+
+    /// 没有口径就不写那几项，让插件按自己的默认走——编一个数会让回执里出现一份
+    /// 从未被约定过的口径。`query` 仍必须是能搜的词。
+    #[test]
+    fn a_rule_without_a_policy_only_sends_the_term() {
+        let target =
+            keyword_search_target(&subject("adhd::comprehensive", SamplingPolicy::default()));
+        assert_eq!(target["query"], json!("adhd"));
+        for absent in [
+            "ranking",
+            "scrollRounds",
+            "topByLikes",
+            "publishedWithinDays",
+        ] {
+            assert!(target.get(absent).is_none(), "{absent} 不该被编出来");
+        }
+    }
+
+    /// 词里含 `::` 时从右边切，排序不含 `::`，所以切得对。
+    #[test]
+    fn a_term_containing_the_separator_still_resolves() {
+        assert_eq!(search_term("c::b::latest", Some("latest")), "c::b");
+        assert_eq!(search_term("c::b::latest", None), "c::b");
+    }
+
+    /// 规则里的排序与身份键对不上时不猜：原样返回好过凭空切出半截。
+    #[test]
+    fn a_mismatched_ranking_falls_back_instead_of_guessing() {
+        assert_eq!(search_term("考研自习", Some("most_liked")), "考研自习");
     }
 }

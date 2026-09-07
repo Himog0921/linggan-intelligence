@@ -98,6 +98,8 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0045_deep_archive_recovery.sql"),
     "\n",
+    include_str!("../../../database/migrations/0046_keyword_sampling_policy.sql"),
+    "\n",
     include_str!("../../../database/migrations/0047_collection_detail_failure_boundary.sql"),
 );
 
@@ -1184,6 +1186,9 @@ fn save_rule(
             fallback_interval_seconds: 43_200,
             surface_key: "keyword_search".to_owned(),
             ranking_key: Some("default".to_owned()),
+            scroll_rounds: None,
+            top_by_likes: None,
+            published_within_days: None,
             task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
         }),
     }
