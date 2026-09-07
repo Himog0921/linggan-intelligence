@@ -215,6 +215,7 @@ migrate() {
   apply_migration_once "0043_comment_daily" "$project_root/database/migrations/0043_comment_daily.sql"
   apply_migration_once "0044_cross_industry_comment" "$project_root/database/migrations/0044_cross_industry_comment.sql"
   apply_migration_once "0045_deep_archive_recovery" "$project_root/database/migrations/0045_deep_archive_recovery.sql"
+  apply_migration_once "0047_collection_detail_failure_boundary" "$project_root/database/migrations/0047_collection_detail_failure_boundary.sql"
 }
 
 case "$command_name" in
