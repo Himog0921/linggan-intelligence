@@ -166,7 +166,8 @@ pub use target_enrichment::{
 };
 pub use work_order_lease::{
     DETAIL_STEP_DEFERRED_REASON, IssuedLease, LeaseError, expire_lapsed_leases,
-    issue_work_order_lease, lease_schema_is_ready, release_work_order_lease,
+    issue_work_order_lease, lease_schema_is_ready, recover_released_orphaned_work_orders,
+    release_work_order_lease,
 };
 pub use work_resource_read::{
     WorkResource, WorkResourceCollectionContext, WorkResourceDisplay, WorkResourceEngagement,

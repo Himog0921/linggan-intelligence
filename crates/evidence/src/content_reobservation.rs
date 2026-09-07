@@ -392,6 +392,8 @@ fn task_from_row(row: &sqlx::postgres::PgRow, lease_released: bool) -> Reobserva
         "ACCEPTED"
     } else if execution_state == "completed" {
         "COMPLETED_WITHOUT_RECEIPT"
+    } else if execution_state == "unavailable" {
+        "PAGE_UNAVAILABLE"
     } else if lease_released {
         "EXPIRED_WITHOUT_RECEIPT"
     } else if execution_state == "in_progress" && attempt_id.is_some() {

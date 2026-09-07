@@ -98,6 +98,34 @@ test('a page-start failure is returned only through the server-advertised local 
   });
 });
 
+test('a producer-confirmed unavailable page is acknowledged as terminal so the next task may run', async () => {
+  const health = {
+    routes: {
+      dispatch: {
+        claim: '/api/local/dispatch/claim',
+        failure: '/api/local/dispatch/failures',
+      },
+    },
+  };
+  const result = await reportLingganDispatchFailure({
+    installKey: 'installation-1',
+    installationCredential: 'credential-1',
+    taskId: '11111111-1111-4111-8111-111111111111',
+    failureId: '33333333-3333-4333-8333-333333333333',
+    failureCode: 'page_unavailable',
+    health,
+    fetchImpl: async () => ({
+      ok: true,
+      json: async () => ({
+        outcome: 'unavailable',
+        taskState: 'unavailable',
+        nextPollAfterSeconds: 0,
+      }),
+    }),
+  });
+  assert.deepEqual(result, { reported: true, outcome: 'unavailable', nextPollAfterSeconds: 0 });
+});
+
 test('runtime notice describes automatic claim without overstating admission', () => {
   assert.match(formatLingganRuntimeNotice(), /本机可靠队列/);
   assert.match(formatLingganRuntimeNotice(), /自动领取/);

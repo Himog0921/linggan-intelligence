@@ -346,23 +346,35 @@ pub(crate) async fn complete_lease_for_task_in_transaction(
     let Some((lease_ref, work_order_ref, target_ref, lane)) = completed else {
         return Ok(false);
     };
-    let all_completed: bool = sqlx::query_scalar(
+    let all_terminal: bool = sqlx::query_scalar(
         "SELECT NOT EXISTS ( \
              SELECT 1 FROM collection_work_order_lease_task \
-             WHERE lease_ref = $1 AND execution_state <> 'completed')",
+             WHERE lease_ref = $1 AND execution_state NOT IN ('completed','unavailable'))",
     )
     .bind(lease_ref)
     .fetch_one(&mut **transaction)
     .await?;
-    if !all_completed {
+    if !all_terminal {
         return Ok(true);
     }
+    let has_unavailable: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM collection_work_order_lease_task \
+           WHERE lease_ref=$1 AND execution_state='unavailable')",
+    )
+    .bind(lease_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
     sqlx::query(
         "UPDATE collection_work_order_lease \
-         SET released_at = scope_001_now(), release_reason = 'completed' \
+         SET released_at = scope_001_now(), release_reason = $2 \
          WHERE lease_ref = $1 AND released_at IS NULL",
     )
     .bind(lease_ref)
+    .bind(if has_unavailable {
+        "partial"
+    } else {
+        "completed"
+    })
     .execute(&mut **transaction)
     .await?;
     sqlx::query(
@@ -542,6 +554,47 @@ pub(crate) async fn requeue_work_orders_after_release(
     .execute(&mut **transaction)
     .await?;
     Ok(())
+}
+
+/// Recover historical WorkOrders whose Lease was already released but whose
+/// queue state predates the invariant that a release must return the WorkOrder
+/// to `queued`.  This is intentionally narrow: a still-live lease and an
+/// order whose every task is terminal are never reopened.
+pub async fn recover_released_orphaned_work_orders(database: &Database) -> Result<u64, LeaseError> {
+    if !lease_schema_is_ready(database).await? {
+        return Err(LeaseError::SchemaUnavailable);
+    }
+    let mut transaction = database.pool().begin().await?;
+    let recovered = recover_released_orphaned_work_orders_in_transaction(&mut transaction).await?;
+    transaction.commit().await?;
+    Ok(recovered)
+}
+
+pub(crate) async fn recover_released_orphaned_work_orders_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<u64, sqlx::Error> {
+    let work_order_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT work_order.work_order_ref \
+         FROM collection_work_order work_order \
+         WHERE work_order.queue_state='leased' \
+           AND EXISTS (SELECT 1 FROM collection_work_order_lease released \
+                       WHERE released.work_order_ref=work_order.work_order_ref \
+                         AND released.released_at IS NOT NULL) \
+           AND NOT EXISTS (SELECT 1 FROM collection_work_order_lease live \
+                           WHERE live.work_order_ref=work_order.work_order_ref \
+                             AND live.released_at IS NULL \
+                             AND live.expires_at>scope_001_now()) \
+           AND EXISTS (SELECT 1 FROM collection_work_order_lease_task task \
+                       JOIN collection_work_order_lease lease USING(lease_ref) \
+                       WHERE lease.work_order_ref=work_order.work_order_ref \
+                         AND task.execution_state IN ('pending','in_progress')) \
+         ORDER BY work_order.created_at,work_order.work_order_ref \
+         LIMIT 100 FOR UPDATE OF work_order SKIP LOCKED",
+    )
+    .fetch_all(&mut **transaction)
+    .await?;
+    requeue_work_orders_after_release(&mut *transaction, &work_order_refs).await?;
+    Ok(u64::try_from(work_order_refs.len()).unwrap_or(u64::MAX))
 }
 
 async fn load_subject(

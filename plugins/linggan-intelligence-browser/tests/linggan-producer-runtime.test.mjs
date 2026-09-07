@@ -676,6 +676,8 @@ test('scheduled page execution propagates a collector failure instead of reporti
   assert.match(content, /if \(pageResult\?\.success !== true\)/);
   assert.match(background, /decodePageExecutionReceipt\(response/);
   assert.match(adapter, /page_receipt_identity_mismatch/);
+  assert.match(content, /detail_page_session_content_not_collected/);
+  assert.match(content, /code = .*page_unavailable/s);
 });
 
 test('producer controls use Linggan runtime commands while manual media remains an explicit separate action', () => {

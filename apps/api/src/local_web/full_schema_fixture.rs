@@ -92,6 +92,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0044_cross_industry_comment.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0045_deep_archive_recovery.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -129,5 +131,6 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "('0035_claimed_station_auto_acceptance', 'feed87adc4fe8090975a0c1150b08d862c0975e80ed71bcb88188053ea7e3a36'),\n",
     "('0036_monitor_scheduling_clarity', '0b2d3c9ed8525d27ce3cac56d620596210d41512b6acaad0cc98c803c1b84c47'),\n",
     "('0037_collection_scheduler_scale', 'e1a9acf277243391032263a24a900771b5e8b3d967890e7c4b58d82632c5a4b0'),\n",
-    "('0038_detail_only_material_scope', 'a748e3c810b85b523e490e4ac202569e024024f4be4b09f32ca824dedd867cc7');\n",
+    "('0038_detail_only_material_scope', 'a748e3c810b85b523e490e4ac202569e024024f4be4b09f32ca824dedd867cc7'),\n",
+    "('0045_deep_archive_recovery', '27b926f404593fd4a65cd88c63afe6e62996281496e8899342c9c647cbf6c349');\n",
 );

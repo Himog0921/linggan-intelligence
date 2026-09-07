@@ -410,7 +410,9 @@ export async function reportLingganDispatchFailure({
     if (!response.ok) return { reported: false, nextPollAfterSeconds: 300 };
     const body = await response.json().catch(() => null);
     const outcome = String(body?.outcome || '');
-    if (!['requeued', 'replay'].includes(outcome) || body?.taskState !== 'pending') {
+    const terminalUnavailable = outcome === 'unavailable' && body?.taskState === 'unavailable';
+    if ((!['requeued', 'replay'].includes(outcome) || body?.taskState !== 'pending')
+        && !terminalUnavailable) {
       return { reported: false, nextPollAfterSeconds: 300 };
     }
     return {

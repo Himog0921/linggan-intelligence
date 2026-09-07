@@ -667,8 +667,9 @@ const DISPATCH_FAILURE_CODES = new Set([
 
 async function requeueClaimedTaskFailure({ claim, installKey, state, message }) {
   const taskId = String(claim?.taskSpec?.taskId || '').trim();
-  const failureCode = DISPATCH_FAILURE_CODES.has(String(state || ''))
-    ? String(state)
+  const normalizedState = String(state || '');
+  const failureCode = DISPATCH_FAILURE_CODES.has(normalizedState)
+    ? normalizedState
     : 'page_read_failed';
   const reported = await reportLingganDispatchFailure({
     installKey,
