@@ -2,7 +2,7 @@
   'use strict';
   const api='/api/local/model-settings', $=id=>document.getElementById(id);
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const errors={model_schema_missing:'本机尚未完成评论研究与模型配置数据库初始化（0039、0040）。当前无法保存或测试，请完成部署后刷新。',provider_endpoint_not_found:'调用地址返回 404。请核对 API 地址、接口协议和模型 ID。',catalog_unavailable:'供应商不提供兼容的模型目录，可手动添加准确模型 ID。',provider_rate_limited:'供应商限流，请稍后重试。',output_limit:'输出达到上限，未作为完整分析接纳。',unexpected_content:'模型输出包含未授权内容类型，未接纳。',response_too_large:'供应商响应超出接收上限，已停止读取。',secret_echo_rejected:'供应商响应包含凭据回显，已拒绝保存或展示。',endpoint_rejected:'请求地址超出已配置连接范围，已阻止。',invalid_request:'模型请求格式不符合当前适配协议。',model_revision_conflict:'设置已被修改。请刷新后重新操作；刚才的请求未覆盖新版本。',model_disabled:'连接或计划已暂停，未发起新调用。',model_not_qualified:'先测试模型，确认评论输出通过校验。',model_secret_unavailable:'无法访问本机 Keychain 凭据。请检查系统授权，或更换这条连接的凭据。',model_adapter_unavailable:'Pi 运行依赖未就绪。请检查本机 Node 与适配器安装状态。',model_budget_exhausted:'剩余额度不足以预留一次调用。',model_source_unavailable:'所选来源已不可读或版本已变化，请重新选择。',model_input_limit:'来源与上下文超过本次输入预算。',model_invalid_output:'调用已结束，输出未通过评论来源与结构校验。',invalid_model_command:'请检查地址、模型 ID、来源数量及额度范围。',model_database_unavailable:'模型设置数据库暂不可用。',provider_timeout:'等待供应商超时；停止等待不代表远端请求已撤销。',authentication_failed:'凭据未通过供应商验证。',provider_failed:'供应商调用失败，请查看连接或稍后重试。',provider_unavailable:'供应商暂不可用，系统按本次配置的次数与额度重试。',worker_interrupted:'执行中断，用量暂未知，保留预留额度。',model_budget_overrun:'供应商报告的用量超过本次上限，结果未被接纳。',provider_redirect_rejected:'供应商返回重定向，凭据未被转发。'};
+  const errors={model_schema_missing:'本机尚未完成评论研究与模型配置数据库初始化（0039、0040）。当前无法保存或测试，请完成部署后刷新。',provider_endpoint_not_found:'调用地址返回 404。请核对 API 地址、接口协议和模型 ID。',catalog_unavailable:'供应商不提供兼容的模型目录，可手动添加准确模型 ID。',provider_rate_limited:'供应商限流，请稍后重试。',output_limit:'模型已响应，但输出达到本次上限，评论分析结果不完整。',unexpected_content:'模型输出包含未授权内容类型，未接纳。',response_too_large:'供应商响应超出接收上限，已停止读取。',secret_echo_rejected:'供应商响应包含凭据回显，已拒绝保存或展示。',endpoint_rejected:'请求地址超出已配置连接范围，已阻止。',invalid_request:'模型请求格式不符合当前适配协议。',model_revision_conflict:'设置已被修改。请刷新后重新操作；刚才的请求未覆盖新版本。',model_disabled:'连接或计划已暂停，未发起新调用。',model_not_qualified:'先测试模型，确认评论输出通过校验。',model_secret_unavailable:'无法访问本机 Keychain 凭据。请检查系统授权，或更换这条连接的凭据。',model_adapter_unavailable:'Pi 运行依赖未就绪。请检查本机 Node 与适配器安装状态。',model_budget_exhausted:'剩余额度不足以预留一次调用。',model_source_unavailable:'所选来源已不可读或版本已变化，请重新选择。',model_input_limit:'来源与上下文超过本次输入预算。',model_invalid_output:'调用已结束，输出未通过评论来源与结构校验。',invalid_model_command:'请检查地址、模型 ID、来源数量及额度范围。',model_database_unavailable:'模型设置数据库暂不可用。',provider_timeout:'等待供应商超时；停止等待不代表远端请求已撤销。',authentication_failed:'凭据未通过供应商验证。',provider_failed:'供应商调用失败，请查看连接或稍后重试。',provider_unavailable:'供应商暂不可用，系统按本次配置的次数与额度重试。',worker_interrupted:'执行中断，用量暂未知，保留预留额度。',model_budget_overrun:'供应商报告的用量超过本次上限，结果未被接纳。',provider_redirect_rejected:'供应商返回重定向，凭据未被转发。'};
   const explain=c=>errors[c]||({model_not_found:'该模型或连接已不存在。',claim_conflict:'任务已被其他执行者接续。',result_validation_pending:'已取得调用回执，结果仍待确认。'}[c])||c||'未测试';
   const kinds={trial:'单条试运行',automatic:'自动新增',backfill:'历史补跑'}, ops={connect:'连接测试',discover:'发现模型',probe:'模型能力测试',analyze:'评论分析'};
   let data=null, command=null, busy=false, loadFailed=false;
@@ -14,7 +14,7 @@
   const table=(heads,rows)=>`<div class="lgi-model-table"><table><thead><tr>${heads.map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
   const button=(action,ref,label,disabled=false)=>`<button type="button" data-action="${action}" data-ref="${esc(ref)}" ${disabled?'disabled':''}>${label}</button>`;
   const note=t=>`<p class="lgi-model-note">${esc(t)}</p>`;
-  function modelStatus(m){return !m.enabled?'连接已停用':!m.test?'尚未测试':m.test.commentQualified?'可调用 · 评论输出通过校验':m.test.modelCallable?'可调用 · 评论输出未通过校验':explain(m.test.failureCode);}
+  function modelStatus(m){return !m.enabled?'连接已停用':!m.test?'尚未测试':m.test.commentQualified?'可调用 · 评论输出通过校验':m.test.modelCallable?(m.test.failureCode?explain(m.test.failureCode):'可调用 · 评论输出未通过校验'):explain(m.test.failureCode);}
   async function load(){
     try { data=await request(api+(focusedPlan?'?planRef='+encodeURIComponent(focusedPlan):'')); } catch(e) { loadFailed=true; data=null; $('storage-state').textContent='配置未就绪'; document.querySelectorAll('.lgi-model-settings button:not(#reload),.lgi-model-settings input,.lgi-model-settings select').forEach(el=>el.disabled=true); $('connection-list').replaceChildren(); throw e; }
     if(loadFailed){$('settings-feedback').textContent='连接已恢复，配置已重新读取。';loadFailed=false;}
@@ -115,7 +115,7 @@
           $('discovered-models').innerHTML=(r?.modelIds||[]).map(id=>`<option value="${esc(id)}"></option>`).join('');
           $('dialog-feedback').textContent=r?.ok?`取得 ${r.modelIds?.length||0} 个候选模型。请在模型 ID 中选择，再测试调用。`:'连接已保存。'+explain(r?.failureCode);
         }else{
-          $('dialog-feedback').textContent=r?.modelCallable?`模型调用成功${r.elapsedMs!=null?'，耗时 '+r.elapsedMs+' ms':''}。`+(r.commentQualified?'合成评论输出通过校验，可设为默认。':'评论输出未通过校验，暂不能设为评论分析默认。'):'配置已保存，测试失败：'+explain(r?.failureCode);
+          $('dialog-feedback').textContent=r?.modelCallable?`模型${r.ok?'调用成功':'已响应'}${r.elapsedMs!=null?'，耗时 '+r.elapsedMs+' ms':''}。`+(r.commentQualified?'合成评论输出通过校验，可设为默认。':(r.failureCode?explain(r.failureCode):'评论输出未通过校验，暂不能设为评论分析默认。')):'配置已保存，测试失败：'+explain(r?.failureCode);
         }
       }
       await load();

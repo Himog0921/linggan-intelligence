@@ -17,8 +17,9 @@ const server=http.createServer(async(req,res)=>{
   const text=body.model==='synthetic-bad'||(actualWork&&material.body.includes('[BAD_OUTPUT]'))?'invalid JSON':JSON.stringify(output);
   res.writeHead(200,{'Content-Type':'text/event-stream'});
   const chunk=(delta,finish_reason=null)=>({id:'synthetic-response',object:'chat.completion.chunk',created:1,model:body.model,choices:[{index:0,delta,finish_reason}]});
-  res.write(`data: ${JSON.stringify(chunk({role:'assistant',content:text}))}\n\n`);res.write(`data: ${JSON.stringify(chunk({},'stop'))}\n\n`);
-  if(body.model!=='synthetic-no-usage')res.write(`data: ${JSON.stringify({id:'synthetic-response',choices:[],usage:{prompt_tokens:800,completion_tokens:100,total_tokens:900}})}\n\n`);
+  const limited=body.model==='synthetic-limit';
+  res.write(`data: ${JSON.stringify(chunk({role:'assistant',content:text}))}\n\n`);res.write(`data: ${JSON.stringify(chunk({},limited?'length':'stop'))}\n\n`);
+  if(body.model!=='synthetic-no-usage')res.write(`data: ${JSON.stringify({id:'synthetic-response',choices:[],usage:{prompt_tokens:800,completion_tokens:limited?1024:100,total_tokens:limited?1824:900}})}\n\n`);
   res.end('data: [DONE]\n\n');
 });
 server.listen(0,'127.0.0.1',()=>process.stdout.write(`http://127.0.0.1:${server.address().port}/v1\n`));

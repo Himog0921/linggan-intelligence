@@ -63,12 +63,21 @@ export async function execute(r) {
     }
     const model={id:r.modelId,name:r.modelId,api:r.api,provider:'linggan-explicit',baseUrl:base.href,
       reasoning:false,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:200000,maxTokens:r.maxOutputTokens};
+    // Our current contract accepts final text only. DeepSeek V4 otherwise defaults
+    // to thinking even when the local model metadata says reasoning:false.
+    const deepseekTextOnly=base.hostname==='api.deepseek.com'&&['deepseek-v4-flash','deepseek-v4-pro','deepseek-v4-flash-vision-exp'].includes(r.modelId);
+    const onPayload=payload=>{
+      if(!deepseekTextOnly)return payload;
+      if(r.api==='openai-responses')return {...payload,reasoning:{effort:'none'}};
+      if(r.api==='openai-completions')return {...payload,thinking:{type:'disabled'}};
+      return payload;
+    };
     const models=createModels();
     models.setProvider(createProvider({id:model.provider,baseUrl:base.href,models:[model],
       auth:{apiKey:{name:'Explicit connection',resolve:async()=>({auth:{apiKey:r.apiKey}})}},api:API[r.api]()}));
     agent=new Agent({initialState:{systemPrompt:r.system,model,tools:[]},
       streamFn:(m,c,o)=>models.streamSimple(m,c,{...o,signal:AbortSignal.any([abort.signal,...(o?.signal?[o.signal]:[])]),
-        apiKey:r.apiKey,fetch:transport,timeoutMs:r.timeoutMs,maxRetries:0,maxTokens:r.maxOutputTokens}),
+        apiKey:r.apiKey,fetch:transport,onPayload,timeoutMs:r.timeoutMs,maxRetries:0,maxTokens:r.maxOutputTokens}),
       shouldStopAfterTurn:()=>true,beforeToolCall:()=>({block:true,reason:'No tools granted',terminate:true})});
     await agent.prompt(r.prompt);
     if(abort.signal.aborted||Date.now()-started>=r.timeoutMs)throw new Rejected('provider_timeout');

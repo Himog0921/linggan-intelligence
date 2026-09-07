@@ -172,7 +172,10 @@ pub async fn probe_model(
         Ok(p) => {
             let mut v = safe_result(p);
             if r.operation == "probe" {
-                v["modelCallable"] = json!(p.ok);
+                // A generation stopped at its output cap proves a model response,
+                // but never qualifies the incomplete comment analysis.
+                v["modelCallable"] =
+                    json!(p.ok || p.failure_code.as_deref() == Some("output_limit"));
                 v["commentQualified"] = json!(
                     p.ok && p
                         .text
