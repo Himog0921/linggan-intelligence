@@ -506,7 +506,7 @@ pub(crate) fn lifecycle_primary_copy(
 ) -> (&'static str, &'static str) {
     match (target_kind, lifecycle_state) {
         ("creator", "pending_decision") => ("neutral", "尚未建档"),
-        ("creator", "archiving") => ("warn", "建档中"),
+        ("creator", "archiving") => ("warn", "建档待处理"),
         ("creator", "archived" | "monitoring" | "paused") => ("ok", "档案已建立"),
         ("creator", "dismissed") => ("neutral", "已停止观察"),
         ("keyword", "pending_decision") => ("neutral", "等待决定"),
@@ -551,10 +551,10 @@ fn statusline(target: &ObservationTarget, completeness: TargetArchiveRead<'_>) -
     } else {
         match completeness {
             TargetArchiveRead::Unavailable => "档案状态暂时无法读取",
-            TargetArchiveRead::Known(Some(value)) if value.work_in_progress => "建档中",
+            TargetArchiveRead::Known(Some(value)) if value.work_in_progress => "建档待处理",
             TargetArchiveRead::Known(Some(value)) if value.quarantined > 0 => "档案有问题",
             TargetArchiveRead::Known(Some(value)) if value.requires_directory_rebuild() => {
-                "目录待重建"
+                "待建标准目录"
             }
             TargetArchiveRead::Known(None) => "尚未建档",
             TargetArchiveRead::Known(Some(value)) if value.is_untouched() => "尚未建档",
@@ -592,7 +592,7 @@ fn drawer_head_facts(
             TargetArchiveRead::Known(None) => "尚未建立".to_owned(),
             TargetArchiveRead::Known(Some(value)) if value.is_untouched() => "尚未建立".to_owned(),
             TargetArchiveRead::Known(Some(value)) if value.requires_directory_rebuild() => {
-                "目录待重建".to_owned()
+                "待建标准目录".to_owned()
             }
             TargetArchiveRead::Known(Some(value)) if value.works_listed > 0 => format!(
                 "{} / {}",
@@ -674,7 +674,7 @@ fn drawer_primary_action(
         | TargetPrimaryAction::ViewArchiveProblems
         | TargetPrimaryAction::ViewArchiveUnavailable => {
             let (label, fragment) = match action {
-                TargetPrimaryAction::ViewArchiveProgress => ("查看进度", "target-archive"),
+                TargetPrimaryAction::ViewArchiveProgress => ("查看建档状态", "target-archive"),
                 TargetPrimaryAction::ViewArchiveProblems => ("查看档案问题", "archive-problems"),
                 TargetPrimaryAction::ViewArchiveUnavailable => ("查看档案", "target-archive"),
                 _ => unreachable!(),
@@ -1280,12 +1280,21 @@ fn archive_tab(
         (Some(value), TargetPrimaryAction::RebuildDirectory)
             if value.requires_directory_rebuild() =>
         {
-            r#"<div id="archive-problems" class="c-dw-problem" tabindex="-1"><b>现有记录不是可用的作品目录基线</b><p>旧的采集记录会保留为历史，但不会再拿来当作品目录或详情分母。先重新获取主页作品链接（最多 200 篇；页面结束则按实际结束），再逐篇补齐详情。</p></div>"#.to_owned()
+            r#"<div id="archive-problems" class="c-dw-problem" tabindex="-1"><b>尚未形成受当前标准证明的目录边界</b><p>已有历史记录会保留；建立标准目录会获取主页作品链接（最多 200 篇；页面结束则按实际结束），再逐篇补齐详情。它不会删除或覆盖已有作品。</p></div>"#.to_owned()
         }
         _ => String::new(),
     };
+    let history_boundary = match archive.value() {
+        Some(value)
+            if value.directory_baseline
+                == linggan_evidence::ArchiveDirectoryBaseline::HistoricalDirectory =>
+        {
+            r#"<p class="c-dw-note">当前目录来自已接纳的历史采集记录。它准确说明本库已有多少作品与详情，不把这个数量写成平台总作品数；后续巡查接纳的新作品会进入同一目录。</p>"#
+        }
+        _ => "",
+    };
     let action = match primary_action {
-        TargetPrimaryAction::ViewArchiveProgress => r#"<span class="c-dw-action-note">档案正在建立，当前范围和待补缺口会随真实采集结果更新。</span>"#.to_owned(),
+        TargetPrimaryAction::ViewArchiveProgress => r#"<span class="c-dw-action-note">已有建档任务等待处理或执行中；本页不会重复提交。目录和详情只会随真实采集回执更新。</span>"#.to_owned(),
         TargetPrimaryAction::ViewArchiveProblems => r#"<span class="c-dw-action-note">当前先处理上面的隔离记录；页面不会把它们算成已完成。</span>"#.to_owned(),
         TargetPrimaryAction::ViewArchiveUnavailable => r#"<span class="c-dw-action-note">档案状态暂时无法读取，本页不会在未知状态下发起写操作。</span>"#.to_owned(),
         TargetPrimaryAction::EstablishArchive
@@ -1322,6 +1331,7 @@ fn archive_tab(
                <div><b>{analyzable}</b><span>当前可分析</span></div>
              </div>
              <p class="c-dw-note">建立档案会读取创作者主页当前可见的前 200 篇作品链接作为上限，先建立去重目录，再逐步补齐详情与已授权的数据化处理。200 不是平台总作品数。</p>
+             {history_boundary}
              <div class="c-dw-material-boundary"><b>评论与深层材料</b><p>评论正文、媒体、OCR 与 ASR 结果仍在语料页按具体作品查看，不在这里合成完成数字。</p></div>
              {problems}
              {action}
@@ -1332,7 +1342,7 @@ fn archive_tab(
 fn archive_action_label(action: TargetPrimaryAction) -> &'static str {
     match action {
         TargetPrimaryAction::EstablishArchive => "建立档案",
-        TargetPrimaryAction::RebuildDirectory => "重建目录",
+        TargetPrimaryAction::RebuildDirectory => "建立标准目录",
         TargetPrimaryAction::ContinueArchive => "继续完善",
         _ => unreachable!("only archive write actions have labels"),
     }
@@ -1435,7 +1445,7 @@ mod tests {
                 &archiving_target,
                 TargetArchiveRead::Known(Some(&in_progress))
             )
-            .contains("建档中")
+            .contains("建档待处理")
         );
 
         let partial = ArchiveCompleteness {
@@ -1530,9 +1540,9 @@ mod tests {
             TargetListContext::default(),
         );
 
-        assert!(html.contains(">重建目录</button>"));
-        assert!(html.contains("旧的采集记录会保留为历史"));
-        assert!(html.contains("目录待重建"));
+        assert!(html.contains(">建立标准目录</button>"));
+        assert!(html.contains("已有历史记录会保留"));
+        assert!(html.contains("待建标准目录"));
         assert!(!html.contains(">31</b><span>作品目录"));
         assert!(!html.contains(">27 / 31</b><span>详情进度"));
     }

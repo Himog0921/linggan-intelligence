@@ -3477,7 +3477,10 @@ async fn collection_target_deep_archive(
         let code = format!("archive_{}", outcome.outcome.code());
         return Redirect::to(&target_archive_return_path(&form, Some(&code)));
     };
-    Redirect::to(&target_archive_return_path(&form, None))
+    Redirect::to(&target_archive_return_path(
+        &form,
+        Some("archive_requested"),
+    ))
 }
 
 /// COLLECTION-001 · 对勾选的来源做批量操作。

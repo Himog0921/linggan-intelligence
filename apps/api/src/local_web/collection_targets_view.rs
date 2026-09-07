@@ -70,7 +70,7 @@ pub fn render_stored_targets(
               <div class="c-tg-directory">{creator_table}{keyword_table}</div>
             </section>"#,
         count = targets.len(),
-        failure = failure_markup(error),
+        failure = action_feedback_markup(error),
     );
     replace_target_state(base, &list)
 }
@@ -135,40 +135,87 @@ fn replace_target_state(base: &str, replacement: &str) -> String {
     format!("{}{}{}", &base[..open], replacement, &base[close..])
 }
 
-/// 上一次动作失败时说明原因。
-///
-/// 失败必须看得见。跳转回来却什么都不说，会让人以为动作成功了——那比「点了没反应」
-/// 更糟，因为它会让人以为系统里正在跑一件其实没跑的事。
-fn failure_markup(error: Option<&str>) -> String {
+/// 上一次动作的回执必须看得见。跳转回来却什么都不说，会让人以为动作成功了——那比
+/// 「点了没反应」更糟，因为它会让人以为系统里正在跑一件其实没跑的事。
+fn action_feedback_markup(error: Option<&str>) -> String {
     let Some(code) = error else {
         return String::new();
     };
-    let explanation = match code {
-        "identity_unrecognised" => {
-            "认不出这是谁。创作者请粘主页链接（里面带平台 ID），关键词直接写词就行。"
-        }
-        "store_failed" => "没有保存成功。这个目标可能已经在观察列表里了。",
-        "archive_not_requestable" => {
-            "现在不能建立或继续完善档案。目标可能已有同类工作在进行，或当前状态不允许再次发起。"
-        }
-        "archive_in_progress" => "已有一批作品正在补齐，请先查看当前进度。",
-        "archive_nothing_to_continue" => "当前作品目录没有待补详情，无需重复发起。",
-        "archive_refuse" => "当前没有覆盖本次范围的采集授权，请完成授权后再试。",
-        "archive_defer" => "当前暂无可用采集能力，或今天的采集额度已用完；稍后可以重试。",
-        "archive_merge" => "已有相同建档正在进行，系统不会重复发起。",
-        "archive_lease_failed" => "建档已完成准备，但暂时没有可用执行资源；稍后可以重试。",
-        "archive_authorization_below_200" => {
-            "当前采集授权不足以支持前 200 篇作品的有界建档。本次没有缩小范围后静默开始。"
-        }
-        "batch_nothing_selected" => "没有选中任何观察目标。",
-        "batch_unknown_action" => "当前不支持这个操作。",
-        "batch_failed" => "这次操作没有完成，也没有改动任何观察目标。",
-        "monitoring_toggle_failed" => "巡查开关没有切换成功。",
-        "read_model_not_connected" => "当前无法读取目标状态，这次没有产生任何改动。",
-        _ => "上一次动作没有完成。",
+    let (class, heading, explanation) = match code {
+        "archive_requested" => (
+            "c-src-feedback c-src-feedback-ok",
+            "建档已入队",
+            "已记录这次建立档案请求。系统会先获取主页作品链接（最多 200 篇或主页实际结束），再逐篇补齐详情；目录和详情只会在接纳真实回执后更新。",
+        ),
+        "archive_merge" => (
+            "c-src-feedback c-src-feedback-warn",
+            "未重复提交",
+            "已有相同建档任务等待处理或执行中。已打开建档状态；本次没有创建第二个任务。",
+        ),
+        "identity_unrecognised" => (
+            "c-src-failure",
+            "没有完成",
+            "认不出这是谁。创作者请粘主页链接（里面带平台 ID），关键词直接写词就行。",
+        ),
+        "store_failed" => (
+            "c-src-failure",
+            "没有完成",
+            "没有保存成功。这个目标可能已经在观察列表里了。",
+        ),
+        "archive_not_requestable" => (
+            "c-src-failure",
+            "没有完成",
+            "现在不能建立或继续完善档案。目标可能已有同类工作在进行，或当前状态不允许再次发起。",
+        ),
+        "archive_in_progress" => (
+            "c-src-failure",
+            "没有完成",
+            "已有一批作品正在补齐，请先查看当前进度。",
+        ),
+        "archive_nothing_to_continue" => (
+            "c-src-failure",
+            "没有完成",
+            "当前作品目录没有待补详情，无需重复发起。",
+        ),
+        "archive_refuse" => (
+            "c-src-failure",
+            "没有完成",
+            "当前没有覆盖本次范围的采集授权，请完成授权后再试。",
+        ),
+        "archive_defer" => (
+            "c-src-failure",
+            "没有完成",
+            "当前暂无可用采集能力，或今天的采集额度已用完；稍后可以重试。",
+        ),
+        "archive_lease_failed" => (
+            "c-src-failure",
+            "没有完成",
+            "建档已完成准备，但暂时没有可用执行资源；稍后可以重试。",
+        ),
+        "archive_authorization_below_200" => (
+            "c-src-failure",
+            "没有完成",
+            "当前采集授权不足以支持前 200 篇作品的有界建档。本次没有缩小范围后静默开始。",
+        ),
+        "batch_nothing_selected" => ("c-src-failure", "没有完成", "没有选中任何观察目标。"),
+        "batch_unknown_action" => ("c-src-failure", "没有完成", "当前不支持这个操作。"),
+        "batch_failed" => (
+            "c-src-failure",
+            "没有完成",
+            "这次操作没有完成，也没有改动任何观察目标。",
+        ),
+        "monitoring_toggle_failed" => ("c-src-failure", "没有完成", "巡查开关没有切换成功。"),
+        "read_model_not_connected" => (
+            "c-src-failure",
+            "没有完成",
+            "当前无法读取目标状态，这次没有产生任何改动。",
+        ),
+        _ => ("c-src-failure", "没有完成", "上一次动作没有完成。"),
     };
     format!(
-        r#"<p class="c-src-failure"><b>没有完成</b>{explanation}</p>"#,
+        r#"<p class="{class}" role="status"><b>{heading}</b>{explanation}</p>"#,
+        class = class,
+        heading = heading,
         explanation = escape(explanation),
     )
 }
@@ -314,10 +361,16 @@ fn archive_state(
     use super::target_drawer::TargetArchiveRead;
     let (tone, label) = match archive {
         TargetArchiveRead::Unavailable => ("neutral", "档案暂不可读"),
-        TargetArchiveRead::Known(Some(value)) if value.work_in_progress => ("warn", "建档中"),
+        TargetArchiveRead::Known(Some(value)) if value.work_in_progress => ("warn", "建档待处理"),
         TargetArchiveRead::Known(Some(value)) if value.quarantined > 0 => ("warn", "档案有问题"),
+        TargetArchiveRead::Known(Some(value))
+            if value.directory_baseline
+                == linggan_evidence::ArchiveDirectoryBaseline::HistoricalDirectory =>
+        {
+            ("ok", "已有目录")
+        }
         TargetArchiveRead::Known(Some(value)) if value.requires_directory_rebuild() => {
-            ("warn", "目录待重建")
+            ("warn", "待建标准目录")
         }
         TargetArchiveRead::Known(None) => ("neutral", "尚未建立"),
         TargetArchiveRead::Known(Some(value)) if value.is_untouched() => ("neutral", "尚未建立"),
@@ -402,7 +455,7 @@ fn row_action(
         | TargetPrimaryAction::ViewArchiveProblems
         | TargetPrimaryAction::ViewArchiveUnavailable => {
             let (label, fragment) = match action {
-                TargetPrimaryAction::ViewArchiveProgress => ("查看进度", "target-archive"),
+                TargetPrimaryAction::ViewArchiveProgress => ("查看建档状态", "target-archive"),
                 TargetPrimaryAction::ViewArchiveProblems => ("查看档案问题", "archive-problems"),
                 TargetPrimaryAction::ViewArchiveUnavailable => ("查看档案", "target-archive"),
                 _ => unreachable!(),
@@ -424,7 +477,7 @@ fn row_action(
         | TargetPrimaryAction::ContinueArchive) => {
             let label = match action {
                 TargetPrimaryAction::EstablishArchive => "建立档案",
-                TargetPrimaryAction::RebuildDirectory => "重建目录",
+                TargetPrimaryAction::RebuildDirectory => "建立标准目录",
                 TargetPrimaryAction::ContinueArchive => "继续完善",
                 _ => unreachable!(),
             };
@@ -714,11 +767,15 @@ mod tests {
 
     #[test]
     fn archive_progress_failures_use_business_language() {
-        assert!(failure_markup(Some("archive_in_progress")).contains("已有一批作品正在补齐"));
         assert!(
-            failure_markup(Some("archive_nothing_to_continue"))
+            action_feedback_markup(Some("archive_in_progress")).contains("已有一批作品正在补齐")
+        );
+        assert!(
+            action_feedback_markup(Some("archive_nothing_to_continue"))
                 .contains("当前作品目录没有待补详情")
         );
+        assert!(action_feedback_markup(Some("archive_requested")).contains("建档已入队"));
+        assert!(action_feedback_markup(Some("archive_merge")).contains("未重复提交"));
     }
 
     #[test]
@@ -747,10 +804,72 @@ mod tests {
             TargetListContext::default(),
         );
 
-        assert!(html.contains("目录待重建"));
-        assert!(html.contains(">重建目录</button>"));
+        assert!(html.contains("待建标准目录"));
+        assert!(html.contains(">建立标准目录</button>"));
         assert!(!html.contains("31 篇"));
         assert!(!html.contains("27 / 31"));
+    }
+
+    #[test]
+    fn completed_historical_directory_remains_visible_and_actionable() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let mut creator = target("creator", Some("已有目录作者"));
+        creator.lifecycle_state = "monitoring".to_owned();
+        creator.monitoring_enabled = true;
+        let mut completeness = HashMap::new();
+        completeness.insert(
+            creator.identity_key.clone(),
+            ArchiveCompleteness {
+                started: true,
+                attempted: true,
+                works_listed: 41,
+                details_captured: 41,
+                directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::HistoricalDirectory,
+                ..ArchiveCompleteness::default()
+            },
+        );
+        let html = render_stored_targets(
+            &base,
+            &[creator],
+            &HashMap::new(),
+            Some(&completeness),
+            None,
+            TargetListContext::default(),
+        );
+
+        assert!(html.contains("已有目录"));
+        assert!(html.contains("41 篇"));
+        assert!(html.contains("41 / 41 · 缺 0"));
+        assert!(html.contains(">查看档案</a>"));
+        assert!(!html.contains("建立标准目录"));
+    }
+
+    #[test]
+    fn pending_legacy_archive_opens_status_without_offering_a_duplicate_request() {
+        let base = format!("{EMPTY_STATE_OPEN}empty{EMPTY_STATE_CLOSE}");
+        let creator = target("creator", Some("待处理作者"));
+        let mut completeness = HashMap::new();
+        completeness.insert(
+            creator.identity_key.clone(),
+            ArchiveCompleteness {
+                started: true,
+                work_in_progress: true,
+                directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Building,
+                ..ArchiveCompleteness::default()
+            },
+        );
+        let html = render_stored_targets(
+            &base,
+            &[creator],
+            &HashMap::new(),
+            Some(&completeness),
+            None,
+            TargetListContext::default(),
+        );
+
+        assert!(html.contains("建档待处理"));
+        assert!(html.contains(">查看建档状态</a>"));
+        assert!(!html.contains(">建立档案</button>"));
     }
 
     #[test]

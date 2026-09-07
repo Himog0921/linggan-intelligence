@@ -368,6 +368,127 @@ async fn surface_ended_directory_from_a_legacy_smaller_quota_requires_rebuild() 
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn fully_detailed_legacy_directory_stays_visible_without_claiming_the_200_work_boundary() {
+    let database = proof_database("dossier_historical_complete_directory").await;
+    let installation = ready_installation(&database, "dossier-historical-complete").await;
+    let target_ref = seed_creator_target(&database, "creator-historical-complete").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let old_root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 3, "surface_ended")
+        .await;
+
+    // Make this immutable root represent pre-200-contract history, then add a detail Package
+    // for each accepted discovery work through the exact target → Work → Lease → Task chain.
+    sqlx::query(
+        "ALTER TABLE linggan_runtime_task DISABLE TRIGGER linggan_runtime_task_is_append_only",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_runtime_task task \
+         SET task_spec=jsonb_set(task.task_spec,'{maximumQuota}','3'::jsonb) \
+         FROM collection_work_order_lease_task lease_task \
+         JOIN collection_work_order_lease lease USING(lease_ref) \
+         WHERE task.task_id=lease_task.task_id AND lease.work_order_ref=$1",
+    )
+    .bind(old_root)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "ALTER TABLE linggan_runtime_task ENABLE TRIGGER linggan_runtime_task_is_append_only",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let lease_ref: Uuid = sqlx::query_scalar(
+        "SELECT lease_ref FROM collection_work_order_lease WHERE work_order_ref=$1",
+    )
+    .bind(old_root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let works: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT finding.content_public_ref \
+         FROM linggan_material_discovery_finding finding \
+         JOIN linggan_runtime_capture_package package ON package.package_ref=finding.package_ref \
+         JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+         JOIN collection_work_order_lease lease USING(lease_ref) \
+         WHERE lease.work_order_ref=$1",
+    )
+    .bind(old_root)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(works.len(), 3);
+    for (index, work_ref) in works.iter().enumerate() {
+        let task_id = seed_bound_task(
+            &database,
+            lease_ref,
+            10 + i32::try_from(index).unwrap(),
+            "content_detail",
+            serde_json::json!({"contentExternalId": format!("legacy-detail-{index}")}),
+        )
+        .await;
+        let package =
+            seed_runtime_package(&database, task_id, "content_detail", "2026-09-04T02:00:00Z")
+                .await;
+        sqlx::query(
+            "INSERT INTO linggan_runtime_record_disposition \
+               (package_ref,record_ordinal,disposition,reason) \
+             VALUES ($1,0,'accepted_for_library_content','historical complete directory proof')",
+        )
+        .bind(package)
+        .execute(database.pool())
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO linggan_material_content_detail \
+               (material_ref,content_public_ref,package_ref,record_ordinal,observed_at, \
+                title,title_state,body_text,body_state,creator_display_name, \
+                creator_display_name_state,published_at_source_text, \
+                published_at_source_text_state,searchable_text) \
+             VALUES ($1,$2,$3,0,'2026-09-04T02:00:00Z', \
+                     '历史完整详情','KNOWN',NULL,'UNKNOWN',NULL,'UNKNOWN', \
+                     NULL,'UNKNOWN','历史完整详情')",
+        )
+        .bind(Uuid::new_v4())
+        .bind(work_ref)
+        .bind(package)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    }
+
+    let baseline = read_archive_completeness(&database, "xhs").await.unwrap();
+    let baseline = baseline.get("creator-historical-complete").unwrap();
+    assert_eq!(
+        baseline.directory_baseline,
+        linggan_evidence::ArchiveDirectoryBaseline::HistoricalDirectory
+    );
+    assert!(baseline.has_displayable_directory());
+    assert_eq!((baseline.works_listed, baseline.details_captured), (3, 3));
+    assert!(
+        !baseline.requires_directory_rebuild(),
+        "existing complete in-library history is not relabelled as missing"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
 async fn quarantined_directory_record_remains_an_archive_problem() {
     let database = proof_database("dossier_quarantined_directory").await;
     let installation = ready_installation(&database, "dossier-quarantined-directory").await;

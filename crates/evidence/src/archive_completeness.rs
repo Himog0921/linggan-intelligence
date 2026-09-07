@@ -22,6 +22,9 @@ pub enum ArchiveDirectoryBaseline {
     NotStarted,
     Building,
     Ready,
+    /// 早于 200 篇目录合同的已接纳目录仍是当前在库事实。它可以展示和接收巡查增量，
+    /// 但不能被叙述成已经证明了创作者主页的完整边界。
+    HistoricalDirectory,
     RebuildRequired,
 }
 
@@ -34,9 +37,9 @@ pub struct ArchiveCompleteness {
     pub started: bool,
     /// 是否有执行 Attempt 已经从这张目标自己的 deep-archive Lease Task 开始。
     pub attempted: bool,
-    /// 是否存在仍有效且尚未释放的建档/完善租约。
+    /// 是否存在执行中的租约，或尚未领取、等待重试的既有建档任务。
     ///
-    /// 这是「查看进度」的 durable 依据；不能用目标生命周期或一次按钮点击猜测在途状态。
+    /// 这是「查看建档状态」的 durable 依据；不能用目标生命周期或一次按钮点击猜测在途状态。
     pub work_in_progress: bool,
     /// 作者档案：拿到过几次公开资料。
     pub author_profile_captures: i64,
@@ -64,7 +67,10 @@ impl ArchiveCompleteness {
     }
 
     pub fn has_displayable_directory(&self) -> bool {
-        self.directory_baseline == ArchiveDirectoryBaseline::Ready
+        matches!(
+            self.directory_baseline,
+            ArchiveDirectoryBaseline::Ready | ArchiveDirectoryBaseline::HistoricalDirectory
+        )
     }
 
     pub fn requires_directory_rebuild(&self) -> bool {
@@ -301,6 +307,83 @@ pub async fn read_archive_completeness(
                 },
             },
         );
+    }
+
+    // The 200-link contract applies to a newly-established standard directory.  It does not
+    // erase an older target-scoped directory that has already been accepted.  Keep those
+    // historical works visible when their details are complete; the UI can then say exactly
+    // what is known instead of converting a real 41/41 archive into an empty “rebuild” row.
+    let historical_rows: Vec<(String, i64, i64)> = sqlx::query_as(
+        "SELECT target.identity_key, \
+                count(DISTINCT finding.content_public_ref) FILTER ( \
+                    WHERE package.package_kind='profile_discovery' \
+                      AND disposition.disposition <> 'quarantined' \
+                ) AS works_listed, \
+                count(DISTINCT detail.content_public_ref) FILTER ( \
+                    WHERE package.package_kind='content_detail' \
+                      AND disposition.disposition <> 'quarantined' \
+                ) AS details_captured \
+         FROM collection_observation_target target \
+         JOIN collection_work_order work_order USING(target_ref) \
+         JOIN collection_work_order_lease lease USING(work_order_ref) \
+         JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+         JOIN linggan_runtime_capture_package package ON package.task_id=lease_task.task_id \
+         JOIN linggan_runtime_record_disposition disposition ON disposition.package_ref=package.package_ref \
+         LEFT JOIN linggan_material_discovery_finding finding \
+           ON finding.package_ref=package.package_ref AND finding.record_ordinal=disposition.record_ordinal \
+         LEFT JOIN linggan_material_content_detail detail \
+           ON detail.package_ref=package.package_ref AND detail.record_ordinal=disposition.record_ordinal \
+         WHERE target.platform=$1 AND target.target_kind='creator' \
+           AND work_order.lane='deep_archive' AND package.platform=$1 \
+           AND disposition.disposition <> 'retained_uninterpreted' \
+         GROUP BY target.identity_key",
+    )
+    .bind(platform)
+    .fetch_all(database.pool())
+    .await?;
+    for (author_external_id, works_listed, details_captured) in historical_rows {
+        let archive = totals.entry(author_external_id).or_default();
+        archive.started = true;
+        // A current progressive root takes precedence over any earlier accepted rows.  Until
+        // that root has reached its bounded result, its old partial history must not leak back
+        // into the visible denominator.  The historical fallback is only for targets that do
+        // not have an active current root (the legacy South-Pumpkin case).
+        if !archive.work_in_progress
+            && archive.directory_baseline != ArchiveDirectoryBaseline::Ready
+            && works_listed > 0
+            && details_captured >= works_listed
+        {
+            archive.works_listed = archive.works_listed.max(works_listed);
+            archive.details_captured = archive.details_captured.max(details_captured);
+            archive.directory_baseline = ArchiveDirectoryBaseline::HistoricalDirectory;
+        }
+    }
+
+    // Admission deduplicates every target-scoped deep-archive WorkOrder, including jobs created
+    // before progressive markers existed.  Read the same durable pending state here so the UI
+    // never offers “建立档案” and then immediately reports that the identical job already exists.
+    let pending_rows: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT target.identity_key \
+         FROM collection_observation_target target \
+         JOIN collection_work_order work_order USING(target_ref) \
+         LEFT JOIN collection_work_order_lease lease USING(work_order_ref) \
+         LEFT JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+         WHERE target.platform=$1 AND target.target_kind='creator' \
+           AND work_order.lane='deep_archive' \
+           AND (work_order.queue_state='queued' OR lease_task.execution_state IN ('pending','in_progress'))",
+    )
+    .bind(platform)
+    .fetch_all(database.pool())
+    .await?;
+    for author_external_id in pending_rows {
+        let archive = totals.entry(author_external_id).or_default();
+        archive.started = true;
+        archive.work_in_progress = true;
+        if archive.directory_baseline != ArchiveDirectoryBaseline::Ready
+            && archive.directory_baseline != ArchiveDirectoryBaseline::HistoricalDirectory
+        {
+            archive.directory_baseline = ArchiveDirectoryBaseline::Building;
+        }
     }
     Ok(totals)
 }
