@@ -1658,9 +1658,7 @@ pub async fn apply_monitor_rule_command(
                      FROM collection_monitor_rule_revision WHERE rule_revision_ref=$2),86400), \
                  monitor_schedule_anchor_at=CASE WHEN $3 THEN scope_001_now() ELSE NULL END, \
                  monitor_schedule_slot_seconds=CASE WHEN $3 THEN $4 ELSE 0 END, \
-                 monitor_next_run_at=CASE WHEN $3 THEN scope_001_now() + make_interval(secs => \
-                     COALESCE((SELECT fixed_interval_seconds \
-                       FROM collection_monitor_rule_revision WHERE rule_revision_ref=$2),86400) + $4) \
+                 monitor_next_run_at=CASE WHEN $3 THEN scope_001_now() + make_interval(secs => $4) \
                      ELSE NULL END, \
                  monitor_missed_run_count=0 \
              WHERE target_ref=$1",
@@ -2200,14 +2198,82 @@ async fn copy_monitor_rule_revision(
 async fn apply_monitor_lifecycle_transition(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
-    _target_kind: &str,
+    target_kind: &str,
     lifecycle_state: &str,
     kind: MonitorCommandKind,
     automatic_enabled: bool,
     rule_revision_ref: Uuid,
     actor: MonitorCommandActor,
 ) -> Result<(), sqlx::Error> {
-    let next_state = match kind {
+    let repairing_invalid_keyword_lifecycle =
+        target_kind == "keyword" && matches!(lifecycle_state, "archiving" | "archived");
+    let next_state = monitor_lifecycle_next_state(
+        lifecycle_state,
+        kind,
+        automatic_enabled,
+        repairing_invalid_keyword_lifecycle,
+    );
+    let Some(next_state) = next_state else {
+        return Ok(());
+    };
+    sqlx::query(
+        "UPDATE collection_observation_target SET lifecycle_state=$2, \
+                lifecycle_changed_at=scope_001_now() WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .bind(next_state)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO collection_observation_target_transition \
+             (transition_ref,target_ref,from_state,to_state,actor,reason_code,reason) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(target_ref)
+    .bind(lifecycle_state)
+    .bind(next_state)
+    .bind(actor.as_str())
+    .bind(if repairing_invalid_keyword_lifecycle {
+        "keyword_lifecycle_repaired_by_rule"
+    } else {
+        match kind {
+            MonitorCommandKind::Pause => "monitor_paused",
+            MonitorCommandKind::Resume => "monitor_resumed",
+            MonitorCommandKind::Stop => "monitor_stopped",
+            MonitorCommandKind::SaveRule if automatic_enabled => "monitor_resumed",
+            MonitorCommandKind::SaveRule => "monitor_paused",
+            MonitorCommandKind::ManualObserve => unreachable!(),
+        }
+    })
+    .bind(if repairing_invalid_keyword_lifecycle {
+        format!("规则版本 {rule_revision_ref} 修复了关键词目标遗留的 {lifecycle_state} 状态")
+    } else {
+        format!("规则版本 {rule_revision_ref}")
+    })
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+fn monitor_lifecycle_next_state(
+    lifecycle_state: &str,
+    kind: MonitorCommandKind,
+    automatic_enabled: bool,
+    repairing_invalid_keyword_lifecycle: bool,
+) -> Option<&'static str> {
+    match kind {
+        // Keyword observation has a monitor lifecycle. This also recovers a historical row
+        // before the database invariant has been applied.
+        MonitorCommandKind::SaveRule if repairing_invalid_keyword_lifecycle => {
+            Some(if automatic_enabled {
+                "monitoring"
+            } else {
+                "paused"
+            })
+        }
+        MonitorCommandKind::Resume if repairing_invalid_keyword_lifecycle => Some("monitoring"),
+        MonitorCommandKind::Pause if repairing_invalid_keyword_lifecycle => Some("paused"),
         // Observing a known target and historically archiving it are separate
         // capabilities. A creator need not first prove a complete archive in
         // order to enter ordinary automatic observation.
@@ -2237,40 +2303,7 @@ async fn apply_monitor_lifecycle_transition(
         }
         MonitorCommandKind::Stop if lifecycle_state != "dismissed" => Some("dismissed"),
         _ => None,
-    };
-    let Some(next_state) = next_state else {
-        return Ok(());
-    };
-    sqlx::query(
-        "UPDATE collection_observation_target SET lifecycle_state=$2, \
-                lifecycle_changed_at=scope_001_now() WHERE target_ref=$1",
-    )
-    .bind(target_ref)
-    .bind(next_state)
-    .execute(&mut **transaction)
-    .await?;
-    sqlx::query(
-        "INSERT INTO collection_observation_target_transition \
-             (transition_ref,target_ref,from_state,to_state,actor,reason_code,reason) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7)",
-    )
-    .bind(Uuid::new_v4())
-    .bind(target_ref)
-    .bind(lifecycle_state)
-    .bind(next_state)
-    .bind(actor.as_str())
-    .bind(match kind {
-        MonitorCommandKind::Pause => "monitor_paused",
-        MonitorCommandKind::Resume => "monitor_resumed",
-        MonitorCommandKind::Stop => "monitor_stopped",
-        MonitorCommandKind::SaveRule if automatic_enabled => "monitor_resumed",
-        MonitorCommandKind::SaveRule => "monitor_paused",
-        MonitorCommandKind::ManualObserve => unreachable!(),
-    })
-    .bind(format!("规则版本 {rule_revision_ref}"))
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
+    }
 }
 
 async fn finish_monitor_command(
@@ -2649,6 +2682,23 @@ mod tests {
         assert_eq!(first, replay, "same target must not drift across processes");
         assert!((0..86_400).contains(&first));
         assert!((0..21_600).contains(&monitor_schedule_slot_seconds(target_ref, 21_600)));
+    }
+
+    #[test]
+    fn automatic_rule_repairs_a_legacy_keyword_archive_state() {
+        assert_eq!(
+            monitor_lifecycle_next_state("archiving", MonitorCommandKind::SaveRule, true, true),
+            Some("monitoring")
+        );
+        assert_eq!(
+            monitor_lifecycle_next_state("archived", MonitorCommandKind::SaveRule, false, true),
+            Some("paused")
+        );
+        assert_eq!(
+            monitor_lifecycle_next_state("archiving", MonitorCommandKind::SaveRule, true, false),
+            None,
+            "a creator's real archive must not be advanced by a monitor-rule save"
+        );
     }
 
     /// Account eligibility and installation liveness answer different questions and must not

@@ -93,6 +93,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0037_collection_scheduler_scale.sql"),
     "\n",
     include_str!("../../../database/migrations/0038_detail_only_material_scope.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0042_keyword_monitoring_lifecycle.sql"),
 );
 
 #[tokio::test]
@@ -375,7 +377,7 @@ async fn automatic_save_rule_moves_a_paused_keyword_target_to_monitoring() {
     .await
     .expect("stable schedule phase and first next run are persisted together");
     assert!((0..interval_seconds).contains(&slot));
-    assert_eq!(first_delay_seconds, i64::from(interval_seconds + slot));
+    assert_eq!(first_delay_seconds, i64::from(slot));
 }
 
 #[tokio::test]

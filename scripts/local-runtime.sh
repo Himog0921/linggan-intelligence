@@ -211,6 +211,7 @@ migrate() {
   apply_migration_once "0039_comment_research" "$project_root/database/migrations/0039_comment_research.sql"
   apply_migration_once "0040_model_pi" "$project_root/database/migrations/0040_model_pi.sql"
   apply_migration_once "0041_observation_domain" "$project_root/database/migrations/0041_observation_domain.sql"
+  apply_migration_once "0042_keyword_monitoring_lifecycle" "$project_root/database/migrations/0042_keyword_monitoring_lifecycle.sql"
 }
 
 case "$command_name" in

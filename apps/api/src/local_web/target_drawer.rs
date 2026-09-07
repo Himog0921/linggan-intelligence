@@ -515,6 +515,9 @@ pub(crate) fn lifecycle_primary_copy(
 }
 
 pub(crate) fn lifecycle_patrol_copy(target: &ObservationTarget) -> (&'static str, &'static str) {
+    if target.monitoring_enabled && target.lifecycle_state != "monitoring" {
+        return ("warn", "状态异常，未调度");
+    }
     match target.lifecycle_state.as_str() {
         "paused" => ("warn", "巡查已暂停"),
         "dismissed" => ("neutral", "不再调度"),
@@ -1328,18 +1331,22 @@ fn patrol_tab(target: &ObservationTarget, list_context: TargetListContext<'_>) -
              <p class="c-dw-note">巡查发现的新作品和后续互动数据，在接纳后会进入同一作品目录与生命周期。当前还没有可显示的本轮新增和数据更新汇总。</p>
              <a id="{opener_id}" class="c-btn-secondary" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">管理巡查</a>
            </section>"#,
-        enabled = if target.monitoring_enabled {
-            "已开启"
-        } else {
-            "未开启"
-        },
+        enabled = lifecycle_patrol_copy(target).1,
         last = escape(
             target
                 .last_patrol_succeeded_at
                 .as_deref()
                 .unwrap_or("尚未巡查")
         ),
-        next = escape(target.next_patrol_at.as_deref().unwrap_or("—")),
+        next = escape(
+            if target.monitoring_enabled && target.lifecycle_state == "monitoring" {
+                target.next_patrol_at.as_deref().unwrap_or("待排定")
+            } else if target.monitoring_enabled {
+                "待状态修复"
+            } else {
+                "—"
+            }
+        ),
         target_ref = target.target_ref,
     )
 }
@@ -1448,6 +1455,27 @@ mod tests {
             statusline(&archiving_target, TargetArchiveRead::Unavailable)
                 .contains("档案状态暂时无法读取")
         );
+    }
+
+    #[test]
+    fn enabled_but_non_monitoring_target_is_never_presented_as_patrolling() {
+        let mut corrupted_keyword = target("archiving");
+        corrupted_keyword.target_kind = "keyword".to_owned();
+        corrupted_keyword.monitoring_enabled = true;
+        corrupted_keyword.next_patrol_at = Some("09-08 20:07".to_owned());
+
+        assert_eq!(
+            lifecycle_patrol_copy(&corrupted_keyword),
+            ("warn", "状态异常，未调度")
+        );
+        assert!(
+            statusline(&corrupted_keyword, TargetArchiveRead::Unavailable)
+                .contains("状态异常，未调度")
+        );
+        assert!(!statusline(&corrupted_keyword, TargetArchiveRead::Unavailable).contains("巡查中"));
+        let patrol = patrol_tab(&corrupted_keyword, TargetListContext::default());
+        assert!(patrol.contains("待状态修复"));
+        assert!(!patrol.contains("已开启"));
     }
 
     #[test]
