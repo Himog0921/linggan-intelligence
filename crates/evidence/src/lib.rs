@@ -31,6 +31,7 @@ mod material_query_sql;
 mod material_social_read;
 mod material_storage_key;
 mod media_acquisition;
+pub mod observation_domain;
 mod patrol_scheduler;
 mod producer_runtime;
 mod receipt;
