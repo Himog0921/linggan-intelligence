@@ -67,6 +67,9 @@ pub async fn run_model_work_once(
     store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<bool, ModelError> {
+    if crate::comment_daily_runner::run_daily_once(db, store, adapter).await? {
+        return Ok(true);
+    }
     sync_automatic_model_work(db).await?;
     let Some(reserved) = reserve_call(db).await? else {
         return Ok(false);

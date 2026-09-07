@@ -1,0 +1,104 @@
+//! Research views are recomputed from receipts and current source qualification, never model counts.
+use crate::{comment_cleaning::CLEANER_VERSION, model_settings::ModelError};
+use linggan_storage_postgres::Database;
+use serde_json::{Value, json};
+use sqlx::Row;
+use uuid::Uuid;
+pub async fn overview(db: &Database) -> Result<Value, ModelError> {
+    let schedule: Value = sqlx::query_scalar(
+        "SELECT to_jsonb(s) FROM linggan_comment_daily_schedule s WHERE singleton",
+    )
+    .fetch_one(db.pool())
+    .await?;
+    let rows=sqlx::query("SELECT b.*,(SELECT input_token_limit+output_token_limit FROM linggan_model_config WHERE config_ref=b.config_ref) AS next_reservation,b.window_start::text AS start_text,b.window_end::text AS end_text,(SELECT count(*) FROM linggan_comment_daily_item i WHERE i.batch_ref=b.batch_ref) AS total,(SELECT count(DISTINCT s.content_public_ref) FROM linggan_comment_daily_item i JOIN linggan_comment_research_readable s ON s.material_ref=i.source_ref WHERE i.batch_ref=b.batch_ref) AS works,COALESCE((SELECT jsonb_object_agg(state,n) FROM (SELECT state,count(*) n FROM linggan_comment_daily_item WHERE batch_ref=b.batch_ref GROUP BY state) counts),'{}'::jsonb) AS counts,COALESCE((SELECT sum(v.charged_tokens) FROM linggan_comment_daily_packet p JOIN linggan_model_invocation v USING(invocation_ref) WHERE p.batch_ref=b.batch_ref),0)::bigint AS charged,COALESCE((SELECT jsonb_object_agg(state,n) FROM (SELECT COALESCE(c.state,'pending') AS state,count(*) n FROM linggan_comment_daily_item i LEFT JOIN linggan_comment_clean c ON c.source_ref=i.source_ref AND c.cleaner_version='comment-clean.v1' WHERE i.batch_ref=b.batch_ref GROUP BY COALESCE(c.state,'pending')) clean_counts),'{}'::jsonb) AS cleaning FROM linggan_comment_daily_batch b ORDER BY b.window_end DESC,b.created_at DESC LIMIT 60").fetch_all(db.pool()).await?;
+    let items:Vec<_>=rows.iter().map(|r|json!({"batchRef":r.get::<Uuid,_>("batch_ref"),"kind":r.get::<String,_>("kind"),"enabled":r.get::<bool,_>("enabled"),"start":r.get::<String,_>("start_text"),"end":r.get::<String,_>("end_text"),"total":r.get::<i64,_>("total"),"works":r.get::<i64,_>("works"),"counts":r.get::<Value,_>("counts"),"cleaning":r.get::<Value,_>("cleaning"),"nextReservation":r.get::<i32,_>("next_reservation"),"chargedTokens":r.get::<i64,_>("charged"),"tokenLimit":r.get::<i64,_>("token_limit")})).collect();
+    Ok(json!({"schedule":schedule,"items":items,"limit":60,"timezone":"Asia/Shanghai"}))
+}
+pub async fn batch_detail(
+    db: &Database,
+    batch: Uuid,
+    after: Option<Uuid>,
+) -> Result<Value, ModelError> {
+    let rows=sqlx::query("SELECT i.*,s.content_public_ref,s.body_text,c.state AS clean_state,c.result AS cleaning,a.result AS analysis FROM linggan_comment_daily_item i LEFT JOIN linggan_comment_research_readable s ON s.material_ref=i.source_ref LEFT JOIN linggan_comment_clean c ON c.source_ref=s.material_ref AND c.cleaner_version=$3 LEFT JOIN linggan_comment_analysis_work a ON a.work_ref=i.analysis_ref WHERE i.batch_ref=$1 AND ($2::uuid IS NULL OR i.source_ref>$2) ORDER BY i.source_ref LIMIT 51").bind(batch).bind(after).bind(CLEANER_VERSION).fetch_all(db.pool()).await?;
+    let mut items = vec![];
+    for r in rows.iter().take(50) {
+        let readable = r.get::<Option<Uuid>, _>("content_public_ref").is_some();
+        // Source restrictions in any jointly supplied comment invalidate the derived packet output.
+        let mut analysis = r.get::<Option<Value>, _>("analysis");
+        if let Some(value) = &analysis {
+            if !context_readable(db, value).await? {
+                analysis = None;
+            }
+        }
+        items.push(json!({"sourceRef":r.get::<Uuid,_>("source_ref"),"workRef":r.get::<Option<Uuid>,_>("content_public_ref"),"body":r.get::<Option<String>,_>("body_text").map(|s|s.chars().take(160).collect::<String>()),"state":if readable{r.get::<String,_>("state")}else{"restricted".into()},"failureCode":r.get::<Option<String>,_>("failure_code"),"cleanState":r.get::<Option<String>,_>("clean_state"),"cleaningReasons":r.get::<Option<Value>,_>("cleaning").and_then(|v|v.get("reasons").cloned()),"analysis":if readable{analysis}else{None}}));
+    }
+    Ok(
+        json!({"items":items,"nextCursor":if rows.len()>50{rows.get(49).map(|r|r.get::<Uuid,_>("source_ref"))}else{None}}),
+    )
+}
+pub async fn context_readable(db: &Database, result: &Value) -> Result<bool, ModelError> {
+    let refs = match result.pointer("/contextRefs/researchSourceRefs") {
+        None => Vec::new(), // Historical v1 results use their separate parent source check.
+        Some(Value::Array(values)) => {
+            let parsed: Option<Vec<Uuid>> = values
+                .iter()
+                .map(|v| v.as_str().and_then(|s| Uuid::parse_str(s).ok()))
+                .collect();
+            let Some(refs) = parsed else {
+                return Ok(false);
+            };
+            if refs.is_empty() {
+                return Ok(false);
+            }
+            refs
+        }
+        Some(_) => return Ok(false),
+    };
+    let count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_readable WHERE material_ref=ANY($1)",
+    )
+    .bind(&refs)
+    .fetch_one(db.pool())
+    .await?;
+    if count != refs.len() as i64 {
+        return Ok(false);
+    }
+    let jobs = result
+        .pointer("/contextRefs/mediaJobs")
+        .and_then(Value::as_array);
+    if let Some(jobs) = jobs.filter(|j| !j.is_empty()) {
+        let work = result
+            .pointer("/contextRefs/workRef")
+            .and_then(Value::as_str)
+            .and_then(|s| Uuid::parse_str(s).ok())
+            .ok_or(ModelError::Source)?;
+        let current = linggan_evidence::read_work_resource(db, work)
+            .await
+            .map_err(|_| ModelError::Source)?;
+        let available = current
+            .as_ref()
+            .and_then(|w| w.inspector.get("derivatives"))
+            .and_then(Value::as_array);
+        if !jobs.iter().all(|job| {
+            available.is_some_and(|a| {
+                a.iter().any(|d| {
+                    d["jobRef"] == *job && d["state"] == "ACQUIRED" && d["displayText"].is_string()
+                })
+            })
+        }) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+pub async fn source_states(db: &Database, refs: &[Uuid]) -> Result<Value, ModelError> {
+    let rows=sqlx::query("SELECT s.material_ref,c.state,c.result,COALESCE((SELECT i.state FROM linggan_comment_daily_item i JOIN linggan_comment_daily_batch b USING(batch_ref) WHERE i.source_ref=s.material_ref ORDER BY b.created_at DESC,b.batch_ref DESC LIMIT 1),(SELECT state FROM linggan_comment_analysis_work a WHERE a.source_ref=s.material_ref ORDER BY created_at DESC,work_ref DESC LIMIT 1)) AS analysis_state FROM linggan_comment_research_readable s LEFT JOIN linggan_comment_clean c ON c.source_ref=s.material_ref AND c.cleaner_version=$2 WHERE s.material_ref=ANY($1)").bind(refs).bind(CLEANER_VERSION).fetch_all(db.pool()).await?;
+    Ok(json!(rows.iter().map(|r|json!({"sourceRef":r.get::<Uuid,_>("material_ref"),"cleanState":r.get::<Option<String>,_>("state"),"cleaning":r.get::<Option<Value>,_>("result").map(|v|json!({"text":v["text"].as_str().map(|s|s.chars().take(4000).collect::<String>()),"reasons":v["reasons"]})),"analysisState":r.get::<Option<String>,_>("analysis_state")})).collect::<Vec<_>>()))
+}
+
+pub async fn cleaning_members(db: &Database, state: &str) -> Result<Vec<Uuid>, ModelError> {
+    if !["pending", "direct", "context", "low_information", "anomaly"].contains(&state) {
+        return Err(ModelError::Invalid);
+    }
+    Ok(sqlx::query_scalar("SELECT s.material_ref FROM linggan_comment_research_readable s LEFT JOIN linggan_comment_clean c ON c.source_ref=s.material_ref AND c.cleaner_version=$2 WHERE COALESCE(c.state,'pending')=$1").bind(state).bind(CLEANER_VERSION).fetch_all(db.pool()).await?)
+}

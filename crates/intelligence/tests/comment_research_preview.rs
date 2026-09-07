@@ -54,6 +54,33 @@ async fn prepare_comment_research_browser_preview() {
             first = Some((source_ref, body));
         }
     }
+    comment(
+        &db,
+        "preview-note-2",
+        "preview-reaction",
+        "😭😭😭",
+        "2026-08-28T10:00:00Z",
+    )
+    .await;
+    comment(
+        &db,
+        "preview-note-2",
+        "preview-short",
+        "我也是！！",
+        "2026-08-28T10:00:00Z",
+    )
+    .await;
+    comment(
+        &db,
+        "preview-note-2",
+        "preview-long",
+        &"SYNTHETIC / NOT EVIDENCE：很长的原声仍应保持两行预览，点击后研读。".repeat(100),
+        "2026-08-28T10:00:00Z",
+    )
+    .await;
+    for (id, likes) in [("preview-zero", 0_i64), ("preview-large", 9000000)] {
+        fixture::submit_package(&db,"comments",serde_json::json!({"contentExternalId":"preview-note-1"}),serde_json::json!({"kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"preview-note-1"},"payload":{"commentId":id,"noteId":"preview-note-1","text":"SYNTHETIC / NOT EVIDENCE：这是点赞边界样本，保留已知零与大数。","likes":likes,"publishedAt":1788750000000_i64}})).await;
+    }
     let (source_ref, body) = first.unwrap();
     save_comment_asset(&db, &asset(source_ref, body))
         .await
@@ -74,6 +101,6 @@ async fn prepare_comment_research_browser_preview() {
         .await
         .unwrap();
     println!(
-        "SYNTHETIC preview schema ready: comment_research_preview; 24 accepted comments, 1 manual asset, 1 manual problem label; no real provider calls"
+        "SYNTHETIC preview schema ready: comment_research_preview; 29 accepted comments, 1 manual asset, 1 manual problem label; no real provider calls"
     );
 }

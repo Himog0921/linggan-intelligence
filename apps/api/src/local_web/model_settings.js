@@ -14,7 +14,8 @@
   const table=(heads,rows)=>`<div class="lgi-model-table"><table><thead><tr>${heads.map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
   const button=(action,ref,label,disabled=false)=>`<button type="button" data-action="${action}" data-ref="${esc(ref)}" ${disabled?'disabled':''}>${label}</button>`;
   const note=t=>`<p class="lgi-model-note">${esc(t)}</p>`;
-  function modelStatus(m){return !m.enabled?'连接已停用':!m.test?'尚未测试':m.test.commentQualified?'可调用 · 评论输出通过校验':m.test.modelCallable?(m.test.failureCode?explain(m.test.failureCode):'可调用 · 评论输出未通过校验'):explain(m.test.failureCode);}
+  const validationLabels={json_or_schema_invalid:'输出 JSON 结构不合格',missing_comment:'缺少评论结果',unexpected_comment:'返回了包外评论',duplicate_comment:'重复返回评论',quote_missing_or_ambiguous:'引用缺失或不唯一',quote_redacted_or_empty:'引用为空或包含遮盖文字',facets_or_evidence_invalid:'字段或引用校验失败',provider_output_incomplete:'输出未完整结束'};
+  function modelStatus(m){return !m.enabled?'连接已停用':!m.test?'尚未测试':m.test.commentQualified?'可调用 · 评论输出通过校验':m.test.modelCallable?(m.test.failureCode?explain(m.test.failureCode):'可调用 · '+(validationLabels[m.test.validationCode]||'评论输出未通过校验')):explain(m.test.failureCode);}
   async function load(){
     try { data=await request(api+(focusedPlan?'?planRef='+encodeURIComponent(focusedPlan):'')); } catch(e) { loadFailed=true; data=null; $('storage-state').textContent='配置未就绪'; document.querySelectorAll('.lgi-model-settings button:not(#reload),.lgi-model-settings input,.lgi-model-settings select').forEach(el=>el.disabled=true); $('connection-list').replaceChildren(); throw e; }
     if(loadFailed){$('settings-feedback').textContent='连接已恢复，配置已重新读取。';loadFailed=false;}
@@ -115,7 +116,7 @@
           $('discovered-models').innerHTML=(r?.modelIds||[]).map(id=>`<option value="${esc(id)}"></option>`).join('');
           $('dialog-feedback').textContent=r?.ok?`取得 ${r.modelIds?.length||0} 个候选模型。请在模型 ID 中选择，再测试调用。`:'连接已保存。'+explain(r?.failureCode);
         }else{
-          $('dialog-feedback').textContent=r?.modelCallable?`模型${r.ok?'调用成功':'已响应'}${r.elapsedMs!=null?'，耗时 '+r.elapsedMs+' ms':''}。`+(r.commentQualified?'合成评论输出通过校验，可设为默认。':(r.failureCode?explain(r.failureCode):'评论输出未通过校验，暂不能设为评论分析默认。')):'配置已保存，测试失败：'+explain(r?.failureCode);
+          $('dialog-feedback').textContent=r?.modelCallable?`模型${r.ok?'调用成功':'已响应'}${r.elapsedMs!=null?'，耗时 '+r.elapsedMs+' ms':''}。`+(r.commentQualified?'合成评论输出通过校验，可设为默认。':(r.failureCode?explain(r.failureCode):(validationLabels[r.validationCode]||'评论输出未通过校验')+'，暂不能设为评论分析默认。')):'配置已保存，测试失败：'+explain(r?.failureCode);
         }
       }
       await load();

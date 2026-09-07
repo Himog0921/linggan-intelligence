@@ -8,11 +8,14 @@ const server=http.createServer(async(req,res)=>{
   if(body.model==='synthetic-fail'){res.writeHead(503);res.end('synthetic failure');return;}
   const prompt=body.messages.findLast(m=>m.role==='user')?.content;
   let material;try{material=JSON.parse(typeof prompt==='string'?prompt:prompt?.find(b=>b.type==='text')?.text).untrustedMaterial;}catch{res.writeHead(400);res.end('synthetic prompt missing');return;}
-  const actualWork=material.workRef!=='00000000-0000-0000-0000-000000000000';
+  const packet=Array.isArray(material.comments);
+  const actualWork=!packet&&material.workRef!=='00000000-0000-0000-0000-000000000000';
   if(actualWork&&material.body.includes('[FAIL_PROVIDER]')){res.writeHead(503);res.end('synthetic bounded failure');return;}
   if(actualWork&&material.body.includes('[HANG_PROVIDER]')){res.writeHead(200,{'Content-Type':'text/event-stream'});res.write(':waiting\n\n');return;}
-  const output={sourceRef:material.sourceRef,sourceSha256:material.sourceSha256,spans:[{sourceRef:material.sourceRef,startChar:0,endChar:Array.from(material.body).length,quote:material.body,
+  const output=packet?{comments:material.comments.map(c=>({commentRef:c.commentRef,spans:c.text.includes('[NO_SIGNAL]')?[]:[{quote:c.text,facets:[{dimension:'problem',label:'合成执行精力',basis:'explicit'}]}],limitations:['SYNTHETIC / NOT EVIDENCE']}))}:{sourceRef:material.sourceRef,sourceSha256:material.sourceSha256,spans:[{sourceRef:material.sourceRef,startChar:0,endChar:Array.from(material.body).length,quote:material.body,
     facets:[{dimension:'problem',label:'合成执行精力',basis:'explicit'}]}],limitations:['SYNTHETIC / NOT EVIDENCE']};
+  if(packet)output.comments=output.comments.filter((c,i)=>!material.comments[i].text.includes('[MISSING]')).map(c=>({...c,spans:material.comments.find(m=>m.commentRef===c.commentRef).text.includes('[BAD_QUOTE]')?[{quote:'INVENTED-NOT-IN-SOURCE',facets:[{dimension:'problem',label:'不可接纳',basis:'explicit'}]}]:c.spans}));
+  if(packet&&material.comments.some(c=>c.text.includes('[HANG_PROVIDER]'))){res.writeHead(200,{'Content-Type':'text/event-stream'});res.write(':waiting\n\n');return;}
   if(actualWork&&material.body.includes('[NO_SIGNAL]'))output.spans=[];
   const text=body.model==='synthetic-bad'||(actualWork&&material.body.includes('[BAD_OUTPUT]'))?'invalid JSON':JSON.stringify(output);
   res.writeHead(200,{'Content-Type':'text/event-stream'});

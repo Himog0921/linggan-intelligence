@@ -2,7 +2,7 @@
 use crate::{
     comment_analysis::{
         COMMENT_RULE_VERSION, CommentAnalysisFailure, CommentAnalysisInput, CommentAnalysisOutput,
-        CommentModelPort, validate_comment_analysis,
+        CommentModelPort,
     },
     comment_research::comment_source_hash,
     model_secrets::ModelSecretStore,
@@ -153,10 +153,9 @@ pub async fn probe_model(
         return Err(ModelError::Invalid);
     }
     request.operation = r.operation.clone();
-    let input = synthetic_input();
     if r.operation == "probe" {
-        request.system = input.instruction.into();
-        request.prompt = analysis_prompt(&input)?;
+        request.system = crate::comment_packet::SYSTEM.into();
+        request.prompt = crate::comment_packet::synthetic_packet().prompt;
     }
     let hash = comment_source_hash(
         &json!({"version":r.connection_version_ref,"model":r.model_ref,"operation":r.operation})
@@ -176,13 +175,17 @@ pub async fn probe_model(
                 // but never qualifies the incomplete comment analysis.
                 v["modelCallable"] =
                     json!(p.ok || p.failure_code.as_deref() == Some("output_limit"));
-                v["commentQualified"] = json!(
-                    p.ok && p
-                        .text
-                        .as_ref()
-                        .and_then(|s| serde_json::from_str::<CommentAnalysisOutput>(s).ok())
-                        .is_some_and(|o| validate_comment_analysis(&input, &o).is_ok())
-                );
+                let qualification = if p.ok {
+                    crate::comment_packet::synthetic_packet()
+                        .parse(p.text.as_deref().unwrap_or(""))
+                        .and_then(|items| items.into_iter().next().ok_or("missing_comment")?)
+                        .map(|_| ())
+                } else {
+                    Err("provider_output_incomplete")
+                };
+                v["commentQualified"] = json!(qualification.is_ok());
+                v["validationCode"] = json!(qualification.err());
+                v["commentContract"] = json!(crate::comment_daily::DAILY_RULE);
             }
             v
         }
