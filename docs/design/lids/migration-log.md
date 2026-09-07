@@ -8,6 +8,12 @@
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
 
+## 2026-09-07 · Collection Targets creator 宽表布局回归
+
+- **范围**：只修复 `Collection Control` L1 的 creator 12 列网格；不改变 Pattern、Token 定义、CMP、状态、动作、数据合同或页面结构。
+- **原因与表达**：未声明的 `--lgi-space-64` 令 CSS `grid-template-columns` 失效，浏览器退回单列自动布局。改为已声明 spacing token 组合，继续让 creator 身份列有界，避免挤占 platform 及后续事实列。
+- **验证边界**：样式源回归断言、creator lifecycle / target list 自动测试及治理检查覆盖；真实 `:3000` 视觉核验、合并和 Mog 业务验收不由本条目证明。
+
 ## 2026-09-07 · OBSERVATION-TARGET-DOSSIER-UI-001 目录基线与首层密度修正
 
 - **来源与范围**：Issue #158 与 Mog 对图妈 Vita 历史 31 篇误读的直接反馈。只修正 Collection Targets 的 current-directory 事实口径和既有首层 creator/platform 栅格间距；不创建版本化“200 篇档案”，不修改 Pattern、Token、CMP、路由或平台访问。
