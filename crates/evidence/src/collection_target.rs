@@ -51,6 +51,13 @@ pub struct ObservationTarget {
     /// 下一次到期时间是调度器与规则命令共同维护的真实计划点，而不是页面从上次派出
     /// 时间反推的猜测。**巡检没开时不读**——算一个永远不会到来的时间，会让人以为它排上队了。
     pub next_patrol_at: Option<String>,
+    /// 这个目标在观察哪个领域。
+    ///
+    /// 只有列表查询读它。`None` 表示领域表尚未建立（旧 schema），不是「没有领域」——
+    /// 没标过 `domain_ref` 的历史目标在读取时已回落成本领域，与 `0041` 的处置一致。
+    pub domain_name: Option<String>,
+    /// 该领域是不是本领域。用于列表里给外部领域加标记；`None` 同上。
+    pub domain_is_own: Option<bool>,
 }
 
 /// Whether a store call created a target or found the one already there.
@@ -161,12 +168,15 @@ pub async fn collection_target_schema_is_ready(database: &Database) -> Result<bo
 /// read-then-write in application code: two pushes arriving together must not both succeed.
 /// The legacy workbench has no such index, and its failure mode is a silent parallel duplicate
 /// with its own independent baseline.
+/// `domain` 是这个目标要观察的领域。`None` 表示不指定——列保持可空，读取时回落本领域，
+/// 与 `0041` 对既有目标的处置一致（「没标过」与「标了本领域」是两件事，只是当前处置相同）。
 pub async fn store_pending_target(
     database: &Database,
     identity: &TargetIdentity,
     source: TargetSource,
     display_name: Option<&str>,
     identity_facts: Option<&Value>,
+    domain: Option<Uuid>,
 ) -> Result<(ObservationTarget, StoreOutcome), CollectionTargetError> {
     if !collection_target_schema_is_ready(database).await? {
         return Err(CollectionTargetError::SchemaUnavailable);
@@ -175,8 +185,8 @@ pub async fn store_pending_target(
     let target_ref = Uuid::new_v4();
     let inserted = sqlx::query_scalar::<_, Uuid>(
         "INSERT INTO collection_observation_target \
-             (target_ref, platform, target_kind, identity_key, display_name, identity_facts, source) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7) \
+             (target_ref, platform, target_kind, identity_key, display_name, identity_facts, source, domain_ref) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
          ON CONFLICT (platform, target_kind, identity_key) DO NOTHING \
          RETURNING target_ref",
     )
@@ -187,6 +197,7 @@ pub async fn store_pending_target(
     .bind(display_name)
     .bind(identity_facts)
     .bind(source.as_str())
+    .bind(domain)
     .fetch_optional(database.pool())
     .await?;
 
@@ -278,11 +289,29 @@ pub async fn read_target(
 
 /// 数各维度的来源。**不受当前筛选影响**：tab 上的数字要回答「切过去有多少」，
 /// 用筛选后的结果去数，每个 tab 都会显示当前这一档的数量，那毫无意义。
-pub async fn count_targets(database: &Database) -> Result<TargetCounts, CollectionTargetError> {
+///
+/// 但**受当前领域影响**：筛选是在一个领域里切换的，如果计数跨领域去数，站在「考研自习」
+/// 下会看到「创作者 2」而列表里只有 1 个——那个 2 说的是别的世界的事。
+pub async fn count_targets(
+    database: &Database,
+    domain: Option<Uuid>,
+) -> Result<TargetCounts, CollectionTargetError> {
     if !collection_target_schema_is_ready(database).await? {
         return Ok(TargetCounts::default());
     }
-    let row: (i64, i64, i64, i64, i64) = sqlx::query_as(
+    let domain_ready = crate::observation_domain::observation_domain_schema_is_ready(database)
+        .await
+        .unwrap_or(false);
+    const COUNT_HEAD: &str = "SELECT count(*), \
+                count(*) FILTER (WHERE target.target_kind = 'creator'), \
+                count(*) FILTER (WHERE target.target_kind = 'keyword'), \
+                count(*) FILTER (WHERE target.lifecycle_state = 'archiving'), \
+                count(*) FILTER (WHERE target.monitoring_enabled \
+                    AND COALESCE(rule.automatic_enabled,false)) \
+         FROM collection_observation_target target \
+         LEFT JOIN collection_monitor_rule_revision rule \
+           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref";
+    const COUNT_IN_DOMAIN: &str = concat!(
         "SELECT count(*), \
                 count(*) FILTER (WHERE target.target_kind = 'creator'), \
                 count(*) FILTER (WHERE target.target_kind = 'keyword'), \
@@ -291,8 +320,15 @@ pub async fn count_targets(database: &Database) -> Result<TargetCounts, Collecti
                     AND COALESCE(rule.automatic_enabled,false)) \
          FROM collection_observation_target target \
          LEFT JOIN collection_monitor_rule_revision rule \
-           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref",
-    )
+           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+         WHERE $1::uuid IS NULL OR COALESCE(target.domain_ref, \
+               (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) = $1"
+    );
+    let row: (i64, i64, i64, i64, i64) = if domain_ready {
+        sqlx::query_as(COUNT_IN_DOMAIN).bind(domain)
+    } else {
+        sqlx::query_as(COUNT_HEAD)
+    }
     .fetch_one(database.pool())
     .await?;
     Ok(TargetCounts {
@@ -309,14 +345,26 @@ pub async fn count_targets(database: &Database) -> Result<TargetCounts, Collecti
 /// **不按状态硬筛**：观察目标列表就是「我在长期看谁」，一个已建档、正在巡检的博主当然
 /// 还在看。此前列表只读 `pending_decision`，于是目标一开始建档就从列表里消失——那把
 /// 「观察目标列表」做成了「待办列表」，两者不是一回事。
+/// 列出观察目标。
+///
+/// `domain` 传 `Some` 时只列该领域的目标，传 `None` 是「全部领域」——采集是运维视角，
+/// 一眼看到所有领域在跑什么是真实需求，与语料页只看一个世界的读法不同。
+///
+/// 没标过 `domain_ref` 的历史目标按本领域处理（读取时回落，与 `0041` 一致）：它们是在
+/// 只有 ADHD 的时候建立的，算成别的领域会改写历史。
 pub async fn list_targets(
     database: &Database,
     filter: Option<&str>,
+    domain: Option<Uuid>,
     limit: i64,
 ) -> Result<Vec<ObservationTarget>, CollectionTargetError> {
     if !collection_target_schema_is_ready(database).await? {
         return Err(CollectionTargetError::SchemaUnavailable);
     }
+    // 领域表还没建立时，这个列表照常出，只是没有领域归属可显示。少一列远好过整页读不出来。
+    let domain_ready = crate::observation_domain::observation_domain_schema_is_ready(database)
+        .await
+        .unwrap_or(false);
     // 筛选值来自页面页签：两个是目标类型，两个是生命周期。它们筛的是不同的列，因此
     // 分开传，而不是把一个字符串塞进一列去猜。
     let (kind, state) = match filter.unwrap_or("") {
@@ -324,8 +372,10 @@ pub async fn list_targets(
         value @ ("archiving" | "monitoring") => (None, Some(value)),
         _ => (None, None),
     };
-    let rows = sqlx::query_as::<_, ListedTargetRow>(
-        "SELECT target.target_ref, target.platform, target.target_kind, target.identity_key, \
+    // 两条完整语句而不是拼接：sqlx 只接受静态 SQL，动态拼串在这个仓库里过不了编译——
+    // 这条约束是对的，这里也确实不需要拼。领域表不在时不能引用它，SQL 在解析期就要求
+    // 表存在，没法用一条语句「有就读、没有就跳过」。
+    const LIST_WITH_DOMAIN: &str = "SELECT target.target_ref, target.platform, target.target_kind, target.identity_key, \
                 target.display_name, target.identity_facts, target.source, target.lifecycle_state, \
                 target.first_stored_at::text, \
                 (target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false)), \
@@ -333,17 +383,45 @@ pub async fn list_targets(
                 to_char(target.last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
                 to_char(target.last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
                 CASE WHEN target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false) \
-                     THEN to_char(target.monitor_next_run_at, 'MM-DD HH24:MI') END \
+                     THEN to_char(target.monitor_next_run_at, 'MM-DD HH24:MI') END, \
+                domain.name, domain.is_own_domain \
+         FROM collection_observation_target target \
+         LEFT JOIN collection_monitor_rule_revision rule \
+           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+         LEFT JOIN observation_domain domain \
+           ON domain.domain_ref = COALESCE(target.domain_ref, \
+                (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) \
+         WHERE ($1::text IS NULL OR target.target_kind = $1) \
+           AND ($2::text IS NULL OR target.lifecycle_state = $2) \
+           AND ($4::uuid IS NULL OR COALESCE(target.domain_ref, \
+                (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) = $4) \
+         ORDER BY target.first_stored_at DESC LIMIT $3";
+    const LIST_WITHOUT_DOMAIN: &str = "SELECT target.target_ref, target.platform, target.target_kind, target.identity_key, \
+                target.display_name, target.identity_facts, target.source, target.lifecycle_state, \
+                target.first_stored_at::text, \
+                (target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false)), \
+                target.group_name, \
+                to_char(target.last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
+                to_char(target.last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
+                CASE WHEN target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false) \
+                     THEN to_char(target.monitor_next_run_at, 'MM-DD HH24:MI') END, \
+                NULL::text, NULL::boolean \
          FROM collection_observation_target target \
          LEFT JOIN collection_monitor_rule_revision rule \
            ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
          WHERE ($1::text IS NULL OR target.target_kind = $1) \
            AND ($2::text IS NULL OR target.lifecycle_state = $2) \
-         ORDER BY target.first_stored_at DESC LIMIT $3",
-    )
+           AND $4::uuid IS NULL \
+         ORDER BY target.first_stored_at DESC LIMIT $3";
+    let rows = sqlx::query_as::<_, ListedTargetRow>(if domain_ready {
+        LIST_WITH_DOMAIN
+    } else {
+        LIST_WITHOUT_DOMAIN
+    })
     .bind(kind)
     .bind(state)
     .bind(limit)
+    .bind(domain)
     .fetch_all(database.pool())
     .await?;
     Ok(rows.into_iter().map(listed_target).collect())
@@ -359,6 +437,8 @@ fn listed_target(row: ListedTargetRow) -> ObservationTarget {
         last_patrol_dispatched_at: row.11,
         last_patrol_succeeded_at: row.12,
         next_patrol_at: row.13,
+        domain_name: row.14,
+        domain_is_own: row.15,
         ..ObservationTarget::from((
             row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8,
         ))
@@ -380,6 +460,8 @@ type ListedTargetRow = (
     Option<String>,
     Option<String>,
     Option<String>,
+    Option<String>,
+    Option<bool>,
 );
 
 pub async fn list_targets_in_state(
@@ -543,6 +625,8 @@ impl From<TargetRow> for ObservationTarget {
             last_patrol_dispatched_at: None,
             last_patrol_succeeded_at: None,
             next_patrol_at: None,
+            domain_name: None,
+            domain_is_own: None,
         }
     }
 }

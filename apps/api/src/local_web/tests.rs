@@ -1725,6 +1725,7 @@ fn target_drawer_is_owned_by_the_url_and_escapes_its_identifier() {
         target_drawer::TargetListContext {
             filter: Some("creator"),
             sort: Some("last"),
+            domain: None,
         },
     );
     assert!(open.contains("id=\"c-drawer\""));

@@ -465,7 +465,7 @@ fn page_html(
         "/corpus/comments"
     };
     // 换领域留在当前子页：换的是观察对象，不是把人送回证据库。
-    let picker = super::corpus_domain_picker(domains, current, action);
+    let picker = super::corpus_domain_picker(domains, current, action, None);
     let crumb = if picker.is_empty() {
         format!("语料 <span class=\"v7-slash\">/</span> <b>{title}</b>")
     } else {

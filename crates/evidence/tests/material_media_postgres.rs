@@ -194,7 +194,9 @@ async fn standalone_author_avatar_uses_media_lifecycle_without_inventing_a_work(
     .unwrap();
     assert_eq!(fabricated_work_count, 0);
 
-    let targets = list_targets(&database, Some("creator"), 10).await.unwrap();
+    let targets = list_targets(&database, Some("creator"), None, 10)
+        .await
+        .unwrap();
     assert_eq!(
         read_target_avatars(&database, &targets).await.unwrap()[&targets[0].target_ref],
         ObservationTargetAvatar::Pending,

@@ -108,9 +108,49 @@ pub fn resolve_current_domain<'a>(
         .or_else(|| domains.first())
 }
 
+/// 采集侧「全部领域」的地址取值。
+///
+/// 用一个显式的词而不是「不带参数」来表达全部领域：地址上看得见自己正处在哪种读法，
+/// 且导航链接可以原样把它带上，不必为这一种情况写特例。
+pub const ALL_DOMAINS: &str = "all";
+
+/// 解析采集侧的当前领域。`None` 表示**全部领域**，不是「读不出来」。
+///
+/// 与语料侧的 [`resolve_current_domain`] 有意不同：那边读不出来回落本领域——阅读时
+/// 混着看没有意义；这边回落全部领域——采集是运维视角，一眼看到所有领域在跑什么是
+/// 真实需求，而且这正是加入领域之前的既有行为，不给人任何意外。
+pub fn resolve_collection_domain<'a>(
+    domains: &'a [ObservationDomain],
+    requested: Option<&str>,
+) -> Option<&'a ObservationDomain> {
+    let requested = requested.map(str::trim).filter(|value| !value.is_empty())?;
+    if requested.eq_ignore_ascii_case(ALL_DOMAINS) {
+        return None;
+    }
+    Uuid::parse_str(requested).ok().and_then(|domain_ref| {
+        domains
+            .iter()
+            .find(|domain| domain.domain_ref == domain_ref)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collection_falls_back_to_every_domain_rather_than_the_home_one() {
+        let domains = vec![domain("ADHD", true), domain("考研自习", false)];
+        // 不带、空、写了 all、写了看不懂的值——都是「全部领域」。
+        for requested in [None, Some(""), Some("all"), Some("ALL"), Some("не-uuid")] {
+            assert!(resolve_collection_domain(&domains, requested).is_none());
+        }
+        // 一个存在的领域仍然选得中。
+        let picked = resolve_collection_domain(&domains, Some(&domains[1].domain_ref.to_string()));
+        assert_eq!(picked.map(|d| d.name.as_str()), Some("考研自习"));
+        // 不存在的领域不该悄悄变成本领域——那会让人以为自己在看某个外部行业。
+        assert!(resolve_collection_domain(&domains, Some(&Uuid::new_v4().to_string())).is_none());
+    }
 
     fn domain(name: &str, is_own_domain: bool) -> ObservationDomain {
         ObservationDomain {

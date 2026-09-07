@@ -592,7 +592,7 @@ async fn evidence_library(
     Query(params): Query<CorpusSurfaceParams>,
 ) -> Html<String> {
     let collection_state = match state.database.database() {
-        Some(database) => match count_targets(database).await {
+        Some(database) => match count_targets(database, None).await {
             Ok(counts) if counts.total > 0 => Some("观察中"),
             Ok(_) => Some("无观察目标"),
             Err(_) => Some("状态未知"),
@@ -749,6 +749,7 @@ async fn collection_target_intake(State(state): State<LocalWebState>, body: Byte
         collection_intake::INTAKE_SOURCE,
         intake.display_name.as_deref(),
         intake.identity_facts.as_ref(),
+        None,
     )
     .await
     {
@@ -2310,6 +2311,9 @@ struct CollectionParams {
     drawer: Option<String>,
     /// 观察目标的筛选。只改读取范围，不消耗任何平台访问。
     filter: Option<String>,
+    /// 当前观察领域。`all` 或缺省表示全部领域——采集是运维视角，默认看全貌，
+    /// 这也正是加入领域之前的既有行为。
+    domain: Option<String>,
     /// 当前唯一排序口径也属于列表返回上下文；打开/关闭抽屉不得把它丢掉。
     sort: Option<String>,
     /// 上一次动作的失败原因。失败必须看得见，否则跳转回来什么都不说，会让人以为成功了。
@@ -2347,7 +2351,7 @@ struct CollectionSurfaceReads {
 }
 
 async fn read_collection_surface(database: &Database) -> CollectionSurfaceReads {
-    let counts_read = async { count_targets(database).await.ok() };
+    let counts_read = async { count_targets(database, None).await.ok() };
     let (counts, heartbeat) = tokio::join!(counts_read, read_scheduler_heartbeat(database));
     let scheduler_state = match heartbeat {
         Ok(Some(heartbeat)) if heartbeat.state == "running" => collection::SchedulerState::Running,
@@ -2405,17 +2409,49 @@ async fn collection_targets(
         Some(database) => Some(read_collection_surface(database).await),
         None => None,
     };
-    let counts = reads.as_ref().and_then(|reads| reads.counts.as_ref());
-    let base = collection::render(
+    // 领域读不出来时给空列表：选择器随之隐藏，列表照常以全部领域呈现。
+    let domains = match database {
+        Some(database) => read_observation_domains(database).await.unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let current_domain = linggan_evidence::observation_domain::resolve_collection_domain(
+        &domains,
+        params.domain.as_deref(),
+    );
+    let picker = corpus_domain_picker(
+        &domains,
+        current_domain,
+        "/collection/targets",
+        Some("全部领域"),
+    );
+    let nav_domain = collection_nav_domain(&domains, current_domain);
+    // 筛选 tab 的计数按当前领域算。它回答的是「在这个领域里切过去有多少」——跨领域去数，
+    // 站在考研自习下会看到「创作者 2」而列表里只有 1 个，那个 2 说的是别的世界的事。
+    // 左栏底部的总数仍是全局的：那是模块级事实，不随当前领域变。
+    let domain_counts = match database {
+        Some(database) => count_targets(database, current_domain.map(|domain| domain.domain_ref))
+            .await
+            .ok(),
+        None => None,
+    };
+    let counts = domain_counts
+        .as_ref()
+        .or_else(|| reads.as_ref().and_then(|reads| reads.counts.as_ref()));
+    let base = collection::render_in_domain(
         collection::Section::Targets,
         collection::OperationsMode::Now,
         params.filter.as_deref(),
         counts,
         reads.as_ref().map(|reads| &reads.surface_state),
+        collection::DomainBar {
+            picker: &picker,
+            nav_domain: nav_domain.as_deref(),
+        },
     );
     let list_context = target_drawer::TargetListContext {
         filter: params.filter.as_deref(),
         sort: params.sort.as_deref(),
+        domain: nav_domain.as_deref(),
     };
     // Without a database the page still renders its honest empty state rather than an error:
     // "we cannot read targets right now" and "there are no targets" are different claims, and
@@ -2505,7 +2541,14 @@ async fn collection_targets(
         }
         _ => None,
     };
-    let list = match list_targets(database, params.filter.as_deref(), 200).await {
+    let list = match list_targets(
+        database,
+        params.filter.as_deref(),
+        current_domain.map(|domain| domain.domain_ref),
+        200,
+    )
+    .await
+    {
         Ok(targets) => {
             let avatars = match read_target_avatars(database, &targets).await {
                 Ok(avatars) => avatars,
@@ -2661,12 +2704,20 @@ async fn collection_operations(
             .await;
     };
     let reads = read_collection_surface(database).await;
-    let base = collection::render(
+    let base = collection::render_in_domain(
         collection::Section::Operations,
         mode,
         None,
         None,
         Some(&reads.surface_state),
+        collection::DomainBar {
+            picker: "",
+            nav_domain: params
+                .domain
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+        },
     );
     match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
         Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
@@ -2676,7 +2727,10 @@ async fn collection_operations(
     }
 }
 
-async fn collection_attention(State(state): State<LocalWebState>) -> Html<String> {
+async fn collection_attention(
+    State(state): State<LocalWebState>,
+    Query(domain): Query<CollectionDomainParam>,
+) -> Html<String> {
     let Some(database) = state.database.database() else {
         return render_simple_collection_surface(
             &state,
@@ -2686,12 +2740,16 @@ async fn collection_attention(State(state): State<LocalWebState>) -> Html<String
         .await;
     };
     let reads = read_collection_surface(database).await;
-    let base = collection::render(
+    let base = collection::render_in_domain(
         collection::Section::Attention,
         collection::OperationsMode::Now,
         None,
         None,
         Some(&reads.surface_state),
+        collection::DomainBar {
+            picker: "",
+            nav_domain: domain.nav(),
+        },
     );
     match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
         Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
@@ -2701,7 +2759,10 @@ async fn collection_attention(State(state): State<LocalWebState>) -> Html<String
     }
 }
 
-async fn collection_tasks(State(state): State<LocalWebState>) -> Html<String> {
+async fn collection_tasks(
+    State(state): State<LocalWebState>,
+    Query(domain): Query<CollectionDomainParam>,
+) -> Html<String> {
     let Some(database) = state.database.database() else {
         return render_simple_collection_surface(
             &state,
@@ -2714,12 +2775,16 @@ async fn collection_tasks(State(state): State<LocalWebState>) -> Html<String> {
         read_collection_surface(database),
         read_collection_task_timeline(database, 100),
     );
-    let base = collection::render(
+    let base = collection::render_in_domain(
         collection::Section::Tasks,
         collection::OperationsMode::Now,
         None,
         None,
         Some(&reads.surface_state),
+        collection::DomainBar {
+            picker: "",
+            nav_domain: domain.nav(),
+        },
     );
     match timeline {
         Ok(timeline) => {
@@ -2743,10 +2808,34 @@ async fn collection_tasks(State(state): State<LocalWebState>) -> Html<String> {
     }
 }
 
+/// 只取当前领域的轻量参数。
+///
+/// 用在那些还不按领域过滤内容的采集子页上：它们不需要读领域表，也不该渲染选择器
+/// （点了不起作用的控件比没有更糟），但必须把地址上的领域原样带进导航链接——否则
+/// 从观察目标走一趟别的子页再回来，当前领域就没了。
+///
+/// 这里刻意不校验取值：无效的领域到了观察目标页会被解析回落成「全部领域」，带着一个
+/// 认不出的值走一段路是无害的，而为此在每个子页各查一次库不值得。
+#[derive(serde::Deserialize)]
+struct CollectionDomainParam {
+    domain: Option<String>,
+}
+
+impl CollectionDomainParam {
+    fn nav(&self) -> Option<&str> {
+        self.domain
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    }
+}
+
 #[derive(serde::Deserialize)]
 struct RuntimeSurfaceParams {
     #[serde(default)]
     error: Option<String>,
+    #[serde(default)]
+    domain: Option<String>,
 }
 
 async fn collection_runtime(
@@ -2756,12 +2845,20 @@ async fn collection_runtime(
     // Without a database the page keeps its honest empty state: "we cannot read stations right
     // now" and "no station is registered" are different claims.
     let Some(database) = state.database.database() else {
-        return Html(collection::render(
+        return Html(collection::render_in_domain(
             collection::Section::Runtime,
             collection::OperationsMode::Now,
             None,
             None,
             None,
+            collection::DomainBar {
+                picker: "",
+                nav_domain: params
+                    .domain
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty()),
+            },
         ));
     };
     // 三份读物一起决定这一页能说什么：工位现状、准入第 5 问的判定、上下文行的事实。
@@ -2792,12 +2889,20 @@ async fn collection_runtime(
             .as_ref()
             .map(|capacity| capacity.patrol.monitoring_targets);
     }
-    let base = collection::render(
+    let base = collection::render_in_domain(
         collection::Section::Runtime,
         collection::OperationsMode::Now,
         None,
         None,
         Some(&reads.surface_state),
+        collection::DomainBar {
+            picker: "",
+            nav_domain: params
+                .domain
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty()),
+        },
     );
     // 能力矩阵按工位逐台读。工位是个位数，一台一次查询换来的是「这一项到底跑成过没有」
     // 这个问题有据可答；读不到的那台留空，由页面说「读不到」，不冒充「没有能力」。
@@ -3124,18 +3229,58 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
 struct NewTargetForm {
     target_kind: String,
     identity: String,
+    /// 当前正在看的领域。表单在「全部领域」下不带这一项，服务端按本领域处置。
+    domain: Option<String>,
 }
 
 /// COLLECTION-001 · 从页面加入一个观察目标。
 ///
 /// 只写本机记录：不访问任何平台，也不会让任何采集开始。加入观察与「开始采集」是两件事，
 /// 后者仍然要走申请 → 授权 → 准入 → 工单 → 租约 → 闸门。
+/// 回到观察目标列表，把当前领域带回去。
+///
+/// 建完目标被甩回「全部领域」，人得再切一次才能看到刚建的东西——地址上的领域在提交
+/// 那一刻就该跟着走。
+fn back_to_targets(domain: Option<&str>, error: Option<&str>) -> String {
+    let mut href = "/collection/targets".to_owned();
+    let mut sep = '?';
+    if let Some(domain) = domain {
+        href.push(sep);
+        href.push_str(&format!(
+            "domain={}",
+            target_drawer::percent_encode_component(domain)
+        ));
+        sep = '&';
+    }
+    if let Some(error) = error {
+        href.push(sep);
+        href.push_str(&format!("error={error}"));
+    }
+    href
+}
+
 async fn collection_target_create(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<NewTargetForm>,
 ) -> Redirect {
+    // 表单在「全部领域」下不带这一项，服务端按本领域处置（既有行为）。
+    let domain_param = form
+        .domain
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| {
+            !value.is_empty()
+                && !value.eq_ignore_ascii_case(linggan_evidence::observation_domain::ALL_DOMAINS)
+        })
+        .map(str::to_owned);
+    let domain = domain_param
+        .as_deref()
+        .and_then(|value| uuid::Uuid::parse_str(value).ok());
     let Some(database) = state.database.database() else {
-        return Redirect::to("/collection/targets?error=read_model_not_connected");
+        return Redirect::to(&back_to_targets(
+            domain_param.as_deref(),
+            Some("read_model_not_connected"),
+        ));
     };
     let raw = form.identity.trim();
     // 创作者用主页链接就够了——平台 ID 藏在 URL 里，让人自己去扒是把工具的活推给使用者。
@@ -3144,7 +3289,10 @@ async fn collection_target_create(
         _ => Some(raw.to_owned()),
     };
     let Some(identity) = identity.filter(|value| !value.is_empty()) else {
-        return Redirect::to("/collection/targets?error=identity_unrecognised");
+        return Redirect::to(&back_to_targets(
+            domain_param.as_deref(),
+            Some("identity_unrecognised"),
+        ));
     };
     let intake = collection_intake::TargetIntake {
         platform: linggan_contracts::OPEN_PLATFORM.to_owned(),
@@ -3166,13 +3314,21 @@ async fn collection_target_create(
             linggan_contracts::TargetSource::Manual,
             parsed_display_name.as_deref(),
             None,
+            domain,
         )
         .await
         {
-            Ok(_) => Redirect::to("/collection/targets"),
-            Err(_) => Redirect::to("/collection/targets?error=store_failed"),
+            // 建完回到刚才那个领域，不把人甩回全部领域——新目标就在那里等着看。
+            Ok(_) => Redirect::to(&back_to_targets(domain_param.as_deref(), None)),
+            Err(_) => Redirect::to(&back_to_targets(
+                domain_param.as_deref(),
+                Some("store_failed"),
+            )),
         },
-        Err(_) => Redirect::to("/collection/targets?error=identity_unrecognised"),
+        Err(_) => Redirect::to(&back_to_targets(
+            domain_param.as_deref(),
+            Some("identity_unrecognised"),
+        )),
     }
 }
 
@@ -3718,20 +3874,49 @@ fn corpus_nav_domain(
     current.map(|domain| domain.domain_ref.to_string())
 }
 
+/// 采集侧的导航领域参数。与语料侧的差别只有一处：全部领域也要显式带上，否则从
+/// 「全部领域」点进另一个子页会悄悄变回默认，与本次修的那类缺陷同源。
+fn collection_nav_domain(
+    domains: &[ObservationDomain],
+    current: Option<&ObservationDomain>,
+) -> Option<String> {
+    if domains.len() < 2 {
+        return None;
+    }
+    Some(current.map_or_else(
+        || linggan_evidence::observation_domain::ALL_DOMAINS.to_owned(),
+        |domain| domain.domain_ref.to_string(),
+    ))
+}
+
+/// 面包屑上的领域选择器。
+///
+/// `all_domains_label` 传 `Some` 时多一个「全部领域」项，`current` 为 `None` 即选中它。
+/// 语料侧传 `None`——阅读时一次只看一个世界，混着看没有意义；采集侧传 `Some`——运维
+/// 视角需要一眼看到所有领域在跑什么。
 fn corpus_domain_picker(
     domains: &[ObservationDomain],
     current: Option<&ObservationDomain>,
     action: &str,
+    all_domains_label: Option<&str>,
 ) -> String {
-    let Some(current) = current else {
+    if current.is_none() && all_domains_label.is_none() {
         return String::new();
-    };
+    }
     if domains.len() < 2 {
         return String::new();
     }
     let mut options = String::new();
+    if let Some(label) = all_domains_label {
+        options.push_str(&format!(
+            r#"<option value="{all}"{selected}>{label}</option>"#,
+            all = linggan_evidence::observation_domain::ALL_DOMAINS,
+            selected = if current.is_none() { " selected" } else { "" },
+            label = html_escape(label),
+        ));
+    }
     for domain in domains {
-        let selected = if domain.domain_ref == current.domain_ref {
+        let selected = if current.is_some_and(|current| current.domain_ref == domain.domain_ref) {
             " selected"
         } else {
             ""
@@ -3776,7 +3961,7 @@ fn evidence_library_header(
     domains: &[ObservationDomain],
     current: Option<&ObservationDomain>,
 ) -> String {
-    let picker = corpus_domain_picker(domains, current, "/corpus/evidence");
+    let picker = corpus_domain_picker(domains, current, "/corpus/evidence", None);
     let crumb = if picker.is_empty() {
         "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">作品材料集合</span>".to_owned()
     } else {
