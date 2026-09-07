@@ -141,9 +141,9 @@ fn target_table(
         ));
     }
     let columns = if is_creator {
-        r#"<span role="columnheader"><input type="checkbox" data-target-select-all aria-label="选择全部创作者目标"/></span><span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span role="columnheader">作品目录</span><span role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近变化</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部创作者目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span role="columnheader">作品目录</span><span role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近变化</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     } else {
-        r#"<span role="columnheader"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span role="columnheader">最近命中</span><span role="columnheader">最近新增</span><span role="columnheader">巡查状态</span><span role="columnheader">数据更新</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span role="columnheader">最近命中</span><span role="columnheader">最近新增</span><span role="columnheader">巡查状态</span><span role="columnheader">数据更新</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     };
     let grid = if is_creator {
         "c-tg-creator-grid"
@@ -284,7 +284,7 @@ fn target_row(
         format!("打开{name}的关键词观察")
     };
     let shared_start = format!(
-        r#"<div class="c-tg-select" role="cell"><input type="checkbox" name="target_ref" value="{target_ref}" form="target-batch-modal-form" data-target-select aria-label="选择{opener_label}"/></div>
+        r#"<label class="c-tg-select" role="cell"><input type="checkbox" name="target_ref" value="{target_ref}" form="target-batch-modal-form" data-target-select aria-label="选择{opener_label}"/></label>
             <div class="c-tg-number" role="cell"><span class="c-tg-index">{index:03}</span></div>
             <div class="c-tg-object" role="cell">{avatar}<div class="c-tg-object-text"><a id="{opener_id}" class="c-tg-title c-tg-object-link" data-row-opener data-drawer-trigger="{target_ref}" href="{opener_href}" aria-label="{opener_label}">{name}</a>{identity}</div></div>
             <div class="c-tg-cell c-tg-platform" role="cell">{platform}</div>
