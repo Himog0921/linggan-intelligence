@@ -101,14 +101,63 @@ pub async fn read_archive_completeness(
              WHERE work_order.lane='deep_archive' \
                AND (work_order.work_order_ref=roots.root_work_order_ref \
                     OR work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=roots.root_work_order_ref::text) \
-         ), root_records AS ( \
+         ), ranked_directory_packages AS ( \
+             SELECT roots.author_external_id,package.package_ref, \
+                    row_number() OVER (PARTITION BY roots.root_work_order_ref \
+                                       ORDER BY package.accepted_at DESC,package.package_ref DESC) AS package_rank \
+             FROM active_roots roots \
+             JOIN collection_work_order root_order ON root_order.work_order_ref=roots.root_work_order_ref \
+             JOIN collection_work_order_lease lease USING(work_order_ref) \
+             JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+             JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+             JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
+             JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
+             CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(package.coverage->'layers')='array' THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
+             WHERE package.platform=$1 AND package.platform=task.platform \
+               AND package.package_kind='profile_discovery' \
+               AND task.task_spec->'capabilitiesRequested' ? package.package_kind \
+               AND receipt.execution_effect='COMPLETED_LIVE_STEP' AND receipt.material_admission='ACCEPTED' \
+               AND layer->>'capability'='profile_discovery' \
+               AND COALESCE((layer->>'observed')::integer,0)>0 \
+               AND COALESCE((layer->>'attempted')::integer,0)>0 \
+               AND COALESCE((layer->>'acquired')::integer,0)>0 \
+               AND COALESCE((layer->>'failed')::integer,0)=0 \
+               AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
+               AND COALESCE((layer->>'unknown')::integer,0)=0 \
+               AND COALESCE((task.task_spec->>'maximumQuota')::integer,-1)=200 \
+               AND (layer->>'stoppedReason'='surface_ended' OR ( \
+                    layer->>'stoppedReason'='maximum_quota' \
+                    AND COALESCE((layer->>'acquired')::integer,-1)=200)) \
+               AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
+                               WHERE disposition.package_ref=package.package_ref AND disposition.disposition='quarantined') \
+               AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition \
+                    WHERE disposition.package_ref=package.package_ref \
+                      AND disposition.disposition='accepted_for_library_discovery')=COALESCE((layer->>'acquired')::integer,-1) \
+         ), directory_packages AS ( \
+             SELECT author_external_id,package_ref FROM ranked_directory_packages WHERE package_rank=1 \
+         ), root_profile_records AS ( \
              SELECT scoped.author_external_id,p.package_ref,p.package_kind,d.record_ordinal,d.disposition \
              FROM scoped_orders scoped \
              JOIN collection_work_order_lease lease USING(work_order_ref) \
              JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
              JOIN linggan_runtime_capture_package p ON p.task_id=lease_task.task_id \
              JOIN linggan_runtime_record_disposition d ON d.package_ref=p.package_ref \
-             WHERE p.platform=$1 AND d.disposition <> 'retained_uninterpreted' \
+             WHERE p.platform=$1 AND p.package_kind='author_profile' \
+               AND d.disposition <> 'retained_uninterpreted' AND d.disposition <> 'quarantined' \
+         ), root_quarantined_records AS ( \
+             SELECT scoped.author_external_id,p.package_ref,p.package_kind,d.record_ordinal,d.disposition \
+             FROM scoped_orders scoped \
+             JOIN collection_work_order_lease lease USING(work_order_ref) \
+             JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+             JOIN linggan_runtime_capture_package p ON p.task_id=lease_task.task_id \
+             JOIN linggan_runtime_record_disposition d ON d.package_ref=p.package_ref \
+             WHERE p.platform=$1 AND d.disposition='quarantined' \
+         ), directory_records AS ( \
+             SELECT packages.author_external_id,p.package_ref,p.package_kind,d.record_ordinal,d.disposition \
+             FROM directory_packages packages \
+             JOIN linggan_runtime_capture_package p ON p.package_ref=packages.package_ref \
+             JOIN linggan_runtime_record_disposition d ON d.package_ref=p.package_ref \
+             WHERE d.disposition <> 'retained_uninterpreted' \
          ), qualified_patrol_packages AS ( \
              SELECT DISTINCT target.identity_key AS author_external_id,package.package_ref \
              FROM collection_observation_target target \
@@ -142,10 +191,40 @@ pub async fn read_archive_completeness(
              JOIN linggan_runtime_capture_package p ON p.package_ref=patrol.package_ref \
              JOIN linggan_runtime_record_disposition d ON d.package_ref=p.package_ref \
              WHERE d.disposition <> 'retained_uninterpreted' \
+         ), directory_work_refs AS ( \
+             SELECT DISTINCT records.author_external_id,finding.content_public_ref \
+             FROM ( \
+                 SELECT author_external_id,package_ref,record_ordinal,disposition FROM directory_records \
+                 UNION ALL \
+                 SELECT author_external_id,package_ref,record_ordinal,disposition FROM patrol_records \
+             ) records \
+             JOIN linggan_material_discovery_finding finding \
+               ON finding.package_ref=records.package_ref AND finding.record_ordinal=records.record_ordinal \
+             WHERE records.disposition <> 'quarantined' \
+         ), detail_records AS ( \
+             SELECT scoped.author_external_id,p.package_ref,p.package_kind,d.record_ordinal,d.disposition \
+             FROM scoped_orders scoped \
+             JOIN collection_work_order_lease lease USING(work_order_ref) \
+             JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+             JOIN linggan_runtime_capture_package p ON p.task_id=lease_task.task_id \
+             JOIN linggan_runtime_record_disposition d ON d.package_ref=p.package_ref \
+             JOIN linggan_material_content_detail detail \
+               ON detail.package_ref=d.package_ref AND detail.record_ordinal=d.record_ordinal \
+             JOIN directory_work_refs works \
+               ON works.author_external_id=scoped.author_external_id \
+              AND works.content_public_ref=detail.content_public_ref \
+             WHERE p.platform=$1 AND p.package_kind='content_detail' \
+               AND d.disposition <> 'retained_uninterpreted' \
          ), target_records AS ( \
-             SELECT author_external_id,package_ref,package_kind,record_ordinal,disposition FROM root_records \
+             SELECT author_external_id,package_ref,package_kind,record_ordinal,disposition FROM root_profile_records \
+             UNION ALL \
+             SELECT author_external_id,package_ref,package_kind,record_ordinal,disposition FROM root_quarantined_records \
+             UNION ALL \
+             SELECT author_external_id,package_ref,package_kind,record_ordinal,disposition FROM directory_records \
              UNION ALL \
              SELECT author_external_id,package_ref,package_kind,record_ordinal,disposition FROM patrol_records \
+             UNION ALL \
+             SELECT author_external_id,package_ref,package_kind,record_ordinal,disposition FROM detail_records \
          ), record_totals AS ( \
              SELECT records.author_external_id, \
                     count(DISTINCT records.package_ref) FILTER ( \
@@ -176,40 +255,15 @@ pub async fn read_archive_completeness(
              LEFT JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
              LEFT JOIN linggan_runtime_attempt attempt ON attempt.task_id=lease_task.task_id \
              GROUP BY roots.author_external_id \
-         ), directory_coverage AS ( \
-             SELECT roots.author_external_id, bool_or( \
-                    receipt.execution_effect='COMPLETED_LIVE_STEP' \
-                    AND receipt.material_admission='ACCEPTED' \
-                    AND package.package_kind='profile_discovery' \
-                    AND layer->>'capability'='profile_discovery' \
-                    AND COALESCE((layer->>'observed')::integer,0)>0 \
-                    AND COALESCE((layer->>'attempted')::integer,0)>0 \
-                    AND COALESCE((layer->>'acquired')::integer,0)>0 \
-                    AND COALESCE((layer->>'failed')::integer,0)=0 \
-                    AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
-                    AND COALESCE((layer->>'unknown')::integer,0)=0 \
-                    AND (layer->>'stoppedReason'='surface_ended' OR ( \
-                        layer->>'stoppedReason'='maximum_quota' \
-                        AND COALESCE((task.task_spec->>'maximumQuota')::integer,-1)=200 \
-                        AND COALESCE((layer->>'acquired')::integer,-1)=200))) AS directory_ready \
-             FROM active_roots roots \
-             LEFT JOIN collection_work_order root_order ON root_order.work_order_ref=roots.root_work_order_ref \
-             LEFT JOIN collection_work_order_lease lease USING(work_order_ref) \
-             LEFT JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
-             LEFT JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
-             LEFT JOIN linggan_runtime_capture_package package ON package.task_id=lease_task.task_id \
-             LEFT JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
-             LEFT JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(package.coverage->'layers')='array' THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer ON true \
-             GROUP BY roots.author_external_id \
          ) \
          SELECT roots.author_external_id,coalesce(progress.started,false),coalesce(progress.attempted,false), \
                 coalesce(progress.work_in_progress,false),coalesce(totals.author_profile_captures,0), \
                 coalesce(totals.works_listed,0),coalesce(totals.details_captured,0),coalesce(totals.quarantined,0), \
-                coalesce(coverage.directory_ready,false) \
+                directories.package_ref IS NOT NULL \
          FROM active_roots roots \
          LEFT JOIN record_totals totals USING(author_external_id) \
          LEFT JOIN archive_progress progress USING(author_external_id) \
-         LEFT JOIN directory_coverage coverage USING(author_external_id)",
+         LEFT JOIN directory_packages directories USING(author_external_id)",
     )
     .bind(platform)
     .fetch_all(database.pool())

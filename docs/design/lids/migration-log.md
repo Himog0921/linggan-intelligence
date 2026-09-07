@@ -1,12 +1,19 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-09-04
+> 最后核对: 2026-09-07
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
+
+## 2026-09-07 · OBSERVATION-TARGET-DOSSIER-UI-001 目录基线与首层密度修正
+
+- **来源与范围**：Issue #158 与 Mog 对图妈 Vita 历史 31 篇误读的直接反馈。只修正 Collection Targets 的 current-directory 事实口径和既有首层 creator/platform 栅格间距；不创建版本化“200 篇档案”，不修改 Pattern、Token、CMP、路由或平台访问。
+- **Data Truth**：目录和详情分母只来自最新 canonical root 的一份合格、已接纳目录 Package；它必须在 `maximumQuota=200` 合同下确证到达 200 或主页表面末端。旧 partial/retry 记录保留历史但不混入当前分母；合格巡查新 Work 通过既有精确链路加入集合，详情只对集合内 Work 计数。UNKNOWN、旧历史和真实零值仍不互相替代。
+- **Pattern / Page**：仍是 Collection Control 的 L1 宽表与受限 L2 creator drawer；基线不合格时唯一主动作明确为“重建目录”，不显示假精确目录/详情数字。creator 身份字段收紧为内容优先宽度，未引入新视觉值或页面结构。
+- **验证与未证明**：源代码 format、针对列表/抽屉/证据的测试、隔离 PostgreSQL 目录重建和巡查新增证明及治理检查分别运行；真实图妈重建、共享 `:3000`、插件、平台和 Mog 业务验收不由本记录证明。
 
 ## 2026-09-06 · MODEL-PI-001 模型设置
 

@@ -1628,9 +1628,9 @@ async fn progressive_root_directory_state_in_transaction(
                AND COALESCE((layer->>'failed')::integer,0)=0 \
                AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
                AND COALESCE((layer->>'unknown')::integer,0)=0 \
+               AND COALESCE((task.task_spec->>'maximumQuota')::integer,-1)=200 \
                AND (layer->>'stoppedReason'='surface_ended' OR ( \
                  layer->>'stoppedReason'='maximum_quota' \
-                 AND COALESCE((task.task_spec->>'maximumQuota')::integer,-1)=200 \
                  AND COALESCE((layer->>'acquired')::integer,-1)=200))) AS directory_ready, \
            EXISTS ( \
              SELECT 1 FROM collection_work_order work_order \

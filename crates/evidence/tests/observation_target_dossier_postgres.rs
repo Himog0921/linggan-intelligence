@@ -185,7 +185,10 @@ async fn incomplete_directory_is_rebuilt_as_a_new_current_baseline_without_mutat
 
     let before = read_archive_completeness(&database, "xhs").await.unwrap();
     let before = before.get("creator-rebuild-incomplete").unwrap();
-    assert_eq!(before.works_listed, 31);
+    assert_eq!(
+        before.works_listed, 0,
+        "a partial historical directory cannot become the current detail denominator"
+    );
     assert!(before.requires_directory_rebuild());
     assert!(!before.has_displayable_directory());
 
@@ -296,6 +299,120 @@ async fn surface_ended_directory_below_200_remains_a_valid_current_baseline() {
     .await
     .unwrap();
     assert_eq!(root_count, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn surface_ended_directory_from_a_legacy_smaller_quota_requires_rebuild() {
+    let database = proof_database("dossier_surface_ended_legacy_quota").await;
+    let installation = ready_installation(&database, "dossier-surface-ended-legacy-quota").await;
+    let target_ref = seed_creator_target(&database, "creator-surface-ended-legacy-quota").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let old_root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 31, "surface_ended")
+        .await;
+    // This synthetic fixture represents a pre-contract immutable runtime task.  Disable only
+    // its append-only trigger long enough to express the historical smaller quota, then restore
+    // it before exercising the current read/action contract.
+    sqlx::query(
+        "ALTER TABLE linggan_runtime_task DISABLE TRIGGER linggan_runtime_task_is_append_only",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_runtime_task task \
+         SET task_spec=jsonb_set(task.task_spec,'{maximumQuota}','31'::jsonb) \
+         FROM collection_work_order_lease_task lease_task \
+         JOIN collection_work_order_lease lease USING(lease_ref) \
+         WHERE task.task_id=lease_task.task_id AND lease.work_order_ref=$1",
+    )
+    .bind(old_root)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "ALTER TABLE linggan_runtime_task ENABLE TRIGGER linggan_runtime_task_is_append_only",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let baseline = read_archive_completeness(&database, "xhs").await.unwrap();
+    let baseline = baseline.get("creator-surface-ended-legacy-quota").unwrap();
+    assert!(!baseline.has_displayable_directory());
+    assert!(baseline.requires_directory_rebuild());
+
+    let rebuilt = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .expect("a legacy smaller quota must create a new current root");
+    assert_ne!(rebuilt.request.work_order_ref.unwrap(), old_root);
+}
+
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn quarantined_directory_record_remains_an_archive_problem() {
+    let database = proof_database("dossier_quarantined_directory").await;
+    let installation = ready_installation(&database, "dossier-quarantined-directory").await;
+    let target_ref = seed_creator_target(&database, "creator-quarantined-directory").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    let root = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "建立创作者档案",
+        "person",
+        30,
+    )
+    .await
+    .unwrap()
+    .request
+    .work_order_ref
+    .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 31, "surface_ended")
+        .await;
+    let directory_package: Uuid = sqlx::query_scalar(
+        "SELECT package.package_ref \
+         FROM linggan_runtime_capture_package package \
+         JOIN collection_work_order_lease_task lease_task ON lease_task.task_id=package.task_id \
+         JOIN collection_work_order_lease lease USING(lease_ref) \
+         WHERE lease.work_order_ref=$1 AND package.package_kind='profile_discovery'",
+    )
+    .bind(root)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_runtime_record_disposition \
+           (package_ref,record_ordinal,disposition,reason) \
+         VALUES ($1,999,'quarantined','synthetic directory conflict')",
+    )
+    .bind(directory_package)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let baseline = read_archive_completeness(&database, "xhs").await.unwrap();
+    let baseline = baseline.get("creator-quarantined-directory").unwrap();
+    assert!(!baseline.has_displayable_directory());
+    assert!(baseline.requires_directory_rebuild());
+    assert_eq!(baseline.quarantined, 1);
 }
 
 #[tokio::test]
@@ -835,8 +952,14 @@ async fn archive_completeness_deduplicates_work_and_follows_the_exact_lease_targ
         .expect("the exact Work Order target owns every bound package");
     assert!(completeness.work_in_progress);
     assert_eq!(completeness.author_profile_captures, 0);
-    assert_eq!(completeness.works_listed, 1);
-    assert_eq!(completeness.details_captured, 1);
+    assert_eq!(
+        completeness.works_listed, 0,
+        "a still-building root does not expose partial links as a current directory"
+    );
+    assert_eq!(
+        completeness.details_captured, 0,
+        "details are not a visible denominator before the current directory is proven"
+    );
     assert_eq!(completeness.quarantined, 0);
 }
 
