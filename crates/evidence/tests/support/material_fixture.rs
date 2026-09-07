@@ -89,6 +89,7 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0039_comment_research.sql"),
     include_str!("../../../../database/migrations/0040_model_pi.sql"),
+    include_str!("../../../../database/migrations/0041_comment_daily.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",

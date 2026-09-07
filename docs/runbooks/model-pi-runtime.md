@@ -1,10 +1,16 @@
 # 模型与 Pi 本机运行说明
 
 > 状态: 权威当前
-> 最后核对: 2026-09-06
+> 最后核对: 2026-09-07
 > 适用范围: MODEL-PI-001 交付分支的依赖准备与隔离预览，不自动授权共享部署
 > 事实来源: .nvmrc、固定 npm lock、实际 runtime / preview 脚本
 > 冲突时以谁为准: Mog 对具体 HEAD/共享迁移/运行切换的授权与真实运行证据
+
+COMMENT-DAILY-001 新增 0041，依赖 0039/0040，已登记 migrate 入口但未应用共享库。0041 创建清洗派生、每日计划、冻结批次/来源、分包租约和重试命令；同时暂停旧 automatic，保留历史。应用迁移不启用每日模型调用。
+
+新使用路径为评论研究 → 勾选少量原声 → 确认模型/供应商/本批额度 → 查看批次与原声结果 → 研究设置中显式启用每日 23:00。首次从启用时刻开始，按评论语料投影首次到达时间计数；暂停恢复后按原截点补建。失败须显式重试；未知用量继续占额度。原页面的旧计划恢复说明仅用于历史兼容。
+
+在新建、空配置的隔离 preview 上执行 `node scripts/verify-comment-daily-api.mjs <origin> <provider URL>`，验证 v2 合成 probe、三条同作品评论一次调用、逐条结果/问题归组、清洗筛选和日设置。该脚本只接受标为 SYNTHETIC_PREVIEW_ONLY 的本机服务，不可用真实配置替代。
 
 正式凭据由 API 写入 macOS Keychain，service 是 `Linggan.Intelligence.Models.<workspace UUID>`，account 为随机不可变 secret UUID；不枚举 Keychain、不保存 API key 到环境文件或数据库。非 macOS 或 Keychain 失败关闭调用，不降级明文。
 

@@ -32,6 +32,16 @@ pub async fn start_model_plan(db: &Database, r: &StartModelPlan) -> Result<Value
     let request = serde_json::to_value(r).map_err(|_| ModelError::Invalid)?;
     let mut tx = db.pool().begin().await?;
     let workspace=sqlx::query("SELECT default_config_ref,active_auto_plan_ref FROM linggan_model_workspace WHERE singleton FOR UPDATE").fetch_one(&mut *tx).await?;
+    if r.kind == "automatic" && crate::comment_daily::schema_ready(db).await? {
+        let enabled: bool = sqlx::query_scalar(
+            "SELECT enabled FROM linggan_comment_daily_schedule WHERE singleton",
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        if enabled {
+            return Err(ModelError::Disabled);
+        }
+    }
     if let Some(row) =
         sqlx::query("SELECT request,enabled FROM linggan_model_plan WHERE plan_ref=$1")
             .bind(r.plan_ref)

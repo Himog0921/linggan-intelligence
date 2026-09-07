@@ -210,6 +210,7 @@ migrate() {
   apply_migration_once "0038_detail_only_material_scope" "$project_root/database/migrations/0038_detail_only_material_scope.sql"
   apply_migration_once "0039_comment_research" "$project_root/database/migrations/0039_comment_research.sql"
   apply_migration_once "0040_model_pi" "$project_root/database/migrations/0040_model_pi.sql"
+  apply_migration_once "0041_comment_daily" "$project_root/database/migrations/0041_comment_daily.sql"
   apply_migration_once "0041_observation_domain" "$project_root/database/migrations/0041_observation_domain.sql"
 }
 

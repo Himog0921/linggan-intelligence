@@ -24,6 +24,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/assets/comment-research.css", get(stylesheet))
         .route("/assets/comment-research.js", get(script))
         .route("/api/local/comment-research", get(search))
+        .route("/api/local/comment-research/works", get(work_options))
         .route(
             "/api/local/comment-research/sources/{source_ref}",
             get(source),
@@ -61,6 +62,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
             "/api/local/comment-research/analysis/{work_ref}/retry",
             post(retry),
         )
+        .merge(super::comment_daily::routes())
         .layer(middleware::from_fn(local_research_guard))
 }
 
@@ -128,14 +130,58 @@ async fn script() -> impl IntoResponse {
     )
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResearchSearchQuery {
+    #[serde(default)]
+    text: String,
+    work_ref: Option<Uuid>,
+    cursor: Option<String>,
+    clean_state: Option<String>,
+}
+async fn work_options(State(state): State<LocalWebState>) -> Response {
+    let Some(db) = state.database.database() else {
+        return unavailable();
+    };
+    match read_comment_work_options(db).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => read_error(e),
+    }
+}
 async fn search(
     State(state): State<LocalWebState>,
-    Query(query): Query<CommentResearchQuery>,
+    Query(query): Query<ResearchSearchQuery>,
 ) -> Response {
     let Some(db) = state.database.database() else {
         return unavailable();
     };
-    let mut page = match read_comment_research(db, &query).await {
+    let members = if let Some(clean) = &query.clean_state {
+        if !linggan_intelligence::comment_daily::schema_ready(db)
+            .await
+            .unwrap_or(false)
+        {
+            return unavailable();
+        }
+        match linggan_intelligence::comment_daily::cleaning_members(db, clean).await {
+            Ok(v) => Some(v),
+            Err(_) => return error(StatusCode::BAD_REQUEST, "invalid_query"),
+        }
+    } else {
+        None
+    };
+    let source_query = CommentResearchQuery {
+        text: query.text,
+        work_ref: query.work_ref,
+        cursor: query.cursor,
+    };
+    let mut page = match read_comment_research_subset(
+        db,
+        &source_query,
+        members.as_deref(),
+        query.clean_state.as_deref().unwrap_or(""),
+    )
+    .await
+    {
         Ok(p) => p,
         Err(e) => return read_error(e),
     };
@@ -157,7 +203,26 @@ async fn search(
     let model = linggan_intelligence::model_settings_read::current_comment_model_state(db)
         .await
         .unwrap_or_else(|_| json!({"modelConnected":false,"modelState":"UNAVAILABLE"}));
-    Json(json!({"page":page,"works":works,"modelConnected":model["modelConnected"],"modelState":model["modelState"],"scope":"ACCEPTED_READABLE_COMMENT_SAMPLE"})).into_response()
+    let research_states = if linggan_intelligence::comment_daily::schema_ready(db)
+        .await
+        .unwrap_or(false)
+    {
+        let refs: Vec<_> = page.items.iter().map(|s| s.source_ref).collect();
+        linggan_intelligence::comment_daily::source_states(db, &refs)
+            .await
+            .ok()
+            .map(|mut v| {
+                if let Some(items) = v.as_array_mut() {
+                    for item in items {
+                        item.as_object_mut().map(|v| v.remove("cleaning"));
+                    }
+                }
+                v
+            })
+    } else {
+        None
+    };
+    Json(json!({"researchStates":research_states,"page":page,"works":works,"modelConnected":model["modelConnected"],"modelState":model["modelState"],"scope":"ACCEPTED_READABLE_COMMENT_SAMPLE"})).into_response()
 }
 
 async fn source(State(state): State<LocalWebState>, Path(source_ref): Path<Uuid>) -> Response {
@@ -190,6 +255,17 @@ async fn source(State(state): State<LocalWebState>, Path(source_ref): Path<Uuid>
         Err(e) => return domain_error(e),
     };
     context["annotations"] = annotations;
+    if linggan_intelligence::comment_daily::schema_ready(db)
+        .await
+        .unwrap_or(false)
+    {
+        context["processing"] =
+            linggan_intelligence::comment_daily::source_states(db, &[source_ref])
+                .await
+                .ok()
+                .and_then(|v| v.as_array().and_then(|v| v.first()).cloned())
+                .unwrap_or(Value::Null);
+    }
     Json(context).into_response()
 }
 
@@ -353,7 +429,7 @@ fn page_html(queries: bool) -> String {
         "<span>内部研究</span><span>样本范围</span>",
         None,
     );
-    include_str!("comment_research.html")
+    let html = include_str!("comment_research.html")
         .replace("{{HEADER}}", &header)
         .replace("{{TITLE}}", title)
         .replace("{{VIEW}}", if queries { "queries" } else { "voices" })
@@ -364,7 +440,15 @@ fn page_html(queries: bool) -> String {
         .replace(
             "{{QUERY_CURRENT}}",
             if queries { "aria-current=\"page\"" } else { "" },
+        );
+    if std::env::var("LINGGAN_MODEL_SYNTHETIC_PREVIEW").as_deref() == Ok("SYNTHETIC-NOT-EVIDENCE") {
+        html.replace(
+            "<p class=\"lgi-research-boundary\">",
+            "<p class=\"lgi-research-boundary\">合成验收环境，非真实研究材料。 ",
         )
+    } else {
+        html
+    }
 }
 
 #[cfg(test)]

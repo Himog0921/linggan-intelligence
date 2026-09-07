@@ -1,7 +1,7 @@
 # 数据库交付边界
 
 > 状态: 权威当前
-> 最后核对: 2026-08-25
+> 最后核对: 2026-09-07
 > 适用范围: 新 PostgreSQL 数据库、migration、fixture 与秘密边界
 > 事实来源: ACCEPTED ADR、当前数据库目录和实际 migration
 > 冲突时以谁为准: ACCEPTED ADR 与实际新项目 migration
@@ -50,3 +50,9 @@ Gate 5 的长期数据分类、身份、版本、Current、隐私传播、统计
 - 完整步骤见 [`docs/runbooks/development-environment.md`](../docs/runbooks/development-environment.md)。
 
 ENV-001 的 proof 数据库只用于环境验证，验证后必须删除；它不包含业务 DDL，也不是 migration baseline。
+
+## COMMENT-DAILY-001
+
+`0041_comment_daily.sql` 依赖 0039/0040。它新增带版本清洗、单日计划、冻结来源批次、逐条状态、分包调用引用及幂等重试命令，复用既有模型配置和 invocation 账本。数据库 trigger 禁止修改已冻结范围或删除研究执行审计；原始 Evidence 不覆盖。迁移暂停旧即时 automatic 并清除自动指针，不启用新每日计划。
+
+当前只在 `test-model-pi-postgres.sh` 的随机隔离 PostgreSQL 验证。已登记 `local-runtime.sh migrate`，未应用共享库。新包边界与证明见 [COMMENT-DAILY-001](../docs/plans/active/comment-daily-001.md)。

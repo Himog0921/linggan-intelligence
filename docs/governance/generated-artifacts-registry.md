@@ -11,7 +11,7 @@
 | 类别 | 固定位置 | 来源/生成方式 | Git 策略 | 手工修改 | 保留与清理 |
 |---|---|---|---|---|---|
 | Pi Node 固定依赖 | `apps/pi-adapter/node_modules/`（含 `.linggan-lock-sha256`）、`package-lock.json` | 精确 package.json、npm ci、`prepare-pi-adapter.sh` | node_modules 忽略；lock 提交 | 禁止手工改 lock/安装产物 | 只清理当前 checkout 依赖，不处理其它项目 |
-| MODEL-PI-001 隔离证明 | 随机 `linggan-comment-proof-*` Docker、`/tmp/model-pi-*` 和 `/tmp/comment-research-preview.*` | `test-model-pi-postgres.sh`、`preview-model-pi.sh`、真实 SDK 本地 fixture 与 `verify-model-pi-api.mjs` | 不进 Git | 禁止伪造 | trap 清理所属 API/worker/fixture/container/volume；日志只含合成资料/固定失败码 |
+| MODEL-PI-001 隔离证明 | 随机 `linggan-comment-proof-*` Docker、`/tmp/model-pi-*` 和 `/tmp/comment-research-preview.*` | `test-model-pi-postgres.sh`、`preview-model-pi.sh`、`verify-comment-daily-api.mjs`、真实 SDK 本地 fixture 与 `verify-model-pi-api.mjs` | 不进 Git | 禁止伪造 | trap 清理所属 API/worker/fixture/container/volume；日志只含合成资料/固定失败码 |
 | 模型后端秘密及合成 Keychain 验证 | macOS Keychain 的 `Linggan.Intelligence.Models.<workspace UUID>` service + 随机 account | API 的 Keychain SecretStore；`model_keychain` 测试只操作随机合成条目 | 不进 Git/数据库/前端存储 | 只经配置命令更换 | 正式版本保留以供冻结任务；测试结束立即删除随机项，不枚举已有秘密 |
 | 评论研究隔离验证与预览 | Docker 中随机 `linggan-comment-proof-*` container/volume；系统临时目录 `/tmp/comment-research-preview.*` | `scripts/test-comment-research-postgres.sh`、`scripts/preview-comment-research.sh`，只接纳明确合成 fixture；API 验证由 `scripts/verify-comment-research-api.py` 执行 | 不进入 Git | 禁止伪造 | proof 结束删除 container/volume；预览脚本退出时关闭它自己的 API 并删除隔离资源；日志无正文/凭据，验证后清理 |
 | Rust 构建缓存 | `target/` | Cargo build/test | 忽略 | 禁止 | 可安全重建，按需清理 |
