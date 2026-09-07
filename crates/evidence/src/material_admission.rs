@@ -32,6 +32,15 @@ pub(crate) async fn insert_typed_materials(
     .map_err(ProducerRuntimeError::Internal)?
     .into_iter()
     .collect::<HashSet<_>>();
+    // 落库分流。采集链路对两种领域完全相同，插件不知道领域的存在；材料去哪张表
+    // 只在这一刻决定。外部领域的内容是参照物，不进证据侧——共用一张表等于把参照物
+    // 混进证据，将来任何读证据的地方都得记得排除它。
+    if let crate::cross_industry_admission::PackageDomain::External(domain) =
+        crate::cross_industry_admission::resolve_package_domain(tx, package).await?
+    {
+        return crate::cross_industry_admission::insert(tx, package, &domain, &accepted_ordinals)
+            .await;
+    }
     match package.package_kind() {
         "discovery_search" | "profile_discovery" => {
             insert_discovery_records(tx, package, &accepted_ordinals).await?
@@ -278,7 +287,10 @@ pub(crate) async fn insert_lane_observation(
     Ok(())
 }
 
-fn target_string<'a>(package: &'a ProducerCapturePackage, field: &str) -> Option<&'a str> {
+pub(crate) fn target_string<'a>(
+    package: &'a ProducerCapturePackage,
+    field: &str,
+) -> Option<&'a str> {
     package
         .coverage()
         .pointer(&format!("/target/{field}"))
@@ -292,6 +304,8 @@ pub(crate) async fn ensure_content(
     package: &ProducerCapturePackage,
     content_id: &str,
 ) -> Result<Uuid, ProducerRuntimeError> {
+    // 不填 domain_ref：证据表只装本领域作品是表的性质，由 0044 的触发器兜住，写入点
+    // 不必记得带上它——要求每处都记得，就是漏一次即破。
     sqlx::query("INSERT INTO linggan_material_content (platform,content_external_id,public_ref,first_package_ref) VALUES ($1,$2,$3,$4) ON CONFLICT (platform,content_external_id) DO NOTHING")
         .bind(package.platform()).bind(content_id).bind(Uuid::new_v4()).bind(package.package_ref())
         .execute(&mut **tx).await.map_err(ProducerRuntimeError::Internal)?;
@@ -497,7 +511,10 @@ fn published_at_evidence(payload: &serde_json::Map<String, Value>) -> PublishedA
     }
 }
 
-fn exact_nonnegative_count(payload: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<i64> {
+pub(crate) fn exact_nonnegative_count(
+    payload: &serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Option<i64> {
     keys.iter().find_map(|key| {
         payload
             .get(*key)
@@ -506,7 +523,7 @@ fn exact_nonnegative_count(payload: &serde_json::Map<String, Value>, keys: &[&st
     })
 }
 
-fn observed_cover_url(payload: &serde_json::Map<String, Value>) -> Option<&str> {
+pub(crate) fn observed_cover_url(payload: &serde_json::Map<String, Value>) -> Option<&str> {
     let direct = ["cover", "coverImg", "coverUrl", "thumbnail"]
         .into_iter()
         .find_map(|key| exact_string(payload, key));
