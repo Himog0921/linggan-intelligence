@@ -1,0 +1,178 @@
+//! Verifiable work lists for one observation target.
+//!
+//! This is a read-only presentation seam.  It deliberately follows accepted,
+//! target-scoped discovery records rather than reconstructing a directory from
+//! a creator name or an unscoped corpus search.
+
+use linggan_storage_postgres::Database;
+use sqlx::Row;
+use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum CatalogSource {
+    InitialArchive,
+    PatrolDiscovery,
+}
+
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum CatalogDetailState {
+    Complete,
+    Pending,
+}
+
+#[derive(Debug, Clone)]
+pub struct CatalogWork {
+    pub public_ref: Uuid,
+    pub content_external_id: String,
+    pub title: Option<String>,
+    /// Present for keyword search hits.  A creator directory already has this owner.
+    pub creator_display_name: Option<String>,
+    /// The rank is a search-result fact, not inferred from table order.
+    pub match_position: Option<i64>,
+    pub published_at: Option<String>,
+    pub source: CatalogSource,
+    pub detail_state: CatalogDetailState,
+    pub media_state: &'static str,
+    pub comment_count: Option<i64>,
+    pub last_captured_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CreatorDirectoryProjection {
+    pub works: Vec<CatalogWork>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct KeywordHitProjection {
+    pub works: Vec<CatalogWork>,
+}
+
+pub async fn read_creator_directory(
+    database: &Database,
+    target_ref: Uuid,
+) -> Result<Option<CreatorDirectoryProjection>, sqlx::Error> {
+    read_catalog(database, target_ref, "creator", "profile_discovery")
+        .await
+        .map(|value| value.map(|works| CreatorDirectoryProjection { works }))
+}
+
+pub async fn read_keyword_hits(
+    database: &Database,
+    target_ref: Uuid,
+) -> Result<Option<KeywordHitProjection>, sqlx::Error> {
+    read_catalog(database, target_ref, "keyword", "discovery_search")
+        .await
+        .map(|value| value.map(|works| KeywordHitProjection { works }))
+}
+
+async fn read_catalog(
+    database: &Database,
+    target_ref: Uuid,
+    target_kind: &str,
+    discovery_kind: &str,
+) -> Result<Option<Vec<CatalogWork>>, sqlx::Error> {
+    let target_exists: Option<Uuid> = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target WHERE target_ref=$1 AND target_kind=$2",
+    )
+    .bind(target_ref)
+    .bind(target_kind)
+    .fetch_optional(database.pool())
+    .await?;
+    if target_exists.is_none() {
+        return Ok(None);
+    }
+    let rows = sqlx::query(
+        "WITH discoveries AS ( \
+             SELECT finding.content_public_ref,content.content_external_id,work_order.lane,package.accepted_at, \
+                    finding.title,finding.title_state,finding.creator_display_name,finding.creator_state, \
+                    finding.result_position,finding.published_at_source_text \
+             FROM collection_work_order work_order \
+             JOIN collection_work_order_lease lease USING(work_order_ref) \
+             JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+             JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+             JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
+             JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+             JOIN linggan_material_discovery_finding finding USING(package_ref) \
+             JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref \
+             JOIN linggan_runtime_record_disposition disposition \
+               ON disposition.package_ref=finding.package_ref AND disposition.record_ordinal=finding.record_ordinal \
+             WHERE work_order.target_ref=$1 AND work_order.lane IN ('deep_archive','patrol') \
+               AND finding.discovery_kind=$2 AND receipt.material_admission='ACCEPTED' \
+               AND disposition.disposition <> 'quarantined' \
+         ), first_discovery AS ( \
+             SELECT DISTINCT ON (content_public_ref) * FROM discoveries \
+             ORDER BY content_public_ref,accepted_at,CASE WHEN lane='deep_archive' THEN 0 ELSE 1 END \
+         ) \
+         SELECT first_discovery.content_public_ref,first_discovery.content_external_id, \
+                CASE WHEN first_discovery.title_state='KNOWN' THEN first_discovery.title END AS discovery_title, \
+                CASE WHEN first_discovery.creator_state='KNOWN' THEN first_discovery.creator_display_name END AS creator_display_name, \
+                first_discovery.result_position, \
+                first_discovery.published_at_source_text,first_discovery.lane, \
+                detail.title AS detail_title,detail.published_at::text AS detail_published_at, \
+                detail.observed_at::text AS detail_observed_at, \
+                comments.comment_count, \
+                CASE WHEN EXISTS (SELECT 1 FROM linggan_material_derived_text derived \
+                                  WHERE derived.content_public_ref=first_discovery.content_public_ref) THEN '已处理' \
+                     WHEN EXISTS (SELECT 1 FROM linggan_material_media_origin origin \
+                                  WHERE origin.content_public_ref=first_discovery.content_public_ref) THEN '待处理' \
+                     ELSE '—' END AS media_state \
+         FROM first_discovery \
+         LEFT JOIN LATERAL ( \
+             SELECT candidate.title,candidate.published_at,candidate.observed_at \
+             FROM linggan_material_content_detail candidate \
+             JOIN linggan_runtime_capture_package package USING(package_ref) \
+             JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+             JOIN linggan_runtime_record_disposition disposition \
+               ON disposition.package_ref=candidate.package_ref AND disposition.record_ordinal=candidate.record_ordinal \
+             WHERE candidate.content_public_ref=first_discovery.content_public_ref \
+               AND receipt.material_admission='ACCEPTED' AND disposition.disposition <> 'quarantined' \
+             ORDER BY package.accepted_at DESC,candidate.created_at DESC LIMIT 1 \
+         ) detail ON true \
+         LEFT JOIN LATERAL ( \
+             SELECT count(*)::bigint AS comment_count FROM linggan_current_material_comment comment \
+             WHERE comment.content_public_ref=first_discovery.content_public_ref \
+         ) comments ON true \
+         ORDER BY COALESCE(detail.published_at::text,first_discovery.published_at_source_text) DESC NULLS LAST, \
+                  first_discovery.accepted_at DESC,first_discovery.content_public_ref DESC",
+    )
+    .bind(target_ref)
+    .bind(discovery_kind)
+    .fetch_all(database.pool())
+    .await?;
+
+    Ok(Some(
+        rows.into_iter()
+            .map(|row| {
+                let detail_title: Option<String> = row.get("detail_title");
+                let detail_state = if detail_title.is_some() {
+                    CatalogDetailState::Complete
+                } else {
+                    CatalogDetailState::Pending
+                };
+                CatalogWork {
+                    public_ref: row.get("content_public_ref"),
+                    content_external_id: row.get("content_external_id"),
+                    title: detail_title.or_else(|| row.get("discovery_title")),
+                    creator_display_name: row.get("creator_display_name"),
+                    match_position: row.get("result_position"),
+                    published_at: row
+                        .get::<Option<String>, _>("detail_published_at")
+                        .or_else(|| row.get("published_at_source_text")),
+                    source: if row.get::<String, _>("lane") == "patrol" {
+                        CatalogSource::PatrolDiscovery
+                    } else {
+                        CatalogSource::InitialArchive
+                    },
+                    detail_state,
+                    media_state: match row.get::<String, _>("media_state").as_str() {
+                        "已处理" => "已处理",
+                        "待处理" => "待处理",
+                        _ => "—",
+                    },
+                    comment_count: row.get("comment_count"),
+                    last_captured_at: row.get("detail_observed_at"),
+                }
+            })
+            .collect(),
+    ))
+}

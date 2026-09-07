@@ -1,7 +1,7 @@
 //! COLLECTION-001 · 观察目标的宽幅研究抽屉。
 //!
 //! 三个职责 tab（概览 / 档案 / 巡查）留在 Collection；作品正文、评论和媒体结果只在
-//! Corpus。创作者概览的视觉核心是作品生命周期分布，不是工程回执或监控价值评分。
+//! Corpus。创作者概览的视觉核心是可核验的作品目录，不是工程回执或监控价值评分。
 //!
 //! **用 URL 参数驱动，不用 JS**：`?drawer=<target_ref>&dtab=archive`。稿子那 142 行
 //! 脚本换来的是「点击不刷新」，代价是刷新即丢状态、链接分享不过去。URL 版两样都不丢，
@@ -11,16 +11,17 @@
 //! 选定方案 A），不填假数。
 
 use linggan_evidence::{
-    ArchiveCompleteness, CreatorLifecycleAssociation, CreatorLifecycleMetric,
-    CreatorLifecyclePoint, CreatorLifecycleProjection, CreatorLifecycleStatus,
-    CreatorLifecycleWindow, ObservationTarget, ObservationTargetAvatar,
+    ArchiveCompleteness, CatalogDetailState, CatalogSource, CreatorDirectoryProjection,
+    CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecyclePoint,
+    CreatorLifecycleProjection, CreatorLifecycleStatus, CreatorLifecycleWindow,
+    KeywordHitProjection, ObservationTarget, ObservationTargetAvatar,
 };
 
 /// Collection 目标抽屉的三个职责。Evidence 已退回唯一的 Corpus 表面。退役或未知
 /// 值统一归一到 Overview；读取守卫和渲染都只消费这个闭集，不能各自猜一次。
 const TABS: &[(TargetDrawerTab, &str)] = &[
     (TargetDrawerTab::Overview, "概览"),
-    (TargetDrawerTab::Baseline, "档案"),
+    (TargetDrawerTab::Baseline, "作品"),
     (TargetDrawerTab::Patrol, "巡查"),
 ];
 
@@ -31,10 +32,17 @@ pub enum TargetDrawerTab {
     Patrol,
 }
 
+#[derive(Clone, Copy)]
+pub(crate) enum TargetCatalogView<'a> {
+    Creator(Option<&'a CreatorDirectoryProjection>),
+    Keyword(Option<&'a KeywordHitProjection>),
+    Unavailable,
+}
+
 impl TargetDrawerTab {
     pub fn parse(value: Option<&str>) -> Self {
         match value {
-            Some("archive" | "baseline") => Self::Baseline,
+            Some("archive" | "baseline" | "works") => Self::Baseline,
             Some("patrol") => Self::Patrol,
             // `baseline` remains a compatibility alias. Retired `evidence` / `trace` and any
             // future spelling open the safe default Overview and actually read it.
@@ -45,7 +53,7 @@ impl TargetDrawerTab {
     fn as_str(self) -> &'static str {
         match self {
             Self::Overview => "overview",
-            Self::Baseline => "archive",
+            Self::Baseline => "works",
             Self::Patrol => "patrol",
         }
     }
@@ -336,6 +344,34 @@ pub fn render(
     selected_work: Option<&str>,
     list_context: TargetListContext<'_>,
 ) -> String {
+    render_with_catalog(
+        target,
+        avatar,
+        completeness,
+        drawer,
+        active_tab,
+        lifecycle,
+        TargetCatalogView::Unavailable,
+        None,
+        None,
+        selected_work,
+        list_context,
+    )
+}
+
+pub fn render_with_catalog(
+    target: Option<&ObservationTarget>,
+    avatar: Option<&ObservationTargetAvatar>,
+    completeness: Option<&std::collections::HashMap<String, ArchiveCompleteness>>,
+    drawer: Option<&str>,
+    active_tab: TargetDrawerTab,
+    lifecycle: LifecycleView<'_>,
+    catalog: TargetCatalogView<'_>,
+    catalog_query: Option<&str>,
+    catalog_filter: Option<&str>,
+    selected_work: Option<&str>,
+    list_context: TargetListContext<'_>,
+) -> String {
     let Some(drawer) = drawer else {
         return String::new();
     };
@@ -371,11 +407,7 @@ pub fn render(
 
     let archive = TargetArchiveRead::from_map(completeness, &target.identity_key);
     let is_creator = target.target_kind == "creator";
-    let tab = if !is_creator && active_tab == TargetDrawerTab::Baseline {
-        TargetDrawerTab::Overview
-    } else {
-        active_tab
-    };
+    let tab = active_tab;
     let return_focus = format!("target-{}", target.target_ref);
     let return_href = list_context.list_href(Some(&return_focus));
 
@@ -430,6 +462,9 @@ pub fn render(
             is_creator,
             tab,
             lifecycle,
+            catalog,
+            catalog_query,
+            catalog_filter,
             selected_work,
             list_context,
         ),
@@ -659,29 +694,36 @@ fn drawer_primary_action(
             )
         }
         TargetPrimaryAction::ViewKeyword => {
-            let href = list_context.drawer_href(target.target_ref, &[], None);
-            format!(r#"<a class="c-btn-primary" href="{href}">查看观察</a>"#)
+            let href = list_context.drawer_href(
+                target.target_ref,
+                &[("dtab", "works")],
+                Some("target-works"),
+            );
+            format!(r#"<a class="c-btn-secondary" href="{href}">查看结果</a>"#)
         }
         TargetPrimaryAction::ViewCreator => {
             let href = list_context.drawer_href(
                 target.target_ref,
-                &[("dtab", "overview")],
-                Some("creator-lifecycle"),
+                &[("dtab", "works")],
+                Some("target-works"),
             );
-            format!(r#"<a class="c-btn-primary" href="{href}">查看档案</a>"#)
+            format!(r#"<a class="c-btn-secondary" href="{href}">查看档案</a>"#)
         }
         TargetPrimaryAction::ViewArchiveProgress
         | TargetPrimaryAction::ViewArchiveProblems
         | TargetPrimaryAction::ViewArchiveUnavailable => {
             let (label, fragment) = match action {
-                TargetPrimaryAction::ViewArchiveProgress => ("查看建档状态", "target-archive"),
-                TargetPrimaryAction::ViewArchiveProblems => ("查看档案问题", "archive-problems"),
+                TargetPrimaryAction::ViewArchiveProgress => ("查看任务", "archive-task"),
+                TargetPrimaryAction::ViewArchiveProblems => ("处理异常", "archive-problems"),
                 TargetPrimaryAction::ViewArchiveUnavailable => ("查看档案", "target-archive"),
                 _ => unreachable!(),
             };
-            let href =
-                list_context.drawer_href(target.target_ref, &[("dtab", "archive")], Some(fragment));
-            format!(r#"<a class="c-btn-primary" href="{href}">{label}</a>"#)
+            let href = list_context.drawer_href(
+                target.target_ref,
+                &[("dtab", "overview")],
+                Some(fragment),
+            );
+            format!(r#"<a class="c-btn-secondary" href="{href}">{label}</a>"#)
         }
     }
 }
@@ -695,7 +737,6 @@ fn tab_bar(
 ) -> String {
     let lifecycle_state = lifecycle_query_state(lifecycle, selected_work);
     TABS.iter()
-        .filter(|(key, _)| target.target_kind == "creator" || *key != TargetDrawerTab::Baseline)
         .map(|(key, label)| {
             let class = if *key == active { " c-dw-tab-on" } else { "" };
             let current = if *key == active {
@@ -721,12 +762,15 @@ fn body(
     is_creator: bool,
     tab: TargetDrawerTab,
     lifecycle: LifecycleView<'_>,
+    catalog: TargetCatalogView<'_>,
+    catalog_query: Option<&str>,
+    catalog_filter: Option<&str>,
     selected_work: Option<&str>,
     list_context: TargetListContext<'_>,
 ) -> String {
     match tab {
         TargetDrawerTab::Baseline => {
-            archive_tab(target, archive, is_creator, lifecycle, list_context)
+            works_tab(target, catalog, catalog_query, catalog_filter, list_context)
         }
         TargetDrawerTab::Patrol => patrol_tab(target, list_context),
         TargetDrawerTab::Overview => overview_tab(
@@ -740,14 +784,185 @@ fn body(
     }
 }
 
+/// The work tab is the checkable result of the target's observation contract.
+/// It contains only target-scoped, accepted discovery rows; opening a work
+/// hands off to Corpus, which remains the owner of its full source material.
+fn works_tab(
+    target: &ObservationTarget,
+    catalog: TargetCatalogView<'_>,
+    query: Option<&str>,
+    filter: Option<&str>,
+    _list_context: TargetListContext<'_>,
+) -> String {
+    let (works, read_error): (&[linggan_evidence::CatalogWork], bool) = match catalog {
+        TargetCatalogView::Creator(Some(value)) => (&value.works, false),
+        TargetCatalogView::Keyword(Some(value)) => (&value.works, false),
+        TargetCatalogView::Creator(None)
+        | TargetCatalogView::Keyword(None)
+        | TargetCatalogView::Unavailable => (&[][..], true),
+    };
+    if read_error {
+        return lifecycle_state(
+            "当前读不到作品记录",
+            "这里不会用主表中的总数拼出一张作品表。恢复读取后，作品目录或关键词命中会显示每条真实记录。",
+        );
+    }
+    let normalized_query = query.map(str::trim).filter(|value| !value.is_empty());
+    let selected_filter = match filter {
+        Some("pending" | "complete" | "patrol_new") => filter.unwrap_or("all"),
+        _ => "all",
+    };
+    let filtered = works
+        .iter()
+        .filter(|work| match selected_filter {
+            "pending" => work.detail_state == CatalogDetailState::Pending,
+            "complete" => work.detail_state == CatalogDetailState::Complete,
+            "patrol_new" => work.source == CatalogSource::PatrolDiscovery,
+            _ => true,
+        })
+        .filter(|work| {
+            normalized_query.is_none_or(|needle| {
+                let needle = needle.to_lowercase();
+                work.content_external_id.to_lowercase().contains(&needle)
+                    || work
+                        .title
+                        .as_deref()
+                        .is_some_and(|title| title.to_lowercase().contains(&needle))
+            })
+        })
+        .collect::<Vec<_>>();
+    let completed = works
+        .iter()
+        .filter(|work| work.detail_state == CatalogDetailState::Complete)
+        .count();
+    let pending = works.len().saturating_sub(completed);
+    let patrol_new = works
+        .iter()
+        .filter(|work| work.source == CatalogSource::PatrolDiscovery)
+        .count();
+    let is_creator = target.target_kind == "creator";
+    let heading = if is_creator {
+        "作品目录"
+    } else {
+        "命中作品"
+    };
+    let count_label = if is_creator { "作品" } else { "命中" };
+    let hidden = format!(
+        r#"<input type="hidden" name="drawer" value="{}"/>"#,
+        target.target_ref
+    );
+    let rows = filtered
+        .iter()
+        .map(|work| {
+            let title = work.title.as_deref().unwrap_or("标题待取得");
+            let published = work.published_at.as_deref().unwrap_or("发布时间待取得");
+            let source = match work.source {
+                CatalogSource::InitialArchive => "初始建档",
+                CatalogSource::PatrolDiscovery => "巡查新增",
+            };
+            let detail = match work.detail_state {
+                CatalogDetailState::Complete => "已完成",
+                CatalogDetailState::Pending => "待采集",
+            };
+            let comments = work
+                .comment_count
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "—".to_owned());
+            let last = work.last_captured_at.as_deref().unwrap_or("—");
+            let creator = work.creator_display_name.as_deref().unwrap_or("创作者待取得");
+            let position = work.match_position.map(|value| value.to_string()).unwrap_or_else(|| "未提供".to_owned());
+            let common = format!(
+                r#"<td><div class="c-dw-catalog-work"><b>{title}</b><span>{id}</span></div></td><td>{published}</td>"#,
+                title = escape(title),
+                id = escape(&work.content_external_id),
+                published = escape(published),
+            );
+            let tail = format!(
+                r#"<td><span class="c-dw-catalog-state" data-state="{detail_state}">{detail}</span></td><td>{media}</td><td>{comments}</td><td>{last}</td><td><a class="c-btn-secondary c-dw-work-open" href="/corpus/evidence?selected={work_ref}">查看</a></td>"#,
+                detail_state = if work.detail_state == CatalogDetailState::Complete { "complete" } else { "pending" },
+                detail = detail,
+                media = work.media_state,
+                comments = comments,
+                last = escape(last),
+                work_ref = work.public_ref,
+            );
+            if is_creator {
+                format!(r#"<tr>{common}<td>{source}</td>{tail}</tr>"#)
+            } else {
+                format!(r#"<tr>{common}<td>{creator}</td><td>{position}</td>{tail}</tr>"#,
+                    creator = escape(creator), position = escape(&position))
+            }
+        })
+        .collect::<String>();
+    let empty = if filtered.is_empty() {
+        r#"<p class="c-dw-note">当前筛选没有匹配的作品。</p>"#
+    } else {
+        ""
+    };
+    format!(
+        r#"<section class="c-dw-section c-dw-works" id="target-works">
+             <div class="c-dw-section-head"><b>{heading}</b><span>{total} 条可查证{count_label}</span></div>
+             <div class="c-dw-catalog-summary">
+               <div><b>{total}</b><span>{count_label}目录</span></div>
+               <div><b>{completed}</b><span>详情已取得</span></div>
+               <div><b>{pending}</b><span>待取得详情</span></div>
+               <div><b>{patrol_new}</b><span>巡查新增</span></div>
+             </div>
+             <form class="c-dw-catalog-filter" method="get" action="/collection/targets">{hidden}
+               <input type="hidden" name="dtab" value="works"/>
+               <input type="search" name="catalog_query" value="{query}" placeholder="搜索作品标题或作品 ID" aria-label="搜索作品标题或作品 ID"/>
+               <select name="catalog_filter" aria-label="筛选作品">
+                 <option value="all"{all}>全部</option><option value="pending"{pending_selected}>待采详情</option><option value="complete"{complete_selected}>详情已完成</option><option value="patrol_new"{patrol_selected}>巡查新增</option>
+               </select><button class="c-btn-secondary" type="submit">筛选</button>
+             </form>
+             <div class="c-dw-catalog-table-wrap"><table class="c-dw-catalog-table"><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table></div>{empty}
+           </section>"#,
+        heading = heading,
+        headers = if is_creator {
+            "<th>作品</th><th>发布时间</th><th>发现来源</th><th>详情</th><th>媒体处理</th><th>评论</th><th>最近采集</th><th>操作</th>"
+        } else {
+            "<th>作品</th><th>发布时间</th><th>创作者</th><th>命中位置</th><th>详情</th><th>媒体处理</th><th>评论</th><th>最近采集</th><th>操作</th>"
+        },
+        total = works.len(),
+        count_label = count_label,
+        completed = completed,
+        pending = pending,
+        patrol_new = patrol_new,
+        hidden = hidden,
+        query = escape(normalized_query.unwrap_or("")),
+        all = if selected_filter == "all" {
+            " selected"
+        } else {
+            ""
+        },
+        pending_selected = if selected_filter == "pending" {
+            " selected"
+        } else {
+            ""
+        },
+        complete_selected = if selected_filter == "complete" {
+            " selected"
+        } else {
+            ""
+        },
+        patrol_selected = if selected_filter == "patrol_new" {
+            " selected"
+        } else {
+            ""
+        },
+        rows = rows,
+        empty = empty,
+    )
+}
+
 /// 概览只回答对象是谁、最近发生了什么、作品如何分布、档案还缺什么。
 /// 缺失的最近变化统计直接表达为尚未取得，不用零值或工程诊断语言填充。
 fn overview_tab(
     target: &ObservationTarget,
     archive: TargetArchiveRead<'_>,
     is_creator: bool,
-    lifecycle: LifecycleView<'_>,
-    selected_work: Option<&str>,
+    _lifecycle: LifecycleView<'_>,
+    _selected_work: Option<&str>,
     list_context: TargetListContext<'_>,
 ) -> String {
     if !is_creator {
@@ -759,11 +974,57 @@ fn overview_tab(
             recent_activity(target),
         );
     }
+    let directory = match archive {
+        TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
+        TargetArchiveRead::Known(Some(value)) if value.has_displayable_directory() => {
+            value.works_listed.to_string()
+        }
+        TargetArchiveRead::Known(_) => "—".to_owned(),
+    };
+    let detail = match archive {
+        TargetArchiveRead::Known(Some(value)) if value.has_displayable_directory() => {
+            format!("{} / {}", value.details_captured, value.works_listed)
+        }
+        TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
+        TargetArchiveRead::Known(_) => "—".to_owned(),
+    };
+    let boundary = match archive.value() {
+        Some(value)
+            if value.directory_baseline == linggan_evidence::ArchiveDirectoryBaseline::Ready =>
+        {
+            "已建立主页目录边界"
+        }
+        Some(value)
+            if value.directory_baseline
+                == linggan_evidence::ArchiveDirectoryBaseline::HistoricalDirectory =>
+        {
+            "历史目录边界未知"
+        }
+        Some(_) => "目录仍在建立或需要处理",
+        None => "当前读不到目录边界",
+    };
+    let works_href = list_context.drawer_href(
+        target.target_ref,
+        &[("dtab", "works")],
+        Some("target-works"),
+    );
+    let task = match archive.value() {
+        Some(value) if value.work_in_progress && value.works_listed == 0 => {
+            r#"<section id="archive-task" class="c-dw-section"><div class="c-dw-section-head"><b>建档任务</b><span>正在处理</span></div><p class="c-dw-note">系统正在获取主页作品目录，完成条件是主页实际结束或取得 200 条去重作品链接。目录完成后会自动分批补齐详情。</p></section>"#
+        }
+        Some(value) if value.work_in_progress => {
+            r#"<section id="archive-task" class="c-dw-section"><div class="c-dw-section-head"><b>建档任务</b><span>正在处理</span></div><p class="c-dw-note">主页目录已经建立，系统正按当前调度能力自动补齐作品详情；无需重复提交。</p></section>"#
+        }
+        _ => "",
+    };
     format!(
-        r#"{recent}{lifecycle}{gaps}"#,
+        r#"{recent}{task}<section class="c-dw-section"><div class="c-dw-section-head"><b>档案情况</b><span>{boundary}</span></div><div class="c-dw-readouts c-dw-archive-readouts"><div><b>{directory}</b><span>作品目录</span></div><div><b>{detail}</b><span>详情进度</span></div></div><p class="c-dw-note">媒体处理独立于详情进度；作品逐条状态请在作品页查证。</p><a class="c-btn-secondary" href="{works_href}">查看作品</a></section>"#,
         recent = recent_activity(target),
-        lifecycle = lifecycle_overview(target, is_creator, lifecycle, selected_work, list_context,),
-        gaps = archive_gap_overview(archive, is_creator, lifecycle),
+        task = task,
+        boundary = boundary,
+        directory = directory,
+        detail = detail,
+        works_href = works_href,
     )
 }
 
@@ -771,7 +1032,7 @@ fn recent_activity(target: &ObservationTarget) -> String {
     let (headline, note) = match target.last_patrol_succeeded_at.as_deref() {
         Some(last) => (
             format!("最近一次有效巡查完成于 {}", escape(last)),
-            "当前还没有可显示的本轮新增作品和数据更新汇总。已接纳的新作品和指标会自动进入下面的作品生命周期。",
+            "当前还没有可显示的本轮新增作品和数据更新汇总。已接纳的新作品会自动进入作品目录。",
         ),
         None if target.monitoring_enabled => (
             "尚无巡查结果".to_owned(),
@@ -783,7 +1044,7 @@ fn recent_activity(target: &ObservationTarget) -> String {
         ),
         None => (
             "尚未开始持续巡查".to_owned(),
-            "当前档案只会在手动建立或继续完善时更新。",
+            "当前档案会在建立档案、补采缺口或成功巡查后更新。",
         ),
     };
     format!(
@@ -1342,8 +1603,8 @@ fn archive_tab(
 fn archive_action_label(action: TargetPrimaryAction) -> &'static str {
     match action {
         TargetPrimaryAction::EstablishArchive => "建立档案",
-        TargetPrimaryAction::RebuildDirectory => "建立标准目录",
-        TargetPrimaryAction::ContinueArchive => "继续完善",
+        TargetPrimaryAction::RebuildDirectory => "处理异常",
+        TargetPrimaryAction::ContinueArchive => "补采缺口",
         _ => unreachable!("only archive write actions have labels"),
     }
 }
@@ -1540,9 +1801,8 @@ mod tests {
             TargetListContext::default(),
         );
 
-        assert!(html.contains(">建立标准目录</button>"));
-        assert!(html.contains("已有历史记录会保留"));
-        assert!(html.contains("待建标准目录"));
+        assert!(html.contains(">处理异常</button>"));
+        assert!(html.contains("当前读不到作品记录"));
         assert!(!html.contains(">31</b><span>作品目录"));
         assert!(!html.contains(">27 / 31</b><span>详情进度"));
     }

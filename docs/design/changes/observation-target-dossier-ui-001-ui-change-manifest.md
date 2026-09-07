@@ -7,6 +7,8 @@
 > 事实来源: Mog 最新确认、Issue #158 与 Claim、PAGE-COLLECTION-001、采集监控产品规则、LIDS v7、当前代码和隔离证明
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实代码/数据库/回执、Issue #158 Claim；本清单不授予共享运行或外部平台权限
 
+> 2026-09-07 语义收敛补充：本清单中任何“生命周期散点”“建立标准目录”“继续完善”“查看建档状态”表述均由 `OBSERVATION-TARGET-SEMANTIC-CLOSURE-001` 取代。日常界面只使用建立档案、查看任务、查看档案、补采缺口、处理异常；creator 为概览/作品/巡查，keyword 为概览/命中作品/巡查。历史目录不删除，但必须明确其主页边界未知。
+
 ## 1. 事项与用户结果
 
 - Issue / SCOPE: `#158 / OBSERVATION-TARGET-DOSSIER-UI-001`。

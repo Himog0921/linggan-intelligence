@@ -8,7 +8,10 @@
 //! What this view may claim is narrow: a row here proves the target was **stored**. It says
 //! nothing about archiving, authorisation or any capture ever running (INV-36).
 
-use linggan_evidence::{ArchiveCompleteness, ObservationTarget, ObservationTargetAvatar};
+use linggan_evidence::{
+    ArchiveCompleteness, ObservationTarget, ObservationTargetAvatar, PatrolReadState,
+    TargetObservationSummary,
+};
 use serde_json::Value;
 use std::collections::HashMap;
 
@@ -26,6 +29,26 @@ pub fn render_stored_targets(
     targets: &[ObservationTarget],
     avatars: &HashMap<uuid::Uuid, ObservationTargetAvatar>,
     completeness: Option<&HashMap<String, ArchiveCompleteness>>,
+    error: Option<&str>,
+    list_context: super::target_drawer::TargetListContext<'_>,
+) -> String {
+    render_stored_targets_with_observation(
+        base,
+        targets,
+        avatars,
+        completeness,
+        None,
+        error,
+        list_context,
+    )
+}
+
+pub fn render_stored_targets_with_observation(
+    base: &str,
+    targets: &[ObservationTarget],
+    avatars: &HashMap<uuid::Uuid, ObservationTargetAvatar>,
+    completeness: Option<&HashMap<String, ArchiveCompleteness>>,
+    observation: Option<&HashMap<uuid::Uuid, TargetObservationSummary>>,
     error: Option<&str>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
@@ -47,6 +70,7 @@ pub fn render_stored_targets(
         targets,
         avatars,
         completeness,
+        observation,
         list_context,
     );
     let keyword_table = target_table(
@@ -55,6 +79,7 @@ pub fn render_stored_targets(
         targets,
         avatars,
         completeness,
+        observation,
         list_context,
     );
 
@@ -81,6 +106,7 @@ fn target_table(
     targets: &[ObservationTarget],
     avatars: &HashMap<uuid::Uuid, ObservationTargetAvatar>,
     completeness: Option<&HashMap<String, ArchiveCompleteness>>,
+    observation: Option<&HashMap<uuid::Uuid, TargetObservationSummary>>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
     let matching = targets
@@ -99,13 +125,14 @@ fn target_table(
             index,
             avatars.get(&target.target_ref),
             super::target_drawer::TargetArchiveRead::from_map(completeness, &target.identity_key),
+            observation.and_then(|values| values.get(&target.target_ref)),
             list_context,
         ));
     }
     let columns = if is_creator {
         r#"<span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span role="columnheader">作品目录</span><span role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近变化</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     } else {
-        r#"<span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">巡查状态</span><span role="columnheader">最近命中</span><span role="columnheader">数据更新</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span role="columnheader">巡查状态</span><span role="columnheader">最近命中</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     };
     let grid = if is_creator {
         "c-tg-creator-grid"
@@ -165,7 +192,7 @@ fn action_feedback_markup(error: Option<&str>) -> String {
         "archive_not_requestable" => (
             "c-src-failure",
             "没有完成",
-            "现在不能建立或继续完善档案。目标可能已有同类工作在进行，或当前状态不允许再次发起。",
+            "现在不能重复提交建档或补采。目标可能已有同类任务在进行，或当前状态不允许再次发起。",
         ),
         "archive_in_progress" => (
             "c-src-failure",
@@ -228,6 +255,7 @@ fn target_row(
     index: usize,
     avatar: Option<&ObservationTargetAvatar>,
     archive: super::target_drawer::TargetArchiveRead<'_>,
+    observation: Option<&TargetObservationSummary>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
     let is_creator = target.target_kind == "creator";
@@ -285,27 +313,32 @@ fn target_row(
                 <div class="c-tg-cell c-tg-number-value" role="cell">{works}</div>
                 <div class="c-tg-cell c-tg-number-value" role="cell">{details}</div>
                 <div class="c-tg-cell" role="cell">{patrol}</div>
-                <div class="c-tg-cell c-tg-unknown" role="cell" title="当前尚未取得最近巡查的新作品或数据更新统计">尚未取得</div>
+                <div class="c-tg-cell c-tg-change" role="cell">{recent_change}</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last}</time>
                 <time class="c-tg-cell c-tg-time" role="cell">{next}</time>
                 <div class="c-tg-actions" role="cell" data-row-no-open>{actions}</div>"#,
             archive_state = archive_state(target, archive),
             works = archive_count(archive),
             details = detail_count(archive),
-            patrol = patrol_state(target),
+            patrol = patrol_state(target, observation),
+            recent_change = creator_recent_change(observation),
             last = escape(last),
             next = escape(next),
             actions = row_action(target, true, archive, list_context),
         )
     } else {
         format!(
-            r#"<div class="c-tg-cell" role="cell">{patrol}</div>
-                <div class="c-tg-cell c-tg-unknown" role="cell" title="当前尚未取得最近一次关键词巡查的命中统计">尚未取得</div>
-                <div class="c-tg-cell c-tg-unknown" role="cell" title="当前尚未取得命中作品的数据更新统计">尚未取得</div>
+            r#"<div class="c-tg-cell c-tg-rule" role="cell">{rule}</div>
+                <div class="c-tg-cell" role="cell">{patrol}</div>
+                <div class="c-tg-cell c-tg-number-value" role="cell">{hits}</div>
+                <div class="c-tg-cell c-tg-change" role="cell">{recent_change}</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last}</time>
                 <time class="c-tg-cell c-tg-time" role="cell">{next}</time>
                 <div class="c-tg-actions" role="cell" data-row-no-open>{actions}</div>"#,
-            patrol = patrol_state(target),
+            rule = keyword_rule(target),
+            patrol = patrol_state(target, observation),
+            hits = keyword_hits(observation),
+            recent_change = keyword_recent_change(observation),
             last = escape(last),
             next = escape(next),
             actions = row_action(target, false, archive, list_context),
@@ -361,23 +394,23 @@ fn archive_state(
     use super::target_drawer::TargetArchiveRead;
     let (tone, label) = match archive {
         TargetArchiveRead::Unavailable => ("neutral", "档案暂不可读"),
-        TargetArchiveRead::Known(Some(value)) if value.work_in_progress => ("warn", "建档待处理"),
+        TargetArchiveRead::Known(Some(value)) if value.work_in_progress => ("warn", "建档中"),
         TargetArchiveRead::Known(Some(value)) if value.quarantined > 0 => ("warn", "档案有问题"),
         TargetArchiveRead::Known(Some(value))
             if value.directory_baseline
                 == linggan_evidence::ArchiveDirectoryBaseline::HistoricalDirectory =>
         {
-            ("ok", "已有目录")
+            ("ok", "已建立")
         }
         TargetArchiveRead::Known(Some(value)) if value.requires_directory_rebuild() => {
-            ("warn", "待建标准目录")
+            ("warn", "异常")
         }
         TargetArchiveRead::Known(None) => ("neutral", "尚未建立"),
         TargetArchiveRead::Known(Some(value)) if value.is_untouched() => ("neutral", "尚未建立"),
         TargetArchiveRead::Known(Some(value))
             if value.works_listed > 0 && value.details_captured < value.works_listed =>
         {
-            ("warn", "待完善")
+            ("warn", "详情有缺口")
         }
         TargetArchiveRead::Known(Some(value))
             if value.works_listed > 0
@@ -391,15 +424,62 @@ fn archive_state(
         TargetArchiveRead::Known(Some(value)) if value.started || value.attempted => {
             ("warn", "档案有问题")
         }
-        TargetArchiveRead::Known(Some(value)) if value.works_listed > 0 => ("warn", "待完善"),
+        TargetArchiveRead::Known(Some(value)) if value.works_listed > 0 => ("warn", "详情有缺口"),
         TargetArchiveRead::Known(Some(_)) => ("neutral", "等待作品目录"),
     };
     format!(r#"<span class="c-tg-truth c-tg-{tone}">{label}</span>"#)
 }
 
-fn patrol_state(target: &ObservationTarget) -> String {
-    let (tone, label) = super::target_drawer::lifecycle_patrol_copy(target);
+fn patrol_state(
+    target: &ObservationTarget,
+    observation: Option<&TargetObservationSummary>,
+) -> String {
+    let (tone, label) = match observation.map(|summary| summary.patrol_state) {
+        Some(PatrolReadState::Disabled) => ("neutral", "已暂停"),
+        Some(PatrolReadState::Waiting) => ("neutral", "等待巡查"),
+        Some(PatrolReadState::Running) => ("info", "巡查中"),
+        Some(PatrolReadState::Normal) => ("ok", "正常"),
+        Some(PatrolReadState::Blocked) => ("warn", "受阻"),
+        Some(PatrolReadState::Unavailable) | None => {
+            super::target_drawer::lifecycle_patrol_copy(target)
+        }
+    };
     format!(r#"<span class="c-tg-truth c-tg-{tone}">{label}</span>"#)
+}
+
+fn creator_recent_change(observation: Option<&TargetObservationSummary>) -> String {
+    match observation.and_then(|summary| summary.latest_new) {
+        Some(0) => "无新增".to_owned(),
+        Some(count) => format!("+{count} 新发现"),
+        None => "尚无成功巡查".to_owned(),
+    }
+}
+
+fn keyword_hits(observation: Option<&TargetObservationSummary>) -> String {
+    observation
+        .and_then(|summary| summary.latest_hits)
+        .map(|count| count.to_string())
+        .unwrap_or_else(|| "尚无成功巡查".to_owned())
+}
+
+fn keyword_recent_change(observation: Option<&TargetObservationSummary>) -> String {
+    match observation.and_then(|summary| summary.latest_new) {
+        Some(count) => format!("+{count}"),
+        None => "尚无成功巡查".to_owned(),
+    }
+}
+
+fn keyword_rule(target: &ObservationTarget) -> String {
+    target
+        .identity_key
+        .split_once("::")
+        .map(|(_, ranking)| match ranking {
+            "comprehensive" => "综合排序",
+            "latest" => "最新排序",
+            other => other,
+        })
+        .unwrap_or("当前规则")
+        .to_owned()
 }
 
 fn archive_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String {
@@ -407,7 +487,15 @@ fn archive_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String
         super::target_drawer::TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         super::target_drawer::TargetArchiveRead::Known(value) => value
             .filter(|value| value.has_displayable_directory())
-            .map(|value| format!("{} 篇", value.works_listed))
+            .map(|value| {
+                if value.directory_baseline
+                    == linggan_evidence::ArchiveDirectoryBaseline::HistoricalDirectory
+                {
+                    format!("{} 篇 · 边界未知", value.works_listed)
+                } else {
+                    format!("{} 篇", value.works_listed)
+                }
+            })
             .unwrap_or_else(|| "—".to_owned()),
     }
 }
@@ -428,7 +516,7 @@ fn detail_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String 
     }
 }
 
-/// 每行只提供一个主要动作。详情抽屉和巡查规则只是导航；建档/继续完善仍走同一条受控
+/// 每行只提供一个主要动作。详情抽屉和巡查规则只是导航；建档/补采仍走同一条受控
 /// 请求入口，真实结果由后端 durable receipt 决定，按钮本身不声称已经执行。
 fn row_action(
     target: &ObservationTarget,
@@ -440,14 +528,18 @@ fn row_action(
     let action = super::target_drawer::target_primary_action(target, is_creator, archive);
     match action {
         TargetPrimaryAction::ViewKeyword => {
-            let drawer_href = list_context.drawer_href(target.target_ref, &[], None);
-            format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看观察</a>"#)
+            let drawer_href = list_context.drawer_href(
+                target.target_ref,
+                &[("dtab", "works")],
+                Some("target-works"),
+            );
+            format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看结果</a>"#)
         }
         TargetPrimaryAction::ViewCreator => {
             let drawer_href = list_context.drawer_href(
                 target.target_ref,
-                &[("dtab", "overview")],
-                Some("creator-lifecycle"),
+                &[("dtab", "works")],
+                Some("target-works"),
             );
             format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看档案</a>"#)
         }
@@ -455,13 +547,16 @@ fn row_action(
         | TargetPrimaryAction::ViewArchiveProblems
         | TargetPrimaryAction::ViewArchiveUnavailable => {
             let (label, fragment) = match action {
-                TargetPrimaryAction::ViewArchiveProgress => ("查看建档状态", "target-archive"),
-                TargetPrimaryAction::ViewArchiveProblems => ("查看档案问题", "archive-problems"),
+                TargetPrimaryAction::ViewArchiveProgress => ("查看任务", "archive-task"),
+                TargetPrimaryAction::ViewArchiveProblems => ("处理异常", "archive-problems"),
                 TargetPrimaryAction::ViewArchiveUnavailable => ("查看档案", "target-archive"),
                 _ => unreachable!(),
             };
-            let drawer_href =
-                list_context.drawer_href(target.target_ref, &[("dtab", "archive")], Some(fragment));
+            let drawer_href = list_context.drawer_href(
+                target.target_ref,
+                &[("dtab", "overview")],
+                Some(fragment),
+            );
             format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">{label}</a>"#)
         }
         TargetPrimaryAction::OpenPatrol(label) => {
@@ -477,8 +572,8 @@ fn row_action(
         | TargetPrimaryAction::ContinueArchive) => {
             let label = match action {
                 TargetPrimaryAction::EstablishArchive => "建立档案",
-                TargetPrimaryAction::RebuildDirectory => "建立标准目录",
-                TargetPrimaryAction::ContinueArchive => "继续完善",
+                TargetPrimaryAction::RebuildDirectory => "处理异常",
+                TargetPrimaryAction::ContinueArchive => "补采缺口",
                 _ => unreachable!(),
             };
             let focus_id = format!("target-{}", target.target_ref);
@@ -759,7 +854,7 @@ mod tests {
         );
 
         assert!(html.contains("档案有问题"));
-        assert!(html.contains(">查看档案问题</a>"));
+        assert!(html.contains(">处理异常</a>"));
         assert!(html.contains("#archive-problems"));
         assert!(!html.contains(">建立档案</button>"));
         assert!(!html.contains(">继续完善</button>"));
@@ -804,8 +899,8 @@ mod tests {
             TargetListContext::default(),
         );
 
-        assert!(html.contains("待建标准目录"));
-        assert!(html.contains(">建立标准目录</button>"));
+        assert!(html.contains("异常"));
+        assert!(html.contains(">处理异常</button>"));
         assert!(!html.contains("31 篇"));
         assert!(!html.contains("27 / 31"));
     }
@@ -867,8 +962,8 @@ mod tests {
             TargetListContext::default(),
         );
 
-        assert!(html.contains("建档待处理"));
-        assert!(html.contains(">查看建档状态</a>"));
+        assert!(html.contains("建档中"));
+        assert!(html.contains(">查看任务</a>"));
         assert!(!html.contains(">建立档案</button>"));
     }
 
@@ -890,7 +985,7 @@ mod tests {
         assert!(html.contains("c-tg-creator-grid"));
         assert!(html.contains("c-tg-keyword-grid"));
         assert!(html.contains(r#"作品目录</span><span role="columnheader">详情进度"#));
-        assert!(html.contains(r#"最近命中</span><span role="columnheader">数据更新"#));
+        assert!(html.contains(r#"最近命中</span><span role="columnheader">最近新增"#));
         assert!(html.contains("打开作者的创作者档案"));
         assert!(html.contains("打开关键词的关键词观察"));
         assert!(!html.contains("关键词档案"));
@@ -938,10 +1033,10 @@ mod tests {
             TargetListContext::default(),
         );
 
-        assert!(html.contains("待完善"));
+        assert!(html.contains("详情有缺口"));
         assert!(html.contains("12 篇"));
         assert!(html.contains("5 / 12 · 缺 7"));
-        assert!(html.contains("继续完善"));
+        assert!(html.contains("补采缺口"));
         assert!(html.contains("2026-09-04 08:30"));
         assert!(html.contains("2026-09-05 09:00"));
         assert!(!html.contains("2026-09-04 09:00"));
