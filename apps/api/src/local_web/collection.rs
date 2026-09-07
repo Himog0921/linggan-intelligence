@@ -172,8 +172,15 @@ fn rail(active: Section, state: Option<&SurfaceState>, nav_domain: Option<&str>)
         };
         // 领域原样带上，即使目标页之外的子页暂时还不按领域过滤内容——链接丢掉它，
         // 去一趟别的子页再回来当前领域就没了，与语料侧修过的那类缺陷同源。
+        //
+        // **必须编码**：那些子页不解析领域，直接把地址上的原值透传到这里，也就是说这个
+        // 值是访问者可控的。不编码就能用一个引号闭合 href 属性，把脚本注进页面。
+        // `percent_encode_component` 是白名单编码，引号、尖括号、`&` 一律变成 %XX。
         let query = match nav_domain {
-            Some(domain) => format!("?domain={domain}"),
+            Some(domain) => format!(
+                "?domain={}",
+                super::target_drawer::percent_encode_component(domain)
+            ),
             None => String::new(),
         };
         items.push_str(&format!(
@@ -795,7 +802,9 @@ fn target_filter_tabs(
             };
             // 领域与筛选是两个维度，切换筛选不该把当前领域一起换掉。写死的链接是这一类
             // 缺陷的常见来源：本页每一处生成的地址都得自己把领域带上。
-            let href = match (value.is_empty(), nav_domain) {
+            // 同 rail：编码放在渲染点，不指望每个调用方都传进来一个已经规范化的值。
+            let encoded = nav_domain.map(super::target_drawer::percent_encode_component);
+            let href = match (value.is_empty(), encoded.as_deref()) {
                 (true, None) => "/collection/targets".to_owned(),
                 (true, Some(domain)) => format!("/collection/targets?domain={domain}"),
                 (false, None) => format!("/collection/targets?filter={value}"),
@@ -818,16 +827,22 @@ fn second_bar(
 ) -> String {
     match section {
         Section::Targets => {
-            let sort_href = match nav_domain {
+            let encoded_domain = nav_domain.map(super::target_drawer::percent_encode_component);
+            let sort_href = match encoded_domain.as_deref() {
                 Some(domain) => format!("/collection/targets?domain={domain}&amp;sort=last"),
                 None => "/collection/targets?sort=last".to_owned(),
             };
             // 新目标归到当前正在看的领域。站在「考研自习」下建的目标落进 ADHD，是个
             // 无声的错误——它会让一条外部领域的采集把材料写进证据侧。看全部领域时不带，
             // 由服务端按本领域处置（那是既有行为）。
+            // 这里是属性值而不是地址，走 HTML 转义。两种编码不能混用：把 %XX 塞进
+            // value 会让提交回来的领域认不出来。
             let domain_field = match nav_domain {
                 Some(domain) if domain != linggan_evidence::observation_domain::ALL_DOMAINS => {
-                    format!(r#"<input type="hidden" name="domain" value="{domain}">"#)
+                    format!(
+                        r#"<input type="hidden" name="domain" value="{}">"#,
+                        escape(domain)
+                    )
                 }
                 _ => String::new(),
             };
@@ -1069,5 +1084,50 @@ mod domain_bar_tests {
         let picker_at = html.find("v7-domain-picker").expect("选择器已渲染");
         let page_at = html.find("<b>观察目标</b>").expect("子页名在面包屑里");
         assert!(crumb_start < picker_at && picker_at < page_at);
+    }
+}
+
+#[cfg(test)]
+mod domain_injection_tests {
+    use super::*;
+
+    /// 那些还不按领域过滤的子页把地址上的原值直接透传给导航，也就是说这个值是访问者
+    /// 可控的。曾经它未经编码就进了 `href`，一个引号即可闭合属性并注入脚本——本条守住
+    /// 编码不被去掉。
+    #[test]
+    fn a_hostile_domain_cannot_break_out_of_the_navigation_href() {
+        let html = render_in_domain(
+            Section::Tasks,
+            OperationsMode::Now,
+            None,
+            None,
+            None,
+            DomainBar {
+                picker: "",
+                nav_domain: Some(r#""><script>alert(1)</script>"#),
+            },
+        );
+        assert!(!html.contains("<script>alert(1)</script>"));
+        assert!(!html.contains(r#"domain="><"#));
+        // 领域仍然带上了，只是被编码成安全字符。
+        assert!(html.contains("?domain=%22%3E%3Cscript%3E"));
+    }
+
+    /// 目标页自己的筛选、排序与新建表单同样不许被穿透。
+    #[test]
+    fn the_target_toolbar_encodes_a_hostile_domain_too() {
+        let html = render_in_domain(
+            Section::Targets,
+            OperationsMode::Now,
+            None,
+            None,
+            None,
+            DomainBar {
+                picker: "",
+                nav_domain: Some(r#""><script>alert(1)</script>"#),
+            },
+        );
+        assert!(!html.contains("<script>alert(1)</script>"));
+        assert!(!html.contains(r#"value=""><"#));
     }
 }
