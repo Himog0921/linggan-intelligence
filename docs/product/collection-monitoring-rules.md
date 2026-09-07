@@ -62,7 +62,9 @@ active automatic rule = none
 
 这不是静态工位分组。工位每次 claim 前都要过：任务到期与 `retry_not_before_at`、工位接活/新鲜度/最低版本/能力、账号绑定与资格、额度、风险/节流、授权 scope、目标冲突，以及平台全局活跃 Lease cap。合格候选按 lane 的权重与虚拟完成量公平选择：即时 lane FIFO、定时 lane 最早计划、batch lane 按最近最少被领取的 group 轮转；认领使用 `FOR UPDATE SKIP LOCKED` 原子抢占。一个工位初期最多执行一个有效浏览器任务；平台 cap 由数据库策略行锁定并跨 Runtime 进程裁决。OCR、ASR、媒体下载和分析是后续独立 worker，不占浏览器 claim。
 
-可恢复的浏览器启动失败或运行超时不会删改旧 Lease/Task/Attempt/Package/Receipt：服务端追加失败账本、释放旧 Lease，并以 60、120、240、480、900 秒封顶的持久退避重新开放同一 WorkOrder。缺失签名执行 locator 发生在浏览器 Attempt 之前，也必须走同样的释放与冷却，不能以一张无效 Lease 占住工位、账号或平台并发。Runtime 页只读展示平台余量、lane 等待/冷却、活着的 Lease 与 Rule 排程；它不声称未被账本定义的“成功率”。
+可恢复的浏览器启动失败或运行超时不会删改旧 Lease/Task/Attempt/Package/Receipt：服务端追加失败账本、释放旧 Lease，并以 60、120、240、480、900 秒封顶的持久退避重新开放同一 WorkOrder。缺失签名执行 locator 发生在浏览器 Attempt 之前，也必须走同样的释放与冷却，不能以一张无效 Lease 占住工位、账号或平台并发。
+
+`content_detail` 的 `page_read_failed` 另有**按冻结 WorkOrder + contentExternalId 计数的三次边界**：前两次仍走上述冷却；第三次把该作品全部尚未执行 lane 标为 `blocked`，追加 `failure_disposition=blocked`，并立刻让同批后续作品继续领取。`blocked` 不是 `page_unavailable`，不表示页面不存在，也不生成 Attempt、CapturePackage、Receipt 或 Evidence；它只表示当前已停止自动重试，必须由后续明确、受控的采集决定重新尝试。Runtime 页只读展示平台余量、lane 等待/冷却、活着的 Lease 与 Rule 排程；它不声称未被账本定义的“成功率”。
 
 ---
 

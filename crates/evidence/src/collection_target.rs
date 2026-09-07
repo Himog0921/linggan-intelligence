@@ -255,6 +255,81 @@ pub struct TargetCounts {
     pub monitoring: i64,
 }
 
+// `ObservationTarget` has one list-shaped read contract, regardless of whether it is being
+// rendered as a row or opened through a deep-linked drawer.  Keep the tuple projection here
+// rather than letting the two routes spell their columns independently: adding a field to one
+// path used to make a valid target look unreadable only in the drawer.
+//
+// The domain table is intentionally split into two static projections. PostgreSQL resolves
+// table references while planning a statement, so a left join cannot safely stand in for a
+// migration that has not been applied yet.
+macro_rules! listed_target_columns {
+    () => {
+        "target.target_ref, target.platform, target.target_kind, target.identity_key, \
+         target.display_name, target.identity_facts, target.source, target.lifecycle_state, \
+         target.first_stored_at::text, \
+         (target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false)), \
+         target.group_name, \
+         to_char(target.last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
+         to_char(target.last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
+         CASE WHEN target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false) \
+              THEN to_char(target.monitor_next_run_at, 'MM-DD HH24:MI') END"
+    };
+}
+
+// Keep every row reader on the same static column contract. SQLx intentionally
+// rejects runtime-built SQL, and the table-presence compatibility branch needs
+// static statements because PostgreSQL resolves an absent table at plan time.
+const READ_TARGET_WITH_DOMAIN: &str = concat!(
+    "SELECT ",
+    listed_target_columns!(),
+    ", domain.name, domain.is_own_domain \
+     FROM collection_observation_target target \
+     LEFT JOIN collection_monitor_rule_revision rule \
+       ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+     LEFT JOIN observation_domain domain \
+       ON domain.domain_ref = COALESCE(target.domain_ref, \
+            (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) \
+     WHERE target.target_ref = $1"
+);
+const READ_TARGET_WITHOUT_DOMAIN: &str = concat!(
+    "SELECT ",
+    listed_target_columns!(),
+    ", NULL::text, NULL::boolean \
+     FROM collection_observation_target target \
+     LEFT JOIN collection_monitor_rule_revision rule \
+       ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+     WHERE target.target_ref = $1"
+);
+const LIST_TARGETS_WITH_DOMAIN: &str = concat!(
+    "SELECT ",
+    listed_target_columns!(),
+    ", domain.name, domain.is_own_domain \
+     FROM collection_observation_target target \
+     LEFT JOIN collection_monitor_rule_revision rule \
+       ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+     LEFT JOIN observation_domain domain \
+       ON domain.domain_ref = COALESCE(target.domain_ref, \
+            (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) \
+     WHERE ($1::text IS NULL OR target.target_kind = $1) \
+       AND ($2::text IS NULL OR target.lifecycle_state = $2) \
+       AND ($4::uuid IS NULL OR COALESCE(target.domain_ref, \
+            (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) = $4) \
+     ORDER BY target.first_stored_at DESC LIMIT $3"
+);
+const LIST_TARGETS_WITHOUT_DOMAIN: &str = concat!(
+    "SELECT ",
+    listed_target_columns!(),
+    ", NULL::text, NULL::boolean \
+     FROM collection_observation_target target \
+     LEFT JOIN collection_monitor_rule_revision rule \
+       ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+     WHERE ($1::text IS NULL OR target.target_kind = $1) \
+       AND ($2::text IS NULL OR target.lifecycle_state = $2) \
+       AND $4::uuid IS NULL \
+     ORDER BY target.first_stored_at DESC LIMIT $3"
+);
+
 /// 按引用读一个观察目标。
 ///
 /// 抽屉必须用它，**不能从当前列表里找**：列表是筛过的，一个被筛掉的目标会让抽屉说
@@ -266,21 +341,14 @@ pub async fn read_target(
     if !collection_target_schema_is_ready(database).await? {
         return Ok(None);
     }
-    let row: Option<ListedTargetRow> = sqlx::query_as(
-        "SELECT target.target_ref, target.platform, target.target_kind, target.identity_key, \
-                target.display_name, target.identity_facts, target.source, target.lifecycle_state, \
-                target.first_stored_at::text, \
-                (target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false)), \
-                target.group_name, \
-                to_char(target.last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
-                to_char(target.last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
-                CASE WHEN target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false) \
-                     THEN to_char(target.monitor_next_run_at, 'MM-DD HH24:MI') END \
-         FROM collection_observation_target target \
-         LEFT JOIN collection_monitor_rule_revision rule \
-           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
-         WHERE target.target_ref = $1",
-    )
+    let domain_ready = crate::observation_domain::observation_domain_schema_is_ready(database)
+        .await
+        .unwrap_or(false);
+    let row: Option<ListedTargetRow> = sqlx::query_as(if domain_ready {
+        READ_TARGET_WITH_DOMAIN
+    } else {
+        READ_TARGET_WITHOUT_DOMAIN
+    })
     .bind(target_ref)
     .fetch_optional(database.pool())
     .await?;
@@ -372,51 +440,10 @@ pub async fn list_targets(
         value @ ("archiving" | "monitoring") => (None, Some(value)),
         _ => (None, None),
     };
-    // 两条完整语句而不是拼接：sqlx 只接受静态 SQL，动态拼串在这个仓库里过不了编译——
-    // 这条约束是对的，这里也确实不需要拼。领域表不在时不能引用它，SQL 在解析期就要求
-    // 表存在，没法用一条语句「有就读、没有就跳过」。
-    const LIST_WITH_DOMAIN: &str = "SELECT target.target_ref, target.platform, target.target_kind, target.identity_key, \
-                target.display_name, target.identity_facts, target.source, target.lifecycle_state, \
-                target.first_stored_at::text, \
-                (target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false)), \
-                target.group_name, \
-                to_char(target.last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
-                to_char(target.last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
-                CASE WHEN target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false) \
-                     THEN to_char(target.monitor_next_run_at, 'MM-DD HH24:MI') END, \
-                domain.name, domain.is_own_domain \
-         FROM collection_observation_target target \
-         LEFT JOIN collection_monitor_rule_revision rule \
-           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
-         LEFT JOIN observation_domain domain \
-           ON domain.domain_ref = COALESCE(target.domain_ref, \
-                (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) \
-         WHERE ($1::text IS NULL OR target.target_kind = $1) \
-           AND ($2::text IS NULL OR target.lifecycle_state = $2) \
-           AND ($4::uuid IS NULL OR COALESCE(target.domain_ref, \
-                (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) = $4) \
-         ORDER BY target.first_stored_at DESC LIMIT $3";
-    const LIST_WITHOUT_DOMAIN: &str = "SELECT target.target_ref, target.platform, target.target_kind, target.identity_key, \
-                target.display_name, target.identity_facts, target.source, target.lifecycle_state, \
-                target.first_stored_at::text, \
-                (target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false)), \
-                target.group_name, \
-                to_char(target.last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
-                to_char(target.last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
-                CASE WHEN target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false) \
-                     THEN to_char(target.monitor_next_run_at, 'MM-DD HH24:MI') END, \
-                NULL::text, NULL::boolean \
-         FROM collection_observation_target target \
-         LEFT JOIN collection_monitor_rule_revision rule \
-           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
-         WHERE ($1::text IS NULL OR target.target_kind = $1) \
-           AND ($2::text IS NULL OR target.lifecycle_state = $2) \
-           AND $4::uuid IS NULL \
-         ORDER BY target.first_stored_at DESC LIMIT $3";
     let rows = sqlx::query_as::<_, ListedTargetRow>(if domain_ready {
-        LIST_WITH_DOMAIN
+        LIST_TARGETS_WITH_DOMAIN
     } else {
-        LIST_WITHOUT_DOMAIN
+        LIST_TARGETS_WITHOUT_DOMAIN
     })
     .bind(kind)
     .bind(state)

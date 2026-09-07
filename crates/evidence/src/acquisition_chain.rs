@@ -1758,7 +1758,11 @@ async fn advance_progressive_archive_in_transaction(
                ON unavailable_runtime.task_id=unavailable_task.task_id \
              WHERE unavailable_order.target_ref=$1 \
                AND unavailable_content.public_ref=current_directory.content_public_ref \
-               AND unavailable_task.execution_state='unavailable' \
+               -- An explicitly absent page and a bounded pre-Attempt read
+               -- failure both remain unresolved details. Neither may be
+               -- silently reintroduced by the automatic progressive worker;
+               -- a later retry requires a new, explicit acquisition decision.
+               AND unavailable_task.execution_state IN ('unavailable','blocked') \
                AND unavailable_runtime.task_spec #>> '{target,contentExternalId}'=unavailable_content.content_external_id) \
          ORDER BY current_directory.first_seen,current_directory.content_public_ref \
          LIMIT $3",

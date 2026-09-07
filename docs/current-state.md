@@ -12,6 +12,12 @@ Mog 批准“评论语料与每日研究 V1”并要求原声参考证据库紧�
 
 ## 当前阶段
 
+### COLLECTION-DOSSIER-RELIABILITY-002 / Issue #158（源码修复中；未进入共享运行）
+
+2026-09-08 针对两项实测问题开始独立源码修复：观察目标抽屉与列表曾维护不同的目标字段投影，领域字段加入后抽屉查询失败并把有效目标误报为“当前未知”；一条 `content_detail` 的 `page_read_failed` 则会无限重排同一 WorkOrder，阻塞同批后续作品。修复把目标列表/精确抽屉读取收束到一份静态列合同；详情读取失败则以同一 `WorkOrder + contentExternalId` 计数，两次有界冷却后第三次写入 `blocked` 终态和失败处置，保留失败账本、零 Attempt/Package/Receipt/Evidence，并让后续作品继续领取。档案和任务页以“详情读取受阻”呈现该事实，不写成页面不存在或采集完成。
+
+该事项的新增 `0047_collection_detail_failure_boundary.sql`、Runtime 切换、共享数据库迁移、插件重载、重派历史任务、真实平台访问、真实采集与 merge 均尚未执行或授权。隔离 PostgreSQL 的 focused dispatch proof 已通过；完整发布/共享运行和 Mog 业务验收仍待后续单独授权与证据。
+
 ### MODEL-PI-001 / Issue #169（共享基础运行已接通；DeepSeek 测试返修）
 
 #168、#170、#172 已合并。Mog 于 2026-09-06 明确授权后，0039/0040 已应用到本机共享库，3000 模型设置 API 从 503 恢复为 200，评论 worker 已有有效心跳。部署回执见 [PR #172](https://github.com/Himog0921/linggan-intelligence/pull/172)。单页+单供应商弹窗是当前交互，不再采用旧四区常驻布局。
