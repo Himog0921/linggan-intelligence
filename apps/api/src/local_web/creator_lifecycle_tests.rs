@@ -431,6 +431,9 @@ fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
         "the creator table must only use declared LIDS spacing tokens"
     );
     assert!(TARGET_DRAWER_CSS.contains(".c-tg-table-head.c-tg-keyword-grid"));
+    assert!(
+        !TARGET_DRAWER_CSS.contains(".c-tg-table-head.c-tg-keyword-grid,.c-tg-item.c-tg-keyword-grid{grid-template-columns:calc(var(--lgi-space-6) + var(--lgi-space-4)) minmax")
+    );
     assert!(TARGET_DRAWER_CSS.contains("overflow-x:auto"));
     assert!(TARGET_DRAWER_CSS.contains("white-space:nowrap"));
     assert!(
