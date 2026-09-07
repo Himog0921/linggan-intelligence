@@ -3669,9 +3669,22 @@ async fn evidence_observation_script() -> Response {
 /// 选中它，语料下的每个子页都跟着换数据源，页面结构一律不变。
 ///
 /// 只有一个领域（或读不出来）时整个控件不渲染——一个永远只有一项的下拉是噪音。
+/// 导航链接该不该带领域参数，与选择器渲不渲染用的是同一个判断：少于两个领域时
+/// 页面上没有可切换的东西，链接再带一个参数只会让地址假装有得选。
+fn corpus_nav_domain(
+    domains: &[ObservationDomain],
+    current: Option<&ObservationDomain>,
+) -> Option<String> {
+    if domains.len() < 2 {
+        return None;
+    }
+    current.map(|domain| domain.domain_ref.to_string())
+}
+
 fn corpus_domain_picker(
     domains: &[ObservationDomain],
     current: Option<&ObservationDomain>,
+    action: &str,
 ) -> String {
     let Some(current) = current else {
         return String::new();
@@ -3705,7 +3718,7 @@ fn corpus_domain_picker(
     // 提交时只带 domain：换领域是换观察对象，此前那个领域下的检索词、筛选、选中的作品
     // 都不该跟着过来——它们说的是另一批材料。地址由服务端重新给，页面从干净状态开始。
     format!(
-        r#"<form class="v7-domain-picker" method="get" action="/corpus/evidence" aria-label="当前观察领域">
+        r#"<form class="v7-domain-picker" method="get" action="{action}" aria-label="当前观察领域">
              <label class="v7-sr-only" for="corpus-domain">当前观察领域</label>
              <select id="corpus-domain" name="domain" onchange="this.form.submit()">{options}</select>
              <noscript><button type="submit">切换</button></noscript>
@@ -3726,7 +3739,7 @@ fn evidence_library_header(
     domains: &[ObservationDomain],
     current: Option<&ObservationDomain>,
 ) -> String {
-    let picker = corpus_domain_picker(domains, current);
+    let picker = corpus_domain_picker(domains, current, "/corpus/evidence");
     let crumb = if picker.is_empty() {
         "语料 <span class=\"v7-slash\">/</span> <b>证据库</b> <span class=\"v7-slash\">/</span> <span class=\"v7-context-current\">作品材料集合</span>".to_owned()
     } else {
@@ -3763,13 +3776,7 @@ fn evidence_library_html(
     <div class="v7-app">
       <!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->
       <div class="v7-shell">
-        <aside class="v7-side" aria-label="语料导航">
-          <a class="v7-side-nav" href="/corpus/evidence" aria-current="page"><i>01</i><span>证据库</span><b class="ev-rail-count" id="ev-rail-count" hidden></b></a>
-          <a class="v7-side-nav" href="/corpus/comments"><i>02</i><span>评论研究</span></a>
-          <span class="v7-side-nav" aria-disabled="true"><i>03</i><span>创作者</span></span>
-          <a class="v7-side-nav" href="/corpus/queries"><i>04</i><span>已存查询</span></a>
-          <div class="v7-side-foot"><span class="v7-side-dot"></span><span class="v7-zh-status">只读本机材料投影</span><br><span class="v7-zh-status">列表与详情不触发采集</span></div>
-        </aside>
+        <!-- CORPUS_SIDE_NAV_START --><!-- CORPUS_SIDE_NAV_END -->
 
         <main class="v7-main ev-main" aria-labelledby="page-title">
           <h1 class="v7-sr-only" id="page-title">证据库</h1>
@@ -3902,12 +3909,21 @@ fn evidence_library_html(
   </body>
 </html>"#;
     let header = evidence_library_header(collection_state, domains, current);
+    let side_nav = shell::corpus_side_nav(
+        shell::CorpusPage::Evidence,
+        corpus_nav_domain(domains, current).as_deref(),
+        r#"<span class="v7-side-dot"></span><span class="v7-zh-status">只读本机材料投影</span><br><span class="v7-zh-status">列表与详情不触发采集</span>"#,
+    );
     // 当前领域随页面一起下发，前端据此决定读哪条查询路径。放在 body 属性上而不是
     // 让前端自己解析地址：地址里的 domain 可能是无效值，回落判定由服务端做过一次了，
     // 前端再判一次就会出现两处规则，早晚不一致。
     base.replace(
         "<!-- GLOBAL_HEADER_START --><!-- GLOBAL_HEADER_END -->",
         &header,
+    )
+    .replace(
+        "<!-- CORPUS_SIDE_NAV_START --><!-- CORPUS_SIDE_NAV_END -->",
+        &side_nav,
     )
     .replace(
         "__CORPUS_DOMAIN_REF__",

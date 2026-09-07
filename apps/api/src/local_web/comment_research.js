@@ -4,6 +4,10 @@
   const api = '/api/local/comment-research';
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const params = new URLSearchParams(location.search);
+  // 当前领域由服务端随页面下发。回落判定服务端已经做过一次，前端再判一次就是两处规则。
+  const domainRef = document.body.dataset.corpusDomain || '';
+  const domainName = document.body.dataset.corpusDomainName || '';
+  const readsEvidence = document.body.dataset.corpusDomainOwn !== 'false';
   const initial = document.querySelector('[data-initial-view]').dataset.initialView;
   const state = {view:initial === 'queries' ? 'queries' : params.get('view') || 'voices',cleanState:params.get('cleanState') || '',text:params.get('text') || '',workRef:params.get('workRef') || '',cursor:null,history:[],next:null,collectionRef:params.get('collectionRef') || '',generation:0,detailGeneration:0,collections:[],assets:new Map(),queries:new Map(),selected:new Set()};
   if (!['voices','groups','assets','queries','daily'].includes(state.view)) state.view = 'voices';
@@ -30,12 +34,27 @@
     if(state.workRef) query.set('workRef',state.workRef);
     if(state.cleanState) query.set('cleanState',state.cleanState);
     if(state.collectionRef) query.set('collectionRef',state.collectionRef);
+    // 领域原样带回。与证据库同一处教训：从零重建地址的函数只认识本页自己的查询条件，
+    // 领域不在其中就会被每一次交互悄悄抹掉，变成「选一次、下次点击即失效」。
+    if(domainRef) query.set('domain',domainRef);
     history.replaceState(null,'',`${location.pathname}${query.size ? '?' + query : ''}`);
   }
   function table(headers, rows) {
     return `<table><thead><tr>${headers.map(h=>`<th scope="col" style="width:${h[1]}">${esc(h[0])}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
   }
   function empty(text) { return `<p class="lgi-research-empty">${esc(text)}</p>`; }
+  // 外部领域的材料不在证据侧。这里给的是「这个领域还没有」，不是「当前查询没匹配」——
+  // 两者的下一步动作完全不同，用后者会把「一条都还没采过」说成「你筛掉了」。
+  function renderOutsideDomain() {
+    const where = domainName ? `「${domainName}」` : '这个领域';
+    const what = ({voices:'评论原声',groups:'问题分组',assets:'语料资产',queries:'已存查询'})[state.view];
+    $('results').innerHTML=empty(`${where}还没有${what}。跨行业内容与本领域材料分开存放，这里只显示当前领域自己的内容。`);
+    $('results').setAttribute('aria-busy','false');
+    $('result-count').textContent='';
+    // 写入口一并收起：外部领域下没有可引用的来源，留着按钮只会存出一条归属不明的记录。
+    $('search-form').hidden=true;
+    $('asset-tools').hidden=true;
+  }
   function resetPage() {state.selected.clear();$('selection-run').disabled=true;$('selection-run').textContent='分析所选';state.cursor=null;state.history=[];state.next=null;}
   async function load() {
     const generation=++state.generation;
@@ -50,6 +69,7 @@
     $('result-title').textContent=({voices:'原声浏览',groups:'问题分组',assets:'语料资产',queries:'已存查询',daily:'每日研究'})[state.view];
     $('result-count').textContent='';$('results').setAttribute('aria-busy','true');$('results').innerHTML=empty('正在读取…');
     $('previous').hidden=true;$('next').hidden=true;feedback('');urlState();
+    if(!readsEvidence) { renderOutsideDomain(); return; }
     try {
       let data;
       if(state.view==='voices') {
