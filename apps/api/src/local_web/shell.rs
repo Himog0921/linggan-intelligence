@@ -202,6 +202,99 @@ pub fn global_header(
     )
 }
 
+/// 语料模块的二级导航。
+///
+/// 当前领域由这里统一带上。领域由整个语料模块承载，任何一个子页都无权在自己的链接里
+/// 把它丢掉——此前证据库与评论研究各写一份侧栏，评论研究那份不带领域，于是「选了外部
+/// 领域、点一下评论研究就掉回本领域」。导航只有一处生成，这类漏写才不会随着下一个子页
+/// 再发生一次。
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum CorpusPage {
+    Evidence,
+    Comments,
+    Queries,
+}
+
+struct CorpusEntry {
+    ordinal: &'static str,
+    label: &'static str,
+    /// `None` 表示这项还没有真正提供的路由，保持禁用而不是变成死链。
+    href: Option<&'static str>,
+    page: Option<CorpusPage>,
+}
+
+const CORPUS_ENTRIES: [CorpusEntry; 4] = [
+    CorpusEntry {
+        ordinal: "01",
+        label: "证据库",
+        href: Some("/corpus/evidence"),
+        page: Some(CorpusPage::Evidence),
+    },
+    CorpusEntry {
+        ordinal: "02",
+        label: "评论研究",
+        href: Some("/corpus/comments"),
+        page: Some(CorpusPage::Comments),
+    },
+    CorpusEntry {
+        ordinal: "03",
+        label: "创作者",
+        href: None,
+        page: None,
+    },
+    CorpusEntry {
+        ordinal: "04",
+        label: "已存查询",
+        href: Some("/corpus/queries"),
+        page: Some(CorpusPage::Queries),
+    },
+];
+
+/// `domain_ref` 传 `None` 时链接保持裸路径（少于两个领域时选择器本就不渲染，
+/// 带一个参数只会让地址假装有得选）。传了就每一条都带上：本领域同样带，
+/// 这样导航行为不因当前是哪个领域而不同。
+pub fn corpus_side_nav(active: CorpusPage, domain_ref: Option<&str>, foot: &str) -> String {
+    let mut items = String::new();
+    for entry in CORPUS_ENTRIES {
+        if !items.is_empty() {
+            items.push('\n');
+        }
+        let badge = if matches!(entry.page, Some(CorpusPage::Evidence)) {
+            r#"<b class="ev-rail-count" id="ev-rail-count" hidden></b>"#
+        } else {
+            ""
+        };
+        match entry.href {
+            None => items.push_str(&format!(
+                r#"<span class="v7-side-nav" aria-disabled="true"><i>{ordinal}</i><span>{label}</span></span>"#,
+                ordinal = entry.ordinal,
+                label = entry.label,
+            )),
+            Some(href) => {
+                let href = match domain_ref {
+                    Some(domain_ref) => format!("{href}?domain={domain_ref}"),
+                    None => href.to_owned(),
+                };
+                let current = if entry.page == Some(active) {
+                    r#" aria-current="page""#
+                } else {
+                    ""
+                };
+                items.push_str(&format!(
+                    r#"<a class="v7-side-nav" href="{href}"{current}><i>{ordinal}</i><span>{label}</span>{badge}</a>"#,
+                    ordinal = entry.ordinal,
+                    label = entry.label,
+                ));
+            }
+        }
+    }
+    format!(
+        r#"<aside class="v7-side" aria-label="语料导航">
+{items}
+<div class="v7-side-foot">{foot}</div></aside>"#
+    )
+}
+
 #[cfg(test)]
 mod code_table_tests {
     use super::CONTEXT_CODES;

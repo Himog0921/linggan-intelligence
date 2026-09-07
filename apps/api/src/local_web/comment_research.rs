@@ -9,6 +9,7 @@ use axum::{
     routing::{get, post},
 };
 use linggan_evidence::comment_research_read::*;
+use linggan_evidence::observation_domain::ObservationDomain;
 use linggan_intelligence::{
     comment_analysis::*, comment_research::*, comment_research_management::*,
     comment_research_projection::*,
@@ -106,11 +107,38 @@ fn allowed_origin(headers: &HeaderMap) -> bool {
         && (host.starts_with("127.0.0.1:") || host.starts_with("localhost:"))
 }
 
-async fn page() -> Html<String> {
-    Html(page_html(false))
+/// 语料页每个子页都在某一个当前观察领域下工作。领域由地址带来，解析仍在服务端做
+/// 一次——与证据库同一个 `resolve_current_domain`，写了非法值或已停用的领域一律回落
+/// 本领域，页面不会因为一个读不出来的参数而空着。
+#[derive(Deserialize)]
+struct CorpusDomainQuery {
+    domain: Option<String>,
 }
-async fn queries_page() -> Html<String> {
-    Html(page_html(true))
+
+async fn page(
+    State(state): State<LocalWebState>,
+    Query(params): Query<CorpusDomainQuery>,
+) -> Html<String> {
+    Html(corpus_page_html(&state, false, params.domain.as_deref()).await)
+}
+async fn queries_page(
+    State(state): State<LocalWebState>,
+    Query(params): Query<CorpusDomainQuery>,
+) -> Html<String> {
+    Html(corpus_page_html(&state, true, params.domain.as_deref()).await)
+}
+
+async fn corpus_page_html(state: &LocalWebState, queries: bool, domain: Option<&str>) -> String {
+    // 读不出领域时给空列表：选择器随之隐藏，页面照常以本领域呈现。与证据库同一处置——
+    // 缺一个切换器远好过显示一个点不动的假控件。
+    let domains = match state.database.database() {
+        Some(database) => linggan_evidence::observation_domain::read_observation_domains(database)
+            .await
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    let current = linggan_evidence::observation_domain::resolve_current_domain(&domains, domain);
+    page_html(queries, &domains, current)
 }
 async fn stylesheet() -> impl IntoResponse {
     (
@@ -416,30 +444,78 @@ fn domain_error(e: CommentResearchError) -> Response {
     }
 }
 
-fn page_html(queries: bool) -> String {
+fn page_html(
+    queries: bool,
+    domains: &[ObservationDomain],
+    current: Option<&ObservationDomain>,
+) -> String {
     let title = if queries {
         "已存查询"
     } else {
         "评论研究"
     };
+    let page = if queries {
+        shell::CorpusPage::Queries
+    } else {
+        shell::CorpusPage::Comments
+    };
+    let action = if queries {
+        "/corpus/queries"
+    } else {
+        "/corpus/comments"
+    };
+    // 换领域留在当前子页：换的是观察对象，不是把人送回证据库。
+    let picker = super::corpus_domain_picker(domains, current, action);
+    let crumb = if picker.is_empty() {
+        format!("语料 <span class=\"v7-slash\">/</span> <b>{title}</b>")
+    } else {
+        format!(
+            "语料 <span class=\"v7-slash\">/</span> {picker} <span class=\"v7-slash\">/</span> <b>{title}</b>"
+        )
+    };
     let header = shell::global_header(
         shell::PrimarySurface::Corpus,
         "本机研究",
-        &format!("语料 <span class=\"v7-slash\">/</span> <b>{title}</b>"),
+        &crumb,
         "<span>内部研究</span><span>样本范围</span>",
         None,
     );
+    let side_nav = shell::corpus_side_nav(
+        page,
+        super::corpus_nav_domain(domains, current).as_deref(),
+        "材料到达即可研究<br>内部受限研究入口",
+    );
+    // 视图 tab 是写死的相对链接，点击被 JS 接管，但脚本没跑起来时它们会原样生效并把
+    // 领域从查询串里冲掉。根因与侧栏那处同源：任何一个写死的链接都得自己把领域带上。
+    let domain_qs = match super::corpus_nav_domain(domains, current) {
+        Some(domain_ref) => format!("domain={domain_ref}&amp;"),
+        None => String::new(),
+    };
     let html = include_str!("comment_research.html")
         .replace("{{HEADER}}", &header)
+        .replace("{{SIDE_NAV}}", &side_nav)
         .replace("{{TITLE}}", title)
         .replace("{{VIEW}}", if queries { "queries" } else { "voices" })
+        .replace("{{DOMAIN_QS}}", &domain_qs)
         .replace(
-            "{{COMMENT_CURRENT}}",
-            if queries { "" } else { "aria-current=\"page\"" },
+            "{{CORPUS_DOMAIN_REF}}",
+            &current
+                .map(|domain| domain.domain_ref.to_string())
+                .unwrap_or_default(),
         )
         .replace(
-            "{{QUERY_CURRENT}}",
-            if queries { "aria-current=\"page\"" } else { "" },
+            "{{CORPUS_DOMAIN_OWN}}",
+            if current.is_none_or(|domain| domain.is_own_domain) {
+                "true"
+            } else {
+                "false"
+            },
+        )
+        .replace(
+            "{{CORPUS_DOMAIN_NAME}}",
+            &current
+                .map(|domain| super::html_escape(&domain.name))
+                .unwrap_or_default(),
         );
     if std::env::var("LINGGAN_MODEL_SYNTHETIC_PREVIEW").as_deref() == Ok("SYNTHETIC-NOT-EVIDENCE") {
         html.replace(
@@ -465,9 +541,54 @@ mod tests {
         headers.insert("sec-fetch-site", "cross-site".parse().unwrap());
         assert!(!allowed_origin(&headers));
     }
+    fn domain(name: &str, own: bool) -> ObservationDomain {
+        ObservationDomain {
+            domain_ref: Uuid::new_v4(),
+            name: name.to_owned(),
+            is_own_domain: own,
+            status: "active".to_owned(),
+            sample_count: None,
+        }
+    }
+
+    /// 这一条守的是本页此前真实存在的缺陷：选了外部领域，点一下评论研究就掉回本领域。
+    /// 根因是侧栏链接写死成裸路径，领域在跳转那一刻被丢掉。导航现在由 shell 一处生成，
+    /// 这条断言保证它继续把当前领域带上——包括切换器提交回的是本页而不是证据库。
+    #[test]
+    fn every_corpus_link_carries_the_current_domain() {
+        let domains = vec![domain("ADHD", true), domain("考研自习", false)];
+        let current = &domains[1];
+        let html = page_html(false, &domains, Some(current));
+        let domain_ref = current.domain_ref;
+        for page in ["/corpus/evidence", "/corpus/comments", "/corpus/queries"] {
+            assert!(
+                html.contains(&format!("href=\"{page}?domain={domain_ref}\"")),
+                "{page} 丢掉了当前领域"
+            );
+        }
+        assert!(html.contains("action=\"/corpus/comments\""));
+        // 视图 tab 同样不许把领域冲掉：脚本没跑起来时它们会原样生效。
+        assert!(html.contains(&format!("href=\"?domain={domain_ref}&amp;view=voices\"")));
+        assert!(html.contains("data-corpus-domain-own=\"false\""));
+        assert!(html.contains("data-corpus-domain=\"") && html.contains(&domain_ref.to_string()));
+    }
+
+    /// 少于两个领域时页面上没有可切换的东西，链接不该带一个参数假装有得选。
+    #[test]
+    fn a_single_domain_leaves_the_links_bare() {
+        let domains = vec![domain("ADHD", true)];
+        let html = page_html(false, &domains, Some(&domains[0]));
+        assert!(html.contains("href=\"/corpus/evidence\""));
+        // 只查链接上的领域参数：body 的 data-corpus-domain 是页面下发的事实，始终该在。
+        assert!(!html.contains("?domain="));
+        assert!(!html.contains("&amp;view="));
+        assert!(html.contains("href=\"?view=voices\""));
+        assert!(!html.contains("v7-domain-picker"));
+    }
+
     #[test]
     fn research_is_a_corpus_page_with_three_internal_views() {
-        let html = page_html(false);
+        let html = page_html(false, &[], None);
         for expected in [
             "原声浏览",
             "问题分组",

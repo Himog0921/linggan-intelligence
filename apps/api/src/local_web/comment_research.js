@@ -4,6 +4,10 @@
   const api = '/api/local/comment-research';
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const params = new URLSearchParams(location.search);
+  // 当前领域由服务端随页面下发。回落判定服务端已经做过一次，前端再判一次就是两处规则。
+  const domainRef = document.body.dataset.corpusDomain || '';
+  const domainName = document.body.dataset.corpusDomainName || '';
+  const readsEvidence = document.body.dataset.corpusDomainOwn !== 'false';
   const initial = document.querySelector('[data-initial-view]').dataset.initialView;
   const state = {view:initial === 'queries' ? 'queries' : params.get('view') || 'voices',cleanState:params.get('cleanState') || '',text:params.get('text') || '',workRef:params.get('workRef') || '',cursor:null,history:[],next:null,collectionRef:params.get('collectionRef') || '',generation:0,detailGeneration:0,collections:[],assets:new Map(),queries:new Map(),selected:new Set()};
   if (!['voices','groups','assets','queries','daily'].includes(state.view)) state.view = 'voices';
@@ -15,7 +19,7 @@
   const cleanLabels={direct:'可分析',context:'需上下文',low_information:'低信息',anomaly:'异常'};
   const analysisLabels = {low_information:'未送模型',anomaly:'未送模型',context_missing:'上下文不足',restricted:'来源受限',source_limit:'超出本批数量上限',pending:'待分析',running:'分析中',succeeded:'已形成候选',no_signal:'分析完成，未提取到信号',failed:'分析失败'};
   const failureLabels = {provider_timeout:'模型调用超过本地等待上限，重试受原批次次数与额度限制',provider_unavailable:'模型服务不可用',invalid_output:'模型返回内容未通过引用校验',source_unavailable:'来源当前不可用',lease_expired:'执行租约已过期'};
-  const errorLabels = {comment_daily_schema_missing:'每日研究尚未完成数据库升级，原声浏览仍可使用。',source_unavailable:'来源当前不可用于研究，正文和派生内容已停止展示。',revision_conflict:'记录已发生变化，请刷新后重试。',idempotency_conflict:'本次保存标识已有不同内容，请重新打开保存表单。',invalid_command:'内容或来源范围不符合要求，请核对后重试。',invalid_query:'查询条件或分页已失效，请重新查询。',comment_research_unavailable:'评论研究暂时无法读取，请检查本机数据服务和本包 schema。'};
+  const errorLabels = {comment_daily_schema_missing:'每日研究尚未完成数据库升级，原声浏览仍可使用。',source_unavailable:'来源当前不可用于研究，正文和派生内容已停止展示。',revision_conflict:'记录已发生变化，请刷新后重试。',idempotency_conflict:'本次保存标识已有不同内容，请重新打开保存表单。',invalid_command:'内容或来源范围不符合要求，请核对后重试。',invalid_query:'查询条件或分页已失效，请重新查询。',comment_research_unavailable:'评论研究暂时无法读取，请检查本机数据服务和本包 schema。',home_domain_reads_evidence:'本领域的评论在证据侧，这个接口只读外部领域。',cross_industry_schema_unavailable:'跨行业相关的数据表尚未建立。',cross_industry_read_unavailable:'跨行业内容暂时无法读取，请检查本机数据服务。'};
   async function request(path, body) {
     const response = await fetch(path, {method:body ? 'POST':'GET',headers:body ? {'Content-Type':'application/json'}:{},body:body ? JSON.stringify(body):undefined,cache:'no-store'});
     const payload = await response.json().catch(() => ({}));
@@ -30,12 +34,59 @@
     if(state.workRef) query.set('workRef',state.workRef);
     if(state.cleanState) query.set('cleanState',state.cleanState);
     if(state.collectionRef) query.set('collectionRef',state.collectionRef);
+    // 领域原样带回。与证据库同一处教训：从零重建地址的函数只认识本页自己的查询条件，
+    // 领域不在其中就会被每一次交互悄悄抹掉，变成「选一次、下次点击即失效」。
+    if(domainRef) query.set('domain',domainRef);
     history.replaceState(null,'',`${location.pathname}${query.size ? '?' + query : ''}`);
   }
   function table(headers, rows) {
     return `<table><thead><tr>${headers.map(h=>`<th scope="col" style="width:${h[1]}">${esc(h[0])}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
   }
   function empty(text) { return `<p class="lgi-research-empty">${esc(text)}</p>`; }
+  // 外部领域走自己的数据源，一个字段都不经过证据侧接口。
+  //
+  // 只有原声浏览有跨行业数据可读：问题分组与语料资产是研究产物，跨行业侧还没有存储，
+  // 给它们编一个数据源就是假 UI。
+  async function loadOutsideDomain(generation) {
+    // 写入口一并收起：外部领域下没有可引用的来源，留着按钮只会存出一条归属不明的记录。
+    $('search-form').hidden=true;
+    $('asset-tools').hidden=true;
+    $('daily-tools').hidden=true;
+    if(state.view!=='voices') { outsideDomainEmpty(); return; }
+    try {
+      const data=await request(`/api/local/cross-industry/comments?domain=${encodeURIComponent(domainRef)}`);
+      if(generation!==state.generation) return;
+      renderCrossIndustryVoices(data);
+    } catch(error) {
+      if(generation!==state.generation) return;
+      $('results').innerHTML=empty('读取失败。');
+      feedback(error.message,true);
+    } finally {
+      if(generation===state.generation) $('results').setAttribute('aria-busy','false');
+    }
+  }
+  // 说的是「这个领域还没有」，不是「当前查询没匹配」——两者的下一步动作完全不同，
+  // 用后者会把「一条都还没采过」说成「你筛掉了」。
+  function outsideDomainEmpty() {
+    const where = domainName ? `「${domainName}」` : '这个领域';
+    const what = ({voices:'评论原声',groups:'问题分组',assets:'语料资产',queries:'已存查询',daily:'每日研究'})[state.view];
+    $('results').innerHTML=empty(`${where}还没有${what}。跨行业内容与本领域材料分开存放，这里只显示当前领域自己的内容。`);
+    $('results').setAttribute('aria-busy','false');
+    $('result-count').textContent='';
+  }
+  function renderCrossIndustryVoices(data) {
+    const {page,works}=data;
+    state.next=null;
+    const byRef=new Map(works.map(w=>[w.workRef,w]));
+    if(!page.items.length) { outsideDomainEmpty(); return; }
+    $('result-count').textContent=`${page.total.toLocaleString()} 条原声 · 本页 ${page.items.length} 条${data.truncated?' · 仅显示第一页':''}`;
+    // 不给「研读与收存」：语料资产目前只认证据侧的来源，在这里收存会存出一条挂错
+    // 地方的记录。等跨行业侧的研究产物有了自己的归属再开。
+    $('results').innerHTML=table([['评论原声','56%'],['来源作品','28%'],['观察','16%']],page.items.map(item=>{
+      const work=byRef.get(item.workRef);
+      return `<tr><td><blockquote>${esc(item.body ?? '正文尚未取得')}</blockquote><div class="lgi-research-meta">${item.isReply?'回复':'主评论'}${item.bodyTruncated?' · 显示开头片段':''}</div></td><td><span class="lgi-research-source-title">${esc(work?.title ?? '作品标题未知')}</span><div class="lgi-research-meta">${esc(work?.creatorDisplayName ?? '作品作者未知')}</div></td><td><div class="lgi-research-meta">观察于 ${esc(item.observedAt ?? '时间未知')}</div></td></tr>`;
+    }));
+  }
   function resetPage() {state.selected.clear();$('selection-run').disabled=true;$('selection-run').textContent='分析所选';state.cursor=null;state.history=[];state.next=null;}
   async function load() {
     const generation=++state.generation;
@@ -50,6 +101,7 @@
     $('result-title').textContent=({voices:'原声浏览',groups:'问题分组',assets:'语料资产',queries:'已存查询',daily:'每日研究'})[state.view];
     $('result-count').textContent='';$('results').setAttribute('aria-busy','true');$('results').innerHTML=empty('正在读取…');
     $('previous').hidden=true;$('next').hidden=true;feedback('');urlState();
+    if(!readsEvidence) { await loadOutsideDomain(generation); return; }
     try {
       let data;
       if(state.view==='voices') {

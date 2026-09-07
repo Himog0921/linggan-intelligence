@@ -213,6 +213,7 @@ migrate() {
   apply_migration_once "0041_observation_domain" "$project_root/database/migrations/0041_observation_domain.sql"
   apply_migration_once "0042_keyword_monitoring_lifecycle" "$project_root/database/migrations/0042_keyword_monitoring_lifecycle.sql"
   apply_migration_once "0043_comment_daily" "$project_root/database/migrations/0043_comment_daily.sql"
+  apply_migration_once "0044_cross_industry_comment" "$project_root/database/migrations/0044_cross_industry_comment.sql"
 }
 
 case "$command_name" in
