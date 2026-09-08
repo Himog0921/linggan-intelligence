@@ -34,8 +34,30 @@ impl Database {
         if let Some(schema) = schema {
             options = options.options([("search_path", validated_schema_name(schema)?)]);
         }
+        // 每条连接都固定在 Asia/Shanghai。
+        //
+        // 时间**存储**不受影响：`timestamptz` 存的是绝对时刻，`scope_001_now()` 也是，
+        // 会话时区只决定读出来时怎么格式化。此前所有 `to_char` 与 `::text` 都直接印出
+        // 数据库的 UTC 值，而页面自己写着「中国标准时间 UTC+08」——差 8 小时，一个还没到
+        // 的巡检时间会显示成已经过去。
+        //
+        // 放在这里而不是逐条 SQL 加 `AT TIME ZONE`：那有 19 处 `to_char` 与 59 处 `::text`，
+        // 漏一处就是一个错的时间，而且下一个新增的读取还会再漏一次。连接池是这个工作区
+        // 唯一的连接入口，在这里定一次，往后所有读取自动正确。
+        //
+        // 必须用 `after_connect` 而不是 startup 参数：sqlx 建立连接时把 `TimeZone=UTC`
+        // 写死在自己的 startup 里（`sqlx-postgres/src/connection/establish.rs`），
+        // 传进去的同名参数会被它覆盖掉——试过，会话时区仍然是 UTC。
         let pool = PgPoolOptions::new()
             .max_connections(4)
+            .after_connect(|connection, _meta| {
+                Box::pin(async move {
+                    sqlx::query("SET TIME ZONE 'Asia/Shanghai'")
+                        .execute(&mut *connection)
+                        .await?;
+                    Ok(())
+                })
+            })
             .connect_with(options)
             .await
             .map_err(StorageError::Connect)?;
