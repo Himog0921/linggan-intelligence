@@ -13,7 +13,7 @@
 - **范围**：Collection Targets 保持 L1 Collection Control；右侧保持 L2 Split Inspector。没有新增 Token、全局 CMP 或主题。
 - **表达**：移除 Targets Context Bar 的 runtime prose；表格工具栏使用文字 tab、40px 控件和受限 signal/hard-shadow 重音。Drawer 页头只承担身份与关闭/外链，状态进入概览；creator 作品内使用 `列表｜表现` 二级文字 tab。
 - **Data Truth**：Target Inspector 直接消费 single-as-of 投影；queued 不写 running，Known zero 与 Unknown 分开，读取失败不回退为健康或空数据。表现图仅使用已有 qualified/KNOWN lifecycle points；没有分类时明示边界。
-- **验证边界**：源码/focused/workspace、新 inspector 隔离 PostgreSQL、项目治理、UI handbook 与 1440×900 浏览器交互/实拍已通过；完整 PostgreSQL 脚本仍有两项未修改的 collection-control 基线失败。PR exact head、共享运行与 Mog 业务验收分层记录在验收文档，不能相互替代。
+- **验证边界**：源码/focused/workspace、新 inspector 隔离 PostgreSQL、项目治理、UI handbook 与 1440×900 浏览器交互/实拍已通过；完整 PostgreSQL 脚本仍有两项未修改的 collection-control 基线失败。PR #205 已合并，本机 API `runtime-main@f0ed68d` 与真实 Targets 页面已核验；worker、插件、平台、真实采集与 Mog 业务验收仍未证明，不能由本机 API 运行替代。
 
 ## 2026-09-07 · OBSERVATION-TARGET-SEMANTIC-FEEDBACK-001
 

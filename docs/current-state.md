@@ -27,13 +27,13 @@ Mog 批准“评论语料与每日研究 V1”并要求原声参考证据库紧�
 
 ## 当前阶段
 
-### TARGET-INSPECTOR-PERFORMANCE-001 / Issue #158（交付分支源码已实现；未进入共享运行）
+### TARGET-INSPECTOR-PERFORMANCE-001 / Issue #158（已合并 main；本机 3000 已刷新）
 
-Mog 于 2026-09-08 确认推进观察目标列表和右侧检查器收口，并要求由 subagent 分工实施。当前代码位于 `codex/target-inspector-performance-001`，已重放到 `origin/main@e5ad0e3316760ae43bc0ab76e00877c7e0fd9fb8`：Targets 顶部删除重复 scheduler/patrol/timezone prose，六目标勾选后顶部批量编辑显示数量；1440 宽表压缩为主体字段与操作同时可见，避免 sticky 操作列覆盖内容。检查器收敛为 `概览｜作品｜巡查`，creator 的作品内为 `列表｜表现`。
+Mog 于 2026-09-08 确认推进观察目标列表和右侧检查器收口，并要求由 subagent 分工实施。PR #205 已由 exact head `e067bfbf7f60d80fc45502ac8cc10f686c8c5efe` squash 合并为 `f0ed68dcf94c139be67f70bd76c09623d3c87b7d`：Targets 顶部删除重复 scheduler/patrol/timezone prose，六目标勾选后顶部批量编辑显示数量；1440 宽表压缩为主体字段与操作同时可见，避免 sticky 操作列覆盖内容。检查器收敛为 `概览｜作品｜巡查`，creator 的作品内为 `列表｜表现`。
 
 新增 `TargetInspectorProjection` 在一个 repeatable-read、read-only 事务中分开读取 archive、execution、patrol、coverage 与 required action；queued 不冒充 running，`Known(0)` 不等于 `Unknown`。概览只给一个行动判断，系统可自行继续时不显示按钮。作品表现复用 target-scoped lifecycle facts；当前没有作品内容分类合同，因此不生成主题分布或运营价值结论。
 
-源码、focused/workspace 测试、新 inspector PostgreSQL 16 证明、项目治理和 UI handbook 已通过；1440×900 浏览器实拍及选择、批量入口、三 Tab、作品双视图和关闭焦点返回均已通过。完整 PostgreSQL 脚本仍被未修改的 collection-control 两项基线断言阻断，不能写成全绿。共享数据库、`:3000`、worker、插件、外部平台、真实采集、merge、deploy 与 Mog 业务验收均未发生或未授权。
+源码、focused/workspace 测试、新 inspector PostgreSQL 16 证明、项目治理和 UI handbook 已通过；1440×900 浏览器实拍及选择、批量入口、三 Tab、作品双视图和关闭焦点返回均已通过。完整 PostgreSQL 脚本仍被未修改的 collection-control 两项基线断言阻断，不能写成全绿。合并后本机 API LaunchAgent 已刷新：live PID `54442` 的 cwd/executable 均来自 `runtime-main@f0ed68d`，`/health` 为 database `READY`、scheduler `running`、loopback-only，`/collection/targets?domain=all` 为 200；现有 Chrome 页面确认 6 个目标、新检查器文案和 0 console issue。没有新 migration，未重启 worker、重载插件、访问外部平台或触发真实采集；Mog 业务验收仍需单独确认。
 
 ### COLLECTION-DOSSIER-RELIABILITY-002 / Issue #158（源码修复中；未进入共享运行）
 

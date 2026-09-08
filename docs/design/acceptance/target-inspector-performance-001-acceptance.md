@@ -28,17 +28,19 @@
 
 | 完成层 | 状态 | 证据/限制 |
 |---|---|---|
-| 设计规格一致 | VERIFIED ON DELIVERY BRANCH | 1440×900 列表、概览、作品表现实拍；浏览器实际走完选择、批量入口、Drawer、作品双视图、巡查和关闭返回 |
-| 源码实现 | VERIFIED ON DELIVERY BRANCH | 尚未合并或部署 |
+| 设计规格一致 | VERIFIED ON MAIN + LIVE LOCAL PAGE | 1440×900 列表、概览、作品表现实拍；发布后 Chrome 实页再次核对新三 Tab、页头动作和已删除旧文案 |
+| 源码实现 | VERIFIED ON MAIN | PR #205 exact head `e067bfb` 已合并为 `f0ed68d` |
 | 自动检查 | VERIFIED | focused、workspace、格式、Node、diff、项目治理与 UI handbook 均通过 |
 | 隔离 PostgreSQL | TARGET INSPECTOR VERIFIED | PostgreSQL 16 的新 inspector proof 1/1 证明 queued/running、Known zero/Unknown 与只读无副作用；完整旧脚本随后在未修改的 `collection_control_postgres` 两项基线断言处失败，不把整条脚本写成全绿 |
-| 部署 | NOT VERIFIED | 本包未授权 |
+| 本机 API 发布 | VERIFIED | PR #205 合并为 `f0ed68d`；PID `54442` 实际来自 `runtime-main@f0ed68d`，health READY，Targets 200，Chrome 实页 6 目标与 0 console issue |
 | Mog / 业务验收 | NOT VERIFIED | 需后续前端验收 |
 
 ## 不得推断
 
 源码或截图通过不证明 shared runtime 已替换、采集成功、作品完整、分类已建立、跨账号价值成立或业务验收完成。
 
+本次后续授权只刷新了本机 loopback API；没有新 migration，也没有重启 worker、重载插件、访问平台或触发真实采集。这里的 runtime 证明不扩张为那些层面的完成声明。
+
 ## 完整 PostgreSQL 脚本保留失败
 
-`./scripts/test-local-001-discovery-postgres.sh` 已实际运行。新增 `target_inspector_postgres` 1/1 通过，临时 database/container/volume 已清理；脚本后续在本分支未修改的 `collection_control_postgres` 留下两项失败：一项仍把迁移上限写死在 `0042`，而当前主线已经到 `0051`；另一项为按时点变化的 station daily-limit 预期与当前 available 结果不一致。它们不改变本包 inspector 专项证明，但阻止我们宣称完整 PostgreSQL harness 全绿。
+`./scripts/test-local-001-discovery-postgres.sh` 已实际运行。新增 `target_inspector_postgres` 1/1 通过，临时 database/container/volume 已清理；脚本后续在本分支未修改的 `collection_control_postgres` 留下两项失败：一项仍把迁移边界写死在 `0042`，而当前证明集合早已继续增长；另一项为按时点变化的 station daily-limit 预期与当前 available 结果不一致。它们不改变本包 inspector 专项证明，但阻止我们宣称完整 PostgreSQL harness 全绿。
