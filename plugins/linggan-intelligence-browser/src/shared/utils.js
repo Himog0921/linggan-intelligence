@@ -29,7 +29,7 @@ function getInjectScriptUrl(file) {
 
 export function getByInject(wd, type) {
   return new Promise((resolve, reject) => {
-    const fileMap = { noteMap: 'injected/noteMap.js', user: 'injected/user.js' };
+    const fileMap = { noteMap: 'injected/noteMap.js', user: 'injected/user.js', searchFilters: 'injected/searchFilters.js' };
     const file = fileMap[type];
     if (!file) {
       reject(new Error(`Unknown inject type: ${type}`));
