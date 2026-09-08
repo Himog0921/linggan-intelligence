@@ -212,6 +212,30 @@ pub async fn read_comment_research_context(
     source_ref: Uuid,
 ) -> Result<Value, CommentResearchReadError> {
     let source = read_comment_research_source(database, source_ref).await?;
+    let comment_author: Option<String> = sqlx::query_scalar(
+        "SELECT author_external_id FROM linggan_comment_research_readable WHERE material_ref=$1",
+    )
+    .bind(source_ref)
+    .fetch_one(database.pool())
+    .await?;
+    let mut identity_tx = database.pool().begin().await?;
+    let identity_as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(&mut *identity_tx)
+        .await?;
+    let identity = crate::work_resource_current::read_work_resource_currents(
+        &mut identity_tx,
+        &[source.work_ref],
+        &identity_as_of,
+    )
+    .await?;
+    let role = if comment_author.as_ref().is_some_and(|author| {
+        identity.first().and_then(|w| w.author_external_id.as_ref()) == Some(author)
+    }) {
+        "author"
+    } else {
+        "unknown"
+    };
+    identity_tx.commit().await?;
     let parent = sqlx::query(
         "SELECT parent.*,true AS is_current FROM linggan_comment_research_readable source
          JOIN linggan_material_comment_current parent ON parent.content_public_ref=source.content_public_ref
@@ -260,9 +284,23 @@ pub async fn read_comment_research_context(
         context["body"]["value"] = json!(body.chars().take(4000).collect::<String>());
     }
     Ok(
-        json!({"source":source,"parent":parent,"parentState":if parent.is_some(){"AVAILABLE"}else if source.is_reply{"MISSING_OR_RESTRICTED"}else{"NOT_APPLICABLE"},
+        json!({"source":source,"role":role,"parent":parent,"parentState":if parent.is_some(){"AVAILABLE"}else if source.is_reply{"MISSING_OR_RESTRICTED"}else{"NOT_APPLICABLE"},
         "derivatives":derivatives,"work":work_context,"workUrl":format!("/api/local/work-resources/{}", source.work_ref)}),
     )
+}
+
+/// Shares the caller's read snapshot with the authoritative field-wise Work Current projection.
+pub async fn read_comment_work_contexts_in_snapshot(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_refs: &[Uuid],
+    as_of: &str,
+) -> Result<Value, CommentResearchReadError> {
+    if work_refs.len() > 250 {
+        return Err(CommentResearchReadError::InvalidQuery);
+    }
+    let works =
+        crate::work_resource_current::read_work_resource_currents(tx, work_refs, as_of).await?;
+    Ok(json!(works.into_iter().map(|w|json!({"workRef":w.public_ref,"title":w.title,"creatorDisplayName":w.creator_display_name})).collect::<Vec<_>>()))
 }
 
 /// Batch projection through the existing Work Resource Current owner, inside Evidence.

@@ -228,3 +228,10 @@
 新文件只有同时满足“位置正确、名称稳定、状态明确、进入本索引、冲突已处理、变更已登记、检查通过”才算正式入库。
 
 - [评论语料与每日研究 V1](plans/active/comment-daily-001.md)：当前授权交付包，紧凑原声表格、清洗、按作品分析与每日研究。
+
+- [评论情报实施合同](data-contracts/comment-intelligence-v1.md)：权威当前，CI-20260907-V1 用户指定完整合同。
+- [评论情报执行与交接](plans/active/comment-intelligence-v1.md)：活跃计划，T0–T8、真实映射、文件所有权和验收记录。
+
+- [评论情报验收矩阵](design/acceptance/comment-intelligence-v1-acceptance.md)：一次性报告，84项逐条映射、实际自动证明和未验证层。
+- [评论情报 UI 变更清单](design/changes/comment-intelligence-v1-ui-change-manifest.md)：本包四视角、范围、状态、交互与视觉验收边界。
+- [评论情报离线评测合同](audits/comment-intelligence-evaluation-contract.md)：本地 JSONL、B0/B1/B2、真实留出集与高级规则门槛。

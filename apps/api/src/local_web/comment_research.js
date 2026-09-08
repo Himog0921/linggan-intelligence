@@ -1,5 +1,6 @@
 (() => {
   'use strict';
+  if (document.querySelector('[data-initial-view]')?.dataset.initialView !== 'queries') return;
   const $ = (id) => document.getElementById(id);
   const api = '/api/local/comment-research';
   const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -153,7 +154,7 @@
   function renderQueries(data) {
     state.queries=new Map(data.items.map(q=>[q.queryRef,q]));state.next=null;$('result-count').textContent=`${data.items.length} 个查询`;
     $('results').innerHTML=data.items.length ? table([['查询名称','35%'],['保存条件','45%'],['使用','20%']],data.items.map(q=>{
-      const p=new URLSearchParams({text:q.text});if(q.workRef)p.set('workRef',q.workRef);
+      const p=new URLSearchParams({view:"voices",text:q.text,domain:domainRef});if(q.workRef)p.set('workRef',q.workRef);
       return `<tr><td>${esc(q.name)}</td><td>${esc(q.text || '全部可读原声')}<div class="lgi-research-meta">${q.workRef?'限定作品':'跨全部作品'} · 每次使用重新查询最新可读材料</div></td><td><a href="/corpus/comments?${esc(p)}">打开查询</a><br><button type="button" data-manage-query="${q.queryRef}">编辑或删除</button></td></tr>`;
     })) : empty('还没有已存查询。在评论研究中设定条件后使用「保存查询」。保存不会触发采集或订阅。');
   }

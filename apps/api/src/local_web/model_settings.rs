@@ -129,7 +129,7 @@ fn respond(result: Result<Value, ModelError>) -> Response {
         Err(e) => {
             let status = match e {
                 ModelError::Invalid | ModelError::InputLimit => StatusCode::BAD_REQUEST,
-                ModelError::Conflict => StatusCode::CONFLICT,
+                ModelError::Conflict | ModelError::ResearchPlanRetired => StatusCode::CONFLICT,
                 ModelError::NotFound => StatusCode::NOT_FOUND,
                 ModelError::Disabled | ModelError::NotQualified | ModelError::Budget => {
                     StatusCode::CONFLICT

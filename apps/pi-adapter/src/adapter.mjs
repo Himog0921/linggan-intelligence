@@ -61,8 +61,10 @@ export async function execute(r) {
       if(r.apiKey&&ids.some(id=>id.includes(r.apiKey)))throw new Rejected('secret_echo_rejected');
       return {version:VERSION,ok:true,modelIds:ids,modelListOrigin:'ACCOUNT_ENDPOINT',usage,elapsedMs:Date.now()-started};
     }
+    // Unknown provider context capacity: a conservative adapter envelope, not advertised capability.
+    if(Buffer.byteLength(r.prompt)+Buffer.byteLength(r.system)+r.maxOutputTokens>32768)throw new Rejected('model_input_limit');
     const model={id:r.modelId,name:r.modelId,api:r.api,provider:'linggan-explicit',baseUrl:base.href,
-      reasoning:false,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:200000,maxTokens:r.maxOutputTokens};
+      reasoning:false,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32768,maxTokens:r.maxOutputTokens};
     // Our current contract accepts final text only. DeepSeek V4 otherwise defaults
     // to thinking even when the local model metadata says reasoning:false.
     const deepseekTextOnly=base.hostname==='api.deepseek.com'&&['deepseek-v4-flash','deepseek-v4-pro','deepseek-v4-flash-vision-exp'].includes(r.modelId);

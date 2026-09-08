@@ -67,6 +67,12 @@ pub async fn run_model_work_once(
     store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<bool, ModelError> {
+    if crate::comment_intelligence::schema_ready(db).await? {
+        crate::comment_intelligence_problems::reconcile_problem_index(db, 100)
+            .await
+            .map_err(|_| ModelError::Source)?;
+        return crate::comment_daily_runner::run_daily_once(db, store, adapter).await;
+    }
     if crate::comment_daily_runner::run_daily_once(db, store, adapter).await? {
         return Ok(true);
     }

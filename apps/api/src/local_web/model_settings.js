@@ -28,16 +28,16 @@
     const selected=data.config?.modelRef;
     $('default-model').innerHTML='<option value="">请选择已通过评论校验的模型</option>'+data.models.filter(m=>(m.enabled&&m.test?.commentQualified)||m.modelRef===selected).map(m=>`<option value="${m.modelRef}">${esc(m.connectionName+' / '+m.modelId+(m.enabled?'':'（连接已停用）'))}</option>`).join('');
     if(data.config)for(const [key,value]of Object.entries(data.config)){const field=$('config-form').elements.namedItem(key);if(field)field.value=value;}
-    ['trial','automatic','backfill'].forEach(id=>$(id).disabled=!data.config);
+    ['trial','automatic','backfill'].forEach(id=>$(id).disabled=!data.config||data.legacyPlansAvailable===false);
     renderActivity();
     if(focusedPlan)$('research-controls').open=true;
     if(focusedPlan)$('plan-'+focusedPlan)?.scrollIntoView({block:'center'});
   }
   function renderActivity(){
     const auto=data.plans.find(p=>p.planRef===data.activeAutoPlanRef),worker=data.worker;
-    $('automatic-state').textContent=auto?.enabled?`自动新增已启用：只纳入 ${auto.createdAt} 后新接纳的可读来源，已纳入 ${auto.sourceCount}/${auto.sourceLimit} 条。换默认模型不会重置这份累计额度。`:'自动新增已暂停或尚未启用。保存设置不改变此状态。';
+    $('automatic-state').textContent=data.legacyPlansAvailable===false?'评论研究已统一使用按作品分包的新流程，请进入语料 → 评论研究试跑或设置每日观察。历史计划与用量在此保留。':auto?.enabled?`自动新增已启用：只纳入 ${auto.createdAt} 后新接纳的可读来源，已纳入 ${auto.sourceCount}/${auto.sourceLimit} 条。换默认模型不会重置这份累计额度。`:'自动新增已暂停或尚未启用。保存设置不改变此状态。';
     $('worker-state').textContent=!worker?.recent?'执行循环暂无近期心跳。提交的计划会保留，待本机 worker 启动后接续。':worker.lastError?`执行循环最近失败：${explain(worker.lastError)}`:`执行循环在线 · ${worker.state==='running'?'正在处理一项调用':'等待可执行任务'} · 最近心跳 ${worker.lastSeenAt}`;
-    $('plan-list').innerHTML=data.plans.length?table(['处理计划','来源与额度','状态'],data.plans.map(p=>`<tr id="plan-${p.planRef}"><td>${kinds[p.kind]}${note(p.createdAt)}</td><td>已纳入 ${p.sourceCount}/${p.sourceLimit} 条${note(`额度占用 ${p.budgetUsed.toLocaleString()} / ${p.tokenLimit.toLocaleString()} token（含 ${p.unknownUsageCount} 次用量未知）`)}</td><td>${!p.enabled?'已暂停':p.nextReservation!=null&&p.tokenLimit-p.budgetUsed<p.nextReservation?'余额不足以预留下次调用':'允许派发'}${p.disabledCount?note(`${p.disabledCount} 条等待的连接已停用`):''}${note(`待处理 ${p.pendingCount??0} · 执行中 ${p.runningCount??0} · 已结束 ${p.finishedCount??0}`)}${p.enabled?button('stop',p.planRef,'暂停此计划'):button('resume',p.planRef,'恢复此计划')}</td></tr>`)):note('没有评论分析计划。先选择一条可读原声试运行。');
+    $('plan-list').innerHTML=data.plans.length?table(['处理计划','来源与额度','状态'],data.plans.map(p=>`<tr id="plan-${p.planRef}"><td>${kinds[p.kind]}${note(p.createdAt)}</td><td>已纳入 ${p.sourceCount}/${p.sourceLimit} 条${note(`额度占用 ${p.budgetUsed.toLocaleString()} / ${p.tokenLimit.toLocaleString()} token（含 ${p.unknownUsageCount} 次用量未知）`)}</td><td>${!p.enabled?'已暂停':p.nextReservation!=null&&p.tokenLimit-p.budgetUsed<p.nextReservation?'余额不足以预留下次调用':'允许派发'}${p.disabledCount?note(`${p.disabledCount} 条等待的连接已停用`):''}${note(`待处理 ${p.pendingCount??0} · 执行中 ${p.runningCount??0} · 已结束 ${p.finishedCount??0}`)}${p.enabled?button('stop',p.planRef,'暂停此计划'):data.legacyPlansAvailable===false?'':button('resume',p.planRef,'恢复此计划')}</td></tr>`)):note('没有评论分析计划。先选择一条可读原声试运行。');
     $('run-list').innerHTML=data.runs.length?table(['最近调用','状态与原因','用量'],data.runs.map(r=>`<tr><td>${ops[r.operation]}${note(r.modelId||'模型目录请求')}${note(r.createdAt)}${r.sourceRef?`<a href="/corpus/comments?source=${r.sourceRef}">查看来源与标注</a>`:''}</td><td>${r.state==='running'?'执行中':r.state==='succeeded'?'已完成':'失败'}${r.failureCode?note(explain(r.failureCode)):''}${r.attempts?note(`此任务已尝试 ${r.attempts} 次`):''}${r.configRef?`<details><summary>配置版本</summary>${note(r.configRef)}</details>`:''}</td><td>输入 ${r.inputTokens??'未知'} · 输出 ${r.outputTokens??'未知'}${note(`本机额度计入 ${r.budgetAccounted} token · 金额待供应商核对`)}${r.elapsedMs!=null?note(`耗时 ${r.elapsedMs} ms`):''}</td></tr>`)):note('没有调用回执。');
   }
   function open(title,fields,action,label='保存'){
@@ -170,5 +170,5 @@
       else if(action==='stop'){await request(api+'/plans/'+ref+'/stop',{});await load();}
     }catch(e){showError(e);}finally{b.disabled=false;}
   });
-  load().then(()=>{const ref=new URLSearchParams(location.search).get('sourceRef');if(ref&&data.config)return chooseSources('trial',ref);}).catch(showError);
+  load().then(()=>{const ref=new URLSearchParams(location.search).get('sourceRef');if(ref&&data.config&&data.legacyPlansAvailable!==false)return chooseSources('trial',ref);}).catch(showError);
 })();

@@ -49,3 +49,7 @@ Pi 的提示词与解析合同随代码版本管理；本包没有引入让 Agen
 人工七维修订分别是场景、问题、尝试过的方法、评论者自述失败原因、情绪、期望、表达方式；每项区分来源直接表达与研究推断。人工历史追加保存，不被机器运行覆盖。当前界面展示最新人工修订及保留版本数，完整旧修订内容可从受控 API 读取。
 
 实施与验收见 [本包合同](../plans/active/comment-research-001.md) 和 [分层验收](../design/acceptance/comment-research-001-acceptance.md)。
+
+## CI-20260907-V1 的替代范围
+
+本文件记录前一版布局。当前交付分支中，评论页面布局与研究行为以 `docs/data-contracts/comment-intelligence-v1.md` 和 `docs/design/acceptance/comment-intelligence-v1-acceptance.md` 为准：概览、原声、用户问题、每日观察，收藏回到原声。旧资产身份、原文资格和已存查询合同仍复用。本替代标记只说明源码合同，不能证明共享运行已经升级。

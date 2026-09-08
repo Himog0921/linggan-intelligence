@@ -6,6 +6,12 @@
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
+### CI-20260907-V1（当前交付分支；编码与隔离验证）
+
+Mog 指定 `comment-intelligence-v1` 完整实施包；基线 `origin/main@61e8c35`，实施位于 `codex/comment-intelligence-v1` 的专属 worktree。四视角、统一来源身份与范围、多维语义、增量问题／词频、人工纠正、23:00 日批与预算恢复已接入代码。来源合同、复用映射和具体证明见 [执行计划](plans/active/comment-intelligence-v1.md)、[84 项验收](design/acceptance/comment-intelligence-v1-acceptance.md)。高级观察默认不自动发布，真实质量须独立评测。
+
+本轮没有共享迁移、push／merge、3000 切换或真实评论外发。Chrome 对隔离预览返回 `ERR_BLOCKED_BY_CLIENT`，没有以原包截图代替实际视觉验收。下方 COMMENT-DAILY-001 是历史交付时点记录，不能据此推断当前运行版本；本轮代码与运行状态分别记录。
+
 ### COMMENT-DAILY-001（交付分支；尚未进入共享运行）
 
 Mog 批准“评论语料与每日研究 V1”并要求原声参考证据库紧凑表格。单代理在 codex/comment-daily-v1、基线 73f5996 实现四视图、异步保守清洗、按作品分包、23:00 日批、预算与显式失败重试，承接下方 #167/#169 历史条目。新 0043 仅在隔离数据库验证，未应用共享库；3000、真实评论外发、merge 和 Mog 业务验收未发生。本次合同及实际证明见 [COMMENT-DAILY-001](plans/active/comment-daily-001.md) 和 [评论验收](design/acceptance/comment-research-001-acceptance.md)。
