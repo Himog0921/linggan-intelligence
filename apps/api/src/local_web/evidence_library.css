@@ -160,6 +160,10 @@
 .ev-evidence--absent{border-left-color:var(--v7-line-strong);background:var(--v7-gray)}
 .ev-evidence--absent .ev-evidence-source{color:var(--v7-ghost)}
 .ev-evidence--absent span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--v7-muted);font-size:11.5px}
+.ev-cross-industry-marker{color:var(--lgi-info);font:700 9px/1 var(--lgi-font-mono);letter-spacing:.055em}
+.ev-cross-industry-boundary{padding-left:9px;border-left:3px solid var(--lgi-info);color:var(--lgi-body)}
+.ev-cross-industry-side-label{color:var(--lgi-ink);font:700 10px/1.35 var(--lgi-font-sans)}
+.ev-cross-industry-side-copy{color:var(--lgi-muted);font:650 9.5px/1.35 var(--lgi-font-mono)}
 .ev-engagement{display:flex;flex-wrap:wrap;gap:4px 16px;margin-top:8px;color:var(--v7-muted);font:650 10.5px var(--lgi-font-mono);font-variant-numeric:tabular-nums}
 .ev-engagement b{margin-left:3px;color:var(--v7-black);font-weight:750}
 
