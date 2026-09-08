@@ -790,7 +790,7 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn authorization_is_bounded_by_scope_and_targets_not_purpose_text() {
+async fn authorization_is_bounded_by_scope_not_by_target_count_or_purpose_text() {
     let database = proof_database("collection_control_authorization_bounds").await;
     let installation = ready_installation_without_account(&database, "authorization-bounds").await;
     make_account_usable(&database, &installation, "authorization-account").await;
@@ -850,26 +850,51 @@ async fn authorization_is_bounded_by_scope_and_targets_not_purpose_text() {
     .expect("authorized work count is readable");
     assert_eq!(authorized_work_count, 2);
 
-    let bounded_target =
+    // 第三个同类目标同样放行：数量上限已取消（Mog 2026-09-08）。
+    //
+    // 一份授权覆盖的是**一类**目标，多观察一个同类对象并没有越过人当初批准的范围。
+    // 授权仍然限定平台、目标类型、通道、用途与有效期，也仍然可以随时撤销——这条
+    // 断言守的正是「取消的只有数量，其余边界一个没松」。
+    let beyond_previous_limit =
         seed_target(&database, "creator", "pending_decision", "target-limit").await;
-    let bounded = request_and_admit(
+    let admitted_anyway = request_and_admit(
         &database,
-        bounded_target,
+        beyond_previous_limit,
         "deep_archive",
         "third audit annotation",
         "person",
     )
     .await
-    .expect("target limit produces a durable decision");
-    assert!(bounded.work_order_ref.is_none());
-    let bounded_reason: String = sqlx::query_scalar(
+    .expect("a third in-scope target still produces a durable decision");
+    assert!(
+        admitted_anyway.work_order_ref.is_some(),
+        "数量上限已取消，同一类目标不再因为「第几个」被拒"
+    );
+    let reason: String = sqlx::query_scalar(
         "SELECT reason_code FROM collection_admission_decision WHERE decision_ref=$1",
     )
-    .bind(bounded.decision_ref)
+    .bind(admitted_anyway.decision_ref)
     .fetch_one(database.pool())
     .await
-    .expect("target-limit reason is readable");
-    assert_eq!(bounded_reason, "authorization_target_limit_reached");
+    .expect("reason is readable");
+    assert_eq!(reason, "within_authorization");
+
+    // 范围之外仍然拒绝：换一条 lane 就不在这份授权里，边界依旧生效。
+    let other_lane_target =
+        seed_target(&database, "creator", "pending_decision", "other-lane").await;
+    let refused = request_and_admit(
+        &database,
+        other_lane_target,
+        "patrol",
+        "out of scope annotation",
+        "person",
+    )
+    .await
+    .expect("an out-of-scope request still decides");
+    assert!(
+        refused.work_order_ref.is_none(),
+        "取消的只是数量上限，通道范围仍然拦得住"
+    );
 }
 
 #[tokio::test]

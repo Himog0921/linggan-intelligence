@@ -982,24 +982,24 @@ async fn gather_facts(
         .await?
     };
 
-    let (authorization_ref, authorization_failure) = if let Some((authorization_ref, max_targets)) =
-        authorization
+    // 目标数量上限不再判定（Mog 2026-09-08 决定）。
+    //
+    // 授权的价值在于「谁批的、批了什么范围、到哪天为止、可以随时撤销」，这几样都留着。
+    // 数量上限则是另一回事：它挡住的不是越权，而是「同一类观察多了一个对象」——而
+    // 一份授权本就覆盖一类目标，多观察一个同类对象并没有越过人当初批准的范围。
+    //
+    // 它在真实运行里也只制造了阻塞：线上 8 次 `authorization_target_limit_reached`
+    // 全部来自关键词巡查那份 `max_targets=1` 的 canary 遗留授权，而创作者两条通道
+    // （`max_targets` 分别是 5 和无限）三个月来从未因它被拒过一次。
+    //
+    // `max_targets` 列与 `TargetLimitReached` 变体都保留：线上有 8 行历史决定的
+    // reason_code 是它，删掉这个概念会让那 8 行无法解释。
+    let (authorization_ref, authorization_failure) = if let Some((
+        authorization_ref,
+        _max_targets,
+    )) = authorization
     {
-        let target_count: i64 = sqlx::query_scalar(
-            "SELECT count(DISTINCT work_order.target_ref) \
-             FROM collection_work_order work_order \
-             JOIN collection_admission_decision decision USING(decision_ref) \
-             WHERE decision.authorization_ref=$1 AND work_order.target_ref<>$2",
-        )
-        .bind(authorization_ref)
-        .bind(target_ref)
-        .fetch_one(&mut **transaction)
-        .await?;
-        if max_targets.is_some_and(|limit| target_count >= i64::from(limit)) {
-            (None, Some(AuthorizationBoundaryFailure::TargetLimitReached))
-        } else {
-            (Some(authorization_ref), None)
-        }
+        (Some(authorization_ref), None)
     } else {
         let status: (bool, bool, bool, bool) = sqlx::query_as(
                 "SELECT \

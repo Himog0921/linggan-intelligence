@@ -66,6 +66,10 @@ pub enum AuthorizationBoundaryFailure {
     Missing,
     ScopeMismatch,
     PurposeMismatch,
+    /// 不再由任何代码产生（Mog 2026-09-08 取消了目标数量上限）。
+    ///
+    /// 保留是为了让历史读得懂：线上有 8 行准入决定的 `reason_code` 是它，另有 14 行
+    /// 散在调度决定与规则命令回执里。删掉这个变体，那些记录就会指向一个不存在的概念。
     TargetLimitReached,
     WorkUnitLimitReached,
     ExpiredOrRevoked,
