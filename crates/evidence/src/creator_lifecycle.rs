@@ -10,6 +10,7 @@ use sqlx::Row;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::directory_boundary::surface_scan_complete_sql;
 use crate::work_resource_current::read_work_resource_currents;
 
 const CREATOR_LIFECYCLE_SCAN_LIMIT: usize = 2_000;
@@ -473,7 +474,8 @@ fn map_schema_error(error: sqlx::Error) -> CreatorLifecycleReadError {
     }
 }
 
-const CANDIDATE_WORK_REFS_SQL: &str = r#"
+const CANDIDATE_WORK_REFS_SQL: &str = concat!(
+    r#"
 WITH selected_target AS (
     SELECT target_ref,platform,identity_key
     FROM collection_observation_target
@@ -500,13 +502,9 @@ qualified_patrols AS (
       AND receipt.material_admission='ACCEPTED'
       AND receipt.execution_effect='COMPLETED_LIVE_STEP'
       AND layer->>'capability'='profile_discovery'
-      AND COALESCE((layer->>'failed')::integer,0)=0
-      AND COALESCE((layer->>'notAttempted')::integer,0)=0
-      AND COALESCE((layer->>'unknown')::integer,0)=0
-      AND (layer->>'stoppedReason'='surface_ended' OR (
-           layer->>'stoppedReason'='maximum_quota'
-           AND COALESCE((layer->>'acquired')::integer,-1)=
-               COALESCE((task.task_spec->>'maximumQuota')::integer,-2)))
+      AND "#,
+    surface_scan_complete_sql!(),
+    r#"
       AND NOT EXISTS (
         SELECT 1 FROM linggan_runtime_record_disposition disposition
         WHERE disposition.package_ref=package.package_ref
@@ -596,7 +594,8 @@ bounded_candidates AS (
 SELECT bounded.work_public_ref,bounded.surface_linked,bounded.new_in_latest_patrol
 FROM bounded_candidates bounded
 ORDER BY bounded.created_at DESC,bounded.work_public_ref DESC
-"#;
+"#,
+);
 
 #[cfg(test)]
 mod tests {

@@ -6,6 +6,7 @@
 //! page body, or a free-form platform error.
 
 use crate::acquisition_chain::{AcquisitionChainError, request_and_admit_in_transaction};
+use crate::directory_boundary::{directory_proven_sql, profile_read_complete_sql};
 use crate::station_read::station_daily_note_usage_in;
 use crate::work_order_lease::LeaseError;
 use linggan_contracts::{Capacity, CapacityReasonCode};
@@ -1980,7 +1981,8 @@ pub(crate) async fn creator_baseline_qualified(
     target_ref: Uuid,
 ) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT \
+        concat!(
+            "SELECT \
            EXISTS ( \
              SELECT 1 FROM collection_work_order work_order \
              JOIN collection_work_order_lease lease USING(work_order_ref) \
@@ -1996,13 +1998,9 @@ pub(crate) async fn creator_baseline_qualified(
                AND receipt.material_admission='ACCEPTED' \
                AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
                AND layer->>'capability'='author_profile' \
-               AND COALESCE((layer->>'observed')::integer,0)>0 \
-               AND COALESCE((layer->>'attempted')::integer,0)>0 \
-               AND COALESCE((layer->>'acquired')::integer,0)>0 \
-               AND COALESCE((layer->>'failed')::integer,0)=0 \
-               AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
-               AND COALESCE((layer->>'unknown')::integer,0)=0 \
-               AND layer->>'stoppedReason' IN ('surface_ended','maximum_quota') \
+               AND ",
+            profile_read_complete_sql!(),
+            " \
                AND EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
                            WHERE disposition.package_ref=package.package_ref \
                              AND disposition.disposition='accepted_for_library_content') \
@@ -2023,26 +2021,19 @@ pub(crate) async fn creator_baseline_qualified(
                AND package.package_kind='profile_discovery' \
                AND receipt.material_admission='ACCEPTED' \
                AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
-               AND layer->>'capability'='profile_discovery' \
-               AND COALESCE((layer->>'observed')::integer,0)>0 \
-               AND COALESCE((layer->>'attempted')::integer,0)>0 \
-               AND COALESCE((layer->>'acquired')::integer,0)>0 \
-               AND COALESCE((layer->>'failed')::integer,0)=0 \
-               AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
-               AND COALESCE((layer->>'unknown')::integer,0)=0 \
-               AND (layer->>'stoppedReason'='surface_ended' OR ( \
-                 layer->>'stoppedReason'='maximum_quota' \
-                 AND work_order.stop_conditions #>> '{progressiveArchive,version}'='1' \
-                 AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order.work_order_ref::text \
-                 AND COALESCE((work_order.stop_conditions #>> '{progressiveArchive,maxDirectoryWorks}')::integer,-1)=200 \
-                 AND COALESCE((task.task_spec->>'maximumQuota')::integer,-1)=200 \
-                 AND COALESCE((layer->>'acquired')::integer,-1)=200)) \
+               AND ",
+            directory_proven_sql!(),
+            " \
+               AND work_order.stop_conditions #>> '{progressiveArchive,version}'='1' \
+               AND work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=work_order.work_order_ref::text \
+               AND COALESCE((work_order.stop_conditions #>> '{progressiveArchive,maxDirectoryWorks}')::integer,-1)=200 \
                AND EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
                            WHERE disposition.package_ref=package.package_ref \
                              AND disposition.disposition<>'quarantined') \
                AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
                                WHERE disposition.package_ref=package.package_ref \
                                  AND disposition.disposition='quarantined'))",
+        ),
     )
     .bind(target_ref)
     .fetch_one(&mut **transaction)

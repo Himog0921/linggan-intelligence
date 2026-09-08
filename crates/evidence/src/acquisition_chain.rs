@@ -9,6 +9,7 @@
 use crate::collection_control::{
     CapacitySelection, evaluate_capacity_in, ready_batch_claim_slots_in, required_capabilities_for,
 };
+use crate::directory_boundary::{directory_proven_sql, surface_scan_complete_sql};
 use crate::work_order_lease::{
     IssuedLease, LeaseError, issue_work_order_lease_in_transaction, lease_schema_is_ready,
 };
@@ -1046,7 +1047,19 @@ async fn gather_facts(
         (None, Some(failure))
     };
 
-    let monitor_rule_revision_ref = if requested_by == "agent" && lane == "patrol" {
+    // 巡检面的工单一律冻结目标当前的活跃规则版本，**不分是人点的还是调度发的**。
+    //
+    // 此前只有 `agent` 发的才绑规则，人点「观察一次」发出的工单规则版本为空。采样口径
+    // （排序、下拉次数、取前 N、发布时间窗）住在规则版本上，规则版本为空就等于口径整个
+    // 丢失，插件只好按自己的默认走。2026-09-08 实测：同一个「考研自习」目标，定时巡检
+    // 下发了 `ranking=most_liked`，人点那次下发的只有一个光秃秃的 `query`——于是「综合
+    // 排序」和「最多点赞」两条规则手点出来的结果一模一样。**人点一次要的是「照这条规则
+    // 现在跑一遍」，不是「按插件默认跑一遍」。**
+    //
+    // 绑上规则不会让人点的工单被规则闸门拦住：`reject_if_rule_changed` 里那几条
+    // （规则变更、规则缺失、巡检暂停）都只对 `agent` 生效——自动巡检停了，人仍然可以手动
+    // 观察一次，这正是这个按钮存在的意义。
+    let monitor_rule_revision_ref = if lane == "patrol" {
         sqlx::query_scalar(
             "SELECT active_monitor_rule_revision_ref FROM collection_observation_target \
              WHERE target_ref=$1",
@@ -1606,7 +1619,8 @@ async fn progressive_root_directory_state_in_transaction(
     root_work_order_ref: Uuid,
 ) -> Result<ProgressiveRootDirectoryState, sqlx::Error> {
     let (directory_ready, work_in_progress): (bool, bool) = sqlx::query_as(
-        "SELECT \
+        concat!(
+            "SELECT \
            EXISTS ( \
              SELECT 1 FROM collection_work_order root_order \
              JOIN collection_work_order_lease lease USING(work_order_ref) \
@@ -1621,17 +1635,9 @@ async fn progressive_root_directory_state_in_transaction(
                AND package.package_kind='profile_discovery' \
                AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
                AND receipt.material_admission='ACCEPTED' \
-               AND layer->>'capability'='profile_discovery' \
-               AND COALESCE((layer->>'observed')::integer,0)>0 \
-               AND COALESCE((layer->>'attempted')::integer,0)>0 \
-               AND COALESCE((layer->>'acquired')::integer,0)>0 \
-               AND COALESCE((layer->>'failed')::integer,0)=0 \
-               AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
-               AND COALESCE((layer->>'unknown')::integer,0)=0 \
-               AND COALESCE((task.task_spec->>'maximumQuota')::integer,-1)=200 \
-               AND (layer->>'stoppedReason'='surface_ended' OR ( \
-                 layer->>'stoppedReason'='maximum_quota' \
-                 AND COALESCE((layer->>'acquired')::integer,-1)=200))) AS directory_ready, \
+               AND ",
+            directory_proven_sql!(),
+            ") AS directory_ready, \
            EXISTS ( \
              SELECT 1 FROM collection_work_order work_order \
              LEFT JOIN collection_work_order_lease lease USING(work_order_ref) \
@@ -1639,6 +1645,7 @@ async fn progressive_root_directory_state_in_transaction(
                     OR work_order.stop_conditions #>> '{progressiveArchive,rootWorkOrderRef}'=$1::text) \
                AND (work_order.queue_state='queued' \
                     OR (lease.released_at IS NULL AND lease.expires_at>scope_001_now()))) AS work_in_progress",
+        ),
     )
     .bind(root_work_order_ref)
     .fetch_one(&mut **transaction)
@@ -1669,7 +1676,8 @@ async fn advance_progressive_archive_in_transaction(
     issue_lease: bool,
 ) -> Result<ProgressiveAdvance, RequestLeaseError> {
     let content_refs: Vec<Uuid> = sqlx::query_scalar(
-        "WITH canonical_directory_package AS ( \
+        concat!(
+            "WITH canonical_directory_package AS ( \
              SELECT package.package_ref,package.accepted_at \
              FROM collection_work_order root_order \
              JOIN collection_work_order_lease lease USING(work_order_ref) \
@@ -1707,13 +1715,9 @@ async fn advance_progressive_archive_in_transaction(
                AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
                AND receipt.material_admission='ACCEPTED' \
                AND layer->>'capability'='profile_discovery' \
-               AND COALESCE((layer->>'failed')::integer,0)=0 \
-               AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
-               AND COALESCE((layer->>'unknown')::integer,0)=0 \
-               AND (layer->>'stoppedReason'='surface_ended' OR ( \
-                    layer->>'stoppedReason'='maximum_quota' \
-                    AND COALESCE((layer->>'acquired')::integer,-1)= \
-                        COALESCE((task.task_spec->>'maximumQuota')::integer,-2))) \
+               AND ",
+            surface_scan_complete_sql!(),
+            " \
                AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
                                WHERE disposition.package_ref=package.package_ref \
                                  AND disposition.disposition='quarantined') \
@@ -1766,6 +1770,7 @@ async fn advance_progressive_archive_in_transaction(
                AND unavailable_runtime.task_spec #>> '{target,contentExternalId}'=unavailable_content.content_external_id) \
          ORDER BY current_directory.first_seen,current_directory.content_public_ref \
          LIMIT $3",
+        ),
     )
     .bind(target_ref)
     .bind(root_work_order_ref)

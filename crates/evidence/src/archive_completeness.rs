@@ -8,6 +8,7 @@
 //! 这条确切链路。详情任务只携带 `contentExternalId`，若靠任务规格里的
 //! `authorExternalId` 反查，渐进补齐的详情会全部丢失归属。
 
+use crate::directory_boundary::{directory_proven_sql, surface_scan_complete_sql};
 use linggan_storage_postgres::Database;
 use std::collections::HashMap;
 
@@ -94,7 +95,8 @@ pub async fn read_archive_completeness(
     platform: &str,
 ) -> Result<HashMap<String, ArchiveCompleteness>, sqlx::Error> {
     let rows: Vec<(String, bool, bool, bool, i64, i64, i64, i64, i64, bool)> = sqlx::query_as(
-        "WITH ranked_roots AS ( \
+        concat!(
+            "WITH ranked_roots AS ( \
              SELECT target.target_ref,target.identity_key AS author_external_id, \
                     work_order.work_order_ref AS root_work_order_ref, \
                     row_number() OVER (PARTITION BY target.target_ref \
@@ -132,16 +134,9 @@ pub async fn read_archive_completeness(
                AND task.task_spec->'capabilitiesRequested' ? package.package_kind \
                AND receipt.execution_effect='COMPLETED_LIVE_STEP' AND receipt.material_admission='ACCEPTED' \
                AND layer->>'capability'='profile_discovery' \
-               AND COALESCE((layer->>'observed')::integer,0)>0 \
-               AND COALESCE((layer->>'attempted')::integer,0)>0 \
-               AND COALESCE((layer->>'acquired')::integer,0)>0 \
-               AND COALESCE((layer->>'failed')::integer,0)=0 \
-               AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
-               AND COALESCE((layer->>'unknown')::integer,0)=0 \
-               AND COALESCE((task.task_spec->>'maximumQuota')::integer,-1)=200 \
-               AND (layer->>'stoppedReason'='surface_ended' OR ( \
-                    layer->>'stoppedReason'='maximum_quota' \
-                    AND COALESCE((layer->>'acquired')::integer,-1)=200)) \
+               AND ",
+            directory_proven_sql!(),
+            " \
                AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
                                WHERE disposition.package_ref=package.package_ref AND disposition.disposition='quarantined') \
                AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition \
@@ -188,12 +183,9 @@ pub async fn read_archive_completeness(
                AND (package.coverage->'target') @> (task.task_spec->'target') \
                AND receipt.execution_effect='COMPLETED_LIVE_STEP' AND receipt.material_admission='ACCEPTED' \
                AND layer->>'capability'='profile_discovery' \
-               AND COALESCE((layer->>'failed')::integer,0)=0 \
-               AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
-               AND COALESCE((layer->>'unknown')::integer,0)=0 \
-               AND (layer->>'stoppedReason'='surface_ended' OR ( \
-                    layer->>'stoppedReason'='maximum_quota' \
-                    AND COALESCE((layer->>'acquired')::integer,-1)=COALESCE((task.task_spec->>'maximumQuota')::integer,-2))) \
+               AND ",
+            surface_scan_complete_sql!(),
+            " \
                AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
                                WHERE disposition.package_ref=package.package_ref AND disposition.disposition='quarantined') \
                AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition \
@@ -291,6 +283,7 @@ pub async fn read_archive_completeness(
          LEFT JOIN archive_progress progress USING(author_external_id) \
          LEFT JOIN blocked_details USING(author_external_id) \
          LEFT JOIN directory_packages directories USING(author_external_id)",
+        ),
     )
     .bind(platform)
     .fetch_all(database.pool())

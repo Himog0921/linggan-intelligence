@@ -9,6 +9,7 @@
 use crate::collection_control::{
     creator_baseline_qualified, required_capabilities_for, revalidate_frozen_capacity_in,
 };
+use crate::directory_boundary::surface_scan_complete_sql;
 use linggan_contracts::{
     PRODUCER_TASK_SPEC_VERSION, ProducerTaskSpec, SERVER_LEASED_RISK_POLICY,
     parse_producer_task_spec,
@@ -459,7 +460,7 @@ async fn patrol_completion_qualified(
     lease_ref: Uuid,
     target_ref: Uuid,
 ) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar(
+    sqlx::query_scalar(concat!(
         "SELECT EXISTS ( \
            SELECT 1 FROM collection_work_order_lease lease \
            JOIN collection_work_order work_order USING(work_order_ref) \
@@ -480,13 +481,9 @@ async fn patrol_completion_qualified(
              AND receipt.material_admission='ACCEPTED' \
              AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
              AND layer->>'capability'=package.package_kind \
-             AND COALESCE((layer->>'failed')::integer,0)=0 \
-             AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
-             AND COALESCE((layer->>'unknown')::integer,0)=0 \
-             AND (layer->>'stoppedReason'='surface_ended' OR ( \
-                  layer->>'stoppedReason'='maximum_quota' \
-                  AND COALESCE((layer->>'acquired')::integer,-1)= \
-                      COALESCE((task.task_spec->>'maximumQuota')::integer,-2))) \
+             AND ",
+        surface_scan_complete_sql!(),
+        " \
              AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
                              WHERE disposition.package_ref=package.package_ref \
                                AND disposition.disposition='quarantined') \
@@ -494,7 +491,7 @@ async fn patrol_completion_qualified(
                   WHERE disposition.package_ref=package.package_ref \
                     AND disposition.disposition='accepted_for_library_discovery') = \
                  COALESCE((layer->>'acquired')::integer,-1))",
-    )
+    ))
     .bind(lease_ref)
     .bind(target_ref)
     .fetch_one(&mut **transaction)
