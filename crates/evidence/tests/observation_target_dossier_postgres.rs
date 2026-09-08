@@ -1376,7 +1376,8 @@ async fn patrol_success_and_latest_new_ring_share_one_qualified_target_level_rou
     .fetch_one(database.pool())
     .await
     .unwrap();
-    assert_eq!(after_zero, "2026-09-04 09:00");
+    // 同一时刻按北京时间读出（会话时区固定 Asia/Shanghai）。
+    assert_eq!(after_zero, "2026-09-04 17:00");
     let lifecycle = read_creator_lifecycle(
         &database,
         target_ref,
@@ -1420,7 +1421,7 @@ async fn patrol_success_and_latest_new_ring_share_one_qualified_target_level_rou
     .await
     .unwrap();
     assert_eq!(
-        after_unqualified, "2026-09-04 09:00",
+        after_unqualified, "2026-09-04 17:00",
         "quarantined and unknown/risk-stopped patrols complete their leases without claiming success",
     );
     let lifecycle = read_creator_lifecycle(

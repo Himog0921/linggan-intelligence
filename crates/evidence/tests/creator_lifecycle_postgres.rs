@@ -91,7 +91,9 @@ async fn creator_lifecycle_isolates_same_named_targets_by_stable_author_identity
 
     assert_eq!(projection.status, CreatorLifecycleStatus::Ready);
     assert_eq!(projection.target_ref, target_a);
-    assert_eq!(projection.as_of, "2026-09-03 12:00:00+00");
+    // 同一时刻，读出来是北京时间：会话时区固定为 Asia/Shanghai，页面上的每个时间
+    // 都按它格式化。断言写 UTC 会让这条测试要求一件与界面相反的事。
+    assert_eq!(projection.as_of, "2026-09-03 20:00:00+08");
     assert_eq!(projection.summary.linked_work_count, Some(1));
     assert_eq!(projection.summary.linked_work_count_lower_bound, 1);
     assert_eq!(projection.summary.confirmed_author_work_count, 1);
