@@ -1,5 +1,7 @@
 //! SQL owned by the target inspector read projection.
 
+use crate::directory_boundary::directory_proven_sql;
+
 pub(super) const EXECUTION_SQL: &str = r#"
 SELECT work_order.lane,
  count(DISTINCT work_order.work_order_ref) FILTER (WHERE work_order.queue_state='queued') AS queued_work_orders,
@@ -13,11 +15,12 @@ WHERE work_order.target_ref=$1 AND work_order.lane IN ('deep_archive','patrol') 
 GROUP BY work_order.lane
 "#;
 
-pub(super) const ARCHIVE_SQL: &str = r#"
+pub(super) const ARCHIVE_SQL: &str = concat!(
+    r#"
 WITH orders AS (
  SELECT work_order_ref FROM collection_work_order WHERE target_ref=$1 AND lane='deep_archive' AND created_at<=$2::timestamptz
 ), records AS (
- SELECT orders.work_order_ref,task.task_spec,package.package_ref,package.package_kind,package.coverage,disposition.record_ordinal,disposition.disposition
+ SELECT orders.work_order_ref,task.task_spec,package.package_ref,package.package_kind,package.coverage,package.checkpoint,disposition.record_ordinal,disposition.disposition
  FROM orders JOIN collection_work_order_lease lease USING(work_order_ref)
  JOIN collection_work_order_lease_task lease_task USING(lease_ref)
  JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id
@@ -43,10 +46,11 @@ WITH orders AS (
    AND NOT EXISTS (SELECT 1 FROM linggan_material_content content JOIN detail_works detail ON detail.content_public_ref=content.public_ref WHERE content.content_external_id=task.task_spec #>> '{target,contentExternalId}')
 ), ready AS (
  SELECT EXISTS(SELECT 1 FROM records CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(records.coverage->'layers')='array' THEN records.coverage->'layers' ELSE '[]'::jsonb END) layer
-  WHERE records.package_kind='profile_discovery' AND (records.task_spec->>'maximumQuota')::integer=200
-    AND layer->>'capability'='profile_discovery' AND COALESCE((layer->>'failed')::integer,0)=0
-    AND COALESCE((layer->>'notAttempted')::integer,0)=0 AND COALESCE((layer->>'unknown')::integer,0)=0
-    AND (layer->>'stoppedReason'='surface_ended' OR (layer->>'stoppedReason'='maximum_quota' AND COALESCE((layer->>'acquired')::integer,-1)=200))) AS value
+  WHERE records.package_kind='profile_discovery'
+    AND EXISTS (SELECT 1 FROM linggan_runtime_submission_receipt proof WHERE proof.package_ref=records.package_ref AND proof.execution_effect='COMPLETED_LIVE_STEP')
+    AND "#,
+    directory_proven_sql!(),
+    r#") AS value
 )
 SELECT EXISTS(SELECT 1 FROM orders) AS started,
  EXISTS(SELECT 1 FROM orders JOIN collection_work_order_lease lease USING(work_order_ref) JOIN collection_work_order_lease_task lease_task USING(lease_ref) JOIN linggan_runtime_attempt attempt ON attempt.task_id=lease_task.task_id WHERE attempt.started_at<=$2::timestamptz) AS attempted,
@@ -54,7 +58,8 @@ SELECT EXISTS(SELECT 1 FROM orders) AS started,
  (SELECT count(*) FROM directory_works) AS works,(SELECT count(*) FROM detail_works) AS details,
  (SELECT count(*) FROM records WHERE disposition='quarantined') AS quarantined,
  (SELECT total FROM blocked) AS blocked_details,(SELECT value FROM ready) AS standard_directory_ready
-"#;
+"#,
+);
 
 pub(super) const LATEST_PATROL_SQL: &str = r#"
 WITH latest AS (

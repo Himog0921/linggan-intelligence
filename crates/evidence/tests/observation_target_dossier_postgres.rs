@@ -1635,6 +1635,7 @@ async fn submit_patrol_round(
                         "stoppedReason":stopped_reason
                     }]
                 },
+                "checkpoint":surface_receipt(stopped_reason),
                 "records":records
             }
         })
@@ -1862,10 +1863,14 @@ fn partial_directory_submission(
                     "layers":[{
                         "capability":"profile_discovery",
                         "observed":directory_size,"attempted":directory_size,"acquired":directory_size,
-                        "verified":0,"failed":0,"notAttempted":0,"unknown":0,
-                        "stoppedReason":stopped_reason
+                        // 真实插件在这两个字段里写的就是这个：一个不携带信息的常量，和一个
+                        // 恒不为零的 `unknown`（「可见页面不等于完整结果集」）。判据不该看
+                        // 它们，这里照实写死，任何一次回头去看它们的改动都会被这条挡住。
+                        "verified":0,"failed":0,"notAttempted":0,"unknown":4,
+                        "stoppedReason":"surface_read_complete"
                     }]
                 },
+                "checkpoint":surface_receipt(stopped_reason),
                 "records":records
             }
         })
@@ -1928,6 +1933,7 @@ fn bounded_root_submission(
                         "stoppedReason":"maximum_quota"
                     }]
                 },
+                "checkpoint":surface_receipt("maximum_quota"),
                 "records":records
             }
         })
@@ -2026,6 +2032,7 @@ async fn seed_runtime_package(
             "failed":0,"notAttempted":0,"unknown":0,"stoppedReason":"surface_ended"
         }]
     });
+    let checkpoint = surface_receipt("surface_ended");
     let attempt_id = Uuid::new_v4();
     let producer_instance_id = Uuid::new_v4();
     let package_ref = Uuid::new_v4();
@@ -2044,8 +2051,8 @@ async fn seed_runtime_package(
     sqlx::query(
         "INSERT INTO linggan_runtime_capture_package \
            (package_ref,attempt_id,task_id,producer_instance_id,package_kind,platform, \
-            package_hash,observed_at,captured_at,coverage,payload,accepted_at) \
-         VALUES ($1,$2,$3,$4,$5,'xhs',$6,$7,$7,$8,'{}',$7::timestamptz)",
+            package_hash,observed_at,captured_at,coverage,checkpoint,payload,accepted_at) \
+         VALUES ($1,$2,$3,$4,$5,'xhs',$6,$7,$7,$8,$9,'{}',$7::timestamptz)",
     )
     .bind(package_ref)
     .bind(attempt_id)
@@ -2055,6 +2062,7 @@ async fn seed_runtime_package(
     .bind(&package_hash)
     .bind(accepted_at)
     .bind(coverage)
+    .bind(checkpoint)
     .execute(database.pool())
     .await
     .unwrap();
@@ -2307,4 +2315,27 @@ async fn seed_detail_observation(
 fn hash_for(value: Uuid) -> String {
     let half = value.simple().to_string();
     format!("{half}{half}")
+}
+
+/// 把夹具表达的「意图」翻成插件真实报回的滚动收尾。
+///
+/// 夹具原来只写 `coverage.stoppedReason`，用的是 `surface_ended` / `maximum_quota`——
+/// 而真实插件从来不发这两个词，它在那个字段里写死一个不携带信息的常量，真话报在
+/// `checkpoint.surfaceReceipt.stopReason`。夹具照着一个不存在的形态构造，测试就只能
+/// 证明服务端会接受一种现实中不会到来的输入。这里补上真实形态。
+fn surface_receipt(stopped_reason: &str) -> serde_json::Value {
+    let stop_reason = match stopped_reason {
+        // 拿满了本次配额就停——真实插件报 `target_reached`。
+        "maximum_quota" => "target_reached",
+        // 翻到底了——真实插件报 `bottom_confirmed`。
+        "surface_ended" => "bottom_confirmed",
+        // 其余（`risk_control` / `no_progress` / `max_rounds_reached`）本来就是
+        // 「没到底也没拿满」，原样传下去——把它们也翻成完成，等于把夹具想表达的残缺
+        // 悄悄改成了成功。
+        other => other,
+    };
+    serde_json::json!({
+        "kind": "search_surface_receipt",
+        "surfaceReceipt": {"kind": "xhs_profile_surface", "stopReason": stop_reason},
+    })
 }

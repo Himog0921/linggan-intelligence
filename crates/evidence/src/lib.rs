@@ -11,6 +11,7 @@ mod content_reobservation;
 mod creator_lifecycle;
 mod cross_industry_admission;
 pub mod cross_industry_read;
+mod directory_boundary;
 mod dispatch;
 mod execution_station;
 mod ingress;
