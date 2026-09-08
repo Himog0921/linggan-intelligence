@@ -100,6 +100,8 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0045_deep_archive_recovery.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0046_keyword_sampling_policy.sql"),
+    "\n",
     include_str!("../../../../database/migrations/0047_collection_detail_failure_boundary.sql"),
     "\n",
     include_str!("../../../../database/migrations/0048_comment_intelligence.sql"),

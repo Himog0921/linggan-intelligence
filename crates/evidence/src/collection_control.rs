@@ -1367,6 +1367,14 @@ pub struct MonitorRuleDraft {
     pub fallback_interval_seconds: i32,
     pub surface_key: String,
     pub ranking_key: Option<String>,
+    /// 采样口径：下拉几次、取点赞前几篇、只要几天内发布的。
+    ///
+    /// 只属于关键词搜索面——创作者主页没有排序也没有「取前 N」可言。三项一起决定
+    /// 「这一轮的 20 篇是怎么来的」，缺了就无法复核。`published_within_days` 可以单独
+    /// 为空（表示不限时间），但下拉与取前 N 必须成对，`0046` 的 CHECK 守着这条。
+    pub scroll_rounds: Option<i32>,
+    pub top_by_likes: Option<i32>,
+    pub published_within_days: Option<i32>,
     pub task_contract_version: String,
 }
 
@@ -2127,8 +2135,9 @@ async fn insert_monitor_rule_revision(
              (rule_revision_ref,target_ref,revision,mode,automatic_enabled,timezone, \
               run_on_weekdays,run_on_weekends,all_day,window_start_minute,window_end_minute, \
               fixed_interval_seconds,fallback_interval_seconds,surface_key,ranking_key, \
+              scroll_rounds,top_by_likes,published_within_days, \
               task_contract_version,rule_payload_digest,created_by) \
-         VALUES ($1,$2,$3,$4,$5,'Asia/Shanghai',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)",
+         VALUES ($1,$2,$3,$4,$5,'Asia/Shanghai',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)",
     )
     .bind(rule_revision_ref)
     .bind(target_ref)
@@ -2150,6 +2159,9 @@ async fn insert_monitor_rule_revision(
             .map(str::trim)
             .filter(|v| !v.is_empty()),
     )
+    .bind(draft.scroll_rounds)
+    .bind(draft.top_by_likes)
+    .bind(draft.published_within_days)
     .bind(draft.task_contract_version.trim())
     .bind(payload_digest)
     .bind(actor.as_str())
@@ -2174,11 +2186,14 @@ async fn copy_monitor_rule_revision(
              (rule_revision_ref,target_ref,revision,mode,automatic_enabled,timezone, \
               run_on_weekdays,run_on_weekends,all_day,window_start_minute,window_end_minute, \
               fixed_interval_seconds,fallback_interval_seconds,surface_key,ranking_key, \
+              scroll_rounds,top_by_likes,published_within_days, \
               task_contract_version,rule_payload_digest,created_by) \
          SELECT $3,$1,$4,COALESCE($5,mode),$6,timezone,run_on_weekdays,run_on_weekends, \
                 all_day,window_start_minute,window_end_minute, \
                 CASE WHEN $5='manual_only' THEN NULL ELSE fixed_interval_seconds END, \
-                fallback_interval_seconds,surface_key,ranking_key,task_contract_version,$7,$8 \
+                fallback_interval_seconds,surface_key,ranking_key, \
+                scroll_rounds,top_by_likes,published_within_days, \
+                task_contract_version,$7,$8 \
          FROM collection_monitor_rule_revision \
          WHERE target_ref=$1 AND rule_revision_ref=$2",
     )

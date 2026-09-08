@@ -679,6 +679,12 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
   font:var(--c-fw-regular) var(--c-fs-300)/1 var(--lgi-font-sans);
 }
 .c-rule-grid input[disabled],.c-rule-grid select[disabled] { background:var(--v7-sunken); color:var(--v7-ghost); }
+/* 只读事实（如排序依据）。刻意不长成输入框：它由目标身份决定，点它不会有任何反应。 */
+.c-rule-grid output {
+  display:flex; align-items:center; height:40px; padding:0 var(--lgi-space-3);
+  background:var(--v7-sunken); color:var(--v7-body);
+  font:var(--c-fw-regular) var(--c-fs-300)/1 var(--lgi-font-sans);
+}
 .c-rule-dynamic { margin-top:var(--lgi-space-3); padding:var(--lgi-space-3); background:var(--v7-gray); }
 .c-rule-dynamic[hidden] { display:none; }
 .c-rule-dynamic > div { display:flex; align-items:baseline; justify-content:space-between; gap:var(--lgi-space-4); }
