@@ -56,6 +56,8 @@ struct NewProblem {
     name: String,
     meaning: String,
     source_refs: Vec<Uuid>,
+    #[serde(default)]
+    candidate_refs: Vec<Uuid>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -444,7 +446,7 @@ pub async fn execute_action(database: &Database, value: Value) -> Result<Value, 
             json!({"term":term,"hidden":payload.hidden,"revision":revision})
         }
         "problem_create" | "problem_rename" | "problem_merge" | "problem_split"
-        | "problem_bookmark" => problem_action(&mut tx, &action).await?,
+        | "problem_bookmark" | "candidate_resolve" => problem_action(&mut tx, &action).await?,
         _ => return Err(rejected("CI_INVALID_COMMAND")),
     };
     sqlx::query(

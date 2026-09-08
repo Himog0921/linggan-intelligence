@@ -15,6 +15,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 sha2 = "0.11.0"
 url = "2.5.8"
+unicode-properties = { version = "=0.1.4", default-features = false, features = ["emoji"] }
 sqlx.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["time", "process", "io-util", "fs", "sync"] }

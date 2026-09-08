@@ -52,6 +52,7 @@ fn response(result: Result<Value, ModelError>) -> Response {
         Err(e) => {
             let (status, code) = match e {
                 ModelError::Invalid => (StatusCode::BAD_REQUEST, "invalid_query"),
+                ModelError::SelectionLimit => (StatusCode::BAD_REQUEST, "research_selection_limit"),
                 ModelError::Conflict => (StatusCode::CONFLICT, "revision_conflict"),
                 ModelError::NotFound => (StatusCode::NOT_FOUND, "not_found"),
                 ModelError::Source => (StatusCode::NOT_FOUND, "source_unavailable"),

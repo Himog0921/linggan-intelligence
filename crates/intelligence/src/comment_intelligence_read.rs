@@ -5,7 +5,7 @@ use super::*;
 pub async fn read(db: &Database, q: &ResearchScope) -> Result<Value, ModelError> {
     // Daily displays frozen batch membership, independent of the voices date filter.
     let mut daily_scope = q.clone();
-    if q.view.as_deref() == Some("daily") {
+    if matches!(q.view.as_deref(), Some("daily" | "runs")) {
         daily_scope.from = Some("1970-01-01T00:00:00Z".into());
         daily_scope.to = Some("9999-01-01T00:00:00Z".into());
     }
@@ -21,6 +21,9 @@ async fn execute_scoped(
     explain: bool,
     detail_ref: Option<Uuid>,
 ) -> Result<Value, ModelError> {
+    if !super::automation_schema_ready(db).await? {
+        return Err(ModelError::SchemaMissing);
+    }
     q.validate()?;
     let dates_valid:bool=sqlx::query_scalar("SELECT ($1::text IS NULL OR pg_input_is_valid($1,'timestamp with time zone')) AND ($2::text IS NULL OR pg_input_is_valid($2,'timestamp with time zone'))").bind(&q.from).bind(&q.to).fetch_one(db.pool()).await?;
     if !dates_valid {
@@ -81,6 +84,20 @@ async fn execute_scoped(
     enrich_titles(&mut tx, &mut value).await?;
     tx.commit().await?;
     add_observations(&mut value);
+    value["limits"] = json!({"maxResearchSources":crate::comment_preflight::MAX_RESEARCH_SOURCES});
+    enrich_runtime(db, &mut value).await?;
+    Ok(value)
+}
+async fn enrich_runtime(db: &Database, value: &mut Value) -> Result<(), ModelError> {
+    // The voices table defers aggregates; external samples cannot run native research.
+    if value["ownDomain"] == true && value["deferredAggregates"] != true {
+        let domain = value["scope"]["domain"]
+            .as_str()
+            .and_then(|s| s.parse().ok())
+            .ok_or(ModelError::Invalid)?;
+        value["problemAutomation"] =
+            crate::comment_intelligence_problems::problem_automation_state(db, domain).await?;
+    }
     value["model"] = crate::model_settings_read::current_comment_model_state(db).await?;
     let mut daily = if value["ownDomain"] == true && value["deferredAggregates"] != true {
         crate::comment_daily::overview(db).await?
@@ -109,7 +126,7 @@ async fn execute_scoped(
         obj.remove("dailySelection");
         obj.remove("ownDomain");
     }
-    Ok(value)
+    Ok(())
 }
 async fn enrich_titles(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -235,6 +252,7 @@ pub async fn source_with_scope(
     } else {
         Value::Null
     };
+    value["cleaning"] = source_cleaning(db, actual, raw["source_sha256"].as_str(), own).await?;
     let thread:Vec<Value>=sqlx::query_scalar("WITH RECURSIVE ancestors AS (SELECT s.*,ARRAY[s.comment_external_id] AS path,0 AS depth FROM linggan_ci_source s WHERE s.domain_ref=$1 AND s.work_ref=$2 AND s.source_ref=$3 UNION ALL SELECT p.*,a.path||p.comment_external_id,a.depth+1 FROM linggan_ci_source p JOIN ancestors a ON p.comment_external_id=a.parent_external_id WHERE p.domain_ref=$1 AND p.work_ref=$2 AND a.depth<32 AND NOT p.comment_external_id=ANY(a.path)), root AS (SELECT comment_external_id FROM ancestors ORDER BY depth DESC LIMIT 1), thread AS (SELECT s.*,ARRAY[s.comment_external_id] AS path,0 AS depth FROM linggan_ci_source s JOIN root USING(comment_external_id) WHERE s.domain_ref=$1 AND s.work_ref=$2 UNION ALL SELECT child.*,p.path||child.comment_external_id,p.depth+1 FROM linggan_ci_source child JOIN thread p ON child.parent_external_id=p.comment_external_id WHERE child.domain_ref=$1 AND child.work_ref=$2 AND p.depth<32 AND NOT child.comment_external_id=ANY(p.path)) SELECT jsonb_build_object('sourceRef',source_ref,'body',body,'likes',likes,'isReply',is_reply,'depth',depth) FROM thread ORDER BY first_observed_at,canonical_ref LIMIT 100").bind(domain).bind(work).bind(actual).fetch_all(db.pool()).await?;
     value["thread"] = json!(thread);
     let scope = ResearchScope {
@@ -302,4 +320,20 @@ fn research_read_error(error: linggan_storage_postgres::StorageError) -> ModelEr
         | linggan_storage_postgres::StorageError::Connect(e) => ModelError::Database(e),
         linggan_storage_postgres::StorageError::UnusableSchemaName(_) => ModelError::Invalid,
     }
+}
+
+async fn source_cleaning(
+    db: &Database,
+    actual: Uuid,
+    hash: Option<&str>,
+    own: bool,
+) -> Result<Value, ModelError> {
+    // Cleaning is independent of model processing and uses a domain-owned table.
+    Ok(if own {
+        sqlx::query_scalar("SELECT jsonb_build_object('version',cleaner_version,'state',state,'text',result->'text','reasons',result->'reasons') FROM linggan_comment_clean WHERE source_ref=$1 AND source_sha256=$2 AND cleaner_version=$3")
+            .bind(actual).bind(hash).bind(crate::comment_cleaning::CLEANER_VERSION).fetch_optional(db.pool()).await?.unwrap_or(Value::Null)
+    } else {
+        sqlx::query_scalar("SELECT jsonb_build_object('version',cleaner_version,'state',state,'text',result->'text','reasons',result->'reasons') FROM cross_industry_comment_clean WHERE source_ref=$1 AND source_sha256=$2 AND cleaner_version=$3")
+            .bind(actual).bind(hash).bind(crate::comment_cleaning::CLEANER_VERSION).fetch_optional(db.pool()).await?.unwrap_or(Value::Null)
+    })
 }

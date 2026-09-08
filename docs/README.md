@@ -18,6 +18,7 @@
 ## 当前权威与状态
 
 | 文档 | 状态 | 用途 |
+| [data-contracts/comment-research-automation.md](data-contracts/comment-research-automation.md) | 权威当前；交付分支 | CI-AUTO-003 自动清洗、分析复用、问题与变化新合同 |
 |---|---|---|
 | [plans/active/model-pi-001.md](plans/active/model-pi-001.md) | 活跃计划 | Issue #169 模型设置与真实 Pi 适配，依赖 #168 |
 | [pages/model-ai-settings.md](pages/model-ai-settings.md) | 权威当前；交付分支 | 单页供应商弹窗、调用限制与用量语义 |

@@ -19,6 +19,14 @@ use uuid::Uuid;
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route(
+            "/api/local/model-settings/embedding",
+            get(read_embedding).post(save_embedding),
+        )
+        .route(
+            "/api/local/model-settings/embedding/probe",
+            post(probe_embedding),
+        )
+        .route(
             "/settings",
             get(|| async { axum::response::Redirect::temporary("/settings/models") }),
         )
@@ -131,9 +139,10 @@ fn respond(result: Result<Value, ModelError>) -> Response {
                 ModelError::Invalid | ModelError::InputLimit => StatusCode::BAD_REQUEST,
                 ModelError::Conflict | ModelError::ResearchPlanRetired => StatusCode::CONFLICT,
                 ModelError::NotFound => StatusCode::NOT_FOUND,
-                ModelError::Disabled | ModelError::NotQualified | ModelError::Budget => {
-                    StatusCode::CONFLICT
-                }
+                ModelError::Disabled
+                | ModelError::NotQualified
+                | ModelError::EmbeddingNotQualified
+                | ModelError::Budget => StatusCode::CONFLICT,
                 _ => StatusCode::SERVICE_UNAVAILABLE,
             };
             (status, Json(json!({"error":e.code()}))).into_response()
@@ -186,4 +195,37 @@ async fn resume_plan(
         return unavailable();
     };
     respond(resume_model_plan(db, reference, &request).await)
+}
+
+async fn read_embedding(State(state): State<LocalWebState>) -> Response {
+    let Some(db) = state.database.database() else {
+        return unavailable();
+    };
+    respond(linggan_intelligence::embedding_settings::read(db).await)
+}
+async fn save_embedding(
+    State(state): State<LocalWebState>,
+    Json(r): Json<linggan_intelligence::embedding_settings::SaveEmbedding>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return unavailable();
+    };
+    respond(linggan_intelligence::embedding_settings::save(db, &r).await)
+}
+async fn probe_embedding(
+    State(state): State<LocalWebState>,
+    Json(r): Json<linggan_intelligence::embedding_settings::ProbeEmbedding>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return unavailable();
+    };
+    respond(
+        linggan_intelligence::embedding_settings::probe(
+            db,
+            model_secret_store().as_ref(),
+            &PiAdapter::configured(),
+            &r,
+        )
+        .await,
+    )
 }

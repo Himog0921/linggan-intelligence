@@ -1,3 +1,4 @@
+import { embed, EmbeddingError } from './embeddings.mjs';
 import { Agent } from '@earendil-works/pi-agent-core';
 import { createModels, createProvider } from '@earendil-works/pi-ai';
 import { openAICompletionsApi } from '@earendil-works/pi-ai/api/openai-completions.lazy';
@@ -15,19 +16,19 @@ const DEEPSEEK_TEXT_MODELS=new Set(['deepseek-v4-flash','deepseek-v4-pro','deeps
 const OPENAI_STRUCTURED_MODELS=new Set(['gpt-4o','gpt-4o-2024-08-06','gpt-4o-2024-11-20','gpt-4o-mini','gpt-4o-mini-2024-07-18','gpt-6-astra']);
 function researchOutputFormat(r,base) {
   let packet;try{packet=JSON.parse(r.prompt);}catch{return null;}
-  if(packet?.contract!=='comment-research.v3')return null;
+  if(packet?.contract!=='comment-research.v4')return null;
   const schema=packet.outputSchema;
   if(!schema||schema.type!=='object'||schema.properties?.comments?.type!=='array'||schema.additionalProperties!==false||JSON.stringify(schema).length>6144)throw new Rejected('invalid_request');
   const official=base.protocol==='https:'&&!base.port&&['','/','/v1','/v1/'].includes(base.pathname);
   const deepseek=official&&base.hostname==='api.deepseek.com'&&DEEPSEEK_TEXT_MODELS.has(r.modelId);
   const openai=official&&base.hostname==='api.openai.com'&&OPENAI_STRUCTURED_MODELS.has(r.modelId);
-  if(r.api==='openai-responses'&&(deepseek||openai))return {text:{format:{type:'json_schema',name:'comment_research_v3',schema,...(openai?{strict:true}:{})}}};
+  if(r.api==='openai-responses'&&(deepseek||openai))return {text:{format:{type:'json_schema',name:'comment_research_v4',schema,...(openai?{strict:true}:{})}}};
   if(r.api==='openai-completions'&&deepseek)return {response_format:{type:'json_object'}};
-  if(r.api==='openai-completions'&&openai)return {response_format:{type:'json_schema',json_schema:{name:'comment_research_v3',strict:true,schema}}};
+  if(r.api==='openai-completions'&&openai)return {response_format:{type:'json_schema',json_schema:{name:'comment_research_v4',strict:true,schema}}};
   return null;
 }
 function validate(r) {
-  if(!r || r.version!==VERSION || !['connect','discover','probe','analyze'].includes(r.operation) || !API[r.api]
+  if(!r || r.version!==VERSION || !['connect','discover','probe','analyze','embed'].includes(r.operation) || !API[r.api]
     || !integer(r.timeoutMs,100,60000) || !integer(r.maxOutputTokens,16,8192)
     || typeof r.apiKey!=='string' || r.apiKey.length>4096 || typeof r.baseUrl!=='string') throw new Rejected('invalid_request');
   const u=new URL(r.baseUrl);
@@ -78,6 +79,10 @@ export async function execute(r) {
     const base=validate(r), abort=new AbortController(), failure={code:null};
     timer=setTimeout(()=>{abort.abort();agent?.abort();},r.timeoutMs);
     const transport=scopedFetch(base,abort.signal,usage,failure);
+    if(r.operation==='embed') {
+      const result=await embed(r,base,transport,usage);usage.inputTokens=result.inputTokens;usage.outputTokens=0;
+      return {version:VERSION,ok:true,text:result.text,usage,elapsedMs:Date.now()-started};
+    }
     if(r.operation==='connect'||r.operation==='discover') {
       const headers=r.api==='anthropic-messages'?{'x-api-key':r.apiKey,'anthropic-version':'2023-06-01'}:{Authorization:`Bearer ${r.apiKey}`};
       const result=await transport(base.href.replace(/\/$/,'')+(r.api==='anthropic-messages'?'/v1/models':'/models'),{headers});
@@ -120,7 +125,7 @@ export async function execute(r) {
     if(r.apiKey&&(text.includes(r.apiKey)||normalized.includes(r.apiKey)))throw new Rejected('secret_echo_rejected');
     return {version:VERSION,ok:true,text,usage,elapsedMs:Date.now()-started};
   } catch(error) {
-    const code=r&&Date.now()-started>=r.timeoutMs?'provider_timeout':error instanceof Rejected?error.code:'provider_failed';
+    const code=r&&Date.now()-started>=r.timeoutMs?'provider_timeout':error instanceof Rejected||error instanceof EmbeddingError?error.code:'provider_failed';
     return {version:VERSION,ok:false,failureCode:code,usage,elapsedMs:Date.now()-started};
   } finally {clearTimeout(timer);agent?.abort();}
 }

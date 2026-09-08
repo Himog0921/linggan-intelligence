@@ -61,7 +61,7 @@ async fn work_packet_is_one_call_with_exact_results_and_restriction_propagation(
             .as_array()
             .unwrap()
             .iter()
-            .filter(|i| i["state"] == "low_information")
+            .filter(|i| i["state"] == "dropped")
             .count(),
         1
     );
@@ -122,15 +122,16 @@ async fn daily_windows_are_gapless_deduplicate_reobservations_and_allow_delayed_
     assert!(seal_due(&db).await.unwrap());
     assert!(seal_due(&db).await.unwrap());
     assert!(!seal_due(&db).await.unwrap());
-    let refs: Vec<Uuid> =
-        sqlx::query_scalar("SELECT source_ref FROM linggan_comment_daily_item ORDER BY source_ref")
-            .fetch_all(db.pool())
-            .await
-            .unwrap();
+    let refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT source_ref FROM linggan_comment_daily_item ORDER BY source_ref",
+    )
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
     assert_eq!(refs.len(), 2);
     assert!(refs.contains(&late));
     clean_pending(&db).await.unwrap();
-    let n:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_comment_daily_item i JOIN linggan_comment_clean c USING(source_ref)").fetch_one(db.pool()).await.unwrap();
+    let n:i64=sqlx::query_scalar("SELECT count(DISTINCT i.source_ref) FROM linggan_comment_daily_item i JOIN linggan_comment_clean c USING(source_ref)").fetch_one(db.pool()).await.unwrap();
     assert_eq!(n, 2);
     server.kill().await.unwrap();
 }
@@ -334,12 +335,12 @@ async fn cleaning_filter_searches_all_sources_and_binds_cursor() {
     }
     source(&db, "filter", "normal", "详细描述一个具体问题").await;
     clean_pending(&db).await.unwrap();
-    let members = cleaning_members(&db, "low_information").await.unwrap();
+    let members = cleaning_members(&db, "dropped").await.unwrap();
     let page = read_comment_research_subset(
         &db,
         &CommentResearchQuery::default(),
         Some(&members),
-        "low_information",
+        "dropped",
     )
     .await
     .unwrap();
@@ -350,7 +351,7 @@ async fn cleaning_filter_searches_all_sources_and_binds_cursor() {
         ..Default::default()
     };
     assert_eq!(
-        read_comment_research_subset(&db, &q, Some(&members), "low_information")
+        read_comment_research_subset(&db, &q, Some(&members), "dropped")
             .await
             .unwrap()
             .items

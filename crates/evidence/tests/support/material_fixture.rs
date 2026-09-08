@@ -107,6 +107,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0048_comment_intelligence.sql"),
     "\n",
     include_str!("../../../../database/migrations/0049_comment_research_runtime.sql"),
+    include_str!("../../../../database/migrations/0050_comment_research_automation.sql"),
+    include_str!("../../../../database/migrations/0051_comment_problem_vectors.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
@@ -261,6 +263,14 @@ pub async fn proof_database(schema: &str) -> Database {
 pub async fn proof_database_before_comment_intelligence(schema: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
     let migrations = MIGRATIONS
+        .replace(
+            include_str!("../../../../database/migrations/0051_comment_problem_vectors.sql"),
+            "",
+        )
+        .replace(
+            include_str!("../../../../database/migrations/0050_comment_research_automation.sql"),
+            "",
+        )
         .replace(
             include_str!("../../../../database/migrations/0049_comment_research_runtime.sql"),
             "",

@@ -6,6 +6,8 @@
 
 # Linggan Intelligence｜评论研究实施合同
 
+CI-AUTO-003交付分支中，冲突条款以[评论研究自动化合同](comment-research-automation.md)为准；本文件保留先前版本与未被替代的约束。
+
 文档编号：CI-20260907-V1.0  
 用途：交给 AI coding agent 的产品、交互、数据与算法实施基线。  
 状态：本轮完整落地方案；不是已完成开发报告。  

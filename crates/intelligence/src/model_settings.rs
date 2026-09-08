@@ -11,6 +11,8 @@ use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
+    #[error("research_selection_limit")]
+    SelectionLimit,
     #[error("invalid_model_command")]
     Invalid,
     #[error("model_revision_conflict")]
@@ -33,6 +35,8 @@ pub enum ModelError {
     Budget,
     #[error("model_not_qualified")]
     NotQualified,
+    #[error("embedding_not_qualified")]
+    EmbeddingNotQualified,
     #[error("comment_research_plan_retired")]
     ResearchPlanRetired,
     #[error("model_schema_missing")]
@@ -64,6 +68,7 @@ impl ModelError {
     pub fn code(&self) -> &'static str {
         match self {
             Self::Invalid => "invalid_model_command",
+            Self::SelectionLimit => "research_selection_limit",
             Self::Conflict => "model_revision_conflict",
             Self::NotFound => "model_not_found",
             Self::Disabled => "model_disabled",
@@ -74,6 +79,7 @@ impl ModelError {
             Self::InvalidOutput => "model_invalid_output",
             Self::Budget => "model_budget_exhausted",
             Self::NotQualified => "model_not_qualified",
+            Self::EmbeddingNotQualified => "embedding_not_qualified",
             Self::ResearchPlanRetired => "comment_research_plan_retired",
             Self::SchemaMissing => "model_schema_missing",
             Self::Database(_) => "model_database_unavailable",
@@ -128,7 +134,10 @@ pub fn normalize_model_endpoint(base: &str, api: &str, local: bool) -> Result<St
             } else {
                 "/responses"
             };
-            let prefix = path.strip_suffix(suffix).unwrap_or(path);
+            let prefix = path
+                .strip_suffix(suffix)
+                .or_else(|| path.strip_suffix("/embeddings"))
+                .unwrap_or(path);
             if prefix.is_empty() { "/v1" } else { prefix }
         }
         "anthropic-messages" => path
