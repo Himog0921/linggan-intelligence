@@ -1,9 +1,9 @@
 //! COLLECTION-001 · 观察目标的宽幅研究抽屉。
 //!
-//! 三个职责 tab（概览 / 档案 / 巡查）留在 Collection；作品正文、评论和媒体结果只在
-//! Corpus。创作者概览的视觉核心是可核验的作品目录，不是工程回执或监控价值评分。
+//! 三个职责 tab（概览 / 作品 / 巡查）留在 Collection；作品正文、评论和媒体结果只在
+//! Corpus。概览负责判断，作品负责查证和看表现，巡查负责时间变化。
 //!
-//! **用 URL 参数驱动，不用 JS**：`?drawer=<target_ref>&dtab=archive`。稿子那 142 行
+//! **用 URL 参数驱动，不用 JS**：`?drawer=<target_ref>&dtab=works&wview=list`。稿子那 142 行
 //! 脚本换来的是「点击不刷新」，代价是刷新即丢状态、链接分享不过去。URL 版两样都不丢，
 //! 而这一页的用途正是「打开一个目标细看，然后把它发给别人」。
 //!
@@ -14,7 +14,9 @@ use linggan_evidence::{
     ArchiveCompleteness, CatalogDetailState, CatalogSource, CreatorDirectoryProjection,
     CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecyclePoint,
     CreatorLifecycleProjection, CreatorLifecycleStatus, CreatorLifecycleWindow,
-    KeywordHitProjection, ObservationTarget, ObservationTargetAvatar,
+    KeywordHitProjection, ObservationTarget, ObservationTargetAvatar, TargetInspectorAction,
+    TargetInspectorArchiveState, TargetInspectorCount, TargetInspectorExecutionState,
+    TargetInspectorPatrolState, TargetInspectorProjection,
 };
 
 /// Collection 目标抽屉的三个职责。Evidence 已退回唯一的 Corpus 表面。退役或未知
@@ -55,6 +57,33 @@ impl TargetDrawerTab {
             Self::Overview => "overview",
             Self::Baseline => "works",
             Self::Patrol => "patrol",
+        }
+    }
+}
+
+/// Creator works have two ways to inspect the same target-scoped facts.  The view stays in the
+/// URL so refresh/back/share preserve the operator's place.  Existing lifecycle links predate
+/// `wview`; callers can opt into the compatibility path when any `life_*` query is present.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TargetWorksView {
+    List,
+    Performance,
+}
+
+impl TargetWorksView {
+    pub fn parse(value: Option<&str>, has_legacy_lifecycle_query: bool) -> Self {
+        match value {
+            Some("performance") => Self::Performance,
+            Some("list") => Self::List,
+            None if has_legacy_lifecycle_query => Self::Performance,
+            None | Some(_) => Self::List,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::List => "list",
+            Self::Performance => "performance",
         }
     }
 }
@@ -327,6 +356,13 @@ pub enum LifecycleView<'a> {
     QueryInvalid,
 }
 
+#[derive(Clone, Copy)]
+pub enum TargetInspectorView<'a> {
+    Projection(&'a TargetInspectorProjection),
+    ReadUnavailable,
+    NotRead,
+}
+
 /// Collection's base renderer owns the closing document and script tag. Mount the drawer before
 /// that script so the behavior module can bind Escape on first parse; appending after `</html>`
 /// produces invalid markup and makes the drawer invisible to the script at execution time.
@@ -385,6 +421,38 @@ pub fn render_with_catalog(
     selected_work: Option<&str>,
     list_context: TargetListContext<'_>,
 ) -> String {
+    render_with_catalog_view(
+        target,
+        avatar,
+        completeness,
+        drawer,
+        active_tab,
+        lifecycle,
+        TargetInspectorView::NotRead,
+        TargetWorksView::List,
+        catalog,
+        catalog_query,
+        catalog_filter,
+        selected_work,
+        list_context,
+    )
+}
+
+pub fn render_with_catalog_view(
+    target: Option<&ObservationTarget>,
+    avatar: Option<&ObservationTargetAvatar>,
+    completeness: Option<&std::collections::HashMap<String, ArchiveCompleteness>>,
+    drawer: Option<&str>,
+    active_tab: TargetDrawerTab,
+    lifecycle: LifecycleView<'_>,
+    inspector: TargetInspectorView<'_>,
+    works_view: TargetWorksView,
+    catalog: TargetCatalogView<'_>,
+    catalog_query: Option<&str>,
+    catalog_filter: Option<&str>,
+    selected_work: Option<&str>,
+    list_context: TargetListContext<'_>,
+) -> String {
     let Some(drawer) = drawer else {
         return String::new();
     };
@@ -408,12 +476,13 @@ pub fn render_with_catalog(
                    <div class="c-dw-title-row">
                      <div><h2 id="c-drawer-title" class="c-dw-title" tabindex="-1" data-drawer-initial-focus>未找到该观察目标</h2>
                        <div class="c-dw-meta">#{drawer}</div></div>
-                     <div class="c-dw-actions"><a class="c-btn-quiet" href="{return_href}">关闭</a></div>
+                     <div class="c-dw-actions"><a class="c-btn-secondary c-dw-close" href="{return_href}">{close_icon}<span>关闭</span></a></div>
                    </div>
                  </div>
                  <div class="c-dw-body"><p class="c-dw-empty">这个标识没有对应的观察目标。它可能已被删除，或链接来自另一台机器的库。</p></div>
                </aside>"#,
             drawer = escape(drawer),
+            close_icon = close_icon(),
             return_url = list_context.list_href(None),
         );
     };
@@ -439,14 +508,10 @@ pub fn render_with_catalog(
                  </div>
                  <div class="c-dw-actions">
                    {source_link}
-                   <a class="c-btn-quiet" href="{return_href}">关闭</a>
+                   <a class="c-btn-secondary c-dw-close" href="{return_href}">{close_icon}<span>关闭</span></a>
                  </div>
                </div>
                <div class="c-dw-statusline">{statusline}</div>
-               <div class="c-dw-head-overview">
-                 <div class="c-dw-head-facts">{head_facts}</div>
-                 <div class="c-dw-head-primary">{primary_action}</div>
-               </div>
              </div>
              <nav class="c-dw-tabs">{tabs}</nav>
              <div class="c-dw-body">{body}</div>
@@ -464,20 +529,28 @@ pub fn render_with_catalog(
             .unwrap_or_default(),
         return_url = list_context.list_href(None),
         source_link = source_link(target, is_creator),
-        statusline = statusline(target, archive),
+        close_icon = close_icon(),
+        statusline = drawer_identity_context(target),
         // Description facts may contain email addresses, tags and other unstructured profile
         // text. They are evidence, not drawer chrome: keeping them out of the header makes the
         // target identity and the three operational facts scannable at a glance.
         bio = "",
-        head_facts = drawer_head_facts(target, archive, is_creator),
-        primary_action = drawer_primary_action(target, archive, is_creator, list_context),
-        tabs = tab_bar(target, tab, lifecycle, selected_work, list_context),
+        tabs = tab_bar(
+            target,
+            tab,
+            lifecycle,
+            works_view,
+            selected_work,
+            list_context
+        ),
         body = body(
             target,
             archive,
             is_creator,
             tab,
             lifecycle,
+            inspector,
+            works_view,
             catalog,
             catalog_query,
             catalog_filter,
@@ -577,9 +650,18 @@ fn source_link(target: &ObservationTarget, is_creator: bool) -> String {
         percent_encode_component(&target.identity_key)
     );
     format!(
-        r#"<a class="c-btn-quiet" href="{}" target="_blank" rel="noreferrer">打开原页</a>"#,
+        r#"<a class="c-btn-secondary c-dw-source" href="{}" target="_blank" rel="noreferrer"><span>打开小红书主页</span>{}</a>"#,
         escape(&href),
+        external_link_icon(),
     )
+}
+
+fn close_icon() -> String {
+    r#"<svg class="c-dw-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>"#.to_owned()
+}
+
+fn external_link_icon() -> String {
+    r#"<svg class="c-dw-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-9 9M19 14v5H5V5h5"/></svg>"#.to_owned()
 }
 
 fn statusline(target: &ObservationTarget, completeness: TargetArchiveRead<'_>) -> String {
@@ -620,50 +702,10 @@ fn statusline(target: &ObservationTarget, completeness: TargetArchiveRead<'_>) -
     )
 }
 
-fn drawer_head_facts(
-    target: &ObservationTarget,
-    archive: TargetArchiveRead<'_>,
-    is_creator: bool,
-) -> String {
-    let first = if is_creator {
-        let progress = match archive {
-            TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
-            TargetArchiveRead::Known(None) => "尚未建立".to_owned(),
-            TargetArchiveRead::Known(Some(value)) if value.is_untouched() => "尚未建立".to_owned(),
-            TargetArchiveRead::Known(Some(value)) if value.requires_directory_rebuild() => {
-                "待建标准目录".to_owned()
-            }
-            TargetArchiveRead::Known(Some(value)) if value.works_listed > 0 => format!(
-                "{} / {}",
-                value.details_captured.min(value.works_listed),
-                value.works_listed
-            ),
-            TargetArchiveRead::Known(Some(_)) => "等待作品目录".to_owned(),
-        };
-        format!(
-            r#"<div><b>{}</b><span>详情 / 作品目录</span></div>"#,
-            escape(&progress)
-        )
-    } else {
-        let (_, patrol) = lifecycle_patrol_copy(target);
-        format!(
-            r#"<div><b>{}</b><span>巡查状态</span></div>"#,
-            escape(patrol)
-        )
-    };
-    let last = target
-        .last_patrol_succeeded_at
-        .as_deref()
-        .unwrap_or("尚未巡查");
-    let next = if target.monitoring_enabled {
-        target.next_patrol_at.as_deref().unwrap_or("待排定")
-    } else {
-        "—"
-    };
+fn drawer_identity_context(target: &ObservationTarget) -> String {
     format!(
-        r#"{first}<div><b>{last}</b><span>上次巡查</span></div><div><b>{next}</b><span>下次巡查</span></div>"#,
-        last = escape(last),
-        next = escape(next),
+        "分组：{}",
+        escape(target.group_name.as_deref().unwrap_or("未分组"))
     )
 }
 
@@ -736,6 +778,7 @@ fn tab_bar(
     target: &ObservationTarget,
     active: TargetDrawerTab,
     lifecycle: LifecycleView<'_>,
+    works_view: TargetWorksView,
     selected_work: Option<&str>,
     list_context: TargetListContext<'_>,
 ) -> String {
@@ -753,6 +796,9 @@ fn tab_bar(
                 .map(|(key, value)| (*key, value.as_str()))
                 .collect::<Vec<_>>();
             let mut params = vec![("dtab", key.as_str())];
+            if *key == TargetDrawerTab::Baseline && target.target_kind == "creator" {
+                params.push(("wview", works_view.as_str()));
+            }
             params.extend(lifecycle_state);
             let href = list_context.drawer_href(target.target_ref, &params, None);
             format!(r#"<a class="c-dw-tab{class}" href="{href}"{current}>{label}</a>"#,)
@@ -766,6 +812,8 @@ fn body(
     is_creator: bool,
     tab: TargetDrawerTab,
     lifecycle: LifecycleView<'_>,
+    inspector: TargetInspectorView<'_>,
+    works_view: TargetWorksView,
     catalog: TargetCatalogView<'_>,
     catalog_query: Option<&str>,
     catalog_filter: Option<&str>,
@@ -773,14 +821,22 @@ fn body(
     list_context: TargetListContext<'_>,
 ) -> String {
     match tab {
-        TargetDrawerTab::Baseline => {
-            works_tab(target, catalog, catalog_query, catalog_filter, list_context)
-        }
-        TargetDrawerTab::Patrol => patrol_tab(target, list_context),
+        TargetDrawerTab::Baseline => works_tab(
+            target,
+            catalog,
+            catalog_query,
+            catalog_filter,
+            lifecycle,
+            works_view,
+            selected_work,
+            list_context,
+        ),
+        TargetDrawerTab::Patrol => patrol_tab(target, inspector, list_context),
         TargetDrawerTab::Overview => overview_tab(
             target,
             archive,
             is_creator,
+            inspector,
             lifecycle,
             selected_work,
             list_context,
@@ -796,7 +852,59 @@ fn works_tab(
     catalog: TargetCatalogView<'_>,
     query: Option<&str>,
     filter: Option<&str>,
-    _list_context: TargetListContext<'_>,
+    lifecycle: LifecycleView<'_>,
+    works_view: TargetWorksView,
+    selected_work: Option<&str>,
+    list_context: TargetListContext<'_>,
+) -> String {
+    if target.target_kind != "creator" {
+        return works_list(target, catalog, query, filter, list_context);
+    }
+    let list_href = list_context.drawer_href(
+        target.target_ref,
+        &[("dtab", "works"), ("wview", "list")],
+        Some("target-works"),
+    );
+    let mut performance_params = vec![("dtab", "works"), ("wview", "performance")];
+    let lifecycle_params = lifecycle_query_state(lifecycle, selected_work);
+    let lifecycle_params = lifecycle_params
+        .iter()
+        .map(|(key, value)| (*key, value.as_str()))
+        .collect::<Vec<_>>();
+    performance_params.extend(lifecycle_params);
+    let performance_href =
+        list_context.drawer_href(target.target_ref, &performance_params, Some("target-works"));
+    let tabs = format!(
+        r#"<nav class="c-dw-view-tabs" aria-label="作品视图">
+              <a class="c-dw-view-tab" href="{list_href}"{list_current}>列表</a>
+              <a class="c-dw-view-tab" href="{performance_href}"{performance_current}>表现</a>
+            </nav>"#,
+        list_current = if works_view == TargetWorksView::List {
+            r#" aria-current="page""#
+        } else {
+            ""
+        },
+        performance_current = if works_view == TargetWorksView::Performance {
+            r#" aria-current="page""#
+        } else {
+            ""
+        },
+    );
+    let content = match works_view {
+        TargetWorksView::List => works_list(target, catalog, query, filter, list_context),
+        TargetWorksView::Performance => {
+            lifecycle_overview(target, true, lifecycle, selected_work, list_context)
+        }
+    };
+    format!(r#"{tabs}<div class="c-dw-view-body">{content}</div>"#)
+}
+
+fn works_list(
+    target: &ObservationTarget,
+    catalog: TargetCatalogView<'_>,
+    query: Option<&str>,
+    filter: Option<&str>,
+    list_context: TargetListContext<'_>,
 ) -> String {
     let (works, read_error): (&[linggan_evidence::CatalogWork], bool) = match catalog {
         TargetCatalogView::Creator(Some(value)) => (&value.works, false),
@@ -848,10 +956,17 @@ fn works_tab(
         "命中作品"
     };
     let count_label = if is_creator { "作品" } else { "命中" };
-    let hidden = format!(
+    let mut hidden = format!(
         r#"<input type="hidden" name="drawer" value="{}"/>"#,
         target.target_ref
     );
+    hidden.push_str(r#"<input type="hidden" name="wview" value="list"/>"#);
+    for (key, value) in list_context.pairs() {
+        hidden.push_str(&format!(
+            r#"<input type="hidden" name="{key}" value="{}"/>"#,
+            escape(value)
+        ));
+    }
     let rows = filtered
         .iter()
         .map(|work| {
@@ -970,23 +1085,47 @@ fn catalog_unavailable_state(target: &ObservationTarget) -> String {
     )
 }
 
-/// 概览只回答对象是谁、最近发生了什么、作品如何分布、档案还缺什么。
-/// 缺失的最近变化统计直接表达为尚未取得，不用零值或工程诊断语言填充。
+/// 概览只回答四件事：对象是谁、系统正在做什么、已经取得什么、是否需要人介入。
+/// 作品逐条查证和表现分布都留在「作品」，避免抽屉再长成一个首页。
 fn overview_tab(
     target: &ObservationTarget,
     archive: TargetArchiveRead<'_>,
     is_creator: bool,
+    inspector: TargetInspectorView<'_>,
     _lifecycle: LifecycleView<'_>,
     _selected_work: Option<&str>,
     list_context: TargetListContext<'_>,
 ) -> String {
+    match inspector {
+        TargetInspectorView::Projection(projection)
+            if projection.target_ref == target.target_ref =>
+        {
+            return inspector_overview(target, is_creator, projection, list_context);
+        }
+        TargetInspectorView::ReadUnavailable | TargetInspectorView::Projection(_) => {
+            return inspector_unavailable_overview(is_creator);
+        }
+        TargetInspectorView::NotRead => {}
+    }
     if !is_creator {
+        let action = target_primary_action(target, false, archive);
+        let (action_title, action_note) = required_action_copy(action);
+        let action_control = required_action_control(target, archive, false, list_context);
         return format!(
-            r#"<section class="c-dw-section">
-                  <div class="c-dw-section-head"><b>关键词观察</b><span>持续搜索</span></div>
-                  <p class="c-dw-note">这里用于查看关键词巡查是否运行、何时有结果，以及后续接通的新命中与数据更新。关键词不建立创作者作品档案。</p>
-                </section>{}"#,
-            recent_activity(target),
+            r#"<section class="c-dw-section c-dw-now">
+                  <div class="c-dw-section-head"><b>系统现在在做什么</b><span>关键词观察</span></div>
+                  <dl class="c-dw-state-list"><div><dt>巡查</dt><dd>{patrol}</dd></div><div><dt>最近结果</dt><dd>{last}</dd></div></dl>
+                </section>
+                <section class="c-dw-section c-dw-decision" id="required-action">
+                  <div class="c-dw-decision-copy"><span>是否需要处理</span><strong>{action_title}</strong><p>{action_note}</p></div>{action_control}
+                </section>"#,
+            patrol = escape(lifecycle_patrol_copy(target).1),
+            last = escape(
+                target
+                    .last_patrol_succeeded_at
+                    .as_deref()
+                    .unwrap_or("尚未取得成功结果")
+            ),
         );
     }
     let directory = match archive {
@@ -994,88 +1133,405 @@ fn overview_tab(
         TargetArchiveRead::Known(Some(value)) if value.has_displayable_directory() => {
             value.works_listed.to_string()
         }
-        TargetArchiveRead::Known(_) => "—".to_owned(),
+        TargetArchiveRead::Known(_) => "尚未建立".to_owned(),
     };
     let detail = match archive {
         TargetArchiveRead::Known(Some(value)) if value.has_displayable_directory() => {
             format!("{} / {}", value.details_captured, value.works_listed)
         }
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
-        TargetArchiveRead::Known(_) => "—".to_owned(),
+        TargetArchiveRead::Known(_) => "尚未取得".to_owned(),
     };
-    let boundary = match archive.value() {
-        Some(value)
-            if value.directory_baseline == linggan_evidence::ArchiveDirectoryBaseline::Ready =>
-        {
-            "已建立主页目录边界"
+    let action = target_primary_action(target, true, archive);
+    let (archive_state, execution_state) = current_system_copy(archive);
+    let (_, patrol_state) = lifecycle_patrol_copy(target);
+    let abnormal = match archive {
+        TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
+        TargetArchiveRead::Known(Some(value)) => {
+            let count = value.quarantined.saturating_add(value.blocked_details);
+            if count == 0 {
+                "无已知阻塞".to_owned()
+            } else {
+                format!("{count} 条待处理")
+            }
         }
-        Some(value)
-            if value.directory_baseline
-                == linggan_evidence::ArchiveDirectoryBaseline::HistoricalDirectory =>
-        {
-            "历史目录边界未知"
-        }
-        Some(_) => "目录仍在建立或需要处理",
-        None => "当前读不到目录边界",
+        TargetArchiveRead::Known(None) => "无已知阻塞".to_owned(),
     };
-    let works_href = list_context.drawer_href(
-        target.target_ref,
-        &[("dtab", "works")],
-        Some("target-works"),
-    );
-    let task = match archive.value() {
-        Some(value) if value.work_in_progress && value.works_listed == 0 => {
-            r#"<section id="archive-task" class="c-dw-section"><div class="c-dw-section-head"><b>建档任务</b><span>正在处理</span></div><p class="c-dw-note">系统正在获取主页作品目录，完成条件是主页实际结束或取得 200 条去重作品链接。目录完成后会自动分批补齐详情。</p></section>"#
-        }
-        Some(value) if value.work_in_progress => {
-            r#"<section id="archive-task" class="c-dw-section"><div class="c-dw-section-head"><b>建档任务</b><span>正在处理</span></div><p class="c-dw-note">主页目录已经建立，系统正按当前调度能力自动补齐作品详情；无需重复提交。</p></section>"#
-        }
-        _ => "",
+    let last = target
+        .last_patrol_succeeded_at
+        .as_deref()
+        .unwrap_or("尚未巡查");
+    let next = if target.monitoring_enabled {
+        target.next_patrol_at.as_deref().unwrap_or("待排定")
+    } else {
+        "未开启"
     };
-    let blocked = match archive.value() {
-        Some(value) if value.blocked_details > 0 => format!(
-            r#"<section id="archive-problem" class="c-dw-section"><div class="c-dw-section-head"><b>详情读取受阻</b><span>{count} 条</span></div><p class="c-dw-note">这些作品连续读取失败后已停止自动重试；它们不是“页面不存在”，也没有生成 Attempt、Package、Receipt 或详情。其余作品仍可继续推进。</p></section>"#,
-            count = value.blocked_details,
-        ),
-        _ => String::new(),
-    };
+    let (action_title, action_note) = required_action_copy(action);
+    let action_control = required_action_control(target, archive, true, list_context);
     format!(
-        r#"{recent}{task}{blocked}<section class="c-dw-section"><div class="c-dw-section-head"><b>档案情况</b><span>{boundary}</span></div><div class="c-dw-readouts c-dw-archive-readouts"><div><b>{directory}</b><span>作品目录</span></div><div><b>{detail}</b><span>详情进度</span></div></div><p class="c-dw-note">媒体处理独立于详情进度；作品逐条状态请在作品页查证。</p><a class="c-btn-secondary" href="{works_href}">查看作品</a></section>"#,
-        recent = recent_activity(target),
-        task = task,
-        blocked = blocked,
-        boundary = boundary,
+        r#"<section class="c-dw-section c-dw-now" id="archive-task">
+              <div class="c-dw-section-head"><b>系统现在在做什么</b><span>状态分别判断</span></div>
+              <dl class="c-dw-state-list">
+                <div><dt>建档</dt><dd>{archive_state}</dd></div>
+                <div><dt>执行</dt><dd>{execution_state}</dd></div>
+                <div><dt>巡查</dt><dd>{patrol_state}</dd></div>
+                <div><dt>异常</dt><dd>{abnormal}</dd></div>
+              </dl>
+            </section>
+            <section class="c-dw-section c-dw-facts">
+              <div class="c-dw-section-head"><b>已经取得什么</b><span>同一目标当前事实</span></div>
+              <div class="c-dw-readouts c-dw-overview-readouts">
+                <div><b>{directory}</b><span>作品目录</span></div>
+                <div><b>{detail}</b><span>详情进度</span></div>
+                <div><b>{last}</b><span>上次巡查</span></div>
+                <div><b>{next}</b><span>下次巡查</span></div>
+              </div>
+            </section>
+            <section class="c-dw-section c-dw-decision" id="archive-problems">
+              <div class="c-dw-decision-copy"><span>是否需要处理</span><strong>{action_title}</strong><p>{action_note}</p></div>{action_control}
+            </section>"#,
         directory = directory,
         detail = detail,
-        works_href = works_href,
+        patrol_state = escape(patrol_state),
+        abnormal = escape(&abnormal),
+        last = escape(last),
+        next = escape(next),
     )
 }
 
-fn recent_activity(target: &ObservationTarget) -> String {
-    let (headline, note) = match target.last_patrol_succeeded_at.as_deref() {
-        Some(last) => (
-            format!("最近一次有效巡查完成于 {}", escape(last)),
-            "当前还没有可显示的本轮新增作品和数据更新汇总。已接纳的新作品会自动进入作品目录。",
-        ),
-        None if target.monitoring_enabled => (
-            "尚无巡查结果".to_owned(),
-            "巡查已经开启，但还没有成功结果；这里不会把未知写成零变化。",
-        ),
-        None if target.target_kind == "keyword" => (
-            "尚未开始关键词巡查".to_owned(),
-            "设置巡查后，这里会显示最近一次取得有效结果的时间；没有结果时不会写成零命中。",
-        ),
-        None => (
-            "尚未开始持续巡查".to_owned(),
-            "当前档案会在建立档案、补采缺口或成功巡查后更新。",
-        ),
+fn inspector_unavailable_overview(is_creator: bool) -> String {
+    let scope = if is_creator {
+        "档案、执行与巡查"
+    } else {
+        "巡查与最近结果"
     };
     format!(
-        r#"<section class="c-dw-section c-dw-activity">
-              <div class="c-dw-section-head"><b>最近变化</b><span>巡查结果</span></div>
-              <strong>{headline}</strong><p>{note}</p>
+        r#"<section class="c-dw-section c-dw-now">
+              <div class="c-dw-section-head"><b>系统现在在做什么</b><span>读取暂不可用</span></div>
+              <div class="life-state"><b>目标状态暂时读不到</b><p>当前无法判断{scope}；这不表示没有任务、没有作品或运行正常。</p></div>
+            </section>
+            <section class="c-dw-section c-dw-decision">
+              <div class="c-dw-decision-copy"><span>是否需要处理</span><strong>当前无法判断</strong><p>读取恢复前不提供新的写操作，避免用未知状态触发重复任务。</p></div>
             </section>"#,
     )
+}
+
+fn inspector_overview(
+    target: &ObservationTarget,
+    is_creator: bool,
+    inspector: &TargetInspectorProjection,
+    list_context: TargetListContext<'_>,
+) -> String {
+    let action = inspector.required_action;
+    let (action_title, action_note) = inspector_action_copy(action);
+    let action_control = inspector_action_control(target, action, list_context);
+    let last = inspector
+        .patrol
+        .last_succeeded_at
+        .as_deref()
+        .unwrap_or("尚未取得成功结果");
+    let next = inspector.patrol.next_run_at.as_deref().unwrap_or_else(|| {
+        if inspector.patrol.state == TargetInspectorPatrolState::Disabled {
+            "未开启"
+        } else {
+            "待排定"
+        }
+    });
+    if !is_creator {
+        return format!(
+            r#"<section class="c-dw-section c-dw-now">
+                  <div class="c-dw-section-head"><b>系统现在在做什么</b><span>状态分别判断</span></div>
+                  <dl class="c-dw-state-list"><div><dt>巡查</dt><dd>{patrol}</dd></div><div><dt>最近结果</dt><dd>{last}</dd></div></dl>
+                </section>
+                <section class="c-dw-section c-dw-facts">
+                  <div class="c-dw-section-head"><b>已经取得什么</b><span>最近一次成功巡查</span></div>
+                  <div class="c-dw-readouts c-dw-overview-readouts">
+                    <div><b>{hits}</b><span>最近命中</span></div><div><b>{new}</b><span>其中新增</span></div>
+                    <div><b>{last}</b><span>上次巡查</span></div><div><b>{next}</b><span>下次巡查</span></div>
+                  </div>
+                </section>
+                <section class="c-dw-section c-dw-decision"><div class="c-dw-decision-copy"><span>是否需要处理</span><strong>{action_title}</strong><p>{action_note}</p></div>{action_control}</section>"#,
+            patrol = inspector_patrol_copy(inspector.patrol.state),
+            hits = inspector_count_copy(inspector.patrol.latest_hits),
+            new = inspector_count_copy(inspector.patrol.latest_new),
+            last = escape(last),
+            next = escape(next),
+        );
+    }
+    let directory = inspector_count_copy(inspector.coverage.directory_works);
+    let detail = inspector_detail_copy(
+        inspector.coverage.captured_details,
+        inspector.coverage.directory_works,
+    );
+    let missing = inspector_count_copy(inspector.coverage.missing_details);
+    let abnormal = inspector_abnormal_copy(
+        inspector.coverage.quarantined_records,
+        inspector.coverage.blocked_details,
+    );
+    format!(
+        r#"<section class="c-dw-section c-dw-now" id="archive-task">
+              <div class="c-dw-section-head"><b>系统现在在做什么</b><span>状态分别判断</span></div>
+              <dl class="c-dw-state-list">
+                <div><dt>建档</dt><dd>{archive_state}</dd></div>
+                <div><dt>执行</dt><dd>{execution_state}</dd></div>
+                <div><dt>巡查</dt><dd>{patrol_state}</dd></div>
+                <div><dt>异常</dt><dd>{abnormal}</dd></div>
+              </dl>
+            </section>
+            <section class="c-dw-section c-dw-facts">
+              <div class="c-dw-section-head"><b>已经取得什么</b><span>同一时点的目标事实</span></div>
+              <div class="c-dw-readouts c-dw-overview-readouts">
+                <div><b>{directory}</b><span>作品目录</span></div>
+                <div><b>{detail}</b><span>详情进度</span></div>
+                <div><b>{missing}</b><span>待取得详情</span></div>
+                <div><b>{latest_new}</b><span>最近巡查新增</span></div>
+                <div><b>{last}</b><span>上次巡查</span></div>
+                <div><b>{next}</b><span>下次巡查</span></div>
+              </div>
+            </section>
+            <section class="c-dw-section c-dw-decision" id="archive-problems">
+              <div class="c-dw-decision-copy"><span>是否需要处理</span><strong>{action_title}</strong><p>{action_note}</p></div>{action_control}
+            </section>"#,
+        archive_state = inspector_archive_copy(inspector.archive.state),
+        execution_state = inspector_execution_copy(inspector.execution.state),
+        patrol_state = inspector_patrol_copy(inspector.patrol.state),
+        latest_new = inspector_count_copy(inspector.patrol.latest_new),
+        last = escape(last),
+        next = escape(next),
+    )
+}
+
+fn inspector_archive_copy(state: TargetInspectorArchiveState) -> &'static str {
+    match state {
+        TargetInspectorArchiveState::NotApplicable => "不适用",
+        TargetInspectorArchiveState::NotStarted => "尚未建立",
+        TargetInspectorArchiveState::Queued => "已排队",
+        TargetInspectorArchiveState::Running => "正在执行",
+        TargetInspectorArchiveState::Partial => "部分可用",
+        TargetInspectorArchiveState::Blocked => "有待处理项",
+        TargetInspectorArchiveState::Complete => "已建立",
+        TargetInspectorArchiveState::Unavailable => "当前读不到",
+    }
+}
+
+fn inspector_execution_copy(state: TargetInspectorExecutionState) -> &'static str {
+    match state {
+        TargetInspectorExecutionState::Idle => "当前无任务执行",
+        TargetInspectorExecutionState::Queued => "已排队，等待调度",
+        TargetInspectorExecutionState::AwaitingProducer => "已分配，等待执行工位",
+        TargetInspectorExecutionState::Running => "正在执行",
+        TargetInspectorExecutionState::Blocked => "执行已阻塞",
+    }
+}
+
+fn inspector_patrol_copy(state: TargetInspectorPatrolState) -> &'static str {
+    match state {
+        TargetInspectorPatrolState::Disabled => "未开启",
+        TargetInspectorPatrolState::Waiting => "已开启，等待首次结果",
+        TargetInspectorPatrolState::Queued => "已排队",
+        TargetInspectorPatrolState::AwaitingProducer => "等待执行工位",
+        TargetInspectorPatrolState::Running => "正在巡查",
+        TargetInspectorPatrolState::Normal => "运行正常",
+        TargetInspectorPatrolState::Blocked => "巡查已阻塞",
+    }
+}
+
+fn inspector_count_copy(value: TargetInspectorCount) -> String {
+    match value {
+        TargetInspectorCount::Known(value) => value.to_string(),
+        TargetInspectorCount::Unknown => "尚未取得".to_owned(),
+    }
+}
+
+fn inspector_detail_copy(captured: TargetInspectorCount, total: TargetInspectorCount) -> String {
+    match (captured, total) {
+        (TargetInspectorCount::Known(captured), TargetInspectorCount::Known(total)) => {
+            format!("{captured} / {total}")
+        }
+        _ => "尚未取得".to_owned(),
+    }
+}
+
+fn inspector_abnormal_copy(
+    quarantined: TargetInspectorCount,
+    blocked: TargetInspectorCount,
+) -> String {
+    match (quarantined, blocked) {
+        (TargetInspectorCount::Known(quarantined), TargetInspectorCount::Known(blocked)) => {
+            let total = quarantined.saturating_add(blocked);
+            if total == 0 {
+                "无已知阻塞".to_owned()
+            } else {
+                format!("{total} 条待处理")
+            }
+        }
+        _ => "当前读不到".to_owned(),
+    }
+}
+
+fn inspector_action_copy(action: TargetInspectorAction) -> (&'static str, &'static str) {
+    match action {
+        TargetInspectorAction::NoActionHealthy => (
+            "当前无需处理",
+            "系统会按现有规则继续观察；需要查证时进入作品或巡查。",
+        ),
+        TargetInspectorAction::NoActionQueued => (
+            "当前无需处理",
+            "任务已经进入队列，系统会在取得真实回执后更新档案。",
+        ),
+        TargetInspectorAction::NoActionRunning => (
+            "当前无需处理",
+            "任务正在执行，系统会在取得真实回执后更新档案。",
+        ),
+        TargetInspectorAction::StartArchive => (
+            "需要建立档案",
+            "当前只有观察目标身份。建立档案会读取主页作品目录，最多 200 篇；页面提前结束则按实际结束。",
+        ),
+        TargetInspectorAction::RebuildDirectory => (
+            "需要处理目录边界",
+            "历史作品会保留；重新建立受当前标准证明的主页目录边界。",
+        ),
+        TargetInspectorAction::ContinueArchive => (
+            "有详情缺口需要补采",
+            "作品目录可用，但部分作品详情尚未取得。",
+        ),
+        TargetInspectorAction::HandleArchiveProblems => (
+            "需要查看档案问题",
+            "存在已知阻塞；页面不会把它写成自动处理中。",
+        ),
+        TargetInspectorAction::EnablePatrol => (
+            "需要设置持续巡查",
+            "当前档案已可用，但还没有生效的持续巡查规则。",
+        ),
+    }
+}
+
+fn inspector_action_control(
+    target: &ObservationTarget,
+    action: TargetInspectorAction,
+    list_context: TargetListContext<'_>,
+) -> String {
+    match action {
+        TargetInspectorAction::StartArchive
+        | TargetInspectorAction::RebuildDirectory
+        | TargetInspectorAction::ContinueArchive => {
+            let label = match action {
+                TargetInspectorAction::StartArchive => "建立档案",
+                TargetInspectorAction::RebuildDirectory => "处理异常",
+                TargetInspectorAction::ContinueArchive => "补采缺口",
+                _ => unreachable!(),
+            };
+            let fields = list_context.return_fields(
+                Some(target.target_ref),
+                Some(TargetDrawerTab::Overview),
+                Some("archive-problems"),
+            );
+            format!(
+                r#"<form class="c-dw-primary-form" method="post" action="/collection/targets/archive">{fields}<button class="c-btn-primary" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                target_ref = target.target_ref,
+            )
+        }
+        TargetInspectorAction::EnablePatrol => {
+            let opener_id = format!("drawer-overview-monitor-rule-{}", target.target_ref);
+            let href = list_context.monitor_rule_href(target.target_ref, &opener_id);
+            format!(
+                r#"<a id="{opener_id}" class="c-btn-primary" data-monitor-rule-trigger="{target_ref}" href="{href}">开启巡查</a>"#,
+                target_ref = target.target_ref,
+            )
+        }
+        TargetInspectorAction::HandleArchiveProblems => {
+            let href = list_context.drawer_href(
+                target.target_ref,
+                &[
+                    ("dtab", "works"),
+                    ("wview", "list"),
+                    ("catalog_filter", "pending"),
+                ],
+                Some("target-works"),
+            );
+            format!(r#"<a class="c-btn-secondary" href="{href}">查看待取得作品</a>"#)
+        }
+        _ => String::new(),
+    }
+}
+
+fn current_system_copy(archive: TargetArchiveRead<'_>) -> (&'static str, &'static str) {
+    match archive {
+        TargetArchiveRead::Unavailable => ("档案状态未知", "执行状态未知"),
+        TargetArchiveRead::Known(None) => ("尚未建立", "当前无建档任务"),
+        TargetArchiveRead::Known(Some(value)) if value.has_actionable_problems() => {
+            ("档案有待处理项", "自动处理已停止")
+        }
+        TargetArchiveRead::Known(Some(value)) if value.work_in_progress => {
+            ("档案正在完善", "已有任务，等待调度或执行")
+        }
+        TargetArchiveRead::Known(Some(value)) if value.requires_directory_rebuild() => {
+            ("目录边界需要重建", "当前无建档任务")
+        }
+        TargetArchiveRead::Known(Some(value))
+            if value.works_listed > 0 && value.details_captured < value.works_listed =>
+        {
+            ("档案部分可用", "当前无建档任务")
+        }
+        TargetArchiveRead::Known(Some(value)) if value.has_displayable_directory() => {
+            ("档案已建立", "当前无建档任务")
+        }
+        TargetArchiveRead::Known(Some(_)) => ("档案尚未建立", "当前无建档任务"),
+    }
+}
+
+fn required_action_copy(action: TargetPrimaryAction) -> (&'static str, &'static str) {
+    match action {
+        TargetPrimaryAction::EstablishArchive => (
+            "需要建立档案",
+            "当前只有观察目标身份，还没有可核验的作品目录。",
+        ),
+        TargetPrimaryAction::RebuildDirectory => (
+            "需要处理目录边界",
+            "历史作品会保留；重新建立受当前标准证明的主页目录边界。",
+        ),
+        TargetPrimaryAction::ContinueArchive => (
+            "有详情缺口需要补采",
+            "作品目录可用，但部分作品详情尚未取得。",
+        ),
+        TargetPrimaryAction::ViewArchiveProgress => (
+            "当前无需处理",
+            "已有建档任务进入队列或执行；系统会在真实回执到达后更新档案。",
+        ),
+        TargetPrimaryAction::ViewArchiveProblems => (
+            "需要查看档案问题",
+            "存在已知阻塞或目录问题；页面不会把它写成自动处理中。",
+        ),
+        TargetPrimaryAction::ViewArchiveUnavailable => (
+            "当前无法判断",
+            "档案读取暂不可用；未知状态下不会发起新的写操作。",
+        ),
+        TargetPrimaryAction::OpenPatrol(_) => (
+            "需要设置持续巡查",
+            "当前档案已可用，但还没有生效的持续巡查规则。",
+        ),
+        TargetPrimaryAction::ViewCreator | TargetPrimaryAction::ViewKeyword => (
+            "当前无需处理",
+            "系统会按现有规则继续观察；需要查证时进入作品或巡查。",
+        ),
+    }
+}
+
+fn required_action_control(
+    target: &ObservationTarget,
+    archive: TargetArchiveRead<'_>,
+    is_creator: bool,
+    list_context: TargetListContext<'_>,
+) -> String {
+    match target_primary_action(target, is_creator, archive) {
+        TargetPrimaryAction::EstablishArchive
+        | TargetPrimaryAction::RebuildDirectory
+        | TargetPrimaryAction::ContinueArchive
+        | TargetPrimaryAction::OpenPatrol(_) => {
+            drawer_primary_action(target, archive, is_creator, list_context)
+        }
+        _ => String::new(),
+    }
 }
 
 fn lifecycle_query_state(
@@ -1181,6 +1637,7 @@ fn lifecycle_overview(
     } else {
         lifecycle_chart(target, projection, selected_work, list_context)
     };
+    let exclusions = lifecycle_exclusions(projection);
     let selected = selected_work
         .and_then(|selected| {
             projection
@@ -1194,11 +1651,12 @@ fn lifecycle_overview(
     format!(
         r#"<section class="c-dw-section life-panel" id="creator-lifecycle">
               <div class="life-heading">
-                <div><h2>作品生命周期</h2><p>横轴是作品发布时间，纵轴是所选互动数据</p></div>
+                <div><h2>作品表现</h2><p>每个点是一篇作品；按发布时间查看真实互动分布</p></div>
                 <p>数据截至 {as_of}</p>
               </div>
-              {controls}{summary}{legend}{chart}
+              {controls}{summary}{legend}{chart}{exclusions}
               {selected}
+              <p class="life-boundary">这里比较的是该创作者自己的作品表现，不是“监控价值”评分。尚未建立内容分类，因此不按主题生成表现结论。</p>
             </section>"#,
         as_of = escape(&projection.as_of),
     )
@@ -1223,6 +1681,8 @@ fn lifecycle_controls(
         let href = list_context.drawer_href(
             target.target_ref,
             &[
+                ("dtab", "works"),
+                ("wview", "performance"),
                 ("life_window", window.as_str()),
                 ("life_metric", projection.metric.as_str()),
             ],
@@ -1247,6 +1707,8 @@ fn lifecycle_controls(
         let href = list_context.drawer_href(
             target.target_ref,
             &[
+                ("dtab", "works"),
+                ("wview", "performance"),
                 ("life_window", projection.window.as_str()),
                 ("life_metric", metric.as_str()),
             ],
@@ -1340,6 +1802,8 @@ fn lifecycle_chart(
             let href = list_context.drawer_href(
                 target.target_ref,
                 &[
+                    ("dtab", "works"),
+                    ("wview", "performance"),
                     ("life_window", projection.window.as_str()),
                     ("life_metric", projection.metric.as_str()),
                     ("life_work", work.as_str()),
@@ -1438,7 +1902,7 @@ fn selected_work_summary(point: &CreatorLifecyclePoint, metric: CreatorLifecycle
 
 fn lifecycle_state(title: &str, body: &str) -> String {
     format!(
-        r#"<section class="c-dw-section life-panel"><div class="life-heading"><h2>作品生命周期</h2></div><div class="life-state"><b>{title}</b><p>{body}</p></div></section>"#,
+        r#"<section class="c-dw-section life-panel"><div class="life-heading"><h2>作品表现</h2></div><div class="life-state"><b>{title}</b><p>{body}</p></div></section>"#,
         title = escape(title),
         body = escape(body),
     )
@@ -1653,9 +2117,49 @@ fn archive_action_label(action: TargetPrimaryAction) -> &'static str {
 }
 
 /// 巡查只展示当前可读的开关与时间，完整规则通过已有版本化规则入口管理。
-fn patrol_tab(target: &ObservationTarget, list_context: TargetListContext<'_>) -> String {
+fn patrol_tab(
+    target: &ObservationTarget,
+    inspector: TargetInspectorView<'_>,
+    list_context: TargetListContext<'_>,
+) -> String {
     let opener_id = format!("drawer-monitor-rule-{}", target.target_ref);
     let rule_href = list_context.monitor_rule_href(target.target_ref, &opener_id);
+    if matches!(inspector, TargetInspectorView::ReadUnavailable) {
+        return format!(
+            r#"<section class="c-dw-section"><div class="c-dw-section-head"><b>巡查变化</b><span>读取暂不可用</span></div><div class="life-state"><b>当前读不到巡查状态</b><p>未知不表示没有巡查结果，也不表示规则正常。</p></div></section>"#
+        );
+    }
+    if let TargetInspectorView::Projection(inspector) = inspector {
+        let last = inspector
+            .patrol
+            .last_succeeded_at
+            .as_deref()
+            .unwrap_or("尚未取得成功结果");
+        let next = inspector.patrol.next_run_at.as_deref().unwrap_or_else(|| {
+            if inspector.patrol.state == TargetInspectorPatrolState::Disabled {
+                "未开启"
+            } else {
+                "待排定"
+            }
+        });
+        return format!(
+            r#"<section class="c-dw-section c-dw-patrol">
+                 <div class="c-dw-section-head"><b>巡查变化</b><span>按时间查看</span></div>
+                 <ol class="c-dw-timeline">
+                   <li><time>{next}</time><div><b>下次巡查</b><p>{state}</p></div></li>
+                   <li><time>{last}</time><div><b>最近一次成功巡查</b><p>命中 {hits} · 新增 {new}</p></div></li>
+                 </ol>
+                 <p class="c-dw-note">当前只显示目标级成功结果与下一次安排；没有可核验的历史差分时，不生成运行日志或“零变化”。</p>
+                 <a id="{opener_id}" class="c-btn-secondary" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">管理巡查</a>
+               </section>"#,
+            next = escape(next),
+            state = inspector_patrol_copy(inspector.patrol.state),
+            last = escape(last),
+            hits = inspector_count_copy(inspector.patrol.latest_hits),
+            new = inspector_count_copy(inspector.patrol.latest_new),
+            target_ref = target.target_ref,
+        );
+    }
     format!(
         r#"<section class="c-dw-section">
              <div class="c-dw-section-head"><b>持续巡查</b><span>当前规则与时间</span></div>
@@ -1814,13 +2318,17 @@ mod tests {
                 .contains("状态异常，未调度")
         );
         assert!(!statusline(&corrupted_keyword, TargetArchiveRead::Unavailable).contains("巡查中"));
-        let patrol = patrol_tab(&corrupted_keyword, TargetListContext::default());
+        let patrol = patrol_tab(
+            &corrupted_keyword,
+            TargetInspectorView::NotRead,
+            TargetListContext::default(),
+        );
         assert!(patrol.contains("待状态修复"));
         assert!(!patrol.contains("已开启"));
     }
 
     #[test]
-    fn rebuild_directory_explains_that_partial_history_is_preserved_but_not_current_scope() {
+    fn works_read_failure_does_not_repeat_an_archive_action_in_the_header() {
         let target = target("monitoring");
         let partial = ArchiveCompleteness {
             started: true,
@@ -1847,7 +2355,7 @@ mod tests {
             TargetListContext::default(),
         );
 
-        assert!(html.contains(">处理异常</button>"));
+        assert!(!html.contains(">处理异常</button>"));
         assert!(html.contains("当前读不到可核验的作品记录"));
         assert!(html.contains("作品目录"));
         assert!(!html.contains("作品生命周期"));

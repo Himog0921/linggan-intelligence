@@ -1224,31 +1224,25 @@ fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
         collection::Section::Tasks,
         collection::Section::Runtime,
     ] {
-        pages.push(collection::render(
+        pages.push((
             section,
-            collection::OperationsMode::Now,
-            None,
-            None,
-            None,
+            collection::render(section, collection::OperationsMode::Now, None, None, None),
         ));
     }
 
-    for html in &pages {
+    for (section, html) in &pages {
         assert!(
             html.contains("<h1 class=\"v7-sr-only\" id=\"page-title\">"),
             "each Collection surface must keep one reader-only h1"
         );
         assert_eq!(html.matches("id=\"page-title\"").count(), 1);
-        assert_eq!(
-            html.matches("class=\"v7-kpi\"").count(),
-            2,
-            "each Collection page must expose exactly two scoped context readings"
-        );
-        assert_eq!(
-            html.matches("</b><small>").count(),
-            2,
-            "each Collection readout must show its source or scope without relying on a tooltip"
-        );
+        let expected_readouts = if *section == collection::Section::Targets {
+            0
+        } else {
+            2
+        };
+        assert_eq!(html.matches("class=\"v7-kpi\"").count(), expected_readouts);
+        assert_eq!(html.matches("</b><small>").count(), expected_readouts);
         assert!(!html.contains("c-page-titlebar"));
         assert!(!html.contains("c-readout-strip"));
         for restated in ["c-eyebrow", "c-head", "v7-title", "v7-eyebrow"] {
@@ -1316,7 +1310,7 @@ fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
         }
     }
 
-    for html in &pages {
+    for (_, html) in &pages {
         for forbidden in ["监控价值", "代表证据", "机会评分"] {
             assert!(
                 !html.contains(forbidden),
@@ -1325,8 +1319,8 @@ fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
         }
     }
 
-    // The counts the title block used to carry now read from the context row, and each one
-    // stays a separate figure rather than a single invented total.
+    // Target facts live beside the target ledger. The breadcrumb band stays quiet instead
+    // of repeating patrol/archive/runtime/timezone above the working surface.
     let targets = collection::render(
         collection::Section::Targets,
         collection::OperationsMode::Now,
@@ -1335,17 +1329,13 @@ fn collection_v4_uses_the_lids_reclaimed_title_and_context_readout_contract() {
         None,
     );
     let context_row = targets
-        .split_once("v7-context-meta")
+        .split_once("<div class=\"v7-context-meta\">")
         .expect("collection pages render the context row")
-        .1;
-    for label in ["巡检已开", "建档中"] {
-        assert!(
-            context_row.contains(&format!("<em>{label}</em>")),
-            "count missing from context row: {label}"
-        );
-    }
-    assert!(context_row.contains("title=\"当前观察目标投影尚未读取\""));
-    assert!(!context_row.contains("aria-label=\"<span"));
+        .1
+        .split_once("</div>")
+        .expect("context meta closes")
+        .0;
+    assert!(context_row.is_empty());
 }
 
 #[test]
@@ -1372,13 +1362,27 @@ fn connected_collection_surfaces_render_real_targets_and_scheduler_state() {
         Some(&counts),
         Some(&running),
     );
+    let targets_context = targets
+        .split_once("<div class=\"v7-context-meta\">")
+        .expect("targets render the context row")
+        .1
+        .split_once("</div>")
+        .expect("targets context meta closes")
+        .0;
 
-    assert!(targets.contains("调度运行中"));
-    assert!(targets.contains("SCHEDULER RUNNING"));
-    assert!(targets.contains("aria-label=\"巡检已开 1；当前观察目标投影\""));
-    assert!(targets.contains("<em>巡检已开</em><b aria-hidden=\"true\">1</b>"));
-    assert!(targets.contains("aria-label=\"建档中 1；当前观察目标投影\""));
-    assert!(targets.contains("<em>建档中</em><b aria-hidden=\"true\">1</b>"));
+    for redundant in [
+        "调度运行中",
+        "SCHEDULER RUNNING",
+        "巡检已开",
+        "当前观察目标投影",
+        "PATROL ARMED",
+        "UTC+08",
+    ] {
+        assert!(
+            !targets_context.contains(redundant),
+            "target context repeated {redundant}"
+        );
+    }
     assert!(targets.contains("<span class=\"v7-nav-state\">观察中</span>"));
     assert!(!targets.contains("调度器未接通"));
     assert!(!targets.contains("<span class=\"v7-status-main\">暂无观察目标</span>"));
@@ -1464,6 +1468,7 @@ fn context_row_counts_read_in_chinese_so_one_row_holds_one_english_scale() {
         collection::Section::Runtime,
     ] {
         let html = collection::render(section, collection::OperationsMode::Now, None, None, None);
+        let count_before = labels.len();
         for fragment in html.split("class=\"v7-kpi\"").skip(1) {
             let fragment = fragment
                 .split_once("<em>")
@@ -1477,8 +1482,22 @@ fn context_row_counts_read_in_chinese_so_one_row_holds_one_english_scale() {
                     .to_owned(),
             );
         }
+        let expected = if section == collection::Section::Targets {
+            0
+        } else {
+            2
+        };
+        assert_eq!(
+            labels.len() - count_before,
+            expected,
+            "Targets intentionally keeps its context band quiet; every other surface has two counts"
+        );
     }
-    assert_eq!(labels.len(), 10, "each surface carries two counts");
+    assert_eq!(
+        labels.len(),
+        8,
+        "four operational surfaces carry two counts"
+    );
 
     for label in &labels {
         assert!(
@@ -1581,8 +1600,12 @@ fn collection_never_publishes_prototype_material_or_a_fake_zero() {
                     "prototype material leaked into a real route: {figure}"
                 );
             }
-            // Unknown must never be flattened into a confirmed zero.
-            assert!(!html.contains(">0<"));
+            // Unknown must never be flattened into a confirmed zero. Targets alone owns one
+            // hidden local-selection counter, whose initial zero is interaction state rather
+            // than an observation fact.
+            let factual_html =
+                html.replace("<strong data-target-selected-count hidden>0</strong>", "");
+            assert!(!factual_html.contains(">0<"));
         }
     }
 }

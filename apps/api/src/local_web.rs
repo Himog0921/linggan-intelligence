@@ -32,6 +32,8 @@ mod model_settings;
 mod shell;
 mod station_view;
 mod target_drawer;
+#[cfg(test)]
+mod target_inspector_performance_tests;
 mod topic_workspace;
 #[cfg(test)]
 mod topic_workspace_tests;
@@ -75,9 +77,9 @@ use linggan_evidence::{
     read_creator_directory, read_creator_lifecycle, read_discovery_library, read_keyword_hits,
     read_media_upload_session, read_runtime_capacity, read_runtime_library,
     read_scheduler_heartbeat, read_station_capabilities, read_station_overview, read_target,
-    read_target_avatars, read_target_observation_summaries, record_media_acquisition_failure,
-    record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, rename_station, request_and_admit,
+    read_target_avatars, read_target_inspector, read_target_observation_summaries,
+    record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
+    register_station, release_media_upload_finalize, rename_station, request_and_admit,
     request_and_admit_material_targets, request_progressive_archive, retire_station,
     set_group_for_many, set_station_accepting, start_local_attempt, start_producer_attempt,
     station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
@@ -2322,6 +2324,9 @@ struct CollectionParams {
     /// 抽屉打开的是哪个目标，以及停在哪个 tab。**放在 URL 里而不是 JS 状态里**：
     /// 刷新与分享都不丢，而这一页的用途正是「打开一个目标细看，然后发给别人」。
     dtab: Option<String>,
+    /// Creator works keep their inner List / Performance view in the URL. Existing
+    /// lifecycle links without `wview` are normalized to Performance below.
+    wview: Option<String>,
     /// Lifecycle 只按窗口与指标读取。选中作品仅是页面状态，不进入 Rust read query。
     life_window: Option<String>,
     life_metric: Option<String>,
@@ -2491,6 +2496,12 @@ async fn collection_targets(
         Some(target_ref) => read_target(database, target_ref).await.map_err(|_| ()),
         None => Ok(None),
     };
+    let drawer_inspector = match drawer_target_ref {
+        Some(target_ref) => read_target_inspector(database, target_ref)
+            .await
+            .map_err(|_| ()),
+        None => Ok(None),
+    };
     let drawer_avatar = match drawer_target.as_ref() {
         Ok(Some(target)) if target.target_kind == "creator" => {
             match read_target_avatars(database, std::slice::from_ref(target)).await {
@@ -2503,6 +2514,10 @@ async fn collection_targets(
         Ok(Some(_)) | Ok(None) | Err(()) => None,
     };
     let drawer_tab = target_drawer::TargetDrawerTab::parse(params.dtab.as_deref());
+    let has_legacy_lifecycle_query =
+        params.life_window.is_some() || params.life_metric.is_some() || params.life_work.is_some();
+    let works_view =
+        target_drawer::TargetWorksView::parse(params.wview.as_deref(), has_legacy_lifecycle_query);
     let lifecycle_query = CreatorLifecycleQuery::parse_optional(
         params.life_window.as_deref(),
         params.life_metric.as_deref(),
@@ -2518,6 +2533,7 @@ async fn collection_targets(
     let lifecycle = if should_read_target_lifecycle(
         drawer_target.as_ref().ok().and_then(Option::as_ref),
         drawer_tab,
+        works_view,
     ) {
         match (drawer_target_ref, lifecycle_query.as_ref()) {
             (Some(target_ref), Ok(query)) => {
@@ -2581,7 +2597,7 @@ async fn collection_targets(
     // list must not erase a target that was read successfully, and an unreadable target must
     // not be flattened into "not found".
     let drawer = match drawer_target.as_ref() {
-        Ok(target) => target_drawer::render_with_catalog(
+        Ok(target) => target_drawer::render_with_catalog_view(
             target.as_ref(),
             drawer_avatar.as_ref(),
             completeness.as_ref(),
@@ -2589,7 +2605,9 @@ async fn collection_targets(
             drawer_tab,
             match lifecycle_query.as_ref() {
                 Err(_) => target_drawer::LifecycleView::QueryInvalid,
-                Ok(query) if should_read_target_lifecycle(target.as_ref(), drawer_tab) => {
+                Ok(query)
+                    if should_read_target_lifecycle(target.as_ref(), drawer_tab, works_view) =>
+                {
                     match lifecycle.as_ref() {
                         Ok(Some(projection)) => {
                             target_drawer::LifecycleView::Projection(projection)
@@ -2605,6 +2623,13 @@ async fn collection_targets(
                     metric: query.metric,
                 },
             },
+            match drawer_inspector.as_ref() {
+                Ok(Some(projection)) => target_drawer::TargetInspectorView::Projection(projection),
+                Ok(None) if target.is_some() => target_drawer::TargetInspectorView::ReadUnavailable,
+                Ok(None) => target_drawer::TargetInspectorView::NotRead,
+                Err(()) => target_drawer::TargetInspectorView::ReadUnavailable,
+            },
+            works_view,
             match target.as_ref().map(|target| target.target_kind.as_str()) {
                 Some("creator") => target_drawer::TargetCatalogView::Creator(
                     creator_catalog.as_ref().and_then(Option::as_ref),
@@ -2685,14 +2710,13 @@ async fn collection_targets(
 fn should_read_target_lifecycle(
     target: Option<&ObservationTarget>,
     active_tab: target_drawer::TargetDrawerTab,
+    works_view: target_drawer::TargetWorksView,
 ) -> bool {
     target
         .map(|target| target.target_kind == "creator")
         .unwrap_or(false)
-        && matches!(
-            active_tab,
-            target_drawer::TargetDrawerTab::Overview | target_drawer::TargetDrawerTab::Baseline
-        )
+        && active_tab == target_drawer::TargetDrawerTab::Baseline
+        && works_view == target_drawer::TargetWorksView::Performance
 }
 
 async fn collection_operations(

@@ -91,7 +91,6 @@ pub fn render_stored_targets_with_observation(
               {failure}
               <div class="c-tg-list-head">
                 <span>{count} 个观察目标</span>
-                <span class="c-tg-list-hint">勾选后可在顶部批量编辑；点击一行查看详情</span>
               </div>
               <div class="c-tg-directory">{creator_table}{keyword_table}</div>
               <form id="target-batch-modal-form" class="c-tg-batch" method="post" action="/collection/targets/batch">

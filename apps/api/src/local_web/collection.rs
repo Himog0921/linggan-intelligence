@@ -850,23 +850,23 @@ fn second_bar(
                 r#"<div class="c-toolbar">
           <div class="c-tabs c-tg-views">{target_filters}</div>
           <div class="c-actions c-tg-toolbar">
-            <a class="c-btn-quiet" href="{sort_href}">排序 / 最近观察 ↓</a>
+            <a class="c-btn-quiet c-tg-sort" href="{sort_href}" aria-label="按最近观察排序">最近观察 ↓</a>
             <form id="collection-target-create" class="c-target-add" method="post" action="/collection/targets/new">
               {domain_field}
-              <select name="target_kind" aria-label="目标类型" data-target-kind>
-                <option value="creator">创作者</option>
-                <option value="keyword">关键词</option>
-              </select>
-              <select name="ranking" aria-label="关键词排序" data-keyword-only hidden>
-                <option value="most_liked">最多点赞</option>
-                <option value="most_collected">最多收藏</option>
-                <option value="most_commented">最多评论</option>
-                <option value="latest">最新</option>
-                <option value="comprehensive">综合排序</option>
-              </select>
-              <input name="identity" required maxlength="120"
-                     placeholder="创作者主页链接或 ID／关键词" />
-              <button class="c-btn-secondary c-tg-batch-open" type="button" data-target-batch-open aria-controls="target-batch-modal" disabled>批量编辑</button>
+              <label class="c-tg-field c-tg-field-kind"><span class="v7-sr-only">目标类型</span><select name="target_kind" aria-label="目标类型" data-target-kind>
+                  <option value="creator">创作者</option>
+                  <option value="keyword">关键词</option>
+                </select></label>
+              <label class="c-tg-field c-tg-field-ranking" data-keyword-only hidden><span class="v7-sr-only">关键词排序</span><select name="ranking" aria-label="关键词排序">
+                  <option value="most_liked">最多点赞</option>
+                  <option value="most_collected">最多收藏</option>
+                  <option value="most_commented">最多评论</option>
+                  <option value="latest">最新</option>
+                  <option value="comprehensive">综合排序</option>
+                </select></label>
+              <label class="c-tg-field c-tg-field-query"><span class="v7-sr-only">主页链接、ID 或关键词</span><input name="identity" required maxlength="120"
+                     aria-label="创作者主页链接、ID 或关键词" placeholder="粘贴主页链接、ID 或输入关键词" /></label>
+              <button class="c-btn-secondary c-tg-batch-open" type="button" data-target-batch-open aria-controls="target-batch-modal" disabled><span data-target-batch-label>批量编辑</span><strong data-target-selected-count hidden>0</strong></button>
               <button class="c-btn-primary" type="submit">＋ 新建目标</button>
             </form>
           </div>
@@ -965,13 +965,21 @@ pub fn render_in_domain(
     let entry = meta(section);
     // DESIGN-003 header reclaim: this surface's own counts ride in the context row next to
     // the system state, so the page can start at its content instead of restating its name.
-    let meta_row = format!(
-        "{slot_start}{counts}{slot_end}<i class=\"v7-vr\" aria-hidden=\"true\"></i>{system}",
-        slot_start = READOUT_SLOT_START,
-        slot_end = READOUT_SLOT_END,
-        counts = head_readout(section, state),
-        system = system_words(state),
-    );
+    // The target page already exposes its actionable scope in the filter tabs and target
+    // ledger. Repeating patrol count, archive count, scheduler, patrol state and timezone in
+    // the breadcrumb band made that band a second status dashboard without helping the user
+    // decide anything. Other Collection surfaces still keep their scoped operational readouts.
+    let meta_row = if section == Section::Targets {
+        String::new()
+    } else {
+        format!(
+            "{slot_start}{counts}{slot_end}<i class=\"v7-vr\" aria-hidden=\"true\"></i>{system}",
+            slot_start = READOUT_SLOT_START,
+            slot_end = READOUT_SLOT_END,
+            counts = head_readout(section, state),
+            system = system_words(state),
+        )
+    };
     // 系统边界那个位置在 shell.css 里是**警告样式**（琥珀底 + 警告圆点），因此它只能
     // 放真正值得警惕的事。「采集运行时未接通」曾经合格，接通后成了假话；换成「只写本地
     // 记录」则是把一句正常状态塞进警告框。这台服务真正的边界是：它不访问任何平台。

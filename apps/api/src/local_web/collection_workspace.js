@@ -240,6 +240,8 @@
   var targetSelections = Array.prototype.slice.call(document.querySelectorAll("[data-target-select]"));
   var targetSelectAll = Array.prototype.slice.call(document.querySelectorAll("[data-target-select-all]"));
   var targetBatchOpen = document.querySelector("[data-target-batch-open]");
+  var targetBatchLabel = document.querySelector("[data-target-batch-label]");
+  var targetSelectedCount = document.querySelector("[data-target-selected-count]");
   var targetBatchModal = document.querySelector("[data-target-batch-modal]");
   var targetBatchCount = document.querySelector("[data-target-batch-count]");
   var targetBatchClose = document.querySelector("[data-target-batch-close]");
@@ -257,6 +259,11 @@
   function syncTargetSelection() {
     var selected = selectedTargetCount();
     if (targetBatchOpen) targetBatchOpen.disabled = selected === 0;
+    if (targetBatchLabel) targetBatchLabel.textContent = "批量编辑";
+    if (targetSelectedCount) {
+      targetSelectedCount.textContent = String(selected);
+      targetSelectedCount.hidden = selected === 0;
+    }
     if (targetBatchCount) targetBatchCount.textContent = "已选择 " + selected + " 个目标";
     targetSelectAll.forEach(function (input) {
       var scoped = selectionsForHeader(input);
@@ -403,7 +410,8 @@
       element.hidden = !isKeyword;
       // 隐藏时一并禁用：一个看不见的 select 仍然会把值提交上去，
       // 那会让创作者目标带上一个它根本没有的排序。
-      element.disabled = !isKeyword;
+      var control = element.matches("select") ? element : element.querySelector("select");
+      if (control) control.disabled = !isKeyword;
     });
   }
   kind.addEventListener("change", sync);

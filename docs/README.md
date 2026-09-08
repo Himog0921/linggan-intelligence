@@ -20,6 +20,9 @@
 | 文档 | 状态 | 用途 |
 | [data-contracts/comment-research-automation.md](data-contracts/comment-research-automation.md) | 权威当前；交付分支 | CI-AUTO-003 自动清洗、分析复用、问题与变化新合同 |
 |---|---|---|
+| [plans/active/target-inspector-performance-001.md](plans/active/target-inspector-performance-001.md) | 活跃计划 | Issue #158 目标列表、统一状态投影、检查器与作品表现实施合同 |
+| [design/changes/target-inspector-performance-001-ui-change-manifest.md](design/changes/target-inspector-performance-001-ui-change-manifest.md) | 权威当前 | 目标检查器的信息架构、LIDS 与状态诚实性变更清单 |
+| [design/acceptance/target-inspector-performance-001-acceptance.md](design/acceptance/target-inspector-performance-001-acceptance.md) | 一次性报告 | 自动、隔离 PostgreSQL、浏览器与未部署边界的分层验收 |
 | [plans/active/model-pi-001.md](plans/active/model-pi-001.md) | 活跃计划 | Issue #169 模型设置与真实 Pi 适配，依赖 #168 |
 | [pages/model-ai-settings.md](pages/model-ai-settings.md) | 权威当前；交付分支 | 单页供应商弹窗、调用限制与用量语义 |
 | [design/pages/model-ai-settings-page.md](design/pages/model-ai-settings-page.md) | 权威当前；交付分支 | L1 模型与 AI 页面/状态/交互规格 |

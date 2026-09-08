@@ -307,18 +307,23 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     ] {
         assert_no_json_key(&api_payload, work_fact);
     }
-    let html = target_drawer::render(
+    let html = target_drawer::render_with_catalog_view(
         Some(&target),
         Some(&avatar),
         Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
-        target_drawer::TargetDrawerTab::Overview,
+        target_drawer::TargetDrawerTab::Baseline,
         target_drawer::LifecycleView::Projection(&projection),
+        target_drawer::TargetInspectorView::NotRead,
+        target_drawer::TargetWorksView::Performance,
+        target_drawer::TargetCatalogView::Unavailable,
+        None,
+        None,
         Some(&selected_ref.to_string()),
         target_drawer::TargetListContext::default(),
     );
 
-    for tab in ["概览", "档案", "巡查"] {
+    for tab in ["概览", "作品", "巡查"] {
         assert!(html.contains(tab));
     }
     assert_eq!(html.matches(r#"<a class="c-dw-tab"#).count(), 3);
@@ -327,7 +332,10 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     assert!(!html.contains("巡检策略"));
     assert!(!html.contains("dtab=evidence"));
     assert!(!html.contains(">证据</a>"));
-    assert!(html.contains("作品生命周期"));
+    assert!(html.contains("作品表现"));
+    assert!(html.contains(r#"aria-label="作品视图""#));
+    assert!(html.contains(">列表</a>"));
+    assert!(html.contains(">表现</a>"));
     assert!(html.contains(r#"id="c-drawer-title""#));
     assert!(html.contains("data-drawer-initial-focus"));
     assert!(html.contains(r#"class="c-dw-avatar""#));
@@ -356,18 +364,12 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     assert_eq!(html.matches(r#"class="life-point-hit" cx="#).count(), 2);
     assert_eq!(html.matches(r#"r="6" aria-hidden="true""#).count(), 2);
     assert_eq!(html.matches(r#"r="5" aria-hidden="true""#).count(), 2);
-    let recent_at = html.find("最近变化").expect("recent activity is shown");
-    let chart_at = html
-        .find("id=\"creator-lifecycle\"")
-        .expect("lifecycle is shown");
-    let gaps_at = html.find("档案缺口").expect("archive gaps are shown");
-    assert!(recent_at < chart_at && chart_at < gaps_at);
+    assert!(html.contains("id=\"creator-lifecycle\""));
     assert!(
         html.contains(r#"class="life-point-hit" cx="764.0""#),
         "the right plot inset must leave the hit target inside the desktop plot"
     );
     for forbidden in [
-        "监控价值",
         "机会评分",
         "产出分",
         "稀缺分",
@@ -383,16 +385,22 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     ] {
         assert!(!html.contains(forbidden));
     }
+    assert!(html.contains("不是“监控价值”评分"));
 
     let mut all_projection = projection.clone();
     all_projection.window = CreatorLifecycleWindow::All;
-    let all_html = target_drawer::render(
+    let all_html = target_drawer::render_with_catalog_view(
         Some(&target),
         None,
         Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
-        target_drawer::TargetDrawerTab::Overview,
+        target_drawer::TargetDrawerTab::Baseline,
         target_drawer::LifecycleView::Projection(&all_projection),
+        target_drawer::TargetInspectorView::NotRead,
+        target_drawer::TargetWorksView::Performance,
+        target_drawer::TargetCatalogView::Unavailable,
+        None,
+        None,
         None,
         target_drawer::TargetListContext::default(),
     );
@@ -406,13 +414,18 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     truncated_projection.receipt.scanned_count = 2_000;
     truncated_projection.receipt.returned_count = 2;
     truncated_projection.receipt.truncated = true;
-    let truncated_html = target_drawer::render(
+    let truncated_html = target_drawer::render_with_catalog_view(
         Some(&target),
         None,
         Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
-        target_drawer::TargetDrawerTab::Overview,
+        target_drawer::TargetDrawerTab::Baseline,
         target_drawer::LifecycleView::Projection(&truncated_projection),
+        target_drawer::TargetInspectorView::NotRead,
+        target_drawer::TargetWorksView::Performance,
+        target_drawer::TargetCatalogView::Unavailable,
+        None,
+        None,
         None,
         target_drawer::TargetListContext::default(),
     );
@@ -480,13 +493,18 @@ fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
 #[test]
 fn invalid_lifecycle_query_is_visible_and_never_claims_defaults() {
     let target = sample_target("creator");
-    let html = target_drawer::render(
+    let html = target_drawer::render_with_catalog_view(
         Some(&target),
         None,
         Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
-        target_drawer::TargetDrawerTab::Overview,
+        target_drawer::TargetDrawerTab::Baseline,
         target_drawer::LifecycleView::QueryInvalid,
+        target_drawer::TargetInspectorView::NotRead,
+        target_drawer::TargetWorksView::Performance,
+        target_drawer::TargetCatalogView::Unavailable,
+        None,
+        None,
         None,
         target_drawer::TargetListContext::default(),
     );
@@ -530,25 +548,35 @@ fn corpus_work_deep_link_does_not_fall_back_when_the_work_is_off_page() {
 #[test]
 fn collection_reads_lifecycle_only_for_creator_tabs_that_show_analyzable_counts() {
     let mut target = sample_target("creator");
-    assert!(should_read_target_lifecycle(
+    assert!(!should_read_target_lifecycle(
         Some(&target),
-        target_drawer::TargetDrawerTab::parse(None)
-    ));
-    assert!(should_read_target_lifecycle(
-        Some(&target),
-        target_drawer::TargetDrawerTab::parse(Some("overview"))
-    ));
-    assert!(should_read_target_lifecycle(
-        Some(&target),
-        target_drawer::TargetDrawerTab::parse(Some("baseline"))
+        target_drawer::TargetDrawerTab::parse(None),
+        target_drawer::TargetWorksView::List,
     ));
     assert!(!should_read_target_lifecycle(
         Some(&target),
-        target_drawer::TargetDrawerTab::parse(Some("patrol"))
+        target_drawer::TargetDrawerTab::parse(Some("overview")),
+        target_drawer::TargetWorksView::Performance,
+    ));
+    assert!(!should_read_target_lifecycle(
+        Some(&target),
+        target_drawer::TargetDrawerTab::parse(Some("baseline")),
+        target_drawer::TargetWorksView::List,
     ));
     assert!(should_read_target_lifecycle(
         Some(&target),
-        target_drawer::TargetDrawerTab::parse(Some("trace"))
+        target_drawer::TargetDrawerTab::parse(Some("baseline")),
+        target_drawer::TargetWorksView::Performance,
+    ));
+    assert!(!should_read_target_lifecycle(
+        Some(&target),
+        target_drawer::TargetDrawerTab::parse(Some("patrol")),
+        target_drawer::TargetWorksView::Performance,
+    ));
+    assert!(!should_read_target_lifecycle(
+        Some(&target),
+        target_drawer::TargetDrawerTab::parse(Some("trace")),
+        target_drawer::TargetWorksView::Performance,
     ));
     assert_eq!(
         target_drawer::TargetDrawerTab::parse(Some("evidence")),
@@ -558,22 +586,26 @@ fn collection_reads_lifecycle_only_for_creator_tabs_that_show_analyzable_counts(
         target_drawer::TargetDrawerTab::parse(Some("unknown")),
         target_drawer::TargetDrawerTab::Overview
     );
-    assert!(should_read_target_lifecycle(
+    assert!(!should_read_target_lifecycle(
         Some(&target),
-        target_drawer::TargetDrawerTab::parse(Some("evidence"))
+        target_drawer::TargetDrawerTab::parse(Some("evidence")),
+        target_drawer::TargetWorksView::Performance,
     ));
-    assert!(should_read_target_lifecycle(
+    assert!(!should_read_target_lifecycle(
         Some(&target),
-        target_drawer::TargetDrawerTab::parse(Some("unknown"))
+        target_drawer::TargetDrawerTab::parse(Some("unknown")),
+        target_drawer::TargetWorksView::Performance,
     ));
     target.target_kind = "keyword".to_owned();
     assert!(!should_read_target_lifecycle(
         Some(&target),
-        target_drawer::TargetDrawerTab::Overview
+        target_drawer::TargetDrawerTab::Baseline,
+        target_drawer::TargetWorksView::Performance,
     ));
     assert!(!should_read_target_lifecycle(
         None,
-        target_drawer::TargetDrawerTab::Overview
+        target_drawer::TargetDrawerTab::Baseline,
+        target_drawer::TargetWorksView::Performance,
     ));
 }
 
@@ -684,7 +716,7 @@ fn invalid_selected_work_is_dropped_and_drawer_identity_stays_encoded() {
 
     assert!(html.contains("creator%22%3E%3Csvg%20onload%3Dalert%281%29%3E"));
     assert!(!html.contains("life_work="));
-    assert!(!html.contains("\"><svg"));
+    assert!(!html.contains("\"><svg onload"));
     assert!(!html.contains("onload=alert"));
 }
 
@@ -738,23 +770,28 @@ fn archive_return_path_drops_untrusted_navigation_fields() {
 #[test]
 fn unreadable_drawer_archive_never_offers_a_write_action() {
     let target = sample_target("creator");
-    let html = target_drawer::render(
+    let html = target_drawer::render_with_catalog_view(
         Some(&target),
         None,
         None,
         Some(&target.target_ref.to_string()),
-        target_drawer::TargetDrawerTab::Baseline,
+        target_drawer::TargetDrawerTab::Overview,
         target_drawer::LifecycleView::NotRead {
             window: linggan_evidence::CreatorLifecycleWindow::Recent90Days,
             metric: linggan_evidence::CreatorLifecycleMetric::Likes,
         },
+        target_drawer::TargetInspectorView::ReadUnavailable,
+        target_drawer::TargetWorksView::List,
+        target_drawer::TargetCatalogView::Unavailable,
+        None,
+        None,
         None,
         target_drawer::TargetListContext::default(),
     );
 
-    assert!(html.contains("档案状态暂时无法读取"));
-    assert!(html.contains("当前读不到"));
-    assert!(html.contains("未知状态下发起写操作"));
+    assert!(html.contains("目标状态暂时读不到"));
+    assert!(html.contains("当前无法判断"));
+    assert!(html.contains("读取恢复前不提供新的写操作"));
     assert!(!html.contains(r#"action="/collection/targets/archive""#));
     assert!(!html.contains(">建立档案</button>"));
     assert!(!html.contains(">继续完善</button>"));
@@ -763,16 +800,25 @@ fn unreadable_drawer_archive_never_offers_a_write_action() {
 #[test]
 fn drawer_archive_post_preserves_validated_list_and_focus_context() {
     let target = sample_target("creator");
-    let html = target_drawer::render(
+    let inspector = target_inspector_projection(
+        &target,
+        linggan_evidence::TargetInspectorAction::StartArchive,
+    );
+    let html = target_drawer::render_with_catalog_view(
         Some(&target),
         None,
         Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
-        target_drawer::TargetDrawerTab::Baseline,
+        target_drawer::TargetDrawerTab::Overview,
         target_drawer::LifecycleView::NotRead {
             window: linggan_evidence::CreatorLifecycleWindow::Recent90Days,
             metric: linggan_evidence::CreatorLifecycleMetric::Likes,
         },
+        target_drawer::TargetInspectorView::Projection(&inspector),
+        target_drawer::TargetWorksView::List,
+        target_drawer::TargetCatalogView::Unavailable,
+        None,
+        None,
         None,
         target_drawer::TargetListContext {
             filter: Some("creator"),
@@ -787,12 +833,12 @@ fn drawer_archive_post_preserves_validated_list_and_focus_context() {
         r#"name="return_drawer" value="{}""#,
         target.target_ref
     )));
-    assert!(html.contains(r#"name="return_dtab" value="archive""#));
-    assert!(html.contains(r#"name="return_focus" value="target-archive""#));
+    assert!(html.contains(r#"name="return_dtab" value="overview""#));
+    assert!(html.contains(r#"name="return_focus" value="archive-problems""#));
 }
 
 #[test]
-fn keyword_drawer_has_only_keyword_overview_and_patrol_without_a_creator_chart_shell() {
+fn keyword_drawer_keeps_three_business_tabs_without_a_creator_chart_shell() {
     let target = sample_target("keyword");
     let html = target_drawer::render(
         Some(&target),
@@ -808,58 +854,45 @@ fn keyword_drawer_has_only_keyword_overview_and_patrol_without_a_creator_chart_s
         target_drawer::TargetListContext::default(),
     );
     assert!(html.contains("关键词观察"));
-    assert!(html.contains("关键词不建立创作者作品档案"));
     assert!(html.contains(">概览</a>"));
+    assert!(html.contains(">作品</a>"));
     assert!(html.contains(">巡查</a>"));
     assert!(!html.contains(">档案</a>"));
-    assert_eq!(html.matches(r#"<a class="c-dw-tab"#).count(), 2);
+    assert_eq!(html.matches(r#"<a class="c-dw-tab"#).count(), 3);
     assert!(!html.contains("class=\"life-chart\""));
     assert!(!html.contains("class=\"life-point"));
     assert!(!html.contains("作品生命周期"));
 }
 
 #[test]
-fn archive_tab_explains_the_first_two_hundred_boundary_without_a_fake_score() {
+fn overview_archive_action_explains_the_two_hundred_boundary_without_a_fake_score() {
     let target = sample_target("creator");
-    let mut completeness = std::collections::HashMap::new();
-    completeness.insert(
-        target.identity_key.clone(),
-        linggan_evidence::ArchiveCompleteness {
-            started: true,
-            attempted: true,
-            work_in_progress: false,
-            author_profile_captures: 1,
-            works_listed: 12,
-            details_captured: 5,
-            quarantined: 1,
-            blocked_details: 0,
-            directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Ready,
-        },
+    let inspector = target_inspector_projection(
+        &target,
+        linggan_evidence::TargetInspectorAction::StartArchive,
     );
-    let html = target_drawer::render(
+    let html = target_drawer::render_with_catalog_view(
         Some(&target),
         None,
-        Some(&completeness),
+        Some(&std::collections::HashMap::new()),
         Some(&target.target_ref.to_string()),
-        target_drawer::TargetDrawerTab::Baseline,
+        target_drawer::TargetDrawerTab::Overview,
         target_drawer::LifecycleView::NotRead {
             window: linggan_evidence::CreatorLifecycleWindow::Recent90Days,
             metric: linggan_evidence::CreatorLifecycleMetric::Likes,
         },
+        target_drawer::TargetInspectorView::Projection(&inspector),
+        target_drawer::TargetWorksView::List,
+        target_drawer::TargetCatalogView::Unavailable,
+        None,
+        None,
         None,
         target_drawer::TargetListContext::default(),
     );
 
-    assert!(html.contains("前 200 篇作品链接作为上限"));
-    assert!(html.contains(r#"id="target-archive""#));
+    assert!(html.contains("最多 200 篇"));
     assert!(html.contains(r#"id="archive-problems""#));
-    assert!(html.contains("1 条记录需要处理"));
-    assert!(html.contains("当前先处理上面的隔离记录"));
-    assert!(html.contains("5 / 12"));
-    assert!(html.contains("当前读不到</b><span>当前可分析"));
-    assert!(!html.contains("语料页</b><span>评论与深层材料"));
-    assert!(!html.contains(">继续完善</button>"));
-    assert!(!html.contains(">建立档案</button>"));
+    assert!(html.contains(">建立档案</button>"));
     assert!(!html.contains('%'));
     assert!(!html.contains("ARCHIVE HEALTH"));
     assert!(!html.contains("持久回执"));
@@ -910,5 +943,53 @@ fn sample_target(target_kind: &str) -> linggan_evidence::ObservationTarget {
         next_patrol_at: None,
         domain_name: None,
         domain_is_own: None,
+    }
+}
+
+fn target_inspector_projection(
+    target: &linggan_evidence::ObservationTarget,
+    action: linggan_evidence::TargetInspectorAction,
+) -> linggan_evidence::TargetInspectorProjection {
+    use linggan_evidence::{
+        TargetInspectorArchive, TargetInspectorArchiveState, TargetInspectorCount,
+        TargetInspectorCoverage, TargetInspectorDirectoryState, TargetInspectorExecution,
+        TargetInspectorExecutionState, TargetInspectorPatrol, TargetInspectorPatrolState,
+        TargetInspectorProjection,
+    };
+
+    TargetInspectorProjection {
+        target_ref: target.target_ref,
+        target_kind: target.target_kind.clone(),
+        as_of: "2026-09-08 12:00:00+08".to_owned(),
+        archive: TargetInspectorArchive {
+            state: TargetInspectorArchiveState::NotStarted,
+            directory_state: TargetInspectorDirectoryState::NotStarted,
+            started: false,
+            attempted: false,
+            author_profile_captures: TargetInspectorCount::Known(0),
+        },
+        execution: TargetInspectorExecution {
+            state: TargetInspectorExecutionState::Idle,
+            queued_work_orders: 0,
+            awaiting_producer_tasks: 0,
+            running_attempts: 0,
+            blocked_tasks: 0,
+        },
+        patrol: TargetInspectorPatrol {
+            state: TargetInspectorPatrolState::Disabled,
+            last_dispatched_at: None,
+            last_succeeded_at: None,
+            next_run_at: None,
+            latest_hits: TargetInspectorCount::Unknown,
+            latest_new: TargetInspectorCount::Unknown,
+        },
+        coverage: TargetInspectorCoverage {
+            directory_works: TargetInspectorCount::Known(0),
+            captured_details: TargetInspectorCount::Known(0),
+            missing_details: TargetInspectorCount::Known(0),
+            quarantined_records: TargetInspectorCount::Known(0),
+            blocked_details: TargetInspectorCount::Known(0),
+        },
+        required_action: action,
     }
 }

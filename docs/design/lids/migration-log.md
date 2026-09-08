@@ -8,6 +8,13 @@
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
 
+## 2026-09-08 · TARGET-INSPECTOR-PERFORMANCE-001
+
+- **范围**：Collection Targets 保持 L1 Collection Control；右侧保持 L2 Split Inspector。没有新增 Token、全局 CMP 或主题。
+- **表达**：移除 Targets Context Bar 的 runtime prose；表格工具栏使用文字 tab、40px 控件和受限 signal/hard-shadow 重音。Drawer 页头只承担身份与关闭/外链，状态进入概览；creator 作品内使用 `列表｜表现` 二级文字 tab。
+- **Data Truth**：Target Inspector 直接消费 single-as-of 投影；queued 不写 running，Known zero 与 Unknown 分开，读取失败不回退为健康或空数据。表现图仅使用已有 qualified/KNOWN lifecycle points；没有分类时明示边界。
+- **验证边界**：源码/focused/workspace、新 inspector 隔离 PostgreSQL、项目治理、UI handbook 与 1440×900 浏览器交互/实拍已通过；完整 PostgreSQL 脚本仍有两项未修改的 collection-control 基线失败。PR exact head、共享运行与 Mog 业务验收分层记录在验收文档，不能相互替代。
+
 ## 2026-09-07 · OBSERVATION-TARGET-SEMANTIC-FEEDBACK-001
 
 - Targets 目录仍是 L1 `Collection Control`：creator / keyword 共享编号、对象、平台、分组的列起点；creator 的“作品目录”和“详情进度”以既有 12px token 间距分开；最后“操作”列改为剩余空间且右对齐，行内按钮恢复既有主/次组件的 40px 命中区和状态样式。
