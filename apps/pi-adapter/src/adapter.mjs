@@ -9,6 +9,23 @@ const API = {'openai-completions':openAICompletionsApi, 'openai-responses':openA
 export const VERSION = 'linggan.pi.v1/0.85.1';
 class Rejected extends Error { constructor(code) { super(code); this.code=code; } }
 const integer = (v,min,max) => Number.isSafeInteger(v) && v>=min && v<=max;
+const DEEPSEEK_TEXT_MODELS=new Set(['deepseek-v4-flash','deepseek-v4-pro','deepseek-v4-flash-vision-exp']);
+// Capability allowlist, not provider-name inference. Unknown models and proxies retain
+// prompt-only output and the same strict server validator until separately qualified.
+const OPENAI_STRUCTURED_MODELS=new Set(['gpt-4o','gpt-4o-2024-08-06','gpt-4o-2024-11-20','gpt-4o-mini','gpt-4o-mini-2024-07-18','gpt-6-astra']);
+function researchOutputFormat(r,base) {
+  let packet;try{packet=JSON.parse(r.prompt);}catch{return null;}
+  if(packet?.contract!=='comment-research.v3')return null;
+  const schema=packet.outputSchema;
+  if(!schema||schema.type!=='object'||schema.properties?.comments?.type!=='array'||schema.additionalProperties!==false||JSON.stringify(schema).length>6144)throw new Rejected('invalid_request');
+  const official=base.protocol==='https:'&&!base.port&&['','/','/v1','/v1/'].includes(base.pathname);
+  const deepseek=official&&base.hostname==='api.deepseek.com'&&DEEPSEEK_TEXT_MODELS.has(r.modelId);
+  const openai=official&&base.hostname==='api.openai.com'&&OPENAI_STRUCTURED_MODELS.has(r.modelId);
+  if(r.api==='openai-responses'&&(deepseek||openai))return {text:{format:{type:'json_schema',name:'comment_research_v3',schema,...(openai?{strict:true}:{})}}};
+  if(r.api==='openai-completions'&&deepseek)return {response_format:{type:'json_object'}};
+  if(r.api==='openai-completions'&&openai)return {response_format:{type:'json_schema',json_schema:{name:'comment_research_v3',strict:true,schema}}};
+  return null;
+}
 function validate(r) {
   if(!r || r.version!==VERSION || !['connect','discover','probe','analyze'].includes(r.operation) || !API[r.api]
     || !integer(r.timeoutMs,100,60000) || !integer(r.maxOutputTokens,16,8192)
@@ -26,13 +43,22 @@ function usageFrom(value,usage) {
   if(integer(input,0,100000000))usage.inputTokens=input+(u.cache_read_input_tokens||0)+(u.cache_creation_input_tokens||0);
   if(integer(output,0,100000000))usage.outputTokens=output;
 }
+function providerFailure(status,url) {
+  if(status>=300&&status<400)return 'provider_redirect_rejected';
+  if(status===401||status===403)return 'authentication_failed';
+  if(status===429)return 'provider_rate_limited';
+  if(status===404)return url.pathname.endsWith('/models')?'catalog_unavailable':'provider_endpoint_not_found';
+  if(status===400||status===422)return 'provider_request_rejected';
+  if(status>=500)return 'provider_unavailable';
+  return 'provider_failed';
+}
 function scopedFetch(base,signal,usage,failure) {
   return async (input,init={}) => {
     const url=new URL(typeof input==='string'||input instanceof URL?input:input.url);
     const prefix=base.pathname.replace(/\/$/,'');
     if(url.origin!==base.origin||!(url.pathname===prefix||url.pathname.startsWith(prefix+'/')))throw new Rejected('endpoint_rejected');
     const response=await fetch(input,{...init,redirect:'manual',signal:AbortSignal.any([signal,...(init.signal?[init.signal]:[])])});
-    if(!response.ok){failure.code=response.status>=300&&response.status<400?'provider_redirect_rejected':response.status===401||response.status===403?'authentication_failed':response.status===429?'provider_rate_limited':response.status===404?(url.pathname.endsWith('/models')?'catalog_unavailable':'provider_endpoint_not_found'):'provider_failed';await response.body?.cancel();throw new Rejected(failure.code);}
+    if(!response.ok){failure.code=providerFailure(response.status,url);await response.body?.cancel();throw new Rejected(failure.code);}
     if(!response.body)return response;
     let bytes=0,buffer='';const decoder=new TextDecoder();
     const body=response.body.pipeThrough(new TransformStream({transform(chunk,controller){
@@ -67,12 +93,14 @@ export async function execute(r) {
       reasoning:false,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:32768,maxTokens:r.maxOutputTokens};
     // Our current contract accepts final text only. DeepSeek V4 otherwise defaults
     // to thinking even when the local model metadata says reasoning:false.
-    const deepseekTextOnly=base.hostname==='api.deepseek.com'&&['deepseek-v4-flash','deepseek-v4-pro','deepseek-v4-flash-vision-exp'].includes(r.modelId);
+    const deepseekTextOnly=base.hostname==='api.deepseek.com'&&DEEPSEEK_TEXT_MODELS.has(r.modelId);
+    const outputFormat=researchOutputFormat(r,base);
     const onPayload=payload=>{
-      if(!deepseekTextOnly)return payload;
-      if(r.api==='openai-responses')return {...payload,reasoning:{effort:'none'}};
-      if(r.api==='openai-completions')return {...payload,thinking:{type:'disabled'}};
-      return payload;
+      const formatted={...payload,...outputFormat};
+      if(!deepseekTextOnly)return formatted;
+      if(r.api==='openai-responses')return {...formatted,reasoning:{effort:'none'}};
+      if(r.api==='openai-completions')return {...formatted,thinking:{type:'disabled'}};
+      return formatted;
     };
     const models=createModels();
     models.setProvider(createProvider({id:model.provider,baseUrl:base.href,models:[model],

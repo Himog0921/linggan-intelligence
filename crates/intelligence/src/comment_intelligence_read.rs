@@ -3,7 +3,13 @@ use super::observations::add_observations;
 use super::query_sql::{READ, SCOPED};
 use super::*;
 pub async fn read(db: &Database, q: &ResearchScope) -> Result<Value, ModelError> {
-    execute_scoped(db, q, false, None).await
+    // Daily displays frozen batch membership, independent of the voices date filter.
+    let mut daily_scope = q.clone();
+    if q.view.as_deref() == Some("daily") {
+        daily_scope.from = Some("1970-01-01T00:00:00Z".into());
+        daily_scope.to = Some("9999-01-01T00:00:00Z".into());
+    }
+    execute_scoped(db, &daily_scope, false, None).await
 }
 /// Explicit diagnostic seam; never exposed by the product HTTP API.
 pub async fn explain_scope(db: &Database, q: &ResearchScope) -> Result<Value, ModelError> {
@@ -118,6 +124,7 @@ async fn enrich_titles(
         &value["works"],
         &value["page"]["items"],
         &value["distribution"],
+        &value["representatives"],
     ] {
         for item in items.as_array().into_iter().flatten() {
             if let Some(id) = item["workRef"]
@@ -144,6 +151,15 @@ async fn enrich_titles(
             for item in value["page"]["items"].as_array_mut().into_iter().flatten() {
                 if item["workRef"] == v["workRef"] && item["workTitle"].is_null() {
                     item["workTitle"] = v["title"].clone();
+                    item["creatorDisplayName"] = v["creatorDisplayName"].clone();
+                }
+            }
+            for item in value["representatives"]
+                .as_array_mut()
+                .into_iter()
+                .flatten()
+            {
+                if item["workRef"] == v["workRef"] {
                     item["creatorDisplayName"] = v["creatorDisplayName"].clone();
                 }
             }

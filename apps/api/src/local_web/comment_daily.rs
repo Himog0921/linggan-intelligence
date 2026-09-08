@@ -14,6 +14,14 @@ use uuid::Uuid;
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/api/local/comment-research/daily", get(read))
+        .route(
+            "/api/local/comment-research/daily/context-settings",
+            get(context_settings).post(save_context_settings),
+        )
+        .route(
+            "/api/local/comment-research/daily/{batch}/requests/{invocation}",
+            get(request_detail),
+        )
         .route("/api/local/comment-research/daily/schedule", post(schedule))
         .route("/api/local/comment-research/daily/selected", post(selected))
         .route(
@@ -92,6 +100,7 @@ async fn selected(State(s): State<LocalWebState>, Json(r): Json<SelectedBatch>) 
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Cursor {
     after: Option<Uuid>,
+    domain: Option<Uuid>,
 }
 async fn detail(
     State(s): State<LocalWebState>,
@@ -103,6 +112,22 @@ async fn detail(
     };
     if !schema_ready(db).await.unwrap_or(false) {
         return unavailable();
+    }
+    if let Some(domain) = q.domain {
+        let own = sqlx::query_scalar::<_, bool>(
+            "SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1 AND is_own_domain)",
+        )
+        .bind(domain)
+        .fetch_one(db.pool())
+        .await
+        .unwrap_or(false);
+        if !own {
+            return (
+                StatusCode::FORBIDDEN,
+                Json(json!({"error":"comment_source_unavailable"})),
+            )
+                .into_response();
+        }
     }
     response(batch_detail(db, batch, q.after).await)
 }
@@ -152,4 +177,38 @@ async fn usage_review_action(
         return unavailable();
     };
     response(review_usage(db, batch, &r).await)
+}
+
+async fn context_settings(State(s): State<LocalWebState>) -> Response {
+    let Some(db) = s.database.database() else {
+        return unavailable();
+    };
+    response(linggan_intelligence::comment_runtime::settings(db).await)
+}
+async fn save_context_settings(
+    State(s): State<LocalWebState>,
+    Json(r): Json<linggan_intelligence::comment_runtime::SaveContext>,
+) -> Response {
+    let Some(db) = s.database.database() else {
+        return unavailable();
+    };
+    response(linggan_intelligence::comment_runtime::save_settings(db, &r).await)
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RequestScope {
+    domain: Uuid,
+}
+async fn request_detail(
+    State(s): State<LocalWebState>,
+    Path((batch, invocation)): Path<(Uuid, Uuid)>,
+    Query(q): Query<RequestScope>,
+) -> Response {
+    let Some(db) = s.database.database() else {
+        return unavailable();
+    };
+    response(
+        linggan_intelligence::comment_runtime::request_detail(db, batch, invocation, q.domain)
+            .await,
+    )
 }

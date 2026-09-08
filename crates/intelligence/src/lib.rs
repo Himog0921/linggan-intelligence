@@ -39,3 +39,5 @@ pub mod comment_intelligence;
 pub mod comment_intelligence_actions;
 pub mod comment_intelligence_problems;
 pub mod comment_intelligence_statistics;
+
+pub mod comment_runtime;

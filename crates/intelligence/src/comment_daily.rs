@@ -8,7 +8,7 @@ use uuid::Uuid;
 pub const DAILY_RULE: &str = "comment-research.v3";
 pub async fn schema_ready(db: &Database) -> Result<bool, ModelError> {
     Ok(
-        sqlx::query_scalar("SELECT to_regclass('linggan_comment_semantic_work') IS NOT NULL")
+        sqlx::query_scalar("SELECT to_regclass('linggan_comment_semantic_work') IS NOT NULL AND to_regclass('linggan_comment_request_trace') IS NOT NULL")
             .fetch_one(db.pool())
             .await?,
     )
@@ -51,6 +51,7 @@ pub async fn save_schedule(db: &Database, r: &DailySchedule) -> Result<Value, Mo
         .await?;
     let row=sqlx::query("UPDATE linggan_comment_daily_schedule SET revision=revision+1,enabled=$2,config_ref=$3,source_limit=$4,token_limit=$5,next_start=CASE WHEN $2 THEN COALESCE(next_start,scope_001_now()) ELSE next_start END,next_end=CASE WHEN $2 THEN COALESCE(next_end,(date_trunc('day',scope_001_now() AT TIME ZONE 'Asia/Shanghai')+interval '23 hours'+CASE WHEN (scope_001_now() AT TIME ZONE 'Asia/Shanghai')::time>=time '23:00' THEN interval '1 day' ELSE interval '0' END) AT TIME ZONE 'Asia/Shanghai') ELSE next_end END,updated_at=scope_001_now() WHERE singleton AND revision=$1 RETURNING revision")
         .bind(r.expected_revision).bind(r.enabled).bind(r.config_ref).bind(r.source_limit).bind(r.token_limit).fetch_optional(&mut *tx).await?.ok_or(ModelError::Conflict)?;
+    sqlx::query("UPDATE linggan_comment_daily_schedule SET context_policy=(SELECT policy FROM linggan_comment_context_settings WHERE singleton) WHERE singleton").execute(&mut *tx).await?;
     // Daily is the new scheduling authority; do not leave the previous continuous auto loop active.
     sqlx::query("UPDATE linggan_model_plan SET enabled=false,revision=revision+1 WHERE kind='automatic' AND enabled").execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_model_workspace SET active_auto_plan_ref=NULL WHERE singleton")
@@ -103,7 +104,7 @@ pub async fn create_selected(db: &Database, r: &SelectedBatch) -> Result<Value, 
     if count != r.source_refs.len() as i64 {
         return Err(ModelError::Source);
     }
-    sqlx::query("INSERT INTO linggan_comment_daily_batch(batch_ref,kind,config_ref,window_start,window_end,source_limit,token_limit,request) VALUES($1,'selected',$2,scope_001_now(),scope_001_now(),$3,$4,$5)")
+    sqlx::query("INSERT INTO linggan_comment_daily_batch(batch_ref,kind,config_ref,window_start,window_end,source_limit,token_limit,request,context_policy) VALUES($1,'selected',$2,scope_001_now(),scope_001_now(),$3,$4,$5,COALESCE((SELECT context_policy FROM linggan_ci_prepare WHERE prepare_ref=$1),(SELECT policy FROM linggan_comment_context_settings WHERE singleton)))")
         .bind(r.batch_ref).bind(r.config_ref).bind(r.source_refs.len()as i32).bind(r.token_limit).bind(request).execute(&mut *tx).await?;
     sqlx::query(
         "INSERT INTO linggan_comment_daily_item(batch_ref,source_ref) SELECT $1,unnest($2::uuid[])",
@@ -121,7 +122,7 @@ pub async fn seal_due(db: &Database) -> Result<bool, ModelError> {
     let batch = Uuid::new_v4();
     let start: String = r.get("start_text");
     let end: String = r.get("end_text");
-    sqlx::query("INSERT INTO linggan_comment_daily_batch(batch_ref,kind,config_ref,window_start,window_end,source_limit,token_limit,request) VALUES($1,'daily',$2,$3::timestamptz,$4::timestamptz,$5,$6,$7)")
+    sqlx::query("INSERT INTO linggan_comment_daily_batch(batch_ref,kind,config_ref,window_start,window_end,source_limit,token_limit,request,context_policy) VALUES($1,'daily',$2,$3::timestamptz,$4::timestamptz,$5,$6,$7,(SELECT policy FROM linggan_comment_context_settings WHERE singleton))")
         .bind(batch).bind(r.get::<Uuid,_>("config_ref")).bind(&start).bind(&end).bind(r.get::<i32,_>("source_limit")).bind(r.get::<i64,_>("token_limit"))
         .bind(json!({"scheduleRevision":r.get::<i32,_>("revision"),"timezone":"Asia/Shanghai","cleanerVersion":crate::comment_cleaning::CLEANER_VERSION,"ruleVersion":DAILY_RULE})).execute(&mut *tx).await?;
     // Identity first acceptance is independent of current observation/interaction updates.
@@ -142,7 +143,7 @@ pub(crate) async fn seal_supplements(db: &Database) -> Result<(), ModelError> {
         let batch = Uuid::new_v4();
         let origin: Uuid = r.get("batch_ref");
         let source: Uuid = r.get("material_ref");
-        sqlx::query("INSERT INTO linggan_comment_daily_batch(batch_ref,kind,config_ref,window_start,window_end,source_limit,token_limit,request) VALUES($1,'supplement',$2,$3::timestamptz,$4::timestamptz,$5,$6,$7)").bind(batch).bind(r.get::<Uuid,_>("config_ref")).bind(r.get::<String,_>("start_text")).bind(r.get::<String,_>("end_text")).bind(r.get::<i32,_>("source_limit")).bind(r.get::<i64,_>("token_limit")).bind(json!({"originBatchRef":origin,"sourceRef":source,"reason":"source_text_revised","ruleVersion":DAILY_RULE,"newIntake":false})).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO linggan_comment_daily_batch(batch_ref,kind,config_ref,window_start,window_end,source_limit,token_limit,request,context_policy) VALUES($1,'supplement',$2,$3::timestamptz,$4::timestamptz,$5,$6,$7,(SELECT context_policy FROM linggan_comment_daily_batch WHERE batch_ref=($7->>'originBatchRef')::uuid))").bind(batch).bind(r.get::<Uuid,_>("config_ref")).bind(r.get::<String,_>("start_text")).bind(r.get::<String,_>("end_text")).bind(r.get::<i32,_>("source_limit")).bind(r.get::<i64,_>("token_limit")).bind(json!({"originBatchRef":origin,"sourceRef":source,"reason":"source_text_revised","ruleVersion":DAILY_RULE,"newIntake":false})).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO linggan_comment_daily_item(batch_ref,source_ref) VALUES($1,$2)")
             .bind(batch)
             .bind(source)

@@ -92,10 +92,47 @@
     returnFocus = null,
     command = null,
     savedScroll = 0,
-    busyAction = false;
+    busyAction = false,
+    selectionNotice = "",
+    batchDetail = null,
+    batchDetailError = "",
+    refreshTimer = null,
+    requestGeneration = 0,
+    voiceScope = null,
+    resultsCurrent = true;
   const selected = new Set();
+  const selectedSources = new Map();
+  const voiceFilterReset = { text: "", workRef: "", lenses: "", problemRef: "", term: "", bookmarkedOnly: false, processingState: "", sourceRefs: "" };
+  function rememberVoiceScope() {
+    return Object.fromEntries([...Object.keys(voiceFilterReset), "batchRef", "sort", "offset", "limit", "from", "to", "days", "timeBasis"].map((key) => [key, state[key]]));
+  }
+  if (state.view === "daily") {
+    voiceScope = rememberVoiceScope();
+    Object.assign(state, voiceFilterReset, { offset: 0 });
+  }
+  const selectionScopeKeys = ["domain", "days", "from", "to", "timeBasis", "text", "workRef", "lenses", "problemRef", "term", "bookmarkedOnly", "batchRef", "processingState", "sourceRefs"];
+  function clearSelectionForScope(patch) {
+    if (selected.size && selectionScopeKeys.some((key) => Object.hasOwn(patch, key) && patch[key] !== state[key])) {
+      selectionNotice = `筛选范围已改变，已清空先前选择的 ${num(selected.size)} 条评论。`;
+      selected.clear();
+      selectedSources.clear();
+    }
+  }
+  function selectSource(source, enabled) {
+    if (!resultsCurrent) return;
+    if (enabled) {
+      selected.add(source.sourceRef);
+      selectedSources.set(source.sourceRef, source);
+    } else {
+      selected.delete(source.sourceRef);
+      selectedSources.delete(source.sourceRef);
+    }
+  }
   const errors = {
     revision_conflict: "记录已更新，请保留输入并重新读取最新版本。",
+    model_revision_conflict: "研究设置已被更新，请重新打开设置后保存。",
+    invalid_model_command: "设置没有保存，请核对数量与预算范围。",
+    model_source_unavailable: "相关来源当前不可读，无法展示或继续处理。",
     invalid_query: "查询条件不正确，请检查日期与筛选范围。",
     research_selection_limit:
       "本次手动研究最多100条，请缩小范围或选取试跑；每日持续研究请使用研究设置。",
@@ -237,6 +274,8 @@
   }
   function showModal(title, html, submit, callback) {
     command = callback;
+    requestGeneration++;
+    modal.classList.remove("ci-request-dialog");
     $("ci-command-title").textContent = title;
     $("ci-command-fields").innerHTML = html;
     $("ci-command-feedback").textContent = "";
@@ -244,8 +283,24 @@
     $("ci-command-submit").hidden = !callback;
     if (!modal.open) modal.showModal();
   }
+  const resultActions = new Set(["select-page", "prepare", "prepare-selected", "bookmark-selected", "candidate-create", "candidate-voices", "problem-create"]);
+  function setResultsCurrent(current) {
+    resultsCurrent = current;
+    const selectors = ["[data-ci-select-page]", "[data-ci-select]", ...[...resultActions].map((a) => `[data-ci="${a}"]`)];
+    document.querySelectorAll(selectors.join(",")).forEach((control) => {
+      if (!current && !control.disabled) {
+        control.dataset.ciLoadingDisabled = "true";
+        control.disabled = true;
+      } else if (current && control.dataset.ciLoadingDisabled === "true") {
+        control.disabled = false;
+        delete control.dataset.ciLoadingDisabled;
+      }
+    });
+  }
   async function load() {
     const seq = ++generation;
+    setResultsCurrent(false);
+    clearTimeout(refreshTimer);
     abort?.abort();
     abort = new AbortController();
     $("results").setAttribute("aria-busy", "true");
@@ -264,10 +319,38 @@
       if (seq !== generation) return;
       if (!v.scope || !v.page || !v.summary)
         throw new Error("服务响应缺少范围或计数，未更新页面。");
+      if (state.view === "daily" && !state.batchRef && v.daily?.items?.length) {
+        clearSelectionForScope({ batchRef: v.daily.items[0].batchRef });
+        state.batchRef = v.daily.items[0].batchRef;
+        return load();
+      }
+      batchDetail = null;
+      batchDetailError = "";
+      if (state.view === "daily" && state.batchRef) {
+        try {
+          batchDetail = await request(`${old}/daily/${encodeURIComponent(state.batchRef)}?domain=${encodeURIComponent(domain)}`, undefined, abort.signal);
+        } catch (e) {
+          if (e.name === "AbortError") throw e;
+          batchDetailError = e.message;
+        }
+      }
+      if (seq !== generation) return;
       data = v;
+      for (const source of v.page.items) if (selected.has(source.sourceRef)) selectedSources.set(source.sourceRef, source);
       state.resultRevision = v.scope.resultRevision || "";
+      setResultsCurrent(true);
       render();
-      feedback(v.scope.updated ? "结果已更新：本页显示最新聚合版本。" : "");
+      feedback(selectionNotice || (v.scope.updated ? "结果已更新：本页显示最新聚合版本。" : ""));
+      selectionNotice = "";
+      const currentBatch = v.daily?.items?.find((b) => b.batchRef === state.batchRef);
+      if (state.view === "daily" && currentBatch?.enabled && ((currentBatch.counts?.pending || 0) + (currentBatch.counts?.running || 0) > 0)) {
+        const refreshWhenVisible = () => {
+          if (state.view !== "daily") return;
+          if (document.visibilityState === "visible" && !modal.open && inspector.hidden) load();
+          else refreshTimer = setTimeout(refreshWhenVisible, 5000);
+        };
+        refreshTimer = setTimeout(refreshWhenVisible, 5000);
+      }
     } catch (e) {
       if (seq !== generation || e.name === "AbortError") return;
       feedback(
@@ -280,13 +363,12 @@
     }
   }
   function navigate(patch) {
+    if (patch.view === "daily" && state.view !== "daily") {
+      voiceScope = rememberVoiceScope();
+      patch = { ...patch, ...voiceFilterReset, offset: 0 };
+    }
     closeInspector();
     savedScroll = main.scrollTop;
-    history.replaceState(
-      { ...state, scroll: savedScroll },
-      "",
-      `${location.pathname}?${query()}`,
-    );
     if (
       data?.scope &&
       patch.from === undefined &&
@@ -296,8 +378,13 @@
       state.from = data.scope.from;
       state.to = data.scope.to;
     }
+    history.replaceState(
+      { ...state, scroll: savedScroll },
+      "",
+      `${location.pathname}?${query()}`,
+    );
+    clearSelectionForScope(patch);
     Object.assign(state, patch, { offset: patch.offset ?? 0 });
-    selected.clear();
     history.pushState(
       { ...state, scroll: 0 },
       "",
@@ -320,7 +407,7 @@
     $("ci-days").disabled = state.view === "daily";
     const s = data.scope;
     $("ci-scope").innerHTML =
-      `<div>${esc(s.domainName || document.body.dataset.corpusDomainName || "当前领域")} · ${state.view === "daily" ? "批次范围" : state.timeBasis === "published" ? "按评论发表时间" : "按首次观察时间"}${state.workRef ? " · 已限定作品" : ""}${state.problemRef ? " · 已限定问题" : ""}${state.term ? " · 热词：" + esc(state.term) : ""}${state.sourceRefs ? " · 精确证据集" : ""}${state.text ? " · 检索：" + esc(state.text) : ""} ${state.workRef || state.problemRef || state.term || state.text || state.lenses || state.processingState || state.sourceRefs ? btn("清除筛选", "clear") : ""}<div class="lgi-research-meta">${esc(date(s.from, true))} 至 ${esc(date(s.to, true))}（不含截止时刻）</div></div><div>${data.model?.modelConnected ? "研究模型已连接" : `<a href="/settings/models">${data.model?.modelState === "PAUSED" ? "模型连接已暂停" : data.model?.modelState === "NEEDS_SELECTION" ? "请选择已通过校验的默认模型" : data.model?.modelState === "NEEDS_QUALIFICATION" ? "模型需要测试评论格式" : "模型尚未配置"}</a>`} · 截止 ${esc(date(s.asOf))}<details><summary>范围与版本</summary><p>聚合版本 ${esc(s.resultRevision || "未知")} · ${esc(s.timeBasis || state.timeBasis)}</p><p>按发表时间筛选时排除 ${num(data.summary.excludedPublished)} 条无法可靠解析时间的评论。</p></details></div>`;
+      `<div>${esc(s.domainName || document.body.dataset.corpusDomainName || "当前领域")} · ${state.view === "daily" ? "批次范围" : state.timeBasis === "published" ? "按评论发表时间" : "按首次观察时间"}${state.workRef ? " · 已限定作品" : ""}${state.problemRef ? " · 已限定问题" : ""}${state.term ? " · 热词：" + esc(state.term) : ""}${state.sourceRefs ? " · 精确证据集" : ""}${state.text ? " · 检索：" + esc(state.text) : ""} ${state.workRef || state.problemRef || state.term || state.text || state.lenses || state.processingState || state.sourceRefs ? btn("清除筛选", "clear") : ""}<div class="lgi-research-meta">${state.view === "daily" ? "按本批冻结的评论成员查看，不受原声浏览日期筛选影响" : `${esc(date(s.from, true))} 至 ${esc(date(s.to, true))}（不含截止时刻）`}</div></div><div>${data.model?.modelConnected ? "研究模型已连接" : `<a href="/settings/models">${data.model?.modelState === "PAUSED" ? "模型连接已暂停" : data.model?.modelState === "NEEDS_SELECTION" ? "请选择已通过校验的默认模型" : data.model?.modelState === "NEEDS_QUALIFICATION" ? "模型需要测试评论格式" : "模型尚未配置"}</a>`} · 截止 ${esc(date(s.asOf))}<details><summary>范围与版本</summary><p>聚合版本 ${esc(s.resultRevision || "未知")} · ${esc(s.timeBasis || state.timeBasis)}</p><p>按发表时间筛选时排除 ${num(data.summary.excludedPublished)} 条无法可靠解析时间的评论。</p></details></div>`;
     renderTools();
     if (state.view === "overview") renderOverview();
     else if (state.view === "voices")
@@ -345,7 +432,7 @@
           )
           .join(
             "",
-          )}<span class="ci-flex"></span>${btn("☆ 仅收藏", "bookmarked", `aria-pressed="${state.bookmarkedOnly}"`)}</div><div class="ci-result-line"><span>${num(data.page.total)} 条原声 · 已分析 ${num(data.summary.analyzed)} / ${num(data.summary.eligible)}${state.processingState ? " · " + esc(status[state.processingState] || "待处理") : ""}</span><label>排序 <select id="ci-sort"><option value="observed">最近观察</option><option value="likes" ${state.sort === "likes" ? "selected" : ""}>点赞最多</option></select></label>${btn("保存查询", "save-query")}${state.bookmarkedOnly ? btn("历史收藏", "legacy-assets") : ""}</div>`
+          )}<span class="ci-flex"></span>${btn("☆ 仅收藏", "bookmarked", `aria-pressed="${state.bookmarkedOnly}"`)}</div><div class="ci-result-line"><span>${num(data.page.total)} 条原声 · 完成分析 ${num(data.summary.analyzed)} / ${num(data.summary.eligible)}（含无信号结果）${state.processingState ? " · " + esc(status[state.processingState] || "待处理") : ""}</span><label>排序 <select id="ci-sort"><option value="observed">最近观察</option><option value="likes" ${state.sort === "likes" ? "selected" : ""}>点赞最多</option></select></label>${btn("保存查询", "save-query")}${state.bookmarkedOnly ? btn("历史收藏", "legacy-assets") : ""}</div>`
       : "";
   }
   function voiceTable(items) {
@@ -356,9 +443,11 @@
     return `<div class="ci-table-wrap"><table class="ci-voices"><colgroup><col class="ci-col-select"><col><col class="ci-col-tags"><col class="ci-col-work"><col class="ci-col-likes"><col class="ci-col-time"></colgroup><thead><tr><th><input type="checkbox" data-ci-select-page aria-label="选择当前页评论" ${items.every((s) => selected.has(s.sourceRef)) ? "checked" : ""}></th><th>评论原声／回复</th><th>研究标签</th><th>所属作品</th><th class="lgi-research-number">赞</th><th>${state.timeBasis === "published" ? "发表时间" : "首次观察"}</th></tr></thead><tbody>${items.map((s) => `<tr data-row="${esc(s.sourceRef)}"><td><input type="checkbox" data-ci-select="${esc(s.sourceRef)}" aria-label="选择评论" ${selected.has(s.sourceRef) ? "checked" : ""}></td><td><button type="button" class="lgi-voice-open" data-ci="source" data-ref="${esc(s.sourceRef)}"><span class="lgi-voice-preview">${markedBody(s.body)}</span></button>${s.isReply ? `<div class="ci-parent">↳ ${esc(s.parentPreview || "父评论尚未采集")}</div>` : ""}<div class="ci-inline-tags">${tags(s.labels, true)}</div>${s.sourceChanged ? '<span class="lgi-research-meta">原文已变化，原人工判断待复核</span>' : ""}${!s.labels?.length ? `<span class="lgi-research-meta">${esc(status[s.analysisState] || status[s.cleanState] || "待分析")}</span>` : ""}${s.matchLocation ? `<span class="lgi-research-meta">${esc(s.matchLocation)}</span>` : ""}</td><td class="ci-tags-cell">${tags(s.labels, true)}${bookmark(s)}</td><td><a class="lgi-research-source-title" href="${linkWork(s)}">${esc(s.workTitle || "作品标题未知")}</a><div class="ci-author">${esc(s.creatorDisplayName || "作者未知")}</div></td><td class="lgi-research-number" title="${s.likes == null ? "尚未取得点赞" : esc(s.likes)}">${s.likes == null ? "—" : s.likes >= 10000 ? (s.likes / 10000).toFixed(1) + "万" : num(s.likes)}</td><td>${state.timeBasis === "published" ? esc(s.publishedAt ? date(s.publishedAt) : s.publishedAtText ? "采集时：" + s.publishedAtText : "未知") : esc(date(s.firstObservedAt))}</td></tr>`).join("")}</tbody></table></div>`;
   }
   function representative(s) {
-    return `<article class="ci-representative"><button type="button" data-ci="source" data-ref="${esc(s.sourceRef)}" class="lgi-voice-open"><span class="lgi-voice-preview">${esc(s.body || "原声当前不可读")}</span></button><div class="ci-result-line"><span>${tags(s.labels) || '<span class="lgi-research-meta">待分析</span>'}</span><span class="lgi-research-meta">${esc(s.creatorDisplayName || "作者未知")} · ${num(s.likes)}赞 ${bookmark(s)}</span></div></article>`;
+    return `<article class="ci-representative"><button type="button" data-ci="source" data-ref="${esc(s.sourceRef)}" class="lgi-voice-open"><span class="lgi-voice-preview">${esc(s.body || "原声当前不可读")}</span></button><div class="ci-result-line"><span>${tags(s.labels) || `<span class="lgi-research-meta">${s.hasAnalysis ? '已分析' : '待分析'}</span>`}</span><span class="lgi-research-meta">${esc(s.creatorDisplayName || "作者未知")} · ${num(s.likes)}赞 ${bookmark(s)}</span></div></article>`;
   }
   function observations(items) {
+    if (data.rules?.advancedReleaseEnabled === false)
+      return '<div class="ci-empty-compact"><p>高级观察尚未启用</p><p class="lgi-research-meta">共鸣、冲突与变化判断还需校准。已提取的需求、故事和问题表达仍可查看。</p></div>';
     return items.length
       ? `<ol class="ci-observations">${items
           .slice(0, 3)
@@ -452,7 +541,8 @@
     if (!p) {
       $("results").innerHTML = (data.problems || []).length
         ? `<table><thead><tr><th>用户问题</th><th>评论</th><th>作品</th><th>样本内变化</th><th>最近原声</th></tr></thead><tbody>${data.problems.map((p) => `<tr><td>${btn(esc(p.name), "problem", `data-ref="${esc(p.problemRef)}" class="ci-text-action"`)}</td><td>${num(p.comments)}</td><td>${num(p.works)}</td><td>${esc(p.change?.label || "无可比基线")}</td><td><span class="lgi-voice-preview">${esc(p.representative?.body || "暂无代表原声")}</span></td></tr>`).join("")}</tbody></table>`
-        : empty("尚未形成稳定的用户问题。可以从原声中研究或纠正问题归属。");
+        : `<div class="ci-empty-compact"><h2>还没有归并成形的用户问题</h2><p>已分析 ${num(data.summary.analyzed)} 条评论。提取出的具体问题先保留在下方，核对原声后可确认归属。</p>${btn("浏览原声", "voices")}</div>`;
+      $("results").innerHTML += candidateList();
       return;
     }
     $("results").innerHTML =
@@ -466,38 +556,69 @@
           .join("") || '<p class="lgi-research-meta">暂无来源分布。</p>'
       }</section></div><details><summary>定义与变更记录</summary><p>${esc(p.definition?.boundary || p.meaning)}</p>${(data.history || []).map((h) => `<p>修订 ${num(h.revision)} · ${esc(h.reason || h.kind || "定义更新")} · ${esc(date(h.createdAt))}</p>`).join("") || "<p>暂无变更记录。</p>"}</details><section class="ci-section"><h2>相关原声</h2>${voiceTable(data.page.items)}</section>`;
   }
+  function candidateList() {
+    const candidates = data.problemCandidates || [];
+    const total = data.candidateTotal;
+    return `<section class="ci-section ci-candidates"><div class="ci-section-head"><h2>待整理的问题表达 <span class="lgi-research-meta">${num(total ?? candidates.length)} 个候选</span></h2></div><p class="lgi-research-meta">模型提取的具体问题，尚未确认为稳定问题。先看用户怎样说，再决定是否归入同一个问题。</p>${candidates.length ? `<ul class="ci-candidate-list">${candidates.map((p) => `<li><div><h3>${esc(p.name)}</h3><p>${esc(p.meaning)}</p>${p.evidence?.length ? `<blockquote>${esc(typeof p.evidence[0] === "string" ? p.evidence[0] : p.evidence[0].quote || p.evidence[0].body || "")}</blockquote>` : ""}<span class="lgi-research-meta">${num(p.comments)} 条原声 · ${num(p.works)} 篇作品 · 待确认归属</span></div><div class="ci-candidate-actions">${btn("核对原声", "candidate-voices", `data-ref="${esc(p.candidateRef)}"`)}${canResearch ? btn("确认为问题", "candidate-create", `data-ref="${esc(p.candidateRef)}"`) : ""}</div></li>`).join("")}</ul>${total > candidates.length ? `<p class="lgi-research-meta">当前展示 ${num(candidates.length)} / ${num(total)} 个候选，可通过作品或评论关键词缩小范围。</p>` : ""}` : `<p class="ci-empty-compact">${total == null ? "问题候选尚未提供，请刷新后重试。" : data.summary.analyzed ? "当前范围内尚未提取到未归并的问题表达。可查看已分析原声，核对标签与具体结果。" : "评论尚未分析。先在原声中选择一批评论进行研究，提取到的问题会在这里保留。"}</p>`}</section>`;
+  }
+  const failureText = (code) => ({
+    item_schema_invalid: "返回字段不符合评论格式",
+    json_invalid: "模型返回未能解析为完整 JSON",
+    schema_invalid: "返回内容不符合约定结构",
+    json_or_schema_invalid: "返回内容不符合约定结构",
+    provider_failed: "供应商未交付完整结果",
+    provider_request_rejected: "供应商拒绝了这次请求，请核对模型与接口配置",
+    provider_unavailable: "供应商暂不可用，可稍后重试",
+    provider_timeout: "等待供应商响应超时",
+    output_limit: "输出达到本次上限",
+    evidence_bounds: "证据引用数量不符合约束",
+    interpretable_without_evidence: "声明有解释，但没有提供研究结果",
+    missing_comment: "模型遗漏了这条评论",
+    duplicate_comment: "同一评论被重复返回",
+    quote_missing_or_ambiguous: "证据引用无法唯一对应原声",
+    quote_redacted_or_empty: "证据引用为空或包含已遮盖内容",
+    model_input_limit: "上下文超过输入预算，尚未调用模型",
+    context_changed: "调用期间上下文变化，结果未接纳",
+    worker_interrupted: "执行中断，供应商用量可能未知",
+    source_or_plan_unavailable: "来源不可用或研究已暂停",
+  })[code] || (code ? "此项未通过校验，打开详情核对具体原因" : "");
+  const duration = (ms) => ms == null ? "耗时未知" : ms < 1000 ? `${num(ms)} 毫秒` : `${(ms / 1000).toFixed(1)} 秒`;
+  function callTable(calls, batchRef) {
+    return calls.length ? `<div class="ci-table-wrap"><table class="ci-call-table"><thead><tr><th>作品与评论</th><th>执行情况</th><th>用量</th><th>详情</th></tr></thead><tbody>${calls.map((c, i) => `<tr><td><span class="lgi-research-meta">调用 ${i + 1}</span><div class="lgi-voice-preview">${esc(c.workTitle || "作品标题未记录")}</div><span class="lgi-research-meta">${num(c.requestedComments)} 条评论 · ${esc(c.modelId || "模型未记录")}</span></td><td><span class="ci-operation" data-state="${esc(c.state)}">${c.state === "running" ? "等待模型返回" : c.state === "succeeded" ? "输出已接纳" : c.state === "partial" ? "部分输出已接纳" : c.state === "failed" ? "未接纳研究输出" : "状态未知"}</span><div class="lgi-research-meta">${esc(date(c.startedAt))} · ${duration(c.elapsedMs)}</div><div>${c.acceptedComments == null ? "" : `接纳 ${num(c.acceptedComments)} 条输出`}</div>${c.succeededComments != null ? `<div class="lgi-research-meta">有结果 ${num(c.succeededComments)} · 无信号 ${num(c.noSignalComments)} · 未接纳 ${num(c.failedComments)}</div>` : ""}${c.failureCode ? `<p class="ci-failure-text">${esc(failureText(c.failureCode))}</p>` : ""}</td><td><span>输入 ${num(c.inputTokens)} / 输出 ${num(c.outputTokens)}</span><div class="lgi-research-meta">${c.usageUnknown ? `用量待核对 · 保留预留 ${num(c.reservedTokens)}` : "供应商已报告用量"}</div></td><td>${btn("查看过程", "request-detail", `data-ref="${esc(batchRef)}" data-invocation="${esc(c.invocationRef)}"`)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="ci-empty-compact">尚无模型请求记录。批次可能还在清洗、等待执行或已暂停。</p>`;
+  }
   function renderDaily() {
-    const daily = data.daily || { items: [], schedule: {} },
-      items = daily.items || [],
-      b = items.find((x) => x.batchRef === state.batchRef);
-    $("ci-tools").innerHTML =
-      `<div class="ci-result-line"><label>研究批次 <select id="ci-batch"><option value="">选择已有批次</option>${items.map((x) => `<option value="${esc(x.batchRef)}" ${x.batchRef === state.batchRef ? "selected" : ""}>${esc(date(x.end, true))} · ${x.kind === "daily" ? "每日新增" : "指定范围研究"}</option>`).join("")}</select></label><span class="lgi-research-meta">每日观察${daily.schedule?.enabled ? "已启用" : "尚未启用或已暂停"} · 北京时间 23:00 冻结批次</span></div>`;
-    $("results").innerHTML = b
-      ? `<section class="ci-problem-header"><h2>本次评论观察</h2><p>${esc(date(b.start, true))} → ${esc(date(b.end, true))} · 北京时间</p><p>${num(b.total)} 条原声 · ${num(b.works)} 篇作品 · ${Object.entries(
-          b.counts || {},
-        )
-          .map(([k, v]) => esc(status[k] || k) + " " + num(v))
-          .join(
-            " · ",
-          )}</p>${b.kind !== "daily" ? '<p class="ci-notice">本次新分析到的历史评论，不表示今天新出现的用户需求。</p>' : ""}${btn("查看本批原声", "batch-voices")}</section><div class="ci-grid"><section><h2>本次值得注意</h2>${observations(data.observations || [])}</section><section><h2>已有问题的本批原声</h2>${problemList(data.problems || [])}</section></div><details class="ci-section"><summary>运行记录与控制</summary><p>当前筛选包含 ${num(b.total)} 条；完整批次 ${num(b.batchTotals?.total ?? b.total)} 条。完整批次已计用量 ${num(b.chargedTokens)} / ${num(b.tokenLimit)} Token。包含用量未知时保留的预留，无法据此推算实际货币费用。</p><p>${b.enabled ? "允许执行" : "已暂停"} · 暂停停止后续派发，已发出的调用仍可能返回并计费。</p><div class="lgi-research-actions">${btn(b.enabled ? "暂停批次" : "恢复批次", "batch-toggle", `data-ref="${esc(b.batchRef)}" data-enabled="${!b.enabled}"`)}${btn("重试失败", "batch-retry", `data-ref="${esc(b.batchRef)}" ${b.enabled && b.counts?.failed ? "" : "disabled"}`)}${btn("继续处理积压／调整额度", "batch-continue", `data-ref="${esc(b.batchRef)}"`)}${btn("逐条运行记录", "batch-records", `data-ref="${esc(b.batchRef)}"`)}</div></details>`
-      : empty(
-          items.length
-            ? "选择一个批次查看本次观察。原声范围与批次范围分别保留。"
-            : "尚无研究批次。先对少量原声试跑，确认结果后在研究设置中启用每日观察。",
-        );
+    const daily = data.daily || { items: [], schedule: {} }, items = daily.items || [], b = items.find((x) => x.batchRef === state.batchRef);
+    $("ci-tools").innerHTML = `<div class="ci-result-line"><label class="ci-batch-picker"><span>研究批次</span> <select id="ci-batch"><option value="">查看最近批次</option>${items.map((x) => `<option value="${esc(x.batchRef)}" ${x.batchRef === state.batchRef ? "selected" : ""}>${esc(date(x.end, true))} · ${x.kind === "daily" ? "每日新增" : "指定范围研究"}</option>`).join("")}</select></label><span>每日自动研究${daily.schedule?.enabled ? "已启用 · 北京时间 23:00 开始" : "未启用"}</span></div>`;
+    if (!b) {
+      $("results").innerHTML = `<div class="ci-empty-compact"><h2>${items.length ? "这个批次当前不在可见范围" : "从一批原声开始研究"}</h2><p>${items.length ? "请从上方选择已有批次，查看研究结果与执行情况。" : "在原声中勾选评论后开始研究。这里会保留每批的发现、未完成项和模型处理过程。"}</p>${btn("浏览原声", "voices")}</div>`;
+      return;
+    }
+    const counts = b.counts || {}, calls = batchDetail?.calls || [];
+    const unfinished = Object.entries(counts).filter(([k]) => !["succeeded", "no_signal", "failed"].includes(k));
+    const knownInput = calls.reduce((n, c) => n + (c.inputTokens || 0), 0), knownOutput = calls.reduce((n, c) => n + (c.outputTokens || 0), 0);
+    const unknownReserve = calls.filter((c) => c.usageUnknown).reduce((n, c) => n + (c.reservedTokens || 0), 0);
+    $("results").innerHTML = `<section class="ci-batch-header"><div class="ci-section-head"><div><h2>这批评论告诉了我们什么</h2><p class="lgi-research-meta">${num(b.total)} 条原声 · ${num(b.works)} 篇作品 · ${esc(date(b.end, true))}</p></div><div class="lgi-research-actions">${btn("查看本批原声", "batch-voices")}${btn("查看运行过程", "show-run")}</div></div><div class="ci-batch-readouts">${[["提取到研究结果", counts.succeeded || 0, "succeeded"], ["未提取到信号", counts.no_signal || 0, "no_signal"], ["分析未完成", counts.failed || 0, "failed"]].map(([label, value, key]) => `<button type="button" data-ci="batch-result" data-state="${key}"><span>${label}</span><strong>${num(value)} <small>条</small></strong><span>${key === "succeeded" ? "查看标签与具体表达" : key === "no_signal" ? "原声保留，可继续核对" : "查看原因与处理方式"}</span></button>`).join("")}</div>${unfinished.length ? `<p class="ci-notice">${unfinished.map(([k, v]) => `${esc(status[k] || "其他待处理状态")} ${num(v)} 条`).join(" · ")}${counts.running ? " · 每 5 秒更新执行情况" : ""}</p>` : ""}${b.kind !== "daily" ? '<p class="lgi-research-meta">这是本批分析到的历史评论，不能据此判断今天新出现了哪些需求。</p>' : ""}</section><section class="ci-section"><div class="ci-section-head"><h2>本批研究结果</h2>${btn("逐条核对", "batch-records", `data-ref="${esc(b.batchRef)}"`)}</div><div class="ci-lens-strip">${["need", "solution", "story", "quote"].map((k) => `<button type="button" data-ci="lens-drill" data-lens="${k}"><span>${lenses[k]}</span><strong>${num(data.summary.lenses?.[k])}</strong></button>`).join("")}</div>${(data.representatives || []).length ? `<div class="ci-representatives">${data.representatives.slice(0, 4).map(representative).join("")}</div>` : '<p class="ci-empty-compact">代表原声尚未选出。可逐条核对已分析评论，查看提取结果。</p>'}${candidateList()}</section><div class="ci-grid"><section><h2>值得继续关注</h2>${observations(data.observations || [])}</section><section><h2>已有问题的新原声</h2>${problemList(data.problems || [])}</section></div><section class="ci-section"><div class="ci-section-head"><div><h2 id="ci-run-heading" tabindex="-1">模型怎样处理这一批</h2><p class="lgi-research-meta">结构化提取 · 思考关闭 · 无工具调用。展示实际请求与校验记录。</p></div><span class="lgi-research-meta">${batchDetail?.callTotal == null ? "" : `共 ${num(batchDetail.callTotal)} 次 · `}最近展示 ${num(batchDetail ? calls.length : null)} 次调用</span></div>${batchDetailError ? `<p class="ci-notice">运行记录暂不可读：${esc(batchDetailError)} ${btn("重试读取", "refresh")}</p>` : callTable(calls, b.batchRef)}<details class="ci-usage"><summary>用量与研究控制</summary><p>当前展示调用已报告：输入 ${num(batchDetail ? knownInput : null)} / 输出 ${num(batchDetail ? knownOutput : null)} Token；用量未知而保留的预留 ${num(batchDetail ? unknownReserve : null)} Token。</p><p>批次额度已计入 ${num(b.chargedTokens)} / ${num(b.tokenLimit)} Token。预留不等于已确认消耗；实际费用以供应商账单为准。</p><p>${b.enabled ? "后续请求允许执行" : "后续请求已暂停"}。暂停后已发出的调用仍可能返回并计费。</p><div class="lgi-research-actions">${btn(b.enabled ? "暂停批次" : "恢复批次", "batch-toggle", `data-ref="${esc(b.batchRef)}" data-enabled="${!b.enabled}"`)}${btn("重试失败", "batch-retry", `data-ref="${esc(b.batchRef)}" ${b.enabled && counts.failed ? "" : "disabled"}`)}${btn("调整本批额度", "batch-continue", `data-ref="${esc(b.batchRef)}"`)}</div></details></section>`;
   }
   function renderPagination() {
-    const show =
-      state.view === "voices" || (state.view === "problems" && data.problem);
+    const show = state.view === "voices" || (state.view === "problems" && data.problem);
     $("ci-pagination").hidden = !show;
     if (!show) return;
-    $("ci-pagination").innerHTML =
-      `<label>每页 <select id="ci-limit"><option value="20">20 条</option><option value="50" ${state.limit === 50 ? "selected" : ""}>50 条</option></select></label><span>${num(data.page.total)} 条 · 第 ${Math.floor(state.offset / state.limit) + 1} 页</span><span class="ci-flex"></span>${btn("上一页", "previous", state.offset ? "" : "disabled")}${btn("下一页", "next", state.offset + state.limit < data.page.total ? "" : "disabled")}`;
+    const pages = Math.max(1, Math.ceil(data.page.total / state.limit));
+    const current = Math.min(pages, Math.floor(state.offset / state.limit) + 1);
+    const numbers = [...new Set([1, current - 1, current, current + 1, pages])].filter((p) => p > 0 && p <= pages).sort((a, b) => a - b);
+    const pageButtons = numbers.map((p, i) => `${i && p - numbers[i - 1] > 1 ? '<span aria-hidden="true">…</span>' : ""}${btn(String(p), "page", `data-page="${p}" aria-label="第 ${p} 页" ${p === current ? 'aria-current="page"' : ""}`)}`).join("");
+    $("ci-pagination").innerHTML = `<span>共 ${num(data.page.total)} 条</span>${btn("选择本页", "select-page", data.page.items.length ? "" : "disabled")}<span class="ci-flex"></span><nav class="ci-pages" aria-label="评论分页">${btn("‹", "previous", `aria-label="上一页" ${state.offset ? "" : "disabled"}`)}${pageButtons}${btn("›", "next", `aria-label="下一页" ${state.offset + state.limit < data.page.total ? "" : "disabled"}`)}</nav><form id="ci-page-jump"><label>跳至 <input name="page" type="number" min="1" max="${pages}" value="${current}" aria-label="跳转页码" required></label><button type="submit">跳转</button></form><label><span class="ci-sr">每页评论数</span><select id="ci-limit"><option value="20">20 条／页</option><option value="50" ${state.limit === 50 ? "selected" : ""}>50 条／页</option></select></label>`;
   }
   function renderSelection() {
     const el = $("ci-selection");
-    el.hidden = !selected.size;
-    el.innerHTML = `<span>已选 ${selected.size} 条（明确评论 ID）</span>${canResearch ? btn("分析所选", "prepare-selected") : ""}${btn("收藏", "bookmark-selected")}${btn("取消选择", "clear-selection")}`;
+    el.hidden = !selected.size || !["voices", "problems"].includes(state.view);
+    el.innerHTML = `<strong>已选 ${num(selected.size)} 条</strong><span class="lgi-research-meta">翻页保留选择</span><span class="ci-flex"></span>${btn("查看已选", "show-selection")}${canResearch ? btn(`研究已选 ${num(selected.size)} 条`, "prepare-selected", 'class="ci-primary"') : ""}${btn("收藏", "bookmark-selected")}${btn("清空选择", "clear-selection")}`;
+    const pageBox = document.querySelector("[data-ci-select-page]");
+    if (pageBox && data) {
+      const count = data.page.items.filter((s) => selected.has(s.sourceRef)).length;
+      pageBox.checked = count > 0 && count === data.page.items.length;
+      pageBox.indeterminate = count > 0 && count < data.page.items.length;
+    }
   }
   async function openSource(ref) {
     const seq = ++detailGeneration;
@@ -784,13 +905,67 @@
       null,
     );
   }
+  const contextLabels = { workBody: "作品正文", ocr: "图片文字", asr: "音视频转录", parent: "父评论", existingProblems: "已有问题召回" };
+  async function openContextSettings() {
+    const [settings, models] = await Promise.all([
+      request(`${old}/daily/context-settings`),
+      request("/api/local/model-settings"),
+    ]);
+    const policy = settings.policy;
+    if (!policy) throw new Error("上下文设置尚未提供，请刷新后重试。");
+    showModal("研究设置", `<p>决定下次研究可以使用哪些已有材料。每批会保存一份设置，修改不会改变正在运行的批次。</p><fieldset><legend>研究上下文</legend><div class="ci-setting-checks">${Object.entries(contextLabels).map(([key, label]) => `<label class="ci-check"><input name="${key}" type="checkbox" ${policy[key] ? "checked" : ""}>${label}</label>`).join("")}</div><p class="lgi-research-meta">开启表示允许纳入已取得的文字；缺失内容不会被补写，也不会自动发起采集。</p><div class="ci-setting-numbers"><label>最多召回已有问题<input name="recallLimit" type="number" min="1" max="10" value="${policy.recallLimit}" required></label><label>每次最多评论数<input name="maxComments" type="number" min="1" max="30" value="${policy.maxComments}" required></label></div><p class="lgi-research-meta">实际分包还会按模型输入和输出预算缩小。</p></fieldset><fieldset><legend>排查记录</legend><label class="ci-check"><input name="recordContent" type="checkbox" ${policy.recordContent ? "checked" : ""}>保留输入与返回 24 小时，便于排查</label><p class="lgi-research-meta">关闭后仍保留状态、用量和校验摘要。历史未记录的内容无法补回；原声本身仍保存在语料库。</p></fieldset><details><summary>模型与预算</summary><p>快速结构化提取 · 思考关闭 · 无工具调用。</p><p>当前输入预算 ${num(models.config?.inputTokenLimit)}；输出预算 ${num(models.config?.outputTokenLimit)} Token。</p><a href="/settings/models">前往模型设置修改预算</a></details><details><summary>每日自动研究</summary><p>自动运行有单独的启用开关与批次额度。保存这里的上下文设置不会开启自动研究。</p>${btn("设置每日运行与额度", "daily-settings")}</details>`, "保存上下文设置", async (f) => {
+      const next = Object.fromEntries(Object.keys(contextLabels).map((key) => [key, f.has(key)]));
+      Object.assign(next, { recallLimit: Number(f.get("recallLimit")), maxComments: Number(f.get("maxComments")), recordContent: f.has("recordContent") });
+      await request(`${old}/daily/context-settings`, { expectedRevision: settings.revision, policy: next });
+      modal.close();
+      await load();
+      feedback("上下文设置已保存，用于之后创建的批次；每日自动研究状态未改变。");
+    });
+  }
+  function contextText(value) {
+    if (typeof value === "string") return value;
+    if (value == null) return "尚未取得";
+    return value.value || value.text || value.body || JSON.stringify(value, null, 2);
+  }
+  function workContextHtml(work) {
+    if (!work) return "<p>这次没有纳入作品文字。</p>";
+    const sections = [
+      ["作品标题", work.title], ["作品正文", work.body],
+      ["图片文字", work.ocr], ["音视频转录", work.asr],
+      ...(Array.isArray(work.mediaTexts) ? work.mediaTexts.map((item) => [({ ocr: "图片文字", asr: "音视频转录", transcript: "音视频转录" })[item.kind] || "媒体文字", item.text]) : []),
+    ].filter(([, value]) => value != null);
+    return `<div class="ci-input-block">${sections.map(([label, value]) => `<article class="ci-input-comment"><p class="lgi-research-meta">${label}</p><blockquote>${esc(contextText(value))}</blockquote></article>`).join("") || "<p>这次没有取得可展示的作品文字。</p>"}</div>`;
+  }
+  function diagnosticActual(value) {
+    if (typeof value === "string") return value;
+    if (!value || typeof value !== "object") return "未记录";
+    const types = {string:"文本",object:"对象",array:"列表",null:"空值",boolean:"布尔值",number:"数字",missing:"字段缺失",invalid_json:"JSON 格式不正确",matches:"对应结果"};
+    const labels = {characters:"字数",count:"数量",fields:"字段数",unexpectedFields:"多余字段数",bytes:"字节数",line:"行",column:"列",labels:"标签数",problems:"问题数",stances:"立场数"};
+    return [types[value.type] || "返回结构", ...Object.entries(labels).filter(([key])=>value[key]!=null).map(([key,label])=>`${label} ${value[key]}`), value.category ? (value.category === "incomplete" ? "内容不完整" : "语法错误") : ""].filter(Boolean).join(" · ");
+  }
+  async function openRequest(batchRef, invocationRef) {
+    showModal("模型处理过程", '<p>正在读取这一次调用的真实记录…</p>', "", null);
+    const currentRequest = requestGeneration;
+    const v = await request(`${old}/daily/${encodeURIComponent(batchRef)}/requests/${encodeURIComponent(invocationRef)}?domain=${encodeURIComponent(domain)}`);
+    if (!modal.open || currentRequest !== requestGeneration) return;
+    const call = v.call || batchDetail?.calls?.find((c) => c.invocationRef === invocationRef) || {}, input = v.input, output = v.output;
+    const recordedPolicy = v.policy || input?.policy || call.contextPolicy;
+    const unavailable = { NOT_RECORDED: "这次调用没有保留输入与返回，无法事后还原。状态和用量记录仍可核对。", EXPIRED: "输入与返回已超过 24 小时保留期限。原声仍在语料库，运行元数据继续保留。", RESTRICTED: "相关来源当前不可读，输入与返回已停止展示。请先核对来源权限。" }[v.availability];
+    const events = { packet_prepared: "上下文已组装", request_started: "开始调用模型", provider_started: "供应商请求已发出", provider_returned: "已收到供应商返回", response_received: "已收到模型返回", validation_completed: "输出校验完成", validation_finished: "输出校验完成", results_saved: "合格结果已保存", request_failed: "请求未完成", queued: "已进入等待队列", started: "开始调用", finished: "调用结束" };
+    const eventHtml = (v.events || []).map((event) => `<li><span>${esc(events[event.kind] || "已记录运行事件")}</span><time>${esc(date(event.at, true))}</time>${events[event.kind] ? "" : `<details><summary>事件代码</summary><code>${esc(event.kind)}</code></details>`}</li>`).join("");
+    const validation = (v.validation || []).map((item) => `<li><strong>${esc(item.commentRef || "请求整体")} · ${esc(failureText(item.code) || "校验记录")}</strong>${item.path ? `<p>位置：<code>${esc(item.path)}</code></p>` : ""}${item.expected != null ? `<p>要求：${esc(contextText(item.expected))}</p>` : ""}${item.actual != null ? `<p>实际：${esc(diagnosticActual(item.actual))}</p>` : ""}<details><summary>校验代码</summary><code>${esc(item.code)}</code></details></li>`).join("");
+    const work = input?.work;
+    const context = input ? `<section><h3>模型实际拿到的材料</h3><p>评论合同 <code>${esc(input.contract || "未记录")}</code> · 本批冻结的上下文</p><div class="ci-context-flags">${Object.entries(contextLabels).map(([key, label]) => `<span>${recordedPolicy?.[key] === false ? "未纳入" : recordedPolicy?.[key] === true ? "允许纳入" : "设置未记录"} · ${label}</span>`).join("")}</div><p class="lgi-research-meta">允许纳入不代表材料已经取得；以下内容是本次实际输入。</p><details><summary>作品内容</summary>${workContextHtml(work)}</details><details open><summary>评论与父评论 · ${num(input.comments?.length)} 条</summary>${(input.comments || []).map((comment) => `<article class="ci-input-comment"><strong>${esc(comment.commentRef || "评论引用未记录")}</strong><blockquote>${esc(comment.text || comment.body || "正文未记录")}</blockquote>${comment.parent ? `<p class="lgi-research-meta">父评论</p><blockquote>${esc(contextText(comment.parent))}</blockquote>` : '<p class="lgi-research-meta">本次没有纳入父评论文字。</p>'}</article>`).join("")}</details><details><summary>召回的已有问题 · ${num(input.existingProblems?.length)} 个</summary>${(input.existingProblems || []).map((problem) => `<article><h4>${esc(problem.definition?.name || problem.name || problem.candidateRef || "问题")}</h4><p>${esc(problem.definition?.meaning || problem.meaning || problem.boundary || "定义未记录")}</p></article>`).join("") || "<p>本次没有召回已有问题。</p>"}</details><details><summary>研究约束与完整输入</summary><pre>${esc(input.system || "系统约束未记录")}</pre><details><summary>查看输入结构</summary><pre>${esc(JSON.stringify(input, null, 2))}</pre></details></details></section>` : "";
+    showModal("模型处理过程", `<div class="ci-request-summary"><strong>${esc(call.workTitle || "作品标题未记录")}</strong><p>${num(call.requestedComments)} 条评论 · ${esc(call.modelId || "模型未记录")} · ${duration(call.elapsedMs)}</p><p class="lgi-research-meta">结构化提取 · 思考关闭 · 无工具调用；以下为真实请求记录。</p>${call.failureCode ? `<p class="ci-failure-text">${esc(failureText(call.failureCode))}</p>` : ""}</div>${eventHtml ? `<ol class="ci-event-list">${eventHtml}</ol>` : '<p class="lgi-research-meta">这次未记录分阶段事件，不能据此推断模型内部过程。</p>'}${unavailable ? `<p class="ci-notice">${esc(unavailable)}</p>` : ""}<div class="ci-request-details">${context}${output ? `<section><h3>模型实际返回 · 已脱敏</h3>${output.truncated ? '<p class="ci-notice">展示已截短，校验使用原始完整返回。展示长度限制不代表模型输出被截断。</p>' : ""}${output.received === false ? "<p>没有取得完整返回。</p>" : ""}<details><summary>查看脱敏返回</summary><pre>${esc(output.text || (output.json ? JSON.stringify(output.json, null, 2) : "返回正文未记录"))}</pre></details></section>` : ""}<section><h3>结果校验</h3>${validation ? `<ul class="ci-validation-list">${validation}</ul>` : `<p>${v.availability === "AVAILABLE" && call.state === "running" ? "正在等待模型返回，校验尚未完成。" : "这次没有可展示的逐字段校验记录。请结合接纳数量与评论结果核对，不能据此判断全部通过。"}</p>`}<details><summary>输入与输出约束</summary><p>输入为清洗后的评论与本批允许纳入的已有上下文。输出须为结构化评论结果，逐条对应输入；研究标签、问题和立场须有可定位的原声引用。缺失内容不补写，未提取信号与调用失败分别记录。</p></details></section><section><h3>用量</h3><p>供应商报告：输入 ${num(call.inputTokens)} / 输出 ${num(call.outputTokens)} Token。</p>${call.usageUnknown ? `<p>用量未知，仍保留 ${num(call.reservedTokens)} Token 预留。预留不代表实际消耗。</p>${call.state !== "running" ? btn("核对用量／允许重试", "usage-review", `data-ref="${esc(batchRef)}" data-invocation="${esc(invocationRef)}"`) : ""}` : ""}</section></div>`, "", null);
+    modal.classList.add("ci-request-dialog");
+  }
   async function openBatchRecords(ref, after = "") {
     const r = await request(
       `${old}/daily/${encodeURIComponent(ref)}${after ? "?after=" + encodeURIComponent(after) : ""}`,
     );
     showModal(
       "逐条运行记录",
-      `<p>评论记录每页最多 50 条。运行用量与人工核对分别记录。</p><table><thead><tr><th>评论</th><th>处理状态</th></tr></thead><tbody>${r.items.map((x) => `<tr><td>${btn(esc(x.body || "来源受限"), "source", `data-ref="${esc(x.sourceRef)}" class="ci-text-action"`)}</td><td>${esc(status[x.state] || x.state)}<p class="lgi-research-meta">${esc(x.failureCode || "")}</p></td></tr>`).join("")}</tbody></table>${r.nextCursor ? btn("下一页评论记录", "batch-records", `data-ref="${esc(ref)}" data-after="${esc(r.nextCursor)}"`) : ""}<details><summary>模型调用与费用核对</summary>${(r.calls || []).map((c) => `<section><p>${esc(status[c.state] || c.state)} · ${esc(date(c.startedAt, true))}</p><p>输入 ${num(c.inputTokens)} · 输出 ${num(c.outputTokens)} · 预留 ${num(c.reservedTokens)} · 已计 ${num(c.chargedTokens)} Token</p>${c.usageUnknown ? "<p>供应商用量未知，预留仍保留；未核对前不自动重试。</p>" : ""}${c.usageUnknown && c.state !== "running" ? btn("核对用量／允许重试", "usage-review", `data-ref="${esc(ref)}" data-invocation="${esc(c.invocationRef)}"`) : ""}${c.review ? "<p>已有人工核对记录。</p>" : ""}</section>`).join("") || "<p>暂无模型调用。</p>"}</details><details><summary>人工调整记录</summary>${(r.adjustments || []).map((a) => `<p>${esc({ continue: "继续处理积压", usage_review: "人工核对用量" }[a.kind] || "调整")} · ${esc(date(a.createdAt, true))} · ${esc(a.request?.reason || "未记录说明")}</p>`).join("") || "<p>暂无调整。</p>"}</details>`,
+      `<p>评论记录每页最多 50 条。运行用量与人工核对分别记录。</p><table><thead><tr><th>评论</th><th>处理状态</th></tr></thead><tbody>${r.items.map((x) => `<tr><td>${btn(esc(x.body || "来源受限"), "source", `data-ref="${esc(x.sourceRef)}" class="ci-text-action"`)}</td><td>${esc(status[x.state] || x.state)}<p class="lgi-research-meta">${esc(failureText(x.failureCode))}</p></td></tr>`).join("")}</tbody></table>${r.nextCursor ? btn("下一页评论记录", "batch-records", `data-ref="${esc(ref)}" data-after="${esc(r.nextCursor)}"`) : ""}<details><summary>模型调用与费用核对</summary>${(r.calls || []).map((c) => `<section><p>${esc(status[c.state] || c.state)} · ${esc(date(c.startedAt, true))}</p><p>输入 ${num(c.inputTokens)} · 输出 ${num(c.outputTokens)} · 预留 ${num(c.reservedTokens)} · 已计 ${num(c.chargedTokens)} Token</p>${c.usageUnknown ? "<p>供应商用量未知，预留仍保留；未核对前不自动重试。</p>" : ""}${c.usageUnknown && c.state !== "running" ? btn("核对用量／允许重试", "usage-review", `data-ref="${esc(ref)}" data-invocation="${esc(c.invocationRef)}"`) : ""}${c.review ? "<p>已有人工核对记录。</p>" : ""}</section>`).join("") || "<p>暂无模型调用。</p>"}</details><details><summary>人工调整记录</summary>${(r.adjustments || []).map((a) => `<p>${esc({ continue: "继续处理积压", usage_review: "人工核对用量" }[a.kind] || "调整")} · ${esc(date(a.createdAt, true))} · ${esc(a.request?.reason || "未记录说明")}</p>`).join("") || "<p>暂无调整。</p>"}</details>`,
       "",
       null,
     );
@@ -835,6 +1010,10 @@
     );
   }
   async function handle(a, el) {
+    if (resultActions.has(a) && !resultsCurrent) {
+      feedback("当前范围尚未读取完成，请等待结果更新后再选择或研究。", true);
+      return;
+    }
     if (a === "refresh") return load();
     if (a === "close-inspector") return closeInspector();
     if (a === "close-modal") return modal.close();
@@ -917,6 +1096,17 @@
             : { view: "voices", sourceRefs: (o.sourceRefs || []).join(",") },
         );
     }
+    if (a === "voices") return navigate(state.view === "daily" && voiceScope ? { ...voiceScope, view: "voices" } : { view: "voices", problemRef: "" });
+    if (a === "page") return navigate({ offset: (Number(el.dataset.page) - 1) * state.limit });
+    if (a === "select-page") {
+      data.page.items.forEach((s) => selectSource(s, true));
+      render();
+      return;
+    }
+    if (a === "show-selection") {
+      showModal("已选择的评论", `<p>共 ${num(selected.size)} 条，包含其他页面的选择。确认研究时会再次核对来源是否可读。</p><ul class="ci-problem-list">${[...selected].map((ref) => `<li><div>${btn(esc(selectedSources.get(ref)?.body || "评论正文未缓存"), "source", `data-ref="${esc(ref)}" class="ci-text-action"`)}<p class="lgi-research-meta">${esc(selectedSources.get(ref)?.workTitle || "作品标题未知")}</p></div></li>`).join("")}</ul>`, "", null);
+      return;
+    }
     if (a === "previous" || a === "next")
       return navigate({
         offset: Math.max(
@@ -926,21 +1116,25 @@
       });
     if (a === "clear-selection") {
       selected.clear();
+      selectedSources.clear();
       render();
       return;
     }
     if (a === "bookmark") return toggleBookmark(el.dataset.ref);
     if (a === "bookmark-selected") {
       for (const ref of selected) {
-        const s = data.page.items.find((x) => x.sourceRef === ref);
+        const current = await request(`${api}/sources/${encodeURIComponent(ref)}?${query()}`);
+        const s = current.source;
         if (s && !s.bookmarked)
           await action("bookmark", {
             sourceRef: ref,
             expectedRevision: s.researchRevision ?? 0,
+            expectedSourceSha256: current.sourceSha256 || s.sourceSha256,
             payload: { enabled: true, note: "" },
           });
       }
       selected.clear();
+      selectedSources.clear();
       return load();
     }
     if (a === "prepare") return openPrepare();
@@ -958,7 +1152,7 @@
       if (!canResearch)
         throw new Error("当前外部领域提供原声浏览，尚未开放模型研究。");
       modal.close();
-      return window.CommentDaily.openSettings();
+      return openContextSettings();
     }
     if (a === "correct") return openCorrection();
     if (a === "terms") return openTerms();
@@ -1048,6 +1242,31 @@
       });
       return load();
     }
+    if (a === "candidate-voices") {
+      const candidate = data.problemCandidates?.find((p) => p.candidateRef === el.dataset.ref);
+      if (candidate) return navigate({ view: "voices", problemRef: "", sourceRefs: candidate.sourceRefs.join(",") });
+    }
+    if (a === "candidate-create") {
+      const candidate = data.problemCandidates?.find((p) => p.candidateRef === el.dataset.ref);
+      if (!candidate) throw new Error("候选已更新，请刷新后重试。");
+      showModal("确认用户问题", `<p>将 ${num(candidate.comments)} 条原声确认为一个问题。请先核对这些表达的含义与边界。</p><label>具体问题<input name="name" required maxlength="200" value="${esc(candidate.name)}"></label><label>含义与边界<textarea name="meaning" required maxlength="2000">${esc(candidate.meaning)}</textarea></label><label>确认依据<textarea name="reason" required maxlength="1000"></textarea></label>`, "确认并创建问题", async (f) => {
+        await action("problem_create", { payload: { name: f.get("name"), meaning: f.get("meaning"), sourceRefs: candidate.sourceRefs }, reason: f.get("reason") });
+        modal.close();
+        await load();
+      });
+      return;
+    }
+    if (a === "show-run") {
+      $("ci-run-heading")?.scrollIntoView({ block: "start" });
+      $("ci-run-heading")?.focus({ preventScroll: true });
+      return;
+    }
+    if (a === "request-detail") return openRequest(el.dataset.ref, el.dataset.invocation);
+    if (a === "daily-settings") {
+      modal.close();
+      return window.CommentDaily.openSettings();
+    }
+    if (a === "batch-result") return navigate({ view: "voices", processingState: el.dataset.state });
     if (a === "batch-voices") return navigate({ view: "voices" });
     if (a === "batch-toggle") {
       await request(`${old}/daily/${el.dataset.ref}`, {
@@ -1089,11 +1308,9 @@
     const tab = e.target.closest(".lgi-research-tabs [data-view]");
     if (tab) {
       e.preventDefault();
-      navigate({
-        view: tab.dataset.view,
-        problemRef: tab.dataset.view === "problems" ? state.problemRef : "",
-        batchRef: "",
-      });
+      navigate(state.view === "daily" && tab.dataset.view === "voices" && voiceScope
+        ? { ...voiceScope, view: "voices" }
+        : { view: tab.dataset.view, problemRef: tab.dataset.view === "problems" ? state.problemRef : "", batchRef: "" });
       return;
     }
     const el = e.target.closest("[data-ci]");
@@ -1127,6 +1344,13 @@
       });
   });
   document.addEventListener("submit", (e) => {
+    if (e.target.id === "ci-page-jump") {
+      e.preventDefault();
+      const page = Number(new FormData(e.target).get("page"));
+      const pages = Math.max(1, Math.ceil(data.page.total / state.limit));
+      if (Number.isInteger(page) && page >= 1 && page <= pages) navigate({ offset: (page - 1) * state.limit });
+      return;
+    }
     if (e.target.id === "ci-search") {
       e.preventDefault();
       const f = new FormData(e.target);
@@ -1149,13 +1373,19 @@
   });
   document.addEventListener("change", (e) => {
     const t = e.target;
+    if ((t.dataset.ciSelect || t.hasAttribute("data-ci-select-page")) && !resultsCurrent) {
+      if (t.dataset.ciSelect) t.checked = selected.has(t.dataset.ciSelect);
+      else t.checked = data?.page.items.every((s) => selected.has(s.sourceRef)) || false;
+      feedback("当前范围尚未读取完成，请等待结果更新后再选择。", true);
+      return;
+    }
     if (t.dataset.ciSelect) {
-      if (t.checked) selected.add(t.dataset.ciSelect);
-      else selected.delete(t.dataset.ciSelect);
+      const source = data.page.items.find((s) => s.sourceRef === t.dataset.ciSelect);
+      if (source) selectSource(source, t.checked);
       renderSelection();
     } else if (t.hasAttribute("data-ci-select-page")) {
       data.page.items.forEach((s) =>
-        t.checked ? selected.add(s.sourceRef) : selected.delete(s.sourceRef),
+        selectSource(s, t.checked),
       );
       render();
     } else if (t.id === "ci-chart-lens") {
@@ -1191,7 +1421,9 @@
   });
   window.addEventListener("popstate", (e) => {
     if (e.state) {
+      clearSelectionForScope(e.state);
       Object.assign(state, e.state);
+      if (state.view === "daily") Object.assign(state, voiceFilterReset);
       closeInspector();
       load().then(() => {
         main.scrollTop = e.state.scroll || 0;

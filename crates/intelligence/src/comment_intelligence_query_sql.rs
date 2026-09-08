@@ -8,12 +8,13 @@ WITH config AS (
  COALESCE($3::text::timestamptz,scope_001_now()) AS end_at,scope_001_now() AS as_of
  FROM observation_domain d WHERE d.domain_ref=COALESCE($1,(SELECT domain_ref FROM observation_domain WHERE is_own_domain))
 ), analysis_latest AS MATERIALIZED (
- SELECT DISTINCT ON(am.content_public_ref,am.comment_external_id,a.result->>'sourceSha256') a.*,am.content_public_ref,am.comment_external_id FROM linggan_comment_analysis_work a JOIN linggan_material_comment am ON am.material_ref=a.source_ref WHERE a.result IS NOT NULL AND linggan_ci_analysis_context_readable(a.result) ORDER BY am.content_public_ref,am.comment_external_id,a.result->>'sourceSha256',a.created_at DESC,a.work_ref DESC
+ SELECT DISTINCT ON(am.content_public_ref,am.comment_external_id,a.result->>'sourceSha256') a.*,am.content_public_ref,am.comment_external_id FROM linggan_comment_analysis_work a JOIN linggan_material_comment am ON am.material_ref=a.source_ref WHERE a.result IS NOT NULL AND ($16::uuid IS NULL OR EXISTS(SELECT 1 FROM linggan_comment_daily_item bi WHERE bi.batch_ref=$16 AND bi.analysis_ref=a.work_ref)) AND linggan_ci_analysis_context_readable(a.result) ORDER BY am.content_public_ref,am.comment_external_id,a.result->>'sourceSha256',a.created_at DESC,a.work_ref DESC
 ), clean_latest AS MATERIALIZED (
  SELECT DISTINCT ON(source_ref) source_ref,state FROM linggan_comment_clean ORDER BY source_ref,created_at DESC
 ), operation_latest AS MATERIALIZED (
  SELECT DISTINCT ON(m.content_public_ref,m.comment_external_id) m.content_public_ref,m.comment_external_id,i.state,i.failure_code
  FROM linggan_comment_daily_item i JOIN linggan_comment_daily_batch b USING(batch_ref) JOIN linggan_material_comment m ON m.material_ref=i.source_ref
+ WHERE $16::uuid IS NULL OR i.batch_ref=$16
  ORDER BY m.content_public_ref,m.comment_external_id,b.created_at DESC,b.batch_ref DESC
 ), capture_provenance AS MATERIALIZED (
  SELECT m.material_ref AS canonical_ref,
@@ -75,7 +76,7 @@ WITH config AS (
  AND ($9::uuid IS NULL OR EXISTS(SELECT 1 FROM memberships m WHERE m.problem_ref=$9 AND m.canonical_ref=s.canonical_ref))
  AND ($10::text='' OR EXISTS(SELECT 1 FROM linggan_ci_term_index t WHERE t.canonical_ref=s.canonical_ref AND t.domain_ref=s.domain_ref AND t.term=$10 AND t.source_sha256=s.source_sha256))
  AND (NOT $11 OR s.bookmarked)
- AND ($18::text='' OR CASE WHEN $18='analyzed' THEN s.result IS NOT NULL WHEN $18='failed' THEN s.analysis_state='failed' WHEN $18='pending' THEN s.result IS NULL AND s.analysis_state='pending' ELSE s.clean_state=$18 END)
+ AND ($18::text='' OR CASE WHEN $18='analyzed' THEN s.result IS NOT NULL WHEN $18 IN('succeeded','no_signal') THEN s.analysis_state=$18 AND s.result IS NOT NULL WHEN $18='failed' THEN s.analysis_state='failed' WHEN $18='pending' THEN s.result IS NULL AND s.analysis_state='pending' ELSE s.clean_state=$18 END)
 ), totals AS (
  SELECT count(*) AS comments,(SELECT count(DISTINCT work_ref) FROM filtered) AS works,count(*) FILTER(WHERE result IS NOT NULL) AS analyzed,count(*) FILTER(WHERE result IS NULL AND analysis_state='pending') AS pending,
  count(*) FILTER(WHERE role<>'platform_system' AND (result IS NOT NULL OR labels<>'[]'::jsonb OR clean_state IN('direct','context'))) AS eligible,
@@ -90,6 +91,13 @@ WITH config AS (
  (array_agg(left(s.body,180) ORDER BY s.likes DESC NULLS LAST,s.canonical_ref))[1] AS representative_body
  FROM memberships m JOIN filtered s USING(canonical_ref) GROUP BY m.problem_ref,m.name,m.meaning,m.revision,m.definition
  HAVING count(DISTINCT s.canonical_ref)>=3 OR bool_or(m.problem_origin='manual')
+), candidate_counts AS (
+ SELECT c.definition_key,min(c.candidate_ref::text) AS candidate_ref,min(c.name) AS name,min(c.meaning) AS meaning,
+ count(DISTINCT s.canonical_ref) AS comments,count(DISTINCT s.work_ref) AS works,
+ (array_agg(DISTINCT s.source_ref))[1:1000] AS refs,(jsonb_agg((SELECT jsonb_agg(e||jsonb_build_object('quote',substring(s.body FROM (e->>'startChar')::integer+1 FOR (e->>'endChar')::integer-(e->>'startChar')::integer))) FROM jsonb_array_elements(c.evidence) e) ORDER BY c.candidate_ref)->0) AS evidence
+ FROM linggan_ci_problem_candidate c JOIN filtered s ON s.canonical_ref=c.canonical_ref AND s.analysis_ref=c.analysis_ref AND s.domain_ref=c.domain_ref
+ WHERE c.state='unmerged' AND s.result IS NOT NULL AND s.role<>'platform_system'
+ GROUP BY c.definition_key
 ), term_counts AS (
  SELECT t.term,count(DISTINCT s.canonical_ref) AS count,count(DISTINCT s.work_ref) AS works,
  (array_agg(DISTINCT s.source_ref))[1:1000] AS refs
@@ -118,6 +126,9 @@ SELECT jsonb_build_object(
  'works',COALESCE((SELECT jsonb_agg(jsonb_build_object('workRef',work_ref,'title',title)) FROM (SELECT work_ref,max(work_title) title FROM source GROUP BY work_ref ORDER BY work_ref LIMIT 200) w),'[]'),
  'terms',COALESCE((SELECT jsonb_agg(jsonb_build_object('term',term,'count',count,'works',works,'sourceRefs',refs,'revision',COALESCE((SELECT h.revision FROM linggan_ci_term_setting h WHERE h.domain_ref=c.domain_ref AND h.term=term_counts.term),0))) FROM term_counts),'[]'),
  'problems',COALESCE((SELECT jsonb_agg(jsonb_build_object('problemRef',problem_ref,'name',name,'meaning',meaning,'revision',revision,'definition',definition,'comments',comments,'works',works,'representative',jsonb_build_object('sourceRef',representative_ref,'body',representative_body),'change',NULL) ORDER BY comments DESC,problem_ref) FROM problem_counts),'[]'),
+ 'problemCandidates',COALESCE((SELECT jsonb_agg(jsonb_build_object('candidateRef',candidate_ref,'name',name,'meaning',meaning,'sourceRefs',refs,'comments',comments,'works',works,'evidence',evidence,'state','unmerged') ORDER BY comments DESC,candidate_ref) FROM (SELECT * FROM candidate_counts ORDER BY comments DESC,candidate_ref LIMIT 100) candidates),'[]'),
+ 'candidateTotal',(SELECT count(*) FROM candidate_counts),
+ 'representatives',COALESCE((SELECT jsonb_agg(jsonb_build_object('sourceRef',source_ref,'workRef',work_ref,'body',left(body,600),'labels',all_labels,'hasAnalysis',true,'analysisState',analysis_state,'likes',likes,'bookmarked',bookmarked,'bookmarkRevision',revision)) FROM (SELECT * FROM filtered WHERE result IS NOT NULL ORDER BY analysis_at DESC,canonical_ref LIMIT 4) representatives),'[]'),
  'trend',CASE WHEN $20 THEN NULL ELSE COALESCE((SELECT jsonb_agg(jsonb_build_object('day',day,'comments',comments,'eligible',eligible,'analyzed',analyzed,'workCount',works,'researchAvailable',research_available,'lenses',jsonb_build_object('solution',solutions,'story',stories,'quote',quotes,'need',needs,'resonance',resonance,'conflict',conflict),'partial',day=to_char(c.as_of AT TIME ZONE 'Asia/Shanghai','YYYY-MM-DD'))) FROM daily_trend),'[]') END,
   'comparisonWindows',CASE WHEN $20 THEN NULL ELSE COALESCE((SELECT jsonb_agg(jsonb_build_object(
  'problemRef',pc.problem_ref,'name',pc.name,'period',periods.period,'captureSignature',periods.capture_signature,'unknownCapture',periods.unknown_capture,'classificationChanges',periods.classification_changes,'eligible',periods.eligible,'analyzed',periods.analyzed,'comments',periods.comments,'works',periods.works,'observedDays',periods.observed_days,'modelVersions',periods.model_versions,'ruleVersions',periods.rule_versions,'modelSignature',periods.model_signature,'ruleSignature',periods.rule_signature,'lateMaterial',periods.late_material,'sourceRefs',periods.refs,'workRefs',periods.work_refs,'firstProblemObservedAt',(SELECT min(s.first_observed_at) FROM linggan_ci_problem_member m JOIN linggan_ci_source s USING(canonical_ref) WHERE m.problem_ref=pc.problem_ref AND s.domain_ref=c.domain_ref),'firstProblemIsNew',COALESCE((SELECT min(s.first_observed_at)>=date_trunc('day',c.as_of AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'-interval '7 days' FROM linggan_ci_problem_member m JOIN linggan_ci_source s USING(canonical_ref) WHERE m.problem_ref=pc.problem_ref AND s.domain_ref=c.domain_ref),false),'windowStart',date_trunc('day',c.as_of AT TIME ZONE 'Asia/Shanghai') AT TIME ZONE 'Asia/Shanghai'-CASE WHEN periods.period='current' THEN interval '7 days' ELSE interval '14 days' END))

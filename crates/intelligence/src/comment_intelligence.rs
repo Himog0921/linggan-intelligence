@@ -53,6 +53,8 @@ impl ResearchScope {
                     v,
                     "pending"
                         | "analyzed"
+                        | "succeeded"
+                        | "no_signal"
                         | "failed"
                         | "direct"
                         | "context"
@@ -177,7 +179,9 @@ pub async fn prepare(db: &Database, r: &Prepare) -> Result<Value, ModelError> {
     }
     let hashes:Value=sqlx::query_scalar("SELECT jsonb_object_agg(source_ref,source_sha256) FROM linggan_ci_source WHERE domain_ref=$1 AND source_ref=ANY($2)").bind(domain).bind(&refs).fetch_one(db.pool()).await?;
     let id = Uuid::new_v4();
-    let expiry:String=sqlx::query_scalar("INSERT INTO linggan_ci_prepare(prepare_ref,domain_ref,scope,source_refs,source_hashes,reanalyze) VALUES($1,$2,$3,$4,$5,$6) RETURNING expires_at::text").bind(id).bind(domain).bind(&result["scope"]).bind(&refs).bind(hashes).bind(r.reanalyze).fetch_one(db.pool()).await?;
+    let policy = crate::comment_runtime::settings(db).await?["policy"].clone();
+    let expiry:String=sqlx::query_scalar("INSERT INTO linggan_ci_prepare(prepare_ref,domain_ref,scope,source_refs,source_hashes,reanalyze,context_policy) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING expires_at::text").bind(id).bind(domain).bind(&result["scope"]).bind(&refs).bind(hashes).bind(r.reanalyze).bind(&policy).fetch_one(db.pool()).await?;
+    result["contextPolicy"] = policy;
     result["prepareRef"] = json!(id);
     result["sourceRefs"] = json!(refs);
     result["count"] = json!(count);
