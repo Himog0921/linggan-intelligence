@@ -1,7 +1,7 @@
 # 当前状态与事项队列
 
 > 状态: 权威当前
-> 最后核对: 2026-09-07
+> 最后核对: 2026-09-08
 > 适用范围: 当前阶段、事项顺序、阻塞与下一步
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
@@ -26,6 +26,14 @@ Mog 指定 `comment-intelligence-v1` 完整实施包；基线 `origin/main@61e8c
 Mog 批准“评论语料与每日研究 V1”并要求原声参考证据库紧凑表格。单代理在 codex/comment-daily-v1、基线 73f5996 实现四视图、异步保守清洗、按作品分包、23:00 日批、预算与显式失败重试，承接下方 #167/#169 历史条目。新 0043 仅在隔离数据库验证，未应用共享库；3000、真实评论外发、merge 和 Mog 业务验收未发生。本次合同及实际证明见 [COMMENT-DAILY-001](plans/active/comment-daily-001.md) 和 [评论验收](design/acceptance/comment-research-001-acceptance.md)。
 
 ## 当前阶段
+
+### TARGET-INSPECTOR-PERFORMANCE-001 / Issue #158（交付分支源码已实现；未进入共享运行）
+
+Mog 于 2026-09-08 确认推进观察目标列表和右侧检查器收口，并要求由 subagent 分工实施。当前代码位于 `codex/target-inspector-performance-001`，已重放到 `origin/main@e5ad0e3316760ae43bc0ab76e00877c7e0fd9fb8`：Targets 顶部删除重复 scheduler/patrol/timezone prose，六目标勾选后顶部批量编辑显示数量；1440 宽表压缩为主体字段与操作同时可见，避免 sticky 操作列覆盖内容。检查器收敛为 `概览｜作品｜巡查`，creator 的作品内为 `列表｜表现`。
+
+新增 `TargetInspectorProjection` 在一个 repeatable-read、read-only 事务中分开读取 archive、execution、patrol、coverage 与 required action；queued 不冒充 running，`Known(0)` 不等于 `Unknown`。概览只给一个行动判断，系统可自行继续时不显示按钮。作品表现复用 target-scoped lifecycle facts；当前没有作品内容分类合同，因此不生成主题分布或运营价值结论。
+
+源码、focused/workspace 测试、新 inspector PostgreSQL 16 证明、项目治理和 UI handbook 已通过；1440×900 浏览器实拍及选择、批量入口、三 Tab、作品双视图和关闭焦点返回均已通过。完整 PostgreSQL 脚本仍被未修改的 collection-control 两项基线断言阻断，不能写成全绿。共享数据库、`:3000`、worker、插件、外部平台、真实采集、merge、deploy 与 Mog 业务验收均未发生或未授权。
 
 ### COLLECTION-DOSSIER-RELIABILITY-002 / Issue #158（源码修复中；未进入共享运行）
 

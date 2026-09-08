@@ -42,6 +42,7 @@ mod runtime_capacity;
 mod station_read;
 mod target_catalog;
 mod target_enrichment;
+mod target_inspector;
 mod work_order;
 mod work_order_lease;
 mod work_resource_current;
@@ -163,6 +164,13 @@ pub use target_catalog::{
 };
 pub use target_enrichment::{
     TargetEnrichmentError, TargetSyncOutcome, sync_target_from_author_profile,
+};
+pub use target_inspector::{
+    TargetInspectorAction, TargetInspectorArchive, TargetInspectorArchiveState,
+    TargetInspectorCount, TargetInspectorCoverage, TargetInspectorDirectoryState,
+    TargetInspectorExecution, TargetInspectorExecutionState, TargetInspectorPatrol,
+    TargetInspectorPatrolState, TargetInspectorProjection, TargetInspectorReadError,
+    read_target_inspector,
 };
 pub use work_order_lease::{
     DETAIL_STEP_DEFERRED_REASON, IssuedLease, LeaseError, expire_lapsed_leases,
