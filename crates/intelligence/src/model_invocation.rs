@@ -176,10 +176,7 @@ pub async fn probe_model(
                 v["modelCallable"] =
                     json!(p.ok || p.failure_code.as_deref() == Some("output_limit"));
                 let qualification = if p.ok {
-                    crate::comment_packet::synthetic_packet()
-                        .parse(p.text.as_deref().unwrap_or(""))
-                        .and_then(|items| items.into_iter().next().ok_or("missing_comment")?)
-                        .map(|_| ())
+                    qualify_comment_probe(p.text.as_deref().unwrap_or(""))
                 } else {
                     Err("provider_output_incomplete")
                 };
@@ -255,4 +252,39 @@ pub async fn checkpoint_invocation_usage(
         .bind(reference).bind(input).bind(output).bind(charged).bind(response.and_then(|r|r.elapsed_ms))
         .bind(json!({"callStarted":true,"validationPending":true})).bind(measured).execute(db.pool()).await?;
     Ok(())
+}
+
+fn qualify_comment_probe(text: &str) -> Result<(), &'static str> {
+    crate::comment_packet::synthetic_packet()
+        .parse(text)
+        .and_then(|items| items.into_iter().next().ok_or("missing_comment")?)
+        .and_then(|value| {
+            if value["semantic"]["acceptance"] == "complete" {
+                Ok(())
+            } else {
+                Err("partial_fields_rejected")
+            }
+        })
+}
+#[cfg(test)]
+mod probe_contract_tests {
+    use super::*;
+    #[test]
+    fn qualification_requires_complete_v4_contract_even_when_research_can_keep_partial_fields() {
+        let packet = crate::comment_packet::synthetic_packet();
+        let label = json!({"label":"need","basis":"explicit","contextEvidence":[],"evidence":[{"quote":packet.cleaned[0].text}]});
+        let mut output = json!({"comments":[{"commentRef":"C001","outcome":"interpretable","labels":[label.clone()],"problems":[],"stances":[],"contextMissing":[],"uncertaintyReason":null,"limitations":[]}]});
+        assert_eq!(qualify_comment_probe(&output.to_string()), Ok(()));
+        let mut invalid = label;
+        invalid["label"] = json!("invalid_label");
+        output["comments"][0]["labels"]
+            .as_array_mut()
+            .unwrap()
+            .push(invalid);
+        assert!(packet.parse(&output.to_string()).unwrap()[0].is_ok());
+        assert_eq!(
+            qualify_comment_probe(&output.to_string()),
+            Err("partial_fields_rejected")
+        );
+    }
 }

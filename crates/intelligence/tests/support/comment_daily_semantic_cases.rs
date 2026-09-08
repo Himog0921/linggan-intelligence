@@ -447,7 +447,7 @@ async fn semantic_retry_limit_cannot_be_reset_by_another_batch() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and local synthetic Pi"]
-async fn packet_recalls_readable_same_domain_definitions_and_records_checked_proposal() {
+async fn extraction_does_not_recall_or_decide_problem_equivalence() {
     let db = fixture::proof_database("semantic_candidate_proposal").await;
     let (mut server, url) = fixture_server().await;
     let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
@@ -492,20 +492,14 @@ async fn packet_recalls_readable_same_domain_definitions_and_records_checked_pro
             .unwrap()
     );
     let result:serde_json::Value=sqlx::query_scalar("SELECT a.result FROM linggan_comment_daily_item i JOIN linggan_comment_analysis_work a ON a.work_ref=i.analysis_ref WHERE i.batch_ref=$1").bind(next_batch).fetch_one(db.pool()).await.unwrap();
-    assert_eq!(
-        result["semantic"]["problems"][0]["candidateRef"],
-        problem.to_string()
-    );
+    assert!(result["semantic"]["problems"][0]["candidateRef"].is_null());
     assert_eq!(
         result["semantic"]["problems"][0]["serverValidatedCandidate"],
-        true
+        false
     );
-    assert_eq!(
-        result["candidateSnapshot"][0]["problemRef"],
-        problem.to_string()
-    );
+    assert_eq!(result["candidateSnapshot"], json!([]));
     assert!(
-        result["contextRefs"]["researchSourceRefs"]
+        !result["contextRefs"]["researchSourceRefs"]
             .as_array()
             .unwrap()
             .contains(&json!(first))
@@ -627,6 +621,223 @@ async fn model_readiness_guides_qualification_then_selection_without_circular_de
     .fetch_one(db.pool())
     .await
     .unwrap();
+    assert_eq!(calls, 0);
+    server.kill().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn next_daily_grant_takes_only_never_dispatched_backlog_without_duplicate_ownership() {
+    let db = fixture::proof_database("daily_backlog_owner").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    clock(&db, "2026-09-07 14:00:00Z").await;
+    save_schedule(
+        &db,
+        &DailySchedule {
+            expected_revision: 0,
+            enabled: true,
+            config_ref: config,
+            source_limit: 1,
+            token_limit: 100000,
+        },
+    )
+    .await
+    .unwrap();
+    let first = source(&db, "backlog-one", "a", "这是第一条待研究的原声").await;
+    let second = source(&db, "backlog-two", "b", "这是第二条待研究的原声").await;
+    clock(&db, "2026-09-07 15:00:00Z").await;
+    assert!(seal_due(&db).await.unwrap());
+    let origin: Uuid =
+        sqlx::query_scalar("SELECT batch_ref FROM linggan_comment_daily_batch WHERE kind='daily'")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert!(tick(&db).await);
+    assert!(!tick(&db).await);
+    let deferred:Uuid=sqlx::query_scalar("SELECT source_ref FROM linggan_comment_daily_item WHERE batch_ref=$1 AND state='source_limit'").bind(origin).fetch_one(db.pool()).await.unwrap();
+    assert!([first, second].contains(&deferred));
+    clock(&db, "2026-09-08 15:00:00Z").await;
+    assert!(seal_due(&db).await.unwrap());
+    let state: String = sqlx::query_scalar(
+        "SELECT state FROM linggan_comment_daily_item WHERE batch_ref=$1 AND source_ref=$2",
+    )
+    .bind(origin)
+    .bind(deferred)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(state, "carried_forward");
+    let carried=sqlx::query("SELECT i.batch_ref,i.origin_batch_ref,b.request FROM linggan_comment_daily_item i JOIN linggan_comment_daily_batch b USING(batch_ref) WHERE i.source_ref=$1 AND i.batch_ref<>$2").bind(deferred).bind(origin).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(carried.get::<Uuid, _>("origin_batch_ref"), origin);
+    assert_eq!(
+        carried.get::<serde_json::Value, _>("request")["backlogCount"],
+        1
+    );
+    assert_eq!(
+        carried.get::<serde_json::Value, _>("request")["newIntakeCount"],
+        0
+    );
+    // Increasing the old grant cannot reclaim transferred ownership.
+    continue_batch(
+        &db,
+        origin,
+        &ContinueDaily {
+            command_ref: Uuid::new_v4(),
+            source_limit: 2,
+            token_limit: 100000,
+            reason: "验证不能重复领取已接续来源".into(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(tick(&db).await);
+    assert!(!tick(&db).await);
+    let packets: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_daily_packet WHERE $1=ANY(source_refs)",
+    )
+    .bind(deferred)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(packets, 1);
+    let oldstate: String = sqlx::query_scalar(
+        "SELECT state FROM linggan_comment_daily_item WHERE batch_ref=$1 AND source_ref=$2",
+    )
+    .bind(origin)
+    .bind(deferred)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(oldstate, "carried_forward");
+    server.kill().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn accepted_semantics_reuse_even_when_the_batch_has_no_remaining_call_budget() {
+    let db = fixture::proof_database("reuse_exhausted_budget").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    let voice = source(&db, "reuse-no-budget", "a", "我需要知道怎样把方法坚持下去").await;
+    let first = selected(&db, config, vec![voice], 18000).await;
+    assert!(tick(&db).await);
+    let second = selected(&db, config, vec![voice], 18000).await;
+    // Isolated ledger fixture: the second batch already consumed its allowance elsewhere.
+    let billed = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,input_tokens,output_tokens,result,finished_at) SELECT $1,connection_version_ref,model_ref,config_ref,'analyze',request_hash,'succeeded',18000,18000,17000,1000,'{}',scope_001_now() FROM linggan_model_invocation WHERE config_ref=$2 AND operation='analyze' LIMIT 1").bind(billed).bind(config).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_comment_daily_packet(packet_ref,batch_ref,source_refs,context_refs,context_hash,invocation_ref,lease_until,state) VALUES($1,$2,'{}','{}','synthetic-accounting-fixture',$3,scope_001_now(),'succeeded')").bind(Uuid::new_v4()).bind(second).bind(billed).execute(db.pool()).await.unwrap();
+    assert!(!tick(&db).await);
+    let results: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT analysis_ref FROM linggan_comment_daily_item WHERE batch_ref=ANY($1)",
+    )
+    .bind(vec![first, second])
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(results[0], results[1]);
+    let calls: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_comment_daily_packet WHERE batch_ref=$1")
+            .bind(second)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(calls, 1);
+    server.kill().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn field_rejection_retains_other_extractions_and_precise_diagnostics() {
+    let db = fixture::proof_database("daily_partial_field").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    let voice = source(
+        &db,
+        "partial-field",
+        "a",
+        "[PARTIAL_FIELD] 我需要知道怎样坚持",
+    )
+    .await;
+    let batch = selected(&db, config, vec![voice], 100000).await;
+    assert!(tick(&db).await);
+    let result:serde_json::Value=sqlx::query_scalar("SELECT a.result FROM linggan_comment_daily_item i JOIN linggan_comment_analysis_work a ON a.work_ref=i.analysis_ref WHERE i.batch_ref=$1 AND i.state='succeeded'").bind(batch).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(result["semantic"]["acceptance"], "partial");
+    assert_eq!(result["semantic"]["problems"].as_array().unwrap().len(), 1);
+    let diagnostics:serde_json::Value=sqlx::query_scalar("SELECT t.validation FROM linggan_comment_request_trace t JOIN linggan_comment_daily_packet p USING(packet_ref) WHERE p.batch_ref=$1").bind(batch).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(diagnostics[0]["path"], "$.comments[0].labels[0].label");
+    server.kill().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn automatic_transient_retry_obeys_cooldown_attempt_cap_and_unknown_usage() {
+    let db = fixture::proof_database("daily_auto_retry").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    clock(&db, "2026-09-08 01:00:00Z").await;
+    let voice = source(&db, "retry-known", "a", "[BAD_QUOTE] 合成可核账的失败").await;
+    let batch = selected(&db, config, vec![voice], 100000).await;
+    assert!(tick(&db).await);
+    // Only the classified failure is substituted in this isolated accounting fixture. Actual
+    // invocation and known usage came through the local SDK; eligibility is the subject of this test.
+    sqlx::query("UPDATE linggan_comment_semantic_work SET failure_code='provider_unavailable' WHERE semantic_ref=(SELECT semantic_ref FROM linggan_comment_daily_item WHERE batch_ref=$1)").bind(batch).execute(db.pool()).await.unwrap();
+    assert!(!tick(&db).await);
+    clock(&db, "2026-09-08 01:01:01Z").await;
+    assert!(tick(&db).await);
+    sqlx::query("UPDATE linggan_comment_semantic_work SET failure_code='provider_unavailable' WHERE semantic_ref=(SELECT semantic_ref FROM linggan_comment_daily_item WHERE batch_ref=$1)").bind(batch).execute(db.pool()).await.unwrap();
+    clock(&db, "2026-09-08 01:02:02Z").await;
+    assert!(!tick(&db).await);
+    let attempts: i32 =
+        sqlx::query_scalar("SELECT attempts FROM linggan_comment_daily_item WHERE batch_ref=$1")
+            .bind(batch)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(attempts, 2);
+    let (other, _, _) = configured(&db, &url, "synthetic-no-usage", Some(config)).await;
+    let unknown = source(&db, "retry-unknown", "a", "[BAD_QUOTE] 合成用量未知的失败").await;
+    let unknown_batch = selected(&db, other, vec![unknown], 100000).await;
+    assert!(tick(&db).await);
+    sqlx::query("UPDATE linggan_comment_semantic_work SET failure_code='provider_unavailable' WHERE semantic_ref=(SELECT semantic_ref FROM linggan_comment_daily_item WHERE batch_ref=$1)").bind(unknown_batch).execute(db.pool()).await.unwrap();
+    clock(&db, "2026-09-08 01:04:00Z").await;
+    assert!(!tick(&db).await);
+    let calls: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_comment_daily_packet WHERE batch_ref=$1")
+            .bind(unknown_batch)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(calls, 1);
+    server.kill().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn legacy_batch_contract_is_readable_but_cannot_be_reactivated_or_executed() {
+    let db = fixture::proof_database("daily_legacy_grant").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    let voice = source(&db, "legacy-grant", "a", "旧规则下冻结的原声").await;
+    let legacy = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_comment_daily_batch(batch_ref,kind,config_ref,window_start,window_end,source_limit,token_limit,request) VALUES($1,'selected',$2,scope_001_now(),scope_001_now(),1,100000,'{\"ruleVersion\":\"comment-research.v3\",\"cleanerVersion\":\"comment-clean.v1\"}')").bind(legacy).bind(config).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_comment_daily_item(batch_ref,source_ref) VALUES($1,$2)")
+        .bind(legacy)
+        .bind(voice)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert!(!tick(&db).await);
+    assert!(set_batch_enabled(&db, legacy, true).await.is_err());
+    let detail = batch_detail(&db, legacy, None).await.unwrap();
+    assert_eq!(detail["items"][0]["state"], "pending");
+    assert_eq!(detail["items"][0]["cleanState"], serde_json::Value::Null);
+    let calls: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_comment_daily_packet WHERE batch_ref=$1")
+            .bind(legacy)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
     assert_eq!(calls, 0);
     server.kill().await.unwrap();
 }

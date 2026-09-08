@@ -44,10 +44,12 @@ impl ResearchScope {
                 .sort
                 .as_deref()
                 .is_some_and(|v| !matches!(v, "observed" | "likes"))
-            || self
-                .view
-                .as_deref()
-                .is_some_and(|v| !matches!(v, "overview" | "voices" | "problems" | "daily"))
+            || self.view.as_deref().is_some_and(|v| {
+                !matches!(
+                    v,
+                    "overview" | "voices" | "problems" | "daily" | "changes" | "runs"
+                )
+            })
             || self.processing_state.as_deref().is_some_and(|v| {
                 !matches!(
                     v,
@@ -85,14 +87,18 @@ impl ResearchScope {
             .filter(|v| !v.is_empty())
             .map(|s| Uuid::parse_str(s).map_err(|_| ModelError::Invalid))
             .collect::<Result<Vec<_>, _>>()?;
-        if refs.len() > 1000 {
-            return Err(ModelError::Invalid);
+        if refs.len() > crate::comment_preflight::MAX_RESEARCH_SOURCES {
+            return Err(ModelError::SelectionLimit);
         }
         Ok(refs)
     }
 }
 pub async fn schema_ready(db: &Database) -> Result<bool, ModelError> {
     Ok(sqlx::query_scalar("SELECT to_regclass('linggan_ci_source') IS NOT NULL AND to_regclass('linggan_ci_term_index') IS NOT NULL").fetch_one(db.pool()).await?)
+}
+
+pub async fn automation_schema_ready(db: &Database) -> Result<bool, ModelError> {
+    Ok(sqlx::query_scalar("SELECT to_regclass('linggan_ci_problem_task') IS NOT NULL AND to_regclass('linggan_ci_definition_vector') IS NOT NULL").fetch_one(db.pool()).await?)
 }
 
 #[path = "comment_intelligence_observations.rs"]
@@ -116,8 +122,11 @@ pub async fn prepare(db: &Database, r: &Prepare) -> Result<Value, ModelError> {
     scope.offset = Some(0);
     scope.limit = Some(50);
     if let Some(refs) = &r.source_refs {
-        if refs.is_empty() || refs.len() > 100 {
+        if refs.is_empty() {
             return Err(ModelError::Invalid);
+        }
+        if refs.len() > crate::comment_preflight::MAX_RESEARCH_SOURCES {
+            return Err(ModelError::SelectionLimit);
         }
         scope.source_refs = Some(
             refs.iter()
@@ -131,35 +140,33 @@ pub async fn prepare(db: &Database, r: &Prepare) -> Result<Value, ModelError> {
         .as_i64()
         .ok_or(ModelError::Invalid)?;
     // One confirmation has a bounded explicit manifest. Larger history uses successive batches.
-    if count == 0 || count > 100 {
+    if count == 0 && r.source_refs.is_none() {
         return Err(ModelError::Invalid);
     }
-    let mut items = result["page"]["items"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
-    if count > 50 {
-        scope.offset = Some(50);
-        let page = read(db, &scope).await?;
-        if page["scope"]["resultRevision"] != result["scope"]["resultRevision"] {
-            return Err(ModelError::Conflict);
-        }
-        items.extend(
-            page["page"]["items"]
-                .as_array()
-                .cloned()
-                .unwrap_or_default(),
-        );
+    if count > crate::comment_preflight::MAX_RESEARCH_SOURCES as i64 {
+        return Err(ModelError::SelectionLimit);
     }
-    let refs: Vec<Uuid> = items
-        .iter()
-        .filter_map(|v| {
-            v["sourceRef"]
+    let mut refs = read_manifest(db, &mut scope, &result, count).await?;
+    if r.source_refs.is_some() {
+        refs = r.source_refs.clone().unwrap_or_default();
+        refs.sort();
+        refs.dedup();
+        let allowed: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM linggan_ci_source WHERE domain_ref=$1 AND source_ref=ANY($2)",
+        )
+        .bind(
+            result["scope"]["domain"]
                 .as_str()
-                .and_then(|s| Uuid::parse_str(s).ok())
-        })
-        .collect();
-    if refs.len() != count as usize {
+                .and_then(|s| s.parse::<Uuid>().ok()),
+        )
+        .bind(&refs)
+        .fetch_one(db.pool())
+        .await?;
+        if allowed != refs.len() as i64 {
+            return Err(ModelError::Source);
+        }
+    }
+    if r.source_refs.is_none() && refs.len() != count as usize {
         return Err(ModelError::Conflict);
     }
     let domain = Uuid::parse_str(
@@ -180,11 +187,17 @@ pub async fn prepare(db: &Database, r: &Prepare) -> Result<Value, ModelError> {
     let hashes:Value=sqlx::query_scalar("SELECT jsonb_object_agg(source_ref,source_sha256) FROM linggan_ci_source WHERE domain_ref=$1 AND source_ref=ANY($2)").bind(domain).bind(&refs).fetch_one(db.pool()).await?;
     let id = Uuid::new_v4();
     let policy = crate::comment_runtime::settings(db).await?["policy"].clone();
-    let expiry:String=sqlx::query_scalar("INSERT INTO linggan_ci_prepare(prepare_ref,domain_ref,scope,source_refs,source_hashes,reanalyze,context_policy) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING expires_at::text").bind(id).bind(domain).bind(&result["scope"]).bind(&refs).bind(hashes).bind(r.reanalyze).bind(&policy).fetch_one(db.pool()).await?;
+    let parsed_policy = crate::comment_runtime::ContextPolicy::parse(policy.clone())?;
+    let preflight =
+        crate::comment_preflight::inspect(db, &refs, &parsed_policy, r.reanalyze).await?;
+    let config: Option<Uuid> = preflight["configRef"].as_str().and_then(|s| s.parse().ok());
+    let expiry:String=sqlx::query_scalar("INSERT INTO linggan_ci_prepare(prepare_ref,domain_ref,scope,source_refs,source_hashes,reanalyze,context_policy,preflight,config_ref) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING expires_at::text").bind(id).bind(domain).bind(&result["scope"]).bind(&refs).bind(hashes).bind(r.reanalyze).bind(&policy).bind(&preflight).bind(config).fetch_one(db.pool()).await?;
+    result["preflight"] = preflight;
+    result["limits"] = json!({"maxResearchSources":crate::comment_preflight::MAX_RESEARCH_SOURCES});
     result["contextPolicy"] = policy;
     result["prepareRef"] = json!(id);
     result["sourceRefs"] = json!(refs);
-    result["count"] = json!(count);
+    result["count"] = json!(refs.len());
     result["works"] = result["summary"]["works"].clone();
     result["states"] = result["summary"].clone();
     result["expiresAt"] = json!(expiry);
@@ -200,11 +213,21 @@ pub struct Run {
     pub reanalyze: bool,
 }
 pub async fn run(db: &Database, r: &Run) -> Result<Value, ModelError> {
-    let row=sqlx::query("SELECT source_refs,source_hashes,domain_ref,reanalyze FROM linggan_ci_prepare WHERE prepare_ref=$1 AND expires_at>scope_001_now()").bind(r.prepare_ref).fetch_optional(db.pool()).await?.ok_or(ModelError::NotFound)?;
+    let row=sqlx::query("SELECT source_refs,source_hashes,domain_ref,reanalyze,preflight,context_policy,config_ref FROM linggan_ci_prepare WHERE prepare_ref=$1 AND expires_at>scope_001_now()").bind(r.prepare_ref).fetch_optional(db.pool()).await?.ok_or(ModelError::NotFound)?;
     if row.get::<bool, _>("reanalyze") != r.reanalyze {
         return Err(ModelError::Conflict);
     }
+    if row.get::<Option<Uuid>, _>("config_ref") != Some(r.config_ref) {
+        return Err(ModelError::Conflict);
+    }
     let refs: Vec<Uuid> = row.get("source_refs");
+    let policy = crate::comment_runtime::ContextPolicy::parse(row.get("context_policy"))?;
+    let fresh = crate::comment_preflight::inspect(db, &refs, &policy, r.reanalyze).await?;
+    if fresh["fingerprints"] != row.get::<Value, _>("preflight")["fingerprints"]
+        || fresh["configRef"] != json!(r.config_ref)
+    {
+        return Err(ModelError::Conflict);
+    }
     let hashes:Value=sqlx::query_scalar("SELECT COALESCE(jsonb_object_agg(source_ref,source_sha256),'{}') FROM linggan_ci_source WHERE domain_ref=$1 AND source_ref=ANY($2)").bind(row.get::<Uuid,_>("domain_ref")).bind(&refs).fetch_one(db.pool()).await?;
     if hashes != row.get::<Value, _>("source_hashes") {
         return Err(ModelError::Conflict);
@@ -220,4 +243,38 @@ pub async fn run(db: &Database, r: &Run) -> Result<Value, ModelError> {
         },
     )
     .await
+}
+
+async fn read_manifest(
+    db: &Database,
+    scope: &mut ResearchScope,
+    result: &Value,
+    count: i64,
+) -> Result<Vec<Uuid>, ModelError> {
+    let mut items = result["page"]["items"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    for offset in (50..count).step_by(50) {
+        scope.offset = Some(offset);
+        let page = read(db, scope).await?;
+        if page["scope"]["resultRevision"] != result["scope"]["resultRevision"] {
+            return Err(ModelError::Conflict);
+        }
+        items.extend(
+            page["page"]["items"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default(),
+        );
+    }
+    let refs: Vec<Uuid> = items
+        .iter()
+        .filter_map(|v| {
+            v["sourceRef"]
+                .as_str()
+                .and_then(|s| Uuid::parse_str(s).ok())
+        })
+        .collect();
+    Ok(refs)
 }

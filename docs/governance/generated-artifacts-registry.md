@@ -38,3 +38,9 @@
 - 临时实验输出使用操作系统临时目录；若结果需要成为项目证据，应转写为 `docs/audits/` 的可读报告，敏感原件仍留在忽略目录或外部安全存储。
 - `PLUGIN-MIGRATION-001` 的 Browser Producer release 只包含 extension code、manifest 和由 Linggan runtime token source 打包的视觉 token；不得包含 Cookie、账号、真实页面材料、媒体字节、旧内容工作台运行依赖或运行日志。该发行物可被浏览器加载，不等于已经获得平台访问或实际采集授权。
 - `plugins/linggan-intelligence-browser/` 是当前 Linggan-owned 唯一可发布源。发行物不得包含 Cookie、账号、真实页面材料、媒体字节、旧工作台 host/endpoint/fallback 或运行日志；旧 `plugin-retrofit-*` 与历史副本只可只读对照，不得生成当前 release。
+
+## CI-AUTO-003 临时验证产物
+
+- 来源：`scripts/test-comment-intelligence-postgres.sh`、`apps/pi-adapter/test/embeddings.test.mjs`、`scripts/tests/comment_research_redesign_ui.mjs`及隔离headless浏览器回归。
+- 固定位置：操作系统临时目录 `/tmp/ci-auto-*`、`/tmp/ci-p5-proof.log`、`/tmp/ci-embedding-*`、`/tmp/ci-problem-relations-proof.log`。截图只含合成材料。测试源码是人工维护的权威输入，可入Git；日志/截图/临时预览脚本不入Git。
+- 再生：按活跃计划列出的同名测试命令重建；数据库容器和卷由脚本退出时清理。验证摘要转入实施计划及验收记录，临时原件可在任务收口后清理。

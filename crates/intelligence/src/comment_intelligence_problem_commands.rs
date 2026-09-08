@@ -76,6 +76,9 @@ pub(super) async fn problem_action(
     connection: &mut PgConnection,
     action: &Action,
 ) -> Result<Value, StorageError> {
+    if action.kind == "candidate_resolve" {
+        return resolve_candidate(connection, action).await;
+    }
     if action.kind == "problem_create" {
         if action.expected_revision != 0 {
             return Err(rejected("CI_REVISION_CONFLICT"));
@@ -244,10 +247,16 @@ async fn create_problem(
     {
         return Err(rejected("CI_PROBLEM_ALREADY_EXISTS"));
     }
-    let definition = json!({"scope":"user_confirmed","boundaries":[],"examples":sources,"counterexamples":[],"splitFrom":split_from});
+    let definition = json!({"lifecycle":"stable","lifecycleBasis":"human_definition","scope":"user_confirmed","boundaries":[],"examples":sources,"counterexamples":[],"splitFrom":split_from});
     sqlx::query("INSERT INTO linggan_ci_problem(problem_ref,domain_ref,name,meaning,definition,origin) VALUES($1,$2,$3,$4,$5,'manual')")
         .bind(problem).bind(action.domain).bind(payload.name.trim()).bind(payload.meaning.trim()).bind(definition).execute(&mut *connection).await.map_err(statement)?;
-    for source in sources {
+    let candidate_refs = payload.candidate_refs;
+    let expression_scoped = !candidate_refs.is_empty();
+    if candidate_refs.len() > 500 {
+        return Err(rejected("CI_INVALID_COMMAND"));
+    }
+    for source in &sources {
+        let source = *source;
         let before = source_snapshot(connection, action.domain, source).await?;
         if let Some(parent) = split_from {
             sqlx::query(
@@ -262,7 +271,9 @@ async fn create_problem(
         sqlx::query("INSERT INTO linggan_ci_problem_member(problem_ref,canonical_ref,origin) VALUES($1,$2,'manual')")
             .bind(problem).bind(source).execute(&mut *connection).await.map_err(statement)?;
         let mut after = source_snapshot(connection, action.domain, source).await?;
-        after["locked"] = json!(true);
+        if !expression_scoped {
+            after["locked"] = json!(true);
+        }
         record_source(
             connection,
             action.domain,
@@ -275,6 +286,7 @@ async fn create_problem(
         )
         .await?;
     }
+    confirm_problem_expressions(connection, action, problem, &sources, candidate_refs).await?;
     let after = problem_snapshot(connection, action.domain, problem).await?;
     problem_version(
         connection,
@@ -287,4 +299,85 @@ async fn create_problem(
     )
     .await?;
     Ok(after)
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CandidateResolution {
+    candidate_ref: Uuid,
+    target_ref: Uuid,
+    target_definition_revision: i64,
+    relation: String,
+}
+
+async fn resolve_candidate(
+    connection: &mut PgConnection,
+    action: &Action,
+) -> Result<Value, StorageError> {
+    let payload: CandidateResolution = parse(&action.payload)?;
+    if !text_ok(&action.reason, 1000)
+        || !["same", "related", "different"].contains(&payload.relation.as_str())
+    {
+        return Err(rejected("CI_INVALID_COMMAND"));
+    }
+    let revision: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_ci_problem_boundary_decision WHERE candidate_ref=$1 AND origin='manual'")
+        .bind(payload.candidate_ref).fetch_one(&mut *connection).await.map_err(statement)?;
+    if action.expected_revision != revision {
+        return Err(rejected("CI_REVISION_CONFLICT"));
+    }
+    crate::comment_intelligence_problems::apply_problem_relation(
+        connection,
+        action.domain,
+        payload.candidate_ref,
+        payload.target_ref,
+        payload.target_definition_revision,
+        &payload.relation,
+        &action.reason,
+        "manual",
+        Some(action.command_ref),
+    )
+    .await?;
+    Ok(
+        json!({"candidateRef":payload.candidate_ref,"targetRef":payload.target_ref,"relation":payload.relation,"revision":revision+1}),
+    )
+}
+
+async fn confirm_problem_expressions(
+    connection: &mut PgConnection,
+    action: &Action,
+    problem: Uuid,
+    sources: &std::collections::BTreeSet<Uuid>,
+    candidate_refs: Vec<Uuid>,
+) -> Result<(), StorageError> {
+    // Explicit expression identities prevent resolving unrelated problems in the same comment.
+    for candidate in candidate_refs {
+        let row = sqlx::query("SELECT canonical_ref,definition_key,state FROM linggan_ci_problem_candidate WHERE candidate_ref=$1 AND domain_ref=$2")
+            .bind(candidate).bind(action.domain).fetch_optional(&mut *connection).await.map_err(statement)?
+            .ok_or_else(|| rejected("CI_CANDIDATE_UNAVAILABLE"))?;
+        if !sources.contains(&row.get::<Uuid, _>("canonical_ref"))
+            || row.get::<String, _>("state") == "superseded"
+        {
+            return Err(rejected("CI_CANDIDATE_UNAVAILABLE"));
+        }
+        let reason = if action.reason.trim().is_empty() {
+            "人工确认此问题表达"
+        } else {
+            action.reason.as_str()
+        };
+        crate::comment_intelligence_problems::record_boundary_decision(
+            connection,
+            action.domain,
+            candidate,
+            problem,
+            1,
+            "same",
+            reason,
+            "manual",
+            Some(action.command_ref),
+        )
+        .await?;
+        sqlx::query("UPDATE linggan_ci_problem_candidate SET state='assigned',problem_ref=$2 WHERE candidate_ref=$1")
+            .bind(candidate).bind(problem).execute(&mut *connection).await.map_err(statement)?;
+    }
+    Ok(())
 }

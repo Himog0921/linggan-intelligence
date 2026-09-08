@@ -5,7 +5,7 @@ import { execute, VERSION } from '../src/adapter.mjs';
 
 // Small synthetic schema tests the wire boundary. The Rust packet owns the real schema.
 const schema={type:'object',properties:{comments:{type:'array',items:{type:'object',properties:{commentRef:{type:'string'}},required:['commentRef'],additionalProperties:false}}},required:['comments'],additionalProperties:false};
-const prompt=JSON.stringify({contract:'comment-research.v3',task:'Return JSON.',outputSchema:schema,untrustedMaterial:{comments:[]}});
+const prompt=JSON.stringify({contract:'comment-research.v4',task:'Return JSON.',outputSchema:schema,untrustedMaterial:{comments:[]}});
 const request={version:VERSION,operation:'analyze',api:'openai-responses',baseUrl:'https://api.deepseek.com/v1',apiKey:'SYNTHETIC-NOT-A-CREDENTIAL',modelId:'deepseek-v4-flash',timeoutMs:3000,maxOutputTokens:1024,system:'SYNTHETIC / NOT EVIDENCE. Return JSON only.',prompt};
 
 function complete(res,api,text='{"comments":[]}') {
@@ -44,7 +44,7 @@ test('actual SDK sends DeepSeek Responses schema and chat JSON mode for probe an
       assert.equal((await execute({...request,api,operation})).ok,true);
       const body=bodies.at(-1);
       if(api==='openai-responses'){
-        assert.deepEqual(body.text.format,{type:'json_schema',name:'comment_research_v3',schema});
+        assert.deepEqual(body.text.format,{type:'json_schema',name:'comment_research_v4',schema});
         assert.deepEqual(body.reasoning,{effort:'none'});
       }else{
         assert.deepEqual(body.response_format,{type:'json_object'});
@@ -60,8 +60,8 @@ test('official supported OpenAI models use strict schema in each documented prot
     for(const api of ['openai-responses','openai-completions']){
       assert.equal((await execute({...request,baseUrl:'https://api.openai.com/v1',modelId:'gpt-4o-mini',api})).ok,true);
       const body=bodies.at(-1);
-      if(api==='openai-responses')assert.deepEqual(body.text.format,{type:'json_schema',name:'comment_research_v3',strict:true,schema});
-      else assert.deepEqual(body.response_format,{type:'json_schema',json_schema:{name:'comment_research_v3',strict:true,schema}});
+      if(api==='openai-responses')assert.deepEqual(body.text.format,{type:'json_schema',name:'comment_research_v4',strict:true,schema});
+      else assert.deepEqual(body.response_format,{type:'json_schema',json_schema:{name:'comment_research_v4',strict:true,schema}});
     }
   });
 });
@@ -73,7 +73,7 @@ test('unknown host, path, model and unrelated prompts do not inherit structured 
       {modelId:'future-unknown-model'},
       {baseUrl:'https://api.openai.com/v1',modelId:'unknown-model'},
       {prompt:'Return JSON.'},
-      {prompt:JSON.stringify({contract:'another-contract',untrustedMaterial:{contract:'comment-research.v3',outputSchema:schema}})},
+      {prompt:JSON.stringify({contract:'another-contract',untrustedMaterial:{contract:'comment-research.v4',outputSchema:schema}})},
     ]){
       assert.equal((await execute({...request,...change})).ok,true);
       assert.equal(bodies.at(-1).text?.format,undefined);
@@ -83,7 +83,7 @@ test('unknown host, path, model and unrelated prompts do not inherit structured 
 });
 test('invalid server schema is rejected before transport; provider schema rejection is not retried',async()=>{
   await fixture(async bodies=>{
-    assert.equal((await execute({...request,prompt:JSON.stringify({contract:'comment-research.v3',outputSchema:{type:'array'}})})).failureCode,'invalid_request');
+    assert.equal((await execute({...request,prompt:JSON.stringify({contract:'comment-research.v4',outputSchema:{type:'array'}})})).failureCode,'invalid_request');
     assert.equal(bodies.length,0);
   });
   for(const [status,code] of [[400,'provider_request_rejected'],[422,'provider_request_rejected'],[503,'provider_unavailable']]){

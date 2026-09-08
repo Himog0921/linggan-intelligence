@@ -199,23 +199,23 @@ pub async fn request_detail(
     if !allowed {
         return Err(ModelError::Source);
     }
-    let r=sqlx::query("SELECT t.*,t.expires_at>scope_001_now() AS fresh,p.source_refs,p.context_refs,v.state,v.failure_code,v.created_at,v.finished_at FROM linggan_comment_daily_packet p JOIN linggan_model_invocation v USING(invocation_ref) LEFT JOIN linggan_comment_request_trace t USING(invocation_ref) WHERE p.batch_ref=$1 AND p.invocation_ref=$2 AND NOT EXISTS(SELECT 1 FROM unnest(p.source_refs) ref LEFT JOIN linggan_material_comment c ON c.material_ref=ref LEFT JOIN linggan_material_content w ON w.public_ref=c.content_public_ref WHERE w.domain_ref IS DISTINCT FROM $3)").bind(batch).bind(invocation).bind(domain).fetch_optional(db.pool()).await?.ok_or(ModelError::NotFound)?;
+    let r=sqlx::query("SELECT t.*,t.expires_at>scope_001_now() AS fresh,p.purpose,p.source_refs,p.context_refs,v.state,v.failure_code,v.created_at,v.finished_at FROM linggan_comment_daily_packet p JOIN linggan_model_invocation v USING(invocation_ref) LEFT JOIN linggan_comment_request_trace t USING(invocation_ref) WHERE p.batch_ref=$1 AND p.invocation_ref=$2 AND NOT EXISTS(SELECT 1 FROM unnest(p.source_refs) ref LEFT JOIN linggan_material_comment c ON c.material_ref=ref LEFT JOIN linggan_material_content w ON w.public_ref=c.content_public_ref WHERE w.domain_ref IS DISTINCT FROM $3)").bind(batch).bind(invocation).bind(domain).fetch_optional(db.pool()).await?.ok_or(ModelError::NotFound)?;
     let guard = r.get::<Option<Value>, _>("context_guard");
     let Some(guard) = guard else {
         return Ok(
-            json!({"availability":"NOT_RECORDED","input":null,"output":null,"validation":[],"events":[]}),
+            json!({"purpose":r.get::<String,_>("purpose"),"availability":"NOT_RECORDED","input":null,"output":null,"validation":[],"events":[]}),
         );
     };
     if !crate::comment_daily_read::context_readable(db, &guard).await? {
         return Ok(
-            json!({"availability":"RESTRICTED","input":null,"output":null,"validation":[],"events":[]}),
+            json!({"purpose":r.get::<String,_>("purpose"),"availability":"RESTRICTED","input":null,"output":null,"validation":[],"events":[]}),
         );
     }
     let fresh = r.get::<Option<bool>, _>("fresh") == Some(true)
         && r.get::<Option<Value>, _>("input_content").is_some();
     let output = r.get::<Option<String>, _>("output_content");
     Ok(
-        json!({"availability":if fresh{"AVAILABLE"}else if r.get::<Option<bool>,_>("fresh")==Some(false){"EXPIRED"}else{"NOT_RECORDED"},
+        json!({"purpose":r.get::<String,_>("purpose"),"availability":if fresh{"AVAILABLE"}else if r.get::<Option<bool>,_>("fresh")==Some(false){"EXPIRED"}else{"NOT_RECORDED"},
  "input":if fresh{r.get::<Option<Value>,_>("input_content")}else{None},"output":if fresh{json!({"received":output.is_some(),"redacted":true,"truncated":r.get::<Option<Value>,_>("events").is_some_and(|events|events.as_array().is_some_and(|a|a.iter().any(|e|e["displayTruncated"]==true))),"json":output.as_deref().and_then(|s|serde_json::from_str::<Value>(s).ok()),"text":output})}else{Value::Null},
  "validation":r.get::<Option<Value>,_>("validation"),"events":r.get::<Option<Value>,_>("events"),"policy":r.get::<Option<Value>,_>("policy"),"inputHash":r.get::<Option<String>,_>("input_hash"),"outcomes":r.get::<Option<Value>,_>("outcomes")}),
     )

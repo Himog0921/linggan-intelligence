@@ -39,5 +39,8 @@ pub mod comment_intelligence;
 pub mod comment_intelligence_actions;
 pub mod comment_intelligence_problems;
 pub mod comment_intelligence_statistics;
+mod comment_preflight;
 
 pub mod comment_runtime;
+
+pub mod embedding_settings;

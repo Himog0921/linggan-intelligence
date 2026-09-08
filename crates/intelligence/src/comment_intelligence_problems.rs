@@ -20,8 +20,24 @@ pub use vocabulary::{
 mod candidates;
 use candidates::{assign_model_equivalence, validated_candidates};
 
-pub const DICTIONARY_VERSION: &str = "comment-language.v1";
-pub const PROBLEM_RULE_VERSION: &str = "problem-exact-definition.v1";
+#[path = "comment_intelligence_problem_relations.rs"]
+mod relations;
+pub use relations::{
+    PROBLEM_RELATION_VERSION, ProblemRelation, RelationDecision, apply_problem_relation_output,
+    apply_problem_task_output, prepare_problem_relation, problem_relation_task,
+    promote_unmatched_expression, validate_problem_relations,
+};
+pub(crate) use relations::{apply_problem_relation, record_boundary_decision};
+
+#[path = "comment_problem_worker.rs"]
+mod worker;
+pub use worker::{
+    problem_automation_state, problem_task_status, queue_problem_task, run_problem_relation_once,
+    sync_problem_tasks,
+};
+
+pub const DICTIONARY_VERSION: &str = "comment-language.v2";
+pub const PROBLEM_RULE_VERSION: &str = "problem-exact-definition.v2";
 
 fn statement(error: sqlx::Error) -> StorageError {
     StorageError::Statement(error)
@@ -36,7 +52,7 @@ pub async fn reconcile_problem_index(
     if !(1..=500).contains(&limit) {
         return Err(rejected("CI_INVALID_LIMIT"));
     }
-    let rows = sqlx::query("SELECT s.canonical_ref,s.source_ref,s.domain_ref,s.body,s.source_sha256,s.role,a.work_ref AS analysis_ref,a.result FROM linggan_ci_source s LEFT JOIN LATERAL (SELECT a.work_ref,a.result FROM linggan_comment_analysis_work a JOIN linggan_material_comment original ON original.material_ref=a.source_ref WHERE original.content_public_ref=s.work_ref AND original.comment_external_id=s.comment_external_id AND a.state IN ('succeeded','no_signal') AND a.result->>'sourceSha256'=s.source_sha256 ORDER BY a.created_at DESC,a.work_ref DESC LIMIT 1) a ON true LEFT JOIN linggan_ci_projection_cursor c ON c.canonical_ref=s.canonical_ref WHERE s.body IS NOT NULL AND (c.canonical_ref IS NULL OR c.source_sha256<>s.source_sha256 OR c.dictionary_version<>$1 OR c.analysis_ref IS DISTINCT FROM a.work_ref) ORDER BY s.first_observed_at,s.canonical_ref LIMIT $2")
+    let rows = sqlx::query("SELECT s.canonical_ref,s.source_ref,s.domain_ref,s.body,s.source_sha256,s.role,a.work_ref AS analysis_ref,a.result FROM linggan_ci_source s LEFT JOIN LATERAL (SELECT a.work_ref,a.result FROM linggan_comment_analysis_work a JOIN linggan_material_comment original ON original.material_ref=a.source_ref WHERE EXISTS(SELECT 1 FROM observation_domain d WHERE d.domain_ref=s.domain_ref AND d.is_own_domain) AND original.content_public_ref=s.work_ref AND original.comment_external_id=s.comment_external_id AND a.state IN ('succeeded','no_signal') AND a.result->>'sourceSha256'=s.source_sha256 ORDER BY a.created_at DESC,a.work_ref DESC LIMIT 1) a ON true LEFT JOIN linggan_ci_projection_cursor c ON c.canonical_ref=s.canonical_ref AND c.domain_ref=s.domain_ref WHERE s.body IS NOT NULL AND (c.canonical_ref IS NULL OR c.source_sha256<>s.source_sha256 OR c.dictionary_version<>$1 OR c.analysis_ref IS DISTINCT FROM a.work_ref) ORDER BY s.first_observed_at,s.canonical_ref LIMIT $2")
         .bind(DICTIONARY_VERSION).bind(limit).fetch_all(database.pool()).await.map_err(statement)?;
     let mut projected = 0;
     let mut model_assigned = 0;
@@ -49,6 +65,7 @@ pub async fn reconcile_problem_index(
         let analysis_ref: Option<Uuid> = row.get("analysis_ref");
         let result: Option<Value> = row.get("result");
         let role: String = row.get("role");
+        let clean = crate::comment_cleaning::clean(&body);
         let result_readable = if let Some(result) = &result {
             crate::comment_daily_read::context_readable(database, result)
                 .await
@@ -64,33 +81,36 @@ pub async fn reconcile_problem_index(
         if !still_current {
             continue;
         }
-        sqlx::query("DELETE FROM linggan_ci_term_index WHERE canonical_ref=$1")
+        sqlx::query("DELETE FROM linggan_ci_term_index WHERE canonical_ref=$1 AND domain_ref=$2")
             .bind(canonical)
+            .bind(domain)
             .execute(&mut *tx)
             .await
             .map_err(statement)?;
-        if ![
-            "platform",
-            "platform_system",
-            "system",
-            "automatic",
-            "summary",
-        ]
-        .contains(&role.as_str())
+        if clean.state != "dropped"
+            && ![
+                "platform",
+                "platform_system",
+                "system",
+                "automatic",
+                "summary",
+            ]
+            .contains(&role.as_str())
         {
-            let terms = comment_terms(&body);
+            let terms = comment_terms(&clean.text);
             sqlx::query("INSERT INTO linggan_ci_term_index(canonical_ref,domain_ref,term,source_sha256,dictionary_version) SELECT $1,$2,unnest($3::text[]),$4,$5")
                 .bind(canonical).bind(domain).bind(terms).bind(&source_sha).bind(DICTIONARY_VERSION).execute(&mut *tx).await.map_err(statement)?;
         }
-        sqlx::query("UPDATE linggan_ci_problem_candidate SET state='superseded' WHERE canonical_ref=$1 AND (analysis_ref IS DISTINCT FROM $2 OR NOT $3)")
-            .bind(canonical).bind(analysis_ref).bind(result_readable).execute(&mut *tx).await.map_err(statement)?;
-        let locked: bool = sqlx::query_scalar("SELECT COALESCE((SELECT locked FROM linggan_ci_source_research WHERE canonical_ref=$1),false)")
-            .bind(canonical).fetch_one(&mut *tx).await.map_err(statement)?;
+        sqlx::query("UPDATE linggan_ci_problem_candidate SET state='superseded' WHERE canonical_ref=$1 AND domain_ref=$4 AND (analysis_ref IS DISTINCT FROM $2 OR NOT $3)")
+            .bind(canonical).bind(analysis_ref).bind(result_readable && clean.state != "dropped").bind(domain).execute(&mut *tx).await.map_err(statement)?;
+        let locked: bool = sqlx::query_scalar("SELECT COALESCE((SELECT locked FROM linggan_ci_source_research WHERE canonical_ref=$1 AND domain_ref=$2),false)")
+            .bind(canonical).bind(domain).fetch_one(&mut *tx).await.map_err(statement)?;
         if !locked {
-            sqlx::query("DELETE FROM linggan_ci_problem_member WHERE canonical_ref=$1 AND origin IN ('exact_definition','model_equivalence')")
-                .bind(canonical).execute(&mut *tx).await.map_err(statement)?;
+            sqlx::query("DELETE FROM linggan_ci_problem_member WHERE canonical_ref=$1 AND problem_ref IN(SELECT problem_ref FROM linggan_ci_problem WHERE domain_ref=$4) AND origin IN ('exact_definition','model_equivalence','model_expression') AND (analysis_ref IS DISTINCT FROM $2 OR NOT $3)")
+                .bind(canonical).bind(analysis_ref).bind(result_readable && clean.state != "dropped").bind(domain).execute(&mut *tx).await.map_err(statement)?;
         }
-        if result_readable
+        if clean.state != "dropped"
+            && result_readable
             && ![
                 "author",
                 "platform",
@@ -106,8 +126,8 @@ pub async fn reconcile_problem_index(
                     project_candidates(&mut tx, domain, canonical, analysis, result, &body).await?;
             }
         }
-        sqlx::query("INSERT INTO linggan_ci_projection_cursor(canonical_ref,source_sha256,dictionary_version,analysis_ref) VALUES($1,$2,$3,$4) ON CONFLICT(canonical_ref) DO UPDATE SET source_sha256=EXCLUDED.source_sha256,dictionary_version=EXCLUDED.dictionary_version,analysis_ref=EXCLUDED.analysis_ref,updated_at=scope_001_now()")
-            .bind(canonical).bind(source_sha).bind(DICTIONARY_VERSION).bind(analysis_ref).execute(&mut *tx).await.map_err(statement)?;
+        sqlx::query("INSERT INTO linggan_ci_projection_cursor(canonical_ref,source_sha256,dictionary_version,analysis_ref,domain_ref) VALUES($1,$2,$3,$4,$5) ON CONFLICT(canonical_ref,domain_ref) DO UPDATE SET source_sha256=EXCLUDED.source_sha256,dictionary_version=EXCLUDED.dictionary_version,analysis_ref=EXCLUDED.analysis_ref,updated_at=scope_001_now()")
+            .bind(canonical).bind(source_sha).bind(DICTIONARY_VERSION).bind(analysis_ref).bind(domain).execute(&mut *tx).await.map_err(statement)?;
         tx.commit().await.map_err(statement)?;
         projected += 1;
         domains.insert(domain);
@@ -147,10 +167,44 @@ async fn project_candidates(
             validated_candidates(result, analyzed_source, body)
         {
             let key = definition_key(&name, &meaning);
-            let candidate:Uuid = sqlx::query_scalar("INSERT INTO linggan_ci_problem_candidate(candidate_ref,canonical_ref,domain_ref,analysis_ref,ordinal,name,meaning,definition_key,evidence,proposal,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'unmerged') ON CONFLICT(analysis_ref,ordinal) DO UPDATE SET state='unmerged',problem_ref=NULL,proposal=EXCLUDED.proposal RETURNING candidate_ref")
-            .bind(Uuid::new_v4()).bind(canonical).bind(domain).bind(analysis).bind(ordinal as i32).bind(name).bind(meaning).bind(key).bind(&evidence).bind(if proposal.is_null() { None } else { Some(&proposal) })
+            let candidate:Uuid = sqlx::query_scalar("INSERT INTO linggan_ci_problem_candidate(candidate_ref,canonical_ref,domain_ref,analysis_ref,ordinal,name,meaning,definition_key,evidence,proposal,state) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'unmerged') ON CONFLICT(analysis_ref,ordinal) DO UPDATE SET proposal=CASE WHEN linggan_ci_problem_candidate.state IN ('assigned','resolved') THEN linggan_ci_problem_candidate.proposal ELSE EXCLUDED.proposal END RETURNING candidate_ref")
+            .bind(Uuid::new_v4()).bind(canonical).bind(domain).bind(analysis).bind(ordinal as i32).bind(&name).bind(&meaning).bind(key).bind(&evidence).bind(if proposal.is_null() { None } else { Some(&proposal) })
             .fetch_one(&mut *connection).await.map_err(statement)?;
-            if !proposal.is_null() {
+            let pending: bool = sqlx::query_scalar(
+                "SELECT state='unmerged' FROM linggan_ci_problem_candidate WHERE candidate_ref=$1",
+            )
+            .bind(candidate)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(statement)?;
+            if !pending {
+                continue;
+            }
+            // Reuse only definition-specific human decisions at the current target revision.
+            // Resolving one expression never locks every problem in this comment.
+            let decisions = sqlx::query("SELECT DISTINCT ON(d.target_ref) d.target_ref,d.target_definition_revision,d.relation,d.reason FROM linggan_ci_problem_boundary_decision d JOIN linggan_ci_problem p ON p.problem_ref=d.target_ref AND p.definition_revision=d.target_definition_revision AND p.redirect_ref IS NULL WHERE d.domain_ref=$1 AND d.definition_key=$2 AND d.origin='manual' ORDER BY d.target_ref,d.created_at DESC,d.decision_ref DESC")
+                .bind(domain).bind(definition_key(&name, &meaning)).fetch_all(&mut *connection).await.map_err(statement)?;
+            let mut decided = false;
+            for decision in decisions {
+                if decision.get::<String, _>("relation") == "same" {
+                    apply_problem_relation(
+                        connection,
+                        domain,
+                        candidate,
+                        decision.get("target_ref"),
+                        decision.get("target_definition_revision"),
+                        "same",
+                        &decision.get::<String, _>("reason"),
+                        "boundary_reuse",
+                        None,
+                    )
+                    .await?;
+                    decided = true;
+                    model_assigned += 1;
+                    break;
+                }
+            }
+            if !decided && !proposal.is_null() {
                 if assign_model_equivalence(
                     connection, domain, canonical, analysis, candidate, &evidence, &proposal,
                 )
@@ -171,13 +225,13 @@ async fn assign_exact_definitions(
 ) -> Result<u64, StorageError> {
     let mut tx = database.pool().begin().await.map_err(statement)?;
     lock_domain(&mut tx, domain).await?;
-    let keys = sqlx::query_scalar::<_,String>("SELECT c.definition_key FROM linggan_ci_problem_candidate c JOIN linggan_ci_source s USING(canonical_ref,domain_ref) WHERE c.domain_ref=$1 AND c.state='unmerged' AND c.proposal IS NULL AND NOT COALESCE((SELECT locked FROM linggan_ci_source_research h WHERE h.canonical_ref=c.canonical_ref),false) AND NOT EXISTS(SELECT 1 FROM linggan_ci_problem p WHERE p.domain_ref=c.domain_ref AND p.definition->>'exactDefinitionKey'=c.definition_key AND (p.redirect_ref IS NOT NULL OR COALESCE((p.definition->>'humanEdited')::boolean,false))) GROUP BY c.definition_key HAVING count(DISTINCT c.canonical_ref)>=3 OR EXISTS(SELECT 1 FROM linggan_ci_problem p WHERE p.domain_ref=$1 AND p.definition->>'exactDefinitionKey'=c.definition_key AND p.redirect_ref IS NULL) ORDER BY max(c.created_at),c.definition_key LIMIT $2")
+    let keys = sqlx::query_scalar::<_,String>("SELECT c.definition_key FROM linggan_ci_problem_candidate c JOIN linggan_ci_source s USING(canonical_ref,domain_ref) WHERE c.domain_ref=$1 AND c.state='unmerged' AND c.proposal IS NULL AND EXISTS(SELECT 1 FROM linggan_comment_analysis_work legacy WHERE legacy.work_ref=c.analysis_ref AND legacy.rule_version<>'comment-research.v4') AND NOT COALESCE((SELECT locked FROM linggan_ci_source_research h WHERE h.canonical_ref=c.canonical_ref AND h.domain_ref=c.domain_ref),false) AND NOT EXISTS(SELECT 1 FROM linggan_ci_problem p WHERE p.domain_ref=c.domain_ref AND p.definition->>'exactDefinitionKey'=c.definition_key AND (p.redirect_ref IS NOT NULL OR COALESCE((p.definition->>'humanEdited')::boolean,false))) GROUP BY c.definition_key HAVING count(DISTINCT c.canonical_ref)>=3 OR EXISTS(SELECT 1 FROM linggan_ci_problem p WHERE p.domain_ref=$1 AND p.definition->>'exactDefinitionKey'=c.definition_key AND p.redirect_ref IS NULL) ORDER BY max(c.created_at),c.definition_key LIMIT $2")
         .bind(domain).bind(limit).fetch_all(&mut *tx).await.map_err(statement)?;
     let mut assigned = 0;
     for key in keys {
         let existing: Option<Uuid> = sqlx::query_scalar("SELECT problem_ref FROM linggan_ci_problem WHERE domain_ref=$1 AND definition->>'exactDefinitionKey'=$2 AND redirect_ref IS NULL AND NOT COALESCE((definition->>'humanEdited')::boolean,false) ORDER BY created_at,problem_ref LIMIT 1")
             .bind(domain).bind(&key).fetch_optional(&mut *tx).await.map_err(statement)?;
-        let candidates = sqlx::query("SELECT DISTINCT ON(c.canonical_ref) c.candidate_ref,c.canonical_ref,c.analysis_ref,c.name,c.meaning,c.evidence,a.result FROM linggan_ci_problem_candidate c JOIN linggan_ci_source s USING(canonical_ref,domain_ref) JOIN linggan_comment_analysis_work a ON a.work_ref=c.analysis_ref AND a.result->>'sourceSha256'=s.source_sha256 WHERE c.domain_ref=$1 AND c.definition_key=$2 AND c.state='unmerged' AND c.proposal IS NULL AND NOT COALESCE((SELECT locked FROM linggan_ci_source_research h WHERE h.canonical_ref=c.canonical_ref),false) ORDER BY c.canonical_ref,c.created_at DESC,c.candidate_ref")
+        let candidates = sqlx::query("SELECT DISTINCT ON(c.canonical_ref) c.candidate_ref,c.canonical_ref,c.analysis_ref,c.name,c.meaning,c.evidence,a.result FROM linggan_ci_problem_candidate c JOIN linggan_ci_source s USING(canonical_ref,domain_ref) JOIN linggan_comment_analysis_work a ON a.work_ref=c.analysis_ref AND a.result->>'sourceSha256'=s.source_sha256 WHERE c.domain_ref=$1 AND c.definition_key=$2 AND c.state='unmerged' AND c.proposal IS NULL AND a.rule_version<>'comment-research.v4' AND NOT COALESCE((SELECT locked FROM linggan_ci_source_research h WHERE h.canonical_ref=c.canonical_ref AND h.domain_ref=c.domain_ref),false) ORDER BY c.canonical_ref,c.created_at DESC,c.candidate_ref")
             .bind(domain).bind(&key).fetch_all(&mut *tx).await.map_err(statement)?;
         let mut readable_candidates = Vec::new();
         for candidate in candidates {
@@ -205,7 +259,7 @@ async fn assign_exact_definitions(
             (problem, problem_snapshot(&mut tx, domain, problem).await?)
         } else {
             let problem = Uuid::new_v4();
-            let definition = json!({"exactDefinitionKey":key,"ruleVersion":PROBLEM_RULE_VERSION,"boundary":"仅定义文字完全一致；相似表达保留候选，未据此断言语义等价", "examples":candidates.iter().take(3).map(|r|r.get::<Uuid,_>("canonical_ref")).collect::<Vec<_>>(),"counterexamples":[]});
+            let definition = json!({"lifecycle":"emerging","lifecycleBasis":"observed_expression_count.v1","exactDefinitionKey":key,"ruleVersion":PROBLEM_RULE_VERSION,"boundary":"仅定义文字完全一致；相似表达保留候选，未据此断言语义等价", "examples":candidates.iter().take(3).map(|r|r.get::<Uuid,_>("canonical_ref")).collect::<Vec<_>>(),"counterexamples":[]});
             sqlx::query("INSERT INTO linggan_ci_problem(problem_ref,domain_ref,name,meaning,definition,origin) VALUES($1,$2,$3,$4,$5,'exact_definition')")
                 .bind(problem).bind(domain).bind(candidates[0].get::<String,_>("name")).bind(candidates[0].get::<String,_>("meaning")).bind(definition)
                 .execute(&mut *tx).await.map_err(statement)?;
@@ -219,6 +273,8 @@ async fn assign_exact_definitions(
             sqlx::query("UPDATE linggan_ci_problem_candidate SET state='assigned',problem_ref=$2 WHERE candidate_ref=$1")
                 .bind(candidate.get::<Uuid,_>("candidate_ref")).bind(problem).execute(&mut *tx).await.map_err(statement)?;
         }
+        sqlx::query("UPDATE linggan_ci_problem p SET definition=definition || jsonb_build_object('lifecycle',CASE WHEN (SELECT count(DISTINCT m.canonical_ref) FROM linggan_ci_problem_member m JOIN linggan_ci_source s USING(canonical_ref) JOIN linggan_comment_analysis_work a ON a.work_ref=m.analysis_ref AND a.result->>'sourceSha256'=s.source_sha256 WHERE m.problem_ref=p.problem_ref AND s.domain_ref=p.domain_ref)>=3 THEN 'stable' ELSE 'emerging' END) WHERE problem_ref=$1")
+            .bind(problem).execute(&mut *tx).await.map_err(statement)?;
         if !before.as_object().is_some_and(|v| v.is_empty()) {
             sqlx::query("UPDATE linggan_ci_problem SET revision=revision+1,updated_at=scope_001_now() WHERE problem_ref=$1")
                 .bind(problem).execute(&mut *tx).await.map_err(statement)?;
@@ -257,7 +313,7 @@ pub async fn problem_details(
         current = Uuid::parse_str(next).map_err(|_| rejected("CI_INVALID_STATE"))?;
         snapshot = problem_metadata(&mut tx, domain, current).await?;
     }
-    let rows = sqlx::query("SELECT s.canonical_ref,s.source_ref,s.work_ref,left(s.body,4000) AS body,m.evidence,m.origin,a.result FROM linggan_ci_problem_member m JOIN linggan_ci_source s USING(canonical_ref) LEFT JOIN linggan_comment_analysis_work a ON a.work_ref=m.analysis_ref LEFT JOIN linggan_ci_source_research h ON h.canonical_ref=s.canonical_ref WHERE m.problem_ref=$1 AND s.domain_ref=$2 AND ((m.origin='manual' AND h.source_sha256=s.source_sha256) OR (m.origin<>'manual' AND a.result->>'sourceSha256'=s.source_sha256)) ORDER BY s.first_observed_at DESC,s.canonical_ref LIMIT 101")
+    let rows = sqlx::query("SELECT s.canonical_ref,s.source_ref,s.work_ref,left(s.body,4000) AS body,m.evidence,m.origin,a.result FROM linggan_ci_problem_member m JOIN linggan_ci_source s USING(canonical_ref) LEFT JOIN linggan_comment_analysis_work a ON a.work_ref=m.analysis_ref LEFT JOIN linggan_ci_source_research h ON h.canonical_ref=s.canonical_ref AND h.domain_ref=s.domain_ref WHERE m.problem_ref=$1 AND s.domain_ref=$2 AND ((m.origin='manual' AND h.source_sha256=s.source_sha256) OR (m.origin<>'manual' AND a.result->>'sourceSha256'=s.source_sha256)) ORDER BY s.first_observed_at DESC,s.canonical_ref LIMIT 101")
         .bind(current).bind(domain).fetch_all(&mut *tx).await.map_err(statement)?;
     let history = sqlx::query("SELECT revision,kind,reason,created_at::text AS at,before_value->>'name' AS old_name,after_value->>'name' AS new_name FROM linggan_ci_problem_version WHERE problem_ref=$1 ORDER BY revision DESC LIMIT 100")
         .bind(current).fetch_all(&mut *tx).await.map_err(statement)?;
@@ -320,7 +376,7 @@ async fn problem_suggestions(
     let mut suggestions = Vec::new();
     for row in candidates {
         let other: Uuid = row.get("problem_ref");
-        let evidence = sqlx::query("SELECT s.source_ref,m.origin,a.result FROM linggan_ci_problem_member m JOIN linggan_ci_source s USING(canonical_ref) LEFT JOIN linggan_comment_analysis_work a ON a.work_ref=m.analysis_ref LEFT JOIN linggan_ci_source_research h ON h.canonical_ref=s.canonical_ref WHERE m.problem_ref=$1 AND s.domain_ref=$2 AND ((m.origin='manual' AND h.source_sha256=s.source_sha256) OR (m.origin<>'manual' AND a.result->>'sourceSha256'=s.source_sha256)) ORDER BY s.first_observed_at,s.source_ref LIMIT 30")
+        let evidence = sqlx::query("SELECT s.source_ref,m.origin,a.result FROM linggan_ci_problem_member m JOIN linggan_ci_source s USING(canonical_ref) LEFT JOIN linggan_comment_analysis_work a ON a.work_ref=m.analysis_ref LEFT JOIN linggan_ci_source_research h ON h.canonical_ref=s.canonical_ref AND h.domain_ref=s.domain_ref WHERE m.problem_ref=$1 AND s.domain_ref=$2 AND ((m.origin='manual' AND h.source_sha256=s.source_sha256) OR (m.origin<>'manual' AND a.result->>'sourceSha256'=s.source_sha256)) ORDER BY s.first_observed_at,s.source_ref LIMIT 30")
             .bind(other).bind(domain).fetch_all(database.pool()).await.map_err(statement)?;
         let mut refs = Vec::new();
         for item in evidence {

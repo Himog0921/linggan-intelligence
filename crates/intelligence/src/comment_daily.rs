@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
-pub const DAILY_RULE: &str = "comment-research.v3";
+pub const DAILY_RULE: &str = "comment-research.v4";
 pub async fn schema_ready(db: &Database) -> Result<bool, ModelError> {
     Ok(
-        sqlx::query_scalar("SELECT to_regclass('linggan_comment_semantic_work') IS NOT NULL AND to_regclass('linggan_comment_request_trace') IS NOT NULL")
+        sqlx::query_scalar("SELECT to_regclass('linggan_comment_semantic_work') IS NOT NULL AND to_regclass('linggan_comment_request_trace') IS NOT NULL AND to_regclass('linggan_ci_problem_boundary_decision') IS NOT NULL")
             .fetch_one(db.pool())
             .await?,
     )
@@ -28,10 +28,10 @@ async fn validate_config(
     sources: i32,
     tokens: i64,
 ) -> Result<(), ModelError> {
-    if !(1..=1000).contains(&sources) || !(1024..=10000000).contains(&tokens) {
+    if !(1..=3000).contains(&sources) || !(1024..=10000000).contains(&tokens) {
         return Err(ModelError::Invalid);
     }
-    let allowed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_model_config cfg JOIN linggan_model_entry m USING(model_ref) JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection c USING(connection_ref) WHERE cfg.config_ref=$1 AND c.enabled AND cfg.input_token_limit+cfg.output_token_limit<=$2 AND COALESCE((SELECT state='succeeded' AND result->>'commentQualified'='true' AND result->>'commentContract'='comment-research.v3' FROM linggan_model_invocation WHERE model_ref=m.model_ref AND operation='probe' ORDER BY created_at DESC LIMIT 1),false))")
+    let allowed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_model_config cfg JOIN linggan_model_entry m USING(model_ref) JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection c USING(connection_ref) WHERE cfg.config_ref=$1 AND c.enabled AND cfg.input_token_limit+cfg.output_token_limit<=$2 AND COALESCE((SELECT state='succeeded' AND result->>'commentQualified'='true' AND result->>'commentContract'='comment-research.v4' FROM linggan_model_invocation WHERE model_ref=m.model_ref AND operation='probe' ORDER BY created_at DESC LIMIT 1),false))")
         .bind(config).bind(tokens).fetch_one(db.pool()).await?;
     if !allowed {
         return Err(ModelError::NotQualified);
@@ -41,7 +41,7 @@ async fn validate_config(
 pub async fn save_schedule(db: &Database, r: &DailySchedule) -> Result<Value, ModelError> {
     if r.enabled {
         validate_config(db, r.config_ref, r.source_limit, r.token_limit).await?;
-    } else if !(1..=1000).contains(&r.source_limit) || !(1024..=10_000_000).contains(&r.token_limit)
+    } else if !(1..=3000).contains(&r.source_limit) || !(1024..=10_000_000).contains(&r.token_limit)
     {
         return Err(ModelError::Invalid);
     }
@@ -72,7 +72,7 @@ pub struct SelectedBatch {
 }
 pub async fn create_selected(db: &Database, r: &SelectedBatch) -> Result<Value, ModelError> {
     if r.source_refs.is_empty()
-        || r.source_refs.len() > 100
+        || r.source_refs.len() > 3000
         || r.source_refs
             .iter()
             .collect::<std::collections::BTreeSet<_>>()
@@ -83,6 +83,7 @@ pub async fn create_selected(db: &Database, r: &SelectedBatch) -> Result<Value, 
     }
     let mut request = serde_json::to_value(r).map_err(|_| ModelError::Invalid)?;
     request["ruleVersion"] = json!(DAILY_RULE);
+    request["cleanerVersion"] = json!(crate::comment_cleaning::CLEANER_VERSION);
     validate_config(db, r.config_ref, r.source_refs.len() as i32, r.token_limit).await?;
     let mut tx = db.pool().begin().await?;
     sqlx::query("SELECT singleton FROM linggan_model_workspace WHERE singleton FOR UPDATE")
@@ -118,16 +119,45 @@ pub async fn create_selected(db: &Database, r: &SelectedBatch) -> Result<Value, 
 }
 pub async fn seal_due(db: &Database) -> Result<bool, ModelError> {
     let mut tx = db.pool().begin().await?;
+    // Serialize manifest ownership transfer with packet reservations.
+    sqlx::query("SELECT singleton FROM linggan_model_workspace WHERE singleton FOR UPDATE")
+        .fetch_one(&mut *tx)
+        .await?;
     let Some(r)=sqlx::query("SELECT *,next_start::text AS start_text,next_end::text AS end_text FROM linggan_comment_daily_schedule WHERE singleton AND enabled AND next_end<=scope_001_now() FOR UPDATE SKIP LOCKED").fetch_optional(&mut *tx).await? else{return Ok(false)};
     let batch = Uuid::new_v4();
     let start: String = r.get("start_text");
     let end: String = r.get("end_text");
+    // Snapshot both intake and transferable ownership before inserting the immutable batch manifest.
+    let intake:Vec<Uuid>=sqlx::query_scalar("SELECT c.material_ref FROM linggan_comment_research_current($2::timestamptz-interval '1 microsecond') c JOIN linggan_comment_research_readable s USING(material_ref) JOIN LATERAL (SELECT min(created_at) AS first_at FROM linggan_material_comment a WHERE a.content_public_ref=c.content_public_ref AND a.comment_external_id=c.comment_external_id) first_seen ON true WHERE first_seen.first_at>=$1::timestamptz AND first_seen.first_at<$2::timestamptz")
+        .bind(&start).bind(&end).fetch_all(&mut *tx).await?;
+    let transferable=sqlx::query("SELECT i.batch_ref,i.source_ref,COALESCE(i.origin_batch_ref,i.batch_ref) AS origin FROM linggan_comment_daily_item i JOIN linggan_comment_daily_batch b USING(batch_ref) WHERE b.kind='daily' AND b.enabled AND b.request->>'ruleVersion'=$1 AND b.window_end<=$2::timestamptz AND i.state IN('pending','source_limit') AND i.attempts=0 AND i.semantic_ref IS NULL AND EXISTS(SELECT 1 FROM linggan_comment_research_readable allowed WHERE allowed.material_ref=i.source_ref) ORDER BY b.window_end,i.source_ref")
+        .bind(DAILY_RULE).bind(&start).fetch_all(&mut *tx).await?;
+    let mut backlog = std::collections::BTreeMap::<Uuid, Uuid>::new();
+    for item in &transferable {
+        let source: Uuid = item.get("source_ref");
+        if !intake.contains(&source) {
+            backlog.entry(source).or_insert(item.get("origin"));
+        }
+    }
     sqlx::query("INSERT INTO linggan_comment_daily_batch(batch_ref,kind,config_ref,window_start,window_end,source_limit,token_limit,request,context_policy) VALUES($1,'daily',$2,$3::timestamptz,$4::timestamptz,$5,$6,$7,(SELECT policy FROM linggan_comment_context_settings WHERE singleton))")
         .bind(batch).bind(r.get::<Uuid,_>("config_ref")).bind(&start).bind(&end).bind(r.get::<i32,_>("source_limit")).bind(r.get::<i64,_>("token_limit"))
-        .bind(json!({"scheduleRevision":r.get::<i32,_>("revision"),"timezone":"Asia/Shanghai","cleanerVersion":crate::comment_cleaning::CLEANER_VERSION,"ruleVersion":DAILY_RULE})).execute(&mut *tx).await?;
-    // Identity first acceptance is independent of current observation/interaction updates.
-    sqlx::query("INSERT INTO linggan_comment_daily_item(batch_ref,source_ref) SELECT $1,c.material_ref FROM linggan_comment_research_current($3::timestamptz-interval '1 microsecond') c JOIN linggan_comment_research_readable s USING(material_ref) JOIN LATERAL (SELECT min(created_at) AS first_at FROM linggan_material_comment a WHERE a.content_public_ref=c.content_public_ref AND a.comment_external_id=c.comment_external_id) first_seen ON true WHERE first_seen.first_at>=$2::timestamptz AND first_seen.first_at<$3::timestamptz")
-        .bind(batch).bind(&start).bind(&end).execute(&mut *tx).await?;
+        .bind(json!({"scheduleRevision":r.get::<i32,_>("revision"),"timezone":"Asia/Shanghai","cleanerVersion":crate::comment_cleaning::CLEANER_VERSION,"ruleVersion":DAILY_RULE,"newIntakeCount":intake.len(),"backlogCount":backlog.len()})).execute(&mut *tx).await?;
+    sqlx::query(
+        "INSERT INTO linggan_comment_daily_item(batch_ref,source_ref) SELECT $1,unnest($2::uuid[])",
+    )
+    .bind(batch)
+    .bind(intake)
+    .execute(&mut *tx)
+    .await?;
+    // A dispatch count of zero and absent semantic claim are both required. Unknown-cost calls
+    // and failures retain their old grant; only untouched work receives the next daily budget.
+    for item in &transferable {
+        sqlx::query("UPDATE linggan_comment_daily_item SET state='carried_forward',failure_code='carried_forward' WHERE batch_ref=$1 AND source_ref=$2 AND state IN('pending','source_limit') AND attempts=0 AND semantic_ref IS NULL")
+            .bind(item.get::<Uuid,_>("batch_ref")).bind(item.get::<Uuid,_>("source_ref")).execute(&mut *tx).await?;
+    }
+    let refs: Vec<Uuid> = backlog.keys().copied().collect();
+    let origins: Vec<Uuid> = backlog.values().copied().collect();
+    sqlx::query("INSERT INTO linggan_comment_daily_item(batch_ref,source_ref,origin_batch_ref) SELECT $1,x.source_ref,x.origin FROM unnest($2::uuid[],$3::uuid[]) x(source_ref,origin)").bind(batch).bind(refs).bind(origins).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_comment_daily_schedule SET next_start=next_end,next_end=next_end+interval '1 day' WHERE singleton").execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(true)
@@ -138,12 +168,12 @@ pub(crate) async fn seal_supplements(db: &Database) -> Result<(), ModelError> {
     sqlx::query("SELECT singleton FROM linggan_model_workspace WHERE singleton FOR UPDATE")
         .fetch_one(&mut *tx)
         .await?;
-    let rows=sqlx::query("SELECT DISTINCT b.batch_ref,b.config_ref,b.window_start::text AS start_text,b.window_end::text AS end_text,b.source_limit,b.token_limit,current.material_ref FROM linggan_comment_daily_batch b JOIN linggan_comment_daily_item i USING(batch_ref) JOIN linggan_material_comment old ON old.material_ref=i.source_ref JOIN linggan_material_comment_current current ON current.content_public_ref=old.content_public_ref AND current.comment_external_id=old.comment_external_id JOIN linggan_comment_research_readable allowed ON allowed.material_ref=current.material_ref WHERE b.kind='daily' AND b.enabled AND EXISTS(SELECT 1 FROM linggan_comment_daily_schedule WHERE singleton AND enabled) AND old.body_text IS DISTINCT FROM current.body_text AND NOT EXISTS(SELECT 1 FROM linggan_comment_daily_batch prior_batch JOIN linggan_comment_daily_item prior_item USING(batch_ref) JOIN linggan_material_comment prior_source ON prior_source.material_ref=prior_item.source_ref WHERE prior_batch.kind='supplement' AND prior_batch.request->>'originBatchRef'=b.batch_ref::text AND prior_source.content_public_ref=current.content_public_ref AND prior_source.comment_external_id=current.comment_external_id AND prior_source.body_text IS NOT DISTINCT FROM current.body_text) AND NOT EXISTS(SELECT 1 FROM linggan_comment_daily_batch supplement WHERE supplement.kind='supplement' AND supplement.request->>'originBatchRef'=b.batch_ref::text AND supplement.request->>'sourceRef'=current.material_ref::text) ORDER BY b.batch_ref,current.material_ref LIMIT 100").fetch_all(&mut *tx).await?;
+    let rows=sqlx::query("SELECT DISTINCT b.batch_ref,b.config_ref,b.window_start::text AS start_text,b.window_end::text AS end_text,b.source_limit,b.token_limit,current.material_ref FROM linggan_comment_daily_batch b JOIN linggan_comment_daily_item i USING(batch_ref) JOIN linggan_material_comment old ON old.material_ref=i.source_ref JOIN linggan_material_comment_current current ON current.content_public_ref=old.content_public_ref AND current.comment_external_id=old.comment_external_id JOIN linggan_comment_research_readable allowed ON allowed.material_ref=current.material_ref WHERE b.kind='daily' AND b.enabled AND b.request->>'ruleVersion'='comment-research.v4' AND EXISTS(SELECT 1 FROM linggan_comment_daily_schedule WHERE singleton AND enabled) AND old.body_text IS DISTINCT FROM current.body_text AND NOT EXISTS(SELECT 1 FROM linggan_comment_daily_batch prior_batch JOIN linggan_comment_daily_item prior_item USING(batch_ref) JOIN linggan_material_comment prior_source ON prior_source.material_ref=prior_item.source_ref WHERE prior_batch.kind='supplement' AND prior_batch.request->>'originBatchRef'=b.batch_ref::text AND prior_source.content_public_ref=current.content_public_ref AND prior_source.comment_external_id=current.comment_external_id AND prior_source.body_text IS NOT DISTINCT FROM current.body_text) AND NOT EXISTS(SELECT 1 FROM linggan_comment_daily_batch supplement WHERE supplement.kind='supplement' AND supplement.request->>'originBatchRef'=b.batch_ref::text AND supplement.request->>'sourceRef'=current.material_ref::text) ORDER BY b.batch_ref,current.material_ref LIMIT 100").fetch_all(&mut *tx).await?;
     for r in rows {
         let batch = Uuid::new_v4();
         let origin: Uuid = r.get("batch_ref");
         let source: Uuid = r.get("material_ref");
-        sqlx::query("INSERT INTO linggan_comment_daily_batch(batch_ref,kind,config_ref,window_start,window_end,source_limit,token_limit,request,context_policy) VALUES($1,'supplement',$2,$3::timestamptz,$4::timestamptz,$5,$6,$7,(SELECT context_policy FROM linggan_comment_daily_batch WHERE batch_ref=($7->>'originBatchRef')::uuid))").bind(batch).bind(r.get::<Uuid,_>("config_ref")).bind(r.get::<String,_>("start_text")).bind(r.get::<String,_>("end_text")).bind(r.get::<i32,_>("source_limit")).bind(r.get::<i64,_>("token_limit")).bind(json!({"originBatchRef":origin,"sourceRef":source,"reason":"source_text_revised","ruleVersion":DAILY_RULE,"newIntake":false})).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO linggan_comment_daily_batch(batch_ref,kind,config_ref,window_start,window_end,source_limit,token_limit,request,context_policy) VALUES($1,'supplement',$2,$3::timestamptz,$4::timestamptz,$5,$6,$7,(SELECT context_policy FROM linggan_comment_daily_batch WHERE batch_ref=($7->>'originBatchRef')::uuid))").bind(batch).bind(r.get::<Uuid,_>("config_ref")).bind(r.get::<String,_>("start_text")).bind(r.get::<String,_>("end_text")).bind(r.get::<i32,_>("source_limit")).bind(r.get::<i64,_>("token_limit")).bind(json!({"originBatchRef":origin,"sourceRef":source,"reason":"source_text_revised","ruleVersion":DAILY_RULE,"cleanerVersion":crate::comment_cleaning::CLEANER_VERSION,"newIntake":false})).execute(&mut *tx).await?;
         sqlx::query("INSERT INTO linggan_comment_daily_item(batch_ref,source_ref) VALUES($1,$2)")
             .bind(batch)
             .bind(source)
@@ -212,7 +242,7 @@ pub async fn retry_failed(db: &Database, batch: Uuid, command: Uuid) -> Result<V
         return Ok(row.get("result"));
     }
     let allowed: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM linggan_comment_daily_batch WHERE batch_ref=$1 AND enabled AND request->>'ruleVersion'='comment-research.v3')",
+        "SELECT EXISTS(SELECT 1 FROM linggan_comment_daily_batch WHERE batch_ref=$1 AND enabled AND request->>'ruleVersion'='comment-research.v4')",
     )
     .bind(batch)
     .fetch_one(&mut *tx)
@@ -248,7 +278,7 @@ pub async fn continue_batch(
     batch: Uuid,
     r: &ContinueDaily,
 ) -> Result<Value, ModelError> {
-    if !(1..=1000).contains(&r.source_limit)
+    if !(1..=3000).contains(&r.source_limit)
         || !(1024..=10_000_000).contains(&r.token_limit)
         || r.reason.trim().is_empty()
         || r.reason.chars().count() > 500
@@ -276,7 +306,10 @@ pub async fn continue_batch(
         }
         return Ok(json!({"batchRef":batch,"replayed":true}));
     }
-    let old=sqlx::query("SELECT b.source_limit,b.token_limit,c.input_token_limit+c.output_token_limit AS reservation FROM linggan_comment_daily_batch b JOIN linggan_model_config c USING(config_ref) WHERE batch_ref=$1").bind(batch).fetch_optional(&mut *tx).await?.ok_or(ModelError::NotFound)?;
+    let old=sqlx::query("SELECT b.source_limit,b.token_limit,b.request->>'ruleVersion' AS rule_version,c.input_token_limit+c.output_token_limit AS reservation FROM linggan_comment_daily_batch b JOIN linggan_model_config c USING(config_ref) WHERE batch_ref=$1").bind(batch).fetch_optional(&mut *tx).await?.ok_or(ModelError::NotFound)?;
+    if old.get::<Option<String>, _>("rule_version").as_deref() != Some(DAILY_RULE) {
+        return Err(ModelError::NotQualified);
+    }
     if r.source_limit < old.get::<i32, _>("source_limit")
         || r.token_limit < old.get::<i64, _>("token_limit")
         || r.token_limit < i64::from(old.get::<i32, _>("reservation"))
