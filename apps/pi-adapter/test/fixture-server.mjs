@@ -25,6 +25,7 @@ const server=http.createServer(async(req,res)=>{
     facets:[{dimension:'problem',label:'合成执行精力',basis:'explicit'}]}],limitations:['SYNTHETIC / NOT EVIDENCE']};
   if(packet)output.comments=output.comments.filter((c,i)=>!material.comments[i].text.includes('[MISSING]')).map(c=>material.comments.find(m=>m.commentRef===c.commentRef).text.includes('[BAD_SCHEMA]')?{...c,labels:'invalid-root-structure'}:c);
   if(packet)for(const c of output.comments)if(material.comments.find(m=>m.commentRef===c.commentRef)?.text.includes('[PARTIAL_FIELD]'))c.labels=[{label:'invented',basis:'explicit',contextEvidence:[],evidence:[]}];
+  if(packet&&body.model==='synthetic-partial')for(const c of output.comments)if(Array.isArray(c.labels))c.labels=[{label:'invented',basis:'explicit',contextEvidence:[],evidence:[]}];
   if(packet&&material.comments.some(c=>c.text.includes('[HANG_PROVIDER]'))){res.writeHead(200,{'Content-Type':'text/event-stream'});res.write(':waiting\n\n');return;}
   if(actualWork&&material.body.includes('[NO_SIGNAL]'))output.spans=[];
   if(packet&&material.comments.some(c=>c.text.includes('[DELAY_PROVIDER]')))await new Promise(resolve=>setTimeout(resolve,1000));

@@ -9,6 +9,13 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
+/// One admission predicate for saved defaults, previews and every research dispatcher.
+/// The marker always refers to the model entry alias `m`; callers supply static SQL only.
+/// Comment contract compatibility is diagnostic, never a connection permission.
+pub(crate) fn with_model_callability(sql: &'static str) -> sqlx::AssertSqlSafe<String> {
+    sqlx::AssertSqlSafe(sql.replace("__MODEL_CALLABLE__", "COALESCE((SELECT i.state='succeeded' AND i.result->>'ok'='true' AND i.result->>'modelCallable'='true' FROM linggan_model_invocation i WHERE i.model_ref=m.model_ref AND i.operation='probe' ORDER BY i.created_at DESC,i.invocation_ref DESC LIMIT 1),false)"))
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ModelError {
     #[error("research_selection_limit")]
@@ -368,8 +375,12 @@ pub async fn save_model_config(db: &Database, r: &SaveModelConfig) -> Result<Val
     if !enabled {
         return Err(ModelError::Disabled);
     }
-    let qualified:bool=sqlx::query_scalar("SELECT COALESCE((SELECT state='succeeded' AND result->>'commentQualified'='true' AND result->>'commentContract'=$2 FROM linggan_model_invocation WHERE model_ref=$1 AND operation='probe' ORDER BY created_at DESC LIMIT 1),false)")
-        .bind(r.model_ref).bind(crate::comment_daily::DAILY_RULE).fetch_one(&mut *tx).await?;
+    let qualified: bool = sqlx::query_scalar(with_model_callability(
+        "SELECT __MODEL_CALLABLE__ FROM linggan_model_entry m WHERE m.model_ref=$1",
+    ))
+    .bind(r.model_ref)
+    .fetch_one(&mut *tx)
+    .await?;
     if !qualified {
         return Err(ModelError::NotQualified);
     }

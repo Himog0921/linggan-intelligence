@@ -2,8 +2,8 @@
   'use strict';
   const api='/api/local/model-settings', $=id=>document.getElementById(id);
   const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const errors={invalid_embedding_input:'向量请求超出文本数量或长度限制。',invalid_embedding_output:'服务已响应，但向量数量、顺序、维度或数值不符合协议。请确认选择的是 Embedding 模型。',embedding_not_qualified:'请先保存并测试向量接口，通过后再启用问题召回；无需通过评论分析校验。',model_schema_missing:'本机尚未完成评论研究与模型配置数据库初始化（0039、0040）。当前无法保存或测试，请完成部署后刷新。',provider_endpoint_not_found:'调用地址返回 404。请核对 API 地址、接口协议和模型 ID。',catalog_unavailable:'供应商不提供兼容的模型目录，可手动添加准确模型 ID。',provider_rate_limited:'供应商限流，请稍后重试。',output_limit:'模型已响应，但输出达到本次上限，评论分析结果不完整。',unexpected_content:'模型输出包含未授权内容类型，未接纳。',response_too_large:'供应商响应超出接收上限，已停止读取。',secret_echo_rejected:'供应商响应包含凭据回显，已拒绝保存或展示。',endpoint_rejected:'请求地址超出已配置连接范围，已阻止。',invalid_request:'模型请求格式不符合当前适配协议。',model_revision_conflict:'设置已被修改。请刷新后重新操作；刚才的请求未覆盖新版本。',model_disabled:'连接或计划已暂停，未发起新调用。',model_not_qualified:'先测试模型，确认评论输出通过校验。',model_secret_unavailable:'无法访问本机 Keychain 凭据。请检查系统授权，或更换这条连接的凭据。',model_adapter_unavailable:'Pi 运行依赖未就绪。请检查本机 Node 与适配器安装状态。',model_budget_exhausted:'剩余额度不足以预留一次调用。',model_source_unavailable:'所选来源已不可读或版本已变化，请重新选择。',model_input_limit:'来源与上下文超过本次输入预算。',model_invalid_output:'调用已结束，输出未通过评论来源与结构校验。',invalid_model_command:'请检查地址、模型 ID、来源数量及额度范围。',model_database_unavailable:'模型设置数据库暂不可用。',provider_timeout:'等待供应商超时；停止等待不代表远端请求已撤销。',authentication_failed:'凭据未通过供应商验证。',provider_failed:'供应商调用失败，请查看连接或稍后重试。',provider_unavailable:'供应商暂不可用，系统按本次配置的次数与额度重试。',worker_interrupted:'执行中断，用量暂未知，保留预留额度。',model_budget_overrun:'供应商报告的用量超过本次上限，结果未被接纳。',provider_redirect_rejected:'供应商返回重定向，凭据未被转发。'};
-  const explain=c=>errors[c]||({model_not_found:'该模型或连接已不存在。',claim_conflict:'任务已被其他执行者接续。',result_validation_pending:'已取得调用回执，结果仍待确认。'}[c])||c||'未测试';
+  const errors={invalid_embedding_input:'向量请求超出文本数量或长度限制。',invalid_embedding_output:'服务已响应，但向量数量、顺序、维度或数值不符合协议。请确认选择的是 Embedding 模型。',embedding_not_qualified:'请先保存并测试向量接口，通过后再启用问题召回；无需通过评论分析校验。',model_schema_missing:'本机尚未完成评论研究与模型配置数据库初始化（0039、0040）。当前无法保存或测试，请完成部署后刷新。',provider_endpoint_not_found:'调用地址返回 404。请核对 API 地址、接口协议和模型 ID。',catalog_unavailable:'供应商不提供兼容的模型目录，可手动添加准确模型 ID。',provider_rate_limited:'供应商限流，请稍后重试。',output_limit:'模型已响应，但输出达到本次上限，评论分析结果不完整。',unexpected_content:'模型输出包含未授权内容类型，未接纳。',response_too_large:'供应商响应超出接收上限，已停止读取。',secret_echo_rejected:'供应商响应包含凭据回显，已拒绝保存或展示。',endpoint_rejected:'请求地址超出已配置连接范围，已阻止。',invalid_request:'模型请求格式不符合当前适配协议。',model_revision_conflict:'设置已被修改。请刷新后重新操作；刚才的请求未覆盖新版本。',model_disabled:'连接或计划已暂停，未发起新调用。',model_not_qualified:'请先测试模型调用，成功后即可设为默认模型。',model_secret_unavailable:'无法访问本机 Keychain 凭据。请检查系统授权，或更换这条连接的凭据。',model_adapter_unavailable:'Pi 运行依赖未就绪。请检查本机 Node 与适配器安装状态。',model_budget_exhausted:'剩余额度不足以预留一次调用。',model_source_unavailable:'所选来源已不可读或版本已变化，请重新选择。',model_input_limit:'来源与上下文超过本次输入预算。',model_invalid_output:'调用已结束，输出未通过评论来源与结构校验。',invalid_model_command:'请检查地址、模型 ID、来源数量及额度范围。',model_database_unavailable:'模型设置数据库暂不可用。',provider_timeout:'等待供应商超时；停止等待不代表远端请求已撤销。',authentication_failed:'凭据未通过供应商验证。',provider_failed:'供应商调用失败，请查看连接或稍后重试。',provider_unavailable:'供应商暂不可用，系统按本次配置的次数与额度重试。',worker_interrupted:'执行中断，用量暂未知，保留预留额度。',model_budget_overrun:'供应商报告的用量超过本次上限，结果未被接纳。',provider_redirect_rejected:'供应商返回重定向，凭据未被转发。'};
+  const explain=c=>errors[c]||validationLabels[c]||({model_not_found:'该模型或连接已不存在。',claim_conflict:'任务已被其他执行者接续。',result_validation_pending:'已取得调用回执，结果仍待确认。'}[c])||(c?'测试未完成，请查看诊断或重新测试。':'未测试');
   const kinds={trial:'单条试运行',automatic:'自动新增',backfill:'历史补跑'}, ops={embed:'问题向量',connect:'连接测试',discover:'发现模型',probe:'模型能力测试',analyze:'评论分析'};
   let embedding=null;
   let data=null, command=null, busy=false, loadFailed=false;
@@ -15,18 +15,37 @@
   const table=(heads,rows)=>`<div class="lgi-model-table"><table><thead><tr>${heads.map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
   const button=(action,ref,label,disabled=false)=>`<button type="button" data-action="${action}" data-ref="${esc(ref)}" ${disabled?'disabled':''}>${label}</button>`;
   const note=t=>`<p class="lgi-model-note">${esc(t)}</p>`;
-  const validationLabels={json_invalid:'返回内容不是有效 JSON',schema_invalid:'评论包结构不符合要求',item_schema_invalid:'评论字段缺失或类型错误',output_bounds_invalid:'评论字段数量或长度超出限制',json_or_schema_invalid:'输出 JSON 结构不合格',missing_comment:'缺少评论结果',unexpected_comment:'返回了包外评论',duplicate_comment:'重复返回评论',quote_missing_or_ambiguous:'引用缺失或不唯一',quote_redacted_or_empty:'引用为空或包含遮盖文字',facets_or_evidence_invalid:'字段或引用校验失败',provider_output_incomplete:'输出未完整结束'};
+  const validationLabels={json_invalid:'返回内容不是有效 JSON',schema_invalid:'评论包结构不符合要求',item_schema_invalid:'评论字段缺失或类型错误',field_schema_invalid:'该研究字段缺失、类型或取值不符合要求',output_bounds_invalid:'评论字段数量或长度超出限制',output_bounds:'评论字段数量或长度超出限制',json_or_schema_invalid:'输出 JSON 结构不合格',missing_comment:'缺少评论结果',unexpected_comment:'返回了输入范围外的评论',unknown_comment:'返回了输入范围外的评论编号',duplicate_comment:'重复返回评论',quote_missing_or_ambiguous:'引用缺失或在原声中不唯一',quote_redacted_or_empty:'引用为空或包含遮盖文字',quote_out_of_bounds:'引用位置超出原声范围',facets_or_evidence_invalid:'研究字段或引用校验失败',provider_output_incomplete:'输出未完整结束',partial_fields_rejected:'部分研究字段未通过校验',all_fields_rejected:'所有研究字段均未通过校验',outcome_conflict:'结果状态与研究字段互相矛盾',interpretable_without_evidence:'声明可理解，但没有提供研究字段',uncertainty_reason_missing:'没有说明含义不确定的原因',evidence_bounds:'每项研究字段须提供一至四条原声引用',context_evidence_required_or_conflicting:'上下文引用与表达依据不一致',context_fragment_unknown:'引用了未提供的上下文片段',context_quote_missing_or_ambiguous:'上下文引用缺失或不唯一',problem_bounds:'问题名称或定义长度不符合要求',stance_bounds:'立场对象长度不符合要求',field_rejected:'该字段未通过校验'};
+  const callable=m=>Boolean(m?.enabled && m.modelCallable === true);
   function modelStatus(m){
     if(!m.enabled)return '连接已停用';
-    if(m.testState==='running')return '评论校验进行中，请稍后刷新';
+    if(m.testState==='running')return '模型调用测试中，请稍后刷新';
+    if(callable(m))return '调用成功，可以设为默认 · '+(m.commentQualified?'评论测试字段已通过':validationLabels[m.test?.validationCode]||'评论字段研究时逐项校验');
     if(!m.test)return '尚未测试，请点击编辑与测试';
-    if(m.test.commentContract && m.test.commentContract!==data.commentContract)return '评论校验已升级，请重新测试';
-    if(m.commentQualified)return '可调用 · 当前评论校验通过';
-    return m.test.modelCallable?'可调用 · '+(m.test.failureCode?explain(m.test.failureCode):validationLabels[m.test.validationCode]||'评论输出未通过校验'):explain(m.test.failureCode);
+    return '尚不能调用 · '+explain(m.test.failureCode);
+  }
+  function probeMessage(result){
+    if(result?.ok !== true || result?.modelCallable !== true)return '配置已保存，测试未完成：'+explain(result?.failureCode || result?.validationCode);
+    const state=result.commentValidation?.status;
+    const message=state==='passed'||(!state&&result.commentQualified)?'评论测试字段已通过。':state==='partial'||(!state&&result.validationCode==='partial_fields_rejected')?'评论测试部分字段未通过，研究时逐项校验。':state==='failed'?'评论测试字段未通过，研究时逐项校验。':'评论字段研究时逐项校验。';
+    return '模型调用成功，可以设为默认。'+message+(result.elapsedMs!=null?' 耗时 '+result.elapsedMs+' ms。':'');
+  }
+  function diagnosticActual(actual){
+    if(!actual||typeof actual!=='object'||Array.isArray(actual))return '具体类型未记录';
+    const types={string:'文本',object:'对象',array:'列表',null:'空值',boolean:'布尔值',number:'数字',missing:'字段缺失',invalid_json:'JSON 格式不正确',matches:'对应结果'};
+    const counts={characters:'字数',count:'数量',fields:'字段数',unexpectedFields:'多余字段数',bytes:'字节数',line:'行',column:'列'};
+    return [types[actual.type]||'返回结构',...Object.entries(counts).filter(([key])=>Number.isFinite(actual[key])).map(([key,label])=>label+' '+actual[key])].join(' · ');
+  }
+  function diagnosticsHtml(result){
+    const validation=result?.commentValidation;
+    if(!validation||validation.diagnosticsRecorded!==true)return result?'<details><summary>评论测试诊断</summary>'+note('历史测试未保存具体字段诊断，无法还原哪一项未通过。重新测试后可查看。')+'</details>':'';
+    const count=n=>Number.isFinite(n)?String(n):'未记录';
+    const rows=Array.isArray(validation.diagnostics)?validation.diagnostics.slice(0,100):[];
+    return '<details><summary>评论测试诊断</summary>'+note('接纳 '+count(validation.acceptedFields)+' 项 · 未接纳 '+count(validation.rejectedFields)+' 项 · 含义不确定 '+count(validation.uncertainFields)+' 项')+(rows.length?'<ul>'+rows.map(d=>'<li><strong>'+esc(validationLabels[d.code]||'该字段未通过校验')+'</strong>'+(typeof d.path==='string'?note('字段位置：'+d.path):'')+(typeof d.expected==='string'?note('要求：'+d.expected):'')+note('实际：'+diagnosticActual(d.actual))+'</li>').join('')+'</ul>':note(validation.status==='passed'?'本次没有未通过的字段。':validation.status==='not_evaluated'?'本次未进行评论字段校验。':'本次没有保存可展示的字段细项。'))+note('这里只展示字段要求、类型与数量，不展示原始提示词或模型返回正文。')+'</details>';
   }
   function selectDefault(modelRef){
     const model=data.models.find(m=>m.modelRef===modelRef);
-    if(!model?.enabled||!model.commentQualified)throw new Error('请先通过当前评论校验。');
+    if(!callable(model))throw new Error('请先测试模型调用，成功后即可设为默认模型。');
     close();$('default-model').value=modelRef;
     $('default-guidance').textContent='已选择 '+model.connectionName+' / '+model.modelId+'。请核对单次调用限制，点击保存默认配置；保存不会开始分析。';
     $('default-model').focus();$('defaults').scrollIntoView({block:'center'});
@@ -39,17 +58,17 @@
     $('storage-state').textContent=data.secretStorage==='SYNTHETIC_PREVIEW_ONLY'?'合成隔离预览 · 凭据仅为测试标记 · 非真实模型质量验收':'本机工作空间 · 凭据保存于 macOS Keychain';
     $('connection-list').innerHTML=data.connections.length?table(['供应商 / API 地址','模型与状态','操作'],data.connections.map(c=>{
       const models=data.models.filter(m=>m.connectionVersionRef===c.versionRef);
-      return `<tr><td><strong>${esc(c.name)}</strong>${note(c.baseUrl)}${note(c.api)}</td><td>${models.length?models.map(m=>`<div>${esc(m.modelId)}${note(modelStatus(m))}</div>`).join(''):note('尚未配置模型')}${!c.enabled?note('连接已停用'):''}</td><td>${button('edit-connection',c.connectionRef,'编辑与测试')} ${button('toggle',c.connectionRef,c.enabled?'停用':'启用')}</td></tr>`;
+      return `<tr><td><strong>${esc(c.name)}</strong>${note(c.baseUrl)}${note(c.api)}</td><td>${models.length?models.map(m=>`<div>${esc(m.modelId)}${note(modelStatus(m))}${diagnosticsHtml(m.test)}</div>`).join(''):note('尚未配置模型')}${!c.enabled?note('连接已停用'):''}</td><td>${button('edit-connection',c.connectionRef,'编辑与测试')} ${button('toggle',c.connectionRef,c.enabled?'停用':'启用')}</td></tr>`;
     })):note('还没有供应商。点击“添加供应商”，填写地址、API Key 和模型。');
     embedding=await request(api+'/embedding');
     $('embedding-state').textContent=!embedding.configRef?'尚未配置':embedding.enabled?'已启用 · '+embedding.dimensions+' 维 · 仅表示接口与向量结构已通过测试':embedding.qualified?'测试通过，尚未启用':'已保存，等待向量测试';
     const selected=data.config?.modelRef;
     const candidates=data.models.filter(m=>m.currentVersion||m.modelRef===selected);
-    $('default-model').innerHTML='<option value="">请选择评论分析模型</option>'+candidates.map(m=>`<option value="${m.modelRef}" ${m.enabled&&m.commentQualified?'':'disabled'}>${esc(m.connectionName+' / '+m.modelId+(m.enabled&&m.commentQualified?'':'（'+modelStatus(m)+'）'))}</option>`).join('');
-    $('default-guidance').textContent=data.model?.modelConnected?'默认模型已就绪，可返回评论研究。':data.model?.modelState==='NEEDS_SELECTION'?'已有模型通过校验。请选择并保存默认配置，即可返回评论研究。':data.model?.modelState==='PAUSED'?'模型连接已停用，请先启用连接。':candidates.length?'请点击供应商的“编辑与测试”，在弹窗中“保存并测试”。测试使用合成评论，无需先设置默认模型。':'先添加供应商，填写 API 地址、凭据与模型，再在弹窗中保存并测试。';
+    $('default-model').innerHTML='<option value="">请选择评论分析模型</option>'+candidates.map(m=>`<option value="${m.modelRef}" ${callable(m)?'':'disabled'}>${esc(m.connectionName+' / '+m.modelId+(callable(m)?'':'（'+modelStatus(m)+'）'))}</option>`).join('');
+    $('default-guidance').textContent=data.model?.modelConnected?'默认模型已就绪，可返回评论研究。':data.model?.modelState==='NEEDS_SELECTION'?'已有模型调用成功。请选择并保存默认配置，即可返回评论研究。':data.model?.modelState==='PAUSED'?'模型连接已停用，请先启用连接。':candidates.length?'请点击供应商的“编辑与测试”，在弹窗中“保存并测试”。测试使用合成评论，无需先设置默认模型。':'先添加供应商，填写 API 地址、凭据与模型，再在弹窗中保存并测试。';
 
     if(data.config)for(const [key,value]of Object.entries(data.config)){const field=$('config-form').elements.namedItem(key);if(field)field.value=value;}
-    ['trial','automatic','backfill'].forEach(id=>$(id).disabled=!data.config||data.legacyPlansAvailable===false);
+    ['trial','automatic','backfill'].forEach(id=>$(id).disabled=!data.config||data.model?.modelConnected!==true||data.legacyPlansAvailable===false);
     renderActivity();
     if(focusedPlan)$('research-controls').open=true;
     if(focusedPlan)$('plan-'+focusedPlan)?.scrollIntoView({block:'center'});
@@ -62,7 +81,7 @@
     $('run-list').innerHTML=data.runs.length?table(['最近调用','状态与原因','用量'],data.runs.map(r=>`<tr><td>${ops[r.operation]}${note(r.modelId||'模型目录请求')}${note(r.createdAt)}${r.sourceRef?`<a href="/corpus/comments?source=${r.sourceRef}">查看来源与标注</a>`:''}</td><td>${r.state==='running'?'执行中':r.state==='succeeded'?'已完成':'失败'}${r.failureCode?note(explain(r.failureCode)):''}${r.attempts?note(`此任务已尝试 ${r.attempts} 次`):''}${r.configRef?`<details><summary>配置版本</summary>${note(r.configRef)}</details>`:''}</td><td>输入 ${r.inputTokens??'未知'} · 输出 ${r.outputTokens??'未知'}${note(`本机额度计入 ${r.budgetAccounted} token · 金额待供应商核对`)}${r.elapsedMs!=null?note(`耗时 ${r.elapsedMs} ms`):''}</td></tr>`)):note('没有调用回执。');
   }
   function open(title,fields,action,label='保存'){
-    $('dialog-select').hidden=true;command=action;command.id=crypto.randomUUID();$('dialog-test').hidden=action.kind!=='connection';$('dialog-test').textContent='保存并测试';$('dialog-title').textContent=title;$('dialog-fields').innerHTML=fields;$('dialog-feedback').textContent='';$('dialog-submit').textContent=label;$('dialog-submit').disabled=false;$('model-dialog').showModal();
+    $('dialog-select').hidden=true;command=action;command.id=crypto.randomUUID();$('dialog-test').hidden=action.kind!=='connection';$('dialog-test').textContent='保存并测试';$('dialog-title').textContent=title;$('dialog-fields').innerHTML=fields+'<div id="dialog-diagnostics"></div>';$('dialog-feedback').textContent='';$('dialog-diagnostics').replaceChildren();$('dialog-submit').textContent=label;$('dialog-submit').disabled=false;$('model-dialog').showModal();
   }
   function close(){if(busy)return;const key=$('model-command').elements.namedItem('apiKey');if(key)key.value='';$('dialog-fields').replaceChildren();command=null;$('model-dialog').close();}
   const textField=(name,label,value='',extra='')=>`<label>${label}<input name="${name}" value="${esc(value)}" ${extra}></label>`;
@@ -91,8 +110,9 @@
       note('也可直接填写模型 ID，无需获取目录。保存并测试会保存当前配置，再发送一条合成请求，可能产生少量费用；上限 10 秒、1024 输出 token，无自动重试。')+
       `<details><summary>高级设置</summary><label class="lgi-model-check"><input type="checkbox" name="localEndpoint" ${c?.localEndpoint?'checked':''}>本机回环服务（允许 HTTP）</label>${note('更换地址或协议时须重新填写凭据。新配置保留旧任务的原版本；停用连接可阻止其后续调用。')}</details>`,
       {kind:'connection',connection:c,connectionRef:c?.connectionRef||crypto.randomUUID(),models},'保存');
+    if(models[0]?.test){$('dialog-feedback').textContent=modelStatus(models[0]);$('dialog-diagnostics').innerHTML=diagnosticsHtml(models[0].test);}
     endpointPreview();
-    $('model-command').oninput=e=>{if(command?.kind!=='connection')return;endpointPreview();$('dialog-select').hidden=true;$('dialog-feedback').textContent='配置已修改；需要重新测试。';if(['api','baseUrl','apiKey','localEndpoint'].includes(e.target.name))$('discovered-models').replaceChildren();};
+    $('model-command').oninput=e=>{if(command?.kind!=='connection')return;endpointPreview();$('dialog-select').hidden=true;$('dialog-feedback').textContent='配置已修改；需要重新测试。';$('dialog-diagnostics').replaceChildren();if(['api','baseUrl','apiKey','localEndpoint'].includes(e.target.name))$('discovered-models').replaceChildren();};
     $('dialog-discover').onclick=()=>runConnection('discover');
   }
   function lockConnection(locked){
@@ -124,7 +144,7 @@
     if(busy||!command||!$('model-command').reportValidity())return;
     if(mode==='test'&&!$('model-command').elements.modelId.value.trim()){$('dialog-feedback').textContent='请填写模型 ID，再测试实际调用。';$('model-command').elements.modelId.focus();return;}
     // Read fields before disabling them: disabled inputs do not enter FormData.
-    busy=true; $('dialog-select').hidden=true;$('dialog-feedback').textContent='正在保存配置…';
+    busy=true; $('dialog-select').hidden=true;$('dialog-diagnostics').replaceChildren();$('dialog-feedback').textContent='正在保存配置…';
     try {
       const pending=persistConnection();lockConnection(true);
       const {connection,model}=await pending;
@@ -137,11 +157,11 @@
           $('discovered-models').innerHTML=(r?.modelIds||[]).map(id=>`<option value="${esc(id)}"></option>`).join('');
           $('dialog-feedback').textContent=r?.ok?`取得 ${r.modelIds?.length||0} 个候选模型。请在模型 ID 中选择，再测试调用。`:'连接已保存。'+explain(r?.failureCode);
         }else{
-          $('dialog-feedback').textContent=r?.modelCallable?`模型${r.ok?'调用成功':'已响应'}${r.elapsedMs!=null?'，耗时 '+r.elapsedMs+' ms':''}。`+(r.commentQualified?'合成评论输出通过校验，可设为默认。':(r.failureCode?explain(r.failureCode):(validationLabels[r.validationCode]||'评论输出未通过校验')+'，暂不能设为评论分析默认。')):'配置已保存，测试失败：'+explain(r?.failureCode);
+          $('dialog-feedback').textContent=probeMessage(r);$('dialog-diagnostics').innerHTML=diagnosticsHtml(r);
         }
       }
       await load();
-      if(mode==='test' && data.models.some(m=>m.modelRef===model.modelRef&&m.enabled&&m.commentQualified)){$('dialog-select').hidden=false;$('dialog-select').onclick=()=>{try{selectDefault(model.modelRef);}catch(e){$('dialog-feedback').textContent=e.message;}};}
+      if(mode==='test' && data.models.some(m=>m.modelRef===model.modelRef&&callable(m))){$('dialog-select').hidden=false;$('dialog-select').onclick=()=>{try{selectDefault(model.modelRef);}catch(e){$('dialog-feedback').textContent=e.message;}};}
       const latest=data.connections.find(c=>c.connectionRef===connection.connectionRef);
       if(latest){command.connection=latest;$('model-command').elements.baseUrl.value=latest.baseUrl;endpointPreview();}
       if(mode==='save'){lockConnection(false);close();$('settings-feedback').textContent='供应商配置已保存。保存没有发起模型调用。';}
@@ -179,7 +199,7 @@
       busy=false;close();await load();$('existing-plans').innerHTML=(result?.existingPlans||[]).map(p=>`<p>所选来源已有${esc(kinds[p.kind])}：<a href="/settings/models?planRef=${p.planRef}">查看所属计划${p.enabled?'':'并恢复'}</a>。本次未为它另建任务或补充额度。</p>`).join('');$('settings-feedback').textContent=result?.queued===0?'请求已保存；相同来源与配置已有任务，未重复调用。':'已保存。评论计划由执行循环接续，调用结果显示在额度与运行中。';
     }catch(e){$('dialog-feedback').textContent=e.message;}finally{busy=false;$('dialog-submit').disabled=false;}
   }
-  $('config-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;try{const f=new FormData(e.currentTarget),body={configRef:crypto.randomUUID(),expectedConfigRef:data.config?.configRef||null};for(const[k,v]of f)body[k]=k==='modelRef'?v:Number(v);await request(api+'/config',body);await load();$('settings-feedback').textContent='默认模型已保存，没有发起分析。';$('default-guidance').innerHTML='默认模型已就绪。<a href="/corpus/comments?view=voices">返回评论研究，重新选择范围并确认分析</a>'; }catch(e){$('settings-feedback').textContent=e.message;}finally{button.disabled=false;}});
+  $('config-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;try{const f=new FormData(e.currentTarget);if(!callable(data.models.find(m=>m.modelRef===f.get('modelRef'))))throw new Error('请先选择调用测试成功的模型。');const body={configRef:crypto.randomUUID(),expectedConfigRef:data.config?.configRef||null};for(const[k,v]of f)body[k]=k==='modelRef'?v:Number(v);await request(api+'/config',body);await load();$('settings-feedback').textContent='默认模型已保存，没有发起分析。';$('default-guidance').innerHTML='默认模型已就绪。<a href="/corpus/comments?view=voices">返回评论研究，重新选择范围并确认分析</a>'; }catch(e){$('settings-feedback').textContent=e.message;}finally{button.disabled=false;}});
   $('embedding-edit').onclick=()=>{
     const options=data.models.filter(m=>m.enabled).map(m=>`<option value="${m.modelRef}" ${m.modelRef===embedding?.modelRef?'selected':''}>${esc(m.connectionName+' / '+m.modelId)}</option>`).join('');
     open('问题召回模型',`<label>已保存的模型<select name="modelRef" required><option value="">选择支持 Embeddings 的模型</option>${options}</select></label>${note('先在供应商中保存地址、凭据和准确模型 ID。这里独立测试向量接口，不要求通过评论分析校验。')}<label class="lgi-model-check"><input name="enabled" type="checkbox" ${embedding?.enabled?'checked':''}>允许已授权研究在原批次额度内调用此模型，整理尚未归并的问题</label>${note('保存模型不会测试。测试仅发送一条合成句子，可能计费；通过接口测试不代表召回质量已验收。切换模型需重新测试，再启用。')}`,{kind:'embedding'},'保存设置');
