@@ -583,6 +583,39 @@ fn sampling_policy_section(form: &MonitorRuleFormState, disabled: bool) -> Strin
         return String::new();
     }
     let disabled_attr = if disabled { " disabled" } else { "" };
+    // 平台只提供这四档发布时间。此前这里是个任意天数的输入框——填 3 天，平台只能给
+    // 「一周内」，那是个做不到的承诺。**取值仍是天数**：存的是「我想要多新的内容」这个
+    // 意图，天数是跨平台通用的表达；档位是各平台的执行细节，由插件按自己的能力兑现，
+    // 并把实际生效的那一档回写进回执。
+    const PUBLISH_WINDOWS: [(&str, &str); 4] =
+        [("", "不限"), ("1", "一天内"), ("7", "一周内"), ("180", "半年内")];
+    let current_window = form.published_within_days.trim();
+    let mut publish_windows = PUBLISH_WINDOWS
+        .iter()
+        .map(|(value, text)| {
+            format!(
+                r#"<option value="{value}"{selected}>{text}</option>"#,
+                selected = if current_window == *value {
+                    " selected"
+                } else {
+                    ""
+                },
+            )
+        })
+        .collect::<String>();
+    // 库里存着一个不在四档里的天数时，多给一个选项把它显示出来。
+    // 否则浏览器会默认选中第一项「不限」，**打开规则再保存一次就把那个值悄悄改没了**——
+    // 界面不该在人没动过某一项的情况下改掉它。
+    if !current_window.is_empty()
+        && !PUBLISH_WINDOWS
+            .iter()
+            .any(|(value, _)| *value == current_window)
+    {
+        publish_windows.push_str(&format!(
+            r#"<option value="{value}" selected>保持当前 · {value} 天（非平台档位）</option>"#,
+            value = escape(current_window),
+        ));
+    }
     let rankings = [
         ("most_liked", "最多点赞"),
         ("most_collected", "最多收藏"),
@@ -612,13 +645,12 @@ fn sampling_policy_section(form: &MonitorRuleFormState, disabled: bool) -> Strin
                     <label for="ranking_key"><span>排序依据</span><select id="ranking_key" name="ranking_key"{disabled_attr}>{rankings}</select></label>
                     <label for="scroll_rounds"><span>下拉刷新次数</span><input id="scroll_rounds" name="scroll_rounds" type="number" min="0" max="20" value="{scroll_rounds}"{disabled_attr}></label>
                     <label for="top_by_likes"><span>取点赞前几篇</span><input id="top_by_likes" name="top_by_likes" type="number" min="1" max="200" value="{top_by_likes}"{disabled_attr}></label>
-                    <label for="published_within_days"><span>只要几天内发布的</span><input id="published_within_days" name="published_within_days" type="number" min="1" max="365" placeholder="不限" value="{published_within_days}"{disabled_attr}></label>
+                    <label for="published_within_days"><span>只要多新的内容</span><select id="published_within_days" name="published_within_days"{disabled_attr}>{publish_windows}</select></label>
                   </div>
-                  <p class="c-rule-hint">按下拉次数控制，不按条数控制——页面每次加载出多少条不由我们决定，只有「拉了几次」是能说准的事实。「只要几天内」留空表示不限；这批样本的点赞数不可跨时间比较。综合排序掺入个性化推荐，采回来的是平台认为这个账号会喜欢的内容，不是这个领域客观最好的内容。</p>
+                  <p class="c-rule-hint">按下拉次数控制，不按条数控制——页面每次加载出多少条不由我们决定，只有「拉了几次」是能说准的事实。时间范围只有这四档，因为平台就只给这四档；选了之后，回执里记的是页面上<b>实际生效</b>的那一档，不是这里选的值。同一批样本的点赞数不可跨时间比较。综合排序掺入个性化推荐，采回来的是平台认为这个账号会喜欢的内容，不是这个领域客观最好的内容。</p>
                 </section>"#,
         scroll_rounds = escape(&form.scroll_rounds),
         top_by_likes = escape(&form.top_by_likes),
-        published_within_days = escape(&form.published_within_days),
     )
 }
 
@@ -824,6 +856,32 @@ mod sampling_policy_tests {
         assert_eq!(form.scroll_rounds, "");
         assert_eq!(form.top_by_likes, "");
         assert!(sampling_policy_section(&form, false).is_empty());
+    }
+
+    /// 时间范围只给平台真正支持的四档：此前是个任意天数输入框，填 3 天平台只能给
+    /// 「一周内」，那是个做不到的承诺。
+    #[test]
+    fn the_publish_window_offers_only_what_the_platform_supports() {
+        let form = MonitorRuleFormState::from_panel(&keyword_panel("考研自习::latest"));
+        let html = sampling_policy_section(&form, false);
+        for (value, text) in [("", "不限"), ("1", "一天内"), ("7", "一周内"), ("180", "半年内")] {
+            assert!(html.contains(&format!(r#"<option value="{value}""#)));
+            assert!(html.contains(text));
+        }
+        assert!(!html.contains(r#"name="published_within_days" type="number""#));
+    }
+
+    /// 库里存着非四档的天数时要显示出来。浏览器会默认选中第一项「不限」，
+    /// 打开规则再保存一次就把那个值悄悄改没了——界面不该改掉人没动过的东西。
+    #[test]
+    fn a_non_standard_window_is_shown_instead_of_being_silently_dropped() {
+        let mut form = MonitorRuleFormState::from_panel(&keyword_panel("考研自习::latest"));
+        form.published_within_days = "3".to_owned();
+        let html = sampling_policy_section(&form, false);
+        assert!(html.contains(r#"<option value="3" selected>"#));
+        assert!(html.contains("非平台档位"));
+        // 「不限」不该同时被选中。
+        assert!(!html.contains(r#"<option value="" selected>"#));
     }
 
     /// 关键词面渲染出那一节，且四项都在。
