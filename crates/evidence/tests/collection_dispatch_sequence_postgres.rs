@@ -96,6 +96,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0046_keyword_sampling_policy.sql"),
     "\n",
     include_str!("../../../database/migrations/0047_collection_detail_failure_boundary.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0052_work_order_expiry.sql"),
 );
 
 #[tokio::test]
@@ -1389,6 +1391,110 @@ async fn detail_only_scope_claims_only_detail_and_rejects_orphaned_replies() {
         }
         other => panic!("detail-only scope must dispatch detail first; got {other:?}"),
     }
+}
+
+/// 过了保质期的工单不再排队，也不再被当成「等待中」。
+///
+/// 一张昨天的工单回答的是昨天的问题：人可以再点一次，巡检下一轮会再来。只要它还在队列
+/// 里，它就一直是最老的那一张，一直排在最前面。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn a_work_order_past_its_shelf_life_leaves_the_queue_instead_of_waiting_forever() {
+    let database = proof_database_for("collection_dispatch_work_order_expiry").await;
+    let fixture = seed_creator_work_order(&database).await;
+    sqlx::query(
+        "UPDATE collection_work_order \
+         SET queue_state='queued',dispatch_lane='immediate', \
+             scheduled_for=scope_001_now()-interval '2 days', \
+             expires_at=scope_001_now()-interval '1 day' \
+         WHERE work_order_ref=$1",
+    )
+    .bind(fixture.work_order_ref)
+    .execute(database.pool())
+    .await
+    .expect("the stale order is the oldest waiting one in its lane");
+
+    let runnable = seed_second_queued_work_order(&database, &fixture).await;
+
+    let decision = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the poll answers without tripping over the stale order");
+    let dispatched_work_order: Uuid = sqlx::query_scalar(
+        "SELECT lease.work_order_ref FROM collection_work_order_lease lease \
+         JOIN collection_work_order_lease_task task USING(lease_ref) WHERE task.task_id=$1",
+    )
+    .bind(task_id(&decision))
+    .fetch_one(database.pool())
+    .await
+    .expect("a dispatched task belongs to exactly one work order");
+    assert_eq!(dispatched_work_order, runnable);
+
+    let stale_state: String =
+        sqlx::query_scalar("SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(fixture.work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("the stale order stays readable");
+    assert_eq!(
+        stale_state, "cancelled",
+        "只把它从候选里滤掉是不够的：它会继续以「等待」的样子留在队列里说假话"
+    );
+}
+
+/// 保质期只对排队中的工单成立。正在跑的活不能被一次派发扫描顺手取消。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn a_leased_work_order_is_not_cancelled_by_its_own_shelf_life() {
+    let database = proof_database_for("collection_dispatch_leased_shelf_life").await;
+    let fixture = seed_creator_work_order(&database).await;
+    sqlx::query(
+        "UPDATE collection_work_order \
+         SET queue_state='queued',dispatch_lane='immediate', \
+             scheduled_for=scope_001_now()-interval '1 hour' \
+         WHERE work_order_ref=$1",
+    )
+    .bind(fixture.work_order_ref)
+    .execute(database.pool())
+    .await
+    .expect("the order is claimable");
+    decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the station claims it");
+    // 它现在真的在跑；此刻让保质期到期。
+    sqlx::query(
+        "UPDATE collection_work_order SET expires_at=scope_001_now()-interval '1 second' \
+         WHERE work_order_ref=$1",
+    )
+    .bind(fixture.work_order_ref)
+    .execute(database.pool())
+    .await
+    .expect("proof advances only the isolated shelf-life clock");
+
+    decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the next poll runs the expiry sweep");
+    let state: String =
+        sqlx::query_scalar("SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(fixture.work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("the leased order stays readable");
+    assert_eq!(
+        state, "leased",
+        "正在执行的工单不能因为保质期到了就被取消——它的租约结束后才轮到这条规则"
+    );
 }
 
 /// 授权失效的工单不得挡住排在它后面的活。

@@ -72,7 +72,10 @@ pub async fn station_schema_is_ready(database: &Database) -> Result<bool, sqlx::
     sqlx::query_scalar::<_, bool>(
         "SELECT to_regclass('execution_station') IS NOT NULL \
              AND to_regclass('plugin_installation') IS NOT NULL \
-             AND to_regclass('installation_credential') IS NOT NULL",
+             AND to_regclass('installation_credential') IS NOT NULL \
+             AND EXISTS (SELECT 1 FROM information_schema.columns \
+                         WHERE table_name='execution_station' \
+                           AND column_name='last_dispatch_answer_at')",
     )
     .fetch_one(database.pool())
     .await

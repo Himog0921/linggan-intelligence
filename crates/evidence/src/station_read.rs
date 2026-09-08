@@ -92,6 +92,15 @@ pub struct StationOverview {
     /// 当天碰过的笔记篇数（去重）。与准入判定读同一段 SQL——旧项目两处口径不同，出现过
     /// 「页面显示已达上限但仍在派单」。
     pub daily_notes_used: i64,
+    /// 上一次这台工位来问活时，服务端给出的回答。三项一起为空表示它还从来没问过。
+    ///
+    /// 这不是「现在能不能接活」——那是 `RuntimeCapacityOverview` 的判定。这里是**实际
+    /// 发生过的一次对话**：工位问了，我们答了什么。2026-09-08 那一整天的答案都是
+    /// 「被拦住了」，而页面上一个字也看不到。
+    pub last_dispatch_answer_at: Option<String>,
+    pub last_dispatch_answer_code: Option<String>,
+    /// 回答是「被拦住」时，拦住它的那条具体原因码。
+    pub last_dispatch_answer_reason: Option<String>,
 }
 
 /// 一个报到了但还没人认领的插件安装。它不会被派活。
@@ -118,7 +127,10 @@ pub async fn read_station_overview(
                 to_char(active.last_seen_at, 'YYYY-MM-DD HH24:MI') AS active_last_seen_at, \
                 (SELECT count(*) FROM plugin_installation h \
                  WHERE h.station_ref = s.station_ref AND h.superseded_at IS NOT NULL) \
-                    AS superseded_count \
+                    AS superseded_count, \
+                to_char(s.last_dispatch_answer_at, 'MM-DD HH24:MI') \
+                    AS last_dispatch_answer_at, \
+                s.last_dispatch_answer_code, s.last_dispatch_answer_reason \
          FROM execution_station s \
          LEFT JOIN plugin_installation active \
                 ON active.station_ref = s.station_ref AND active.superseded_at IS NULL \
@@ -166,6 +178,9 @@ type StationRow = (
     Option<String>,
     Option<String>,
     i64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
 );
 
 impl From<StationRow> for StationOverview {
@@ -182,6 +197,9 @@ impl From<StationRow> for StationOverview {
             superseded_count: row.7,
             // 由 read_station_overview 调用配额权威函数补齐，不在这条查询里另写一份 SQL。
             daily_notes_used: 0,
+            last_dispatch_answer_at: row.8,
+            last_dispatch_answer_code: row.9,
+            last_dispatch_answer_reason: row.10,
         }
     }
 }

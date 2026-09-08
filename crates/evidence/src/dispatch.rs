@@ -223,6 +223,42 @@ impl DispatchDecision {
     }
 }
 
+/// 记下「上一次这台工位来问活，我们的回答是什么」。
+///
+/// 2026-09-08 停摆的那一整天里，服务端每 5 分钟都给出过一个明确的回答，而这个回答只发给
+/// 插件，没有在任何人能看见的地方留下痕迹。人能看到的只有「等待 5 单」——**给出了回答却
+/// 不留痕，等于没有回答**。
+///
+/// 只留最后一次，不做流水账：一天 288 次问活，其中 287 次是同一句话。人要看的是「现在
+/// 为什么不动」，不是「过去三天每五分钟分别为什么不动」。
+///
+/// 这是一条**只供显示**的记录：它不参与任何准入或派发判断，写失败也不能影响这次派发的
+/// 结果——所以它单独一次写入，而不是挤进 `decide_dispatch` 的事务里。调用方据此可以放心
+/// 忽略它的错误。
+pub async fn record_dispatch_answer(
+    database: &Database,
+    install_key: &str,
+    decision: &DispatchDecision,
+) -> Result<(), sqlx::Error> {
+    // 「被拦住了」与「被什么拦住」是两个事实，分开存才拆得开。
+    let reason_code = match decision {
+        DispatchDecision::ControlBlocked { reason_code } => Some(reason_code.as_str()),
+        _ => None,
+    };
+    sqlx::query(
+        "UPDATE execution_station SET last_dispatch_answer_at=scope_001_now(), \
+             last_dispatch_answer_code=$2,last_dispatch_answer_reason=$3 \
+         WHERE station_ref=(SELECT station_ref FROM plugin_installation \
+                            WHERE install_key=$1 AND superseded_at IS NULL)",
+    )
+    .bind(install_key)
+    .bind(decision.code())
+    .bind(reason_code)
+    .execute(database.pool())
+    .await?;
+    Ok(())
+}
+
 pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
         "SELECT to_regclass('collection_work_order_lease') IS NOT NULL \
@@ -605,6 +641,10 @@ pub async fn decide_dispatch(
     // have no live lease but still be marked `leased`.  Recover only orders
     // with runnable work; terminal historical orders never reopen.
     recover_released_orphaned_work_orders_in_transaction(&mut transaction).await?;
+    // 过了保质期的工单在这里终结，而不是靠上面那条候选查询把它们滤掉了事。
+    // 只滤掉的话，它们会永远以「等待」的样子留在队列里——页面显示等待 5 单，其中 3 单
+    // 永远不会跑，这正是 2026-09-08 那一天人看着队列却什么也看不出来的原因之一。
+    expire_stale_queued_work_orders_in_transaction(&mut transaction).await?;
     let (Some(station_ref), Some(_quota)) = (station_ref, quota) else {
         // Expiry recovery above is durable even when this caller has not yet
         // claimed a station.  Returning without a commit would silently roll
@@ -849,6 +889,8 @@ async fn claim_next_queued_work_order(
                AND work_order.dispatch_lane=$1 \
                AND work_order.retry_not_before_at<=scope_001_now() \
                AND work_order.scheduled_for<=scope_001_now() \
+               AND (work_order.expires_at IS NULL \
+                    OR work_order.expires_at>scope_001_now()) \
              ORDER BY CASE WHEN $1='batch' THEN COALESCE(( \
                         SELECT EXTRACT(EPOCH FROM max(prior_lease.issued_at))::bigint \
                         FROM collection_work_order prior \
@@ -1031,6 +1073,29 @@ async fn undo_failed_queue_claim(
                            WHERE work_order_ref=$1 AND released_at IS NULL)",
     )
     .bind(work_order_ref)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+/// 终结过了保质期的排队工单。
+///
+/// 一张昨天的工单回答的是昨天的问题。人可以再点一次、巡检下一轮会再来、建档可以重新
+/// 发起——每条通道都有自己的再生方式，没有哪一张值得无限期等下去；而只要它还在队列里，
+/// 它就一直是最老的那一张，一直排在最前面。
+///
+/// 只动 `queued`：`leased` 表示它此刻真的在跑，一次派发扫描不该把正在跑的活取消掉。
+/// 它的租约结束后会回到队列，那时这条规则才轮到它。
+async fn expire_stale_queued_work_orders_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE collection_work_order \
+         SET queue_state='cancelled',station_ref=NULL,installation_ref=NULL, \
+             account_ref=NULL,eligibility_ref=NULL \
+         WHERE queue_state='queued' AND expires_at IS NOT NULL \
+           AND expires_at<=scope_001_now()",
+    )
     .execute(&mut **transaction)
     .await?;
     Ok(())

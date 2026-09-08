@@ -221,6 +221,7 @@ migrate() {
   apply_migration_once "0049_comment_research_runtime" "$project_root/database/migrations/0049_comment_research_runtime.sql"
   apply_migration_once "0050_comment_research_automation" "$project_root/database/migrations/0050_comment_research_automation.sql"
   apply_migration_once "0051_comment_problem_vectors" "$project_root/database/migrations/0051_comment_problem_vectors.sql"
+  apply_migration_once "0052_work_order_expiry" "$project_root/database/migrations/0052_work_order_expiry.sql"
 }
 
 case "$command_name" in

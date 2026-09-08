@@ -93,7 +93,7 @@ pub use creator_lifecycle::{
 pub use dispatch::{
     DISPATCH_FAILURE_RETRY_AFTER_SECONDS, DispatchDecision, DispatchError, DispatchFailureCode,
     DispatchFailureError, DispatchFailureOutcome, decide_dispatch, dispatch_schema_is_ready,
-    requeue_failed_dispatch,
+    record_dispatch_answer, requeue_failed_dispatch,
 };
 pub use execution_station::{
     CheckInOutcome, InstallationCheckIn, InstallationClaimOutcome, StationError,

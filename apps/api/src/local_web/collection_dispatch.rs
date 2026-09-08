@@ -15,7 +15,7 @@ use axum::{
 use linggan_evidence::{
     AccountEligibilitySignal, CollectionControlError, DispatchDecision, DispatchFailureCode,
     DispatchFailureError, DispatchFailureOutcome, activate_installation_credential,
-    decide_dispatch, report_account_eligibility, requeue_failed_dispatch,
+    decide_dispatch, record_dispatch_answer, report_account_eligibility, requeue_failed_dispatch,
 };
 
 /// The station asks whether it may execute a bounded task. Published through
@@ -191,7 +191,12 @@ async fn claim(State(state): State<LocalWebState>, body: Bytes) -> Response {
     )
     .await
     {
-        Ok(decision) => Json(payload(&decision)).into_response(),
+        Ok(decision) => {
+            // 把刚才给出的回答留在工位上，执行工位页才说得出「现在为什么不动」。
+            // 只供显示：写不进去也不改变这次派发的结果，因此这里不把它变成一个错误响应。
+            let _ = record_dispatch_answer(database, &request.install_key, &decision).await;
+            Json(payload(&decision)).into_response()
+        }
         Err(_) => local_read_json_error(
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             "dispatch_claim_rejected",
