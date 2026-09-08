@@ -104,3 +104,61 @@ test('加载数不足 N 时原样返回，不做无谓重排', () => {
   assert.equal(pickTopByLikes(cards, 0), cards);
   assert.equal(pickTopByLikes(cards, undefined), cards);
 });
+
+/**
+ * 这一组守的是「回执不许替一个未发生的状态背书」。
+ *
+ * 真实事故：`readCurrentXhsSearchFilterSnapshot` 直接读 `window.__INITIAL_STATE__`，
+ * 而 content script 跑在 Chrome 的隔离世界里，按设计看不见页面的 JS 变量——于是它恒
+ * 返回默认值「沿用当前」。一次真的按最多点赞采回的样本（点赞 4309→3363→1206 严格
+ * 递减）被回执写成了「筛选没生效」，反过来污蔑了一次正常采集。
+ */
+test('筛选快照必须经注入读取，且注册在可注入类型表里', () => {
+  const filters = readFileSync(
+    fileURLToPath(new URL('../src/platforms/xhs/searchFilters.js', import.meta.url)),
+    'utf8',
+  );
+  const utils = readFileSync(
+    fileURLToPath(new URL('../src/shared/utils.js', import.meta.url)),
+    'utf8',
+  );
+  const controller = readFileSync(
+    fileURLToPath(new URL('../src/content/xhsPageController.js', import.meta.url)),
+    'utf8',
+  );
+
+  assert.match(filters, /readXhsSearchFilterSnapshotByInject/);
+  assert.match(filters, /getByInject\(wd, 'searchFilters'\)/);
+  // 没在 fileMap 里注册，注入会直接抛 Unknown inject type。
+  assert.match(utils, /searchFilters: 'injected\/searchFilters\.js'/);
+  // 回执必须用注入版；用回同步版就等于把这个缺陷放回去。
+  assert.match(controller, /await readXhsSearchFilterSnapshotByInject/);
+  assert.ok(
+    !/effective: filterOutcome\?\.snapshot/.test(controller),
+    '回执不能再用同步快照——它在真实页面上读不到',
+  );
+});
+
+test('注入脚本必须被 manifest 放行，否则加载即失败', async () => {
+  const manifest = JSON.parse(
+    readFileSync(fileURLToPath(new URL('../manifest.json', import.meta.url)), 'utf8'),
+  );
+  const xhs = manifest.web_accessible_resources.find((entry) =>
+    entry.matches.some((match) => match.includes('xiaohongshu')),
+  );
+  assert.ok(xhs.resources.includes('injected/searchFilters.js'));
+});
+
+test('读不到时说读不到，不伪装成「什么都没选」', () => {
+  const injected = readFileSync(
+    fileURLToPath(new URL('../src/injected/searchFilters.js', import.meta.url)),
+    'utf8',
+  );
+  // readable 把「读不到」与「页面上什么都没选」分开——两者的含义完全不同。
+  assert.match(injected, /readable: Boolean\(window\.__INITIAL_STATE__\)/);
+  const filters = readFileSync(
+    fileURLToPath(new URL('../src/platforms/xhs/searchFilters.js', import.meta.url)),
+    'utf8',
+  );
+  assert.match(filters, /readable: false/);
+});

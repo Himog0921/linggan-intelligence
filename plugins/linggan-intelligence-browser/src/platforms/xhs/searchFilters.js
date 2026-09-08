@@ -1,4 +1,5 @@
 import { buildXhsSearchSurfaceReceipt } from './captureReceipt.js';
+import { getByInject } from '../../shared/utils.js';
 
 const SEARCH_PAGE_RE = /xiaohongshu\.com\/search_result/i;
 const FEED_CONTAINER_SELECTOR = '.feeds-container';
@@ -125,6 +126,16 @@ export function hasExplicitXhsSearchFilters(filters = {}) {
   return Object.values(normalizeXhsSearchFilters(filters)).some((value) => value !== 'current');
 }
 
+/**
+ * 从页面状态读当前生效的筛选。
+ *
+ * **content script 读不到 `__INITIAL_STATE__`**——那是页面自己的 JS 变量，内容脚本跑在
+ * Chrome 的隔离世界里，按设计看不见它。所以这个同步版在真实页面上恒返回默认值。
+ * 需要真实结果的地方请用 {@link readXhsSearchFilterSnapshotByInject}。
+ *
+ * 返回值带 `readable`：**读不到与「页面上什么都没选」是两件事**。此前不加区分，
+ * 一次真的按最多点赞采回的样本被写成了「筛选没生效」。
+ */
 export function readCurrentXhsSearchFilterSnapshot(win = globalThis.window) {
   const state = unwrapState(win?.__INITIAL_STATE__) || {};
   const searchState = unwrapState(state.search) || {};
@@ -150,7 +161,37 @@ export function readCurrentXhsSearchFilterSnapshot(win = globalThis.window) {
     ...normalizeXhsSearchFilters(result),
     labels,
     raw,
+    readable: Boolean(win?.__INITIAL_STATE__),
   };
+}
+
+/**
+ * 注入页面读当前生效的筛选，跨过隔离世界。
+ *
+ * 与 `noteCollector.js` 读 `noteMap` 是同一套机制，那条路已在真实页面上验证过。
+ * 读不到时返回 `readable: false` 而不是一份看起来像「什么都没选」的默认值——
+ * 回执宁可说「这次没读到」，也不能替一个未发生的状态背书。
+ */
+export async function readXhsSearchFilterSnapshotByInject(wd = globalThis.window) {
+  let payload;
+  try {
+    payload = await getByInject(wd, 'searchFilters');
+  } catch {
+    return { ...normalizeXhsSearchFilters(), labels: {}, raw: {}, readable: false };
+  }
+  if (!payload?.readable) {
+    return { ...normalizeXhsSearchFilters(), labels: {}, raw: {}, readable: false };
+  }
+  const raw = payload.raw || {};
+  const result = {};
+  const labels = {};
+  Object.entries(FILTER_GROUPS).forEach(([groupKey, group]) => {
+    const tags = raw[group.stateType] || [];
+    const option = resolveOptionByLabel(groupKey, tags);
+    result[groupKey] = option?.value || group.defaultValue;
+    labels[groupKey] = option?.label || group.currentLabel;
+  });
+  return { ...normalizeXhsSearchFilters(result), labels, raw, readable: true };
 }
 
 export function readCurrentXhsSearchSurfaceContext({
