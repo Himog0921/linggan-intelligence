@@ -142,7 +142,7 @@
     source_unavailable: "来源当前不可读，已停止展示正文与衍生结果。",
     comment_intelligence_schema_missing:
       "评论研究升级尚未应用，请完成数据库升级后重试。",
-    model_not_qualified: "研究模型尚未通过当前合同测试，请先完成模型配置。",
+    model_not_qualified: "研究模型尚未完成调用测试，请先在模型设置中测试并保存默认模型。",
     invalid_command: "请核对必填内容、选择范围及版本。",
     prepare_expired: "确认范围已经过期，请关闭后重新准备研究。",
   };
@@ -412,7 +412,7 @@
     $("ci-days").disabled = isRunView();
     const s = data.scope;
     $("ci-scope").innerHTML =
-      `<div>${esc(s.domainName || document.body.dataset.corpusDomainName || "当前领域")} · ${isRunView() ? "批次范围" : state.timeBasis === "published" ? "按评论发表时间" : "按首次观察时间"}${state.workRef ? " · 已限定作品" : ""}${state.problemRef ? " · 已限定问题" : ""}${state.term ? " · 热词：" + esc(state.term) : ""}${state.sourceRefs ? " · 精确证据集" : ""}${state.text ? " · 检索：" + esc(state.text) : ""} ${state.workRef || state.problemRef || state.term || state.text || state.lenses || state.processingState || state.sourceRefs ? btn("清除筛选", "clear") : ""}<div class="lgi-research-meta">${isRunView() ? "按本批冻结的评论成员查看，不受原声浏览日期筛选影响" : `${esc(date(s.from, true))} 至 ${esc(date(s.to, true))}（不含截止时刻）`}</div></div><div>${data.model?.modelConnected ? "研究模型已连接" : `<a href="/settings/models">${data.model?.modelState === "PAUSED" ? "模型连接已暂停" : data.model?.modelState === "NEEDS_SELECTION" ? "请选择已通过校验的默认模型" : data.model?.modelState === "NEEDS_QUALIFICATION" ? "模型需要测试评论格式" : "模型尚未配置"}</a>`} · 截止 ${esc(date(s.asOf))}<details><summary>范围与版本</summary><p>聚合版本 ${esc(s.resultRevision || "未知")} · ${esc(s.timeBasis || state.timeBasis)}</p><p>按发表时间筛选时排除 ${num(data.summary.excludedPublished)} 条无法可靠解析时间的评论。</p></details></div>`;
+      `<div>${esc(s.domainName || document.body.dataset.corpusDomainName || "当前领域")} · ${isRunView() ? "批次范围" : state.timeBasis === "published" ? "按评论发表时间" : "按首次观察时间"}${state.workRef ? " · 已限定作品" : ""}${state.problemRef ? " · 已限定问题" : ""}${state.term ? " · 热词：" + esc(state.term) : ""}${state.sourceRefs ? " · 精确证据集" : ""}${state.text ? " · 检索：" + esc(state.text) : ""} ${state.workRef || state.problemRef || state.term || state.text || state.lenses || state.processingState || state.sourceRefs ? btn("清除筛选", "clear") : ""}<div class="lgi-research-meta">${isRunView() ? "按本批冻结的评论成员查看，不受原声浏览日期筛选影响" : `${esc(date(s.from, true))} 至 ${esc(date(s.to, true))}（不含截止时刻）`}</div></div><div>${data.model?.modelConnected ? "研究模型已连接" : `<a href="/settings/models">${data.model?.modelState === "PAUSED" ? "模型连接已暂停" : data.model?.modelState === "NEEDS_SELECTION" ? "请选择调用成功的默认模型" : ["NEEDS_CALL_TEST", "NEEDS_QUALIFICATION"].includes(data.model?.modelState) ? "请先测试模型调用" : "模型尚未配置"}</a>`} · 截止 ${esc(date(s.asOf))}<details><summary>范围与版本</summary><p>聚合版本 ${esc(s.resultRevision || "未知")} · ${esc(s.timeBasis || state.timeBasis)}</p><p>按发表时间筛选时排除 ${num(data.summary.excludedPublished)} 条无法可靠解析时间的评论。</p></details></div>`;
     renderTools();
     if (state.view === "overview") renderOverview();
     else if (state.view === "voices")
@@ -610,6 +610,21 @@
     context_changed: "调用期间上下文变化，结果未接纳",
     worker_interrupted: "执行中断，供应商用量可能未知",
     source_or_plan_unavailable: "来源不可用或研究已暂停",
+    output_bounds_invalid: "评论字段数量或长度超出限制",
+    output_bounds: "评论字段数量或长度超出限制",
+    unexpected_comment: "返回了输入范围外的评论",
+    unknown_comment: "返回了输入范围外的评论编号",
+    quote_out_of_bounds: "引用位置超出原声范围",
+    facets_or_evidence_invalid: "研究字段或引用校验失败",
+    provider_output_incomplete: "输出未完整结束",
+    partial_fields_rejected: "部分研究字段未通过校验",
+    outcome_conflict: "结果状态与研究字段互相矛盾",
+    context_evidence_required_or_conflicting: "上下文引用与表达依据不一致",
+    context_fragment_unknown: "引用了未提供的上下文片段",
+    context_quote_missing_or_ambiguous: "上下文引用缺失或不唯一",
+    problem_bounds: "问题名称或定义长度不符合要求",
+    stance_bounds: "立场对象长度不符合要求",
+    field_rejected: "该字段未通过校验",
   })[code] || (code ? "此项未通过校验，打开详情核对具体原因" : "");
   const duration = (ms) => ms == null ? "耗时未知" : ms < 1000 ? `${num(ms)} 毫秒` : `${(ms / 1000).toFixed(1)} 秒`;
   function callTable(calls, batchRef) {
@@ -816,8 +831,8 @@
     const model = (m.models || []).find(
       (x) => x.modelRef === m.config?.modelRef,
     );
-    const modelReady = Boolean(m.config && m.model?.modelConnected);
-    const modelHint = ({NEEDS_SELECTION:"已有模型通过校验，尚未选择为默认模型",NEEDS_QUALIFICATION:"请在供应商弹窗中测试评论格式，无需先设置默认模型",PAUSED:"模型连接已暂停，请先启用"})[m.model?.modelState] || "尚未配置，请先添加供应商并测试";
+    const modelReady = Boolean(m.model?.modelConnected);
+    const modelHint = ({NEEDS_SELECTION:"已有模型调用成功，尚未选择为默认模型",NEEDS_CALL_TEST:"请在供应商弹窗中测试模型调用，无需先设置默认模型",NEEDS_QUALIFICATION:"请在供应商弹窗中测试模型调用，无需先设置默认模型",PAUSED:"模型连接已暂停，请先启用"})[m.model?.modelState] || "尚未配置，请先添加供应商并测试";
     showModal(
       "确认评论研究",
       `<p>${num(p.count)} 条评论 · ${num(p.works)} 篇作品。范围已冻结，有效至 ${esc(date(p.expiresAt))}。</p><p>已有结果优先复用，其余按作品和模型预算自动分包。</p>${p.preflight ? `<div class="ci-preflight-counts">${Object.entries(p.preflight.counts || {}).map(([key,n]) => `<div><span>${esc({reusable:"已有结果可复用",newAnalysis:"需要新增分析",dropped:"已过滤噪声",contextMissing:"上下文待补",anomaly:"数据异常",retryRequired:"既有失败，需重试",inProgress:"已有分析正在进行",inputTooLarge:"上下文超过输入预算"}[key] || key)}</span><strong>${num(n)}</strong></div>`).join("")}</div><p class="lgi-research-meta">${p.preflight.estimatedCalls?.available ? `预计新增调用 ${num(p.preflight.estimatedCalls.min)}–${num(p.preflight.estimatedCalls.max)} 次 · Token 保守上界 ${num(p.preflight.tokenUpperBound)}` : "配置模型后才能估算新增调用"}</p><details><summary>预检与估算说明</summary><p>${esc(p.preflight.estimateMethod)}</p><p>已有失败不会因重新选择而自动重试；重新分析会保留旧版本并使用新额度。</p></details>` : ""}<details><summary>范围处理统计</summary><p>${Object.entries(

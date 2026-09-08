@@ -376,7 +376,7 @@ async fn daily_text_revision_reuses_original_grant_but_reobservation_does_not() 
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and local synthetic Pi"]
-async fn historical_probe_does_not_qualify_new_semantic_contract() {
+async fn historical_callable_probe_allows_current_contract_without_retesting() {
     let db = fixture::proof_database("semantic_contract_qualification").await;
     let (mut server, url) = fixture_server().await;
     let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
@@ -393,7 +393,8 @@ async fn historical_probe_does_not_qualify_new_semantic_contract() {
         },
     )
     .await;
-    assert!(matches!(result, Err(ModelError::NotQualified)));
+    assert!(result.is_ok());
+    assert!(tick(&db).await);
     server.kill().await.unwrap();
 }
 
@@ -509,7 +510,7 @@ async fn extraction_does_not_recall_or_decide_problem_equivalence() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and local synthetic Pi"]
-async fn model_readiness_guides_qualification_then_selection_without_circular_dependency() {
+async fn model_readiness_separates_callability_from_comment_contract_diagnostics() {
     use linggan_intelligence::model_settings_read::{
         current_comment_model_state, read_model_settings,
     };
@@ -535,7 +536,8 @@ async fn model_readiness_guides_qualification_then_selection_without_circular_de
     );
     sqlx::query("UPDATE linggan_model_invocation SET result=jsonb_set(result,'{commentContract}','\"comment-research.v2\"'::jsonb) WHERE operation='probe'").execute(db.pool()).await.unwrap();
     data = read_model_settings(&db, true).await.unwrap();
-    assert_eq!(data["model"]["modelState"], "NEEDS_QUALIFICATION");
+    assert_eq!(data["model"]["modelState"], "NEEDS_SELECTION");
+    assert_eq!(data["models"][0]["modelCallable"], true);
     assert_eq!(data["models"][0]["commentQualified"], false);
     let request = SaveModelConfig {
         config_ref: Uuid::new_v4(),
@@ -548,10 +550,7 @@ async fn model_readiness_guides_qualification_then_selection_without_circular_de
         auto_source_limit: 10,
         auto_token_limit: 100000,
     };
-    assert!(matches!(
-        save_model_config(&db, &request).await,
-        Err(ModelError::NotQualified)
-    ));
+    save_model_config(&db, &request).await.unwrap();
     sqlx::query("UPDATE linggan_model_invocation SET result=jsonb_set(result,'{commentContract}',to_jsonb($1::text)),state='failed' WHERE operation='probe'").bind(DAILY_RULE).execute(db.pool()).await.unwrap();
     assert_eq!(
         read_model_settings(&db, true).await.unwrap()["models"][0]["commentQualified"],
@@ -578,6 +577,10 @@ async fn model_readiness_guides_qualification_then_selection_without_circular_de
         .execute(db.pool())
         .await
         .unwrap();
+    let request = SaveModelConfig {
+        config_ref: Uuid::new_v4(),
+        ..request
+    };
     save_model_config(&db, &request).await.unwrap();
     set_model_connection_enabled(
         &db,

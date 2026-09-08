@@ -19,7 +19,7 @@ pub async fn inspect(
     policy: &ContextPolicy,
     reanalyze: bool,
 ) -> Result<Value, ModelError> {
-    let config = sqlx::query("SELECT c.config_ref,c.input_token_limit,c.output_token_limit,w.workspace_ref,concat(m.connection_version_ref,':',m.model_id) AS identity FROM linggan_model_workspace w JOIN linggan_model_config c ON c.config_ref=w.default_config_ref JOIN linggan_model_entry m USING(model_ref) WHERE w.singleton")
+    let config = sqlx::query(crate::model_settings::with_model_callability("SELECT c.config_ref,c.input_token_limit,c.output_token_limit,w.workspace_ref,concat(m.connection_version_ref,':',m.model_id) AS identity FROM linggan_model_workspace w JOIN linggan_model_config c ON c.config_ref=w.default_config_ref JOIN linggan_model_entry m USING(model_ref) JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection conn USING(connection_ref) WHERE w.singleton AND conn.enabled AND __MODEL_CALLABLE__"))
         .fetch_optional(db.pool()).await?;
     let rows=sqlx::query("SELECT c.material_ref,c.content_public_ref,c.comment_external_id,c.body_text FROM linggan_comment_research_readable c WHERE c.material_ref=ANY($1) ORDER BY c.content_public_ref,c.material_ref")
         .bind(refs).fetch_all(db.pool()).await?;

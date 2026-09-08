@@ -54,6 +54,7 @@ export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password
 cargo test -p linggan-intelligence --test comment_daily_postgres --locked -- --ignored
 cargo test -p linggan-intelligence --test model_pi_postgres --locked -- --ignored
 cargo test -p linggan-intelligence --test model_probe_limit_postgres --locked -- --ignored
+cargo test -p linggan-intelligence --test model_callability_postgres --locked -- --ignored
 cargo test -p linggan-intelligence --test comment_research_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test material_social_postgres --locked -- --ignored
 cargo test -p linggan-api --bin linggan-api --locked material_projection_tests -- --ignored

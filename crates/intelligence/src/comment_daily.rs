@@ -31,7 +31,7 @@ async fn validate_config(
     if !(1..=3000).contains(&sources) || !(1024..=10000000).contains(&tokens) {
         return Err(ModelError::Invalid);
     }
-    let allowed:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_model_config cfg JOIN linggan_model_entry m USING(model_ref) JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection c USING(connection_ref) WHERE cfg.config_ref=$1 AND c.enabled AND cfg.input_token_limit+cfg.output_token_limit<=$2 AND COALESCE((SELECT state='succeeded' AND result->>'commentQualified'='true' AND result->>'commentContract'='comment-research.v4' FROM linggan_model_invocation WHERE model_ref=m.model_ref AND operation='probe' ORDER BY created_at DESC LIMIT 1),false))")
+    let allowed:bool=sqlx::query_scalar(crate::model_settings::with_model_callability("SELECT EXISTS(SELECT 1 FROM linggan_model_config cfg JOIN linggan_model_entry m USING(model_ref) JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection c USING(connection_ref) WHERE cfg.config_ref=$1 AND c.enabled AND cfg.input_token_limit+cfg.output_token_limit<=$2 AND __MODEL_CALLABLE__)"))
         .bind(config).bind(tokens).fetch_one(db.pool()).await?;
     if !allowed {
         return Err(ModelError::NotQualified);

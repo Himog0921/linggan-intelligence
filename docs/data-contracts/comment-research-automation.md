@@ -16,7 +16,7 @@
 
 新规则用comment-clean.v2，旧v1不可重写。派生文本去emoji、可靠mention；无语义文字dropped，不进入当前原声/检索/词频/问题/代表统计。短语蹲、同问、求分享保留。anomaly不等于无价值。原始事实不删除，列表显示派生文本，详情可核对原文和位置映射。内部direct/context对应可分析/需上下文，low_information仅为旧记录兼容值。
 
-Task A固定comment-research.v4提示词/Schema，逐评论提取需求、方案、经历、原文表达、问题和立场。explicit/context_resolved/uncertain有独立依据；context_resolved同时引用目标评论和实际输入辅助片段。模型只看相关上下文片段，不看点赞来决定语义。字段不合法仅拒独立字段；身份/截断/根结构失败仍不可接纳；全字段拒绝不冒充no_signal。版本升级需新合成probe资格；历史分析仍可读，既有授权不自动升级重算。
+Task A固定comment-research.v4提示词/Schema，逐评论提取需求、方案、经历、原文表达、问题和立场。explicit/context_resolved/uncertain有独立依据；context_resolved同时引用目标评论和实际输入辅助片段。模型只看相关上下文片段，不看点赞来决定语义。字段不合法仅拒独立字段；身份/截断/根结构失败仍不可接纳；全字段拒绝不冒充no_signal。分析合同升级不撤销已验证的模型调用能力；历史分析仍可读，既有授权不自动升级重算。MODEL-CALL-004以当前模型最后一次完整成功的调用回执作为配置/研究准入，评论格式校验仅为诊断，实际每次分析仍严格验证。
 
 ## 研究范围与复用
 
@@ -45,7 +45,7 @@ Task B独立召回与判断same/related/different/uncertain；只有same可自�
 - `comment_problem_worker.rs`、`comment_problem_vectors.rs`：持久TaskB任务、定义版本、来源资格、同批额度、向量缓存和关系判断。关系结果与接纳回执同事务保存；记账前中断恢复已接纳结果并标用量待核对，不重复外发。相似度仅召回，same才入既有对象。自动首条对象为emerging；3条当前可用独立原声后可标stable，这只是暂定组织门槛，不是结论正确率；人工定义另记依据。
 - `embedding_settings.rs`、`apps/pi-adapter/src/embeddings.mjs`：可配置本机或外部OpenAI兼容向量接口，复用Keychain连接。保存不发请求；独立合成探针合格后显式启用，授权在原研究额度内处理待归并表达。参考[官方Embeddings接口](https://developers.openai.com/api/reference/resources/embeddings/methods/create)，最多2条、每条8000 UTF8字节，校验索引/维度/有限非零向量；缺少用量仍未知。兼容协议不等于所有供应商或模型都已通过真实测试。
 - 当前向量召回以同域最多500个可读问题的精确余弦排序为首版边界；超出边界显示受限，不静默截断冒充全域召回。新表达依次比较既有对象，无same且无uncertain时建立emerging对象；尚未实现批量全局重聚类及自动重整问题树。
-- `0050_comment_research_automation.sql`、`0051_comment_problem_vectors.sql`：追加新合同/队列/清洗派生/向量缓存；投影游标与词索引按领域及评论联合标识，迁移仅清空可重建游标使其重新投影，不删除原文/分析。部署暂停旧授权，需新合同校验及显式设置。批次切到新日只接续从未调用的积压，carried_forward保留出处，未知计费不随之转移。
+- `0050_comment_research_automation.sql`、`0051_comment_problem_vectors.sql`：追加新合同/队列/清洗派生/向量缓存；投影游标与词索引按领域及评论联合标识，迁移仅清空可重建游标使其重新投影，不删除原文/分析。部署暂停旧合同研究授权，恢复研究需显式设置；模型调用能力不因评论合同升级作废。批次切到新日只接续从未调用的积压，carried_forward保留出处，未知计费不随之转移。
 
 ## 本次执行证明口径
 

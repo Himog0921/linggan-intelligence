@@ -57,3 +57,15 @@ Linggan 持有配置、用途/来源资格、预算、持久 comment work、租�
 - 范围：Pi adapter 对 api.deepseek.com 的已知 V4 模型落实当前无思考文本调用约束，probe/analyze 使用同一参数；保留 10 秒/1024 probe 上限和无重试。修正输出截断的 modelCallable 与可见提示，commentQualified 仍 false、不接纳不完整结果。原始历史回执不回写。
 - 文件：adapter/test fixture、model_invocation 与其 PostgreSQL proof、model_settings.js、既有页面/验收/当月记录。无新 migration、无新一级入口、无新外部调用、无密钥读取/导出、无预算增加。
 - 验证：真实 Pi SDK 对本机 SSE 重现省略 thinking 控制导致截断，显式关闭后成功；负例不影响其它域名/模型。PG 截断仍计费且不能设为默认，重放不重复调用；编译与治理检查。真实供应商复测尚未执行。
+
+
+## MODEL-CALL-004（2026-09-08）调用准入与评论诊断解耦
+
+Mog认可排查结果并授权修复。实际失败回执2273ms，ok=true/modelCallable=true/commentQualified=false/partial_fields_rejected；原程序将部分有效的合成评论输出扩大成模型禁用，又丢弃具体字段诊断。本包在codex/model-callability工作树实现：同模型最新完整成功调用作为统一门槛，评论兼容报告保留但不拦设置，正式研究逐次校验不变。旧合同计划不自动恢复，失败/截断/停用不获得准入，无共享数据改写或真实供应商重测。
+
+执行分工：根model_invocation/model_probe_validation、合同/集成；backend代理所有调用准入及PG验证；UI代理单弹窗诊断/默认选择/研究入口及DOM验证。适用旧文档中“评论格式全部通过才可默认”的决定由docs/pages/model-ai-settings.md中MODEL-CALL-004段替代。验证和发布层分别记录，不因旧包已发布推断本包已部署。
+
+
+MODEL-CALL-004 验证收口：37 项 Rust 单元、19 项 Pi SDK 本机合成协议、38 项 DOM 通过；隔离 PostgreSQL 41 个独立场景累计通过（新增 4、daily 28、preflight 2、relation 7）。首轮测试准备/重放断言及合成 fixture 顺序问题定向修复，只复验失败项，未重复整包审核。真实浏览器使用当前 Rust shell + HTML/CSS/JS、仅本地 API 合成数据，1280/900 视口通过部分字段诊断展开→选择默认→保存，页面脚本错误为零。API/worker cargo check、领域 clippy、diff/JS/bash 语法检查通过；clippy 14 个既有告警未扩大整治。新 PG 测试已接入 scripts/test-model-pi-postgres.sh。
+
+运行证据位于 /tmp/model-call* 与 /tmp/model-callability-pg{,2,3}.log。模型 SDK 测试、合成 UI、真实供应商质量和共享运行环境分别报告：没有再次调用用户模型，没有迁移或修改共享配置；当前代码未提交/推送/合并，main 与 3000 未更新。发布需按用户后续授权执行。
