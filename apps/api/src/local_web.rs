@@ -3978,44 +3978,54 @@ fn corpus_domain_picker(
         return String::new();
     }
     let mut options = String::new();
+    let mut current_label = String::new();
+    let mut current_meta = String::new();
     if let Some(label) = all_domains_label {
+        let selected = current.is_none();
+        if selected {
+            current_label = label.to_owned();
+            current_meta = "全部领域".to_owned();
+        }
         options.push_str(&format!(
-            r#"<option value="{all}"{selected}>{label}</option>"#,
+            r#"<a href="{action}?domain={all}"{current} aria-label="{label}，全部领域"><span>{label}</span><small>全部领域</small></a>"#,
+            action = html_escape(action),
             all = linggan_evidence::observation_domain::ALL_DOMAINS,
-            selected = if current.is_none() { " selected" } else { "" },
+            current = if selected { " aria-current=\"page\"" } else { "" },
             label = html_escape(label),
         ));
     }
     for domain in domains {
-        let selected = if current.is_some_and(|current| current.domain_ref == domain.domain_ref) {
-            " selected"
-        } else {
-            ""
-        };
+        let selected = current.is_some_and(|current| current.domain_ref == domain.domain_ref);
         // 本领域只带一个角标，不单列一类：它在这个列表里是普通一项。
-        let own = if domain.is_own_domain {
-            "（本领域）"
+        let meta = if domain.is_own_domain {
+            "本领域".to_owned()
+        } else if let Some(count) = domain.sample_count {
+            format!("{count} 条样本")
         } else {
-            ""
+            "样本数未知".to_owned()
         };
-        let count = match domain.sample_count {
-            Some(count) if !domain.is_own_domain => format!(" · {count}"),
-            _ => String::new(),
-        };
+        if selected {
+            current_label = domain.name.clone();
+            current_meta = meta.clone();
+        }
         options.push_str(&format!(
-            r#"<option value="{domain_ref}"{selected}>{name}{own}{count}</option>"#,
+            r#"<a href="{action}?domain={domain_ref}"{current} aria-label="{name}，{meta}"><span>{name}</span><small>{meta}</small></a>"#,
+            action = html_escape(action),
             domain_ref = domain.domain_ref,
+            current = if selected { " aria-current=\"page\"" } else { "" },
             name = html_escape(&domain.name),
+            meta = html_escape(&meta),
         ));
     }
-    // 提交时只带 domain：换领域是换观察对象，此前那个领域下的检索词、筛选、选中的作品
-    // 都不该跟着过来——它们说的是另一批材料。地址由服务端重新给，页面从干净状态开始。
+    // 领域切换只带 domain：此前领域下的检索词、筛选和选中项不能跟去描述另一批材料。
+    // 使用链接而不是原生 select，菜单的打开态、焦点和当前项才能由 LIDS 接管。
     format!(
-        r#"<form class="v7-domain-picker" method="get" action="{action}" aria-label="当前观察领域">
-             <label class="v7-sr-only" for="corpus-domain">当前观察领域</label>
-             <select id="corpus-domain" name="domain" onchange="this.form.submit()">{options}</select>
-             <noscript><button type="submit">切换</button></noscript>
-           </form>"#
+        r#"<details class="v7-domain-picker">
+             <summary aria-label="切换当前观察领域"><span>{current_label}</span><small>{current_meta}</small><i aria-hidden="true"></i></summary>
+             <nav aria-label="可选观察领域">{options}</nav>
+           </details>"#,
+        current_label = html_escape(&current_label),
+        current_meta = html_escape(&current_meta),
     )
 }
 

@@ -1,7 +1,7 @@
 # PAGE-EVIDENCE-001 · 多材料证据库
 
 > 状态: 权威当前
-> 最后核对: 2026-09-01
+> 最后核对: 2026-09-08
 > 适用范围: `语料 → 证据库` 的产品任务、页面信息架构、技术呈现要求、状态与验收；运行时入口仍为 `http://localhost:3000/corpus/evidence`
 > 事实来源: Mog 批准的五卡 Evidence Library 垂直交付、Issue #85/#86/#90、MEDIA-RECON-001、MATERIAL-PROJECTION-001、LIDS、UI execution contract 与当前 Rust/HTML/CSS/JS
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；本页规格不让静态原型冒充已接通运行时
@@ -155,6 +155,23 @@ Inspector 默认停在“概览”，但页面不得只在隐藏 Tab 中提供�
 | 排序 | 默认最近观察降序；后续可明确切换来源发布时间 | sort key、asOf | 把“最近观察”写成“最新发布” |
 
 排版使用独立 URL 参数 `layout=research|table|cover`；状态筛选继续使用 `view`。`view` 是查询预设，必须与其他筛选一起放在主结果上方的 `SYSTEM VIEWS / 系统视图` 横向工作台，不作为左侧导航或独立状态面板；结果数、读取回执和当前选择分别由工作台底栏、inline receipt、选中行/Inspector 承担，不重复做统计栏。`MY VIEWS / 我的视图` 可以保留参考稿的结构位置，但在保存合同缺失时只能显示不可交互的“暂无已保存视图 / SAVED VIEWS NOT CONNECTED”，不得展示假视图或假保存动作。切换排版只重排已读取的同一 Work Resource 集合，不重新请求、不改字段资格、不改变当前选择。保存视图、批量选择、发起研究和泛化“补采”继续禁用，直到各自有独立产品/权限/回执合同。唯一已接通的例外是当前选中作品的受限 `立即复观测`：它只面对小红书、稳定 public ref 和已存在的 target-linked active deep-archive authorization，不能从作者、标题、URL 或采集来源名称推断授权；请求与状态均来自受控 API，不能显示本地伪造成功。
+
+### 5.4 外部观察领域的列表级参照样本
+
+当 Context Bar 选择 `is_own_domain=false` 的已存在观察领域时，证据库不再消费
+`/api/local/work-resources`，而只读该领域的
+`/api/local/cross-industry/samples?domain=<domain-ref>`。这是一条与本领域 Material
+Projection 并列的展示适配路径，不是给作品接口增加 `domain` 参数，也不把外部样本伪造成
+Work Resource。
+
+| 表面 | 允许表达 | 必须明确 | 禁止表达 |
+|---|---|---|---|
+| Context Bar | 当前观察领域、外部样本数、可切换的已启用领域 | 切换仅改变观察对象，旧领域的查询/选中项不携带过去 | 领域创建、改名、暂停或配置入口 |
+| 外部样本列表 | 标题、作者、已知互动、观察目标/关键词、最近观察和受控本地封面状态 | `跨行业参照样本 / 列表级字段`；未知仍为未知 | 作品 `publicRef`、材料 lane、Evidence 摘要、远程封面回退 |
+| Inspector | 样本 `sampleRef`、列表级字段、未读取边界 | 外部参照不参与本领域判断；详情、正文、评论、媒体和来源血缘尚未读取 | Work Resource detail URL、复观测、补采、伪造 `SOURCE_INCOMPLETE` |
+| 查询工作台 | 三种已读取结果排版仍可本地切换 | 跨行业列表模型尚不支持检索、材料筛选、状态视图或排序，这些控件必须禁用并说明原因 | 显示实际无效的筛选/排序或假回执 |
+
+外部样本的列表级读取成功不是详情读取成功；`0` 仅表示该领域接口确认没有样本，读取失败仍为读取失败，不能写成空库。领域自助配置属于 `Issue #130` 的后续领域治理能力，未由本页实现或暗示已经接通。
 
 ## 6. 材料 lane 与数据来源
 

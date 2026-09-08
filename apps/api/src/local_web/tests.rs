@@ -2497,6 +2497,63 @@ fn evidence_runtime_uses_material_projection_as_its_only_default_read_source() {
 }
 
 #[test]
+fn corpus_cross_industry_samples_keep_their_list_level_boundary() {
+    // A cross-industry item has `sampleRef`, not the Work Resource `publicRef` which licenses
+    // the evidence-detail route. This source-level contract prevents the old blank-list bug
+    // from returning as a fake detail lookup.
+    assert!(
+        EVIDENCE_LIBRARY_JS
+            .contains("const CROSS_INDUSTRY_ROOT = '/api/local/cross-industry/samples'")
+    );
+    assert!(EVIDENCE_LIBRARY_JS.contains("function crossIndustryListItem(sample)"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("identity: {\n        sampleRef:"));
+    assert!(
+        EVIDENCE_LIBRARY_JS.contains("function selectCrossIndustrySample(item, selectionSource)")
+    );
+    assert!(EVIDENCE_LIBRARY_JS.contains("跨行业列表级参照样本"));
+    assert!(EVIDENCE_LIBRARY_JS.contains("不参与本领域判断"));
+    assert!(EVIDENCE_LIBRARY_JS.contains(
+        "if (CORPUS_DOMAIN.isOwn && model.selectedRef) params.set('work', model.selectedRef)"
+    ));
+    assert!(!EVIDENCE_LIBRARY_JS.contains("[data-public-ref]"));
+}
+
+#[test]
+fn corpus_domain_picker_is_a_lids_owned_link_menu_not_a_native_select() {
+    let domains = vec![
+        ObservationDomain {
+            domain_ref: uuid::Uuid::new_v4(),
+            name: "ADHD".to_owned(),
+            is_own_domain: true,
+            status: "active".to_owned(),
+            sample_count: None,
+        },
+        ObservationDomain {
+            domain_ref: uuid::Uuid::new_v4(),
+            name: "考研自习".to_owned(),
+            is_own_domain: false,
+            status: "active".to_owned(),
+            sample_count: Some(21),
+        },
+    ];
+    let html = evidence_library_html(None, &domains, Some(&domains[1]));
+
+    assert!(html.contains("<details class=\"v7-domain-picker\">"));
+    assert!(html.contains("<nav aria-label=\"可选观察领域\">"));
+    assert!(html.contains("考研自习</span><small>21 条样本</small>"));
+    assert!(html.contains("aria-label=\"考研自习，21 条样本\""));
+    assert!(html.contains(&format!(
+        "href=\"/corpus/evidence?domain={}\" aria-current=\"page\"",
+        domains[1].domain_ref
+    )));
+    assert!(!html.contains("<select id=\"corpus-domain\""));
+    assert!(
+        SHELL_CSS.contains(".v7-domain-picker[open] summary{box-shadow:var(--lgi-shadow-brutal)}")
+    );
+    assert!(!SHELL_CSS.contains(".v7-domain-picker select"));
+}
+
+#[test]
 fn evidence_runtime_restores_system_and_personal_view_strategy_without_faking_saved_views() {
     let html = evidence_library_html(None, &[], None);
 
