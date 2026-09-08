@@ -8,6 +8,8 @@ WITH config AS (
  COALESCE($3::text::timestamptz,scope_001_now()) AS end_at,scope_001_now() AS as_of
  FROM observation_domain d WHERE d.domain_ref=COALESCE($1,(SELECT domain_ref FROM observation_domain WHERE is_own_domain))
 ), analysis_latest AS MATERIALIZED (
+ -- Check context readability once per analysis in this snapshot. The source join below
+ -- consumes this materialized result and must not re-run the guard for every comment.
  SELECT DISTINCT ON(am.content_public_ref,am.comment_external_id,a.result->>'sourceSha256') a.*,am.content_public_ref,am.comment_external_id FROM linggan_comment_analysis_work a JOIN linggan_material_comment am ON am.material_ref=a.source_ref WHERE a.result IS NOT NULL AND ($16::uuid IS NULL OR EXISTS(SELECT 1 FROM linggan_comment_daily_item bi WHERE bi.batch_ref=$16 AND bi.analysis_ref=a.work_ref)) AND linggan_ci_analysis_context_readable(a.result) ORDER BY am.content_public_ref,am.comment_external_id,a.result->>'sourceSha256',a.created_at DESC,a.work_ref DESC
 ), clean_latest AS MATERIALIZED (
  SELECT source_ref,source_sha256,state,result,cleaner_version,true AS own_domain FROM linggan_comment_clean WHERE cleaner_version='comment-clean.v2' UNION ALL SELECT source_ref,source_sha256,state,result,cleaner_version,false AS own_domain FROM cross_industry_comment_clean WHERE cleaner_version='comment-clean.v2'
@@ -41,7 +43,6 @@ WITH config AS (
  LEFT JOIN research_current h ON h.canonical_ref=s.canonical_ref AND h.domain_ref=s.domain_ref
  LEFT JOIN analysis_latest a ON c.is_own_domain AND a.content_public_ref=s.work_ref AND a.comment_external_id=s.comment_external_id
  AND a.result->>'sourceSha256'=s.source_sha256
- AND linggan_ci_analysis_context_readable(a.result)
  LEFT JOIN clean_latest cl ON cl.own_domain=c.is_own_domain AND cl.source_ref=s.source_ref AND cl.source_sha256=s.source_sha256
  LEFT JOIN operation_latest op ON c.is_own_domain AND op.content_public_ref=s.work_ref AND op.comment_external_id=s.comment_external_id
  LEFT JOIN capture_provenance cp ON c.is_own_domain AND cp.canonical_ref=s.canonical_ref

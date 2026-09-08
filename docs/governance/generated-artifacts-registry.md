@@ -42,5 +42,5 @@
 ## CI-AUTO-003 临时验证产物
 
 - 来源：`scripts/test-comment-intelligence-postgres.sh`、`apps/pi-adapter/test/embeddings.test.mjs`、`scripts/tests/comment_research_redesign_ui.mjs`及隔离headless浏览器回归。
-- 固定位置：操作系统临时目录 `/tmp/ci-auto-*`、`/tmp/ci-p5-proof.log`、`/tmp/ci-embedding-*`、`/tmp/ci-problem-relations-proof.log`。截图只含合成材料。测试源码是人工维护的权威输入，可入Git；日志/截图/临时预览脚本不入Git。
+- 固定位置：操作系统临时目录 `/tmp/ci-auto-*`、`/tmp/ci-native-*`（只读执行计划/耗时，不保存评论正文）、`/tmp/ci-p5-proof.log`、`/tmp/ci-embedding-*`、`/tmp/ci-problem-relations-proof.log`。截图只含合成材料。测试源码是人工维护的权威输入，可入Git；日志/截图/临时预览脚本不入Git。
 - 再生：按活跃计划列出的同名测试命令重建；数据库容器和卷由脚本退出时清理。验证摘要转入实施计划及验收记录，临时原件可在任务收口后清理。
