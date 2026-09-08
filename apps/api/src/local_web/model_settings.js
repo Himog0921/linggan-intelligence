@@ -14,8 +14,23 @@
   const table=(heads,rows)=>`<div class="lgi-model-table"><table><thead><tr>${heads.map(h=>`<th scope="col">${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
   const button=(action,ref,label,disabled=false)=>`<button type="button" data-action="${action}" data-ref="${esc(ref)}" ${disabled?'disabled':''}>${label}</button>`;
   const note=t=>`<p class="lgi-model-note">${esc(t)}</p>`;
-  const validationLabels={json_or_schema_invalid:'输出 JSON 结构不合格',missing_comment:'缺少评论结果',unexpected_comment:'返回了包外评论',duplicate_comment:'重复返回评论',quote_missing_or_ambiguous:'引用缺失或不唯一',quote_redacted_or_empty:'引用为空或包含遮盖文字',facets_or_evidence_invalid:'字段或引用校验失败',provider_output_incomplete:'输出未完整结束'};
-  function modelStatus(m){return !m.enabled?'连接已停用':!m.test?'尚未测试':m.test.commentQualified?'可调用 · 评论输出通过校验':m.test.modelCallable?(m.test.failureCode?explain(m.test.failureCode):'可调用 · '+(validationLabels[m.test.validationCode]||'评论输出未通过校验')):explain(m.test.failureCode);}
+  const validationLabels={json_invalid:'返回内容不是有效 JSON',schema_invalid:'评论包结构不符合要求',item_schema_invalid:'评论字段缺失或类型错误',output_bounds_invalid:'评论字段数量或长度超出限制',json_or_schema_invalid:'输出 JSON 结构不合格',missing_comment:'缺少评论结果',unexpected_comment:'返回了包外评论',duplicate_comment:'重复返回评论',quote_missing_or_ambiguous:'引用缺失或不唯一',quote_redacted_or_empty:'引用为空或包含遮盖文字',facets_or_evidence_invalid:'字段或引用校验失败',provider_output_incomplete:'输出未完整结束'};
+  function modelStatus(m){
+    if(!m.enabled)return '连接已停用';
+    if(m.testState==='running')return '评论校验进行中，请稍后刷新';
+    if(!m.test)return '尚未测试，请点击编辑与测试';
+    if(m.test.commentContract && m.test.commentContract!==data.commentContract)return '评论校验已升级，请重新测试';
+    if(m.commentQualified)return '可调用 · 当前评论校验通过';
+    return m.test.modelCallable?'可调用 · '+(m.test.failureCode?explain(m.test.failureCode):validationLabels[m.test.validationCode]||'评论输出未通过校验'):explain(m.test.failureCode);
+  }
+  function selectDefault(modelRef){
+    const model=data.models.find(m=>m.modelRef===modelRef);
+    if(!model?.enabled||!model.commentQualified)throw new Error('请先通过当前评论校验。');
+    close();$('default-model').value=modelRef;
+    $('default-guidance').textContent='已选择 '+model.connectionName+' / '+model.modelId+'。请核对单次调用限制，点击保存默认配置；保存不会开始分析。';
+    $('default-model').focus();$('defaults').scrollIntoView({block:'center'});
+  }
+
   async function load(){
     try { data=await request(api+(focusedPlan?'?planRef='+encodeURIComponent(focusedPlan):'')); } catch(e) { loadFailed=true; data=null; $('storage-state').textContent='配置未就绪'; document.querySelectorAll('.lgi-model-settings button:not(#reload),.lgi-model-settings input,.lgi-model-settings select').forEach(el=>el.disabled=true); $('connection-list').replaceChildren(); throw e; }
     if(loadFailed){$('settings-feedback').textContent='连接已恢复，配置已重新读取。';loadFailed=false;}
@@ -26,7 +41,10 @@
       return `<tr><td><strong>${esc(c.name)}</strong>${note(c.baseUrl)}${note(c.api)}</td><td>${models.length?models.map(m=>`<div>${esc(m.modelId)}${note(modelStatus(m))}</div>`).join(''):note('尚未配置模型')}${!c.enabled?note('连接已停用'):''}</td><td>${button('edit-connection',c.connectionRef,'编辑与测试')} ${button('toggle',c.connectionRef,c.enabled?'停用':'启用')}</td></tr>`;
     })):note('还没有供应商。点击“添加供应商”，填写地址、API Key 和模型。');
     const selected=data.config?.modelRef;
-    $('default-model').innerHTML='<option value="">请选择已通过评论校验的模型</option>'+data.models.filter(m=>(m.enabled&&m.test?.commentQualified)||m.modelRef===selected).map(m=>`<option value="${m.modelRef}">${esc(m.connectionName+' / '+m.modelId+(m.enabled?'':'（连接已停用）'))}</option>`).join('');
+    const candidates=data.models.filter(m=>m.currentVersion||m.modelRef===selected);
+    $('default-model').innerHTML='<option value="">请选择评论分析模型</option>'+candidates.map(m=>`<option value="${m.modelRef}" ${m.enabled&&m.commentQualified?'':'disabled'}>${esc(m.connectionName+' / '+m.modelId+(m.enabled&&m.commentQualified?'':'（'+modelStatus(m)+'）'))}</option>`).join('');
+    $('default-guidance').textContent=data.model?.modelConnected?'默认模型已就绪，可返回评论研究。':data.model?.modelState==='NEEDS_SELECTION'?'已有模型通过校验。请选择并保存默认配置，即可返回评论研究。':data.model?.modelState==='PAUSED'?'模型连接已停用，请先启用连接。':candidates.length?'请点击供应商的“编辑与测试”，在弹窗中“保存并测试”。测试使用合成评论，无需先设置默认模型。':'先添加供应商，填写 API 地址、凭据与模型，再在弹窗中保存并测试。';
+
     if(data.config)for(const [key,value]of Object.entries(data.config)){const field=$('config-form').elements.namedItem(key);if(field)field.value=value;}
     ['trial','automatic','backfill'].forEach(id=>$(id).disabled=!data.config||data.legacyPlansAvailable===false);
     renderActivity();
@@ -41,7 +59,7 @@
     $('run-list').innerHTML=data.runs.length?table(['最近调用','状态与原因','用量'],data.runs.map(r=>`<tr><td>${ops[r.operation]}${note(r.modelId||'模型目录请求')}${note(r.createdAt)}${r.sourceRef?`<a href="/corpus/comments?source=${r.sourceRef}">查看来源与标注</a>`:''}</td><td>${r.state==='running'?'执行中':r.state==='succeeded'?'已完成':'失败'}${r.failureCode?note(explain(r.failureCode)):''}${r.attempts?note(`此任务已尝试 ${r.attempts} 次`):''}${r.configRef?`<details><summary>配置版本</summary>${note(r.configRef)}</details>`:''}</td><td>输入 ${r.inputTokens??'未知'} · 输出 ${r.outputTokens??'未知'}${note(`本机额度计入 ${r.budgetAccounted} token · 金额待供应商核对`)}${r.elapsedMs!=null?note(`耗时 ${r.elapsedMs} ms`):''}</td></tr>`)):note('没有调用回执。');
   }
   function open(title,fields,action,label='保存'){
-    command=action;command.id=crypto.randomUUID();$('dialog-test').hidden=action.kind!=='connection';$('dialog-title').textContent=title;$('dialog-fields').innerHTML=fields;$('dialog-feedback').textContent='';$('dialog-submit').textContent=label;$('dialog-submit').disabled=false;$('model-dialog').showModal();
+    $('dialog-select').hidden=true;command=action;command.id=crypto.randomUUID();$('dialog-test').hidden=action.kind!=='connection';$('dialog-title').textContent=title;$('dialog-fields').innerHTML=fields;$('dialog-feedback').textContent='';$('dialog-submit').textContent=label;$('dialog-submit').disabled=false;$('model-dialog').showModal();
   }
   function close(){if(busy)return;const key=$('model-command').elements.namedItem('apiKey');if(key)key.value='';$('dialog-fields').replaceChildren();command=null;$('model-dialog').close();}
   const textField=(name,label,value='',extra='')=>`<label>${label}<input name="${name}" value="${esc(value)}" ${extra}></label>`;
@@ -71,7 +89,7 @@
       `<details><summary>高级设置</summary><label class="lgi-model-check"><input type="checkbox" name="localEndpoint" ${c?.localEndpoint?'checked':''}>本机回环服务（允许 HTTP）</label>${note('更换地址或协议时须重新填写凭据。新配置保留旧任务的原版本；停用连接可阻止其后续调用。')}</details>`,
       {kind:'connection',connection:c,connectionRef:c?.connectionRef||crypto.randomUUID(),models},'保存');
     endpointPreview();
-    $('model-command').oninput=e=>{if(command?.kind!=='connection')return;endpointPreview();$('dialog-feedback').textContent='配置已修改；需要重新测试。';if(['api','baseUrl','apiKey','localEndpoint'].includes(e.target.name))$('discovered-models').replaceChildren();};
+    $('model-command').oninput=e=>{if(command?.kind!=='connection')return;endpointPreview();$('dialog-select').hidden=true;$('dialog-feedback').textContent='配置已修改；需要重新测试。';if(['api','baseUrl','apiKey','localEndpoint'].includes(e.target.name))$('discovered-models').replaceChildren();};
     $('dialog-discover').onclick=()=>runConnection('discover');
   }
   function lockConnection(locked){
@@ -103,7 +121,7 @@
     if(busy||!command||!$('model-command').reportValidity())return;
     if(mode==='test'&&!$('model-command').elements.modelId.value.trim()){$('dialog-feedback').textContent='请填写模型 ID，再测试实际调用。';$('model-command').elements.modelId.focus();return;}
     // Read fields before disabling them: disabled inputs do not enter FormData.
-    busy=true; $('dialog-feedback').textContent='正在保存配置…';
+    busy=true; $('dialog-select').hidden=true;$('dialog-feedback').textContent='正在保存配置…';
     try {
       const pending=persistConnection();lockConnection(true);
       const {connection,model}=await pending;
@@ -120,6 +138,7 @@
         }
       }
       await load();
+      if(mode==='test' && data.models.some(m=>m.modelRef===model.modelRef&&m.enabled&&m.commentQualified)){$('dialog-select').hidden=false;$('dialog-select').onclick=()=>{try{selectDefault(model.modelRef);}catch(e){$('dialog-feedback').textContent=e.message;}};}
       const latest=data.connections.find(c=>c.connectionRef===connection.connectionRef);
       if(latest){command.connection=latest;$('model-command').elements.baseUrl.value=latest.baseUrl;endpointPreview();}
       if(mode==='save'){lockConnection(false);close();$('settings-feedback').textContent='供应商配置已保存。保存没有发起模型调用。';}
@@ -157,7 +176,7 @@
       busy=false;close();await load();$('existing-plans').innerHTML=(result?.existingPlans||[]).map(p=>`<p>所选来源已有${esc(kinds[p.kind])}：<a href="/settings/models?planRef=${p.planRef}">查看所属计划${p.enabled?'':'并恢复'}</a>。本次未为它另建任务或补充额度。</p>`).join('');$('settings-feedback').textContent=result?.queued===0?'请求已保存；相同来源与配置已有任务，未重复调用。':'已保存。评论计划由执行循环接续，调用结果显示在额度与运行中。';
     }catch(e){$('dialog-feedback').textContent=e.message;}finally{busy=false;$('dialog-submit').disabled=false;}
   }
-  $('config-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;try{const f=new FormData(e.currentTarget),body={configRef:crypto.randomUUID(),expectedConfigRef:data.config?.configRef||null};for(const[k,v]of f)body[k]=k==='modelRef'?v:Number(v);await request(api+'/config',body);await load();$('settings-feedback').textContent='用途配置已保存，没有发起分析。';}catch(e){$('settings-feedback').textContent=e.message;}finally{button.disabled=false;}});
+  $('config-form').addEventListener('submit',async e=>{e.preventDefault();const button=e.submitter;button.disabled=true;try{const f=new FormData(e.currentTarget),body={configRef:crypto.randomUUID(),expectedConfigRef:data.config?.configRef||null};for(const[k,v]of f)body[k]=k==='modelRef'?v:Number(v);await request(api+'/config',body);await load();$('settings-feedback').textContent='默认模型已保存，没有发起分析。';$('default-guidance').innerHTML='默认模型已就绪。<a href="/corpus/comments?view=voices">返回评论研究，重新选择范围并确认分析</a>'; }catch(e){$('settings-feedback').textContent=e.message;}finally{button.disabled=false;}});
   $('new-connection').onclick=()=>editConnection(null);$('automatic').onclick=automatic;
   $('trial').onclick=()=>chooseSources('trial').catch(showError);$('backfill').onclick=()=>chooseSources('backfill').catch(showError);
   $('reload').onclick=()=>load().catch(showError);$('dialog-close').onclick=close;$('model-dialog').addEventListener('cancel',e=>{e.preventDefault();close();});$('model-command').addEventListener('submit',submit);

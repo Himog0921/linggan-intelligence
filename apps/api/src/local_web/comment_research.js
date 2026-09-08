@@ -131,7 +131,7 @@
   function renderVoices(data) {
     const {page,works}=data;state.next=page.nextCursor;
     $('result-count').textContent=`${page.total.toLocaleString()} 条匹配原声 · 本页 ${page.items.length} 条`;
-    $('model-state').innerHTML=esc(({CONFIGURED:'已配置评论分析模型',PAUSED:'模型连接已暂停',UNAVAILABLE:'模型设置状态暂不可读'})[data.modelState]||'模型尚未配置')+' · <a href="/settings/models">模型与 AI 设置</a>';
+    $('model-state').innerHTML=esc(({CONFIGURED:'已配置评论分析模型',NEEDS_SELECTION:'请选择已通过校验的默认模型',NEEDS_QUALIFICATION:'请在供应商弹窗中测试评论格式',PAUSED:'模型连接已暂停',UNAVAILABLE:'模型设置状态暂不可读'})[data.modelState]||'模型尚未配置')+' · <a href="/settings/models">模型与 AI 设置</a>';
     const byRef=new Map(works.map(w=>[w.workRef,w]));
     const processing=new Map((data.researchStates||[]).map(v=>[v.sourceRef,v]));
     $('results').innerHTML=page.items.length ? table([['','4%'],['评论原声','35%'],['赞','7%'],['所属作品','24%'],['评论时间','14%'],['处理状态','16%']],page.items.map(s=>{
