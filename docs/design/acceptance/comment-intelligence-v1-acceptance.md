@@ -192,3 +192,13 @@
 性能修复过程保留事实：早期单独基准原声498ms通过，但整包复验528ms失败（`/tmp/ci-combined-final.log`），没有改阈值。执行计划显示广域/单作品/可选过滤的不同选择率被复用generic plan；最终在只读事务内使用`plan_cache_mode=force_custom_plan`，保留64MB局部排序/聚合内存上限，不改变服务器全局设置、权限或统计内容。最终同一10万条测试概览P95为500ms、原声394ms；它仍仅证明本机合成数据层条件。
 
 最终源码/测试/迁移/脚本指纹：`1e12afcfae6b99d4fac68ee0e4c0b0df61dade56fda16905df6390c277fbbf9e`（48个变更文件，不含文档）。format、JS语法、mock DOM、目标clippy、diff和项目治理检查通过；共享3000未切换，临时3307与本轮隔离资源均已清理。
+
+### CI-20260907-V1 本机发布回执（2026-09-08）
+
+- Mog本轮授权提交、推送、合并main和刷新3000。代码PR #192已合并为`cce3f60855fae0143452136a9b96daa9ac243e4a`；独立release_review对head`8d35138`给出PASS。集成后评论PG38、模型兼容50（18重叠）、新API3、治理通过。
+- 发布时保留main已有0047采集迁移，评论迁移顺延0048并注册local-runtime。共享台账0048 SHA256=`2ed806e50dbc85fa3d6ceaaffcd3041136a303e9532237953355043161d57b88`与文件一致；应用前已创建加密pg_dump并校验archive目录，未重置数据库。
+- 首次发布核验：API/worker/media PID为91654/91657/91659，cwd与executable均属于`~/Library/Application Support/Linggan Intelligence/runtime-main`，revision为cce3f60；health数据库/schema READY、scheduler running。后续文档回执提交会同步runtime，PID可能更新，不能把这些点时PID当永久事实。
+- 四视角真实GET均成功：1054评论、15作品、1050可研究、0分析、0问题。每次单次HTTP约982–1043ms，不是P95证明，真实规模/并发性能门槛仍未完成。API的高级观察资格false；daily enabled=false；模型调用数发布前后均5，没有新模型外发。
+- 已在用户现有Chrome `localhost:3000`标签刷新，确认概览/原声/用户问题/每日观察导航和原声1054条加载。本次解除的是实际3000基本访问验证，不是此前3307阻断的绕过；完整视口/缩放/键盘/写操作、真实语义质量/embedding与Mog验收仍未完成。
+- 旧“未提交/未迁移/3000未切换”及0047评论编号是实施阶段历史快照，由本回执替代。此发布不将84项全部验收或T7质量门槛改成通过；Issue #190保持打开承接剩余项。发布证据另见PR #192与Issue #190回执。
+

@@ -10,6 +10,15 @@
 
 来源合同：[唯一合同](../../data-contracts/comment-intelligence-v1.md)；外部原包 `/Users/moglenny/Downloads/comment-intelligence-v1`，13 项 SHA256 全部一致。蓝图不是生产数据。
 
+### CI-20260907-V1 本机发布回执（2026-09-08）
+
+- Mog本轮授权提交、推送、合并main和刷新3000。代码PR #192已合并为`cce3f60855fae0143452136a9b96daa9ac243e4a`；独立release_review对head`8d35138`给出PASS。集成后评论PG38、模型兼容50（18重叠）、新API3、治理通过。
+- 发布时保留main已有0047采集迁移，评论迁移顺延0048并注册local-runtime。共享台账0048 SHA256=`2ed806e50dbc85fa3d6ceaaffcd3041136a303e9532237953355043161d57b88`与文件一致；应用前已创建加密pg_dump并校验archive目录，未重置数据库。
+- 首次发布核验：API/worker/media PID为91654/91657/91659，cwd与executable均属于`~/Library/Application Support/Linggan Intelligence/runtime-main`，revision为cce3f60；health数据库/schema READY、scheduler running。后续文档回执提交会同步runtime，PID可能更新，不能把这些点时PID当永久事实。
+- 四视角真实GET均成功：1054评论、15作品、1050可研究、0分析、0问题。每次单次HTTP约982–1043ms，不是P95证明，真实规模/并发性能门槛仍未完成。API的高级观察资格false；daily enabled=false；模型调用数发布前后均5，没有新模型外发。
+- 已在用户现有Chrome `localhost:3000`标签刷新，确认概览/原声/用户问题/每日观察导航和原声1054条加载。本次解除的是实际3000基本访问验证，不是此前3307阻断的绕过；完整视口/缩放/键盘/写操作、真实语义质量/embedding与Mog验收仍未完成。
+- 旧“未提交/未迁移/3000未切换”及0047评论编号是实施阶段历史快照，由本回执替代。此发布不将84项全部验收或T7质量门槛改成通过；Issue #190保持打开承接剩余项。发布证据另见PR #192与Issue #190回执。
+
 ## Claim 与真实基线
 
 - 基线 origin/main `61e8c35`；独立 `codex/comment-intelligence-v1` / `.worktrees/comment-intelligence-v1`。
@@ -38,7 +47,7 @@
 | T5 四视角页面 | 已实现概览、紧凑原声、用户问题、每日观察；侧栏、研究与纠正弹窗；旧资产/查询保持 | API、JS语法和DOM冒烟通过；Chrome临时入口被客户端阻断，布局/键盘/缩放NOT VERIFIED |
 | T6 每日观察与恢复 | 已实现23:00半开窗口、冻集、跨批复用、迟到上下文恢复、暂停/继续/失败重试、未知用量保留 | 18项PG日批回归；0047暂停旧v2授权，旧计划入口拒绝启动，重新资格通过后显式开启 |
 | T7 审查与评测 | 分包独立核对、固定范围修复；84项逐项映射、离线评测器与规模基准已落地 | 自动证明见验收记录；真实人工gold、B0/B1/B2、完整浏览器、混合负载性能尚未验证 |
-| T8 集成与发布 | 交付分支实现与隔离迁移/临时API验证 | 尚未提交/推送/合并、共享迁移或切换3000；发布后还须核对实际API/worker/DB与Mog验收 |
+| T8 集成与发布 | PR #192已合并；0048共享迁移、runtime/API/worker和3000基本验证完成 | 完整业务点击与Mog验收未完成；详细事实见本页发布回执 |
 
 ## 代码定位与复现
 
