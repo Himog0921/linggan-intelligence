@@ -11,7 +11,87 @@ import {
   applyXhsSearchFilters,
   hasExplicitXhsSearchFilters,
   normalizeXhsSearchFilters,
+  readCurrentXhsSearchFilterSnapshot,
 } from '../platforms/xhs/searchFilters.js';
+import { parseCount } from '../shared/utils.js';
+
+
+/**
+ * 把服务端下发的采样口径翻成页面筛选。
+ *
+ * 服务端用「几天内」表达时间范围，而平台只提供四档（不限／一天内／一周内／半年内）。
+ * 这里向上取到**不小于**请求的那一档：要 3 天却给「一天内」会漏掉第 2、3 天的内容，
+ * 给「一周内」只是多采了一些——多采可以在读取时筛掉，漏采则无从补回。
+ *
+ * 这层映射是有损的，所以采完之后回写的是**页面上实际生效的筛选**，不是这里请求的值。
+ */
+function samplingFiltersFromTaskSpec(taskSpec) {
+  const target = taskSpec?.target || {};
+  const filters = {};
+  const ranking = String(target.ranking || '').trim();
+  // 服务端的排序词与筛选表的取值是同一套（most_liked / most_commented / most_collected /
+  // latest / comprehensive→general）；认不出来的一概不设，让页面保持当前排序。
+  const RANKING_TO_SORT = {
+    most_liked: 'most_liked',
+    most_collected: 'most_collected',
+    most_commented: 'most_commented',
+    latest: 'latest',
+    comprehensive: 'general',
+  };
+  if (RANKING_TO_SORT[ranking]) filters.sortBasis = RANKING_TO_SORT[ranking];
+  const days = Number(target.publishedWithinDays);
+  if (Number.isFinite(days) && days > 0) {
+    filters.publishTime = days <= 1 ? 'one_day' : (days <= 7 ? 'one_week' : 'half_year');
+  }
+  return filters;
+}
+
+/**
+ * 从加载出来的内容里取点赞最高的前 N 篇。
+ *
+ * **Top N 只决定「采哪几篇」，返回顺序仍按页面原始位置**——按名次重排会让后续逐篇打开
+ * 时来回滚动。名次单独记在 `__topRank` 上，它就是「爆」徽章的依据。
+ */
+function pickTopByLikes(cards, topByLikes) {
+  const limit = Number(topByLikes);
+  if (!Number.isFinite(limit) || limit <= 0 || !Array.isArray(cards) || cards.length <= limit) {
+    return cards;
+  }
+  const ranked = cards
+    .map((card, index) => ({ card, likes: parseCount(card?.likes), position: index }))
+    .sort((a, b) => (b.likes || 0) - (a.likes || 0) || a.position - b.position)
+    .slice(0, limit)
+    .map((entry, rank) => ({ ...entry, rank: rank + 1 }))
+    .sort((a, b) => a.position - b.position);
+  return ranked.map((entry) => ({ ...entry.card, __topRank: entry.rank }));
+}
+
+/**
+ * 把这一轮**实际发生**的采样情况附到页面事实上。
+ *
+ * 记的是生效值而不是请求值：平台改了筛选文案、筛选没点上、时间档位被向上取整——
+ * 这些都会让实际口径与下发的口径不同。只回写「我请求了什么」，回执就会替一次并未
+ * 发生的采样背书。`snapshot` 直接读页面自己的筛选状态，是这里唯一可信的一手事实。
+ *
+ * `loadedCount` 与 `retained` 也一并记下：规格要求「实际取得数」不可省略，
+ * 采不满是已知会发生的情况，只记目标数会让后续复核的基数是错的。
+ */
+function withAppliedSampling(pageFacts, { filterOutcome, requested, loadedCount, retained }) {
+  const requestedKeys = Object.keys(requested || {});
+  if (!requestedKeys.length && !filterOutcome) return pageFacts;
+  return {
+    ...(pageFacts || {}),
+    appliedSampling: {
+      requested: requested || {},
+      // 请求了筛选却没能应用时，reason 会说明为什么——那比默默采一轮有用。
+      applied: Boolean(filterOutcome?.applied),
+      reason: filterOutcome?.reason || null,
+      effective: filterOutcome?.snapshot || readCurrentXhsSearchFilterSnapshot(window),
+      loadedCount,
+      retained,
+    },
+  };
+}
 
 const XHS_CONTEXT_REFRESH_MESSAGE = '插件刚更新，请刷新当前页面后再点一次，刷新后即可继续。';
 
@@ -417,9 +497,12 @@ export function createXhsPageController({
           }
           const mode = String(params.mode || '').trim();
           const suppliedQuota = Number(params.maximumQuota || params.limit || 0);
+          // 服务端派下来的任务自带采样口径；此前这里恒为空筛选，于是排序从来没被设过，
+          // 采回来的永远是页面当时碰巧的排序——回执里那句「按最多点赞采」是假的。
+          const dispatchedSampling = samplingFiltersFromTaskSpec(params.taskSpec);
           let discoverySettings = {
             count: Number.isFinite(suppliedQuota) && suppliedQuota > 0 ? suppliedQuota : 0,
-            searchFilters: normalizeXhsSearchFilters(),
+            searchFilters: normalizeXhsSearchFilters(dispatchedSampling),
           };
           // Page buttons ask for a real target.  Runtime dispatches may supply a quota directly
           // and therefore do not open another dialog.
@@ -436,12 +519,22 @@ export function createXhsPageController({
           }
           const maximumQuota = Math.max(1, Number(discoverySettings.count || 20));
           const searchFilters = normalizeXhsSearchFilters(discoverySettings.searchFilters || {});
+          let filterOutcome = null;
           if (mode === COLLECT_MODE.SEARCH && hasExplicitXhsSearchFilters(searchFilters)) {
-            await applyXhsSearchFilters(searchFilters, { document, win: window });
+            filterOutcome = await applyXhsSearchFilters(searchFilters, { document, win: window });
           }
           showToast(`正在按目标加载，最多 ${maximumQuota} 条…`, 'info');
-          const discovered = await discoverSurface({ mode, maximumQuota });
-          const cards = Array.isArray(discovered) ? discovered : (Array.isArray(discovered?.cards) ? discovered.cards : []);
+          const discovered = await discoverSurface({
+            mode,
+            maximumQuota,
+            scrollRounds: params.taskSpec?.target?.scrollRounds,
+          });
+          const loaded = Array.isArray(discovered) ? discovered : (Array.isArray(discovered?.cards) ? discovered.cards : []);
+          // 先按点赞取前 N，再交付：口径说的是「从加载出来的里面取 20 篇」，
+          // 把全部加载结果都提交上去会让「取前 20」这句话没有落到实处。
+          const cards = mode === COLLECT_MODE.SEARCH
+            ? pickTopByLikes(loaded, params.taskSpec?.target?.topByLikes)
+            : loaded;
           const target = new URL(window.location.href);
           const query = target.searchParams.get('keyword') || target.searchParams.get('q') || '';
           const authorExternalId = mode === COLLECT_MODE.PROFILE
@@ -451,7 +544,10 @@ export function createXhsPageController({
             query,
             authorExternalId,
             surface: 'target_driven_surface',
-            pageFacts: Array.isArray(discovered) ? undefined : discovered?.pageFacts,
+            pageFacts: withAppliedSampling(
+              Array.isArray(discovered) ? undefined : discovered?.pageFacts,
+              { filterOutcome, requested: dispatchedSampling, loadedCount: loaded.length, retained: cards.length },
+            ),
             maximumQuota,
             taskSpec: params.taskSpec,
           });

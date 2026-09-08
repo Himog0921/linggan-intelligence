@@ -156,11 +156,15 @@ const xhsPageController = createXhsPageController({
   extractNoteId,
   sendToBackground,
   downloadNoteMediaFromRecord: (note, options) => manualMediaDownloadService.downloadNoteMediaFromRecord(note, options),
-  discoverSurface: async ({ mode, maximumQuota }) => {
+  discoverSurface: async ({ mode, maximumQuota, scrollRounds }) => {
     const expectedCount = Math.max(1, Number(maximumQuota) || 20);
+    // 下拉次数由服务端的采样口径决定；没给就沿用采集器自己的默认。
+    // **按次数控制，不按条数控制**：页面每次加载出多少条不由我们决定，
+    // 只有「拉了几次」是能说准的事实，也只有它能被回执如实记下来。
+    const rounds = Number(scrollRounds);
     const cards = await discoverWithScroll(
       mode === 'profile' ? '#userPostedFeeds' : '.feeds-container',
-      undefined,
+      Number.isFinite(rounds) && rounds >= 0 ? rounds : undefined,
       { expectedCount },
     );
     const executionSummary = buildDiscoveryExecutionSummary(cards.discoveryMeta);
