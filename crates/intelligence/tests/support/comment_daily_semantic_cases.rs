@@ -512,3 +512,121 @@ async fn packet_recalls_readable_same_domain_definitions_and_records_checked_pro
     );
     server.kill().await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn model_readiness_guides_qualification_then_selection_without_circular_dependency() {
+    use linggan_intelligence::model_settings_read::{
+        current_comment_model_state, read_model_settings,
+    };
+    let db = fixture::proof_database("model_readiness").await;
+    assert_eq!(
+        current_comment_model_state(&db).await.unwrap()["modelState"],
+        "NOT_CONFIGURED"
+    );
+    let (mut server, url) = fixture_server().await;
+    // configured probes the actual synthetic provider before saving any default.
+    let (config, connection, _) = configured(&db, &url, "synthetic-good", None).await;
+    let mut data = read_model_settings(&db, true).await.unwrap();
+    assert_eq!(data["model"]["modelState"], "CONFIGURED");
+    assert_eq!(data["models"][0]["commentQualified"], true);
+    assert_eq!(data["models"][0]["currentVersion"], true);
+    sqlx::query("UPDATE linggan_model_workspace SET default_config_ref=NULL")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        current_comment_model_state(&db).await.unwrap()["modelState"],
+        "NEEDS_SELECTION"
+    );
+    sqlx::query("UPDATE linggan_model_invocation SET result=jsonb_set(result,'{commentContract}','\"comment-research.v2\"'::jsonb) WHERE operation='probe'").execute(db.pool()).await.unwrap();
+    data = read_model_settings(&db, true).await.unwrap();
+    assert_eq!(data["model"]["modelState"], "NEEDS_QUALIFICATION");
+    assert_eq!(data["models"][0]["commentQualified"], false);
+    let request = SaveModelConfig {
+        config_ref: Uuid::new_v4(),
+        expected_config_ref: None,
+        model_ref: serde_json::from_value(data["models"][0]["modelRef"].clone()).unwrap(),
+        input_token_limit: 16000,
+        output_token_limit: 2000,
+        timeout_seconds: 5,
+        max_attempts: 2,
+        auto_source_limit: 10,
+        auto_token_limit: 100000,
+    };
+    assert!(matches!(
+        save_model_config(&db, &request).await,
+        Err(ModelError::NotQualified)
+    ));
+    sqlx::query("UPDATE linggan_model_invocation SET result=jsonb_set(result,'{commentContract}',to_jsonb($1::text)),state='failed' WHERE operation='probe'").bind(DAILY_RULE).execute(db.pool()).await.unwrap();
+    assert_eq!(
+        read_model_settings(&db, true).await.unwrap()["models"][0]["commentQualified"],
+        false
+    );
+    sqlx::query("UPDATE linggan_model_workspace SET default_config_ref=$1")
+        .bind(config)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        current_comment_model_state(&db).await.unwrap()["modelConnected"],
+        false
+    );
+    sqlx::query("UPDATE linggan_model_invocation SET state='succeeded' WHERE operation='probe'")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        current_comment_model_state(&db).await.unwrap()["modelConnected"],
+        true
+    );
+    sqlx::query("UPDATE linggan_model_workspace SET default_config_ref=NULL")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    save_model_config(&db, &request).await.unwrap();
+    set_model_connection_enabled(
+        &db,
+        &SetModelConnectionEnabled {
+            connection_ref: connection,
+            expected_revision: 1,
+            enabled: false,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        current_comment_model_state(&db).await.unwrap()["modelState"],
+        "PAUSED"
+    );
+    set_model_connection_enabled(
+        &db,
+        &SetModelConnectionEnabled {
+            connection_ref: connection,
+            expected_revision: 2,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+    data = read_model_settings(&db, true).await.unwrap();
+    assert_eq!(data["model"]["modelState"], "CONFIGURED");
+    // Enable/disable increments the connection revision without creating a version.
+    assert_eq!(data["models"][0]["currentVersion"], true);
+    sqlx::query("UPDATE linggan_model_workspace SET default_config_ref=NULL")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        current_comment_model_state(&db).await.unwrap()["modelState"],
+        "NEEDS_SELECTION"
+    );
+    let calls: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_model_invocation WHERE operation='analyze'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(calls, 0);
+    server.kill().await.unwrap();
+}

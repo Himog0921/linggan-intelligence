@@ -320,7 +320,7 @@
     $("ci-days").disabled = state.view === "daily";
     const s = data.scope;
     $("ci-scope").innerHTML =
-      `<div>${esc(s.domainName || document.body.dataset.corpusDomainName || "当前领域")} · ${state.view === "daily" ? "批次范围" : state.timeBasis === "published" ? "按评论发表时间" : "按首次观察时间"}${state.workRef ? " · 已限定作品" : ""}${state.problemRef ? " · 已限定问题" : ""}${state.term ? " · 热词：" + esc(state.term) : ""}${state.sourceRefs ? " · 精确证据集" : ""}${state.text ? " · 检索：" + esc(state.text) : ""} ${state.workRef || state.problemRef || state.term || state.text || state.lenses || state.processingState || state.sourceRefs ? btn("清除筛选", "clear") : ""}<div class="lgi-research-meta">${esc(date(s.from, true))} 至 ${esc(date(s.to, true))}（不含截止时刻）</div></div><div>${data.model?.modelConnected ? "研究模型已连接" : `<a href="/settings/models">${data.model?.modelState === "PAUSED" ? "模型连接已暂停" : data.model?.modelState === "NEEDS_QUALIFICATION" ? "模型需要重新测试评论合同" : "模型尚未配置"}</a>`} · 截止 ${esc(date(s.asOf))}<details><summary>范围与版本</summary><p>聚合版本 ${esc(s.resultRevision || "未知")} · ${esc(s.timeBasis || state.timeBasis)}</p><p>按发表时间筛选时排除 ${num(data.summary.excludedPublished)} 条无法可靠解析时间的评论。</p></details></div>`;
+      `<div>${esc(s.domainName || document.body.dataset.corpusDomainName || "当前领域")} · ${state.view === "daily" ? "批次范围" : state.timeBasis === "published" ? "按评论发表时间" : "按首次观察时间"}${state.workRef ? " · 已限定作品" : ""}${state.problemRef ? " · 已限定问题" : ""}${state.term ? " · 热词：" + esc(state.term) : ""}${state.sourceRefs ? " · 精确证据集" : ""}${state.text ? " · 检索：" + esc(state.text) : ""} ${state.workRef || state.problemRef || state.term || state.text || state.lenses || state.processingState || state.sourceRefs ? btn("清除筛选", "clear") : ""}<div class="lgi-research-meta">${esc(date(s.from, true))} 至 ${esc(date(s.to, true))}（不含截止时刻）</div></div><div>${data.model?.modelConnected ? "研究模型已连接" : `<a href="/settings/models">${data.model?.modelState === "PAUSED" ? "模型连接已暂停" : data.model?.modelState === "NEEDS_SELECTION" ? "请选择已通过校验的默认模型" : data.model?.modelState === "NEEDS_QUALIFICATION" ? "模型需要测试评论格式" : "模型尚未配置"}</a>`} · 截止 ${esc(date(s.asOf))}<details><summary>范围与版本</summary><p>聚合版本 ${esc(s.resultRevision || "未知")} · ${esc(s.timeBasis || state.timeBasis)}</p><p>按发表时间筛选时排除 ${num(data.summary.excludedPublished)} 条无法可靠解析时间的评论。</p></details></div>`;
     renderTools();
     if (state.view === "overview") renderOverview();
     else if (state.view === "voices")
@@ -644,6 +644,8 @@
     const model = (m.models || []).find(
       (x) => x.modelRef === m.config?.modelRef,
     );
+    const modelReady = Boolean(m.config && m.model?.modelConnected);
+    const modelHint = ({NEEDS_SELECTION:"已有模型通过校验，尚未选择为默认模型",NEEDS_QUALIFICATION:"请在供应商弹窗中测试评论格式，无需先设置默认模型",PAUSED:"模型连接已暂停，请先启用"})[m.model?.modelState] || "尚未配置，请先添加供应商并测试";
     showModal(
       "确认评论研究",
       `<p>${num(p.count)} 条评论 · ${num(p.works)} 篇作品。范围已冻结，有效至 ${esc(date(p.expiresAt))}。</p><p>按所属作品组织上下文，不增加外部采集。</p><p>${Object.entries(
@@ -656,9 +658,9 @@
         )
         .join(
           " · ",
-        )}</p><p>研究模型：${esc(model?.modelId || "尚未配置")}。评论及已有作品、父评论文字经必要清洗后提交给该供应商。</p>${m.config ? `<label>本批 Token 总上限<input name="tokenLimit" type="number" min="1024" max="10000000" value="100000" required></label><label class="ci-check"><input name="reanalyze" type="checkbox"> 重新分析已有结果（额外消耗额度，保留旧版本）</label>` : '<p><a href="/settings/models">配置研究模型</a></p>'}<p class="lgi-research-meta">只在确认后创建批次。取消不创建任务、不预留额度。实际费用取决于模型计费，当前不换算货币。</p>`,
+        )}</p><p>研究模型：${esc(modelReady ? model.modelId : modelHint)}。评论及已有作品、父评论文字经必要清洗后提交给该供应商。</p>${modelReady ? `<label>本批 Token 总上限<input name="tokenLimit" type="number" min="1024" max="10000000" value="100000" required></label><label class="ci-check"><input name="reanalyze" type="checkbox"> 重新分析已有结果（额外消耗额度，保留旧版本）</label>` : '<p><a href="/settings/models">配置研究模型</a></p>'}<p class="lgi-research-meta">只在确认后创建批次。取消不创建任务、不预留额度。实际费用取决于模型计费，当前不换算货币。</p>`,
       "确认并开始",
-      m.config && p.count
+      modelReady && p.count
         ? async (f) => {
             let prep = p;
             if (f.get("reanalyze"))
