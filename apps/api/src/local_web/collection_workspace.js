@@ -385,3 +385,27 @@
     selectPanel(requestedTab);
   }
 })();
+
+// 关键词的排序只在建关键词目标时才有意义——创作者主页没有排序可言。
+//
+// 排序是关键词身份的一部分（`{词}::{排序}`），建完不可改：换排序等于换一个观察面，
+// 要另建一个目标。所以它必须在这里选，而不是等建完再去规则里调。
+(function () {
+  "use strict";
+  var kind = document.querySelector("[data-target-kind]");
+  var rankingOnly = document.querySelectorAll("[data-keyword-only]");
+  if (!kind || !rankingOnly.length) {
+    return;
+  }
+  function sync() {
+    var isKeyword = kind.value === "keyword";
+    rankingOnly.forEach(function (element) {
+      element.hidden = !isKeyword;
+      // 隐藏时一并禁用：一个看不见的 select 仍然会把值提交上去，
+      // 那会让创作者目标带上一个它根本没有的排序。
+      element.disabled = !isKeyword;
+    });
+  }
+  kind.addEventListener("change", sync);
+  sync();
+})();

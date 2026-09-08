@@ -3230,6 +3230,9 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
 struct NewTargetForm {
     target_kind: String,
     identity: String,
+    /// 关键词的排序。它是身份的一部分（`{词}::{排序}`），建完就不能改——
+    /// 换排序等于换一个观察面，要另建一个目标。
+    ranking: Option<String>,
     /// 当前正在看的领域。表单在「全部领域」下不带这一项，服务端按本领域处置。
     domain: Option<String>,
 }
@@ -3299,8 +3302,23 @@ async fn collection_target_create(
         platform: linggan_contracts::OPEN_PLATFORM.to_owned(),
         target_kind: form.target_kind.clone(),
         identity,
-        // 同一个词的两种排序是两个观察面，因此关键词默认落在综合排序上并写明。
-        ranking: (form.target_kind == "keyword").then(|| "comprehensive".to_owned()),
+        // 同一个词的两种排序是两个观察面，所以排序在建目标这一刻就定下来，之后不可改。
+        //
+        // 此前这里写死成综合排序，等于「一个词只能有一个观察面」——想按最多点赞观察
+        // 同一个词根本建不出来，表单会命中已有的那个综合排序目标。而规格明写跨行业
+        // 不采综合排序（它掺个性化推荐），于是页面能建的唯一形态恰好是规格禁止的那个。
+        //
+        // 认不出的取值回落综合排序，与此前行为一致。
+        ranking: (form.target_kind == "keyword").then(|| {
+            match form.ranking.as_deref().map(str::trim) {
+                Some("most_liked") => "most_liked",
+                Some("most_collected") => "most_collected",
+                Some("most_commented") => "most_commented",
+                Some("latest") => "latest",
+                _ => "comprehensive",
+            }
+            .to_owned()
+        }),
         // 粘进来的是链接时不要拿整条 URL 当名字：它又长又带追踪参数，在列表里认不出人。
         // 真名要等采集回来才知道，在那之前留空比塞一条 URL 诚实。
         display_name: (!raw.starts_with("http")).then(|| raw.to_owned()),
