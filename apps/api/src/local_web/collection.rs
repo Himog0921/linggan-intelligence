@@ -853,9 +853,16 @@ fn second_bar(
             <a class="c-btn-quiet" href="{sort_href}">排序 / 最近观察 ↓</a>
             <form id="collection-target-create" class="c-target-add" method="post" action="/collection/targets/new">
               {domain_field}
-              <select name="target_kind" aria-label="目标类型">
+              <select name="target_kind" aria-label="目标类型" data-target-kind>
                 <option value="creator">创作者</option>
                 <option value="keyword">关键词</option>
+              </select>
+              <select name="ranking" aria-label="关键词排序" data-keyword-only hidden>
+                <option value="most_liked">最多点赞</option>
+                <option value="most_collected">最多收藏</option>
+                <option value="most_commented">最多评论</option>
+                <option value="latest">最新</option>
+                <option value="comprehensive">综合排序</option>
               </select>
               <input name="identity" required maxlength="120"
                      placeholder="创作者主页链接或 ID／关键词" />
@@ -1056,6 +1063,32 @@ mod domain_bar_tests {
         }
         // 这一页还不按领域过滤内容，就不该显示选择器——点了不起作用的控件比没有更糟。
         assert!(!html.contains("v7-domain-picker"));
+    }
+
+    /// 关键词的排序必须能在建目标时选。
+    ///
+    /// 此前这里写死成综合排序，等于「一个词只能有一个观察面」——想按最多点赞观察同一个
+    /// 词根本建不出来，表单会命中已有的那个综合排序目标。而规格明写跨行业不采综合排序，
+    /// 于是页面能建的唯一形态恰好是规格禁止的那个。
+    #[test]
+    fn a_new_keyword_target_can_choose_its_ranking() {
+        let html = render(Section::Targets, OperationsMode::Now, None, None, None);
+        assert!(html.contains(r#"<select name="ranking""#));
+        for ranking in [
+            "most_liked",
+            "most_collected",
+            "most_commented",
+            "latest",
+            "comprehensive",
+        ] {
+            assert!(
+                html.contains(&format!(r#"<option value="{ranking}">"#)),
+                "{ranking} 缺失"
+            );
+        }
+        // 创作者主页没有排序可言，所以它默认藏起来，由脚本按目标类型切换。
+        assert!(html.contains("data-keyword-only"));
+        assert!(html.contains("data-target-kind"));
     }
 
     /// 没有领域上下文时链接保持裸路径：带一个空参数会让地址假装有得选。

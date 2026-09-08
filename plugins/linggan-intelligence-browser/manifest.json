@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Linggan Intelligence Browser",
-  "version": "0.8.41",
+  "version": "0.8.42",
   "description": "Linggan Intelligence 浏览器执行端（灵感爆爆爆 v2.0.91 迁入基线）",
   "permissions": [
     "activeTab",
@@ -83,6 +83,7 @@
         "lgboom-banner.svg",
         "lgboom-inject-logo.svg",
         "injected/noteMap.js",
+        "injected/searchFilters.js",
         "injected/user.js",
         "injected/xhsApiCapture.js"
       ],

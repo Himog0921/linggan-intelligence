@@ -11,7 +11,7 @@ import {
   applyXhsSearchFilters,
   hasExplicitXhsSearchFilters,
   normalizeXhsSearchFilters,
-  readCurrentXhsSearchFilterSnapshot,
+  readXhsSearchFilterSnapshotByInject,
 } from '../platforms/xhs/searchFilters.js';
 import { parseCount } from '../shared/utils.js';
 
@@ -76,9 +76,12 @@ function pickTopByLikes(cards, topByLikes) {
  * `loadedCount` 与 `retained` 也一并记下：规格要求「实际取得数」不可省略，
  * 采不满是已知会发生的情况，只记目标数会让后续复核的基数是错的。
  */
-function withAppliedSampling(pageFacts, { filterOutcome, requested, loadedCount, retained }) {
+async function withAppliedSampling(pageFacts, { filterOutcome, requested, loadedCount, retained }) {
   const requestedKeys = Object.keys(requested || {});
   if (!requestedKeys.length && !filterOutcome) return pageFacts;
+  // 注入读取：`__INITIAL_STATE__` 是页面自己的变量，content script 在隔离世界里看不见它。
+  // 直接读的那一版恒返回默认值，把一次真的按最多点赞采回的样本写成了「筛选没生效」。
+  const effective = await readXhsSearchFilterSnapshotByInject(window);
   return {
     ...(pageFacts || {}),
     appliedSampling: {
@@ -86,7 +89,8 @@ function withAppliedSampling(pageFacts, { filterOutcome, requested, loadedCount,
       // 请求了筛选却没能应用时，reason 会说明为什么——那比默默采一轮有用。
       applied: Boolean(filterOutcome?.applied),
       reason: filterOutcome?.reason || null,
-      effective: filterOutcome?.snapshot || readCurrentXhsSearchFilterSnapshot(window),
+      // 读不到就说读不到。一份看起来像「什么都没选」的默认值会反过来污蔑一次正常采集。
+      effective,
       loadedCount,
       retained,
     },
@@ -544,7 +548,7 @@ export function createXhsPageController({
             query,
             authorExternalId,
             surface: 'target_driven_surface',
-            pageFacts: withAppliedSampling(
+            pageFacts: await withAppliedSampling(
               Array.isArray(discovered) ? undefined : discovered?.pageFacts,
               { filterOutcome, requested: dispatchedSampling, loadedCount: loaded.length, retained: cards.length },
             ),
