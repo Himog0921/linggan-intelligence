@@ -4,6 +4,7 @@ mod collection_intake;
 mod collection_targets_view;
 mod collection_tasks_view;
 mod comment_daily;
+mod comment_intelligence;
 mod comment_research;
 mod creator_lifecycle_api;
 #[cfg(test)]

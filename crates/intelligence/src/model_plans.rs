@@ -18,6 +18,9 @@ pub struct StartModelPlan {
     pub expected_auto_plan_ref: Option<Uuid>,
 }
 pub async fn start_model_plan(db: &Database, r: &StartModelPlan) -> Result<Value, ModelError> {
+    if crate::comment_intelligence::schema_ready(db).await? {
+        return Err(ModelError::ResearchPlanRetired);
+    }
     if !matches!(r.kind.as_str(), "trial" | "automatic" | "backfill")
         || !(1..=1000).contains(&r.source_limit)
         || !(1024..=10_000_000).contains(&r.token_limit)
@@ -199,6 +202,9 @@ pub async fn resume_model_plan(
     plan: Uuid,
     request: &ResumeModelPlan,
 ) -> Result<Value, ModelError> {
+    if crate::comment_intelligence::schema_ready(db).await? {
+        return Err(ModelError::ResearchPlanRetired);
+    }
     if request.expected_revision < 0 {
         return Err(ModelError::Invalid);
     }

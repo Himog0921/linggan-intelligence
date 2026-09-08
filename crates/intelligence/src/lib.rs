@@ -34,3 +34,8 @@ pub mod comment_daily;
 mod comment_daily_read;
 mod comment_daily_runner;
 mod comment_packet;
+
+pub mod comment_intelligence;
+pub mod comment_intelligence_actions;
+pub mod comment_intelligence_problems;
+pub mod comment_intelligence_statistics;

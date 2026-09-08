@@ -33,6 +33,8 @@ pub enum ModelError {
     Budget,
     #[error("model_not_qualified")]
     NotQualified,
+    #[error("comment_research_plan_retired")]
+    ResearchPlanRetired,
     #[error("model_schema_missing")]
     SchemaMissing,
     #[error("model_database_unavailable")]
@@ -41,13 +43,21 @@ pub enum ModelError {
     Source,
 }
 impl From<CommentResearchError> for ModelError {
-    fn from(_: CommentResearchError) -> Self {
-        Self::Source
+    fn from(value: CommentResearchError) -> Self {
+        match value {
+            CommentResearchError::Database(e) => Self::Database(e),
+            _ => Self::Source,
+        }
     }
 }
 impl From<linggan_evidence::comment_research_read::CommentResearchReadError> for ModelError {
-    fn from(_: linggan_evidence::comment_research_read::CommentResearchReadError) -> Self {
-        Self::Source
+    fn from(value: linggan_evidence::comment_research_read::CommentResearchReadError) -> Self {
+        match value {
+            linggan_evidence::comment_research_read::CommentResearchReadError::Database(e) => {
+                Self::Database(e)
+            }
+            _ => Self::Source,
+        }
     }
 }
 impl ModelError {
@@ -64,6 +74,7 @@ impl ModelError {
             Self::InvalidOutput => "model_invalid_output",
             Self::Budget => "model_budget_exhausted",
             Self::NotQualified => "model_not_qualified",
+            Self::ResearchPlanRetired => "comment_research_plan_retired",
             Self::SchemaMissing => "model_schema_missing",
             Self::Database(_) => "model_database_unavailable",
             Self::Source => "model_source_unavailable",
@@ -348,8 +359,8 @@ pub async fn save_model_config(db: &Database, r: &SaveModelConfig) -> Result<Val
     if !enabled {
         return Err(ModelError::Disabled);
     }
-    let qualified:bool=sqlx::query_scalar("SELECT COALESCE((SELECT state='succeeded' AND result->>'commentQualified'='true' FROM linggan_model_invocation WHERE model_ref=$1 AND operation='probe' ORDER BY created_at DESC LIMIT 1),false)")
-        .bind(r.model_ref).fetch_one(&mut *tx).await?;
+    let qualified:bool=sqlx::query_scalar("SELECT COALESCE((SELECT state='succeeded' AND result->>'commentQualified'='true' AND result->>'commentContract'=$2 FROM linggan_model_invocation WHERE model_ref=$1 AND operation='probe' ORDER BY created_at DESC LIMIT 1),false)")
+        .bind(r.model_ref).bind(crate::comment_daily::DAILY_RULE).fetch_one(&mut *tx).await?;
     if !qualified {
         return Err(ModelError::NotQualified);
     }

@@ -21,6 +21,9 @@ impl CleanComment {
         }
         let chars: Vec<_> = self.text.chars().collect();
         let needle: Vec<_> = quote.chars().collect();
+        if needle.len() > chars.len() {
+            return Err("quote_missing_or_ambiguous");
+        }
         let positions: Vec<_> = chars
             .windows(needle.len())
             .enumerate()

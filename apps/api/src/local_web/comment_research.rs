@@ -64,6 +64,7 @@ pub(super) fn routes() -> Router<LocalWebState> {
             post(retry),
         )
         .merge(super::comment_daily::routes())
+        .merge(super::comment_intelligence::routes())
         .layer(middleware::from_fn(local_research_guard))
 }
 
@@ -495,7 +496,7 @@ fn page_html(
         .replace("{{HEADER}}", &header)
         .replace("{{SIDE_NAV}}", &side_nav)
         .replace("{{TITLE}}", title)
-        .replace("{{VIEW}}", if queries { "queries" } else { "voices" })
+        .replace("{{VIEW}}", if queries { "queries" } else { "overview" })
         .replace("{{DOMAIN_QS}}", &domain_qs)
         .replace(
             "{{CORPUS_DOMAIN_REF}}",
@@ -518,10 +519,11 @@ fn page_html(
                 .unwrap_or_default(),
         );
     if std::env::var("LINGGAN_MODEL_SYNTHETIC_PREVIEW").as_deref() == Ok("SYNTHETIC-NOT-EVIDENCE") {
-        html.replace(
-            "<p class=\"lgi-research-boundary\">",
-            "<p class=\"lgi-research-boundary\">合成验收环境，非真实研究材料。 ",
-        )
+        html.replace("<body ", "<body data-research-synthetic=\"true\" ")
+            .replace(
+                "<p class=\"lgi-research-boundary\">",
+                "<p class=\"lgi-research-boundary\">合成验收环境，非真实研究材料。 ",
+            )
     } else {
         html
     }
@@ -568,7 +570,9 @@ mod tests {
         }
         assert!(html.contains("action=\"/corpus/comments\""));
         // 视图 tab 同样不许把领域冲掉：脚本没跑起来时它们会原样生效。
-        assert!(html.contains(&format!("href=\"?domain={domain_ref}&amp;view=voices\"")));
+        assert!(html.contains(&format!(
+            "href=\"/corpus/comments?domain={domain_ref}&amp;view=voices\""
+        )));
         assert!(html.contains("data-corpus-domain-own=\"false\""));
         assert!(html.contains("data-corpus-domain=\"") && html.contains(&domain_ref.to_string()));
     }
@@ -582,19 +586,20 @@ mod tests {
         // 只查链接上的领域参数：body 的 data-corpus-domain 是页面下发的事实，始终该在。
         assert!(!html.contains("?domain="));
         assert!(!html.contains("&amp;view="));
-        assert!(html.contains("href=\"?view=voices\""));
+        assert!(html.contains("href=\"/corpus/comments?view=voices\""));
         assert!(!html.contains("v7-domain-picker"));
     }
 
     #[test]
-    fn research_is_a_corpus_page_with_three_internal_views() {
+    fn research_defaults_to_overview_with_four_research_views() {
         let html = page_html(false, &[], None);
         for expected in [
-            "原声浏览",
-            "问题分组",
-            "语料资产",
+            "概览",
+            "原声",
+            "用户问题",
+            "每日观察",
             "/corpus/queries",
-            "data-initial-view=\"voices\"",
+            "data-initial-view=\"overview\"",
         ] {
             assert!(html.contains(expected));
         }

@@ -24,6 +24,14 @@ pub(super) fn routes() -> Router<LocalWebState> {
             "/api/local/comment-research/daily/{batch}/retry",
             post(retry),
         )
+        .route(
+            "/api/local/comment-research/daily/{batch}/continue",
+            post(continue_batch_action),
+        )
+        .route(
+            "/api/local/comment-research/daily/{batch}/usage-review",
+            post(usage_review_action),
+        )
         .route("/assets/comment-daily.js", get(script))
 }
 async fn script() -> impl IntoResponse {
@@ -124,4 +132,24 @@ async fn retry(
         return unavailable();
     }
     response(retry_failed(db, batch, r.command_ref).await)
+}
+async fn continue_batch_action(
+    State(s): State<LocalWebState>,
+    Path(batch): Path<Uuid>,
+    Json(r): Json<ContinueDaily>,
+) -> Response {
+    let Some(db) = s.database.database() else {
+        return unavailable();
+    };
+    response(continue_batch(db, batch, &r).await)
+}
+async fn usage_review_action(
+    State(s): State<LocalWebState>,
+    Path(batch): Path<Uuid>,
+    Json(r): Json<ReviewUsage>,
+) -> Response {
+    let Some(db) = s.database.database() else {
+        return unavailable();
+    };
+    response(review_usage(db, batch, &r).await)
 }

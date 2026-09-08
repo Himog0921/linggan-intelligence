@@ -1,12 +1,12 @@
 <!doctype html>
 <html lang="zh-CN" data-theme="linggan-intelligence">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{TITLE}} · Linggan Intelligence</title>
-<link rel="stylesheet" href="/assets/comment-research.css"><script src="/assets/comment-daily.js" defer></script><script src="/assets/comment-research.js" defer></script></head>
+<link rel="stylesheet" href="/assets/comment-research.css"><script src="/assets/comment-daily.js" defer></script><script src="/assets/comment-research.js" defer></script><script src="/assets/comment-intelligence.js" defer></script><link rel="stylesheet" href="/assets/comment-intelligence.css"></head>
 <body data-corpus-domain="{{CORPUS_DOMAIN_REF}}" data-corpus-domain-own="{{CORPUS_DOMAIN_OWN}}" data-corpus-domain-name="{{CORPUS_DOMAIN_NAME}}"><div class="v7-app">{{HEADER}}<div class="v7-shell">
 {{SIDE_NAV}}
 <main class="lgi-research" data-initial-view="{{VIEW}}">
 <div class="lgi-research-heading"><div><h1>{{TITLE}}</h1></div><span id="model-state" class="lgi-research-status"><a href="/settings/models">模型与 AI 设置</a></span></div>
-<nav class="lgi-research-tabs" aria-label="评论研究视图"><a href="?{{DOMAIN_QS}}view=voices" data-view="voices">原声浏览</a><a href="?{{DOMAIN_QS}}view=groups" data-view="groups">问题分组</a><a href="?{{DOMAIN_QS}}view=assets" data-view="assets">语料资产</a><a href="?{{DOMAIN_QS}}view=daily" data-view="daily">每日研究</a></nav>
+<nav class="lgi-research-tabs" aria-label="评论研究视图"><a href="/corpus/comments?{{DOMAIN_QS}}view=overview">概览</a><a href="/corpus/comments?{{DOMAIN_QS}}view=voices">原声</a><a href="/corpus/comments?{{DOMAIN_QS}}view=problems">用户问题</a><a href="/corpus/comments?{{DOMAIN_QS}}view=daily">每日观察</a></nav>
 <p class="lgi-research-boundary">仅包含已经接纳、当前允许研究的观察样本。评论用户身份隐藏；数量不代表平台总体或需求规模。</p>
 <form id="search-form" class="lgi-research-tools"><label class="lgi-research-grow">检索原声<input id="search-text" type="search" maxlength="200" placeholder="查找一句表达、一个困扰或关键词"></label><label>作品范围<select id="work-filter"><option value="">全部作品</option></select></label><label>清洗状态<select id="clean-filter"><option value="">全部状态</option><option value="pending">待清洗</option><option value="direct">可分析</option><option value="context">需上下文</option><option value="low_information">低信息</option><option value="anomaly">异常</option></select></label><button type="submit">查询</button><button type="button" id="save-query-open">保存查询</button><button type="button" id="selection-run" disabled>分析所选</button></form>
 <div id="daily-tools" class="lgi-research-tools" hidden><span>北京时间 23:00 固定批次 · 原声入库后异步清洗</span><button type="button" id="daily-settings">研究设置</button></div>

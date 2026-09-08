@@ -1,3 +1,4 @@
+// Historical pre-0047 plan contract. V3 dispatch/retirement is proved by comment_intelligence and daily tests.
 #[path = "../../evidence/tests/support/material_fixture.rs"]
 mod fixture;
 #[path = "support/comment_research_fixture.rs"]
@@ -117,7 +118,7 @@ fn plan(config: Uuid, kind: &str, sources: Vec<Uuid>, limit: i32, tokens: i64) -
 #[tokio::test]
 #[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
 async fn settings_to_real_sdk_to_qualified_comment_and_usage_is_persistent() {
-    let db = fixture::proof_database("model_pi_end_to_end").await;
+    let db = fixture::proof_database_before_comment_intelligence("model_pi_end_to_end").await;
     let (_server, url) = fixture_server().await;
     let (config, _, version) = configured(&db, &url, "synthetic-good", None).await;
     assert_eq!(
@@ -172,7 +173,7 @@ async fn settings_to_real_sdk_to_qualified_comment_and_usage_is_persistent() {
 #[tokio::test]
 #[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
 async fn automatic_scope_switch_pause_and_budget_have_real_execution_boundaries() {
-    let db = fixture::proof_database("model_pi_auto").await;
+    let db = fixture::proof_database_before_comment_intelligence("model_pi_auto").await;
     let (_server, url) = fixture_server().await;
     let (old, connection, _) = configured(&db, &url, "synthetic-good", None).await;
     let historical = source(&db, "model-old").await;
@@ -222,7 +223,7 @@ async fn automatic_scope_switch_pause_and_budget_have_real_execution_boundaries(
 #[tokio::test]
 #[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
 async fn invalid_output_cost_no_signal_and_finite_retry_are_distinct() {
-    let db = fixture::proof_database("model_pi_failures").await;
+    let db = fixture::proof_database_before_comment_intelligence("model_pi_failures").await;
     let (_server, url) = fixture_server().await;
     let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
     for (key, marker) in [
@@ -277,7 +278,7 @@ async fn invalid_output_cost_no_signal_and_finite_retry_are_distinct() {
 #[tokio::test]
 #[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
 async fn simultaneous_workers_cannot_overspend_or_duplicate_unknown_usage_work() {
-    let db = fixture::proof_database("model_pi_parallel_budget").await;
+    let db = fixture::proof_database_before_comment_intelligence("model_pi_parallel_budget").await;
     let (_server, url) = fixture_server().await;
     let (config, _, _) = configured(&db, &url, "synthetic-no-usage", None).await;
     let refs = vec![
@@ -312,7 +313,7 @@ async fn simultaneous_workers_cannot_overspend_or_duplicate_unknown_usage_work()
 #[tokio::test]
 #[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
 async fn changed_connection_and_config_replay_do_not_restore_old_defaults_or_permissions() {
-    let db = fixture::proof_database("model_pi_replay").await;
+    let db = fixture::proof_database_before_comment_intelligence("model_pi_replay").await;
     let (_server, url) = fixture_server().await;
     let (config, connection, version) = configured(&db, &url, "synthetic-good", None).await;
     let current = read_model_settings(&db, true).await.unwrap();
@@ -382,7 +383,7 @@ async fn changed_connection_and_config_replay_do_not_restore_old_defaults_or_per
 #[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
 async fn configured_deadline_stops_real_sdk_wait_and_restricted_sources_never_dispatch() {
     use linggan_evidence::comment_research_read::restrict_comment_research_source;
-    let db = fixture::proof_database("model_pi_deadline").await;
+    let db = fixture::proof_database_before_comment_intelligence("model_pi_deadline").await;
     let (_server, url) = fixture_server().await;
     let (previous, _, _) = configured(&db, &url, "synthetic-good", None).await;
     let current = read_model_settings(&db, true).await.unwrap();
@@ -449,7 +450,7 @@ async fn configured_deadline_stops_real_sdk_wait_and_restricted_sources_never_di
 #[tokio::test]
 #[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
 async fn paused_owner_is_locatable_and_only_a_new_revision_command_resumes_its_remaining_work() {
-    let db = fixture::proof_database("model_pi_resume_owner").await;
+    let db = fixture::proof_database_before_comment_intelligence("model_pi_resume_owner").await;
     let (_server, url) = fixture_server().await;
     let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
     let refs = vec![
@@ -537,7 +538,7 @@ async fn paused_owner_is_locatable_and_only_a_new_revision_command_resumes_its_r
 #[tokio::test]
 #[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
 async fn automatic_selection_skips_global_trial_work_before_its_one_source_limit() {
-    let db = fixture::proof_database("model_pi_global_selection").await;
+    let db = fixture::proof_database_before_comment_intelligence("model_pi_global_selection").await;
     let (_server, url) = fixture_server().await;
     let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
     for n in 0..24 {
@@ -623,7 +624,7 @@ async fn interrupted_fixture(
 #[tokio::test]
 #[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
 async fn maintenance_commits_without_dispatch_and_honors_each_frozen_attempt_cap() {
-    let db = fixture::proof_database("model_pi_recovery_idle").await;
+    let db = fixture::proof_database_before_comment_intelligence("model_pi_recovery_idle").await;
     let (_server, url) = fixture_server().await;
     let (initial, _, _) = configured(&db, &url, "synthetic-good", None).await;
     let current = read_model_settings(&db, true).await.unwrap();
@@ -734,7 +735,8 @@ fn api_address_normalization_preserves_gateway_prefix_and_rejects_embedded_secre
 #[tokio::test]
 #[ignore = "requires isolated PostgreSQL proof harness and local synthetic SDK server"]
 async fn full_api_address_and_retained_key_reach_model_without_catalog() {
-    let db = fixture::proof_database("model_pi_repair_connection").await;
+    let db =
+        fixture::proof_database_before_comment_intelligence("model_pi_repair_connection").await;
     let (_server, url) = fixture_server().await;
     let mut connection = SaveModelConnection {
         version_ref: Uuid::new_v4(),
@@ -816,7 +818,7 @@ async fn full_api_address_and_retained_key_reach_model_without_catalog() {
 #[tokio::test]
 #[ignore = "requires isolated PostgreSQL proof harness"]
 async fn missing_model_schema_has_a_specific_recoverable_error() {
-    let db = fixture::proof_database("model_pi_repair_schema").await;
+    let db = fixture::proof_database_before_comment_intelligence("model_pi_repair_schema").await;
     sqlx::query(
         "ALTER TABLE linggan_model_workspace RENAME TO repair_temporarily_missing_workspace",
     )
