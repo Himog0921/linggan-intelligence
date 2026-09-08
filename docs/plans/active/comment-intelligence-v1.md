@@ -42,7 +42,7 @@
 
 ## 代码定位与复现
 
-- `database/migrations/0047_comment_intelligence.sql`：追加身份、查询view、语义工作、人工命令/版本、稳定问题、词项、准备清单和自动观察发布门槛。未修改已应用迁移。
+- `database/migrations/0048_comment_intelligence.sql`：追加身份、查询view、语义工作、人工命令/版本、稳定问题、词项、准备清单和自动观察发布门槛。未修改已应用迁移。
 - `crates/intelligence/src/comment_intelligence*.rs`：统一读模型、确定性观察、人工动作、问题归并与词项。`comment_packet*.rs` / `comment_daily*.rs`：v3结果合同和有界执行。
 - `apps/api/src/local_web/comment_intelligence.{rs,js,css}`：API、四视角与交互；复用原有Evidence、模型设置和Pi调用账本。
 - `scripts/test-comment-intelligence-postgres.sh`：新查询/人工反馈/边界/日批，随机隔离数据库与容器，退出清理；包含10万条合成原声性能断言。

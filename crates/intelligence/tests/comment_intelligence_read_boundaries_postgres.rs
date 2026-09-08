@@ -397,7 +397,7 @@ async fn upgrading_pauses_legacy_grants_and_old_endpoints_explain_retirement() {
         .await
         .unwrap();
     sqlx::raw_sql(include_str!(
-        "../../../database/migrations/0047_comment_intelligence.sql"
+        "../../../database/migrations/0048_comment_intelligence.sql"
     ))
     .execute(db.pool())
     .await

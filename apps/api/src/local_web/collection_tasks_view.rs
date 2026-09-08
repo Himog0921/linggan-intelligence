@@ -311,6 +311,11 @@ fn task_state(task: &CollectionTaskExecution) -> TaskStateView {
             "c-task-state-warn",
             "平台当前未提供该作品；未生成 Attempt、Package 或详情",
         ),
+        Some("blocked") => (
+            "详情读取受阻",
+            "c-task-state-warn",
+            "连续读取失败后已停止自动重试；未生成 Attempt、Package、Receipt 或详情",
+        ),
         Some("completed") => (
             "步骤完成",
             "c-task-state-ok",
