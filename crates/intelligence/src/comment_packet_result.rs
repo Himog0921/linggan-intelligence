@@ -9,6 +9,9 @@ use crate::{
 };
 use serde_json::{Value, json};
 
+#[path = "comment_packet_diagnostics.rs"]
+mod diagnostics;
+
 fn bounded(value: &str, max: usize) -> bool {
     !value.trim().is_empty() && value.chars().count() <= max
 }

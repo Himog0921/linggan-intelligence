@@ -408,3 +408,369 @@ async fn daily_permission_cannot_be_duplicated_by_legacy_auto_and_pauses_without
     assert_eq!(overview(&db).await.unwrap()["schedule"]["enabled"], false);
     server.kill().await.unwrap();
 }
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn runtime_trace_reports_exact_packet_outcomes_candidates_and_source_access() {
+    use linggan_intelligence::{
+        comment_intelligence::{ResearchScope, read},
+        comment_runtime::*,
+    };
+    let db = fixture::proof_database("runtime_trace_outcomes").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    research_fixture::detail(&db, "runtime-work", "合成运行详情").await;
+    let a = source(&db, "runtime-work", "good", "我需要更省精力的办法").await;
+    let b = source(&db, "runtime-work", "bad", "[BAD_QUOTE] 没有真正引用我的话").await;
+    let c = source(&db, "runtime-work", "none", "[NO_SIGNAL] 合成无信号评论").await;
+    let batch = selected(&db, config, vec![a, b, c], 100000).await;
+    assert!(
+        run_daily_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
+            .await
+            .unwrap()
+    );
+    let detail = batch_detail(&db, batch, None).await.unwrap();
+    assert_eq!(detail["callTotal"], 1);
+    let call = &detail["calls"][0];
+    assert_eq!(call["requestedComments"], 3);
+    assert_eq!(call["acceptedComments"], 2);
+    assert_eq!(call["succeededComments"], 1);
+    assert_eq!(call["noSignalComments"], 1);
+    assert_eq!(call["failedComments"], 1);
+    assert_eq!(call["state"], "partial");
+    assert_eq!(call["modelId"], "synthetic-good");
+    assert_eq!(call["workTitle"], "合成运行详情");
+    let invocation = Uuid::parse_str(call["invocationRef"].as_str().unwrap()).unwrap();
+    let own = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    let trace = request_detail(&db, batch, invocation, own).await.unwrap();
+    assert_eq!(trace["availability"], "AVAILABLE");
+    assert_eq!(trace["input"]["comments"].as_array().unwrap().len(), 3);
+    assert!(trace["input"]["outputSchema"].is_object());
+    assert_eq!(trace["validation"].as_array().unwrap().len(), 1);
+    assert!(
+        trace["validation"][0]["path"]
+            .as_str()
+            .unwrap()
+            .contains("quote")
+    );
+    assert_eq!(trace["events"].as_array().unwrap().len(), 4);
+    assert!(
+        request_detail(&db, Uuid::new_v4(), invocation, own)
+            .await
+            .is_err()
+    );
+    assert!(
+        request_detail(&db, batch, invocation, Uuid::new_v4())
+            .await
+            .is_err()
+    );
+    let scope = ResearchScope {
+        domain: Some(own),
+        from: Some("2020-01-01T00:00:00Z".into()),
+        to: Some("2099-01-01T00:00:00Z".into()),
+        ..Default::default()
+    };
+    linggan_intelligence::comment_intelligence_problems::reconcile_problem_index(&db, 100)
+        .await
+        .unwrap();
+    let view = read(&db, &scope).await.unwrap();
+    assert_eq!(view["candidateTotal"], 1);
+    let daily = read(
+        &db,
+        &ResearchScope {
+            view: Some("daily".into()),
+            batch_ref: Some(batch),
+            from: Some("2020-01-01T00:00:00Z".into()),
+            to: Some("2020-02-01T00:00:00Z".into()),
+            ..scope.clone()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(daily["summary"]["comments"], 3);
+    assert_eq!(daily["daily"]["items"][0]["total"], 3);
+    assert_eq!(
+        view["problemCandidates"][0]["evidence"][0]["quote"],
+        "我需要更省精力的办法"
+    );
+    assert_eq!(view["representatives"].as_array().unwrap().len(), 2);
+    assert_eq!(view["problems"].as_array().unwrap().len(), 0);
+    assert_eq!(view["problemCandidates"][0]["sourceRefs"], json!([a]));
+    assert_eq!(
+        read(
+            &db,
+            &ResearchScope {
+                processing_state: Some("no_signal".into()),
+                ..scope.clone()
+            }
+        )
+        .await
+        .unwrap()["page"]["total"],
+        1
+    );
+    let later: String = sqlx::query_scalar("SELECT (scope_001_now()+interval '1 second')::text")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    clock(&db, &later).await;
+    let pending_batch = selected(&db, config, vec![a], 100000).await;
+    let original = read(
+        &db,
+        &ResearchScope {
+            batch_ref: Some(batch),
+            processing_state: Some("succeeded".into()),
+            ..scope.clone()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        original["page"]["total"], 1,
+        "later pending run must not erase the original batch result"
+    );
+    assert_eq!(
+        read(
+            &db,
+            &ResearchScope {
+                batch_ref: Some(pending_batch),
+                ..scope.clone()
+            }
+        )
+        .await
+        .unwrap()["summary"]["analyzed"],
+        0,
+        "unexecuted batch must not claim another batch result"
+    );
+    restrict_comment_research_source(&db, b, "synthetic restriction")
+        .await
+        .unwrap();
+    assert_eq!(
+        request_detail(&db, batch, invocation, own).await.unwrap()["availability"],
+        "RESTRICTED"
+    );
+    assert_eq!(read(&db, &scope).await.unwrap()["candidateTotal"], 0);
+    expire_content(&db).await.unwrap();
+    let retained:bool=sqlx::query_scalar("SELECT input_content IS NULL AND output_content IS NULL FROM linggan_comment_request_trace WHERE invocation_ref=$1").bind(invocation).fetch_one(db.pool()).await.unwrap();
+    assert!(retained);
+    server.kill().await.unwrap();
+}
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn runtime_context_is_frozen_by_preparation_and_recording_can_be_disabled() {
+    use linggan_intelligence::{
+        comment_intelligence::{Prepare, ResearchScope, Run, prepare, run},
+        comment_runtime::*,
+    };
+    let db = fixture::proof_database("runtime_context_freeze").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    research_fixture::detail(&db, "runtime-policy", "合成冻结上下文").await;
+    let a = source(&db, "runtime-policy", "a", "希望减少监督成本").await;
+    let own = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    let policy = ContextPolicy {
+        work_body: false,
+        parent: false,
+        ocr: false,
+        asr: false,
+        existing_problems: false,
+        record_content: false,
+        max_comments: 1,
+        ..Default::default()
+    };
+    save_settings(
+        &db,
+        &SaveContext {
+            expected_revision: 0,
+            policy: policy.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    let prepared = prepare(
+        &db,
+        &Prepare {
+            scope: ResearchScope {
+                domain: Some(own),
+                from: Some("2020-01-01T00:00:00Z".into()),
+                to: Some("2099-01-01T00:00:00Z".into()),
+                ..Default::default()
+            },
+            source_refs: Some(vec![a]),
+            reanalyze: false,
+        },
+    )
+    .await
+    .unwrap();
+    let batch = Uuid::parse_str(prepared["prepareRef"].as_str().unwrap()).unwrap();
+    save_settings(
+        &db,
+        &SaveContext {
+            expected_revision: 1,
+            policy: ContextPolicy::default(),
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        save_settings(
+            &db,
+            &SaveContext {
+                expected_revision: 1,
+                policy: policy.clone()
+            }
+        )
+        .await
+        .is_err()
+    );
+    run(
+        &db,
+        &Run {
+            prepare_ref: batch,
+            config_ref: config,
+            token_limit: 100000,
+            reanalyze: false,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        run_daily_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
+            .await
+            .unwrap()
+    );
+    let d = batch_detail(&db, batch, None).await.unwrap();
+    assert_eq!(d["calls"][0]["contextPolicy"], json!(policy));
+    let inv = Uuid::parse_str(d["calls"][0]["invocationRef"].as_str().unwrap()).unwrap();
+    let trace = request_detail(&db, batch, inv, own).await.unwrap();
+    assert_eq!(trace["availability"], "NOT_RECORDED");
+    assert!(trace["input"].is_null());
+    assert!(trace["output"].is_null());
+    assert_eq!(trace["events"].as_array().unwrap().len(), 4);
+    let automatic: bool =
+        sqlx::query_scalar("SELECT enabled FROM linggan_comment_daily_schedule WHERE singleton")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert!(!automatic);
+    clock(&db, "2026-09-08 14:00:00Z").await;
+    save_schedule(
+        &db,
+        &DailySchedule {
+            expected_revision: 0,
+            enabled: true,
+            config_ref: config,
+            source_limit: 100,
+            token_limit: 100000,
+        },
+    )
+    .await
+    .unwrap();
+    save_settings(
+        &db,
+        &SaveContext {
+            expected_revision: 2,
+            policy: policy.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    clock(&db, "2026-09-08 15:00:00Z").await;
+    assert!(seal_due(&db).await.unwrap());
+    let daily_policy: serde_json::Value = sqlx::query_scalar(
+        "SELECT context_policy FROM linggan_comment_daily_batch WHERE kind='daily'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(daily_policy, json!(policy));
+    server.kill().await.unwrap();
+}
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn runtime_expiry_and_historical_absence_are_distinct_without_reconstructing_content() {
+    use linggan_intelligence::comment_runtime::*;
+    let db = fixture::proof_database("runtime_expiry").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    research_fixture::detail(&db, "runtime-expiry", "合成保留期限").await;
+    let a = source(&db, "runtime-expiry", "a", "希望有人解释操作步骤").await;
+    let batch = selected(&db, config, vec![a], 100000).await;
+    run_daily_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
+        .await
+        .unwrap();
+    let own = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    let inv: Uuid = sqlx::query_scalar(
+        "SELECT invocation_ref FROM linggan_comment_daily_packet WHERE batch_ref=$1",
+    )
+    .bind(batch)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_request_trace SET expires_at=scope_001_now()-interval '1 second'",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let expired = request_detail(&db, batch, inv, own).await.unwrap();
+    assert_eq!(expired["availability"], "EXPIRED");
+    assert!(expired["input"].is_null());
+    expire_content(&db).await.unwrap();
+    sqlx::query("DELETE FROM linggan_comment_request_trace WHERE invocation_ref=$1")
+        .bind(inv)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        request_detail(&db, batch, inv, own).await.unwrap()["availability"],
+        "NOT_RECORDED"
+    );
+    server.kill().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated synthetic browser preview, never production"]
+async fn prepare_runtime_browser_preview() {
+    let db = fixture::proof_database("comment_runtime_preview").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    for (id, sql) in [
+        (
+            "0001_scope_001_capture_evidence",
+            include_str!("../../../database/migrations/0001_scope_001_capture_evidence.sql"),
+        ),
+        (
+            "0002_local_001_discovery",
+            include_str!("../../../database/migrations/0002_local_001_discovery.sql"),
+        ),
+    ] {
+        sqlx::query("INSERT INTO linggan_local_schema_migration(migration_id,migration_sha256) VALUES($1,$2) ON CONFLICT DO NOTHING").bind(id).bind(linggan_intelligence::comment_research::comment_source_hash(sql)).execute(db.pool()).await.unwrap();
+    }
+    research_fixture::detail(&db, "preview-runtime", "合成材料 · 陪写作业的时间与精力").await;
+    let mut refs = vec![];
+    for i in 0..123 {
+        let text = match i {
+            0 => "[BAD_QUOTE] 每天提醒却没有效果，希望知道怎样安排。",
+            1 => "[NO_SIGNAL] 我先留下记录，后面继续看看。",
+            _ => "我下班还要做饭，每天坐在旁边提醒真的做不到，希望有省精力的办法。",
+        };
+        let r = source(
+            &db,
+            "preview-runtime",
+            &format!("runtime-{i}"),
+            &format!("SYNTHETIC / NOT EVIDENCE {i}：{text}"),
+        )
+        .await;
+        if i < 3 {
+            refs.push(r);
+        }
+    }
+    selected(&db, config, refs, 100000).await;
+    run_daily_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
+        .await
+        .unwrap();
+    linggan_intelligence::comment_intelligence_problems::reconcile_problem_index(&db, 500)
+        .await
+        .unwrap();
+    server.kill().await.unwrap();
+}

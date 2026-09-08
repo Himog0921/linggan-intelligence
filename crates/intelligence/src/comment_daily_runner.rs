@@ -2,7 +2,7 @@
 use crate::{
     comment_cleaning::{CLEANER_VERSION, clean_pending},
     comment_daily::{self, DAILY_RULE},
-    comment_packet::{ResearchPacket, SYSTEM, build_packet, input_fingerprint},
+    comment_packet::{ResearchPacket, SYSTEM, build_packet_with_policy, input_fingerprint},
     model_invocation::{checkpoint_invocation_usage, connection_request},
     model_secrets::ModelSecretStore,
     model_settings::ModelError,
@@ -23,6 +23,7 @@ struct Reserved {
     output_limit: i32,
     timeout: i32,
     research: ResearchPacket,
+    policy: crate::comment_runtime::ContextPolicy,
     semantics: Vec<Uuid>,
     fingerprints: Vec<String>,
 }
@@ -40,10 +41,12 @@ async fn recover(db: &Database) -> Result<(), ModelError> {
     Ok(())
 }
 async fn recover_context(db: &Database) -> Result<(), ModelError> {
-    let rows=sqlx::query("SELECT i.batch_ref,i.source_ref,i.context_candidate_hash,(i.context_candidate_at<=scope_001_now()-interval '60 seconds') AS settled,a.result FROM linggan_comment_daily_item i JOIN linggan_comment_daily_batch b USING(batch_ref) LEFT JOIN linggan_comment_analysis_work a ON a.work_ref=i.analysis_ref WHERE b.enabled AND (b.kind='selected' OR EXISTS(SELECT 1 FROM linggan_comment_daily_schedule WHERE singleton AND enabled)) AND (i.state='context_missing' OR (i.state IN ('succeeded','no_signal') AND jsonb_array_length(COALESCE(a.result#>'{semantic,contextMissing}','[]'::jsonb))>0)) ORDER BY i.context_candidate_at NULLS FIRST,b.window_end,i.source_ref LIMIT 100").fetch_all(db.pool()).await?;
+    let rows=sqlx::query("SELECT b.context_policy,i.batch_ref,i.source_ref,i.context_candidate_hash,(i.context_candidate_at<=scope_001_now()-interval '60 seconds') AS settled,a.result FROM linggan_comment_daily_item i JOIN linggan_comment_daily_batch b USING(batch_ref) LEFT JOIN linggan_comment_analysis_work a ON a.work_ref=i.analysis_ref WHERE b.enabled AND (b.kind='selected' OR EXISTS(SELECT 1 FROM linggan_comment_daily_schedule WHERE singleton AND enabled)) AND (i.state='context_missing' OR (i.state IN ('succeeded','no_signal') AND jsonb_array_length(COALESCE(a.result#>'{semantic,contextMissing}','[]'::jsonb))>0)) ORDER BY i.context_candidate_at NULLS FIRST,b.window_end,i.source_ref LIMIT 100").fetch_all(db.pool()).await?;
     for row in rows {
         let source: Uuid = row.get("source_ref");
-        let Ok(packet) = build_packet(db, &[source], "context-check").await else {
+        let policy = crate::comment_runtime::ContextPolicy::parse(row.get("context_policy"))?;
+        let Ok(packet) = build_packet_with_policy(db, &[source], "context-check", &policy).await
+        else {
             continue;
         };
         let context = &packet.inputs[0].context;
@@ -200,7 +203,7 @@ async fn reserve(db: &Database) -> Result<Option<Reserved>, ModelError> {
     sqlx::query("UPDATE linggan_comment_daily_item i SET state='restricted',failure_code='source_unavailable' WHERE i.state='pending' AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_readable s WHERE s.material_ref=i.source_ref)").execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_comment_daily_item i SET state=c.state FROM linggan_comment_clean c WHERE c.source_ref=i.source_ref AND c.cleaner_version=$1 AND c.state IN ('low_information','anomaly') AND i.state='pending'").bind(CLEANER_VERSION).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_comment_daily_item i SET state='source_limit',failure_code='source_limit' FROM linggan_comment_daily_batch b,linggan_comment_clean c WHERE i.batch_ref=b.batch_ref AND c.source_ref=i.source_ref AND c.cleaner_version=$1 AND c.state IN ('direct','context') AND i.state='pending' AND i.attempts=0 AND (SELECT count(*) FROM linggan_comment_daily_item used WHERE used.batch_ref=b.batch_ref AND used.attempts>0)>=COALESCE((SELECT (a.request->>'sourceLimit')::integer FROM linggan_comment_daily_adjustment a WHERE a.batch_ref=COALESCE((b.request->>'originBatchRef')::uuid,b.batch_ref) AND a.kind='continue' ORDER BY a.created_at DESC,a.command_ref DESC LIMIT 1),b.source_limit)").bind(CLEANER_VERSION).execute(&mut *tx).await?;
-    let row=sqlx::query("SELECT b.batch_ref,b.config_ref,b.token_limit,b.request,(COALESCE((SELECT (a.request->>'sourceLimit')::integer FROM linggan_comment_daily_adjustment a WHERE a.batch_ref=COALESCE((b.request->>'originBatchRef')::uuid,b.batch_ref) AND a.kind='continue' ORDER BY a.created_at DESC,a.command_ref DESC LIMIT 1),b.source_limit)-(SELECT count(*) FROM linggan_comment_daily_item used WHERE used.batch_ref=b.batch_ref AND used.attempts>0)) AS remaining_sources,cfg.input_token_limit,cfg.output_token_limit,cfg.timeout_seconds,cfg.max_attempts,m.model_ref,m.model_id,v.version_ref,s.content_public_ref FROM linggan_comment_daily_batch b JOIN linggan_model_config cfg USING(config_ref) JOIN linggan_model_entry m USING(model_ref) JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection conn USING(connection_ref) JOIN linggan_comment_daily_item i USING(batch_ref) JOIN linggan_comment_research_readable s ON s.material_ref=i.source_ref JOIN linggan_comment_clean c ON c.source_ref=i.source_ref AND c.cleaner_version=$1 WHERE b.enabled AND b.request->>'ruleVersion'='comment-research.v3' AND COALESCE((SELECT state='succeeded' AND result->>'commentQualified'='true' AND result->>'commentContract'='comment-research.v3' FROM linggan_model_invocation WHERE model_ref=m.model_ref AND operation='probe' ORDER BY created_at DESC LIMIT 1),false) AND (b.kind<>'supplement' OR EXISTS(SELECT 1 FROM linggan_comment_daily_batch origin WHERE origin.batch_ref::text=b.request->>'originBatchRef' AND origin.enabled)) AND conn.enabled AND (b.kind='selected' OR EXISTS(SELECT 1 FROM linggan_comment_daily_schedule WHERE singleton AND enabled)) AND i.state='pending' AND i.attempts<cfg.max_attempts AND c.state IN ('direct','context') AND COALESCE((SELECT sum(v.charged_tokens) FROM linggan_comment_daily_packet p JOIN linggan_model_invocation v USING(invocation_ref) JOIN linggan_comment_daily_batch family ON family.batch_ref=p.batch_ref WHERE COALESCE(family.request->>'originBatchRef',family.batch_ref::text)=COALESCE(b.request->>'originBatchRef',b.batch_ref::text)),0)+cfg.input_token_limit+cfg.output_token_limit<=COALESCE((SELECT (a.request->>'tokenLimit')::bigint FROM linggan_comment_daily_adjustment a WHERE a.batch_ref=COALESCE((b.request->>'originBatchRef')::uuid,b.batch_ref) AND a.kind='continue' ORDER BY a.created_at DESC,a.command_ref DESC LIMIT 1),b.token_limit) ORDER BY b.window_end,b.batch_ref,s.content_public_ref,i.source_ref LIMIT 1")
+    let row=sqlx::query("SELECT b.context_policy,b.batch_ref,b.config_ref,b.token_limit,b.request,(COALESCE((SELECT (a.request->>'sourceLimit')::integer FROM linggan_comment_daily_adjustment a WHERE a.batch_ref=COALESCE((b.request->>'originBatchRef')::uuid,b.batch_ref) AND a.kind='continue' ORDER BY a.created_at DESC,a.command_ref DESC LIMIT 1),b.source_limit)-(SELECT count(*) FROM linggan_comment_daily_item used WHERE used.batch_ref=b.batch_ref AND used.attempts>0)) AS remaining_sources,cfg.input_token_limit,cfg.output_token_limit,cfg.timeout_seconds,cfg.max_attempts,m.model_ref,m.model_id,v.version_ref,s.content_public_ref FROM linggan_comment_daily_batch b JOIN linggan_model_config cfg USING(config_ref) JOIN linggan_model_entry m USING(model_ref) JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection conn USING(connection_ref) JOIN linggan_comment_daily_item i USING(batch_ref) JOIN linggan_comment_research_readable s ON s.material_ref=i.source_ref JOIN linggan_comment_clean c ON c.source_ref=i.source_ref AND c.cleaner_version=$1 WHERE b.enabled AND b.request->>'ruleVersion'='comment-research.v3' AND COALESCE((SELECT state='succeeded' AND result->>'commentQualified'='true' AND result->>'commentContract'='comment-research.v3' FROM linggan_model_invocation WHERE model_ref=m.model_ref AND operation='probe' ORDER BY created_at DESC LIMIT 1),false) AND (b.kind<>'supplement' OR EXISTS(SELECT 1 FROM linggan_comment_daily_batch origin WHERE origin.batch_ref::text=b.request->>'originBatchRef' AND origin.enabled)) AND conn.enabled AND (b.kind='selected' OR EXISTS(SELECT 1 FROM linggan_comment_daily_schedule WHERE singleton AND enabled)) AND i.state='pending' AND i.attempts<cfg.max_attempts AND c.state IN ('direct','context') AND COALESCE((SELECT sum(v.charged_tokens) FROM linggan_comment_daily_packet p JOIN linggan_model_invocation v USING(invocation_ref) JOIN linggan_comment_daily_batch family ON family.batch_ref=p.batch_ref WHERE COALESCE(family.request->>'originBatchRef',family.batch_ref::text)=COALESCE(b.request->>'originBatchRef',b.batch_ref::text)),0)+cfg.input_token_limit+cfg.output_token_limit<=COALESCE((SELECT (a.request->>'tokenLimit')::bigint FROM linggan_comment_daily_adjustment a WHERE a.batch_ref=COALESCE((b.request->>'originBatchRef')::uuid,b.batch_ref) AND a.kind='continue' ORDER BY a.created_at DESC,a.command_ref DESC LIMIT 1),b.token_limit) ORDER BY b.window_end,b.batch_ref,s.content_public_ref,i.source_ref LIMIT 1")
         .bind(CLEANER_VERSION).fetch_optional(&mut *tx).await?;
     let Some(row) = row else {
         tx.commit().await?;
@@ -210,12 +213,15 @@ async fn reserve(db: &Database) -> Result<Option<Reserved>, ModelError> {
     let config: Uuid = row.get("config_ref");
     let input_limit: i32 = row.get("input_token_limit");
     let output_limit: i32 = row.get("output_token_limit");
+    let policy = crate::comment_runtime::ContextPolicy::parse(row.get("context_policy"))?;
     let max_comments = i64::from((output_limit / 256).clamp(1, 30))
+        .min(policy.max_comments as i64)
         .min(row.get::<i64, _>("remaining_sources").max(1));
     let mut refs:Vec<Uuid>=sqlx::query_scalar("SELECT i.source_ref FROM linggan_comment_daily_item i JOIN linggan_comment_research_readable s ON s.material_ref=i.source_ref JOIN linggan_comment_clean c ON c.source_ref=i.source_ref AND c.cleaner_version=$3 WHERE i.batch_ref=$1 AND s.content_public_ref=$2 AND i.state='pending' AND i.attempts<$5 AND c.state IN ('direct','context') ORDER BY i.source_ref LIMIT $4")
         .bind(batch).bind(row.get::<Uuid,_>("content_public_ref")).bind(CLEANER_VERSION).bind(max_comments).bind(row.get::<i32,_>("max_attempts")).fetch_all(&mut *tx).await?;
     let mut research = loop {
-        let packet = build_packet(db, &refs, &comment_daily::version(config)).await?;
+        let packet =
+            build_packet_with_policy(db, &refs, &comment_daily::version(config), &policy).await?;
         if packet.prompt.len() + SYSTEM.len() + 512 <= input_limit as usize {
             break packet;
         }
@@ -243,7 +249,8 @@ async fn reserve(db: &Database) -> Result<Option<Reserved>, ModelError> {
         return Ok(None);
     }
     refs = execute_refs;
-    research = build_packet(db, &refs, &comment_daily::version(config)).await?;
+    research =
+        build_packet_with_policy(db, &refs, &comment_daily::version(config), &policy).await?;
     let invocation = Uuid::new_v4();
     let packet = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6)")
@@ -270,6 +277,7 @@ async fn reserve(db: &Database) -> Result<Option<Reserved>, ModelError> {
         output_limit,
         timeout: row.get("timeout_seconds"),
         research,
+        policy,
         semantics,
         fingerprints,
     }))
@@ -292,6 +300,7 @@ pub async fn run_daily_once(
     if !comment_daily::schema_ready(db).await? {
         return Ok(false);
     }
+    crate::comment_runtime::expire_content(db).await?;
     recover(db).await?;
     comment_daily::seal_due(db).await?;
     comment_daily::seal_supplements(db).await?;
@@ -317,8 +326,10 @@ pub async fn run_daily_once(
     request.system = SYSTEM.into();
     request.max_output_tokens = r.output_limit;
     request.timeout_ms = r.timeout as u64 * 1000;
+    crate::comment_runtime::begin_trace(db, r.invocation, r.packet, &r.research, &r.policy).await?;
     let outcome = adapter.call(&request).await;
     let response = outcome.as_ref().ok();
+    crate::comment_runtime::record_response(db, r.invocation, response, &r.policy).await?;
     checkpoint_invocation_usage(db, r.invocation, response).await?;
     let mut failure = outcome.as_ref().err().map(ModelError::code);
     if let Some(p) = response {
@@ -331,6 +342,8 @@ pub async fn run_daily_once(
                 Some("unexpected_content") => "unexpected_content",
                 Some("model_input_limit") => "model_input_limit",
                 Some("provider_refused") => "provider_refused",
+                Some("provider_request_rejected") => "provider_request_rejected",
+                Some("provider_unavailable") => "provider_unavailable",
                 _ => "provider_failed",
             });
         }
@@ -348,7 +361,7 @@ pub async fn run_daily_once(
         failure = Some("source_or_plan_unavailable");
     }
     let refs: Vec<_> = r.research.inputs.iter().map(|i| i.source_ref).collect();
-    match build_packet(db, &refs, &comment_daily::version(r.config)).await {
+    match build_packet_with_policy(db, &refs, &comment_daily::version(r.config), &r.policy).await {
         Ok(current) if current.context_hash == r.research.context_hash => {}
         _ => failure = Some("context_changed"),
     }
@@ -376,6 +389,15 @@ async fn finish(
     }
     let outcomes =
         parsed.unwrap_or_else(|code| r.research.inputs.iter().map(|_| Err(code)).collect());
+    let diagnostics = if failure.is_none() {
+        r.research
+            .validation_diagnostics(response.and_then(|p| p.text.as_deref()).unwrap_or(""))
+    } else {
+        vec![
+            json!({"commentRef":null,"code":failure,"path":"request","expected":"供应商完整返回","actual":"请求未完成或未获接纳"}),
+        ]
+    };
+    let mut outcome_counts = std::collections::BTreeMap::<String, usize>::new();
     let mut success = 0;
     for (index, (input, result)) in r.research.inputs.iter().zip(outcomes).enumerate() {
         let (state, code, analysis_ref) = match result {
@@ -401,6 +423,7 @@ async fn finish(
             }
             Err(code) => ("failed", Some(code), None),
         };
+        *outcome_counts.entry(state.into()).or_default() += 1;
         sqlx::query("UPDATE linggan_comment_semantic_work SET state=$2,failure_code=$3,analysis_ref=$4,updated_at=scope_001_now() WHERE semantic_ref=$1 AND invocation_ref=$5 AND state='running'").bind(r.semantics[index]).bind(state).bind(code).bind(analysis_ref).bind(r.invocation).execute(&mut *tx).await?;
         sqlx::query("UPDATE linggan_comment_daily_item SET state=$2,failure_code=$3,analysis_ref=$4 WHERE semantic_ref=$1 AND state='running'").bind(r.semantics[index]).bind(state).bind(code).bind(analysis_ref).execute(&mut *tx).await?;
     }
@@ -408,6 +431,8 @@ async fn finish(
     sqlx::query("UPDATE linggan_model_invocation SET state=$2,failure_code=$3,result=$4,finished_at=scope_001_now(),charged_tokens=CASE WHEN $5 THEN charged_tokens ELSE 0 END,input_tokens=CASE WHEN $5 THEN input_tokens ELSE 0 END,output_tokens=CASE WHEN $5 THEN output_tokens ELSE 0 END WHERE invocation_ref=$1 AND state='running'")
         .bind(r.invocation).bind(if success==r.research.inputs.len(){"succeeded"}else{"failed"}).bind(global_failure.or(if success<r.research.inputs.len(){Some("partial_output")}else{None}))
         .bind(json!({"callStarted":started,"batchRef":r.batch,"packetRef":r.packet,"acceptedComments":success,"requestedComments":r.research.inputs.len(),"failureCode":global_failure})).bind(started).execute(&mut *tx).await?;
+    sqlx::query("UPDATE linggan_comment_request_trace SET validation=$2,outcomes=$3,events=events||jsonb_build_array(jsonb_build_object('kind','validation_finished','at',scope_001_now()),jsonb_build_object('kind','results_saved','at',scope_001_now())) WHERE invocation_ref=$1")
+      .bind(r.invocation).bind(json!(diagnostics)).bind(json!(outcome_counts)).execute(&mut *tx).await?;
     tx.commit().await?;
     Ok(())
 }

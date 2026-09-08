@@ -15,6 +15,7 @@
 | 模型后端秘密及合成 Keychain 验证 | macOS Keychain 的 `Linggan.Intelligence.Models.<workspace UUID>` service + 随机 account | API 的 Keychain SecretStore；`model_keychain` 测试只操作随机合成条目 | 不进 Git/数据库/前端存储 | 只经配置命令更换 | 正式版本保留以供冻结任务；测试结束立即删除随机项，不枚举已有秘密 |
 | 评论研究隔离验证与预览 | Docker 中随机 `linggan-comment-proof-*` container/volume；系统临时目录 `/tmp/comment-research-preview.*` | `scripts/test-comment-research-postgres.sh`、`scripts/preview-comment-research.sh`，只接纳明确合成 fixture；API 验证由 `scripts/verify-comment-research-api.py` 执行 | 不进入 Git | 禁止伪造 | proof 结束删除 container/volume；预览脚本退出时关闭它自己的 API 并删除隔离资源；日志无正文/凭据，验证后清理 |
 | CI-20260907-V1 隔离证明 | 随机 `linggan-ci-proof-*` Docker container/volume；`/tmp/ci-*`、`/tmp/comment-intelligence-*` 日志及合成预览 | `scripts/test-comment-intelligence-postgres.sh`、`scripts/evaluate-comment-intelligence.py`、本地 API 与 SDK fixture | 不进 Git；报告摘要转写验收文档 | 禁止伪造或混入真实原文 | proof trap 清理所属容器和卷；预览结束关闭自己的 PID；临时 JSONL 不作为真实质量证明 |
+| CI-RUN-002 请求诊断 | PostgreSQL `linggan_comment_request_trace` | 已授权研究的真实请求边界写入；输入已脱敏，返回保结构脱敏 | 不进入 Git | 禁止伪造或回填历史 | 正文最多保留 24 小时；读取独立校验有效期与来源；worker 清理过期或受限正文，元数据与安全校验摘要继续保留；关闭记录仅影响新批次 |
 | Rust 构建缓存 | `target/` | Cargo build/test | 忽略 | 禁止 | 可安全重建，按需清理 |
 | Rust 依赖锁 | `Cargo.lock` | `cargo generate-lockfile` | 提交 | 禁止 | Cargo 配置变化后重新生成并验证 `--locked` |
 | 本地环境秘密 | `.env`、`.env.*` | 人工从安全凭据源配置 | 忽略；仅 `env.example` 可提交 | 允许本地配置 | 不进入变更记录正文，不复制到仓库 |

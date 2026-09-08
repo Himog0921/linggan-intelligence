@@ -218,6 +218,7 @@ migrate() {
   apply_migration_once "0046_keyword_sampling_policy" "$project_root/database/migrations/0046_keyword_sampling_policy.sql"
   apply_migration_once "0047_collection_detail_failure_boundary" "$project_root/database/migrations/0047_collection_detail_failure_boundary.sql"
   apply_migration_once "0048_comment_intelligence" "$project_root/database/migrations/0048_comment_intelligence.sql"
+  apply_migration_once "0049_comment_research_runtime" "$project_root/database/migrations/0049_comment_research_runtime.sql"
 }
 
 case "$command_name" in
