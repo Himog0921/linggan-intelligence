@@ -477,7 +477,9 @@ async fn patrol_completion_qualified(
                                            THEN 'profile_discovery' ELSE 'discovery_search' END \
              AND package.platform=task.platform \
              AND task.task_spec->'capabilitiesRequested' ? package.package_kind \
-             AND (package.coverage->'target') @> (task.task_spec->'target') \
+             -- 归属由 package.task_id=task.task_id 保证。此前这里还要求包的 target 包含
+             -- 任务 target 的每一个键，而采样口径是下发的指令、不是回执的事实，插件只
+             -- 回显身份——任务一带口径就必然为假，关键词巡检因此从未被记成成功。
              AND receipt.material_admission='ACCEPTED' \
              AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
              AND layer->>'capability'=package.package_kind \
