@@ -484,13 +484,23 @@ fn keyword_recent_change(observation: Option<&TargetObservationSummary>) -> Stri
     }
 }
 
+/// 关键词目标当前按什么排序采。
+///
+/// 从右边切：身份键是 `{词}::{排序}`，词本身可能含 `::`，而排序不含。
+///
+/// 五种排序都给中文——描述性标签必须只用中文（LIDS-LANG-001 · LANG-05），而且弹窗里
+/// 已经是「最多点赞」，列表再显示 `most_liked` 就是同一件事两种说法。认不出的值保留
+/// 原文：那是一个机器标识，藏起来会让人看不出这个目标到底在按什么采。
 fn keyword_rule(target: &ObservationTarget) -> String {
     target
         .identity_key
-        .split_once("::")
+        .rsplit_once("::")
         .map(|(_, ranking)| match ranking {
             "comprehensive" => "综合排序",
             "latest" => "最新排序",
+            "most_liked" => "最多点赞",
+            "most_collected" => "最多收藏",
+            "most_commented" => "最多评论",
             other => other,
         })
         .unwrap_or("当前规则")

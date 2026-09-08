@@ -389,14 +389,12 @@ pub fn render_monitor_rule_modal(
         sampling = sampling_policy_section(form, disabled),
         // 关键词的排序移进了采样口径那一节，不再藏在 hidden 里；创作者没有那一节，
         // 它的 ranking 仍按原样透传（恒为空）。少一个隐藏输入就少一处能和界面说法不一致的地方。
-        ranking_hidden = if form.surface_key.trim() == "keyword_search" {
-            String::new()
-        } else {
-            format!(
-                r#"<input type="hidden" name="ranking_key" value="{}">"#,
-                escape(&form.ranking_key)
-            )
-        },
+        // 排序对两种目标都由 hidden 传回：关键词的它只读展示在采样口径里，创作者的它
+        // 恒为空。表单不带这一项，保存就会把已有的排序清掉。
+        ranking_hidden = format!(
+            r#"<input type="hidden" name="ranking_key" value="{}">"#,
+            escape(&form.ranking_key)
+        ),
         cadence_hint = if form.surface_key.trim() == "keyword_search" {
             "每次运行按下面的采样口径搜一轮。关键词观察不做作者资格核验——那是创作者档案的事。"
         } else {
@@ -616,7 +614,10 @@ fn sampling_policy_section(form: &MonitorRuleFormState, disabled: bool) -> Strin
             value = escape(current_window),
         ));
     }
-    let rankings = [
+    // 排序**只读**：它是目标身份的一部分（`{词}::{排序}`，「同一个词的两种排序是两个
+    // 观察面」）。做成可编辑会让规则里的排序与身份脱节——列表还叫「考研自习（最多点赞）」，
+    // 实际却按别的排序采。要换排序就建一个新的观察目标，那本来就是另一个观察面。
+    let ranking_label = [
         ("most_liked", "最多点赞"),
         ("most_collected", "最多收藏"),
         ("most_commented", "最多评论"),
@@ -624,17 +625,13 @@ fn sampling_policy_section(form: &MonitorRuleFormState, disabled: bool) -> Strin
         ("comprehensive", "综合排序"),
     ]
     .iter()
-    .map(|(value, text)| {
-        format!(
-            r#"<option value="{value}"{selected}>{text}</option>"#,
-            selected = if form.ranking_key.trim() == *value {
-                " selected"
-            } else {
-                ""
-            },
-        )
-    })
-    .collect::<String>();
+    .find(|(value, _)| *value == form.ranking_key.trim())
+    .map_or_else(
+        // 认不出的排序显示原文：那是一个机器标识而不是我们的描述性标签，
+        // 把它藏起来会让人看不出这个目标到底在按什么采。
+        || escape(form.ranking_key.trim()),
+        |(_, text)| (*text).to_owned(),
+    );
     format!(
         r#"<section class="c-rule-section" aria-labelledby="c-rule-sampling-title">
                   <div class="c-rule-section-head">
@@ -642,14 +639,16 @@ fn sampling_policy_section(form: &MonitorRuleFormState, disabled: bool) -> Strin
                     <span>决定每一轮怎么取样，随样本一起留痕</span>
                   </div>
                   <div class="c-rule-grid">
-                    <label for="ranking_key"><span>排序依据</span><select id="ranking_key" name="ranking_key"{disabled_attr}>{rankings}</select></label>
+                    <label><span>排序依据</span><output>{ranking_label}</output></label>
                     <label for="scroll_rounds"><span>下拉刷新次数</span><input id="scroll_rounds" name="scroll_rounds" type="number" min="0" max="20" value="{scroll_rounds}"{disabled_attr}></label>
                     <label for="top_by_likes"><span>取点赞前几篇</span><input id="top_by_likes" name="top_by_likes" type="number" min="1" max="200" value="{top_by_likes}"{disabled_attr}></label>
                     <label for="published_within_days"><span>只要多新的内容</span><select id="published_within_days" name="published_within_days"{disabled_attr}>{publish_windows}</select></label>
                   </div>
+                  <p class="c-rule-hint">排序属于这个观察目标的身份，不在这里改——同一个词的两种排序是两个观察面。要按别的排序采，建一个新的关键词目标。</p>
                   <p class="c-rule-hint">按下拉次数控制，不按条数控制——页面每次加载出多少条不由我们决定，只有「拉了几次」是能说准的事实。时间范围只有这四档，因为平台就只给这四档；选了之后，回执里记的是页面上<b>实际生效</b>的那一档，不是这里选的值。同一批样本的点赞数不可跨时间比较。综合排序掺入个性化推荐，采回来的是平台认为这个账号会喜欢的内容，不是这个领域客观最好的内容。</p>
                 </section>"#,
         scroll_rounds = escape(&form.scroll_rounds),
+        ranking_label = ranking_label,
         top_by_likes = escape(&form.top_by_likes),
     )
 }
@@ -884,14 +883,26 @@ mod sampling_policy_tests {
         assert!(!html.contains(r#"<option value="" selected>"#));
     }
 
-    /// 关键词面渲染出那一节，且四项都在。
+    /// 关键词面渲染出那一节：三项可编辑，排序只读。
     #[test]
     fn the_keyword_surface_renders_every_sampling_input() {
         let form = MonitorRuleFormState::from_panel(&keyword_panel("考研自习::latest"));
         let html = sampling_policy_section(&form, false);
-        for field in ["ranking_key", "scroll_rounds", "top_by_likes", "published_within_days"] {
+        for field in ["scroll_rounds", "top_by_likes", "published_within_days"] {
             assert!(html.contains(&format!(r#"name="{field}""#)), "{field} 缺失");
         }
-        assert!(html.contains(r#"<option value="latest" selected>"#));
+        // 排序只读展示，中文。
+        assert!(html.contains("<output>最新</output>"));
+    }
+
+    /// 排序不可在规则里改：它是目标身份的一部分（`{词}::{排序}`）。做成可编辑会让规则
+    /// 与身份脱节——列表还叫「考研自习（最多点赞）」，实际却按别的排序采。
+    #[test]
+    fn the_ranking_is_read_only_because_it_belongs_to_the_target_identity() {
+        let form = MonitorRuleFormState::from_panel(&keyword_panel("考研自习::most_liked"));
+        let html = sampling_policy_section(&form, false);
+        assert!(!html.contains(r#"<select id="ranking_key""#));
+        assert!(html.contains("<output>最多点赞</output>"));
+        assert!(html.contains("排序属于这个观察目标的身份"));
     }
 }
