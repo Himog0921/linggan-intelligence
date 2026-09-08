@@ -923,15 +923,26 @@ async fn claim_next_queued_work_order(
             .await
             {
                 Ok(lease) => lease,
+                // 发租被拦住说的是**这一张工单**此刻不能发，不是整条队列没活。此前这里直接
+                // 返回，等于让队首那一张挡住它后面所有人：2026-09-08 实测 immediate 队首是
+                // 一张 09-05 授权已被撤销的建档工单，此后每一次领活都停在它身上，当天两张
+                // 人工观察工单一次都没有被看过。与上面容量不足的处理保持一致——记下第一个
+                // 稳定原因当兜底，然后继续往下看。
                 Err(LeaseError::ControlBlocked { reason_code }) => {
                     undo_failed_queue_claim(transaction, work_order_ref).await?;
-                    return Ok(Some(DispatchDecision::ControlBlocked { reason_code }));
+                    deferred_control_block.get_or_insert(reason_code);
+                    continue;
                 }
+                // 授权没了就不会自己回来，这张工单永远不可能再执行。放回队列等于每一轮都
+                // 重试一次注定失败的事，而且它还占着队列位置。终结它。
+                //
+                // 终结原因不另存一列：工单经 `decision_ref → authorization_ref` 指着那份
+                // 授权，撤销原因与到期时间都还在那里，比在这里复述一遍更不容易走样。
                 Err(LeaseError::AuthorizationLapsed) => {
-                    undo_failed_queue_claim(transaction, work_order_ref).await?;
-                    return Ok(Some(DispatchDecision::ControlBlocked {
-                        reason_code: "authorization_expired_or_revoked".to_owned(),
-                    }));
+                    cancel_work_order_without_authorization(transaction, work_order_ref).await?;
+                    deferred_control_block
+                        .get_or_insert_with(|| "authorization_expired_or_revoked".to_owned());
+                    continue;
                 }
                 Err(LeaseError::Database(error)) => return Err(error),
                 Err(_) => {
@@ -1014,6 +1025,28 @@ async fn undo_failed_queue_claim(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE collection_work_order SET queue_state='queued',station_ref=NULL, \
+             installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL \
+         WHERE work_order_ref=$1 AND queue_state='leased' \
+           AND NOT EXISTS (SELECT 1 FROM collection_work_order_lease \
+                           WHERE work_order_ref=$1 AND released_at IS NULL)",
+    )
+    .bind(work_order_ref)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+/// 终结一张授权已经不在了的工单。
+///
+/// 与 `undo_failed_queue_claim` 的唯一差别是终点：那边是「这次没轮到你，回队列等」，
+/// 这边是「你等的那个条件已经不存在了」。同样只动没有存活租约的那一行——真在跑的活
+/// 不能被一次派发扫描顺手取消。
+async fn cancel_work_order_without_authorization(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE collection_work_order SET queue_state='cancelled',station_ref=NULL, \
              installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL \
          WHERE work_order_ref=$1 AND queue_state='leased' \
            AND NOT EXISTS (SELECT 1 FROM collection_work_order_lease \
