@@ -460,10 +460,16 @@ fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
     );
     assert!(TARGET_DRAWER_CSS.contains(".c-tg-actions form{width:auto;min-width:0;margin:0}"));
     assert!(!TARGET_DRAWER_CSS.contains(".c-tg-btn{width:100%"));
+    // 目录要一屏排满，不靠横向滚动：一张需要左右拖动才能看全的表，等于要求人记住
+    // 左边看过什么。定宽列写成 minmax(0,N) 以便窄窗口按比例收窄，而不是把表推出屏幕。
+    assert!(!TARGET_DRAWER_CSS.contains("min-width:1120px"));
+    assert!(TARGET_DRAWER_CSS.contains("minmax(0,116px)"));
+    assert!(TARGET_DRAWER_CSS.contains("minmax(0,88px) 128px;gap:var(--lgi-space-3)}"));
+    // 操作列定宽，按钮不得再宽过自己的列而压到相邻列上。
     assert!(
-        TARGET_DRAWER_CSS
-            .contains(".c-tg-creator-grid>:nth-child(8){margin-left:var(--lgi-space-3)}")
+        !TARGET_DRAWER_CSS.contains("min-width:calc(var(--lgi-space-24) + var(--lgi-space-6))")
     );
+    assert!(!TARGET_DRAWER_CSS.contains(".c-tg-creator-grid>:nth-child(8)"));
     assert!(!TARGET_DRAWER_CSS.contains(".c-tg-row-open"));
     assert!(TARGET_DRAWER_CSS.contains(".life-control-row{min-width:0;"));
     assert!(TARGET_DRAWER_CSS.contains(".life-figure{min-width:0;"));

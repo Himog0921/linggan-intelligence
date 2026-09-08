@@ -89,9 +89,6 @@ pub fn render_stored_targets_with_observation(
     let list = format!(
         r#"<section class="c-tg-workspace">
               {failure}
-              <div class="c-tg-list-head">
-                <span>{count} 个观察目标</span>
-              </div>
               <div class="c-tg-directory">{creator_table}{keyword_table}</div>
               <form id="target-batch-modal-form" class="c-tg-batch" method="post" action="/collection/targets/batch">
                 <div class="c-tg-batch-overlay" data-target-batch-modal hidden>
@@ -104,7 +101,6 @@ pub fn render_stored_targets_with_observation(
                 </div>
               </form>
             </section>"#,
-        count = targets.len(),
         failure = action_feedback_markup(error),
     );
     replace_target_state(base, &list)

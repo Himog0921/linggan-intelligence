@@ -25,7 +25,9 @@ fn six_targets_keep_batch_selection_without_the_redundant_row_instruction() {
         super::target_drawer::TargetListContext::default(),
     );
 
-    assert!(html.contains("6 个观察目标"));
+    // 顶部 tab 已经写着「全部来源 6」，表格上方再数一遍是同一件事说两次。
+    assert!(!html.contains("个观察目标"));
+    assert!(!html.contains("c-tg-list-head"));
     assert_eq!(html.matches(" data-target-select ").count(), 6);
     assert_eq!(html.matches(" data-target-select-all ").count(), 2);
     assert_eq!(html.matches(r#"form="target-batch-modal-form""#).count(), 6);
@@ -68,7 +70,9 @@ fn six_targets_keep_batch_selection_without_the_redundant_row_instruction() {
             .contains("targetBatchCount.textContent = \"已选择 \" + selected + \" 个目标\"")
     );
     assert!(COLLECTION_WORKSPACE_JS.contains("a,button,input,select,textarea,label,summary"));
-    assert!(TARGET_DRAWER_CSS.contains("min-width:1120px"));
+    // 此前这里要求表格保持 1120px 最小宽度、窄窗口交给横向滚动。改为一屏排满：
+    // 需要左右拖动才能看全的目录，等于要求人记住左边看过什么。
+    assert!(!TARGET_DRAWER_CSS.contains("min-width:1120px"));
     assert!(!TARGET_DRAWER_CSS.contains("calc(var(--lgi-space-24) * 57)"));
     assert!(!TARGET_DRAWER_CSS.contains("position:sticky;right:0"));
     assert!(!TARGET_DRAWER_CSS.contains("border-left:5px solid var(--lgi-signal)"));
