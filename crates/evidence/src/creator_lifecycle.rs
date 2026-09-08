@@ -498,7 +498,11 @@ qualified_patrols AS (
       AND package.accepted_at <= $2::timestamptz
       AND package.platform=task.platform
       AND task.task_spec->'capabilitiesRequested' ? package.package_kind
-      AND (package.coverage->'target') @> (task.task_spec->'target')
+      -- 采样口径是**下发的指令**，不是回执的事实：插件的 coverage.target 只回显身份
+      -- （query / authorExternalId），不会把 ranking、scrollRounds 抄回来。用「包必须
+      -- 包含任务 target 的每一个键」来确认归属，任务一带口径就必然为假——实测关键词
+      -- 目标的巡检成功时刻因此从未被写过。归属由 package.task_id=task.task_id 保证，
+      -- 这条检查防的事连接条件已经防住了，而它防的方式是错的。
       AND receipt.material_admission='ACCEPTED'
       AND receipt.execution_effect='COMPLETED_LIVE_STEP'
       AND layer->>'capability'='profile_discovery'

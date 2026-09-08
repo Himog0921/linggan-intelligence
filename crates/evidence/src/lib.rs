@@ -3,6 +3,7 @@
 
 mod acquisition_chain;
 mod archive_completeness;
+mod archive_ledger;
 mod collection_control;
 mod collection_target;
 mod collection_task_read;

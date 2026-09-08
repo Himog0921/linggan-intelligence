@@ -8,6 +8,7 @@
 //! 这条确切链路。详情任务只携带 `contentExternalId`，若靠任务规格里的
 //! `authorExternalId` 反查，渐进补齐的详情会全部丢失归属。
 
+use crate::archive_ledger::directory_works_sql;
 use crate::directory_boundary::{directory_proven_sql, surface_scan_complete_sql};
 use linggan_storage_postgres::Database;
 use std::collections::HashMap;
@@ -180,7 +181,7 @@ pub async fn read_archive_completeness(
              WHERE target.platform=$1 AND target.target_kind='creator' AND work_order.lane='patrol' \
                AND package.package_kind='profile_discovery' AND package.platform=task.platform \
                AND task.task_spec->'capabilitiesRequested' ? package.package_kind \
-               AND (package.coverage->'target') @> (task.task_spec->'target') \
+               -- 同 work_order_ledger：归属由 task_id 保证，不靠 target 逐键包含。
                AND receipt.execution_effect='COMPLETED_LIVE_STEP' AND receipt.material_admission='ACCEPTED' \
                AND layer->>'capability'='profile_discovery' \
                AND ",
@@ -272,16 +273,28 @@ pub async fn read_archive_completeness(
                AND runtime.task_spec #>> '{capabilitiesRequested,0}'='content_detail' \
                AND NULLIF(runtime.task_spec #>> '{target,contentExternalId}','') IS NOT NULL \
              GROUP BY scoped.author_external_id \
+         ), ",
+            directory_works_sql!("target.platform=$1 AND target.target_kind='creator'", "true"),
+            ", ledger_totals AS ( \
+             SELECT target.identity_key AS author_external_id, \
+                    count(*) AS works_listed, \
+                    count(*) FILTER (WHERE ledger.has_detail) AS details_captured \
+             FROM directory_work ledger \
+             JOIN collection_observation_target target \
+               ON target.target_ref=ledger.target_ref \
+             GROUP BY target.identity_key \
          ) \
          SELECT roots.author_external_id,coalesce(progress.started,false),coalesce(progress.attempted,false), \
                 coalesce(progress.work_in_progress,false),coalesce(totals.author_profile_captures,0), \
-                coalesce(totals.works_listed,0),coalesce(totals.details_captured,0),coalesce(totals.quarantined,0), \
+                coalesce(ledger.works_listed,0),coalesce(ledger.details_captured,0), \
+                coalesce(totals.quarantined,0), \
                 coalesce(blocked_details.blocked_details,0), \
                 directories.package_ref IS NOT NULL \
          FROM active_roots roots \
          LEFT JOIN record_totals totals USING(author_external_id) \
          LEFT JOIN archive_progress progress USING(author_external_id) \
          LEFT JOIN blocked_details USING(author_external_id) \
+         LEFT JOIN ledger_totals ledger USING(author_external_id) \
          LEFT JOIN directory_packages directories USING(author_external_id)",
         ),
     )
