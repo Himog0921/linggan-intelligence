@@ -96,6 +96,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0046_keyword_sampling_policy.sql"),
     "\n",
     include_str!("../../../database/migrations/0047_collection_detail_failure_boundary.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0052_work_order_expiry.sql"),
 );
 
 #[tokio::test]
@@ -1389,6 +1391,231 @@ async fn detail_only_scope_claims_only_detail_and_rejects_orphaned_replies() {
         }
         other => panic!("detail-only scope must dispatch detail first; got {other:?}"),
     }
+}
+
+/// 过了保质期的工单不再排队，也不再被当成「等待中」。
+///
+/// 一张昨天的工单回答的是昨天的问题：人可以再点一次，巡检下一轮会再来。只要它还在队列
+/// 里，它就一直是最老的那一张，一直排在最前面。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn a_work_order_past_its_shelf_life_leaves_the_queue_instead_of_waiting_forever() {
+    let database = proof_database_for("collection_dispatch_work_order_expiry").await;
+    let fixture = seed_creator_work_order(&database).await;
+    sqlx::query(
+        "UPDATE collection_work_order \
+         SET queue_state='queued',dispatch_lane='immediate', \
+             scheduled_for=scope_001_now()-interval '2 days', \
+             expires_at=scope_001_now()-interval '1 day' \
+         WHERE work_order_ref=$1",
+    )
+    .bind(fixture.work_order_ref)
+    .execute(database.pool())
+    .await
+    .expect("the stale order is the oldest waiting one in its lane");
+
+    let runnable = seed_second_queued_work_order(&database, &fixture).await;
+
+    let decision = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the poll answers without tripping over the stale order");
+    let dispatched_work_order: Uuid = sqlx::query_scalar(
+        "SELECT lease.work_order_ref FROM collection_work_order_lease lease \
+         JOIN collection_work_order_lease_task task USING(lease_ref) WHERE task.task_id=$1",
+    )
+    .bind(task_id(&decision))
+    .fetch_one(database.pool())
+    .await
+    .expect("a dispatched task belongs to exactly one work order");
+    assert_eq!(dispatched_work_order, runnable);
+
+    let stale_state: String =
+        sqlx::query_scalar("SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(fixture.work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("the stale order stays readable");
+    assert_eq!(
+        stale_state, "cancelled",
+        "只把它从候选里滤掉是不够的：它会继续以「等待」的样子留在队列里说假话"
+    );
+}
+
+/// 保质期只对排队中的工单成立。正在跑的活不能被一次派发扫描顺手取消。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn a_leased_work_order_is_not_cancelled_by_its_own_shelf_life() {
+    let database = proof_database_for("collection_dispatch_leased_shelf_life").await;
+    let fixture = seed_creator_work_order(&database).await;
+    sqlx::query(
+        "UPDATE collection_work_order \
+         SET queue_state='queued',dispatch_lane='immediate', \
+             scheduled_for=scope_001_now()-interval '1 hour' \
+         WHERE work_order_ref=$1",
+    )
+    .bind(fixture.work_order_ref)
+    .execute(database.pool())
+    .await
+    .expect("the order is claimable");
+    decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the station claims it");
+    // 它现在真的在跑；此刻让保质期到期。
+    sqlx::query(
+        "UPDATE collection_work_order SET expires_at=scope_001_now()-interval '1 second' \
+         WHERE work_order_ref=$1",
+    )
+    .bind(fixture.work_order_ref)
+    .execute(database.pool())
+    .await
+    .expect("proof advances only the isolated shelf-life clock");
+
+    decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the next poll runs the expiry sweep");
+    let state: String =
+        sqlx::query_scalar("SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(fixture.work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("the leased order stays readable");
+    assert_eq!(
+        state, "leased",
+        "正在执行的工单不能因为保质期到了就被取消——它的租约结束后才轮到这条规则"
+    );
+}
+
+/// 授权失效的工单不得挡住排在它后面的活。
+///
+/// 2026-09-08 实测的停摆就长这样：一张 09-05 授权被撤销的建档工单排在 immediate 队首，
+/// 派发扫描每一轮都停在它身上直接返回，当天两张人工观察工单一次都没有被看过。队列不空，
+/// 工位在线，所有闸门都是开的——却什么都不发生。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn a_lapsed_authorization_at_the_queue_head_does_not_hide_runnable_work_behind_it() {
+    let database = proof_database_for("collection_dispatch_lapsed_authorization").await;
+    let fixture = seed_creator_work_order(&database).await;
+    sqlx::query(
+        "UPDATE collection_work_order \
+         SET queue_state='queued',dispatch_lane='immediate', \
+             scheduled_for=scope_001_now()-interval '2 hours' \
+         WHERE work_order_ref=$1",
+    )
+    .bind(fixture.work_order_ref)
+    .execute(database.pool())
+    .await
+    .expect("the poisoned order is the oldest waiting one in its lane");
+    sqlx::query(
+        "UPDATE collection_acquisition_authorization \
+         SET revoked_at=scope_001_now(),revoke_reason='proof: replaced by a wider grant' \
+         WHERE authorization_ref=( \
+             SELECT decision.authorization_ref FROM collection_admission_decision decision \
+             JOIN collection_work_order work_order \
+               ON work_order.decision_ref=decision.decision_ref \
+             WHERE work_order.work_order_ref=$1)",
+    )
+    .bind(fixture.work_order_ref)
+    .execute(database.pool())
+    .await
+    .expect("a person withdrew the authorization this order was admitted under");
+
+    let runnable = seed_second_queued_work_order(&database, &fixture).await;
+
+    let decision = decide_dispatch(
+        &database,
+        &fixture.install_key,
+        &fixture.installation_credential,
+    )
+    .await
+    .expect("the same poll keeps looking past an order it can never run");
+    let dispatched_work_order: Uuid = sqlx::query_scalar(
+        "SELECT lease.work_order_ref FROM collection_work_order_lease lease \
+         JOIN collection_work_order_lease_task task USING(lease_ref) WHERE task.task_id=$1",
+    )
+    .bind(task_id(&decision))
+    .fetch_one(database.pool())
+    .await
+    .expect("a dispatched task belongs to exactly one work order");
+    assert_eq!(
+        dispatched_work_order, runnable,
+        "the runnable order behind the lapsed one is what gets dispatched"
+    );
+
+    let poisoned_state: String =
+        sqlx::query_scalar("SELECT queue_state FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(fixture.work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("the poisoned order stays readable");
+    assert_eq!(
+        poisoned_state, "cancelled",
+        "an order whose authorization is gone is finished, not queued for a retry that can never succeed"
+    );
+}
+
+/// 在同一个目标、同一台工位上再排一张工单——授权是有效的，排在毒工单后面。
+async fn seed_second_queued_work_order(database: &Database, fixture: &Fixture) -> Uuid {
+    let authorization_ref = Uuid::new_v4();
+    let request_ref = Uuid::new_v4();
+    let decision_ref = Uuid::new_v4();
+    let work_order_ref = Uuid::new_v4();
+    let (target_ref, account_ref): (Uuid, Uuid) = sqlx::query_as(
+        "SELECT target_ref,account_ref FROM collection_work_order WHERE work_order_ref=$1",
+    )
+    .bind(fixture.work_order_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the fixture froze its own control tuple");
+    sqlx::query(
+        "INSERT INTO collection_acquisition_authorization              (authorization_ref, platform, target_kind, lane, max_targets, max_works_per_target,               allowed_task_templates,allowed_dispatch_lanes,max_work_units,purpose,granted_by,expires_at)          VALUES ($1,'xhs','creator','deep_archive',1,10,                  ARRAY['creator_archive','material_deepening'],ARRAY['immediate','batch'],10,                  'proof: the grant that replaced the withdrawn one','person',                  scope_001_now() + interval '1 day')",
+    )
+    .bind(authorization_ref)
+    .execute(database.pool())
+    .await
+    .expect("the replacement authorization is seeded");
+    sqlx::query(
+        "INSERT INTO collection_acquisition_request              (request_ref, target_ref, lane, purpose, requested_by)          VALUES ($1,$2,'deep_archive','proof: the request behind the lapsed one','person')",
+    )
+    .bind(request_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the later request is seeded");
+    sqlx::query(
+        "INSERT INTO collection_admission_decision              (decision_ref, request_ref, outcome, reason_code, authorization_ref,               target_ref, station_ref, installation_ref, account_ref)          VALUES ($1,$2,'admitted','lapsed_authorization_proof',$3,$4,$5,$6,$7)",
+    )
+    .bind(decision_ref)
+    .bind(request_ref)
+    .bind(authorization_ref)
+    .bind(target_ref)
+    .bind(fixture.station_ref)
+    .bind(fixture.installation_ref)
+    .bind(account_ref)
+    .execute(database.pool())
+    .await
+    .expect("the later admission is seeded");
+    sqlx::query(
+        "INSERT INTO collection_work_order              (work_order_ref, decision_ref, target_ref, lane, max_works, stop_conditions,               dispatch_lane, queue_state, scheduled_for)          VALUES ($1,$2,$3,'deep_archive',10,'[\"maximum_quota\",\"time_budget\"]'::jsonb,                  'immediate','queued',scope_001_now()-interval '1 hour')",
+    )
+    .bind(work_order_ref)
+    .bind(decision_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the runnable order waits behind the poisoned one");
+    work_order_ref
 }
 
 struct Fixture {

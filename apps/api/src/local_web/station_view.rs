@@ -88,7 +88,7 @@ fn render_runtime_with_roster(
         verdict = verdict_markup(overview, stations),
         roster = roster_markup(roster, capabilities),
         console = console_markup(stations.unwrap_or_default(), error),
-        bounds = bounds_markup(overview),
+        bounds = bounds_markup(overview, stations),
     );
 
     format!(
@@ -652,13 +652,220 @@ fn dev_tools_markup(stations: &[StationOverview]) -> String {
 }
 
 // ---------------------------------------------------------------------------
+/// 上一次每台工位来问活时，服务端实际给出的回答。
+///
+/// 这一组回答的是「现在为什么不动」，而上面那一组回答的是「队列里有多少活」。两者
+/// 缺一不可：2026-09-08 那一整天，「等待 5 单」一直显示得好好的，服务端每 5 分钟也
+/// 都明确回答了「被拦住了」——但那个回答只发给插件，页面上一个字也没有。人于是只能
+/// 看着一个不动的数字，猜不出原因。
+fn dispatch_answers_markup(stations: Option<&[StationOverview]>) -> String {
+    // 读不到工位与没有工位是两个说法，合并会让人去修一个没有坏的东西。
+    let Some(stations) = stations else {
+        return "<p class=\"c-bounds-empty\">工位列表当前读不到，因此这里也说不出上一次的回答。</p>"
+            .to_owned();
+    };
+    if stations.is_empty() {
+        return "<p class=\"c-bounds-empty\">还没有登记任何工位，因此没有人来问过活。</p>"
+            .to_owned();
+    }
+    stations
+        .iter()
+        .map(|station| {
+            let Some(code) = station.last_dispatch_answer_code.as_deref() else {
+                // 从未问过与「问了但没活」是两件事。前者说明这台工位根本没来敲过门，
+                // 该查的是插件那一侧，不是队列。
+                return format!(
+                    r#"<div class="c-bound-row"><div class="c-bound-name"><b>{name}</b><span>从未来问过活</span></div><div class="c-bound-meta"><span>这台工位还没有向服务端要过任务</span><span>先确认插件已安装并归位到这台工位</span></div></div>"#,
+                    name = escape(&station.display_name),
+                );
+            };
+            let (label, hint) =
+                dispatch_answer_label(code, station.last_dispatch_answer_reason.as_deref());
+            format!(
+                r#"<div class="c-bound-row"><div class="c-bound-name"><b>{name}</b><span>上一次问活 {at}</span></div><div class="c-bound-meta"><span>{label}</span><span>{hint}</span></div></div>"#,
+                name = escape(&station.display_name),
+                at = escape(station.last_dispatch_answer_at.as_deref().unwrap_or("时间未记录")),
+                label = escape(label),
+                hint = escape(&hint),
+            )
+        })
+        .collect()
+}
+
+/// 每一条派发回答的中文说明：这是什么事，你该做什么。
+///
+/// 写成一张表而不是一长串分支：它本来就是一份词表，不是控制流。新增一条原因码时，
+/// 这里加一行即可，读的人也一眼看得出总共认得几条。
+const DISPATCH_ANSWER_EXPLANATIONS: &[(&str, &str, &str)] = &[
+    ("dispatch", "派出了一单", "工位正在执行它；这是正常状态。"),
+    (
+        "nothing_waiting",
+        "队列里没有等待的活",
+        "这不是故障。要立刻采一次，去观察目标页发起人工观察。",
+    ),
+    (
+        "installation_not_claimed",
+        "这个插件安装还没归位到工位",
+        "在这一页开一个认领窗口，或直接把它认领到一台工位上。",
+    ),
+    (
+        "risk_paused",
+        "风险暂停正在生效",
+        "有人按下了刹车。解除之前不会派出任何活。",
+    ),
+    (
+        "daily_quota_reached",
+        "这台工位今天的额度用完了",
+        "工位没有离线，明天窗口重置后自然恢复。",
+    ),
+    (
+        "station_daily_budget_reached",
+        "这台工位今天的额度用完了",
+        "工位没有离线，明天窗口重置后自然恢复。",
+    ),
+    (
+        "execution_locator_unavailable",
+        "缺少可用的签名链接",
+        "这篇作品当前没有带签名的已接纳发现链接，已进入冷却重试。",
+    ),
+    (
+        "station_not_accepting",
+        "工位被人暂停了接活",
+        "在上面的工位一行里把接活重新打开。",
+    ),
+    (
+        "station_unavailable",
+        "工单冻结的工位或安装已不在岗",
+        "确认那台工位还在、插件还连着。",
+    ),
+    (
+        "installation_credential_missing",
+        "在岗安装没有有效凭据",
+        "让插件重新报到一次，服务端会补发凭据。",
+    ),
+    (
+        "plugin_version_unsupported",
+        "插件版本过低",
+        "升级这台机器上的插件到当前最低版本以上。",
+    ),
+    (
+        "installation_stale",
+        "插件超过 20 分钟没有报到",
+        "按失联处理。确认那台机器的浏览器还开着、插件还启用着。",
+    ),
+    (
+        "capability_missing",
+        "这台工位没有这条活需要的能力",
+        "看上面的能力矩阵缺哪一项；升级或换一台工位。",
+    ),
+    (
+        "account_unbound",
+        "插件还没绑定观察账号",
+        "在这一页把这个安装绑定到一个平台账号上。",
+    ),
+    (
+        "account_binding_changed",
+        "账号绑定与工单冻结的不一致",
+        "这一单是按旧绑定发出的；重新发起一次即可。",
+    ),
+    (
+        "account_binding_expired",
+        "账号绑定的人工确认已超过 30 天",
+        "重新确认一次这个安装绑定的是哪个账号。",
+    ),
+    (
+        "account_eligibility_stale",
+        "账号资格超过 20 分钟没上报",
+        "让插件在一个已登录的平台页面上待一会儿，它会自动重报。",
+    ),
+    (
+        "account_cooling",
+        "账号正在冷却",
+        "等冷却结束会自动恢复，不需要做什么。",
+    ),
+    (
+        "account_needs_login",
+        "账号需要重新登录",
+        "在这台机器的浏览器里重新登录平台账号。",
+    ),
+    (
+        "account_restricted",
+        "账号被平台限制",
+        "先在浏览器里处理平台的验证或限制，再让它接活。",
+    ),
+    (
+        "account_unknown",
+        "账号资格未知",
+        "读不到就按关闭处理。让插件重新上报一次账号状态。",
+    ),
+    (
+        "account_busy",
+        "这个账号已经有一份活在跑",
+        "等它跑完自然轮到下一单。",
+    ),
+    (
+        "platform_concurrency_reached",
+        "平台并发已满",
+        "等任一执行许可释放后自然恢复。",
+    ),
+    (
+        "rule_revision_changed",
+        "规则改过了",
+        "这一单是按旧规则发出的，不会再执行；新规则会自己排下一单。",
+    ),
+    (
+        "monitoring_paused",
+        "这个目标的自动观察被暂停了",
+        "去观察目标页把它的巡检重新打开。",
+    ),
+    (
+        "authorization_expired_or_revoked",
+        "这一单的授权已撤销或过期",
+        "工单已终结，不会再重试。需要的话在观察目标页重新发起一次。",
+    ),
+    (
+        "target_not_requestable",
+        "这个观察目标已被弃置",
+        "弃置的目标不能再发起采集。要用它就先恢复这个目标。",
+    ),
+];
+
+/// 把一条派发回答翻成「这是什么事」加「你该做什么」。
+///
+/// 词表里没有的取值原样显示机器取值，并明说它还没有说明——**编一句出来等于假装我们
+/// 知道它是什么**。
+fn dispatch_answer_label(code: &str, reason: Option<&str>) -> (&'static str, String) {
+    if let Some((_, label, hint)) = DISPATCH_ANSWER_EXPLANATIONS
+        .iter()
+        .find(|(key, _, _)| *key == code)
+    {
+        return ((*label), (*hint).to_owned());
+    }
+    if code == "capacity_unknown" {
+        return (
+            "拦住它的原因这一页还没有中文说明",
+            reason.map_or_else(
+                || "服务端只说了「资格未知」，没有给出更具体的原因。".to_owned(),
+                |reason| format!("服务端给出的原因码是 {reason}。"),
+            ),
+        );
+    }
+    (
+        "这条回答这一页还没有中文说明",
+        format!("服务端给出的判定是 {code}。"),
+    )
+}
+
 // 第四层：正在按什么边界跑
 // ---------------------------------------------------------------------------
 
 /// 租约与巡检：系统在无人值守时按什么边界跑。
 ///
 /// 调度器 heartbeat 由共享页头表达；这里不复制第二套状态，只显示租约与派发痕迹。
-fn bounds_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
+fn bounds_markup(
+    overview: Option<&RuntimeCapacityOverview>,
+    stations: Option<&[StationOverview]>,
+) -> String {
     let Some(overview) = overview else {
         return String::new();
     };
@@ -782,6 +989,10 @@ fn bounds_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
                 {dispatch_backlog}
               </div>
               <div class="c-bounds-group">
+                <h3>上一次问活</h3>
+                {dispatch_answers}
+              </div>
+              <div class="c-bounds-group">
                 <h3>巡检</h3>
                 <dl class="c-bounds-grid">
                   <div><dt>开着巡检</dt><dd>{monitoring}/{total}</dd></div>
@@ -809,6 +1020,7 @@ fn bounds_markup(overview: Option<&RuntimeCapacityOverview>) -> String {
         patrol_note = escape(patrol_note),
         platform_dispatch = platform_dispatch,
         dispatch_backlog = dispatch_backlog,
+        dispatch_answers = dispatch_answers_markup(stations),
         rule_schedules = rule_schedules,
     )
 }
@@ -878,6 +1090,9 @@ mod tests {
             active_last_seen_at: Some("2026-08-27 02:58".to_owned()),
             superseded_count: superseded,
             daily_notes_used: 0,
+            last_dispatch_answer_at: None,
+            last_dispatch_answer_code: None,
+            last_dispatch_answer_reason: None,
         }
     }
 
@@ -1031,6 +1246,44 @@ mod tests {
         assert!(!rendered.contains("还没有登记任何工位"));
         assert!(rendered.contains("<dt>今日预算</dt>"));
         assert!(rendered.contains("<dd>未知</dd>"));
+    }
+
+    #[test]
+    fn the_last_dispatch_answer_is_shown_in_chinese_instead_of_a_machine_code() {
+        // 2026-09-08 停摆的那一整天，服务端每 5 分钟都答了「被拦住了」，页面上一个字也
+        // 没有。人只看得到一个不动的「等待 5 单」，猜不出原因。
+        let mut blocked = station(Some("0.8.42"), 0);
+        blocked.last_dispatch_answer_at = Some("09-08 18:33".to_owned());
+        blocked.last_dispatch_answer_code = Some("authorization_expired_or_revoked".to_owned());
+        blocked.last_dispatch_answer_reason = Some("authorization_expired_or_revoked".to_owned());
+        let rendered = render_runtime(
+            &base(),
+            Some(&overview(vec![lane("巡检", available())])),
+            &[blocked],
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+        );
+        assert!(rendered.contains("上一次问活 09-08 18:33"));
+        assert!(rendered.contains("这一单的授权已撤销或过期"));
+        // 机器取值不是给人读的答案；它可以存在于数据库，但不能是页面上唯一的说法。
+        assert!(!rendered.contains("authorization_expired_or_revoked"));
+    }
+
+    #[test]
+    fn a_station_that_never_asked_is_not_reported_as_having_no_work() {
+        // 「从未来问过」要查的是插件那一侧；「问了但没活」要查的是队列。合并成一句会让人
+        // 去修一个没有坏的东西。
+        let rendered = render_runtime(
+            &base(),
+            Some(&overview(vec![lane("巡检", available())])),
+            &[station(Some("0.8.42"), 0)],
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+        );
+        assert!(rendered.contains("从未来问过活"));
+        assert!(!rendered.contains("队列里没有等待的活"));
     }
 
     #[test]
