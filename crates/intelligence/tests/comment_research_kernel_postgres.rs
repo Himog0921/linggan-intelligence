@@ -15,7 +15,8 @@ use linggan_intelligence::comment_research_embeddings::{
 };
 use linggan_intelligence::comment_research_kernel::{
     DERIVATION_VERSION, RunItemFailureClass, SaveResearchPolicy, claim_next_run_item,
-    derive_current_sources, record_run_item_failure, save_active_policy, start_run,
+    derive_current_sources, record_run_item_failure, recover_expired_run_items, save_active_policy,
+    start_run,
 };
 use linggan_intelligence::comment_research_problems::{
     CommentResearchProblemError, ExistingProblemAdmission, NewProblemAdmission,
@@ -445,6 +446,77 @@ async fn incompatible_item_does_not_block_the_next_healthy_v1_item() {
     let healthy = claim_next_run_item(&database).await.unwrap().unwrap();
     assert_ne!(healthy.derivation_ref, poisoned.derivation_ref);
     assert_eq!(healthy.attempt, 1);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn expired_v1_lease_recovers_without_stalling_the_run() {
+    let database = fixture::proof_database("comment_research_v1_lease_recovery").await;
+    detail_with_author(
+        &database,
+        "lease-note",
+        "SYNTHETIC lease recovery note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "lease-note",
+        "reader",
+        "孩子写作业时总是拖延，有什么办法吗",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: None,
+            source_limit: 100,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_run(&database, json!({"initiatedBy":"synthetic-test"}))
+        .await
+        .unwrap();
+    let first = claim_next_run_item(&database).await.unwrap().unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_research_run_item \
+         SET lease_until=scope_001_now()-interval '1 second' \
+         WHERE run_ref=$1 AND derivation_ref=$2",
+    )
+    .bind(first.run_ref)
+    .bind(first.derivation_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(recover_expired_run_items(&database).await.unwrap(), 1);
+    let state: (String, Option<String>) = sqlx::query_as(
+        "SELECT state,lease_until::text FROM linggan_comment_research_run_item \
+         WHERE run_ref=$1 AND derivation_ref=$2",
+    )
+    .bind(first.run_ref)
+    .bind(first.derivation_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(state, ("retryable".into(), None));
+    sqlx::query(
+        "UPDATE linggan_comment_research_run_item \
+         SET next_attempt_at=scope_001_now()-interval '1 second' \
+         WHERE run_ref=$1 AND derivation_ref=$2",
+    )
+    .bind(first.run_ref)
+    .bind(first.derivation_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let second = claim_next_run_item(&database).await.unwrap().unwrap();
+    assert_eq!(second.run_ref, run.run_ref);
+    assert_eq!(second.derivation_ref, first.derivation_ref);
+    assert_eq!(second.attempt, 2);
 }
 
 #[tokio::test]

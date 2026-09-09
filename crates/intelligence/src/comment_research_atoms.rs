@@ -241,7 +241,7 @@ async fn finish_item(
 ) -> Result<(), CommentResearchAtomError> {
     let changed = sqlx::query(
         "UPDATE linggan_comment_research_run_item \
-         SET state=$3,finished_at=scope_001_now(),updated_at=scope_001_now() \
+         SET state=$3,finished_at=scope_001_now(),lease_until=NULL,updated_at=scope_001_now() \
          WHERE run_ref=$1 AND derivation_ref=$2 AND state='running'",
     )
     .bind(claim.run_ref)

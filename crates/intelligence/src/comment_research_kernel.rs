@@ -412,6 +412,7 @@ pub async fn claim_next_run_item(
     database: &Database,
 ) -> Result<Option<ResearchRunItemClaim>, CommentResearchKernelError> {
     let mut transaction = database.pool().begin().await?;
+    recover_expired_run_items_in(&mut transaction).await?;
     let row = sqlx::query(
         "WITH candidate AS ( \
              SELECT item.run_ref,item.derivation_ref \
@@ -425,7 +426,8 @@ pub async fn claim_next_run_item(
              LIMIT 1 FOR UPDATE OF item SKIP LOCKED \
          ), claimed AS ( \
              UPDATE linggan_comment_research_run_item item \
-             SET state='running',attempts=attempts+1,next_attempt_at=NULL,updated_at=scope_001_now() \
+             SET state='running',attempts=attempts+1,next_attempt_at=NULL, \
+                 lease_until=scope_001_now()+interval '120 seconds',updated_at=scope_001_now() \
              FROM candidate \
              WHERE item.run_ref=candidate.run_ref AND item.derivation_ref=candidate.derivation_ref \
              RETURNING item.run_ref,item.derivation_ref,item.attempts \
@@ -444,6 +446,60 @@ pub async fn claim_next_run_item(
     }))
 }
 
+/// Reclaims only expired V1 execution leases.  Historical recovery records and legacy queues are
+/// intentionally absent: a poisoned old task can never become a head-of-line blocker here.
+pub async fn recover_expired_run_items(
+    database: &Database,
+) -> Result<u64, CommentResearchKernelError> {
+    let mut transaction = database.pool().begin().await?;
+    let recovered = recover_expired_run_items_in(&mut transaction).await?;
+    transaction.commit().await?;
+    Ok(recovered)
+}
+
+async fn recover_expired_run_items_in(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+) -> Result<u64, CommentResearchKernelError> {
+    let rows = sqlx::query(
+        "UPDATE linggan_comment_research_run_item \
+         SET state=CASE WHEN attempts>=3 THEN 'model_failed' ELSE 'retryable' END, \
+             failure_code='worker_interrupted', \
+             next_attempt_at=CASE WHEN attempts>=3 THEN NULL ELSE scope_001_now()+interval '60 seconds' END, \
+             finished_at=CASE WHEN attempts>=3 THEN scope_001_now() ELSE NULL END, \
+             lease_until=NULL,updated_at=scope_001_now() \
+         WHERE state='running' AND lease_until<=scope_001_now() \
+         RETURNING run_ref,invocation_ref",
+    )
+    .fetch_all(&mut **transaction)
+    .await?;
+    if rows.is_empty() {
+        return Ok(0);
+    }
+    let invocations: Vec<Uuid> = rows
+        .iter()
+        .filter_map(|row| row.get::<Option<Uuid>, _>("invocation_ref"))
+        .collect();
+    if !invocations.is_empty() {
+        sqlx::query(
+            "UPDATE linggan_model_invocation \
+             SET state='failed',failure_code='worker_interrupted',finished_at=scope_001_now(), \
+                 result=COALESCE(result,'{}'::jsonb)||jsonb_build_object( \
+                     'callStarted',true,'usageUnknown',input_tokens IS NULL OR output_tokens IS NULL,'recovered',true \
+                 ) \
+             WHERE invocation_ref=ANY($1) AND state='running'",
+        )
+        .bind(&invocations)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    let run_refs: std::collections::BTreeSet<Uuid> =
+        rows.iter().map(|row| row.get("run_ref")).collect();
+    for run_ref in run_refs {
+        refresh_run_completion(transaction, run_ref).await?;
+    }
+    Ok(rows.len() as u64)
+}
+
 /// Records one item outcome without changing any other queue member. A retry is bounded by the
 /// schema attempt limit; permanent incompatibility is terminal and immediately lets the worker
 /// claim the next healthy item.
@@ -458,7 +514,7 @@ pub async fn record_run_item_failure(
     let changed = if let Some(state) = terminal {
         sqlx::query(
             "UPDATE linggan_comment_research_run_item \
-             SET state=$3,failure_code=$4,finished_at=scope_001_now(),updated_at=scope_001_now() \
+             SET state=$3,failure_code=$4,finished_at=scope_001_now(),lease_until=NULL,updated_at=scope_001_now() \
              WHERE run_ref=$1 AND derivation_ref=$2 AND state='running'",
         )
         .bind(claim.run_ref)
@@ -475,6 +531,7 @@ pub async fn record_run_item_failure(
                  failure_code=$3, \
                  next_attempt_at=CASE WHEN attempts>=3 THEN NULL ELSE scope_001_now()+interval '60 seconds' END, \
                  finished_at=CASE WHEN attempts>=3 THEN scope_001_now() ELSE NULL END, \
+                 lease_until=NULL, \
                  updated_at=scope_001_now() \
              WHERE run_ref=$1 AND derivation_ref=$2 AND state='running'",
         )

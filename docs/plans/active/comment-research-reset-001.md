@@ -113,7 +113,7 @@ Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类
 - 实现单一作者 attribution / research derivation；模型策略保存后直接运行；将 recoverable、incompatible、unrecoverable、model_failed 分开。
 - 验收：`作者` 徽标不进入 `research_text`；一条旧不兼容恢复记录不阻断一条新研究；取消或 prepare 失败没有模型调用；调用、费用与 source hash 可追溯。
 
-实施进度（2026-09-09）：作者 attribution、ResearchDerivation、保存策略、冻结 Run、逐项 claim 与失败隔离已在 Issue #213 worktree 及 isolated PostgreSQL 证明；真实模型执行、调用/费用回执接入和新 worker 切换留待后续阶段，不能据此宣布 R1 全部完成。
+实施进度（2026-09-09）：作者 attribution、ResearchDerivation、保存策略、冻结 Run、逐项 claim 与失败隔离已在 Issue #213 worktree 及 isolated PostgreSQL 证明。0067 又为 RunItem 加入 120 秒 execution lease：每次 V1 claim 前只在新表回收过期 running 行，关联调用记为 `worker_interrupted` 与未知用量，并按三次上限转为 retryable/model_failed；旧 recovery/task 永不进入候选队列。真实模型执行、调用/费用回执接入和新 worker 切换留待后续阶段，不能据此宣布 R1 全部完成。
 
 ### R2 · Atom、向量与归并
 
