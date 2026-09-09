@@ -120,7 +120,7 @@ Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类
 - 实现四类 Atom 接纳、embedding adapter、精确召回 benchmark、候选消歧、Problem/Membership。
 - 验收：同义表达归并、近义但不同的问题不合并、`unknown` 角色不入分母、向量错维/NaN/部分响应逐项失败不污染其余 Atom、撤回后不再可读或统计。
 
-实施进度（2026-09-09）：四类 Atom 的接纳边界和稳定 Problem/Membership 的写入边界已由 isolated PostgreSQL 证明。模型只能提交受约束的 Atom 类型、proposition、basis 与 frozen `research_text` Unicode span；程序根据 ResearchDerivation 的不可变 offsets 生成 source span，拒绝输出时不会写入 Atom 或结算 Item。只有 `problem`/`need` 能以 `same` 进入稳定 Problem；Problem 只能通过显式 `new_problem` 或 `same_problem` 决定写入，一个 Atom 同时只有一个 current membership，definition revision、policy hash、basis、decision evidence 与必要 invocation 均留痕。该模块尚未接入真实模型/调用账本写入或 embedding；质量 benchmark、候选召回、模型消歧和真实调用接线仍待实施。
+实施进度（2026-09-09）：四类 Atom 的接纳边界、稳定 Problem/Membership 的写入边界、以及 vector candidate cache 已由 isolated PostgreSQL 证明。模型只能提交受约束的 Atom 类型、proposition、basis 与 frozen `research_text` Unicode span；程序根据 ResearchDerivation 的不可变 offsets 生成 source span，拒绝输出时不会写入 Atom 或结算 Item。只有 `problem`/`need` 能以 `same` 进入稳定 Problem；Problem 只能通过显式 `new_problem` 或 `same_problem` 决定写入，一个 Atom 同时只有一个 current membership，definition revision、policy hash、basis、decision evidence 与必要 invocation 均留痕。向量空间只从已保存、启用且 qualified 的 embedding config 建立；错维/NaN/零范数拒绝，exact cosine 返回最多十个仍有可读成员的定义候选，绝不写 membership。该模块尚未接入真实 provider/调用账本写入；gold-set 质量 benchmark、模型消歧和真实调用接线仍待实施。
 
 ### R3 · 冻结结果与变化
 
