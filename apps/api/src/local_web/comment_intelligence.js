@@ -25,6 +25,27 @@
     quote: "金句",
     story: "故事",
   };
+  const atomKinds = {
+    problem: "问题",
+    need: "需求",
+    solution: "解决方法",
+    stance: "立场",
+    story: "经历",
+    quote: "原声引用",
+    emotion: "情绪",
+  };
+  const organizationReasons = {
+    missing_embedding: "等待语义向量准备",
+    awaiting_organization: "等待自动整理",
+    below_min_common_core: "共同核心不足，暂不归并",
+    below_fixed_ann_sample: "固定样本不足，暂不归并",
+    comparison_quality_insufficient: "整理质量对照未达条件",
+    no_review_eligible_clusters: "没有达到复核条件的表达组",
+    semantic_runtime_unavailable: "语义整理运行环境暂不可用",
+    purpose_budget_exhausted: "语义整理额度不足，请检查研究设置",
+    day_budget_exhausted: "今日总额度已用完，等待恢复",
+    unknown_recovery_budget_exhausted: "未知用量恢复额度不足",
+  };
   const status = {
     pending: "待分析",
     running: "分析中",
@@ -41,6 +62,21 @@
     direct: "可分析",
     source_limit: "等待数量额度",
   };
+  const resultStatus = {
+    unstudied: "未研究",
+    studied: "已研究",
+    no_signal: "未提取到研究信号",
+    noSignal: "未提取到研究信号",
+    outdated: "研究结果待更新",
+  };
+  const executionStatus = {
+    idle: "尚未排队",
+    queued: "已排队",
+    running: "正在执行",
+    failed: "本次更新未完成",
+    waiting_recovery: "等待恢复",
+    waitingRecovery: "等待恢复",
+  };
   const isRunView = (view = state.view) => view === "daily" || view === "runs";
   const num = (v) => (v == null ? "—" : Number(v).toLocaleString("zh-CN"));
   const date = (v, full = false) =>
@@ -54,6 +90,31 @@
           minute: "2-digit",
         })
       : "未知";
+  function beijingDateTimeInput(value) {
+    if (!value || Number.isNaN(new Date(value).valueOf())) return "";
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Shanghai",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hourCycle: "h23",
+      })
+        .formatToParts(new Date(value))
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, part.value]),
+    );
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  }
+  function beijingDateTimePayload(value) {
+    const local = String(value || "").trim();
+    if (!local) return null;
+    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?$/.test(local))
+      throw new Error("历史起点必须选择一个北京时间日期和时间。");
+    return `${local.length === 16 ? `${local}:00` : local}+08:00`;
+  }
   const params = new URLSearchParams(location.search),
     domain = document.body.dataset.corpusDomain || "",
     canResearch = document.body.dataset.corpusDomainOwn !== "false";
@@ -101,6 +162,8 @@
     batchDetailError = "",
     refreshTimer = null,
     requestGeneration = 0,
+    researchSettings = null,
+    researchSettingsModel = null,
     voiceScope = null,
     resultsCurrent = true;
   const selected = new Set();
@@ -211,6 +274,20 @@
             ? `<span class="ci-tag" title="${esc(values.map((k) => lenses[k]).join("、"))}">+${values.length - 2}</span>`
             : "")
       : "";
+  }
+  function researchAxes(source, compact = false) {
+    const result = source?.resultState;
+    const execution = source?.executionState;
+    if (!result && !execution)
+      return '<span class="lgi-research-meta">结果与执行状态尚未记录</span>';
+    return `<span class="ci-axis-tags${compact ? " ci-axis-tags-compact" : ""}">${result ? `<span class="ci-axis-tag" data-axis="result">结果 · ${esc(resultStatus[result] || result)}</span>` : ""}${execution ? `<span class="ci-axis-tag" data-axis="execution">执行 · ${esc(executionStatus[execution] || execution)}</span>` : ""}</span>`;
+  }
+  function researchReason(source) {
+    const code = source?.reasonCode || source?.failureCode;
+    if (!code || code === "first_research") return "";
+    if (!["failed", "waiting_recovery"].includes(source?.executionState)) return "";
+    const message = failureText(code) || "执行未完成，请打开详情核对原因";
+    return `<span class="lgi-research-meta ci-execution-reason">${esc(message)}</span>`;
   }
   function bookmark(s) {
     return `<button type="button" class="ci-bookmark" data-ci="bookmark" data-ref="${esc(s.sourceRef)}" aria-label="${s.bookmarked ? "取消收藏" : "收藏评论"}" aria-pressed="${Boolean(s.bookmarked)}">${s.bookmarked ? "★" : "☆"}</button>`;
@@ -446,10 +523,38 @@
       return empty(
         "当前范围没有匹配原声。可以清除筛选；尚未采到不代表现实中没有讨论。",
       );
-    return `<div class="ci-table-wrap"><table class="ci-voices"><colgroup><col class="ci-col-select"><col><col class="ci-col-tags"><col class="ci-col-work"><col class="ci-col-likes"><col class="ci-col-time"></colgroup><thead><tr><th><input type="checkbox" data-ci-select-page aria-label="选择当前页评论" ${items.every((s) => selected.has(s.sourceRef)) ? "checked" : ""}></th><th>评论原声／回复</th><th>研究标签</th><th>所属作品</th><th class="lgi-research-number">赞</th><th>${state.timeBasis === "published" ? "发表时间" : "首次观察"}</th></tr></thead><tbody>${items.map((s) => `<tr data-row="${esc(s.sourceRef)}"><td><input type="checkbox" data-ci-select="${esc(s.sourceRef)}" aria-label="选择评论" ${selected.has(s.sourceRef) ? "checked" : ""}></td><td><button type="button" class="lgi-voice-open" data-ci="source" data-ref="${esc(s.sourceRef)}"><span class="lgi-voice-preview">${markedBody(s.body)}</span></button>${s.isReply ? `<div class="ci-parent">↳ ${esc(s.parentPreview || "父评论尚未采集")}</div>` : ""}<div class="ci-inline-tags">${tags(s.labels, true)}</div>${s.sourceChanged ? '<span class="lgi-research-meta">原文已变化，原人工判断待复核</span>' : ""}${!s.labels?.length ? `<span class="lgi-research-meta">${esc(status[s.analysisState] || status[s.cleanState] || "待分析")}</span>` : ""}${s.matchLocation ? `<span class="lgi-research-meta">${esc(s.matchLocation)}</span>` : ""}</td><td class="ci-tags-cell">${tags(s.labels, true)}${bookmark(s)}</td><td><a class="lgi-research-source-title" href="${linkWork(s)}">${esc(s.workTitle || "作品标题未知")}</a><div class="ci-author">${esc(s.creatorDisplayName || "作者未知")}</div></td><td class="lgi-research-number" title="${s.likes == null ? "尚未取得点赞" : esc(s.likes)}">${s.likes == null ? "—" : s.likes >= 10000 ? (s.likes / 10000).toFixed(1) + "万" : num(s.likes)}</td><td>${state.timeBasis === "published" ? esc(s.publishedAt ? date(s.publishedAt) : s.publishedAtText ? "采集时：" + s.publishedAtText : "未知") : esc(date(s.firstObservedAt))}</td></tr>`).join("")}</tbody></table></div>`;
+    return `<div class="ci-table-wrap"><table class="ci-voices"><colgroup><col class="ci-col-select"><col><col class="ci-col-tags"><col class="ci-col-work"><col class="ci-col-likes"><col class="ci-col-time"></colgroup><thead><tr><th><input type="checkbox" data-ci-select-page aria-label="选择当前页评论" ${items.every((s) => selected.has(s.sourceRef)) ? "checked" : ""}></th><th>评论原声／回复</th><th class="ci-col-tags">研究结果与执行</th><th>所属作品</th><th class="lgi-research-number">赞</th><th>${state.timeBasis === "published" ? "发表时间" : "首次观察"}</th></tr></thead><tbody>${items.map(voiceRow).join("")}</tbody></table></div>`;
+  }
+
+  function voiceRow(s) {
+    const sourceChanged = s.sourceChanged
+      ? '<span class="lgi-research-meta">原文已变化，原人工判断待复核</span>'
+      : "";
+    const matchLocation = s.matchLocation
+      ? `<span class="lgi-research-meta">${esc(s.matchLocation)}</span>`
+      : "";
+    const parent = s.isReply
+      ? `<div class="ci-parent">↳ ${esc(s.parentPreview || "父评论尚未采集")}</div>`
+      : "";
+    const observedAt = state.timeBasis === "published"
+      ? esc(s.publishedAt ? date(s.publishedAt) : s.publishedAtText ? "采集时：" + s.publishedAtText : "未知")
+      : esc(date(s.firstObservedAt));
+    const likes = s.likes == null
+      ? "—"
+      : s.likes >= 10000
+        ? (s.likes / 10000).toFixed(1) + "万"
+        : num(s.likes);
+    return `<tr data-row="${esc(s.sourceRef)}">
+      <td><input type="checkbox" data-ci-select="${esc(s.sourceRef)}" aria-label="选择评论" ${selected.has(s.sourceRef) ? "checked" : ""}></td>
+      <td><button type="button" class="lgi-voice-open" data-ci="source" data-ref="${esc(s.sourceRef)}"><span class="lgi-voice-preview">${markedBody(s.body)}</span></button>${parent}<div class="ci-inline-tags">${researchAxes(s, true)}${tags(s.labels, true)}</div>${sourceChanged}${matchLocation}</td>
+      <td class="ci-tags-cell"><div class="ci-status-line">${researchAxes(s, true)}${tags(s.labels, true)}${bookmark(s)}</div>${researchReason(s)}</td>
+      <td><a class="lgi-research-source-title" href="${linkWork(s)}">${esc(s.workTitle || "作品标题未知")}</a><div class="ci-author">${esc(s.creatorDisplayName || "作者未知")}</div></td>
+      <td class="lgi-research-number" title="${s.likes == null ? "尚未取得点赞" : esc(s.likes)}">${likes}</td>
+      <td>${observedAt}</td>
+    </tr>`;
   }
   function representative(s) {
-    return `<article class="ci-representative"><button type="button" data-ci="source" data-ref="${esc(s.sourceRef)}" class="lgi-voice-open"><span class="lgi-voice-preview">${esc(s.body || "原声当前不可读")}</span></button><div class="ci-result-line"><span>${tags(s.labels) || `<span class="lgi-research-meta">${s.hasAnalysis ? '已分析' : '待分析'}</span>`}</span><span class="lgi-research-meta">${esc(s.creatorDisplayName || "作者未知")} · ${num(s.likes)}赞 ${bookmark(s)}</span></div></article>`;
+    return `<article class="ci-representative"><button type="button" data-ci="source" data-ref="${esc(s.sourceRef)}" class="lgi-voice-open"><span class="lgi-voice-preview">${esc(s.body || "原声当前不可读")}</span></button><div class="ci-result-line"><span>${researchAxes(s, true)}${tags(s.labels)}</span><span class="lgi-research-meta">${esc(s.creatorDisplayName || "作者未知")} · ${num(s.likes)}赞 ${bookmark(s)}</span></div></article>`;
   }
   function observations(items) {
     if (data.rules?.advancedReleaseEnabled === false)
@@ -509,6 +614,62 @@
       )}</select></label><label>显示 <select id="ci-chart-mode"><option value="count">数量</option><option value="share" ${chartMode === "share" ? "selected" : ""} ${chartLens ? "" : "disabled"}>可分析样本内占比</option></select></label></div><div class="ci-chart" role="group" aria-label="用户声音按日计数">${t.map((d, i) => `<button type="button" data-ci="day" data-day="${esc(d.day)}" class="ci-chart-day ${d.partial ? "ci-partial" : ""}" style="--ci-bar:${values[i] == null ? 0 : Math.max(1, (100 * values[i]) / max)}%" aria-label="${esc(d.day)}，${values[i] == null ? "尚未分析" : chartMode === "share" ? values[i].toFixed(1) + "%" : num(values[i]) + "条"}${d.partial ? "，当日未结束" : ""}"><span class="ci-chart-count">${values[i] == null ? "—" : chartMode === "share" ? values[i].toFixed(0) + "%" : num(values[i])}</span><span class="ci-chart-bar"></span><span class="ci-chart-date">${esc(d.day.slice(5))}</span></button>`).join("")}</div><p class="lgi-research-meta">${chartMode === "share" ? "分母为当日当前可分析评论数，需结合分析覆盖解读。" : "本库首次观察计数。"}当日未完成部分以浅色标记，不解释为需求增长。</p>`;
   }
 
+  function schedulePolicy(schedule = {}) {
+    const value = schedule.policy || schedule.autoPolicy || schedule.auto_policy || {};
+    return {
+      continuousNew: value.continuousNew ?? value.continuous_new,
+      historicalEnabled: value.historicalEnabled ?? value.historical_enabled,
+      historyStart: value.historyStart ?? value.history_start,
+      outdatedPolicy: value.outdatedPolicy ?? value.outdated_policy,
+      dayTokenLimit: value.dayTokenLimit ?? value.day_token_limit,
+    };
+  }
+  function automationCoverage() {
+    const automatic = data.automaticResearch;
+    if (!automatic)
+      return '<section class="ci-auto-coverage" aria-labelledby="ci-auto-heading"><div class="ci-section-head"><div><h2 id="ci-auto-heading">自动研究覆盖</h2><p class="lgi-research-meta">当前读取未提供本领域的自动研究授权与队列事实。</p></div></div></section>';
+    const schedule = automatic.schedule || {};
+    const policy = schedulePolicy(schedule);
+    const results = data.summary?.resultStates || {};
+    const execution = data.summary?.executionStates || {};
+    const queue = automatic.queue || {};
+    const usage = automatic.usage || {};
+    const admittedComments = usage.admittedComments ?? usage.admitted_comments;
+    const sourceLimit = schedule.sourceLimit ?? schedule.source_limit;
+    const runningState = schedule.enabled === true && policy.continuousNew === true
+      ? "自动研究已启用"
+      : schedule.enabled === false
+        ? "自动研究未启用或已暂停"
+        : "自动研究状态尚未提供";
+    const next = schedule.nextCutoff || schedule.next_cutoff;
+    const history = policy.historicalEnabled
+      ? `历史补齐从 ${esc(policy.historyStart || "起点尚未记录")} 开始`
+      : "历史补齐未启用";
+    const currentItems = [
+      ["结果 · 未研究", results.unstudied, "unstudied"],
+      ["结果 · 已研究", results.studied, "studied"],
+      ["结果 · 无信号", results.noSignal ?? results.no_signal, "no_signal"],
+      ["结果 · 待更新", results.outdated, "outdated"],
+      ["执行 · 已排队", execution.queued, "queued"],
+      ["执行 · 执行中", execution.running, "running"],
+      ["执行 · 等待恢复", execution.waitingRecovery ?? execution.waiting_recovery, "waiting_recovery"],
+      ["执行 · 本次未完成", execution.failed, "failed"],
+    ];
+    const queueItems = [
+      ["新增队列", queue.new_intake ?? queue.newIntake],
+      ["恢复队列", queue.recovery],
+      ["历史补齐", queue.historical],
+      ["历史未研究且可调度", automatic.unresearchedHistory],
+    ];
+    const outdated = { disabled: "不自动更新", current_only: "只更新启用后的评论", historical: "按历史授权更新" }[policy.outdatedPolicy] || "更新政策尚未提供";
+    const firstEnabled = schedule.firstEnabledAt || schedule.first_enabled_at;
+    const firstBoundary = firstEnabled
+      ? `首次启用 ${esc(date(firstEnabled, true))}；暂停恢复不覆盖这个边界。`
+      : (schedule.legacyActivationUnknown || schedule.legacy_activation_unknown)
+        ? "旧启用时间无法可靠回溯，历史授权保持关闭，直到保存明确的新政策。"
+        : "首次启用边界尚未记录。";
+    return `<section class="ci-auto-coverage" aria-labelledby="ci-auto-heading"><div class="ci-section-head"><div><h2 id="ci-auto-heading">自动研究覆盖</h2><p class="lgi-research-meta">${runningState}${next ? ` · 下一截点 ${esc(date(next, true))}` : " · 下一截点尚未提供"}</p></div>${canResearch ? btn("设置自动研究", "settings") : ""}</div><p class="lgi-research-meta">自动授权范围：${automatic.scope === "entire_own_domain" ? "整个自有领域" : "范围尚未提供"}。本页临时原声筛选只改变浏览与当前状态清单，不缩小后台自动队列。</p><p class="lgi-research-meta">${history}；新增 ${policy.continuousNew ? "已启用" : "未启用"}；已有结果 ${esc(outdated)}。${firstBoundary}</p><div class="ci-auto-state-grid">${queueItems.map(([label, value]) => `<div class="ci-auto-state"><span>${label}</span><strong>${num(value)}</strong></div>`).join("")}</div><dl class="ci-rule-fields"><div><dt>今日自动研究上限</dt><dd>${num(admittedComments)} / ${num(sourceLimit)} 条</dd></div><div><dt>今日用量</dt><dd>${num(usage.chargedTokens)} Token · ${num(usage.calls)} 次调用</dd></div><div><dt>未知用量</dt><dd>${num(usage.unknownUsageCalls)} 次 · 恢复已计 ${num(usage.unknownRecoveryTokens)} Token</dd></div><div><dt>规则比较</dt><dd>${num(usage.replayTokens)} Token</dd></div><div><dt>问题整理</dt><dd>${num(usage.semanticTokens)} Token</dd></div></dl><p class="lgi-research-meta">同一评论重试不会重复占用评论槽位，重试请求仍按实际用量计 Token。新增、恢复与历史补齐共用这一日上限；手动指定范围遵守自己的授权与总 Token 上限。</p><p class="lgi-research-meta">${esc(automatic.accounting || "计费说明尚未提供")} ${esc(automatic.historyNote || "")}</p><details><summary>研究结果与任务进度</summary><p class="lgi-research-meta">下面只统计本页读取的原声；点击可进入相同浏览范围的筛选，不代表整个自有领域。</p><div class="ci-auto-state-grid">${currentItems.map(([label, value, state]) => `<button type="button" data-ci="axis-drill" data-state="${state}"><span>${label}</span><strong>${num(value)}</strong></button>`).join("")}</div></details></section>`;
+  }
   function renderOverview() {
     const s = data.summary;
     $("results").innerHTML = `<div class="ci-metrics">${[
@@ -523,7 +684,7 @@
       )
       .join(
         "",
-      )}</div><div class="ci-grid"><section><h2>用户声音走势</h2>${chart()}</section><section><h2>值得注意</h2>${observations(data.observations || [])}</section></div><div class="ci-lens-strip">${Object.entries(
+      )}</div>${automationCoverage()}${semanticOrganizationSummary()}<div class="ci-grid"><section><h2>用户声音走势</h2>${chart()}</section><section><h2>值得注意</h2>${observations(data.observations || [])}</section></div><div class="ci-lens-strip">${Object.entries(
       lenses,
     )
       .map(
@@ -540,19 +701,41 @@
           return `<button type="button" data-ci="term" data-term="${esc(t.term)}" style="font-size:${15 + Math.round((17 * t.count) / max)}px" title="${num(t.count)}条原声 · ${num(t.works)}篇作品">${esc(t.term)}</button>`;
         })
         .join("") || empty("当前范围尚无可展示词频。")
-    }</div><p class="lgi-research-meta">字号表示包含该词的不同评论数。点击查看原声；没有可比基线时不标升温。</p></section></div><section class="ci-section"><div class="ci-section-head"><h2>代表原声</h2><span class="lgi-research-meta">按最近观察选取，可回溯，不代表总体</span></div><div class="ci-representatives">${(data.representatives || data.page.items.slice(0, 4)).map(representative).join("") || empty("尚无原声。采集接纳后的评论会进入这里。")}</div></section>`;
+    }</div><p class="lgi-research-meta">字号表示包含该词的不同评论数。点击查看原声；没有可比基线时不标升温。</p></section></div><section class="ci-section"><div class="ci-section-head"><h2>代表原声</h2><span class="lgi-research-meta">按最近观察选取，可回溯，不代表总体</span></div><div class="ci-representatives">${(data.representatives || data.page.items.slice(0, 4)).map(representative).join("") || `${empty("尚无已分析的代表原声。")}<p>${btn("查看全部原声", "voices")}</p>`}</div></section>`;
   }
   const lifecycleLabel = (p) => ({ emerging: "新兴问题", stable: "稳定问题" })[p.lifecycle || p.definition?.lifecycle] || "已有问题";
   function automationSummary() {
     const automation = data.problemAutomation;
     const names = { ready: "问题归并已就绪", running_or_queued: "问题归并正在处理或排队", retrieval_not_configured: "问题召回模型尚未配置", READY: "问题归并已就绪", RUNNING: "问题归并正在运行", NOT_CONFIGURED: "问题归并尚未配置", PAUSED: "问题归并已暂停", NEEDS_QUALIFICATION: "归并模型需完成测试", MODEL_NOT_QUALIFIED: "归并模型需完成测试", WAITING_MODEL: "等待可用的归并模型" };
-    const stateNames = { pending: "等待处理", running: "正在归并", blocked_retrieval: "等待问题召回配置", needs_judgment: "需要判断", succeeded: "已完成关系判断", failed: "处理失败", superseded: "已由新版接续" };
+    const stateNames = { pending: "等待处理", running: "正在归并", blocked_retrieval: "等待问题召回配置", needs_judgment: "待自动复核", succeeded: "已完成关系判断", failed: "处理失败", superseded: "已由新版接续" };
     const processing = (automation?.states || []).filter((row) => row.count > 0);
-    return `<div class="ci-automation-line"><span>${esc(names[automation?.status] || "问题归并状态尚未提供")}</span>${automation?.reason ? `<span class="lgi-research-meta">${esc(automation.reason)}</span>` : ""}${automation?.status === "retrieval_not_configured" ? '<a href="/settings/models#embedding" class="ci-text-action">配置问题召回模型</a>' : ""}<span class="ci-flex"></span>${btn("需要判断", "judgment", `class="ci-text-action" ${automation ? "" : "disabled"}`)}${automation?.needsJudgment ? `<span class="ci-count">${num(automation.needsJudgment.length)}</span>` : ""}</div>${processing.length ? `<details class="ci-automation-details"><summary>归并处理情况 · 当前领域</summary><ul class="ci-problem-list">${processing.map((row) => `<li><span>${esc(row.reason === "usage_review_required" && ["succeeded", "needs_judgment"].includes(row.state) ? `结果已接纳，用量待核对${row.state === "needs_judgment" ? "；问题关系仍需要判断" : ""}` : stateNames[row.state] || "已记录处理状态")}</span><span>${num(row.count)} 项</span></li>`).join("")}</ul>${processing.some((row) => row.state === "failed") ? `<p class="lgi-research-meta">存在未完成的关系判断，已有原声和提取结果仍保留。${btn("查看运行记录", "runs", 'class="ci-text-action"')}</p>` : ""}</details>` : ""}`;
+    return `<div class="ci-automation-line"><span>${esc(names[automation?.status] || "问题归并状态尚未提供")}</span>${automation?.reason ? `<span class="lgi-research-meta">${esc(automation.reason)}</span>` : ""}${automation?.status === "retrieval_not_configured" ? '<a href="/settings/models#embedding" class="ci-text-action">配置问题召回模型</a>' : ""}${automation?.needsJudgment ? `<span class="lgi-research-meta">${num(automation.needsJudgment.length)} 项边界等待后续自动复核；普通表达继续保留且不要求逐条确认。</span>` : ""}</div>${processing.length ? `<details class="ci-automation-details"><summary>归并处理情况 · 当前领域</summary><ul class="ci-problem-list">${processing.map((row) => `<li><span>${esc(row.reason === "usage_review_required" && ["succeeded", "needs_judgment"].includes(row.state) ? `结果已接纳，用量待核对${row.state === "needs_judgment" ? "；边界等待自动复核" : ""}` : stateNames[row.state] || "已记录处理状态")}</span><span>${num(row.count)} 项</span></li>`).join("")}</ul>${processing.some((row) => row.state === "failed") ? `<p class="lgi-research-meta">存在未完成的自动归并，已有原声和提取结果仍保留。${btn("查看运行记录", "runs", 'class="ci-text-action"')}</p>` : ""}</details>` : ""}`;
   }
   function problemReadouts() {
     const s = data.problemSummary || {};
-    return `<dl class="ci-research-readouts">${[["已分析评论", s.analyzedComments], ["问题表达", s.expressionCount], ["待归并表达", s.unmergedExpressions], ["需要判断", s.needsJudgment], ["新兴问题", s.emergingProblems], ["稳定问题", s.stableProblems]].map(([label,value]) => `<div><dt>${label}</dt><dd>${num(value)}</dd></div>`).join("")}</dl>${s.unclassifiedProblems ? `<p class="lgi-research-meta">另有 ${num(s.unclassifiedProblems)} 个历史问题尚未标定发展阶段。</p>` : ""}`;
+    return `<dl class="ci-research-readouts">${[["已分析评论", s.analyzedComments], ["问题表达", s.expressionCount], ["待归并表达", s.unmergedExpressions], ["待自动复核", s.needsJudgment], ["新兴问题", s.emergingProblems], ["稳定问题", s.stableProblems]].map(([label,value]) => `<div><dt>${label}</dt><dd>${num(value)}</dd></div>`).join("")}</dl>${s.unclassifiedProblems ? `<p class="lgi-research-meta">另有 ${num(s.unclassifiedProblems)} 个历史问题尚未标定发展阶段。</p>` : ""}`;
+  }
+  function semanticOrganizationSummary() {
+    const organization = data.semanticOrganization;
+    if (!organization) return "";
+    const atomCount = organization.atomCount;
+    const waiting = organization.unclusteredCount;
+    return `<section class="ci-semantic-organization ci-semantic-organization-summary"><div class="ci-section-head"><div><h2>表达整理</h2><p class="lgi-research-meta">已接受的原声表达会先保留，再按稳定条件组织；没有稳定簇时也不会消失。</p></div>${btn("查看表达", "all-problems", 'class="ci-text-action"')}</div><div class="ci-organization-counts"><div><span>已经理解</span><strong>${num(atomCount)}</strong></div><div><span>等待整理</span><strong>${num(waiting)}</strong></div></div></section>`;
+  }
+  function semanticOrganizationList() {
+    const organization = data.semanticOrganization;
+    if (!organization) return "";
+    const waiting = organization.unclustered || [];
+    const byKind = Object.entries(organization.byKind || {})
+      .filter(([, count]) => Number(count) > 0)
+      .map(([kind, count]) => `<span class="ci-tag">${esc(atomKinds[kind] || kind)} ${num(count)}</span>`)
+      .join("");
+    return `<section class="ci-semantic-organization"><div class="ci-section-head"><div><h2>已经理解、等待整理的表达</h2><p class="lgi-research-meta">已经理解 ${num(organization.atomCount)} 条 · 等待整理 ${num(organization.unclusteredCount)} 条。稳定性只决定是否归并，不抹去已经接纳的表达。</p></div></div>${byKind ? `<div class="ci-organization-kinds">${byKind}</div>` : ""}${waiting.length ? `<ul class="ci-organization-list">${waiting.map((item) => `<li><div><span class="ci-tag">${esc(atomKinds[item.kind] || item.kind || "表达")}</span><p>${esc(item.meaning || "表达含义尚未提供")}</p><span class="lgi-research-meta">${esc(organizationReasons[item.reason] || item.reason || "等待自动整理")}</span></div><div>${item.sourceRef ? btn("查看原声", "source", `data-ref="${esc(item.sourceRef)}" class="ci-text-action"`) : ""}</div></li>`).join("")}</ul>${waiting.length >= 30 ? '<p class="lgi-research-meta">当前仅展示最近 30 条等待整理的表达。</p>' : ""}` : `<p class="ci-empty-compact">当前范围的已理解表达都已通过现有整理条件；后续新增表达仍会保留并继续核对。</p>`}<p class="lgi-research-meta">${esc(organization.qualityMeaning || "稳定性不等于语义正确率；请通过原声核对含义。")}</p></section>`;
+  }
+  function relatedTopics() {
+    const topics = data.relatedTopics || [];
+    if (!topics.length) return "";
+    return `<details class="ci-related-topics"><summary>相关作品所属主题 · ${num(topics.length)}</summary><p class="lgi-research-meta">这是来源作品与既有主题成员的派生关联，用来补充阅读背景；不表示这条评论已被正式分类到主题。</p><ul>${topics.map((topic) => `<li><div><strong>${esc(topic.name || "主题名称尚未提供")}</strong><span class="lgi-research-meta">${num(topic.works)} 篇作品 · ${num(topic.comments)} 条当前范围原声</span><p>${esc(topic.meaning || "主题含义尚未提供")}</p></div></li>`).join("")}</ul></details>`;
   }
   function renderChanges() {
     $("results").innerHTML = `<section class="ci-view-intro"><div><h2>哪些声音值得继续关注</h2><p>按当前时间与材料范围观察变化，运行批次在「运行记录」中单独查看。</p></div>${btn("查看运行记录", "runs")}</section><section class="ci-section ci-change-observations"><div class="ci-section-head"><h2>样本中的变化</h2><span class="lgi-research-meta">${num(data.summary.analyzed)} 条已分析 · ${num(data.summary.works)} 篇作品</span></div>${observations(data.observations || [])}</section><div class="ci-grid"><section><h2>当前范围涉及的问题</h2>${problemList(data.problems || [])}</section><section><h2>观察覆盖</h2><p class="lgi-research-meta">${num(data.summary.comments)} 条研究原声，${num(data.summary.analyzed)} 条完成分析。刚处理完历史评论不代表近期讨论增加。</p>${chart()}</section></div><section class="ci-section"><div class="ci-section-head"><h2>已研究的具体声音</h2>${btn("查看原声", "voices", 'class="ci-text-action"')}</div><div class="ci-representatives">${(data.representatives || []).map(representative).join("") || '<p class="ci-empty-compact">当前范围尚无可展示的已分析原声。</p>'}</div></section>`;
@@ -560,10 +743,11 @@
   function renderProblems() {
     const p = data.problem;
     if (!p) {
-      $("results").innerHTML = `<section class="ci-view-intro"><div><h2>用户反复遇到的问题</h2><p>已有问题持续吸收新原声；早期表达与需要判断的边界分别保留。</p></div>${btn("浏览原声", "voices")}</section>${problemReadouts()}${automationSummary()}`;
+      $("results").innerHTML = `<section class="ci-view-intro"><div><h2>用户反复遇到的问题</h2><p>已有问题持续吸收新原声；早期表达与待自动复核的边界分别保留。</p></div>${btn("浏览原声", "voices")}</section>${problemReadouts()}${automationSummary()}`;
       $("results").innerHTML += (data.problems || []).length
         ? `<div class="ci-table-wrap"><table class="ci-problem-table"><thead><tr><th>用户问题</th><th>阶段</th><th>原声</th><th>作品</th><th>代表表达</th></tr></thead><tbody>${data.problems.map((p) => `<tr><td>${btn(esc(p.name), "problem", `data-ref="${esc(p.problemRef)}" class="ci-text-action"`)}<div class="lgi-research-meta">${esc(p.meaning)}</div></td><td><span class="ci-tag">${lifecycleLabel(p)}</span></td><td>${num(p.comments)}</td><td>${num(p.works)}</td><td><span class="lgi-voice-preview">${esc(p.representative?.body || "暂无代表原声")}</span></td></tr>`).join("")}</tbody></table></div>`
         : `<div class="ci-empty-compact"><h3>还没有形成长期用户问题</h3><p>已完成分析 ${num(data.summary.analyzed)} 条评论。具体问题表达会在下方保留，自动归并的进展见上方状态。</p></div>`;
+      $("results").innerHTML += semanticOrganizationList();
       $("results").innerHTML += `<details class="ci-early-expressions" ${(data.problems || []).length ? "" : "open"}><summary>早期问题表达 · ${num(data.candidateTotal)} 组</summary>${candidateList()}</details>`;
       return;
     }
@@ -576,12 +760,12 @@
               `<p>${btn(esc(w.title || "作品标题未知"), "work", `data-ref="${esc(w.workRef)}" class="ci-text-action"`)} · ${num(w.comments)}</p>`,
           )
           .join("") || '<p class="lgi-research-meta">暂无来源分布。</p>'
-      }</section></div><details><summary>定义与变更记录</summary><p>${esc(p.definition?.boundary || p.meaning)}</p>${(data.history || []).map((h) => `<p>修订 ${num(h.revision)} · ${esc(h.reason || h.kind || "定义更新")} · ${esc(date(h.createdAt))}</p>`).join("") || "<p>暂无变更记录。</p>"}</details><section class="ci-section"><h2>相关原声</h2>${voiceTable(data.page.items)}</section>`;
+      }</section></div>${relatedTopics()}<details><summary>定义与变更记录</summary><p>${esc(p.definition?.boundary || p.meaning)}</p>${(data.history || []).map((h) => `<p>修订 ${num(h.revision)} · ${esc(h.reason || h.kind || "定义更新")} · ${esc(date(h.createdAt))}</p>`).join("") || "<p>暂无变更记录。</p>"}</details><section class="ci-section"><h2>相关原声</h2>${voiceTable(data.page.items)}</section>`;
   }
   function candidateList() {
     const candidates = data.problemCandidates || [];
     const total = data.candidateTotal;
-    return `<section class="ci-section ci-candidates"><div class="ci-section-head"><h2>待整理的问题表达 <span class="lgi-research-meta">${num(total ?? candidates.length)} 个候选</span></h2></div><p class="lgi-research-meta">这些表达尚未归入长期问题，系统按研究设置继续整理。你可以查看证据，必要时纠正归属，不需要逐条确认。</p>${candidates.length ? `<ul class="ci-candidate-list">${candidates.map((p) => `<li><div><h3>${esc(p.name)}</h3><p>${esc(p.meaning)}</p>${p.evidence?.length ? `<blockquote>${esc(typeof p.evidence[0] === "string" ? p.evidence[0] : p.evidence[0].quote || p.evidence[0].body || "")}</blockquote>` : ""}<span class="lgi-research-meta">${num(p.comments)} 条原声 · ${num(p.works)} 篇作品 · 等待整理</span></div><div class="ci-candidate-actions">${btn("核对原声", "candidate-voices", `data-ref="${esc(p.candidateRef)}"`)}${canResearch ? btn("人工建立问题", "candidate-create", `data-ref="${esc(p.candidateRef)}"`) : ""}</div></li>`).join("")}</ul>${total > candidates.length ? `<p class="lgi-research-meta">当前展示 ${num(candidates.length)} / ${num(total)} 个候选，可通过作品或评论关键词缩小范围。</p>` : ""}` : `<p class="ci-empty-compact">${total == null ? "问题候选尚未提供，请刷新后重试。" : data.summary.analyzed ? "当前范围内尚未提取到未归并的问题表达。可查看已分析原声，核对标签与具体结果。" : "当前范围尚未完成评论分析。手动研究或已启用的每日研究完成后，问题表达会进入这里。"}</p>`}</section>`;
+    return `<section class="ci-section ci-candidates"><div class="ci-section-head"><h2>待整理的问题表达 <span class="lgi-research-meta">${num(total ?? candidates.length)} 个候选</span></h2></div><p class="lgi-research-meta">这些表达尚未归入长期问题，系统按研究设置继续整理。你可以查看证据，必要时纠正归属，不需要逐条确认。</p>${candidates.length ? `<ul class="ci-candidate-list">${candidates.map((p) => `<li><div><h3>${esc(p.name)}</h3><p>${esc(p.meaning)}</p>${p.evidence?.length ? `<blockquote>${esc(typeof p.evidence[0] === "string" ? p.evidence[0] : p.evidence[0].quote || p.evidence[0].body || "")}</blockquote>` : ""}<span class="lgi-research-meta">${num(p.comments)} 条原声 · ${num(p.works)} 篇作品 · 等待整理</span></div><div class="ci-candidate-actions">${btn("核对原声", "candidate-voices", `data-ref="${esc(p.candidateRef)}"`)}${canResearch ? `<details class="ci-candidate-correction"><summary>按需修正</summary><p class="lgi-research-meta">只有需要保留例外边界时，才基于已核对原声建立问题。</p>${btn("建立问题", "candidate-create", `data-ref="${esc(p.candidateRef)}"`)}</details>` : ""}</div></li>`).join("")}</ul>${total > candidates.length ? `<p class="lgi-research-meta">当前展示 ${num(candidates.length)} / ${num(total)} 个候选，可通过作品或评论关键词缩小范围。</p>` : ""}` : `<p class="ci-empty-compact">${total == null ? "问题候选尚未提供，请刷新后重试。" : data.summary.analyzed ? "当前范围内尚未提取到未归并的问题表达。可查看已分析原声，核对标签与具体结果。" : "当前范围尚未完成评论分析。手动研究或已启用的每日研究完成后，问题表达会进入这里。"}</p>`}</section>`;
   }
   const failureText = (code) => ({
     usage_review_required: "结果已接纳，用量待核对",
@@ -627,12 +811,53 @@
     field_rejected: "该字段未通过校验",
   })[code] || (code ? "此项未通过校验，打开详情核对具体原因" : "");
   const duration = (ms) => ms == null ? "耗时未知" : ms < 1000 ? `${num(ms)} 毫秒` : `${(ms / 1000).toFixed(1)} 秒`;
+  const callPurpose = (purpose) => ({
+    problem_relation: "问题归并",
+    problem_embedding: "语义召回",
+    field_repair: "补齐未通过的字段",
+  })[purpose] || "评论提取";
+  function repairFieldList(fields) {
+    const items = Array.isArray(fields) ? fields : fields == null ? [] : [fields];
+    return items.map((field) => {
+      if (typeof field === "string") return `<code>${esc(field)}</code>`;
+      const label = field?.path || field?.field || field?.name || contextText(field);
+      return `<code>${esc(label)}</code>`;
+    }).join("、") || "字段未记录";
+  }
+  function callInputScope(call) {
+    return call?.purpose === "field_repair"
+      ? `${num(call.requestedFields)} 个未通过字段 · ${num(call.requestedComments)} 条评论`
+      : `${num(call?.requestedComments)} 条评论`;
+  }
   function callTable(calls, batchRef) {
-    return calls.length ? `<div class="ci-table-wrap"><table class="ci-call-table"><thead><tr><th>作品与评论</th><th>执行情况</th><th>用量</th><th>详情</th></tr></thead><tbody>${calls.map((c, i) => `<tr><td><span class="lgi-research-meta">调用 ${i + 1} · ${({ problem_relation: "问题归并", problem_embedding: "语义召回" })[c.purpose] || "评论提取"}</span><div class="lgi-voice-preview">${esc(c.workTitle || "作品标题未记录")}</div><span class="lgi-research-meta">${num(c.requestedComments)} 条评论 · ${esc(c.modelId || "模型未记录")}</span></td><td><span class="ci-operation" data-state="${esc(c.state)}">${c.state === "succeeded" && c.failureCode === "usage_review_required" ? "结果已接纳，用量待核对" : c.state === "running" ? "等待模型返回" : c.state === "succeeded" ? "输出已接纳" : c.state === "partial" ? "部分输出已接纳" : c.state === "failed" ? "未接纳研究输出" : "状态未知"}</span><div class="lgi-research-meta">${esc(date(c.startedAt))} · ${duration(c.elapsedMs)}</div><div>${c.acceptedComments == null ? "" : `接纳 ${num(c.acceptedComments)} 条输出`}</div>${c.succeededComments != null ? `<div class="lgi-research-meta">有结果 ${num(c.succeededComments)} · 无信号 ${num(c.noSignalComments)} · 未接纳 ${num(c.failedComments)}</div>` : ""}${c.failureCode && c.failureCode !== "usage_review_required" ? `<p class="ci-failure-text">${esc(failureText(c.failureCode))}</p>` : ""}</td><td><span>输入 ${num(c.inputTokens)} / 输出 ${num(c.outputTokens)}</span><div class="lgi-research-meta">${c.usageUnknown ? `用量待核对 · 保留预留 ${num(c.reservedTokens)}` : "供应商已报告用量"}</div></td><td>${btn("查看过程", "request-detail", `data-ref="${esc(batchRef)}" data-invocation="${esc(c.invocationRef)}"`)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="ci-empty-compact">尚无模型请求记录。批次可能还在清洗、等待执行或已暂停。</p>`;
+    return calls.length ? `<div class="ci-table-wrap"><table class="ci-call-table"><thead><tr><th>作品与评论</th><th>执行情况</th><th>用量</th><th>详情</th></tr></thead><tbody>${calls.map((c, i) => `<tr><td><span class="lgi-research-meta">调用 ${i + 1} · ${callPurpose(c.purpose)}</span><div class="lgi-voice-preview">${esc(c.workTitle || "作品标题未记录")}</div><span class="lgi-research-meta">${callInputScope(c)} · ${esc(c.modelId || "模型未记录")}</span></td><td><span class="ci-operation" data-state="${esc(c.state)}">${c.state === "succeeded" && c.failureCode === "usage_review_required" ? "结果已接纳，用量待核对" : c.state === "running" ? "等待模型返回" : c.state === "succeeded" ? "输出已接纳" : c.state === "partial" ? "部分输出已接纳" : c.state === "failed" ? "未接纳研究输出" : "状态未知"}</span><div class="lgi-research-meta">${esc(date(c.startedAt))} · ${duration(c.elapsedMs)}</div><div>${c.acceptedComments == null ? "" : c.purpose === "field_repair" ? c.acceptedComments ? "补齐结果已写入补充分析" : "未生成补充分析" : `接纳 ${num(c.acceptedComments)} 条输出`}</div>${c.succeededComments != null ? `<div class="lgi-research-meta">有结果 ${num(c.succeededComments)} · 无信号 ${num(c.noSignalComments)} · 未接纳 ${num(c.failedComments)}</div>` : ""}${localRecoveryNote(c)}${c.failureCode && c.failureCode !== "usage_review_required" ? `<p class="ci-failure-text">${esc(failureText(c.failureCode) || "调用未完成，请查看过程核对原因")}</p>` : ""}</td><td><span>输入 ${num(c.inputTokens)} / 输出 ${num(c.outputTokens)}</span><div class="lgi-research-meta">${c.usageUnknown ? `用量待核对 · 保留预留 ${num(c.reservedTokens)}` : "供应商已报告用量"}</div></td><td>${btn("查看过程", "request-detail", `data-ref="${esc(batchRef)}" data-invocation="${esc(c.invocationRef)}"`)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="ci-empty-compact">尚无模型请求记录。批次可能还在清洗、等待执行或已暂停。</p>`;
+  }
+  function localRecoveryNote(call) {
+    if (!call?.localRecoveryRef && call?.locallyRecoveredComments == null) return "";
+    return `<p class="lgi-research-meta">本地严格复核接纳 ${num(call.locallyRecoveredComments)} 条；未新增外发模型调用，原失败调用与用量记录继续保留。</p>`;
+  }
+  function batchTitle(batch) {
+    return ({
+      daily: "每日新增",
+      backlog: "历史补齐／结果更新",
+      supplement: "补充研究",
+      selected: "指定范围研究",
+    })[batch?.kind] || "指定范围研究";
+  }
+  function batchReasonNote(batch) {
+    if (batch?.kind === "backlog") {
+      const reason = {
+        authorized_history_or_changed_input: "按已授权历史或当前输入变化排队，不表示今天出现了新的需求。",
+      }[batch.reason] || "按自动历史补齐或结果更新排队，不表示今天出现了新的需求。";
+      return `<p class="lgi-research-meta">${reason}</p>`;
+    }
+    if (batch?.kind === "supplement" && batch.reason === "source_text_revised")
+      return '<p class="lgi-research-meta">来源文字已变化，沿用原批次冻结范围进行补充研究，不计为今天新增需求。</p>';
+    return "";
   }
   function renderDaily() {
     const daily = data.daily || { items: [], schedule: {} }, items = daily.items || [], b = items.find((x) => x.batchRef === state.batchRef);
-    $("ci-tools").innerHTML = `<div class="ci-run-toolbar"><div><h2>研究运行记录</h2><p class="lgi-research-meta">核对范围、模型调用和未完成项。日常发现请查看「变化观察」。</p></div>${btn("返回变化观察", "changes")}</div><div class="ci-result-line"><label class="ci-batch-picker"><span>研究批次</span> <select id="ci-batch"><option value="">查看最近批次</option>${items.map((x) => `<option value="${esc(x.batchRef)}" ${x.batchRef === state.batchRef ? "selected" : ""}>${esc(date(x.end, true))} · ${{ daily: "每日新增", supplement: "补充研究" }[x.kind] || "指定范围研究"}</option>`).join("")}</select></label><span>每日自动研究${daily.schedule?.enabled ? "已启用 · 北京时间 23:00 截止" : "未启用"}</span></div>`;
+    $("ci-tools").innerHTML = `<div class="ci-run-toolbar"><div><h2>研究运行记录</h2><p class="lgi-research-meta">核对范围、模型调用和未完成项。日常发现请查看「变化观察」。</p></div>${btn("返回变化观察", "changes")}</div><div class="ci-result-line"><label class="ci-batch-picker"><span>研究批次</span> <select id="ci-batch"><option value="">查看最近批次</option>${items.map((x) => `<option value="${esc(x.batchRef)}" ${x.batchRef === state.batchRef ? "selected" : ""}>${esc(date(x.end, true))} · ${batchTitle(x)}</option>`).join("")}</select></label><span>每日自动研究${daily.schedule?.enabled ? "已启用 · 北京时间 23:00 截止" : "未启用"}</span></div>`;
     if (!b) {
       $("results").innerHTML = `<div class="ci-empty-compact"><h3>${items.length ? "这个批次当前不在可见范围" : "还没有研究运行记录"}</h3><p>${items.length ? "从上方选择批次，查看执行情况。" : "手动研究与每日自动研究都会留下独立记录，包含范围、用量和失败原因。"}</p>${btn("浏览原声", "voices")}</div>`;
       return;
@@ -641,7 +866,7 @@
     const unfinished = Object.entries(counts).filter(([k]) => !["succeeded", "no_signal", "failed"].includes(k));
     const knownInput = calls.reduce((n, c) => n + (c.inputTokens || 0), 0), knownOutput = calls.reduce((n, c) => n + (c.outputTokens || 0), 0);
     const unknownReserve = calls.filter((c) => c.usageUnknown).reduce((n, c) => n + (c.reservedTokens || 0), 0);
-    $("results").innerHTML = `<section class="ci-batch-header"><div class="ci-section-head"><div><h2>本批执行情况</h2><p class="lgi-research-meta">${num(b.total)} 条原声 · ${num(b.works)} 篇作品 · ${esc(date(b.end, true))}</p></div><div class="lgi-research-actions">${btn("查看本批原声", "batch-voices")}${btn("逐条运行记录", "batch-records", `data-ref="${esc(b.batchRef)}"`)}</div></div><div class="ci-batch-readouts">${[["提取到研究结果", counts.succeeded || 0, "succeeded"], ["未提取到信号", counts.no_signal || 0, "no_signal"], ["分析未完成", counts.failed || 0, "failed"]].map(([label, value, key]) => `<button type="button" data-ci="batch-result" data-state="${key}"><span>${label}</span><strong>${num(value)} <small>条</small></strong><span>${key === "succeeded" ? "查看已保存结果" : key === "no_signal" ? "查看原声与无信号结果" : "查看原因与处理方式"}</span></button>`).join("")}</div>${unfinished.length ? `<p class="ci-notice">${unfinished.map(([k, v]) => `${esc(status[k] || "其他处理状态")} ${num(v)} 条`).join(" · ")}${counts.running ? " · 每 5 秒更新执行情况" : ""}</p>` : ""}${b.kind !== "daily" ? '<p class="lgi-research-meta">这里包含本批处理的历史评论，不据此判断今天出现了新的需求。</p>' : ""}</section><section class="ci-section"><div class="ci-section-head"><div><h2 id="ci-run-heading" tabindex="-1">模型怎样处理这一批</h2><p class="lgi-research-meta">评论提取与问题归并分别记录；展开一次调用查看实际输入、输出与校验。</p></div><span class="lgi-research-meta">${batchDetail?.callTotal == null ? "" : `共 ${num(batchDetail.callTotal)} 次 · `}当前展示 ${num(batchDetail ? calls.length : null)} 次调用</span></div>${batchDetailError ? `<p class="ci-notice">运行记录暂不可读：${esc(batchDetailError)} ${btn("重试读取", "refresh")}</p>` : callTable(calls, b.batchRef)}<details class="ci-usage"><summary>用量与研究控制</summary><p>当前展示调用已报告：输入 ${num(batchDetail ? knownInput : null)} / 输出 ${num(batchDetail ? knownOutput : null)} Token；用量未知而保留的预留 ${num(batchDetail ? unknownReserve : null)} Token。</p><p>批次额度已计入 ${num(b.chargedTokens)} / ${num(b.tokenLimit)} Token。预留不等于已确认消耗；实际费用以供应商账单为准。</p><p>${b.enabled ? "后续请求允许执行" : "后续请求已暂停"}。暂停后已发出的调用仍可能返回并计费。</p><div class="lgi-research-actions">${btn(b.enabled ? "暂停批次" : "恢复批次", "batch-toggle", `data-ref="${esc(b.batchRef)}" data-enabled="${!b.enabled}"`)}${btn("重试失败", "batch-retry", `data-ref="${esc(b.batchRef)}" ${b.enabled && counts.failed ? "" : "disabled"}`)}${btn("调整本批额度", "batch-continue", `data-ref="${esc(b.batchRef)}"`)}</div></details></section>`;
+    $("results").innerHTML = `<section class="ci-batch-header"><div class="ci-section-head"><div><h2>${batchTitle(b)}</h2><p class="lgi-research-meta">${num(b.total)} 条原声 · ${num(b.works)} 篇作品 · ${esc(date(b.end, true))}</p></div><div class="lgi-research-actions">${btn("查看本批原声", "batch-voices")}${btn("逐条运行记录", "batch-records", `data-ref="${esc(b.batchRef)}"`)}</div></div><div class="ci-batch-readouts">${[["提取到研究结果", counts.succeeded || 0, "succeeded"], ["未提取到信号", counts.no_signal || 0, "no_signal"], ["分析未完成", counts.failed || 0, "failed"]].map(([label, value, key]) => `<button type="button" data-ci="batch-result" data-state="${key}"><span>${label}</span><strong>${num(value)} <small>条</small></strong><span>${key === "succeeded" ? "查看已保存结果" : key === "no_signal" ? "查看原声与无信号结果" : "查看原因与处理方式"}</span></button>`).join("")}</div>${unfinished.length ? `<p class="ci-notice">${unfinished.map(([k, v]) => `${esc(status[k] || "其他处理状态")} ${num(v)} 条`).join(" · ")}${counts.running ? " · 每 5 秒更新执行情况" : ""}</p>` : ""}${batchReasonNote(b)}</section><section class="ci-section"><div class="ci-section-head"><div><h2 id="ci-run-heading" tabindex="-1">模型怎样处理这一批</h2><p class="lgi-research-meta">评论提取与问题归并分别记录；展开一次调用查看实际输入、输出与校验。</p></div><span class="lgi-research-meta">${batchDetail?.callTotal == null ? "" : `共 ${num(batchDetail.callTotal)} 次 · `}当前展示 ${num(batchDetail ? calls.length : null)} 次调用</span></div>${batchDetailError ? `<p class="ci-notice">运行记录暂不可读：${esc(batchDetailError)} ${btn("重试读取", "refresh")}</p>` : callTable(calls, b.batchRef)}<details class="ci-usage"><summary>用量与研究控制</summary><p>当前展示调用已报告：输入 ${num(batchDetail ? knownInput : null)} / 输出 ${num(batchDetail ? knownOutput : null)} Token；用量未知而保留的预留 ${num(batchDetail ? unknownReserve : null)} Token。</p><p>批次额度已计入 ${num(b.chargedTokens)} / ${num(b.tokenLimit)} Token。预留不等于已确认消耗；实际费用以供应商账单为准。</p><p>${b.enabled ? "后续请求允许执行" : "后续请求已暂停"}。暂停后已发出的调用仍可能返回并计费。</p><div class="lgi-research-actions">${btn(b.enabled ? "暂停批次" : "恢复批次", "batch-toggle", `data-ref="${esc(b.batchRef)}" data-enabled="${!b.enabled}"`)}${btn("重试失败", "batch-retry", `data-ref="${esc(b.batchRef)}" ${b.enabled && counts.failed ? "" : "disabled"}`)}${btn("调整本批额度", "batch-continue", `data-ref="${esc(b.batchRef)}"`)}</div></details></section>`;
   }
   function renderPagination() {
     const show = state.view === "voices" || (state.view === "problems" && data.problem);
@@ -704,7 +929,7 @@
       const s = v.source,
         idx = data.page.items.findIndex((x) => x.sourceRef === s.sourceRef),
         a = v.annotations || {};
-      inspector.innerHTML = `<header><h2 id="ci-inspector-title" tabindex="-1">评论详情</h2><div>${btn("↑", "source-previous", `aria-label="上一条评论" ${idx > 0 ? "" : "disabled"}`)}${btn("↓", "source-next", `aria-label="下一条评论" ${idx >= 0 && idx < data.page.items.length - 1 ? "" : "disabled"}`)}${bookmark(s)}${btn("关闭", "close-inspector")}</div></header><div class="ci-inspector-content"><section><h3>原始评论</h3><blockquote id="ci-source-body">${esc(s.body || "正文当前不可读")}</blockquote><p class="lgi-research-meta">${num(s.likes)} 赞 · ${s.isReply ? "回复评论" : "一级评论"} · ${esc({ author: "作者回复", platform_system: "平台系统评论", user: "用户评论" }[s.role] || "角色未知")} · 点赞快照 ${esc(date(s.lastObservedAt, true))}</p><p class="lgi-research-meta">发表：${esc(s.publishedAt ? date(s.publishedAt, true) : s.publishedAtText ? "采集时：" + s.publishedAtText : "未知")} · 首次观察 ${esc(date(s.firstObservedAt, true))}</p></section><section><h3>对话上下文</h3>${v.parent ? `<div class="ci-parent-context"><p>父评论</p><blockquote>${esc(v.parent.body || "父评论正文未知")}</blockquote></div>` : `<p>${s.isReply ? "父评论尚未采集或当前不可读，不补写缺失内容。" : "这是一条一级评论。"}</p>`}<details><summary>展开已采集的对话片段</summary>${(v.thread || []).map((t) => `<blockquote>${esc(t.body)}</blockquote>`).join("") || "<p>没有更多已存对话。</p>"}</details></section><section><h3>所属作品</h3><strong>${esc(v.work?.title?.value || s.workTitle || "作品标题未知")}</strong><p class="lgi-research-meta">${esc(s.creatorDisplayName || "作者未知")}</p><blockquote class="ci-context-body">${esc(v.work?.body?.value || "作品正文尚未取得。")}</blockquote>${window.CommentDaily.mediaHtml(v.derivatives)}<a href="${linkWork(s)}">查看完整作品 →</a></section><section><h3>研究结果</h3>${v.research?.sourceChanged || s.sourceChanged ? '<p class="lgi-research-meta">原文已变化，原人工判断待复核。</p>' : ""}${semanticNotice((a.analysis || []).find((x) => x.result)?.result)}${tags(v.research?.labels || s.labels) || "<p>尚无研究分类。</p>"}${(v.problems || []).map((p) => `<p>${btn(esc(p.name), "problem", `data-ref="${esc(p.problemRef)}" class="ci-text-action"`)}</p>`).join("")}${(
+      inspector.innerHTML = `<header><h2 id="ci-inspector-title" tabindex="-1">评论详情</h2><div>${btn("↑", "source-previous", `aria-label="上一条评论" ${idx > 0 ? "" : "disabled"}`)}${btn("↓", "source-next", `aria-label="下一条评论" ${idx >= 0 && idx < data.page.items.length - 1 ? "" : "disabled"}`)}${bookmark(s)}${btn("关闭", "close-inspector")}</div></header><div class="ci-inspector-content"><section><h3>原始评论</h3><blockquote id="ci-source-body">${esc(s.body || "正文当前不可读")}</blockquote><p class="lgi-research-meta">${num(s.likes)} 赞 · ${s.isReply ? "回复评论" : "一级评论"} · ${esc({ author: "作者回复", platform_system: "平台系统评论", user: "用户评论" }[s.role] || "角色未知")} · 点赞快照 ${esc(date(s.lastObservedAt, true))}</p><p class="lgi-research-meta">发表：${esc(s.publishedAt ? date(s.publishedAt, true) : s.publishedAtText ? "采集时：" + s.publishedAtText : "未知")} · 首次观察 ${esc(date(s.firstObservedAt, true))}</p></section><section><h3>对话上下文</h3>${v.parent ? `<div class="ci-parent-context"><p>父评论</p><blockquote>${esc(v.parent.body || "父评论正文未知")}</blockquote></div>` : `<p>${s.isReply ? "父评论尚未采集或当前不可读，不补写缺失内容。" : "这是一条一级评论。"}</p>`}<details><summary>展开已采集的对话片段</summary>${(v.thread || []).map((t) => `<blockquote>${esc(t.body)}</blockquote>`).join("") || "<p>没有更多已存对话。</p>"}</details></section><section><h3>所属作品</h3><strong>${esc(v.work?.title?.value || s.workTitle || "作品标题未知")}</strong><p class="lgi-research-meta">${esc(s.creatorDisplayName || "作者未知")}</p><blockquote class="ci-context-body">${esc(v.work?.body?.value || "作品正文尚未取得。")}</blockquote>${window.CommentDaily.mediaHtml(v.derivatives)}<a href="${linkWork(s)}">查看完整作品 →</a></section><section><h3>研究结果与执行</h3>${researchAxes(s)}${researchReason(s)}${v.research?.sourceChanged || s.sourceChanged ? '<p class="lgi-research-meta">原文已变化，原人工判断待复核。</p>' : ""}${semanticNotice((a.analysis || []).find((x) => x.result)?.result)}${tags(v.research?.labels || s.labels) || "<p>尚无研究分类。</p>"}${(v.problems || []).map((p) => `<p>${btn(esc(p.name), "problem", `data-ref="${esc(p.problemRef)}" class="ci-text-action"`)}</p>`).join("")}${(
         a.analysis || []
       )
         .map((x) =>
@@ -770,6 +995,45 @@
     await load();
     if (detail?.source.sourceRef === ref) await openSource(ref);
   }
+  function preflightRows(preflight) {
+    const legacy = {
+      reusable: "已有结果可复用",
+      newAnalysis: "需要新增分析",
+      dropped: "已过滤噪声",
+      contextMissing: "上下文待补",
+      anomaly: "数据异常",
+      retryRequired: "恢复条件已满足",
+      inProgress: "已有分析正在进行",
+      inputTooLarge: "上下文超过输入预算",
+    };
+    const categories = {
+      Reusable: "已有结果可复用",
+      InProgress: "已有分析正在进行",
+      FirstResearch: "首次研究",
+      Outdated: "现有结果待更新",
+      FailedRecovery: "恢复条件检查",
+      Excluded: "已过滤噪声",
+      ContextMissing: "上下文待补",
+      Anomaly: "数据异常",
+      reusable: "已有结果可复用",
+      inProgress: "已有分析正在进行",
+      firstResearch: "首次研究",
+      outdated: "现有结果待更新",
+      failedRecovery: "恢复条件检查",
+      excluded: "已过滤噪声",
+      contextMissing: "上下文待补",
+      anomaly: "数据异常",
+    };
+    const rows = Object.entries(preflight.categories || {}).length
+      ? Object.entries(preflight.categories || {}).map(([key, value]) => [categories[key] || key, value])
+      : Object.entries(preflight.counts || {}).map(([key, value]) => [legacy[key] || key, value]);
+    return rows.map(([label, value]) => `<div><span>${esc(label)}</span><strong>${num(value)}</strong></div>`).join("");
+  }
+  function preflightSummary(prepared) {
+    const preflight = prepared.preflight;
+    if (!preflight) return '<p class="lgi-research-meta">当前范围未提供预检回执，不能确认新增外发范围。</p>';
+    return `<p>${num(prepared.count)} 条评论 · ${num(prepared.works)} 篇作品。范围已冻结，有效至 ${esc(date(prepared.expiresAt))}。</p><p>已有结果优先复用，其余按作品和模型预算自动分包。</p><div class="ci-preflight-counts">${preflightRows(preflight)}</div><p class="lgi-research-meta">${preflight.estimatedCalls?.available ? `预计新增调用 ${num(preflight.estimatedCalls.min)}–${num(preflight.estimatedCalls.max)} 次 · Token 保守上界 ${num(preflight.tokenUpperBound)}` : "配置模型后才能估算新增调用"}</p><details><summary>预检与估算说明</summary><p>${esc(preflight.estimateMethod)}</p><p>旧结果与本次更新结果分别保留；只有恢复政策、冷却和次数都允许时才会重新进入外发范围。</p></details>`;
+  }
   async function openPrepare(refs, scopeOverride = {}) {
     if (!canResearch)
       throw new Error("当前外部领域仅浏览原声，不向模型发送评论。");
@@ -823,7 +1087,7 @@
       offset: 0,
       bookmarkedOnly: state.bookmarkedOnly,
     };
-    const [p, m] = await Promise.all([
+    let [p, m] = await Promise.all([
       request(`${api}/prepare`, { scope, sourceRefs: refs, reanalyze: false }),
       request("/api/local/model-settings"),
     ]);
@@ -835,7 +1099,7 @@
     const modelHint = ({NEEDS_SELECTION:"已有模型调用成功，尚未选择为默认模型",NEEDS_CALL_TEST:"请在供应商弹窗中测试模型调用，无需先设置默认模型",NEEDS_QUALIFICATION:"请在供应商弹窗中测试模型调用，无需先设置默认模型",PAUSED:"模型连接已暂停，请先启用"})[m.model?.modelState] || "尚未配置，请先添加供应商并测试";
     showModal(
       "确认评论研究",
-      `<p>${num(p.count)} 条评论 · ${num(p.works)} 篇作品。范围已冻结，有效至 ${esc(date(p.expiresAt))}。</p><p>已有结果优先复用，其余按作品和模型预算自动分包。</p>${p.preflight ? `<div class="ci-preflight-counts">${Object.entries(p.preflight.counts || {}).map(([key,n]) => `<div><span>${esc({reusable:"已有结果可复用",newAnalysis:"需要新增分析",dropped:"已过滤噪声",contextMissing:"上下文待补",anomaly:"数据异常",retryRequired:"既有失败，需重试",inProgress:"已有分析正在进行",inputTooLarge:"上下文超过输入预算"}[key] || key)}</span><strong>${num(n)}</strong></div>`).join("")}</div><p class="lgi-research-meta">${p.preflight.estimatedCalls?.available ? `预计新增调用 ${num(p.preflight.estimatedCalls.min)}–${num(p.preflight.estimatedCalls.max)} 次 · Token 保守上界 ${num(p.preflight.tokenUpperBound)}` : "配置模型后才能估算新增调用"}</p><details><summary>预检与估算说明</summary><p>${esc(p.preflight.estimateMethod)}</p><p>已有失败不会因重新选择而自动重试；重新分析会保留旧版本并使用新额度。</p></details>` : ""}<details><summary>范围处理统计</summary><p>${Object.entries(
+      `<div id="ci-preflight-summary">${preflightSummary(p)}</div><details><summary>范围处理统计</summary><p>${Object.entries(
         p.states || {},
       )
         .filter(([, n]) => typeof n === "number")
@@ -849,15 +1113,8 @@
       "确认并开始",
       modelReady && p.count
         ? async (f) => {
-            let prep = p;
-            if (f.get("reanalyze"))
-              prep = await request(`${api}/prepare`, {
-                scope,
-                sourceRefs: p.sourceRefs,
-                reanalyze: true,
-              });
             const r = await request(`${api}/run`, {
-              prepareRef: prep.prepareRef,
+              prepareRef: p.prepareRef,
               configRef: m.config.configRef,
               tokenLimit: Number(f.get("tokenLimit")),
               reanalyze: Boolean(f.get("reanalyze")),
@@ -867,6 +1124,27 @@
           }
         : null,
     );
+    modal.querySelector('input[name="reanalyze"]')?.addEventListener("change", async (event) => {
+      const control = event.currentTarget;
+      control.disabled = true;
+      const summary = $("ci-preflight-summary");
+      summary?.setAttribute("aria-busy", "true");
+      if (summary) summary.innerHTML = '<p role="status">正在按新的重研选项重新核对范围、可复用结果与调用估算…</p>';
+      try {
+        p = await request(`${api}/prepare`, {
+          scope,
+          sourceRefs: p.sourceRefs,
+          reanalyze: control.checked,
+        });
+        if (summary && modal.open) summary.innerHTML = preflightSummary(p);
+      } catch (error) {
+        if (summary && modal.open) summary.innerHTML = `<p class="ci-failure-text">预检未更新：${esc(error.message)}。当前确认已停用，请重新打开研究范围。</p>`;
+        $("ci-command-submit").disabled = true;
+      } finally {
+        summary?.removeAttribute("aria-busy");
+        control.disabled = false;
+      }
+    });
   }
   function openCorrection() {
     const d = detail;
@@ -939,7 +1217,7 @@
   function openFilters() {
     showModal(
       "筛选当前研究范围",
-      `<label>时间口径<select name="timeBasis"><option value="observed">首次观察时间</option><option value="published" ${state.timeBasis === "published" ? "selected" : ""}>评论发表时间（仅可靠时间）</option></select></label><label>处理状态<select name="processingState"><option value="">全部状态</option>${["pending", "context", "failed", "low_information", "anomaly"].map((k) => `<option value="${k}" ${state.processingState === k ? "selected" : ""}>${status[k]}</option>`).join("")}</select></label><p>发表时间无法可靠解析的评论会被排除；不会以观察时间补充发表时间。</p>`,
+      `<label>时间口径<select name="timeBasis"><option value="observed">首次观察时间</option><option value="published" ${state.timeBasis === "published" ? "selected" : ""}>评论发表时间（仅可靠时间）</option></select></label><label>研究状态<select name="processingState"><option value="">全部状态</option><optgroup label="结果">${["unstudied", "studied", "outdated"].map((k) => `<option value="${k}" ${state.processingState === k ? "selected" : ""}>${resultStatus[k]}</option>`).join("")}<option value="no_signal" ${state.processingState === "no_signal" ? "selected" : ""}>${resultStatus.no_signal}</option></optgroup><optgroup label="执行">${["idle", "queued", "running", "waiting_recovery", "failed"].map((k) => `<option value="${k}" ${state.processingState === k ? "selected" : ""}>${executionStatus[k]}</option>`).join("")}</optgroup><optgroup label="清洗／旧处理">${["pending", "context", "low_information", "anomaly"].map((k) => `<option value="${k}" ${state.processingState === k ? "selected" : ""}>${status[k]}</option>`).join("")}</optgroup></select></label><p>结果状态与执行状态分别来自当前资格投影；发表时间无法可靠解析的评论会被排除，不会以观察时间补充。</p>`,
       "应用筛选",
       async (f) => {
         modal.close();
@@ -972,6 +1250,281 @@
     );
   }
   const contextLabels = { workBody: "作品正文", ocr: "图片文字", asr: "音视频转录", parent: "父评论", existingProblems: "问题自动归并" };
+  const ruleKinds = ["problem", "need", "solution", "stance", "story", "quote", "emotion"];
+  const ruleKindLabels = { problem: "问题", need: "需求", solution: "解决方法", stance: "立场", story: "经历", quote: "原声引用", emotion: "情绪" };
+  const replayState = {
+    queued: "已冻结样本，等待比较执行",
+    running: "比较执行中",
+    succeeded: "比较已完成",
+    failed: "本次比较未完成",
+    insufficient_evidence: "可用配对样本不足",
+    pass: "通过当前自动检查",
+    degraded: "本次比较未通过自动检查",
+  };
+  function autoPolicy(schedule = {}) {
+    const raw = schedule.autoPolicy || schedule.auto_policy || {};
+    return {
+      continuousNew: raw.continuousNew ?? raw.continuous_new ?? false,
+      historicalEnabled: raw.historicalEnabled ?? raw.historical_enabled ?? false,
+      historyStart: raw.historyStart ?? raw.history_start ?? "",
+      outdatedPolicy: raw.outdatedPolicy ?? raw.outdated_policy ?? "disabled",
+      unknownRetryMaxAttempts: raw.unknownRetryMaxAttempts ?? raw.unknown_retry_max_attempts ?? 0,
+      unknownRetryTokenLimit: raw.unknownRetryTokenLimit ?? raw.unknown_retry_token_limit ?? 0,
+      dayTokenLimit: raw.dayTokenLimit ?? raw.day_token_limit ?? schedule.tokenLimit ?? schedule.token_limit ?? 100000,
+      replayTokenLimit: raw.replayTokenLimit ?? raw.replay_token_limit ?? 0,
+      semanticTokenLimit: raw.semanticTokenLimit ?? raw.semantic_token_limit ?? 0,
+    };
+  }
+  function ruleSummary(rule, title = "当前有效规则") {
+    if (!rule) return `<section class="ci-setting-block"><h3>${title}</h3><p class="lgi-research-meta">规则读取尚未提供，不能据此推断研究方向。</p></section>`;
+    const fields = rule.fieldDefinitions || [];
+    const examples = rule.examples || [];
+    return `<section class="ci-setting-block"><h3>${title}</h3><p><strong>${esc(rule.purpose?.title || "标题未记录")}</strong> · ${esc(rule.ruleVersion || "版本未记录")}</p><p>${esc(rule.purpose?.instruction || "目的未记录")}</p><p class="lgi-research-meta">哈希 ${esc(rule.canonicalHash || "未记录")} · schema ${esc(rule.schemaVersion || "未记录")} · selector ${esc(rule.selectorVersion || "未记录")}</p><details><summary>字段与例子</summary><dl class="ci-rule-fields">${fields.map((field) => `<div><dt>${esc(field.name || field.kind || "字段")}</dt><dd>${esc(field.definition || "定义未记录")}</dd></div>`).join("") || "<p>没有可读字段定义。</p>"}</dl>${examples.length ? `<ol class="ci-rule-examples">${examples.map((example) => `<li><span class="ci-axis-tag" data-axis="result">${esc(example.field || "字段")} · ${example.polarity === "negative" ? "不算" : "算"}</span><blockquote>${esc(example.comment || "例子未记录")}</blockquote><p>${esc(example.expected || "预期未记录")}</p></li>`).join("")}</ol>` : "<p>没有可读例子。</p>"}</details></section>`;
+  }
+  function ruleKindOptions(value) {
+    return ruleKinds.map((kind) => `<option value="${kind}" ${kind === value ? "selected" : ""}>${ruleKindLabels[kind]}</option>`).join("");
+  }
+  function candidateFieldEditorRow(field = {}) {
+    return `<div class="ci-rule-editor-row" data-rule-field><label>类型<select data-rule-field-kind>${ruleKindOptions(field.kind || "need")}</select></label><label>字段名称<input data-rule-field-name maxlength="120" value="${esc(field.name || "")}" placeholder="例如：具体需求" required></label><label>字段说明<input data-rule-field-definition maxlength="1200" value="${esc(field.definition || "")}" placeholder="什么情况算，什么情况不算" required></label><button type="button" class="ci-text-action" data-rule-remove-field>删除</button></div>`;
+  }
+  function candidateExampleEditorRow(example = {}) {
+    return `<div class="ci-rule-editor-row" data-rule-example><label>对应类型<select data-rule-example-field>${ruleKindOptions(example.field || "need")}</select></label><label>判断<select data-rule-example-polarity><option value="positive" ${example.polarity !== "negative" ? "selected" : ""}>算作</option><option value="negative" ${example.polarity === "negative" ? "selected" : ""}>不算作</option></select></label><label>评论例子<textarea data-rule-example-comment maxlength="1200" rows="2" placeholder="用户实际会怎样表达">${esc(example.comment || "")}</textarea></label><label>预期判断<textarea data-rule-example-expected maxlength="1200" rows="2" placeholder="应当如何解释或排除">${esc(example.expected || "")}</textarea></label><button type="button" class="ci-text-action" data-rule-remove-example>删除</button></div>`;
+  }
+  function candidateEditorValue(row, selector) {
+    return String(row.querySelector(selector)?.value || "").trim();
+  }
+  function candidateFieldDefinitions() {
+    const rows = [...modal.querySelectorAll("[data-rule-field]")];
+    if (!rows.length) throw new Error("至少保留一个研究字段。");
+    return rows.map((row, index) => {
+      const kind = candidateEditorValue(row, "[data-rule-field-kind]");
+      const name = candidateEditorValue(row, "[data-rule-field-name]");
+      const definition = candidateEditorValue(row, "[data-rule-field-definition]");
+      if (!ruleKinds.includes(kind) || !name || !definition)
+        throw new Error(`请完整填写第 ${index + 1} 个字段的类型、名称和说明。`);
+      return { kind, name, definition };
+    });
+  }
+  function candidateExamples() {
+    return [...modal.querySelectorAll("[data-rule-example]")].map((row, index) => {
+      const field = candidateEditorValue(row, "[data-rule-example-field]");
+      const polarity = candidateEditorValue(row, "[data-rule-example-polarity]");
+      const comment = candidateEditorValue(row, "[data-rule-example-comment]");
+      const expected = candidateEditorValue(row, "[data-rule-example-expected]");
+      if (!ruleKinds.includes(field) || !["positive", "negative"].includes(polarity) || !comment || !expected)
+        throw new Error(`请完整填写第 ${index + 1} 个例子的类型、判断、评论和预期。`);
+      return { field, polarity, comment, expected };
+    });
+  }
+  function bindCandidateEditor() {
+    const fields = modal.querySelector("#ci-rule-fields-editor");
+    const examples = modal.querySelector("#ci-rule-examples-editor");
+    modal.querySelector("[data-rule-add-field]")?.addEventListener("click", () => fields?.insertAdjacentHTML("beforeend", candidateFieldEditorRow()));
+    modal.querySelector("[data-rule-add-example]")?.addEventListener("click", () => examples?.insertAdjacentHTML("beforeend", candidateExampleEditorRow()));
+    fields?.addEventListener("click", (event) => event.target.closest("[data-rule-remove-field]")?.closest("[data-rule-field]")?.remove());
+    examples?.addEventListener("click", (event) => event.target.closest("[data-rule-remove-example]")?.closest("[data-rule-example]")?.remove());
+  }
+  function candidateOptions(settings) {
+    return (settings?.candidates || []).filter((candidate) => candidate.ruleVersion === "comment-research.v5" && candidate.creationSource === "user_candidate");
+  }
+  function comparisonReadout(comparison) {
+    if (!comparison) return '<p class="lgi-research-meta">比较尚未形成结论；不能据此写成无差异或已通过。</p>';
+    const percent = (value) => value == null ? "未知" : `${(100 * value).toFixed(1)}%`;
+    const ratio = (value) => value == null ? "未知" : `${value.toFixed(2)}×`;
+    const rows = [
+      ["成对覆盖", `${num(comparison.completedPairs)} / ${num(comparison.eligibleCount)} · ${percent(comparison.pairCoverage)}`],
+      ["结构拒绝", `基线 ${percent(comparison.baselineSchemaFailure)} · 候选 ${percent(comparison.candidateSchemaFailure)}`],
+      ["无信号分布", `基线 ${percent(comparison.baselineNoSignal)} · 候选 ${percent(comparison.candidateNoSignal)}`],
+      ["Token 比率", ratio(comparison.tokenRatio)],
+      ["耗时比率", ratio(comparison.latencyRatio)],
+      ["重复稳定性", `${percent(comparison.repeatConsistency)} · ${num(comparison.repeatCompletedCount)} / ${num(comparison.repeatRequestedCount)}`],
+      ["可归因条件", comparison.sameInputSameModel === true ? "同输入、同模型的工程健康检查" : comparison.sameInputSameModel === false ? "条件不一致，不能归因到规则" : "未记录"],
+      ["供应商失败", comparison.supplierFailureCount == null ? "未记录" : `${num(comparison.supplierFailureCount)} 次`],
+      ["提示词可归因健康回归", comparison.promptAttributableHealthRegression === true ? "记录到工程回归" : comparison.promptAttributableHealthRegression === false ? "未记录到工程回归" : "未记录"],
+    ];
+    return `<section class="ci-setting-block"><h3>比较结论 · ${esc(replayState[comparison.state] || comparison.state || "状态未记录")}</h3><dl class="ci-rule-fields">${rows.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join("")}</dl><p class="lgi-research-meta">稳定性、结构、分布与健康检查只说明工程表现，不等于语义准确率。</p>${comparison.newDimensionsNotDirectlyCompared ? '<p class="lgi-research-meta">候选新增维度不与基线标签做直接语义等价比较。</p>' : ""}${(comparison.reasons || []).length ? `<p class="lgi-research-meta">限制／原因：${esc(comparison.reasons.join("、"))}</p>` : ""}</section>`;
+  }
+  function thresholdReadout(thresholds) {
+    if (!thresholds || typeof thresholds !== "object")
+      return '<p class="lgi-research-meta">本次比较阈值尚未提供。</p>';
+    const percent = (value) => value == null ? "未知" : `${(100 * value).toFixed(1)}%`;
+    const rows = [
+      ["最少成对样本", thresholds.minimumPairs],
+      ["最少作品数", thresholds.minimumWorks],
+      ["最低成对覆盖", percent(thresholds.minimumPairCoverage)],
+      ["最大结构拒绝", percent(thresholds.maximumSchemaFailure)],
+      ["最大结构拒绝增幅", percent(thresholds.maximumSchemaIncrease)],
+      ["最大无信号偏移", percent(thresholds.maximumNoSignalShift)],
+      ["最大 Token 比率", thresholds.maximumTokenRatio == null ? "未知" : `${thresholds.maximumTokenRatio}×`],
+      ["最大耗时比率", thresholds.maximumLatencyRatio == null ? "未知" : `${thresholds.maximumLatencyRatio}×`],
+      ["最低重复稳定性", percent(thresholds.minimumRepeatConsistency)],
+    ];
+    return `<section class="ci-setting-block"><h3>冻结的工程阈值</h3><dl class="ci-rule-fields">${rows.map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`).join("")}</dl><p class="lgi-research-meta">${esc(thresholds.version || "阈值版本未记录")}；这些阈值只检查结构、覆盖、用量与稳定性，不等于语义质量证明。</p></section>`;
+  }
+  function replayFreezeReadout(run) {
+    const model = run.modelSnapshot || {};
+    const policy = run.contextPolicy || {};
+    const enabledContext = Object.entries(contextLabels).filter(([key]) => policy[key] === true).map(([, label]) => label);
+    return `<details class="ci-setting-block"><summary>冻结的执行边界</summary><dl class="ci-rule-fields"><div><dt>模型</dt><dd>${esc(model.modelId || "模型标识未记录")}</dd></div><div><dt>输入／输出上限</dt><dd>${num(model.inputTokenLimit)} / ${num(model.outputTokenLimit)} Token</dd></div><div><dt>上下文</dt><dd>${esc(enabledContext.join("、") || "没有可读上下文开关")}</dd></div><div><dt>上下文哈希</dt><dd><code>${esc(run.contextPolicyHash || "未记录")}</code></dd></div></dl></details>`;
+  }
+  function replayRows(replays) {
+    const items = replays?.items || [];
+    if (!items.length) return '<p class="lgi-research-meta">还没有规则比较记录。保存候选不会自动发送模型请求。</p>';
+    return `<div class="ci-table-wrap"><table class="ci-replay-table"><thead><tr><th>候选</th><th>比较状态</th><th>样本／用量</th><th>结论</th><th></th></tr></thead><tbody>${items.slice(0, 8).map((run) => `<tr><td><code>${esc(run.candidateRuleRevisionRef || "未记录")}</code></td><td>${esc(replayState[run.state] || run.state || "状态未记录")}${run.failureCode ? `<div class="lgi-research-meta">${esc(run.failureCode)}</div>` : ""}</td><td>冻结 ${num(run.frozenCount)} 条 · 已完成 ${num(run.succeededCount)} 条<br><span class="lgi-research-meta">授权 ${num(run.authorizedTokenBudget)} Token · 预留 ${num(run.reservedTokens)}</span></td><td>${run.comparison ? `${esc(replayState[run.comparison.state] || run.comparison.state || "已保留比较摘要")} · 覆盖 ${num(run.comparison.completedPairs)} / ${num(run.comparison.eligibleCount)}` : "尚无可用比较结论"}</td><td>${btn("查看摘要", "replay-detail", `data-ref="${esc(run.runRef)}"`)}</td></tr>`).join("")}</tbody></table></div>`;
+  }
+  const continuityState = {
+    queued: "等待后台处理",
+    running: "处理中",
+    succeeded: "已完成",
+    failed: "未完成",
+    expired: "保留期已过",
+    no_new_samples: "尚无新的可研究样本",
+    waiting_daily_budget: "等待当日共享额度",
+  };
+  function continuityFailure(code) {
+    return ({ insufficient_new_sources: "没有新的可研究原声", replay_authorized_budget_exhausted: "比较授权额度已用尽", source_unavailable: "来源当前不可读", retention_expired: "保留期已过", invalid_explanation_citation: "有限工程说明未通过引用校验" })[code] || (code ? "本次未完成，保留运行记录供核对" : "");
+  }
+  function continuityReadout(continuity) {
+    const followUps = continuity?.followUps || [];
+    const explanations = continuity?.explanations || [];
+    const rollbacks = continuity?.rollbackReceipts || [];
+    if (!followUps.length && !explanations.length && !rollbacks.length)
+      return '<details class="ci-setting-block"><summary>比较后续与回退记录</summary><p class="lgi-research-meta">尚无后续比较、有限工程说明或规则回退记录。这里是只读历史，不会创建运行或模型调用。</p></details>';
+    const followUpRows = followUps.slice(0, 8).map((item) => `<tr><td><code>${esc(item.priorRunRef || "未记录")}</code></td><td>${esc(({ required_new_samples: "等待新的可研究原声" })[item.reason] || "后续条件未记录")}</td><td>${esc(continuityState[item.state] || item.state || "状态未记录")}${item.failureCode ? `<div class="lgi-research-meta">${esc(continuityFailure(item.failureCode))}</div>` : ""}</td><td>${item.successorRunRef ? `<code>${esc(item.successorRunRef)}</code>` : "尚未生成"}</td></tr>`).join("");
+    const explanationRows = explanations.slice(0, 8).map((item) => {
+      const safe = item.result && typeof item.result === "object" ? item.result : {};
+      const note = safe.summary ? `<p>${esc(safe.summary)}</p>` : "";
+      const uncertainty = safe.uncertainty ? `<p class="lgi-research-meta">限制：${esc(safe.uncertainty)}</p>` : "";
+      return `<tr><td><code>${esc(item.runRef || "未记录")}</code></td><td>${esc(continuityState[item.state] || item.state || "状态未记录")}${item.failureCode ? `<div class="lgi-research-meta">${esc(continuityFailure(item.failureCode))}</div>` : ""}</td><td>预留 ${num(item.reservedTokens)} Token<br><span class="lgi-research-meta">${item.expiresAt ? `保留至 ${esc(date(item.expiresAt, true))}` : "保留期未记录"}</span></td><td>${note || "尚无可读工程说明"}${uncertainty}</td></tr>`;
+    }).join("");
+    const rollbackRows = rollbacks.slice(0, 8).map((item) => {
+      const health = item.healthEvidence && typeof item.healthEvidence === "object" ? item.healthEvidence : {};
+      const healthStatus = replayState[health.state] || health.state || "工程健康检查记录";
+      return `<tr><td><code>${esc(item.triggeringRunRef || "未记录")}</code></td><td><code>${esc(item.candidateRuleRevisionRef || "未记录")}</code></td><td><code>${esc(item.restoredRuleRevisionRef || "未记录")}</code></td><td>${esc(healthStatus)} · 配对 ${num(health.completedPairs)} / ${num(health.eligibleCount)}<br><span class="lgi-research-meta">${esc(date(item.createdAt, true))}</span></td></tr>`;
+    }).join("");
+    return `<details class="ci-setting-block"><summary>比较后续与回退记录 · ${num(followUps.length + explanations.length + rollbacks.length)}</summary><p class="lgi-research-meta">只读展示后续样本、有限工程说明和回退回执；稳定性、结构和分布检查不等于语义准确率，也不触发逐条人工审批。</p>${followUpRows ? `<h4>后续比较</h4><div class="ci-table-wrap"><table class="ci-replay-table"><thead><tr><th>原运行</th><th>条件</th><th>状态</th><th>后续运行</th></tr></thead><tbody>${followUpRows}</tbody></table></div>` : ""}${explanationRows ? `<h4>有限工程说明</h4><div class="ci-table-wrap"><table class="ci-replay-table"><thead><tr><th>运行</th><th>状态</th><th>用量／保留期</th><th>安全摘要</th></tr></thead><tbody>${explanationRows}</tbody></table></div>` : ""}${rollbackRows ? `<h4>规则回退回执</h4><div class="ci-table-wrap"><table class="ci-replay-table"><thead><tr><th>触发运行</th><th>候选规则</th><th>已恢复规则</th><th>工程健康检查</th></tr></thead><tbody>${rollbackRows}</tbody></table></div>` : ""}</details>`;
+  }
+  function replayItemSummary(item) {
+    const summary = item?.summary ?? item?.safeSummary;
+    if (summary && typeof summary === "object" && !Array.isArray(summary)) {
+      const violations = (summary.invariantViolations || []).map((value) => ({ validator_rejected: "结构校验未接纳" })[value] || value);
+      const rows = [
+        ["输出封装", summary.normalization || "未记录"],
+        ["结构校验", summary.structureAccepted === true ? "已接纳" : summary.structureAccepted === false ? "未接纳" : "未知"],
+        ["无信号", summary.noSignal === true ? "是" : summary.noSignal === false ? "否" : "未知"],
+        ["不变量", violations.length ? violations.join("、") : "无已记录问题"],
+        ["校验诊断", Array.isArray(summary.validation) ? `${num(summary.validation.length)} 项（不展示原始返回）` : "未记录"],
+      ];
+      return `<dl class="ci-replay-safe-summary">${rows.map(([label, value]) => `<div><dt>${label}</dt><dd>${esc(value)}</dd></div>`).join("")}</dl>`;
+    }
+    if (typeof summary === "string") return `<p class="lgi-research-meta">${esc(summary)}</p>`;
+    return `<p class="lgi-research-meta">${esc(item?.failureCode || item?.exclusionReason || "尚无可公开摘要")}</p>`;
+  }
+  async function openResearchSettings() {
+    showModal("研究设置", '<p role="status">正在读取当前自动研究、上下文与规则版本…</p>', "", null);
+    const [daily, context, models, settings] = await Promise.all([
+      window.CommentDaily.readSettings(),
+      request(`${old}/daily/context-settings`),
+      request("/api/local/model-settings"),
+      request(`${api}/research-settings`),
+    ]);
+    researchSettings = settings;
+    researchSettingsModel = models;
+    const schedule = daily.schedule || {};
+    const policy = autoPolicy(schedule);
+    const contextPolicy = context.policy || {};
+    const configRef = models.config?.configRef || schedule.configRef || schedule.config_ref;
+    const selectedCandidate = settings.upgradePolicy?.selectedCandidateRuleRevisionRef || "";
+    const candidates = candidateOptions(settings);
+    const scheduleAvailable = Boolean(configRef);
+    const enabled = schedule.enabled === true;
+    showModal("研究设置", `<p>保存后只影响后续创建的自动研究；每个批次冻结其规则、上下文与预算。读取本页不会创建批次或发送模型请求。</p><section class="ci-setting-block"><h3>自动研究</h3><div class="ci-setting-checks"><label class="ci-check"><input name="enabled" type="checkbox" ${enabled ? "checked" : ""} ${models.model?.modelConnected ? "" : "disabled"}>启用自动研究</label><label class="ci-check"><input name="continuousNew" type="checkbox" ${policy.continuousNew ? "checked" : ""}>持续研究新增评论</label><label class="ci-check"><input name="historicalEnabled" type="checkbox" ${policy.historicalEnabled ? "checked" : ""}>补齐历史未研究评论</label></div><label>历史起点（北京时间；仅在补齐历史时使用）<input name="historyStart" type="datetime-local" step="60" value="${esc(beijingDateTimeInput(policy.historyStart))}"></label><label>已有结果更新政策<select name="outdatedPolicy"><option value="disabled" ${policy.outdatedPolicy === "disabled" ? "selected" : ""}>不自动更新</option><option value="current_only" ${policy.outdatedPolicy === "current_only" ? "selected" : ""}>仅更新启用后的评论</option><option value="historical" ${policy.outdatedPolicy === "historical" ? "selected" : ""}>允许按历史政策更新</option></select></label><p class="lgi-research-meta">“仅更新启用后的评论”以首次启用边界为准，不包含历史评论。北京时间 23:00 截点。${schedule.autoEnabledAt || schedule.auto_enabled_at ? `首次启用 ${esc(date(schedule.autoEnabledAt || schedule.auto_enabled_at, true))}；暂停恢复不覆盖此边界。` : (schedule.legacyActivationUnknown || schedule.legacy_activation_unknown) ? "旧启用边界无法可靠回溯，历史授权保持关闭，直到保存新的明确政策。" : "首次启用时间将在首次保存启用后记录。"}</p></section><section class="ci-setting-block"><h3>资源限制</h3><div class="ci-setting-numbers"><label>每日 Token 总额度<input name="dayTokenLimit" type="number" min="1024" max="10000000" value="${esc(policy.dayTokenLimit)}" required></label><label>恢复未知用量次数<input name="unknownRetryMaxAttempts" type="number" min="0" max="1" value="${esc(policy.unknownRetryMaxAttempts)}" required></label><label>恢复未知用量额度<input name="unknownRetryTokenLimit" type="number" min="0" value="${esc(policy.unknownRetryTokenLimit)}" required></label><label>规则比较额度<input name="replayTokenLimit" type="number" min="0" value="${esc(policy.replayTokenLimit)}" required></label><label>问题整理额度<input name="semanticTokenLimit" type="number" min="0" value="${esc(policy.semanticTokenLimit)}" required></label><label>每日自动研究评论上限<input name="sourceLimit" type="number" min="1" max="3000" value="${esc(schedule.sourceLimit ?? schedule.source_limit ?? "")}" required></label></div><p class="lgi-research-meta">恢复、规则比较与问题整理共享日总额度；未知用量预留不会被当作已确认消耗。</p></section><section class="ci-setting-block"><h3>研究上下文</h3><div class="ci-setting-checks">${Object.entries(contextLabels).map(([key, label]) => `<label class="ci-check"><input name="${key}" type="checkbox" ${contextPolicy[key] ? "checked" : ""}>${label}</label>`).join("")}</div><div class="ci-setting-numbers"><label>归并最多召回问题<input name="recallLimit" type="number" min="1" max="10" value="${esc(contextPolicy.recallLimit)}" required></label><label>每次最多评论数<input name="maxComments" type="number" min="1" max="30" value="${esc(contextPolicy.maxComments)}" required></label></div><label class="ci-check"><input name="recordContent" type="checkbox" ${contextPolicy.recordContent ? "checked" : ""}>保留输入与返回 24 小时，用于排查</label><p class="lgi-research-meta">允许纳入不代表材料已取得；缺失内容不补写，也不会触发采集。${settings.programSafeguards ? esc(settings.programSafeguards) : "程序保护状态尚未提供。"}</p></section>${ruleSummary(settings.activeRule, "当前有效规则")}<section class="ci-setting-block"><div class="ci-section-head"><h3>候选规则与自动采用</h3>${btn("保存候选草稿", "create-rule-candidate")}</div><p class="lgi-research-meta">候选草稿不调用模型。规则比较通过后才可能按此政策自动采用；证据、身份与结构校验不能关闭。</p><label class="ci-check"><input name="upgradeEnabled" type="checkbox" ${settings.upgradePolicy?.enabled ? "checked" : ""}>允许通过自动检查后采用选定候选</label><label>候选版本<select id="ci-upgrade-candidate" name="upgradeCandidate"><option value="">尚未选择</option>${candidates.map((candidate) => `<option value="${esc(candidate.ruleRevisionRef)}" ${candidate.ruleRevisionRef === selectedCandidate ? "selected" : ""}>${esc(candidate.purpose?.title || candidate.ruleRevisionRef)} · ${esc(candidate.canonicalHash || "哈希未记录")}</option>`).join("")}</select></label>${candidates.length ? `<details><summary>已保存候选 · ${num(candidates.length)} 个</summary>${candidates.map((candidate) => ruleSummary(candidate, candidate.ruleRevisionRef === selectedCandidate ? "自动采用候选" : "候选规则")).join("")}</details>` : '<p class="lgi-research-meta">还没有候选规则。</p>'}</section><section class="ci-setting-block"><div class="ci-section-head"><h3>版本比较（shadow）</h3>${btn("冻结并提交比较", "start-replay", `${candidates.length && configRef ? "" : "disabled"}`)}</div><label>本次比较 Token 授权<input id="ci-replay-budget" name="replayBudget" type="number" min="0" max="10000000" value="${esc(policy.replayTokenLimit)}" required></label><p class="lgi-research-meta">${esc(settings.replaySampling || "样本策略尚未提供。")} 比较创建只冻结安全引用、哈希、分层与阈值；实际执行会由后台预算守卫决定。</p>${replayRows(settings.replays)}</section><details class="ci-setting-block"><summary>模型与调用资格</summary>${models.model?.modelConnected ? `<p>当前研究模型已连接：${esc((models.models || []).find((model) => model.modelRef === models.config?.modelRef)?.modelId || "当前冻结配置")}。</p>` : `<p>${esc(({ NEEDS_SELECTION: "已有模型调用成功，尚未选择默认模型。", NEEDS_CALL_TEST: "请在供应商弹窗中测试模型调用。", NEEDS_QUALIFICATION: "请在供应商弹窗中测试模型调用。", PAUSED: "模型连接已暂停。" })[models.model?.modelState] || "研究模型尚未配置。")} <a href="/settings/models">前往模型设置</a></p>`}<p class="lgi-research-meta">${scheduleAvailable ? "日程将保存当前实际模型配置。" : "当前没有可保存的研究模型配置，不能启用自动研究或创建 shadow 比较。"}</p></details><p class="lgi-research-meta">${models.model?.modelConnected ? "保存不会立即外发；启用后的自动执行仍受 23:00 截点、来源资格和预算约束。" : "模型尚未可用，因此自动研究保持不能启用。"}</p>`, "保存研究设置", async (form) => {
+      if (!scheduleAvailable) throw new Error("当前没有可保存的研究模型配置，请先完成模型设置。");
+      if (form.has("enabled") && !models.model?.modelConnected)
+        throw new Error("请先完成模型调用测试并保存默认研究模型，再启用自动研究。");
+      const dayTokenLimit = Number(form.get("dayTokenLimit"));
+      const nextPolicy = {
+        continuousNew: form.has("continuousNew"),
+        historicalEnabled: form.has("historicalEnabled"),
+        historyStart: beijingDateTimePayload(form.get("historyStart")),
+        outdatedPolicy: form.get("outdatedPolicy"),
+        unknownRetryMaxAttempts: Number(form.get("unknownRetryMaxAttempts")),
+        unknownRetryTokenLimit: Number(form.get("unknownRetryTokenLimit")),
+        dayTokenLimit,
+        replayTokenLimit: Number(form.get("replayTokenLimit")),
+        semanticTokenLimit: Number(form.get("semanticTokenLimit")),
+      };
+      if (nextPolicy.historicalEnabled && !nextPolicy.historyStart)
+        throw new Error("启用历史补齐时必须给出明确的历史起点。");
+      if (nextPolicy.unknownRetryTokenLimit + nextPolicy.replayTokenLimit + nextPolicy.semanticTokenLimit > dayTokenLimit)
+        throw new Error("恢复、规则比较与问题整理额度之和不能超过每日总额度。");
+      const upgradeEnabled = form.has("upgradeEnabled");
+      const nextCandidate = String(form.get("upgradeCandidate") || "") || null;
+      if (upgradeEnabled && !nextCandidate)
+        throw new Error("启用自动采用前必须选择一个已保存候选规则。");
+      const nextContext = Object.fromEntries(Object.keys(contextLabels).map((key) => [key, form.has(key)]));
+      Object.assign(nextContext, { recallLimit: Number(form.get("recallLimit")), maxComments: Number(form.get("maxComments")), recordContent: form.has("recordContent") });
+      let contextSaved = false;
+      let scheduleSaved = false;
+      try {
+        await request(`${old}/daily/context-settings`, { expectedRevision: context.revision, policy: nextContext });
+        contextSaved = true;
+        await window.CommentDaily.saveSchedule({ expectedRevision: schedule.revision, enabled: form.has("enabled"), configRef, sourceLimit: Number(form.get("sourceLimit")), tokenLimit: dayTokenLimit, autoPolicy: nextPolicy });
+        scheduleSaved = true;
+        if (upgradeEnabled !== Boolean(settings.upgradePolicy?.enabled) || nextCandidate !== (settings.upgradePolicy?.selectedCandidateRuleRevisionRef || null))
+          await request(`${api}/upgrade-policy`, { expectedRevision: settings.upgradePolicy?.revision, enabled: upgradeEnabled, selectedCandidateRuleRevisionRef: nextCandidate });
+      } catch (error) {
+        const saved = [contextSaved && "上下文", scheduleSaved && "自动研究与额度"].filter(Boolean);
+        if (saved.length) throw new Error(`${saved.join("、")}已保存；其余设置未完成：${error.message}。请保留当前输入，刷新后重试。`);
+        throw error;
+      }
+      modal.close();
+      await load();
+      feedback("研究设置已保存。后续批次会冻结当前设置；本次保存未创建模型调用。");
+    });
+    const replaySection = [...(modal.querySelectorAll?.(".ci-setting-block") || [])].find((section) => section.querySelector("h3")?.textContent === "版本比较（shadow）");
+    replaySection?.insertAdjacentHTML("beforeend", continuityReadout(settings.continuity));
+  }
+  function openRuleCandidateEditor() {
+    const active = researchSettings?.activeRule;
+    if (!active) throw new Error("当前有效规则尚未读取，不能创建候选草稿。");
+    showModal("保存候选规则草稿", `<p>候选只允许修改研究方向、字段定义和例子；保存会创建不可变候选版本，不会发送模型请求。</p><label>研究方向标题<input name="title" maxlength="120" value="${esc(active.purpose?.title || "")}" required></label><label>研究方向说明<textarea name="instruction" maxlength="1200" required>${esc(active.purpose?.instruction || "")}</textarea></label><section class="ci-rule-editor"><div class="ci-section-head"><div><h3>研究字段</h3><p class="lgi-research-meta">用中文说明每一种研究结论的含义与边界。</p></div><button type="button" class="ci-text-action" data-rule-add-field>新增字段</button></div><div id="ci-rule-fields-editor" class="ci-rule-editor-list">${(active.fieldDefinitions || []).map(candidateFieldEditorRow).join("") || candidateFieldEditorRow()}</div></section><section class="ci-rule-editor"><div class="ci-section-head"><div><h3>正反例</h3><p class="lgi-research-meta">例子帮助比较规则理解边界，不会在保存时发送模型请求。</p></div><button type="button" class="ci-text-action" data-rule-add-example>新增例子</button></div><div id="ci-rule-examples-editor" class="ci-rule-editor-list">${(active.examples || []).map(candidateExampleEditorRow).join("")}</div></section>`, "保存候选草稿", async (form) => {
+      const fieldDefinitions = candidateFieldDefinitions();
+      const examples = candidateExamples();
+      await request(`${api}/rules`, { ruleRevisionRef: crypto.randomUUID(), parentRuleRevisionRef: active.ruleRevisionRef, purpose: { title: form.get("title"), instruction: form.get("instruction") }, fieldDefinitions, examples });
+      await openResearchSettings();
+      feedback("候选规则草稿已保存；尚未创建模型调用。可选择它并冻结 shadow 比较。");
+    });
+    bindCandidateEditor();
+  }
+  async function startReplay() {
+    const candidate = modal.querySelector("#ci-upgrade-candidate")?.value;
+    const budget = Number(modal.querySelector("#ci-replay-budget")?.value);
+    const configRef = researchSettingsModel?.config?.configRef;
+    if (!candidate) throw new Error("先选择一个已保存候选规则，再冻结比较样本。");
+    if (!configRef) throw new Error("当前没有可用于比较的研究模型配置。");
+    const result = await request(`${api}/replays`, { runRef: crypto.randomUUID(), candidateRuleRevisionRef: candidate, configRef, authorizedTokenBudget: budget });
+    if (result?.state === "insufficient_evidence") {
+      $("ci-command-feedback").textContent = result.reason || "可用配对样本不足，尚未创建比较运行。";
+      return;
+    }
+    const run = result?.run;
+    if (!run || typeof run !== "object")
+      throw new Error("比较创建未返回冻结运行，请重新读取研究设置后重试。");
+    if (run.state === "insufficient_evidence") {
+      $("ci-command-feedback").textContent = run.reason || result.reason || "可用配对样本不足，尚未创建比较运行。";
+      return;
+    }
+    await openResearchSettings();
+    feedback("比较样本已冻结；尚未由此页面直接发送模型请求。执行会遵守共享额度与后台资格检查。");
+  }
+  async function openReplayDetail(runRef) {
+    const detail = await request(`${api}/replays/${encodeURIComponent(runRef)}`);
+    const run = detail.run || {};
+    const items = detail.items || [];
+    showModal("规则比较摘要", `<p>${esc(replayState[run.state] || run.state || "状态未记录")} · 冻结 ${num(detail.sampleSet?.frozenCount)} 条当前可研究原声。</p><p class="lgi-research-meta">样本 ${esc(detail.sampleSet?.selectorVersion || "版本未记录")} · 成员哈希 ${esc(detail.sampleSet?.memberHash || "未记录")}。这里不展示评论正文或供应商原始返回。</p>${comparisonReadout(run.comparison)}<div class="ci-table-wrap"><table class="ci-replay-table"><thead><tr><th>成员</th><th>侧别</th><th>状态</th><th>结构接纳</th><th>安全摘要／用量</th></tr></thead><tbody>${items.map((item) => `<tr><td>${num(item.memberOrdinal)} · 第 ${num(item.repeatOrdinal)} 次</td><td>${esc(item.side || "未记录")}</td><td>${esc(replayState[item.state] || item.state || "未记录")}</td><td>${item.structureAccepted == null ? "未知" : item.structureAccepted ? "已接纳" : "未接纳"}</td><td>${replayItemSummary(item)}<div class="lgi-research-meta">输入 ${num(item.usage?.inputTokens ?? item.inputTokens)} / 输出 ${num(item.usage?.outputTokens ?? item.outputTokens)} Token · ${item.elapsedMs == null ? "耗时未知" : duration(item.elapsedMs)}</div></td></tr>`).join("") || '<tr><td colspan="5">尚无比较成员记录。</td></tr>'}</tbody></table></div>`, "", null);
+    modal.querySelector(".ci-table-wrap")?.insertAdjacentHTML("beforebegin", `${ruleSummary(run.baselineSnapshot, "冻结基线规则")}${ruleSummary(run.candidateSnapshot, "冻结候选规则")}${thresholdReadout(run.comparison?.thresholds || run.thresholds)}${replayFreezeReadout(run)}`);
+  }
   async function openContextSettings() {
     const [settings, models] = await Promise.all([
       request(`${old}/daily/context-settings`),
@@ -1014,6 +1567,26 @@
     if (!expression) return "";
     return `<section class="ci-input-comment"><h3>本次需要归并的问题表达</h3><h4>${esc(expression.name || "名称未记录")}</h4><p>${esc(expression.meaning || "含义未记录")}</p><p class="lgi-research-meta">对应的实际评论</p><blockquote>${esc(contextText(expression.comment))}</blockquote><details><summary>引用依据与表达身份</summary><pre>${esc(JSON.stringify({ candidateRef: expression.candidateRef, evidence: expression.evidence }, null, 2))}</pre></details></section>`;
   }
+  function fieldRepairInputHtml(input) {
+    const comments = Array.isArray(input.comments) ? input.comments : [];
+    const outputSchema = input.outputSchema == null ? "未记录" : JSON.stringify(input.outputSchema, null, 2);
+    return `<section><h3>本次实际补齐范围</h3><p>研究合同 <code>${esc(input.contract || "未记录")}</code>。只请求补齐此前未通过的字段；不重写原分析，也不把补齐结果当作新的评论研究。</p><p>请求字段：${repairFieldList(input.selectedFields)}</p><details open><summary>实际评论 · ${num(comments.length)} 条</summary>${comments.map((comment) => `<article class="ci-input-comment"><strong>${esc(comment?.commentRef || comment?.sourceRef || "评论引用未记录")}</strong><blockquote>${esc(comment?.text || comment?.body || "正文未记录")}</blockquote></article>`).join("") || '<p class="lgi-research-meta">评论内容未保留，不能事后补写。</p>'}</details><details><summary>系统约束、政策与输出结构</summary><h4>系统约束</h4><pre>${esc(input.system || "系统约束未记录")}</pre><h4>本次政策</h4><pre>${esc(input.policy == null ? "未记录" : JSON.stringify(input.policy, null, 2))}</pre><h4>输出结构</h4><pre>${esc(outputSchema)}</pre></details></section>`;
+  }
+  function fieldRepairReceiptHtml(receipt) {
+    if (!receipt) return "";
+    const state = ({ succeeded: "补齐结果已接纳", succeeded_partial: "部分补齐结果已接纳", partial: "部分补齐结果已接纳", running: "补齐处理中", failed: "补齐未完成" })[receipt.state] || receipt.state || "状态未记录";
+    return `<section class="ci-repair-receipt"><h3>字段补齐回执</h3><dl class="ci-rule-fields"><div><dt>原分析</dt><dd><code>${esc(receipt.baseAnalysisRef || "未记录")}</code></dd></div><div><dt>补充分析</dt><dd>${receipt.supplementAnalysisRef ? `<code>${esc(receipt.supplementAnalysisRef)}</code>` : "尚未生成"}</dd></div><div><dt>状态</dt><dd>${esc(state)}</dd></div><div><dt>请求字段</dt><dd>${repairFieldList(receipt.fields)}</dd></div></dl><p class="lgi-research-meta">回执只说明本次补齐与原分析的关联；没有分阶段事件时，不据此补造模型过程。</p></section>`;
+  }
+  function packetInputHtml(input, recordedPolicy) {
+    const work = input.work;
+    const contextFlags = Object.entries(contextLabels).filter(([key]) => key !== "existingProblems").map(([key, label]) => `<span>${recordedPolicy?.[key] === false ? "未纳入" : recordedPolicy?.[key] === true ? "允许纳入" : "设置未记录"} · ${label}</span>`).join("");
+    const comments = (input.comments || []).map((comment) => `<article class="ci-input-comment"><strong>${esc(comment.commentRef || "评论引用未记录")}</strong><blockquote>${esc(comment.text || comment.body || "正文未记录")}</blockquote>${commentContextHtml(comment)}</article>`).join("");
+    const problems = (input.existingProblems || []).map((problem) => `<article><h4>${esc(problem.definition?.name || problem.name || problem.candidateRef || "问题")}</h4><p>${esc(problem.definition?.meaning || problem.meaning || problem.boundary || "定义未记录")}</p>${problem.evidenceSamples?.length ? `<details><summary>已有证据与人工边界</summary><pre>${esc(JSON.stringify({ evidenceSamples: problem.evidenceSamples, humanBoundaries: problem.humanBoundaries }, null, 2))}</pre></details>` : ""}</article>`).join("") || "<p>本次没有召回已有问题。</p>";
+    return `<section><h3>模型实际拿到的材料</h3><p>研究合同 <code>${esc(input.contract || "未记录")}</code> · 本批冻结的上下文</p>${input.expression ? "" : `<div class="ci-context-flags">${contextFlags}</div><p class="lgi-research-meta">允许纳入不代表材料已经取得；以下内容是本次实际输入。</p>`}${relationExpressionHtml(input.expression)}${work ? `<details><summary>作品内容</summary>${workContextHtml(work)}</details>` : input.expression ? "" : '<p class="lgi-research-meta">作品文字按评论选择相关片段，见下方各条上下文。</p>'}${input.expression ? "" : `<details open><summary>评论与对应上下文 · ${num(input.comments?.length)} 条</summary>${comments}</details>`}<details><summary>召回的已有问题 · ${num(input.existingProblems?.length)} 个</summary>${problems}</details><details><summary>研究约束与完整输入</summary><pre>${esc(input.system || "系统约束未记录")}</pre><details><summary>查看输入结构</summary><pre>${esc(JSON.stringify(input, null, 2))}</pre></details></details></section>`;
+  }
+  function requestInputHtml(input, recordedPolicy, purpose) {
+    return purpose === "field_repair" ? fieldRepairInputHtml(input) : packetInputHtml(input, recordedPolicy);
+  }
   function diagnosticActual(value) {
     if (typeof value === "string") return value;
     if (!value || typeof value !== "object") return "未记录";
@@ -1026,7 +1599,7 @@
     const currentRequest = requestGeneration;
     const v = await request(`${old}/daily/${encodeURIComponent(batchRef)}/requests/${encodeURIComponent(invocationRef)}?domain=${encodeURIComponent(domain)}`);
     if (!modal.open || currentRequest !== requestGeneration) return;
-    const call = { ...(batchDetail?.calls?.find((c) => c.invocationRef === invocationRef) || {}), ...(v.call || {}), ...(v.purpose ? { purpose: v.purpose } : {}) }, input = v.input, output = v.output;
+    const call = { ...(batchDetail?.calls?.find((c) => c.invocationRef === invocationRef) || {}), ...(v.call || {}), ...(v.purpose ? { purpose: v.purpose } : {}), ...(v.localRecoveryRef ? { localRecoveryRef: v.localRecoveryRef } : {}), ...(v.locallyRecoveredComments != null ? { locallyRecoveredComments: v.locallyRecoveredComments } : {}) }, input = v.input, output = v.output;
     const recordedPolicy = v.policy || input?.policy || call.contextPolicy;
     const unavailable = { NOT_RECORDED: "这次调用没有保留输入与返回，无法事后还原。状态和用量记录仍可核对。", EXPIRED: "输入与返回已超过 24 小时保留期限。原声仍在语料库，运行元数据继续保留。", RESTRICTED: "相关来源当前不可读，输入与返回已停止展示。请先核对来源权限。" }[v.availability];
     const events = { accepted_result_recovered: "已恢复接纳结果", packet_prepared: "上下文已组装", request_started: "开始调用模型", provider_started: "供应商请求已发出", provider_returned: "已收到供应商返回", response_received: "已收到模型返回", validation_completed: "输出校验完成", validation_finished: "输出校验完成", results_saved: "合格结果已保存", request_failed: "请求未完成", queued: "已进入等待队列", started: "开始调用", finished: "调用结束" };
@@ -1036,6 +1609,20 @@
     const work = input?.work;
     const context = input ? `<section><h3>模型实际拿到的材料</h3><p>研究合同 <code>${esc(input.contract || "未记录")}</code> · 本批冻结的上下文</p>${input.expression ? "" : `<div class="ci-context-flags">${Object.entries(contextLabels).filter(([key]) => key !== "existingProblems").map(([key, label]) => `<span>${recordedPolicy?.[key] === false ? "未纳入" : recordedPolicy?.[key] === true ? "允许纳入" : "设置未记录"} · ${label}</span>`).join("")}</div><p class="lgi-research-meta">允许纳入不代表材料已经取得；以下内容是本次实际输入。</p>`}${relationExpressionHtml(input.expression)}${work ? `<details><summary>作品内容</summary>${workContextHtml(work)}</details>` : input.expression ? "" : '<p class="lgi-research-meta">作品文字按评论选择相关片段，见下方各条上下文。</p>'}${input.expression ? "" : `<details open><summary>评论与对应上下文 · ${num(input.comments?.length)} 条</summary>${(input.comments || []).map((comment) => `<article class="ci-input-comment"><strong>${esc(comment.commentRef || "评论引用未记录")}</strong><blockquote>${esc(comment.text || comment.body || "正文未记录")}</blockquote>${commentContextHtml(comment)}</article>`).join("")}</details>`}<details><summary>召回的已有问题 · ${num(input.existingProblems?.length)} 个</summary>${(input.existingProblems || []).map((problem) => `<article><h4>${esc(problem.definition?.name || problem.name || problem.candidateRef || "问题")}</h4><p>${esc(problem.definition?.meaning || problem.meaning || problem.boundary || "定义未记录")}</p>${problem.evidenceSamples?.length ? `<details><summary>已有证据与人工边界</summary><pre>${esc(JSON.stringify({ evidenceSamples: problem.evidenceSamples, humanBoundaries: problem.humanBoundaries }, null, 2))}</pre></details>` : ""}</article>`).join("") || "<p>本次没有召回已有问题。</p>"}</details><details><summary>研究约束与完整输入</summary><pre>${esc(input.system || "系统约束未记录")}</pre><details><summary>查看输入结构</summary><pre>${esc(JSON.stringify(input, null, 2))}</pre></details></details></section>` : "";
     showModal("模型处理过程", `<div class="ci-request-summary"><strong>${esc(call.workTitle || "作品标题未记录")}</strong><p>${num(call.requestedComments)} 条评论 · ${esc(call.modelId || "模型未记录")} · ${duration(call.elapsedMs)}</p><p class="lgi-research-meta">${({ problem_relation: "问题关系判断", problem_embedding: "问题语义召回" })[call.purpose] || "结构化提取"} · 思考关闭 · 无工具调用；以下为真实请求记录。</p>${call.failureCode ? `<p class="${call.failureCode === "usage_review_required" ? "lgi-research-meta" : "ci-failure-text"}">${esc(failureText(call.failureCode))}</p>` : ""}</div>${eventHtml ? `<ol class="ci-event-list">${eventHtml}</ol>` : '<p class="lgi-research-meta">这次未记录分阶段事件，不能据此推断模型内部过程。</p>'}${unavailable ? `<p class="ci-notice">${esc(unavailable)}</p>` : ""}<div class="ci-request-details">${context}${output ? `<section><h3>模型实际返回 · 已脱敏</h3>${output.truncated ? '<p class="ci-notice">展示已截短，校验使用原始完整返回。展示长度限制不代表模型输出被截断。</p>' : ""}${output.received === false ? "<p>没有取得完整返回。</p>" : ""}<details><summary>查看脱敏返回</summary><pre>${esc(output.text || (output.json ? JSON.stringify(output.json, null, 2) : "返回正文未记录"))}</pre></details></section>` : ""}<section><h3>结果校验</h3>${receiptAccepted ? `<p>${v.validation.usageReviewRequired ? "结果已接纳，用量待核对" : "已恢复接纳结果"}。已有问题判断继续保留。</p>` : ""}${validation ? `<ul class="ci-validation-list">${validation}</ul>` : receiptAccepted ? "" : `<p>${v.availability === "AVAILABLE" && call.state === "running" ? "正在等待模型返回，校验尚未完成。" : "这次没有可展示的逐字段校验记录。请结合接纳数量与评论结果核对，不能据此判断全部通过。"}</p>`}<details><summary>输入与输出约束</summary><p>${call.purpose === "problem_relation" ? "输入是已提取的问题表达、对应原声依据与召回的已有问题定义。输出判断相同、相关、不同或尚不确定，并给出依据；相似不等于相同，人工边界不得被自动覆盖。" : call.purpose === "problem_embedding" ? "输入为问题定义文字；输出须是数量对应、顺序一致、维度稳定且数值有效的向量。向量只用于召回候选，不直接决定问题相同。" : "输入为清洗后的评论与本批允许纳入的已有上下文。输出须为结构化评论结果，逐条对应输入；研究标签、问题和立场须有可定位的原声引用。缺失内容不补写，未提取信号与调用失败分别记录。"}</p></details></section><section><h3>用量</h3><p>供应商报告：输入 ${num(call.inputTokens)} / 输出 ${num(call.outputTokens)} Token。</p>${call.usageUnknown ? `<p>用量未知，仍保留 ${num(call.reservedTokens)} Token 预留。预留不代表实际消耗。</p>${call.state !== "running" ? btn("核对用量／允许重试", "usage-review", `data-ref="${esc(batchRef)}" data-invocation="${esc(invocationRef)}"`) : ""}` : ""}</section></div>`, "", null);
+    if (call.purpose === "field_repair") {
+      const details = modal.querySelector(".ci-request-details");
+      if (input) details?.querySelector(":scope > section:first-child")?.remove();
+      details?.insertAdjacentHTML("afterbegin", `${input ? fieldRepairInputHtml(input) : ""}${fieldRepairReceiptHtml(v.repairReceipt)}`);
+      const summary = modal.querySelector(".ci-request-summary");
+      summary?.querySelector("p")?.replaceChildren(`${callInputScope(call)} · ${call.modelId || "模型未记录"} · ${duration(call.elapsedMs)}`);
+      summary?.querySelector(".lgi-research-meta")?.replaceChildren(`${callPurpose(call.purpose)} · 思考关闭 · 无工具调用；以下为真实请求记录。`);
+      const resultSection = [...(details?.querySelectorAll("section") || [])].find((section) => section.querySelector("h3")?.textContent === "结果校验");
+      const contract = [...(resultSection?.querySelectorAll("details") || [])].find((item) => item.querySelector("summary")?.textContent === "输入与输出约束");
+      contract?.querySelector("p")?.replaceChildren("输入只包括这条评论、请求补齐的字段及冻结的系统约束和政策。输出只能补齐这些字段；原分析和其他已接纳字段继续保留。缺失内容不补写，未完成与部分补齐分别记录。");
+    }
+    const recovery = localRecoveryNote(call);
+    if (recovery)
+      modal.querySelector(".ci-request-summary")?.insertAdjacentHTML("afterend", recovery);
     modal.classList.add("ci-request-dialog");
   }
   async function openBatchRecords(ref, after = "") {
@@ -1048,6 +1635,9 @@
       "",
       null,
     );
+    const recoveries = (r.calls || []).map(localRecoveryNote).filter(Boolean);
+    if (recoveries.length)
+      modal.querySelector("details")?.insertAdjacentHTML("beforebegin", `<section><h3>本地严格复核</h3>${recoveries.join("")}</section>`);
   }
   function openContinue(ref) {
     const b = data.daily.items.find((x) => x.batchRef === ref);
@@ -1111,8 +1701,9 @@
       return;
     }
     if (a === "refresh") return load();
-    if (a === "judgment") return openJudgment();
-    if (a === "judgment-open") return openJudgmentDecision(el.dataset.ref);
+    if (a === "create-rule-candidate") return openRuleCandidateEditor();
+    if (a === "start-replay") return startReplay();
+    if (a === "replay-detail") return openReplayDetail(el.dataset.ref);
     if (a === "runs") return navigate({ view: "runs", batchRef: "" });
     if (a === "changes") return navigate({ view: "changes", batchRef: "", problemRef: "", sourceRefs: "" });
     if (a === "close-inspector") return closeInspector();
@@ -1157,6 +1748,8 @@
     }
     if (a === "lens-drill")
       return navigate({ view: "voices", lenses: el.dataset.lens });
+    if (a === "axis-drill")
+      return navigate({ view: "voices", processingState: el.dataset.state });
     if (a === "metric") {
       if (el.dataset.metric === "works") {
         navigate({ view: "voices" });
@@ -1252,7 +1845,7 @@
       if (!canResearch)
         throw new Error("当前外部领域提供原声浏览，尚未开放模型研究。");
       modal.close();
-      return openContextSettings();
+      return openResearchSettings();
     }
     if (a === "correct") return openCorrection();
     if (a === "terms") return openTerms();
@@ -1364,7 +1957,7 @@
     if (a === "request-detail") return openRequest(el.dataset.ref, el.dataset.invocation);
     if (a === "daily-settings") {
       modal.close();
-      return window.CommentDaily.openSettings();
+      return openResearchSettings();
     }
     if (a === "batch-result") return navigate({ view: "voices", batchRef: state.batchRef, processingState: el.dataset.state });
     if (a === "batch-voices") return navigate({ view: "voices", batchRef: state.batchRef });

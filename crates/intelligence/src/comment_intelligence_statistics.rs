@@ -16,6 +16,14 @@ pub struct Window {
     pub capture_signature: Option<String>,
     pub unknown_capture: i64,
     pub classification_changes: i64,
+    #[serde(default)]
+    pub organization_changes: i64,
+    #[serde(default)]
+    pub semantic_signature: Option<String>,
+    #[serde(default)]
+    pub organization_eligible: i64,
+    #[serde(default)]
+    pub organized: i64,
 }
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,6 +61,12 @@ pub fn compare(previous: &Window, current: &Window) -> Comparison {
         "分析覆盖差超过10个百分点"
     } else if previous.classification_changes > 0 || current.classification_changes > 0 {
         "近期有人工归类调整，变化不归因于新讨论"
+    } else if previous.organization_changes > 0 || current.organization_changes > 0 {
+        "近期问题发生自动拆分、合并或定义调整，暂不归因于新讨论"
+    } else if previous.semantic_signature != current.semantic_signature {
+        "语义组织版本不可比"
+    } else if !organization_coverage_comparable(previous, current) {
+        "问题组织覆盖不足或两期覆盖差异过大，暂不判断讨论变化"
     } else if previous.unknown_capture > 0
         || current.unknown_capture > 0
         || previous.capture_signature.is_none()
@@ -93,8 +107,22 @@ pub fn compare(previous: &Window, current: &Window) -> Comparison {
         current_share,
         percentage_point_change: difference,
         rising: difference.is_some_and(|d| d >= 5.0 - 1e-9),
-        rule_version: "comment-change.v1",
+        rule_version: "comment-change.v2",
     }
+}
+fn organization_coverage_comparable(previous: &Window, current: &Window) -> bool {
+    if previous.organization_eligible == 0 && current.organization_eligible == 0 {
+        return true; // Both are legacy comment-level organization; no atom coverage is claimed.
+    }
+    let coverage = |window: &Window| {
+        if window.organization_eligible > 0 {
+            window.organized as f64 / window.organization_eligible as f64
+        } else {
+            0.0
+        }
+    };
+    let (before, after) = (coverage(previous), coverage(current));
+    before >= 0.8 && after >= 0.8 && (before - after).abs() <= 0.100000001
 }
 #[cfg(test)]
 mod tests {
@@ -114,6 +142,10 @@ mod tests {
             capture_signature: Some("target.rule".into()),
             unknown_capture: 0,
             classification_changes: 0,
+            organization_changes: 0,
+            semantic_signature: None,
+            organization_eligible: 0,
+            organized: 0,
         }
     }
     #[test]
@@ -144,5 +176,32 @@ mod tests {
         let mut cur = w(20, 100);
         cur.observed_days = 4;
         assert!(!compare(&w(10, 100), &cur).rising);
+    }
+    #[test]
+    fn automatic_lineage_and_space_changes_do_not_create_growth() {
+        let mut before = w(10, 100);
+        let mut after = w(25, 100);
+        before.semantic_signature = Some("group:1:space:policy".into());
+        after.semantic_signature = before.semantic_signature.clone();
+        assert!(compare(&before, &after).rising);
+        after.organization_changes = 1;
+        assert!(!compare(&before, &after).comparable);
+        after.organization_changes = 0;
+        after.semantic_signature = Some("group:2:new-space:policy".into());
+        assert_eq!(compare(&before, &after).reason, "语义组织版本不可比");
+    }
+    #[test]
+    fn partial_organization_is_not_a_change_in_user_problems() {
+        let mut before = w(10, 100);
+        let mut after = w(25, 100);
+        before.organization_eligible = 100;
+        after.organization_eligible = 100;
+        before.organized = 100;
+        after.organized = 70;
+        assert!(!compare(&before, &after).comparable);
+        after.organized = 85;
+        assert!(!compare(&before, &after).comparable);
+        after.organized = 90;
+        assert!(compare(&before, &after).rising);
     }
 }

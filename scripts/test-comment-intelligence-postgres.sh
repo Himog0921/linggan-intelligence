@@ -51,6 +51,12 @@ proof_port="$(docker port "$proof_container" 5432/tcp | sed -n 's/^127\.0\.0\.1:
 [[ "$proof_port" =~ ^[0-9]+$ ]] || { echo "isolated proof PostgreSQL did not expose a safe port" >&2; exit 1; }
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 
+if [[ "$#" -gt 0 ]]; then
+  # Focused integration runs still get the same disposable database and cleanup guarantees.
+  cargo test -p linggan-intelligence --locked "$@"
+  exit 0
+fi
+
 cargo test -p linggan-intelligence --test embedding_settings_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test comment_cleaning_v2_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test comment_problem_relations_postgres --locked -- --ignored --nocapture
@@ -59,4 +65,8 @@ cargo test -p linggan-intelligence --test comment_intelligence_query_postgres --
 cargo test -p linggan-intelligence --test comment_intelligence_actions_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test comment_intelligence_read_boundaries_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test comment_daily_postgres --locked -- --ignored --nocapture
-printf '%s\n' 'Comment intelligence query/actions/boundaries/daily proofs passed' 
+cargo test -p linggan-intelligence --test comment_auto_scale_postgres --locked -- --ignored --nocapture
+cargo test -p linggan-intelligence --test comment_research_rules_postgres --locked -- --ignored --nocapture
+cargo test -p linggan-intelligence --test comment_replay_postgres --locked -- --ignored --nocapture
+cargo test -p linggan-intelligence --test model_worker_drain_postgres --locked -- --ignored --nocapture
+printf '%s\n' 'Comment intelligence query/actions/boundaries/daily/rules/replay/drain proofs passed'

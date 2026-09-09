@@ -118,7 +118,7 @@ pub(super) fn fragments(context: &Value, comment: &str) -> Value {
 }
 /// Location and text changes invalidate raw evidence coordinates. Re-observation identifiers
 /// and engagement metadata do not change meaning; old evidence still requires readable guards.
-pub(super) fn evidence_identity(context: &Value, comment: &str) -> Value {
+pub(crate) fn evidence_identity(context: &Value, comment: &str) -> Value {
     let mut selected = fragments(context, comment);
     for f in selected.as_array_mut().into_iter().flatten() {
         let stable = match f["kind"].as_str() {

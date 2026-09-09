@@ -19,14 +19,92 @@
   api.render=data=>{
     overview=data;
     document.getElementById('result-count').textContent=`最近 ${data.items.length} 批 · 北京时间`;
-    document.getElementById('results').innerHTML=`<p class="lgi-research-meta">每日研究${data.schedule.enabled?'已启用':'未启用或已暂停'}${data.schedule.next_end?' · 下一个待封存截点 '+esc(date(data.schedule.next_end)):''}。数字只描述本机观察样本，确定性噪声不进入研究语料，历史记录与异常分别保留。重试失败会占用本批剩余额度，未知用量预留不释放。</p>`+(data.items.length?`<table><thead><tr><th>研究批次</th><th>材料范围</th><th>处理进展</th><th>额度使用</th><th>操作</th></tr></thead><tbody>${data.items.map(b=>`<tr><td>${b.kind==='daily'?'每日新增':'指定样本'}<div class="lgi-research-meta">${esc(date(b.start))}—${esc(date(b.end))}</div></td><td>${b.total.toLocaleString()} 条<div class="lgi-research-meta">${b.works.toLocaleString()} 篇当前可读作品</div></td><td>${Object.entries(b.counts).map(([k,n])=>`${esc(labels[k]||k)} ${n}`).join(' · ')||'没有新增评论'}${!b.enabled?'<div class="lgi-research-meta">批次已暂停</div>':''}<div class="lgi-research-meta">${Object.entries(b.cleaning||{}).map(([k,n])=>esc(cleanLabels[k]||'待清洗')+' '+n).join(' · ')}</div>${b.counts.pending&&b.tokenLimit-b.chargedTokens<b.nextReservation?'<div class="lgi-research-meta">剩余额度不足以预留下一包</div>':''}</td><td>${b.chargedTokens.toLocaleString()} / ${b.tokenLimit.toLocaleString()}<div class="lgi-research-meta">Token · 含用量未知时的预留</div></td><td><button type="button" data-batch="${b.batchRef}">查看</button><button type="button" data-batch-toggle="${b.batchRef}" data-enabled="${!b.enabled}">${b.enabled?'暂停':'恢复'}</button>${b.counts.failed?`<button type="button" data-batch-retry="${b.batchRef}" data-command="${crypto.randomUUID()}" ${b.enabled?'':'disabled'}>重试失败</button>`:''}</td></tr>`).join('')}</tbody></table>`:'<p class="lgi-research-empty">还没有研究批次。先在原声浏览中勾选少量评论试跑，确认效果后启用每日研究。</p>');
+    document.getElementById('results').innerHTML=`<p class="lgi-research-meta">每日研究${data.schedule.enabled?'已启用':'未启用或已暂停'}${data.schedule.next_end?' · 下一个待封存截点 '+esc(date(data.schedule.next_end)):''}。数字只描述本机观察样本，确定性噪声不进入研究语料，历史记录与异常分别保留。重试失败会占用本批剩余额度，未知用量预留不释放。</p>`+(data.items.length?`<table><thead><tr><th>研究批次</th><th>材料范围</th><th>处理进展</th><th>额度使用</th><th>操作</th></tr></thead><tbody>${data.items.map(b=>`<tr><td>${b.kind==='daily'?'每日新增':'指定样本'}<div class="lgi-research-meta">${esc(date(b.start))}—${esc(date(b.end))}</div></td><td>${b.total.toLocaleString()} 条<div class="lgi-research-meta">${b.works.toLocaleString()} 篇当前可读作品</div></td><td>${Object.entries(b.counts).map(([k,n])=>`${esc(labels[k]||k)} ${n}`).join(' · ')||'没有新增评论'}${!b.enabled?'<div class="lgi-research-meta">批次已暂停</div>':''}<div class="lgi-research-meta">${Object.entries(b.cleaning||{}).map(([k,n])=>esc(cleanLabels[k]||'待清洗')+' '+n).join(' · ')}</div>${b.counts.pending&&b.tokenLimit-b.chargedTokens<b.nextReservation?'<div class="lgi-research-meta">剩余额度不足以预留下一包</div>':''}</td><td>${b.chargedTokens.toLocaleString()} / ${b.tokenLimit.toLocaleString()}<div class="lgi-research-meta">Token · 含用量未知时的预留</div></td><td><button type="button" data-batch="${b.batchRef}">查看</button><button type="button" data-batch-toggle="${b.batchRef}" data-enabled="${!b.enabled}">${b.enabled?'暂停':'恢复'}</button>${b.counts.failed?`<button type="button" data-batch-retry="${b.batchRef}" data-command="${crypto.randomUUID()}" ${b.enabled?'':'disabled'}>重试失败</button>`:''}</td></tr>`).join('')}</tbody></table>`:'<p class="lgi-research-empty">还没有研究批次。可在「研究设置」中授权自动新增、历史补齐和日额度；启用后按 23:00 截点自动建立符合资格的研究范围。</p>');
   };
   async function modelSettings(){const r=await fetch('/api/local/model-settings',{cache:'no-store'});if(!r.ok)throw new Error('模型设置暂不可读。');return r.json();}
   function modelSummary(m){if(!m.model?.modelConnected)return '<p>'+esc(({NEEDS_SELECTION:'已有模型调用成功，请选择并保存默认模型。',NEEDS_CALL_TEST:'请在供应商弹窗中测试模型调用，无需先设置默认模型。',NEEDS_QUALIFICATION:'请在供应商弹窗中测试模型调用，无需先设置默认模型。',PAUSED:'模型连接已暂停，请先启用。'})[m.model?.modelState]||'请添加供应商并完成测试，再选择默认模型。')+' <a href="/settings/models">前往模型设置</a></p>';const model=(m.models||[]).find(v=>v.modelRef===m.config.modelRef);return `<p>研究模型：${esc(model?.modelId||'当前冻结配置')} · ${esc(model?.connectionName||'已配置供应商')}。所选评论、父评论与作品已有文字会经清洗及联系方式遮盖后发送。</p>`;}
   api.openSelected=async refs=>{loading('分析所选评论');try{const m=await modelSettings();const id=crypto.randomUUID();show('分析所选评论',`${modelSummary(m)}<p>选中 ${refs.length} 条评论。按所属作品分包；不增加采集。</p>${m.model?.modelConnected?'<form data-daily-selected><label>本批 Token 总上限<input name="tokens" type="number" min="1024" max="10000000" value="100000" required></label><p data-form-error role="status"></p><button type="submit">确认范围并开始分析</button></form>':''}`);dialog.querySelector('form')?.addEventListener('submit',async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;try{await ask('/selected',{batchRef:id,configRef:m.config.configRef,sourceRefs:refs,tokenLimit:Number(new FormData(e.target).get('tokens'))});dialog.close();document.getElementById('research-detail').close();api.onRefresh(true);}catch(err){fail(err);}finally{b.disabled=false;}});}catch(e){fail(e);}};
   api.openSettings=async()=>{loading('每日研究设置');try{const [data,m]=await Promise.all([ask(''),modelSettings()]);const s=data.schedule;show('每日研究设置',`${modelSummary(m)}<p>北京时间 23:00 固定批次。首次启用从启用时刻开始；暂停期间不调用，恢复后按原截点补建批次。每批有独立额度。</p>${m.config?`<form data-daily-settings><label>每日自动研究<select name="enabled"><option value="false">暂停</option><option value="true" ${m.model?.modelConnected?'':'disabled'} ${s.enabled?'selected':''}>启用</option></select></label><label>每批最多分析评论数<input name="sources" type="number" min="1" max="3000" value="${s.source_limit}" required></label><label>每批 Token 总上限<input name="tokens" type="number" min="1024" max="10000000" value="${s.token_limit}" required></label><p class="lgi-research-meta">来源清单与超额条目保留。评论按模型预算自动分包；问题自动归并还需要在研究设置中开启，并配置问题召回模型。保存每日运行设置不会修改这些上下文开关。</p><p data-form-error role="status"></p><button type="submit">保存研究设置</button></form>`:''}`);dialog.querySelector('form')?.addEventListener('submit',async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;const f=new FormData(e.target);try{if(f.get('enabled')==='true'&&!m.model?.modelConnected)throw new Error('请先完成模型调用测试并保存默认模型，再启用每日研究。');await ask('/schedule',{expectedRevision:s.revision,enabled:f.get('enabled')==='true',configRef:m.config.configRef,sourceLimit:Number(f.get('sources')),tokenLimit:Number(f.get('tokens'))});dialog.close();api.onRefresh();}catch(err){fail(err);}finally{b.disabled=false;}});}catch(e){fail(e);}};
+  api.readSettings=()=>ask('');
+  api.saveSchedule=payload=>ask('/schedule',payload);
+  const policyFor=s=>{const p=s.autoPolicy||s.auto_policy||{};return {continuousNew:p.continuousNew??p.continuous_new??false,historicalEnabled:p.historicalEnabled??p.historical_enabled??false,historyStart:p.historyStart??p.history_start??'',outdatedPolicy:p.outdatedPolicy??p.outdated_policy??'disabled',unknownRetryMaxAttempts:p.unknownRetryMaxAttempts??p.unknown_retry_max_attempts??0,unknownRetryTokenLimit:p.unknownRetryTokenLimit??p.unknown_retry_token_limit??0,dayTokenLimit:p.dayTokenLimit??p.day_token_limit??s.tokenLimit??s.token_limit??100000,replayTokenLimit:p.replayTokenLimit??p.replay_token_limit??0,semanticTokenLimit:p.semanticTokenLimit??p.semantic_token_limit??0};};
+  api.openSettings=async()=>{
+    loading('自动研究设置');
+    try {
+      const [data, modelState] = await Promise.all([api.readSettings(), modelSettings()]);
+      const schedule = data.schedule || {};
+      const policy = policyFor(schedule);
+      const configRef = modelState.config?.configRef || schedule.configRef || schedule.config_ref;
+      if (!configRef) {
+        show('自动研究设置', `${modelSummary(modelState)}<p>当前没有可保存的研究模型配置。请先完成模型设置。</p>`);
+        return;
+      }
+      show('自动研究设置', `${modelSummary(modelState)}<p>北京时间 23:00 固定截点。首次启用从实际启用时刻开始；暂停恢复保留边界。保存不会立即调用模型。</p><form data-daily-settings><fieldset><legend>授权范围</legend><label>自动研究<select name="enabled"><option value="false">暂停</option><option value="true" ${modelState.model?.modelConnected ? '' : 'disabled'} ${schedule.enabled ? 'selected' : ''}>启用</option></select></label><label><input name="continuousNew" type="checkbox" ${policy.continuousNew ? 'checked' : ''}>持续研究新增评论</label><label><input name="historicalEnabled" type="checkbox" ${policy.historicalEnabled ? 'checked' : ''}>补齐历史未研究评论</label><label>历史起点<input name="historyStart" value="${esc(policy.historyStart)}" placeholder="2026-09-01T00:00:00+08:00"></label><label>已有结果更新<select name="outdatedPolicy"><option value="disabled" ${policy.outdatedPolicy === 'disabled' ? 'selected' : ''}>不自动更新</option><option value="current_only" ${policy.outdatedPolicy === 'current_only' ? 'selected' : ''}>仅当前范围</option><option value="historical" ${policy.outdatedPolicy === 'historical' ? 'selected' : ''}>按历史政策</option></select></label></fieldset><fieldset><legend>共享日额度</legend><label>每日 Token 总额度<input name="dayTokenLimit" type="number" min="1024" max="10000000" value="${esc(policy.dayTokenLimit)}" required></label><label>每日最多评论数<input name="sourceLimit" type="number" min="1" max="3000" value="${esc(schedule.sourceLimit ?? schedule.source_limit)}" required></label><label>未知用量额外恢复次数<input name="unknownRetryMaxAttempts" type="number" min="0" max="1" value="${esc(policy.unknownRetryMaxAttempts)}" required></label><label>未知用量恢复额度<input name="unknownRetryTokenLimit" type="number" min="0" value="${esc(policy.unknownRetryTokenLimit)}" required></label><label>规则比较额度<input name="replayTokenLimit" type="number" min="0" value="${esc(policy.replayTokenLimit)}" required></label><label>问题整理额度<input name="semanticTokenLimit" type="number" min="0" value="${esc(policy.semanticTokenLimit)}" required></label></fieldset><p class="lgi-research-meta">恢复、规则比较与问题整理共用日总额度；未知用量预留不因重试自动释放。</p><p data-form-error role="status"></p><button type="submit">保存自动研究设置</button></form>`);
+      dialog.querySelector('form')?.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const submit = event.submitter;
+        submit.disabled = true;
+        const form = new FormData(event.target);
+        try {
+          const dayTokenLimit = Number(form.get('dayTokenLimit'));
+          const autoPolicy = {
+            continuousNew: form.has('continuousNew'),
+            historicalEnabled: form.has('historicalEnabled'),
+            historyStart: String(form.get('historyStart') || '').trim() || null,
+            outdatedPolicy: form.get('outdatedPolicy'),
+            unknownRetryMaxAttempts: Number(form.get('unknownRetryMaxAttempts')),
+            unknownRetryTokenLimit: Number(form.get('unknownRetryTokenLimit')),
+            dayTokenLimit,
+            replayTokenLimit: Number(form.get('replayTokenLimit')),
+            semanticTokenLimit: Number(form.get('semanticTokenLimit')),
+          };
+          if (autoPolicy.historicalEnabled && !autoPolicy.historyStart)
+            throw new Error('启用历史补齐时必须给出明确的历史起点。');
+          if (autoPolicy.unknownRetryTokenLimit + autoPolicy.replayTokenLimit + autoPolicy.semanticTokenLimit > dayTokenLimit)
+            throw new Error('恢复、比较与整理额度之和不能超过每日总额度。');
+          if (form.get('enabled') === 'true' && !modelState.model?.modelConnected)
+            throw new Error('请先完成模型调用测试并保存默认模型，再启用自动研究。');
+          await api.saveSchedule({ expectedRevision: schedule.revision, enabled: form.get('enabled') === 'true', configRef, sourceLimit: Number(form.get('sourceLimit')), tokenLimit: dayTokenLimit, autoPolicy });
+          dialog.close();
+          api.onRefresh();
+        } catch (error) {
+          fail(error);
+        } finally {
+          submit.disabled = false;
+        }
+      });
+    } catch (error) {
+      fail(error);
+    }
+  };
   async function showBatch(ref,after=null){const generation=++detailsGeneration;loading('批次处理明细');try{const data=await ask('/'+ref+(after?'?after='+after:''));if(generation!==detailsGeneration||!dialog.open)return;show('批次处理明细',`<p>逐条核对原声与分析。当前页最多 50 条；研究结果为候选解释。</p><table><thead><tr><th>评论</th><th>状态与原因</th><th>研究结果</th></tr></thead><tbody>${data.items.map(i=>`<tr><td><button type="button" class="lgi-voice-open" data-source="${i.sourceRef}"><span class="lgi-voice-preview">${esc(i.body||'来源当前受限')}</span></button></td><td>${esc(labels[i.state]||i.state)}<div class="lgi-research-meta">${esc(failures[i.failureCode]||i.failureCode||'')}</div></td><td>${i.analysis?(i.analysis.spans||[]).flatMap(s=>s.facets).map(f=>`<div>${esc(f.label)} <span class="lgi-research-meta">${f.basis==='explicit'?'直接表达':'推断'}</span></div>`).join('')||'未提取到研究信号':'尚无可展示结果'}</td></tr>`).join('')}</tbody></table>${data.nextCursor?`<button type="button" data-batch-next="${ref}" data-after="${data.nextCursor}">下一页</button>`:''}`);}catch(e){if(generation===detailsGeneration)fail(e);}}
   document.addEventListener('click',async e=>{const one=e.target.closest('[data-daily-source]');if(one){api.openSelected([one.dataset.dailySource]);return;}const close=e.target.closest('[data-daily-close]');if(close){dialog.close();return;}const retry=e.target.closest('[data-batch-retry]');if(retry){retry.disabled=true;try{const r=await ask('/'+retry.dataset.batchRetry+'/retry',{commandRef:retry.dataset.command});await api.onRefresh();document.getElementById('feedback').textContent='已重新排队 '+r.queued+' 条；仍受原批次次数与剩余额度限制，未知用量预留保留。';}catch(err){document.getElementById('feedback').textContent=err.message;}finally{retry.disabled=false;}return;}const b=e.target.closest('[data-batch]');if(b){showBatch(b.dataset.batch);return;}const next=e.target.closest('[data-batch-next]');if(next){showBatch(next.dataset.batchNext,next.dataset.after);return;}const toggle=e.target.closest('[data-batch-toggle]');if(toggle){toggle.disabled=true;try{await ask('/'+toggle.dataset.batchToggle,{enabled:toggle.dataset.enabled==='true'});api.onRefresh();}catch(err){document.getElementById('feedback').textContent=err.message;}finally{toggle.disabled=false;}}});
   dialog.addEventListener('close',()=>{detailsGeneration++;dialog.replaceChildren();});
   window.CommentDaily=api;
+})();
+
+(() => {
+  const api = window.CommentDaily;
+  if (!api?.render) return;
+  const render = api.render;
+  const batchTitle = (batch) => ({
+    daily: "每日新增",
+    backlog: "历史补齐／结果更新",
+    supplement: "补充研究",
+    selected: "指定范围研究",
+  })[batch?.kind] || "指定范围研究";
+  api.render = (data) => {
+    render(data);
+    (data.items || []).forEach((batch, index) => {
+      const cell = document.querySelectorAll("#results tbody tr")[index]?.cells[0];
+      const title = [...(cell?.childNodes || [])].find((node) => node.nodeType === Node.TEXT_NODE);
+      if (title) title.textContent = batchTitle(batch);
+      if (batch.kind === "backlog" && cell) {
+        const note = document.createElement("div");
+        note.className = "lgi-research-meta";
+        note.textContent = "按已授权历史或结果更新排队，不计为今日新增需求。";
+        cell.append(note);
+      }
+    });
+  };
 })();

@@ -1,7 +1,7 @@
 //! Frozen context choices and source-gated, expiring request diagnostics.
 use crate::{
     comment_cleaning::{CleanComment, outbound},
-    comment_packet::{ResearchPacket, SYSTEM},
+    comment_packet::ResearchPacket,
     comment_research::comment_source_hash,
     model_settings::ModelError,
 };
@@ -101,7 +101,7 @@ pub async fn begin_trace(
     policy: &ContextPolicy,
 ) -> Result<(), ModelError> {
     let prompt: Value = serde_json::from_str(&research.prompt).map_err(|_| ModelError::Invalid)?;
-    let input = json!({"contract":crate::comment_daily::DAILY_RULE,"system":SYSTEM,"work":prompt["untrustedMaterial"]["work"],"comments":prompt["untrustedMaterial"]["comments"],"existingProblems":prompt["existingProblems"],"policy":policy,"task":prompt["task"],"outputSchema":prompt["outputSchema"]});
+    let input = json!({"contract":research.rule_snapshot.rule_version.as_str(),"rule":research.rule_snapshot,"system":research.system,"work":prompt["untrustedMaterial"]["work"],"comments":prompt["untrustedMaterial"]["comments"],"existingProblems":prompt["existingProblems"],"policy":policy,"task":prompt["task"],"outputSchema":prompt["outputSchema"]});
     let hashes: Value = research
         .inputs
         .iter()
@@ -130,7 +130,7 @@ pub async fn expire_content(db: &Database) -> Result<(), ModelError> {
     sqlx::query("UPDATE linggan_comment_request_trace SET input_content=NULL,output_content=NULL,purged_at=scope_001_now() WHERE purged_at IS NULL AND (expires_at<=scope_001_now() OR NOT linggan_ci_analysis_context_readable(context_guard))").execute(db.pool()).await?;
     Ok(())
 }
-fn mask_text(text: &str) -> String {
+pub(crate) fn mask_text(text: &str) -> String {
     outbound(CleanComment {
         text: text.into(),
         offsets: vec![],
@@ -184,6 +184,19 @@ pub async fn record_response(
     Ok(())
 }
 
+pub async fn record_process_timeout(
+    db: &Database,
+    invocation: Uuid,
+    elapsed_ms: u64,
+) -> Result<(), ModelError> {
+    let diagnostic =
+        serde_json::to_value(crate::pi_adapter::PiDiagnostic::process_timeout(elapsed_ms))
+            .map_err(|_| ModelError::InvalidOutput)?;
+    sqlx::query("UPDATE linggan_model_invocation SET result=COALESCE(result,'{}'::jsonb)||jsonb_build_object('diagnostic',$2::jsonb) WHERE invocation_ref=$1 AND state='running'")
+        .bind(invocation).bind(diagnostic).execute(db.pool()).await?;
+    Ok(())
+}
+
 pub async fn request_detail(
     db: &Database,
     batch: Uuid,
@@ -199,23 +212,34 @@ pub async fn request_detail(
     if !allowed {
         return Err(ModelError::Source);
     }
-    let r=sqlx::query("SELECT t.*,t.expires_at>scope_001_now() AS fresh,p.purpose,p.source_refs,p.context_refs,v.state,v.failure_code,v.created_at,v.finished_at FROM linggan_comment_daily_packet p JOIN linggan_model_invocation v USING(invocation_ref) LEFT JOIN linggan_comment_request_trace t USING(invocation_ref) WHERE p.batch_ref=$1 AND p.invocation_ref=$2 AND NOT EXISTS(SELECT 1 FROM unnest(p.source_refs) ref LEFT JOIN linggan_material_comment c ON c.material_ref=ref LEFT JOIN linggan_material_content w ON w.public_ref=c.content_public_ref WHERE w.domain_ref IS DISTINCT FROM $3)").bind(batch).bind(invocation).bind(domain).fetch_optional(db.pool()).await?.ok_or(ModelError::NotFound)?;
+    let r=sqlx::query("SELECT t.*,t.expires_at>scope_001_now() AS fresh,p.purpose,p.source_refs,p.context_refs,v.state,v.failure_code,v.result AS invocation_result,v.created_at,v.finished_at FROM linggan_comment_daily_packet p JOIN linggan_model_invocation v USING(invocation_ref) LEFT JOIN linggan_comment_request_trace t USING(invocation_ref) WHERE p.batch_ref=$1 AND p.invocation_ref=$2 AND NOT EXISTS(SELECT 1 FROM unnest(p.source_refs) ref LEFT JOIN linggan_material_comment c ON c.material_ref=ref LEFT JOIN linggan_material_content w ON w.public_ref=c.content_public_ref WHERE w.domain_ref IS DISTINCT FROM $3)").bind(batch).bind(invocation).bind(domain).fetch_optional(db.pool()).await?;
+    let Some(r) = r else {
+        return crate::comment_field_repair_read::detail(db, batch, invocation, domain).await;
+    };
+    let invocation_result = r
+        .get::<Option<Value>, _>("invocation_result")
+        .unwrap_or(Value::Null);
+    let diagnostic = invocation_result
+        .get("diagnostic")
+        .cloned()
+        .and_then(|v| serde_json::from_value::<crate::pi_adapter::PiDiagnostic>(v).ok())
+        .filter(|v| v.valid());
     let guard = r.get::<Option<Value>, _>("context_guard");
     let Some(guard) = guard else {
         return Ok(
-            json!({"purpose":r.get::<String,_>("purpose"),"availability":"NOT_RECORDED","input":null,"output":null,"validation":[],"events":[]}),
+            json!({"purpose":r.get::<String,_>("purpose"),"diagnostic":diagnostic,"normalization":invocation_result.get("normalization"),"localRecoveryRef":invocation_result.get("localRecoveryRef"),"locallyRecoveredComments":invocation_result.get("locallyRecoveredComments"),"availability":"NOT_RECORDED","input":null,"output":null,"validation":[],"events":[]}),
         );
     };
     if !crate::comment_daily_read::context_readable(db, &guard).await? {
         return Ok(
-            json!({"purpose":r.get::<String,_>("purpose"),"availability":"RESTRICTED","input":null,"output":null,"validation":[],"events":[]}),
+            json!({"purpose":r.get::<String,_>("purpose"),"diagnostic":diagnostic,"availability":"RESTRICTED","input":null,"output":null,"validation":[],"events":[]}),
         );
     }
     let fresh = r.get::<Option<bool>, _>("fresh") == Some(true)
         && r.get::<Option<Value>, _>("input_content").is_some();
     let output = r.get::<Option<String>, _>("output_content");
     Ok(
-        json!({"purpose":r.get::<String,_>("purpose"),"availability":if fresh{"AVAILABLE"}else if r.get::<Option<bool>,_>("fresh")==Some(false){"EXPIRED"}else{"NOT_RECORDED"},
+        json!({"purpose":r.get::<String,_>("purpose"),"diagnostic":diagnostic,"normalization":invocation_result.get("normalization"),"localRecoveryRef":invocation_result.get("localRecoveryRef"),"locallyRecoveredComments":invocation_result.get("locallyRecoveredComments"),"availability":if fresh{"AVAILABLE"}else if r.get::<Option<bool>,_>("fresh")==Some(false){"EXPIRED"}else{"NOT_RECORDED"},
  "input":if fresh{r.get::<Option<Value>,_>("input_content")}else{None},"output":if fresh{json!({"received":output.is_some(),"redacted":true,"truncated":r.get::<Option<Value>,_>("events").is_some_and(|events|events.as_array().is_some_and(|a|a.iter().any(|e|e["displayTruncated"]==true))),"json":output.as_deref().and_then(|s|serde_json::from_str::<Value>(s).ok()),"text":output})}else{Value::Null},
  "validation":r.get::<Option<Value>,_>("validation"),"events":r.get::<Option<Value>,_>("events"),"policy":r.get::<Option<Value>,_>("policy"),"inputHash":r.get::<Option<String>,_>("input_hash"),"outcomes":r.get::<Option<Value>,_>("outcomes")}),
     )

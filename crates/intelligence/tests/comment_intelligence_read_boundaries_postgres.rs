@@ -30,10 +30,50 @@ fn result(source: Uuid, body: &str, label: &str, context: Value) -> Value {
 }
 async fn analysis(db: &Database, source: Uuid, value: Value, version: &str, at: &str) -> Uuid {
     let id = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_comment_analysis_work(work_ref,source_ref,rule_version,model_version,state,result,created_at) VALUES($1,$2,'comment-research.v3',$3,'succeeded',$4,$5::timestamptz)")
+    sqlx::query("INSERT INTO linggan_comment_analysis_work(work_ref,source_ref,rule_version,model_version,state,result,created_at) SELECT $1,$2,rule.schema_version,$3,'succeeded',$4,$5::timestamptz FROM linggan_comment_research_rule_active active JOIN linggan_comment_research_rule_revision rule USING(rule_revision_ref)")
         .bind(id).bind(source).bind(version).bind(value).bind(at).execute(db.pool()).await.unwrap();
+    qualify_current_read_fixture(db, source, id).await;
     id
 }
+// Explicit synthetic reader input, not a production extraction/reuse pipeline proof.
+// Historical analysis alone has no current qualification. The test supplies a current
+// rule/context decision only for the same readable identity and exact current body.
+async fn qualify_current_read_fixture(db: &Database, source: Uuid, analysis: Uuid) {
+    let written = sqlx::query(r#"INSERT INTO linggan_comment_research_eligibility_current
+      (source_identity,source_ref,source_sha256,fingerprint,rule_revision_ref,rule_hash,schema_version,
+       selector_version,source_context_revision,current_analysis_ref,last_accepted_analysis_ref,
+       result_state,execution_state,reason_code,eligible_to_dispatch,input_manifest)
+      SELECT encode(sha256(convert_to(current.work_ref::text||':'||current.comment_external_id,'UTF8')),'hex'),
+       current.source_ref,current.source_sha256,
+       encode(sha256(convert_to('SYNTHETIC-boundary-reader:'||current.source_ref::text,'UTF8')),'hex'),
+       rule.rule_revision_ref,rule.canonical_hash,rule.schema_version,rule.selector_version,
+       linggan_comment_research_context_revision(current.source_ref),analysis.work_ref,analysis.work_ref,
+       'studied','idle','current_result',false,'{"isSyntheticReadFixture":true}'::jsonb
+      FROM linggan_ci_source current
+      JOIN linggan_comment_research_readable readable ON readable.material_ref=current.source_ref
+      JOIN linggan_comment_analysis_work analysis ON analysis.work_ref=$3 AND analysis.state='succeeded'
+      JOIN linggan_material_comment original ON original.material_ref=analysis.source_ref
+       AND original.content_public_ref=current.work_ref AND original.comment_external_id=current.comment_external_id
+      CROSS JOIN linggan_comment_research_rule_active active
+      JOIN linggan_comment_research_rule_revision rule USING(rule_revision_ref)
+      WHERE current.domain_ref=$1 AND current.source_ref=$2 AND analysis.rule_version=rule.schema_version
+       AND analysis.result->>'sourceSha256'=current.source_sha256
+       AND linggan_ci_analysis_context_readable(analysis.result)
+      ON CONFLICT(source_identity) DO UPDATE SET source_ref=EXCLUDED.source_ref,source_sha256=EXCLUDED.source_sha256,
+       fingerprint=EXCLUDED.fingerprint,rule_revision_ref=EXCLUDED.rule_revision_ref,rule_hash=EXCLUDED.rule_hash,
+       schema_version=EXCLUDED.schema_version,selector_version=EXCLUDED.selector_version,
+       source_context_revision=EXCLUDED.source_context_revision,current_analysis_ref=EXCLUDED.current_analysis_ref,
+       last_accepted_analysis_ref=EXCLUDED.last_accepted_analysis_ref,result_state=EXCLUDED.result_state,
+       execution_state=EXCLUDED.execution_state,reason_code=EXCLUDED.reason_code,
+       eligible_to_dispatch=EXCLUDED.eligible_to_dispatch,input_manifest=EXCLUDED.input_manifest"#)
+      .bind(own()).bind(source).bind(analysis).execute(db.pool()).await.unwrap();
+    assert_eq!(
+        written.rows_affected(),
+        1,
+        "fixture requires matching current source, body, rule and readable context"
+    );
+}
+
 async fn config(db: &Database) -> Uuid {
     // Immutable synthetic configuration satisfies relational integrity without probing or publishing it.
     let connection = Uuid::new_v4();
@@ -59,7 +99,7 @@ async fn restored_comment_text_reuses_qualified_old_analysis_instead_of_newer_ot
     let a = "每天需要家长一直陪伴，想知道怎么办";
     let b = "试用了一个新的时间安排方法";
     let old_a = comment(&db, "restore", "same", a, "2026-08-28T10:00:00Z").await;
-    analysis(
+    let qualified_a = analysis(
         &db,
         old_a,
         result(old_a, a, "need", json!({"researchSourceRefs":[old_a]})),
@@ -82,6 +122,7 @@ async fn restored_comment_text_reuses_qualified_old_analysis_instead_of_newer_ot
     )
     .await;
     let restored = comment(&db, "restore", "same", a, "2026-08-30T10:00:00Z").await;
+    qualify_current_read_fixture(&db, restored, qualified_a).await;
     let r = read(&db, &all()).await.unwrap();
     assert_eq!(r["summary"]["comments"], 1);
     assert_eq!(r["summary"]["analyzed"], 1);
@@ -159,6 +200,8 @@ async fn failed_daily_item_is_visible_as_failed_and_not_pending() {
     sqlx::query("INSERT INTO linggan_comment_daily_item(batch_ref,source_ref,state,attempts,failure_code) VALUES($1,$2,'failed',1,'provider_timeout')").bind(batch).bind(source).execute(db.pool()).await.unwrap();
     let r = read(&db, &all()).await.unwrap();
     assert_eq!(r["page"]["items"][0]["analysisState"], "failed");
+    assert_eq!(r["page"]["items"][0]["executionState"], "failed");
+    assert_eq!(r["page"]["items"][0]["reasonCode"], "provider_timeout");
     assert_eq!(r["page"]["items"][0]["failureCode"], "provider_timeout");
     assert_eq!(r["summary"]["analyzed"], 0);
     assert_eq!(r["daily"]["items"][0]["counts"]["failed"], 1);
@@ -465,7 +508,7 @@ async fn cross_domain_uuid_collision_never_inherits_or_overwrites_native_researc
     detail(&db, "collision", "SYNTHETIC native title").await;
     let body = "每天都需要陪伴，想知道怎样安排时间";
     let first = comment(&db, "collision", "same-id", body, "2026-08-28T10:00:00Z").await;
-    analysis(
+    let qualified_native = analysis(
         &db,
         first,
         result(first, body, "need", json!({"researchSourceRefs":[first]})),
@@ -482,6 +525,7 @@ async fn cross_domain_uuid_collision_never_inherits_or_overwrites_native_researc
         .bind(problem).bind(own()).execute(db.pool()).await.unwrap();
     execute_action(&db, json!({"commandRef":Uuid::new_v4(),"domain":own(),"kind":"correct","sourceRef":first,"expectedRevision":0,"payload":{"labels":["need"],"problemRefs":[problem],"needsContext":false},"reason":"SYNTHETIC native correction"})).await.unwrap();
     let latest = comment(&db, "collision", "same-id", body, "2026-08-29T10:00:00Z").await;
+    qualify_current_read_fixture(&db, latest, qualified_native).await;
     let work: Uuid = sqlx::query_scalar(
         "SELECT content_public_ref FROM linggan_material_comment WHERE material_ref=$1",
     )
@@ -493,6 +537,7 @@ async fn cross_domain_uuid_collision_never_inherits_or_overwrites_native_researc
     // Every native identity join key and body hash collides, while domain ownership differs.
     sqlx::query("INSERT INTO cross_industry_sample(sample_ref,domain_ref,platform,content_external_id,title) VALUES($1,$2,'xhs','collision','SYNTHETIC external title')").bind(work).bind(external).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO cross_industry_comment(comment_ref,sample_ref,domain_ref,comment_external_id,body_text,body_state) VALUES($1,$2,$3,'same-id',$4,'KNOWN')").bind(first).bind(work).bind(external).bind(body).execute(db.pool()).await.unwrap();
+    assert_eq!(read(&db, &all()).await.unwrap()["summary"]["analyzed"], 1);
     let native = source(&db, own(), first).await.unwrap();
     assert_eq!(native["source"]["bookmarked"], true);
     assert_eq!(native["source"]["labels"], json!(["need"]));

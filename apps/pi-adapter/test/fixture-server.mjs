@@ -1,6 +1,7 @@
 // Explicit synthetic protocol fixture. Never serves as a production model fallback.
 import http from 'node:http';
 const embeddingRequests=[];
+let omittedLastTwo = false;
 const server=http.createServer(async(req,res)=>{
   if(req.headers.authorization!=='Bearer SYNTHETIC-NOT-A-CREDENTIAL'&&req.headers['x-api-key']!=='SYNTHETIC-NOT-A-CREDENTIAL'){res.writeHead(401);res.end('synthetic unauthorized');return;}
   if(req.url==='/v1/synthetic-embedding-requests'){const text=JSON.stringify(embeddingRequests);res.writeHead(200,{'Content-Type':'application/json','Content-Length':Buffer.byteLength(text)});res.end(text);return;}
@@ -16,20 +17,22 @@ const server=http.createServer(async(req,res)=>{
   }
   const prompt=body.messages.findLast(m=>m.role==='user')?.content;
   let material,promptPayload;try{promptPayload=JSON.parse(typeof prompt==='string'?prompt:prompt?.find(b=>b.type==='text')?.text);material=promptPayload.untrustedMaterial;}catch{res.writeHead(400);res.end('synthetic prompt missing');return;}
+  const repair=promptPayload.contract==='comment-field-repair.v1';
   const packet=Array.isArray(material.comments);
   const relation=!!material.expression&&Array.isArray(material.targets);
-  const actualWork=!packet&&!relation&&material.workRef!=='00000000-0000-0000-0000-000000000000';
+  const actualWork=!repair&&!packet&&!relation&&material.workRef!=='00000000-0000-0000-0000-000000000000';
   if(actualWork&&material.body.includes('[FAIL_PROVIDER]')){res.writeHead(503);res.end('synthetic bounded failure');return;}
   if(actualWork&&material.body.includes('[HANG_PROVIDER]')){res.writeHead(200,{'Content-Type':'text/event-stream'});res.write(':waiting\n\n');return;}
-  const output=relation?{decisions:material.targets.map((t,i)=>({targetRef:t.problemRef,definitionRevision:t.definitionRevision,relation:i===0?'same':'different',reason:'SYNTHETIC / NOT EVIDENCE · 固定关系验证'}))}:packet?{comments:material.comments.map(c=>({commentRef:c.commentRef,outcome:c.text.includes('[NO_SIGNAL]')?'no_signal':'interpretable',labels:[],problems:c.text.includes('[NO_SIGNAL]')?[]:[{basis:'explicit',contextEvidence:[],name:'合成执行精力',meaning:'合成执行过程中的精力困难',evidence:[{quote:c.text.includes('[BAD_QUOTE]')?'INVENTED-NOT-IN-SOURCE':c.text}]}],stances:[],contextMissing:[],uncertaintyReason:null,limitations:['SYNTHETIC / NOT EVIDENCE']}))}:{sourceRef:material.sourceRef,sourceSha256:material.sourceSha256,spans:[{sourceRef:material.sourceRef,startChar:0,endChar:Array.from(material.body).length,quote:material.body,
+  const output=repair?{commentRef:'C001',repairs:promptPayload.selectedFields.map(f=>({path:f.path,value:{label:'need',basis:'explicit',contextEvidence:[],evidence:[{quote:material.comment.text}]}}))}:relation?{decisions:material.targets.map((t,i)=>({targetRef:t.problemRef,definitionRevision:t.definitionRevision,relation:i===0?'same':'different',reason:'SYNTHETIC / NOT EVIDENCE · 固定关系验证'}))}:packet?{comments:material.comments.map(c=>({commentRef:c.commentRef,outcome:c.text.includes('[NO_SIGNAL]')?'no_signal':'interpretable',labels:[],problems:c.text.includes('[NO_SIGNAL]')?[]:[{basis:'explicit',contextEvidence:[],name:'合成执行精力',meaning:'合成执行过程中的精力困难',evidence:[{quote:c.text.includes('[BAD_QUOTE]')?'INVENTED-NOT-IN-SOURCE':c.text}]}],stances:[],contextMissing:[],uncertaintyReason:null,limitations:['SYNTHETIC / NOT EVIDENCE']}))}:{sourceRef:material.sourceRef,sourceSha256:material.sourceSha256,spans:[{sourceRef:material.sourceRef,startChar:0,endChar:Array.from(material.body).length,quote:material.body,
     facets:[{dimension:'problem',label:'合成执行精力',basis:'explicit'}]}],limitations:['SYNTHETIC / NOT EVIDENCE']};
   if(packet)output.comments=output.comments.filter((c,i)=>!material.comments[i].text.includes('[MISSING]')).map(c=>material.comments.find(m=>m.commentRef===c.commentRef).text.includes('[BAD_SCHEMA]')?{...c,labels:'invalid-root-structure'}:c);
+  if(packet&&!omittedLastTwo&&material.comments.length>2&&material.comments.some(c=>c.text.includes('[MISSING_LAST_TWO_ONCE]'))){output.comments=output.comments.slice(0,-2);omittedLastTwo=true;}
   if(packet)for(const c of output.comments)if(material.comments.find(m=>m.commentRef===c.commentRef)?.text.includes('[PARTIAL_FIELD]'))c.labels=[{label:'invented',basis:'explicit',contextEvidence:[],evidence:[]}];
   if(packet&&body.model==='synthetic-partial')for(const c of output.comments)if(Array.isArray(c.labels))c.labels=[{label:'invented',basis:'explicit',contextEvidence:[],evidence:[]}];
   if(packet&&material.comments.some(c=>c.text.includes('[HANG_PROVIDER]'))){res.writeHead(200,{'Content-Type':'text/event-stream'});res.write(':waiting\n\n');return;}
   if(actualWork&&material.body.includes('[NO_SIGNAL]'))output.spans=[];
-  if(packet&&material.comments.some(c=>c.text.includes('[DELAY_PROVIDER]')))await new Promise(resolve=>setTimeout(resolve,1000));
-  const text=body.model==='synthetic-bad'||(actualWork&&material.body.includes('[BAD_OUTPUT]'))?'invalid JSON':JSON.stringify(output);
+  if((packet&&material.comments.some(c=>c.text.includes('[DELAY_PROVIDER]')))||(repair&&material.comment.text.includes('[DELAY_REPAIR]')))await new Promise(resolve=>setTimeout(resolve,1000));
+  const text=body.model==='synthetic-bad'||(actualWork&&material.body.includes('[BAD_OUTPUT]'))||(packet&&material.comments.some(c=>c.text.includes('[BAD_OUTPUT]')))||(repair&&material.comment.text.includes('[BAD_REPAIR]'))?'invalid JSON':JSON.stringify(output);
   res.writeHead(200,{'Content-Type':'text/event-stream'});
   const chunk=(delta,finish_reason=null)=>({id:'synthetic-response',object:'chat.completion.chunk',created:1,model:body.model,choices:[{index:0,delta,finish_reason}]});
   const limited=body.model==='synthetic-limit';

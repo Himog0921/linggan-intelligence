@@ -10,8 +10,11 @@ use axum::{
 use linggan_intelligence::{comment_intelligence as ci, model_settings::ModelError};
 use serde_json::{Value, json};
 use uuid::Uuid;
+#[path = "comment_research_settings.rs"]
+mod settings;
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
+        .merge(settings::routes())
         .route("/api/local/comment-intelligence", get(read))
         .route(
             "/api/local/comment-intelligence/sources/{source}",

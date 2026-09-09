@@ -13,7 +13,12 @@
 //! **自动化不是豁免权**：准入若说资源不够、风险暂停生效或额度触顶，tick 也只能记下理由
 //! 然后等下一轮。
 
-use std::time::Duration;
+use std::{path::PathBuf, process::ExitCode, time::Duration};
+
+use linggan_intelligence::{
+    model_runner::{model_worker_heartbeat, run_model_worker_with_drain},
+    model_worker_drain::{MODEL_WORKER_DRAIN_GRACE, ModelWorkerDrain},
+};
 
 /// 两次扫描的间隔。
 ///
@@ -23,22 +28,28 @@ use std::time::Duration;
 const TICK_INTERVAL: Duration = Duration::from_secs(60);
 
 #[tokio::main]
-async fn main() {
+async fn main() -> ExitCode {
     let Ok(url) = std::env::var("LINGGAN_LOCAL_DATABASE_URL") else {
         // 没有数据库就什么都不做，而不是拿一个默认连接串去猜。
         println!("linggan worker: LINGGAN_LOCAL_DATABASE_URL is not set; no jobs are enabled");
-        return;
+        return ExitCode::SUCCESS;
     };
     let database = match linggan_storage_postgres::Database::connect(&url).await {
         Ok(database) => database,
         Err(error) => {
             println!("linggan worker: cannot reach the local database: {error}");
-            return;
+            return ExitCode::SUCCESS;
         }
     };
-    tokio::spawn(linggan_intelligence::model_runner::run_model_worker(
-        database.clone(),
-    ));
+    let drain = ModelWorkerDrain::new();
+    let drain_on_signal = drain.clone();
+    // Listen independently: a patrol database await must not delay closing model reservations.
+    let mut shutdown = tokio::spawn(async move {
+        wait_for_worker_shutdown().await;
+        drain_on_signal.request();
+    });
+    let mut model_worker =
+        tokio::spawn(run_model_worker_with_drain(database.clone(), drain.clone()));
     println!(
         "linggan worker: patrol tick every {}s",
         TICK_INTERVAL.as_secs()
@@ -59,7 +70,10 @@ async fn main() {
 
     let mut ticker = tokio::time::interval(TICK_INTERVAL);
     loop {
-        ticker.tick().await;
+        tokio::select! {
+            _ = &mut shutdown => break,
+            _ = ticker.tick() => {}
+        }
         if let Err(error) = linggan_evidence::ensure_discovery_cover_media_work(&database).await {
             println!("linggan worker: media acquisition projection failed: {error}");
         }
@@ -93,5 +107,84 @@ async fn main() {
             }
             Err(error) => println!("linggan worker: patrol tick failed: {error}"),
         }
+    }
+    drain.request();
+    println!("linggan worker: shutdown requested; stopping new model reservations");
+    finish_worker_shutdown(&database, &mut model_worker).await
+}
+
+async fn finish_worker_shutdown(
+    database: &linggan_storage_postgres::Database,
+    model_worker: &mut tokio::task::JoinHandle<
+        Result<(), linggan_intelligence::model_settings::ModelError>,
+    >,
+) -> ExitCode {
+    match tokio::time::timeout(MODEL_WORKER_DRAIN_GRACE, &mut *model_worker).await {
+        Ok(Ok(Ok(()))) => {
+            write_drain_ack("drained");
+            println!("linggan worker: model drain confirmed");
+            ExitCode::SUCCESS
+        }
+        Ok(Ok(Err(error))) => {
+            eprintln!(
+                "linggan worker: model receipt finalization failed: {}",
+                error.code()
+            );
+            let _ =
+                model_worker_heartbeat(&database, "error", Some("drain_finalization_failed")).await;
+            write_drain_ack("failed");
+            ExitCode::FAILURE
+        }
+        Ok(Err(error)) => {
+            eprintln!("linggan worker: model drain task failed: {error}");
+            let _ = model_worker_heartbeat(&database, "error", Some("drain_task_failed")).await;
+            write_drain_ack("failed");
+            ExitCode::FAILURE
+        }
+        Err(_) => {
+            model_worker.abort();
+            let _ = model_worker.await;
+            let _ = model_worker_heartbeat(&database, "error", Some("drain_timeout")).await;
+            write_drain_ack("timed_out");
+            eprintln!("linggan worker: model drain exceeded its bounded grace");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+async fn wait_for_worker_shutdown() {
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("SIGTERM handler is available on macOS");
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {}
+        _ = terminate.recv() => {}
+    }
+}
+
+fn write_drain_ack(state: &str) {
+    let path = std::env::var_os("LINGGAN_WORKER_DRAIN_ACK_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var_os("LINGGAN_SUPPORT_DIR").map(|root| {
+                PathBuf::from(root)
+                    .join("runtime-drain")
+                    .join("worker-drain-ack")
+            })
+        });
+    let Some(path) = path else {
+        eprintln!("linggan worker: no drain acknowledgement path is configured");
+        return;
+    };
+    let Some(parent) = path.parent() else {
+        eprintln!("linggan worker: drain acknowledgement path has no parent");
+        return;
+    };
+    if let Err(error) = std::fs::create_dir_all(parent).and_then(|_| {
+        std::fs::write(
+            &path,
+            format!("pid={}\nstate={state}\n", std::process::id()),
+        )
+    }) {
+        eprintln!("linggan worker: cannot persist drain acknowledgement: {error}");
     }
 }

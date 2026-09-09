@@ -1,7 +1,7 @@
 //! Per-field acceptance with exact target-comment evidence and separately scoped context support.
 use super::{
-    ContextQuote, EvidenceBasis, Outcome, PacketComment, ProblemCandidate, Quote, ResearchPacket,
-    SemanticLabel, Stance, semantic_context_for_comment,
+    ContextQuote, EvidenceBasis, Outcome, ProblemCandidate, Quote, ResearchPacket, SemanticLabel,
+    Stance, semantic_context_for_comment,
 };
 use crate::{
     comment_analysis::{
@@ -10,42 +10,280 @@ use crate::{
     comment_cleaning::{CleanComment, clean, outbound},
     comment_research::{ResearchBasis, ResearchDimension, ResearchFacet, comment_source_hash},
 };
+use serde::de::{Error as DeError, MapAccess, SeqAccess, Visitor};
+use serde::{Deserialize, Deserializer};
 use serde_json::{Value, json};
+use std::{collections::HashSet, fmt};
 #[path = "comment_packet_diagnostics.rs"]
 mod diagnostics;
+#[cfg(test)]
+#[path = "comment_packet_parser_tests.rs"]
+mod parser_tests;
+
+const DUPLICATE_KEY_MARKER: &str = "comment_packet_duplicate_json_key";
+
+/// `serde_json::Value` keeps the last duplicate map entry. Walk the input once before decoding
+/// into `Value` so an ambiguous provider response cannot silently replace an earlier value.
+struct NoDuplicateJsonKeys;
+
+struct NoDuplicateJsonKeysVisitor;
+
+impl<'de> Deserialize<'de> for NoDuplicateJsonKeys {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_any(NoDuplicateJsonKeysVisitor)
+    }
+}
+
+impl<'de> Visitor<'de> for NoDuplicateJsonKeysVisitor {
+    type Value = NoDuplicateJsonKeys;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a JSON value without duplicate object keys")
+    }
+
+    fn visit_bool<E>(self, _: bool) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Ok(NoDuplicateJsonKeys)
+    }
+
+    fn visit_i64<E>(self, _: i64) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Ok(NoDuplicateJsonKeys)
+    }
+
+    fn visit_u64<E>(self, _: u64) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Ok(NoDuplicateJsonKeys)
+    }
+
+    fn visit_f64<E>(self, _: f64) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Ok(NoDuplicateJsonKeys)
+    }
+
+    fn visit_str<E>(self, _: &str) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Ok(NoDuplicateJsonKeys)
+    }
+
+    fn visit_string<E>(self, _: String) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Ok(NoDuplicateJsonKeys)
+    }
+
+    fn visit_none<E>(self) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Ok(NoDuplicateJsonKeys)
+    }
+
+    fn visit_unit<E>(self) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Ok(NoDuplicateJsonKeys)
+    }
+
+    fn visit_seq<A>(self, mut sequence: A) -> Result<Self::Value, A::Error>
+    where
+        A: SeqAccess<'de>,
+    {
+        while sequence.next_element::<NoDuplicateJsonKeys>()?.is_some() {}
+        Ok(NoDuplicateJsonKeys)
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut keys = HashSet::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if !keys.insert(key) {
+                return Err(A::Error::custom(DUPLICATE_KEY_MARKER));
+            }
+            map.next_value::<NoDuplicateJsonKeys>()?;
+        }
+        Ok(NoDuplicateJsonKeys)
+    }
+}
+
+pub(crate) struct NormalizedEnvelope {
+    pub(crate) value: Value,
+    pub(crate) kind: &'static str,
+}
+
+pub(crate) fn normalized_envelope(raw: &str) -> Result<NormalizedEnvelope, &'static str> {
+    let trimmed = raw.trim();
+    let (json, kind) = if trimmed.starts_with("```") {
+        let body = trimmed
+            .strip_prefix("```json")
+            .and_then(|rest| {
+                rest.strip_prefix('\n')
+                    .or_else(|| rest.strip_prefix("\r\n"))
+            })
+            .ok_or("json_fence_invalid")?;
+        let closing = body.rfind("\n```").ok_or("json_fence_invalid")?;
+        if &body[closing + 1..] != "```" {
+            return Err("json_fence_invalid");
+        }
+        (&body[..closing], "json_fence")
+    } else {
+        (trimmed, "bare_json")
+    };
+    match serde_json::from_str::<NoDuplicateJsonKeys>(json) {
+        Ok(_) => {}
+        Err(error) if error.to_string().contains(DUPLICATE_KEY_MARKER) => {
+            return Err("duplicate_json_key");
+        }
+        Err(_) => return Err("json_invalid"),
+    }
+    let value = serde_json::from_str(json).map_err(|_| "json_invalid")?;
+    Ok(NormalizedEnvelope { value, kind })
+}
+
 fn bounded(value: &str, max: usize) -> bool {
     !value.trim().is_empty() && value.chars().count() <= max
 }
-fn validate_output(output: &PacketComment) -> Result<(), &'static str> {
-    if output.labels.len() > 8
-        || output.problems.len() > 8
-        || output.stances.len() > 8
-        || output.context_missing.len() > 8
-        || output.limitations.len() > 8
-        || output
-            .context_missing
-            .iter()
-            .chain(&output.limitations)
-            .any(|s| !bounded(s, 200))
-        || output
-            .uncertainty_reason
-            .as_ref()
-            .is_some_and(|s| !bounded(s, 200))
+struct ItemFields<'a> {
+    outcome: Outcome,
+    labels: &'a [Value],
+    problems: &'a [Value],
+    stances: &'a [Value],
+}
+
+fn item_fields(raw: &Value) -> Result<ItemFields<'_>, &'static str> {
+    const REQUIRED: [&str; 8] = [
+        "commentRef",
+        "outcome",
+        "labels",
+        "problems",
+        "stances",
+        "contextMissing",
+        "uncertaintyReason",
+        "limitations",
+    ];
+    let object = raw.as_object().ok_or("item_schema_invalid")?;
+    if object.len() != REQUIRED.len()
+        || REQUIRED.iter().any(|field| !object.contains_key(*field))
+        || raw["commentRef"].as_str().is_none()
     {
+        return Err("item_schema_invalid");
+    }
+    let outcome =
+        serde_json::from_value(raw["outcome"].clone()).map_err(|_| "item_schema_invalid")?;
+    let labels = raw["labels"].as_array().ok_or("item_schema_invalid")?;
+    let problems = raw["problems"].as_array().ok_or("item_schema_invalid")?;
+    let stances = raw["stances"].as_array().ok_or("item_schema_invalid")?;
+    if labels.len() > 8 || problems.len() > 8 || stances.len() > 8 {
         return Err("output_bounds");
     }
-    if output.outcome == Outcome::Uncertain && output.uncertainty_reason.is_none() {
+    Ok(ItemFields {
+        outcome,
+        labels,
+        problems,
+        stances,
+    })
+}
+
+fn accepted_auxiliary_list(raw: &Value, name: &str, rejected: &mut Vec<Value>) -> Vec<String> {
+    let Some(items) = raw[name].as_array() else {
+        rejected.push(json!({"path":name,"code":"field_schema_invalid"}));
+        return Vec::new();
+    };
+    items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            if index >= 8 {
+                rejected.push(
+                    json!({"path":format!("{name}[{index}]"),"code":"auxiliary_items_bounds"}),
+                );
+                return None;
+            }
+            match item.as_str() {
+                Some(value) if bounded(value, 200) => Some(value.to_owned()),
+                Some(_) => {
+                    rejected.push(
+                        json!({"path":format!("{name}[{index}]"),"code":"auxiliary_text_bounds"}),
+                    );
+                    None
+                }
+                None => {
+                    rejected.push(
+                        json!({"path":format!("{name}[{index}]"),"code":"field_schema_invalid"}),
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+fn accepted_auxiliary_reason(raw: &Value, rejected: &mut Vec<Value>) -> Option<String> {
+    match &raw["uncertaintyReason"] {
+        Value::Null => None,
+        Value::String(value) if bounded(value, 200) => Some(value.to_owned()),
+        Value::String(_) => {
+            rejected.push(json!({"path":"uncertaintyReason","code":"auxiliary_text_bounds"}));
+            None
+        }
+        _ => {
+            rejected.push(json!({"path":"uncertaintyReason","code":"field_schema_invalid"}));
+            None
+        }
+    }
+}
+
+struct ValidatedItem<'a> {
+    fields: ItemFields<'a>,
+    context_missing: Vec<String>,
+    limitations: Vec<String>,
+    uncertainty_reason: Option<String>,
+    rejected: Vec<Value>,
+}
+
+fn validated_item(raw: &Value) -> Result<ValidatedItem<'_>, &'static str> {
+    let fields = item_fields(raw)?;
+    let mut rejected = Vec::new();
+    let context_missing = accepted_auxiliary_list(raw, "contextMissing", &mut rejected);
+    let limitations = accepted_auxiliary_list(raw, "limitations", &mut rejected);
+    let uncertainty_reason = accepted_auxiliary_reason(raw, &mut rejected);
+    if fields.outcome == Outcome::Uncertain && uncertainty_reason.is_none() {
         return Err("uncertainty_reason_missing");
     }
-    let empty = output.labels.is_empty() && output.problems.is_empty() && output.stances.is_empty();
-    if output.outcome != Outcome::Interpretable && !empty {
+    let semantic_fields_present =
+        !fields.labels.is_empty() || !fields.problems.is_empty() || !fields.stances.is_empty();
+    if fields.outcome != Outcome::Interpretable && semantic_fields_present {
         return Err("outcome_conflict");
     }
-    if output.outcome == Outcome::Interpretable && empty {
+    if fields.outcome == Outcome::Interpretable && !semantic_fields_present {
         return Err("interpretable_without_evidence");
     }
-    Ok(())
+    Ok(ValidatedItem {
+        fields,
+        context_missing,
+        limitations,
+        uncertainty_reason,
+        rejected,
+    })
 }
+
 struct ItemEvidence<'a> {
     input: &'a CommentAnalysisInput,
     cleaned: &'a CleanComment,
@@ -91,8 +329,23 @@ impl ItemEvidence<'_> {
     }
 }
 impl ResearchPacket {
+    /// The caller retains the original provider text; this only exposes which strict transport
+    /// form was safe to normalize for trace metadata.
+    pub fn normalization_kind(raw: &str) -> Option<&'static str> {
+        normalized_envelope(raw)
+            .ok()
+            .map(|normalized| normalized.kind)
+    }
+
     pub fn parse(&self, raw: &str) -> Result<Vec<Result<Value, &'static str>>, &'static str> {
-        let envelope: Value = serde_json::from_str(raw).map_err(|_| "json_invalid")?;
+        let envelope = normalized_envelope(raw)?.value;
+        self.parse_envelope(&envelope)
+    }
+
+    fn parse_envelope(
+        &self,
+        envelope: &Value,
+    ) -> Result<Vec<Result<Value, &'static str>>, &'static str> {
         let obj = envelope.as_object().ok_or("schema_invalid")?;
         if obj.len() != 1 {
             return Err("schema_invalid");
@@ -270,15 +523,13 @@ impl ResearchPacket {
     }
     /// Evaluates fields without committing acceptance. `parse` is the sole public acceptance path.
     fn evaluate_item(&self, index: usize, raw: &Value) -> Result<Value, &'static str> {
-        if !raw
-            .as_object()
-            .is_some_and(|o| o.contains_key("uncertaintyReason"))
-        {
-            return Err("item_schema_invalid");
-        }
-        let output: PacketComment =
-            serde_json::from_value(raw.clone()).map_err(|_| "item_schema_invalid")?;
-        validate_output(&output)?;
+        let ValidatedItem {
+            fields: output,
+            context_missing,
+            limitations,
+            uncertainty_reason,
+            mut rejected,
+        } = validated_item(raw)?;
         let input = &self.inputs[index];
         let mut evidence = ItemEvidence {
             input,
@@ -287,17 +538,16 @@ impl ResearchPacket {
         };
         let mut accepted = json!({"labels":[],"problems":[],"stances":[]});
         let mut uncertain = Vec::new();
-        let mut rejected = Vec::new();
         for (group, fields) in [
-            ("labels", &output.labels),
-            ("problems", &output.problems),
-            ("stances", &output.stances),
+            ("labels", output.labels),
+            ("problems", output.problems),
+            ("stances", output.stances),
         ] {
             for (n, raw_field) in fields.iter().enumerate() {
                 let checkpoint = evidence.spans.len();
                 let field = self.resolve_semantic_field(index, group, raw_field, &mut evidence);
                 let field = field.and_then(|(value, basis)| {
-                    if basis == EvidenceBasis::Uncertain && output.uncertainty_reason.is_none() {
+                    if basis == EvidenceBasis::Uncertain && uncertainty_reason.is_none() {
                         Err("uncertainty_reason_missing")
                     } else {
                         Ok((value, basis))
@@ -333,11 +583,11 @@ impl ResearchPacket {
             source_ref: input.source_ref,
             source_sha256: input.source_sha256.clone(),
             spans: evidence.spans,
-            limitations: output.limitations,
+            limitations,
         };
         let mut result =
             validate_comment_analysis(input, &legacy).map_err(|_| "facets_or_evidence_invalid")?;
-        result["semantic"] = json!({"outcome":outcome,"labels":accepted["labels"],"problems":accepted["problems"],"stances":accepted["stances"],"uncertainFields":uncertain,"rejectedFields":rejected,"acceptance":if all_rejected {"rejected"} else if rejected.is_empty() {"complete"} else {"partial"},"contextMissing":output.context_missing,"uncertaintyReason":output.uncertainty_reason});
+        result["semantic"] = json!({"outcome":outcome,"labels":accepted["labels"],"problems":accepted["problems"],"stances":accepted["stances"],"uncertainFields":uncertain,"rejectedFields":rejected,"acceptance":if all_rejected {"rejected"} else if rejected.is_empty() {"complete"} else {"partial"},"contextMissing":context_missing,"uncertaintyReason":uncertainty_reason});
         result["schemaVersion"] = json!(super::EXTRACTION_SCHEMA_VERSION);
         result["candidateSnapshot"] = json!([]);
         result["contextFingerprint"] = json!(comment_source_hash(

@@ -17,6 +17,8 @@
 | CI-20260907-V1 隔离证明 | 随机 `linggan-ci-proof-*` Docker container/volume；`/tmp/ci-*`、`/tmp/comment-intelligence-*` 日志及合成预览 | `scripts/test-comment-intelligence-postgres.sh`、`scripts/evaluate-comment-intelligence.py`、本地 API 与 SDK fixture | 不进 Git；报告摘要转写验收文档 | 禁止伪造或混入真实原文 | proof trap 清理所属容器和卷；预览结束关闭自己的 PID；临时 JSONL 不作为真实质量证明 |
 | CI-RUN-002 请求诊断 | PostgreSQL `linggan_comment_request_trace` | 已授权研究的真实请求边界写入；输入已脱敏，返回保结构脱敏 | 不进入 Git | 禁止伪造或回填历史 | 正文最多保留 24 小时；读取独立校验有效期与来源；worker 清理过期或受限正文，元数据与安全校验摘要继续保留；关闭记录仅影响新批次 |
 | Rust 构建缓存 | `target/` | Cargo build/test | 忽略 | 禁止 | 可安全重建，按需清理 |
+| CI-AUTO-004 worker退出回执 | Application Support/Linggan Intelligence/runtime-drain/worker-drain-ack、worker-update-permit；开发启动为系统临时目录 `linggan-runtime-drain.*` | worker写PID与终态；install生成绑定起止revision的许可，sync核验消费 | 不进Git；无正文/凭据 | 不得伪造完成回执 | 下一次受控drain替换；开发启动成功退出后仅清理自己目录，失败保留供诊断 |
+| CI-AUTO-004 本地语义计算依赖与容量证明 | `apps/comment-semantics/.venv/`、`artifacts/private/comment-semantics/capacity-report.synthetic.json`；操作系统临时目录 `ci-auto-semantics-*` 内float32 mmap、索引、合成assignment、指标与checkpoint | 固定依赖锁及 `scripts/runtime/prepare-comment-semantics.sh`；真实算法测试与Rust受限调用 | .venv/缓存/数据/报告忽略，维护源码和依赖锁提交；验收摘要进docs | 不伪造质量或把合成容量当真实语义 | 不写原声文本/DB凭据；成功后删除所属临时目录，失败保留诊断元数据至收口；不删除其他运行缓存 |
 | Rust 依赖锁 | `Cargo.lock` | `cargo generate-lockfile` | 提交 | 禁止 | Cargo 配置变化后重新生成并验证 `--locked` |
 | 本地环境秘密 | `.env`、`.env.*` | 人工从安全凭据源配置 | 忽略；仅 `env.example` 可提交 | 允许本地配置 | 不进入变更记录正文，不复制到仓库 |
 | PostgreSQL Docker 镜像缓存 | Docker Desktop 管理空间 | `docker compose pull`，来源由 `compose.yaml` 的 tag + digest 固定 | 不进入 Git | 禁止 | 可重新拉取，清理不等于删除数据卷 |

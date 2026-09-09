@@ -17,6 +17,7 @@ function setup(overrides = {}, search = '?view=voices&limit=50') {
     focus() {}
     showModal() { this.open = true; }
     close() { this.open = false; }
+    querySelector() { return null; }
   }
   const get = (id) => { if (!nodes.has(id)) nodes.set(id, new Element()); return nodes.get(id); };
   const main = get('main'); main.dataset.initialView = 'voices';
@@ -37,7 +38,7 @@ function setup(overrides = {}, search = '?view=voices&limit=50') {
       return { ok: true, json: async () => structuredClone(fixture) };
     }, crypto: { randomUUID: () => 'command-ref' },
   };
-  const instrumented = original.replace(/  load\(\)\.then\(\(\) => \{\n    if \(params.get\("source"\)\) openSource\(params.get\("source"\)\);\n  \}\);/, '  window.test = { state, selected, selectedSources, selectSource, navigate, render, renderPagination, renderSelection, renderProblems, callTable, renderDaily, renderChanges, candidateList, observations, cleaningHtml, semanticNotice, commentContextHtml, relationExpressionHtml, automationSummary, openJudgment, openJudgmentDecision, clearSelectionForScope, handle, openRequest, openContextSettings, openPrepare, runCommand: (f) => command(f), setData: (v) => { data = v; }, setBatch: (v) => { batchDetail = v; } };');
+  const instrumented = original.replace(/  load\(\)\.then\(\(\) => \{\n    if \(params.get\("source"\)\) openSource\(params.get\("source"\)\);\n  \}\);/, '  window.test = { state, selected, selectedSources, selectSource, navigate, render, renderOverview, renderPagination, renderSelection, renderProblems, callTable, callPurpose, fieldRepairInputHtml, fieldRepairReceiptHtml, continuityReadout, renderDaily, renderChanges, candidateList, observations, cleaningHtml, semanticNotice, commentContextHtml, relationExpressionHtml, automationSummary, semanticOrganizationSummary, semanticOrganizationList, openJudgment, openJudgmentDecision, clearSelectionForScope, handle, openRequest, openContextSettings, openPrepare, runCommand: (f) => command(f), setData: (v) => { data = v; }, setBatch: (v) => { batchDetail = v; } };');
   assert.notEqual(instrumented, original, 'test instrumentation must locate startup without changing product logic');
   vm.runInNewContext(instrumented, context);
   window.test.setData(fixture);
@@ -81,9 +82,66 @@ test('problem counts distinguish expressions, unresolved boundaries and developm
   app.renderProblems();
   const html = get('results').innerHTML;
   assert.match(html, /<dt>问题表达<\/dt><dd>16<\/dd>/);
-  assert.match(html, /<dt>需要判断<\/dt><dd>1<\/dd>/);
+  assert.match(html, /<dt>待自动复核<\/dt><dd>1<\/dd>/);
   assert.match(html, /<span class="ci-tag">新兴问题<\/span>/);
   assert.match(html, /3 个历史问题尚未标定发展阶段/);
+});
+
+test('semantic organization keeps accepted expressions visible before a stable cluster exists', () => {
+  const { app, fixture, get } = setup();
+  fixture.semanticOrganization = {
+    atomCount: 9,
+    unclusteredCount: 2,
+    byKind: { problem: 4, need: 3, solution: 2 },
+    unclustered: [
+      { atomRef: 'a1', kind: 'need', meaning: '需要更容易坚持的奖励表', sourceRef: 'source-1', reason: 'below_min_common_core' },
+      { atomRef: 'a2', kind: 'story', meaning: '晚间陪写作业的经历', sourceRef: 'source-2', reason: 'missing_embedding' },
+    ],
+    scope: 'current_filtered_accepted_results',
+    qualityMeaning: '稳定性不等于语义正确率；未通过组织条件的表达仍可查看原声。',
+  };
+  app.renderOverview();
+  assert.match(get('results').innerHTML, /已经理解/);
+  assert.match(get('results').innerHTML, /等待整理/);
+  app.renderProblems();
+  const html = get('results').innerHTML;
+  assert.match(html, /已经理解、等待整理的表达/);
+  assert.match(html, /需求 3/);
+  assert.match(html, /共同核心不足，暂不归并/);
+  assert.match(html, /等待语义向量准备/);
+  assert.match(html, /data-ci="source"/);
+  assert.match(html, /稳定性只决定是否归并，不抹去已经接纳的表达/);
+});
+
+test('semantic organization makes each real budget blocker distinct from waiting for a vector', () => {
+  const { app, fixture } = setup();
+  fixture.semanticOrganization = {
+    atomCount: 3,
+    unclusteredCount: 3,
+    byKind: { need: 3 },
+    unclustered: [
+      { atomRef: 'a1', kind: 'need', meaning: '预算受限表达一', reason: 'purpose_budget_exhausted' },
+      { atomRef: 'a2', kind: 'need', meaning: '预算受限表达二', reason: 'day_budget_exhausted' },
+      { atomRef: 'a3', kind: 'need', meaning: '预算受限表达三', reason: 'unknown_recovery_budget_exhausted' },
+    ],
+  };
+  const html = app.semanticOrganizationList();
+  for (const reason of ['语义整理额度不足，请检查研究设置', '今日总额度已用完，等待恢复', '未知用量恢复额度不足'])
+    assert.match(html, new RegExp(reason));
+  assert.doesNotMatch(html, /等待语义向量准备/);
+});
+
+test('problem details disclose related work topics without classifying the comment into a topic', () => {
+  const { app, fixture, get } = setup();
+  fixture.problem = { problemRef: 'p1', name: '合成问题', meaning: '需要持续的陪伴安排', revision: 1 };
+  fixture.relatedTopics = [{ topicRef: 'topic-1', definitionRef: 'definition-1', definitionVersion: 2, name: '亲子晚间协作', canonicalKey: 'synthetic-topic', works: 2, comments: 5, associationRefs: ['assoc-1'], relation: 'source_work_member', meaning: '围绕晚间陪伴与家庭协作的既有作品主题' }];
+  app.renderProblems();
+  const html = get('results').innerHTML;
+  assert.match(html, /相关作品所属主题 · 1/);
+  assert.match(html, /亲子晚间协作/);
+  assert.match(html, /围绕晚间陪伴与家庭协作的既有作品主题/);
+  assert.match(html, /不表示这条评论已被正式分类到主题/);
+  assert.doesNotMatch(html, /评论已归类到主题/);
 });
 
 test('actual per-comment context fragments are rendered without inventing missing work text', () => {
@@ -183,7 +241,7 @@ test('accepted Task B recovery presents usage review without labelling analysis 
   assert.match(table, /结果已接纳，用量待核对/);
   assert.doesNotMatch(table, /未接纳研究输出|此项未通过校验|ci-failure-text/);
   const summary = app.automationSummary();
-  assert.match(summary, /结果已接纳，用量待核对；问题关系仍需要判断/);
+  assert.match(summary, /结果已接纳，用量待核对；边界等待自动复核/);
   assert.doesNotMatch(summary, /处理失败/);
   app.setBatch({ calls: [call] });
   await app.openRequest('real-batch', 'recovered-call');
@@ -191,4 +249,42 @@ test('accepted Task B recovery presents usage review without labelling analysis 
   assert.match(html, /已恢复接纳结果/);
   assert.match(html, /结果已接纳，用量待核对/);
   assert.doesNotMatch(html, /此项未通过校验|ci-failure-text|不能据此判断全部通过/);
+});
+
+test('field repair uses its own label, retained input and supplement receipt without synthetic events', () => {
+  const { app } = setup();
+  const call = { invocationRef: 'repair-call', purpose: 'field_repair', state: 'partial', requestedComments: 1, requestedFields: 2, acceptedComments: 1, workTitle: '合成作品', modelId: 'synthetic' };
+  const table = app.callTable([call], 'repair-batch');
+  assert.match(table, /补齐未通过的字段/);
+  assert.match(table, /2 个未通过字段 · 1 条评论/);
+  assert.match(table, /补齐结果已写入补充分析/);
+  const input = app.fieldRepairInputHtml({ contract: 'comment-field-repair.v1', selectedFields: ['labels[0]', 'evidence[0]'], comments: [{ commentRef: 'source-1', text: '真实保留的评论' }], system: '只补齐字段', policy: { context: 'frozen' }, outputSchema: { type: 'object' } });
+  assert.match(input, /本次实际补齐范围/);
+  assert.match(input, /labels\[0\]/);
+  assert.match(input, /真实保留的评论/);
+  assert.match(input, /只补齐字段/);
+  assert.match(input, /输出结构/);
+  assert.doesNotMatch(input, /已收到模型返回|开始调用模型/);
+  const receipt = app.fieldRepairReceiptHtml({ baseAnalysisRef: 'base-analysis', supplementAnalysisRef: 'supplement-analysis', state: 'succeeded_partial', fields: ['labels[0]'] });
+  assert.match(receipt, /字段补齐回执/);
+  assert.match(receipt, /base-analysis/);
+  assert.match(receipt, /supplement-analysis/);
+  assert.match(receipt, /部分补齐结果已接纳/);
+});
+
+test('replay continuity is read-only and never presents stability as semantic accuracy', () => {
+  const { app } = setup();
+  const html = app.continuityReadout({
+    stabilityNotAccuracy: true,
+    followUps: [{ priorRunRef: 'prior-run', reason: 'required_new_samples', state: 'waiting_daily_budget', failureCode: 'replay_authorized_budget_exhausted', successorRunRef: null }],
+    explanations: [{ runRef: 'explanation-run', state: 'succeeded', reservedTokens: 600, expiresAt: '2026-09-10T00:00:00Z', result: { stabilityNotAccuracy: true, summary: '只解释工程差异', uncertainty: '不比较语义正确性' } }],
+    rollbackReceipts: [{ triggeringRunRef: 'trigger-run', candidateRuleRevisionRef: 'candidate-rule', restoredRuleRevisionRef: 'restored-rule', createdAt: '2026-09-09T00:00:00Z', healthEvidence: { state: 'degraded', completedPairs: 9, eligibleCount: 12 } }],
+  });
+  assert.match(html, /比较后续与回退记录 · 3/);
+  assert.match(html, /等待当日共享额度/);
+  assert.match(html, /只解释工程差异/);
+  assert.match(html, /已恢复规则/);
+  assert.match(html, /稳定性、结构和分布检查不等于语义准确率/);
+  assert.doesNotMatch(html, /<button/);
+  assert.doesNotMatch(html, /语义准确率已证明/);
 });

@@ -45,7 +45,11 @@ pub(super) async fn advance_problem_retrieval(
     db: &Database,
     store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
+    drain: Option<&crate::model_worker_drain::ModelWorkerDrain>,
 ) -> Result<bool, ModelError> {
+    if super::drain_requested(drain) {
+        return Ok(false);
+    }
     // Qualification withdrawal invalidates derived features even while dispatch is disabled.
     sqlx::query("DELETE FROM linggan_ci_definition_vector v WHERE EXISTS(SELECT 1 FROM jsonb_array_elements(v.source_guards) g WHERE NOT linggan_ci_analysis_context_readable(jsonb_build_object('contextRefs',g))) OR (v.entity_kind='expression' AND NOT EXISTS(SELECT 1 FROM linggan_ci_problem_candidate c JOIN linggan_ci_source s USING(canonical_ref,domain_ref) JOIN linggan_comment_analysis_work a ON a.work_ref=c.analysis_ref AND a.result->>'sourceSha256'=s.source_sha256 WHERE c.candidate_ref=v.entity_ref AND c.domain_ref=v.domain_ref AND c.state<>'superseded')) OR (v.entity_kind='problem' AND NOT EXISTS(SELECT 1 FROM linggan_ci_problem p JOIN linggan_ci_problem_member m USING(problem_ref) JOIN linggan_ci_source s USING(canonical_ref) WHERE p.problem_ref=v.entity_ref AND p.domain_ref=v.domain_ref AND p.redirect_ref IS NULL))").execute(db.pool()).await?;
     let Some(config) = crate::embedding_settings::active_config(db).await? else {
@@ -94,27 +98,17 @@ pub(super) async fn advance_problem_retrieval(
         mark(db, marker, "succeeded", "first_emerging_problem").await?;
         return Ok(true);
     }
-    let mut vectors = Vec::new();
-    let mut missing = Vec::new();
-    for e in &entities {
-        let values:Option<Value>=sqlx::query_scalar("SELECT embedding FROM linggan_ci_definition_vector WHERE domain_ref=$1 AND entity_kind=$2 AND entity_ref=$3 AND definition_fingerprint=$4 AND model_ref=$5 AND dimensions=$6")
-            .bind(domain).bind(e.kind).bind(e.id).bind(&e.fingerprint).bind(embedding_model).bind(dimensions as i32).fetch_optional(db.pool()).await?;
-        if let Some(values) = values {
-            vectors.push(DefinitionVector {
-                problem_ref: e.id,
-                model_version: format!("{embedding_model}:{dimensions}"),
-                dimensions,
-                values: serde_json::from_value(values).map_err(|_| ModelError::InvalidOutput)?,
-            });
-        } else if missing.len() < 2 {
-            missing.push(e)
-        }
-    }
+    let (mut vectors, missing) =
+        cached_vectors(db, &entities, domain, embedding_model, dimensions).await?;
     if !missing.is_empty() {
+        if super::drain_requested(drain) {
+            return Ok(false);
+        }
         return embed_missing(
             db,
             store,
             adapter,
+            drain,
             EmbeddingJob {
                 config: &config,
                 domain,
@@ -146,6 +140,33 @@ pub(super) async fn advance_problem_retrieval(
     .await?;
     Ok(true)
 }
+
+async fn cached_vectors<'a>(
+    db: &Database,
+    entities: &'a [Entity],
+    domain: Uuid,
+    embedding_model: Uuid,
+    dimensions: usize,
+) -> Result<(Vec<DefinitionVector>, Vec<&'a Entity>), ModelError> {
+    let mut vectors = Vec::new();
+    let mut missing = Vec::new();
+    for entity in entities {
+        let values: Option<Value> = sqlx::query_scalar("SELECT embedding FROM linggan_ci_definition_vector WHERE domain_ref=$1 AND entity_kind=$2 AND entity_ref=$3 AND definition_fingerprint=$4 AND model_ref=$5 AND dimensions=$6")
+            .bind(domain).bind(entity.kind).bind(entity.id).bind(&entity.fingerprint).bind(embedding_model).bind(dimensions as i32).fetch_optional(db.pool()).await?;
+        if let Some(values) = values {
+            vectors.push(DefinitionVector {
+                problem_ref: entity.id,
+                model_version: format!("{embedding_model}:{dimensions}"),
+                dimensions,
+                values: serde_json::from_value(values).map_err(|_| ModelError::InvalidOutput)?,
+            });
+        } else if missing.len() < 2 {
+            missing.push(entity);
+        }
+    }
+    Ok((vectors, missing))
+}
+
 async fn mark(db: &Database, id: Uuid, state: &str, reason: &str) -> Result<(), ModelError> {
     sqlx::query("UPDATE linggan_ci_problem_task SET state=$2,failure_code=$3,updated_at=scope_001_now() WHERE task_ref=$1").bind(id).bind(state).bind(reason).execute(db.pool()).await?;
     Ok(())
@@ -162,6 +183,7 @@ async fn embed_missing(
     db: &Database,
     store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
+    drain: Option<&crate::model_worker_drain::ModelWorkerDrain>,
     job: EmbeddingJob<'_>,
 ) -> Result<bool, ModelError> {
     let EmbeddingJob {
@@ -172,6 +194,9 @@ async fn embed_missing(
         entities,
         dimensions,
     } = job;
+    if super::drain_requested(drain) {
+        return Ok(false);
+    }
     let texts: Vec<&str> = entities.iter().map(|e| e.text.as_str()).collect();
     let prompt = serde_json::to_string(&texts).map_err(|_| ModelError::Invalid)?;
     if texts.iter().any(|s| s.len() > 8000) || texts.iter().map(|s| s.len()).sum::<usize>() > 16000
@@ -197,10 +222,21 @@ async fn embed_missing(
         mark(db, marker, "blocked_retrieval", "model_budget_exhausted").await?;
         return Ok(false);
     }
+    let budget = crate::comment_execution_budget::check_budget_in(
+        &mut tx,
+        crate::comment_execution_budget::BudgetPurpose::Semantic,
+        reserved,
+        false,
+    )
+    .await?;
+    if !budget.allowed {
+        tx.rollback().await?;
+        return Ok(false);
+    }
     let invocation = Uuid::new_v4();
     let packet = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens) VALUES($1,$2,$3,'embed',$4,'running',$5,$5)")
-        .bind(invocation).bind(uuid(config,"connectionVersionRef")?).bind(uuid(config,"modelRef")?).bind(comment_source_hash(&prompt)).bind(reserved).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) VALUES($1,$2,$3,'embed',$4,'running',$5,$5,$6)")
+        .bind(invocation).bind(uuid(config,"connectionVersionRef")?).bind(uuid(config,"modelRef")?).bind(comment_source_hash(&prompt)).bind(reserved).bind(&budget.ledger_metadata).execute(&mut *tx).await?;
     let refs: Vec<Uuid> = entities
         .iter()
         .flat_map(|e| e.guards.iter())
@@ -212,8 +248,45 @@ async fn embed_missing(
     sqlx::query("INSERT INTO linggan_comment_daily_packet(packet_ref,batch_ref,source_refs,context_refs,context_hash,invocation_ref,lease_until,state,purpose) VALUES($1,$2,$3,$3,$4,$5,scope_001_now()+interval '120 seconds','running','problem_embedding')")
         .bind(packet).bind(batch).bind(refs).bind(comment_source_hash(&prompt)).bind(invocation).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_ci_problem_task SET state='running',invocation_ref=$2,packet_ref=$3,lease_until=scope_001_now()+interval '120 seconds' WHERE task_ref=$1").bind(marker).bind(invocation).bind(packet).execute(&mut *tx).await?;
+    if super::drain_requested(drain) {
+        tx.rollback().await?;
+        return Ok(false);
+    }
     tx.commit().await?;
+    let dispatch = dispatch_embedding(db, store, adapter, drain, config, entities, prompt).await;
+    finish_embedding(
+        db,
+        EmbeddingFinish {
+            domain,
+            marker,
+            invocation,
+            packet,
+            config,
+            entities,
+            dimensions,
+            reserved,
+            called: dispatch.called,
+            drain_interrupted: dispatch.drain_interrupted,
+            result: dispatch.result,
+        },
+    )
+    .await
+}
+
+async fn dispatch_embedding(
+    db: &Database,
+    store: &dyn ModelSecretStore,
+    adapter: &PiAdapter,
+    drain: Option<&crate::model_worker_drain::ModelWorkerDrain>,
+    config: &Value,
+    entities: &[&Entity],
+    prompt: String,
+) -> EmbeddingDispatch {
+    if super::drain_requested(drain) {
+        return EmbeddingDispatch::interrupted();
+    }
     let mut called = false;
+    let mut drain_interrupted = false;
     let result = async {
         let active = crate::embedding_settings::active_config(db)
             .await?
@@ -221,8 +294,8 @@ async fn embed_missing(
         if active["configRef"] != config["configRef"] {
             return Err(ModelError::Disabled);
         }
-        for e in entities {
-            for guard in &e.guards {
+        for entity in entities {
+            for guard in &entity.guards {
                 if !crate::comment_daily_read::context_readable(db, &json!({"contextRefs":guard}))
                     .await?
                 {
@@ -240,27 +313,37 @@ async fn embed_missing(
         request.prompt = prompt;
         request.timeout_ms = 30000;
         request.max_output_tokens = 16;
+        if super::drain_requested(drain) {
+            drain_interrupted = true;
+            return Err(ModelError::Source);
+        }
         called = true;
         adapter.call(&request).await
     }
     .await;
-    finish_embedding(
-        db,
-        EmbeddingFinish {
-            domain,
-            marker,
-            invocation,
-            packet,
-            config,
-            entities,
-            dimensions,
-            reserved,
-            called,
-            result,
-        },
-    )
-    .await
+    EmbeddingDispatch {
+        called,
+        drain_interrupted,
+        result,
+    }
 }
+
+struct EmbeddingDispatch {
+    called: bool,
+    drain_interrupted: bool,
+    result: Result<crate::pi_adapter::PiResponse, ModelError>,
+}
+
+impl EmbeddingDispatch {
+    fn interrupted() -> Self {
+        Self {
+            called: false,
+            drain_interrupted: true,
+            result: Err(ModelError::Source),
+        }
+    }
+}
+
 struct EmbeddingFinish<'a> {
     domain: Uuid,
     marker: Uuid,
@@ -271,6 +354,7 @@ struct EmbeddingFinish<'a> {
     dimensions: usize,
     reserved: i64,
     called: bool,
+    drain_interrupted: bool,
     result: Result<crate::pi_adapter::PiResponse, ModelError>,
 }
 async fn finish_embedding(db: &Database, run: EmbeddingFinish<'_>) -> Result<bool, ModelError> {
@@ -284,13 +368,18 @@ async fn finish_embedding(db: &Database, run: EmbeddingFinish<'_>) -> Result<boo
         dimensions,
         reserved,
         called,
+        drain_interrupted,
         result,
     } = run;
     let response = result.as_ref().ok();
     if called {
         checkpoint_invocation_usage(db, invocation, response).await?
     }
-    let mut failure = result.as_ref().err().map(|e| e.code().to_owned());
+    let mut failure = if drain_interrupted {
+        Some("worker_interrupted".to_owned())
+    } else {
+        result.as_ref().err().map(|e| e.code().to_owned())
+    };
     let mut accepted = None;
     if let Some(r) = response {
         if !r.ok {
@@ -365,9 +454,14 @@ fn validate_vectors(
     struct Output {
         vectors: Vec<Vec<f64>>,
         dimensions: usize,
+        // The shared adapter reports rejected positions even for a complete response.
+        // Legacy Task B remains all-or-nothing; partial caching belongs to the atom path.
+        #[serde(default)]
+        rejected: Vec<Value>,
     }
     let out: Output = serde_json::from_str(text).map_err(|_| ModelError::InvalidOutput)?;
-    if out.dimensions != dimensions
+    if !out.rejected.is_empty()
+        || out.dimensions != dimensions
         || out.vectors.len() != count
         || out.vectors.iter().any(|v| {
             v.len() != dimensions
@@ -389,6 +483,21 @@ mod tests {
         assert!(validate_vectors(r#"{"vectors":[[0,0]],"dimensions":2}"#, 1, 2).is_err());
         assert!(validate_vectors(r#"{"vectors":[[1,0]],"dimensions":3}"#, 1, 2).is_err());
         assert!(validate_vectors(r#"{"vectors":[[1,0]],"dimensions":2}"#, 2, 2).is_err());
+        assert!(
+            validate_vectors(r#"{"vectors":[[1,0]],"dimensions":2,"rejected":[]}"#, 1, 2).is_ok()
+        );
+        assert!(validate_vectors(r#"{"vectors":[[1,0]],"dimensions":2,"rejected":[{"index":0,"code":"invalid_vector"}]}"#, 1, 2).is_err());
+        assert!(
+            validate_vectors(r#"{"vectors":[null],"dimensions":2,"rejected":[]}"#, 1, 2).is_err()
+        );
+        assert!(
+            validate_vectors(
+                r#"{"vectors":[[1,0]],"dimensions":2,"rejected":[],"invented":true}"#,
+                1,
+                2
+            )
+            .is_err()
+        );
     }
 }
 

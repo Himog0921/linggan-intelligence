@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-09-04
+> 最后核对: 2026-09-08
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -18,8 +18,11 @@
 ## 当前权威与状态
 
 | 文档 | 状态 | 用途 |
-| [data-contracts/comment-research-automation.md](data-contracts/comment-research-automation.md) | 权威当前；交付分支 | CI-AUTO-003 自动清洗、分析复用、问题与变化新合同 |
 |---|---|---|
+| [plans/active/ci-auto-004-comment-auto-research.md](plans/active/ci-auto-004-comment-auto-research.md) | 活跃计划 | 评论自动研究最新24节决定的唯一推进入口、P0–P5覆盖和主线审查 |
+| [plans/active/ci-auto-004-execution-contracts.md](plans/active/ci-auto-004-execution-contracts.md) | 活跃计划 | 已实施P0–P5的数据/API合同及A01–A24验收；当前证据及性能未过项见主计划 |
+| [design/changes/ci-auto-004-ui-change-manifest.md](design/changes/ci-auto-004-ui-change-manifest.md) | 活跃计划 | 自动研究用户路径、四张UI地图与U01–U08验收 |
+| [data-contracts/comment-research-automation.md](data-contracts/comment-research-automation.md) | 权威当前；CI-AUTO-003基线 | 已有自动清洗、分析复用、问题与变化合同；最新目标差异见CI-AUTO-004 |
 | [plans/active/target-inspector-performance-001.md](plans/active/target-inspector-performance-001.md) | 活跃计划 | Issue #158 目标列表、统一状态投影、检查器与作品表现实施合同 |
 | [design/changes/target-inspector-performance-001-ui-change-manifest.md](design/changes/target-inspector-performance-001-ui-change-manifest.md) | 权威当前 | 目标检查器的信息架构、LIDS 与状态诚实性变更清单 |
 | [design/acceptance/target-inspector-performance-001-acceptance.md](design/acceptance/target-inspector-performance-001-acceptance.md) | 一次性报告 | 自动、隔离 PostgreSQL、浏览器与未部署边界的分层验收 |
