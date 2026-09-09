@@ -235,6 +235,7 @@ migrate() {
   apply_migration_once "0063_content_author_attribution" "$project_root/database/migrations/0063_content_author_attribution.sql"
   apply_migration_once "0064_comment_research_kernel" "$project_root/database/migrations/0064_comment_research_kernel.sql"
   apply_migration_once "0065_comment_research_vector_candidates" "$project_root/database/migrations/0065_comment_research_vector_candidates.sql"
+  apply_migration_once "0066_comment_research_change_signals" "$project_root/database/migrations/0066_comment_research_change_signals.sql"
 }
 
 case "$command_name" in

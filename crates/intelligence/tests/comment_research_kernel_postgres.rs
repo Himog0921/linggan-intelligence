@@ -21,6 +21,7 @@ use linggan_intelligence::comment_research_problems::{
     CommentResearchProblemError, ExistingProblemAdmission, NewProblemAdmission,
     ProblemDefinitionProposal, ProblemMembershipBasis, admit_existing_problem, admit_new_problem,
 };
+use linggan_intelligence::comment_research_results::publish_result_revision;
 use linggan_storage_postgres::Database;
 use research_fixture::{comment_with_author, detail_with_author};
 use serde_json::json;
@@ -98,6 +99,45 @@ async fn synthetic_qualified_embedding_space(database: &Database) -> EmbeddingSp
         .await
         .unwrap();
     activate_configured_embedding_space(database).await.unwrap()
+}
+
+async fn freeze_research_clock(database: &Database, now_at: &str) {
+    sqlx::raw_sql(
+        "CREATE TABLE research_result_test_clock( \
+             singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),now_at timestamptz NOT NULL \
+         ); \
+         INSERT INTO research_result_test_clock(singleton,now_at) VALUES(true,'2026-09-09T12:00:00Z'); \
+         CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql STABLE AS $$ \
+             SELECT (SELECT now_at FROM research_result_test_clock WHERE singleton) \
+         $$;",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE research_result_test_clock SET now_at=$1::timestamptz WHERE singleton")
+        .bind(now_at)
+        .execute(database.pool())
+        .await
+        .unwrap();
+}
+
+async fn claim_is_in_current_result_window(
+    database: &Database,
+    run_ref: Uuid,
+    derivation_ref: Uuid,
+) -> bool {
+    sqlx::query_scalar(
+        "SELECT source.observed_at::timestamptz >= '2026-09-01T16:00:00Z'::timestamptz \
+         FROM linggan_comment_research_run_item item \
+         JOIN linggan_comment_research_derivation derivation USING(derivation_ref) \
+         JOIN linggan_material_comment source ON source.material_ref=derivation.source_ref \
+         WHERE item.run_ref=$1 AND item.derivation_ref=$2",
+    )
+    .bind(run_ref)
+    .bind(derivation_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap()
 }
 
 #[tokio::test]
@@ -924,4 +964,189 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
         .await
         .unwrap();
     assert_eq!(calls, 0, "synthetic vector acceptance made no model call");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn published_result_has_independent_multi_signal_changes_and_is_idempotent() {
+    let database = fixture::proof_database("comment_research_result_revision").await;
+    freeze_research_clock(&database, "2026-09-09T12:00:00Z").await;
+    for note in ["result-note-a", "result-note-b"] {
+        detail_with_author(
+            &database,
+            note,
+            "SYNTHETIC result revision note",
+            Some("creator-1"),
+        )
+        .await;
+    }
+    for (note, id, body, observed_at) in [
+        (
+            "result-note-a",
+            "baseline-1",
+            "谢谢",
+            "2026-08-27T08:00:00Z",
+        ),
+        (
+            "result-note-a",
+            "baseline-2",
+            "谢谢",
+            "2026-08-28T08:00:00Z",
+        ),
+        (
+            "result-note-a",
+            "baseline-3",
+            "谢谢",
+            "2026-08-29T08:00:00Z",
+        ),
+        (
+            "result-note-a",
+            "current-1",
+            "孩子一到写作业就很难开始",
+            "2026-09-02T08:00:00Z",
+        ),
+        (
+            "result-note-b",
+            "current-2",
+            "每天写作业前都拖着不动",
+            "2026-09-03T08:00:00Z",
+        ),
+        (
+            "result-note-b",
+            "current-3",
+            "求一个让孩子开始写作业的方法",
+            "2026-09-04T08:00:00Z",
+        ),
+    ] {
+        comment_with_author(&database, note, id, body, Some("reader-1"), observed_at).await;
+    }
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: None,
+            source_limit: 100,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_run(&database, json!({"initiatedBy":"synthetic-test"}))
+        .await
+        .unwrap();
+    let mut created_problem: Option<(Uuid, i32)> = None;
+    while let Some(claim) = claim_next_run_item(&database).await.unwrap() {
+        if !claim_is_in_current_result_window(&database, run.run_ref, claim.derivation_ref).await {
+            accept_semantic_output(
+                &database,
+                &claim,
+                SemanticExtractionOutput::NoSignal {
+                    reason: "礼貌表达，不包含可归并的问题".into(),
+                },
+                None,
+            )
+            .await
+            .unwrap();
+            continue;
+        }
+        accept_semantic_output(
+            &database,
+            &claim,
+            SemanticExtractionOutput::Atoms {
+                atoms: vec![SemanticAtomProposal {
+                    kind: AtomKind::Problem,
+                    proposition: "孩子难以启动写作业".into(),
+                    basis: AtomBasis::Explicit,
+                    evidence_start: 0,
+                    evidence_end: 5,
+                }],
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let atom = atom_ref(&database, run.run_ref, claim.derivation_ref).await;
+        if let Some((problem_ref, definition_revision)) = created_problem {
+            admit_existing_problem(
+                &database,
+                ExistingProblemAdmission {
+                    atom_ref: atom,
+                    problem_ref,
+                    definition_revision,
+                    basis: ProblemMembershipBasis::Manual,
+                    decision_evidence: json!({
+                        "decision":"same_problem",
+                        "reason":"synthetic reviewer confirmed the same problem"
+                    }),
+                    invocation_ref: None,
+                },
+            )
+            .await
+            .unwrap();
+        } else {
+            let created = admit_new_problem(
+                &database,
+                NewProblemAdmission {
+                    atom_ref: atom,
+                    definition: ProblemDefinitionProposal {
+                        name: "写作业启动困难".into(),
+                        meaning: "孩子在开始完成作业前持续拖延或难以行动".into(),
+                    },
+                    basis: ProblemMembershipBasis::Deterministic,
+                    decision_evidence: json!({
+                        "decision":"new_problem",
+                        "candidateRefs":[]
+                    }),
+                    invocation_ref: None,
+                },
+            )
+            .await
+            .unwrap();
+            created_problem = Some((created.problem_ref, created.definition_revision));
+        }
+    }
+    let (problem_ref, _) = created_problem.unwrap();
+    let first = publish_result_revision(&database, run.run_ref)
+        .await
+        .unwrap();
+    assert_eq!(first.published_observations, 3);
+    assert_eq!(first.current_window_start, "2026-09-02 00:00:00+08");
+    assert_eq!(first.current_window_end, "2026-09-09 00:00:00+08");
+    let signals: Vec<String> = sqlx::query_scalar(
+        "SELECT kind FROM linggan_comment_research_change_observation \
+         WHERE result_revision_ref=$1 AND status='published' ORDER BY kind",
+    )
+    .bind(first.result_revision_ref)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(signals, vec!["newly_observed", "rising", "spreading"]);
+    let stats: Vec<(String, i32, i32, i32, i32)> = sqlx::query_as(
+        "SELECT window_kind,comment_count,comment_denominator,work_count,work_denominator \
+         FROM linggan_comment_research_problem_window_stat \
+         WHERE result_revision_ref=$1 AND problem_ref=$2 ORDER BY window_kind",
+    )
+    .bind(first.result_revision_ref)
+    .bind(problem_ref)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        stats,
+        vec![
+            ("baseline".into(), 0, 3, 0, 1),
+            ("current".into(), 3, 3, 2, 2)
+        ]
+    );
+    let second = publish_result_revision(&database, run.run_ref)
+        .await
+        .unwrap();
+    assert_eq!(second.result_revision_ref, first.result_revision_ref);
+    let readable_revisions: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_result_revision_readable WHERE run_ref=$1",
+    )
+    .bind(run.run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(readable_revisions, 1);
 }

@@ -127,6 +127,8 @@ Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类
 - 实现 ResultRevision、7d-vs-previous-7d、四类观察和 `not_comparable` 原因。
 - 验收：规则或 membership revision 变化只影响相应结果；历史回填、采集扩大、无基线、未完成日均不能显示为需求增长；结果只在完整 revision 发布后可见。
 
+实施进度（2026-09-09）：ResultRevision 的严格发布门和 Asia/Shanghai 完整自然日的 `前 7d vs 当前 7d` 计算已由 isolated PostgreSQL 证明。它要求 Run `completed`、所有 `problem`/`need` Atom 有 current membership、且每个 frozen source 仍可读；不满足即不发布。每个 Problem 记录评论占比和作品覆盖率，覆盖不足写 `not_comparable`。0066 将变化约束改为“同一 Problem 每种 published signal 最多一条”，从而保留 `newly_observed`、`rising/falling` 和 `spreading` 的并存证据；published revision 只读且重复发布幂等。真实历史回填、规则/definition revision 变更重算、API/read model 与页面仍待实施。
+
 ### R4 · 读取模型与体验
 
 - 以独立 endpoints/read models 重写四页和运行记录；不再在任意 tab 读取全量研究快照。
