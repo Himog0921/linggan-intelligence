@@ -9,11 +9,13 @@
 .c-tg-kind-head h2{margin:0;color:var(--lgi-ink);font-size:var(--lgi-text-body);font-weight:700}
 .c-tg-kind-head span{color:var(--lgi-muted);font:600 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono);font-variant-numeric:tabular-nums}
 .c-tg-table-scroll{min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain}
-.c-tg-table-head.c-tg-creator-grid,.c-tg-item.c-tg-creator-grid,.c-tg-table-head.c-tg-keyword-grid,.c-tg-item.c-tg-keyword-grid{display:grid;grid-template-columns:40px 48px minmax(160px,1fr) 56px 68px 72px 64px 76px 68px 74px 88px 88px 88px;gap:var(--lgi-space-2)}
-.c-tg-table-head{width:100%;min-width:1120px;min-height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);background:var(--lgi-canvas-low);color:var(--lgi-muted);font:600 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans);letter-spacing:var(--lgi-ls-normal)}
-.c-tg-table-head>span{min-width:0;white-space:nowrap}
-.c-tg-creator-grid>:nth-child(8){margin-left:var(--lgi-space-3)}
-.c-tg-item{position:relative;width:100%;min-width:1120px;min-height:64px;box-sizing:border-box;padding:var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline)}
+/* 十三列一次排满，不再靠横向滚动。定宽列写成 minmax(0,N)：窗口窄时它们按比例收窄并
+ * 省略文字，而不是把整张表推出屏幕——一张需要左右拖动才能看全的目录，等于要求人
+ * 记住左边看过什么。选择框、编号与操作三列保持定宽：它们是可点区域，收窄会让人点不中。 */
+.c-tg-table-head.c-tg-creator-grid,.c-tg-item.c-tg-creator-grid,.c-tg-table-head.c-tg-keyword-grid,.c-tg-item.c-tg-keyword-grid{display:grid;grid-template-columns:40px 48px minmax(140px,1fr) minmax(0,52px) minmax(0,72px) minmax(0,92px) minmax(0,60px) minmax(0,116px) minmax(0,64px) minmax(0,80px) minmax(0,88px) minmax(0,88px) 128px;gap:var(--lgi-space-3)}
+.c-tg-table-head{width:100%;min-height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);background:var(--lgi-canvas-low);color:var(--lgi-muted);font:600 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans);letter-spacing:var(--lgi-ls-normal)}
+.c-tg-table-head>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.c-tg-item{position:relative;width:100%;min-height:64px;box-sizing:border-box;padding:var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline)}
 .c-tg-item{cursor:pointer}
 .c-tg-item:has(.c-tg-object-link:focus-visible){background:var(--lgi-canvas-sunken)}
 .c-tg-number{display:flex;align-items:center;gap:var(--lgi-space-2);min-width:0}
@@ -44,9 +46,9 @@
 .c-tg-info{color:var(--lgi-info)}
 .c-tg-info::before{background:var(--lgi-info-dot)}
 .c-tg-neutral{color:var(--lgi-muted)}
-.c-tg-actions{display:flex;align-items:center;justify-content:flex-end;min-width:0;overflow:visible;cursor:default}
+.c-tg-actions{display:flex;align-items:center;justify-content:flex-end;min-width:0;cursor:default}
 .c-tg-actions form{width:auto;min-width:0;margin:0}
-.c-tg-btn{display:inline-flex;align-items:center;width:auto;min-width:calc(var(--lgi-space-24) + var(--lgi-space-6));min-height:40px;height:40px;box-sizing:border-box;padding:0 var(--lgi-space-4);justify-content:center;line-height:1;white-space:nowrap;font-size:var(--lgi-text-label)}
+.c-tg-btn{display:inline-flex;align-items:center;width:auto;max-width:100%;min-height:40px;height:40px;box-sizing:border-box;padding:0 var(--lgi-space-4);justify-content:center;line-height:1;white-space:nowrap;font-size:var(--lgi-text-label)}
 .c-tg-list-head{display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4)}
 .c-tg-list-tools{display:flex;align-items:center;justify-content:flex-end;gap:var(--lgi-space-3)}
 .c-tg-list-hint{color:var(--lgi-muted);font-size:var(--lgi-text-label)}

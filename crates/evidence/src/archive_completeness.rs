@@ -8,6 +8,8 @@
 //! 这条确切链路。详情任务只携带 `contentExternalId`，若靠任务规格里的
 //! `authorExternalId` 反查，渐进补齐的详情会全部丢失归属。
 
+use crate::archive_ledger::directory_works_sql;
+use crate::directory_boundary::{directory_proven_sql, surface_scan_complete_sql};
 use linggan_storage_postgres::Database;
 use std::collections::HashMap;
 
@@ -94,7 +96,8 @@ pub async fn read_archive_completeness(
     platform: &str,
 ) -> Result<HashMap<String, ArchiveCompleteness>, sqlx::Error> {
     let rows: Vec<(String, bool, bool, bool, i64, i64, i64, i64, i64, bool)> = sqlx::query_as(
-        "WITH ranked_roots AS ( \
+        concat!(
+            "WITH ranked_roots AS ( \
              SELECT target.target_ref,target.identity_key AS author_external_id, \
                     work_order.work_order_ref AS root_work_order_ref, \
                     row_number() OVER (PARTITION BY target.target_ref \
@@ -132,16 +135,9 @@ pub async fn read_archive_completeness(
                AND task.task_spec->'capabilitiesRequested' ? package.package_kind \
                AND receipt.execution_effect='COMPLETED_LIVE_STEP' AND receipt.material_admission='ACCEPTED' \
                AND layer->>'capability'='profile_discovery' \
-               AND COALESCE((layer->>'observed')::integer,0)>0 \
-               AND COALESCE((layer->>'attempted')::integer,0)>0 \
-               AND COALESCE((layer->>'acquired')::integer,0)>0 \
-               AND COALESCE((layer->>'failed')::integer,0)=0 \
-               AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
-               AND COALESCE((layer->>'unknown')::integer,0)=0 \
-               AND COALESCE((task.task_spec->>'maximumQuota')::integer,-1)=200 \
-               AND (layer->>'stoppedReason'='surface_ended' OR ( \
-                    layer->>'stoppedReason'='maximum_quota' \
-                    AND COALESCE((layer->>'acquired')::integer,-1)=200)) \
+               AND ",
+            directory_proven_sql!(),
+            " \
                AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
                                WHERE disposition.package_ref=package.package_ref AND disposition.disposition='quarantined') \
                AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition \
@@ -185,15 +181,12 @@ pub async fn read_archive_completeness(
              WHERE target.platform=$1 AND target.target_kind='creator' AND work_order.lane='patrol' \
                AND package.package_kind='profile_discovery' AND package.platform=task.platform \
                AND task.task_spec->'capabilitiesRequested' ? package.package_kind \
-               AND (package.coverage->'target') @> (task.task_spec->'target') \
+               -- 同 work_order_ledger：归属由 task_id 保证，不靠 target 逐键包含。
                AND receipt.execution_effect='COMPLETED_LIVE_STEP' AND receipt.material_admission='ACCEPTED' \
                AND layer->>'capability'='profile_discovery' \
-               AND COALESCE((layer->>'failed')::integer,0)=0 \
-               AND COALESCE((layer->>'notAttempted')::integer,0)=0 \
-               AND COALESCE((layer->>'unknown')::integer,0)=0 \
-               AND (layer->>'stoppedReason'='surface_ended' OR ( \
-                    layer->>'stoppedReason'='maximum_quota' \
-                    AND COALESCE((layer->>'acquired')::integer,-1)=COALESCE((task.task_spec->>'maximumQuota')::integer,-2))) \
+               AND ",
+            surface_scan_complete_sql!(),
+            " \
                AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
                                WHERE disposition.package_ref=package.package_ref AND disposition.disposition='quarantined') \
                AND (SELECT count(*) FROM linggan_runtime_record_disposition disposition \
@@ -280,17 +273,30 @@ pub async fn read_archive_completeness(
                AND runtime.task_spec #>> '{capabilitiesRequested,0}'='content_detail' \
                AND NULLIF(runtime.task_spec #>> '{target,contentExternalId}','') IS NOT NULL \
              GROUP BY scoped.author_external_id \
+         ), ",
+            directory_works_sql!("target.platform=$1 AND target.target_kind='creator'", "true"),
+            ", ledger_totals AS ( \
+             SELECT target.identity_key AS author_external_id, \
+                    count(*) AS works_listed, \
+                    count(*) FILTER (WHERE ledger.has_detail) AS details_captured \
+             FROM directory_work ledger \
+             JOIN collection_observation_target target \
+               ON target.target_ref=ledger.target_ref \
+             GROUP BY target.identity_key \
          ) \
          SELECT roots.author_external_id,coalesce(progress.started,false),coalesce(progress.attempted,false), \
                 coalesce(progress.work_in_progress,false),coalesce(totals.author_profile_captures,0), \
-                coalesce(totals.works_listed,0),coalesce(totals.details_captured,0),coalesce(totals.quarantined,0), \
+                coalesce(ledger.works_listed,0),coalesce(ledger.details_captured,0), \
+                coalesce(totals.quarantined,0), \
                 coalesce(blocked_details.blocked_details,0), \
                 directories.package_ref IS NOT NULL \
          FROM active_roots roots \
          LEFT JOIN record_totals totals USING(author_external_id) \
          LEFT JOIN archive_progress progress USING(author_external_id) \
          LEFT JOIN blocked_details USING(author_external_id) \
+         LEFT JOIN ledger_totals ledger USING(author_external_id) \
          LEFT JOIN directory_packages directories USING(author_external_id)",
+        ),
     )
     .bind(platform)
     .fetch_all(database.pool())

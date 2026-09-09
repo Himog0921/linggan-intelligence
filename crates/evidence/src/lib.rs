@@ -3,6 +3,7 @@
 
 mod acquisition_chain;
 mod archive_completeness;
+mod archive_ledger;
 mod collection_control;
 mod collection_target;
 mod collection_task_read;
@@ -11,6 +12,7 @@ mod content_reobservation;
 mod creator_lifecycle;
 mod cross_industry_admission;
 pub mod cross_industry_read;
+mod directory_boundary;
 mod dispatch;
 mod execution_station;
 mod ingress;
