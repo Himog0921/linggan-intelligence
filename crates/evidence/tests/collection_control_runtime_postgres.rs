@@ -107,6 +107,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0061_material_retirement.sql"),
     "\n",
     include_str!("../../../database/migrations/0062_human_moment.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0063_content_author_attribution.sql"),
 );
 
 #[tokio::test]
@@ -337,12 +339,15 @@ async fn station_closed_after_lease_issuance_blocks_dispatch() {
 
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
-async fn creator_archive_completion_tracks_coverage_without_blocking_observation_rules() {
+async fn non_progressive_creator_archive_never_claims_a_completed_baseline() {
     let cases = [
         ("empty_records", CoverageCase::EmptyRecords, "archiving"),
         ("zero", CoverageCase::Zero, "archiving"),
         ("scan_limited", CoverageCase::ScanLimited, "archiving"),
-        ("qualified", CoverageCase::Qualified, "archived"),
+        // A complete pair of receipts is evidence, but it was dispatched under the ordinary
+        // 20-work path.  Only an explicitly frozen 200-work progressive root can establish an
+        // archive baseline; see the dedicated progressive-root proof for that positive path.
+        ("qualified", CoverageCase::Qualified, "archiving"),
     ];
     for (suffix, coverage_case, expected_state) in cases {
         let database = proof_database(&format!("control_runtime_baseline_{suffix}")).await;
@@ -579,10 +584,9 @@ async fn retiring_station_atomically_ends_control_and_execution_ownership() {
     assert_eq!(binding_reason, "station_retired");
     let lease_reason: String = sqlx::query_scalar(
         "SELECT release_reason FROM collection_work_order_lease lease \
-         JOIN collection_work_order work_order USING(work_order_ref) \
-         WHERE work_order.installation_ref=$1 ORDER BY lease.issued_at DESC LIMIT 1",
+         WHERE lease.station_ref=$1 ORDER BY lease.issued_at DESC LIMIT 1",
     )
-    .bind(installation.installation_ref)
+    .bind(installation.station_ref)
     .fetch_one(database.pool())
     .await
     .expect("lease release is retained");

@@ -65,26 +65,26 @@ use linggan_evidence::{
     MonitorRuleCommandError, MonitorRuleDraft, MonitorRuleMode, ObservationTarget,
     ObservationTargetAvatar, ProducerRuntimeError, RequestLeaseError, RuntimeAttemptOutcome,
     RuntimeCapacityOverview, RuntimeSubmissionOutcome, RuntimeTaskOutcome, StationCapability,
-    StationOverview, StoreOutcome, TargetCounts, UnclaimedInstallation, WorkResourceReadError,
-    admit_media_blob, apply_monitor_rule_command, begin_media_upload, bind_observation_account,
-    check_in_installation, claim_installation, claim_media_acquisition,
+    StationOverview, StoreOutcome, TargetCounts, TargetDeletionOutcome, UnclaimedInstallation,
+    WorkResourceReadError, admit_media_blob, apply_monitor_rule_command, begin_media_upload,
+    bind_observation_account, check_in_installation, claim_installation, claim_media_acquisition,
     claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
-    create_manual_task, create_producer_task, dispatch_schema_is_ready, grant_authorization,
-    ingest_discovery_package, issue_work_order_lease, list_targets, list_targets_in_state,
-    local_discovery_schema_is_ready, local_producer_schema_is_ready,
+    create_manual_task, create_producer_task, delete_observation_target, dispatch_schema_is_ready,
+    grant_authorization, ingest_discovery_package, issue_work_order_lease, list_targets,
+    list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
     media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_archive_completeness, read_blocked_materials,
     read_collection_task_timeline, read_creator_directory, read_creator_lifecycle,
     read_discovery_library, read_keyword_hits, read_media_upload_session, read_runtime_capacity,
     read_runtime_library, read_scheduler_heartbeat, read_station_capabilities,
-    read_station_overview, read_target, read_target_avatars, read_target_inspector,
-    read_target_observation_summaries, record_media_acquisition_failure,
+    read_station_overview, read_target, read_target_avatars, read_target_deletion_preview,
+    read_target_inspector, read_target_observation_summaries, record_media_acquisition_failure,
     record_media_download_failure, record_media_upload_chunk, register_station,
     release_media_upload_finalize, rename_station, request_and_admit,
     request_and_admit_material_targets, request_progressive_archive, retire_materials,
     retire_station, set_group_for_many, set_station_accepting, start_local_attempt,
     start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
-    submit_producer_package, sync_target_from_author_profile,
+    submit_producer_package, sync_target_from_author_profile, toggle_target_patrol,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -348,6 +348,11 @@ fn router(state: LocalWebState) -> Router {
             "/collection/targets/retire-materials",
             post(collection_retire_materials),
         )
+        .route(
+            "/collection/targets/patrol-toggle",
+            post(collection_target_patrol_toggle),
+        )
+        .route("/collection/targets/delete", post(collection_target_delete))
         .route("/collection/targets/batch", post(collection_targets_batch))
         .route("/collection/operations", get(collection_operations))
         .route("/collection/attention", get(collection_attention))
@@ -2317,6 +2322,8 @@ async fn stylesheet() -> Response {
 struct CollectionParams {
     mode: Option<String>,
     drawer: Option<String>,
+    /// 要删除哪个观察目标。只是打开确认面板，不删任何东西——删除只走 POST。
+    delete: Option<String>,
     /// 观察目标的筛选。只改读取范围，不消耗任何平台访问。
     filter: Option<String>,
     /// 当前观察领域。`all` 或缺省表示全部领域——采集是运维视角，默认看全貌，
@@ -2518,9 +2525,16 @@ async fn collection_targets(
         }
         Ok(Some(_)) | Ok(None) | Err(()) => None,
     };
-    let drawer_tab = target_drawer::TargetDrawerTab::parse(params.dtab.as_deref());
     let has_legacy_lifecycle_query =
         params.life_window.is_some() || params.life_metric.is_some() || params.life_work.is_some();
+    // 早期的作品表现链接只有 `life_*`，没有今天的 `dtab=works&wview=performance`。
+    // 它们必须仍然落到表现视图；否则无效查询会在概览里被静默吞掉，用户既看不到图也看
+    // 不到为什么图不可用。
+    let drawer_tab = if params.dtab.is_none() && has_legacy_lifecycle_query {
+        target_drawer::TargetDrawerTab::Baseline
+    } else {
+        target_drawer::TargetDrawerTab::parse(params.dtab.as_deref())
+    };
     let works_view =
         target_drawer::TargetWorksView::parse(params.wview.as_deref(), has_legacy_lifecycle_query);
     let lifecycle_query = CreatorLifecycleQuery::parse_optional(
@@ -2563,6 +2577,19 @@ async fn collection_targets(
         }
         _ => None,
     };
+    // 只有真的点了删除才去读预览：列表每次渲染都读一遍，等于为一个多数时候不显示的
+    // 面板付一次查询。
+    let deletion_target = params
+        .delete
+        .as_deref()
+        .and_then(|value| uuid::Uuid::parse_str(value).ok());
+    let deletion_preview = match deletion_target {
+        Some(target_ref) => read_target_deletion_preview(database, target_ref)
+            .await
+            .ok()
+            .flatten(),
+        None => None,
+    };
     let list = match list_targets(
         database,
         params.filter.as_deref(),
@@ -2593,6 +2620,8 @@ async fn collection_targets(
                 completeness.as_ref(),
                 observation.as_ref(),
                 params.error.as_deref(),
+                deletion_preview.as_ref(),
+                deletion_target,
                 list_context,
             )
         }
@@ -3787,6 +3816,154 @@ fn target_retire_return_path(form: &TargetArchiveForm, error: Option<&str>) -> S
         pairs.push(format!("error={error}"));
     }
     format!("/collection/targets?{}#archive-problems", pairs.join("&"))
+}
+
+/// 行内写入只能回到它出发的列表上下文。这里逐项白名单，而不是接受一个 `return_url`：
+/// 既不会把用户送到别的领域，也不会把表单变成开放跳转入口。
+fn target_list_return_path(
+    return_domain: Option<&str>,
+    return_filter: Option<&str>,
+    return_sort: Option<&str>,
+    return_focus: Option<&str>,
+    delete: Option<uuid::Uuid>,
+    error: &str,
+) -> String {
+    let mut pairs = Vec::new();
+    if let Some(domain) = return_domain.filter(|domain| {
+        *domain == linggan_evidence::observation_domain::ALL_DOMAINS
+            || uuid::Uuid::parse_str(domain).is_ok()
+    }) {
+        pairs.push(format!("domain={domain}"));
+    }
+    if let Some(filter @ ("creator" | "keyword" | "archiving" | "monitoring")) = return_filter {
+        pairs.push(format!("filter={filter}"));
+    }
+    if return_sort == Some("last") {
+        pairs.push("sort=last".to_owned());
+    }
+    if let Some(target_ref) = delete {
+        pairs.push(format!("delete={target_ref}"));
+    }
+    pairs.push(format!("error={error}"));
+    let mut path = format!("/collection/targets?{}", pairs.join("&"));
+    if let Some(focus) = return_focus
+        .and_then(|value| value.strip_prefix("target-"))
+        .and_then(|value| uuid::Uuid::parse_str(value).ok())
+    {
+        path.push_str(&format!("#target-{focus}"));
+    }
+    path
+}
+
+/// COLLECTION-001 · 从列表上开关一个目标的自动巡查。
+///
+/// 停止观察不是删除：语料与档案全部保留，已经在跑的活跑完，只是不再排新的巡检。
+async fn collection_target_patrol_toggle(
+    State(state): State<LocalWebState>,
+    body: Bytes,
+) -> Redirect {
+    let mut target_ref: Option<uuid::Uuid> = None;
+    let mut enable = false;
+    let mut return_filter: Option<String> = None;
+    let mut return_sort: Option<String> = None;
+    let mut return_domain: Option<String> = None;
+    let mut return_focus: Option<String> = None;
+    for (key, value) in parse_form_pairs(&body) {
+        match key.as_str() {
+            "row_target_ref" => target_ref = uuid::Uuid::parse_str(&value).ok(),
+            "enable" => enable = value == "true",
+            "return_filter" => return_filter = Some(value),
+            "return_sort" => return_sort = Some(value),
+            "return_domain" => return_domain = Some(value),
+            "return_focus" => return_focus = Some(value),
+            _ => {}
+        }
+    }
+    let Some(target_ref) = target_ref else {
+        return Redirect::to("/collection/targets?error=patrol_toggle_invalid");
+    };
+    let back = |code| {
+        target_list_return_path(
+            return_domain.as_deref(),
+            return_filter.as_deref(),
+            return_sort.as_deref(),
+            return_focus.as_deref(),
+            None,
+            code,
+        )
+    };
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&back("read_model_not_connected"));
+    };
+    match toggle_target_patrol(database, target_ref, enable).await {
+        Ok(_) if enable => Redirect::to(&back("patrol_resumed")),
+        Ok(_) => Redirect::to(&back("patrol_paused")),
+        Err(MonitorRuleCommandError::UnknownTarget) => Redirect::to(&back("patrol_toggle_no_rule")),
+        Err(_) => Redirect::to(&back("patrol_toggle_failed")),
+    }
+}
+
+/// COLLECTION-001 · 彻底删除一个观察目标。
+///
+/// 删掉的是控制面——「我要盯着这个人」这个决定，以及它产生的申请、准入、工单、租约。
+/// 采集事实（作品、详情、评论、采集包、回执）在数据库层禁止删除，也不需要跟着走：作者
+/// 归属推自那些 append-only 事实，删完之后作品仍然属于这个博主、仍然检索得到。
+///
+/// 要求把名字原样打一遍。不可逆的操作，点两下太容易了。
+async fn collection_target_delete(State(state): State<LocalWebState>, body: Bytes) -> Redirect {
+    let mut target_ref: Option<uuid::Uuid> = None;
+    let mut confirm_name = String::new();
+    let mut return_filter: Option<String> = None;
+    let mut return_sort: Option<String> = None;
+    let mut return_domain: Option<String> = None;
+    let mut return_focus: Option<String> = None;
+    for (key, value) in parse_form_pairs(&body) {
+        match key.as_str() {
+            "row_target_ref" => target_ref = uuid::Uuid::parse_str(&value).ok(),
+            "confirm_name" => confirm_name = value,
+            "return_filter" => return_filter = Some(value),
+            "return_sort" => return_sort = Some(value),
+            "return_domain" => return_domain = Some(value),
+            "return_focus" => return_focus = Some(value),
+            _ => {}
+        }
+    }
+    let Some(target_ref) = target_ref else {
+        return Redirect::to(&target_list_return_path(
+            return_domain.as_deref(),
+            return_filter.as_deref(),
+            return_sort.as_deref(),
+            return_focus.as_deref(),
+            None,
+            "target_delete_invalid",
+        ));
+    };
+    let back = |delete, error| {
+        target_list_return_path(
+            return_domain.as_deref(),
+            return_filter.as_deref(),
+            return_sort.as_deref(),
+            return_focus.as_deref(),
+            delete,
+            error,
+        )
+    };
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&back(Some(target_ref), "read_model_not_connected"));
+    };
+    match delete_observation_target(database, target_ref, &confirm_name).await {
+        Ok(TargetDeletionOutcome::Deleted) => Redirect::to(&back(None, "target_deleted")),
+        Ok(TargetDeletionOutcome::NameMismatch) => {
+            Redirect::to(&back(Some(target_ref), "target_delete_name_mismatch"))
+        }
+        Ok(TargetDeletionOutcome::BlockedByProtectedFacts { .. }) => {
+            Redirect::to(&back(Some(target_ref), "target_delete_blocked"))
+        }
+        Ok(TargetDeletionOutcome::UnknownTarget) => {
+            Redirect::to(&back(None, "target_delete_missing"))
+        }
+        Err(_) => Redirect::to(&back(Some(target_ref), "target_delete_failed")),
+    }
 }
 
 /// COLLECTION-001 · 切换一个观察目标的巡检开关。

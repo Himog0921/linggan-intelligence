@@ -58,6 +58,13 @@ pub struct ArchiveCompleteness {
     /// 人已确认在平台上不存在的作品数。它们仍留在作品目录里，只是不再计入待补齐——
     /// 抹掉分母会让「档案完成」建立在一个被修饰过的数字上。
     pub retired_works: i64,
+    /// 既没有详情、也没有被确认失效的作品数：**真正还要去采的那些**。
+    ///
+    /// 它是一个独立的投影列，不是 `works_listed - details_captured`。此前七处展示层各自
+    /// 做那个减法，于是「已确认失效」加进来之后，只有其中一处知道要再减一次——木可可
+    /// 确认了 3 篇已删除，界面照旧催他去补那 3 篇。三个互斥的数相加等于作品总数，
+    /// 展示层就没有可减的东西了。
+    pub pending_details: i64,
     /// 当前目录根的边界是否已经由受接纳 Package 证明。
     pub directory_baseline: ArchiveDirectoryBaseline,
 }
@@ -99,7 +106,7 @@ pub async fn read_archive_completeness(
     database: &Database,
     platform: &str,
 ) -> Result<HashMap<String, ArchiveCompleteness>, sqlx::Error> {
-    let rows: Vec<(String, bool, bool, bool, i64, i64, i64, i64, i64, i64, bool)> = sqlx::query_as(
+    let rows: Vec<(String, bool, bool, bool, i64, i64, i64, i64, i64, i64, i64, bool)> = sqlx::query_as(
         concat!(
             "WITH ranked_roots AS ( \
              SELECT target.target_ref,target.identity_key AS author_external_id, \
@@ -295,7 +302,9 @@ pub async fn read_archive_completeness(
                     count(*) AS works_listed, \
                     count(*) FILTER (WHERE ledger.has_detail) AS details_captured, \
                     count(*) FILTER (WHERE ledger.is_retired AND NOT ledger.has_detail) \
-                        AS retired_works \
+                        AS retired_works, \
+                    count(*) FILTER (WHERE NOT ledger.has_detail AND NOT ledger.is_retired) \
+                        AS pending_details \
              FROM directory_work ledger \
              JOIN collection_observation_target target \
                ON target.target_ref=ledger.target_ref \
@@ -304,7 +313,7 @@ pub async fn read_archive_completeness(
          SELECT roots.author_external_id,coalesce(progress.started,false),coalesce(progress.attempted,false), \
                 coalesce(progress.work_in_progress,false),coalesce(totals.author_profile_captures,0), \
                 coalesce(ledger.works_listed,0),coalesce(ledger.details_captured,0), \
-                coalesce(ledger.retired_works,0), \
+                coalesce(ledger.retired_works,0),coalesce(ledger.pending_details,0), \
                 coalesce(totals.quarantined,0), \
                 coalesce(blocked_details.blocked_details,0), \
                 directories.package_ref IS NOT NULL \
@@ -330,6 +339,7 @@ pub async fn read_archive_completeness(
         works,
         details,
         retired_works,
+        pending_details,
         quarantined,
         blocked_details,
         directory_ready,
@@ -345,6 +355,7 @@ pub async fn read_archive_completeness(
                 works_listed: works,
                 details_captured: details,
                 retired_works,
+                pending_details,
                 quarantined,
                 blocked_details,
                 directory_baseline: if directory_ready {

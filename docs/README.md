@@ -24,6 +24,8 @@
 | [design/changes/ci-auto-004-ui-change-manifest.md](design/changes/ci-auto-004-ui-change-manifest.md) | 活跃计划 | 自动研究用户路径、四张UI地图与U01–U08验收 |
 | [data-contracts/comment-research-automation.md](data-contracts/comment-research-automation.md) | 权威当前；CI-AUTO-003基线 | 已有自动清洗、分析复用、问题与变化合同；最新目标差异见CI-AUTO-004 |
 | [plans/active/target-inspector-performance-001.md](plans/active/target-inspector-performance-001.md) | 活跃计划 | Issue #158 目标列表、统一状态投影、检查器与作品表现实施合同 |
+| [plans/active/target-deletion-author-attribution-001.md](plans/active/target-deletion-author-attribution-001.md) | 活跃计划 | Issue #214 安全撤回观察目标、独立作者归属 projection 与本机发布边界 |
+| [design/changes/target-deletion-author-attribution-001-ui-change-manifest.md](design/changes/target-deletion-author-attribution-001-ui-change-manifest.md) | 活跃计划 | Issue #214 的 Targets 行级停止/恢复、删除确认、保留事实与回执清单 |
 | [design/changes/target-inspector-performance-001-ui-change-manifest.md](design/changes/target-inspector-performance-001-ui-change-manifest.md) | 权威当前 | 目标检查器的信息架构、LIDS 与状态诚实性变更清单 |
 | [design/acceptance/target-inspector-performance-001-acceptance.md](design/acceptance/target-inspector-performance-001-acceptance.md) | 一次性报告 | 自动、隔离 PostgreSQL、浏览器与未部署边界的分层验收 |
 | [plans/active/model-pi-001.md](plans/active/model-pi-001.md) | 活跃计划 | Issue #169 模型设置与真实 Pi 适配，依赖 #168 |

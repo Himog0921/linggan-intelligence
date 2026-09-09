@@ -4,8 +4,11 @@ mod fixture;
 use fixture::{
     coverage_layer, proof_database, submit_custom_package, submit_package, submit_package_at,
 };
-use linggan_contracts::EvidenceQuery;
-use linggan_evidence::{admit_media_blob, read_work_resource, read_work_resources};
+use linggan_contracts::{EvidenceQuery, TargetIdentity, TargetSource};
+use linggan_evidence::{
+    TargetDeletionOutcome, admit_media_blob, delete_observation_target,
+    read_target_deletion_preview, read_work_resource, read_work_resources, store_pending_target,
+};
 use sqlx::Row;
 
 #[tokio::test]
@@ -110,6 +113,109 @@ async fn content_detail_submission_forms_a_typed_material_with_field_sources_and
     assert_eq!(
         detail_count, 1,
         "mismatched source identity is not projected"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn content_author_attribution_is_retained_after_observation_target_deletion() {
+    let database = proof_database("content_author_target_deletion").await;
+    submit_package(
+        &database,
+        "content_detail",
+        serde_json::json!({"contentExternalId":"retained-author-work"}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"retained-author-work"},
+            "payload":{"authorId":"retained-author","title":"保留作者归属"}
+        }),
+    )
+    .await;
+
+    let identity =
+        TargetIdentity::creator("xhs", "retained-author").expect("creator identity is valid");
+    let (target, _) = store_pending_target(
+        &database,
+        &identity,
+        TargetSource::Manual,
+        Some("保留作者"),
+        None,
+        None,
+    )
+    .await
+    .expect("observation target is stored");
+    let preview = read_target_deletion_preview(&database, target.target_ref)
+        .await
+        .expect("deletion preview is readable")
+        .expect("target exists");
+    assert_eq!((preview.retained_works, preview.retained_details), (1, 1));
+
+    let before: (String, String) = sqlx::query_as(
+        "SELECT author_external_id,attribution_source \
+         FROM linggan_material_content_author WHERE platform='xhs' AND author_external_id='retained-author'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("content detail supplies author attribution");
+    assert_eq!(
+        before,
+        ("retained-author".to_owned(), "content_detail".to_owned())
+    );
+    assert_eq!(
+        delete_observation_target(&database, target.target_ref, "保留作者")
+            .await
+            .expect("deletion only clears target control state"),
+        TargetDeletionOutcome::Deleted
+    );
+    let after: (String, String) = sqlx::query_as(
+        "SELECT author_external_id,attribution_source \
+         FROM linggan_material_content_author WHERE platform='xhs' AND author_external_id='retained-author'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("attribution remains after target deletion");
+    assert_eq!(after, before);
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn profile_discovery_supplies_author_attribution_only_for_its_scanned_creator() {
+    let database = proof_database("content_author_profile_discovery").await;
+    let target = serde_json::json!({"authorExternalId":"profile-only-author"});
+    submit_custom_package(
+        &database,
+        "xhs",
+        &["profile_discovery"],
+        target.clone(),
+        "profile_discovery",
+        "xhs",
+        serde_json::json!({"target":target,"layers":[coverage_layer("profile_discovery",1)]}),
+        vec![serde_json::json!({
+            "kind":"profile_discovery_card",
+            "resultPosition":1,
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"profile-only-work"},
+            "payload":{"title":"主页发现的作品"}
+        })],
+    )
+    .await;
+
+    let attribution: (String, String) = sqlx::query_as(
+        "SELECT author_external_id,attribution_source \
+         FROM linggan_material_content_author \
+         WHERE platform='xhs' AND content_public_ref=( \
+             SELECT public_ref FROM linggan_material_content \
+             WHERE platform='xhs' AND content_external_id='profile-only-work' \
+         )",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("profile discovery only attributes its own scanned creator");
+    assert_eq!(
+        attribution,
+        (
+            "profile-only-author".to_owned(),
+            "profile_discovery".to_owned()
+        )
     );
 }
 

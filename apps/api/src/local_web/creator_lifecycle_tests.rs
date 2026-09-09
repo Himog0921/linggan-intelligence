@@ -125,8 +125,10 @@ async fn lifecycle_api_returns_a_minimal_target_projection() {
                 .to_vec(),
         )
         .unwrap();
-        assert!(html.contains("观察不足，暂时无法成图"));
-        assert!(!html.contains("生命周期当前读不到"));
+        // Retired and unknown tab spellings normalize to the overview.  They must not make the
+        // renderer read or pretend to render the creator-only performance view.
+        assert!(html.contains("系统现在在做什么"));
+        assert!(!html.contains("作品表现"));
         assert!(html.contains(r#"class="c-dw-tab c-dw-tab-on" href="#));
     }
 

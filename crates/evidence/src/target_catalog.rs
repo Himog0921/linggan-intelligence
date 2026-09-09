@@ -99,8 +99,24 @@ async fn read_catalog(
              WHERE work_order.target_ref=$1 AND work_order.lane IN ('deep_archive','patrol') \
                AND finding.discovery_kind=$2 AND receipt.material_admission='ACCEPTED' \
                AND disposition.disposition <> 'quarantined' \
+         ), attributed AS ( \
+             -- 作者归属来自作品自己（`linggan_material_content_author` 推自 append-only 事实），
+             -- 不再只靠「这篇是在哪张工单下被发现的」。创作者目录因此不依赖控制面：
+             -- 删掉观察目标之后，作品仍然属于这个博主。
+             SELECT author.content_public_ref \
+             FROM linggan_material_content_author author \
+             JOIN collection_observation_target target \
+               ON target.identity_key=author.author_external_id \
+              AND target.platform=author.platform \
+              AND target.target_kind='creator' \
+             WHERE target.target_ref=$1 \
+         ), owned AS ( \
+             -- 目标是创作者时以作者归属为准；关键词目标没有作者可言，仍按发现所属的工单算。
+             SELECT * FROM discoveries \
+             WHERE $2 <> 'profile_discovery' \
+                OR content_public_ref IN (SELECT content_public_ref FROM attributed) \
          ), first_discovery AS ( \
-             SELECT DISTINCT ON (content_public_ref) * FROM discoveries \
+             SELECT DISTINCT ON (content_public_ref) * FROM owned \
              ORDER BY content_public_ref,accepted_at,CASE WHEN lane='deep_archive' THEN 0 ELSE 1 END \
          ) \
          SELECT first_discovery.content_public_ref,first_discovery.content_external_id, \

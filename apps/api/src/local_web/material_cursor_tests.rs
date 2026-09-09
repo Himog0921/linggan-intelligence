@@ -204,7 +204,7 @@ async fn a_late_accepted_older_observation_does_not_replace_the_latest_observed_
         payload
             .pointer("/items/0/summary/lastObservedAt")
             .and_then(Value::as_str),
-        Some("2026-08-28T10:00:00Z")
+        Some("2026-08-28 18:00")
     );
 }
 

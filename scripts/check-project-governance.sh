@@ -164,6 +164,22 @@ if [[ -n "$human_moment_offenders" ]]; then
 $human_moment_offenders"
 fi
 
+# 派生数不许在展示层现算。
+#
+# 「还差多少」= 目录 − 已取得，这个减法看起来太自然，所以每个人都会写一遍——2026-09-09
+# 实测它散在七处。等「已确认失效」成为第三种去向，七处里只有一处知道要再减一次，木可可
+# 确认了 3 篇已删除，界面照旧催他去补那 3 篇。
+#
+# 现在投影直接给三个互斥的数（已取得 / 已确认失效 / 待取得），相加等于作品总数，展示层
+# 没有可减的东西。这条检查防的是它再长回来。
+derived_count_offenders="$(grep -rn "works_listed - \|works_listed\.saturating_sub\|details_captured < " \
+  apps/api/src crates/evidence/src --include='*.rs' \
+  | grep -vE '^[^:]+:[0-9]+:[[:space:]]*//' || true)"
+if [[ -n "$derived_count_offenders" ]]; then
+  report_error "缺口数必须读投影 pending_details，不要在展示层用 works_listed 减：
+$derived_count_offenders"
+fi
+
 if [[ "$errors" -ne 0 ]]; then
   echo "project governance check failed with $errors error(s)" >&2
   exit 1

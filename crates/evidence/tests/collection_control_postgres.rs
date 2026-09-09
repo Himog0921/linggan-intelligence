@@ -1,15 +1,16 @@
-use linggan_contracts::{AdmissionOutcome, Capacity};
+use linggan_contracts::{AdmissionOutcome, Capacity, TargetIdentity, TargetSource};
 use linggan_evidence::{
     AccountEligibilitySignal, AccountEligibilityState, AuthorizationGrant, CheckInOutcome,
     CollectionControlError, ComparableObservationRound, DispatchDecision, DynamicCadence,
     InstallationCheckIn, MAXIMUM_MONITOR_INTERVAL_SECONDS, MINIMUM_MONITOR_INTERVAL_SECONDS,
     MonitorCommandActor, MonitorCommandKind, MonitorCommandOutcomeKind, MonitorRuleCommand,
-    MonitorRuleDraft, MonitorRuleMode, activate_installation_credential,
+    MonitorRuleDraft, MonitorRuleMode, TargetDeletionOutcome, activate_installation_credential,
     apply_monitor_rule_command, bind_observation_account, check_in_installation,
-    collection_control_schema_is_ready, decide_dispatch, dynamic_cadence, grant_authorization,
-    open_claim_window, read_capacity, register_station, release_work_order_lease, rename_station,
+    collection_control_schema_is_ready, decide_dispatch, delete_observation_target,
+    dynamic_cadence, grant_authorization, open_claim_window, read_capacity,
+    read_target_deletion_preview, register_station, release_work_order_lease, rename_station,
     report_account_eligibility, request_and_admit, retire_station, rotate_installation_credential,
-    set_station_accepting,
+    set_station_accepting, store_pending_target, toggle_target_patrol,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::{AssertSqlSafe, Row};
@@ -94,6 +95,8 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0038_detail_only_material_scope.sql"),
     "\n",
+    include_str!("../../../database/migrations/0041_observation_domain.sql"),
+    "\n",
     include_str!("../../../database/migrations/0042_keyword_monitoring_lifecycle.sql"),
     "\n",
     include_str!("../../../database/migrations/0045_deep_archive_recovery.sql"),
@@ -107,6 +110,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0061_material_retirement.sql"),
     "\n",
     include_str!("../../../database/migrations/0062_human_moment.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0063_content_author_attribution.sql"),
 );
 
 #[tokio::test]
@@ -796,6 +801,261 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
+async fn target_deletion_removes_control_history_before_its_work_order_and_lease() {
+    let database = proof_database("target_deletion_control_history").await;
+    let target_ref = seed_target(
+        &database,
+        "creator",
+        "pending_decision",
+        "target-deletion-history",
+    )
+    .await;
+    let authorization_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_acquisition_authorization \
+             (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,purpose,granted_by,expires_at, \
+              allowed_task_templates,allowed_dispatch_lanes,max_work_units) \
+         VALUES ($1,'xhs','creator','deep_archive',1,20,'target deletion proof','person', \
+                 scope_001_now()+interval '1 day',ARRAY['creator_archive'],ARRAY['immediate'],20)",
+    )
+    .bind(authorization_ref)
+    .execute(database.pool())
+    .await
+    .expect("authorization fixture is stored");
+    let request_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_acquisition_request \
+             (request_ref,target_ref,lane,purpose,requested_by) \
+         VALUES ($1,$2,'deep_archive','target deletion proof','person')",
+    )
+    .bind(request_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("request fixture is stored");
+    let decision_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_admission_decision \
+             (decision_ref,request_ref,outcome,reason_code,authorization_ref,target_ref) \
+         VALUES ($1,$2,'admitted','target_deletion_proof',$3,$4)",
+    )
+    .bind(decision_ref)
+    .bind(request_ref)
+    .bind(authorization_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("admission fixture is stored");
+    let work_order_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_work_order \
+             (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions) \
+         VALUES ($1,$2,$3,'deep_archive',20,'[\"maximum_quota\"]'::jsonb)",
+    )
+    .bind(work_order_ref)
+    .bind(decision_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("work order fixture is stored");
+    let station_ref = register_station(&database, "删除证明工位", 20)
+        .await
+        .expect("station fixture is stored");
+    let lease_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_work_order_lease \
+             (lease_ref,work_order_ref,station_ref,capture_identity,expires_at) \
+         VALUES ($1,$2,$3,'{}'::jsonb,scope_001_now()+interval '1 hour')",
+    )
+    .bind(lease_ref)
+    .bind(work_order_ref)
+    .bind(station_ref)
+    .execute(database.pool())
+    .await
+    .expect("lease fixture is stored");
+    let command_identity_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_monitor_rule_command_identity \
+             (command_identity_ref,target_ref,idempotency_key,command_kind,payload_digest,first_outcome,first_reason_code,work_order_ref,lease_ref) \
+         VALUES ($1,$2,$3,'manual_observe',repeat('a',64),'applied','manual_observe_created',$4,$5)",
+    )
+    .bind(command_identity_ref)
+    .bind(target_ref)
+    .bind(Uuid::new_v4())
+    .bind(work_order_ref)
+    .bind(lease_ref)
+    .execute(database.pool())
+    .await
+    .expect("command identity fixture is stored");
+    sqlx::query(
+        "INSERT INTO collection_monitor_rule_command_receipt \
+             (command_receipt_ref,command_identity_ref,target_ref,idempotency_key,command_kind,expected_revision,payload_digest,actor,source,outcome,reason_code,work_order_ref,lease_ref) \
+         VALUES ($1,$2,$3,$4,'manual_observe',0,repeat('a',64),'person','targets_ui','applied','manual_observe_created',$5,$6)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(command_identity_ref)
+    .bind(target_ref)
+    .bind(Uuid::new_v4())
+    .bind(work_order_ref)
+    .bind(lease_ref)
+    .execute(database.pool())
+    .await
+    .expect("command receipt fixture is stored");
+    let scheduler_run_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_scheduler_run \
+             (scheduler_run_ref,scheduler_key,completed_at,outcome,considered_count,dispatched_count) \
+         VALUES ($1,'patrol',scope_001_now(),'dispatched',1,1)",
+    )
+    .bind(scheduler_run_ref)
+    .execute(database.pool())
+    .await
+    .expect("scheduler run fixture is stored");
+    sqlx::query(
+        "INSERT INTO collection_scheduler_target_decision \
+             (target_decision_ref,scheduler_run_ref,target_ref,outcome,reason_code,work_order_ref,lease_ref) \
+         VALUES ($1,$2,$3,'dispatched','dispatched',$4,$5)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(scheduler_run_ref)
+    .bind(target_ref)
+    .bind(work_order_ref)
+    .bind(lease_ref)
+    .execute(database.pool())
+    .await
+    .expect("scheduler decision fixture is stored");
+
+    let preview = read_target_deletion_preview(&database, target_ref)
+        .await
+        .expect("preview query succeeds")
+        .expect("target remains visible before deletion");
+    assert_eq!(preview.work_orders, 1);
+    assert_eq!(preview.leases, 1);
+    assert_eq!(
+        delete_observation_target(&database, target_ref, "target-deletion-history")
+            .await
+            .expect("deletion handles all dependent control records"),
+        TargetDeletionOutcome::Deleted
+    );
+    for (relation, query) in [
+        (
+            "collection_observation_target",
+            "SELECT count(*) FROM collection_observation_target WHERE target_ref=$1",
+        ),
+        (
+            "collection_work_order",
+            "SELECT count(*) FROM collection_work_order WHERE target_ref=$1",
+        ),
+        (
+            "collection_monitor_rule_command_identity",
+            "SELECT count(*) FROM collection_monitor_rule_command_identity WHERE target_ref=$1",
+        ),
+        (
+            "collection_monitor_rule_command_receipt",
+            "SELECT count(*) FROM collection_monitor_rule_command_receipt WHERE target_ref=$1",
+        ),
+        (
+            "collection_scheduler_target_decision",
+            "SELECT count(*) FROM collection_scheduler_target_decision WHERE target_ref=$1",
+        ),
+    ] {
+        let count: i64 = sqlx::query_scalar(query)
+            .bind(target_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("deleted control relation is queryable");
+        assert_eq!(
+            count, 0,
+            "{relation} no longer retains target control state"
+        );
+    }
+    let lease_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_lease WHERE work_order_ref=$1",
+    )
+    .bind(work_order_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("deleted lease is queryable");
+    assert_eq!(
+        lease_count, 0,
+        "the work order lease is deleted before its work order"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn target_deletion_uses_identity_key_when_display_name_is_unknown() {
+    let database = proof_database("target_deletion_unknown_name").await;
+    let identity = TargetIdentity::creator("xhs", "target-deletion-identity")
+        .expect("stable creator identity is valid");
+    let (target, _) =
+        store_pending_target(&database, &identity, TargetSource::Manual, None, None, None)
+            .await
+            .expect("target with unknown display name is stored");
+    let preview = read_target_deletion_preview(&database, target.target_ref)
+        .await
+        .expect("preview query succeeds")
+        .expect("target remains visible");
+    assert_eq!(preview.confirmation_name, target.identity_key);
+    assert_eq!(
+        delete_observation_target(&database, target.target_ref, " ")
+            .await
+            .expect("blank confirmation is evaluated"),
+        TargetDeletionOutcome::NameMismatch
+    );
+    assert_eq!(
+        delete_observation_target(&database, target.target_ref, &preview.confirmation_name)
+            .await
+            .expect("identity confirmation deletes the target"),
+        TargetDeletionOutcome::Deleted
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn target_deletion_preserves_cross_industry_samples() {
+    let database = proof_database("target_deletion_preserves_cross_industry").await;
+    let target_ref = seed_target(
+        &database,
+        "keyword",
+        "pending_decision",
+        "cross-industry-delete-block",
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO cross_industry_sample \
+             (sample_ref,domain_ref,target_ref,platform,content_external_id) \
+         VALUES ($1,'00000000-0000-4000-8000-000000000002',$2,'xhs','cross-industry-delete-block')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("cross-industry sample is retained material");
+
+    let preview = read_target_deletion_preview(&database, target_ref)
+        .await
+        .expect("preview query succeeds")
+        .expect("target remains visible");
+    assert_eq!(preview.blocking_cross_industry_samples, 1);
+    assert_eq!(
+        delete_observation_target(&database, target_ref, "cross-industry-delete-block")
+            .await
+            .expect("protected facts are evaluated"),
+        TargetDeletionOutcome::BlockedByProtectedFacts { rows: 1 }
+    );
+    let target_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("target remains queryable after blocked deletion");
+    assert_eq!(target_count, 1);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
 async fn authorization_is_bounded_by_scope_not_by_target_count_or_purpose_text() {
     let database = proof_database("collection_control_authorization_bounds").await;
     let installation = ready_installation_without_account(&database, "authorization-bounds").await;
@@ -1068,6 +1328,58 @@ async fn monitor_rule_commands_are_revisioned_idempotent_and_side_effect_bounded
     .await
     .expect("keyword target state is readable");
     assert_eq!(keyword_state, ("monitoring".to_owned(), true));
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn target_list_toggle_uses_the_accepted_person_command_source() {
+    let database = proof_database("collection_control_target_list_toggle").await;
+    let target_ref = seed_target(&database, "keyword", "pending_decision", "toggle-source").await;
+    let saved = apply_monitor_rule_command(
+        &database,
+        &MonitorRuleCommand {
+            target_ref,
+            expected_revision: 0,
+            idempotency_key: Uuid::new_v4(),
+            kind: MonitorCommandKind::SaveRule,
+            actor: MonitorCommandActor::Person,
+            source: "targets_ui",
+            draft: Some(fixed_rule(None)),
+        },
+    )
+    .await
+    .expect("the target has a current rule to toggle");
+    assert_eq!(saved.current_revision, 1);
+
+    let paused = toggle_target_patrol(&database, target_ref, false)
+        .await
+        .expect("the list pause command is accepted");
+    assert_eq!(paused.reason_code, "monitor_paused");
+    assert_eq!(paused.current_revision, 2);
+    let paused_state: (String, bool) = sqlx::query_as(
+        "SELECT lifecycle_state,monitoring_enabled FROM collection_observation_target \
+         WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("pause updates the target read model");
+    assert_eq!(paused_state, ("paused".to_owned(), false));
+
+    let resumed = toggle_target_patrol(&database, target_ref, true)
+        .await
+        .expect("the list resume command is accepted");
+    assert_eq!(resumed.reason_code, "monitor_resumed");
+    assert_eq!(resumed.current_revision, 3);
+    let resumed_state: (String, bool) = sqlx::query_as(
+        "SELECT lifecycle_state,monitoring_enabled FROM collection_observation_target \
+         WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("resume updates the target read model");
+    assert_eq!(resumed_state, ("monitoring".to_owned(), true));
 }
 
 #[tokio::test]
@@ -1398,20 +1710,25 @@ async fn seed_accepted_daily_notes(database: &Database, installation: &Installed
         "INSERT INTO linggan_runtime_capture_package \
              (package_ref,attempt_id,task_id,producer_instance_id,package_kind,platform, \
               package_hash,observed_at,captured_at,coverage,payload) \
-         VALUES ($1,$2,$3,$4,'profile_discovery','xhs',repeat('b',64), \
-                 '2026-09-04T00:00:00Z','2026-09-04T00:00:01Z','{}'::jsonb,'[]'::jsonb)",
+         VALUES ($1,$2,$3,$4,'content_detail','xhs',repeat('b',64), \
+                 '2026-09-04T00:00:00Z','2026-09-04T00:00:01Z','{}'::jsonb, \
+                 jsonb_build_object('packageKind','content_detail','records', \
+                     (SELECT jsonb_agg(jsonb_build_object('sourceObject',jsonb_build_object( \
+                         'type','content','externalId','capacity-' || ordinal))) \
+                      FROM generate_series(0,$5-1) AS ordinal)))",
     )
     .bind(package_ref)
     .bind(attempt_id)
     .bind(task_id)
     .bind(producer_instance_id)
+    .bind(count)
     .execute(database.pool())
     .await
     .expect("daily usage package is seeded");
     sqlx::query(
         "INSERT INTO linggan_runtime_record_disposition \
-             (package_ref,record_ordinal,disposition,reason) \
-         SELECT $1,ordinal,'accepted_for_library_discovery','capacity proof' \
+           (package_ref,record_ordinal,disposition,reason) \
+         SELECT $1,ordinal,'accepted_for_library_content','capacity proof' \
          FROM generate_series(0,$2-1) AS ordinal",
     )
     .bind(package_ref)
@@ -1475,11 +1792,9 @@ async fn proof_database_before_keyword_lifecycle(schema: &str) -> Database {
         .or_else(|_| std::env::var("COLLECTION_DISPATCH_PROOF_DATABASE_URL"))
         .expect("an isolated proof database URL is supplied");
     let migrations_before_0042 = MIGRATIONS
-        .strip_suffix(concat!(
-            "\n",
-            include_str!("../../../database/migrations/0042_keyword_monitoring_lifecycle.sql")
-        ))
-        .expect("the complete proof migrations end with 0042");
+        .split_once(KEYWORD_LIFECYCLE_MIGRATION)
+        .map(|(prefix, _)| prefix)
+        .expect("the complete proof migrations include 0042");
     isolated_proof_schema(&url, schema, migrations_before_0042)
         .await
         .expect("complete migrations before 0042 apply")
