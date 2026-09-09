@@ -222,6 +222,14 @@ migrate() {
   apply_migration_once "0050_comment_research_automation" "$project_root/database/migrations/0050_comment_research_automation.sql"
   apply_migration_once "0051_comment_problem_vectors" "$project_root/database/migrations/0051_comment_problem_vectors.sql"
   apply_migration_once "0052_work_order_expiry" "$project_root/database/migrations/0052_work_order_expiry.sql"
+  apply_migration_once "0053_comment_research_rules" "$project_root/database/migrations/0053_comment_research_rules.sql"
+  apply_migration_once "0054_comment_auto_policy" "$project_root/database/migrations/0054_comment_auto_policy.sql"
+  apply_migration_once "0055_comment_research_replay" "$project_root/database/migrations/0055_comment_research_replay.sql"
+  apply_migration_once "0056_comment_semantic_atoms" "$project_root/database/migrations/0056_comment_semantic_atoms.sql"
+  apply_migration_once "0057_comment_local_recovery" "$project_root/database/migrations/0057_comment_local_recovery.sql"
+  apply_migration_once "0058_comment_field_repair" "$project_root/database/migrations/0058_comment_field_repair.sql"
+  apply_migration_once "0059_comment_replay_continuity" "$project_root/database/migrations/0059_comment_replay_continuity.sql"
+  apply_migration_once "0060_comment_topic_associations" "$project_root/database/migrations/0060_comment_topic_associations.sql"
 }
 
 case "$command_name" in
@@ -247,6 +255,8 @@ case "$command_name" in
     # Build the three binaries once. Launching three concurrent `cargo run` processes can make
     # startup appear hung while they contend for Cargo's build lock.
     cargo build -p linggan-api -p linggan-worker --bins
+    runtime_drain_dir="$(mktemp -d "${TMPDIR:-/tmp}/linggan-runtime-drain.XXXXXX")"
+    export LINGGAN_WORKER_DRAIN_ACK_PATH="$runtime_drain_dir/worker-drain-ack"
     "$project_root/target/debug/linggan-worker" &
     scheduler_pid=$!
     "$project_root/target/debug/linggan-media-worker" &
@@ -254,8 +264,27 @@ case "$command_name" in
     "$project_root/target/debug/linggan-api" &
     api_pid=$!
     cleanup_runtime_children() {
-      kill "$scheduler_pid" "$media_worker_pid" "$api_pid" 2>/dev/null || true
-      wait "$scheduler_pid" "$media_worker_pid" "$api_pid" 2>/dev/null || true
+      trap - EXIT INT TERM
+      kill -TERM "$scheduler_pid" 2>/dev/null || true
+      local deadline=$((SECONDS + 90)) ack_pid="" ack_state=""
+      while (( SECONDS < deadline )); do
+        if [[ -f "$LINGGAN_WORKER_DRAIN_ACK_PATH" ]]; then
+          ack_pid="$(awk -F= '$1 == "pid" { print $2; exit }' "$LINGGAN_WORKER_DRAIN_ACK_PATH")"
+          ack_state="$(awk -F= '$1 == "state" { print $2; exit }' "$LINGGAN_WORKER_DRAIN_ACK_PATH")"
+          if [[ "$ack_pid" == "$scheduler_pid" && "$ack_state" == "drained" ]]; then
+            wait "$scheduler_pid" 2>/dev/null || true
+            kill "$media_worker_pid" "$api_pid" 2>/dev/null || true
+            wait "$media_worker_pid" "$api_pid" 2>/dev/null || true
+            rm -f -- "$LINGGAN_WORKER_DRAIN_ACK_PATH"
+            rmdir "$runtime_drain_dir"
+            return 0
+          fi
+          [[ "$ack_pid" == "$scheduler_pid" && "$ack_state" != "drained" ]] && break
+        fi
+        sleep 1
+      done
+      echo "worker 未确认安全落账；保留其他服务及 drain 回执，不继续强制停止。" >&2
+      return 1
     }
     trap cleanup_runtime_children EXIT
     trap 'exit 143' INT TERM

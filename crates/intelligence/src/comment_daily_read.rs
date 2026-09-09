@@ -11,7 +11,7 @@ pub async fn overview(db: &Database) -> Result<Value, ModelError> {
     .fetch_one(db.pool())
     .await?;
     let rows=sqlx::query("SELECT b.*,COALESCE((SELECT (a.request->>'sourceLimit')::integer FROM linggan_comment_daily_adjustment a WHERE a.batch_ref=COALESCE((b.request->>'originBatchRef')::uuid,b.batch_ref) AND a.kind='continue' ORDER BY a.created_at DESC,a.command_ref DESC LIMIT 1),b.source_limit) AS effective_source_limit,COALESCE((SELECT (a.request->>'tokenLimit')::bigint FROM linggan_comment_daily_adjustment a WHERE a.batch_ref=COALESCE((b.request->>'originBatchRef')::uuid,b.batch_ref) AND a.kind='continue' ORDER BY a.created_at DESC,a.command_ref DESC LIMIT 1),b.token_limit) AS effective_token_limit,(SELECT input_token_limit+output_token_limit FROM linggan_model_config WHERE config_ref=b.config_ref) AS next_reservation,b.window_start::text AS start_text,b.window_end::text AS end_text,(SELECT count(*) FROM linggan_comment_daily_item i WHERE i.batch_ref=b.batch_ref) AS total,(SELECT count(DISTINCT s.content_public_ref) FROM linggan_comment_daily_item i JOIN linggan_comment_research_readable s ON s.material_ref=i.source_ref WHERE i.batch_ref=b.batch_ref) AS works,COALESCE((SELECT jsonb_object_agg(state,n) FROM (SELECT state,count(*) n FROM linggan_comment_daily_item WHERE batch_ref=b.batch_ref GROUP BY state) counts),'{}'::jsonb) AS counts,COALESCE((SELECT sum(v.charged_tokens) FROM linggan_comment_daily_packet p JOIN linggan_model_invocation v USING(invocation_ref) JOIN linggan_comment_daily_batch family ON family.batch_ref=p.batch_ref WHERE COALESCE(family.request->>'originBatchRef',family.batch_ref::text)=COALESCE(b.request->>'originBatchRef',b.batch_ref::text)),0)::bigint AS charged,COALESCE((SELECT jsonb_object_agg(state,n) FROM (SELECT COALESCE(c.state,'pending') AS state,count(*) n FROM linggan_comment_daily_item i LEFT JOIN linggan_comment_clean c ON c.source_ref=i.source_ref AND c.cleaner_version=COALESCE(b.request->>'cleanerVersion','comment-clean.v1') WHERE i.batch_ref=b.batch_ref GROUP BY COALESCE(c.state,'pending')) clean_counts),'{}'::jsonb) AS cleaning FROM linggan_comment_daily_batch b ORDER BY b.window_end DESC,b.created_at DESC LIMIT 60").fetch_all(db.pool()).await?;
-    let items:Vec<_>=rows.iter().map(|r|json!({"batchRef":r.get::<Uuid,_>("batch_ref"),"kind":r.get::<String,_>("kind"),"originBatchRef":r.get::<Value,_>("request")["originBatchRef"],"newIntakeCount":r.get::<Value,_>("request")["newIntakeCount"],"backlogCount":r.get::<Value,_>("request")["backlogCount"],"enabled":r.get::<bool,_>("enabled"),"start":r.get::<String,_>("start_text"),"end":r.get::<String,_>("end_text"),"total":r.get::<i64,_>("total"),"works":r.get::<i64,_>("works"),"counts":r.get::<Value,_>("counts"),"cleaning":r.get::<Value,_>("cleaning"),"nextReservation":r.get::<i32,_>("next_reservation"),"chargedTokens":r.get::<i64,_>("charged"),"tokenLimit":r.get::<i64,_>("effective_token_limit"),"sourceLimit":r.get::<i32,_>("effective_source_limit")})).collect();
+    let items:Vec<_>=rows.iter().map(|r|json!({"batchRef":r.get::<Uuid,_>("batch_ref"),"kind":r.get::<String,_>("kind"),"reason":r.get::<Value,_>("request")["reason"],"originBatchRef":r.get::<Value,_>("request")["originBatchRef"],"newIntakeCount":r.get::<Value,_>("request")["newIntakeCount"],"backlogCount":r.get::<Value,_>("request")["backlogCount"],"enabled":r.get::<bool,_>("enabled"),"start":r.get::<String,_>("start_text"),"end":r.get::<String,_>("end_text"),"total":r.get::<i64,_>("total"),"works":r.get::<i64,_>("works"),"counts":r.get::<Value,_>("counts"),"cleaning":r.get::<Value,_>("cleaning"),"nextReservation":r.get::<i32,_>("next_reservation"),"chargedTokens":r.get::<i64,_>("charged"),"tokenLimit":r.get::<i64,_>("effective_token_limit"),"sourceLimit":r.get::<i32,_>("effective_source_limit")})).collect();
     Ok(json!({"schedule":schedule,"items":items,"limit":60,"timezone":"Asia/Shanghai"}))
 }
 pub async fn batch_detail(
@@ -37,6 +37,7 @@ pub async fn batch_detail(
       'invocationRef',v.invocation_ref,'packetRef',p.packet_ref,'purpose',p.purpose,'state',p.state,'failureCode',v.failure_code,
       'inputTokens',v.input_tokens,'outputTokens',v.output_tokens,'reservedTokens',v.reserved_tokens,'chargedTokens',v.charged_tokens,
       'usageUnknown',v.input_tokens IS NULL OR v.output_tokens IS NULL,'callStarted',v.result->'callStarted','review',v.result->'usageReviewRef',
+      'diagnostic',v.result->'diagnostic','normalization',v.result->'normalization','localRecoveryRef',v.result->'localRecoveryRef','locallyRecoveredComments',v.result->'locallyRecoveredComments','executionDay',v.result->'executionDay','budgetPurpose',v.result->'budgetPurpose',
       'startedAt',v.created_at,'finishedAt',v.finished_at,'elapsedMs',COALESCE(v.elapsed_ms,(extract(epoch FROM v.finished_at-v.created_at)*1000)::bigint),
       'requestedComments',cardinality(p.source_refs),'acceptedComments',v.result->'acceptedComments',
       'succeededComments',CASE WHEN t.outcomes<>'{}'::jsonb THEN COALESCE(t.outcomes->'succeeded','0'::jsonb) END,
@@ -49,6 +50,22 @@ pub async fn batch_detail(
       JOIN linggan_model_entry m ON m.model_ref=cfg.model_ref LEFT JOIN linggan_comment_request_trace t USING(invocation_ref)
       LEFT JOIN linggan_ci_source s ON s.source_ref=p.source_refs[1]
       WHERE p.batch_ref=$1 ORDER BY v.created_at DESC,v.invocation_ref LIMIT 100"#).bind(batch).fetch_all(db.pool()).await?;
+    calls.extend(crate::comment_field_repair_read::calls(db, batch).await?);
+    calls.sort_by(|a, b| b["startedAt"].as_str().cmp(&a["startedAt"].as_str()));
+    calls.truncate(100);
+    for call in &mut calls {
+        let diagnostic =
+            serde_json::from_value::<crate::pi_adapter::PiDiagnostic>(call["diagnostic"].clone())
+                .ok()
+                .filter(|d| d.valid());
+        call["diagnostic"] = json!(diagnostic);
+        if !matches!(
+            call["normalization"].as_str(),
+            Some("bare_json" | "json_fence")
+        ) {
+            call["normalization"] = Value::Null;
+        }
+    }
     let work_refs: Vec<Uuid> = calls
         .iter()
         .filter_map(|c| c["workRef"].as_str().and_then(|v| Uuid::parse_str(v).ok()))
@@ -71,6 +88,7 @@ pub async fn batch_detail(
             .bind(batch)
             .fetch_one(db.pool())
             .await?;
+    let call_total = call_total + crate::comment_field_repair_read::count(db, batch).await?;
     let adjustments:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('commandRef',command_ref,'kind',kind,'request',request,'createdAt',created_at) FROM linggan_comment_daily_adjustment WHERE batch_ref=$1 ORDER BY created_at DESC LIMIT 100").bind(batch).fetch_all(db.pool()).await?;
     Ok(
         json!({"items":items,"calls":calls,"callTotal":call_total,"adjustments":adjustments,"nextCursor":if rows.len()>50{rows.get(49).map(|r|r.get::<Uuid,_>("source_ref"))}else{None}}),

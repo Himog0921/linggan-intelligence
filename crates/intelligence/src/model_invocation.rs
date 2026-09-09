@@ -234,13 +234,33 @@ pub async fn finish_invocation(
     failure: Option<&str>,
     result: &Value,
 ) -> Result<(), ModelError> {
+    let mut connection = db.pool().acquire().await?;
+    finish_invocation_in(
+        &mut connection,
+        reference,
+        response,
+        success,
+        failure,
+        result,
+    )
+    .await
+}
+
+pub(crate) async fn finish_invocation_in(
+    connection: &mut sqlx::PgConnection,
+    reference: Uuid,
+    response: Option<&PiResponse>,
+    success: bool,
+    failure: Option<&str>,
+    result: &Value,
+) -> Result<(), ModelError> {
     let input = response.and_then(|r| r.usage.input_tokens);
     let output = response.and_then(|r| r.usage.output_tokens);
     let measured = input.unwrap_or(0) + output.unwrap_or(0);
     let charged = input.zip(output).map(|(a, b)| a + b);
-    sqlx::query("UPDATE linggan_model_invocation SET state=$2,input_tokens=$3,output_tokens=$4,charged_tokens=COALESCE($5,GREATEST(reserved_tokens,$9)),elapsed_ms=$6,failure_code=$7,result=$8,finished_at=scope_001_now() WHERE invocation_ref=$1 AND state='running'")
+    sqlx::query("UPDATE linggan_model_invocation SET state=$2,input_tokens=$3,output_tokens=$4,charged_tokens=COALESCE($5,GREATEST(reserved_tokens,$9)),elapsed_ms=$6,failure_code=$7,result=COALESCE(result,'{}'::jsonb)||$8||jsonb_build_object('diagnostic',$10::jsonb),finished_at=scope_001_now() WHERE invocation_ref=$1 AND state='running'")
         .bind(reference).bind(if success{"succeeded"}else{"failed"}).bind(input).bind(output).bind(charged).bind(response.and_then(|r|r.elapsed_ms))
-        .bind(failure).bind(result).bind(measured).execute(db.pool()).await?;
+        .bind(failure).bind(result).bind(measured).bind(response.and_then(|r|r.diagnostic.as_ref()).map(|d|serde_json::to_value(d).expect("diagnostic is serializable"))).execute(connection).await?;
     Ok(())
 }
 
@@ -255,8 +275,8 @@ pub async fn checkpoint_invocation_usage(
     let output = response.and_then(|r| r.usage.output_tokens);
     let measured = input.unwrap_or(0) + output.unwrap_or(0);
     let charged = input.zip(output).map(|(a, b)| a + b);
-    sqlx::query("UPDATE linggan_model_invocation SET input_tokens=$2,output_tokens=$3,charged_tokens=COALESCE($4,GREATEST(reserved_tokens,$7)),elapsed_ms=$5,result=$6 WHERE invocation_ref=$1 AND state='running'")
+    sqlx::query("UPDATE linggan_model_invocation SET input_tokens=$2,output_tokens=$3,charged_tokens=COALESCE($4,GREATEST(reserved_tokens,$7)),elapsed_ms=$5,result=COALESCE(result,'{}'::jsonb)||$6 WHERE invocation_ref=$1 AND state='running'")
         .bind(reference).bind(input).bind(output).bind(charged).bind(response.and_then(|r|r.elapsed_ms))
-        .bind(json!({"callStarted":true,"validationPending":true})).bind(measured).execute(db.pool()).await?;
+        .bind(json!({"callStarted":true,"validationPending":true,"diagnostic":response.and_then(|r|r.diagnostic.as_ref())})).bind(measured).execute(db.pool()).await?;
     Ok(())
 }

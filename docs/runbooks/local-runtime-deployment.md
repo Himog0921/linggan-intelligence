@@ -1,7 +1,7 @@
 # 本机常驻服务部署手册
 
 > 状态: 权威当前
-> 最后核对: 2026-09-03
+> 最后核对: 2026-09-08
 > 适用范围: 本机三个 launchd 常驻服务（API / 巡检 worker / 媒体 worker）的运行来源、更新方式与故障处置
 > 事实来源: Mog 于 2026-09-03 的明确要求「本地以 `/Users/moglenny/proma/linggan-intelligence` 为准，跟远端同步，不要到处复制」、当前 launchd 配置与实际运行验证
 > 冲突时以谁为准: 实际运行输出与 launchd 当前加载的配置；本手册不授予平台访问或迁移执行权限
@@ -38,18 +38,18 @@ cp env.example .env && $EDITOR .env      # 填数据库口令
 
 ## 3. 更新方式
 
-**重启服务即更新。** 没有第二个步骤。
+CI-AUTO-004 源码将版本切换改为先等待评论调用落账。以下是本包发布后的更新合同，不表示当前常驻进程已经使用这版协议。
 
 ```bash
-launchctl kickstart -k gui/$(id -u)/com.linggan-intelligence.local-runtime
+./scripts/runtime/install.sh
 ```
 
-部署脚本本身也跟着 `origin/main` 走——`launch.sh` 与 `sync.sh` 都在运行目录里，同步时一并更新，不需要重跑 `install.sh`。只有 launchd 配置（plist）变化时才需要。
+`install.sh` 先请求巡检 worker 停止领取新模型任务，等待它将当前调用和用量落账，并核对与 PID 对应的退出回执。成功后才生成绑定起止 revision 的更新许可，再同步、构建并重新加载三个服务。未确认退出时停止更新，不把未知调用费用当作零。
 
 启动时 `scripts/runtime/sync.sh` 依次做：
 
 1. 取同步锁（三个服务同时启动时串行化）；
-2. `git fetch origin main` 并 `git reset --hard origin/main`；
+2. `git fetch origin main`；需要改变 revision 时核对并消费匹配的 worker 更新许可，之后才切换；
 3. 检查迁移台账，有未应用的迁移就**拒绝启动**（见下）；
 4. 在锁内构建三个二进制；
 5. 释放锁，各服务 `exec` 自己的二进制。
@@ -81,7 +81,7 @@ cd /Users/moglenny/proma/linggan-intelligence
 | 巡检调度 | `com.linggan-intelligence.patrol-worker` | `linggan-worker` |
 | 媒体处理 | `com.linggan-intelligence.media-worker` | `linggan-media-worker` |
 
-三者由同一个 `scripts/runtime/launch.sh <binary>` 启动、共用同一份 `sync.sh`，因此**永远跑同一个 revision**。
+三者由同一个 `scripts/runtime/launch.sh <binary>` 启动、共用同一份 `sync.sh`。更新后仍须分别核对三个 PID 和构建 revision；共用脚本不证明当前存活进程已经同步。
 
 日志在 `runtime-logs/{api,worker,media-worker}.{out,err}.log`。
 
@@ -109,8 +109,7 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.linggan-intelligence
 
 ### 不要用 `pkill` 停服务
 
-`pkill -f linggan-api` 会同时打到开发用的临时实例和常驻服务。按 label 操作：
-`launchctl kickstart -k`（重启）或 `launchctl bootout`（停止）。
+`pkill -f linggan-api` 会同时打到开发用的临时实例和常驻服务。版本更新使用上述受控 install 入口，不以 `kickstart -k` 绕过模型落账。开发用 `local-runtime.sh serve` 同样先等待自己启动的 worker，成功才结束其他子进程；失败保留回执并说明未完成停止。
 
 ### 同步锁卡住
 
@@ -122,3 +121,18 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.linggan-intelligence
 - 不证明部署机（Mac mini）或任何远端环境采用同一模型——这里只描述本机；
 - 不授权服务自行执行迁移、访问平台或修改数据库；
 - 不保证开机首次启动时迁移检查一定生效（见第 4 节的已知边界）。
+
+
+## 8. CI-AUTO-004 评论自动研究的发布前条件
+
+本段是未发布代码包的部署要求，不表示共享数据库或 3000 已更新。
+
+- 追加迁移为 `0053`–`0060`，包含规则、自动政策、回放、语义原子、恢复、字段补齐和派生 Topic 关联。使用第 4 节的显式迁移入口；启动脚本不会代做迁移。
+- 聚类使用构建该二进制的仓库内 `apps/comment-semantics/.venv`。必须在实际 runtime checkout 中准备，开发工作树里的 venv 不能证明 runtime 已具备依赖。
+- 当前依赖锁针对 macOS 14+、Apple Silicon、CPython `3.14.5`。先安装匹配解释器和 `uv`，再以 `LINGGAN_SEMANTICS_PYTHON` 指向该解释器运行 `bash scripts/runtime/prepare-comment-semantics.sh --install`；随后 `--check` 必须通过。安装使用带哈希的固定 wheel 锁，服务启动不自动下载依赖。
+- 没有匹配环境时，评论提取和已有结果仍可读；聚类记录 `semantic_runtime_unavailable`，不能宣称语义组织已经运行。更换平台需要重新制作并验证依赖锁，不能绕过环境校验。
+- 在现有模型设置中配置可调用的研究模型；语义向量复用独立 Embedding 配置。研究设置中的语义组织子预算默认是 0，必须明确配置后才会产生向量/语义复核调用，并受全局日额度约束。规则比较同样需要回归子预算。
+- 发布不自动开启新增研究、历史补齐或未知用量重试，也不批量重算历史评论。由保存的政策控制执行；额度不足保留待处理原因，旧结果不删除。
+- 停机先等待与实际 worker PID 对应的 drain 回执；未结束的调用保留费用未知和恢复状态。共享发布仍须分别核对 Git revision、迁移台账、三个 PID 与实际页面。
+
+隔离验证入口为 `scripts/test-comment-intelligence-postgres.sh`；本地聚类生产链专项为 `comment_semantic_organization_postgres`，需要先准备上述环境。容量报告只证明固定合成输入的资源和恢复行为，不代表真实评论研究准确率。

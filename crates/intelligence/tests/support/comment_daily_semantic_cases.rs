@@ -238,6 +238,7 @@ async fn daily_source_cap_defers_instead_of_losing_manifest_members() {
             config_ref: config,
             source_limit: 1,
             token_limit: 100000,
+            auto_policy: AutoPolicy::new_intake_only(100000),
         },
     )
     .await
@@ -273,9 +274,13 @@ async fn daily_source_cap_defers_instead_of_losing_manifest_members() {
     .await
     .unwrap();
     assert!(
-        run_daily_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
-            .await
-            .unwrap()
+        !tick(&db).await,
+        "extending a batch must not bypass the shared day source cap"
+    );
+    clock(&db, "2026-09-09 01:00:00Z").await;
+    assert!(
+        tick(&db).await,
+        "the already frozen remaining member resumes next day"
     );
     let complete: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_comment_daily_item WHERE batch_ref=$1 AND state='succeeded'",
@@ -290,7 +295,7 @@ async fn daily_source_cap_defers_instead_of_losing_manifest_members() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and local synthetic Pi"]
-async fn daily_text_revision_reuses_original_grant_but_reobservation_does_not() {
+async fn changed_text_follows_automatic_update_policy_and_shared_day_budget() {
     let db = fixture::proof_database("semantic_text_revision").await;
     let (mut server, url) = fixture_server().await;
     let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
@@ -303,74 +308,88 @@ async fn daily_text_revision_reuses_original_grant_but_reobservation_does_not() 
             config_ref: config,
             source_limit: 10,
             token_limit: 18000,
+            auto_policy: AutoPolicy {
+                outdated_policy: OutdatedPolicy::CurrentOnly,
+                ..AutoPolicy::new_intake_only(18000)
+            },
         },
     )
     .await
     .unwrap();
-    source(&db, "revision", "a", "我不知道如何开始").await;
+    research_fixture::comment(
+        &db,
+        "revision",
+        "a",
+        "我不知道如何开始",
+        "2026-09-08T14:01:00Z",
+    )
+    .await;
     clock(&db, "2026-09-08 15:00:00Z").await;
     assert!(tick(&db).await);
-    let origin: Uuid =
-        sqlx::query_scalar("SELECT batch_ref FROM linggan_comment_daily_batch WHERE kind='daily'")
-            .fetch_one(db.pool())
-            .await
-            .unwrap();
     clock(&db, "2026-09-08 15:01:00Z").await;
-    source(&db, "revision", "a", "我不知道如何开始").await;
-    tick(&db).await;
-    let n: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_comment_daily_batch WHERE kind='supplement'",
-    )
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    assert_eq!(n, 0);
-    clock(&db, "2026-09-08 15:02:00Z").await;
-    let changed = source(&db, "revision", "a", "我已经开始了但不知道如何继续").await;
-    // A supplement consumes the original budget, so the first call's reservation prevents a second dispatch.
-    assert!(!tick(&db).await);
-    let supplement: Uuid = sqlx::query_scalar(
-        "SELECT batch_ref FROM linggan_comment_daily_batch WHERE kind='supplement'",
-    )
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    continue_batch(
+    research_fixture::comment(
         &db,
-        supplement,
-        &ContinueDaily {
-            command_ref: Uuid::new_v4(),
-            source_limit: 10,
-            token_limit: 36000,
-            reason: "继续原日批的修订处理".into(),
-        },
+        "revision",
+        "a",
+        "我不知道如何开始",
+        "2026-09-08T15:01:00Z",
     )
+    .await;
+    assert!(
+        !tick(&db).await,
+        "same-body observation reuses the semantic result"
+    );
+    clock(&db, "2026-09-08 15:02:00Z").await;
+    let changed = research_fixture::comment(
+        &db,
+        "revision",
+        "a",
+        "我已经开始了但不知道如何继续",
+        "2026-09-08T15:02:00Z",
+    )
+    .await;
+    assert!(
+        !tick(&db).await,
+        "remaining shared day budget cannot reserve another packet"
+    );
+    let backlog: Uuid = sqlx::query_scalar(
+        "SELECT batch_ref FROM linggan_comment_daily_batch WHERE kind='backlog'",
+    )
+    .fetch_one(db.pool())
     .await
     .unwrap();
-    assert!(tick(&db).await);
-    let r=sqlx::query("SELECT i.source_ref,i.state,b.request FROM linggan_comment_daily_item i JOIN linggan_comment_daily_batch b USING(batch_ref) WHERE b.batch_ref=$1").bind(supplement).fetch_one(db.pool()).await.unwrap();
-    assert_eq!(r.get::<Uuid, _>("source_ref"), changed);
-    assert_eq!(r.get::<String, _>("state"), "succeeded");
-    assert_eq!(
-        r.get::<serde_json::Value, _>("request")["originBatchRef"],
-        origin.to_string()
+    let state = item_state(&db, backlog, changed).await;
+    assert_eq!(state, "pending");
+    clock(&db, "2026-09-09 01:00:00Z").await;
+    assert!(
+        tick(&db).await,
+        "next execution day resumes the same automatic recovery owner"
     );
+    let state = item_state(&db, backlog, changed).await;
+    assert_eq!(state, "succeeded");
     assert!(!tick(&db).await);
     let calls: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_daily_packet")
         .fetch_one(db.pool())
         .await
         .unwrap();
     assert_eq!(calls, 2);
-    clock(&db, "2026-09-08 15:03:00Z").await;
-    source(&db, "revision", "a", "我已经开始了但不知道如何继续").await;
-    assert!(!tick(&db).await);
-    let supplements: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM linggan_comment_daily_batch WHERE kind='supplement'",
+    research_fixture::comment(
+        &db,
+        "revision",
+        "a",
+        "我已经开始了但不知道如何继续",
+        "2026-09-09T01:01:00Z",
     )
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    assert_eq!(supplements, 1);
+    .await;
+    assert!(!tick(&db).await);
+    let calls: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_daily_packet")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        calls, 2,
+        "re-observing revised text never grants a third call"
+    );
     server.kill().await.unwrap();
 }
 
@@ -402,13 +421,14 @@ async fn historical_callable_probe_allows_current_contract_without_retesting() {
 #[ignore = "isolated PostgreSQL and local synthetic Pi"]
 async fn semantic_retry_limit_cannot_be_reset_by_another_batch() {
     let db = fixture::proof_database("semantic_global_attempts").await;
+    clock(&db, "2026-09-08 15:00:00Z").await;
     let (mut server, url) = fixture_server().await;
     let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
     let source = source(
         &db,
         "global-attempts",
         "a",
-        "[BAD_SCHEMA] 持续无法符合结构的结果",
+        "[MISSING] 持续遗漏本条的合成供应商结果",
     )
     .await;
     let first = selected(&db, config, vec![source], 100000).await;
@@ -419,9 +439,20 @@ async fn semantic_retry_limit_cannot_be_reset_by_another_batch() {
         retry_failed(&db, first, Uuid::new_v4()).await.unwrap()["queued"],
         1
     );
+    clock(&db, "2026-09-08 15:02:00Z").await;
     run_daily_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
         .await
         .unwrap();
+    let diagnostic: serde_json::Value = sqlx::query_scalar("SELECT jsonb_build_object('semantics',(SELECT jsonb_agg(jsonb_build_object('state',state,'attempts',attempts,'failureCode',failure_code)) FROM linggan_comment_semantic_work),'items',(SELECT jsonb_agg(jsonb_build_object('state',state,'attempts',attempts,'failureCode',failure_code)) FROM linggan_comment_daily_item))")
+        .fetch_one(db.pool()).await.unwrap();
+    let calls_so_far: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_daily_packet")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        calls_so_far, 2,
+        "second allowed call must actually execute: {diagnostic}"
+    );
     let second = selected(&db, config, vec![source], 100000).await;
     run_daily_once(&db, &SyntheticModelSecrets, &PiAdapter::configured())
         .await
@@ -582,34 +613,7 @@ async fn model_readiness_separates_callability_from_comment_contract_diagnostics
         ..request
     };
     save_model_config(&db, &request).await.unwrap();
-    set_model_connection_enabled(
-        &db,
-        &SetModelConnectionEnabled {
-            connection_ref: connection,
-            expected_revision: 1,
-            enabled: false,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(
-        current_comment_model_state(&db).await.unwrap()["modelState"],
-        "PAUSED"
-    );
-    set_model_connection_enabled(
-        &db,
-        &SetModelConnectionEnabled {
-            connection_ref: connection,
-            expected_revision: 2,
-            enabled: true,
-        },
-    )
-    .await
-    .unwrap();
-    data = read_model_settings(&db, true).await.unwrap();
-    assert_eq!(data["model"]["modelState"], "CONFIGURED");
-    // Enable/disable increments the connection revision without creating a version.
-    assert_eq!(data["models"][0]["currentVersion"], true);
+    assert_connection_pause_round_trip(&db, connection).await;
     sqlx::query("UPDATE linggan_model_workspace SET default_config_ref=NULL")
         .execute(db.pool())
         .await
@@ -643,6 +647,7 @@ async fn next_daily_grant_takes_only_never_dispatched_backlog_without_duplicate_
             config_ref: config,
             source_limit: 1,
             token_limit: 100000,
+            auto_policy: AutoPolicy::new_intake_only(100000),
         },
     )
     .await
@@ -843,4 +848,49 @@ async fn legacy_batch_contract_is_readable_but_cannot_be_reactivated_or_executed
             .unwrap();
     assert_eq!(calls, 0);
     server.kill().await.unwrap();
+}
+
+async fn item_state(db: &Database, batch: Uuid, source: Uuid) -> String {
+    sqlx::query_scalar(
+        "SELECT state FROM linggan_comment_daily_item WHERE batch_ref=$1 AND source_ref=$2",
+    )
+    .bind(batch)
+    .bind(source)
+    .fetch_one(db.pool())
+    .await
+    .unwrap()
+}
+
+async fn assert_connection_pause_round_trip(db: &Database, connection: Uuid) {
+    use linggan_intelligence::model_settings_read::{
+        current_comment_model_state, read_model_settings,
+    };
+    set_model_connection_enabled(
+        db,
+        &SetModelConnectionEnabled {
+            connection_ref: connection,
+            expected_revision: 1,
+            enabled: false,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        current_comment_model_state(db).await.unwrap()["modelState"],
+        "PAUSED"
+    );
+    set_model_connection_enabled(
+        db,
+        &SetModelConnectionEnabled {
+            connection_ref: connection,
+            expected_revision: 2,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+    let data = read_model_settings(db, true).await.unwrap();
+    assert_eq!(data["model"]["modelState"], "CONFIGURED");
+    // Enable/disable increments the connection revision without creating a version.
+    assert_eq!(data["models"][0]["currentVersion"], true);
 }

@@ -197,48 +197,8 @@ async fn qualified_embedding_cache_and_task_b_run_with_shared_budget_without_rew
     let db = proof_database("ci_problem_worker").await;
     let (mut server, url) = daily_fixture::fixture_server().await;
     let (config, _, _) = daily_fixture::configured(&db, &url, "synthetic-good", None).await;
-    let model: Uuid =
-        sqlx::query_scalar("SELECT model_ref FROM linggan_model_config WHERE config_ref=$1")
-            .bind(config)
-            .fetch_one(db.pool())
-            .await
-            .unwrap();
-    let embedding = linggan_intelligence::embedding_settings::save(
-        &db,
-        &linggan_intelligence::embedding_settings::SaveEmbedding {
-            expected_revision: 0,
-            model_ref: model,
-            enabled: false,
-        },
-    )
-    .await
-    .unwrap();
-    let embedding_ref = Uuid::parse_str(embedding["configRef"].as_str().unwrap()).unwrap();
-    let probe = linggan_intelligence::embedding_settings::probe(
-        &db,
-        &SyntheticModelSecrets,
-        &PiAdapter::configured(),
-        &linggan_intelligence::embedding_settings::ProbeEmbedding {
-            invocation_ref: Uuid::new_v4(),
-            config_ref: embedding_ref,
-        },
-    )
-    .await
-    .unwrap();
-    assert_eq!(probe["embeddingQualified"], true);
-    let settings = linggan_intelligence::embedding_settings::read(&db)
-        .await
-        .unwrap();
-    linggan_intelligence::embedding_settings::save(
-        &db,
-        &linggan_intelligence::embedding_settings::SaveEmbedding {
-            expected_revision: settings["revision"].as_i64().unwrap(),
-            model_ref: model,
-            enabled: true,
-        },
-    )
-    .await
-    .unwrap();
+    configure_legacy_semantic_budget(&db, config).await;
+    configure_qualified_legacy_embedding(&db, config).await;
     let domain: Uuid =
         sqlx::query_scalar("SELECT domain_ref FROM observation_domain WHERE is_own_domain")
             .fetch_one(db.pool())
@@ -303,66 +263,7 @@ async fn qualified_embedding_cache_and_task_b_run_with_shared_budget_without_rew
         .unwrap(),
         before
     );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_ci_problem_member")
-            .fetch_one(db.pool())
-            .await
-            .unwrap(),
-        2
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_ci_definition_vector")
-            .fetch_one(db.pool())
-            .await
-            .unwrap(),
-        2
-    );
-    let purposes: Vec<String> = sqlx::query_scalar(
-        "SELECT purpose FROM linggan_comment_daily_packet WHERE batch_ref=$1 ORDER BY created_at",
-    )
-    .bind(batch)
-    .fetch_all(db.pool())
-    .await
-    .unwrap();
-    assert!(purposes.contains(&"extraction".into()));
-    assert!(purposes.contains(&"problem_embedding".into()));
-    assert!(purposes.contains(&"problem_relation".into()));
-    let charged:i64=sqlx::query_scalar("SELECT sum(v.charged_tokens)::bigint FROM linggan_comment_daily_packet p JOIN linggan_model_invocation v USING(invocation_ref) WHERE p.batch_ref=$1").bind(batch).fetch_one(db.pool()).await.unwrap();
-    assert_eq!(charged, 1830);
-    let invocation:Uuid=sqlx::query_scalar("SELECT invocation_ref FROM linggan_comment_daily_packet WHERE batch_ref=$1 AND purpose='problem_relation'").bind(batch).fetch_one(db.pool()).await.unwrap();
-    let trace =
-        linggan_intelligence::comment_runtime::request_detail(&db, batch, invocation, domain)
-            .await
-            .unwrap();
-    assert_eq!(trace["availability"], "AVAILABLE");
-    assert_eq!(trace["purpose"], "problem_relation");
-    assert!(trace["input"]["expression"]["comment"].is_string());
-    assert!(trace["output"]["json"]["decisions"].is_array());
-    let state =
-        linggan_intelligence::comment_intelligence_problems::problem_automation_state(&db, domain)
-            .await
-            .unwrap();
-    assert_eq!(state["status"], "ready");
-    let counts: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
-    assert!(
-        !linggan_intelligence::comment_intelligence_problems::run_problem_relation_once(
-            &db,
-            &SyntheticModelSecrets,
-            &PiAdapter::configured()
-        )
-        .await
-        .unwrap()
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_model_invocation")
-            .fetch_one(db.pool())
-            .await
-            .unwrap(),
-        counts
-    );
+    assert_completed_legacy_relation(&db, batch, domain).await;
     server.kill().await.unwrap();
 }
 
@@ -545,61 +446,8 @@ async fn applied_receipt_recovers_crash_before_accounting_without_repeating_disp
                 .unwrap()
         );
     }
-    let recovered=sqlx::query("SELECT state,failure_code,result,charged_tokens FROM linggan_model_invocation WHERE invocation_ref=$1").bind(invocation).fetch_one(db.pool()).await.unwrap();
-    assert_eq!(recovered.get::<String, _>("state"), "succeeded");
-    assert_eq!(
-        recovered.get::<String, _>("failure_code"),
-        "usage_review_required"
-    );
-    assert_eq!(
-        recovered.get::<i64, _>("charged_tokens"),
-        18000,
-        "unknown usage retains its reservation"
-    );
-    assert_eq!(
-        recovered.get::<Value, _>("result")["usageReviewRequired"],
-        true
-    );
-    assert_eq!(recovered.get::<Value, _>("result")["receipt"], receipt);
-    assert_eq!(
-        sqlx::query_scalar::<_, String>(
-            "SELECT state FROM linggan_comment_daily_packet WHERE packet_ref=$1"
-        )
-        .bind(packet)
-        .fetch_one(db.pool())
-        .await
-        .unwrap(),
-        "succeeded"
-    );
-    assert_eq!(sqlx::query_scalar::<_,String>("SELECT failure_code FROM linggan_ci_problem_task WHERE task_ref=$1 AND state='succeeded'").bind(task).fetch_one(db.pool()).await.unwrap(),"usage_review_required");
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_model_invocation")
-            .fetch_one(db.pool())
-            .await
-            .unwrap(),
-        calls
-    );
-    assert_eq!(
-        apply_problem_task_output(&db, task, &output).await.unwrap(),
-        receipt,
-        "receipt replay is idempotent"
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM linggan_ci_problem_boundary_decision WHERE origin='task_b'"
-        )
-        .fetch_one(db.pool())
-        .await
-        .unwrap(),
-        1
-    );
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_ci_problem_member")
-            .fetch_one(db.pool())
-            .await
-            .unwrap(),
-        2
-    );
+    assert_recovered_relation_receipt(&db, invocation, packet, task, &output, &receipt, calls)
+        .await;
     server.kill().await.unwrap();
 }
 
@@ -685,4 +533,213 @@ async fn external_identity_collision_cannot_borrow_native_analysis_or_task_b_gra
         Err(ModelError::Disabled)
     ));
     server.kill().await.unwrap();
+}
+
+async fn configure_legacy_semantic_budget(db: &linggan_storage_postgres::Database, config: Uuid) {
+    use linggan_intelligence::comment_daily::{AutoPolicy, DailySchedule, save_schedule};
+    // Explicit legacy Task B remains subject to the same purpose and daily budget as atoms.
+    save_schedule(
+        db,
+        &DailySchedule {
+            expected_revision: 0,
+            enabled: false,
+            config_ref: config,
+            source_limit: 200,
+            token_limit: 100_000,
+            auto_policy: AutoPolicy {
+                semantic_token_limit: 80_000,
+                ..AutoPolicy::default()
+            },
+        },
+    )
+    .await
+    .unwrap();
+}
+
+// Failure-only synthetic metadata; never include source text, prompt or provider credentials.
+async fn task_b_fixture_state(db: &linggan_storage_postgres::Database) -> Value {
+    sqlx::query_scalar(r#"SELECT jsonb_build_object(
+      'tasks',(SELECT jsonb_agg(jsonb_build_object('state',state,'failureCode',failure_code,'receiptPresent',applied_receipt IS NOT NULL)) FROM linggan_ci_problem_task),
+      'packets',(SELECT jsonb_agg(jsonb_build_object('purpose',purpose,'state',state)) FROM linggan_comment_daily_packet),
+      'invocations',(SELECT jsonb_agg(jsonb_build_object('operation',operation,'state',state,'failureCode',failure_code,'reserved',reserved_tokens,'charged',charged_tokens,'purpose',result->>'budgetPurpose')) FROM linggan_model_invocation),
+      'vectors',(SELECT count(*) FROM linggan_ci_definition_vector),
+      'candidates',(SELECT jsonb_agg(jsonb_build_object('state',state,'assigned',problem_ref IS NOT NULL)) FROM linggan_ci_problem_candidate))"#)
+        .fetch_one(db.pool()).await.unwrap()
+}
+
+async fn configure_qualified_legacy_embedding(db: &Database, config: Uuid) {
+    let model: Uuid =
+        sqlx::query_scalar("SELECT model_ref FROM linggan_model_config WHERE config_ref=$1")
+            .bind(config)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    let embedding = linggan_intelligence::embedding_settings::save(
+        db,
+        &linggan_intelligence::embedding_settings::SaveEmbedding {
+            expected_revision: 0,
+            model_ref: model,
+            enabled: false,
+        },
+    )
+    .await
+    .unwrap();
+    let embedding_ref = Uuid::parse_str(embedding["configRef"].as_str().unwrap()).unwrap();
+    let probe = linggan_intelligence::embedding_settings::probe(
+        db,
+        &SyntheticModelSecrets,
+        &PiAdapter::configured(),
+        &linggan_intelligence::embedding_settings::ProbeEmbedding {
+            invocation_ref: Uuid::new_v4(),
+            config_ref: embedding_ref,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(probe["embeddingQualified"], true);
+    let settings = linggan_intelligence::embedding_settings::read(db)
+        .await
+        .unwrap();
+    linggan_intelligence::embedding_settings::save(
+        db,
+        &linggan_intelligence::embedding_settings::SaveEmbedding {
+            expected_revision: settings["revision"].as_i64().unwrap(),
+            model_ref: model,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+}
+
+async fn assert_completed_legacy_relation(db: &Database, batch: Uuid, domain: Uuid) {
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_ci_problem_member")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        2,
+        "SYNTHETIC legacy Task B state: {}",
+        task_b_fixture_state(db).await
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_ci_definition_vector")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        2
+    );
+    let purposes: Vec<String> = sqlx::query_scalar(
+        "SELECT purpose FROM linggan_comment_daily_packet WHERE batch_ref=$1 ORDER BY created_at",
+    )
+    .bind(batch)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert!(purposes.contains(&"extraction".into()));
+    assert!(purposes.contains(&"problem_embedding".into()));
+    assert!(purposes.contains(&"problem_relation".into()));
+    let charged:i64=sqlx::query_scalar("SELECT sum(v.charged_tokens)::bigint FROM linggan_comment_daily_packet p JOIN linggan_model_invocation v USING(invocation_ref) WHERE p.batch_ref=$1").bind(batch).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(charged, 1830);
+    let invocation:Uuid=sqlx::query_scalar("SELECT invocation_ref FROM linggan_comment_daily_packet WHERE batch_ref=$1 AND purpose='problem_relation'").bind(batch).fetch_one(db.pool()).await.unwrap();
+    let trace =
+        linggan_intelligence::comment_runtime::request_detail(db, batch, invocation, domain)
+            .await
+            .unwrap();
+    assert_eq!(trace["availability"], "AVAILABLE");
+    assert_eq!(trace["purpose"], "problem_relation");
+    assert!(trace["input"]["expression"]["comment"].is_string());
+    assert!(trace["output"]["json"]["decisions"].is_array());
+    let state =
+        linggan_intelligence::comment_intelligence_problems::problem_automation_state(db, domain)
+            .await
+            .unwrap();
+    assert_eq!(state["status"], "ready");
+    let counts: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert!(
+        !linggan_intelligence::comment_intelligence_problems::run_problem_relation_once(
+            db,
+            &SyntheticModelSecrets,
+            &PiAdapter::configured()
+        )
+        .await
+        .unwrap()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_model_invocation")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        counts
+    );
+}
+
+async fn assert_recovered_relation_receipt(
+    db: &Database,
+    invocation: Uuid,
+    packet: Uuid,
+    task: Uuid,
+    output: &Value,
+    receipt: &Value,
+    calls: i64,
+) {
+    use linggan_intelligence::comment_intelligence_problems::apply_problem_task_output;
+    let recovered=sqlx::query("SELECT state,failure_code,result,charged_tokens FROM linggan_model_invocation WHERE invocation_ref=$1").bind(invocation).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(recovered.get::<String, _>("state"), "succeeded");
+    assert_eq!(
+        recovered.get::<String, _>("failure_code"),
+        "usage_review_required"
+    );
+    assert_eq!(
+        recovered.get::<i64, _>("charged_tokens"),
+        18000,
+        "unknown usage retains its reservation"
+    );
+    assert_eq!(
+        recovered.get::<Value, _>("result")["usageReviewRequired"],
+        true
+    );
+    assert_eq!(&recovered.get::<Value, _>("result")["receipt"], receipt);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT state FROM linggan_comment_daily_packet WHERE packet_ref=$1"
+        )
+        .bind(packet)
+        .fetch_one(db.pool())
+        .await
+        .unwrap(),
+        "succeeded"
+    );
+    assert_eq!(sqlx::query_scalar::<_,String>("SELECT failure_code FROM linggan_ci_problem_task WHERE task_ref=$1 AND state='succeeded'").bind(task).fetch_one(db.pool()).await.unwrap(),"usage_review_required");
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_model_invocation")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        calls
+    );
+    assert_eq!(
+        apply_problem_task_output(db, task, output).await.unwrap(),
+        *receipt,
+        "receipt replay is idempotent"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM linggan_ci_problem_boundary_decision WHERE origin='task_b'"
+        )
+        .fetch_one(db.pool())
+        .await
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_ci_problem_member")
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        2
+    );
 }

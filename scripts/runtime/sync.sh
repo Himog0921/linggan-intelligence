@@ -13,8 +13,20 @@ set -euo pipefail
 
 runtime_main="${LINGGAN_RUNTIME_DIR:?LINGGAN_RUNTIME_DIR 未设置}"
 lock_file="${runtime_main}/.sync.lock"
+support_dir="${LINGGAN_SUPPORT_DIR:-$HOME/Library/Application Support/Linggan Intelligence}"
+worker_update_permit="${LINGGAN_WORKER_UPDATE_PERMIT_PATH:-$support_dir/runtime-drain/worker-update-permit}"
 
 log() { print -r -- "[sync] $*"; }
+
+has_worker_update_permit() {
+  local expected_from="$1" expected_target="$2" state from target
+  [[ -f "$worker_update_permit" ]] || return 1
+  state="$(awk -F= '$1 == "state" { print $2; exit }' "$worker_update_permit")"
+  from="$(awk -F= '$1 == "from" { print $2; exit }' "$worker_update_permit")"
+  target="$(awk -F= '$1 == "target" { print $2; exit }' "$worker_update_permit")"
+  [[ "$from" == "$expected_from" && "$target" == "$expected_target" \
+    && ( "$state" == "drained" || "$state" == "no_worker" || "$state" == "no_inflight_bootstrap" ) ]]
+}
 
 cd "$runtime_main"
 
@@ -41,7 +53,13 @@ previous="$(git rev-parse --short HEAD)"
 
 # 拿不到网络时不要让服务起不来：继续用现有 revision，并把这件事说出来。
 if git fetch --quiet origin main 2>/dev/null; then
-  git reset --quiet --hard origin/main
+  target="$(git rev-parse origin/main)"
+  current_full="$(git rev-parse HEAD)"
+  if [[ "$current_full" != "$target" ]] && ! has_worker_update_permit "$current_full" "$target"; then
+    log "拒绝切换 ${current_full:0:7} → ${target:0:7}：没有匹配的 worker drain 回执"
+    exit 1
+  fi
+  git reset --quiet --hard "$target"
   current="$(git rev-parse --short HEAD)"
   [[ "$previous" == "$current" ]] && log "已是最新 origin/main（${current}）" \
                                   || log "同步 ${previous} → ${current}"

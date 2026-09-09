@@ -10,6 +10,7 @@ use crate::{
     model_invocation::{checkpoint_invocation_usage, connection_request, finish_invocation},
     model_secrets::ModelSecretStore,
     model_settings::ModelError,
+    model_worker_drain::ModelWorkerDrain,
     pi_adapter::PiAdapter,
 };
 use linggan_storage_postgres::Database;
@@ -72,7 +73,7 @@ async fn recover(db: &Database) -> Result<(), ModelError> {
             recover_accepted_task(&mut tx, &row, &receipt).await?;
             continue;
         }
-        sqlx::query("UPDATE linggan_model_invocation SET state='failed',failure_code='worker_interrupted',finished_at=scope_001_now(),result=jsonb_build_object('task','problem_relation','usageUnknown',input_tokens IS NULL OR output_tokens IS NULL) WHERE invocation_ref=$1 AND state='running'")
+        sqlx::query("UPDATE linggan_model_invocation SET state='failed',failure_code='worker_interrupted',finished_at=scope_001_now(),result=COALESCE(result,'{}'::jsonb)||jsonb_build_object('task','problem_relation','usageUnknown',input_tokens IS NULL OR output_tokens IS NULL) WHERE invocation_ref=$1 AND state='running'")
             .bind(row.get::<Option<Uuid>,_>("invocation_ref")).execute(&mut *tx).await?;
         sqlx::query("UPDATE linggan_comment_daily_packet SET state='failed',finished_at=scope_001_now() WHERE packet_ref=$1 AND purpose IN ('problem_relation','problem_embedding') AND state='running'")
             .bind(row.get::<Option<Uuid>,_>("packet_ref")).execute(&mut *tx).await?;
@@ -89,18 +90,44 @@ pub async fn run_problem_relation_once(
     store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<bool, ModelError> {
+    run_problem_relation_once_with_drain(db, store, adapter, None).await
+}
+
+/// The worker passes its one-way drain signal here so Task B never commits a new
+/// invocation reservation once shutdown has been requested. The public wrapper remains
+/// for tests and callers that intentionally have no worker lifecycle.
+pub async fn run_problem_relation_once_with_drain(
+    db: &Database,
+    store: &dyn ModelSecretStore,
+    adapter: &PiAdapter,
+    drain: Option<&ModelWorkerDrain>,
+) -> Result<bool, ModelError> {
+    if drain_requested(drain) {
+        return Ok(false);
+    }
     recover(db).await?;
     sync_problem_tasks(db).await?;
+    if drain_requested(drain) {
+        return Ok(false);
+    }
     let mut tx = db.pool().begin().await?;
     // Same lock as Task A: simultaneous workers cannot over-reserve the batch family.
     sqlx::query("SELECT singleton FROM linggan_model_workspace WHERE singleton FOR UPDATE")
         .fetch_one(&mut *tx)
         .await?;
+    if drain_requested(drain) {
+        tx.rollback().await?;
+        return Ok(false);
+    }
     let row=sqlx::query(crate::model_settings::with_model_callability("SELECT b.context_policy,t.task_ref,t.task_snapshot,t.batch_ref,t.config_ref,cfg.input_token_limit,cfg.output_token_limit,cfg.timeout_seconds,m.model_ref,m.model_id,m.connection_version_ref FROM linggan_ci_problem_task t JOIN linggan_comment_daily_batch b USING(batch_ref) JOIN linggan_model_config cfg ON cfg.config_ref=t.config_ref JOIN linggan_model_entry m USING(model_ref) JOIN linggan_model_connection_version cv ON cv.version_ref=m.connection_version_ref JOIN linggan_model_connection conn USING(connection_ref) WHERE EXISTS(SELECT 1 FROM linggan_ci_problem_candidate c JOIN observation_domain d USING(domain_ref) WHERE c.candidate_ref=t.candidate_ref AND c.state='unmerged' AND d.is_own_domain) AND t.applied_receipt IS NULL AND t.state='pending' AND t.expires_at>scope_001_now() AND b.enabled AND conn.enabled AND __MODEL_CALLABLE__ AND b.request->>'ruleVersion'='comment-research.v4' AND COALESCE((b.context_policy->>'existingProblems')::boolean,true) AND (b.kind='selected' OR EXISTS(SELECT 1 FROM linggan_comment_daily_schedule WHERE singleton AND enabled)) AND (b.kind<>'supplement' OR EXISTS(SELECT 1 FROM linggan_comment_daily_batch origin WHERE origin.batch_ref::text=b.request->>'originBatchRef' AND origin.enabled)) AND NOT EXISTS(SELECT 1 FROM linggan_comment_daily_item unfinished WHERE unfinished.batch_ref=b.batch_ref AND unfinished.state IN('pending','running')) AND COALESCE((SELECT sum(v.charged_tokens) FROM linggan_comment_daily_packet p JOIN linggan_model_invocation v USING(invocation_ref) JOIN linggan_comment_daily_batch family ON family.batch_ref=p.batch_ref WHERE COALESCE(family.request->>'originBatchRef',family.batch_ref::text)=COALESCE(b.request->>'originBatchRef',b.batch_ref::text)),0)+cfg.input_token_limit+cfg.output_token_limit<=COALESCE((SELECT (a.request->>'tokenLimit')::bigint FROM linggan_comment_daily_adjustment a WHERE a.batch_ref=COALESCE((b.request->>'originBatchRef')::uuid,b.batch_ref) AND a.kind='continue' ORDER BY a.created_at DESC,a.command_ref DESC LIMIT 1),b.token_limit) ORDER BY t.created_at,t.task_ref LIMIT 1 FOR UPDATE OF t"))
         .fetch_optional(&mut *tx).await?;
     let Some(row) = row else {
+        if drain_requested(drain) {
+            tx.rollback().await?;
+            return Ok(false);
+        }
         tx.commit().await?;
-        return vectors::advance_problem_retrieval(db, store, adapter).await;
+        return vectors::advance_problem_retrieval(db, store, adapter, drain).await;
     };
     let task: Value = row.get("task_snapshot");
     let prompt=json!({"contractVersion":task["contractVersion"],"responseSchema":task["responseSchema"],"untrustedMaterial":{"expression":task["expression"],"targets":task["targets"]}}).to_string();
@@ -113,16 +140,35 @@ pub async fn run_problem_relation_once(
         tx.commit().await?;
         return Ok(true);
     }
+    if drain_requested(drain) {
+        tx.rollback().await?;
+        return Ok(false);
+    }
+    let budget = crate::comment_execution_budget::check_budget_in(
+        &mut tx,
+        crate::comment_execution_budget::BudgetPurpose::Semantic,
+        i64::from(input + output),
+        false,
+    )
+    .await?;
+    if !budget.allowed {
+        tx.rollback().await?;
+        return Ok(false);
+    }
     let invocation = Uuid::new_v4();
     let packet = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6)")
-        .bind(invocation).bind(row.get::<Uuid,_>("connection_version_ref")).bind(row.get::<Uuid,_>("model_ref")).bind(row.get::<Uuid,_>("config_ref")).bind(comment_source_hash(&prompt)).bind(i64::from(input+output)).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,$7)")
+        .bind(invocation).bind(row.get::<Uuid,_>("connection_version_ref")).bind(row.get::<Uuid,_>("model_ref")).bind(row.get::<Uuid,_>("config_ref")).bind(comment_source_hash(&prompt)).bind(i64::from(input+output)).bind(&budget.ledger_metadata).execute(&mut *tx).await?;
     let refs: Vec<Uuid> = serde_json::from_value(task["sourceGuard"]["researchSourceRefs"].clone())
         .map_err(|_| ModelError::Source)?;
     sqlx::query("INSERT INTO linggan_comment_daily_packet(packet_ref,batch_ref,source_refs,context_refs,context_hash,invocation_ref,lease_until,state,purpose) VALUES($1,$2,$3,$3,$4,$5,scope_001_now()+interval '120 seconds','running','problem_relation')")
         .bind(packet).bind(row.get::<Uuid,_>("batch_ref")).bind(refs).bind(comment_source_hash(&task.to_string())).bind(invocation).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_ci_problem_task SET state='running',invocation_ref=$2,packet_ref=$3,lease_until=scope_001_now()+interval '120 seconds',updated_at=scope_001_now() WHERE task_ref=$1")
         .bind(id).bind(invocation).bind(packet).execute(&mut *tx).await?;
+    if drain_requested(drain) {
+        tx.rollback().await?;
+        return Ok(false);
+    }
     tx.commit().await?;
     let run = RelationRun {
         row,
@@ -134,7 +180,11 @@ pub async fn run_problem_relation_once(
         packet,
         id,
     };
-    finish_relation_call(db, store, adapter, run).await
+    finish_relation_call(db, store, adapter, drain, run).await
+}
+
+fn drain_requested(drain: Option<&ModelWorkerDrain>) -> bool {
+    drain.is_some_and(ModelWorkerDrain::is_requested)
 }
 struct RelationRun {
     row: sqlx::postgres::PgRow,
@@ -150,9 +200,10 @@ async fn finish_relation_call(
     db: &Database,
     store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
+    drain: Option<&ModelWorkerDrain>,
     run: RelationRun,
 ) -> Result<bool, ModelError> {
-    let (call_started, result) = dispatch_relation(db, store, adapter, &run).await;
+    let dispatch = dispatch_relation(db, store, adapter, drain, &run).await;
     let RelationRun {
         row,
         input,
@@ -162,13 +213,17 @@ async fn finish_relation_call(
         id,
         ..
     } = run;
-    let response = result.as_ref().ok();
+    let response = dispatch.result.as_ref().ok();
     let policy = crate::comment_runtime::ContextPolicy::parse(row.get("context_policy"))?;
     crate::comment_runtime::record_response(db, invocation, response, &policy).await?;
-    if call_started {
+    if dispatch.call_started {
         checkpoint_invocation_usage(db, invocation, response).await?;
     }
-    let mut failure = result.as_ref().err().map(|e| e.code().to_owned());
+    let mut failure = if dispatch.drain_interrupted {
+        Some("worker_interrupted".to_owned())
+    } else {
+        dispatch.result.as_ref().err().map(|e| e.code().to_owned())
+    };
     let mut receipt = Value::Null;
     if let Some(response) = response {
         if !response.ok {
@@ -213,10 +268,10 @@ async fn finish_relation_call(
         response,
         succeeded,
         failure.as_deref(),
-        &json!({"task":"problem_relation","receipt":receipt,"callStarted":call_started,"usageUnknown":call_started && response.is_none()}),
+        &json!({"task":"problem_relation","receipt":receipt,"callStarted":dispatch.call_started,"usageUnknown":dispatch.call_started && response.is_none()}),
     )
     .await?;
-    if !call_started {
+    if !dispatch.call_started {
         sqlx::query("UPDATE linggan_model_invocation SET charged_tokens=0 WHERE invocation_ref=$1")
             .bind(invocation)
             .execute(db.pool())
@@ -305,8 +360,12 @@ async fn dispatch_relation(
     db: &Database,
     store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
+    drain: Option<&ModelWorkerDrain>,
     run: &RelationRun,
-) -> (bool, Result<crate::pi_adapter::PiResponse, ModelError>) {
+) -> RelationDispatch {
+    if drain_requested(drain) {
+        return RelationDispatch::interrupted();
+    }
     let RelationRun {
         row,
         task,
@@ -319,6 +378,7 @@ async fn dispatch_relation(
     let (invocation, packet, output) = (*invocation, *packet, *output);
     let system = task["system"].as_str().unwrap_or("");
     let mut call_started = false;
+    let mut drain_interrupted = false;
     let result = async {
         let candidate = task["expression"]["candidateRef"]
             .as_str()
@@ -361,12 +421,40 @@ async fn dispatch_relation(
         request.max_output_tokens = output;
         request.timeout_ms = row.get::<i32, _>("timeout_seconds") as u64 * 1000;
         let policy = crate::comment_runtime::ContextPolicy::parse(row.get("context_policy"))?;
+        if drain_requested(drain) {
+            drain_interrupted = true;
+            return Err(ModelError::Source);
+        }
         begin_problem_trace(db, invocation, packet, task, &policy).await?;
+        if drain_requested(drain) {
+            drain_interrupted = true;
+            return Err(ModelError::Source);
+        }
         call_started = true;
         adapter.call(&request).await
     }
     .await;
-    (call_started, result)
+    RelationDispatch {
+        call_started,
+        drain_interrupted,
+        result,
+    }
+}
+
+struct RelationDispatch {
+    call_started: bool,
+    drain_interrupted: bool,
+    result: Result<crate::pi_adapter::PiResponse, ModelError>,
+}
+
+impl RelationDispatch {
+    fn interrupted() -> Self {
+        Self {
+            call_started: false,
+            drain_interrupted: true,
+            result: Err(ModelError::Source),
+        }
+    }
 }
 
 fn accepted_task_state(receipt: &Value) -> &'static str {
@@ -392,7 +480,7 @@ async fn recover_accepted_task(
     } else {
         None
     };
-    sqlx::query("UPDATE linggan_model_invocation SET state='succeeded',failure_code=$2,finished_at=scope_001_now(),result=$3 WHERE invocation_ref=$1")
+    sqlx::query("UPDATE linggan_model_invocation SET state='succeeded',failure_code=$2,finished_at=scope_001_now(),result=COALESCE(result,'{}'::jsonb)||$3 WHERE invocation_ref=$1")
         .bind(invocation).bind(reason).bind(json!({"task":"problem_relation","receipt":receipt,"accepted":true,"recovered":true,"usageUnknown":unknown,"usageReviewRequired":unknown}))
         .execute(&mut *connection).await?;
     sqlx::query("UPDATE linggan_comment_daily_packet SET state='succeeded',finished_at=scope_001_now() WHERE packet_ref=$1 AND purpose='problem_relation'")

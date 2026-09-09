@@ -15,3 +15,6 @@
 /.worktrees/
 
 /apps/pi-adapter/node_modules/
+/apps/comment-semantics/.venv/
+/apps/comment-semantics/**/__pycache__/
+/apps/comment-semantics/.pytest_cache/

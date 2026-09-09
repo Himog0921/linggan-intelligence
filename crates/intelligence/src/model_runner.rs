@@ -1,7 +1,7 @@
 //! Bounded execution of already granted comment work; no model-owned scheduling or database tools.
 use crate::{
     comment_analysis::*, model_invocation::*, model_plans::*, model_secrets::*, model_settings::*,
-    pi_adapter::*,
+    model_worker_drain::ModelWorkerDrain, pi_adapter::*,
 };
 use linggan_storage_postgres::Database;
 use serde_json::json;
@@ -19,7 +19,14 @@ struct ReservedCall {
     output_limit: i32,
     timeout: i32,
 }
-async fn reserve_call(db: &Database) -> Result<Option<ReservedCall>, ModelError> {
+
+async fn reserve_call(
+    db: &Database,
+    drain: &ModelWorkerDrain,
+) -> Result<Option<ReservedCall>, ModelError> {
+    if drain.is_requested() {
+        return Ok(None);
+    }
     let mut tx = db.pool().begin().await?;
     // Serialize only short reservation transactions in this local workspace. The next
     // statements obtain fresh snapshots after the lock, so concurrent workers cannot
@@ -40,6 +47,10 @@ async fn reserve_call(db: &Database) -> Result<Option<ReservedCall>, ModelError>
         tx.commit().await?;
         return Ok(None);
     };
+    if drain.is_requested() {
+        tx.rollback().await?;
+        return Ok(None);
+    }
     let reserved = ReservedCall {
         invocation: Uuid::new_v4(),
         work: row.get("work_ref"),
@@ -67,26 +78,121 @@ pub async fn run_model_work_once(
     store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<bool, ModelError> {
-    if crate::comment_intelligence::schema_ready(db).await? {
-        if !crate::comment_intelligence::automation_schema_ready(db).await? {
-            return Err(ModelError::SchemaMissing);
-        }
-        crate::comment_intelligence_problems::reconcile_problem_index(db, 100)
-            .await
-            .map_err(|_| ModelError::Source)?;
-        if crate::comment_daily_runner::run_daily_once(db, store, adapter).await? {
-            return Ok(true);
-        }
-        return crate::comment_intelligence_problems::run_problem_relation_once(db, store, adapter)
-            .await;
+    run_model_work_once_with_drain(db, store, adapter, &ModelWorkerDrain::new()).await
+}
+
+async fn run_model_work_once_with_drain(
+    db: &Database,
+    store: &dyn ModelSecretStore,
+    adapter: &PiAdapter,
+    drain: &ModelWorkerDrain,
+) -> Result<bool, ModelError> {
+    if drain.is_requested() {
+        return Ok(false);
     }
-    if crate::comment_daily_runner::run_daily_once(db, store, adapter).await? {
+    if crate::comment_intelligence::schema_ready(db).await? {
+        return run_comment_intelligence_once(db, store, adapter, drain).await;
+    }
+    run_legacy_model_work_once(db, store, adapter, drain).await
+}
+
+async fn run_comment_intelligence_once(
+    db: &Database,
+    store: &dyn ModelSecretStore,
+    adapter: &PiAdapter,
+    drain: &ModelWorkerDrain,
+) -> Result<bool, ModelError> {
+    if !crate::comment_intelligence::automation_schema_ready(db).await? {
+        return Err(ModelError::SchemaMissing);
+    }
+    crate::comment_intelligence_problems::reconcile_problem_index(db, 100)
+        .await
+        .map_err(|_| ModelError::Source)?;
+    if drain.is_requested() {
+        return Ok(false);
+    }
+    if crate::comment_daily_runner::run_daily_once_with_drain(db, store, adapter, Some(drain))
+        .await?
+    {
         return Ok(true);
     }
+    // A daily run may have just finished while shutdown was requested. Do not turn that
+    // completion into a new Task B reservation during the same loop iteration.
+    if drain.is_requested() {
+        return Ok(false);
+    }
+    crate::comment_semantic_atoms::refresh(db, 100).await?;
+    crate::comment_topic_associations::refresh(db).await?;
+    crate::comment_replay_continuity::enqueue_replay_follow_ups(db).await?;
+    crate::comment_replay_continuity::run_next_replay_follow_up(db).await?;
+    crate::comment_replay_continuity::enqueue_active_rule_health_replays(db).await?;
+    crate::comment_replay_continuity::rollback_future_default_if_unhealthy(db).await?;
+    crate::comment_replay_continuity::enqueue_difference_explanations(db).await?;
+    if crate::comment_replay::run_next_replay(db, store, adapter, Some(drain)).await? {
+        return Ok(true);
+    }
+    if drain.is_requested() {
+        return Ok(false);
+    }
+    if crate::comment_replay_continuity::run_next_difference_explanation(db, store, adapter).await?
+    {
+        return Ok(true);
+    }
+    if drain.is_requested() {
+        return Ok(false);
+    }
+    if crate::comment_atom_vectors::run_once(db, store, adapter, Some(drain)).await? {
+        return Ok(true);
+    }
+    if drain.is_requested() {
+        return Ok(false);
+    }
+    if crate::comment_semantic_organization::run_once(db, store, adapter, Some(drain)).await? {
+        return Ok(true);
+    }
+    if drain.is_requested() {
+        return Ok(false);
+    }
+    // Legacy coarse Task B remains readable and explicitly addressable, but must not bypass
+    // the current atom/algorithm quality gates through an automatic fallback.
+    Ok(false)
+}
+
+async fn run_legacy_model_work_once(
+    db: &Database,
+    store: &dyn ModelSecretStore,
+    adapter: &PiAdapter,
+    drain: &ModelWorkerDrain,
+) -> Result<bool, ModelError> {
+    if drain.is_requested() {
+        return Ok(false);
+    }
+    if crate::comment_daily_runner::run_daily_once_with_drain(db, store, adapter, Some(drain))
+        .await?
+    {
+        return Ok(true);
+    }
+    if drain.is_requested() {
+        return Ok(false);
+    }
     sync_automatic_model_work(db).await?;
-    let Some(reserved) = reserve_call(db).await? else {
+    let Some(reserved) = reserve_call(db, drain).await? else {
         return Ok(false);
     };
+    dispatch_legacy_reserved_call(db, store, adapter, drain, reserved).await
+}
+
+async fn dispatch_legacy_reserved_call(
+    db: &Database,
+    store: &dyn ModelSecretStore,
+    adapter: &PiAdapter,
+    drain: &ModelWorkerDrain,
+    reserved: ReservedCall,
+) -> Result<bool, ModelError> {
+    if drain.is_requested() {
+        no_call(db, &reserved, "worker_draining").await?;
+        return Ok(false);
+    }
     let request = connection_request(db, store, reserved.version).await;
     let mut request = match request {
         Ok(r) => r,
@@ -95,6 +201,10 @@ pub async fn run_model_work_once(
             return Err(e);
         }
     };
+    if drain.is_requested() {
+        no_call(db, &reserved, "worker_draining").await?;
+        return Ok(false);
+    }
     let claimed =
         claim_selected_comment_analysis(db, &model_version(reserved.config), Some(reserved.work))
             .await;
@@ -145,6 +255,17 @@ pub async fn run_model_work_once(
         input_limit: reserved.input_limit,
         receipt: Mutex::new(None),
     };
+    if drain.is_requested() {
+        no_call(db, &reserved, "worker_draining").await?;
+        fail_comment_analysis(
+            db,
+            input.work_ref,
+            input.lease_ref,
+            CommentAnalysisFailure::ProviderUnavailable,
+        )
+        .await?;
+        return Ok(false);
+    }
     let output = provider.analyze(&input).await;
     let receipt = provider
         .receipt
@@ -203,25 +324,51 @@ pub async fn model_schema_ready(db: &Database) -> bool {
         .unwrap_or(false)
 }
 pub async fn run_model_worker(db: Database) {
+    let _ = run_model_worker_with_drain(db, ModelWorkerDrain::new()).await;
+}
+
+pub async fn run_model_worker_with_drain(
+    db: Database,
+    drain: ModelWorkerDrain,
+) -> Result<(), ModelError> {
     let store = model_secret_store();
     let adapter = PiAdapter::configured();
     let mut interval = tokio::time::interval(std::time::Duration::from_secs(10));
+    let mut shutdown = drain.subscribe();
     loop {
-        interval.tick().await;
+        if drain.is_requested() {
+            break;
+        }
+        tokio::select! {
+            _ = interval.tick() => {}
+            changed = shutdown.changed() => {
+                if changed.is_ok() && *shutdown.borrow() {
+                    break;
+                }
+            }
+        }
+        if drain.is_requested() {
+            break;
+        }
         if !model_schema_ready(&db).await {
             continue;
         }
         let _ = model_worker_heartbeat(&db, "running", None).await;
-        match run_model_work_once(&db, store.as_ref(), &adapter).await {
+        match run_model_work_once_with_drain(&db, store.as_ref(), &adapter, &drain).await {
             Ok(_) => {
                 let _ = model_worker_heartbeat(&db, "idle", None).await;
             }
             Err(error) => {
                 eprintln!("comment model worker: {}", error.code());
                 let _ = model_worker_heartbeat(&db, "error", Some(error.code())).await;
+                if drain.is_requested() {
+                    return Err(error);
+                }
             }
         }
     }
+    let _ = model_worker_heartbeat(&db, "idle", None).await;
+    Ok(())
 }
 
 pub async fn model_worker_heartbeat(

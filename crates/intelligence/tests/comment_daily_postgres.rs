@@ -4,8 +4,21 @@ mod fixture;
 mod research_fixture;
 use linggan_evidence::comment_research_read::*;
 use linggan_intelligence::{
-    comment_daily::*, comment_research_projection::*, model_invocation::*, model_secrets::*,
-    model_settings::*, pi_adapter::*,
+    comment_analysis::CommentAnalysisInput,
+    comment_daily::*,
+    comment_intelligence::{Prepare, ResearchScope, Run, prepare, read, run},
+    comment_research::comment_source_hash,
+    comment_research_fingerprint::{
+        CleanState, EligibilityCategory, EligibilityRequest, ExecutionState, RecoveryPolicy,
+        ResultState, RuleFingerprint, SourceIdentity, SourceQualification, build_semantic_input,
+        evaluate_eligibility,
+    },
+    comment_research_projection::*,
+    comment_runtime::*,
+    model_invocation::*,
+    model_secrets::*,
+    model_settings::*,
+    pi_adapter::*,
 };
 use linggan_storage_postgres::Database;
 use serde_json::json;
@@ -14,6 +27,12 @@ use uuid::Uuid;
 #[path = "support/comment_daily_fixture.rs"]
 mod daily_fixture;
 use daily_fixture::*;
+#[path = "support/comment_field_repair_cases.rs"]
+mod field_repair_cases;
+#[path = "support/comment_local_recovery_cases.rs"]
+mod local_recovery_cases;
+#[path = "support/comment_partial_recovery_cases.rs"]
+mod partial_recovery_cases;
 #[path = "support/comment_daily_semantic_cases.rs"]
 mod semantic_cases;
 
@@ -94,6 +113,7 @@ async fn daily_windows_are_gapless_deduplicate_reobservations_and_allow_delayed_
             config_ref: config,
             source_limit: 100,
             token_limit: 100000,
+            auto_policy: AutoPolicy::new_intake_only(100000),
         },
     )
     .await
@@ -101,7 +121,7 @@ async fn daily_windows_are_gapless_deduplicate_reobservations_and_allow_delayed_
     let first = source(&db, "first", "same", "今天首次入库的评论").await;
     clock(&db, "2026-09-07 15:00:00Z").await;
     let late = source(&db, "late", "late", "23点整入库，进入下批").await;
-    assert!(seal_due(&db).await.unwrap());
+    assert_eq!(seal_all_due(&db).await.unwrap(), 1);
     assert!(!seal_due(&db).await.unwrap());
     let rows = sqlx::query("SELECT source_ref FROM linggan_comment_daily_item")
         .fetch_all(db.pool())
@@ -119,8 +139,7 @@ async fn daily_windows_are_gapless_deduplicate_reobservations_and_allow_delayed_
     clock(&db, "2026-09-08 14:00:00Z").await;
     source(&db, "first", "same", "今天首次入库的评论").await;
     clock(&db, "2026-09-09 16:00:00Z").await;
-    assert!(seal_due(&db).await.unwrap());
-    assert!(seal_due(&db).await.unwrap());
+    assert_eq!(seal_all_due(&db).await.unwrap(), 2);
     assert!(!seal_due(&db).await.unwrap());
     let refs: Vec<Uuid> = sqlx::query_scalar(
         "SELECT DISTINCT source_ref FROM linggan_comment_daily_item ORDER BY source_ref",
@@ -378,6 +397,7 @@ async fn daily_permission_cannot_be_duplicated_by_legacy_auto_and_pauses_without
         config_ref: config,
         source_limit: 10,
         token_limit: 100000,
+        auto_policy: AutoPolicy::new_intake_only(100000),
     };
     save_schedule(&db, &schedule).await.unwrap();
     let automatic = StartModelPlan {
@@ -410,16 +430,7 @@ async fn daily_permission_cannot_be_duplicated_by_legacy_auto_and_pauses_without
     server.kill().await.unwrap();
 }
 
-#[tokio::test]
-#[ignore = "isolated PostgreSQL and local synthetic Pi"]
-async fn runtime_trace_reports_exact_packet_outcomes_candidates_and_source_access() {
-    use linggan_intelligence::{
-        comment_intelligence::{ResearchScope, read},
-        comment_runtime::*,
-    };
-    let db = fixture::proof_database("runtime_trace_outcomes").await;
-    let (mut server, url) = fixture_server().await;
-    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+async fn runtime_trace_packet(db: &Database, config: Uuid) -> (Uuid, Uuid, Uuid, Uuid) {
     research_fixture::detail(&db, "runtime-work", "合成运行详情").await;
     let a = source(&db, "runtime-work", "good", "我需要更省精力的办法").await;
     let b = source(&db, "runtime-work", "bad", "[BAD_QUOTE] 没有真正引用我的话").await;
@@ -442,7 +453,10 @@ async fn runtime_trace_reports_exact_packet_outcomes_candidates_and_source_acces
     assert_eq!(call["modelId"], "synthetic-good");
     assert_eq!(call["workTitle"], "合成运行详情");
     let invocation = Uuid::parse_str(call["invocationRef"].as_str().unwrap()).unwrap();
-    let own = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    (a, b, batch, invocation)
+}
+
+async fn assert_runtime_trace_access(db: &Database, batch: Uuid, invocation: Uuid, own: Uuid) {
     let trace = request_detail(&db, batch, invocation, own).await.unwrap();
     assert_eq!(trace["availability"], "AVAILABLE");
     assert_eq!(trace["input"]["comments"].as_array().unwrap().len(), 3);
@@ -465,16 +479,27 @@ async fn runtime_trace_reports_exact_packet_outcomes_candidates_and_source_acces
             .await
             .is_err()
     );
-    let scope = ResearchScope {
+}
+
+fn runtime_trace_scope(own: Uuid) -> ResearchScope {
+    ResearchScope {
         domain: Some(own),
         from: Some("2020-01-01T00:00:00Z".into()),
         to: Some("2099-01-01T00:00:00Z".into()),
         ..Default::default()
-    };
+    }
+}
+
+async fn assert_runtime_trace_index(
+    db: &Database,
+    scope: &ResearchScope,
+    batch: Uuid,
+    source_ref: Uuid,
+) {
     linggan_intelligence::comment_intelligence_problems::reconcile_problem_index(&db, 100)
         .await
         .unwrap();
-    let view = read(&db, &scope).await.unwrap();
+    let view = read(&db, scope).await.unwrap();
     assert_eq!(view["candidateTotal"], 1);
     let daily = read(
         &db,
@@ -496,7 +521,10 @@ async fn runtime_trace_reports_exact_packet_outcomes_candidates_and_source_acces
     );
     assert_eq!(view["representatives"].as_array().unwrap().len(), 2);
     assert_eq!(view["problems"].as_array().unwrap().len(), 0);
-    assert_eq!(view["problemCandidates"][0]["sourceRefs"], json!([a]));
+    assert_eq!(
+        view["problemCandidates"][0]["sourceRefs"],
+        json!([source_ref])
+    );
     assert_eq!(
         read(
             &db,
@@ -509,12 +537,29 @@ async fn runtime_trace_reports_exact_packet_outcomes_candidates_and_source_acces
         .unwrap()["page"]["total"],
         1
     );
+}
+
+async fn assert_runtime_trace_reuse_and_restriction(
+    db: &Database,
+    config: Uuid,
+    source_ref: Uuid,
+    restricted_source_ref: Uuid,
+    batch: Uuid,
+    invocation: Uuid,
+    own: Uuid,
+    scope: &ResearchScope,
+) {
     let later: String = sqlx::query_scalar("SELECT (scope_001_now()+interval '1 second')::text")
         .fetch_one(db.pool())
         .await
         .unwrap();
     clock(&db, &later).await;
-    let pending_batch = selected(&db, config, vec![a], 100000).await;
+    let pending_batch = selected(&db, config, vec![source_ref], 100000).await;
+    assert_eq!(
+        batch_detail(&db, pending_batch, None).await.unwrap()["callTotal"],
+        0,
+        "reused coverage is not a new model invocation"
+    );
     let original = read(
         &db,
         &ResearchScope {
@@ -539,10 +584,10 @@ async fn runtime_trace_reports_exact_packet_outcomes_candidates_and_source_acces
         )
         .await
         .unwrap()["summary"]["analyzed"],
-        0,
-        "unexecuted batch must not claim another batch result"
+        1,
+        "a newly selected scope may reuse an existing current result without a new call"
     );
-    restrict_comment_research_source(&db, b, "synthetic restriction")
+    restrict_comment_research_source(&db, restricted_source_ref, "synthetic restriction")
         .await
         .unwrap();
     assert_eq!(
@@ -553,22 +598,26 @@ async fn runtime_trace_reports_exact_packet_outcomes_candidates_and_source_acces
     expire_content(&db).await.unwrap();
     let retained:bool=sqlx::query_scalar("SELECT input_content IS NULL AND output_content IS NULL FROM linggan_comment_request_trace WHERE invocation_ref=$1").bind(invocation).fetch_one(db.pool()).await.unwrap();
     assert!(retained);
-    server.kill().await.unwrap();
 }
+
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and local synthetic Pi"]
-async fn runtime_context_is_frozen_by_preparation_and_recording_can_be_disabled() {
-    use linggan_intelligence::{
-        comment_intelligence::{Prepare, ResearchScope, Run, prepare, run},
-        comment_runtime::*,
-    };
-    let db = fixture::proof_database("runtime_context_freeze").await;
+async fn runtime_trace_reports_exact_packet_outcomes_candidates_and_source_access() {
+    let db = fixture::proof_database("runtime_trace_outcomes").await;
     let (mut server, url) = fixture_server().await;
     let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
-    research_fixture::detail(&db, "runtime-policy", "合成冻结上下文").await;
-    let a = source(&db, "runtime-policy", "a", "希望减少监督成本").await;
     let own = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
-    let policy = ContextPolicy {
+    let (a, b, batch, invocation) = runtime_trace_packet(&db, config).await;
+    assert_runtime_trace_access(&db, batch, invocation, own).await;
+    let scope = runtime_trace_scope(own);
+    assert_runtime_trace_index(&db, &scope, batch, a).await;
+    assert_runtime_trace_reuse_and_restriction(&db, config, a, b, batch, invocation, own, &scope)
+        .await;
+    server.kill().await.unwrap();
+}
+
+fn frozen_runtime_context_policy() -> ContextPolicy {
+    ContextPolicy {
         work_body: false,
         parent: false,
         ocr: false,
@@ -577,9 +626,17 @@ async fn runtime_context_is_frozen_by_preparation_and_recording_can_be_disabled(
         record_content: false,
         max_comments: 1,
         ..Default::default()
-    };
+    }
+}
+
+async fn prepare_with_frozen_context(
+    db: &Database,
+    own: Uuid,
+    source_ref: Uuid,
+    policy: &ContextPolicy,
+) -> Uuid {
     save_settings(
-        &db,
+        db,
         &SaveContext {
             expected_revision: 0,
             policy: policy.clone(),
@@ -588,7 +645,7 @@ async fn runtime_context_is_frozen_by_preparation_and_recording_can_be_disabled(
     .await
     .unwrap();
     let prepared = prepare(
-        &db,
+        db,
         &Prepare {
             scope: ResearchScope {
                 domain: Some(own),
@@ -596,13 +653,65 @@ async fn runtime_context_is_frozen_by_preparation_and_recording_can_be_disabled(
                 to: Some("2099-01-01T00:00:00Z".into()),
                 ..Default::default()
             },
-            source_refs: Some(vec![a]),
+            source_refs: Some(vec![source_ref]),
             reanalyze: false,
         },
     )
     .await
     .unwrap();
-    let batch = Uuid::parse_str(prepared["prepareRef"].as_str().unwrap()).unwrap();
+    Uuid::parse_str(prepared["prepareRef"].as_str().unwrap()).unwrap()
+}
+
+async fn assert_frozen_runtime_trace(
+    db: &Database,
+    batch: Uuid,
+    own: Uuid,
+    policy: &ContextPolicy,
+) {
+    let detail = batch_detail(db, batch, None).await.unwrap();
+    assert_eq!(detail["calls"][0]["contextPolicy"], json!(policy));
+    let invocation =
+        Uuid::parse_str(detail["calls"][0]["invocationRef"].as_str().unwrap()).unwrap();
+    let trace = request_detail(db, batch, invocation, own).await.unwrap();
+    assert_eq!(trace["availability"], "NOT_RECORDED");
+    assert!(trace["input"].is_null());
+    assert!(trace["output"].is_null());
+    assert_eq!(trace["events"].as_array().unwrap().len(), 4);
+}
+
+async fn save_test_schedule(
+    db: &Database,
+    expected_revision: i32,
+    enabled: bool,
+    config_ref: Uuid,
+    auto_policy: AutoPolicy,
+) {
+    save_schedule(
+        db,
+        &DailySchedule {
+            expected_revision,
+            enabled,
+            config_ref,
+            source_limit: 100,
+            token_limit: 100000,
+            auto_policy,
+        },
+    )
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn runtime_context_is_frozen_by_preparation_and_recording_can_be_disabled() {
+    let db = fixture::proof_database("runtime_context_freeze").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    research_fixture::detail(&db, "runtime-policy", "合成冻结上下文").await;
+    let a = source(&db, "runtime-policy", "a", "希望减少监督成本").await;
+    let own = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    let policy = frozen_runtime_context_policy();
+    let batch = prepare_with_frozen_context(&db, own, a, &policy).await;
     save_settings(
         &db,
         &SaveContext {
@@ -639,14 +748,7 @@ async fn runtime_context_is_frozen_by_preparation_and_recording_can_be_disabled(
             .await
             .unwrap()
     );
-    let d = batch_detail(&db, batch, None).await.unwrap();
-    assert_eq!(d["calls"][0]["contextPolicy"], json!(policy));
-    let inv = Uuid::parse_str(d["calls"][0]["invocationRef"].as_str().unwrap()).unwrap();
-    let trace = request_detail(&db, batch, inv, own).await.unwrap();
-    assert_eq!(trace["availability"], "NOT_RECORDED");
-    assert!(trace["input"].is_null());
-    assert!(trace["output"].is_null());
-    assert_eq!(trace["events"].as_array().unwrap().len(), 4);
+    assert_frozen_runtime_trace(&db, batch, own, &policy).await;
     let automatic: bool =
         sqlx::query_scalar("SELECT enabled FROM linggan_comment_daily_schedule WHERE singleton")
             .fetch_one(db.pool())
@@ -654,18 +756,7 @@ async fn runtime_context_is_frozen_by_preparation_and_recording_can_be_disabled(
             .unwrap();
     assert!(!automatic);
     clock(&db, "2026-09-08 14:00:00Z").await;
-    save_schedule(
-        &db,
-        &DailySchedule {
-            expected_revision: 0,
-            enabled: true,
-            config_ref: config,
-            source_limit: 100,
-            token_limit: 100000,
-        },
-    )
-    .await
-    .unwrap();
+    save_test_schedule(&db, 0, true, config, AutoPolicy::new_intake_only(100000)).await;
     save_settings(
         &db,
         &SaveContext {
@@ -773,5 +864,444 @@ async fn prepare_runtime_browser_preview() {
     linggan_intelligence::comment_intelligence_problems::reconcile_problem_index(&db, 500)
         .await
         .unwrap();
+    server.kill().await.unwrap();
+}
+
+fn p1_semantic_input(
+    source_ref: Uuid,
+    work_ref: Uuid,
+    comment_external_id: &str,
+    body: &str,
+    rule_hash: &str,
+) -> linggan_intelligence::comment_research_fingerprint::SemanticInput {
+    build_semantic_input(
+        &CommentAnalysisInput {
+            work_ref,
+            lease_ref: Uuid::nil(),
+            source_ref,
+            source_sha256: comment_source_hash(body),
+            body: body.into(),
+            context: json!({
+                "role":"unknown",
+                "workIdentity":work_ref,
+                "researchFragments":[],
+            }),
+            rule_version: "comment-research.v4".into(),
+            model_version: "synthetic.execution.provenance".into(),
+            instruction: "synthetic P1 eligibility input",
+            limitations: vec![],
+        },
+        &SourceIdentity {
+            work_ref,
+            comment_external_id: comment_external_id.into(),
+        },
+        &RuleFingerprint::new(
+            Uuid::from_u128(0x100),
+            rule_hash,
+            "comment-extraction.schema.v4",
+            "comment-context.lexical-excerpts.v1",
+            "comment-research.v4",
+        ),
+    )
+}
+
+async fn p1_source_shape(db: &Database, source_ref: Uuid) -> (Uuid, String, String) {
+    let row = sqlx::query(
+        "SELECT content_public_ref,comment_external_id,body_text FROM linggan_material_comment WHERE material_ref=$1",
+    )
+    .bind(source_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    (
+        row.get("content_public_ref"),
+        row.get("comment_external_id"),
+        row.get("body_text"),
+    )
+}
+
+async fn p1_observe_with_likes(
+    db: &Database,
+    note: &str,
+    comment_id: &str,
+    body: &str,
+    likes: i64,
+    observed_at: &str,
+) -> Uuid {
+    let package = fixture::submit_package_at(
+        db,
+        "comments",
+        json!({"contentExternalId":note}),
+        json!({
+            "kind":"comment",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":note},
+            "payload":{
+                "commentId":comment_id,
+                "noteId":note,
+                "text":body,
+                "authorId":"synthetic-hidden-author",
+                "likes":likes,
+            },
+        }),
+        observed_at,
+    )
+    .await;
+    sqlx::query_scalar("SELECT material_ref FROM linggan_material_comment WHERE package_ref=$1")
+        .bind(package)
+        .fetch_one(db.pool())
+        .await
+        .unwrap()
+}
+
+async fn p1_insert_accepted_analysis(db: &Database, source_ref: Uuid) -> Uuid {
+    let analysis_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_comment_analysis_work(work_ref,source_ref,rule_version,model_version,state,result) VALUES($1,$2,'comment-research.v4','synthetic-p1','succeeded',$3)",
+    )
+    .bind(analysis_ref)
+    .bind(source_ref)
+    .bind(json!({"contextRefs":{"researchSourceRefs":[source_ref]}}))
+    .execute(db.pool())
+    .await
+    .unwrap();
+    analysis_ref
+}
+
+async fn p1_insert_invocation(
+    db: &Database,
+    config_ref: Uuid,
+    connection_version_ref: Uuid,
+    known_usage: bool,
+) -> Uuid {
+    let invocation_ref = Uuid::new_v4();
+    let result = json!({"callStarted":true});
+    let (input_tokens, output_tokens) = if known_usage {
+        (Some(17_i64), Some(5_i64))
+    } else {
+        (None, None)
+    };
+    sqlx::query(
+        "INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,input_tokens,output_tokens,result,finished_at) SELECT $1,$2,m.model_ref,$3,'analyze',repeat('0',64),'failed',100,100,$4,$5,$6,scope_001_now() FROM linggan_model_config c JOIN linggan_model_entry m USING(model_ref) WHERE c.config_ref=$3",
+    )
+    .bind(invocation_ref)
+    .bind(connection_version_ref)
+    .bind(config_ref)
+    .bind(input_tokens)
+    .bind(output_tokens)
+    .bind(result)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    invocation_ref
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL"]
+async fn p1_semantic_identity_ignores_new_observation_and_likes() {
+    let db = fixture::proof_database("p1_stable_comment_identity").await;
+    let first = p1_observe_with_likes(
+        &db,
+        "stable-identity",
+        "same-comment",
+        "同一条评论，正文没有变化",
+        0,
+        "2026-09-07T01:00:00Z",
+    )
+    .await;
+    let replay = p1_observe_with_likes(
+        &db,
+        "stable-identity",
+        "same-comment",
+        "同一条评论，正文没有变化",
+        99,
+        "2026-09-08T01:00:00Z",
+    )
+    .await;
+    assert_ne!(first, replay);
+    let (first_work, first_id, first_body) = p1_source_shape(&db, first).await;
+    let (replay_work, replay_id, replay_body) = p1_source_shape(&db, replay).await;
+    assert_eq!(first_work, replay_work);
+    assert_eq!(first_id, replay_id);
+    let initial = p1_semantic_input(first, first_work, &first_id, &first_body, "a");
+    let observed_again = p1_semantic_input(replay, replay_work, &replay_id, &replay_body, "a");
+    assert_eq!(initial.source_identity, observed_again.source_identity);
+    assert_eq!(initial.fingerprint, observed_again.fingerprint);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn p1_legacy_alias_reuses_accepted_analysis_without_rewriting_its_key() {
+    let db = fixture::proof_database("p1_legacy_alias_reuse").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    let source_ref = source(&db, "legacy-alias", "a", "我想知道如何坚持下去").await;
+    let (work_ref, comment_id, body) = p1_source_shape(&db, source_ref).await;
+    let old = p1_semantic_input(source_ref, work_ref, &comment_id, &body, "old-rule");
+    let current = p1_semantic_input(source_ref, work_ref, &comment_id, &body, "new-rule");
+    assert_ne!(old.fingerprint, current.fingerprint);
+    let workspace_ref: Uuid =
+        sqlx::query_scalar("SELECT workspace_ref FROM linggan_model_workspace WHERE singleton")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    let analysis_ref = p1_insert_accepted_analysis(&db, source_ref).await;
+    let semantic_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_comment_semantic_work(semantic_ref,workspace_ref,identity_key,fingerprint,source_ref,config_ref,state,analysis_ref,attempts,input_manifest) VALUES($1,$2,$3,$4,$5,$6,'succeeded',$7,1,$8)",
+    )
+    .bind(semantic_ref)
+    .bind(workspace_ref)
+    .bind(&old.source_identity)
+    .bind(&old.fingerprint)
+    .bind(source_ref)
+    .bind(config)
+    .bind(analysis_ref)
+    .bind(&old.input_manifest)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_legacy_fingerprint_alias(source_identity,old_fingerprint,new_fingerprint,analysis_ref,proof_hash) VALUES($1,$2,$3,$4,$5)",
+    )
+    .bind(&old.source_identity)
+    .bind(&old.fingerprint)
+    .bind(&current.fingerprint)
+    .bind(analysis_ref)
+    .bind(comment_source_hash("synthetic compatibility proof"))
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let eligibility = evaluate_eligibility(
+        &db,
+        &EligibilityRequest {
+            workspace_ref,
+            source_ref,
+            input: current.clone(),
+            qualification: SourceQualification::eligible(CleanState::Direct),
+            explicit_generation: None,
+            recovery: RecoveryPolicy::default(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(eligibility.category, EligibilityCategory::Reusable);
+    assert_eq!(eligibility.result_state, ResultState::Studied);
+    assert_eq!(eligibility.last_accepted_analysis_ref, Some(analysis_ref));
+    assert!(!eligibility.eligible_to_dispatch);
+    let persisted: String = sqlx::query_scalar(
+        "SELECT fingerprint FROM linggan_comment_semantic_work WHERE semantic_ref=$1",
+    )
+    .bind(semantic_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(persisted, old.fingerprint);
+    server.kill().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn p1_unknown_charge_allows_exactly_one_separate_recovery() {
+    let db = fixture::proof_database("p1_unknown_recovery").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, connection_version) = configured(&db, &url, "synthetic-good", None).await;
+    let source_ref = source(&db, "unknown-retry", "a", "这条调用需要保留未知费用").await;
+    let (work_ref, comment_id, body) = p1_source_shape(&db, source_ref).await;
+    let input = p1_semantic_input(source_ref, work_ref, &comment_id, &body, "active-rule");
+    let workspace_ref: Uuid =
+        sqlx::query_scalar("SELECT workspace_ref FROM linggan_model_workspace WHERE singleton")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    let invocation_ref = p1_insert_invocation(&db, config, connection_version, false).await;
+    let semantic_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_comment_semantic_work(semantic_ref,workspace_ref,identity_key,fingerprint,source_ref,config_ref,state,invocation_ref,failure_code,attempts,unknown_retry_attempts,input_manifest) VALUES($1,$2,$3,$4,$5,$6,'failed',$7,'worker_interrupted',1,0,$8)",
+    )
+    .bind(semantic_ref)
+    .bind(workspace_ref)
+    .bind(&input.source_identity)
+    .bind(&input.fingerprint)
+    .bind(source_ref)
+    .bind(config)
+    .bind(invocation_ref)
+    .bind(&input.input_manifest)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let request = EligibilityRequest {
+        workspace_ref,
+        source_ref,
+        input,
+        qualification: SourceQualification::eligible(CleanState::Direct),
+        explicit_generation: None,
+        recovery: RecoveryPolicy {
+            retry_max_attempts: 3,
+            unknown_retry_max_attempts: 1,
+            retry_cooldown_seconds: 0,
+        },
+    };
+    let first = evaluate_eligibility(&db, &request).await.unwrap();
+    assert_eq!(first.category, EligibilityCategory::FailedRecovery);
+    assert_eq!(first.execution_state, ExecutionState::WaitingRecovery);
+    assert!(first.eligible_to_dispatch);
+    assert_eq!(first.recovery.unwrap().unknown_retry_attempts, 0);
+    sqlx::query(
+        "UPDATE linggan_comment_semantic_work SET unknown_retry_attempts=1 WHERE semantic_ref=$1",
+    )
+    .bind(semantic_ref)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let exhausted = evaluate_eligibility(&db, &request).await.unwrap();
+    assert_eq!(exhausted.category, EligibilityCategory::FailedRecovery);
+    assert_eq!(exhausted.execution_state, ExecutionState::Failed);
+    assert!(!exhausted.eligible_to_dispatch);
+    assert_eq!(exhausted.recovery.unwrap().unknown_retry_attempts, 1);
+    server.kill().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn p1_old_accepted_result_remains_visible_when_current_update_fails() {
+    let db = fixture::proof_database("p1_result_execution_axes").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, connection_version) = configured(&db, &url, "synthetic-good", None).await;
+    let source_ref = source(&db, "axes", "a", "更新前后都需要可解释").await;
+    let (work_ref, comment_id, body) = p1_source_shape(&db, source_ref).await;
+    let old = p1_semantic_input(source_ref, work_ref, &comment_id, &body, "old-rule");
+    let current = p1_semantic_input(source_ref, work_ref, &comment_id, &body, "new-rule");
+    let workspace_ref: Uuid =
+        sqlx::query_scalar("SELECT workspace_ref FROM linggan_model_workspace WHERE singleton")
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    let accepted_ref = p1_insert_accepted_analysis(&db, source_ref).await;
+    sqlx::query(
+        "INSERT INTO linggan_comment_semantic_work(semantic_ref,workspace_ref,identity_key,fingerprint,source_ref,config_ref,state,analysis_ref,attempts,input_manifest) VALUES($1,$2,$3,$4,$5,$6,'succeeded',$7,1,$8)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(workspace_ref)
+    .bind(&old.source_identity)
+    .bind(&old.fingerprint)
+    .bind(source_ref)
+    .bind(config)
+    .bind(accepted_ref)
+    .bind(&old.input_manifest)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let invocation_ref = p1_insert_invocation(&db, config, connection_version, true).await;
+    sqlx::query(
+        "INSERT INTO linggan_comment_semantic_work(semantic_ref,workspace_ref,identity_key,fingerprint,source_ref,config_ref,state,invocation_ref,failure_code,attempts,input_manifest) VALUES($1,$2,$3,$4,$5,$6,'failed',$7,'invalid_output',1,$8)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(workspace_ref)
+    .bind(&current.source_identity)
+    .bind(&current.fingerprint)
+    .bind(source_ref)
+    .bind(config)
+    .bind(invocation_ref)
+    .bind(&current.input_manifest)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let eligibility = evaluate_eligibility(
+        &db,
+        &EligibilityRequest {
+            workspace_ref,
+            source_ref,
+            input: current,
+            qualification: SourceQualification::eligible(CleanState::Direct),
+            explicit_generation: None,
+            recovery: RecoveryPolicy::default(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(eligibility.result_state, ResultState::Outdated);
+    assert_eq!(eligibility.execution_state, ExecutionState::Failed);
+    assert_eq!(eligibility.last_accepted_analysis_ref, Some(accepted_ref));
+    assert_eq!(eligibility.current_attempt_ref, Some(invocation_ref));
+    assert!(!eligibility.eligible_to_dispatch);
+    server.kill().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and local synthetic Pi"]
+async fn p1_23_cutoff_and_pause_resume_keep_first_enable_history_boundary() {
+    let db = fixture::proof_database("p1_daily_cutoff_pause_history").await;
+    let (mut server, url) = fixture_server().await;
+    let (config, _, _) = configured(&db, &url, "synthetic-good", None).await;
+    clock(&db, "2026-09-07 13:00:00Z").await;
+    let before_enable = source(&db, "p1-history", "before", "首次启用前的历史评论").await;
+    let policy = AutoPolicy {
+        historical_enabled: true,
+        history_start: Some("2026-09-01T00:00:00Z".into()),
+        ..AutoPolicy::new_intake_only(100000)
+    };
+    clock(&db, "2026-09-07 14:59:59Z").await;
+    save_test_schedule(&db, 0, true, config, policy.clone()).await;
+    let enabled_at: String = sqlx::query_scalar(
+        "SELECT auto_enabled_at::text FROM linggan_comment_daily_schedule WHERE singleton",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let before_cutoff = source(&db, "p1-history", "before-cutoff", "22:59:59属于当前窗口").await;
+    clock(&db, "2026-09-07 15:00:00Z").await;
+    let at_cutoff = source(&db, "p1-history", "at-cutoff", "23:00整属于下一窗口").await;
+    assert_eq!(seal_all_due(&db).await.unwrap(), 1);
+    let first_window: Vec<Uuid> =
+        sqlx::query_scalar("SELECT source_ref FROM linggan_comment_daily_item ORDER BY source_ref")
+            .fetch_all(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(first_window, vec![before_cutoff]);
+    let first_policy: serde_json::Value = sqlx::query_scalar(
+        "SELECT request->'autoPolicy' FROM linggan_comment_daily_batch WHERE kind='daily'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(first_policy["historyStart"], "2026-09-01T00:00:00Z");
+    assert!(
+        first_window
+            .iter()
+            .all(|source_ref| *source_ref != before_enable)
+    );
+
+    save_test_schedule(&db, 1, false, config, policy.clone()).await;
+    clock(&db, "2026-09-07 18:00:00Z").await;
+    let while_paused = source(&db, "p1-history", "paused", "暂停期间只等待恢复").await;
+    assert_eq!(seal_all_due(&db).await.unwrap(), 0);
+    clock(&db, "2026-09-08 14:00:00Z").await;
+    save_test_schedule(&db, 2, true, config, policy).await;
+    let resumed_at: String = sqlx::query_scalar(
+        "SELECT auto_enabled_at::text FROM linggan_comment_daily_schedule WHERE singleton",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(resumed_at, enabled_at);
+    clock(&db, "2026-09-08 15:00:00Z").await;
+    assert_eq!(seal_all_due(&db).await.unwrap(), 1);
+    let resumed_window: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT source_ref FROM linggan_comment_daily_item WHERE source_ref=ANY($1) ORDER BY source_ref",
+    )
+    .bind(vec![at_cutoff, while_paused])
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    let mut expected_resumed = vec![at_cutoff, while_paused];
+    expected_resumed.sort();
+    assert_eq!(resumed_window, expected_resumed);
+    let historical_count: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_comment_daily_item WHERE source_ref=$1")
+            .bind(before_enable)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    assert_eq!(historical_count, 0);
     server.kill().await.unwrap();
 }

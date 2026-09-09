@@ -41,6 +41,10 @@ async fn execute_scoped(
     sqlx::query("SET LOCAL plan_cache_mode=force_custom_plan")
         .execute(&mut *tx)
         .await?;
+    // Freeze the domain capability in this same snapshot. A bound boolean lets custom planning
+    // remove native-only outer joins for external samples without weakening their domain gates.
+    let native_domain: bool = sqlx::query_scalar("SELECT is_own_domain FROM observation_domain WHERE domain_ref=COALESCE($1,(SELECT domain_ref FROM observation_domain WHERE is_own_domain))")
+        .bind(q.domain).fetch_optional(&mut *tx).await?.ok_or(ModelError::Invalid)?;
     let sql = if explain {
         format!("EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) {SCOPED}{READ}")
     } else {
@@ -74,6 +78,7 @@ async fn execute_scoped(
         .bind(q.processing_state.as_deref().unwrap_or(""))
         .bind(detail_ref)
         .bind(q.view.as_deref() == Some("voices") && detail_ref.is_none())
+        .bind(native_domain)
         .fetch_optional(&mut *tx)
         .await?
         .ok_or(ModelError::Invalid)?;
@@ -97,6 +102,9 @@ async fn enrich_runtime(db: &Database, value: &mut Value) -> Result<(), ModelErr
             .ok_or(ModelError::Invalid)?;
         value["problemAutomation"] =
             crate::comment_intelligence_problems::problem_automation_state(db, domain).await?;
+    }
+    if value["ownDomain"] == true {
+        value["automaticResearch"] = crate::comment_auto_status::read(db).await?;
     }
     value["model"] = crate::model_settings_read::current_comment_model_state(db).await?;
     let mut daily = if value["ownDomain"] == true && value["deferredAggregates"] != true {

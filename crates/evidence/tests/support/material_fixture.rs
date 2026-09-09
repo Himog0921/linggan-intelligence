@@ -73,6 +73,7 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0030_comment_image_media.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0031_topic_workspace.sql"),
     include_str!("../../../../database/migrations/0032_author_profile_avatar_media.sql"),
     "\n",
     include_str!("../../../../database/migrations/0033_dispatch_failure_recovery.sql"),
@@ -111,6 +112,16 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0051_comment_problem_vectors.sql"),
     "\n",
     include_str!("../../../../database/migrations/0052_work_order_expiry.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0053_comment_research_rules.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0054_comment_auto_policy.sql"),
+    include_str!("../../../../database/migrations/0055_comment_research_replay.sql"),
+    include_str!("../../../../database/migrations/0056_comment_semantic_atoms.sql"),
+    include_str!("../../../../database/migrations/0057_comment_local_recovery.sql"),
+    include_str!("../../../../database/migrations/0058_comment_field_repair.sql"),
+    include_str!("../../../../database/migrations/0059_comment_replay_continuity.sql"),
+    include_str!("../../../../database/migrations/0060_comment_topic_associations.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
@@ -264,24 +275,12 @@ pub async fn proof_database(schema: &str) -> Database {
 /// Post-0047 retirement and replacement behavior is tested in comment_intelligence suites.
 pub async fn proof_database_before_comment_intelligence(schema: &str) -> Database {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
-    let migrations = MIGRATIONS
-        .replace(
-            include_str!("../../../../database/migrations/0051_comment_problem_vectors.sql"),
-            "",
-        )
-        .replace(
-            include_str!("../../../../database/migrations/0050_comment_research_automation.sql"),
-            "",
-        )
-        .replace(
-            include_str!("../../../../database/migrations/0049_comment_research_runtime.sql"),
-            "",
-        )
-        .replace(
-            include_str!("../../../../database/migrations/0048_comment_intelligence.sql"),
-            "",
-        );
-    isolated_proof_schema(&url, schema, &migrations)
+    let (migrations, _) = MIGRATIONS
+        .split_once(include_str!(
+            "../../../../database/migrations/0048_comment_intelligence.sql"
+        ))
+        .expect("the pre-CI migration boundary exists");
+    isolated_proof_schema(&url, schema, migrations)
         .await
         .expect("pre-CI migrations apply")
 }

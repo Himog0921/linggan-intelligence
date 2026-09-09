@@ -1,0 +1,67 @@
+{
+  "policyVersion": "ci-auto-cluster.policy.v1",
+  "input": {
+    "vectorDtype": "float32-le",
+    "normalization": "l2",
+    "allowedKinds": ["problem", "need", "solution", "stance", "story", "quote", "emotion"],
+    "requireSingleKind": true,
+    "requireSingleSpace": true,
+    "derivedRelations": {
+      "conflict": "not_an_atom_or_cluster_kind; derive only from at_least_two_incompatible_stance_atoms_for_one_target_with_source_evidence"
+    }
+  },
+  "resource": {
+    "threads": 4,
+    "maxRssBytes": 6442450944,
+    "timeoutSeconds": 1800
+  },
+  "knn": {
+    "metric": "cosine_inner_product_on_l2_normalized_vectors",
+    "k": 20,
+    "hnswM": 32,
+    "efConstruction": 200,
+    "efSearch": 256
+  },
+  "hdbscan": {
+    "metric": "euclidean",
+    "minClusterSize": 10,
+    "minSamples": 5,
+    "compareSampleMaxAtoms": 10000
+  },
+  "leiden": {
+    "partition": "RBConfigurationVertexPartition",
+    "resolution": 1.0,
+    "nIterations": -1
+  },
+  "quality": {
+    "seeds": [17, 29, 43],
+    "sameSeed": 17,
+    "sameSeedRepeats": 2,
+    "recallQueries": 1000,
+    "minRecallAt20": 0.95,
+    "minStabilityAri": 0.8,
+    "minCommonCore": 30,
+    "silhouetteSampleMaxAtoms": 1000
+  },
+  "semanticReview": {
+    "perClusterMaxAtoms": 12,
+    "coreMaxAtoms": 5,
+    "boundaryMaxAtoms": 4,
+    "neighborMaxAtoms": 3,
+    "inputTokenMax": 8000,
+    "outputTokenMax": 2000,
+    "modelAttemptsPerRevisionMax": 2,
+    "cooldownHours": 24,
+    "callsPerRoundMax": 60
+  },
+  "adoptionOrder": [
+    "input_conservation_and_resource_hard_gates",
+    "ann_recall_hard_gate",
+    "same_seed_reproducibility_hard_gate",
+    "perturbation_stability_gate",
+    "bounded_semantic_review",
+    "higher_reviewed_core_coverage",
+    "higher_perturbation_stability",
+    "lower_elapsed_time"
+  ]
+}

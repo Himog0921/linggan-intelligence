@@ -33,7 +33,7 @@ pub(crate) use relations::{apply_problem_relation, record_boundary_decision};
 mod worker;
 pub use worker::{
     problem_automation_state, problem_task_status, queue_problem_task, run_problem_relation_once,
-    sync_problem_tasks,
+    run_problem_relation_once_with_drain, sync_problem_tasks,
 };
 
 pub const DICTIONARY_VERSION: &str = "comment-language.v2";
@@ -313,7 +313,7 @@ pub async fn problem_details(
         current = Uuid::parse_str(next).map_err(|_| rejected("CI_INVALID_STATE"))?;
         snapshot = problem_metadata(&mut tx, domain, current).await?;
     }
-    let rows = sqlx::query("SELECT s.canonical_ref,s.source_ref,s.work_ref,left(s.body,4000) AS body,m.evidence,m.origin,a.result FROM linggan_ci_problem_member m JOIN linggan_ci_source s USING(canonical_ref) LEFT JOIN linggan_comment_analysis_work a ON a.work_ref=m.analysis_ref LEFT JOIN linggan_ci_source_research h ON h.canonical_ref=s.canonical_ref AND h.domain_ref=s.domain_ref WHERE m.problem_ref=$1 AND s.domain_ref=$2 AND ((m.origin='manual' AND h.source_sha256=s.source_sha256) OR (m.origin<>'manual' AND a.result->>'sourceSha256'=s.source_sha256)) ORDER BY s.first_observed_at DESC,s.canonical_ref LIMIT 101")
+    let rows = sqlx::query("SELECT s.canonical_ref,s.source_ref,s.work_ref,left(s.body,4000) AS body,m.evidence,m.origin,a.result FROM linggan_ci_problem_member m JOIN linggan_ci_source s USING(canonical_ref) LEFT JOIN linggan_comment_analysis_work a ON a.work_ref=m.analysis_ref LEFT JOIN linggan_ci_source_research h ON h.canonical_ref=s.canonical_ref AND h.domain_ref=s.domain_ref WHERE m.problem_ref=$1 AND s.domain_ref=$2 AND linggan_ci_group_problem_member_current(m.problem_ref,m.canonical_ref,m.analysis_ref) AND ((m.origin='manual' AND h.source_sha256=s.source_sha256) OR (m.origin<>'manual' AND a.result->>'sourceSha256'=s.source_sha256)) ORDER BY s.first_observed_at DESC,s.canonical_ref LIMIT 101")
         .bind(current).bind(domain).fetch_all(&mut *tx).await.map_err(statement)?;
     let history = sqlx::query("SELECT revision,kind,reason,created_at::text AS at,before_value->>'name' AS old_name,after_value->>'name' AS new_name FROM linggan_ci_problem_version WHERE problem_ref=$1 ORDER BY revision DESC LIMIT 100")
         .bind(current).fetch_all(&mut *tx).await.map_err(statement)?;
@@ -356,10 +356,13 @@ pub async fn problem_details(
     let mut source_distribution: Vec<_> = distribution.into_iter().collect();
     source_distribution.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
     let suggestions = problem_suggestions(database, domain, current, &snapshot, &members).await?;
+    let related_topics = crate::comment_topic_associations::read(database, domain, current)
+        .await
+        .map_err(statement)?;
     Ok(
         json!({"problem":snapshot,"requestedProblemRef":problem,"resolvedProblemRef":current,"redirected":current!=problem,
         "history":history.iter().map(|r|json!({"revision":r.get::<i64,_>("revision"),"kind":r.get::<String,_>("kind"),"reason":r.get::<String,_>("reason"),"at":r.get::<String,_>("at"),"oldName":r.get::<Option<String>,_>("old_name"),"newName":r.get::<Option<String>,_>("new_name")})).collect::<Vec<_>>(),
-        "members":members,"membersLimit":100,"membersTruncated":members_truncated,"sourceDistributionScope":"visible_evidence_sample","sourceDistribution":source_distribution.into_iter().take(5).map(|(work,n)|json!({"workRef":work,"comments":n})).collect::<Vec<_>>(),"suggestions":suggestions}),
+        "members":members,"membersLimit":100,"membersTruncated":members_truncated,"sourceDistributionScope":"visible_evidence_sample","sourceDistribution":source_distribution.into_iter().take(5).map(|(work,n)|json!({"workRef":work,"comments":n})).collect::<Vec<_>>(),"suggestions":suggestions,"relatedTopics":related_topics}),
     )
 }
 
@@ -376,7 +379,7 @@ async fn problem_suggestions(
     let mut suggestions = Vec::new();
     for row in candidates {
         let other: Uuid = row.get("problem_ref");
-        let evidence = sqlx::query("SELECT s.source_ref,m.origin,a.result FROM linggan_ci_problem_member m JOIN linggan_ci_source s USING(canonical_ref) LEFT JOIN linggan_comment_analysis_work a ON a.work_ref=m.analysis_ref LEFT JOIN linggan_ci_source_research h ON h.canonical_ref=s.canonical_ref AND h.domain_ref=s.domain_ref WHERE m.problem_ref=$1 AND s.domain_ref=$2 AND ((m.origin='manual' AND h.source_sha256=s.source_sha256) OR (m.origin<>'manual' AND a.result->>'sourceSha256'=s.source_sha256)) ORDER BY s.first_observed_at,s.source_ref LIMIT 30")
+        let evidence = sqlx::query("SELECT s.source_ref,m.origin,a.result FROM linggan_ci_problem_member m JOIN linggan_ci_source s USING(canonical_ref) LEFT JOIN linggan_comment_analysis_work a ON a.work_ref=m.analysis_ref LEFT JOIN linggan_ci_source_research h ON h.canonical_ref=s.canonical_ref AND h.domain_ref=s.domain_ref WHERE m.problem_ref=$1 AND s.domain_ref=$2 AND linggan_ci_group_problem_member_current(m.problem_ref,m.canonical_ref,m.analysis_ref) AND ((m.origin='manual' AND h.source_sha256=s.source_sha256) OR (m.origin<>'manual' AND a.result->>'sourceSha256'=s.source_sha256)) ORDER BY s.first_observed_at,s.source_ref LIMIT 30")
             .bind(other).bind(domain).fetch_all(database.pool()).await.map_err(statement)?;
         let mut refs = Vec::new();
         for item in evidence {

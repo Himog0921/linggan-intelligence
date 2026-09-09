@@ -18,7 +18,7 @@ url = "2.5.8"
 unicode-properties = { version = "=0.1.4", default-features = false, features = ["emoji"] }
 sqlx.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["time", "process", "io-util", "fs", "sync"] }
+tokio = { workspace = true, features = ["time", "process", "io-util", "fs", "sync", "macros"] }
 uuid = { workspace = true, features = ["serde", "v4"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]

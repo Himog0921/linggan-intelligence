@@ -6,6 +6,8 @@
 
 # CI-20260907-V1 实施与交接
 
+2026-09-08之后评论自动研究的最新执行入口为[CI-AUTO-004](ci-auto-004-comment-auto-research.md)。本文件保留此前实施/发布证据；最新无日常人工边界维护、自动回归与规模化原子聚类目标以新计划覆盖表为准，旧条目不是新功能已完成的证明。
+
 用户授权：按完整实施包落实代码与隔离验收。真实外发、自动启用、共享迁移、合并和部署保持分别记录。
 
 来源合同：[唯一合同](../../data-contracts/comment-intelligence-v1.md)；外部原包 `/Users/moglenny/Downloads/comment-intelligence-v1`，13 项 SHA256 全部一致。蓝图不是生产数据。

@@ -54,6 +54,13 @@ impl ResearchScope {
                 !matches!(
                     v,
                     "pending"
+                        | "unstudied"
+                        | "studied"
+                        | "outdated"
+                        | "idle"
+                        | "queued"
+                        | "running"
+                        | "waiting_recovery"
                         | "analyzed"
                         | "succeeded"
                         | "no_signal"
@@ -98,7 +105,7 @@ pub async fn schema_ready(db: &Database) -> Result<bool, ModelError> {
 }
 
 pub async fn automation_schema_ready(db: &Database) -> Result<bool, ModelError> {
-    Ok(sqlx::query_scalar("SELECT to_regclass('linggan_ci_problem_task') IS NOT NULL AND to_regclass('linggan_ci_definition_vector') IS NOT NULL").fetch_one(db.pool()).await?)
+    Ok(sqlx::query_scalar("SELECT to_regclass('linggan_ci_problem_task') IS NOT NULL AND to_regclass('linggan_ci_definition_vector') IS NOT NULL AND to_regclass('linggan_comment_research_rule_active') IS NOT NULL AND to_regclass('linggan_comment_legacy_fingerprint_alias') IS NOT NULL AND to_regclass('linggan_comment_replay_run') IS NOT NULL AND to_regclass('linggan_ci_semantic_atom_current') IS NOT NULL AND to_regclass('linggan_comment_local_recovery') IS NOT NULL AND to_regclass('linggan_comment_field_repair_trace') IS NOT NULL AND to_regclass('linggan_comment_replay_follow_up') IS NOT NULL AND to_regclass('linggan_ci_comment_topic_association') IS NOT NULL").fetch_one(db.pool()).await?)
 }
 
 #[path = "comment_intelligence_observations.rs"]

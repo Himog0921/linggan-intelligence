@@ -39,6 +39,80 @@ pub struct PiResponse {
     pub model_list_origin: Option<String>,
     pub usage: PiUsage,
     pub elapsed_ms: Option<i64>,
+    #[serde(default)]
+    pub diagnostic: Option<PiDiagnostic>,
+}
+/// Only transport metadata crosses the child boundary; upstream error prose never does.
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PiDiagnostic {
+    pub schema_version: u8,
+    pub stage: String,
+    pub http_status: Option<u16>,
+    pub response_started: Option<bool>,
+    pub terminal_received: Option<bool>,
+    pub received_bytes: Option<u64>,
+    pub finish_reason: Option<String>,
+    pub elapsed_ms: u64,
+    pub usage_known: bool,
+    pub sdk_error_type: Option<String>,
+    pub retry_class: String,
+}
+impl PiDiagnostic {
+    pub fn valid(&self) -> bool {
+        self.schema_version == 1
+            && matches!(
+                self.stage.as_str(),
+                "request_not_started"
+                    | "request_sent"
+                    | "response_started"
+                    | "streaming"
+                    | "terminal"
+                    | "failed"
+                    | "timed_out"
+                    | "rejected"
+            )
+            && self.http_status.is_none_or(|v| (100..=599).contains(&v))
+            && self.received_bytes.is_none_or(|v| v <= 100_000_000)
+            && self.elapsed_ms <= 86_400_000
+            && self.finish_reason.as_deref().is_none_or(|v| {
+                matches!(
+                    v,
+                    "stop" | "length" | "content_filter" | "tool_calls" | "cancelled" | "unknown"
+                )
+            })
+            && self.sdk_error_type.as_deref().is_none_or(|v| {
+                matches!(
+                    v,
+                    "timeout"
+                        | "abort"
+                        | "network"
+                        | "http"
+                        | "stream_interrupted"
+                        | "invalid_response"
+                        | "sdk"
+                )
+            })
+            && matches!(
+                self.retry_class.as_str(),
+                "never" | "after_cooldown" | "manual_review" | "unknown"
+            )
+    }
+    pub fn process_timeout(elapsed_ms: u64) -> Self {
+        Self {
+            schema_version: 1,
+            stage: "timed_out".into(),
+            http_status: None,
+            response_started: None,
+            terminal_received: None,
+            received_bytes: None,
+            finish_reason: None,
+            elapsed_ms,
+            usage_known: false,
+            sdk_error_type: Some("timeout".into()),
+            retry_class: "manual_review".into(),
+        }
+    }
 }
 #[derive(Clone)]
 pub struct PiAdapter {
@@ -104,6 +178,12 @@ impl PiAdapter {
             let response: PiResponse =
                 serde_json::from_slice(&bytes).map_err(|_| ModelError::InvalidOutput)?;
             if response.version != PI_PROTOCOL
+                || response.diagnostic.as_ref().is_some_and(|d| {
+                    !d.valid()
+                        || d.usage_known
+                            != (response.usage.input_tokens.is_some()
+                                && response.usage.output_tokens.is_some())
+                })
                 || response
                     .usage
                     .input_tokens
@@ -129,5 +209,29 @@ impl PiAdapter {
     }
 }
 pub fn safe_result(response: &PiResponse) -> Value {
-    serde_json::json!({"ok":response.ok,"failureCode":response.failure_code,"usage":response.usage,"elapsedMs":response.elapsed_ms,"modelIds":response.model_ids,"modelListOrigin":response.model_list_origin})
+    serde_json::json!({"ok":response.ok,"failureCode":response.failure_code,"usage":response.usage,"elapsedMs":response.elapsed_ms,"modelIds":response.model_ids,"modelListOrigin":response.model_list_origin,"diagnostic":response.diagnostic})
+}
+
+#[cfg(test)]
+mod diagnostic_tests {
+    use super::*;
+    #[test]
+    fn missing_transport_observation_stays_unknown() {
+        let d = PiDiagnostic::process_timeout(31_000);
+        assert!(d.valid());
+        let value = serde_json::to_value(&d).unwrap();
+        assert!(value["httpStatus"].is_null());
+        assert!(value["responseStarted"].is_null());
+        assert!(value["receivedBytes"].is_null());
+        assert_eq!(value["usageKnown"], false);
+    }
+    #[test]
+    fn diagnostic_rejects_free_form_metadata() {
+        let mut d = PiDiagnostic::process_timeout(1);
+        d.sdk_error_type = Some("upstream error body with private material".into());
+        assert!(!d.valid());
+        let mut value = serde_json::to_value(PiDiagnostic::process_timeout(1)).unwrap();
+        value["headers"] = serde_json::json!({"authorization":"synthetic"});
+        assert!(serde_json::from_value::<PiDiagnostic>(value).is_err());
+    }
 }

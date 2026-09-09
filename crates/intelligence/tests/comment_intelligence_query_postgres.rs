@@ -170,8 +170,9 @@ async fn semantic_lenses_are_nonexclusive_and_resonance_has_group_evidence() {
         .await;
         let evidence = json!([{"sourceRef":id,"startChar":0,"endChar":body.chars().count()}]);
         let result = json!({"sourceRef":id,"sourceSha256":linggan_intelligence::comment_research::comment_source_hash(&body),"spans":[],"contextRefs":{"researchSourceRefs":[id]},"semantic":{"outcome":"interpretable","labels":[{"label":"need","evidence":evidence},{"label":"story","evidence":evidence}],"problems":[{"name":"家长陪伴成本","meaning":"孩子写作业需要持续陪伴，家长在问如何减轻持续陪伴","evidence":evidence}],"stances":[{"target":"写作业需要持续陪伴","position":"support","evidence":evidence}],"contextMissing":[],"uncertaintyReason":null}});
-        sqlx::query("INSERT INTO linggan_comment_analysis_work(work_ref,source_ref,rule_version,model_version,state,result) VALUES($1,$2,'comment-research.v3','synthetic.v1','succeeded',$3)").bind(Uuid::new_v4()).bind(id).bind(result).execute(db.pool()).await.unwrap();
+        sqlx::query("INSERT INTO linggan_comment_analysis_work(work_ref,source_ref,rule_version,model_version,state,result) SELECT $1,$2,rule.schema_version,'synthetic.v1','succeeded',$3 FROM linggan_comment_research_rule_active active JOIN linggan_comment_research_rule_revision rule USING(rule_revision_ref)").bind(Uuid::new_v4()).bind(id).bind(result).execute(db.pool()).await.unwrap();
     }
+    seed_current_query_qualification(&db).await;
     reconcile_problem_index(&db, 100).await.unwrap();
     let r = read(&db, &all()).await.unwrap();
     assert_eq!(r["summary"]["comments"], 6);
@@ -228,6 +229,7 @@ async fn hundred_thousand_comment_scope_is_paged_and_reports_server_p95() {
         read(&db, &q).await.unwrap();
         times.push(now.elapsed().as_millis());
     }
+    eprintln!("CI_SCALE_OVERVIEW_SAMPLES_MS {times:?}");
     times.sort_unstable();
     let p95 = times[18];
     eprintln!(
@@ -257,6 +259,7 @@ async fn hundred_thousand_comment_scope_is_paged_and_reports_server_p95() {
         read(&db, &voices).await.unwrap();
         voice_times.push(now.elapsed().as_millis());
     }
+    eprintln!("CI_SCALE_VOICES_SAMPLES_MS {voice_times:?}");
     voice_times.sort_unstable();
     eprintln!(
         "CI_SCALE_VOICES SYNTHETIC cross-industry 100000 rows cold_ms={voices_cold} warm_p95_ms={}; excludes HTTP/browser/LLM",
@@ -273,4 +276,26 @@ async fn hundred_thousand_comment_scope_is_paged_and_reports_server_p95() {
         voice_times[18]
     );
     assert!(p95 < 1000, "overview P95 exceeds contract: {p95}ms");
+}
+
+async fn seed_current_query_qualification(db: &linggan_storage_postgres::Database) {
+    // This SQL fixture tests the reader's nonexclusive labels, not extraction compatibility.
+    // Since CI-AUTO-004 the reader requires an explicit current qualification; a same-body
+    // historical result alone must not become current coverage. Production builds this locally.
+    sqlx::query(r#"INSERT INTO linggan_comment_research_eligibility_current
+      (source_identity,source_ref,source_sha256,fingerprint,rule_revision_ref,rule_hash,schema_version,
+       selector_version,source_context_revision,current_analysis_ref,last_accepted_analysis_ref,
+       result_state,execution_state,reason_code,eligible_to_dispatch,input_manifest)
+      SELECT encode(sha256(convert_to(source.work_ref::text||':'||source.comment_external_id,'UTF8')),'hex'),
+       source.source_ref,source.source_sha256,
+       encode(sha256(convert_to('SYNTHETIC-reader-fixture:'||source.source_ref::text,'UTF8')),'hex'),
+       rule.rule_revision_ref,rule.canonical_hash,rule.schema_version,rule.selector_version,
+       linggan_comment_research_context_revision(source.source_ref),analysis.work_ref,analysis.work_ref,
+       'studied','idle','current_result',false,'{"isSyntheticReadFixture":true}'::jsonb
+      FROM linggan_ci_source source
+      JOIN linggan_comment_analysis_work analysis ON analysis.source_ref=source.source_ref AND analysis.state='succeeded'
+      CROSS JOIN linggan_comment_research_rule_active active
+      JOIN linggan_comment_research_rule_revision rule USING(rule_revision_ref)
+      WHERE source.domain_ref=$1 AND analysis.rule_version=rule.schema_version"#)
+      .bind(own()).execute(db.pool()).await.unwrap();
 }

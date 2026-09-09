@@ -81,8 +81,15 @@ async fn current_research_excludes_dropped_but_preserves_versioned_source_and_an
             before["scope"]["resultRevision"],
             after["scope"]["resultRevision"]
         );
-        assert_eq!(after["representatives"], json!([]));
-        assert_eq!(after["problemCandidates"], json!([]));
+        // The voices read deliberately omits aggregate lanes; null means not requested,
+        // not an empty aggregate. Other views must still prove noise never enters them.
+        let aggregate = if view == "voices" {
+            serde_json::Value::Null
+        } else {
+            json!([])
+        };
+        assert_eq!(after["representatives"], aggregate, "{view}");
+        assert_eq!(after["problemCandidates"], aggregate, "{view}");
     }
     let search = read(
         &db,
