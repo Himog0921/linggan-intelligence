@@ -320,6 +320,7 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
         None,
         None,
         Some(&selected_ref.to_string()),
+        &[],
         target_drawer::TargetListContext::default(),
     );
 
@@ -402,6 +403,7 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
         None,
         None,
         None,
+        &[],
         target_drawer::TargetListContext::default(),
     );
     assert!(all_html.contains("UTC+08 全部合格历史"));
@@ -427,6 +429,7 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
         None,
         None,
         None,
+        &[],
         target_drawer::TargetListContext::default(),
     );
     assert!(truncated_html.contains("≥2001</b><span>作品目录下限"));
@@ -512,6 +515,7 @@ fn invalid_lifecycle_query_is_visible_and_never_claims_defaults() {
         None,
         None,
         None,
+        &[],
         target_drawer::TargetListContext::default(),
     );
     assert!(html.contains("作品分布的查询条件无效"));
@@ -792,6 +796,7 @@ fn unreadable_drawer_archive_never_offers_a_write_action() {
         None,
         None,
         None,
+        &[],
         target_drawer::TargetListContext::default(),
     );
 
@@ -826,6 +831,7 @@ fn drawer_archive_post_preserves_validated_list_and_focus_context() {
         None,
         None,
         None,
+        &[],
         target_drawer::TargetListContext {
             filter: Some("creator"),
             sort: Some("last"),
@@ -893,6 +899,7 @@ fn overview_archive_action_explains_the_two_hundred_boundary_without_a_fake_scor
         None,
         None,
         None,
+        &[],
         target_drawer::TargetListContext::default(),
     );
 

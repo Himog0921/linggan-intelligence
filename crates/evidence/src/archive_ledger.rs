@@ -27,6 +27,10 @@
 //!   挑下一批时用的 `NOT EXISTS (SELECT 1 FROM linggan_material_content_detail ...)` 是同一个
 //!   判断，因此界面说「还差 N 篇」与系统实际会去采的篇数永远一致。
 //!
+//! - **已确认失效**：人看过平台页面后确认「这篇已经没了」的那些。作品仍留在目录里（博主
+//!   当时确实发过，抹掉分母是改写历史），只是不再计入待补齐。「已有详情」压过「已失效」：
+//!   作者若把作品恢复、详情随后采到了，它就该按已有详情算。
+//!
 //! 归属只认 `package.task_id`：包是哪张任务采回来的，连接条件已经确定了，不需要再拿
 //! `coverage.target` 去逐键比对——采样口径是下发的指令而非回执的事实，插件不会把它抄回来。
 
@@ -135,7 +139,13 @@ macro_rules! directory_works_sql {
                  SELECT DISTINCT packages.target_ref,finding.content_public_ref, \
                         EXISTS (SELECT 1 FROM linggan_material_content_detail detail \
                                 WHERE detail.content_public_ref=finding.content_public_ref) \
-                            AS has_detail \
+                            AS has_detail, \
+                        -- 人确认过「这篇在平台上已经没了」。它仍然留在目录里——博主当时
+                        -- 确实发过——只是不再计入待补齐。
+                        EXISTS (SELECT 1 FROM collection_material_retirement retired \
+                                WHERE retired.target_ref=packages.target_ref \
+                                  AND retired.content_public_ref=finding.content_public_ref) \
+                            AS is_retired \
                  FROM ledger_directory_packages packages \
                  JOIN linggan_material_discovery_finding finding \
                    ON finding.package_ref=packages.package_ref \

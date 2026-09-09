@@ -195,3 +195,14 @@
   .life-chip,.life-point-visible{transition:none}
   .life-chip:active{transform:none}
 }
+
+/* 「确认这些作品已失效」：一次判断，列出对象再确认。它不是一个可以顺手点掉的按钮——
+ * 每一项都带标题与平台 id，人是照着这些去平台上核对的。 */
+.c-dw-retire{margin-top:var(--lgi-space-4);padding:var(--lgi-space-4);border:1px solid var(--lgi-border);background:var(--lgi-canvas-low)}
+.c-dw-retire>b{display:block;color:var(--lgi-ink);font-size:var(--lgi-text-body);font-weight:700}
+.c-dw-retire>p{margin:var(--lgi-space-2) 0 0;color:var(--lgi-body);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+.c-dw-retire ul{margin:var(--lgi-space-3) 0;padding:0;list-style:none;display:grid;gap:var(--lgi-space-2)}
+.c-dw-retire label{display:flex;align-items:baseline;gap:var(--lgi-space-2);min-width:0;cursor:pointer}
+.c-dw-retire label input{flex:0 0 auto;inline-size:16px;block-size:16px;margin:0;accent-color:var(--lgi-signal-ink);cursor:pointer}
+.c-dw-retire label b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:600}
+.c-dw-retire label span{flex:0 0 auto;color:var(--lgi-muted);font:400 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono)}

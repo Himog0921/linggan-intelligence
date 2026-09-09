@@ -40,7 +40,7 @@ WITH orders AS (
  JOIN collection_work_order_lease_task lease_task USING(lease_ref)
  JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id
  WHERE lease_task.execution_state='blocked' AND NULLIF(task.task_spec #>> '{target,contentExternalId}','') IS NOT NULL
-   AND NOT EXISTS (SELECT 1 FROM linggan_material_content content JOIN directory_work detail ON detail.content_public_ref=content.public_ref AND detail.has_detail WHERE content.content_external_id=task.task_spec #>> '{target,contentExternalId}')
+   AND NOT EXISTS (SELECT 1 FROM linggan_material_content content JOIN directory_work detail ON detail.content_public_ref=content.public_ref AND (detail.has_detail OR detail.is_retired) WHERE content.content_external_id=task.task_spec #>> '{target,contentExternalId}')
 ), ready AS (
  SELECT EXISTS(SELECT 1 FROM records CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(records.coverage->'layers')='array' THEN records.coverage->'layers' ELSE '[]'::jsonb END) layer
   WHERE records.package_kind='profile_discovery'

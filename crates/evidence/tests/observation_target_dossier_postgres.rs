@@ -15,8 +15,8 @@ use linggan_evidence::{
     bind_observation_account, check_in_installation, decide_dispatch, grant_authorization,
     list_targets, open_claim_window, read_archive_completeness, read_creator_lifecycle,
     read_target, register_station, report_account_eligibility, request_admit_and_lease,
-    request_progressive_archive_and_lease, run_progressive_archives, set_station_accepting,
-    start_producer_attempt, submit_producer_package,
+    request_progressive_archive_and_lease, retire_materials, run_progressive_archives,
+    set_station_accepting, start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use std::time::Duration;
@@ -184,6 +184,59 @@ async fn clean_200_work_progressive_root_establishes_the_bounded_creator_baselin
         state, "archived",
         "a clean, explicitly bounded 200-Work directory is established without claiming the platform surface ended",
     );
+}
+
+/// 人确认「这篇在平台上没了」之后，作品仍留在目录里，只是不再计入待补齐。
+///
+/// 抹掉分母会让「档案完成」建立在一个修饰过的数字上——这个博主当时确实发过这几篇。
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn a_retired_work_stays_in_the_directory_and_leaves_the_pending_count() {
+    let database = proof_database("dossier_material_retirement").await;
+    let installation = ready_installation(&database, "dossier-retirement").await;
+    let target_ref = seed_creator_target(&database, "creator-retirement").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+    request_progressive_archive_and_lease(&database, target_ref, "建立创作者档案", "person", 30)
+        .await
+        .unwrap();
+    complete_progressive_root_with_partial_directory(&database, &installation, 31, "surface_ended")
+        .await;
+
+    let before = read_archive_completeness(&database, "xhs").await.unwrap();
+    let before = before.get("creator-retirement").unwrap();
+    assert_eq!((before.works_listed, before.details_captured), (31, 0));
+    assert_eq!(before.retired_works, 0);
+
+    let gone: Uuid = sqlx::query_scalar(
+        "SELECT finding.content_public_ref FROM linggan_material_discovery_finding finding          ORDER BY finding.content_public_ref LIMIT 1",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let written = retire_materials(&database, target_ref, &[gone], "page_gone")
+        .await
+        .unwrap();
+    assert_eq!(written, 1);
+
+    let after = read_archive_completeness(&database, "xhs").await.unwrap();
+    let after = after.get("creator-retirement").unwrap();
+    assert_eq!(
+        after.works_listed, 31,
+        "确认失效不改写目录：这个博主当时确实发过这一篇"
+    );
+    assert_eq!(after.details_captured, 0, "确认失效不是取得详情");
+    assert_eq!(after.retired_works, 1);
+
+    // 再点一次是同一个结论，不该变成第二条事实。
+    let again = retire_materials(&database, target_ref, &[gone], "page_gone")
+        .await
+        .unwrap();
+    assert_eq!(again, 0);
+    let rows: i64 = sqlx::query_scalar("SELECT count(*) FROM collection_material_retirement")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(rows, 1);
 }
 
 #[tokio::test]

@@ -73,17 +73,18 @@ use linggan_evidence::{
     ingest_discovery_package, issue_work_order_lease, list_targets, list_targets_in_state,
     local_discovery_schema_is_ready, local_producer_schema_is_ready,
     media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
-    producer_runtime_schema_is_ready, read_archive_completeness, read_collection_task_timeline,
-    read_creator_directory, read_creator_lifecycle, read_discovery_library, read_keyword_hits,
-    read_media_upload_session, read_runtime_capacity, read_runtime_library,
-    read_scheduler_heartbeat, read_station_capabilities, read_station_overview, read_target,
-    read_target_avatars, read_target_inspector, read_target_observation_summaries,
-    record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
-    register_station, release_media_upload_finalize, rename_station, request_and_admit,
-    request_and_admit_material_targets, request_progressive_archive, retire_station,
-    set_group_for_many, set_station_accepting, start_local_attempt, start_producer_attempt,
-    station_schema_is_ready, store_pending_target, submit_local_package, submit_producer_package,
-    sync_target_from_author_profile,
+    producer_runtime_schema_is_ready, read_archive_completeness, read_blocked_materials,
+    read_collection_task_timeline, read_creator_directory, read_creator_lifecycle,
+    read_discovery_library, read_keyword_hits, read_media_upload_session, read_runtime_capacity,
+    read_runtime_library, read_scheduler_heartbeat, read_station_capabilities,
+    read_station_overview, read_target, read_target_avatars, read_target_inspector,
+    read_target_observation_summaries, record_media_acquisition_failure,
+    record_media_download_failure, record_media_upload_chunk, register_station,
+    release_media_upload_finalize, rename_station, request_and_admit,
+    request_and_admit_material_targets, request_progressive_archive, retire_materials,
+    retire_station, set_group_for_many, set_station_accepting, start_local_attempt,
+    start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
+    submit_producer_package, sync_target_from_author_profile,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -342,6 +343,10 @@ fn router(state: LocalWebState) -> Router {
         .route(
             "/collection/targets/archive",
             post(collection_target_deep_archive),
+        )
+        .route(
+            "/collection/targets/retire-materials",
+            post(collection_retire_materials),
         )
         .route("/collection/targets/batch", post(collection_targets_batch))
         .route("/collection/operations", get(collection_operations))
@@ -2596,6 +2601,17 @@ async fn collection_targets(
     // The selected target lookup is independent from the list lookup. A filtered or failed
     // list must not erase a target that was read successfully, and an unreadable target must
     // not be flattened into "not found".
+    // 只有真的打开了某个目标才去读它的待判断作品：列表页每次渲染都读一遍，等于为一个
+    // 多数时候不显示的区块付一次查询。读不到就当作没有待判断项——那时不渲染确认入口，
+    // 而不是把「读不到」渲染成「没问题」。
+    let retirable = match drawer_target.as_ref() {
+        Ok(Some(target)) if target.target_kind == "creator" => {
+            read_blocked_materials(database, target.target_ref)
+                .await
+                .unwrap_or_default()
+        }
+        _ => Vec::new(),
+    };
     let drawer = match drawer_target.as_ref() {
         Ok(target) => target_drawer::render_with_catalog_view(
             target.as_ref(),
@@ -2642,6 +2658,7 @@ async fn collection_targets(
             params.catalog_query.as_deref(),
             params.catalog_filter.as_deref(),
             selected_lifecycle_work.as_deref(),
+            &retirable,
             list_context,
         ),
         Err(()) => {
@@ -3691,6 +3708,85 @@ fn target_archive_return_path(form: &TargetArchiveForm, error: Option<&str>) -> 
         pairs.push(format!("error={error}"));
     }
     format!("/collection/targets?{}#target-archive", pairs.join("&"))
+}
+
+/// COLLECTION-001 · 人确认一批作品在平台上已经不存在了。
+///
+/// 手工解析表单而不是用 `Form<T>`：`serde_urlencoded` 不支持把同名字段收成数组（已知限制，
+/// 不是用法问题），而勾选框正是靠重复的 `content_public_ref` 表达「选了哪几篇」。批量入口
+/// 已经因为同一个原因手工解析，这里沿用同一套做法而不是为它引一个新依赖。
+///
+/// 一次判断只写一条结论：不删作品、不改那次读取失败、不触发任何采集。
+async fn collection_retire_materials(State(state): State<LocalWebState>, body: Bytes) -> Redirect {
+    let mut target_ref: Option<uuid::Uuid> = None;
+    let mut contents: Vec<uuid::Uuid> = Vec::new();
+    let mut return_filter: Option<String> = None;
+    let mut return_sort: Option<String> = None;
+    for (key, value) in parse_form_pairs(&body) {
+        match key.as_str() {
+            "row_target_ref" => target_ref = uuid::Uuid::parse_str(&value).ok(),
+            "content_public_ref" => {
+                if let Ok(parsed) = uuid::Uuid::parse_str(&value) {
+                    contents.push(parsed);
+                }
+            }
+            "return_filter" => return_filter = Some(value),
+            "return_sort" => return_sort = Some(value),
+            _ => {}
+        }
+    }
+    let Some(target_ref) = target_ref else {
+        return Redirect::to("/collection/targets?error=material_retirement_invalid");
+    };
+    let form = TargetArchiveForm {
+        row_target_ref: target_ref,
+        return_filter,
+        return_sort,
+    };
+    let Some(database) = state.database.database() else {
+        return Redirect::to(&target_retire_return_path(
+            &form,
+            Some("read_model_not_connected"),
+        ));
+    };
+    if contents.is_empty() {
+        // 一篇都没勾就提交，是「什么都没选」而不是「全部确认」。默默当成全选会让人在
+        // 一次误点里失去三个判断。
+        return Redirect::to(&target_retire_return_path(
+            &form,
+            Some("material_retirement_empty"),
+        ));
+    }
+    match retire_materials(database, target_ref, &contents, "page_gone").await {
+        Ok(0) => Redirect::to(&target_retire_return_path(
+            &form,
+            Some("material_retirement_none"),
+        )),
+        Ok(_) => Redirect::to(&target_retire_return_path(
+            &form,
+            Some("material_retirement_done"),
+        )),
+        Err(_) => Redirect::to(&target_retire_return_path(
+            &form,
+            Some("material_retirement_failed"),
+        )),
+    }
+}
+
+/// 回到抽屉里发起这次判断的那一段，而不是回到列表顶部——人做完一个决定要看到它的结果。
+fn target_retire_return_path(form: &TargetArchiveForm, error: Option<&str>) -> String {
+    let mut pairs = Vec::new();
+    if let Some(filter @ ("creator" | "keyword" | "archiving" | "monitoring")) =
+        form.return_filter.as_deref()
+    {
+        pairs.push(format!("filter={filter}"));
+    }
+    pairs.push(format!("drawer={}", form.row_target_ref));
+    pairs.push("dtab=overview".to_owned());
+    if let Some(error) = error {
+        pairs.push(format!("error={error}"));
+    }
+    format!("/collection/targets?{}#archive-problems", pairs.join("&"))
 }
 
 /// COLLECTION-001 · 切换一个观察目标的巡检开关。
