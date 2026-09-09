@@ -6,6 +6,17 @@
 > 事实来源: 本机实际检查、已确认项目边界和完成计划
 > 冲突时以谁为准: 真实运行结果、ACCEPTED ADR 与用户最新确认
 
+### CI-AUTO-004 · 本机发布回执（2026-09-09）
+
+- Mog授权提交、推送、合并及刷新3000。PR #210已合并，代码revision为 `23bce3833cb3198934afa117fd40f634bda2b83c`；合入main新增采集/证据库修复后Rust单元84、API/worker编译、治理检查通过。
+- 已生成0053迁移前的加密备份并校验解密与archive目录；0053–0060八项迁移应用成功，实际台账SHA256全部与仓库文件一致。未修改研究开关或额度。
+- 旧worker无drain协议，本次按明确维护授权走一次bootstrap：停止前后running invocation均0，许可为no_inflight_bootstrap，未伪称取得旧worker drain回执。新worker已装入PID绑定drain与90秒退出窗口。
+- 首次发布三个PID为API41214、worker41224、media41235，cwd及executable均指向runtime-main，revision23bce38；3000为loopback监听，health database/schema READY、scheduler running。后续文档回执同步仍会更换PID，以现场核验为准。
+- runtime-main内CPython3.14.5与带哈希锁定wheel已安装，comment-semantics runtime自检通过；没有用开发工作树venv替代运行依赖。
+- Chrome原有3000证据库已刷新，再进入评论研究，真实加载四视图/研究设置/自动研究覆盖；当前范围1613条原声、144篇作品。自动研究仍关闭、revision0；模型调用保持76（成功25、失败51），无running及部署新建调用。页面加载证明不等于真实语义准确率。
+- 原声10万合成样本P95591ms未过500ms的已知验收限制仍保留；不以发布替代性能/模型质量/Mog业务验收。
+- 合并后的交付工作树已移除，合成容量报告按登记路径保留在canonical的artifacts/private/comment-semantics。源码在main；本回执替代先前“未提交/未迁移/3000未更新”的阶段描述。
+
 ### CI-AUTO-004 · 评论自动研究（代码与功能验证完成，性能部分未达标，未发布）
 
 Mog 明确要求完整落实《重构评论研究流程》最后决策，由 subagent 实施、root 先审查并落盘完整计划。基线 `829fe22`，独立 `codex/comment-auto-research-v1` / `.worktrees/comment-auto-research-v1`。当前已读取24节及7场景、完成运行/语义/UI三路源码审查，实施入口为[主计划](plans/active/ci-auto-004-comment-auto-research.md)、[执行合同](plans/active/ci-auto-004-execution-contracts.md)、[UI清单](design/changes/ci-auto-004-ui-change-manifest.md)。

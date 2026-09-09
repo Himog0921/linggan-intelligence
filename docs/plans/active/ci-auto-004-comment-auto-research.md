@@ -187,3 +187,15 @@
 - 旧Task B失败实际由共享embedding接口增加空 `rejected` 字段触发严格旧校验器误拒绝；仅兼容空列表，非空拒绝、缺失/null向量、错维度与其他未知字段仍拒绝。自动研究仍走原子组织，不恢复旧Task B后台主路径。
 - V5回归明确“唯一原子的字段非法→all_fields_rejected”，同时要求精确字段诊断和相邻评论接纳；不是将非法原子改成成功。
 - 功能集中审核至此收口；只修实证失败，没有增加新产品对象或人工质检环节。性能未过项、真实质量和发布层保持上表状态。工作树未提交，不能把本记录当发布回执。
+
+
+### CI-AUTO-004 · 本机发布回执（2026-09-09）
+
+- Mog授权提交、推送、合并及刷新3000。PR #210已合并，代码revision为 `23bce3833cb3198934afa117fd40f634bda2b83c`；合入main新增采集/证据库修复后Rust单元84、API/worker编译、治理检查通过。
+- 已生成0053迁移前的加密备份并校验解密与archive目录；0053–0060八项迁移应用成功，实际台账SHA256全部与仓库文件一致。未修改研究开关或额度。
+- 旧worker无drain协议，本次按明确维护授权走一次bootstrap：停止前后running invocation均0，许可为no_inflight_bootstrap，未伪称取得旧worker drain回执。新worker已装入PID绑定drain与90秒退出窗口。
+- 首次发布三个PID为API41214、worker41224、media41235，cwd及executable均指向runtime-main，revision23bce38；3000为loopback监听，health database/schema READY、scheduler running。后续文档回执同步仍会更换PID，以现场核验为准。
+- runtime-main内CPython3.14.5与带哈希锁定wheel已安装，comment-semantics runtime自检通过；没有用开发工作树venv替代运行依赖。
+- Chrome原有3000证据库已刷新，再进入评论研究，真实加载四视图/研究设置/自动研究覆盖；当前范围1613条原声、144篇作品。自动研究仍关闭、revision0；模型调用保持76（成功25、失败51），无running及部署新建调用。页面加载证明不等于真实语义准确率。
+- 原声10万合成样本P95591ms未过500ms的已知验收限制仍保留；不以发布替代性能/模型质量/Mog业务验收。
+- 合并后的交付工作树已移除，合成容量报告按登记路径保留在canonical的artifacts/private/comment-semantics。源码在main；本回执替代先前“未提交/未迁移/3000未更新”的阶段描述。
