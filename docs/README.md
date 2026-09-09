@@ -1,7 +1,7 @@
 # 文档总索引
 
 > 状态: 权威当前
-> 最后核对: 2026-09-08
+> 最后核对: 2026-09-09
 > 适用范围: 全仓库文档导航、权威状态与渐进式披露
 > 事实来源: 当前 Git 文件树、`AGENTS.md` 与文档状态头
 > 冲突时以谁为准: `AGENTS.md` 和真实代码、合同、测试、运行结果
@@ -19,10 +19,12 @@
 
 | 文档 | 状态 | 用途 |
 |---|---|---|
-| [plans/active/ci-auto-004-comment-auto-research.md](plans/active/ci-auto-004-comment-auto-research.md) | 活跃计划 | 评论自动研究最新24节决定的唯一推进入口、P0–P5覆盖和主线审查 |
-| [plans/active/ci-auto-004-execution-contracts.md](plans/active/ci-auto-004-execution-contracts.md) | 活跃计划 | 已实施P0–P5的数据/API合同及A01–A24验收；当前证据及性能未过项见主计划 |
-| [design/changes/ci-auto-004-ui-change-manifest.md](design/changes/ci-auto-004-ui-change-manifest.md) | 活跃计划 | 自动研究用户路径、四张UI地图与U01–U08验收 |
-| [data-contracts/comment-research-automation.md](data-contracts/comment-research-automation.md) | 权威当前；CI-AUTO-003基线 | 已有自动清洗、分析复用、问题与变化合同；最新目标差异见CI-AUTO-004 |
+| [plans/active/comment-research-reset-001.md](plans/active/comment-research-reset-001.md) | 活跃计划；唯一未来入口 | Issue #213：开发期清空旧研究派生结果、删除 Task B/P4，重建唯一评论研究语义内核 |
+| [decisions/0003-comment-research-single-semantic-kernel.md](decisions/0003-comment-research-single-semantic-kernel.md) | 权威当前 | 旧评论语义路径的退役、可继承基础能力和新内核的长期边界 |
+| [archive/ci-auto-004-comment-auto-research.md](archive/ci-auto-004-comment-auto-research.md) | 历史归档 | 既有 P0–P5 与本机发布证据；其未来语义、聚类、读取和页面路径已被 COMMENT-RESEARCH-RESET-001 替代 |
+| [archive/ci-auto-004-execution-contracts.md](archive/ci-auto-004-execution-contracts.md) | 历史归档 | 既有数据/API/验收证据；不再规定新评论研究内核 |
+| [design/changes/ci-auto-004-ui-change-manifest.md](design/changes/ci-auto-004-ui-change-manifest.md) | 历史实施记录 | 既有 UI 状态证据；新用户路径由 COMMENT-RESEARCH-RESET-001 重新定义 |
+| [data-contracts/comment-research-automation.md](data-contracts/comment-research-automation.md) | 历史基线 | 保留自动清洗、权限、版本与调用账本基础；旧问题/向量/变化合同不再规定未来实现 |
 | [plans/active/target-inspector-performance-001.md](plans/active/target-inspector-performance-001.md) | 活跃计划 | Issue #158 目标列表、统一状态投影、检查器与作品表现实施合同 |
 | [plans/active/target-deletion-author-attribution-001.md](plans/active/target-deletion-author-attribution-001.md) | 活跃计划 | Issue #214 安全撤回观察目标、独立作者归属 projection 与本机发布边界 |
 | [design/changes/target-deletion-author-attribution-001-ui-change-manifest.md](design/changes/target-deletion-author-attribution-001-ui-change-manifest.md) | 活跃计划 | Issue #214 的 Targets 行级停止/恢复、删除确认、保留事实与回执清单 |
@@ -34,10 +36,10 @@
 | [design/changes/model-pi-001-ui-change-manifest.md](design/changes/model-pi-001-ui-change-manifest.md) | 权威当前；交付分支 | 模型设置及个人菜单的授权、共享接缝和验证矩阵 |
 | [design/acceptance/model-pi-001-acceptance.md](design/acceptance/model-pi-001-acceptance.md) | 一次性报告 | 真实 SDK/隔离 PG/HTTP/Keychain 与未证实层 |
 | [runbooks/model-pi-runtime.md](runbooks/model-pi-runtime.md) | 权威当前；交付分支 | 固定 Node/lock、worker、隔离预览与真实试验前提 |
-| [plans/active/comment-research-001.md](plans/active/comment-research-001.md) | 活跃计划 | Issue #167 评论研究 A/B/C 的首包实施合同与明确模型缺口 |
-| [pages/comment-research.md](pages/comment-research.md) | 权威当前；交付分支 | 原声、问题分组、语料资产、每日研究及已存查询的用户语义 |
-| [design/pages/comment-research-page.md](design/pages/comment-research-page.md) | 权威当前；交付分支 | 评论研究的 L1 Corpus Explorer 规格与状态/交互边界 |
-| [design/changes/comment-research-001-ui-change-manifest.md](design/changes/comment-research-001-ui-change-manifest.md) | 权威当前；交付分支 | 评论研究四视图、共享导航和内部研究权限的 UI 变更清单 |
+| [archive/comment-research-001.md](archive/comment-research-001.md) | 历史归档 | Issue #167 的首包与模型接入证据；后续评论研究架构由 COMMENT-RESEARCH-RESET-001 规定 |
+| [pages/comment-research.md](pages/comment-research.md) | 历史实施记录 | 旧评论研究的页面语义与入口；后续用户结果由 COMMENT-RESEARCH-RESET-001 定义 |
+| [design/pages/comment-research-page.md](design/pages/comment-research-page.md) | 历史归档 | Issue #167 的 L1 Corpus Explorer 规格；不再规定新评论研究页面 |
+| [design/changes/comment-research-001-ui-change-manifest.md](design/changes/comment-research-001-ui-change-manifest.md) | 历史归档 | Issue #167 的 UI 变更与验收边界；后续 UI 由 COMMENT-RESEARCH-RESET-001 定义 |
 | [design/acceptance/comment-research-001-acceptance.md](design/acceptance/comment-research-001-acceptance.md) | 一次性报告 | 本包自动、隔离 PostgreSQL/API/UI 与真实模型的分层验收记录 |
 | [`current-state.md`](current-state.md) | 权威当前 | 当前阶段、事项队列和决策缺口 |
 | [`development-stage-tracker.md`](development-stage-tracker.md) | 权威当前 | 从开发基线到真实运行与业务验收的全项目阶段总表、阶段证据和 Mog 跟进入口 |
@@ -240,9 +242,9 @@
 
 - [评论语料与每日研究 V1](plans/active/comment-daily-001.md)：当前授权交付包，紧凑原声表格、清洗、按作品分析与每日研究。
 
-- [评论情报实施合同](data-contracts/comment-intelligence-v1.md)：权威当前，CI-20260907-V1 用户指定完整合同。
-- [评论情报执行与交接](plans/active/comment-intelligence-v1.md)：活跃计划，T0–T8、真实映射、文件所有权和验收记录。
+- [评论情报实施合同](data-contracts/comment-intelligence-v1.md)：历史归档，CI-20260907-V1 的实施合同与证据；未来架构由 COMMENT-RESEARCH-RESET-001 替代。
+- [评论情报执行与交接](archive/comment-intelligence-v1.md)：历史归档，T0–T8、真实映射、文件所有权和验收记录；不再作为未来交付入口。
 
 - [评论情报验收矩阵](design/acceptance/comment-intelligence-v1-acceptance.md)：一次性报告，84项逐条映射、实际自动证明和未验证层。
-- [评论情报 UI 变更清单](design/changes/comment-intelligence-v1-ui-change-manifest.md)：本包四视角、范围、状态、交互与视觉验收边界。
+- [评论情报 UI 变更清单](design/changes/comment-intelligence-v1-ui-change-manifest.md)：历史归档，四视角、范围、状态、交互与视觉验收边界。
 - [评论情报离线评测合同](audits/comment-intelligence-evaluation-contract.md)：本地 JSONL、B0/B1/B2、真实留出集与高级规则门槛。

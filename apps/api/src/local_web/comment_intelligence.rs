@@ -201,6 +201,8 @@ mod tests {
             "/api/local/comment-intelligence/actions",
             "/api/local/comment-intelligence/prepare",
             "/api/local/comment-intelligence/run",
+            "/api/local/comment-research/policy",
+            "/api/local/comment-research/runs",
         ] {
             let response = app()
                 .oneshot(

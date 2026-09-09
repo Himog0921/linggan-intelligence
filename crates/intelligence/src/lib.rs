@@ -31,11 +31,12 @@ pub mod model_worker_drain;
 
 pub mod model_settings_read;
 
-mod comment_cleaning;
+pub(crate) mod comment_cleaning;
 pub mod comment_daily;
 mod comment_daily_read;
 mod comment_daily_runner;
 mod comment_packet;
+pub mod comment_research_kernel;
 
 pub mod comment_intelligence;
 pub mod comment_intelligence_actions;

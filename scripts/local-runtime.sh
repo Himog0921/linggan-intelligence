@@ -233,6 +233,7 @@ migrate() {
   apply_migration_once "0061_material_retirement" "$project_root/database/migrations/0061_material_retirement.sql"
   apply_migration_once "0062_human_moment" "$project_root/database/migrations/0062_human_moment.sql"
   apply_migration_once "0063_content_author_attribution" "$project_root/database/migrations/0063_content_author_attribution.sql"
+  apply_migration_once "0064_comment_research_kernel" "$project_root/database/migrations/0064_comment_research_kernel.sql"
 }
 
 case "$command_name" in

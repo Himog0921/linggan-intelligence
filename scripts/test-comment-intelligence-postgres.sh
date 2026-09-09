@@ -59,6 +59,7 @@ fi
 
 cargo test -p linggan-intelligence --test embedding_settings_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test comment_cleaning_v2_postgres --locked -- --ignored --nocapture
+cargo test -p linggan-intelligence --test comment_research_kernel_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test comment_problem_relations_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test comment_preflight_postgres --locked -- --ignored --nocapture
 cargo test -p linggan-intelligence --test comment_intelligence_query_postgres --locked -- --ignored --nocapture

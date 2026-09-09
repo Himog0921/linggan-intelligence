@@ -1,10 +1,12 @@
 # CI-AUTO-004 · 评论自动研究实施主计划
 
-> 状态: 活跃计划
+> 状态: 历史归档
 > 最后核对: 2026-09-09
 > 适用范围: 评论自动研究 P0–P5 的完整交付；root 协调，subagent 实施
 > 事实来源: Mog 本轮指令、《重构评论研究流程》最后决策全文 24 节及 7 个场景、main@829fe22 当前源码与三路只读审查
 > 冲突时以谁为准: 用户最新决定；目标要求不冒充当前实现，运行与质量结论须有对应证据
+
+> 替代说明（2026-09-09）：本文件继续保留 CI-AUTO-004 的实现、测试、发布和运行事实；但 Mog 已决定在开发期清空旧研究派生结果、删除 Task B 与 P4 语义组织、建立唯一新内核。未来评论研究的语义、读取、页面和删除策略以 [COMMENT-RESEARCH-RESET-001](../plans/active/comment-research-reset-001.md) 与 [DEC-0003](../decisions/0003-comment-research-single-semantic-kernel.md) 为准。
 
 ## 1. 唯一入口与交付结果
 
@@ -15,7 +17,7 @@
 - 实施基线：`829fe22e60a5cfa60a0e130ae58d87f79fb3cba3`。
 - 独立分支：`codex/comment-auto-research-v1`；工作树：`.worktrees/comment-auto-research-v1`。
 - 单一交付编号 CI-AUTO-004；P0–P5 是内部依赖阶段，不产生六个新产品或六次用户审批。
-- 本计划管覆盖、顺序与完成证据；[执行合同](ci-auto-004-execution-contracts.md)管数据、运行、算法和用例；[UI 变更清单](../../design/changes/ci-auto-004-ui-change-manifest.md)管页面与状态表达。
+- 本计划管覆盖、顺序与完成证据；[执行合同](ci-auto-004-execution-contracts.md)管数据、运行、算法和用例；[UI 变更清单](../design/changes/ci-auto-004-ui-change-manifest.md)管页面与状态表达。
 - 计划审查已完成。Mog随后明确在当前对话实施，所有执行subagent使用GPT-5.6 Terra / xhigh；代码逐阶段执行并更新下方状态，计划出现不代表实现完成。
 
 ## 2. 主线审查裁定
@@ -178,7 +180,7 @@
 | A23 升级兼容 | PG按实际迁移前缀和0053–0060顺序执行；v4不可改写；共享迁移未执行 |
 | A24 Topic边界 | 组织PG正式Topic导入→全部当前原声派生关联→撤回，不改定义与正式成员 |
 
-运行时依赖及发布前检查见[本机部署手册](../../runbooks/local-runtime-deployment.md)。本包任何程序检查均不授予研究准确率或平台代表性。
+运行时依赖及发布前检查见[本机部署手册](../runbooks/local-runtime-deployment.md)。本包任何程序检查均不授予研究准确率或平台代表性。
 
 ### 最终功能回执（2026-09-09）
 

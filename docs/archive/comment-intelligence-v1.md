@@ -1,16 +1,18 @@
-> 状态: 活跃计划
+> 状态: 历史归档
 > 最后核对: 2026-09-08
 > 适用范围: CI-20260907-V1 完整评论研究交付
 > 事实来源: Mog 指定实施包，manifest 已验证
 > 冲突时以谁为准: 用户最新决定；现状以真实代码与运行证据为准
 
+> 替代说明（2026-09-09）：本文件保留 CI-20260907-V1 的实施、发布与验收历史。后续代码、迁移、读模型与 UI 不再按本计划推进；唯一未来交付见 [COMMENT-RESEARCH-RESET-001](../plans/active/comment-research-reset-001.md)。
+
 # CI-20260907-V1 实施与交接
 
-2026-09-08之后评论自动研究的最新执行入口为[CI-AUTO-004](ci-auto-004-comment-auto-research.md)。本文件保留此前实施/发布证据；最新无日常人工边界维护、自动回归与规模化原子聚类目标以新计划覆盖表为准，旧条目不是新功能已完成的证明。
+本文件保留此前实施/发布证据；CI-AUTO-004 及其后续路线均已被 [COMMENT-RESEARCH-RESET-001](../plans/active/comment-research-reset-001.md) 替代，旧条目不是新功能已完成的证明。
 
 用户授权：按完整实施包落实代码与隔离验收。真实外发、自动启用、共享迁移、合并和部署保持分别记录。
 
-来源合同：[唯一合同](../../data-contracts/comment-intelligence-v1.md)；外部原包 `/Users/moglenny/Downloads/comment-intelligence-v1`，13 项 SHA256 全部一致。蓝图不是生产数据。
+来源合同：[唯一合同](../data-contracts/comment-intelligence-v1.md)；外部原包 `/Users/moglenny/Downloads/comment-intelligence-v1`，13 项 SHA256 全部一致。蓝图不是生产数据。
 
 ### CI-20260907-V1 本机发布回执（2026-09-08）
 
@@ -60,7 +62,7 @@
 - `scripts/test-model-pi-postgres.sh`：新日批与旧Pi/评论资产/材料兼容证明。旧模型执行器测试显式使用0047之前的schema，新schema关闭旧入口另有升级回归。
 - `scripts/evaluate-comment-intelligence.py`：读取自包含JSONL，核对真实/合成、作品划分、三模式、精确引用、误归并/未归并及群体审查；不会因合成分数获得真实资格。
 
-本轮自动结果、84项映射、基线失败与未验证项以 [验收记录](../../design/acceptance/comment-intelligence-v1-acceptance.md) 为准。不要把“对应代码存在”解释成全部84场景已通过。
+本轮自动结果、84项映射、基线失败与未验证项以 [验收记录](../design/acceptance/comment-intelligence-v1-acceptance.md) 为准。不要把“对应代码存在”解释成全部84场景已通过。
 
 ## 下一次执行的明确入口
 
@@ -99,7 +101,7 @@ CI-RUN-002 实现已收口：代码、增量 migration、输出合同/诊断、1
 
 ## CI-AUTO-003 自动化推进
 
-Mog明确授权按redesign审查后的P0–P6推进，并使用子代理。基线e4006ac，专属codex/comment-research-automation工作树。业务冲突以[自动化合同](../../data-contracts/comment-research-automation.md)为准；本节不改写历史发布事实。
+Mog明确授权按redesign审查后的P0–P6推进，并使用子代理。基线e4006ac，专属codex/comment-research-automation工作树。业务冲突以[自动化合同](../data-contracts/comment-research-automation.md)为准；本节不改写历史发布事实。
 
 | 阶段 | 实现与用户收益 | 交付状态 |
 |---|---|---|

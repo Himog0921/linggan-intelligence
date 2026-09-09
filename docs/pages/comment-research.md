@@ -1,10 +1,12 @@
 # 评论研究
 
-> 状态: 权威当前
+> 状态: 历史归档
 > 最后核对: 2026-09-07
 > 适用范围: COMMENT-DAILY-001 交付分支，承接 COMMENT-RESEARCH-001
 > 事实来源: Mog 当前会话决策、Issue #167、0039/0043 migration 与当前 Rust/API
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实代码/数据库与验证；本页不证明部署
+
+> 替代说明（2026-09-09）：本页保留 COMMENT-DAILY-001 / COMMENT-RESEARCH-001 的页面语义与历史实现事实。后续用户任务、研究输入、结果版本和四视图职责以 [COMMENT-RESEARCH-RESET-001](../plans/active/comment-research-reset-001.md) 为准。
 
 评论是语料库的基础材料。接纳、去重与当前可读资格成立后，用户直接研究，不需要手动搬运、完成全部采集或等待 AI。当前四个内部视图及查询页已接入代码。MODEL-PI-001 进一步接入 [模型与 AI 设置](model-ai-settings.md) 及真实 Pi SDK 执行链；外部供应商和真实样本效果尚未验收。
 
@@ -48,7 +50,7 @@ Pi 的提示词与解析合同随代码版本管理；本包没有引入让 Agen
 
 人工七维修订分别是场景、问题、尝试过的方法、评论者自述失败原因、情绪、期望、表达方式；每项区分来源直接表达与研究推断。人工历史追加保存，不被机器运行覆盖。当前界面展示最新人工修订及保留版本数，完整旧修订内容可从受控 API 读取。
 
-实施与验收见 [本包合同](../plans/active/comment-research-001.md) 和 [分层验收](../design/acceptance/comment-research-001-acceptance.md)。
+历史实施与验收见 [本包合同](../archive/comment-research-001.md) 和 [分层验收](../design/acceptance/comment-research-001-acceptance.md)。
 
 ## CI-20260907-V1 的替代范围
 

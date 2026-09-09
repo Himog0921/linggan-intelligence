@@ -1,10 +1,12 @@
 # CI-AUTO-004 · 分阶段执行合同与验收
 
-> 状态: 活跃计划
+> 状态: 历史归档
 > 最后核对: 2026-09-08
 > 适用范围: 主计划 P0–P5 的代码、数据库、自动计算与验证；本文件中的新增字段/模块是实施目标
 > 事实来源: 用户最后24节决策、main@829fe22源码、root与三个subagent只读审查
 > 冲突时以谁为准: 用户最新决定与实际数据不变量；尚未实现的设计不得解释为当前代码事实
+
+> 替代说明（2026-09-09）：本文件保留 CI-AUTO-004 的实施目标、测试与运行历史。旧 Task B、P4、V4/V5 adapter、旧变化与页面合同不再规定未来实现；唯一新内核见 [COMMENT-RESEARCH-RESET-001](../plans/active/comment-research-reset-001.md) 与 [DEC-0003](../decisions/0003-comment-research-single-semantic-kernel.md)。
 
 入口：[实施主计划](ci-auto-004-comment-auto-research.md)。只读取当前阶段；跨阶段依赖查本文件的接口表，不要求每个实现代理重读全对话。
 

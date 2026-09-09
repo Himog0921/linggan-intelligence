@@ -11,10 +11,13 @@ use axum::{
 use linggan_evidence::comment_research_read::*;
 use linggan_evidence::observation_domain::ObservationDomain;
 use linggan_intelligence::{
-    comment_analysis::*, comment_research::*, comment_research_management::*,
+    comment_analysis::*,
+    comment_research::*,
+    comment_research_kernel::{self as kernel, SaveResearchPolicy},
+    comment_research_management::*,
     comment_research_projection::*,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
@@ -45,6 +48,14 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route(
             "/api/local/comment-research/annotations",
             post(correct_annotation),
+        )
+        .route(
+            "/api/local/comment-research/policy",
+            post(save_research_kernel_policy),
+        )
+        .route(
+            "/api/local/comment-research/runs",
+            post(start_research_kernel_run),
         )
         .route(
             "/api/local/comment-research/assets/revisions",
@@ -157,6 +168,60 @@ async fn script() -> impl IntoResponse {
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("comment_research.js"),
     )
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StartResearchKernelRun {
+    scope: Value,
+}
+
+fn kernel_response<T: Serialize>(
+    result: Result<T, kernel::CommentResearchKernelError>,
+) -> Response {
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => {
+            let (status, code) = match error {
+                kernel::CommentResearchKernelError::InvalidPolicy
+                | kernel::CommentResearchKernelError::InvalidScope => {
+                    (StatusCode::BAD_REQUEST, "invalid_research_request")
+                }
+                kernel::CommentResearchKernelError::PolicyMissing => {
+                    (StatusCode::CONFLICT, "research_policy_missing")
+                }
+                kernel::CommentResearchKernelError::NoEligibleDerivations => {
+                    (StatusCode::CONFLICT, "no_eligible_research_comments")
+                }
+                kernel::CommentResearchKernelError::Database(_)
+                | kernel::CommentResearchKernelError::Serialization => (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "comment_research_unavailable",
+                ),
+            };
+            (status, Json(json!({"error":code}))).into_response()
+        }
+    }
+}
+
+async fn save_research_kernel_policy(
+    State(state): State<LocalWebState>,
+    Json(request): Json<SaveResearchPolicy>,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return unavailable();
+    };
+    kernel_response(kernel::save_active_policy(database, request).await)
+}
+
+async fn start_research_kernel_run(
+    State(state): State<LocalWebState>,
+    Json(request): Json<StartResearchKernelRun>,
+) -> Response {
+    let Some(database) = state.database.database() else {
+        return unavailable();
+    };
+    kernel_response(kernel::start_run(database, request.scope).await)
 }
 
 #[derive(Deserialize)]
