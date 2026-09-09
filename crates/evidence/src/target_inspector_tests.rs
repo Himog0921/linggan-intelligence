@@ -7,6 +7,7 @@ fn facts() -> ArchiveFacts {
         profiles: 1,
         works: 42,
         details: 42,
+        retired_works: 0,
         quarantined: 0,
         blocked_details: 0,
         standard_directory_ready: true,

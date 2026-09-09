@@ -1658,6 +1658,17 @@ pub async fn apply_monitor_rule_command(
         let schedule_slot_seconds = automatic_enabled
             .then(|| monitor_schedule_slot_seconds(command.target_ref, interval_seconds))
             .unwrap_or(0);
+        // `monitoring` requires an enabled rule in the database, so pause/resume cannot first
+        // write the rule flag and then change the lifecycle in a second statement. Apply the
+        // coupled state in one UPDATE, then append its transition record afterwards.
+        let repairing_invalid_keyword_lifecycle = target_kind == "keyword"
+            && matches!(lifecycle_state.as_str(), "archiving" | "archived");
+        let next_lifecycle_state = monitor_lifecycle_next_state(
+            &lifecycle_state,
+            command.kind,
+            automatic_enabled,
+            repairing_invalid_keyword_lifecycle,
+        );
         sqlx::query(
             "UPDATE collection_observation_target \
              SET active_monitor_rule_revision_ref=$2,monitoring_enabled=$3, \
@@ -1669,24 +1680,28 @@ pub async fn apply_monitor_rule_command(
                  monitor_schedule_slot_seconds=CASE WHEN $3 THEN $4 ELSE 0 END, \
                  monitor_next_run_at=CASE WHEN $3 THEN scope_001_now() + make_interval(secs => $4) \
                      ELSE NULL END, \
-                 monitor_missed_run_count=0 \
+                 monitor_missed_run_count=0, \
+                 lifecycle_state=COALESCE($5,lifecycle_state), \
+                 lifecycle_changed_at=CASE WHEN $5 IS NULL THEN lifecycle_changed_at \
+                     ELSE scope_001_now() END \
              WHERE target_ref=$1",
         )
         .bind(command.target_ref)
         .bind(applied_rule_ref)
         .bind(automatic_enabled)
         .bind(schedule_slot_seconds)
+        .bind(next_lifecycle_state)
         .execute(&mut *transaction)
         .await?;
-        apply_monitor_lifecycle_transition(
+        record_monitor_lifecycle_transition(
             &mut transaction,
             command.target_ref,
-            &target_kind,
             &lifecycle_state,
+            next_lifecycle_state,
             command.kind,
-            automatic_enabled,
             rule_revision_ref,
             command.actor,
+            repairing_invalid_keyword_lifecycle,
         )
         .await?;
     }
@@ -2201,35 +2216,19 @@ async fn copy_monitor_rule_revision(
     Ok(())
 }
 
-async fn apply_monitor_lifecycle_transition(
+async fn record_monitor_lifecycle_transition(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
-    target_kind: &str,
     lifecycle_state: &str,
+    next_state: Option<&str>,
     kind: MonitorCommandKind,
-    automatic_enabled: bool,
     rule_revision_ref: Uuid,
     actor: MonitorCommandActor,
+    repairing_invalid_keyword_lifecycle: bool,
 ) -> Result<(), sqlx::Error> {
-    let repairing_invalid_keyword_lifecycle =
-        target_kind == "keyword" && matches!(lifecycle_state, "archiving" | "archived");
-    let next_state = monitor_lifecycle_next_state(
-        lifecycle_state,
-        kind,
-        automatic_enabled,
-        repairing_invalid_keyword_lifecycle,
-    );
     let Some(next_state) = next_state else {
         return Ok(());
     };
-    sqlx::query(
-        "UPDATE collection_observation_target SET lifecycle_state=$2, \
-                lifecycle_changed_at=scope_001_now() WHERE target_ref=$1",
-    )
-    .bind(target_ref)
-    .bind(next_state)
-    .execute(&mut **transaction)
-    .await?;
     sqlx::query(
         "INSERT INTO collection_observation_target_transition \
              (transition_ref,target_ref,from_state,to_state,actor,reason_code,reason) \
@@ -2247,7 +2246,7 @@ async fn apply_monitor_lifecycle_transition(
             MonitorCommandKind::Pause => "monitor_paused",
             MonitorCommandKind::Resume => "monitor_resumed",
             MonitorCommandKind::Stop => "monitor_stopped",
-            MonitorCommandKind::SaveRule if automatic_enabled => "monitor_resumed",
+            MonitorCommandKind::SaveRule if next_state == "monitoring" => "monitor_resumed",
             MonitorCommandKind::SaveRule => "monitor_paused",
             MonitorCommandKind::ManualObserve => unreachable!(),
         }
@@ -2723,4 +2722,49 @@ mod tests {
         // Still far shorter than a real platform login, so this remains a conservative claim.
         assert_eq!(ACCOUNT_ELIGIBILITY_TTL_MINUTES, 360);
     }
+}
+
+/// 从列表上直接开关一个目标的自动巡查。
+///
+/// 版本号在服务端读，不由表单带上来。乐观并发那道关卡是为**规则编辑表单**设的——那里
+/// 你提交的是一整套字段值，用一个过期的版本号覆盖别人刚改过的设置是真实风险。而这里
+/// 只翻一个开关，不携带任何字段值，读当前版本再发命令不会覆盖任何人的编辑。
+///
+/// 它仍然走版本化命令这一条路：每次开关都留下一个新的规则版本与回执，不是裸改一个布尔
+/// 值——那条路早就因为「不能成为巡检的第二个真相源」被废弃了。
+pub async fn toggle_target_patrol(
+    database: &Database,
+    target_ref: Uuid,
+    enable: bool,
+) -> Result<MonitorRuleCommandReceipt, MonitorRuleCommandError> {
+    let current: Option<(i32,)> = sqlx::query_as(
+        "SELECT revision.revision FROM collection_monitor_rule_revision revision \
+         JOIN collection_observation_target target \
+           ON target.active_monitor_rule_revision_ref=revision.rule_revision_ref \
+         WHERE target.target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_optional(database.pool())
+    .await?;
+    let Some((expected_revision,)) = current else {
+        // 没有生效的规则版本就没有可开关的东西。这不是失败，是「先去设一条规则」。
+        return Err(MonitorRuleCommandError::UnknownTarget);
+    };
+    apply_monitor_rule_command(
+        database,
+        &MonitorRuleCommand {
+            target_ref,
+            expected_revision,
+            idempotency_key: Uuid::new_v4(),
+            kind: if enable {
+                MonitorCommandKind::Resume
+            } else {
+                MonitorCommandKind::Pause
+            },
+            actor: MonitorCommandActor::Person,
+            source: "targets_ui",
+            draft: None,
+        },
+    )
+    .await
 }
