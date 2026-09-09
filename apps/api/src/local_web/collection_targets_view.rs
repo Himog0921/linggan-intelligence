@@ -185,6 +185,32 @@ fn action_feedback_markup(error: Option<&str>) -> String {
             "未重复提交",
             "已有相同建档任务等待处理或执行中。已打开建档状态；本次没有创建第二个任务。",
         ),
+        // 成功回执与失败回执一样必须说出来：跳转回来却什么都不说，人会以为没生效而再点一次。
+        "material_retirement_done" => (
+            "c-src-feedback c-src-feedback-ok",
+            "已记下这几篇不存在了",
+            "它们仍留在作品目录里——博主当时确实发过——只是不再计入待补齐。作品若日后恢复并采到详情，会自动按已有详情算。",
+        ),
+        "material_retirement_empty" => (
+            "c-src-failure",
+            "没有完成",
+            "一篇都没有勾选。没有勾选不等于全部确认，这次没有写下任何判断。",
+        ),
+        "material_retirement_none" => (
+            "c-src-feedback c-src-feedback-warn",
+            "没有新的判断",
+            "勾选的作品此前已经确认过，或它们已经取到了详情。没有重复写入第二条记录。",
+        ),
+        "material_retirement_failed" => (
+            "c-src-failure",
+            "没有完成",
+            "这次判断没有写进去。作品目录与待补齐都没有变化，可以再试一次。",
+        ),
+        "material_retirement_invalid" => (
+            "c-src-failure",
+            "没有完成",
+            "这次提交没有说明是哪个观察目标，因此没有写下任何判断。",
+        ),
         "identity_unrecognised" => (
             "c-src-failure",
             "没有完成",
@@ -863,6 +889,7 @@ mod tests {
                 author_profile_captures: 0,
                 works_listed: 0,
                 details_captured: 0,
+                retired_works: 0,
                 quarantined: 1,
                 ..ArchiveCompleteness::default()
             },
@@ -1110,6 +1137,7 @@ mod tests {
                 author_profile_captures: 1,
                 works_listed: 12,
                 details_captured: 5,
+                retired_works: 0,
                 quarantined: 0,
                 blocked_details: 0,
                 directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Ready,

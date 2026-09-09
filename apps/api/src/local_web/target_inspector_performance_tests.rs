@@ -103,6 +103,63 @@ fn works_view_is_url_restorable_and_legacy_lifecycle_links_open_performance() {
 }
 
 #[test]
+fn blocked_materials_get_a_real_decision_instead_of_a_dead_end() {
+    use super::target_drawer::{
+        LifecycleView, TargetCatalogView, TargetDrawerTab, TargetInspectorView, TargetListContext,
+        TargetWorksView,
+    };
+    use linggan_evidence::BlockedMaterial;
+
+    let target = sample_target(31, "creator");
+    let projection = inspector_projection(
+        &target,
+        TargetInspectorExecutionState::Idle,
+        TargetInspectorAction::HandleArchiveProblems,
+        known_coverage(13, 10),
+    );
+    let retirable = [BlockedMaterial {
+        content_public_ref: uuid::Uuid::from_u128(77),
+        content_external_id: "gone-work-one".to_owned(),
+        title: Some("这篇已经被作者删了".to_owned()),
+    }];
+    let render = |retirable: &[BlockedMaterial]| {
+        super::target_drawer::render_with_catalog_view(
+            Some(&target),
+            None,
+            Some(&HashMap::new()),
+            Some(&target.target_ref.to_string()),
+            TargetDrawerTab::Overview,
+            LifecycleView::NotRead {
+                window: linggan_evidence::CreatorLifecycleWindow::Recent90Days,
+                metric: linggan_evidence::CreatorLifecycleMetric::Likes,
+            },
+            TargetInspectorView::Projection(&projection),
+            TargetWorksView::List,
+            TargetCatalogView::Unavailable,
+            None,
+            None,
+            None,
+            retirable,
+            TargetListContext::default(),
+        )
+    };
+
+    // 有待判断的作品时，「处理异常」不再只是一句陈述：它给出可以做的那个决定，
+    // 并把作品的标题与平台 id 一起摆出来——人是照着这些去平台上核对的。
+    let html = render(&retirable);
+    assert!(html.contains(r#"action="/collection/targets/retire-materials""#));
+    assert!(html.contains("确认这些作品已失效"));
+    assert!(html.contains("这篇已经被作者删了"));
+    assert!(html.contains("gone-work-one"));
+    assert!(html.contains(r#"value="00000000-0000-0000-0000-00000000004d""#));
+
+    // 没有待判断的对象就不摆按钮：请人对空气做一个决定，不是一个动作。
+    let empty = render(&[]);
+    assert!(!empty.contains("确认这些作品已失效"));
+    assert!(!empty.contains(r#"action="/collection/targets/retire-materials""#));
+}
+
+#[test]
 fn performance_view_keeps_known_zero_excludes_unknown_and_preserves_context() {
     use super::target_drawer::{
         LifecycleView, TargetCatalogView, TargetDrawerTab, TargetInspectorView, TargetListContext,
@@ -124,6 +181,7 @@ fn performance_view_keeps_known_zero_excludes_unknown_and_preserves_context() {
         None,
         None,
         None,
+        &[],
         TargetListContext {
             filter: Some("creator"),
             sort: Some("last"),
@@ -177,6 +235,7 @@ fn overview_orders_identity_system_facts_and_decision_as_four_distinct_layers() 
         None,
         None,
         None,
+        &[],
         TargetListContext::default(),
     );
 
@@ -222,6 +281,7 @@ fn queued_and_running_are_not_the_same_execution_claim() {
             None,
             None,
             None,
+            &[],
             TargetListContext::default(),
         )
     };
@@ -284,6 +344,7 @@ fn unknown_coverage_never_falls_back_to_zero() {
         None,
         None,
         None,
+        &[],
         TargetListContext::default(),
     );
 
@@ -317,6 +378,7 @@ fn unavailable_inspector_does_not_fall_back_to_a_healthy_or_empty_state() {
         None,
         None,
         None,
+        &[],
         TargetListContext::default(),
     );
 

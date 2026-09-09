@@ -230,6 +230,7 @@ migrate() {
   apply_migration_once "0058_comment_field_repair" "$project_root/database/migrations/0058_comment_field_repair.sql"
   apply_migration_once "0059_comment_replay_continuity" "$project_root/database/migrations/0059_comment_replay_continuity.sql"
   apply_migration_once "0060_comment_topic_associations" "$project_root/database/migrations/0060_comment_topic_associations.sql"
+  apply_migration_once "0061_material_retirement" "$project_root/database/migrations/0061_material_retirement.sql"
 }
 
 case "$command_name" in

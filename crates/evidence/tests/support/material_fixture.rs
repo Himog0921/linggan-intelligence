@@ -123,6 +123,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0059_comment_replay_continuity.sql"),
     include_str!("../../../../database/migrations/0060_comment_topic_associations.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0061_material_retirement.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
     "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd'), ",

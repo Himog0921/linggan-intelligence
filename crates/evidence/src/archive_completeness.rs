@@ -12,6 +12,7 @@ use crate::archive_ledger::directory_works_sql;
 use crate::directory_boundary::{directory_proven_sql, surface_scan_complete_sql};
 use linggan_storage_postgres::Database;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 /// 当前目录基线能否作为「作品目录」和「详情进度」的分母。
 ///
@@ -54,6 +55,9 @@ pub struct ArchiveCompleteness {
     /// 当前根建档中因连续页面读取失败而停止自动重试的作品详情数。它不是页面
     /// 不存在，也没有形成 Attempt、Package、Receipt 或 Evidence。
     pub blocked_details: i64,
+    /// 人已确认在平台上不存在的作品数。它们仍留在作品目录里，只是不再计入待补齐——
+    /// 抹掉分母会让「档案完成」建立在一个被修饰过的数字上。
+    pub retired_works: i64,
     /// 当前目录根的边界是否已经由受接纳 Package 证明。
     pub directory_baseline: ArchiveDirectoryBaseline,
 }
@@ -95,7 +99,7 @@ pub async fn read_archive_completeness(
     database: &Database,
     platform: &str,
 ) -> Result<HashMap<String, ArchiveCompleteness>, sqlx::Error> {
-    let rows: Vec<(String, bool, bool, bool, i64, i64, i64, i64, i64, bool)> = sqlx::query_as(
+    let rows: Vec<(String, bool, bool, bool, i64, i64, i64, i64, i64, i64, bool)> = sqlx::query_as(
         concat!(
             "WITH ranked_roots AS ( \
              SELECT target.target_ref,target.identity_key AS author_external_id, \
@@ -272,13 +276,26 @@ pub async fn read_archive_completeness(
              WHERE lease_task.execution_state='blocked' \
                AND runtime.task_spec #>> '{capabilitiesRequested,0}'='content_detail' \
                AND NULLIF(runtime.task_spec #>> '{target,contentExternalId}','') IS NOT NULL \
+               -- 人已经确认这篇在平台上没了，它就不再是待处理项。受阻记录本身保留——
+               -- 那次读取失败确实发生过——但它不该继续把整个档案标成「有问题」。
+               AND NOT EXISTS ( \
+                 SELECT 1 FROM collection_material_retirement retired \
+                 JOIN linggan_material_content content \
+                   ON content.public_ref=retired.content_public_ref \
+                 JOIN collection_observation_target target \
+                   ON target.target_ref=retired.target_ref \
+                 WHERE target.identity_key=scoped.author_external_id \
+                   AND content.content_external_id \
+                       =runtime.task_spec #>> '{target,contentExternalId}') \
              GROUP BY scoped.author_external_id \
          ), ",
             directory_works_sql!("target.platform=$1 AND target.target_kind='creator'", "true"),
             ", ledger_totals AS ( \
              SELECT target.identity_key AS author_external_id, \
                     count(*) AS works_listed, \
-                    count(*) FILTER (WHERE ledger.has_detail) AS details_captured \
+                    count(*) FILTER (WHERE ledger.has_detail) AS details_captured, \
+                    count(*) FILTER (WHERE ledger.is_retired AND NOT ledger.has_detail) \
+                        AS retired_works \
              FROM directory_work ledger \
              JOIN collection_observation_target target \
                ON target.target_ref=ledger.target_ref \
@@ -287,6 +304,7 @@ pub async fn read_archive_completeness(
          SELECT roots.author_external_id,coalesce(progress.started,false),coalesce(progress.attempted,false), \
                 coalesce(progress.work_in_progress,false),coalesce(totals.author_profile_captures,0), \
                 coalesce(ledger.works_listed,0),coalesce(ledger.details_captured,0), \
+                coalesce(ledger.retired_works,0), \
                 coalesce(totals.quarantined,0), \
                 coalesce(blocked_details.blocked_details,0), \
                 directories.package_ref IS NOT NULL \
@@ -311,6 +329,7 @@ pub async fn read_archive_completeness(
         profiles,
         works,
         details,
+        retired_works,
         quarantined,
         blocked_details,
         directory_ready,
@@ -325,6 +344,7 @@ pub async fn read_archive_completeness(
                 author_profile_captures: profiles,
                 works_listed: works,
                 details_captured: details,
+                retired_works,
                 quarantined,
                 blocked_details,
                 directory_baseline: if directory_ready {
@@ -417,4 +437,96 @@ pub async fn read_archive_completeness(
         }
     }
     Ok(totals)
+}
+
+/// 当前因连续读取失败而停在待补齐里的一篇作品，以及人做判断需要看到的东西。
+#[derive(Debug, Clone)]
+pub struct BlockedMaterial {
+    pub content_public_ref: Uuid,
+    pub content_external_id: String,
+    /// 采集时记下的标题。可能为空——那也是事实，不编一个出来。
+    pub title: Option<String>,
+}
+
+/// 读出这个目标当前**还需要人来判断**的作品。
+///
+/// 已经确认失效的不在其中：那个判断已经做过了，再列一遍等于问同一个问题两次。
+pub async fn read_blocked_materials(
+    database: &Database,
+    target_ref: Uuid,
+) -> Result<Vec<BlockedMaterial>, sqlx::Error> {
+    let rows: Vec<(Uuid, String, Option<String>)> = sqlx::query_as(
+        "SELECT DISTINCT content.public_ref,content.content_external_id, \
+                (SELECT finding.title FROM linggan_material_discovery_finding finding \
+                 WHERE finding.content_public_ref=content.public_ref \
+                   AND NULLIF(btrim(finding.title),'') IS NOT NULL \
+                 ORDER BY finding.created_at DESC LIMIT 1) \
+         FROM collection_work_order work_order \
+         JOIN collection_work_order_lease lease USING(work_order_ref) \
+         JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+         JOIN linggan_runtime_task runtime ON runtime.task_id=lease_task.task_id \
+         JOIN linggan_material_content content \
+           ON content.content_external_id=runtime.task_spec #>> '{target,contentExternalId}' \
+         WHERE work_order.target_ref=$1 \
+           AND lease_task.execution_state='blocked' \
+           AND runtime.task_spec #>> '{capabilitiesRequested,0}'='content_detail' \
+           AND NOT EXISTS (SELECT 1 FROM linggan_material_content_detail detail \
+                           WHERE detail.content_public_ref=content.public_ref) \
+           AND NOT EXISTS (SELECT 1 FROM collection_material_retirement retired \
+                           WHERE retired.target_ref=$1 \
+                             AND retired.content_public_ref=content.public_ref) \
+         ORDER BY content.content_external_id",
+    )
+    .bind(target_ref)
+    .fetch_all(database.pool())
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(
+            |(content_public_ref, content_external_id, title)| BlockedMaterial {
+                content_public_ref,
+                content_external_id,
+                title,
+            },
+        )
+        .collect())
+}
+
+/// 人确认这几篇在平台上已经不存在了。
+///
+/// **只记结论，不动作品，也不动那次失败。**作品继续留在目录里（博主当时确实发过），受阻
+/// 记录继续留着（那次读取失败确实发生过）——这里新增的是第三件事：有人看过，它没了。
+///
+/// 重复确认是同一个结论，靠唯一索引收敛成一条，不报错也不写第二条：人多点一次不该变成
+/// 两个事实。
+///
+/// 只接受**已经在这个目标目录里、且当前确实没有详情**的作品。凭一个任意 id 就能写下
+/// 「已失效」，等于给这张表开一个不受目录约束的后门。
+pub async fn retire_materials(
+    database: &Database,
+    target_ref: Uuid,
+    content_public_refs: &[Uuid],
+    reason_code: &str,
+) -> Result<u64, sqlx::Error> {
+    if content_public_refs.is_empty() || !matches!(reason_code, "page_gone" | "page_unreadable") {
+        return Ok(0);
+    }
+    let inserted = sqlx::query(
+        "INSERT INTO collection_material_retirement \
+             (retirement_ref,target_ref,content_public_ref,reason_code,decided_by) \
+         SELECT gen_random_uuid(),$1,candidate.content_public_ref,$3,'person' \
+         FROM unnest($2::uuid[]) AS candidate(content_public_ref) \
+         WHERE EXISTS (SELECT 1 FROM linggan_material_content content \
+                       WHERE content.public_ref=candidate.content_public_ref) \
+           AND NOT EXISTS (SELECT 1 FROM linggan_material_content_detail detail \
+                           WHERE detail.content_public_ref=candidate.content_public_ref) \
+         ON CONFLICT (target_ref,content_public_ref) DO NOTHING",
+    )
+    .bind(target_ref)
+    .bind(content_public_refs)
+    .bind(reason_code)
+    .execute(database.pool())
+    .await?
+    .rows_affected();
+    Ok(inserted)
 }

@@ -11,12 +11,12 @@
 //! 选定方案 A），不填假数。
 
 use linggan_evidence::{
-    ArchiveCompleteness, CatalogDetailState, CatalogSource, CreatorDirectoryProjection,
-    CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecyclePoint,
-    CreatorLifecycleProjection, CreatorLifecycleStatus, CreatorLifecycleWindow,
-    KeywordHitProjection, ObservationTarget, ObservationTargetAvatar, TargetInspectorAction,
-    TargetInspectorArchiveState, TargetInspectorCount, TargetInspectorExecutionState,
-    TargetInspectorPatrolState, TargetInspectorProjection,
+    ArchiveCompleteness, BlockedMaterial, CatalogDetailState, CatalogSource,
+    CreatorDirectoryProjection, CreatorLifecycleAssociation, CreatorLifecycleMetric,
+    CreatorLifecyclePoint, CreatorLifecycleProjection, CreatorLifecycleStatus,
+    CreatorLifecycleWindow, KeywordHitProjection, ObservationTarget, ObservationTargetAvatar,
+    TargetInspectorAction, TargetInspectorArchiveState, TargetInspectorCount,
+    TargetInspectorExecutionState, TargetInspectorPatrolState, TargetInspectorProjection,
 };
 
 /// Collection 目标抽屉的三个职责。Evidence 已退回唯一的 Corpus 表面。退役或未知
@@ -434,6 +434,7 @@ pub fn render_with_catalog(
         catalog_query,
         catalog_filter,
         selected_work,
+        &[],
         list_context,
     )
 }
@@ -451,6 +452,9 @@ pub fn render_with_catalog_view(
     catalog_query: Option<&str>,
     catalog_filter: Option<&str>,
     selected_work: Option<&str>,
+    // 当前还需要人来判断「是不是已经没了」的作品。空表示没有可判断的对象——
+    // 那时不渲染任何确认入口，请人对空气做决定不是一个动作。
+    retirable: &[BlockedMaterial],
     list_context: TargetListContext<'_>,
 ) -> String {
     let Some(drawer) = drawer else {
@@ -544,6 +548,7 @@ pub fn render_with_catalog_view(
             list_context
         ),
         body = body(
+            retirable,
             target,
             archive,
             is_creator,
@@ -807,6 +812,7 @@ fn tab_bar(
 }
 
 fn body(
+    retirable: &[BlockedMaterial],
     target: &ObservationTarget,
     archive: TargetArchiveRead<'_>,
     is_creator: bool,
@@ -833,6 +839,7 @@ fn body(
         ),
         TargetDrawerTab::Patrol => patrol_tab(target, inspector, list_context),
         TargetDrawerTab::Overview => overview_tab(
+            retirable,
             target,
             archive,
             is_creator,
@@ -1088,6 +1095,7 @@ fn catalog_unavailable_state(target: &ObservationTarget) -> String {
 /// 概览只回答四件事：对象是谁、系统正在做什么、已经取得什么、是否需要人介入。
 /// 作品逐条查证和表现分布都留在「作品」，避免抽屉再长成一个首页。
 fn overview_tab(
+    retirable: &[BlockedMaterial],
     target: &ObservationTarget,
     archive: TargetArchiveRead<'_>,
     is_creator: bool,
@@ -1100,7 +1108,7 @@ fn overview_tab(
         TargetInspectorView::Projection(projection)
             if projection.target_ref == target.target_ref =>
         {
-            return inspector_overview(target, is_creator, projection, list_context);
+            return inspector_overview(target, is_creator, projection, retirable, list_context);
         }
         TargetInspectorView::ReadUnavailable | TargetInspectorView::Projection(_) => {
             return inspector_unavailable_overview(is_creator);
@@ -1189,7 +1197,9 @@ fn overview_tab(
             </section>
             <section class="c-dw-section c-dw-decision" id="archive-problems">
               <div class="c-dw-decision-copy"><span>是否需要处理</span><strong>{action_title}</strong><p>{action_note}</p></div>{action_control}
+              {retire}
             </section>"#,
+        retire = retirement_form(target, retirable, list_context),
         directory = directory,
         detail = detail,
         patrol_state = escape(patrol_state),
@@ -1216,10 +1226,57 @@ fn inspector_unavailable_overview(is_creator: bool) -> String {
     )
 }
 
+/// 让人把「这几篇在平台上已经没了」这个结论写下来。
+///
+/// 只有在**确实还有待判断的作品**时才出现：没有可判断的对象却摆一个按钮，等于请人对空气
+/// 做决定。列出的每一篇都带标题与平台 id——人是照着这些去平台上核对的，光给一个内部编号
+/// 等于要求他凭记忆判断。
+///
+/// 它不删作品，也不抹掉那次读取失败：作品继续留在目录里（博主当时确实发过），失败记录
+/// 继续留着（那次确实失败过）。写下的只是第三件事——有人看过，它没了。
+fn retirement_form(
+    target: &ObservationTarget,
+    retirable: &[BlockedMaterial],
+    list_context: TargetListContext<'_>,
+) -> String {
+    if retirable.is_empty() {
+        return String::new();
+    }
+    let items = retirable
+        .iter()
+        .map(|material| {
+            let title = material.title.as_deref().unwrap_or("未取得标题");
+            format!(
+                r#"<li><label><input type="checkbox" name="content_public_ref" value="{value}" checked/><b>{title}</b><span>{external}</span></label></li>"#,
+                value = material.content_public_ref,
+                title = escape(title),
+                external = escape(&material.content_external_id),
+            )
+        })
+        .collect::<String>();
+    let fields = list_context.return_fields(
+        Some(target.target_ref),
+        Some(TargetDrawerTab::Overview),
+        Some("archive-problems"),
+    );
+    format!(
+        r#"<form class="c-dw-retire" method="post" action="/collection/targets/retire-materials">
+             {fields}
+             <input type="hidden" name="row_target_ref" value="{target_ref}"/>
+             <b>这些作品连续读不到，等你判断</b>
+             <p>确认之后它们仍留在作品目录里，只是不再计入待补齐——博主当时确实发过，抹掉分母会让「档案完成」建立在一个修饰过的数字上。判断错了可以重新采集，记录不会挡住它。</p>
+             <ul>{items}</ul>
+             <button class="c-btn-primary" type="submit">确认这些作品已失效</button>
+           </form>"#,
+        target_ref = target.target_ref,
+    )
+}
+
 fn inspector_overview(
     target: &ObservationTarget,
     is_creator: bool,
     inspector: &TargetInspectorProjection,
+    retirable: &[BlockedMaterial],
     list_context: TargetListContext<'_>,
 ) -> String {
     let action = inspector.required_action;
@@ -1291,7 +1348,9 @@ fn inspector_overview(
             </section>
             <section class="c-dw-section c-dw-decision" id="archive-problems">
               <div class="c-dw-decision-copy"><span>是否需要处理</span><strong>{action_title}</strong><p>{action_note}</p></div>{action_control}
+              {retire}
             </section>"#,
+        retire = retirement_form(target, retirable, list_context),
         archive_state = inspector_archive_copy(inspector.archive.state),
         execution_state = inspector_execution_copy(inspector.execution.state),
         patrol_state = inspector_patrol_copy(inspector.patrol.state),
@@ -2265,6 +2324,7 @@ mod tests {
             author_profile_captures: 1,
             works_listed: 12,
             details_captured: 5,
+            retired_works: 0,
             quarantined: 0,
             blocked_details: 0,
             directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Ready,
