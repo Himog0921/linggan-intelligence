@@ -57,6 +57,8 @@ RawComment（不可变证据）
 
 每个 Atom 包含 `kind`、受约束的 `proposition`、精确 `evidence span`、`basis`、来源/上下文引用、rule/model/input hash。程序在接纳前校验类型、长度、源身份、Unicode 区间与引用资格。无信号、输入不足、模型失败、字段拒绝必须是不同终态。
 
+V1 的 `AtomProblemMembership(relation='same')` 只接受 `problem` 与 `need`：两者都可表达同一个待解决的用户问题。`solution`、`experience` 保持为 Atom/原声证据，不能被伪装成“与问题相同”；若以后需要关联它们，必须新增有独立语义和验收的关系，而不是扩大 `same`。
+
 ### 3.3 Problem 与 Membership
 
 Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类型/范围；只有剩余歧义才调用受限 LLM 归并判断。`AtomProblemMembership` 必须记录：`atom_ref`、`problem_ref`、`relation`、`basis`、definition/membership policy hash、决策模型版本、证据引用和创建时刻。
@@ -118,7 +120,7 @@ Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类
 - 实现四类 Atom 接纳、embedding adapter、精确召回 benchmark、候选消歧、Problem/Membership。
 - 验收：同义表达归并、近义但不同的问题不合并、`unknown` 角色不入分母、向量错维/NaN/部分响应逐项失败不污染其余 Atom、撤回后不再可读或统计。
 
-实施进度（2026-09-09）：四类 Atom 的接纳边界和稳定 Problem/Membership 的写入边界已由 isolated PostgreSQL 证明。模型只能提交受约束的 Atom 类型、proposition、basis 与 frozen `research_text` Unicode span；程序根据 ResearchDerivation 的不可变 offsets 生成 source span，拒绝输出时不会写入 Atom 或结算 Item。Problem 只能通过显式 `new_problem` 或 `same_problem` 决定写入；一个 Atom 同时只有一个 current membership，definition revision、policy hash、basis、decision evidence 与必要 invocation 均留痕。该模块尚未接入真实模型/调用账本写入或 embedding；质量 benchmark、候选召回、模型消歧和真实调用接线仍待实施。
+实施进度（2026-09-09）：四类 Atom 的接纳边界和稳定 Problem/Membership 的写入边界已由 isolated PostgreSQL 证明。模型只能提交受约束的 Atom 类型、proposition、basis 与 frozen `research_text` Unicode span；程序根据 ResearchDerivation 的不可变 offsets 生成 source span，拒绝输出时不会写入 Atom 或结算 Item。只有 `problem`/`need` 能以 `same` 进入稳定 Problem；Problem 只能通过显式 `new_problem` 或 `same_problem` 决定写入，一个 Atom 同时只有一个 current membership，definition revision、policy hash、basis、decision evidence 与必要 invocation 均留痕。该模块尚未接入真实模型/调用账本写入或 embedding；质量 benchmark、候选召回、模型消歧和真实调用接线仍待实施。
 
 ### R3 · 冻结结果与变化
 

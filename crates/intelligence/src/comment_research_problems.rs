@@ -74,6 +74,8 @@ pub enum CommentResearchProblemError {
     AtomUnavailable,
     #[error("the Atom already has a current Problem membership")]
     AtomAlreadyAssigned,
+    #[error("the Atom kind is not problem-bearing in V1")]
+    AtomNotProblemBearing,
     #[error("the requested Problem definition is unavailable")]
     ProblemUnavailable,
     #[error("the Problem decision violates the V1 contract")]
@@ -98,8 +100,8 @@ pub async fn admit_new_problem(
     }
 
     let mut transaction = database.pool().begin().await?;
-    let membership_policy_hash =
-        lock_unassigned_readable_atom(&mut transaction, admission.atom_ref).await?;
+    let atom = lock_unassigned_readable_atom(&mut transaction, admission.atom_ref).await?;
+    ensure_problem_bearing_kind(&atom.kind)?;
     let problem_ref = Uuid::new_v4();
     let membership_ref = Uuid::new_v4();
     let definition_hash = definition_hash(&admission.definition);
@@ -116,7 +118,7 @@ pub async fn admit_new_problem(
     .bind(admission.definition.name.trim())
     .bind(admission.definition.meaning.trim())
     .bind(definition_hash)
-    .bind(&membership_policy_hash)
+    .bind(&atom.membership_policy_hash)
     .bind(admission.invocation_ref)
     .execute(&mut *transaction)
     .await?;
@@ -127,7 +129,7 @@ pub async fn admit_new_problem(
         problem_ref,
         1,
         admission.basis,
-        &membership_policy_hash,
+        &atom.membership_policy_hash,
         &admission.decision_evidence,
         admission.invocation_ref,
     )
@@ -155,8 +157,8 @@ pub async fn admit_existing_problem(
     }
 
     let mut transaction = database.pool().begin().await?;
-    let membership_policy_hash =
-        lock_unassigned_readable_atom(&mut transaction, admission.atom_ref).await?;
+    let atom = lock_unassigned_readable_atom(&mut transaction, admission.atom_ref).await?;
+    ensure_problem_bearing_kind(&atom.kind)?;
     let definition_exists: bool = sqlx::query_scalar(
         "SELECT EXISTS( \
              SELECT 1 \
@@ -181,7 +183,7 @@ pub async fn admit_existing_problem(
         admission.problem_ref,
         admission.definition_revision,
         admission.basis,
-        &membership_policy_hash,
+        &atom.membership_policy_hash,
         &admission.decision_evidence,
         admission.invocation_ref,
     )
@@ -198,9 +200,9 @@ pub async fn admit_existing_problem(
 async fn lock_unassigned_readable_atom(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     atom_ref: Uuid,
-) -> Result<String, CommentResearchProblemError> {
+) -> Result<ReadableUnassignedAtom, CommentResearchProblemError> {
     let row = sqlx::query(
-        "SELECT policy.membership_policy_hash \
+        "SELECT atom.kind,policy.membership_policy_hash \
          FROM linggan_comment_research_atom atom \
          JOIN linggan_comment_research_derivation_readable derivation \
            ON derivation.derivation_ref=atom.derivation_ref \
@@ -227,7 +229,23 @@ async fn lock_unassigned_readable_atom(
     if assigned {
         return Err(CommentResearchProblemError::AtomAlreadyAssigned);
     }
-    Ok(row.get("membership_policy_hash"))
+    Ok(ReadableUnassignedAtom {
+        kind: row.get("kind"),
+        membership_policy_hash: row.get("membership_policy_hash"),
+    })
+}
+
+struct ReadableUnassignedAtom {
+    kind: String,
+    membership_policy_hash: String,
+}
+
+fn ensure_problem_bearing_kind(kind: &str) -> Result<(), CommentResearchProblemError> {
+    if matches!(kind, "problem" | "need") {
+        Ok(())
+    } else {
+        Err(CommentResearchProblemError::AtomNotProblemBearing)
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -332,6 +350,16 @@ mod tests {
         assert!(valid_basis(
             ProblemMembershipBasis::Manual,
             Some(Uuid::nil())
+        ));
+    }
+
+    #[test]
+    fn only_problem_and_need_atoms_can_be_problem_members() {
+        assert!(ensure_problem_bearing_kind("problem").is_ok());
+        assert!(ensure_problem_bearing_kind("need").is_ok());
+        assert!(matches!(
+            ensure_problem_bearing_kind("solution"),
+            Err(CommentResearchProblemError::AtomNotProblemBearing)
         ));
     }
 }
