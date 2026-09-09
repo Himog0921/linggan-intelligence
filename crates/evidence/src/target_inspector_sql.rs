@@ -54,6 +54,7 @@ SELECT EXISTS(SELECT 1 FROM orders) AS started,
  (SELECT count(DISTINCT package_ref) FROM records WHERE package_kind='author_profile' AND disposition<>'quarantined') AS profiles,
  (SELECT count(*) FROM directory_work) AS works, 
  (SELECT count(*) FROM directory_work WHERE has_detail) AS details,
+ (SELECT count(*) FROM directory_work WHERE is_retired AND NOT has_detail) AS retired_works,
  (SELECT count(*) FROM records WHERE disposition='quarantined') AS quarantined,
  (SELECT total FROM blocked) AS blocked_details,(SELECT value FROM ready) AS standard_directory_ready
 "#,

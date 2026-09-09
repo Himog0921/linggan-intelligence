@@ -254,7 +254,7 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
         "INSERT INTO collection_work_order_lease \
              (lease_ref, work_order_ref, station_ref, task_id, capture_identity, expires_at) \
          VALUES ($1, $2, $3, NULL, $4, scope_001_now() + make_interval(mins => $5)) \
-         RETURNING to_char(expires_at, 'YYYY-MM-DD HH24:MI')",
+         RETURNING linggan_human_moment(expires_at)",
     )
     .bind(lease_ref)
     .bind(work_order_ref)

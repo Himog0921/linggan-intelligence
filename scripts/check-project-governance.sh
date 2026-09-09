@@ -150,6 +150,20 @@ else
   fi
 fi
 
+# 人可读时间只有一种写法：YYYY-MM-DD HH:MM，由数据库函数 linggan_human_moment 统一给出。
+#
+# 2026-09-09 之前全项目并存五种写法（缺年份的、带毫秒的、带时区偏移的、ISO 的、直接
+# ::text 倒出来的），同一个页面上并排出现三种，读的人得先判断这是哪一种。
+#
+# 机器合同（/health、Producer 契约、凭据回执）仍用 ISO：那里精度与偏移都有意义，因此
+# 只禁止在读取层新写人可读格式，不禁止 ISO。
+human_moment_offenders="$(grep -rn "to_char(" crates/evidence/src apps/api/src --include='*.rs' \
+  | grep -v 'YYYY-MM-DD\\"T\\"' | grep -v 'HH24:MI:SSOF' | grep -v "'YYYY-MM-DD'" || true)"
+if [[ -n "$human_moment_offenders" ]]; then
+  report_error "人可读时间必须走 linggan_human_moment()，不要另写 to_char 格式：
+$human_moment_offenders"
+fi
+
 if [[ "$errors" -ne 0 ]]; then
   echo "project governance check failed with $errors error(s)" >&2
   exit 1

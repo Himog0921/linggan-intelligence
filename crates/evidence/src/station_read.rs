@@ -124,11 +124,11 @@ pub async fn read_station_overview(
                 (s.claim_window_expires_at > scope_001_now()) AS claim_window_open, \
                 active.plugin_version AS active_plugin_version, \
                 active.browser_label AS active_browser_label, \
-                to_char(active.last_seen_at, 'YYYY-MM-DD HH24:MI') AS active_last_seen_at, \
+                linggan_human_moment(active.last_seen_at) AS active_last_seen_at, \
                 (SELECT count(*) FROM plugin_installation h \
                  WHERE h.station_ref = s.station_ref AND h.superseded_at IS NOT NULL) \
                     AS superseded_count, \
-                to_char(s.last_dispatch_answer_at, 'MM-DD HH24:MI') \
+                linggan_human_moment(s.last_dispatch_answer_at) \
                     AS last_dispatch_answer_at, \
                 s.last_dispatch_answer_code, s.last_dispatch_answer_reason \
          FROM execution_station s \
@@ -142,7 +142,7 @@ pub async fn read_station_overview(
 
     let unclaimed_rows = sqlx::query_as::<_, UnclaimedRow>(
         "SELECT installation_ref, plugin_version, browser_label, \
-                to_char(first_seen_at, 'YYYY-MM-DD HH24:MI') AS first_seen_at \
+                linggan_human_moment(first_seen_at) AS first_seen_at \
          FROM plugin_installation \
          WHERE station_ref IS NULL AND superseded_at IS NULL \
          ORDER BY first_seen_at DESC",
@@ -329,10 +329,10 @@ pub async fn read_station_capabilities(
          SELECT COALESCE(d.capability, s.capability, fl.capability) AS capability, \
                 (d.capability IS NOT NULL) AS declared, \
                 COALESCE(s.successes, 0) AS successes, \
-                to_char(s.last_success_at, 'MM-DD HH24:MI') AS last_success_at, \
+                linggan_human_moment(s.last_success_at) AS last_success_at, \
                 COALESCE(fl.capability_failures, 0) AS capability_failures, \
                 COALESCE(fl.execution_failures, 0) AS execution_failures, \
-                to_char(fl.last_failure_at, 'MM-DD HH24:MI') AS last_failure_at \
+                linggan_human_moment(fl.last_failure_at) AS last_failure_at \
          FROM active_declared d \
          FULL OUTER JOIN successes s ON s.capability = d.capability \
          FULL OUTER JOIN failures fl ON fl.capability = COALESCE(d.capability, s.capability) \

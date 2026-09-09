@@ -121,7 +121,7 @@ latest_detail AS (
   ORDER BY observation.content_public_ref,observation.observed_at::timestamptz DESC,
            observation.created_at DESC,(observation.source_lane='detail') DESC,observation.package_ref DESC
 ), latest_lane AS (
-  SELECT lane.content_public_ref,max(lane.observed_at::timestamptz)::text AS observed_at
+  SELECT lane.content_public_ref,linggan_human_moment(max(lane.observed_at::timestamptz)) AS observed_at
   FROM linggan_material_lane_observation lane
   JOIN linggan_runtime_capture_package package USING(package_ref)
   WHERE lane.content_public_ref IS NOT NULL AND package.accepted_at <= $2::timestamptz
@@ -132,28 +132,28 @@ latest_detail AS (
     COALESCE(detail.material_ref,discovery.material_ref) AS material_ref,
     COALESCE(detail.package_ref,discovery.package_ref) AS package_ref,
     COALESCE(detail.record_ordinal,discovery.record_ordinal) AS record_ordinal,
-    COALESCE(detail.observed_at,discovery.observed_at,lane_latest.observed_at) AS observed_at,
+    linggan_human_moment(COALESCE(detail.observed_at,discovery.observed_at,lane_latest.observed_at)) AS observed_at,
     COALESCE(detail_title.title,discovery.title) AS title,
     COALESCE(detail_title.title_state,discovery.title_state,'UNKNOWN') AS title_state,
     COALESCE(detail_title.material_ref,discovery.material_ref) AS title_source_material_ref,
     COALESCE(detail_title.package_ref,discovery.package_ref) AS title_source_package_ref,
     COALESCE(detail_title.record_ordinal,discovery.record_ordinal) AS title_source_record_ordinal,
     COALESCE(detail_title.observed_at,discovery.observed_at) AS title_source_observed_at,
-    COALESCE(detail_title.created_at,discovery.created_at)::text AS title_source_recorded_at,
+    linggan_human_moment(COALESCE(detail_title.created_at,discovery.created_at)) AS title_source_recorded_at,
     detail_body.body_text,COALESCE(detail_body.body_state,'UNKNOWN') AS body_state,
     detail_body.material_ref AS body_source_material_ref,
     detail_body.package_ref AS body_source_package_ref,
     detail_body.record_ordinal AS body_source_record_ordinal,
     detail_body.observed_at AS body_source_observed_at,
-    detail_body.created_at::text AS body_source_recorded_at,
+    linggan_human_moment(detail_body.created_at) AS body_source_recorded_at,
     COALESCE(detail_creator.creator_display_name,discovery.creator_display_name) AS creator_display_name,
     COALESCE(detail_creator.creator_display_name_state,discovery.creator_state,'UNKNOWN') AS creator_display_name_state,
     COALESCE(detail_creator.material_ref,discovery.material_ref) AS creator_source_material_ref,
     COALESCE(detail_creator.package_ref,discovery.package_ref) AS creator_source_package_ref,
     COALESCE(detail_creator.record_ordinal,discovery.record_ordinal) AS creator_source_record_ordinal,
     COALESCE(detail_creator.observed_at,discovery.observed_at) AS creator_source_observed_at,
-    COALESCE(detail_creator.created_at,discovery.created_at)::text AS creator_source_recorded_at,
-    detail_published_at.published_at::text AS published_at,
+    linggan_human_moment(COALESCE(detail_creator.created_at,discovery.created_at)) AS creator_source_recorded_at,
+    linggan_human_moment(detail_published_at.published_at) AS published_at,
     CASE WHEN detail_published_at.published_at IS NULL THEN NULL
          ELSE (detail_published_at.published_at AT TIME ZONE 'Asia/Shanghai')::date::text END AS published_local_date,
     CASE WHEN detail_published_at.published_at IS NULL THEN NULL

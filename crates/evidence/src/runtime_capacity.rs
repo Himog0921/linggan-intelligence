@@ -207,7 +207,7 @@ pub async fn read_runtime_capacity(
 
     let risk_pauses = sqlx::query_as::<_, RiskPauseRow>(
         "SELECT platform, lane, reason, paused_by, \
-                to_char(paused_at, 'YYYY-MM-DD HH24:MI') AS paused_at \
+                linggan_human_moment(paused_at) AS paused_at \
          FROM collection_risk_pause \
          WHERE lifted_at IS NULL \
          ORDER BY paused_at DESC",
@@ -241,11 +241,11 @@ pub async fn read_runtime_capacity(
                 count(*) FILTER (WHERE target.monitoring_enabled \
                     AND COALESCE(rule.automatic_enabled,false) \
                     AND target.monitor_next_run_at < scope_001_now()), \
-                to_char(min(target.monitor_next_run_at) FILTER (WHERE target.monitoring_enabled \
+                linggan_human_moment(min(target.monitor_next_run_at) FILTER (WHERE target.monitoring_enabled \
                     AND COALESCE(rule.automatic_enabled,false) \
-                    AND target.monitor_next_run_at <= scope_001_now()), 'YYYY-MM-DD HH24:MI'), \
-                to_char(max(target.last_patrol_dispatched_at), 'YYYY-MM-DD HH24:MI'), \
-                to_char(max(target.last_patrol_succeeded_at), 'YYYY-MM-DD HH24:MI') \
+                    AND target.monitor_next_run_at <= scope_001_now())), \
+                linggan_human_moment(max(target.last_patrol_dispatched_at)), \
+                linggan_human_moment(max(target.last_patrol_succeeded_at)) \
          FROM collection_observation_target target \
          LEFT JOIN collection_monitor_rule_revision rule \
            ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
@@ -258,10 +258,10 @@ pub async fn read_runtime_capacity(
     let live_leases = sqlx::query_as::<_, LeaseRow>(
         "SELECT s.display_name, o.lane, \
                 coalesce(t.display_name, t.identity_key), \
-                to_char(COALESCE((SELECT min(task.claimed_at) \
+                linggan_human_moment(COALESCE((SELECT min(task.claimed_at) \
                                   FROM collection_work_order_lease_task task \
-                                  WHERE task.lease_ref=l.lease_ref),l.issued_at), 'YYYY-MM-DD HH24:MI'), \
-                to_char(l.expires_at, 'YYYY-MM-DD HH24:MI'), \
+                                  WHERE task.lease_ref=l.lease_ref),l.issued_at)), \
+                linggan_human_moment(l.expires_at), \
                 o.estimated_work_units, \
                 (l.task_id IS NOT NULL) \
          FROM collection_work_order_lease l \
@@ -298,9 +298,9 @@ pub async fn read_runtime_capacity(
                 count(work_order.work_order_ref) FILTER (WHERE work_order.queue_state='leased'), \
                 count(work_order.work_order_ref) FILTER (WHERE work_order.queue_state='queued' \
                     AND work_order.retry_not_before_at>scope_001_now()), \
-                to_char(min(work_order.scheduled_for) FILTER (WHERE work_order.queue_state='queued' \
+                linggan_human_moment(min(work_order.scheduled_for) FILTER (WHERE work_order.queue_state='queued' \
                     AND work_order.retry_not_before_at<=scope_001_now() \
-                    AND work_order.scheduled_for<=scope_001_now()), 'YYYY-MM-DD HH24:MI') \
+                    AND work_order.scheduled_for<=scope_001_now())) \
          FROM collection_dispatch_lane_fairness policy \
          LEFT JOIN collection_work_order work_order \
            ON work_order.dispatch_lane=policy.dispatch_lane \
@@ -315,30 +315,27 @@ pub async fn read_runtime_capacity(
 
     let monitor_rule_schedules = sqlx::query_as::<_, MonitorRuleScheduleRow>(
         "SELECT coalesce(target.display_name,target.identity_key),rule.fixed_interval_seconds, \
-                to_char((SELECT max(work_order.scheduled_for) FROM collection_work_order work_order \
-                         WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref), \
-                        'YYYY-MM-DD HH24:MI'), \
-                to_char((SELECT max(attempt.started_at) FROM linggan_runtime_attempt attempt \
+                linggan_human_moment((SELECT max(work_order.scheduled_for) FROM collection_work_order work_order \
+                         WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref)), \
+                linggan_human_moment((SELECT max(attempt.started_at) FROM linggan_runtime_attempt attempt \
                          JOIN collection_work_order_lease_task lease_task \
                            ON lease_task.task_id=attempt.task_id \
                          JOIN collection_work_order_lease lease USING(lease_ref) \
                          JOIN collection_work_order work_order USING(work_order_ref) \
-                         WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref), \
-                        'YYYY-MM-DD HH24:MI'), \
+                         WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref)), \
                 (SELECT work_order.queue_state FROM collection_work_order work_order \
                  WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref \
                  ORDER BY work_order.scheduled_for DESC NULLS LAST,work_order.created_at DESC \
                  LIMIT 1), \
-                to_char(target.monitor_next_run_at,'YYYY-MM-DD HH24:MI'), \
-                to_char((SELECT max(receipt.received_at) \
+                linggan_human_moment(target.monitor_next_run_at), \
+                linggan_human_moment((SELECT max(receipt.received_at) \
                          FROM linggan_runtime_submission_receipt receipt \
                          JOIN linggan_runtime_capture_package package USING(package_ref) \
                          JOIN collection_work_order_lease_task lease_task \
                            ON lease_task.task_id=package.task_id \
                          JOIN collection_work_order_lease lease USING(lease_ref) \
                          JOIN collection_work_order work_order USING(work_order_ref) \
-                         WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref), \
-                        'YYYY-MM-DD HH24:MI') \
+                         WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref)) \
          FROM collection_observation_target target \
          JOIN collection_monitor_rule_revision rule \
            ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
