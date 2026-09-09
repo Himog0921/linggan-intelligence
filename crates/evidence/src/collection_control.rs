@@ -2724,3 +2724,48 @@ mod tests {
         assert_eq!(ACCOUNT_ELIGIBILITY_TTL_MINUTES, 360);
     }
 }
+
+/// 从列表上直接开关一个目标的自动巡查。
+///
+/// 版本号在服务端读，不由表单带上来。乐观并发那道关卡是为**规则编辑表单**设的——那里
+/// 你提交的是一整套字段值，用一个过期的版本号覆盖别人刚改过的设置是真实风险。而这里
+/// 只翻一个开关，不携带任何字段值，读当前版本再发命令不会覆盖任何人的编辑。
+///
+/// 它仍然走版本化命令这一条路：每次开关都留下一个新的规则版本与回执，不是裸改一个布尔
+/// 值——那条路早就因为「不能成为巡检的第二个真相源」被废弃了。
+pub async fn toggle_target_patrol(
+    database: &Database,
+    target_ref: Uuid,
+    enable: bool,
+) -> Result<MonitorRuleCommandReceipt, MonitorRuleCommandError> {
+    let current: Option<(i32,)> = sqlx::query_as(
+        "SELECT revision_number FROM collection_monitor_rule_revision revision \
+         JOIN collection_observation_target target \
+           ON target.active_monitor_rule_revision_ref=revision.rule_revision_ref \
+         WHERE target.target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_optional(database.pool())
+    .await?;
+    let Some((expected_revision,)) = current else {
+        // 没有生效的规则版本就没有可开关的东西。这不是失败，是「先去设一条规则」。
+        return Err(MonitorRuleCommandError::UnknownTarget);
+    };
+    apply_monitor_rule_command(
+        database,
+        &MonitorRuleCommand {
+            target_ref,
+            expected_revision,
+            idempotency_key: Uuid::new_v4(),
+            kind: if enable {
+                MonitorCommandKind::Resume
+            } else {
+                MonitorCommandKind::Pause
+            },
+            actor: MonitorCommandActor::Person,
+            source: "target_list_toggle",
+            draft: None,
+        },
+    )
+    .await
+}

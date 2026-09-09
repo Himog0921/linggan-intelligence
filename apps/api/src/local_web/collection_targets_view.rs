@@ -39,6 +39,8 @@ pub fn render_stored_targets(
         completeness,
         None,
         error,
+        None,
+        None,
         list_context,
     )
 }
@@ -50,6 +52,9 @@ pub fn render_stored_targets_with_observation(
     completeness: Option<&HashMap<String, ArchiveCompleteness>>,
     observation: Option<&HashMap<uuid::Uuid, TargetObservationSummary>>,
     error: Option<&str>,
+    // 打开了删除确认面板时，这里带着「会删掉什么、会留下什么」的真实数字。
+    deletion: Option<&linggan_evidence::TargetDeletionPreview>,
+    deletion_target: Option<uuid::Uuid>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
     if targets.is_empty() {
@@ -100,7 +105,12 @@ pub fn render_stored_targets_with_observation(
                   </section>
                 </div>
               </form>
+              {deletion}
             </section>"#,
+        deletion = match (deletion, deletion_target) {
+            (Some(preview), Some(target_ref)) => deletion_modal(preview, target_ref, error),
+            _ => String::new(),
+        },
         failure = action_feedback_markup(error),
     );
     replace_target_state(base, &list)
@@ -184,6 +194,46 @@ fn action_feedback_markup(error: Option<&str>) -> String {
             "c-src-feedback c-src-feedback-warn",
             "未重复提交",
             "已有相同建档任务等待处理或执行中。已打开建档状态；本次没有创建第二个任务。",
+        ),
+        "target_deleted" => (
+            "c-src-feedback c-src-feedback-ok",
+            "观察目标已删除",
+            "它的采集申请、工单与租约一并清掉了。已经采到的作品、详情与评论仍在语料库里，也仍然属于这个博主——作者归属来自作品自己，不依赖观察目标是否存在。",
+        ),
+        "target_delete_blocked" => (
+            "c-src-failure",
+            "没有完成",
+            "这个目标下有跨行业清洗结果，数据库层禁止删除它们，因此删不干净。没有做任何删除——删一半不能叫彻底。",
+        ),
+        "target_delete_name_mismatch" => (
+            "c-src-failure",
+            "没有完成",
+            "输入的名字与目标名字不一致，没有删除任何东西。",
+        ),
+        "target_delete_failed" | "target_delete_invalid" | "target_delete_missing" => (
+            "c-src-failure",
+            "没有完成",
+            "这次删除没有生效，目标与它的记录都没有变化。可以再试一次。",
+        ),
+        "patrol_paused" => (
+            "c-src-feedback c-src-feedback-ok",
+            "已停止观察",
+            "不再排新的巡检；已经在跑的会跑完。语料与档案全部保留，随时可以恢复。",
+        ),
+        "patrol_resumed" => (
+            "c-src-feedback c-src-feedback-ok",
+            "已恢复观察",
+            "会按现有规则重新排巡检。",
+        ),
+        "patrol_toggle_no_rule" => (
+            "c-src-failure",
+            "没有完成",
+            "这个目标还没有生效的观察规则，没有可以开关的东西。先设置一条规则。",
+        ),
+        "patrol_toggle_failed" | "patrol_toggle_invalid" => (
+            "c-src-failure",
+            "没有完成",
+            "这次开关没有生效，巡检状态没有变化。",
         ),
         // 成功回执与失败回执一样必须说出来：跳转回来却什么都不说，人会以为没生效而再点一次。
         "material_retirement_done" => (
@@ -335,10 +385,11 @@ fn target_row(
         .last_patrol_succeeded_at
         .as_deref()
         .unwrap_or("尚未巡查");
+    // 下次巡查写成「还有多久」：人在这一列判断的是要等多久，不是那一刻的钟点。
     let next = if target.monitoring_enabled {
-        target.next_patrol_at.as_deref().unwrap_or("待排定")
+        relative_moment(target.next_patrol_at.as_deref(), beijing_now_minutes())
     } else {
-        "—"
+        "—".to_owned()
     };
     let cells = if is_creator {
         format!(
@@ -349,15 +400,16 @@ fn target_row(
                 <div class="c-tg-cell c-tg-change" role="cell">{recent_change}</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last}</time>
                 <time class="c-tg-cell c-tg-time" role="cell">{next}</time>
-                <div class="c-tg-actions" role="cell" data-row-no-open>{actions}</div>"#,
+                <div class="c-tg-actions" role="cell" data-row-no-open>{actions}{secondary}</div>"#,
             archive_state = archive_state(target, archive),
             works = archive_count(archive),
             details = detail_count(archive),
             patrol = patrol_state(target, observation),
             recent_change = creator_recent_change(observation),
             last = escape(last),
-            next = escape(next),
+            next = escape(&next),
             actions = row_action(target, true, archive, list_context),
+            secondary = row_secondary_actions(target, list_context),
         )
     } else {
         format!(
@@ -368,14 +420,15 @@ fn target_row(
                 <div class="c-tg-cell c-tg-unknown" role="cell">尚未取得</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last}</time>
                 <time class="c-tg-cell c-tg-time" role="cell">{next}</time>
-                <div class="c-tg-actions" role="cell" data-row-no-open>{actions}</div>"#,
+                <div class="c-tg-actions" role="cell" data-row-no-open>{actions}{secondary}</div>"#,
             rule = keyword_rule(target),
             patrol = patrol_state(target, observation),
             hits = keyword_hits(observation),
             recent_change = keyword_recent_change(observation),
             last = escape(last),
-            next = escape(next),
+            next = escape(&next),
             actions = row_action(target, false, archive, list_context),
+            secondary = row_secondary_actions(target, list_context),
         )
     };
     let grid = if is_creator {
@@ -444,7 +497,7 @@ fn archive_state(
         TargetArchiveRead::Known(None) => ("neutral", "尚未建立"),
         TargetArchiveRead::Known(Some(value)) if value.is_untouched() => ("neutral", "尚未建立"),
         TargetArchiveRead::Known(Some(value))
-            if value.works_listed > 0 && value.details_captured < value.works_listed =>
+            if value.works_listed > 0 && value.pending_details > 0 =>
         {
             ("warn", "详情有缺口")
         }
@@ -505,6 +558,163 @@ fn keyword_recent_change(observation: Option<&TargetObservationSummary>) -> Stri
     }
 }
 
+/// 「停止观察」与「删除」这两个动作，跟主动作放在同一格里。
+///
+/// 停止观察 ≠ 删除：前者是「先不看了」——语料、档案、历史全部保留，只是不再排新的巡检，
+/// 随时能开回来；后者是「不要了」，且不可逆。两者形状不同（开关 vs 危险动作），
+/// 不能长得像同一个按钮。
+fn row_secondary_actions(
+    target: &ObservationTarget,
+    list_context: super::target_drawer::TargetListContext<'_>,
+) -> String {
+    let (enable, toggle_label) = if target.monitoring_enabled {
+        ("false", "停止观察")
+    } else {
+        ("true", "恢复观察")
+    };
+    let filter = list_context
+        .filter
+        .map(|value| {
+            format!(
+                r#"<input type="hidden" name="return_filter" value="{}"/>"#,
+                escape(value)
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        r#"<form class="c-tg-toggle" method="post" action="/collection/targets/patrol-toggle">{filter}<input type="hidden" name="enable" value="{enable}"/><button class="c-btn-quiet c-tg-btn-slim" type="submit" name="row_target_ref" value="{target_ref}">{toggle_label}</button></form>
+           <a class="c-tg-danger" href="/collection/targets?delete={target_ref}">删除</a>"#,
+        target_ref = target.target_ref,
+    )
+}
+
+/// 「下次巡查」写成还有多久，而不是一个绝对时刻。
+///
+/// 人在这一列要判断的是「还要等多久」，而不是「那一刻的钟点是几点」——后者他还得自己
+/// 跟当前时间做一次减法。上次巡查保留绝对时刻：那是一个已经发生的事实，可能要拿去跟
+/// 别的记录对时间。
+///
+/// 逾期单独说。把逾期显示成「0 分钟后」会把一个真的出问题的状态说成正常。
+fn relative_moment(value: Option<&str>, now_minutes: i64) -> String {
+    let Some(raw) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return "尚未安排".to_owned();
+    };
+    let Some(target_minutes) = minutes_since_epoch(raw) else {
+        // 认不出来就原样显示。编一个「还有多久」出来会被当成事实。
+        return raw.to_owned();
+    };
+    let delta = target_minutes - now_minutes;
+    match delta {
+        d if d <= -60 => format!("已逾期约 {} 小时", (-d + 30) / 60),
+        d if d < 0 => format!("已逾期约 {} 分钟", -d),
+        d if d < 60 => format!("约 {d} 分钟后"),
+        d if d < 60 * 48 => format!("约 {} 小时后", (d + 30) / 60),
+        d => format!("约 {} 天后", (d + 720) / 1440),
+    }
+}
+
+/// 把 `YYYY-MM-DD HH:MM` 折成分钟数。只认这一种格式——全项目的人可读时间都由
+/// `linggan_human_moment()` 统一给出，认别的写法等于给第二种格式留后门。
+/// 当前时刻，按北京时间折成分钟。
+///
+/// 加 8 小时而不是查时区库：全项目的会话时区已经固定为 Asia/Shanghai，页面上的时间也
+/// 都由 `linggan_human_moment()` 按这个时区给出。这里换一个时区就会跟页面对不上。
+fn beijing_now_minutes() -> i64 {
+    let seconds = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|value| value.as_secs())
+        .unwrap_or(0);
+    i64::try_from(seconds / 60).unwrap_or(0) + 8 * 60
+}
+
+fn minutes_since_epoch(value: &str) -> Option<i64> {
+    let bytes = value.as_bytes();
+    if bytes.len() < 16 {
+        return None;
+    }
+    let number = |from: usize, to: usize| value.get(from..to)?.parse::<i64>().ok();
+    let (year, month, day) = (number(0, 4)?, number(5, 7)?, number(8, 10)?);
+    let (hour, minute) = (number(11, 13)?, number(14, 16)?);
+    // civil-from-days（Howard Hinnant）：不引日期库也能把年月日折成天数。
+    let year = year - i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let day_of_year = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(days * 1440 + hour * 60 + minute)
+}
+
+/// 删除确认面板：把将要发生的事用真实数字摆出来，而不是一句「确定删除吗」。
+///
+/// 要求把名字原样打一遍——不可逆的操作，点两下太容易了。
+///
+/// 「会保留」那一栏同样重要：人担心的正是「删了目标，采到的东西是不是也没了」。
+/// 答案是不会，而且原因写在这里——作者归属推自 append-only 事实，不依赖这个目标。
+fn deletion_modal(
+    preview: &linggan_evidence::TargetDeletionPreview,
+    target_ref: uuid::Uuid,
+    error: Option<&str>,
+) -> String {
+    let blocked = preview.blocking_cross_industry_rows > 0;
+    let note = if blocked {
+        format!(
+            r#"<p class="c-tg-delete-blocked">这个目标下有 {rows} 条跨行业清洗结果，它们在数据库层禁止删除，因此**删不干净**。与其删一半还叫「彻底」，这里不提供删除。</p>"#,
+            rows = preview.blocking_cross_industry_rows,
+        )
+    } else {
+        String::new()
+    };
+    let mismatch = if error == Some("target_delete_name_mismatch") {
+        r#"<p class="c-tg-delete-blocked">名字对不上，没有删除任何东西。请原样输入上面那个名字。</p>"#
+    } else {
+        ""
+    };
+    let confirm = if blocked {
+        String::new()
+    } else {
+        format!(
+            r#"<form method="post" action="/collection/targets/delete">
+                 <input type="hidden" name="row_target_ref" value="{target_ref}"/>
+                 <label>输入「{name}」以确认<input name="confirm_name" required autocomplete="off"/></label>
+                 <button class="c-btn-primary c-tg-delete-go" type="submit">彻底删除</button>
+               </form>"#,
+            name = escape(&preview.display_name),
+        )
+    };
+    format!(
+        r#"<div class="c-tg-batch-overlay">
+             <section class="c-tg-batch-dialog c-tg-delete" role="dialog" aria-modal="true" aria-labelledby="target-delete-title">
+               <h2 id="target-delete-title">彻底删除「{name}」</h2>
+               {mismatch}
+               {note}
+               <div class="c-tg-delete-cols">
+                 <div><b>会删掉</b><ul>
+                   <li>这个观察目标本身与它的 {rules} 个规则版本</li>
+                   <li>{requests} 次采集申请与准入决定</li>
+                   <li>{orders} 张采集工单、{leases} 份租约、{tasks} 个执行任务</li>
+                 </ul></div>
+                 <div><b>不会删掉</b><ul>
+                   <li>{works} 篇作品与 {details} 份详情，以及它们的评论</li>
+                   <li>它们仍然属于这个博主：作者归属来自作品自己，不依赖观察目标是否存在</li>
+                   <li>采集包与回执——数据库层禁止删除已经发生的事实</li>
+                 </ul></div>
+               </div>
+               {confirm}
+               <a class="c-btn-quiet" href="/collection/targets">取消</a>
+             </section>
+           </div>"#,
+        name = escape(&preview.display_name),
+        rules = preview.rule_revisions,
+        requests = preview.requests,
+        orders = preview.work_orders,
+        leases = preview.leases,
+        tasks = preview.lease_tasks,
+        works = preview.retained_works,
+        details = preview.retained_details,
+    )
+}
+
 /// 关键词目标当前按什么排序采。
 ///
 /// 从右边切：身份键是 `{词}::{排序}`，词本身可能含 `::`，而排序不含。
@@ -552,10 +762,11 @@ fn detail_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String 
         super::target_drawer::TargetArchiveRead::Known(value) => value
             .filter(|value| value.has_displayable_directory() && value.works_listed > 0)
             .map(|value| {
-                let missing = (value.works_listed - value.details_captured).max(0);
+                // 缺口读投影，不在这里相减：已确认失效的作品有详情之外的第三种去向，
+                // 减法算不出来它。
                 format!(
                     "{} / {} · 缺 {}",
-                    value.details_captured, value.works_listed, missing
+                    value.details_captured, value.works_listed, value.pending_details
                 )
             })
             .unwrap_or_else(|| "—".to_owned()),
@@ -890,6 +1101,7 @@ mod tests {
                 works_listed: 0,
                 details_captured: 0,
                 retired_works: 0,
+                pending_details: 0,
                 quarantined: 1,
                 ..ArchiveCompleteness::default()
             },
@@ -1103,7 +1315,12 @@ mod tests {
         assert!(html.contains("打开关键词的关键词观察"));
         assert!(!html.contains("关键词档案"));
         assert_eq!(html.matches("c-tg-actions").count(), 2);
-        assert_eq!(html.matches("c-tg-btn").count(), 2);
+        // 主动作两个（一行一个），加上每行一个「停止观察」开关。
+        assert_eq!(html.matches("c-tg-btn").count(), 4);
+        // 停止观察与删除必须每行各出现一次，且删除是链接不是按钮——两者形状不同，
+        // 长得像同一个按钮，人迟早会点错那个不可逆的。
+        assert_eq!(html.matches("c-tg-toggle").count(), 2);
+        assert_eq!(html.matches("c-tg-danger").count(), 2);
         assert_eq!(html.matches("data-monitor-rule-trigger").count(), 1);
         assert_eq!(html.matches(">建立档案</button>").count(), 1);
         assert_eq!(html.matches(">设置巡查</a>").count(), 1);
@@ -1138,6 +1355,7 @@ mod tests {
                 works_listed: 12,
                 details_captured: 5,
                 retired_works: 0,
+                pending_details: 7,
                 quarantined: 0,
                 blocked_details: 0,
                 directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Ready,
@@ -1156,8 +1374,11 @@ mod tests {
         assert!(html.contains("12 篇"));
         assert!(html.contains("5 / 12 · 缺 7"));
         assert!(html.contains("补采缺口"));
+        // 上次巡查是已经发生的事实，保留绝对时刻——可能要拿去跟别的记录对时间。
         assert!(html.contains("2026-09-04 08:30"));
-        assert!(html.contains("2026-09-05 09:00"));
+        // 下次巡查写成还有多久：人在这一列判断的是要等多久，而不是那一刻的钟点。
+        assert!(!html.contains("2026-09-05 09:00"));
+        assert!(html.contains("已逾期") || html.contains("后"));
         assert!(!html.contains("2026-09-04 09:00"));
         assert!(!html.contains("ARCHIVE HEALTH"));
         assert!(!html.contains('%'));

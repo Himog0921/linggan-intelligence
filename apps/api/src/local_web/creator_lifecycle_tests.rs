@@ -467,7 +467,10 @@ fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
     // 左边看过什么。定宽列写成 minmax(0,N) 以便窄窗口按比例收窄，而不是把表推出屏幕。
     assert!(!TARGET_DRAWER_CSS.contains("min-width:1120px"));
     assert!(TARGET_DRAWER_CSS.contains("minmax(0,116px)"));
-    assert!(TARGET_DRAWER_CSS.contains("minmax(0,88px) 128px;gap:var(--lgi-space-3)}"));
+    // 创作者列不再吃掉全部富余（名字后面空一大片，而右边数据列还在截断）：
+    // 它只占内容需要的宽度，富余留给操作列。
+    assert!(TARGET_DRAWER_CSS.contains("minmax(140px,max-content)"));
+    assert!(TARGET_DRAWER_CSS.contains("minmax(148px,1fr);gap:var(--lgi-space-3)}"));
     // 操作列定宽，按钮不得再宽过自己的列而压到相邻列上。
     assert!(
         !TARGET_DRAWER_CSS.contains("min-width:calc(var(--lgi-space-24) + var(--lgi-space-6))")

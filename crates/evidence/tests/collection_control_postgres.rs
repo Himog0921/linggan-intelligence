@@ -107,6 +107,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0061_material_retirement.sql"),
     "\n",
     include_str!("../../../database/migrations/0062_human_moment.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0063_content_author_attribution.sql"),
 );
 
 #[tokio::test]

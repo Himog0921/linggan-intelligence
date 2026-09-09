@@ -72,12 +72,13 @@ pub use collection_control::{
     MonitorRuleCommandReceipt, MonitorRuleDraft, MonitorRuleMode, activate_installation_credential,
     apply_manual_observe_command, apply_monitor_rule_command, bind_observation_account,
     collection_control_schema_is_ready, dynamic_cadence, report_account_eligibility,
-    rotate_installation_credential, set_station_accepting, version_at_least,
+    rotate_installation_credential, set_station_accepting, toggle_target_patrol, version_at_least,
 };
 pub use collection_target::{
     CollectionTargetError, ObservationTarget, ObservationTargetAvatar, StoreOutcome, TargetCounts,
-    collection_target_schema_is_ready, count_targets, list_targets, list_targets_in_state,
-    read_target, read_target_avatars, store_pending_target, transition_target,
+    TargetDeletionOutcome, TargetDeletionPreview, collection_target_schema_is_ready, count_targets,
+    delete_observation_target, list_targets, list_targets_in_state, read_target,
+    read_target_avatars, read_target_deletion_preview, store_pending_target, transition_target,
 };
 pub use collection_task_read::{
     CollectionTaskExecution, CollectionTaskTimeline, read_collection_task_timeline,

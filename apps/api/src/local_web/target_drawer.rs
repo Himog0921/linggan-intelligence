@@ -310,8 +310,8 @@ pub(crate) fn target_primary_action(
         return TargetPrimaryAction::ViewCreator;
     }
     let untouched = archive.is_none_or(ArchiveCompleteness::is_untouched);
-    let needs_details = archive
-        .is_some_and(|value| value.works_listed > 0 && value.details_captured < value.works_listed);
+    let needs_details =
+        archive.is_some_and(|value| value.works_listed > 0 && value.pending_details > 0);
     if untouched {
         return TargetPrimaryAction::EstablishArchive;
     }
@@ -685,7 +685,7 @@ fn statusline(target: &ObservationTarget, completeness: TargetArchiveRead<'_>) -
             TargetArchiveRead::Known(None) => "尚未建档",
             TargetArchiveRead::Known(Some(value)) if value.is_untouched() => "尚未建档",
             TargetArchiveRead::Known(Some(value))
-                if value.works_listed > 0 && value.details_captured < value.works_listed =>
+                if value.works_listed > 0 && value.pending_details > 0 =>
             {
                 "档案待完善"
             }
@@ -1528,7 +1528,7 @@ fn current_system_copy(archive: TargetArchiveRead<'_>) -> (&'static str, &'stati
             ("目录边界需要重建", "当前无建档任务")
         }
         TargetArchiveRead::Known(Some(value))
-            if value.works_listed > 0 && value.details_captured < value.works_listed =>
+            if value.works_listed > 0 && value.pending_details > 0 =>
         {
             ("档案部分可用", "当前无建档任务")
         }
@@ -2325,6 +2325,7 @@ mod tests {
             works_listed: 12,
             details_captured: 5,
             retired_works: 0,
+            pending_details: 7,
             quarantined: 0,
             blocked_details: 0,
             directory_baseline: linggan_evidence::ArchiveDirectoryBaseline::Ready,
@@ -2338,6 +2339,8 @@ mod tests {
         established_target.monitoring_enabled = false;
         let established = ArchiveCompleteness {
             details_captured: 12,
+            // 三态必须自洽：12 篇全部取得，就没有待取得的了。
+            pending_details: 0,
             ..partial
         };
         assert!(

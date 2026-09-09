@@ -657,3 +657,176 @@ impl From<TargetRow> for ObservationTarget {
         }
     }
 }
+
+/// 删除一个观察目标之前，先把「会消失什么、会留下什么」摆出来。
+///
+/// 这不是一句「确定删除吗」。不可逆的操作要让人看着真实数字决定：删掉的是控制面
+/// （我要盯着这个人这个决定，以及它产生的申请、准入、工单、租约），留下的是采集事实
+/// （作品、详情、评论）——它们在数据库层就禁止删除，而且作者归属推自 append-only 事实，
+/// 不依赖这个目标是否存在。
+#[derive(Debug, Clone)]
+pub struct TargetDeletionPreview {
+    pub display_name: String,
+    pub target_kind: String,
+    pub work_orders: i64,
+    pub leases: i64,
+    pub lease_tasks: i64,
+    pub rule_revisions: i64,
+    pub requests: i64,
+    /// 归属这个作者、会保留下来的作品数。关键词目标没有作者可言，为 0。
+    pub retained_works: i64,
+    pub retained_details: i64,
+    /// 跨行业语料里有 append-only 的清洗结果时，这个目标删不干净。
+    /// 这时不能删一半还叫「彻底」——宁可拒绝。
+    pub blocking_cross_industry_rows: i64,
+}
+
+pub async fn read_target_deletion_preview(
+    database: &Database,
+    target_ref: Uuid,
+) -> Result<Option<TargetDeletionPreview>, sqlx::Error> {
+    let row: Option<(String, String, i64, i64, i64, i64, i64, i64, i64, i64)> = sqlx::query_as(
+        "SELECT target.display_name,target.target_kind, \
+                (SELECT count(*) FROM collection_work_order w WHERE w.target_ref=target.target_ref), \
+                (SELECT count(*) FROM collection_work_order w \
+                 JOIN collection_work_order_lease l USING(work_order_ref) \
+                 WHERE w.target_ref=target.target_ref), \
+                (SELECT count(*) FROM collection_work_order w \
+                 JOIN collection_work_order_lease l USING(work_order_ref) \
+                 JOIN collection_work_order_lease_task lt ON lt.lease_ref=l.lease_ref \
+                 WHERE w.target_ref=target.target_ref), \
+                (SELECT count(*) FROM collection_monitor_rule_revision r \
+                 WHERE r.target_ref=target.target_ref), \
+                (SELECT count(*) FROM collection_acquisition_request q \
+                 WHERE q.target_ref=target.target_ref), \
+                (SELECT count(*) FROM linggan_material_content_author a \
+                 WHERE a.author_external_id=target.identity_key AND a.platform=target.platform), \
+                (SELECT count(*) FROM linggan_material_content_author a \
+                 JOIN linggan_material_content_detail d \
+                   ON d.content_public_ref=a.content_public_ref \
+                 WHERE a.author_external_id=target.identity_key AND a.platform=target.platform), \
+                (SELECT count(*) FROM cross_industry_sample s \
+                 JOIN cross_industry_note n USING(sample_ref) \
+                 JOIN cross_industry_comment c USING(note_ref) \
+                 JOIN cross_industry_comment_clean clean USING(comment_ref) \
+                 WHERE s.target_ref=target.target_ref) \
+         FROM collection_observation_target target WHERE target.target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_optional(database.pool())
+    .await?;
+    Ok(row.map(|row| TargetDeletionPreview {
+        display_name: row.0,
+        target_kind: row.1,
+        work_orders: row.2,
+        leases: row.3,
+        lease_tasks: row.4,
+        rule_revisions: row.5,
+        requests: row.6,
+        retained_works: row.7,
+        retained_details: row.8,
+        blocking_cross_industry_rows: row.9,
+    }))
+}
+
+/// 删除的结果。「删不了」与「没找到」是两件事，不能都报成失败。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TargetDeletionOutcome {
+    Deleted,
+    UnknownTarget,
+    /// 输入的名字与目标名字不一致。不可逆操作要求手打名字，点两下太容易了。
+    NameMismatch,
+    /// 有 append-only 的跨行业清洗结果挂在它下面，删不干净。
+    BlockedByProtectedFacts {
+        rows: i64,
+    },
+}
+
+/// 彻底删除一个观察目标：删掉控制面，保留采集事实。
+///
+/// 采集事实（作品、详情、评论、采集包、回执）在数据库层挂着 append-only 触发器，删除会被
+/// 直接拒绝——那是这个系统的地基，不为一次清理去拆。而这些事实本来也不需要跟着走：
+/// 「这篇笔记是这个博主发的」是世界的事实，「我要盯着这个人」是我的决定，删掉后者不该
+/// 让前者失效。作者归属推自 append-only 事实（见 `linggan_material_content_author`），
+/// 因此删除之后作品仍然属于这个博主、仍然检索得到。
+pub async fn delete_observation_target(
+    database: &Database,
+    target_ref: Uuid,
+    confirmed_display_name: &str,
+) -> Result<TargetDeletionOutcome, sqlx::Error> {
+    let mut tx = database.pool().begin().await?;
+    let found: Option<(String,)> = sqlx::query_as(
+        "SELECT display_name FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
+    )
+    .bind(target_ref)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let Some((display_name,)) = found else {
+        tx.rollback().await?;
+        return Ok(TargetDeletionOutcome::UnknownTarget);
+    };
+    if display_name.trim() != confirmed_display_name.trim() {
+        tx.rollback().await?;
+        return Ok(TargetDeletionOutcome::NameMismatch);
+    }
+    let blocking: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM cross_industry_sample s \
+         JOIN cross_industry_note n USING(sample_ref) \
+         JOIN cross_industry_comment c USING(note_ref) \
+         JOIN cross_industry_comment_clean clean USING(comment_ref) \
+         WHERE s.target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(&mut *tx)
+    .await?;
+    if blocking > 0 {
+        tx.rollback().await?;
+        return Ok(TargetDeletionOutcome::BlockedByProtectedFacts { rows: blocking });
+    }
+
+    // 顺序由外键决定，从叶子往根删。任何一条走不通都会整笔回滚——半删的目标比不删更糟。
+    for statement in [
+        "DELETE FROM collection_work_order_lease_task_dispatch_failure WHERE task_id IN ( \
+           SELECT lt.task_id FROM collection_work_order w \
+           JOIN collection_work_order_lease l USING(work_order_ref) \
+           JOIN collection_work_order_lease_task lt ON lt.lease_ref=l.lease_ref \
+           WHERE w.target_ref=$1)",
+        "DELETE FROM collection_work_order_lease_task WHERE lease_ref IN ( \
+           SELECT l.lease_ref FROM collection_work_order w \
+           JOIN collection_work_order_lease l USING(work_order_ref) WHERE w.target_ref=$1)",
+        "DELETE FROM collection_work_order_material_target WHERE work_order_ref IN ( \
+           SELECT work_order_ref FROM collection_work_order WHERE target_ref=$1)",
+        "DELETE FROM collection_work_order_lease WHERE work_order_ref IN ( \
+           SELECT work_order_ref FROM collection_work_order WHERE target_ref=$1)",
+        "DELETE FROM collection_work_order WHERE target_ref=$1",
+        "DELETE FROM cross_industry_comment WHERE note_ref IN ( \
+           SELECT n.note_ref FROM cross_industry_sample s JOIN cross_industry_note n USING(sample_ref) \
+           WHERE s.target_ref=$1)",
+        "DELETE FROM cross_industry_note WHERE sample_ref IN ( \
+           SELECT sample_ref FROM cross_industry_sample WHERE target_ref=$1)",
+        "DELETE FROM cross_industry_sample WHERE target_ref=$1",
+        "DELETE FROM collection_material_retirement WHERE target_ref=$1",
+        "DELETE FROM collection_scheduler_target_decision WHERE target_ref=$1",
+        "DELETE FROM collection_observation_target_transition WHERE target_ref=$1",
+        "DELETE FROM collection_monitor_rule_command_receipt WHERE target_ref=$1",
+        "DELETE FROM collection_monitor_rule_command_identity WHERE target_ref=$1",
+        "DELETE FROM collection_admission_decision WHERE request_ref IN ( \
+           SELECT request_ref FROM collection_acquisition_request WHERE target_ref=$1)",
+        "DELETE FROM collection_admission_decision WHERE target_ref=$1",
+        "DELETE FROM collection_acquisition_request WHERE target_ref=$1",
+        // 目标行还指着活跃规则版本，先松开这条引用再删规则。
+        "UPDATE collection_observation_target \
+         SET active_monitor_rule_revision_ref=NULL,monitoring_enabled=false, \
+             lifecycle_state='dismissed' \
+         WHERE target_ref=$1",
+        "DELETE FROM collection_monitor_rule_revision WHERE target_ref=$1",
+        "DELETE FROM collection_observation_target WHERE target_ref=$1",
+    ] {
+        sqlx::query(statement)
+            .bind(target_ref)
+            .execute(&mut *tx)
+            .await?;
+    }
+    tx.commit().await?;
+    Ok(TargetDeletionOutcome::Deleted)
+}
