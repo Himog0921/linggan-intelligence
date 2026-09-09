@@ -492,7 +492,7 @@ pub async fn record_run_item_failure(
     Ok(())
 }
 
-async fn refresh_run_completion(
+pub(crate) async fn refresh_run_completion(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     run_ref: Uuid,
 ) -> Result<(), CommentResearchKernelError> {

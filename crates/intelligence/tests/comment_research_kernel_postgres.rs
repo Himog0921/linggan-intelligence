@@ -3,6 +3,10 @@ mod fixture;
 #[path = "support/comment_research_fixture.rs"]
 mod research_fixture;
 
+use linggan_intelligence::comment_research_atoms::{
+    AtomBasis, AtomKind, CommentResearchAtomError, SemanticAtomProposal, SemanticExtractionOutput,
+    accept_semantic_output,
+};
 use linggan_intelligence::comment_research_kernel::{
     DERIVATION_VERSION, RunItemFailureClass, SaveResearchPolicy, claim_next_run_item,
     derive_current_sources, record_run_item_failure, save_active_policy, start_run,
@@ -327,4 +331,178 @@ async fn incompatible_item_does_not_block_the_next_healthy_v1_item() {
     let healthy = claim_next_run_item(&database).await.unwrap().unwrap();
     assert_ne!(healthy.derivation_ref, poisoned.derivation_ref);
     assert_eq!(healthy.attempt, 1);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn accepted_atoms_are_evidence_bound_and_invalid_model_output_writes_nothing() {
+    let database = fixture::proof_database("comment_research_atom_acceptance").await;
+    detail_with_author(
+        &database,
+        "atom-note",
+        "SYNTHETIC atom acceptance note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "atom-note",
+        "reader",
+        "孩子写作业总拖延，有什么办法吗",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: None,
+            source_limit: 100,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_run(&database, json!({"initiatedBy":"synthetic-test"}))
+        .await
+        .unwrap();
+    let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+
+    let invalid = accept_semantic_output(
+        &database,
+        &claim,
+        SemanticExtractionOutput::Atoms {
+            atoms: vec![SemanticAtomProposal {
+                kind: AtomKind::Problem,
+                proposition: " ".into(),
+                basis: AtomBasis::Explicit,
+                evidence_start: 0,
+                evidence_end: 5,
+            }],
+        },
+        None,
+    )
+    .await;
+    assert!(matches!(
+        invalid,
+        Err(CommentResearchAtomError::InvalidOutput)
+    ));
+    let after_invalid: (String, i64) = sqlx::query_as(
+        "SELECT item.state,count(atom.atom_ref) \
+         FROM linggan_comment_research_run_item item \
+         LEFT JOIN linggan_comment_research_atom atom \
+           ON atom.run_ref=item.run_ref AND atom.derivation_ref=item.derivation_ref \
+         WHERE item.run_ref=$1 AND item.derivation_ref=$2 \
+         GROUP BY item.state",
+    )
+    .bind(claim.run_ref)
+    .bind(claim.derivation_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(after_invalid, ("running".into(), 0));
+
+    let receipt = accept_semantic_output(
+        &database,
+        &claim,
+        SemanticExtractionOutput::Atoms {
+            atoms: vec![SemanticAtomProposal {
+                kind: AtomKind::Problem,
+                proposition: "孩子写作业时存在持续拖延".into(),
+                basis: AtomBasis::Explicit,
+                evidence_start: 0,
+                evidence_end: 5,
+            }],
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(receipt.state, "succeeded");
+    assert_eq!(receipt.accepted_atoms, 1);
+
+    let atom: (String, i32, i32, i32, i32) = sqlx::query_as(
+        "SELECT kind,research_start,research_end,source_start,source_end \
+         FROM linggan_comment_research_atom \
+         WHERE run_ref=$1 AND derivation_ref=$2",
+    )
+    .bind(claim.run_ref)
+    .bind(claim.derivation_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(atom, ("problem".into(), 0, 5, 0, 5));
+    let run_state: String =
+        sqlx::query_scalar("SELECT state FROM linggan_comment_research_run WHERE run_ref=$1")
+            .bind(run.run_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(run_state, "completed");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn no_signal_is_a_terminal_run_item_outcome_not_an_atom() {
+    let database = fixture::proof_database("comment_research_atom_no_signal").await;
+    detail_with_author(
+        &database,
+        "no-signal-note",
+        "SYNTHETIC no-signal note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "no-signal-note",
+        "reader",
+        "谢谢",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: None,
+            source_limit: 100,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_run(&database, json!({"initiatedBy":"synthetic-test"}))
+        .await
+        .unwrap();
+    let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+
+    let receipt = accept_semantic_output(
+        &database,
+        &claim,
+        SemanticExtractionOutput::NoSignal {
+            reason: "礼貌性表达，不包含可研究的用户语义".into(),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(receipt.state, "no_signal");
+    assert_eq!(receipt.accepted_atoms, 0);
+    let item_state: String = sqlx::query_scalar(
+        "SELECT state FROM linggan_comment_research_run_item \
+         WHERE run_ref=$1 AND derivation_ref=$2",
+    )
+    .bind(claim.run_ref)
+    .bind(claim.derivation_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(item_state, "no_signal");
+    let atoms: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_comment_research_atom WHERE run_ref=$1")
+            .bind(run.run_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(atoms, 0);
 }

@@ -118,6 +118,8 @@ Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类
 - 实现四类 Atom 接纳、embedding adapter、精确召回 benchmark、候选消歧、Problem/Membership。
 - 验收：同义表达归并、近义但不同的问题不合并、`unknown` 角色不入分母、向量错维/NaN/部分响应逐项失败不污染其余 Atom、撤回后不再可读或统计。
 
+实施进度（2026-09-09）：四类 Atom 的接纳边界已落地并由 isolated PostgreSQL 证明：模型只能提交受约束的类型、proposition、basis 与 frozen `research_text` Unicode span；程序根据 ResearchDerivation 的不可变 offsets 生成 source span，拒绝输出时不会写入 Atom 或结算 Item。该模块尚未接入真实模型/调用账本写入；embedding adapter、质量 benchmark、候选召回、模型消歧和 Problem/Membership 仍待实施。
+
 ### R3 · 冻结结果与变化
 
 - 实现 ResultRevision、7d-vs-previous-7d、四类观察和 `not_comparable` 原因。
