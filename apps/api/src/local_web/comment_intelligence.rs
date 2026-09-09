@@ -196,6 +196,35 @@ mod tests {
         assert!(value.get("summary").is_none());
     }
     #[tokio::test]
+    async fn v1_tab_read_routes_never_substitute_empty_research_for_a_missing_schema() {
+        for path in [
+            "/api/local/comment-research/v1/overview",
+            "/api/local/comment-research/v1/voices",
+            "/api/local/comment-research/v1/problems",
+            "/api/local/comment-research/v1/changes",
+            "/api/local/comment-research/v1/runs",
+        ] {
+            let response = app()
+                .oneshot(
+                    Request::builder()
+                        .uri(path)
+                        .header("host", "127.0.0.1:3000")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "{path}");
+            let body = to_bytes(response.into_body(), 4096).await.unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(
+                value["error"], "comment_research_v1_schema_missing",
+                "{path}"
+            );
+            assert!(value.get("page").is_none(), "{path}");
+        }
+    }
+    #[tokio::test]
     async fn new_mutation_routes_inherit_origin_and_host_guards() {
         for path in [
             "/api/local/comment-intelligence/actions",

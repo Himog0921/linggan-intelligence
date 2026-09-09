@@ -16,6 +16,9 @@ use linggan_intelligence::{
     comment_research_kernel::{self as kernel, SaveResearchPolicy},
     comment_research_management::*,
     comment_research_projection::*,
+    comment_research_read_v1::{
+        self as read_v1, CommentResearchV1ReadError, CommentResearchV1ReadQuery,
+    },
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -57,6 +60,20 @@ pub(super) fn routes() -> Router<LocalWebState> {
             "/api/local/comment-research/runs",
             post(start_research_kernel_run),
         )
+        .route(
+            "/api/local/comment-research/v1/overview",
+            get(read_v1_overview),
+        )
+        .route("/api/local/comment-research/v1/voices", get(read_v1_voices))
+        .route(
+            "/api/local/comment-research/v1/problems",
+            get(read_v1_problems),
+        )
+        .route(
+            "/api/local/comment-research/v1/changes",
+            get(read_v1_changes),
+        )
+        .route("/api/local/comment-research/v1/runs", get(read_v1_runs))
         .route(
             "/api/local/comment-research/assets/revisions",
             post(revise_asset),
@@ -222,6 +239,86 @@ async fn start_research_kernel_run(
         return unavailable();
     };
     kernel_response(kernel::start_run(database, request.scope).await)
+}
+
+async fn read_v1_overview(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CommentResearchV1ReadQuery>,
+) -> Response {
+    let database = match v1_database(&state).await {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    v1_read_response(read_v1::read_overview(database, &query).await)
+}
+
+async fn read_v1_voices(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CommentResearchV1ReadQuery>,
+) -> Response {
+    let database = match v1_database(&state).await {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    v1_read_response(read_v1::read_voices(database, &query).await)
+}
+
+async fn read_v1_problems(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CommentResearchV1ReadQuery>,
+) -> Response {
+    let database = match v1_database(&state).await {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    v1_read_response(read_v1::read_problems(database, &query).await)
+}
+
+async fn read_v1_changes(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CommentResearchV1ReadQuery>,
+) -> Response {
+    let database = match v1_database(&state).await {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    v1_read_response(read_v1::read_changes(database, &query).await)
+}
+
+async fn read_v1_runs(
+    State(state): State<LocalWebState>,
+    Query(query): Query<CommentResearchV1ReadQuery>,
+) -> Response {
+    let database = match v1_database(&state).await {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    v1_read_response(read_v1::read_runs(database, &query).await)
+}
+
+async fn v1_database(
+    state: &LocalWebState,
+) -> Result<&linggan_storage_postgres::Database, Response> {
+    let Some(database) = state.database.database() else {
+        return Err(error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "comment_research_v1_schema_missing",
+        ));
+    };
+    match read_v1::schema_ready(database).await {
+        Ok(true) => Ok(database),
+        Ok(false) | Err(_) => Err(error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "comment_research_v1_schema_missing",
+        )),
+    }
+}
+
+fn v1_read_response(result: Result<Value, CommentResearchV1ReadError>) -> Response {
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(error_value) => v1_read_error(error_value),
+    }
 }
 
 #[derive(Deserialize)]
@@ -494,6 +591,20 @@ fn read_error(e: CommentResearchReadError) -> Response {
             error(StatusCode::NOT_FOUND, "source_unavailable")
         }
         CommentResearchReadError::Database(_) => unavailable(),
+    }
+}
+fn v1_read_error(error_value: CommentResearchV1ReadError) -> Response {
+    match error_value {
+        CommentResearchV1ReadError::InvalidQuery => error(StatusCode::BAD_REQUEST, "invalid_query"),
+        CommentResearchV1ReadError::ResultUnavailable => {
+            error(StatusCode::NOT_FOUND, "comment_research_result_unavailable")
+        }
+        CommentResearchV1ReadError::SchemaUnavailable | CommentResearchV1ReadError::Database(_) => {
+            error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "comment_research_v1_unavailable",
+            )
+        }
     }
 }
 fn domain_error(e: CommentResearchError) -> Response {

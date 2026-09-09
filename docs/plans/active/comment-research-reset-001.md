@@ -134,6 +134,8 @@ Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类
 - 以独立 endpoints/read models 重写四页和运行记录；不再在任意 tab 读取全量研究快照。
 - 验收：变化页不渲染问题页/概览副本；技术原因不作为列表标签；当前 1,613 条开发样本与 100k 合成评论分别做 20 次独立测量，单 Tab 数据读取 P95 分别不超过 500ms 与 1s；无数据、未配置 embedding、部分失败、来源受限、不可比均如实表达。
 
+实施进度（2026-09-09）：已落地 V1 的五个 read model/API：`overview`、`voices`、`problems`、`changes` 与 `runs`。每个请求在 repeatable-read 只读事务中选择一个 readable published ResultRevision；指定 revision 不可读时返回明确 unavailable，schema 缺失时不伪造空研究结果。概览只返回当前问题与覆盖，原声返回 raw evidence / research text / author role / research outcome 而没有 embedding 状态，问题返回冻结的 Definition 与双窗口事实，变化只返回 published Observation 和 `notComparable` 原因。隔离 PostgreSQL 已证明同一冻结 revision 的五个投影互不混用。旧页面尚未切到这些 endpoints，故当前页面性能和交互问题尚未算修复。
+
 ### R5 · 开发库重置准备
 
 - 执行 isolated PostgreSQL 全链路、API、worker crash/recovery、浏览器与治理证明；生成 exact-head deletion/runbook。

@@ -21,6 +21,9 @@ use linggan_intelligence::comment_research_problems::{
     CommentResearchProblemError, ExistingProblemAdmission, NewProblemAdmission,
     ProblemDefinitionProposal, ProblemMembershipBasis, admit_existing_problem, admit_new_problem,
 };
+use linggan_intelligence::comment_research_read_v1::{
+    CommentResearchV1ReadQuery, read_changes, read_overview, read_problems, read_runs, read_voices,
+};
 use linggan_intelligence::comment_research_results::publish_result_revision;
 use linggan_storage_postgres::Database;
 use research_fixture::{comment_with_author, detail_with_author};
@@ -1149,4 +1152,44 @@ async fn published_result_has_independent_multi_signal_changes_and_is_idempotent
     .await
     .unwrap();
     assert_eq!(readable_revisions, 1);
+
+    let query = CommentResearchV1ReadQuery {
+        result_revision_ref: Some(first.result_revision_ref),
+        limit: Some(20),
+        offset: Some(0),
+    };
+    let overview = read_overview(&database, &query).await.unwrap();
+    assert_eq!(overview["view"], "overview");
+    assert_eq!(overview["currentProblems"].as_array().unwrap().len(), 1);
+    assert!(overview.get("observations").is_none());
+
+    let voices = read_voices(&database, &query).await.unwrap();
+    assert_eq!(voices["view"], "voices");
+    assert_eq!(voices["page"]["total"], 6);
+    assert!(
+        voices["page"]["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|voice| voice.get("embeddingState").is_none())
+    );
+
+    let problems = read_problems(&database, &query).await.unwrap();
+    assert_eq!(problems["view"], "problems");
+    assert_eq!(problems["page"]["total"], 1);
+    assert_eq!(problems["page"]["items"][0]["evidenceAtomCount"], 3);
+
+    let changes = read_changes(&database, &query).await.unwrap();
+    assert_eq!(changes["view"], "changes");
+    assert_eq!(changes["observations"].as_array().unwrap().len(), 3);
+    assert!(changes.get("currentProblems").is_none());
+    assert!(changes["notComparable"].as_array().unwrap().is_empty());
+
+    let runs = read_runs(&database, &query).await.unwrap();
+    assert_eq!(runs["view"], "runs");
+    assert_eq!(runs["page"]["total"], 1);
+    assert_eq!(
+        runs["page"]["items"][0]["publishedResult"]["resultRevisionRef"],
+        first.result_revision_ref.to_string()
+    );
 }
