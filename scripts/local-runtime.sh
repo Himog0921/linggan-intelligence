@@ -231,6 +231,7 @@ migrate() {
   apply_migration_once "0059_comment_replay_continuity" "$project_root/database/migrations/0059_comment_replay_continuity.sql"
   apply_migration_once "0060_comment_topic_associations" "$project_root/database/migrations/0060_comment_topic_associations.sql"
   apply_migration_once "0061_material_retirement" "$project_root/database/migrations/0061_material_retirement.sql"
+  apply_migration_once "0062_human_moment" "$project_root/database/migrations/0062_human_moment.sql"
 }
 
 case "$command_name" in

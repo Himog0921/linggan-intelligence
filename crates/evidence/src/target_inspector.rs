@@ -166,6 +166,9 @@ struct ArchiveFacts {
     profiles: i64,
     works: i64,
     details: i64,
+    /// 人已确认在平台上不存在的作品数。它们留在作品目录里，但不再是待补齐——
+    /// 少了这一项，界面会一直催人去补一批永远补不到的作品。
+    retired_works: i64,
     quarantined: i64,
     blocked_details: i64,
     standard_directory_ready: bool,
@@ -189,8 +192,9 @@ pub async fn read_target_inspector(
         .map_err(map_schema_error)?;
     let target = sqlx::query(
         "SELECT target_ref,target_kind,monitoring_enabled, \
-                last_patrol_dispatched_at::text,last_patrol_succeeded_at::text, \
-                CASE WHEN monitoring_enabled THEN monitor_next_run_at::text END AS next_run_at \
+                linggan_human_moment(last_patrol_dispatched_at) AS last_patrol_dispatched_at, \
+                linggan_human_moment(last_patrol_succeeded_at) AS last_patrol_succeeded_at, \
+                CASE WHEN monitoring_enabled THEN linggan_human_moment(monitor_next_run_at) END AS next_run_at \
          FROM collection_observation_target WHERE target_ref=$1 AND first_stored_at <= $2::timestamptz",
     )
     .bind(target_ref)
@@ -294,7 +298,10 @@ fn archive_projection(
             unknown_coverage(),
         );
     }
-    let missing = facts.works.saturating_sub(facts.details);
+    let missing = facts
+        .works
+        .saturating_sub(facts.details)
+        .saturating_sub(facts.retired_works);
     let historical = !facts.standard_directory_ready && facts.works > 0 && missing == 0;
     let directory_state = if facts.standard_directory_ready {
         TargetInspectorDirectoryState::Ready
@@ -444,6 +451,7 @@ async fn read_archive_facts(
         profiles: row.get("profiles"),
         works: row.get("works"),
         details: row.get("details"),
+        retired_works: row.get("retired_works"),
         quarantined: row.get("quarantined"),
         blocked_details: row.get("blocked_details"),
         standard_directory_ready: row.get("standard_directory_ready"),

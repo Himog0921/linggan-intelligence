@@ -59,7 +59,7 @@ pub async fn read_cross_industry_samples(
                 sample.like_count, sample.collect_count, sample.comment_count, \
                 to_char(sample.published_at, 'YYYY-MM-DD') AS published_on, \
                 sample.keyword, sample.sort_order, \
-                to_char(sample.last_observed_at, 'YYYY-MM-DD HH24:MI') AS last_observed_at, \
+                linggan_human_moment(sample.last_observed_at) AS last_observed_at, \
                 target.display_name, \
                 (SELECT count(*) FROM cross_industry_note note \
                  WHERE note.sample_ref = sample.sample_ref) AS note_count \
@@ -130,7 +130,7 @@ pub async fn read_cross_industry_comments(
 
     let rows: Vec<CrossIndustryCommentRow> = sqlx::query_as(
         "SELECT comment.comment_ref, comment.sample_ref, comment.body_text, comment.is_reply, \
-                to_char(comment.observed_at, 'YYYY-MM-DD HH24:MI') AS observed_at, \
+                linggan_human_moment(comment.observed_at) AS observed_at, \
                 sample.title, sample.author_name \
          FROM cross_industry_comment comment \
          JOIN cross_industry_sample sample ON sample.sample_ref = comment.sample_ref \

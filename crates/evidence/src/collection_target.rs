@@ -270,10 +270,10 @@ macro_rules! listed_target_columns {
          target.first_stored_at::text, \
          (target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false)), \
          target.group_name, \
-         to_char(target.last_patrol_dispatched_at, 'MM-DD HH24:MI'), \
-         to_char(target.last_patrol_succeeded_at, 'MM-DD HH24:MI'), \
+         linggan_human_moment(target.last_patrol_dispatched_at), \
+         linggan_human_moment(target.last_patrol_succeeded_at), \
          CASE WHEN target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false) \
-              THEN to_char(target.monitor_next_run_at, 'MM-DD HH24:MI') END"
+              THEN linggan_human_moment(target.monitor_next_run_at) END"
     };
 }
 
