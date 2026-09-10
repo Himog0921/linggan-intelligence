@@ -5,7 +5,7 @@
 
 use crate::{
     comment_cleaning::{CLEANER_VERSION, CleanComment, clean},
-    comment_research::comment_source_hash,
+    research_text::content_hash,
 };
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
@@ -87,8 +87,6 @@ pub enum CommentResearchKernelError {
     InvalidPolicy,
     #[error("no saved comment research policy exists")]
     PolicyMissing,
-    #[error("the requested research scope is invalid")]
-    InvalidScope,
     #[error("no eligible ordinary-user derivations are available")]
     NoEligibleDerivations,
 }
@@ -143,6 +141,21 @@ pub struct ResearchRunItemClaim {
     pub attempt: i32,
 }
 
+/// The worker may read this immutable execution input after it has claimed an Item.  Keeping the
+/// source text here means the transport layer never needs to discover a second, legacy comment
+/// projection just to construct a prompt.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimedResearchInput {
+    pub run_ref: Uuid,
+    pub derivation_ref: Uuid,
+    pub attempt: i32,
+    pub research_text: String,
+    pub context_manifest: Value,
+    pub config_ref: Option<Uuid>,
+    pub token_limit: i64,
+}
+
 /// A role is a comparison between two collected platform identities, never a name heuristic.
 pub fn classify_author_role(
     comment_author_external_id: Option<&str>,
@@ -195,8 +208,9 @@ fn strip_confirmed_content_author_badge(cleaned: &mut CleanComment) {
     cleaned.reasons.push("content_author_badge_removed".into());
 }
 
-/// Derives up to `limit` current sources. Re-running is safe: source + version + raw hash form
-/// the immutable identity, and a concurrent worker can only win the same `ON CONFLICT` insert.
+/// Derives up to `limit` changed current sources. Re-running is safe: the immutable identity
+/// includes raw text, role attribution and reply context, so a late author-attribution fact
+/// creates a new derivation rather than preserving stale research eligibility.
 pub async fn derive_current_sources(
     database: &Database,
     limit: usize,
@@ -221,8 +235,28 @@ pub async fn derive_current_sources(
            ORDER BY candidate.observed_at::timestamptz DESC,candidate.created_at DESC,candidate.material_ref DESC \
            LIMIT 1 \
          ) parent ON true \
-         ORDER BY source.created_at,source.material_ref LIMIT $1",
+         WHERE NOT EXISTS ( \
+           SELECT 1 FROM linggan_comment_research_derivation existing \
+           WHERE existing.source_ref=source.material_ref \
+             AND existing.derivation_version=$1 \
+             AND existing.source_sha256=encode(sha256(convert_to(COALESCE(source.body_text,''),'UTF8')),'hex') \
+             AND existing.author_role=CASE \
+               WHEN NULLIF(btrim(source.author_external_id),'') IS NULL \
+                 OR NULLIF(btrim(attribution.author_external_id),'') IS NULL THEN 'author_identity_unknown' \
+               WHEN NULLIF(btrim(source.author_external_id),'')=NULLIF(btrim(attribution.author_external_id),'') THEN 'content_author_reply' \
+               ELSE 'ordinary_user' END \
+             AND existing.attribution_source IS NOT DISTINCT FROM attribution.attribution_source \
+             AND existing.attribution_observed_at IS NOT DISTINCT FROM attribution.observed_at \
+             AND existing.context_manifest=jsonb_build_object( \
+               'workRef',source.content_public_ref, \
+               'parentSourceRef',parent.material_ref, \
+               'parentSourceSha256',CASE WHEN parent.body_text IS NULL THEN NULL ELSE encode(sha256(convert_to(parent.body_text,'UTF8')),'hex') END, \
+               'parentRequested',source.parent_comment_external_id IS NOT NULL \
+             ) \
+         ) \
+         ORDER BY source.created_at DESC,source.material_ref DESC LIMIT $2",
     )
+    .bind(DERIVATION_VERSION)
     .bind(limit)
     .fetch_all(database.pool())
     .await?;
@@ -245,8 +279,8 @@ pub async fn save_active_policy(
         return Err(CommentResearchKernelError::InvalidPolicy);
     }
     let policy_revision_ref = Uuid::new_v4();
-    let extraction_rule_hash = comment_source_hash(EXTRACTION_CONTRACT);
-    let membership_policy_hash = comment_source_hash(MEMBERSHIP_CONTRACT);
+    let extraction_rule_hash = content_hash(EXTRACTION_CONTRACT);
+    let membership_policy_hash = content_hash(MEMBERSHIP_CONTRACT);
     let mut transaction = database.pool().begin().await?;
     sqlx::query(
         "INSERT INTO linggan_comment_research_policy_revision( \
@@ -282,11 +316,7 @@ pub async fn save_active_policy(
 /// for a second authorization nor calls an external provider. The worker will advance this queue.
 pub async fn start_run(
     database: &Database,
-    scope: Value,
 ) -> Result<ResearchRunReceipt, CommentResearchKernelError> {
-    if !scope.is_object() {
-        return Err(CommentResearchKernelError::InvalidScope);
-    }
     derive_current_sources(database, MAX_DERIVATIONS_PER_PASS as usize).await?;
     let mut transaction = database.pool().begin().await?;
     let policy = sqlx::query(
@@ -318,7 +348,10 @@ pub async fn start_run(
     .bind(run_ref)
     .bind(policy_revision_ref)
     .bind(&as_of)
-    .bind(scope)
+    .bind(json!({
+        "kind":"all_current_readable_ordinary_user_comments",
+        "selection":"unprocessed_derivation_created_desc"
+    }))
     .bind(&manifest_hash)
     .bind(exclusion_counts)
     .execute(&mut *transaction)
@@ -355,14 +388,14 @@ struct EligibleDerivation {
 
 impl EligibleDerivation {
     fn input_hash(&self) -> String {
-        comment_source_hash(&format!(
+        content_hash(&format!(
             "{}\n{}\n{}",
             self.source_sha256, self.research_sha256, self.research_text
         ))
     }
 
     fn context_hash(&self) -> String {
-        comment_source_hash(&self.context_manifest.to_string())
+        content_hash(&self.context_manifest.to_string())
     }
 }
 
@@ -372,9 +405,13 @@ async fn select_eligible_derivations(
 ) -> Result<Vec<EligibleDerivation>, CommentResearchKernelError> {
     let rows = sqlx::query(
         "SELECT derivation_ref,source_sha256,research_sha256,research_text,context_manifest \
-         FROM linggan_comment_research_derivation_readable \
+         FROM linggan_comment_research_derivation_current derivation \
          WHERE derivation_version=$1 AND eligibility='eligible' \
-         ORDER BY created_at,derivation_ref LIMIT $2",
+           AND NOT EXISTS ( \
+             SELECT 1 FROM linggan_comment_research_run_item used \
+             WHERE used.derivation_ref=derivation.derivation_ref \
+           ) \
+         ORDER BY created_at DESC,derivation_ref DESC LIMIT $2",
     )
     .bind(policy.get::<String, _>("derivation_version"))
     .bind(policy.get::<i32, _>("source_limit"))
@@ -403,7 +440,7 @@ fn manifest_hash(sources: &[EligibleDerivation]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    comment_source_hash(&manifest)
+    content_hash(&manifest)
 }
 
 /// Claims a single new-kernel item. Legacy recovery tables are deliberately absent from this
@@ -443,6 +480,37 @@ pub async fn claim_next_run_item(
         run_ref: row.get("run_ref"),
         derivation_ref: row.get("derivation_ref"),
         attempt: row.get("attempts"),
+    }))
+}
+
+/// Returns only the frozen material belonging to a current V1 claim.  A missing row is a normal
+/// lease-loss outcome: another recovery path may have settled the Item while the caller waited.
+pub async fn load_claimed_research_input(
+    database: &Database,
+    claim: &ResearchRunItemClaim,
+) -> Result<Option<ClaimedResearchInput>, CommentResearchKernelError> {
+    let row = sqlx::query(
+        "SELECT derivation.research_text,derivation.context_manifest,policy.config_ref,policy.token_limit \
+         FROM linggan_comment_research_run_item item \
+         JOIN linggan_comment_research_run run USING(run_ref) \
+         JOIN linggan_comment_research_policy_revision policy \
+           ON policy.policy_revision_ref=run.policy_revision_ref \
+         JOIN linggan_comment_research_derivation_readable derivation \
+           ON derivation.derivation_ref=item.derivation_ref \
+         WHERE item.run_ref=$1 AND item.derivation_ref=$2 AND item.state='running'",
+    )
+    .bind(claim.run_ref)
+    .bind(claim.derivation_ref)
+    .fetch_optional(database.pool())
+    .await?;
+    Ok(row.map(|row| ClaimedResearchInput {
+        run_ref: claim.run_ref,
+        derivation_ref: claim.derivation_ref,
+        attempt: claim.attempt,
+        research_text: row.get("research_text"),
+        context_manifest: row.get("context_manifest"),
+        config_ref: row.get("config_ref"),
+        token_limit: row.get("token_limit"),
     }))
 }
 
@@ -553,31 +621,192 @@ pub(crate) async fn refresh_run_completion(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     run_ref: Uuid,
 ) -> Result<(), CommentResearchKernelError> {
-    let outcome: (bool, bool) = sqlx::query_as(
-        "SELECT bool_and(state IN ('succeeded','no_signal','incompatible','unrecoverable','model_failed','restricted','cancelled')), \
-                bool_or(state IN ('incompatible','unrecoverable','model_failed','restricted')) \
-         FROM linggan_comment_research_run_item WHERE run_ref=$1",
+    refresh_run_completion_with_embedding_state(transaction, run_ref, false).await
+}
+
+async fn refresh_run_completion_with_embedding_state(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_ref: Uuid,
+    embedding_unavailable_is_terminal: bool,
+) -> Result<(), CommentResearchKernelError> {
+    let outcome = sqlx::query(
+        "SELECT \
+            NOT EXISTS( \
+                SELECT 1 FROM linggan_comment_research_run_item \
+                WHERE run_ref=$1 \
+                  AND state NOT IN ('succeeded','no_signal','incompatible','unrecoverable','model_failed','restricted','cancelled') \
+            ) AS items_terminal, \
+            (SELECT count(*) FROM linggan_comment_research_run_item \
+             WHERE run_ref=$1 \
+               AND state IN ('incompatible','unrecoverable','model_failed','restricted')) AS item_failed_count, \
+            (SELECT count(*) FROM linggan_comment_research_atom atom \
+             WHERE atom.run_ref=$1 AND atom.kind IN ('problem','need') \
+               AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                              WHERE membership.atom_ref=atom.atom_ref AND membership.current)) AS unassigned_atoms, \
+            (SELECT count(*) FROM linggan_comment_research_atom atom \
+             WHERE atom.run_ref=$1 AND atom.kind IN ('problem','need') \
+               AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                              WHERE membership.atom_ref=atom.atom_ref AND membership.current) \
+               AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_embedding embedding \
+                              WHERE embedding.atom_ref=atom.atom_ref AND embedding.state='succeeded') \
+               AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_embedding embedding \
+                              WHERE embedding.atom_ref=atom.atom_ref AND embedding.state IN ('pending','running')) \
+               AND (EXISTS(SELECT 1 FROM linggan_comment_research_atom_embedding embedding \
+                           WHERE embedding.atom_ref=atom.atom_ref AND embedding.state IN ('failed','incompatible')) \
+                    OR ($2 AND NOT EXISTS(SELECT 1 FROM linggan_embedding_settings settings \
+                                  JOIN linggan_embedding_config config USING(config_ref) \
+                                  JOIN linggan_model_entry model USING(model_ref) \
+                                  JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref \
+                                  JOIN linggan_model_connection connection USING(connection_ref) \
+                                  WHERE settings.singleton AND config.enabled AND config.qualified AND connection.enabled))) \
+            ) \
+            + (SELECT count(*) FROM linggan_comment_research_atom atom \
+               WHERE atom.run_ref=$1 AND atom.kind IN ('problem','need') \
+                 AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                                WHERE membership.atom_ref=atom.atom_ref AND membership.current) \
+                 AND $2 \
+                 AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+                                WHERE resolution.atom_ref=atom.atom_ref) \
+                 AND EXISTS(SELECT 1 FROM linggan_comment_research_atom_embedding embedding \
+                            WHERE embedding.atom_ref=atom.atom_ref AND embedding.state='succeeded') \
+                 AND EXISTS( \
+                     SELECT 1 FROM linggan_comment_research_problem_definition definition \
+                     JOIN linggan_comment_research_problem problem USING(problem_ref) \
+                     WHERE problem.state='active' \
+                       AND EXISTS( \
+                           SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                           JOIN linggan_comment_research_atom member_atom USING(atom_ref) \
+                           JOIN linggan_comment_research_derivation_readable member_derivation \
+                             ON member_derivation.derivation_ref=member_atom.derivation_ref \
+                           WHERE membership.problem_ref=definition.problem_ref \
+                             AND membership.definition_revision=definition.revision AND membership.current \
+                       ) \
+                       AND NOT EXISTS( \
+                           SELECT 1 FROM linggan_comment_research_problem_definition_embedding definition_embedding \
+                           JOIN linggan_comment_research_atom_embedding atom_embedding \
+                             ON atom_embedding.atom_ref=atom.atom_ref AND atom_embedding.state='succeeded' \
+                           WHERE definition_embedding.problem_ref=definition.problem_ref \
+                             AND definition_embedding.definition_revision=definition.revision \
+                             AND definition_embedding.space_ref=atom_embedding.space_ref \
+                             AND definition_embedding.state='succeeded' \
+                       ) \
+                 ) \
+            ) AS embedding_failed_atoms, \
+            (SELECT count(*) FROM linggan_comment_research_atom atom \
+             WHERE atom.run_ref=$1 AND atom.kind IN ('problem','need') \
+               AND EXISTS(SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+                          WHERE resolution.atom_ref=atom.atom_ref \
+                            AND resolution.state IN ('model_failed','incompatible')) \
+            ) AS resolution_failed_atoms, \
+            (SELECT count(*) FROM linggan_comment_research_atom atom \
+             WHERE atom.run_ref=$1 AND atom.kind IN ('problem','need') \
+               AND EXISTS(SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+                          WHERE resolution.atom_ref=atom.atom_ref \
+                            AND resolution.state IN ('pending','running','retryable')) \
+            ) AS unsettled_resolution_atoms",
     )
     .bind(run_ref)
+    .bind(embedding_unavailable_is_terminal)
     .fetch_one(&mut **transaction)
     .await?;
-    if outcome.0 {
-        let state = if outcome.1 {
-            "completed_with_failures"
-        } else {
-            "completed"
-        };
-        sqlx::query(
-            "UPDATE linggan_comment_research_run \
-             SET state=$2,finished_at=scope_001_now(),updated_at=scope_001_now() \
-             WHERE run_ref=$1 AND state IN ('queued','running')",
-        )
-        .bind(run_ref)
-        .bind(state)
-        .execute(&mut **transaction)
-        .await?;
+    settle_run_completion(transaction, run_ref, &outcome).await
+}
+
+async fn settle_run_completion(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_ref: Uuid,
+    outcome: &sqlx::postgres::PgRow,
+) -> Result<(), CommentResearchKernelError> {
+    let items_terminal: bool = outcome.get("items_terminal");
+    if !items_terminal {
+        return Ok(());
     }
+    let item_failed_count: i64 = outcome.get("item_failed_count");
+    let unassigned_atoms: i64 = outcome.get("unassigned_atoms");
+    let embedding_failed_atoms: i64 = outcome.get("embedding_failed_atoms");
+    let resolution_failed_atoms: i64 = outcome.get("resolution_failed_atoms");
+    let unsettled_resolution_atoms: i64 = outcome.get("unsettled_resolution_atoms");
+    if unsettled_resolution_atoms > 0 {
+        return Ok(());
+    }
+    let terminal_unassigned = embedding_failed_atoms + resolution_failed_atoms;
+    if unassigned_atoms > 0 && terminal_unassigned < unassigned_atoms {
+        return Ok(());
+    }
+    let state = if item_failed_count > 0 || terminal_unassigned > 0 {
+        "completed_with_failures"
+    } else {
+        "completed"
+    };
+    sqlx::query(
+        "UPDATE linggan_comment_research_run \
+         SET state=$2,failure_counts=jsonb_strip_nulls(jsonb_build_object( \
+               'runItems',NULLIF($3,0), \
+               'embedding',NULLIF($4,0), \
+               'problemResolution',NULLIF($5,0) \
+             )),finished_at=scope_001_now(),updated_at=scope_001_now() \
+         WHERE run_ref=$1 AND state IN ('queued','running')",
+    )
+    .bind(run_ref)
+    .bind(state)
+    .bind(item_failed_count)
+    .bind(embedding_failed_atoms)
+    .bind(resolution_failed_atoms)
+    .execute(&mut **transaction)
+    .await?;
     Ok(())
+}
+
+/// Re-evaluates the single Run whose problem-bearing Atom has just advanced.  Semantic item
+/// completion alone never publishes a result: vector and problem-resolution terminal states
+/// participate in this exact same completion decision.
+pub async fn refresh_run_completion_for_atom(
+    database: &Database,
+    atom_ref: Uuid,
+) -> Result<(), CommentResearchKernelError> {
+    let run_ref: Option<Uuid> =
+        sqlx::query_scalar("SELECT run_ref FROM linggan_comment_research_atom WHERE atom_ref=$1")
+            .bind(atom_ref)
+            .fetch_optional(database.pool())
+            .await?;
+    let Some(run_ref) = run_ref else {
+        return Ok(());
+    };
+    let mut transaction = database.pool().begin().await?;
+    refresh_run_completion(&mut transaction, run_ref).await?;
+    transaction.commit().await?;
+    Ok(())
+}
+
+/// A disabled or failed embedding configuration must settle active Runs honestly instead of
+/// leaving their semantic items labelled completed while publication can never happen.
+pub async fn fail_active_runs_without_embedding_config(
+    database: &Database,
+) -> Result<u64, CommentResearchKernelError> {
+    sqlx::query(
+        "UPDATE linggan_comment_research_atom_embedding embedding \
+         SET state='failed',failure_code='embedding_configuration_unavailable',updated_at=scope_001_now() \
+         FROM linggan_comment_research_atom atom \
+         JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
+         WHERE embedding.atom_ref=atom.atom_ref AND embedding.state='pending' \
+           AND run.state IN ('queued','running')",
+    )
+    .execute(database.pool())
+    .await?;
+    let run_refs: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT run_ref FROM linggan_comment_research_run \
+         WHERE state IN ('queued','running') ORDER BY created_at,run_ref",
+    )
+    .fetch_all(database.pool())
+    .await?;
+    let mut refreshed = 0;
+    for run_ref in run_refs {
+        let mut transaction = database.pool().begin().await?;
+        refresh_run_completion_with_embedding_state(&mut transaction, run_ref, true).await?;
+        transaction.commit().await?;
+        refreshed += 1;
+    }
+    Ok(refreshed)
 }
 
 async fn persist_derivation(
@@ -603,16 +832,30 @@ async fn persist_derivation(
         .map_err(|_| CommentResearchKernelError::Serialization)?;
     let reasons = serde_json::to_value(&research.reasons)
         .map_err(|_| CommentResearchKernelError::Serialization)?;
-    let raw_hash = comment_source_hash(raw.as_deref().unwrap_or_default());
-    let research_hash = comment_source_hash(&research.text);
+    let raw_hash = content_hash(raw.as_deref().unwrap_or_default());
+    let research_hash = content_hash(&research.text);
+    let derivation_input_hash = content_hash(
+        &json!({
+            "sourceRef":source_ref,
+            "derivationVersion":DERIVATION_VERSION,
+            "sourceSha256":raw_hash,
+            "researchSha256":research_hash,
+            "cleanerVersion":CLEANER_VERSION,
+            "authorRole":author_role.as_db(),
+            "attributionSource":row.get::<Option<String>, _>("attribution_source"),
+            "attributionObservedAt":row.get::<Option<String>, _>("attribution_observed_at"),
+            "contextManifest":context_manifest.clone(),
+        })
+        .to_string(),
+    );
     let inserted = sqlx::query(
         "INSERT INTO linggan_comment_research_derivation( \
              derivation_ref,source_ref,derivation_version,source_sha256,cleaner_version,clean_state, \
-             research_text,research_sha256,research_offsets,normalization_reasons,author_role, \
+             research_text,research_sha256,derivation_input_hash,research_offsets,normalization_reasons,author_role, \
              attribution_source,attribution_observed_at,eligibility,eligibility_reason,context_manifest \
          ) VALUES( \
-             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::timestamptz,$14,$15,$16 \
-         ) ON CONFLICT(source_ref,derivation_version,source_sha256) DO NOTHING",
+             $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14::timestamptz,$15,$16,$17 \
+         ) ON CONFLICT(source_ref,derivation_version,derivation_input_hash) DO NOTHING",
     )
     .bind(Uuid::new_v4())
     .bind(source_ref)
@@ -622,6 +865,7 @@ async fn persist_derivation(
     .bind(&research.clean_state)
     .bind(&research.text)
     .bind(research_hash)
+    .bind(derivation_input_hash)
     .bind(offsets)
     .bind(reasons)
     .bind(author_role.as_db())
@@ -669,7 +913,7 @@ fn context_manifest(row: &sqlx::postgres::PgRow, content_ref: Uuid) -> Value {
     let parent_ref: Option<Uuid> = row.get("parent_source_ref");
     let parent_hash = row
         .get::<Option<String>, _>("parent_body_text")
-        .map(|body| comment_source_hash(&body));
+        .map(|body| content_hash(&body));
     json!({
         "workRef":content_ref,
         "parentSourceRef":parent_ref,

@@ -21,6 +21,9 @@
 |---|---|---|
 | [plans/active/comment-research-reset-001.md](plans/active/comment-research-reset-001.md) | 活跃计划；唯一未来入口 | Issue #213：开发期清空旧研究派生结果、删除 Task B/P4，重建唯一评论研究语义内核 |
 | [decisions/0003-comment-research-single-semantic-kernel.md](decisions/0003-comment-research-single-semantic-kernel.md) | 权威当前 | 旧评论语义路径的退役、可继承基础能力和新内核的长期边界 |
+| [design/pages/comment-research-v1-page.md](design/pages/comment-research-v1-page.md) | 权威当前；交付分支实现 | 评论研究 V1 的五视图、研究设置与用户状态合同 |
+| [design/changes/comment-research-reset-001-ui-change-manifest.md](design/changes/comment-research-reset-001-ui-change-manifest.md) | 权威当前；交付分支实现 | 旧评论页面/API/自动计划替代与用户体验验证范围 |
+| [design/acceptance/comment-research-reset-001-acceptance.md](design/acceptance/comment-research-reset-001-acceptance.md) | 一次性验收记录；进行中 | V1 数据库、worker、UI、runtime 与用户验收边界 |
 | [archive/ci-auto-004-comment-auto-research.md](archive/ci-auto-004-comment-auto-research.md) | 历史归档 | 既有 P0–P5 与本机发布证据；其未来语义、聚类、读取和页面路径已被 COMMENT-RESEARCH-RESET-001 替代 |
 | [archive/ci-auto-004-execution-contracts.md](archive/ci-auto-004-execution-contracts.md) | 历史归档 | 既有数据/API/验收证据；不再规定新评论研究内核 |
 | [design/changes/ci-auto-004-ui-change-manifest.md](design/changes/ci-auto-004-ui-change-manifest.md) | 历史实施记录 | 既有 UI 状态证据；新用户路径由 COMMENT-RESEARCH-RESET-001 重新定义 |
@@ -30,7 +33,7 @@
 | [design/changes/target-deletion-author-attribution-001-ui-change-manifest.md](design/changes/target-deletion-author-attribution-001-ui-change-manifest.md) | 活跃计划 | Issue #214 的 Targets 行级停止/恢复、删除确认、保留事实与回执清单 |
 | [design/changes/target-inspector-performance-001-ui-change-manifest.md](design/changes/target-inspector-performance-001-ui-change-manifest.md) | 权威当前 | 目标检查器的信息架构、LIDS 与状态诚实性变更清单 |
 | [design/acceptance/target-inspector-performance-001-acceptance.md](design/acceptance/target-inspector-performance-001-acceptance.md) | 一次性报告 | 自动、隔离 PostgreSQL、浏览器与未部署边界的分层验收 |
-| [plans/active/model-pi-001.md](plans/active/model-pi-001.md) | 活跃计划 | Issue #169 模型设置与真实 Pi 适配，依赖 #168 |
+| [archive/model-pi-001.md](archive/model-pi-001.md) | 历史归档 | Issue #169 的模型设置/Pi 基础能力历史记录；当前调用路径由 COMMENT-RESEARCH-RESET-001 定义 |
 | [pages/model-ai-settings.md](pages/model-ai-settings.md) | 权威当前；交付分支 | 单页供应商弹窗、调用限制与用量语义 |
 | [design/pages/model-ai-settings-page.md](design/pages/model-ai-settings-page.md) | 权威当前；交付分支 | L1 模型与 AI 页面/状态/交互规格 |
 | [design/changes/model-pi-001-ui-change-manifest.md](design/changes/model-pi-001-ui-change-manifest.md) | 权威当前；交付分支 | 模型设置及个人菜单的授权、共享接缝和验证矩阵 |
@@ -240,11 +243,11 @@
 
 新文件只有同时满足“位置正确、名称稳定、状态明确、进入本索引、冲突已处理、变更已登记、检查通过”才算正式入库。
 
-- [评论语料与每日研究 V1](plans/active/comment-daily-001.md)：当前授权交付包，紧凑原声表格、清洗、按作品分析与每日研究。
+- [评论语料与每日研究 V1](plans/active/comment-daily-001.md)：历史实施记录；其 daily/旧页面路径已被 COMMENT-RESEARCH-RESET-001 terminal cutover 取代。
 
 - [评论情报实施合同](data-contracts/comment-intelligence-v1.md)：历史归档，CI-20260907-V1 的实施合同与证据；未来架构由 COMMENT-RESEARCH-RESET-001 替代。
 - [评论情报执行与交接](archive/comment-intelligence-v1.md)：历史归档，T0–T8、真实映射、文件所有权和验收记录；不再作为未来交付入口。
 
 - [评论情报验收矩阵](design/acceptance/comment-intelligence-v1-acceptance.md)：一次性报告，84项逐条映射、实际自动证明和未验证层。
 - [评论情报 UI 变更清单](design/changes/comment-intelligence-v1-ui-change-manifest.md)：历史归档，四视角、范围、状态、交互与视觉验收边界。
-- [评论情报离线评测合同](audits/comment-intelligence-evaluation-contract.md)：本地 JSONL、B0/B1/B2、真实留出集与高级规则门槛。
+- [评论情报离线评测合同](audits/comment-intelligence-evaluation-contract.md)：历史归档；对应旧评测器已删除，不是 V1 质量门。

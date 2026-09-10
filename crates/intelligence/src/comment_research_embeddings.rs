@@ -4,7 +4,7 @@
 //! vectors for readable V1 atoms and Problem definitions, then returns at most ten candidates.
 //! Cosine similarity never writes a Problem membership and never authorizes a model request.
 
-use crate::comment_research::comment_source_hash;
+use crate::research_text::content_hash;
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -75,6 +75,21 @@ pub struct ProblemCandidate {
     pub cosine: f64,
 }
 
+/// A single provider-facing embedding claim.  The worker receives the already frozen text and
+/// identity, never a query it has to rebuild from a separate research implementation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum EmbeddingWorkClaim {
+    Atom {
+        input: AtomEmbeddingInput,
+        run_ref: Uuid,
+    },
+    ProblemDefinition {
+        input: ProblemDefinitionEmbeddingInput,
+        run_ref: Uuid,
+    },
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum CommentResearchEmbeddingError {
     #[error(transparent)]
@@ -116,7 +131,7 @@ pub async fn activate_configured_embedding_space(
     let config_ref: Uuid = row.get("config_ref");
     let model_ref: Uuid = row.get("model_ref");
     let dimensions = positive_dimensions(row.get::<i32, _>("dimensions"))?;
-    let policy_hash = comment_source_hash(
+    let policy_hash = content_hash(
         &json!({
             "version":CANDIDATE_RECALL_VERSION,
             "configRef":config_ref,
@@ -214,7 +229,7 @@ pub async fn accept_atom_embedding(
         "UPDATE linggan_comment_research_atom_embedding \
          SET state='succeeded',dimensions=$4,vector=$5,invocation_ref=$6,failure_code=NULL, \
              updated_at=scope_001_now() \
-         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND state='pending'",
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND state IN ('pending','running')",
     )
     .bind(result.atom_ref)
     .bind(result.space_ref)
@@ -255,7 +270,7 @@ pub async fn accept_problem_definition_embedding(
          SET state='succeeded',dimensions=$5,vector=$6,invocation_ref=$7,failure_code=NULL, \
              updated_at=scope_001_now() \
          WHERE problem_ref=$1 AND definition_revision=$2 AND space_ref=$3 AND input_hash=$4 \
-           AND state='pending'",
+           AND state IN ('pending','running')",
     )
     .bind(result.problem_ref)
     .bind(result.definition_revision)
@@ -345,6 +360,237 @@ pub async fn recall_problem_candidates(
     ))
 }
 
+/// Advances exactly one V1 embedding queue item.  Definition vectors are prioritised so the
+/// first newly admitted Problem becomes recallable before another similar Atom is resolved.
+/// Failed work is terminal for this immutable input and is deliberately not silently retried as
+/// a different vector.
+pub async fn claim_next_embedding_work(
+    database: &Database,
+) -> Result<Option<EmbeddingWorkClaim>, CommentResearchEmbeddingError> {
+    let space = activate_configured_embedding_space(database).await?;
+    if let Some((input, run_ref)) =
+        claim_pending_definition_embedding(database, space.space_ref).await?
+    {
+        return Ok(Some(EmbeddingWorkClaim::ProblemDefinition {
+            input,
+            run_ref,
+        }));
+    }
+    if let Some((input, run_ref)) = claim_pending_atom_embedding(database, space.space_ref).await? {
+        return Ok(Some(EmbeddingWorkClaim::Atom { input, run_ref }));
+    }
+    Ok(None)
+}
+
+/// A provider failure belongs to this immutable input, not to every pending embedding in the
+/// system.  Leaving it explicit lets the run screen distinguish an incomplete result from an
+/// empty one and prevents a poisoned input from head-of-line blocking a healthy later item.
+pub async fn record_embedding_failure(
+    database: &Database,
+    claim: &EmbeddingWorkClaim,
+    invocation_ref: Option<Uuid>,
+    failure_code: &str,
+) -> Result<(), CommentResearchEmbeddingError> {
+    let (is_atom, first, second, space_ref, input_hash) = match claim {
+        EmbeddingWorkClaim::Atom { input, .. } => (
+            true,
+            input.atom_ref,
+            None,
+            input.space_ref,
+            input.input_hash.as_str(),
+        ),
+        EmbeddingWorkClaim::ProblemDefinition { input, .. } => (
+            false,
+            input.problem_ref,
+            Some(input.definition_revision),
+            input.space_ref,
+            input.input_hash.as_str(),
+        ),
+    };
+    let updated = if is_atom {
+        sqlx::query(
+            "UPDATE linggan_comment_research_atom_embedding \
+             SET state='failed',invocation_ref=$4,failure_code=$5,updated_at=scope_001_now() \
+             WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND state='running'",
+        )
+        .bind(first)
+        .bind(space_ref)
+        .bind(input_hash)
+        .bind(invocation_ref)
+        .bind(failure_code)
+        .execute(database.pool())
+        .await?
+        .rows_affected()
+    } else {
+        sqlx::query(
+            "UPDATE linggan_comment_research_problem_definition_embedding \
+             SET state='failed',invocation_ref=$5,failure_code=$6,updated_at=scope_001_now() \
+             WHERE problem_ref=$1 AND definition_revision=$2 AND space_ref=$3 AND input_hash=$4 \
+               AND state='running'",
+        )
+        .bind(first)
+        .bind(second)
+        .bind(space_ref)
+        .bind(input_hash)
+        .bind(invocation_ref)
+        .bind(failure_code)
+        .execute(database.pool())
+        .await?
+        .rows_affected()
+    };
+    if updated == 1 {
+        Ok(())
+    } else {
+        Err(CommentResearchEmbeddingError::WorkUnavailable)
+    }
+}
+
+async fn claim_pending_definition_embedding(
+    database: &Database,
+    space_ref: Uuid,
+) -> Result<Option<(ProblemDefinitionEmbeddingInput, Uuid)>, CommentResearchEmbeddingError> {
+    let Some(run_ref) = candidate_recall_run(database).await? else {
+        return Ok(None);
+    };
+    let existing: Option<(Uuid, i32)> = sqlx::query_as(
+        "SELECT embedding.problem_ref,embedding.definition_revision \
+         FROM linggan_comment_research_problem_definition_embedding embedding \
+         WHERE embedding.space_ref=$1 AND embedding.state='pending' \
+         ORDER BY embedding.created_at,embedding.problem_ref LIMIT 1",
+    )
+    .bind(space_ref)
+    .fetch_optional(database.pool())
+    .await?;
+    let target = if let Some(target) = existing {
+        target
+    } else {
+        let candidate: Option<(Uuid, i32)> = sqlx::query_as(
+            "SELECT definition.problem_ref,definition.revision \
+             FROM linggan_comment_research_problem_definition definition \
+             JOIN linggan_comment_research_problem problem USING(problem_ref) \
+             WHERE problem.state='active' \
+               AND EXISTS( \
+                 SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
+                 JOIN linggan_comment_research_atom atom USING(atom_ref) \
+                 JOIN linggan_comment_research_derivation_readable derivation \
+                   ON derivation.derivation_ref=atom.derivation_ref \
+                 WHERE membership.problem_ref=definition.problem_ref \
+                   AND membership.definition_revision=definition.revision AND membership.current \
+               ) \
+               AND NOT EXISTS( \
+                 SELECT 1 FROM linggan_comment_research_problem_definition_embedding prior \
+                 WHERE prior.problem_ref=definition.problem_ref \
+                   AND prior.definition_revision=definition.revision AND prior.space_ref=$1 \
+               ) \
+             ORDER BY definition.created_at,definition.problem_ref LIMIT 1",
+        )
+        .bind(space_ref)
+        .fetch_optional(database.pool())
+        .await?;
+        let Some(target) = candidate else {
+            return Ok(None);
+        };
+        queue_problem_definition_embedding(database, target.0, target.1, space_ref).await?;
+        target
+    };
+    let input = read_definition_embedding_input(database, target.0, target.1, space_ref).await?;
+    let claimed = sqlx::query(
+        "UPDATE linggan_comment_research_problem_definition_embedding \
+         SET state='running',updated_at=scope_001_now() \
+         WHERE problem_ref=$1 AND definition_revision=$2 AND space_ref=$3 AND input_hash=$4 \
+           AND state='pending'",
+    )
+    .bind(input.problem_ref)
+    .bind(input.definition_revision)
+    .bind(input.space_ref)
+    .bind(&input.input_hash)
+    .execute(database.pool())
+    .await?
+    .rows_affected();
+    Ok((claimed == 1).then_some((input, run_ref)))
+}
+
+/// Definition vectors are only built while a current Run has an Atom ready for candidate recall.
+/// This prevents a global cache warmer from sending unbounded provider calls after a Run ended.
+async fn candidate_recall_run(
+    database: &Database,
+) -> Result<Option<Uuid>, CommentResearchEmbeddingError> {
+    sqlx::query_scalar(
+        "SELECT atom.run_ref \
+         FROM linggan_comment_research_atom atom \
+         JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
+         LEFT JOIN linggan_comment_research_atom_problem_membership membership \
+           ON membership.atom_ref=atom.atom_ref AND membership.current \
+         WHERE atom.kind IN ('problem','need') AND membership.atom_ref IS NULL \
+           AND run.state IN ('queued','running') \
+           AND EXISTS(SELECT 1 FROM linggan_comment_research_atom_embedding embedding \
+                      WHERE embedding.atom_ref=atom.atom_ref AND embedding.state='succeeded') \
+         ORDER BY run.created_at,atom.created_at,atom.atom_ref LIMIT 1",
+    )
+    .fetch_optional(database.pool())
+    .await
+    .map_err(CommentResearchEmbeddingError::Database)
+}
+
+async fn claim_pending_atom_embedding(
+    database: &Database,
+    space_ref: Uuid,
+) -> Result<Option<(AtomEmbeddingInput, Uuid)>, CommentResearchEmbeddingError> {
+    let existing: Option<(Uuid, Uuid)> = sqlx::query_as(
+        "SELECT embedding.atom_ref,atom.run_ref \
+         FROM linggan_comment_research_atom_embedding embedding \
+         JOIN linggan_comment_research_atom atom USING(atom_ref) \
+         JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
+         WHERE embedding.space_ref=$1 AND embedding.state='pending' \
+           AND run.state IN ('queued','running') \
+         ORDER BY embedding.created_at,embedding.atom_ref LIMIT 1",
+    )
+    .bind(space_ref)
+    .fetch_optional(database.pool())
+    .await?;
+    let (atom_ref, run_ref) = if let Some(existing) = existing {
+        existing
+    } else {
+        let candidate: Option<(Uuid, Uuid)> = sqlx::query_as(
+            "SELECT atom.atom_ref,atom.run_ref \
+             FROM linggan_comment_research_atom atom \
+             JOIN linggan_comment_research_derivation_readable derivation \
+               ON derivation.derivation_ref=atom.derivation_ref \
+             LEFT JOIN linggan_comment_research_atom_problem_membership membership \
+               ON membership.atom_ref=atom.atom_ref AND membership.current \
+             JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
+             WHERE atom.kind IN ('problem','need') AND membership.atom_ref IS NULL \
+               AND run.state IN ('queued','running') \
+               AND NOT EXISTS( \
+                 SELECT 1 FROM linggan_comment_research_atom_embedding prior \
+                 WHERE prior.atom_ref=atom.atom_ref AND prior.space_ref=$1 \
+               ) \
+             ORDER BY atom.created_at,atom.atom_ref LIMIT 1",
+        )
+        .bind(space_ref)
+        .fetch_optional(database.pool())
+        .await?;
+        let Some(candidate) = candidate else {
+            return Ok(None);
+        };
+        queue_atom_embedding(database, candidate.0, space_ref).await?;
+        candidate
+    };
+    let input = read_atom_embedding_input(database, atom_ref, space_ref).await?;
+    let claimed = sqlx::query(
+        "UPDATE linggan_comment_research_atom_embedding \
+         SET state='running',updated_at=scope_001_now() \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND state='pending'",
+    )
+    .bind(input.atom_ref)
+    .bind(input.space_ref)
+    .bind(&input.input_hash)
+    .execute(database.pool())
+    .await?
+    .rows_affected();
+    Ok((claimed == 1).then_some((input, run_ref)))
+}
+
 struct ProblemCandidateVector {
     problem_ref: Uuid,
     definition_revision: i32,
@@ -378,7 +624,7 @@ async fn read_atom_embedding_input(
     Ok(AtomEmbeddingInput {
         atom_ref,
         space_ref,
-        input_hash: comment_source_hash(
+        input_hash: content_hash(
             &json!({"kind":"atom","atomKind":kind,"proposition":text,"ruleHash":rule_hash})
                 .to_string(),
         ),
@@ -425,7 +671,7 @@ async fn read_definition_embedding_input(
         problem_ref,
         definition_revision,
         space_ref,
-        input_hash: comment_source_hash(
+        input_hash: content_hash(
             &json!({
                 "kind":"problem_definition",
                 "definitionHash":definition_hash,

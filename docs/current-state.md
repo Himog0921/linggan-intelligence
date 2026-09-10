@@ -13,13 +13,15 @@
 - 本轮隔离 PostgreSQL 已通过作者归属、删除控制历史、阻止删除保护事实及名称确认等新增证明，并修正了四处旧测试夹具/断言，使其符合现有的 200 篇渐进建档、工单重排、租约历史与人可读北京时间合同。完整 LOCAL-001 脚本已通过，且其临时数据库、容器和卷均已清理；该结论仍只是候选源码证明，不代表共享迁移、PR 合并、运行时切换或真实采集。
 
 
-### COMMENT-RESEARCH-RESET-001 / Issue #213（已启动；设计与受控重建中）
+### COMMENT-RESEARCH-RESET-001 / Issue #213（V1 实现与终态迁移候选已完成；共享切换待执行）
 
 Mog 已决定评论研究仍处开发期：既有研究派生结果可以删除，不做 Task B、P4 与新系统之间的数据迁移。新交付只保留 Raw Comment/Evidence、来源资格、作者事实、清洗定位、调用账本、预算与 lease/recovery 等可独立复用基础；旧 candidate/relation/vector、P4 HDBSCAN/Leiden/adapter/group、旧超级查询和页面读取将全部退役。唯一未来合同为 [COMMENT-RESEARCH-RESET-001](plans/active/comment-research-reset-001.md)，长期裁定为 [DEC-0003](decisions/0003-comment-research-single-semantic-kernel.md)。
 
-本轮只读走查已完成：旧 Task B、P4 与 UI/runtime 三条路径的写入、读取、Worker、迁移和测试依赖均已定位；Issue #213 与 `codex/comment-research-reset-001` worktree 已建立。R1 输入/运行基础已在该 worktree 落地：`0063_content_author_attribution` 成为作者归属唯一投影，`0064_comment_research_kernel` 新建 versioned ResearchDerivation、保存策略、冻结 Run、四类失败语义和未来归并/结果骨架；`0065_comment_research_vector_candidates` 为新内核追加 Problem definition vector cache，`0066_comment_research_change_signals` 允许同一 Problem 发布多条独立变化信号，`0067_comment_research_run_item_lease` 令 V1 Worker 的 120 秒 claim 可恢复、并为 interrupted 调用保留未知用量账本。当前实现以普通用户身份比较决定资格，确认作品作者回复才从研究正文移除 `作者 ` 徽标，且不会改写 Raw Comment。R2 的 Atom 接纳器现只接受四类受限原子；模型提议必须带有效的 Unicode research span，程序才依据不可变映射写入 source span。无效提议整项回滚、不留下半成品 Atom；`no_signal` 仅是 RunItem 终态。已接纳 Atom 的稳定 Problem 接纳同样落地：只有 `problem`/`need` 可成为 `same` 问题成员；一个 Atom 只能有一个当前归属，明确的新建/同一问题决定才可创建或绑定 `problem_ref`，并写入 definition revision、policy hash、basis、证据和必要的 invocation ledger。`solution`/`experience` 仍是原声证据，不能污染问题页。已保存且合格的 embedding 配置可生成版本化空间，错维/NaN/零向量会零写入拒绝；exact cosine 最多返回十个可读定义候选，不能直接写 membership。已完成、归属完整且来源仍可读的 Run 才能发布 immutable ResultRevision；上海完整 7d/前 7d 的占比/覆盖率及独立变化信号由此生成。新 V1 endpoints 已为概览、原声、问题、变化、运行记录各自建立只读投影，不会再让变化观察复用概览或让原声暴露向量准备状态；尚未把旧网页切到它们，因此真实性能改造仍未完成。隔离 PostgreSQL 的 10 项证明、内核单测和 API 守卫测试通过；尚未接入真实模型或 embedding provider、做召回质量 benchmark、改造页面或在共享 runtime 验收。
+本轮已完成旧路径依赖图与代码替换。`0063_content_author_attribution` 是作品作者归属唯一投影；`0064`–`0068` 建立 versioned ResearchDerivation、保存策略、冻结 Run、四类失败语义、RunItem/归并 lease、四类 Atom、版本化 embedding、exact cosine Top-K 候选、受限同一/新问题决定、immutable ResultRevision 和独立变化信号。确认作品作者回复才从研究正文移除 `作者 ` 徽标，Raw Comment 不改写；`author_identity_unknown` 不进入研究分母。模型输出必须通过 Unicode span、kind、来源与定义候选校验，才可写入 Atom/Membership；`solution`/`experience` 仍是原声证据。生产 `linggan-comment-worker --execute [--once]` 只推进 V1 的语义、向量、归并与发布步骤，通用 invocation ledger 保存预算、调用、失败与用量；短暂 adapter/provider 问题有界重试，永久不兼容记录到具体 Item，旧 recovery 不能阻断新 Run。
 
-本轮仍只在隔离代码/数据库重建，不触碰共享 `main` 的未提交 collection 修改，不清空共享数据库、不切换 runtime、不自动研究或外发真实评论。新内核必须先完成 isolated PostgreSQL、API、worker、UI 与性能证据，随后才向 Mog 请求一次明确的开发库重置授权。
+`0069_comment_research_v1_cutover` 在完整历史 migration fixture 上通过：它不用 `CASCADE`，显式删除旧 Task B/P4/daily/replay/recovery 的表、视图、触发器、函数和 identity index（含无 FK 的 `linggan_ci_source_revision`），并清空可能由早期开发分支写入的 V1 policy/run/derivation/Atom/vector/Problem/result 派生行；Raw Comment/Evidence、作品作者归属、来源资格、通用模型连接/配置、embedding 设置和 invocation ledger 保留。`0070_comment_research_v1_derivation_head` 使归属/父回复上下文变化产生新的 immutable derivation：冻结 Run 继续读取其原始可读输入，新 Run 才选择当前 head；任一冻结输入不再当前时，已发布整版结果不可读。旧 API/UI、旧 Python 语义计算 runtime、旧 worker 入口和专属验证脚本均已从候选源码删除；五个 V1 读取端点与页面不再让变化观察复用概览，也不向原声显示“语义向量准备”。isolated PostgreSQL 的 20 项 V1 proof、2 项 API proof、Pi adapter SDK proof、Rust 编译及 API route/page guard 已通过。
+
+Mog 已于 2026-09-10 授权 source merge、共享开发库执行此 terminal migration、localhost runtime 切换和上线测试；连续排程仍关闭，部署不会自动向真实模型发送评论。尚未发生的事实必须保持分开：独立复审、exact-head merge、共享开发库删除回执、runtime PID/health、真实浏览器交互/性能，以及用户主动开始一轮真实 V1 研究后的业务验收。
 
 ### CI-AUTO-004 · 本机发布回执（2026-09-09；历史实现事实）
 
@@ -79,7 +81,7 @@ Mog 于 2026-09-08 确认推进观察目标列表和右侧检查器收口，并�
 
 #168、#170、#172 已合并。Mog 于 2026-09-06 明确授权后，0039/0040 已应用到本机共享库，3000 模型设置 API 从 503 恢复为 200，评论 worker 已有有效心跳。部署回执见 [PR #172](https://github.com/Himog0921/linggan-intelligence/pull/172)。单页+单供应商弹窗是当前交互，不再采用旧四区常驻布局。
 
-2026-09-07 Mog 的 DeepSeek Responses 测试两次达到 1024 token 上限。当前同包返修明确关闭已知官方 V4 模型的默认思考，落实原纯文本合同，区分模型已响应和评论输出资格；保持预算/超时/历史回执。SDK 11 项、隔离 PostgreSQL 32 项及合成浏览器验证通过，真实供应商修复后复测尚未执行。具体范围见 [MODEL-PI-001 合同](plans/active/model-pi-001.md) 和 [验收记录](design/acceptance/model-pi-001-acceptance.md)。
+2026-09-07 Mog 的 DeepSeek Responses 测试两次达到 1024 token 上限。当前同包返修明确关闭已知官方 V4 模型的默认思考，落实原纯文本合同，区分模型已响应和评论输出资格；保持预算/超时/历史回执。SDK 11 项、隔离 PostgreSQL 32 项及合成浏览器验证通过，真实供应商修复后复测尚未执行。具体范围见 [MODEL-PI-001 历史合同](archive/model-pi-001.md) 和 [验收记录](design/acceptance/model-pi-001-acceptance.md)。
 
 ### COMMENT-RESEARCH-001 / Issue #167（已合并 main；模型执行已由 #169 接入）
 

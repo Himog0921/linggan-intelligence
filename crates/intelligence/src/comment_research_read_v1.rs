@@ -83,7 +83,12 @@ pub async fn schema_ready(database: &Database) -> Result<bool, CommentResearchV1
         "SELECT to_regclass('linggan_comment_research_result_revision_readable') IS NOT NULL \
                 AND to_regclass('linggan_comment_research_problem_window_stat') IS NOT NULL \
                 AND to_regclass('linggan_comment_research_change_observation') IS NOT NULL \
-                AND to_regclass('linggan_comment_research_atom_problem_membership') IS NOT NULL",
+                AND to_regclass('linggan_comment_research_atom_problem_membership') IS NOT NULL \
+                AND to_regclass('linggan_comment_daily_batch') IS NULL \
+                AND to_regclass('linggan_ci_problem') IS NULL \
+                AND EXISTS(SELECT 1 FROM pg_attribute \
+                    WHERE attrelid='linggan_comment_research_derivation'::regclass \
+                      AND attname='derivation_input_hash' AND NOT attisdropped)",
     )
     .fetch_one(database.pool())
     .await?)
@@ -134,9 +139,10 @@ pub async fn read_overview(
     }))
 }
 
-/// Reads the frozen input comments for one result.  A row always carries the raw evidence text,
-/// its separately derived research text, author-role fact, and visible research outcome; it does
-/// not surface vector/embedding implementation states to the user.
+/// Reads the frozen ordinary-user input comments for one result. A row carries the raw evidence
+/// and separately derived research text, but never implementation queue state. Author replies
+/// and identity-unknown comments remain excluded upstream and do not masquerade as research
+/// voices.
 pub async fn read_voices(
     database: &Database,
     query: &CommentResearchV1ReadQuery,
@@ -161,7 +167,6 @@ pub async fn read_voices(
              'commentText',source.body_text, \
              'researchText',derivation.research_text, \
              'authorDisplayName',source.author_display_name, \
-             'authorRole',derivation.author_role, \
              'researchOutcome',item.state, \
              'observedAt',source.observed_at, \
              'isReply',source.is_reply, \

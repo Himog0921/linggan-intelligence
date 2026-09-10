@@ -1,25 +1,7 @@
 use crate::fixture::{submit_package, submit_package_at};
-use linggan_intelligence::comment_research::*;
 use linggan_storage_postgres::Database;
 use serde_json::json;
 use uuid::Uuid;
-pub async fn comment(
-    database: &Database,
-    note: &str,
-    id: &str,
-    body: &str,
-    observed_at: &str,
-) -> Uuid {
-    comment_with_author(
-        database,
-        note,
-        id,
-        body,
-        Some("synthetic-hidden-author"),
-        observed_at,
-    )
-    .await
-}
 pub async fn comment_with_author(
     database: &Database,
     note: &str,
@@ -45,9 +27,6 @@ pub async fn comment_with_author(
         .await
         .unwrap()
 }
-pub async fn detail(database: &Database, note: &str, title: &str) {
-    detail_with_author(database, note, title, None).await;
-}
 pub async fn detail_with_author(
     database: &Database,
     note: &str,
@@ -67,22 +46,4 @@ pub async fn detail_with_author(
         "kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":note},
         "payload":payload
     })).await;
-}
-pub fn asset(source_ref: Uuid, body: &str) -> SaveCommentAsset {
-    SaveCommentAsset {
-        asset_ref: Uuid::new_v4(),
-        source_ref,
-        start_char: 0,
-        end_char: body.chars().count() as i32,
-        source_sha256: comment_source_hash(body),
-        reason: "合成研究理由".into(),
-        collection_ref: None,
-    }
-}
-pub fn problem(label: &str) -> ResearchFacet {
-    ResearchFacet {
-        dimension: ResearchDimension::Problem,
-        label: label.into(),
-        basis: ResearchBasis::Explicit,
-    }
 }

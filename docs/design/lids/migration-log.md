@@ -1,12 +1,19 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-09-07
+> 最后核对: 2026-09-10
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
 
 任何影响 LIDS 五层或横向约束的事项必须在同一 PR 更新本记录：变更是什么、取代什么、影响页面/组件、验证结果和仍未证明什么。日志不是路线图，更不是运行时真相。
+
+## 2026-09-10 · COMMENT-RESEARCH-RESET-001 V1 唯一页面
+
+- **范围**：旧评论研究的每日观察、保存查询、资产、标注、Task B/P4 与技术队列表面被移除；新页面用概览、用户原声、用户问题、变化观察、运行记录五个独立读取面替代。
+- **表达**：只组合既有 L1 shell、文字 tab、表格、状态与 modal，消费 `--lgi-*` token；不新增全局 token 或视觉风格。原声不显示 embedding 队列，确认作者回复的 `作者` 徽标不进入研究正文。
+- **Data Truth**：变化观察只呈现窗口 observation/不可比原因，禁止复用概览；运行失败、无已发布版本和向量未就绪是不同状态，不能以旧结果或空数字替代。
+- **验证边界**：页面/API 单元与隔离数据库证明在本交付分支通过；真实 runtime、浏览器交互、性能和 Mog 业务验收仍待上线步骤，见 [V1 页面规格](../pages/comment-research-v1-page.md) 与 [验收记录](../acceptance/comment-research-reset-001-acceptance.md)。
 
 ## 2026-09-08 · TARGET-INSPECTOR-PERFORMANCE-001
 

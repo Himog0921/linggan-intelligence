@@ -1,270 +1,198 @@
 (() => {
   'use strict';
-  if (document.querySelector('[data-initial-view]')?.dataset.initialView !== 'queries') return;
-  const $ = (id) => document.getElementById(id);
+
   const api = '/api/local/comment-research';
-  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const params = new URLSearchParams(location.search);
-  // 当前领域由服务端随页面下发。回落判定服务端已经做过一次，前端再判一次就是两处规则。
-  const domainRef = document.body.dataset.corpusDomain || '';
-  const domainName = document.body.dataset.corpusDomainName || '';
-  const readsEvidence = document.body.dataset.corpusDomainOwn !== 'false';
-  const initial = document.querySelector('[data-initial-view]').dataset.initialView;
-  const state = {view:initial === 'queries' ? 'queries' : params.get('view') || 'voices',cleanState:params.get('cleanState') || '',text:params.get('text') || '',workRef:params.get('workRef') || '',cursor:null,history:[],next:null,collectionRef:params.get('collectionRef') || '',generation:0,detailGeneration:0,collections:[],assets:new Map(),queries:new Map(),selected:new Set()};
-  if (!['voices','groups','assets','queries','daily'].includes(state.view)) state.view = 'voices';
-  let workOptions=null;
-  let detail = null;
-  let command = null;
-  let commandId = null;
-  const dimensionLabels = {scene:'场景',problem:'问题',tried_method:'尝试过的方法',stated_failure_reason:'评论者自述的失败原因',emotion:'情绪',expectation:'期望',expression:'表达方式'};
-  const cleanLabels={direct:'可分析',context:'需上下文',low_information:'低信息',anomaly:'异常'};
-  const analysisLabels = {low_information:'未送模型',anomaly:'未送模型',context_missing:'上下文不足',restricted:'来源受限',source_limit:'超出本批数量上限',pending:'待分析',running:'分析中',succeeded:'已形成候选',no_signal:'分析完成，未提取到信号',failed:'分析失败'};
-  const failureLabels = {provider_timeout:'模型调用超过本地等待上限，重试受原批次次数与额度限制',provider_unavailable:'模型服务不可用',invalid_output:'模型返回内容未通过引用校验',source_unavailable:'来源当前不可用',lease_expired:'执行租约已过期'};
-  const errorLabels = {comment_daily_schema_missing:'每日研究尚未完成数据库升级，原声浏览仍可使用。',source_unavailable:'来源当前不可用于研究，正文和派生内容已停止展示。',revision_conflict:'记录已发生变化，请刷新后重试。',idempotency_conflict:'本次保存标识已有不同内容，请重新打开保存表单。',invalid_command:'内容或来源范围不符合要求，请核对后重试。',invalid_query:'查询条件或分页已失效，请重新查询。',comment_research_unavailable:'评论研究暂时无法读取，请检查本机数据服务和本包 schema。',home_domain_reads_evidence:'本领域的评论在证据侧，这个接口只读外部领域。',cross_industry_schema_unavailable:'跨行业相关的数据表尚未建立。',cross_industry_read_unavailable:'跨行业内容暂时无法读取，请检查本机数据服务。'};
-  async function request(path, body) {
-    const response = await fetch(path, {method:body ? 'POST':'GET',headers:body ? {'Content-Type':'application/json'}:{},body:body ? JSON.stringify(body):undefined,cache:'no-store'});
+  const $ = (selector) => document.querySelector(selector);
+  const result = $('#research-result');
+  const status = $('#research-status');
+  const dialog = $('#research-settings-dialog');
+  const form = $('#research-settings-form');
+  const views = new Set(['overview', 'voices', 'problems', 'changes', 'runs']);
+  const state = { view: new URLSearchParams(location.search).get('view') || 'overview', setup: null };
+  if (!views.has(state.view)) state.view = 'overview';
+
+  const errorText = {
+    comment_research_result_unavailable: '还没有可读取的已发布研究结果。先保存策略并开始一轮研究；后台完成提取、向量归并和结果冻结后，页面会显示新的版本。',
+    comment_research_v1_schema_missing: '评论研究 V1 的数据库结构尚未就绪。',
+    comment_research_unavailable: '评论研究暂时不可用，请检查本机数据服务。',
+    comment_research_v1_unavailable: '本次研究结果暂时无法读取；上一次已显示的结果不会被伪造成新结果。',
+    research_policy_missing: '请先保存研究策略。',
+    no_eligible_research_comments: '当前没有可进入研究的普通用户评论。作品作者回复、身份未知或不可读评论不会被混入。',
+    invalid_research_request: '研究设置或运行范围不符合要求。',
+  };
+
+  const escape = (value) => String(value ?? '').replace(/[&<>"']/g, character => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' })[character]);
+  const date = value => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle:'medium', timeStyle:'short', timeZone:'Asia/Shanghai' }).format(new Date(value)) : '未知';
+  const count = value => Number(value ?? 0).toLocaleString('zh-CN');
+  const pct = value => `${(Number(value ?? 0) * 100).toFixed(1)}%`;
+  const empty = message => `<section class="cr-v1-empty"><h2>暂时没有可显示的研究结果</h2><p>${escape(message)}</p></section>`;
+  const table = (head, rows) => `<div class="cr-v1-table-wrap"><table><thead><tr>${head.map(item => `<th scope="col">${escape(item)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+
+  async function request(path, options = {}) {
+    const response = await fetch(path, { cache:'no-store', headers: options.body ? {'Content-Type':'application/json'} : undefined, ...options });
     const payload = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(errorLabels[payload.error] || '请求未完成，请保留当前输入并重试。');
+    if (!response.ok) {
+      const error = new Error(errorText[payload.error] || '请求没有完成，请保留当前输入后重试。');
+      error.code = payload.error;
+      throw error;
+    }
     return payload;
   }
-  function feedback(message, error=false) { $('feedback').textContent=message; $('feedback').classList.toggle('lgi-research-error',error); }
-  function urlState() {
-    const query = new URLSearchParams();
-    if(state.view!=='queries') query.set('view',state.view);
-    if(state.text) query.set('text',state.text);
-    if(state.workRef) query.set('workRef',state.workRef);
-    if(state.cleanState) query.set('cleanState',state.cleanState);
-    if(state.collectionRef) query.set('collectionRef',state.collectionRef);
-    // 领域原样带回。与证据库同一处教训：从零重建地址的函数只认识本页自己的查询条件，
-    // 领域不在其中就会被每一次交互悄悄抹掉，变成「选一次、下次点击即失效」。
-    if(domainRef) query.set('domain',domainRef);
-    history.replaceState(null,'',`${location.pathname}${query.size ? '?' + query : ''}`);
-  }
-  function table(headers, rows) {
-    return `<table><thead><tr>${headers.map(h=>`<th scope="col" style="width:${h[1]}">${esc(h[0])}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table>`;
-  }
-  function empty(text) { return `<p class="lgi-research-empty">${esc(text)}</p>`; }
-  // 外部领域走自己的数据源，一个字段都不经过证据侧接口。
-  //
-  // 只有原声浏览有跨行业数据可读：问题分组与语料资产是研究产物，跨行业侧还没有存储，
-  // 给它们编一个数据源就是假 UI。
-  async function loadOutsideDomain(generation) {
-    // 写入口一并收起：外部领域下没有可引用的来源，留着按钮只会存出一条归属不明的记录。
-    $('search-form').hidden=true;
-    $('asset-tools').hidden=true;
-    $('daily-tools').hidden=true;
-    if(state.view!=='voices') { outsideDomainEmpty(); return; }
-    try {
-      const data=await request(`/api/local/cross-industry/comments?domain=${encodeURIComponent(domainRef)}`);
-      if(generation!==state.generation) return;
-      renderCrossIndustryVoices(data);
-    } catch(error) {
-      if(generation!==state.generation) return;
-      $('results').innerHTML=empty('读取失败。');
-      feedback(error.message,true);
-    } finally {
-      if(generation===state.generation) $('results').setAttribute('aria-busy','false');
-    }
-  }
-  // 说的是「这个领域还没有」，不是「当前查询没匹配」——两者的下一步动作完全不同，
-  // 用后者会把「一条都还没采过」说成「你筛掉了」。
-  function outsideDomainEmpty() {
-    const where = domainName ? `「${domainName}」` : '这个领域';
-    const what = ({voices:'评论原声',groups:'问题分组',assets:'语料资产',queries:'已存查询',daily:'每日研究'})[state.view];
-    $('results').innerHTML=empty(`${where}还没有${what}。跨行业内容与本领域材料分开存放，这里只显示当前领域自己的内容。`);
-    $('results').setAttribute('aria-busy','false');
-    $('result-count').textContent='';
-  }
-  function renderCrossIndustryVoices(data) {
-    const {page,works}=data;
-    state.next=null;
-    const byRef=new Map(works.map(w=>[w.workRef,w]));
-    if(!page.items.length) { outsideDomainEmpty(); return; }
-    $('result-count').textContent=`${page.total.toLocaleString()} 条原声 · 本页 ${page.items.length} 条${data.truncated?' · 仅显示第一页':''}`;
-    // 不给「研读与收存」：语料资产目前只认证据侧的来源，在这里收存会存出一条挂错
-    // 地方的记录。等跨行业侧的研究产物有了自己的归属再开。
-    $('results').innerHTML=table([['评论原声','56%'],['来源作品','28%'],['观察','16%']],page.items.map(item=>{
-      const work=byRef.get(item.workRef);
-      return `<tr><td><blockquote>${esc(item.body ?? '正文尚未取得')}</blockquote><div class="lgi-research-meta">${item.isReply?'回复':'主评论'}${item.bodyTruncated?' · 显示开头片段':''}</div></td><td><span class="lgi-research-source-title">${esc(work?.title ?? '作品标题未知')}</span><div class="lgi-research-meta">${esc(work?.creatorDisplayName ?? '作品作者未知')}</div></td><td><div class="lgi-research-meta">观察于 ${esc(item.observedAt ?? '时间未知')}</div></td></tr>`;
-    }));
-  }
-  function resetPage() {state.selected.clear();$('selection-run').disabled=true;$('selection-run').textContent='分析所选';state.cursor=null;state.history=[];state.next=null;}
-  async function load() {
-    const generation=++state.generation;
-    $('search-text').value=state.text;
-    $('clean-filter').value=state.cleanState;
-    $('search-form').hidden=state.view!=='voices';
-    $('asset-tools').hidden=state.view!=='assets';
-    $('daily-tools').hidden=state.view!=='daily';
-    document.querySelector('.lgi-research').dataset.view=state.view;
-    document.querySelector('.lgi-research-tabs').hidden=state.view==='queries';
-    document.querySelectorAll('.lgi-research-tabs [data-view]').forEach(el=>{if(el.dataset.view===state.view) el.setAttribute('aria-current','page');else el.removeAttribute('aria-current');});
-    $('result-title').textContent=({voices:'原声浏览',groups:'问题分组',assets:'语料资产',queries:'已存查询',daily:'每日研究'})[state.view];
-    $('result-count').textContent='';$('results').setAttribute('aria-busy','true');$('results').innerHTML=empty('正在读取…');
-    $('previous').hidden=true;$('next').hidden=true;feedback('');urlState();
-    if(!readsEvidence) { await loadOutsideDomain(generation); return; }
-    try {
-      let data;
-      if(state.view==='voices') {
-        const q=new URLSearchParams({text:state.text});
-        if(state.workRef) q.set('workRef',state.workRef);
-        if(state.cursor) q.set('cursor',state.cursor);
-        if(state.cleanState) q.set('cleanState',state.cleanState);
-        if(!workOptions){const options=await request(`${api}/works`);workOptions=options.items;$('work-filter').innerHTML='<option value="">全部作品</option>'+options.items.map(w=>`<option value="${w.workRef}">${esc(w.title||'作品标题未知')}</option>`).join('');if(options.truncated)$('work-filter').insertAdjacentHTML('beforeend','<option disabled>仅列出前 200 篇，可从来源作品限定范围</option>');}
-        if(state.workRef&&!workOptions.some(w=>w.workRef===state.workRef)&&!Array.from($('work-filter').options).some(o=>o.value===state.workRef))$('work-filter').add(new Option('当前限定作品',state.workRef));
-        $('work-filter').value=state.workRef;
-        data=await request(`${api}?${q}`);
-      } else if(state.view==='assets') {
-        const q=new URLSearchParams();if(state.collectionRef) q.set('collectionRef',state.collectionRef);if(state.cursor) q.set('cursor',state.cursor);
-        [data]=await Promise.all([request(`${api}/assets?${q}`),loadCollections()]);
-      } else data=await request(`${api}/${state.view}`);
-      if(generation!==state.generation) return;
-      if(state.view==='voices') renderVoices(data);
-      if(state.view==='assets') renderAssets(data);
-      if(state.view==='groups') renderGroups(data);
-      if(state.view==='queries') renderQueries(data);
-      if(state.view==='daily') window.CommentDaily.render(data);
-      $('previous').hidden=state.history.length===0;$('next').hidden=!state.next;
-    } catch(e) {if(generation===state.generation){$('results').innerHTML=empty('本次读取没有完成。可使用刷新重试。');feedback(e.message,true);}}
-    finally {if(generation===state.generation)$('results').setAttribute('aria-busy','false');}
-  }
-  function renderVoices(data) {
-    const {page,works}=data;state.next=page.nextCursor;
-    $('result-count').textContent=`${page.total.toLocaleString()} 条匹配原声 · 本页 ${page.items.length} 条`;
-    $('model-state').innerHTML=esc(({CONFIGURED:'已配置评论分析模型',NEEDS_SELECTION:'请选择调用成功的默认模型',NEEDS_CALL_TEST:'请在供应商弹窗中测试模型调用',NEEDS_QUALIFICATION:'请在供应商弹窗中测试模型调用',PAUSED:'模型连接已暂停',UNAVAILABLE:'模型设置状态暂不可读'})[data.modelState]||'模型尚未配置')+' · <a href="/settings/models">模型与 AI 设置</a>';
-    const byRef=new Map(works.map(w=>[w.workRef,w]));
-    const processing=new Map((data.researchStates||[]).map(v=>[v.sourceRef,v]));
-    $('results').innerHTML=page.items.length ? table([['','4%'],['评论原声','35%'],['赞','7%'],['所属作品','24%'],['评论时间','14%'],['处理状态','16%']],page.items.map(s=>{
-      const w=byRef.get(s.workRef),p=processing.get(s.sourceRef);
-      const published=s.publishedAt ? new Date(s.publishedAt).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'}) : s.publishedAtText || '未知';
-      return `<tr><td><input type="checkbox" data-select-source="${s.sourceRef}" aria-label="选择这条评论" ${state.selected.has(s.sourceRef)?'checked':''}></td><td><button type="button" class="lgi-voice-open" data-source="${s.sourceRef}"><span class="lgi-voice-preview">${esc(s.body || '正文尚未取得')}</span></button>${s.isReply?'<span class="lgi-research-meta">回复</span>':''}</td><td class="lgi-research-number" title="${s.likes==null?'尚未取得':esc(s.likes)}">${s.likes==null?'—':s.likes>=10000?(s.likes/10000).toFixed(1)+'万':s.likes.toLocaleString()}</td><td><a class="lgi-research-source-title" href="/corpus/evidence?work=${s.workRef}">${esc(w?.title || '作品标题未知')}</a><div class="lgi-research-meta">${esc(w?.creatorDisplayName || '作者未知')}</div></td><td><span>${esc(published)}</span><div class="lgi-research-meta" title="${esc(s.acceptedAt||s.observedAt)}">${new Date(s.acceptedAt||s.observedAt).toLocaleDateString('zh-CN',{timeZone:'Asia/Shanghai'})} 入库</div></td><td><span>${esc(cleanLabels[p?.cleanState]||'待清洗')}</span><div class="lgi-research-meta">${esc(analysisLabels[p?.analysisState]||'未分析')}</div></td></tr>`;
-    })) : empty((state.text||state.workRef||state.cleanState)?'没有符合当前条件的可读原声。可以缩短关键词后重试。':'尚未取得可读评论。采集接纳后的评论会直接出现在这里，无需手动搬运。');
-    if(state.workRef) {feedback('当前限定一个作品。');$('feedback').insertAdjacentHTML('beforeend',' <button type="button" id="clear-work">查看全部作品</button>');}
+
+  function setStatus(message, kind = '') {
+    status.textContent = message;
+    status.dataset.kind = kind;
   }
 
-  function renderAssets(data) {
-    state.assets=new Map(data.items.map(a=>[a.assetRef,a]));state.next=data.nextCursor;$('result-count').textContent=`${data.total.toLocaleString()} 次人工收存`;
-    $('results').innerHTML=data.items.length ? table([['收存表达','46%'],['为什么收存','32%'],['来源资格','22%']],data.items.map(a=>`<tr><td><blockquote>${esc(a.quote || '来源当前不可读')}</blockquote></td><td>${esc(a.reason || '来源受限，停止展示衍生内容')}<div class="lgi-research-meta">${esc(a.createdAt)} · ${esc(state.collections.find(c=>c.collectionRef===a.collectionRef)?.name || '未加入集合')}</div></td><td>${a.eligibility==='READABLE'?`${a.isCurrentSource?'当前来源版本':'固定历史来源版本'}<br><button type="button" data-source="${a.sourceRef}">查看来源</button>`:'来源不可用'}<button type="button" data-manage-asset="${a.assetRef}">整理与修订</button><div class="lgi-research-meta">修订 ${a.revision} · 人工收存不代表已证实</div></td></tr>`)) : empty('这个范围还没有收存表达。从原声浏览中选中一句有价值的话，写下理由即可保存。');
+  function updateUrl() {
+    const query = new URLSearchParams(location.search);
+    query.set('view', state.view);
+    history.replaceState(null, '', `${location.pathname}?${query}`);
   }
-  function renderGroups(data) {
-    state.next=null;$('result-count').textContent=`${data.items.length} 个候选问题组${data.truncated?' · 有界样本结果，见范围说明':''}`;
-    $('results').innerHTML=data.items.length ? table([['候选问题','48%'],['样本范围','20%'],['查看表达','32%']],data.items.map((g,i)=>`<tr><td>${esc(g.label)}<div class="lgi-research-meta">${g.origin==='human'?'人工问题标注':'模型候选'} · 按相同问题标签归组</div></td><td>${g.sampleCount.toLocaleString()} 条当前原声</td><td>${g.sourceRefs.map((ref,n)=>`<button type="button" data-source="${ref}">样本 ${n+1}</button>`).join(' ')}</td></tr>`)) : empty('还没有可用的问题标注。可以研读原声并补充人工问题标注；模型接入后会产生有来源的候选。');
-    feedback((data.truncated?'最多检查 '+data.analyzedSourceLimit+' 条当前原声并显示前 100 组。':'')+'这里是样本内候选标签分组，尚不是语义聚类、正式主题或需求规模。人工修订优先显示，分析历史保留在原声详情。');
+
+  function renderTabs() {
+    document.querySelectorAll('[data-view]').forEach(button => {
+      button.setAttribute('aria-current', button.dataset.view === state.view ? 'page' : 'false');
+    });
   }
-  function renderQueries(data) {
-    state.queries=new Map(data.items.map(q=>[q.queryRef,q]));state.next=null;$('result-count').textContent=`${data.items.length} 个查询`;
-    $('results').innerHTML=data.items.length ? table([['查询名称','35%'],['保存条件','45%'],['使用','20%']],data.items.map(q=>{
-      const p=new URLSearchParams({view:"voices",text:q.text,domain:domainRef});if(q.workRef)p.set('workRef',q.workRef);
-      return `<tr><td>${esc(q.name)}</td><td>${esc(q.text || '全部可读原声')}<div class="lgi-research-meta">${q.workRef?'限定作品':'跨全部作品'} · 每次使用重新查询最新可读材料</div></td><td><a href="/corpus/comments?${esc(p)}">打开查询</a><br><button type="button" data-manage-query="${q.queryRef}">编辑或删除</button></td></tr>`;
-    })) : empty('还没有已存查询。在评论研究中设定条件后使用「保存查询」。保存不会触发采集或订阅。');
+
+  function setupSummary() {
+    const { policy, defaultConfig, embedding, worker } = state.setup || {};
+    if (!defaultConfig?.connectionEnabled) return '尚未配置可用的研究模型。保存策略和开始研究都不会发送评论。';
+    const embeddingText = embedding?.enabled && embedding?.qualified
+      ? `向量归并已就绪（${embedding.dimensions} 维）。`
+      : '向量归并尚未就绪；本轮可完成语义提取，但问题归并与发布会等待向量模型通过测试并启用。';
+    const policyText = policy ? `当前策略已保存：每轮最多 ${count(policy.sourceLimit)} 条评论。` : '尚未保存研究策略。';
+    const workerText = worker?.state === 'error' ? '后台执行器上次报告异常。' : '连续自动排程关闭。';
+    return `${policyText}${embeddingText}${workerText}`;
   }
-  async function loadCollections() {
-    const data=await request(`${api}/collections`);state.collections=data.items;
-    $('collection-filter').innerHTML='<option value="">全部集合</option>'+data.items.map(c=>`<option value="${c.collectionRef}">${esc(c.name)} · ${c.savedCount}</option>`).join('');
-    $('collection-filter').value=state.collectionRef;
+
+  async function loadSetup() {
+    state.setup = await request(`${api}/setup`);
+    setStatus(setupSummary(), state.setup.defaultConfig?.connectionEnabled ? 'ready' : 'warning');
   }
-  async function openSource(ref) {
-    const generation=++state.detailGeneration;detail=null;
-    $('detail-content').innerHTML=empty('正在读取当前来源资格与研究历史…');
-    if(!$('research-detail').open)$('research-detail').showModal();
+
+  function resultMeta(data) {
+    const input = data.result?.inputCounts || {};
+    return `<p class="cr-v1-result-meta">已发布 ${escape(date(data.result?.publishedAt))} · 当前窗口 ${escape(date(data.result?.comparison?.current?.start))} 至 ${escape(date(data.result?.comparison?.current?.end))} · 冻结样本 ${count(input.analyzedCommentCount)} 条</p>`;
+  }
+
+  function renderOverview(data) {
+    const items = data.currentProblems || [];
+    result.innerHTML = `<section class="cr-v1-intro"><h2>当前已被研究的问题</h2><p>这里回答“当前用户在表达什么”。变化信号只在“变化观察”中呈现。</p>${resultMeta(data)}</section>` +
+      (items.length ? table(['用户问题', '当前评论占比', '当前作品覆盖', '当前评论数'], items.map(item => `<tr><td><strong>${escape(item.name)}</strong><p>${escape(item.meaning)}</p></td><td>${pct(item.currentCommentShare)}</td><td>${pct(item.currentWorkShare)}</td><td>${count(item.currentCommentCount)}</td></tr>`)) : empty('本版研究没有形成可显示的问题。'));
+  }
+
+  function renderVoices(data) {
+    const page = data.page || {items:[], total:0};
+    result.innerHTML = `<section class="cr-v1-intro"><h2>用户原声</h2><p>这里仅呈现已通过身份过滤的普通用户评论。原文是证据；研究正文是独立派生，不会改写原文，也不显示向量准备等实现状态。</p>${resultMeta(data)}<p class="cr-v1-result-meta">本版共 ${count(page.total)} 条冻结输入。</p></section>` +
+      (page.items.length ? table(['评论原文', '研究正文', '作品与观察时间', '研究结果'], page.items.map(item => `<tr><td><blockquote>${escape(item.commentText || '正文尚未取得')}</blockquote></td><td><p>${escape(item.researchText || '未形成研究正文')}</p><span class="cr-v1-badge">普通用户</span></td><td><strong>${escape(item.workTitle || '作品标题未知')}</strong><p>${escape(date(item.observedAt))}</p></td><td>${escape(item.researchOutcome || '状态未知')}<p>${(item.atomKinds || []).map(escape).join(' · ') || '未形成 Atom'}</p></td></tr>`)) : empty('本版没有可显示的原声。'));
+  }
+
+  function renderProblems(data) {
+    const page = data.page || {items:[], total:0};
+    result.innerHTML = `<section class="cr-v1-intro"><h2>稳定用户问题</h2><p>不同表达只有在记录了归并依据后才属于同一问题；向量相似度本身不会合并身份。</p>${resultMeta(data)}</section>` +
+      (page.items.length ? table(['问题定义', '当前窗口', '前一窗口', '证据 Atom'], page.items.map(item => `<tr><td><strong>${escape(item.name)}</strong><p>${escape(item.meaning)}</p></td><td>${count(item.current?.commentCount)} 条评论 · ${pct(item.current?.commentShare)}<p>${count(item.current?.workCount)} 篇作品 · ${pct(item.current?.workShare)}</p></td><td>${count(item.baseline?.commentCount)} 条评论 · ${pct(item.baseline?.commentShare)}<p>${count(item.baseline?.workCount)} 篇作品 · ${pct(item.baseline?.workShare)}</p></td><td>${count(item.evidenceAtomCount)}</td></tr>`)) : empty('本版没有可显示的稳定问题。'));
+  }
+
+  function observationLabel(kind) {
+    return ({ rising:'升温', falling:'降温', spreading:'扩散', newly_observed:'新出现' })[kind] || '未命名观察';
+  }
+
+  function reasonLabel(code) {
+    return ({ insufficient_window_coverage:'两个完整窗口的样本覆盖不足', first_observed_in_comparable_history:'首次出现在本系统可比研究历史中', comment_share_increased:'评论占比上升', comment_share_decreased:'评论占比下降', work_coverage_increased:'作品覆盖率上升' })[code] || '已记录原因';
+  }
+
+  function runStateLabel(state) {
+    return ({ queued:'等待处理', running:'正在研究', completed:'已完成', completed_with_failures:'未发布', failed:'失败', cancelled:'已取消' })[state] || '状态未知';
+  }
+
+  function runFailureLabel(code) {
+    return ({ runItems:'语义提取未完成', embedding:'向量候选未完成', problemResolution:'问题归并未完成' })[code] || '研究步骤未完成';
+  }
+
+  function renderChanges(data) {
+    const observations = data.observations || [];
+    const incomparable = data.notComparable || [];
+    result.innerHTML = `<section class="cr-v1-intro"><h2>变化观察</h2><p>这里只回答“相对前一个完整 7 天，什么发生了可证实的变化”。它不重复当前问题列表。</p>${resultMeta(data)}</section>` +
+      (observations.length ? table(['观察', '问题', '依据'], observations.map(item => `<tr><td><span class="cr-v1-signal">${escape(observationLabel(item.kind))}</span></td><td><strong>${escape(item.problemName)}</strong><p>${escape(item.problemMeaning)}</p></td><td>${escape(reasonLabel(item.reasonCode))}</td></tr>`)) : `<section class="cr-v1-empty"><h2>暂未发布可比变化</h2><p>这不表示没有讨论；当前已发布结果没有达到本页的可比条件或变化阈值。</p></section>`) +
+      (incomparable.length ? `<section class="cr-v1-subsection"><h2>尚不可比较</h2>${table(['问题', '原因'], incomparable.map(item => `<tr><td>${escape(item.problemName)}</td><td>${escape(reasonLabel(item.reasonCode))}</td></tr>`))}</section>` : '');
+  }
+
+  function renderRuns(data) {
+    const page = data.page || {items:[], total:0};
+    result.innerHTML = `<section class="cr-v1-intro"><h2>运行记录</h2><p>记录冻结样本、逐项结果与已发布版本。运行失败不会被显示成“没有研究发现”。</p></section>` +
+      (page.items.length ? table(['开始时间', '运行状态', '冻结输入', '已发布结果'], page.items.map(item => { const failures=Object.entries(item.failureCounts || {}).filter(([,value]) => Number(value) > 0); return `<tr><td>${escape(date(item.createdAt))}</td><td><strong>${escape(runStateLabel(item.state))}</strong><p>${Object.entries(item.itemStates || {}).map(([key, value]) => `${escape(key)} ${count(value)}`).join(' · ') || '尚未开始'}</p>${failures.length ? `<p>${failures.map(([key, value]) => `${escape(runFailureLabel(key))} ${count(value)} 条`).join(' · ')}</p>` : ''}</td><td>${count(item.selectedSources)} 条评论</td><td>${item.publishedResult?.resultRevisionRef ? `已发布 ${escape(date(item.publishedResult.publishedAt))}` : item.state === 'completed_with_failures' ? '未发布：请修复运行记录所示问题后重新开始研究' : '尚未发布'}</td></tr>`; })) : empty('还没有运行记录。保存策略后可以直接开始第一轮研究。'));
+  }
+
+  function render(view, data) {
+    ({ overview:renderOverview, voices:renderVoices, problems:renderProblems, changes:renderChanges, runs:renderRuns })[view](data);
+  }
+
+  async function loadView() {
+    renderTabs(); updateUrl(); result.setAttribute('aria-busy', 'true');
     try {
-      const value=await request(`${api}/sources/${ref}`);
-      if(generation!==state.detailGeneration || !$('research-detail').open)return;
-      detail=value;const s=value.source;
-      const annotations=value.annotations;const human=annotations.human[0];
-      $('detail-content').innerHTML=`<p class="lgi-research-meta">${s.isCurrent?'当前来源版本':'固定历史来源版本'} · 观察于 ${esc(s.observedAt)}</p><section><h3>原声</h3><blockquote id="source-body">${esc(s.body || '正文尚未取得')}</blockquote><p class="lgi-research-meta">${s.bodyTruncated?"当前仅显示原文前 4,000 字符。":""}选中一段原声后收存；没有选中时默认收存显示的全文。字符范围按 Unicode 字符记录。</p><div class="lgi-research-actions"><button type="button" id="asset-open" ${s.body?'':'disabled'}>收存表达</button><button type="button" id="annotation-open">编辑研究标注</button><a href="/corpus/evidence?work=${s.workRef}">查看来源作品</a><button type="button" data-daily-source="${s.sourceRef}">分析这条评论</button></div></section>${window.CommentDaily.cleaningHtml(value.processing)}<section><h3>作品上下文</h3><p>${esc(value.work?.title?.value || "作品标题尚未取得")}</p><blockquote>${esc(value.work?.body?.value || "作品正文尚未取得，不补全缺失上下文。")}</blockquote>${window.CommentDaily.mediaHtml(value.derivatives)}</section><section><h3>对话上下文</h3>${value.parent?`<blockquote>${esc(value.parent.body || '父评论正文未知')}</blockquote>`:`<p>${value.parentState==='NOT_APPLICABLE'?'这是一条主评论。':'父评论尚未取得或当前不可读，不据此补全含义。'}</p>`}</section><section><h3>人工研究标注</h3>${human?facetHtml(human.facets)+`<p>${esc(human.reason)}</p><p class="lgi-research-meta">修订 ${human.revision} · 共保留 ${annotations.human.length} 个版本</p>`:'<p>尚未标注。人工选择和模型输出分别保留。</p>'}</section><section><h3>分析记录</h3>${annotations.analysis.length?annotations.analysis.map(a=>`<p>${esc(analysisLabels[a.state] || '状态未知')} · <span class="lgi-research-meta">${esc(a.ruleVersion)} / ${esc(a.modelVersion)}</span></p>${a.contextReadable===false?'<p>关联上下文已受限，停止展示候选内容。</p>':''}${a.result?(a.result.spans || []).map(span=>`<blockquote>${esc(Array.from(s.body||'').slice(span.startChar,span.endChar).join(''))}</blockquote>`+facetHtml(span.facets)).join(''):''}${a.failureCode?`<p class="lgi-research-meta">${esc(failureLabels[a.failureCode] || a.failureCode)}</p>`:''}`).join(''):'<p>尚未分析。可使用「分析这条评论」连同作品上下文试跑。</p>'}</section>`;
-    } catch(e){if(generation===state.detailGeneration){$('detail-content').innerHTML=empty(e.message);detail=null;}}
-  }
-  function facetHtml(facets) {return facets.map(f=>`<p><strong>${esc(dimensionLabels[f.dimension] || f.dimension)}</strong>：${esc(f.label)} <span class="lgi-research-meta">${f.basis==='explicit'?'来源直接表达':'研究推断'}</span></p>`).join('');}
-  function selectedSpan() {
-    const node=$('source-body');const selection=window.getSelection();
-    let start=0,end=Array.from(detail.source.body).length;
-    if(selection?.rangeCount && !selection.isCollapsed) {
-      const range=selection.getRangeAt(0);
-      if(node.contains(range.startContainer)&&node.contains(range.endContainer)) {
-        const prefix=range.cloneRange();prefix.selectNodeContents(node);prefix.setEnd(range.startContainer,range.startOffset);
-        start=Array.from(prefix.toString()).length;end=start+Array.from(range.toString()).length;
-      }
+      const data = await request(`${api}/${state.view}?limit=20&offset=0`);
+      render(state.view, data);
+    } catch (error) {
+      result.innerHTML = empty(error.message);
+    } finally {
+      result.setAttribute('aria-busy', 'false');
     }
-    return {startChar:start,endChar:end,quote:Array.from(detail.source.body).slice(start,end).join('')};
   }
-  async function openCommand(kind) {
-    command=kind;commandId=crypto.randomUUID();$('command-feedback').textContent='';
-    if(kind==='asset') {
-      if(!detail?.source.body)return;const span=selectedSpan();await loadCollections();
-      command={kind,...span,sourceRef:detail.source.sourceRef,sourceSha256:detail.sourceSha256};
-      $('command-title').textContent='收存表达';
-      $('command-fields').innerHTML=`<blockquote>${esc(span.quote)}</blockquote><p class="lgi-research-meta">范围 ${span.startChar}–${span.endChar} · 固定来源版本</p><label>收存理由<textarea name="reason" required maxlength="1000" placeholder="为什么这句话值得再次研究？"></textarea></label><label>集合<select name="collectionRef"><option value="">暂不加入集合</option>${state.collections.map(c=>`<option value="${c.collectionRef}">${esc(c.name)}</option>`).join('')}</select></label>`;
-    } else if(kind==='annotation') {
-      if(!detail)return;const human=detail.annotations.human[0];command={kind,sourceRef:detail.source.sourceRef,expectedRevision:human?.revision || 0};
-      $('command-title').textContent='编辑研究标注';
-      $('command-fields').innerHTML=Object.entries(dimensionLabels).map(([key,label])=>{
-        const existing=human?.facets.find(f=>f.dimension===key);
-        return `<label>${esc(label)}<input name="facet-${key}" maxlength="100" value="${esc(existing?.label || '')}" placeholder="没有依据时留空"><select name="basis-${key}" aria-label="${esc(label)}的依据"><option value="explicit">来源直接表达</option><option value="inferred" ${existing?.basis==='inferred'?'selected':''}>研究推断</option></select></label>`;
-      }).join('')+'<label>修订理由<textarea name="reason" required maxlength="1000"></textarea></label>';
-    } else {
-      $('command-title').textContent=kind==='query'?'保存查询':'新建集合';
-      $('command-fields').innerHTML=`<label>名称<input name="name" required maxlength="100"></label><p>${kind==='query'?'保存文字与作品范围；清洗状态是当前处理条件，不计入已存查询。下次打开时查询最新可读材料，不触发采集。':'集合保存人工选择的引用，不改变来源事实或总体统计。'}</p>`;
-    }
-    $('research-form-dialog').showModal();$('command-fields').querySelector('input,textarea,select')?.focus();
-  }
-  async function openManagement(kind, ref) {
-    commandId=crypto.randomUUID();$('command-feedback').textContent='';
-    if(kind==='asset-revision') {
-      const [history]=await Promise.all([request(`${api}/assets/${ref}/history`),loadCollections()]);
-      const current=history.items[0];if(current.withdrawn)throw new Error('这次收存已撤销，请刷新列表。');
-      const readable=history.eligibility==='READABLE';
-      command={kind,assetRef:ref,expectedRevision:current.revision,readable};
-      $('command-title').textContent='整理语料资产';
-      $('command-fields').innerHTML=`<p>固定来源和原始片段保持不变。每次整理保留修订记录。</p>${readable?`<label>收存理由<textarea name="reason" required maxlength="1000">${esc(current.reason)}</textarea></label><label>所属集合<select name="collectionRef"><option value="">不加入集合</option>${state.collections.map(c=>`<option value="${c.collectionRef}" ${c.collectionRef===current.collectionRef?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>`:'<p>来源当前不可读，理由和历史派生内容已隐藏。仍可撤销误收存。</p>'}<label>本次整理说明<textarea name="changeReason" required maxlength="1000" placeholder="记录修改或撤销的原因"></textarea></label><label>操作<select name="action">${readable?'<option value="edit">保存整理</option>':''}<option value="withdraw">撤销这次收存</option></select></label><p class="lgi-research-meta">撤销后不再进入语料资产和集合统计；保留审计记录，旧请求不会恢复收存。</p><details><summary>查看 ${history.items.length} 个修订版本</summary>${history.items.map(h=>`<p>修订 ${h.revision} · ${h.withdrawn?'已撤销':'收存'}<br>${esc(h.reason || '理由已隐藏或已撤销')}<br><span class="lgi-research-meta">${esc(h.changeReason || '整理说明已隐藏')}</span></p>`).join('')}</details>`;
-    } else {
-      const current=state.queries.get(ref);if(!current)return;
-      command={kind:'query-revision',queryRef:ref,expectedRevision:current.revision};
-      $('command-title').textContent='编辑已存查询';
-      $('command-fields').innerHTML=`<label>查询名称<input name="name" required maxlength="100" value="${esc(current.name)}"></label><label>检索原声<input name="text" maxlength="200" value="${esc(current.text)}" placeholder="留空查询全部可读原声"></label><label>作品范围<select name="workRef"><option value="">跨全部作品</option>${current.workRef?`<option value="${current.workRef}" selected>保留当前限定作品</option>`:''}</select></label><label>操作<select name="action"><option value="edit">保存修改</option><option value="delete">删除这个查询</option></select></label><p class="lgi-research-meta">修改后使用新条件查询当前可读材料。删除不会删除语料，旧请求不会恢复查询。</p>`;
-    }
-    $('research-form-dialog').showModal();$('command-fields').querySelector('input,textarea,select')?.focus();
-  }
-  $('research-command-form').addEventListener('submit',async event=>{
-    event.preventDefault();const form=new FormData(event.currentTarget);const button=$('command-submit');button.disabled=true;$('command-feedback').textContent='正在保存…';
+
+  async function openSettings() {
     try {
-      if(command==='query')await request(`${api}/queries`,{queryRef:commandId,name:form.get('name'),text:state.text,workRef:state.workRef || null});
-      else if(command==='collection')await request(`${api}/collections`,{collectionRef:commandId,name:form.get('name')});
-      else if(command?.kind==='asset')await request(`${api}/assets`,{assetRef:commandId,sourceRef:command.sourceRef,startChar:command.startChar,endChar:command.endChar,sourceSha256:command.sourceSha256,reason:form.get('reason'),collectionRef:form.get('collectionRef') || null});
-      else if(command?.kind==='asset-revision') {
-        const withdrawn=form.get('action')==='withdraw';
-        await request(`${api}/assets/revisions`,{revisionRef:commandId,assetRef:command.assetRef,expectedRevision:command.expectedRevision,reason:withdrawn?null:form.get('reason'),collectionRef:withdrawn?null:form.get('collectionRef') || null,withdrawn,changeReason:form.get('changeReason')});
-      } else if(command?.kind==='query-revision') {
-        await request(`${api}/queries/revisions`,{revisionRef:commandId,queryRef:command.queryRef,expectedRevision:command.expectedRevision,name:form.get('name'),text:form.get('text'),workRef:form.get('workRef') || null,deleted:form.get('action')==='delete'});
-      } else if(command?.kind==='annotation') {
-        const facets=Object.keys(dimensionLabels).filter(key=>String(form.get(`facet-${key}`) || '').trim()).map(key=>({dimension:key,label:String(form.get(`facet-${key}`)).trim(),basis:form.get(`basis-${key}`)}));
-        await request(`${api}/annotations`,{annotationRef:commandId,sourceRef:command.sourceRef,expectedRevision:command.expectedRevision,facets,reason:form.get('reason')});
-      }
-      $('research-form-dialog').close();feedback('已保存到本机研究记录。');
-      if(command?.kind==='annotation')await openSource(command.sourceRef);
-      if(state.view==='assets'||state.view==='queries'){resetPage();await load();}
-    } catch(e){$('command-feedback').textContent=e.message;}
-    finally {button.disabled=false;}
-  });
-  document.addEventListener('click',event=>{
-    if(event.target.id==='clear-work'){state.workRef='';resetPage();load();return;}
-    const close=event.target.closest('[data-close]');if(close){$(close.dataset.close).close();return;}
-    const manageAsset=event.target.closest('[data-manage-asset]');if(manageAsset){openManagement('asset-revision',manageAsset.dataset.manageAsset).catch(e=>feedback(e.message,true));return;}
-    const manageQuery=event.target.closest('[data-manage-query]');if(manageQuery){openManagement('query-revision',manageQuery.dataset.manageQuery).catch(e=>feedback(e.message,true));return;}
-    const source=event.target.closest('[data-source]');if(source){openSource(source.dataset.source);return;}
-    const tab=event.target.closest('.lgi-research-tabs [data-view]');if(tab){event.preventDefault();state.view=tab.dataset.view;resetPage();load();return;}
-    const commands={'asset-open':'asset','annotation-open':'annotation','save-query-open':'query','collection-open':'collection'};
-    const kind=commands[event.target.id];if(kind)openCommand(kind).catch(e=>feedback(e.message,true));
-  });
-  $('research-detail').addEventListener('close',()=>{state.detailGeneration++;detail=null;$('detail-content').replaceChildren();});
-  document.addEventListener('change',e=>{if(e.target.dataset.selectSource){if(e.target.checked)state.selected.add(e.target.dataset.selectSource);else state.selected.delete(e.target.dataset.selectSource);$('selection-run').disabled=state.selected.size===0;$('selection-run').textContent=state.selected.size?'分析所选（'+state.selected.size+'）':'分析所选';}});
-  $('selection-run').addEventListener('click',()=>window.CommentDaily.openSelected([...state.selected]));
-  $('daily-settings').addEventListener('click',()=>window.CommentDaily.openSettings());
-  window.CommentDaily.onRefresh=(newBatch=false)=>{if(newBatch){state.view='daily';resetPage();}return load();};
-  $('search-form').addEventListener('submit',event=>{event.preventDefault();state.text=$('search-text').value.trim();state.workRef=$('work-filter').value;state.cleanState=$('clean-filter').value;resetPage();load();});
-  $('collection-filter').addEventListener('change',()=>{state.collectionRef=$('collection-filter').value;resetPage();load();});
-  $('next').addEventListener('click',()=>{state.history.push(state.cursor);state.cursor=state.next;load();});
-  $('previous').addEventListener('click',()=>{state.cursor=state.history.pop() || null;load();});
-  $('reload').addEventListener('click',()=>{resetPage();load();});
-  load().then(()=>{if(params.get('source'))return openSource(params.get('source'));});
+      await loadSetup();
+      const { policy, defaultConfig, embedding } = state.setup;
+      $('#policy-model').value = defaultConfig?.connectionEnabled ? defaultConfig.modelId : '尚未配置可用模型';
+      form.elements.sourceLimit.value = policy?.sourceLimit || 1000;
+      form.elements.tokenLimit.value = policy?.tokenLimit || 100000;
+      $('#embedding-state').textContent = embedding?.enabled && embedding?.qualified ? `向量模型已通过测试并启用：${embedding.modelId}。` : '向量模型尚未通过测试或尚未启用。请在模型与向量设置中完成后再开始需要归并的研究。';
+      $('#settings-feedback').textContent = defaultConfig?.connectionEnabled ? '' : '请先在模型与 AI 设置中配置并启用研究模型。';
+      dialog.showModal();
+    } catch (error) {
+      setStatus(error.message, 'error');
+    }
+  }
+
+  async function savePolicy(event) {
+    event.preventDefault();
+    const defaultConfig = state.setup?.defaultConfig;
+    if (!defaultConfig?.connectionEnabled) {
+      $('#settings-feedback').textContent = '当前没有可用研究模型，无法保存策略。';
+      return;
+    }
+    const button = form.querySelector('[type="submit"]'); button.disabled = true;
+    try {
+      await request(`${api}/policy`, { method:'POST', body:JSON.stringify({ configRef:defaultConfig.configRef, sourceLimit:Number(form.elements.sourceLimit.value), tokenLimit:Number(form.elements.tokenLimit.value) }) });
+      await loadSetup();
+      $('#settings-feedback').textContent = '研究策略已保存。之后每次点击“开始研究”将直接冻结范围，不再要求重复授权。';
+    } catch (error) {
+      $('#settings-feedback').textContent = error.message;
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function startRun() {
+    try {
+      await loadSetup();
+      if (!state.setup?.policy) { await openSettings(); return; }
+      const receipt = await request(`${api}/runs`, { method:'POST', body:JSON.stringify({}) });
+      setStatus(`已冻结 ${count(receipt.selectedSources)} 条普通用户评论，后台将继续完成语义提取、向量归并与结果发布。`, 'ready');
+      state.view = 'runs'; await loadView();
+    } catch (error) {
+      setStatus(error.message, 'error');
+    }
+  }
+
+  document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', async () => { state.view = button.dataset.view; await loadView(); }));
+  $('#refresh').addEventListener('click', async () => { await loadSetup().catch(error => setStatus(error.message, 'error')); await loadView(); });
+  $('#research-settings').addEventListener('click', openSettings);
+  $('#start-run').addEventListener('click', startRun);
+  form.addEventListener('submit', savePolicy);
+  document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => document.getElementById(button.dataset.close).close()));
+
+  Promise.all([loadSetup(), loadView()]).catch(error => setStatus(error.message, 'error'));
 })();

@@ -10,13 +10,13 @@ use linggan_intelligence::comment_research_atoms::{
 use linggan_intelligence::comment_research_embeddings::{
     AtomEmbeddingResult, CommentResearchEmbeddingError, EmbeddingSpaceReceipt,
     ProblemDefinitionEmbeddingResult, accept_atom_embedding, accept_problem_definition_embedding,
-    activate_configured_embedding_space, queue_atom_embedding, queue_problem_definition_embedding,
-    recall_problem_candidates,
+    activate_configured_embedding_space, claim_next_embedding_work, queue_atom_embedding,
+    queue_problem_definition_embedding, recall_problem_candidates, record_embedding_failure,
 };
 use linggan_intelligence::comment_research_kernel::{
     DERIVATION_VERSION, RunItemFailureClass, SaveResearchPolicy, claim_next_run_item,
-    derive_current_sources, record_run_item_failure, recover_expired_run_items, save_active_policy,
-    start_run,
+    derive_current_sources, fail_active_runs_without_embedding_config, record_run_item_failure,
+    recover_expired_run_items, refresh_run_completion_for_atom, save_active_policy, start_run,
 };
 use linggan_intelligence::comment_research_problems::{
     CommentResearchProblemError, ExistingProblemAdmission, NewProblemAdmission,
@@ -26,6 +26,7 @@ use linggan_intelligence::comment_research_read_v1::{
     CommentResearchV1ReadQuery, read_changes, read_overview, read_problems, read_runs, read_voices,
 };
 use linggan_intelligence::comment_research_results::publish_result_revision;
+use linggan_intelligence::comment_research_worker::recover_problem_resolution_leases;
 use linggan_storage_postgres::Database;
 use research_fixture::{comment_with_author, detail_with_author};
 use serde_json::json;
@@ -33,6 +34,135 @@ use sqlx::Row;
 use uuid::Uuid;
 
 const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn terminal_cutover_removes_every_retired_research_relation_and_keeps_v1_inputs() {
+    let database = fixture::proof_database("comment_research_terminal_cutover").await;
+    for relation in [
+        "linggan_ci_source_revision",
+        "linggan_ci_source_research",
+        "linggan_ci_problem",
+        "linggan_ci_semantic_atom",
+        "linggan_comment_daily_batch",
+        "linggan_comment_replay_run",
+        "linggan_comment_analysis_work",
+    ] {
+        let present: Option<String> = sqlx::query_scalar("SELECT to_regclass($1)::text")
+            .bind(relation)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+        assert!(
+            present.is_none(),
+            "retired relation survived terminal cutover: {relation}"
+        );
+    }
+    for relation in [
+        "linggan_material_comment",
+        "linggan_material_content_author",
+        "linggan_comment_research_restriction",
+        "linggan_embedding_settings",
+        "linggan_model_invocation",
+        "linggan_comment_research_derivation",
+    ] {
+        let present: Option<String> = sqlx::query_scalar("SELECT to_regclass($1)::text")
+            .bind(relation)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+        assert!(
+            present.is_some(),
+            "required V1 input disappeared: {relation}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn terminal_cutover_clears_preliminary_v1_results_without_touching_raw_evidence() {
+    let database = fixture::proof_database("comment_research_terminal_reset").await;
+    detail_with_author(
+        &database,
+        "terminal-reset-note",
+        "SYNTHETIC terminal reset note",
+        Some("creator-1"),
+    )
+    .await;
+    let source_ref = comment_with_author(
+        &database,
+        "terminal-reset-note",
+        "terminal-reset-comment",
+        "我想知道怎样让孩子愿意写作业",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    assert_eq!(derive_current_sources(&database, 10).await.unwrap(), 1);
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: None,
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    start_run(&database).await.unwrap();
+
+    sqlx::raw_sql(include_str!(
+        "../../../database/migrations/0069_comment_research_v1_cutover.sql"
+    ))
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    let counts = sqlx::query(
+        "SELECT \
+           (SELECT count(*) FROM linggan_comment_research_policy_revision) AS policy_revisions, \
+           (SELECT count(*) FROM linggan_comment_research_derivation) AS derivations, \
+           (SELECT count(*) FROM linggan_comment_research_run) AS runs, \
+           (SELECT count(*) FROM linggan_comment_research_run_item) AS run_items, \
+           (SELECT count(*) FROM linggan_comment_research_atom) AS atoms, \
+           (SELECT count(*) FROM linggan_comment_research_embedding_space) AS spaces, \
+           (SELECT count(*) FROM linggan_comment_research_problem) AS problems, \
+           (SELECT count(*) FROM linggan_comment_research_result_revision) AS result_revisions",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    for column in [
+        "policy_revisions",
+        "derivations",
+        "runs",
+        "run_items",
+        "atoms",
+        "spaces",
+        "problems",
+        "result_revisions",
+    ] {
+        assert_eq!(
+            counts.get::<i64, _>(column),
+            0,
+            "preliminary V1 data survived reset in {column}"
+        );
+    }
+    let active_policy_is_empty: bool = sqlx::query_scalar(
+        "SELECT policy_revision_ref IS NULL FROM linggan_comment_research_policy_active WHERE singleton",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(active_policy_is_empty);
+    let raw_body: String =
+        sqlx::query_scalar("SELECT body_text FROM linggan_material_comment WHERE material_ref=$1")
+            .bind(source_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(raw_body, "我想知道怎样让孩子愿意写作业");
+}
 
 async fn derivation_ref(database: &Database, source_ref: Uuid) -> Uuid {
     sqlx::query_scalar::<_, Uuid>(
@@ -249,6 +379,283 @@ async fn derivation_preserves_raw_text_and_excludes_confirmed_content_author_rep
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn later_author_attribution_creates_a_new_current_derivation() {
+    let database = fixture::proof_database("comment_research_derivation_attribution_head").await;
+    detail_with_author(
+        &database,
+        "attribution-note",
+        "SYNTHETIC attribution note",
+        None,
+    )
+    .await;
+    let comment = comment_with_author(
+        &database,
+        "attribution-note",
+        "reader-comment",
+        "作者 说得很对，但我还是不知道怎么做",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    assert_eq!(derive_current_sources(&database, 10).await.unwrap(), 1);
+    let first: (String, String) = sqlx::query_as(
+        "SELECT author_role,eligibility FROM linggan_comment_research_derivation_readable \
+         WHERE source_ref=$1",
+    )
+    .bind(comment)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        first,
+        (
+            "author_identity_unknown".into(),
+            "author_identity_unknown".into()
+        )
+    );
+
+    detail_with_author(
+        &database,
+        "attribution-note",
+        "SYNTHETIC attribution note",
+        Some("creator-1"),
+    )
+    .await;
+    assert_eq!(derive_current_sources(&database, 10).await.unwrap(), 1);
+    let history_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_derivation WHERE source_ref=$1",
+    )
+    .bind(comment)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(history_count, 2);
+    let readable_history: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_derivation_readable WHERE source_ref=$1",
+    )
+    .bind(comment)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(readable_history, 2);
+    let current: (String, String, String) = sqlx::query_as(
+        "SELECT author_role,eligibility,research_text \
+         FROM linggan_comment_research_derivation_current WHERE source_ref=$1",
+    )
+    .bind(comment)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        current,
+        (
+            "ordinary_user".into(),
+            "eligible".into(),
+            "作者 说得很对,但我还是不知道怎么做".into()
+        )
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn unchanged_unknown_author_does_not_starve_older_ordinary_derivation() {
+    let database = fixture::proof_database("comment_research_unknown_author_selection").await;
+    detail_with_author(
+        &database,
+        "unknown-author-selection-note",
+        "SYNTHETIC selection note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "unknown-author-selection-note",
+        "ordinary-older",
+        "孩子总是拖着不写作业",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "unknown-author-selection-note",
+        "unknown-newer",
+        "我家也是这种情况",
+        None,
+        "2026-09-01T08:01:00Z",
+    )
+    .await;
+
+    assert_eq!(derive_current_sources(&database, 1).await.unwrap(), 1);
+    assert_eq!(derive_current_sources(&database, 1).await.unwrap(), 1);
+    let counts: (i64, i64) = sqlx::query_as(
+        "SELECT count(*),count(*) FILTER (WHERE eligibility='eligible') \
+         FROM linggan_comment_research_derivation",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(counts, (2, 1));
+    assert_eq!(derive_current_sources(&database, 1).await.unwrap(), 0);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn frozen_run_remains_executable_but_stale_result_is_hidden_after_author_correction() {
+    let database = fixture::proof_database("comment_research_frozen_derivation_readability").await;
+    detail_with_author(
+        &database,
+        "frozen-input-note",
+        "SYNTHETIC frozen input note",
+        Some("creator-1"),
+    )
+    .await;
+    let source = comment_with_author(
+        &database,
+        "frozen-input-note",
+        "reader-comment",
+        "这个方法很有用",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: None,
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_run(&database).await.unwrap();
+
+    detail_with_author(
+        &database,
+        "frozen-input-note",
+        "SYNTHETIC frozen input note",
+        Some("reader-1"),
+    )
+    .await;
+    assert_eq!(derive_current_sources(&database, 10).await.unwrap(), 1);
+    let current_role: String = sqlx::query_scalar(
+        "SELECT author_role FROM linggan_comment_research_derivation_current WHERE source_ref=$1",
+    )
+    .bind(source)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(current_role, "content_author_reply");
+
+    let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+    accept_semantic_output(
+        &database,
+        &claim,
+        SemanticExtractionOutput::NoSignal {
+            reason: "礼貌表达，不包含可归并的问题".into(),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let result = publish_result_revision(&database, run.run_ref)
+        .await
+        .unwrap();
+    let published: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_result_revision WHERE result_revision_ref=$1",
+    )
+    .bind(result.result_revision_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let readable: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_result_revision_readable WHERE result_revision_ref=$1",
+    )
+    .bind(result.result_revision_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(published, 1);
+    assert_eq!(
+        readable, 0,
+        "a changed input must hide the entire stale result"
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn later_comments_are_derived_and_frozen_before_older_unprocessed_input() {
+    let database = fixture::proof_database("comment_research_incremental_selection").await;
+    detail_with_author(
+        &database,
+        "incremental-note",
+        "SYNTHETIC incremental note",
+        Some("creator-1"),
+    )
+    .await;
+    let older = comment_with_author(
+        &database,
+        "incremental-note",
+        "older",
+        "旧评论：孩子写作业总拖延",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    assert_eq!(derive_current_sources(&database, 1).await.unwrap(), 1);
+    let newer = comment_with_author(
+        &database,
+        "incremental-note",
+        "newer",
+        "新评论：孩子一写作业就回避",
+        Some("reader-2"),
+        "2026-09-02T08:00:00Z",
+    )
+    .await;
+    assert_eq!(derive_current_sources(&database, 1).await.unwrap(), 1);
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: None,
+            source_limit: 1,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+
+    let first_run = start_run(&database).await.unwrap();
+    let first_source: Uuid = sqlx::query_scalar(
+        "SELECT derivation.source_ref FROM linggan_comment_research_run_item item \
+         JOIN linggan_comment_research_derivation derivation USING(derivation_ref) \
+         WHERE item.run_ref=$1",
+    )
+    .bind(first_run.run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(first_source, newer);
+
+    let second_run = start_run(&database).await.unwrap();
+    let second_source: Uuid = sqlx::query_scalar(
+        "SELECT derivation.source_ref FROM linggan_comment_research_run_item item \
+         JOIN linggan_comment_research_derivation derivation USING(derivation_ref) \
+         WHERE item.run_ref=$1",
+    )
+    .bind(second_run.run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(second_source, older);
+    assert!(matches!(
+        start_run(&database).await,
+        Err(linggan_intelligence::comment_research_kernel::CommentResearchKernelError::NoEligibleDerivations)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn a_run_cannot_admit_an_author_reply_or_unknown_identity() {
     let database = fixture::proof_database("comment_research_kernel_eligibility").await;
     detail_with_author(
@@ -373,9 +780,7 @@ async fn saved_policy_is_the_only_authorization_needed_to_queue_a_research_run()
     )
     .await
     .unwrap();
-    let receipt = start_run(&database, json!({"initiatedBy":"synthetic-test"}))
-        .await
-        .unwrap();
+    let receipt = start_run(&database).await.unwrap();
 
     assert_eq!(receipt.policy_revision_ref, policy.policy_revision_ref);
     assert_eq!(receipt.selected_sources, 1);
@@ -430,9 +835,7 @@ async fn incompatible_item_does_not_block_the_next_healthy_v1_item() {
     )
     .await
     .unwrap();
-    start_run(&database, json!({"initiatedBy":"synthetic-test"}))
-        .await
-        .unwrap();
+    start_run(&database).await.unwrap();
 
     let poisoned = claim_next_run_item(&database).await.unwrap().unwrap();
     record_run_item_failure(
@@ -478,9 +881,7 @@ async fn expired_v1_lease_recovers_without_stalling_the_run() {
     )
     .await
     .unwrap();
-    let run = start_run(&database, json!({"initiatedBy":"synthetic-test"}))
-        .await
-        .unwrap();
+    let run = start_run(&database).await.unwrap();
     let first = claim_next_run_item(&database).await.unwrap().unwrap();
     sqlx::query(
         "UPDATE linggan_comment_research_run_item \
@@ -549,9 +950,7 @@ async fn accepted_atoms_are_evidence_bound_and_invalid_model_output_writes_nothi
     )
     .await
     .unwrap();
-    let run = start_run(&database, json!({"initiatedBy":"synthetic-test"}))
-        .await
-        .unwrap();
+    let run = start_run(&database).await.unwrap();
     let claim = claim_next_run_item(&database).await.unwrap().unwrap();
 
     let invalid = accept_semantic_output(
@@ -624,7 +1023,391 @@ async fn accepted_atoms_are_evidence_bound_and_invalid_model_output_writes_nothi
             .fetch_one(database.pool())
             .await
             .unwrap();
-    assert_eq!(run_state, "completed");
+    assert_eq!(run_state, "running");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn unavailable_embedding_settles_a_run_as_failure_instead_of_completed_unpublished() {
+    let database = fixture::proof_database("comment_research_embedding_unavailable").await;
+    detail_with_author(
+        &database,
+        "embedding-unavailable-note",
+        "SYNTHETIC embedding unavailable note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "embedding-unavailable-note",
+        "reader",
+        "孩子写作业总拖延，有什么办法吗",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: None,
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_run(&database).await.unwrap();
+    let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+    accept_semantic_output(
+        &database,
+        &claim,
+        SemanticExtractionOutput::Atoms {
+            atoms: vec![SemanticAtomProposal {
+                kind: AtomKind::Problem,
+                proposition: "孩子难以启动写作业".into(),
+                basis: AtomBasis::Explicit,
+                evidence_start: 0,
+                evidence_end: 5,
+            }],
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        fail_active_runs_without_embedding_config(&database)
+            .await
+            .unwrap(),
+        1
+    );
+    let state: (String, serde_json::Value) = sqlx::query_as(
+        "SELECT state,failure_counts FROM linggan_comment_research_run WHERE run_ref=$1",
+    )
+    .bind(run.run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(state.0, "completed_with_failures");
+    assert_eq!(state.1["embedding"], 1);
+    let published: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_result_revision WHERE run_ref=$1",
+    )
+    .bind(run.run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(published, 0);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn terminal_embedding_and_resolution_failures_are_visible_on_the_run() {
+    for (suffix, resolution_failure) in [("embedding", false), ("resolution", true)] {
+        let database = fixture::proof_database(&format!("comment_research_{suffix}_failure")).await;
+        detail_with_author(
+            &database,
+            "terminal-failure-note",
+            "SYNTHETIC terminal failure note",
+            Some("creator-1"),
+        )
+        .await;
+        comment_with_author(
+            &database,
+            "terminal-failure-note",
+            suffix,
+            "孩子写作业总拖延，有什么办法吗",
+            Some("reader-1"),
+            "2026-09-01T08:00:00Z",
+        )
+        .await;
+        let space = synthetic_qualified_embedding_space(&database).await;
+        save_active_policy(
+            &database,
+            SaveResearchPolicy {
+                config_ref: None,
+                source_limit: 10,
+                token_limit: 10_000,
+            },
+        )
+        .await
+        .unwrap();
+        let run = start_run(&database).await.unwrap();
+        let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+        accept_semantic_output(
+            &database,
+            &claim,
+            SemanticExtractionOutput::Atoms {
+                atoms: vec![SemanticAtomProposal {
+                    kind: AtomKind::Problem,
+                    proposition: "孩子难以启动写作业".into(),
+                    basis: AtomBasis::Explicit,
+                    evidence_start: 0,
+                    evidence_end: 5,
+                }],
+            },
+            None,
+        )
+        .await
+        .unwrap();
+        let atom = atom_ref(&database, run.run_ref, claim.derivation_ref).await;
+        if resolution_failure {
+            let input = queue_atom_embedding(&database, atom, space.space_ref)
+                .await
+                .unwrap();
+            accept_atom_embedding(
+                &database,
+                AtomEmbeddingResult {
+                    atom_ref: atom,
+                    space_ref: space.space_ref,
+                    input_hash: input.input_hash,
+                    values: vec![1.0, 0.0],
+                    invocation_ref: None,
+                },
+            )
+            .await
+            .unwrap();
+            sqlx::query(
+                "INSERT INTO linggan_comment_research_problem_resolution( \
+                     atom_ref,space_ref,candidate_set,candidate_hash,state,failure_code,finished_at \
+                 ) VALUES($1,$2,'[]'::jsonb,$3,'model_failed','synthetic_resolution_failure',scope_001_now())",
+            )
+            .bind(atom)
+            .bind(space.space_ref)
+            .bind(HASH)
+            .execute(database.pool())
+            .await
+            .unwrap();
+        } else {
+            let claim = claim_next_embedding_work(&database).await.unwrap().unwrap();
+            record_embedding_failure(&database, &claim, None, "synthetic_embedding_failure")
+                .await
+                .unwrap();
+        }
+        refresh_run_completion_for_atom(&database, atom)
+            .await
+            .unwrap();
+        let failures: serde_json::Value = sqlx::query_scalar(
+            "SELECT failure_counts FROM linggan_comment_research_run WHERE run_ref=$1 AND state='completed_with_failures'",
+        )
+        .bind(run.run_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+        assert_eq!(
+            failures[if resolution_failure {
+                "problemResolution"
+            } else {
+                "embedding"
+            }],
+            1
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn membership_admission_waits_for_its_running_resolution_to_settle() {
+    let database = fixture::proof_database("comment_research_resolution_settlement_boundary").await;
+    detail_with_author(
+        &database,
+        "resolution-boundary-note",
+        "SYNTHETIC resolution boundary note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "resolution-boundary-note",
+        "reader",
+        "孩子写作业总拖延，有什么办法吗",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    let space = synthetic_qualified_embedding_space(&database).await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: None,
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_run(&database).await.unwrap();
+    let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+    accept_semantic_output(
+        &database,
+        &claim,
+        SemanticExtractionOutput::Atoms {
+            atoms: vec![SemanticAtomProposal {
+                kind: AtomKind::Problem,
+                proposition: "孩子难以启动写作业".into(),
+                basis: AtomBasis::Explicit,
+                evidence_start: 0,
+                evidence_end: 5,
+            }],
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let atom = atom_ref(&database, run.run_ref, claim.derivation_ref).await;
+    let input = queue_atom_embedding(&database, atom, space.space_ref)
+        .await
+        .unwrap();
+    accept_atom_embedding(
+        &database,
+        AtomEmbeddingResult {
+            atom_ref: atom,
+            space_ref: space.space_ref,
+            input_hash: input.input_hash,
+            values: vec![1.0, 0.0],
+            invocation_ref: None,
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_problem_resolution( \
+             atom_ref,space_ref,candidate_set,candidate_hash,state,lease_until \
+         ) VALUES($1,$2,'[]'::jsonb,$3,'running',scope_001_now()+interval '120 seconds')",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(HASH)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    admit_new_problem(
+        &database,
+        NewProblemAdmission {
+            atom_ref: atom,
+            definition: ProblemDefinitionProposal {
+                name: "写作业启动困难".into(),
+                meaning: "孩子在开始完成作业前持续拖延或难以行动".into(),
+            },
+            basis: ProblemMembershipBasis::Deterministic,
+            decision_evidence: json!({"decision":"new_problem","candidateRefs":[]}),
+            invocation_ref: None,
+        },
+    )
+    .await
+    .unwrap();
+    let before_settlement: String =
+        sqlx::query_scalar("SELECT state FROM linggan_comment_research_run WHERE run_ref=$1")
+            .bind(run.run_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(before_settlement, "running");
+
+    assert_eq!(
+        recover_problem_resolution_leases(&database).await.unwrap(),
+        1
+    );
+    let after_settlement: String =
+        sqlx::query_scalar("SELECT state FROM linggan_comment_research_run WHERE run_ref=$1")
+            .bind(run.run_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(after_settlement, "completed");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn unavailable_embedding_does_not_fail_an_atom_with_a_frozen_resolution() {
+    let database = fixture::proof_database("comment_research_embedding_resolution_continues").await;
+    detail_with_author(
+        &database,
+        "embedding-resolution-note",
+        "SYNTHETIC embedding resolution note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "embedding-resolution-note",
+        "reader",
+        "孩子写作业总拖延，有什么办法吗",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    let space = synthetic_qualified_embedding_space(&database).await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: None,
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_run(&database).await.unwrap();
+    let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+    accept_semantic_output(
+        &database,
+        &claim,
+        SemanticExtractionOutput::Atoms {
+            atoms: vec![SemanticAtomProposal {
+                kind: AtomKind::Problem,
+                proposition: "孩子难以启动写作业".into(),
+                basis: AtomBasis::Explicit,
+                evidence_start: 0,
+                evidence_end: 5,
+            }],
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let atom = atom_ref(&database, run.run_ref, claim.derivation_ref).await;
+    let input = queue_atom_embedding(&database, atom, space.space_ref)
+        .await
+        .unwrap();
+    accept_atom_embedding(
+        &database,
+        AtomEmbeddingResult {
+            atom_ref: atom,
+            space_ref: space.space_ref,
+            input_hash: input.input_hash,
+            values: vec![1.0, 0.0],
+            invocation_ref: None,
+        },
+    )
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_problem_resolution( \
+             atom_ref,space_ref,candidate_set,candidate_hash,state \
+         ) VALUES($1,$2,'[]'::jsonb,$3,'pending')",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(HASH)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query("UPDATE linggan_embedding_config SET enabled=false")
+        .execute(database.pool())
+        .await
+        .unwrap();
+
+    fail_active_runs_without_embedding_config(&database)
+        .await
+        .unwrap();
+    let state: String =
+        sqlx::query_scalar("SELECT state FROM linggan_comment_research_run WHERE run_ref=$1")
+            .bind(run.run_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(state, "running");
 }
 
 #[tokio::test]
@@ -657,9 +1440,7 @@ async fn no_signal_is_a_terminal_run_item_outcome_not_an_atom() {
     )
     .await
     .unwrap();
-    let run = start_run(&database, json!({"initiatedBy":"synthetic-test"}))
-        .await
-        .unwrap();
+    let run = start_run(&database).await.unwrap();
     let claim = claim_next_run_item(&database).await.unwrap().unwrap();
 
     let receipt = accept_semantic_output(
@@ -728,9 +1509,7 @@ async fn atom_problem_membership_has_one_stable_identity_and_auditable_basis() {
     )
     .await
     .unwrap();
-    let run = start_run(&database, json!({"initiatedBy":"synthetic-test"}))
-        .await
-        .unwrap();
+    let run = start_run(&database).await.unwrap();
 
     let first_claim = claim_next_run_item(&database).await.unwrap().unwrap();
     accept_semantic_output(
@@ -886,9 +1665,7 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
     )
     .await
     .unwrap();
-    let run = start_run(&database, json!({"initiatedBy":"synthetic-test"}))
-        .await
-        .unwrap();
+    let run = start_run(&database).await.unwrap();
     let first_claim = claim_next_run_item(&database).await.unwrap().unwrap();
     accept_semantic_output(
         &database,
@@ -1105,9 +1882,7 @@ async fn published_result_has_independent_multi_signal_changes_and_is_idempotent
     )
     .await
     .unwrap();
-    let run = start_run(&database, json!({"initiatedBy":"synthetic-test"}))
-        .await
-        .unwrap();
+    let run = start_run(&database).await.unwrap();
     let mut created_problem: Option<(Uuid, i32)> = None;
     while let Some(claim) = claim_next_run_item(&database).await.unwrap() {
         if !claim_is_in_current_result_window(&database, run.run_ref, claim.derivation_ref).await {

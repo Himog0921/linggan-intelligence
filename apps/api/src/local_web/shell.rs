@@ -212,7 +212,6 @@ pub fn global_header(
 pub enum CorpusPage {
     Evidence,
     Comments,
-    Queries,
 }
 
 struct CorpusEntry {
@@ -223,7 +222,7 @@ struct CorpusEntry {
     page: Option<CorpusPage>,
 }
 
-const CORPUS_ENTRIES: [CorpusEntry; 4] = [
+const CORPUS_ENTRIES: [CorpusEntry; 3] = [
     CorpusEntry {
         ordinal: "01",
         label: "证据库",
@@ -241,12 +240,6 @@ const CORPUS_ENTRIES: [CorpusEntry; 4] = [
         label: "创作者",
         href: None,
         page: None,
-    },
-    CorpusEntry {
-        ordinal: "04",
-        label: "已存查询",
-        href: Some("/corpus/queries"),
-        page: Some(CorpusPage::Queries),
     },
 ];
 

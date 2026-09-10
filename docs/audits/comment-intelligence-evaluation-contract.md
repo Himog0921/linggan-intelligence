@@ -1,10 +1,12 @@
 # 评论研究本地质量评测合同
 
-> 状态: 代码事实优先
-> 最后核对: 2026-09-08
-> 适用范围: CI-20260907-V1 / T7，离线 B0、B1、B2 对照与人工留出集质量核验
-> 事实来源: `docs/data-contracts/comment-intelligence-v1.md` 第 10 节、`scripts/evaluate-comment-intelligence.py` 和对应合成单元测试
-> 冲突时以谁为准: 用户实施包、可复现评测输入与代码；本说明不替代真实人工标注、数据使用授权或上线验收
+> 状态: 历史归档
+> 最后核对: 2026-09-10
+> 适用范围: CI-20260907-V1 / T7 的历史离线评测合同
+> 事实来源: `docs/data-contracts/comment-intelligence-v1.md` 第 10 节与已删除的历史评测器/合成单元测试
+> 冲突时以谁为准: COMMENT-RESEARCH-RESET-001、用户实施包、可复现评测输入与代码；本说明不替代真实人工标注、数据使用授权或上线验收
+
+> 替代说明：对应 V4/V5 评测器已由 V1 terminal cutover 删除。本页保留过去评测的事实，不是可再生脚本或当前质量门；未来 V1 gold-set 需按新 Atom/Problem 合同另行建立。
 
 评测器只读取两份本地 JSONL。它不调用模型、不联网、不生成 gold、不修改运行配置。报告不回显评论正文、引用文字或模型答案，只保存计数、版本、输入文件 SHA-256 和有限的错误对象引用。
 
@@ -47,16 +49,6 @@ predictions 每行必须包含 `sourceRef`、`labels`、`problemRef`、`sourceSh
 
 这一字段只表示**这份输入满足本地质量评测门槛**，不授权自动发布、外发评论或部署。输入的真实来源与人工身份仍是提交者的明确声明，程序不能认证；小分母也不能用阈值假装有统计置信度。真实语义质量尚未评测时必须保留未核实状态。
 
-## 运行
+## 已删除的历史运行入口
 
-```sh
-python3 scripts/evaluate-comment-intelligence.py \
-  --gold /private/path/gold.jsonl \
-  --predictions /private/path/predictions.jsonl \
-  --output /tmp/comment-intelligence-evaluation.json \
-  --require-qualified
-
-python3 -m unittest discover -s scripts/tests -p 'test_comment_intelligence_evaluation.py'
-```
-
-默认成功生成报告即返回 0；使用 `--require-qualified` 时，未达质量门槛返回 1。无效输入、作品泄漏、重复预测等返回 2。脚本禁止用报告覆盖任一输入文件。真实输入与生成报告保留在私有位置或系统临时目录，不进入 Git；提交的测试只有四条明确合成评论，用于验证计算与拒绝路径，不是模型质量成绩。
+`scripts/evaluate-comment-intelligence.py` 及其测试已由 COMMENT-RESEARCH-RESET-001 terminal cutover 删除，仓库中没有可执行的旧评测命令。上文只保留这套旧评测方法、阈值和当时的边界事实；它既不是当前 V1 的质量门，也不能在当前代码树中复跑。未来如需 V1 gold-set，应针对 Atom、Problem、membership 和冻结 ResultRevision 另建独立合同与实现。

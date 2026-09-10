@@ -4,7 +4,10 @@
 //! `new_problem` or `same_problem` decision with bounded evidence; this module persists the
 //! durable identity and prevents one Atom from belonging to two current Problems.
 
-use crate::comment_research::comment_source_hash;
+use crate::{
+    comment_research_kernel::{CommentResearchKernelError, refresh_run_completion},
+    research_text::content_hash,
+};
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -70,6 +73,8 @@ pub struct ProblemAdmissionReceipt {
 pub enum CommentResearchProblemError {
     #[error(transparent)]
     Database(#[from] sqlx::Error),
+    #[error(transparent)]
+    Kernel(#[from] CommentResearchKernelError),
     #[error("the Atom is unavailable because its source is no longer readable")]
     AtomUnavailable,
     #[error("the Atom already has a current Problem membership")]
@@ -134,6 +139,7 @@ pub async fn admit_new_problem(
         admission.invocation_ref,
     )
     .await?;
+    refresh_run_completion(&mut transaction, atom.run_ref).await?;
     transaction.commit().await?;
     Ok(ProblemAdmissionReceipt {
         problem_ref,
@@ -188,6 +194,7 @@ pub async fn admit_existing_problem(
         admission.invocation_ref,
     )
     .await?;
+    refresh_run_completion(&mut transaction, atom.run_ref).await?;
     transaction.commit().await?;
     Ok(ProblemAdmissionReceipt {
         problem_ref: admission.problem_ref,
@@ -202,7 +209,7 @@ async fn lock_unassigned_readable_atom(
     atom_ref: Uuid,
 ) -> Result<ReadableUnassignedAtom, CommentResearchProblemError> {
     let row = sqlx::query(
-        "SELECT atom.kind,policy.membership_policy_hash \
+        "SELECT atom.run_ref,atom.kind,policy.membership_policy_hash \
          FROM linggan_comment_research_atom atom \
          JOIN linggan_comment_research_derivation_readable derivation \
            ON derivation.derivation_ref=atom.derivation_ref \
@@ -230,12 +237,14 @@ async fn lock_unassigned_readable_atom(
         return Err(CommentResearchProblemError::AtomAlreadyAssigned);
     }
     Ok(ReadableUnassignedAtom {
+        run_ref: row.get("run_ref"),
         kind: row.get("kind"),
         membership_policy_hash: row.get("membership_policy_hash"),
     })
 }
 
 struct ReadableUnassignedAtom {
+    run_ref: Uuid,
     kind: String,
     membership_policy_hash: String,
 }
@@ -282,7 +291,7 @@ async fn insert_membership(
 fn definition_hash(definition: &ProblemDefinitionProposal) -> String {
     // Normalization deliberately stops at surrounding whitespace and case. A qualifier or a
     // negation changes the stable definition identity and therefore cannot be silently merged.
-    comment_source_hash(&format!(
+    content_hash(&format!(
         "{}\u{0}{}",
         definition.name.trim().to_lowercase(),
         definition.meaning.trim().to_lowercase()

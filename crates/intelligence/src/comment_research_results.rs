@@ -105,6 +105,48 @@ pub async fn publish_result_revision(
         transaction.commit().await?;
         return Ok(existing);
     }
+    let run = lock_publishable_run(&mut transaction, run_ref).await?;
+    let window = publication_window(&mut transaction, run.as_of.clone()).await?;
+    let denominators = read_denominators(&mut transaction, run_ref, &window).await?;
+    let problems = read_problem_counts(&mut transaction, run_ref, &window).await?;
+    let result_revision_ref = insert_building_revision(
+        &mut transaction,
+        run_ref,
+        &run,
+        &denominators,
+        problems.len(),
+    )
+    .await?;
+    let observation_count = publish_problem_facts(
+        &mut transaction,
+        result_revision_ref,
+        problems,
+        &window,
+        &denominators,
+    )
+    .await?;
+    publish_revision(&mut transaction, result_revision_ref).await?;
+    transaction.commit().await?;
+    Ok(ResultPublicationReceipt {
+        result_revision_ref,
+        run_ref,
+        current_window_start: window.current_start,
+        current_window_end: window.current_end,
+        published_observations: observation_count,
+    })
+}
+
+struct PublicationRun {
+    as_of: String,
+    manifest_hash: String,
+    extraction_rule_hash: String,
+    membership_policy_hash: String,
+}
+
+async fn lock_publishable_run(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_ref: Uuid,
+) -> Result<PublicationRun, CommentResearchResultError> {
     let run = sqlx::query(
         "SELECT run.state,run.as_of::text AS as_of,run.manifest_hash, \
                 policy.extraction_rule_hash,policy.membership_policy_hash \
@@ -114,7 +156,7 @@ pub async fn publish_result_revision(
          WHERE run.run_ref=$1 FOR UPDATE OF run",
     )
     .bind(run_ref)
-    .fetch_optional(&mut *transaction)
+    .fetch_optional(&mut **transaction)
     .await?
     .ok_or(CommentResearchResultError::InvalidRun)?;
     if run.get::<String, _>("state") != "completed" {
@@ -134,7 +176,7 @@ pub async fn publish_result_revision(
          )",
     )
     .bind(run_ref)
-    .fetch_one(&mut *transaction)
+    .fetch_one(&mut **transaction)
     .await?;
     if unreadable {
         return Err(CommentResearchResultError::SourceUnavailable);
@@ -154,15 +196,27 @@ pub async fn publish_result_revision(
          )",
     )
     .bind(run_ref)
-    .fetch_one(&mut *transaction)
+    .fetch_one(&mut **transaction)
     .await?;
     if unassigned {
         return Err(CommentResearchResultError::MembershipIncomplete);
     }
 
-    let window = publication_window(&mut transaction, run.get::<String, _>("as_of")).await?;
-    let denominators = read_denominators(&mut transaction, run_ref, &window).await?;
-    let problems = read_problem_counts(&mut transaction, run_ref, &window).await?;
+    Ok(PublicationRun {
+        as_of: run.get("as_of"),
+        manifest_hash: run.get("manifest_hash"),
+        extraction_rule_hash: run.get("extraction_rule_hash"),
+        membership_policy_hash: run.get("membership_policy_hash"),
+    })
+}
+
+async fn insert_building_revision(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    run_ref: Uuid,
+    run: &PublicationRun,
+    denominators: &Denominators,
+    problem_count: usize,
+) -> Result<Uuid, CommentResearchResultError> {
     let result_revision_ref = Uuid::new_v4();
     let input_counts = json!({
         "analyzedCommentCount":denominators.current.comment_denominator + denominators.baseline.comment_denominator,
@@ -170,11 +224,11 @@ pub async fn publish_result_revision(
         "currentCommentDenominator":denominators.current.comment_denominator,
         "baselineWorkDenominator":denominators.baseline.work_denominator,
         "currentWorkDenominator":denominators.current.work_denominator,
-        "problemCount":problems.len(),
+        "problemCount":problem_count,
     });
     let policy_hashes = json!({
-        "extraction":run.get::<String,_>("extraction_rule_hash"),
-        "membership":run.get::<String,_>("membership_policy_hash"),
+        "extraction":run.extraction_rule_hash,
+        "membership":run.membership_policy_hash,
         "window":"Asia/Shanghai.complete-7d.v1",
     });
     sqlx::query(
@@ -184,13 +238,22 @@ pub async fn publish_result_revision(
     )
     .bind(result_revision_ref)
     .bind(run_ref)
-    .bind(run.get::<String, _>("as_of"))
-    .bind(run.get::<String, _>("manifest_hash"))
+    .bind(&run.as_of)
+    .bind(&run.manifest_hash)
     .bind(policy_hashes)
     .bind(input_counts)
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await?;
+    Ok(result_revision_ref)
+}
 
+async fn publish_problem_facts(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    result_revision_ref: Uuid,
+    problems: Vec<ProblemCounts>,
+    window: &Window,
+    denominators: &Denominators,
+) -> Result<usize, CommentResearchResultError> {
     let mut observation_count = 0usize;
     for problem in problems {
         let baseline = WindowCounts {
@@ -206,49 +269,49 @@ pub async fn publish_result_revision(
             work_denominator: denominators.current.work_denominator,
         };
         insert_stat(
-            &mut transaction,
+            &mut *transaction,
             result_revision_ref,
             problem,
             "baseline",
-            &window,
+            window,
             baseline,
         )
         .await?;
         insert_stat(
-            &mut transaction,
+            &mut *transaction,
             result_revision_ref,
             problem,
             "current",
-            &window,
+            window,
             current,
         )
         .await?;
         observation_count += publish_observations(
-            &mut transaction,
+            &mut *transaction,
             result_revision_ref,
             problem,
-            &window,
+            window,
             baseline,
             current,
         )
         .await?;
     }
+    Ok(observation_count)
+}
+
+async fn publish_revision(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    result_revision_ref: Uuid,
+) -> Result<(), CommentResearchResultError> {
     sqlx::query(
         "UPDATE linggan_comment_research_result_revision \
          SET state='published',published_at=scope_001_now() \
          WHERE result_revision_ref=$1 AND state='building'",
     )
     .bind(result_revision_ref)
-    .execute(&mut *transaction)
+    .execute(&mut **transaction)
     .await?;
-    transaction.commit().await?;
-    Ok(ResultPublicationReceipt {
-        result_revision_ref,
-        run_ref,
-        current_window_start: window.current_start,
-        current_window_end: window.current_end,
-        published_observations: observation_count,
-    })
+    Ok(())
 }
 
 struct Denominators {

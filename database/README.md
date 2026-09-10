@@ -51,8 +51,10 @@ Gate 5 的长期数据分类、身份、版本、Current、隐私传播、统计
 
 ENV-001 的 proof 数据库只用于环境验证，验证后必须删除；它不包含业务 DDL，也不是 migration baseline。
 
-## COMMENT-DAILY-001
+## COMMENT-RESEARCH-RESET-001
 
-`0043_comment_daily.sql` 依赖 0039/0040。它新增带版本清洗、单日计划、冻结来源批次、逐条状态、分包调用引用及幂等重试命令，复用既有模型配置和 invocation 账本。数据库 trigger 禁止修改已冻结范围或删除研究执行审计；原始 Evidence 不覆盖。迁移暂停旧即时 automatic 并清除自动指针，不启用新每日计划。
+`0064`–`0068` 是唯一 V1 研究内核：ResearchDerivation、保存 policy、冻结 Run/RunItem、四类 Atom、版本化 embedding、候选归并、Problem membership、immutable ResultRevision 与完整 7d 对前一 7d 的观察。它们不改写 Raw Comment/Evidence。
 
-当前只在 `test-model-pi-postgres.sh` 的随机隔离 PostgreSQL 验证。已登记 `local-runtime.sh migrate`，未应用共享库。新包边界与证明见 [COMMENT-DAILY-001](../docs/plans/active/comment-daily-001.md)。
+`0069_comment_research_v1_cutover.sql` 是开发期 terminal migration。它在不使用 `CASCADE` 的前提下，显式删除旧 daily、replay、recovery、Task B/P4 的表、视图、触发器、函数和索引（包括无 FK 的 `linggan_ci_source_revision`），并按依赖顺序清空可能由早期开发分支写入的 V1 policy/run/derivation/Atom/vector/Problem/result 行；通用 invocation ledger 不改写。Raw Comment、Evidence、作品作者归属、来源资格、通用模型连接/配置和 embedding 设置保留。`0070_comment_research_v1_derivation_head.sql` 随后为 V1 增加完整 derivation input identity：冻结 Run 读取其原始可读输入，新 Run 才选择当前归属/上下文 head；任一冻结输入不再当前时，整版 Result 不可读。历史 migration 文件继续保留为完整 schema/迁移历史的必要证据，不能重写或删除。
+
+`scripts/test-comment-research-postgres.sh` 从完整历史 migration fixture 应用到 `0070`，在随机隔离 PostgreSQL 中执行 V1 proof 并清理资源。共享开发库只可在用户授权、worker drain、exact-head merge 后由 `local-runtime.sh migrate` 显式执行；服务永远不自行迁移，也不会因 migration 自动发送真实评论给模型。
