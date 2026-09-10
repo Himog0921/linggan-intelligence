@@ -568,7 +568,10 @@ mod tests {
                 "{page} 丢掉了当前领域"
             );
         }
-        assert!(html.contains("action=\"/corpus/comments\""));
+        // 切换器早已不是提交表单，而是一个链接列表；它同样得指回本页，换的是观察领域，
+        // 不是把人送回证据库。用非当前领域来验：当前领域的链接侧栏也会出，区分不开。
+        let other = domains[0].domain_ref;
+        assert!(html.contains(&format!("href=\"/corpus/comments?domain={other}\"")));
         // 视图 tab 同样不许把领域冲掉：脚本没跑起来时它们会原样生效。
         assert!(html.contains(&format!(
             "href=\"/corpus/comments?domain={domain_ref}&amp;view=voices\""

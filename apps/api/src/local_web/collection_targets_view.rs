@@ -1379,7 +1379,12 @@ mod tests {
         assert!(html.contains("打开关键词的关键词观察"));
         assert!(!html.contains("关键词档案"));
         assert_eq!(html.matches("c-tg-actions").count(), 2);
-        assert_eq!(html.matches("c-tg-btn").count(), 2);
+        // 主动作两个（一行一个），加上每行一个「停止观察」开关。
+        assert_eq!(html.matches("c-tg-btn").count(), 4);
+        // 停止观察与删除必须每行各出现一次，且删除是链接不是按钮——两者形状不同，
+        // 长得像同一个按钮，人迟早会点错那个不可逆的。
+        assert_eq!(html.matches("c-tg-toggle").count(), 2);
+        assert_eq!(html.matches("c-tg-danger").count(), 2);
         assert_eq!(html.matches("data-monitor-rule-trigger").count(), 1);
         assert_eq!(html.matches(">建立档案</button>").count(), 1);
         assert_eq!(html.matches(">设置巡查</a>").count(), 1);
@@ -1433,8 +1438,11 @@ mod tests {
         assert!(html.contains("12 篇"));
         assert!(html.contains("5 / 12 · 缺 7"));
         assert!(html.contains("补采缺口"));
+        // 上次巡查是已经发生的事实，保留绝对时刻——可能要拿去跟别的记录对时间。
         assert!(html.contains("2026-09-04 08:30"));
-        assert!(html.contains("2026-09-05 09:00"));
+        // 下次巡查写成还有多久：人在这一列判断的是要等多久，而不是那一刻的钟点。
+        assert!(!html.contains("2026-09-05 09:00"));
+        assert!(html.contains("已逾期") || html.contains("后"));
         assert!(!html.contains("2026-09-04 09:00"));
         assert!(!html.contains("ARCHIVE HEALTH"));
         assert!(!html.contains('%'));
