@@ -148,9 +148,9 @@ fn target_table(
         ));
     }
     let columns = if is_creator {
-        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部创作者目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span class="c-tg-head-num" role="columnheader">作品目录</span><span class="c-tg-head-num" role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部创作者目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span class="c-tg-head-num" role="columnheader">作品目录</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     } else {
-        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span class="c-tg-head-num" role="columnheader">最近命中</span><span class="c-tg-head-num" role="columnheader">数据更新</span><span role="columnheader">巡查状态</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span class="c-tg-head-num" role="columnheader">最近命中</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">数据更新</span><span role="columnheader">巡查状态</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     };
     let grid = if is_creator {
         "c-tg-creator-grid"
@@ -411,7 +411,7 @@ fn target_row(
         format!(
             r#"<div class="c-tg-cell" role="cell">{archive_state}</div>
                 <div class="c-tg-cell c-tg-number-value" role="cell">{works}</div>
-                <div class="c-tg-cell c-tg-number-value" role="cell">{details}</div>
+                <div class="c-tg-cell c-tg-number-value c-tg-cell-end" role="cell">{details}</div>
                 <div class="c-tg-cell" role="cell">{patrol}</div>
                 <div class="c-tg-cell c-tg-change" role="cell">{recent_change}</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last}</time>
@@ -1419,14 +1419,17 @@ mod tests {
         assert!(html.contains("c-tg-creator-grid"));
         assert!(html.contains("c-tg-keyword-grid"));
         assert!(html.contains(
-            r#"作品目录</span><span class="c-tg-head-num" role="columnheader">详情进度"#
+            r#"作品目录</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">详情进度"#
         ));
         // 两张表的「最近新增」必须落在同一列位（第 10 位）。它们读的是同一个字段
         // `latest_new`——创作者那边此前叫「最近变化」、排在第 10 位，关键词这边叫
         // 「最近新增」、排在第 8 位：同一件事，两个名字，两个位置。现已统一。
         assert!(html.contains(
-            r#"最近命中</span><span class="c-tg-head-num" role="columnheader">数据更新"#
+            r#"最近命中</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">数据更新"#
         ));
+        // 第 8 列（详情进度／数据更新）在两张表里都单独多留右内边距，一起左移。
+        assert_eq!(html.matches("c-tg-head-end").count(), 2);
+        assert_eq!(html.matches("c-tg-cell-end").count(), 2);
         assert!(html.contains(r#"巡查状态</span><span role="columnheader">最近新增"#));
         assert!(!html.contains("最近变化"));
         // 数字列的表头必须与右对齐的数字同侧，否则一列两端各站一边，看着就是错位。
