@@ -57,8 +57,18 @@ no_running_model_invocations() {
 }
 
 request_worker_drain() {
-  local from_revision="$1" target_revision="$2" worker_pid ack_pid ack_state waited=0
-  worker_pid="$(launchctl print "gui/$(id -u)/$worker_label" 2>/dev/null | awk '$1 == "pid" { print $3; exit }')"
+  local from_revision="$1" target_revision="$2" worker_pid worker_inspection ack_pid ack_state waited=0
+  if ! worker_inspection="$(launchctl print "gui/$(id -u)/$worker_label" 2>&1)"; then
+    if [[ "$worker_inspection" == *"Could not find service \"$worker_label\" "* ]]; then
+      log "没有运行中的巡检 worker；记录无需 drain 的更新许可"
+      write_worker_update_permit "no_worker" "$from_revision" "$target_revision"
+      return
+    fi
+    print -r -- "无法查询 $worker_label 的 drain 状态；未切换运行 revision" >&2
+    print -r -- "$worker_inspection" >&2
+    exit 1
+  fi
+  worker_pid="$(print -r -- "$worker_inspection" | awk '$1 == "pid" { print $3; exit }')"
   if [[ ! "$worker_pid" =~ '^[0-9]+$' ]]; then
     log "没有运行中的巡检 worker；记录无需 drain 的更新许可"
     write_worker_update_permit "no_worker" "$from_revision" "$target_revision"
