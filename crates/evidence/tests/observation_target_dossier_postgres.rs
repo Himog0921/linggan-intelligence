@@ -1719,7 +1719,7 @@ async fn ready_installation(database: &Database, label: &str) -> Installed {
         &InstallationCheckIn {
             install_key: &install_key,
             installation_credential: None,
-            plugin_version: "0.8.46",
+            plugin_version: "0.8.47",
             browser_label: Some(label),
             capabilities: serde_json::json!([
                 "author_profile",

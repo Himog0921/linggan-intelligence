@@ -358,7 +358,7 @@ async fn seed_authorized_material_context(
         .bind(decision_ref).bind(request_ref).bind(authorization_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO execution_station (station_ref,display_name,daily_work_quota) VALUES ($1,'复观测夹具工位',200)")
         .bind(station_ref).execute(database.pool()).await.unwrap();
-    sqlx::query("INSERT INTO plugin_installation (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version,capabilities) VALUES ($1,$2,$3,'person',scope_001_now(),'0.8.46','[\"content_detail\",\"comments\",\"replies\",\"media_slots\",\"media_bytes\"]'::jsonb)")
+    sqlx::query("INSERT INTO plugin_installation (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version,capabilities) VALUES ($1,$2,$3,'person',scope_001_now(),'0.8.47','[\"content_detail\",\"comments\",\"replies\",\"media_slots\",\"media_bytes\"]'::jsonb)")
         .bind(installation_ref).bind(&install_key).bind(station_ref).execute(database.pool()).await.unwrap();
     set_station_accepting(database, station_ref, true, "person")
         .await

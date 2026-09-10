@@ -804,6 +804,11 @@ const DISPATCH_ANSWER_EXPLANATIONS: &[(&str, &str, &str)] = &[
         "等它跑完自然轮到下一单。",
     ),
     (
+        "station_busy",
+        "这台工位已有一份活在跑",
+        "等待当前 Lease 结束；未观察账号的首单也只允许这一份并发。",
+    ),
+    (
         "platform_concurrency_reached",
         "平台并发已满",
         "等任一执行许可释放后自然恢复。",

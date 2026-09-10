@@ -16,7 +16,7 @@ use linggan_evidence::{
     AccountEligibilityObservation, CollectionControlError, DispatchDecision, DispatchFailureCode,
     DispatchFailureError, DispatchFailureOutcome, ExplicitAccountEligibilitySignal,
     activate_installation_credential, decide_dispatch, record_dispatch_answer,
-    report_account_eligibility, requeue_failed_dispatch,
+    report_account_eligibility, report_claimed_task_account_eligibility, requeue_failed_dispatch,
 };
 
 /// The station asks whether it may execute a bounded task. Published through
@@ -91,6 +91,8 @@ async fn activate_credential(State(state): State<LocalWebState>, body: Bytes) ->
 struct AccountEligibilityBody {
     installation_ref: uuid::Uuid,
     installation_credential: String,
+    #[serde(default)]
+    task_id: Option<uuid::Uuid>,
     observation: AccountEligibilityObservationBody,
 }
 
@@ -168,29 +170,55 @@ async fn report_account(State(state): State<LocalWebState>, body: Bytes) -> Resp
             "account_eligibility_observation_invalid",
         );
     };
-    match report_account_eligibility(
-        database,
-        request.installation_ref,
-        &request.installation_credential,
-        observation,
-        state.account_digest_key.as_deref().map(Vec::as_slice),
-    )
-    .await
-    {
+    let digest_key = state.account_digest_key.as_deref().map(Vec::as_slice);
+    let reported = match request.task_id {
+        Some(task_id) => {
+            report_claimed_task_account_eligibility(
+                database,
+                request.installation_ref,
+                &request.installation_credential,
+                task_id,
+                observation,
+                digest_key,
+            )
+            .await
+        }
+        None => {
+            report_account_eligibility(
+                database,
+                request.installation_ref,
+                &request.installation_credential,
+                observation,
+                digest_key,
+            )
+            .await
+        }
+    };
+    match reported {
         Ok(receipt) => Json(serde_json::json!({
             "outcome": "observed",
             "installationRef": receipt.installation_ref,
             "accountRef": receipt.account_ref,
             "eligibilityState": receipt.state.as_str(),
             "bindingRequired": receipt.binding_required,
+            "bindingMismatch": receipt.binding_mismatch,
+            "frozenAccountMismatch": receipt.frozen_account_mismatch,
+            "accountBusy": receipt.account_busy,
         }))
         .into_response(),
         Err(CollectionControlError::InvalidCredential) => local_read_json_error(
             axum::http::StatusCode::UNAUTHORIZED,
             "installation_credential_invalid",
         ),
-        Err(CollectionControlError::SchemaUnavailable)
-        | Err(CollectionControlError::MissingDigestKey) => local_read_json_error(
+        Err(CollectionControlError::ClaimedTaskNotHeld) => local_read_json_error(
+            axum::http::StatusCode::CONFLICT,
+            "account_observation_claim_not_held",
+        ),
+        Err(CollectionControlError::MissingDigestKey) => local_read_json_error(
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "account_identity_key_missing",
+        ),
+        Err(CollectionControlError::SchemaUnavailable) => local_read_json_error(
             axum::http::StatusCode::SERVICE_UNAVAILABLE,
             "account_control_unavailable",
         ),

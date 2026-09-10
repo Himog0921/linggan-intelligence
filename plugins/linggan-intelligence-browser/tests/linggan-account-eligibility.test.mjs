@@ -9,6 +9,7 @@ import {
 } from '../src/linggan/accountEligibilityProbe.js';
 import {
   accountEligibilityRouteFromHealth,
+  accountObservationAvailabilityFromHealth,
   claimedTaskAccountDecision,
   confirmedAccountObservationBlocksClaim,
   reportLingganAccountEligibility,
@@ -18,6 +19,7 @@ const HEALTH = {
   routes: {
     station: {
       eligibilityReport: '/api/local/stations/account-eligibility-observations',
+      accountObservation: 'ready',
     },
   },
 };
@@ -182,7 +184,14 @@ test('only a server-confirmed negative or binding change stops an already claime
   assert.equal(confirmedAccountObservationBlocksClaim({ reported: false }), false);
   assert.equal(confirmedAccountObservationBlocksClaim({ reported: true, eligibilityState: 'unknown' }), false);
   assert.equal(confirmedAccountObservationBlocksClaim({ reported: true, eligibilityState: 'usable' }), false);
-  assert.equal(confirmedAccountObservationBlocksClaim({ reported: true, bindingRequired: true }), true);
+  assert.equal(confirmedAccountObservationBlocksClaim({ reported: true, bindingRequired: true }), false);
+  assert.equal(confirmedAccountObservationBlocksClaim({ reported: true, bindingMismatch: true }), true);
+  assert.equal(confirmedAccountObservationBlocksClaim({ reported: true, frozenAccountMismatch: true }), true);
+  assert.deepEqual(claimedTaskAccountDecision({ reported: false, claimedTaskNotHeld: true }), {
+    mayExecute: false,
+    state: 'account_observation_blocked',
+    message: '任务页已观察到账号状态变化或限制，已停止本次采集并等待服务端恢复条件。',
+  });
   assert.equal(confirmedAccountObservationBlocksClaim({ reported: true, eligibilityState: 'needs_login' }), true);
 });
 
@@ -192,10 +201,16 @@ test('eligibility reporting uses only the health-advertised station route', asyn
     '/api/local/stations/account-eligibility-observations',
   );
   assert.equal(accountEligibilityRouteFromHealth({ routes: {} }), null);
+  assert.equal(accountObservationAvailabilityFromHealth(HEALTH), 'ready');
+  assert.equal(
+    accountObservationAvailabilityFromHealth({ routes: { station: { accountObservation: 'identity_key_missing' } } }),
+    'identity_key_missing',
+  );
   let request;
   const result = await reportLingganAccountEligibility({
     installationRef: '11111111-1111-4111-8111-111111111111',
     installationCredential: 'high-entropy-fixture-credential',
+    taskId: '33333333-3333-4333-8333-333333333333',
     observation: { signal: 'authenticated_observed', rawPlatformAccountId: 'stable-user-3' },
     health: HEALTH,
     fetchImpl: async (url, options) => {
@@ -208,6 +223,8 @@ test('eligibility reporting uses only the health-advertised station route', asyn
             accountRef: '22222222-2222-4222-8222-222222222222',
             eligibilityState: 'usable',
             bindingRequired: true,
+            bindingMismatch: false,
+            frozenAccountMismatch: false,
           };
         },
       };
@@ -217,6 +234,7 @@ test('eligibility reporting uses only the health-advertised station route', asyn
   assert.deepEqual(request.body, {
     installationRef: '11111111-1111-4111-8111-111111111111',
     installationCredential: 'high-entropy-fixture-credential',
+    taskId: '33333333-3333-4333-8333-333333333333',
     observation: {
       signal: 'authenticated_observed',
       rawPlatformAccountId: 'stable-user-3',
@@ -225,6 +243,58 @@ test('eligibility reporting uses only the health-advertised station route', asyn
   assert.match(request.url, /^http:\/\/localhost:3000\/api\/local\/stations\//);
   assert.equal(JSON.stringify(result).includes('stable-user-3'), false);
   assert.equal(JSON.stringify(result).includes('high-entropy-fixture-credential'), false);
+});
+
+test('a missing identity key still sends a closed negative account observation', async () => {
+  let request;
+  const result = await reportLingganAccountEligibility({
+    installationRef: '11111111-1111-4111-8111-111111111111',
+    installationCredential: 'high-entropy-fixture-credential',
+    observation: { signal: 'login_required' },
+    health: {
+      routes: {
+        station: {
+          eligibilityReport: '/api/local/stations/account-eligibility-observations',
+          accountObservation: 'identity_key_missing',
+        },
+      },
+    },
+    fetchImpl: async (_url, options) => {
+      request = JSON.parse(options.body);
+      return {
+        ok: true,
+        async json() {
+          return { outcome: 'observed', eligibilityState: 'needs_login' };
+        },
+      };
+    },
+  });
+  assert.equal(result.reported, true);
+  assert.equal(result.eligibilityState, 'needs_login');
+  assert.deepEqual(request.observation, { signal: 'login_required' });
+  assert.equal(JSON.stringify(request).includes('high-entropy-fixture-credential'), true,
+    'the credential belongs only to the loopback request body');
+  assert.equal(JSON.stringify(result).includes('high-entropy-fixture-credential'), false);
+});
+
+test('a server-confirmed missing claimed task stops the page without exposing task context', async () => {
+  const result = await reportLingganAccountEligibility({
+    installationRef: '11111111-1111-4111-8111-111111111111',
+    installationCredential: 'high-entropy-fixture-credential',
+    taskId: '33333333-3333-4333-8333-333333333333',
+    observation: { signal: 'authenticated_observed', rawPlatformAccountId: 'stable-user-3' },
+    health: HEALTH,
+    fetchImpl: async () => ({
+      ok: false,
+      async json() { return { code: 'account_observation_claim_not_held' }; },
+    }),
+  });
+  assert.deepEqual(result, {
+    reported: false,
+    reasonCode: 'account_observation_claim_not_held',
+    claimedTaskNotHeld: true,
+  });
+  assert.equal(JSON.stringify(result).includes('stable-user-3'), false);
 });
 
 test('an unavailable page does not turn missing positive evidence into a negative account report', async () => {

@@ -67,6 +67,12 @@ Mog 批准“评论语料与每日研究 V1”并要求原声参考证据库紧�
 
 ## 当前阶段
 
+### ACCOUNT-OBSERVATION-BOOTSTRAP-002 / Issue #218（源码候选；尚未进入共享运行）
+
+新装 Browser Producer 显示“无观察账号”的根因被拆开处理：安装记录与服务端凭据可以已经有效，但运行时未配置账号身份摘要键时，健康接口会明确标示 `identity_key_missing`；认证身份 observation 不会上报，但明确的登录墙、冷却或访问限制仍可上报并阻断后续接活。即使账号身份尚未由人工绑定，也不应因“未观察”或“未绑定”而拒绝第一张任务。源码候选新增 `0065_account_observation_bootstrap.sql`，将账号观察改为按安装追加记录、以数据库生成序列裁决同一时间点的先后、允许无身份的显式负面状态；容量选择仅拒绝明确的登录/限制/冷却、身份变更、账号并发或工位并发。
+
+第一张任务仍由既有 WorkOrder/Lease 串行保护，并只在任务本来访问的页面被动确认账号；不打开、刷新、滚动小红书页面，不额外制造平台访问。运行时与插件会明确呈现 `identity_key_missing`，不泄露任何摘要键或账号身份。Rust 单元、API 单元、插件 262 项和完整隔离 PostgreSQL LOCAL-001 已通过，临时数据库、容器和卷已清理。分支为 `codex/account-observation-bootstrap-002`，基线为 `origin/main@9c84f3506a1ff3ee7a3357daba83130dd5ee438b`；尚未提交、推送、合并、迁移共享库、刷新 3000、重载插件或访问外部平台。
+
 ### TARGET-INSPECTOR-PERFORMANCE-001 / Issue #158（已合并 main；本机 3000 已刷新）
 
 Mog 于 2026-09-08 确认推进观察目标列表和右侧检查器收口，并要求由 subagent 分工实施。PR #205 已由 exact head `e067bfbf7f60d80fc45502ac8cc10f686c8c5efe` squash 合并为 `f0ed68dcf94c139be67f70bd76c09623d3c87b7d`：Targets 顶部删除重复 scheduler/patrol/timezone prose，六目标勾选后顶部批量编辑显示数量；1440 宽表压缩为主体字段与操作同时可见，避免 sticky 操作列覆盖内容。检查器收敛为 `概览｜作品｜巡查`，creator 的作品内为 `列表｜表现`。

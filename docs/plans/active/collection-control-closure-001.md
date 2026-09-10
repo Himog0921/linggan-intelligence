@@ -47,10 +47,20 @@
 - Producer→API 的 observation body 是严格闭集：`authenticated_observed` 必须携带瞬时账号标识；`cooldown_observed`、`login_required`、`access_restricted` 是不携带账号标识的明确负面事件。不存在 `signal_incomplete + raw account id` 这类可产生幽灵身份的交叉组合；不完整 DOM 读取不发送请求。
 - 人工账号 binding 是持续有效的服务端事实，直到人明确结束/替换它。新增 additive `0064_account_observation_normalization` 删除旧 `confirmed_until` deadline，并取消新 observation 的 expiry 写入；历史 `account_binding_expired` reason 只用于读取既有历史，不再由当前 evaluator 产生。
 - 账号观察只在用户自然打开的 XHS 页，或已领取任务自然打开的同一 XHS 页发生。负面信号只能来自平台状态组件，绝不从页面标题、笔记或评论全文猜测；无法得出结论、或本机回传暂时失败时都放行该首单。只有服务端已确认的负面事实或身份不一致才停止该 Lease。禁止 alarm、标签枚举、打开/刷新/滚动/点击或平台 API 探测。
-- server minimum plugin version 与 Producer contract 同步升级到 `0.8.46`，旧版本不能绕过任务页观察路径领取新 Lease。`evaluate`、frozen revalidation 和 ready-batch slots 使用同一命名 `CapacityCandidate` loader / policy，不再维护三份 SQL 或 positional tuple。
+- server minimum plugin version 与 Producer contract 同步升级到 `0.8.47`，旧版本不能绕过首单观察与 `bindingMismatch` 路径领取新 Lease。`evaluate`、frozen revalidation 和 ready-batch slots 使用同一命名 `CapacityCandidate` loader / policy，不再维护三份 SQL 或 positional tuple。
 - 验收必须分别证明：普通 capacity 读取、具体 claimant revalidation/dispatch 及 batch-ready slots 都会在账号身份变化或明确负面观察后关闭；HTTP 拒绝旧平铺 body 和畸形组合；发布 zip 可重现且只保留当前受控版本。
 
 **阅读规则补充：** 此后各节出现 `account_eligibility_stale`、账号 positive freshness、20 分钟/6 小时资格续期或“先重报再 retry claim”时，均为历史快照或历史行兼容，不得恢复为当前执行门槛。
+
+### 0.2.2 2026-09-10 范围修正 · 未观察不是未授权
+
+Issue #218 的 `ACCOUNT-OBSERVATION-BOOTSTRAP-002` 继续收敛本节：**没有账号观察、没有人工绑定**不再是新安装工位的首单阻断理由。只要工位/安装、凭据、版本、能力、风险、平台并发和预算均合格，就允许该安装取得一项 Work Order；该 Work Order 如实冻结 `account_ref = NULL` 与 `eligibility_ref = NULL`。首单期间同一 installation 至多一份 live Lease，不能因未知身份并发扩张。
+
+- `cooling`、`needs_login`、`restricted` 仍是明确负面事实，即使页面尚未给出认证身份，也以 installation 级 append-only observation 阻断后续任务；不得为它们伪造账号或人工 binding。
+- 未绑定但已观察到的认证身份允许继续执行；`bindingRequired` 仅表示 Runtime 可供人工确认的候选。只有已有人工 binding 与新身份不一致的 `bindingMismatch` 才停止已领取任务并阻断新 Lease。
+- “最新 observation”按数据库单调 append sequence 决定，不能在相同服务器时间戳时以 UUID 随机排序。详细范围、非目标和隔离验证见 [ACCOUNT-OBSERVATION-BOOTSTRAP-002](account-observation-bootstrap-002.md)。
+
+本节替代本计划其余历史段落中“bound account 是所有新 Lease 前置条件”以及“从未形成账号事实一律阻断”的表述；历史 `account_unbound` / `account_unknown` 行只保留读取兼容，不得作为当前 evaluator 输出。
 
 ## 1. 用户结果与串行门
 

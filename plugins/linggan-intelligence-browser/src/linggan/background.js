@@ -648,7 +648,7 @@ async function requeueClaimedTaskFailure({ claim, installKey, state, message }) 
   };
 }
 
-async function reportAccountObservationFromPage(observation) {
+async function reportAccountObservationFromPage(observation, { taskId = null } = {}) {
   const station = await reportStationStatus();
   const installKey = await producerInstanceId();
   const installationCredential = await installationCredentialFor(installKey);
@@ -658,6 +658,7 @@ async function reportAccountObservationFromPage(observation) {
   return reportLingganAccountEligibility({
     installationRef: station.installationRef,
     installationCredential,
+    taskId,
     observation,
     health: (await readLingganLocalReadiness()).health,
   });
@@ -669,13 +670,13 @@ async function reportAccountObservationFromPage(observation) {
  * platform navigation, refresh, fetch, or tab search. Inconclusive DOM state stays soft; every
  * conclusive observation must be accepted by the server before collection may start.
  */
-async function verifyClaimedTaskAccount(tabId) {
+async function verifyClaimedTaskAccount(tabId, claim) {
   const page = await chrome.tabs.sendMessage(tabId, {
     action: LINGGAN_RUNTIME_ACTION.OBSERVE_CLAIMED_TASK_ACCOUNT,
   });
   const observation = page?.success === true ? page.observation : null;
   if (!observation) return { mayExecute: true, state: 'account_observation_inconclusive' };
-  const report = await reportAccountObservationFromPage(observation);
+  const report = await reportAccountObservationFromPage(observation, { taskId: claim?.taskId });
   return claimedTaskAccountDecision(report);
 }
 
@@ -828,7 +829,7 @@ async function runDispatchedTask() {
         message: '观察页面加载超时，本次未采集。',
       });
     }
-    const accountVerification = await verifyClaimedTaskAccount(tabId);
+    const accountVerification = await verifyClaimedTaskAccount(tabId, claim);
     if (!accountVerification.mayExecute) {
       return requeueClaimedTaskFailure({
         claim: { ...claim, health: readiness.health },

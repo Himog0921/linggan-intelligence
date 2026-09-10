@@ -9,8 +9,9 @@ use linggan_evidence::{
     bind_observation_account, check_in_installation, collection_control_schema_is_ready,
     decide_dispatch, delete_observation_target, dynamic_cadence, grant_authorization,
     open_claim_window, read_capacity, read_target_deletion_preview, register_station,
-    release_work_order_lease, rename_station, report_account_eligibility, request_and_admit,
-    retire_station, rotate_installation_credential, set_station_accepting, store_pending_target,
+    release_work_order_lease, rename_station, report_account_eligibility,
+    report_claimed_task_account_eligibility, request_and_admit, retire_station,
+    rotate_installation_credential, set_station_accepting, store_pending_target,
     toggle_target_patrol,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
@@ -115,6 +116,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0063_content_author_attribution.sql"),
     "\n",
     include_str!("../../../database/migrations/0064_account_observation_normalization.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0065_account_observation_bootstrap.sql"),
 );
 
 #[tokio::test]
@@ -184,6 +187,19 @@ async fn complete_migration_set_applies_collection_control_0037() {
     .await
     .expect("the observation schema retains a nullable historic expiry field");
     assert!(observation_expiry_is_optional);
+    let observation_sequence_is_required: bool = sqlx::query_scalar(
+        "SELECT is_nullable='NO' FROM information_schema.columns \
+         WHERE table_schema=current_schema() \
+           AND table_name='platform_observation_account_eligibility_observation' \
+           AND column_name='observation_sequence'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the current observation order is represented in the schema");
+    assert!(
+        observation_sequence_is_required,
+        "0065 makes latest account state append-ordered rather than UUID tie-broken"
+    );
 }
 
 #[tokio::test]
@@ -235,7 +251,7 @@ async fn claimed_installation_auto_accepts_but_a_person_pause_survives_replaceme
         &InstallationCheckIn {
             install_key: "auto-accept-first",
             installation_credential: None,
-            plugin_version: "0.8.46",
+            plugin_version: "0.8.47",
             browser_label: Some("Chrome"),
             capabilities: serde_json::json!(["author_profile"]),
         },
@@ -273,7 +289,7 @@ async fn claimed_installation_auto_accepts_but_a_person_pause_survives_replaceme
         &InstallationCheckIn {
             install_key: "auto-accept-replacement",
             installation_credential: None,
-            plugin_version: "0.8.46",
+            plugin_version: "0.8.47",
             browser_label: Some("Chrome"),
             capabilities: serde_json::json!(["author_profile"]),
         },
@@ -331,7 +347,7 @@ async fn legacy_registered_closed_default_also_auto_accepts_when_claimed() {
         &InstallationCheckIn {
             install_key: "legacy-default-claim",
             installation_credential: None,
-            plugin_version: "0.8.46",
+            plugin_version: "0.8.47",
             browser_label: Some("Chrome"),
             capabilities: serde_json::json!(["author_profile"]),
         },
@@ -358,7 +374,7 @@ async fn legacy_registered_closed_default_also_auto_accepts_when_claimed() {
 #[ignore = "requires an isolated PostgreSQL proof database"]
 async fn account_identity_and_installation_credential_are_hash_only() {
     let database = proof_database("collection_control_hash_only").await;
-    let installation = install(&database, "hash-only", "0.8.46").await;
+    let installation = install(&database, "hash-only", "0.8.47").await;
     let raw_credential = installation
         .credential
         .as_deref()
@@ -466,7 +482,7 @@ async fn credentials_require_compatible_version_and_rotation_activates_before_re
     .expect("legacy credential absence is readable");
     assert_eq!(legacy_credential_count, 0);
 
-    let current = install(&database, "current-credential", "0.8.46").await;
+    let current = install(&database, "current-credential", "0.8.47").await;
     let first_secret = current
         .credential
         .as_deref()
@@ -580,7 +596,7 @@ async fn account_binding_is_one_to_one_and_does_not_expire_by_calendar() {
     let account_ref = first_observation.account_ref.expect("account ref exists");
     let emitted_expiry: Option<String> = sqlx::query_scalar(
         "SELECT expires_at::text FROM platform_observation_account_eligibility_observation \
-         WHERE account_ref=$1 AND installation_ref=$2 ORDER BY observed_at DESC,eligibility_ref DESC LIMIT 1",
+         WHERE account_ref=$1 AND installation_ref=$2 ORDER BY observation_sequence DESC LIMIT 1",
     )
     .bind(account_ref)
     .bind(first.installation_ref)
@@ -840,9 +856,100 @@ async fn server_projects_each_closed_account_signal_into_capacity() {
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
+async fn account_observation_bootstrap_preserves_the_0064_current_projection_for_existing_rows() {
+    let database =
+        proof_database_before_account_observation_bootstrap("control_0065_upgrade").await;
+    let station_ref = Uuid::new_v4();
+    let installation_ref = Uuid::new_v4();
+    let account_ref = Uuid::new_v4();
+    sqlx::query("INSERT INTO execution_station (station_ref,display_name) VALUES ($1,'0065 upgrade station')")
+        .bind(station_ref)
+        .execute(database.pool())
+        .await
+        .expect("legacy station exists");
+    sqlx::query(
+        "INSERT INTO plugin_installation \
+             (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version) \
+         VALUES ($1,'0065-upgrade-install',$2,'person',scope_001_now(),'0.8.46')",
+    )
+    .bind(installation_ref)
+    .bind(station_ref)
+    .execute(database.pool())
+    .await
+    .expect("legacy installation exists");
+    sqlx::query(
+        "INSERT INTO platform_observation_account \
+             (account_ref,platform,identity_digest,digest_version) \
+         VALUES ($1,'xhs',$2,'hmac-sha256-v1')",
+    )
+    .bind(account_ref)
+    .bind("a".repeat(64))
+    .execute(database.pool())
+    .await
+    .expect("legacy account exists");
+
+    let older = Uuid::parse_str("00000000-0000-0000-0000-0000000000ff").expect("uuid");
+    let later_lower_uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("uuid");
+    let later_higher_uuid = Uuid::parse_str("00000000-0000-0000-0000-000000000002").expect("uuid");
+    for (eligibility_ref, state, reason, observed_at) in [
+        (
+            older,
+            "restricted",
+            "access_restricted",
+            "2026-09-01T00:00:00Z",
+        ),
+        (
+            later_lower_uuid,
+            "usable",
+            "authenticated",
+            "2026-09-02T00:00:00Z",
+        ),
+        (
+            later_higher_uuid,
+            "needs_login",
+            "login_required",
+            "2026-09-02T00:00:00Z",
+        ),
+    ] {
+        sqlx::query(
+            "INSERT INTO platform_observation_account_eligibility_observation \
+                 (eligibility_ref,account_ref,installation_ref,eligibility_state,signal_version,reason_code,observed_at) \
+             VALUES ($1,$2,$3,$4,'xhs-account-eligibility-v1',$5,$6::timestamptz)",
+        )
+        .bind(eligibility_ref)
+        .bind(account_ref)
+        .bind(installation_ref)
+        .bind(state)
+        .bind(reason)
+        .bind(observed_at)
+        .execute(database.pool())
+        .await
+        .expect("0064 observation exists");
+    }
+
+    sqlx::raw_sql(include_str!(
+        "../../../database/migrations/0065_account_observation_bootstrap.sql"
+    ))
+    .execute(database.pool())
+    .await
+    .expect("0065 upgrades a populated 0064 schema");
+    let current: (Uuid, String) = sqlx::query_as(
+        "SELECT eligibility_ref,eligibility_state \
+         FROM platform_observation_account_eligibility_observation \
+         WHERE installation_ref=$1 ORDER BY observation_sequence DESC LIMIT 1",
+    )
+    .bind(installation_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("upgraded current observation is readable");
+    assert_eq!(current, (later_higher_uuid, "needs_login".to_owned()));
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
 async fn unified_capacity_exposes_distinct_recoverable_reasons() {
     let database = proof_database("collection_control_capacity_reasons").await;
-    let installation = install(&database, "capacity-reasons", "0.8.46").await;
+    let installation = install(&database, "capacity-reasons", "0.8.47").await;
     let original_secret = installation
         .credential
         .as_deref()
@@ -884,7 +991,7 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
     assert_capacity_reason(&database, "plugin_version_unsupported").await;
 
     sqlx::query(
-        "UPDATE plugin_installation SET plugin_version='0.8.46', \
+        "UPDATE plugin_installation SET plugin_version='0.8.47', \
              last_seen_at=scope_001_now()-interval '21 minutes' WHERE installation_ref=$1",
     )
     .bind(installation.installation_ref)
@@ -900,7 +1007,24 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
     .execute(database.pool())
     .await
     .expect("proof restores installation freshness");
-    assert_capacity_reason(&database, "account_unbound").await;
+    assert_capacity_reason(&database, "available").await;
+
+    let unbound_negative = report_account_eligibility(
+        &database,
+        installation.installation_ref,
+        &secret,
+        AccountEligibilityObservation::ExplicitBlock(
+            ExplicitAccountEligibilitySignal::LoginRequired,
+        ),
+        Some(DIGEST_KEY),
+    )
+    .await
+    .expect("an explicit unbound login block is retained at the installation boundary");
+    assert_eq!(unbound_negative.account_ref, None);
+    assert_eq!(unbound_negative.state, AccountEligibilityState::NeedsLogin);
+    assert!(!unbound_negative.binding_required);
+    assert!(!unbound_negative.binding_mismatch);
+    assert_capacity_reason(&database, "account_needs_login").await;
 
     let observation = report_account_eligibility(
         &database,
@@ -913,16 +1037,10 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
     )
     .await
     .expect("account fact is reported");
-    let account_ref = observation.account_ref.expect("account ref exists");
-    bind_observation_account(
-        &database,
-        account_ref,
-        installation.installation_ref,
-        "person",
-    )
-    .await
-    .expect("person binds the account");
+    assert!(observation.binding_required);
+    assert!(!observation.binding_mismatch);
     assert_capacity_reason(&database, "available").await;
+    let account_ref = observation.account_ref.expect("account ref exists");
 
     sqlx::query(
         "UPDATE platform_observation_account_eligibility_observation \
@@ -979,17 +1097,109 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
         admitted.work_order_ref.is_some(),
         "admission creates queued work"
     );
-    let lease_ref = match decide_dispatch(&database, &installation.install_key, &secret)
+    let work_order_ref = admitted
+        .work_order_ref
+        .expect("admission created a work order");
+    let admitted_account_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT account_ref FROM collection_admission_decision WHERE decision_ref=$1",
+    )
+    .bind(admitted.decision_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the unbound observed identity is frozen on the admission decision");
+    assert_eq!(
+        admitted_account_ref, None,
+        "admission records no fictional station or account; the claimant freezes that fact atomically"
+    );
+    let (lease_ref, task_id) = match decide_dispatch(&database, &installation.install_key, &secret)
         .await
         .expect("the claimed installation atomically selects and claims queued work")
     {
-        DispatchDecision::Dispatch { lease_ref, .. } => lease_ref,
+        DispatchDecision::Dispatch {
+            lease_ref, task_id, ..
+        } => (lease_ref, task_id),
         other => panic!("ready claimed installation must receive the queued work; got {other:?}"),
     };
-    assert_capacity_reason(&database, "account_busy").await;
+    let claimed_account_ref: Option<Uuid> =
+        sqlx::query_scalar("SELECT account_ref FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("claim freezes the observed identity on the leased work order");
+    assert_eq!(
+        claimed_account_ref,
+        Some(account_ref),
+        "an observed identity remains a concurrency subject before person binding"
+    );
+    let switched_account = report_claimed_task_account_eligibility(
+        &database,
+        installation.installation_ref,
+        &secret,
+        task_id,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "capacity-reason-account-switched",
+        },
+        Some(DIGEST_KEY),
+    )
+    .await
+    .expect(
+        "the claimed task page reports its observed identity through the server-owned task context",
+    );
+    assert!(
+        switched_account.frozen_account_mismatch,
+        "a task claimed under account A must not continue when its page proves account B before either account is human-bound"
+    );
+    let preserved_account_ref: Option<Uuid> =
+        sqlx::query_scalar("SELECT account_ref FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("a mismatched observation does not rewrite the account frozen by the lease");
+    assert_eq!(preserved_account_ref, Some(account_ref));
+    sqlx::query("UPDATE collection_work_order SET account_ref=NULL WHERE work_order_ref=$1")
+        .bind(work_order_ref)
+        .execute(database.pool())
+        .await
+        .expect("proof recreates a first task leased before an identity was observed");
+    let first_task_observation = report_claimed_task_account_eligibility(
+        &database,
+        installation.installation_ref,
+        &secret,
+        task_id,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "capacity-reason-account",
+        },
+        Some(DIGEST_KEY),
+    )
+    .await
+    .expect("a task-page observation is accepted");
+    assert!(
+        !first_task_observation.account_busy,
+        "the first task may promote its newly observed account when no other installation owns it"
+    );
+    let frozen_account_ref: Option<Uuid> =
+        sqlx::query_scalar("SELECT account_ref FROM collection_work_order WHERE work_order_ref=$1")
+            .bind(work_order_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("the observed identity is frozen when the queued task is claimed");
+    assert_eq!(
+        frozen_account_ref,
+        Some(account_ref),
+        "the claimed task preserves account concurrency and identity revalidation before person binding"
+    );
+    assert_capacity_reason(&database, "station_busy").await;
     release_work_order_lease(&database, lease_ref, "revoked")
         .await
         .expect("proof releases the busy lease");
+    bind_observation_account(
+        &database,
+        account_ref,
+        installation.installation_ref,
+        "person",
+    )
+    .await
+    .expect("person may bind the observed identity after the first task");
 
     seed_accepted_daily_notes(&database, &installation, 200).await;
     assert_capacity_reason(&database, "station_daily_budget_reached").await;
@@ -1810,7 +2020,7 @@ async fn install(database: &Database, label: &str, version: &str) -> Installed {
 }
 
 async fn ready_installation_without_account(database: &Database, label: &str) -> Installed {
-    let installation = install(database, label, "0.8.46").await;
+    let installation = install(database, label, "0.8.47").await;
     set_station_accepting(database, installation.station_ref, true, "person")
         .await
         .expect("person enables station acceptance");
@@ -1982,6 +2192,20 @@ async fn proof_database(schema: &str) -> Database {
     isolated_proof_schema(&url, schema, MIGRATIONS)
         .await
         .expect("complete migrations through 0036 apply")
+}
+
+async fn proof_database_before_account_observation_bootstrap(schema: &str) -> Database {
+    let url = std::env::var("COLLECTION_CONTROL_PROOF_DATABASE_URL")
+        .or_else(|_| std::env::var("COLLECTION_DISPATCH_PROOF_DATABASE_URL"))
+        .expect("an isolated proof database URL is supplied");
+    let (migrations, _) = MIGRATIONS
+        .split_once(include_str!(
+            "../../../database/migrations/0065_account_observation_bootstrap.sql"
+        ))
+        .expect("0065 is the final migration in this proof ledger");
+    isolated_proof_schema(&url, schema, migrations)
+        .await
+        .expect("migrations through 0064 apply")
 }
 
 async fn proof_database_before_keyword_lifecycle(schema: &str) -> Database {
