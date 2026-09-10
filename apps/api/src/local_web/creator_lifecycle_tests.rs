@@ -468,18 +468,20 @@ fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
     // 目录要一屏排满，不靠横向滚动：一张需要左右拖动才能看全的表，等于要求人记住
     // 左边看过什么。定宽列写成 minmax(0,N) 以便窄窗口按比例收窄，而不是把表推出屏幕。
     assert!(!TARGET_DRAWER_CSS.contains("min-width:1120px"));
-    assert!(TARGET_DRAWER_CSS.contains("minmax(0,116px)"));
+    assert!(TARGET_DRAWER_CSS.contains("minmax(0,124px)"));
     // 创作者列必须是**定值**，不能是 max-content。
     //
     // 表头与数据行是两个各自独立的 grid 容器。内容相关的轨道（max-content）在两个容器里
     // 会各算各的：表头按「创作者」三个字算，落到下限 140px；数据行按「头像＋名字＋ID」
     // 算，得 189px。189 − 140 = 49——从第四列「平台」起，每个数据格都比表头右移 49px，
     // 整张表看上去就是「字段没对齐」。定值轨道在两个容器里算出同一个结果。
-    assert!(TARGET_DRAWER_CSS.contains("minmax(0,192px)"));
+    // 名字列吸走富余（此前富余全给了操作列，导致操作列 508px 而内容只有 194px）。
+    assert!(TARGET_DRAWER_CSS.contains("minmax(192px,1fr)"));
     assert!(!TARGET_DRAWER_CSS.contains("max-content"));
     // 操作列 200px 是量出来的：查看档案 70 + 观察开关 60 + 删除 48 + 两个 8px 间距 = 194。
     // 三个控件统一到 34px 同高后才是这个数；给不够就换行，行高会从 65px 被撑到 101px。
-    assert!(TARGET_DRAWER_CSS.contains("minmax(200px,1fr);gap:var(--lgi-space-2)}"));
+    // 操作列定宽 200px：内容实测 194，再多就是白占。
+    assert!(TARGET_DRAWER_CSS.contains("200px;gap:var(--lgi-space-2)}"));
     // 这一行的操作区**必须横排**。collection_workspace.css 曾给 .c-tg-actions 设过
     // flex-direction:column（8fe218c，那时操作列只有一个按钮，看不出问题），而本文件
     // 只重设了 display/align-items/justify-content，没重设 flex-direction——竖排就这样
