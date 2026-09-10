@@ -70,6 +70,7 @@ cargo test -p linggan-evidence --test local_discovery_postgres --locked -- --ign
 cargo test -p linggan-evidence --test local_producer_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test content_reobservation_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test material_projection_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test cross_industry_admission_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test material_social_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test material_media_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test creator_lifecycle_postgres --locked -- --ignored
