@@ -835,6 +835,113 @@ async fn exact_time_requires_a_supported_detail_field_and_parser_version() {
     );
 }
 
+/// 关键词任务带上采样口径后，整包被判为 `task_package_contract_mismatch` 而全部隔离。
+///
+/// 真实形状：任务 target 有 `query` + 四项口径，插件回执的 `coverage.target` 只回显
+/// `query` 与 surface 事实。既有的 discovery 集成用例全都只用 `{"query": ...}` 这种
+/// 不带口径的 target，所以 2026-09-08 起线上每一次关键词采集整包隔离，没有任何一条
+/// 测试变红。这条用例补上那个缺口。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_keyword_search_carrying_sampling_directives_projects_instead_of_quarantining() {
+    let database = proof_database("material_keyword_sampling_slice").await;
+    let task_target = serde_json::json!({
+        "query":"考研自习","ranking":"most_liked",
+        "topByLikes":20,"scrollRounds":3,"publishedWithinDays":7
+    });
+    submit_custom_package(
+        &database,
+        "xhs",
+        &["discovery_search"],
+        task_target,
+        "discovery_search",
+        "xhs",
+        serde_json::json!({
+            "target":{
+                "basis":"current_visible_surface",
+                "surface":"target_driven_surface",
+                "query":"考研自习"
+            },
+            "layers":[coverage_layer("discovery_search",1)]
+        }),
+        vec![serde_json::json!({
+            "kind":"discovery_card","resultPosition":1,
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-keyword-sampling"},
+            "payload":{"title":"二战考研半夜被自习室赶出来了","likes":2704}
+        })],
+    )
+    .await;
+
+    let quarantined: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_runtime_record_disposition \
+         WHERE reason='task_package_contract_mismatch'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        quarantined, 0,
+        "采样口径是下发的执行指令，不该参与包与任务的身份比对"
+    );
+    let row = sqlx::query(
+        "SELECT finding.title,finding.like_count,content.content_external_id \
+         FROM linggan_material_discovery_finding finding \
+         JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("带口径的关键词搜索结果进入发现面");
+    assert_eq!(
+        row.get::<String, _>("content_external_id"),
+        "note-keyword-sampling"
+    );
+    assert_eq!(row.get::<Option<i64>, _>("like_count"), Some(2704));
+}
+
+/// 豁免只对口径生效：搜索词本身对不上，仍然整包隔离，不进素材库。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_keyword_search_reporting_another_term_is_still_quarantined() {
+    let database = proof_database("material_keyword_identity_slice").await;
+    submit_custom_package(
+        &database,
+        "xhs",
+        &["discovery_search"],
+        serde_json::json!({"query":"考研自习","ranking":"most_liked"}),
+        "discovery_search",
+        "xhs",
+        serde_json::json!({
+            "target":{
+                "basis":"current_visible_surface",
+                "surface":"target_driven_surface",
+                "query":"adhd"
+            },
+            "layers":[coverage_layer("discovery_search",1)]
+        }),
+        vec![serde_json::json!({
+            "kind":"discovery_card","resultPosition":1,
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-keyword-elsewhere"},
+            "payload":{"title":"另一个词的结果","likes":1}
+        })],
+    )
+    .await;
+
+    let quarantined: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_runtime_record_disposition \
+         WHERE reason='task_package_contract_mismatch'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(quarantined, 1, "搜索词对不上仍然必须整包隔离");
+    let findings: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_material_discovery_finding")
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(findings, 0, "隔离的记录不得进入发现面");
+}
+
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn discovery_forms_the_same_work_identity_without_claiming_detail() {

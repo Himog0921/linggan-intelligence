@@ -3,6 +3,23 @@
 use linggan_contracts::ProducerCapturePackage;
 use serde_json::Value;
 
+/// 这个包是不是这张任务单要的东西。
+///
+/// target 的比对只问**身份**（搜的是不是这个词、这个博主、这篇内容），不问采样口径。
+/// 口径是下发给插件的**执行指令**（怎么排序、滚几次、取赞前几名、限几天内），插件照做，
+/// 但回执的 `coverage.target` 只回显身份，不会把指令抄回来——它本来也没有义务抄：
+/// 「插件有没有守住口径」由 `coverage` 的 `attempted/acquired` 如实记录，不靠回显一份
+/// 指令副本来证明。
+///
+/// 2026-09-08 的 `45c04f2` 给关键词任务加上口径下发后，这条比对就必然为假，
+/// 此后**每一次**带口径的关键词采集都被整包判为 `task_package_contract_mismatch`
+/// 并隔离：09-08 至 09-10 共 120 条搜索结果采回来却全部进不了库。
+/// 创作者/内容任务的 target 只有一个身份键，不受影响，所以问题只在关键词这一条通道。
+///
+/// 同一条错误判定此前在 `creator_lifecycle` 的巡检采样 SQL 里也有一份，09-08 的
+/// `58fce3f` 已经把那条 `@>` 比对整条删掉、改用 `package.task_id=task.task_id` 定归属；
+/// 那里现在只剩一段记录经过的注释。**当时没有一并改这里**——而这里才是决定材料
+/// 能不能入库的那道闸。
 pub(crate) fn task_package_binding_valid(
     task_spec: &Value,
     package: &ProducerCapturePackage,
@@ -24,8 +41,20 @@ pub(crate) fn task_package_binding_valid(
             .is_some_and(|(expected, actual)| {
                 expected
                     .iter()
+                    .filter(|(key, _)| !is_exempt_sampling_directive(package, key))
                     .all(|(key, value)| actual.get(key) == Some(value))
             })
+}
+
+/// 采样口径只在**关键词搜索**这一条通道上豁免身份比对。
+///
+/// 豁免按 `package_kind` 而不是只按键名生效：只有 `discovery_search` 会下发口径，
+/// 别的通道即使将来出现同名字段（比如给创作者作品排序也叫 `ranking`），那也是它自己的
+/// 身份口径，必须照常逐键比对，不该被这里顺手放过。名单的唯一真源在
+/// [`crate::work_order_lease::SAMPLING_DIRECTIVE_KEYS`]。
+fn is_exempt_sampling_directive(package: &ProducerCapturePackage, key: &str) -> bool {
+    package.package_kind() == "discovery_search"
+        && crate::work_order_lease::SAMPLING_DIRECTIVE_KEYS.contains(&key)
 }
 
 pub(crate) fn record_disposition(
@@ -214,4 +243,190 @@ fn exact_string<'a>(payload: &'a serde_json::Map<String, Value>, key: &str) -> O
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
+}
+
+#[cfg(test)]
+mod task_package_binding_tests {
+    use super::*;
+    use serde_json::json;
+
+    /// 按真实链路构造：包只能由合同解析产生，不能在测试里直接拼结构体。
+    fn package(package_kind: &str, coverage_target: Value) -> ProducerCapturePackage {
+        let raw = json!({
+            "contractVersion": "linggan.producer.capture-package.v1",
+            "packageRef": "5a6563c6-b962-4916-a17c-04c660cb7313",
+            "packageKind": package_kind,
+            "platform": "xhs",
+            "observedAt": "2026-09-10T10:57:26.801Z",
+            "capturedAt": "2026-09-10T10:57:26.801Z",
+            "coverage": {
+                "target": coverage_target,
+                "layers": [{
+                    "capability": package_kind,
+                    "observed": 20,
+                    "attempted": 20,
+                    "acquired": 20,
+                    "verified": 0,
+                    "failed": 0,
+                    "notAttempted": 0,
+                    "unknown": 4,
+                    "stoppedReason": "surface_read_complete"
+                }]
+            },
+            "records": []
+        });
+        linggan_contracts::parse_producer_capture_package(&raw.to_string())
+            .expect("fixture is a valid capture package")
+    }
+
+    fn task_spec(capability: &str, target: Value) -> Value {
+        json!({
+            "platform": "xhs",
+            "capabilitiesRequested": [capability],
+            "target": target,
+        })
+    }
+
+    /// 插件回执里的 `coverage.target`，只回显身份，不回显口径——这是真实形状。
+    fn keyword_coverage_target() -> Value {
+        json!({
+            "basis": "current_visible_surface",
+            "surface": "target_driven_surface",
+            "query": "考研自习",
+        })
+    }
+
+    /// 回归：2026-09-08 起带口径的关键词任务被整包判为不匹配，120 条搜索结果因此隔离。
+    #[test]
+    fn a_keyword_task_carrying_sampling_directives_still_binds() {
+        let spec = task_spec(
+            "discovery_search",
+            json!({
+                "query": "考研自习",
+                "ranking": "most_liked",
+                "topByLikes": 20,
+                "scrollRounds": 3,
+                "publishedWithinDays": 7,
+            }),
+        );
+        assert!(task_package_binding_valid(
+            &spec,
+            &package("discovery_search", keyword_coverage_target())
+        ));
+    }
+
+    /// 豁免的只有口径。搜索词本身对不上，仍然必须判为不匹配——
+    /// 否则这次修改就成了「关键词包一律放行」。
+    #[test]
+    fn a_keyword_task_whose_term_differs_does_not_bind() {
+        let spec = task_spec(
+            "discovery_search",
+            json!({ "query": "考研自习", "ranking": "most_liked" }),
+        );
+        let mut elsewhere = keyword_coverage_target();
+        elsewhere["query"] = json!("adhd");
+        assert!(!task_package_binding_valid(
+            &spec,
+            &package("discovery_search", elsewhere)
+        ));
+    }
+
+    /// 创作者通道原样不变：target 只有身份键，逐键全比对。
+    #[test]
+    fn a_creator_task_binds_exactly_as_before() {
+        let spec = task_spec(
+            "profile_discovery",
+            json!({ "authorExternalId": "69aad16e000000003201b172" }),
+        );
+        assert!(task_package_binding_valid(
+            &spec,
+            &package(
+                "profile_discovery",
+                json!({
+                    "basis": "current_visible_surface",
+                    "surface": "target_driven_surface",
+                    "authorExternalId": "69aad16e000000003201b172",
+                })
+            )
+        ));
+    }
+
+    /// 创作者通道的负例同样不变：身份对不上就是不匹配。
+    #[test]
+    fn a_creator_task_pointing_at_another_author_does_not_bind() {
+        let spec = task_spec(
+            "profile_discovery",
+            json!({ "authorExternalId": "69aad16e000000003201b172" }),
+        );
+        assert!(!task_package_binding_valid(
+            &spec,
+            &package(
+                "profile_discovery",
+                json!({
+                    "basis": "current_visible_surface",
+                    "surface": "target_driven_surface",
+                    "authorExternalId": "578d8413bd0da503d085793c",
+                })
+            )
+        ));
+    }
+
+    /// 口径键的豁免不跨通道生效：创作者任务的 target 里根本不会出现这些键，
+    /// 真出现了也不该被当成口径放过——这里锁住「只改了关键词」这件事。
+    #[test]
+    fn the_exemption_does_not_loosen_identity_keys_of_other_channels() {
+        let spec = task_spec(
+            "content_detail",
+            json!({ "contentExternalId": "6aa1670c0000000029017b8f" }),
+        );
+        assert!(!task_package_binding_valid(
+            &spec,
+            &package(
+                "content_detail",
+                json!({ "basis": "known_set", "contentExternalId": "6a8e86de00000000240043b0" })
+            )
+        ));
+    }
+
+    /// 豁免按通道生效，不只按键名：别的通道将来若出现同名字段（例如给创作者作品
+    /// 排序也叫 `ranking`），那是它自己的身份口径，必须照常参与比对。
+    /// 少了这一条，这次豁免就成了一条按裸键名全局放宽身份校验的暗门。
+    #[test]
+    fn a_same_named_key_on_another_channel_is_not_exempt() {
+        let spec = task_spec(
+            "profile_discovery",
+            json!({
+                "authorExternalId": "69aad16e000000003201b172",
+                "ranking": "most_liked",
+            }),
+        );
+        assert!(!task_package_binding_valid(
+            &spec,
+            &package(
+                "profile_discovery",
+                json!({
+                    "basis": "current_visible_surface",
+                    "surface": "target_driven_surface",
+                    "authorExternalId": "69aad16e000000003201b172",
+                })
+            )
+        ));
+    }
+
+    /// 平台、能力、层唯一性这三道检查不受本次改动影响。
+    #[test]
+    fn the_other_three_checks_still_hold() {
+        let mismatched_capability = task_spec("profile_discovery", json!({ "query": "考研自习" }));
+        assert!(!task_package_binding_valid(
+            &mismatched_capability,
+            &package("discovery_search", keyword_coverage_target())
+        ));
+
+        let mut mismatched_platform = task_spec("discovery_search", json!({ "query": "考研自习" }));
+        mismatched_platform["platform"] = json!("douyin");
+        assert!(!task_package_binding_valid(
+            &mismatched_platform,
+            &package("discovery_search", keyword_coverage_target())
+        ));
+    }
 }

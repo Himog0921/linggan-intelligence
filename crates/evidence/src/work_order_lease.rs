@@ -698,19 +698,47 @@ fn keyword_search_target(subject: &LeaseSubject) -> Value {
             subject.sampling.ranking.as_deref()
         )),
     );
-    if let Some(ranking) = subject.sampling.ranking.as_deref() {
-        target.insert("ranking".to_owned(), json!(ranking));
-    }
-    if let Some(rounds) = subject.sampling.scroll_rounds {
-        target.insert("scrollRounds".to_owned(), json!(rounds));
-    }
-    if let Some(top) = subject.sampling.top_by_likes {
-        target.insert("topByLikes".to_owned(), json!(top));
-    }
-    if let Some(days) = subject.sampling.published_within_days {
-        target.insert("publishedWithinDays".to_owned(), json!(days));
+    for (key, value) in sampling_directives(&subject.sampling) {
+        if let Some(value) = value {
+            target.insert(key.to_owned(), value);
+        }
     }
     Value::Object(target)
+}
+
+/// 关键词任务 target 里属于**采样口径**的键——即「怎么取」，而不是「取谁」。
+///
+/// 这份名单是唯一真源：[`keyword_search_target`] 按它下发，
+/// [`crate::material_contract_validation::task_package_binding_valid`] 按它豁免。
+/// 加新口径时改这一处，两边同时生效；`sampling_directives_are_all_declared_exempt`
+/// 会在漏改时变红。
+pub(crate) const SAMPLING_DIRECTIVE_KEYS: [&str; 4] = [
+    "ranking",
+    "scrollRounds",
+    "topByLikes",
+    "publishedWithinDays",
+];
+
+/// 口径缺失的项返回 `None`，调用方不写进去，让插件按自己的默认走。
+fn sampling_directives(sampling: &SamplingPolicy) -> [(&'static str, Option<Value>); 4] {
+    [
+        (
+            "ranking",
+            sampling.ranking.as_deref().map(|value| json!(value)),
+        ),
+        (
+            "scrollRounds",
+            sampling.scroll_rounds.map(|value| json!(value)),
+        ),
+        (
+            "topByLikes",
+            sampling.top_by_likes.map(|value| json!(value)),
+        ),
+        (
+            "publishedWithinDays",
+            sampling.published_within_days.map(|value| json!(value)),
+        ),
+    ]
 }
 
 /// 从关键词目标的身份键里取出真正的搜索词。
@@ -1343,6 +1371,42 @@ mod keyword_search_target_tests {
         ] {
             assert!(target.get(absent).is_none(), "{absent} 不该被编出来");
         }
+    }
+
+    /// 名单漏改会让被漏掉的那个口径重新参与身份比对，而插件不会回显它——
+    /// 于是那一类关键词采集重新整包隔离，且没有任何报错。这条测试是那件事的唯一防线。
+    #[test]
+    fn sampling_directives_are_all_declared_exempt() {
+        let sampling = SamplingPolicy {
+            ranking: Some("most_liked".to_owned()),
+            scroll_rounds: Some(3),
+            top_by_likes: Some(20),
+            published_within_days: Some(7),
+        };
+        let emitted: Vec<&str> = sampling_directives(&sampling)
+            .into_iter()
+            .map(|(key, value)| {
+                assert!(value.is_some(), "{key} 在口径填满时必须下发");
+                key
+            })
+            .collect();
+        assert_eq!(emitted, SAMPLING_DIRECTIVE_KEYS);
+
+        let target = keyword_search_target(&subject("考研自习::most_liked", sampling));
+        let mut carried: Vec<&str> = target
+            .as_object()
+            .expect("target is an object")
+            .keys()
+            .map(String::as_str)
+            .filter(|key| *key != "query")
+            .collect();
+        carried.sort_unstable();
+        let mut exempt = SAMPLING_DIRECTIVE_KEYS.to_vec();
+        exempt.sort_unstable();
+        assert_eq!(
+            carried, exempt,
+            "下发的口径键必须与豁免名单逐项一致，否则关键词采集会被整包隔离"
+        );
     }
 
     /// 词里含 `::` 时从右边切，排序不含 `::`，所以切得对。
