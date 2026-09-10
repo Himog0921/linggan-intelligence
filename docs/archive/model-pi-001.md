@@ -1,0 +1,71 @@
+# MODEL-PI-001 · 模型设置与评论分析链
+
+> 状态: 历史归档
+> 最后核对: 2026-09-10
+> 适用范围: Issue #169 的历史模型设置与旧评论分析链
+> 事实来源: Mog 本轮整包授权、当前 Rust/DB、Pi 0.85.1 固定发布源码
+> 冲突时以谁为准: 用户最新决定、AGENTS.md、真实代码/运行与验证
+
+替代说明（2026-09-10）：Pi adapter、Keychain、连接版本、模型配置和 invocation ledger 继续复用；本文件的旧即时/daily/plan/comment contract 不再是可调用产品路径。当前模型设置和唯一评论研究调用路径分别见 [模型与 AI 设置](../pages/model-ai-settings.md)、[V1 运行说明](../runbooks/model-pi-runtime.md) 与 [COMMENT-RESEARCH-RESET-001](../plans/active/comment-research-reset-001.md)。
+
+## 用户结果和四区表面
+
+个人菜单 → 设置 → 模型与 AI，采用 L1 Settings / Governance，一个外层 Form Surface、左侧四区索引。共享 shell 只增加个人菜单内设置入口，不增加一级产品职责。四区是供应商连接、可用模型、用途默认、额度与运行。
+
+| 表面 | 动作 | 状态及含义 | 验证 |
+|---|---|---|---|
+| 供应商 | 添加/更换地址凭据、测试、停用 | 保存不调用；连接测试只说明认证/传输结果，不证明模型可用 | 后端秘密隔离、真实 Pi 本地协议、错误不泄露 |
+| 模型 | 发现或准确手动 ID、独立能力测试 | 目录候选、模型可调用、评论输出合格分开 | model probe/无信号/坏引用各有回执 |
+| 用途默认 | 指定评论模型与预算，指定来源试运行，启停新增处理 | 配置按本机 DB 工作空间生效；保存不触发分析 | 设置→执行→输出→标注/候选 |
+| 额度/运行 | 单次输入/输出 token、秒数、重试、自动额度；历史补跑范围和上限 | 任务固定配置版本；停用停止新派发；旧结果不改写 | 并发预留、重放、切换、停用、unknown 用量 |
+
+## 业务与执行边界
+
+Linggan 持有配置、用途/来源资格、预算、持久 comment work、租约/尝试、人工修订优先及输出接纳。Pi 仅在一次性 Node adapter 内执行获准模型调用；官方 pi-ai/pi-agent-core 固定 0.85.1 和 lock。没有 SQL/Shell/文件/网络工具，没有 Pi session 主库。模型输入材料不可信，拒绝发起工具调用；简单提取一次模型轮次即可。
+
+不可变连接版本保存地址与不透明秘密引用，秘密后端使用 macOS Keychain；测试 SecretStore 只接受本包合成凭据。进程环境清空，不继承其他账户的 env/store/OAuth/云凭据；秘密经有界 stdin 传递，不进参数、浏览器存储、代码或日志。子进程只回规范结果/用量和固定失败码，SDK 原始错误不回显。
+
+新增自动处理只在用户显式启用后的来源时间范围执行；历史补跑使用单独冻结的来源集合/数量/额度。保存配置或发现模型都不自动分析评论。更换默认模型只影响新建工作，待执行/已完成工作记录冻结配置版本；停用连接/自动处理会在派发前重查，不删除历史。未知用量保留 null，不用供应商目录单价零推导免费。
+
+## 实施与所有权
+
+唯一实施 `/root/comment_research_impl`，唯一审核/integration owner `/root`；Issue Claim 记录完整 exclusive/shared/forbidden。实现已由 PR #168、#170 按依赖顺序合并到 `main@f97968e`；必要共享接缝是 API/shell、评论运行/读取、专用 worker、Cargo/exports、0040 及 migration/fixture 登记、docs 索引/LIDS/进度。其他包不动。
+
+验收采用固定 HEAD 一次集中审核、一批实质清单整改、只复验清单及直接影响；最终 verdict 放 PR 评论，不提交 PASS 时间戳。
+
+首轮固定 `ff95268` 的唯一整改清单为 R1/R2/R3：显式恢复暂停计划并定位重复来源的所属计划；自动选源按来源/规则/配置全局幂等条件排除已有工作，避免有界 LIMIT 卡住；没有新派发时也提交中断恢复，并按每份冻结配置的次数上限收口。实施已补齐 API/页面、9 项模型隔离 PostgreSQL 中的三项针对性回归及 HTTP 操作；最终审核结论由根代理在新固定 HEAD 复验后记录于 PR #170。没有新增审核轮次或扩大任务。
+
+## 证明与停止点
+
+独立 PostgreSQL、官方真实 SDK 对本地合成协议、无秘密泄露、有限超时/重试/预算、停用/切换/重放、UI HTTP 自检和浏览器审核均已完成，最终实现已合并到 `main@f97968e`。真实外部模型调用等待 Mog 填写凭据并明确材料与预算，不以未配置阻断其余完整实现。语义聚类、真实质量、shared DB/deploy 和 Mog 业务验收独立报告，不把合成 proof 冒充真实外部能力。
+
+## 2026-09-06 同包返修：基础连接与单弹窗
+
+用户结果：一个配置页、一份新增/编辑弹窗中填写 API 地址、凭据、模型并完成真实协议测试。用户最新决定替代四区常驻表单，不新增 Tab。Claim：根代理，`codex/model-settings-repair`，仅继续 Issue #169；无并行实施/审核。
+
+- 表面：设置列表、连接弹窗、地址最终请求预览、测试状态、加载失败；现有评论计划管理先折叠保留，避免丢失暂停/恢复入口，后续迁移研究动作另行完成。
+- 状态：未保存、已保存未测试、测试中、可调用、评论校验通过/未通过、目录不支持、地址/认证/网络失败、数据库未初始化；测试失败保留表单，保存绝不声称已分析。
+- 依赖：页面 HTML/JS/CSS、现有连接版本/Keychain、Pi 三协议、0040/0039；不增加 migration、不升级 Pi、不发送真实语料、不改共享 Header。
+- 地址：接收基础地址或对应协议完整调用地址，后端规范化；可见预览与实际请求一致。协议错误不猜测切换。编辑空凭据仅同地址同协议沿用，改目标要求明确提供凭据。
+- 验收：隔离 PostgreSQL 保存/读回/修订及错误状态；真实 Pi SDK + 本机 HTTP/SSE 成功、无目录、认证/404/限流/超时；浏览器单弹窗保存/测试/失败保留/加载失败不可提交。
+- 共享事实：只读确认迁移台账至 0038，模型 API 503；共享 0039/0040 迁移尚未获授权。源码与隔离验证先完成，迁移及运行发布以具体结果取得最终授权。
+
+## 2026-09-07 DeepSeek 测试返修（同 Issue #169）
+
+- Claim：`/root` 在 `codex/model-deepseek-test-fix` 单一执行；基线 main `7e14db5`。Mog 报告 DeepSeek 绑定后的输出上限错误，继续本包基础调用修复。
+- 事实：共享两次 Responses probe 均返回 459 输入 / 1024 输出 token、output_limit。已响应不能标成未连通。官方 DeepSeek V4 默认启用思考，当前适配 model.reasoning=false 没有显式禁用上游默认思考；实际思考占比未留存，故具体消耗构成仍未知。
+- 范围：Pi adapter 对 api.deepseek.com 的已知 V4 模型落实当前无思考文本调用约束，probe/analyze 使用同一参数；保留 10 秒/1024 probe 上限和无重试。修正输出截断的 modelCallable 与可见提示，commentQualified 仍 false、不接纳不完整结果。原始历史回执不回写。
+- 文件：adapter/test fixture、model_invocation 与其 PostgreSQL proof、model_settings.js、既有页面/验收/当月记录。无新 migration、无新一级入口、无新外部调用、无密钥读取/导出、无预算增加。
+- 验证：真实 Pi SDK 对本机 SSE 重现省略 thinking 控制导致截断，显式关闭后成功；负例不影响其它域名/模型。PG 截断仍计费且不能设为默认，重放不重复调用；编译与治理检查。真实供应商复测尚未执行。
+
+
+## MODEL-CALL-004（2026-09-08）调用准入与评论诊断解耦
+
+Mog认可排查结果并授权修复。实际失败回执2273ms，ok=true/modelCallable=true/commentQualified=false/partial_fields_rejected；原程序将部分有效的合成评论输出扩大成模型禁用，又丢弃具体字段诊断。本包在codex/model-callability工作树实现：同模型最新完整成功调用作为统一门槛，评论兼容报告保留但不拦设置，正式研究逐次校验不变。旧合同计划不自动恢复，失败/截断/停用不获得准入，无共享数据改写或真实供应商重测。
+
+执行分工：根model_invocation/model_probe_validation、合同/集成；backend代理所有调用准入及PG验证；UI代理单弹窗诊断/默认选择/研究入口及DOM验证。适用旧文档中“评论格式全部通过才可默认”的决定由docs/pages/model-ai-settings.md中MODEL-CALL-004段替代。验证和发布层分别记录，不因旧包已发布推断本包已部署。
+
+
+MODEL-CALL-004 验证收口：37 项 Rust 单元、19 项 Pi SDK 本机合成协议、38 项 DOM 通过；隔离 PostgreSQL 41 个独立场景累计通过（新增 4、daily 28、preflight 2、relation 7）。首轮测试准备/重放断言及合成 fixture 顺序问题定向修复，只复验失败项，未重复整包审核。真实浏览器使用当前 Rust shell + HTML/CSS/JS、仅本地 API 合成数据，1280/900 视口通过部分字段诊断展开→选择默认→保存，页面脚本错误为零。API/worker cargo check、领域 clippy、diff/JS/bash 语法检查通过；clippy 14 个既有告警未扩大整治。新 PG 测试已接入 scripts/test-model-pi-postgres.sh。
+
+运行证据位于 /tmp/model-call* 与 /tmp/model-callability-pg{,2,3}.log。模型 SDK 测试、合成 UI、真实供应商质量和共享运行环境分别报告：没有再次调用用户模型，没有迁移或修改共享配置；当前代码未提交/推送/合并，main 与 3000 未更新。发布需按用户后续授权执行。

@@ -1,8 +1,5 @@
 //! Versioned local workspace model configuration; no save command invokes a provider.
-use crate::{
-    comment_research::{CommentResearchError, valid_text},
-    model_secrets::ModelSecretStore,
-};
+use crate::{model_secrets::ModelSecretStore, research_text::valid_text};
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -44,32 +41,12 @@ pub enum ModelError {
     NotQualified,
     #[error("embedding_not_qualified")]
     EmbeddingNotQualified,
-    #[error("comment_research_plan_retired")]
-    ResearchPlanRetired,
     #[error("model_schema_missing")]
     SchemaMissing,
     #[error("model_database_unavailable")]
     Database(#[from] sqlx::Error),
     #[error("model_source_unavailable")]
     Source,
-}
-impl From<CommentResearchError> for ModelError {
-    fn from(value: CommentResearchError) -> Self {
-        match value {
-            CommentResearchError::Database(e) => Self::Database(e),
-            _ => Self::Source,
-        }
-    }
-}
-impl From<linggan_evidence::comment_research_read::CommentResearchReadError> for ModelError {
-    fn from(value: linggan_evidence::comment_research_read::CommentResearchReadError) -> Self {
-        match value {
-            linggan_evidence::comment_research_read::CommentResearchReadError::Database(e) => {
-                Self::Database(e)
-            }
-            _ => Self::Source,
-        }
-    }
 }
 impl ModelError {
     pub fn code(&self) -> &'static str {
@@ -87,7 +64,6 @@ impl ModelError {
             Self::Budget => "model_budget_exhausted",
             Self::NotQualified => "model_not_qualified",
             Self::EmbeddingNotQualified => "embedding_not_qualified",
-            Self::ResearchPlanRetired => "comment_research_plan_retired",
             Self::SchemaMissing => "model_schema_missing",
             Self::Database(_) => "model_database_unavailable",
             Self::Source => "model_source_unavailable",
@@ -96,8 +72,10 @@ impl ModelError {
 }
 
 pub async fn ensure_model_schema(db: &Database) -> Result<(), ModelError> {
-    let ready: bool = sqlx::query_scalar("SELECT to_regclass('linggan_model_workspace') IS NOT NULL AND to_regclass('linggan_comment_analysis_work') IS NOT NULL")
-        .fetch_one(db.pool()).await?;
+    let ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('linggan_model_workspace') IS NOT NULL")
+            .fetch_one(db.pool())
+            .await?;
     if !ready {
         return Err(ModelError::SchemaMissing);
     }
@@ -327,8 +305,6 @@ pub struct SaveModelConfig {
     pub output_token_limit: i32,
     pub timeout_seconds: i32,
     pub max_attempts: i32,
-    pub auto_source_limit: i32,
-    pub auto_token_limit: i64,
 }
 impl SaveModelConfig {
     pub fn validate(&self) -> Result<(), ModelError> {
@@ -336,8 +312,6 @@ impl SaveModelConfig {
             || !(128..=8192).contains(&self.output_token_limit)
             || !(1..=60).contains(&self.timeout_seconds)
             || !(1..=3).contains(&self.max_attempts)
-            || !(1..=1000).contains(&self.auto_source_limit)
-            || !(1024..=10_000_000).contains(&self.auto_token_limit)
         {
             Err(ModelError::Invalid)
         } else {
@@ -361,7 +335,7 @@ pub async fn save_model_config(db: &Database, r: &SaveModelConfig) -> Result<Val
     .await?
     {
         let old: Value = row.get("config");
-        let expected = json!({"config_ref":r.config_ref,"model_ref":r.model_ref,"input_token_limit":r.input_token_limit,"output_token_limit":r.output_token_limit,"timeout_seconds":r.timeout_seconds,"max_attempts":r.max_attempts,"auto_source_limit":r.auto_source_limit,"auto_token_limit":r.auto_token_limit});
+        let expected = json!({"config_ref":r.config_ref,"model_ref":r.model_ref,"input_token_limit":r.input_token_limit,"output_token_limit":r.output_token_limit,"timeout_seconds":r.timeout_seconds,"max_attempts":r.max_attempts});
         if old != expected {
             return Err(ModelError::Conflict);
         }
@@ -384,8 +358,8 @@ pub async fn save_model_config(db: &Database, r: &SaveModelConfig) -> Result<Val
     if !qualified {
         return Err(ModelError::NotQualified);
     }
-    sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts,auto_source_limit,auto_token_limit) VALUES($1,$2,$3,$4,$5,$6,$7,$8)")
-        .bind(r.config_ref).bind(r.model_ref).bind(r.input_token_limit).bind(r.output_token_limit).bind(r.timeout_seconds).bind(r.max_attempts).bind(r.auto_source_limit).bind(r.auto_token_limit).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) VALUES($1,$2,$3,$4,$5,$6)")
+        .bind(r.config_ref).bind(r.model_ref).bind(r.input_token_limit).bind(r.output_token_limit).bind(r.timeout_seconds).bind(r.max_attempts).execute(&mut *tx).await?;
     sqlx::query("UPDATE linggan_model_workspace SET default_config_ref=$1 WHERE singleton")
         .bind(r.config_ref)
         .execute(&mut *tx)

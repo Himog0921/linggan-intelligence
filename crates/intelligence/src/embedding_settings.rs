@@ -4,6 +4,7 @@ use crate::{
     model_secrets::ModelSecretStore,
     model_settings::ModelError,
     pi_adapter::*,
+    research_text::content_hash,
 };
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
@@ -79,10 +80,7 @@ pub async fn probe(
     let row=sqlx::query("SELECT c.model_ref,m.model_id,m.connection_version_ref FROM linggan_embedding_config c JOIN linggan_model_entry m USING(model_ref) WHERE c.config_ref=$1").bind(r.config_ref).fetch_optional(db.pool()).await?.ok_or(ModelError::NotFound)?;
     let model: Uuid = row.get("model_ref");
     let version: Uuid = row.get("connection_version_ref");
-    let hash = crate::comment_research::comment_source_hash(&format!(
-        "embedding-probe.v1:{}",
-        r.config_ref
-    ));
+    let hash = content_hash(&format!("embedding-probe.v1:{}", r.config_ref));
     let mut request = connection_request(db, store, version).await?;
     request.operation = "embed".into();
     request.model_id = row.get("model_id");

@@ -1,8 +1,10 @@
-> 状态: 权威当前
+> 状态: 历史归档
 > 最后核对: 2026-09-08
 > 适用范围: CI-20260907-V1 完整评论研究交付
 > 事实来源: Mog 指定实施包，manifest 已验证
 > 冲突时以谁为准: 用户最新决定；现状以真实代码与运行证据为准
+
+> 替代说明（2026-09-09）：本文件保留 CI-20260907-V1 的合同、实现与运行历史。其稳定问题、人工反馈、群体统计、旧研究动作与页面数据合同不再规定未来系统；唯一未来内核见 [COMMENT-RESEARCH-RESET-001](../plans/active/comment-research-reset-001.md) 与 [DEC-0003](../decisions/0003-comment-research-single-semantic-kernel.md)。
 
 # Linggan Intelligence｜评论研究实施合同
 

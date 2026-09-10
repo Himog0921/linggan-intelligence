@@ -234,6 +234,13 @@ migrate() {
   apply_migration_once "0062_human_moment" "$project_root/database/migrations/0062_human_moment.sql"
   apply_migration_once "0063_content_author_attribution" "$project_root/database/migrations/0063_content_author_attribution.sql"
   apply_migration_once "0064_account_observation_normalization" "$project_root/database/migrations/0064_account_observation_normalization.sql"
+  apply_migration_once "0064_comment_research_kernel" "$project_root/database/migrations/0064_comment_research_kernel.sql"
+  apply_migration_once "0065_comment_research_vector_candidates" "$project_root/database/migrations/0065_comment_research_vector_candidates.sql"
+  apply_migration_once "0066_comment_research_change_signals" "$project_root/database/migrations/0066_comment_research_change_signals.sql"
+  apply_migration_once "0067_comment_research_run_item_lease" "$project_root/database/migrations/0067_comment_research_run_item_lease.sql"
+  apply_migration_once "0068_comment_research_problem_resolution" "$project_root/database/migrations/0068_comment_research_problem_resolution.sql"
+  apply_migration_once "0069_comment_research_v1_cutover" "$project_root/database/migrations/0069_comment_research_v1_cutover.sql"
+  apply_migration_once "0070_comment_research_v1_derivation_head" "$project_root/database/migrations/0070_comment_research_v1_derivation_head.sql"
 }
 
 case "$command_name" in

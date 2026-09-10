@@ -3,19 +3,16 @@ use super::{LocalWebState, shell};
 use axum::{
     Json, Router,
     body::Bytes,
-    extract::{Path, Query, State},
+    extract::State,
     http::{StatusCode, header},
     middleware,
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
 use linggan_intelligence::{
-    model_invocation::*, model_plans::*, model_secrets::*, model_settings::*,
-    model_settings_read::*, pi_adapter::*,
+    model_invocation::*, model_secrets::*, model_settings::*, model_settings_read::*, pi_adapter::*,
 };
-use serde::Deserialize;
 use serde_json::{Value, json};
-use uuid::Uuid;
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route(
@@ -45,32 +42,15 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/api/local/model-settings/models", post(save_model))
         .route("/api/local/model-settings/probes", post(probe))
         .route("/api/local/model-settings/config", post(save_config))
-        .route("/api/local/model-settings/plans", post(start_plan))
-        .route(
-            "/api/local/model-settings/plans/{plan_ref}/stop",
-            post(stop_plan),
-        )
-        .route(
-            "/api/local/model-settings/plans/{plan_ref}/resume",
-            post(resume_plan),
-        )
         .layer(middleware::from_fn(
             super::comment_research::local_research_guard,
         ))
 }
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct ReadQuery {
-    plan_ref: Option<Uuid>,
-}
-async fn read(State(state): State<LocalWebState>, Query(query): Query<ReadQuery>) -> Response {
+async fn read(State(state): State<LocalWebState>) -> Response {
     let Some(db) = state.database.database() else {
         return unavailable();
     };
-    respond(
-        read_model_settings_with_plan(db, model_secret_store().is_synthetic(), query.plan_ref)
-            .await,
-    )
+    respond(read_model_settings(db, model_secret_store().is_synthetic()).await)
 }
 async fn save_connection(State(state): State<LocalWebState>, body: Bytes) -> Response {
     let Some(db) = state.database.database() else {
@@ -119,25 +99,13 @@ async fn save_config(
     };
     respond(save_model_config(db, &r).await)
 }
-async fn start_plan(State(state): State<LocalWebState>, Json(r): Json<StartModelPlan>) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    respond(start_model_plan(db, &r).await)
-}
-async fn stop_plan(State(state): State<LocalWebState>, Path(reference): Path<Uuid>) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    respond(stop_model_plan(db, reference).await)
-}
 fn respond(result: Result<Value, ModelError>) -> Response {
     match result {
         Ok(value) => Json(value).into_response(),
         Err(e) => {
             let status = match e {
                 ModelError::Invalid | ModelError::InputLimit => StatusCode::BAD_REQUEST,
-                ModelError::Conflict | ModelError::ResearchPlanRetired => StatusCode::CONFLICT,
+                ModelError::Conflict => StatusCode::CONFLICT,
                 ModelError::NotFound => StatusCode::NOT_FOUND,
                 ModelError::Disabled
                 | ModelError::NotQualified
@@ -184,17 +152,6 @@ async fn script() -> impl IntoResponse {
         [(header::CONTENT_TYPE, "text/javascript; charset=utf-8")],
         include_str!("model_settings.js"),
     )
-}
-
-async fn resume_plan(
-    State(state): State<LocalWebState>,
-    Path(reference): Path<Uuid>,
-    Json(request): Json<ResumeModelPlan>,
-) -> Response {
-    let Some(db) = state.database.database() else {
-        return unavailable();
-    };
-    respond(resume_model_plan(db, reference, &request).await)
 }
 
 async fn read_embedding(State(state): State<LocalWebState>) -> Response {

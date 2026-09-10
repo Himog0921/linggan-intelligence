@@ -1,7 +1,13 @@
-//! Standalone comment runner for isolated proof or explicit operation; the normal worker
-//! composes the same loop. Queue-only compatibility never invokes a provider.
-use linggan_evidence::comment_research_read::comment_research_schema_is_ready;
-use linggan_intelligence::comment_analysis::{UNCONFIGURED_MODEL, sync_comment_analysis_work};
+//! Explicit local runner for COMMENT-RESEARCH-RESET-001.
+//!
+//! It advances only V1 work already created through the saved-policy/start-run path. It never
+//! recreates the retired comment-analysis queue and never starts an external call in queue-only
+//! mode.
+use linggan_intelligence::{
+    model_runner::{model_schema_ready, model_worker_heartbeat, run_model_work_once},
+    model_secrets::model_secret_store,
+    pi_adapter::PiAdapter,
+};
 use linggan_storage_postgres::Database;
 
 #[tokio::main]
@@ -9,64 +15,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args
         .iter()
-        .any(|a| !matches!(a.as_str(), "--once" | "--queue-only" | "--execute"))
-        || (args.iter().any(|a| a == "--queue-only") == args.iter().any(|a| a == "--execute"))
+        .any(|arg| !matches!(arg.as_str(), "--once" | "--execute"))
     {
-        return Err("usage: linggan-comment-worker (--queue-only | --execute) [--once]".into());
+        return Err("usage: linggan-comment-worker --execute [--once]".into());
+    }
+    if !args.iter().any(|arg| arg == "--execute") {
+        return Err(
+            "V1 has no queue-only compatibility mode; save a policy and start a Run in the UI"
+                .into(),
+        );
     }
     let url = std::env::var("LINGGAN_LOCAL_DATABASE_URL")
         .map_err(|_| "local database is not configured")?;
     let database = Database::connect(&url)
         .await
         .map_err(|_| "local database is unavailable")?;
-    if !comment_research_schema_is_ready(&database)
-        .await
-        .map_err(|_| "schema read failed")?
-    {
-        return Err("comment research migration 0039 is required; no work was started".into());
+    if !model_schema_ready(&database).await {
+        return Err(
+            "comment research V1 terminal migrations 0069–0070 are required; no work was started"
+                .into(),
+        );
     }
-    let once = args.iter().any(|a| a == "--once");
-    if args.iter().any(|a| a == "--execute") {
-        use linggan_intelligence::{model_runner::*, model_secrets::*, pi_adapter::*};
-        if !model_schema_ready(&database).await {
-            return Err("model migration 0040 is required".into());
-        }
-        if once {
-            model_worker_heartbeat(&database, "running", None).await?;
-            let result = run_model_work_once(
-                &database,
-                model_secret_store().as_ref(),
-                &PiAdapter::configured(),
-            )
-            .await;
-            match result {
-                Ok(worked) => {
-                    model_worker_heartbeat(&database, "idle", None).await?;
-                    println!("comment model worker: completed step; work selected: {worked}");
-                }
-                Err(e) => {
-                    model_worker_heartbeat(&database, "error", Some(e.code())).await?;
-                    return Err(e.into());
+    let once = args.iter().any(|arg| arg == "--once");
+    let store = model_secret_store();
+    let adapter = PiAdapter::configured();
+    loop {
+        model_worker_heartbeat(&database, "running", None).await?;
+        match run_model_work_once(&database, store.as_ref(), &adapter).await {
+            Ok(worked) => {
+                model_worker_heartbeat(&database, "idle", None).await?;
+                if once || !worked {
+                    println!("comment research V1 worker: completed step; work selected: {worked}");
+                    return Ok(());
                 }
             }
-        } else {
-            run_model_worker(database).await;
-        }
-        return Ok(());
-    }
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
-    loop {
-        interval.tick().await;
-        let count = sync_comment_analysis_work(&database, UNCONFIGURED_MODEL)
-            .await
-            .map_err(|_| "comment queue synchronization failed")?;
-        if count > 0 || once {
-            println!(
-                "comment worker: {count} source versions queued; model NOT_CONFIGURED; no source text was sent"
-            );
-        }
-        if once {
-            return Ok(());
+            Err(error) => {
+                model_worker_heartbeat(&database, "error", Some(error.code())).await?;
+                return Err(error.into());
+            }
         }
     }
 }

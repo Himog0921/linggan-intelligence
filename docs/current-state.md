@@ -12,7 +12,18 @@
 - `0063_content_author_attribution.sql` 从已接纳的内容详情优先、同次 `profile_discovery` 受限回退地建立作品作者归属读取面。它支持控制目标删除后保留作者归属；它**不是**评论研究 V1 的作者回复清洗或语义归并实现。
 - 本轮隔离 PostgreSQL 已通过作者归属、删除控制历史、阻止删除保护事实及名称确认等新增证明，并修正了四处旧测试夹具/断言，使其符合现有的 200 篇渐进建档、工单重排、租约历史与人可读北京时间合同。完整 LOCAL-001 脚本已通过，且其临时数据库、容器和卷均已清理；该结论仍只是候选源码证明，不代表共享迁移、PR 合并、运行时切换或真实采集。
 
-### CI-AUTO-004 · 本机发布回执（2026-09-09）
+
+### COMMENT-RESEARCH-RESET-001 / Issue #213（V1 实现与终态迁移候选已完成；共享切换待执行）
+
+Mog 已决定评论研究仍处开发期：既有研究派生结果可以删除，不做 Task B、P4 与新系统之间的数据迁移。新交付只保留 Raw Comment/Evidence、来源资格、作者事实、清洗定位、调用账本、预算与 lease/recovery 等可独立复用基础；旧 candidate/relation/vector、P4 HDBSCAN/Leiden/adapter/group、旧超级查询和页面读取将全部退役。唯一未来合同为 [COMMENT-RESEARCH-RESET-001](plans/active/comment-research-reset-001.md)，长期裁定为 [DEC-0003](decisions/0003-comment-research-single-semantic-kernel.md)。
+
+本轮已完成旧路径依赖图与代码替换。`0063_content_author_attribution` 是作品作者归属唯一投影；`0064`–`0068` 建立 versioned ResearchDerivation、保存策略、冻结 Run、四类失败语义、RunItem/归并 lease、四类 Atom、版本化 embedding、exact cosine Top-K 候选、受限同一/新问题决定、immutable ResultRevision 和独立变化信号。确认作品作者回复才从研究正文移除 `作者 ` 徽标，Raw Comment 不改写；`author_identity_unknown` 不进入研究分母。模型输出必须通过 Unicode span、kind、来源与定义候选校验，才可写入 Atom/Membership；`solution`/`experience` 仍是原声证据。生产 `linggan-comment-worker --execute [--once]` 只推进 V1 的语义、向量、归并与发布步骤，通用 invocation ledger 保存预算、调用、失败与用量；短暂 adapter/provider 问题有界重试，永久不兼容记录到具体 Item，旧 recovery 不能阻断新 Run。
+
+`0069_comment_research_v1_cutover` 在完整历史 migration fixture 上通过：它不用 `CASCADE`，显式删除旧 Task B/P4/daily/replay/recovery 的表、视图、触发器、函数和 identity index（含无 FK 的 `linggan_ci_source_revision`），并清空可能由早期开发分支写入的 V1 policy/run/derivation/Atom/vector/Problem/result 派生行；Raw Comment/Evidence、作品作者归属、来源资格、通用模型连接/配置、embedding 设置和 invocation ledger 保留。`0070_comment_research_v1_derivation_head` 使归属/父回复上下文变化产生新的 immutable derivation：冻结 Run 继续读取其原始可读输入，新 Run 才选择当前 head；任一冻结输入不再当前时，已发布整版结果不可读。旧 API/UI、旧 Python 语义计算 runtime、旧 worker 入口和专属验证脚本均已从候选源码删除；五个 V1 读取端点与页面不再让变化观察复用概览，也不向原声显示“语义向量准备”。isolated PostgreSQL 的 20 项 V1 proof、2 项 API proof、Pi adapter SDK proof、Rust 编译及 API route/page guard 已通过。
+
+Mog 已于 2026-09-10 授权 source merge、共享开发库执行此 terminal migration、localhost runtime 切换和上线测试；连续排程仍关闭，部署不会自动向真实模型发送评论。尚未发生的事实必须保持分开：独立复审、exact-head merge、共享开发库删除回执、runtime PID/health、真实浏览器交互/性能，以及用户主动开始一轮真实 V1 研究后的业务验收。
+
+### CI-AUTO-004 · 本机发布回执（2026-09-09；历史实现事实）
 
 - Mog授权提交、推送、合并及刷新3000。PR #210已合并，代码revision为 `23bce3833cb3198934afa117fd40f634bda2b83c`；合入main新增采集/证据库修复后Rust单元84、API/worker编译、治理检查通过。
 - 已生成0053迁移前的加密备份并校验解密与archive目录；0053–0060八项迁移应用成功，实际台账SHA256全部与仓库文件一致。未修改研究开关或额度。
@@ -25,7 +36,7 @@
 
 ### CI-AUTO-004 · 评论自动研究（代码与功能验证完成，性能部分未达标，未发布）
 
-Mog 明确要求完整落实《重构评论研究流程》最后决策，由 subagent 实施、root 先审查并落盘完整计划。基线 `829fe22`，独立 `codex/comment-auto-research-v1` / `.worktrees/comment-auto-research-v1`。当前已读取24节及7场景、完成运行/语义/UI三路源码审查，实施入口为[主计划](plans/active/ci-auto-004-comment-auto-research.md)、[执行合同](plans/active/ci-auto-004-execution-contracts.md)、[UI清单](design/changes/ci-auto-004-ui-change-manifest.md)。
+Mog 曾要求完整落实《重构评论研究流程》最后决策，由 subagent 实施、root 先审查并落盘完整计划。基线 `829fe22`，独立 `codex/comment-auto-research-v1` / `.worktrees/comment-auto-research-v1`。当前已读取24节及7场景、完成运行/语义/UI三路源码审查；其历史入口为[主计划](archive/ci-auto-004-comment-auto-research.md)、[执行合同](archive/ci-auto-004-execution-contracts.md)、[UI清单](design/changes/ci-auto-004-ui-change-manifest.md)，未来架构由 COMMENT-RESEARCH-RESET-001 规定。
 
 P0–P5代码已实现：自动资格/日预算、不可变规则、成对回放与健康回退、原子聚类、统一设置和双轴状态已接入。Rust单元84、SDK23、UI45、评论任务PG45、3000新增准入1、回放6及聚类/来源/拆并专项1通过；来源边界7、定向预检2、旧问题关系7、规则1、drain1与查询功能3通过。实际合成浏览器已核对1440/1280/900/375、跨页20+8、设置取消零写入；所有本包临时服务/数据库已清理。
 
@@ -42,7 +53,7 @@ P0–P5代码已实现：自动资格/日预算、不可变规则、成对回放
 
 ### CI-20260907-V1（当前交付分支；编码与隔离验证）
 
-Mog 指定 `comment-intelligence-v1` 完整实施包；基线 `origin/main@61e8c35`，实施位于 `codex/comment-intelligence-v1` 的专属 worktree。四视角、统一来源身份与范围、多维语义、增量问题／词频、人工纠正、23:00 日批与预算恢复已接入代码。来源合同、复用映射和具体证明见 [执行计划](plans/active/comment-intelligence-v1.md)、[84 项验收](design/acceptance/comment-intelligence-v1-acceptance.md)。高级观察默认不自动发布，真实质量须独立评测。
+Mog 曾指定 `comment-intelligence-v1` 完整实施包；基线 `origin/main@61e8c35`，实施位于 `codex/comment-intelligence-v1` 的专属 worktree。四视角、统一来源身份与范围、多维语义、增量问题／词频、人工纠正、23:00 日批与预算恢复已接入代码。来源合同、复用映射和具体证明见[历史执行计划](archive/comment-intelligence-v1.md)、[84 项验收](design/acceptance/comment-intelligence-v1-acceptance.md)。高级观察默认不自动发布，真实质量须独立评测。
 
 本轮没有共享迁移、push／merge、3000 切换或真实评论外发。Chrome 对隔离预览返回 `ERR_BLOCKED_BY_CLIENT`，没有以原包截图代替实际视觉验收。下方 COMMENT-DAILY-001 是历史交付时点记录，不能据此推断当前运行版本；本轮代码与运行状态分别记录。
 
@@ -70,11 +81,11 @@ Mog 于 2026-09-08 确认推进观察目标列表和右侧检查器收口，并�
 
 #168、#170、#172 已合并。Mog 于 2026-09-06 明确授权后，0039/0040 已应用到本机共享库，3000 模型设置 API 从 503 恢复为 200，评论 worker 已有有效心跳。部署回执见 [PR #172](https://github.com/Himog0921/linggan-intelligence/pull/172)。单页+单供应商弹窗是当前交互，不再采用旧四区常驻布局。
 
-2026-09-07 Mog 的 DeepSeek Responses 测试两次达到 1024 token 上限。当前同包返修明确关闭已知官方 V4 模型的默认思考，落实原纯文本合同，区分模型已响应和评论输出资格；保持预算/超时/历史回执。SDK 11 项、隔离 PostgreSQL 32 项及合成浏览器验证通过，真实供应商修复后复测尚未执行。具体范围见 [MODEL-PI-001 合同](plans/active/model-pi-001.md) 和 [验收记录](design/acceptance/model-pi-001-acceptance.md)。
+2026-09-07 Mog 的 DeepSeek Responses 测试两次达到 1024 token 上限。当前同包返修明确关闭已知官方 V4 模型的默认思考，落实原纯文本合同，区分模型已响应和评论输出资格；保持预算/超时/历史回执。SDK 11 项、隔离 PostgreSQL 32 项及合成浏览器验证通过，真实供应商修复后复测尚未执行。具体范围见 [MODEL-PI-001 历史合同](archive/model-pi-001.md) 和 [验收记录](design/acceptance/model-pi-001-acceptance.md)。
 
 ### COMMENT-RESEARCH-001 / Issue #167（已合并 main；模型执行已由 #169 接入）
 
-Mog 已授权一个子代理实施、根代理集中审核，先推进 P00 直接依赖与 P01 评论研究，尚不启动后续产品包。实施基线 `be1e6fb83650b376ee22e6fdec07241b8f604614`，分支 `codex/comment-research-001`；自包含合同见 [comment-research-001.md](plans/active/comment-research-001.md)。源码接入原声浏览、问题分组、语料资产与服务端已存查询，人工收存不再依赖 AI。资产理由、单集合归属与撤销、查询名称/条件/删除通过追加修订维护，旧请求不能覆盖新版本或复活已撤销项。`0039_comment_research.sql` 已在 2026-09-06 按 Mog 授权应用共享库，见 #172 部署回执。
+Mog 曾授权一个子代理实施、根代理集中审核，先推进 P00 直接依赖与 P01 评论研究，尚不启动后续产品包。实施基线 `be1e6fb83650b376ee22e6fdec07241b8f604614`，分支 `codex/comment-research-001`；自包含合同见[历史合同](archive/comment-research-001.md)。源码接入原声浏览、问题分组、语料资产与服务端已存查询，人工收存不再依赖 AI。资产理由、单集合归属与撤销、查询名称/条件/删除通过追加修订维护，旧请求不能覆盖新版本或复活已撤销项。`0039_comment_research.sql` 已在 2026-09-06 按 Mog 授权应用共享库，见 #172 部署回执。
 
 评论分析有持久队列、租约恢复、最多 60 秒本地等待及严格候选接纳接口，独立 `linggan-comment-worker --queue-only [--once]` 只入队；#170 已为其接入受控 Pi 消费器。真实模型/费用/敏感材料处理许可未收口；没有语义聚类或真实质量证明，P01-C 和全包不能因此标为完成。共享 migration、3000 与评论 worker 已完成 #172 运行更新；真实采集与 Mog 对评论分析质量的验收不由该部署证明。
 
