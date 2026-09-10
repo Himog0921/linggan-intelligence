@@ -802,10 +802,18 @@ fn detail_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String 
             .map(|value| {
                 // 缺口读投影，不在这里相减：已确认失效的作品有详情之外的第三种去向，
                 // 减法算不出来它。
-                format!(
-                    "{} / {} · 缺 {}",
-                    value.details_captured, value.works_listed, value.pending_details
-                )
+                //
+                // 缺 0 不显示——每一行都挂一个「缺 0」是纯噪音。但**缺口大于 0 时必须
+                // 显示**：木可可的 `10 / 13` 里那 3 篇是已确认失效、不是缺失，读的人
+                // 若自己做 13−10 会得出「缺 3」这个错误结论。这个数正是为此而投影的。
+                if value.pending_details == 0 {
+                    format!("{} / {}", value.details_captured, value.works_listed)
+                } else {
+                    format!(
+                        "{} / {} · 缺 {}",
+                        value.details_captured, value.works_listed, value.pending_details
+                    )
+                }
             })
             .unwrap_or_else(|| "—".to_owned()),
     }
@@ -1316,7 +1324,9 @@ mod tests {
 
         assert!(html.contains("已有目录"));
         assert!(html.contains("41 篇"));
-        assert!(html.contains("41 / 41 · 缺 0"));
+        // 缺口为 0 时不挂「缺 0」：每行都挂一个零值是纯噪音。
+        assert!(html.contains("41 / 41"));
+        assert!(!html.contains("缺 0"));
         assert!(html.contains(">查看档案</a>"));
         assert!(!html.contains("建立标准目录"));
     }
@@ -1475,6 +1485,8 @@ mod tests {
 
         assert!(html.contains("详情有缺口"));
         assert!(html.contains("12 篇"));
+        // 缺口大于 0 时必须显示：这一格的 12 篇里有已确认失效的，读的人不能靠
+        // 12−5 自己算——那会把「已失效」误算成「缺失」。
         assert!(html.contains("5 / 12 · 缺 7"));
         assert!(html.contains("补采缺口"));
         // 上次巡查是已经发生的事实，保留绝对时刻——可能要拿去跟别的记录对时间。

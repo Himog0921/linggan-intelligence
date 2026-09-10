@@ -38,6 +38,10 @@
 /* 数字列右对齐是为了让位数对齐着比。表头必须跟着一起右对齐——否则表头贴左、
  * 数字贴右，同一列的两端各站一边，读的人会以为是错位。 */
 .c-tg-head-num{text-align:right}
+/* 右对齐的值贴在列的右边缘，紧邻的左对齐列又贴在自己的左边缘，两者只隔一个 8px 的
+ * 栅格间距——「43 / 43」和「巡查中」就这样黏成一团。给数字列一个右内边距，把值从
+ * 边缘推开，视觉间距变成 8+12。表头同处理，否则表头与数值又会各站一边。 */
+.c-tg-number-value,.c-tg-head-num{padding-right:var(--lgi-space-3)}
 .c-tg-time{color:var(--lgi-body)}
 .c-tg-unknown{color:var(--lgi-muted)}
 .c-tg-truth{display:inline-flex;align-items:center;max-width:100%;min-height:24px;overflow:hidden;text-overflow:ellipsis;font-size:var(--lgi-text-label);font-weight:600;white-space:nowrap}
@@ -324,7 +328,7 @@
  * 现在工具条不再自带线，由「创作者档案」那条线兼任分隔——少一条线，少一段留白。 */
 /* 工具条与内容之间只留**一条**线，且是这条粗线。tab 的选中下划线要落在它上面——
  * 一条线同时承担「分区」和「你在哪个分类」两件事，比两条各说一半更省。 */
-.c-page .c-toolbar{border-bottom:var(--c-line-rail,2px) solid var(--lgi-border-solid)}
+.c-page .c-toolbar{border-bottom:0}
 .c-body .c-tg-kind:first-child{margin-top:0}
 
 /* tab 与右侧控件在同一行里垂直居中。
