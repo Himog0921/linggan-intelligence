@@ -111,6 +111,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0063_content_author_attribution.sql"),
     "\n",
     include_str!("../../../database/migrations/0064_account_observation_normalization.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0065_account_observation_bootstrap.sql"),
 );
 
 #[tokio::test]
@@ -692,7 +694,7 @@ async fn credential_response_loss_rotation_and_activation_are_recoverable_and_ha
         &InstallationCheckIn {
             install_key: &install_key,
             installation_credential: None,
-            plugin_version: "0.8.46",
+            plugin_version: "0.8.47",
             browser_label: Some("credential-recovery"),
             capabilities: capabilities(),
         },
@@ -957,7 +959,7 @@ async fn claim_pending_installation(
         &InstallationCheckIn {
             install_key: &install_key,
             installation_credential: None,
-            plugin_version: "0.8.46",
+            plugin_version: "0.8.47",
             browser_label: Some(label),
             capabilities: capabilities(),
         },

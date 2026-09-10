@@ -504,18 +504,30 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
     // schema is applied: advertising it earlier would invite a call that cannot succeed.
     let station_routes = match state.database.database() {
         Some(database) if station_schema_is_ready(database).await.unwrap_or(false) => {
-            let eligibility_report = if state.account_digest_key.is_some()
-                && linggan_evidence::collection_control_schema_is_ready(database)
+            let account_observation_ready =
+                linggan_evidence::collection_control_schema_is_ready(database)
                     .await
-                    .unwrap_or(false)
-            {
-                Value::String(collection_dispatch::ACCOUNT_ELIGIBILITY_PATH.to_owned())
+                    .unwrap_or(false);
+            let (eligibility_report, account_observation) = if !account_observation_ready {
+                (Value::Null, "schema_unavailable")
+            } else if state.account_digest_key.is_none() {
+                // Explicit login/cooling/restriction facts do not need an identity digest and
+                // must remain reportable. The endpoint rejects only authenticated identity
+                // observations while the key is unavailable.
+                (
+                    Value::String(collection_dispatch::ACCOUNT_ELIGIBILITY_PATH.to_owned()),
+                    "identity_key_missing",
+                )
             } else {
-                Value::Null
+                (
+                    Value::String(collection_dispatch::ACCOUNT_ELIGIBILITY_PATH.to_owned()),
+                    "ready",
+                )
             };
             json!({
                 "checkIn": STATION_CHECK_IN_PATH,
                 "eligibilityReport": eligibility_report,
+                "accountObservation": account_observation,
                 "credentialActivation": collection_dispatch::CREDENTIAL_ACTIVATION_PATH
             })
         }
@@ -3002,7 +3014,11 @@ async fn collection_runtime(
     };
     match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
         Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
-            Html(collection::collection_control_surface_view::render_runtime_control(&rendered, &projection)),
+            Html(collection::collection_control_surface_view::render_runtime_control(
+                &rendered,
+                &projection,
+                state.account_digest_key.is_some(),
+            )),
         Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::SchemaUnavailable)
         | Err(_) => Html(rendered),
     }
@@ -3285,6 +3301,7 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
             "account_restricted" => "account_restricted",
             "account_unknown" => "account_unknown",
             "account_busy" => "account_busy",
+            "station_busy" => "station_busy",
             "station_daily_budget_reached" => "station_daily_budget_reached",
             "rule_missing" => "rule_missing",
             "rule_revision_changed" => "rule_revision_changed",

@@ -16,7 +16,7 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-pub const MINIMUM_PLUGIN_VERSION: &str = "0.8.46";
+pub const MINIMUM_PLUGIN_VERSION: &str = "0.8.47";
 /// How recently an installation must have checked in to be considered on duty.
 ///
 /// This is a liveness question — is that browser still there — and it stays short. A worker
@@ -44,6 +44,8 @@ pub enum CollectionControlError {
     InvalidPlatformIdentity,
     #[error("account digest key is unavailable")]
     MissingDigestKey,
+    #[error("the installation no longer holds that live task claim")]
+    ClaimedTaskNotHeld,
     #[error("eligibility state and reason code do not form a closed pair")]
     InvalidEligibility,
     #[error("station acceptance requires a person action")]
@@ -172,6 +174,16 @@ pub struct AccountEligibilityReceipt {
     pub installation_ref: Uuid,
     pub state: AccountEligibilityState,
     pub binding_required: bool,
+    /// A mismatch is different from an unbound observation: only an existing human binding can
+    /// make a newly observed identity unsafe for the task that is already in progress.
+    pub binding_mismatch: bool,
+    /// A task that was already claimed under a known account must not execute after the task
+    /// page proves a different authenticated identity, even when neither identity has yet been
+    /// human-bound to this installation.
+    pub frozen_account_mismatch: bool,
+    /// A first task began before an identity was available; once it observes one, that identity
+    /// must not already be executing on another installation.
+    pub account_busy: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -202,7 +214,7 @@ impl CapacitySelection {
     fn available(
         station_ref: Uuid,
         installation_ref: Uuid,
-        account_ref: Uuid,
+        account_ref: Option<Uuid>,
         eligibility_ref: Option<Uuid>,
     ) -> Self {
         Self {
@@ -211,7 +223,7 @@ impl CapacitySelection {
             },
             station_ref: Some(station_ref),
             installation_ref: Some(installation_ref),
-            account_ref: Some(account_ref),
+            account_ref,
             eligibility_ref,
         }
     }
@@ -236,7 +248,15 @@ pub async fn collection_control_schema_is_ready(database: &Database) -> Result<b
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
                             WHERE table_schema=current_schema() \
                               AND table_name='platform_observation_account_eligibility_observation' \
-                              AND column_name='expires_at' AND is_nullable='YES')",
+                              AND column_name='expires_at' AND is_nullable='YES') \
+                AND EXISTS (SELECT 1 FROM information_schema.columns \
+                            WHERE table_schema=current_schema() \
+                              AND table_name='platform_observation_account_eligibility_observation' \
+                              AND column_name='account_ref' AND is_nullable='YES') \
+                AND EXISTS (SELECT 1 FROM information_schema.columns \
+                            WHERE table_schema=current_schema() \
+                              AND table_name='platform_observation_account_eligibility_observation' \
+                              AND column_name='observation_sequence' AND is_nullable='NO')",
     )
     .fetch_one(database.pool())
     .await
@@ -452,18 +472,68 @@ pub async fn report_account_eligibility(
     observation: AccountEligibilityObservation<'_>,
     digest_key: Option<&[u8]>,
 ) -> Result<AccountEligibilityReceipt, CollectionControlError> {
+    report_account_eligibility_inner(
+        database,
+        installation_ref,
+        raw_credential,
+        observation,
+        digest_key,
+        None,
+    )
+    .await
+}
+
+/// Report the passive account observation made on a page that was opened for one exact claimed
+/// task. The server—not the browser—verifies that this installation still owns the task and
+/// compares a positive observation with the account frozen by the Lease.
+pub async fn report_claimed_task_account_eligibility(
+    database: &Database,
+    installation_ref: Uuid,
+    raw_credential: &str,
+    task_id: Uuid,
+    observation: AccountEligibilityObservation<'_>,
+    digest_key: Option<&[u8]>,
+) -> Result<AccountEligibilityReceipt, CollectionControlError> {
+    report_account_eligibility_inner(
+        database,
+        installation_ref,
+        raw_credential,
+        observation,
+        digest_key,
+        Some(task_id),
+    )
+    .await
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ClaimedTaskAccountContext {
+    work_order_ref: Uuid,
+    frozen_account_ref: Option<Uuid>,
+}
+
+async fn report_account_eligibility_inner(
+    database: &Database,
+    installation_ref: Uuid,
+    raw_credential: &str,
+    observation: AccountEligibilityObservation<'_>,
+    digest_key: Option<&[u8]>,
+    claimed_task_id: Option<Uuid>,
+) -> Result<AccountEligibilityReceipt, CollectionControlError> {
     if !collection_control_schema_is_ready(database).await? {
         return Err(CollectionControlError::SchemaUnavailable);
     }
     let mut transaction = database.pool().begin().await?;
-    let installation_exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM plugin_installation \
-         WHERE installation_ref=$1 AND superseded_at IS NULL)",
+    // Lease issue locks this same row before it assigns capacity. Serializing a task-page
+    // observation here prevents a first-task account promotion from racing a second claim by
+    // the same installation.
+    let installation_exists: Option<Uuid> = sqlx::query_scalar(
+        "SELECT installation_ref FROM plugin_installation \
+         WHERE installation_ref=$1 AND superseded_at IS NULL FOR UPDATE",
     )
     .bind(installation_ref)
-    .fetch_one(&mut *transaction)
+    .fetch_optional(&mut *transaction)
     .await?;
-    if !installation_exists {
+    if installation_exists.is_none() {
         return Err(CollectionControlError::UnknownInstallation);
     }
     if !validate_installation_credential_in(&mut transaction, installation_ref, raw_credential)
@@ -472,6 +542,33 @@ pub async fn report_account_eligibility(
         return Err(CollectionControlError::InvalidCredential);
     }
 
+    let claimed_task = if let Some(task_id) = claimed_task_id {
+        let context: Option<(Uuid, Option<Uuid>)> = sqlx::query_as(
+            "SELECT work_order.work_order_ref,work_order.account_ref \
+             FROM collection_work_order_lease_task task \
+             JOIN collection_work_order_lease lease ON lease.lease_ref=task.lease_ref \
+             JOIN collection_work_order work_order ON work_order.work_order_ref=lease.work_order_ref \
+             WHERE task.task_id=$1 AND task.execution_state='in_progress' \
+               AND task.claimed_by_installation_ref=$2 \
+               AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
+             FOR UPDATE OF task",
+        )
+        .bind(task_id)
+        .bind(installation_ref)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some((work_order_ref, frozen_account_ref)) = context else {
+            return Err(CollectionControlError::ClaimedTaskNotHeld);
+        };
+        Some(ClaimedTaskAccountContext {
+            work_order_ref,
+            frozen_account_ref,
+        })
+    } else {
+        None
+    };
+
+    let bound_account_ref = active_bound_account_ref_in(&mut transaction, installation_ref).await?;
     let account_ref = match observation {
         AccountEligibilityObservation::Authenticated {
             raw_platform_account_id,
@@ -487,20 +584,68 @@ pub async fn report_account_eligibility(
             )
             .await?
         }
-        AccountEligibilityObservation::ExplicitBlock(_) => {
-            active_bound_account_ref_in(&mut transaction, installation_ref).await?
-        }
-    };
-    let Some(account_ref) = account_ref else {
-        transaction.commit().await?;
-        return Ok(AccountEligibilityReceipt {
-            account_ref: None,
-            installation_ref,
-            state: AccountEligibilityState::Unknown,
-            binding_required: true,
-        });
+        AccountEligibilityObservation::ExplicitBlock(_) => bound_account_ref,
     };
     let state = observation.projected_state();
+    let binding_required = account_ref.is_some_and(|observed| bound_account_ref != Some(observed));
+    let binding_mismatch = account_ref
+        .is_some_and(|observed| bound_account_ref.is_some_and(|bound| bound != observed));
+    let frozen_account_mismatch = claimed_task
+        .and_then(|context| context.frozen_account_ref)
+        .zip(account_ref)
+        .is_some_and(|(frozen, observed)| frozen != observed);
+    let account_busy = if let Some(observed_account_ref) =
+        account_ref.filter(|_| !binding_mismatch && !frozen_account_mismatch)
+    {
+        // The Lease issuer locks this same row before it checks account capacity. Holding it
+        // across the observation, conflict test and NULL→identity promotion closes the race
+        // between a first task discovering an account and another installation claiming it.
+        sqlx::query(
+            "SELECT account_ref FROM platform_observation_account WHERE account_ref=$1 FOR UPDATE",
+        )
+        .bind(observed_account_ref)
+        .execute(&mut *transaction)
+        .await?;
+        let busy_elsewhere: bool = sqlx::query_scalar(
+            "SELECT EXISTS ( \
+                SELECT 1 FROM collection_work_order work_order \
+                JOIN collection_work_order_lease lease USING(work_order_ref) \
+                WHERE work_order.account_ref=$1 \
+                  AND work_order.installation_ref<>$2 \
+                  AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
+            )",
+        )
+        .bind(observed_account_ref)
+        .bind(installation_ref)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !busy_elsewhere
+            && let Some(context) =
+                claimed_task.filter(|context| context.frozen_account_ref.is_none())
+        {
+            // A passive, non-task observation remains diagnostic only. A claimed first task is
+            // the sole place allowed to promote NULL to the page's server-verified identity.
+            sqlx::query(
+                "UPDATE collection_work_order work_order SET account_ref=$1 \
+                 WHERE work_order.work_order_ref=$2 AND work_order.installation_ref=$3 \
+                   AND work_order.account_ref IS NULL \
+                   AND work_order.queue_state='leased' \
+                   AND EXISTS ( \
+                     SELECT 1 FROM collection_work_order_lease lease \
+                     WHERE lease.work_order_ref=work_order.work_order_ref \
+                       AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
+                   )",
+            )
+            .bind(observed_account_ref)
+            .bind(context.work_order_ref)
+            .bind(installation_ref)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        busy_elsewhere
+    } else {
+        false
+    };
     sqlx::query(
         "INSERT INTO platform_observation_account_eligibility_observation \
              (eligibility_ref,account_ref,installation_ref,eligibility_state,signal_version, \
@@ -514,20 +659,15 @@ pub async fn report_account_eligibility(
     .bind(state.reason_code())
     .execute(&mut *transaction)
     .await?;
-    let binding_required: bool = sqlx::query_scalar(
-        "SELECT NOT EXISTS (SELECT 1 FROM platform_observation_account_binding \
-         WHERE account_ref=$1 AND installation_ref=$2 AND ended_at IS NULL)",
-    )
-    .bind(account_ref)
-    .bind(installation_ref)
-    .fetch_one(&mut *transaction)
-    .await?;
     transaction.commit().await?;
     Ok(AccountEligibilityReceipt {
-        account_ref: Some(account_ref),
+        account_ref,
         installation_ref,
         state,
         binding_required,
+        binding_mismatch,
+        frozen_account_mismatch,
+        account_busy,
     })
 }
 
@@ -690,9 +830,11 @@ struct CapacityCandidate {
     installation_fresh: bool,
     has_valid_credential: bool,
     bound_account_ref: Option<Uuid>,
+    observed_account_ref: Option<Uuid>,
     observed_account_changed: bool,
     eligibility_state: Option<String>,
     account_busy: bool,
+    installation_busy: bool,
 }
 
 impl<'row> sqlx::FromRow<'row, sqlx::postgres::PgRow> for CapacityCandidate {
@@ -709,9 +851,11 @@ impl<'row> sqlx::FromRow<'row, sqlx::postgres::PgRow> for CapacityCandidate {
             installation_fresh: row.try_get("installation_fresh")?,
             has_valid_credential: row.try_get("has_valid_credential")?,
             bound_account_ref: row.try_get("bound_account_ref")?,
+            observed_account_ref: row.try_get("observed_account_ref")?,
             observed_account_changed: row.try_get("observed_account_changed")?,
             eligibility_state: row.try_get("eligibility_state")?,
             account_busy: row.try_get("account_busy")?,
+            installation_busy: row.try_get("installation_busy")?,
         })
     }
 }
@@ -741,16 +885,24 @@ async fn load_capacity_candidates_in(
                           AND credential.activated_at IS NOT NULL \
                           AND credential.expires_at>scope_001_now()) AS has_valid_credential, \
                 binding.account_ref AS bound_account_ref, \
-                COALESCE(latest_observation.account_ref<>binding.account_ref,false) \
+                eligibility.account_ref AS observed_account_ref, \
+                COALESCE(eligibility.account_ref<>binding.account_ref,false) \
                     AS observed_account_changed, \
                 eligibility.eligibility_state, \
-                CASE WHEN binding.account_ref IS NULL THEN false ELSE EXISTS ( \
+                CASE WHEN COALESCE(binding.account_ref,eligibility.account_ref) IS NULL THEN false ELSE EXISTS ( \
                     SELECT 1 FROM collection_work_order work_order \
                     JOIN collection_work_order_lease lease \
                       ON lease.work_order_ref=work_order.work_order_ref \
-                    WHERE work_order.account_ref=binding.account_ref \
+                    WHERE work_order.account_ref=COALESCE(binding.account_ref,eligibility.account_ref) \
                       AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
-                      AND ($4::uuid IS NULL OR lease.lease_ref<>$4)) END AS account_busy \
+                      AND ($4::uuid IS NULL OR lease.lease_ref<>$4)) END AS account_busy, \
+                EXISTS ( \
+                    SELECT 1 FROM collection_work_order work_order \
+                    JOIN collection_work_order_lease lease \
+                      ON lease.work_order_ref=work_order.work_order_ref \
+                    WHERE work_order.installation_ref=i.installation_ref \
+                      AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
+                      AND ($4::uuid IS NULL OR lease.lease_ref<>$4)) AS installation_busy \
          FROM execution_station s \
          JOIN plugin_installation i ON i.station_ref=s.station_ref AND i.superseded_at IS NULL \
          LEFT JOIN LATERAL ( \
@@ -759,17 +911,11 @@ async fn load_capacity_candidates_in(
              WHERE candidate.installation_ref=i.installation_ref AND candidate.ended_at IS NULL \
              ORDER BY candidate.bound_at DESC,candidate.binding_ref DESC LIMIT 1) binding ON true \
          LEFT JOIN LATERAL ( \
-             SELECT observation.eligibility_state \
-             FROM platform_observation_account_eligibility_observation observation \
-             WHERE observation.account_ref=binding.account_ref \
-               AND observation.installation_ref=i.installation_ref \
-               AND observation.eligibility_state IN ('usable','cooling','needs_login','restricted') \
-             ORDER BY observation.observed_at DESC,observation.eligibility_ref DESC LIMIT 1) eligibility ON true \
-         LEFT JOIN LATERAL ( \
-             SELECT observation.account_ref \
+             SELECT observation.account_ref,observation.eligibility_state \
              FROM platform_observation_account_eligibility_observation observation \
              WHERE observation.installation_ref=i.installation_ref \
-             ORDER BY observation.observed_at DESC,observation.eligibility_ref DESC LIMIT 1) latest_observation ON true \
+               AND observation.eligibility_state IN ('usable','cooling','needs_login','restricted') \
+             ORDER BY observation.observation_sequence DESC LIMIT 1) eligibility ON true \
          WHERE s.retired_at IS NULL \
            AND ($2::uuid IS NULL OR s.station_ref=$2) \
            AND ($3::uuid IS NULL OR i.installation_ref=$3) \
@@ -785,15 +931,14 @@ async fn load_capacity_candidates_in(
 
 async fn latest_eligibility_ref_in(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    account_ref: Uuid,
     installation_ref: Uuid,
 ) -> Result<Option<Uuid>, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT eligibility_ref FROM platform_observation_account_eligibility_observation \
-         WHERE account_ref=$1 AND installation_ref=$2 \
-         ORDER BY observed_at DESC,eligibility_ref DESC LIMIT 1",
+         WHERE installation_ref=$1 \
+           AND eligibility_state IN ('usable','cooling','needs_login','restricted') \
+         ORDER BY observation_sequence DESC LIMIT 1",
     )
-    .bind(account_ref)
     .bind(installation_ref)
     .fetch_optional(&mut **transaction)
     .await
@@ -872,9 +1017,12 @@ pub(crate) async fn evaluate_capacity_in(
         let station_ref = candidate.station_ref;
         let installation_ref = candidate.installation_ref;
         let daily_quota = candidate.daily_work_quota;
+        // A human binding is not required to dispatch, but a conclusive observed identity is
+        // still a real concurrency and revalidation subject. Freeze it when present; only a
+        // truly unobserved first task freezes NULL and relies solely on the installation lock.
         let account_ref = candidate
             .bound_account_ref
-            .expect("candidate policy checked account");
+            .or(candidate.observed_account_ref);
         let used = station_daily_note_usage_in(transaction, station_ref).await?;
         if used >= i64::from(daily_quota) {
             first_block.get_or_insert_with(|| {
@@ -885,8 +1033,7 @@ pub(crate) async fn evaluate_capacity_in(
             });
             continue;
         }
-        let eligibility_ref =
-            latest_eligibility_ref_in(transaction, account_ref, installation_ref).await?;
+        let eligibility_ref = latest_eligibility_ref_in(transaction, installation_ref).await?;
         return Ok(CapacitySelection::available(
             station_ref,
             installation_ref,
@@ -912,7 +1059,7 @@ pub(crate) async fn revalidate_frozen_capacity_in(
     required_capabilities: &[&str],
     station_ref: Uuid,
     installation_ref: Uuid,
-    account_ref: Uuid,
+    account_ref: Option<Uuid>,
     current_lease_ref: Option<Uuid>,
     require_accepting_tasks: bool,
 ) -> Result<CapacitySelection, sqlx::Error> {
@@ -968,7 +1115,7 @@ pub(crate) async fn revalidate_frozen_capacity_in(
     if let Some((code, reason)) = candidate_block_reason(
         &candidate,
         required_capabilities,
-        Some(account_ref),
+        account_ref,
         require_accepting_tasks,
     ) {
         return Ok(CapacitySelection::blocked(code, reason));
@@ -980,8 +1127,7 @@ pub(crate) async fn revalidate_frozen_capacity_in(
             "工位当天已接纳 200 篇，等待自然日预算恢复。",
         ));
     }
-    let eligibility_ref =
-        latest_eligibility_ref_in(transaction, account_ref, installation_ref).await?;
+    let eligibility_ref = latest_eligibility_ref_in(transaction, installation_ref).await?;
     Ok(CapacitySelection::available(
         station_ref,
         installation_ref,
@@ -1017,12 +1163,6 @@ pub(crate) async fn evaluate_claiming_installation_capacity_in(
             "当前插件安装没有可用工位。",
         ));
     };
-    let Some(account_ref) = candidate.bound_account_ref else {
-        return Ok(CapacitySelection::blocked(
-            CapacityReasonCode::AccountUnbound,
-            "当前插件安装尚未由人绑定观察账号。",
-        ));
-    };
     revalidate_frozen_capacity_in(
         transaction,
         platform,
@@ -1030,7 +1170,9 @@ pub(crate) async fn evaluate_claiming_installation_capacity_in(
         required_capabilities,
         candidate.station_ref,
         installation_ref,
-        account_ref,
+        candidate
+            .bound_account_ref
+            .or(candidate.observed_account_ref),
         None,
         true,
     )
@@ -1158,14 +1300,18 @@ fn candidate_block_reason(
             CapacityReasonCode::CapabilityMissing,
             "在岗安装缺少本次 lane 所需能力。",
         ))
-    } else if candidate.bound_account_ref.is_none() {
+    } else if candidate.installation_busy {
         Some((
-            CapacityReasonCode::AccountUnbound,
-            "安装尚未由人绑定到一个观察账号。",
+            CapacityReasonCode::StationBusy,
+            "这台工位已有一份有效 Lease，首单观察完成前不会并发领取。",
         ))
-    } else if frozen_account_ref
-        .is_some_and(|expected| candidate.bound_account_ref != Some(expected))
-    {
+    } else if frozen_account_ref.is_some_and(|expected| {
+        candidate
+            .bound_account_ref
+            .map_or(candidate.observed_account_ref != Some(expected), |bound| {
+                bound != expected
+            })
+    }) {
         Some((
             CapacityReasonCode::AccountBindingChanged,
             "安装当前账号绑定与工单冻结账号不一致。",
@@ -1181,7 +1327,7 @@ fn candidate_block_reason(
                 CapacityReasonCode::AccountBusy,
                 "观察账号已有一份有效 Lease。",
             )),
-            Some("usable") => None,
+            Some("usable") | None => None,
             Some("cooling") => Some((
                 CapacityReasonCode::AccountCooling,
                 "观察账号当前处于冷却状态。",
@@ -1194,14 +1340,7 @@ fn candidate_block_reason(
                 CapacityReasonCode::AccountRestricted,
                 "观察账号当前受到访问限制。",
             )),
-            None => Some((
-                CapacityReasonCode::AccountUnknown,
-                "观察账号尚无可用观察事实，控制层按关闭处理。",
-            )),
-            _ => Some((
-                CapacityReasonCode::AccountUnknown,
-                "观察账号资格为 UNKNOWN，控制层按关闭处理。",
-            )),
+            _ => None,
         }
     }
 }
@@ -2009,6 +2148,7 @@ fn closed_monitor_reason(value: &str) -> &'static str {
         "account_restricted" => "account_restricted",
         "account_unknown" => "account_unknown",
         "account_busy" => "account_busy",
+        "station_busy" => "station_busy",
         "station_daily_budget_reached" => "station_daily_budget_reached",
         "capacity_unknown" => "capacity_unknown",
         _ => "database_unavailable",
@@ -2518,9 +2658,9 @@ mod tests {
     #[test]
     fn semantic_version_gate_rejects_old_and_malformed_versions() {
         assert!(!version_at_least("0.8.33", MINIMUM_PLUGIN_VERSION));
-        assert!(version_at_least("0.8.46", MINIMUM_PLUGIN_VERSION));
+        assert!(version_at_least("0.8.47", MINIMUM_PLUGIN_VERSION));
         assert!(version_at_least("v0.9.0", MINIMUM_PLUGIN_VERSION));
-        assert!(!version_at_least("0.8.46-beta.1", MINIMUM_PLUGIN_VERSION));
+        assert!(!version_at_least("0.8.47-beta.1", MINIMUM_PLUGIN_VERSION));
         assert!(!version_at_least("current", MINIMUM_PLUGIN_VERSION));
     }
 
@@ -2536,9 +2676,11 @@ mod tests {
             installation_fresh: true,
             has_valid_credential: true,
             bound_account_ref: Some(Uuid::new_v4()),
+            observed_account_ref: Some(Uuid::new_v4()),
             observed_account_changed: true,
             eligibility_state: Some("usable".to_owned()),
             account_busy: false,
+            installation_busy: false,
         };
 
         assert_eq!(
@@ -2546,6 +2688,38 @@ mod tests {
                 .map(|(reason, _)| reason),
             Some(CapacityReasonCode::AccountBindingChanged),
             "every capacity path invokes this common policy before it can create or revalidate a Lease"
+        );
+    }
+
+    #[test]
+    fn an_unbound_observed_identity_can_freeze_and_revalidate_a_first_task() {
+        let observed_account_ref = Uuid::new_v4();
+        let candidate = CapacityCandidate {
+            station_ref: Uuid::new_v4(),
+            installation_ref: Uuid::new_v4(),
+            accepting_tasks: true,
+            plugin_version: MINIMUM_PLUGIN_VERSION.to_owned(),
+            capabilities: serde_json::json!(["content_detail"]),
+            daily_work_quota: 200,
+            installation_fresh: true,
+            has_valid_credential: true,
+            bound_account_ref: None,
+            observed_account_ref: Some(observed_account_ref),
+            observed_account_changed: false,
+            eligibility_state: Some("usable".to_owned()),
+            account_busy: false,
+            installation_busy: false,
+        };
+
+        assert_eq!(
+            candidate_block_reason(
+                &candidate,
+                &["content_detail"],
+                Some(observed_account_ref),
+                true,
+            ),
+            None,
+            "an observed but not human-bound identity is safe for the task that observed it"
         );
     }
 

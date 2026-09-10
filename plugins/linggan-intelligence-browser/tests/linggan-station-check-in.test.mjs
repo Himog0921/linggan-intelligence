@@ -74,7 +74,7 @@ test('an existing installation includes its active credential in heartbeat check
   await checkInLingganStation({
     installKey: 'install-1',
     installationCredential: 'active-secret',
-    pluginVersion: '0.8.46',
+    pluginVersion: '0.8.47',
     health: HEALTH,
     fetchImpl: async (_url, options) => {
       sent.push(JSON.parse(options.body));

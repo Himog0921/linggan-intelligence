@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.46`
+> 版本: `0.8.47`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -276,7 +276,11 @@ npm run verify:linggan-isolation
 `unknown/signal_incomplete` 不会覆盖最后一个确定账号事实。页面启动 selector probe 现在只是无副作用诊断，不会再将 SPA 水合中的短暂缺失打印为
 `Selector preflight blocked`；真正动作前的 selector preflight 仍保持阻断。
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.46.zip`。打包器以
+0.8.47 补齐新 installation 的启动路径：没有观察或人工绑定不再阻断首单，`bindingRequired`
+只是人工确认提示，只有 `bindingMismatch` 才停止已领取任务；当本机没有账号身份摘要键时，
+插件获得明确且不含秘密的诊断，不会为此扫描或驱动平台页面。
+
+当前发行包生成在 `releases/linggan-intelligence-browser-v0.8.47.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

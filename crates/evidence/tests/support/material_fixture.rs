@@ -131,6 +131,8 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0064_account_observation_normalization.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0065_account_observation_bootstrap.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
     "('0025_comment_current_projection', '64fd9474647834358f8d2d4f1c25e4345e26a3ff79dbfc53a7846915576b0885'), ",
     "('0026_work_resource_read', '08712c71e9b6f97d270739649a7c264da2f115315bef90fabaedded50cf774bd'), ",
@@ -144,7 +146,8 @@ const MIGRATIONS: &str = concat!(
     "('0037_collection_scheduler_scale', 'e1a9acf277243391032263a24a900771b5e8b3d967890e7c4b58d82632c5a4b0'), ",
     "('0038_detail_only_material_scope', 'a748e3c810b85b523e490e4ac202569e024024f4be4b09f32ca824dedd867cc7'),\n",
     "('0045_deep_archive_recovery', '27b926f404593fd4a65cd88c63afe6e62996281496e8899342c9c647cbf6c349'), ",
-    "('0047_collection_detail_failure_boundary', 'bf925085f968c6711ff5a81cda9feeddc2468870a54c33ca37aecd16341b7aeb');\n",
+    "('0047_collection_detail_failure_boundary', 'bf925085f968c6711ff5a81cda9feeddc2468870a54c33ca37aecd16341b7aeb'), ",
+    "('0065_account_observation_bootstrap', '7b375e7b0ad786aa45d3b4ab83b3843f34a2fe88c9599a3c4b5cc95afeb990d6');\n",
 );
 
 pub fn coverage_layer(capability: &str, acquired: i64) -> serde_json::Value {

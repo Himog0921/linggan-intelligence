@@ -70,12 +70,19 @@ npm run verify:linggan-isolation
 - 候选 ZIP 为 `releases/linggan-intelligence-browser-v0.8.36.zip`，SHA-256 `1b0d2832b7483d4efb3c7d13f94bef37018fb1455edfac9434575ca89ee3313c`。它仅代表本分支 source/build/release 候选；不代表已经合入 `main`、替换本机 runtime、被 Chrome 加载、成功产生账号 Observation、完成账号绑定或取得任务。
 - 合入后仍需一次由 Mog 明确授权的受控运行验证：精确更新 runtime 与 Chrome 已解压扩展，刷新已登录页面以形成资格 Observation，在 Collection Runtime 人工绑定账号，并确认 `account_eligibility` 与 station capacity 后，才可对一项明确授权的手动复采或已配置规则验证 `WorkOrder → Lease → Attempt → Package → Receipt`。这一步不能由构建或 ZIP 校验替代。
 
-## 2026-09-10 当前候选 · `0.8.46` 持久账号绑定与任务页观察
+## 2026-09-10 当前候选 · `0.8.47` 首单观察启动与身份摘要诊断
 
 - `confirmed_until` 和 observation expiry 都不再是接活门槛：工位心跳继续判断浏览器是否在岗；账号绑定只有在人明确结束或替换时改变。页面“最后观察”只为排障展示，时间经过本身不会拒绝 Lease。
 - Producer→API body 改为严格嵌套 observation：`authenticated_observed` 必须带导航里读出的当前账号标识；`cooldown_observed`、`login_required`、`access_restricted` 不带标识。负面状态只读取平台状态组件，绝不匹配标题、笔记或评论全文；没有明确 DOM 事实不发请求，不生成 `UNKNOWN` 或负面记录。
 - 普通任务先由既有服务端门禁领取；其本来打开的 XHS 任务页只做一次 DOM 复核。仅服务端已确认的明确负面或账号不一致会让任务进入 `account_observation_blocked` 回退；无结论和本机回传失败均让首单继续。不会为了账号资格扫描标签、打开/刷新/滚动/点击页面或调用平台接口。
 - XHS 页面启动时的 selector 健康读取是无副作用诊断，不再将水合中的暂缺 DOM 打印/提示为 `Selector preflight blocked`；用户实际点击的 selector preflight 仍是执行前置条件。
+
+## 2026-09-10 后续候选 · 首单观察启动与身份摘要诊断
+
+- `无观察账号` 不再等于“不能接活”：满足其他工位准入条件的新 installation 可以先领取一项任务，并在该任务本来打开的 XHS 页面被动观察。未观察期间同一 installation 只允许一份 live Lease；这不打开、刷新、滚动、扫描或调用平台接口。
+- 首次认证身份尚未人工绑定时，Runtime 只显示人工确认候选；它不是领取前置条件。只有已存在人工绑定与新身份不一致，或服务端确认 `needs_login` / `restricted` / `cooling`，才关闭后续领取。
+- 如果 Runtime 显示“账号身份摘要未配置”，应先检查受控 runtime 的 `LINGGAN_ACCOUNT_DIGEST_KEY` 是否存在且满足最小长度；不要把密钥写入插件、日志、Git 或 UI。缺钥只影响认证身份摘要，明确登录墙、冷却或访问限制仍会形成服务端负面事实。生成/恢复/rekey 旧 identity digest 是独立运维决定，需要 Mog 明确授权。
+- 本段是源码候选的操作解释，不证明共享 migration、`:3000` runtime、Chrome 或 XHS 已完成更新；这些动作必须另行授权并以真实 check-in、WorkOrder、Lease、Attempt、Package、Receipt 证据验收。
 
 ## 2026-09-04 · `0.8.37` 认领默认接活与工位名候选
 
@@ -98,4 +105,4 @@ npm run verify:linggan-isolation
 
 ## 明确不证明
 
-构建检查本身不证明插件已加载、工位已认领、Package 已接纳或 Evidence UI 已读取。历史 `0.8.28` 有一笔标准详情真实链，但仍不证明小红书全平台总量/趋势、所有筛选搜索、所有作者页、真实非空评论图片、长期稳定性或未实测媒体/处理组合；也不证明当前 `0.8.46` 候选已经在真实 Chrome 或平台生效。
+构建检查本身不证明插件已加载、工位已认领、Package 已接纳或 Evidence UI 已读取。历史 `0.8.28` 有一笔标准详情真实链，但仍不证明小红书全平台总量/趋势、所有筛选搜索、所有作者页、真实非空评论图片、长期稳定性或未实测媒体/处理组合；也不证明当前 `0.8.47` 候选已经在真实 Chrome 或平台生效。

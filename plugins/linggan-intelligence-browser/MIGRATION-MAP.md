@@ -77,6 +77,7 @@
 | 自动工位心跳与精确详情范围（0.8.38） | 每个 `linggan-patrol` alarm 先 check-in 再 claim；仅当服务端返回账号事实已过期/未绑定/登录失效，才向已打开 XHS 页请求同一被动导航观察并重试一次；固定材料可声明 detail-only | 不打开、刷新或导航 XHS 页面；不读 Cookie/存储，不把所查看博主当账号；不因“详情”自动采评论、回复或媒体 |
 | 详情页派发回执身份（0.8.39） | 首个同页 `content_detail` 读取入本机可靠 outbox 后，回显原派发的 action、capability、taskId；后台保持严格比对后才继续交付 | 不因一个页面读取合并后续 lane；不将缺身份回执当作成功；不扩大 WorkOrder、页面访问或采集范围 |
 | 持久账号绑定与任务页观察（0.8.46） | 账号 binding 不再依赖日历 expiry；严格嵌套 observation 合同将正向身份与显式负面事实分开。自然页面只读一次已渲染 DOM；已领取任务在其本来打开的页面复核后才采集。启动 selector probe 仅留诊断 | 不扫描标签、不为账号打开/刷新/滚动/切换页面、不调平台 API；缺失 DOM或本机回传失败不写/不阻断；负面仅能来自平台状态组件；服务端确认的负面或账号变化才中止当前任务；不把启动诊断误报为 selector blocked |
+| 首单观察启动与身份摘要诊断（0.8.47） | 新 installation 没有 observation 或人工 binding 时，可在其余服务端准入已满足后领取一项任务；`bindingRequired` 仅提示人工确认，`bindingMismatch` 才停止已领取任务；health 缺少身份摘要键时返回无秘密诊断 | 不为账号资格扫描标签、打开/刷新/滚动/点击页面或调用平台接口；不生成、记录或显示身份摘要键；明确登录/限制/冷却与已绑定账号变化仍由服务端阻断 |
 
 ## 新旧运行路径对照
 
@@ -87,7 +88,7 @@ Popup / injected control
   -> old authorization / station / lease / polling
   -> 内容工作台 endpoint / sync / fallback
 
-当前路径（0.8.46）
+当前路径（0.8.47）
 Popup / Dashboard / injected control
   -> Linggan adapter boundary
   -> scheduled 或 manual TaskSpec / Attempt / durable Submission outbox

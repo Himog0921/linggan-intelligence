@@ -209,6 +209,7 @@ impl DispatchDecision {
                 "account_restricted" => "account_restricted",
                 "account_unknown" => "account_unknown",
                 "account_busy" => "account_busy",
+                "station_busy" => "station_busy",
                 "station_daily_budget_reached" => "station_daily_budget_reached",
                 "platform_concurrency_reached" => "platform_concurrency_reached",
                 "rule_revision_changed" => "rule_revision_changed",
@@ -946,11 +947,9 @@ async fn claim_next_queued_work_order(
                 &required,
             )
             .await?;
-            let (Some(station_ref), Some(bound_installation_ref), Some(account_ref)) = (
-                selection.station_ref,
-                selection.installation_ref,
-                selection.account_ref,
-            ) else {
+            let (Some(station_ref), Some(bound_installation_ref)) =
+                (selection.station_ref, selection.installation_ref)
+            else {
                 deferred_control_block
                     .get_or_insert_with(|| selection.capacity.reason_code().to_owned());
                 continue;
@@ -963,7 +962,7 @@ async fn claim_next_queued_work_order(
                 work_order_ref,
                 station_ref,
                 installation_ref,
-                account_ref,
+                selection.account_ref,
                 selection.eligibility_ref,
                 CLAIM_LEASE_MINUTES,
             )
@@ -1182,7 +1181,7 @@ async fn revalidate_dispatch_task(
     else {
         return Ok(Some("station_unavailable".to_owned()));
     };
-    let (Some(installation_ref), Some(account_ref)) = (installation_ref, account_ref) else {
+    let Some(installation_ref) = installation_ref else {
         return Ok(Some("station_unavailable".to_owned()));
     };
     if installation_ref != caller_installation_ref {

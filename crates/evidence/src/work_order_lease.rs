@@ -35,7 +35,7 @@ pub enum LeaseError {
     NoStation,
     #[error("that station no longer has a live plugin installation")]
     StationUnavailable,
-    #[error("the work order did not freeze an installation and observation account")]
+    #[error("the work order did not freeze an installation")]
     FrozenControlMissing,
     #[error("every step this work order froze is already done")]
     WorkOrderAlreadySatisfied,
@@ -104,7 +104,7 @@ struct LeaseSubject {
     identity_key: String,
     authorization_ref: Option<Uuid>,
     installation_ref: Uuid,
-    account_ref: Uuid,
+    account_ref: Option<Uuid>,
     monitor_rule_revision_ref: Option<Uuid>,
     active_monitor_rule_revision_ref: Option<Uuid>,
     active_rule_automatic_enabled: Option<bool>,
@@ -171,14 +171,23 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
     reject_if_authorization_lapsed(transaction, &subject).await?;
     reject_if_rule_changed(&subject)?;
 
-    // Busy is a cross-lease predicate. Serializing on the exact frozen account makes the later
-    // recheck a hard exclusion: two concurrent issuers cannot both observe the account as idle.
+    // One installation may hold only one active Lease. Serialize on its installation first so an
+    // unobserved account still has a safe first task; when an identity is known, also serialize on
+    // that account to preserve the cross-installation exclusion.
     sqlx::query(
-        "SELECT account_ref FROM platform_observation_account WHERE account_ref=$1 FOR UPDATE",
+        "SELECT installation_ref FROM plugin_installation WHERE installation_ref=$1 FOR UPDATE",
     )
-    .bind(subject.account_ref)
+    .bind(subject.installation_ref)
     .execute(&mut **transaction)
     .await?;
+    if let Some(account_ref) = subject.account_ref {
+        sqlx::query(
+            "SELECT account_ref FROM platform_observation_account WHERE account_ref=$1 FOR UPDATE",
+        )
+        .bind(account_ref)
+        .execute(&mut **transaction)
+        .await?;
+    }
 
     let material_targets = load_material_targets(transaction, work_order_ref).await?;
     let required_capabilities = required_capabilities_for(
@@ -285,7 +294,7 @@ pub(crate) async fn claim_queued_work_order_in_transaction(
     work_order_ref: Uuid,
     station_ref: Uuid,
     installation_ref: Uuid,
-    account_ref: Uuid,
+    account_ref: Option<Uuid>,
     eligibility_ref: Option<Uuid>,
     valid_for_minutes: i32,
 ) -> Result<IssuedLease, LeaseError> {
@@ -639,7 +648,7 @@ async fn load_subject(
     let Some(station_ref) = row.1 else {
         return Err(LeaseError::NoStation);
     };
-    let (Some(installation_ref), Some(account_ref)) = (row.8, row.9) else {
+    let Some(installation_ref) = row.8 else {
         return Err(LeaseError::FrozenControlMissing);
     };
     Ok(LeaseSubject {
@@ -652,7 +661,7 @@ async fn load_subject(
         identity_key: row.6,
         authorization_ref: row.7,
         installation_ref,
-        account_ref,
+        account_ref: row.9,
         monitor_rule_revision_ref: row.10,
         active_monitor_rule_revision_ref: row.11,
         active_rule_automatic_enabled: row.12,
@@ -1137,7 +1146,7 @@ mod tests {
             identity_key: "creator-fixture".to_owned(),
             authorization_ref: Some(Uuid::new_v4()),
             installation_ref: Uuid::new_v4(),
-            account_ref: Uuid::new_v4(),
+            account_ref: Some(Uuid::new_v4()),
             monitor_rule_revision_ref: None,
             active_monitor_rule_revision_ref: None,
             active_rule_automatic_enabled: None,
@@ -1290,7 +1299,7 @@ mod keyword_search_target_tests {
             identity_key: identity_key.to_owned(),
             authorization_ref: None,
             installation_ref: Uuid::nil(),
-            account_ref: Uuid::nil(),
+            account_ref: Some(Uuid::nil()),
             monitor_rule_revision_ref: None,
             active_monitor_rule_revision_ref: None,
             active_rule_automatic_enabled: None,

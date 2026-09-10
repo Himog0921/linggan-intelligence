@@ -106,6 +106,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0063_content_author_attribution.sql"),
     "\n",
     include_str!("../../../database/migrations/0064_account_observation_normalization.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0065_account_observation_bootstrap.sql"),
 );
 
 #[tokio::test]
@@ -1189,7 +1191,7 @@ async fn replacement_installation_releases_stale_work_instead_of_adopting_it() {
         &database,
         &InstallationCheckIn {
             install_key: &intermediate_install_key,
-            plugin_version: "0.8.46",
+            plugin_version: "0.8.47",
             browser_label: Some("intermediate fixture"),
             capabilities: serde_json::json!(["author_profile", "profile_discovery"]),
             installation_credential: None,
@@ -1219,7 +1221,7 @@ async fn replacement_installation_releases_stale_work_instead_of_adopting_it() {
         &database,
         &InstallationCheckIn {
             install_key: &replacement_install_key,
-            plugin_version: "0.8.46",
+            plugin_version: "0.8.47",
             browser_label: Some("replacement fixture"),
             capabilities: serde_json::json!([
                 "author_profile",
@@ -1741,7 +1743,7 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     sqlx::query(
         "INSERT INTO plugin_installation \
              (installation_ref, install_key, station_ref, claim_kind, claimed_at, plugin_version, capabilities) \
-         VALUES ($1, $2, $3, 'person', scope_001_now(), '0.8.46', \
+         VALUES ($1, $2, $3, 'person', scope_001_now(), '0.8.47', \
                  '[\"author_profile\",\"profile_discovery\",\"content_detail\",\"media_slots\",\"comments\",\"replies\"]'::jsonb)",
     )
     .bind(installation_ref)

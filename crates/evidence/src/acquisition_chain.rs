@@ -1266,11 +1266,9 @@ async fn assign_current_capacity_to_queued_work_order(
         material_targets,
     )
     .await?;
-    let (Some(station_ref), Some(installation_ref), Some(account_ref)) = (
-        selection.station_ref,
-        selection.installation_ref,
-        selection.account_ref,
-    ) else {
+    let (Some(station_ref), Some(installation_ref)) =
+        (selection.station_ref, selection.installation_ref)
+    else {
         return Err(LeaseError::ControlBlocked {
             reason_code: selection.capacity.reason_code().to_owned(),
         });
@@ -1283,7 +1281,7 @@ async fn assign_current_capacity_to_queued_work_order(
     .bind(work_order_ref)
     .bind(station_ref)
     .bind(installation_ref)
-    .bind(account_ref)
+    .bind(selection.account_ref)
     .bind(selection.eligibility_ref)
     .execute(&mut **transaction)
     .await?

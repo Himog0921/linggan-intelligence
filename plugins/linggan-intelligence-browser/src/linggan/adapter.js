@@ -192,6 +192,19 @@ export function accountEligibilityRouteFromHealth(health) {
   return path.startsWith('/api/local/stations/') && !/[?#]/.test(path) ? path : null;
 }
 
+/**
+ * The server tells a newly installed producer whether account observation is usable without
+ * disclosing the secret that keys account identities. A missing identity key prevents positive
+ * identity reports, but explicit login, cooling, or restriction facts remain reportable and
+ * authoritative; transport or DOM uncertainty never turns a claimed task into an account block.
+ */
+export function accountObservationAvailabilityFromHealth(health) {
+  const availability = String(health?.routes?.station?.accountObservation || '').trim();
+  return ['ready', 'schema_unavailable', 'identity_key_missing'].includes(availability)
+    ? availability
+    : 'unavailable';
+}
+
 export function credentialActivationRouteFromHealth(health) {
   const path = String(health?.routes?.station?.credentialActivation || '').trim();
   return path.startsWith('/api/local/stations/') && !/[?#]/.test(path) ? path : null;
@@ -256,13 +269,23 @@ const CONFIRMED_ACCOUNT_BLOCK_STATES = new Set(['cooling', 'needs_login', 'restr
  * they must not be converted into an account block after the task has already been leased.
  */
 export function confirmedAccountObservationBlocksClaim(report) {
+  if (report?.claimedTaskNotHeld === true) return true;
   if (report?.reported !== true) return false;
-  if (report.bindingRequired === true) return true;
+  if (report.bindingMismatch === true) return true;
+  if (report.frozenAccountMismatch === true) return true;
+  if (report.accountBusy === true) return true;
   return CONFIRMED_ACCOUNT_BLOCK_STATES.has(String(report.eligibilityState || ''));
 }
 
 /** Turn the account-report receipt into the only task-page stop decision. */
 export function claimedTaskAccountDecision(report) {
+  if (report?.claimedTaskNotHeld === true) {
+    return {
+      mayExecute: false,
+      state: 'account_observation_blocked',
+      message: '任务页已观察到账号状态变化或限制，已停止本次采集并等待服务端恢复条件。',
+    };
+  }
   if (report?.reported !== true) {
     return { mayExecute: true, state: 'account_observation_inconclusive', message: '' };
   }
@@ -295,6 +318,7 @@ function normalizedAccountObservation(observation) {
 export async function reportLingganAccountEligibility({
   installationRef,
   installationCredential,
+  taskId = null,
   observation,
   origin = LINGGAN_LOCAL_ORIGIN,
   fetchImpl = globalThis.fetch,
@@ -303,28 +327,39 @@ export async function reportLingganAccountEligibility({
   const route = accountEligibilityRouteFromHealth(health);
   const normalizedObservation = normalizedAccountObservation(observation);
   if (typeof fetchImpl !== 'function'
-      || !route
       || !String(installationRef || '').trim()
       || !String(installationCredential || '').trim()
       || !normalizedObservation) {
     return { reported: false, reasonCode: 'account_observation_not_ready' };
+  }
+  if (!route) {
+    const availability = accountObservationAvailabilityFromHealth(health);
+    return {
+      reported: false,
+      reasonCode: availability === 'identity_key_missing'
+        ? 'account_observation_identity_key_missing'
+        : 'account_observation_not_ready',
+    };
   }
   try {
     const response = await fetchImpl(`${origin}${route}`, {
       method: 'POST',
       credentials: 'omit',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        installationRef,
-        installationCredential,
-        observation: normalizedObservation,
+    body: JSON.stringify({
+      installationRef,
+      installationCredential,
+      observation: normalizedObservation,
+      ...(String(taskId || '').trim() ? { taskId: String(taskId).trim() } : {}),
       }),
     });
     const body = await response.json().catch(() => null);
     if (!response.ok) {
+      const reasonCode = String(body?.code || 'account_observation_rejected');
       return {
         reported: false,
-        reasonCode: String(body?.code || 'account_observation_rejected'),
+        reasonCode,
+        claimedTaskNotHeld: reasonCode === 'account_observation_claim_not_held',
       };
     }
     return {
@@ -332,6 +367,9 @@ export async function reportLingganAccountEligibility({
       accountRef: String(body?.accountRef || '').trim(),
       eligibilityState: String(body?.eligibilityState || 'unknown'),
       bindingRequired: body?.bindingRequired === true,
+      bindingMismatch: body?.bindingMismatch === true,
+      frozenAccountMismatch: body?.frozenAccountMismatch === true,
+      accountBusy: body?.accountBusy === true,
     };
   } catch {
     return { reported: false, reasonCode: 'account_observation_unavailable' };
