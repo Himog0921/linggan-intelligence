@@ -118,6 +118,7 @@
 | [design/changes/design-012-evidence-information-hierarchy-ui-change-manifest.md](design/changes/design-012-evidence-information-hierarchy-ui-change-manifest.md) | 权威当前；DESIGN-012 | `/corpus/evidence` 信息层级四层、LANG-05 运行时迁移、边界带收口，以及 provenance 覆盖等三处错误信念的修复 |
 | [design/changes/plugin-001-producer-popup-ui-change-manifest.md](design/changes/plugin-001-producer-popup-ui-change-manifest.md) | 已被替代；PLUGIN-001 | Issue #33 popup 的历史 UI 边界；不再约束当前实现 |
 | [design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md](design/changes/plugin-migration-001-producer-popup-ui-change-manifest.md) | 权威当前；PLUGIN-MIGRATION-001 | Issue #37 popup 的 Discovery 行动与状态边界；启动恢复由 Issue #53 文档补充 |
+| [design/changes/targets-row-actions-layout-001-ui-change-manifest.md](design/changes/targets-row-actions-layout-001-ui-change-manifest.md) | 活跃计划；TARGETS-ROW-ACTIONS-LAYOUT-001 | 观察目标行内操作竖排溢出的排版修复；13 列密度问题与 V4 结构差距留给 Mog 决策 |
 | [design/changes/plugin-popup-recovery-001-ui-change-manifest.md](design/changes/plugin-popup-recovery-001-ui-change-manifest.md) | 权威当前；PLUGIN-POPUP-RECOVERY-001 | Issue #53 popup 启动恢复、无副作用 fallback 与 v0.4.2 release 边界；Issue #55 的运行时修订见当月进度记录 |
 | [design/acceptance/local-001a-evidence-library-visual-acceptance.md](design/acceptance/local-001a-evidence-library-visual-acceptance.md) | 一次性报告 | `ACC-EVIDENCE-001`：本地页面的视觉、状态与真实后果分层验收记录 |
 | [design/acceptance/local-001d-unknown-published-discovery-acceptance.md](design/acceptance/local-001d-unknown-published-discovery-acceptance.md) | 一次性报告 | `ACC-LOCAL-001D-001`：未知发布时间默认读取和显式窗口的分层验收记录 |

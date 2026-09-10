@@ -383,10 +383,12 @@ fn target_row(
         target_ref = target.target_ref,
         opener_label = escape(&opener_label),
     );
-    let last = target
-        .last_patrol_succeeded_at
-        .as_deref()
-        .unwrap_or("尚未巡查");
+    let last = moment_without_year(
+        target
+            .last_patrol_succeeded_at
+            .as_deref()
+            .unwrap_or("尚未巡查"),
+    );
     // 下次巡查写成「还有多久」：人在这一列判断的是要等多久，不是那一刻的钟点。
     let next = if target.monitoring_enabled {
         relative_moment(target.next_patrol_at.as_deref(), beijing_now_minutes())
@@ -569,19 +571,40 @@ fn row_secondary_actions(
     target: &ObservationTarget,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
-    let (enable, toggle_label) = if target.monitoring_enabled {
-        ("false", "停止观察")
+    // 开关不带可见文字：状态由滑块位置与颜色表达（右+信号色=观察中，左+墨色=已停止）。
+    // 但没有可见文字就必须有可读标签，否则读屏软件只会念出一个「按钮」。
+    let (enable, pressed, action_label) = if target.monitoring_enabled {
+        ("false", "true", "正在观察，点击停止观察")
     } else {
-        ("true", "恢复观察")
+        ("true", "false", "已停止观察，点击恢复观察")
     };
     let focus_id = format!("target-{}", target.target_ref);
     let fields = list_context.return_fields(None, None, Some(&focus_id));
     let delete_href = list_context.delete_href(target.target_ref);
     format!(
-        r#"<form class="c-tg-toggle" method="post" action="/collection/targets/patrol-toggle">{fields}<input type="hidden" name="enable" value="{enable}"/><button class="c-btn-quiet c-tg-btn-slim" type="submit" name="row_target_ref" value="{target_ref}">{toggle_label}</button></form>
-           <a class="c-tg-danger" href="{delete_href}">删除</a>"#,
+        r#"<form class="c-tg-toggle" method="post" action="/collection/targets/patrol-toggle">{fields}<input type="hidden" name="enable" value="{enable}"/><button class="c-tg-switch" type="submit" name="row_target_ref" value="{target_ref}" aria-pressed="{pressed}" aria-label="{action_label}" title="{action_label}"></button></form>
+           <a class="c-tg-act c-tg-act-danger" href="{delete_href}">删除</a>"#,
         target_ref = target.target_ref,
     )
+}
+
+/// 列表里的巡查时刻去掉年份。
+///
+/// 这一列要回答的是「上次是什么时候」，而同一屏里的年份几乎总是同一个，却稳定占掉
+/// 五个字符的宽度——在一张十三列的表里，那正是把「2026-09-08 23:14」挤成
+/// 「2026-09-08 23:…」的最后一根稻草。完整时刻仍在目标详情里给出。
+///
+/// **只裁剪，不另写格式**：全项目的人可读时间由 `linggan_human_moment()` 统一产出，
+/// 这里从那一种格式上切掉前缀。自己拼一个 `to_char` 出来就是全项目的第二种时间写法，
+/// 治理检查也正是为此设的。
+fn moment_without_year(value: &str) -> &str {
+    // 只认 `YYYY-MM-DD ...` 这一种形状；认不出就原样返回（"尚未巡查" 这类文案）。
+    let bytes = value.as_bytes();
+    if bytes.len() >= 5 && bytes[0..4].iter().all(u8::is_ascii_digit) && bytes[4] == b'-' {
+        &value[5..]
+    } else {
+        value
+    }
 }
 
 /// 「下次巡查」写成还有多久，而不是一个绝对时刻。
@@ -805,7 +828,7 @@ fn row_action(
                 &[("dtab", "works")],
                 Some("target-works"),
             );
-            format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看结果</a>"#)
+            format!(r#"<a class="c-tg-act" href="{drawer_href}">查看结果</a>"#)
         }
         TargetPrimaryAction::ViewCreator => {
             let drawer_href = list_context.drawer_href(
@@ -813,7 +836,7 @@ fn row_action(
                 &[("dtab", "works")],
                 Some("target-works"),
             );
-            format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看档案</a>"#)
+            format!(r#"<a class="c-tg-act" href="{drawer_href}">查看档案</a>"#)
         }
         TargetPrimaryAction::ViewArchiveProgress
         | TargetPrimaryAction::ViewArchiveProblems
@@ -829,13 +852,13 @@ fn row_action(
                 &[("dtab", "overview")],
                 Some(fragment),
             );
-            format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">{label}</a>"#)
+            format!(r#"<a class="c-tg-act" href="{drawer_href}">{label}</a>"#)
         }
         TargetPrimaryAction::OpenPatrol(label) => {
             let opener_id = format!("monitor-rule-{}", target.target_ref);
             let rule_href = list_context.monitor_rule_href(target.target_ref, &opener_id);
             format!(
-                r#"<a id="{opener_id}" class="c-btn-secondary c-tg-btn" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">{label}</a>"#,
+                r#"<a id="{opener_id}" class="c-tg-act" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">{label}</a>"#,
                 target_ref = target.target_ref,
             )
         }
@@ -851,7 +874,7 @@ fn row_action(
             let focus_id = format!("target-{}", target.target_ref);
             let fields = list_context.return_fields(None, None, Some(&focus_id));
             format!(
-                r#"<form method="post" action="/collection/targets/archive">{fields}<button class="c-btn-primary c-tg-btn" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                r#"<form method="post" action="/collection/targets/archive">{fields}<button class="c-tg-act" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
                 target_ref = target.target_ref,
             )
         }
@@ -1379,16 +1402,19 @@ mod tests {
         assert!(html.contains("打开关键词的关键词观察"));
         assert!(!html.contains("关键词档案"));
         assert_eq!(html.matches("c-tg-actions").count(), 2);
-        // 主动作两个（一行一个），加上每行一个「停止观察」开关。
-        assert_eq!(html.matches("c-tg-btn").count(), 4);
-        // 直接把「每行一个主动作」量出来：主动作的 class 以 `c-tg-btn"` 收尾，开关是
-        // `c-tg-btn-slim`，引号把两者分得干净。上面那个 4 是总数，单看它不排除「一行两个
-        // 主动作、另一行没有」——虽然 c-tg-toggle==2 已经排除了，但让判据直说更省事。
-        assert_eq!(html.matches(r#"c-tg-btn""#).count(), 2);
-        // 停止观察与删除必须每行各出现一次，且删除是链接不是按钮——两者形状不同，
-        // 长得像同一个按钮，人迟早会点错那个不可逆的。
+        // 三个行内控件现在共用一套尺寸（34px + 1px 墨线），靠颜色与形状区分而不是靠大小。
+        //
+        // 判据用**引号收尾的完整 class**，不用裸子串：`c-tg-act-danger` 自身就含
+        // `c-tg-act`，按子串数会把一个删除按钮算成两次。
+        assert_eq!(html.matches(r#"class="c-tg-act""#).count(), 2);
+        assert_eq!(html.matches(r#"c-tg-act c-tg-act-danger""#).count(), 2);
+        assert_eq!(html.matches("c-tg-switch").count(), 2);
+        // 旧的三种尺寸（40px 描边按钮 / 28px 浅按钮 / 下划线文字）必须彻底消失。
+        assert!(!html.contains("c-tg-btn-slim"));
+        assert!(!html.contains("c-btn-quiet"));
+        // 观察开关与删除必须每行各出现一次。区分不再靠尺寸（三者已统一成 34px），
+        // 靠形状与颜色：开关是唯一带滑轨的，删除是唯一的红。
         assert_eq!(html.matches("c-tg-toggle").count(), 2);
-        assert_eq!(html.matches("c-tg-danger").count(), 2);
         assert_eq!(html.matches("data-monitor-rule-trigger").count(), 1);
         assert_eq!(html.matches(">建立档案</button>").count(), 1);
         assert_eq!(html.matches(">设置巡查</a>").count(), 1);
@@ -1443,7 +1469,10 @@ mod tests {
         assert!(html.contains("5 / 12 · 缺 7"));
         assert!(html.contains("补采缺口"));
         // 上次巡查是已经发生的事实，保留绝对时刻——可能要拿去跟别的记录对时间。
-        assert!(html.contains("2026-09-04 08:30"));
+        // 列表里的巡查时刻不带年份：同一屏里年份永远相同，却稳定占掉五个字符，
+        // 正是把这一列挤到截断的最后一根稻草。完整时刻仍在目标详情里。
+        assert!(html.contains("09-04 08:30"));
+        assert!(!html.contains("2026-09-04 08:30"));
         // 下次巡查写成还有多久：人在这一列判断的是要等多久，而不是那一刻的钟点。
         assert!(!html.contains("2026-09-05 09:00"));
         // 断言「已逾期」而不是「已逾期 || 后」：夹具的下次巡查固定在 2026-09-05，时间

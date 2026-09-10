@@ -850,7 +850,7 @@ fn second_bar(
                 r#"<div class="c-toolbar">
           <div class="c-tabs c-tg-views">{target_filters}</div>
           <div class="c-actions c-tg-toolbar">
-            <a class="c-btn-quiet c-tg-sort" href="{sort_href}" aria-label="按最近观察排序">最近观察 ↓</a>
+            <a class="c-tg-ctl c-tg-sort" href="{sort_href}" aria-label="按最近观察排序"><span>最近观察</span><i class="c-tg-caret" aria-hidden="true"></i></a>
             <form id="collection-target-create" class="c-target-add" method="post" action="/collection/targets/new">
               {domain_field}
               <label class="c-tg-field c-tg-field-kind"><span class="v7-sr-only">目标类型</span><select name="target_kind" aria-label="目标类型" data-target-kind>

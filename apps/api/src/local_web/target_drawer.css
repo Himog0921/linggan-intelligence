@@ -12,7 +12,7 @@
 /* 十三列一次排满，不再靠横向滚动。定宽列写成 minmax(0,N)：窗口窄时它们按比例收窄并
  * 省略文字，而不是把整张表推出屏幕——一张需要左右拖动才能看全的目录，等于要求人
  * 记住左边看过什么。选择框、编号与操作三列保持定宽：它们是可点区域，收窄会让人点不中。 */
-.c-tg-table-head.c-tg-creator-grid,.c-tg-item.c-tg-creator-grid,.c-tg-table-head.c-tg-keyword-grid,.c-tg-item.c-tg-keyword-grid{display:grid;grid-template-columns:40px 48px minmax(140px,max-content) minmax(0,52px) minmax(0,72px) minmax(0,92px) minmax(0,60px) minmax(0,116px) minmax(0,64px) minmax(0,84px) minmax(0,104px) minmax(0,104px) minmax(148px,1fr);gap:var(--lgi-space-3)}
+.c-tg-table-head.c-tg-creator-grid,.c-tg-item.c-tg-creator-grid,.c-tg-table-head.c-tg-keyword-grid,.c-tg-item.c-tg-keyword-grid{display:grid;grid-template-columns:40px 48px minmax(0,192px) minmax(0,52px) minmax(0,72px) minmax(0,92px) minmax(0,60px) minmax(0,116px) minmax(0,64px) minmax(0,84px) minmax(0,104px) minmax(0,104px) minmax(200px,1fr);gap:var(--lgi-space-2)}
 .c-tg-table-head{width:100%;min-height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);background:var(--lgi-canvas-low);color:var(--lgi-muted);font:600 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans);letter-spacing:var(--lgi-ls-normal)}
 .c-tg-table-head>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .c-tg-item{position:relative;width:100%;min-height:64px;box-sizing:border-box;padding:var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline)}
@@ -207,13 +207,46 @@
 .c-dw-retire label b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:600}
 .c-dw-retire label span{flex:0 0 auto;color:var(--lgi-muted);font:400 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono)}
 
-/* 行内次动作：停止观察是一个开关，删除是一个危险动作。两者形状必须不同——
- * 长得像同一个按钮，人迟早会点错那个不可逆的。 */
-.c-tg-actions{flex-wrap:wrap;gap:var(--lgi-space-2);justify-content:flex-end}
-.c-tg-toggle{margin:0}
-.c-tg-btn-slim{min-height:28px;height:28px;padding:0 var(--lgi-space-2);font-size:var(--lgi-text-label)}
-.c-tg-danger{align-self:center;color:var(--lgi-muted);font-size:var(--lgi-text-label);text-decoration:underline}
-.c-tg-danger:hover{color:var(--lgi-danger,#b3261e)}
+/* 行内动作：查看档案、观察开关、删除。
+ *
+ * 三者**必须同高同边框重量**。此前它们是 40px 描边按钮 / 28px 浅色按钮 / 一行下划线
+ * 文字，三种尺寸三种形状挤在一格里，读的人先要分辨「这三个是不是一类东西」。
+ * 现在统一到 34px + 1px 墨线，沿用证据库 `.ev-button` 那套已被认可的控件语言。
+ *
+ * 区分不靠尺寸，靠颜色与形状：删除是墨线里唯一的红，开关是唯一带滑轨的。 */
+.c-tg-actions{flex-wrap:nowrap;gap:var(--lgi-space-2);justify-content:flex-end}
+.c-tg-toggle{margin:0;display:flex;align-items:center}
+
+.c-tg-act{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;
+  height:34px;min-height:34px;padding:0 var(--lgi-space-3);
+  border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas);
+  color:var(--lgi-ink);font:650 var(--lgi-text-label)/1 var(--lgi-font-sans);
+  white-space:nowrap;text-decoration:none;cursor:pointer;
+  transition:background var(--lgi-duration-press) var(--lgi-ease-ui),color var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-tg-act:hover{background:var(--lgi-ink);color:var(--lgi-canvas)}
+
+/* 删除是这一行里唯一的红。不可逆的动作不该和「查看」长得一样。 */
+.c-tg-act-danger{border-color:var(--lgi-danger);color:var(--lgi-danger)}
+.c-tg-act-danger:hover{background:var(--lgi-danger);color:var(--lgi-canvas)}
+
+/* 观察开关：与两侧按钮同高，靠滑轨形状把自己和按钮区分开。
+ *
+ * 此前是 38×21 的细线小方块，夹在两个 28~40px 的按钮之间显得单薄。现在与按钮同高，
+ * 2px 外框给足分量；轨道用点阵纹理（v7 的采样点阵材料），滑块是实心方块。 */
+.c-tg-switch{position:relative;overflow:hidden;box-sizing:border-box;flex:0 0 auto;
+  width:60px;height:34px;padding:0;border:2px solid var(--lgi-border-solid);
+  /* 轨道用下沉面而不是花纹：60×34 这么小的控件上，点阵会读成噪点而不是材料。
+   * 深度靠明暗——凹下去的槽 + 压在上面的实心滑块，这才是「有分量」。 */
+  background:var(--lgi-canvas-sunken);
+  cursor:pointer;transition:background-color var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-tg-switch::before{content:"";position:absolute;z-index:1;top:3px;left:3px;width:24px;height:24px;
+  background:var(--lgi-ink);
+  transition:left var(--lgi-duration-state) var(--lgi-ease-ui),background var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-tg-switch[aria-pressed="true"]::before{left:29px;background:var(--lgi-signal)}
+.c-tg-switch:hover{background-color:var(--lgi-canvas-low)}
+/* 观察中时整条槽透一点信号色，隔着一米也能看出哪些目标是活的 */
+.c-tg-switch[aria-pressed="true"]{background-color:var(--lgi-signal-soft)}
+.c-tg-switch:focus-visible{outline:2px solid var(--lgi-ink);outline-offset:2px}
 .c-tg-delete{max-width:640px}
 .c-tg-delete-cols{display:grid;grid-template-columns:1fr 1fr;gap:var(--lgi-space-4);margin:var(--lgi-space-4) 0}
 .c-tg-delete-cols b{display:block;margin-bottom:var(--lgi-space-2);color:var(--lgi-ink);font-size:var(--lgi-text-label)}
@@ -221,3 +254,61 @@
 .c-tg-delete-blocked{margin:var(--lgi-space-2) 0;color:var(--lgi-danger,#b3261e);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
 .c-tg-delete label{display:block;margin:var(--lgi-space-3) 0;color:var(--lgi-body);font-size:var(--lgi-text-label)}
 .c-tg-delete label input{display:block;width:100%;margin-top:var(--lgi-space-2);min-height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);border:1px solid var(--lgi-border)}
+
+/* ── 顶部工具条：统一到证据库那套已被认可的控件语言 ──────────────────────────
+ *
+ * 此前这一条上并存三种控件：一个浅色描边的排序链接（箭头是文字 ↓）、两个**原生
+ * select**（浏览器自带箭头，各系统长得都不一样）、一个输入框、两个不同粗细的按钮。
+ * 同一条工具条上四种边框、三种高度、两种箭头。
+ *
+ * 现在全部 44px 高、1px 墨线、650/12px，与 `.ev-button` 对齐；箭头一律自绘。 */
+.c-tg-toolbar .c-tg-ctl,
+.c-tg-toolbar .c-tg-field select,
+.c-tg-toolbar .c-tg-field input,
+.c-tg-toolbar .c-tg-batch-open,
+.c-tg-toolbar .c-btn-primary{
+  box-sizing:border-box;height:44px;min-height:44px;padding:0 var(--lgi-space-4);
+  border:1px solid var(--lgi-border-solid);border-radius:0;background:var(--lgi-canvas);
+  color:var(--lgi-ink);font:650 12px/1 var(--lgi-font-sans);
+  transition:background var(--lgi-duration-press) var(--lgi-ease-ui),color var(--lgi-duration-press) var(--lgi-ease-ui)}
+
+.c-tg-toolbar .c-tg-ctl{display:inline-flex;align-items:center;gap:var(--lgi-space-2);
+  text-decoration:none;cursor:pointer}
+.c-tg-toolbar .c-tg-ctl:hover,
+.c-tg-toolbar .c-tg-batch-open:not([disabled]):hover{background:var(--lgi-ink);color:var(--lgi-canvas)}
+
+/* 原生 select 的箭头去掉，换成和别处同一个自绘折角——否则同一条工具条上会同时出现
+ * 系统箭头和我们的折角，两种粗细两种角度。 */
+/* 折角用描边画在包裹的 label 上。本文件禁止一切渐变写法（见 target_inspector 的样式
+ * 检查）——那条规矩防的是把纹理做成廉价图案皮肤，折角同样该用描边而不是色彩过渡。
+ * select 是替换元素，自己挂不了伪元素，所以挂在 label 上并让它不吃指针事件。 */
+.c-tg-toolbar .c-tg-field{position:relative;display:inline-flex}
+.c-tg-toolbar .c-tg-field select{appearance:none;-webkit-appearance:none;
+  padding-right:var(--lgi-space-8);cursor:pointer}
+.c-tg-toolbar .c-tg-field::after{content:"";position:absolute;right:var(--lgi-space-4);top:50%;
+  width:8px;height:8px;margin-top:-6px;
+  border-right:2px solid var(--lgi-ink);border-bottom:2px solid var(--lgi-ink);
+  transform:rotate(45deg);pointer-events:none}
+.c-tg-toolbar .c-tg-field select:hover{background-color:var(--lgi-canvas-low)}
+.c-tg-toolbar .c-tg-field input::placeholder{color:var(--lgi-muted)}
+.c-tg-toolbar .c-tg-field input:focus{outline:0;box-shadow:inset 0 0 0 1px var(--lgi-border-solid)}
+
+/* 主按钮：黑底白字 + 右侧点阵纹理，与证据库的「读取材料」同一个做法。
+ * 不用硬阴影——工具条是常驻控件，天天在眼前，投影会一直在喊。 */
+.c-tg-toolbar .c-btn-primary{position:relative;overflow:hidden;border-width:2px;
+  padding-right:var(--lgi-space-10);background:var(--lgi-ink);color:var(--lgi-canvas);cursor:pointer}
+/* 点阵引用 token，不在本文件里写任何渐变字面量；淡出用整体透明度而不是遮罩，
+ * 同样是为了守住上面那条规矩。 */
+.c-tg-toolbar .c-btn-primary::after{content:"";position:absolute;top:0;right:0;bottom:0;width:34%;
+  background-image:var(--lgi-mosaic-on-dark);background-size:9px 9px;
+  opacity:.5;pointer-events:none}
+.c-tg-toolbar .c-btn-primary:hover{background:var(--lgi-signal)}
+
+.c-tg-toolbar .c-tg-batch-open[disabled]{border-color:var(--lgi-border);color:var(--lgi-muted);cursor:not-allowed}
+
+/* 自绘折角，与证据库 .ev-caret 同一形状 */
+.c-tg-caret{width:8px;height:8px;flex:0 0 auto;
+  border-right:2px solid currentColor;border-bottom:2px solid currentColor;
+  transform:translateY(-2px) rotate(45deg);
+  transition:transform var(--lgi-duration-state) var(--lgi-ease-ui)}
+.c-tg-ctl:hover .c-tg-caret{transform:translateY(0) rotate(45deg)}
