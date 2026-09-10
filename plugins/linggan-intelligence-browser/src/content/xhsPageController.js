@@ -1,7 +1,6 @@
 import { createCommentTaskController } from './commentTaskController.js';
 import { createCommentImageTaskController } from './commentImageTask.js';
 import { COLLECT_MODE, COMMENT_DEPTH_MODE, TASK_STATE } from '../shared/constants.js';
-import { consumeSelectorHealthAlertMessage } from '../shared/selectorHealth.js';
 import { isTerminalTaskState, resolveTaskState } from '../shared/taskUi.js';
 import {
   runXhsSelectorBootstrapProbe,
@@ -336,14 +335,10 @@ export function createXhsPageController({
     clearTimeout(selectorProbeTimer);
     selectorProbeTimer = setTimeout(() => {
       selectorProbeTimer = null;
-      const result = runXhsSelectorBootstrapProbe({
+      runXhsSelectorBootstrapProbe({
         document,
         win: window,
       });
-      const alertMessage = consumeSelectorHealthAlertMessage(result, { win: window });
-      if (alertMessage) {
-        showToast(alertMessage, 'warning');
-      }
     }, delayMs);
   }
 

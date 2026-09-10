@@ -775,13 +775,13 @@ const DISPATCH_ANSWER_EXPLANATIONS: &[(&str, &str, &str)] = &[
     ),
     (
         "account_eligibility_stale",
-        "账号资格超过 20 分钟没上报",
-        "让插件在一个已登录的平台页面上待一会儿，它会自动重报。",
+        "账号观察已过诊断窗口",
+        "这是历史兼容状态；当前不会仅因观察时间阻断接活。实际登录、限制或绑定问题仍会阻断。",
     ),
     (
         "account_cooling",
         "账号正在冷却",
-        "等冷却结束会自动恢复，不需要做什么。",
+        "平台恢复后，在正常平台页面形成新的账号观察再恢复接活。",
     ),
     (
         "account_needs_login",
@@ -796,7 +796,7 @@ const DISPATCH_ANSWER_EXPLANATIONS: &[(&str, &str, &str)] = &[
     (
         "account_unknown",
         "账号资格未知",
-        "读不到就按关闭处理。让插件重新上报一次账号状态。",
+        "尚未形成可判定的账号事实，按关闭处理；页面暂时读不到标记不会覆盖已有状态。",
     ),
     (
         "account_busy",

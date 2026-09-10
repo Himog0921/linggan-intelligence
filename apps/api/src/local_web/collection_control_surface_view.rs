@@ -117,12 +117,10 @@ pub struct RuntimeResourceView {
     pub account_ref: Option<Uuid>,
     pub bound_account_ref: Option<Uuid>,
     pub binding_state: String,
-    pub binding_confirmed_until: Option<String>,
     pub eligibility_ref: Option<Uuid>,
     pub eligibility_state: Option<String>,
     pub eligibility_reason_code: Option<String>,
     pub eligibility_observed_at: Option<String>,
-    pub eligibility_expires_at: Option<String>,
     pub account_has_live_lease: bool,
 }
 
@@ -243,8 +241,7 @@ async fn read_frozen_works(
                     SELECT 1 FROM platform_observation_account_binding current_binding \
                     WHERE current_binding.account_ref=work.account_ref \
                       AND current_binding.installation_ref=work.installation_ref \
-                      AND current_binding.ended_at IS NULL \
-                      AND current_binding.confirmed_until>scope_001_now()) END AS account_is_current, \
+                      AND current_binding.ended_at IS NULL) END AS account_is_current, \
                 CASE WHEN work.monitor_rule_revision_ref IS NULL THEN NULL \
                      ELSE target.active_monitor_rule_revision_ref=work.monitor_rule_revision_ref \
                      END AS rule_is_current,work.created_at::text AS created_at \
@@ -305,13 +302,10 @@ async fn read_runtime_resources(
                      WHEN eligibility.account_ref IS NULL THEN 'bound_without_eligibility' \
                      WHEN binding.account_ref IS NULL THEN 'unconfirmed' \
                      WHEN binding.account_ref<>eligibility.account_ref THEN 'changed' \
-                     WHEN binding.confirmed_until<=scope_001_now() THEN 'expired' \
                      ELSE 'current' END AS binding_state, \
-                binding.confirmed_until::text AS binding_confirmed_until, \
                 eligibility.eligibility_ref, \
                 eligibility.eligibility_state,eligibility.reason_code AS eligibility_reason_code, \
                 eligibility.observed_at::text AS eligibility_observed_at, \
-                eligibility.expires_at::text AS eligibility_expires_at, \
                 COALESCE(CASE WHEN COALESCE(eligibility.account_ref,binding.account_ref) IS NULL THEN false ELSE EXISTS ( \
                     SELECT 1 FROM collection_work_order busy_work \
                     JOIN collection_work_order_lease busy_lease USING(work_order_ref) \
@@ -324,12 +318,12 @@ async fn read_runtime_resources(
          LEFT JOIN LATERAL ( \
              SELECT observation.eligibility_ref,observation.account_ref, \
                     observation.eligibility_state,observation.reason_code, \
-                    observation.observed_at,observation.expires_at \
+                    observation.observed_at \
              FROM platform_observation_account_eligibility_observation observation \
              WHERE observation.installation_ref=installation.installation_ref \
              ORDER BY observation.observed_at DESC LIMIT 1) eligibility ON true \
          LEFT JOIN LATERAL ( \
-             SELECT candidate.account_ref,candidate.confirmed_until \
+             SELECT candidate.account_ref \
              FROM platform_observation_account_binding candidate \
              WHERE candidate.installation_ref=installation.installation_ref \
                AND candidate.ended_at IS NULL LIMIT 1) binding ON true \
@@ -350,12 +344,10 @@ async fn read_runtime_resources(
             account_ref: row.try_get("account_ref")?,
             bound_account_ref: row.try_get("bound_account_ref")?,
             binding_state: row.try_get("binding_state")?,
-            binding_confirmed_until: row.try_get("binding_confirmed_until")?,
             eligibility_ref: row.try_get("eligibility_ref")?,
             eligibility_state: row.try_get("eligibility_state")?,
             eligibility_reason_code: row.try_get("eligibility_reason_code")?,
             eligibility_observed_at: row.try_get("eligibility_observed_at")?,
-            eligibility_expires_at: row.try_get("eligibility_expires_at")?,
             account_has_live_lease: row.try_get("account_has_live_lease")?,
         })
     })
@@ -822,8 +814,8 @@ fn recovery_for(reason: &str) -> Option<Recovery> {
             action: "重新核对并确认安装的观察账号绑定。",
         }),
         "account_eligibility_stale" => Some(Recovery {
-            owner: "执行工位",
-            action: "重新上报版本化账号资格信号。",
+            owner: "诊断记录",
+            action: "这是历史兼容状态；当前不以观察时间单独限制接活。",
         }),
         "account_cooling" => Some(Recovery {
             owner: "账号",
@@ -1065,7 +1057,7 @@ fn runtime_resource_row(resource: &RuntimeResourceView) -> String {
     let eligibility_reason = resource
         .eligibility_reason_code
         .as_deref()
-        .unwrap_or("account_eligibility_stale");
+        .unwrap_or("account_unknown");
     let account_state = resource.eligibility_state.as_deref().unwrap_or("UNKNOWN");
     let acceptance_form = format!(
         r#"<form class="c-runtime-control-form" method="post" action="/collection/runtime/accepting" data-station-accepting-form>
@@ -1100,8 +1092,8 @@ fn runtime_resource_row(resource: &RuntimeResourceView) -> String {
              <dl>
                <div><dt>安装</dt><dd>{installation}</dd><span>{version} · 心跳 {last_seen}</span></div>
                <div><dt>服务端凭据</dt><dd>{credential}</dd><span>只显示有效性，不显示密钥或摘要</span></div>
-               <div data-account-binding-required="{binding_required}"><dt>观察账号</dt><dd>{account}</dd><span>{binding_state} · 当前绑定 {bound_account} · 确认至 {binding_until}</span>{binding_form}</div>
-               <div data-account-eligibility-reason="{reason}"><dt>账号资格</dt><dd>{account_state}</dd><span>{reason} · 观察 {observed} · 到期 {expires}{busy} · Eligibility {eligibility_ref}</span></div>
+               <div data-account-binding-required="{binding_required}"><dt>观察账号</dt><dd>{account}</dd><span>{binding_state} · 当前绑定 {bound_account} · 仅人工替换或结束会改变绑定</span>{binding_form}</div>
+               <div data-account-eligibility-reason="{reason}"><dt>账号资格</dt><dd>{account_state}</dd><span>{reason} · 最后观察 {observed}（仅供排障，不因时间经过阻断接活）{busy} · Eligibility {eligibility_ref}</span></div>
              </dl>
            </article>"#,
         station_ref = resource.station_ref,
@@ -1125,22 +1117,10 @@ fn runtime_resource_row(resource: &RuntimeResourceView) -> String {
         bound_account = optional_short_ref(resource.bound_account_ref),
         binding_state = escape(binding_state_label(&resource.binding_state)),
         binding_required = binding_required(&resource.binding_state),
-        binding_until = escape(
-            resource
-                .binding_confirmed_until
-                .as_deref()
-                .unwrap_or("UNKNOWN")
-        ),
         account_state = escape(account_state),
         observed = escape(
             resource
                 .eligibility_observed_at
-                .as_deref()
-                .unwrap_or("UNKNOWN")
-        ),
-        expires = escape(
-            resource
-                .eligibility_expires_at
                 .as_deref()
                 .unwrap_or("UNKNOWN")
         ),
@@ -1217,14 +1197,13 @@ fn binding_state_label(value: &str) -> &'static str {
         "current" => "当前一致",
         "unconfirmed" => "未确认",
         "changed" => "观察账号已变化",
-        "expired" => "确认已过期",
         "bound_without_eligibility" => "已绑定，资格信号缺失",
         _ => "尚无观察账号",
     }
 }
 
 fn binding_required(value: &str) -> bool {
-    matches!(value, "unconfirmed" | "changed" | "expired")
+    matches!(value, "unconfirmed" | "changed")
 }
 
 fn optional_ref(value: Option<Uuid>) -> String {
@@ -1308,18 +1287,16 @@ mod tests {
                 station_name: "Mac mini <主机>".to_owned(),
                 accepting_tasks: true,
                 installation_ref: Some(Uuid::new_v4()),
-                plugin_version: Some("0.8.34".to_owned()),
+                plugin_version: Some("0.8.46".to_owned()),
                 last_seen_at: Some("2026-09-04 09:00:00+08".to_owned()),
                 has_valid_credential: true,
                 account_ref: Some(Uuid::new_v4()),
                 bound_account_ref: None,
                 binding_state: "unconfirmed".to_owned(),
-                binding_confirmed_until: Some("2026-10-04 09:00:00+08".to_owned()),
                 eligibility_ref: Some(Uuid::new_v4()),
                 eligibility_state: Some("needs_login".to_owned()),
                 eligibility_reason_code: Some("login_required".to_owned()),
                 eligibility_observed_at: Some("2026-09-04 09:00:00+08".to_owned()),
-                eligibility_expires_at: Some("2026-09-04 09:20:00+08".to_owned()),
                 account_has_live_lease: false,
             }],
         }
@@ -1666,6 +1643,23 @@ mod tests {
         let already_bound = render_runtime_control(&base, &projection);
         assert!(!already_bound.contains("data-account-binding-form"));
         assert!(already_bound.contains("已绑定，资格信号缺失"));
+    }
+
+    #[test]
+    fn runtime_keeps_last_observation_for_diagnosis_not_as_a_claim_deadline() {
+        let mut projection = projection();
+        let base = format!("{BODY_OPEN}old</div>");
+        projection.runtime_resources[0].eligibility_state = Some("usable".to_owned());
+        projection.runtime_resources[0].eligibility_reason_code = Some("authenticated".to_owned());
+        let rendered = render_runtime_control(&base, &projection);
+        assert!(rendered.contains("最后观察"));
+        assert!(rendered.contains("不因时间经过阻断接活"));
+
+        projection.runtime_resources[0].eligibility_state = None;
+        projection.runtime_resources[0].eligibility_reason_code = None;
+        let never_observed = render_runtime_control(&base, &projection);
+        assert!(never_observed.contains("data-account-eligibility-reason=\"account_unknown\""));
+        assert!(!never_observed.contains("account_eligibility_stale"));
     }
 
     #[test]

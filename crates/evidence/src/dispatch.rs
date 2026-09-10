@@ -59,6 +59,7 @@ pub enum DispatchFailureCode {
     PageReceiptMissing,
     PageReceiptIdentityMismatch,
     PageReadFailed,
+    AccountObservationBlocked,
 }
 
 impl DispatchFailureCode {
@@ -72,6 +73,7 @@ impl DispatchFailureCode {
             "page_receipt_missing" => Some(Self::PageReceiptMissing),
             "page_receipt_identity_mismatch" => Some(Self::PageReceiptIdentityMismatch),
             "page_read_failed" => Some(Self::PageReadFailed),
+            "account_observation_blocked" => Some(Self::AccountObservationBlocked),
             _ => None,
         }
     }
@@ -86,6 +88,7 @@ impl DispatchFailureCode {
             Self::PageReceiptMissing => "page_receipt_missing",
             Self::PageReceiptIdentityMismatch => "page_receipt_identity_mismatch",
             Self::PageReadFailed => "page_read_failed",
+            Self::AccountObservationBlocked => "account_observation_blocked",
         }
     }
 }
@@ -261,16 +264,18 @@ pub async fn record_dispatch_answer(
 
 pub async fn dispatch_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
-        "SELECT to_regclass('collection_work_order_lease') IS NOT NULL \
-                AND to_regclass('collection_work_order_lease_task') IS NOT NULL \
-                AND to_regclass('collection_work_order_lease_task_dispatch_failure') IS NOT NULL \
-                AND to_regclass('collection_dispatch_lane_fairness') IS NOT NULL \
-                AND to_regclass('collection_platform_dispatch_policy') IS NOT NULL \
+        "SELECT to_regclass(format('%I.%I',current_schema(),'collection_work_order_lease')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_work_order_lease_task')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_work_order_lease_task_dispatch_failure')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_dispatch_lane_fairness')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_platform_dispatch_policy')) IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
-                            WHERE table_name='collection_work_order' \
+                            WHERE table_schema=current_schema() \
+                              AND table_name='collection_work_order' \
                               AND column_name='retry_not_before_at') \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
-                            WHERE table_name='collection_work_order_lease_task_dispatch_failure' \
+                            WHERE table_schema=current_schema() \
+                              AND table_name='collection_work_order_lease_task_dispatch_failure' \
                               AND column_name='failure_disposition')",
     )
     .fetch_one(database.pool())

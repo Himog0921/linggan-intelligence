@@ -4,11 +4,13 @@ import test from 'node:test';
 import {
   accountObservationFromCurrentAccountHref,
   currentAccountHrefFromDocument,
-  dispatchStateRequiresFreshPassiveAccountObservation,
+  observeXhsAccountFromDocument,
   reportPassiveAccountEligibility,
 } from '../src/linggan/accountEligibilityProbe.js';
 import {
   accountEligibilityRouteFromHealth,
+  claimedTaskAccountDecision,
+  confirmedAccountObservationBlocksClaim,
   reportLingganAccountEligibility,
 } from '../src/linggan/adapter.js';
 
@@ -20,29 +22,42 @@ const HEALTH = {
   },
 };
 
+function documentWithCurrentAccount(accountId) {
+  let currentAccountLink;
+  const navigation = {
+    querySelectorAll() {
+      return [
+        { getAttribute: (name) => (name === 'href' ? '/explore' : '') },
+        { getAttribute: (name) => (name === 'href' ? '/notification' : '') },
+        { getAttribute: (name) => (name === 'href' ? '/chat' : '') },
+        currentAccountLink,
+      ];
+    },
+  };
+  currentAccountLink = {
+    textContent: '我',
+    getAttribute(name) {
+      return name === 'href' ? `/user/profile/${accountId}` : '';
+    },
+    closest() {
+      return navigation;
+    },
+  };
+  return { querySelectorAll: () => [currentAccountLink], title: '', body: { innerText: '' } };
+}
+
 test('a passive account probe accepts only the explicitly marked current-account profile', () => {
-  assert.deepEqual(accountObservationFromCurrentAccountHref(''), {
-    signal: 'signal_incomplete', rawPlatformAccountId: '',
-  });
+  assert.equal(accountObservationFromCurrentAccountHref(''), null);
   assert.deepEqual(accountObservationFromCurrentAccountHref('/user/profile/111111111111111111111111'), {
     signal: 'authenticated_observed', rawPlatformAccountId: '111111111111111111111111',
   });
-  assert.deepEqual(accountObservationFromCurrentAccountHref('/user/profile/not-a-valid-xhs-id'), {
-    signal: 'signal_incomplete', rawPlatformAccountId: '',
-  });
+  assert.equal(accountObservationFromCurrentAccountHref('/user/profile/not-a-valid-xhs-id'), null);
   assert.deepEqual(
     accountObservationFromCurrentAccountHref(
       'http://www.xiaohongshu.com/user/profile/111111111111111111111111',
     ),
-    { signal: 'signal_incomplete', rawPlatformAccountId: '' },
+    null,
   );
-});
-
-test('only account freshness decisions may trigger an automatic passive re-observation', () => {
-  assert.equal(dispatchStateRequiresFreshPassiveAccountObservation('account_eligibility_stale'), true);
-  assert.equal(dispatchStateRequiresFreshPassiveAccountObservation('account_needs_login'), true);
-  assert.equal(dispatchStateRequiresFreshPassiveAccountObservation('installation_stale'), false);
-  assert.equal(dispatchStateRequiresFreshPassiveAccountObservation('nothing_waiting'), false);
 });
 
 test('the passive account probe never mistakes the viewed creator for the logged-in account', () => {
@@ -102,39 +117,73 @@ test('the passive account probe never mistakes the viewed creator for the logged
   );
 });
 
-test('the passive probe waits briefly for hydrated current-account navigation before failing closed', async () => {
-  let reads = 0;
-  let sleeps = 0;
+test('the passive probe reads one already-rendered document and sends a nested positive observation', async () => {
   let message;
   await reportPassiveAccountEligibility({
-    readCurrentAccountHref: async () => {
-      reads += 1;
-      return reads === 1 ? '' : '/user/profile/dddddddddddddddddddddddd';
-    },
+    document: documentWithCurrentAccount('dddddddddddddddddddddddd'),
     sendMessage: async (value) => { message = value; return { reported: true }; },
-    attempts: 2,
-    sleep: async () => { sleeps += 1; },
   });
-  assert.equal(reads, 2);
-  assert.equal(sleeps, 1);
   assert.deepEqual(message, {
     action: 'lingganReportAccountEligibility',
-    signal: 'authenticated_observed',
-    rawPlatformAccountId: 'dddddddddddddddddddddddd',
+    observation: {
+      signal: 'authenticated_observed',
+      rawPlatformAccountId: 'dddddddddddddddddddddddd',
+    },
   });
 });
 
 test('the passive probe emits a closed signal without caching or logging identity', async () => {
   let message;
   await reportPassiveAccountEligibility({
-    readCurrentAccountHref: async () => '/user/profile/cccccccccccccccccccccccc',
+    document: documentWithCurrentAccount('cccccccccccccccccccccccc'),
     sendMessage: async (value) => { message = value; return { reported: true }; },
   });
   assert.deepEqual(message, {
     action: 'lingganReportAccountEligibility',
-    signal: 'authenticated_observed',
-    rawPlatformAccountId: 'cccccccccccccccccccccccc',
+    observation: {
+      signal: 'authenticated_observed',
+      rawPlatformAccountId: 'cccccccccccccccccccccccc',
+    },
   });
+});
+
+test('only a platform status surface becomes a negative account observation', () => {
+  const loginPrompt = { innerText: '请使用已登录小红书 APP 扫码验证身份' };
+  assert.deepEqual(
+    observeXhsAccountFromDocument({
+      querySelectorAll: () => [loginPrompt],
+      title: '小红书',
+      body: { innerText: '请使用已登录小红书 APP 扫码验证身份' },
+    }),
+    { signal: 'login_required' },
+  );
+  assert.equal(
+    observeXhsAccountFromDocument({ querySelectorAll: () => [], title: '小红书', body: { innerText: '' } }),
+    null,
+  );
+  assert.equal(
+    observeXhsAccountFromDocument({
+      querySelectorAll: () => [],
+      title: '普通笔记',
+      body: { innerText: '账号被限制怎么办？操作过于频繁请稍后再试。' },
+    }),
+    null,
+    'user-authored note or comment text is not a platform account decision',
+  );
+});
+
+test('only a server-confirmed negative or binding change stops an already claimed task', () => {
+  const unavailable = claimedTaskAccountDecision({ reported: false });
+  assert.deepEqual(unavailable, {
+    mayExecute: true,
+    state: 'account_observation_inconclusive',
+    message: '',
+  }, 'a local report failure is inconclusive and does not revoke an already claimed task');
+  assert.equal(confirmedAccountObservationBlocksClaim({ reported: false }), false);
+  assert.equal(confirmedAccountObservationBlocksClaim({ reported: true, eligibilityState: 'unknown' }), false);
+  assert.equal(confirmedAccountObservationBlocksClaim({ reported: true, eligibilityState: 'usable' }), false);
+  assert.equal(confirmedAccountObservationBlocksClaim({ reported: true, bindingRequired: true }), true);
+  assert.equal(confirmedAccountObservationBlocksClaim({ reported: true, eligibilityState: 'needs_login' }), true);
 });
 
 test('eligibility reporting uses only the health-advertised station route', async () => {
@@ -147,8 +196,7 @@ test('eligibility reporting uses only the health-advertised station route', asyn
   const result = await reportLingganAccountEligibility({
     installationRef: '11111111-1111-4111-8111-111111111111',
     installationCredential: 'high-entropy-fixture-credential',
-    rawPlatformAccountId: 'stable-user-3',
-    signal: 'authenticated_observed',
+    observation: { signal: 'authenticated_observed', rawPlatformAccountId: 'stable-user-3' },
     health: HEALTH,
     fetchImpl: async (url, options) => {
       request = { url, body: JSON.parse(options.body) };
@@ -169,21 +217,22 @@ test('eligibility reporting uses only the health-advertised station route', asyn
   assert.deepEqual(request.body, {
     installationRef: '11111111-1111-4111-8111-111111111111',
     installationCredential: 'high-entropy-fixture-credential',
-    rawPlatformAccountId: 'stable-user-3',
-    signal: 'authenticated_observed',
+    observation: {
+      signal: 'authenticated_observed',
+      rawPlatformAccountId: 'stable-user-3',
+    },
   });
   assert.match(request.url, /^http:\/\/localhost:3000\/api\/local\/stations\//);
   assert.equal(JSON.stringify(result).includes('stable-user-3'), false);
   assert.equal(JSON.stringify(result).includes('high-entropy-fixture-credential'), false);
 });
 
-test('an unavailable page reports unknown without inventing a usable identity', async () => {
+test('an unavailable page does not turn missing positive evidence into a negative account report', async () => {
   let message;
-  await reportPassiveAccountEligibility({
-    readCurrentAccountHref: async () => { throw new Error('page state unavailable'); },
+  const result = await reportPassiveAccountEligibility({
+    document: { querySelectorAll: () => [], title: '', body: { innerText: '' } },
     sendMessage: async (value) => { message = value; return { reported: false }; },
-    attempts: 1,
   });
-  assert.equal(message.signal, 'signal_incomplete');
-  assert.equal(message.rawPlatformAccountId, '');
+  assert.deepEqual(result, { reported: false, reason: 'account_observation_inconclusive' });
+  assert.equal(message, undefined);
 });

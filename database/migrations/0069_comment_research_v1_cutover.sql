@@ -6,8 +6,6 @@
 -- facts, generic model connections, model configurations, embedding settings, or invocation
 -- receipts.  Every drop is explicit: no CASCADE is used to guess at an unrelated consumer.
 
-BEGIN;
-
 DROP VIEW IF EXISTS linggan_ci_semantic_atom_current;
 DROP VIEW IF EXISTS linggan_ci_source;
 DROP VIEW IF EXISTS linggan_comment_asset_current;
@@ -153,5 +151,3 @@ DROP FUNCTION IF EXISTS linggan_ci_group_problem_member_current(uuid, uuid, uuid
 
 COMMENT ON TABLE linggan_comment_research_derivation IS
   'V1-only research derivation. Raw comment text and content-author attribution remain in Evidence tables.';
-
-COMMIT;

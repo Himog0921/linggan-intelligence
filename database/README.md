@@ -53,7 +53,7 @@ ENV-001 的 proof 数据库只用于环境验证，验证后必须删除；它�
 
 ## COMMENT-RESEARCH-RESET-001
 
-`0064`–`0068` 是唯一 V1 研究内核：ResearchDerivation、保存 policy、冻结 Run/RunItem、四类 Atom、版本化 embedding、候选归并、Problem membership、immutable ResultRevision 与完整 7d 对前一 7d 的观察。它们不改写 Raw Comment/Evidence。
+`0064_comment_research_kernel`–`0068_comment_research_problem_resolution` 是唯一 V1 研究内核：ResearchDerivation、保存 policy、冻结 Run/RunItem、四类 Atom、版本化 embedding、候选归并、Problem membership、immutable ResultRevision 与完整 7d 对前一 7d 的观察。它们不改写 Raw Comment/Evidence。`0064_account_observation_normalization` 是另一项已应用的独立迁移；migration ledger 以完整 migration ID（不是数字前缀）校验，本地运行器先应用它，再应用 V1 kernel。
 
 `0069_comment_research_v1_cutover.sql` 是开发期 terminal migration。它在不使用 `CASCADE` 的前提下，显式删除旧 daily、replay、recovery、Task B/P4 的表、视图、触发器、函数和索引（包括无 FK 的 `linggan_ci_source_revision`），并按依赖顺序清空可能由早期开发分支写入的 V1 policy/run/derivation/Atom/vector/Problem/result 行；通用 invocation ledger 不改写。Raw Comment、Evidence、作品作者归属、来源资格、通用模型连接/配置和 embedding 设置保留。`0070_comment_research_v1_derivation_head.sql` 随后为 V1 增加完整 derivation input identity：冻结 Run 读取其原始可读输入，新 Run 才选择当前归属/上下文 head；任一冻结输入不再当前时，整版 Result 不可读。历史 migration 文件继续保留为完整 schema/迁移历史的必要证据，不能重写或删除。
 

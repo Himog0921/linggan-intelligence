@@ -16,36 +16,17 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-pub const MINIMUM_PLUGIN_VERSION: &str = "0.8.34";
+pub const MINIMUM_PLUGIN_VERSION: &str = "0.8.46";
 /// How recently an installation must have checked in to be considered on duty.
 ///
 /// This is a liveness question — is that browser still there — and it stays short. A worker
 /// that has been silent for twenty minutes cannot be handed platform work.
 pub const CONTROL_FRESHNESS_MINUTES: i32 = 20;
-/// How long one passive account-eligibility observation stays usable.
-///
-/// This answers a different question from [`CONTROL_FRESHNESS_MINUTES`]: not "is the browser
-/// alive" but "is this platform account still in a state we may work with". The two shared one
-/// constant until 2026-09-06, which silently coupled them.
-///
-/// Twenty minutes was far too short for the second question, because the only way to refresh
-/// this observation is to read an *already open* XHS document — the producer will not open,
-/// reload, or navigate a tab to get it. Closing the last XHS tab therefore stopped every deep
-/// archive within twenty minutes, with no error recorded anywhere: capacity selection simply
-/// skipped every work order and the queue looked empty. Observed on 2026-09-06, where a target
-/// sat with twenty-two ready tasks for eight hours while all nine other control checks passed.
-///
-/// A platform login survives for days, so six hours is still a conservative claim about it. The
-/// window only decides how long we may act on the last real observation; it never invents one.
-/// Any dispatch that comes back with an account state still forces a fresh passive read, and a
-/// real failure still ends the run — this widens patience, not trust.
-pub const ACCOUNT_ELIGIBILITY_TTL_MINUTES: i32 = 360;
 pub const DEFAULT_MONITOR_INTERVAL_SECONDS: i32 = 86_400;
 pub const MINIMUM_MONITOR_INTERVAL_SECONDS: i32 = 21_600;
 pub const MAXIMUM_MONITOR_INTERVAL_SECONDS: i32 = 604_800;
 const CREDENTIAL_VALID_FOR_DAYS: i32 = 30;
 const PENDING_CREDENTIAL_VALID_FOR_MINUTES: i32 = 10;
-const ACCOUNT_BINDING_VALID_FOR_DAYS: i32 = 30;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CollectionControlError {
@@ -106,36 +87,48 @@ pub enum AccountEligibilityState {
     Unknown,
 }
 
-/// Closed producer observation vocabulary. The producer reports only what it observed; the
-/// server owns the projection into an eligibility state.
+/// Explicit negative facts observable on an already-open platform page. An inconclusive DOM
+/// read is deliberately absent from this type: it is not an eligibility observation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum AccountEligibilitySignal {
-    AuthenticatedObserved,
+pub enum ExplicitAccountEligibilitySignal {
     CooldownObserved,
     LoginRequired,
     AccessRestricted,
-    SignalIncomplete,
 }
 
-impl AccountEligibilitySignal {
+impl ExplicitAccountEligibilitySignal {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim() {
-            "authenticated_observed" => Some(Self::AuthenticatedObserved),
             "cooldown_observed" => Some(Self::CooldownObserved),
             "login_required" => Some(Self::LoginRequired),
             "access_restricted" => Some(Self::AccessRestricted),
-            "signal_incomplete" => Some(Self::SignalIncomplete),
             _ => None,
         }
     }
 
     pub const fn projected_state(self) -> AccountEligibilityState {
         match self {
-            Self::AuthenticatedObserved => AccountEligibilityState::Usable,
             Self::CooldownObserved => AccountEligibilityState::Cooling,
             Self::LoginRequired => AccountEligibilityState::NeedsLogin,
             Self::AccessRestricted => AccountEligibilityState::Restricted,
-            Self::SignalIncomplete => AccountEligibilityState::Unknown,
+        }
+    }
+}
+
+/// A conclusive account observation. The type couples the only positive signal to a transient
+/// account identity and makes a negative signal identity-free, so a caller cannot accidentally
+/// create an account record while claiming that its observation was incomplete.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccountEligibilityObservation<'a> {
+    Authenticated { raw_platform_account_id: &'a str },
+    ExplicitBlock(ExplicitAccountEligibilitySignal),
+}
+
+impl<'a> AccountEligibilityObservation<'a> {
+    pub const fn projected_state(self) -> AccountEligibilityState {
+        match self {
+            Self::Authenticated { .. } => AccountEligibilityState::Usable,
+            Self::ExplicitBlock(signal) => signal.projected_state(),
         }
     }
 }
@@ -226,16 +219,24 @@ impl CapacitySelection {
 
 pub async fn collection_control_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar(
-        "SELECT to_regclass('installation_credential') IS NOT NULL \
-                AND to_regclass('platform_observation_account') IS NOT NULL \
-                AND to_regclass('collection_monitor_rule_revision') IS NOT NULL \
-                AND to_regclass('collection_platform_dispatch_policy') IS NOT NULL \
+        "SELECT to_regclass(format('%I.%I',current_schema(),'installation_credential')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'platform_observation_account')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_monitor_rule_revision')) IS NOT NULL \
+                AND to_regclass(format('%I.%I',current_schema(),'collection_platform_dispatch_policy')) IS NOT NULL \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
-                            WHERE table_name='execution_station' \
+                            WHERE table_schema=current_schema() AND table_name='execution_station' \
                               AND column_name='accepting_tasks') \
                 AND EXISTS (SELECT 1 FROM information_schema.columns \
-                            WHERE table_name='collection_work_order' \
-                              AND column_name='retry_not_before_at')",
+                            WHERE table_schema=current_schema() AND table_name='collection_work_order' \
+                              AND column_name='retry_not_before_at') \
+                AND NOT EXISTS (SELECT 1 FROM information_schema.columns \
+                                WHERE table_schema=current_schema() \
+                                  AND table_name='platform_observation_account_binding' \
+                                  AND column_name='confirmed_until') \
+                AND EXISTS (SELECT 1 FROM information_schema.columns \
+                            WHERE table_schema=current_schema() \
+                              AND table_name='platform_observation_account_eligibility_observation' \
+                              AND column_name='expires_at' AND is_nullable='YES')",
     )
     .fetch_one(database.pool())
     .await
@@ -448,15 +449,11 @@ pub async fn report_account_eligibility(
     database: &Database,
     installation_ref: Uuid,
     raw_credential: &str,
-    raw_platform_account_id: Option<&str>,
-    signal: AccountEligibilitySignal,
-    digest_key: &[u8],
+    observation: AccountEligibilityObservation<'_>,
+    digest_key: Option<&[u8]>,
 ) -> Result<AccountEligibilityReceipt, CollectionControlError> {
     if !collection_control_schema_is_ready(database).await? {
         return Err(CollectionControlError::SchemaUnavailable);
-    }
-    if digest_key.len() < 32 {
-        return Err(CollectionControlError::MissingDigestKey);
     }
     let mut transaction = database.pool().begin().await?;
     let installation_exists: bool = sqlx::query_scalar(
@@ -475,35 +472,24 @@ pub async fn report_account_eligibility(
         return Err(CollectionControlError::InvalidCredential);
     }
 
-    let account_ref = if let Some(raw_platform_account_id) = raw_platform_account_id {
-        let raw_platform_account_id = raw_platform_account_id.trim();
-        if raw_platform_account_id.is_empty() || raw_platform_account_id.len() > 512 {
-            return Err(CollectionControlError::InvalidPlatformIdentity);
-        }
-        let identity_digest = hmac_sha256_hex(digest_key, raw_platform_account_id.as_bytes());
-        Some(
-            sqlx::query_scalar(
-                "INSERT INTO platform_observation_account \
-                     (account_ref,platform,identity_digest,digest_version) \
-                 VALUES ($1,'xhs',$2,'hmac-sha256-v1') \
-                 ON CONFLICT (platform,digest_version,identity_digest) \
-                 DO UPDATE SET identity_digest=EXCLUDED.identity_digest \
-                 RETURNING account_ref",
+    let account_ref = match observation {
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id,
+        } => {
+            let digest_key = digest_key.ok_or(CollectionControlError::MissingDigestKey)?;
+            if digest_key.len() < 32 {
+                return Err(CollectionControlError::MissingDigestKey);
+            }
+            account_ref_for_authenticated_observation_in(
+                &mut transaction,
+                raw_platform_account_id,
+                digest_key,
             )
-            .bind(Uuid::new_v4())
-            .bind(identity_digest)
-            .fetch_one(&mut *transaction)
-            .await?,
-        )
-    } else {
-        sqlx::query_scalar(
-            "SELECT account_ref FROM platform_observation_account_binding \
-             WHERE installation_ref=$1 AND ended_at IS NULL \
-               AND confirmed_until>scope_001_now() LIMIT 1",
-        )
-        .bind(installation_ref)
-        .fetch_optional(&mut *transaction)
-        .await?
+            .await?
+        }
+        AccountEligibilityObservation::ExplicitBlock(_) => {
+            active_bound_account_ref_in(&mut transaction, installation_ref).await?
+        }
     };
     let Some(account_ref) = account_ref else {
         transaction.commit().await?;
@@ -514,26 +500,23 @@ pub async fn report_account_eligibility(
             binding_required: true,
         });
     };
-    let state = signal.projected_state();
+    let state = observation.projected_state();
     sqlx::query(
         "INSERT INTO platform_observation_account_eligibility_observation \
              (eligibility_ref,account_ref,installation_ref,eligibility_state,signal_version, \
-              reason_code,expires_at) \
-         VALUES ($1,$2,$3,$4,'xhs-account-eligibility-v1',$5, \
-                 scope_001_now()+make_interval(mins=>$6))",
+              reason_code) \
+         VALUES ($1,$2,$3,$4,'xhs-account-eligibility-v1',$5)",
     )
     .bind(Uuid::new_v4())
     .bind(account_ref)
     .bind(installation_ref)
     .bind(state.as_str())
     .bind(state.reason_code())
-    .bind(ACCOUNT_ELIGIBILITY_TTL_MINUTES)
     .execute(&mut *transaction)
     .await?;
     let binding_required: bool = sqlx::query_scalar(
         "SELECT NOT EXISTS (SELECT 1 FROM platform_observation_account_binding \
-         WHERE account_ref=$1 AND installation_ref=$2 AND ended_at IS NULL \
-           AND confirmed_until>scope_001_now())",
+         WHERE account_ref=$1 AND installation_ref=$2 AND ended_at IS NULL)",
     )
     .bind(account_ref)
     .bind(installation_ref)
@@ -546,6 +529,45 @@ pub async fn report_account_eligibility(
         state,
         binding_required,
     })
+}
+
+async fn account_ref_for_authenticated_observation_in(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    raw_platform_account_id: &str,
+    digest_key: &[u8],
+) -> Result<Option<Uuid>, CollectionControlError> {
+    let raw_platform_account_id = raw_platform_account_id.trim();
+    if raw_platform_account_id.is_empty() || raw_platform_account_id.len() > 512 {
+        return Err(CollectionControlError::InvalidPlatformIdentity);
+    }
+    let identity_digest = hmac_sha256_hex(digest_key, raw_platform_account_id.as_bytes());
+    let account_ref = sqlx::query_scalar(
+        "INSERT INTO platform_observation_account \
+             (account_ref,platform,identity_digest,digest_version) \
+         VALUES ($1,'xhs',$2,'hmac-sha256-v1') \
+         ON CONFLICT (platform,digest_version,identity_digest) \
+         DO UPDATE SET identity_digest=EXCLUDED.identity_digest \
+         RETURNING account_ref",
+    )
+    .bind(Uuid::new_v4())
+    .bind(identity_digest)
+    .fetch_one(&mut **transaction)
+    .await?;
+    Ok(Some(account_ref))
+}
+
+async fn active_bound_account_ref_in(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    installation_ref: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT account_ref FROM platform_observation_account_binding \
+         WHERE installation_ref=$1 AND ended_at IS NULL \
+         ORDER BY bound_at DESC,binding_ref DESC LIMIT 1",
+    )
+    .bind(installation_ref)
+    .fetch_optional(&mut **transaction)
+    .await
 }
 
 pub async fn bind_observation_account(
@@ -593,13 +615,12 @@ pub async fn bind_observation_account(
     let binding_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO platform_observation_account_binding \
-             (binding_ref,account_ref,installation_ref,bound_by,confirmed_until) \
-         VALUES ($1,$2,$3,'person',scope_001_now()+make_interval(days=>$4))",
+             (binding_ref,account_ref,installation_ref,bound_by) \
+         VALUES ($1,$2,$3,'person')",
     )
     .bind(binding_ref)
     .bind(account_ref)
     .bind(installation_ref)
-    .bind(ACCOUNT_BINDING_VALID_FOR_DAYS)
     .execute(&mut *transaction)
     .await?;
     transaction.commit().await?;
@@ -658,21 +679,125 @@ pub async fn set_station_accepting(
 
 /// The only capacity evaluator. All callers receive the same stable reason code and the exact
 /// station/installation/account triple frozen by a successful decision.
-type CapacityCandidate = (
-    Uuid,
-    Uuid,
-    bool,
-    String,
-    Value,
-    i32,
-    bool,
-    bool,
-    Option<Uuid>,
-    bool,
-    Option<String>,
-    bool,
-    bool,
-);
+#[derive(Debug)]
+struct CapacityCandidate {
+    station_ref: Uuid,
+    installation_ref: Uuid,
+    accepting_tasks: bool,
+    plugin_version: String,
+    capabilities: Value,
+    daily_work_quota: i32,
+    installation_fresh: bool,
+    has_valid_credential: bool,
+    bound_account_ref: Option<Uuid>,
+    observed_account_changed: bool,
+    eligibility_state: Option<String>,
+    account_busy: bool,
+}
+
+impl<'row> sqlx::FromRow<'row, sqlx::postgres::PgRow> for CapacityCandidate {
+    fn from_row(row: &'row sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+
+        Ok(Self {
+            station_ref: row.try_get("station_ref")?,
+            installation_ref: row.try_get("installation_ref")?,
+            accepting_tasks: row.try_get("accepting_tasks")?,
+            plugin_version: row.try_get("plugin_version")?,
+            capabilities: row.try_get("capabilities")?,
+            daily_work_quota: row.try_get("daily_work_quota")?,
+            installation_fresh: row.try_get("installation_fresh")?,
+            has_valid_credential: row.try_get("has_valid_credential")?,
+            bound_account_ref: row.try_get("bound_account_ref")?,
+            observed_account_changed: row.try_get("observed_account_changed")?,
+            eligibility_state: row.try_get("eligibility_state")?,
+            account_busy: row.try_get("account_busy")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct CapacityCandidateScope {
+    station_ref: Option<Uuid>,
+    installation_ref: Option<Uuid>,
+    current_lease_ref: Option<Uuid>,
+}
+
+/// One loader supplies every capacity path. Keeping the candidate snapshot in a named model
+/// prevents normal admission, claimant revalidation and batch backpressure from drifting into
+/// subtly different account/binding policies. Its eligibility subquery selects only conclusive
+/// facts: historical `unknown/signal_incomplete` rows were inconclusive reads, not negatives.
+async fn load_capacity_candidates_in(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    scope: CapacityCandidateScope,
+) -> Result<Vec<CapacityCandidate>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT s.station_ref,i.installation_ref,s.accepting_tasks,i.plugin_version, \
+                i.capabilities,s.daily_work_quota, \
+                i.last_seen_at>=scope_001_now()-make_interval(mins=>$1) AS installation_fresh, \
+                EXISTS (SELECT 1 FROM installation_credential credential \
+                        WHERE credential.installation_ref=i.installation_ref \
+                          AND credential.revoked_at IS NULL \
+                          AND credential.activated_at IS NOT NULL \
+                          AND credential.expires_at>scope_001_now()) AS has_valid_credential, \
+                binding.account_ref AS bound_account_ref, \
+                COALESCE(latest_observation.account_ref<>binding.account_ref,false) \
+                    AS observed_account_changed, \
+                eligibility.eligibility_state, \
+                CASE WHEN binding.account_ref IS NULL THEN false ELSE EXISTS ( \
+                    SELECT 1 FROM collection_work_order work_order \
+                    JOIN collection_work_order_lease lease \
+                      ON lease.work_order_ref=work_order.work_order_ref \
+                    WHERE work_order.account_ref=binding.account_ref \
+                      AND lease.released_at IS NULL AND lease.expires_at>scope_001_now() \
+                      AND ($4::uuid IS NULL OR lease.lease_ref<>$4)) END AS account_busy \
+         FROM execution_station s \
+         JOIN plugin_installation i ON i.station_ref=s.station_ref AND i.superseded_at IS NULL \
+         LEFT JOIN LATERAL ( \
+             SELECT candidate.account_ref \
+             FROM platform_observation_account_binding candidate \
+             WHERE candidate.installation_ref=i.installation_ref AND candidate.ended_at IS NULL \
+             ORDER BY candidate.bound_at DESC,candidate.binding_ref DESC LIMIT 1) binding ON true \
+         LEFT JOIN LATERAL ( \
+             SELECT observation.eligibility_state \
+             FROM platform_observation_account_eligibility_observation observation \
+             WHERE observation.account_ref=binding.account_ref \
+               AND observation.installation_ref=i.installation_ref \
+               AND observation.eligibility_state IN ('usable','cooling','needs_login','restricted') \
+             ORDER BY observation.observed_at DESC,observation.eligibility_ref DESC LIMIT 1) eligibility ON true \
+         LEFT JOIN LATERAL ( \
+             SELECT observation.account_ref \
+             FROM platform_observation_account_eligibility_observation observation \
+             WHERE observation.installation_ref=i.installation_ref \
+             ORDER BY observation.observed_at DESC,observation.eligibility_ref DESC LIMIT 1) latest_observation ON true \
+         WHERE s.retired_at IS NULL \
+           AND ($2::uuid IS NULL OR s.station_ref=$2) \
+           AND ($3::uuid IS NULL OR i.installation_ref=$3) \
+         ORDER BY s.registered_at,s.station_ref",
+    )
+    .bind(CONTROL_FRESHNESS_MINUTES)
+    .bind(scope.station_ref)
+    .bind(scope.installation_ref)
+    .bind(scope.current_lease_ref)
+    .fetch_all(&mut **transaction)
+    .await
+}
+
+async fn latest_eligibility_ref_in(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    account_ref: Uuid,
+    installation_ref: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT eligibility_ref FROM platform_observation_account_eligibility_observation \
+         WHERE account_ref=$1 AND installation_ref=$2 \
+         ORDER BY observed_at DESC,eligibility_ref DESC LIMIT 1",
+    )
+    .bind(account_ref)
+    .bind(installation_ref)
+    .fetch_optional(&mut **transaction)
+    .await
+}
 
 pub(crate) async fn evaluate_capacity_in(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -726,43 +851,9 @@ pub(crate) async fn evaluate_capacity_in(
     .fetch_optional(&mut **transaction)
     .await?
     .flatten();
-    let mut candidates: Vec<CapacityCandidate> = sqlx::query_as(
-        "SELECT s.station_ref,i.installation_ref,s.accepting_tasks,i.plugin_version, \
-                i.capabilities,s.daily_work_quota, \
-                i.last_seen_at>=scope_001_now()-make_interval(mins=>$1), \
-                EXISTS (SELECT 1 FROM installation_credential credential \
-                        WHERE credential.installation_ref=i.installation_ref \
-                          AND credential.revoked_at IS NULL \
-                          AND credential.activated_at IS NOT NULL \
-                          AND credential.expires_at>scope_001_now()), \
-                binding.account_ref,COALESCE(binding.confirmed_until>scope_001_now(),false), \
-                eligibility.eligibility_state, \
-                COALESCE(eligibility.expires_at>scope_001_now(),false), \
-                CASE WHEN binding.account_ref IS NULL THEN false ELSE EXISTS ( \
-                    SELECT 1 FROM collection_work_order work_order \
-                    JOIN collection_work_order_lease lease \
-                      ON lease.work_order_ref=work_order.work_order_ref \
-                    WHERE work_order.account_ref=binding.account_ref \
-                      AND lease.released_at IS NULL AND lease.expires_at>scope_001_now()) END \
-         FROM execution_station s \
-         JOIN plugin_installation i ON i.station_ref=s.station_ref AND i.superseded_at IS NULL \
-         LEFT JOIN LATERAL ( \
-             SELECT candidate.account_ref,candidate.confirmed_until \
-             FROM platform_observation_account_binding candidate \
-             WHERE candidate.installation_ref=i.installation_ref AND candidate.ended_at IS NULL \
-             LIMIT 1) binding ON true \
-         LEFT JOIN LATERAL ( \
-             SELECT observation.eligibility_state,observation.expires_at \
-             FROM platform_observation_account_eligibility_observation observation \
-             WHERE observation.account_ref=binding.account_ref \
-               AND observation.installation_ref=i.installation_ref \
-             ORDER BY observation.observed_at DESC LIMIT 1) eligibility ON true \
-         WHERE s.retired_at IS NULL ORDER BY s.registered_at,s.station_ref",
-    )
-    .bind(CONTROL_FRESHNESS_MINUTES)
-    .fetch_all(&mut **transaction)
-    .await?;
-    candidates.sort_by_key(|candidate| Some(candidate.0) == last_failed_station);
+    let mut candidates =
+        load_capacity_candidates_in(transaction, CapacityCandidateScope::default()).await?;
+    candidates.sort_by_key(|candidate| Some(candidate.station_ref) == last_failed_station);
     if candidates.is_empty() {
         return Ok(CapacitySelection::blocked(
             CapacityReasonCode::StationUnavailable,
@@ -778,10 +869,12 @@ pub(crate) async fn evaluate_capacity_in(
             first_block.get_or_insert_with(|| CapacitySelection::blocked(code, reason));
             continue;
         }
-        let station_ref = candidate.0;
-        let installation_ref = candidate.1;
-        let daily_quota = candidate.5;
-        let account_ref = candidate.8.expect("candidate policy checked account");
+        let station_ref = candidate.station_ref;
+        let installation_ref = candidate.installation_ref;
+        let daily_quota = candidate.daily_work_quota;
+        let account_ref = candidate
+            .bound_account_ref
+            .expect("candidate policy checked account");
         let used = station_daily_note_usage_in(transaction, station_ref).await?;
         if used >= i64::from(daily_quota) {
             first_block.get_or_insert_with(|| {
@@ -792,14 +885,8 @@ pub(crate) async fn evaluate_capacity_in(
             });
             continue;
         }
-        let eligibility_ref: Option<Uuid> = sqlx::query_scalar(
-            "SELECT eligibility_ref FROM platform_observation_account_eligibility_observation \
-             WHERE account_ref=$1 AND installation_ref=$2 ORDER BY observed_at DESC LIMIT 1",
-        )
-        .bind(account_ref)
-        .bind(installation_ref)
-        .fetch_optional(&mut **transaction)
-        .await?;
+        let eligibility_ref =
+            latest_eligibility_ref_in(transaction, account_ref, installation_ref).await?;
         return Ok(CapacitySelection::available(
             station_ref,
             installation_ref,
@@ -861,47 +948,17 @@ pub(crate) async fn revalidate_frozen_capacity_in(
             "平台并发策略缺失，控制层按关闭处理。",
         ));
     }
-    let candidate: Option<CapacityCandidate> = sqlx::query_as(
-        "SELECT s.station_ref,i.installation_ref,s.accepting_tasks,i.plugin_version, \
-                i.capabilities,s.daily_work_quota, \
-                i.last_seen_at>=scope_001_now()-make_interval(mins=>$1), \
-                EXISTS (SELECT 1 FROM installation_credential credential \
-                        WHERE credential.installation_ref=i.installation_ref \
-                          AND credential.revoked_at IS NULL \
-                          AND credential.activated_at IS NOT NULL \
-                          AND credential.expires_at>scope_001_now()), \
-                binding.account_ref,COALESCE(binding.confirmed_until>scope_001_now(),false), \
-                eligibility.eligibility_state, \
-                COALESCE(eligibility.expires_at>scope_001_now(),false), \
-                CASE WHEN binding.account_ref IS NULL THEN false ELSE EXISTS ( \
-                    SELECT 1 FROM collection_work_order busy_work \
-                    JOIN collection_work_order_lease busy_lease \
-                      ON busy_lease.work_order_ref=busy_work.work_order_ref \
-                    WHERE busy_work.account_ref=binding.account_ref \
-                      AND busy_lease.released_at IS NULL \
-                      AND busy_lease.expires_at>scope_001_now() \
-                      AND ($4::uuid IS NULL OR busy_lease.lease_ref<>$4)) END \
-         FROM execution_station s \
-         JOIN plugin_installation i ON i.station_ref=s.station_ref AND i.superseded_at IS NULL \
-         LEFT JOIN LATERAL ( \
-             SELECT candidate.account_ref,candidate.confirmed_until \
-             FROM platform_observation_account_binding candidate \
-             WHERE candidate.installation_ref=i.installation_ref AND candidate.ended_at IS NULL \
-             LIMIT 1) binding ON true \
-         LEFT JOIN LATERAL ( \
-             SELECT observation.eligibility_state,observation.expires_at \
-             FROM platform_observation_account_eligibility_observation observation \
-             WHERE observation.account_ref=binding.account_ref \
-               AND observation.installation_ref=i.installation_ref \
-             ORDER BY observation.observed_at DESC LIMIT 1) eligibility ON true \
-         WHERE s.retired_at IS NULL AND s.station_ref=$2 AND i.installation_ref=$3",
+    let candidate = load_capacity_candidates_in(
+        transaction,
+        CapacityCandidateScope {
+            station_ref: Some(station_ref),
+            installation_ref: Some(installation_ref),
+            current_lease_ref,
+        },
     )
-    .bind(CONTROL_FRESHNESS_MINUTES)
-    .bind(station_ref)
-    .bind(installation_ref)
-    .bind(current_lease_ref)
-    .fetch_optional(&mut **transaction)
-    .await?;
+    .await?
+    .into_iter()
+    .next();
     let Some(candidate) = candidate else {
         return Ok(CapacitySelection::blocked(
             CapacityReasonCode::StationUnavailable,
@@ -917,20 +974,14 @@ pub(crate) async fn revalidate_frozen_capacity_in(
         return Ok(CapacitySelection::blocked(code, reason));
     }
     let used = station_daily_note_usage_in(transaction, station_ref).await?;
-    if used >= i64::from(candidate.5) {
+    if used >= i64::from(candidate.daily_work_quota) {
         return Ok(CapacitySelection::blocked(
             CapacityReasonCode::StationDailyBudgetReached,
             "工位当天已接纳 200 篇，等待自然日预算恢复。",
         ));
     }
-    let eligibility_ref: Option<Uuid> = sqlx::query_scalar(
-        "SELECT eligibility_ref FROM platform_observation_account_eligibility_observation \
-         WHERE account_ref=$1 AND installation_ref=$2 ORDER BY observed_at DESC LIMIT 1",
-    )
-    .bind(account_ref)
-    .bind(installation_ref)
-    .fetch_optional(&mut **transaction)
-    .await?;
+    let eligibility_ref =
+        latest_eligibility_ref_in(transaction, account_ref, installation_ref).await?;
     Ok(CapacitySelection::available(
         station_ref,
         installation_ref,
@@ -950,22 +1001,26 @@ pub(crate) async fn evaluate_claiming_installation_capacity_in(
     lane: &str,
     required_capabilities: &[&str],
 ) -> Result<CapacitySelection, sqlx::Error> {
-    let claimant: Option<(Option<Uuid>, Option<Uuid>)> = sqlx::query_as(
-        "SELECT i.station_ref,binding.account_ref \
-         FROM plugin_installation i \
-         LEFT JOIN LATERAL ( \
-             SELECT account_ref FROM platform_observation_account_binding \
-             WHERE installation_ref=i.installation_ref AND ended_at IS NULL \
-             LIMIT 1) binding ON true \
-         WHERE i.installation_ref=$1 AND i.superseded_at IS NULL",
+    let claimant = load_capacity_candidates_in(
+        transaction,
+        CapacityCandidateScope {
+            installation_ref: Some(installation_ref),
+            ..CapacityCandidateScope::default()
+        },
     )
-    .bind(installation_ref)
-    .fetch_optional(&mut **transaction)
-    .await?;
-    let Some((Some(station_ref), Some(account_ref))) = claimant else {
+    .await?
+    .into_iter()
+    .next();
+    let Some(candidate) = claimant else {
         return Ok(CapacitySelection::blocked(
             CapacityReasonCode::StationUnavailable,
-            "当前插件安装没有可用工位或已绑定观察账号。",
+            "当前插件安装没有可用工位。",
+        ));
+    };
+    let Some(account_ref) = candidate.bound_account_ref else {
+        return Ok(CapacitySelection::blocked(
+            CapacityReasonCode::AccountUnbound,
+            "当前插件安装尚未由人绑定观察账号。",
         ));
     };
     revalidate_frozen_capacity_in(
@@ -973,7 +1028,7 @@ pub(crate) async fn evaluate_claiming_installation_capacity_in(
         platform,
         lane,
         required_capabilities,
-        station_ref,
+        candidate.station_ref,
         installation_ref,
         account_ref,
         None,
@@ -1055,48 +1110,16 @@ pub(crate) async fn ready_batch_claim_slots_in(
     if platform_remaining == 0 {
         return Ok((0, multiplier));
     }
-    let candidates: Vec<CapacityCandidate> = sqlx::query_as(
-        "SELECT s.station_ref,i.installation_ref,s.accepting_tasks,i.plugin_version, \
-                i.capabilities,s.daily_work_quota, \
-                i.last_seen_at>=scope_001_now()-make_interval(mins=>$1), \
-                EXISTS (SELECT 1 FROM installation_credential credential \
-                        WHERE credential.installation_ref=i.installation_ref \
-                          AND credential.revoked_at IS NULL \
-                          AND credential.activated_at IS NOT NULL \
-                          AND credential.expires_at>scope_001_now()), \
-                binding.account_ref,COALESCE(binding.confirmed_until>scope_001_now(),false), \
-                eligibility.eligibility_state, \
-                COALESCE(eligibility.expires_at>scope_001_now(),false), \
-                CASE WHEN binding.account_ref IS NULL THEN false ELSE EXISTS ( \
-                    SELECT 1 FROM collection_work_order work_order \
-                    JOIN collection_work_order_lease lease \
-                      ON lease.work_order_ref=work_order.work_order_ref \
-                    WHERE work_order.account_ref=binding.account_ref \
-                      AND lease.released_at IS NULL AND lease.expires_at>scope_001_now()) END \
-         FROM execution_station s \
-         JOIN plugin_installation i ON i.station_ref=s.station_ref AND i.superseded_at IS NULL \
-         LEFT JOIN LATERAL ( \
-             SELECT candidate.account_ref,candidate.confirmed_until \
-             FROM platform_observation_account_binding candidate \
-             WHERE candidate.installation_ref=i.installation_ref AND candidate.ended_at IS NULL \
-             LIMIT 1) binding ON true \
-         LEFT JOIN LATERAL ( \
-             SELECT observation.eligibility_state,observation.expires_at \
-             FROM platform_observation_account_eligibility_observation observation \
-             WHERE observation.account_ref=binding.account_ref \
-               AND observation.installation_ref=i.installation_ref \
-             ORDER BY observation.observed_at DESC LIMIT 1) eligibility ON true \
-         WHERE s.retired_at IS NULL",
-    )
-    .bind(CONTROL_FRESHNESS_MINUTES)
-    .fetch_all(&mut **transaction)
-    .await?;
+    let candidates =
+        load_capacity_candidates_in(transaction, CapacityCandidateScope::default()).await?;
     let mut ready = 0_i64;
     for candidate in candidates {
         if candidate_block_reason(&candidate, required_capabilities, None, true).is_some() {
             continue;
         }
-        if station_daily_note_usage_in(transaction, candidate.0).await? >= i64::from(candidate.5) {
+        if station_daily_note_usage_in(transaction, candidate.station_ref).await?
+            >= i64::from(candidate.daily_work_quota)
+        {
             continue;
         }
         ready += 1;
@@ -1110,54 +1133,51 @@ fn candidate_block_reason(
     frozen_account_ref: Option<Uuid>,
     require_accepting_tasks: bool,
 ) -> Option<(CapacityReasonCode, &'static str)> {
-    if require_accepting_tasks && !candidate.2 {
+    if require_accepting_tasks && !candidate.accepting_tasks {
         Some((
             CapacityReasonCode::StationNotAccepting,
             "工位已由人显式暂停未来接活。",
         ))
-    } else if !candidate.7 {
+    } else if !candidate.has_valid_credential {
         Some((
             CapacityReasonCode::InstallationCredentialMissing,
             "在岗安装没有有效的服务端凭据。",
         ))
-    } else if !version_at_least(&candidate.3, MINIMUM_PLUGIN_VERSION) {
+    } else if !version_at_least(&candidate.plugin_version, MINIMUM_PLUGIN_VERSION) {
         Some((
             CapacityReasonCode::PluginVersionUnsupported,
-            "插件版本低于 0.8.34，不能执行当前合同。",
+            "插件版本低于当前账号观察合同，不能执行当前任务。",
         ))
-    } else if !candidate.6 {
+    } else if !candidate.installation_fresh {
         Some((
             CapacityReasonCode::InstallationStale,
             "插件心跳超过 20 分钟，按失联处理。",
         ))
-    } else if !capabilities_cover(&candidate.4, required_capabilities) {
+    } else if !capabilities_cover(&candidate.capabilities, required_capabilities) {
         Some((
             CapacityReasonCode::CapabilityMissing,
             "在岗安装缺少本次 lane 所需能力。",
         ))
-    } else if candidate.8.is_none() {
+    } else if candidate.bound_account_ref.is_none() {
         Some((
             CapacityReasonCode::AccountUnbound,
             "安装尚未由人绑定到一个观察账号。",
         ))
-    } else if frozen_account_ref.is_some_and(|expected| candidate.8 != Some(expected)) {
+    } else if frozen_account_ref
+        .is_some_and(|expected| candidate.bound_account_ref != Some(expected))
+    {
         Some((
             CapacityReasonCode::AccountBindingChanged,
             "安装当前账号绑定与工单冻结账号不一致。",
         ))
-    } else if !candidate.9 {
+    } else if candidate.observed_account_changed {
         Some((
-            CapacityReasonCode::AccountBindingExpired,
-            "观察账号人工确认已超过 30 天，需重新确认绑定。",
-        ))
-    } else if candidate.10.is_none() || !candidate.11 {
-        Some((
-            CapacityReasonCode::AccountEligibilityStale,
-            "观察账号资格未上报或已超过 20 分钟有效期。",
+            CapacityReasonCode::AccountBindingChanged,
+            "安装实际观察到的账号与人工确认绑定不一致。",
         ))
     } else {
-        match candidate.10.as_deref() {
-            Some("usable") if candidate.12 => Some((
+        match candidate.eligibility_state.as_deref() {
+            Some("usable") if candidate.account_busy => Some((
                 CapacityReasonCode::AccountBusy,
                 "观察账号已有一份有效 Lease。",
             )),
@@ -1173,6 +1193,10 @@ fn candidate_block_reason(
             Some("restricted") => Some((
                 CapacityReasonCode::AccountRestricted,
                 "观察账号当前受到访问限制。",
+            )),
+            None => Some((
+                CapacityReasonCode::AccountUnknown,
+                "观察账号尚无可用观察事实，控制层按关闭处理。",
             )),
             _ => Some((
                 CapacityReasonCode::AccountUnknown,
@@ -2494,10 +2518,35 @@ mod tests {
     #[test]
     fn semantic_version_gate_rejects_old_and_malformed_versions() {
         assert!(!version_at_least("0.8.33", MINIMUM_PLUGIN_VERSION));
-        assert!(version_at_least("0.8.34", MINIMUM_PLUGIN_VERSION));
+        assert!(version_at_least("0.8.46", MINIMUM_PLUGIN_VERSION));
         assert!(version_at_least("v0.9.0", MINIMUM_PLUGIN_VERSION));
-        assert!(!version_at_least("0.8.34-beta.1", MINIMUM_PLUGIN_VERSION));
+        assert!(!version_at_least("0.8.46-beta.1", MINIMUM_PLUGIN_VERSION));
         assert!(!version_at_least("current", MINIMUM_PLUGIN_VERSION));
+    }
+
+    #[test]
+    fn observed_identity_change_has_one_shared_pre_lease_block_reason() {
+        let candidate = CapacityCandidate {
+            station_ref: Uuid::new_v4(),
+            installation_ref: Uuid::new_v4(),
+            accepting_tasks: true,
+            plugin_version: MINIMUM_PLUGIN_VERSION.to_owned(),
+            capabilities: serde_json::json!(["content_detail"]),
+            daily_work_quota: 200,
+            installation_fresh: true,
+            has_valid_credential: true,
+            bound_account_ref: Some(Uuid::new_v4()),
+            observed_account_changed: true,
+            eligibility_state: Some("usable".to_owned()),
+            account_busy: false,
+        };
+
+        assert_eq!(
+            candidate_block_reason(&candidate, &["content_detail"], None, true)
+                .map(|(reason, _)| reason),
+            Some(CapacityReasonCode::AccountBindingChanged),
+            "every capacity path invokes this common policy before it can create or revalidate a Lease"
+        );
     }
 
     #[test]
@@ -2706,21 +2755,11 @@ mod tests {
         );
     }
 
-    /// Account eligibility and installation liveness answer different questions and must not
-    /// share one window again. They were the same constant until 2026-09-06, and the coupling
-    /// meant that closing the last XHS tab stopped every deep archive within twenty minutes
-    /// while nothing was recorded as failing.
+    /// A station heartbeat is liveness; account facts are only superseded by later observations.
     #[test]
-    fn account_eligibility_outlives_installation_liveness() {
-        assert!(
-            ACCOUNT_ELIGIBILITY_TTL_MINUTES > CONTROL_FRESHNESS_MINUTES,
-            "an eligibility observation must stay usable longer than a heartbeat window; \
-             refreshing it requires an already-open platform document, a heartbeat does not",
-        );
+    fn account_observations_do_not_have_a_ttl_gate() {
         // Liveness stays short on purpose: a silent browser cannot be given platform work.
         assert_eq!(CONTROL_FRESHNESS_MINUTES, 20);
-        // Still far shorter than a real platform login, so this remains a conservative claim.
-        assert_eq!(ACCOUNT_ELIGIBILITY_TTL_MINUTES, 360);
     }
 }
 

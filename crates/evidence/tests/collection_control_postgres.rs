@@ -1,16 +1,17 @@
 use linggan_contracts::{AdmissionOutcome, Capacity, TargetIdentity, TargetSource};
 use linggan_evidence::{
-    AccountEligibilitySignal, AccountEligibilityState, AuthorizationGrant, CheckInOutcome,
+    AccountEligibilityObservation, AccountEligibilityState, AuthorizationGrant, CheckInOutcome,
     CollectionControlError, ComparableObservationRound, DispatchDecision, DynamicCadence,
-    InstallationCheckIn, MAXIMUM_MONITOR_INTERVAL_SECONDS, MINIMUM_MONITOR_INTERVAL_SECONDS,
-    MonitorCommandActor, MonitorCommandKind, MonitorCommandOutcomeKind, MonitorRuleCommand,
-    MonitorRuleDraft, MonitorRuleMode, TargetDeletionOutcome, activate_installation_credential,
-    apply_monitor_rule_command, bind_observation_account, check_in_installation,
-    collection_control_schema_is_ready, decide_dispatch, delete_observation_target,
-    dynamic_cadence, grant_authorization, open_claim_window, read_capacity,
-    read_target_deletion_preview, register_station, release_work_order_lease, rename_station,
-    report_account_eligibility, request_and_admit, retire_station, rotate_installation_credential,
-    set_station_accepting, store_pending_target, toggle_target_patrol,
+    ExplicitAccountEligibilitySignal, InstallationCheckIn, MAXIMUM_MONITOR_INTERVAL_SECONDS,
+    MINIMUM_MONITOR_INTERVAL_SECONDS, MonitorCommandActor, MonitorCommandKind,
+    MonitorCommandOutcomeKind, MonitorRuleCommand, MonitorRuleDraft, MonitorRuleMode,
+    TargetDeletionOutcome, activate_installation_credential, apply_monitor_rule_command,
+    bind_observation_account, check_in_installation, collection_control_schema_is_ready,
+    decide_dispatch, delete_observation_target, dynamic_cadence, grant_authorization,
+    open_claim_window, read_capacity, read_target_deletion_preview, register_station,
+    release_work_order_lease, rename_station, report_account_eligibility, request_and_admit,
+    retire_station, rotate_installation_credential, set_station_accepting, store_pending_target,
+    toggle_target_patrol,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
 use sqlx::{AssertSqlSafe, Row};
@@ -112,6 +113,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0062_human_moment.sql"),
     "\n",
     include_str!("../../../database/migrations/0063_content_author_attribution.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0064_account_observation_normalization.sql"),
 );
 
 #[tokio::test]
@@ -157,6 +160,60 @@ async fn complete_migration_set_applies_collection_control_0037() {
     .await
     .expect("0035 transition contract remains inspectable after 0036");
     assert!(transition_constraint);
+
+    let binding_deadline_present: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns \
+         WHERE table_schema=current_schema() \
+           AND table_name='platform_observation_account_binding' \
+           AND column_name='confirmed_until')",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the normalized binding schema is inspectable");
+    assert!(
+        !binding_deadline_present,
+        "0064 removes the former calendar-expiry gate rather than merely ignoring it in Rust"
+    );
+    let observation_expiry_is_optional: bool = sqlx::query_scalar(
+        "SELECT is_nullable='YES' FROM information_schema.columns \
+         WHERE table_schema=current_schema() \
+           AND table_name='platform_observation_account_eligibility_observation' \
+           AND column_name='expires_at'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the observation schema retains a nullable historic expiry field");
+    assert!(observation_expiry_is_optional);
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn schema_readiness_requires_relations_in_the_current_schema() {
+    let database = proof_database("collection_control_schema_readiness").await;
+    let schema: String = sqlx::query_scalar("SELECT current_schema()")
+        .fetch_one(database.pool())
+        .await
+        .expect("proof schema is identifiable");
+    let shadow_schema = format!("{schema}_shadow");
+
+    // The old unqualified to_regclass checks could accept this shadow relation once it appeared
+    // later in search_path, even though the current schema was missing the real relation.
+    sqlx::raw_sql(AssertSqlSafe(format!(
+        "CREATE SCHEMA {shadow_schema}; \
+         CREATE TABLE {shadow_schema}.installation_credential (placeholder text); \
+         ALTER TABLE installation_credential RENAME TO installation_credential_missing; \
+         SET search_path TO {schema},{shadow_schema};"
+    )))
+    .execute(database.pool())
+    .await
+    .expect("proof shadows only the missing relation outside the current schema");
+
+    assert!(
+        !collection_control_schema_is_ready(&database)
+            .await
+            .expect("schema readiness remains readable"),
+        "a relation in a later search_path schema cannot make a partial current schema ready"
+    );
 }
 
 #[tokio::test]
@@ -178,7 +235,7 @@ async fn claimed_installation_auto_accepts_but_a_person_pause_survives_replaceme
         &InstallationCheckIn {
             install_key: "auto-accept-first",
             installation_credential: None,
-            plugin_version: "0.8.36",
+            plugin_version: "0.8.46",
             browser_label: Some("Chrome"),
             capabilities: serde_json::json!(["author_profile"]),
         },
@@ -216,7 +273,7 @@ async fn claimed_installation_auto_accepts_but_a_person_pause_survives_replaceme
         &InstallationCheckIn {
             install_key: "auto-accept-replacement",
             installation_credential: None,
-            plugin_version: "0.8.36",
+            plugin_version: "0.8.46",
             browser_label: Some("Chrome"),
             capabilities: serde_json::json!(["author_profile"]),
         },
@@ -274,7 +331,7 @@ async fn legacy_registered_closed_default_also_auto_accepts_when_claimed() {
         &InstallationCheckIn {
             install_key: "legacy-default-claim",
             installation_credential: None,
-            plugin_version: "0.8.36",
+            plugin_version: "0.8.46",
             browser_label: Some("Chrome"),
             capabilities: serde_json::json!(["author_profile"]),
         },
@@ -301,7 +358,7 @@ async fn legacy_registered_closed_default_also_auto_accepts_when_claimed() {
 #[ignore = "requires an isolated PostgreSQL proof database"]
 async fn account_identity_and_installation_credential_are_hash_only() {
     let database = proof_database("collection_control_hash_only").await;
-    let installation = install(&database, "hash-only", "0.8.34").await;
+    let installation = install(&database, "hash-only", "0.8.46").await;
     let raw_credential = installation
         .credential
         .as_deref()
@@ -312,9 +369,10 @@ async fn account_identity_and_installation_credential_are_hash_only() {
         &database,
         installation.installation_ref,
         raw_credential,
-        Some(raw_account_id),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: raw_account_id,
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("bounded account fact is accepted");
@@ -408,7 +466,7 @@ async fn credentials_require_compatible_version_and_rotation_activates_before_re
     .expect("legacy credential absence is readable");
     assert_eq!(legacy_credential_count, 0);
 
-    let current = install(&database, "current-credential", "0.8.34").await;
+    let current = install(&database, "current-credential", "0.8.46").await;
     let first_secret = current
         .credential
         .as_deref()
@@ -427,9 +485,10 @@ async fn credentials_require_compatible_version_and_rotation_activates_before_re
         &database,
         current.installation_ref,
         &first_secret,
-        Some("rotation-proof-account"),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "rotation-proof-account",
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("the old active credential remains usable while rotation is pending");
@@ -438,9 +497,10 @@ async fn credentials_require_compatible_version_and_rotation_activates_before_re
             &database,
             current.installation_ref,
             &second_secret,
-            None,
-            AccountEligibilitySignal::AuthenticatedObserved,
-            DIGEST_KEY,
+            AccountEligibilityObservation::Authenticated {
+                raw_platform_account_id: "rotation-proof-account",
+            },
+            Some(DIGEST_KEY),
         )
         .await,
         Err(CollectionControlError::InvalidCredential)
@@ -458,9 +518,10 @@ async fn credentials_require_compatible_version_and_rotation_activates_before_re
             &database,
             current.installation_ref,
             &first_secret,
-            None,
-            AccountEligibilitySignal::AuthenticatedObserved,
-            DIGEST_KEY,
+            AccountEligibilityObservation::Authenticated {
+                raw_platform_account_id: "rotation-proof-account",
+            },
+            Some(DIGEST_KEY),
         )
         .await,
         Err(CollectionControlError::InvalidCredential)
@@ -469,9 +530,10 @@ async fn credentials_require_compatible_version_and_rotation_activates_before_re
         &database,
         current.installation_ref,
         &second_secret,
-        Some("rotation-proof-account"),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "rotation-proof-account",
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("rotated credential is the only usable secret");
@@ -497,7 +559,7 @@ async fn credentials_require_compatible_version_and_rotation_activates_before_re
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn account_binding_is_one_to_one_and_expiry_fails_closed() {
+async fn account_binding_is_one_to_one_and_does_not_expire_by_calendar() {
     let database = proof_database("collection_control_binding").await;
     let first = ready_installation_without_account(&database, "binding-first").await;
     let second = ready_installation_without_account(&database, "binding-second").await;
@@ -508,13 +570,27 @@ async fn account_binding_is_one_to_one_and_expiry_fails_closed() {
         &database,
         first.installation_ref,
         first_secret,
-        Some("same-account-across-installations"),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "same-account-across-installations",
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("first installation reports the account");
     let account_ref = first_observation.account_ref.expect("account ref exists");
+    let emitted_expiry: Option<String> = sqlx::query_scalar(
+        "SELECT expires_at::text FROM platform_observation_account_eligibility_observation \
+         WHERE account_ref=$1 AND installation_ref=$2 ORDER BY observed_at DESC,eligibility_ref DESC LIMIT 1",
+    )
+    .bind(account_ref)
+    .bind(first.installation_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("fresh account observation is readable");
+    assert_eq!(
+        emitted_expiry, None,
+        "new observations do not encode a synthetic expiry deadline"
+    );
     bind_observation_account(&database, account_ref, first.installation_ref, "person")
         .await
         .expect("person confirms the first binding");
@@ -523,9 +599,10 @@ async fn account_binding_is_one_to_one_and_expiry_fails_closed() {
         &database,
         second.installation_ref,
         second_secret,
-        Some("same-account-across-installations"),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "same-account-across-installations",
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("second installation reports the same account");
@@ -559,16 +636,74 @@ async fn account_binding_is_one_to_one_and_expiry_fails_closed() {
         .expect("the earlier station no longer competes in capacity selection");
     sqlx::query(
         "UPDATE platform_observation_account_binding \
-         SET bound_at=scope_001_now()-interval '31 days', \
-             confirmed_until=scope_001_now()-interval '1 day' \
+         SET bound_at=scope_001_now()-interval '31 days' \
          WHERE account_ref=$1 AND installation_ref=$2 AND ended_at IS NULL",
     )
     .bind(account_ref)
     .bind(second.installation_ref)
     .execute(database.pool())
     .await
-    .expect("proof clock moves the confirmation beyond its validity window");
-    assert_capacity_reason(&database, "account_binding_expired").await;
+    .expect("proof moves the audit timestamp without ending the binding");
+    assert_capacity_reason(&database, "available").await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn observed_account_change_blocks_claims_until_a_person_confirms_the_new_binding() {
+    let database = proof_database("collection_control_observed_account_change").await;
+    let installation =
+        ready_installation_without_account(&database, "observed-account-change").await;
+    let secret = installation
+        .credential
+        .as_deref()
+        .expect("compatible installation has a secret");
+
+    let original = report_account_eligibility(
+        &database,
+        installation.installation_ref,
+        secret,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "observed-account-a",
+        },
+        Some(DIGEST_KEY),
+    )
+    .await
+    .expect("the original account observation is recorded");
+    let original_account = original.account_ref.expect("original account ref exists");
+    bind_observation_account(
+        &database,
+        original_account,
+        installation.installation_ref,
+        "person",
+    )
+    .await
+    .expect("person confirms the original account binding");
+    assert_capacity_reason(&database, "available").await;
+
+    let changed = report_account_eligibility(
+        &database,
+        installation.installation_ref,
+        secret,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "observed-account-b",
+        },
+        Some(DIGEST_KEY),
+    )
+    .await
+    .expect("the newly observed account is recorded");
+    let changed_account = changed.account_ref.expect("changed account ref exists");
+    assert_ne!(changed_account, original_account);
+    assert_capacity_reason(&database, "account_binding_changed").await;
+
+    bind_observation_account(
+        &database,
+        changed_account,
+        installation.installation_ref,
+        "person",
+    )
+    .await
+    .expect("person confirms the changed account binding");
+    assert_capacity_reason(&database, "available").await;
 }
 
 #[tokio::test]
@@ -584,9 +719,10 @@ async fn server_projects_each_closed_account_signal_into_capacity() {
         &database,
         installation.installation_ref,
         secret,
-        Some("signal-projection-account"),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "signal-projection-account",
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("account identity is established");
@@ -602,52 +738,111 @@ async fn server_projects_each_closed_account_signal_into_capacity() {
 
     let cases = [
         (
-            AccountEligibilitySignal::AuthenticatedObserved,
+            AccountEligibilityObservation::Authenticated {
+                raw_platform_account_id: "signal-projection-account",
+            },
             AccountEligibilityState::Usable,
             "available",
+            false,
         ),
         (
-            AccountEligibilitySignal::CooldownObserved,
+            AccountEligibilityObservation::ExplicitBlock(
+                ExplicitAccountEligibilitySignal::CooldownObserved,
+            ),
             AccountEligibilityState::Cooling,
             "account_cooling",
+            false,
         ),
         (
-            AccountEligibilitySignal::LoginRequired,
+            AccountEligibilityObservation::ExplicitBlock(
+                ExplicitAccountEligibilitySignal::LoginRequired,
+            ),
             AccountEligibilityState::NeedsLogin,
             "account_needs_login",
+            true,
         ),
         (
-            AccountEligibilitySignal::AccessRestricted,
+            AccountEligibilityObservation::ExplicitBlock(
+                ExplicitAccountEligibilitySignal::AccessRestricted,
+            ),
             AccountEligibilityState::Restricted,
             "account_restricted",
-        ),
-        (
-            AccountEligibilitySignal::SignalIncomplete,
-            AccountEligibilityState::Unknown,
-            "account_unknown",
+            false,
         ),
     ];
-    for (signal, expected_state, expected_capacity) in cases {
+    for (observation, expected_state, expected_capacity, ages_negative_observation) in cases {
         let receipt = report_account_eligibility(
             &database,
             installation.installation_ref,
             secret,
-            None,
-            signal,
-            DIGEST_KEY,
+            observation,
+            Some(DIGEST_KEY),
         )
         .await
         .expect("closed producer signal is accepted");
         assert_eq!(receipt.state, expected_state);
         assert_capacity_reason(&database, expected_capacity).await;
+        if ages_negative_observation {
+            sqlx::query(
+                "UPDATE platform_observation_account_eligibility_observation \
+                 SET observed_at=scope_001_now()-interval '8 hours' \
+                 WHERE account_ref=$1 AND installation_ref=$2 AND reason_code<>'login_required'",
+            )
+            .bind(account_ref)
+            .bind(installation.installation_ref)
+            .execute(database.pool())
+            .await
+            .expect("proof moves earlier account observations behind the latest signal");
+            sqlx::query(
+                "UPDATE platform_observation_account_eligibility_observation \
+                 SET observed_at=scope_001_now()-interval '2 seconds' \
+                 WHERE account_ref=$1 AND installation_ref=$2 AND reason_code='login_required'",
+            )
+            .bind(account_ref)
+            .bind(installation.installation_ref)
+            .execute(database.pool())
+            .await
+            .expect("proof ages an explicit negative account observation");
+            assert_capacity_reason(&database, "account_needs_login").await;
+        }
     }
+
+    let usable = report_account_eligibility(
+        &database,
+        installation.installation_ref,
+        secret,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "signal-projection-account",
+        },
+        Some(DIGEST_KEY),
+    )
+    .await
+    .expect("a real authenticated observation restores the account");
+    assert_eq!(usable.state, AccountEligibilityState::Usable);
+    assert_capacity_reason(&database, "available").await;
+
+    // Pre-0064 producers wrote UNKNOWN/signal_incomplete when their DOM had not hydrated. It is
+    // historical evidence of an inconclusive read, not an account block, and must not eclipse
+    // the last conclusive usable observation.
+    sqlx::query(
+        "INSERT INTO platform_observation_account_eligibility_observation \
+             (eligibility_ref,account_ref,installation_ref,eligibility_state,signal_version,reason_code) \
+         VALUES ($1,$2,$3,'unknown','xhs-account-eligibility-v1','signal_incomplete')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(account_ref)
+    .bind(installation.installation_ref)
+    .execute(database.pool())
+    .await
+    .expect("legacy inconclusive account observation is representable");
+    assert_capacity_reason(&database, "available").await;
 }
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
 async fn unified_capacity_exposes_distinct_recoverable_reasons() {
     let database = proof_database("collection_control_capacity_reasons").await;
-    let installation = install(&database, "capacity-reasons", "0.8.34").await;
+    let installation = install(&database, "capacity-reasons", "0.8.46").await;
     let original_secret = installation
         .credential
         .as_deref()
@@ -689,7 +884,7 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
     assert_capacity_reason(&database, "plugin_version_unsupported").await;
 
     sqlx::query(
-        "UPDATE plugin_installation SET plugin_version='0.8.34', \
+        "UPDATE plugin_installation SET plugin_version='0.8.46', \
              last_seen_at=scope_001_now()-interval '21 minutes' WHERE installation_ref=$1",
     )
     .bind(installation.installation_ref)
@@ -711,9 +906,10 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
         &database,
         installation.installation_ref,
         &secret,
-        Some("capacity-reason-account"),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "capacity-reason-account",
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("account fact is reported");
@@ -730,23 +926,23 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
 
     sqlx::query(
         "UPDATE platform_observation_account_eligibility_observation \
-         SET observed_at=scope_001_now()-interval '21 minutes', \
-             expires_at=scope_001_now()-interval '1 second' \
+         SET observed_at=scope_001_now()-interval '21 minutes' \
          WHERE account_ref=$1 AND installation_ref=$2",
     )
     .bind(account_ref)
     .bind(installation.installation_ref)
     .execute(database.pool())
     .await
-    .expect("proof expires account eligibility");
-    assert_capacity_reason(&database, "account_eligibility_stale").await;
+    .expect("proof ages the diagnostic account observation");
+    assert_capacity_reason(&database, "available").await;
     report_account_eligibility(
         &database,
         installation.installation_ref,
         &secret,
-        None,
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "capacity-reason-account",
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("fresh eligibility is restored");
@@ -1614,7 +1810,7 @@ async fn install(database: &Database, label: &str, version: &str) -> Installed {
 }
 
 async fn ready_installation_without_account(database: &Database, label: &str) -> Installed {
-    let installation = install(database, label, "0.8.34").await;
+    let installation = install(database, label, "0.8.46").await;
     set_station_accepting(database, installation.station_ref, true, "person")
         .await
         .expect("person enables station acceptance");
@@ -1629,9 +1825,10 @@ async fn make_account_usable(database: &Database, installation: &Installed, raw_
             .credential
             .as_deref()
             .expect("compatible installation has a credential"),
-        Some(raw_account_id),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: raw_account_id,
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("account eligibility is reported");

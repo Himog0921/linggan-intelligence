@@ -1,7 +1,7 @@
 # COLLECTION-CONTROL-CLOSURE-001 · 平台账号准入与巡检规则闭环
 
 > 状态: 活跃计划
-> 最后核对: 2026-09-04
+> 最后核对: 2026-09-10
 > 适用范围: Issue #149 / Package 2；只支持 1440 CSS px 桌面全屏
 > 事实来源: Issue #149 Claim、`origin/main@c5158b14f5fc2313dbd3dc94670083500e767ced` 的 migration/Rust/Collection/Browser Producer、PAGE-COLLECTION-001 与 LIDS v7
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实代码/数据库/测试、ACCEPTED 决定与 Issue #149 冻结合同
@@ -16,7 +16,7 @@
 - `execution_station.display_name` 是唯一的可读工位名真相。Runtime 新建工位预填“本机 Chrome”，且可由人改名；check-in 只回显该服务端名称和当前接活状态。插件不保存/编辑本地别名，不以显示名做身份或配对键。
 - additive `0035_claimed_station_auto_acceptance` 只把旧 `migration_closed` 或 `registered_closed` 默认态且已认领的历史工位迁为自动接活；人工暂停的历史工位保持暂停。
 
-这项源码/隔离 proof 不授权共享 migration、`:3000` runtime 切换、Chrome reload、真实平台访问或实际采集；当前现场暂停状态不会因为本修正被自动解除。
+这项源码/隔离 proof 不授权共享 migration、`:3000` runtime 切换、Chrome reload、真实平台访问或实际采集；当前现场暂停状态不会因为本修正被自动解除。此处“账号资格新鲜”的旧表述由 §0.2 取代。
 
 ## 0.1 2026-09-05 范围修正 · 建档不再是观察门槛，工位只认领统一队列
 
@@ -29,6 +29,28 @@
 - `0036_monitor_scheduling_clarity` 为 additive migration；本实现只允许 disposable PostgreSQL 证明，**不**授权共享 migration、`:3000` Runtime 切换、插件重载、真实平台访问、部署、push 或 merge。
 
 **阅读规则：** 下文 §3–§9 保留的是 2026-09-04 Package 2 的交付快照，用于追溯当时 PR 的边界；其中出现的 `baseline_required`、dynamic cadence、窗口/fallback 和 scheduler 预先创建 Lease 均已被本节取代，不能作为当前实现或验收依据。
+
+## 0.2 2026-09-10 范围修正 · 账号观察是诊断事实，不是短租约门槛
+
+本段按 Mog 最新产品决定，取代本计划 §0、§4.1 和既有 Runtime 文案中“正向账号资格必须在短窗口内新鲜，否则拒绝接活”的语义。实施任务为 `collection-account-observation-soft-gate-001`，exact base 为 `origin/main@7c4375e78e96fdf7411a5dec74304e9e822e3b49`，专属分支为 `codex/collection-account-observation-soft-gate-001`；范围修订与 Claim 记录在 [Issue #149 comment](https://github.com/Himog0921/linggan-intelligence/issues/149#issuecomment-5613757602)。
+
+- `account_last_observed_at` 只保留为诊断与排障元数据；`0064` 将旧 observation `expires_at` 改为可空历史字段，新的观察不再产生任何到期时间。**时间流逝本身绝不拒绝新 Lease**。固定浏览器里 20 分钟、6 小时或更久未读取全局导航，不是账号退出的证据。
+- 新 Lease 的硬门仍为：工位心跳、接活开关、凭据、最低版本、能力、人工确认的账号绑定、风险/并发/预算，以及没有明确账号负面事实。最新页面观察到的账号与当前人工绑定不一致时也是 `account_binding_changed`，必须由人确认新绑定；`needs_login`、`restricted`、`cooling` 和从未形成账号事实的 `UNKNOWN` 仍按关闭处理。**人工绑定没有按日期自动失效：时间不是账号变更的证据。**
+- 页面暂时读不到“我/我的”导航标记属于**不完整观察**，不得写成新的 `UNKNOWN` 覆盖既有 `usable` 或既有明确负面状态；它不是可上报的 eligibility event。容量投影也忽略历史 `unknown/signal_incomplete` 行，回退到最后一个确定事实；首次从未形成任何确定事实的账号仍为 `UNKNOWN`。
+- Browser Producer 只在 XHS content script 因用户页面或任务本来要打开的任务页自然启动时做一次已渲染 DOM 的最小观察。它不再由 alarm、队列等待或 `account_eligibility_stale` 扫描任何已打开标签、重试 claim、打开/刷新/滚动/切换平台页面或调用平台接口。
+- 长时间空闲后的保护复用既有**每账号至多一个 live Lease**：同一 station/account 的第一个正常任务可领取并在其本来打开的任务页顺便形成新事实；该 Lease 未释放前不会再给同账号第二单。不新增 Account Lease 表、后台巡检或定期探测。
+
+### 0.2.1 2026-09-10 实施收敛 · 观察事件、持久绑定和单一容量读取
+
+本轮落实不以继续叠加条件为方式，而是替换旧的交叉输入和重复容量 SQL。它只覆盖源码、append-only migration、隔离 PostgreSQL proof、Browser Producer source/release 与文档；不授权 shared DB migration、Runtime/Chrome reload、真实平台访问、push、merge 或部署。
+
+- Producer→API 的 observation body 是严格闭集：`authenticated_observed` 必须携带瞬时账号标识；`cooldown_observed`、`login_required`、`access_restricted` 是不携带账号标识的明确负面事件。不存在 `signal_incomplete + raw account id` 这类可产生幽灵身份的交叉组合；不完整 DOM 读取不发送请求。
+- 人工账号 binding 是持续有效的服务端事实，直到人明确结束/替换它。新增 additive `0064_account_observation_normalization` 删除旧 `confirmed_until` deadline，并取消新 observation 的 expiry 写入；历史 `account_binding_expired` reason 只用于读取既有历史，不再由当前 evaluator 产生。
+- 账号观察只在用户自然打开的 XHS 页，或已领取任务自然打开的同一 XHS 页发生。负面信号只能来自平台状态组件，绝不从页面标题、笔记或评论全文猜测；无法得出结论、或本机回传暂时失败时都放行该首单。只有服务端已确认的负面事实或身份不一致才停止该 Lease。禁止 alarm、标签枚举、打开/刷新/滚动/点击或平台 API 探测。
+- server minimum plugin version 与 Producer contract 同步升级到 `0.8.46`，旧版本不能绕过任务页观察路径领取新 Lease。`evaluate`、frozen revalidation 和 ready-batch slots 使用同一命名 `CapacityCandidate` loader / policy，不再维护三份 SQL 或 positional tuple。
+- 验收必须分别证明：普通 capacity 读取、具体 claimant revalidation/dispatch 及 batch-ready slots 都会在账号身份变化或明确负面观察后关闭；HTTP 拒绝旧平铺 body 和畸形组合；发布 zip 可重现且只保留当前受控版本。
+
+**阅读规则补充：** 此后各节出现 `account_eligibility_stale`、账号 positive freshness、20 分钟/6 小时资格续期或“先重报再 retry claim”时，均为历史快照或历史行兼容，不得恢复为当前执行门槛。
 
 ## 1. 用户结果与串行门
 
@@ -66,7 +88,7 @@ Package 1 已合并并核验到本计划的 exact base。Package 2 要让同一�
 
 ### 4.1 统一容量判定
 
-服务端单一 policy 固定 `minimum_plugin_version=0.8.34`、installation/account positive freshness `20m`、station daily accepted-note budget `200/day`（Asia/Shanghai，仍以 station 为唯一主体）。判定顺序为 risk → station active/accepting → active installation → credential → version → freshness → capability → bound account → eligibility current/fresh → live-Lease busy → station budget。每次返回闭集 reason code；UNKNOWN 一律阻断。`busy` 只从 live Lease 派生，不接受 Producer 上报。
+历史快照曾把 installation/account positive freshness `20m` 写入这一 policy；当前仅 installation heartbeat freshness 保持硬门。账号正向观察的时间窗口已经由 §0.2 降为诊断元数据。当前判定顺序为 risk → station active/accepting → active installation → credential → version → installation heartbeat → capability → bound account → explicit eligibility state → live-Lease busy → station budget。每次返回闭集 reason code；从未形成账号事实的 UNKNOWN 一律阻断。`busy` 只从 live Lease 派生，不接受 Producer 上报。
 
 账号 eligibility 闭集为 `usable | cooling | needs_login | restricted | unknown`。Producer 只提交版本化 signal 与 raw account identity 的瞬时 loopback body；服务端使用部署密钥计算 versioned keyed digest，raw identity 绝不持久化或返回。账号 binding 与 eligibility history 只追加；current 是重算读取责任。
 
@@ -111,7 +133,7 @@ Collection 仍为五个子面；目标页新增一个轻量“监控规则”按
 2. RED→GREEN：单一 capacity evaluator；Authorization purpose/max_targets；Admission frozen refs；Lease/dispatch 时点重查。
 3. RED→GREEN：rule command、固定 next-run schedule、scheduler queue/target receipt、失败/cancel/recovery。
 4. HTTP/UI：规则 modal 与 durable receipt；Operations/Attention/Tasks/Runtime 共用读模型。
-5. Producer：0.8.34 credential/report/claim contract，只上报最小 signal；build/package/verify/reproducibility。
+5. Producer：0.8.46 嵌套 observation/任务页复核合同，只上报最小的确定事实；build/package/verify/reproducibility。
 6. disposable PostgreSQL、Rust workspace、1440 browser、plugin 与治理验证。
 
 ## 8. 停止条件

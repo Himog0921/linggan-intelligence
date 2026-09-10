@@ -1,7 +1,7 @@
 # COLLECTION-CONTROL-CLOSURE-001 · UI Change Manifest
 
 > 状态: 权威当前
-> 最后核对: 2026-09-04
+> 最后核对: 2026-09-10
 > 适用范围: Issue #149 的 Collection Targets 规则 modal 与 Operations/Attention/Tasks/Runtime 控制事实表达
 > 事实来源: Issue #149、PAGE-COLLECTION-001、COLLECTION-CONTROL-CLOSURE-001 active plan、LIDS v7 与当前 Rust/server-rendered UI
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实服务端合同/数据库回执、PAGE-COLLECTION-001 与 LIDS；本清单不增加权限
@@ -28,6 +28,20 @@ Runtime 在既有 `Collection Control` Pattern 内新增两项受控表达，而
 
 `自动接活` 只是 station acceptance 这一层：Runtime 仍同时显示由 capacity evaluator 给出的 credential/version/freshness/account/risk/quota/busy 等真实阻断原因。名称读取和状态回显是 loopback check-in，不是平台访问或采集动作。
 
+## 2026-09-10 账号观察软门槛修正
+
+Runtime 将“账号观察时刻 / 诊断窗口”显示为排障事实，**不是**“到期即无法接活”的红线。当前容量结论只能由工位心跳、接活开关、凭据/版本/能力、账号绑定、显式账号负面状态、风险/并发/预算和 live Lease 产生。
+
+- 历史 `account_eligibility_stale` 行必须明确标为历史兼容/诊断，不向用户暗示需要定时重报或等待；当前 evaluator 不再产生它。
+- `needs_login`、`restricted`、`cooling`、绑定异常和从未形成账号事实的 `UNKNOWN` 仍显示为可恢复阻断；页面暂时读不到账号导航标记不是新的负面状态，也不会覆盖已有结论。
+- 插件不会为保持该字段而扫描、刷新或打开平台页。任务页自然加载时的既有最小 DOM 观察可更新事实；同账号 live Lease 让长空闲后的第一单成为唯一并发的验证机会。
+
+### 2026-09-10 观察事件与持久绑定收敛
+
+- Runtime 不再呈现或要求“账号绑定到期日”。人工绑定持续有效，直到人在 Runtime 明确替换/结束；时间经过既不形成红色阻断，也不要求用户重新证明账号。
+- 任务页只能显示由已领取页明确观察到的 `需登录`、`访问受限`、`冷却中` 或 `账号与人工绑定不一致`。页面暂时无可判定标记时没有新错误，不覆盖旧事实，也不制造“重试资格探测”的行动。
+- 历史投影若仍包含 `account_binding_expired`，须标为旧记录兼容，不能作为当前工位的恢复动作或接活条件。
+
 ## 表面与状态
 
 | 表面 | 状态来源 | 呈现责任 |
@@ -36,7 +50,7 @@ Runtime 在既有 `Collection Control` Pattern 内新增两项受控表达，而
 | modal form | rule revision + command receipt | 中文独立表达；expected revision/idempotency 隐藏但真实提交 |
 | modal feedback | durable receipt outcome/reason | success/replay/stale/conflict/rejected 分开；失败保留输入 |
 | dynamic | comparable-round qualification | `DYNAMIC_UNAVAILABLE` 与 24h fixed fallback 同时可见，不渲染假计算 |
-| Runtime | `execution_station.display_name` + capacity evaluator | 显示并可人工修正服务器工位名；每个阻断 reason、接活状态、freshness、来源和恢复责任可解释 |
+| Runtime | `execution_station.display_name` + capacity evaluator | 显示并可人工修正服务器工位名；工位 freshness 是硬门，账号观察窗口只作诊断；每个真实阻断、来源和恢复责任可解释 |
 | Browser Producer Popup | check-in 的 server-confirmed `stationDisplayName`/`stationAccepting` | 只回显同一工位名称与自动接活/已暂停/待认领，不保存本地别名、不提供配对或采集按钮 |
 | Operations/Attention/Tasks | scheduler/decision/work/lease/task/receipt | 只显示 durable fact；UNKNOWN 不是 0/失败，PARTIAL+VALID 不进失败区 |
 

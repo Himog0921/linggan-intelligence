@@ -108,6 +108,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0063_content_author_attribution.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0064_account_observation_normalization.sql"),
+    "\n",
     include_str!("../../../../database/migrations/0064_comment_research_kernel.sql"),
     "\n",
     include_str!("../../../../database/migrations/0065_comment_research_vector_candidates.sql"),
