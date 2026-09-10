@@ -241,6 +241,7 @@ migrate() {
   apply_migration_once "0068_comment_research_problem_resolution" "$project_root/database/migrations/0068_comment_research_problem_resolution.sql"
   apply_migration_once "0069_comment_research_v1_cutover" "$project_root/database/migrations/0069_comment_research_v1_cutover.sql"
   apply_migration_once "0070_comment_research_v1_derivation_head" "$project_root/database/migrations/0070_comment_research_v1_derivation_head.sql"
+  apply_migration_once "0071_cross_industry_sampling_provenance" "$project_root/database/migrations/0071_cross_industry_sampling_provenance.sql"
   apply_migration_once "0065_account_observation_bootstrap" "$project_root/database/migrations/0065_account_observation_bootstrap.sql"
 }
 

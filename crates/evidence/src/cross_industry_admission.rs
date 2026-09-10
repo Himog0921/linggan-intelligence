@@ -106,15 +106,20 @@ pub(crate) async fn insert(
 
 /// 列表面带回来的样本。
 ///
-/// 采样口径（关键词、排序、下拉次数、目标数、实际取得数）**不在这里写**：它属于一轮
-/// 采集的事实，不属于单条记录，且要么整套要么没有（`0044` 的 CHECK 拦着半套）。采集
-/// 入口接通后由那一侧补齐；在此之前这些样本没有口径，那是真话。
+/// **采样口径来自工单冻结的那张任务单，不来自插件的回执**：插件的 `coverage.target`
+/// 只回显身份（搜的是哪个词），从不回显下发给它的排序、下拉次数与取样上限——它也没有
+/// 义务回显。此前这里只看回执，于是五列口径一直全空，同一个词按「最多点赞」和按
+/// 「综合」采回来的笔记混在一张表里分不出来源，一个词的面貌也就拼不起来。
+///
+/// 口径要么整套要么没有（`0041` 的 CHECK 拦着半套）。博主来源没有排序口径可言，
+/// 于是整套留空——那是真话，不是缺失。
 async fn insert_samples(
     tx: &mut Transaction<'_, Postgres>,
     package: &ProducerCapturePackage,
     domain: &ExternalDomain,
     accepted_ordinals: &HashSet<i32>,
 ) -> Result<(), ProducerRuntimeError> {
+    let sampling = sampling_provenance(tx, package).await?;
     for (ordinal, record) in package.records().iter().enumerate() {
         if !accepted_ordinals.contains(&i32::try_from(ordinal).expect("record count is bounded")) {
             continue;
@@ -139,10 +144,100 @@ async fn insert_samples(
             exact_nonnegative_count(payload, &["likeCount", "likes"]),
             exact_nonnegative_count(payload, &["collectCount", "collects"]),
             exact_nonnegative_count(payload, &["commentCount", "comments"]),
+            signed_source_url(payload),
+            sampling.as_ref(),
         )
         .await?;
     }
     Ok(())
+}
+
+/// 一轮关键词采集的口径。只有关键词来源才有；博主来源返回 `None`。
+struct SamplingProvenance {
+    keyword: String,
+    sort_order: String,
+    scroll_rounds: Option<i32>,
+    requested_count: Option<i32>,
+    actual_count: Option<i32>,
+}
+
+/// 从这批材料所属的任务单上取回口径。
+///
+/// 包此刻已经写进 `linggan_runtime_capture_package`（同一事务），所以能由 `package_ref`
+/// 找回它的任务单。**任务单是发租那一刻冻结的**，中途有人改了监控规则也不会改写这一轮
+/// 已经发生的事实。
+///
+/// `keyword` 与 `sort_order` 缺一不可（CHECK 如此要求，语义上也如此：不知道按什么排序
+/// 取回来的一批笔记，说不清代表什么）。任何一项缺失就整套留空，不用默认值补。
+async fn sampling_provenance(
+    tx: &mut Transaction<'_, Postgres>,
+    package: &ProducerCapturePackage,
+) -> Result<Option<SamplingProvenance>, ProducerRuntimeError> {
+    let task_spec: Option<Value> = sqlx::query_scalar(
+        "SELECT task.task_spec FROM linggan_runtime_capture_package pkg \
+         JOIN linggan_runtime_task task ON task.task_id = pkg.task_id \
+         WHERE pkg.package_ref = $1",
+    )
+    .bind(package.package_ref())
+    .fetch_optional(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    let Some(target) = task_spec
+        .as_ref()
+        .and_then(|spec| spec.get("target"))
+        .and_then(Value::as_object)
+    else {
+        return Ok(None);
+    };
+    let text = |key: &str| {
+        target
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    };
+    let count = |key: &str| {
+        target
+            .get(key)
+            .and_then(Value::as_i64)
+            .filter(|value| *value >= 0)
+            .and_then(|value| i32::try_from(value).ok())
+    };
+    let (Some(keyword), Some(sort_order)) = (text("query"), text("ranking")) else {
+        return Ok(None);
+    };
+    Ok(Some(SamplingProvenance {
+        keyword,
+        sort_order,
+        scroll_rounds: count("scrollRounds"),
+        // 「要了多少」是取样上限：设了取赞前 N 就是 N，否则是这一单的篇数上限。
+        requested_count: count("topByLikes").or_else(|| {
+            task_spec
+                .as_ref()
+                .and_then(|spec| spec.get("maximumQuota"))
+                .and_then(Value::as_i64)
+                .and_then(|value| i32::try_from(value).ok())
+        }),
+        // 「实际拿到多少」用插件如实报告的取得数，而不是本次写库条数：采不满是常态，
+        // 复核时基数错了比没有基数更糟。
+        actual_count: crate::material_contract_validation::unique_coverage_layer(
+            package.coverage(),
+            package.package_kind(),
+        )
+        .and_then(|layer| layer.get("acquired"))
+        .and_then(Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok()),
+    }))
+}
+
+/// 平台返回的、带短期签名的作品链接。
+///
+/// 小红书的作品必须用来源页给出的 `xsec_token` 才能打开，裸 `/explore/{id}` 会被拒绝。
+/// 所以这里**只保存平台实际返回的那一条**，绝不由作品 ID 拼一个——拼出来的链接是一个
+/// 从未被平台返回过的事实，既打不开，也会让后续详情采集以为自己有合法入口。
+fn signed_source_url(payload: &serde_json::Map<String, Value>) -> Option<&str> {
+    exact_string(payload, "url").filter(|url| url.starts_with("https://"))
 }
 
 /// 详情面把标题、作者与互动数补准。
@@ -180,6 +275,10 @@ async fn insert_detail(
             exact_nonnegative_count(payload, &["likes", "likeCount", "likedCount"]),
             exact_nonnegative_count(payload, &["collects", "collectCount", "collectedCount"]),
             exact_nonnegative_count(payload, &["publicCommentCount", "comments", "commentCount"]),
+            // 详情面按已知作品去采，没有「按什么排序搜到的」这回事；口径留给列表面写。
+            // 详情页返回的链接不带来源页签名，不覆盖列表面记下的那条。
+            None,
+            None,
         )
         .await?;
     }
@@ -201,7 +300,7 @@ async fn insert_comments(
     // 评论必须挂在样本上。样本尚不存在时先立一条只有身份的：材料先到、列表后到是
     // 可能的，丢掉评论比留一条没有标题的样本更糟。
     let sample_ref = upsert_sample(
-        tx, package, domain, content_id, None, None, None, None, None, None, None,
+        tx, package, domain, content_id, None, None, None, None, None, None, None, None, None,
     )
     .await?;
     let expected_kind = if replies { "reply" } else { "comment" };
@@ -283,12 +382,25 @@ async fn upsert_sample(
     like_count: Option<i64>,
     collect_count: Option<i64>,
     comment_count: Option<i64>,
+    source_url: Option<&str>,
+    sampling: Option<&SamplingProvenance>,
 ) -> Result<Uuid, ProducerRuntimeError> {
     sqlx::query_scalar(
+        // 口径描述的是**最近这一轮是怎么看到它的**：同一篇笔记这周由「最多点赞」带回、
+        // 下周由「综合」带回，该记的就是最近那一次。所以带口径的这一轮整套覆盖。
+        //
+        // **五列必须整套一起换或一起保**，判据是这一轮有没有口径（`EXCLUDED.keyword`）。
+        // 逐列 COALESCE 会把这一轮的关键词配上上一轮的下拉次数，拼出一份从未发生过的
+        // 口径；而详情面与评论面本来就没有排序口径，它们更新同一行时必须原样保留列表面
+        // 记下的那一套，不能把它抹成空。
+        //
+        // 标题、作者、封面、互动数是作品自身的事实，保旧补新——这一轮没读到不等于它没有。
+        // 签名链接同理：旧的那条即便已过期，也好过没有。
         "INSERT INTO cross_industry_sample \
          (sample_ref,domain_ref,target_ref,platform,content_external_id,title,\
-          author_external_id,author_name,cover_source_url,like_count,collect_count,comment_count) \
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) \
+          author_external_id,author_name,cover_source_url,like_count,collect_count,comment_count,\
+          source_url,keyword,sort_order,scroll_rounds,requested_count,actual_count) \
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18) \
          ON CONFLICT (domain_ref, platform, content_external_id) DO UPDATE SET \
            title = COALESCE(EXCLUDED.title, cross_industry_sample.title), \
            author_external_id = COALESCE(EXCLUDED.author_external_id, cross_industry_sample.author_external_id), \
@@ -297,6 +409,12 @@ async fn upsert_sample(
            like_count = COALESCE(EXCLUDED.like_count, cross_industry_sample.like_count), \
            collect_count = COALESCE(EXCLUDED.collect_count, cross_industry_sample.collect_count), \
            comment_count = COALESCE(EXCLUDED.comment_count, cross_industry_sample.comment_count), \
+           source_url = COALESCE(EXCLUDED.source_url, cross_industry_sample.source_url), \
+           keyword = CASE WHEN EXCLUDED.keyword IS NULL THEN cross_industry_sample.keyword ELSE EXCLUDED.keyword END, \
+           sort_order = CASE WHEN EXCLUDED.keyword IS NULL THEN cross_industry_sample.sort_order ELSE EXCLUDED.sort_order END, \
+           scroll_rounds = CASE WHEN EXCLUDED.keyword IS NULL THEN cross_industry_sample.scroll_rounds ELSE EXCLUDED.scroll_rounds END, \
+           requested_count = CASE WHEN EXCLUDED.keyword IS NULL THEN cross_industry_sample.requested_count ELSE EXCLUDED.requested_count END, \
+           actual_count = CASE WHEN EXCLUDED.keyword IS NULL THEN cross_industry_sample.actual_count ELSE EXCLUDED.actual_count END, \
            target_ref = COALESCE(cross_industry_sample.target_ref, EXCLUDED.target_ref), \
            last_observed_at = scope_001_now() \
          RETURNING sample_ref",
@@ -315,6 +433,12 @@ async fn upsert_sample(
     .bind(like_count)
     .bind(collect_count)
     .bind(comment_count)
+    .bind(source_url)
+    .bind(sampling.map(|sampling| sampling.keyword.as_str()))
+    .bind(sampling.map(|sampling| sampling.sort_order.as_str()))
+    .bind(sampling.and_then(|sampling| sampling.scroll_rounds))
+    .bind(sampling.and_then(|sampling| sampling.requested_count))
+    .bind(sampling.and_then(|sampling| sampling.actual_count))
     .fetch_one(&mut **tx)
     .await
     .map_err(ProducerRuntimeError::Internal)

@@ -118,6 +118,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0064_account_observation_normalization.sql"),
     "\n",
     include_str!("../../../database/migrations/0065_account_observation_bootstrap.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0071_cross_industry_sampling_provenance.sql"),
 );
 
 #[tokio::test]
