@@ -1,14 +1,16 @@
 # CI-AUTO-004 · 评论自动研究 UI 执行清单
 
-> 状态: 活跃计划
+> 状态: 历史归档
 > 最后核对: 2026-09-08
 > 适用范围: 评论研究四视角、设置、定向研究、运行与来源检查器；实施前冻结的目标表达
 > 事实来源: Mog 最新评论自动研究决定、main@829fe22 页面/API审查、LIDS v7
 > 冲突时以谁为准: 用户最新决定、实际数据合同和LIDS；本清单不能证明代码或真实页面已经符合
 
+> 替代说明（2026-09-09）：本清单保留 CI-AUTO-004 当时的 UI 验收证据，不再定义后续评论研究页面。新用户结果、状态和读取边界见 [COMMENT-RESEARCH-RESET-001](../../plans/active/comment-research-reset-001.md)。
+
 ## 1. 读取与层级
 
-- 入口：[主计划](../../plans/active/ci-auto-004-comment-auto-research.md)、[执行合同](../../plans/active/ci-auto-004-execution-contracts.md)；本清单只定义表达，不另造字段/预算/准入逻辑。
+- 历史入口：[主计划](../../archive/ci-auto-004-comment-auto-research.md)、[执行合同](../../archive/ci-auto-004-execution-contracts.md)；本清单只定义当时表达，不另造字段/预算/准入逻辑。
 - 必读：[UI执行合同](../../agents/ui-execution-contract.md)、[设计手册](../README.md)、[LIDS](../lids/README.md)、[Tokens](../lids/tokens.md)、[Pattern](../lids/patterns.md)、[壳层](../lids/shell-zones.md)、[语言](../lids/language-policy.md)、[数据边界](../lids/data-boundaries.md)。新增视觉值必须消费现行 `--lgi-*`，旧页面违规不构成先例。
 - 分类：混合（交互、状态、研究策略与外发动作），不能按CSS小修验收。
 - 模块主Pattern仍为L1 Corpus Explorer；来源/问题详情按现有检查器，设置为L1 Settings/Governance的单一对话表面。不新增一级导航、聊天控制台、Skill中心、选题库或Three.js场景。

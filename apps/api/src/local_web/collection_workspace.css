@@ -569,7 +569,6 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-tg-baseline { min-width:0; }
 .c-tg-baseline-title { margin-bottom:5px; font:800 8px var(--lgi-font-mono); letter-spacing:.07em; color:var(--v7-ghost); }
 .c-tg-baseline small { display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font:9px var(--lgi-font-mono); color:var(--v7-muted); }
-.c-tg-actions { display:flex; flex-direction:column; gap:5px; align-items:flex-start; }
 .c-tg-btn { height:26px; padding:0 10px; font-size:10px; box-shadow:none; }
 .c-tg-btn:hover { transform:none; box-shadow:none; }
 .c-tg-muted { color:var(--v7-ghost); font-size:11px; }
@@ -871,7 +870,6 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-tg-title { font-size:var(--c-fs-300); font-weight:var(--c-fw-bold); text-decoration:none; }
 .c-tg-avatar { width:calc(var(--c-cell) * 5.25); height:calc(var(--c-cell) * 5.25); }
 .c-tg-baseline-title { padding-top:var(--c-cell); border-top:var(--c-line-rail) solid var(--v7-black); }
-.c-tg-actions .c-btn-quiet { width:100%; min-height:calc(var(--c-cell) * 4); justify-content:center; }
 .c-tg-batch { padding:calc(var(--c-cell) * 2) calc(var(--c-cell) * 1.5); }
 
 /* Attention: ledger selection on the left, one recoverable fact on the right. */

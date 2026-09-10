@@ -148,9 +148,9 @@ fn target_table(
         ));
     }
     let columns = if is_creator {
-        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部创作者目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span role="columnheader">作品目录</span><span role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近变化</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部创作者目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span class="c-tg-head-num" role="columnheader">作品目录</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     } else {
-        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span role="columnheader">最近命中</span><span role="columnheader">最近新增</span><span role="columnheader">巡查状态</span><span role="columnheader">数据更新</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span class="c-tg-head-num" role="columnheader">最近命中</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">数据更新</span><span role="columnheader">巡查状态</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     };
     let grid = if is_creator {
         "c-tg-creator-grid"
@@ -323,6 +323,18 @@ fn action_feedback_markup(error: Option<&str>) -> String {
         ),
         _ => ("c-src-failure", "没有完成", "上一次动作没有完成。"),
     };
+    // 成功回执做成右下角角标，3 秒后自己消失：它只是确认「刚才那下生效了」，看过即可，
+    // 常驻在列表顶上会把内容一直往下顶。
+    //
+    // **失败与警示不自动消失**——没成功的事必须让人看清楚，自动收走等于把坏消息藏起来。
+    // 消失由 CSS 动画完成，不依赖 JS：脚本没跑起来时，一个永不消失的浮层比横幅更糟。
+    if class == "c-src-feedback c-src-feedback-ok" {
+        return format!(
+            r#"<p class="c-tg-toast" role="status"><b>{heading}</b>{explanation}</p>"#,
+            heading = heading,
+            explanation = escape(explanation),
+        );
+    }
     format!(
         r#"<p class="{class}" role="status"><b>{heading}</b>{explanation}</p>"#,
         class = class,
@@ -383,10 +395,12 @@ fn target_row(
         target_ref = target.target_ref,
         opener_label = escape(&opener_label),
     );
-    let last = target
-        .last_patrol_succeeded_at
-        .as_deref()
-        .unwrap_or("尚未巡查");
+    let last = moment_without_year(
+        target
+            .last_patrol_succeeded_at
+            .as_deref()
+            .unwrap_or("尚未巡查"),
+    );
     // 下次巡查写成「还有多久」：人在这一列判断的是要等多久，不是那一刻的钟点。
     let next = if target.monitoring_enabled {
         relative_moment(target.next_patrol_at.as_deref(), beijing_now_minutes())
@@ -397,7 +411,7 @@ fn target_row(
         format!(
             r#"<div class="c-tg-cell" role="cell">{archive_state}</div>
                 <div class="c-tg-cell c-tg-number-value" role="cell">{works}</div>
-                <div class="c-tg-cell c-tg-number-value" role="cell">{details}</div>
+                <div class="c-tg-cell c-tg-number-value c-tg-cell-end" role="cell">{details}</div>
                 <div class="c-tg-cell" role="cell">{patrol}</div>
                 <div class="c-tg-cell c-tg-change" role="cell">{recent_change}</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last}</time>
@@ -417,9 +431,9 @@ fn target_row(
         format!(
             r#"<div class="c-tg-cell c-tg-rule" role="cell">{rule}</div>
                 <div class="c-tg-cell c-tg-number-value" role="cell">{hits}</div>
-                <div class="c-tg-cell c-tg-change" role="cell">{recent_change}</div>
+                <div class="c-tg-cell c-tg-unknown c-tg-cell-end" role="cell">尚未取得</div>
                 <div class="c-tg-cell" role="cell">{patrol}</div>
-                <div class="c-tg-cell c-tg-unknown" role="cell">尚未取得</div>
+                <div class="c-tg-cell c-tg-change" role="cell">{recent_change}</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last}</time>
                 <time class="c-tg-cell c-tg-time" role="cell">{next}</time>
                 <div class="c-tg-actions" role="cell" data-row-no-open>{actions}{secondary}</div>"#,
@@ -569,19 +583,40 @@ fn row_secondary_actions(
     target: &ObservationTarget,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
-    let (enable, toggle_label) = if target.monitoring_enabled {
-        ("false", "停止观察")
+    // 开关不带可见文字：状态由滑块位置与颜色表达（右+信号色=观察中，左+墨色=已停止）。
+    // 但没有可见文字就必须有可读标签，否则读屏软件只会念出一个「按钮」。
+    let (enable, pressed, action_label) = if target.monitoring_enabled {
+        ("false", "true", "正在观察，点击停止观察")
     } else {
-        ("true", "恢复观察")
+        ("true", "false", "已停止观察，点击恢复观察")
     };
     let focus_id = format!("target-{}", target.target_ref);
     let fields = list_context.return_fields(None, None, Some(&focus_id));
     let delete_href = list_context.delete_href(target.target_ref);
     format!(
-        r#"<form class="c-tg-toggle" method="post" action="/collection/targets/patrol-toggle">{fields}<input type="hidden" name="enable" value="{enable}"/><button class="c-btn-quiet c-tg-btn-slim" type="submit" name="row_target_ref" value="{target_ref}">{toggle_label}</button></form>
-           <a class="c-tg-danger" href="{delete_href}">删除</a>"#,
+        r#"<form class="c-tg-toggle" method="post" action="/collection/targets/patrol-toggle">{fields}<input type="hidden" name="enable" value="{enable}"/><button class="c-tg-switch" type="submit" name="row_target_ref" value="{target_ref}" aria-pressed="{pressed}" aria-label="{action_label}" title="{action_label}"></button></form>
+           <a class="c-tg-act c-tg-act-danger" href="{delete_href}">删除</a>"#,
         target_ref = target.target_ref,
     )
+}
+
+/// 列表里的巡查时刻去掉年份。
+///
+/// 这一列要回答的是「上次是什么时候」，而同一屏里的年份几乎总是同一个，却稳定占掉
+/// 五个字符的宽度——在一张十三列的表里，那正是把「2026-09-08 23:14」挤成
+/// 「2026-09-08 23:…」的最后一根稻草。完整时刻仍在目标详情里给出。
+///
+/// **只裁剪，不另写格式**：全项目的人可读时间由 `linggan_human_moment()` 统一产出，
+/// 这里从那一种格式上切掉前缀。自己拼一个 `to_char` 出来就是全项目的第二种时间写法，
+/// 治理检查也正是为此设的。
+fn moment_without_year(value: &str) -> &str {
+    // 只认 `YYYY-MM-DD ...` 这一种形状；认不出就原样返回（"尚未巡查" 这类文案）。
+    let bytes = value.as_bytes();
+    if bytes.len() >= 5 && bytes[0..4].iter().all(u8::is_ascii_digit) && bytes[4] == b'-' {
+        &value[5..]
+    } else {
+        value
+    }
 }
 
 /// 「下次巡查」写成还有多久，而不是一个绝对时刻。
@@ -779,10 +814,18 @@ fn detail_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String 
             .map(|value| {
                 // 缺口读投影，不在这里相减：已确认失效的作品有详情之外的第三种去向，
                 // 减法算不出来它。
-                format!(
-                    "{} / {} · 缺 {}",
-                    value.details_captured, value.works_listed, value.pending_details
-                )
+                //
+                // 缺 0 不显示——每一行都挂一个「缺 0」是纯噪音。但**缺口大于 0 时必须
+                // 显示**：木可可的 `10 / 13` 里那 3 篇是已确认失效、不是缺失，读的人
+                // 若自己做 13−10 会得出「缺 3」这个错误结论。这个数正是为此而投影的。
+                if value.pending_details == 0 {
+                    format!("{} / {}", value.details_captured, value.works_listed)
+                } else {
+                    format!(
+                        "{} / {} · 缺 {}",
+                        value.details_captured, value.works_listed, value.pending_details
+                    )
+                }
             })
             .unwrap_or_else(|| "—".to_owned()),
     }
@@ -805,7 +848,7 @@ fn row_action(
                 &[("dtab", "works")],
                 Some("target-works"),
             );
-            format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看结果</a>"#)
+            format!(r#"<a class="c-tg-act" href="{drawer_href}">查看结果</a>"#)
         }
         TargetPrimaryAction::ViewCreator => {
             let drawer_href = list_context.drawer_href(
@@ -813,7 +856,7 @@ fn row_action(
                 &[("dtab", "works")],
                 Some("target-works"),
             );
-            format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">查看档案</a>"#)
+            format!(r#"<a class="c-tg-act" href="{drawer_href}">查看档案</a>"#)
         }
         TargetPrimaryAction::ViewArchiveProgress
         | TargetPrimaryAction::ViewArchiveProblems
@@ -829,13 +872,13 @@ fn row_action(
                 &[("dtab", "overview")],
                 Some(fragment),
             );
-            format!(r#"<a class="c-btn-secondary c-tg-btn" href="{drawer_href}">{label}</a>"#)
+            format!(r#"<a class="c-tg-act" href="{drawer_href}">{label}</a>"#)
         }
         TargetPrimaryAction::OpenPatrol(label) => {
             let opener_id = format!("monitor-rule-{}", target.target_ref);
             let rule_href = list_context.monitor_rule_href(target.target_ref, &opener_id);
             format!(
-                r#"<a id="{opener_id}" class="c-btn-secondary c-tg-btn" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">{label}</a>"#,
+                r#"<a id="{opener_id}" class="c-tg-act" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">{label}</a>"#,
                 target_ref = target.target_ref,
             )
         }
@@ -851,7 +894,7 @@ fn row_action(
             let focus_id = format!("target-{}", target.target_ref);
             let fields = list_context.return_fields(None, None, Some(&focus_id));
             format!(
-                r#"<form method="post" action="/collection/targets/archive">{fields}<button class="c-btn-primary c-tg-btn" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
+                r#"<form method="post" action="/collection/targets/archive">{fields}<button class="c-tg-act" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
                 target_ref = target.target_ref,
             )
         }
@@ -1293,7 +1336,9 @@ mod tests {
 
         assert!(html.contains("已有目录"));
         assert!(html.contains("41 篇"));
-        assert!(html.contains("41 / 41 · 缺 0"));
+        // 缺口为 0 时不挂「缺 0」：每行都挂一个零值是纯噪音。
+        assert!(html.contains("41 / 41"));
+        assert!(!html.contains("缺 0"));
         assert!(html.contains(">查看档案</a>"));
         assert!(!html.contains("建立标准目录"));
     }
@@ -1373,22 +1418,41 @@ mod tests {
         assert!(html.contains("关键词观察"));
         assert!(html.contains("c-tg-creator-grid"));
         assert!(html.contains("c-tg-keyword-grid"));
-        assert!(html.contains(r#"作品目录</span><span role="columnheader">详情进度"#));
-        assert!(html.contains(r#"最近命中</span><span role="columnheader">最近新增"#));
+        assert!(html.contains(
+            r#"作品目录</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">详情进度"#
+        ));
+        // 两张表的「最近新增」必须落在同一列位（第 10 位）。它们读的是同一个字段
+        // `latest_new`——创作者那边此前叫「最近变化」、排在第 10 位，关键词这边叫
+        // 「最近新增」、排在第 8 位：同一件事，两个名字，两个位置。现已统一。
+        assert!(html.contains(
+            r#"最近命中</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">数据更新"#
+        ));
+        // 第 8 列（详情进度／数据更新）在两张表里都单独多留右内边距，一起左移。
+        assert_eq!(html.matches("c-tg-head-end").count(), 2);
+        assert_eq!(html.matches("c-tg-cell-end").count(), 2);
+        assert!(html.contains(r#"巡查状态</span><span role="columnheader">最近新增"#));
+        assert!(!html.contains("最近变化"));
+        // 数字列的表头必须与右对齐的数字同侧，否则一列两端各站一边，看着就是错位。
+        // 4 处：创作者表的 作品目录/详情进度，关键词表的 最近命中/数据更新。
+        // 「数据更新」跟着右对齐，是为了和创作者表同列位的「详情进度」纵向对齐。
+        assert_eq!(html.matches("c-tg-head-num").count(), 4);
         assert!(html.contains("打开作者的创作者档案"));
         assert!(html.contains("打开关键词的关键词观察"));
         assert!(!html.contains("关键词档案"));
         assert_eq!(html.matches("c-tg-actions").count(), 2);
-        // 主动作两个（一行一个），加上每行一个「停止观察」开关。
-        assert_eq!(html.matches("c-tg-btn").count(), 4);
-        // 直接把「每行一个主动作」量出来：主动作的 class 以 `c-tg-btn"` 收尾，开关是
-        // `c-tg-btn-slim`，引号把两者分得干净。上面那个 4 是总数，单看它不排除「一行两个
-        // 主动作、另一行没有」——虽然 c-tg-toggle==2 已经排除了，但让判据直说更省事。
-        assert_eq!(html.matches(r#"c-tg-btn""#).count(), 2);
-        // 停止观察与删除必须每行各出现一次，且删除是链接不是按钮——两者形状不同，
-        // 长得像同一个按钮，人迟早会点错那个不可逆的。
+        // 三个行内控件现在共用一套尺寸（34px + 1px 墨线），靠颜色与形状区分而不是靠大小。
+        //
+        // 判据用**引号收尾的完整 class**，不用裸子串：`c-tg-act-danger` 自身就含
+        // `c-tg-act`，按子串数会把一个删除按钮算成两次。
+        assert_eq!(html.matches(r#"class="c-tg-act""#).count(), 2);
+        assert_eq!(html.matches(r#"c-tg-act c-tg-act-danger""#).count(), 2);
+        assert_eq!(html.matches("c-tg-switch").count(), 2);
+        // 旧的三种尺寸（40px 描边按钮 / 28px 浅按钮 / 下划线文字）必须彻底消失。
+        assert!(!html.contains("c-tg-btn-slim"));
+        assert!(!html.contains("c-btn-quiet"));
+        // 观察开关与删除必须每行各出现一次。区分不再靠尺寸（三者已统一成 34px），
+        // 靠形状与颜色：开关是唯一带滑轨的，删除是唯一的红。
         assert_eq!(html.matches("c-tg-toggle").count(), 2);
-        assert_eq!(html.matches("c-tg-danger").count(), 2);
         assert_eq!(html.matches("data-monitor-rule-trigger").count(), 1);
         assert_eq!(html.matches(">建立档案</button>").count(), 1);
         assert_eq!(html.matches(">设置巡查</a>").count(), 1);
@@ -1440,10 +1504,15 @@ mod tests {
 
         assert!(html.contains("详情有缺口"));
         assert!(html.contains("12 篇"));
+        // 缺口大于 0 时必须显示：这一格的 12 篇里有已确认失效的，读的人不能靠
+        // 12−5 自己算——那会把「已失效」误算成「缺失」。
         assert!(html.contains("5 / 12 · 缺 7"));
         assert!(html.contains("补采缺口"));
         // 上次巡查是已经发生的事实，保留绝对时刻——可能要拿去跟别的记录对时间。
-        assert!(html.contains("2026-09-04 08:30"));
+        // 列表里的巡查时刻不带年份：同一屏里年份永远相同，却稳定占掉五个字符，
+        // 正是把这一列挤到截断的最后一根稻草。完整时刻仍在目标详情里。
+        assert!(html.contains("09-04 08:30"));
+        assert!(!html.contains("2026-09-04 08:30"));
         // 下次巡查写成还有多久：人在这一列判断的是要等多久，而不是那一刻的钟点。
         assert!(!html.contains("2026-09-05 09:00"));
         // 断言「已逾期」而不是「已逾期 || 后」：夹具的下次巡查固定在 2026-09-05，时间

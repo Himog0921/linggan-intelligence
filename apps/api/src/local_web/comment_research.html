@@ -1,20 +1,51 @@
 <!doctype html>
 <html lang="zh-CN" data-theme="linggan-intelligence">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{{TITLE}} · Linggan Intelligence</title>
-<link rel="stylesheet" href="/assets/comment-research.css"><script src="/assets/comment-daily.js" defer></script><script src="/assets/comment-research.js" defer></script><script src="/assets/comment-intelligence.js" defer></script><link rel="stylesheet" href="/assets/comment-intelligence.css"></head>
-<body data-corpus-domain="{{CORPUS_DOMAIN_REF}}" data-corpus-domain-own="{{CORPUS_DOMAIN_OWN}}" data-corpus-domain-name="{{CORPUS_DOMAIN_NAME}}"><div class="v7-app">{{HEADER}}<div class="v7-shell">
-{{SIDE_NAV}}
-<main class="lgi-research" data-initial-view="{{VIEW}}">
-<div class="lgi-research-heading"><div><h1>{{TITLE}}</h1></div><span id="model-state" class="lgi-research-status"><a href="/settings/models">模型与 AI 设置</a></span></div>
-<nav class="lgi-research-tabs" aria-label="评论研究视图"><a href="/corpus/comments?{{DOMAIN_QS}}view=overview">概览</a><a href="/corpus/comments?{{DOMAIN_QS}}view=voices">原声</a><a href="/corpus/comments?{{DOMAIN_QS}}view=problems">用户问题</a><a href="/corpus/comments?{{DOMAIN_QS}}view=daily">每日观察</a></nav>
-<p class="lgi-research-boundary">仅包含已经接纳、当前允许研究的观察样本。评论用户身份隐藏；数量不代表平台总体或需求规模。</p>
-<form id="search-form" class="lgi-research-tools"><label class="lgi-research-grow">检索原声<input id="search-text" type="search" maxlength="200" placeholder="查找一句表达、一个困扰或关键词"></label><label>作品范围<select id="work-filter"><option value="">全部作品</option></select></label><label>清洗状态<select id="clean-filter"><option value="">全部状态</option><option value="pending">待清洗</option><option value="direct">可分析</option><option value="context">需上下文</option><option value="low_information">低信息</option><option value="anomaly">异常</option></select></label><button type="submit">查询</button><button type="button" id="save-query-open">保存查询</button><button type="button" id="selection-run" disabled>分析所选</button></form>
-<div id="daily-tools" class="lgi-research-tools" hidden><span>北京时间 23:00 固定批次 · 原声入库后异步清洗</span><button type="button" id="daily-settings">研究设置</button></div>
-<div id="asset-tools" class="lgi-research-tools" hidden><label>集合<select id="collection-filter"><option value="">全部集合</option></select></label><button type="button" id="collection-open">新建集合</button></div>
-<div class="lgi-research-result-heading"><h2 id="result-title">原声浏览</h2><span id="result-count"></span><button type="button" id="reload">刷新</button></div>
-<p id="feedback" role="status" aria-live="polite"></p><div id="results" aria-busy="true"></div>
-<div class="lgi-research-pagination"><button type="button" id="previous" hidden>上一页</button><button type="button" id="next" hidden>下一页</button></div>
-</main></div></div>
-<dialog id="research-detail" class="lgi-research-dialog"><div class="lgi-research-dialog-heading"><h2>原声与研究记录</h2><button type="button" data-close="research-detail">关闭</button></div><div id="detail-content"></div></dialog>
-<dialog id="research-form-dialog" class="lgi-research-dialog lgi-research-form-dialog"><form id="research-command-form"><div class="lgi-research-dialog-heading"><h2 id="command-title"></h2><button type="button" data-close="research-form-dialog">取消</button></div><div id="command-fields"></div><p id="command-feedback" role="status"></p><button type="submit" id="command-submit">保存</button></form></dialog>
-</body></html>
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>评论研究 · Linggan Intelligence</title>
+  <link rel="stylesheet" href="/assets/comment-research.css">
+  <script src="/assets/comment-research.js" defer></script>
+</head>
+<body>
+  <div class="v7-app">{{HEADER}}<div class="v7-shell">{{SIDE_NAV}}
+    <main class="cr-v1" aria-labelledby="comment-research-title">
+      <header class="cr-v1-heading">
+        <div>
+          <p class="cr-v1-kicker">评论研究</p>
+          <h1 id="comment-research-title">从原声到可追溯的问题观察</h1>
+          <p>只读取已发布的研究版本。原始评论保持原样；作品作者回复和身份未知评论不进入用户问题与变化统计。</p>
+        </div>
+        <div class="cr-v1-actions">
+          <button type="button" id="research-settings">研究设置</button>
+          <button type="button" id="start-run" class="cr-v1-primary">开始研究</button>
+          <button type="button" id="refresh">刷新</button>
+        </div>
+      </header>
+
+      <p id="research-status" class="cr-v1-status" role="status" aria-live="polite">正在读取研究状态…</p>
+      <nav class="cr-v1-tabs" aria-label="评论研究视图">
+        <button type="button" data-view="overview" aria-current="page">概览</button>
+        <button type="button" data-view="voices">用户原声</button>
+        <button type="button" data-view="problems">用户问题</button>
+        <button type="button" data-view="changes">变化观察</button>
+        <button type="button" data-view="runs">运行记录</button>
+      </nav>
+      <section id="research-result" aria-busy="true"></section>
+    </main>
+  </div></div>
+
+  <dialog id="research-settings-dialog" class="cr-v1-dialog">
+    <form id="research-settings-form">
+      <header><div><p class="cr-v1-kicker">研究设置</p><h2>保存一次策略，之后可直接开始研究</h2></div><button type="button" data-close="research-settings-dialog">关闭</button></header>
+      <p>保存不会发送评论或启动模型。向量模型测试并启用后，开始研究只冻结当前可读的普通用户评论并交给后台推进；连续自动排程保持关闭。</p>
+      <label>研究模型<input name="model" id="policy-model" disabled></label>
+      <label>单轮评论上限<input name="sourceLimit" type="number" min="1" max="3000" required></label>
+      <label>单轮研究模型额度（Token）<input name="tokenLimit" type="number" min="1024" max="10000000" required></label>
+      <p class="cr-v1-note">这项额度约束本轮语义提取、向量候选和问题归并的所有外部调用。额度不足时，运行记录会如实标记未发布失败，不会继续发送请求。</p>
+      <p id="embedding-state" class="cr-v1-note"></p>
+      <p id="settings-feedback" class="cr-v1-status" role="status"></p>
+      <footer><a href="/settings/models">前往模型与向量设置</a><button type="submit" class="cr-v1-primary">保存研究策略</button></footer>
+    </form>
+  </dialog>
+</body>
+</html>

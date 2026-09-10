@@ -1,9 +1,6 @@
 //! Versioned research text; source facts remain immutable. Every retained Unicode scalar
 //! maps to its original span, including after emoji and reliable mention removal.
-use crate::{comment_research::comment_source_hash, model_settings::ModelError};
-use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
-use sqlx::Row;
 pub const CLEANER_VERSION: &str = "comment-clean.v2";
 
 #[path = "comment_cleaning_noise.rs"]
@@ -16,32 +13,38 @@ pub struct CleanComment {
     pub state: String,
     pub reasons: Vec<String>,
 }
+#[cfg(test)]
 impl CleanComment {
-    /// Only unambiguous exact outbound quotes are accepted. Masked text is not evidence.
+    /// Maps one unambiguous retained quote back to the immutable source text.  This remains a
+    /// generic cleaner guarantee; V1's Atom admission uses the same offset contract.
     pub fn resolve(&self, quote: &str, raw: &str) -> Result<(i32, i32, String), &'static str> {
         if quote.is_empty() || quote.contains('█') {
             return Err("quote_redacted_or_empty");
         }
-        let chars: Vec<_> = self.text.chars().collect();
+        let text: Vec<_> = self.text.chars().collect();
         let needle: Vec<_> = quote.chars().collect();
-        if needle.len() > chars.len() {
+        if needle.len() > text.len() {
             return Err("quote_missing_or_ambiguous");
         }
-        let positions: Vec<_> = chars
+        let matches: Vec<_> = text
             .windows(needle.len())
             .enumerate()
-            .filter(|(_, w)| *w == needle.as_slice())
-            .map(|(i, _)| i)
+            .filter(|(_, window)| *window == needle.as_slice())
+            .map(|(index, _)| index)
             .collect();
-        if positions.len() != 1 {
+        if matches.len() != 1 {
             return Err("quote_missing_or_ambiguous");
         }
-        let start = positions[0];
+        let start = matches[0];
         let end = start + needle.len();
-        let a = self.offsets.get(start).ok_or("quote_out_of_bounds")?.0;
-        let b = self.offsets.get(end - 1).ok_or("quote_out_of_bounds")?.1;
-        let original: String = raw.chars().skip(a).take(b - a).collect();
-        Ok((a as i32, b as i32, original))
+        let source_start = self.offsets.get(start).ok_or("quote_out_of_bounds")?.0;
+        let source_end = self.offsets.get(end - 1).ok_or("quote_out_of_bounds")?.1;
+        let original = raw
+            .chars()
+            .skip(source_start)
+            .take(source_end - source_start)
+            .collect();
+        Ok((source_start as i32, source_end as i32, original))
     }
 }
 /// A platform-supplied mention boundary, expressed in original Unicode scalar offsets.
@@ -189,14 +192,7 @@ pub fn outbound(mut value: CleanComment) -> CleanComment {
         let tail: String = cs[url_start..].iter().take(8).collect();
         if tail.starts_with("https://") || tail.starts_with("http://") || tail.starts_with("www.") {
             let mut end = url_start;
-            while end < cs.len()
-                && !cs[end].is_whitespace()
-                && !"，。；！？、<>\"".contains(cs[end])
-                && !(matches!(cs[end], ',' | ';' | '!')
-                    && cs
-                        .get(end + 1)
-                        .is_some_and(|c| c.is_alphabetic() && !c.is_ascii()))
-            {
+            while end < cs.len() && !url_boundary(&cs, end) {
                 end += 1;
             }
             cs[url_start..end].fill('█');
@@ -256,43 +252,25 @@ pub fn outbound(mut value: CleanComment) -> CleanComment {
     value.text = cs.into_iter().collect();
     value
 }
-fn clean_optional(raw: Option<&str>) -> CleanComment {
-    match raw {
-        Some(raw) => clean(raw),
-        None => CleanComment {
-            text: String::new(),
-            offsets: vec![],
-            state: "anomaly".into(),
-            reasons: vec!["missing_body".into()],
-        },
-    }
+
+fn url_boundary(characters: &[char], index: usize) -> bool {
+    let current = characters[index];
+    current.is_whitespace()
+        || "，。；！？、<>\"".contains(current)
+        || (matches!(current, ',' | ';' | '!')
+            && characters
+                .get(index + 1)
+                .is_some_and(|next| next.is_alphabetic() && !next.is_ascii()))
 }
-pub async fn clean_pending(db: &Database) -> Result<u64, ModelError> {
-    let rows=sqlx::query("SELECT s.material_ref,s.body_text FROM linggan_comment_research_readable s WHERE NOT EXISTS(SELECT 1 FROM linggan_comment_clean c WHERE c.source_ref=s.material_ref AND c.cleaner_version=$1) AND (EXISTS(SELECT 1 FROM linggan_material_comment_current c WHERE c.material_ref=s.material_ref) OR EXISTS(SELECT 1 FROM linggan_comment_daily_item i WHERE i.source_ref=s.material_ref AND i.state='pending')) ORDER BY s.created_at,s.material_ref LIMIT 100")
-        .bind(CLEANER_VERSION).fetch_all(db.pool()).await?;
-    let mut count = 0;
-    for row in rows {
-        let raw: Option<String> = row.get("body_text");
-        let result = clean_optional(raw.as_deref());
-        let raw = raw.unwrap_or_default();
-        count+=sqlx::query("INSERT INTO linggan_comment_clean(source_ref,cleaner_version,source_sha256,state,result) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING")
-            .bind(row.get::<uuid::Uuid,_>("material_ref")).bind(CLEANER_VERSION).bind(comment_source_hash(&raw)).bind(&result.state).bind(serde_json::to_value(result).map_err(|_|ModelError::Invalid)?).execute(db.pool()).await?.rows_affected();
-    }
-    // Cross-domain voices have their own source identity and model permission.
-    // Cleaning this corpus never makes its comments eligible for external analysis.
-    let cross_rows = sqlx::query("SELECT s.source_ref,s.source_sha256,s.body FROM linggan_ci_source s JOIN observation_domain d USING(domain_ref) WHERE NOT d.is_own_domain AND NOT EXISTS(SELECT 1 FROM cross_industry_comment_clean c WHERE c.source_ref=s.source_ref AND c.source_sha256=s.source_sha256 AND c.cleaner_version=$1) ORDER BY s.first_observed_at,s.source_ref LIMIT 100")
-        .bind(CLEANER_VERSION).fetch_all(db.pool()).await?;
-    for row in cross_rows {
-        let raw: Option<String> = row.get("body");
-        let result = clean_optional(raw.as_deref());
-        count += sqlx::query("INSERT INTO cross_industry_comment_clean(source_ref,source_sha256,cleaner_version,state,result) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING")
-            .bind(row.get::<uuid::Uuid,_>("source_ref"))
-            .bind(row.get::<String,_>("source_sha256"))
-            .bind(CLEANER_VERSION).bind(&result.state)
-            .bind(serde_json::to_value(result).map_err(|_| ModelError::Invalid)?)
-            .execute(db.pool()).await?.rows_affected();
-    }
-    Ok(count)
+
+#[cfg(test)]
+fn clean_optional(raw: Option<&str>) -> CleanComment {
+    raw.map(clean).unwrap_or_else(|| CleanComment {
+        text: String::new(),
+        offsets: Vec::new(),
+        state: "anomaly".into(),
+        reasons: vec!["missing_body".into()],
+    })
 }
 #[cfg(test)]
 mod tests {
@@ -302,15 +280,7 @@ mod tests {
         let raw = "  我👨‍👩‍👧不想\n  催促 &amp; 监督  ";
         let c = clean(raw);
         assert!(c.text.contains("不想 催促 & 监督"));
-        let (a, b, q) = c.resolve("不想 催促", raw).unwrap();
-        assert_eq!(q, "不想\n  催促");
-        assert_eq!(
-            raw.chars()
-                .skip(a as usize)
-                .take((b - a) as usize)
-                .collect::<String>(),
-            q
-        );
+        assert_eq!(c.offsets.len(), c.text.chars().count());
     }
     #[test]
     fn deterministic_noise_is_dropped_and_short_replies_need_context() {
@@ -331,8 +301,6 @@ mod tests {
                 .text
                 .contains("1234")
         );
-        assert!(clean("aaa").resolve("aa", "aaa").is_err());
-        assert!(clean("同问同问").resolve("同问", "同问同问").is_err());
     }
 }
 

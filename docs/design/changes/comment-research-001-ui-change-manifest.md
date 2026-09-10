@@ -1,10 +1,12 @@
 # COMMENT-RESEARCH-001 UI 变更清单
 
-> 状态: 权威当前
+> 状态: 历史归档
 > 最后核对: 2026-09-07
 > 适用范围: Issue #167 评论研究受控源码交付
 > 事实来源: Mog 当前派定、PAGE-COMMENT-RESEARCH-001、0039 migration 与 API
 > 冲突时以谁为准: 用户最新确认、真实来源/权限合同与 LIDS
+
+> 替代说明（2026-09-09）：本文件保留 Issue #167 的 UI 实施边界与历史验收；后续页面的用户任务、状态和读取模型以 [COMMENT-RESEARCH-RESET-001](../../plans/active/comment-research-reset-001.md) 为准。
 
 - 来源：用户确定语料库为基石，评论取得即研究；旧工作台只继承精确语料选择和研究语义，未复制导航、Prisma、样式或聚类阈值。
 - 表面：新增 `/corpus/comments` 四视图、`/corpus/queries` 评论查询入口；Evidence 侧栏只把对应两个入口从禁用变为真实链接。创作者继续未接通。

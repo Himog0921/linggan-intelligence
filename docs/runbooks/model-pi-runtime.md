@@ -1,38 +1,42 @@
 # 模型与 Pi 本机运行说明
 
 > 状态: 权威当前
-> 最后核对: 2026-09-07
-> 适用范围: MODEL-PI-001 交付分支的依赖准备与隔离预览，不自动授权共享部署
-> 事实来源: .nvmrc、固定 npm lock、实际 runtime / preview 脚本
-> 冲突时以谁为准: Mog 对具体 HEAD/共享迁移/运行切换的授权与真实运行证据
+> 最后核对: 2026-09-10
+> 适用范围: COMMENT-RESEARCH-RESET-001 V1 的 Pi adapter 依赖、模型连接与受控调用
+> 事实来源: `.nvmrc`、固定 npm lock、V1 worker/API 合同与本机 runtime 部署手册
+> 冲突时以谁为准: 用户对真实外发/费用的授权、真实运行回执和当前代码
 
-COMMENT-DAILY-001 新增 0043，依赖 0039/0040，已登记 migrate 入口但未应用共享库。0043 创建清洗派生、每日计划、冻结批次/来源、分包租约和重试命令；同时暂停旧 automatic，保留历史。应用迁移不启用每日模型调用。
+模型设置只管理连接、模型、V1 默认研究模型、embedding 配置及不可变调用账本。保存配置或进入评论研究不会发送评论；持续自动排程没有入口。
 
-新使用路径为评论研究 → 勾选少量原声 → 确认模型/供应商/本批额度 → 查看批次与原声结果 → 研究设置中显式启用每日 23:00。首次从启用时刻开始，按评论语料投影首次到达时间计数；暂停恢复后按原截点补建。失败须显式重试；未知用量继续占额度。原页面的旧计划恢复说明仅用于历史兼容。
+## 运行依赖
 
-在新建、空配置的隔离 preview 上执行 `node scripts/verify-comment-daily-api.mjs <origin> <provider URL>`，验证 v2 合成 probe、三条同作品评论一次调用、逐条结果/问题归组、清洗筛选和日设置。该脚本只接受标为 SYNTHETIC_PREVIEW_ONLY 的本机服务，不可用真实配置替代。
+Pi adapter 使用 `.nvmrc` 固定的 Node 版本。运行：
 
-正式凭据由 API 写入 macOS Keychain，service 是 `Linggan.Intelligence.Models.<workspace UUID>`，account 为随机不可变 secret UUID；不枚举 Keychain、不保存 API key 到环境文件或数据库。非 macOS 或 Keychain 失败关闭调用，不降级明文。
+```bash
+bash scripts/runtime/prepare-pi-adapter.sh --install
+bash scripts/runtime/prepare-pi-adapter.sh --check
+npm test --prefix apps/pi-adapter
+```
 
-运行需要 `.nvmrc` 的 Node 24.13.0。默认路径 `$HOME/.nvm/versions/node/v24.13.0/bin/node`；可明确设置绝对 `LINGGAN_PI_NODE`，实际版本仍须匹配。`./scripts/runtime/prepare-pi-adapter.sh --install` 仅在当前 checkout 内按 lock 执行 `npm ci --ignore-scripts`，验证两包精确 0.85.1，并写 gitignored 安装 hash。`--check` 只读验证，不访问模型或数据库。
+安装只在当前 checkout 的 `apps/pi-adapter/node_modules/` 执行 `npm ci --ignore-scripts`，并写入 gitignored 安装 hash；不读取模型凭据、不访问数据库或调用 provider。adapter 由构建该 Rust binary 的 checkout 定位，不能脱离来源目录单独搬运。
 
-常驻服务的 sync 在构建三个 Rust binary 后准备依赖，launch 显式传固定 Node 路径并检查。适配器脚本从构建时 checkout 的 `apps/pi-adapter/src/adapter.mjs` 定位，因此 binary 必须连同构建 checkout 使用，不能单独搬到另一目录后删除来源。runtime-main 当前流程满足这个路径布局；升级仍须 Mog 单独授权，本文不能证明已经切换。
+正式凭据由 API 写入 macOS Keychain，service 为 `Linggan.Intelligence.Models.<workspace UUID>`，account 是随机不可变 secret UUID。不得将 API key 写入环境文件、数据库、日志、Git 或测试 fixture；Keychain 不可用时关闭调用，不降级为明文。
 
-migration 0040 已登记 `local-runtime.sh migrate`；它依赖 #168 的 0039。服务不会自行迁移共享数据库。评论模型循环已在 `linggan-worker` 内独立异步组合，巡检任务不 await 模型；10 秒检查已授权计划。读页面/保存配置不创建授权。暂停连接/计划阻止之后的派发，已发送的远端请求不保证撤销。心跳 90 秒不新鲜时页面说明未获当前运行证明。
+## V1 调用边界
 
-`linggan-comment-worker --execute [--once]` 为单独入口，消费相同账本，受同一并发/预算检查；`--queue-only [--once]` 保留旧无模型同步行为。在正常服务已经执行时无需另起一个常驻评论进程。
+1. 用户在模型设置保存并测试可调用的生成模型，以及独立的 embedding 配置。
+2. 用户在评论研究保存一次 policy（研究模型与单轮总 Token 限额）。这只保存策略；语义提取、向量候选与问题归并的每笔调用都附属该 Run 并写入通用调用账本。
+3. 用户点击“开始研究”后，V1 冻结当前普通用户且可读的评论；`linggan-comment-worker --execute [--once]` 依次执行语义提取、embedding、候选归并和结果发布。
+4. 生成模型只输出 semantic Atom 或 same/new problem JSON；embedding 只返回向量。统计、membership、变化与发布由 Rust/SQL 校验和写入。
+5. 每次调用落入通用 `linggan_model_invocation`：请求 hash、模型/连接版本、预留与实际用量、provider 失败及 V1 stage/run reference 可审计。adapter/provider 的短暂失败最多重试到队列上限；不兼容输入/配置与无效输出终态留痕，不阻塞后续 Item。
 
-恢复暂停计划：进入「额度与运行」找到原计划，点击「恢复此计划」并确认；重复选择已有来源时，回执中的所属计划链接可直接定位原计划。恢复使用当前修订号，旧页面或旧请求冲突时先刷新；不重置尝试、配置、来源、额度或时间起点。若连接仍停用须单独启用连接。当前自动计划接续原时间范围，被替代的旧自动计划仅接续已排工作，不重新接管新增。额度不足或达到次数上限不能靠恢复绕过；已完成来源不会重跑。worker 的维护恢复即使没有可派发工作也会提交，未知消耗仍占用原预留。
+真实评论外发、费用和语义质量仅在用户主动开始一轮研究后产生；部署、保存策略、调用测试和本 runbook 不构成此授权。供应商测试应使用最小 synthetic input；真实材料需遵守当前用途、最小样本与输出边界。
 
-## 隔离验证
+## 验证边界
 
-1. `./scripts/runtime/prepare-pi-adapter.sh --install`（仅本 checkout 的 npm 依赖）。
-2. `npm test --prefix apps/pi-adapter`：真实 SDK 对本机 SSE fixture，包含三种支持协议、错误/重定向、未知用量及无限流超时。
-3. `./scripts/test-model-pi-postgres.sh`：随机独立 PostgreSQL/container/volume，完整 migration 与合成材料；trap 清理。无需项目 `.env` 或共享数据库。
-4. `cargo test -p linggan-intelligence --test model_keychain --locked -- --ignored`：只写读更换删除随机 service/account 的合成 secret，不枚举/读取已有项。
-5. `./scripts/preview-model-pi.sh`：创建独立 PG、合成评论、真实 API、独立评论 worker 和本地合成供应商，输出设置 URL/provider URL/PID。明确 `LINGGAN_MODEL_SYNTHETIC_PREVIEW=SYNTHETIC-NOT-EVIDENCE`，只接纳公开 marker `SYNTHETIC-NOT-A-CREDENTIAL` 和本机地址。这个 store 不接受真实 key。
-6. 在新预览上运行 `node scripts/verify-model-pi-api.mjs <origin> <provider URL>`；脚本先验证合成存储与每条来源标识才写入。它配置一个模型，验证两条合成来源的执行、暂停/显式恢复、过期恢复冲突和所属计划定位；要做从空设置开始的浏览器验收，应重建预览。
+- `bash scripts/test-comment-research-postgres.sh`：随机隔离 PostgreSQL 的 V1 schema、queue、poison isolation、结果与 route proof；不访问共享数据库或 provider。
+- `npm test --prefix apps/pi-adapter`：Pi SDK/transport/structured-output fixture proof；不含真实凭据或评论。
+- `cargo test -p linggan-intelligence --test model_keychain --locked -- --ignored`：只读取、替换、删除随机 synthetic Keychain secret，不枚举已有秘密。
+- `docs/runbooks/local-runtime-deployment.md`：共享开发库 migration、runtime 切换与 :3000 验收的唯一运行步骤。
 
-关闭预览所属 API PID 会让脚本退出并清理它拥有的 worker、fixture、container、volume。脚本保留 `/tmp` 下的合成日志，供审核定位。不要用 shared `:3000` 或真实库 URL 代替。
-
-真实外部首次试验：在已获部署/运行授权的配置页由 Mog 输入自己的供应商、准确模型 ID 与凭据，先合成能力测试，再明确选定一条已许可原声及 token 额度试运行。保存本身不授权全库；历史与自动新增分别启用。外部内容处理和费用授权由 Mog 决定，本包没有代填或搜寻其它项目凭据。
+这些证明不等于真实 provider 可用、真实评论语义正确或用户业务验收。

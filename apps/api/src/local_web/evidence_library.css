@@ -37,7 +37,10 @@
 .ev-filter-toggle b{min-width:18px;padding:1px 5px;background:var(--v7-sunken);color:var(--v7-muted);font:700 10.5px var(--lgi-font-mono);text-align:center}
 .ev-filter-toggle[data-active="true"] b{background:var(--v7-red);color:var(--v7-white)}
 .ev-sort-toggle{display:flex;align-items:center;gap:9px;min-width:132px;justify-content:space-between}
-.ev-caret{width:7px;height:7px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:translateY(-2px) rotate(45deg)}
+/* 折角自己画，不用字符：字体里的 ↓ 与 ⌄ 各家渲染粗细不一，而且没法参与状态变化。
+ * 2px 描边给足重量；展开时翻上去——一个不会动的折角，等于让人自己记住面板开没开。 */
+.ev-caret{width:8px;height:8px;border-right:2px solid currentColor;border-bottom:2px solid currentColor;transform:translateY(-2px) rotate(45deg);transition:transform var(--lgi-duration-state) var(--lgi-ease-ui)}
+[aria-expanded="true"] .ev-caret{transform:translateY(2px) rotate(-135deg)}
 .ev-button[aria-expanded="true"]{background:var(--v7-black);color:var(--v7-white);border-color:var(--v7-black)}
 .ev-button[aria-expanded="true"] b{background:var(--v7-white);color:var(--v7-black)}
 .ev-button[aria-expanded="true"][data-active="true"] b{background:var(--v7-red);color:var(--v7-white)}

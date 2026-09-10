@@ -12,7 +12,7 @@
 /* 十三列一次排满，不再靠横向滚动。定宽列写成 minmax(0,N)：窗口窄时它们按比例收窄并
  * 省略文字，而不是把整张表推出屏幕——一张需要左右拖动才能看全的目录，等于要求人
  * 记住左边看过什么。选择框、编号与操作三列保持定宽：它们是可点区域，收窄会让人点不中。 */
-.c-tg-table-head.c-tg-creator-grid,.c-tg-item.c-tg-creator-grid,.c-tg-table-head.c-tg-keyword-grid,.c-tg-item.c-tg-keyword-grid{display:grid;grid-template-columns:40px 48px minmax(140px,max-content) minmax(0,52px) minmax(0,72px) minmax(0,92px) minmax(0,60px) minmax(0,116px) minmax(0,64px) minmax(0,84px) minmax(0,104px) minmax(0,104px) minmax(148px,1fr);gap:var(--lgi-space-3)}
+.c-tg-table-head.c-tg-creator-grid,.c-tg-item.c-tg-creator-grid,.c-tg-table-head.c-tg-keyword-grid,.c-tg-item.c-tg-keyword-grid{display:grid;grid-template-columns:40px 48px minmax(192px,1fr) minmax(0,52px) minmax(0,72px) minmax(0,92px) minmax(0,92px) minmax(0,124px) minmax(0,84px) minmax(0,100px) minmax(0,104px) minmax(0,104px) 200px;gap:var(--lgi-space-2)}
 .c-tg-table-head{width:100%;min-height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);background:var(--lgi-canvas-low);color:var(--lgi-muted);font:600 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans);letter-spacing:var(--lgi-ls-normal)}
 .c-tg-table-head>span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .c-tg-item{position:relative;width:100%;min-height:64px;box-sizing:border-box;padding:var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline)}
@@ -35,6 +35,13 @@
 .c-tg-platform{color:var(--lgi-ink);font-weight:600}
 .c-tg-number-value,.c-tg-time{font-family:var(--lgi-font-mono);font-variant-numeric:tabular-nums}
 .c-tg-number-value{color:var(--lgi-ink);font-weight:700;text-align:right}
+/* 数字列右对齐是为了让位数对齐着比。表头必须跟着一起右对齐——否则表头贴左、
+ * 数字贴右，同一列的两端各站一边，读的人会以为是错位。 */
+.c-tg-head-num{text-align:right}
+/* 右对齐的值贴在列的右边缘，紧邻的左对齐列又贴在自己的左边缘，两者只隔一个 8px 的
+ * 栅格间距——「43 / 43」和「巡查中」就这样黏成一团。给数字列一个右内边距，把值从
+ * 边缘推开，视觉间距变成 8+12。表头同处理，否则表头与数值又会各站一边。 */
+.c-tg-number-value,.c-tg-head-num{padding-right:var(--lgi-space-3)}
 .c-tg-time{color:var(--lgi-body)}
 .c-tg-unknown{color:var(--lgi-muted)}
 .c-tg-truth{display:inline-flex;align-items:center;max-width:100%;min-height:24px;overflow:hidden;text-overflow:ellipsis;font-size:var(--lgi-text-label);font-weight:600;white-space:nowrap}
@@ -207,13 +214,46 @@
 .c-dw-retire label b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:600}
 .c-dw-retire label span{flex:0 0 auto;color:var(--lgi-muted);font:400 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono)}
 
-/* 行内次动作：停止观察是一个开关，删除是一个危险动作。两者形状必须不同——
- * 长得像同一个按钮，人迟早会点错那个不可逆的。 */
-.c-tg-actions{flex-wrap:wrap;gap:var(--lgi-space-2);justify-content:flex-end}
-.c-tg-toggle{margin:0}
-.c-tg-btn-slim{min-height:28px;height:28px;padding:0 var(--lgi-space-2);font-size:var(--lgi-text-label)}
-.c-tg-danger{align-self:center;color:var(--lgi-muted);font-size:var(--lgi-text-label);text-decoration:underline}
-.c-tg-danger:hover{color:var(--lgi-danger,#b3261e)}
+/* 行内动作：查看档案、观察开关、删除。
+ *
+ * 三者**必须同高同边框重量**。此前它们是 40px 描边按钮 / 28px 浅色按钮 / 一行下划线
+ * 文字，三种尺寸三种形状挤在一格里，读的人先要分辨「这三个是不是一类东西」。
+ * 现在统一到 34px + 1px 墨线，沿用证据库 `.ev-button` 那套已被认可的控件语言。
+ *
+ * 区分不靠尺寸，靠颜色与形状：删除是墨线里唯一的红，开关是唯一带滑轨的。 */
+.c-tg-actions{flex-wrap:nowrap;gap:var(--lgi-space-2);justify-content:flex-end}
+.c-tg-toggle{margin:0;display:flex;align-items:center}
+
+.c-tg-act{display:inline-flex;align-items:center;justify-content:center;box-sizing:border-box;
+  height:34px;min-height:34px;padding:0 var(--lgi-space-3);
+  border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas);
+  color:var(--lgi-ink);font:650 var(--lgi-text-label)/1 var(--lgi-font-sans);
+  white-space:nowrap;text-decoration:none;cursor:pointer;
+  transition:background var(--lgi-duration-press) var(--lgi-ease-ui),color var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-tg-act:hover{background:var(--lgi-ink);color:var(--lgi-canvas)}
+
+/* 删除是这一行里唯一的红。不可逆的动作不该和「查看」长得一样。 */
+.c-tg-act-danger{border-color:var(--lgi-danger);color:var(--lgi-danger)}
+.c-tg-act-danger:hover{background:var(--lgi-danger);color:var(--lgi-canvas)}
+
+/* 观察开关：与两侧按钮同高，靠滑轨形状把自己和按钮区分开。
+ *
+ * 此前是 38×21 的细线小方块，夹在两个 28~40px 的按钮之间显得单薄。现在与按钮同高，
+ * 2px 外框给足分量；轨道用点阵纹理（v7 的采样点阵材料），滑块是实心方块。 */
+.c-tg-switch{position:relative;overflow:hidden;box-sizing:border-box;flex:0 0 auto;
+  width:60px;height:34px;padding:0;border:2px solid var(--lgi-border-solid);
+  /* 轨道用下沉面而不是花纹：60×34 这么小的控件上，点阵会读成噪点而不是材料。
+   * 深度靠明暗——凹下去的槽 + 压在上面的实心滑块，这才是「有分量」。 */
+  background:var(--lgi-canvas-sunken);
+  cursor:pointer;transition:background-color var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-tg-switch::before{content:"";position:absolute;z-index:1;top:3px;left:3px;width:24px;height:24px;
+  background:var(--lgi-ink);
+  transition:left var(--lgi-duration-state) var(--lgi-ease-ui),background var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-tg-switch[aria-pressed="true"]::before{left:29px;background:var(--lgi-signal)}
+.c-tg-switch:hover{background-color:var(--lgi-canvas-low)}
+/* 观察中时整条槽透一点信号色，隔着一米也能看出哪些目标是活的 */
+.c-tg-switch[aria-pressed="true"]{background-color:var(--lgi-signal-soft)}
+.c-tg-switch:focus-visible{outline:2px solid var(--lgi-ink);outline-offset:2px}
 .c-tg-delete{max-width:640px}
 .c-tg-delete-cols{display:grid;grid-template-columns:1fr 1fr;gap:var(--lgi-space-4);margin:var(--lgi-space-4) 0}
 .c-tg-delete-cols b{display:block;margin-bottom:var(--lgi-space-2);color:var(--lgi-ink);font-size:var(--lgi-text-label)}
@@ -221,3 +261,152 @@
 .c-tg-delete-blocked{margin:var(--lgi-space-2) 0;color:var(--lgi-danger,#b3261e);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
 .c-tg-delete label{display:block;margin:var(--lgi-space-3) 0;color:var(--lgi-body);font-size:var(--lgi-text-label)}
 .c-tg-delete label input{display:block;width:100%;margin-top:var(--lgi-space-2);min-height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);border:1px solid var(--lgi-border)}
+
+/* ── 顶部工具条：统一到证据库那套已被认可的控件语言 ──────────────────────────
+ *
+ * 此前这一条上并存三种控件：一个浅色描边的排序链接（箭头是文字 ↓）、两个**原生
+ * select**（浏览器自带箭头，各系统长得都不一样）、一个输入框、两个不同粗细的按钮。
+ * 同一条工具条上四种边框、三种高度、两种箭头。
+ *
+ * 现在全部 44px 高、1px 墨线、650/12px，与 `.ev-button` 对齐；箭头一律自绘。 */
+.c-tg-toolbar .c-tg-ctl,
+.c-tg-toolbar .c-tg-field select,
+.c-tg-toolbar .c-tg-field input,
+.c-tg-toolbar .c-tg-batch-open,
+.c-tg-toolbar .c-btn-primary{
+  box-sizing:border-box;height:44px;min-height:44px;padding:0 var(--lgi-space-4);
+  border:1px solid var(--lgi-border-solid);border-radius:0;background:var(--lgi-canvas);
+  color:var(--lgi-ink);font:650 12px/1 var(--lgi-font-sans);
+  transition:background var(--lgi-duration-press) var(--lgi-ease-ui),color var(--lgi-duration-press) var(--lgi-ease-ui)}
+
+.c-tg-toolbar .c-tg-ctl{display:inline-flex;align-items:center;gap:var(--lgi-space-2);
+  text-decoration:none;cursor:pointer}
+.c-tg-toolbar .c-tg-ctl:hover,
+.c-tg-toolbar .c-tg-batch-open:not([disabled]):hover{background:var(--lgi-ink);color:var(--lgi-canvas)}
+
+/* 原生 select 的箭头去掉，换成和别处同一个自绘折角——否则同一条工具条上会同时出现
+ * 系统箭头和我们的折角，两种粗细两种角度。 */
+/* 折角用描边画在包裹的 label 上。本文件禁止一切渐变写法（见 target_inspector 的样式
+ * 检查）——那条规矩防的是把纹理做成廉价图案皮肤，折角同样该用描边而不是色彩过渡。
+ * select 是替换元素，自己挂不了伪元素，所以挂在 label 上并让它不吃指针事件。 */
+.c-tg-toolbar .c-tg-field{position:relative;display:inline-flex}
+.c-tg-toolbar .c-tg-field select{appearance:none;-webkit-appearance:none;
+  padding-right:var(--lgi-space-8);cursor:pointer}
+.c-tg-toolbar .c-tg-field::after{content:"";position:absolute;right:var(--lgi-space-4);top:50%;
+  width:8px;height:8px;margin-top:-6px;
+  border-right:2px solid var(--lgi-ink);border-bottom:2px solid var(--lgi-ink);
+  transform:rotate(45deg);pointer-events:none}
+.c-tg-toolbar .c-tg-field select:hover{background-color:var(--lgi-canvas-low)}
+.c-tg-toolbar .c-tg-field input::placeholder{color:var(--lgi-muted)}
+.c-tg-toolbar .c-tg-field input:focus{outline:0;box-shadow:inset 0 0 0 1px var(--lgi-border-solid)}
+
+/* 主按钮：黑底白字 + 右侧点阵纹理，与证据库的「读取材料」同一个做法。
+ * 不用硬阴影——工具条是常驻控件，天天在眼前，投影会一直在喊。 */
+.c-tg-toolbar .c-btn-primary{position:relative;overflow:hidden;border-width:2px;
+  padding-right:var(--lgi-space-10);background:var(--lgi-ink);color:var(--lgi-canvas);cursor:pointer}
+/* 点阵引用 token，不在本文件里写任何渐变字面量；淡出用整体透明度而不是遮罩，
+ * 同样是为了守住上面那条规矩。 */
+.c-tg-toolbar .c-btn-primary::after{content:"";position:absolute;top:0;right:0;bottom:0;width:34%;
+  background-image:var(--lgi-mosaic-on-dark);background-size:9px 9px;
+  opacity:.5;pointer-events:none}
+.c-tg-toolbar .c-btn-primary:hover{background:var(--lgi-signal)}
+
+.c-tg-toolbar .c-tg-batch-open[disabled]{border-color:var(--lgi-border);color:var(--lgi-muted);cursor:not-allowed}
+
+/* 自绘折角，与证据库 .ev-caret 同一形状 */
+.c-tg-caret{width:8px;height:8px;flex:0 0 auto;
+  border-right:2px solid currentColor;border-bottom:2px solid currentColor;
+  transform:translateY(-2px) rotate(45deg);
+  transition:transform var(--lgi-duration-state) var(--lgi-ease-ui)}
+.c-tg-ctl:hover .c-tg-caret{transform:translateY(0) rotate(45deg)}
+
+/* ── 工具条与第一张表之间只留一条线 ────────────────────────────────────────
+ *
+ * 此前这里叠了两条：工具条自己的底线，和「创作者档案」那一行的底线，中间还夹着一段
+ * 空白。两条平行的线离得越近，越像是排版事故而不是分区。
+ *
+ * 现在工具条不再自带线，由「创作者档案」那条线兼任分隔——少一条线，少一段留白。 */
+/* 工具条与内容之间只留**一条**线，且是这条粗线。tab 的选中下划线要落在它上面——
+ * 一条线同时承担「分区」和「你在哪个分类」两件事，比两条各说一半更省。 */
+.c-page .c-toolbar{border-bottom:0}
+.c-body .c-tg-kind:first-child{margin-top:0}
+
+/* tab 与右侧控件在同一行里垂直居中。
+ * tab 是 46px、控件是 44px，行高由高者决定；此前 tab 贴着行底（上留 7px、下留 1px），
+ * 因为它的选中下划线要贴住工具条的底线。那条线已经去掉，下划线就没有必须贴底的理由了。 */
+/* V4 那段把 .c-toolbar 设成 align-items:flex-end，原意是让 tab 的选中下划线压住工具条
+ * 自己的底线。那条底线已经去掉（由「创作者档案」那条兼任），压底就没有理由了，改回居中。 */
+/* 控件在粗线上方的带里垂直居中：工具条 align-items:center，控件 44px、带 48px，
+ * 上下各 2px。
+ *
+ * 但 tab 不能一起居中——它的下划线必须贴住那条粗线。所以 tab 单独 stretch 撑满整带，
+ * 文字在自己内部居中，下划线落在带底，也就是线上。 */
+.c-page .c-toolbar{align-items:center}
+/* align-items:center 会把 tab 容器整体居中，它的底边就够不到那条粗线。
+ * 让容器自己 stretch 撑满整带（align-self），文字仍在其内部居中——
+ * 于是下划线落在带底，也就是落在粗线上。 */
+.c-toolbar .c-tabs{align-self:stretch;align-items:stretch}
+.c-toolbar .c-tabs a,.c-toolbar .c-tabs button{height:auto;align-items:center}
+
+/* 主按钮收窄：黑底加纹理本身就够重，再撑宽就成了页面上最吵的东西。
+ * 点阵带同步收窄，否则纹理会占掉按钮一半。 */
+.c-tg-toolbar .c-btn-primary{padding-right:var(--lgi-space-8)}
+.c-tg-toolbar .c-btn-primary::after{width:26%}
+
+/* 自绘下拉的外观。只有在 JS 真的画出来之后才生效（靠 .c-tg-drawn 这个类），
+ * 没有 JS 时原生 select 照旧可见可用。 */
+/* 给 .c-tg-field 设了 display 就会盖掉浏览器自带的 [hidden]{display:none}——
+ * 关键词排序只在建关键词目标时才该出现，盖掉之后它在创作者模式下也会露出来。 */
+.c-tg-toolbar .c-tg-field[hidden]{display:none}
+.c-tg-drawn{position:relative}
+.c-tg-drawn>select{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.c-tg-drawn::after{display:none}
+.c-tg-toolbar .c-tg-drawn-toggle{display:inline-flex;align-items:center;justify-content:space-between;
+  gap:var(--lgi-space-3);min-width:110px;cursor:pointer}
+/* 展开时按钮反白，和证据库那套一致：一个不变样的触发器，等于让人自己记住开没开。 */
+.c-tg-toolbar .c-tg-drawn-toggle[aria-expanded="true"]{background:var(--lgi-ink);color:var(--lgi-canvas)}
+.c-tg-drawn-toggle[aria-expanded="true"] .c-tg-caret{transform:translateY(2px) rotate(-135deg)}
+.c-tg-drawn-list{position:absolute;z-index:40;top:calc(100% + 4px);left:0;min-width:100%;
+  display:grid;padding:var(--lgi-space-1);
+  border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas)}
+.c-tg-drawn-list[hidden]{display:none}
+.c-tg-drawn-list button{display:block;width:100%;padding:var(--lgi-space-2) var(--lgi-space-3);
+  border:0;background:transparent;color:var(--lgi-ink);
+  font:650 12px/1 var(--lgi-font-sans);text-align:left;white-space:nowrap;cursor:pointer;
+  transition:background var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-tg-drawn-list button:hover{background:var(--lgi-canvas-sunken)}
+.c-tg-drawn-list button[aria-selected="true"]{background:var(--lgi-ink);color:var(--lgi-canvas)}
+
+/* 那条分区粗线离工具条更近一些：它属于下面的表，不该在中间悬着一段空白。 */
+.c-page .c-tg-workspace{margin-top:var(--lgi-space-2)}
+
+/* 关键词表的「数据更新」与创作者表的「详情进度」在同一列位上。前者左对齐、后者
+ * 右对齐时，两张表的同一列各站一端，纵向看就是错开的。让它跟着右对齐。 */
+/* 第 8 列（详情进度／数据更新）单独多留一段右内边距。
+ *
+ * 这一列 124px 宽而内容只有 40~60px，右对齐把内容全顶到右缘：实测左侧空 86px、
+ * 右侧只剩 20px，看着就是贴着「巡查状态」。让两侧均衡需要约 45px，取 40px 档。
+ * 只作用于第 8 列——第 7 列（作品目录／最近命中）与第 9 列的间距本来就是对的。 */
+.c-tg-cell-end{text-align:right}
+.c-tg-cell-end,.c-tg-head-end{padding-right:var(--lgi-space-10)}
+
+/* 成功回执：右下角角标，3 秒后自行退场。
+ *
+ * 退场用 CSS 动画而不是 JS——脚本没跑起来时，一个永不消失的浮层比常驻横幅更糟。
+ * `forwards` 让它停在终态，`visibility:hidden` 保证它不再挡住底下的东西。 */
+.c-tg-toast{position:fixed;right:var(--lgi-space-6);bottom:var(--lgi-space-6);z-index:80;
+  max-width:min(420px,calc(100vw - var(--lgi-space-12)));margin:0;
+  padding:var(--lgi-space-4) var(--lgi-space-5);
+  border:2px solid var(--lgi-border-solid);background:var(--lgi-canvas);
+  color:var(--lgi-ink);font-size:var(--lgi-text-body);line-height:var(--lgi-lh-body,1.5);
+  box-shadow:var(--lgi-space-2) var(--lgi-space-2) 0 var(--lgi-border-solid);
+  animation:c-tg-toast-in var(--lgi-duration-overlay) var(--lgi-ease-enter),
+            c-tg-toast-out var(--lgi-duration-panel) var(--lgi-ease-ui) 3s forwards}
+.c-tg-toast b{display:block;margin-bottom:var(--lgi-space-1);font-weight:700}
+@keyframes c-tg-toast-in{from{opacity:0;transform:translateY(var(--lgi-space-3))}to{opacity:1;transform:none}}
+@keyframes c-tg-toast-out{to{opacity:0;visibility:hidden}}
+
+@media (prefers-reduced-motion:reduce){
+  /* 关掉位移，但**保留定时退场**：它仍然该在 3 秒后让开，只是不再滑动。 */
+  .c-tg-toast{animation:c-tg-toast-out 1ms linear 3s forwards}
+}

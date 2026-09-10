@@ -1,66 +1,176 @@
-//! Safe projections never select a credential or its reference for browser output.
-use crate::{model_plans::model_version, model_settings::*};
+//! Browser-safe model configuration projection for the V1 research setup.
+
+use crate::{embedding_settings, model_settings::*};
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
-use sqlx::Row;
+use sqlx::{Row, postgres::PgRow};
 use uuid::Uuid;
-pub async fn read_model_settings(db: &Database, synthetic: bool) -> Result<Value, ModelError> {
-    read_model_settings_with_plan(db, synthetic, None).await
-}
-pub async fn read_model_settings_with_plan(
-    db: &Database,
+
+pub async fn read_model_settings(
+    database: &Database,
     synthetic: bool,
-    focused_plan: Option<Uuid>,
 ) -> Result<Value, ModelError> {
-    ensure_model_schema(db).await?;
-    let legacy_plans_available = !crate::comment_intelligence::schema_ready(db).await?;
-    let workspace=sqlx::query("SELECT workspace_ref,default_config_ref,active_auto_plan_ref,worker_last_seen_at::text AS worker_seen,worker_last_seen_at>scope_001_now()-interval '90 seconds' AS worker_recent,worker_state,worker_last_error FROM linggan_model_workspace WHERE singleton").fetch_one(db.pool()).await?;
-    let connections=sqlx::query("SELECT c.connection_ref,c.enabled,c.revision,v.version_ref,v.name,v.api,v.base_url,v.local_endpoint,(SELECT result FROM linggan_model_invocation i WHERE i.connection_version_ref=v.version_ref AND operation IN ('connect','discover') ORDER BY i.created_at DESC,i.invocation_ref DESC LIMIT 1) AS test FROM linggan_model_connection c JOIN LATERAL(SELECT * FROM linggan_model_connection_version WHERE connection_ref=c.connection_ref ORDER BY revision DESC LIMIT 1)v ON true ORDER BY c.created_at")
-        .fetch_all(db.pool()).await?;
-    let models=sqlx::query(with_model_callability("SELECT m.model_ref,m.model_id,m.connection_version_ref,v.name AS connection_name,c.enabled,v.revision=(SELECT max(latest.revision) FROM linggan_model_connection_version latest WHERE latest.connection_ref=c.connection_ref) AS current_version,COALESCE((SELECT i.state='succeeded' AND i.result->>'commentContract'=$1 AND i.result->>'commentQualified'='true' FROM linggan_model_invocation i WHERE i.model_ref=m.model_ref AND operation='probe' ORDER BY i.created_at DESC,i.invocation_ref DESC LIMIT 1),false) AS qualified,__MODEL_CALLABLE__ AS callable,(SELECT state FROM linggan_model_invocation i WHERE i.model_ref=m.model_ref AND operation='probe' ORDER BY i.created_at DESC,i.invocation_ref DESC LIMIT 1) AS test_state,(SELECT result FROM linggan_model_invocation i WHERE i.model_ref=m.model_ref AND operation='probe' ORDER BY i.created_at DESC,i.invocation_ref DESC LIMIT 1) AS test FROM linggan_model_entry m JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection c USING(connection_ref) ORDER BY m.created_at"))
-        .bind(crate::comment_daily::DAILY_RULE).fetch_all(db.pool()).await?;
-    let config:Option<Value>=sqlx::query_scalar("SELECT jsonb_build_object('configRef',config_ref,'modelRef',model_ref,'inputTokenLimit',input_token_limit,'outputTokenLimit',output_token_limit,'timeoutSeconds',timeout_seconds,'maxAttempts',max_attempts,'autoSourceLimit',auto_source_limit,'autoTokenLimit',auto_token_limit) FROM linggan_model_config WHERE config_ref=$1")
-        .bind(workspace.get::<Option<Uuid>,_>("default_config_ref")).fetch_optional(db.pool()).await?;
-    let plans=sqlx::query("SELECT p.*,p.created_at::text AS created,(SELECT count(*) FROM linggan_comment_model_work b JOIN linggan_model_config f ON f.config_ref=b.config_ref JOIN linggan_model_entry m USING(model_ref) JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection c USING(connection_ref) JOIN linggan_comment_analysis_work w USING(work_ref) WHERE b.plan_ref=p.plan_ref AND w.state='pending' AND NOT c.enabled) AS disabled_count,(SELECT min(f.input_token_limit+f.output_token_limit) FROM linggan_comment_model_work b JOIN linggan_model_config f ON f.config_ref=b.config_ref JOIN linggan_comment_analysis_work w USING(work_ref) WHERE b.plan_ref=p.plan_ref AND w.state='pending') AS next_reservation,(SELECT count(*) FROM linggan_comment_model_work b JOIN linggan_comment_analysis_work w USING(work_ref) WHERE b.plan_ref=p.plan_ref AND w.state='pending') AS pending_count,(SELECT count(*) FROM linggan_comment_model_work b JOIN linggan_comment_analysis_work w USING(work_ref) WHERE b.plan_ref=p.plan_ref AND w.state='running') AS running_count,(SELECT count(*) FROM linggan_comment_model_work b JOIN linggan_comment_analysis_work w USING(work_ref) WHERE b.plan_ref=p.plan_ref AND w.state IN ('succeeded','no_signal','failed')) AS finished_count,(SELECT count(*) FROM linggan_comment_model_work w WHERE w.plan_ref=p.plan_ref) AS source_count,(SELECT COALESCE(sum(charged_tokens),0)::bigint FROM linggan_model_invocation i WHERE i.plan_ref=p.plan_ref) AS budget_used,(SELECT count(*) FROM linggan_model_invocation i WHERE i.plan_ref=p.plan_ref AND (i.input_tokens IS NULL OR i.output_tokens IS NULL)) AS unknown_usage_count FROM linggan_model_plan p ORDER BY COALESCE(p.plan_ref=$1,false) DESC,p.created_at DESC LIMIT 50")
-        .bind(focused_plan).fetch_all(db.pool()).await?;
-    let runs=sqlx::query("SELECT i.invocation_ref,i.operation,i.state,i.failure_code,i.input_tokens,i.output_tokens,i.charged_tokens,i.reserved_tokens,i.elapsed_ms,i.created_at::text AS created,i.model_ref,i.work_ref,i.config_ref,i.result,model.model_id,work.source_ref,work.attempts FROM linggan_model_invocation i LEFT JOIN linggan_model_entry model USING(model_ref) LEFT JOIN linggan_comment_analysis_work work USING(work_ref) ORDER BY i.created_at DESC,i.invocation_ref DESC LIMIT 100")
-        .fetch_all(db.pool()).await?;
-    Ok(
-        json!({"commentContract":crate::comment_daily::DAILY_RULE,"model":current_comment_model_state(db).await?,"legacyPlansAvailable":legacy_plans_available,"commentResearchUrl":"/corpus/comments","workspaceRef":workspace.get::<Uuid,_>("workspace_ref"),"activeAutoPlanRef":workspace.get::<Option<Uuid>,_>("active_auto_plan_ref"),"secretStorage":if synthetic{"SYNTHETIC_PREVIEW_ONLY"}else{"MACOS_KEYCHAIN"},
-        "worker":{"lastSeenAt":workspace.get::<Option<String>,_>("worker_seen"),"recent":workspace.get::<Option<bool>,_>("worker_recent").unwrap_or(false),"state":workspace.get::<Option<String>,_>("worker_state"),"lastError":workspace.get::<Option<String>,_>("worker_last_error")},
-        "connections":connections.iter().map(|r|json!({"connectionRef":r.get::<Uuid,_>("connection_ref"),"versionRef":r.get::<Uuid,_>("version_ref"),"name":r.get::<String,_>("name"),"api":r.get::<String,_>("api"),"baseUrl":r.get::<String,_>("base_url"),"localEndpoint":r.get::<bool,_>("local_endpoint"),"enabled":r.get::<bool,_>("enabled"),"revision":r.get::<i32,_>("revision"),"test":r.get::<Option<Value>,_>("test"),"credentialStored":true})).collect::<Vec<_>>(),
-        "models":models.iter().map(|r|json!({"modelRef":r.get::<Uuid,_>("model_ref"),"modelId":r.get::<String,_>("model_id"),"connectionVersionRef":r.get::<Uuid,_>("connection_version_ref"),"connectionName":r.get::<String,_>("connection_name"),"currentVersion":r.get::<bool,_>("current_version"),"commentQualified":r.get::<bool,_>("qualified"),"modelCallable":r.get::<bool,_>("callable"),"testState":r.get::<Option<String>,_>("test_state"),"enabled":r.get::<bool,_>("enabled"),"test":r.get::<Option<Value>,_>("test")})).collect::<Vec<_>>(),"config":config,
-        "plans":plans.iter().map(|r|json!({"planRef":r.get::<Uuid,_>("plan_ref"),"kind":r.get::<String,_>("kind"),"enabled":r.get::<bool,_>("enabled"),"revision":r.get::<i32,_>("revision"),"sourceLimit":r.get::<i32,_>("source_limit"),"sourceCount":r.get::<i64,_>("source_count"),"tokenLimit":r.get::<i64,_>("token_limit"),"budgetUsed":r.get::<i64,_>("budget_used"),"unknownUsageCount":r.get::<i64,_>("unknown_usage_count"),"pendingCount":r.get::<i64,_>("pending_count"),"disabledCount":r.get::<i64,_>("disabled_count"),"nextReservation":r.get::<Option<i32>,_>("next_reservation"),"runningCount":r.get::<i64,_>("running_count"),"finishedCount":r.get::<i64,_>("finished_count"),"createdAt":r.get::<String,_>("created")})).collect::<Vec<_>>(),
-        "runs":runs.iter().map(|r|json!({"invocationRef":r.get::<Uuid,_>("invocation_ref"),"operation":r.get::<String,_>("operation"),"state":r.get::<String,_>("state"),"failureCode":r.get::<Option<String>,_>("failure_code"),"inputTokens":r.get::<Option<i64>,_>("input_tokens"),"outputTokens":r.get::<Option<i64>,_>("output_tokens"),"budgetAccounted":r.get::<i64,_>("charged_tokens"),"reservedTokens":r.get::<i64,_>("reserved_tokens"),"costUsd":null,"elapsedMs":r.get::<Option<i64>,_>("elapsed_ms"),"createdAt":r.get::<String,_>("created"),"modelId":r.get::<Option<String>,_>("model_id"),"workRef":r.get::<Option<Uuid>,_>("work_ref"),"sourceRef":r.get::<Option<Uuid>,_>("source_ref"),"configRef":r.get::<Option<Uuid>,_>("config_ref"),"attempts":r.get::<Option<i32>,_>("attempts")})).collect::<Vec<_>>() }),
-    )
-}
-pub async fn current_model_version(db: &Database) -> Result<Option<String>, ModelError> {
-    let config: Option<Uuid> = sqlx::query_scalar(
-        "SELECT default_config_ref FROM linggan_model_workspace WHERE singleton",
-    )
-    .fetch_one(db.pool())
-    .await?;
-    Ok(config.map(model_version))
+    ensure_model_schema(database).await?;
+    let workspace = read_workspace(database).await?;
+    let connections = read_connections(database).await?;
+    let models = read_models(database).await?;
+    let configuration = read_configuration(database, &workspace).await?;
+    let invocations = read_invocations(database).await?;
+    Ok(model_settings_projection(
+        workspace,
+        connections,
+        models,
+        configuration,
+        embedding_settings::read(database).await?,
+        invocations,
+        synthetic,
+    ))
 }
 
-pub async fn current_comment_model_state(db: &Database) -> Result<Value, ModelError> {
-    let row=sqlx::query(with_model_callability("SELECT c.enabled,config.config_ref,COALESCE((SELECT i.state='succeeded' AND i.result->>'commentContract'=$1 AND i.result->>'commentQualified'='true' FROM linggan_model_invocation i WHERE i.model_ref=m.model_ref AND i.operation='probe' ORDER BY i.created_at DESC,i.invocation_ref DESC LIMIT 1),false) AS qualified,__MODEL_CALLABLE__ AS callable FROM linggan_model_workspace ws JOIN linggan_model_config config ON config.config_ref=ws.default_config_ref JOIN linggan_model_entry m USING(model_ref) JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection c USING(connection_ref) WHERE ws.singleton")).bind(crate::comment_daily::DAILY_RULE).fetch_optional(db.pool()).await?;
-    Ok(match row {
-        Some(r) => {
-            json!({"modelConnected":r.get::<bool,_>("enabled") && r.get::<bool,_>("callable"),"commentContract":crate::comment_daily::DAILY_RULE,"commentQualified":r.get::<bool,_>("qualified"),"modelCallable":r.get::<bool,_>("callable"),"modelState":if !r.get::<bool,_>("enabled"){"PAUSED"}else if r.get::<bool,_>("callable"){"CONFIGURED"}else{"NEEDS_CALL_TEST"}})
-        }
-        None => {
-            let availability=sqlx::query(with_model_callability("SELECT count(*) AS models,count(*) FILTER(WHERE c.enabled) AS enabled,count(*) FILTER(WHERE c.enabled AND __MODEL_CALLABLE__) AS callable FROM linggan_model_entry m JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection c USING(connection_ref) WHERE v.revision=(SELECT max(latest.revision) FROM linggan_model_connection_version latest WHERE latest.connection_ref=c.connection_ref)" )).fetch_one(db.pool()).await?;
-            let state = if availability.get::<i64, _>("callable") > 0 {
-                "NEEDS_SELECTION"
-            } else if availability.get::<i64, _>("enabled") > 0 {
-                "NEEDS_CALL_TEST"
-            } else if availability.get::<i64, _>("models") > 0 {
-                "PAUSED"
-            } else {
-                "NOT_CONFIGURED"
-            };
-            json!({"modelConnected":false,"modelCallable":false,"commentQualified":false,"modelState":state})
-        }
+async fn read_workspace(database: &Database) -> Result<PgRow, ModelError> {
+    Ok(sqlx::query(
+        "SELECT workspace_ref,default_config_ref,worker_last_seen_at::text AS worker_seen,\
+                worker_last_seen_at>scope_001_now()-interval '90 seconds' AS worker_recent,\
+                worker_state,worker_last_error \
+         FROM linggan_model_workspace WHERE singleton",
+    )
+    .fetch_one(database.pool())
+    .await?)
+}
+
+async fn read_connections(database: &Database) -> Result<Vec<PgRow>, ModelError> {
+    Ok(sqlx::query(
+        "SELECT connection.connection_ref,connection.enabled,connection.revision,\
+                version.version_ref,version.name,version.api,version.base_url,version.local_endpoint,\
+                (SELECT result FROM linggan_model_invocation invocation \
+                   WHERE invocation.connection_version_ref=version.version_ref \
+                     AND invocation.operation IN ('connect','discover') \
+                   ORDER BY invocation.created_at DESC,invocation.invocation_ref DESC LIMIT 1) AS test \
+         FROM linggan_model_connection connection \
+         JOIN LATERAL(SELECT * FROM linggan_model_connection_version \
+                      WHERE connection_ref=connection.connection_ref \
+                      ORDER BY revision DESC LIMIT 1) version ON true \
+         ORDER BY connection.created_at",
+    )
+    .fetch_all(database.pool())
+    .await?)
+}
+
+async fn read_models(database: &Database) -> Result<Vec<PgRow>, ModelError> {
+    Ok(sqlx::query(with_model_callability(
+        "SELECT model.model_ref,model.model_id,model.connection_version_ref,\
+                version.name AS connection_name,connection.enabled,\
+                version.revision=(SELECT max(latest.revision) \
+                                  FROM linggan_model_connection_version latest \
+                                  WHERE latest.connection_ref=connection.connection_ref) AS current_version,\
+                COALESCE((SELECT invocation.state='succeeded' \
+                              AND invocation.result->>'semanticQualified'='true' \
+                          FROM linggan_model_invocation invocation \
+                          WHERE invocation.model_ref=model.model_ref AND invocation.operation='probe' \
+                          ORDER BY invocation.created_at DESC,invocation.invocation_ref DESC LIMIT 1),false) AS semantic_qualified,\
+                __MODEL_CALLABLE__ AS callable,\
+                (SELECT state FROM linggan_model_invocation invocation \
+                 WHERE invocation.model_ref=model.model_ref AND invocation.operation='probe' \
+                 ORDER BY invocation.created_at DESC,invocation.invocation_ref DESC LIMIT 1) AS test_state,\
+                (SELECT result FROM linggan_model_invocation invocation \
+                 WHERE invocation.model_ref=model.model_ref AND invocation.operation='probe' \
+                 ORDER BY invocation.created_at DESC,invocation.invocation_ref DESC LIMIT 1) AS test \
+         FROM linggan_model_entry model \
+         JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref \
+         JOIN linggan_model_connection connection USING(connection_ref) \
+         ORDER BY model.created_at",
+    ))
+    .fetch_all(database.pool())
+    .await?)
+}
+
+async fn read_configuration(
+    database: &Database,
+    workspace: &PgRow,
+) -> Result<Option<Value>, ModelError> {
+    Ok(sqlx::query_scalar(
+        "SELECT jsonb_build_object(\
+            'configRef',config_ref,'modelRef',model_ref,'inputTokenLimit',input_token_limit,\
+            'outputTokenLimit',output_token_limit,'timeoutSeconds',timeout_seconds,\
+            'maxAttempts',max_attempts) \
+         FROM linggan_model_config WHERE config_ref=$1",
+    )
+    .bind(workspace.get::<Option<Uuid>, _>("default_config_ref"))
+    .fetch_optional(database.pool())
+    .await?)
+}
+
+async fn read_invocations(database: &Database) -> Result<Vec<PgRow>, ModelError> {
+    Ok(sqlx::query(
+        "SELECT invocation.invocation_ref,invocation.operation,invocation.state,\
+                invocation.failure_code,invocation.input_tokens,invocation.output_tokens,\
+                invocation.charged_tokens,invocation.reserved_tokens,invocation.elapsed_ms,\
+                invocation.created_at::text AS created,invocation.result,model.model_id \
+         FROM linggan_model_invocation invocation \
+         LEFT JOIN linggan_model_entry model USING(model_ref) \
+         ORDER BY invocation.created_at DESC,invocation.invocation_ref DESC LIMIT 100",
+    )
+    .fetch_all(database.pool())
+    .await?)
+}
+
+fn model_settings_projection(
+    workspace: PgRow,
+    connections: Vec<PgRow>,
+    models: Vec<PgRow>,
+    configuration: Option<Value>,
+    embedding: Value,
+    invocations: Vec<PgRow>,
+    synthetic: bool,
+) -> Value {
+    json!({
+        "workspaceRef": workspace.get::<Uuid, _>("workspace_ref"),
+        "secretStorage": if synthetic { "SYNTHETIC_PREVIEW_ONLY" } else { "MACOS_KEYCHAIN" },
+        "worker": {
+            "lastSeenAt": workspace.get::<Option<String>, _>("worker_seen"),
+            "recent": workspace.get::<Option<bool>, _>("worker_recent").unwrap_or(false),
+            "state": workspace.get::<Option<String>, _>("worker_state"),
+            "lastError": workspace.get::<Option<String>, _>("worker_last_error")
+        },
+        "connections": connections.iter().map(|row| json!({
+            "connectionRef": row.get::<Uuid, _>("connection_ref"),
+            "versionRef": row.get::<Uuid, _>("version_ref"),
+            "name": row.get::<String, _>("name"),
+            "api": row.get::<String, _>("api"),
+            "baseUrl": row.get::<String, _>("base_url"),
+            "localEndpoint": row.get::<bool, _>("local_endpoint"),
+            "enabled": row.get::<bool, _>("enabled"),
+            "revision": row.get::<i32, _>("revision"),
+            "test": row.get::<Option<Value>, _>("test"),
+            "credentialStored": true
+        })).collect::<Vec<_>>(),
+        "models": models.iter().map(|row| json!({
+            "modelRef": row.get::<Uuid, _>("model_ref"),
+            "modelId": row.get::<String, _>("model_id"),
+            "connectionVersionRef": row.get::<Uuid, _>("connection_version_ref"),
+            "connectionName": row.get::<String, _>("connection_name"),
+            "currentVersion": row.get::<bool, _>("current_version"),
+            "semanticQualified": row.get::<bool, _>("semantic_qualified"),
+            "modelCallable": row.get::<bool, _>("callable"),
+            "testState": row.get::<Option<String>, _>("test_state"),
+            "enabled": row.get::<bool, _>("enabled"),
+            "test": row.get::<Option<Value>, _>("test")
+        })).collect::<Vec<_>>(),
+        "config": configuration,
+        "embedding": embedding,
+        "invocations": invocations.iter().map(|row| json!({
+            "invocationRef": row.get::<Uuid, _>("invocation_ref"),
+            "operation": row.get::<String, _>("operation"),
+            "state": row.get::<String, _>("state"),
+            "failureCode": row.get::<Option<String>, _>("failure_code"),
+            "inputTokens": row.get::<Option<i64>, _>("input_tokens"),
+            "outputTokens": row.get::<Option<i64>, _>("output_tokens"),
+            "chargedTokens": row.get::<i64, _>("charged_tokens"),
+            "reservedTokens": row.get::<i64, _>("reserved_tokens"),
+            "elapsedMs": row.get::<Option<i64>, _>("elapsed_ms"),
+            "createdAt": row.get::<String, _>("created"),
+            "modelId": row.get::<Option<String>, _>("model_id"),
+            "result": row.get::<Option<Value>, _>("result")
+        })).collect::<Vec<_>>()
     })
 }

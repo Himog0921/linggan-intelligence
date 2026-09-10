@@ -51,7 +51,6 @@ proof_port="$(docker port "$proof_container" 5432/tcp | sed -n 's/^127\.0\.0\.1:
 [[ "$proof_port" =~ ^[0-9]+$ ]] || { echo "isolated proof PostgreSQL did not expose a safe port" >&2; exit 1; }
 export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password}@127.0.0.1:${proof_port}/${proof_database}"
 
-cargo test -p linggan-intelligence --test comment_research_postgres --locked -- --ignored
-cargo test -p linggan-evidence --test material_social_postgres --locked -- --ignored
-cargo test -p linggan-api --bin linggan-api --locked material_projection_tests -- --ignored
-printf '%s\n' 'Comment research PostgreSQL proof passed'
+RUST_TEST_THREADS=1 cargo test -p linggan-intelligence --test comment_research_kernel_postgres --locked -- --ignored --nocapture --test-threads=1
+cargo test -p linggan-api --bin linggan-api --locked comment_research::tests -- --nocapture
+printf '%s\n' 'Comment research V1 PostgreSQL and local API proof passed'

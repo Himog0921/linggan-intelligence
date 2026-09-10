@@ -6,7 +6,7 @@
 > 事实来源: 用户当前派定、Issue Claim、LIDS、0040 与当前 API/worker
 > 冲突时以谁为准: 用户最新确认、AGENTS、真实数据/权限与 LIDS
 
-读取回执：AGENTS → docs README → current-state → governance/agent-collaboration/file-placement 与 Issue 规则 → UI execution contract → LIDS README、tokens、patterns、materials、shell-zones、language-policy、data-boundaries。预先表面/状态/依赖/验收矩阵在 [实施计划](../../plans/active/model-pi-001.md)。本包是状态、权限/行动与交互的混合变更。
+读取回执：AGENTS → docs README → current-state → governance/agent-collaboration/file-placement 与 Issue 规则 → UI execution contract → LIDS README、tokens、patterns、materials、shell-zones、language-policy、data-boundaries。预先表面/状态/依赖/验收矩阵在 [历史实施计划](../../archive/model-pi-001.md)。本包是状态、权限/行动与交互的混合变更。
 
 - 表面：`/settings` 到 `/settings/models`；个人菜单；四区设置和必要 dialog；评论原声的当前模型提示/试运行入口/默认版本问题候选。无额外一级页面。
 - 分类：L1 Settings / Governance，单一 Form Surface；Token → 现有边界/按钮/表单 primitive → 连接/模型/计划与来源选择 → 四区功能页。共享 shell 只有菜单入口，专用类 `lgi-model-*` 不覆盖壳层。

@@ -11,14 +11,12 @@
 | 类别 | 固定位置 | 来源/生成方式 | Git 策略 | 手工修改 | 保留与清理 |
 |---|---|---|---|---|---|
 | Pi Node 固定依赖 | `apps/pi-adapter/node_modules/`（含 `.linggan-lock-sha256`）、`package-lock.json` | 精确 package.json、npm ci、`prepare-pi-adapter.sh` | node_modules 忽略；lock 提交 | 禁止手工改 lock/安装产物 | 只清理当前 checkout 依赖，不处理其它项目 |
-| MODEL-PI-001 隔离证明 | 随机 `linggan-comment-proof-*` Docker、`/tmp/model-pi-*` 和 `/tmp/comment-research-preview.*` | `test-model-pi-postgres.sh`、`preview-model-pi.sh`、`verify-comment-daily-api.mjs`、真实 SDK 本地 fixture 与 `verify-model-pi-api.mjs` | 不进 Git | 禁止伪造 | trap 清理所属 API/worker/fixture/container/volume；日志只含合成资料/固定失败码 |
+| COMMENT-RESEARCH-RESET-001 V1 隔离证明 | 随机 `linggan-comment-proof-*` Docker container/volume；系统临时目录下的 test log | `scripts/test-comment-research-postgres.sh`、`apps/pi-adapter` 的 Node fixture；历史 migration 后显式应用 0068–0070 | 不进入 Git | 禁止伪造 | 脚本 trap 删除它拥有的 container/volume；日志只含合成资料/失败码，不含评论正文或凭据 |
 | 模型后端秘密及合成 Keychain 验证 | macOS Keychain 的 `Linggan.Intelligence.Models.<workspace UUID>` service + 随机 account | API 的 Keychain SecretStore；`model_keychain` 测试只操作随机合成条目 | 不进 Git/数据库/前端存储 | 只经配置命令更换 | 正式版本保留以供冻结任务；测试结束立即删除随机项，不枚举已有秘密 |
-| 评论研究隔离验证与预览 | Docker 中随机 `linggan-comment-proof-*` container/volume；系统临时目录 `/tmp/comment-research-preview.*` | `scripts/test-comment-research-postgres.sh`、`scripts/preview-comment-research.sh`，只接纳明确合成 fixture；API 验证由 `scripts/verify-comment-research-api.py` 执行 | 不进入 Git | 禁止伪造 | proof 结束删除 container/volume；预览脚本退出时关闭它自己的 API 并删除隔离资源；日志无正文/凭据，验证后清理 |
-| CI-20260907-V1 隔离证明 | 随机 `linggan-ci-proof-*` Docker container/volume；`/tmp/ci-*`、`/tmp/comment-intelligence-*` 日志及合成预览 | `scripts/test-comment-intelligence-postgres.sh`、`scripts/evaluate-comment-intelligence.py`、本地 API 与 SDK fixture | 不进 Git；报告摘要转写验收文档 | 禁止伪造或混入真实原文 | proof trap 清理所属容器和卷；预览结束关闭自己的 PID；临时 JSONL 不作为真实质量证明 |
+| CI-20260907-V1 历史隔离证明 | 已清理的临时 Docker/log 位置 | 历史交付记录；对应旧评论研究源码与再生脚本已由 V1 terminal cutover 删除 | 不进 Git | 禁止伪造或重新生成旧结果 | 仅保留文档中的历史事实；不再是可运行验证入口 |
 | CI-RUN-002 请求诊断 | PostgreSQL `linggan_comment_request_trace` | 已授权研究的真实请求边界写入；输入已脱敏，返回保结构脱敏 | 不进入 Git | 禁止伪造或回填历史 | 正文最多保留 24 小时；读取独立校验有效期与来源；worker 清理过期或受限正文，元数据与安全校验摘要继续保留；关闭记录仅影响新批次 |
 | Rust 构建缓存 | `target/` | Cargo build/test | 忽略 | 禁止 | 可安全重建，按需清理 |
 | CI-AUTO-004 worker退出回执 | Application Support/Linggan Intelligence/runtime-drain/worker-drain-ack、worker-update-permit；开发启动为系统临时目录 `linggan-runtime-drain.*` | worker写PID与终态；install生成绑定起止revision的许可，sync核验消费 | 不进Git；无正文/凭据 | 不得伪造完成回执 | 下一次受控drain替换；开发启动成功退出后仅清理自己目录，失败保留供诊断 |
-| CI-AUTO-004 本地语义计算依赖与容量证明 | `apps/comment-semantics/.venv/`、`artifacts/private/comment-semantics/capacity-report.synthetic.json`；操作系统临时目录 `ci-auto-semantics-*` 内float32 mmap、索引、合成assignment、指标与checkpoint | 固定依赖锁及 `scripts/runtime/prepare-comment-semantics.sh`；真实算法测试与Rust受限调用 | .venv/缓存/数据/报告忽略，维护源码和依赖锁提交；验收摘要进docs | 不伪造质量或把合成容量当真实语义 | 不写原声文本/DB凭据；成功后删除所属临时目录，失败保留诊断元数据至收口；不删除其他运行缓存 |
 | Rust 依赖锁 | `Cargo.lock` | `cargo generate-lockfile` | 提交 | 禁止 | Cargo 配置变化后重新生成并验证 `--locked` |
 | 本地环境秘密 | `.env`、`.env.*` | 人工从安全凭据源配置 | 忽略；仅 `env.example` 可提交 | 允许本地配置 | 不进入变更记录正文，不复制到仓库 |
 | PostgreSQL Docker 镜像缓存 | Docker Desktop 管理空间 | `docker compose pull`，来源由 `compose.yaml` 的 tag + digest 固定 | 不进入 Git | 禁止 | 可重新拉取，清理不等于删除数据卷 |
@@ -40,14 +38,3 @@
 - 临时实验输出使用操作系统临时目录；若结果需要成为项目证据，应转写为 `docs/audits/` 的可读报告，敏感原件仍留在忽略目录或外部安全存储。
 - `PLUGIN-MIGRATION-001` 的 Browser Producer release 只包含 extension code、manifest 和由 Linggan runtime token source 打包的视觉 token；不得包含 Cookie、账号、真实页面材料、媒体字节、旧内容工作台运行依赖或运行日志。该发行物可被浏览器加载，不等于已经获得平台访问或实际采集授权。
 - `plugins/linggan-intelligence-browser/` 是当前 Linggan-owned 唯一可发布源。发行物不得包含 Cookie、账号、真实页面材料、媒体字节、旧工作台 host/endpoint/fallback 或运行日志；旧 `plugin-retrofit-*` 与历史副本只可只读对照，不得生成当前 release。
-
-## CI-AUTO-003 临时验证产物
-
-- 来源：`scripts/test-comment-intelligence-postgres.sh`、`apps/pi-adapter/test/embeddings.test.mjs`、`scripts/tests/comment_research_redesign_ui.mjs`及隔离headless浏览器回归。
-- 固定位置：操作系统临时目录 `/tmp/ci-auto-*`、`/tmp/ci-native-*`（只读执行计划/耗时，不保存评论正文）、`/tmp/ci-p5-proof.log`、`/tmp/ci-embedding-*`、`/tmp/ci-problem-relations-proof.log`。截图只含合成材料。测试源码是人工维护的权威输入，可入Git；日志/截图/临时预览脚本不入Git。
-- 再生：按活跃计划列出的同名测试命令重建；数据库容器和卷由脚本退出时清理。验证摘要转入实施计划及验收记录，临时原件可在任务收口后清理。
-
-
-## MODEL-CALL-004 验证产物
-
-维护源码为model_probe_validation.rs单元测试、backend代理新增调用准入PG测试及scripts/tests/model_callability_ui.mjs。日志/合成页面截图仅位于/tmp/model-call*、/tmp/model-probe-*；不入Git，不含真实供应商凭据/真实评论正文。隔离PostgreSQL沿用随机container/volume和退出trap清理，结果摘要归活跃计划；临时产物可在验收后删除。

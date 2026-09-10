@@ -131,6 +131,20 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0064_account_observation_normalization.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0064_comment_research_kernel.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0065_comment_research_vector_candidates.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0066_comment_research_change_signals.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0067_comment_research_run_item_lease.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0068_comment_research_problem_resolution.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0069_comment_research_v1_cutover.sql"),
+    "\n",
+    include_str!("../../../../database/migrations/0070_comment_research_v1_derivation_head.sql"),
+    "\n",
     include_str!("../../../../database/migrations/0065_account_observation_bootstrap.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",
@@ -280,18 +294,4 @@ pub async fn proof_database(schema: &str) -> Database {
     isolated_proof_schema(&url, schema, MIGRATIONS)
         .await
         .expect("migrations apply")
-}
-
-/// Retained pre-CI contract tests use the actual migration prefix, not a runtime bypass.
-/// Post-0047 retirement and replacement behavior is tested in comment_intelligence suites.
-pub async fn proof_database_before_comment_intelligence(schema: &str) -> Database {
-    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").expect("proof URL is supplied");
-    let (migrations, _) = MIGRATIONS
-        .split_once(include_str!(
-            "../../../../database/migrations/0048_comment_intelligence.sql"
-        ))
-        .expect("the pre-CI migration boundary exists");
-    isolated_proof_schema(&url, schema, migrations)
-        .await
-        .expect("pre-CI migrations apply")
 }

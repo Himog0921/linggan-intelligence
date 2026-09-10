@@ -31,15 +31,19 @@ const DEEPSEEK_TEXT_MODELS=new Set(['deepseek-v4-flash','deepseek-v4-pro','deeps
 const OPENAI_STRUCTURED_MODELS=new Set(['gpt-4o','gpt-4o-2024-08-06','gpt-4o-2024-11-20','gpt-4o-mini','gpt-4o-mini-2024-07-18','gpt-6-astra']);
 function researchOutputFormat(r,base) {
   let packet;try{packet=JSON.parse(r.prompt);}catch{return null;}
-  if(packet?.contract!=='comment-research.v4')return null;
+  const schemaName=packet?.contract==='comment-research.semantic.v1'?'comment_research_semantic_v1':packet?.contract==='comment-research.semantic.v1/problem-resolution'?'comment_research_problem_resolution_v1':null;
+  if(!schemaName)return null;
   const schema=packet.outputSchema;
-  if(!schema||schema.type!=='object'||schema.properties?.comments?.type!=='array'||schema.additionalProperties!==false||JSON.stringify(schema).length>6144)throw new Rejected('invalid_request');
+  if(!schema||schema.type!=='object'||!schema.properties||schema.additionalProperties!==false||JSON.stringify(schema).length>6144)throw new Rejected('invalid_request');
   const official=base.protocol==='https:'&&!base.port&&['','/','/v1','/v1/'].includes(base.pathname);
   const deepseek=official&&base.hostname==='api.deepseek.com'&&DEEPSEEK_TEXT_MODELS.has(r.modelId);
   const openai=official&&base.hostname==='api.openai.com'&&OPENAI_STRUCTURED_MODELS.has(r.modelId);
-  if(r.api==='openai-responses'&&(deepseek||openai))return {text:{format:{type:'json_schema',name:'comment_research_v4',schema,...(openai?{strict:true}:{})}}};
+  // V1 uses optional fields for its two tagged response variants.  Do not claim strict
+  // provider validation when the provider would require every property on the root object;
+  // Rust remains the contract authority after transport.
+  if(r.api==='openai-responses'&&(deepseek||openai))return {text:{format:{type:'json_schema',name:schemaName,schema}}};
   if(r.api==='openai-completions'&&deepseek)return {response_format:{type:'json_object'}};
-  if(r.api==='openai-completions'&&openai)return {response_format:{type:'json_schema',json_schema:{name:'comment_research_v4',strict:true,schema}}};
+  if(r.api==='openai-completions'&&openai)return {response_format:{type:'json_schema',json_schema:{name:schemaName,schema}}};
   return null;
 }
 function validate(r) {
