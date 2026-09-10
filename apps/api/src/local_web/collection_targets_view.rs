@@ -1379,7 +1379,16 @@ mod tests {
         assert!(html.contains("打开关键词的关键词观察"));
         assert!(!html.contains("关键词档案"));
         assert_eq!(html.matches("c-tg-actions").count(), 2);
-        assert_eq!(html.matches("c-tg-btn").count(), 2);
+        // 主动作两个（一行一个），加上每行一个「停止观察」开关。
+        assert_eq!(html.matches("c-tg-btn").count(), 4);
+        // 直接把「每行一个主动作」量出来：主动作的 class 以 `c-tg-btn"` 收尾，开关是
+        // `c-tg-btn-slim`，引号把两者分得干净。上面那个 4 是总数，单看它不排除「一行两个
+        // 主动作、另一行没有」——虽然 c-tg-toggle==2 已经排除了，但让判据直说更省事。
+        assert_eq!(html.matches(r#"c-tg-btn""#).count(), 2);
+        // 停止观察与删除必须每行各出现一次，且删除是链接不是按钮——两者形状不同，
+        // 长得像同一个按钮，人迟早会点错那个不可逆的。
+        assert_eq!(html.matches("c-tg-toggle").count(), 2);
+        assert_eq!(html.matches("c-tg-danger").count(), 2);
         assert_eq!(html.matches("data-monitor-rule-trigger").count(), 1);
         assert_eq!(html.matches(">建立档案</button>").count(), 1);
         assert_eq!(html.matches(">设置巡查</a>").count(), 1);
@@ -1433,8 +1442,15 @@ mod tests {
         assert!(html.contains("12 篇"));
         assert!(html.contains("5 / 12 · 缺 7"));
         assert!(html.contains("补采缺口"));
+        // 上次巡查是已经发生的事实，保留绝对时刻——可能要拿去跟别的记录对时间。
         assert!(html.contains("2026-09-04 08:30"));
-        assert!(html.contains("2026-09-05 09:00"));
+        // 下次巡查写成还有多久：人在这一列判断的是要等多久，而不是那一刻的钟点。
+        assert!(!html.contains("2026-09-05 09:00"));
+        // 断言「已逾期」而不是「已逾期 || 后」：夹具的下次巡查固定在 2026-09-05，时间
+        // 只会往前走，这一格永远是逾期，判据因此是确定的。原先那个 `|| "后"` 是条一字
+        // 逃生口——本文件别处文案就含「日后恢复」，任何这类文字落进渲染片段，断言就
+        // 永久为真，这一列从此不再被测。
+        assert!(html.contains("已逾期"));
         assert!(!html.contains("2026-09-04 09:00"));
         assert!(!html.contains("ARCHIVE HEALTH"));
         assert!(!html.contains('%'));
