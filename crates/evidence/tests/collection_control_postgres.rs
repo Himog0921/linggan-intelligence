@@ -573,6 +573,63 @@ async fn account_binding_is_one_to_one_and_expiry_fails_closed() {
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
+async fn observed_account_change_blocks_claims_until_a_person_confirms_the_new_binding() {
+    let database = proof_database("collection_control_observed_account_change").await;
+    let installation =
+        ready_installation_without_account(&database, "observed-account-change").await;
+    let secret = installation
+        .credential
+        .as_deref()
+        .expect("compatible installation has a secret");
+
+    let original = report_account_eligibility(
+        &database,
+        installation.installation_ref,
+        secret,
+        Some("observed-account-a"),
+        AccountEligibilitySignal::AuthenticatedObserved,
+        DIGEST_KEY,
+    )
+    .await
+    .expect("the original account observation is recorded");
+    let original_account = original.account_ref.expect("original account ref exists");
+    bind_observation_account(
+        &database,
+        original_account,
+        installation.installation_ref,
+        "person",
+    )
+    .await
+    .expect("person confirms the original account binding");
+    assert_capacity_reason(&database, "available").await;
+
+    let changed = report_account_eligibility(
+        &database,
+        installation.installation_ref,
+        secret,
+        Some("observed-account-b"),
+        AccountEligibilitySignal::AuthenticatedObserved,
+        DIGEST_KEY,
+    )
+    .await
+    .expect("the newly observed account is recorded");
+    let changed_account = changed.account_ref.expect("changed account ref exists");
+    assert_ne!(changed_account, original_account);
+    assert_capacity_reason(&database, "account_binding_changed").await;
+
+    bind_observation_account(
+        &database,
+        changed_account,
+        installation.installation_ref,
+        "person",
+    )
+    .await
+    .expect("person confirms the changed account binding");
+    assert_capacity_reason(&database, "available").await;
+}
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
 async fn server_projects_each_closed_account_signal_into_capacity() {
     let database = proof_database("collection_control_signal_projection").await;
     let installation = ready_installation_without_account(&database, "signal-projection").await;
@@ -621,11 +678,6 @@ async fn server_projects_each_closed_account_signal_into_capacity() {
             AccountEligibilityState::Restricted,
             "account_restricted",
         ),
-        (
-            AccountEligibilitySignal::SignalIncomplete,
-            AccountEligibilityState::Unknown,
-            "account_unknown",
-        ),
     ];
     for (signal, expected_state, expected_capacity) in cases {
         let receipt = report_account_eligibility(
@@ -640,7 +692,78 @@ async fn server_projects_each_closed_account_signal_into_capacity() {
         .expect("closed producer signal is accepted");
         assert_eq!(receipt.state, expected_state);
         assert_capacity_reason(&database, expected_capacity).await;
+        if signal == AccountEligibilitySignal::LoginRequired {
+            sqlx::query(
+                "UPDATE platform_observation_account_eligibility_observation \
+                 SET observed_at=scope_001_now()-interval '8 hours', \
+                     expires_at=scope_001_now()-interval '7 hours' \
+                 WHERE account_ref=$1 AND installation_ref=$2 AND reason_code<>'login_required'",
+            )
+            .bind(account_ref)
+            .bind(installation.installation_ref)
+            .execute(database.pool())
+            .await
+            .expect("proof moves earlier account observations behind the latest signal");
+            sqlx::query(
+                "UPDATE platform_observation_account_eligibility_observation \
+                 SET observed_at=scope_001_now()-interval '2 seconds', \
+                     expires_at=scope_001_now()-interval '1 second' \
+                 WHERE account_ref=$1 AND installation_ref=$2 AND reason_code='login_required'",
+            )
+            .bind(account_ref)
+            .bind(installation.installation_ref)
+            .execute(database.pool())
+            .await
+            .expect("proof ages an explicit negative account observation");
+            assert_capacity_reason(&database, "account_needs_login").await;
+        }
     }
+
+    let usable = report_account_eligibility(
+        &database,
+        installation.installation_ref,
+        secret,
+        None,
+        AccountEligibilitySignal::AuthenticatedObserved,
+        DIGEST_KEY,
+    )
+    .await
+    .expect("a real authenticated observation restores the account");
+    assert_eq!(usable.state, AccountEligibilityState::Usable);
+    let observation_count_before_incomplete: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM platform_observation_account_eligibility_observation \
+         WHERE account_ref=$1 AND installation_ref=$2",
+    )
+    .bind(account_ref)
+    .bind(installation.installation_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("eligibility history is readable");
+    let incomplete = report_account_eligibility(
+        &database,
+        installation.installation_ref,
+        secret,
+        None,
+        AccountEligibilitySignal::SignalIncomplete,
+        DIGEST_KEY,
+    )
+    .await
+    .expect("an incomplete page observation is accepted without becoming a blocker");
+    assert_eq!(incomplete.state, AccountEligibilityState::Usable);
+    let observation_count_after_incomplete: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM platform_observation_account_eligibility_observation \
+         WHERE account_ref=$1 AND installation_ref=$2",
+    )
+    .bind(account_ref)
+    .bind(installation.installation_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("eligibility history remains readable");
+    assert_eq!(
+        observation_count_after_incomplete, observation_count_before_incomplete,
+        "an unreadable page is not a new negative account fact"
+    );
+    assert_capacity_reason(&database, "available").await;
 }
 
 #[tokio::test]
@@ -738,8 +861,8 @@ async fn unified_capacity_exposes_distinct_recoverable_reasons() {
     .bind(installation.installation_ref)
     .execute(database.pool())
     .await
-    .expect("proof expires account eligibility");
-    assert_capacity_reason(&database, "account_eligibility_stale").await;
+    .expect("proof ages the diagnostic account observation");
+    assert_capacity_reason(&database, "available").await;
     report_account_eligibility(
         &database,
         installation.installation_ref,

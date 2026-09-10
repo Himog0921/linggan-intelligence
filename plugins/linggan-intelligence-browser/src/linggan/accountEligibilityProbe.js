@@ -6,13 +6,6 @@ const CURRENT_ACCOUNT_NAVIGATION_SELECTOR = 'nav, [role="navigation"], ul, ol, [
 const REQUIRED_GLOBAL_NAVIGATION_PATHS = new Set(['/explore', '/notification', '/chat']);
 const ACCOUNT_PROBE_ATTEMPTS = 8;
 const ACCOUNT_PROBE_RETRY_DELAY_MS = 500;
-const DISPATCH_STATES_REQUIRING_FRESH_ACCOUNT_OBSERVATION = new Set([
-  'account_unbound',
-  'account_binding_changed',
-  'account_binding_expired',
-  'account_eligibility_stale',
-  'account_needs_login',
-]);
 
 function normalizeMarker(value) {
   return String(value || '').replace(/\s+/g, '').trim();
@@ -83,18 +76,10 @@ export function accountObservationFromCurrentAccountHref(href) {
 }
 
 /**
- * A stale account fact is not repaired from a cached creator page or browser storage. The only
- * allowed recovery is a new passive read of an already open XHS global-navigation marker.
- */
-export function dispatchStateRequiresFreshPassiveAccountObservation(state = '') {
-  return DISPATCH_STATES_REQUIRING_FRESH_ACCOUNT_OBSERVATION.has(
-    String(state || '').trim(),
-  );
-}
-
-/**
- * Read only the current account fact already present in an open XHS page. This never navigates,
- * opens a tab, reads cookies, starts collection, or retains the raw id after the message resolves.
+ * Read only the current account fact already rendered as part of an XHS page load. This never
+ * navigates, opens a tab, reads cookies, starts collection, or retains the raw id after the
+ * message resolves. An absent marker is inconclusive, so it never emits a synthetic negative
+ * account report that could overwrite a prior real observation.
  */
 export async function reportPassiveAccountEligibility({
   readCurrentAccountHref,
@@ -112,6 +97,9 @@ export async function reportPassiveAccountEligibility({
     }
     if (observation.signal === 'authenticated_observed' || attempt + 1 === maxAttempts) break;
     await sleep(ACCOUNT_PROBE_RETRY_DELAY_MS);
+  }
+  if (observation.signal !== 'authenticated_observed') {
+    return { reported: false, reason: 'current_account_not_observed' };
   }
   return sendMessage({
     action: LINGGAN_RUNTIME_ACTION.REPORT_ACCOUNT_ELIGIBILITY,

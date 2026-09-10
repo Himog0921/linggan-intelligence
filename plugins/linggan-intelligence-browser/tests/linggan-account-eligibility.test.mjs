@@ -4,7 +4,6 @@ import test from 'node:test';
 import {
   accountObservationFromCurrentAccountHref,
   currentAccountHrefFromDocument,
-  dispatchStateRequiresFreshPassiveAccountObservation,
   reportPassiveAccountEligibility,
 } from '../src/linggan/accountEligibilityProbe.js';
 import {
@@ -36,13 +35,6 @@ test('a passive account probe accepts only the explicitly marked current-account
     ),
     { signal: 'signal_incomplete', rawPlatformAccountId: '' },
   );
-});
-
-test('only account freshness decisions may trigger an automatic passive re-observation', () => {
-  assert.equal(dispatchStateRequiresFreshPassiveAccountObservation('account_eligibility_stale'), true);
-  assert.equal(dispatchStateRequiresFreshPassiveAccountObservation('account_needs_login'), true);
-  assert.equal(dispatchStateRequiresFreshPassiveAccountObservation('installation_stale'), false);
-  assert.equal(dispatchStateRequiresFreshPassiveAccountObservation('nothing_waiting'), false);
 });
 
 test('the passive account probe never mistakes the viewed creator for the logged-in account', () => {
@@ -177,13 +169,13 @@ test('eligibility reporting uses only the health-advertised station route', asyn
   assert.equal(JSON.stringify(result).includes('high-entropy-fixture-credential'), false);
 });
 
-test('an unavailable page reports unknown without inventing a usable identity', async () => {
+test('an unavailable page does not turn missing positive evidence into a negative account report', async () => {
   let message;
-  await reportPassiveAccountEligibility({
+  const result = await reportPassiveAccountEligibility({
     readCurrentAccountHref: async () => { throw new Error('page state unavailable'); },
     sendMessage: async (value) => { message = value; return { reported: false }; },
     attempts: 1,
   });
-  assert.equal(message.signal, 'signal_incomplete');
-  assert.equal(message.rawPlatformAccountId, '');
+  assert.deepEqual(result, { reported: false, reason: 'current_account_not_observed' });
+  assert.equal(message, undefined);
 });

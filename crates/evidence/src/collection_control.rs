@@ -22,23 +22,10 @@ pub const MINIMUM_PLUGIN_VERSION: &str = "0.8.34";
 /// This is a liveness question — is that browser still there — and it stays short. A worker
 /// that has been silent for twenty minutes cannot be handed platform work.
 pub const CONTROL_FRESHNESS_MINUTES: i32 = 20;
-/// How long one passive account-eligibility observation stays usable.
-///
-/// This answers a different question from [`CONTROL_FRESHNESS_MINUTES`]: not "is the browser
-/// alive" but "is this platform account still in a state we may work with". The two shared one
-/// constant until 2026-09-06, which silently coupled them.
-///
-/// Twenty minutes was far too short for the second question, because the only way to refresh
-/// this observation is to read an *already open* XHS document — the producer will not open,
-/// reload, or navigate a tab to get it. Closing the last XHS tab therefore stopped every deep
-/// archive within twenty minutes, with no error recorded anywhere: capacity selection simply
-/// skipped every work order and the queue looked empty. Observed on 2026-09-06, where a target
-/// sat with twenty-two ready tasks for eight hours while all nine other control checks passed.
-///
-/// A platform login survives for days, so six hours is still a conservative claim about it. The
-/// window only decides how long we may act on the last real observation; it never invents one.
-/// Any dispatch that comes back with an account state still forces a fresh passive read, and a
-/// real failure still ends the run — this widens patience, not trust.
+/// Account-observation expiry remains diagnostic and recovery metadata. It must never deny a
+/// new Lease by itself: elapsed time is not evidence that a fixed browser account logged out.
+/// Explicit negative observations still project to durable blocking states; this window only
+/// retains historical freshness for the UI and incident diagnosis.
 pub const ACCOUNT_ELIGIBILITY_TTL_MINUTES: i32 = 360;
 pub const DEFAULT_MONITOR_INTERVAL_SECONDS: i32 = 86_400;
 pub const MINIMUM_MONITOR_INTERVAL_SECONDS: i32 = 21_600;
@@ -514,6 +501,40 @@ pub async fn report_account_eligibility(
             binding_required: true,
         });
     };
+    // Failure to read a page marker is not proof that the account changed or logged out. Keep
+    // the last conclusive fact intact so a page hydration race cannot turn a healthy station
+    // into UNKNOWN. A never-observed account remains UNKNOWN and therefore stays closed.
+    if signal == AccountEligibilitySignal::SignalIncomplete {
+        let state = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT eligibility_state FROM platform_observation_account_eligibility_observation \
+             WHERE account_ref=$1 AND installation_ref=$2 \
+             ORDER BY observed_at DESC LIMIT 1",
+        )
+        .bind(account_ref)
+        .bind(installation_ref)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .flatten()
+        .as_deref()
+        .and_then(AccountEligibilityState::parse)
+        .unwrap_or(AccountEligibilityState::Unknown);
+        let binding_required: bool = sqlx::query_scalar(
+            "SELECT NOT EXISTS (SELECT 1 FROM platform_observation_account_binding \
+             WHERE account_ref=$1 AND installation_ref=$2 AND ended_at IS NULL \
+               AND confirmed_until>scope_001_now())",
+        )
+        .bind(account_ref)
+        .bind(installation_ref)
+        .fetch_one(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        return Ok(AccountEligibilityReceipt {
+            account_ref: Some(account_ref),
+            installation_ref,
+            state,
+            binding_required,
+        });
+    }
     let state = signal.projected_state();
     sqlx::query(
         "INSERT INTO platform_observation_account_eligibility_observation \
@@ -669,8 +690,8 @@ type CapacityCandidate = (
     bool,
     Option<Uuid>,
     bool,
-    Option<String>,
     bool,
+    Option<String>,
     bool,
 );
 
@@ -736,8 +757,8 @@ pub(crate) async fn evaluate_capacity_in(
                           AND credential.activated_at IS NOT NULL \
                           AND credential.expires_at>scope_001_now()), \
                 binding.account_ref,COALESCE(binding.confirmed_until>scope_001_now(),false), \
+                COALESCE(latest_observation.account_ref<>binding.account_ref,false), \
                 eligibility.eligibility_state, \
-                COALESCE(eligibility.expires_at>scope_001_now(),false), \
                 CASE WHEN binding.account_ref IS NULL THEN false ELSE EXISTS ( \
                     SELECT 1 FROM collection_work_order work_order \
                     JOIN collection_work_order_lease lease \
@@ -752,11 +773,16 @@ pub(crate) async fn evaluate_capacity_in(
              WHERE candidate.installation_ref=i.installation_ref AND candidate.ended_at IS NULL \
              LIMIT 1) binding ON true \
          LEFT JOIN LATERAL ( \
-             SELECT observation.eligibility_state,observation.expires_at \
+             SELECT observation.eligibility_state \
              FROM platform_observation_account_eligibility_observation observation \
              WHERE observation.account_ref=binding.account_ref \
                AND observation.installation_ref=i.installation_ref \
              ORDER BY observation.observed_at DESC LIMIT 1) eligibility ON true \
+         LEFT JOIN LATERAL ( \
+             SELECT observation.account_ref \
+             FROM platform_observation_account_eligibility_observation observation \
+             WHERE observation.installation_ref=i.installation_ref \
+             ORDER BY observation.observed_at DESC LIMIT 1) latest_observation ON true \
          WHERE s.retired_at IS NULL ORDER BY s.registered_at,s.station_ref",
     )
     .bind(CONTROL_FRESHNESS_MINUTES)
@@ -871,8 +897,8 @@ pub(crate) async fn revalidate_frozen_capacity_in(
                           AND credential.activated_at IS NOT NULL \
                           AND credential.expires_at>scope_001_now()), \
                 binding.account_ref,COALESCE(binding.confirmed_until>scope_001_now(),false), \
+                COALESCE(latest_observation.account_ref<>binding.account_ref,false), \
                 eligibility.eligibility_state, \
-                COALESCE(eligibility.expires_at>scope_001_now(),false), \
                 CASE WHEN binding.account_ref IS NULL THEN false ELSE EXISTS ( \
                     SELECT 1 FROM collection_work_order busy_work \
                     JOIN collection_work_order_lease busy_lease \
@@ -889,11 +915,16 @@ pub(crate) async fn revalidate_frozen_capacity_in(
              WHERE candidate.installation_ref=i.installation_ref AND candidate.ended_at IS NULL \
              LIMIT 1) binding ON true \
          LEFT JOIN LATERAL ( \
-             SELECT observation.eligibility_state,observation.expires_at \
+             SELECT observation.eligibility_state \
              FROM platform_observation_account_eligibility_observation observation \
              WHERE observation.account_ref=binding.account_ref \
                AND observation.installation_ref=i.installation_ref \
              ORDER BY observation.observed_at DESC LIMIT 1) eligibility ON true \
+         LEFT JOIN LATERAL ( \
+             SELECT observation.account_ref \
+             FROM platform_observation_account_eligibility_observation observation \
+             WHERE observation.installation_ref=i.installation_ref \
+             ORDER BY observation.observed_at DESC LIMIT 1) latest_observation ON true \
          WHERE s.retired_at IS NULL AND s.station_ref=$2 AND i.installation_ref=$3",
     )
     .bind(CONTROL_FRESHNESS_MINUTES)
@@ -1065,8 +1096,8 @@ pub(crate) async fn ready_batch_claim_slots_in(
                           AND credential.activated_at IS NOT NULL \
                           AND credential.expires_at>scope_001_now()), \
                 binding.account_ref,COALESCE(binding.confirmed_until>scope_001_now(),false), \
+                COALESCE(latest_observation.account_ref<>binding.account_ref,false), \
                 eligibility.eligibility_state, \
-                COALESCE(eligibility.expires_at>scope_001_now(),false), \
                 CASE WHEN binding.account_ref IS NULL THEN false ELSE EXISTS ( \
                     SELECT 1 FROM collection_work_order work_order \
                     JOIN collection_work_order_lease lease \
@@ -1081,11 +1112,16 @@ pub(crate) async fn ready_batch_claim_slots_in(
              WHERE candidate.installation_ref=i.installation_ref AND candidate.ended_at IS NULL \
              LIMIT 1) binding ON true \
          LEFT JOIN LATERAL ( \
-             SELECT observation.eligibility_state,observation.expires_at \
+             SELECT observation.eligibility_state \
              FROM platform_observation_account_eligibility_observation observation \
              WHERE observation.account_ref=binding.account_ref \
                AND observation.installation_ref=i.installation_ref \
              ORDER BY observation.observed_at DESC LIMIT 1) eligibility ON true \
+         LEFT JOIN LATERAL ( \
+             SELECT observation.account_ref \
+             FROM platform_observation_account_eligibility_observation observation \
+             WHERE observation.installation_ref=i.installation_ref \
+             ORDER BY observation.observed_at DESC LIMIT 1) latest_observation ON true \
          WHERE s.retired_at IS NULL",
     )
     .bind(CONTROL_FRESHNESS_MINUTES)
@@ -1145,18 +1181,18 @@ fn candidate_block_reason(
             CapacityReasonCode::AccountBindingChanged,
             "安装当前账号绑定与工单冻结账号不一致。",
         ))
+    } else if candidate.10 {
+        Some((
+            CapacityReasonCode::AccountBindingChanged,
+            "安装实际观察到的账号与人工确认绑定不一致。",
+        ))
     } else if !candidate.9 {
         Some((
             CapacityReasonCode::AccountBindingExpired,
             "观察账号人工确认已超过 30 天，需重新确认绑定。",
         ))
-    } else if candidate.10.is_none() || !candidate.11 {
-        Some((
-            CapacityReasonCode::AccountEligibilityStale,
-            "观察账号资格未上报或已超过 20 分钟有效期。",
-        ))
     } else {
-        match candidate.10.as_deref() {
+        match candidate.11.as_deref() {
             Some("usable") if candidate.12 => Some((
                 CapacityReasonCode::AccountBusy,
                 "观察账号已有一份有效 Lease。",
@@ -1173,6 +1209,10 @@ fn candidate_block_reason(
             Some("restricted") => Some((
                 CapacityReasonCode::AccountRestricted,
                 "观察账号当前受到访问限制。",
+            )),
+            None => Some((
+                CapacityReasonCode::AccountUnknown,
+                "观察账号尚无可用观察事实，控制层按关闭处理。",
             )),
             _ => Some((
                 CapacityReasonCode::AccountUnknown,
@@ -2706,20 +2746,16 @@ mod tests {
         );
     }
 
-    /// Account eligibility and installation liveness answer different questions and must not
-    /// share one window again. They were the same constant until 2026-09-06, and the coupling
-    /// meant that closing the last XHS tab stopped every deep archive within twenty minutes
-    /// while nothing was recorded as failing.
+    /// Observation expiry is diagnostic metadata, while station liveness remains a hard gate.
     #[test]
-    fn account_eligibility_outlives_installation_liveness() {
+    fn account_observation_expiry_is_diagnostic_metadata() {
         assert!(
             ACCOUNT_ELIGIBILITY_TTL_MINUTES > CONTROL_FRESHNESS_MINUTES,
-            "an eligibility observation must stay usable longer than a heartbeat window; \
-             refreshing it requires an already-open platform document, a heartbeat does not",
+            "the UI diagnostic window remains longer than station liveness",
         );
         // Liveness stays short on purpose: a silent browser cannot be given platform work.
         assert_eq!(CONTROL_FRESHNESS_MINUTES, 20);
-        // Still far shorter than a real platform login, so this remains a conservative claim.
+        // This historical freshness window is not read by capacity evaluation.
         assert_eq!(ACCOUNT_ELIGIBILITY_TTL_MINUTES, 360);
     }
 }

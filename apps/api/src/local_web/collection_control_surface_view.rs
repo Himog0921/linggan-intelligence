@@ -822,8 +822,8 @@ fn recovery_for(reason: &str) -> Option<Recovery> {
             action: "重新核对并确认安装的观察账号绑定。",
         }),
         "account_eligibility_stale" => Some(Recovery {
-            owner: "执行工位",
-            action: "重新上报版本化账号资格信号。",
+            owner: "诊断记录",
+            action: "这是历史兼容状态；当前不以观察时间单独限制接活。",
         }),
         "account_cooling" => Some(Recovery {
             owner: "账号",
@@ -1065,7 +1065,7 @@ fn runtime_resource_row(resource: &RuntimeResourceView) -> String {
     let eligibility_reason = resource
         .eligibility_reason_code
         .as_deref()
-        .unwrap_or("account_eligibility_stale");
+        .unwrap_or("account_unknown");
     let account_state = resource.eligibility_state.as_deref().unwrap_or("UNKNOWN");
     let acceptance_form = format!(
         r#"<form class="c-runtime-control-form" method="post" action="/collection/runtime/accepting" data-station-accepting-form>
@@ -1101,7 +1101,7 @@ fn runtime_resource_row(resource: &RuntimeResourceView) -> String {
                <div><dt>安装</dt><dd>{installation}</dd><span>{version} · 心跳 {last_seen}</span></div>
                <div><dt>服务端凭据</dt><dd>{credential}</dd><span>只显示有效性，不显示密钥或摘要</span></div>
                <div data-account-binding-required="{binding_required}"><dt>观察账号</dt><dd>{account}</dd><span>{binding_state} · 当前绑定 {bound_account} · 确认至 {binding_until}</span>{binding_form}</div>
-               <div data-account-eligibility-reason="{reason}"><dt>账号资格</dt><dd>{account_state}</dd><span>{reason} · 观察 {observed} · 到期 {expires}{busy} · Eligibility {eligibility_ref}</span></div>
+               <div data-account-eligibility-reason="{reason}"><dt>账号资格</dt><dd>{account_state}</dd><span>{reason} · 观察 {observed} · 诊断窗口至 {expires}（到期本身不阻断接活）{busy} · Eligibility {eligibility_ref}</span></div>
              </dl>
            </article>"#,
         station_ref = resource.station_ref,
@@ -1666,6 +1666,23 @@ mod tests {
         let already_bound = render_runtime_control(&base, &projection);
         assert!(!already_bound.contains("data-account-binding-form"));
         assert!(already_bound.contains("已绑定，资格信号缺失"));
+    }
+
+    #[test]
+    fn runtime_keeps_account_observation_expiry_diagnostic_not_a_claim_blocker() {
+        let mut projection = projection();
+        let base = format!("{BODY_OPEN}old</div>");
+        projection.runtime_resources[0].eligibility_state = Some("usable".to_owned());
+        projection.runtime_resources[0].eligibility_reason_code = Some("authenticated".to_owned());
+        let rendered = render_runtime_control(&base, &projection);
+        assert!(rendered.contains("诊断窗口至"));
+        assert!(rendered.contains("到期本身不阻断接活"));
+
+        projection.runtime_resources[0].eligibility_state = None;
+        projection.runtime_resources[0].eligibility_reason_code = None;
+        let never_observed = render_runtime_control(&base, &projection);
+        assert!(never_observed.contains("data-account-eligibility-reason=\"account_unknown\""));
+        assert!(!never_observed.contains("account_eligibility_stale"));
     }
 
     #[test]

@@ -395,23 +395,6 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
     sendResponse({ success: true, context: { platform: platform(), url: location.href, mode: 'linggan_browser_producer_runtime' } });
     return true;
   }
-  if (action === LINGGAN_RUNTIME_ACTION.PROBE_CURRENT_ACCOUNT_ELIGIBILITY) {
-    if (platform() !== 'xhs') {
-      sendResponse({ success: false, code: 'account_observation_platform_invalid' });
-      return true;
-    }
-    // This is the same bounded observation made on XHS content startup: it neither navigates,
-    // reads cookies/storage, nor uses the viewed creator as an account fallback.
-    reportPassiveAccountEligibility({
-      readCurrentAccountHref: () => currentAccountHrefFromDocument(document),
-      sendMessage: (probeMessage) => chrome.runtime.sendMessage(probeMessage),
-    }).then((result) => {
-      sendResponse({ success: true, reported: result?.reported === true });
-    }).catch(() => {
-      sendResponse({ success: false, code: 'account_observation_unavailable' });
-    });
-    return true;
-  }
   if (action === LINGGAN_RUNTIME_ACTION.TOGGLE_DASHBOARD && platform() === 'xhs') {
     dashboardBridge.toggleDashboard().then(() => sendResponse({ success: true })).catch((error) => {
       sendResponse({ success: false, code: 'dashboard_not_opened', message: String(error?.message || error) });

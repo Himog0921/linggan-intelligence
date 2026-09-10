@@ -3277,6 +3277,8 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
             "account_unbound" => "account_unbound",
             "account_binding_changed" => "account_binding_changed",
             "account_binding_expired" => "account_binding_expired",
+            // Retained solely to render historical dispatch rows written before observation
+            // freshness became diagnostic metadata; current capacity evaluation never emits it.
             "account_eligibility_stale" => "account_eligibility_stale",
             "account_cooling" => "account_cooling",
             "account_needs_login" => "account_needs_login",
