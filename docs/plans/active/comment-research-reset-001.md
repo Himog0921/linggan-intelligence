@@ -15,7 +15,7 @@
 - **用户问题**回答：哪些不同说法已被研究为同一稳定问题，每个问题可回到原声证据。
 - **变化观察**只回答：在两个可比时间窗口中，哪个已定义问题升温、降温、扩散或首次在本系统可用历史中出现；没有可靠变化时，明确说明不可比原因，绝不复用概览填版。
 
-用户保存一次模型/研究策略与总预算后，符合该策略的“开始研究”直接调用；语义提取、向量候选和问题归并调用均写入同一 Run 的通用调用账本并受该总预算约束。预检仍在服务端冻结范围、估算成本和排除项，但不再成为每次运行的重复人工授权。持续自动排程仍保持关闭，直到 Mog 单独开启。
+用户保存一次模型/研究策略与总预算后，在 qualified+enabled embedding 也已就绪时，符合该策略的“开始研究”直接调用；语义提取、向量候选和问题归并调用均写入同一 Run 的通用调用账本并受该总预算约束。预检仍在服务端冻结范围、估算成本和排除项，但不再成为每次运行的重复人工授权。embedding 未就绪时，页面和服务端都拒绝创建 Run，避免产生必然无法归并和发布的无效调用。持续自动排程仍保持关闭，直到 Mog 单独开启。
 
 ## 2. 已确认决策与非目标
 
@@ -142,7 +142,7 @@ Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类
 - Mog 已于 2026-09-10 授权本事项完成开发库旧研究派生数据的清除、source merge、localhost runtime 切换和上线测试；不授权自动启动持续排程或因部署而发起真实评论模型调用。
 - 切换前必须完成 exact terminal migration、隔离 PostgreSQL、API/worker/browser proof，并逐项核对 RawComment、作者归属、来源资格、模型调用账本和通用模型配置仍在。
 
-实施进度（2026-09-10）：0069 终态 migration 已在完整历史 migration fixture 上通过，并明确删除旧表、视图、触发器、函数与 identity index（含 `linggan_ci_source_revision`），以及任何早期 V1 开发派生行；没有使用 `CASCADE`。0070 使 derivation identity 覆盖作者归属和回复上下文：冻结 Run 读取其原始可读输入，新 Run 才读取当前 head；输入变化使整个已发布结果撤出可读投影。20 项 isolated PostgreSQL V1 proof、2 项 API proof、Pi adapter SDK proof、Rust compilation 和 API route/page guard 已完成。独立 review 的可操作问题已经修复并由新增 isolated proof 覆盖。尚待本轮收口：exact-head merge、共享开发库执行 0069–0070、runtime PID/健康检查、浏览器实际点击和 Mog 的一轮真实研究验收。
+实施进度（2026-09-10）：0069 终态 migration 已在完整历史 migration fixture 上通过，并明确删除旧表、视图、触发器、函数与 identity index（含 `linggan_ci_source_revision`），以及任何早期 V1 开发派生行；没有使用 `CASCADE`。0070 使 derivation identity 覆盖作者归属和回复上下文：冻结 Run 读取其原始可读输入，新 Run 才读取当前 head；输入变化使整个已发布结果撤出可读投影。20 项 isolated PostgreSQL V1 proof、2 项 API proof、Pi adapter SDK proof、Rust compilation 和 API route/page guard 已完成。PR #217/#219 已进入 main；共享开发库已应用 0064–0070，`runtime-main` 同步旧的 `638b6cd` 并通过 loopback health，浏览器已实际看到 V1 的五视图空态。部署前后未创建真实模型调用。qualified+enabled embedding 的页面/服务端双重运行门已有 isolated proof，待本 guarded revision 合并、runtime 切换以及页面和 POST 回执现场核验后才能记为当前运行时事实；当前没有 embedding provider，故首轮真实运行、向量/语义质量、tab 性能测量与 Mog 业务验收仍待下一张明确的模型配置/首轮运行任务。
 
 ## 7. 直接影响文件（实施时精确收束）
 

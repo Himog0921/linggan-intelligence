@@ -8,7 +8,7 @@
 <body>
   <div class="v7-app">{{HEADER}}<div class="v7-shell lgi-model-shell">
     <main class="lgi-model-settings" aria-labelledby="model-settings-title">
-      <header class="lgi-model-toolbar"><div><p>设置 / 模型与 AI</p><h1 id="model-settings-title">评论研究 V1 的模型设置</h1><p>保存连接或默认配置不会发送评论。只有手动测试和评论研究中的“开始研究”会发起受控调用。</p></div><button type="button" id="reload">刷新</button></header>
+      <header class="lgi-model-toolbar"><div><p>设置 / 模型与 AI</p><h1 id="model-settings-title">评论研究 V1 的模型设置</h1><p>保存连接或默认配置不会发送评论。只有手动测试，以及已启用向量归并后的“开始研究”会发起受控调用。</p></div><button type="button" id="reload">刷新</button></header>
       <p id="settings-feedback" role="status" aria-live="polite"></p>
       <div class="lgi-model-surface">
         <section id="connections"><div class="lgi-model-section-heading"><h2>供应商连接</h2><button type="button" id="new-connection">添加连接</button></div><p>连接只保存到本机工作空间。测试会发送一条合成 V1 JSON 请求，不会发送评论。</p><div id="connection-list"></div></section>

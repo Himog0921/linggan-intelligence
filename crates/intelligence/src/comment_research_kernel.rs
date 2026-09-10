@@ -5,6 +5,7 @@
 
 use crate::{
     comment_cleaning::{CLEANER_VERSION, CleanComment, clean},
+    embedding_settings,
     research_text::content_hash,
 };
 use linggan_storage_postgres::Database;
@@ -89,6 +90,8 @@ pub enum CommentResearchKernelError {
     PolicyMissing,
     #[error("no eligible ordinary-user derivations are available")]
     NoEligibleDerivations,
+    #[error("no enabled, qualified embedding configuration is available")]
+    EmbeddingNotReady,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -319,6 +322,9 @@ pub async fn start_run(
 ) -> Result<ResearchRunReceipt, CommentResearchKernelError> {
     derive_current_sources(database, MAX_DERIVATIONS_PER_PASS as usize).await?;
     let mut transaction = database.pool().begin().await?;
+    if !embedding_settings::ready_in_transaction(&mut transaction, None).await? {
+        return Err(CommentResearchKernelError::EmbeddingNotReady);
+    }
     let policy = sqlx::query(
         "SELECT policy.policy_revision_ref,policy.derivation_version,policy.source_limit \
          FROM linggan_comment_research_policy_active active \
@@ -778,17 +784,39 @@ pub async fn refresh_run_completion_for_atom(
     Ok(())
 }
 
-/// A disabled or failed embedding configuration must settle active Runs honestly instead of
-/// leaving their semantic items labelled completed while publication can never happen.
+/// A disabled embedding configuration terminalizes work that has not reserved a provider call.
+/// Calls already in flight settle through their normal receipts; this function never creates a
+/// new invocation merely to make an active Run finish.
 pub async fn fail_active_runs_without_embedding_config(
     database: &Database,
 ) -> Result<u64, CommentResearchKernelError> {
+    sqlx::query(
+        "UPDATE linggan_comment_research_run_item item \
+         SET state='incompatible',failure_code='embedding_configuration_unavailable', \
+             finished_at=scope_001_now(),lease_until=NULL,next_attempt_at=NULL,updated_at=scope_001_now() \
+         FROM linggan_comment_research_run run \
+         WHERE item.run_ref=run.run_ref AND item.state IN ('pending','retryable') \
+           AND run.state IN ('queued','running')",
+    )
+    .execute(database.pool())
+    .await?;
     sqlx::query(
         "UPDATE linggan_comment_research_atom_embedding embedding \
          SET state='failed',failure_code='embedding_configuration_unavailable',updated_at=scope_001_now() \
          FROM linggan_comment_research_atom atom \
          JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
          WHERE embedding.atom_ref=atom.atom_ref AND embedding.state='pending' \
+           AND run.state IN ('queued','running')",
+    )
+    .execute(database.pool())
+    .await?;
+    sqlx::query(
+        "UPDATE linggan_comment_research_problem_resolution resolution \
+         SET state='incompatible',failure_code='embedding_configuration_unavailable', \
+             finished_at=scope_001_now(),lease_until=NULL,next_attempt_at=NULL,updated_at=scope_001_now() \
+         FROM linggan_comment_research_atom atom \
+         JOIN linggan_comment_research_run run ON run.run_ref=atom.run_ref \
+         WHERE resolution.atom_ref=atom.atom_ref AND resolution.state IN ('pending','retryable') \
            AND run.state IN ('queued','running')",
     )
     .execute(database.pool())

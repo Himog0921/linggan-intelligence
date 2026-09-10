@@ -14,9 +14,10 @@ use linggan_intelligence::comment_research_embeddings::{
     queue_problem_definition_embedding, recall_problem_candidates, record_embedding_failure,
 };
 use linggan_intelligence::comment_research_kernel::{
-    DERIVATION_VERSION, RunItemFailureClass, SaveResearchPolicy, claim_next_run_item,
-    derive_current_sources, fail_active_runs_without_embedding_config, record_run_item_failure,
-    recover_expired_run_items, refresh_run_completion_for_atom, save_active_policy, start_run,
+    CommentResearchKernelError, DERIVATION_VERSION, ResearchRunReceipt, RunItemFailureClass,
+    SaveResearchPolicy, claim_next_run_item, derive_current_sources,
+    fail_active_runs_without_embedding_config, record_run_item_failure, recover_expired_run_items,
+    refresh_run_completion_for_atom, save_active_policy, start_run,
 };
 use linggan_intelligence::comment_research_problems::{
     CommentResearchProblemError, ExistingProblemAdmission, NewProblemAdmission,
@@ -109,7 +110,7 @@ async fn terminal_cutover_clears_preliminary_v1_results_without_touching_raw_evi
     )
     .await
     .unwrap();
-    start_run(&database).await.unwrap();
+    start_ready_run(&database).await.unwrap();
 
     sqlx::raw_sql(include_str!(
         "../../../database/migrations/0069_comment_research_v1_cutover.sql"
@@ -233,6 +234,26 @@ async fn synthetic_qualified_embedding_space(database: &Database) -> EmbeddingSp
         .await
         .unwrap();
     activate_configured_embedding_space(database).await.unwrap()
+}
+
+async fn start_ready_run(
+    database: &Database,
+) -> Result<ResearchRunReceipt, CommentResearchKernelError> {
+    let ready: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM linggan_embedding_settings settings \
+         JOIN linggan_embedding_config config USING(config_ref) \
+         JOIN linggan_model_entry model USING(model_ref) \
+         JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref \
+         JOIN linggan_model_connection connection USING(connection_ref) \
+         WHERE settings.singleton AND config.enabled AND config.qualified AND connection.enabled)",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    if !ready {
+        synthetic_qualified_embedding_space(database).await;
+    }
+    start_run(database).await
 }
 
 async fn freeze_research_clock(database: &Database, now_at: &str) {
@@ -529,7 +550,7 @@ async fn frozen_run_remains_executable_but_stale_result_is_hidden_after_author_c
     )
     .await
     .unwrap();
-    let run = start_run(&database).await.unwrap();
+    let run = start_ready_run(&database).await.unwrap();
 
     detail_with_author(
         &database,
@@ -625,7 +646,7 @@ async fn later_comments_are_derived_and_frozen_before_older_unprocessed_input() 
     .await
     .unwrap();
 
-    let first_run = start_run(&database).await.unwrap();
+    let first_run = start_ready_run(&database).await.unwrap();
     let first_source: Uuid = sqlx::query_scalar(
         "SELECT derivation.source_ref FROM linggan_comment_research_run_item item \
          JOIN linggan_comment_research_derivation derivation USING(derivation_ref) \
@@ -637,7 +658,7 @@ async fn later_comments_are_derived_and_frozen_before_older_unprocessed_input() 
     .unwrap();
     assert_eq!(first_source, newer);
 
-    let second_run = start_run(&database).await.unwrap();
+    let second_run = start_ready_run(&database).await.unwrap();
     let second_source: Uuid = sqlx::query_scalar(
         "SELECT derivation.source_ref FROM linggan_comment_research_run_item item \
          JOIN linggan_comment_research_derivation derivation USING(derivation_ref) \
@@ -649,7 +670,7 @@ async fn later_comments_are_derived_and_frozen_before_older_unprocessed_input() 
     .unwrap();
     assert_eq!(second_source, older);
     assert!(matches!(
-        start_run(&database).await,
+        start_ready_run(&database).await,
         Err(linggan_intelligence::comment_research_kernel::CommentResearchKernelError::NoEligibleDerivations)
     ));
 }
@@ -780,7 +801,7 @@ async fn saved_policy_is_the_only_authorization_needed_to_queue_a_research_run()
     )
     .await
     .unwrap();
-    let receipt = start_run(&database).await.unwrap();
+    let receipt = start_ready_run(&database).await.unwrap();
 
     assert_eq!(receipt.policy_revision_ref, policy.policy_revision_ref);
     assert_eq!(receipt.selected_sources, 1);
@@ -835,7 +856,7 @@ async fn incompatible_item_does_not_block_the_next_healthy_v1_item() {
     )
     .await
     .unwrap();
-    start_run(&database).await.unwrap();
+    start_ready_run(&database).await.unwrap();
 
     let poisoned = claim_next_run_item(&database).await.unwrap().unwrap();
     record_run_item_failure(
@@ -881,7 +902,7 @@ async fn expired_v1_lease_recovers_without_stalling_the_run() {
     )
     .await
     .unwrap();
-    let run = start_run(&database).await.unwrap();
+    let run = start_ready_run(&database).await.unwrap();
     let first = claim_next_run_item(&database).await.unwrap().unwrap();
     sqlx::query(
         "UPDATE linggan_comment_research_run_item \
@@ -950,7 +971,7 @@ async fn accepted_atoms_are_evidence_bound_and_invalid_model_output_writes_nothi
     )
     .await
     .unwrap();
-    let run = start_run(&database).await.unwrap();
+    let run = start_ready_run(&database).await.unwrap();
     let claim = claim_next_run_item(&database).await.unwrap().unwrap();
 
     let invalid = accept_semantic_output(
@@ -1056,7 +1077,7 @@ async fn unavailable_embedding_settles_a_run_as_failure_instead_of_completed_unp
     )
     .await
     .unwrap();
-    let run = start_run(&database).await.unwrap();
+    let run = start_ready_run(&database).await.unwrap();
     let claim = claim_next_run_item(&database).await.unwrap().unwrap();
     accept_semantic_output(
         &database,
@@ -1074,6 +1095,10 @@ async fn unavailable_embedding_settles_a_run_as_failure_instead_of_completed_unp
     )
     .await
     .unwrap();
+    sqlx::query("UPDATE linggan_embedding_config SET enabled=false")
+        .execute(database.pool())
+        .await
+        .unwrap();
     assert_eq!(
         fail_active_runs_without_embedding_config(&database)
             .await
@@ -1097,6 +1122,73 @@ async fn unavailable_embedding_settles_a_run_as_failure_instead_of_completed_unp
     .await
     .unwrap();
     assert_eq!(published, 0);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn unavailable_embedding_prevents_run_creation_and_terminalizes_queued_work_without_calls() {
+    let database = fixture::proof_database("comment_research_embedding_start_gate").await;
+    detail_with_author(
+        &database,
+        "embedding-start-gate-note",
+        "SYNTHETIC embedding start gate note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "embedding-start-gate-note",
+        "reader",
+        "孩子写作业总拖延，有什么办法吗",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: None,
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        start_run(&database).await,
+        Err(CommentResearchKernelError::EmbeddingNotReady)
+    ));
+    let no_runs: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_research_run")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(no_runs, 0);
+
+    let run = start_ready_run(&database).await.unwrap();
+    sqlx::query("UPDATE linggan_embedding_config SET enabled=false")
+        .execute(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        fail_active_runs_without_embedding_config(&database)
+            .await
+            .unwrap(),
+        1
+    );
+    let outcome: (String, String, i64) = sqlx::query_as(
+        "SELECT run.state,item.state,(SELECT count(*) FROM linggan_model_invocation invocation \
+         WHERE invocation.result->>'runRef'=run.run_ref::text) \
+         FROM linggan_comment_research_run run \
+         JOIN linggan_comment_research_run_item item USING(run_ref) WHERE run.run_ref=$1",
+    )
+    .bind(run.run_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        outcome,
+        ("completed_with_failures".into(), "incompatible".into(), 0)
+    );
 }
 
 #[tokio::test]
@@ -1131,7 +1223,7 @@ async fn terminal_embedding_and_resolution_failures_are_visible_on_the_run() {
         )
         .await
         .unwrap();
-        let run = start_run(&database).await.unwrap();
+        let run = start_ready_run(&database).await.unwrap();
         let claim = claim_next_run_item(&database).await.unwrap().unwrap();
         accept_semantic_output(
             &database,
@@ -1235,7 +1327,7 @@ async fn membership_admission_waits_for_its_running_resolution_to_settle() {
     )
     .await
     .unwrap();
-    let run = start_run(&database).await.unwrap();
+    let run = start_ready_run(&database).await.unwrap();
     let claim = claim_next_run_item(&database).await.unwrap().unwrap();
     accept_semantic_output(
         &database,
@@ -1319,7 +1411,7 @@ async fn membership_admission_waits_for_its_running_resolution_to_settle() {
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn unavailable_embedding_does_not_fail_an_atom_with_a_frozen_resolution() {
+async fn unavailable_embedding_terminalizes_a_frozen_resolution_without_a_new_call() {
     let database = fixture::proof_database("comment_research_embedding_resolution_continues").await;
     detail_with_author(
         &database,
@@ -1348,7 +1440,7 @@ async fn unavailable_embedding_does_not_fail_an_atom_with_a_frozen_resolution() 
     )
     .await
     .unwrap();
-    let run = start_run(&database).await.unwrap();
+    let run = start_ready_run(&database).await.unwrap();
     let claim = claim_next_run_item(&database).await.unwrap().unwrap();
     accept_semantic_output(
         &database,
@@ -1401,13 +1493,22 @@ async fn unavailable_embedding_does_not_fail_an_atom_with_a_frozen_resolution() 
     fail_active_runs_without_embedding_config(&database)
         .await
         .unwrap();
-    let state: String =
-        sqlx::query_scalar("SELECT state FROM linggan_comment_research_run WHERE run_ref=$1")
+    let outcome: (String, String, i64) = sqlx::query_as(
+        "SELECT run.state,resolution.state,(SELECT count(*) FROM linggan_model_invocation invocation \
+         WHERE invocation.result->>'runRef'=run.run_ref::text) \
+         FROM linggan_comment_research_run run \
+         JOIN linggan_comment_research_problem_resolution resolution ON resolution.atom_ref=$2 \
+         WHERE run.run_ref=$1",
+    )
             .bind(run.run_ref)
+            .bind(atom)
             .fetch_one(database.pool())
             .await
             .unwrap();
-    assert_eq!(state, "running");
+    assert_eq!(
+        outcome,
+        ("completed_with_failures".into(), "incompatible".into(), 0)
+    );
 }
 
 #[tokio::test]
@@ -1440,7 +1541,7 @@ async fn no_signal_is_a_terminal_run_item_outcome_not_an_atom() {
     )
     .await
     .unwrap();
-    let run = start_run(&database).await.unwrap();
+    let run = start_ready_run(&database).await.unwrap();
     let claim = claim_next_run_item(&database).await.unwrap().unwrap();
 
     let receipt = accept_semantic_output(
@@ -1509,7 +1610,7 @@ async fn atom_problem_membership_has_one_stable_identity_and_auditable_basis() {
     )
     .await
     .unwrap();
-    let run = start_run(&database).await.unwrap();
+    let run = start_ready_run(&database).await.unwrap();
 
     let first_claim = claim_next_run_item(&database).await.unwrap().unwrap();
     accept_semantic_output(
@@ -1665,7 +1766,7 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
     )
     .await
     .unwrap();
-    let run = start_run(&database).await.unwrap();
+    let run = start_ready_run(&database).await.unwrap();
     let first_claim = claim_next_run_item(&database).await.unwrap().unwrap();
     accept_semantic_output(
         &database,
@@ -1882,7 +1983,7 @@ async fn published_result_has_independent_multi_signal_changes_and_is_idempotent
     )
     .await
     .unwrap();
-    let run = start_run(&database).await.unwrap();
+    let run = start_ready_run(&database).await.unwrap();
     let mut created_problem: Option<(Uuid, i32)> = None;
     while let Some(claim) = claim_next_run_item(&database).await.unwrap() {
         if !claim_is_in_current_result_window(&database, run.run_ref, claim.derivation_ref).await {

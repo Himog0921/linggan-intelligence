@@ -12,6 +12,41 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
+/// Returns whether one exact (or any) embedding configuration is enabled, qualified and connected.
+/// The settings, configuration and connection rows stay share-locked until the caller commits its
+/// enclosing operation, so disabling the configuration cannot race Run or invocation reservation.
+pub(crate) async fn ready_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    required_config_ref: Option<Uuid>,
+) -> Result<bool, sqlx::Error> {
+    let config_ref: Option<Uuid> = sqlx::query_scalar(
+        "SELECT config_ref FROM linggan_embedding_settings WHERE singleton FOR SHARE",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if let Some(required) = required_config_ref
+        && config_ref != Some(required)
+    {
+        return Ok(false);
+    }
+    let Some(config_ref) = config_ref else {
+        return Ok(false);
+    };
+    sqlx::query_scalar(
+        "SELECT config.qualified AND config.enabled AND connection.enabled \
+         FROM linggan_embedding_config config \
+         JOIN linggan_model_entry model USING(model_ref) \
+         JOIN linggan_model_connection_version version \
+           ON version.version_ref=model.connection_version_ref \
+         JOIN linggan_model_connection connection USING(connection_ref) \
+         WHERE config.config_ref=$1 FOR SHARE OF config,connection",
+    )
+    .bind(config_ref)
+    .fetch_optional(&mut **transaction)
+    .await
+    .map(|ready| ready.unwrap_or(false))
+}
+
 pub async fn read(db: &Database) -> Result<Value, ModelError> {
     let r=sqlx::query("SELECT s.revision,c.config_ref,c.model_ref,c.dimensions,c.qualified,c.enabled FROM linggan_embedding_settings s LEFT JOIN linggan_embedding_config c USING(config_ref) WHERE singleton").fetch_one(db.pool()).await?;
     Ok(

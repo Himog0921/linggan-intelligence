@@ -13,7 +13,7 @@
 - 本轮隔离 PostgreSQL 已通过作者归属、删除控制历史、阻止删除保护事实及名称确认等新增证明，并修正了四处旧测试夹具/断言，使其符合现有的 200 篇渐进建档、工单重排、租约历史与人可读北京时间合同。完整 LOCAL-001 脚本已通过，且其临时数据库、容器和卷均已清理；该结论仍只是候选源码证明，不代表共享迁移、PR 合并、运行时切换或真实采集。
 
 
-### COMMENT-RESEARCH-RESET-001 / Issue #213（V1 实现与终态迁移候选已完成；共享切换待执行）
+### COMMENT-RESEARCH-RESET-001 / Issue #213（V1 已合并、开发库已切换、3000 已上线；首轮模型配置与业务验收待执行）
 
 Mog 已决定评论研究仍处开发期：既有研究派生结果可以删除，不做 Task B、P4 与新系统之间的数据迁移。新交付只保留 Raw Comment/Evidence、来源资格、作者事实、清洗定位、调用账本、预算与 lease/recovery 等可独立复用基础；旧 candidate/relation/vector、P4 HDBSCAN/Leiden/adapter/group、旧超级查询和页面读取将全部退役。唯一未来合同为 [COMMENT-RESEARCH-RESET-001](plans/active/comment-research-reset-001.md)，长期裁定为 [DEC-0003](decisions/0003-comment-research-single-semantic-kernel.md)。
 
@@ -21,7 +21,11 @@ Mog 已决定评论研究仍处开发期：既有研究派生结果可以删除�
 
 `0069_comment_research_v1_cutover` 在完整历史 migration fixture 上通过：它不用 `CASCADE`，显式删除旧 Task B/P4/daily/replay/recovery 的表、视图、触发器、函数和 identity index（含无 FK 的 `linggan_ci_source_revision`），并清空可能由早期开发分支写入的 V1 policy/run/derivation/Atom/vector/Problem/result 派生行；Raw Comment/Evidence、作品作者归属、来源资格、通用模型连接/配置、embedding 设置和 invocation ledger 保留。`0070_comment_research_v1_derivation_head` 使归属/父回复上下文变化产生新的 immutable derivation：冻结 Run 继续读取其原始可读输入，新 Run 才选择当前 head；任一冻结输入不再当前时，已发布整版结果不可读。旧 API/UI、旧 Python 语义计算 runtime、旧 worker 入口和专属验证脚本均已从候选源码删除；五个 V1 读取端点与页面不再让变化观察复用概览，也不向原声显示“语义向量准备”。isolated PostgreSQL 的 20 项 V1 proof、2 项 API proof、Pi adapter SDK proof、Rust 编译及 API route/page guard 已通过。
 
-Mog 已于 2026-09-10 授权 source merge、共享开发库执行此 terminal migration、localhost runtime 切换和上线测试；连续排程仍关闭，部署不会自动向真实模型发送评论。尚未发生的事实必须保持分开：独立复审、exact-head merge、共享开发库删除回执、runtime PID/health、真实浏览器交互/性能，以及用户主动开始一轮真实 V1 研究后的业务验收。
+Mog 已于 2026-09-10 授权 source merge、共享开发库执行此 terminal migration、localhost runtime 切换和上线测试。PR #217 的 V1 交付已合并，PR #219 补足受控 runtime 在 worker 明确不存在时的 drain 判定；`runtime-main` 与当时的 `origin/main` 同步，`/health` 返回数据库与 schema `READY`，API、巡检 worker 和媒体 worker 均在 loopback 本机服务中运行。共享开发库已记录 `0064_comment_research_kernel` 至 `0070_comment_research_v1_derivation_head`；旧 Task B/P4/daily/replay/recovery relation 不存在，V1 policy/run/Atom/vector/Problem/result 派生计数均为 0，而 Raw Comment 为 3,102、通用 invocation ledger 为 129，说明 terminal reset 没有删除应保留的证据与账本。
+
+浏览器已实际打开 `http://127.0.0.1:3000/corpus/comments?view=overview`：页面标题、五个 V1 tab、空态和“作品作者回复/身份未知不进入用户问题与变化统计”均正确出现，控制台无 error；旧评论研究页面不存在。当前空态不是研究失败：开发期结果已按决定清空，尚未保存策略或手动开始首轮研究。连续排程仍关闭，部署没有创建真实模型 invocation。
+
+**仍未完成且不能伪称已上线可研究的条件**：当前已运行 revision 仅有 DeepSeek 文本模型，未配置、测试或启用任何 embedding 模型。本次 guarded revision 在合并并完成 runtime 切换后，才会使评论研究页禁用“开始研究”、服务端拒绝没有 qualified+enabled embedding 的启动请求；切换后必须以实际页面和 POST 回执核验，不能预先把该保护写成已部署事实。它避免用户先消耗文本调用而得到必然无法归并/发布的失败 Run。下一步需要 Mog 选择并提供可用的 embedding 供应商连接，在“模型与向量设置”完成合成探针、启用向量模型，然后保存策略并手动开始首轮研究；这之后才可验收真实语义质量、向量归并和变化观察，不能用当前 UI 空态或 health 代替。
 
 ### CI-AUTO-004 · 本机发布回执（2026-09-09；历史实现事实）
 
