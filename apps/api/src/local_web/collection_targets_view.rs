@@ -148,9 +148,9 @@ fn target_table(
         ));
     }
     let columns = if is_creator {
-        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部创作者目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span role="columnheader">作品目录</span><span role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近变化</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部创作者目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span class="c-tg-head-num" role="columnheader">作品目录</span><span class="c-tg-head-num" role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近变化</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     } else {
-        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span role="columnheader">最近命中</span><span role="columnheader">最近新增</span><span role="columnheader">巡查状态</span><span role="columnheader">数据更新</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span class="c-tg-head-num" role="columnheader">最近命中</span><span role="columnheader">最近新增</span><span role="columnheader">巡查状态</span><span role="columnheader">数据更新</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     };
     let grid = if is_creator {
         "c-tg-creator-grid"
@@ -1396,8 +1396,12 @@ mod tests {
         assert!(html.contains("关键词观察"));
         assert!(html.contains("c-tg-creator-grid"));
         assert!(html.contains("c-tg-keyword-grid"));
-        assert!(html.contains(r#"作品目录</span><span role="columnheader">详情进度"#));
+        assert!(html.contains(
+            r#"作品目录</span><span class="c-tg-head-num" role="columnheader">详情进度"#
+        ));
         assert!(html.contains(r#"最近命中</span><span role="columnheader">最近新增"#));
+        // 数字列的表头必须与右对齐的数字同侧，否则一列两端各站一边，看着就是错位。
+        assert_eq!(html.matches("c-tg-head-num").count(), 3);
         assert!(html.contains("打开作者的创作者档案"));
         assert!(html.contains("打开关键词的关键词观察"));
         assert!(!html.contains("关键词档案"));

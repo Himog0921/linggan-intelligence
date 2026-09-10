@@ -417,3 +417,99 @@
   kind.addEventListener("change", sync);
   sync();
 })();
+
+// 自绘下拉。
+//
+// 原生 select 的**弹出层由操作系统绘制**——自带圆角、蓝色高亮和阴影，CSS 一律管不到。
+// 于是一个硬边、直角、墨线的页面，一点开筛选就露出四个系统菜单。证据库早就为此写了
+// 一套自绘 select（见 evidence_library.js 的 createSelect），这里把同一件事做到观察
+// 目标的工具条上。
+//
+// 用渐进增强而不是直接替换：原生 select 留在表单里当唯一真值来源，JS 只是在它上面画
+// 一层。没有 JS 时表单照常提交——这是一个真的会 POST 的表单，不是查询面板。
+(function () {
+  "use strict";
+  var fields = document.querySelectorAll(".c-tg-toolbar .c-tg-field");
+  if (!fields.length) return;
+
+  var openOne = null;
+  function closeOpen() {
+    if (!openOne) return;
+    openOne.list.hidden = true;
+    openOne.toggle.setAttribute("aria-expanded", "false");
+    openOne = null;
+  }
+  document.addEventListener("click", closeOpen);
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") closeOpen();
+  });
+
+  Array.prototype.forEach.call(fields, function (field) {
+    var select = field.querySelector("select");
+    if (!select) return;
+
+    var toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "c-tg-ctl c-tg-drawn-toggle";
+    toggle.setAttribute("aria-haspopup", "listbox");
+    toggle.setAttribute("aria-expanded", "false");
+    var label = document.createElement("span");
+    var caret = document.createElement("i");
+    caret.className = "c-tg-caret";
+    caret.setAttribute("aria-hidden", "true");
+    toggle.appendChild(label);
+    toggle.appendChild(caret);
+
+    var list = document.createElement("div");
+    list.className = "c-tg-drawn-list";
+    list.setAttribute("role", "listbox");
+    list.hidden = true;
+
+    var buttons = [];
+    Array.prototype.forEach.call(select.options, function (option) {
+      var item = document.createElement("button");
+      item.type = "button";
+      item.setAttribute("role", "option");
+      item.textContent = option.textContent;
+      item.addEventListener("click", function (event) {
+        event.stopPropagation();
+        select.value = option.value;
+        // 派发 change：隐藏关键词排序那段逻辑挂在原生 select 的 change 上，
+        // 只改 value 不派发事件，它就不会跟着动。
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+        paint();
+        closeOpen();
+        toggle.focus();
+      });
+      buttons.push({ button: item, value: option.value });
+      list.appendChild(item);
+    });
+
+    function paint() {
+      var current = select.options[select.selectedIndex];
+      label.textContent = current ? current.textContent : "";
+      buttons.forEach(function (entry) {
+        entry.button.setAttribute("aria-selected", String(entry.value === select.value));
+      });
+    }
+
+    toggle.addEventListener("click", function (event) {
+      event.stopPropagation();
+      var wasOpen = openOne && openOne.toggle === toggle;
+      closeOpen();
+      if (wasOpen) return;
+      list.hidden = false;
+      toggle.setAttribute("aria-expanded", "true");
+      openOne = { toggle: toggle, list: list };
+    });
+    list.addEventListener("click", function (event) {
+      event.stopPropagation();
+    });
+    select.addEventListener("change", paint);
+
+    field.classList.add("c-tg-drawn");
+    field.appendChild(toggle);
+    field.appendChild(list);
+    paint();
+  });
+})();

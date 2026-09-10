@@ -35,6 +35,9 @@
 .c-tg-platform{color:var(--lgi-ink);font-weight:600}
 .c-tg-number-value,.c-tg-time{font-family:var(--lgi-font-mono);font-variant-numeric:tabular-nums}
 .c-tg-number-value{color:var(--lgi-ink);font-weight:700;text-align:right}
+/* 数字列右对齐是为了让位数对齐着比。表头必须跟着一起右对齐——否则表头贴左、
+ * 数字贴右，同一列的两端各站一边，读的人会以为是错位。 */
+.c-tg-head-num{text-align:right}
 .c-tg-time{color:var(--lgi-body)}
 .c-tg-unknown{color:var(--lgi-muted)}
 .c-tg-truth{display:inline-flex;align-items:center;max-width:100%;min-height:24px;overflow:hidden;text-overflow:ellipsis;font-size:var(--lgi-text-label);font-weight:600;white-space:nowrap}
@@ -312,3 +315,50 @@
   transform:translateY(-2px) rotate(45deg);
   transition:transform var(--lgi-duration-state) var(--lgi-ease-ui)}
 .c-tg-ctl:hover .c-tg-caret{transform:translateY(0) rotate(45deg)}
+
+/* ── 工具条与第一张表之间只留一条线 ────────────────────────────────────────
+ *
+ * 此前这里叠了两条：工具条自己的底线，和「创作者档案」那一行的底线，中间还夹着一段
+ * 空白。两条平行的线离得越近，越像是排版事故而不是分区。
+ *
+ * 现在工具条不再自带线，由「创作者档案」那条线兼任分隔——少一条线，少一段留白。 */
+.c-page .c-toolbar{border-bottom:0}
+.c-body .c-tg-kind:first-child{margin-top:0}
+
+/* tab 与右侧控件在同一行里垂直居中。
+ * tab 是 46px、控件是 44px，行高由高者决定；此前 tab 贴着行底（上留 7px、下留 1px），
+ * 因为它的选中下划线要贴住工具条的底线。那条线已经去掉，下划线就没有必须贴底的理由了。 */
+/* V4 那段把 .c-toolbar 设成 align-items:flex-end，原意是让 tab 的选中下划线压住工具条
+ * 自己的底线。那条底线已经去掉（由「创作者档案」那条兼任），压底就没有理由了，改回居中。 */
+.c-page .c-toolbar{align-items:center}
+.c-toolbar .c-tabs{align-items:center}
+.c-toolbar .c-tabs a,.c-toolbar .c-tabs button{height:44px}
+
+/* 主按钮收窄：黑底加纹理本身就够重，再撑宽就成了页面上最吵的东西。
+ * 点阵带同步收窄，否则纹理会占掉按钮一半。 */
+.c-tg-toolbar .c-btn-primary{padding-right:var(--lgi-space-8)}
+.c-tg-toolbar .c-btn-primary::after{width:26%}
+
+/* 自绘下拉的外观。只有在 JS 真的画出来之后才生效（靠 .c-tg-drawn 这个类），
+ * 没有 JS 时原生 select 照旧可见可用。 */
+/* 给 .c-tg-field 设了 display 就会盖掉浏览器自带的 [hidden]{display:none}——
+ * 关键词排序只在建关键词目标时才该出现，盖掉之后它在创作者模式下也会露出来。 */
+.c-tg-toolbar .c-tg-field[hidden]{display:none}
+.c-tg-drawn{position:relative}
+.c-tg-drawn>select{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.c-tg-drawn::after{display:none}
+.c-tg-toolbar .c-tg-drawn-toggle{display:inline-flex;align-items:center;justify-content:space-between;
+  gap:var(--lgi-space-3);min-width:110px;cursor:pointer}
+/* 展开时按钮反白，和证据库那套一致：一个不变样的触发器，等于让人自己记住开没开。 */
+.c-tg-toolbar .c-tg-drawn-toggle[aria-expanded="true"]{background:var(--lgi-ink);color:var(--lgi-canvas)}
+.c-tg-drawn-toggle[aria-expanded="true"] .c-tg-caret{transform:translateY(2px) rotate(-135deg)}
+.c-tg-drawn-list{position:absolute;z-index:40;top:calc(100% + 4px);left:0;min-width:100%;
+  display:grid;padding:var(--lgi-space-1);
+  border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas)}
+.c-tg-drawn-list[hidden]{display:none}
+.c-tg-drawn-list button{display:block;width:100%;padding:var(--lgi-space-2) var(--lgi-space-3);
+  border:0;background:transparent;color:var(--lgi-ink);
+  font:650 12px/1 var(--lgi-font-sans);text-align:left;white-space:nowrap;cursor:pointer;
+  transition:background var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-tg-drawn-list button:hover{background:var(--lgi-canvas-sunken)}
+.c-tg-drawn-list button[aria-selected="true"]{background:var(--lgi-ink);color:var(--lgi-canvas)}
