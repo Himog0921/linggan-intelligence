@@ -357,14 +357,14 @@
  * 没有 JS 时原生 select 照旧可见可用。 */
 /* 给 .c-tg-field 设了 display 就会盖掉浏览器自带的 [hidden]{display:none}——
  * 关键词排序只在建关键词目标时才该出现，盖掉之后它在创作者模式下也会露出来。 */
-.c-tg-toolbar .c-tg-field[hidden]{display:none}
+[data-drawn-select][hidden]{display:none}
 .c-tg-drawn{position:relative}
 .c-tg-drawn>select{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .c-tg-drawn::after{display:none}
-.c-tg-toolbar .c-tg-drawn-toggle{display:inline-flex;align-items:center;justify-content:space-between;
+[data-drawn-select] .c-tg-drawn-toggle{display:inline-flex;align-items:center;justify-content:space-between;
   gap:var(--lgi-space-3);min-width:110px;cursor:pointer}
 /* 展开时按钮反白，和证据库那套一致：一个不变样的触发器，等于让人自己记住开没开。 */
-.c-tg-toolbar .c-tg-drawn-toggle[aria-expanded="true"]{background:var(--lgi-ink);color:var(--lgi-canvas)}
+[data-drawn-select] .c-tg-drawn-toggle[aria-expanded="true"]{background:var(--lgi-ink);color:var(--lgi-canvas)}
 .c-tg-drawn-toggle[aria-expanded="true"] .c-tg-caret{transform:translateY(2px) rotate(-135deg)}
 .c-tg-drawn-list{position:absolute;z-index:40;top:calc(100% + 4px);left:0;min-width:100%;
   display:grid;padding:var(--lgi-space-1);
@@ -410,3 +410,25 @@
   /* 关掉位移，但**保留定时退场**：它仍然该在 3 秒后让开，只是不再滑动。 */
   .c-tg-toast{animation:c-tg-toast-out 1ms linear 3s forwards}
 }
+
+/* ── 检查器抽屉：与列表用同一套控件语言 ─────────────────────────────────────
+ *
+ * 抽屉此前自成一套：筛选是原生 select（弹出层由系统绘制）、「打开主页」与「关闭」
+ * 是两段带图标的文字。同一个页面里因此并存两种控件外观。 */
+.c-dw-field{position:relative;display:inline-flex}
+[data-drawn-select] .c-tg-drawn-toggle{min-height:34px;height:34px;padding:0 var(--lgi-space-3);
+  border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas);color:var(--lgi-ink);
+  font:650 var(--lgi-text-label)/1 var(--lgi-font-sans)}
+.c-tg-toolbar [data-drawn-select] .c-tg-drawn-toggle{min-height:44px;height:44px;
+  padding:0 var(--lgi-space-4);font-size:12px}
+
+/* 抽屉头部两个动作沿用行内动作的形状：同高、同墨线，关闭是唯一带叉号的。 */
+.c-dw-source,.c-dw-close{display:inline-flex;align-items:center;justify-content:center;
+  box-sizing:border-box;gap:var(--lgi-space-2);height:34px;min-height:34px;
+  padding:0 var(--lgi-space-3);border:1px solid var(--lgi-border-solid);
+  background:var(--lgi-canvas);color:var(--lgi-ink);
+  font:650 var(--lgi-text-label)/1 var(--lgi-font-sans);text-decoration:none;cursor:pointer;
+  transition:background var(--lgi-duration-press) var(--lgi-ease-ui),
+             color var(--lgi-duration-press) var(--lgi-ease-ui)}
+.c-dw-source:hover,.c-dw-close:hover{background:var(--lgi-ink);color:var(--lgi-canvas)}
+.c-dw-source svg,.c-dw-close svg{width:12px;height:12px;flex:0 0 auto}

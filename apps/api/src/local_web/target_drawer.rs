@@ -1060,9 +1060,9 @@ fn works_list(
              <form class="c-dw-catalog-filter" method="get" action="/collection/targets">{hidden}
                <input type="hidden" name="dtab" value="works"/>
                <input type="search" name="catalog_query" value="{query}" placeholder="搜索作品标题或作品 ID" aria-label="搜索作品标题或作品 ID"/>
-               <select name="catalog_filter" aria-label="筛选作品">
+               <span class="c-dw-field" data-drawn-select><select name="catalog_filter" aria-label="筛选作品">
                  <option value="all"{all}>全部</option><option value="pending"{pending_selected}>待采详情</option><option value="complete"{complete_selected}>详情已完成</option><option value="patrol_new"{patrol_selected}>巡查新增</option>
-               </select><button class="c-btn-secondary" type="submit">筛选</button>
+               </select></span><button class="c-tg-act" type="submit">筛选</button>
              </form>
              <div class="c-dw-catalog-table-wrap"><table class="c-dw-catalog-table"><thead><tr>{headers}</tr></thead><tbody>{rows}</tbody></table></div>{empty}
            </section>"#,
@@ -1736,7 +1736,7 @@ fn lifecycle_overview(
     format!(
         r#"<section class="c-dw-section life-panel" id="creator-lifecycle">
               <div class="life-heading">
-                <div><h2>作品表现</h2><p>每个点是一篇作品；按发布时间查看真实互动分布</p></div>
+                <div><h2>作品表现</h2></div>
                 <p>数据截至 {as_of}</p>
               </div>
               {controls}{summary}{legend}{chart}{exclusions}

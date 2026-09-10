@@ -123,9 +123,12 @@ async fn read_catalog(
                 CASE WHEN first_discovery.title_state='KNOWN' THEN first_discovery.title END AS discovery_title, \
                 CASE WHEN first_discovery.creator_state='KNOWN' THEN first_discovery.creator_display_name END AS creator_display_name, \
                 first_discovery.result_position::bigint AS result_position, \
-                first_discovery.published_at_source_text,first_discovery.lane, \
-                detail.title AS detail_title,detail.published_at::text AS detail_published_at, \
-                detail.observed_at::text AS detail_observed_at, \
+                linggan_human_moment(first_discovery.published_at_source_text) \
+                    AS published_at_source_text, \
+                first_discovery.lane, \
+                detail.title AS detail_title, \
+                linggan_human_moment(detail.published_at) AS detail_published_at, \
+                linggan_human_moment(detail.observed_at) AS detail_observed_at, \
                 comments.comment_count, \
                 CASE WHEN EXISTS (SELECT 1 FROM linggan_material_derived_text derived \
                                   WHERE derived.content_public_ref=first_discovery.content_public_ref) THEN '已处理' \

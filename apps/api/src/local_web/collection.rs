@@ -853,11 +853,11 @@ fn second_bar(
             <a class="c-tg-ctl c-tg-sort" href="{sort_href}" aria-label="按最近观察排序"><span>最近观察</span><i class="c-tg-caret" aria-hidden="true"></i></a>
             <form id="collection-target-create" class="c-target-add" method="post" action="/collection/targets/new">
               {domain_field}
-              <label class="c-tg-field c-tg-field-kind"><span class="v7-sr-only">目标类型</span><select name="target_kind" aria-label="目标类型" data-target-kind>
+              <label class="c-tg-field c-tg-field-kind" data-drawn-select><span class="v7-sr-only">目标类型</span><select name="target_kind" aria-label="目标类型" data-target-kind>
                   <option value="creator">创作者</option>
                   <option value="keyword">关键词</option>
                 </select></label>
-              <label class="c-tg-field c-tg-field-ranking" data-keyword-only hidden><span class="v7-sr-only">关键词排序</span><select name="ranking" aria-label="关键词排序">
+              <label class="c-tg-field c-tg-field-ranking" data-keyword-only hidden data-drawn-select><span class="v7-sr-only">关键词排序</span><select name="ranking" aria-label="关键词排序">
                   <option value="most_liked">最多点赞</option>
                   <option value="most_collected">最多收藏</option>
                   <option value="most_commented">最多评论</option>

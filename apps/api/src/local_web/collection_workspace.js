@@ -429,7 +429,9 @@
 // 一层。没有 JS 时表单照常提交——这是一个真的会 POST 的表单，不是查询面板。
 (function () {
   "use strict";
-  var fields = document.querySelectorAll(".c-tg-toolbar .c-tg-field");
+  // 用标记属性而不是写死某一条工具条：抽屉里的「筛选作品」也是原生 select，
+  // 同样需要这层自绘，否则一点开又是系统菜单。
+  var fields = document.querySelectorAll("[data-drawn-select]");
   if (!fields.length) return;
 
   var openOne = null;
