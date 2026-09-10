@@ -511,16 +511,72 @@ fn published_at_evidence(payload: &serde_json::Map<String, Value>) -> PublishedA
     }
 }
 
+/// 取平台给出的互动计数。
+///
+/// **列表面的计数是文本，不是数字**：插件从搜索/主页卡片上读到的原样是 `"2704"`、
+/// `"2.9万"`，偶尔还有 `"赞"` 这种没有数字的占位。此前这里只接 `Value::as_i64`，
+/// 于是 1100 多条发现记录的点赞、评论、收藏**全部落空**，`*_state` 一律 `UNKNOWN`。
+/// 详情面走 API、给的是数字，所以只有列表面受影响——而列表面正是判断「哪篇值得
+/// 深挖」的地方。
+///
+/// `"2.9万"` 按 29000 记。**这是平台自己就只显示到这个精度**，不是我们丢了精度：
+/// 原文 `"2.9万"` 不可变地留在 `linggan_runtime_capture_package.payload` 里，任何
+/// 时候都能回查这个数是从什么文本来的，所以投影侧不再复制一份原文。
+///
+/// 认不出的一概返回 `None`（→ `UNKNOWN`），**绝不当作 0**：`"赞"` 表示这张卡片上
+/// 没有数字可读，不表示没有人点赞。
 pub(crate) fn exact_nonnegative_count(
     payload: &serde_json::Map<String, Value>,
     keys: &[&str],
 ) -> Option<i64> {
+    // 非负判定留在**每个候选键各自的闭包里**，不要提到 `find_map` 外面：提出去之后
+    // 第一个能解析的键一旦为负就直接判定整体未知，后面的候选键再也轮不到。多候选
+    // 存在的意义就是「这个键不可用时换下一个」。
     keys.iter().find_map(|key| {
-        payload
-            .get(*key)
-            .and_then(Value::as_i64)
-            .filter(|value| *value >= 0)
+        match payload.get(*key) {
+            Some(Value::Number(_)) => payload.get(*key).and_then(Value::as_i64),
+            Some(Value::String(text)) => platform_count_text(text),
+            _ => None,
+        }
+        .filter(|value| *value >= 0)
     })
+}
+
+/// 把平台卡片上的计数文本解析成整数。
+///
+/// 只认已经在真实回传里见过的写法：纯数字与「万」。`亿` 是同一套中文计数写法里
+/// 「万」的上一级，一并展开。**没见过的写法一概不认**——多认一种没有证据的后缀
+/// （`w`、`k`、`K`…）不会让数据更全，只会在某天把一个不是计数的文本读成数字。
+fn platform_count_text(text: &str) -> Option<i64> {
+    let text = text.trim();
+    let (digits, scale) = match text.strip_suffix('万') {
+        Some(head) => (head, 10_000_i64),
+        None => match text.strip_suffix('亿') {
+            Some(head) => (head, 100_000_000_i64),
+            None => (text, 1_i64),
+        },
+    };
+    scaled_decimal(digits.trim(), scale)
+}
+
+/// `"2.9"` × 10000 → 29000。
+///
+/// 走定点而不是浮点：`2.9_f64 * 10000.0` 得到 28999.999999999996，取整就少 1 个赞。
+fn scaled_decimal(digits: &str, scale: i64) -> Option<i64> {
+    let (whole, fraction) = digits.split_once('.').unwrap_or((digits, ""));
+    if whole.is_empty()
+        || !whole.bytes().all(|byte| byte.is_ascii_digit())
+        || !fraction.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let mut total = whole.parse::<i64>().ok()?.checked_mul(scale)?;
+    if !fraction.is_empty() {
+        let divisor = 10_i64.checked_pow(u32::try_from(fraction.len()).ok()?)?;
+        // 小数位比单位还细时（`1.23456万`）截断，不四舍五入：平台没显示的位数我们不猜。
+        total = total.checked_add(fraction.parse::<i64>().ok()?.checked_mul(scale)? / divisor)?;
+    }
+    Some(total)
 }
 
 pub(crate) fn observed_cover_url(payload: &serde_json::Map<String, Value>) -> Option<&str> {
@@ -561,4 +617,116 @@ fn observed_xhs_media_url_is_allowed(value: &str) -> bool {
 
 pub(crate) fn known_state<T>(value: Option<T>) -> &'static str {
     if value.is_some() { "KNOWN" } else { "UNKNOWN" }
+}
+
+#[cfg(test)]
+mod platform_count_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn count(value: Value) -> Option<i64> {
+        let payload = json!({ "likes": value });
+        exact_nonnegative_count(
+            payload.as_object().expect("object"),
+            &["likeCount", "likes"],
+        )
+    }
+
+    /// 列表面给的是文本。此前只接数字，1100+ 条发现记录的互动数因此全部落空。
+    #[test]
+    fn a_plain_digit_text_from_a_card_is_read() {
+        assert_eq!(count(json!("2704")), Some(2704));
+        assert_eq!(count(json!("0")), Some(0));
+    }
+
+    /// 「万」正是高赞笔记的写法——恰恰是最该被读到的那批。
+    #[test]
+    fn a_chinese_ten_thousand_unit_expands() {
+        assert_eq!(count(json!("1万")), Some(10_000));
+        assert_eq!(count(json!("2.9万")), Some(29_000));
+        assert_eq!(count(json!("1.25万")), Some(12_500));
+        assert_eq!(count(json!("5.3万")), Some(53_000));
+    }
+
+    /// 定点而非浮点：`2.9 * 10000.0` 在 f64 下是 28999.999999999996。
+    #[test]
+    fn the_expansion_does_not_lose_a_unit_to_floating_point() {
+        for (text, expected) in [("2.9万", 29_000), ("8.7万", 87_000), ("1.1万", 11_000)] {
+            assert_eq!(count(json!(text)), Some(expected), "{text}");
+        }
+    }
+
+    /// `"赞"` 是「这张卡片上没有数字」，不是「没有人点赞」——必须是未知，不能是 0。
+    #[test]
+    fn a_placeholder_without_digits_stays_unknown() {
+        assert_eq!(count(json!("赞")), None);
+        assert_eq!(count(json!("")), None);
+        assert_eq!(count(json!("万")), None);
+        assert_eq!(count(json!("很多")), None);
+    }
+
+    /// 详情面走 API 给的是数字，原路径不能被这次改动动到。
+    #[test]
+    fn a_numeric_count_keeps_its_previous_behaviour() {
+        assert_eq!(count(json!(321)), Some(321));
+        assert_eq!(count(json!(-1)), None);
+        assert_eq!(count(json!(null)), None);
+        assert_eq!(count(json!(true)), None);
+    }
+
+    /// 负号、空白、千分位这些没在平台上出现过的写法，一律不猜。
+    #[test]
+    fn unobserved_shapes_are_refused_rather_than_guessed() {
+        assert_eq!(count(json!("-5")), None);
+        assert_eq!(count(json!("1,234")), None);
+        assert_eq!(count(json!("2.9 万")), Some(29_000), "单位前的空白应被容忍");
+    }
+
+    /// 只认真实见过的「万」「亿」。`w`/`k` 这类后缀没有任何观测证据，多认一种就是
+    /// 多一条把非计数文本读成数字的路。
+    #[test]
+    fn only_units_actually_seen_on_the_platform_are_expanded() {
+        assert_eq!(count(json!("1亿")), Some(100_000_000));
+        for guessed in ["1w", "1W", "1k", "1K", "1万万"] {
+            assert_eq!(
+                count(json!(guessed)),
+                None,
+                "{guessed} 没有观测依据，不该被认出"
+            );
+        }
+    }
+
+    /// 多候选键的意义是「这个键不可用就换下一个」。非负判定必须留在每个候选各自的
+    /// 判断里；提到最外面会让第一个能解析的键一旦为负就直接判整体未知，后备键再也
+    /// 轮不到——那是一次静默的能力收窄。
+    #[test]
+    fn a_negative_first_candidate_falls_back_to_the_next_key() {
+        let payload = json!({ "likeCount": -1, "likes": 42 });
+        assert_eq!(
+            exact_nonnegative_count(
+                payload.as_object().expect("object"),
+                &["likeCount", "likes"]
+            ),
+            Some(42)
+        );
+
+        let all_negative = json!({ "likeCount": -1, "likes": -2 });
+        assert_eq!(
+            exact_nonnegative_count(
+                all_negative.as_object().expect("object"),
+                &["likeCount", "likes"]
+            ),
+            None
+        );
+
+        // 文本候选同样要能被跳过，而不是让整串候选就此打住。
+        let text_first = json!({ "likeCount": "赞", "likes": "2.9万" });
+        assert_eq!(
+            exact_nonnegative_count(
+                text_first.as_object().expect("object"),
+                &["likeCount", "likes"]
+            ),
+            Some(29_000)
+        );
+    }
 }

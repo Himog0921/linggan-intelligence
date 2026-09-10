@@ -835,6 +835,46 @@ async fn exact_time_requires_a_supported_detail_field_and_parser_version() {
     );
 }
 
+/// 列表面的互动数是**文本**，不是数字。
+///
+/// 既有 discovery 用例全都写 `"likes":321` 这种数字形态，恰好避开了真实形状，于是
+/// 「列表面互动数全部落空」这件事一直没有测试能发现：线上 1100+ 条发现记录的点赞、
+/// 评论、收藏 `*_state` 全是 `UNKNOWN`。这条用例按插件真实回传的形态断言。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn card_engagement_text_including_the_ten_thousand_unit_projects_as_counts() {
+    let database = proof_database("material_card_engagement_slice").await;
+    submit_package(
+        &database,
+        "discovery_search",
+        serde_json::json!({"query":"考研自习"}),
+        serde_json::json!({
+            "kind":"discovery_card","resultPosition":1,
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-engagement-text"},
+            // 插件从卡片上读到什么就回传什么：高赞是「万」，没有数字时是占位文案。
+            "payload":{"title":"文本互动数","likes":"2.9万","comments":"312","collects":"1万","shares":"赞"}
+        }),
+    )
+    .await;
+    let row = sqlx::query(
+        "SELECT like_count,like_count_state,comment_count,comment_count_state, \
+                collect_count,collect_count_state,share_count,share_count_state \
+         FROM linggan_material_discovery_finding",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("typed discovery finding exists");
+    assert_eq!(row.get::<Option<i64>, _>("like_count"), Some(29_000));
+    assert_eq!(row.get::<String, _>("like_count_state"), "KNOWN");
+    assert_eq!(row.get::<Option<i64>, _>("comment_count"), Some(312));
+    assert_eq!(row.get::<String, _>("comment_count_state"), "KNOWN");
+    assert_eq!(row.get::<Option<i64>, _>("collect_count"), Some(10_000));
+    assert_eq!(row.get::<String, _>("collect_count_state"), "KNOWN");
+    // 「赞」是这张卡片上没有数字可读，不是没有人点赞——必须留在未知，不能变成 0。
+    assert_eq!(row.get::<Option<i64>, _>("share_count"), None);
+    assert_eq!(row.get::<String, _>("share_count_state"), "UNKNOWN");
+}
+
 /// 关键词任务带上采样口径后，整包被判为 `task_package_contract_mismatch` 而全部隔离。
 ///
 /// 真实形状：任务 target 有 `query` + 四项口径，插件回执的 `coverage.target` 只回显
