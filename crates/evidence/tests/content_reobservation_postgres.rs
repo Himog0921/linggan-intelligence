@@ -6,9 +6,9 @@ use linggan_contracts::{
     parse_producer_attempt, parse_producer_submission, parse_producer_task_spec,
 };
 use linggan_evidence::{
-    AccountEligibilitySignal, DispatchDecision, RuntimeAttemptOutcome, RuntimeSubmissionOutcome,
-    activate_installation_credential, bind_observation_account, content_reobservation,
-    decide_dispatch, issue_work_order_lease, read_content_reobservation,
+    AccountEligibilityObservation, DispatchDecision, RuntimeAttemptOutcome,
+    RuntimeSubmissionOutcome, activate_installation_credential, bind_observation_account,
+    content_reobservation, decide_dispatch, issue_work_order_lease, read_content_reobservation,
     report_account_eligibility, rotate_installation_credential, set_station_accepting,
     start_producer_attempt, submit_producer_package,
 };
@@ -358,7 +358,7 @@ async fn seed_authorized_material_context(
         .bind(decision_ref).bind(request_ref).bind(authorization_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO execution_station (station_ref,display_name,daily_work_quota) VALUES ($1,'复观测夹具工位',200)")
         .bind(station_ref).execute(database.pool()).await.unwrap();
-    sqlx::query("INSERT INTO plugin_installation (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version,capabilities) VALUES ($1,$2,$3,'person',scope_001_now(),'0.8.34','[\"content_detail\",\"comments\",\"replies\",\"media_slots\",\"media_bytes\"]'::jsonb)")
+    sqlx::query("INSERT INTO plugin_installation (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version,capabilities) VALUES ($1,$2,$3,'person',scope_001_now(),'0.8.46','[\"content_detail\",\"comments\",\"replies\",\"media_slots\",\"media_bytes\"]'::jsonb)")
         .bind(installation_ref).bind(&install_key).bind(station_ref).execute(database.pool()).await.unwrap();
     set_station_accepting(database, station_ref, true, "person")
         .await
@@ -379,9 +379,10 @@ async fn seed_authorized_material_context(
         database,
         installation_ref,
         &installation_credential,
-        Some("xhs-account-reobservation-fixture"),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        b"reobservation-fixture-digest-key-at-least-32",
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "xhs-account-reobservation-fixture",
+        },
+        Some(b"reobservation-fixture-digest-key-at-least-32"),
     )
     .await
     .unwrap();

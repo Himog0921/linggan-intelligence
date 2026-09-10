@@ -21,7 +21,7 @@ import { createLingganContentRuntime } from '../linggan/contentRuntimeAdapter.js
 import { LINGGAN_RUNTIME_ACTION } from '../linggan/runtimeActions.js';
 import { unavailableLingganStats } from '../linggan/adapter.js';
 import {
-  currentAccountHrefFromDocument,
+  observeXhsAccountFromDocument,
   reportPassiveAccountEligibility,
 } from '../linggan/accountEligibilityProbe.js';
 import {
@@ -205,7 +205,7 @@ async function initXhs() {
   dashboardBridge.registerDashboardBridge();
   xhsPageController.initPage();
   void reportPassiveAccountEligibility({
-    readCurrentAccountHref: () => currentAccountHrefFromDocument(document),
+    document,
     sendMessage: (message) => chrome.runtime.sendMessage(message),
   }).catch(() => {});
   console.info('[Linggan Intelligence Browser] XHS collector runtime active.');
@@ -393,6 +393,10 @@ chrome.runtime.onMessage.addListener((message = {}, _sender, sendResponse) => {
   const action = String(message.action || '');
   if (action === LINGGAN_RUNTIME_ACTION.GET_PAGE_CONTEXT) {
     sendResponse({ success: true, context: { platform: platform(), url: location.href, mode: 'linggan_browser_producer_runtime' } });
+    return true;
+  }
+  if (action === LINGGAN_RUNTIME_ACTION.OBSERVE_CLAIMED_TASK_ACCOUNT && platform() === 'xhs') {
+    sendResponse({ success: true, observation: observeXhsAccountFromDocument(document) });
     return true;
   }
   if (action === LINGGAN_RUNTIME_ACTION.TOGGLE_DASHBOARD && platform() === 'xhs') {

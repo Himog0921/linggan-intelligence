@@ -8,7 +8,7 @@ use linggan_contracts::{
     parse_producer_task_spec,
 };
 use linggan_evidence::{
-    AccountEligibilitySignal, AcquisitionChainError, AuthorizationGrant, CheckInOutcome,
+    AccountEligibilityObservation, AcquisitionChainError, AuthorizationGrant, CheckInOutcome,
     CreatorLifecycleAssociation, CreatorLifecycleMetric, CreatorLifecycleQuery,
     CreatorLifecycleStatus, CreatorLifecycleWindow, InstallationCheckIn, RequestLeaseError,
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, activate_installation_credential,
@@ -1719,7 +1719,7 @@ async fn ready_installation(database: &Database, label: &str) -> Installed {
         &InstallationCheckIn {
             install_key: &install_key,
             installation_credential: None,
-            plugin_version: "0.8.34",
+            plugin_version: "0.8.46",
             browser_label: Some(label),
             capabilities: serde_json::json!([
                 "author_profile",
@@ -1755,9 +1755,10 @@ async fn ready_installation(database: &Database, label: &str) -> Installed {
         database,
         installation_ref,
         &secret,
-        Some(&format!("{label}-account")),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: &format!("{label}-account"),
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .unwrap();

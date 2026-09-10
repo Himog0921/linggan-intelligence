@@ -1,3 +1,5 @@
+import { hasXhsAppScanVerification } from './accountObservation.js';
+
 const LOGIN_REQUIRED = 'login_required';
 
 function buildCapabilityReport(input = {}) {
@@ -18,13 +20,6 @@ function resolveXhsMode(page = {}) {
   if (page.type === 'profile') return 'profile';
   if (page.type === 'search') return 'search';
   return 'unknown';
-}
-
-function hasXhsAppScanVerification(win = {}) {
-  const title = String(win?.document?.title || '').trim();
-  const bodyText = String(win?.document?.body?.innerText || '').trim().slice(0, 3000);
-  const text = `${title}\n${bodyText}`;
-  return /使用已登录.*小红书.*扫码验证身份|小红书\s*APP.*扫码验证身份|扫码验证身份/.test(text);
 }
 
 /**

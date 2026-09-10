@@ -77,6 +77,24 @@ test('xhs selector bootstrap probe inspects current search route without blockin
   assert.equal(result.checks[0].name, 'feed_container');
 });
 
+test('xhs selector bootstrap keeps an unfinished SPA diagnostic instead of a blocked preflight', () => {
+  const result = runXhsSelectorBootstrapProbe({
+    document: createDocument({}),
+    win: {
+      location: {
+        href: 'https://www.xiaohongshu.com/search_result/coffee?keyword=%E5%92%96%E5%95%A1',
+        pathname: '/search_result/coffee',
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.kind, 'diagnostic');
+  assert.equal(result.diagnosticState, 'not_ready');
+  assert.equal(result.code, 'not_ready');
+  assert.equal(result.checks[0].ok, false);
+});
+
 test('xhs selector bootstrap accepts a signed detail route backed by SSR note state', () => {
   const noteId = '6a8e86de00000000240043b0';
   const win = {

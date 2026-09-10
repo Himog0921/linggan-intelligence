@@ -5,6 +5,7 @@ import {
   checkInLingganStation,
   claimLingganDispatch,
   claimLingganMediaAcquisition,
+  claimedTaskAccountDecision,
   createLocalAttempt,
   createLocalSubmission,
   createTaskSpec,
@@ -621,6 +622,7 @@ const DISPATCH_FAILURE_CODES = new Set([
   'page_receipt_missing',
   'page_receipt_identity_mismatch',
   'page_read_failed',
+  'account_observation_blocked',
 ]);
 
 async function requeueClaimedTaskFailure({ claim, installKey, state, message }) {
@@ -644,6 +646,37 @@ async function requeueClaimedTaskFailure({ claim, installKey, state, message }) 
     requeued: reported.reported === true,
     nextPollAfterSeconds: Number(reported.nextPollAfterSeconds || 300),
   };
+}
+
+async function reportAccountObservationFromPage(observation) {
+  const station = await reportStationStatus();
+  const installKey = await producerInstanceId();
+  const installationCredential = await installationCredentialFor(installKey);
+  if (!station.authorized || !station.installationRef || !installationCredential) {
+    return { reported: false, reasonCode: 'account_observation_station_not_ready' };
+  }
+  return reportLingganAccountEligibility({
+    installationRef: station.installationRef,
+    installationCredential,
+    observation,
+    health: (await readLingganLocalReadiness()).health,
+  });
+}
+
+/**
+ * The claimed page is the only task-scoped account observation target. It has already been
+ * opened for this exact Lease, so this reads its rendered DOM and never performs a separate
+ * platform navigation, refresh, fetch, or tab search. Inconclusive DOM state stays soft; every
+ * conclusive observation must be accepted by the server before collection may start.
+ */
+async function verifyClaimedTaskAccount(tabId) {
+  const page = await chrome.tabs.sendMessage(tabId, {
+    action: LINGGAN_RUNTIME_ACTION.OBSERVE_CLAIMED_TASK_ACCOUNT,
+  });
+  const observation = page?.success === true ? page.observation : null;
+  if (!observation) return { mayExecute: true, state: 'account_observation_inconclusive' };
+  const report = await reportAccountObservationFromPage(observation);
+  return claimedTaskAccountDecision(report);
 }
 
 async function queueCachedDetailPageSessionLane({ leaseRef, taskSpec } = {}) {
@@ -795,6 +828,15 @@ async function runDispatchedTask() {
         message: '观察页面加载超时，本次未采集。',
       });
     }
+    const accountVerification = await verifyClaimedTaskAccount(tabId);
+    if (!accountVerification.mayExecute) {
+      return requeueClaimedTaskFailure({
+        claim: { ...claim, health: readiness.health },
+        installKey,
+        state: accountVerification.state,
+        message: accountVerification.message,
+      });
+    }
     const response = await chrome.tabs.sendMessage(tabId, {
       action,
       mode: capability === 'discovery_search' ? 'search' : 'profile',
@@ -905,16 +947,7 @@ chrome.runtime.onMessage.addListener((message = {}, sender, sendResponse) => {
       if (!/^https:\/\/([^.]+\.)?xiaohongshu\.com\//i.test(senderUrl)) {
         return { reported: false, reasonCode: 'account_observation_source_invalid' };
       }
-      const station = await reportStationStatus();
-      const installKey = await producerInstanceId();
-      const installationCredential = await installationCredentialFor(installKey);
-      return reportLingganAccountEligibility({
-        installationRef: station.installationRef,
-        installationCredential,
-        rawPlatformAccountId: message.rawPlatformAccountId,
-        signal: message.signal,
-        health: (await readLingganLocalReadiness()).health,
-      });
+      return reportAccountObservationFromPage(message.observation);
     }
     if (action === LINGGAN_RUNTIME_ACTION.TEST_FLYWHEEL_CONNECTION) return getLingganStatus();
     if (action === LINGGAN_RUNTIME_ACTION.SUBMIT_DISCOVERY_PACKAGE) {

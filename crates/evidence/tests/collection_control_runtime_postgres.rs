@@ -3,7 +3,7 @@ use linggan_contracts::{
     parse_producer_submission, parse_producer_task_spec,
 };
 use linggan_evidence::{
-    AccountEligibilitySignal, AuthorizationGrant, CheckInOutcome, CollectionControlError,
+    AccountEligibilityObservation, AuthorizationGrant, CheckInOutcome, CollectionControlError,
     DispatchDecision, InstallationCheckIn, MonitorCommandActor, MonitorCommandKind,
     MonitorCommandOutcomeKind, MonitorRuleCommand, MonitorRuleDraft, MonitorRuleMode,
     RuntimeAttemptOutcome, RuntimeSubmissionOutcome, StationError,
@@ -109,6 +109,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0062_human_moment.sql"),
     "\n",
     include_str!("../../../database/migrations/0063_content_author_attribution.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0064_account_observation_normalization.sql"),
 );
 
 #[tokio::test]
@@ -690,7 +692,7 @@ async fn credential_response_loss_rotation_and_activation_are_recoverable_and_ha
         &InstallationCheckIn {
             install_key: &install_key,
             installation_credential: None,
-            plugin_version: "0.8.34",
+            plugin_version: "0.8.46",
             browser_label: Some("credential-recovery"),
             capabilities: capabilities(),
         },
@@ -730,9 +732,10 @@ async fn credential_response_loss_rotation_and_activation_are_recoverable_and_ha
         &database,
         installation_ref,
         &second_pending_raw,
-        Some("credential-recovery-account"),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "credential-recovery-account",
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("activated credential authenticates");
@@ -755,9 +758,10 @@ async fn credential_response_loss_rotation_and_activation_are_recoverable_and_ha
         &database,
         installation_ref,
         &second_pending_raw,
-        None,
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "credential-recovery-account",
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("the old active credential survives pending rotation");
@@ -766,9 +770,10 @@ async fn credential_response_loss_rotation_and_activation_are_recoverable_and_ha
             &database,
             installation_ref,
             &rotated_raw,
-            None,
-            AccountEligibilitySignal::AuthenticatedObserved,
-            DIGEST_KEY,
+            AccountEligibilityObservation::Authenticated {
+                raw_platform_account_id: "credential-recovery-account",
+            },
+            Some(DIGEST_KEY),
         )
         .await,
         Err(CollectionControlError::InvalidCredential)
@@ -783,9 +788,10 @@ async fn credential_response_loss_rotation_and_activation_are_recoverable_and_ha
             &database,
             installation_ref,
             &second_pending_raw,
-            None,
-            AccountEligibilitySignal::AuthenticatedObserved,
-            DIGEST_KEY,
+            AccountEligibilityObservation::Authenticated {
+                raw_platform_account_id: "credential-recovery-account",
+            },
+            Some(DIGEST_KEY),
         )
         .await,
         Err(CollectionControlError::InvalidCredential)
@@ -794,9 +800,10 @@ async fn credential_response_loss_rotation_and_activation_are_recoverable_and_ha
         &database,
         installation_ref,
         &rotated_raw,
-        None,
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "credential-recovery-account",
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("new credential becomes active atomically");
@@ -950,7 +957,7 @@ async fn claim_pending_installation(
         &InstallationCheckIn {
             install_key: &install_key,
             installation_credential: None,
-            plugin_version: "0.8.34",
+            plugin_version: "0.8.46",
             browser_label: Some(label),
             capabilities: capabilities(),
         },
@@ -990,9 +997,10 @@ async fn ready_installation(database: &Database, label: &str) -> Installed {
         database,
         installation_ref,
         &secret,
-        Some(&format!("{label}-account")),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        DIGEST_KEY,
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: &format!("{label}-account"),
+        },
+        Some(DIGEST_KEY),
     )
     .await
     .expect("account eligibility is current");

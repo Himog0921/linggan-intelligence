@@ -3,19 +3,19 @@ use linggan_contracts::{
     parse_producer_task_spec,
 };
 use linggan_evidence::{
-    AccountEligibilitySignal, AuthorizationGrant, CheckInOutcome, DispatchDecision,
+    AccountEligibilityObservation, AuthorizationGrant, CheckInOutcome, DispatchDecision,
     DispatchFailureCode, DispatchFailureOutcome, InstallationCheckIn, MonitorCommandActor,
     MonitorCommandKind, MonitorRuleCommand, MonitorRuleDraft, MonitorRuleMode,
     ProducerRuntimeError, RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome,
     activate_installation_credential, apply_monitor_rule_command, bind_observation_account,
-    check_in_installation, create_producer_task, decide_dispatch, expire_lapsed_leases,
-    grant_authorization, issue_work_order_lease, open_claim_window, read_collection_task_timeline,
-    read_work_resources, recover_released_orphaned_work_orders, report_account_eligibility,
-    requeue_failed_dispatch, rotate_installation_credential, set_station_accepting,
-    start_producer_attempt, submit_producer_package,
+    check_in_installation, create_producer_task, decide_dispatch, dispatch_schema_is_ready,
+    expire_lapsed_leases, grant_authorization, issue_work_order_lease, open_claim_window,
+    read_collection_task_timeline, read_work_resources, recover_released_orphaned_work_orders,
+    report_account_eligibility, requeue_failed_dispatch, rotate_installation_credential,
+    set_station_accepting, start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::{Database, testing::isolated_proof_schema};
-use sqlx::Row;
+use sqlx::{AssertSqlSafe, Row};
 use uuid::Uuid;
 
 const MIGRATIONS: &str = concat!(
@@ -104,7 +104,39 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0062_human_moment.sql"),
     "\n",
     include_str!("../../../database/migrations/0063_content_author_attribution.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0064_account_observation_normalization.sql"),
 );
+
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn dispatch_schema_readiness_requires_relations_in_the_current_schema() {
+    let database = proof_database_for("collection_dispatch_schema_readiness").await;
+    let schema: String = sqlx::query_scalar("SELECT current_schema()")
+        .fetch_one(database.pool())
+        .await
+        .expect("proof schema is identifiable");
+    let shadow_schema = format!("{schema}_shadow");
+
+    // A later search_path schema can contain a same-named relation.  Dispatch
+    // readiness must still reject the incomplete active proof schema.
+    sqlx::raw_sql(AssertSqlSafe(format!(
+        "CREATE SCHEMA {shadow_schema}; \
+         CREATE TABLE {shadow_schema}.collection_work_order_lease (placeholder text); \
+         ALTER TABLE collection_work_order_lease RENAME TO collection_work_order_lease_missing; \
+         SET search_path TO {schema},{shadow_schema};"
+    )))
+    .execute(database.pool())
+    .await
+    .expect("proof shadows only the missing dispatch relation outside the current schema");
+
+    assert!(
+        !dispatch_schema_is_ready(&database)
+            .await
+            .expect("dispatch readiness remains readable"),
+        "a relation in a later search_path schema cannot make dispatch ready"
+    );
+}
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
@@ -1157,7 +1189,7 @@ async fn replacement_installation_releases_stale_work_instead_of_adopting_it() {
         &database,
         &InstallationCheckIn {
             install_key: &intermediate_install_key,
-            plugin_version: "0.8.34",
+            plugin_version: "0.8.46",
             browser_label: Some("intermediate fixture"),
             capabilities: serde_json::json!(["author_profile", "profile_discovery"]),
             installation_credential: None,
@@ -1187,7 +1219,7 @@ async fn replacement_installation_releases_stale_work_instead_of_adopting_it() {
         &database,
         &InstallationCheckIn {
             install_key: &replacement_install_key,
-            plugin_version: "0.8.34",
+            plugin_version: "0.8.46",
             browser_label: Some("replacement fixture"),
             capabilities: serde_json::json!([
                 "author_profile",
@@ -1709,7 +1741,7 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
     sqlx::query(
         "INSERT INTO plugin_installation \
              (installation_ref, install_key, station_ref, claim_kind, claimed_at, plugin_version, capabilities) \
-         VALUES ($1, $2, $3, 'person', scope_001_now(), '0.8.34', \
+         VALUES ($1, $2, $3, 'person', scope_001_now(), '0.8.46', \
                  '[\"author_profile\",\"profile_discovery\",\"content_detail\",\"media_slots\",\"comments\",\"replies\"]'::jsonb)",
     )
     .bind(installation_ref)
@@ -1737,9 +1769,10 @@ async fn seed_creator_work_order(database: &Database) -> Fixture {
         database,
         installation_ref,
         &installation_credential,
-        Some("xhs-account-dispatch-fixture"),
-        AccountEligibilitySignal::AuthenticatedObserved,
-        b"collection-dispatch-fixture-digest-key-32-plus",
+        AccountEligibilityObservation::Authenticated {
+            raw_platform_account_id: "xhs-account-dispatch-fixture",
+        },
+        Some(b"collection-dispatch-fixture-digest-key-32-plus"),
     )
     .await
     .expect("fixture account observation is accepted");

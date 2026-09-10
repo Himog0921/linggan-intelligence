@@ -66,21 +66,7 @@ export function runXhsSelectorBootstrapProbe({ document = window.document, win =
         '笔记流容器',
         SEARCH_FEED_VERIFIED_AT,
       );
-      return publishSelectorHealthSnapshot(
-        finalizeSelectorPreflight('xhs', 'bootstrap', check.ok
-          ? {
-              ok: true,
-              code: 'ok',
-              checks: [check],
-            }
-          : {
-              ok: false,
-              code: 'selector_missing',
-              message: '当前搜索页未识别到笔记流容器，建议等待页面稳定后重试',
-              checks: [check],
-            }),
-        win,
-      );
+      return publishBootstrapDiagnostic(check, win, '当前搜索页暂未识别到笔记流容器');
     }
     case PAGE_TYPE.PROFILE: {
       const check = buildPresenceCheck(
@@ -89,21 +75,7 @@ export function runXhsSelectorBootstrapProbe({ document = window.document, win =
         AUTHOR_PAGE_SELECTORS,
         '博主页结构信号',
       );
-      return publishSelectorHealthSnapshot(
-        finalizeSelectorPreflight('xhs', 'bootstrap', check.ok
-          ? {
-              ok: true,
-              code: 'ok',
-              checks: [check],
-            }
-          : {
-              ok: false,
-              code: 'selector_missing',
-              message: '当前博主页未识别到基础资料区，建议刷新页面后重试',
-              checks: [check],
-            }),
-        win,
-      );
+      return publishBootstrapDiagnostic(check, win, '当前博主页暂未识别到基础资料区');
     }
     case PAGE_TYPE.NOTE_DETAIL: {
       const shellCheck = buildPresenceCheck(
@@ -122,21 +94,7 @@ export function runXhsSelectorBootstrapProbe({ document = window.document, win =
         stale: false,
       };
       const check = shellCheck.ok ? shellCheck : ssrCheck;
-      return publishSelectorHealthSnapshot(
-        finalizeSelectorPreflight('xhs', 'bootstrap', check.ok
-          ? {
-              ok: true,
-              code: 'ok',
-              checks: [check],
-            }
-          : {
-              ok: false,
-              code: 'selector_missing',
-              message: '当前笔记页未识别到详情容器信号，建议刷新页面后重试',
-              checks: [check],
-            }),
-        win,
-      );
+      return publishBootstrapDiagnostic(check, win, '当前笔记页暂未识别到详情容器信号');
     }
     default:
       return publishSelectorHealthSnapshot(
@@ -148,6 +106,27 @@ export function runXhsSelectorBootstrapProbe({ document = window.document, win =
         win,
       );
   }
+}
+
+/**
+ * Bootstrap only records what the page looked like at one moment. It does not authorize, start,
+ * or reject collection, so a still-hydrating SPA must not be labelled as a blocked selector.
+ * Action-specific preflight continues to use `ok: false` immediately before the action it can
+ * actually stop.
+ */
+function publishBootstrapDiagnostic(check, win, unavailableMessage) {
+  const ready = check.ok === true;
+  const result = finalizeSelectorPreflight('xhs', 'bootstrap', {
+    ok: true,
+    code: ready ? 'ok' : 'not_ready',
+    message: ready ? '' : unavailableMessage,
+    checks: [check],
+  });
+  return publishSelectorHealthSnapshot({
+    ...result,
+    kind: 'diagnostic',
+    diagnosticState: ready ? 'ready' : 'not_ready',
+  }, win);
 }
 
 function runBatchPreflight(action, label, params, document, win) {

@@ -1,7 +1,7 @@
 # Linggan Intelligence Browser
 
 > 状态: 自动观察与固定材料深化 Producer
-> 版本: `0.8.39`
+> 版本: `0.8.46`
 > 适用范围: `OBSERVATION-RUNTIME-001`、`MEDIA-ACQUISITION-001` 与 `MATERIAL-DEEPENING-001`（GitHub Issue #103）
 > 事实来源: 当前 package source、`MIGRATION-MAP.md`、构建与隔离检查输出
 > 冲突时以谁为准: 用户最新确认、仓库 `AGENTS.md`、当前代码和实际运行证明
@@ -59,6 +59,13 @@ scheduler 由 Linggan 服务端常驻 worker 负责。插件以 MV3 alarm、安�
 这不等于立即采集：服务端仍逐一核对最新心跳、凭证、最低版本、能力、账号绑定/资格、风险、
 并发 Lease 和 station 预算，且必须确有合格排队任务，才会派 Lease。人通过 Runtime 显式暂停
 后，`person_disabled` 是持久覆盖；心跳、重装或替换安装都不能自行恢复，只有人显式恢复才会重开。
+
+账号绑定是人工确认的持续事实，不会因“上次观察距今多久”自动失效。浏览器只会在用户自然
+打开的 XHS 页面，或某个已领取任务本来就打开的同一页面，读取已渲染的“我/我的”导航；它不
+打开、刷新、滚动、切换页面、枚举标签或调用平台接口来证明账号仍可用。找不到该 DOM 事实时
+不发送请求，也不会把未知覆盖既有状态。只有明确的登录/访问限制/冷却提示，或与人工绑定不同
+的账号身份，才会暂停当前任务并留下服务端可解释的原因；相同账号的 live Lease 上限仍会使长
+空闲后的第一个已批准任务串行复核，避免一批任务同时撞到真实登录问题。
 
 交付前，插件只信任 `GET /health` 在 `routes.localProducer` 中同时公布的
 `taskCreation`、`attemptStart` 与 `submission` 三条本机路径；后台会按这一份 route bundle
@@ -233,11 +240,10 @@ TaskSpec 的页面执行和受限媒体候选取得。
 不可被重装/心跳覆盖的安全状态；check-in 同时回显服务端确认的工位名称和接活状态。它不把
 Popup 名称变成身份，也不绕过账号、凭证、风险、配额、并发或 TaskSpec 门禁。
 
-0.8.38 让每个 MV3 `linggan-patrol` alarm 在 claim 前先刷新本机安装心跳；工位已认领且未被
-人工暂停时不再因 service worker 空闲被误判失联。只有服务端明确回答账号资格已过期、未绑定或
-登录失效时，插件才会向一张**已经打开**的小红书页面请求同一份被动全局导航观察，并对同一 claim
-重试一次；不会打开、刷新或导航页面，不读取 Cookie/存储，也不把被查看的博主当成执行账号。固定
-作品深化现可冻结为 `detail-only`（评论数为 0），因此不会把“补齐详情”悄然扩大为评论、回复或媒体采集。
+0.8.38 是历史版本：它曾在服务端回答账号过期时，向一张已经打开的小红书页面请求导航观察并重试
+claim。当前 0.8.46 已移除“账号过期”硬门和该补救扫描；只保留自然页面观察与已领取任务页的单次
+复核，不读取 Cookie/存储，也不把被查看的博主当成执行账号。固定作品深化仍可冻结为 `detail-only`
+（评论数为 0），因此不会把“补齐详情”悄然扩大为评论、回复或媒体采集。
 
 完整逐项清单见 [MIGRATION-MAP.md](MIGRATION-MAP.md)。
 
@@ -263,7 +269,14 @@ npm run verify:linggan-isolation
 核验，不会把缺失身份的页面“成功”当成可交付结果；这不改变 WorkOrder 范围、不新增页面访问、
 也不改变后续评论、回复或媒体 lane 的独立 claim/Package/Receipt。
 
-发行包生成在 `releases/linggan-intelligence-browser-v0.8.39.zip`。打包器以
+0.8.46 将账号观察 wire body 收紧为嵌套闭集：正向 `authenticated_observed` 必须带当前账号
+标识，明确负向 `cooldown_observed`、`login_required`、`access_restricted` 不得携带任何账号
+标识。负向只允许来自平台状态组件，不能由笔记、评论或标题文字触发；服务端回传不可用也只是
+任务页的软结果。任务页复核先将确定事实交给服务端，再决定是否开始页面采集；历史
+`unknown/signal_incomplete` 不会覆盖最后一个确定账号事实。页面启动 selector probe 现在只是无副作用诊断，不会再将 SPA 水合中的短暂缺失打印为
+`Selector preflight blocked`；真正动作前的 selector preflight 仍保持阻断。
+
+发行包生成在 `releases/linggan-intelligence-browser-v0.8.46.zip`。打包器以
 固定 ZIP 时间戳和稳定文件顺序生成；`releases/release-manifest.json` 记录已提交
 ZIP 的 SHA-256。`npm run verify` 不会改写 release ZIP：它会以新的 `npm ci`、build
 和临时 ZIP 重新打包，并要求该 SHA-256 与已提交 ZIP 完全一致，然后运行旧工作台

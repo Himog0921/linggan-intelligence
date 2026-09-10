@@ -246,8 +246,46 @@ const ACCOUNT_ELIGIBILITY_SIGNALS = new Set([
   'cooldown_observed',
   'login_required',
   'access_restricted',
-  'signal_incomplete',
 ]);
+
+const CONFIRMED_ACCOUNT_BLOCK_STATES = new Set(['cooling', 'needs_login', 'restricted']);
+
+/**
+ * A task page may stop only on a server-confirmed account decision. Transport failure, a
+ * temporarily unavailable local host, and a malformed/unrecognized receipt are inconclusive;
+ * they must not be converted into an account block after the task has already been leased.
+ */
+export function confirmedAccountObservationBlocksClaim(report) {
+  if (report?.reported !== true) return false;
+  if (report.bindingRequired === true) return true;
+  return CONFIRMED_ACCOUNT_BLOCK_STATES.has(String(report.eligibilityState || ''));
+}
+
+/** Turn the account-report receipt into the only task-page stop decision. */
+export function claimedTaskAccountDecision(report) {
+  if (report?.reported !== true) {
+    return { mayExecute: true, state: 'account_observation_inconclusive', message: '' };
+  }
+  const blocked = confirmedAccountObservationBlocksClaim(report);
+  return {
+    mayExecute: !blocked,
+    state: blocked ? 'account_observation_blocked' : 'account_observation_confirmed',
+    message: blocked
+      ? '任务页已观察到账号状态变化或限制，已停止本次采集并等待服务端恢复条件。'
+      : '',
+  };
+}
+
+function normalizedAccountObservation(observation) {
+  if (!observation || typeof observation !== 'object' || Array.isArray(observation)) return null;
+  const signal = String(observation.signal || '').trim();
+  if (!ACCOUNT_ELIGIBILITY_SIGNALS.has(signal)) return null;
+  if (signal === 'authenticated_observed') {
+    const rawPlatformAccountId = String(observation.rawPlatformAccountId || '').trim();
+    return rawPlatformAccountId ? { signal, rawPlatformAccountId } : null;
+  }
+  return { signal };
+}
 
 /**
  * Report one passive account observation. The producer never declares a final eligibility
@@ -257,22 +295,20 @@ const ACCOUNT_ELIGIBILITY_SIGNALS = new Set([
 export async function reportLingganAccountEligibility({
   installationRef,
   installationCredential,
-  rawPlatformAccountId = '',
-  signal = 'signal_incomplete',
+  observation,
   origin = LINGGAN_LOCAL_ORIGIN,
   fetchImpl = globalThis.fetch,
   health = null,
 } = {}) {
   const route = accountEligibilityRouteFromHealth(health);
-  const normalizedSignal = String(signal || '').trim();
+  const normalizedObservation = normalizedAccountObservation(observation);
   if (typeof fetchImpl !== 'function'
       || !route
       || !String(installationRef || '').trim()
       || !String(installationCredential || '').trim()
-      || !ACCOUNT_ELIGIBILITY_SIGNALS.has(normalizedSignal)) {
+      || !normalizedObservation) {
     return { reported: false, reasonCode: 'account_observation_not_ready' };
   }
-  const rawIdentity = String(rawPlatformAccountId || '').trim();
   try {
     const response = await fetchImpl(`${origin}${route}`, {
       method: 'POST',
@@ -281,8 +317,7 @@ export async function reportLingganAccountEligibility({
       body: JSON.stringify({
         installationRef,
         installationCredential,
-        rawPlatformAccountId: rawIdentity || null,
-        signal: normalizedSignal,
+        observation: normalizedObservation,
       }),
     });
     const body = await response.json().catch(() => null);

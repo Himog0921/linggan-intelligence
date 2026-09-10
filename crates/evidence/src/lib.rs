@@ -63,10 +63,10 @@ pub use archive_completeness::{
     read_blocked_materials, retire_materials,
 };
 pub use collection_control::{
-    AccountEligibilityReceipt, AccountEligibilitySignal, AccountEligibilityState,
+    AccountEligibilityObservation, AccountEligibilityReceipt, AccountEligibilityState,
     CapacitySelection, CollectionControlError, ComparableObservationRound,
-    DEFAULT_MONITOR_INTERVAL_SECONDS, DynamicCadence, InstallationCredentialSecret,
-    IssuedInstallationCredential, MAXIMUM_MONITOR_INTERVAL_SECONDS,
+    DEFAULT_MONITOR_INTERVAL_SECONDS, DynamicCadence, ExplicitAccountEligibilitySignal,
+    InstallationCredentialSecret, IssuedInstallationCredential, MAXIMUM_MONITOR_INTERVAL_SECONDS,
     MINIMUM_MONITOR_INTERVAL_SECONDS, MINIMUM_PLUGIN_VERSION, MonitorCommandActor,
     MonitorCommandKind, MonitorCommandOutcomeKind, MonitorRuleCommand, MonitorRuleCommandError,
     MonitorRuleCommandReceipt, MonitorRuleDraft, MonitorRuleMode, activate_installation_credential,

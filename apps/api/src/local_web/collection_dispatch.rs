@@ -13,9 +13,10 @@ use axum::{
     routing::post,
 };
 use linggan_evidence::{
-    AccountEligibilitySignal, CollectionControlError, DispatchDecision, DispatchFailureCode,
-    DispatchFailureError, DispatchFailureOutcome, activate_installation_credential,
-    decide_dispatch, record_dispatch_answer, report_account_eligibility, requeue_failed_dispatch,
+    AccountEligibilityObservation, CollectionControlError, DispatchDecision, DispatchFailureCode,
+    DispatchFailureError, DispatchFailureOutcome, ExplicitAccountEligibilitySignal,
+    activate_installation_credential, decide_dispatch, record_dispatch_answer,
+    report_account_eligibility, requeue_failed_dispatch,
 };
 
 /// The station asks whether it may execute a bounded task. Published through
@@ -86,12 +87,64 @@ async fn activate_credential(State(state): State<LocalWebState>, body: Bytes) ->
 }
 
 #[derive(serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct AccountEligibilityBody {
     installation_ref: uuid::Uuid,
     installation_credential: String,
+    observation: AccountEligibilityObservationBody,
+}
+
+/// This is a wire-only shape. `as_evidence_observation` below validates it into the closed
+/// evidence type before any database work starts. Separating those two steps is necessary
+/// because an internally tagged JSON enum otherwise silently ignores a field from another
+/// variant on some serde paths.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AccountEligibilityObservationBody {
+    signal: AccountEligibilitySignalWire,
+    #[serde(default)]
     raw_platform_account_id: Option<String>,
-    signal: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum AccountEligibilitySignalWire {
+    AuthenticatedObserved,
+    CooldownObserved,
+    LoginRequired,
+    AccessRestricted,
+}
+
+impl AccountEligibilityObservationBody {
+    /// Validation closes the only field cross-product JSON cannot express in one tagged enum:
+    /// positive means exactly one identity, and explicit negatives mean none.
+    fn as_evidence_observation(&self) -> Result<AccountEligibilityObservation<'_>, ()> {
+        match (&self.signal, self.raw_platform_account_id.as_deref()) {
+            (
+                AccountEligibilitySignalWire::AuthenticatedObserved,
+                Some(raw_platform_account_id),
+            ) => Ok(AccountEligibilityObservation::Authenticated {
+                raw_platform_account_id,
+            }),
+            (AccountEligibilitySignalWire::AuthenticatedObserved, None) => Err(()),
+            (AccountEligibilitySignalWire::CooldownObserved, None) => {
+                Ok(AccountEligibilityObservation::ExplicitBlock(
+                    ExplicitAccountEligibilitySignal::CooldownObserved,
+                ))
+            }
+            (AccountEligibilitySignalWire::LoginRequired, None) => {
+                Ok(AccountEligibilityObservation::ExplicitBlock(
+                    ExplicitAccountEligibilitySignal::LoginRequired,
+                ))
+            }
+            (AccountEligibilitySignalWire::AccessRestricted, None) => {
+                Ok(AccountEligibilityObservation::ExplicitBlock(
+                    ExplicitAccountEligibilitySignal::AccessRestricted,
+                ))
+            }
+            (_, Some(_)) => Err(()),
+        }
+    }
 }
 
 /// Consume one closed producer observation. The raw platform id never leaves this stack frame;
@@ -103,31 +156,24 @@ async fn report_account(State(state): State<LocalWebState>, body: Bytes) -> Resp
             "read_model_not_connected",
         );
     };
-    let Some(digest_key) = state.account_digest_key.as_deref() else {
-        return local_read_json_error(
-            axum::http::StatusCode::SERVICE_UNAVAILABLE,
-            "account_digest_key_unavailable",
-        );
-    };
     let Ok(request) = serde_json::from_slice::<AccountEligibilityBody>(&body) else {
         return local_read_json_error(
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             "account_eligibility_observation_invalid",
         );
     };
-    let Some(signal) = AccountEligibilitySignal::parse(&request.signal) else {
+    let Ok(observation) = request.observation.as_evidence_observation() else {
         return local_read_json_error(
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
-            "account_eligibility_signal_invalid",
+            "account_eligibility_observation_invalid",
         );
     };
     match report_account_eligibility(
         database,
         request.installation_ref,
         &request.installation_credential,
-        request.raw_platform_account_id.as_deref(),
-        signal,
-        digest_key,
+        observation,
+        state.account_digest_key.as_deref().map(Vec::as_slice),
     )
     .await
     {
@@ -355,4 +401,87 @@ fn payload(decision: &DispatchDecision) -> serde_json::Value {
         }
     }
     payload
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const INSTALLATION_REF: &str = "11111111-1111-4111-8111-111111111111";
+
+    fn parse(body: serde_json::Value) -> Result<AccountEligibilityBody, serde_json::Error> {
+        serde_json::from_value(body)
+    }
+
+    #[test]
+    fn account_observation_wire_contract_is_closed_and_nested() {
+        let request = parse(serde_json::json!({
+            "installationRef": INSTALLATION_REF,
+            "installationCredential": "fixture-credential",
+            "observation": {
+                "signal": "authenticated_observed",
+                "rawPlatformAccountId": "current-account"
+            }
+        }))
+        .expect("a positive observation carries its identity inside the variant");
+        assert!(matches!(
+            request.observation.as_evidence_observation(),
+            Ok(AccountEligibilityObservation::Authenticated {
+                raw_platform_account_id: "current-account"
+            })
+        ));
+
+        let negative = parse(serde_json::json!({
+            "installationRef": INSTALLATION_REF,
+            "installationCredential": "fixture-credential",
+            "observation": { "signal": "login_required" }
+        }))
+        .expect("an explicit negative fact has no identity field");
+        assert!(matches!(
+            negative.observation.as_evidence_observation(),
+            Ok(AccountEligibilityObservation::ExplicitBlock(
+                ExplicitAccountEligibilitySignal::LoginRequired
+            ))
+        ));
+    }
+
+    #[test]
+    fn account_observation_wire_contract_rejects_legacy_and_crossed_payloads() {
+        for invalid in [
+            // The old flat format would let signal and identity drift independently.
+            serde_json::json!({
+                "installationRef": INSTALLATION_REF,
+                "installationCredential": "fixture-credential",
+                "signal": "authenticated_observed",
+                "rawPlatformAccountId": "current-account"
+            }),
+            // A negative fact must never create or select an arbitrary account record.
+            serde_json::json!({
+                "installationRef": INSTALLATION_REF,
+                "installationCredential": "fixture-credential",
+                "observation": {
+                    "signal": "login_required",
+                    "rawPlatformAccountId": "current-account"
+                }
+            }),
+            // A positive fact cannot omit the identity that makes it meaningful.
+            serde_json::json!({
+                "installationRef": INSTALLATION_REF,
+                "installationCredential": "fixture-credential",
+                "observation": { "signal": "authenticated_observed" }
+            }),
+            // Future accidental fields require an explicit contract change and a version bump.
+            serde_json::json!({
+                "installationRef": INSTALLATION_REF,
+                "installationCredential": "fixture-credential",
+                "observation": { "signal": "cooldown_observed", "unexpected": true }
+            }),
+        ] {
+            let parsed = parse(invalid);
+            assert!(match parsed.as_ref() {
+                Err(_) => true,
+                Ok(request) => request.observation.as_evidence_observation().is_err(),
+            });
+        }
+    }
 }
