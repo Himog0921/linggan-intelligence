@@ -150,7 +150,7 @@ fn target_table(
     let columns = if is_creator {
         r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部创作者目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span class="c-tg-head-num" role="columnheader">作品目录</span><span class="c-tg-head-num" role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     } else {
-        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span class="c-tg-head-num" role="columnheader">最近命中</span><span role="columnheader">数据更新</span><span role="columnheader">巡查状态</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span class="c-tg-head-num" role="columnheader">最近命中</span><span class="c-tg-head-num" role="columnheader">数据更新</span><span role="columnheader">巡查状态</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     };
     let grid = if is_creator {
         "c-tg-creator-grid"
@@ -323,6 +323,18 @@ fn action_feedback_markup(error: Option<&str>) -> String {
         ),
         _ => ("c-src-failure", "没有完成", "上一次动作没有完成。"),
     };
+    // 成功回执做成右下角角标，3 秒后自己消失：它只是确认「刚才那下生效了」，看过即可，
+    // 常驻在列表顶上会把内容一直往下顶。
+    //
+    // **失败与警示不自动消失**——没成功的事必须让人看清楚，自动收走等于把坏消息藏起来。
+    // 消失由 CSS 动画完成，不依赖 JS：脚本没跑起来时，一个永不消失的浮层比横幅更糟。
+    if class == "c-src-feedback c-src-feedback-ok" {
+        return format!(
+            r#"<p class="c-tg-toast" role="status"><b>{heading}</b>{explanation}</p>"#,
+            heading = heading,
+            explanation = escape(explanation),
+        );
+    }
     format!(
         r#"<p class="{class}" role="status"><b>{heading}</b>{explanation}</p>"#,
         class = class,
@@ -419,7 +431,7 @@ fn target_row(
         format!(
             r#"<div class="c-tg-cell c-tg-rule" role="cell">{rule}</div>
                 <div class="c-tg-cell c-tg-number-value" role="cell">{hits}</div>
-                <div class="c-tg-cell c-tg-unknown" role="cell">尚未取得</div>
+                <div class="c-tg-cell c-tg-unknown c-tg-cell-end" role="cell">尚未取得</div>
                 <div class="c-tg-cell" role="cell">{patrol}</div>
                 <div class="c-tg-cell c-tg-change" role="cell">{recent_change}</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last}</time>
@@ -1412,11 +1424,15 @@ mod tests {
         // 两张表的「最近新增」必须落在同一列位（第 10 位）。它们读的是同一个字段
         // `latest_new`——创作者那边此前叫「最近变化」、排在第 10 位，关键词这边叫
         // 「最近新增」、排在第 8 位：同一件事，两个名字，两个位置。现已统一。
-        assert!(html.contains(r#"最近命中</span><span role="columnheader">数据更新"#));
+        assert!(html.contains(
+            r#"最近命中</span><span class="c-tg-head-num" role="columnheader">数据更新"#
+        ));
         assert!(html.contains(r#"巡查状态</span><span role="columnheader">最近新增"#));
         assert!(!html.contains("最近变化"));
         // 数字列的表头必须与右对齐的数字同侧，否则一列两端各站一边，看着就是错位。
-        assert_eq!(html.matches("c-tg-head-num").count(), 3);
+        // 4 处：创作者表的 作品目录/详情进度，关键词表的 最近命中/数据更新。
+        // 「数据更新」跟着右对齐，是为了和创作者表同列位的「详情进度」纵向对齐。
+        assert_eq!(html.matches("c-tg-head-num").count(), 4);
         assert!(html.contains("打开作者的创作者档案"));
         assert!(html.contains("打开关键词的关键词观察"));
         assert!(!html.contains("关键词档案"));

@@ -376,3 +376,31 @@
   transition:background var(--lgi-duration-press) var(--lgi-ease-ui)}
 .c-tg-drawn-list button:hover{background:var(--lgi-canvas-sunken)}
 .c-tg-drawn-list button[aria-selected="true"]{background:var(--lgi-ink);color:var(--lgi-canvas)}
+
+/* 那条分区粗线离工具条更近一些：它属于下面的表，不该在中间悬着一段空白。 */
+.c-page .c-tg-workspace{margin-top:var(--lgi-space-2)}
+
+/* 关键词表的「数据更新」与创作者表的「详情进度」在同一列位上。前者左对齐、后者
+ * 右对齐时，两张表的同一列各站一端，纵向看就是错开的。让它跟着右对齐。 */
+.c-tg-cell-end{text-align:right;padding-right:var(--lgi-space-3)}
+
+/* 成功回执：右下角角标，3 秒后自行退场。
+ *
+ * 退场用 CSS 动画而不是 JS——脚本没跑起来时，一个永不消失的浮层比常驻横幅更糟。
+ * `forwards` 让它停在终态，`visibility:hidden` 保证它不再挡住底下的东西。 */
+.c-tg-toast{position:fixed;right:var(--lgi-space-6);bottom:var(--lgi-space-6);z-index:80;
+  max-width:min(420px,calc(100vw - var(--lgi-space-12)));margin:0;
+  padding:var(--lgi-space-4) var(--lgi-space-5);
+  border:2px solid var(--lgi-border-solid);background:var(--lgi-canvas);
+  color:var(--lgi-ink);font-size:var(--lgi-text-body);line-height:var(--lgi-lh-body,1.5);
+  box-shadow:var(--lgi-space-2) var(--lgi-space-2) 0 var(--lgi-border-solid);
+  animation:c-tg-toast-in var(--lgi-duration-overlay) var(--lgi-ease-enter),
+            c-tg-toast-out var(--lgi-duration-panel) var(--lgi-ease-ui) 3s forwards}
+.c-tg-toast b{display:block;margin-bottom:var(--lgi-space-1);font-weight:700}
+@keyframes c-tg-toast-in{from{opacity:0;transform:translateY(var(--lgi-space-3))}to{opacity:1;transform:none}}
+@keyframes c-tg-toast-out{to{opacity:0;visibility:hidden}}
+
+@media (prefers-reduced-motion:reduce){
+  /* 关掉位移，但**保留定时退场**：它仍然该在 3 秒后让开，只是不再滑动。 */
+  .c-tg-toast{animation:c-tg-toast-out 1ms linear 3s forwards}
+}
