@@ -2,8 +2,13 @@
 # 不变量层：把已经踩过的坑固化成「不可能再犯」的自动检查。
 #
 # 这里每一条都对应一次真实事故，不是设想出来的风险。检查全部是静态的（读代码、读
-# migration），不需要数据库——它才能挂在每次提交上跑。需要真实数据库才能证明的行为，
-# 本脚本只断言「那个测试还在」，真正的证明由 scripts/test-*-postgres.sh 给出。
+# migration），不需要数据库。需要真实数据库才能证明的行为，本脚本只断言「那个测试还
+# 在」，真正的证明由 scripts/test-*-postgres.sh 给出。
+#
+# **它现在不是提交闸门**：对当前 main 运行会报 4 条真实失败并退出 1（语料库对已失效零
+# 感知，以及三处定位式睡眠）。在这 4 条被处理掉之前，谁把它接进 pre-commit，谁就会被
+# 四个与自己改动无关的问题挡住，进而学会用 --no-verify 绕过——那比没有闸门更糟。
+# 先当作按需运行的体检，等它自然变绿再接闸门。
 #
 # 加新检查的规矩：先有一次真实故障，再有这里的一条。
 set -euo pipefail
@@ -69,7 +74,10 @@ expected_call_sites=(
   "crates/evidence/src/target_inspector_sql.rs:1"
   "crates/evidence/src/work_order_lease.rs:1"
 )
-macro_call_re='\(surface_scan_complete_sql\|directory_proven_sql\|profile_read_complete_sql\)!()'
+# 只匹配 `!()` 会漏掉 `!{}` 与 `![]`——它们是同样合法的宏调用写法，漏掉就等于让
+# 「第七份判据」可以绕过整张登记表。这里匹配到 `!` 为止，括号形态一律算数。
+# `use` 与 `macro_rules!` 那几行不带 `名字!`，不会被误计。
+macro_call_re='\(surface_scan_complete_sql\|directory_proven_sql\|profile_read_complete_sql\)!'
 
 for entry in "${expected_call_sites[@]}"; do
   file="${entry%:*}"
@@ -78,7 +86,7 @@ for entry in "${expected_call_sites[@]}"; do
     report_error "INV-1 登记的判据调用点文件不存在：$file"
     continue
   fi
-  got="$(grep -c "$macro_call_re" "$file" || true)"
+  got="$(grep -o "$macro_call_re" "$file" | wc -l | tr -d ' ')"
   if [[ "$got" != "$want" ]]; then
     report_error "INV-1 $file 的判据调用点从 $want 变成 $got —— 改动调用点必须同步更新 scripts/check-invariants.sh 的登记表"
   fi
@@ -105,8 +113,18 @@ done < <(grep -rl "$macro_call_re" crates apps --include='*.rs' 2>/dev/null || t
 lease_migration="database/migrations/0010_work_order_lease.sql"
 lease_source="crates/evidence/src/work_order_lease.rs"
 
-if ! grep -q "expires_at timestamptz NOT NULL" "$lease_migration"; then
+if [[ ! -f "$lease_migration" ]]; then
+  report_error "INV-2 租约迁移文件不存在：${lease_migration} —— 它被改名或删了，下面几条都无从谈起"
+elif ! grep -q "expires_at timestamptz NOT NULL" "$lease_migration"; then
   report_error "INV-2 租约的 expires_at 不再是 NOT NULL —— 没有到期时间的租约等于永久授权"
+fi
+if [[ ! -f "$lease_source" ]]; then
+  report_error "INV-2 租约源码文件不存在：${lease_source}"
+fi
+# 迁移是 append-only：撤销一个约束不会改动创建它的那个文件，而是新加一个迁移。
+# 只看创建处等于给「后来悄悄撤掉」留了整条后门。
+if grep -rq "ALTER COLUMN expires_at DROP NOT NULL" database/migrations/; then
+  report_error "INV-2 有后续迁移把租约的 expires_at 改回可空 —— 没有到期时间的租约等于永久授权"
 fi
 if ! grep -q "collection_work_order_lease_live_idx" "$lease_migration"; then
   report_error "INV-2 租约 live 唯一索引不见了 —— 一张工单会被同时派两次"
@@ -141,8 +159,16 @@ for entry in "${unique_indexes[@]}"; do
   rest="${entry#*:}"
   index="${rest%%:*}"
   why="${rest#*:}"
+  if [[ ! -f "$file" ]]; then
+    report_error "INV-3 迁移文件不存在：${file} —— 无法确认 ${index} 还在"
+    continue
+  fi
   if ! grep -q "CREATE UNIQUE INDEX $index" "$file"; then
     report_error "INV-3 唯一索引 ${index} 不见了（${file}）—— ${why}"
+  fi
+  # 迁移 append-only：后来的迁移可以 DROP 掉它，而创建它的文件纹丝不动。
+  if grep -rq "DROP INDEX[^;]*${index}" database/migrations/; then
+    report_error "INV-3 有后续迁移 DROP 掉了唯一索引 ${index} —— ${why}"
   fi
 done
 
@@ -183,7 +209,9 @@ for file in "${expected_dependents[@]}"; do
 done
 
 # 语料库读模型：一篇已被确认失效的作品，在语料库里也该看得出来。
-if ! grep -q "retire" apps/api/src/local_web/material_projection.rs; then
+# 判据要落在真实的读取上，不是「文件里出现过 retire 这几个字母」——否则谁加一句
+# `// TODO: retire` 就把这条永久点绿，而它描述的缺陷还原封不动地活着。
+if ! grep -q "collection_material_retirement\|retired_works\|retired_at\|is_retired" apps/api/src/local_web/material_projection.rs; then
   report_error "INV-4 语料库读模型 apps/api/src/local_web/material_projection.rs 对「已确认失效」零感知 —— 同一篇作品在观察目标页显示已失效，在语料库页仍显示为正常材料"
 fi
 
@@ -204,9 +232,14 @@ fi
 # 判据用时长，不用上下文：grep 看不出循环结构，而时长恰好把两类分得很干净。
 while IFS= read -r hit; do
   [[ -z "$hit" ]] && continue
-  millis="$(printf '%s' "$hit" | sed -n 's/.*from_millis(\([0-9]*\)).*/\1/p')"
-  [[ -z "$millis" ]] && millis=9999
-  if [[ "$millis" -ge 50 ]]; then
+  # 取第一个 from_millis(数字)。用 [^)]* 而不是 .* ——贪婪匹配会在一行有两个时长时
+  # 取到最后一个，报出一个跟这次睡眠无关的数。
+  millis="$(printf '%s' "$hit" | sed -n 's/.*from_millis(\([0-9][0-9]*\)).*/\1/p' | head -1)"
+  if [[ -z "$millis" ]]; then
+    # 读不到字面时长（变量、from_secs、常量）。**不编一个数出来**：报「无法判定」，
+    # 让人自己去看。编一个 9999 出来，等于在报告里写一个源码中不存在的事实。
+    report_error "INV-5 无法判定时长的睡眠：$hit —— 时长不是字面量，人工确认它是循环里的短退避还是定位式睡眠"
+  elif [[ "$millis" -ge 50 ]]; then
     report_error "INV-5 定位式睡眠（${millis}ms）：$hit —— 它赌的是「此刻正好在执行中」，机器快一点干扰就落在操作完成之后，测试会为错误的原因变绿。改用确定性汇合点（barrier/oneshot/tokio::join!）"
   fi
 done < <(grep -rn "sleep(" crates/evidence/tests crates/intelligence/tests 2>/dev/null || true)
