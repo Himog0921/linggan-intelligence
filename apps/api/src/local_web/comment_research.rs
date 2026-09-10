@@ -155,6 +155,9 @@ fn kernel_response<T: Serialize>(
                 kernel::CommentResearchKernelError::NoEligibleDerivations => {
                     (StatusCode::CONFLICT, "no_eligible_research_comments")
                 }
+                kernel::CommentResearchKernelError::EmbeddingNotReady => {
+                    (StatusCode::CONFLICT, "embedding_not_ready")
+                }
                 kernel::CommentResearchKernelError::Database(_)
                 | kernel::CommentResearchKernelError::Serialization => (
                     StatusCode::SERVICE_UNAVAILABLE,
@@ -231,10 +234,12 @@ async fn read_setup(State(state): State<LocalWebState>) -> Response {
     let embedding: Option<Value> = sqlx::query_scalar(
         "SELECT jsonb_build_object( \
              'configured',true,'enabled',config.enabled,'qualified',config.qualified, \
-             'dimensions',config.dimensions,'modelId',model.model_id \
+             'connectionEnabled',connection.enabled,'dimensions',config.dimensions,'modelId',model.model_id \
          ) FROM linggan_embedding_settings settings \
          JOIN linggan_embedding_config config USING(config_ref) \
-         JOIN linggan_model_entry model USING(model_ref) WHERE settings.singleton",
+         JOIN linggan_model_entry model USING(model_ref) \
+         JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref \
+         JOIN linggan_model_connection connection USING(connection_ref) WHERE settings.singleton",
     )
     .fetch_optional(database.pool())
     .await
@@ -414,6 +419,7 @@ mod tests {
         for label in ["概览", "用户原声", "用户问题", "变化观察", "运行记录"] {
             assert!(page.contains(label));
         }
+        assert!(page.contains("前往模型与向量设置"));
         for retired in ["每日观察", "保存查询", "分析所选", "评论研究设置"] {
             assert!(!page.contains(retired));
         }

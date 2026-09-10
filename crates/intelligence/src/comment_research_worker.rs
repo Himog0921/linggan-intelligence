@@ -99,6 +99,12 @@ pub async fn run_once(
     if drain.is_requested() || !schema_ready(database).await? {
         return Ok(false);
     }
+    if embedding_settings::active_config(database).await?.is_none() {
+        return fail_active_runs_without_embedding_config(database)
+            .await
+            .map(|settled| settled > 0)
+            .map_err(kernel_error);
+    }
     if advance_semantic_item(database, store, adapter, drain).await? {
         return Ok(true);
     }
@@ -807,6 +813,9 @@ async fn reserve_generation_call(
     stage: &'static str,
 ) -> Result<ReservedCall, ModelError> {
     let mut transaction = database.pool().begin().await?;
+    if !embedding_settings::ready_in_transaction(&mut transaction, None).await? {
+        return Err(ModelError::EmbeddingNotQualified);
+    }
     let row = sqlx::query(
         "SELECT policy.token_limit,config.input_token_limit,config.output_token_limit,config.timeout_seconds, \
                 model.model_ref,model.model_id,version.version_ref,connection.enabled \
@@ -876,6 +885,7 @@ async fn reserve_embedding_call(
     payload: &str,
     stage: &'static str,
 ) -> Result<ReservedCall, ModelError> {
+    let embedding_config_ref = json_uuid(config, "configRef")?;
     let model_ref = json_uuid(config, "modelRef")?;
     let version_ref = json_uuid(config, "connectionVersionRef")?;
     let model_id = config["modelId"]
@@ -883,6 +893,11 @@ async fn reserve_embedding_call(
         .ok_or(ModelError::Invalid)?
         .to_owned();
     let mut transaction = database.pool().begin().await?;
+    if !embedding_settings::ready_in_transaction(&mut transaction, Some(embedding_config_ref))
+        .await?
+    {
+        return Err(ModelError::EmbeddingNotQualified);
+    }
     let policy_limit: i64 = sqlx::query_scalar(
         "SELECT policy.token_limit FROM linggan_comment_research_run run \
          JOIN linggan_comment_research_policy_revision policy \

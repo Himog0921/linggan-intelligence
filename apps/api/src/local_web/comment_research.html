@@ -37,7 +37,7 @@
   <dialog id="research-settings-dialog" class="cr-v1-dialog">
     <form id="research-settings-form">
       <header><div><p class="cr-v1-kicker">研究设置</p><h2>保存一次策略，之后可直接开始研究</h2></div><button type="button" data-close="research-settings-dialog">关闭</button></header>
-      <p>保存不会发送评论或启动模型。开始研究只冻结当前可读的普通用户评论并交给后台推进；连续自动排程保持关闭。</p>
+      <p>保存不会发送评论或启动模型。向量模型测试并启用后，开始研究只冻结当前可读的普通用户评论并交给后台推进；连续自动排程保持关闭。</p>
       <label>研究模型<input name="model" id="policy-model" disabled></label>
       <label>单轮评论上限<input name="sourceLimit" type="number" min="1" max="3000" required></label>
       <label>单轮研究模型额度（Token）<input name="tokenLimit" type="number" min="1024" max="10000000" required></label>

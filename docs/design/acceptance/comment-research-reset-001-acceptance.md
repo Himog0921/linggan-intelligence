@@ -3,7 +3,7 @@
 > 状态: 一次性报告
 > 最后核对: 2026-09-10
 > 适用范围: COMMENT-RESEARCH-RESET-001 的隔离数据库、API、worker、浏览器与本机运行时验收
-> 事实来源: 当前交付分支代码与后续命令回执
+> 事实来源: main、共享开发库、loopback runtime 与浏览器命令回执
 > 冲突时以谁为准: 真实运行/数据库副作用、用户最新确认、AGENTS.md
 
 ## 已实现与自动证明
@@ -22,9 +22,10 @@
 | Rust 编译 / 静态 JS | PASS（自动） | `cargo check`、format、Pi adapter protocol test |
 | isolated PostgreSQL 终态迁移 | PASS（自动） | full-history migration 至 0070、20 项 V1 PostgreSQL proof、2 项 API proof、资源清理 |
 | Worker synthetic end-to-end | PASS（受控 fixture） | 逐阶段 Atom、向量候选、归并、失败隔离与 publish gate proof；不等于真实供应商语义质量 |
-| HTTP / UI | 部分 PASS（自动） | 独立 endpoint、无旧 route、本地 API guard 已验证；真实浏览器点击和 tab P95 尚待 runtime |
-| shared 开发库清理 | 未完成 | explicit table deletion receipt；raw/comment attribution/model ledger 留存核验 |
-| localhost :3000 切换 | 未完成 | runtime exact head、migration、健康检查和浏览器验收 |
-| Mog 业务验收 | 未完成 | 用户亲自验证一轮已配置模型的评论研究结果 |
+| HTTP / UI | PASS（初始运行态） | 浏览器实际打开 `/corpus/comments?view=overview`，看到五个 V1 tab、正确空态，控制台无 error；尚未有结果态和 tab P95 测量 |
+| shared 开发库清理 | PASS（终态重置） | 0064–0070 已入台账；旧 Task B/P4/daily/replay/recovery relation 已不存在；Raw Comment 3,102 与 invocation ledger 129 均留存；V1 派生结果为 0 |
+| localhost :3000 切换 | PASS（本机） | `runtime-main` 与 `origin/main` 同步，API/worker/media 均运行，`/health` database/schema `READY` |
+| 向量模型配置 | BLOCKED（真实运行前置） | 当前只有 DeepSeek 文本模型，没有 qualified+enabled embedding；guarded revision 已由 isolated proof 覆盖页面禁用与服务端无向量 Run 拒绝，仍须在本次 runtime 切换后核验实际页面与 POST 回执，并先配置、测试实际 embedding provider |
+| Mog 业务验收 | 未完成 | 用户亲自配置 embedding、保存策略并验证一轮真实评论研究结果 |
 
 本页不将代码完成、部署成功或 HTTP 200 写成用户验收或真实模型语义质量。

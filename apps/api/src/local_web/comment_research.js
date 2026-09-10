@@ -17,6 +17,7 @@
     comment_research_unavailable: '评论研究暂时不可用，请检查本机数据服务。',
     comment_research_v1_unavailable: '本次研究结果暂时无法读取；上一次已显示的结果不会被伪造成新结果。',
     research_policy_missing: '请先保存研究策略。',
+    embedding_not_ready: '请先在“模型与向量设置”中完成向量模型测试并启用；系统不会创建一个必然无法归并和发布的研究运行。',
     no_eligible_research_comments: '当前没有可进入研究的普通用户评论。作品作者回复、身份未知或不可读评论不会被混入。',
     invalid_research_request: '研究设置或运行范围不符合要求。',
   };
@@ -59,17 +60,29 @@
   function setupSummary() {
     const { policy, defaultConfig, embedding, worker } = state.setup || {};
     if (!defaultConfig?.connectionEnabled) return '尚未配置可用的研究模型。保存策略和开始研究都不会发送评论。';
-    const embeddingText = embedding?.enabled && embedding?.qualified
+    const embeddingText = embeddingReady()
       ? `向量归并已就绪（${embedding.dimensions} 维）。`
-      : '向量归并尚未就绪；本轮可完成语义提取，但问题归并与发布会等待向量模型通过测试并启用。';
+      : '向量归并尚未就绪；开始研究已锁定，避免产生无法归并和发布的无效运行。请先在模型与向量设置中完成测试并启用。';
     const policyText = policy ? `当前策略已保存：每轮最多 ${count(policy.sourceLimit)} 条评论。` : '尚未保存研究策略。';
     const workerText = worker?.state === 'error' ? '后台执行器上次报告异常。' : '连续自动排程关闭。';
     return `${policyText}${embeddingText}${workerText}`;
   }
 
+  function embeddingReady() {
+    return Boolean(state.setup?.embedding?.enabled && state.setup?.embedding?.qualified && state.setup?.embedding?.connectionEnabled);
+  }
+
+  function renderRunAvailability() {
+    const start = $('#start-run');
+    const ready = embeddingReady();
+    start.disabled = !ready;
+    start.title = ready ? '' : '请先在模型与向量设置中完成向量模型测试并启用。';
+  }
+
   async function loadSetup() {
     state.setup = await request(`${api}/setup`);
-    setStatus(setupSummary(), state.setup.defaultConfig?.connectionEnabled ? 'ready' : 'warning');
+    renderRunAvailability();
+    setStatus(setupSummary(), state.setup.defaultConfig?.connectionEnabled && embeddingReady() ? 'ready' : 'warning');
   }
 
   function resultMeta(data) {
@@ -148,7 +161,7 @@
       $('#policy-model').value = defaultConfig?.connectionEnabled ? defaultConfig.modelId : '尚未配置可用模型';
       form.elements.sourceLimit.value = policy?.sourceLimit || 1000;
       form.elements.tokenLimit.value = policy?.tokenLimit || 100000;
-      $('#embedding-state').textContent = embedding?.enabled && embedding?.qualified ? `向量模型已通过测试并启用：${embedding.modelId}。` : '向量模型尚未通过测试或尚未启用。请在模型与向量设置中完成后再开始需要归并的研究。';
+      $('#embedding-state').textContent = embeddingReady() ? `向量模型已通过测试并启用：${embedding.modelId}。` : '向量模型尚未通过测试、尚未启用或连接不可用。请在模型与向量设置中完成后再开始需要归并的研究。';
       $('#settings-feedback').textContent = defaultConfig?.connectionEnabled ? '' : '请先在模型与 AI 设置中配置并启用研究模型。';
       dialog.showModal();
     } catch (error) {
@@ -178,6 +191,10 @@
   async function startRun() {
     try {
       await loadSetup();
+      if (!embeddingReady()) {
+        setStatus(errorText.embedding_not_ready, 'warning');
+        return;
+      }
       if (!state.setup?.policy) { await openSettings(); return; }
       const receipt = await request(`${api}/runs`, { method:'POST', body:JSON.stringify({}) });
       setStatus(`已冻结 ${count(receipt.selectedSources)} 条普通用户评论，后台将继续完成语义提取、向量归并与结果发布。`, 'ready');
