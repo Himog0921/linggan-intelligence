@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 
 import {
   buildDiscoveryPlan,
+  getScrollMetrics,
   discoverNotesFromDOM,
   readCurrentVisibleSurfaceNotes,
   discoverProfileSurfaceNotesFromApi,
@@ -819,6 +820,87 @@ test('discovery stops with a risk-control receipt before loading more cards', as
     assert.equal(records.discoveryMeta.scrollTrace.length, 1);
     assert.equal(records.discoveryMeta.scrollTrace[0].action, 'none');
     assert.equal(records.discoveryMeta.scrollTrace[0].stopReason, 'risk_control');
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('window scroll metrics never mistake content height for viewport height', () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  // 小红书搜索页的真实形状：窗口 900px 高，body 被内容撑到 3218px。
+  // 线上每一条 window 分支轨迹都是 documentHeight === viewportHeight 且 atBottom 为真，
+  // 正是 body.clientHeight 被当成视口高度的结果。
+  globalThis.document = {
+    documentElement: { clientHeight: 900, scrollHeight: 3218, scrollTop: 0 },
+    body: { clientHeight: 3218, scrollHeight: 3218, scrollTop: 0 },
+  };
+  globalThis.window = { innerHeight: 900, scrollY: 0 };
+  try {
+    const metrics = getScrollMetrics();
+    assert.equal(metrics.viewportHeight, 900, '视口高度只能来自窗口，不能是内容高度');
+    assert.equal(metrics.scrollHeight, 3218);
+    assert.equal(metrics.maxTop, 2318, '还有 2318px 可滚，不是 0');
+    assert.equal(metrics.atBottom, false, '停在顶部时不得判定为已到底');
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('window scroll metrics still report the real bottom once the page is scrolled through', () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  globalThis.document = {
+    documentElement: { clientHeight: 900, scrollHeight: 3218, scrollTop: 0 },
+    body: { clientHeight: 3218, scrollHeight: 3218, scrollTop: 0 },
+  };
+  globalThis.window = { innerHeight: 900, scrollY: 2318 };
+  try {
+    const metrics = getScrollMetrics();
+    assert.equal(metrics.atBottom, true, '真的滚到底了就要如实说到底');
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('a short page that genuinely fits the viewport is still reported as bottom', () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  // 内容比视口还短：maxTop 为 0，atBottom 为真——这是真话，不是本次要修的那种假到底。
+  globalThis.document = {
+    documentElement: { clientHeight: 900, scrollHeight: 400, scrollTop: 0 },
+    body: { clientHeight: 400, scrollHeight: 400, scrollTop: 0 },
+  };
+  globalThis.window = { innerHeight: 900, scrollY: 0 };
+  try {
+    const metrics = getScrollMetrics();
+    assert.equal(metrics.viewportHeight, 900);
+    assert.equal(metrics.maxTop, 0);
+    assert.equal(metrics.atBottom, true);
+  } finally {
+    globalThis.document = originalDocument;
+    globalThis.window = originalWindow;
+  }
+});
+
+test('an element scroll target keeps using the list viewport, not the window', () => {
+  const originalDocument = globalThis.document;
+  const originalWindow = globalThis.window;
+  globalThis.document = { documentElement: { clientHeight: 900 }, body: { clientHeight: 3218 } };
+  globalThis.window = { innerHeight: 900, scrollY: 0 };
+  try {
+    // 博主主页那条路径：列表自身可滚，按列表可视高度算「到底」。本次改动不得影响它。
+    const metrics = getScrollMetrics({
+      type: 'element',
+      element: { clientHeight: 600, scrollHeight: 4000, scrollTop: 0 },
+    });
+    assert.equal(metrics.viewportHeight, 600);
+    assert.equal(metrics.scrollHeight, 4000);
+    assert.equal(metrics.maxTop, 3400);
+    assert.equal(metrics.atBottom, false);
   } finally {
     globalThis.document = originalDocument;
     globalThis.window = originalWindow;

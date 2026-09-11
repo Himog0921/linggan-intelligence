@@ -1463,7 +1463,9 @@ function isElementScrollTarget(scrollTarget) {
   return scrollTarget?.type === 'element' && scrollTarget.element;
 }
 
-function getScrollMetrics(scrollTarget = getWindowScrollTarget()) {
+/// 导出仅为可测：视口高度算错会让整轮滚动静默失效，而那种失效在采集回执里
+/// 看起来和「这个词真的只有 20 条」一模一样，只能靠这里的直接断言挡住。
+export function getScrollMetrics(scrollTarget = getWindowScrollTarget()) {
   if (isElementScrollTarget(scrollTarget)) {
     const element = scrollTarget.element;
     const elementHeight = Number(element.clientHeight || 0);
@@ -1485,7 +1487,15 @@ function getScrollMetrics(scrollTarget = getWindowScrollTarget()) {
   const doc = document.documentElement || document.body;
   const body = document.body || doc;
   const scrollTop = Math.max(window.scrollY || 0, doc?.scrollTop || 0, body?.scrollTop || 0);
-  const viewportHeight = Math.max(window.innerHeight || 0, doc?.clientHeight || 0, body?.clientHeight || 0);
+  // 视口高度只能来自窗口本身。**`body.clientHeight` 是内容高度，不是视口高度**：
+  // 把它并进这个 max，页面越长视口就被算得越高，`maxTop = scrollHeight - viewportHeight`
+  // 于是恒为 0、`atBottom` 第一轮就为真，一次都不滚就宣布「已到底」。
+  //
+  // 这不是假设：线上每一条走 window 分支的滚动轨迹都是 `documentHeight === viewportHeight`
+  // 且 `atBottom: true`、`action: "none"`，而那些数值各不相同（2367~4674），正是内容高度
+  // 被当成视口高度的指纹。搜索页因此每次只拿得到首屏 20~27 条；博主主页因为找得到可滚
+  // 元素、走的是上面的 element 分支，才滚得到 200 条以上。
+  const viewportHeight = Math.max(Number(window.innerHeight || 0), Number(doc?.clientHeight || 0), 1);
   const scrollHeight = Math.max(doc?.scrollHeight || 0, body?.scrollHeight || 0, viewportHeight);
   const maxTop = Math.max(0, scrollHeight - viewportHeight);
   return {
