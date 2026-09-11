@@ -41,6 +41,8 @@ pub fn render_stored_targets(
         error,
         None,
         None,
+        // 这条入口不读建档情况——读不到就如实是「读不到」，不假装查过。
+        None,
         list_context,
     )
 }
@@ -55,6 +57,7 @@ pub fn render_stored_targets_with_observation(
     // 打开了删除确认面板时，这里带着「会删掉什么、会留下什么」的真实数字。
     deletion: Option<&linggan_evidence::TargetDeletionPreview>,
     deletion_target: Option<uuid::Uuid>,
+    keyword_archives: Option<&std::collections::HashSet<uuid::Uuid>>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
     if targets.is_empty() {
@@ -76,6 +79,8 @@ pub fn render_stored_targets_with_observation(
         avatars,
         completeness,
         observation,
+        // 创作者不看这个：它的档案状态另有来源（`completeness`）。
+        None,
         list_context,
     );
     let keyword_table = target_table(
@@ -85,6 +90,7 @@ pub fn render_stored_targets_with_observation(
         avatars,
         completeness,
         observation,
+        keyword_archives,
         list_context,
     );
 
@@ -125,6 +131,9 @@ fn target_table(
     avatars: &HashMap<uuid::Uuid, ObservationTargetAvatar>,
     completeness: Option<&HashMap<String, ArchiveCompleteness>>,
     observation: Option<&HashMap<uuid::Uuid, TargetObservationSummary>>,
+    // 已建档的关键词目标。`None` 表示这一批没读出来——与 `completeness` 同一种表达：
+    // 读不到就说读不到，不把它压成「没建过」。
+    keyword_archives: Option<&std::collections::HashSet<uuid::Uuid>>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
     let matching = targets
@@ -144,6 +153,12 @@ fn target_table(
             avatars.get(&target.target_ref),
             super::target_drawer::TargetArchiveRead::from_map(completeness, &target.identity_key),
             observation.and_then(|values| values.get(&target.target_ref)),
+            match keyword_archives {
+                Some(archived) => super::target_drawer::KeywordArchiveRead::Known(
+                    archived.contains(&target.target_ref),
+                ),
+                None => super::target_drawer::KeywordArchiveRead::Unavailable,
+            },
             list_context,
         ));
     }
@@ -352,6 +367,7 @@ fn target_row(
     avatar: Option<&ObservationTargetAvatar>,
     archive: super::target_drawer::TargetArchiveRead<'_>,
     observation: Option<&TargetObservationSummary>,
+    keyword_archive: super::target_drawer::KeywordArchiveRead,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
     let is_creator = target.target_kind == "creator";
@@ -424,7 +440,7 @@ fn target_row(
             recent_change = creator_recent_change(observation),
             last = escape(last),
             next = escape(&next),
-            actions = row_action(target, true, archive, list_context),
+            actions = row_action(target, true, archive, keyword_archive, list_context),
             secondary = row_secondary_actions(target, list_context),
         )
     } else {
@@ -443,7 +459,7 @@ fn target_row(
             recent_change = keyword_recent_change(observation),
             last = escape(last),
             next = escape(&next),
-            actions = row_action(target, false, archive, list_context),
+            actions = row_action(target, false, archive, keyword_archive, list_context),
             secondary = row_secondary_actions(target, list_context),
         )
     };
@@ -837,10 +853,12 @@ fn row_action(
     target: &ObservationTarget,
     is_creator: bool,
     archive: super::target_drawer::TargetArchiveRead<'_>,
+    keyword_archive: super::target_drawer::KeywordArchiveRead,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
     use super::target_drawer::TargetPrimaryAction;
-    let action = super::target_drawer::target_primary_action(target, is_creator, archive);
+    let action =
+        super::target_drawer::target_primary_action(target, is_creator, archive, keyword_archive);
     match action {
         TargetPrimaryAction::ViewKeyword => {
             let drawer_href = list_context.drawer_href(
@@ -1155,6 +1173,7 @@ mod tests {
             None,
             Some(&preview),
             Some(creator.target_ref),
+            None,
             context,
         );
         let target_ref = creator.target_ref;
@@ -1523,5 +1542,110 @@ mod tests {
         assert!(!html.contains("2026-09-04 09:00"));
         assert!(!html.contains("ARCHIVE HEALTH"));
         assert!(!html.contains('%'));
+    }
+}
+
+#[cfg(test)]
+mod keyword_archive_action_tests {
+    use super::super::target_drawer::{KeywordArchiveRead, TargetArchiveRead, TargetPrimaryAction};
+    use super::*;
+
+    fn keyword(lifecycle: &str, monitoring: bool) -> ObservationTarget {
+        ObservationTarget {
+            target_ref: uuid::Uuid::new_v4(),
+            platform: "xhs".to_owned(),
+            target_kind: "keyword".to_owned(),
+            identity_key: "考研自习::most_liked".to_owned(),
+            display_name: Some("考研自习".to_owned()),
+            identity_facts: None,
+            source: "manual".to_owned(),
+            lifecycle_state: lifecycle.to_owned(),
+            first_stored_at: "2026-09-11T09:00:00+08".to_owned(),
+            monitoring_enabled: monitoring,
+            group_name: None,
+            last_patrol_dispatched_at: None,
+            last_patrol_succeeded_at: None,
+            next_patrol_at: None,
+            domain_name: None,
+            domain_is_own: None,
+        }
+    }
+
+    fn action(
+        target: &ObservationTarget,
+        keyword_archive: KeywordArchiveRead,
+    ) -> TargetPrimaryAction {
+        super::super::target_drawer::target_primary_action(
+            target,
+            false,
+            TargetArchiveRead::Known(None),
+            keyword_archive,
+        )
+    }
+
+    /// 一个还没建过档的词，下一步是建档，不是直接开始每周看增量。
+    ///
+    /// 历史高赞是这个词的底座；没有底座就开始数「本周新增」，等于在一张空表上数新增。
+    #[test]
+    fn an_unarchived_keyword_is_asked_to_build_its_archive_first() {
+        assert_eq!(
+            action(
+                &keyword("pending_decision", false),
+                KeywordArchiveRead::Known(false)
+            ),
+            TargetPrimaryAction::EstablishArchive
+        );
+    }
+
+    /// 建过档之后，下一步才是开始每周巡检。
+    #[test]
+    fn an_archived_keyword_is_offered_the_weekly_patrol() {
+        assert_eq!(
+            action(
+                &keyword("pending_decision", false),
+                KeywordArchiveRead::Known(true)
+            ),
+            TargetPrimaryAction::OpenPatrol("开始每周巡检")
+        );
+    }
+
+    /// **读不到就不猜**：既不催人建档（可能已经建过），也不改口径。
+    ///
+    /// 把「读不到」当成「没建过」，会让页面催人重做一件可能已经做完的事；而重做一次
+    /// 关键词建档要真实访问平台。
+    #[test]
+    fn an_unreadable_archive_state_keeps_the_original_entry() {
+        assert_eq!(
+            action(
+                &keyword("pending_decision", false),
+                KeywordArchiveRead::Unavailable
+            ),
+            TargetPrimaryAction::OpenPatrol("设置巡查")
+        );
+    }
+
+    /// 已经在监控的词不再被问建档——它的下一步是看命中，不是回头建档。
+    #[test]
+    fn a_monitored_keyword_is_not_asked_to_archive() {
+        for archive in [
+            KeywordArchiveRead::Known(false),
+            KeywordArchiveRead::Known(true),
+            KeywordArchiveRead::Unavailable,
+        ] {
+            assert_eq!(
+                action(&keyword("monitoring", true), archive),
+                TargetPrimaryAction::ViewKeyword,
+                "监控中的词不该被建档按钮打断"
+            );
+        }
+    }
+
+    /// 暂停的词恢复巡查，同样不被建档打断。
+    #[test]
+    fn a_paused_keyword_still_resumes_its_patrol() {
+        assert_eq!(
+            action(&keyword("paused", false), KeywordArchiveRead::Known(false)),
+            TargetPrimaryAction::OpenPatrol("恢复巡查")
+        );
     }
 }

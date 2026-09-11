@@ -1442,11 +1442,22 @@ async fn write_work_order(
 
     // 只有深度建档会推进生命周期。**巡检不改状态**：它是一个已建档目标的常规动作，
     // 每跑一次就改一次状态，会把「这个目标处于什么阶段」变成「它最近被派过一次」。
+    //
+    // **而关键词连这一步都不做**：`0042` 的 CHECK 禁止关键词进入 `archiving`，理由是
+    // 「Keyword observation has a monitor lifecycle, not a creator archive lifecycle」。
+    // 这条 UPDATE 原先不分目标类型，于是关键词的建档请求在准入通过之后必然撞上那条
+    // CHECK，整个事务回滚——**结果是关键词根本发不出建档工单**，而页面只会显示一句
+    // 「上一次动作没有完成」，看不出是被一条数据库不变量挡住的。
+    //
+    // 关键词「正在建档 / 建过档了」不靠生命周期字段表达，而是从证据里查
+    // （`collection_control::keyword_baseline_qualified`），所以这里跳过它是完整的，
+    // 不是少做了一步。
     if lane == "deep_archive" {
         let moved = sqlx::query(
             "UPDATE collection_observation_target \
              SET lifecycle_state = 'archiving', lifecycle_changed_at = scope_001_now() \
-             WHERE target_ref = $1 AND lifecycle_state='pending_decision'",
+             WHERE target_ref = $1 AND lifecycle_state='pending_decision' \
+               AND target_kind <> 'keyword'",
         )
         .bind(target_ref)
         .execute(&mut **transaction)
