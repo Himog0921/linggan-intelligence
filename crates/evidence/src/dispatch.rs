@@ -864,6 +864,14 @@ async fn claim_next_queued_work_order(
     // a fallback, but continue looking: another lane/platform may still be
     // runnable by this worker during the same poll.
     let mut deferred_control_block: Option<String> = None;
+    // 跨行业作用域表（`0074`）不在每一套 schema 里：控制面的证明库只装了它需要的那一段
+    // 迁移，跨行业那一串依赖的 `0044` 不在其中。派发必须在两种库上都跑得起来，所以
+    // 这里先问一次表在不在，而不是让整条派发在缺表时 42P01。
+    let cross_industry_scope_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
     for (dispatch_lane, weight, concurrent_cap, _virtual_finish) in lanes {
         if concurrent_cap.is_some_and(|cap| {
             active_by_lane.get(&dispatch_lane).copied().unwrap_or(0) >= i64::from(cap)
@@ -873,40 +881,11 @@ async fn claim_next_queued_work_order(
         // This is a bounded eligibility probe, not a module queue. A station
         // that cannot run one candidate continues through the lane and then
         // through the other lanes rather than making all later work invisible.
-        let candidates: Vec<Candidate> = sqlx::query_as(
-            "SELECT work_order.work_order_ref,target.platform,target.target_kind,work_order.lane, \
-                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
-                            WHERE scope.work_order_ref=work_order.work_order_ref), \
-                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
-                            WHERE scope.work_order_ref=work_order.work_order_ref \
-                              AND scope.comment_limit>0), \
-                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
-                            WHERE scope.work_order_ref=work_order.work_order_ref \
-                              AND scope.reply_expand_limit>0), \
-                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
-                            WHERE scope.work_order_ref=work_order.work_order_ref \
-                              AND scope.acquire_media), \
-                    work_order.estimated_work_units, \
-                    COALESCE(work_order.dispatch_group_key, \
-                             concat('work:',work_order.work_order_ref::text)) \
-             FROM collection_work_order work_order \
-             JOIN collection_observation_target target USING(target_ref) \
-             WHERE work_order.queue_state='queued' \
-               AND work_order.dispatch_lane=$1 \
-               AND work_order.retry_not_before_at<=scope_001_now() \
-               AND work_order.scheduled_for<=scope_001_now() \
-               AND (work_order.expires_at IS NULL \
-                    OR work_order.expires_at>scope_001_now()) \
-             ORDER BY CASE WHEN $1='batch' THEN COALESCE(( \
-                        SELECT EXTRACT(EPOCH FROM max(prior_lease.issued_at))::bigint \
-                        FROM collection_work_order prior \
-                        JOIN collection_work_order_lease prior_lease USING(work_order_ref) \
-                        WHERE prior.dispatch_lane='batch' \
-                          AND prior.dispatch_group_key=work_order.dispatch_group_key \
-                    ),-1) ELSE 0 END, \
-                    work_order.scheduled_for,work_order.created_at,work_order.work_order_ref \
-             LIMIT 64 FOR UPDATE OF work_order SKIP LOCKED",
-        )
+        let candidates: Vec<Candidate> = sqlx::query_as(if cross_industry_scope_ready {
+            CANDIDATE_SQL_WITH_CROSS_INDUSTRY_SCOPE
+        } else {
+            CANDIDATE_SQL
+        })
         .bind(&dispatch_lane)
         .fetch_all(&mut **transaction)
         .await?;
@@ -1308,6 +1287,100 @@ async fn page_session_plan_for_task(
     })))
 }
 
+/// 「这张工单现在就可以派」。
+///
+/// 派发与「我排在第几」必须问同一个问题：还没到点、还在退避、已经过期的工单不占队列
+/// 位置，把它们算进去会让人看到一个永远不减的数字。
+macro_rules! dispatch_ready_predicate_sql {
+    () => {
+        "work_order.queue_state='queued' \
+           AND work_order.retry_not_before_at<=scope_001_now() \
+           AND work_order.scheduled_for<=scope_001_now() \
+           AND (work_order.expires_at IS NULL OR work_order.expires_at>scope_001_now())"
+    };
+}
+
+/// 派发的排序键。`$lane` 是当前通道的 SQL 表达式（派发时是绑定参数，读取时是列本身）。
+///
+/// **排队位置必须用这把尺子量**，否则界面上的「前面还有 2 个」与真正的出队顺序无关——
+/// batch 通道那一项轮转公平（同一来源上次发租越久远越靠前）会让直觉上的「先来先到」
+/// 完全不成立。
+macro_rules! dispatch_order_sql {
+    ($lane:expr) => {
+        concat!(
+            "CASE WHEN ",
+            $lane,
+            "='batch' THEN COALESCE(( \
+                        SELECT EXTRACT(EPOCH FROM max(prior_lease.issued_at))::bigint \
+                        FROM collection_work_order prior \
+                        JOIN collection_work_order_lease prior_lease USING(work_order_ref) \
+                        WHERE prior.dispatch_lane='batch' \
+                          AND prior.dispatch_group_key=work_order.dispatch_group_key \
+                    ),-1) ELSE 0 END, \
+                    work_order.scheduled_for,work_order.created_at,work_order.work_order_ref"
+        )
+    };
+}
+
+pub(crate) use {dispatch_order_sql, dispatch_ready_predicate_sql};
+
+/// 候选工单的选取。两份只差一处：**这张工单有没有冻结具体作品**。
+///
+/// 这个答案决定要求工位具备哪些能力（冻结了就要 `content_detail`，没冻结就是发现面）。
+/// 跨行业详情补采把作用域放在 `0074` 那张表上，漏问它会让补详情的工单被当成发现任务
+/// 派给一个不具备详情能力的工位。
+const CANDIDATE_SQL: &str = concat!(
+    "SELECT work_order.work_order_ref,target.platform,target.target_kind,work_order.lane, \
+                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                            WHERE scope.work_order_ref=work_order.work_order_ref), \
+                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                            WHERE scope.work_order_ref=work_order.work_order_ref \
+                              AND scope.comment_limit>0), \
+                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                            WHERE scope.work_order_ref=work_order.work_order_ref \
+                              AND scope.reply_expand_limit>0), \
+                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                            WHERE scope.work_order_ref=work_order.work_order_ref \
+                              AND scope.acquire_media), \
+                    work_order.estimated_work_units, \
+                    COALESCE(work_order.dispatch_group_key, \
+                             concat('work:',work_order.work_order_ref::text)) \
+             FROM collection_work_order work_order \
+             JOIN collection_observation_target target USING(target_ref) \
+             WHERE work_order.dispatch_lane=$1 AND ",
+    dispatch_ready_predicate_sql!(),
+    " ORDER BY ",
+    dispatch_order_sql!("$1"),
+    " LIMIT 64 FOR UPDATE OF work_order SKIP LOCKED",
+);
+
+const CANDIDATE_SQL_WITH_CROSS_INDUSTRY_SCOPE: &str = concat!(
+    "SELECT work_order.work_order_ref,target.platform,target.target_kind,work_order.lane, \
+                    (EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                             WHERE scope.work_order_ref=work_order.work_order_ref) \
+                     OR EXISTS (SELECT 1 FROM collection_work_order_cross_industry_target scope \
+                                WHERE scope.work_order_ref=work_order.work_order_ref)), \
+                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                            WHERE scope.work_order_ref=work_order.work_order_ref \
+                              AND scope.comment_limit>0), \
+                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                            WHERE scope.work_order_ref=work_order.work_order_ref \
+                              AND scope.reply_expand_limit>0), \
+                    EXISTS (SELECT 1 FROM collection_work_order_material_target scope \
+                            WHERE scope.work_order_ref=work_order.work_order_ref \
+                              AND scope.acquire_media), \
+                    work_order.estimated_work_units, \
+                    COALESCE(work_order.dispatch_group_key, \
+                             concat('work:',work_order.work_order_ref::text)) \
+             FROM collection_work_order work_order \
+             JOIN collection_observation_target target USING(target_ref) \
+             WHERE work_order.dispatch_lane=$1 AND ",
+    dispatch_ready_predicate_sql!(),
+    " ORDER BY ",
+    dispatch_order_sql!("$1"),
+    " LIMIT 64 FOR UPDATE OF work_order SKIP LOCKED",
+);
+
 fn requires_signed_execution_source(task_spec: &Value) -> bool {
     task_spec.get("platform").and_then(Value::as_str) == Some("xhs")
         && task_spec
@@ -1339,7 +1412,7 @@ async fn execution_source_url_for_task(
     else {
         return Ok(None);
     };
-    sqlx::query_scalar(
+    let from_evidence: Option<String> = sqlx::query_scalar(
         "SELECT record.value->'payload'->>'url' \
          FROM linggan_material_discovery_finding finding \
          JOIN linggan_material_content content ON content.public_ref=finding.content_public_ref \
@@ -1352,6 +1425,33 @@ async fn execution_source_url_for_task(
            AND record.value->'payload'->>'url' LIKE 'https://www.xiaohongshu.com/%' \
            AND position('xsec_token=' IN record.value->'payload'->>'url') > 0 \
          ORDER BY package.accepted_at DESC,finding.created_at DESC LIMIT 1",
+    )
+    .bind(content_external_id)
+    .fetch_optional(&mut **transaction)
+    .await?
+    .flatten();
+    if from_evidence.is_some() {
+        return Ok(from_evidence);
+    }
+    // 跨行业参照物不在证据侧，上面那一查对它必然落空。
+    //
+    // 外部领域的材料按 `0044` 的隔离住在 `cross_industry_sample`，那张表上的
+    // `source_url` 正是列表面当时平台返回的那条签名链接（`signed_source_url` 只收
+    // 平台真给过的，从不由作品 ID 拼）。没有这一步，关键词建档的详情补采会在派发这一关
+    // 被判为「没有可用执行入口」——活派不出去，而原因看上去像是链接过期。
+    let cross_industry_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample') IS NOT NULL")
+            .fetch_one(&mut **transaction)
+            .await?;
+    if !cross_industry_ready {
+        return Ok(None);
+    }
+    sqlx::query_scalar(
+        "SELECT sample.source_url FROM cross_industry_sample sample \
+         WHERE sample.platform='xhs' AND sample.content_external_id=$1 \
+           AND sample.source_url LIKE 'https://www.xiaohongshu.com/%' \
+           AND position('xsec_token=' IN sample.source_url) > 0 \
+         ORDER BY sample.last_observed_at DESC,sample.sample_ref LIMIT 1",
     )
     .bind(content_external_id)
     .fetch_optional(&mut **transaction)

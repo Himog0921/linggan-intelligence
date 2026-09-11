@@ -15,6 +15,10 @@ use uuid::Uuid;
 pub enum ObservationDomainError {
     #[error("observation domain schema is not applied")]
     SchemaUnavailable,
+    #[error("an observation domain needs a name")]
+    EmptyName,
+    #[error("an observation domain with that name already exists")]
+    DuplicateName,
     #[error(transparent)]
     Database(#[from] sqlx::Error),
 }
@@ -131,6 +135,49 @@ pub fn resolve_collection_domain<'a>(
         domains
             .iter()
             .find(|domain| domain.domain_ref == domain_ref)
+    })
+}
+
+/// 建一个新的观察领域。
+///
+/// **新领域一律是外部领域**（参照物）。本领域只能有一个，由 `0041` 预置并由一条
+/// partial unique 索引保证——"我自己在做的那个行业"不是可以随手多开一个的东西。
+///
+/// 这件事比它听起来轻：**不需要建任何表**。跨行业材料共用同一组表，靠 `domain_ref`
+/// 区分；新领域只是多了一个可以被归属的值。真正把两边隔开的是复合外键与
+/// `is_own_domain` 上的 CHECK，不是"一个领域一套表"。
+pub async fn create_observation_domain(
+    database: &Database,
+    name: &str,
+) -> Result<ObservationDomain, ObservationDomainError> {
+    if !observation_domain_schema_is_ready(database).await? {
+        return Err(ObservationDomainError::SchemaUnavailable);
+    }
+    let name = name.trim();
+    if name.is_empty() {
+        return Err(ObservationDomainError::EmptyName);
+    }
+    let domain_ref = Uuid::new_v4();
+    let inserted = sqlx::query(
+        "INSERT INTO observation_domain (domain_ref,name,is_own_domain) \
+         VALUES ($1,$2,false) ON CONFLICT (name) DO NOTHING",
+    )
+    .bind(domain_ref)
+    .bind(name)
+    .execute(database.pool())
+    .await?
+    .rows_affected();
+    // 重名不静默复用已有那一个：人以为自己新建了一个领域，实际把目标归进了别人的领域，
+    // 而这两件事在后面的材料归属上后果完全不同。
+    if inserted == 0 {
+        return Err(ObservationDomainError::DuplicateName);
+    }
+    Ok(ObservationDomain {
+        domain_ref,
+        name: name.to_owned(),
+        is_own_domain: false,
+        status: "active".to_owned(),
+        sample_count: Some(0),
     })
 }
 

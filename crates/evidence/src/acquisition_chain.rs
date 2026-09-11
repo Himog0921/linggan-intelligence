@@ -113,6 +113,57 @@ pub struct MaterialDeepeningTarget {
     pub allow_asr: bool,
 }
 
+/// 一张深化工单要覆盖的作品，两侧合起来的样子。
+///
+/// 证据侧的作品住 `linggan_material_content`，跨行业参照物住 `cross_industry_sample`，
+/// 两者不能也不该混进同一张表（`0044` 的隔离）。但对这条准入链来说，它们问的是同一个
+/// 问题：**这张工单有没有冻结具体作品**。把这个问题合并成一个类型，各处就不必各自
+/// 记得「还要再看一眼另一侧」。
+#[derive(Clone, Copy)]
+pub(crate) struct DeepeningScope<'scope> {
+    pub material: &'scope [MaterialDeepeningTarget],
+    pub cross_industry: &'scope [Uuid],
+}
+
+impl<'scope> DeepeningScope<'scope> {
+    /// 没有冻结任何作品：一次普通的发现请求。
+    const EMPTY: Self = Self {
+        material: &[],
+        cross_industry: &[],
+    };
+
+    fn material(material: &'scope [MaterialDeepeningTarget]) -> Self {
+        Self {
+            material,
+            cross_industry: &[],
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.material.is_empty() && self.cross_industry.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.material.len() + self.cross_industry.len()
+    }
+
+    /// 跨行业详情补采**只取详情**：评论、回复与媒体各自是另一次明确的决定，不由
+    /// 「顺手补一下详情」隐含授权。
+    fn wants_comments(&self) -> bool {
+        self.material.iter().any(|target| target.comment_limit > 0)
+    }
+
+    fn wants_replies(&self) -> bool {
+        self.material
+            .iter()
+            .any(|target| target.reply_expand_limit > 0)
+    }
+
+    fn wants_media(&self) -> bool {
+        self.material.iter().any(|target| target.acquire_media)
+    }
+}
+
 pub async fn acquisition_chain_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
         "SELECT to_regclass('collection_acquisition_authorization') IS NOT NULL \
@@ -685,6 +736,43 @@ async fn request_and_admit_in_transaction_with_progressive_resume(
     required_authorization_ref: Option<Uuid>,
     allow_progressive_resume: bool,
 ) -> Result<RequestOutcome, AcquisitionChainError> {
+    request_and_admit_in_transaction_scoped(
+        transaction,
+        target_ref,
+        lane,
+        purpose,
+        requested_by,
+        material_targets,
+        &[],
+        required_authorization_ref,
+        allow_progressive_resume,
+    )
+    .await
+}
+
+/// 与上面同一件事，只是作用域可以落在**跨行业样本**上。
+///
+/// 详情补采要指明「补哪几篇」。证据侧用 `collection_work_order_material_target`，跨行业
+/// 样本不在证据库里，用 `collection_work_order_cross_industry_target`。两者在这条链上
+/// 的作用完全一样：把工单从「再看一眼发现面」变成「按已知作品逐篇去取」。
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn request_and_admit_in_transaction_scoped(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    lane: &str,
+    purpose: &str,
+    requested_by: &str,
+    material_targets: &[MaterialDeepeningTarget],
+    cross_industry_samples: &[Uuid],
+    required_authorization_ref: Option<Uuid>,
+    allow_progressive_resume: bool,
+) -> Result<RequestOutcome, AcquisitionChainError> {
+    // 「这张工单有没有冻结具体作品」——两侧任何一侧有，答案就是有。下面的生命周期前置、
+    // 任务模板与工作量估算都问的是这一件事，不是问材料住在哪张表里。
+    let scope = DeepeningScope {
+        material: material_targets,
+        cross_industry: cross_industry_samples,
+    };
     // 领域列只在 `0041` 之后存在。还没应用它的环境（以及只装了控制面那部分 schema 的
     // 证明库）里没有领域这回事，此时这道闸不适用——**「这个环境还没有领域概念」与
     // 「这个目标没归属领域」是两件事**，不能用同一个拒绝去表达。
@@ -726,6 +814,14 @@ async fn request_and_admit_in_transaction_with_progressive_resume(
     let requestable = match lane {
         // A fixed material set is a follow-up to an admitted baseline.  It may deepen an archived
         // or monitored creator, but it still uses the existing deep-archive authorization class.
+        // 关键词的详情补采也走这一支，但它的前置状态多一个 `pending_decision`：
+        // `0042` 的 CHECK 禁止关键词进入 `archiving`/`archived`，所以一个刚建完档的
+        // 关键词仍然停在 `pending_decision`。沿用博主那套前置，等于宣布关键词永远
+        // 没资格补详情。
+        "deep_archive" if !cross_industry_samples.is_empty() => matches!(
+            lifecycle_state.as_str(),
+            "pending_decision" | "archiving" | "archived" | "monitoring" | "paused"
+        ),
         "deep_archive" if !material_targets.is_empty() => matches!(
             lifecycle_state.as_str(),
             "archiving" | "archived" | "monitoring" | "paused"
@@ -768,6 +864,12 @@ async fn request_and_admit_in_transaction_with_progressive_resume(
 
     ensure_material_targets_belong_to_platform(&mut *transaction, &platform, material_targets)
         .await?;
+    ensure_cross_industry_samples_belong_to_target(
+        &mut *transaction,
+        target_ref,
+        cross_industry_samples,
+    )
+    .await?;
     let facts = gather_facts(
         &mut *transaction,
         &platform,
@@ -776,7 +878,7 @@ async fn request_and_admit_in_transaction_with_progressive_resume(
         purpose,
         requested_by,
         target_ref,
-        material_targets,
+        scope,
         required_authorization_ref,
     )
     .await?;
@@ -828,10 +930,12 @@ async fn request_and_admit_in_transaction_with_progressive_resume(
             facts.dispatch_lane,
             facts.task_template,
             facts.estimated_work_units,
-            material_targets,
+            scope,
         )
         .await?;
         write_material_targets(&mut *transaction, work_order_ref, material_targets).await?;
+        write_cross_industry_targets(&mut *transaction, work_order_ref, cross_industry_samples)
+            .await?;
         Some(work_order_ref)
     } else {
         None
@@ -890,6 +994,54 @@ async fn ensure_material_targets_belong_to_platform(
     Ok(())
 }
 
+/// 这几篇跨行业样本确实属于这个观察目标所在的领域。
+///
+/// 作用域表只有一条指向 `cross_industry_sample` 的外键，它挡得住「样本不存在」，挡不住
+/// 「拿 A 领域的样本给 B 领域的目标补详情」。两个领域完全可能观察同一个词，所以这道
+/// 检查不是形式：补错了，材料会以另一个领域的名义落库。
+async fn ensure_cross_industry_samples_belong_to_target(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    samples: &[Uuid],
+) -> Result<(), AcquisitionChainError> {
+    if samples.is_empty() {
+        return Ok(());
+    }
+    let matched: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM cross_industry_sample sample \
+         JOIN collection_observation_target target ON target.domain_ref=sample.domain_ref \
+         WHERE sample.sample_ref=ANY($1) AND target.target_ref=$2 \
+           AND sample.platform=target.platform",
+    )
+    .bind(samples)
+    .bind(target_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    if usize::try_from(matched).ok() != Some(samples.len()) {
+        return Err(AcquisitionChainError::InvalidMaterialTargets);
+    }
+    Ok(())
+}
+
+async fn write_cross_industry_targets(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+    samples: &[Uuid],
+) -> Result<(), sqlx::Error> {
+    for (index, sample_ref) in samples.iter().enumerate() {
+        sqlx::query(
+            "INSERT INTO collection_work_order_cross_industry_target \
+             (work_order_ref,sample_ref,ordinal) VALUES ($1,$2,$3)",
+        )
+        .bind(work_order_ref)
+        .bind(sample_ref)
+        .bind(i32::try_from(index + 1).unwrap_or(i32::MAX))
+        .execute(&mut **transaction)
+        .await?;
+    }
+    Ok(())
+}
+
 async fn write_material_targets(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_order_ref: Uuid,
@@ -933,12 +1085,12 @@ async fn gather_facts(
     _purpose: &str,
     requested_by: &str,
     target_ref: Uuid,
-    material_targets: &[MaterialDeepeningTarget],
+    scope: DeepeningScope<'_>,
     required_authorization_ref: Option<Uuid>,
 ) -> Result<GatheredFacts, sqlx::Error> {
     let dispatch_lane = dispatch_lane_for(lane, requested_by);
-    let task_template = task_template_for(target_kind, lane, !material_targets.is_empty());
-    let estimated_work_units = estimated_work_units_for(task_template, material_targets.len());
+    let task_template = task_template_for(target_kind, lane, !scope.is_empty());
+    let estimated_work_units = estimated_work_units_for(task_template, scope.len());
     let authorization: Option<(Uuid, Option<i32>)> = sqlx::query_as(
         "SELECT authorization_ref,max_targets FROM collection_acquisition_authorization \
          WHERE platform = $1 AND target_kind = $2 AND lane = $3 \
@@ -955,7 +1107,7 @@ async fn gather_facts(
     .bind(task_template)
     .bind(dispatch_lane)
     .bind(required_authorization_ref)
-    .bind(i32::try_from(material_targets.len()).unwrap_or(i32::MAX))
+    .bind(i32::try_from(scope.len()).unwrap_or(i32::MAX))
     .bind(estimated_work_units)
     .fetch_optional(&mut **transaction)
     .await?;
@@ -965,7 +1117,7 @@ async fn gather_facts(
     //
     // 此前的判据是「存在一行工单」——而工单从不结束，于是第一次巡检之后，后续每一次都被
     // 合并掉，巡检永远只跑一次。一个只置位、从不复位的状态，等于把功能永久关掉。
-    let in_flight: bool = if material_targets.is_empty() {
+    let in_flight: bool = if scope.is_empty() {
         sqlx::query_scalar(
             "SELECT EXISTS ( \
                  SELECT 1 FROM collection_work_order w \
@@ -980,18 +1132,40 @@ async fn gather_facts(
         .bind(dispatch_lane)
         .fetch_one(&mut **transaction)
         .await?
+    } else if !scope.cross_industry.is_empty() {
+        // 跨行业侧的在途判据与证据侧同形：只要这几篇里有一篇已经排在一张还活着的工单上，
+        // 就不再复制一份。重复补采同一篇不会产生新事实，只会多花一次平台访问。
+        sqlx::query_scalar(
+            "SELECT EXISTS ( \
+                 SELECT 1 FROM collection_work_order w \
+                 JOIN collection_work_order_cross_industry_target scope \
+                   ON scope.work_order_ref=w.work_order_ref \
+                 WHERE w.target_ref=$1 AND w.lane=$2 AND w.dispatch_lane=$3 \
+                   AND scope.sample_ref=ANY($4) \
+                   AND (w.queue_state IN ('queued','leased') OR EXISTS ( \
+                       SELECT 1 FROM collection_work_order_lease l \
+                       WHERE l.work_order_ref=w.work_order_ref \
+                         AND l.released_at IS NULL AND l.expires_at>scope_001_now())))",
+        )
+        .bind(target_ref)
+        .bind(lane)
+        .bind(dispatch_lane)
+        .bind(scope.cross_industry)
+        .fetch_one(&mut **transaction)
+        .await?
     } else if let Some(authorization_ref) = required_authorization_ref {
         in_flight_work_for_exact_material_scope_in_transaction(
             transaction,
             target_ref,
             lane,
             authorization_ref,
-            material_targets,
+            scope.material,
         )
         .await?
         .is_some()
     } else {
-        let content_refs: Vec<Uuid> = material_targets
+        let content_refs: Vec<Uuid> = scope
+            .material
             .iter()
             .map(|target| target.content_public_ref)
             .collect();
@@ -1062,7 +1236,7 @@ async fn gather_facts(
             .bind(required_authorization_ref)
             .bind(task_template)
             .bind(dispatch_lane)
-            .bind(i32::try_from(material_targets.len()).unwrap_or(i32::MAX))
+            .bind(i32::try_from(scope.len()).unwrap_or(i32::MAX))
             .bind(estimated_work_units)
             .fetch_one(&mut **transaction)
             .await?;
@@ -1229,8 +1403,15 @@ pub async fn read_capacity(
     lane: &str,
 ) -> Result<Capacity, sqlx::Error> {
     let mut transaction = database.pool().begin().await?;
-    let capacity =
-        establish_capacity(&mut transaction, platform, target_kind, lane, None, &[]).await?;
+    let capacity = establish_capacity(
+        &mut transaction,
+        platform,
+        target_kind,
+        lane,
+        None,
+        DeepeningScope::EMPTY,
+    )
+    .await?;
     transaction.rollback().await?;
     Ok(capacity.capacity)
 }
@@ -1246,19 +1427,15 @@ async fn establish_capacity(
     target_kind: &str,
     lane: &str,
     target_ref: Option<Uuid>,
-    material_targets: &[MaterialDeepeningTarget],
+    scope: DeepeningScope<'_>,
 ) -> Result<CapacitySelection, sqlx::Error> {
     let required = required_capabilities_for(
         target_kind,
         lane,
-        !material_targets.is_empty(),
-        material_targets
-            .iter()
-            .any(|target| target.comment_limit > 0),
-        material_targets
-            .iter()
-            .any(|target| target.reply_expand_limit > 0),
-        material_targets.iter().any(|target| target.acquire_media),
+        !scope.is_empty(),
+        scope.wants_comments(),
+        scope.wants_replies(),
+        scope.wants_media(),
     );
     evaluate_capacity_in(
         transaction,
@@ -1294,7 +1471,7 @@ async fn assign_current_capacity_to_queued_work_order(
         &target_kind,
         lane,
         Some(target_ref),
-        material_targets,
+        DeepeningScope::material(material_targets),
     )
     .await?;
     let (Some(station_ref), Some(installation_ref)) =
@@ -1433,14 +1610,14 @@ async fn write_work_order(
     dispatch_lane: &str,
     task_template: &str,
     estimated_work_units: i32,
-    material_targets: &[MaterialDeepeningTarget],
+    scope: DeepeningScope<'_>,
 ) -> Result<Uuid, sqlx::Error> {
     let work_order_ref = Uuid::new_v4();
     let max_works = max_works_for(transaction, authorization_ref).await?;
     let dedupe_key = format!(
         "{dispatch_lane}:{target_ref}:{task_template}:{}:{}",
         monitor_rule_revision_ref.unwrap_or(Uuid::nil()),
-        material_scope_dedupe_fragment(material_targets),
+        scope_dedupe_fragment(scope),
     );
     let dispatch_group_key = (dispatch_lane == "batch").then(|| format!("target:{target_ref}"));
     sqlx::query(
@@ -1519,6 +1696,35 @@ async fn write_work_order(
 /// The active WorkOrder dedupe index protects an exact browser read scope, not
 /// every future batch for the same target.  Persisting a digest keeps the key
 /// compact while still separating different content/comment/media contracts.
+/// 两侧作用域合起来的去重片段。
+///
+/// 跨行业那一批单独算一段：同一个关键词的第一批和第二批覆盖的是不同的几篇，若两批算出
+/// 同一个 key，第二批会被当作重复而整批丢掉——建档就永远停在前三篇。
+fn scope_dedupe_fragment(scope: DeepeningScope<'_>) -> String {
+    if scope.is_empty() {
+        return "target".to_owned();
+    }
+    let mut fragments = Vec::new();
+    if !scope.material.is_empty() {
+        fragments.push(material_scope_dedupe_fragment(scope.material));
+    }
+    if !scope.cross_industry.is_empty() {
+        let mut samples = scope.cross_industry.to_vec();
+        samples.sort_unstable();
+        let input = samples
+            .iter()
+            .map(Uuid::to_string)
+            .collect::<Vec<_>>()
+            .join("|");
+        let digest: String = Sha256::digest(input.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        fragments.push(format!("xi-{digest}"));
+    }
+    fragments.join("+")
+}
+
 fn material_scope_dedupe_fragment(material_targets: &[MaterialDeepeningTarget]) -> String {
     if material_targets.is_empty() {
         return "target".to_owned();

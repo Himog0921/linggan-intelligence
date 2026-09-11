@@ -13,6 +13,7 @@
 //! （`CHECK (is_own_domain = true)` + 复合外键）：万一这里判错，写入会被数据库拒绝
 //! 而不是静默把参照物混进证据。**失败远好过污染。**
 
+use crate::cross_industry_observation::{ObservationReading, record_sample_observation};
 use crate::material_admission::{
     exact_nonnegative_count, exact_string, known_state, observed_cover_url, target_string,
 };
@@ -146,6 +147,7 @@ async fn insert_samples(
             exact_nonnegative_count(payload, &["commentCount", "comments"]),
             signed_source_url(payload),
             sampling.as_ref(),
+            discovery_order(payload),
         )
         .await?;
     }
@@ -153,9 +155,9 @@ async fn insert_samples(
 }
 
 /// 一轮关键词采集的口径。只有关键词来源才有；博主来源返回 `None`。
-struct SamplingProvenance {
-    keyword: String,
-    sort_order: String,
+pub(crate) struct SamplingProvenance {
+    pub keyword: String,
+    pub sort_order: String,
     scroll_rounds: Option<i32>,
     requested_count: Option<i32>,
     actual_count: Option<i32>,
@@ -231,6 +233,19 @@ async fn sampling_provenance(
     }))
 }
 
+/// 插件在这一轮结果流里发现这篇时的位次。
+///
+/// 原样取插件报告的 `_discoveryOrder`（从 0 起计），不加一改写成「第几名」。按点赞取
+/// 前 N 时插件另给一个 `__topRank`，那是它自己排出来的名次，由点赞数本身就能说明，
+/// 不再存一份。
+fn discovery_order(payload: &serde_json::Map<String, Value>) -> Option<i32> {
+    payload
+        .get("_discoveryOrder")
+        .and_then(Value::as_i64)
+        .filter(|value| *value >= 0)
+        .and_then(|value| i32::try_from(value).ok())
+}
+
 /// 平台返回的、带短期签名的作品链接。
 ///
 /// 小红书的作品必须用来源页给出的 `xsec_token` 才能打开，裸 `/explore/{id}` 会被拒绝。
@@ -279,6 +294,7 @@ async fn insert_detail(
             // 详情页返回的链接不带来源页签名，不覆盖列表面记下的那条。
             None,
             None,
+            None,
         )
         .await?;
     }
@@ -300,7 +316,7 @@ async fn insert_comments(
     // 评论必须挂在样本上。样本尚不存在时先立一条只有身份的：材料先到、列表后到是
     // 可能的，丢掉评论比留一条没有标题的样本更糟。
     let sample_ref = upsert_sample(
-        tx, package, domain, content_id, None, None, None, None, None, None, None, None, None,
+        tx, package, domain, content_id, None, None, None, None, None, None, None, None, None, None,
     )
     .await?;
     let expected_kind = if replies { "reply" } else { "comment" };
@@ -384,6 +400,7 @@ async fn upsert_sample(
     comment_count: Option<i64>,
     source_url: Option<&str>,
     sampling: Option<&SamplingProvenance>,
+    discovery_order: Option<i32>,
 ) -> Result<Uuid, ProducerRuntimeError> {
     let sample_ref: Uuid = sqlx::query_scalar(
         // 口径描述的是**最近这一轮是怎么看到它的**：同一篇笔记这周由「最多点赞」带回、
@@ -442,50 +459,21 @@ async fn upsert_sample(
     .fetch_one(&mut **tx)
     .await
     .map_err(ProducerRuntimeError::Internal)?;
-    record_sample_lane(tx, sample_ref, domain.domain_ref, sampling).await?;
-    Ok(sample_ref)
-}
-
-/// 记下「这篇在这个词的这个榜上出现过」。
-///
-/// 样本行上的口径只留得下**最近一次**是从哪个维度看到它的：同一个词的综合榜和点赞榜
-/// 完全可能收录同一篇，后一轮会把前一轮的口径整套换掉。而「同时上了几个榜」恰恰是
-/// 识别真爆款的信号，也正是关键词建档想要的东西。
-///
-/// 所以按维度逐条留痕，一篇一榜一行。不复制样本事实——标题、互动数、链接仍然只有一份，
-/// 这里只回答出现过与否、第一次和最近一次是什么时候。
-///
-/// 没有口径的那一轮（详情面、评论面，以及未绑定规则的一次性请求）不写：它们不是从
-/// 某个榜上看到这篇的。
-async fn record_sample_lane(
-    tx: &mut Transaction<'_, Postgres>,
-    sample_ref: Uuid,
-    domain_ref: Uuid,
-    sampling: Option<&SamplingProvenance>,
-) -> Result<(), ProducerRuntimeError> {
-    let Some(sampling) = sampling else {
-        return Ok(());
-    };
-    let schema_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample_lane') IS NOT NULL")
-            .fetch_one(&mut **tx)
-            .await
-            .map_err(ProducerRuntimeError::Internal)?;
-    if !schema_ready {
-        return Ok(());
-    }
-    sqlx::query(
-        "INSERT INTO cross_industry_sample_lane (sample_ref,domain_ref,keyword,sort_order) \
-         VALUES ($1,$2,$3,$4) \
-         ON CONFLICT (sample_ref,keyword,sort_order) DO UPDATE SET \
-           last_observed_at = scope_001_now()",
+    // 观察记录用的是**这一轮读到的数**，与样本行上那份保旧补新的当前事实分开：
+    // 这一轮没读到收藏数，就该是「这次没读到」，不能借用上一轮的值凑一份完整读数。
+    record_sample_observation(
+        tx,
+        package,
+        sample_ref,
+        domain.domain_ref,
+        sampling,
+        &ObservationReading {
+            like_count,
+            comment_count,
+            collect_count,
+            discovery_order,
+        },
     )
-    .bind(sample_ref)
-    .bind(domain_ref)
-    .bind(sampling.keyword.as_str())
-    .bind(sampling.sort_order.as_str())
-    .execute(&mut **tx)
-    .await
-    .map_err(ProducerRuntimeError::Internal)?;
-    Ok(())
+    .await?;
+    Ok(sample_ref)
 }

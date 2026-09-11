@@ -824,6 +824,7 @@ fn second_bar(
     counts: Option<&TargetCounts>,
     state: Option<&SurfaceState>,
     nav_domain: Option<&str>,
+    domains: &[linggan_evidence::observation_domain::ObservationDomain],
 ) -> String {
     match section {
         Section::Targets => {
@@ -842,31 +843,39 @@ fn second_bar(
             //
             // 这里是属性值而不是地址，走 HTML 转义。两种编码不能混用：把 %XX 塞进
             // value 会让提交回来的领域认不出来。
-            let domain_chosen = matches!(
-                nav_domain,
-                Some(domain) if domain != linggan_evidence::observation_domain::ALL_DOMAINS
-            );
-            let domain_field = match nav_domain {
-                Some(domain) if domain_chosen => format!(
-                    r#"<input type="hidden" name="domain" value="{}">"#,
-                    escape(domain)
-                ),
-                _ => String::new(),
+            // 领域在新建时当场选，不再靠「当前在看哪个领域」推断，也不再只给一句提示。
+            // 预选当前视图的领域；站在「全部领域」下时没有预选项，必须自己挑一个。
+            let preselected = match nav_domain {
+                Some(domain) if domain != linggan_evidence::observation_domain::ALL_DOMAINS => {
+                    Some(domain)
+                }
+                _ => None,
             };
-            let create_disabled = if domain_chosen { "" } else { " disabled" };
-            let create_hint = if domain_chosen {
-                String::new()
-            } else {
-                // 复用既有的反馈样式，不为一句提示另造一个没有定义的类名。
-                r#"<p class="c-src-feedback c-src-feedback-warn" role="note"><b>先选领域再新建</b>目标归哪个领域，决定它采回来的材料进本行业证据库还是跨行业参照语料。这一项不做推断——猜错会让参照物混进证据，而且之后任何读证据的地方都不会再提醒你。</p>"#.to_owned()
-            };
+            let mut domain_options = String::new();
+            for domain in domains {
+                let value = domain.domain_ref.to_string();
+                let selected = if preselected == Some(value.as_str()) {
+                    " selected"
+                } else {
+                    ""
+                };
+                let suffix = if domain.is_own_domain {
+                    "（本行业·材料进证据库）"
+                } else {
+                    "（参照·材料进跨行业语料）"
+                };
+                domain_options.push_str(&format!(
+                    r#"<option value="{value}"{selected}>{name}{suffix}</option>"#,
+                    value = escape(&value),
+                    name = escape(&domain.name),
+                ));
+            }
             format!(
                 r#"<div class="c-toolbar">
           <div class="c-tabs c-tg-views">{target_filters}</div>
           <div class="c-actions c-tg-toolbar">
             <a class="c-tg-ctl c-tg-sort" href="{sort_href}" aria-label="按最近观察排序"><span>最近观察</span><i class="c-tg-caret" aria-hidden="true"></i></a>
             <form id="collection-target-create" class="c-target-add" method="post" action="/collection/targets/new">
-              {domain_field}
               <label class="c-tg-field c-tg-field-kind" data-drawn-select><span class="v7-sr-only">目标类型</span><select name="target_kind" aria-label="目标类型" data-target-kind>
                   <option value="creator">创作者</option>
                   <option value="keyword">关键词</option>
@@ -881,10 +890,21 @@ fn second_bar(
               <label class="c-tg-field c-tg-field-query"><span class="v7-sr-only">主页链接、ID 或关键词</span><input name="identity" required maxlength="120"
                      aria-label="创作者主页链接、ID 或关键词" placeholder="粘贴主页链接、ID 或输入关键词" /></label>
               <button class="c-btn-secondary c-tg-batch-open" type="button" data-target-batch-open aria-controls="target-batch-modal" disabled><span data-target-batch-label>批量编辑</span><strong data-target-selected-count hidden>0</strong></button>
-              <button class="c-btn-primary" type="submit"{create_disabled}>＋ 新建目标</button>
+              <button class="c-btn-primary" type="button" data-target-domain-open aria-controls="target-domain-modal">＋ 新建目标</button>
+              <div class="c-tg-batch-overlay" data-target-domain-modal hidden>
+                <section id="target-domain-modal" class="c-tg-batch-dialog" role="dialog" aria-modal="true" aria-labelledby="target-domain-title">
+                  <div>
+                    <h2 id="target-domain-title">这个目标属于哪个领域</h2>
+                    <p>领域决定它采回来的材料进本行业证据库，还是作为参照进跨行业语料。这一项不做推断——猜错会让参照物混进证据，之后任何读证据的地方都不会再提醒你。</p>
+                  </div>
+                  <label>领域<span class="c-tg-field" data-drawn-select><select name="domain" data-target-domain-select required>{domain_options}<option value="__new__">＋ 新建一个领域…</option></select></span></label>
+                  <label data-target-domain-new hidden>新领域名称<input name="new_domain_name" type="text" maxlength="80" placeholder="例如：考研自习" data-target-domain-name /></label>
+                  <p data-target-domain-new-note hidden>新领域一律作为<b>参照领域</b>建立：它采回来的材料进跨行业语料，不进本行业证据库。本行业只能有一个，不能新建。</p>
+                  <div class="c-tg-batch-dialog-actions"><button class="c-btn-secondary" type="button" data-target-domain-close>取消</button><button class="c-btn-primary" type="submit">建立目标</button></div>
+                </section>
+              </div>
             </form>
           </div>
-          {create_hint}
         </div>"#,
                 target_filters = target_filter_tabs(filter, counts, nav_domain),
             )
@@ -957,6 +977,9 @@ fn crumb(section: Section, mode: OperationsMode, picker: &str) -> String {
 pub struct DomainBar<'a> {
     pub picker: &'a str,
     pub nav_domain: Option<&'a str>,
+    /// 可供新建目标时选择的领域。空表示领域功能还没就绪——那时不渲染选择器，
+    /// 也就不会让人以为"没得选"是"只有一个领域"。
+    pub domains: &'a [linggan_evidence::observation_domain::ObservationDomain],
 }
 
 pub fn render(
@@ -1044,7 +1067,15 @@ pub fn render_in_domain(
 "#,
         title = entry.title,
         rail = rail(section, state, domain.nav_domain),
-        second_bar = second_bar(section, mode, filter, counts, state, domain.nav_domain),
+        second_bar = second_bar(
+            section,
+            mode,
+            filter,
+            counts,
+            state,
+            domain.nav_domain,
+            domain.domains,
+        ),
         body = body(section, mode, state),
     )
 }
@@ -1075,6 +1106,7 @@ mod domain_bar_tests {
             None,
             DomainBar {
                 picker: "",
+                domains: &[],
                 nav_domain: Some("all"),
             },
         );
@@ -1133,6 +1165,7 @@ mod domain_bar_tests {
             None,
             DomainBar {
                 picker: r#"<form class="v7-domain-picker"></form>"#,
+                domains: &[],
                 nav_domain: Some("all"),
             },
         );
@@ -1160,6 +1193,7 @@ mod domain_injection_tests {
             None,
             DomainBar {
                 picker: "",
+                domains: &[],
                 nav_domain: Some(r#""><script>alert(1)</script>"#),
             },
         );
@@ -1180,6 +1214,7 @@ mod domain_injection_tests {
             None,
             DomainBar {
                 picker: "",
+                domains: &[],
                 nav_domain: Some(r#""><script>alert(1)</script>"#),
             },
         );

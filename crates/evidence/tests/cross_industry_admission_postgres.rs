@@ -1,234 +1,19 @@
-//! 跨行业落库分流的真实链路证明。
+//! 跨行业落库分流的真实链路证明：**采样口径与观察记录**。
 //!
 //! 这条路径此前没有任何集成测试：`insert_samples` 只在代码复用的意义上「顺带受益」，
-//! 从没有人证明过外部领域的包真的会走到它、真的写出预期的行。本文件补上，并锁住两件
-//! 最容易悄悄坏掉的语义：采样口径**整套一起换或一起保**，签名链接**只存平台返回的**。
+//! 从没有人证明过外部领域的包真的会走到它、真的写出预期的行。本文件补上，并锁住三件
+//! 最容易悄悄坏掉的语义：采样口径**整套一起换或一起保**、签名链接**只存平台返回的**、
+//! 以及同一篇被再看到一次要**追加一条观察记录**而不是覆盖上一条。
 
+#[path = "support/cross_industry_fixture.rs"]
+mod cross_industry;
 #[path = "support/material_fixture.rs"]
 mod fixture;
 
+use cross_industry::{discovery_card, discovery_card_at, search_coverage, submit_external_package};
 use fixture::proof_database;
-use linggan_contracts::{parse_producer_attempt, parse_producer_submission};
-use linggan_evidence::{
-    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, keyword_baseline_qualified, register_station,
-    request_and_admit, start_producer_attempt, submit_producer_package,
-};
-use linggan_storage_postgres::Database;
 use sqlx::Row;
 use uuid::Uuid;
-
-/// 迁移预置的外部领域「考研自习」。
-const EXTERNAL_DOMAIN: &str = "00000000-0000-4000-8000-000000000002";
-
-/// 造出一条完整的「外部领域关键词目标 → 工单 → 租约 → 任务 → 包」链路并提交。
-///
-/// 领域判定靠的正是这条链（`resolve_package_domain` 从包一路 JOIN 回观察目标），
-/// 所以少任何一环，包都会被当作本领域材料写进证据侧——那恰恰是这套分流要防的事。
-async fn submit_external_package(
-    database: &Database,
-    identity_key: &str,
-    lane: &str,
-    task_target: serde_json::Value,
-    package_kind: &str,
-    coverage: serde_json::Value,
-    // 搜索面的完整性判据读的是**包的 checkpoint**（`surfaceReceipt.stopReason`），
-    // 不是 coverage 里的 stoppedReason——两处都有 stop 字样，放错地方判据就悄悄落空。
-    checkpoint: serde_json::Value,
-    records: Vec<serde_json::Value>,
-) -> Uuid {
-    // 生命周期一律留在默认的 pending_decision。关键词**不能**进入 archiving/archived
-    // （`0042` 的 CHECK），建档与否是读取时从证据里查出来的；领域分流也不看生命周期。
-    let target_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
-         VALUES ($1,'xhs','keyword',$2,$2,'manual',$3::uuid)",
-    )
-    .bind(target_ref)
-    .bind(identity_key)
-    .bind(EXTERNAL_DOMAIN)
-    .execute(database.pool())
-    .await
-    .expect("external-domain target is stored");
-
-    let request_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO collection_acquisition_request (request_ref,target_ref,lane,purpose,requested_by) \
-         VALUES ($1,$2,$3,'cross industry sampling proof','person')",
-    )
-    .bind(request_ref)
-    .bind(target_ref)
-    .bind(lane)
-    .execute(database.pool())
-    .await
-    .expect("request fixture is stored");
-
-    // `admitted` 必须挂在一份有效授权上（CHECK 强制两者同在），所以先签一份。
-    let authorization_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO collection_acquisition_authorization \
-             (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
-              allowed_task_templates,allowed_dispatch_lanes,max_work_units) \
-         VALUES ($1,'xhs','keyword',$2,'cross industry sampling proof','person', \
-                 scope_001_now()+interval '1 day', \
-                 CASE WHEN $2='deep_archive' THEN ARRAY['keyword_archive','material_deepening'] \
-                      ELSE ARRAY['keyword_patrol'] END, \
-                 CASE WHEN $2='deep_archive' THEN ARRAY['immediate','batch'] \
-                      ELSE ARRAY['immediate','scheduled'] END, \
-                 200)",
-    )
-    .bind(authorization_ref)
-    .bind(lane)
-    .execute(database.pool())
-    .await
-    .expect("authorization fixture is stored");
-
-    let decision_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO collection_admission_decision \
-             (decision_ref,request_ref,outcome,reason_code,authorization_ref,target_ref) \
-         VALUES ($1,$2,'admitted','cross_industry_sampling_proof',$3,$4)",
-    )
-    .bind(decision_ref)
-    .bind(request_ref)
-    .bind(authorization_ref)
-    .bind(target_ref)
-    .execute(database.pool())
-    .await
-    .expect("admission fixture is stored");
-
-    let work_order_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO collection_work_order (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions) \
-         VALUES ($1,$2,$3,$4,200,'[\"maximum_quota\"]'::jsonb)",
-    )
-    .bind(work_order_ref)
-    .bind(decision_ref)
-    .bind(target_ref)
-    .bind(lane)
-    .execute(database.pool())
-    .await
-    .expect("work order fixture is stored");
-
-    // 工位名在同一个证明库里必须唯一：一条用例会连着提交两轮（列表面 + 详情面）。
-    let station_ref =
-        register_station(database, &format!("跨行业采样证明工位 {identity_key}"), 200)
-            .await
-            .expect("station fixture is stored");
-    let lease_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO collection_work_order_lease (lease_ref,work_order_ref,station_ref,capture_identity,expires_at) \
-         VALUES ($1,$2,$3,'{}'::jsonb,scope_001_now()+interval '1 hour')",
-    )
-    .bind(lease_ref)
-    .bind(work_order_ref)
-    .bind(station_ref)
-    .execute(database.pool())
-    .await
-    .expect("lease fixture is stored");
-
-    let task_id = Uuid::new_v4();
-    let producer_instance_id = Uuid::new_v4();
-    let attempt_id = Uuid::new_v4();
-    let installation_ref = Uuid::new_v4();
-    let task = serde_json::json!({
-        "contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"scheduled",
-        "platform":"xhs","pageType":"search_results","target":task_target,
-        "capabilitiesRequested":[package_kind],"maximumQuota":200,
-        "commentLimit":"not_requested","acquireMedia":"not_requested",
-        // scheduled 任务必须配服务端签发的风险策略，本机自发那套只属于 manual。
-        "riskPolicy":"server_authorized_leased","stopConditions":["maximum_quota"]
-    });
-    // scheduled 任务只能由服务端派发产生——`create_producer_task` 会明确拒绝创建它们
-    // （`ScheduledTaskNotServerIssued`）。夹具因此直接写入这一行，与它已经在直接造
-    // 工单、租约、认领是同一层面的事。
-    let task_spec = task.to_string();
-    sqlx::query(
-        "INSERT INTO linggan_runtime_task \
-             (task_id,task_spec_hash,task_spec,source,platform,page_type) \
-         VALUES ($1,encode(sha256(convert_to($2,'UTF8')),'hex'),$2::jsonb,'scheduled','xhs','search_results')",
-    )
-    .bind(task_id)
-    .bind(&task_spec)
-    .execute(database.pool())
-    .await
-    .expect("scheduled task fixture is stored");
-    // 认领必须落在一个**真实的安装**上，而且停在 in_progress：提交时要重新锁定这份执行
-    // 权限，只有锁得住才会写出 `COMPLETED_LIVE_STEP` 回执。夹具此前直接写 completed，
-    // 回执因此是 NOT_APPLICABLE——那种包不足以证明任何一轮建档完成过。
-    sqlx::query(
-        "INSERT INTO plugin_installation \
-             (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version) \
-         VALUES ($1,$2,$3,'person',scope_001_now(),'0.8.48')",
-    )
-    .bind(installation_ref)
-    .bind(producer_instance_id.to_string())
-    .bind(station_ref)
-    .execute(database.pool())
-    .await
-    .expect("installation fixture is stored");
-    sqlx::query(
-        "INSERT INTO collection_work_order_lease_task \
-             (lease_ref,task_id,sequence_no,execution_state,claimed_at,claimed_by_installation_ref) \
-         VALUES ($1,$2,1,'in_progress',scope_001_now(),$3)",
-    )
-    .bind(lease_ref)
-    .bind(task_id)
-    .bind(installation_ref)
-    .execute(database.pool())
-    .await
-    .expect("lease task fixture is stored");
-
-    let attempt = serde_json::json!({
-        "contractVersion":"linggan.producer.attempt.v1","producerInstanceId":producer_instance_id,
-        "taskId":task_id,"attemptId":attempt_id
-    });
-    let attempt = parse_producer_attempt(&attempt.to_string()).expect("attempt validates");
-    assert!(matches!(
-        start_producer_attempt(database, &attempt).await,
-        Ok(RuntimeAttemptOutcome::Started { .. })
-    ));
-
-    let package_ref = Uuid::new_v4();
-    let submission = serde_json::json!({
-        "contractVersion":"linggan.producer.capture-package.v1",
-        "producerInstanceId":producer_instance_id,"taskId":task_id,"attemptId":attempt_id,
-        "submissionId":Uuid::new_v4(),
-        "capturePackage":{
-            "contractVersion":"linggan.producer.capture-package.v1","packageRef":package_ref,
-            "packageKind":package_kind,"platform":"xhs",
-            "observedAt":"2026-09-11T02:00:00Z","capturedAt":"2026-09-11T02:00:00Z",
-            "coverage":coverage,"checkpoint":checkpoint,"records":records
-        }
-    });
-    let submission =
-        parse_producer_submission(&submission.to_string()).expect("submission validates");
-    let outcome = submit_producer_package(database, &submission).await;
-    assert!(
-        matches!(outcome, Ok(RuntimeSubmissionOutcome::Acknowledged { .. })),
-        "cross-industry submission must be acknowledged: {outcome:?}"
-    );
-    package_ref
-}
-
-fn search_coverage(query: &str, acquired: i64) -> serde_json::Value {
-    serde_json::json!({
-        "target":{"basis":"current_visible_surface","surface":"target_driven_surface","query":query},
-        "layers":[{
-            "capability":"discovery_search","observed":acquired,"attempted":acquired,
-            "acquired":acquired,"verified":0,"failed":0,"notAttempted":0,"unknown":0,
-            "stoppedReason":"surface_read_complete"
-        }]
-    })
-}
-
-fn discovery_card(external_id: &str, title: &str, likes: &str, url: &str) -> serde_json::Value {
-    serde_json::json!({
-        "kind":"discovery_card","resultPosition":1,
-        "sourceObject":{"platform":"xhs","type":"content","externalId":external_id},
-        "payload":{"noteId":external_id,"title":title,"likes":likes,"url":url}
-    })
-}
 
 /// 关键词采集要把「这一批是按什么口径取回来的」和「上哪儿能看到原作」一起留下。
 ///
@@ -440,6 +225,98 @@ async fn a_note_seen_on_two_boards_of_one_keyword_is_recorded_on_both() {
     assert_eq!(latest.as_deref(), Some("comprehensive"));
 }
 
+/// 同一篇被**再次看到**时，样本仍是一行，但观察记录要多出一条。
+///
+/// 样本行是 upsert 的，它只回答「这篇是什么、现在多少赞」。巡检一周跑一次，如果只有
+/// 这一行，上一周读到的数就被这一周盖掉了——「被看到过几次、热度怎么变」从此无从查起，
+/// 而且补不回来（平台不提供历史值）。所以每看到一次就追加一条。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn seeing_a_note_again_appends_an_observation_without_forking_the_sample() {
+    let database = proof_database("cross_industry_sample_observation").await;
+    let signed = "https://www.xiaohongshu.com/search_result/note-seen-twice?xsec_token=ABtwice";
+    for (identity, likes, order) in [
+        ("考研自习::week-1", "1.2万", 7),
+        ("考研自习::week-2", "1.5万", 2),
+    ] {
+        submit_external_package(
+            &database,
+            identity,
+            "patrol",
+            serde_json::json!({"query":"考研自习","ranking":"most_liked","scrollRounds":3}),
+            "discovery_search",
+            search_coverage("考研自习", 1),
+            serde_json::Value::Null,
+            vec![discovery_card_at(
+                "note-seen-twice",
+                "被看到两次",
+                likes,
+                signed,
+                order,
+            )],
+        )
+        .await;
+    }
+
+    let samples: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM cross_industry_sample WHERE content_external_id='note-seen-twice'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(samples, 1, "一篇一行——再看到一次不该分裂出第二条样本");
+
+    // 两次读数都在，而且各自挂在自己那一轮的包上。
+    let readings: Vec<(Option<i64>, Option<i32>)> = sqlx::query_as(
+        "SELECT observation.like_count, observation.discovery_order \
+         FROM cross_industry_sample_observation observation \
+         JOIN cross_industry_sample sample USING (sample_ref) \
+         WHERE sample.content_external_id='note-seen-twice' \
+         ORDER BY observation.like_count",
+    )
+    .fetch_all(database.pool())
+    .await
+    .expect("observation rows are readable");
+    assert_eq!(
+        readings,
+        vec![(Some(12_000), Some(7)), (Some(15_000), Some(2))],
+        "两次观察各自的点赞数与发现位次都要留着，后一次不覆盖前一次"
+    );
+
+    let packages: i64 = sqlx::query_scalar(
+        "SELECT count(DISTINCT observation.package_ref) \
+         FROM cross_industry_sample_observation observation \
+         JOIN cross_industry_sample sample USING (sample_ref) \
+         WHERE sample.content_external_id='note-seen-twice'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(packages, 2, "两条观察必须来自两轮不同的采集");
+
+    // 榜单留痕由明细聚合出来，「被看到过几次」直接能读。
+    let (times, first_seen_differs): (i64, bool) = sqlx::query_as(
+        "SELECT lane.observed_times, lane.first_seen_at <= lane.last_observed_at \
+         FROM cross_industry_sample_lane lane \
+         JOIN cross_industry_sample sample USING (sample_ref) \
+         WHERE sample.content_external_id='note-seen-twice'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the aggregated lane view is readable");
+    assert_eq!(times, 2, "同一个榜上被看到两次就是两次");
+    assert!(first_seen_differs);
+
+    // 样本行上仍是最近一次读到的数——两者各司其职。
+    let current: Option<i64> = sqlx::query_scalar(
+        "SELECT like_count FROM cross_industry_sample WHERE content_external_id='note-seen-twice'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(current, Some(15_000));
+}
+
 /// 没有采样口径的那一轮不该在任何榜上留痕。
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
@@ -507,369 +384,27 @@ async fn a_board_row_cannot_claim_a_domain_its_sample_does_not_belong_to() {
     .await
     .expect("the sample exists");
 
-    // 另一个真实存在的外部领域（迁移预置的「自闭症干预」）。
-    let wrong_domain = sqlx::query(
-        "INSERT INTO cross_industry_sample_lane (sample_ref,domain_ref,keyword,sort_order) \
-         VALUES ($1,'00000000-0000-4000-8000-000000000003','考研自习','most_liked')",
+    let package_ref: Uuid = sqlx::query_scalar(
+        "SELECT package_ref FROM cross_industry_sample_observation WHERE sample_ref=$1",
     )
     .bind(sample_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the observation exists");
+
+    // 另一个真实存在的外部领域（迁移预置的「自闭症干预」）。
+    let wrong_domain = sqlx::query(
+        "INSERT INTO cross_industry_sample_observation \
+             (observation_ref,sample_ref,domain_ref,package_ref,keyword,sort_order) \
+         VALUES (gen_random_uuid(),$1,'00000000-0000-4000-8000-000000000003',$2, \
+                 '考研自习','most_liked')",
+    )
+    .bind(sample_ref)
+    .bind(package_ref)
     .execute(database.pool())
     .await;
     assert!(
         wrong_domain.is_err(),
         "榜单留痕不得声称一个不属于该样本的领域"
-    );
-}
-
-/// 一轮把搜索面翻到底、且没有一条材料被隔离的建档，应当被判为**已建档**。
-///
-/// 关键词没有建档生命周期（`0042` 的 CHECK 禁止它进入 `archiving`/`archived`），所以
-/// 「建过档没有」是读取时从证据里查出来的，不是存下来的状态。
-#[tokio::test]
-#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn a_keyword_that_scanned_its_surface_to_the_bottom_counts_as_archived() {
-    let database = proof_database("keyword_archive_completes").await;
-    let target_ref =
-        submit_keyword_archive(&database, "考研自习::archive-ok", "bottom_confirmed", 1, 0).await;
-
-    let mut tx = database.pool().begin().await.unwrap();
-    let qualified = keyword_baseline_qualified(&mut tx, target_ref)
-        .await
-        .expect("baseline query runs");
-    tx.commit().await.unwrap();
-    assert!(qualified, "翻到底且无隔离的一轮就是建档");
-}
-
-/// 中途因为失败而停下的那一轮不算建档。
-///
-/// 把它算作完成，等于宣布一个没挖完的词已经建好档——之后所有基于它的判断都建立在一个
-/// 不完整的底座上，而且没人看得出来。
-#[tokio::test]
-#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn a_keyword_archive_that_stopped_on_failures_does_not_count() {
-    let database = proof_database("keyword_archive_incomplete").await;
-    let target_ref = submit_keyword_archive(
-        &database,
-        "考研自习::archive-failed",
-        "bottom_confirmed",
-        1,
-        2,
-    )
-    .await;
-
-    let mut tx = database.pool().begin().await.unwrap();
-    let qualified = keyword_baseline_qualified(&mut tx, target_ref)
-        .await
-        .expect("baseline query runs");
-    tx.commit().await.unwrap();
-    assert!(!qualified, "有失败的一轮不是建档，还得接着补");
-}
-
-/// 没翻到底、也没采满配额的那一轮不算建档，哪怕一条失败都没有。
-///
-/// 这条与「有失败就不算」分开测是必要的：完整性判据读的是包的 `checkpoint`，而
-/// coverage 里另有一个名字很像的 `stoppedReason`。写这组用例时就踩过——停止原因放错了
-/// 地方，判据整条落空，负例却因为**失败数非零**照样变红，看上去一切正常。
-#[tokio::test]
-#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn a_keyword_archive_that_never_reached_the_bottom_does_not_count() {
-    let database = proof_database("keyword_archive_not_bottom").await;
-    // 一条失败都没有，但停在半路：既没 bottom_confirmed，也没采满 maximumQuota。
-    let target_ref = submit_keyword_archive(
-        &database,
-        "考研自习::archive-partial",
-        "time_budget_exhausted",
-        1,
-        0,
-    )
-    .await;
-
-    let mut tx = database.pool().begin().await.unwrap();
-    let qualified = keyword_baseline_qualified(&mut tx, target_ref)
-        .await
-        .expect("baseline query runs");
-    tx.commit().await.unwrap();
-    assert!(!qualified, "没翻到底又没采满，就还不是建档");
-}
-
-/// 巡检拿回来的包再完整，也不算建档——建档是另一条通道上的事。
-#[tokio::test]
-#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn a_complete_patrol_round_is_not_an_archive() {
-    let database = proof_database("keyword_patrol_is_not_archive").await;
-    submit_external_package(
-        &database,
-        "考研自习::patrol-only",
-        "patrol",
-        serde_json::json!({"query":"考研自习","ranking":"most_liked","topByLikes":20,"scrollRounds":3}),
-        "discovery_search",
-        search_coverage("考研自习", 1),
-        serde_json::Value::Null,
-        vec![discovery_card(
-            "note-patrol-only",
-            "巡检样本",
-            "233",
-            "https://www.xiaohongshu.com/search_result/note-patrol-only?xsec_token=ABpatrol",
-        )],
-    )
-    .await;
-    let target_ref: Uuid = sqlx::query_scalar(
-        "SELECT target_ref FROM collection_observation_target WHERE identity_key=$1",
-    )
-    .bind("考研自习::patrol-only")
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-
-    let mut tx = database.pool().begin().await.unwrap();
-    let qualified = keyword_baseline_qualified(&mut tx, target_ref)
-        .await
-        .expect("baseline query runs");
-    tx.commit().await.unwrap();
-    assert!(!qualified, "巡检不是建档，哪怕这一轮本身很完整");
-}
-
-/// 造一轮关键词建档：发一张 deep_archive 工单并提交一个搜索包。
-///
-/// `failed` 非零时模拟「中途停下」的那一轮。
-async fn submit_keyword_archive(
-    database: &Database,
-    identity_key: &str,
-    stop_reason: &str,
-    acquired: i64,
-    failed: i64,
-) -> Uuid {
-    let mut coverage = search_coverage("考研自习", acquired);
-    coverage["layers"][0]["failed"] = serde_json::json!(failed);
-    coverage["layers"][0]["observed"] = serde_json::json!(acquired + failed);
-    coverage["layers"][0]["attempted"] = serde_json::json!(acquired + failed);
-    coverage["layers"][0]["stoppedReason"] = serde_json::json!(stop_reason);
-    submit_external_package(
-        database,
-        identity_key,
-        "deep_archive",
-        // 建档口径：不限时间、不设取前 N。
-        serde_json::json!({"query":"考研自习","ranking":"most_liked","scrollRounds":10}),
-        "discovery_search",
-        coverage,
-        serde_json::json!({"surfaceReceipt":{"stopReason":stop_reason}}),
-        vec![discovery_card(
-            "note-archive-1",
-            "建档样本",
-            "1.4万",
-            "https://www.xiaohongshu.com/search_result/note-archive-1?xsec_token=ABarchive",
-        )],
-    )
-    .await;
-    sqlx::query_scalar("SELECT target_ref FROM collection_observation_target WHERE identity_key=$1")
-        .bind(identity_key)
-        .fetch_one(database.pool())
-        .await
-        .expect("the archived target exists")
-}
-
-/// 关键词的建档请求必须真的能走完准入、写出工单。
-///
-/// 这条用例补的是一个方法上的缺口：本文件其它用例都直接拼 SQL 造工单与租约，**从未走过
-/// `request_and_admit` 这条真实链路**，于是没有一条能发现「建档请求在写工单那一步必然
-/// 撞上 `0042` 的 CHECK」——`write_work_order` 里那条把目标推进 `archiving` 的 UPDATE
-/// 原本不分目标类型，而关键词被禁止进入那个状态，整个事务因此回滚，页面只显示一句
-/// 「上一次动作没有完成」。100% 必现，却被 14 条绿测试全部漏掉。
-///
-/// 所以这里不用夹具抄近路：建目标、签授权，然后调用产品代码自己的入口。
-#[tokio::test]
-#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn a_keyword_archive_request_passes_admission_and_writes_a_work_order() {
-    let database = proof_database("keyword_archive_admission").await;
-    let target_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
-         VALUES ($1,'xhs','keyword','考研自习::most_liked','考研自习','manual',$2::uuid)",
-    )
-    .bind(target_ref)
-    .bind(EXTERNAL_DOMAIN)
-    .execute(database.pool())
-    .await
-    .expect("target is stored");
-    sqlx::query(
-        "INSERT INTO collection_acquisition_authorization \
-             (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
-              allowed_task_templates,allowed_dispatch_lanes,max_work_units,max_works_per_target) \
-         VALUES ($1,'xhs','keyword','deep_archive','关键词历史建档','person', \
-                 scope_001_now()+interval '1 day', \
-                 ARRAY['keyword_archive','material_deepening'],ARRAY['immediate','batch'],200,200)",
-    )
-    .bind(Uuid::new_v4())
-    .execute(database.pool())
-    .await
-    .expect("keyword deep-archive authorization is granted");
-
-    let outcome = request_and_admit(
-        &database,
-        target_ref,
-        "deep_archive",
-        "从观察目标页发起关键词历史建档",
-        "person",
-    )
-    .await
-    .expect("the archive request survives admission");
-    assert!(
-        outcome.work_order_ref.is_some(),
-        "关键词建档请求必须写出工单，实际结论：{:?} / {}",
-        outcome.outcome,
-        outcome.reason_code
-    );
-
-    // 生命周期一步都没动：关键词不进 archiving，建过没建过从证据里查。
-    let state: String = sqlx::query_scalar(
-        "SELECT lifecycle_state FROM collection_observation_target WHERE target_ref=$1",
-    )
-    .bind(target_ref)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(state, "pending_decision", "关键词不得被推进到建档状态");
-
-    let lane: String =
-        sqlx::query_scalar("SELECT lane FROM collection_work_order WHERE target_ref=$1")
-            .bind(target_ref)
-            .fetch_one(database.pool())
-            .await
-            .expect("the work order exists");
-    assert_eq!(lane, "deep_archive");
-}
-
-/// 同一个请求对创作者仍然要推进到「建档中」——这条链没有被上面的修改弄坏。
-#[tokio::test]
-#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn a_creator_archive_request_still_advances_the_lifecycle() {
-    let database = proof_database("creator_archive_admission").await;
-    let target_ref = Uuid::new_v4();
-    // 本行业创作者，领域写实：采集准入会拒绝未归属领域的目标。
-    sqlx::query(
-        "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
-         VALUES ($1,'xhs','creator','69aad16e000000003201b172','木可可','manual', \
-                 '00000000-0000-4000-8000-000000000001')",
-    )
-    .bind(target_ref)
-    .execute(database.pool())
-    .await
-    .expect("target is stored");
-    sqlx::query(
-        "INSERT INTO collection_acquisition_authorization \
-             (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
-              allowed_task_templates,allowed_dispatch_lanes,max_work_units,max_works_per_target) \
-         VALUES ($1,'xhs','creator','deep_archive','创作者建档','person', \
-                 scope_001_now()+interval '1 day', \
-                 ARRAY['creator_archive','material_deepening'],ARRAY['immediate','batch'],200,200)",
-    )
-    .bind(Uuid::new_v4())
-    .execute(database.pool())
-    .await
-    .expect("creator deep-archive authorization is granted");
-
-    request_and_admit(
-        &database,
-        target_ref,
-        "deep_archive",
-        "创作者建档",
-        "person",
-    )
-    .await
-    .expect("the archive request survives admission");
-
-    let state: String = sqlx::query_scalar(
-        "SELECT lifecycle_state FROM collection_observation_target WHERE target_ref=$1",
-    )
-    .bind(target_ref)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(state, "archiving", "创作者建档仍然推进生命周期");
-}
-
-/// 没归属领域的目标不得开始采集。
-///
-/// 目标本身允许先无领域地存在：浏览器上报（`collection_target_intake`）与插件推送
-/// （`sync_target_from_author_profile`）都发现得到目标却不知道领域，让它们建候选是对的。
-/// 但读取侧对未归属目标一律回落成本领域，**一旦真开始采，材料就会按那个猜测写进证据侧**
-/// ——2026-09-11 的 413 条误写正是这条路径。所以闸设在「要花平台访问额度之前」。
-#[tokio::test]
-#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn a_target_without_a_domain_cannot_start_acquiring() {
-    let database = proof_database("acquisition_requires_domain").await;
-    let target_ref = Uuid::new_v4();
-    // 刻意不写 domain_ref：模拟浏览器上报或插件推送建出来的候选目标。
-    sqlx::query(
-        "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source) \
-         VALUES ($1,'xhs','keyword','数学思维::most_liked','数学思维','plugin_push')",
-    )
-    .bind(target_ref)
-    .execute(database.pool())
-    .await
-    .expect("candidate target is stored");
-    sqlx::query(
-        "INSERT INTO collection_acquisition_authorization \
-             (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
-              allowed_task_templates,allowed_dispatch_lanes,max_work_units,max_works_per_target) \
-         VALUES ($1,'xhs','keyword','deep_archive','领域闸门证明','person', \
-                 scope_001_now()+interval '1 day', \
-                 ARRAY['keyword_archive','material_deepening'],ARRAY['immediate','batch'],200,200)",
-    )
-    .bind(Uuid::new_v4())
-    .execute(database.pool())
-    .await
-    .expect("authorization is granted");
-
-    let refused = request_and_admit(
-        &database,
-        target_ref,
-        "deep_archive",
-        "领域闸门证明",
-        "person",
-    )
-    .await;
-    assert!(
-        matches!(
-            refused,
-            Err(linggan_evidence::AcquisitionChainError::TargetDomainUnassigned)
-        ),
-        "未归属领域的目标不该开始采集，实际：{refused:?}"
-    );
-
-    // 授权是齐的——挡住它的必须是领域这一项，不是别的条件顺带拦下的。
-    let requests: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM collection_acquisition_request WHERE target_ref=$1",
-    )
-    .bind(target_ref)
-    .fetch_one(database.pool())
-    .await
-    .unwrap();
-    assert_eq!(requests, 0, "连请求都不该落下，它还没到该被审的那一步");
-
-    // 指定领域之后，同一个请求就该通过——证明闸挡的确实只是「没归属」。
-    sqlx::query("UPDATE collection_observation_target SET domain_ref=$2::uuid WHERE target_ref=$1")
-        .bind(target_ref)
-        .bind(EXTERNAL_DOMAIN)
-        .execute(database.pool())
-        .await
-        .expect("domain is assigned");
-    let admitted = request_and_admit(
-        &database,
-        target_ref,
-        "deep_archive",
-        "领域闸门证明",
-        "person",
-    )
-    .await
-    .expect("the same request now survives admission");
-    assert!(
-        admitted.work_order_ref.is_some(),
-        "补上领域之后应当放行，实际：{:?} / {}",
-        admitted.outcome,
-        admitted.reason_code
     );
 }

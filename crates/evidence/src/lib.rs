@@ -10,11 +10,13 @@ mod collection_task_read;
 mod content_reobservation;
 mod creator_lifecycle;
 mod cross_industry_admission;
+mod cross_industry_observation;
 pub mod cross_industry_read;
 mod directory_boundary;
 mod dispatch;
 mod execution_station;
 mod ingress;
+mod keyword_archive_detail;
 mod local_discovery;
 mod local_producer;
 mod material_admission;
@@ -34,10 +36,17 @@ mod material_query_sql;
 mod material_social_read;
 mod material_storage_key;
 mod media_acquisition;
+pub use keyword_archive_detail::{
+    KeywordDetailAdvance, advance_keyword_archive_detail, keyword_targets_pending_detail,
+};
+
+pub use queue_position::{TargetQueuePosition, read_target_queue_positions};
+
 pub mod observation_domain;
 mod observation_summary;
 mod patrol_scheduler;
 mod producer_runtime;
+mod queue_position;
 mod receipt;
 mod runtime_capacity;
 mod station_read;
