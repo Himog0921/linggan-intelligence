@@ -833,18 +833,32 @@ fn second_bar(
                 None => "/collection/targets?sort=last".to_owned(),
             };
             // 新目标归到当前正在看的领域。站在「考研自习」下建的目标落进 ADHD，是个
-            // 无声的错误——它会让一条外部领域的采集把材料写进证据侧。看全部领域时不带，
-            // 由服务端按本领域处置（那是既有行为）。
+            // 无声的错误——它会让一条外部领域的采集把材料写进证据侧。
+            //
+            // **看「全部领域」时不再静默按本领域处置**：那正是 2026-09-11 出事的路径，
+            // 两个本该做跨行业参照的关键词被归进本领域，413 条笔记直接写进了 ADHD
+            // 证据库。领域是目标的必要属性，不能由「当前在看哪个领域」推断——这里改为
+            // 停用新建并说明原因，服务端另有一道同样的闸。
+            //
             // 这里是属性值而不是地址，走 HTML 转义。两种编码不能混用：把 %XX 塞进
             // value 会让提交回来的领域认不出来。
+            let domain_chosen = matches!(
+                nav_domain,
+                Some(domain) if domain != linggan_evidence::observation_domain::ALL_DOMAINS
+            );
             let domain_field = match nav_domain {
-                Some(domain) if domain != linggan_evidence::observation_domain::ALL_DOMAINS => {
-                    format!(
-                        r#"<input type="hidden" name="domain" value="{}">"#,
-                        escape(domain)
-                    )
-                }
+                Some(domain) if domain_chosen => format!(
+                    r#"<input type="hidden" name="domain" value="{}">"#,
+                    escape(domain)
+                ),
                 _ => String::new(),
+            };
+            let create_disabled = if domain_chosen { "" } else { " disabled" };
+            let create_hint = if domain_chosen {
+                String::new()
+            } else {
+                // 复用既有的反馈样式，不为一句提示另造一个没有定义的类名。
+                r#"<p class="c-src-feedback c-src-feedback-warn" role="note"><b>先选领域再新建</b>目标归哪个领域，决定它采回来的材料进本行业证据库还是跨行业参照语料。这一项不做推断——猜错会让参照物混进证据，而且之后任何读证据的地方都不会再提醒你。</p>"#.to_owned()
             };
             format!(
                 r#"<div class="c-toolbar">
@@ -867,9 +881,10 @@ fn second_bar(
               <label class="c-tg-field c-tg-field-query"><span class="v7-sr-only">主页链接、ID 或关键词</span><input name="identity" required maxlength="120"
                      aria-label="创作者主页链接、ID 或关键词" placeholder="粘贴主页链接、ID 或输入关键词" /></label>
               <button class="c-btn-secondary c-tg-batch-open" type="button" data-target-batch-open aria-controls="target-batch-modal" disabled><span data-target-batch-label>批量编辑</span><strong data-target-selected-count hidden>0</strong></button>
-              <button class="c-btn-primary" type="submit">＋ 新建目标</button>
+              <button class="c-btn-primary" type="submit"{create_disabled}>＋ 新建目标</button>
             </form>
           </div>
+          {create_hint}
         </div>"#,
                 target_filters = target_filter_tabs(filter, counts, nav_domain),
             )

@@ -202,10 +202,20 @@ fn action_feedback_markup(error: Option<&str>) -> String {
         return String::new();
     };
     let (class, heading, explanation) = match code {
+        "target_domain_unassigned" => (
+            "c-src-feedback c-src-feedback-warn",
+            "这个目标还没归属领域",
+            "采集没有开始。领域决定这个目标采回来的材料写进本行业证据库还是跨行业参照语料，没有它就只能靠推断，而推断错会让参照物混进证据。请先给这个目标指定领域，再发起采集——不是等状态流转，也不是服务出了问题。",
+        ),
+        "target_domain_required" => (
+            "c-src-feedback c-src-feedback-warn",
+            "还没选领域",
+            "新建观察目标前要先选定它属于哪个领域。领域决定这个目标采回来的材料进本行业证据库还是跨行业参照语料——选错会让参照物混进证据，而且之后任何读证据的地方都不会再提醒你，所以这一项不做推断。",
+        ),
         "archive_requested" => (
             "c-src-feedback c-src-feedback-ok",
             "建档已入队",
-            "已记录这次建立档案请求。系统会先获取主页作品链接（最多 200 篇或主页实际结束），再逐篇补齐详情；目录和详情只会在接纳真实回执后更新。",
+            "已记录这次建立档案请求。系统会先取回作品链接（创作者取主页目录，关键词按排序翻搜索面），再逐篇补齐详情；目录和详情只会在接纳真实回执后更新。执行要等一个空闲工位，可能需要几分钟。",
         ),
         "archive_merge" => (
             "c-src-feedback c-src-feedback-warn",
@@ -1647,5 +1657,56 @@ mod keyword_archive_action_tests {
             action(&keyword("paused", false), KeywordArchiveRead::Known(false)),
             TargetPrimaryAction::OpenPatrol("恢复巡查")
         );
+    }
+}
+
+#[cfg(test)]
+mod domain_gate_tests {
+    use super::*;
+
+    /// 领域必须由人选定，不能由「当前在看哪个领域」推断。
+    ///
+    /// 2026-09-11 真实发生：两个本想做跨行业参照的关键词在「全部领域」视图下建出来，
+    /// 被静默归进本领域，413 条笔记直接写进了 ADHD 证据库，而跨行业语料表一条都没有。
+    /// 参照物一旦混进证据，之后任何读证据的地方都不会再提醒。
+    #[test]
+    fn the_missing_domain_notice_explains_what_the_choice_decides() {
+        let markup = action_feedback_markup(Some("target_domain_required"));
+        assert!(markup.contains("还没选领域"));
+        // 提示必须说清后果，而不只是「请选择」——不然人不知道为什么这一项不能省。
+        assert!(markup.contains("证据库"));
+        assert!(markup.contains("跨行业"));
+    }
+
+    /// 建档提示此前只说「主页作品链接」，那是创作者的说法；关键词翻的是搜索面。
+    #[test]
+    fn the_archive_notice_covers_both_kinds_of_target() {
+        let markup = action_feedback_markup(Some("archive_requested"));
+        assert!(markup.contains("创作者取主页目录"));
+        assert!(markup.contains("关键词按排序翻搜索面"));
+        // 执行要排队等空闲工位，实测等过 213 秒。不说这件事，人会以为点了没反应。
+        assert!(markup.contains("空闲工位"));
+    }
+}
+
+#[cfg(test)]
+mod domain_unassigned_notice_tests {
+    use super::*;
+
+    /// 「缺领域」必须说清是缺领域，并给出下一步。
+    ///
+    /// 它此前在三条真实路径上被吞成别的意思：人工立即观察显示「数据库不可用」（人会去
+    /// 查服务是不是挂了）、关键词建档显示「上一次动作没有完成」（信息量最低的兜底）、
+    /// 创作者建档显示「当前状态不允许再次发起」（**会把人引向一个永远不会到来的状态
+    /// 流转**）。三条都不是真的，而这一轮要解决的恰恰就是这类看不懂。
+    #[test]
+    fn the_unassigned_domain_notice_names_the_cause_and_the_next_step() {
+        let markup = action_feedback_markup(Some("target_domain_unassigned"));
+        assert!(markup.contains("还没归属领域"));
+        assert!(markup.contains("采集没有开始"), "要先说清什么都没发生");
+        assert!(markup.contains("先给这个目标指定领域"), "要给出下一步");
+        // 明确排除两条错误的归因，免得再被读成状态问题或故障。
+        assert!(markup.contains("不是等状态流转"));
+        assert!(markup.contains("不是服务出了问题"));
     }
 }

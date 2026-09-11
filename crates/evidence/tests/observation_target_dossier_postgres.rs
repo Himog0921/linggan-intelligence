@@ -1500,8 +1500,8 @@ async fn seed_creator_target(database: &Database, identity_key: &str) -> Uuid {
     let target_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_observation_target \
-           (target_ref,platform,target_kind,identity_key,display_name,source) \
-         VALUES ($1,'xhs','creator',$2,$2,'manual')",
+           (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
+         VALUES ($1,'xhs','creator',$2,$2,'manual','00000000-0000-4000-8000-000000000001')",
     )
     .bind(target_ref)
     .bind(identity_key)
