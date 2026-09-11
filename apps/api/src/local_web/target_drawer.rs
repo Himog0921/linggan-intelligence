@@ -333,6 +333,20 @@ pub(crate) fn target_primary_action(
     keyword_archive: KeywordArchiveRead,
 ) -> TargetPrimaryAction {
     if !is_creator {
+        // 详情还欠着就先补详情，**排在「查看结果」之前**——与创作者那一路同一个次序，
+        // 那边 `needs_details` 同样排在「查看档案」前面。
+        //
+        // 这一条不排前面，整个第二段就够不着：关键词一旦开始巡检就直接走「查看结果」，
+        // 补详情的入口从此消失。而巡检每周带回来的新笔记同样只有链接——不补详情，这个词
+        // 的面貌就永远停在列表面能看到的那一层（标题、封面、点赞），正文、发布时间、评论
+        // 一样都没有。
+        // 已弃用的目标只提供查看，任何采集动作都不该来打断它——与创作者那一路一致。
+        if target.lifecycle_state == "dismissed" {
+            return TargetPrimaryAction::ViewKeyword;
+        }
+        if keyword_archive == KeywordArchiveRead::DetailPending {
+            return TargetPrimaryAction::ContinueArchive;
+        }
         if target.monitoring_enabled && target.lifecycle_state != "paused" {
             return TargetPrimaryAction::ViewKeyword;
         }
