@@ -103,9 +103,19 @@ pub async fn read_target_observation_summaries(
              WHERE work_order.lane='patrol' \
                AND (work_order.queue_state='queued' OR (lease.released_at IS NULL AND lease.expires_at>scope_001_now())) \
          ), blocked_patrol AS ( \
+             -- 「受阻」说的是**现在有事卡着、需要人看一眼**，不是「历史上重试过」。
+             -- 派发失败会自动重排队（failure_disposition='requeued'），失败计数是那次
+             -- 重试的留痕，会永久留在工单上；只看它 >0 就把重试后成功的工单也判成受阻，
+             -- 而且**永不恢复**——这个标记因此从来没有正确工作过：库里有失败计数的
+             -- 工单全部已经 completed 或 cancelled，一张卡住的都没有，界面却一直红着。
+             -- 一个永远亮的警告等于没有警告，真正卡住时反而看不出来。
+             -- 只有仍在队列里或已租出未完成的工单，才谈得上受阻。其中 'queued' 这一支
+             -- 实际总被 Running 抢先（active_patrol 也认这个状态、判定顺序又在前），
+             -- 留着它是为了把「未结束」这个判据说完整，不是它在起作用。
              SELECT DISTINCT selected.target_ref \
              FROM selected JOIN collection_work_order work_order USING(target_ref) \
              WHERE work_order.lane='patrol' AND work_order.dispatch_failure_count>0 \
+               AND work_order.queue_state IN ('queued','leased') \
          ) \
          SELECT selected.target_ref,latest_counts.hits,latest_counts.newly_discovered, \
                 selected.monitoring_enabled,active_patrol.target_ref IS NOT NULL, \

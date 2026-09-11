@@ -5,10 +5,11 @@ use linggan_evidence::{
     ExplicitAccountEligibilitySignal, InstallationCheckIn, MAXIMUM_MONITOR_INTERVAL_SECONDS,
     MINIMUM_MONITOR_INTERVAL_SECONDS, MonitorCommandActor, MonitorCommandKind,
     MonitorCommandOutcomeKind, MonitorRuleCommand, MonitorRuleDraft, MonitorRuleMode,
-    TargetDeletionOutcome, activate_installation_credential, apply_monitor_rule_command,
-    bind_observation_account, check_in_installation, collection_control_schema_is_ready,
-    decide_dispatch, delete_observation_target, dynamic_cadence, grant_authorization,
-    open_claim_window, read_capacity, read_target_deletion_preview, register_station,
+    PatrolReadState, TargetDeletionOutcome, activate_installation_credential,
+    apply_monitor_rule_command, bind_observation_account, check_in_installation,
+    collection_control_schema_is_ready, decide_dispatch, delete_observation_target,
+    dynamic_cadence, grant_authorization, list_targets, open_claim_window, read_capacity,
+    read_target_deletion_preview, read_target_observation_summaries, register_station,
     release_work_order_lease, rename_station, report_account_eligibility,
     report_claimed_task_account_eligibility, request_and_admit, retire_station,
     rotate_installation_credential, set_station_accepting, store_pending_target,
@@ -2066,6 +2067,153 @@ async fn assert_capacity_reason(database: &Database, expected: &str) {
     if expected == "available" {
         assert!(matches!(capacity, Capacity::Available { .. }));
     }
+}
+
+/// 把一个目标置成「正在监控」，并给它一张 patrol 工单。
+///
+/// `queue_state` 与 `failure_count` 是这组用例真正要摆布的两个变量。
+async fn seed_monitored_patrol_order(
+    database: &Database,
+    identity_key: &str,
+    queue_state: &str,
+    failure_count: i32,
+) -> Uuid {
+    let target_ref = seed_target(database, "keyword", "pending_decision", identity_key).await;
+    let rule_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_monitor_rule_revision              (rule_revision_ref,target_ref,revision,mode,automatic_enabled,timezone,               run_on_weekdays,run_on_weekends,all_day,fixed_interval_seconds,               fallback_interval_seconds,surface_key,task_contract_version,rule_payload_digest,created_by)          VALUES ($1,$2,1,'fixed',true,'Asia/Shanghai',true,true,true,86400,86400,                  'keyword_search','linggan.producer.task-spec.v1',repeat('a',64),'person')",
+    )
+    .bind(rule_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("monitor rule fixture is stored");
+    // monitoring_enabled 只有挂上活跃规则才允许为真（CHECK 强制）。
+    sqlx::query(
+        "UPDATE collection_observation_target          SET active_monitor_rule_revision_ref=$2,monitoring_enabled=true WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .bind(rule_ref)
+    .execute(database.pool())
+    .await
+    .expect("target is put under monitoring");
+
+    let request_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_acquisition_request (request_ref,target_ref,lane,purpose,requested_by)          VALUES ($1,$2,'patrol','patrol blocked state proof','person')",
+    )
+    .bind(request_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("request fixture is stored");
+    let decision_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_admission_decision (decision_ref,request_ref,outcome,reason_code,target_ref)          VALUES ($1,$2,'defer','patrol_blocked_state_proof',$3)",
+    )
+    .bind(decision_ref)
+    .bind(request_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("decision fixture is stored");
+    let work_order_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_work_order              (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions,               queue_state,scheduled_for,dispatch_failure_count)          VALUES ($1,$2,$3,'patrol',200,'[\"maximum_quota\"]'::jsonb,$4,scope_001_now(),$5)",
+    )
+    .bind(work_order_ref)
+    .bind(decision_ref)
+    .bind(target_ref)
+    .bind(queue_state)
+    .bind(failure_count)
+    .execute(database.pool())
+    .await
+    .expect("patrol work order fixture is stored");
+
+    // `leased` 必须配一行**真实且已过期**的租约，否则造出来的是生产不可能出现的状态：
+    // 置位 queue_state 与插入租约在同一事务里发生，失败处理也会同事务打回 queued 并释放。
+    // 少了这一行，`active_patrol` 的 LEFT JOIN 全为 NULL，判断会从「租约已过期」那条分支
+    // 旁落到「根本没有租约」上——于是租约到期比较写反了也照样绿。
+    if queue_state == "leased" {
+        let station_ref = register_station(database, &format!("受阻证明工位 {identity_key}"), 200)
+            .await
+            .expect("station fixture is stored");
+        sqlx::query(
+            "INSERT INTO collection_work_order_lease \
+                 (lease_ref,work_order_ref,station_ref,capture_identity,issued_at,expires_at) \
+             VALUES ($1,$2,$3,'{}'::jsonb, \
+                     scope_001_now()-interval '2 hours',scope_001_now()-interval '1 hour')",
+        )
+        .bind(Uuid::new_v4())
+        .bind(work_order_ref)
+        .bind(station_ref)
+        .execute(database.pool())
+        .await
+        .expect("expired lease fixture is stored");
+    }
+    target_ref
+}
+
+/// 派发失败会自动重排队，失败计数是那次重试的留痕、永久留在工单上。
+///
+/// 只看计数 >0 就判「受阻」，会把**重试后已经成功**的工单也标成受阻，而且永不恢复。
+/// 2026-09-11 真实复现：一次关键词巡检两次 `page_timeout` 后第三次成功、20 条全部入库，
+/// 目标却在列表上显示「受阻」。库里所有带失败计数的工单当时全是 completed/cancelled，
+/// 一张卡住的都没有——**这个标记从来没有正确工作过**，而一个永远亮的警告等于没有警告。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_patrol_that_recovered_after_retries_is_not_reported_as_blocked() {
+    let database = proof_database("patrol_blocked_after_recovery").await;
+    let recovered =
+        seed_monitored_patrol_order(&database, "patrol-recovered", "completed", 2).await;
+    let cancelled =
+        seed_monitored_patrol_order(&database, "patrol-cancelled", "cancelled", 1).await;
+
+    // 摘要按目标对象读，所以先把这两个目标从列表里取回来。
+    let targets = list_targets(&database, None, None, 50)
+        .await
+        .expect("targets are listable");
+    let summaries = read_target_observation_summaries(&database, &targets)
+        .await
+        .expect("observation summaries are readable");
+    assert_ne!(
+        summaries
+            .get(&recovered)
+            .map(|summary| summary.patrol_state),
+        Some(PatrolReadState::Blocked),
+        "重试后已完成的巡检不是受阻"
+    );
+    assert_ne!(
+        summaries
+            .get(&cancelled)
+            .map(|summary| summary.patrol_state),
+        Some(PatrolReadState::Blocked),
+        "人为取消的工单不是受阻"
+    );
+}
+
+/// 真卡住时仍然要报受阻：工单还没结束、**租约已签发但已过期**、而且确实派发失败过。
+///
+/// 租约必须真实存在且过期，不能只把工单标成 `leased` 就算数——后者是生产不可能出现的
+/// 状态，会让「租约到期比较」这条分支完全测不到（独立审核用反向比较实测过：不补租约时
+/// 这条用例照样绿）。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn an_unfinished_patrol_that_lost_its_lease_after_failures_is_still_blocked() {
+    let database = proof_database("patrol_blocked_still_stuck").await;
+    let stuck = seed_monitored_patrol_order(&database, "patrol-stuck", "leased", 3).await;
+
+    let targets = list_targets(&database, None, None, 50)
+        .await
+        .expect("targets are listable");
+    let summaries = read_target_observation_summaries(&database, &targets)
+        .await
+        .expect("observation summaries are readable");
+    assert_eq!(
+        summaries.get(&stuck).map(|summary| summary.patrol_state),
+        Some(PatrolReadState::Blocked),
+        "工单没结束、租约没了、又失败过，就是真的卡住了"
+    );
 }
 
 async fn seed_target(
