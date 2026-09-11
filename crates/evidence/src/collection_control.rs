@@ -6,7 +6,9 @@
 //! page body, or a free-form platform error.
 
 use crate::acquisition_chain::{AcquisitionChainError, request_and_admit_in_transaction};
-use crate::directory_boundary::{directory_proven_sql, profile_read_complete_sql};
+use crate::directory_boundary::{
+    directory_proven_sql, profile_read_complete_sql, surface_scan_complete_sql,
+};
 use crate::station_read::station_daily_note_usage_in;
 use crate::work_order_lease::LeaseError;
 use linggan_contracts::{Capacity, CapacityReasonCode};
@@ -2153,6 +2155,86 @@ fn closed_monitor_reason(value: &str) -> &'static str {
         "capacity_unknown" => "capacity_unknown",
         _ => "database_unavailable",
     }
+}
+
+/// 「一轮合格的关键词建档」这条判据本身。
+///
+/// 单目标与批量两个入口共用它，避免同一件事在两处各写一遍、日后各自漂移。
+/// `$1` 是目标引用（单目标用 `=`，批量用 `= ANY`，由调用方拼）。
+macro_rules! keyword_baseline_sql {
+    ($target_predicate:expr) => {
+        concat!(
+            "SELECT DISTINCT work_order.target_ref FROM collection_work_order work_order \
+             JOIN collection_work_order_lease lease USING(work_order_ref) \
+             JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+             JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+             JOIN linggan_runtime_capture_package package ON package.task_id=lease_task.task_id \
+             JOIN linggan_runtime_submission_receipt receipt ON receipt.package_ref=package.package_ref \
+             CROSS JOIN LATERAL jsonb_array_elements( \
+               CASE WHEN jsonb_typeof(package.coverage->'layers')='array' \
+                    THEN package.coverage->'layers' ELSE '[]'::jsonb END) layer \
+             WHERE ",
+            $target_predicate,
+            " AND work_order.lane='deep_archive' \
+               AND package.package_kind='discovery_search' \
+               AND receipt.material_admission='ACCEPTED' \
+               AND receipt.execution_effect='COMPLETED_LIVE_STEP' \
+               AND layer->>'capability'='discovery_search' \
+               AND ",
+            surface_scan_complete_sql!(),
+            " \
+               AND NOT EXISTS (SELECT 1 FROM linggan_runtime_record_disposition disposition \
+                               WHERE disposition.package_ref=package.package_ref \
+                                 AND disposition.disposition='quarantined')",
+        )
+    };
+}
+
+/// 一批关键词各自**建过档没有**。
+///
+/// 列表页一次要判断很多个目标，逐个查会变成 N+1。返回集合里出现的才是已建档；
+/// 没出现的是「还没建过」，不是「读不到」——读不到会以 `Err` 的形式浮上来，由调用方
+/// 决定怎么如实呈现，而不是在这里默默压成 false。
+pub async fn keyword_baselines_qualified(
+    database: &Database,
+    target_refs: &[Uuid],
+) -> Result<std::collections::HashSet<Uuid>, sqlx::Error> {
+    if target_refs.is_empty() {
+        return Ok(std::collections::HashSet::new());
+    }
+    let rows: Vec<Uuid> =
+        sqlx::query_scalar(keyword_baseline_sql!("work_order.target_ref=ANY($1)"))
+            .bind(target_refs)
+            .fetch_all(database.pool())
+            .await?;
+    Ok(rows.into_iter().collect())
+}
+
+/// 这个关键词**建过档没有**。
+///
+/// 关键词没有建档生命周期：`0042` 用 CHECK 禁止它进入 `archiving`/`archived`，理由写在
+/// 那条迁移里——「Keyword observation has a monitor lifecycle, not a creator archive
+/// lifecycle」。所以这件事不存成状态，而是**每次读的时候从证据里查出来**，与本仓库
+/// 对生命周期的一贯理解一致：生命周期点不是第二份材料事实，是读取时的组合。
+///
+/// 要证明的事与博主基线相同——「这一轮把该翻的表面翻完了，而且没有一条材料被隔离」
+/// ——只是证据长在不同的包上：博主看 `author_profile`，关键词看 `discovery_search`。
+///
+/// **采完就算不够**：要么把这个词的搜索面翻到底，要么采满了工单给的篇数
+/// （`surface_scan_complete_sql!`）。中途因为失败或没尝试而停下的一轮不算建档——把它
+/// 算作完成，等于宣布一个没挖完的词已经建好档，之后所有基于它的判断都建立在一个不完整
+/// 的底座上，而且没人看得出来。
+pub async fn keyword_baseline_qualified(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+) -> Result<bool, sqlx::Error> {
+    Ok(
+        sqlx::query_scalar::<_, Uuid>(keyword_baseline_sql!("work_order.target_ref=$1"))
+            .bind(target_ref)
+            .fetch_optional(&mut **transaction)
+            .await?
+            .is_some(),
+    )
 }
 
 pub(crate) async fn creator_baseline_qualified(

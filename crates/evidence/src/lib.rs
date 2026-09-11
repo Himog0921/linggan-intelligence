@@ -70,7 +70,8 @@ pub use collection_control::{
     MonitorCommandKind, MonitorCommandOutcomeKind, MonitorRuleCommand, MonitorRuleCommandError,
     MonitorRuleCommandReceipt, MonitorRuleDraft, MonitorRuleMode, activate_installation_credential,
     apply_manual_observe_command, apply_monitor_rule_command, bind_observation_account,
-    collection_control_schema_is_ready, dynamic_cadence, report_account_eligibility,
+    collection_control_schema_is_ready, dynamic_cadence, keyword_baseline_qualified,
+    keyword_baselines_qualified, report_account_eligibility,
     report_claimed_task_account_eligibility, rotate_installation_credential, set_station_accepting,
     toggle_target_patrol, version_at_least,
 };

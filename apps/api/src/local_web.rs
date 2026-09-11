@@ -68,8 +68,9 @@ use linggan_evidence::{
     bind_observation_account, check_in_installation, claim_installation, claim_media_acquisition,
     claim_media_upload_finalize, close_claim_window, complete_media_upload, count_targets,
     create_manual_task, create_producer_task, delete_observation_target, dispatch_schema_is_ready,
-    grant_authorization, ingest_discovery_package, issue_work_order_lease, list_targets,
-    list_targets_in_state, local_discovery_schema_is_ready, local_producer_schema_is_ready,
+    grant_authorization, ingest_discovery_package, issue_work_order_lease,
+    keyword_baselines_qualified, list_targets, list_targets_in_state,
+    local_discovery_schema_is_ready, local_producer_schema_is_ready,
     media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_archive_completeness, read_blocked_materials,
     read_collection_task_timeline, read_creator_directory, read_creator_lifecycle,
@@ -2623,6 +2624,17 @@ async fn collection_targets(
             let observation = read_target_observation_summaries(database, &targets)
                 .await
                 .ok();
+            // 关键词「建过档没有」是查出来的（它不能存成生命周期状态），所以这里批量问
+            // 一次，而不是每行查一次。查不到时传 None——页面据此显示「读不到」而不是
+            // 催人去做一件可能已经做过的事。
+            let keyword_refs = targets
+                .iter()
+                .filter(|target| target.target_kind == "keyword")
+                .map(|target| target.target_ref)
+                .collect::<Vec<_>>();
+            let keyword_archives = keyword_baselines_qualified(database, &keyword_refs)
+                .await
+                .ok();
             collection_targets_view::render_stored_targets_with_observation(
                 &base,
                 &targets,
@@ -2632,6 +2644,7 @@ async fn collection_targets(
                 params.error.as_deref(),
                 deletion_preview.as_ref(),
                 deletion_target,
+                keyword_archives.as_ref(),
                 list_context,
             )
         }
@@ -4018,6 +4031,43 @@ async fn collection_target_deep_archive(
             Some("read_model_not_connected"),
         ));
     };
+    // 建档对两类目标是同一个用户意图，走的却必须是两条链。
+    //
+    // 创作者走**渐进式建档**：作品数可能上千，要分批、可续跑，并且需要一份足够大的授权。
+    // 关键词没有这回事——它的建档就是把搜索面按点赞翻一遍，一轮就该结束；把它塞进渐进式
+    // 那条链，只会因为「拿不到 200 篇的渐进授权」而被拒，而那条拒绝对关键词毫无意义。
+    let target_kind: Option<String> = sqlx::query_scalar(
+        "SELECT target_kind FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(form.row_target_ref)
+    .fetch_optional(database.pool())
+    .await
+    .ok()
+    .flatten();
+    if target_kind.as_deref() == Some("keyword") {
+        let requested = linggan_evidence::request_and_admit(
+            database,
+            form.row_target_ref,
+            "deep_archive",
+            "从观察目标页发起关键词历史建档",
+            "person",
+        )
+        .await;
+        return Redirect::to(&match requested {
+            Ok(outcome) if outcome.work_order_ref.is_some() => {
+                target_archive_return_path(&form, Some("archive_requested"))
+            }
+            // 准入没放行时**把它的结论原样带回去**，与创作者那一路同一种处理：
+            // refuse（没有授权）、defer（暂时没有执行资源）、merge（已经有在途的同类
+            // 工作）后果完全不同。压成一句「没有授权」会让人去申请一份根本不缺的授权，
+            // 而真实情况——已经在建了——完全没有传达。
+            Ok(outcome) => target_archive_return_path(
+                &form,
+                Some(&format!("archive_{}", outcome.outcome.code())),
+            ),
+            Err(_) => target_archive_return_path(&form, Some("archive_unavailable")),
+        });
+    }
     let outcome = request_progressive_archive(
         database,
         form.row_target_ref,

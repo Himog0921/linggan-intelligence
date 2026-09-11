@@ -308,18 +308,38 @@ pub(crate) enum TargetPrimaryAction {
     ViewKeyword,
 }
 
+/// 一个关键词**建过档没有**。
+///
+/// 关键词不能进入 `archiving`/`archived`（`0042` 的 CHECK），所以这件事是查出来的，
+/// 不是目标行上的一个状态字段。读不到时必须说「读不到」而不是当成「没建过」——后者会
+/// 让页面催人去做一件可能已经做过的事。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum KeywordArchiveRead {
+    /// 这一批目标的建档情况没读出来（查询失败或表还不在）。
+    Unavailable,
+    Known(bool),
+}
+
 pub(crate) fn target_primary_action(
     target: &ObservationTarget,
     is_creator: bool,
     archive: TargetArchiveRead<'_>,
+    keyword_archive: KeywordArchiveRead,
 ) -> TargetPrimaryAction {
     if !is_creator {
-        return if target.monitoring_enabled && target.lifecycle_state != "paused" {
-            TargetPrimaryAction::ViewKeyword
-        } else if target.lifecycle_state == "paused" {
-            TargetPrimaryAction::OpenPatrol("恢复巡查")
-        } else {
-            TargetPrimaryAction::OpenPatrol("设置巡查")
+        if target.monitoring_enabled && target.lifecycle_state != "paused" {
+            return TargetPrimaryAction::ViewKeyword;
+        }
+        if target.lifecycle_state == "paused" {
+            return TargetPrimaryAction::OpenPatrol("恢复巡查");
+        }
+        // 还没开始监控的关键词：先问它建过档没有。历史高赞是这个词的底座，没有底座就
+        // 开始每周看增量，等于在一张空表上数新增。
+        return match keyword_archive {
+            KeywordArchiveRead::Known(false) => TargetPrimaryAction::EstablishArchive,
+            KeywordArchiveRead::Known(true) => TargetPrimaryAction::OpenPatrol("开始每周巡检"),
+            // 读不到就不催也不改口径，维持原本的入口。
+            KeywordArchiveRead::Unavailable => TargetPrimaryAction::OpenPatrol("设置巡查"),
         };
     }
     let archive = match archive {
@@ -746,7 +766,10 @@ fn drawer_primary_action(
     is_creator: bool,
     list_context: TargetListContext<'_>,
 ) -> String {
-    let action = target_primary_action(target, is_creator, archive);
+    // 抽屉是另一个表面，本轮不接建档态：传 `Unavailable` 让它维持原本的入口，
+    // 而不是在这里顺手改一个不在本次范围内的页面。
+    let action =
+        target_primary_action(target, is_creator, archive, KeywordArchiveRead::Unavailable);
     match action {
         TargetPrimaryAction::EstablishArchive
         | TargetPrimaryAction::RebuildDirectory
@@ -1142,7 +1165,7 @@ fn overview_tab(
         TargetInspectorView::NotRead => {}
     }
     if !is_creator {
-        let action = target_primary_action(target, false, archive);
+        let action = target_primary_action(target, false, archive, KeywordArchiveRead::Unavailable);
         let (action_title, action_note) = required_action_copy(action);
         let action_control = required_action_control(target, archive, false, list_context);
         return format!(
@@ -1176,7 +1199,7 @@ fn overview_tab(
         TargetArchiveRead::Unavailable => "当前读不到".to_owned(),
         TargetArchiveRead::Known(_) => "尚未取得".to_owned(),
     };
-    let action = target_primary_action(target, true, archive);
+    let action = target_primary_action(target, true, archive, KeywordArchiveRead::Unavailable);
     let (archive_state, execution_state) = current_system_copy(archive);
     let (_, patrol_state) = lifecycle_patrol_copy(target);
     let abnormal = match archive {
@@ -1608,7 +1631,7 @@ fn required_action_control(
     is_creator: bool,
     list_context: TargetListContext<'_>,
 ) -> String {
-    match target_primary_action(target, is_creator, archive) {
+    match target_primary_action(target, is_creator, archive, KeywordArchiveRead::Unavailable) {
         TargetPrimaryAction::EstablishArchive
         | TargetPrimaryAction::RebuildDirectory
         | TargetPrimaryAction::ContinueArchive
@@ -2108,7 +2131,8 @@ fn archive_tab(
         | LifecycleView::NotRead { .. }
         | LifecycleView::QueryInvalid => "当前读不到".to_owned(),
     };
-    let primary_action = target_primary_action(target, true, archive);
+    let primary_action =
+        target_primary_action(target, true, archive, KeywordArchiveRead::Unavailable);
     let problems = match (archive.value(), primary_action) {
         (Some(value), _) if value.has_actionable_problems() => {
             let quarantined = if value.quarantined > 0 {
@@ -2380,7 +2404,8 @@ mod tests {
             target_primary_action(
                 &archiving_target,
                 true,
-                TargetArchiveRead::Known(Some(&established))
+                TargetArchiveRead::Known(Some(&established)),
+                KeywordArchiveRead::Unavailable
             ),
             TargetPrimaryAction::ViewArchiveProblems,
             "equal counters do not authorize patrol while the bounded baseline is still archiving"

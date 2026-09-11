@@ -8,12 +8,10 @@
 mod fixture;
 
 use fixture::proof_database;
-use linggan_contracts::{
-    parse_producer_attempt, parse_producer_submission, parse_producer_task_spec,
-};
+use linggan_contracts::{parse_producer_attempt, parse_producer_submission};
 use linggan_evidence::{
-    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, RuntimeTaskOutcome, create_producer_task,
-    register_station, start_producer_attempt, submit_producer_package,
+    RuntimeAttemptOutcome, RuntimeSubmissionOutcome, keyword_baseline_qualified, register_station,
+    request_and_admit, start_producer_attempt, submit_producer_package,
 };
 use linggan_storage_postgres::Database;
 use sqlx::Row;
@@ -29,13 +27,17 @@ const EXTERNAL_DOMAIN: &str = "00000000-0000-4000-8000-000000000002";
 async fn submit_external_package(
     database: &Database,
     identity_key: &str,
+    lane: &str,
     task_target: serde_json::Value,
     package_kind: &str,
     coverage: serde_json::Value,
+    // 搜索面的完整性判据读的是**包的 checkpoint**（`surfaceReceipt.stopReason`），
+    // 不是 coverage 里的 stoppedReason——两处都有 stop 字样，放错地方判据就悄悄落空。
+    checkpoint: serde_json::Value,
     records: Vec<serde_json::Value>,
 ) -> Uuid {
-    // 生命周期留在默认的 pending_decision：`monitoring` 另有「必须绑定监控规则」的约束，
-    // 而领域分流只看目标归属哪个领域，与它处在哪个生命周期无关。
+    // 生命周期一律留在默认的 pending_decision。关键词**不能**进入 archiving/archived
+    // （`0042` 的 CHECK），建档与否是读取时从证据里查出来的；领域分流也不看生命周期。
     let target_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_observation_target \
@@ -52,10 +54,11 @@ async fn submit_external_package(
     let request_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_acquisition_request (request_ref,target_ref,lane,purpose,requested_by) \
-         VALUES ($1,$2,'patrol','cross industry sampling proof','person')",
+         VALUES ($1,$2,$3,'cross industry sampling proof','person')",
     )
     .bind(request_ref)
     .bind(target_ref)
+    .bind(lane)
     .execute(database.pool())
     .await
     .expect("request fixture is stored");
@@ -66,10 +69,16 @@ async fn submit_external_package(
         "INSERT INTO collection_acquisition_authorization \
              (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
               allowed_task_templates,allowed_dispatch_lanes,max_work_units) \
-         VALUES ($1,'xhs','keyword','patrol','cross industry sampling proof','person', \
-                 scope_001_now()+interval '1 day',ARRAY['keyword_patrol'],ARRAY['scheduled'],200)",
+         VALUES ($1,'xhs','keyword',$2,'cross industry sampling proof','person', \
+                 scope_001_now()+interval '1 day', \
+                 CASE WHEN $2='deep_archive' THEN ARRAY['keyword_archive','material_deepening'] \
+                      ELSE ARRAY['keyword_patrol'] END, \
+                 CASE WHEN $2='deep_archive' THEN ARRAY['immediate','batch'] \
+                      ELSE ARRAY['immediate','scheduled'] END, \
+                 200)",
     )
     .bind(authorization_ref)
+    .bind(lane)
     .execute(database.pool())
     .await
     .expect("authorization fixture is stored");
@@ -91,11 +100,12 @@ async fn submit_external_package(
     let work_order_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_work_order (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions) \
-         VALUES ($1,$2,$3,'patrol',200,'[\"maximum_quota\"]'::jsonb)",
+         VALUES ($1,$2,$3,$4,200,'[\"maximum_quota\"]'::jsonb)",
     )
     .bind(work_order_ref)
     .bind(decision_ref)
     .bind(target_ref)
+    .bind(lane)
     .execute(database.pool())
     .await
     .expect("work order fixture is stored");
@@ -120,24 +130,51 @@ async fn submit_external_package(
     let task_id = Uuid::new_v4();
     let producer_instance_id = Uuid::new_v4();
     let attempt_id = Uuid::new_v4();
+    let installation_ref = Uuid::new_v4();
     let task = serde_json::json!({
-        "contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"manual",
+        "contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"scheduled",
         "platform":"xhs","pageType":"search_results","target":task_target,
         "capabilitiesRequested":[package_kind],"maximumQuota":200,
         "commentLimit":"not_requested","acquireMedia":"not_requested",
-        "riskPolicy":"local_trusted_user_initiated","stopConditions":["maximum_quota"]
+        // scheduled 任务必须配服务端签发的风险策略，本机自发那套只属于 manual。
+        "riskPolicy":"server_authorized_leased","stopConditions":["maximum_quota"]
     });
-    let task = parse_producer_task_spec(&task.to_string()).expect("task validates");
-    assert!(matches!(
-        create_producer_task(database, &task).await,
-        Ok(RuntimeTaskOutcome::Created { .. })
-    ));
+    // scheduled 任务只能由服务端派发产生——`create_producer_task` 会明确拒绝创建它们
+    // （`ScheduledTaskNotServerIssued`）。夹具因此直接写入这一行，与它已经在直接造
+    // 工单、租约、认领是同一层面的事。
+    let task_spec = task.to_string();
     sqlx::query(
-        "INSERT INTO collection_work_order_lease_task (lease_ref,task_id,sequence_no,execution_state,claimed_at,completed_at) \
-         VALUES ($1,$2,1,'completed',scope_001_now(),scope_001_now())",
+        "INSERT INTO linggan_runtime_task \
+             (task_id,task_spec_hash,task_spec,source,platform,page_type) \
+         VALUES ($1,encode(sha256(convert_to($2,'UTF8')),'hex'),$2::jsonb,'scheduled','xhs','search_results')",
+    )
+    .bind(task_id)
+    .bind(&task_spec)
+    .execute(database.pool())
+    .await
+    .expect("scheduled task fixture is stored");
+    // 认领必须落在一个**真实的安装**上，而且停在 in_progress：提交时要重新锁定这份执行
+    // 权限，只有锁得住才会写出 `COMPLETED_LIVE_STEP` 回执。夹具此前直接写 completed，
+    // 回执因此是 NOT_APPLICABLE——那种包不足以证明任何一轮建档完成过。
+    sqlx::query(
+        "INSERT INTO plugin_installation \
+             (installation_ref,install_key,station_ref,claim_kind,claimed_at,plugin_version) \
+         VALUES ($1,$2,$3,'person',scope_001_now(),'0.8.48')",
+    )
+    .bind(installation_ref)
+    .bind(producer_instance_id.to_string())
+    .bind(station_ref)
+    .execute(database.pool())
+    .await
+    .expect("installation fixture is stored");
+    sqlx::query(
+        "INSERT INTO collection_work_order_lease_task \
+             (lease_ref,task_id,sequence_no,execution_state,claimed_at,claimed_by_installation_ref) \
+         VALUES ($1,$2,1,'in_progress',scope_001_now(),$3)",
     )
     .bind(lease_ref)
     .bind(task_id)
+    .bind(installation_ref)
     .execute(database.pool())
     .await
     .expect("lease task fixture is stored");
@@ -161,7 +198,7 @@ async fn submit_external_package(
             "contractVersion":"linggan.producer.capture-package.v1","packageRef":package_ref,
             "packageKind":package_kind,"platform":"xhs",
             "observedAt":"2026-09-11T02:00:00Z","capturedAt":"2026-09-11T02:00:00Z",
-            "coverage":coverage,"records":records
+            "coverage":coverage,"checkpoint":checkpoint,"records":records
         }
     });
     let submission =
@@ -205,12 +242,14 @@ async fn a_keyword_search_records_its_sampling_provenance_and_signed_link() {
     submit_external_package(
         &database,
         "考研自习::most_liked",
+        "patrol",
         serde_json::json!({
             "query":"考研自习","ranking":"most_liked",
             "topByLikes":20,"scrollRounds":3,"publishedWithinDays":7
         }),
         "discovery_search",
         search_coverage("考研自习", 1),
+        serde_json::Value::Null,
         vec![discovery_card(
             "note-cross-1",
             "二战考研半夜被自习室赶出来了",
@@ -270,9 +309,11 @@ async fn a_later_round_without_provenance_keeps_the_recorded_one_intact() {
     submit_external_package(
         &database,
         "考研自习::comprehensive",
+        "patrol",
         serde_json::json!({"query":"考研自习","ranking":"comprehensive","topByLikes":20,"scrollRounds":3}),
         "discovery_search",
         search_coverage("考研自习", 1),
+        serde_json::Value::Null,
         vec![discovery_card("note-cross-2", "初稿标题", "1万", signed)],
     )
     .await;
@@ -281,6 +322,7 @@ async fn a_later_round_without_provenance_keeps_the_recorded_one_intact() {
     submit_external_package(
         &database,
         "考研自习::comprehensive::detail",
+        "patrol",
         serde_json::json!({"contentExternalId":"note-cross-2"}),
         "content_detail",
         serde_json::json!({
@@ -291,6 +333,7 @@ async fn a_later_round_without_provenance_keeps_the_recorded_one_intact() {
                 "stoppedReason":"known_set_complete"
             }]
         }),
+        serde_json::Value::Null,
         vec![serde_json::json!({
             "kind":"content_detail",
             "sourceObject":{"platform":"xhs","type":"content","externalId":"note-cross-2"},
@@ -348,9 +391,11 @@ async fn a_note_seen_on_two_boards_of_one_keyword_is_recorded_on_both() {
         submit_external_package(
             &database,
             identity,
+            "patrol",
             serde_json::json!({"query":"考研自习","ranking":ranking,"scrollRounds":3}),
             "discovery_search",
             search_coverage("考研自习", 1),
+            serde_json::Value::Null,
             vec![discovery_card(
                 "note-two-boards",
                 "两个榜都上了",
@@ -403,6 +448,7 @@ async fn a_detail_round_without_provenance_joins_no_board() {
     submit_external_package(
         &database,
         "考研自习::detail-only",
+        "patrol",
         serde_json::json!({"contentExternalId":"note-detail-only"}),
         "content_detail",
         serde_json::json!({
@@ -413,6 +459,7 @@ async fn a_detail_round_without_provenance_joins_no_board() {
                 "stoppedReason":"known_set_complete"
             }]
         }),
+        serde_json::Value::Null,
         vec![serde_json::json!({
             "kind":"content_detail",
             "sourceObject":{"platform":"xhs","type":"content","externalId":"note-detail-only"},
@@ -439,9 +486,11 @@ async fn a_board_row_cannot_claim_a_domain_its_sample_does_not_belong_to() {
     submit_external_package(
         &database,
         "考研自习::most_liked",
+        "patrol",
         serde_json::json!({"query":"考研自习","ranking":"most_liked","scrollRounds":3}),
         "discovery_search",
         search_coverage("考研自习", 1),
+        serde_json::Value::Null,
         vec![discovery_card(
             "note-domain-guard",
             "领域守卫",
@@ -470,4 +519,271 @@ async fn a_board_row_cannot_claim_a_domain_its_sample_does_not_belong_to() {
         wrong_domain.is_err(),
         "榜单留痕不得声称一个不属于该样本的领域"
     );
+}
+
+/// 一轮把搜索面翻到底、且没有一条材料被隔离的建档，应当被判为**已建档**。
+///
+/// 关键词没有建档生命周期（`0042` 的 CHECK 禁止它进入 `archiving`/`archived`），所以
+/// 「建过档没有」是读取时从证据里查出来的，不是存下来的状态。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_keyword_that_scanned_its_surface_to_the_bottom_counts_as_archived() {
+    let database = proof_database("keyword_archive_completes").await;
+    let target_ref =
+        submit_keyword_archive(&database, "考研自习::archive-ok", "bottom_confirmed", 1, 0).await;
+
+    let mut tx = database.pool().begin().await.unwrap();
+    let qualified = keyword_baseline_qualified(&mut tx, target_ref)
+        .await
+        .expect("baseline query runs");
+    tx.commit().await.unwrap();
+    assert!(qualified, "翻到底且无隔离的一轮就是建档");
+}
+
+/// 中途因为失败而停下的那一轮不算建档。
+///
+/// 把它算作完成，等于宣布一个没挖完的词已经建好档——之后所有基于它的判断都建立在一个
+/// 不完整的底座上，而且没人看得出来。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_keyword_archive_that_stopped_on_failures_does_not_count() {
+    let database = proof_database("keyword_archive_incomplete").await;
+    let target_ref = submit_keyword_archive(
+        &database,
+        "考研自习::archive-failed",
+        "bottom_confirmed",
+        1,
+        2,
+    )
+    .await;
+
+    let mut tx = database.pool().begin().await.unwrap();
+    let qualified = keyword_baseline_qualified(&mut tx, target_ref)
+        .await
+        .expect("baseline query runs");
+    tx.commit().await.unwrap();
+    assert!(!qualified, "有失败的一轮不是建档，还得接着补");
+}
+
+/// 没翻到底、也没采满配额的那一轮不算建档，哪怕一条失败都没有。
+///
+/// 这条与「有失败就不算」分开测是必要的：完整性判据读的是包的 `checkpoint`，而
+/// coverage 里另有一个名字很像的 `stoppedReason`。写这组用例时就踩过——停止原因放错了
+/// 地方，判据整条落空，负例却因为**失败数非零**照样变红，看上去一切正常。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_keyword_archive_that_never_reached_the_bottom_does_not_count() {
+    let database = proof_database("keyword_archive_not_bottom").await;
+    // 一条失败都没有，但停在半路：既没 bottom_confirmed，也没采满 maximumQuota。
+    let target_ref = submit_keyword_archive(
+        &database,
+        "考研自习::archive-partial",
+        "time_budget_exhausted",
+        1,
+        0,
+    )
+    .await;
+
+    let mut tx = database.pool().begin().await.unwrap();
+    let qualified = keyword_baseline_qualified(&mut tx, target_ref)
+        .await
+        .expect("baseline query runs");
+    tx.commit().await.unwrap();
+    assert!(!qualified, "没翻到底又没采满，就还不是建档");
+}
+
+/// 巡检拿回来的包再完整，也不算建档——建档是另一条通道上的事。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_complete_patrol_round_is_not_an_archive() {
+    let database = proof_database("keyword_patrol_is_not_archive").await;
+    submit_external_package(
+        &database,
+        "考研自习::patrol-only",
+        "patrol",
+        serde_json::json!({"query":"考研自习","ranking":"most_liked","topByLikes":20,"scrollRounds":3}),
+        "discovery_search",
+        search_coverage("考研自习", 1),
+        serde_json::Value::Null,
+        vec![discovery_card(
+            "note-patrol-only",
+            "巡检样本",
+            "233",
+            "https://www.xiaohongshu.com/search_result/note-patrol-only?xsec_token=ABpatrol",
+        )],
+    )
+    .await;
+    let target_ref: Uuid = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target WHERE identity_key=$1",
+    )
+    .bind("考研自习::patrol-only")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+
+    let mut tx = database.pool().begin().await.unwrap();
+    let qualified = keyword_baseline_qualified(&mut tx, target_ref)
+        .await
+        .expect("baseline query runs");
+    tx.commit().await.unwrap();
+    assert!(!qualified, "巡检不是建档，哪怕这一轮本身很完整");
+}
+
+/// 造一轮关键词建档：发一张 deep_archive 工单并提交一个搜索包。
+///
+/// `failed` 非零时模拟「中途停下」的那一轮。
+async fn submit_keyword_archive(
+    database: &Database,
+    identity_key: &str,
+    stop_reason: &str,
+    acquired: i64,
+    failed: i64,
+) -> Uuid {
+    let mut coverage = search_coverage("考研自习", acquired);
+    coverage["layers"][0]["failed"] = serde_json::json!(failed);
+    coverage["layers"][0]["observed"] = serde_json::json!(acquired + failed);
+    coverage["layers"][0]["attempted"] = serde_json::json!(acquired + failed);
+    coverage["layers"][0]["stoppedReason"] = serde_json::json!(stop_reason);
+    submit_external_package(
+        database,
+        identity_key,
+        "deep_archive",
+        // 建档口径：不限时间、不设取前 N。
+        serde_json::json!({"query":"考研自习","ranking":"most_liked","scrollRounds":10}),
+        "discovery_search",
+        coverage,
+        serde_json::json!({"surfaceReceipt":{"stopReason":stop_reason}}),
+        vec![discovery_card(
+            "note-archive-1",
+            "建档样本",
+            "1.4万",
+            "https://www.xiaohongshu.com/search_result/note-archive-1?xsec_token=ABarchive",
+        )],
+    )
+    .await;
+    sqlx::query_scalar("SELECT target_ref FROM collection_observation_target WHERE identity_key=$1")
+        .bind(identity_key)
+        .fetch_one(database.pool())
+        .await
+        .expect("the archived target exists")
+}
+
+/// 关键词的建档请求必须真的能走完准入、写出工单。
+///
+/// 这条用例补的是一个方法上的缺口：本文件其它用例都直接拼 SQL 造工单与租约，**从未走过
+/// `request_and_admit` 这条真实链路**，于是没有一条能发现「建档请求在写工单那一步必然
+/// 撞上 `0042` 的 CHECK」——`write_work_order` 里那条把目标推进 `archiving` 的 UPDATE
+/// 原本不分目标类型，而关键词被禁止进入那个状态，整个事务因此回滚，页面只显示一句
+/// 「上一次动作没有完成」。100% 必现，却被 14 条绿测试全部漏掉。
+///
+/// 所以这里不用夹具抄近路：建目标、签授权，然后调用产品代码自己的入口。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_keyword_archive_request_passes_admission_and_writes_a_work_order() {
+    let database = proof_database("keyword_archive_admission").await;
+    let target_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+             (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
+         VALUES ($1,'xhs','keyword','考研自习::most_liked','考研自习','manual',$2::uuid)",
+    )
+    .bind(target_ref)
+    .bind(EXTERNAL_DOMAIN)
+    .execute(database.pool())
+    .await
+    .expect("target is stored");
+    sqlx::query(
+        "INSERT INTO collection_acquisition_authorization \
+             (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
+              allowed_task_templates,allowed_dispatch_lanes,max_work_units,max_works_per_target) \
+         VALUES ($1,'xhs','keyword','deep_archive','关键词历史建档','person', \
+                 scope_001_now()+interval '1 day', \
+                 ARRAY['keyword_archive','material_deepening'],ARRAY['immediate','batch'],200,200)",
+    )
+    .bind(Uuid::new_v4())
+    .execute(database.pool())
+    .await
+    .expect("keyword deep-archive authorization is granted");
+
+    let outcome = request_and_admit(
+        &database,
+        target_ref,
+        "deep_archive",
+        "从观察目标页发起关键词历史建档",
+        "person",
+    )
+    .await
+    .expect("the archive request survives admission");
+    assert!(
+        outcome.work_order_ref.is_some(),
+        "关键词建档请求必须写出工单，实际结论：{:?} / {}",
+        outcome.outcome,
+        outcome.reason_code
+    );
+
+    // 生命周期一步都没动：关键词不进 archiving，建过没建过从证据里查。
+    let state: String = sqlx::query_scalar(
+        "SELECT lifecycle_state FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(state, "pending_decision", "关键词不得被推进到建档状态");
+
+    let lane: String =
+        sqlx::query_scalar("SELECT lane FROM collection_work_order WHERE target_ref=$1")
+            .bind(target_ref)
+            .fetch_one(database.pool())
+            .await
+            .expect("the work order exists");
+    assert_eq!(lane, "deep_archive");
+}
+
+/// 同一个请求对创作者仍然要推进到「建档中」——这条链没有被上面的修改弄坏。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_creator_archive_request_still_advances_the_lifecycle() {
+    let database = proof_database("creator_archive_admission").await;
+    let target_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+             (target_ref,platform,target_kind,identity_key,display_name,source) \
+         VALUES ($1,'xhs','creator','69aad16e000000003201b172','木可可','manual')",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("target is stored");
+    sqlx::query(
+        "INSERT INTO collection_acquisition_authorization \
+             (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
+              allowed_task_templates,allowed_dispatch_lanes,max_work_units,max_works_per_target) \
+         VALUES ($1,'xhs','creator','deep_archive','创作者建档','person', \
+                 scope_001_now()+interval '1 day', \
+                 ARRAY['creator_archive','material_deepening'],ARRAY['immediate','batch'],200,200)",
+    )
+    .bind(Uuid::new_v4())
+    .execute(database.pool())
+    .await
+    .expect("creator deep-archive authorization is granted");
+
+    request_and_admit(
+        &database,
+        target_ref,
+        "deep_archive",
+        "创作者建档",
+        "person",
+    )
+    .await
+    .expect("the archive request survives admission");
+
+    let state: String = sqlx::query_scalar(
+        "SELECT lifecycle_state FROM collection_observation_target WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(state, "archiving", "创作者建档仍然推进生命周期");
 }
