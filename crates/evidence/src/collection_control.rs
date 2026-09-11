@@ -2085,6 +2085,10 @@ pub async fn apply_manual_observe_command(
 fn manual_observe_error_reason(error: &AcquisitionChainError) -> &'static str {
     match error {
         AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
+        // 缺领域必须单独报。它此前落进下面那个通配符，于是「这个目标还没说清属于哪个
+        // 领域」被显示成「数据库不可用」——人会去查服务是不是挂了，而真正要做的只是
+        // 给目标指定一个领域。
+        AcquisitionChainError::TargetDomainUnassigned => "target_domain_unassigned",
         AcquisitionChainError::Database(_) => "database_unavailable",
         _ => "database_unavailable",
     }
@@ -3062,4 +3066,33 @@ pub async fn toggle_target_patrol(
         },
     )
     .await
+}
+
+#[cfg(test)]
+mod manual_observe_reason_tests {
+    use super::*;
+
+    /// 「缺领域」不能被通配符吞成「数据库不可用」。
+    ///
+    /// 它原本落进 `_ => "database_unavailable"`：人对一个没归属领域的目标点「立即观察」，
+    /// 页面说数据库不可用，于是去查服务是不是挂了——而真正要做的只是给目标指定领域。
+    /// 这条用例锁住它不会再被归到故障里去。
+    #[test]
+    fn an_unassigned_domain_is_not_reported_as_a_database_failure() {
+        assert_eq!(
+            manual_observe_error_reason(&AcquisitionChainError::TargetDomainUnassigned),
+            "target_domain_unassigned"
+        );
+        // 另外两类原因保持原样，证明这次只把一个被误归的原因摘出来。
+        assert_eq!(
+            manual_observe_error_reason(&AcquisitionChainError::TargetNotRequestable {
+                state: "monitoring".to_owned()
+            }),
+            "target_not_requestable"
+        );
+        assert_eq!(
+            manual_observe_error_reason(&AcquisitionChainError::SchemaUnavailable),
+            "database_unavailable"
+        );
+    }
 }

@@ -348,7 +348,9 @@ async fn seed_authorized_material_context(
     let installation_ref = Uuid::new_v4();
     let producer_instance_id = Uuid::new_v4();
     let install_key = producer_instance_id.to_string();
-    sqlx::query("INSERT INTO collection_observation_target (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) VALUES ($1,'xhs','creator','creator-reobserve','复观测夹具','manual','archived')")
+    // 领域必须写：一个**已建档**的目标在真实系统里不可能没有领域归属，而采集准入现在
+    // 会拒绝未归属的目标——材料该写进本行业证据侧还是跨行业参照侧，不能靠回落去猜。
+    sqlx::query("INSERT INTO collection_observation_target (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state,domain_ref) VALUES ($1,'xhs','creator','creator-reobserve','复观测夹具','manual','archived','00000000-0000-4000-8000-000000000001')")
         .bind(target_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO collection_acquisition_authorization (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,allowed_task_templates,allowed_dispatch_lanes,max_work_units,purpose,granted_by,expires_at) VALUES ($1,'xhs','creator','deep_archive',10,20,ARRAY['creator_archive','material_deepening'],ARRAY['immediate','batch'],20,'content reobservation proof','person',scope_001_now()+interval '1 day')")
         .bind(authorization_ref).execute(database.pool()).await.unwrap();

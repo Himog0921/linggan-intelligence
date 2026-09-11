@@ -28,6 +28,17 @@ pub enum AcquisitionChainError {
     SchemaUnavailable,
     #[error("no observation target with that reference")]
     UnknownTarget,
+    /// 目标还没归属任何领域。**采集不能在这种状态下开始**：领域决定材料写进本行业证据侧
+    /// 还是跨行业参照侧，没有它就只能靠「回落成本领域」来猜，而猜错的后果是参照物混进
+    /// 证据、且此后任何读证据的地方都不会再提醒。2026-09-11 因此误写过 413 条。
+    ///
+    /// 目标本身允许先无领域地存在——浏览器上报与插件推送都发现得到目标却不知道领域，
+    /// 让它们建候选是对的。闸设在这里：**要开始花平台访问额度之前，人必须先说清它属于
+    /// 哪个领域。**
+    #[error(
+        "that target has no observation domain yet, so acquisition cannot decide where its material belongs"
+    )]
+    TargetDomainUnassigned,
     #[error("that target is not in a state where deep archiving can be requested: {state}")]
     TargetNotRequestable { state: String },
     #[error("material deepening needs between 1 and 200 distinct content targets")]
@@ -674,16 +685,36 @@ async fn request_and_admit_in_transaction_with_progressive_resume(
     required_authorization_ref: Option<Uuid>,
     allow_progressive_resume: bool,
 ) -> Result<RequestOutcome, AcquisitionChainError> {
-    let target: Option<(String, String, String)> = sqlx::query_as(
-        "SELECT platform, target_kind, lifecycle_state \
-         FROM collection_observation_target WHERE target_ref = $1 FOR UPDATE",
+    // 领域列只在 `0041` 之后存在。还没应用它的环境（以及只装了控制面那部分 schema 的
+    // 证明库）里没有领域这回事，此时这道闸不适用——**「这个环境还没有领域概念」与
+    // 「这个目标没归属领域」是两件事**，不能用同一个拒绝去表达。
+    let domain_ready: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM information_schema.columns \
+                        WHERE table_schema=current_schema() \
+                          AND table_name='collection_observation_target' \
+                          AND column_name='domain_ref')",
     )
+    .fetch_one(&mut **transaction)
+    .await?;
+    let target: Option<(String, String, String, Option<Uuid>)> = sqlx::query_as(if domain_ready {
+        "SELECT platform, target_kind, lifecycle_state, domain_ref \
+         FROM collection_observation_target WHERE target_ref = $1 FOR UPDATE"
+    } else {
+        "SELECT platform, target_kind, lifecycle_state, NULL::uuid \
+         FROM collection_observation_target WHERE target_ref = $1 FOR UPDATE"
+    })
     .bind(target_ref)
     .fetch_optional(&mut **transaction)
     .await?;
-    let Some((platform, target_kind, lifecycle_state)) = target else {
+    let Some((platform, target_kind, lifecycle_state, domain_ref)) = target else {
         return Err(AcquisitionChainError::UnknownTarget);
     };
+    // 领域是「这批材料该写进哪个库」的唯一依据，必须在花掉第一次平台访问之前就确定。
+    // 读取侧对未归属目标一律 `COALESCE(domain_ref, 本领域)` 回落——那是为历史行准备的
+    // 兜底，不该被当成新采集的默认值。
+    if domain_ready && domain_ref.is_none() {
+        return Err(AcquisitionChainError::TargetDomainUnassigned);
+    }
     // 前置状态按 lane 分开。
     //
     // **深度建档是一次性的**：只有待决的目标能申请，否则同一个博主会被反复全量建档。

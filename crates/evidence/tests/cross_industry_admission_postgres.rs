@@ -746,10 +746,12 @@ async fn a_keyword_archive_request_passes_admission_and_writes_a_work_order() {
 async fn a_creator_archive_request_still_advances_the_lifecycle() {
     let database = proof_database("creator_archive_admission").await;
     let target_ref = Uuid::new_v4();
+    // 本行业创作者，领域写实：采集准入会拒绝未归属领域的目标。
     sqlx::query(
         "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source) \
-         VALUES ($1,'xhs','creator','69aad16e000000003201b172','木可可','manual')",
+             (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
+         VALUES ($1,'xhs','creator','69aad16e000000003201b172','木可可','manual', \
+                 '00000000-0000-4000-8000-000000000001')",
     )
     .bind(target_ref)
     .execute(database.pool())
@@ -786,4 +788,88 @@ async fn a_creator_archive_request_still_advances_the_lifecycle() {
     .await
     .unwrap();
     assert_eq!(state, "archiving", "创作者建档仍然推进生命周期");
+}
+
+/// 没归属领域的目标不得开始采集。
+///
+/// 目标本身允许先无领域地存在：浏览器上报（`collection_target_intake`）与插件推送
+/// （`sync_target_from_author_profile`）都发现得到目标却不知道领域，让它们建候选是对的。
+/// 但读取侧对未归属目标一律回落成本领域，**一旦真开始采，材料就会按那个猜测写进证据侧**
+/// ——2026-09-11 的 413 条误写正是这条路径。所以闸设在「要花平台访问额度之前」。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_target_without_a_domain_cannot_start_acquiring() {
+    let database = proof_database("acquisition_requires_domain").await;
+    let target_ref = Uuid::new_v4();
+    // 刻意不写 domain_ref：模拟浏览器上报或插件推送建出来的候选目标。
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+             (target_ref,platform,target_kind,identity_key,display_name,source) \
+         VALUES ($1,'xhs','keyword','数学思维::most_liked','数学思维','plugin_push')",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("candidate target is stored");
+    sqlx::query(
+        "INSERT INTO collection_acquisition_authorization \
+             (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
+              allowed_task_templates,allowed_dispatch_lanes,max_work_units,max_works_per_target) \
+         VALUES ($1,'xhs','keyword','deep_archive','领域闸门证明','person', \
+                 scope_001_now()+interval '1 day', \
+                 ARRAY['keyword_archive','material_deepening'],ARRAY['immediate','batch'],200,200)",
+    )
+    .bind(Uuid::new_v4())
+    .execute(database.pool())
+    .await
+    .expect("authorization is granted");
+
+    let refused = request_and_admit(
+        &database,
+        target_ref,
+        "deep_archive",
+        "领域闸门证明",
+        "person",
+    )
+    .await;
+    assert!(
+        matches!(
+            refused,
+            Err(linggan_evidence::AcquisitionChainError::TargetDomainUnassigned)
+        ),
+        "未归属领域的目标不该开始采集，实际：{refused:?}"
+    );
+
+    // 授权是齐的——挡住它的必须是领域这一项，不是别的条件顺带拦下的。
+    let requests: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_acquisition_request WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(requests, 0, "连请求都不该落下，它还没到该被审的那一步");
+
+    // 指定领域之后，同一个请求就该通过——证明闸挡的确实只是「没归属」。
+    sqlx::query("UPDATE collection_observation_target SET domain_ref=$2::uuid WHERE target_ref=$1")
+        .bind(target_ref)
+        .bind(EXTERNAL_DOMAIN)
+        .execute(database.pool())
+        .await
+        .expect("domain is assigned");
+    let admitted = request_and_admit(
+        &database,
+        target_ref,
+        "deep_archive",
+        "领域闸门证明",
+        "person",
+    )
+    .await
+    .expect("the same request now survives admission");
+    assert!(
+        admitted.work_order_ref.is_some(),
+        "补上领域之后应当放行，实际：{:?} / {}",
+        admitted.outcome,
+        admitted.reason_code
+    );
 }

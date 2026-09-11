@@ -1188,6 +1188,8 @@ async fn collection_material_deepening(
         Err(error) => {
             let code = match error {
                 AcquisitionChainError::UnknownTarget => "unknown_target",
+                // 与「状态不允许」分开报：这条的处置是去给目标指定领域，不是等状态流转。
+                AcquisitionChainError::TargetDomainUnassigned => "target_domain_unassigned",
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
                 AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
                 AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
@@ -1268,6 +1270,8 @@ async fn collection_archive_request(State(state): State<LocalWebState>, body: By
             axum::http::StatusCode::UNPROCESSABLE_ENTITY,
             match error {
                 AcquisitionChainError::UnknownTarget => "unknown_target",
+                // 与「状态不允许」分开报：这条的处置是去给目标指定领域，不是等状态流转。
+                AcquisitionChainError::TargetDomainUnassigned => "target_domain_unassigned",
                 AcquisitionChainError::TargetNotRequestable { .. } => "target_not_requestable",
                 AcquisitionChainError::InvalidMaterialTargets => "material_targets_invalid",
                 AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { .. } => {
@@ -3367,7 +3371,13 @@ async fn collection_target_create(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<NewTargetForm>,
 ) -> Redirect {
-    // 表单在「全部领域」下不带这一项，服务端按本领域处置（既有行为）。
+    // 领域必须由人明确选定，不能由「当前在看哪个领域」推断出来。
+    //
+    // 此前在「全部领域」视图下新建时表单不带这一项，服务端按本领域处置——于是一个本想
+    // 用作跨行业参照的关键词被静默归进了本领域，它采回来的材料**直接写进证据侧**。
+    // 2026-09-11 真实发生过一次：两个「数学思维」目标因此把 413 条笔记写进了 ADHD
+    // 证据库，而跨行业语料表里一条都没有。领域不是一个可以猜的默认值，猜错的代价是
+    // 参照物混进证据，且任何读证据的地方都不会再提醒你。
     let domain_param = form
         .domain
         .as_deref()
@@ -3380,6 +3390,13 @@ async fn collection_target_create(
     let domain = domain_param
         .as_deref()
         .and_then(|value| uuid::Uuid::parse_str(value).ok());
+    // 没选领域就不建。前端也会挡一道，但真正的闸门在这里——前端禁用是提示，不是保证。
+    let Some(domain) = domain else {
+        return Redirect::to(&back_to_targets(
+            domain_param.as_deref(),
+            Some("target_domain_required"),
+        ));
+    };
     let Some(database) = state.database.database() else {
         return Redirect::to(&back_to_targets(
             domain_param.as_deref(),
@@ -3433,7 +3450,8 @@ async fn collection_target_create(
             linggan_contracts::TargetSource::Manual,
             parsed_display_name.as_deref(),
             None,
-            domain,
+            // 领域已在上面确认过，这里是确定值而不是「可能没有」。
+            Some(domain),
         )
         .await
         {
@@ -4065,6 +4083,11 @@ async fn collection_target_deep_archive(
                 &form,
                 Some(&format!("archive_{}", outcome.outcome.code())),
             ),
+            // 缺领域要说清是缺领域。它此前落进一句「上一次动作没有完成」——信息量最低的
+            // 那条兜底文案，既不说原因也不说下一步。
+            Err(AcquisitionChainError::TargetDomainUnassigned) => {
+                target_archive_return_path(&form, Some("target_domain_unassigned"))
+            }
             Err(_) => target_archive_return_path(&form, Some("archive_unavailable")),
         });
     }
@@ -4102,11 +4125,17 @@ async fn collection_target_deep_archive(
             };
             return Redirect::to(&target_archive_return_path(&form, Some(code)));
         }
-        Err(_) => {
+        // 「缺领域」不是「状态不允许」：后者的文案是「目标可能已有同类任务在进行，
+        // 或当前状态不允许再次发起」，会把人引向一个永远不会到来的状态流转。
+        Err(RequestLeaseError::Acquisition(AcquisitionChainError::TargetDomainUnassigned)) => {
             return Redirect::to(&target_archive_return_path(
                 &form,
-                Some("archive_not_requestable"),
+                Some("target_domain_unassigned"),
             ));
+        }
+        Err(_) => {
+            let code = { "archive_not_requestable" };
+            return Redirect::to(&target_archive_return_path(&form, Some(code)));
         }
     };
     let Some(_work_order_ref) = outcome.work_order_ref else {

@@ -2224,9 +2224,11 @@ async fn seed_target(
 ) -> Uuid {
     let target_ref = Uuid::new_v4();
     sqlx::query(
+        // 领域写实：采集准入会拒绝未归属领域的目标——材料该进本行业证据侧还是跨行业
+        // 参照侧，不能靠回落去猜。共享夹具默认本领域。
         "INSERT INTO collection_observation_target \
-             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) \
-         VALUES ($1,'xhs',$2,$3,$3,'manual',$4)",
+             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state,domain_ref) \
+         VALUES ($1,'xhs',$2,$3,$3,'manual',$4,'00000000-0000-4000-8000-000000000001')",
     )
     .bind(target_ref)
     .bind(target_kind)

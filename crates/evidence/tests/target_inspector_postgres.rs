@@ -91,7 +91,7 @@ async fn seed_queued_archive(database: &Database) -> Fixture {
     let decision_ref = Uuid::new_v4();
     let work_order_ref = Uuid::new_v4();
     let station_ref = Uuid::new_v4();
-    sqlx::query("INSERT INTO collection_observation_target (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state) VALUES ($1,'xhs','creator','inspector-author','Inspector fixture','manual','archiving')")
+    sqlx::query("INSERT INTO collection_observation_target (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state,domain_ref) VALUES ($1,'xhs','creator','inspector-author','Inspector fixture','manual','archiving','00000000-0000-4000-8000-000000000001')")
         .bind(target_ref).execute(database.pool()).await.unwrap();
     sqlx::query("INSERT INTO collection_acquisition_authorization (authorization_ref,platform,target_kind,lane,max_targets,max_works_per_target,allowed_task_templates,allowed_dispatch_lanes,max_work_units,purpose,granted_by,expires_at) VALUES ($1,'xhs','creator','deep_archive',1,200,ARRAY['creator_archive'],ARRAY['batch'],200,'inspector proof','person',scope_001_now()+interval '1 day')")
         .bind(authorization_ref).execute(database.pool()).await.unwrap();
