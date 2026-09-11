@@ -67,9 +67,29 @@
 .c-tg-batch-dialog h2,.c-tg-batch-dialog p{margin:0}
 .c-tg-batch-dialog h2{color:var(--lgi-ink);font-size:var(--lgi-text-section)}
 .c-tg-batch-dialog p{color:var(--lgi-body);font-size:var(--lgi-text-data);line-height:var(--lgi-lh-body)}
-.c-tg-batch-dialog label{display:grid;gap:var(--lgi-space-2);color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:700}
+.c-tg-batch-dialog label:not([hidden]){display:grid;gap:var(--lgi-space-2);color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:700}
+/* 上面那条规则**只挑没被隐藏的 label**。
+ *
+ * `hidden` 自带的 `display:none` 只是 UA 样式，任何类选择器都比它强。原来写的是
+ * `.c-tg-batch-dialog label{display:grid}`，于是「新领域名称」那一栏无论选了哪个领域都
+ * 露在外面：字段看着能填，填了却不会被当成新建领域——真正的判据是下拉选没选 `__new__`。
+ *
+ * 修法是**不制造那个覆盖**，而不是再写一条更强的规则去赢它：`:not([hidden])` 让隐藏的
+ * label 压根不匹配这条排版规则，UA 的 `display:none` 因此无人竞争。靠特异性赢只能赢过
+ * 当前这一种写法——给这个弹窗自己的 id 加一条 `#target-domain-modal label{display:flex}`，
+ * (1,0,1) 就重新压过 (0,2,0)，同一个 bug 换条路回来。
+ *
+ * 下面这条留着兜底：它挡得住类选择器一级的新规则，挡不住带 id 的。一劳永逸的写法是给
+ * `[hidden]` 加上优先级强制标记，但这张表的 LIDS 断言禁止那个标记（见
+ * `creator_lifecycle_tests.rs`：那条禁令是为了防止有人用它盖掉焦点轮廓）。要不要为
+ * `[hidden]` 破例，是设计系统的决定，不在本次修复的范围里。 */
+.c-tg-batch-dialog [hidden]{display:none}
 .c-tg-batch-dialog input{min-height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas);color:var(--lgi-ink);font:var(--lgi-text-data)/var(--lgi-lh-data) var(--lgi-font-sans)}
 .c-tg-batch-dialog-actions{display:flex;justify-content:flex-end;gap:var(--lgi-space-3)}
+
+/* 领域弹窗只有一个下拉和一个可选输入框，用批量编辑那张表的宽度（1440px）会横跨整屏，
+ * 一行说明文字被拉成一条细线，读的人要横扫一整屏才看得完一句话。按内容定宽。 */
+#target-domain-modal{width:min(100%,calc(var(--lgi-space-24) * 6))}
 .c-src-feedback{margin:var(--lgi-space-3) 0 0;max-width:calc(var(--lgi-space-24) * 6);padding:var(--lgi-space-2) var(--lgi-space-3);font:600 var(--lgi-text-data)/var(--lgi-lh-body) var(--lgi-font-sans)}
 .c-src-feedback b{margin-right:var(--lgi-space-2);padding:var(--lgi-space-2);font:700 var(--lgi-text-label)/1 var(--lgi-font-mono)}
 .c-src-feedback-ok{background:var(--lgi-success-soft);color:var(--lgi-success)}
@@ -209,7 +229,7 @@
 .c-dw-retire>b{display:block;color:var(--lgi-ink);font-size:var(--lgi-text-body);font-weight:700}
 .c-dw-retire>p{margin:var(--lgi-space-2) 0 0;color:var(--lgi-body);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
 .c-dw-retire ul{margin:var(--lgi-space-3) 0;padding:0;list-style:none;display:grid;gap:var(--lgi-space-2)}
-.c-dw-retire label{display:flex;align-items:baseline;gap:var(--lgi-space-2);min-width:0;cursor:pointer}
+.c-dw-retire label:not([hidden]){display:flex;align-items:baseline;gap:var(--lgi-space-2);min-width:0;cursor:pointer}
 .c-dw-retire label input{flex:0 0 auto;inline-size:16px;block-size:16px;margin:0;accent-color:var(--lgi-signal-ink);cursor:pointer}
 .c-dw-retire label b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:600}
 .c-dw-retire label span{flex:0 0 auto;color:var(--lgi-muted);font:400 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono)}
@@ -264,7 +284,7 @@
 .c-tg-delete-cols b{display:block;margin-bottom:var(--lgi-space-2);color:var(--lgi-ink);font-size:var(--lgi-text-label)}
 .c-tg-delete-cols ul{margin:0;padding-left:var(--lgi-space-4);color:var(--lgi-body);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
 .c-tg-delete-blocked{margin:var(--lgi-space-2) 0;color:var(--lgi-danger,#b3261e);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
-.c-tg-delete label{display:block;margin:var(--lgi-space-3) 0;color:var(--lgi-body);font-size:var(--lgi-text-label)}
+.c-tg-delete label:not([hidden]){display:block;margin:var(--lgi-space-3) 0;color:var(--lgi-body);font-size:var(--lgi-text-label)}
 .c-tg-delete label input{display:block;width:100%;margin-top:var(--lgi-space-2);min-height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);border:1px solid var(--lgi-border)}
 
 /* ── 顶部工具条：统一到证据库那套已被认可的控件语言 ──────────────────────────

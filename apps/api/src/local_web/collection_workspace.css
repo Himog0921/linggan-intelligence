@@ -677,7 +677,7 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-rule-checks { margin-top:var(--lgi-space-4); display:flex; align-items:center; gap:var(--lgi-space-6); }
 .c-rule-check { min-height:40px; display:flex; align-items:center; gap:var(--lgi-space-2); color:var(--v7-black); font-size:var(--c-fs-200); cursor:pointer; }
 .c-rule-grid { margin-top:var(--lgi-space-3); display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--lgi-space-4); }
-.c-rule-grid label { display:grid; gap:var(--lgi-space-2); color:var(--v7-muted); font-size:var(--c-fs-100); }
+.c-rule-grid label:not([hidden]){ display:grid; gap:var(--lgi-space-2); color:var(--v7-muted); font-size:var(--c-fs-100); }
 .c-rule-grid input,.c-rule-grid select {
   width:100%; height:40px; padding:0 var(--lgi-space-3); border:var(--c-line-hair) solid var(--v7-line-strong);
   border-radius:var(--lgi-radius-sm); background:var(--v7-white); color:var(--v7-black);

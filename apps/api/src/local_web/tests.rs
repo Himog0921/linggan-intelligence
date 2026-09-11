@@ -2108,6 +2108,80 @@ fn declared_selectors(stylesheet: &str) -> Vec<String> {
     selectors
 }
 
+/// 对话框里被 `hidden` 切换显隐的那些元素，排版规则必须把它们排除在外。
+///
+/// `hidden` 自带的 `display:none` 只是 UA 样式，任何类选择器都比它强。本项目为这一个坑
+/// 打过十四处补丁，每一处都是被咬过之后补的——`target_drawer.css` 里那条
+/// `[data-drawn-select][hidden]` 的注释记着上一次是怎么被咬的。
+///
+/// 守的是**不制造覆盖**：给裸 `label` 设 `display` 时必须带 `:not([hidden])`。
+/// 再写一条更强的规则去赢，只赢得过当前这一种写法：给弹窗自己的 id 加一条
+/// `#target-domain-modal label{display:flex}`，(1,0,1) 就压过 `.c-tg-batch-dialog [hidden]`
+/// 的 (0,2,0)，同一个 bug 换条路回来。
+#[test]
+fn dialog_layout_rules_exclude_the_elements_hidden_toggles() {
+    for (name, stylesheet) in [
+        ("target_drawer.css", TARGET_DRAWER_CSS),
+        ("collection_workspace.css", COLLECTION_WORKSPACE_CSS),
+    ] {
+        for rule in stylesheet.lines() {
+            // 注释里会引用坏写法当反面教材，那不是生效的规则。
+            let rule = rule.trim();
+            if rule.starts_with("/*") || rule.starts_with('*') {
+                continue;
+            }
+            let Some((selector, body)) = rule.split_once('{') else {
+                continue;
+            };
+            if !body.contains("display:") {
+                continue;
+            }
+            // 只看「容器 + 裸 label」这一种：弹窗里的字段就是这样成组显隐的。
+            let subject = selector.trim().rsplit(' ').next().unwrap_or("");
+            if subject != "label" {
+                continue;
+            }
+            assert!(
+                selector.contains(":not([hidden])"),
+                "{name} 的 `{selector}` 给裸 label 设了 display，却没有把被 hidden 标记的排除在外——\
+                 标了 hidden 的字段会照常显示，人填了也不算数，而且没有任何报错"
+            );
+        }
+    }
+}
+
+/// 领域弹窗必须**真的比**批量编辑那张表窄，不是"写着一条宽度规则"。
+///
+/// 两者宽度都是同一个间距 token 的倍数，所以比较系数就是比较宽度。逐字匹配一整条规则
+/// 只证明有这么一行：把批量弹窗改窄到比它还窄，名字里那个「narrower」就成了假话，而
+/// 断言照样绿。
+#[test]
+fn the_domain_dialog_is_narrower_than_the_batch_dialog() {
+    let batch = space_24_multiplier(TARGET_DRAWER_CSS, ".c-tg-batch-dialog{")
+        .expect("批量编辑弹窗按 --lgi-space-24 的倍数定宽");
+    let domain = space_24_multiplier(TARGET_DRAWER_CSS, "#target-domain-modal{")
+        .expect("领域弹窗按 --lgi-space-24 的倍数定宽");
+    assert!(
+        domain < batch,
+        "领域弹窗只有一个下拉和一个可选输入框，不该和批量编辑那张表一样宽：\
+         领域 {domain} 倍 vs 批量 {batch} 倍"
+    );
+}
+
+/// 从 `width:min(100%,calc(var(--lgi-space-24) * N))` 里取出 N。
+fn space_24_multiplier(stylesheet: &str, selector: &str) -> Option<u32> {
+    let rule = stylesheet.lines().find(|line| line.starts_with(selector))?;
+    let after = rule.split("var(--lgi-space-24)").nth(1)?;
+    let digits = after
+        .trim_start()
+        .strip_prefix('*')?
+        .trim_start()
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect::<String>();
+    digits.parse().ok()
+}
+
 #[test]
 fn no_page_stylesheet_restyles_a_component_the_shell_owns() {
     // One header, one implementation. While the primary nav's typography lived in the

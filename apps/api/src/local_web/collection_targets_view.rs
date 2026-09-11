@@ -1767,12 +1767,11 @@ mod keyword_archive_action_tests {
         );
     }
 
-    /// 已经在监控的词不再被问建档——它的下一步是看命中，不是回头建档。
+    /// 已经在监控、且详情齐了的词不再被问建档——它的下一步是看命中，不是回头建档。
     #[test]
     fn a_monitored_keyword_is_not_asked_to_archive() {
         for archive in [
             KeywordArchiveRead::NotArchived,
-            KeywordArchiveRead::DetailPending,
             KeywordArchiveRead::Complete,
             KeywordArchiveRead::Unavailable,
         ] {
@@ -1780,6 +1779,54 @@ mod keyword_archive_action_tests {
                 action(&keyword("monitoring", true), archive),
                 TargetPrimaryAction::ViewKeyword,
                 "监控中的词不该被建档按钮打断"
+            );
+        }
+    }
+
+    /// **监控中的词，详情欠着时仍要够得着补详情。**
+    ///
+    /// 巡检每周带回来的新笔记同样只有链接。这一条不排在「查看结果」前面，补详情的入口
+    /// 一进入监控就消失，这个词的面貌永远停在列表面那一层——正文、发布时间、评论一样
+    /// 都没有，而界面上看不出少了什么。
+    #[test]
+    fn a_monitored_keyword_still_reaches_its_missing_details() {
+        assert_eq!(
+            action(
+                &keyword("monitoring", true),
+                KeywordArchiveRead::DetailPending
+            ),
+            TargetPrimaryAction::ContinueArchive
+        );
+    }
+
+    /// 暂停巡查不等于放弃已经拿到的链接：补详情是人手动点的一次动作，仍该够得着。
+    #[test]
+    fn a_paused_keyword_can_still_finish_its_details() {
+        assert_eq!(
+            action(&keyword("paused", false), KeywordArchiveRead::DetailPending),
+            TargetPrimaryAction::ContinueArchive
+        );
+    }
+
+    /// 已弃用的目标只提供查看，不被任何采集动作打断。
+    ///
+    /// 钉死结果而不是只排除一个动作：`assert_ne!(_, ContinueArchive)` 放得过
+    /// 「建立档案」和「开始每周巡检」，而那两个同样是在催一个已经被弃用的目标去采集。
+    ///
+    /// 这一条在 main 上是红的——弃用的关键词此前会落到建档三态的 match 里，拿到
+    /// 「继续建档」或「开始每周巡检」按钮。
+    #[test]
+    fn a_dismissed_keyword_is_offered_only_a_read_only_view() {
+        for archive in [
+            KeywordArchiveRead::NotArchived,
+            KeywordArchiveRead::DetailPending,
+            KeywordArchiveRead::Complete,
+            KeywordArchiveRead::Unavailable,
+        ] {
+            assert_eq!(
+                action(&keyword("dismissed", false), archive),
+                TargetPrimaryAction::ViewKeyword,
+                "已弃用的目标不该被任何采集动作打断"
             );
         }
     }
