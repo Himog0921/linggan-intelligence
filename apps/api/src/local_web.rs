@@ -2479,6 +2479,7 @@ async fn collection_targets(
         collection::DomainBar {
             picker: &picker,
             nav_domain: nav_domain.as_deref(),
+            domains: &domains,
         },
     );
     let list_context = target_drawer::TargetListContext {
@@ -2639,6 +2640,19 @@ async fn collection_targets(
             let keyword_archives = keyword_baselines_qualified(database, &keyword_refs)
                 .await
                 .ok();
+            // 建档分两段：先拿链接，再补详情。第二段是不是还欠着，同样批量问一次。
+            let keyword_details_pending =
+                linggan_evidence::keyword_targets_pending_detail(database, &keyword_refs)
+                    .await
+                    .ok();
+            // 发起之后到插件开始动手之间有一段沉默。把「排在第几」读出来，等待就不再是
+            // 一段什么都看不见的时间。
+            let target_refs = targets
+                .iter()
+                .map(|target| target.target_ref)
+                .collect::<Vec<_>>();
+            let queue_positions =
+                linggan_evidence::read_target_queue_positions(database, &target_refs).await;
             collection_targets_view::render_stored_targets_with_observation(
                 &base,
                 &targets,
@@ -2648,7 +2662,15 @@ async fn collection_targets(
                 params.error.as_deref(),
                 deletion_preview.as_ref(),
                 deletion_target,
-                keyword_archives.as_ref(),
+                collection_targets_view::TargetListFacts {
+                    keyword_archives: keyword_archives.as_ref(),
+                    keyword_details_pending: keyword_details_pending.as_ref(),
+                    queue: match queue_positions.as_ref() {
+                        Ok(positions) => collection_targets_view::QueuePositions::Known(positions),
+                        // 读不到就说读不到。压成「没有排队」会让人以为请求没发出去。
+                        Err(_) => collection_targets_view::QueuePositions::Unavailable,
+                    },
+                },
                 list_context,
             )
         }
@@ -2809,6 +2831,7 @@ async fn collection_operations(
         None,
         Some(&reads.surface_state),
         collection::DomainBar {
+            domains: &[],
             picker: "",
             nav_domain: params
                 .domain
@@ -2845,6 +2868,7 @@ async fn collection_attention(
         None,
         Some(&reads.surface_state),
         collection::DomainBar {
+            domains: &[],
             picker: "",
             nav_domain: domain.nav(),
         },
@@ -2880,6 +2904,7 @@ async fn collection_tasks(
         None,
         Some(&reads.surface_state),
         collection::DomainBar {
+            domains: &[],
             picker: "",
             nav_domain: domain.nav(),
         },
@@ -2950,6 +2975,8 @@ async fn collection_runtime(
             None,
             None,
             collection::DomainBar {
+                // 这条渲染路径不提供领域清单：新建入口在观察目标页，不在这里。
+                domains: &[],
                 picker: "",
                 nav_domain: params
                     .domain
@@ -2994,6 +3021,7 @@ async fn collection_runtime(
         None,
         Some(&reads.surface_state),
         collection::DomainBar {
+            domains: &[],
             picker: "",
             nav_domain: params
                 .domain
@@ -3337,8 +3365,11 @@ struct NewTargetForm {
     /// 关键词的排序。它是身份的一部分（`{词}::{排序}`），建完就不能改——
     /// 换排序等于换一个观察面，要另建一个目标。
     ranking: Option<String>,
-    /// 当前正在看的领域。表单在「全部领域」下不带这一项，服务端按本领域处置。
+    /// 这个目标归属的领域，由新建弹窗当场选定——**不再是「当前正在看的领域」**。
+    /// 值为 `__new__` 时表示同时新建一个领域，名字在 `new_domain_name` 里。
     domain: Option<String>,
+    /// 新领域的名字。只在 `domain == "__new__"` 时有意义。
+    new_domain_name: Option<String>,
 }
 
 /// COLLECTION-001 · 从页面加入一个观察目标。
@@ -3390,6 +3421,30 @@ async fn collection_target_create(
     let domain = domain_param
         .as_deref()
         .and_then(|value| uuid::Uuid::parse_str(value).ok());
+    // 选了「＋ 新建一个领域」时先把领域建出来，再用它建目标。两件事同一个动作里完成，
+    // 但**不共用一个事务**：领域建成而目标没建成时，多一个空领域是可解释的；反过来
+    // 目标挂在一个不存在的领域上则连外键都过不去。
+    let domain = if domain_param.as_deref() == Some("__new__") {
+        let Some(database) = state.database.database() else {
+            return Redirect::to(&back_to_targets(None, Some("read_model_not_connected")));
+        };
+        let name = form.new_domain_name.as_deref().unwrap_or_default();
+        match linggan_evidence::observation_domain::create_observation_domain(database, name).await
+        {
+            Ok(created) => Some(created.domain_ref),
+            Err(linggan_evidence::observation_domain::ObservationDomainError::EmptyName) => {
+                return Redirect::to(&back_to_targets(None, Some("domain_name_required")));
+            }
+            Err(linggan_evidence::observation_domain::ObservationDomainError::DuplicateName) => {
+                return Redirect::to(&back_to_targets(None, Some("domain_name_taken")));
+            }
+            Err(_) => {
+                return Redirect::to(&back_to_targets(None, Some("domain_create_failed")));
+            }
+        }
+    } else {
+        domain
+    };
     // 没选领域就不建。前端也会挡一道，但真正的闸门在这里——前端禁用是提示，不是保证。
     let Some(domain) = domain else {
         return Redirect::to(&back_to_targets(
@@ -4063,6 +4118,55 @@ async fn collection_target_deep_archive(
     .ok()
     .flatten();
     if target_kind.as_deref() == Some("keyword") {
+        // 关键词建档也是两段：**先拿链接，再补详情**，与创作者渐进式建档同一个形状。
+        //
+        // 同一个按钮按所处的段落做不同的事：还没翻完搜索面就去翻，翻完了就去补下一批
+        // 详情。分成两个按钮反而要人先判断「现在到哪一步了」——那是系统自己查得出来的。
+        let advanced = linggan_evidence::advance_keyword_archive_detail(
+            database,
+            form.row_target_ref,
+            "从观察目标页发起关键词历史建档",
+            "person",
+        )
+        .await;
+        match advanced {
+            Ok(linggan_evidence::KeywordDetailAdvance::Queued { .. }) => {
+                return Redirect::to(&target_archive_return_path(
+                    &form,
+                    Some("keyword_detail_requested"),
+                ));
+            }
+            // 还没建完第一段，往下走去发第一段。这不是错误，是这个词还在更早的阶段。
+            Ok(linggan_evidence::KeywordDetailAdvance::Skipped("archive_round_not_complete")) => {}
+            Ok(linggan_evidence::KeywordDetailAdvance::Skipped("detail_batch_in_flight")) => {
+                return Redirect::to(&target_archive_return_path(
+                    &form,
+                    Some("archive_in_progress"),
+                ));
+            }
+            Ok(linggan_evidence::KeywordDetailAdvance::Skipped("no_missing_detail")) => {
+                return Redirect::to(&target_archive_return_path(
+                    &form,
+                    Some("keyword_detail_complete"),
+                ));
+            }
+            // 准入没放行时把它的结论原样带回去，与下面那一段同一种处理。
+            Ok(linggan_evidence::KeywordDetailAdvance::Skipped(code)) => {
+                return Redirect::to(&target_archive_return_path(
+                    &form,
+                    Some(&format!("archive_{code}")),
+                ));
+            }
+            Err(AcquisitionChainError::TargetDomainUnassigned) => {
+                return Redirect::to(&target_archive_return_path(
+                    &form,
+                    Some("target_domain_unassigned"),
+                ));
+            }
+            // 详情这一段读不出来，不代表第一段发不出去。继续往下走，由第一段自己的
+            // 结论说话——在这里断言「建档不可用」会掩盖真实原因。
+            Err(_) => {}
+        }
         let requested = linggan_evidence::request_and_admit(
             database,
             form.row_target_ref,

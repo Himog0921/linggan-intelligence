@@ -317,7 +317,13 @@ pub(crate) enum TargetPrimaryAction {
 pub(crate) enum KeywordArchiveRead {
     /// 这一批目标的建档情况没读出来（查询失败或表还不在）。
     Unavailable,
-    Known(bool),
+    /// 还没有一轮把这个词的搜索面翻完。
+    NotArchived,
+    /// 链接拿到了，还有作品没取详情。**建档到这里只做了一半**：列表面给不出正文、
+    /// 评论和发布时间，停在这一步的词还不是一个可用的底座。
+    DetailPending,
+    /// 该翻的翻完了，该补的详情也补完了。
+    Complete,
 }
 
 pub(crate) fn target_primary_action(
@@ -336,8 +342,10 @@ pub(crate) fn target_primary_action(
         // 还没开始监控的关键词：先问它建过档没有。历史高赞是这个词的底座，没有底座就
         // 开始每周看增量，等于在一张空表上数新增。
         return match keyword_archive {
-            KeywordArchiveRead::Known(false) => TargetPrimaryAction::EstablishArchive,
-            KeywordArchiveRead::Known(true) => TargetPrimaryAction::OpenPatrol("开始每周巡检"),
+            KeywordArchiveRead::NotArchived => TargetPrimaryAction::EstablishArchive,
+            // 与创作者同一个入口、同一个词：链接有了、详情还差，就是「继续建档」。
+            KeywordArchiveRead::DetailPending => TargetPrimaryAction::ContinueArchive,
+            KeywordArchiveRead::Complete => TargetPrimaryAction::OpenPatrol("开始每周巡检"),
             // 读不到就不催也不改口径，维持原本的入口。
             KeywordArchiveRead::Unavailable => TargetPrimaryAction::OpenPatrol("设置巡查"),
         };

@@ -232,6 +232,11 @@
   transition:background var(--lgi-duration-press) var(--lgi-ease-ui),color var(--lgi-duration-press) var(--lgi-ease-ui)}
 .c-tg-act:hover{background:var(--lgi-ink);color:var(--lgi-canvas)}
 
+/* 排队位置不是控件，是这一格里唯一的纯文字：它不能按，也不该长得像能按。
+ * 用与行内元信息同一套字号和弱色，在按钮旁边说明「点过了，正在等」。 */
+.c-tg-queued{display:inline-flex;align-items:center;white-space:nowrap;
+  color:var(--v7-ghost);font:650 9.5px/1 var(--lgi-font-mono)}
+
 /* 删除是这一行里唯一的红。不可逆的动作不该和「查看」长得一样。 */
 .c-tg-act-danger{border-color:var(--lgi-danger);color:var(--lgi-danger)}
 .c-tg-act-danger:hover{background:var(--lgi-danger);color:var(--lgi-canvas)}

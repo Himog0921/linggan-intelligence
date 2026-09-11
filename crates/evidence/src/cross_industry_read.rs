@@ -36,6 +36,7 @@ pub async fn read_cross_industry_samples(
 ) -> Result<Value, CrossIndustryReadError> {
     let schema_ready: bool = sqlx::query_scalar(
         "SELECT to_regclass('cross_industry_sample') IS NOT NULL \
+                AND to_regclass('cross_industry_sample_observation') IS NOT NULL \
                 AND to_regclass('observation_domain') IS NOT NULL",
     )
     .fetch_one(database.pool())
@@ -60,9 +61,19 @@ pub async fn read_cross_industry_samples(
                 to_char(sample.published_at, 'YYYY-MM-DD') AS published_on, \
                 sample.keyword, sample.sort_order, \
                 linggan_human_moment(sample.last_observed_at) AS last_observed_at, \
-                target.display_name, \
+                target.display_name AS display_name, \
                 (SELECT count(*) FROM cross_industry_note note \
-                 WHERE note.sample_ref = sample.sample_ref) AS note_count \
+                 WHERE note.sample_ref = sample.sample_ref) AS note_count, \
+                -- 被看到过几次，以及第一次看到时读到多少赞。两者一起才说得清变化：
+                -- 只报「3 次」看不出热度动没动，只报当前赞数看不出它是新冒头还是一直在。
+                (SELECT count(*) FROM cross_industry_sample_observation seen \
+                 WHERE seen.sample_ref = sample.sample_ref) AS observed_times, \
+                (SELECT linggan_human_moment(min(seen.observed_at)) \
+                 FROM cross_industry_sample_observation seen \
+                 WHERE seen.sample_ref = sample.sample_ref) AS first_seen_at, \
+                (SELECT seen.like_count FROM cross_industry_sample_observation seen \
+                 WHERE seen.sample_ref = sample.sample_ref \
+                 ORDER BY seen.observed_at, seen.observation_ref LIMIT 1) AS first_like_count \
          FROM cross_industry_sample sample \
          LEFT JOIN collection_observation_target target \
                 ON target.target_ref = sample.target_ref \
@@ -188,23 +199,55 @@ type CrossIndustryCommentRow = (
     Option<String>,
 );
 
-type CrossIndustrySampleRow = (
-    Uuid,
-    String,
-    String,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<i64>,
-    Option<i64>,
-    Option<i64>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    i64,
-);
+/// 一条样本读回来的列。**具名而不是元组**：这一行有十八列，靠位置对齐迟早会把
+/// 「首次读到的赞」接到「当前的赞」上，而两者类型相同，编译器不会拦。
+struct CrossIndustrySampleRow {
+    sample_ref: Uuid,
+    platform: String,
+    content_external_id: String,
+    title: Option<String>,
+    author_name: Option<String>,
+    cover_local_asset_path: Option<String>,
+    like_count: Option<i64>,
+    collect_count: Option<i64>,
+    comment_count: Option<i64>,
+    published_on: Option<String>,
+    keyword: Option<String>,
+    sort_order: Option<String>,
+    last_observed_at: Option<String>,
+    display_name: Option<String>,
+    note_count: i64,
+    observed_times: i64,
+    first_seen_at: Option<String>,
+    first_like_count: Option<i64>,
+}
+
+impl<'row> sqlx::FromRow<'row, sqlx::postgres::PgRow> for CrossIndustrySampleRow {
+    fn from_row(row: &'row sqlx::postgres::PgRow) -> Result<Self, sqlx::Error> {
+        use sqlx::Row;
+
+        Ok(Self {
+            sample_ref: row.try_get("sample_ref")?,
+            platform: row.try_get("platform")?,
+            content_external_id: row.try_get("content_external_id")?,
+            title: row.try_get("title")?,
+            author_name: row.try_get("author_name")?,
+            cover_local_asset_path: row.try_get("cover_local_asset_path")?,
+            like_count: row.try_get("like_count")?,
+            collect_count: row.try_get("collect_count")?,
+            comment_count: row.try_get("comment_count")?,
+            published_on: row.try_get("published_on")?,
+            keyword: row.try_get("keyword")?,
+            sort_order: row.try_get("sort_order")?,
+            last_observed_at: row.try_get("last_observed_at")?,
+            display_name: row.try_get("display_name")?,
+            note_count: row.try_get("note_count")?,
+            observed_times: row.try_get("observed_times")?,
+            first_seen_at: row.try_get("first_seen_at")?,
+            first_like_count: row.try_get("first_like_count")?,
+        })
+    }
+}
 
 /// 一条样本的展示形状。
 ///
@@ -212,7 +255,7 @@ type CrossIndustrySampleRow = (
 /// 跨行业样本大量来自列表面，互动数缺失是常态，把它显示成 0 会让「没看到」变成
 /// 「确实是零」——这正是本项目在评论数上刚踩过的坑。
 fn sample_item(row: CrossIndustrySampleRow) -> Value {
-    let (
+    let CrossIndustrySampleRow {
         sample_ref,
         platform,
         content_external_id,
@@ -226,9 +269,12 @@ fn sample_item(row: CrossIndustrySampleRow) -> Value {
         keyword,
         sort_order,
         last_observed_at,
-        target_display_name,
+        display_name: target_display_name,
         note_count,
-    ) = row;
+        observed_times,
+        first_seen_at,
+        first_like_count,
+    } = row;
     json!({
         "identity": {
             "sampleRef": sample_ref,
@@ -258,6 +304,12 @@ fn sample_item(row: CrossIndustrySampleRow) -> Value {
             "sortOrder": sort_order,
             "observationTarget": target_display_name,
             "lastObservedAt": last_observed_at,
+            // 这篇被看到过几次，以及第一次看到时是什么样。样本行只留得下最近一次的
+            // 读数，所以「涨了还是一直如此」只能由观察记录回答。
+            "observedTimes": observed_times,
+            "firstSeenAt": first_seen_at,
+            "firstLikeCount": first_like_count,
+            "firstLikeCountState": count_state(first_like_count),
         },
         "cover": {
             "localAssetUrl": cover_local_asset_path,
@@ -286,23 +338,26 @@ mod tests {
     use super::*;
 
     fn row(title: Option<&str>, likes: Option<i64>) -> CrossIndustrySampleRow {
-        (
-            Uuid::new_v4(),
-            "xhs".to_owned(),
-            "note-1".to_owned(),
-            title.map(str::to_owned),
-            Some("某作者".to_owned()),
-            None,
-            likes,
-            None,
-            None,
-            None,
-            Some("学不进去".to_owned()),
-            Some("most_liked".to_owned()),
-            Some("2026-09-07 10:00".to_owned()),
-            None,
-            0,
-        )
+        CrossIndustrySampleRow {
+            sample_ref: Uuid::new_v4(),
+            platform: "xhs".to_owned(),
+            content_external_id: "note-1".to_owned(),
+            title: title.map(str::to_owned),
+            author_name: Some("某作者".to_owned()),
+            cover_local_asset_path: None,
+            like_count: likes,
+            collect_count: None,
+            comment_count: None,
+            published_on: None,
+            keyword: Some("学不进去".to_owned()),
+            sort_order: Some("most_liked".to_owned()),
+            last_observed_at: Some("2026-09-07 10:00".to_owned()),
+            display_name: None,
+            note_count: 0,
+            observed_times: 1,
+            first_seen_at: Some("2026-09-07 10:00".to_owned()),
+            first_like_count: likes,
+        }
     }
 
     #[test]

@@ -1132,13 +1132,55 @@ async fn load_material_targets(
     .bind(work_order_ref)
     .fetch_all(&mut **transaction)
     .await?;
-    Ok(rows
+    let mut targets: Vec<MaterialTarget> = rows
         .into_iter()
         .map(|row| MaterialTarget {
             content_external_id: row.0,
             comment_limit: row.1,
             reply_expand_limit: row.2,
             acquire_media: row.3,
+        })
+        .collect();
+    targets.extend(load_cross_industry_targets(transaction, work_order_ref).await?);
+    Ok(targets)
+}
+
+/// 这张工单要补详情的跨行业样本。
+///
+/// 与证据侧那张作用域表分开存（`0074`），到这里合成同一串逐篇任务：对插件而言，「按已知
+/// 作品去取它的详情」是同一件事，材料最终落哪张表由落库那一刻的领域判定决定，不由任务
+/// 形状决定。
+///
+/// **只展开详情**：评论、回复、媒体各自是另一次明确的决定。把它们默认打开，等于让一次
+/// 「补详情」顺手授权了三类范围更大的采集。
+async fn load_cross_industry_targets(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    work_order_ref: Uuid,
+) -> Result<Vec<MaterialTarget>, LeaseError> {
+    let schema_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
+    )
+    .fetch_one(&mut **transaction)
+    .await?;
+    if !schema_ready {
+        return Ok(Vec::new());
+    }
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT sample.content_external_id \
+         FROM collection_work_order_cross_industry_target scope \
+         JOIN cross_industry_sample sample USING(sample_ref) \
+         WHERE scope.work_order_ref=$1 ORDER BY scope.ordinal",
+    )
+    .bind(work_order_ref)
+    .fetch_all(&mut **transaction)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|row| MaterialTarget {
+            content_external_id: row.0,
+            comment_limit: 0,
+            reply_expand_limit: 0,
+            acquire_media: false,
         })
         .collect())
 }

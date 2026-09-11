@@ -246,8 +246,26 @@
         lastObservedAt: provenance.lastObservedAt || null,
         observationTarget: provenance.observationTarget || null,
         sortOrder: provenance.sortOrder ?? null,
+        observedTimes: Number.isFinite(provenance.observedTimes) ? provenance.observedTimes : 0,
+        firstSeenAt: provenance.firstSeenAt || null,
+        firstLikeCount: provenance.firstLikeCount ?? null,
+        firstLikeCountState: provenance.firstLikeCountState || 'UNKNOWN',
       },
     };
+  }
+
+  /* 「这篇被看到过几次、第一次看到时多少赞」。样本行只留得下最近一次的读数，所以
+   * 热度到底动没动，只能由观察记录回答；一次也没记到时不编一个「1 次」出来。 */
+  function observationHistoryCopy(item) {
+    const provenance = item?.provenance || {};
+    const times = Number(provenance.observedTimes);
+    if (!Number.isFinite(times) || times < 1) return null;
+    const parts = [`被看到 ${times} 次`];
+    if (provenance.firstLikeCountState === 'KNOWN' && provenance.firstLikeCount !== null) {
+      parts.push(`首次赞 ${Number(provenance.firstLikeCount).toLocaleString('zh-CN')}`);
+    }
+    if (provenance.firstSeenAt) parts.push(`起于 ${compactMoment(provenance.firstSeenAt) || provenance.firstSeenAt}`);
+    return parts.join(' · ');
   }
 
   function stateMeta(state) {
@@ -848,6 +866,8 @@
     if (crossIndustry) {
       side.append(node('strong', 'ev-cross-industry-side-label', '列表级参照物'));
       side.append(node('span', 'ev-cross-industry-side-copy', '不参与本领域判断'));
+      const history = observationHistoryCopy(item);
+      if (history) side.append(node('span', 'ev-cross-industry-side-copy', history));
     } else {
       side.append(material.rail, stateLine(detailState));
     }
