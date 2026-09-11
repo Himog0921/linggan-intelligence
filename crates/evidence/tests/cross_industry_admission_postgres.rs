@@ -331,3 +331,143 @@ async fn a_later_round_without_provenance_keeps_the_recorded_one_intact() {
     );
     assert_eq!(row.get::<Option<i64>, _>("like_count"), Some(12_000));
 }
+
+/// 同一篇笔记同时上了一个词的两个榜时，两次都要留痕。
+///
+/// 样本行只留得下最近一次的口径，所以「同时上了综合榜和点赞榜」这个信号必须另记——
+/// 它正是识别真爆款的依据，而且不记就补不回来（同词同排序隔两天重合率只有 5%~20%）。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_note_seen_on_two_boards_of_one_keyword_is_recorded_on_both() {
+    let database = proof_database("cross_industry_sample_lane").await;
+    let signed = "https://www.xiaohongshu.com/search_result/note-two-boards?xsec_token=ABboards";
+    for (identity, ranking) in [
+        ("考研自习::most_liked", "most_liked"),
+        ("考研自习::comprehensive", "comprehensive"),
+    ] {
+        submit_external_package(
+            &database,
+            identity,
+            serde_json::json!({"query":"考研自习","ranking":ranking,"scrollRounds":3}),
+            "discovery_search",
+            search_coverage("考研自习", 1),
+            vec![discovery_card(
+                "note-two-boards",
+                "两个榜都上了",
+                "3.1万",
+                signed,
+            )],
+        )
+        .await;
+    }
+
+    // 材料层仍然只有一行：去重的是笔记，不是榜。
+    let samples: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM cross_industry_sample WHERE content_external_id='note-two-boards'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(samples, 1, "同一篇笔记在材料层只该有一行");
+
+    let boards: Vec<String> = sqlx::query_scalar(
+        "SELECT lane.sort_order FROM cross_industry_sample_lane lane \
+         JOIN cross_industry_sample sample USING (sample_ref) \
+         WHERE sample.content_external_id='note-two-boards' AND lane.keyword='考研自习' \
+         ORDER BY lane.sort_order",
+    )
+    .fetch_all(database.pool())
+    .await
+    .expect("lane rows are readable");
+    assert_eq!(
+        boards,
+        vec!["comprehensive".to_owned(), "most_liked".to_owned()],
+        "两个榜都要留痕，而不是后一个把前一个盖掉"
+    );
+
+    // 样本行上的口径仍是最近一次看到它的那个维度——两者各司其职。
+    let latest: Option<String> = sqlx::query_scalar(
+        "SELECT sort_order FROM cross_industry_sample WHERE content_external_id='note-two-boards'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(latest.as_deref(), Some("comprehensive"));
+}
+
+/// 没有采样口径的那一轮不该在任何榜上留痕。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_detail_round_without_provenance_joins_no_board() {
+    let database = proof_database("cross_industry_lane_detail_only").await;
+    submit_external_package(
+        &database,
+        "考研自习::detail-only",
+        serde_json::json!({"contentExternalId":"note-detail-only"}),
+        "content_detail",
+        serde_json::json!({
+            "target":{"basis":"known_set","contentExternalId":"note-detail-only"},
+            "layers":[{
+                "capability":"content_detail","observed":1,"attempted":1,"acquired":1,
+                "verified":0,"failed":0,"notAttempted":0,"unknown":0,
+                "stoppedReason":"known_set_complete"
+            }]
+        }),
+        vec![serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-detail-only"},
+            "payload":{"noteId":"note-detail-only","title":"只有详情","likes":"12"}
+        })],
+    )
+    .await;
+
+    let lanes: i64 = sqlx::query_scalar("SELECT count(*) FROM cross_industry_sample_lane")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(lanes, 0, "详情面不是从某个榜上看到这篇的，不该留榜单痕迹");
+}
+
+/// 榜单留痕的领域必须与样本一致——由数据库拒绝，不指望每个读取点都记得加条件。
+///
+/// 「按关键词查这张表」是主要读法，而两个领域完全可能用同一个词。复合外键把这件事
+/// 变成写不进去，而不是读出来才发现混了。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_board_row_cannot_claim_a_domain_its_sample_does_not_belong_to() {
+    let database = proof_database("cross_industry_lane_domain_guard").await;
+    submit_external_package(
+        &database,
+        "考研自习::most_liked",
+        serde_json::json!({"query":"考研自习","ranking":"most_liked","scrollRounds":3}),
+        "discovery_search",
+        search_coverage("考研自习", 1),
+        vec![discovery_card(
+            "note-domain-guard",
+            "领域守卫",
+            "88",
+            "https://www.xiaohongshu.com/search_result/note-domain-guard?xsec_token=ABguard",
+        )],
+    )
+    .await;
+
+    let sample_ref: Uuid = sqlx::query_scalar(
+        "SELECT sample_ref FROM cross_industry_sample WHERE content_external_id='note-domain-guard'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .expect("the sample exists");
+
+    // 另一个真实存在的外部领域（迁移预置的「自闭症干预」）。
+    let wrong_domain = sqlx::query(
+        "INSERT INTO cross_industry_sample_lane (sample_ref,domain_ref,keyword,sort_order) \
+         VALUES ($1,'00000000-0000-4000-8000-000000000003','考研自习','most_liked')",
+    )
+    .bind(sample_ref)
+    .execute(database.pool())
+    .await;
+    assert!(
+        wrong_domain.is_err(),
+        "榜单留痕不得声称一个不属于该样本的领域"
+    );
+}

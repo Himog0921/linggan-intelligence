@@ -385,7 +385,7 @@ async fn upsert_sample(
     source_url: Option<&str>,
     sampling: Option<&SamplingProvenance>,
 ) -> Result<Uuid, ProducerRuntimeError> {
-    sqlx::query_scalar(
+    let sample_ref: Uuid = sqlx::query_scalar(
         // 口径描述的是**最近这一轮是怎么看到它的**：同一篇笔记这周由「最多点赞」带回、
         // 下周由「综合」带回，该记的就是最近那一次。所以带口径的这一轮整套覆盖。
         //
@@ -441,5 +441,51 @@ async fn upsert_sample(
     .bind(sampling.and_then(|sampling| sampling.actual_count))
     .fetch_one(&mut **tx)
     .await
-    .map_err(ProducerRuntimeError::Internal)
+    .map_err(ProducerRuntimeError::Internal)?;
+    record_sample_lane(tx, sample_ref, domain.domain_ref, sampling).await?;
+    Ok(sample_ref)
+}
+
+/// 记下「这篇在这个词的这个榜上出现过」。
+///
+/// 样本行上的口径只留得下**最近一次**是从哪个维度看到它的：同一个词的综合榜和点赞榜
+/// 完全可能收录同一篇，后一轮会把前一轮的口径整套换掉。而「同时上了几个榜」恰恰是
+/// 识别真爆款的信号，也正是关键词建档想要的东西。
+///
+/// 所以按维度逐条留痕，一篇一榜一行。不复制样本事实——标题、互动数、链接仍然只有一份，
+/// 这里只回答出现过与否、第一次和最近一次是什么时候。
+///
+/// 没有口径的那一轮（详情面、评论面，以及未绑定规则的一次性请求）不写：它们不是从
+/// 某个榜上看到这篇的。
+async fn record_sample_lane(
+    tx: &mut Transaction<'_, Postgres>,
+    sample_ref: Uuid,
+    domain_ref: Uuid,
+    sampling: Option<&SamplingProvenance>,
+) -> Result<(), ProducerRuntimeError> {
+    let Some(sampling) = sampling else {
+        return Ok(());
+    };
+    let schema_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample_lane') IS NOT NULL")
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+    if !schema_ready {
+        return Ok(());
+    }
+    sqlx::query(
+        "INSERT INTO cross_industry_sample_lane (sample_ref,domain_ref,keyword,sort_order) \
+         VALUES ($1,$2,$3,$4) \
+         ON CONFLICT (sample_ref,keyword,sort_order) DO UPDATE SET \
+           last_observed_at = scope_001_now()",
+    )
+    .bind(sample_ref)
+    .bind(domain_ref)
+    .bind(sampling.keyword.as_str())
+    .bind(sampling.sort_order.as_str())
+    .execute(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
+    Ok(())
 }

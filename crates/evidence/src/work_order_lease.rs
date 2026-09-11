@@ -741,6 +741,31 @@ fn sampling_directives(sampling: &SamplingPolicy) -> [(&'static str, Option<Valu
     ]
 }
 
+/// 首次建档要下发给插件的东西。
+///
+/// 与巡检口径的区别只有三处，但每一处都是建档之所以是建档的原因：
+/// **不限发布时间**（历史全要）、**不设取前 N**（采到多少交多少）、**排序固定按点赞**
+/// （历史里值得挖的就是高赞那批）。
+///
+/// 下拉次数给足：建档是一次性的，把这个词能翻到的表面翻完，而不是翻三屏就停。真正的
+/// 上限由工单的篇数（授权给的 200）和插件自己的轮次上限一起兜住，不靠这个数收口。
+///
+/// **不设取前 N 是有意的**：截断只会把第 N+1 名之后的永久扔掉，而「点赞最高的前 100」
+/// 是读取时按点赞排序就能得到的事，不必在采集时先砍一刀。
+fn keyword_archive_target(subject: &LeaseSubject) -> Value {
+    json!({
+        "query": search_term(&subject.identity_key, Some(ARCHIVE_RANKING)),
+        "ranking": ARCHIVE_RANKING,
+        "scrollRounds": ARCHIVE_SCROLL_ROUNDS,
+    })
+}
+
+/// 建档按点赞排序。这是建档的目的，不是可配项。
+pub(crate) const ARCHIVE_RANKING: &str = "most_liked";
+
+/// 建档下发的下拉次数。插件会按自己的策略把它放大成实际轮次上限，采够工单篇数即停。
+const ARCHIVE_SCROLL_ROUNDS: i32 = 10;
+
 /// 从关键词目标的身份键里取出真正的搜索词。
 ///
 /// 身份键由 `TargetIdentity::keyword` 拼成 `{词}::{排序}`。优先按规则里的排序去掉后缀——
@@ -1006,6 +1031,19 @@ fn expand_into_tasks(
         ("creator", _) => vec![(
             "profile_discovery",
             json!({ "authorExternalId": subject.identity_key }),
+            subject.max_works,
+        )],
+        // 关键词的首次建档：把这个词的历史高赞挖一遍，**一个词只做一次**。
+        //
+        // 它不读监控规则的口径。规则描述的是「每周该怎么看这个词」——近 7 天、取前 20；
+        // 建档要的恰恰相反：不限时间、能取多少取多少。共用一份口径时，走了建档通道拿回来
+        // 的仍然是最近一周的 20 条，历史那一段等于没做。
+        //
+        // 排序固定为 most_liked：历史里最值得挖的就是高赞那批，这是建档的目的本身，
+        // 不是一个每次都要人选的参数。
+        ("keyword", "deep_archive") => vec![(
+            "discovery_search",
+            keyword_archive_target(subject),
             subject.max_works,
         )],
         _ => vec![(
@@ -1371,6 +1409,45 @@ mod keyword_search_target_tests {
         ] {
             assert!(target.get(absent).is_none(), "{absent} 不该被编出来");
         }
+    }
+
+    /// 建档与巡检读的必须是两套口径。共用一份时，走了建档通道拿回来的仍然是最近一周的
+    /// 20 条——历史那一段等于没做，而这正是关键词建档存在的理由。
+    #[test]
+    fn archiving_a_keyword_ignores_the_patrol_sampling_policy() {
+        let patrol_policy = SamplingPolicy {
+            ranking: Some("most_liked".to_owned()),
+            scroll_rounds: Some(3),
+            top_by_likes: Some(20),
+            published_within_days: Some(7),
+        };
+        let target = keyword_archive_target(&subject("考研自习::most_liked", patrol_policy));
+
+        assert_eq!(target["query"], json!("考研自习"));
+        assert_eq!(target["ranking"], json!(ARCHIVE_RANKING));
+        // 建档要历史全量：**一天都不能限**，否则挖不到这个词真正的高赞。
+        assert!(
+            target.get("publishedWithinDays").is_none(),
+            "建档不限发布时间"
+        );
+        // 也不截断：截断只会把第 N+1 名之后的永久扔掉，而「前 100」是读取时排序的事。
+        assert!(target.get("topByLikes").is_none(), "建档不设取前 N");
+    }
+
+    /// 巡检那一路照旧读规则口径，不受建档改动影响。
+    #[test]
+    fn patrolling_a_keyword_still_follows_the_rule() {
+        let target = keyword_search_target(&subject(
+            "考研自习::most_liked",
+            SamplingPolicy {
+                ranking: Some("most_liked".to_owned()),
+                scroll_rounds: Some(3),
+                top_by_likes: Some(20),
+                published_within_days: Some(7),
+            },
+        ));
+        assert_eq!(target["publishedWithinDays"], json!(7));
+        assert_eq!(target["topByLikes"], json!(20));
     }
 
     /// 名单漏改会让被漏掉的那个口径重新参与身份比对，而插件不会回显它——
