@@ -236,6 +236,15 @@ async fn reserve_semantic_call(
             Ok(None)
         }
         Err(error) => {
+            // The run item intentionally persists the stable failure code, rather than a raw
+            // database message. Keep the underlying SQLx error in the private worker log so a
+            // retryable `model_database_unavailable` receipt remains diagnosable.
+            if let ModelError::Database(source) = &error {
+                eprintln!(
+                    "comment research semantic reservation database error for run {}: {source}",
+                    claim.run_ref
+                );
+            }
             record_run_item_failure(
                 database,
                 claim,
