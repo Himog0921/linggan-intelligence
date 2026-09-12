@@ -3383,8 +3383,8 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
 struct NewTargetForm {
     target_kind: String,
     identity: String,
-    /// 关键词的排序。它是身份的一部分（`{词}::{排序}`），建完就不能改——
-    /// 换排序等于换一个观察面，要另建一个目标。
+    /// 关键词的排序。**它已经不再是身份的一部分**（`0076`）：排序是巡检口径，属于规则，
+    /// 一个词可以同时盯几个榜。这个字段留着只为兼容仍在发送它的旧表单，值被忽略。
     ranking: Option<String>,
     /// 这个目标归属的领域，由新建弹窗当场选定——**不再是「当前正在看的领域」**。
     /// 值为 `__new__` 时表示同时新建一个领域，名字在 `new_domain_name` 里。
