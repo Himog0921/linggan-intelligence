@@ -27,12 +27,12 @@
     $('#connection-list').innerHTML = data.connections.length ? table(['连接','模型','状态'],data.connections.map(connection=>{
       const connectionModels=models.filter(model=>model.connectionVersionRef===connection.versionRef);
       return `<tr><td><strong>${escape(connection.name)}</strong>${note(`${connection.api} · ${connection.baseUrl}`)}<button data-action="edit-connection" data-ref="${connection.connectionRef}">编辑</button><button data-action="toggle-connection" data-ref="${connection.connectionRef}">${connection.enabled?'停用':'启用'}</button></td><td>${connectionModels.length?connectionModels.map(model=>`<p><strong>${escape(model.modelId)}</strong> · ${escape(modelState(model))}<button data-action="test-model" data-ref="${model.modelRef}">测试</button></p>`).join(''):note('尚未添加模型 ID。')}</td><td>${connection.enabled?'已启用':'已停用'}${connection.test?.failureCode?note(connection.test.failureCode):''}</td></tr>`;
-    }).join('')) : note('还没有供应商连接。');
+    })) : note('还没有供应商连接。');
     const embedding = data.embedding;
     $('#embedding-state').textContent = !embedding?.configRef ? '尚未配置向量召回模型。' : embedding.enabled && embedding.qualified ? `已启用：${embedding.modelRef}，${embedding.dimensions} 维。` : embedding.qualified ? '已测试但尚未启用。' : '尚未通过向量测试。';
     const worker = data.worker || {};
     $('#worker-state').textContent = worker.recent ? `执行器最近活动：${date(worker.lastSeenAt)}。` : `执行器未在最近 90 秒报告活动。${worker.lastError ? `上次错误：${worker.lastError}` : ''}`;
-    $('#invocation-list').innerHTML = data.invocations.length ? table(['时间','调用','状态与使用量'],data.invocations.map(row=>`<tr><td>${escape(date(row.createdAt))}</td><td>${escape(row.operation)} · ${escape(row.modelId || '连接测试')}</td><td>${escape(row.state)}${row.failureCode?note(row.failureCode):''}${note(`输入 ${row.inputTokens ?? '未知'} · 输出 ${row.outputTokens ?? '未知'} · 计入 ${row.chargedTokens} Token`)}</td></tr>`)).join('') : note('还没有调用记录。');
+    $('#invocation-list').innerHTML = data.invocations.length ? table(['时间','调用','状态与使用量'],data.invocations.map(row=>`<tr><td>${escape(date(row.createdAt))}</td><td>${escape(row.operation)} · ${escape(row.modelId || '连接测试')}</td><td>${escape(row.state)}${row.failureCode?note(row.failureCode):''}${note(`输入 ${row.inputTokens ?? '未知'} · 输出 ${row.outputTokens ?? '未知'} · 计入 ${row.chargedTokens} Token`)}</td></tr>`)) : note('还没有调用记录。');
   }
   async function load(){state.data=await request(api);render();}
   function open(title, fields, command, testLabel='保存并测试') { state.command=command; $('#dialog-title').textContent=title; $('#dialog-fields').innerHTML=fields; $('#dialog-feedback').textContent=''; $('#dialog-test').textContent=testLabel; $('#dialog-test').hidden=!command.test; $('#model-dialog').showModal(); }
