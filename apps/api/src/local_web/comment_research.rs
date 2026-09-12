@@ -386,7 +386,7 @@ fn page_html(domains: &[ObservationDomain], current: Option<&ObservationDomain>)
         shell::PrimarySurface::Corpus,
         "本机研究",
         &crumb,
-        "<span>已发布研究结果</span>",
+        "<span>当前研究与证据</span>",
         None,
     );
     let side_nav = shell::corpus_side_nav(
@@ -408,6 +408,13 @@ fn page_html(domains: &[ObservationDomain], current: Option<&ObservationDomain>)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{
+        body::{Body, to_bytes},
+        http::Request,
+    };
+    use linggan_intelligence::comment_research_kernel::derive_current_sources;
+    use serde_json::json;
+    use tower::ServiceExt;
 
     #[test]
     fn local_mutations_reject_foreign_origin_and_cross_site_fetches() {
@@ -432,5 +439,118 @@ mod tests {
             assert!(!page.contains(retired));
         }
         assert!(!page.contains("{{"));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+    async fn voices_api_is_readable_without_a_published_result() {
+        let database = super::super::material_projection_tests::proof_database(
+            "comment_research_voices_api_without_result",
+        )
+        .await;
+        let source_ref = seed_ordinary_voice(&database).await;
+        assert_eq!(derive_current_sources(&database, 10).await.unwrap(), 1);
+        let source_author_display_name: Option<String> = sqlx::query_scalar(
+            "SELECT author_display_name FROM linggan_material_comment WHERE material_ref=$1",
+        )
+        .bind(source_ref)
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+        assert_eq!(source_author_display_name.as_deref(), Some("合成读者昵称"));
+        let application = super::super::app_with_database(database);
+
+        // This deliberately has a derivation but no ResultRevision.  The source fact contains a
+        // display name so the HTTP proof can assert that the voices DTO does not expose it.
+        let voices = application
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/local/comment-research/voices?limit=1&offset=0")
+                    .header(header::HOST, "127.0.0.1:3000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(voices.status(), StatusCode::OK);
+        let voices: Value =
+            serde_json::from_slice(&to_bytes(voices.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(voices["view"], "voices");
+        assert_eq!(voices["source"]["kind"], "current_readable_ordinary_user");
+        assert!(voices.get("result").is_none());
+        assert_eq!(voices["page"]["limit"], 1);
+        assert_eq!(voices["page"]["offset"], 0);
+        assert_eq!(voices["page"]["total"], 1);
+        assert_eq!(
+            voices["page"]["items"][0]["sourceRef"],
+            source_ref.to_string()
+        );
+        assert!(
+            voices["page"]["items"][0]
+                .get("authorDisplayName")
+                .is_none()
+        );
+        assert!(voices["page"]["items"][0].get("atomKinds").is_none());
+
+        let overview = application
+            .oneshot(
+                Request::builder()
+                    .uri("/api/local/comment-research/overview")
+                    .header(header::HOST, "127.0.0.1:3000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(overview.status(), StatusCode::NOT_FOUND);
+        let overview: Value =
+            serde_json::from_slice(&to_bytes(overview.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(overview["error"], "comment_research_result_unavailable");
+    }
+
+    async fn seed_ordinary_voice(database: &linggan_storage_postgres::Database) -> uuid::Uuid {
+        let note_id = "voices-api-note";
+        super::super::comment_research_api_fixture::submit_package(
+            database,
+            "content_detail",
+            json!({"contentExternalId":note_id}),
+            json!({
+                "kind":"content_detail",
+                "sourceObject":{"platform":"xhs","type":"content","externalId":note_id},
+                "payload":{
+                    "noteId":note_id,
+                    "title":"合成作品",
+                    "bodyText":"SYNTHETIC / NOT EVIDENCE · 作品上下文",
+                    "authorId":"creator-1",
+                    "authorName":"合成作品作者"
+                }
+            }),
+        )
+        .await;
+        let package_ref = super::super::comment_research_api_fixture::submit_package(
+            database,
+            "comments",
+            json!({"contentExternalId":note_id}),
+            json!({
+                "kind":"comment",
+                "sourceObject":{"platform":"xhs","type":"content","externalId":note_id},
+                "payload":{
+                    "commentId":"voices-api-comment",
+                    "noteId":note_id,
+                    "text":"我想知道怎么开始做作业",
+                    "authorId":"reader-1",
+                    "authorName":"合成读者昵称"
+                }
+            }),
+        )
+        .await;
+        sqlx::query_scalar("SELECT material_ref FROM linggan_material_comment WHERE package_ref=$1")
+            .bind(package_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap()
     }
 }

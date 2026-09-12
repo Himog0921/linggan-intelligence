@@ -27,7 +27,7 @@
   const date = value => value ? new Intl.DateTimeFormat('zh-CN', { dateStyle:'medium', timeStyle:'short', timeZone:'Asia/Shanghai' }).format(new Date(value)) : '未知';
   const count = value => Number(value ?? 0).toLocaleString('zh-CN');
   const pct = value => `${(Number(value ?? 0) * 100).toFixed(1)}%`;
-  const empty = message => `<section class="cr-v1-empty"><h2>暂时没有可显示的研究结果</h2><p>${escape(message)}</p></section>`;
+  const empty = (message, heading = '暂时没有可显示的研究结果') => `<section class="cr-v1-empty"><h2>${escape(heading)}</h2><p>${escape(message)}</p></section>`;
   const table = (head, rows) => `<div class="cr-v1-table-wrap"><table><thead><tr>${head.map(item => `<th scope="col">${escape(item)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
 
   async function request(path, options = {}) {
@@ -103,8 +103,27 @@
 
   function renderVoices(data) {
     const page = data.page || {items:[], total:0};
-    result.innerHTML = `<section class="cr-v1-intro"><h2>用户原声</h2><p>这里仅呈现已通过身份过滤的普通用户评论。原文是证据；研究正文是独立派生，不会改写原文，也不显示向量准备等实现状态。</p>${resultMeta(data)}<p class="cr-v1-result-meta">本版共 ${count(page.total)} 条冻结输入。</p></section>` +
-      (page.items.length ? table(['评论原文', '研究正文', '作品与观察时间', '研究结果'], page.items.map(item => `<tr><td><blockquote>${escape(item.commentText || '正文尚未取得')}</blockquote></td><td><p>${escape(item.researchText || '未形成研究正文')}</p><span class="cr-v1-badge">普通用户</span></td><td><strong>${escape(item.workTitle || '作品标题未知')}</strong><p>${escape(date(item.observedAt))}</p></td><td>${escape(item.researchOutcome || '状态未知')}<p>${(item.atomKinds || []).map(escape).join(' · ') || '未形成 Atom'}</p></td></tr>`)) : empty('本版没有可显示的原声。'));
+    result.innerHTML = `<section class="cr-v1-intro"><h2>用户原声</h2><p>这里呈现当前可读、已通过身份与清洗过滤的普通用户评论。原文是证据；研究正文是独立派生，不会改写原文。</p><p class="cr-v1-result-meta">当前共 ${count(page.total)} 条可读用户原声。没有对应研究运行的评论会如实显示为“尚未进入研究”。</p></section>` +
+      (page.items.length ? table(['评论原文', '研究正文', '作品与观察时间', '最新研究状态'], page.items.map(item => `<tr><td><blockquote>${escape(item.commentText || '正文尚未取得')}</blockquote></td><td><p>${escape(item.researchText || '未形成研究正文')}</p><span class="cr-v1-badge">普通用户</span></td><td><strong>${escape(item.workTitle || '作品标题未知')}</strong><p>${escape(date(item.observedAt))}</p></td><td>${escape(voiceResearchStatusLabel(item.researchStatus))}<p>${escape(voiceResearchDetail(item.researchStatus, item.researchFailureCode))}</p></td></tr>`)) : empty('当前没有可读的普通用户原声。作者回复、身份未知及已被清洗剔除的内容不会混入这里。', '暂时没有可显示的用户原声'));
+  }
+
+  function voiceResearchStatusLabel(state) {
+    return ({
+      unresearched:'尚未进入研究', pending:'等待研究', running:'正在研究', retryable:'等待重试',
+      succeeded:'已提取研究信号', no_signal:'未提取到研究信号', incompatible:'无法按当前合同研究',
+      unrecoverable:'无法继续研究', model_failed:'模型研究失败', restricted:'已限制', cancelled:'本轮已取消'
+    })[state] || '研究状态未知';
+  }
+
+  function voiceResearchDetail(state, failureCode) {
+    if (failureCode) return itemFailureLabel(failureCode);
+    return ({
+      unresearched:'尚未创建该评论的研究任务', pending:'已进入研究队列', running:'正在执行本轮研究',
+      retryable:'上次未完成，正在等待重试', succeeded:'已完成本轮研究',
+      no_signal:'本轮未提取到可归并的研究信号', incompatible:'当前输入无法按研究合同处理',
+      unrecoverable:'当前研究无法继续处理', model_failed:'模型研究未完成',
+      restricted:'该评论已被限制用于研究', cancelled:'本轮研究已取消'
+    })[state] || '尚未取得可显示的研究状态说明';
   }
 
   function renderProblems(data) {
