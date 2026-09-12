@@ -479,9 +479,7 @@ fn target_row(
         facts.keyword_details_pending,
         target.target_ref,
     );
-    let counts = facts
-        .keyword_counts
-        .and_then(|counts| counts.get(&target.target_ref));
+
     let is_creator = target.target_kind == "creator";
     let name = target
         .display_name
@@ -567,8 +565,8 @@ fn target_row(
                 <div class="c-tg-actions" role="cell" data-row-no-open>{actions}{secondary}</div>"#,
             rule = keyword_archive_state(keyword_archive),
             patrol = patrol_state(target, observation),
-            hits = keyword_hit_count(counts),
-            details = keyword_detail_progress(counts),
+            hits = keyword_hit_count(facts.keyword_counts, target.target_ref),
+            details = keyword_detail_progress(facts.keyword_counts, target.target_ref),
             recent_change = keyword_recent_change(observation),
             last = escape(last),
             next = escape(&next),
@@ -919,14 +917,34 @@ fn keyword_archive_state(archive: super::target_drawer::KeywordArchiveRead) -> S
 }
 
 /// 这个词命中了多少篇作品。
-fn keyword_hit_count(counts: Option<&linggan_evidence::KeywordCatalogCounts>) -> String {
-    counts.map_or_else(|| "读不到".to_owned(), |counts| counts.works.to_string())
+///
+/// **「查到了，这个目标一篇都没有」与「没查到」是两件事。** 计数是批量读的：读成功时
+/// 返回一张表，一个还没采过的目标根本不会出现在表里——那是 0，不是读不到。此前这两种
+/// 情况都落在同一个 `None` 上，于是刚建好的关键词显示「读不到」，看着像坏了。
+fn keyword_hit_count(
+    counts: Option<&HashMap<uuid::Uuid, linggan_evidence::KeywordCatalogCounts>>,
+    target_ref: uuid::Uuid,
+) -> String {
+    match counts {
+        None => "读不到".to_owned(),
+        Some(counts) => counts
+            .get(&target_ref)
+            .map_or(0, |counts| counts.works)
+            .to_string(),
+    }
 }
 
 /// 详情补到哪儿了。与创作者的「详情进度」同一种写法：`已取得 / 命中`。
-fn keyword_detail_progress(counts: Option<&linggan_evidence::KeywordCatalogCounts>) -> String {
-    match counts {
-        None => "读不到".to_owned(),
+fn keyword_detail_progress(
+    counts: Option<&HashMap<uuid::Uuid, linggan_evidence::KeywordCatalogCounts>>,
+    target_ref: uuid::Uuid,
+) -> String {
+    let Some(counts) = counts else {
+        return "读不到".to_owned();
+    };
+    // 一篇都还没命中时不写 `0 / 0`——那读起来像「采过了，一篇都没有」。
+    match counts.get(&target_ref) {
+        None => "—".to_owned(),
         Some(counts) if counts.works == 0 => "—".to_owned(),
         Some(counts) => format!("{} / {}", counts.details, counts.works),
     }
@@ -1903,6 +1921,53 @@ mod queue_toast_tests {
                 "{code} 的回执还在指着一句已经删掉的行内提示"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod keyword_counts_tests {
+    use super::{keyword_detail_progress, keyword_hit_count};
+    use linggan_evidence::KeywordCatalogCounts;
+    use std::collections::HashMap;
+
+    /// **「查到了，这个目标一篇都没有」与「没查到」是两件事。**
+    ///
+    /// 计数是批量读的：读成功时返回一张表，一个还没采过的目标根本不会出现在表里——那是 0，
+    /// 不是读不到。此前两种情况共用一个 `None`，于是刚建好的关键词显示「读不到」，
+    /// 看着像坏了；而真读不到时又说不出来。
+    #[test]
+    fn a_target_absent_from_a_successful_read_has_zero_not_unknown() {
+        let target_ref = uuid::Uuid::new_v4();
+        let empty = HashMap::new();
+        assert_eq!(keyword_hit_count(Some(&empty), target_ref), "0");
+        assert_eq!(keyword_detail_progress(Some(&empty), target_ref), "—");
+    }
+
+    /// 读失败才说读不到。
+    #[test]
+    fn an_unreadable_count_says_so() {
+        let target_ref = uuid::Uuid::new_v4();
+        assert_eq!(keyword_hit_count(None, target_ref), "读不到");
+        assert_eq!(keyword_detail_progress(None, target_ref), "读不到");
+    }
+
+    /// 有命中时按「已取得 / 命中」写，与创作者那一列同一种写法。
+    #[test]
+    fn a_counted_target_reads_as_details_over_hits() {
+        let target_ref = uuid::Uuid::new_v4();
+        let mut counts = HashMap::new();
+        counts.insert(
+            target_ref,
+            KeywordCatalogCounts {
+                works: 218,
+                details: 60,
+            },
+        );
+        assert_eq!(keyword_hit_count(Some(&counts), target_ref), "218");
+        assert_eq!(
+            keyword_detail_progress(Some(&counts), target_ref),
+            "60 / 218"
+        );
     }
 }
 
