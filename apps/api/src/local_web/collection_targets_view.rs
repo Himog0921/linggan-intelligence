@@ -41,6 +41,7 @@ pub fn render_stored_targets(
         error,
         None,
         None,
+        None,
         // 这条入口不读那三件事——读不到就如实是「读不到」，不假装查过。
         TargetListFacts::default(),
         list_context,
@@ -54,6 +55,8 @@ pub fn render_stored_targets_with_observation(
     completeness: Option<&HashMap<String, ArchiveCompleteness>>,
     observation: Option<&HashMap<uuid::Uuid, TargetObservationSummary>>,
     error: Option<&str>,
+    // 刚排进队列的那张工单前面还有几个。只喂给右下角那条回执。
+    ahead: Option<i64>,
     // 打开了删除确认面板时，这里带着「会删掉什么、会留下什么」的真实数字。
     deletion: Option<&linggan_evidence::TargetDeletionPreview>,
     deletion_target: Option<uuid::Uuid>,
@@ -123,7 +126,7 @@ pub fn render_stored_targets_with_observation(
             }
             _ => String::new(),
         },
-        failure = action_feedback_markup(error),
+        failure = action_feedback_markup(error, ahead),
     );
     replace_target_state(base, &list)
 }
@@ -140,22 +143,6 @@ pub struct TargetListFacts<'facts> {
     pub keyword_archives: Option<&'facts std::collections::HashSet<uuid::Uuid>>,
     /// 还有作品等着补详情的关键词目标。`None` 同样是「没读出来」，不是「都补齐了」。
     pub keyword_details_pending: Option<&'facts std::collections::HashSet<uuid::Uuid>>,
-    /// 每个目标当前排在队列第几。
-    pub queue: QueuePositions<'facts>,
-}
-
-/// 队列位置这一问的三种结果。
-///
-/// **「没问」「问了读不到」「问到了」是三件事**，压成两态必然有一种被谎报：把读不到
-/// 显示成没有排队，人会以为请求根本没发出去而再点一次——那正是这个功能要消除的误会。
-#[derive(Clone, Copy, Default)]
-pub enum QueuePositions<'facts> {
-    /// 这条入口不读队列。页面对此不发表意见。
-    #[default]
-    NotRead,
-    /// 问了，但读不到。要如实说出来。
-    Unavailable,
-    Known(&'facts HashMap<uuid::Uuid, linggan_evidence::TargetQueuePosition>),
 }
 
 /// 把两次批量查询合成这一行的建档状态。
@@ -249,7 +236,7 @@ fn replace_target_state(base: &str, replacement: &str) -> String {
 
 /// 上一次动作的回执必须看得见。跳转回来却什么都不说，会让人以为动作成功了——那比
 /// 「点了没反应」更糟，因为它会让人以为系统里正在跑一件其实没跑的事。
-fn action_feedback_markup(error: Option<&str>) -> String {
+fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
     let Some(code) = error else {
         return String::new();
     };
@@ -282,12 +269,12 @@ fn action_feedback_markup(error: Option<&str>) -> String {
         "archive_requested" => (
             "c-src-feedback c-src-feedback-ok",
             "建档已入队",
-            "已记录这次建立档案请求。系统会先取回作品链接（创作者取主页目录，关键词按排序翻搜索面），再逐篇补齐详情；目录和详情只会在接纳真实回执后更新。执行要等一个空闲工位，可能需要几分钟——这一行的按钮旁会写着你排在第几，数字变小就是在往前走，不用再点一次。",
+            "已记录这次建立档案请求。系统会先取回作品链接（创作者取主页目录，关键词按排序翻搜索面），再逐篇补齐详情；目录和详情只会在接纳真实回执后更新。执行要等一个空闲工位，可能需要几分钟，不用再点一次。",
         ),
         "keyword_detail_requested" => (
             "c-src-feedback c-src-feedback-ok",
             "已排入详情补采",
-            "这个词的链接已经拿到，正在按点赞从高到低逐篇补正文与发布时间。一次补三篇，补完再点一次继续。执行要等一个空闲工位，这一行的按钮旁会写着你排在第几。",
+            "这个词的链接已经拿到，正在按点赞从高到低逐篇补正文与发布时间。一次补三篇，补完之后调度会自己接着补下一批。执行要等一个空闲工位。",
         ),
         "keyword_detail_complete" => (
             "c-src-feedback c-src-feedback-ok",
@@ -431,8 +418,16 @@ fn action_feedback_markup(error: Option<&str>) -> String {
     // **失败与警示不自动消失**——没成功的事必须让人看清楚，自动收走等于把坏消息藏起来。
     // 消失由 CSS 动画完成，不依赖 JS：脚本没跑起来时，一个永不消失的浮层比横幅更糟。
     if class == "c-src-feedback c-src-feedback-ok" {
+        // 排队位置只在这条右下角回执里说一次。**不在每一行旁边常驻一句描述**：那行字
+        // 挤在操作按钮之间，窄一点就和按钮叠在一起，而它回答的本来就是「我刚点的那下
+        // 什么时候轮到」——看过即可。
+        let queued = match ahead {
+            Some(ahead) if ahead > 0 => format!("前面还有 {ahead} 个在排队。"),
+            Some(_) => "它就排在最前面。".to_owned(),
+            None => String::new(),
+        };
         return format!(
-            r#"<p class="c-tg-toast" role="status"><b>{heading}</b>{explanation}</p>"#,
+            r#"<p class="c-tg-toast" role="status"><b>{heading}</b>{explanation}{queued}</p>"#,
             heading = heading,
             explanation = escape(explanation),
         );
@@ -462,7 +457,6 @@ fn target_row(
         facts.keyword_details_pending,
         target.target_ref,
     );
-    let queue = facts.queue;
     let is_creator = target.target_kind == "creator";
     let name = target
         .display_name
@@ -533,7 +527,7 @@ fn target_row(
             recent_change = creator_recent_change(observation),
             last = escape(last),
             next = escape(&next),
-            actions = row_action(target, true, archive, keyword_archive, queue, list_context),
+            actions = row_action(target, true, archive, keyword_archive, list_context),
             secondary = row_secondary_actions(target, list_context),
         )
     } else {
@@ -552,7 +546,7 @@ fn target_row(
             recent_change = keyword_recent_change(observation),
             last = escape(last),
             next = escape(&next),
-            actions = row_action(target, false, archive, keyword_archive, queue, list_context),
+            actions = row_action(target, false, archive, keyword_archive, list_context),
             secondary = row_secondary_actions(target, list_context),
         )
     };
@@ -947,11 +941,9 @@ fn row_action(
     is_creator: bool,
     archive: super::target_drawer::TargetArchiveRead<'_>,
     keyword_archive: super::target_drawer::KeywordArchiveRead,
-    queue: QueuePositions<'_>,
     list_context: super::target_drawer::TargetListContext<'_>,
 ) -> String {
     use super::target_drawer::TargetPrimaryAction;
-    let queued = queue_position_markup(queue, target.target_ref);
     let action =
         super::target_drawer::target_primary_action(target, is_creator, archive, keyword_archive);
     match action {
@@ -1007,44 +999,11 @@ fn row_action(
             let focus_id = format!("target-{}", target.target_ref);
             let fields = list_context.return_fields(None, None, Some(&focus_id));
             format!(
-                r#"<form method="post" action="/collection/targets/archive">{fields}<button class="c-tg-act" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>{queued}"#,
+                r#"<form method="post" action="/collection/targets/archive">{fields}<button class="c-tg-act" type="submit" name="row_target_ref" value="{target_ref}">{label}</button></form>"#,
                 target_ref = target.target_ref,
             )
         }
     }
-}
-
-/// 「已经排上队了，前面还有几个」。
-///
-/// 发起之后到插件真正开始动手之间有一段沉默——实测可以到三分半。那段时间里页面上没有
-/// 任何东西在动，人无法分辨「在排队」和「压根没发出去」，于是会再点一次。这一行把等待
-/// 变成一个能看见、会变小的数。
-///
-/// 三种情况分开说，因为等的东西不一样：前面还有别人（等工位轮到）、就排在最前面（等
-/// 一个空闲工位）、以及只有到点才轮得到的定时工单（等时间，不等工位）。
-fn queue_position_markup(queue: QueuePositions<'_>, target_ref: uuid::Uuid) -> String {
-    let queue = match queue {
-        // 没问就不说。每一行都挂一句「未在排队」是纯噪音。
-        QueuePositions::NotRead => return String::new(),
-        QueuePositions::Unavailable => {
-            return r#"<span class="c-tg-queued">排队情况读不到</span>"#.to_owned();
-        }
-        QueuePositions::Known(positions) => match positions.get(&target_ref) {
-            Some(position) => position,
-            // 问到了，这个目标不在队列里。这是事实，同样不必多说一句。
-            None => return String::new(),
-        },
-    };
-    let label = if queue.ready > 0 && queue.ahead > 0 {
-        format!("排队中 · 前面 {} 个", queue.ahead)
-    } else if queue.ready > 0 {
-        "排队中 · 下一个就是它".to_owned()
-    } else if queue.waiting_for_time > 0 {
-        "已入队 · 等到点".to_owned()
-    } else {
-        return String::new();
-    };
-    format!(r#"<span class="c-tg-queued">{label}</span>"#)
 }
 
 /// 小红书号优先，采不到才退回平台 ID——小红书号是人能对上的那个。
@@ -1299,6 +1258,7 @@ mod tests {
             Some(&HashMap::new()),
             None,
             None,
+            None,
             Some(&preview),
             Some(creator.target_ref),
             TargetListFacts::default(),
@@ -1412,14 +1372,15 @@ mod tests {
     #[test]
     fn archive_progress_failures_use_business_language() {
         assert!(
-            action_feedback_markup(Some("archive_in_progress")).contains("已有一批作品正在补齐")
+            action_feedback_markup(Some("archive_in_progress"), None)
+                .contains("已有一批作品正在补齐")
         );
         assert!(
-            action_feedback_markup(Some("archive_nothing_to_continue"))
+            action_feedback_markup(Some("archive_nothing_to_continue"), None)
                 .contains("当前作品目录没有待补详情")
         );
-        assert!(action_feedback_markup(Some("archive_requested")).contains("建档已入队"));
-        assert!(action_feedback_markup(Some("archive_merge")).contains("未重复提交"));
+        assert!(action_feedback_markup(Some("archive_requested"), None).contains("建档已入队"));
+        assert!(action_feedback_markup(Some("archive_merge"), None).contains("未重复提交"));
     }
 
     #[test]
@@ -1842,76 +1803,63 @@ mod keyword_archive_action_tests {
 }
 
 #[cfg(test)]
-mod queue_position_tests {
-    use super::{QueuePositions, queue_position_markup};
-    use linggan_evidence::TargetQueuePosition;
-    use std::collections::HashMap;
+mod queue_toast_tests {
+    use super::action_feedback_markup;
 
-    fn known(
-        ahead: i64,
-        ready: i64,
-        waiting_for_time: i64,
-    ) -> (uuid::Uuid, HashMap<uuid::Uuid, TargetQueuePosition>) {
-        let target_ref = uuid::Uuid::new_v4();
-        let mut positions = HashMap::new();
-        positions.insert(
-            target_ref,
-            TargetQueuePosition {
-                ahead,
-                ready,
-                waiting_for_time,
-            },
-        );
-        (target_ref, positions)
-    }
-
-    fn markup(ahead: i64, ready: i64, waiting_for_time: i64) -> String {
-        let (target_ref, positions) = known(ahead, ready, waiting_for_time);
-        queue_position_markup(QueuePositions::Known(&positions), target_ref)
-    }
-
-    /// 排队要说得出**前面还有几个**。
+    /// 排队位置只在右下角那条回执里说一次，不在行里常驻一句描述。
     ///
-    /// 从点下去到插件动手实测等过 213 秒。那段时间里页面上什么都不动，人无法分辨
-    /// 「在排队」和「没发出去」，于是会再点一次。
+    /// 回执正文也不能再提"行里那句话"——那行字已经删了，留着就是一句谎话。
+    ///
+    /// 那行字此前挤在操作按钮之间，窄一点就和「补采缺口」叠在一起——一个用来消除焦虑的
+    /// 提示，自己先变成了显示故障。
     #[test]
-    fn a_queued_request_says_how_many_are_ahead() {
-        assert!(markup(3, 1, 0).contains("前面 3 个"));
+    fn the_success_receipt_says_how_many_are_ahead() {
+        let markup = action_feedback_markup(Some("archive_requested"), Some(3));
+        assert!(markup.contains("c-tg-toast"), "排队位置属于右下角那条回执");
+        assert!(markup.contains("前面还有 3 个"));
     }
 
-    /// 排在最前面时不能写「前面 0 个」——那读起来像「没有在排队」。
+    /// 排在最前面时不说「前面还有 0 个」——那读起来像没在排队。
     #[test]
     fn the_front_of_the_queue_is_not_written_as_zero_ahead() {
-        let markup = markup(0, 1, 0);
-        assert!(markup.contains("下一个就是它"));
+        let markup = action_feedback_markup(Some("archive_requested"), Some(0));
+        assert!(markup.contains("就排在最前面"));
         assert!(!markup.contains("0 个"));
     }
 
-    /// 等时间的工单不占当前队列位置，说法也不同：它等的不是工位。
+    /// 读不到位置就不说这句，其余回执照常。**不编一个数字**：人会拿它估还要等多久。
     #[test]
-    fn a_scheduled_order_waits_for_its_time_not_for_a_station() {
-        assert!(markup(0, 0, 2).contains("等到点"));
+    fn an_unknown_position_stays_silent_without_losing_the_receipt() {
+        let markup = action_feedback_markup(Some("archive_requested"), None);
+        assert!(markup.contains("建档已入队"));
+        assert!(!markup.contains("前面还有"));
+        assert!(!markup.contains("排在最前面"));
     }
 
-    /// 队列里没有它，就什么都不显示。每一行都挂一句「未在排队」是纯噪音。
+    /// 失败回执不是右下角角标，也不带排队位置——没成功的事不该自动消失。
     #[test]
-    fn nothing_is_claimed_when_there_is_no_queued_work() {
-        assert!(markup(0, 0, 0).is_empty());
-        let (target_ref, _) = known(0, 0, 0);
-        assert!(
-            queue_position_markup(QueuePositions::Known(&HashMap::new()), target_ref).is_empty()
-        );
+    fn a_failure_is_not_turned_into_a_disappearing_toast() {
+        let markup = action_feedback_markup(Some("archive_refuse"), Some(3));
+        assert!(!markup.contains("c-tg-toast"));
+        assert!(!markup.contains("前面还有"));
     }
 
-    /// **读不到要说读不到。**
+    /// 行里不再有任何常驻的排队描述——样式与标记都不该留着。
     ///
-    /// 把它压成「没有排队」，人会以为请求根本没发出去而再点一次——那正是这个数字
-    /// 本来要消除的误会。而「这条入口没问队列」又是另一回事，不该冒充读取失败。
+    /// 这条断言第一版查错了常量（查的是 `COLLECTION_WORKSPACE_CSS`，而那条规则住在
+    /// `TARGET_DRAWER_CSS`），于是样式还在、断言照绿。查的东西不对，断言再多也是装饰。
+    ///
+    /// 第二版想顺便查渲染标记，写成了「读这个文件自己的源码」——结果断言自己那行字
+    /// 就命中了它要找的字符串，永远为真。自引用的检查不是检查。
     #[test]
-    fn an_unreadable_queue_says_so_while_an_unasked_one_stays_silent() {
-        let target_ref = uuid::Uuid::new_v4();
-        assert!(queue_position_markup(QueuePositions::Unavailable, target_ref).contains("读不到"));
-        assert!(queue_position_markup(QueuePositions::NotRead, target_ref).is_empty());
+    fn no_row_carries_a_standing_queue_sentence() {
+        assert!(!crate::local_web::TARGET_DRAWER_CSS.contains("c-tg-queued"));
+        for code in ["archive_requested", "keyword_detail_requested"] {
+            assert!(
+                !action_feedback_markup(Some(code), Some(3)).contains("按钮旁"),
+                "{code} 的回执还在指着一句已经删掉的行内提示"
+            );
+        }
     }
 }
 
@@ -1981,7 +1929,7 @@ mod domain_gate_tests {
     /// 参照物一旦混进证据，之后任何读证据的地方都不会再提醒。
     #[test]
     fn the_missing_domain_notice_explains_what_the_choice_decides() {
-        let markup = action_feedback_markup(Some("target_domain_required"));
+        let markup = action_feedback_markup(Some("target_domain_required"), None);
         assert!(markup.contains("还没选领域"));
         // 提示必须说清后果，而不只是「请选择」——不然人不知道为什么这一项不能省。
         assert!(markup.contains("证据库"));
@@ -1991,7 +1939,7 @@ mod domain_gate_tests {
     /// 建档提示此前只说「主页作品链接」，那是创作者的说法；关键词翻的是搜索面。
     #[test]
     fn the_archive_notice_covers_both_kinds_of_target() {
-        let markup = action_feedback_markup(Some("archive_requested"));
+        let markup = action_feedback_markup(Some("archive_requested"), None);
         assert!(markup.contains("创作者取主页目录"));
         assert!(markup.contains("关键词按排序翻搜索面"));
         // 执行要排队等空闲工位，实测等过 213 秒。不说这件事，人会以为点了没反应。
@@ -2011,7 +1959,7 @@ mod domain_unassigned_notice_tests {
     /// 流转**）。三条都不是真的，而这一轮要解决的恰恰就是这类看不懂。
     #[test]
     fn the_unassigned_domain_notice_names_the_cause_and_the_next_step() {
-        let markup = action_feedback_markup(Some("target_domain_unassigned"));
+        let markup = action_feedback_markup(Some("target_domain_unassigned"), None);
         assert!(markup.contains("还没归属领域"));
         assert!(markup.contains("采集没有开始"), "要先说清什么都没发生");
         assert!(markup.contains("先给这个目标指定领域"), "要给出下一步");

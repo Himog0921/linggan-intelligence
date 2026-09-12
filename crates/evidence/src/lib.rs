@@ -37,7 +37,8 @@ mod material_social_read;
 mod material_storage_key;
 mod media_acquisition;
 pub use keyword_archive_detail::{
-    KeywordDetailAdvance, advance_keyword_archive_detail, keyword_targets_pending_detail,
+    KeywordDetailAdvance, KeywordDetailTickSummary, advance_keyword_archive_detail,
+    keyword_targets_pending_detail, run_keyword_archive_details,
 };
 
 pub use queue_position::{TargetQueuePosition, read_target_queue_positions};
@@ -174,7 +175,7 @@ pub use station_read::{
 };
 pub use target_catalog::{
     CatalogDetailState, CatalogSource, CatalogWork, CreatorDirectoryProjection,
-    KeywordHitProjection, read_creator_directory, read_keyword_hits,
+    KeywordHitProjection, read_creator_directory, read_cross_industry_hits, read_keyword_hits,
 };
 pub use target_enrichment::{
     TargetEnrichmentError, TargetSyncOutcome, sync_target_from_author_profile,

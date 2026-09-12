@@ -10,8 +10,12 @@ mod cross_industry;
 #[path = "support/material_fixture.rs"]
 mod fixture;
 
-use cross_industry::{discovery_card, discovery_card_at, search_coverage, submit_external_package};
+use cross_industry::{
+    discovery_card, discovery_card_at, search_coverage, submit_external_package,
+    submit_package_for_target,
+};
 use fixture::proof_database;
+use linggan_evidence::{CatalogDetailState, read_cross_industry_hits, read_keyword_hits};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -315,6 +319,152 @@ async fn seeing_a_note_again_appends_an_observation_without_forking_the_sample()
     .await
     .unwrap();
     assert_eq!(current, Some(15_000));
+}
+
+/// 跨行业目标的检查器要看得见自己的作品。
+///
+/// 外部领域的材料按 `0044` 的隔离住在 `cross_industry_sample`，证据侧一条都没有。检查器
+/// 此前只读证据侧，于是跨行业目标的作品页永远是「0 条可查证命中」——采回来两百多篇，
+/// 界面上一篇都看不到，而且看不出是没采到还是读错了地方。
+///
+/// 这条用例同时锁住名次那一列的类型：`discovery_order` 是 integer，展示合同上是 bigint。
+/// 不显式转换时**只有在真的有观察记录的目标上**才会解码失败——空库一路绿灯，线上一点就崩。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_cross_industry_target_can_read_its_own_hits() {
+    let database = proof_database("cross_industry_hits_read").await;
+    submit_external_package(
+        &database,
+        "考研自习::hits-read",
+        "patrol",
+        serde_json::json!({"query":"考研自习","ranking":"most_liked","scrollRounds":3}),
+        "discovery_search",
+        search_coverage("考研自习", 1),
+        serde_json::Value::Null,
+        vec![discovery_card_at(
+            "note-hits-read",
+            "检查器要看得见我",
+            "2.4万",
+            "https://www.xiaohongshu.com/search_result/note-hits-read?xsec_token=ABhits",
+            11,
+        )],
+    )
+    .await;
+    let target_ref: Uuid = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target WHERE identity_key=$1",
+    )
+    .bind("考研自习::hits-read")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+
+    // 证据侧那条读法对它必然落空——材料不在那儿。
+    let evidence_side = read_keyword_hits(&database, target_ref)
+        .await
+        .expect("the evidence-side read runs");
+    assert_eq!(
+        evidence_side.map(|projection| projection.works.len()),
+        Some(0),
+        "跨行业材料不该出现在证据侧；这里为 0 是对的，也正是检查器此前空白的原因"
+    );
+
+    let hits = read_cross_industry_hits(&database, target_ref)
+        .await
+        .expect("the cross-industry read runs")
+        .expect("the projection exists");
+    assert_eq!(hits.works.len(), 1);
+    let work = &hits.works[0];
+    assert_eq!(work.content_external_id, "note-hits-read");
+    assert_eq!(work.title.as_deref(), Some("检查器要看得见我"));
+    // 发现位次从 0 起计，展示成「第几名」时加一——这里也验证那一列真的解得出来。
+    assert_eq!(work.match_position, Some(12));
+    assert_eq!(work.detail_state, CatalogDetailState::Pending);
+}
+
+/// **被隔离的那一轮不算「详情已取得」。**
+///
+/// 包的身份与任务声明对不上时，记录判为 `quarantined`、材料整段不写——样本行一个字段都
+/// 没变；但租约任务仍然被标成 `completed`（完成说的是这一步执行过了，不是材料合格）。
+/// 只看 `completed` 就会对一篇什么都没有的笔记说「详情已取得」，而那一篇从此没人再看它。
+/// 2026-09-10 的 120 条整包隔离正是这个形状。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_quarantined_detail_round_is_not_reported_as_collected() {
+    let database = proof_database("cross_industry_hits_quarantine").await;
+    submit_external_package(
+        &database,
+        "考研自习::hits-quarantine",
+        "patrol",
+        serde_json::json!({"query":"考研自习","ranking":"most_liked","scrollRounds":3}),
+        "discovery_search",
+        search_coverage("考研自习", 1),
+        serde_json::Value::Null,
+        vec![discovery_card(
+            "note-quarantined",
+            "详情会被隔离",
+            "9000",
+            "https://www.xiaohongshu.com/search_result/note-quarantined?xsec_token=ABq",
+        )],
+    )
+    .await;
+    let target_ref: Uuid = sqlx::query_scalar(
+        "SELECT target_ref FROM collection_observation_target WHERE identity_key=$1",
+    )
+    .bind("考研自习::hits-quarantine")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+
+    // 详情那一轮**挂在同一个目标底下**——判据是按 `target_ref` 关联两轮的，换个目标
+    // 就静默落空，测试会为错误的原因变绿。
+    submit_package_for_target(
+        &database,
+        target_ref,
+        "考研自习::hits-quarantine-detail",
+        "patrol",
+        serde_json::json!({"contentExternalId":"note-quarantined"}),
+        "content_detail",
+        serde_json::json!({
+            "target":{"basis":"known_set","contentExternalId":"note-quarantined"},
+            "layers":[{
+                "capability":"content_detail","observed":1,"attempted":1,"acquired":1,
+                "verified":0,"failed":0,"notAttempted":0,"unknown":0,
+                "stoppedReason":"known_set_complete"
+            }]
+        }),
+        serde_json::Value::Null,
+        vec![serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-somebody-else"},
+            "payload":{"noteId":"note-somebody-else","title":"这不是要的那一篇","likes":"1"}
+        })],
+    )
+    .await;
+
+    // 前提：这一轮确实被隔离了，材料一个字段都没进去。
+    let quarantined: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_runtime_record_disposition \
+         WHERE disposition='quarantined'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(quarantined > 0, "前提不成立：这一轮本该被判为隔离");
+
+    let hits = read_cross_industry_hits(&database, target_ref)
+        .await
+        .expect("the cross-industry read runs")
+        .expect("the projection exists");
+    let work = hits
+        .works
+        .iter()
+        .find(|work| work.content_external_id == "note-quarantined")
+        .expect("被隔离的那一篇仍然在命中列表里——隔离的是那一轮材料，不是这篇笔记");
+    assert_eq!(
+        work.detail_state,
+        CatalogDetailState::Pending,
+        "材料被隔离、一个字段都没写进来，就不能显示成「详情已取得」"
+    );
 }
 
 /// 没有采样口径的那一轮不该在任何榜上留痕。

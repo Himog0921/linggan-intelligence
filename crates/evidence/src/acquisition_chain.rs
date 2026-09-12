@@ -816,12 +816,17 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
         // or monitored creator, but it still uses the existing deep-archive authorization class.
         // 关键词的详情补采也走这一支，但它的前置状态多一个 `pending_decision`：
         // `0042` 的 CHECK 禁止关键词进入 `archiving`/`archived`，所以一个刚建完档的
-        // 关键词仍然停在 `pending_decision`。沿用博主那套前置，等于宣布关键词永远
-        // 没资格补详情。
-        "deep_archive" if !cross_industry_samples.is_empty() => matches!(
-            lifecycle_state.as_str(),
-            "pending_decision" | "archiving" | "archived" | "monitoring" | "paused"
-        ),
+        // 关键词仍然停在 `pending_decision`。两侧都算——本领域的关键词材料住证据侧，
+        // 它的作用域落在 `material_targets` 上，一样不能被卡在这儿。
+        "deep_archive"
+            if target_kind == "keyword"
+                && (!cross_industry_samples.is_empty() || !material_targets.is_empty()) =>
+        {
+            matches!(
+                lifecycle_state.as_str(),
+                "pending_decision" | "archiving" | "archived" | "monitoring" | "paused"
+            )
+        }
         "deep_archive" if !material_targets.is_empty() => matches!(
             lifecycle_state.as_str(),
             "archiving" | "archived" | "monitoring" | "paused"

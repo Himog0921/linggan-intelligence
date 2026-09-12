@@ -18,6 +18,9 @@ use uuid::Uuid;
 /// 迁移预置的外部领域「考研自习」。
 pub const EXTERNAL_DOMAIN: &str = "00000000-0000-4000-8000-000000000002";
 
+/// 迁移预置的本领域（ADHD）。本领域只有一个，由 `0041` 预置。
+pub const HOME_DOMAIN: &str = "00000000-0000-4000-8000-000000000001";
+
 /// 造出一条完整的「外部领域关键词目标 → 工单 → 租约 → 任务 → 包」链路并提交。
 ///
 /// 领域判定靠的正是这条链（`resolve_package_domain` 从包一路 JOIN 回观察目标），
@@ -34,9 +37,57 @@ pub async fn submit_external_package(
     checkpoint: serde_json::Value,
     records: Vec<serde_json::Value>,
 ) -> Uuid {
+    submit_package_in_domain(
+        database,
+        EXTERNAL_DOMAIN,
+        identity_key,
+        lane,
+        task_target,
+        package_kind,
+        coverage,
+        checkpoint,
+        records,
+    )
+    .await
+}
+
+/// 同一条链路，领域可选。本领域与外部领域走的是同一套采集，只在落库那一刻分流。
+#[allow(clippy::too_many_arguments)]
+pub async fn submit_package_in_domain(
+    database: &Database,
+    domain_ref: &str,
+    identity_key: &str,
+    lane: &str,
+    task_target: serde_json::Value,
+    package_kind: &str,
+    coverage: serde_json::Value,
+    checkpoint: serde_json::Value,
+    records: Vec<serde_json::Value>,
+) -> Uuid {
     // 生命周期一律留在默认的 pending_decision。关键词**不能**进入 archiving/archived
     // （`0042` 的 CHECK），建档与否是读取时从证据里查出来的；领域分流也不看生命周期。
     let target_ref = Uuid::new_v4();
+    create_target(database, target_ref, domain_ref, identity_key).await;
+    submit_package_for_target(
+        database,
+        target_ref,
+        identity_key,
+        lane,
+        task_target,
+        package_kind,
+        coverage,
+        checkpoint,
+        records,
+    )
+    .await
+}
+
+async fn create_target(
+    database: &Database,
+    target_ref: Uuid,
+    domain_ref: &str,
+    identity_key: &str,
+) {
     sqlx::query(
         "INSERT INTO collection_observation_target \
              (target_ref,platform,target_kind,identity_key,display_name,source,domain_ref) \
@@ -44,11 +95,28 @@ pub async fn submit_external_package(
     )
     .bind(target_ref)
     .bind(identity_key)
-    .bind(EXTERNAL_DOMAIN)
+    .bind(domain_ref)
     .execute(database.pool())
     .await
-    .expect("external-domain target is stored");
+    .expect("the domain-bound target is stored");
+}
 
+/// 同一条链路，但挂在**已有的观察目标**上。
+///
+/// 「第二轮采集」与「第二个目标」是两件事。一篇笔记的详情必须在同一个目标底下取，否则
+/// 任何按 `target_ref` 关联两轮的判据都会静默落空——而测试会因此为错误的原因变绿。
+#[allow(clippy::too_many_arguments)]
+pub async fn submit_package_for_target(
+    database: &Database,
+    target_ref: Uuid,
+    identity_key: &str,
+    lane: &str,
+    task_target: serde_json::Value,
+    package_kind: &str,
+    coverage: serde_json::Value,
+    checkpoint: serde_json::Value,
+    records: Vec<serde_json::Value>,
+) -> Uuid {
     let request_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_acquisition_request (request_ref,target_ref,lane,purpose,requested_by) \

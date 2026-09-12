@@ -13,14 +13,17 @@ mod cross_industry;
 #[path = "support/material_fixture.rs"]
 mod fixture;
 
-use cross_industry::{EXTERNAL_DOMAIN, discovery_card, search_coverage, submit_external_package};
+use cross_industry::{
+    EXTERNAL_DOMAIN, HOME_DOMAIN, discovery_card, search_coverage, submit_external_package,
+    submit_package_in_domain,
+};
 use fixture::proof_database;
 use linggan_evidence::{
     AccountEligibilityObservation, CheckInOutcome, DispatchDecision, InstallationCheckIn,
     KeywordDetailAdvance, activate_installation_credential, advance_keyword_archive_detail,
     bind_observation_account, check_in_installation, decide_dispatch, keyword_baseline_qualified,
-    open_claim_window, register_station, report_account_eligibility, request_and_admit,
-    set_station_accepting,
+    keyword_targets_pending_detail, open_claim_window, register_station,
+    report_account_eligibility, request_and_admit, set_station_accepting,
 };
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
@@ -238,6 +241,82 @@ async fn an_archived_keyword_advances_from_links_to_details() {
         ),
         "在途的批次要如实说成在途，而不是「没有可继续的」：{again:?}"
     );
+}
+
+/// **本领域的关键词也要能补详情。**
+///
+/// 关键词不只有外部领域那一种。本领域的关键词（ADHD 底下的「a娃」就是）采回来的材料按
+/// `0044` 的隔离写进证据侧，跨行业样本表里一条都没有。此前候选只查跨行业那张表，于是
+/// 本领域关键词永远「没有待补详情的」，补详情的入口对它们根本不出现——活只做了一半，
+/// 而界面上看不出少了什么：它显示的是「查看结果」，像是已经做完了。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_home_domain_keyword_also_advances_to_details() {
+    let database = proof_database("keyword_detail_home_domain").await;
+    let target_ref = submit_home_domain_keyword_archive(&database, "ADHD::home-detail").await;
+
+    // 批量判据要认得出它——列表页的「补采缺口」按钮就是由这一问决定的。
+    let pending = keyword_targets_pending_detail(&database, &[target_ref])
+        .await
+        .expect("pending detail query runs");
+    assert!(
+        pending.contains(&target_ref),
+        "本领域关键词的待补详情必须数得出来，否则界面上永远不会出现补详情的入口"
+    );
+
+    let advance = advance_keyword_archive_detail(&database, target_ref, "建档补详情", "person")
+        .await
+        .expect("the detail advance runs");
+    let KeywordDetailAdvance::Queued {
+        work_order_ref,
+        works,
+    } = advance
+    else {
+        panic!("本领域关键词建完档之后同样该排出详情补采，实际是 {advance:?}");
+    };
+    assert_eq!(works, 3, "一批补三篇");
+
+    // **按点赞从高到低挑**——与跨行业那一侧以及回执文案（「正在按点赞从高到低逐篇补」）
+    // 一致。此前本领域这条按 `content_public_ref`（近似随机的 UUID）取，页面上写着一回事、
+    // 实际做的是另一回事，而且看不出来。
+    let picked: Vec<String> = sqlx::query_scalar(
+        "SELECT content.content_external_id \
+         FROM collection_work_order_material_target scope \
+         JOIN linggan_material_content content ON content.public_ref=scope.content_public_ref \
+         WHERE scope.work_order_ref=$1 ORDER BY scope.ordinal",
+    )
+    .bind(work_order_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("the evidence-side scope is readable");
+    assert_eq!(
+        picked,
+        vec![
+            "note-home-4".to_owned(),
+            "note-home-3".to_owned(),
+            "note-home-2".to_owned()
+        ],
+        "该先补点赞最高的三篇"
+    );
+
+    // 作用域落在**证据侧**那张表，不是跨行业那张——本领域的材料不进跨行业语料。
+    let evidence_scope: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_material_target WHERE work_order_ref=$1",
+    )
+    .bind(work_order_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(evidence_scope, 3);
+    let cross_scope: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_work_order_cross_industry_target \
+         WHERE work_order_ref=$1",
+    )
+    .bind(work_order_ref)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(cross_scope, 0, "本领域的作品不得写进跨行业作用域表");
 }
 
 /// 还没翻完搜索面的词不该跳到补详情这一步。
@@ -624,4 +703,40 @@ async fn ready_detail_station(database: &Database, label: &str) -> DetailStation
         install_key,
         credential,
     }
+}
+
+/// 造一轮**本领域**关键词建档：材料走证据侧，跨行业样本表里一条都不该有。
+async fn submit_home_domain_keyword_archive(database: &Database, identity_key: &str) -> Uuid {
+    let mut coverage = search_coverage("学不进去", 4);
+    coverage["layers"][0]["stoppedReason"] = serde_json::json!("bottom_confirmed");
+    coverage["target"]["query"] = serde_json::json!("学不进去");
+    submit_package_in_domain(
+        database,
+        HOME_DOMAIN,
+        identity_key,
+        "deep_archive",
+        serde_json::json!({"query":"学不进去","ranking":"most_liked","scrollRounds":10}),
+        "discovery_search",
+        coverage,
+        serde_json::json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
+        // 四篇、点赞各不相同：一批只补三篇，于是这一批挑的是哪三篇本身就是判据。
+        (1..=4)
+            .map(|index| {
+                discovery_card(
+                    &format!("note-home-{index}"),
+                    &format!("本领域建档样本 {index}"),
+                    &format!("{}", index * 1000),
+                    &format!(
+                        "https://www.xiaohongshu.com/search_result/note-home-{index}?xsec_token=ABhome"
+                    ),
+                )
+            })
+            .collect(),
+    )
+    .await;
+    sqlx::query_scalar("SELECT target_ref FROM collection_observation_target WHERE identity_key=$1")
+        .bind(identity_key)
+        .fetch_one(database.pool())
+        .await
+        .expect("the home-domain target exists")
 }
