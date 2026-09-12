@@ -1,4 +1,4 @@
-//! 一个目标几条规则：口径、首要位与到期口径的真实证明。
+//! 一个目标几条规则：口径各自的版本号、互不干扰与到期口径的真实证明。
 //!
 //! 这三件事的共同点是**跑起来全都自洽**：工单发得出去、回执正常、材料落库、覆盖度完整，
 //! 只有采回来的东西按了错误的口径。没有断言就等于没修。
@@ -65,26 +65,28 @@ fn save_rule(
     }
 }
 
-async fn primary_pointer(database: &Database, target_ref: Uuid) -> Option<Uuid> {
+/// 这条口径当前在用的是哪一版。**问的是规则，不是目标**——目标行上再没有这份副本。
+async fn active_revision_of(database: &Database, target_ref: Uuid, slot_key: &str) -> Option<Uuid> {
     sqlx::query_scalar(
-        "SELECT active_monitor_rule_revision_ref FROM collection_observation_target \
-         WHERE target_ref=$1",
+        "SELECT active_revision_ref FROM collection_monitor_rule \
+         WHERE target_ref=$1 AND slot_key=$2 AND retired_at IS NULL",
     )
     .bind(target_ref)
+    .bind(slot_key)
     .fetch_one(database.pool())
     .await
-    .expect("the target row is readable")
+    .expect("the rule row is readable")
 }
 
-/// **加第二条规则不该顶掉首要位。**
+/// **版本号属于规则，不属于目标。**
 ///
-/// 目标行上那一列的含义是「首要规则的当前版本」，全项目还有五处把它当作「这个目标的规则」
-/// 在读（发租的取样口径、派发的规则闸、运行产能、管理巡查面板）。给一个关键词存第二条规则时
-/// 若照旧覆盖它，那五处会集体开始读一条**非首要**规则——最直接的后果是点「暂停巡检」只停掉了
-/// 其中一条，另一条继续按自己的周期跑，而界面上看不出任何异常。
+/// 第二条口径是一条崭新的规则，它的第一版就是第 1 版；提交时报的「我看到的是第 0 版」说的
+/// 是这条规则，不是这个目标。此前版本号按目标全局递增，于是存第二条必须报 1、第三条必须报
+/// 2——而页面上那条规则明明写着「第 1 版」。结果是配到第三条时必然 `stale_revision`，
+/// 再改任何一条都会撞唯一约束。
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn a_second_rule_does_not_hijack_the_primary_pointer() {
+async fn each_rule_numbers_its_own_versions() {
     let database = proof_database("monitor_rule_second_slot").await;
     let target_ref = seed_keyword(&database, "考研自习").await;
 
@@ -95,25 +97,29 @@ async fn a_second_rule_does_not_hijack_the_primary_pointer() {
     .await
     .expect("the first rule is saved");
     assert_eq!(first.outcome, MonitorCommandOutcomeKind::Applied);
-    let primary_revision = primary_pointer(&database, target_ref).await;
-    assert_eq!(
-        primary_revision, first.applied_rule_revision_ref,
-        "第一条规则就是首要规则，目标行指着它"
-    );
+    assert_eq!(first.current_revision, 1, "一条新规则的第一版就是第 1 版");
+    let first_revision = active_revision_of(&database, target_ref, "comprehensive").await;
+    assert_eq!(first_revision, first.applied_rule_revision_ref);
 
+    // 第二条口径同样报 0：它是另一条规则的第一版。
     let second =
-        apply_monitor_rule_command(&database, &save_rule(target_ref, "most_liked", 21_600, 1))
+        apply_monitor_rule_command(&database, &save_rule(target_ref, "most_liked", 21_600, 0))
             .await
             .expect("the second rule is saved");
-    assert_eq!(second.outcome, MonitorCommandOutcomeKind::Applied);
+    assert_eq!(
+        (second.outcome, second.reason_code),
+        (MonitorCommandOutcomeKind::Applied, "rule_saved"),
+        "第二条口径的第一版不该被判成过期版本"
+    );
+    assert_eq!(second.current_revision, 1);
     assert_ne!(
         second.applied_rule_revision_ref, first.applied_rule_revision_ref,
         "两条口径是两条规则，不是同一条的两个版本"
     );
     assert_eq!(
-        primary_pointer(&database, target_ref).await,
-        primary_revision,
-        "加第二条规则不得改写首要位——那一列还有五处在当作「这个目标的规则」读"
+        active_revision_of(&database, target_ref, "comprehensive").await,
+        first_revision,
+        "存第二条不得动到第一条在用的版本"
     );
 
     let rules = read_target_monitor_rules(&database, target_ref)
@@ -121,11 +127,6 @@ async fn a_second_rule_does_not_hijack_the_primary_pointer() {
         .expect("rules are readable")
         .expect("the schema has rules");
     assert_eq!(rules.len(), 2);
-    assert_eq!(
-        rules.iter().filter(|rule| rule.is_primary).count(),
-        1,
-        "首要规则只能有一条"
-    );
     // 两条各自的周期都留着——这正是「各有各的时间周期」那句话的意思。
     let mut intervals = rules
         .iter()
@@ -135,38 +136,13 @@ async fn a_second_rule_does_not_hijack_the_primary_pointer() {
     assert_eq!(intervals, vec![21_600, 86_400]);
 }
 
-/// **同一个口径存两次是改那一条，不是再开一条。**
-#[tokio::test]
-#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn saving_the_same_ranking_twice_edits_one_rule() {
-    let database = proof_database("monitor_rule_same_slot").await;
-    let target_ref = seed_keyword(&database, "学不进去").await;
-    apply_monitor_rule_command(&database, &save_rule(target_ref, "most_liked", 86_400, 0))
-        .await
-        .expect("the rule is saved");
-    apply_monitor_rule_command(&database, &save_rule(target_ref, "most_liked", 21_600, 1))
-        .await
-        .expect("the same slot is saved again");
-
-    let rules = read_target_monitor_rules(&database, target_ref)
-        .await
-        .expect("rules are readable")
-        .expect("the schema has rules");
-    assert_eq!(rules.len(), 1, "同一个口径只该有一条在用的规则");
-    assert_eq!(
-        rules[0].interval_seconds,
-        Some(21_600),
-        "改的是周期，不是新开一条"
-    );
-}
-
-/// **停用首要规则必须把首要位交出去。**
+/// **停用一条口径不得碰到另一条。**
 ///
-/// 留下一个没有首要规则的目标，那五处读取会一直读着一条已经停用的规则的版本——而它已经
-/// 不在界面的规则列表里了，没人看得出它还在影响什么。
+/// 规则之间没有主次（`0078` 取消了 `is_primary`）。停掉点赞榜那条，综合榜那条的在用版本
+/// 和周期必须原封不动——否则界面上看不出任何异常，采回来的东西却换了口径。
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn retiring_the_primary_hands_the_primary_seat_to_a_survivor() {
+async fn retiring_one_rule_leaves_the_others_alone() {
     let database = proof_database("monitor_rule_retire_primary").await;
     let target_ref = seed_keyword(&database, "图书馆打卡").await;
     let first = apply_monitor_rule_command(
@@ -175,36 +151,41 @@ async fn retiring_the_primary_hands_the_primary_seat_to_a_survivor() {
     )
     .await
     .expect("the first rule is saved");
-    let second =
-        apply_monitor_rule_command(&database, &save_rule(target_ref, "most_liked", 21_600, 1))
-            .await
-            .expect("the second rule is saved");
+    apply_monitor_rule_command(&database, &save_rule(target_ref, "most_liked", 21_600, 0))
+        .await
+        .expect("the second rule is saved");
+    let survivor_revision = active_revision_of(&database, target_ref, "comprehensive").await;
+    assert_eq!(survivor_revision, first.applied_rule_revision_ref);
 
-    let primary_rule_ref: Uuid = sqlx::query_scalar(
+    let retired_rule_ref: Uuid = sqlx::query_scalar(
         "SELECT rule_ref FROM collection_monitor_rule \
-         WHERE target_ref=$1 AND is_primary AND retired_at IS NULL",
+         WHERE target_ref=$1 AND slot_key='most_liked' AND retired_at IS NULL",
     )
     .bind(target_ref)
     .fetch_one(database.pool())
     .await
-    .expect("a primary rule exists");
+    .expect("the most_liked rule exists");
 
-    retire_monitor_rule(&database, target_ref, primary_rule_ref)
+    retire_monitor_rule(&database, target_ref, retired_rule_ref)
         .await
-        .expect("the primary rule is retired");
+        .expect("the rule is retired");
 
     let rules = read_target_monitor_rules(&database, target_ref)
         .await
         .expect("rules are readable")
         .expect("the schema has rules");
     assert_eq!(rules.len(), 1, "停用的那条不再出现在可管理的规则里");
-    assert!(rules[0].is_primary, "还在的那条必须接过首要位");
+    assert_eq!(rules[0].slot_key, "comprehensive");
     assert_eq!(
-        primary_pointer(&database, target_ref).await,
-        second.applied_rule_revision_ref,
-        "目标行必须跟着指向接手的那条，而不是继续指着已停用的规则"
+        rules[0].interval_seconds,
+        Some(86_400),
+        "留下的那条保持自己的周期"
     );
-    let _ = first;
+    assert_eq!(
+        active_revision_of(&database, target_ref, "comprehensive").await,
+        survivor_revision,
+        "停用另一条不得改写这一条在用的版本"
+    );
 }
 
 /// **到期的是哪条规则，工单就得冻哪条规则的口径。**
@@ -225,7 +206,7 @@ async fn a_due_rule_freezes_its_own_sampling_into_the_work_order() {
     .await
     .expect("the primary rule is saved");
     let secondary =
-        apply_monitor_rule_command(&database, &save_rule(target_ref, "most_liked", 21_600, 1))
+        apply_monitor_rule_command(&database, &save_rule(target_ref, "most_liked", 21_600, 0))
             .await
             .expect("the secondary rule is saved");
 
@@ -308,10 +289,78 @@ async fn a_due_rule_freezes_its_own_sampling_into_the_work_order() {
     .flatten();
     assert_eq!(
         frozen, secondary.applied_rule_revision_ref,
-        "到期的是点赞榜那条，冻进工单的就必须是它的版本——冻成首要那条，插件会按综合排序去采"
+        "到期的是点赞榜那条，冻进工单的就必须是它的版本——冻成另一条，插件会按综合排序去采"
     );
     assert_ne!(
         frozen, primary.applied_rule_revision_ref,
-        "不得回落到目标行上的「当前规则」"
+        "不得回落到另一条口径"
+    );
+}
+
+/// **一个关键词配三条规则，再各改一次周期。**
+///
+/// 这正是 Mog 说的用法：7 天综合前 20、7 天点赞前 20、7 天评论前 20，各设各的周期。
+/// 版本号按目标全局递增时，这条路一定走不通——第二条报 `stale_revision`，第三条直接撞
+/// `(target_ref, revision)` 唯一约束报数据库错误。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn three_rules_can_each_be_edited_afterwards() {
+    let database = proof_database("audit_three_rules").await;
+    let target_ref = seed_keyword(&database, "审计词").await;
+    let rankings = ["comprehensive", "most_liked", "most_commented"];
+
+    // 先配三条：每条都是自己那条规则的第 1 版。
+    for ranking in rankings {
+        let receipt =
+            apply_monitor_rule_command(&database, &save_rule(target_ref, ranking, 604_800, 0))
+                .await
+                .unwrap_or_else(|error| panic!("{ranking} 这条规则存不进去：{error}"));
+        assert_eq!(
+            (receipt.outcome, receipt.reason_code),
+            (MonitorCommandOutcomeKind::Applied, "rule_saved"),
+            "{ranking} 这条口径的第一版被拒了"
+        );
+        assert_eq!(receipt.current_revision, 1);
+    }
+    let rules = read_target_monitor_rules(&database, target_ref)
+        .await
+        .expect("rules are readable")
+        .expect("the schema has rules");
+    assert_eq!(rules.len(), 3, "三个口径就是三条规则");
+
+    // 再各改一次周期。人会这么做：先配好三条，再调其中一条的频率。
+    for ranking in rankings {
+        let receipt =
+            apply_monitor_rule_command(&database, &save_rule(target_ref, ranking, 86_400, 1))
+                .await
+                .unwrap_or_else(|error| panic!("{ranking} 这条规则改不了：{error}"));
+        assert_eq!(
+            (receipt.outcome, receipt.reason_code),
+            (MonitorCommandOutcomeKind::Applied, "rule_saved"),
+            "{ranking} 改周期被拒了"
+        );
+        assert_eq!(
+            receipt.current_revision, 2,
+            "{ranking} 应该走到自己的第 2 版"
+        );
+    }
+
+    let rules = read_target_monitor_rules(&database, target_ref)
+        .await
+        .expect("rules are readable")
+        .expect("the schema has rules");
+    let mut slots = rules
+        .iter()
+        .map(|rule| (rule.slot_key.as_str(), rule.interval_seconds))
+        .collect::<Vec<_>>();
+    slots.sort_unstable();
+    assert_eq!(
+        slots,
+        vec![
+            ("comprehensive", Some(86_400)),
+            ("most_commented", Some(86_400)),
+            ("most_liked", Some(86_400)),
+        ],
+        "三条各自改到的新周期都要落在自己那条上"
     );
 }

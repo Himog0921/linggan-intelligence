@@ -1282,15 +1282,21 @@ async fn gather_facts(
     // 错误的取样上限去采——而回执、覆盖度、材料全都自洽，没有任何一处看得出来。
     let monitor_rule_revision_ref = match (lane, frozen_rule_revision_ref) {
         (_, Some(revision_ref)) => Some(revision_ref),
-        ("patrol", None) => {
-            sqlx::query_scalar(
-                "SELECT active_monitor_rule_revision_ref FROM collection_observation_target \
-             WHERE target_ref=$1",
-            )
-            .bind(target_ref)
-            .fetch_one(&mut **transaction)
-            .await?
-        }
+        // 人工「观察一次」没有指定规则。它仍然必须绑一条——取样口径（排序、下拉次数、
+        // 取前 N）住在规则上，不绑就等于让插件按自己的默认跑。
+        //
+        // 一个目标有几条规则时按哪一条跑，**是个还没做的产品决定**；这里取最早建的那条，
+        // 与暂停／恢复挑规则的方式一致，至少两处说法相同。单规则目标（博主永远如此）
+        // 行为与从前完全一样。
+        ("patrol", None) => sqlx::query_scalar(
+            "SELECT rule.active_revision_ref FROM collection_monitor_rule rule \
+                 WHERE rule.target_ref=$1 AND rule.retired_at IS NULL \
+                 ORDER BY rule.created_at,rule.rule_ref LIMIT 1",
+        )
+        .bind(target_ref)
+        .fetch_optional(&mut **transaction)
+        .await?
+        .flatten(),
         _ => None,
     };
 

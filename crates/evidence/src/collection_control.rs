@@ -1634,27 +1634,38 @@ pub async fn apply_monitor_rule_command(
     }
     let payload_digest = monitor_command_digest(command);
     let mut transaction = database.pool().begin().await?;
-    let target: Option<(String, String, Option<Uuid>)> = sqlx::query_as(
-        "SELECT target_kind,lifecycle_state,active_monitor_rule_revision_ref \
+    let target: Option<(String, String)> = sqlx::query_as(
+        "SELECT target_kind,lifecycle_state \
          FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
     )
     .bind(command.target_ref)
     .fetch_optional(&mut *transaction)
     .await?;
-    let Some((target_kind, lifecycle_state, active_rule_ref)) = target else {
+    let Some((target_kind, lifecycle_state)) = target else {
         return Err(MonitorRuleCommandError::UnknownTarget);
     };
-    let current_revision: i32 = if let Some(active_rule_ref) = active_rule_ref {
-        sqlx::query_scalar(
-            "SELECT revision FROM collection_monitor_rule_revision \
-             WHERE target_ref=$1 AND rule_revision_ref=$2",
-        )
-        .bind(command.target_ref)
-        .bind(active_rule_ref)
-        .fetch_one(&mut *transaction)
-        .await?
-    } else {
-        0
+
+    // **版本号属于规则，不属于目标。**
+    //
+    // 这条命令作用在哪一条规则上，先定下来，再读那条规则改到第几版。此前读的是目标行上
+    // 那个「当前规则」指针，于是一个目标配到第三条规则时必然失败：版本号按目标全局递增，
+    // 而指针停在第一条上，第三条永远被判 `stale_revision`，改任何一条都撞唯一约束。
+    let commanded_rule = commanded_monitor_rule(&mut transaction, command, &target_kind).await?;
+    let (current_revision, active_rule_ref): (i32, Option<Uuid>) = match commanded_rule {
+        Some(rule_ref) => {
+            sqlx::query_as(
+                "SELECT COALESCE(revision.revision,0),rule.active_revision_ref \
+             FROM collection_monitor_rule rule \
+             LEFT JOIN collection_monitor_rule_revision revision \
+                    ON revision.rule_revision_ref=rule.active_revision_ref \
+             WHERE rule.rule_ref=$1",
+            )
+            .bind(rule_ref)
+            .fetch_one(&mut *transaction)
+            .await?
+        }
+        // 还没有这条规则：这是它的第 0 版，接下来会被立出来。
+        None => (0, None),
     };
 
     let existing: Option<(
@@ -1754,17 +1765,14 @@ pub async fn apply_monitor_rule_command(
     let next_revision = current_revision + 1;
     let rule_revision_ref = Uuid::new_v4();
     let mut saved_rule_ref: Option<Uuid> = None;
-    let mut saved_rule_is_primary = true;
     match command.kind {
         MonitorCommandKind::SaveRule => {
             let draft = command.draft.as_ref().expect("validated save-rule draft");
-            // 一个目标可以同时有几条口径不同的规则。找到这条口径的规则身份，没有就立一条；
-            // 第一条立出来的是首要规则，目标行上那一列指着它。
+            // 一个目标可以同时有几条口径不同的规则。找到这条口径的规则身份，没有就立一条。
             let slot_key = monitor_rule_slot_key(&target_kind, draft);
-            let (rule_ref, is_primary) =
+            let rule_ref =
                 ensure_monitor_rule(&mut transaction, command.target_ref, &slot_key).await?;
             saved_rule_ref = Some(rule_ref);
-            saved_rule_is_primary = is_primary;
             insert_monitor_rule_revision(
                 &mut transaction,
                 command.target_ref,
@@ -1830,12 +1838,6 @@ pub async fn apply_monitor_rule_command(
             | MonitorCommandKind::Stop
             | MonitorCommandKind::ManualObserve => DEFAULT_MONITOR_INTERVAL_SECONDS,
         };
-        let schedule_slot_seconds = automatic_enabled
-            .then(|| monitor_schedule_slot_seconds(command.target_ref, interval_seconds))
-            .unwrap_or(0);
-        // `monitoring` requires an enabled rule in the database, so pause/resume cannot first
-        // write the rule flag and then change the lifecycle in a second statement. Apply the
-        // coupled state in one UPDATE, then append its transition record afterwards.
         let repairing_invalid_keyword_lifecycle = target_kind == "keyword"
             && matches!(lifecycle_state.as_str(), "archiving" | "archived");
         let next_lifecycle_state = monitor_lifecycle_next_state(
@@ -1844,86 +1846,35 @@ pub async fn apply_monitor_rule_command(
             automatic_enabled,
             repairing_invalid_keyword_lifecycle,
         );
-        // 这条命令作用在首要规则上吗？
+        // 目标行只写目标级的两样事实：这个目标在不在被观察、它的生命周期到哪一步。
         //
-        // 保存规则时由口径决定（第一条落地的那条是首要）。暂停／恢复／停止作用的是目标行
-        // 指着的那条，按定义就是首要——而且它们真正的效果是目标级的 `monitoring_enabled`：
-        // 调度的到期查询要求目标开着监控，所以关掉它，这个目标底下**所有**规则一起停，
-        // 不会出现「以为全停了其实只停了一条」。
-        let commanded_rule_is_primary = match command.kind {
-            MonitorCommandKind::SaveRule => saved_rule_is_primary,
-            _ => true,
-        };
-        // **只有首要规则才改目标行上那一列。**
-        //
-        // 那一列的含义是「首要规则的当前版本」，全项目还有五处把它当作「这个目标的规则」
-        // 在读（发租的取样口径、派发的规则闸、运行产能、管理巡查面板）。给一个关键词存
-        // 第二条规则时若照旧覆盖它，那五处会集体开始读一条**非首要**规则——最直接的后果是
-        // 点「暂停巡检」只停掉了其中一条，另一条继续按自己的周期跑，而界面上看不出任何异常。
-        //
-        // 生命周期与监控开关仍然按目标写：它们本来就是目标级的事实。
-        if commanded_rule_is_primary {
-            sqlx::query(
-                "UPDATE collection_observation_target \
-             SET active_monitor_rule_revision_ref=$2,monitoring_enabled=$3, \
-                 patrol_interval_seconds=COALESCE((SELECT CASE \
-                     WHEN mode='fixed' THEN fixed_interval_seconds \
-                     ELSE fallback_interval_seconds END \
-                     FROM collection_monitor_rule_revision WHERE rule_revision_ref=$2),86400), \
-                 monitor_schedule_anchor_at=CASE WHEN $3 THEN scope_001_now() ELSE NULL END, \
-                 monitor_schedule_slot_seconds=CASE WHEN $3 THEN $4 ELSE 0 END, \
-                 monitor_next_run_at=CASE WHEN $3 THEN scope_001_now() + make_interval(secs => $4) \
-                     ELSE NULL END, \
-                 monitor_missed_run_count=0, \
-                 lifecycle_state=COALESCE($5,lifecycle_state), \
-                 lifecycle_changed_at=CASE WHEN $5 IS NULL THEN lifecycle_changed_at \
+        // 排期、周期、当前版本**全部归规则**（`0078` 已把目标行上那份副本删掉）。此前那份
+        // 副本要靠「只有首要规则才写」来维持一致，而首要位本身又得靠交接来维持——一层补丁
+        // 叠一层。现在只有一个真相，这两件事一起消失了。
+        sqlx::query(
+            "UPDATE collection_observation_target \
+             SET monitoring_enabled=$2, \
+                 lifecycle_state=COALESCE($3,lifecycle_state), \
+                 lifecycle_changed_at=CASE WHEN $3 IS NULL THEN lifecycle_changed_at \
                      ELSE scope_001_now() END \
              WHERE target_ref=$1",
-            )
-            .bind(command.target_ref)
-            .bind(applied_rule_ref)
-            .bind(automatic_enabled)
-            .bind(schedule_slot_seconds)
-            .bind(next_lifecycle_state)
-            .execute(&mut *transaction)
-            .await?;
-        } else {
-            // 非首要规则只改目标级那两样：生命周期与监控开关。给一个词加第二条规则同样
-            // 意味着「这个词在被监控」，但它不该改写首要规则的排期，也不该顶掉那个指针。
-            sqlx::query(
-                "UPDATE collection_observation_target \
-                 SET monitoring_enabled=monitoring_enabled OR $2, \
-                     lifecycle_state=COALESCE($3,lifecycle_state), \
-                     lifecycle_changed_at=CASE WHEN $3 IS NULL THEN lifecycle_changed_at \
-                         ELSE scope_001_now() END \
-                 WHERE target_ref=$1",
-            )
-            .bind(command.target_ref)
-            .bind(automatic_enabled)
-            .bind(next_lifecycle_state)
-            .execute(&mut *transaction)
-            .await?;
-        }
+        )
+        .bind(command.target_ref)
+        .bind(automatic_enabled)
+        .bind(next_lifecycle_state)
+        .execute(&mut *transaction)
+        .await?;
 
-        // 排期状态现在住在**规则**上——调度按规则算到期。目标行上那几列保留给首要规则，
-        // 两处必须在同一个事务里一起写：只写一处，要么规则永远不到期，要么列表显示的
-        // 下次巡查与真正会跑的那一次对不上。
-        //
-        // 这条命令作用在哪条规则上：保存规则时是刚落地的那条，暂停／恢复时是当前生效的那条。
+        // 排期状态只住在规则上。错峰偏移按**规则**算：一个关键词的三条规则若共用目标级
+        // 偏移，会在同一时刻一起开跑。
         let commanded_rule_ref: Option<Uuid> = match saved_rule_ref {
             Some(rule_ref) => Some(rule_ref),
-            None => {
-                sqlx::query_scalar(
-                    "SELECT rule_ref FROM collection_monitor_rule_revision \
-                 WHERE target_ref=$1 AND rule_revision_ref=$2",
-                )
-                .bind(command.target_ref)
-                .bind(applied_rule_ref)
-                .fetch_optional(&mut *transaction)
-                .await?
-            }
+            None => commanded_rule,
         };
         if let Some(rule_ref) = commanded_rule_ref {
+            let schedule_slot_seconds = automatic_enabled
+                .then(|| monitor_schedule_slot_seconds(rule_ref, interval_seconds))
+                .unwrap_or(0);
             sqlx::query(
                 "UPDATE collection_monitor_rule \
                  SET active_revision_ref=$2, \
@@ -1974,10 +1925,14 @@ pub async fn apply_monitor_rule_command(
 /// Stable scheduling phase derived directly from the target UUID.  Rust's
 /// default hash is intentionally process-randomized, so it must not be used
 /// for a value persisted in a Rule's scheduling contract.
-fn monitor_schedule_slot_seconds(target_ref: Uuid, interval_seconds: i32) -> i32 {
+/// 这条规则在它的周期里错开多少秒起跑。
+///
+/// 按**规则**算，不按目标：一个关键词的三条规则若共用目标级偏移，会在同一时刻一起开跑，
+/// 三个浏览器任务挤在一起，而错峰正是为了避免这件事。
+fn monitor_schedule_slot_seconds(rule_ref: Uuid, interval_seconds: i32) -> i32 {
     debug_assert!(interval_seconds > 0);
     let mut prefix = [0_u8; 8];
-    prefix.copy_from_slice(&target_ref.as_bytes()[..8]);
+    prefix.copy_from_slice(&rule_ref.as_bytes()[..8]);
     let phase = u64::from_be_bytes(prefix) % u64::try_from(interval_seconds).unwrap_or(1);
     i32::try_from(phase).unwrap_or(0)
 }
@@ -1997,28 +1952,29 @@ pub async fn apply_manual_observe_command(
     }
     let payload_digest = monitor_command_digest(command);
     let mut transaction = database.pool().begin().await?;
-    let target: Option<(String, Option<Uuid>)> = sqlx::query_as(
-        "SELECT lifecycle_state,active_monitor_rule_revision_ref \
-         FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
+    let lifecycle_state: Option<String> = sqlx::query_scalar(
+        "SELECT lifecycle_state FROM collection_observation_target WHERE target_ref=$1 FOR UPDATE",
     )
     .bind(command.target_ref)
     .fetch_optional(&mut *transaction)
     .await?;
-    let Some((lifecycle_state, active_rule_ref)) = target else {
+    let Some(lifecycle_state) = lifecycle_state else {
         return Err(MonitorRuleCommandError::UnknownTarget);
     };
-    let current_revision: i32 = if let Some(active_rule_ref) = active_rule_ref {
-        sqlx::query_scalar(
-            "SELECT revision FROM collection_monitor_rule_revision \
-             WHERE target_ref=$1 AND rule_revision_ref=$2",
-        )
-        .bind(command.target_ref)
-        .bind(active_rule_ref)
-        .fetch_one(&mut *transaction)
-        .await?
-    } else {
-        0
-    };
+    // 手动观察是对目标下的一次性命令，不改任何规则；版本号只用来挡住「页面上看到的还是旧的」。
+    // 页面预填的是最早那条在用规则，这里就对同一条问，两边说的是同一个数。
+    let current_revision: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(revision.revision,0) \
+         FROM collection_monitor_rule rule \
+         LEFT JOIN collection_monitor_rule_revision revision \
+                ON revision.rule_revision_ref=rule.active_revision_ref \
+         WHERE rule.target_ref=$1 AND rule.retired_at IS NULL \
+         ORDER BY rule.created_at,rule.rule_ref LIMIT 1",
+    )
+    .bind(command.target_ref)
+    .fetch_optional(&mut *transaction)
+    .await?
+    .unwrap_or(0);
     let existing: Option<(Uuid, String, String, Option<Uuid>, Option<Uuid>)> = sqlx::query_as(
         "SELECT command_identity_ref,payload_digest,first_reason_code,work_order_ref,lease_ref \
          FROM collection_monitor_rule_command_identity \
@@ -2458,6 +2414,40 @@ fn monitor_command_digest(command: &MonitorRuleCommand) -> String {
     )
 }
 
+/// 这条命令作用在哪一条规则上。
+///
+/// 保存规则时由口径（排序）决定——那条口径还不存在就返回 `None`，它会在保存那一步被立出来。
+/// 暂停／恢复／停止作用的是**整个目标**：它们改的是 `monitoring_enabled`，调度的到期查询
+/// 要求它为真，所以关掉它这个目标底下所有规则一起停。这类命令挑目标现有的任意一条规则
+/// 记版本即可——取最早那条，保证同一个目标上这类命令的版本号是一条连续的线。
+async fn commanded_monitor_rule(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    command: &MonitorRuleCommand,
+    target_kind: &str,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    let slot_key = match (command.kind, command.draft.as_ref()) {
+        (MonitorCommandKind::SaveRule, Some(draft)) => monitor_rule_slot_key(target_kind, draft),
+        _ => {
+            return sqlx::query_scalar(
+                "SELECT rule_ref FROM collection_monitor_rule \
+                 WHERE target_ref=$1 AND retired_at IS NULL \
+                 ORDER BY created_at,rule_ref LIMIT 1",
+            )
+            .bind(command.target_ref)
+            .fetch_optional(&mut **transaction)
+            .await;
+        }
+    };
+    sqlx::query_scalar(
+        "SELECT rule_ref FROM collection_monitor_rule \
+         WHERE target_ref=$1 AND slot_key=$2 AND retired_at IS NULL",
+    )
+    .bind(command.target_ref)
+    .bind(slot_key)
+    .fetch_optional(&mut **transaction)
+    .await
+}
+
 /// 这条规则在这个目标底下的**口径身份**。
 ///
 /// 关键词用排序（`most_liked`／`comprehensive`…）：同一个词盯两个榜是两条规则，不是两个词。
@@ -2471,15 +2461,17 @@ fn monitor_rule_slot_key(target_kind: &str, draft: &MonitorRuleDraft) -> String 
 
 /// 找到这个口径的规则身份，没有就立一条。
 ///
-/// 第一条立出来的是**首要规则**：目标行上那一列指着它，「监控中必须有规则」这条 CHECK
-/// 守的就是它。后面加的口径不动那一列。
+/// **规则之间没有主次。** 此前有个 `is_primary`，只为在迁移期保住目标行上那条
+/// 「监控中必须有规则」的 CHECK；`0078` 把那份副本连同 CHECK 一起删掉之后，它就没有对应的
+/// 领域含义了——一个关键词的三条规则是并列的三个口径。
 async fn ensure_monitor_rule(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
     slot_key: &str,
-) -> Result<(Uuid, bool), sqlx::Error> {
-    if let Some(existing) = sqlx::query_as::<_, (Uuid, bool)>(
-        "SELECT rule_ref,is_primary FROM collection_monitor_rule          WHERE target_ref=$1 AND slot_key=$2 AND retired_at IS NULL FOR UPDATE",
+) -> Result<Uuid, sqlx::Error> {
+    if let Some(existing) = sqlx::query_scalar::<_, Uuid>(
+        "SELECT rule_ref FROM collection_monitor_rule \
+         WHERE target_ref=$1 AND slot_key=$2 AND retired_at IS NULL FOR UPDATE",
     )
     .bind(target_ref)
     .bind(slot_key)
@@ -2488,23 +2480,16 @@ async fn ensure_monitor_rule(
     {
         return Ok(existing);
     }
-    let has_primary: bool = sqlx::query_scalar(
-        "SELECT EXISTS (SELECT 1 FROM collection_monitor_rule          WHERE target_ref=$1 AND is_primary AND retired_at IS NULL)",
-    )
-    .bind(target_ref)
-    .fetch_one(&mut **transaction)
-    .await?;
     let rule_ref = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO collection_monitor_rule (rule_ref,target_ref,slot_key,is_primary)          VALUES ($1,$2,$3,$4)",
+        "INSERT INTO collection_monitor_rule (rule_ref,target_ref,slot_key) VALUES ($1,$2,$3)",
     )
     .bind(rule_ref)
     .bind(target_ref)
     .bind(slot_key)
-    .bind(!has_primary)
     .execute(&mut **transaction)
     .await?;
-    Ok((rule_ref, !has_primary))
+    Ok(rule_ref)
 }
 
 async fn insert_monitor_rule_revision(
@@ -3170,11 +3155,15 @@ pub async fn toggle_target_patrol(
     target_ref: Uuid,
     enable: bool,
 ) -> Result<MonitorRuleCommandReceipt, MonitorRuleCommandError> {
+    // 暂停／恢复落在最早那条在用规则上（与 `commanded_monitor_rule` 同一个挑法），所以版本号
+    // 也对那一条问。**一个关键词配了几条规则时，这个开关只翻其中一条**——列表上的「巡查中」
+    // 是几条规则的或，于是关掉一条可能看不出变化。这是个还没做的产品决定，不是这里用错了数。
     let current: Option<(i32,)> = sqlx::query_as(
-        "SELECT revision.revision FROM collection_monitor_rule_revision revision \
-         JOIN collection_observation_target target \
-           ON target.active_monitor_rule_revision_ref=revision.rule_revision_ref \
-         WHERE target.target_ref=$1",
+        "SELECT COALESCE(revision.revision,0) FROM collection_monitor_rule rule \
+         LEFT JOIN collection_monitor_rule_revision revision \
+                ON revision.rule_revision_ref=rule.active_revision_ref \
+         WHERE rule.target_ref=$1 AND rule.retired_at IS NULL \
+         ORDER BY rule.created_at,rule.rule_ref LIMIT 1",
     )
     .bind(target_ref)
     .fetch_optional(database.pool())

@@ -22,6 +22,8 @@ use uuid::Uuid;
 const DIGEST_KEY: &[u8] = b"collection-control-proof-digest-key-v1";
 const KEYWORD_LIFECYCLE_MIGRATION: &str =
     include_str!("../../../database/migrations/0042_keyword_monitoring_lifecycle.sql");
+const RULE_SCHEDULE_MIGRATION: &str =
+    include_str!("../../../database/migrations/0078_monitor_rule_owns_its_schedule.sql");
 
 const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0001_scope_001_capture_evidence.sql"),
@@ -123,6 +125,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0071_cross_industry_sampling_provenance.sql"),
     "\n",
     include_str!("../../../database/migrations/0076_monitor_rule_slots.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0078_monitor_rule_owns_its_schedule.sql"),
 );
 
 #[tokio::test]
@@ -1709,9 +1713,14 @@ async fn monitor_rule_commands_are_revisioned_idempotent_and_side_effect_bounded
     .expect("creator observation rule does not require a historic baseline");
     assert_eq!(creator.outcome, MonitorCommandOutcomeKind::Applied);
     assert_eq!(creator.reason_code, "rule_saved");
+    // 排期住在规则上（`0078`）：目标只说「在不在监控中」。
     let creator_schedule: (String, bool, Option<String>) = sqlx::query_as(
-        "SELECT lifecycle_state,monitoring_enabled,monitor_next_run_at::text \
-         FROM collection_observation_target WHERE target_ref=$1",
+        "SELECT target.lifecycle_state,target.monitoring_enabled, \
+                rule.monitor_next_run_at::text \
+         FROM collection_observation_target target \
+         JOIN collection_monitor_rule rule \
+           ON rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
+         WHERE target.target_ref=$1",
     )
     .bind(creator_ref)
     .fetch_one(database.pool())
@@ -1791,6 +1800,111 @@ async fn target_list_toggle_uses_the_accepted_person_command_source() {
     .await
     .expect("resume updates the target read model");
     assert_eq!(resumed_state, ("monitoring".to_owned(), true));
+}
+
+/// **一条规则都没有的目标必须照常出现在列表里。**
+///
+/// `0078` 删掉了「监控中必须有规则」那两条 CHECK——调度遍历规则，没有规则自然产不出到期项，
+/// 它们守的失效模式不存在了。代价是这个状态在数据库层面变成合法的：列表的「自动巡查」那一列
+/// 是几条规则的或，而 `bool_or` 在空集上返回 NULL 不是 false。Rust 侧那一列是非空布尔，
+/// **读到 NULL 不是某一行显示错，是整页列表读不出来**。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn a_monitoring_target_without_any_rule_still_lists() {
+    let database = proof_database("target_list_without_rule").await;
+    let target_ref = seed_target(&database, "keyword", "monitoring", "无规则也要能列出").await;
+    sqlx::query(
+        "UPDATE collection_observation_target SET monitoring_enabled=true WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("monitoring is a target-level fact on its own");
+
+    let targets = list_targets(&database, None, None, 50)
+        .await
+        .expect("目标列表必须读得出来，哪怕这个目标一条规则都没配");
+    let listed = targets
+        .iter()
+        .find(|target| target.target_ref == target_ref)
+        .expect("the target is listed");
+    assert!(
+        !listed.monitoring_enabled,
+        "没有任何规则就没有自动巡查——这是假，不是未知，更不是读不出来"
+    );
+    assert!(listed.next_patrol_at.is_none(), "没有规则就没有下次巡查");
+}
+
+/// **迁移要在已经有多条规则的库上跑得过去。**
+///
+/// 重排把同一个目标下的两条规则各自编回第 1 版——这正是新口径要的结果，却会当场撞上
+/// 还没删的 `UNIQUE (target_ref, revision)`。顺序写反在空库上永远看不出来：所有证明库都是
+/// 先建空库再用新代码逐条存规则，从不经过「旧数据重排」这一段。
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL proof database"]
+async fn rule_schedule_migration_renumbers_a_target_that_already_has_two_rules() {
+    let database = proof_database_before_rule_schedule("rule_schedule_0078").await;
+    let target_ref = seed_target(&database, "keyword", "paused", "两条规则的历史数据").await;
+    // `0076` 之后、`0078` 之前的真实形态：版本号按目标全局递增，两条规则各占一个号。
+    let mut revision_refs = Vec::new();
+    for (index, slot_key) in ["comprehensive", "most_liked"].into_iter().enumerate() {
+        let rule_ref = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO collection_monitor_rule (rule_ref,target_ref,slot_key,is_primary) \
+             VALUES ($1,$2,$3,$4)",
+        )
+        .bind(rule_ref)
+        .bind(target_ref)
+        .bind(slot_key)
+        .bind(index == 0)
+        .execute(database.pool())
+        .await
+        .expect("legacy rule identity is seeded");
+        let revision_ref = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO collection_monitor_rule_revision \
+                 (rule_revision_ref,target_ref,rule_ref,revision,mode,automatic_enabled,timezone, \
+                  run_on_weekdays,run_on_weekends,all_day,fixed_interval_seconds, \
+                  fallback_interval_seconds,surface_key,task_contract_version, \
+                  rule_payload_digest,created_by) \
+             VALUES ($1,$2,$3,$4,'fixed',true,'Asia/Shanghai',true,true,true,86400,86400, \
+                     'keyword_search','linggan.producer.task-spec.v1',repeat('a',64),'person')",
+        )
+        .bind(revision_ref)
+        .bind(target_ref)
+        .bind(rule_ref)
+        .bind(i32::try_from(index).expect("small index") + 1)
+        .execute(database.pool())
+        .await
+        .expect("legacy globally numbered revision is seeded");
+        sqlx::query("UPDATE collection_monitor_rule SET active_revision_ref=$2 WHERE rule_ref=$1")
+            .bind(rule_ref)
+            .bind(revision_ref)
+            .execute(database.pool())
+            .await
+            .expect("the rule points at its current revision");
+        revision_refs.push(revision_ref);
+    }
+
+    sqlx::raw_sql(AssertSqlSafe(RULE_SCHEDULE_MIGRATION.to_owned()))
+        .execute(database.pool())
+        .await
+        .expect("0078 applies to a target that already has two rules");
+
+    let revisions: Vec<(i32,)> = sqlx::query_as(
+        "SELECT revision FROM collection_monitor_rule_revision \
+         WHERE target_ref=$1 ORDER BY rule_revision_ref",
+    )
+    .bind(target_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("renumbered revisions are readable");
+    assert_eq!(
+        revisions,
+        vec![(1,), (1,)],
+        "两条规则各自的第一版都是第 1 版——按规则计，不按目标"
+    );
+    let _ = revision_refs;
 }
 
 #[tokio::test]
@@ -2086,8 +2200,8 @@ async fn seed_monitored_patrol_order(
     // 版本是「这条规则改过几次」，不挂身份就说不清它是哪条规则的历史。
     let rule_identity_ref = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO collection_monitor_rule (rule_ref,target_ref,slot_key,is_primary) \
-         VALUES ($1,$2,'primary',true)",
+        "INSERT INTO collection_monitor_rule (rule_ref,target_ref,slot_key) \
+         VALUES ($1,$2,'primary')",
     )
     .bind(rule_identity_ref)
     .bind(target_ref)
@@ -2109,12 +2223,11 @@ async fn seed_monitored_patrol_order(
         .execute(database.pool())
         .await
         .expect("the rule points at its current revision");
-    // monitoring_enabled 只有挂上活跃规则才允许为真（CHECK 强制）。
+    // 「在监控中」是目标自己的事实；「按哪些口径巡查」住在规则上（`0078`）。
     sqlx::query(
-        "UPDATE collection_observation_target          SET active_monitor_rule_revision_ref=$2,monitoring_enabled=true WHERE target_ref=$1",
+        "UPDATE collection_observation_target SET monitoring_enabled=true WHERE target_ref=$1",
     )
     .bind(target_ref)
-    .bind(rule_ref)
     .execute(database.pool())
     .await
     .expect("target is put under monitoring");
@@ -2379,6 +2492,19 @@ async fn proof_database_before_account_observation_bootstrap(schema: &str) -> Da
     isolated_proof_schema(&url, schema, migrations)
         .await
         .expect("migrations through 0064 apply")
+}
+
+async fn proof_database_before_rule_schedule(schema: &str) -> Database {
+    let url = std::env::var("COLLECTION_CONTROL_PROOF_DATABASE_URL")
+        .or_else(|_| std::env::var("COLLECTION_DISPATCH_PROOF_DATABASE_URL"))
+        .expect("an isolated proof database URL is supplied");
+    let migrations_before_0078 = MIGRATIONS
+        .split_once(RULE_SCHEDULE_MIGRATION)
+        .map(|(prefix, _)| prefix)
+        .expect("the complete proof migrations include 0078");
+    isolated_proof_schema(&url, schema, migrations_before_0078)
+        .await
+        .expect("complete migrations before 0078 apply")
 }
 
 async fn proof_database_before_keyword_lifecycle(schema: &str) -> Database {
