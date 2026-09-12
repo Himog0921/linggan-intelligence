@@ -41,5 +41,9 @@ export LINGGAN_LOCAL_PORT
 : "${LINGGAN_PI_NODE:=$HOME/.nvm/versions/node/v$(cat .nvmrc)/bin/node}"
 export LINGGAN_PI_NODE
 ./scripts/runtime/prepare-pi-adapter.sh --check
+if [[ "$binary" == "linggan-worker" ]]; then
+  # Explicit artifact verification only: no model download or profile mutation during a Run.
+  ./scripts/runtime/prepare-wemm-embedding.sh --check
+fi
 exec "./target/debug/${binary}"
 }

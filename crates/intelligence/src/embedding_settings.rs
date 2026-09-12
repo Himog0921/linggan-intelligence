@@ -1,5 +1,6 @@
 //! Explicit embedding configuration. Qualification checks transport and shape, not recall quality.
 use crate::{
+    local_embedding_profile,
     model_invocation::{connection_request, finish_invocation, invocation_replay},
     model_secrets::ModelSecretStore,
     model_settings::ModelError,
@@ -15,6 +16,7 @@ use uuid::Uuid;
 /// Returns whether one exact (or any) embedding configuration is enabled, qualified and connected.
 /// The settings, configuration and connection rows stay share-locked until the caller commits its
 /// enclosing operation, so disabling the configuration cannot race Run or invocation reservation.
+#[allow(dead_code)]
 pub(crate) async fn ready_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     required_config_ref: Option<Uuid>,
@@ -48,10 +50,19 @@ pub(crate) async fn ready_in_transaction(
 }
 
 pub async fn read(db: &Database) -> Result<Value, ModelError> {
-    let r=sqlx::query("SELECT s.revision,c.config_ref,c.model_ref,c.dimensions,c.qualified,c.enabled FROM linggan_embedding_settings s LEFT JOIN linggan_embedding_config c USING(config_ref) WHERE singleton").fetch_one(db.pool()).await?;
-    Ok(
-        json!({"revision":r.get::<i64,_>("revision"),"configRef":r.get::<Option<Uuid>,_>("config_ref"),"modelRef":r.get::<Option<Uuid>,_>("model_ref"),"dimensions":r.get::<Option<i32>,_>("dimensions"),"qualified":r.get::<Option<bool>,_>("qualified"),"enabled":r.get::<Option<bool>,_>("enabled"),"protocol":"openai-embeddings.v1","qualificationMeaning":"连接与向量结构通过，不代表问题召回质量已验收"}),
-    )
+    let profile = local_embedding_profile::active(db).await?;
+    Ok(match profile {
+        Some(profile) => json!({
+            "revision": 1, "configRef": null, "profileRef": profile.profile_ref,
+            "modelRef": profile.model_ref, "modelId": profile.model_id,
+            "modelRevision": profile.model_revision, "encodingMode": profile.encoding_mode,
+            "dimensions": profile.dimension, "preprocessingVersion": profile.preprocessing_version,
+            "qualified": true, "enabled": true, "protocol": "local-wemm-document.v1",
+            "qualificationMeaning": "固定本机 WeMM profile；512 维是工程初值，候选仅作 exact cosine 召回"
+        }),
+        None => json!({"revision":1,"configRef":null,"qualified":false,"enabled":false,
+            "protocol":"local-wemm-document.v1","qualificationMeaning":"本机固定 WeMM profile 不可用"}),
+    })
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

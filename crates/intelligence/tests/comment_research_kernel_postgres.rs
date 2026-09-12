@@ -9,9 +9,8 @@ use linggan_intelligence::comment_research_atoms::{
 };
 use linggan_intelligence::comment_research_embeddings::{
     AtomEmbeddingResult, CommentResearchEmbeddingError, EmbeddingSpaceReceipt,
-    ProblemDefinitionEmbeddingResult, accept_atom_embedding, accept_problem_definition_embedding,
-    activate_configured_embedding_space, claim_next_embedding_work, queue_atom_embedding,
-    queue_problem_definition_embedding, recall_problem_candidates, record_embedding_failure,
+    accept_atom_embedding, activate_configured_embedding_space, claim_next_embedding_work,
+    queue_atom_embedding, recall_problem_candidates, record_embedding_failure,
 };
 use linggan_intelligence::comment_research_kernel::{
     CommentResearchKernelError, DERIVATION_VERSION, ResearchRunReceipt, RunItemFailureClass,
@@ -188,51 +187,6 @@ async fn atom_ref(database: &Database, run_ref: Uuid, derivation_ref: Uuid) -> U
 }
 
 async fn synthetic_qualified_embedding_space(database: &Database) -> EmbeddingSpaceReceipt {
-    let connection_ref = Uuid::new_v4();
-    let version_ref = Uuid::new_v4();
-    let model_ref = Uuid::new_v4();
-    let config_ref = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_model_connection(connection_ref,enabled) VALUES($1,true)")
-        .bind(connection_ref)
-        .execute(database.pool())
-        .await
-        .unwrap();
-    sqlx::query(
-        "INSERT INTO linggan_model_connection_version( \
-             version_ref,connection_ref,revision,name,api,base_url,local_endpoint,secret_ref \
-         ) VALUES($1,$2,1,'SYNTHETIC embedding connection','openai-completions', \
-             'http://localhost:9',true,$3)",
-    )
-    .bind(version_ref)
-    .bind(connection_ref)
-    .bind(Uuid::new_v4())
-    .execute(database.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) \
-         VALUES($1,$2,'synthetic-embedding','manual')",
-    )
-    .bind(model_ref)
-    .bind(version_ref)
-    .execute(database.pool())
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO linggan_embedding_config( \
-             config_ref,model_ref,dimensions,qualified,enabled \
-         ) VALUES($1,$2,2,true,true)",
-    )
-    .bind(config_ref)
-    .bind(model_ref)
-    .execute(database.pool())
-    .await
-    .unwrap();
-    sqlx::query("UPDATE linggan_embedding_settings SET config_ref=$1 WHERE singleton")
-        .bind(config_ref)
-        .execute(database.pool())
-        .await
-        .unwrap();
     activate_configured_embedding_space(database).await.unwrap()
 }
 
@@ -240,12 +194,7 @@ async fn start_ready_run(
     database: &Database,
 ) -> Result<ResearchRunReceipt, CommentResearchKernelError> {
     let ready: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM linggan_embedding_settings settings \
-         JOIN linggan_embedding_config config USING(config_ref) \
-         JOIN linggan_model_entry model USING(model_ref) \
-         JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref \
-         JOIN linggan_model_connection connection USING(connection_ref) \
-         WHERE settings.singleton AND config.enabled AND config.qualified AND connection.enabled)",
+        "SELECT EXISTS(SELECT 1 FROM linggan_comment_research_embedding_profile WHERE singleton AND enabled)",
     )
     .fetch_one(database.pool())
     .await
@@ -1801,37 +1750,16 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
     .await
     .unwrap();
     let space = synthetic_qualified_embedding_space(&database).await;
-    let definition_input = queue_problem_definition_embedding(
+    let first_input = queue_atom_embedding(&database, first_atom, space.space_ref).await.unwrap();
+    let mut first_values = vec![0.0; 512];
+    first_values[0] = 1.0;
+    accept_atom_embedding(
         &database,
-        problem.problem_ref,
-        problem.definition_revision,
-        space.space_ref,
-    )
-    .await
-    .unwrap();
-    assert!(matches!(
-        accept_problem_definition_embedding(
-            &database,
-            ProblemDefinitionEmbeddingResult {
-                problem_ref: problem.problem_ref,
-                definition_revision: problem.definition_revision,
-                space_ref: space.space_ref,
-                input_hash: definition_input.input_hash.clone(),
-                values: vec![1.0],
-                invocation_ref: None,
-            },
-        )
-        .await,
-        Err(CommentResearchEmbeddingError::InvalidEmbedding)
-    ));
-    accept_problem_definition_embedding(
-        &database,
-        ProblemDefinitionEmbeddingResult {
-            problem_ref: problem.problem_ref,
-            definition_revision: problem.definition_revision,
+        AtomEmbeddingResult {
+            atom_ref: first_atom,
             space_ref: space.space_ref,
-            input_hash: definition_input.input_hash,
-            values: vec![1.0, 0.0],
+            input_hash: first_input.input_hash,
+            values: first_values,
             invocation_ref: None,
         },
     )
@@ -1866,7 +1794,7 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
                 atom_ref: second_atom,
                 space_ref: space.space_ref,
                 input_hash: atom_input.input_hash.clone(),
-                values: vec![f64::NAN, 0.0],
+                values: vec![f64::NAN; 512],
                 invocation_ref: None,
             },
         )
@@ -1890,7 +1818,7 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
             atom_ref: second_atom,
             space_ref: space.space_ref,
             input_hash: atom_input.input_hash,
-            values: vec![0.99, 0.1],
+            values: { let mut values = vec![0.0; 512]; values[0] = 0.99; values[1] = 0.1; values },
             invocation_ref: None,
         },
     )

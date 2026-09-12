@@ -2,10 +2,15 @@
 use crate::model_settings::ModelError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{path::PathBuf, process::Stdio, time::Duration};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use std::{path::PathBuf, process::Stdio, sync::Arc, time::Duration};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
+    process::{Child, ChildStdin, ChildStdout},
+    sync::Mutex,
+};
 
 pub const PI_PROTOCOL: &str = "linggan.pi.v1/0.85.1";
+pub const WEMM_PROTOCOL: &str = "linggan.wemm.v1";
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PiRequest {
@@ -118,9 +123,82 @@ impl PiDiagnostic {
 pub struct PiAdapter {
     node: PathBuf,
     script: PathBuf,
+    wemm_python: PathBuf,
+    wemm_script: PathBuf,
+    wemm_model: PathBuf,
+    wemm_revision: String,
+    wemm_process: Arc<Mutex<Option<WeMMProcess>>>,
+}
+
+struct WeMMProcess {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WeMMResponse {
+    pub version: String,
+    #[serde(default)]
+    pub id: Option<String>,
+    pub ok: bool,
+    #[serde(default)]
+    pub values: Option<Vec<Vec<f64>>>,
+    #[serde(default)]
+    pub failure_code: Option<String>,
+    #[serde(default)]
+    pub elapsed_ms: Option<i64>,
+    #[serde(default)]
+    pub backend: Option<String>,
+    #[serde(default)]
+    pub dimension: Option<usize>,
+    #[serde(default, rename = "type")]
+    pub response_type: Option<String>,
+    #[serde(default)]
+    pub model_id: Option<String>,
+    #[serde(default)]
+    pub model_revision: Option<String>,
+    #[serde(default)]
+    pub encoding_mode: Option<String>,
+}
+
+impl WeMMResponse {
+    fn valid_ready(&self, revision: &str) -> bool {
+        self.version == WEMM_PROTOCOL
+            && self.ok
+            && self.response_type.as_deref() == Some("ready")
+            && self.model_id.as_deref() == Some("Tencent/WeMM-Embedding-2B")
+            && self.model_revision.as_deref() == Some(revision)
+            && self.encoding_mode.as_deref() == Some("document")
+            && self.dimension == Some(512)
+            && matches!(self.backend.as_deref(), Some("mps") | Some("cpu"))
+    }
+
+    pub fn single_document_values(&self, request_id: &str) -> Option<Vec<f64>> {
+        if self.version != WEMM_PROTOCOL
+            || !self.ok
+            || self.id.as_deref() != Some(request_id)
+            || self.dimension != Some(512)
+            || !matches!(self.backend.as_deref(), Some("mps") | Some("cpu"))
+        {
+            return None;
+        }
+        let vectors = self.values.as_ref()?;
+        (vectors.len() == 1).then(|| vectors[0].clone())
+    }
 }
 impl PiAdapter {
     pub fn configured() -> Self {
+        let support_dir = std::env::var_os("LINGGAN_SUPPORT_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| {
+                PathBuf::from(std::env::var_os("HOME").unwrap_or_default())
+                    .join("Library/Application Support/Linggan Intelligence")
+            });
+        let wemm_runtime = std::env::var_os("LINGGAN_WEMM_RUNTIME_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| support_dir.join("wemm-embedding-2b"));
         Self {
             node: std::env::var_os("LINGGAN_PI_NODE")
                 .map(PathBuf::from)
@@ -130,7 +208,104 @@ impl PiAdapter {
                 }),
             script: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../apps/pi-adapter/src/adapter.mjs"),
+            wemm_python: std::env::var_os("LINGGAN_WEMM_PYTHON")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| wemm_runtime.join("venv/bin/python")),
+            wemm_script: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../../apps/pi-adapter/src/wemm_runtime.py"),
+            wemm_model: std::env::var_os("LINGGAN_WEMM_MODEL_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| wemm_runtime.join("model")),
+            wemm_revision: "bbd6cd4bf52cfc6716f752a2df80b2706720bd95".into(),
+            wemm_process: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Calls the one local WeMM document runtime.  Its process remains owned by this adapter
+    /// (which in turn is owned by the existing research worker), so model weights load once and
+    /// no port, independent queue or new lifecycle is introduced.
+    pub async fn embed_wemm_document(&self, text: &str) -> Result<WeMMResponse, ModelError> {
+        if text.is_empty() || text.len() > 16_000 {
+            return Err(ModelError::InputLimit);
+        }
+        let mut guard = self.wemm_process.lock().await;
+        if guard.is_none() {
+            *guard = Some(self.start_wemm().await?);
+        }
+        let request_id = uuid::Uuid::new_v4().to_string();
+        let payload = serde_json::to_vec(&serde_json::json!({
+            "id": request_id,
+            "encodingMode": "document",
+            "texts": [text],
+        }))
+        .map_err(|_| ModelError::Invalid)?;
+        let outcome = async {
+            let process = guard.as_mut().ok_or(ModelError::AdapterUnavailable)?;
+            process
+                .stdin
+                .write_all(&payload)
+                .await
+                .map_err(|_| ModelError::AdapterUnavailable)?;
+            process
+                .stdin
+                .write_all(b"\n")
+                .await
+                .map_err(|_| ModelError::AdapterUnavailable)?;
+            process
+                .stdin
+                .flush()
+                .await
+                .map_err(|_| ModelError::AdapterUnavailable)?;
+            read_wemm_line(&mut process.stdout).await
+        };
+        match tokio::time::timeout(Duration::from_secs(120), outcome).await {
+            Ok(Ok(response)) => Ok(response),
+            Ok(Err(error)) => {
+                if let Some(mut process) = guard.take() {
+                    let _ = process.child.kill().await;
+                }
+                Err(error)
+            }
+            Err(_) => {
+                if let Some(mut process) = guard.take() {
+                    let _ = process.child.kill().await;
+                }
+                Err(ModelError::Timeout)
+            }
+        }
+    }
+
+    async fn start_wemm(&self) -> Result<WeMMProcess, ModelError> {
+        let mut child = tokio::process::Command::new(&self.wemm_python)
+            .arg(&self.wemm_script)
+            .arg("--model-path")
+            .arg(&self.wemm_model)
+            .arg("--model-revision")
+            .arg(&self.wemm_revision)
+            .env_clear()
+            .env("PYTHONNOUSERSITE", "1")
+            .env("TOKENIZERS_PARALLELISM", "false")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .spawn()
+            .map_err(|_| ModelError::AdapterUnavailable)?;
+        let stdin = child.stdin.take().ok_or(ModelError::AdapterUnavailable)?;
+        let stdout = child.stdout.take().ok_or(ModelError::AdapterUnavailable)?;
+        let mut process = WeMMProcess {
+            child,
+            stdin,
+            stdout: BufReader::new(stdout),
+        };
+        let ready = tokio::time::timeout(Duration::from_secs(90), read_wemm_line(&mut process.stdout))
+            .await
+            .map_err(|_| ModelError::Timeout)??;
+        if !ready.valid_ready(&self.wemm_revision) {
+            let _ = process.child.kill().await;
+            return Err(ModelError::AdapterUnavailable);
+        }
+        Ok(process)
     }
     pub async fn call(&self, request: &PiRequest) -> Result<PiResponse, ModelError> {
         let input = serde_json::to_vec(request).map_err(|_| ModelError::Invalid)?;
@@ -207,6 +382,18 @@ impl PiAdapter {
             }
         }
     }
+}
+
+async fn read_wemm_line(reader: &mut BufReader<ChildStdout>) -> Result<WeMMResponse, ModelError> {
+    let mut line = String::new();
+    let bytes = reader
+        .read_line(&mut line)
+        .await
+        .map_err(|_| ModelError::AdapterUnavailable)?;
+    if bytes == 0 || bytes > 262_144 {
+        return Err(ModelError::InvalidOutput);
+    }
+    serde_json::from_str(&line).map_err(|_| ModelError::InvalidOutput)
 }
 pub fn safe_result(response: &PiResponse) -> Value {
     serde_json::json!({"ok":response.ok,"failureCode":response.failure_code,"usage":response.usage,"elapsedMs":response.elapsed_ms,"modelIds":response.model_ids,"modelListOrigin":response.model_list_origin,"diagnostic":response.diagnostic})

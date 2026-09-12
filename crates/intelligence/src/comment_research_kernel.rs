@@ -5,7 +5,7 @@
 
 use crate::{
     comment_cleaning::{CLEANER_VERSION, CleanComment, clean},
-    embedding_settings,
+    local_embedding_profile,
     research_text::content_hash,
 };
 use linggan_storage_postgres::Database;
@@ -322,7 +322,7 @@ pub async fn start_run(
 ) -> Result<ResearchRunReceipt, CommentResearchKernelError> {
     derive_current_sources(database, MAX_DERIVATIONS_PER_PASS as usize).await?;
     let mut transaction = database.pool().begin().await?;
-    if !embedding_settings::ready_in_transaction(&mut transaction, None).await? {
+    if !local_embedding_profile::ready_in_transaction(&mut transaction).await? {
         return Err(CommentResearchKernelError::EmbeddingNotReady);
     }
     let policy = sqlx::query(
@@ -659,12 +659,11 @@ async fn refresh_run_completion_with_embedding_state(
                               WHERE embedding.atom_ref=atom.atom_ref AND embedding.state IN ('pending','running')) \
                AND (EXISTS(SELECT 1 FROM linggan_comment_research_atom_embedding embedding \
                            WHERE embedding.atom_ref=atom.atom_ref AND embedding.state IN ('failed','incompatible')) \
-                    OR ($2 AND NOT EXISTS(SELECT 1 FROM linggan_embedding_settings settings \
-                                  JOIN linggan_embedding_config config USING(config_ref) \
+                    OR ($2 AND NOT EXISTS(SELECT 1 FROM linggan_comment_research_embedding_profile profile \
                                   JOIN linggan_model_entry model USING(model_ref) \
                                   JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref \
                                   JOIN linggan_model_connection connection USING(connection_ref) \
-                                  WHERE settings.singleton AND config.enabled AND config.qualified AND connection.enabled))) \
+                                  WHERE profile.singleton AND profile.enabled AND connection.enabled))) \
             ) \
             + (SELECT count(*) FROM linggan_comment_research_atom atom \
                WHERE atom.run_ref=$1 AND atom.kind IN ('problem','need') \
@@ -675,28 +674,7 @@ async fn refresh_run_completion_with_embedding_state(
                                 WHERE resolution.atom_ref=atom.atom_ref) \
                  AND EXISTS(SELECT 1 FROM linggan_comment_research_atom_embedding embedding \
                             WHERE embedding.atom_ref=atom.atom_ref AND embedding.state='succeeded') \
-                 AND EXISTS( \
-                     SELECT 1 FROM linggan_comment_research_problem_definition definition \
-                     JOIN linggan_comment_research_problem problem USING(problem_ref) \
-                     WHERE problem.state='active' \
-                       AND EXISTS( \
-                           SELECT 1 FROM linggan_comment_research_atom_problem_membership membership \
-                           JOIN linggan_comment_research_atom member_atom USING(atom_ref) \
-                           JOIN linggan_comment_research_derivation_readable member_derivation \
-                             ON member_derivation.derivation_ref=member_atom.derivation_ref \
-                           WHERE membership.problem_ref=definition.problem_ref \
-                             AND membership.definition_revision=definition.revision AND membership.current \
-                       ) \
-                       AND NOT EXISTS( \
-                           SELECT 1 FROM linggan_comment_research_problem_definition_embedding definition_embedding \
-                           JOIN linggan_comment_research_atom_embedding atom_embedding \
-                             ON atom_embedding.atom_ref=atom.atom_ref AND atom_embedding.state='succeeded' \
-                           WHERE definition_embedding.problem_ref=definition.problem_ref \
-                             AND definition_embedding.definition_revision=definition.revision \
-                             AND definition_embedding.space_ref=atom_embedding.space_ref \
-                             AND definition_embedding.state='succeeded' \
-                       ) \
-                 ) \
+               AND false \
             ) AS embedding_failed_atoms, \
             (SELECT count(*) FROM linggan_comment_research_atom atom \
              WHERE atom.run_ref=$1 AND atom.kind IN ('problem','need') \
