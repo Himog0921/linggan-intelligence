@@ -41,7 +41,10 @@ Gate 5 的长期数据分类、身份、版本、Current、隐私传播、统计
 
 ## 本地开发环境
 
-- PostgreSQL 运行在 Docker 官方 `postgres:16.14-bookworm` 中。
+- PostgreSQL 基于固定的 Docker 官方 `postgres:16.14-bookworm` digest 构建本地
+  `linggan-intelligence-postgres-pgvector:16.14-v0.8.0-r1`。扩展从 pgvector `v0.8.0`
+  commit `2627c5ff775ae6d7aef0c430121ccf857842d2f2` 编译；这是 LOCAL-EMBEDDING-001
+  所需的服务器端 `vector` 扩展，不是新的网络服务。
 - 本机只绑定 `127.0.0.1:55432`，不复用旧项目端口。
 - 开发库固定为 `linggan_intelligence_dev`。
 - 本地初始化与 migration 管理账号为 `linggan_dev_admin`；产品运行账号以后由已确认 migration 创建。

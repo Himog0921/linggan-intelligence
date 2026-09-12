@@ -10,8 +10,7 @@ use crate::{
     comment_research_atoms::{SemanticExtractionOutput, accept_semantic_output},
     comment_research_embeddings::{
         AtomEmbeddingResult, CommentResearchEmbeddingError, EmbeddingWorkClaim,
-        ProblemDefinitionEmbeddingResult, accept_atom_embedding,
-        accept_problem_definition_embedding, claim_next_embedding_work, recall_problem_candidates,
+        accept_atom_embedding, claim_next_embedding_work, recall_problem_candidates,
         record_embedding_failure,
     },
     comment_research_kernel::{
@@ -24,12 +23,12 @@ use crate::{
         ProblemMembershipBasis, admit_existing_problem, admit_new_problem,
     },
     comment_research_results::{CommentResearchResultError, publish_result_revision},
-    embedding_settings,
+    local_embedding_profile,
     model_invocation::{connection_request, finish_invocation},
     model_secrets::ModelSecretStore,
     model_settings::ModelError,
     model_worker_drain::ModelWorkerDrain,
-    pi_adapter::{PiAdapter, PiResponse, safe_result},
+    pi_adapter::{PiAdapter, PiResponse, PiUsage, safe_result},
     research_text::content_hash,
 };
 use linggan_storage_postgres::Database;
@@ -99,7 +98,7 @@ pub async fn run_once(
     if drain.is_requested() || !schema_ready(database).await? {
         return Ok(false);
     }
-    if embedding_settings::active_config(database).await?.is_none() {
+    if local_embedding_profile::active(database).await?.is_none() {
         return fail_active_runs_without_embedding_config(database)
             .await
             .map(|settled| settled > 0)
@@ -347,7 +346,7 @@ async fn settle_semantic_response(
 
 async fn advance_embedding(
     database: &Database,
-    store: &dyn ModelSecretStore,
+    _store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
     drain: &ModelWorkerDrain,
 ) -> Result<bool, ModelError> {
@@ -367,15 +366,15 @@ async fn advance_embedding(
     let Some(claim) = claim else {
         return Ok(false);
     };
-    let Some(config) = embedding_settings::active_config(database).await? else {
+    let Some(profile) = local_embedding_profile::active(database).await? else {
         fail_embedding_work(database, &claim, None, "embedding_not_qualified").await?;
         return Ok(true);
     };
-    let payload = embedding_payload(&claim)?;
+    let payload = embedding_payload(&claim);
     let reserved = match reserve_embedding_call(
         database,
         embedding_run_ref(&claim),
-        &config,
+        &profile,
         &payload,
         "embedding",
     )
@@ -387,25 +386,18 @@ async fn advance_embedding(
             return Ok(true);
         }
     };
-    let response = dispatch_embedding(database, store, adapter, &reserved, payload, drain).await;
+    let response = dispatch_embedding(adapter, payload, drain).await;
     settle_embedding_response(database, &claim, &reserved, response).await?;
     refresh_embedding_completion(database, &claim).await?;
     Ok(true)
 }
 
 fn embedding_run_ref(claim: &EmbeddingWorkClaim) -> Uuid {
-    match claim {
-        EmbeddingWorkClaim::Atom { run_ref, .. }
-        | EmbeddingWorkClaim::ProblemDefinition { run_ref, .. } => *run_ref,
-    }
+    claim.run_ref
 }
 
-fn embedding_payload(claim: &EmbeddingWorkClaim) -> Result<String, ModelError> {
-    let text = match claim {
-        EmbeddingWorkClaim::Atom { input, .. } => &input.text,
-        EmbeddingWorkClaim::ProblemDefinition { input, .. } => &input.text,
-    };
-    serde_json::to_string(&vec![text]).map_err(|_| ModelError::Invalid)
+fn embedding_payload(claim: &EmbeddingWorkClaim) -> String {
+    claim.input.canonical_text.clone()
 }
 
 async fn fail_embedding_work(
@@ -424,11 +416,9 @@ async fn refresh_embedding_completion(
     database: &Database,
     claim: &EmbeddingWorkClaim,
 ) -> Result<(), ModelError> {
-    if let EmbeddingWorkClaim::Atom { input, .. } = claim {
-        refresh_run_completion_for_atom(database, input.atom_ref)
-            .await
-            .map_err(kernel_error)?;
-    }
+    refresh_run_completion_for_atom(database, claim.input.atom_ref)
+        .await
+        .map_err(kernel_error)?;
     Ok(())
 }
 
@@ -506,35 +496,17 @@ async fn accept_embedding_values(
     values: Vec<f64>,
     invocation_ref: Uuid,
 ) -> Result<(), CommentResearchEmbeddingError> {
-    match claim {
-        EmbeddingWorkClaim::Atom { input, .. } => {
-            accept_atom_embedding(
-                database,
-                AtomEmbeddingResult {
-                    atom_ref: input.atom_ref,
-                    space_ref: input.space_ref,
-                    input_hash: input.input_hash.clone(),
-                    values,
-                    invocation_ref: Some(invocation_ref),
-                },
-            )
-            .await
-        }
-        EmbeddingWorkClaim::ProblemDefinition { input, .. } => {
-            accept_problem_definition_embedding(
-                database,
-                ProblemDefinitionEmbeddingResult {
-                    problem_ref: input.problem_ref,
-                    definition_revision: input.definition_revision,
-                    space_ref: input.space_ref,
-                    input_hash: input.input_hash.clone(),
-                    values,
-                    invocation_ref: Some(invocation_ref),
-                },
-            )
-            .await
-        }
-    }
+    accept_atom_embedding(
+        database,
+        AtomEmbeddingResult {
+            atom_ref: claim.input.atom_ref,
+            space_ref: claim.input.space_ref,
+            input_hash: claim.input.input_hash.clone(),
+            values,
+            invocation_ref: Some(invocation_ref),
+        },
+    )
+    .await
 }
 
 async fn advance_problem_resolution(
@@ -813,7 +785,7 @@ async fn reserve_generation_call(
     stage: &'static str,
 ) -> Result<ReservedCall, ModelError> {
     let mut transaction = database.pool().begin().await?;
-    if !embedding_settings::ready_in_transaction(&mut transaction, None).await? {
+    if !local_embedding_profile::ready_in_transaction(&mut transaction).await? {
         return Err(ModelError::EmbeddingNotQualified);
     }
     let row = sqlx::query(
@@ -881,21 +853,12 @@ async fn reserve_generation_call(
 async fn reserve_embedding_call(
     database: &Database,
     run_ref: Uuid,
-    config: &Value,
+    profile: &local_embedding_profile::LocalEmbeddingProfile,
     payload: &str,
     stage: &'static str,
 ) -> Result<ReservedCall, ModelError> {
-    let embedding_config_ref = json_uuid(config, "configRef")?;
-    let model_ref = json_uuid(config, "modelRef")?;
-    let version_ref = json_uuid(config, "connectionVersionRef")?;
-    let model_id = config["modelId"]
-        .as_str()
-        .ok_or(ModelError::Invalid)?
-        .to_owned();
     let mut transaction = database.pool().begin().await?;
-    if !embedding_settings::ready_in_transaction(&mut transaction, Some(embedding_config_ref))
-        .await?
-    {
+    if !local_embedding_profile::ready_in_transaction(&mut transaction).await? {
         return Err(ModelError::EmbeddingNotQualified);
     }
     let policy_limit: i64 = sqlx::query_scalar(
@@ -908,20 +871,6 @@ async fn reserve_embedding_call(
     .fetch_optional(&mut *transaction)
     .await?
     .ok_or(ModelError::Source)?;
-    let enabled: bool = sqlx::query_scalar(
-        "SELECT connection.enabled FROM linggan_model_entry model \
-         JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref \
-         JOIN linggan_model_connection connection USING(connection_ref) \
-         WHERE model.model_ref=$1 AND version.version_ref=$2",
-    )
-    .bind(model_ref)
-    .bind(version_ref)
-    .fetch_optional(&mut *transaction)
-    .await?
-    .unwrap_or(false);
-    if !enabled {
-        return Err(ModelError::Disabled);
-    }
     let reservation = i64::try_from(payload.chars().count())
         .unwrap_or(i64::MAX)
         .saturating_add(64)
@@ -943,8 +892,8 @@ async fn reserve_embedding_call(
          ) VALUES($1,$2,$3,'embed',$4,'running',$5,$5,$6)",
     )
     .bind(invocation_ref)
-    .bind(version_ref)
-    .bind(model_ref)
+    .bind(profile.connection_version_ref)
+    .bind(profile.model_ref)
     .bind(content_hash(payload))
     .bind(reservation)
     .bind(json!({"runRef":run_ref,"stage":stage,"callStarted":false}))
@@ -953,8 +902,8 @@ async fn reserve_embedding_call(
     transaction.commit().await?;
     Ok(ReservedCall {
         invocation_ref,
-        connection_version_ref: version_ref,
-        model_id,
+        connection_version_ref: profile.connection_version_ref,
+        model_id: profile.model_id.clone(),
         output_limit: 16,
         timeout_seconds: 30,
         stage,
@@ -1011,26 +960,31 @@ async fn dispatch_with_connection(
 }
 
 async fn dispatch_embedding(
-    database: &Database,
-    store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
-    reserved: &ReservedCall,
     payload: String,
     drain: &ModelWorkerDrain,
 ) -> Result<PiResponse, ModelError> {
-    dispatch_with_connection(
-        database,
-        store,
-        adapter,
-        reserved,
-        DispatchInput {
-            operation: "embed",
-            system: String::new(),
-            prompt: payload,
+    if drain.is_requested() {
+        return Err(ModelError::Source);
+    }
+    let response = adapter.embed_wemm_document(&payload).await?;
+    Ok(PiResponse {
+        version: crate::pi_adapter::PI_PROTOCOL.into(),
+        ok: response.ok,
+        text: response
+            .values
+            .map(|vectors| json!({"vectors":vectors}).to_string()),
+        failure_code: response.failure_code,
+        model_ids: Some(vec![local_embedding_profile::MODEL_ID.into()]),
+        model_list_origin: Some("local_wemm_runtime".into()),
+        usage: PiUsage {
+            input_tokens: None,
+            output_tokens: None,
+            cost_usd: None,
         },
-        drain,
-    )
-    .await
+        elapsed_ms: response.elapsed_ms,
+        diagnostic: None,
+    })
 }
 
 async fn settle_call(
@@ -1457,14 +1411,6 @@ fn reservation_failure_state(error: &ModelError) -> &'static str {
 fn rationale_is_valid(value: &str) -> bool {
     let trimmed = value.trim();
     !trimmed.is_empty() && trimmed.chars().count() <= 300
-}
-
-fn json_uuid(value: &Value, key: &str) -> Result<Uuid, ModelError> {
-    value
-        .get(key)
-        .and_then(Value::as_str)
-        .and_then(|value| value.parse().ok())
-        .ok_or(ModelError::Invalid)
 }
 
 fn kernel_error(error: crate::comment_research_kernel::CommentResearchKernelError) -> ModelError {

@@ -39,6 +39,7 @@ case "$command_name" in
     ;;
   up)
     ensure_env
+    "$project_root/scripts/runtime/build-pgvector-image.sh" --ensure
     docker compose up -d --wait postgres
     ;;
   stop)

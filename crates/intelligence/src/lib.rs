@@ -35,3 +35,4 @@ pub mod comment_research_results;
 pub mod comment_research_worker;
 
 pub mod embedding_settings;
+pub mod local_embedding_profile;

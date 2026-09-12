@@ -2,7 +2,10 @@ name: linggan-intelligence
 
 services:
   postgres:
-    image: postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8
+    image: linggan-intelligence-postgres-pgvector:16.14-v0.8.0-r1
+    build:
+      context: .
+      dockerfile: docker/postgres-pgvector/Dockerfile
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}

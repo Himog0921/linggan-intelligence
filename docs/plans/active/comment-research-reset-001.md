@@ -1,7 +1,7 @@
 # COMMENT-RESEARCH-RESET-001 · 开发期评论研究唯一内核重建
 
 > 状态: 活跃计划
-> 最后核对: 2026-09-10
+> 最后核对: 2026-09-12
 > 适用范围: Issue #213；评论研究的唯一语义内核、研究运行、读取模型、四个研究视图和开发期派生数据重置
 > 事实来源: Mog 2026-09-09 明确授权、[DEC-0003](../../decisions/0003-comment-research-single-semantic-kernel.md)、Issue #213 三路只读走查、`origin/main@45ffdf0`
 > 冲突时以谁为准: 用户最新决定、`AGENTS.md`、真实代码/迁移/测试/运行证据
@@ -23,7 +23,7 @@
 2. 原始 Evidence、采集包、作品/评论事实、作者归属事实、来源资格和调用账本不可删除或改写。
 3. 旧 Task B 与 P4 均不保留为 fallback、双写或页面读取来源。
 4. 新内核只持久四类 Atom：`problem`、`need`、`solution`、`experience`。`no_signal` 是 run item 终态，不是 Atom；`stance`、`story`、`quote`、`emotion` 不进入本交付的正式归并体系。
-5. V1 使用已保存、已测试的 embedding 配置和版本化 exact cosine Top-K 候选召回；它不引入 ANN、pgvector、HNSW 或预设 provider。候选召回不能直接写入 membership，模型消歧与程序校验才可归并。
+5. LOCAL-EMBEDDING-001 覆盖本条旧约束：V1 的唯一 embedding 是本机 `Tencent/WeMM-Embedding-2B` 固定 commit，Atom canonical_text 以 `document` 模式编码为 512 维并 L2 normalize，写入 pgvector 后只做 exact cosine Top-K；没有 ANN/HNSW、外部 embedding provider 或 Problem-definition embedding。Profile 绑定 model id/revision、编码模式、维度与 preprocessing 版本，候选召回不能跨 profile，也不能直接写 membership。
 6. V1 不自动 merge/split 已发布 Problem；新的残余表达最多成为待定义候选，不能仅凭聚类取得永久身份。
 
 ## 3. 唯一数据链与最小数据合同
