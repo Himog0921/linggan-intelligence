@@ -53,15 +53,18 @@ pub async fn read(db: &Database) -> Result<Value, ModelError> {
     let profile = local_embedding_profile::active(db).await?;
     Ok(match profile {
         Some(profile) => json!({
-            "revision": 1, "configRef": null, "profileRef": profile.profile_ref,
+            "revision": 1, "configured": true, "configRef": null, "profileRef": profile.profile_ref,
             "modelRef": profile.model_ref, "modelId": profile.model_id,
             "modelRevision": profile.model_revision, "encodingMode": profile.encoding_mode,
             "dimensions": profile.dimension, "preprocessingVersion": profile.preprocessing_version,
-            "qualified": true, "enabled": true, "protocol": "local-wemm-document.v1",
+            "qualified": true, "enabled": true, "connectionEnabled": true,
+            "protocol": "local-wemm-document.v1",
             "qualificationMeaning": "固定本机 WeMM profile；512 维是工程初值，候选仅作 exact cosine 召回"
         }),
-        None => json!({"revision":1,"configRef":null,"qualified":false,"enabled":false,
-            "protocol":"local-wemm-document.v1","qualificationMeaning":"本机固定 WeMM profile 不可用"}),
+        None => {
+            json!({"revision":1,"configured":false,"configRef":null,"qualified":false,"enabled":false,"connectionEnabled":false,
+            "protocol":"local-wemm-document.v1","qualificationMeaning":"本机固定 WeMM profile 不可用"})
+        }
     })
 }
 #[derive(Deserialize)]

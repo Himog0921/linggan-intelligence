@@ -18,6 +18,7 @@ use linggan_intelligence::{
     comment_research_read_v1::{
         self as read_v1, CommentResearchV1ReadError, CommentResearchV1ReadQuery,
     },
+    embedding_settings,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -231,19 +232,12 @@ async fn read_setup(State(state): State<LocalWebState>) -> Response {
         Ok(config) => config,
         Err(_) => return unavailable(),
     };
-    let embedding: Option<Value> = sqlx::query_scalar(
-        "SELECT jsonb_build_object( \
-             'configured',true,'enabled',config.enabled,'qualified',config.qualified, \
-             'connectionEnabled',connection.enabled,'dimensions',config.dimensions,'modelId',model.model_id \
-         ) FROM linggan_embedding_settings settings \
-         JOIN linggan_embedding_config config USING(config_ref) \
-         JOIN linggan_model_entry model USING(model_ref) \
-         JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref \
-         JOIN linggan_model_connection connection USING(connection_ref) WHERE settings.singleton",
-    )
-    .fetch_optional(database.pool())
-    .await
-    .unwrap_or(None);
+    // This existing setup projection must read the same singleton used by Run admission.
+    // The retired generic provider config is intentionally not a fallback for LOCAL-EMBEDDING-001.
+    let embedding = match embedding_settings::read(&database).await {
+        Ok(embedding) => embedding,
+        Err(_) => return unavailable(),
+    };
     let worker: Option<Value> = sqlx::query_scalar(
         "SELECT jsonb_build_object( \
              'lastSeenAt',worker_last_seen_at,'state',worker_state,'lastError',worker_last_error \
