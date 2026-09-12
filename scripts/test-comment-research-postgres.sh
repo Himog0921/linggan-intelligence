@@ -10,7 +10,7 @@ proof_container="linggan-comment-proof-${proof_suffix}"
 proof_volume="linggan-comment-proof-${proof_suffix}-data"
 proof_user="comment_proof_admin"
 proof_password="$(openssl rand -hex 24)"
-postgres_image="postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8"
+postgres_image="linggan-intelligence-postgres-pgvector:16.14-v0.8.0-r1"
 
 [[ "$proof_database" =~ ^linggan_comment_proof_[a-zA-Z0-9_]+$ ]] || { echo "unsafe proof database name" >&2; exit 1; }
 [[ "$proof_container" =~ ^linggan-comment-proof-[a-zA-Z0-9_-]+$ ]] || { echo "unsafe proof container name" >&2; exit 1; }
@@ -20,6 +20,7 @@ if ! docker info >/dev/null 2>&1; then
   echo "Comment research PostgreSQL proof was not started: the Docker daemon is unavailable." >&2
   exit 1
 fi
+"$project_root/scripts/runtime/build-pgvector-image.sh" --ensure
 
 cleanup() {
   task_exit=$?

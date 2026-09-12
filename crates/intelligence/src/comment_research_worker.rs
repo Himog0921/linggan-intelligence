@@ -10,7 +10,8 @@ use crate::{
     comment_research_atoms::{SemanticExtractionOutput, accept_semantic_output},
     comment_research_embeddings::{
         AtomEmbeddingResult, CommentResearchEmbeddingError, EmbeddingWorkClaim,
-        accept_atom_embedding, claim_next_embedding_work, recall_problem_candidates, record_embedding_failure,
+        accept_atom_embedding, claim_next_embedding_work, recall_problem_candidates,
+        record_embedding_failure,
     },
     comment_research_kernel::{
         ClaimedResearchInput, RunItemFailureClass, claim_next_run_item,
@@ -504,7 +505,8 @@ async fn accept_embedding_values(
             values,
             invocation_ref: Some(invocation_ref),
         },
-    ).await
+    )
+    .await
 }
 
 async fn advance_problem_resolution(
@@ -962,16 +964,24 @@ async fn dispatch_embedding(
     payload: String,
     drain: &ModelWorkerDrain,
 ) -> Result<PiResponse, ModelError> {
-    if drain.is_requested() { return Err(ModelError::Source); }
+    if drain.is_requested() {
+        return Err(ModelError::Source);
+    }
     let response = adapter.embed_wemm_document(&payload).await?;
     Ok(PiResponse {
         version: crate::pi_adapter::PI_PROTOCOL.into(),
         ok: response.ok,
-        text: response.values.map(|vectors| json!({"vectors":vectors}).to_string()),
+        text: response
+            .values
+            .map(|vectors| json!({"vectors":vectors}).to_string()),
         failure_code: response.failure_code,
         model_ids: Some(vec![local_embedding_profile::MODEL_ID.into()]),
         model_list_origin: Some("local_wemm_runtime".into()),
-        usage: PiUsage { input_tokens: None, output_tokens: None, cost_usd: None },
+        usage: PiUsage {
+            input_tokens: None,
+            output_tokens: None,
+            cost_usd: None,
+        },
         elapsed_ms: response.elapsed_ms,
         diagnostic: None,
     })

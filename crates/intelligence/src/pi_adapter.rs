@@ -298,9 +298,10 @@ impl PiAdapter {
             stdin,
             stdout: BufReader::new(stdout),
         };
-        let ready = tokio::time::timeout(Duration::from_secs(90), read_wemm_line(&mut process.stdout))
-            .await
-            .map_err(|_| ModelError::Timeout)??;
+        let ready =
+            tokio::time::timeout(Duration::from_secs(90), read_wemm_line(&mut process.stdout))
+                .await
+                .map_err(|_| ModelError::Timeout)??;
         if !ready.valid_ready(&self.wemm_revision) {
             let _ = process.child.kill().await;
             return Err(ModelError::AdapterUnavailable);

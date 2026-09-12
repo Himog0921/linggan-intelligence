@@ -1,7 +1,10 @@
 -- LOCAL-EMBEDDING-001: one local WeMM profile, Atom-only pgvector storage and exact cosine.
 -- No model registry, HTTP service, queue or scheduling state is introduced here.
 
-CREATE EXTENSION IF NOT EXISTS vector;
+-- The application schema is normally `public`, while PostgreSQL proof tests deliberately use
+-- one private schema per case.  Installing pgvector once in `public` and qualifying the type
+-- below preserves both the production deployment and isolated-schema proof semantics.
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
 
 -- A local runtime is an auditable invocation source, not an OpenAI-compatible endpoint.  The
 -- existing generic model ledger remains the receipt store, but this profile never reads a secret.
@@ -72,11 +75,16 @@ ALTER TABLE linggan_comment_research_embedding_space
 ALTER TABLE linggan_comment_research_embedding_space ALTER COLUMN profile_ref DROP DEFAULT;
 
 ALTER TABLE linggan_comment_research_atom_embedding
-  DROP CONSTRAINT linggan_comment_research_atom_embedding_check,
-  DROP CONSTRAINT linggan_comment_research_atom_embedding_vector_check,
-  DROP CONSTRAINT linggan_comment_research_atom_embedding_vector_check1,
+  -- PostgreSQL derives names for anonymous multi-column CHECKs from different
+  -- referenced columns across the historic V1 migration path.  Remove only
+  -- the retired JSON-vector guards; the surviving state/input-hash guards are
+  -- column constraints and do not need to be reconstructed here.
+  DROP CONSTRAINT IF EXISTS linggan_comment_research_atom_embedding_check,
+  DROP CONSTRAINT IF EXISTS linggan_comment_research_atom_embedding_vector_check,
+  DROP CONSTRAINT IF EXISTS linggan_comment_research_atom_embedding_vector_check1,
+  DROP CONSTRAINT IF EXISTS linggan_comment_research_atom_embedding_dimensions_check,
   DROP COLUMN vector,
-  ADD COLUMN vector vector(512),
+  ADD COLUMN vector public.vector(512),
   ADD CONSTRAINT linggan_comment_research_atom_embedding_check
     CHECK((state='succeeded') = (dimensions IS NOT NULL AND vector IS NOT NULL)),
   ADD CONSTRAINT linggan_comment_research_atom_embedding_dimension_check CHECK(dimensions IS NULL OR dimensions=512);

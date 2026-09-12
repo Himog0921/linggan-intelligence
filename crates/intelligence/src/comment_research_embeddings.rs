@@ -117,7 +117,10 @@ pub async fn activate_configured_embedding_space(
     )
     .bind(Uuid::new_v4())
     .bind(profile.profile_ref)
-    .bind(i32::try_from(profile.dimension).map_err(|_| CommentResearchEmbeddingError::InvalidEmbedding)?)
+    .bind(
+        i32::try_from(profile.dimension)
+            .map_err(|_| CommentResearchEmbeddingError::InvalidEmbedding)?,
+    )
     .bind(&policy_hash)
     .execute(database.pool())
     .await?;
@@ -170,7 +173,7 @@ pub async fn accept_atom_embedding(
     let vector = normalized_vector_literal(&result.values, expected.dimensions)?;
     let changed = sqlx::query(
         "UPDATE linggan_comment_research_atom_embedding \
-         SET state='succeeded',dimensions=$4,vector=$5::vector,invocation_ref=$6,failure_code=NULL, \
+         SET state='succeeded',dimensions=$4,vector=$5::public.vector,invocation_ref=$6,failure_code=NULL, \
              updated_at=scope_001_now() \
          WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND state IN ('pending','running')",
     )
@@ -200,7 +203,7 @@ pub async fn recall_problem_candidates(
          FROM ( \
            SELECT DISTINCT ON (membership.problem_ref,membership.definition_revision) \
                   membership.problem_ref,membership.definition_revision,neighbor.atom_ref AS neighbor_atom_ref, \
-                  1-(neighbor_embedding.vector <=> query_embedding.vector) AS cosine \
+                  1-(neighbor_embedding.vector OPERATOR(public.<=>) query_embedding.vector) AS cosine \
            FROM linggan_comment_research_atom_embedding query_embedding \
            JOIN linggan_comment_research_atom query_atom ON query_atom.atom_ref=query_embedding.atom_ref \
            JOIN linggan_comment_research_derivation_readable query_derivation \
@@ -221,7 +224,7 @@ pub async fn recall_problem_candidates(
                             WHERE own.atom_ref=query_atom.atom_ref AND own.problem_ref=membership.problem_ref \
                               AND own.current) \
            ORDER BY membership.problem_ref,membership.definition_revision,\
-                    neighbor_embedding.vector <=> query_embedding.vector,neighbor.atom_ref \
+                    neighbor_embedding.vector OPERATOR(public.<=>) query_embedding.vector,neighbor.atom_ref \
          ) candidate \
          ORDER BY candidate.cosine DESC,candidate.problem_ref,candidate.neighbor_atom_ref LIMIT $3",
     )
@@ -291,7 +294,9 @@ pub async fn claim_next_embedding_work(
         .bind(space.space_ref)
         .fetch_optional(database.pool())
         .await?;
-        let Some(candidate) = candidate else { return Ok(None); };
+        let Some(candidate) = candidate else {
+            return Ok(None);
+        };
         queue_atom_embedding(database, candidate.0, space.space_ref).await?;
         candidate
     };
@@ -357,19 +362,25 @@ async fn read_atom_embedding_input(
     Ok(AtomEmbeddingInput {
         atom_ref,
         space_ref,
-        input_hash: content_hash(&json!({
-            "kind": "atom_canonical_text",
-            "atomKind": kind,
-            "canonicalText": canonical_text,
-            "ruleHash": row.get::<String, _>("rule_hash"),
-            "preprocessingVersion": local_embedding_profile::PREPROCESSING_VERSION,
-        }).to_string()),
+        input_hash: content_hash(
+            &json!({
+                "kind": "atom_canonical_text",
+                "atomKind": kind,
+                "canonicalText": canonical_text,
+                "ruleHash": row.get::<String, _>("rule_hash"),
+                "preprocessingVersion": local_embedding_profile::PREPROCESSING_VERSION,
+            })
+            .to_string(),
+        ),
         dimensions,
         canonical_text,
     })
 }
 
-async fn space_dimensions(database: &Database, space_ref: Uuid) -> Result<usize, CommentResearchEmbeddingError> {
+async fn space_dimensions(
+    database: &Database,
+    space_ref: Uuid,
+) -> Result<usize, CommentResearchEmbeddingError> {
     let dimensions: Option<i32> = sqlx::query_scalar(
         "SELECT space.dimensions FROM linggan_comment_research_embedding_space space \
          JOIN linggan_comment_research_embedding_profile profile USING(profile_ref) \
@@ -382,17 +393,23 @@ async fn space_dimensions(database: &Database, space_ref: Uuid) -> Result<usize,
     .bind(space_ref)
     .fetch_optional(database.pool())
     .await?;
-    dimensions.ok_or(CommentResearchEmbeddingError::SpaceUnavailable).and_then(positive_dimensions)
+    dimensions
+        .ok_or(CommentResearchEmbeddingError::SpaceUnavailable)
+        .and_then(positive_dimensions)
 }
 
 fn positive_dimensions(dimensions: i32) -> Result<usize, CommentResearchEmbeddingError> {
-    let dimensions = usize::try_from(dimensions).map_err(|_| CommentResearchEmbeddingError::InvalidEmbedding)?;
+    let dimensions =
+        usize::try_from(dimensions).map_err(|_| CommentResearchEmbeddingError::InvalidEmbedding)?;
     (dimensions == local_embedding_profile::DIMENSION)
         .then_some(dimensions)
         .ok_or(CommentResearchEmbeddingError::InvalidEmbedding)
 }
 
-fn normalized_vector_literal(values: &[f64], dimensions: usize) -> Result<String, CommentResearchEmbeddingError> {
+fn normalized_vector_literal(
+    values: &[f64],
+    dimensions: usize,
+) -> Result<String, CommentResearchEmbeddingError> {
     if values.len() != dimensions || values.iter().any(|value| !value.is_finite()) {
         return Err(CommentResearchEmbeddingError::InvalidEmbedding);
     }
@@ -410,7 +427,10 @@ mod tests {
     use super::*;
     #[test]
     fn normalized_vector_is_pgvector_literal_with_unit_norm() {
-        assert_eq!(normalized_vector_literal(&[3.0, 4.0], 2).unwrap(), "[0.6,0.8]");
+        assert_eq!(
+            normalized_vector_literal(&[3.0, 4.0], 2).unwrap(),
+            "[0.6,0.8]"
+        );
         assert!(normalized_vector_literal(&[0.0, 0.0], 2).is_err());
         assert!(normalized_vector_literal(&[1.0], 2).is_err());
     }
