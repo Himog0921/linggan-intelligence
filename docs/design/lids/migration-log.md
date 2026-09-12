@@ -22,6 +22,13 @@
 - **Data Truth**：Target Inspector 直接消费 single-as-of 投影；queued 不写 running，Known zero 与 Unknown 分开，读取失败不回退为健康或空数据。表现图仅使用已有 qualified/KNOWN lifecycle points；没有分类时明示边界。
 - **验证边界**：源码/focused/workspace、新 inspector 隔离 PostgreSQL、项目治理、UI handbook 与 1440×900 浏览器交互/实拍已通过；完整 PostgreSQL 脚本仍有两项未修改的 collection-control 基线失败。PR #205 已合并，本机 API `runtime-main@f0ed68d` 与真实 Targets 页面已核验；worker、插件、平台、真实采集与 Mog 业务验收仍未证明，不能由本机 API 运行替代。
 
+## 2026-09-13 · TARGET-INSPECTOR-PERFORMANCE-001 表现页复核构图
+
+- **范围**：Collection L1 与现有 L2 Split Inspector 不变；creator 的「作品｜表现」以 Mog 提供的静态参考稿重排为控制、覆盖、趋势、复核和证据五层。参考稿不提供运行数值、目标身份或状态。没有新增 Token、CMP、壳层、数据合同或动作。
+- **Data Truth**：趋势和摘要仅消费 qualified / KNOWN lifecycle point；空 point 集显示不可成图原因与真实 exclusion，而不以中位数、密度或巡查新增 `0` 填充。header 的持续观察标记区分 active、paused、dismissed 与 inactive，既不把未启用猜为暂停，也不借用 scheduler／Lease／Attempt 状态。
+- **Token / Layout / A11y**：新增样式只消费现有 `--lgi-*` Token，所有功能文字使用 11px 及以上的 Token 档位；趋势图例可折行，避免 901px 以上但右侧摘要仍并列的中间宽度横溢。散点保留为展开后的可访问逐篇证据，趋势 SVG 保留具名替代文字。
+- **验证边界**：focused render 反例覆盖 Known(0)、Unknown-only 空点、观察状态分支和 URL 恢复；format、check、UI handbook 与治理检查通过。共享 runtime、插件、外部平台、采集与 Mog 业务视觉验收仍由发布后的独立回执区分。
+
 ## 2026-09-07 · OBSERVATION-TARGET-SEMANTIC-FEEDBACK-001
 
 - Targets 目录仍是 L1 `Collection Control`：creator / keyword 共享编号、对象、平台、分组的列起点；creator 的“作品目录”和“详情进度”以既有 12px token 间距分开；最后“操作”列改为剩余空间且右对齐，行内按钮恢复既有主/次组件的 40px 命中区和状态样式。

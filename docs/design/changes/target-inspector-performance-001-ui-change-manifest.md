@@ -1,7 +1,7 @@
 # TARGET-INSPECTOR-PERFORMANCE-001 · UI Change Manifest
 
 > 状态: 权威当前
-> 最后核对: 2026-09-08
+> 最后核对: 2026-09-13
 > 适用范围: `/collection/targets` 目标工具栏、creator Inspector 与作品表现
 > 事实来源: Mog 当前确认、Issue #158 Claim、TARGET-INSPECTOR-PERFORMANCE-001 计划、PAGE-COLLECTION-001、LIDS v7 与真实 read model
 > 冲突时以谁为准: 用户最新确认、真实代码/事实合同与 Issue Claim；本清单不授权新事实、共享运行或外部动作
@@ -25,6 +25,13 @@
 - `0` 只来自 Known zero；Unknown 以未知/尚未取得显示。
 - 无分类合同时直接说明尚未建立内容分类，不生成主题或运营结论。
 - 生命周期图是创作者自己的作品分布，不是跨账号评分或“监控价值”。
+
+## 2026-09-13 · 表现页参考复刻回执
+
+- 来源：Mog 提供的检查器侧边栏静态参考稿只提供信息层级、留白和视觉密度；其中目标、日期、趋势和数值不进入运行页。运行页继续消费 creator target-scoped lifecycle projection。
+- 表达：creator 的「作品｜表现」改为时间／指标控制、三项覆盖读数、发布密度与同桶指标中位数趋势、可核验摘要和最近四条作品证据；单篇散点分布保留在渐进展开中。Drawer header 只显示身份、持续观察配置、来源链接与关闭，不把 scheduler 或 Attempt 伪装成档案身份。
+- 反例：没有合格 lifecycle point 时只显示不可成图理由与实际排除计数，不渲染中位数、密度或巡查新增的零值摘要。`dismissed`、`paused` 与从未启用的持续观察配置在 header 分开表达，不能由布尔开关互相推导。
+- LIDS：不新增 Token、CMP、全局壳层或领域数据；页面 CSS 只使用既有 `--lgi-*` Token，功能文字不低于 11px，窄趋势列中的图例可折行而不横向溢出。
 
 ## 验收
 

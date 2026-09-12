@@ -199,12 +199,100 @@ fn performance_view_keeps_known_zero_excludes_unknown_and_preserves_context() {
     assert!(html.contains("sort=last"));
     assert!(html.contains("life_window=recent_90_days"));
     assert!(html.contains("life_metric=likes"));
+    assert!(html.contains(r#"class="life-trend-chart""#));
+    assert!(html.contains(r#"aria-label="复核摘要""#));
+    assert!(html.contains("近期作品证据"));
     assert!(html.contains("零互动作品，2026-09-01，点赞 0"));
     assert_eq!(html.matches(r#"class="life-point-hit""#).count(), 1);
     assert!(html.contains("指标未知 1"));
     assert!(html.contains("尚未建立内容分类"));
     assert!(!html.contains("主题表现"));
     assert!(!html.contains("内容结构"));
+}
+
+#[test]
+fn performance_view_keeps_unknown_out_of_the_review_when_no_points_qualify() {
+    use super::target_drawer::{
+        LifecycleView, TargetCatalogView, TargetDrawerTab, TargetInspectorView, TargetListContext,
+        TargetWorksView,
+    };
+
+    let target = sample_target(11, "creator");
+    let mut projection = lifecycle_projection(target.target_ref);
+    projection.points.clear();
+    projection.summary.eligible_point_count = 0;
+    projection.receipt.returned_count = 0;
+    let html = super::target_drawer::render_with_catalog_view(
+        Some(&target),
+        None,
+        Some(&HashMap::new()),
+        Some(&target.target_ref.to_string()),
+        TargetDrawerTab::Baseline,
+        LifecycleView::Projection(&projection),
+        TargetInspectorView::NotRead,
+        TargetWorksView::Performance,
+        TargetCatalogView::Unavailable,
+        None,
+        None,
+        None,
+        None,
+        &[],
+        TargetListContext::default(),
+    );
+
+    assert!(html.contains("观察不足，暂时无法成图"));
+    assert!(html.contains("指标未知 1"));
+    assert!(html.contains("life-performance-grid-empty"));
+    assert!(!html.contains(r#"aria-label="复核摘要""#));
+    assert!(!html.contains("当前窗口中位点赞"));
+    assert!(!html.contains("发布密度"));
+}
+
+#[test]
+fn drawer_observation_badge_does_not_collapse_stopped_or_unstarted_into_paused() {
+    use super::target_drawer::{
+        LifecycleView, TargetCatalogView, TargetDrawerTab, TargetInspectorView, TargetListContext,
+        TargetWorksView,
+    };
+
+    let render = |lifecycle_state: &str, monitoring_enabled: bool| {
+        let mut target = sample_target(12, "creator");
+        target.lifecycle_state = lifecycle_state.to_owned();
+        target.monitoring_enabled = monitoring_enabled;
+        super::target_drawer::render_with_catalog_view(
+            Some(&target),
+            None,
+            Some(&HashMap::new()),
+            Some(&target.target_ref.to_string()),
+            TargetDrawerTab::Overview,
+            LifecycleView::NotRead {
+                window: CreatorLifecycleWindow::Recent90Days,
+                metric: CreatorLifecycleMetric::Likes,
+            },
+            TargetInspectorView::NotRead,
+            TargetWorksView::List,
+            TargetCatalogView::Unavailable,
+            None,
+            None,
+            None,
+            None,
+            &[],
+            TargetListContext::default(),
+        )
+    };
+
+    let stopped = render("dismissed", false);
+    assert!(stopped.contains(r#"data-state="stopped""#));
+    assert!(stopped.contains("已停止观察"));
+    assert!(!stopped.contains(r#"data-state="paused""#));
+
+    let paused = render("paused", false);
+    assert!(paused.contains(r#"data-state="paused""#));
+    assert!(paused.contains("已暂停"));
+
+    let unstarted = render("pending_decision", false);
+    assert!(unstarted.contains(r#"data-state="inactive""#));
+    assert!(unstarted.contains("未开启观察"));
 }
 
 #[test]
@@ -412,6 +500,29 @@ fn inspector_css_keeps_desktop_controls_and_accessible_motion_boundaries() {
     assert!(!TARGET_DRAWER_CSS.contains("gradient"));
     assert!(!TARGET_DRAWER_CSS.contains("outline:none"));
     assert!(!TARGET_DRAWER_CSS.contains("!important"));
+
+    let review_css = TARGET_DRAWER_CSS
+        .split("TARGET-INSPECTOR-REVIEW-001")
+        .nth(1)
+        .expect("performance-review scope is present");
+    for forbidden in [
+        "font-size:9px",
+        "font-size:10px",
+        "font-size:12px",
+        "font:650",
+        "life-strip-height",
+        "margin-bottom:12px",
+    ] {
+        assert!(
+            !review_css.contains(forbidden),
+            "performance-review CSS reintroduced a non-token visual value: {forbidden}"
+        );
+    }
+    assert!(review_css.contains("font-size:var(--lgi-text-label)"));
+    assert!(review_css.contains(".life-performance-grid-empty"));
+    assert!(
+        review_css.contains(".life-trend-legend{display:flex;align-items:center;flex-wrap:wrap")
+    );
 }
 
 fn sample_target(index: u128, target_kind: &str) -> ObservationTarget {
