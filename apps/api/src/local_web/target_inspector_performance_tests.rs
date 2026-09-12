@@ -139,6 +139,7 @@ fn blocked_materials_get_a_real_decision_instead_of_a_dead_end() {
             None,
             None,
             None,
+            None,
             retirable,
             TargetListContext::default(),
         )
@@ -178,6 +179,7 @@ fn performance_view_keeps_known_zero_excludes_unknown_and_preserves_context() {
         TargetInspectorView::NotRead,
         TargetWorksView::Performance,
         TargetCatalogView::Unavailable,
+        None,
         None,
         None,
         None,
@@ -235,6 +237,7 @@ fn overview_orders_identity_system_facts_and_decision_as_four_distinct_layers() 
         None,
         None,
         None,
+        None,
         &[],
         TargetListContext::default(),
     );
@@ -278,6 +281,7 @@ fn queued_and_running_are_not_the_same_execution_claim() {
             TargetInspectorView::Projection(inspector),
             TargetWorksView::List,
             TargetCatalogView::Unavailable,
+            None,
             None,
             None,
             None,
@@ -344,6 +348,7 @@ fn unknown_coverage_never_falls_back_to_zero() {
         None,
         None,
         None,
+        None,
         &[],
         TargetListContext::default(),
     );
@@ -375,6 +380,7 @@ fn unavailable_inspector_does_not_fall_back_to_a_healthy_or_empty_state() {
         TargetInspectorView::ReadUnavailable,
         TargetWorksView::List,
         TargetCatalogView::Unavailable,
+        None,
         None,
         None,
         None,

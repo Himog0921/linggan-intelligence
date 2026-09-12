@@ -351,6 +351,10 @@ fn router(state: LocalWebState) -> Router {
             "/collection/targets/patrol-toggle",
             post(collection_target_patrol_toggle),
         )
+        .route(
+            "/collection/targets/monitor-rules/retire",
+            post(collection_monitor_rule_retire),
+        )
         .route("/collection/targets/delete", post(collection_target_delete))
         .route("/collection/targets/batch", post(collection_targets_batch))
         .route("/collection/operations", get(collection_operations))
@@ -2657,6 +2661,12 @@ async fn collection_targets(
                 linggan_evidence::keyword_targets_pending_detail(database, &keyword_refs)
                     .await
                     .ok();
+            // 命中多少篇、补到多少篇详情：两侧一起数（本领域在证据侧，外部领域在跨行业
+            // 语料），只数一侧另一侧会显示成 0——而 0 与「还没采」在界面上长得一样。
+            let keyword_counts =
+                linggan_evidence::read_keyword_catalog_counts(database, &keyword_refs)
+                    .await
+                    .ok();
             collection_targets_view::render_stored_targets_with_observation(
                 &base,
                 &targets,
@@ -2670,6 +2680,7 @@ async fn collection_targets(
                 collection_targets_view::TargetListFacts {
                     keyword_archives: keyword_archives.as_ref(),
                     keyword_details_pending: keyword_details_pending.as_ref(),
+                    keyword_counts: keyword_counts.as_ref(),
                 },
                 list_context,
             )
@@ -2679,6 +2690,15 @@ async fn collection_targets(
     // The selected target lookup is independent from the list lookup. A filtered or failed
     // list must not erase a target that was read successfully, and an unreadable target must
     // not be flattened into "not found".
+    // 打开了某个目标才读它的巡检规则：一个关键词可以有好几条，看不见就管不了。
+    // 读不到时传 `None`，界面说读不到——不把读不到显示成「一条都没有」。
+    let monitor_rules = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
+        Some(target) => linggan_evidence::read_target_monitor_rules(database, target.target_ref)
+            .await
+            .ok()
+            .flatten(),
+        None => None,
+    };
     // 只有真的打开了某个目标才去读它的待判断作品：列表页每次渲染都读一遍，等于为一个
     // 多数时候不显示的区块付一次查询。读不到就当作没有待判断项——那时不渲染确认入口，
     // 而不是把「读不到」渲染成「没问题」。
@@ -2736,6 +2756,7 @@ async fn collection_targets(
             params.catalog_query.as_deref(),
             params.catalog_filter.as_deref(),
             selected_lifecycle_work.as_deref(),
+            monitor_rules.as_deref(),
             &retirable,
             list_context,
         ),
@@ -4133,6 +4154,53 @@ async fn target_is_cross_industry(database: &Database, target_ref: uuid::Uuid) -
     .ok()
     .flatten()
     .unwrap_or(false)
+}
+
+#[derive(serde::Deserialize)]
+struct MonitorRuleRetireForm {
+    row_target_ref: uuid::Uuid,
+    rule_ref: uuid::Uuid,
+    return_filter: Option<String>,
+    return_sort: Option<String>,
+}
+
+/// COLLECTION-001 · 停用一条巡检规则。
+///
+/// **不删**：它签发过的工单与材料还挂在它的版本上。停用只是不再排期。
+async fn collection_monitor_rule_retire(
+    State(state): State<LocalWebState>,
+    axum::extract::Form(form): axum::extract::Form<MonitorRuleRetireForm>,
+) -> Redirect {
+    let code = match state.database.database() {
+        None => "read_model_not_connected",
+        Some(database) => match linggan_evidence::retire_monitor_rule(
+            database,
+            form.row_target_ref,
+            form.rule_ref,
+        )
+        .await
+        {
+            Ok(()) => "monitor_rule_retired",
+            Err(linggan_evidence::MonitorRuleRetireError::UnknownRule) => "monitor_rule_unknown",
+            Err(linggan_evidence::MonitorRuleRetireError::LastRuleOfAMonitoredTarget) => {
+                "monitor_rule_is_the_last_one"
+            }
+            Err(_) => "monitor_rule_retire_failed",
+        },
+    };
+    let mut pairs = Vec::new();
+    if let Some(filter @ ("creator" | "keyword" | "archiving" | "monitoring")) =
+        form.return_filter.as_deref()
+    {
+        pairs.push(format!("filter={filter}"));
+    }
+    if matches!(form.return_sort.as_deref(), Some("last")) {
+        pairs.push("sort=last".to_owned());
+    }
+    pairs.push(format!("drawer={}", form.row_target_ref));
+    pairs.push("dtab=patrol".to_owned());
+    pairs.push(format!("error={code}"));
+    Redirect::to(&format!("/collection/targets?{}", pairs.join("&")))
 }
 
 async fn collection_target_deep_archive(

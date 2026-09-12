@@ -157,6 +157,106 @@ pub async fn read_cross_industry_hits(
     Ok(Some(KeywordHitProjection { works }))
 }
 
+/// 一批关键词各自**命中了多少篇、其中多少篇取到了详情**。
+///
+/// 列表页一次要显示很多行，逐行查会变成 N+1。两侧都要数：本领域的材料在证据侧，外部
+/// 领域的在跨行业语料（`0044` 的隔离）。只数一侧，另一侧那些行会显示成 0——而 0 和
+/// 「还没采」在界面上长得一样。
+///
+/// 读不到时返回 `Err`，由调用方如实呈现；不把读不到压成 0。
+pub async fn read_keyword_catalog_counts(
+    database: &Database,
+    target_refs: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, KeywordCatalogCounts>, sqlx::Error> {
+    if target_refs.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let cross_industry_ready: bool =
+        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample') IS NOT NULL")
+            .fetch_one(database.pool())
+            .await?;
+    let mut counts: std::collections::HashMap<Uuid, KeywordCatalogCounts> =
+        std::collections::HashMap::new();
+
+    // 证据侧：本领域关键词的命中作品与它们的详情。
+    let evidence: Vec<(Uuid, i64, i64)> = sqlx::query_as(
+        "SELECT work_order.target_ref, \
+                count(DISTINCT finding.content_public_ref), \
+                count(DISTINCT finding.content_public_ref) FILTER (WHERE EXISTS ( \
+                  SELECT 1 FROM linggan_material_content_detail detail \
+                  WHERE detail.content_public_ref=finding.content_public_ref)) \
+         FROM collection_work_order work_order \
+         JOIN collection_work_order_lease lease USING(work_order_ref) \
+         JOIN collection_work_order_lease_task lease_task USING(lease_ref) \
+         JOIN linggan_runtime_task task ON task.task_id=lease_task.task_id \
+         JOIN linggan_runtime_capture_package package ON package.task_id=task.task_id \
+         JOIN linggan_runtime_submission_receipt receipt USING(package_ref) \
+         JOIN linggan_material_discovery_finding finding USING(package_ref) \
+         JOIN linggan_runtime_record_disposition disposition \
+           ON disposition.package_ref=finding.package_ref \
+          AND disposition.record_ordinal=finding.record_ordinal \
+         WHERE work_order.target_ref=ANY($1) \
+           AND finding.discovery_kind='discovery_search' \
+           AND receipt.material_admission='ACCEPTED' \
+           AND disposition.disposition='accepted_for_library_discovery' \
+         GROUP BY 1",
+    )
+    .bind(target_refs)
+    .fetch_all(database.pool())
+    .await?;
+    for (target_ref, works, details) in evidence {
+        let entry = counts.entry(target_ref).or_default();
+        entry.works += works;
+        entry.details += details;
+    }
+    if !cross_industry_ready {
+        return Ok(counts);
+    }
+
+    // 跨行业侧：口径与检查器那条完全一致——材料被隔离的那一轮不算「详情已取得」。
+    let cross: Vec<(Uuid, i64, i64)> = sqlx::query_as(
+        "SELECT sample.target_ref,count(*), \
+                count(*) FILTER (WHERE EXISTS ( \
+                  SELECT 1 FROM collection_work_order done_order \
+                  JOIN collection_work_order_lease done_lease USING (work_order_ref) \
+                  JOIN collection_work_order_lease_task done_task USING (lease_ref) \
+                  JOIN linggan_runtime_task done_runtime \
+                    ON done_runtime.task_id=done_task.task_id \
+                  JOIN linggan_runtime_capture_package done_package \
+                    ON done_package.task_id=done_runtime.task_id \
+                  JOIN linggan_runtime_submission_receipt done_receipt \
+                    ON done_receipt.package_ref=done_package.package_ref \
+                  WHERE done_order.target_ref=sample.target_ref \
+                    AND done_task.execution_state='completed' \
+                    AND done_receipt.material_admission='ACCEPTED' \
+                    AND done_runtime.task_spec->'capabilitiesRequested'->>0='content_detail' \
+                    AND done_runtime.task_spec #>> '{target,contentExternalId}' \
+                        = sample.content_external_id \
+                    AND NOT EXISTS ( \
+                      SELECT 1 FROM linggan_runtime_record_disposition quarantine \
+                      WHERE quarantine.package_ref=done_package.package_ref \
+                        AND quarantine.disposition='quarantined'))) \
+         FROM cross_industry_sample sample \
+         WHERE sample.target_ref=ANY($1) GROUP BY 1",
+    )
+    .bind(target_refs)
+    .fetch_all(database.pool())
+    .await?;
+    for (target_ref, works, details) in cross {
+        let entry = counts.entry(target_ref).or_default();
+        entry.works += works;
+        entry.details += details;
+    }
+    Ok(counts)
+}
+
+/// 一个关键词目标的命中与详情计数。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct KeywordCatalogCounts {
+    pub works: i64,
+    pub details: i64,
+}
+
 async fn read_catalog(
     database: &Database,
     target_ref: Uuid,

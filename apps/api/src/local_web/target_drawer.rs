@@ -502,11 +502,16 @@ pub fn render_with_catalog(
         catalog_query,
         catalog_filter,
         selected_work,
+        // 这条旧入口不读巡检规则。`None` 是「没问」——界面据此说读不到，而不是谎称
+        // 一条规则都没有，后者会让人再配一条。
+        None,
         &[],
         list_context,
     )
 }
 
+/// 最内层入口：巡检规则清单从这里进来。外两层是旧入口，它们不读规则，传 `None`——
+/// 那是「没问」，界面据此说读不到，而不是谎称一条规则都没有。
 pub fn render_with_catalog_view(
     target: Option<&ObservationTarget>,
     avatar: Option<&ObservationTargetAvatar>,
@@ -520,6 +525,7 @@ pub fn render_with_catalog_view(
     catalog_query: Option<&str>,
     catalog_filter: Option<&str>,
     selected_work: Option<&str>,
+    monitor_rules: Option<&[linggan_evidence::MonitorRuleSummary]>,
     // 当前还需要人来判断「是不是已经没了」的作品。空表示没有可判断的对象——
     // 那时不渲染任何确认入口，请人对空气做决定不是一个动作。
     retirable: &[BlockedMaterial],
@@ -628,6 +634,7 @@ pub fn render_with_catalog_view(
             catalog_query,
             catalog_filter,
             selected_work,
+            monitor_rules,
             list_context,
         ),
     )
@@ -895,6 +902,7 @@ fn body(
     catalog_query: Option<&str>,
     catalog_filter: Option<&str>,
     selected_work: Option<&str>,
+    monitor_rules: Option<&[linggan_evidence::MonitorRuleSummary]>,
     list_context: TargetListContext<'_>,
 ) -> String {
     match tab {
@@ -908,7 +916,7 @@ fn body(
             selected_work,
             list_context,
         ),
-        TargetDrawerTab::Patrol => patrol_tab(target, inspector, list_context),
+        TargetDrawerTab::Patrol => patrol_tab(target, inspector, monitor_rules, list_context),
         TargetDrawerTab::Overview => overview_tab(
             retirable,
             target,
@@ -2248,16 +2256,122 @@ fn archive_action_label(action: TargetPrimaryAction) -> &'static str {
 }
 
 /// 巡查只展示当前可读的开关与时间，完整规则通过已有版本化规则入口管理。
+/// 这个目标底下的巡检规则清单。
+///
+/// 一个关键词可以同时盯综合榜和点赞榜（`0076`），看不见就管不了——人无法知道自己配过
+/// 几条、哪条还在跑。读不到时如实说读不到，不显示成「一条都没有」：后者会让人再配一条，
+/// 而那会变成第二条同口径的规则。
+fn monitor_rule_list(
+    target: &ObservationTarget,
+    rules: Option<&[linggan_evidence::MonitorRuleSummary]>,
+    list_context: TargetListContext<'_>,
+) -> String {
+    let Some(rules) = rules else {
+        return r#"<section class="c-dw-section"><div class="c-dw-section-head"><b>巡检规则</b><span>读取暂不可用</span></div><p class="c-dw-note">当前读不到这个目标的规则。未知不表示没有规则，也不表示规则正常。</p></section>"#.to_owned();
+    };
+    if rules.is_empty() {
+        return format!(
+            r#"<section class="c-dw-section"><div class="c-dw-section-head"><b>巡检规则</b><span>还没有</span></div><p class="c-dw-note">这个目标还没有巡检规则。建档是一次性的历史挖掘，巡检是此后每周看新增——两件事，需要各自的口径。</p>{add}</section>"#,
+            add = add_rule_link(target, list_context),
+        );
+    }
+    let mut items = String::new();
+    for rule in rules {
+        let cadence = rule.interval_seconds.map_or_else(
+            || "周期读不到".to_owned(),
+            |seconds| format!("每 {} 小时", seconds / 3600),
+        );
+        let mut sampling = Vec::new();
+        if let Some(rounds) = rule.scroll_rounds {
+            sampling.push(format!("下拉 {rounds} 次"));
+        }
+        if let Some(top) = rule.top_by_likes {
+            sampling.push(format!("取赞前 {top}"));
+        }
+        if let Some(days) = rule.published_within_days {
+            sampling.push(format!("近 {days} 天"));
+        }
+        let sampling = if sampling.is_empty() {
+            "未设取样上限".to_owned()
+        } else {
+            sampling.join(" · ")
+        };
+        let state = if rule.automatic_enabled {
+            r#"<span class="c-tg-truth c-tg-ok">自动巡检开着</span>"#
+        } else {
+            r#"<span class="c-tg-truth c-tg-neutral">已暂停</span>"#
+        };
+        let next = rule.next_run_at.as_deref().unwrap_or("未排定");
+        let last = rule.last_succeeded_at.as_deref().unwrap_or("尚未成功巡查");
+        // 最后一条规则不提供停用：监控中的目标必须有规则（`0042` 的 CHECK）。
+        // 要停最后一条，先停止观察这个目标——那是另一个决定，不该藏在这里。
+        let retire = if rules.len() > 1 {
+            format!(
+                r#"<form method="post" action="/collection/targets/monitor-rules/retire">{fields}<input type="hidden" name="rule_ref" value="{rule_ref}"/><button class="c-btn-secondary" type="submit">停用</button></form>"#,
+                fields = list_context.return_fields(
+                    Some(target.target_ref),
+                    Some(TargetDrawerTab::Patrol),
+                    None,
+                ),
+                rule_ref = rule.rule_ref,
+            )
+        } else {
+            String::new()
+        };
+        items.push_str(&format!(
+            r#"<li><div><b>{slot}</b><p>{cadence} · {sampling}</p><p>下次 {next} · 最近成功 {last}</p></div><div>{state}{retire}</div></li>"#,
+            slot = escape(&monitor_slot_label(&rule.slot_key, target.target_kind == "creator")),
+            cadence = escape(&cadence),
+            sampling = escape(&sampling),
+            next = escape(next),
+            last = escape(last),
+        ));
+    }
+    format!(
+        r#"<section class="c-dw-section"><div class="c-dw-section-head"><b>巡检规则</b><span>{count} 条</span></div><ul class="c-dw-rules">{items}</ul><p class="c-dw-note">一个关键词可以同时盯几个榜，各有各的周期。停用只是不再排期，它签发过的工单与材料仍然留着——删掉会让那些材料说不清是按什么口径取回来的。</p>{add}</section>"#,
+        count = rules.len(),
+        add = add_rule_link(target, list_context),
+    )
+}
+
+/// 口径的人话。关键词的口径是排序，博主没有排序可言——它只有一条看主页目录的规则。
+///
+/// `primary` 这个槽对两种目标含义不同：博主是「主页目录」，关键词是迁移之前留下的那一条
+/// （`0076` 把每个既有目标的规则回填成首要槽）。对关键词不说「主页目录」——它没有主页。
+fn monitor_slot_label(slot_key: &str, is_creator: bool) -> String {
+    match slot_key {
+        "comprehensive" => "综合排序".to_owned(),
+        "latest" => "最新排序".to_owned(),
+        "most_liked" => "最多点赞".to_owned(),
+        "most_collected" => "最多收藏".to_owned(),
+        "most_commented" => "最多评论".to_owned(),
+        "primary" if is_creator => "主页目录".to_owned(),
+        "primary" => "当前口径".to_owned(),
+        other => other.to_owned(),
+    }
+}
+
+fn add_rule_link(target: &ObservationTarget, list_context: TargetListContext<'_>) -> String {
+    let opener_id = format!("drawer-add-rule-{}", target.target_ref);
+    format!(
+        r#"<a id="{opener_id}" class="c-btn-secondary" data-monitor-rule-trigger="{target_ref}" href="{href}">加一条规则</a>"#,
+        href = list_context.monitor_rule_href(target.target_ref, &opener_id),
+        target_ref = target.target_ref,
+    )
+}
+
 fn patrol_tab(
     target: &ObservationTarget,
     inspector: TargetInspectorView<'_>,
+    rules: Option<&[linggan_evidence::MonitorRuleSummary]>,
     list_context: TargetListContext<'_>,
 ) -> String {
     let opener_id = format!("drawer-monitor-rule-{}", target.target_ref);
     let rule_href = list_context.monitor_rule_href(target.target_ref, &opener_id);
+    let rule_list = monitor_rule_list(target, rules, list_context);
     if matches!(inspector, TargetInspectorView::ReadUnavailable) {
         return format!(
-            r#"<section class="c-dw-section"><div class="c-dw-section-head"><b>巡查变化</b><span>读取暂不可用</span></div><div class="life-state"><b>当前读不到巡查状态</b><p>未知不表示没有巡查结果，也不表示规则正常。</p></div></section>"#
+            r#"<section class="c-dw-section"><div class="c-dw-section-head"><b>巡查变化</b><span>读取暂不可用</span></div><div class="life-state"><b>当前读不到巡查状态</b><p>未知不表示没有巡查结果，也不表示规则正常。</p></div></section>{rule_list}"#
         );
     }
     if let TargetInspectorView::Projection(inspector) = inspector {
@@ -2282,7 +2396,7 @@ fn patrol_tab(
                  </ol>
                  <p class="c-dw-note">当前只显示目标级成功结果与下一次安排；没有可核验的历史差分时，不生成运行日志或“零变化”。</p>
                  <a id="{opener_id}" class="c-btn-secondary" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">管理巡查</a>
-               </section>"#,
+               </section>{rule_list}"#,
             next = escape(next),
             state = inspector_patrol_copy(inspector.patrol.state),
             last = escape(last),
@@ -2302,7 +2416,7 @@ fn patrol_tab(
              </div>
              <p class="c-dw-note">巡查发现的新作品和后续互动数据，在接纳后会进入同一作品目录与生命周期。当前还没有可显示的本轮新增和数据更新汇总。</p>
              <a id="{opener_id}" class="c-btn-secondary" data-monitor-rule-trigger="{target_ref}" href="{rule_href}">管理巡查</a>
-           </section>"#,
+           </section>{rule_list}"#,
         enabled = lifecycle_patrol_copy(target).1,
         last = escape(
             target
@@ -2457,6 +2571,7 @@ mod tests {
         let patrol = patrol_tab(
             &corrupted_keyword,
             TargetInspectorView::NotRead,
+            None,
             TargetListContext::default(),
         );
         assert!(patrol.contains("待状态修复"));

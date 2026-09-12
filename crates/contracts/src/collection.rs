@@ -202,17 +202,18 @@ impl TargetIdentity {
     /// `ranking` is part of the identity on purpose: searching one term by "comprehensive" and
     /// by "latest" produces two different surfaces, and treating them as one target would let
     /// each overwrite the other's results.
-    pub fn keyword(
-        platform: &str,
-        term: &str,
-        ranking: &str,
-    ) -> Result<Self, CollectionContractError> {
+    /// 一个关键词就是一个观察目标，**排序不进身份**。
+    ///
+    /// 此前身份是 `{词}::{排序}`，于是「考研自习」按点赞看和按综合看是两个目标，在列表上
+    /// 占两行，删一个另一个还在。可这是同一个词的两条巡检口径——口径属于规则（`0076`），
+    /// 不属于身份。把排序刻进身份还有一个说不通的地方：同一个词的两个目标各自建一次档，
+    /// 各自攒一份历史，而它们面对的是同一批笔记。
+    pub fn keyword(platform: &str, term: &str) -> Result<Self, CollectionContractError> {
         let term = term.trim().to_lowercase();
-        let ranking = ranking.trim().to_lowercase();
-        if term.is_empty() || ranking.is_empty() {
+        if term.is_empty() {
             return Err(CollectionContractError::EmptyIdentity);
         }
-        Self::build(platform, TargetKind::Keyword, &format!("{term}::{ranking}"))
+        Self::build(platform, TargetKind::Keyword, &term)
     }
 
     fn build(platform: &str, kind: TargetKind, key: &str) -> Result<Self, CollectionContractError> {
@@ -277,14 +278,20 @@ mod tests {
         );
     }
 
+    /// **一个词就是一个目标，排序不再分裂它。**
+    ///
+    /// 排序是巡检口径，属于规则（`0076`）：同一个词按点赞看和按综合看，是它的两条规则，
+    /// 不是两个观察对象。此前身份是 `{词}::{排序}`，同一个词在列表上占两行、各建一次档、
+    /// 各攒一份历史，而它们面对的是同一批笔记。
     #[test]
-    fn the_same_keyword_under_two_rankings_is_two_targets() {
-        let comprehensive = TargetIdentity::keyword("xhs", "ADHD", "comprehensive").unwrap();
-        let latest = TargetIdentity::keyword("xhs", "ADHD", "latest").unwrap();
-        assert_ne!(comprehensive.key(), latest.key());
-        // Casing and padding are normalised away, so one term cannot enter twice.
-        let padded = TargetIdentity::keyword("xhs", "  adhd  ", "COMPREHENSIVE").unwrap();
-        assert_eq!(comprehensive.key(), padded.key());
+    fn one_term_is_one_target_however_it_will_be_ranked() {
+        let plain = TargetIdentity::keyword("xhs", "ADHD").unwrap();
+        // 大小写与空白照旧归一，同一个词进不来两次。
+        let padded = TargetIdentity::keyword("xhs", "  adhd  ").unwrap();
+        assert_eq!(plain.key(), padded.key());
+        assert_eq!(plain.key(), "adhd");
+        let other = TargetIdentity::keyword("xhs", "a娃").unwrap();
+        assert_ne!(plain.key(), other.key());
     }
 
     #[test]

@@ -784,6 +784,27 @@ pub async fn delete_observation_target(
         return Ok(TargetDeletionOutcome::BlockedByProtectedFacts { rows: blocking });
     }
 
+    // 跨行业详情补采的作用域（`0074`）挂在工单上。漏了它，删一个做过详情补采的关键词
+    // 会在删工单那一步撞外键，整笔回滚——而界面只会说「删除没有完成」。
+    //
+    // 单独一条而不是并进下面那串：只装了控制面那一段 schema 的库里没有这张表，而
+    // PostgreSQL **在解析阶段就会因表不存在报错**，写在 `WHERE` 里的存在性判断根本来不及
+    // 生效。它只 FK 工单，先删掉不影响其余顺序。
+    let cross_industry_scope_ready: bool = sqlx::query_scalar(
+        "SELECT to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    if cross_industry_scope_ready {
+        sqlx::query(
+            "DELETE FROM collection_work_order_cross_industry_target WHERE work_order_ref IN ( \
+               SELECT work_order_ref FROM collection_work_order WHERE target_ref=$1)",
+        )
+        .bind(target_ref)
+        .execute(&mut *tx)
+        .await?;
+    }
+
     // 顺序由外键决定，从叶子往根删。任何一条走不通都会整笔回滚——半删的目标比不删更糟。
     for statement in [
         "DELETE FROM collection_monitor_rule_command_receipt WHERE target_ref=$1",
@@ -812,7 +833,11 @@ pub async fn delete_observation_target(
          SET active_monitor_rule_revision_ref=NULL,monitoring_enabled=false, \
              lifecycle_state='dismissed' \
          WHERE target_ref=$1",
+        // 规则身份与规则版本互相引用（规则指着当前版本，版本挂在规则上，`0076`），
+        // 谁都不能先删。先把规则那一侧的引用松开，再删版本，最后删规则身份。
+        "UPDATE collection_monitor_rule SET active_revision_ref=NULL WHERE target_ref=$1",
         "DELETE FROM collection_monitor_rule_revision WHERE target_ref=$1",
+        "DELETE FROM collection_monitor_rule WHERE target_ref=$1",
         "DELETE FROM collection_observation_target WHERE target_ref=$1",
     ] {
         sqlx::query(statement)

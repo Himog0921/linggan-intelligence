@@ -108,6 +108,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0064_account_observation_normalization.sql"),
     "\n",
     include_str!("../../../database/migrations/0065_account_observation_bootstrap.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0076_monitor_rule_slots.sql"),
 );
 
 #[tokio::test]
@@ -274,8 +276,9 @@ async fn creator_rule_queues_once_without_a_baseline_or_a_preassigned_station() 
     .await
     .expect("baseline completeness does not block creator rule save");
     assert_eq!(saved.reason_code, "rule_saved");
+    // 排期状态住在规则上（`0076`）——改目标行不会让任何规则到期。
     sqlx::query(
-        "UPDATE collection_observation_target \
+        "UPDATE collection_monitor_rule \
          SET monitor_next_run_at=scope_001_now()-interval '1 second' WHERE target_ref=$1",
     )
     .bind(target_ref)

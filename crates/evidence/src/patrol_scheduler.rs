@@ -189,35 +189,40 @@ async fn run_due_patrols_inner(database: &Database) -> Result<PatrolTickSummary,
     .execute(database.pool())
     .await?;
 
-    let due_targets: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT target.target_ref \
-         FROM collection_observation_target target \
-         JOIN collection_monitor_rule_revision rule \
-           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
-         WHERE target.monitoring_enabled \
+    // 到期是**按规则**算的，不是按目标：一个关键词可以同时盯综合榜和点赞榜，两条规则
+    // 各有各的周期。共用一个目标级的 `monitor_next_run_at` 说不清是谁该跑了。
+    let due_rules: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT rule.rule_ref \
+         FROM collection_monitor_rule rule \
+         JOIN collection_observation_target target USING(target_ref) \
+         JOIN collection_monitor_rule_revision revision \
+           ON revision.rule_revision_ref=rule.active_revision_ref \
+         WHERE rule.retired_at IS NULL \
+           AND target.monitoring_enabled \
            AND target.lifecycle_state='monitoring' \
-           AND rule.automatic_enabled \
-           AND rule.mode='fixed' \
-           AND target.monitor_next_run_at IS NOT NULL \
-           AND target.monitor_next_run_at<=scope_001_now() \
+           AND revision.automatic_enabled \
+           AND revision.mode='fixed' \
+           AND rule.monitor_next_run_at IS NOT NULL \
+           AND rule.monitor_next_run_at<=scope_001_now() \
            AND NOT EXISTS ( \
              SELECT 1 FROM collection_scheduler_target_decision prior \
-             WHERE prior.target_ref=target.target_ref \
+             WHERE prior.rule_ref=rule.rule_ref \
                AND prior.next_eligible_at>scope_001_now()) \
-         ORDER BY target.monitor_next_run_at,target.target_ref LIMIT $1",
+         ORDER BY rule.monitor_next_run_at,rule.rule_ref LIMIT $1",
     )
     .bind(PATROL_PAGE_SIZE)
     .fetch_all(database.pool())
     .await?;
 
     let mut summary = PatrolTickSummary::default();
-    for target_ref in &due_targets {
-        let (outcome, reason, work_order_ref) =
-            queue_one_due_rule(database, scheduler_run_ref, *target_ref).await?;
+    for rule_ref in &due_rules {
+        let (outcome, reason, target_ref, work_order_ref) =
+            queue_one_due_rule(database, scheduler_run_ref, *rule_ref).await?;
+        // 汇总仍按目标报：人关心的是「哪个词跑了」，规则是它内部的口径。
         if outcome == "queued" {
-            summary.queued.push(*target_ref);
+            summary.queued.push(target_ref);
         } else {
-            summary.skipped.push((*target_ref, reason.to_owned()));
+            summary.skipped.push((target_ref, reason.to_owned()));
         }
         let _ = work_order_ref;
     }
@@ -235,7 +240,7 @@ async fn run_due_patrols_inner(database: &Database) -> Result<PatrolTickSummary,
     )
     .bind(scheduler_run_ref)
     .bind(run_outcome)
-    .bind(i32::try_from(due_targets.len()).unwrap_or(i32::MAX))
+    .bind(i32::try_from(due_rules.len()).unwrap_or(i32::MAX))
     // The legacy column is retained for projection compatibility. It means
     // “orders queued by this scheduler run”, never “browser collection ran”.
     .bind(i32::try_from(summary.queued.len()).unwrap_or(i32::MAX))
@@ -250,37 +255,51 @@ async fn run_due_patrols_inner(database: &Database) -> Result<PatrolTickSummary,
 async fn queue_one_due_rule(
     database: &Database,
     scheduler_run_ref: Uuid,
-    target_ref: Uuid,
-) -> Result<(&'static str, &'static str, Option<Uuid>), sqlx::Error> {
+    rule_ref: Uuid,
+) -> Result<(&'static str, &'static str, Uuid, Option<Uuid>), sqlx::Error> {
     let mut transaction = database.pool().begin().await?;
-    let due: Option<(Uuid, i32)> = sqlx::query_as(
-        "SELECT rule.rule_revision_ref,rule.fixed_interval_seconds \
-         FROM collection_observation_target target \
-         JOIN collection_monitor_rule_revision rule \
-           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
-         WHERE target.target_ref=$1 \
+    // 锁**规则**而不是目标：同一个目标的另一条规则该跑就让它跑，两条互不阻塞。
+    let due: Option<(Uuid, Uuid, i32)> = sqlx::query_as(
+        "SELECT rule.target_ref,revision.rule_revision_ref,revision.fixed_interval_seconds \
+         FROM collection_monitor_rule rule \
+         JOIN collection_observation_target target USING(target_ref) \
+         JOIN collection_monitor_rule_revision revision \
+           ON revision.rule_revision_ref=rule.active_revision_ref \
+         WHERE rule.rule_ref=$1 AND rule.retired_at IS NULL \
            AND target.monitoring_enabled AND target.lifecycle_state='monitoring' \
-           AND rule.automatic_enabled AND rule.mode='fixed' \
-           AND target.monitor_next_run_at IS NOT NULL \
-           AND target.monitor_next_run_at<=scope_001_now() \
-         FOR UPDATE OF target",
+           AND revision.automatic_enabled AND revision.mode='fixed' \
+           AND rule.monitor_next_run_at IS NOT NULL \
+           AND rule.monitor_next_run_at<=scope_001_now() \
+         FOR UPDATE OF rule",
     )
-    .bind(target_ref)
+    .bind(rule_ref)
     .fetch_optional(&mut *transaction)
     .await?;
-    let Some((rule_revision_ref, interval_seconds)) = due else {
+    let Some((target_ref, rule_revision_ref, interval_seconds)) = due else {
         transaction.rollback().await?;
-        return Ok(("deferred", "not_due", None));
+        // 目标引用拿不到时用规则引用回报：调用方只是要在汇总里说清是谁没跑。
+        let target_ref: Uuid =
+            sqlx::query_scalar("SELECT target_ref FROM collection_monitor_rule WHERE rule_ref=$1")
+                .bind(rule_ref)
+                .fetch_one(database.pool())
+                .await?;
+        return Ok(("deferred", "not_due", target_ref, None));
     };
 
-    let request = request_and_admit_in_transaction(
+    // **冻进工单的必须是这一条到期规则的版本**，不能让准入去目标行上读「当前规则」：
+    // 一个关键词可以同时盯综合榜和点赞榜，点赞榜到期时读到综合榜的口径，插件就会按错误的
+    // 排序和取样上限去采——而回执、覆盖度、材料全都自洽，没有任何一处看得出来采错了。
+    let request = crate::acquisition_chain::request_and_admit_in_transaction_scoped(
         &mut transaction,
         target_ref,
         "patrol",
         "定时巡检",
         "agent",
         &[],
+        &[],
         None,
+        Some(rule_revision_ref),
+        false,
     )
     .await;
     let (outcome, reason_code, work_order_ref, advance_schedule) = match request {
@@ -307,44 +326,48 @@ async fn queue_one_due_rule(
         // The generic request has a queue identity before scheduler context is
         // known. Freeze the due timestamp into this scheduled identity now.
         sqlx::query(
+            // 冻结的是**这条规则**该跑的那个时刻，不是目标行上那一列。排期搬到规则上之后
+            // 还读目标行，会把工单冻结在一个未来的时间点——它排进了队列却永远派不出去，
+            // 而队列上看不出任何异常。
             "UPDATE collection_work_order SET scheduled_for=( \
-                 SELECT monitor_next_run_at FROM collection_observation_target WHERE target_ref=$2), \
+                 SELECT monitor_next_run_at FROM collection_monitor_rule WHERE rule_ref=$4), \
                  dedupe_key=concat('scheduled:', $2::text, ':', $3::text, ':', \
-                   (SELECT monitor_next_run_at::text FROM collection_observation_target WHERE target_ref=$2)) \
+                   (SELECT monitor_next_run_at::text FROM collection_monitor_rule \
+                     WHERE rule_ref=$4)) \
              WHERE work_order_ref=$1 AND queue_state='queued'",
         )
         .bind(work_order_ref)
         .bind(target_ref)
         .bind(rule_revision_ref)
+        .bind(rule_ref)
         .execute(&mut *transaction)
         .await?;
     }
 
     if advance_schedule {
         sqlx::query(
-            "UPDATE collection_observation_target \
+            "UPDATE collection_monitor_rule \
              SET monitor_missed_run_count=monitor_missed_run_count + GREATEST(0, \
                    FLOOR(EXTRACT(EPOCH FROM (scope_001_now()-monitor_next_run_at))/$2)::integer), \
                  monitor_next_run_at=monitor_next_run_at + make_interval(secs => $2 * \
                    (GREATEST(0,FLOOR(EXTRACT(EPOCH FROM \
                        (scope_001_now()-monitor_next_run_at))/$2)::integer)+1)), \
-                 last_patrol_dispatched_at=scope_001_now(), \
-                 last_scheduler_considered_at=scope_001_now() \
-             WHERE target_ref=$1",
+                 last_patrol_dispatched_at=scope_001_now() \
+             WHERE rule_ref=$1",
         )
-        .bind(target_ref)
+        .bind(rule_ref)
         .bind(interval_seconds)
         .execute(&mut *transaction)
         .await?;
-    } else {
-        sqlx::query(
-            "UPDATE collection_observation_target SET last_scheduler_considered_at=scope_001_now() \
-             WHERE target_ref=$1",
-        )
-        .bind(target_ref)
-        .execute(&mut *transaction)
-        .await?;
     }
+    // 「最近考虑过」是目标级的公平性事实，两种情况都要记：它决定下一轮先看谁。
+    sqlx::query(
+        "UPDATE collection_observation_target SET last_scheduler_considered_at=scope_001_now() \
+         WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .execute(&mut *transaction)
+    .await?;
 
     let retry_after_seconds = if advance_schedule {
         interval_seconds
@@ -353,9 +376,10 @@ async fn queue_one_due_rule(
     };
     sqlx::query(
         "INSERT INTO collection_scheduler_target_decision \
-             (target_decision_ref,scheduler_run_ref,target_ref,rule_revision_ref,outcome,reason_code, \
+             (target_decision_ref,scheduler_run_ref,target_ref,rule_ref,rule_revision_ref, \
+              outcome,reason_code, \
               cadence_source,effective_interval_seconds,next_eligible_at,work_order_ref,lease_ref) \
-         VALUES ($1,$2,$3,$4,$5,$6,'fixed',$7, \
+         VALUES ($1,$2,$3,$10,$4,$5,$6,'fixed',$7, \
                  scope_001_now()+make_interval(secs=>$8),$9,NULL)",
     )
     .bind(Uuid::new_v4())
@@ -367,10 +391,11 @@ async fn queue_one_due_rule(
     .bind(interval_seconds)
     .bind(retry_after_seconds)
     .bind(work_order_ref)
+    .bind(rule_ref)
     .execute(&mut *transaction)
     .await?;
     transaction.commit().await?;
-    Ok((outcome, reason_code, work_order_ref))
+    Ok((outcome, reason_code, target_ref, work_order_ref))
 }
 
 #[allow(dead_code)]

@@ -1753,12 +1753,22 @@ pub async fn apply_monitor_rule_command(
 
     let next_revision = current_revision + 1;
     let rule_revision_ref = Uuid::new_v4();
+    let mut saved_rule_ref: Option<Uuid> = None;
+    let mut saved_rule_is_primary = true;
     match command.kind {
         MonitorCommandKind::SaveRule => {
             let draft = command.draft.as_ref().expect("validated save-rule draft");
+            // 一个目标可以同时有几条口径不同的规则。找到这条口径的规则身份，没有就立一条；
+            // 第一条立出来的是首要规则，目标行上那一列指着它。
+            let slot_key = monitor_rule_slot_key(&target_kind, draft);
+            let (rule_ref, is_primary) =
+                ensure_monitor_rule(&mut transaction, command.target_ref, &slot_key).await?;
+            saved_rule_ref = Some(rule_ref);
+            saved_rule_is_primary = is_primary;
             insert_monitor_rule_revision(
                 &mut transaction,
                 command.target_ref,
+                rule_ref,
                 rule_revision_ref,
                 next_revision,
                 draft,
@@ -1834,8 +1844,27 @@ pub async fn apply_monitor_rule_command(
             automatic_enabled,
             repairing_invalid_keyword_lifecycle,
         );
-        sqlx::query(
-            "UPDATE collection_observation_target \
+        // 这条命令作用在首要规则上吗？
+        //
+        // 保存规则时由口径决定（第一条落地的那条是首要）。暂停／恢复／停止作用的是目标行
+        // 指着的那条，按定义就是首要——而且它们真正的效果是目标级的 `monitoring_enabled`：
+        // 调度的到期查询要求目标开着监控，所以关掉它，这个目标底下**所有**规则一起停，
+        // 不会出现「以为全停了其实只停了一条」。
+        let commanded_rule_is_primary = match command.kind {
+            MonitorCommandKind::SaveRule => saved_rule_is_primary,
+            _ => true,
+        };
+        // **只有首要规则才改目标行上那一列。**
+        //
+        // 那一列的含义是「首要规则的当前版本」，全项目还有五处把它当作「这个目标的规则」
+        // 在读（发租的取样口径、派发的规则闸、运行产能、管理巡查面板）。给一个关键词存
+        // 第二条规则时若照旧覆盖它，那五处会集体开始读一条**非首要**规则——最直接的后果是
+        // 点「暂停巡检」只停掉了其中一条，另一条继续按自己的周期跑，而界面上看不出任何异常。
+        //
+        // 生命周期与监控开关仍然按目标写：它们本来就是目标级的事实。
+        if commanded_rule_is_primary {
+            sqlx::query(
+                "UPDATE collection_observation_target \
              SET active_monitor_rule_revision_ref=$2,monitoring_enabled=$3, \
                  patrol_interval_seconds=COALESCE((SELECT CASE \
                      WHEN mode='fixed' THEN fixed_interval_seconds \
@@ -1850,14 +1879,66 @@ pub async fn apply_monitor_rule_command(
                  lifecycle_changed_at=CASE WHEN $5 IS NULL THEN lifecycle_changed_at \
                      ELSE scope_001_now() END \
              WHERE target_ref=$1",
-        )
-        .bind(command.target_ref)
-        .bind(applied_rule_ref)
-        .bind(automatic_enabled)
-        .bind(schedule_slot_seconds)
-        .bind(next_lifecycle_state)
-        .execute(&mut *transaction)
-        .await?;
+            )
+            .bind(command.target_ref)
+            .bind(applied_rule_ref)
+            .bind(automatic_enabled)
+            .bind(schedule_slot_seconds)
+            .bind(next_lifecycle_state)
+            .execute(&mut *transaction)
+            .await?;
+        } else {
+            // 非首要规则只改目标级那两样：生命周期与监控开关。给一个词加第二条规则同样
+            // 意味着「这个词在被监控」，但它不该改写首要规则的排期，也不该顶掉那个指针。
+            sqlx::query(
+                "UPDATE collection_observation_target \
+                 SET monitoring_enabled=monitoring_enabled OR $2, \
+                     lifecycle_state=COALESCE($3,lifecycle_state), \
+                     lifecycle_changed_at=CASE WHEN $3 IS NULL THEN lifecycle_changed_at \
+                         ELSE scope_001_now() END \
+                 WHERE target_ref=$1",
+            )
+            .bind(command.target_ref)
+            .bind(automatic_enabled)
+            .bind(next_lifecycle_state)
+            .execute(&mut *transaction)
+            .await?;
+        }
+
+        // 排期状态现在住在**规则**上——调度按规则算到期。目标行上那几列保留给首要规则，
+        // 两处必须在同一个事务里一起写：只写一处，要么规则永远不到期，要么列表显示的
+        // 下次巡查与真正会跑的那一次对不上。
+        //
+        // 这条命令作用在哪条规则上：保存规则时是刚落地的那条，暂停／恢复时是当前生效的那条。
+        let commanded_rule_ref: Option<Uuid> = match saved_rule_ref {
+            Some(rule_ref) => Some(rule_ref),
+            None => {
+                sqlx::query_scalar(
+                    "SELECT rule_ref FROM collection_monitor_rule_revision \
+                 WHERE target_ref=$1 AND rule_revision_ref=$2",
+                )
+                .bind(command.target_ref)
+                .bind(applied_rule_ref)
+                .fetch_optional(&mut *transaction)
+                .await?
+            }
+        };
+        if let Some(rule_ref) = commanded_rule_ref {
+            sqlx::query(
+                "UPDATE collection_monitor_rule \
+                 SET active_revision_ref=$2, \
+                     monitor_next_run_at=CASE WHEN $3 \
+                         THEN scope_001_now() + make_interval(secs => $4) ELSE NULL END, \
+                     monitor_missed_run_count=0 \
+                 WHERE rule_ref=$1",
+            )
+            .bind(rule_ref)
+            .bind(applied_rule_ref)
+            .bind(automatic_enabled)
+            .bind(schedule_slot_seconds)
+            .execute(&mut *transaction)
+            .await?;
+        }
         record_monitor_lifecycle_transition(
             &mut transaction,
             command.target_ref,
@@ -2377,9 +2458,59 @@ fn monitor_command_digest(command: &MonitorRuleCommand) -> String {
     )
 }
 
+/// 这条规则在这个目标底下的**口径身份**。
+///
+/// 关键词用排序（`most_liked`／`comprehensive`…）：同一个词盯两个榜是两条规则，不是两个词。
+/// 博主没有排序可言，固定一条 `primary`——它永远只有一条规则，行为与加多规则之前一致。
+fn monitor_rule_slot_key(target_kind: &str, draft: &MonitorRuleDraft) -> String {
+    match (target_kind, draft.ranking_key.as_deref()) {
+        ("keyword", Some(ranking)) if !ranking.trim().is_empty() => ranking.trim().to_owned(),
+        _ => "primary".to_owned(),
+    }
+}
+
+/// 找到这个口径的规则身份，没有就立一条。
+///
+/// 第一条立出来的是**首要规则**：目标行上那一列指着它，「监控中必须有规则」这条 CHECK
+/// 守的就是它。后面加的口径不动那一列。
+async fn ensure_monitor_rule(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    target_ref: Uuid,
+    slot_key: &str,
+) -> Result<(Uuid, bool), sqlx::Error> {
+    if let Some(existing) = sqlx::query_as::<_, (Uuid, bool)>(
+        "SELECT rule_ref,is_primary FROM collection_monitor_rule          WHERE target_ref=$1 AND slot_key=$2 AND retired_at IS NULL FOR UPDATE",
+    )
+    .bind(target_ref)
+    .bind(slot_key)
+    .fetch_optional(&mut **transaction)
+    .await?
+    {
+        return Ok(existing);
+    }
+    let has_primary: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM collection_monitor_rule          WHERE target_ref=$1 AND is_primary AND retired_at IS NULL)",
+    )
+    .bind(target_ref)
+    .fetch_one(&mut **transaction)
+    .await?;
+    let rule_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_monitor_rule (rule_ref,target_ref,slot_key,is_primary)          VALUES ($1,$2,$3,$4)",
+    )
+    .bind(rule_ref)
+    .bind(target_ref)
+    .bind(slot_key)
+    .bind(!has_primary)
+    .execute(&mut **transaction)
+    .await?;
+    Ok((rule_ref, !has_primary))
+}
+
 async fn insert_monitor_rule_revision(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
+    rule_ref: Uuid,
     rule_revision_ref: Uuid,
     revision: i32,
     draft: &MonitorRuleDraft,
@@ -2388,12 +2519,12 @@ async fn insert_monitor_rule_revision(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO collection_monitor_rule_revision \
-             (rule_revision_ref,target_ref,revision,mode,automatic_enabled,timezone, \
+             (rule_revision_ref,target_ref,rule_ref,revision,mode,automatic_enabled,timezone, \
               run_on_weekdays,run_on_weekends,all_day,window_start_minute,window_end_minute, \
               fixed_interval_seconds,fallback_interval_seconds,surface_key,ranking_key, \
               scroll_rounds,top_by_likes,published_within_days, \
               task_contract_version,rule_payload_digest,created_by) \
-         VALUES ($1,$2,$3,$4,$5,'Asia/Shanghai',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)",
+         VALUES ($1,$2,$21,$3,$4,$5,'Asia/Shanghai',$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)",
     )
     .bind(rule_revision_ref)
     .bind(target_ref)
@@ -2421,6 +2552,7 @@ async fn insert_monitor_rule_revision(
     .bind(draft.task_contract_version.trim())
     .bind(payload_digest)
     .bind(actor.as_str())
+    .bind(rule_ref)
     .execute(&mut **transaction)
     .await?;
     Ok(())
@@ -2439,12 +2571,14 @@ async fn copy_monitor_rule_revision(
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT INTO collection_monitor_rule_revision \
-             (rule_revision_ref,target_ref,revision,mode,automatic_enabled,timezone, \
+             (rule_revision_ref,target_ref,rule_ref,revision,mode,automatic_enabled,timezone, \
               run_on_weekdays,run_on_weekends,all_day,window_start_minute,window_end_minute, \
               fixed_interval_seconds,fallback_interval_seconds,surface_key,ranking_key, \
               scroll_rounds,top_by_likes,published_within_days, \
               task_contract_version,rule_payload_digest,created_by) \
-         SELECT $3,$1,$4,COALESCE($5,mode),$6,timezone,run_on_weekdays,run_on_weekends, \
+         -- 暂停／恢复复制的是**同一条规则**的上一个版本，规则身份跟着原样带过来：
+         -- 换个规则身份等于把这条口径的历史切断，之后没人说得清它改过几次。
+         SELECT $3,$1,rule_ref,$4,COALESCE($5,mode),$6,timezone,run_on_weekdays,run_on_weekends, \
                 all_day,window_start_minute,window_end_minute, \
                 CASE WHEN $5='manual_only' THEN NULL ELSE fixed_interval_seconds END, \
                 fallback_interval_seconds,surface_key,ranking_key, \

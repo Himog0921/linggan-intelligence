@@ -121,6 +121,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0065_account_observation_bootstrap.sql"),
     "\n",
     include_str!("../../../database/migrations/0071_cross_industry_sampling_provenance.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0076_monitor_rule_slots.sql"),
 );
 
 #[tokio::test]
@@ -2080,14 +2082,33 @@ async fn seed_monitored_patrol_order(
 ) -> Uuid {
     let target_ref = seed_target(database, "keyword", "pending_decision", identity_key).await;
     let rule_ref = Uuid::new_v4();
+    // 规则版本必须挂在一条规则身份上（`0076`）：一个目标可以同时有几条口径不同的规则，
+    // 版本是「这条规则改过几次」，不挂身份就说不清它是哪条规则的历史。
+    let rule_identity_ref = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO collection_monitor_rule_revision              (rule_revision_ref,target_ref,revision,mode,automatic_enabled,timezone,               run_on_weekdays,run_on_weekends,all_day,fixed_interval_seconds,               fallback_interval_seconds,surface_key,task_contract_version,rule_payload_digest,created_by)          VALUES ($1,$2,1,'fixed',true,'Asia/Shanghai',true,true,true,86400,86400,                  'keyword_search','linggan.producer.task-spec.v1',repeat('a',64),'person')",
+        "INSERT INTO collection_monitor_rule (rule_ref,target_ref,slot_key,is_primary) \
+         VALUES ($1,$2,'primary',true)",
     )
-    .bind(rule_ref)
+    .bind(rule_identity_ref)
     .bind(target_ref)
     .execute(database.pool())
     .await
+    .expect("monitor rule identity fixture is stored");
+    sqlx::query(
+        "INSERT INTO collection_monitor_rule_revision              (rule_revision_ref,target_ref,rule_ref,revision,mode,automatic_enabled,timezone,               run_on_weekdays,run_on_weekends,all_day,fixed_interval_seconds,               fallback_interval_seconds,surface_key,task_contract_version,rule_payload_digest,created_by)          VALUES ($1,$2,$3,1,'fixed',true,'Asia/Shanghai',true,true,true,86400,86400,                  'keyword_search','linggan.producer.task-spec.v1',repeat('a',64),'person')",
+    )
+    .bind(rule_ref)
+    .bind(target_ref)
+    .bind(rule_identity_ref)
+    .execute(database.pool())
+    .await
     .expect("monitor rule fixture is stored");
+    sqlx::query("UPDATE collection_monitor_rule SET active_revision_ref=$2 WHERE rule_ref=$1")
+        .bind(rule_identity_ref)
+        .bind(rule_ref)
+        .execute(database.pool())
+        .await
+        .expect("the rule points at its current revision");
     // monitoring_enabled 只有挂上活跃规则才允许为真（CHECK 强制）。
     sqlx::query(
         "UPDATE collection_observation_target          SET active_monitor_rule_revision_ref=$2,monitoring_enabled=true WHERE target_ref=$1",
