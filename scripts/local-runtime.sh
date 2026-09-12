@@ -246,6 +246,7 @@ migrate() {
   apply_migration_once "0073_cross_industry_sample_observation" "$project_root/database/migrations/0073_cross_industry_sample_observation.sql"
   apply_migration_once "0074_cross_industry_detail_scope" "$project_root/database/migrations/0074_cross_industry_detail_scope.sql"
   apply_migration_once "0075_local_embedding_001" "$project_root/database/migrations/0075_local_embedding_001.sql"
+  apply_migration_once "0076_monitor_rule_slots" "$project_root/database/migrations/0076_monitor_rule_slots.sql"
   apply_migration_once "0065_account_observation_bootstrap" "$project_root/database/migrations/0065_account_observation_bootstrap.sql"
 }
 

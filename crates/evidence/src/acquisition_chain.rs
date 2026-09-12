@@ -745,6 +745,7 @@ async fn request_and_admit_in_transaction_with_progressive_resume(
         material_targets,
         &[],
         required_authorization_ref,
+        None,
         allow_progressive_resume,
     )
     .await
@@ -765,6 +766,8 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
     material_targets: &[MaterialDeepeningTarget],
     cross_industry_samples: &[Uuid],
     required_authorization_ref: Option<Uuid>,
+    // 调度按规则算到期，它知道是哪一条该跑；其余入口传 `None`，沿用目标行上的当前规则。
+    frozen_rule_revision_ref: Option<Uuid>,
     allow_progressive_resume: bool,
 ) -> Result<RequestOutcome, AcquisitionChainError> {
     // 「这张工单有没有冻结具体作品」——两侧任何一侧有，答案就是有。下面的生命周期前置、
@@ -885,6 +888,7 @@ pub(crate) async fn request_and_admit_in_transaction_scoped(
         target_ref,
         scope,
         required_authorization_ref,
+        frozen_rule_revision_ref,
     )
     .await?;
     let outcome = decide_admission(&facts.admission);
@@ -1092,6 +1096,8 @@ async fn gather_facts(
     target_ref: Uuid,
     scope: DeepeningScope<'_>,
     required_authorization_ref: Option<Uuid>,
+    // 调度指定了到期的是哪一条规则时，冻这一条；`None` 才回落到目标行上的当前规则。
+    frozen_rule_revision_ref: Option<Uuid>,
 ) -> Result<GatheredFacts, sqlx::Error> {
     let dispatch_lane = dispatch_lane_for(lane, requested_by);
     let task_template = task_template_for(target_kind, lane, !scope.is_empty());
@@ -1269,16 +1275,23 @@ async fn gather_facts(
     // 绑上规则不会让人点的工单被规则闸门拦住：`reject_if_rule_changed` 里那几条
     // （规则变更、规则缺失、巡检暂停）都只对 `agent` 生效——自动巡检停了，人仍然可以手动
     // 观察一次，这正是这个按钮存在的意义。
-    let monitor_rule_revision_ref = if lane == "patrol" {
-        sqlx::query_scalar(
-            "SELECT active_monitor_rule_revision_ref FROM collection_observation_target \
+    //
+    // **调度必须说清是哪一条规则到期了。** 一个关键词可以同时盯综合榜和点赞榜，两条规则
+    // 各有各的口径与周期（`0076`）。从目标行上读「当前规则」只在一个目标一条规则的年代
+    // 成立：现在点赞榜那一轮到期时，冻进工单的可能是综合榜的口径，插件于是按错误的排序、
+    // 错误的取样上限去采——而回执、覆盖度、材料全都自洽，没有任何一处看得出来。
+    let monitor_rule_revision_ref = match (lane, frozen_rule_revision_ref) {
+        (_, Some(revision_ref)) => Some(revision_ref),
+        ("patrol", None) => {
+            sqlx::query_scalar(
+                "SELECT active_monitor_rule_revision_ref FROM collection_observation_target \
              WHERE target_ref=$1",
-        )
-        .bind(target_ref)
-        .fetch_one(&mut **transaction)
-        .await?
-    } else {
-        None
+            )
+            .bind(target_ref)
+            .fetch_one(&mut **transaction)
+            .await?
+        }
+        _ => None,
     };
 
     Ok(GatheredFacts {

@@ -113,6 +113,8 @@ const MIGRATIONS: &str = concat!(
     include_str!("../../../database/migrations/0064_account_observation_normalization.sql"),
     "\n",
     include_str!("../../../database/migrations/0065_account_observation_bootstrap.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0076_monitor_rule_slots.sql"),
 );
 
 #[tokio::test]
@@ -624,14 +626,16 @@ async fn scheduler_scans_due_valid_rules_in_bounded_pages_without_rule_missing()
                 .await
                 .expect("a fixed automatic rule is saved before scheduling");
         assert_eq!(applied.outcome, MonitorCommandOutcomeKind::Applied);
+        // 排期状态住在**规则**上（`0076`）：一个目标可以有几条规则，各自的下次运行时间
+        // 互不相干。改目标行已经不会让任何规则到期。
         sqlx::query(
-            "UPDATE collection_observation_target \
+            "UPDATE collection_monitor_rule \
              SET monitor_next_run_at=scope_001_now()-interval '1 second' WHERE target_ref=$1",
         )
         .bind(target_ref)
         .execute(database.pool())
         .await
-        .expect("valid scheduler target is due");
+        .expect("valid scheduler rule is due");
         targets.push(target_ref);
     }
     let summary = run_due_patrols(&database)

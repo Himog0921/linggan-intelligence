@@ -17,7 +17,10 @@ proof_container="linggan-intelligence-local-001-proof-${proof_suffix}"
 proof_volume="linggan-intelligence-local-001-proof-${proof_suffix}-data"
 proof_user="local_001_proof_admin"
 proof_password="$(openssl rand -hex 24)"
-postgres_image="postgres:16.14-bookworm@sha256:64154d0babcb1741988719e703419af0382b19953706149f9872fbd0f438efa8"
+# 0075 起夹具里有 `CREATE EXTENSION vector`，裸 postgres 镜像装不了它，整套证明会在
+# 应用迁移那一步就崩。评论研究那个脚本已经换成了带 pgvector 的基础镜像，这一套当时
+# 漏了——于是 main 上 LOCAL-001 全套跑不起来。与那边同一个写法。
+postgres_image="linggan-intelligence-postgres-pgvector:16.14-v0.8.0-r1"
 
 [[ "$proof_database" =~ ^linggan_intelligence_local_001_[a-zA-Z0-9_]+$ ]] || { echo "unsafe proof database name" >&2; exit 1; }
 [[ "$proof_container" =~ ^linggan-intelligence-local-001-proof-[a-zA-Z0-9_-]+$ ]] || { echo "unsafe proof container name" >&2; exit 1; }
@@ -27,6 +30,7 @@ if ! docker info >/dev/null 2>&1; then
   echo "LOCAL-001 PostgreSQL proof was not started: the Docker daemon is unavailable. No proof database, container, or volume was created." >&2
   exit 1
 fi
+"$project_root/scripts/runtime/build-pgvector-image.sh" --ensure
 
 cleanup() {
   task_exit=$?
@@ -79,6 +83,7 @@ cargo test -p linggan-evidence --test creator_lifecycle_postgres --locked -- --i
 cargo test -p linggan-evidence --test target_inspector_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test observation_target_dossier_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test collection_control_postgres --locked -- --ignored
+cargo test -p linggan-evidence --test monitor_rule_slots_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test collection_control_runtime_postgres --locked -- --ignored
 cargo test -p linggan-evidence --test collection_dispatch_sequence_postgres --locked -- --ignored
 cargo test -p linggan-intelligence --test topic_workspace_postgres --locked -- --ignored

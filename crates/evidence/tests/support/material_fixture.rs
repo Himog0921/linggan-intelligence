@@ -155,6 +155,8 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0075_local_embedding_001.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0076_monitor_rule_slots.sql"),
+    "\n",
     include_str!("../../../../database/migrations/0065_account_observation_bootstrap.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ",

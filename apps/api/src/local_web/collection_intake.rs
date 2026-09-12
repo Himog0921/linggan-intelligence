@@ -83,16 +83,11 @@ pub fn parse_intake(intake: &TargetIntake) -> Result<TargetIdentity, IntakeRejec
                 .map_err(IntakeRejection::from)
         }
         TargetKind::Keyword => {
-            // A keyword without a ranking is not a weaker target — it is an ambiguous one.
-            // Accepting it would silently pick a ranking on the person's behalf and later
-            // merge two different surfaces into one identity.
-            let ranking = intake
-                .ranking
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .ok_or(IntakeRejection::KeywordNeedsRanking)?;
-            TargetIdentity::keyword(intake.platform.trim(), intake.identity.trim(), ranking)
+            // 排序**不再进身份**（`0076`）：一个词就是一个观察目标，按哪些榜去看是它的
+            // 巡检规则，可以有好几条。此前这里要求必须带排序，理由是「不带排序的关键词
+            // 是个含糊的目标」——那在一个词只能有一条口径的年代成立；现在口径有自己的
+            // 归处，再把它塞进身份，只会让同一个词分裂成几个各自建档的目标。
+            TargetIdentity::keyword(intake.platform.trim(), intake.identity.trim())
                 .map_err(IntakeRejection::from)
         }
     }
@@ -116,15 +111,19 @@ mod tests {
         }
     }
 
+    /// **不带排序的关键词是完整的，带排序的也不会因此分裂。**
+    ///
+    /// 排序是巡检口径，属于规则（`0076`）。此前这里要求必须带排序，理由是「替人猜一个
+    /// 排序会把两个不同的观察面并成一个身份」——那在一个词只能有一条口径的年代成立。
+    /// 现在反过来了：把排序塞进身份，同一个词会分裂成几个各自建档、各攒一份历史的目标，
+    /// 而它们面对的是同一批笔记。
     #[test]
-    fn a_keyword_without_a_ranking_is_rejected_rather_than_guessed() {
-        // Picking a ranking on the person's behalf would later merge two different
-        // observation surfaces into one identity.
-        assert_eq!(
-            parse_intake(&intake("keyword", "ADHD", None)).unwrap_err(),
-            IntakeRejection::KeywordNeedsRanking
-        );
-        assert!(parse_intake(&intake("keyword", "ADHD", Some("comprehensive"))).is_ok());
+    fn a_keyword_is_taken_by_its_term_whatever_ranking_accompanies_it() {
+        let without = parse_intake(&intake("keyword", "ADHD", None)).expect("term alone is enough");
+        let with = parse_intake(&intake("keyword", "ADHD", Some("comprehensive")))
+            .expect("an accompanying ranking is accepted but does not enter the identity");
+        assert_eq!(without.key(), with.key());
+        assert_eq!(without.key(), "adhd");
     }
 
     #[test]
@@ -133,7 +132,7 @@ mod tests {
         assert_eq!(creator.key(), "5ebe6d21");
 
         let keyword = parse_intake(&intake("keyword", " ADHD ", Some(" Comprehensive "))).unwrap();
-        assert_eq!(keyword.key(), "adhd::comprehensive");
+        assert_eq!(keyword.key(), "adhd");
     }
 
     #[test]

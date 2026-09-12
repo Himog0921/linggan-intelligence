@@ -153,6 +153,8 @@ pub async fn advance_keyword_archive_detail(
         &material_targets,
         &samples,
         None,
+        // 详情补采不是巡检，不绑规则版本。
+        None,
         false,
     )
     .await?;

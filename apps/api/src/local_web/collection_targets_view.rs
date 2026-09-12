@@ -143,6 +143,8 @@ pub struct TargetListFacts<'facts> {
     pub keyword_archives: Option<&'facts std::collections::HashSet<uuid::Uuid>>,
     /// 还有作品等着补详情的关键词目标。`None` 同样是「没读出来」，不是「都补齐了」。
     pub keyword_details_pending: Option<&'facts std::collections::HashSet<uuid::Uuid>>,
+    /// 每个关键词命中了多少篇、补到了多少篇详情。`None` 是这一批没读出来。
+    pub keyword_counts: Option<&'facts HashMap<uuid::Uuid, linggan_evidence::KeywordCatalogCounts>>,
 }
 
 /// 把两次批量查询合成这一行的建档状态。
@@ -204,7 +206,7 @@ fn target_table(
     let columns = if is_creator {
         r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部创作者目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">创作者</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span class="c-tg-head-num" role="columnheader">作品目录</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     } else {
-        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">规则</span><span class="c-tg-head-num" role="columnheader">最近命中</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">数据更新</span><span role="columnheader">巡查状态</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
+        r#"<span role="columnheader"><label class="c-tg-select-all"><input type="checkbox" data-target-select-all aria-label="选择全部关键词目标"/></label></span><span role="columnheader">编号</span><span role="columnheader">关键词</span><span role="columnheader">平台</span><span role="columnheader">分组</span><span role="columnheader">档案状态</span><span class="c-tg-head-num" role="columnheader">命中作品</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">详情进度</span><span role="columnheader">巡查状态</span><span role="columnheader">最近新增</span><span role="columnheader">上次巡查</span><span role="columnheader">下次巡查</span><span role="columnheader">操作</span>"#
     };
     let grid = if is_creator {
         "c-tg-creator-grid"
@@ -280,6 +282,26 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
             "c-src-feedback c-src-feedback-ok",
             "详情已补齐",
             "这个词当前拿到的作品都取过详情了。下一步是开始每周巡检，看它每周新增什么。",
+        ),
+        "monitor_rule_retired" => (
+            "c-src-feedback c-src-feedback-ok",
+            "这条规则已停用",
+            "它不再排期。已经签发过的工单与采回来的材料仍然留着——删掉会让那些材料说不清是按什么口径取回来的。想重新用它，按同一个排序再存一条规则即可。",
+        ),
+        "monitor_rule_is_the_last_one" => (
+            "c-src-feedback c-src-feedback-warn",
+            "这是最后一条规则",
+            "没有停用。观察中的目标必须有一条规则，否则调度不知道该按什么口径去看它。要完全停下来，用这一行的观察开关停止观察；那是另一个决定，不该由「停用一条规则」顺带完成。",
+        ),
+        "monitor_rule_unknown" => (
+            "c-src-feedback c-src-feedback-warn",
+            "没找到这条规则",
+            "它可能已经被停用了。刷新一下看当前还有哪几条。",
+        ),
+        "monitor_rule_retire_failed" => (
+            "c-src-feedback c-src-feedback-warn",
+            "规则没有停用",
+            "这次什么都没有改动，可以重试。反复失败说明规则管理当前不可用，而不是你点错了。",
         ),
         "archive_merge" => (
             "c-src-feedback c-src-feedback-warn",
@@ -457,6 +479,9 @@ fn target_row(
         facts.keyword_details_pending,
         target.target_ref,
     );
+    let counts = facts
+        .keyword_counts
+        .and_then(|counts| counts.get(&target.target_ref));
     let is_creator = target.target_kind == "creator";
     let name = target
         .display_name
@@ -532,17 +557,18 @@ fn target_row(
         )
     } else {
         format!(
-            r#"<div class="c-tg-cell c-tg-rule" role="cell">{rule}</div>
+            r#"<div class="c-tg-cell" role="cell">{rule}</div>
                 <div class="c-tg-cell c-tg-number-value" role="cell">{hits}</div>
-                <div class="c-tg-cell c-tg-unknown c-tg-cell-end" role="cell">尚未取得</div>
+                <div class="c-tg-cell c-tg-number-value c-tg-cell-end" role="cell">{details}</div>
                 <div class="c-tg-cell" role="cell">{patrol}</div>
                 <div class="c-tg-cell c-tg-change" role="cell">{recent_change}</div>
                 <time class="c-tg-cell c-tg-time" role="cell">{last}</time>
                 <time class="c-tg-cell c-tg-time" role="cell">{next}</time>
                 <div class="c-tg-actions" role="cell" data-row-no-open>{actions}{secondary}</div>"#,
-            rule = keyword_rule(target),
+            rule = keyword_archive_state(keyword_archive),
             patrol = patrol_state(target, observation),
-            hits = keyword_hits(observation),
+            hits = keyword_hit_count(counts),
+            details = keyword_detail_progress(counts),
             recent_change = keyword_recent_change(observation),
             last = escape(last),
             next = escape(&next),
@@ -875,20 +901,35 @@ fn deletion_modal(
 /// 五种排序都给中文——描述性标签必须只用中文（LIDS-LANG-001 · LANG-05），而且弹窗里
 /// 已经是「最多点赞」，列表再显示 `most_liked` 就是同一件事两种说法。认不出的值保留
 /// 原文：那是一个机器标识，藏起来会让人看不出这个目标到底在按什么采。
-fn keyword_rule(target: &ObservationTarget) -> String {
-    target
-        .identity_key
-        .rsplit_once("::")
-        .map(|(_, ranking)| match ranking {
-            "comprehensive" => "综合排序",
-            "latest" => "最新排序",
-            "most_liked" => "最多点赞",
-            "most_collected" => "最多收藏",
-            "most_commented" => "最多评论",
-            other => other,
-        })
-        .unwrap_or("当前规则")
-        .to_owned()
+/// 关键词的档案状态。与创作者那一列同一套说法：**这个词的底座建好了没有**。
+///
+/// 这一列此前显示的是「最多点赞」这类排序口径——排序现在属于规则（`0076`），一个词可以有
+/// 好几条，摆在列表上既不完整也不再是这一行的身份。而「建没建档」是这一行真正该先回答的：
+/// 新建关键词默认采最多点赞前 200 篇，那就是它的档案。
+fn keyword_archive_state(archive: super::target_drawer::KeywordArchiveRead) -> String {
+    use super::target_drawer::KeywordArchiveRead;
+    let (tone, label) = match archive {
+        KeywordArchiveRead::NotArchived => ("neutral", "尚未建立"),
+        KeywordArchiveRead::DetailPending => ("info", "建档中"),
+        KeywordArchiveRead::Complete => ("ok", "档案已建立"),
+        // 读不到就说读不到。压成「尚未建立」会催人重跑一次真实的平台访问。
+        KeywordArchiveRead::Unavailable => ("neutral", "读不到"),
+    };
+    format!(r#"<span class="c-tg-truth c-tg-{tone}">{label}</span>"#)
+}
+
+/// 这个词命中了多少篇作品。
+fn keyword_hit_count(counts: Option<&linggan_evidence::KeywordCatalogCounts>) -> String {
+    counts.map_or_else(|| "读不到".to_owned(), |counts| counts.works.to_string())
+}
+
+/// 详情补到哪儿了。与创作者的「详情进度」同一种写法：`已取得 / 命中`。
+fn keyword_detail_progress(counts: Option<&linggan_evidence::KeywordCatalogCounts>) -> String {
+    match counts {
+        None => "读不到".to_owned(),
+        Some(counts) if counts.works == 0 => "—".to_owned(),
+        Some(counts) => format!("{} / {}", counts.details, counts.works),
+    }
 }
 
 fn archive_count(archive: super::target_drawer::TargetArchiveRead<'_>) -> String {
@@ -1532,17 +1573,19 @@ mod tests {
         // 两张表的「最近新增」必须落在同一列位（第 10 位）。它们读的是同一个字段
         // `latest_new`——创作者那边此前叫「最近变化」、排在第 10 位，关键词这边叫
         // 「最近新增」、排在第 8 位：同一件事，两个名字，两个位置。现已统一。
+        //
+        // 关键词这两列此前叫「最近命中／数据更新」，后者还是写死的「尚未取得」——一整列
+        // 纯装饰。现在与创作者同义：命中作品／详情进度，两边纵向对得上，读的也都是真数。
         assert!(html.contains(
-            r#"最近命中</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">数据更新"#
+            r#"命中作品</span><span class="c-tg-head-num c-tg-head-end" role="columnheader">详情进度"#
         ));
-        // 第 8 列（详情进度／数据更新）在两张表里都单独多留右内边距，一起左移。
+        // 第 8 列（详情进度）在两张表里都单独多留右内边距，一起左移。
         assert_eq!(html.matches("c-tg-head-end").count(), 2);
         assert_eq!(html.matches("c-tg-cell-end").count(), 2);
         assert!(html.contains(r#"巡查状态</span><span role="columnheader">最近新增"#));
         assert!(!html.contains("最近变化"));
         // 数字列的表头必须与右对齐的数字同侧，否则一列两端各站一边，看着就是错位。
-        // 4 处：创作者表的 作品目录/详情进度，关键词表的 最近命中/数据更新。
-        // 「数据更新」跟着右对齐，是为了和创作者表同列位的「详情进度」纵向对齐。
+        // 4 处：创作者表的 作品目录/详情进度，关键词表的 命中作品/详情进度。
         assert_eq!(html.matches("c-tg-head-num").count(), 4);
         assert!(html.contains("打开作者的创作者档案"));
         assert!(html.contains("打开关键词的关键词观察"));
