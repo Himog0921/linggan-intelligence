@@ -5,7 +5,7 @@
 
 use crate::{
     comment_cleaning::{CLEANER_VERSION, CleanComment, clean},
-    local_embedding_profile,
+    local_embedding_profile, model_settings,
     research_text::content_hash,
 };
 use linggan_storage_postgres::Database;
@@ -92,6 +92,8 @@ pub enum CommentResearchKernelError {
     NoEligibleDerivations,
     #[error("no enabled, qualified embedding configuration is available")]
     EmbeddingNotReady,
+    #[error("the selected research model has not passed the V1 semantic probe")]
+    ModelNotReady,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -281,10 +283,16 @@ pub async fn save_active_policy(
     {
         return Err(CommentResearchKernelError::InvalidPolicy);
     }
+    let Some(config_ref) = request.config_ref else {
+        return Err(CommentResearchKernelError::ModelNotReady);
+    };
     let policy_revision_ref = Uuid::new_v4();
     let extraction_rule_hash = content_hash(EXTRACTION_CONTRACT);
     let membership_policy_hash = content_hash(MEMBERSHIP_CONTRACT);
     let mut transaction = database.pool().begin().await?;
+    if !research_model_ready_in_transaction(&mut transaction, config_ref).await? {
+        return Err(CommentResearchKernelError::ModelNotReady);
+    }
     sqlx::query(
         "INSERT INTO linggan_comment_research_policy_revision( \
              policy_revision_ref,config_ref,contract_version,derivation_version,extraction_rule_hash, \
@@ -292,7 +300,7 @@ pub async fn save_active_policy(
          ) VALUES($1,$2,'comment-research.semantic.v1',$3,$4,$5,$6,$7)",
     )
     .bind(policy_revision_ref)
-    .bind(request.config_ref)
+    .bind(config_ref)
     .bind(DERIVATION_VERSION)
     .bind(extraction_rule_hash)
     .bind(membership_policy_hash)
@@ -326,7 +334,7 @@ pub async fn start_run(
         return Err(CommentResearchKernelError::EmbeddingNotReady);
     }
     let policy = sqlx::query(
-        "SELECT policy.policy_revision_ref,policy.derivation_version,policy.source_limit \
+        "SELECT policy.policy_revision_ref,policy.derivation_version,policy.source_limit,policy.config_ref \
          FROM linggan_comment_research_policy_active active \
          JOIN linggan_comment_research_policy_revision policy \
            ON policy.policy_revision_ref=active.policy_revision_ref \
@@ -335,6 +343,13 @@ pub async fn start_run(
     .fetch_optional(&mut *transaction)
     .await?
     .ok_or(CommentResearchKernelError::PolicyMissing)?;
+    let config_ref: Option<Uuid> = policy.get("config_ref");
+    let Some(config_ref) = config_ref else {
+        return Err(CommentResearchKernelError::ModelNotReady);
+    };
+    if !research_model_ready_in_transaction(&mut transaction, config_ref).await? {
+        return Err(CommentResearchKernelError::ModelNotReady);
+    }
     let selected = select_eligible_derivations(&mut transaction, &policy).await?;
     if selected.is_empty() {
         return Err(CommentResearchKernelError::NoEligibleDerivations);
@@ -382,6 +397,20 @@ pub async fn start_run(
         selected_sources: selected.len(),
         external_calls_started: 0,
     })
+}
+
+async fn research_model_ready_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    config_ref: Uuid,
+) -> Result<bool, CommentResearchKernelError> {
+    model_settings::research_model_semantically_ready_in_transaction(transaction, config_ref)
+        .await
+        .map_err(|error| match error {
+            model_settings::ModelError::Database(source) => {
+                CommentResearchKernelError::Database(source)
+            }
+            _ => CommentResearchKernelError::ModelNotReady,
+        })
 }
 
 struct EligibleDerivation {

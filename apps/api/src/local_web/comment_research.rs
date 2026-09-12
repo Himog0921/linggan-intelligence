@@ -159,6 +159,9 @@ fn kernel_response<T: Serialize>(
                 kernel::CommentResearchKernelError::EmbeddingNotReady => {
                     (StatusCode::CONFLICT, "embedding_not_ready")
                 }
+                kernel::CommentResearchKernelError::ModelNotReady => {
+                    (StatusCode::CONFLICT, "research_model_not_ready")
+                }
                 kernel::CommentResearchKernelError::Database(_)
                 | kernel::CommentResearchKernelError::Serialization => (
                     StatusCode::SERVICE_UNAVAILABLE,
@@ -218,7 +221,18 @@ async fn read_setup(State(state): State<LocalWebState>) -> Response {
         "SELECT jsonb_build_object( \
              'configRef',config.config_ref,'modelId',model.model_id, \
              'inputTokenLimit',config.input_token_limit,'outputTokenLimit',config.output_token_limit, \
-             'timeoutSeconds',config.timeout_seconds,'connectionEnabled',connection.enabled \
+             'timeoutSeconds',config.timeout_seconds,'connectionEnabled',connection.enabled, \
+             'semanticReady',COALESCE(( \
+                 SELECT invocation.state='succeeded' \
+                    AND invocation.result->>'ok'='true' \
+                    AND invocation.result->>'modelCallable'='true' \
+                    AND invocation.result->>'semanticQualified'='true' \
+                 FROM linggan_model_invocation invocation \
+                 WHERE invocation.model_ref=model.model_ref \
+                   AND invocation.connection_version_ref=version.version_ref \
+                   AND invocation.operation='probe' \
+                 ORDER BY invocation.created_at DESC,invocation.invocation_ref DESC LIMIT 1 \
+             ),false) \
          ) FROM linggan_model_workspace workspace \
          JOIN linggan_model_config config ON config.config_ref=workspace.default_config_ref \
          JOIN linggan_model_entry model ON model.model_ref=config.model_ref \

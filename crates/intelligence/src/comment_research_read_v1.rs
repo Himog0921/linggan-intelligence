@@ -357,6 +357,12 @@ pub async fn read_runs(
                  SELECT jsonb_object_agg(state,count) \
                  FROM (SELECT item.state,count(*) FROM linggan_comment_research_run_item item WHERE item.run_ref=run.run_ref GROUP BY item.state) grouped \
              ),'{}'::jsonb), \
+             'itemFailureCounts',COALESCE(( \
+                 SELECT jsonb_object_agg(failure_code,count) \
+                 FROM (SELECT item.failure_code,count(*) FROM linggan_comment_research_run_item item \
+                       WHERE item.run_ref=run.run_ref AND item.failure_code IS NOT NULL \
+                       GROUP BY item.failure_code) grouped \
+             ),'{}'::jsonb), \
              'exclusionCounts',run.exclusion_counts, \
              'failureCounts',run.failure_counts, \
              'publishedResult',COALESCE(( \

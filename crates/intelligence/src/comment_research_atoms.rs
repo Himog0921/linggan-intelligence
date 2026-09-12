@@ -301,4 +301,24 @@ mod tests {
             Err(CommentResearchAtomError::InvalidOutput)
         ));
     }
+
+    #[test]
+    fn invalid_unicode_offset_map_is_distinguished_from_a_model_contract_failure() {
+        let input = ClaimedInput {
+            research_text: "我😊不想催促".into(),
+            offsets: vec![(0, 1)],
+            extraction_rule_hash: "unused".into(),
+        };
+        let atom = SemanticAtomProposal {
+            kind: AtomKind::Problem,
+            proposition: "家长不想以催促应对孩子".into(),
+            basis: AtomBasis::Explicit,
+            evidence_start: 1,
+            evidence_end: 5,
+        };
+        assert!(matches!(
+            validate_atom(&input, &atom),
+            Err(CommentResearchAtomError::DerivationCorrupt)
+        ));
+    }
 }

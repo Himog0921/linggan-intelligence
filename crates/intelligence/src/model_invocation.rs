@@ -100,6 +100,15 @@ pub async fn probe_model(
         })
         .to_string(),
     );
+    let mut insertion = database.pool().begin().await?;
+    if request.operation == "probe" {
+        lock_research_model_probe_completion_in_transaction(
+            &mut insertion,
+            request.model_ref.ok_or(ModelError::Invalid)?,
+            request.connection_version_ref,
+        )
+        .await?;
+    }
     let inserted = sqlx::query(
         "INSERT INTO linggan_model_invocation(\
             invocation_ref,connection_version_ref,model_ref,operation,request_hash,state,reserved_tokens,charged_tokens\
@@ -111,8 +120,9 @@ pub async fn probe_model(
     .bind(&request.operation)
     .bind(&request_hash)
     .bind(if request.operation == "probe" { 1_024_i64 } else { 0 })
-    .execute(database.pool())
+    .execute(&mut *insertion)
     .await?;
+    insertion.commit().await?;
     if inserted.rows_affected() == 0 {
         return invocation_replay(database, request.invocation_ref, &request_hash).await;
     }
@@ -189,16 +199,36 @@ pub async fn finish_invocation(
     failure_code: Option<&str>,
     result: &Value,
 ) -> Result<(), ModelError> {
-    let mut connection = database.pool().acquire().await?;
+    let mut transaction = database.pool().begin().await?;
+    let probe_target = sqlx::query(
+        "SELECT model_ref,connection_version_ref,operation \
+         FROM linggan_model_invocation WHERE invocation_ref=$1 FOR UPDATE",
+    )
+    .bind(invocation_ref)
+    .fetch_optional(&mut *transaction)
+    .await?;
+    if let Some(target) = probe_target.filter(|target| {
+        target.get::<String, _>("operation") == "probe"
+            && target.get::<Option<Uuid>, _>("model_ref").is_some()
+    }) {
+        lock_research_model_probe_completion_in_transaction(
+            &mut transaction,
+            target.get("model_ref"),
+            target.get("connection_version_ref"),
+        )
+        .await?;
+    }
     finish_invocation_in(
-        &mut connection,
+        &mut *transaction,
         invocation_ref,
         response,
         succeeded,
         failure_code,
         result,
     )
-    .await
+    .await?;
+    transaction.commit().await?;
+    Ok(())
 }
 
 pub(crate) async fn finish_invocation_in(

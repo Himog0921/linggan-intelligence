@@ -15,7 +15,7 @@
 - **用户问题**回答：哪些不同说法已被研究为同一稳定问题，每个问题可回到原声证据。
 - **变化观察**只回答：在两个可比时间窗口中，哪个已定义问题升温、降温、扩散或首次在本系统可用历史中出现；没有可靠变化时，明确说明不可比原因，绝不复用概览填版。
 
-用户保存一次模型/研究策略与总预算后，在 qualified+enabled embedding 也已就绪时，符合该策略的“开始研究”直接调用；语义提取、向量候选和问题归并调用均写入同一 Run 的通用调用账本并受该总预算约束。预检仍在服务端冻结范围、估算成本和排除项，但不再成为每次运行的重复人工授权。embedding 未就绪时，页面和服务端都拒绝创建 Run，避免产生必然无法归并和发布的无效调用。持续自动排程仍保持关闭，直到 Mog 单独开启。
+用户保存一次模型/研究策略与总预算后，在 qualified+enabled embedding 也已就绪时，符合该策略的“开始研究”直接调用；语义提取、向量候选和问题归并调用均写入同一 Run 的通用调用账本并受该总预算约束。预检仍在服务端冻结范围、估算成本和排除项，但不再成为每次运行的重复人工授权。研究模型也必须满足唯一的 V1 语义就绪判断：精确 config 所引用的 model/connection version 仍启用，且该 model/version 最新 `probe` 是成功、`ok`、`modelCallable` 与 `semanticQualified` 都为真。该判断用于保存默认模型配置、保存策略、启动 Run 和每次 generation reservation；reservation 会持有与 probe 写入/完成相同的版本化 PostgreSQL advisory lock 直到 adapter 返回，防止已写入的失败 probe 在资格判断与外发之间越过边界。任一处不满足都不发送评论。embedding 未就绪时，页面和服务端都拒绝创建 Run，避免产生必然无法归并和发布的无效调用。持续自动排程仍保持关闭，直到 Mog 单独开启。
 
 ## 2. 已确认决策与非目标
 
@@ -55,7 +55,7 @@ RawComment（不可变证据）
 
 生成式模型只负责：从冻结的 `research_text` 与必要、可读的上下文中抽取结构化 Atom；在候选关系存在歧义时判断同一/不同/不确定；为获接纳的新 Problem 生成受限定义。它不计算趋势、不决定重要性、不直接创建正式 Topic，也不自行决定发布。
 
-每个 Atom 包含 `kind`、受约束的 `proposition`、精确 `evidence span`、`basis`、来源/上下文引用、rule/model/input hash。程序在接纳前校验类型、长度、源身份、Unicode 区间与引用资格。无信号、输入不足、模型失败、字段拒绝必须是不同终态。
+每个 Atom 包含 `kind`、受约束的 `proposition`、精确 `evidence span`、`basis`、来源/上下文引用、rule/model/input hash。程序在接纳前校验类型、长度、源身份、Unicode 区间与引用资格。无信号、输入不足、模型失败、字段/证据合同拒绝必须是不同终态。调用账本与 Run 读取只保存并呈现安全阶段/计数：JSON 不可解析、字段/范围合同拒绝和 Unicode span 无法映射回原评论相互区分，不保存原始评论或模型原文。
 
 V1 的 `AtomProblemMembership(relation='same')` 只接受 `problem` 与 `need`：两者都可表达同一个待解决的用户问题。`solution`、`experience` 保持为 Atom/原声证据，不能被伪装成“与问题相同”；若以后需要关联它们，必须新增有独立语义和验收的关系，而不是扩大 `same`。
 
@@ -113,7 +113,7 @@ Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类
 - 实现单一作者 attribution / research derivation；模型策略保存后直接运行；将 recoverable、incompatible、unrecoverable、model_failed 分开。
 - 验收：`作者` 徽标不进入 `research_text`；一条旧不兼容恢复记录不阻断一条新研究；取消或 prepare 失败没有模型调用；调用、费用与 source hash 可追溯。
 
-实施进度（2026-09-10）：作者 attribution、ResearchDerivation、保存策略、冻结 Run、逐项 claim 与失败隔离已完成，并由 isolated PostgreSQL 证明。0067 为 RunItem 加入 120 秒 execution lease；0068 追加候选归并的独立 lease/retry 队列。生产 `linggan-comment-worker --execute [--once]` 只推进这条 V1 链，模型调用、预算预留、用量回执和 provider/adapter 短暂失败的有界重试均写入通用 invocation ledger；旧 recovery/task 永不进入候选队列。真实供应商调用和敏感评论外发仍留给用户在已保存配置后主动开始的一轮 V1 Run。
+实施进度（2026-09-12，隔离候选）：已把研究模型 V1 语义就绪判断收束为唯一事务内 predicate，并接入默认模型配置、策略保存、Run 启动和 generation reservation。该候选还将 `semantic_json_unparseable`、`semantic_contract_rejected` 与 `semantic_evidence_offset_unmappable` 写入安全的 item/code 汇总；模型设置 projection 的外层 alias 已修正并有隔离 PostgreSQL 回归。它尚未合并、切换 runtime 或对真实评论/模型生效，真实模型语义质量仍须在用户主动启动首轮后单独验收。
 
 ### R2 · Atom、向量与归并
 
