@@ -579,8 +579,8 @@ pub fn render_with_catalog_view(
                  <div class="c-dw-identity">
                    {avatar}
                    <div class="c-dw-identity-copy">
-                     <h2 id="c-drawer-title" class="c-dw-title" tabindex="-1" data-drawer-initial-focus>{name}</h2>
-                     <div class="c-dw-meta">{platform}{handle}</div>
+                     <div class="c-dw-name-row"><h2 id="c-drawer-title" class="c-dw-title" tabindex="-1" data-drawer-initial-focus>{name}</h2>{watch_badge}</div>
+                     <div class="c-dw-meta"><span>{platform}</span>{handle}<i class="c-dw-meta-dot" aria-hidden="true"></i><span>{group}</span></div>
                      {bio}
                    </div>
                  </div>
@@ -589,7 +589,6 @@ pub fn render_with_catalog_view(
                    <a class="c-btn-secondary c-dw-close" href="{return_href}">{close_icon}<span>关闭</span></a>
                  </div>
                </div>
-               <div class="c-dw-statusline">{statusline}</div>
              </div>
              <nav class="c-dw-tabs">{tabs}</nav>
              <div class="c-dw-body">{body}</div>
@@ -608,7 +607,8 @@ pub fn render_with_catalog_view(
         return_url = list_context.list_href(None),
         source_link = source_link(target, is_creator),
         close_icon = close_icon(),
-        statusline = drawer_identity_context(target),
+        watch_badge = drawer_watch_badge(target),
+        group = escape(target.group_name.as_deref().unwrap_or("未分组")),
         // Description facts may contain email addresses, tags and other unstructured profile
         // text. They are evidence, not drawer chrome: keeping them out of the header makes the
         // target identity and the three operational facts scannable at a glance.
@@ -744,6 +744,10 @@ fn external_link_icon() -> String {
     r#"<svg class="c-dw-action-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M19 5l-9 9M19 14v5H5V5h5"/></svg>"#.to_owned()
 }
 
+/// Stable copy contract used by the archived/read-model tests. The compact reference header
+/// intentionally exposes only the continuing-observation badge; full archive and patrol state
+/// remains in the Overview body, where it can be read without being mistaken for identity.
+#[cfg_attr(not(test), allow(dead_code))]
 fn statusline(target: &ObservationTarget, completeness: TargetArchiveRead<'_>) -> String {
     let archive = if target.target_kind != "creator" {
         lifecycle_primary_copy(&target.target_kind, &target.lifecycle_state).1
@@ -782,10 +786,19 @@ fn statusline(target: &ObservationTarget, completeness: TargetArchiveRead<'_>) -
     )
 }
 
-fn drawer_identity_context(target: &ObservationTarget) -> String {
+/// This badge describes the target's configured continuing-observation state, not runtime work.
+/// It deliberately does not borrow a scheduler, Work Order, Lease or Attempt state from the
+/// read model: an enabled rule is not evidence that something is executing right now, and a
+/// disabled rule alone cannot tell a paused target from one that was stopped or never enabled.
+fn drawer_watch_badge(target: &ObservationTarget) -> String {
+    let (state, label) = match target.lifecycle_state.as_str() {
+        "dismissed" => ("stopped", "已停止观察"),
+        "paused" => ("paused", "已暂停"),
+        _ if target.monitoring_enabled => ("active", "观察中"),
+        _ => ("inactive", "未开启观察"),
+    };
     format!(
-        "分组：{}",
-        escape(target.group_name.as_deref().unwrap_or("未分组"))
+        r#"<span class="c-dw-watch-badge" data-state="{state}"><i aria-hidden="true"></i>{label}</span>"#,
     )
 }
 
@@ -1746,36 +1759,44 @@ fn lifecycle_overview(
     }
 
     let controls = lifecycle_controls(target, projection, list_context);
-    let (linked, linked_label) = match projection.summary.linked_work_count {
-        Some(count) => (count.to_string(), "作品目录"),
-        None => (
-            format!("≥{}", projection.summary.linked_work_count_lower_bound),
-            "作品目录下限",
-        ),
-    };
-    let summary = format!(
-        r#"<div class="life-summary" aria-label="生命周期覆盖摘要">
-              <div><b>{linked}</b><span>{linked_label}</span></div>
-              <div><b>{confirmed}</b><span>作者已确认</span></div>
-              <div><b>{eligible}</b><span>当前可分析</span></div>
-            </div>"#,
-        confirmed = projection.summary.confirmed_author_work_count,
-        eligible = projection.summary.eligible_point_count,
-    );
-    let legend = r#"<div class="life-legend" aria-label="散点含义">
-          <span><i class="life-legend-dot life-legend-directory"></i>主页目录，详情待确认</span>
-          <span><i class="life-legend-dot life-legend-confirmed"></i>作者已确认</span>
-          <span><i class="life-legend-dot life-legend-new"></i>最近巡查新增</span>
-        </div>"#;
-    let chart = if projection.points.is_empty() {
+    let has_points = !projection.points.is_empty();
+    let summary = performance_summary(projection);
+    let trend = if !has_points {
         lifecycle_state(
             "观察不足，暂时无法成图",
             "作品必须同时具备可确认的作者归属、真实发布时间和当前互动数据。未知值不会按零计算。",
         )
     } else {
-        lifecycle_chart(target, projection, selected_work, list_context)
+        performance_trend_chart(projection)
     };
-    let exclusions = lifecycle_exclusions(projection);
+    let review = has_points
+        .then(|| performance_review(projection))
+        .unwrap_or_default();
+    let evidence = performance_evidence(target, projection, list_context);
+    // The reference surface leads with a time-bucket trend. The per-work scatter remains
+    // available as an explicit progressive disclosure: it is still the only precise way to
+    // inspect each qualified work without turning an aggregate bucket into a fake work record.
+    let distribution = if !has_points {
+        String::new()
+    } else {
+        format!(
+            r#"<details class="life-distribution"><summary>查看每篇作品分布<span>每个点是一篇可分析作品</span></summary>
+                  <div class="life-legend" aria-label="散点含义">
+                    <span><i class="life-legend-dot life-legend-directory"></i>主页目录，详情待确认</span>
+                    <span><i class="life-legend-dot life-legend-confirmed"></i>作者已确认</span>
+                    <span><i class="life-legend-dot life-legend-new"></i>最近巡查新增</span>
+                  </div>
+                  {chart}{exclusions}
+                </details>"#,
+            chart = lifecycle_chart(target, projection, selected_work, list_context),
+            exclusions = lifecycle_exclusions(projection),
+        )
+    };
+    let exclusions = if has_points {
+        String::new()
+    } else {
+        lifecycle_exclusions(projection)
+    };
     let selected = selected_work
         .and_then(|selected| {
             projection
@@ -1788,15 +1809,364 @@ fn lifecycle_overview(
 
     format!(
         r#"<section class="c-dw-section life-panel" id="creator-lifecycle">
-              <div class="life-heading">
-                <div><h2>作品表现</h2></div>
-                <p>数据截至 {as_of}</p>
-              </div>
-              {controls}{summary}{legend}{chart}{exclusions}
-              {selected}
+              <div class="life-performance-controls"><div>{controls}</div><p>数据截至 <time>{as_of}</time></p></div>
+              {summary}
+              <div class="life-performance-grid{empty_state}"><article class="life-trend-panel">{trend}</article>{review}</div>
+              {evidence}{exclusions}{distribution}{selected}
               <p class="life-boundary">这里比较的是该创作者自己的作品表现，不是“监控价值”评分。尚未建立内容分类，因此不按主题生成表现结论。</p>
             </section>"#,
         as_of = escape(&projection.as_of),
+        empty_state = if has_points {
+            ""
+        } else {
+            " life-performance-grid-empty"
+        },
+    )
+}
+
+/// The review surface aggregates only the already-qualified lifecycle points.  A bucket is not
+/// a new persistence model and is never presented as a platform-wide total: it is merely a
+/// readable way to see the same creator-scoped evidence set over time.
+fn performance_buckets<'a>(
+    points: &'a [CreatorLifecyclePoint],
+) -> Vec<(String, Vec<&'a CreatorLifecyclePoint>)> {
+    let mut buckets: Vec<(String, Vec<&CreatorLifecyclePoint>)> = Vec::new();
+    for point in points {
+        let label = point
+            .published_local_date
+            .get(..7)
+            .unwrap_or(point.published_local_date.as_str())
+            .replace('-', "/");
+        if let Some((_, items)) = buckets.last_mut().filter(|(key, _)| *key == label) {
+            items.push(point);
+        } else {
+            buckets.push((label, vec![point]));
+        }
+    }
+    buckets
+}
+
+fn median_f64(values: &[f64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let middle = sorted.len() / 2;
+    Some(if sorted.len() % 2 == 0 {
+        (sorted[middle - 1] + sorted[middle]) / 2.0
+    } else {
+        sorted[middle]
+    })
+}
+
+fn compact_metric(value: f64) -> String {
+    if value.abs() >= 10_000.0 {
+        format!("{:.0}k", value / 1_000.0)
+    } else if value.abs() >= 1_000.0 {
+        format!("{:.1}k", value / 1_000.0)
+    } else {
+        format!("{:.0}", value)
+    }
+}
+
+fn performance_stat(value: String, label: &str, progress: Option<f64>, signal: bool) -> String {
+    let progress = progress
+        .map(|value| {
+            format!(
+                r#"<span class="life-stat-progress{}"><i style="--life-progress:{:.2}%"></i></span>"#,
+                if signal { " life-stat-progress-signal" } else { "" },
+                value.clamp(0.0, 100.0),
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        r#"<div class="life-performance-stat"><div><b>{value}</b><span>{label}</span></div>{progress}</div>"#,
+    )
+}
+
+fn performance_summary(projection: &CreatorLifecycleProjection) -> String {
+    let linked = projection.summary.linked_work_count;
+    let confirmed = projection.summary.confirmed_author_work_count;
+    let eligible = projection.summary.eligible_point_count;
+    let (directory, directory_label) = match linked {
+        Some(count) => (count.to_string(), "作品目录"),
+        None => (
+            format!("≥{}", projection.summary.linked_work_count_lower_bound),
+            "作品目录下限",
+        ),
+    };
+    let confirmed_progress = linked
+        .filter(|count| *count > 0)
+        .map(|count| confirmed as f64 / count as f64 * 100.0);
+    let eligible_progress = (confirmed > 0).then(|| eligible as f64 / confirmed as f64 * 100.0);
+    format!(
+        r#"<div class="life-performance-summary" aria-label="作品覆盖摘要">
+              {directory}{confirmed}{eligible}
+            </div>"#,
+        directory = performance_stat(directory, directory_label, linked.map(|_| 100.0), false),
+        confirmed = performance_stat(
+            confirmed.to_string(),
+            "作者已确认",
+            confirmed_progress,
+            false,
+        ),
+        eligible = performance_stat(eligible.to_string(), "当前可分析", eligible_progress, true,),
+    )
+}
+
+fn performance_trend_chart(projection: &CreatorLifecycleProjection) -> String {
+    const WIDTH: f64 = 980.0;
+    const HEIGHT: f64 = 470.0;
+    const LEFT: f64 = 62.0;
+    const RIGHT: f64 = 28.0;
+    const TOP: f64 = 28.0;
+    const BOTTOM: f64 = 54.0;
+
+    let buckets = performance_buckets(&projection.points);
+    let bucket_medians = buckets
+        .iter()
+        .map(|(_, points)| {
+            median_f64(
+                &points
+                    .iter()
+                    .map(|point| point.metric_value as f64)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap_or(0.0)
+        })
+        .collect::<Vec<_>>();
+    let plot_width = WIDTH - LEFT - RIGHT;
+    let plot_height = HEIGHT - TOP - BOTTOM;
+    let max_metric = bucket_medians
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max)
+        .max(1.0)
+        * 1.18;
+    let max_posts = buckets
+        .iter()
+        .map(|(_, points)| points.len())
+        .max()
+        .unwrap_or(1)
+        .max(1) as f64;
+    let step = if buckets.len() > 1 {
+        plot_width / (buckets.len() - 1) as f64
+    } else {
+        plot_width / 2.0
+    };
+    let x_for = |index: usize| {
+        if buckets.len() == 1 {
+            LEFT + plot_width / 2.0
+        } else {
+            LEFT + step * index as f64
+        }
+    };
+    let y_for = |value: f64| TOP + plot_height - value / max_metric * plot_height;
+    let grid = (0..5)
+        .map(|index| {
+            let y = TOP + plot_height / 4.0 * index as f64;
+            let value = max_metric * (1.0 - index as f64 / 4.0);
+            format!(
+                r#"<line class="life-trend-grid" x1="{LEFT}" y1="{y:.1}" x2="{}" y2="{y:.1}"/><text class="life-trend-axis" x="{}" y="{:.1}" text-anchor="end">{}</text>"#,
+                WIDTH - RIGHT,
+                LEFT - 12.0,
+                y + 4.0,
+                compact_metric(value),
+            )
+        })
+        .collect::<String>();
+    let bars = buckets
+        .iter()
+        .enumerate()
+        .map(|(index, (_, points))| {
+            let x = x_for(index);
+            let height = points.len() as f64 / max_posts * 72.0;
+            let width = (step * 0.42).min(30.0).max(12.0);
+            format!(
+                r#"<rect class="life-trend-bar" x="{:.1}" y="{:.1}" width="{width:.1}" height="{height:.1}" rx="1"/>"#,
+                x - width / 2.0,
+                TOP + plot_height - height,
+            )
+        })
+        .collect::<String>();
+    let line_points = bucket_medians
+        .iter()
+        .enumerate()
+        .map(|(index, value)| format!("{:.1},{:.1}", x_for(index), y_for(*value)))
+        .collect::<Vec<_>>();
+    let line = line_points.join(" ");
+    let benchmark = median_f64(
+        &bucket_medians
+            .iter()
+            .rev()
+            .take(5)
+            .copied()
+            .collect::<Vec<_>>(),
+    )
+    .unwrap_or(0.0);
+    let benchmark_y = y_for(benchmark);
+    let dots = buckets
+        .iter()
+        .enumerate()
+        .map(|(index, (_, points))| {
+            let x = x_for(index);
+            let y = y_for(bucket_medians[index]);
+            let is_new = points.iter().any(|point| point.new_in_latest_patrol);
+            let ring = if is_new {
+                format!(r#"<circle class="life-trend-new-ring" cx="{x:.1}" cy="{y:.1}" r="9.5"/>"#,)
+            } else {
+                String::new()
+            };
+            format!(
+                r#"{ring}<circle class="life-trend-dot{}" cx="{x:.1}" cy="{y:.1}" r="4.4"/>"#,
+                if is_new { " life-trend-dot-new" } else { "" },
+            )
+        })
+        .collect::<String>();
+    let labels = buckets
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| {
+            buckets.len() <= 7 || *index == 0 || *index + 1 == buckets.len() || *index % 2 == 0
+        })
+        .map(|(index, (label, _))| {
+            let anchor = if index == 0 {
+                "start"
+            } else if index + 1 == buckets.len() {
+                "end"
+            } else {
+                "middle"
+            };
+            format!(
+                r#"<text class="life-trend-axis" x="{:.1}" y="{}" text-anchor="{anchor}">{}</text>"#,
+                x_for(index),
+                HEIGHT - 24.0,
+                escape(label),
+            )
+        })
+        .collect::<String>();
+    let trend_right = WIDTH - RIGHT;
+    let benchmark_copy_y = benchmark_y - 7.0;
+    let vertical_label_y = TOP + plot_height / 2.0;
+    format!(
+        r#"<div class="life-trend-head"><div><div class="life-trend-eyebrow">作品复核</div><h2>作品表现趋势</h2><p>柱形表示发布密度，主线使用同一时间桶的{metric}中位数；新巡查作品以信号环标出。</p></div><span class="life-trend-grain">自动聚合</span></div>
+            <div class="life-trend-legend" aria-label="趋势图图例"><span><i class="life-legend-bar"></i>发布作品数</span><span><i class="life-legend-line"></i>{metric}中位数</span><span><i class="life-legend-dash"></i>最近窗口中位基准</span><span><i class="life-legend-ring"></i>巡查新增</span></div>
+            <figure class="life-trend-figure"><svg class="life-trend-chart" viewBox="0 0 980 470" role="img" aria-labelledby="life-trend-chart-title life-trend-chart-desc"><title id="life-trend-chart-title">创作者作品表现趋势</title><desc id="life-trend-chart-desc">横轴为当前时间窗口的月份，柱形表示可分析作品数，线条表示每月{metric}中位数。</desc>{grid}{bars}<line class="life-trend-benchmark" x1="{LEFT}" y1="{benchmark_y:.1}" x2="{trend_right:.1}" y2="{benchmark_y:.1}"/><text class="life-trend-benchmark-copy" x="{trend_right:.1}" y="{benchmark_copy_y:.1}" text-anchor="end">当前窗口中位 · {benchmark_label}</text><polyline class="life-trend-line" points="{line}"/>{dots}{labels}<text class="life-trend-axis" x="17" y="{vertical_label_y:.1}" transform="rotate(-90 17 {vertical_label_y:.1})" text-anchor="middle">{metric}中位数</text></svg></figure>"#,
+        metric = metric_label(projection.metric),
+        grid = grid,
+        bars = bars,
+        benchmark_y = benchmark_y,
+        benchmark_label = compact_metric(benchmark),
+        line = line,
+        dots = dots,
+        labels = labels,
+        LEFT = LEFT,
+        trend_right = trend_right,
+        benchmark_copy_y = benchmark_copy_y,
+        vertical_label_y = vertical_label_y,
+    )
+}
+
+fn performance_review(projection: &CreatorLifecycleProjection) -> String {
+    let buckets = performance_buckets(&projection.points);
+    let metric_values = projection
+        .points
+        .iter()
+        .map(|point| point.metric_value as f64)
+        .collect::<Vec<_>>();
+    let median = median_f64(&metric_values).unwrap_or(0.0);
+    let active_months = buckets.len().max(1);
+    let density = projection.summary.eligible_point_count as f64 / active_months as f64;
+    let new_count = projection
+        .points
+        .iter()
+        .filter(|point| point.new_in_latest_patrol)
+        .count();
+    let max_posts = buckets
+        .iter()
+        .map(|(_, points)| points.len())
+        .max()
+        .unwrap_or(1)
+        .max(1) as f64;
+    let strip = buckets
+        .iter()
+        .rev()
+        .take(7)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .map(|(_, points)| {
+            let size = 2.0 + points.len() as f64 / max_posts * 5.0;
+            let hot = points.iter().any(|point| point.new_in_latest_patrol);
+            format!(
+                r#"<i{} style="--life-strip-size:{size:.3}"></i>"#,
+                if hot { " class=\"life-mini-hot\"" } else { "" },
+            )
+        })
+        .collect::<String>();
+    format!(
+        r#"<aside class="life-review" aria-label="复核摘要"><div class="life-review-head"><b>复核摘要</b><span>把“变化”转成可核验线索。</span></div>
+              <div class="life-review-item"><div><span>当前窗口中位{metric}</span></div><strong>{median}</strong><p>只按当前可分析作品计算；缺少指标的作品不会以零参与中位数。</p><div class="life-mini-strip">{strip}</div></div>
+              <div class="life-review-item"><div><span>发布密度</span><em>{density:.1} / 活跃月</em></div><strong>{eligible}</strong><p>当前窗口内 {eligible} 篇可分析作品，分布在 {months} 个有作品月份。</p></div>
+              <div class="life-review-item"><div><span>最近巡查新增</span><em>{new_count} 篇</em></div><strong>{new_count}</strong><p>这里仅标记已进入当前可分析集的新增作品，未把读取未知写成零。</p></div>
+              <div class="life-review-boundary"><b>复核边界</b><p>观察结果不等于结论。先查证单篇作品与其来源，再做解释。</p></div></aside>"#,
+        metric = metric_label(projection.metric),
+        median = compact_metric(median),
+        strip = strip,
+        density = density,
+        eligible = projection.summary.eligible_point_count,
+        months = buckets.len(),
+        new_count = new_count,
+    )
+}
+
+fn performance_evidence(
+    target: &ObservationTarget,
+    projection: &CreatorLifecycleProjection,
+    list_context: TargetListContext<'_>,
+) -> String {
+    let rows = projection
+        .points
+        .iter()
+        .rev()
+        .take(4)
+        .map(|point| {
+            let work = point.work_public_ref.to_string();
+            let href = list_context.drawer_href(
+                target.target_ref,
+                &[
+                    ("dtab", "works"),
+                    ("wview", "performance"),
+                    ("life_window", projection.window.as_str()),
+                    ("life_metric", projection.metric.as_str()),
+                    ("life_work", work.as_str()),
+                ],
+                Some("creator-lifecycle"),
+            );
+            let association = match point.association_state {
+                CreatorLifecycleAssociation::DirectoryLinked => "目录已列入，作者待确认",
+                CreatorLifecycleAssociation::AuthorConfirmed => "作者已确认",
+            };
+            format!(
+                r#"<tr><td><a class="life-evidence-title" href="{href}">{title}</a></td><td>{published}</td><td class="life-evidence-number">{value}</td><td>{association}</td></tr>"#,
+                title = escape(point.title.as_deref().unwrap_or("标题未知")),
+                published = escape(&point.published_local_date),
+                value = point.metric_value,
+                association = association,
+            )
+        })
+        .collect::<String>();
+    let content = if rows.is_empty() {
+        r#"<p class="life-evidence-empty">当前窗口没有可展示的单篇作品；未知数据不会替换成占位读数。</p>"#.to_owned()
+    } else {
+        format!(
+            r#"<div class="life-evidence-table-wrap"><table class="life-evidence-table"><thead><tr><th>近期作品证据</th><th>发布时间</th><th>{metric}</th><th>归属</th></tr></thead><tbody>{rows}</tbody></table></div>"#,
+            metric = metric_label(projection.metric),
+        )
+    };
+    format!(
+        r#"<section class="life-evidence"><div class="life-evidence-head"><h2>近期作品证据</h2><p>展示当前窗口最后 4 篇可分析作品；选择一篇可继续进入语料核验。</p></div>{content}</section>"#,
     )
 }
 
