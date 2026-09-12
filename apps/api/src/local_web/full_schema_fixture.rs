@@ -136,6 +136,8 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../../database/migrations/0076_monitor_rule_slots.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0077_comment_research_voice_read_index.sql"),
+    "\n",
     include_str!("../../../../database/migrations/0065_account_observation_bootstrap.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",

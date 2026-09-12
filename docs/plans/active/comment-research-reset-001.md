@@ -11,7 +11,7 @@
 评论研究是把当前可读的评论证据转为可追溯的用户表达与变化，而不是把一套聚类算法的中间状态展示给用户。
 
 - **概览**回答：当前研究覆盖了什么、用户正在表达哪些问题与需求。
-- **用户原声**回答：经过身份过滤的普通用户原声具体是什么、来自哪篇作品；不显示“等待语义向量准备”。作品作者回复和身份未知评论不进入这一页、问题或变化分母。
+- **用户原声**回答：当前可读、经过身份与清洗过滤的 canonical V1 普通用户原声具体是什么、来自哪篇作品，以及它是否已进入研究；只显示受控中文状态和安全失败说明，不显示评论作者名、Atom 枚举或“等待语义向量准备”，也不等待 ResultRevision 发布。作品作者回复和身份未知评论不进入这一页、问题或变化分母。
 - **用户问题**回答：哪些不同说法已被研究为同一稳定问题，每个问题可回到原声证据。
 - **变化观察**只回答：在两个可比时间窗口中，哪个已定义问题升温、降温、扩散或首次在本系统可用历史中出现；没有可靠变化时，明确说明不可比原因，绝不复用概览填版。
 
@@ -67,7 +67,7 @@ Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类
 
 ### 3.4 Result Revision 与变化
 
-页面只读取已 `published` 的 `ResultRevision`；正在清洗、提取、向量化或归并的结果不会半成品混入页面。每个 revision 固定：范围、`as_of`、样本 manifest hash、research/attribution/embedding/membership policy hash、输入/失败/排除计数。
+概览、用户问题与变化观察只读取已 `published` 的 `ResultRevision`；正在清洗、提取、向量化或归并的结果不会半成品混入这些研究结论。用户原声是例外：它只读 canonical `comment-research.derivation.v1` 的 current、readable、`ordinary_user + eligible` derivation 的原文与研究正文，并附该 derivation 最后一次 RunItem 状态；它不等待或返回 `ResultRevision`，不派生、冻结、认领或调用模型。每个 revision 固定：范围、`as_of`、样本 manifest hash、research/attribution/embedding/membership policy hash、输入/失败/排除计数。
 
 变化比较固定为 Asia/Shanghai 的两个完整自然周：`[as_of-14d, as_of-7d)` 对 `[as_of-7d, as_of)`；不使用当天未结束的部分日。统计同时计算去重评论占比和作品覆盖率。发布 `升温`、`降温`、`扩散`、`新出现` 前，必须满足冻结 membership basis、两期覆盖和范围可比性；否则只返回 `not_comparable` 与原因。它们是研究输入范围内的观察，不是“市场正在增长/下降”的断言。
 
@@ -134,7 +134,7 @@ Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类
 - 以独立 endpoints/read models 重写四页和运行记录；不再在任意 tab 读取全量研究快照。
 - 验收：变化页不渲染问题页/概览副本；技术原因不作为列表标签；当前 1,613 条开发样本与 100k 合成评论分别做 20 次独立测量，单 Tab 数据读取 P95 分别不超过 500ms 与 1s；无数据、未配置 embedding、部分失败、来源受限、不可比均如实表达。
 
-实施进度（2026-09-10）：V1 的五个 read model/API 与唯一页面已经替换旧入口：`overview`、`voices`、`problems`、`changes` 与 `runs`。每个请求在 repeatable-read 只读事务中选择一个 readable published ResultRevision；指定 revision 不可读时返回明确 unavailable，schema 缺失时不伪造空研究结果。概览只返回当前问题与覆盖，原声返回 raw evidence / research text / author role / research outcome 而没有 embedding 状态，问题返回冻结的 Definition 与双窗口事实，变化只返回 published Observation 和 `notComparable` 原因。隔离 PostgreSQL 已证明同一冻结 revision 的五个投影互不混用。真实浏览器交互与性能的上线验收进入 R5，不用源码替代。
+实施进度（2026-09-12，隔离候选）：V1 的五个 read model/API 与唯一页面已经替换旧入口：`overview`、`voices`、`problems`、`changes` 与 `runs`。`overview`、`problems` 与 `changes` 在 repeatable-read 只读事务中选择一个 readable published ResultRevision；指定 revision 不可读时返回明确 unavailable，schema 缺失时不伪造空研究结果。`voices` 改为在同一只读事务直接读取 current、readable、`ordinary_user + eligible` 的 canonical `comment-research.derivation.v1` derivation，不依赖 ResultRevision；它返回原始证据、研究正文和最后 RunItem 状态，且不会派生、冻结、认领或调用模型。它不返回评论作者显示名或 Atom 类型枚举；最新状态只映射为受控中文状态与安全失败说明。0077 为 RunItem 反查增加 `(derivation_ref, updated_at DESC, run_ref DESC)` 索引，因 migration runner 的显式 transaction 约束不使用 `CONCURRENTLY`。问题返回冻结的 Definition 与双窗口事实，变化只返回 published Observation 和 `notComparable` 原因。隔离 PostgreSQL 覆盖无 published ResultRevision 时原声仍可读、分页保持、无模型调用，旧 derivation version 不污染分页，且概览/问题/变化继续拒绝无结果。真实浏览器交互与大容量索引计划性能均进入 R5，不用源码或 fixture 的索引存在替代。
 
 ### R5 · 开发库重置、运行切换与上线验证
 

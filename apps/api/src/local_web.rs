@@ -4,6 +4,9 @@ mod collection_intake;
 mod collection_targets_view;
 mod collection_tasks_view;
 mod comment_research;
+#[cfg(test)]
+#[path = "../../../crates/evidence/tests/support/material_fixture.rs"]
+mod comment_research_api_fixture;
 mod creator_lifecycle_api;
 #[cfg(test)]
 mod creator_lifecycle_tests;

@@ -1,10 +1,16 @@
 //! Read models for the single COMMENT-RESEARCH-RESET-001 semantic kernel.
 //!
-//! Each function reads one published ResultRevision only.  It intentionally does not join the
-//! legacy comment-intelligence projections, expose embedding queue state, or recompute trends
-//! from a mutable overview.  A caller may ask for a particular readable revision; otherwise the
-//! latest readable published revision is selected.
+//! Overview, Problems, and Changes each read one published ResultRevision only.  They
+//! intentionally do not join the legacy comment-intelligence projections, expose embedding queue
+//! state, or recompute trends from a mutable overview.  A caller may ask for a particular
+//! readable revision; otherwise the latest readable published revision is selected.
+//!
+//! Voices answers a different question: what currently readable ordinary-user evidence is
+//! available to research?  It reads the current derivation head directly and is deliberately
+//! available before a ResultRevision exists.  This is a read-only evidence view: it never derives
+//! a comment, claims work, or calls a model.
 
+use crate::comment_research_kernel::DERIVATION_VERSION;
 use linggan_storage_postgres::Database;
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -139,24 +145,28 @@ pub async fn read_overview(
     }))
 }
 
-/// Reads the frozen ordinary-user input comments for one result. A row carries the raw evidence
-/// and separately derived research text, but never implementation queue state. Author replies
-/// and identity-unknown comments remain excluded upstream and do not masquerade as research
-/// voices.
+/// Reads current, readable ordinary-user evidence independently of ResultRevision publication.
+///
+/// A row carries the raw evidence and separately derived research text.  `researchStatus` is the
+/// most recent RunItem state for this exact current derivation; it is `unresearched` when this
+/// derivation has not entered a Run.  It is not a mutable overview, and this function never
+/// derives comments, claims work, or calls a model.  Author replies, identity-unknown comments,
+/// and deterministically dropped/anomalous entries remain excluded by the `eligible` filter.
+/// `derivation_current` retains an immutable head for every historical derivation version, so this
+/// view explicitly selects only the canonical V1 version that new Runs can read.
 pub async fn read_voices(
     database: &Database,
     query: &CommentResearchV1ReadQuery,
 ) -> Result<Value, CommentResearchV1ReadError> {
     let (limit, offset) = query.page()?;
     let mut transaction = begin_read(database).await?;
-    let context = resolve_result(&mut transaction, query.result_revision_ref).await?;
     let total: i64 = sqlx::query_scalar(
         "SELECT count(*) \
-         FROM linggan_comment_research_run_item item \
-         JOIN linggan_comment_research_derivation_readable derivation USING(derivation_ref) \
-         WHERE item.run_ref=$1",
+         FROM linggan_comment_research_derivation_current derivation \
+         WHERE derivation.derivation_version=$1 \
+           AND derivation.author_role='ordinary_user' AND derivation.eligibility='eligible'",
     )
-    .bind(context.run_ref)
+    .bind(DERIVATION_VERSION)
     .fetch_one(&mut *transaction)
     .await?;
     let items: Vec<Value> = sqlx::query_scalar(
@@ -166,18 +176,12 @@ pub async fn read_voices(
              'workTitle',work.title, \
              'commentText',source.body_text, \
              'researchText',derivation.research_text, \
-             'authorDisplayName',source.author_display_name, \
-             'researchOutcome',item.state, \
+             'researchStatus',COALESCE(latest_item.state,'unresearched'), \
+             'researchFailureCode',latest_item.failure_code, \
              'observedAt',source.observed_at, \
-             'isReply',source.is_reply, \
-             'atomKinds',COALESCE(( \
-                 SELECT jsonb_agg(atom.kind ORDER BY atom.ordinal) \
-                 FROM linggan_comment_research_atom atom \
-                 WHERE atom.run_ref=item.run_ref AND atom.derivation_ref=item.derivation_ref \
-             ),'[]'::jsonb) \
+             'isReply',source.is_reply \
          ) \
-         FROM linggan_comment_research_run_item item \
-         JOIN linggan_comment_research_derivation_readable derivation USING(derivation_ref) \
+         FROM linggan_comment_research_derivation_current derivation \
          JOIN linggan_comment_research_readable source ON source.material_ref=derivation.source_ref \
          LEFT JOIN LATERAL ( \
              SELECT detail.title \
@@ -186,11 +190,19 @@ pub async fn read_voices(
              ORDER BY detail.created_at DESC,detail.material_ref DESC \
              LIMIT 1 \
          ) work ON true \
-         WHERE item.run_ref=$1 \
+         LEFT JOIN LATERAL ( \
+             SELECT item.state,item.failure_code \
+             FROM linggan_comment_research_run_item item \
+             WHERE item.derivation_ref=derivation.derivation_ref \
+             ORDER BY item.updated_at DESC,item.run_ref DESC \
+             LIMIT 1 \
+         ) latest_item ON true \
+         WHERE derivation.derivation_version=$1 \
+           AND derivation.author_role='ordinary_user' AND derivation.eligibility='eligible' \
          ORDER BY source.observed_at::timestamptz DESC,source.material_ref DESC \
          LIMIT $2 OFFSET $3",
     )
-    .bind(context.run_ref)
+    .bind(DERIVATION_VERSION)
     .bind(limit)
     .bind(offset)
     .fetch_all(&mut *transaction)
@@ -198,7 +210,7 @@ pub async fn read_voices(
     transaction.commit().await?;
     Ok(json!({
         "view":"voices",
-        "result":context.envelope(),
+        "source":{"kind":"current_readable_ordinary_user"},
         "page":{"total":total,"limit":limit,"offset":offset,"items":items},
     }))
 }

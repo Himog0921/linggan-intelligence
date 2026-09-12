@@ -23,7 +23,8 @@ use linggan_intelligence::comment_research_problems::{
     ProblemDefinitionProposal, ProblemMembershipBasis, admit_existing_problem, admit_new_problem,
 };
 use linggan_intelligence::comment_research_read_v1::{
-    CommentResearchV1ReadQuery, read_changes, read_overview, read_problems, read_runs, read_voices,
+    CommentResearchV1ReadError, CommentResearchV1ReadQuery, read_changes, read_overview,
+    read_problems, read_runs, read_voices,
 };
 use linggan_intelligence::comment_research_results::publish_result_revision;
 use linggan_intelligence::comment_research_worker::{recover_problem_resolution_leases, run_once};
@@ -145,6 +146,27 @@ async fn derivation_ref(database: &Database, source_ref: Uuid) -> Uuid {
     .fetch_one(database.pool())
     .await
     .unwrap()
+}
+
+async fn insert_historical_derivation_version(database: &Database, source_ref: Uuid) {
+    sqlx::query(
+        "INSERT INTO linggan_comment_research_derivation( \
+             derivation_ref,source_ref,derivation_version,source_sha256,cleaner_version,clean_state, \
+             research_text,research_sha256,derivation_input_hash,research_offsets,normalization_reasons, \
+             author_role,attribution_source,attribution_observed_at,eligibility,eligibility_reason,context_manifest \
+         ) SELECT $1,source_ref,'comment-research.derivation.v0',source_sha256,cleaner_version,clean_state, \
+                  research_text,research_sha256,$2,research_offsets,normalization_reasons, \
+                  author_role,attribution_source,attribution_observed_at,eligibility,eligibility_reason,context_manifest \
+           FROM linggan_comment_research_derivation \
+          WHERE source_ref=$3 AND derivation_version=$4",
+    )
+    .bind(Uuid::new_v4())
+    .bind("b".repeat(64))
+    .bind(source_ref)
+    .bind(DERIVATION_VERSION)
+    .execute(database.pool())
+    .await
+    .unwrap();
 }
 
 async fn atom_ref(database: &Database, run_ref: Uuid, derivation_ref: Uuid) -> Uuid {
@@ -622,6 +644,153 @@ async fn derivation_preserves_raw_text_and_excludes_confirmed_content_author_rep
             .await
             .unwrap();
     assert_eq!(raw, "作者 别再瞎干预啦");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn voices_read_current_ordinary_user_evidence_without_a_published_result() {
+    let database = fixture::proof_database("comment_research_current_voices").await;
+    detail_with_author(
+        &database,
+        "current-voices-note",
+        "SYNTHETIC current voices note",
+        Some("creator-1"),
+    )
+    .await;
+    let ordinary = comment_with_author(
+        &database,
+        "current-voices-note",
+        "ordinary-reader",
+        "孩子总是在写作业前拖延，我不知道怎么帮他开始。",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "current-voices-note",
+        "author-reply",
+        "作者 我会继续补充方法。",
+        Some("creator-1"),
+        "2026-09-01T08:01:00Z",
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "current-voices-note",
+        "unknown-reader",
+        "我家也是这种情况。",
+        None,
+        "2026-09-01T08:02:00Z",
+    )
+    .await;
+    assert_eq!(derive_current_sources(&database, 100).await.unwrap(), 3);
+    insert_historical_derivation_version(&database, ordinary).await;
+    let derivation_heads: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_derivation_current WHERE source_ref=$1",
+    )
+    .bind(ordinary)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(derivation_heads, 2);
+
+    let latest_status_index: String = sqlx::query_scalar(
+        "SELECT indexdef FROM pg_indexes \
+         WHERE schemaname=current_schema() \
+           AND indexname='linggan_comment_research_run_item_derivation_latest_idx'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(latest_status_index.contains("derivation_ref, updated_at DESC, run_ref DESC"));
+
+    let invocations_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    let query = CommentResearchV1ReadQuery {
+        // A stale result reference belongs to the published-result views only.  It cannot turn
+        // an evidence browse into a `ResultUnavailable` response.
+        result_revision_ref: Some(Uuid::new_v4()),
+        limit: Some(1),
+        offset: Some(0),
+    };
+    let voices = read_voices(&database, &query).await.unwrap();
+    assert_eq!(voices["view"], "voices");
+    assert_eq!(voices["source"]["kind"], "current_readable_ordinary_user");
+    assert!(voices.get("result").is_none());
+    assert_eq!(voices["page"]["total"], 1);
+    assert_eq!(voices["page"]["limit"], 1);
+    assert_eq!(voices["page"]["offset"], 0);
+    assert_eq!(
+        voices["page"]["items"][0]["sourceRef"],
+        ordinary.to_string()
+    );
+    assert_eq!(
+        voices["page"]["items"][0]["researchText"],
+        "孩子总是在写作业前拖延,我不知道怎么帮他开始。"
+    );
+    assert_eq!(voices["page"]["items"][0]["researchStatus"], "unresearched");
+    assert!(
+        voices["page"]["items"][0]
+            .get("authorDisplayName")
+            .is_none()
+    );
+    assert!(voices["page"]["items"][0].get("atomKinds").is_none());
+    let invocations_after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(invocations_after, invocations_before);
+
+    let second_page = read_voices(
+        &database,
+        &CommentResearchV1ReadQuery {
+            limit: Some(1),
+            offset: Some(1),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(second_page["page"]["total"], 1);
+    assert!(second_page["page"]["items"].as_array().unwrap().is_empty());
+
+    assert!(matches!(
+        read_overview(&database, &query).await,
+        Err(CommentResearchV1ReadError::ResultUnavailable)
+    ));
+    assert!(matches!(
+        read_problems(&database, &query).await,
+        Err(CommentResearchV1ReadError::ResultUnavailable)
+    ));
+    assert!(matches!(
+        read_changes(&database, &query).await,
+        Err(CommentResearchV1ReadError::ResultUnavailable)
+    ));
+
+    let config_ref = qualified_research_config(&database).await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(config_ref),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_ready_run(&database).await.unwrap();
+    assert_eq!(run.external_calls_started, 0);
+    let queued_voices = read_voices(&database, &query).await.unwrap();
+    assert_eq!(
+        queued_voices["page"]["items"][0]["researchStatus"],
+        "pending"
+    );
+    assert!(queued_voices.get("result").is_none());
 }
 
 #[tokio::test]

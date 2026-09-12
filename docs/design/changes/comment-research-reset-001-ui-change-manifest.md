@@ -1,7 +1,7 @@
 # COMMENT-RESEARCH-RESET-001 · UI 变更清单
 
 > 状态: 权威当前
-> 最后核对: 2026-09-10
+> 最后核对: 2026-09-12
 > 适用范围: 评论研究与模型设置的用户界面替换
 > 事实来源: PAGE-COMMENT-RESEARCH-V1-001、DEC-0003、用户测试反馈
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行证据
@@ -17,7 +17,7 @@
 | `/api/local/comment-intelligence` 全量快照 | 删除 | overview / voices / problems / changes / runs 五个独立只读 endpoint |
 | 每日观察、查询、资产、标注、Task B/P4 设置 | 删除 | 一个保存 policy 的研究设置 modal |
 | 旧模型设置中的 trial/backfill/automatic plan | 删除 | 连接、V1 JSON 测试、默认模型、向量配置和调用账本 |
-| “等待语义向量准备”原声标签 | 删除 | 原声仅显示已通过身份过滤的普通用户证据、研究正文和研究结果 |
+| “等待语义向量准备”原声标签 | 删除 | 原声独立读取 canonical V1 的 current、readable、`ordinary_user + eligible` 证据、研究正文与受控中文最新研究状态；它不等待 ResultRevision，也不显示评论作者名、Atom 枚举或向量实现状态 |
 
 ## 运行与可访问性
 
@@ -33,5 +33,6 @@
 | 旧入口不存在 | Rust route/page test 与 API route probe |
 | 新 tab 不再共享重查询 | endpoint SQL / HTTP 计时测试 |
 | 作者角色不污染研究正文 | isolated PostgreSQL derivation fixture |
+| 没有 published ResultRevision 时仍可浏览当前原声 | isolated PostgreSQL `read_voices` / HTTP proof：canonical V1 version filter、200、分页、无作者名/Atom 枚举、无模型调用；overview/problems/changes 仍返回 result unavailable |
 | 设置后直接开始研究 | HTTP mutation test；模型调用数断言 |
 | 运行时显示新页面 | exact-head runtime switch 与浏览器截图 |

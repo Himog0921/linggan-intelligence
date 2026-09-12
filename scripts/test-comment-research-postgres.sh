@@ -54,4 +54,5 @@ export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password
 
 RUST_TEST_THREADS=1 cargo test -p linggan-intelligence --test comment_research_kernel_postgres --locked -- --ignored --nocapture --test-threads=1
 cargo test -p linggan-api --bin linggan-api --locked comment_research::tests -- --nocapture
+cargo test -p linggan-api --bin linggan-api --locked comment_research::tests::voices_api_is_readable_without_a_published_result -- --ignored --nocapture
 printf '%s\n' 'Comment research V1 PostgreSQL and local API proof passed'
