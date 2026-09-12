@@ -26,11 +26,20 @@ use linggan_intelligence::comment_research_read_v1::{
     CommentResearchV1ReadQuery, read_changes, read_overview, read_problems, read_runs, read_voices,
 };
 use linggan_intelligence::comment_research_results::publish_result_revision;
-use linggan_intelligence::comment_research_worker::recover_problem_resolution_leases;
+use linggan_intelligence::comment_research_worker::{recover_problem_resolution_leases, run_once};
+use linggan_intelligence::model_invocation::{ProbeModel, probe_model};
+use linggan_intelligence::model_secrets::SyntheticModelSecrets;
+use linggan_intelligence::model_settings::{
+    ModelError, SaveModelConfig, reserve_research_model_semantic_dispatch_permit, save_model_config,
+};
+use linggan_intelligence::model_settings_read::read_model_settings;
+use linggan_intelligence::model_worker_drain::ModelWorkerDrain;
+use linggan_intelligence::pi_adapter::PiAdapter;
 use linggan_storage_postgres::Database;
 use research_fixture::{comment_with_author, detail_with_author};
 use serde_json::json;
 use sqlx::Row;
+use std::{path::PathBuf, time::Duration};
 use uuid::Uuid;
 
 const HASH: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
@@ -99,10 +108,11 @@ async fn local_embedding_cutover_removes_definition_embeddings_without_touching_
     )
     .await;
     assert_eq!(derive_current_sources(&database, 10).await.unwrap(), 1);
+    let config_ref = qualified_research_config(&database).await;
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(config_ref),
             source_limit: 10,
             token_limit: 10_000,
         },
@@ -177,6 +187,299 @@ async fn start_ready_run(
         .unwrap();
     }
     start_run(database).await
+}
+
+async fn synthetic_research_model(
+    database: &Database,
+    semantic_qualified: bool,
+) -> (Uuid, Uuid, Uuid) {
+    let connection_ref = Uuid::new_v4();
+    let version_ref = Uuid::new_v4();
+    let model_ref = Uuid::new_v4();
+    let config_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_model_connection(connection_ref,enabled,revision) VALUES($1,true,1)",
+    )
+    .bind(connection_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_model_connection_version( \
+             version_ref,connection_ref,revision,name,api,base_url,local_endpoint,secret_ref \
+         ) VALUES($1,$2,1,'SYNTHETIC V1 research','openai-completions','http://127.0.0.1:18080',true,$3)",
+    )
+    .bind(version_ref)
+    .bind(connection_ref)
+    .bind(Uuid::new_v4())
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_model_entry(model_ref,connection_version_ref,model_id,origin) \
+         VALUES($1,$2,'synthetic-comment-research-v1','manual')",
+    )
+    .bind(model_ref)
+    .bind(version_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_model_config( \
+             config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts \
+         ) VALUES($1,$2,16000,2000,30,1)",
+    )
+    .bind(config_ref)
+    .bind(model_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    record_synthetic_research_probe(
+        database,
+        version_ref,
+        model_ref,
+        config_ref,
+        "succeeded",
+        semantic_qualified,
+    )
+    .await;
+    (config_ref, model_ref, version_ref)
+}
+
+async fn record_synthetic_research_probe(
+    database: &Database,
+    version_ref: Uuid,
+    model_ref: Uuid,
+    config_ref: Uuid,
+    state: &str,
+    semantic_qualified: bool,
+) {
+    sqlx::query(
+        "INSERT INTO linggan_model_invocation( \
+             invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state, \
+             reserved_tokens,charged_tokens,result,finished_at \
+         ) VALUES($1,$2,$3,$4,'probe',$5,$6,0,0,$7,scope_001_now())",
+    )
+    .bind(Uuid::new_v4())
+    .bind(version_ref)
+    .bind(model_ref)
+    .bind(config_ref)
+    .bind(HASH)
+    .bind(state)
+    .bind(json!({
+        "ok": state == "succeeded",
+        "modelCallable": state == "succeeded",
+        "semanticQualified": semantic_qualified,
+    }))
+    .execute(database.pool())
+    .await
+    .unwrap();
+}
+
+async fn qualified_research_config(database: &Database) -> Uuid {
+    synthetic_research_model(database, true).await.0
+}
+
+/// A bad offsets payload can only exist through historical corruption because derivations are
+/// append-only. The isolated proof temporarily disables that one guard, restores it before the
+/// worker runs, then verifies the production settlement path reports the corruption safely.
+async fn corrupt_isolated_derivation_offsets(database: &Database, source_ref: Uuid) {
+    sqlx::raw_sql(
+        "ALTER TABLE linggan_comment_research_derivation \
+         DISABLE TRIGGER linggan_comment_research_derivation_immutable",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let updated = sqlx::query(
+        "UPDATE linggan_comment_research_derivation \
+         SET research_offsets='[]'::jsonb WHERE source_ref=$1",
+    )
+    .bind(source_ref)
+    .execute(database.pool())
+    .await;
+    sqlx::raw_sql(
+        "ALTER TABLE linggan_comment_research_derivation \
+         ENABLE TRIGGER linggan_comment_research_derivation_immutable",
+    )
+    .execute(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(updated.unwrap().rows_affected(), 1);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn v1_model_admission_rejects_an_unqualified_default_and_policy_before_any_run() {
+    let database = fixture::proof_database("comment_research_v1_model_admission").await;
+    assert!(matches!(
+        save_active_policy(
+            &database,
+            SaveResearchPolicy {
+                config_ref: None,
+                source_limit: 10,
+                token_limit: 10_000,
+            },
+        )
+        .await,
+        Err(CommentResearchKernelError::ModelNotReady)
+    ));
+
+    let (_, unqualified_model_ref, _) = synthetic_research_model(&database, false).await;
+    assert!(matches!(
+        save_model_config(
+            &database,
+            &SaveModelConfig {
+                config_ref: Uuid::new_v4(),
+                expected_config_ref: None,
+                model_ref: unqualified_model_ref,
+                input_token_limit: 16_000,
+                output_token_limit: 2_000,
+                timeout_seconds: 30,
+                max_attempts: 1,
+            },
+        )
+        .await,
+        Err(ModelError::NotQualified)
+    ));
+    let default_config: Option<Uuid> = sqlx::query_scalar(
+        "SELECT default_config_ref FROM linggan_model_workspace WHERE singleton",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert!(default_config.is_none());
+
+    let qualified_config_ref = qualified_research_config(&database).await;
+    let policy = save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(qualified_config_ref),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(policy.active_revision, 1);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn latest_failed_v1_probe_blocks_start_before_a_run_is_created() {
+    let database = fixture::proof_database("comment_research_v1_start_preflight").await;
+    detail_with_author(
+        &database,
+        "semantic-preflight-note",
+        "SYNTHETIC semantic preflight note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "semantic-preflight-note",
+        "reader",
+        "孩子写作业时总是拖延，有什么办法吗",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    let (config_ref, model_ref, version_ref) = synthetic_research_model(&database, true).await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(config_ref),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    record_synthetic_research_probe(
+        &database,
+        version_ref,
+        model_ref,
+        config_ref,
+        "failed",
+        false,
+    )
+    .await;
+
+    assert!(matches!(
+        start_ready_run(&database).await,
+        Err(CommentResearchKernelError::ModelNotReady)
+    ));
+    let runs: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_comment_research_run")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(runs, 0);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn probe_write_and_failure_cannot_cross_a_reserved_generation_dispatch_permit() {
+    let database = fixture::proof_database("comment_research_semantic_probe_permit").await;
+    let (config_ref, model_ref, version_ref) = synthetic_research_model(&database, true).await;
+    let permit = reserve_research_model_semantic_dispatch_permit(&database, config_ref)
+        .await
+        .unwrap();
+    let adapter = PiAdapter::configured_with_test_command(
+        PathBuf::from("/bin/sh"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/support/comment_research_semantic_settlement_adapter.sh"),
+    );
+    let probe_database = database.clone();
+    let mut probe = tokio::spawn(async move {
+        probe_model(
+            &probe_database,
+            &SyntheticModelSecrets,
+            &adapter,
+            &ProbeModel {
+                invocation_ref: Uuid::new_v4(),
+                connection_version_ref: version_ref,
+                model_ref: Some(model_ref),
+                operation: "probe".into(),
+            },
+        )
+        .await
+    });
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), &mut probe)
+            .await
+            .is_err(),
+        "probe insertion must wait until the generation dispatch permit is released"
+    );
+
+    permit.release().await.unwrap();
+    probe.await.unwrap().unwrap();
+    assert!(matches!(
+        reserve_research_model_semantic_dispatch_permit(&database, config_ref).await,
+        Err(ModelError::NotQualified)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn model_settings_projection_reads_the_model_alias_used_by_callability() {
+    let database = fixture::proof_database("comment_research_model_settings_projection").await;
+    let (config_ref, model_ref, _) = synthetic_research_model(&database, true).await;
+    sqlx::query("UPDATE linggan_model_workspace SET default_config_ref=$1 WHERE singleton")
+        .bind(config_ref)
+        .execute(database.pool())
+        .await
+        .unwrap();
+
+    let settings = read_model_settings(&database, true).await.unwrap();
+    let model = settings["models"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["modelRef"] == model_ref.to_string())
+        .unwrap();
+    assert_eq!(model["modelCallable"], true);
+    assert_eq!(model["semanticQualified"], true);
+    assert_eq!(model["testState"], "succeeded");
 }
 
 async fn freeze_research_clock(database: &Database, now_at: &str) {
@@ -466,7 +769,7 @@ async fn frozen_run_remains_executable_but_stale_result_is_hidden_after_author_c
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 10,
             token_limit: 10_000,
         },
@@ -474,7 +777,6 @@ async fn frozen_run_remains_executable_but_stale_result_is_hidden_after_author_c
     .await
     .unwrap();
     let run = start_ready_run(&database).await.unwrap();
-
     detail_with_author(
         &database,
         "frozen-input-note",
@@ -561,7 +863,7 @@ async fn later_comments_are_derived_and_frozen_before_older_unprocessed_input() 
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 1,
             token_limit: 10_000,
         },
@@ -717,7 +1019,7 @@ async fn saved_policy_is_the_only_authorization_needed_to_queue_a_research_run()
     let policy = save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 100,
             token_limit: 10_000,
         },
@@ -737,10 +1039,12 @@ async fn saved_policy_is_the_only_authorization_needed_to_queue_a_research_run()
     .await
     .unwrap();
     assert_eq!(item_count, 1);
-    let calls: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
-        .fetch_one(database.pool())
-        .await
-        .unwrap();
+    let calls: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_model_invocation WHERE operation='analyze'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
     assert_eq!(calls, 0, "manifest freezing must not invoke a model");
 }
 
@@ -772,7 +1076,7 @@ async fn incompatible_item_does_not_block_the_next_healthy_v1_item() {
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 100,
             token_limit: 10_000,
         },
@@ -793,6 +1097,192 @@ async fn incompatible_item_does_not_block_the_next_healthy_v1_item() {
     let healthy = claim_next_run_item(&database).await.unwrap().unwrap();
     assert_ne!(healthy.derivation_ref, poisoned.derivation_ref);
     assert_eq!(healthy.attempt, 1);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn run_read_exposes_safe_semantic_failure_counts_without_model_or_comment_text() {
+    let database = fixture::proof_database("comment_research_run_failure_summary").await;
+    detail_with_author(
+        &database,
+        "failure-summary-note",
+        "SYNTHETIC failure summary note",
+        Some("creator-1"),
+    )
+    .await;
+    let json_source = comment_with_author(
+        &database,
+        "failure-summary-note",
+        "json-failure",
+        "孩子写作业总是拖延。SETTLEMENT_JSON_UNPARSEABLE",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    let contract_source = comment_with_author(
+        &database,
+        "failure-summary-note",
+        "contract-failure",
+        "孩子一写应用题就不知道怎么开始。SETTLEMENT_CONTRACT_REJECTED",
+        Some("reader-1"),
+        "2026-09-01T08:00:01Z",
+    )
+    .await;
+    let offset_source = comment_with_author(
+        &database,
+        "failure-summary-note",
+        "offset-failure",
+        "孩子总说自己不会做题。SETTLEMENT_OFFSET_UNMAPPABLE",
+        Some("reader-1"),
+        "2026-09-01T08:00:02Z",
+    )
+    .await;
+    let config_ref = qualified_research_config(&database).await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(config_ref),
+            source_limit: 10,
+            token_limit: 100_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_ready_run(&database).await.unwrap();
+    reserve_research_model_semantic_dispatch_permit(&database, config_ref)
+        .await
+        .unwrap()
+        .release()
+        .await
+        .unwrap();
+    assert!(
+        linggan_intelligence::local_embedding_profile::active(&database)
+            .await
+            .unwrap()
+            .is_some()
+    );
+    corrupt_isolated_derivation_offsets(&database, offset_source).await;
+    let adapter = PiAdapter::configured_with_test_command(
+        PathBuf::from("/bin/sh"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/support/comment_research_semantic_settlement_adapter.sh"),
+    );
+    let secrets = SyntheticModelSecrets;
+    let drain = ModelWorkerDrain::new();
+    for _ in 0..3 {
+        assert!(
+            run_once(&database, &secrets, &adapter, &drain)
+                .await
+                .unwrap()
+        );
+    }
+    let item_receipts: Vec<(String, Option<String>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT state,failure_code,invocation_ref FROM linggan_comment_research_run_item \
+         WHERE run_ref=$1 ORDER BY derivation_ref",
+    )
+    .bind(run.run_ref)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert!(
+        item_receipts
+            .iter()
+            .all(|(_, _, invocation_ref)| invocation_ref.is_some()),
+        "worker must reserve an invocation before semantic settlement: {item_receipts:?}"
+    );
+
+    let outcomes = sqlx::query(
+        "SELECT derivation.source_ref,item.failure_code,invocation.result->>'failureStage' AS failure_stage, \
+                NOT (invocation.result ? 'text') AS safe_result \
+         FROM linggan_comment_research_run_item item \
+         JOIN linggan_comment_research_derivation derivation USING(derivation_ref) \
+         JOIN linggan_model_invocation invocation USING(invocation_ref) \
+         WHERE item.run_ref=$1",
+    )
+    .bind(run.run_ref)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        outcomes.len(),
+        3,
+        "each synthetic semantic settlement must retain one invocation receipt"
+    );
+    let outcome_for = |source_ref| {
+        outcomes
+            .iter()
+            .find(|row| row.get::<Uuid, _>("source_ref") == source_ref)
+            .unwrap()
+    };
+    let json_outcome = outcome_for(json_source);
+    assert_eq!(
+        json_outcome
+            .get::<Option<String>, _>("failure_code")
+            .as_deref(),
+        Some("semantic_json_unparseable")
+    );
+    assert_eq!(
+        json_outcome
+            .get::<Option<String>, _>("failure_stage")
+            .as_deref(),
+        Some("semantic_json_parse")
+    );
+    let contract_outcome = outcome_for(contract_source);
+    assert_eq!(
+        contract_outcome
+            .get::<Option<String>, _>("failure_code")
+            .as_deref(),
+        Some("semantic_contract_rejected")
+    );
+    assert_eq!(
+        contract_outcome
+            .get::<Option<String>, _>("failure_stage")
+            .as_deref(),
+        Some("semantic_contract_acceptance")
+    );
+    let offset_outcome = outcome_for(offset_source);
+    assert_eq!(
+        offset_outcome
+            .get::<Option<String>, _>("failure_code")
+            .as_deref(),
+        Some("semantic_evidence_offset_unmappable")
+    );
+    assert_eq!(
+        offset_outcome
+            .get::<Option<String>, _>("failure_stage")
+            .as_deref(),
+        Some("semantic_evidence_offset_mapping")
+    );
+    assert!(outcomes.iter().all(|row| row.get::<bool, _>("safe_result")));
+
+    let runs = read_runs(
+        &database,
+        &CommentResearchV1ReadQuery {
+            result_revision_ref: None,
+            limit: Some(20),
+            offset: Some(0),
+        },
+    )
+    .await
+    .unwrap();
+    let item = runs["page"]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["runRef"] == run.run_ref.to_string())
+        .unwrap();
+    assert_eq!(item["itemFailureCounts"]["semantic_json_unparseable"], 1);
+    assert_eq!(item["itemFailureCounts"]["semantic_contract_rejected"], 1);
+    assert_eq!(
+        item["itemFailureCounts"]["semantic_evidence_offset_unmappable"],
+        1
+    );
+    assert!(item.get("modelResponse").is_none());
+    assert!(item.get("commentText").is_none());
+    let public_run_payload = runs.to_string();
+    assert!(!public_run_payload.contains("SETTLEMENT_JSON_UNPARSEABLE"));
+    assert!(!public_run_payload.contains("SETTLEMENT_CONTRACT_REJECTED"));
+    assert!(!public_run_payload.contains("SETTLEMENT_OFFSET_UNMAPPABLE"));
 }
 
 #[tokio::test]
@@ -818,7 +1308,7 @@ async fn expired_v1_lease_recovers_without_stalling_the_run() {
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 100,
             token_limit: 10_000,
         },
@@ -887,7 +1377,7 @@ async fn accepted_atoms_are_evidence_bound_and_invalid_model_output_writes_nothi
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 100,
             token_limit: 10_000,
         },
@@ -993,7 +1483,7 @@ async fn unavailable_embedding_settles_a_run_as_failure_instead_of_completed_unp
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 10,
             token_limit: 10_000,
         },
@@ -1072,7 +1562,7 @@ async fn unavailable_embedding_prevents_run_creation_and_terminalizes_queued_wor
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 10,
             token_limit: 10_000,
         },
@@ -1149,7 +1639,7 @@ async fn terminal_embedding_and_resolution_failures_are_visible_on_the_run() {
         save_active_policy(
             &database,
             SaveResearchPolicy {
-                config_ref: None,
+                config_ref: Some(qualified_research_config(&database).await),
                 source_limit: 10,
                 token_limit: 10_000,
             },
@@ -1253,7 +1743,7 @@ async fn membership_admission_waits_for_its_running_resolution_to_settle() {
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 10,
             token_limit: 10_000,
         },
@@ -1366,7 +1856,7 @@ async fn unavailable_embedding_terminalizes_a_frozen_resolution_without_a_new_ca
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 10,
             token_limit: 10_000,
         },
@@ -1469,7 +1959,7 @@ async fn no_signal_is_a_terminal_run_item_outcome_not_an_atom() {
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 100,
             token_limit: 10_000,
         },
@@ -1538,7 +2028,7 @@ async fn atom_problem_membership_has_one_stable_identity_and_auditable_basis() {
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 100,
             token_limit: 10_000,
         },
@@ -1694,7 +2184,7 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 100,
             token_limit: 10_000,
         },
@@ -1833,10 +2323,12 @@ async fn exact_vector_recall_only_returns_candidates_and_invalid_vectors_never_w
     .await
     .unwrap();
     assert_eq!(memberships, 0, "candidate recall must not assign a Problem");
-    let calls: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
-        .fetch_one(database.pool())
-        .await
-        .unwrap();
+    let calls: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_model_invocation WHERE operation='analyze'",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
     assert_eq!(calls, 0, "synthetic vector acceptance made no model call");
 }
 
@@ -1897,7 +2389,7 @@ async fn published_result_has_independent_multi_signal_changes_and_is_idempotent
     save_active_policy(
         &database,
         SaveResearchPolicy {
-            config_ref: None,
+            config_ref: Some(qualified_research_config(&database).await),
             source_limit: 100,
             token_limit: 10_000,
         },

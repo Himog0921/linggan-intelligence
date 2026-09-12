@@ -58,7 +58,7 @@ async fn read_connections(database: &Database) -> Result<Vec<PgRow>, ModelError>
 
 async fn read_models(database: &Database) -> Result<Vec<PgRow>, ModelError> {
     Ok(sqlx::query(with_model_callability(
-        "SELECT model.model_ref,model.model_id,model.connection_version_ref,\
+        "SELECT m.model_ref,m.model_id,m.connection_version_ref,\
                 version.name AS connection_name,connection.enabled,\
                 version.revision=(SELECT max(latest.revision) \
                                   FROM linggan_model_connection_version latest \
@@ -66,19 +66,19 @@ async fn read_models(database: &Database) -> Result<Vec<PgRow>, ModelError> {
                 COALESCE((SELECT invocation.state='succeeded' \
                               AND invocation.result->>'semanticQualified'='true' \
                           FROM linggan_model_invocation invocation \
-                          WHERE invocation.model_ref=model.model_ref AND invocation.operation='probe' \
+                          WHERE invocation.model_ref=m.model_ref AND invocation.operation='probe' \
                           ORDER BY invocation.created_at DESC,invocation.invocation_ref DESC LIMIT 1),false) AS semantic_qualified,\
                 __MODEL_CALLABLE__ AS callable,\
                 (SELECT state FROM linggan_model_invocation invocation \
-                 WHERE invocation.model_ref=model.model_ref AND invocation.operation='probe' \
+                 WHERE invocation.model_ref=m.model_ref AND invocation.operation='probe' \
                  ORDER BY invocation.created_at DESC,invocation.invocation_ref DESC LIMIT 1) AS test_state,\
                 (SELECT result FROM linggan_model_invocation invocation \
-                 WHERE invocation.model_ref=model.model_ref AND invocation.operation='probe' \
+                 WHERE invocation.model_ref=m.model_ref AND invocation.operation='probe' \
                  ORDER BY invocation.created_at DESC,invocation.invocation_ref DESC LIMIT 1) AS test \
-         FROM linggan_model_entry model \
-         JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref \
+         FROM linggan_model_entry m \
+         JOIN linggan_model_connection_version version ON version.version_ref=m.connection_version_ref \
          JOIN linggan_model_connection connection USING(connection_ref) \
-         ORDER BY model.created_at",
+         ORDER BY m.created_at",
     ))
     .fetch_all(database.pool())
     .await?)

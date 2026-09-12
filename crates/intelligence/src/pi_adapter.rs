@@ -221,6 +221,17 @@ impl PiAdapter {
         }
     }
 
+    /// Isolated PostgreSQL proofs use a checked-in local process instead of a provider. This
+    /// keeps worker settlement tests on the production adapter boundary without loading a model
+    /// or changing the configured runtime.
+    #[doc(hidden)]
+    pub fn configured_with_test_command(node: PathBuf, script: PathBuf) -> Self {
+        let mut adapter = Self::configured();
+        adapter.node = node;
+        adapter.script = script;
+        adapter
+    }
+
     /// Calls the one local WeMM document runtime.  Its process remains owned by this adapter
     /// (which in turn is owned by the existing research worker), so model weights load once and
     /// no port, independent queue or new lifecycle is introduced.

@@ -7,7 +7,9 @@
 
 use crate::{
     comment_cleaning::{CleanComment, outbound},
-    comment_research_atoms::{SemanticExtractionOutput, accept_semantic_output},
+    comment_research_atoms::{
+        CommentResearchAtomError, SemanticExtractionOutput, accept_semantic_output,
+    },
     comment_research_embeddings::{
         AtomEmbeddingResult, CommentResearchEmbeddingError, EmbeddingWorkClaim,
         accept_atom_embedding, claim_next_embedding_work, recall_problem_candidates,
@@ -26,7 +28,10 @@ use crate::{
     local_embedding_profile,
     model_invocation::{connection_request, finish_invocation},
     model_secrets::ModelSecretStore,
-    model_settings::ModelError,
+    model_settings::{
+        ModelError, ResearchModelSemanticDispatchPermit,
+        reserve_research_model_semantic_dispatch_permit,
+    },
     model_worker_drain::ModelWorkerDrain,
     pi_adapter::{PiAdapter, PiResponse, PiUsage, safe_result},
     research_text::content_hash,
@@ -43,7 +48,6 @@ const RESOLUTION_SYSTEM: &str = "你是评论研究的受限问题归并器。�
 // The policy has a bounded maximum, so cast the aggregate result back to the Rust ledger type.
 const CHARGED_TOKEN_TOTAL_SQL: &str = "SELECT COALESCE(sum(charged_tokens),0)::bigint FROM linggan_model_invocation WHERE result->>'runRef'=$1";
 
-#[derive(Debug, Clone)]
 struct ReservedCall {
     invocation_ref: Uuid,
     connection_version_ref: Uuid,
@@ -52,6 +56,7 @@ struct ReservedCall {
     timeout_seconds: i32,
     stage: &'static str,
     run_ref: Option<Uuid>,
+    semantic_dispatch_permit: Option<ResearchModelSemanticDispatchPermit>,
 }
 
 struct DispatchInput {
@@ -190,17 +195,20 @@ async fn advance_loaded_semantic(
         return Ok(());
     };
     let prompt = semantic_prompt(&input)?;
-    let Some(reserved) =
+    let Some(mut reserved) =
         reserve_semantic_call(database, claim, input.run_ref, config_ref, &prompt).await?
     else {
         return Ok(());
     };
-    attach_semantic_invocation(database, claim, reserved.invocation_ref).await?;
+    if let Err(error) = attach_semantic_invocation(database, claim, reserved.invocation_ref).await {
+        release_semantic_dispatch_permit(&mut reserved).await?;
+        return Err(error);
+    }
     let response = dispatch_generation(
         database,
         store,
         adapter,
-        &reserved,
+        &mut reserved,
         SEMANTIC_SYSTEM,
         prompt,
         drain,
@@ -296,14 +304,14 @@ async fn settle_semantic_response(
                     reserved,
                     Some(&response),
                     false,
-                    Some("invalid_semantic_output"),
+                    Some("semantic_json_unparseable"),
                 )
                 .await?;
                 record_run_item_failure(
                     database,
                     claim,
                     RunItemFailureClass::ModelFailed,
-                    "invalid_semantic_output",
+                    "semantic_json_unparseable",
                 )
                 .await
                 .map_err(kernel_error)?;
@@ -315,20 +323,21 @@ async fn settle_semantic_response(
                 Ok(_) => {
                     settle_call(database, reserved, Some(&response), true, None).await?;
                 }
-                Err(_) => {
+                Err(error) => {
+                    let failure_code = semantic_acceptance_failure_code(&error);
                     settle_call(
                         database,
                         reserved,
                         Some(&response),
                         false,
-                        Some("invalid_semantic_output"),
+                        Some(failure_code),
                     )
                     .await?;
                     record_run_item_failure(
                         database,
                         claim,
                         RunItemFailureClass::ModelFailed,
-                        "invalid_semantic_output",
+                        failure_code,
                     )
                     .await
                     .map_err(kernel_error)?;
@@ -553,7 +562,7 @@ async fn advance_problem_resolution(
     };
     let candidates = read_resolution_candidates(database, &claim.candidate_set).await?;
     let prompt = resolution_prompt(&input.proposition, &candidates)?;
-    let reserved = match reserve_generation_call(
+    let mut reserved = match reserve_generation_call(
         database,
         input.run_ref,
         config_ref,
@@ -583,12 +592,17 @@ async fn advance_problem_resolution(
             return Ok(true);
         }
     };
-    attach_resolution_invocation(database, &claim, reserved.invocation_ref).await?;
+    if let Err(error) =
+        attach_resolution_invocation(database, &claim, reserved.invocation_ref).await
+    {
+        release_semantic_dispatch_permit(&mut reserved).await?;
+        return Err(error);
+    }
     let response = dispatch_generation(
         database,
         store,
         adapter,
-        &reserved,
+        &mut reserved,
         RESOLUTION_SYSTEM,
         prompt,
         drain,
@@ -796,12 +810,18 @@ async fn reserve_generation_call(
     prompt: &str,
     stage: &'static str,
 ) -> Result<ReservedCall, ModelError> {
-    let mut transaction = database.pool().begin().await?;
-    if !local_embedding_profile::ready_in_transaction(&mut transaction).await? {
+    let mut embedding_transaction = database.pool().begin().await?;
+    if !local_embedding_profile::ready_in_transaction(&mut embedding_transaction).await? {
         return Err(ModelError::EmbeddingNotQualified);
     }
-    let row = sqlx::query(
-        "SELECT policy.token_limit,config.input_token_limit,config.output_token_limit,config.timeout_seconds, \
+    embedding_transaction.commit().await?;
+
+    let mut semantic_dispatch_permit =
+        reserve_research_model_semantic_dispatch_permit(database, config_ref).await?;
+    let reservation = async {
+        let mut transaction = semantic_dispatch_permit.begin().await?;
+        let row = sqlx::query(
+            "SELECT policy.token_limit,config.input_token_limit,config.output_token_limit,config.timeout_seconds, \
                 model.model_ref,model.model_id,version.version_ref,connection.enabled \
          FROM linggan_comment_research_run run \
          JOIN linggan_comment_research_policy_revision policy ON policy.policy_revision_ref=run.policy_revision_ref \
@@ -810,53 +830,72 @@ async fn reserve_generation_call(
          JOIN linggan_model_connection_version version ON version.version_ref=model.connection_version_ref \
          JOIN linggan_model_connection connection USING(connection_ref) \
          WHERE run.run_ref=$1 AND policy.config_ref=$2 FOR UPDATE OF run",
-    )
-    .bind(run_ref)
-    .bind(config_ref)
-    .fetch_optional(&mut *transaction)
-    .await?
-    .ok_or(ModelError::Disabled)?;
-    if !row.get::<bool, _>("enabled") {
-        return Err(ModelError::Disabled);
-    }
-    let input_limit: i32 = row.get("input_token_limit");
-    let output_limit: i32 = row.get("output_token_limit");
-    if prompt.len() + system.len() + 512 > usize::try_from(input_limit).unwrap_or(0) {
-        return Err(ModelError::InputLimit);
-    }
-    let reservation = i64::from(input_limit) + i64::from(output_limit);
-    let used: i64 = sqlx::query_scalar(CHARGED_TOKEN_TOTAL_SQL)
-        .bind(run_ref.to_string())
-        .fetch_one(&mut *transaction)
-        .await?;
-    if used + reservation > row.get::<i64, _>("token_limit") {
-        return Err(ModelError::Budget);
-    }
-    let invocation_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO linggan_model_invocation( \
+        )
+        .bind(run_ref)
+        .bind(config_ref)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .ok_or(ModelError::Disabled)?;
+        if !row.get::<bool, _>("enabled") {
+            return Err(ModelError::Disabled);
+        }
+        let input_limit: i32 = row.get("input_token_limit");
+        let output_limit: i32 = row.get("output_token_limit");
+        if prompt.len() + system.len() + 512 > usize::try_from(input_limit).unwrap_or(0) {
+            return Err(ModelError::InputLimit);
+        }
+        let reserved_tokens = i64::from(input_limit) + i64::from(output_limit);
+        let used: i64 = sqlx::query_scalar(CHARGED_TOKEN_TOTAL_SQL)
+            .bind(run_ref.to_string())
+            .fetch_one(&mut *transaction)
+            .await?;
+        if used + reserved_tokens > row.get::<i64, _>("token_limit") {
+            return Err(ModelError::Budget);
+        }
+        let invocation_ref = Uuid::new_v4();
+        sqlx::query(
+            "INSERT INTO linggan_model_invocation( \
              invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result \
          ) VALUES($1,$2,$3,$4,'analyze',$5,'running',$6,$6,$7)",
-    )
-    .bind(invocation_ref)
-    .bind(row.get::<Uuid, _>("version_ref"))
-    .bind(row.get::<Uuid, _>("model_ref"))
-    .bind(config_ref)
-    .bind(content_hash(prompt))
-    .bind(reservation)
-    .bind(json!({"runRef":run_ref,"stage":stage,"callStarted":false}))
-    .execute(&mut *transaction)
-    .await?;
-    transaction.commit().await?;
-    Ok(ReservedCall {
-        invocation_ref,
-        connection_version_ref: row.get("version_ref"),
-        model_id: row.get("model_id"),
-        output_limit,
-        timeout_seconds: row.get("timeout_seconds"),
-        stage,
-        run_ref: Some(run_ref),
-    })
+        )
+        .bind(invocation_ref)
+        .bind(row.get::<Uuid, _>("version_ref"))
+        .bind(row.get::<Uuid, _>("model_ref"))
+        .bind(config_ref)
+        .bind(content_hash(prompt))
+        .bind(reserved_tokens)
+        .bind(json!({"runRef":run_ref,"stage":stage,"callStarted":false}))
+        .execute(&mut *transaction)
+        .await?;
+        let call = (
+            invocation_ref,
+            row.get("version_ref"),
+            row.get("model_id"),
+            output_limit,
+            row.get("timeout_seconds"),
+        );
+        transaction.commit().await?;
+        Ok::<_, ModelError>(call)
+    }
+    .await;
+    match reservation {
+        Ok((invocation_ref, connection_version_ref, model_id, output_limit, timeout_seconds)) => {
+            Ok(ReservedCall {
+                invocation_ref,
+                connection_version_ref,
+                model_id,
+                output_limit,
+                timeout_seconds,
+                stage,
+                run_ref: Some(run_ref),
+                semantic_dispatch_permit: Some(semantic_dispatch_permit),
+            })
+        }
+        Err(error) => {
+            let _ = semantic_dispatch_permit.release().await;
+            Err(error)
+        }
+    }
 }
 
 async fn reserve_embedding_call(
@@ -914,6 +953,7 @@ async fn reserve_embedding_call(
         timeout_seconds: 30,
         stage,
         run_ref: Some(run_ref),
+        semantic_dispatch_permit: None,
     })
 }
 
@@ -921,7 +961,7 @@ async fn dispatch_generation(
     database: &Database,
     store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
-    reserved: &ReservedCall,
+    reserved: &mut ReservedCall,
     system: &str,
     prompt: String,
     drain: &ModelWorkerDrain,
@@ -945,24 +985,37 @@ async fn dispatch_with_connection(
     database: &Database,
     store: &dyn ModelSecretStore,
     adapter: &PiAdapter,
-    reserved: &ReservedCall,
+    reserved: &mut ReservedCall,
     input: DispatchInput,
     drain: &ModelWorkerDrain,
 ) -> Result<PiResponse, ModelError> {
-    if drain.is_requested() {
-        return Err(ModelError::Source);
+    let response = async {
+        if drain.is_requested() {
+            return Err(ModelError::Source);
+        }
+        let mut request =
+            connection_request(database, store, reserved.connection_version_ref).await?;
+        request.operation = input.operation.to_owned();
+        request.model_id = reserved.model_id.clone();
+        request.timeout_ms = u64::try_from(reserved.timeout_seconds).unwrap_or(30) * 1000;
+        request.max_output_tokens = reserved.output_limit;
+        request.system = input.system;
+        request.prompt = input.prompt;
+        if drain.is_requested() {
+            return Err(ModelError::Source);
+        }
+        adapter.call(&request).await
     }
-    let mut request = connection_request(database, store, reserved.connection_version_ref).await?;
-    request.operation = input.operation.to_owned();
-    request.model_id = reserved.model_id.clone();
-    request.timeout_ms = u64::try_from(reserved.timeout_seconds).unwrap_or(30) * 1000;
-    request.max_output_tokens = reserved.output_limit;
-    request.system = input.system;
-    request.prompt = input.prompt;
-    if drain.is_requested() {
-        return Err(ModelError::Source);
+    .await;
+    release_semantic_dispatch_permit(reserved).await?;
+    response
+}
+
+async fn release_semantic_dispatch_permit(reserved: &mut ReservedCall) -> Result<(), ModelError> {
+    if let Some(permit) = reserved.semantic_dispatch_permit.take() {
+        permit.release().await?;
     }
-    adapter.call(&request).await
+    Ok(())
 }
 
 async fn dispatch_embedding(
@@ -1005,6 +1058,9 @@ async fn settle_call(
         .unwrap_or_else(|| json!({"ok":false}));
     result["stage"] = json!(reserved.stage);
     result["callStarted"] = json!(response.is_some());
+    if let Some(stage) = semantic_failure_stage(failure) {
+        result["failureStage"] = json!(stage);
+    }
     if let Some(run_ref) = reserved.run_ref {
         result["runRef"] = json!(run_ref);
     }
@@ -1017,6 +1073,26 @@ async fn settle_call(
         &result,
     )
     .await
+}
+
+fn semantic_failure_stage(failure: Option<&str>) -> Option<&'static str> {
+    match failure {
+        Some("semantic_json_unparseable") => Some("semantic_json_parse"),
+        Some("semantic_contract_rejected") => Some("semantic_contract_acceptance"),
+        Some("semantic_evidence_offset_unmappable") => Some("semantic_evidence_offset_mapping"),
+        Some("semantic_claim_lost") => Some("semantic_claim_state"),
+        Some("semantic_acceptance_storage_failed") => Some("semantic_acceptance_storage"),
+        _ => None,
+    }
+}
+
+fn semantic_acceptance_failure_code(error: &CommentResearchAtomError) -> &'static str {
+    match error {
+        CommentResearchAtomError::InvalidOutput => "semantic_contract_rejected",
+        CommentResearchAtomError::DerivationCorrupt => "semantic_evidence_offset_unmappable",
+        CommentResearchAtomError::ClaimLost => "semantic_claim_lost",
+        CommentResearchAtomError::Database(_) => "semantic_acceptance_storage_failed",
+    }
 }
 
 fn parse_single_embedding_vector(text: &str) -> Option<Vec<f64>> {
@@ -1470,6 +1546,39 @@ mod tests {
         assert_eq!(
             reservation_failure_class(&ModelError::Budget),
             RunItemFailureClass::ModelFailed
+        );
+        assert_eq!(
+            reservation_failure_class(&ModelError::NotQualified),
+            RunItemFailureClass::Incompatible
+        );
+    }
+
+    #[test]
+    fn semantic_failure_stages_are_safe_and_distinct() {
+        assert_eq!(
+            semantic_failure_stage(Some("semantic_json_unparseable")),
+            Some("semantic_json_parse")
+        );
+        assert_eq!(
+            semantic_failure_stage(Some("semantic_contract_rejected")),
+            Some("semantic_contract_acceptance")
+        );
+        assert_eq!(
+            semantic_failure_stage(Some("semantic_evidence_offset_unmappable")),
+            Some("semantic_evidence_offset_mapping")
+        );
+        assert_eq!(semantic_failure_stage(Some("provider_timeout")), None);
+    }
+
+    #[test]
+    fn semantic_acceptance_failure_codes_separate_contract_and_evidence_mapping() {
+        assert_eq!(
+            semantic_acceptance_failure_code(&CommentResearchAtomError::InvalidOutput),
+            "semantic_contract_rejected"
+        );
+        assert_eq!(
+            semantic_acceptance_failure_code(&CommentResearchAtomError::DerivationCorrupt),
+            "semantic_evidence_offset_unmappable"
         );
     }
 }

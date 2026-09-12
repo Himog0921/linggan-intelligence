@@ -18,6 +18,7 @@
     comment_research_v1_unavailable: '本次研究结果暂时无法读取；上一次已显示的结果不会被伪造成新结果。',
     research_policy_missing: '请先保存研究策略。',
     embedding_not_ready: '请先在“模型与向量设置”中完成向量模型测试并启用；系统不会创建一个必然无法归并和发布的研究运行。',
+    research_model_not_ready: '请先在“模型与 AI 设置”中完成当前研究模型的 V1 语义测试；系统不会向未通过结构化输出检查的模型发送评论。',
     no_eligible_research_comments: '当前没有可进入研究的普通用户评论。作品作者回复、身份未知或不可读评论不会被混入。',
     invalid_research_request: '研究设置或运行范围不符合要求。',
   };
@@ -59,7 +60,7 @@
 
   function setupSummary() {
     const { policy, defaultConfig, embedding, worker } = state.setup || {};
-    if (!defaultConfig?.connectionEnabled) return '尚未配置可用的研究模型。保存策略和开始研究都不会发送评论。';
+    if (!researchModelReady()) return '研究模型尚未通过 V1 语义测试。保存策略和开始研究都不会发送评论。';
     const embeddingText = embeddingReady()
       ? `向量归并已就绪（${embedding.dimensions} 维）。`
       : '向量归并尚未就绪；开始研究已锁定，避免产生无法归并和发布的无效运行。请先在模型与向量设置中完成测试并启用。';
@@ -72,17 +73,21 @@
     return Boolean(state.setup?.embedding?.enabled && state.setup?.embedding?.qualified && state.setup?.embedding?.connectionEnabled);
   }
 
+  function researchModelReady() {
+    return Boolean(state.setup?.defaultConfig?.connectionEnabled && state.setup?.defaultConfig?.semanticReady);
+  }
+
   function renderRunAvailability() {
     const start = $('#start-run');
-    const ready = embeddingReady();
+    const ready = embeddingReady() && researchModelReady();
     start.disabled = !ready;
-    start.title = ready ? '' : '请先在模型与向量设置中完成向量模型测试并启用。';
+    start.title = ready ? '' : '请先在模型与 AI 设置完成研究模型的 V1 语义测试，并在模型与向量设置启用向量模型。';
   }
 
   async function loadSetup() {
     state.setup = await request(`${api}/setup`);
     renderRunAvailability();
-    setStatus(setupSummary(), state.setup.defaultConfig?.connectionEnabled && embeddingReady() ? 'ready' : 'warning');
+    setStatus(setupSummary(), researchModelReady() && embeddingReady() ? 'ready' : 'warning');
   }
 
   function resultMeta(data) {
@@ -124,6 +129,22 @@
     return ({ runItems:'语义提取未完成', embedding:'向量候选未完成', problemResolution:'问题归并未完成' })[code] || '研究步骤未完成';
   }
 
+  function itemFailureLabel(code) {
+    return ({
+      semantic_json_unparseable:'语义 JSON 未通过结构解析',
+      semantic_contract_rejected:'语义字段或证据范围未通过合同校验',
+      semantic_evidence_offset_unmappable:'证据 Unicode 位置无法映射回原评论',
+      semantic_claim_lost:'该项在接纳语义结果前已失去处理租约',
+      semantic_acceptance_storage_failed:'语义结果接纳记录失败',
+      model_not_qualified:'研究模型未通过 V1 语义测试',
+      model_budget_exhausted:'研究预算已用尽',
+      model_input_limit:'单条输入超出模型限制',
+      embedding_not_qualified:'向量模型不可用',
+      provider_timeout:'模型服务超时',
+      provider_failed:'模型服务未返回可用结果'
+    })[code] || '该项未通过研究处理';
+  }
+
   function renderChanges(data) {
     const observations = data.observations || [];
     const incomparable = data.notComparable || [];
@@ -135,7 +156,7 @@
   function renderRuns(data) {
     const page = data.page || {items:[], total:0};
     result.innerHTML = `<section class="cr-v1-intro"><h2>运行记录</h2><p>记录冻结样本、逐项结果与已发布版本。运行失败不会被显示成“没有研究发现”。</p></section>` +
-      (page.items.length ? table(['开始时间', '运行状态', '冻结输入', '已发布结果'], page.items.map(item => { const failures=Object.entries(item.failureCounts || {}).filter(([,value]) => Number(value) > 0); return `<tr><td>${escape(date(item.createdAt))}</td><td><strong>${escape(runStateLabel(item.state))}</strong><p>${Object.entries(item.itemStates || {}).map(([key, value]) => `${escape(key)} ${count(value)}`).join(' · ') || '尚未开始'}</p>${failures.length ? `<p>${failures.map(([key, value]) => `${escape(runFailureLabel(key))} ${count(value)} 条`).join(' · ')}</p>` : ''}</td><td>${count(item.selectedSources)} 条评论</td><td>${item.publishedResult?.resultRevisionRef ? `已发布 ${escape(date(item.publishedResult.publishedAt))}` : item.state === 'completed_with_failures' ? '未发布：请修复运行记录所示问题后重新开始研究' : '尚未发布'}</td></tr>`; })) : empty('还没有运行记录。保存策略后可以直接开始第一轮研究。'));
+      (page.items.length ? table(['开始时间', '运行状态', '冻结输入', '已发布结果'], page.items.map(item => { const failures=Object.entries(item.failureCounts || {}).filter(([,value]) => Number(value) > 0); const itemFailures=Object.entries(item.itemFailureCounts || {}).filter(([,value]) => Number(value) > 0); return `<tr><td>${escape(date(item.createdAt))}</td><td><strong>${escape(runStateLabel(item.state))}</strong><p>${Object.entries(item.itemStates || {}).map(([key, value]) => `${escape(key)} ${count(value)}`).join(' · ') || '尚未开始'}</p>${failures.length ? `<p>${failures.map(([key, value]) => `${escape(runFailureLabel(key))} ${count(value)} 条`).join(' · ')}</p>` : ''}${itemFailures.length ? `<p>${itemFailures.map(([key, value]) => `${escape(itemFailureLabel(key))} ${count(value)} 条`).join(' · ')}</p>` : ''}</td><td>${count(item.selectedSources)} 条评论</td><td>${item.publishedResult?.resultRevisionRef ? `已发布 ${escape(date(item.publishedResult.publishedAt))}` : item.state === 'completed_with_failures' ? '未发布：请修复运行记录所示问题后重新开始研究' : '尚未发布'}</td></tr>`; })) : empty('还没有运行记录。保存策略后可以直接开始第一轮研究。'));
   }
 
   function render(view, data) {
@@ -158,11 +179,11 @@
     try {
       await loadSetup();
       const { policy, defaultConfig, embedding } = state.setup;
-      $('#policy-model').value = defaultConfig?.connectionEnabled ? defaultConfig.modelId : '尚未配置可用模型';
+      $('#policy-model').value = researchModelReady() ? defaultConfig.modelId : '尚未通过 V1 语义测试';
       form.elements.sourceLimit.value = policy?.sourceLimit || 1000;
       form.elements.tokenLimit.value = policy?.tokenLimit || 100000;
       $('#embedding-state').textContent = embeddingReady() ? `向量模型已通过测试并启用：${embedding.modelId}。` : '向量模型尚未通过测试、尚未启用或连接不可用。请在模型与向量设置中完成后再开始需要归并的研究。';
-      $('#settings-feedback').textContent = defaultConfig?.connectionEnabled ? '' : '请先在模型与 AI 设置中配置并启用研究模型。';
+      $('#settings-feedback').textContent = researchModelReady() ? '' : '请先在模型与 AI 设置中完成当前研究模型的 V1 语义测试。';
       dialog.showModal();
     } catch (error) {
       setStatus(error.message, 'error');
@@ -172,8 +193,8 @@
   async function savePolicy(event) {
     event.preventDefault();
     const defaultConfig = state.setup?.defaultConfig;
-    if (!defaultConfig?.connectionEnabled) {
-      $('#settings-feedback').textContent = '当前没有可用研究模型，无法保存策略。';
+    if (!researchModelReady()) {
+      $('#settings-feedback').textContent = '当前研究模型尚未通过 V1 语义测试，无法保存策略。';
       return;
     }
     const button = form.querySelector('[type="submit"]'); button.disabled = true;
@@ -191,8 +212,8 @@
   async function startRun() {
     try {
       await loadSetup();
-      if (!embeddingReady()) {
-        setStatus(errorText.embedding_not_ready, 'warning');
+      if (!researchModelReady() || !embeddingReady()) {
+        setStatus(!researchModelReady() ? errorText.research_model_not_ready : errorText.embedding_not_ready, 'warning');
         return;
       }
       if (!state.setup?.policy) { await openSettings(); return; }

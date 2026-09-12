@@ -3,12 +3,12 @@ use crate::{model_secrets::ModelSecretStore, research_text::valid_text};
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use sqlx::Row;
+use sqlx::{Acquire, Postgres, Row, pool::PoolConnection};
 use uuid::Uuid;
 
-/// One admission predicate for saved defaults, previews and every research dispatcher.
+/// Browser projection of generic provider callability. It is diagnostic only; V1 research
+/// admission must use `research_model_semantically_ready_in_transaction` below.
 /// The marker always refers to the model entry alias `m`; callers supply static SQL only.
-/// Comment contract compatibility is diagnostic, never a connection permission.
 pub(crate) fn with_model_callability(sql: &'static str) -> sqlx::AssertSqlSafe<String> {
     sqlx::AssertSqlSafe(sql.replace("__MODEL_CALLABLE__", "COALESCE((SELECT i.state='succeeded' AND i.result->>'ok'='true' AND i.result->>'modelCallable'='true' FROM linggan_model_invocation i WHERE i.model_ref=m.model_ref AND i.operation='probe' ORDER BY i.created_at DESC,i.invocation_ref DESC LIMIT 1),false)"))
 }
@@ -81,6 +81,183 @@ pub async fn ensure_model_schema(db: &Database) -> Result<(), ModelError> {
     }
     Ok(())
 }
+
+/// The only V1 admission predicate for a generation configuration.  A connection being
+/// reachable is insufficient: the exact model and connection version must most recently have
+/// produced a syntactically valid V1 semantic probe.  The configuration, model and connection
+/// stay share-locked so a disable or replacement cannot race a Run reservation.
+pub async fn research_model_semantically_ready_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    config_ref: Uuid,
+) -> Result<bool, ModelError> {
+    let row = sqlx::query(
+        "SELECT connection.enabled, \
+                (SELECT invocation.state='succeeded' \
+                        AND invocation.result->>'ok'='true' \
+                        AND invocation.result->>'modelCallable'='true' \
+                        AND invocation.result->>'semanticQualified'='true' \
+                 FROM linggan_model_invocation invocation \
+                 WHERE invocation.model_ref=model.model_ref \
+                   AND invocation.connection_version_ref=version.version_ref \
+                   AND invocation.operation='probe' \
+                 ORDER BY invocation.created_at DESC,invocation.invocation_ref DESC \
+                 LIMIT 1) AS semantic_ready \
+         FROM linggan_model_config config \
+         JOIN linggan_model_entry model ON model.model_ref=config.model_ref \
+         JOIN linggan_model_connection_version version \
+           ON version.version_ref=model.connection_version_ref \
+         JOIN linggan_model_connection connection USING(connection_ref) \
+         WHERE config.config_ref=$1 \
+         FOR SHARE OF config,model,version,connection",
+    )
+    .bind(config_ref)
+    .fetch_optional(&mut **transaction)
+    .await?;
+    Ok(row.is_some_and(|row| {
+        row.get::<bool, _>("enabled")
+            && row
+                .get::<Option<bool>, _>("semantic_ready")
+                .unwrap_or(false)
+    }))
+}
+
+/// A session-scoped permit covering the narrow interval from a generation reservation through
+/// its adapter call. Probe completion takes the matching transaction lock, so a newly failed
+/// probe cannot commit between the semantic-ready decision and outbound dispatch.
+pub struct ResearchModelSemanticDispatchPermit {
+    // Keeping this as an Option lets `release` consume the checked-out connection. If a worker
+    // task is cancelled before release, Drop marks the still-locked session for close, which
+    // releases PostgreSQL's session advisory lock instead of returning a locked connection to
+    // the pool.
+    connection: Option<PoolConnection<Postgres>>,
+    model_ref: Uuid,
+    connection_version_ref: Uuid,
+}
+
+pub async fn reserve_research_model_semantic_dispatch_permit(
+    database: &Database,
+    config_ref: Uuid,
+) -> Result<ResearchModelSemanticDispatchPermit, ModelError> {
+    let mut connection = database.pool().acquire().await?;
+    let target = sqlx::query(
+        "SELECT model.model_ref,model.connection_version_ref \
+         FROM linggan_model_config config \
+         JOIN linggan_model_entry model ON model.model_ref=config.model_ref \
+         WHERE config.config_ref=$1",
+    )
+    .bind(config_ref)
+    .fetch_optional(&mut *connection)
+    .await?
+    .ok_or(ModelError::NotQualified)?;
+    let model_ref: Uuid = target.get("model_ref");
+    let connection_version_ref: Uuid = target.get("connection_version_ref");
+    lock_semantic_probe_session(&mut connection, model_ref, connection_version_ref).await?;
+
+    let readiness = async {
+        let mut transaction = connection.begin().await?;
+        let ready =
+            research_model_semantically_ready_in_transaction(&mut transaction, config_ref).await?;
+        transaction.commit().await?;
+        Ok::<bool, ModelError>(ready)
+    }
+    .await;
+    match readiness {
+        Ok(true) => Ok(ResearchModelSemanticDispatchPermit {
+            connection: Some(connection),
+            model_ref,
+            connection_version_ref,
+        }),
+        Ok(false) => {
+            unlock_semantic_probe_session(&mut connection, model_ref, connection_version_ref)
+                .await?;
+            Err(ModelError::NotQualified)
+        }
+        Err(error) => {
+            let _ =
+                unlock_semantic_probe_session(&mut connection, model_ref, connection_version_ref)
+                    .await;
+            Err(error)
+        }
+    }
+}
+
+impl ResearchModelSemanticDispatchPermit {
+    pub async fn begin(&mut self) -> Result<sqlx::Transaction<'_, sqlx::Postgres>, ModelError> {
+        Ok(self
+            .connection
+            .as_mut()
+            .ok_or(ModelError::Source)?
+            .begin()
+            .await?)
+    }
+
+    pub async fn release(mut self) -> Result<(), ModelError> {
+        let mut connection = self.connection.take().ok_or(ModelError::Source)?;
+        let released = unlock_semantic_probe_session(
+            &mut connection,
+            self.model_ref,
+            self.connection_version_ref,
+        )
+        .await;
+        if released.is_err() {
+            let _ = connection.close().await;
+        }
+        released
+    }
+}
+
+impl Drop for ResearchModelSemanticDispatchPermit {
+    fn drop(&mut self) {
+        if let Some(connection) = self.connection.as_mut() {
+            connection.close_on_drop();
+        }
+    }
+}
+
+pub(crate) async fn lock_research_model_probe_completion_in_transaction(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    model_ref: Uuid,
+    connection_version_ref: Uuid,
+) -> Result<(), ModelError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind(semantic_probe_lock_name(model_ref, connection_version_ref))
+        .execute(&mut **transaction)
+        .await?;
+    Ok(())
+}
+
+async fn lock_semantic_probe_session(
+    connection: &mut sqlx::PgConnection,
+    model_ref: Uuid,
+    connection_version_ref: Uuid,
+) -> Result<(), ModelError> {
+    sqlx::query("SELECT pg_advisory_lock(hashtextextended($1,0))")
+        .bind(semantic_probe_lock_name(model_ref, connection_version_ref))
+        .execute(connection)
+        .await?;
+    Ok(())
+}
+
+async fn unlock_semantic_probe_session(
+    connection: &mut sqlx::PgConnection,
+    model_ref: Uuid,
+    connection_version_ref: Uuid,
+) -> Result<(), ModelError> {
+    let released: bool = sqlx::query_scalar("SELECT pg_advisory_unlock(hashtextextended($1,0))")
+        .bind(semantic_probe_lock_name(model_ref, connection_version_ref))
+        .fetch_one(connection)
+        .await?;
+    if released {
+        Ok(())
+    } else {
+        Err(ModelError::Source)
+    }
+}
+
+fn semantic_probe_lock_name(model_ref: Uuid, connection_version_ref: Uuid) -> String {
+    format!("comment-research-v1-semantic-probe:{model_ref}:{connection_version_ref}")
+}
+
 pub async fn workspace_ref(db: &Database) -> Result<Uuid, ModelError> {
     ensure_model_schema(db).await?;
     Ok(
@@ -339,27 +516,19 @@ pub async fn save_model_config(db: &Database, r: &SaveModelConfig) -> Result<Val
         if old != expected {
             return Err(ModelError::Conflict);
         }
+        if !research_model_semantically_ready_in_transaction(&mut tx, r.config_ref).await? {
+            return Err(ModelError::NotQualified);
+        }
         return Ok(json!({"configRef":current,"replayed":true}));
     }
     if current != r.expected_config_ref {
         return Err(ModelError::Conflict);
     }
-    let enabled:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_model_entry m JOIN linggan_model_connection_version v ON v.version_ref=m.connection_version_ref JOIN linggan_model_connection c USING(connection_ref) WHERE m.model_ref=$1 AND c.enabled)")
-        .bind(r.model_ref).fetch_one(&mut *tx).await?;
-    if !enabled {
-        return Err(ModelError::Disabled);
-    }
-    let qualified: bool = sqlx::query_scalar(with_model_callability(
-        "SELECT __MODEL_CALLABLE__ FROM linggan_model_entry m WHERE m.model_ref=$1",
-    ))
-    .bind(r.model_ref)
-    .fetch_one(&mut *tx)
-    .await?;
-    if !qualified {
-        return Err(ModelError::NotQualified);
-    }
     sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts) VALUES($1,$2,$3,$4,$5,$6)")
         .bind(r.config_ref).bind(r.model_ref).bind(r.input_token_limit).bind(r.output_token_limit).bind(r.timeout_seconds).bind(r.max_attempts).execute(&mut *tx).await?;
+    if !research_model_semantically_ready_in_transaction(&mut tx, r.config_ref).await? {
+        return Err(ModelError::NotQualified);
+    }
     sqlx::query("UPDATE linggan_model_workspace SET default_config_ref=$1 WHERE singleton")
         .bind(r.config_ref)
         .execute(&mut *tx)

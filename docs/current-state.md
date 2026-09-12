@@ -25,7 +25,7 @@ Mog 已于 2026-09-10 授权 source merge、共享开发库执行此 terminal mi
 
 浏览器已实际打开 `http://127.0.0.1:3000/corpus/comments?view=overview`：页面标题、五个 V1 tab、空态和“作品作者回复/身份未知不进入用户问题与变化统计”均正确出现，控制台无 error；旧评论研究页面不存在。当前空态不是研究失败：开发期结果已按决定清空，尚未保存策略或手动开始首轮研究。连续排程仍关闭，部署没有创建真实模型 invocation。
 
-**仍未完成且不能伪称已上线可研究的条件**：当前已运行 revision 仅有 DeepSeek 文本模型，未配置、测试或启用任何 embedding 模型。本次 guarded revision 在合并并完成 runtime 切换后，才会使评论研究页禁用“开始研究”、服务端拒绝没有 qualified+enabled embedding 的启动请求；切换后必须以实际页面和 POST 回执核验，不能预先把该保护写成已部署事实。它避免用户先消耗文本调用而得到必然无法归并/发布的失败 Run。下一步需要 Mog 选择并提供可用的 embedding 供应商连接，在“模型与向量设置”完成合成探针、启用向量模型，然后保存策略并手动开始首轮研究；这之后才可验收真实语义质量、向量归并和变化观察，不能用当前 UI 空态或 health 代替。
+**2026-09-12 首轮就绪只读核对与隔离候选**：live `/api/local/comment-research/setup` 已返回默认 `deepseek-v4-flash` 配置、已启用且 qualified 的 `Tencent/WeMM-Embedding-2B` profile，故“没有 embedding”不再是当前现场事实；但 `/api/local/model-settings` 返回 `503 model_database_unavailable`，当前运行中的模型语义资格不能由该读取面确认。精确源码根因为 model settings projection 的外层 alias 与通用 callability SQL 不一致。候选分支 `codex/comment-research-v1-first-run-repair` 已将 V1 研究资格收束为同一个事务内 predicate：精确 config/model/connection version、连接启用和最新成功 `semanticQualified` probe；默认配置保存、策略保存、Run 启动和每次 generation reservation 都复用它。候选还让 JSON 解析、字段/证据合同和 Unicode offset 映射失败分别以安全代码/计数出现在运行读取面，不保存评论或模型原文。该候选尚未提交/合并、未切换 `runtime-main`、未写共享数据库且未调用模型；隔离 PostgreSQL/API proof 与实际页面/POST 回执仍是进入首轮前的必要条件。
 
 ### CI-AUTO-004 · 本机发布回执（2026-09-09；历史实现事实）
 
