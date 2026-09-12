@@ -74,12 +74,12 @@ use linggan_evidence::{
     media_acquisition_schema_is_ready, open_claim_window, producer_runtime_has_packages,
     producer_runtime_schema_is_ready, read_archive_completeness, read_blocked_materials,
     read_collection_task_timeline, read_creator_directory, read_creator_lifecycle,
-    read_discovery_library, read_keyword_hits, read_media_upload_session, read_runtime_capacity,
-    read_runtime_library, read_scheduler_heartbeat, read_station_capabilities,
-    read_station_overview, read_target, read_target_avatars, read_target_deletion_preview,
-    read_target_inspector, read_target_observation_summaries, record_media_acquisition_failure,
-    record_media_download_failure, record_media_upload_chunk, register_station,
-    release_media_upload_finalize, rename_station, request_and_admit,
+    read_cross_industry_hits, read_discovery_library, read_keyword_hits, read_media_upload_session,
+    read_runtime_capacity, read_runtime_library, read_scheduler_heartbeat,
+    read_station_capabilities, read_station_overview, read_target, read_target_avatars,
+    read_target_deletion_preview, read_target_inspector, read_target_observation_summaries,
+    record_media_acquisition_failure, record_media_download_failure, record_media_upload_chunk,
+    register_station, release_media_upload_finalize, rename_station, request_and_admit,
     request_and_admit_material_targets, request_progressive_archive, retire_materials,
     retire_station, set_group_for_many, set_station_accepting, start_local_attempt,
     start_producer_attempt, station_schema_is_ready, store_pending_target, submit_local_package,
@@ -2348,6 +2348,9 @@ struct CollectionParams {
     sort: Option<String>,
     /// 上一次动作的失败原因。失败必须看得见，否则跳转回来什么都不说，会让人以为成功了。
     error: Option<String>,
+    /// 刚排进队列的那张工单，前面还有几个。只给右下角那条回执用——它回答的是
+    /// 「我刚点的那下什么时候轮到」，看过即可，不常驻在列表上。
+    ahead: Option<i64>,
     /// 抽屉打开的是哪个目标，以及停在哪个 tab。**放在 URL 里而不是 JS 状态里**：
     /// 刷新与分享都不丢，而这一页的用途正是「打开一个目标细看，然后发给别人」。
     dtab: Option<String>,
@@ -2587,9 +2590,18 @@ async fn collection_targets(
         }
         _ => None,
     };
+    // 命中作品按**领域**决定读哪一侧：本领域的材料在证据库，外部领域的在跨行业语料
+    // （`0044` 的隔离）。只读证据侧的话，跨行业目标的作品页永远是空的——采回来 204 篇，
+    // 界面上一篇看不到，而且看不出是没采到还是读错了地方。
     let keyword_catalog = match drawer_target.as_ref().ok().and_then(Option::as_ref) {
         Some(target) if target.target_kind == "keyword" => {
-            read_keyword_hits(database, target.target_ref).await.ok()
+            if target_is_cross_industry(database, target.target_ref).await {
+                read_cross_industry_hits(database, target.target_ref)
+                    .await
+                    .ok()
+            } else {
+                read_keyword_hits(database, target.target_ref).await.ok()
+            }
         }
         _ => None,
     };
@@ -2645,14 +2657,6 @@ async fn collection_targets(
                 linggan_evidence::keyword_targets_pending_detail(database, &keyword_refs)
                     .await
                     .ok();
-            // 发起之后到插件开始动手之间有一段沉默。把「排在第几」读出来，等待就不再是
-            // 一段什么都看不见的时间。
-            let target_refs = targets
-                .iter()
-                .map(|target| target.target_ref)
-                .collect::<Vec<_>>();
-            let queue_positions =
-                linggan_evidence::read_target_queue_positions(database, &target_refs).await;
             collection_targets_view::render_stored_targets_with_observation(
                 &base,
                 &targets,
@@ -2660,16 +2664,12 @@ async fn collection_targets(
                 completeness.as_ref(),
                 observation.as_ref(),
                 params.error.as_deref(),
+                params.ahead,
                 deletion_preview.as_ref(),
                 deletion_target,
                 collection_targets_view::TargetListFacts {
                     keyword_archives: keyword_archives.as_ref(),
                     keyword_details_pending: keyword_details_pending.as_ref(),
-                    queue: match queue_positions.as_ref() {
-                        Ok(positions) => collection_targets_view::QueuePositions::Known(positions),
-                        // 读不到就说读不到。压成「没有排队」会让人以为请求没发出去。
-                        Err(_) => collection_targets_view::QueuePositions::Unavailable,
-                    },
                 },
                 list_context,
             )
@@ -3824,7 +3824,25 @@ struct TargetArchiveForm {
     return_sort: Option<String>,
 }
 
+/// 刚排进队列的那张工单前面还有几个。读不到就不说——编一个数字比不说更糟。
+async fn queued_ahead_for(database: &Database, target_ref: uuid::Uuid) -> Option<i64> {
+    linggan_evidence::read_target_queue_positions(database, &[target_ref])
+        .await
+        .ok()?
+        .get(&target_ref)
+        .filter(|position| position.ready > 0)
+        .map(|position| position.ahead)
+}
+
 fn target_archive_return_path(form: &TargetArchiveForm, error: Option<&str>) -> String {
+    target_archive_return_path_with_queue(form, error, None)
+}
+
+fn target_archive_return_path_with_queue(
+    form: &TargetArchiveForm,
+    error: Option<&str>,
+    ahead: Option<i64>,
+) -> String {
     let mut pairs = Vec::new();
     if let Some(filter @ ("creator" | "keyword" | "archiving" | "monitoring")) =
         form.return_filter.as_deref()
@@ -3838,6 +3856,9 @@ fn target_archive_return_path(form: &TargetArchiveForm, error: Option<&str>) -> 
     pairs.push("dtab=archive".to_owned());
     if let Some(error) = error {
         pairs.push(format!("error={error}"));
+    }
+    if let Some(ahead) = ahead {
+        pairs.push(format!("ahead={ahead}"));
     }
     format!("/collection/targets?{}#target-archive", pairs.join("&"))
 }
@@ -4094,6 +4115,26 @@ async fn collection_target_toggle_monitoring(
 ///
 /// 失败原因原样带回页面：没有覆盖深度建档的授权、目标已在建档中、工位不在岗，这三种
 /// 情况的处置完全不同，压成一句「失败」等于让人自己去猜。
+/// 这个观察目标的材料落在跨行业语料那一侧吗？
+///
+/// 读不出来时按**本领域**处理，与 `0041` 对既有目标的处置一致：历史上的采集全发生在
+/// 只有一个领域的时候，把它们算成别的领域会改写历史。这里只影响「读哪张表」，读错的
+/// 后果是看不到作品，不会把材料写错地方——写入侧的领域判定另有一套，并且有复合外键兜底。
+async fn target_is_cross_industry(database: &Database, target_ref: uuid::Uuid) -> bool {
+    sqlx::query_scalar::<_, bool>(
+        "SELECT COALESCE(domain.is_own_domain,true)=false \
+         FROM collection_observation_target target \
+         LEFT JOIN observation_domain domain USING(domain_ref) \
+         WHERE target.target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_optional(database.pool())
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(false)
+}
+
 async fn collection_target_deep_archive(
     State(state): State<LocalWebState>,
     axum::extract::Form(form): axum::extract::Form<TargetArchiveForm>,
@@ -4131,9 +4172,11 @@ async fn collection_target_deep_archive(
         .await;
         match advanced {
             Ok(linggan_evidence::KeywordDetailAdvance::Queued { .. }) => {
-                return Redirect::to(&target_archive_return_path(
+                let ahead = queued_ahead_for(database, form.row_target_ref).await;
+                return Redirect::to(&target_archive_return_path_with_queue(
                     &form,
                     Some("keyword_detail_requested"),
+                    ahead,
                 ));
             }
             // 还没建完第一段，往下走去发第一段。这不是错误，是这个词还在更早的阶段。
@@ -4177,7 +4220,11 @@ async fn collection_target_deep_archive(
         .await;
         return Redirect::to(&match requested {
             Ok(outcome) if outcome.work_order_ref.is_some() => {
-                target_archive_return_path(&form, Some("archive_requested"))
+                target_archive_return_path_with_queue(
+                    &form,
+                    Some("archive_requested"),
+                    queued_ahead_for(database, form.row_target_ref).await,
+                )
             }
             // 准入没放行时**把它的结论原样带回去**，与创作者那一路同一种处理：
             // refuse（没有授权）、defer（暂时没有执行资源）、merge（已经有在途的同类

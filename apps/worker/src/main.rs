@@ -27,6 +27,8 @@ use linggan_intelligence::{
 /// 太久才被发现，代价是一次几乎为空的查询。
 const TICK_INTERVAL: Duration = Duration::from_secs(60);
 
+mod keyword_details;
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let Ok(url) = std::env::var("LINGGAN_LOCAL_DATABASE_URL") else {
@@ -88,6 +90,7 @@ async fn main() -> ExitCode {
             Ok(_) => {}
             Err(error) => println!("linggan worker: progressive dossier tick failed: {error}"),
         }
+        keyword_details::advance_keyword_details(&database).await;
         match linggan_evidence::run_due_patrols(&database).await {
             Ok(summary) => {
                 // 只在真的发生了什么时说话。一个每分钟打印「本轮 0 个」的 tick 会让日志
