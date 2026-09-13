@@ -517,17 +517,6 @@ pub fn render_tasks_control_unavailable(base: &str, state: TaskControlUnavailabl
     )
 }
 
-pub fn render_runtime_control(
-    base: &str,
-    projection: &CollectionControlSurfaceProjection,
-    account_observation_available: bool,
-) -> String {
-    prepend_body(
-        base,
-        &runtime_control_markup(projection, account_observation_available),
-    )
-}
-
 fn operations_markup(projection: &CollectionControlSurfaceProjection) -> String {
     let run = projection.latest_run.as_ref().map_or_else(
         || {
@@ -1013,162 +1002,6 @@ fn frozen_cell(label: &str, selector: &str, value: Option<Uuid>, current: Option
     )
 }
 
-fn runtime_control_markup(
-    projection: &CollectionControlSurfaceProjection,
-    account_observation_available: bool,
-) -> String {
-    let lanes = projection
-        .runtime_lanes
-        .iter()
-        .map(runtime_lane_row)
-        .collect::<String>();
-    let resources = if projection.runtime_resources.is_empty() {
-        r#"<p class="c-control-none">当前没有未退役工位；这不是账号健康结论。</p>"#.to_owned()
-    } else {
-        projection
-            .runtime_resources
-            .iter()
-            .map(|resource| runtime_resource_row(resource, account_observation_available))
-            .collect::<String>()
-    };
-    format!(
-        r#"<section class="c-control-surface c-runtime-control" data-collection-control="runtime">
-             <div class="c-control-section-head"><div><p>准入第 5 问・同一评估器</p><h2>当前控制资格</h2></div><span>实时重算</span></div>
-             <div class="c-runtime-lanes">{lanes}</div>
-             <div class="c-control-section-head c-control-subhead"><div><p>有界控制事实</p><h2>工位 / 安装 / 观察账号</h2></div><span>不含原始账号身份</span></div>
-             <div class="c-runtime-resources">{resources}</div>
-           </section>"#,
-    )
-}
-
-fn runtime_lane_row(lane: &RuntimeLaneControlView) -> String {
-    let (state, reason, capacity_state) = if lane.available {
-        ("可接活", "capacity_available", "available")
-    } else if lane.queueable {
-        ("可入队，待工位认领", "capacity_queueable", "queueable")
-    } else {
-        (
-            "关闭",
-            lane.reason_code.unwrap_or("capacity_unknown"),
-            "blocked",
-        )
-    };
-    format!(
-        r#"<article class="c-runtime-lane" data-capacity-state="{available}" data-control-reason="{reason}">
-             <div><p>{kind} / {lane}</p><h3>{label}</h3></div>
-             <div><b>{state}</b><code>{reason}</code><span>{detail}</span></div>
-           </article>"#,
-        available = capacity_state,
-        reason = escape(reason),
-        kind = target_kind_label(lane.target_kind),
-        lane = escape(lane_label(lane.lane)),
-        label = lane.label,
-        state = state,
-        detail = escape(
-            lane.reason
-                .as_deref()
-                .or(lane.station_ref.as_deref())
-                .unwrap_or("当前判定没有返回详情。")
-        ),
-    )
-}
-
-fn runtime_resource_row(
-    resource: &RuntimeResourceView,
-    account_observation_available: bool,
-) -> String {
-    let eligibility_reason = resource
-        .eligibility_reason_code
-        .as_deref()
-        .unwrap_or("account_unknown");
-    let account_state = resource.eligibility_state.as_deref().unwrap_or("UNKNOWN");
-    let account_observation_availability = if account_observation_available {
-        "ready"
-    } else {
-        "identity_key_missing"
-    };
-    let account_observation_note = if account_observation_available {
-        "未观察不阻断首单；只有人工确认会替换或结束绑定"
-    } else {
-        "账号身份摘要未配置；认证身份不会上报，但明确登录或限制仍会阻断"
-    };
-    let acceptance_form = format!(
-        r#"<form class="c-runtime-control-form" method="post" action="/collection/runtime/accepting" data-station-accepting-form>
-             <input type="hidden" name="station_ref" value="{station_ref}">
-             <button class="c-btn-quiet" type="submit" name="accepting" value="{next}">{label}</button>
-           </form>"#,
-        station_ref = resource.station_ref,
-        next = !resource.accepting_tasks,
-        label = if resource.accepting_tasks {
-            "暂停未来接活"
-        } else {
-            "恢复自动接活"
-        },
-    );
-    let binding_form = match (
-        resource.installation_ref,
-        resource.account_ref,
-        resource.binding_state.as_str(),
-    ) {
-        (Some(installation_ref), Some(account_ref), state) if binding_required(state) => format!(
-            r#"<form class="c-runtime-control-form" method="post" action="/collection/runtime/account-bindings" data-account-binding-form>
-                 <input type="hidden" name="installation_ref" value="{installation_ref}">
-                 <input type="hidden" name="account_ref" value="{account_ref}">
-                 <button class="c-btn-quiet" type="submit">确认这个观察账号</button>
-               </form>"#,
-        ),
-        _ => String::new(),
-    };
-    format!(
-        r#"<article class="c-runtime-resource" data-station-ref="{station_ref}" data-control-fact="runtime-resource">
-             <div class="c-runtime-resource-head"><div><p>工位</p><h3>{name}</h3></div><div><b>{accepting}</b>{acceptance_form}</div></div>
-             <dl>
-               <div><dt>安装</dt><dd>{installation}</dd><span>{version} · 心跳 {last_seen}</span></div>
-               <div><dt>服务端凭据</dt><dd>{credential}</dd><span>只显示有效性，不显示密钥或摘要</span></div>
-               <div data-account-binding-required="{binding_required}" data-account-observation-availability="{account_observation_availability}"><dt>观察账号</dt><dd>{account}</dd><span>{binding_state} · 当前绑定 {bound_account} · {account_observation_note}</span>{binding_form}</div>
-               <div data-account-eligibility-reason="{reason}"><dt>账号资格</dt><dd>{account_state}</dd><span>{reason} · 最后观察 {observed}（仅供排障，不因时间经过阻断接活）{busy} · Eligibility {eligibility_ref}</span></div>
-             </dl>
-           </article>"#,
-        station_ref = resource.station_ref,
-        reason = escape(eligibility_reason),
-        name = escape(&resource.station_name),
-        accepting = if resource.accepting_tasks {
-            "自动接活"
-        } else {
-            "已暂停"
-        },
-        acceptance_form = acceptance_form,
-        installation = optional_short_ref(resource.installation_ref),
-        version = escape(resource.plugin_version.as_deref().unwrap_or("版本未知")),
-        last_seen = escape(resource.last_seen_at.as_deref().unwrap_or("UNKNOWN")),
-        credential = if resource.has_valid_credential {
-            "有效"
-        } else {
-            "缺失 / 失效"
-        },
-        account = optional_short_ref(resource.account_ref),
-        bound_account = optional_short_ref(resource.bound_account_ref),
-        binding_state = escape(binding_state_label(&resource.binding_state)),
-        binding_required = binding_required(&resource.binding_state),
-        account_observation_availability = account_observation_availability,
-        account_observation_note = account_observation_note,
-        account_state = escape(account_state),
-        observed = escape(
-            resource
-                .eligibility_observed_at
-                .as_deref()
-                .unwrap_or("UNKNOWN")
-        ),
-        busy = if resource.account_has_live_lease {
-            " · 已有有效 Lease"
-        } else {
-            ""
-        },
-        eligibility_ref = optional_short_ref(resource.eligibility_ref),
-        binding_form = binding_form,
-    )
-}
-
 fn replace_empty(base: &str, content: &str) -> String {
     let Some(open) = base.find(EMPTY_STATE_OPEN) else {
         return base.to_owned();
@@ -1228,19 +1061,7 @@ fn decision_reason(value: &str) -> &'static str {
     }
 }
 
-fn binding_state_label(value: &str) -> &'static str {
-    match value {
-        "current" => "当前一致",
-        "unconfirmed" => "未确认",
-        "changed" => "观察账号已变化",
-        "bound_without_eligibility" => "已绑定，资格信号缺失",
-        _ => "尚无观察账号",
-    }
-}
 
-fn binding_required(value: &str) -> bool {
-    matches!(value, "unconfirmed" | "changed")
-}
 
 fn optional_ref(value: Option<Uuid>) -> String {
     value.map_or_else(|| "NONE".to_owned(), |value| value.to_string())
@@ -1339,14 +1160,13 @@ mod tests {
     }
 
     #[test]
-    fn four_surfaces_share_stable_reason_and_frozen_reference_selectors() {
+    fn three_surfaces_share_stable_reason_and_frozen_reference_selectors() {
         let projection = projection();
         let empty = format!("{EMPTY_STATE_OPEN}old{EMPTY_STATE_CLOSE}");
         let operations = render_operations(&empty, &projection, OperationsMode::Now);
         let attention = render_attention(&empty, &projection);
         let body = format!("{BODY_OPEN}old</div>");
         let tasks = render_tasks_control(&body, &projection);
-        let runtime = render_runtime_control(&body, &projection, true);
 
         assert!(operations.contains("data-control-reason=\"account_needs_login\""));
         assert!(operations.contains("data-rule-revision-ref"));
@@ -1360,13 +1180,6 @@ mod tests {
             assert!(tasks.contains(selector), "missing {selector}");
         }
         assert!(tasks.contains("当前已变化"));
-        assert!(runtime.contains("data-capacity-state=\"blocked\""));
-        assert!(runtime.contains("login_required"));
-        assert!(runtime.contains("data-station-accepting-form"));
-        assert!(runtime.contains("action=\"/collection/runtime/accepting\""));
-        assert!(runtime.contains("data-account-binding-form"));
-        assert!(runtime.contains("action=\"/collection/runtime/account-bindings\""));
-        assert!(runtime.contains("data-account-binding-required=\"true\""));
     }
 
     #[test]
@@ -1666,62 +1479,4 @@ mod tests {
         }
     }
 
-    #[test]
-    fn binding_action_is_only_shown_for_an_observed_candidate_needing_confirmation() {
-        let mut projection = projection();
-        let base = format!("{BODY_OPEN}old</div>");
-        let candidate = render_runtime_control(&base, &projection, true);
-        assert!(candidate.contains("data-account-binding-form"));
-
-        projection.runtime_resources[0].binding_state = "bound_without_eligibility".to_owned();
-        projection.runtime_resources[0].eligibility_state = None;
-        projection.runtime_resources[0].eligibility_reason_code = None;
-        let already_bound = render_runtime_control(&base, &projection, true);
-        assert!(!already_bound.contains("data-account-binding-form"));
-        assert!(already_bound.contains("已绑定，资格信号缺失"));
-    }
-
-    #[test]
-    fn runtime_keeps_last_observation_for_diagnosis_not_as_a_claim_deadline() {
-        let mut projection = projection();
-        let base = format!("{BODY_OPEN}old</div>");
-        projection.runtime_resources[0].eligibility_state = Some("usable".to_owned());
-        projection.runtime_resources[0].eligibility_reason_code = Some("authenticated".to_owned());
-        let rendered = render_runtime_control(&base, &projection, true);
-        assert!(rendered.contains("最后观察"));
-        assert!(rendered.contains("不因时间经过阻断接活"));
-
-        projection.runtime_resources[0].eligibility_state = None;
-        projection.runtime_resources[0].eligibility_reason_code = None;
-        let never_observed = render_runtime_control(&base, &projection, true);
-        assert!(never_observed.contains("data-account-eligibility-reason=\"account_unknown\""));
-        assert!(!never_observed.contains("account_eligibility_stale"));
-    }
-
-    #[test]
-    fn renderers_escape_names_and_never_expose_forbidden_payload_fields() {
-        let projection = projection();
-        let base = format!("{BODY_OPEN}old</div>");
-        let html = format!(
-            "{}{}",
-            render_tasks_control(&base, &projection),
-            render_runtime_control(&base, &projection, true)
-        );
-        assert!(html.contains("&lt;一&gt;"));
-        assert!(html.contains("Mac mini &lt;主机&gt;"));
-        for forbidden in ["credential_hash", "identity_digest", "Cookie", "payload"] {
-            assert!(!html.contains(forbidden), "leaked {forbidden}");
-        }
-    }
-
-    #[test]
-    fn runtime_exposes_missing_identity_key_without_exposing_identity_material() {
-        let projection = projection();
-        let base = format!("{BODY_OPEN}old</div>");
-        let rendered = render_runtime_control(&base, &projection, false);
-
-        assert!(rendered.contains("data-account-observation-availability=\"identity_key_missing\""));
-        assert!(rendered.contains("账号身份摘要未配置；认证身份不会上报，但明确登录或限制仍会阻断"));
-        assert!(!rendered.contains("identity_digest"));
-    }
 }

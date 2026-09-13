@@ -582,3 +582,14 @@
 @media (max-width:900px){.c-dw{width:100vw}.c-dw-head{padding-right:var(--lgi-space-5);padding-left:var(--lgi-space-5)}.c-dw-tabs,.c-dw-body{padding-right:var(--lgi-space-5);padding-left:var(--lgi-space-5)}.c-dw-title-row{align-items:flex-start}.c-dw-actions{flex-direction:column}.life-performance-controls{align-items:flex-start;flex-direction:column;padding:var(--lgi-space-3) 0}.life-controls{align-items:flex-start;flex-direction:column;gap:0}.life-control-row{flex-wrap:wrap}.life-performance-summary{grid-template-columns:1fr}.life-performance-stat+.life-performance-stat{padding-left:0;border-top:1px solid var(--lgi-hairline);border-left:0}.life-performance-grid{grid-template-columns:1fr}.life-review{min-height:0}.life-evidence-head{align-items:flex-start;flex-direction:column}.life-evidence-head p{text-align:left}.life-evidence-table-wrap{overflow-x:auto}.life-evidence-table{min-width:calc(var(--lgi-grid-major) * 3 + var(--lgi-space-2))}}
 @media (max-width:900px){.life-trend-head{align-items:stretch;flex-direction:column}.life-chart-head-actions{justify-content:flex-start}}
 @media (prefers-reduced-motion:reduce){.c-dw-actions :is(.c-dw-source,.c-dw-close),.c-dw-view-tab{transition:none}}
+
+/* RUNTIME-STATION-TABLE-001 · 执行工位两张表的栅格变体。
+ * 与上面两条同住一处：栅格列宽这个决定只允许有一个住处，散开写就会分叉。
+ * 工位表十一列：编号 / 工位 / 状态 / 插件 / 最后报到 / 今日采集 / 接活 / 账号 /
+ * 能力 / 上次问活 / 明细。定宽列写成 minmax(0,N)，窄窗按比例收窄并省略文字；
+ * 编号与明细两列保持定宽，它们是可点区域，收窄会让人点不中。 */
+.c-tg-table-head.c-tg-station-grid,.c-tg-item.c-tg-station-grid{display:grid;grid-template-columns:48px minmax(176px,1fr) minmax(0,72px) minmax(0,80px) minmax(0,104px) minmax(0,104px) minmax(0,84px) minmax(0,96px) minmax(0,152px) minmax(0,168px) 64px;gap:var(--lgi-space-2);align-items:center}
+.c-tg-table-head.c-tg-plan-grid,.c-tg-item.c-tg-plan-grid{display:grid;grid-template-columns:minmax(176px,1fr) minmax(0,96px) minmax(0,104px) minmax(0,120px) minmax(0,120px) minmax(0,120px);gap:var(--lgi-space-2);align-items:center}
+@media (max-width:900px){
+  .c-tg-table-head.c-tg-station-grid,.c-tg-item.c-tg-station-grid{grid-template-columns:40px minmax(140px,1fr) minmax(0,64px) minmax(0,72px) minmax(0,88px) minmax(0,88px) minmax(0,72px) minmax(0,84px) minmax(0,128px) minmax(0,140px) 56px}
+}

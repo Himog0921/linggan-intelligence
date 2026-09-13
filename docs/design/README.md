@@ -79,6 +79,7 @@
 | [changes/design-009-runtime-capacity-surface-ui-change-manifest.md](changes/design-009-runtime-capacity-surface-ui-change-manifest.md) | DESIGN-009：执行工位改为产能判定面，五处写死的接通状态改为实读 | 权威当前 |
 | [changes/design-010-lids-v7-adoption-ui-change-manifest.md](changes/design-010-lids-v7-adoption-ui-change-manifest.md) | DESIGN-010：LIDS 升级到 v7.0 的范围、逐条差异、运行时欠账与明确非目标 | 权威当前 |
 | [changes/design-011-collection-surfaces-v7-ui-change-manifest.md](changes/design-011-collection-surfaces-v7-ui-change-manifest.md) | DESIGN-011：生产流与执行工位落地 v7、能力矩阵四态与已知限制 | 权威当前 |
+| [changes/runtime-station-table-001-ui-change-manifest.md](changes/runtime-station-table-001-ui-change-manifest.md) | RUNTIME-STATION-TABLE-001：执行工位改为以工位为单位的管理台，工位总表、LANG-05 收敛与页头计数口径；本页的工位呈现替代 DESIGN-009 / DESIGN-011 的卡片块实现 | 权威当前 |
 | [changes/collection-lifecycle-001-ui-change-manifest.md](changes/collection-lifecycle-001-ui-change-manifest.md) | COLLECTION-LIFECYCLE-001：Issue #148 creator 生命周期、四职责抽屉与 Corpus 精确深链 | 权威当前 |
 | [acceptance/collection-lifecycle-001-visual-acceptance.md](acceptance/collection-lifecycle-001-visual-acceptance.md) | ACC-COLLECTION-LIFECYCLE-001：Issue #148 自动、隔离视口与未部署边界 | 一次性报告 |
 | [changes/observation-target-dossier-ui-001-ui-change-manifest.md](changes/observation-target-dossier-ui-001-ui-change-manifest.md) | OBSERVATION-TARGET-DOSSIER-UI-001：creator/keyword 宽表、200 篇上限渐进建档与三职责档案工作区 | 交付分支实现；Issue #158 |

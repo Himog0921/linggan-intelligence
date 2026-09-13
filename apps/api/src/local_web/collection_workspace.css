@@ -235,12 +235,10 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-gate-note { margin-top:11px; color:var(--v7-muted); font-size:12px; line-height:1.6; }
 
 @media (max-width:1450px) {
-  .c-runtime-split { grid-template-columns:minmax(0,1fr) 340px; gap:28px; }
   :root { --c-drawer-width:76vw; --c-drawer-wide:90vw; --c-now-aside:410px; --c-inspector:390px; }
   .c-now { grid-template-columns:minmax(620px,1fr) var(--c-now-aside); }
 }
 @media (max-width:1180px) {
-  .c-runtime-split { grid-template-columns:minmax(0,1fr); gap:32px; }
   .c-factors { grid-template-columns:repeat(2,minmax(0,1fr)); }
   :root { --c-drawer-width:calc(100vw - var(--v7-side-width)); --c-drawer-wide:calc(100vw - var(--v7-side-width)); }
   .c-now { grid-template-columns:minmax(0,1fr); }
@@ -249,9 +247,6 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
   .c-split-main { border-right:0; border-bottom:2px solid var(--v7-black); }
 }
 @media (max-width:900px) {
-  .c-station-row { grid-template-columns:56px minmax(0,1fr) auto; row-gap:8px; }
-  .c-station-row .c-quota,.c-station-row .c-station-meta { grid-column:2 / -1; text-align:left; }
-  .c-station-meta { flex-direction:row; gap:14px; }
   .c-drawer { top:0; width:100vw; }
 }
 @media (prefers-reduced-motion:reduce) { .c-drawer { transition:none; } }
@@ -277,10 +272,6 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
  *
  * 这一页允许出现真实可点的按钮，因为登记工位与认领安装只写本地记录，不访问任何平台——
  * 与页面其余那些会消耗平台访问、因而显式不可用的控件不同。 */
-.c-runtime { padding:24px 20px 40px; display:flex; flex-direction:column; gap:32px; }
-.c-runtime-split { display:grid; grid-template-columns:minmax(0,1fr) 400px; gap:40px; align-items:start; }
-.c-runtime-main { min-width:0; display:flex; flex-direction:column; gap:32px; }
-.c-runtime-aside { min-width:0; display:flex; flex-direction:column; gap:32px; }
 
 /* COLLECTION-TASK-READ-001 · local Task / Attempt / Package / Receipt facts. */
 .c-tasks { padding:24px 20px 40px; }
@@ -354,28 +345,16 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-factor dd { margin:6px 0 0; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-500)/1.2 var(--lgi-font-mono); letter-spacing:-.02em; }
 .c-factor p { margin:6px 0 0; color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.5; }
 /* 没有被检查的那一项不能与被检查过的看起来一样：显示成四项齐备就是改写资格。 */
-.c-factor-unchecked dd { color:var(--v7-muted); font-family:var(--lgi-font-sans); font-size:var(--c-fs-300); font-weight:var(--c-fw-medium); letter-spacing:0; }
 .c-factors-caveat { margin:16px 0 0; max-width:74ch; color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.65; }
 
 /* 第三层：构成这些值的对象。 */
-.c-roster-head { padding-bottom:14px; border-bottom:var(--c-line-rail) solid var(--v7-black); }
-.c-roster-count { display:flex; align-items:baseline; gap:9px; }
-.c-roster-count b { color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-700)/1 var(--lgi-font-mono); letter-spacing:-.03em; }
-.c-roster-count span { color:var(--v7-muted); font-size:var(--c-fs-300); }
-.c-roster-note { margin:10px 0 0; max-width:66ch; color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.7; }
-.c-roster-empty { margin:16px 0 0; max-width:66ch; color:var(--v7-muted); font-size:var(--c-fs-300); line-height:1.7; }
 /* M-03 序列索引轨。v7 的六种材料共用同一套 8px 点阵，这是它被压成一维的那一态，语义是
  * 「身份 · 溯源 · 仅窄轨」。工位正是这一页唯一的身份对象——它要活得比插件长，而插件版本
  * 每天都在换。所以轨只画在已登记的工位行上，待认领安装没有轨：它们还不是身份。
  *
  * 轨宽 3px，只在行的左缘，不进正文区。这不是装饰条：它把「这台机器在册」这件事画成了
  * 一个看得见的事实，而不是又一行文字。 */
-.c-station-row { position:relative; display:grid; grid-template-columns:64px minmax(0,1fr) 108px auto 64px; align-items:center; gap:16px; padding:15px 0 15px 14px; border-bottom:var(--c-line-hair) solid var(--v7-line); }
-.c-station-row::before { content:""; position:absolute; left:0; top:15px; height:44px; width:3px;
-  background-image:repeating-linear-gradient(180deg, var(--v7-black) 0 var(--c-cell), transparent var(--c-cell) calc(var(--c-cell) * 2));
-  opacity:.55; }
 /* 空缺工位的轨降到虚位：身份还在册，但现在没有插件连着它。 */
-.c-station-row:has(.c-state-vacant)::before { opacity:.2; }
 
 /* DESIGN-011 · 能力矩阵。v7 的工站组件要求每台工位显示分项就绪，这是它的落地。
  *
@@ -383,9 +362,6 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
  * 未验证在中间偏轻——它不是坏消息，只是还没有消息。把未验证做成警告色会让一屏全是黄，
  * 而真正坏掉的那一格反而淹没在里面。 */
 .c-caps { grid-column:1 / -1; margin-top:4px; padding:14px 0 4px; border-top:var(--c-line-hair) dashed var(--v7-line-strong); }
-.c-caps-head { display:flex; align-items:baseline; gap:10px; color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-200)/1.4 var(--lgi-font-sans); }
-.c-caps-head span { color:var(--v7-ghost); font:var(--c-fw-regular) var(--c-fs-100) var(--lgi-font-mono); }
-.c-caps-unreadable { grid-column:1 / -1; margin-top:4px; padding:12px 0 4px; border-top:var(--c-line-hair) dashed var(--v7-line-strong); color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.6; }
 .c-caps-grid { margin-top:10px; display:grid; grid-template-columns:repeat(auto-fit,minmax(196px,1fr)); gap:0; border-top:var(--c-line-hair) solid var(--v7-line); }
 .c-cap { padding:10px 14px 11px 0; border-bottom:var(--c-line-hair) solid var(--v7-line); }
 .c-cap b { display:block; color:var(--v7-black); font-size:var(--c-fs-300); font-weight:var(--c-fw-medium); }
@@ -402,64 +378,13 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-cap-unverified .c-cap-state { background:var(--v7-unknown-soft); color:var(--v7-unknown); }
 .c-cap-undeclared .c-cap-state { background:transparent; color:var(--v7-ghost); border:var(--c-line-hair) dashed var(--v7-line-strong); }
 .c-cap-degraded b { color:var(--v7-bad); }
-.c-station-row-unclaimed { grid-template-columns:64px minmax(0,1fr) auto; padding-left:0; }
-.c-station-row-unclaimed::before { content:none; }
-.c-station-state { font:var(--c-fw-bold) var(--c-fs-100) var(--lgi-font-mono); letter-spacing:.05em; }
-.c-state-staffed { color:var(--v7-black); }
-.c-state-vacant { color:var(--v7-muted); }
-.c-state-waiting { color:var(--v7-warn); }
-.c-station-name { min-width:0; }
-.c-station-name b { display:block; color:var(--v7-black); font-size:var(--c-fs-400); font-weight:var(--c-fw-medium); }
-.c-station-name span { display:block; margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-100) var(--lgi-font-mono); }
-.c-station-rename { display:flex; align-items:center; gap:6px; margin-top:8px; }
-.c-station-rename input { min-width:0; width:150px; height:28px; padding:0 7px; border:var(--c-line-hair) solid var(--v7-line-strong); border-radius:4px; background:var(--v7-white); color:var(--v7-black); font:var(--c-fw-regular) var(--c-fs-100) var(--lgi-font-sans); }
-.c-station-rename .c-btn-quiet { min-height:28px; padding:4px 7px; font-size:var(--c-fs-100); }
 /* 额度是这一行唯一回答「今天还能干多少活」的数，因此是第二视觉重量。 */
-.c-quota b { color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-500)/1 var(--lgi-font-mono); letter-spacing:-.02em; }
-.c-quota span { color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-200) var(--lgi-font-mono); }
-.c-quota em { display:block; margin-top:4px; color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-100)/1.4 var(--lgi-font-sans); font-style:normal; }
-.c-quota-full b,.c-quota-full span { color:var(--v7-red); }
-.c-station-meta { display:flex; flex-direction:column; gap:4px; color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-100)/1.4 var(--lgi-font-sans); text-align:right; }
-.c-station-retire { display:flex; justify-content:flex-end; }
-.c-station-claim { display:flex; align-items:center; gap:7px; }
-.c-station-claim select { height:34px; padding:0 9px; border:var(--c-line-hair) solid var(--v7-line-strong); border-radius:4px; background:var(--v7-white); color:var(--v7-black); font-size:var(--c-fs-200); }
 
 /* 右栏主动作。登记一台工位是这一页唯一的真实主动作。 */
-.c-console { padding:20px; background:var(--v7-sunken); }
-.c-console-title { margin:0; color:var(--v7-black); font-size:var(--c-fs-400); font-weight:var(--c-fw-medium); }
-.c-console-form { margin-top:14px; display:flex; flex-wrap:wrap; align-items:center; gap:9px; }
-.c-console-form label { flex:0 0 100%; color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.5; }
-.c-console-form input,.c-console-form select {
-  height:40px; padding:0 11px; border:1px solid var(--v7-line-strong); border-radius:4px;
-  background:var(--v7-white); color:var(--v7-black); font-size:13px;
-}
-.c-console-form input { flex:1 1 200px; min-width:0; }
-.c-console-note { margin:12px 0 0; color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.6; }
 /* 开发期用的东西不与主动作同级：默认折叠。 */
-.c-dev-tools { margin-top:18px; border-top:var(--c-line-hair) solid var(--v7-line-strong); padding-top:12px; }
-.c-dev-tools summary { color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-200)/1.4 var(--lgi-font-sans); cursor:pointer; }
-.c-dev-tools summary:focus-visible { outline:2px solid var(--v7-black); outline-offset:2px; }
-.c-console-form-quiet label { color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-100)/1.4 var(--lgi-font-sans); }
-.c-console-form-quiet select { height:34px; font-size:var(--c-fs-200); }
-.c-console-failure { margin:12px 0 0; padding:10px 12px; background:var(--v7-bad-soft); color:var(--v7-black); font-size:var(--c-fs-200); line-height:1.65; }
-.c-console-failure b { margin-right:9px; padding:2px 7px; background:var(--v7-bad-fill); color:var(--v7-white); font:var(--c-fw-bold) var(--c-fs-100) var(--lgi-font-mono); letter-spacing:.06em; }
 
-/* 第四层：正在按什么边界跑。租约是许可，不是活。 */
-.c-bounds-title { margin:0 0 4px; color:var(--v7-black); font-size:var(--c-fs-400); font-weight:var(--c-fw-medium); }
-.c-bounds-group { margin-top:20px; }
-.c-bounds-group h3 { margin:0 0 2px; padding-bottom:8px; border-bottom:var(--c-line-rail) solid var(--v7-black); color:var(--v7-black); font:var(--c-fw-medium) var(--c-fs-200)/1.4 var(--lgi-font-sans); }
-.c-bound-row { display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:12px 0; border-bottom:var(--c-line-hair) solid var(--v7-line); }
-.c-bound-name b { display:block; color:var(--v7-black); font-size:var(--c-fs-300); font-weight:var(--c-fw-medium); }
-.c-bound-name span { display:block; margin-top:3px; color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-100) var(--lgi-font-mono); }
-.c-bound-meta { display:flex; flex-direction:column; gap:4px; color:var(--v7-muted); font:var(--c-fw-regular) var(--c-fs-100)/1.4 var(--lgi-font-sans); text-align:right; }
-.c-bounds-empty { margin:12px 0 0; color:var(--v7-muted); font-size:var(--c-fs-200); line-height:1.65; }
-.c-bounds-grid { margin:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0; }
-.c-bounds-grid div { padding:12px 12px 12px 0; border-bottom:var(--c-line-hair) solid var(--v7-line); }
-.c-bounds-grid dt { color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-200)/1.4 var(--lgi-font-sans); }
-.c-bounds-grid dd { margin:5px 0 0; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-300) var(--lgi-font-mono); }
-.c-bounds-note { margin:12px 0 0; color:var(--v7-muted); font-size:var(--c-fs-100); line-height:1.6; }
 
-.c-console-form input:focus-visible,.c-console-form select:focus-visible,.c-station-claim select:focus-visible,
+.c-stn-form input:focus-visible,.c-stn-form select:focus-visible,
 .c-btn-primary:focus-visible,.c-btn-secondary:focus-visible {
   outline:2px solid var(--v7-black); outline-offset:2px;
 }
@@ -758,7 +683,7 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
   align-items:end; margin-bottom:var(--lgi-space-8); padding:var(--lgi-space-5);
   background:var(--v7-sunken); border-top:var(--c-line-mode) solid var(--v7-black);
 }
-.c-control-run p,.c-control-row p,.c-attention-row > div > p,.c-frozen-head p,.c-runtime-lane p,.c-runtime-resource-head p {
+.c-control-run p,.c-control-row p,.c-attention-row > div > p,.c-frozen-head p {
   margin:0; color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-100)/var(--lgi-lh-data) var(--lgi-font-mono);
   letter-spacing:var(--lgi-ls-data);
 }
@@ -772,13 +697,13 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
   gap:var(--lgi-space-6); align-items:center; padding:var(--lgi-space-4) 0;
   border-bottom:var(--c-line-hair) solid var(--v7-line);
 }
-.c-control-row h3,.c-attention-row h3,.c-frozen-row h3,.c-runtime-lane h3,.c-runtime-resource h3 {
+.c-control-row h3,.c-attention-row h3,.c-frozen-row h3 {
   margin:var(--lgi-space-1) 0 0; color:var(--v7-black); font-size:var(--c-fs-300); font-weight:var(--c-fw-medium);
 }
 .c-control-row > div > span { display:block; margin-top:var(--lgi-space-1); color:var(--v7-muted); font-size:var(--c-fs-100); }
 .c-control-outcome { display:grid; justify-items:end; gap:var(--lgi-space-1); text-align:right; }
 .c-control-outcome b { color:var(--v7-black); font-size:var(--c-fs-200); font-weight:var(--c-fw-bold); text-transform:uppercase; }
-.c-control-outcome code,.c-attention-row code,.c-runtime-lane code {
+.c-control-outcome code,.c-attention-row code {
   color:var(--v7-muted); font:var(--c-fw-bold) var(--c-fs-100)/var(--lgi-lh-data) var(--lgi-font-mono); overflow-wrap:anywhere;
 }
 .c-control-outcome span { color:var(--v7-muted); font-size:var(--c-fs-100); }
@@ -804,28 +729,6 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-frozen-grid dd { margin:var(--lgi-space-1) 0 0; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-200)/var(--lgi-lh-data) var(--lgi-font-mono); }
 .c-frozen-grid span { display:block; margin-top:var(--lgi-space-1); color:var(--v7-muted); font-size:var(--c-fs-100); }
 .c-frozen-links { margin:var(--lgi-space-3) 0 0; color:var(--v7-muted); font:var(--c-fw-medium) var(--c-fs-100)/var(--lgi-lh-data) var(--lgi-font-mono); }
-
-.c-runtime-lanes { border-bottom:var(--c-line-hair) solid var(--v7-line-strong); }
-.c-runtime-lane {
-  min-height:78px; display:grid; grid-template-columns:minmax(180px,.55fr) minmax(0,1fr);
-  gap:var(--lgi-space-6); align-items:center; padding:var(--lgi-space-4) 0;
-  border-bottom:var(--c-line-hair) solid var(--v7-line);
-}
-.c-runtime-lane > div:last-child { display:grid; grid-template-columns:72px 220px minmax(0,1fr); gap:var(--lgi-space-4); align-items:center; }
-.c-runtime-lane b { color:var(--v7-black); font-size:var(--c-fs-200); font-weight:var(--c-fw-bold); }
-.c-runtime-lane span { color:var(--v7-body); font-size:var(--c-fs-200); line-height:var(--lgi-lh-body); }
-.c-runtime-resources { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:var(--lgi-space-5); margin-top:var(--lgi-space-5); }
-.c-runtime-resource { min-width:0; padding:var(--lgi-space-4); border:var(--c-line-hair) solid var(--v7-line-strong); background:var(--v7-white); }
-.c-runtime-resource-head { display:flex; align-items:flex-start; justify-content:space-between; gap:var(--lgi-space-4); }
-.c-runtime-resource-head > div:last-child { display:grid; justify-items:end; gap:var(--lgi-space-2); }
-.c-runtime-resource-head b { color:var(--v7-black); font-size:var(--c-fs-200); font-weight:var(--c-fw-bold); }
-.c-runtime-resource dl { margin:var(--lgi-space-4) 0 0; }
-.c-runtime-resource dl > div { position:relative; min-height:60px; padding:var(--lgi-space-3) 0; border-top:var(--c-line-hair) solid var(--v7-line); }
-.c-runtime-resource dt { color:var(--v7-muted); font-size:var(--c-fs-100); }
-.c-runtime-resource dd { margin:var(--lgi-space-1) 0 0; color:var(--v7-black); font:var(--c-fw-bold) var(--c-fs-200)/var(--lgi-lh-data) var(--lgi-font-mono); }
-.c-runtime-resource dl span { display:block; margin-top:var(--lgi-space-1); color:var(--v7-muted); font-size:var(--c-fs-100); line-height:var(--lgi-lh-data); overflow-wrap:anywhere; }
-.c-runtime-control-form { display:inline-flex; margin-top:var(--lgi-space-2); }
-.c-runtime-control-form .c-btn-quiet { min-height:40px; }
 .c-control-surface :focus-visible { outline:2px solid var(--lgi-focus); outline-offset:2px; }
 
 @media (prefers-reduced-motion:reduce) {
@@ -1018,16 +921,67 @@ a.c-btn-quiet:hover,.c-btn-quiet:not([disabled]):hover { border-color:var(--v7-b
 .c-task-panel .c-frozen-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
 
 /* Runtime: preserve the authoritative verdict, but use the V4 station hierarchy. */
-.c-runtime { padding:calc(var(--c-cell) * 2) 0 calc(var(--c-cell) * 4); gap:calc(var(--c-cell) * 3); }
 .c-verdict { border-top:var(--c-line-rail) solid var(--v7-black); border-bottom:var(--c-line-hair) solid var(--v7-black); }
-.c-runtime-split { grid-template-columns:minmax(0,1fr) calc(var(--c-cell) * 45); gap:calc(var(--c-cell) * 3); }
-.c-runtime-main,.c-runtime-aside { gap:calc(var(--c-cell) * 3); }
-.c-console { border-top:var(--c-line-rail) solid var(--v7-black); }
-.c-roster-head { padding-bottom:var(--c-cell); }
-.c-roster-count b { font-size:var(--c-fs-600); }
-.c-station-row { min-height:calc(var(--c-cell) * 11.5); grid-template-columns:calc(var(--c-cell) * 8.5) minmax(0,1fr) calc(var(--c-cell) * 13.5) auto calc(var(--c-cell) * 8); border-top:0; }
-.c-runtime-control { padding-top:0; }
-.c-runtime-control .c-control-section-head { min-height:calc(var(--c-cell) * 5.5); }
-.c-runtime-lanes { border-top:var(--c-line-rail) solid var(--v7-black); }
-.c-runtime-lane { min-height:calc(var(--c-cell) * 9); }
-.c-runtime-resources { grid-template-columns:1fr; }
+
+/* RUNTIME-STATION-TABLE-001 · 执行工位：一台机器一行，展开即管理。
+ * 复用目标目录宽表的单元格语法，不另写第二套表格实现；两张表的栅格列宽住在
+ * target_drawer.css 那一组 .c-tg-*-grid 旁边。 */
+/* 行是 <summary>：整行可点即展开。它不是链接，也不打开别的页面，所以只给 hover 底色，
+ * 不给位移——位移在这套语言里专属于重音元素（LIDS-PRI-001）。 */
+.c-stn-entry>summary{cursor:pointer;list-style:none}
+.c-stn-entry>summary::-webkit-details-marker{display:none}
+.c-stn-entry>summary:hover{background:var(--lgi-canvas-sunken)}
+.c-stn-entry>summary:focus-visible{outline:2px solid var(--lgi-signal-ink);outline-offset:-2px}
+.c-stn-more{color:var(--lgi-muted);text-align:right}
+/* 工位名与「换过几次插件」竖排。目标目录把两者并排是因为那一列放的是创作者名 + 平台
+ * 身份，两个短标识；这里第二行是一句话，并排时被省略成「换过 5 次…」——一个把关键
+ * 名词截掉的省略号，等于没显示。 */
+.c-tg-station-grid .c-tg-object-text{display:block}
+.c-tg-station-grid .c-tg-title{max-width:100%}
+.c-stn-entry[open]>summary .c-stn-more{color:var(--lgi-signal-ink);font-weight:700}
+.c-stn-mono{font-family:var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+/* 展开面板换底色而不是画线：分区用面，不用线（LIDS-PRI-001 线条第 2 条）。 */
+.c-stn-panel{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:var(--lgi-space-5);padding:var(--lgi-space-5);background:var(--lgi-canvas-low);border-bottom:1px solid var(--lgi-hairline)}
+.c-stn-block{min-width:0}
+.c-stn-block-wide{grid-column:1/-1}
+.c-stn-block h3{display:flex;align-items:baseline;gap:var(--lgi-space-2);margin:0 0 var(--lgi-space-3);color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:700}
+.c-stn-block h3 span{color:var(--lgi-muted);font:600 var(--lgi-text-label)/1 var(--lgi-font-mono)}
+.c-stn-facts{display:grid;gap:var(--lgi-space-2);margin:0 0 var(--lgi-space-3)}
+.c-stn-facts>div{display:grid;grid-template-columns:minmax(0,132px) minmax(0,1fr);gap:var(--lgi-space-3)}
+.c-stn-facts dt{color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.c-stn-facts dd{margin:0;color:var(--lgi-ink);font:600 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono);word-break:break-all}
+.c-stn-note{margin:0 0 var(--lgi-space-3);color:var(--lgi-body);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+.c-stn-empty{margin:var(--lgi-space-4) var(--lgi-space-3);color:var(--lgi-body);font-size:var(--lgi-text-data);line-height:var(--lgi-lh-body)}
+.c-stn-form{display:flex;flex-wrap:wrap;align-items:center;gap:var(--lgi-space-2);margin:0 0 var(--lgi-space-3)}
+.c-stn-form label{flex:0 0 auto;color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.c-stn-form input,.c-stn-form select{min-height:40px;box-sizing:border-box;padding:0 var(--lgi-space-3);border:1px solid var(--lgi-border-solid);background:var(--lgi-canvas);color:var(--lgi-ink);font-size:var(--lgi-text-label)}
+.c-stn-form input{flex:1 1 140px;min-width:0}
+.c-stn-failure{margin:0 0 var(--lgi-space-3);padding:var(--lgi-space-3);background:var(--lgi-danger-soft);color:var(--lgi-ink);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+.c-stn-failure b{margin-right:var(--lgi-space-2);color:var(--lgi-danger);font-weight:700}
+.c-stn-footer{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:var(--lgi-space-6);align-items:start}
+.c-stn-unclaimed>summary{cursor:pointer;display:flex;align-items:baseline;gap:var(--lgi-space-3);min-height:40px;color:var(--lgi-ink);font-size:var(--lgi-text-label)}
+.c-stn-unclaimed>summary span{color:var(--lgi-muted);font:600 var(--lgi-text-label)/1 var(--lgi-font-mono)}
+.c-stn-unclaimed-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--lgi-space-3);padding:var(--lgi-space-3) 0;border-bottom:1px solid var(--lgi-hairline)}
+.c-stn-unclaimed-row .c-stn-form{margin:0}
+/* 运行读数：一排读数替换掉此前六个并列区块，其中五个在正常日子里全是 0。 */
+.c-run{min-width:0}
+.c-run-readouts{display:grid;grid-template-columns:repeat(auto-fit,minmax(152px,1fr));gap:var(--lgi-space-5);margin:var(--lgi-space-4) var(--lgi-space-3)}
+.c-run-readouts>div{min-width:0}
+.c-run-readouts dt{color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.c-run-readouts dd{margin:var(--lgi-space-1) 0 0;color:var(--lgi-ink);font:700 var(--lgi-text-section)/1.1 var(--lgi-font-mono);font-variant-numeric:tabular-nums}
+.c-run-readouts p{margin:var(--lgi-space-1) 0 0;color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
+.c-run-list{margin:0 var(--lgi-space-3) var(--lgi-space-4)}
+.c-run-list h3{margin:0 0 var(--lgi-space-2);color:var(--lgi-ink);font-size:var(--lgi-text-label);font-weight:700}
+.c-run-row{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:var(--lgi-space-3);padding:var(--lgi-space-3) 0;border-bottom:1px solid var(--lgi-hairline)}
+.c-run-name b{color:var(--lgi-ink);font-size:var(--lgi-text-body);font-weight:700}
+.c-run-name span{margin-left:var(--lgi-space-2);color:var(--lgi-muted);font-size:var(--lgi-text-label)}
+.c-run-meta{display:flex;flex-wrap:wrap;gap:var(--lgi-space-4);color:var(--lgi-body);font:600 var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono)}
+.c-run .c-stn-note{margin:0 var(--lgi-space-3) var(--lgi-space-4)}
+/* 通道行的原因码是合同字面取值，按 LANG-05 第 2 类作为中文旁边的小字保留。 */
+.c-lane-code{margin-left:var(--lgi-space-2);color:var(--lgi-muted);font:600 var(--lgi-text-label)/1 var(--lgi-font-mono)}
+.c-lane-queueable{color:var(--lgi-warning)}
+/* 整页竖向节奏。工位表是主体，因此它上下的留白比其它区块大一档。 */
+.c-runtime{display:grid;gap:var(--lgi-space-8);padding:var(--lgi-space-6) 0}
+@media (max-width:900px){
+  .c-stn-panel{grid-template-columns:minmax(0,1fr)}
+}

@@ -3041,10 +3041,18 @@ async fn collection_runtime(
         .capacity
         .as_ref()
         .map(|capacity| capacity.registered_stations - capacity.staffed_stations);
-    reads.surface_state.unclaimed_installations = reads
-        .roster
-        .as_ref()
-        .map(|(_, unclaimed)| unclaimed.len() as i64);
+    // 只数最近报到过的安装。一台机器每升级一次插件就留下一条旧安装，它们永远不会
+    // 被认领；把它们算进上下文行，那个数字就只会往上涨，读起来像「有 N 台机器掉队
+    // 了」，而实际掉队的是 0 台。历史残留仍在页面里，只是不冒充待处理项。
+    let now_minutes = station_view::recent_installation_cutoff();
+    reads.surface_state.unclaimed_installations = reads.roster.as_ref().map(|(_, unclaimed)| {
+        unclaimed
+            .iter()
+            .filter(|installation| {
+                station_view::installation_is_recent(&installation.first_seen_at, now_minutes)
+            })
+            .count() as i64
+    });
     if reads.surface_state.total_targets.is_none() {
         reads.surface_state.total_targets = reads
             .capacity
@@ -3081,6 +3089,29 @@ async fn collection_runtime(
             }
         }
     }
+    // 通道判定与工位控制事实此前渲染成页面顶部一个独立区块，于是同一台工位在一页里
+    // 出现两次、同一条通道有两个名字。现在它们作为**输入**交给这一页：通道判定进
+    // 判断区，工位控制事实进工位表对应的那一行。读不到时页面说读不到，不退回空值。
+    let control = match collection::collection_control_surface_view::read_collection_control_surface(
+        database, 100,
+    )
+    .await
+    {
+        Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(
+            projection,
+        )) => Some(projection),
+        Ok(
+            collection::collection_control_surface_view::CollectionControlSurfaceRead::SchemaUnavailable,
+        )
+        | Err(_) => None,
+    };
+    let control = control
+        .as_ref()
+        .map(|projection| station_view::RuntimeControl {
+            lanes: &projection.runtime_lanes,
+            resources: &projection.runtime_resources,
+            account_observation_available: state.account_digest_key.is_some(),
+        });
     let rendered = match reads.roster.as_ref() {
         Some((stations, unclaimed)) => station_view::render_runtime(
             &base,
@@ -3088,24 +3119,19 @@ async fn collection_runtime(
             stations,
             unclaimed,
             &capabilities,
+            control.as_ref(),
+            now_minutes,
             params.error.as_deref(),
         ),
         None => station_view::render_runtime_with_unreadable_roster(
             &base,
             reads.capacity.as_ref(),
+            control.as_ref(),
+            now_minutes,
             params.error.as_deref(),
         ),
     };
-    match collection::collection_control_surface_view::read_collection_control_surface(database, 100).await {
-        Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::Ready(projection)) =>
-            Html(collection::collection_control_surface_view::render_runtime_control(
-                &rendered,
-                &projection,
-                state.account_digest_key.is_some(),
-            )),
-        Ok(collection::collection_control_surface_view::CollectionControlSurfaceRead::SchemaUnavailable)
-        | Err(_) => Html(rendered),
-    }
+    Html(rendered)
 }
 
 /// COLLECTION-001 · the person-facing station actions on the 执行工位 surface.

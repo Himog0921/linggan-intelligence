@@ -1932,17 +1932,17 @@ fn station_capability_matrix_separates_unverified_from_degraded() {
 /// 它们各自迁移时把前缀加进下面这张表即可。
 #[test]
 fn the_runtime_surface_holds_the_v7_type_ladder() {
-    const RUNTIME_SELECTOR_PREFIXES: [&str; 10] = [
+    // RUNTIME-STATION-TABLE-001 把工位行、名册、运行边界三组类名换成 `.c-stn-*` 与
+    // `.c-run-*`。前缀表必须跟着换：留着已经不存在的 `.c-roster` / `.c-bounds`，这条
+    // 测试就会在一个空集合上通过——一条扫不到任何一行的检查，等于没有检查。
+    const RUNTIME_SELECTOR_PREFIXES: [&str; 7] = [
         ".c-verdict",
         ".c-lane",
         ".c-factor",
-        ".c-roster",
-        ".c-station",
-        ".c-quota",
+        ".c-stn",
+        ".c-run",
         ".c-caps",
         ".c-cap",
-        ".c-bounds",
-        ".c-bound",
     ];
     const BANNED: [&str; 7] = [
         "font-size:10px",
@@ -1969,6 +1969,18 @@ fn the_runtime_surface_holds_the_v7_type_ladder() {
             );
         }
     }
+
+    // 前缀表必须真的扫到东西。这条断言防的是上面那种「扫不到任何一行也通过」。
+    let covered = COLLECTION_WORKSPACE_CSS
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim_start();
+            RUNTIME_SELECTOR_PREFIXES
+                .iter()
+                .any(|prefix| trimmed.starts_with(prefix))
+        })
+        .count();
+    assert!(covered > 40, "执行工位的类名前缀表已与样式表脱节：只扫到 {covered} 行");
 
     // 页面局部 v7 阶梯必须仍然存在——上面所有替换都指向它。
     assert!(COLLECTION_WORKSPACE_CSS.contains("--c-fs-100:11px"));

@@ -148,6 +148,7 @@ LANG-05 是**规则层**收窄，运行时**尚未迁移**。现有页面中大�
 |---|---|---|
 | `apps/api/src/local_web/shell.rs` | 一级导航中英并列、`LOCAL MATERIAL PROJECTION`、时区全称与代号并存 | 按 [shell-zones.md](shell-zones.md) 的区位表一次性收敛 |
 | `apps/api/src/local_web/evidence_page.rs` | `ACCEPTED DISCOVERY`、`LOCAL READ ONLY`、`NO MATERIAL READ`、`LOCAL HOST` 等描述性标签 | 逐条对照数据合同判定，非字面取值者删除英文 |
+| `apps/api/src/local_web/station_view.rs`、`collection_control_surface_view.rs` 的执行工位区块 | ~~`准入第 5 问`、`有界控制事实`、`同一评估器`、`Eligibility`、`lane 上限`、`WorkOrder`、`Attempt`、裸 station UUID~~ | **已清偿**：RUNTIME-STATION-TABLE-001（2026-09-13）。保留的英文只剩合同字面取值（`account_unknown`、`author_profile` 等原因码与能力名），且每一处都有中文相邻；由 `the_page_never_speaks_in_internal_engineering_names` 自动执行 |
 
 两处**不在本次范围内**，须各自另立受控事项。在迁移完成前：
 
