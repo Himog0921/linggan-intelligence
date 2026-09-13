@@ -630,6 +630,19 @@ async fn a_completed_detail_round_records_the_body_and_the_fact_that_it_arrived(
         CatalogDetailState::Complete,
         "材料真的进来了，就该显示成已取得"
     );
+
+    // **反方向同样要守住：取到了就不该再排进补详情。**
+    //
+    // 此前只断言了「还没取到的仍在待补清单里」。少了这一半，那条排除条件被漏写、取反或
+    // 关联到错误的列时，一篇已经取到详情的样本会被永远重复排队——每一轮都真的去平台再采
+    // 一遍同一篇，而它不产生任何新事实，只多花一次平台访问额度，界面上也看不出异常。
+    let pending = linggan_evidence::keyword_targets_pending_detail(&database, &[target_ref])
+        .await
+        .expect("the pending-detail read runs");
+    assert!(
+        !pending.contains(&target_ref),
+        "这个关键词唯一的一篇已经取到详情，它不该还留在待补清单里"
+    );
 }
 
 /// **试过没成功不等于取到了。**

@@ -42,8 +42,17 @@ CREATE TABLE cross_industry_sample_detail (
     observed_at text NOT NULL,
     created_at timestamptz NOT NULL DEFAULT scope_001_now(),
     UNIQUE (package_ref, record_ordinal),
+    -- **不写 `ON DELETE CASCADE`。** 这张表是追加式的（下面那个触发器对 DELETE 无条件
+    -- 抛异常），级联删除照样要经过子行的 `BEFORE DELETE`——于是父行的删除连同整个事务
+    -- 一起回滚，报出来的却是一句无关的「append-only」。CASCADE 在这里是一句做不到的承诺。
+    -- 去掉它，删样本会被外键如实挡住，错误信息指向真正的阻挡者。
+    --
+    -- 挂账：`0073_cross_industry_sample_observation` 也是「追加式 + CASCADE」这个组合，
+    -- 同样潜伏着这个矛盾。目前没有任何代码路径删除 `cross_industry_sample`（删目标由
+    -- `collection_target.rs` 的受保护事实计数提前拦住），所以它没有被激活；迁移是追加式的，
+    -- 改它要另起一支，不并进本支。
     FOREIGN KEY (sample_ref, domain_ref)
-        REFERENCES cross_industry_sample(sample_ref, domain_ref) ON DELETE CASCADE,
+        REFERENCES cross_industry_sample(sample_ref, domain_ref),
     FOREIGN KEY (package_ref, record_ordinal)
         REFERENCES linggan_runtime_record_disposition(package_ref, record_ordinal),
     CHECK ((body_state = 'KNOWN') = (body_text IS NOT NULL)),

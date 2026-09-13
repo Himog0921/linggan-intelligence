@@ -9,6 +9,9 @@
 -- 这一支把缺的词补进闭集。代码侧改成对错误逐种匹配、不留 `_` 兜底分支：再有新的失败形态
 -- 时编译器会拦住，而不是让它悄悄落进一个通用桶里。
 --
+-- 数据库错误不在其中：那一支在调用点就提前返回了，用词表里既有的 `database_error` 就够，
+-- 不为一个走不到的分支新造一个永远写不进去的词。
+--
 -- 其中三个（`authorization_bound_too_small`、`progressive_purpose_mismatch`、
 -- `progressive_archive_not_ready`）目前走不到巡检这条路——它们来自创作者的渐进建档。
 -- 仍然收进词表并逐种匹配：判据要覆盖整个错误集合，覆盖不到的那一块将来就是兜底。
@@ -37,5 +40,5 @@ ALTER TABLE collection_scheduler_target_decision
         -- 本支新增：准入在形成决策之前就报错的那几种。
         'acquisition_schema_unavailable','unknown_target','target_domain_unassigned',
         'invalid_material_targets','authorization_bound_too_small',
-        'progressive_purpose_mismatch','progressive_archive_not_ready','acquisition_read_failed'
+        'progressive_purpose_mismatch','progressive_archive_not_ready'
     ));

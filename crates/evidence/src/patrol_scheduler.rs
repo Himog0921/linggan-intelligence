@@ -677,8 +677,10 @@ fn scheduler_admission_failure_reason(
         Failure::ProgressiveArchiveAuthorizationMissing => "authorization_missing",
         Failure::ProgressiveArchivePurposeMismatch => "progressive_purpose_mismatch",
         Failure::ProgressiveArchiveNotReady { .. } => "progressive_archive_not_ready",
-        // 数据库错误在上面就 return 了，不会走到这里——它不是「这个目标不能采」，
-        // 而是「这一轮没读成」，压成一个目标级原因码会把故障说成业务判断。
-        Failure::Database(_) => "acquisition_read_failed",
+        // 数据库错误在调用点上一条 match 臂就 `return Err` 了，走不到这里。仍然显式写出
+        // 而不是留 `_`：留了兜底，将来新增一个错误变体时编译器不会拦，它会悄悄落进通用桶。
+        // 用词表里既有的 `database_error`——**不为一个走不到的分支往闭集里新造一个词**，
+        // 那等于在词表里留一个永远不会出现的答案。
+        Failure::Database(_) => "database_error",
     }
 }
