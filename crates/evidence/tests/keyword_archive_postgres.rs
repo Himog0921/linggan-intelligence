@@ -740,3 +740,107 @@ async fn submit_home_domain_keyword_archive(database: &Database, identity_key: &
         .await
         .expect("the home-domain target exists")
 }
+
+/// **准入直接报错时，调度要如实说出是哪一种。**
+///
+/// 此前调度对准入的直接报错只有一句 `Err(_) => "target_not_requestable"`：一个字符串吞掉了
+/// 「目标还没归属领域」「schema 没装」「目标不存在」「授权额度不够」全部情况。界面只写
+/// 「目标不可请求」，而真实原因是没有领域——排查时为此多花了两轮。
+///
+/// **一个压平的原因码比没有原因码更坏：它看起来是个答案。**
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_scheduler_tick_names_the_actual_admission_failure() {
+    let database = proof_database("scheduler_failure_reason").await;
+    let target_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_observation_target \
+             (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state, \
+              domain_ref) \
+         VALUES ($1,'xhs','keyword','数学思维::sched','数学思维','manual','pending_decision', \
+                 $2::uuid)",
+    )
+    .bind(target_ref)
+    .bind(HOME_DOMAIN)
+    .execute(database.pool())
+    .await
+    .expect("target fixture is stored");
+    // 规则得先立起来（保存规则本身要求目标有领域），之后再把领域摘掉——模拟历史上那些
+    // 先被发现、领域还没定的目标。
+    let saved = linggan_evidence::apply_monitor_rule_command(
+        &database,
+        &linggan_evidence::MonitorRuleCommand {
+            target_ref,
+            expected_revision: 0,
+            idempotency_key: Uuid::new_v4(),
+            kind: linggan_evidence::MonitorCommandKind::SaveRule,
+            actor: linggan_evidence::MonitorCommandActor::Person,
+            source: "targets_ui",
+            draft: Some(linggan_evidence::MonitorRuleDraft {
+                mode: linggan_evidence::MonitorRuleMode::Fixed,
+                automatic_enabled: true,
+                run_on_weekdays: true,
+                run_on_weekends: true,
+                all_day: true,
+                window_start_minute: None,
+                window_end_minute: None,
+                fixed_interval_seconds: Some(86_400),
+                fallback_interval_seconds: 86_400,
+                surface_key: "keyword_search".to_owned(),
+                ranking_key: Some("most_liked".to_owned()),
+                scroll_rounds: Some(3),
+                top_by_likes: Some(20),
+                published_within_days: Some(7),
+                task_contract_version: "linggan.producer.task-spec.v1".to_owned(),
+            }),
+        },
+    )
+    .await
+    .expect("the rule command runs");
+    assert_eq!(
+        saved.outcome,
+        linggan_evidence::MonitorCommandOutcomeKind::Applied
+    );
+    // 授权签齐，这样挡住它的只剩领域那一道闸——否则测试会因为「没有授权」而变绿，
+    // 证明不了任何关于原因码的事。
+    sqlx::query(
+        "INSERT INTO collection_acquisition_authorization \
+             (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
+              allowed_task_templates,allowed_dispatch_lanes,max_work_units,max_works_per_target) \
+         VALUES (gen_random_uuid(),'xhs','keyword','patrol','定时巡检','person', \
+                 scope_001_now()+interval '1 day', \
+                 ARRAY['keyword_patrol'],ARRAY['immediate','scheduled'],200,200)",
+    )
+    .execute(database.pool())
+    .await
+    .expect("authorization is granted");
+    sqlx::query("UPDATE collection_observation_target SET domain_ref=NULL WHERE target_ref=$1")
+        .bind(target_ref)
+        .execute(database.pool())
+        .await
+        .expect("the target is left without an observation domain");
+    sqlx::query(
+        "UPDATE collection_monitor_rule \
+         SET monitor_next_run_at=scope_001_now()-interval '1 second' WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the rule is due");
+
+    linggan_evidence::run_due_patrols(&database)
+        .await
+        .expect("the scheduler tick completes");
+    let reason: String = sqlx::query_scalar(
+        "SELECT reason_code FROM collection_scheduler_target_decision \
+         WHERE target_ref=$1 ORDER BY decided_at DESC LIMIT 1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("a per-target decision is durable");
+    assert_eq!(
+        reason, "target_domain_unassigned",
+        "挡住它的是「还没说清属于哪个领域」，不是一句笼统的「目标不可请求」"
+    );
+}

@@ -12,6 +12,7 @@ mod creator_lifecycle;
 mod cross_industry_admission;
 mod cross_industry_observation;
 pub mod cross_industry_read;
+mod cross_industry_sample_facts;
 mod directory_boundary;
 mod dispatch;
 mod execution_station;

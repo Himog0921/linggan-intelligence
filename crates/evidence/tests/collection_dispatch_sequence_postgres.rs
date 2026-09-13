@@ -109,7 +109,11 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0065_account_observation_bootstrap.sql"),
     "\n",
+    include_str!("../../../database/migrations/0080_scheduler_admission_failure_reasons.sql"),
+    "\n",
     include_str!("../../../database/migrations/0076_monitor_rule_slots.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0078_monitor_rule_owns_its_schedule.sql"),
 );
 
 #[tokio::test]
@@ -144,21 +148,30 @@ async fn dispatch_schema_readiness_requires_relations_in_the_current_schema() {
 
 #[tokio::test]
 #[ignore = "requires an isolated PostgreSQL proof database"]
-async fn target_cannot_claim_monitoring_without_a_rule_and_scheduler_stays_idle() {
+async fn a_target_without_any_rule_never_becomes_due_and_the_scheduler_stays_idle() {
     let database = proof_database_for("collection_scheduler_enabled_target").await;
     let target_ref = Uuid::new_v4();
-    let invalid = sqlx::query(
+    // `0036` 曾用一条 CHECK 挡住「在监控中却没有规则」：那时目标行上存着一份规则指针，
+    // 指针为空而开关为真，调度就会照着一个不存在的规则跑。`0078` 把那份指针删掉之后，
+    // 调度是**遍历规则**的——没有规则就没有到期的东西，这件事由下面的空转直接证明，
+    // 不再需要一条数据库约束替它挡。
+    sqlx::query(
         "INSERT INTO collection_observation_target \
              (target_ref,platform,target_kind,identity_key,display_name,source,lifecycle_state,monitoring_enabled) \
          VALUES ($1,'xhs','creator','creator-auto-proof','自动调度证明','manual','monitoring',true)",
     )
     .bind(target_ref)
     .execute(database.pool())
-    .await;
-    assert!(
-        invalid.is_err(),
-        "0036 rejects monitoring without an active rule"
-    );
+    .await
+    .expect("monitoring is a target-level fact; having rules is a rule-level one");
+    let rule_count: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM collection_monitor_rule WHERE target_ref=$1 AND retired_at IS NULL",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("rule count is readable");
+    assert_eq!(rule_count, 0, "前提：这个目标一条规则都没有");
 
     linggan_evidence::record_scheduler_started(&database, Uuid::new_v4())
         .await
@@ -312,9 +325,14 @@ async fn creator_rule_queues_once_without_a_baseline_or_a_preassigned_station() 
     assert_eq!(queued.1, "scheduled");
     assert_eq!((queued.2, queued.3, queued.4), (None, None, None));
     assert_eq!(queued.5, saved.applied_rule_revision_ref);
+    // 排程住在规则上（`0078`）；目标只保留「在不在监控中」这一件它自己的事实。
     let schedule: (bool, Option<String>, i32) = sqlx::query_as(
-        "SELECT monitoring_enabled,monitor_next_run_at::text,monitor_missed_run_count \
-         FROM collection_observation_target WHERE target_ref=$1",
+        "SELECT target.monitoring_enabled,rule.monitor_next_run_at::text, \
+                rule.monitor_missed_run_count \
+         FROM collection_observation_target target \
+         JOIN collection_monitor_rule rule \
+           ON rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
+         WHERE target.target_ref=$1",
     )
     .bind(target_ref)
     .fetch_one(database.pool())

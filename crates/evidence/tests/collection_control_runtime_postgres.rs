@@ -114,7 +114,11 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0065_account_observation_bootstrap.sql"),
     "\n",
+    include_str!("../../../database/migrations/0080_scheduler_admission_failure_reasons.sql"),
+    "\n",
     include_str!("../../../database/migrations/0076_monitor_rule_slots.sql"),
+    "\n",
+    include_str!("../../../database/migrations/0078_monitor_rule_owns_its_schedule.sql"),
 );
 
 #[tokio::test]
@@ -375,6 +379,15 @@ async fn non_progressive_creator_archive_never_claims_a_completed_baseline() {
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
 async fn automatic_save_rule_moves_a_paused_keyword_target_to_monitoring() {
     let database = proof_database("control_runtime_save_rule_resume").await;
+    // 时钟冻住：下面要断言两次存同一条规则落在同一个发车时刻。用真实时钟的话，两次读数
+    // 之间只要跨过一个整秒边界，取整后就会差 1——那种红是机器快慢造成的，不是缺陷。
+    sqlx::query(
+        "CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE \
+         AS $$ SELECT timestamptz '2026-09-13T02:00:00Z' $$",
+    )
+    .execute(database.pool())
+    .await
+    .expect("the proof clock is frozen");
     let target_ref =
         seed_target(&database, "keyword", "pending_decision", "save-rule-resume").await;
     let first =
@@ -390,17 +403,43 @@ async fn automatic_save_rule_moves_a_paused_keyword_target_to_monitoring() {
             .expect("automatic rule is saved");
     assert_eq!(second.outcome, MonitorCommandOutcomeKind::Applied);
     assert_target_state(&database, target_ref, "monitoring", true).await;
-    let (slot, interval_seconds, first_delay_seconds): (i32, i32, i64) = sqlx::query_as(
-        "SELECT monitor_schedule_slot_seconds,patrol_interval_seconds, \
-                EXTRACT(EPOCH FROM (monitor_next_run_at-monitor_schedule_anchor_at))::bigint \
-         FROM collection_observation_target WHERE target_ref=$1",
+    // 首次巡查不排在「现在」，而是排在这条规则自己的相位上：同一批目标同时开监控时不会
+    // 挤在同一秒里发车。相位由规则身份决定，所以再存一次同一条规则，落点不会漂。
+    let (interval_seconds, first_delay_seconds): (i32, i64) = sqlx::query_as(
+        "SELECT revision.fixed_interval_seconds, \
+                EXTRACT(EPOCH FROM (rule.monitor_next_run_at-scope_001_now()))::bigint \
+         FROM collection_monitor_rule rule \
+         JOIN collection_monitor_rule_revision revision \
+           ON revision.rule_revision_ref=rule.active_revision_ref \
+         WHERE rule.target_ref=$1 AND rule.retired_at IS NULL",
     )
     .bind(target_ref)
     .fetch_one(database.pool())
     .await
-    .expect("stable schedule phase and first next run are persisted together");
-    assert!((0..interval_seconds).contains(&slot));
-    assert_eq!(first_delay_seconds, i64::from(slot));
+    .expect("the rule carries its own schedule phase and first next run");
+    assert!(
+        (0..i64::from(interval_seconds)).contains(&first_delay_seconds),
+        "首次巡查必须落在一个周期之内，实际 {first_delay_seconds} 秒"
+    );
+
+    let third =
+        apply_monitor_rule_command(&database, &save_rule(target_ref, 2, true, Uuid::new_v4()))
+            .await
+            .expect("the same rule is saved again");
+    assert_eq!(third.outcome, MonitorCommandOutcomeKind::Applied);
+    let replayed_delay_seconds: i64 = sqlx::query_scalar(
+        "SELECT EXTRACT(EPOCH FROM (rule.monitor_next_run_at-scope_001_now()))::bigint \
+         FROM collection_monitor_rule rule \
+         WHERE rule.target_ref=$1 AND rule.retired_at IS NULL",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the rule schedule is readable again");
+    assert_eq!(
+        replayed_delay_seconds, first_delay_seconds,
+        "相位由规则身份决定，改一次设置不该把发车时刻推走"
+    );
 }
 
 #[tokio::test]
@@ -426,10 +465,11 @@ async fn runtime_scale_projection_reads_policy_lanes_and_persisted_rule_schedule
             .collect::<Vec<_>>(),
         vec!["immediate", "scheduled", "batch"]
     );
+    // 一条规则一行，名字带口径：同一个关键词盯几个榜时，三行在页面上得分得出谁是谁。
     assert_eq!(overview.monitor_rule_schedules.len(), 1);
     assert_eq!(
         overview.monitor_rule_schedules[0].target_label,
-        "runtime-scale-rule"
+        "runtime-scale-rule · default"
     );
     assert!(overview.monitor_rule_schedules[0].next_run_at.is_some());
 }

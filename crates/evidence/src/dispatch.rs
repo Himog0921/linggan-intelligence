@@ -1128,16 +1128,21 @@ async fn revalidate_dispatch_task(
     let control: Option<DispatchControlRow> = sqlx::query_as(
         "SELECT target.platform,work_order.lane,lease.station_ref, \
                 work_order.installation_ref,work_order.account_ref, \
-                work_order.monitor_rule_revision_ref,target.active_monitor_rule_revision_ref, \
-                active_rule.automatic_enabled,target.lifecycle_state,request.requested_by, \
+                work_order.monitor_rule_revision_ref,owning_rule.active_revision_ref, \
+                current_revision.automatic_enabled,target.lifecycle_state,request.requested_by, \
                 decision.authorization_ref \
          FROM collection_work_order_lease lease \
          JOIN collection_work_order work_order USING(work_order_ref) \
          JOIN collection_observation_target target USING(target_ref) \
          JOIN collection_admission_decision decision USING(decision_ref) \
          JOIN collection_acquisition_request request USING(request_ref) \
-         LEFT JOIN collection_monitor_rule_revision active_rule \
-           ON active_rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+         -- 与发租那一处同一个判据：比的是**同一条规则**的当前版本。
+         LEFT JOIN collection_monitor_rule_revision frozen \
+           ON frozen.rule_revision_ref=work_order.monitor_rule_revision_ref \
+         LEFT JOIN collection_monitor_rule owning_rule \
+           ON owning_rule.rule_ref=frozen.rule_ref AND owning_rule.retired_at IS NULL \
+         LEFT JOIN collection_monitor_rule_revision current_revision \
+           ON current_revision.rule_revision_ref=owning_rule.active_revision_ref \
          WHERE lease.lease_ref=$1 AND lease.released_at IS NULL \
            AND lease.expires_at>scope_001_now() FOR UPDATE OF lease,target",
     )

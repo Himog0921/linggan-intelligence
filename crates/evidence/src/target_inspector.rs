@@ -190,12 +190,22 @@ pub async fn read_target_inspector(
         .fetch_one(&mut *tx)
         .await
         .map_err(map_schema_error)?;
+    // 派发时刻与下次巡查住在**规则**上（`0078`）：一个关键词可以有几条口径各跑各的周期。
+    // 检查器头部讲的是目标，所以这里把几条规则收成一句话——最近一次派发是它们里最近的，
+    // 下次巡查是它们里最早的那个。
     let target = sqlx::query(
-        "SELECT target_ref,target_kind,monitoring_enabled, \
-                linggan_human_moment(last_patrol_dispatched_at) AS last_patrol_dispatched_at, \
-                linggan_human_moment(last_patrol_succeeded_at) AS last_patrol_succeeded_at, \
-                CASE WHEN monitoring_enabled THEN linggan_human_moment(monitor_next_run_at) END AS next_run_at \
-         FROM collection_observation_target WHERE target_ref=$1 AND first_stored_at <= $2::timestamptz",
+        "SELECT target.target_ref,target.target_kind,target.monitoring_enabled, \
+                linggan_human_moment(rules.last_dispatched_at) AS last_patrol_dispatched_at, \
+                linggan_human_moment(target.last_patrol_succeeded_at) AS last_patrol_succeeded_at, \
+                CASE WHEN target.monitoring_enabled \
+                     THEN linggan_human_moment(rules.next_run_at) END AS next_run_at \
+         FROM collection_observation_target target \
+         LEFT JOIN LATERAL ( \
+             SELECT max(rule.last_patrol_dispatched_at) AS last_dispatched_at, \
+                    min(rule.monitor_next_run_at) AS next_run_at \
+               FROM collection_monitor_rule rule \
+              WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
+         WHERE target.target_ref=$1 AND target.first_stored_at <= $2::timestamptz",
     )
     .bind(target_ref)
     .bind(&as_of)

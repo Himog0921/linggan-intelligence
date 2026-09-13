@@ -242,8 +242,16 @@ async fn read_frozen_works(
                     WHERE current_binding.account_ref=work.account_ref \
                       AND current_binding.installation_ref=work.installation_ref \
                       AND current_binding.ended_at IS NULL) END AS account_is_current, \
+                -- 「这张工单绑的规则还是当前的吗」比的是**同一条规则**的当前版本，
+                -- 不是目标的某一条规则：一个关键词可以同时盯几个榜。规则被停用时为假。
                 CASE WHEN work.monitor_rule_revision_ref IS NULL THEN NULL \
-                     ELSE target.active_monitor_rule_revision_ref=work.monitor_rule_revision_ref \
+                     ELSE EXISTS ( \
+                       SELECT 1 FROM collection_monitor_rule_revision frozen \
+                       JOIN collection_monitor_rule owning_rule \
+                         ON owning_rule.rule_ref=frozen.rule_ref \
+                        AND owning_rule.retired_at IS NULL \
+                       WHERE frozen.rule_revision_ref=work.monitor_rule_revision_ref \
+                         AND owning_rule.active_revision_ref=work.monitor_rule_revision_ref) \
                      END AS rule_is_current,work.created_at::text AS created_at \
          FROM recent_work work \
          JOIN collection_observation_target target USING(target_ref) \

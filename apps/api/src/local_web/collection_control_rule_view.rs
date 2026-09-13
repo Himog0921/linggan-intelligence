@@ -175,9 +175,16 @@ pub async fn read_monitor_rule_panel(
         return Ok(MonitorRulePanelRead::SchemaUnavailable);
     }
     let target = sqlx::query(
-        "SELECT target_ref,target_kind,identity_key,COALESCE(NULLIF(btrim(display_name),''),identity_key) AS target_name, \
-                lifecycle_state,active_monitor_rule_revision_ref \
-         FROM collection_observation_target WHERE target_ref=$1",
+        // 预填用最早建的那条在用规则。一个目标可以有几条口径（`0076`），面板本身一次只
+        // 编辑一条——存的时候按排序决定落到哪条口径上，选一个新排序就是新开一条。
+        // 单规则目标（博主永远如此）与从前完全一样。检查器的规则台负责把几条都列出来。
+        "SELECT target.target_ref,target.target_kind,target.identity_key, \
+                COALESCE(NULLIF(btrim(target.display_name),''),target.identity_key) AS target_name, \
+                target.lifecycle_state, \
+                (SELECT rule.active_revision_ref FROM collection_monitor_rule rule \
+                  WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
+                  ORDER BY rule.created_at,rule.rule_ref LIMIT 1) AS active_monitor_rule_revision_ref \
+         FROM collection_observation_target target WHERE target.target_ref=$1",
     )
     .bind(target_ref)
     .fetch_optional(database.pool())

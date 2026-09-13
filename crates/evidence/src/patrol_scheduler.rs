@@ -12,11 +12,7 @@
 //! 3. **调度不绕过授权链**。它做的事与人点一次按钮完全一样——申请、准入、工单、租约，
 //!    一步不少。自动化不是豁免权：如果准入说资源不够，调度也只能等。
 
-use crate::acquisition_chain::{
-    RequestLeaseError, request_admit_and_lease, request_and_admit_in_transaction,
-};
 use crate::collection_control::{ComparableObservationRound, DynamicCadence, dynamic_cadence};
-use crate::work_order_lease::LeaseError;
 use linggan_contracts::AdmissionOutcome;
 use linggan_storage_postgres::Database;
 use uuid::Uuid;
@@ -49,8 +45,6 @@ pub struct SchedulerHeartbeat {
 const PATROL_PAGE_SIZE: i64 = 50;
 // Retained only while the pre-0036 scheduler helper remains compiled for
 // historical test fixtures; the live path above does not pre-lease work.
-const PATROL_LEASE_MINUTES: i32 = 30;
-const PATROL_MAX_CONSIDERED_PER_TICK: usize = 500;
 
 pub async fn patrol_schema_is_ready(database: &Database) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>(
@@ -319,7 +313,18 @@ async fn queue_one_due_rule(
             ),
         },
         Err(crate::acquisition_chain::AcquisitionChainError::Database(error)) => return Err(error),
-        Err(_) => ("rejected", "target_not_requestable", None, false),
+        // **每种准入失败说出自己的原因。**
+        //
+        // 此前这里是 `Err(_) => "target_not_requestable"`：一个字符串吞掉了「这个目标还没
+        // 归属领域」「授权没签」「授权额度不够 200 篇」「schema 没装」「目标不存在」全部
+        // 情况。界面上只看到「目标不可请求」——而真实原因是目标没有领域，排查多花了两轮。
+        // 一个压平的原因码比没有原因码更坏：它看起来是个答案。
+        Err(error) => (
+            "rejected",
+            scheduler_admission_failure_reason(&error),
+            None,
+            false,
+        ),
     };
 
     if let Some(work_order_ref) = work_order_ref {
@@ -396,228 +401,6 @@ async fn queue_one_due_rule(
     .await?;
     transaction.commit().await?;
     Ok((outcome, reason_code, target_ref, work_order_ref))
-}
-
-#[allow(dead_code)]
-async fn legacy_run_due_patrols_inner(
-    database: &Database,
-) -> Result<PatrolTickSummary, sqlx::Error> {
-    if !patrol_schema_is_ready(database).await? {
-        return Ok(PatrolTickSummary::default());
-    }
-    // Persist the expiry before deciding whether an archiving target needs a bounded recovery.
-    // The old rows remain the history; a recovery creates a new Work Order and lease.
-    sqlx::query(
-        "UPDATE collection_work_order_lease SET released_at=expires_at,release_reason='expired' \
-         WHERE released_at IS NULL AND expires_at <= scope_001_now()",
-    )
-    .execute(database.pool())
-    .await?;
-    let scheduler_run_ref = Uuid::new_v4();
-    sqlx::query(
-        "INSERT INTO collection_scheduler_run (scheduler_run_ref,scheduler_key) \
-         VALUES ($1,'patrol')",
-    )
-    .bind(scheduler_run_ref)
-    .execute(database.pool())
-    .await?;
-
-    type CandidateRow = (
-        Uuid,
-        String,
-        Option<Uuid>,
-        Option<String>,
-        Option<bool>,
-        Option<bool>,
-        Option<i32>,
-        Option<i32>,
-    );
-    let mut considered_refs: Vec<Uuid> = Vec::new();
-    let mut summary = PatrolTickSummary::default();
-    while considered_refs.len() < PATROL_MAX_CONSIDERED_PER_TICK {
-        let page: Vec<CandidateRow> = sqlx::query_as(
-            "SELECT target.target_ref,target.lifecycle_state, \
-                    target.active_monitor_rule_revision_ref,rule.mode,rule.automatic_enabled, \
-                    CASE WHEN rule.rule_revision_ref IS NULL THEN false ELSE ( \
-                      ((EXTRACT(ISODOW FROM scope_001_now() AT TIME ZONE rule.timezone)<6 \
-                         AND rule.run_on_weekdays) OR \
-                       (EXTRACT(ISODOW FROM scope_001_now() AT TIME ZONE rule.timezone)>=6 \
-                         AND rule.run_on_weekends)) \
-                      AND (rule.all_day OR \
-                           ((EXTRACT(HOUR FROM scope_001_now() AT TIME ZONE rule.timezone)::integer*60) \
-                             + EXTRACT(MINUTE FROM scope_001_now() AT TIME ZONE rule.timezone)::integer) \
-                               >= rule.window_start_minute \
-                           AND ((EXTRACT(HOUR FROM scope_001_now() AT TIME ZONE rule.timezone)::integer*60) \
-                             + EXTRACT(MINUTE FROM scope_001_now() AT TIME ZONE rule.timezone)::integer) \
-                               < rule.window_end_minute)) END, \
-                    rule.fixed_interval_seconds,rule.fallback_interval_seconds \
-             FROM collection_observation_target target \
-             LEFT JOIN collection_monitor_rule_revision rule \
-               ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
-             WHERE target.monitoring_enabled \
-               AND NOT (target.target_ref=ANY($1)) \
-               AND NOT EXISTS (SELECT 1 FROM collection_scheduler_target_decision prior \
-                               WHERE prior.target_ref=target.target_ref \
-                                 AND prior.next_eligible_at>scope_001_now()) \
-             ORDER BY target.last_scheduler_considered_at NULLS FIRST,target.target_ref \
-             LIMIT $2",
-        )
-        .bind(&considered_refs)
-        .bind(PATROL_PAGE_SIZE)
-        .fetch_all(database.pool())
-        .await?;
-        if page.is_empty() {
-            break;
-        }
-        for (
-            target_ref,
-            lifecycle_state,
-            rule_revision_ref,
-            mode,
-            automatic_enabled,
-            schedule_open,
-            fixed_interval_seconds,
-            fallback_interval_seconds,
-        ) in page
-        {
-            considered_refs.push(target_ref);
-            let mut cadence_source: Option<&'static str> = None;
-            let mut effective_interval_seconds: Option<i32> = None;
-            let mut dynamic_reason_code: Option<&'static str> = None;
-            let (outcome, reason_code, work_order_ref, lease_ref, retry_after_seconds) =
-                if rule_revision_ref.is_none() {
-                    ("rejected", "rule_missing", None, None, 300)
-                } else if automatic_enabled != Some(true) {
-                    (
-                        "skipped",
-                        if mode.as_deref() == Some("manual_only") {
-                            "manual_only"
-                        } else {
-                            "monitoring_paused"
-                        },
-                        None,
-                        None,
-                        300,
-                    )
-                } else if lifecycle_state != "monitoring" {
-                    ("rejected", "target_not_requestable", None, None, 300)
-                } else if schedule_open != Some(true) {
-                    ("deferred", "not_due", None, None, 300)
-                } else {
-                    let interval_seconds = match mode.as_deref() {
-                        Some("fixed") => {
-                            cadence_source = Some("fixed");
-                            fixed_interval_seconds
-                        }
-                        Some("dynamic") => match read_dynamic_cadence_for_rule(
-                            database,
-                            target_ref,
-                            rule_revision_ref.expect("checked rule"),
-                        )
-                        .await?
-                        {
-                            DynamicCadence::Available { interval_seconds } => {
-                                cadence_source = Some("dynamic");
-                                Some(interval_seconds)
-                            }
-                            DynamicCadence::Unavailable { reason_code } => {
-                                cadence_source = Some("fixed_fallback");
-                                dynamic_reason_code = Some(reason_code);
-                                fallback_interval_seconds
-                            }
-                        },
-                        _ => None,
-                    };
-                    if let Some(interval_seconds) = interval_seconds {
-                        effective_interval_seconds = Some(interval_seconds);
-                        let seconds_until_due: i64 = sqlx::query_scalar(
-                        "SELECT CASE WHEN last_patrol_dispatched_at IS NULL THEN 0 ELSE \
-                             GREATEST(0,CEIL(EXTRACT(EPOCH FROM \
-                               (last_patrol_dispatched_at+make_interval(secs=>$2)-scope_001_now()))))::bigint END \
-                         FROM collection_observation_target WHERE target_ref=$1",
-                    )
-                    .bind(target_ref)
-                    .bind(interval_seconds)
-                    .fetch_one(database.pool())
-                    .await?;
-                        if seconds_until_due > 0 {
-                            (
-                                "deferred",
-                                "not_due",
-                                None,
-                                None,
-                                i32::try_from(seconds_until_due).unwrap_or(i32::MAX),
-                            )
-                        } else {
-                            match dispatch_one(database, target_ref).await {
-                                Ok((work_order_ref, lease_ref)) => {
-                                    summary.dispatched.push(target_ref);
-                                    (
-                                        "dispatched",
-                                        "dispatched",
-                                        Some(work_order_ref),
-                                        Some(lease_ref),
-                                        interval_seconds,
-                                    )
-                                }
-                                Err(reason_code) => ("rejected", reason_code, None, None, 300),
-                            }
-                        }
-                    } else {
-                        cadence_source = None;
-                        ("rejected", "manual_only", None, None, 300)
-                    }
-                };
-            if outcome != "dispatched" {
-                summary.skipped.push((target_ref, reason_code.to_owned()));
-            }
-
-            sqlx::query(
-                "WITH considered AS ( \
-                   UPDATE collection_observation_target \
-                   SET last_scheduler_considered_at=scope_001_now() WHERE target_ref=$2) \
-                 INSERT INTO collection_scheduler_target_decision \
-                   (target_decision_ref,scheduler_run_ref,target_ref,rule_revision_ref, \
-                    outcome,reason_code,cadence_source,effective_interval_seconds, \
-                    dynamic_reason_code,next_eligible_at,work_order_ref,lease_ref) \
-                 VALUES ($1,$3,$2,$4,$5,$6,$7,$8,$9, \
-                         scope_001_now()+make_interval(secs=>$10),$11,$12)",
-            )
-            .bind(Uuid::new_v4())
-            .bind(target_ref)
-            .bind(scheduler_run_ref)
-            .bind(rule_revision_ref)
-            .bind(outcome)
-            .bind(reason_code)
-            .bind(cadence_source)
-            .bind(effective_interval_seconds)
-            .bind(dynamic_reason_code)
-            .bind(retry_after_seconds)
-            .bind(work_order_ref)
-            .bind(lease_ref)
-            .execute(database.pool())
-            .await?;
-        }
-    }
-
-    let run_outcome = if summary.dispatched.is_empty() && summary.skipped.is_empty() {
-        "idle"
-    } else if summary.skipped.is_empty() {
-        "dispatched"
-    } else {
-        "partial"
-    };
-    sqlx::query(
-        "UPDATE collection_scheduler_run SET completed_at=scope_001_now(),outcome=$2, \
-             considered_count=$3,dispatched_count=$4 WHERE scheduler_run_ref=$1",
-    )
-    .bind(scheduler_run_ref)
-    .bind(run_outcome)
-    .bind(i32::try_from(considered_refs.len()).unwrap_or(i32::MAX))
-    .bind(i32::try_from(summary.dispatched.len()).unwrap_or(i32::MAX))
-    .execute(database.pool())
-    .await?;
-    Ok(summary)
 }
 
 /// Read the exact, durable observations that are eligible to teach a dynamic cadence. The
@@ -729,78 +512,6 @@ pub async fn read_dynamic_cadence_for_rule(
     ))
 }
 
-/// 为一个到期目标走完整条授权链。
-///
-/// **自动化不是豁免权**：它走的路与人点一次按钮完全一样。准入若说资源不够、风险暂停生效
-/// 或额度触顶，调度也只能记下理由然后等——不会因为「是定时任务」就放行。
-async fn dispatch_one(database: &Database, target_ref: Uuid) -> Result<(Uuid, Uuid), &'static str> {
-    let execution = // 申请人是 `agent` 而不是 `person`：调度器不是人。合同写着「Agent 可以提出需要，
-    // 不能自行扩大观察面」——调度器提出巡检申请正是这个位置：它能申请，能不能跑仍由
-    // 准入决定。记成 person 会让追责链指向一个当时并不在场的人。
-    request_admit_and_lease(
-        database,
-        target_ref,
-        "patrol",
-        "定时巡检",
-        "agent",
-        PATROL_LEASE_MINUTES,
-    )
-    .await
-    .map_err(scheduler_error_code)?;
-
-    let AdmissionOutcome::Admitted { .. } = execution.request.outcome else {
-        return Err(scheduler_decision_reason(execution.request.reason_code));
-    };
-    let Some(work_order_ref) = execution.request.work_order_ref else {
-        return Err("admission_refused");
-    };
-    let Some(lease) = execution.lease else {
-        return Err("lease_issue_failed");
-    };
-
-    Ok((work_order_ref, lease.lease_ref))
-}
-
-fn scheduler_error_code(error: RequestLeaseError) -> &'static str {
-    match error {
-        RequestLeaseError::Lease(LeaseError::ControlBlocked { reason_code }) => {
-            match reason_code.as_str() {
-                "risk_paused" => "risk_paused",
-                "station_unavailable" => "station_unavailable",
-                "station_not_accepting" => "station_not_accepting",
-                "installation_credential_missing" => "installation_credential_missing",
-                "plugin_version_unsupported" => "plugin_version_unsupported",
-                "installation_stale" => "installation_stale",
-                "capability_missing" => "capability_missing",
-                "account_unbound" => "account_unbound",
-                "account_binding_changed" => "account_binding_changed",
-                "account_binding_expired" => "account_binding_expired",
-                "account_eligibility_stale" => "account_eligibility_stale",
-                "account_cooling" => "account_cooling",
-                "account_needs_login" => "account_needs_login",
-                "account_restricted" => "account_restricted",
-                "account_unknown" => "account_unknown",
-                "account_busy" => "account_busy",
-                "station_busy" => "station_busy",
-                "station_daily_budget_reached" => "station_daily_budget_reached",
-                "rule_revision_changed" => "rule_revision_changed",
-                "monitoring_paused" => "monitoring_paused",
-                "authorization_expired_or_revoked" => "authorization_expired_or_revoked",
-                "target_not_requestable" => "target_not_requestable",
-                _ => "lease_issue_failed",
-            }
-        }
-        RequestLeaseError::Lease(LeaseError::AuthorizationLapsed) => {
-            "authorization_expired_or_revoked"
-        }
-        RequestLeaseError::Lease(_) => "lease_issue_failed",
-        RequestLeaseError::Acquisition(
-            crate::acquisition_chain::AcquisitionChainError::TargetNotRequestable { .. },
-        ) => "target_not_requestable",
-        RequestLeaseError::Acquisition(_) => "database_error",
-    }
-}
-
 fn scheduler_decision_reason(value: &str) -> &'static str {
     match value {
         "authorization_missing" => "authorization_missing",
@@ -846,24 +557,24 @@ pub async fn set_monitoring_for_many(
         return Ok(0);
     }
     let query = if enabled {
+        // 开观察：目标级开关打开，条件是它至少有一条自动巡检开着的规则——没有规则可跑的
+        // 目标「在观察中」是一句空话。排期由规则自己持有，这里不再复制一份到目标行。
         "UPDATE collection_observation_target target \
          SET monitoring_enabled=true, lifecycle_state='monitoring', \
-             lifecycle_changed_at=scope_001_now(), \
-             monitor_schedule_anchor_at=COALESCE(monitor_schedule_anchor_at,scope_001_now()), \
-             monitor_next_run_at=COALESCE( \
-                 monitor_next_run_at,scope_001_now()+make_interval(secs=>patrol_interval_seconds)) \
-         FROM collection_monitor_rule_revision rule \
+             lifecycle_changed_at=scope_001_now() \
          WHERE target.target_ref=ANY($1) \
-           AND rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
-           AND rule.automatic_enabled \
-           AND target.lifecycle_state <> 'dismissed'"
+           AND target.lifecycle_state <> 'dismissed' \
+           AND EXISTS (SELECT 1 FROM collection_monitor_rule rule \
+                       JOIN collection_monitor_rule_revision revision \
+                         ON revision.rule_revision_ref=rule.active_revision_ref \
+                       WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
+                         AND revision.automatic_enabled)"
     } else {
         "UPDATE collection_observation_target \
          SET monitoring_enabled=false, \
              lifecycle_state=CASE WHEN lifecycle_state='monitoring' THEN 'paused' ELSE lifecycle_state END, \
              lifecycle_changed_at=CASE WHEN lifecycle_state='monitoring' THEN scope_001_now() \
-                                       ELSE lifecycle_changed_at END, \
-             monitor_next_run_at=NULL \
+                                       ELSE lifecycle_changed_at END \
          WHERE target_ref=ANY($1)"
     };
     Ok(sqlx::query(query)
@@ -920,15 +631,14 @@ pub async fn set_target_monitoring(
         sqlx::query(
             "UPDATE collection_observation_target target \
              SET monitoring_enabled=true,lifecycle_state='monitoring', \
-                 lifecycle_changed_at=scope_001_now(), \
-                 monitor_schedule_anchor_at=COALESCE(monitor_schedule_anchor_at,scope_001_now()), \
-                 monitor_next_run_at=COALESCE( \
-                     monitor_next_run_at,scope_001_now()+make_interval(secs=>patrol_interval_seconds)) \
-             FROM collection_monitor_rule_revision rule \
+                 lifecycle_changed_at=scope_001_now() \
              WHERE target.target_ref=$1 \
-               AND rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
-               AND rule.automatic_enabled \
-               AND target.lifecycle_state <> 'dismissed'",
+               AND target.lifecycle_state <> 'dismissed' \
+               AND EXISTS (SELECT 1 FROM collection_monitor_rule rule \
+                           JOIN collection_monitor_rule_revision revision \
+                             ON revision.rule_revision_ref=rule.active_revision_ref \
+                           WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
+                             AND revision.automatic_enabled)",
         )
         .bind(target_ref)
         .execute(database.pool())
@@ -939,8 +649,7 @@ pub async fn set_target_monitoring(
              SET monitoring_enabled=false, \
                  lifecycle_state=CASE WHEN lifecycle_state='monitoring' THEN 'paused' ELSE lifecycle_state END, \
                  lifecycle_changed_at=CASE WHEN lifecycle_state='monitoring' THEN scope_001_now() \
-                                           ELSE lifecycle_changed_at END, \
-                 monitor_next_run_at=NULL \
+                                           ELSE lifecycle_changed_at END \
              WHERE target_ref=$1",
         )
         .bind(target_ref)
@@ -948,4 +657,30 @@ pub async fn set_target_monitoring(
         .await?;
     }
     Ok(())
+}
+
+/// 准入直接报错（还没走到决策）时，如实说出是哪一种。
+///
+/// 返回的是闭集里的机器原因码，与决策上持久化的那一套同源——调度写进
+/// `collection_scheduler_target_decision.reason_code`，界面按它显示。
+fn scheduler_admission_failure_reason(
+    error: &crate::acquisition_chain::AcquisitionChainError,
+) -> &'static str {
+    use crate::acquisition_chain::AcquisitionChainError as Failure;
+    match error {
+        Failure::SchemaUnavailable => "acquisition_schema_unavailable",
+        Failure::UnknownTarget => "unknown_target",
+        Failure::TargetDomainUnassigned => "target_domain_unassigned",
+        Failure::TargetNotRequestable { .. } => "target_not_requestable",
+        Failure::InvalidMaterialTargets => "invalid_material_targets",
+        Failure::ProgressiveArchiveAuthorizationTooSmall { .. } => "authorization_bound_too_small",
+        Failure::ProgressiveArchiveAuthorizationMissing => "authorization_missing",
+        Failure::ProgressiveArchivePurposeMismatch => "progressive_purpose_mismatch",
+        Failure::ProgressiveArchiveNotReady { .. } => "progressive_archive_not_ready",
+        // 数据库错误在调用点上一条 match 臂就 `return Err` 了，走不到这里。仍然显式写出
+        // 而不是留 `_`：留了兜底，将来新增一个错误变体时编译器不会拦，它会悄悄落进通用桶。
+        // 用词表里既有的 `database_error`——**不为一个走不到的分支往闭集里新造一个词**，
+        // 那等于在词表里留一个永远不会出现的答案。
+        Failure::Database(_) => "database_error",
+    }
 }

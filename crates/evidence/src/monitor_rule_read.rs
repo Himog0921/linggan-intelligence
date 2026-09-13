@@ -14,7 +14,6 @@ pub struct MonitorRuleSummary {
     pub rule_ref: Uuid,
     /// 口径：关键词是排序键，博主是 `primary`。
     pub slot_key: String,
-    pub is_primary: bool,
     /// 自动巡检开着没有。关掉的规则仍然留着——它签发过的工单与材料还挂在它的版本上。
     pub automatic_enabled: bool,
     /// 多久跑一次（秒）。读不到时为 `None`，不编一个默认值。
@@ -44,7 +43,7 @@ pub async fn read_target_monitor_rules(
         return Ok(None);
     }
     let rows: Vec<MonitorRuleRow> = sqlx::query_as(
-        "SELECT rule.rule_ref,rule.slot_key,rule.is_primary, \
+        "SELECT rule.rule_ref,rule.slot_key, \
                 revision.automatic_enabled, \
                 CASE WHEN revision.mode='fixed' THEN revision.fixed_interval_seconds \
                      ELSE revision.fallback_interval_seconds END AS interval_seconds, \
@@ -55,7 +54,7 @@ pub async fn read_target_monitor_rules(
          LEFT JOIN collection_monitor_rule_revision revision \
                 ON revision.rule_revision_ref=rule.active_revision_ref \
          WHERE rule.target_ref=$1 AND rule.retired_at IS NULL \
-         ORDER BY rule.is_primary DESC,rule.slot_key",
+         ORDER BY rule.created_at,rule.slot_key",
     )
     .bind(target_ref)
     .fetch_all(database.pool())
@@ -65,14 +64,13 @@ pub async fn read_target_monitor_rules(
             .map(|row| MonitorRuleSummary {
                 rule_ref: row.0,
                 slot_key: row.1,
-                is_primary: row.2,
-                automatic_enabled: row.3.unwrap_or(false),
-                interval_seconds: row.4,
-                scroll_rounds: row.5,
-                top_by_likes: row.6,
-                published_within_days: row.7,
-                next_run_at: row.8,
-                last_succeeded_at: row.9,
+                automatic_enabled: row.2.unwrap_or(false),
+                interval_seconds: row.3,
+                scroll_rounds: row.4,
+                top_by_likes: row.5,
+                published_within_days: row.6,
+                next_run_at: row.7,
+                last_succeeded_at: row.8,
             })
             .collect(),
     ))
@@ -81,7 +79,6 @@ pub async fn read_target_monitor_rules(
 type MonitorRuleRow = (
     Uuid,
     String,
-    bool,
     Option<bool>,
     Option<i32>,
     Option<i32>,
@@ -106,26 +103,26 @@ pub enum MonitorRuleRetireError {
 /// **不删**：它签发过的工单与材料还挂在它的版本上，删掉等于让那些材料说不清是按什么口径
 /// 取回来的。停用只是不再排期。
 ///
-/// 监控中的目标不允许把最后一条规则停掉——`0042` 之后的那两条 CHECK 守的正是「监控中
-/// 必须有规则」。要停最后一条，先停止观察这个目标。
+/// 观察中的目标不允许把最后一条规则停掉：调度按规则算到期，一条规则都没有的目标
+/// 「在观察中」是一句空话。要完全停下来，用观察开关停止观察——那是另一个决定。
 pub async fn retire_monitor_rule(
     database: &Database,
     target_ref: Uuid,
     rule_ref: Uuid,
 ) -> Result<(), MonitorRuleRetireError> {
     let mut transaction = database.pool().begin().await?;
-    let belongs: Option<bool> = sqlx::query_scalar(
-        "SELECT is_primary FROM collection_monitor_rule \
+    let belongs: Option<Uuid> = sqlx::query_scalar(
+        "SELECT rule_ref FROM collection_monitor_rule \
          WHERE rule_ref=$1 AND target_ref=$2 AND retired_at IS NULL FOR UPDATE",
     )
     .bind(rule_ref)
     .bind(target_ref)
     .fetch_optional(&mut *transaction)
     .await?;
-    let Some(is_primary) = belongs else {
+    if belongs.is_none() {
         transaction.rollback().await?;
         return Err(MonitorRuleRetireError::UnknownRule);
-    };
+    }
     let (live_rules, monitoring): (i64, bool) = sqlx::query_as(
         "SELECT (SELECT count(*) FROM collection_monitor_rule \
                   WHERE target_ref=$1 AND retired_at IS NULL), \
@@ -139,6 +136,11 @@ pub async fn retire_monitor_rule(
         transaction.rollback().await?;
         return Err(MonitorRuleRetireError::LastRuleOfAMonitoredTarget);
     }
+    // 停用只是不再排期。**不删**：它签发过的工单与材料还挂在它的版本上，删掉等于让那些
+    // 材料说不清是按什么口径取回来的。
+    //
+    // 规则之间没有主次（`0078` 取消了 `is_primary`），所以停哪一条都不需要交接——
+    // 剩下的规则各自照旧按自己的周期跑。
     sqlx::query(
         "UPDATE collection_monitor_rule \
          SET retired_at=scope_001_now(),monitor_next_run_at=NULL WHERE rule_ref=$1",
@@ -146,41 +148,6 @@ pub async fn retire_monitor_rule(
     .bind(rule_ref)
     .execute(&mut *transaction)
     .await?;
-
-    // 停掉的是首要规则时，**必须把首要位交给还在的那条**。
-    //
-    // 目标行上的 `active_monitor_rule_revision_ref` 指着首要规则的当前版本，全项目有五处
-    // 把它当作「这个目标的规则」在读（发租的取样口径、派发的规则闸、运行产能、管理巡查
-    // 面板）。留下一个没有首要规则的目标，那五处会一直读着一条已经停用的规则的版本——
-    // 而界面上这条规则已经不在列表里了，没人看得出它还在影响什么。
-    if is_primary {
-        let promoted: Option<(Uuid, Option<Uuid>)> = sqlx::query_as(
-            "SELECT rule_ref,active_revision_ref FROM collection_monitor_rule \
-             WHERE target_ref=$1 AND retired_at IS NULL \
-             ORDER BY created_at,rule_ref LIMIT 1",
-        )
-        .bind(target_ref)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        let Some((promoted_rule_ref, promoted_revision_ref)) = promoted else {
-            // 上面的闸门保证监控中的目标至少还留着一条；走到这里说明目标没在监控，
-            // 那就没有首要规则可言，也没有谁在读那个指针。
-            transaction.commit().await?;
-            return Ok(());
-        };
-        sqlx::query("UPDATE collection_monitor_rule SET is_primary=true WHERE rule_ref=$1")
-            .bind(promoted_rule_ref)
-            .execute(&mut *transaction)
-            .await?;
-        sqlx::query(
-            "UPDATE collection_observation_target \
-             SET active_monitor_rule_revision_ref=$2 WHERE target_ref=$1",
-        )
-        .bind(target_ref)
-        .bind(promoted_revision_ref)
-        .execute(&mut *transaction)
-        .await?;
-    }
     transaction.commit().await?;
     Ok(())
 }

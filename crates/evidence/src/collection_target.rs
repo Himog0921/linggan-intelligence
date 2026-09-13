@@ -263,17 +263,28 @@ pub struct TargetCounts {
 // The domain table is intentionally split into two static projections. PostgreSQL resolves
 // table references while planning a statement, so a left join cannot safely stand in for a
 // migration that has not been applied yet.
+/// 列表一行要读的列。
+///
+/// 「下次巡查」「上次派发」「巡检开着没有」都是**对这个目标所有在用规则的聚合**：
+/// 下次取最早到期的那条，上次取最近派发过的那条，开关是「有没有一条自动巡检开着」。
+/// 此前它们读的是目标行上那份副本，而调度只推进规则行——下一次巡检排出去之后两处分叉，
+/// 界面上会永远停在一个越来越旧的过去时间。副本已在 `0078` 删除，这里只剩一个真相。
+///
+/// `bool_or` 在**一条规则都没有**时返回 NULL 而不是 false，所以外面套了一层 `COALESCE`：
+/// 「自动巡查」这一列在 Rust 侧是非空布尔，读到 NULL 不是显示成假，是整条查询解码失败。
+/// `0078` 删掉了「监控中必须有规则」那两条 CHECK（调度遍历规则，没有规则自然不产到期项），
+/// 于是这个状态在数据库层面变成合法的了——读取侧必须自己接得住。
 macro_rules! listed_target_columns {
     () => {
         "target.target_ref, target.platform, target.target_kind, target.identity_key, \
          target.display_name, target.identity_facts, target.source, target.lifecycle_state, \
          target.first_stored_at::text, \
-         (target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false)), \
+         (target.monitoring_enabled AND rules.automatic_any), \
          target.group_name, \
-         linggan_human_moment(target.last_patrol_dispatched_at), \
+         linggan_human_moment(rules.last_dispatched_at), \
          linggan_human_moment(target.last_patrol_succeeded_at), \
-         CASE WHEN target.monitoring_enabled AND COALESCE(rule.automatic_enabled,false) \
-              THEN linggan_human_moment(target.monitor_next_run_at) END"
+         CASE WHEN target.monitoring_enabled AND rules.automatic_any \
+              THEN linggan_human_moment(rules.next_run_at) END"
     };
 }
 
@@ -285,8 +296,15 @@ const READ_TARGET_WITH_DOMAIN: &str = concat!(
     listed_target_columns!(),
     ", domain.name, domain.is_own_domain \
      FROM collection_observation_target target \
-     LEFT JOIN collection_monitor_rule_revision rule \
-       ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+     LEFT JOIN LATERAL ( \
+       SELECT COALESCE(bool_or(COALESCE(revision.automatic_enabled,false)),false) \
+                AS automatic_any, \
+              min(rule.monitor_next_run_at) AS next_run_at, \
+              max(rule.last_patrol_dispatched_at) AS last_dispatched_at \
+       FROM collection_monitor_rule rule \
+       LEFT JOIN collection_monitor_rule_revision revision \
+              ON revision.rule_revision_ref=rule.active_revision_ref \
+       WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
      LEFT JOIN observation_domain domain \
        ON domain.domain_ref = COALESCE(target.domain_ref, \
             (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) \
@@ -297,8 +315,15 @@ const READ_TARGET_WITHOUT_DOMAIN: &str = concat!(
     listed_target_columns!(),
     ", NULL::text, NULL::boolean \
      FROM collection_observation_target target \
-     LEFT JOIN collection_monitor_rule_revision rule \
-       ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+     LEFT JOIN LATERAL ( \
+       SELECT COALESCE(bool_or(COALESCE(revision.automatic_enabled,false)),false) \
+                AS automatic_any, \
+              min(rule.monitor_next_run_at) AS next_run_at, \
+              max(rule.last_patrol_dispatched_at) AS last_dispatched_at \
+       FROM collection_monitor_rule rule \
+       LEFT JOIN collection_monitor_rule_revision revision \
+              ON revision.rule_revision_ref=rule.active_revision_ref \
+       WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
      WHERE target.target_ref = $1"
 );
 const LIST_TARGETS_WITH_DOMAIN: &str = concat!(
@@ -306,8 +331,15 @@ const LIST_TARGETS_WITH_DOMAIN: &str = concat!(
     listed_target_columns!(),
     ", domain.name, domain.is_own_domain \
      FROM collection_observation_target target \
-     LEFT JOIN collection_monitor_rule_revision rule \
-       ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+     LEFT JOIN LATERAL ( \
+       SELECT COALESCE(bool_or(COALESCE(revision.automatic_enabled,false)),false) \
+                AS automatic_any, \
+              min(rule.monitor_next_run_at) AS next_run_at, \
+              max(rule.last_patrol_dispatched_at) AS last_dispatched_at \
+       FROM collection_monitor_rule rule \
+       LEFT JOIN collection_monitor_rule_revision revision \
+              ON revision.rule_revision_ref=rule.active_revision_ref \
+       WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
      LEFT JOIN observation_domain domain \
        ON domain.domain_ref = COALESCE(target.domain_ref, \
             (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) \
@@ -322,8 +354,15 @@ const LIST_TARGETS_WITHOUT_DOMAIN: &str = concat!(
     listed_target_columns!(),
     ", NULL::text, NULL::boolean \
      FROM collection_observation_target target \
-     LEFT JOIN collection_monitor_rule_revision rule \
-       ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+     LEFT JOIN LATERAL ( \
+       SELECT COALESCE(bool_or(COALESCE(revision.automatic_enabled,false)),false) \
+                AS automatic_any, \
+              min(rule.monitor_next_run_at) AS next_run_at, \
+              max(rule.last_patrol_dispatched_at) AS last_dispatched_at \
+       FROM collection_monitor_rule rule \
+       LEFT JOIN collection_monitor_rule_revision revision \
+              ON revision.rule_revision_ref=rule.active_revision_ref \
+       WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
      WHERE ($1::text IS NULL OR target.target_kind = $1) \
        AND ($2::text IS NULL OR target.lifecycle_state = $2) \
        AND $4::uuid IS NULL \
@@ -374,21 +413,25 @@ pub async fn count_targets(
                 count(*) FILTER (WHERE target.target_kind = 'creator'), \
                 count(*) FILTER (WHERE target.target_kind = 'keyword'), \
                 count(*) FILTER (WHERE target.lifecycle_state = 'archiving'), \
-                count(*) FILTER (WHERE target.monitoring_enabled \
-                    AND COALESCE(rule.automatic_enabled,false)) \
-         FROM collection_observation_target target \
-         LEFT JOIN collection_monitor_rule_revision rule \
-           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref";
+                count(*) FILTER (WHERE target.monitoring_enabled AND EXISTS ( \
+                    SELECT 1 FROM collection_monitor_rule rule \
+                    JOIN collection_monitor_rule_revision revision \
+                      ON revision.rule_revision_ref=rule.active_revision_ref \
+                    WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
+                      AND revision.automatic_enabled)) \
+         FROM collection_observation_target target";
     const COUNT_IN_DOMAIN: &str = concat!(
         "SELECT count(*), \
                 count(*) FILTER (WHERE target.target_kind = 'creator'), \
                 count(*) FILTER (WHERE target.target_kind = 'keyword'), \
                 count(*) FILTER (WHERE target.lifecycle_state = 'archiving'), \
-                count(*) FILTER (WHERE target.monitoring_enabled \
-                    AND COALESCE(rule.automatic_enabled,false)) \
+                count(*) FILTER (WHERE target.monitoring_enabled AND EXISTS ( \
+                    SELECT 1 FROM collection_monitor_rule rule \
+                    JOIN collection_monitor_rule_revision revision \
+                      ON revision.rule_revision_ref=rule.active_revision_ref \
+                    WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
+                      AND revision.automatic_enabled)) \
          FROM collection_observation_target target \
-         LEFT JOIN collection_monitor_rule_revision rule \
-           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
          WHERE $1::uuid IS NULL OR COALESCE(target.domain_ref, \
                (SELECT home.domain_ref FROM observation_domain home WHERE home.is_own_domain)) = $1"
     );
@@ -828,11 +871,8 @@ pub async fn delete_observation_target(
            SELECT request_ref FROM collection_acquisition_request WHERE target_ref=$1)",
         "DELETE FROM collection_admission_decision WHERE target_ref=$1",
         "DELETE FROM collection_acquisition_request WHERE target_ref=$1",
-        // 目标行还指着活跃规则版本，先松开这条引用再删规则。
         "UPDATE collection_observation_target \
-         SET active_monitor_rule_revision_ref=NULL,monitoring_enabled=false, \
-             lifecycle_state='dismissed' \
-         WHERE target_ref=$1",
+         SET monitoring_enabled=false,lifecycle_state='dismissed' WHERE target_ref=$1",
         // 规则身份与规则版本互相引用（规则指着当前版本，版本挂在规则上，`0076`），
         // 谁都不能先删。先把规则那一侧的引用松开，再删版本，最后删规则身份。
         "UPDATE collection_monitor_rule SET active_revision_ref=NULL WHERE target_ref=$1",

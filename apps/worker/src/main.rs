@@ -22,9 +22,10 @@ use linggan_intelligence::{
 
 /// 两次扫描的间隔。
 ///
-/// 这是**扫描**频率，不是**巡检**频率：每个目标多久看一次由它自己的
-/// `patrol_interval_seconds` 决定（默认 24 小时）。扫描频繁一点只是让到期的目标不必等
-/// 太久才被发现，代价是一次几乎为空的查询。
+/// 这是**扫描**频率，不是**巡检**频率：多久看一次由每条监控规则自己的周期决定
+/// （`collection_monitor_rule_revision.fixed_interval_seconds`，默认 24 小时；一个关键词
+/// 可以有几条口径各设各的周期）。扫描频繁一点只是让到期的规则不必等太久才被发现，
+/// 代价是一次几乎为空的查询。
 const TICK_INTERVAL: Duration = Duration::from_secs(60);
 
 mod keyword_details;

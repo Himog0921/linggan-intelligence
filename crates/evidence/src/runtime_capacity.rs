@@ -232,23 +232,28 @@ pub async fn read_runtime_capacity(
     // 到期判据与 `run_due_patrols` 读同一个已持久化的 `monitor_next_run_at`。页面不能
     // 用上次派出时间和旧间隔反推，否则规则修订、一次 catch-up 或暂停恢复后会显示另一套事实。
     let patrol = sqlx::query_as::<_, PatrolRow>(
+        // 单位仍是**目标**（页面讲的是目标），但排期住在规则上（`0078`）：一个目标
+        // 「到期了」的意思是它有任一条在用规则到期了；时间取规则里最早／最近的那个。
         "SELECT count(*), \
-                count(*) FILTER (WHERE target.monitoring_enabled \
-                    AND COALESCE(rule.automatic_enabled,false)), \
-                count(*) FILTER (WHERE target.monitoring_enabled \
-                    AND COALESCE(rule.automatic_enabled,false) \
-                    AND target.monitor_next_run_at <= scope_001_now()), \
-                count(*) FILTER (WHERE target.monitoring_enabled \
-                    AND COALESCE(rule.automatic_enabled,false) \
-                    AND target.monitor_next_run_at < scope_001_now()), \
-                linggan_human_moment(min(target.monitor_next_run_at) FILTER (WHERE target.monitoring_enabled \
-                    AND COALESCE(rule.automatic_enabled,false) \
-                    AND target.monitor_next_run_at <= scope_001_now())), \
-                linggan_human_moment(max(target.last_patrol_dispatched_at)), \
+                count(*) FILTER (WHERE target.monitoring_enabled AND rules.automatic_any), \
+                count(*) FILTER (WHERE target.monitoring_enabled AND rules.automatic_any \
+                    AND rules.next_run_at <= scope_001_now()), \
+                count(*) FILTER (WHERE target.monitoring_enabled AND rules.automatic_any \
+                    AND rules.next_run_at < scope_001_now()), \
+                linggan_human_moment(min(rules.next_run_at) FILTER (WHERE target.monitoring_enabled \
+                    AND rules.automatic_any AND rules.next_run_at <= scope_001_now())), \
+                linggan_human_moment(max(rules.last_dispatched_at)), \
                 linggan_human_moment(max(target.last_patrol_succeeded_at)) \
          FROM collection_observation_target target \
-         LEFT JOIN collection_monitor_rule_revision rule \
-           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
+         LEFT JOIN LATERAL ( \
+           SELECT COALESCE(bool_or(COALESCE(revision.automatic_enabled,false)),false) \
+                AS automatic_any, \
+                  min(rule.monitor_next_run_at) AS next_run_at, \
+                  max(rule.last_patrol_dispatched_at) AS last_dispatched_at \
+           FROM collection_monitor_rule rule \
+           LEFT JOIN collection_monitor_rule_revision revision \
+                  ON revision.rule_revision_ref=rule.active_revision_ref \
+           WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL) rules ON true \
          WHERE target.lifecycle_state <> 'dismissed'",
     )
     .fetch_one(database.pool())
@@ -314,7 +319,12 @@ pub async fn read_runtime_capacity(
     .collect();
 
     let monitor_rule_schedules = sqlx::query_as::<_, MonitorRuleScheduleRow>(
-        "SELECT coalesce(target.display_name,target.identity_key),rule.fixed_interval_seconds, \
+        // 一条规则一行。一个关键词可以同时盯几个榜，各有各的周期——按目标一行会把其中
+        // 两条藏起来。名字带上口径，否则同一个词的三行在页面上分不出谁是谁。
+        "SELECT coalesce(target.display_name,target.identity_key) \
+                  || CASE WHEN rule_identity.slot_key='primary' THEN '' \
+                          ELSE ' · ' || rule_identity.slot_key END, \
+                rule.fixed_interval_seconds, \
                 linggan_human_moment((SELECT max(work_order.scheduled_for) FROM collection_work_order work_order \
                          WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref)), \
                 linggan_human_moment((SELECT max(attempt.started_at) FROM linggan_runtime_attempt attempt \
@@ -327,7 +337,7 @@ pub async fn read_runtime_capacity(
                  WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref \
                  ORDER BY work_order.scheduled_for DESC NULLS LAST,work_order.created_at DESC \
                  LIMIT 1), \
-                linggan_human_moment(target.monitor_next_run_at), \
+                linggan_human_moment(rule_identity.monitor_next_run_at), \
                 linggan_human_moment((SELECT max(receipt.received_at) \
                          FROM linggan_runtime_submission_receipt receipt \
                          JOIN linggan_runtime_capture_package package USING(package_ref) \
@@ -336,11 +346,13 @@ pub async fn read_runtime_capacity(
                          JOIN collection_work_order_lease lease USING(lease_ref) \
                          JOIN collection_work_order work_order USING(work_order_ref) \
                          WHERE work_order.monitor_rule_revision_ref=rule.rule_revision_ref)) \
-         FROM collection_observation_target target \
+         FROM collection_monitor_rule rule_identity \
+         JOIN collection_observation_target target USING(target_ref) \
          JOIN collection_monitor_rule_revision rule \
-           ON rule.rule_revision_ref=target.active_monitor_rule_revision_ref \
-         WHERE target.monitoring_enabled AND rule.automatic_enabled AND rule.mode='fixed' \
-         ORDER BY target.monitor_next_run_at,target.target_ref LIMIT 100",
+           ON rule.rule_revision_ref=rule_identity.active_revision_ref \
+         WHERE rule_identity.retired_at IS NULL \
+           AND target.monitoring_enabled AND rule.automatic_enabled AND rule.mode='fixed' \
+         ORDER BY rule_identity.monitor_next_run_at,rule_identity.rule_ref LIMIT 100",
     )
     .fetch_all(database.pool())
     .await?

@@ -347,34 +347,32 @@ async fn request_progressive_archive_inner(
     let Some((platform, target_kind)) = target else {
         return Err(AcquisitionChainError::UnknownTarget.into());
     };
-    let qualifying_authorization = match progressive_authorization_in_transaction(
-        &mut transaction,
-        &platform,
-        &target_kind,
-        purpose,
-    )
-    .await
-    .map_err(AcquisitionChainError::from)?
-    {
-        ProgressiveAuthorization::Qualified(authorization_ref) => authorization_ref,
-        ProgressiveAuthorization::TooSmall(current_bound) => {
-            transaction
-                .rollback()
-                .await
-                .map_err(AcquisitionChainError::from)?;
-            return Err(
-                AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall { current_bound }
+    let qualifying_authorization =
+        match progressive_authorization_in_transaction(&mut transaction, &platform, &target_kind)
+            .await
+            .map_err(AcquisitionChainError::from)?
+        {
+            ProgressiveAuthorization::Qualified(authorization_ref) => authorization_ref,
+            ProgressiveAuthorization::TooSmall(current_bound) => {
+                transaction
+                    .rollback()
+                    .await
+                    .map_err(AcquisitionChainError::from)?;
+                return Err(
+                    AcquisitionChainError::ProgressiveArchiveAuthorizationTooSmall {
+                        current_bound,
+                    }
                     .into(),
-            );
-        }
-        ProgressiveAuthorization::Missing => {
-            transaction
-                .rollback()
-                .await
-                .map_err(AcquisitionChainError::from)?;
-            return Err(AcquisitionChainError::ProgressiveArchiveAuthorizationMissing.into());
-        }
-    };
+                );
+            }
+            ProgressiveAuthorization::Missing => {
+                transaction
+                    .rollback()
+                    .await
+                    .map_err(AcquisitionChainError::from)?;
+                return Err(AcquisitionChainError::ProgressiveArchiveAuthorizationMissing.into());
+            }
+        };
     if let Some((root_work_order_ref, root_purpose)) =
         canonical_progressive_root_in_transaction(&mut transaction, target_ref)
             .await
@@ -1282,15 +1280,21 @@ async fn gather_facts(
     // 错误的取样上限去采——而回执、覆盖度、材料全都自洽，没有任何一处看得出来。
     let monitor_rule_revision_ref = match (lane, frozen_rule_revision_ref) {
         (_, Some(revision_ref)) => Some(revision_ref),
-        ("patrol", None) => {
-            sqlx::query_scalar(
-                "SELECT active_monitor_rule_revision_ref FROM collection_observation_target \
-             WHERE target_ref=$1",
-            )
-            .bind(target_ref)
-            .fetch_one(&mut **transaction)
-            .await?
-        }
+        // 人工「观察一次」没有指定规则。它仍然必须绑一条——取样口径（排序、下拉次数、
+        // 取前 N）住在规则上，不绑就等于让插件按自己的默认跑。
+        //
+        // 一个目标有几条规则时按哪一条跑，**是个还没做的产品决定**；这里取最早建的那条，
+        // 与暂停／恢复挑规则的方式一致，至少两处说法相同。单规则目标（博主永远如此）
+        // 行为与从前完全一样。
+        ("patrol", None) => sqlx::query_scalar(
+            "SELECT rule.active_revision_ref FROM collection_monitor_rule rule \
+                 WHERE rule.target_ref=$1 AND rule.retired_at IS NULL \
+                 ORDER BY rule.created_at,rule.rule_ref LIMIT 1",
+        )
+        .bind(target_ref)
+        .fetch_optional(&mut **transaction)
+        .await?
+        .flatten(),
         _ => None,
     };
 
@@ -1809,36 +1813,44 @@ enum ProgressiveAuthorization {
     Missing,
 }
 
+/// 渐进建档要用的那份授权。
+///
+/// **不按目的文本逐字比对。** 此前这里有 `AND purpose=$3`，而同一条链上另一头的
+/// `gather_facts` 从来不看目的（它的形参就叫 `_purpose`），判的是 lane、任务模板、派发通道
+/// 和额度。两处判据不一致的后果是：签了一份授权、额度也够，渐进建档却说「没有匹配的
+/// 授权」——差别只是请求里写的目的文本与授权上那一串不一字不差。2026-09-04 为此卡了一天。
+///
+/// 目的**不是授权的身份**：领域规则明写「观察目的只说明为什么观察和授权范围，不进入
+/// Source Object、Evidence 或 Observation 的身份」。授权真正管的是 lane、平台、目标类型、
+/// 额度与撤销——这些照旧全查。删掉这条特殊规则，不是放松授权，是把两处判据对齐到同一套。
 async fn progressive_authorization_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     platform: &str,
     target_kind: &str,
-    purpose: &str,
 ) -> Result<ProgressiveAuthorization, sqlx::Error> {
     let qualified: Option<Uuid> = sqlx::query_scalar(
         "SELECT authorization_ref FROM collection_acquisition_authorization \
-         WHERE platform=$1 AND target_kind=$2 AND lane='deep_archive' AND purpose=$3 \
+         WHERE platform=$1 AND target_kind=$2 AND lane='deep_archive' \
            AND revoked_at IS NULL AND expires_at>scope_001_now() \
-           AND (max_works_per_target IS NULL OR max_works_per_target >= $4) \
+           AND (max_works_per_target IS NULL OR max_works_per_target >= $3) \
          ORDER BY expires_at DESC,authorization_ref LIMIT 1 FOR UPDATE",
     )
     .bind(platform)
     .bind(target_kind)
-    .bind(purpose)
     .bind(PROGRESSIVE_ARCHIVE_DIRECTORY_LIMIT)
     .fetch_optional(&mut **transaction)
     .await?;
     if let Some(authorization_ref) = qualified {
         return Ok(ProgressiveAuthorization::Qualified(authorization_ref));
     }
+    // 「额度不够」与「一份都没有」要分开说：前者是「把授权改大」，后者是「先去签一份」。
     let smaller_bound: Option<i32> = sqlx::query_scalar(
         "SELECT max(max_works_per_target) FROM collection_acquisition_authorization \
-         WHERE platform=$1 AND target_kind=$2 AND lane='deep_archive' AND purpose=$3 \
+         WHERE platform=$1 AND target_kind=$2 AND lane='deep_archive' \
            AND revoked_at IS NULL AND expires_at>scope_001_now()",
     )
     .bind(platform)
     .bind(target_kind)
-    .bind(purpose)
     .fetch_one(&mut **transaction)
     .await?;
     Ok(smaller_bound.map_or(
@@ -2251,7 +2263,6 @@ pub async fn run_progressive_archives(
                 &mut transaction,
                 &platform,
                 &target_kind,
-                purpose,
             )
             .await
             .map_err(AcquisitionChainError::from)?

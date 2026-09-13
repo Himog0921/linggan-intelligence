@@ -894,6 +894,44 @@ async fn concurrent_continue_reuses_one_root_and_freezes_one_three_work_child_un
     );
 }
 
+/// **授权不按目的文本逐字比对。**
+///
+/// 签一份额度够的 `deep_archive` 授权、请求时写另一句目的，渐进建档必须照常开始。此前这里
+/// 有 `AND purpose=$3`，而同一条链另一头的 `gather_facts` 从来不看目的（形参就叫 `_purpose`）。
+/// 两处判据不一致的后果是：授权签了、额度也够，界面却说「没有匹配的授权」——差别只是那一串
+/// 文本不一字不差。2026-09-04 为此卡了一天。
+///
+/// 授权真正管的东西（lane、平台、目标类型、额度、撤销）照旧全查，下一条断言证明这一点。
+#[tokio::test]
+#[ignore = "requires a disposable PostgreSQL 16 proof database"]
+async fn progressive_archive_does_not_require_the_purpose_text_to_match_the_grant() {
+    let database = proof_database("dossier_progressive_purpose_text").await;
+    ready_installation(&database, "dossier-purpose-text").await;
+    let target_ref = seed_creator_target(&database, "creator-purpose-text").await;
+    grant_deep_archive(&database, "建立创作者档案", 200).await;
+
+    // 请求写的是另一句目的。目的说明的是「为什么观察」，不是授权的身份。
+    let result = request_progressive_archive_and_lease(
+        &database,
+        target_ref,
+        "看看这个博主最近在讲什么",
+        "person",
+        30,
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "额度够的授权在手，渐进建档不该因为目的文本不同而被拒：{result:?}"
+    );
+    let work_orders: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM collection_work_order WHERE target_ref=$1")
+            .bind(target_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    assert_eq!(work_orders, 1, "它该真的排出一张工单");
+}
+
 #[tokio::test]
 #[ignore = "requires a disposable PostgreSQL 16 proof database"]
 async fn progressive_archive_rejects_a_smaller_grant_without_writing_a_request_or_work() {
