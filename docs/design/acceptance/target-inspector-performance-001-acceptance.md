@@ -41,6 +41,12 @@
 
 本次后续授权只刷新了本机 loopback API；没有新 migration，也没有重启 worker、重载插件、访问平台或触发真实采集。这里的 runtime 证明不扩张为那些层面的完成声明。
 
+## 2026-09-13 · 趋势／分布复核补充
+
+- **用户反馈与实现**：用户指出作品数据必须同时承担「趋势」和「分布」两种阅读逻辑，且折线需要受控色阶。逐篇散点因此从折叠详情提升为趋势后的常驻同级面；阅读次序为「趋势 → 分布 → 逐篇证据」，散点仍保留到每篇作品的可访问链接。趋势 SVG 与其图例仅在数据线中使用既有 `body / signal-ink / signal` 的低饱和墨色至信号橙过渡；它不代表另一条指标、状态或预测。
+- **本次证据**：`cargo fmt --all -- --check`、`cargo build -p linggan-api` 及表现页 focused tests 已通过；本地 `:3001` source preview 对真实只读目标确认两张图同时可见，散点的逐点链接和 Unknown 排除说明仍在。
+- **仍未证明**：这次 source preview 本身不证明 Git 提交、`main` 合并或 `:3000` 刷新；不改变此报告先前的 runtime 记录，更不证明共享数据库、worker、插件、外部平台、采集或 Mog 最终视觉验收。
+
 ## 完整 PostgreSQL 脚本保留失败
 
 `./scripts/test-local-001-discovery-postgres.sh` 已实际运行。新增 `target_inspector_postgres` 1/1 通过，临时 database/container/volume 已清理；脚本后续在本分支未修改的 `collection_control_postgres` 留下两项失败：一项仍把迁移边界写死在 `0042`，而当前证明集合早已继续增长；另一项为按时点变化的 station daily-limit 预期与当前 available 结果不一致。它们不改变本包 inspector 专项证明，但阻止我们宣称完整 PostgreSQL harness 全绿。

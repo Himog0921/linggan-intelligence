@@ -200,8 +200,24 @@ fn performance_view_keeps_known_zero_excludes_unknown_and_preserves_context() {
     assert!(html.contains("life_window=recent_90_days"));
     assert!(html.contains("life_metric=likes"));
     assert!(html.contains(r#"class="life-trend-chart""#));
+    assert!(html.contains(r#"id="life-trend-line-gradient""#));
+    assert_eq!(html.matches("<linearGradient").count(), 1);
+    assert_eq!(
+        html.matches(r#"stroke="url(#life-trend-line-gradient)""#)
+            .count(),
+        1
+    );
+    assert_eq!(html.matches("url(#life-trend-line-gradient)").count(), 1);
+    assert!(html.contains(r#"class="life-distribution-panel""#));
+    assert!(html.contains("逐篇作品分布"));
+    assert!(!html.contains(r#"<details class="life-distribution""#));
     assert!(html.contains(r#"aria-label="复核摘要""#));
     assert!(html.contains("近期作品证据"));
+    let trend_position = html.find("作品表现趋势").expect("trend heading");
+    let distribution_position = html.find("逐篇作品分布").expect("distribution heading");
+    let evidence_position = html.find("近期作品证据").expect("evidence heading");
+    assert!(trend_position < distribution_position);
+    assert!(distribution_position < evidence_position);
     assert!(html.contains("零互动作品，2026-09-01，点赞 0"));
     assert_eq!(html.matches(r#"class="life-point-hit""#).count(), 1);
     assert!(html.contains("指标未知 1"));
@@ -497,7 +513,9 @@ fn inspector_css_keeps_desktop_controls_and_accessible_motion_boundaries() {
             "target inspector CSS is missing {required}"
         );
     }
-    assert!(!TARGET_DRAWER_CSS.contains("gradient"));
+    assert!(TARGET_DRAWER_CSS.contains(
+        "background:linear-gradient(90deg,var(--lgi-body) 0%,var(--lgi-signal-ink) 56%,var(--lgi-signal) 100%)"
+    ));
     assert!(!TARGET_DRAWER_CSS.contains("outline:none"));
     assert!(!TARGET_DRAWER_CSS.contains("!important"));
 

@@ -26,7 +26,7 @@
 
 - **范围**：Collection L1 与现有 L2 Split Inspector 不变；creator 的「作品｜表现」以 Mog 提供的静态参考稿重排为控制、覆盖、趋势、复核和证据五层。参考稿不提供运行数值、目标身份或状态。没有新增 Token、CMP、壳层、数据合同或动作。
 - **Data Truth**：趋势和摘要仅消费 qualified / KNOWN lifecycle point；空 point 集显示不可成图原因与真实 exclusion，而不以中位数、密度或巡查新增 `0` 填充。header 的持续观察标记区分 active、paused、dismissed 与 inactive，既不把未启用猜为暂停，也不借用 scheduler／Lease／Attempt 状态。
-- **Token / Layout / A11y**：新增样式只消费现有 `--lgi-*` Token，所有功能文字使用 11px 及以上的 Token 档位；趋势图例可折行，避免 901px 以上但右侧摘要仍并列的中间宽度横溢。散点保留为展开后的可访问逐篇证据，趋势 SVG 保留具名替代文字。
+- **Token / Layout / A11y**：新增样式只消费现有 `--lgi-*` Token，所有功能文字使用 11px 及以上的 Token 档位；趋势图例可折行，避免 901px 以上但右侧摘要仍并列的中间宽度横溢。2026-09-13 反馈后，逐篇散点提升为趋势后的常驻同级分析面，再接近期证据表；趋势 SVG 与图例的唯一受控色阶只用既有 body / signal-ink / signal，由低饱和墨色到信号橙表示同一条中位数线的连续读取，不能扩散到背景、正文或状态。散点保留逐点链接与具名替代文字。
 - **验证边界**：focused render 反例覆盖 Known(0)、Unknown-only 空点、观察状态分支和 URL 恢复；format、check、UI handbook 与治理检查通过。共享 runtime、插件、外部平台、采集与 Mog 业务视觉验收仍由发布后的独立回执区分。
 
 ## 2026-09-07 · OBSERVATION-TARGET-SEMANTIC-FEEDBACK-001
