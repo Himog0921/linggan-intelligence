@@ -208,12 +208,29 @@ impl<'a> TargetListContext<'a> {
     /// working set. `opener_id` is a fragment only: it restores keyboard focus and never
     /// participates in target identity.
     pub fn monitor_rule_href(self, target_ref: uuid::Uuid, opener_id: &str) -> String {
+        self.monitor_rule_slot_href(target_ref, None, opener_id)
+    }
+
+    /// 规则面板的链接，可以指定打开哪一条口径。
+    ///
+    /// `None` = 最早那条（博主永远只有一条，「管理巡查」的既有行为）；`Some("new")` = 新开
+    /// 一条；`Some(口径)` = 规则台上那一条。此前只有按目标的那一种，于是「加一条规则」
+    /// 与「编辑第二条」在 URL 上无法区分。
+    pub fn monitor_rule_slot_href(
+        self,
+        target_ref: uuid::Uuid,
+        slot: Option<&str>,
+        opener_id: &str,
+    ) -> String {
         let mut pairs = self
             .pairs()
             .into_iter()
             .map(|(key, value)| (key.to_owned(), value.to_owned()))
             .collect::<Vec<_>>();
         pairs.push(("rule".to_owned(), target_ref.to_string()));
+        if let Some(slot) = slot {
+            pairs.push(("rule_slot".to_owned(), slot.to_owned()));
+        }
         escape(&format!(
             "/collection/targets?{}#{}",
             pairs
@@ -2675,8 +2692,10 @@ fn monitor_rule_list(
         };
         let next = rule.next_run_at.as_deref().unwrap_or("未排定");
         let last = rule.last_succeeded_at.as_deref().unwrap_or("尚未成功巡查");
-        // 最后一条规则不提供停用：监控中的目标必须有规则（`0042` 的 CHECK）。
-        // 要停最后一条，先停止观察这个目标——那是另一个决定，不该藏在这里。
+        // 最后一条规则不提供停用。**理由不再是数据库约束**——`0078` 删掉了「监控中必须有
+        // 规则」那两条 CHECK（调度改成遍历规则，没有规则自然产不出到期项）。留着这个限制
+        // 是产品判断：停掉最后一条规则，这个目标就在「还开着观察、却什么都不会跑」的状态
+        // 上，界面上看不出差别。要停就停止观察这个目标，那是另一个决定，不该藏在这里。
         let retire = if rules.len() > 1 {
             format!(
                 r#"<form method="post" action="/collection/targets/monitor-rules/retire">{fields}<input type="hidden" name="rule_ref" value="{rule_ref}"/><button class="c-btn-secondary" type="submit">停用</button></form>"#,
@@ -2690,8 +2709,21 @@ fn monitor_rule_list(
         } else {
             String::new()
         };
+        // 编辑指定这一条的口径。此前规则台上只有「停用」，没有任何入口能编辑第二条
+        // 规则——面板只按目标寻址，点开永远是最早那条。
+        let edit_opener = format!("drawer-edit-rule-{}", rule.rule_ref);
+        let edit = format!(
+            r#"<a id="{edit_opener}" class="c-btn-quiet" data-monitor-rule-trigger="{target_ref}" href="{href}">编辑</a>"#,
+            href = list_context.monitor_rule_slot_href(
+                target.target_ref,
+                Some(&rule.slot_key),
+                &edit_opener
+            ),
+            target_ref = target.target_ref,
+            edit_opener = escape(&edit_opener),
+        );
         items.push_str(&format!(
-            r#"<li><div><b>{slot}</b><p>{cadence} · {sampling}</p><p>下次 {next} · 最近成功 {last}</p></div><div>{state}{retire}</div></li>"#,
+            r#"<li><div><b>{slot}</b><p>{cadence} · {sampling}</p><p>下次 {next} · 最近成功 {last}</p></div><div>{state}{edit}{retire}</div></li>"#,
             slot = escape(&monitor_slot_label(&rule.slot_key, target.target_kind == "creator")),
             cadence = escape(&cadence),
             sampling = escape(&sampling),
@@ -2723,11 +2755,21 @@ fn monitor_slot_label(slot_key: &str, is_creator: bool) -> String {
     }
 }
 
+/// 「加一条规则」。
+///
+/// **只对关键词提供**：口径是排序，博主没有排序可言——它只有一条看主页目录的规则，再加
+/// 一条会落到同一个 `primary` 槽上，变成改那一条，而按钮写着「加」。
+///
+/// 走新建模式（`rule_slot=new`）。此前它与「管理巡查」指向同一个链接，于是点开拿到的是最早
+/// 那条规则的表单、口径还是只读的——**第二条规则从界面上根本加不出来**。
 fn add_rule_link(target: &ObservationTarget, list_context: TargetListContext<'_>) -> String {
+    if target.target_kind != "keyword" {
+        return String::new();
+    }
     let opener_id = format!("drawer-add-rule-{}", target.target_ref);
     format!(
         r#"<a id="{opener_id}" class="c-btn-secondary" data-monitor-rule-trigger="{target_ref}" href="{href}">加一条规则</a>"#,
-        href = list_context.monitor_rule_href(target.target_ref, &opener_id),
+        href = list_context.monitor_rule_slot_href(target.target_ref, Some("new"), &opener_id),
         target_ref = target.target_ref,
     )
 }

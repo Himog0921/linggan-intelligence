@@ -31,7 +31,37 @@ pub struct MonitorRulePanel {
     pub lifecycle_state: String,
     pub active_rule: Option<ActiveMonitorRule>,
     pub receipt: Option<MonitorRuleReceiptView>,
+    /// 这个面板在编辑哪条口径。`None` 表示**新开一条**。
+    ///
+    /// 口径是规则的身份（`0076`）：同一个关键词盯综合榜和点赞榜是两条规则。面板一次只
+    /// 编辑一条，所以必须说清是哪一条——此前它只按目标寻址，于是「加一条规则」点进来
+    /// 拿到的是最早那条的表单，保存只会改那一条，**第二条永远加不出来**。
+    pub editing_slot: Option<String>,
+    /// 还没有在用规则的排序。只在新开一条时有意义：已经有规则的榜不重复提供，否则保存
+    /// 会撞上那条已存在的规则、被判成过期版本，而人看不出为什么。
+    pub available_rankings: Vec<String>,
 }
+
+/// 面板要打开哪一条规则。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MonitorRuleSelection<'a> {
+    /// 不指定：最早建的那条在用规则。博主永远只有一条，这就是它；关键词上是「管理巡查」
+    /// 那个入口的既有行为。
+    CurrentRule,
+    /// 指定口径。规则台上每条规则的「编辑」走这一支。
+    Slot(&'a str),
+    /// 新开一条。「加一条规则」走这一支。
+    NewRule,
+}
+
+/// 关键词能选的五个榜。顺序即界面顺序。
+pub const KEYWORD_RANKINGS: [(&str, &str); 5] = [
+    ("most_liked", "最多点赞"),
+    ("most_collected", "最多收藏"),
+    ("most_commented", "最多评论"),
+    ("latest", "最新"),
+    ("comprehensive", "综合排序"),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ActiveMonitorRule {
@@ -86,14 +116,26 @@ impl MonitorRuleFormState {
         } else {
             "creator_profile"
         };
-        // 默认排序从目标身份里取，而不是一律给综合排序：身份写着「最多点赞」的目标
-        // 默认配上综合排序，等于界面与身份各说各话。身份里读不出来才回落——回落到
-        // 综合排序是既有行为，不在这一步改它（规格说跨行业不采综合，那要在建目标时解决）。
-        let default_ranking = if panel.target_kind == "keyword" {
+        // 新开一条时的默认排序：**先用还没被占用的那个榜**。已经有规则的榜再默认一次，
+        // 保存就会撞上那条已存在的规则、被判成过期版本，而人看不出为什么。
+        //
+        // 都占满了（或指定了要编辑的那一条）才回落到目标身份里那个排序；身份里也读不出来
+        // 才是综合排序。身份不再是口径的来源（`0076` 之后排序属于规则），但它仍是历史目标
+        // 唯一能说明「当初按什么采的」的地方，作为回落比一律给综合排序更接近事实。
+        let identity_ranking = if panel.target_kind == "keyword" {
             panel
                 .identity_key
                 .rsplit_once("::")
                 .map_or("comprehensive", |(_, ranking)| ranking)
+        } else {
+            ""
+        };
+        let default_ranking: &str = if panel.target_kind == "keyword" {
+            panel
+                .editing_slot
+                .as_deref()
+                .or_else(|| panel.available_rankings.first().map(String::as_str))
+                .unwrap_or(identity_ranking)
         } else {
             ""
         };
@@ -169,21 +211,16 @@ pub struct MonitorRuleFieldError {
 pub async fn read_monitor_rule_panel(
     database: &Database,
     target_ref: Uuid,
+    selection: MonitorRuleSelection<'_>,
     receipt_ref: Option<Uuid>,
 ) -> Result<MonitorRulePanelRead, sqlx::Error> {
     if !collection_control_schema_is_ready(database).await? {
         return Ok(MonitorRulePanelRead::SchemaUnavailable);
     }
     let target = sqlx::query(
-        // 预填用最早建的那条在用规则。一个目标可以有几条口径（`0076`），面板本身一次只
-        // 编辑一条——存的时候按排序决定落到哪条口径上，选一个新排序就是新开一条。
-        // 单规则目标（博主永远如此）与从前完全一样。检查器的规则台负责把几条都列出来。
         "SELECT target.target_ref,target.target_kind,target.identity_key, \
                 COALESCE(NULLIF(btrim(target.display_name),''),target.identity_key) AS target_name, \
-                target.lifecycle_state, \
-                (SELECT rule.active_revision_ref FROM collection_monitor_rule rule \
-                  WHERE rule.target_ref=target.target_ref AND rule.retired_at IS NULL \
-                  ORDER BY rule.created_at,rule.rule_ref LIMIT 1) AS active_monitor_rule_revision_ref \
+                target.lifecycle_state \
          FROM collection_observation_target target WHERE target.target_ref=$1",
     )
     .bind(target_ref)
@@ -192,13 +229,69 @@ pub async fn read_monitor_rule_panel(
     let Some(target) = target else {
         return Ok(MonitorRulePanelRead::TargetNotFound);
     };
-    let active_rule_ref: Option<Uuid> = target.try_get("active_monitor_rule_revision_ref")?;
-    let active_rule = if let Some(rule_ref) = active_rule_ref {
-        read_active_rule(database, target_ref, rule_ref).await?
-    } else {
-        None
-    };
+    // 在用规则的口径，按建立顺序。既用来定位要编辑的那一条，也用来算还剩哪些榜可选。
+    let live_slots: Vec<(String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT slot_key,active_revision_ref FROM collection_monitor_rule \
+         WHERE target_ref=$1 AND retired_at IS NULL ORDER BY created_at,rule_ref",
+    )
+    .bind(target_ref)
+    .fetch_all(database.pool())
+    .await?;
     let receipt = read_receipt(database, target_ref, receipt_ref).await?;
+    // **刚跑完一条命令时，面板显示的就是它写的那条规则。**
+    //
+    // 回执只会出现在命令刚跑完的那次跳转里（抽屉上的链接一律不带它），所以它比 URL 上的
+    // 口径更准：新开一条成功之后 URL 上还写着 `rule_slot=new`，照它读就会显示成「再加一条」，
+    // 而人刚存的那条看不见——横幅说「已保存」，下面的表单却是另一条规则的设置。
+    let receipt_slot = match receipt
+        .as_ref()
+        .and_then(|receipt| receipt.applied_rule_revision_ref)
+    {
+        Some(revision_ref) => sqlx::query_scalar::<_, String>(
+            "SELECT rule.slot_key FROM collection_monitor_rule rule \
+             JOIN collection_monitor_rule_revision revision ON revision.rule_ref=rule.rule_ref \
+             WHERE revision.rule_revision_ref=$1 AND rule.retired_at IS NULL",
+        )
+        .bind(revision_ref)
+        .fetch_optional(database.pool())
+        .await?,
+        None => None,
+    };
+    let selection = match receipt_slot.as_deref() {
+        Some(slot) => MonitorRuleSelection::Slot(slot),
+        None => selection,
+    };
+    // 选中哪一条：不指定就是最早那条（博主永远只有一条，关键词上是「管理巡查」的既有
+    // 行为）；指定口径就是那一条；新开一条则谁也不读。
+    let selected = match selection {
+        MonitorRuleSelection::NewRule => None,
+        MonitorRuleSelection::CurrentRule => live_slots.first().cloned(),
+        MonitorRuleSelection::Slot(slot) => live_slots
+            .iter()
+            .find(|(slot_key, _)| slot_key == slot)
+            .cloned(),
+    };
+    // 指定的口径还没有规则时，仍然把它当作「要新开的那一条」预填进表单，而不是悄悄
+    // 回落到别的规则——后者会让人以为改的是刚才点的那一条。
+    let editing_slot = match (selection, selected.as_ref()) {
+        (MonitorRuleSelection::NewRule, _) => None,
+        (MonitorRuleSelection::Slot(slot), None) => Some(slot.to_owned()),
+        (_, Some((slot_key, _))) => Some(slot_key.clone()),
+        (MonitorRuleSelection::CurrentRule, None) => None,
+    };
+    let active_rule = match selected.as_ref().and_then(|(_, revision)| *revision) {
+        Some(revision_ref) => read_active_rule(database, target_ref, revision_ref).await?,
+        None => None,
+    };
+    let available_rankings = KEYWORD_RANKINGS
+        .iter()
+        .filter(|(value, _)| {
+            !live_slots
+                .iter()
+                .any(|(slot_key, _)| slot_key.as_str() == *value)
+        })
+        .map(|(value, _)| (*value).to_owned())
+        .collect::<Vec<_>>();
     Ok(MonitorRulePanelRead::Found(MonitorRulePanel {
         target_ref: target.try_get("target_ref")?,
         target_name: target.try_get("target_name")?,
@@ -207,6 +300,8 @@ pub async fn read_monitor_rule_panel(
         lifecycle_state: target.try_get("lifecycle_state")?,
         active_rule,
         receipt,
+        editing_slot,
+        available_rankings,
     }))
 }
 
@@ -330,6 +425,7 @@ pub fn render_monitor_rule_modal(
               <input type="hidden" name="target_ref" value="{target_ref}">
               <input type="hidden" name="expected_revision" value="{expected_revision}">
               <input type="hidden" name="idempotency_key" value="{idempotency_key}">
+              <input type="hidden" name="rule_slot" value="{rule_slot}">
               <input type="hidden" name="surface_key" value="{surface_key}">
               {ranking_hidden}
               <input type="hidden" name="task_contract_version" value="{task_contract_version}">
@@ -376,6 +472,16 @@ pub fn render_monitor_rule_modal(
         target_ref = panel.target_ref,
         expected_revision = form.expected_revision,
         idempotency_key = form.idempotency_key,
+        // 这个面板在编辑哪一条。**必须随表单往返**：校验失败时服务端按查询串重建表单，
+        // 排序会从 `rule_ranking_key` 回来，而版本号来自面板——面板若读错了规则，人改完
+        // 重试会永远撞 `stale_revision`，因为报的是另一条规则的版本号。
+        rule_slot = escape(
+            panel
+                .editing_slot
+                .as_deref()
+                .filter(|_| !is_new_rule(panel))
+                .unwrap_or("new")
+        ),
         surface_key = escape(&form.surface_key),
         task_contract_version = escape(&form.task_contract_version),
         return_filter = escape(return_filter),
@@ -393,15 +499,19 @@ pub fn render_monitor_rule_modal(
             disabled,
         ),
         pause_or_resume = pause_or_resume(panel, disabled),
-        sampling = sampling_policy_section(form, disabled),
-        // 关键词的排序移进了采样口径那一节，不再藏在 hidden 里；创作者没有那一节，
-        // 它的 ranking 仍按原样透传（恒为空）。少一个隐藏输入就少一处能和界面说法不一致的地方。
-        // 排序对两种目标都由 hidden 传回：关键词的它只读展示在采样口径里，创作者的它
-        // 恒为空。表单不带这一项，保存就会把已有的排序清掉。
-        ranking_hidden = format!(
-            r#"<input type="hidden" name="ranking_key" value="{}">"#,
-            escape(&form.ranking_key)
-        ),
+        sampling = sampling_policy_section(panel, form, disabled),
+        // 排序由 hidden 传回——**除了新开一条的时候**：那时采样口径那一节里是个同名的
+        // `<select>`，再发一个 hidden 会让同一个字段提交两个值，服务端按先到的那个解析，
+        // 于是人选的榜被静默丢掉。表单不带这一项则会把已有的排序清掉，所以两者必须恰好
+        // 有一个在。
+        ranking_hidden = if panel.target_kind == "keyword" && is_new_rule(panel) {
+            String::new()
+        } else {
+            format!(
+                r#"<input type="hidden" name="ranking_key" value="{}">"#,
+                escape(&form.ranking_key)
+            )
+        },
         cadence_hint = if form.surface_key.trim() == "keyword_search" {
             "每次运行按下面的采样口径搜一轮。关键词观察不做作者资格核验——那是创作者档案的事。"
         } else {
@@ -583,7 +693,11 @@ fn pause_or_resume(panel: &MonitorRulePanel, disabled: bool) -> String {
 ///
 /// 只对关键词目标渲染。创作者主页没有排序也没有「取前 N」可言，给它一组输入框，
 /// 等于请人填一份不存在的事实。
-fn sampling_policy_section(form: &MonitorRuleFormState, disabled: bool) -> String {
+fn sampling_policy_section(
+    panel: &MonitorRulePanel,
+    form: &MonitorRuleFormState,
+    disabled: bool,
+) -> String {
     if form.surface_key.trim() != "keyword_search" {
         return String::new();
     }
@@ -621,16 +735,15 @@ fn sampling_policy_section(form: &MonitorRuleFormState, disabled: bool) -> Strin
             value = escape(current_window),
         ));
     }
-    // 排序**只读**：它是目标身份的一部分（`{词}::{排序}`，「同一个词的两种排序是两个
-    // 观察面」）。做成可编辑会让规则里的排序与身份脱节——列表还叫「考研自习（最多点赞）」，
-    // 实际却按别的排序采。要换排序就建一个新的观察目标，那本来就是另一个观察面。
-    let ranking_label = [
-        ("most_liked", "最多点赞"),
-        ("most_collected", "最多收藏"),
-        ("most_commented", "最多评论"),
-        ("latest", "最新"),
-        ("comprehensive", "综合排序"),
-    ]
+    // 排序在**新开一条**时可选，在**编辑已有规则**时只读。
+    //
+    // 可选：排序就是这条规则的身份（`0076`），一个关键词盯几个榜就是几条规则。此前这里
+    // 一律只读，理由是「排序属于目标身份（`{词}::{排序}`）」——那是 `0076` 之前的设计，
+    // 而它把整个多规则能力锁在了界面之外：「加一条规则」点进来也只能改最早那条。
+    //
+    // 只读：编辑一条已有规则时改它的排序，等于把这条规则搬到另一个榜上——它签发过的工单
+    // 与采回来的材料会突然说不清是按什么口径取的。要换榜就新开一条，再停用旧的那条。
+    let ranking_label = KEYWORD_RANKINGS
     .iter()
     .find(|(value, _)| *value == form.ranking_key.trim())
     .map_or_else(
@@ -639,6 +752,55 @@ fn sampling_policy_section(form: &MonitorRuleFormState, disabled: bool) -> Strin
         || escape(form.ranking_key.trim()),
         |(_, text)| (*text).to_owned(),
     );
+    let (ranking_field, ranking_hint) = if is_new_rule(panel) {
+        // 只提供还没有规则的榜。已经有规则的那个再列出来，保存会撞上那条规则、被判成
+        // 过期版本，而人只看到一句「版本已过期」，看不出是因为这个榜已经在盯了。
+        let mut offered = KEYWORD_RANKINGS
+            .iter()
+            .filter(|(value, _)| {
+                panel
+                    .available_rankings
+                    .iter()
+                    .any(|available| available == value)
+                    || *value == form.ranking_key.trim()
+            })
+            .map(|(value, text)| {
+                format!(
+                    r#"<option value="{value}"{selected}>{text}</option>"#,
+                    value = escape(value),
+                    text = escape(text),
+                    selected = if *value == form.ranking_key.trim() {
+                        " selected"
+                    } else {
+                        ""
+                    },
+                )
+            })
+            .collect::<String>();
+        if offered.is_empty() {
+            // 五个榜都已经有规则了。不给一个空下拉——那看起来像坏了。
+            offered = format!(
+                r#"<option value="{value}" selected>{label}</option>"#,
+                value = escape(form.ranking_key.trim()),
+                label = ranking_label,
+            );
+        }
+        (
+            format!(
+                r#"<label for="ranking_key"><span>排序依据</span><select id="ranking_key" name="ranking_key"{disabled_attr}>{offered}</select></label>"#
+            ),
+            if panel.available_rankings.is_empty() {
+                "这个关键词的五个榜都已经有规则了。要换口径，先停用其中一条。".to_owned()
+            } else {
+                "排序就是这条规则的身份：同一个关键词盯几个榜就是几条规则，各有各的周期。这里只列出还没有规则的榜。".to_owned()
+            },
+        )
+    } else {
+        (
+            format!(r#"<label><span>排序依据</span><output>{ranking_label}</output></label>"#),
+            "排序是这条规则的身份，不在编辑里改——改它等于把这条规则搬到另一个榜上，它采回来的材料会说不清是按什么口径取的。要按别的榜采，回规则台加一条。".to_owned(),
+        )
+    };
     format!(
         r#"<section class="c-rule-section" aria-labelledby="c-rule-sampling-title">
                   <div class="c-rule-section-head">
@@ -646,18 +808,27 @@ fn sampling_policy_section(form: &MonitorRuleFormState, disabled: bool) -> Strin
                     <span>决定每一轮怎么取样，随样本一起留痕</span>
                   </div>
                   <div class="c-rule-grid">
-                    <label><span>排序依据</span><output>{ranking_label}</output></label>
+                    {ranking_field}
                     <label for="scroll_rounds"><span>下拉刷新次数</span><input id="scroll_rounds" name="scroll_rounds" type="number" min="0" max="20" value="{scroll_rounds}"{disabled_attr}></label>
                     <label for="top_by_likes"><span>取点赞前几篇</span><input id="top_by_likes" name="top_by_likes" type="number" min="1" max="200" value="{top_by_likes}"{disabled_attr}></label>
                     <label for="published_within_days"><span>只要多新的内容</span><select id="published_within_days" name="published_within_days"{disabled_attr}>{publish_windows}</select></label>
                   </div>
-                  <p class="c-rule-hint">排序属于这个观察目标的身份，不在这里改——同一个词的两种排序是两个观察面。要按别的排序采，建一个新的关键词目标。</p>
+                  <p class="c-rule-hint">{ranking_hint}</p>
                   <p class="c-rule-hint">按下拉次数控制，不按条数控制——页面每次加载出多少条不由我们决定，只有「拉了几次」是能说准的事实。时间范围只有这四档，因为平台就只给这四档；选了之后，回执里记的是页面上<b>实际生效</b>的那一档，不是这里选的值。同一批样本的点赞数不可跨时间比较。综合排序掺入个性化推荐，采回来的是平台认为这个账号会喜欢的内容，不是这个领域客观最好的内容。</p>
                 </section>"#,
         scroll_rounds = escape(&form.scroll_rounds),
-        ranking_label = ranking_label,
+        ranking_field = ranking_field,
+        ranking_hint = ranking_hint,
         top_by_likes = escape(&form.top_by_likes),
     )
+}
+
+/// 这个面板是不是在新开一条规则。
+///
+/// 判据是「读到了一条在用规则没有」，不是「URL 上有没有带口径」：指定的口径还没有规则时
+/// （规则台上的链接过期了，或者那条刚被停用），那也是新开一条。
+fn is_new_rule(panel: &MonitorRulePanel) -> bool {
+    panel.active_rule.is_none()
 }
 
 fn interval_select(name: &str, label: &str, selected: &str, disabled: bool) -> String {
@@ -728,6 +899,8 @@ mod tests {
                 task_contract_version: PRODUCER_TASK_SPEC_VERSION.to_owned(),
                 created_at: "2026-09-04 09:00:00+08".to_owned(),
             }),
+            editing_slot: Some("primary".to_owned()),
+            available_rankings: Vec::new(),
             receipt: Some(MonitorRuleReceiptView {
                 receipt_ref: Uuid::parse_str("92dbfd51-9678-4781-a489-c00805576852").unwrap(),
                 command_kind: "save_rule".to_owned(),
@@ -837,7 +1010,35 @@ mod sampling_policy_tests {
             lifecycle_state: "paused".to_owned(),
             active_rule: None,
             receipt: None,
+            // 默认是「新开一条」：五个榜都还空着。
+            editing_slot: None,
+            available_rankings: KEYWORD_RANKINGS
+                .iter()
+                .map(|(value, _)| (*value).to_owned())
+                .collect(),
         }
+    }
+
+    /// 已经有一条在用规则的关键词面板：编辑模式。
+    fn keyword_panel_editing(identity_key: &str, slot: &str) -> MonitorRulePanel {
+        let mut panel = keyword_panel(identity_key);
+        panel.editing_slot = Some(slot.to_owned());
+        panel.available_rankings.retain(|value| value != slot);
+        panel.active_rule = Some(ActiveMonitorRule {
+            rule_revision_ref: Uuid::parse_str("0da99cb2-0f4a-4da5-ac1b-c99e10bb64ed").unwrap(),
+            revision: 2,
+            automatic_enabled: true,
+            fixed_interval_seconds: Some(86_400),
+            fallback_interval_seconds: 86_400,
+            surface_key: "keyword_search".to_owned(),
+            ranking_key: Some(slot.to_owned()),
+            scroll_rounds: Some(3),
+            top_by_likes: Some(20),
+            published_within_days: None,
+            task_contract_version: PRODUCER_TASK_SPEC_VERSION.to_owned(),
+            created_at: "2026-09-04 09:00:00+08".to_owned(),
+        });
+        panel
     }
 
     /// 身份写着「最多点赞」的目标，默认不该配上综合排序——那会让界面与身份各说各话。
@@ -861,7 +1062,7 @@ mod sampling_policy_tests {
         assert_eq!(form.ranking_key, "");
         assert_eq!(form.scroll_rounds, "");
         assert_eq!(form.top_by_likes, "");
-        assert!(sampling_policy_section(&form, false).is_empty());
+        assert!(sampling_policy_section(&panel, &form, false).is_empty());
     }
 
     /// 时间范围只给平台真正支持的四档：此前是个任意天数输入框，填 3 天平台只能给
@@ -869,7 +1070,7 @@ mod sampling_policy_tests {
     #[test]
     fn the_publish_window_offers_only_what_the_platform_supports() {
         let form = MonitorRuleFormState::from_panel(&keyword_panel("考研自习::latest"));
-        let html = sampling_policy_section(&form, false);
+        let html = sampling_policy_section(&keyword_panel("考研自习::latest"), &form, false);
         for (value, text) in [("", "不限"), ("1", "一天内"), ("7", "一周内"), ("180", "半年内")] {
             assert!(html.contains(&format!(r#"<option value="{value}""#)));
             assert!(html.contains(text));
@@ -883,33 +1084,168 @@ mod sampling_policy_tests {
     fn a_non_standard_window_is_shown_instead_of_being_silently_dropped() {
         let mut form = MonitorRuleFormState::from_panel(&keyword_panel("考研自习::latest"));
         form.published_within_days = "3".to_owned();
-        let html = sampling_policy_section(&form, false);
+        let html = sampling_policy_section(&keyword_panel("考研自习::latest"), &form, false);
         assert!(html.contains(r#"<option value="3" selected>"#));
         assert!(html.contains("非平台档位"));
         // 「不限」不该同时被选中。
         assert!(!html.contains(r#"<option value="" selected>"#));
     }
 
-    /// 关键词面渲染出那一节：三项可编辑，排序只读。
+    /// 关键词面渲染出那一节：三项可编辑。
     #[test]
     fn the_keyword_surface_renders_every_sampling_input() {
-        let form = MonitorRuleFormState::from_panel(&keyword_panel("考研自习::latest"));
-        let html = sampling_policy_section(&form, false);
+        let panel = keyword_panel_editing("考研自习::latest", "latest");
+        let form = MonitorRuleFormState::from_panel(&panel);
+        let html = sampling_policy_section(&panel, &form, false);
         for field in ["scroll_rounds", "top_by_likes", "published_within_days"] {
             assert!(html.contains(&format!(r#"name="{field}""#)), "{field} 缺失");
         }
-        // 排序只读展示，中文。
-        assert!(html.contains("<output>最新</output>"));
     }
 
-    /// 排序不可在规则里改：它是目标身份的一部分（`{词}::{排序}`）。做成可编辑会让规则
-    /// 与身份脱节——列表还叫「考研自习（最多点赞）」，实际却按别的排序采。
+    /// **新开一条时排序必须可选。**
+    ///
+    /// 这是「一个关键词盯几个榜」这件事在界面上唯一的入口。此前它一律只读（理由写的是
+    /// 「排序属于目标身份」，那是 `0076` 之前的设计），于是存储层支持多规则、而界面上
+    /// 第二条永远加不出来：「加一条规则」点进去拿到的是最早那条的表单，口径锁死，
+    /// 保存只会改那一条。
     #[test]
-    fn the_ranking_is_read_only_because_it_belongs_to_the_target_identity() {
-        let form = MonitorRuleFormState::from_panel(&keyword_panel("考研自习::most_liked"));
-        let html = sampling_policy_section(&form, false);
+    fn a_new_rule_lets_a_person_pick_the_ranking() {
+        let panel = keyword_panel("考研自习");
+        let form = MonitorRuleFormState::from_panel(&panel);
+        let html = sampling_policy_section(&panel, &form, false);
+        assert!(
+            html.contains(r#"<select id="ranking_key" name="ranking_key""#),
+            "新开一条规则必须能选榜，否则多规则从界面上到不了"
+        );
+        for (value, text) in KEYWORD_RANKINGS {
+            assert!(html.contains(&format!(r#"value="{value}""#)), "{value} 缺失");
+            assert!(html.contains(text), "{text} 缺失");
+        }
+        assert_eq!(form.expected_revision, 0, "新规则报的是它自己的第 0 版");
+    }
+
+    /// **已经有规则的榜不再提供。**
+    ///
+    /// 再提供一次，保存会撞上那条已存在的规则、被判成过期版本，而人只看到一句「版本已
+    /// 过期」，看不出是因为这个榜已经在盯了。
+    #[test]
+    fn a_new_rule_only_offers_rankings_without_a_live_rule() {
+        let mut panel = keyword_panel("考研自习");
+        panel
+            .available_rankings
+            .retain(|value| value != "most_liked" && value != "comprehensive");
+        let form = MonitorRuleFormState::from_panel(&panel);
+        let html = sampling_policy_section(&panel, &form, false);
+        assert!(!html.contains(r#"value="most_liked""#), "已有规则的榜不该再列");
+        assert!(
+            !html.contains(r#"value="comprehensive""#),
+            "已有规则的榜不该再列"
+        );
+        assert!(html.contains(r#"value="most_collected""#));
+        assert_eq!(
+            form.ranking_key, "most_collected",
+            "默认落在第一个还空着的榜上，而不是一个已经有规则的榜"
+        );
+    }
+
+    /// **编辑已有规则时排序只读。**
+    ///
+    /// 改一条已有规则的排序，等于把它搬到另一个榜上——它签发过的工单与采回来的材料会
+    /// 突然说不清是按什么口径取的。要换榜就新开一条，再停用旧的。
+    #[test]
+    fn editing_an_existing_rule_keeps_its_ranking_fixed() {
+        let panel = keyword_panel_editing("考研自习::most_liked", "most_liked");
+        let form = MonitorRuleFormState::from_panel(&panel);
+        let html = sampling_policy_section(&panel, &form, false);
         assert!(!html.contains(r#"<select id="ranking_key""#));
         assert!(html.contains("<output>最多点赞</output>"));
-        assert!(html.contains("排序属于这个观察目标的身份"));
+        assert_eq!(form.expected_revision, 2, "报的是这条规则自己的版本号");
+    }
+
+    /// **新开一条时不能同时发一个同名的 hidden。**
+    ///
+    /// 同一个字段提交两个值，服务端按先到的那个解析，于是人选的榜被静默丢掉——表单看起来
+    /// 正常工作，实际每次都存进同一条规则。
+    #[test]
+    fn the_new_rule_form_sends_the_ranking_exactly_once() {
+        let panel = keyword_panel("考研自习");
+        let form = MonitorRuleFormState::from_panel(&panel);
+        let html = render_monitor_rule_modal(
+            &panel,
+            &form,
+            None,
+            TargetListContext {
+                filter: None,
+                sort: None,
+                domain: None,
+            },
+        );
+        assert_eq!(
+            html.matches(r#"name="ranking_key""#).count(),
+            1,
+            "排序字段只能出现一次：新开一条时是 select，编辑时是 hidden"
+        );
+        assert!(html.contains(r#"<select id="ranking_key""#));
+    }
+
+    /// **表单必须把「在编辑哪一条」带回去。**
+    ///
+    /// 丢了它，校验失败后服务端按查询串重建表单：排序是人选的那个、版本号却来自「最早那条
+    /// 规则」——人改完重试永远撞 `stale_revision`，而界面只说「版本已过期」，看不出是因为
+    /// 报的是另一条规则的版本号。成功时也一样看不见刚存的那条。
+    #[test]
+    fn the_form_carries_which_rule_it_is_editing() {
+        let new_panel = keyword_panel("考研自习");
+        let new_form = MonitorRuleFormState::from_panel(&new_panel);
+        let new_html = render_monitor_rule_modal(
+            &new_panel,
+            &new_form,
+            None,
+            TargetListContext {
+                filter: None,
+                sort: None,
+                domain: None,
+            },
+        );
+        assert!(
+            new_html.contains(r#"<input type="hidden" name="rule_slot" value="new">"#),
+            "新开一条要带回 new，否则失败重试会变成改最早那条"
+        );
+
+        let edit_panel = keyword_panel_editing("考研自习::most_liked", "most_liked");
+        let edit_form = MonitorRuleFormState::from_panel(&edit_panel);
+        let edit_html = render_monitor_rule_modal(
+            &edit_panel,
+            &edit_form,
+            None,
+            TargetListContext {
+                filter: None,
+                sort: None,
+                domain: None,
+            },
+        );
+        assert!(
+            edit_html.contains(r#"<input type="hidden" name="rule_slot" value="most_liked">"#),
+            "编辑要带回这条规则自己的口径"
+        );
+    }
+
+    /// 编辑模式相反：排序只有 hidden 那一份。
+    #[test]
+    fn the_edit_form_sends_the_ranking_exactly_once_too() {
+        let panel = keyword_panel_editing("考研自习::latest", "latest");
+        let form = MonitorRuleFormState::from_panel(&panel);
+        let html = render_monitor_rule_modal(
+            &panel,
+            &form,
+            None,
+            TargetListContext {
+                filter: None,
+                sort: None,
+                domain: None,
+            },
+        );
+        assert_eq!(html.matches(r#"name="ranking_key""#).count(), 1);
+        assert!(html.contains(r#"<input type="hidden" name="ranking_key" value="latest">"#));
     }
 }
