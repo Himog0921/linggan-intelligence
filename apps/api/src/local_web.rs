@@ -2367,6 +2367,9 @@ struct CollectionParams {
     /// Lifecycle 只按窗口与指标读取。选中作品仅是页面状态，不进入 Rust read query。
     life_window: Option<String>,
     life_metric: Option<String>,
+    /// 图表阅读方式与趋势粒度是页面本地状态：它们不进入 lifecycle read contract。
+    life_chart: Option<String>,
+    life_grain: Option<String>,
     life_work: Option<String>,
     /// The target drawer owns this bounded, read-only catalogue filter.
     catalog_query: Option<String>,
@@ -2557,8 +2560,11 @@ async fn collection_targets(
         }
         Ok(Some(_)) | Ok(None) | Err(()) => None,
     };
-    let has_legacy_lifecycle_query =
-        params.life_window.is_some() || params.life_metric.is_some() || params.life_work.is_some();
+    let has_legacy_lifecycle_query = params.life_window.is_some()
+        || params.life_metric.is_some()
+        || params.life_chart.is_some()
+        || params.life_grain.is_some()
+        || params.life_work.is_some();
     // 早期的作品表现链接只有 `life_*`，没有今天的 `dtab=works&wview=performance`。
     // 它们必须仍然落到表现视图；否则无效查询会在概览里被静默吞掉，用户既看不到图也看
     // 不到为什么图不可用。
@@ -2569,6 +2575,8 @@ async fn collection_targets(
     };
     let works_view =
         target_drawer::TargetWorksView::parse(params.wview.as_deref(), has_legacy_lifecycle_query);
+    let chart_view = target_drawer::LifeChartView::parse(params.life_chart.as_deref());
+    let trend_grain = target_drawer::LifeTrendGrain::parse(params.life_grain.as_deref());
     let lifecycle_query = CreatorLifecycleQuery::parse_optional(
         params.life_window.as_deref(),
         params.life_metric.as_deref(),
@@ -2720,7 +2728,7 @@ async fn collection_targets(
         _ => Vec::new(),
     };
     let drawer = match drawer_target.as_ref() {
-        Ok(target) => target_drawer::render_with_catalog_view(
+        Ok(target) => target_drawer::render_with_catalog_view_with_chart(
             target.as_ref(),
             drawer_avatar.as_ref(),
             completeness.as_ref(),
@@ -2753,6 +2761,8 @@ async fn collection_targets(
                 Err(()) => target_drawer::TargetInspectorView::ReadUnavailable,
             },
             works_view,
+            chart_view,
+            trend_grain,
             match target.as_ref().map(|target| target.target_kind.as_str()) {
                 Some("creator") => target_drawer::TargetCatalogView::Creator(
                     creator_catalog.as_ref().and_then(Option::as_ref),

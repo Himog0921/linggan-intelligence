@@ -1,7 +1,7 @@
 # LIDS-LOG-001 · LIDS 迁移与变更记录
 
 > 状态: 权威当前
-> 最后核对: 2026-09-10
+> 最后核对: 2026-09-13
 > 适用范围: Linggan Intelligence LIDS Token、Primitive、Component、Pattern、Page、Motion、Scene 和 Data Truth 规则的实际变更、替代、例外与验证边界
 > 事实来源: [system.md](system.md)、[README.md](README.md)、DESIGN-002 Issue #7、项目 progress 记录和实际验证输出
 > 冲突时以谁为准: 真实代码/合同/测试、用户最新确认、当前 SCOPE 和 ACCEPTED 决策；本日志不把计划写成已实现事实
@@ -28,6 +28,14 @@
 - **Data Truth**：趋势和摘要仅消费 qualified / KNOWN lifecycle point；空 point 集显示不可成图原因与真实 exclusion，而不以中位数、密度或巡查新增 `0` 填充。header 的持续观察标记区分 active、paused、dismissed 与 inactive，既不把未启用猜为暂停，也不借用 scheduler／Lease／Attempt 状态。
 - **Token / Layout / A11y**：新增样式只消费现有 `--lgi-*` Token，所有功能文字使用 11px 及以上的 Token 档位；趋势图例可折行，避免 901px 以上但右侧摘要仍并列的中间宽度横溢。2026-09-13 反馈后，逐篇散点提升为趋势后的常驻同级分析面，再接近期证据表；趋势 SVG 与图例的唯一受控色阶只用既有 body / signal-ink / signal，由低饱和墨色到信号橙表示同一条中位数线的连续读取，不能扩散到背景、正文或状态。散点保留逐点链接与具名替代文字。
 - **验证边界**：focused render 反例覆盖 Known(0)、Unknown-only 空点、观察状态分支和 URL 恢复；format、check、UI handbook 与治理检查通过。共享 runtime、插件、外部平台、采集与 Mog 业务视觉验收仍由发布后的独立回执区分。
+
+## 2026-09-13 · TARGET-INSPECTOR-PERFORMANCE-001 同画布趋势／分布切换
+
+- **替代范围**：本条替代上一条“趋势与逐篇分布连续常驻”的页面布局结论。Collection L1 与既有 L2 Split Inspector 不变；同一个表现画布通过 URL-owned `life_chart=trend|distribution` 切换两种阅读，不新增 Token、CMP、主题、全局壳层或动作。`life_grain=month|week` 仅在趋势成立，分布不显示或消费粒度控制。
+- **Data Truth**：两视图消费同一时间窗、当前指标、as-of 与 qualified / KNOWN 单篇作品集。趋势以发布密度、时间桶内当前指标中位数与当前窗口逐篇中位基准回答常态是否移动；分布以“发布时间 × 当前指标”的逐篇原始值回答变化由哪些作品构成。Known zero 继续参与当前指标；指标未知仍在 exclusion 中，不以零补点。
+- **复核信号**：评论／点赞 `>20%` 只是逐篇分布的 signal 外圈，不改写纵轴或形成第二张指标图。仅评论、点赞已知且点赞大于零才可判；未知计数或 Known zero 进入“讨论率未可判”计数，不被推断为低讨论。巡检新增是独立轻标记，可与高讨论信号共存。
+- **LIDS / A11y**：趋势保持单一 Ink 主线与同序列的淡填充，橙红只用于 active tab 与复核 signal；不把渐变当作另一项指标或方向编码。图例、SVG 替代文字与逐点到精确作品的链接随视图同步，右侧复核栏只解释当前图。新增 CSS 只消费既有 `--lgi-*` token。
+- **验证边界**：源码 focused render tests 与只读 rate 计算单测覆盖 URL、视图分离、Known zero／Unknown、未可判率与逐点链接。`cargo fmt`、API check、focused API/evidence tests、UI handbook、governance 与 diff 检查的结果以本轮回执为准；本机 source `:3001` 虽 health READY，但 Targets 读取呈“当前未知”，因此实际图表浏览器像素为 `NOT VERIFIED`。未提交、未合并、未刷新 `:3000`，更不证明共享 runtime、插件、外部平台、采集或 Mog 视觉验收。
 
 ## 2026-09-07 · OBSERVATION-TARGET-SEMANTIC-FEEDBACK-001
 

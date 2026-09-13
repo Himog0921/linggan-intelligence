@@ -189,6 +189,10 @@ pub struct CreatorLifecyclePoint {
     pub published_local_date: String,
     pub published_at_epoch_ms: i64,
     pub metric_value: i64,
+    /// `comments / likes` only when both source facts are KNOWN and likes is non-zero.
+    /// A missing rate must never be interpreted as no discussion: it can mean that either
+    /// source metric is still unknown, or that likes is a real zero and the ratio is undefined.
+    pub discussion_rate: Option<f64>,
     pub association_state: CreatorLifecycleAssociation,
     pub new_in_latest_patrol: bool,
 }
@@ -382,6 +386,7 @@ pub async fn read_creator_lifecycle(
             published_local_date: published_local_date.clone(),
             published_at_epoch_ms,
             metric_value,
+            discussion_rate: discussion_rate(candidate.like_count, candidate.comment_count),
             association_state,
             new_in_latest_patrol,
         });
@@ -460,6 +465,16 @@ fn metric_value(
         CreatorLifecycleMetric::Comments => comment_count,
         CreatorLifecycleMetric::Collects => collect_count,
         CreatorLifecycleMetric::Shares => share_count,
+    }
+}
+
+fn discussion_rate(like_count: Option<i64>, comment_count: Option<i64>) -> Option<f64> {
+    match (like_count, comment_count) {
+        (Some(likes), Some(comments)) if likes > 0 => Some(comments as f64 / likes as f64),
+        // `Some(0)` is a Known zero, but a comment-to-like ratio is undefined rather than 0.
+        // It deliberately shares the `None` UI state with unknown source metrics; neither is
+        // allowed to claim that the work has a low discussion rate.
+        _ => None,
     }
 }
 
@@ -641,5 +656,13 @@ mod tests {
             CreatorLifecycleQuery::parse_optional(None, Some("monitoring_value")),
             Err(CreatorLifecycleQueryError::Metric)
         );
+    }
+
+    #[test]
+    fn discussion_rate_requires_known_positive_like_count() {
+        assert_eq!(discussion_rate(Some(20), Some(5)), Some(0.25));
+        assert_eq!(discussion_rate(Some(0), Some(5)), None);
+        assert_eq!(discussion_rate(None, Some(5)), None);
+        assert_eq!(discussion_rate(Some(20), None), None);
     }
 }

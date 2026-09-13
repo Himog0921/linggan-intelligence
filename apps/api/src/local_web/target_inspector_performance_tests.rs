@@ -163,33 +163,38 @@ fn blocked_materials_get_a_real_decision_instead_of_a_dead_end() {
 #[test]
 fn performance_view_keeps_known_zero_excludes_unknown_and_preserves_context() {
     use super::target_drawer::{
-        LifecycleView, TargetCatalogView, TargetDrawerTab, TargetInspectorView, TargetListContext,
-        TargetWorksView,
+        LifeChartView, LifeTrendGrain, LifecycleView, TargetCatalogView, TargetDrawerTab,
+        TargetInspectorView, TargetListContext, TargetWorksView,
     };
 
     let target = sample_target(10, "creator");
     let projection = lifecycle_projection(target.target_ref);
-    let html = super::target_drawer::render_with_catalog_view(
-        Some(&target),
-        None,
-        Some(&HashMap::new()),
-        Some(&target.target_ref.to_string()),
-        TargetDrawerTab::Baseline,
-        LifecycleView::Projection(&projection),
-        TargetInspectorView::NotRead,
-        TargetWorksView::Performance,
-        TargetCatalogView::Unavailable,
-        None,
-        None,
-        None,
-        None,
-        &[],
-        TargetListContext {
-            filter: Some("creator"),
-            sort: Some("last"),
-            domain: Some("adhd-family"),
-        },
-    );
+    let render = |chart_view| {
+        super::target_drawer::render_with_catalog_view_with_chart(
+            Some(&target),
+            None,
+            Some(&HashMap::new()),
+            Some(&target.target_ref.to_string()),
+            TargetDrawerTab::Baseline,
+            LifecycleView::Projection(&projection),
+            TargetInspectorView::NotRead,
+            TargetWorksView::Performance,
+            chart_view,
+            LifeTrendGrain::Month,
+            TargetCatalogView::Unavailable,
+            None,
+            None,
+            None,
+            None,
+            &[],
+            TargetListContext {
+                filter: Some("creator"),
+                sort: Some("last"),
+                domain: Some("adhd-family"),
+            },
+        )
+    };
+    let html = render(LifeChartView::Trend);
 
     assert!(html.contains(r#"aria-label="作品视图""#));
     assert!(html.contains("wview=list"));
@@ -199,27 +204,38 @@ fn performance_view_keeps_known_zero_excludes_unknown_and_preserves_context() {
     assert!(html.contains("sort=last"));
     assert!(html.contains("life_window=recent_90_days"));
     assert!(html.contains("life_metric=likes"));
+    assert!(html.contains("life_chart=trend"));
+    assert!(html.contains("life_chart=distribution"));
+    assert!(html.contains("life_grain=month"));
     assert!(html.contains(r#"class="life-trend-chart""#));
-    assert!(html.contains(r#"id="life-trend-line-gradient""#));
+    assert!(html.contains(r#"id="life-trend-area-gradient""#));
     assert_eq!(html.matches("<linearGradient").count(), 1);
-    assert_eq!(
-        html.matches(r#"stroke="url(#life-trend-line-gradient)""#)
-            .count(),
-        1
-    );
-    assert_eq!(html.matches("url(#life-trend-line-gradient)").count(), 1);
-    assert!(html.contains(r#"class="life-distribution-panel""#));
-    assert!(html.contains("逐篇作品分布"));
-    assert!(!html.contains(r#"<details class="life-distribution""#));
+    assert_eq!(html.matches("life-distribution-chart").count(), 0);
+    assert!(html.contains(r#"aria-label="图表视图""#));
+    assert!(html.contains(r#"aria-label="趋势粒度""#));
     assert!(html.contains(r#"aria-label="复核摘要""#));
     assert!(html.contains("近期作品证据"));
     let trend_position = html.find("作品表现趋势").expect("trend heading");
-    let distribution_position = html.find("逐篇作品分布").expect("distribution heading");
     let evidence_position = html.find("近期作品证据").expect("evidence heading");
-    assert!(trend_position < distribution_position);
-    assert!(distribution_position < evidence_position);
-    assert!(html.contains("零互动作品，2026-09-01，点赞 0"));
-    assert_eq!(html.matches(r#"class="life-point-hit""#).count(), 1);
+    assert!(trend_position < evidence_position);
+    assert!(!html.contains(r#"class="life-point-hit""#));
+
+    let distribution = render(LifeChartView::Distribution);
+    assert!(distribution.contains("作品表现分布"));
+    assert!(distribution.contains("life-distribution-chart"));
+    assert_eq!(distribution.matches("<linearGradient").count(), 0);
+    assert!(distribution.contains("纵轴保持当前点赞原始数值"));
+    assert!(!distribution.contains("纵轴压缩"));
+    assert!(distribution.contains("零互动作品，2026-09-01，点赞 0"));
+    assert_eq!(distribution.matches(r#"class="life-point-hit""#).count(), 3);
+    assert_eq!(
+        distribution
+            .matches("life-point-high-discussion-ring")
+            .count(),
+        1
+    );
+    assert!(distribution.contains("高讨论率"));
+    assert!(distribution.contains("讨论率未可判"));
     assert!(html.contains("指标未知 1"));
     assert!(html.contains("尚未建立内容分类"));
     assert!(!html.contains("主题表现"));
@@ -513,9 +529,25 @@ fn inspector_css_keeps_desktop_controls_and_accessible_motion_boundaries() {
             "target inspector CSS is missing {required}"
         );
     }
+    assert!(TARGET_DRAWER_CSS.contains(".life-chart-switch"));
+    assert!(TARGET_DRAWER_CSS.contains(".life-grain-switch"));
+    assert!(TARGET_DRAWER_CSS.contains("fill:url(#life-trend-area-gradient)"));
+    assert!(TARGET_DRAWER_CSS.contains("stroke:var(--lgi-ink)"));
+    assert!(
+        TARGET_DRAWER_CSS
+            .contains(".life-trend-line{fill:none;stroke:var(--lgi-ink);stroke-width:2;")
+    );
     assert!(TARGET_DRAWER_CSS.contains(
-        "background:linear-gradient(90deg,var(--lgi-body) 0%,var(--lgi-signal-ink) 56%,var(--lgi-signal) 100%)"
+        ".life-trend-new-ring{fill:var(--lgi-canvas);stroke:var(--lgi-signal);stroke-width:2}"
     ));
+    assert!(
+        !TARGET_DRAWER_CSS
+            .contains(".life-trend-line{fill:none;stroke:var(--lgi-ink);stroke-width:2.15")
+    );
+    assert!(!TARGET_DRAWER_CSS.contains(
+        ".life-trend-new-ring{fill:var(--lgi-canvas);stroke:var(--lgi-signal);stroke-width:1.5}"
+    ));
+    assert!(!TARGET_DRAWER_CSS.contains("life-trend-line-gradient"));
     assert!(!TARGET_DRAWER_CSS.contains("outline:none"));
     assert!(!TARGET_DRAWER_CSS.contains("!important"));
 
@@ -573,10 +605,10 @@ fn lifecycle_projection(target_ref: uuid::Uuid) -> CreatorLifecycleProjection {
         window: CreatorLifecycleWindow::Recent90Days,
         metric: CreatorLifecycleMetric::Likes,
         summary: CreatorLifecycleSummary {
-            linked_work_count: Some(2),
-            linked_work_count_lower_bound: 2,
-            confirmed_author_work_count: 1,
-            eligible_point_count: 1,
+            linked_work_count: Some(4),
+            linked_work_count_lower_bound: 4,
+            confirmed_author_work_count: 3,
+            eligible_point_count: 3,
         },
         exclusions: CreatorLifecycleExclusions {
             author_not_verified: 0,
@@ -588,22 +620,49 @@ fn lifecycle_projection(target_ref: uuid::Uuid) -> CreatorLifecycleProjection {
         },
         receipt: CreatorLifecycleReceipt {
             scan_limit: 2_000,
-            probed_count: 2,
-            scanned_count: 2,
-            returned_count: 1,
+            probed_count: 4,
+            scanned_count: 4,
+            returned_count: 3,
             truncated: false,
         },
-        points: vec![CreatorLifecyclePoint {
-            work_public_ref: uuid::Uuid::from_u128(20_001),
-            title: Some("零互动作品".to_owned()),
-            title_state: "KNOWN",
-            published_at: "2026-09-01 00:00:00+08".to_owned(),
-            published_local_date: "2026-09-01".to_owned(),
-            published_at_epoch_ms: 1_788_192_000_000,
-            metric_value: 0,
-            association_state: CreatorLifecycleAssociation::AuthorConfirmed,
-            new_in_latest_patrol: false,
-        }],
+        points: vec![
+            CreatorLifecyclePoint {
+                work_public_ref: uuid::Uuid::from_u128(20_001),
+                title: Some("零互动作品".to_owned()),
+                title_state: "KNOWN",
+                published_at: "2026-09-01 00:00:00+08".to_owned(),
+                published_local_date: "2026-09-01".to_owned(),
+                published_at_epoch_ms: 1_788_192_000_000,
+                metric_value: 0,
+                discussion_rate: None,
+                association_state: CreatorLifecycleAssociation::AuthorConfirmed,
+                new_in_latest_patrol: false,
+            },
+            CreatorLifecyclePoint {
+                work_public_ref: uuid::Uuid::from_u128(20_002),
+                title: Some("高讨论作品".to_owned()),
+                title_state: "KNOWN",
+                published_at: "2026-09-03 00:00:00+08".to_owned(),
+                published_local_date: "2026-09-03".to_owned(),
+                published_at_epoch_ms: 1_788_364_800_000,
+                metric_value: 20,
+                discussion_rate: Some(0.25),
+                association_state: CreatorLifecycleAssociation::AuthorConfirmed,
+                new_in_latest_patrol: true,
+            },
+            CreatorLifecyclePoint {
+                work_public_ref: uuid::Uuid::from_u128(20_003),
+                title: Some("常规作品".to_owned()),
+                title_state: "KNOWN",
+                published_at: "2026-09-04 00:00:00+08".to_owned(),
+                published_local_date: "2026-09-04".to_owned(),
+                published_at_epoch_ms: 1_788_451_200_000,
+                metric_value: 8,
+                discussion_rate: Some(0.10),
+                association_state: CreatorLifecycleAssociation::DirectoryLinked,
+                new_in_latest_patrol: false,
+            },
+        ],
     }
 }
 
