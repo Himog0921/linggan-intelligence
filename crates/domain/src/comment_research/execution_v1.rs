@@ -205,7 +205,7 @@ fn ensure_not_blank(field: &'static str, value: &str) -> Result<(), ResearchFing
 fn write_semantic_field(hasher: &mut Sha256, name: &str, value: &str) {
     hasher.update(name.as_bytes());
     hasher.update([0]);
-    hasher.update(value.as_bytes().len().to_string().as_bytes());
+    hasher.update(value.len().to_string().as_bytes());
     hasher.update([0]);
     hasher.update(value.as_bytes());
     hasher.update([0]);
@@ -332,7 +332,7 @@ fn append_source_text(rendered: &mut String, name: &str, value: &ContextPackPrev
 fn append_field(rendered: &mut String, name: &str, value: &str) {
     rendered.push_str(name);
     rendered.push('=');
-    rendered.push_str(&value.as_bytes().len().to_string());
+    rendered.push_str(&value.len().to_string());
     rendered.push('\n');
     rendered.push_str(value);
     rendered.push('\n');
