@@ -771,7 +771,7 @@ fn row_secondary_actions(
 /// **只裁剪，不另写格式**：全项目的人可读时间由 `linggan_human_moment()` 统一产出，
 /// 这里从那一种格式上切掉前缀。自己拼一个 `to_char` 出来就是全项目的第二种时间写法，
 /// 治理检查也正是为此设的。
-fn moment_without_year(value: &str) -> &str {
+pub(super) fn moment_without_year(value: &str) -> &str {
     // 只认 `YYYY-MM-DD ...` 这一种形状；认不出就原样返回（"尚未巡查" 这类文案）。
     let bytes = value.as_bytes();
     if bytes.len() >= 5 && bytes[0..4].iter().all(u8::is_ascii_digit) && bytes[4] == b'-' {
@@ -812,7 +812,7 @@ fn relative_moment(value: Option<&str>, now_minutes: i64) -> String {
 ///
 /// 加 8 小时而不是查时区库：全项目的会话时区已经固定为 Asia/Shanghai，页面上的时间也
 /// 都由 `linggan_human_moment()` 按这个时区给出。这里换一个时区就会跟页面对不上。
-fn beijing_now_minutes() -> i64 {
+pub(super) fn beijing_now_minutes() -> i64 {
     let seconds = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|value| value.as_secs())
@@ -820,7 +820,7 @@ fn beijing_now_minutes() -> i64 {
     i64::try_from(seconds / 60).unwrap_or(0) + 8 * 60
 }
 
-fn minutes_since_epoch(value: &str) -> Option<i64> {
+pub(super) fn minutes_since_epoch(value: &str) -> Option<i64> {
     let bytes = value.as_bytes();
     if bytes.len() < 16 {
         return None;
