@@ -3410,7 +3410,11 @@ mod tests {
         target
     }
 
-    fn rule(slot_key: &str, automatic_enabled: bool, revision: i32) -> linggan_evidence::MonitorRuleSummary {
+    fn rule(
+        slot_key: &str,
+        automatic_enabled: bool,
+        revision: i32,
+    ) -> linggan_evidence::MonitorRuleSummary {
         linggan_evidence::MonitorRuleSummary {
             rule_ref: uuid::Uuid::new_v4(),
             slot_key: slot_key.to_owned(),
@@ -3476,19 +3480,43 @@ mod tests {
                 domain: None,
             },
         );
-        // 开着的那条给「暂停」，停着的那条给「启用」。
-        assert!(html.contains(r#"value="pause">暂停"#));
-        assert!(html.contains(r#"value="resume">启用"#));
-        // 各自报自己的版本号：用别条的会永远撞「版本已过期」。
-        assert!(html.contains(r#"name="expected_revision" value="3""#));
-        assert!(html.contains(r#"name="expected_revision" value="1""#));
-        // 各自说清作用在哪条口径上。
-        assert!(html.contains(r#"name="rule_slot" value="comprehensive""#));
-        assert!(html.contains(r#"name="rule_slot" value="most_liked""#));
-        // 点完要回到这张表，而不是被丢进规则编辑弹窗。
-        assert!(html.contains(r#"name="return_dtab" value="patrol""#));
-        // 停用要带 retire 那个 wire 的必填项，否则 422。
-        assert!(html.contains(r#"name="row_target_ref""#));
+        // **逐行核对，不用整页 contains。** 整页查「存在 expected_revision=3」与「存在
+        // rule_slot=comprehensive」是两句互不相干的话：哪天把两行的版本号或口径错配了，
+        // 两句仍然都成立，测试照样绿。要断言的是**同一行里**这两项对得上。
+        let rows = html
+            .split("<tr><th scope=\"row\">")
+            .skip(1)
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 2);
+        for (label, slot, revision, toggle) in [
+            ("综合排序", "comprehensive", 3, ("pause", "暂停")),
+            ("最多点赞", "most_liked", 1, ("resume", "启用")),
+        ] {
+            let row = rows
+                .iter()
+                .find(|row| row.starts_with(label))
+                .unwrap_or_else(|| panic!("{label} 那一行不在表里"));
+            assert!(
+                row.contains(&format!(r#"name="rule_slot" value="{slot}""#)),
+                "{label} 那一行要说清作用在哪条口径上"
+            );
+            assert!(
+                row.contains(&format!(r#"name="expected_revision" value="{revision}""#)),
+                "{label} 那一行要报**自己的**版本号，用别条的会永远撞「版本已过期」"
+            );
+            assert!(
+                row.contains(&format!(r#"value="{}">{}"#, toggle.0, toggle.1)),
+                "{label} 那一行的按钮该是「{}」",
+                toggle.1
+            );
+            // 点完要回到这张表，而不是被丢进规则编辑弹窗。
+            assert!(row.contains(r#"name="return_dtab" value="patrol""#));
+            // 停用要带 retire 那个 wire 的必填项，否则整个表单 422、点下去什么都不发生。
+            assert!(
+                row.contains(r#"name="row_target_ref""#),
+                "{label} 那一行的停用缺 row_target_ref"
+            );
+        }
     }
 
     #[test]

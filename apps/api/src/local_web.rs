@@ -3642,9 +3642,16 @@ fn monitor_rule_redirect(
                 _ => "patrol",
             }
         ));
-        if let Some(error) = error {
-            pairs.push(format!("error={error}"));
-        }
+        // 成功也要说一句。规则台没有回执面板，什么都不说的话「改成功了」与「被拒了」
+        // 在页面上长得一模一样——这一行的状态字本来就可能因为别的原因没变。
+        pairs.push(format!(
+            "error={}",
+            error.unwrap_or(match form.command_kind.as_str() {
+                "pause" => "monitor_rule_paused",
+                "resume" => "monitor_rule_resumed",
+                _ => "monitor_rule_saved",
+            })
+        ));
         return Redirect::to(&format!("/collection/targets?{}", pairs.join("&")));
     }
     let mut params = vec![format!("rule={}", form.target_ref)];
@@ -3807,6 +3814,9 @@ fn monitor_rule_error_code(error: &MonitorRuleCommandError) -> &'static str {
         MonitorRuleCommandError::SchemaUnavailable => "read_model_not_connected",
         MonitorRuleCommandError::UnknownTarget => "target_not_found",
         MonitorRuleCommandError::InvalidManualObserveCommand => "target_not_requestable",
+        // 只有列表上那个「一起开关」会产生它；单条命令这一路走不到。显式写出而不留兜底：
+        // 留了兜底，将来新增错误变体会悄悄变成一句通用文案。
+        MonitorRuleCommandError::NotEveryRuleSwitched { .. } => "patrol_toggle_partial",
         MonitorRuleCommandError::ManualObserveNotAdmitted { reason_code } => {
             match reason_code.as_str() {
                 "authorization_missing" => "authorization_missing",
@@ -3917,8 +3927,38 @@ async fn collection_target_rule_command(
             .flatten(),
     };
     match apply_monitor_rule_command(database, &command).await {
-        Ok(receipt) => monitor_rule_redirect(&form, None, Some(receipt.receipt_ref)),
+        // **`Ok` 不等于「命令被接受了」。** 这套命令系统里 Rust 的 `Err` 只留给基础设施故障；
+        // 「版本过期」「被拒」「重放」都是耐久事实，走 `Ok(receipt)` 带回执。只看 `Ok`/`Err`
+        // 的话，规则台上那个按钮点下去撞了 `stale_revision` 也会跳回去一句不说——页面上这一行
+        // 状态原封不动、没有任何文字，人分不清「点了没反应」和「点了但被拒」。
+        //
+        // 弹窗那条路靠 `rule_receipt` 把回执带回去逐字渲染，不需要这个码；规则台没有回执面板，
+        // 只有列表那张消息表，所以把结果翻成一个码给它。
+        Ok(receipt) => monitor_rule_redirect(
+            &form,
+            monitor_rule_outcome_code(&receipt),
+            Some(receipt.receipt_ref),
+        ),
         Err(error) => monitor_rule_redirect(&form, Some(monitor_rule_error_code(&error)), None),
+    }
+}
+
+/// 回执翻成列表那张消息表认的码。`None` 表示「这次真的改了，没什么要额外说的」。
+///
+/// 只给**从规则台点过来**的那条路用（带 `return_drawer` 的那种）——弹窗有自己的回执面板，
+/// 会把 outcome 与 reason 逐字渲染出来，再叠一个码是重复说同一件事。
+fn monitor_rule_outcome_code(
+    receipt: &linggan_evidence::MonitorRuleCommandReceipt,
+) -> Option<&'static str> {
+    match receipt.outcome {
+        linggan_evidence::MonitorCommandOutcomeKind::Applied => None,
+        linggan_evidence::MonitorCommandOutcomeKind::Replay => {
+            Some("monitor_rule_command_replayed")
+        }
+        linggan_evidence::MonitorCommandOutcomeKind::StaleRevision => {
+            Some("monitor_rule_command_stale")
+        }
+        _ => Some("monitor_rule_command_rejected"),
     }
 }
 
@@ -4156,6 +4196,11 @@ async fn collection_target_patrol_toggle(
         Ok(_) if enable => Redirect::to(&back("patrol_resumed")),
         Ok(_) => Redirect::to(&back("patrol_paused")),
         Err(MonitorRuleCommandError::UnknownTarget) => Redirect::to(&back("patrol_toggle_no_rule")),
+        // 一起开关时有规则没翻过来——多半是那一条在这一页打开之后被改过（另一个标签页，
+        // 或者一次巡检推进了它的版本）。不报成功：目标行是诚实的，撒谎的会是那句横幅。
+        Err(MonitorRuleCommandError::NotEveryRuleSwitched { .. }) => {
+            Redirect::to(&back("patrol_toggle_partial"))
+        }
         Err(_) => Redirect::to(&back("patrol_toggle_failed")),
     }
 }

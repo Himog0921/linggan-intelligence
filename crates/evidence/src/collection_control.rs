@@ -1620,6 +1620,14 @@ pub enum MonitorRuleCommandError {
     UnknownTarget,
     #[error("manual observation command expected")]
     InvalidManualObserveCommand,
+    /// 一起开关时有规则没翻过来。
+    ///
+    /// **`Ok(receipt)` 不等于命令被接受了**：这套命令系统里「版本过期」「被拒」都是耐久事实，
+    /// 走回执而不是 `Err`。逐条循环里照 `Ok` 走下去，被拒的那一条只是被静默跳过，而调用方
+    /// 看到 `Ok` 就报「已停止观察」——横幅与目标行的真实状态互相矛盾（目标级的开关是所有
+    /// 规则的或，它会诚实地留在 monitoring）。
+    #[error("{switched} of {total} rules switched")]
+    NotEveryRuleSwitched { switched: usize, total: usize },
     #[error("manual observation was not admitted: {reason_code}")]
     ManualObserveNotAdmitted { reason_code: String },
     #[error(transparent)]
@@ -2392,6 +2400,16 @@ fn validate_monitor_command(
     }
     if command.kind == MonitorCommandKind::Resume && lifecycle_state == "dismissed" {
         return Err("target_not_requestable");
+    }
+    // **「停止观察」是目标级的决定，不针对某一条口径。**
+    //
+    // 它把生命周期推到 `dismissed`，而那一支不看还有没有别的规则在跑——一个盯三个榜的关键词
+    // 若被允许「只停点赞那一条」并走 Stop，整个目标会变成已停止观察，另外两条却还在按周期
+    // 出活。当前没有任何界面能提交这个组合，但这个端点收 `command_kind=stop` 也收 `rule_slot`，
+    // 直接 POST 就能触发。在这里挡掉，而不是等哪天加个按钮时才发现。
+    // 要停一条口径，用暂停或停用；要停整个目标，别带口径。
+    if command.kind == MonitorCommandKind::Stop && command.slot_key.is_some() {
+        return Err("invalid_mode");
     }
     if command.kind != MonitorCommandKind::SaveRule {
         return command.draft.is_none().then_some(()).ok_or("invalid_mode");
@@ -3227,28 +3245,37 @@ pub async fn toggle_target_patrol(
         // 没有生效的规则版本就没有可开关的东西。这不是失败，是「先去设一条规则」。
         return Err(MonitorRuleCommandError::UnknownTarget);
     }
+    let total = rules.len();
+    let mut switched = 0;
     let mut last = None;
     for (slot_key, expected_revision) in rules {
-        last = Some(
-            apply_monitor_rule_command(
-                database,
-                &MonitorRuleCommand {
-                    target_ref,
-                    expected_revision,
-                    idempotency_key: Uuid::new_v4(),
-                    kind: if enable {
-                        MonitorCommandKind::Resume
-                    } else {
-                        MonitorCommandKind::Pause
-                    },
-                    actor: MonitorCommandActor::Person,
-                    source: "targets_ui",
-                    draft: None,
-                    slot_key: Some(slot_key),
+        let receipt = apply_monitor_rule_command(
+            database,
+            &MonitorRuleCommand {
+                target_ref,
+                expected_revision,
+                idempotency_key: Uuid::new_v4(),
+                kind: if enable {
+                    MonitorCommandKind::Resume
+                } else {
+                    MonitorCommandKind::Pause
                 },
-            )
-            .await?,
-        );
+                actor: MonitorCommandActor::Person,
+                source: "targets_ui",
+                draft: None,
+                slot_key: Some(slot_key),
+            },
+        )
+        .await?;
+        if matches!(receipt.outcome, MonitorCommandOutcomeKind::Applied) {
+            switched += 1;
+        }
+        last = Some(receipt);
+    }
+    if switched != total {
+        // 有一条没翻过来就不能报成功。目标行自己是诚实的（它是所有规则的或），撒谎的是
+        // 那句横幅——而横幅正是人唯一会读的东西。
+        return Err(MonitorRuleCommandError::NotEveryRuleSwitched { switched, total });
     }
     Ok(last.expect("the rule list was checked to be non-empty"))
 }

@@ -511,3 +511,49 @@ async fn assert_target_observing(
         "目标级的「在不在被观察」是所有规则的或"
     );
 }
+
+/// **「停止观察」不接受口径。**
+///
+/// 它把生命周期推到 `dismissed`，而那一支不看还有没有别的规则在跑。允许「只停一条口径」
+/// 走这条命令，整个目标会变成已停止观察，另外几条却还在按自己的周期出活。当前没有界面能
+/// 提交这个组合，但端点收得下——挡在这里，而不是等哪天加个按钮才发现。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn stopping_observation_does_not_accept_a_single_slot() {
+    let database = proof_database("monitor_rule_stop_with_slot").await;
+    let target_ref = seed_keyword(&database, "考研自习::stop-slot").await;
+    for ranking in ["comprehensive", "most_liked"] {
+        apply_monitor_rule_command(&database, &save_rule(target_ref, ranking, 86_400, 0))
+            .await
+            .unwrap_or_else(|error| panic!("{ranking} 存不进去：{error}"));
+    }
+
+    let refused = apply_monitor_rule_command(
+        &database,
+        &MonitorRuleCommand {
+            target_ref,
+            expected_revision: 1,
+            idempotency_key: Uuid::new_v4(),
+            kind: MonitorCommandKind::Stop,
+            actor: MonitorCommandActor::Person,
+            source: "targets_ui",
+            draft: None,
+            slot_key: Some("most_liked".to_owned()),
+        },
+    )
+    .await
+    .expect("the command is decided, not an infrastructure failure");
+    assert_eq!(
+        (refused.outcome, refused.reason_code),
+        (MonitorCommandOutcomeKind::Rejected, "invalid_mode"),
+        "带口径的「停止观察」必须被拒"
+    );
+    assert_target_observing(&database, target_ref, true, "monitoring").await;
+    assert!(
+        rule_states(&database, target_ref)
+            .await
+            .iter()
+            .all(|(_, automatic)| *automatic),
+        "被拒的命令不该改动任何规则"
+    );
+}
