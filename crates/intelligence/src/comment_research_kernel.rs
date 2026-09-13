@@ -120,6 +120,29 @@ pub struct ResearchRunReceipt {
     pub external_calls_started: usize,
 }
 
+/// A server-computed explanation of what a subsequent `start_run` may freeze.
+///
+/// This is deliberately a summary rather than a manifest: the browser never receives source
+/// identifiers, source text, or a client-controlled selection. `start_run` still derives and
+/// selects again in its own transaction, so a confirmation cannot turn an old preview into a
+/// stale or hand-picked Run.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResearchRunPreview {
+    pub policy_configured: bool,
+    pub source_limit: Option<i32>,
+    pub eligible_sources: usize,
+    pub unprocessed_sources: usize,
+    pub selected_sources: usize,
+    pub selected_context_sources: usize,
+    pub selected_missing_parent_context_sources: usize,
+    pub succeeded_sources: usize,
+    pub no_signal_sources: usize,
+    pub active_sources: usize,
+    pub retryable_sources: usize,
+    pub terminal_item_states: Value,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunItemFailureClass {
     Retryable,
@@ -399,6 +422,119 @@ pub async fn start_run(
     })
 }
 
+/// Reads the current automatic-selection boundary without creating a Run or reserving a provider
+/// call. Refreshing derivations is the same local, deterministic preparation that `start_run`
+/// performs; it is needed so the preview and the confirmed command reason about the same current
+/// evidence boundary.
+pub async fn preview_run(
+    database: &Database,
+) -> Result<ResearchRunPreview, CommentResearchKernelError> {
+    derive_current_sources(database, MAX_DERIVATIONS_PER_PASS as usize).await?;
+    let mut transaction = database.pool().begin().await?;
+    let policy = sqlx::query(
+        "SELECT policy.derivation_version,policy.source_limit \
+         FROM linggan_comment_research_policy_active active \
+         JOIN linggan_comment_research_policy_revision policy \
+           ON policy.policy_revision_ref=active.policy_revision_ref \
+         WHERE active.singleton FOR SHARE OF active",
+    )
+    .fetch_optional(&mut *transaction)
+    .await?;
+    let summary = sqlx::query(
+        "WITH current AS ( \
+             SELECT derivation.derivation_ref,latest_item.state AS latest_state \
+             FROM linggan_comment_research_derivation_current derivation \
+             LEFT JOIN LATERAL ( \
+                 SELECT item.state \
+                 FROM linggan_comment_research_run_item item \
+                 WHERE item.derivation_ref=derivation.derivation_ref \
+                 ORDER BY item.updated_at DESC,item.run_ref DESC LIMIT 1 \
+             ) latest_item ON true \
+             WHERE derivation.derivation_version=$1 AND derivation.eligibility='eligible' \
+         ) \
+         SELECT count(*) AS eligible_sources, \
+                count(*) FILTER(WHERE latest_state IS NULL) AS unprocessed_sources, \
+                count(*) FILTER(WHERE latest_state='succeeded') AS succeeded_sources, \
+                count(*) FILTER(WHERE latest_state='no_signal') AS no_signal_sources, \
+                count(*) FILTER(WHERE latest_state IN ('pending','running')) AS active_sources, \
+                count(*) FILTER(WHERE latest_state='retryable') AS retryable_sources \
+         FROM current",
+    )
+    .bind(
+        policy
+            .as_ref()
+            .map(|row| row.get::<String, _>("derivation_version"))
+            .unwrap_or_else(|| DERIVATION_VERSION.to_owned()),
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+    let terminal_item_states: Value = sqlx::query_scalar(
+        "WITH current AS ( \
+             SELECT latest_item.state AS latest_state \
+             FROM linggan_comment_research_derivation_current derivation \
+             LEFT JOIN LATERAL ( \
+                 SELECT item.state \
+                 FROM linggan_comment_research_run_item item \
+                 WHERE item.derivation_ref=derivation.derivation_ref \
+                 ORDER BY item.updated_at DESC,item.run_ref DESC LIMIT 1 \
+             ) latest_item ON true \
+             WHERE derivation.derivation_version=$1 AND derivation.eligibility='eligible' \
+         ), grouped AS ( \
+             SELECT latest_state,count(*) AS item_count FROM current \
+             WHERE latest_state IN ('incompatible','unrecoverable','model_failed','restricted','cancelled') \
+             GROUP BY latest_state \
+         ) \
+         SELECT COALESCE(jsonb_object_agg(latest_state,item_count),'{}'::jsonb) FROM grouped",
+    )
+    .bind(
+        policy
+            .as_ref()
+            .map(|row| row.get::<String, _>("derivation_version"))
+            .unwrap_or_else(|| DERIVATION_VERSION.to_owned()),
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+    let selected = match policy.as_ref() {
+        Some(policy) => select_eligible_derivations(&mut transaction, policy).await?,
+        None => Vec::new(),
+    };
+    let selected_context_sources = selected
+        .iter()
+        .filter(|source| source.clean_state == "context")
+        .count();
+    let selected_missing_parent_context_sources = selected
+        .iter()
+        .filter(|source| {
+            source.clean_state == "context"
+                && source
+                    .context_manifest
+                    .get("parentRequested")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                && source
+                    .context_manifest
+                    .get("parentSourceRef")
+                    .is_none_or(Value::is_null)
+        })
+        .count();
+    let source_limit = policy.as_ref().map(|row| row.get::<i32, _>("source_limit"));
+    transaction.commit().await?;
+    Ok(ResearchRunPreview {
+        policy_configured: source_limit.is_some(),
+        source_limit,
+        eligible_sources: summary.get::<i64, _>("eligible_sources") as usize,
+        unprocessed_sources: summary.get::<i64, _>("unprocessed_sources") as usize,
+        selected_sources: selected.len(),
+        selected_context_sources,
+        selected_missing_parent_context_sources,
+        succeeded_sources: summary.get::<i64, _>("succeeded_sources") as usize,
+        no_signal_sources: summary.get::<i64, _>("no_signal_sources") as usize,
+        active_sources: summary.get::<i64, _>("active_sources") as usize,
+        retryable_sources: summary.get::<i64, _>("retryable_sources") as usize,
+        terminal_item_states,
+    })
+}
+
 async fn research_model_ready_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     config_ref: Uuid,
@@ -418,6 +554,7 @@ struct EligibleDerivation {
     source_sha256: String,
     research_sha256: String,
     research_text: String,
+    clean_state: String,
     context_manifest: Value,
 }
 
@@ -439,7 +576,7 @@ async fn select_eligible_derivations(
     policy: &sqlx::postgres::PgRow,
 ) -> Result<Vec<EligibleDerivation>, CommentResearchKernelError> {
     let rows = sqlx::query(
-        "SELECT derivation_ref,source_sha256,research_sha256,research_text,context_manifest \
+        "SELECT derivation_ref,source_sha256,research_sha256,research_text,clean_state,context_manifest \
          FROM linggan_comment_research_derivation_current derivation \
          WHERE derivation_version=$1 AND eligibility='eligible' \
            AND NOT EXISTS ( \
@@ -459,6 +596,7 @@ async fn select_eligible_derivations(
             source_sha256: row.get("source_sha256"),
             research_sha256: row.get("research_sha256"),
             research_text: row.get("research_text"),
+            clean_state: row.get("clean_state"),
             context_manifest: row.get("context_manifest"),
         })
         .collect())

@@ -17,7 +17,7 @@
         </div>
         <div class="cr-v1-actions">
           <button type="button" id="research-settings">研究设置</button>
-          <button type="button" id="start-run" class="cr-v1-primary">开始研究</button>
+          <button type="button" id="start-run" class="cr-v1-primary">准备本轮研究</button>
           <button type="button" id="refresh">刷新</button>
         </div>
       </header>
@@ -46,6 +46,14 @@
       <p id="settings-feedback" class="cr-v1-status" role="status"></p>
       <footer><a href="/settings/models">前往模型与向量设置</a><button type="submit" class="cr-v1-primary">保存研究策略</button></footer>
     </form>
+  </dialog>
+
+  <dialog id="research-run-dialog" class="cr-v1-dialog">
+    <header><div><p class="cr-v1-kicker">本轮自动研究</p><h2>确认系统将处理的范围</h2></div><button type="button" data-close="research-run-dialog">关闭</button></header>
+    <p>系统只从当前可读的普通用户原声自动选择；这里不接受手选评论。确认后服务端会再次核对当前范围、研究模型与向量模型资格，再冻结一个新的 Run。</p>
+    <div id="run-preview" class="cr-v1-preview" aria-live="polite"></div>
+    <p id="run-preview-feedback" class="cr-v1-status" role="status"></p>
+    <footer><a href="/settings/models">前往模型与向量设置</a><button type="button" id="confirm-run" class="cr-v1-primary">确认并开始研究</button></footer>
   </dialog>
 </body>
 </html>

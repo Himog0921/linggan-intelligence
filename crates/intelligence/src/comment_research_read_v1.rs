@@ -346,8 +346,9 @@ pub async fn read_changes(
 }
 
 /// Run history contains operational truth only.  It reports the V1 Run state, frozen source
-/// count and whether its already-published result remains readable; it never treats a failed run
-/// as an empty successful analysis.
+/// count, safe invocation-ledger aggregates and whether its already-published result remains
+/// readable; it never treats a failed run as an empty successful analysis. Prompt material,
+/// model output, provider diagnostics, secrets and invocation IDs remain private.
 pub async fn read_runs(
     database: &Database,
     query: &CommentResearchV1ReadQuery,
@@ -377,6 +378,48 @@ pub async fn read_runs(
              ),'{}'::jsonb), \
              'exclusionCounts',run.exclusion_counts, \
              'failureCounts',run.failure_counts, \
+             'modelExecution',( \
+                 SELECT jsonb_build_object( \
+                     'callCount',count(*), \
+                     'startedCallCount',count(*) FILTER(WHERE invocation.result->>'callStarted'='true'), \
+                     'succeededCallCount',count(*) FILTER(WHERE invocation.state='succeeded'), \
+                     'failedCallCount',count(*) FILTER(WHERE invocation.state='failed'), \
+                     'runningCallCount',count(*) FILTER(WHERE invocation.state='running'), \
+                     'stateCounts',COALESCE(( \
+                         SELECT jsonb_object_agg(state,call_count) FROM ( \
+                             SELECT ledger.state,count(*) AS call_count \
+                             FROM linggan_model_invocation ledger \
+                             WHERE ledger.result->>'runRef'=run.run_ref::text \
+                             GROUP BY ledger.state \
+                         ) grouped_states \
+                     ),'{}'::jsonb), \
+                     'stageCounts',COALESCE(( \
+                         SELECT jsonb_object_agg(stage,call_count) FROM ( \
+                             SELECT COALESCE(ledger.result->>'stage','unknown') AS stage,count(*) AS call_count \
+                             FROM linggan_model_invocation ledger \
+                             WHERE ledger.result->>'runRef'=run.run_ref::text \
+                             GROUP BY COALESCE(ledger.result->>'stage','unknown') \
+                         ) grouped_stages \
+                     ),'{}'::jsonb), \
+                     'failureCounts',COALESCE(( \
+                         SELECT jsonb_object_agg(failure_code,call_count) FROM ( \
+                             SELECT ledger.failure_code,count(*) AS call_count \
+                             FROM linggan_model_invocation ledger \
+                             WHERE ledger.result->>'runRef'=run.run_ref::text \
+                               AND ledger.failure_code IS NOT NULL \
+                             GROUP BY ledger.failure_code \
+                         ) grouped_failures \
+                     ),'{}'::jsonb), \
+                     'elapsedMs',CASE WHEN count(invocation.elapsed_ms)=0 THEN NULL ELSE sum(invocation.elapsed_ms) END, \
+                     'elapsedMeasuredCallCount',count(invocation.elapsed_ms), \
+                     'inputTokens',CASE WHEN count(invocation.input_tokens)=0 THEN NULL ELSE sum(invocation.input_tokens) END, \
+                     'outputTokens',CASE WHEN count(invocation.output_tokens)=0 THEN NULL ELSE sum(invocation.output_tokens) END, \
+                     'usageMeasuredCallCount',count(*) FILTER(WHERE invocation.input_tokens IS NOT NULL AND invocation.output_tokens IS NOT NULL), \
+                     'chargedTokens',CASE WHEN count(*)=0 THEN NULL ELSE sum(invocation.charged_tokens) END \
+                 ) \
+                 FROM linggan_model_invocation invocation \
+                 WHERE invocation.result->>'runRef'=run.run_ref::text \
+             ), \
              'publishedResult',COALESCE(( \
                  SELECT jsonb_build_object('resultRevisionRef',result.result_revision_ref,'publishedAt',result.published_at) \
                  FROM linggan_comment_research_result_revision_readable result \

@@ -6,9 +6,10 @@
   const result = $('#research-result');
   const status = $('#research-status');
   const dialog = $('#research-settings-dialog');
+  const runDialog = $('#research-run-dialog');
   const form = $('#research-settings-form');
   const views = new Set(['overview', 'voices', 'problems', 'changes', 'runs']);
-  const state = { view: new URLSearchParams(location.search).get('view') || 'overview', setup: null };
+  const state = { view: new URLSearchParams(location.search).get('view') || 'overview', setup: null, preview: null };
   if (!views.has(state.view)) state.view = 'overview';
 
   const errorText = {
@@ -60,12 +61,18 @@
 
   function setupSummary() {
     const { policy, defaultConfig, embedding, worker } = state.setup || {};
-    if (!researchModelReady()) return '研究模型尚未通过 V1 语义测试。保存策略和开始研究都不会发送评论。';
+    if (!defaultConfig) return '尚未在模型工作区选择研究模型。保存策略和开始研究都不会发送评论。';
+    if (!defaultConfig.connectionEnabled) return '当前研究模型连接已停用。保存策略和开始研究都不会发送评论。';
+    if (!researchModelReady()) return '当前研究模型尚未通过评论研究 V1 的结构化输出测试。保存策略和开始研究都不会发送评论。';
     const embeddingText = embeddingReady()
       ? `向量归并已就绪（${embedding.dimensions} 维）。`
       : '向量归并尚未就绪；开始研究已锁定，避免产生无法归并和发布的无效运行。请先在模型与向量设置中完成测试并启用。';
     const policyText = policy ? `当前策略已保存：每轮最多 ${count(policy.sourceLimit)} 条评论。` : '尚未保存研究策略。';
-    const workerText = worker?.state === 'error' ? '后台执行器上次报告异常。' : '连续自动排程关闭。';
+    const workerText = worker?.state === 'error'
+      ? '后台执行器上次报告异常；已冻结项目会保留真实状态与安全失败原因。'
+      : !worker?.lastSeenAt
+        ? '尚未记录后台执行器心跳；确认后只会冻结范围，模型调用会等待 Worker 启动。'
+        : `后台执行器上次心跳：${date(worker.lastSeenAt)}（${worker.state === 'running' ? '正在推进' : '空闲'}）。连续自动排程关闭。`;
     return `${policyText}${embeddingText}${workerText}`;
   }
 
@@ -79,9 +86,8 @@
 
   function renderRunAvailability() {
     const start = $('#start-run');
-    const ready = embeddingReady() && researchModelReady();
-    start.disabled = !ready;
-    start.title = ready ? '' : '请先在模型与 AI 设置完成研究模型的 V1 语义测试，并在模型与向量设置启用向量模型。';
+    start.disabled = false;
+    start.title = '先查看服务端自动计算的本轮范围；确认时仍会复核模型与向量资格。';
   }
 
   async function loadSetup() {
@@ -155,13 +161,82 @@
       semantic_evidence_offset_unmappable:'证据 Unicode 位置无法映射回原评论',
       semantic_claim_lost:'该项在接纳语义结果前已失去处理租约',
       semantic_acceptance_storage_failed:'语义结果接纳记录失败',
+      model_configuration_missing:'运行冻结时缺少研究模型配置',
       model_not_qualified:'研究模型未通过 V1 语义测试',
+      model_disabled:'研究模型连接已停用',
+      model_secret_unavailable:'研究模型凭据当前不可用',
+      model_adapter_unavailable:'研究模型执行适配器当前不可用',
+      model_database_unavailable:'模型调用账本暂时不可用',
+      model_source_unavailable:'研究来源在处理时不可用',
       model_budget_exhausted:'研究预算已用尽',
       model_input_limit:'单条输入超出模型限制',
       embedding_not_qualified:'向量模型不可用',
+      embedding_configuration_unavailable:'向量模型配置在执行中不可用',
+      worker_interrupted:'后台执行中断，正在按次数限制恢复',
+      source_unavailable:'研究来源在处理时已不可读取',
       provider_timeout:'模型服务超时',
       provider_failed:'模型服务未返回可用结果'
-    })[code] || '该项未通过研究处理';
+    })[code] || '该项未完成研究处理；已保留安全失败类别';
+  }
+
+  function runItemStateLabel(state) {
+    return ({
+      pending:'等待执行', running:'正在执行', succeeded:'已提取研究信号', no_signal:'未提取到研究信号',
+      retryable:'等待恢复', incompatible:'无法按当前合同处理', unrecoverable:'无法继续处理',
+      model_failed:'模型处理失败', restricted:'已限制用于研究', cancelled:'本轮已取消'
+    })[state] || '状态未知';
+  }
+
+  function previewTerminalStateLabel(state) {
+    return ({
+      incompatible:'当前合同不兼容', unrecoverable:'无法继续处理', model_failed:'模型重试已耗尽',
+      restricted:'已限制用于研究', cancelled:'已取消'
+    })[state] || '已被限制或终止';
+  }
+
+  function stageLabel(stage) {
+    return ({ semantic_extraction:'语义提取', embedding:'向量候选', problem_resolution:'问题归并' })[stage] || '研究调用';
+  }
+
+  function countSummary(values, label, formatter = value => value) {
+    return Object.entries(values || {})
+      .filter(([, value]) => Number(value) > 0)
+      .map(([key, value]) => `${formatter(key)} ${count(value)}${label}`)
+      .join(' · ');
+  }
+
+  function duration(milliseconds) {
+    const value = Number(milliseconds);
+    if (!Number.isFinite(value) || value < 0) return '不可用';
+    return value >= 1000 ? `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)} 秒` : `${Math.round(value)} 毫秒`;
+  }
+
+  function modelExecutionSummary(execution) {
+    const calls = Number(execution?.callCount || 0);
+    if (!calls) return '尚未建立模型调用';
+    const started = Number(execution?.startedCallCount || 0);
+    const succeeded = Number(execution?.succeededCallCount || 0);
+    const failed = Number(execution?.failedCallCount || 0);
+    const running = Number(execution?.runningCallCount || 0);
+    return `已记录 ${count(calls)} 次调用：已开始 ${count(started)} · 成功 ${count(succeeded)} · 失败 ${count(failed)} · 进行中 ${count(running)}`;
+  }
+
+  function modelExecutionDetails(execution) {
+    const callCount = Number(execution?.callCount || 0);
+    if (!callCount) return '本轮尚未将任何评论交给模型。若范围已冻结，请查看后台执行器状态。';
+    const parts = [];
+    const stages = countSummary(execution.stageCounts, ' 次', stageLabel);
+    if (stages) parts.push(`阶段：${stages}`);
+    if (Number(execution.elapsedMeasuredCallCount || 0) > 0) parts.push(`累计模型耗时：${duration(execution.elapsedMs)}`);
+    if (Number(execution.usageMeasuredCallCount || 0) > 0) {
+      parts.push(`模型报回 Token：输入 ${count(execution.inputTokens)} · 输出 ${count(execution.outputTokens)}`);
+    }
+    if (execution.chargedTokens !== null && execution.chargedTokens !== undefined) {
+      parts.push(`账本 Token：${count(execution.chargedTokens)}${Number(execution.usageMeasuredCallCount || 0) < callCount ? '（含用量未知调用的预留）' : ''}`);
+    }
+    const failures = countSummary(execution.failureCounts, ' 次', itemFailureLabel);
+    if (failures) parts.push(`调用失败原因：${failures}`);
+    return parts.join('。') || '模型调用已建立，尚未取得可显示的用量或耗时。';
   }
 
   function renderChanges(data) {
@@ -174,8 +249,14 @@
 
   function renderRuns(data) {
     const page = data.page || {items:[], total:0};
-    result.innerHTML = `<section class="cr-v1-intro"><h2>运行记录</h2><p>记录冻结样本、逐项结果与已发布版本。运行失败不会被显示成“没有研究发现”。</p></section>` +
-      (page.items.length ? table(['开始时间', '运行状态', '冻结输入', '已发布结果'], page.items.map(item => { const failures=Object.entries(item.failureCounts || {}).filter(([,value]) => Number(value) > 0); const itemFailures=Object.entries(item.itemFailureCounts || {}).filter(([,value]) => Number(value) > 0); return `<tr><td>${escape(date(item.createdAt))}</td><td><strong>${escape(runStateLabel(item.state))}</strong><p>${Object.entries(item.itemStates || {}).map(([key, value]) => `${escape(key)} ${count(value)}`).join(' · ') || '尚未开始'}</p>${failures.length ? `<p>${failures.map(([key, value]) => `${escape(runFailureLabel(key))} ${count(value)} 条`).join(' · ')}</p>` : ''}${itemFailures.length ? `<p>${itemFailures.map(([key, value]) => `${escape(itemFailureLabel(key))} ${count(value)} 条`).join(' · ')}</p>` : ''}</td><td>${count(item.selectedSources)} 条评论</td><td>${item.publishedResult?.resultRevisionRef ? `已发布 ${escape(date(item.publishedResult.publishedAt))}` : item.state === 'completed_with_failures' ? '未发布：请修复运行记录所示问题后重新开始研究' : '尚未发布'}</td></tr>`; })) : empty('还没有运行记录。保存策略后可以直接开始第一轮研究。'));
+    result.innerHTML = `<section class="cr-v1-intro"><h2>运行记录</h2><p>每一轮都区分范围已冻结、模型是否实际执行、逐项结果与发布状态。运行失败不会被显示成“没有研究发现”。</p></section>` +
+      (page.items.length ? table(['运行与冻结输入', '模型执行', '项目结果与安全原因', '发布'], page.items.map(item => {
+        const runFailures = countSummary(item.failureCounts, ' 条', runFailureLabel);
+        const itemFailures = countSummary(item.itemFailureCounts, ' 条', itemFailureLabel);
+        const itemStates = countSummary(item.itemStates, ' 条', runItemStateLabel);
+        const execution = item.modelExecution || {};
+        return `<tr><td><strong>${escape(date(item.createdAt))}</strong><p>${escape(runStateLabel(item.state))} · 冻结 ${count(item.selectedSources)} 条评论</p>${item.finishedAt ? `<p>结束于 ${escape(date(item.finishedAt))}</p>` : ''}</td><td><strong>${escape(modelExecutionSummary(execution))}</strong><details class="cr-v1-run-detail"><summary>查看调用账本摘要</summary><p>${escape(modelExecutionDetails(execution))}</p></details></td><td><p>${escape(itemStates || '尚未开始处理')}</p>${runFailures ? `<p>${escape(runFailures)}</p>` : ''}${itemFailures ? `<p>${escape(itemFailures)}</p>` : ''}</td><td>${item.publishedResult?.resultRevisionRef ? `已发布 ${escape(date(item.publishedResult.publishedAt))}` : item.state === 'completed_with_failures' ? '未发布：本轮有未完成项' : item.state === 'failed' ? '未发布：运行失败' : '尚未发布'}</td></tr>`;
+      })) : empty('还没有运行记录。保存策略后可先查看系统自动选择的范围。'));
   }
 
   function render(view, data) {
@@ -220,7 +301,7 @@
     try {
       await request(`${api}/policy`, { method:'POST', body:JSON.stringify({ configRef:defaultConfig.configRef, sourceLimit:Number(form.elements.sourceLimit.value), tokenLimit:Number(form.elements.tokenLimit.value) }) });
       await loadSetup();
-      $('#settings-feedback').textContent = '研究策略已保存。之后每次点击“开始研究”将直接冻结范围，不再要求重复授权。';
+      $('#settings-feedback').textContent = '研究策略已保存。之后先查看系统自动范围，再确认冻结并开始研究。';
     } catch (error) {
       $('#settings-feedback').textContent = error.message;
     } finally {
@@ -228,26 +309,70 @@
     }
   }
 
-  async function startRun() {
+  function previewBlocker(preview) {
+    if (!preview?.policyConfigured) return '请先保存研究策略，系统才有本轮自动选择上限。';
+    if (!researchModelReady()) return errorText.research_model_not_ready;
+    if (!embeddingReady()) return errorText.embedding_not_ready;
+    if (!Number(preview.selectedSources || 0)) return '当前没有尚未进入任何研究运行的可处理用户原声。已有成功、无信号、重试或限制状态会保留在各自的运行记录中。';
+    return '';
+  }
+
+  function renderRunPreview(preview) {
+    const target = $('#run-preview');
+    const feedback = $('#run-preview-feedback');
+    const confirm = $('#confirm-run');
+    const terminal = countSummary(preview.terminalItemStates, ' 条', previewTerminalStateLabel);
+    if (!preview.policyConfigured) {
+      target.innerHTML = `<p>当前有 ${count(preview.eligibleSources)} 条可读普通用户原声，但尚未保存研究策略，系统不能计算本轮上限。</p>`;
+    } else {
+      target.innerHTML = `<p>服务端会按当前策略和既有运行记录自动选择；确认时会再次计算并冻结范围。</p><dl><div><dt>本次自动处理</dt><dd>${count(preview.selectedSources)} 条</dd></div><div><dt>尚未进入研究</dt><dd>${count(preview.unprocessedSources)} 条</dd></div><div><dt>已提取研究信号</dt><dd>${count(preview.succeededSources)} 条</dd></div><div><dt>未提取到信号</dt><dd>${count(preview.noSignalSources)} 条</dd></div><div><dt>已有执行或恢复中</dt><dd>${count(Number(preview.activeSources) + Number(preview.retryableSources))} 条</dd></div><div><dt>需关联语境</dt><dd>${count(preview.selectedContextSources)} 条</dd></div></dl><p>已提取信号和未提取信号的原声保留在历史运行中，不会被重新加入本轮。执行或恢复中的原声继续由原 Run 推进。</p>${preview.selectedMissingParentContextSources ? `<p>所选范围中有 ${count(preview.selectedMissingParentContextSources)} 条需要关联语境，但当前没有可读父评论记录；该事实会随输入冻结保留，不会由页面补造。</p>` : ''}${terminal ? `<p>不会重新加入本轮：${escape(terminal)}。</p>` : ''}`;
+    }
+    const blocker = previewBlocker(preview);
+    feedback.textContent = blocker || (state.setup?.worker?.lastSeenAt ? '确认后会创建一个新的冻结 Run；模型是否已执行及其结果会在运行记录中如实更新。' : '确认后会创建一个新的冻结 Run；尚未记录 Worker 心跳，模型调用会等待 Worker 启动。');
+    feedback.dataset.kind = blocker ? 'warning' : 'ready';
+    confirm.disabled = Boolean(blocker);
+  }
+
+  async function openRunPreview() {
     try {
       await loadSetup();
-      if (!researchModelReady() || !embeddingReady()) {
-        setStatus(!researchModelReady() ? errorText.research_model_not_ready : errorText.embedding_not_ready, 'warning');
-        return;
-      }
-      if (!state.setup?.policy) { await openSettings(); return; }
-      const receipt = await request(`${api}/runs`, { method:'POST', body:JSON.stringify({}) });
-      setStatus(`已冻结 ${count(receipt.selectedSources)} 条普通用户评论，后台将继续完成语义提取、向量归并与结果发布。`, 'ready');
-      state.view = 'runs'; await loadView();
+      state.preview = await request(`${api}/runs/preview`);
+      renderRunPreview(state.preview);
+      runDialog.showModal();
     } catch (error) {
       setStatus(error.message, 'error');
+    }
+  }
+
+  async function confirmRun() {
+    const button = $('#confirm-run');
+    button.disabled = true;
+    try {
+      await loadSetup();
+      const blocker = previewBlocker(state.preview);
+      if (blocker) {
+        $('#run-preview-feedback').textContent = blocker;
+        $('#run-preview-feedback').dataset.kind = 'warning';
+        return;
+      }
+      const receipt = await request(`${api}/runs`, { method:'POST', body:JSON.stringify({}) });
+      setStatus(`已冻结 ${count(receipt.selectedSources)} 条普通用户评论，后台将继续完成语义提取、向量归并与结果发布。`, 'ready');
+      runDialog.close();
+      state.view = 'runs'; await loadView();
+    } catch (error) {
+      $('#run-preview-feedback').textContent = error.message;
+      $('#run-preview-feedback').dataset.kind = 'error';
+    }
+    finally {
+      if (runDialog.open) button.disabled = Boolean(previewBlocker(state.preview));
     }
   }
 
   document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', async () => { state.view = button.dataset.view; await loadView(); }));
   $('#refresh').addEventListener('click', async () => { await loadSetup().catch(error => setStatus(error.message, 'error')); await loadView(); });
   $('#research-settings').addEventListener('click', openSettings);
-  $('#start-run').addEventListener('click', startRun);
+  $('#start-run').addEventListener('click', openRunPreview);
+  $('#confirm-run').addEventListener('click', confirmRun);
   form.addEventListener('submit', savePolicy);
   document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => document.getElementById(button.dataset.close).close()));
 

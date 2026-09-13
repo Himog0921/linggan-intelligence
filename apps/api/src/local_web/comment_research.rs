@@ -38,6 +38,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
             post(start_research_kernel_run),
         )
         .route(
+            "/api/local/comment-research/runs/preview",
+            get(preview_research_kernel_run),
+        )
+        .route(
             "/api/local/comment-research/overview",
             get(read_v1_overview),
         )
@@ -194,6 +198,17 @@ async fn start_research_kernel_run(
     };
     let _ = request;
     kernel_response(kernel::start_run(database).await)
+}
+
+/// This endpoint only explains the server's current automatic boundary. It accepts no request
+/// body and returns no source IDs, so a browser cannot select comments for a later Run. The
+/// confirm action remains the existing, gated `POST /runs` command.
+async fn preview_research_kernel_run(State(state): State<LocalWebState>) -> Response {
+    let database = match v1_database(&state).await {
+        Ok(database) => database,
+        Err(response) => return response,
+    };
+    kernel_response(kernel::preview_run(database).await)
 }
 
 async fn read_setup(State(state): State<LocalWebState>) -> Response {
@@ -429,12 +444,25 @@ mod tests {
     }
 
     #[test]
+    fn run_confirmation_does_not_accept_client_comment_selection() {
+        assert!(serde_json::from_value::<StartResearchKernelRun>(json!({})).is_ok());
+        assert!(
+            serde_json::from_value::<StartResearchKernelRun>(json!({
+                "derivationRefs":["00000000-0000-0000-0000-000000000000"]
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
     fn page_has_one_v1_surface_and_no_retired_query_or_daily_entry() {
         let page = page_html(&[], None);
         for label in ["概览", "用户原声", "用户问题", "变化观察", "运行记录"] {
             assert!(page.contains(label));
         }
         assert!(page.contains("前往模型与向量设置"));
+        assert!(page.contains("准备本轮研究"));
+        assert!(page.contains("确认系统将处理的范围"));
         for retired in ["每日观察", "保存查询", "分析所选", "评论研究设置"] {
             assert!(!page.contains(retired));
         }

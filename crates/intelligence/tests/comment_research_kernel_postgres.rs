@@ -15,8 +15,8 @@ use linggan_intelligence::comment_research_embeddings::{
 use linggan_intelligence::comment_research_kernel::{
     CommentResearchKernelError, DERIVATION_VERSION, ResearchRunReceipt, RunItemFailureClass,
     SaveResearchPolicy, claim_next_run_item, derive_current_sources,
-    fail_active_runs_without_embedding_config, record_run_item_failure, recover_expired_run_items,
-    refresh_run_completion_for_atom, save_active_policy, start_run,
+    fail_active_runs_without_embedding_config, preview_run, record_run_item_failure,
+    recover_expired_run_items, refresh_run_completion_for_atom, save_active_policy, start_run,
 };
 use linggan_intelligence::comment_research_problems::{
     CommentResearchProblemError, ExistingProblemAdmission, NewProblemAdmission,
@@ -1219,6 +1219,143 @@ async fn saved_policy_is_the_only_authorization_needed_to_queue_a_research_run()
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn automatic_run_preview_keeps_completed_retryable_and_cancelled_items_out_of_a_new_run() {
+    let database = fixture::proof_database("comment_research_automatic_run_preview").await;
+    detail_with_author(
+        &database,
+        "preview-note",
+        "SYNTHETIC automatic preview note",
+        Some("creator-1"),
+    )
+    .await;
+    for comment_id in ["no-signal", "succeeded", "retryable", "cancelled"] {
+        comment_with_author(
+            &database,
+            "preview-note",
+            comment_id,
+            "孩子写作业很困难，需要帮助",
+            Some("reader-1"),
+            "2026-09-01T08:00:00Z",
+        )
+        .await;
+    }
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(qualified_research_config(&database).await),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let first_run = start_ready_run(&database).await.unwrap();
+
+    let no_signal = claim_next_run_item(&database).await.unwrap().unwrap();
+    accept_semantic_output(
+        &database,
+        &no_signal,
+        SemanticExtractionOutput::NoSignal {
+            reason: "礼貌性回复之外没有明确研究信号".into(),
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let succeeded = claim_next_run_item(&database).await.unwrap().unwrap();
+    accept_semantic_output(
+        &database,
+        &succeeded,
+        SemanticExtractionOutput::Atoms {
+            atoms: vec![SemanticAtomProposal {
+                kind: AtomKind::Need,
+                proposition: "希望得到作业支持".into(),
+                basis: AtomBasis::Explicit,
+                evidence_start: 0,
+                evidence_end: 1,
+            }],
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let retryable = claim_next_run_item(&database).await.unwrap().unwrap();
+    record_run_item_failure(
+        &database,
+        &retryable,
+        RunItemFailureClass::Retryable,
+        "provider_timeout",
+    )
+    .await
+    .unwrap();
+    let cancelled = claim_next_run_item(&database).await.unwrap().unwrap();
+    sqlx::query(
+        "UPDATE linggan_comment_research_run_item \
+         SET state='cancelled',failure_code='manual_cancelled',finished_at=scope_001_now(), \
+             lease_until=NULL,updated_at=scope_001_now() \
+         WHERE run_ref=$1 AND derivation_ref=$2 AND state='running'",
+    )
+    .bind(cancelled.run_ref)
+    .bind(cancelled.derivation_ref)
+    .execute(database.pool())
+    .await
+    .unwrap();
+
+    comment_with_author(
+        &database,
+        "preview-note",
+        "new-automatic-input",
+        "我想知道怎样开始陪孩子写作业",
+        Some("reader-1"),
+        "2026-09-01T08:01:00Z",
+    )
+    .await;
+    let calls_before_preview: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_model_invocation WHERE operation IN ('analyze','embed')",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let preview = preview_run(&database).await.unwrap();
+    assert!(preview.policy_configured);
+    assert_eq!(preview.source_limit, Some(10));
+    assert_eq!(preview.eligible_sources, 5);
+    assert_eq!(preview.unprocessed_sources, 1);
+    assert_eq!(preview.selected_sources, 1);
+    assert_eq!(preview.succeeded_sources, 1);
+    assert_eq!(preview.no_signal_sources, 1);
+    assert_eq!(preview.retryable_sources, 1);
+    assert_eq!(preview.terminal_item_states["cancelled"], 1);
+    let public_preview = serde_json::to_value(&preview).unwrap();
+    assert!(public_preview.get("derivationRefs").is_none());
+    assert!(public_preview.get("commentText").is_none());
+    let calls_after_preview: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_model_invocation WHERE operation IN ('analyze','embed')",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(calls_after_preview, calls_before_preview);
+
+    let second_run = start_ready_run(&database).await.unwrap();
+    assert_ne!(second_run.run_ref, first_run.run_ref);
+    assert_eq!(second_run.selected_sources, 1);
+    let selected: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT derivation_ref FROM linggan_comment_research_run_item WHERE run_ref=$1",
+    )
+    .bind(second_run.run_ref)
+    .fetch_all(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(selected.len(), 1);
+    assert_ne!(selected[0], no_signal.derivation_ref);
+    assert_ne!(selected[0], succeeded.derivation_ref);
+    assert_ne!(selected[0], retryable.derivation_ref);
+    assert_ne!(selected[0], cancelled.derivation_ref);
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn incompatible_item_does_not_block_the_next_healthy_v1_item() {
     let database = fixture::proof_database("comment_research_kernel_poison_isolation").await;
     detail_with_author(
@@ -1446,6 +1583,19 @@ async fn run_read_exposes_safe_semantic_failure_counts_without_model_or_comment_
         item["itemFailureCounts"]["semantic_evidence_offset_unmappable"],
         1
     );
+    assert_eq!(item["modelExecution"]["callCount"], 3);
+    assert_eq!(item["modelExecution"]["startedCallCount"], 3);
+    assert_eq!(item["modelExecution"]["failedCallCount"], 3);
+    assert_eq!(item["modelExecution"]["elapsedMs"], 3);
+    assert_eq!(
+        item["modelExecution"]["stageCounts"]["semantic_extraction"],
+        3
+    );
+    assert_eq!(
+        item["modelExecution"]["failureCounts"]["semantic_json_unparseable"],
+        1
+    );
+    assert!(item["modelExecution"].get("invocationRef").is_none());
     assert!(item.get("modelResponse").is_none());
     assert!(item.get("commentText").is_none());
     let public_run_payload = runs.to_string();
