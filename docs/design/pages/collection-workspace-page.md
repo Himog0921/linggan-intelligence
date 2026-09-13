@@ -1,7 +1,7 @@
 # PAGE-COLLECTION-001 · Collection Workspace 本地页面族
 
 > 状态: 权威当前
-> 最后核对: 2026-09-07
+> 最后核对: 2026-09-13
 > 适用范围: `http://localhost:3000/collection/*` 的五个子面
 > 事实来源: Mog 于 2026-08-26 的直接指定与逐项裁定、`REF-V4-001`、LIDS、领域不变量、当前 SCOPE 与真实 Rust 实现
 > 冲突时以谁为准: 用户最新确认、AGENTS.md、真实运行/代码/合同、ACCEPTED 决定；V4 为本页族受限的视觉与骨架 Gold Master
@@ -38,8 +38,8 @@
 | 状态 ID | 触发 | 用户应理解什么 | 禁止暗示什么 |
 |---|---|---|---|
 | `READY` | creator 生命周期至少有一个合格点 | 当前窗口/指标可绘制 | 平台全量、趋势或价值 |
-| `DIRECTORY_LINKED` | 作品从该目标创作者主页直接发现，但详情作者尚未确认 | 灰色空心点 | 已完成详情确认 |
-| `AUTHOR_CONFIRMED` | 详情作者 ID 与目标精确一致 | 黑色实心点 | 网红价值或作品质量判定 |
+| `DIRECTORY_LINKED` | 作品从该目标创作者主页直接发现，但详情作者尚未确认 | 作品目录已列入；在作品表可查归属，分布图不以归属样式冒充确认程度 | 已完成详情确认 |
+| `AUTHOR_CONFIRMED` | 详情作者 ID 与目标精确一致 | 作者归属已确认；在作品表可查，不把墨点颜色当作质量或确认评分 | 网红价值或作品质量判定 |
 | `INSUFFICIENT_OBSERVATION` | 作者、时间或指标资格不足 | 观察不足以成图 | 没有作品或表现为 0 |
 | `NOT_APPLICABLE` | keyword target | 创作者目录不适用，显示关键词命中 | 空曲线或 keyword 表现为 0 |
 | `READ_UNAVAILABLE` | 生命周期查询失败 | 当前读取状态未知 | 目标不存在或作品为空 |
@@ -48,12 +48,12 @@
 | `TARGET_NOT_FOUND` | 抽屉标识无法解析 | 这个标识没有对应的观察目标 | 该对象在平台上不存在；它曾被删除 |
 | `UNKNOWN` | 所有读数 | 尚未获得或无法验证 | 数值为零；运行正常；运行失败 |
 
-本页族只在字段为 `KNOWN` 时显示真实 `0` 或互动数。`UNKNOWN` 不画为 0；明确作者冲突、发布时间不合格、当前指标未知均不入图，但必须进入档案缺口。不再对用户暴露复合指标、创作者内分位、滚动中位线或算法版本。
+本页族只在字段为 `KNOWN` 时显示真实 `0` 或互动数。`UNKNOWN` 不画为 0；明确作者冲突、发布时间不合格、当前指标未知均不入图，但必须进入档案缺口。不向用户暴露复合指标、滚动中位线或算法版本；作品表现分布可显示当前纳入作品的 P25–P75 典型区间，但必须明确它不是行业常态、质量判断或预测。高讨论率（评论／点赞 `>20%`）仅是逐点复核外圈，点赞为 `0` 或任一分子／分母未知时写为未可判，不推断低讨论。
 
 ## 4. 已批准的设计组合
 
 - 全局页头由 `apps/api/src/local_web/shell.rs` 统一生成，Corpus 与 Collection 共用同一实现；`shell.css` 承载页头、上下文行与 216px 导轨，两页共用。
-- 页面局部样式在 `collection_workspace.css`；Issue #148 的生命周期与抽屉增量隔离在 `target_drawer.css`，只消费 `--lgi-*`，不写字面色值或渐变。review remediation 在唯一 Token 真源新增共享 `--lgi-focus`，由主题文档级交互元素 selector 统一提供 2px/2px focus；它同时覆盖 `.v7-app` 与作为 sibling 的固定 drawer，不使用 `!important`。后加载页面仍保留局部 focus 声明；已验证表面的 computed focus 正确，Mog 接受该声明为本包外技术债，原 reviewer FAIL 不改写为 PASS。
+- 页面局部样式在 `collection_workspace.css`；生命周期与抽屉增量隔离在 `target_drawer.css`，只消费 `--lgi-*`，不写字面色值。趋势图允许唯一的 SVG 面积渐变：现有 `signal-soft → canvas` 只辅助读取同一条 Ink 中位线，不能承载第二指标、时间方向、状态或营销装饰；分布图不输出渐变。review remediation 在唯一 Token 真源新增共享 `--lgi-focus`，由主题文档级交互元素 selector 统一提供 2px/2px focus；它同时覆盖 `.v7-app` 与作为 sibling 的固定 drawer，不使用 `!important`。后加载页面仍保留局部 focus 声明；已验证表面的 computed focus 正确，Mog 接受该声明为本包外技术债，原 reviewer FAIL 不改写为 PASS。
 - 深色实时观察流是全产品唯一的深色面，色值以 `--lgi-stream-*` 十项 token 进入唯一色值源（当时 117 → 127 项；当前真源随后演进为 132 项）。
 - 目标工作区由服务端和 URL 状态渲染；“作品”Tab 是目标范围内已接纳记录的可核验表，支持标题或作品 ID 筛选，不用主表数字拼装空表。
 
@@ -70,7 +70,7 @@ Mog 于 2026-08-26 确认保留 V4 的深色终端配色。它与 `system.md` §
 | 用地址打开目标工作区 | 可用 | creator 仅「概览｜作品｜巡查」；keyword 仅「概览｜作品｜巡查」，作品对关键词即命中结果 |
 | 点「建立档案 / 补采缺口 / 处理异常」 | 受控写入 | 通过 Request → Authorization → Admission → Work Order → Lease 发起不超过 200 条的主页链接目录；达到主页末端或 200 才是合格初始边界。旧事实保留且标明边界未知，不冒充平台总数 |
 | 渐进建档 worker tick | 受控写入 | 只对有版本 marker 的目标，每批 3 篇，使用原 deep-archive 授权与 purpose，任务严格冻结具体 Work；已成功且完整的巡查发现并入当前目录和详情分母 |
-| 切换生命周期 `all/recent_90_days` 与四指标 | creator 概览可用 | target-scoped bounded read；不访问平台 |
+| 切换作品表现的 `trend/distribution`、趋势 `month/week`、生命周期 `all/recent_90_days` 与四指标 | creator 作品表现可用 | target-scoped bounded read；图表／粒度仅为 URL-owned 阅读状态，不访问平台 |
 | 选择散点并进入语料 | 可用 | `life_work` 仅为 UI 状态；Corpus 精确读取该 Work，不复制 Evidence；既有 390px 诊断证明直接 URL/刷新可打开 Inspector 且不新增 history，但窄屏不属于当前验收合同 |
 | Escape 或关闭抽屉 | 可用 | 保留列表 filter 与既有 `sort=last` 上下文；焦点返回原 target opener |
 | creator 档案/巡查或 keyword 巡查 | 可用 | 不执行 lifecycle 大查询；keyword 不渲染 creator 档案空壳 |
@@ -82,7 +82,7 @@ Mog 于 2026-08-26 确认保留 V4 的深色终端配色。它与 `system.md` §
 ## 6. 验收与未证明边界
 
 - Issue #158 自动检查覆盖 creator/keyword 独立列、默认无批量选择、状态驱动单一动作、成功巡查时间、stable Work 去重档案、live deep-archive Lease、授权 200 下限、版本 marker、渐进批次、两级关联、KNOWN 0/UNKNOWN、可访问散点与 Corpus Work 深链。
-- 当前 creator 只保留三 Tab，不再渲染复合指标、生命周期图、分位数、算法版本或扫描回执；keyword 同样提供命中作品表，不生成“不适用”的创作者档案空壳。
+- 当前 creator 保留「概览｜作品｜巡查」三 Tab；作品内的“表现”在同一画布切换时间桶趋势与逐篇分布，并保留精确作品链接、Known zero／Unknown 边界和当前纳入作品的 P25–P75 阅读辅助。它不渲染复合指标、滚动中位线、算法版本或扫描工程回执；keyword 同样提供命中作品表，不生成“不适用”的创作者档案空壳。
 - 视觉验收记录见 `ACC-OBSERVATION-TARGET-DOSSIER-UI-001`；Issue #148 的 `ACC-COLLECTION-LIFECYCLE-001` 只保留历史演进证据。
 - 本次证明: branch 源码、隔离 PostgreSQL、API/HTML/CSS/JS seam 与 1440 CSS px 桌面全屏受控视口走查；不新增或验收 1280/390/手机适配。
 - 已接受风险: 一次隔离 1280 测量中 Inspector 右缘约超出 viewport 49.83 CSS px，移出当前 Package；页面局部 focus 声明保留为技术债，已验证表面的 computed focus 仍正确。

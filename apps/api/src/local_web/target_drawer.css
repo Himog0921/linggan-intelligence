@@ -187,21 +187,17 @@
 .life-legend{display:flex;align-items:center;gap:var(--lgi-space-5);color:var(--lgi-body);font-size:var(--lgi-text-label)}
 .life-legend span{display:inline-flex;align-items:center;gap:var(--lgi-space-2);white-space:nowrap}
 .life-legend-dot{position:relative;width:var(--lgi-space-3);height:var(--lgi-space-3);display:inline-block;border-radius:50%;background:var(--lgi-ink)}
-.life-legend-directory{border:2px solid var(--lgi-muted);background:var(--lgi-canvas)}
-.life-legend-new{border:2px solid var(--lgi-signal);background:var(--lgi-canvas)}
-.life-legend-new::after{content:"";position:absolute;inset:var(--lgi-space-1);border-radius:50%;background:var(--lgi-ink)}
+.life-legend-new{width:var(--lgi-space-2);height:var(--lgi-space-2);background:var(--lgi-signal-soft);border:1px solid var(--lgi-signal-ink)}
 .life-figure{min-width:0;margin:0;border:1px solid var(--lgi-border);border-radius:var(--lgi-radius-md);background:var(--lgi-canvas);overflow:hidden}
 .life-chart{display:block;width:100%;max-width:100%;height:auto;min-height:320px;background:var(--lgi-canvas)}
 .life-axis{stroke:var(--lgi-border-strong);stroke-width:1;vector-effect:non-scaling-stroke}
 .life-point-hit{fill:transparent;stroke:transparent;stroke-width:24;vector-effect:non-scaling-stroke;pointer-events:all}
 .life-point-visible{fill:var(--lgi-ink);stroke:var(--lgi-canvas);stroke-width:2;vector-effect:non-scaling-stroke;pointer-events:none;transition:transform var(--lgi-duration-press) var(--lgi-ease-ui),fill var(--lgi-duration-state) var(--lgi-ease-ui),stroke var(--lgi-duration-state) var(--lgi-ease-ui);transform-box:fill-box;transform-origin:center}
-.life-point-directory .life-point-visible{fill:var(--lgi-canvas);stroke:var(--lgi-muted)}
-.life-point-new-ring{fill:none;stroke:var(--lgi-signal);stroke-width:2;vector-effect:non-scaling-stroke;pointer-events:none}
-.life-point-confirmed:hover .life-point-visible,.life-point-confirmed:focus-visible .life-point-visible{fill:var(--lgi-signal);transform:scale(1.35)}
-.life-point-directory:hover .life-point-visible,.life-point-directory:focus-visible .life-point-visible{stroke:var(--lgi-signal);transform:scale(1.35)}
+.life-point-high-discussion-ring{fill:var(--lgi-canvas);stroke:var(--lgi-signal);stroke-width:2;vector-effect:non-scaling-stroke;pointer-events:none}
+.life-point-new-mark{fill:var(--lgi-signal-soft);stroke:var(--lgi-signal-ink);stroke-width:1;vector-effect:non-scaling-stroke;pointer-events:none}
+.life-point:hover .life-point-visible,.life-point:focus-visible .life-point-visible{fill:var(--lgi-signal);transform:scale(1.35)}
 .life-point:focus-visible .life-point-visible{stroke:var(--lgi-focus);stroke-width:4}
 .life-point-selected .life-point-visible{stroke:var(--lgi-ink);stroke-width:3}
-.life-point-confirmed.life-point-selected .life-point-visible{fill:var(--lgi-signal)}
 .life-axis-copy{fill:var(--lgi-muted);font:400 var(--lgi-text-label) var(--lgi-font-mono)}
 .life-caption{display:flex;justify-content:space-between;gap:var(--lgi-space-3);padding:var(--lgi-space-3) var(--lgi-space-4);border-top:1px solid var(--lgi-hairline);color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data)}
 .life-exclusions{display:flex;flex-wrap:wrap;gap:var(--lgi-space-2);margin:var(--lgi-space-3) 0 0;padding:0;list-style:none}
@@ -516,14 +512,22 @@
 .life-trend-head h2{margin:0;color:var(--lgi-ink);font-size:var(--lgi-text-section);line-height:var(--lgi-lh-heading);font-weight:var(--lgi-weight-bold);letter-spacing:var(--lgi-ls-normal)}
 .life-trend-head p{margin:var(--lgi-space-1) 0 0;color:var(--lgi-ghost);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data)}
 .life-trend-grain{flex:0 0 auto;min-height:var(--lgi-space-8);padding:var(--lgi-space-2) var(--lgi-space-3);border:1px solid var(--lgi-hairline);background:var(--lgi-canvas-low);color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-data)}
+.life-chart-head-actions{display:flex;align-items:flex-start;justify-content:flex-end;flex-wrap:wrap;gap:var(--lgi-space-2)}
+.life-chart-switch,.life-grain-switch{display:flex;align-items:center;min-height:var(--lgi-space-8);border:1px solid var(--lgi-hairline);background:var(--lgi-canvas)}
+.life-chart-switch-tab,.life-grain-switch a,.life-grain-switch span{display:inline-flex;align-items:center;justify-content:center;min-height:var(--lgi-space-8);padding:0 var(--lgi-space-3);color:var(--lgi-muted);font-size:var(--lgi-text-label);text-decoration:none}
+.life-chart-switch-tab[aria-current="page"]{background:var(--lgi-ink);color:var(--lgi-on-dark);font-weight:var(--lgi-weight-bold)}
+.life-grain-switch{background:var(--lgi-canvas-low)}
+.life-grain-switch span{color:var(--lgi-ghost);font-weight:var(--lgi-weight-bold);letter-spacing:var(--lgi-ls-caps)}
+.life-grain-switch a[aria-current="page"]{color:var(--lgi-ink);font-weight:var(--lgi-weight-bold);box-shadow:inset 0 calc(var(--lgi-space-1) / -2) 0 var(--lgi-signal)}
+@media (hover:hover){.life-chart-switch-tab:not([aria-current="page"]):hover,.life-grain-switch a:hover{background:var(--lgi-canvas-low);color:var(--lgi-ink)}}
 .life-trend-legend{display:flex;align-items:center;flex-wrap:wrap;gap:var(--lgi-space-3);min-height:var(--lgi-space-8);padding:0 var(--lgi-space-5) var(--lgi-space-1);color:var(--lgi-muted);font-size:var(--lgi-text-label)}
 .life-trend-legend span{display:inline-flex;align-items:center;gap:var(--lgi-space-2);white-space:nowrap}
 .life-trend-legend i{display:inline-block;flex:0 0 auto}
 .life-legend-bar{width:var(--lgi-space-3);height:var(--lgi-space-2);background:var(--lgi-canvas-sunken)}
-.life-legend-line{position:relative;width:var(--lgi-space-4);height:calc(var(--lgi-space-1) / 2);background:linear-gradient(90deg,var(--lgi-body) 0%,var(--lgi-signal-ink) 56%,var(--lgi-signal) 100%)}
-.life-legend-line::after{content:"";position:absolute;top:calc(var(--lgi-space-1) / -2);right:calc(var(--lgi-space-1) / -4);width:var(--lgi-space-1);height:var(--lgi-space-1);border-radius:50%;background:var(--lgi-signal)}
+.life-legend-line{position:relative;width:var(--lgi-space-4);height:calc(var(--lgi-space-1) / 2);background:var(--lgi-ink)}
 .life-legend-dash{width:var(--lgi-space-4);border-top:1px dashed var(--lgi-unknown-dot)}
 .life-legend-ring{width:var(--lgi-space-2);height:var(--lgi-space-2);border:1px solid var(--lgi-signal);border-radius:50%}
+.life-legend-dot{width:var(--lgi-space-2);height:var(--lgi-space-2);background:var(--lgi-ink)}
 .life-trend-figure{height:calc(var(--lgi-grid-major) * 3 - var(--lgi-space-16));margin:0 var(--lgi-space-2) var(--lgi-space-2);overflow:hidden}
 .life-trend-chart{display:block;width:100%;height:100%}
 .life-trend-grid{stroke:var(--lgi-canvas-sunken);stroke-width:1}
@@ -531,10 +535,11 @@
 .life-trend-bar{fill:var(--lgi-canvas-sunken);opacity:.92}
 .life-trend-benchmark{stroke:var(--lgi-unknown-dot);stroke-width:1;stroke-dasharray:5 6}
 .life-trend-benchmark-copy{fill:var(--lgi-muted);font:var(--lgi-weight-regular) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans)}
-.life-trend-line{fill:none;stroke-width:2.15;stroke-linecap:round;stroke-linejoin:round}
+.life-trend-area{fill:url(#life-trend-area-gradient);pointer-events:none}
+.life-trend-line{fill:none;stroke:var(--lgi-ink);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .life-trend-dot{fill:var(--lgi-ink);stroke:var(--lgi-canvas);stroke-width:2}
 .life-trend-dot-new{fill:var(--lgi-signal)}
-.life-trend-new-ring{fill:var(--lgi-canvas);stroke:var(--lgi-signal);stroke-width:1.5}
+.life-trend-new-ring{fill:var(--lgi-canvas);stroke:var(--lgi-signal);stroke-width:2}
 .life-review{min-height:calc(var(--lgi-grid-major) * 3 - var(--lgi-space-2));border:1px solid var(--lgi-hairline);background:var(--lgi-canvas-low)}
 .life-review-head{padding:var(--lgi-space-5) var(--lgi-space-4) var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline)}
 .life-review-head b{display:block;color:var(--lgi-ink);font-size:var(--lgi-text-body);font-weight:var(--lgi-weight-bold)}
@@ -564,10 +569,7 @@
 .life-evidence-number{text-align:right;color:var(--lgi-ink);font-family:var(--lgi-font-mono);font-variant-numeric:tabular-nums}
 .life-evidence-empty{margin:0;padding:var(--lgi-space-4);background:var(--lgi-canvas-low);color:var(--lgi-muted);font-size:var(--lgi-text-data);line-height:var(--lgi-lh-body)}
 @media (hover:hover){.life-evidence-title:hover{color:var(--lgi-signal-ink);text-decoration:underline;text-underline-offset:var(--lgi-space-1)}}
-.life-distribution-panel{min-width:0;margin-top:var(--lgi-space-4);border:1px solid var(--lgi-hairline);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-stage)}
-.life-distribution-legend{display:flex;align-items:center;flex-wrap:wrap;gap:var(--lgi-space-3);min-height:var(--lgi-space-8);padding:0 var(--lgi-space-5) var(--lgi-space-3);color:var(--lgi-muted);font-size:var(--lgi-text-label)}
-.life-distribution-panel .life-figure{margin:0 var(--lgi-space-2) var(--lgi-space-2);border:0;border-radius:var(--lgi-radius-none);box-shadow:none}
-.life-distribution-panel .life-exclusions{margin:0 var(--lgi-space-2) var(--lgi-space-4)}
 .life-boundary{margin:var(--lgi-space-5) 0 0;max-width:72ch;color:var(--lgi-muted);font-size:var(--lgi-text-label);line-height:var(--lgi-lh-body)}
 @media (max-width:900px){.c-dw{width:100vw}.c-dw-head{padding-right:var(--lgi-space-5);padding-left:var(--lgi-space-5)}.c-dw-tabs,.c-dw-body{padding-right:var(--lgi-space-5);padding-left:var(--lgi-space-5)}.c-dw-title-row{align-items:flex-start}.c-dw-actions{flex-direction:column}.life-performance-controls{align-items:flex-start;flex-direction:column;padding:var(--lgi-space-3) 0}.life-controls{align-items:flex-start;flex-direction:column;gap:0}.life-control-row{flex-wrap:wrap}.life-performance-summary{grid-template-columns:1fr}.life-performance-stat+.life-performance-stat{padding-left:0;border-top:1px solid var(--lgi-hairline);border-left:0}.life-performance-grid{grid-template-columns:1fr}.life-review{min-height:0}.life-evidence-head{align-items:flex-start;flex-direction:column}.life-evidence-head p{text-align:left}.life-evidence-table-wrap{overflow-x:auto}.life-evidence-table{min-width:calc(var(--lgi-grid-major) * 3 + var(--lgi-space-2))}}
+@media (max-width:900px){.life-trend-head{align-items:stretch;flex-direction:column}.life-chart-head-actions{justify-content:flex-start}}
 @media (prefers-reduced-motion:reduce){.c-dw-actions :is(.c-dw-source,.c-dw-close),.c-dw-view-tab{transition:none}}

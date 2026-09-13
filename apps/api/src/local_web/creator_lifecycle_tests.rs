@@ -263,6 +263,7 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
                 published_local_date: "2026-08-01".to_owned(),
                 published_at_epoch_ms: 1_785_542_400_000,
                 metric_value: 10,
+                discussion_rate: Some(0.30),
                 association_state: CreatorLifecycleAssociation::DirectoryLinked,
                 new_in_latest_patrol: true,
             },
@@ -274,6 +275,7 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
                 published_local_date: "2026-08-02".to_owned(),
                 published_at_epoch_ms: 1_785_628_800_000,
                 metric_value: 100,
+                discussion_rate: Some(0.10),
                 association_state: CreatorLifecycleAssociation::AuthorConfirmed,
                 new_in_latest_patrol: false,
             },
@@ -309,7 +311,7 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     ] {
         assert_no_json_key(&api_payload, work_fact);
     }
-    let html = target_drawer::render_with_catalog_view(
+    let html = target_drawer::render_with_catalog_view_with_chart(
         Some(&target),
         Some(&avatar),
         Some(&std::collections::HashMap::new()),
@@ -318,6 +320,8 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
         target_drawer::LifecycleView::Projection(&projection),
         target_drawer::TargetInspectorView::NotRead,
         target_drawer::TargetWorksView::Performance,
+        target_drawer::LifeChartView::Distribution,
+        target_drawer::LifeTrendGrain::Month,
         target_drawer::TargetCatalogView::Unavailable,
         None,
         None,
@@ -349,28 +353,27 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
     assert!(html.contains("作者已确认"));
     assert!(html.contains("当前可分析"));
     assert!(html.contains("role=\"group\""));
-    assert!(html.contains("纵轴压缩互动量差距"));
-    assert!(html.contains("主页目录，详情待确认"));
+    assert!(html.contains("纵轴保持当前点赞原始数值"));
+    assert!(!html.contains("纵轴压缩"));
     assert!(html.contains("作者已确认"));
     assert!(html.contains("最近巡查新增"));
-    assert!(html.contains("life-point-directory"));
-    assert!(html.contains("life-point-confirmed"));
+    assert!(html.contains("life-point-high-discussion"));
     assert!(html.contains("life-point-new"));
-    assert_eq!(html.matches("life-point-new-ring").count(), 1);
+    assert_eq!(html.matches("life-point-new-mark").count(), 1);
     assert!(html.contains("发布时间</dt><dd>2026-08-02</dd>"));
     assert!(html.contains(r#"aria-current="true""#));
-    assert!(html.contains(r#"life-point-confirmed life-point-selected""#));
+    assert!(html.contains(r#"life-point-selected""#));
     assert!(html.contains(&format!("life_work={selected_ref}")));
     assert!(html.contains(&format!("/corpus/evidence?work={selected_ref}")));
     assert!(html.contains("第二篇"));
     assert_eq!(html.matches(r#"class="life-point-hit""#).count(), 2);
     assert_eq!(html.matches(r#"class="life-point-visible""#).count(), 2);
     assert_eq!(html.matches(r#"class="life-point-hit" cx="#).count(), 2);
-    assert_eq!(html.matches(r#"r="6" aria-hidden="true""#).count(), 2);
-    assert_eq!(html.matches(r#"r="5" aria-hidden="true""#).count(), 2);
+    assert_eq!(html.matches(r#"r="7" aria-hidden="true""#).count(), 2);
+    assert_eq!(html.matches(r#"r="4.6" aria-hidden="true""#).count(), 2);
     assert!(html.contains("id=\"creator-lifecycle\""));
     assert!(
-        html.contains(r#"class="life-point-hit" cx="764.0""#),
+        html.contains(r#"class="life-point-hit" cx="952.0""#),
         "the right plot inset must leave the hit target inside the desktop plot"
     );
     for forbidden in [
@@ -410,8 +413,8 @@ fn creator_drawer_uses_three_business_tabs_and_two_level_work_association() {
         &[],
         target_drawer::TargetListContext::default(),
     );
-    assert!(all_html.contains("UTC+08 全部合格历史"));
-    assert!(!all_html.contains("UTC+08 近 90 个日历日"));
+    assert!(all_html.contains("life_window=all"));
+    assert!(all_html.contains("全部周期"));
 
     let mut truncated_projection = projection.clone();
     truncated_projection.summary.linked_work_count = None;
@@ -500,11 +503,11 @@ fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
     assert!(!TARGET_DRAWER_CSS.contains(".c-tg-row-open"));
     assert!(TARGET_DRAWER_CSS.contains(".life-control-row{min-width:0;"));
     assert!(TARGET_DRAWER_CSS.contains(".life-figure{min-width:0;"));
-    // Mog explicitly approved one data-only gradient for the performance median line.  Keep
-    // the page-level LIDS guard closed for every other gradient-like treatment.
-    let allowed_trend_gradient = "background:linear-gradient(90deg,var(--lgi-body) 0%,var(--lgi-signal-ink) 56%,var(--lgi-signal) 100%)";
+    // The chart keeps one data-only area gradient. The median remains a single ink line, so the
+    // fade aids reading its shape without inventing a second metric or a direction-of-time cue.
     assert_eq!(TARGET_DRAWER_CSS.matches("gradient").count(), 1);
-    assert!(TARGET_DRAWER_CSS.contains(allowed_trend_gradient));
+    assert!(TARGET_DRAWER_CSS.contains("fill:url(#life-trend-area-gradient)"));
+    assert!(!TARGET_DRAWER_CSS.contains("life-trend-line-gradient"));
     assert!(!TARGET_DRAWER_CSS.contains("#fff"));
     assert!(!TARGET_DRAWER_CSS.contains("#000"));
     assert!(LIDS_TOKENS.contains("--lgi-focus: #335e72"));

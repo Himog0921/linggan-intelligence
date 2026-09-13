@@ -88,6 +88,70 @@ impl TargetWorksView {
     }
 }
 
+/// The two performance readings are alternate views of one qualified point set, never two
+/// independent reports. The state lives in the URL so a copied inspector link preserves the
+/// question the operator was asking.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LifeChartView {
+    Trend,
+    Distribution,
+}
+
+impl LifeChartView {
+    pub fn parse(value: Option<&str>) -> Self {
+        match value {
+            Some("distribution") => Self::Distribution,
+            None | Some("trend") | Some(_) => Self::Trend,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Trend => "trend",
+            Self::Distribution => "distribution",
+        }
+    }
+}
+
+/// Trend aggregation is a local reading aid. It neither changes the lifecycle query nor creates
+/// an additional persisted fact. “每 7 日” is deliberately described as a calendar-week bucket
+/// rather than a new analytics metric.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum LifeTrendGrain {
+    Month,
+    Week,
+}
+
+impl LifeTrendGrain {
+    pub fn parse(value: Option<&str>) -> Self {
+        match value {
+            Some("week") => Self::Week,
+            None | Some("month") | Some(_) => Self::Month,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Month => "month",
+            Self::Week => "week",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Month => "按月",
+            Self::Week => "按周",
+        }
+    }
+
+    fn density_unit(self) -> &'static str {
+        match self {
+            Self::Month => "活跃月",
+            Self::Week => "活跃周",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TargetListContext<'a> {
     pub filter: Option<&'a str>,
@@ -548,6 +612,49 @@ pub fn render_with_catalog_view(
     retirable: &[BlockedMaterial],
     list_context: TargetListContext<'_>,
 ) -> String {
+    render_with_catalog_view_with_chart(
+        target,
+        avatar,
+        completeness,
+        drawer,
+        active_tab,
+        lifecycle,
+        inspector,
+        works_view,
+        LifeChartView::Trend,
+        LifeTrendGrain::Month,
+        catalog,
+        catalog_query,
+        catalog_filter,
+        selected_work,
+        monitor_rules,
+        retirable,
+        list_context,
+    )
+}
+
+/// Variant used by the collection route after it has decoded the bounded presentation state.
+/// Keeping the older entry point above preserves callers that intentionally only need the
+/// default trend reading.
+pub fn render_with_catalog_view_with_chart(
+    target: Option<&ObservationTarget>,
+    avatar: Option<&ObservationTargetAvatar>,
+    completeness: Option<&std::collections::HashMap<String, ArchiveCompleteness>>,
+    drawer: Option<&str>,
+    active_tab: TargetDrawerTab,
+    lifecycle: LifecycleView<'_>,
+    inspector: TargetInspectorView<'_>,
+    works_view: TargetWorksView,
+    chart_view: LifeChartView,
+    trend_grain: LifeTrendGrain,
+    catalog: TargetCatalogView<'_>,
+    catalog_query: Option<&str>,
+    catalog_filter: Option<&str>,
+    selected_work: Option<&str>,
+    monitor_rules: Option<&[linggan_evidence::MonitorRuleSummary]>,
+    retirable: &[BlockedMaterial],
+    list_context: TargetListContext<'_>,
+) -> String {
     let Some(drawer) = drawer else {
         return String::new();
     };
@@ -635,6 +742,8 @@ pub fn render_with_catalog_view(
             tab,
             lifecycle,
             works_view,
+            chart_view,
+            trend_grain,
             selected_work,
             list_context
         ),
@@ -647,6 +756,8 @@ pub fn render_with_catalog_view(
             lifecycle,
             inspector,
             works_view,
+            chart_view,
+            trend_grain,
             catalog,
             catalog_query,
             catalog_filter,
@@ -892,10 +1003,12 @@ fn tab_bar(
     active: TargetDrawerTab,
     lifecycle: LifecycleView<'_>,
     works_view: TargetWorksView,
+    chart_view: LifeChartView,
+    trend_grain: LifeTrendGrain,
     selected_work: Option<&str>,
     list_context: TargetListContext<'_>,
 ) -> String {
-    let lifecycle_state = lifecycle_query_state(lifecycle, selected_work);
+    let lifecycle_state = lifecycle_query_state(lifecycle, chart_view, trend_grain, selected_work);
     TABS.iter()
         .map(|(key, label)| {
             let class = if *key == active { " c-dw-tab-on" } else { "" };
@@ -928,6 +1041,8 @@ fn body(
     lifecycle: LifecycleView<'_>,
     inspector: TargetInspectorView<'_>,
     works_view: TargetWorksView,
+    chart_view: LifeChartView,
+    trend_grain: LifeTrendGrain,
     catalog: TargetCatalogView<'_>,
     catalog_query: Option<&str>,
     catalog_filter: Option<&str>,
@@ -943,6 +1058,8 @@ fn body(
             catalog_filter,
             lifecycle,
             works_view,
+            chart_view,
+            trend_grain,
             selected_work,
             list_context,
         ),
@@ -970,6 +1087,8 @@ fn works_tab(
     filter: Option<&str>,
     lifecycle: LifecycleView<'_>,
     works_view: TargetWorksView,
+    chart_view: LifeChartView,
+    trend_grain: LifeTrendGrain,
     selected_work: Option<&str>,
     list_context: TargetListContext<'_>,
 ) -> String {
@@ -982,7 +1101,7 @@ fn works_tab(
         Some("target-works"),
     );
     let mut performance_params = vec![("dtab", "works"), ("wview", "performance")];
-    let lifecycle_params = lifecycle_query_state(lifecycle, selected_work);
+    let lifecycle_params = lifecycle_query_state(lifecycle, chart_view, trend_grain, selected_work);
     let lifecycle_params = lifecycle_params
         .iter()
         .map(|(key, value)| (*key, value.as_str()))
@@ -1008,9 +1127,15 @@ fn works_tab(
     );
     let content = match works_view {
         TargetWorksView::List => works_list(target, catalog, query, filter, list_context),
-        TargetWorksView::Performance => {
-            lifecycle_overview(target, true, lifecycle, selected_work, list_context)
-        }
+        TargetWorksView::Performance => lifecycle_overview(
+            target,
+            true,
+            lifecycle,
+            chart_view,
+            trend_grain,
+            selected_work,
+            list_context,
+        ),
     };
     format!(r#"{tabs}<div class="c-dw-view-body">{content}</div>"#)
 }
@@ -1704,6 +1829,8 @@ fn required_action_control(
 
 fn lifecycle_query_state(
     lifecycle: LifecycleView<'_>,
+    chart_view: LifeChartView,
+    trend_grain: LifeTrendGrain,
     selected_work: Option<&str>,
 ) -> Vec<(&'static str, String)> {
     let (window, metric, validate_selection) = match lifecycle {
@@ -1731,6 +1858,8 @@ fn lifecycle_query_state(
     let mut params = vec![
         ("life_window", window.as_str().to_owned()),
         ("life_metric", metric.as_str().to_owned()),
+        ("life_chart", chart_view.as_str().to_owned()),
+        ("life_grain", trend_grain.as_str().to_owned()),
     ];
     if let Some(selected) = selected {
         params.push(("life_work", selected));
@@ -1742,6 +1871,8 @@ fn lifecycle_overview(
     target: &ObservationTarget,
     is_creator: bool,
     lifecycle: LifecycleView<'_>,
+    chart_view: LifeChartView,
+    trend_grain: LifeTrendGrain,
     selected_work: Option<&str>,
     list_context: TargetListContext<'_>,
 ) -> String {
@@ -1775,47 +1906,38 @@ fn lifecycle_overview(
         );
     }
 
-    let controls = lifecycle_controls(target, projection, list_context);
+    let controls = lifecycle_controls(target, projection, chart_view, trend_grain, list_context);
     let has_points = !projection.points.is_empty();
     let summary = performance_summary(projection);
-    let trend = if !has_points {
+    let chart = if !has_points {
         lifecycle_state(
             "观察不足，暂时无法成图",
             "作品必须同时具备可确认的作者归属、真实发布时间和当前互动数据。未知值不会按零计算。",
         )
     } else {
-        performance_trend_chart(projection)
+        match chart_view {
+            LifeChartView::Trend => performance_trend_chart(
+                target,
+                projection,
+                trend_grain,
+                selected_work,
+                list_context,
+            ),
+            LifeChartView::Distribution => performance_distribution_chart(
+                target,
+                projection,
+                chart_view,
+                trend_grain,
+                selected_work,
+                list_context,
+            ),
+        }
     };
     let review = has_points
-        .then(|| performance_review(projection))
+        .then(|| performance_review(projection, chart_view, trend_grain))
         .unwrap_or_default();
-    let evidence = performance_evidence(target, projection, list_context);
-    // Trend and distribution answer different questions from the same qualified point set:
-    // time buckets expose movement, while the scatter keeps every work inspectable.  Neither
-    // is a detail of the other, so both stay visible in the performance view.
-    let distribution = if !has_points {
-        String::new()
-    } else {
-        format!(
-            r#"<article class="life-distribution-panel" aria-labelledby="life-distribution-title">
-                  <div class="life-trend-head"><div><div class="life-trend-eyebrow">逐篇证据</div><h2 id="life-distribution-title">逐篇作品分布</h2><p>每个点是一篇当前可分析作品；横轴保留发布时间，纵轴压缩 {metric} 的差距。</p></div><span class="life-trend-grain">逐篇可查</span></div>
-                  <div class="life-distribution-legend life-legend" aria-label="散点含义">
-                    <span><i class="life-legend-dot life-legend-directory"></i>主页目录，详情待确认</span>
-                    <span><i class="life-legend-dot life-legend-confirmed"></i>作者已确认</span>
-                    <span><i class="life-legend-dot life-legend-new"></i>最近巡查新增</span>
-                  </div>
-                  {chart}{exclusions}
-                </article>"#,
-            chart = lifecycle_chart(target, projection, selected_work, list_context),
-            exclusions = lifecycle_exclusions(projection),
-            metric = metric_label(projection.metric),
-        )
-    };
-    let exclusions = if has_points {
-        String::new()
-    } else {
-        lifecycle_exclusions(projection)
-    };
+    let evidence = performance_evidence(target, projection, chart_view, trend_grain, list_context);
+    let exclusions = lifecycle_exclusions(projection);
     let selected = selected_work
         .and_then(|selected| {
             projection
@@ -1830,8 +1952,8 @@ fn lifecycle_overview(
         r#"<section class="c-dw-section life-panel" id="creator-lifecycle">
               <div class="life-performance-controls"><div>{controls}</div><p>数据截至 <time>{as_of}</time></p></div>
               {summary}
-              <div class="life-performance-grid{empty_state}"><article class="life-trend-panel">{trend}</article>{review}</div>
-              {distribution}{evidence}{exclusions}{selected}
+              <div class="life-performance-grid{empty_state}"><article class="life-trend-panel">{chart}</article>{review}</div>
+              {evidence}{exclusions}{selected}
               <p class="life-boundary">这里比较的是该创作者自己的作品表现，不是“监控价值”评分。尚未建立内容分类，因此不按主题生成表现结论。</p>
             </section>"#,
         as_of = escape(&projection.as_of),
@@ -1848,14 +1970,11 @@ fn lifecycle_overview(
 /// readable way to see the same creator-scoped evidence set over time.
 fn performance_buckets<'a>(
     points: &'a [CreatorLifecyclePoint],
+    grain: LifeTrendGrain,
 ) -> Vec<(String, Vec<&'a CreatorLifecyclePoint>)> {
     let mut buckets: Vec<(String, Vec<&CreatorLifecyclePoint>)> = Vec::new();
     for point in points {
-        let label = point
-            .published_local_date
-            .get(..7)
-            .unwrap_or(point.published_local_date.as_str())
-            .replace('-', "/");
+        let label = trend_bucket_label(&point.published_local_date, grain);
         if let Some((_, items)) = buckets.last_mut().filter(|(key, _)| *key == label) {
             items.push(point);
         } else {
@@ -1863,6 +1982,61 @@ fn performance_buckets<'a>(
         }
     }
     buckets
+}
+
+fn trend_bucket_label(published_local_date: &str, grain: LifeTrendGrain) -> String {
+    match grain {
+        LifeTrendGrain::Month => published_local_date
+            .get(..7)
+            .unwrap_or(published_local_date)
+            .replace('-', "/"),
+        LifeTrendGrain::Week => calendar_week_start(published_local_date)
+            .unwrap_or_else(|| published_local_date.to_owned())
+            .replace('-', "/"),
+    }
+}
+
+/// The read model already supplies an Asia/Shanghai local calendar date. This small calendar
+/// helper finds that date's Monday without treating the UTC timestamp as a second publication
+/// fact or adding a timezone dependency to the UI adapter.
+fn calendar_week_start(date: &str) -> Option<String> {
+    let mut parts = date.split('-');
+    let year = parts.next()?.parse::<i64>().ok()?;
+    let month = parts.next()?.parse::<i64>().ok()?;
+    let day = parts.next()?.parse::<i64>().ok()?;
+    if parts.next().is_some() || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return None;
+    }
+    let days = days_from_civil(year, month, day);
+    let monday = days - (days + 3).rem_euclid(7);
+    let (year, month, day) = civil_from_days(monday);
+    Some(format!("{year:04}-{month:02}-{day:02}"))
+}
+
+// Howard Hinnant's public-domain civil calendar algorithms, expressed here only to bucket the
+// already-qualified local date. Day zero is 1970-01-01, a Thursday; Monday therefore maps to 0.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - i64::from(month <= 2);
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+fn civil_from_days(days: i64) -> (i64, i64, i64) {
+    let days = days + 719_468;
+    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
+    let day_of_era = days - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era + era * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_prime = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_prime + 2) / 5 + 1;
+    let month = month_prime + if month_prime < 10 { 3 } else { -9 };
+    (year + i64::from(month <= 2), month, day)
 }
 
 fn median_f64(values: &[f64]) -> Option<f64> {
@@ -1881,12 +2055,131 @@ fn median_f64(values: &[f64]) -> Option<f64> {
 
 fn compact_metric(value: f64) -> String {
     if value.abs() >= 10_000.0 {
-        format!("{:.0}k", value / 1_000.0)
-    } else if value.abs() >= 1_000.0 {
-        format!("{:.1}k", value / 1_000.0)
+        format!("{:.1}万", value / 10_000.0)
     } else {
-        format!("{:.0}", value)
+        exact_metric(value)
     }
+}
+
+/// A compact label may save chart space, but it must never become the only representation of a
+/// known value. Median and percentile values can be fractional; preserve that fraction while
+/// grouping the integer part for the title/accessible alternative.
+fn exact_metric(value: f64) -> String {
+    let rounded = value.round();
+    let raw = if (value - rounded).abs() < 0.000_001 {
+        format!("{rounded:.0}")
+    } else {
+        let mut decimal = format!("{value:.2}");
+        while decimal.ends_with('0') {
+            decimal.pop();
+        }
+        if decimal.ends_with('.') {
+            decimal.pop();
+        }
+        decimal
+    };
+    let (whole, fraction) = raw.split_once('.').unwrap_or((&raw, ""));
+    let (sign, digits) = whole
+        .strip_prefix('-')
+        .map_or(("", whole), |digits| ("-", digits));
+    let mut grouped_reversed = String::new();
+    for (index, digit) in digits.chars().rev().enumerate() {
+        if index > 0 && index % 3 == 0 {
+            grouped_reversed.push(',');
+        }
+        grouped_reversed.push(digit);
+    }
+    let grouped = grouped_reversed.chars().rev().collect::<String>();
+    if fraction.is_empty() {
+        format!("{sign}{grouped}")
+    } else {
+        format!("{sign}{grouped}.{fraction}")
+    }
+}
+
+fn performance_href(
+    target: &ObservationTarget,
+    projection: &CreatorLifecycleProjection,
+    chart_view: LifeChartView,
+    trend_grain: LifeTrendGrain,
+    selected_work: Option<&str>,
+    list_context: TargetListContext<'_>,
+    fragment: Option<&str>,
+) -> String {
+    let mut params = vec![
+        ("dtab", "works"),
+        ("wview", "performance"),
+        ("life_window", projection.window.as_str()),
+        ("life_metric", projection.metric.as_str()),
+        ("life_chart", chart_view.as_str()),
+        ("life_grain", trend_grain.as_str()),
+    ];
+    if let Some(selected_work) = selected_work {
+        params.push(("life_work", selected_work));
+    }
+    list_context.drawer_href(target.target_ref, &params, fragment)
+}
+
+fn performance_chart_switch(
+    target: &ObservationTarget,
+    projection: &CreatorLifecycleProjection,
+    selected_work: Option<&str>,
+    active_view: LifeChartView,
+    trend_grain: LifeTrendGrain,
+    list_context: TargetListContext<'_>,
+) -> String {
+    [
+        (LifeChartView::Trend, "趋势"),
+        (LifeChartView::Distribution, "分布"),
+    ]
+    .into_iter()
+    .map(|(view, label)| {
+        let current = if view == active_view {
+            r#" aria-current="page""#
+        } else {
+            ""
+        };
+        let href = performance_href(
+            target,
+            projection,
+            view,
+            trend_grain,
+            selected_work,
+            list_context,
+            Some("creator-lifecycle"),
+        );
+        format!(r#"<a class="life-chart-switch-tab" href="{href}"{current}>{label}</a>"#)
+    })
+    .collect::<String>()
+}
+
+fn performance_grain_switch(
+    target: &ObservationTarget,
+    projection: &CreatorLifecycleProjection,
+    trend_grain: LifeTrendGrain,
+    selected_work: Option<&str>,
+    list_context: TargetListContext<'_>,
+) -> String {
+    [LifeTrendGrain::Month, LifeTrendGrain::Week]
+        .into_iter()
+        .map(|grain| {
+            let current = if grain == trend_grain {
+                r#" aria-current="page""#
+            } else {
+                ""
+            };
+            let href = performance_href(
+                target,
+                projection,
+                LifeChartView::Trend,
+                grain,
+                selected_work,
+                list_context,
+                Some("creator-lifecycle"),
+            );
+            format!(r#"<a href="{href}"{current}>{}</a>"#, grain.label())
+        })
+        .collect::<String>()
 }
 
 fn performance_stat(value: String, label: &str, progress: Option<f64>, signal: bool) -> String {
@@ -1934,7 +2227,13 @@ fn performance_summary(projection: &CreatorLifecycleProjection) -> String {
     )
 }
 
-fn performance_trend_chart(projection: &CreatorLifecycleProjection) -> String {
+fn performance_trend_chart(
+    target: &ObservationTarget,
+    projection: &CreatorLifecycleProjection,
+    trend_grain: LifeTrendGrain,
+    selected_work: Option<&str>,
+    list_context: TargetListContext<'_>,
+) -> String {
     const WIDTH: f64 = 980.0;
     const HEIGHT: f64 = 470.0;
     const LEFT: f64 = 62.0;
@@ -1942,7 +2241,7 @@ fn performance_trend_chart(projection: &CreatorLifecycleProjection) -> String {
     const TOP: f64 = 28.0;
     const BOTTOM: f64 = 54.0;
 
-    let buckets = performance_buckets(&projection.points);
+    let buckets = performance_buckets(&projection.points, trend_grain);
     let bucket_medians = buckets
         .iter()
         .map(|(_, points)| {
@@ -1986,12 +2285,13 @@ fn performance_trend_chart(projection: &CreatorLifecycleProjection) -> String {
         .map(|index| {
             let y = TOP + plot_height / 4.0 * index as f64;
             let value = max_metric * (1.0 - index as f64 / 4.0);
+            let compact = compact_metric(value);
+            let exact = exact_metric(value);
             format!(
-                r#"<line class="life-trend-grid" x1="{LEFT}" y1="{y:.1}" x2="{}" y2="{y:.1}"/><text class="life-trend-axis" x="{}" y="{:.1}" text-anchor="end">{}</text>"#,
+                r#"<line class="life-trend-grid" x1="{LEFT}" y1="{y:.1}" x2="{}" y2="{y:.1}"/><text class="life-trend-axis" x="{}" y="{:.1}" text-anchor="end" aria-label="精确数值 {exact}"><title>精确数值 {exact}</title>{compact}</text>"#,
                 WIDTH - RIGHT,
                 LEFT - 12.0,
                 y + 4.0,
-                compact_metric(value),
             )
         })
         .collect::<String>();
@@ -2012,15 +2312,21 @@ fn performance_trend_chart(projection: &CreatorLifecycleProjection) -> String {
     let line_points = bucket_medians
         .iter()
         .enumerate()
-        .map(|(index, value)| format!("{:.1},{:.1}", x_for(index), y_for(*value)))
+        .map(|(index, value)| (x_for(index), y_for(*value)))
         .collect::<Vec<_>>();
-    let line = line_points.join(" ");
+    let line = smooth_svg_path(&line_points);
+    let area = format!(
+        "{line} L {:.1},{:.1} L {:.1},{:.1} Z",
+        line_points.last().map(|(x, _)| *x).unwrap_or(LEFT),
+        TOP + plot_height,
+        line_points.first().map(|(x, _)| *x).unwrap_or(LEFT),
+        TOP + plot_height,
+    );
     let benchmark = median_f64(
-        &bucket_medians
+        &projection
+            .points
             .iter()
-            .rev()
-            .take(5)
-            .copied()
+            .map(|point| point.metric_value as f64)
             .collect::<Vec<_>>(),
     )
     .unwrap_or(0.0);
@@ -2067,16 +2373,33 @@ fn performance_trend_chart(projection: &CreatorLifecycleProjection) -> String {
         .collect::<String>();
     let trend_right = WIDTH - RIGHT;
     let benchmark_copy_y = benchmark_y - 7.0;
+    let benchmark_label = compact_metric(benchmark);
+    let benchmark_exact = exact_metric(benchmark);
     let vertical_label_y = TOP + plot_height / 2.0;
+    let chart_switch = performance_chart_switch(
+        target,
+        projection,
+        selected_work,
+        LifeChartView::Trend,
+        trend_grain,
+        list_context,
+    );
+    let grain_switch =
+        performance_grain_switch(target, projection, trend_grain, selected_work, list_context);
     format!(
-        r#"<div class="life-trend-head"><div><div class="life-trend-eyebrow">作品复核</div><h2>作品表现趋势</h2><p>柱形表示发布密度，主线使用同一时间桶的{metric}中位数；新巡查作品以信号环标出。</p></div><span class="life-trend-grain">自动聚合</span></div>
-            <div class="life-trend-legend" aria-label="趋势图图例"><span><i class="life-legend-bar"></i>发布作品数</span><span><i class="life-legend-line"></i>{metric}中位数</span><span><i class="life-legend-dash"></i>最近窗口中位基准</span><span><i class="life-legend-ring"></i>巡查新增</span></div>
-            <figure class="life-trend-figure"><svg class="life-trend-chart" viewBox="0 0 980 470" role="img" aria-labelledby="life-trend-chart-title life-trend-chart-desc"><title id="life-trend-chart-title">创作者作品表现趋势</title><desc id="life-trend-chart-desc">横轴为当前时间窗口的月份，柱形表示可分析作品数，线条表示每月{metric}中位数；线条从低饱和墨色过渡到信号橙，仍只表示同一条中位数序列。</desc><defs><linearGradient id="life-trend-line-gradient" gradientUnits="userSpaceOnUse" x1="{LEFT}" y1="{vertical_label_y:.1}" x2="{trend_right:.1}" y2="{vertical_label_y:.1}"><stop offset="0%" stop-color="var(--lgi-body)"/><stop offset="56%" stop-color="var(--lgi-signal-ink)"/><stop offset="100%" stop-color="var(--lgi-signal)"/></linearGradient></defs>{grid}{bars}<line class="life-trend-benchmark" x1="{LEFT}" y1="{benchmark_y:.1}" x2="{trend_right:.1}" y2="{benchmark_y:.1}"/><text class="life-trend-benchmark-copy" x="{trend_right:.1}" y="{benchmark_copy_y:.1}" text-anchor="end">当前窗口中位 · {benchmark_label}</text><polyline class="life-trend-line" points="{line}" stroke="url(#life-trend-line-gradient)"/>{dots}{labels}<text class="life-trend-axis" x="17" y="{vertical_label_y:.1}" transform="rotate(-90 17 {vertical_label_y:.1})" text-anchor="middle">{metric}中位数</text></svg></figure>"#,
+        r#"<div class="life-trend-head"><div><div class="life-trend-eyebrow">作品复核</div><h2>作品表现趋势</h2><p>柱形表示发布密度，主线使用同一时间桶的{metric}中位数；橙红只标记最近巡查新增。</p></div><div class="life-chart-head-actions"><nav class="life-chart-switch" aria-label="图表视图">{chart_switch}</nav><nav class="life-grain-switch" aria-label="趋势粒度"><span>粒度</span>{grain_switch}</nav></div></div>
+            <div class="life-trend-legend" aria-label="趋势图图例"><span><i class="life-legend-bar"></i>发布作品数</span><span><i class="life-legend-line"></i>{metric}中位数</span><span><i class="life-legend-dash"></i>当前窗口中位基准</span><span><i class="life-legend-ring"></i>巡查新增</span></div>
+            <figure class="life-trend-figure"><svg class="life-trend-chart" viewBox="0 0 980 470" role="img" aria-labelledby="life-trend-chart-title life-trend-chart-desc"><title id="life-trend-chart-title">创作者作品表现趋势</title><desc id="life-trend-chart-desc">横轴为当前时间窗口的{grain}，柱形表示可分析作品数，墨线表示同一时间桶的{metric}中位数，虚线表示当前窗口所有已纳入作品的{metric}中位数。橙红圆环仅表示该桶包含最近巡查新增作品。</desc><defs><linearGradient id="life-trend-area-gradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="var(--lgi-signal-soft)" stop-opacity="0.92"/><stop offset="100%" stop-color="var(--lgi-canvas)" stop-opacity="0"/></linearGradient></defs>{grid}{bars}<path class="life-trend-area" d="{area}"/><line class="life-trend-benchmark" x1="{LEFT}" y1="{benchmark_y:.1}" x2="{trend_right:.1}" y2="{benchmark_y:.1}"/><text class="life-trend-benchmark-copy" x="{trend_right:.1}" y="{benchmark_copy_y:.1}" text-anchor="end" aria-label="当前窗口精确中位数 {benchmark_exact}"><title>当前窗口精确中位数 {benchmark_exact}</title>当前窗口中位 · {benchmark_label}</text><path class="life-trend-line" d="{line}"/>{dots}{labels}<text class="life-trend-axis" x="17" y="{vertical_label_y:.1}" transform="rotate(-90 17 {vertical_label_y:.1})" text-anchor="middle">{metric}中位数</text></svg></figure>"#,
         metric = metric_label(projection.metric),
+        grain = trend_grain.label(),
+        chart_switch = chart_switch,
+        grain_switch = grain_switch,
         grid = grid,
         bars = bars,
+        area = area,
         benchmark_y = benchmark_y,
-        benchmark_label = compact_metric(benchmark),
+        benchmark_label = benchmark_label,
+        benchmark_exact = benchmark_exact,
         line = line,
         dots = dots,
         labels = labels,
@@ -2087,16 +2410,61 @@ fn performance_trend_chart(projection: &CreatorLifecycleProjection) -> String {
     )
 }
 
-fn performance_review(projection: &CreatorLifecycleProjection) -> String {
-    let buckets = performance_buckets(&projection.points);
+fn smooth_svg_path(points: &[(f64, f64)]) -> String {
+    let Some((first_x, first_y)) = points.first().copied() else {
+        return String::new();
+    };
+    if points.len() == 1 {
+        return format!("M {first_x:.1},{first_y:.1}");
+    }
+    let mut path = format!("M {first_x:.1},{first_y:.1}");
+    for index in 0..points.len() - 1 {
+        let previous = points[index.saturating_sub(1)];
+        let current = points[index];
+        let next = points[index + 1];
+        let following = points.get(index + 2).copied().unwrap_or(next);
+        let control_one = (
+            current.0 + (next.0 - previous.0) / 6.0,
+            current.1 + (next.1 - previous.1) / 6.0,
+        );
+        let control_two = (
+            next.0 - (following.0 - current.0) / 6.0,
+            next.1 - (following.1 - current.1) / 6.0,
+        );
+        path.push_str(&format!(
+            " C {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}",
+            control_one.0, control_one.1, control_two.0, control_two.1, next.0, next.1
+        ));
+    }
+    path
+}
+
+fn performance_review(
+    projection: &CreatorLifecycleProjection,
+    chart_view: LifeChartView,
+    trend_grain: LifeTrendGrain,
+) -> String {
+    match chart_view {
+        LifeChartView::Trend => performance_trend_review(projection, trend_grain),
+        LifeChartView::Distribution => performance_distribution_review(projection),
+    }
+}
+
+fn performance_trend_review(
+    projection: &CreatorLifecycleProjection,
+    trend_grain: LifeTrendGrain,
+) -> String {
+    let buckets = performance_buckets(&projection.points, trend_grain);
     let metric_values = projection
         .points
         .iter()
         .map(|point| point.metric_value as f64)
         .collect::<Vec<_>>();
     let median = median_f64(&metric_values).unwrap_or(0.0);
-    let active_months = buckets.len().max(1);
-    let density = projection.summary.eligible_point_count as f64 / active_months as f64;
+    let median_label = compact_metric(median);
+    let median_exact = exact_metric(median);
+    let active_buckets = buckets.len().max(1);
+    let density = projection.summary.eligible_point_count as f64 / active_buckets as f64;
     let new_count = projection
         .points
         .iter()
@@ -2126,23 +2494,82 @@ fn performance_review(projection: &CreatorLifecycleProjection) -> String {
         .collect::<String>();
     format!(
         r#"<aside class="life-review" aria-label="复核摘要"><div class="life-review-head"><b>复核摘要</b><span>把“变化”转成可核验线索。</span></div>
-              <div class="life-review-item"><div><span>当前窗口中位{metric}</span></div><strong>{median}</strong><p>只按当前可分析作品计算；缺少指标的作品不会以零参与中位数。</p><div class="life-mini-strip">{strip}</div></div>
-              <div class="life-review-item"><div><span>发布密度</span><em>{density:.1} / 活跃月</em></div><strong>{eligible}</strong><p>当前窗口内 {eligible} 篇可分析作品，分布在 {months} 个有作品月份。</p></div>
+              <div class="life-review-item"><div><span>当前窗口中位{metric}</span></div><strong title="精确中位数 {median_exact}" aria-label="精确中位数 {median_exact}">{median}</strong><p>只按当前可分析作品计算；缺少指标的作品不会以零参与中位数。</p><div class="life-mini-strip">{strip}</div></div>
+              <div class="life-review-item"><div><span>发布密度</span><em>{density:.1} / {density_unit}</em></div><strong>{eligible}</strong><p>当前窗口内 {eligible} 篇可分析作品，分布在 {bucket_count} 个{grain}时间桶。</p></div>
               <div class="life-review-item"><div><span>最近巡查新增</span><em>{new_count} 篇</em></div><strong>{new_count}</strong><p>这里仅标记已进入当前可分析集的新增作品，未把读取未知写成零。</p></div>
               <div class="life-review-boundary"><b>复核边界</b><p>观察结果不等于结论。先查证单篇作品与其来源，再做解释。</p></div></aside>"#,
         metric = metric_label(projection.metric),
-        median = compact_metric(median),
+        median = median_label,
+        median_exact = median_exact,
         strip = strip,
         density = density,
         eligible = projection.summary.eligible_point_count,
-        months = buckets.len(),
+        density_unit = trend_grain.density_unit(),
+        bucket_count = buckets.len(),
+        grain = trend_grain.label(),
         new_count = new_count,
     )
+}
+
+fn performance_distribution_review(projection: &CreatorLifecycleProjection) -> String {
+    let values = projection
+        .points
+        .iter()
+        .map(|point| point.metric_value as f64)
+        .collect::<Vec<_>>();
+    let typical_low = percentile_f64(&values, 0.25).unwrap_or(0.0);
+    let typical_high = percentile_f64(&values, 0.75).unwrap_or(0.0);
+    let typical_low_label = compact_metric(typical_low);
+    let typical_high_label = compact_metric(typical_high);
+    let typical_low_exact = exact_metric(typical_low);
+    let typical_high_exact = exact_metric(typical_high);
+    let high_discussion = projection
+        .points
+        .iter()
+        .filter(|point| point.discussion_rate.is_some_and(|rate| rate > 0.20))
+        .count();
+    let discussion_unavailable = projection
+        .points
+        .iter()
+        .filter(|point| point.discussion_rate.is_none())
+        .count();
+    format!(
+        r#"<aside class="life-review" aria-label="复核摘要"><div class="life-review-head"><b>复核摘要</b><span>把“分布”转成逐篇可查的范围。</span></div>
+              <div class="life-review-item"><div><span>当前纳入作品</span></div><strong>{eligible}</strong><p>只包括当前时间窗与当前指标均为已知的作品；Known zero 仍保留在图中。</p></div>
+              <div class="life-review-item"><div><span>典型区间</span><em>25%–75%</em></div><strong title="精确区间 {typical_low_exact}–{typical_high_exact}" aria-label="精确区间 {typical_low_exact}–{typical_high_exact}">{typical_low}–{typical_high}</strong><p>按当前纳入作品的{metric}第 25 至第 75 百分位计算，不表示行业常态或质量判断。</p></div>
+              <div class="life-review-item"><div><span>高讨论率</span><em>&gt; 20%</em></div><strong>{high_discussion}</strong><p>只标记评论／点赞可判且超过 20% 的作品；它是复核信号，不改变纵轴指标。</p></div>
+              <div class="life-review-item"><div><span>讨论率未可判</span></div><strong>{discussion_unavailable}</strong><p>评论或点赞未知，或点赞为 0 时不计算比率，不写成低讨论率。</p></div>
+              <div class="life-review-item"><div><span>当前指标未知</span></div><strong>{metric_unknown}</strong><p>这类作品没有进入当前分布；未知不以 0 或典型区间的边界替代。</p></div>
+              <div class="life-review-boundary"><b>复核边界</b><p>先点击具体作品查证其来源与语境；点的高低不等于内容价值。</p></div></aside>"#,
+        eligible = projection.summary.eligible_point_count,
+        typical_low = typical_low_label,
+        typical_high = typical_high_label,
+        typical_low_exact = typical_low_exact,
+        typical_high_exact = typical_high_exact,
+        metric = metric_label(projection.metric),
+        high_discussion = high_discussion,
+        discussion_unavailable = discussion_unavailable,
+        metric_unknown = projection.exclusions.metric_unknown,
+    )
+}
+
+fn percentile_f64(values: &[f64], percentile: f64) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let index = percentile.clamp(0.0, 1.0) * (sorted.len() - 1) as f64;
+    let lower = index.floor() as usize;
+    let upper = index.ceil() as usize;
+    Some(sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower as f64))
 }
 
 fn performance_evidence(
     target: &ObservationTarget,
     projection: &CreatorLifecycleProjection,
+    chart_view: LifeChartView,
+    trend_grain: LifeTrendGrain,
     list_context: TargetListContext<'_>,
 ) -> String {
     let rows = projection
@@ -2152,15 +2579,13 @@ fn performance_evidence(
         .take(4)
         .map(|point| {
             let work = point.work_public_ref.to_string();
-            let href = list_context.drawer_href(
-                target.target_ref,
-                &[
-                    ("dtab", "works"),
-                    ("wview", "performance"),
-                    ("life_window", projection.window.as_str()),
-                    ("life_metric", projection.metric.as_str()),
-                    ("life_work", work.as_str()),
-                ],
+            let href = performance_href(
+                target,
+                projection,
+                chart_view,
+                trend_grain,
+                Some(work.as_str()),
+                list_context,
                 Some("creator-lifecycle"),
             );
             let association = match point.association_state {
@@ -2192,6 +2617,8 @@ fn performance_evidence(
 fn lifecycle_controls(
     target: &ObservationTarget,
     projection: &CreatorLifecycleProjection,
+    chart_view: LifeChartView,
+    trend_grain: LifeTrendGrain,
     list_context: TargetListContext<'_>,
 ) -> String {
     let windows = [
@@ -2205,16 +2632,16 @@ fn lifecycle_controls(
         } else {
             ""
         };
-        let href = list_context.drawer_href(
-            target.target_ref,
-            &[
-                ("dtab", "works"),
-                ("wview", "performance"),
-                ("life_window", window.as_str()),
-                ("life_metric", projection.metric.as_str()),
-            ],
-            Some("creator-lifecycle"),
-        );
+        let href_params = vec![
+            ("dtab", "works"),
+            ("wview", "performance"),
+            ("life_window", window.as_str()),
+            ("life_metric", projection.metric.as_str()),
+            ("life_chart", chart_view.as_str()),
+            ("life_grain", trend_grain.as_str()),
+        ];
+        let href =
+            list_context.drawer_href(target.target_ref, &href_params, Some("creator-lifecycle"));
         format!(r#"<a class="life-chip"{current} href="{href}">{label}</a>"#)
     })
     .collect::<String>();
@@ -2231,16 +2658,16 @@ fn lifecycle_controls(
         } else {
             ""
         };
-        let href = list_context.drawer_href(
-            target.target_ref,
-            &[
-                ("dtab", "works"),
-                ("wview", "performance"),
-                ("life_window", projection.window.as_str()),
-                ("life_metric", metric.as_str()),
-            ],
-            Some("creator-lifecycle"),
-        );
+        let href_params = vec![
+            ("dtab", "works"),
+            ("wview", "performance"),
+            ("life_window", projection.window.as_str()),
+            ("life_metric", metric.as_str()),
+            ("life_chart", chart_view.as_str()),
+            ("life_grain", trend_grain.as_str()),
+        ];
+        let href =
+            list_context.drawer_href(target.target_ref, &href_params, Some("creator-lifecycle"));
         format!(r#"<a class="life-chip"{current} href="{href}">{label}</a>"#)
     })
     .collect::<String>();
@@ -2252,19 +2679,20 @@ fn lifecycle_controls(
     )
 }
 
-fn lifecycle_chart(
+fn performance_distribution_chart(
     target: &ObservationTarget,
     projection: &CreatorLifecycleProjection,
+    chart_view: LifeChartView,
+    trend_grain: LifeTrendGrain,
     selected_work: Option<&str>,
     list_context: TargetListContext<'_>,
 ) -> String {
-    const WIDTH: f64 = 800.0;
-    const HEIGHT: f64 = 300.0;
-    const LEFT: f64 = 54.0;
-    // Keep the non-scaling hit ring inside the plot at the supported desktop drawer width.
-    const RIGHT: f64 = 36.0;
-    const TOP: f64 = 20.0;
-    const BOTTOM: f64 = 40.0;
+    const WIDTH: f64 = 980.0;
+    const HEIGHT: f64 = 470.0;
+    const LEFT: f64 = 62.0;
+    const RIGHT: f64 = 28.0;
+    const TOP: f64 = 28.0;
+    const BOTTOM: f64 = 54.0;
     let min_x = projection
         .points
         .first()
@@ -2276,16 +2704,36 @@ fn lifecycle_chart(
         .map(|point| point.published_at_epoch_ms)
         .unwrap_or(min_x);
     let x_span = (max_x - min_x).max(1) as f64;
+    let plot_width = WIDTH - LEFT - RIGHT;
+    let plot_height = HEIGHT - TOP - BOTTOM;
     let max_y = projection
         .points
         .iter()
-        .map(|point| (point.metric_value as f64).ln_1p())
+        .map(|point| point.metric_value as f64)
         .fold(0.0_f64, f64::max)
         .max(1.0);
     let x_for = |point: &CreatorLifecyclePoint| {
-        LEFT + (point.published_at_epoch_ms - min_x) as f64 / x_span * (WIDTH - LEFT - RIGHT)
+        if min_x == max_x {
+            LEFT + plot_width / 2.0
+        } else {
+            LEFT + (point.published_at_epoch_ms - min_x) as f64 / x_span * plot_width
+        }
     };
-    let y_for = |value: f64| TOP + (1.0 - value.ln_1p() / max_y) * (HEIGHT - TOP - BOTTOM);
+    let y_for = |value: f64| TOP + (1.0 - value / max_y) * plot_height;
+    let grid = (0..5)
+        .map(|index| {
+            let y = TOP + plot_height / 4.0 * index as f64;
+            let value = max_y * (1.0 - index as f64 / 4.0);
+            let compact = compact_metric(value);
+            let exact = exact_metric(value);
+            format!(
+                r#"<line class="life-trend-grid" x1="{LEFT}" y1="{y:.1}" x2="{}" y2="{y:.1}"/><text class="life-trend-axis" x="{}" y="{:.1}" text-anchor="end" aria-label="精确数值 {exact}"><title>精确数值 {exact}</title>{compact}</text>"#,
+                WIDTH - RIGHT,
+                LEFT - 12.0,
+                y + 4.0,
+            )
+        })
+        .collect::<String>();
     let points = projection
         .points
         .iter()
@@ -2303,42 +2751,55 @@ fn lifecycle_chart(
             } else {
                 ""
             };
-            let (association_class, association_label) = match point.association_state {
+            let association_label = match point.association_state {
                 CreatorLifecycleAssociation::DirectoryLinked => {
-                    (" life-point-directory", "来自主页作品目录，详情作者待确认")
+                    "来自主页作品目录，详情作者待确认"
                 }
                 CreatorLifecycleAssociation::AuthorConfirmed => {
-                    (" life-point-confirmed", "作者已确认")
+                    "作者已确认"
                 }
             };
-            let (new_class, new_label, new_ring) = if point.new_in_latest_patrol {
+            let (new_class, new_label, new_mark) = if point.new_in_latest_patrol {
                 (
                     " life-point-new",
                     "，最近一次巡查新增",
                     format!(
-                        r#"<circle class="life-point-new-ring" cx="{:.1}" cy="{:.1}" r="9" aria-hidden="true"/>"#,
-                        x_for(point),
-                        y_for(point.metric_value as f64),
+                        r#"<rect class="life-point-new-mark" x="{:.1}" y="{:.1}" width="6" height="6" aria-hidden="true"/>"#,
+                        x_for(point) + 6.0,
+                        y_for(point.metric_value as f64) - 11.0,
                     ),
                 )
             } else {
                 ("", "", String::new())
             };
+            let (discussion_class, discussion_label, discussion_ring) = point
+                .discussion_rate
+                .filter(|rate| *rate > 0.20)
+                .map(|rate| {
+                    (
+                        " life-point-high-discussion",
+                        format!("，评论／点赞 {:.0}%（高讨论率复核信号）", rate * 100.0),
+                        format!(
+                            r#"<circle class="life-point-high-discussion-ring" cx="{:.1}" cy="{:.1}" r="10" aria-hidden="true"/>"#,
+                            x_for(point),
+                            y_for(point.metric_value as f64),
+                        ),
+                    )
+                })
+                .unwrap_or(("", String::new(), String::new()));
             let title = point.title.as_deref().unwrap_or("标题未知");
             let work = point.work_public_ref.to_string();
-            let href = list_context.drawer_href(
-                target.target_ref,
-                &[
-                    ("dtab", "works"),
-                    ("wview", "performance"),
-                    ("life_window", projection.window.as_str()),
-                    ("life_metric", projection.metric.as_str()),
-                    ("life_work", work.as_str()),
-                ],
+            let href = performance_href(
+                target,
+                projection,
+                chart_view,
+                trend_grain,
+                Some(work.as_str()),
+                list_context,
                 Some("creator-lifecycle"),
             );
             format!(
-                r#"<a class="life-point{association_class}{new_class}{selected_class}" href="{href}" aria-label="{title}，{published}，{metric_label} {value}，{association_label}{new_label}"{current}>{new_ring}<circle class="life-point-hit" cx="{x:.1}" cy="{y:.1}" r="6" aria-hidden="true"/><circle class="life-point-visible" cx="{x:.1}" cy="{y:.1}" r="5" aria-hidden="true"/></a>"#,
+                r#"<a class="life-point{new_class}{discussion_class}{selected_class}" href="{href}" aria-label="{title}，{published}，{metric_label} {value}，{association_label}{new_label}{discussion_label}"{current}>{discussion_ring}{new_mark}<circle class="life-point-hit" cx="{x:.1}" cy="{y:.1}" r="7" aria-hidden="true"/><circle class="life-point-visible" cx="{x:.1}" cy="{y:.1}" r="4.6" aria-hidden="true"/></a>"#,
                 title = escape(title),
                 published = escape(&point.published_local_date),
                 metric_label = metric_label(projection.metric),
@@ -2358,26 +2819,28 @@ fn lifecycle_chart(
         .last()
         .map(|point| point.published_local_date.as_str())
         .unwrap_or("—");
-    let window_caption = match projection.window {
-        CreatorLifecycleWindow::Recent90Days => "UTC+08 近 90 个日历日（含首尾）",
-        CreatorLifecycleWindow::All => "UTC+08 全部合格历史",
-    };
+    let chart_switch = performance_chart_switch(
+        target,
+        projection,
+        selected_work,
+        LifeChartView::Distribution,
+        trend_grain,
+        list_context,
+    );
     format!(
-        r#"<figure class="life-figure">
-              <svg class="life-chart" viewBox="0 0 800 300" role="group" aria-labelledby="life-chart-title life-chart-desc">
-                <title id="life-chart-title">创作者作品生命周期散点图</title>
-                <desc id="life-chart-desc">横轴为合格作品发布时间，纵轴压缩互动量差距。每个点代表一篇当前可分析作品。</desc>
-                <line class="life-axis" x1="54" y1="260" x2="782" y2="260"/>
-                <line class="life-axis" x1="54" y1="20" x2="54" y2="260"/>
-                {points}
-                <text class="life-axis-copy" x="54" y="284">{start}</text>
-                <text class="life-axis-copy" x="782" y="284" text-anchor="end">{end}</text>
-                <text class="life-axis-copy" x="14" y="142" transform="rotate(-90 14 142)" text-anchor="middle">互动量</text>
-              </svg>
-              <figcaption class="life-caption"><span>作品发布时间 · {window_caption}</span><span>纵轴压缩差距，选中作品仍显示原始数值</span></figcaption>
-            </figure>"#,
+        r#"<div class="life-trend-head"><div><div class="life-trend-eyebrow">作品复核</div><h2>作品表现分布</h2><p>每个点是一篇当前可分析作品；横轴为发布时间，纵轴保持当前{metric}原始数值。</p></div><div class="life-chart-head-actions"><nav class="life-chart-switch" aria-label="图表视图">{chart_switch}</nav><span class="life-trend-grain">复核信号 · 高讨论率 &gt; 20%</span></div></div>
+            <div class="life-trend-legend" aria-label="分布图图例"><span><i class="life-legend-dot"></i>每个点代表一篇作品</span><span><i class="life-legend-ring"></i>高讨论率 &gt; 20%</span><span><i class="life-legend-new"></i>最近巡查新增</span></div>
+            <figure class="life-trend-figure"><svg class="life-trend-chart life-distribution-chart" viewBox="0 0 980 470" role="group" aria-labelledby="life-chart-title life-chart-desc"><title id="life-chart-title">创作者作品表现分布图</title><desc id="life-chart-desc">横轴为当前时间窗内合格作品的发布时间，纵轴为当前指标{metric}的原始数值。每个可交互点代表一篇作品。橙红外圈表示评论／点赞超过 20% 的复核信号；评论或点赞未知、或点赞为零的作品不参与该信号。</desc>{grid}<line class="life-axis" x1="{LEFT}" y1="{plot_bottom:.1}" x2="{plot_right:.1}" y2="{plot_bottom:.1}"/>{points}<text class="life-axis-copy" x="{LEFT}" y="{caption_y:.1}">{start}</text><text class="life-axis-copy" x="{plot_right:.1}" y="{caption_y:.1}" text-anchor="end">{end}</text><text class="life-axis-copy" x="17" y="{vertical_label_y:.1}" transform="rotate(-90 17 {vertical_label_y:.1})" text-anchor="middle">{metric}</text></svg></figure>"#,
+        metric = metric_label(projection.metric),
+        chart_switch = chart_switch,
+        grid = grid,
+        LEFT = LEFT,
+        plot_bottom = TOP + plot_height,
+        plot_right = WIDTH - RIGHT,
+        caption_y = HEIGHT - 24.0,
         start = escape(start),
         end = escape(end),
+        vertical_label_y = TOP + plot_height / 2.0,
     )
 }
 
@@ -2876,6 +3339,14 @@ pub(super) fn percent_encode_component(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compact_metric_uses_chinese_units_without_losing_exact_value() {
+        assert_eq!(compact_metric(9_439.0), "9,439");
+        assert_eq!(compact_metric(1_234_567.0), "123.5万");
+        assert_eq!(exact_metric(1_234_567.0), "1,234,567");
+        assert_eq!(exact_metric(12_345.5), "12,345.5");
+    }
 
     fn target(state: &str) -> ObservationTarget {
         ObservationTarget {
