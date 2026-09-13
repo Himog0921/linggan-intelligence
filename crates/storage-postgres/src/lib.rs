@@ -25,6 +25,71 @@ pub struct CommentFactStore {
     client: Client,
 }
 
+/// The largest page accepted by the current-comment read model.
+///
+/// This is a transport safety bound, not a statement about how many comments
+/// should be researched together.
+pub const CURRENT_COMMENT_VOICES_V0_MAX_LIMIT: i64 = 100;
+
+/// A bounded, offset-based request for the User Voices V0 read model.
+///
+/// Pagination belongs here instead of the HTTP layer so other callers cannot
+/// accidentally create an unbounded current-comment read.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CurrentCommentVoicesPageRequestV0 {
+    limit: i64,
+    offset: i64,
+}
+
+impl CurrentCommentVoicesPageRequestV0 {
+    pub fn new(limit: i64, offset: i64) -> Result<Self, StorageError> {
+        if !(1..=CURRENT_COMMENT_VOICES_V0_MAX_LIMIT).contains(&limit) {
+            return Err(StorageError::InvalidCurrentCommentVoicesLimit);
+        }
+        if offset < 0 {
+            return Err(StorageError::InvalidCurrentCommentVoicesOffset);
+        }
+        Ok(Self { limit, offset })
+    }
+
+    pub const fn limit(self) -> i64 {
+        self.limit
+    }
+
+    pub const fn offset(self) -> i64 {
+        self.offset
+    }
+}
+
+/// The immutable source record that supports the current comment text.
+///
+/// It is deliberately an Evidence relation, not a synthetic note URL, author,
+/// engagement count, or inferred work context.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentSourceEvidenceRelationV0 {
+    pub evidence_id: Uuid,
+    pub record_index: i32,
+}
+
+/// One current comment fact safely available to a User Voices V0 client.
+///
+/// `current_admitted_at` is Linggan's local admission time for the Current
+/// materialization. It is not a platform publication or observation time.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentVoiceV0 {
+    pub source_note_id: String,
+    pub text: String,
+    pub current_admitted_at: String,
+    pub source_evidence: CurrentCommentSourceEvidenceRelationV0,
+}
+
+/// One deterministically ordered page of current comment facts.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentVoicesPageV0 {
+    pub total: i64,
+    pub voices: Vec<CurrentCommentVoiceV0>,
+}
+
 impl CommentFactStore {
     /// Creates a store from a caller-managed PostgreSQL client.
     pub const fn new(client: Client) -> Self {
@@ -51,6 +116,83 @@ impl CommentFactStore {
             .batch_execute(COMMENT_FACT_STORAGE_V0_MIGRATION)
             .await
             .map_err(StorageError::Database)
+    }
+
+    /// Reads the current User Voices V0 projection without changing any table.
+    ///
+    /// The query deliberately joins only `comment_current_v0` and its backing
+    /// immutable Observation. Its stable order is local current-admission time,
+    /// then the source identity's note and comment IDs. The source comment ID
+    /// is used solely as a deterministic tie-breaker and is never returned by
+    /// this read model.
+    ///
+    /// `total` is calculated in the same PostgreSQL statement as the page, so
+    /// it describes the same statement snapshot as returned rows. A sentinel
+    /// row keeps that total available when an offset falls beyond the final
+    /// page; it is not materialized as a voice.
+    pub async fn list_current_comment_voices_v0(
+        &self,
+        workspace_id: &str,
+        page: CurrentCommentVoicesPageRequestV0,
+    ) -> Result<CurrentCommentVoicesPageV0, StorageError> {
+        if workspace_id.trim().is_empty() {
+            return Err(StorageError::BlankWorkspaceId);
+        }
+
+        let rows = self
+            .client
+            .query(
+                "WITH filtered AS ( \
+                   SELECT current_projection.note_id, current_projection.comment_id, \
+                          current_observation.source_text, current_observation.admitted_at, \
+                          current_observation.source_evidence_id, \
+                          current_observation.source_record_index \
+                     FROM comment_current_v0 AS current_projection \
+                     JOIN comment_observation_v0 AS current_observation \
+                       ON current_observation.workspace_id = current_projection.workspace_id \
+                      AND current_observation.platform = current_projection.platform \
+                      AND current_observation.note_id = current_projection.note_id \
+                      AND current_observation.comment_id = current_projection.comment_id \
+                      AND current_observation.id = current_projection.current_observation_id \
+                    WHERE current_projection.workspace_id = $1 \
+                 ), page AS ( \
+                   SELECT * FROM filtered \
+                    ORDER BY admitted_at ASC, note_id ASC, comment_id ASC \
+                    LIMIT $2 OFFSET $3 \
+                 ), total AS ( \
+                   SELECT count(*)::BIGINT AS total FROM filtered \
+                 ) \
+                 SELECT page.note_id, page.source_text, \
+                        to_char(page.admitted_at AT TIME ZONE 'UTC', \
+                          'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS current_admitted_at, \
+                        page.source_evidence_id, page.source_record_index, total.total \
+                   FROM total \
+                   LEFT JOIN page ON TRUE \
+                  ORDER BY page.admitted_at ASC NULLS LAST, page.note_id ASC NULLS LAST, \
+                           page.comment_id ASC NULLS LAST",
+                &[&workspace_id, &page.limit(), &page.offset()],
+            )
+            .await
+            .map_err(StorageError::Database)?;
+
+        let total = rows.first().map_or(0, |row| row.get(5));
+        let voices = rows
+            .into_iter()
+            .filter_map(|row| {
+                let source_note_id: Option<String> = row.get(0);
+                source_note_id.map(|source_note_id| CurrentCommentVoiceV0 {
+                    source_note_id,
+                    text: row.get(1),
+                    current_admitted_at: row.get(2),
+                    source_evidence: CurrentCommentSourceEvidenceRelationV0 {
+                        evidence_id: row.get(3),
+                        record_index: row.get(4),
+                    },
+                })
+            })
+            .collect();
+
+        Ok(CurrentCommentVoicesPageV0 { total, voices })
     }
 
     /// Validates then admits two producer packages atomically.
@@ -178,6 +320,9 @@ pub struct CommentFactAdmissionOutcomeV0 {
 /// Storage failures never include captured comment content or identifiers.
 #[derive(Debug)]
 pub enum StorageError {
+    BlankWorkspaceId,
+    InvalidCurrentCommentVoicesLimit,
+    InvalidCurrentCommentVoicesOffset,
     Preparation(EvidencePreparationError),
     Database(tokio_postgres::Error),
     SourceRecordIndexOutOfRange,
@@ -192,6 +337,15 @@ pub enum StorageError {
 impl fmt::Display for StorageError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::BlankWorkspaceId => write!(formatter, "workspace ID must not be blank"),
+            Self::InvalidCurrentCommentVoicesLimit => write!(
+                formatter,
+                "current comment voices limit must be between 1 and {CURRENT_COMMENT_VOICES_V0_MAX_LIMIT}"
+            ),
+            Self::InvalidCurrentCommentVoicesOffset => write!(
+                formatter,
+                "current comment voices offset must be zero or greater"
+            ),
             Self::Preparation(error) => {
                 write!(formatter, "comment evidence preparation failed: {error}")
             }
