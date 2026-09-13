@@ -3572,6 +3572,10 @@ struct MonitorRuleWire {
     task_contract_version: Option<String>,
     return_filter: Option<String>,
     return_sort: Option<String>,
+    /// 这次提交是在编辑哪一条口径（或 `new`）。**必须原样带回**：校验失败时服务端按查询串
+    /// 重建表单，丢了它面板就回落到「最早那条规则」，于是排序是人选的、版本号却是另一条
+    /// 规则的——人改完重试永远撞 `stale_revision`，而界面只说「版本已过期」。
+    rule_slot: Option<String>,
 }
 
 /// URL 上那个口径参数说的是哪一条规则。
@@ -3599,6 +3603,15 @@ fn monitor_rule_redirect(
     receipt_ref: Option<uuid::Uuid>,
 ) -> Redirect {
     let mut params = vec![format!("rule={}", form.target_ref)];
+    // 原样带回这次是在编辑哪一条。成功时回执会进一步把面板指向真正写进去的那条规则
+    // （见 `read_monitor_rule_panel`）；失败时没有回执，就靠这个参数留在同一个模式上。
+    if let Some(
+        slot @ ("new" | "most_liked" | "most_collected" | "most_commented" | "latest"
+        | "comprehensive" | "primary"),
+    ) = form.rule_slot.as_deref().map(str::trim)
+    {
+        params.push(format!("rule_slot={slot}"));
+    }
     if let Some(receipt_ref) = receipt_ref {
         params.push(format!("rule_receipt={receipt_ref}"));
     }

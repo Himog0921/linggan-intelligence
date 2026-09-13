@@ -237,6 +237,30 @@ pub async fn read_monitor_rule_panel(
     .bind(target_ref)
     .fetch_all(database.pool())
     .await?;
+    let receipt = read_receipt(database, target_ref, receipt_ref).await?;
+    // **刚跑完一条命令时，面板显示的就是它写的那条规则。**
+    //
+    // 回执只会出现在命令刚跑完的那次跳转里（抽屉上的链接一律不带它），所以它比 URL 上的
+    // 口径更准：新开一条成功之后 URL 上还写着 `rule_slot=new`，照它读就会显示成「再加一条」，
+    // 而人刚存的那条看不见——横幅说「已保存」，下面的表单却是另一条规则的设置。
+    let receipt_slot = match receipt
+        .as_ref()
+        .and_then(|receipt| receipt.applied_rule_revision_ref)
+    {
+        Some(revision_ref) => sqlx::query_scalar::<_, String>(
+            "SELECT rule.slot_key FROM collection_monitor_rule rule \
+             JOIN collection_monitor_rule_revision revision ON revision.rule_ref=rule.rule_ref \
+             WHERE revision.rule_revision_ref=$1 AND rule.retired_at IS NULL",
+        )
+        .bind(revision_ref)
+        .fetch_optional(database.pool())
+        .await?,
+        None => None,
+    };
+    let selection = match receipt_slot.as_deref() {
+        Some(slot) => MonitorRuleSelection::Slot(slot),
+        None => selection,
+    };
     // 选中哪一条：不指定就是最早那条（博主永远只有一条，关键词上是「管理巡查」的既有
     // 行为）；指定口径就是那一条；新开一条则谁也不读。
     let selected = match selection {
@@ -268,7 +292,6 @@ pub async fn read_monitor_rule_panel(
         })
         .map(|(value, _)| (*value).to_owned())
         .collect::<Vec<_>>();
-    let receipt = read_receipt(database, target_ref, receipt_ref).await?;
     Ok(MonitorRulePanelRead::Found(MonitorRulePanel {
         target_ref: target.try_get("target_ref")?,
         target_name: target.try_get("target_name")?,
@@ -402,6 +425,7 @@ pub fn render_monitor_rule_modal(
               <input type="hidden" name="target_ref" value="{target_ref}">
               <input type="hidden" name="expected_revision" value="{expected_revision}">
               <input type="hidden" name="idempotency_key" value="{idempotency_key}">
+              <input type="hidden" name="rule_slot" value="{rule_slot}">
               <input type="hidden" name="surface_key" value="{surface_key}">
               {ranking_hidden}
               <input type="hidden" name="task_contract_version" value="{task_contract_version}">
@@ -448,6 +472,16 @@ pub fn render_monitor_rule_modal(
         target_ref = panel.target_ref,
         expected_revision = form.expected_revision,
         idempotency_key = form.idempotency_key,
+        // 这个面板在编辑哪一条。**必须随表单往返**：校验失败时服务端按查询串重建表单，
+        // 排序会从 `rule_ranking_key` 回来，而版本号来自面板——面板若读错了规则，人改完
+        // 重试会永远撞 `stale_revision`，因为报的是另一条规则的版本号。
+        rule_slot = escape(
+            panel
+                .editing_slot
+                .as_deref()
+                .filter(|_| !is_new_rule(panel))
+                .unwrap_or("new")
+        ),
         surface_key = escape(&form.surface_key),
         task_contract_version = escape(&form.task_contract_version),
         return_filter = escape(return_filter),
@@ -1152,6 +1186,48 @@ mod sampling_policy_tests {
             "排序字段只能出现一次：新开一条时是 select，编辑时是 hidden"
         );
         assert!(html.contains(r#"<select id="ranking_key""#));
+    }
+
+    /// **表单必须把「在编辑哪一条」带回去。**
+    ///
+    /// 丢了它，校验失败后服务端按查询串重建表单：排序是人选的那个、版本号却来自「最早那条
+    /// 规则」——人改完重试永远撞 `stale_revision`，而界面只说「版本已过期」，看不出是因为
+    /// 报的是另一条规则的版本号。成功时也一样看不见刚存的那条。
+    #[test]
+    fn the_form_carries_which_rule_it_is_editing() {
+        let new_panel = keyword_panel("考研自习");
+        let new_form = MonitorRuleFormState::from_panel(&new_panel);
+        let new_html = render_monitor_rule_modal(
+            &new_panel,
+            &new_form,
+            None,
+            TargetListContext {
+                filter: None,
+                sort: None,
+                domain: None,
+            },
+        );
+        assert!(
+            new_html.contains(r#"<input type="hidden" name="rule_slot" value="new">"#),
+            "新开一条要带回 new，否则失败重试会变成改最早那条"
+        );
+
+        let edit_panel = keyword_panel_editing("考研自习::most_liked", "most_liked");
+        let edit_form = MonitorRuleFormState::from_panel(&edit_panel);
+        let edit_html = render_monitor_rule_modal(
+            &edit_panel,
+            &edit_form,
+            None,
+            TargetListContext {
+                filter: None,
+                sort: None,
+                domain: None,
+            },
+        );
+        assert!(
+            edit_html.contains(r#"<input type="hidden" name="rule_slot" value="most_liked">"#),
+            "编辑要带回这条规则自己的口径"
+        );
     }
 
     /// 编辑模式相反：排序只有 hidden 那一份。
