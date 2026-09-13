@@ -25,7 +25,7 @@ use linggan_observation::{
     CommentObservationDecisionV0, CurrentCommentFactV0, decide_comment_observation_v0,
 };
 use tokio::sync::Mutex;
-use tokio_postgres::{Client, NoTls, Transaction};
+use tokio_postgres::{Client, NoTls, Row, Transaction};
 use uuid::Uuid;
 
 /// The one greenfield migration required by Comment fact storage V0.
@@ -78,6 +78,9 @@ pub const COMMENT_RESEARCH_PLAN_PREVIEW_V0_DEFAULT_LIMIT: i64 = 50;
 /// Creation has the same explicit upper bound as the live scope preview. It
 /// is a safety bound for one confirmation, never an automatic schedule.
 pub const COMMENT_RESEARCH_RUN_PREPARATION_V1_MAX_LIMIT: i64 = 100;
+/// The maximum number of immutable local run records one read request may
+/// return. This bounds the records page without turning it into a scheduler.
+pub const COMMENT_RESEARCH_RUN_RECORDS_V1_MAX_LIMIT: i64 = 100;
 
 /// Backfill is intentionally bounded and local. It has no model, network, or
 /// worker dependency, and is never triggered by a User Voices read.
@@ -370,6 +373,72 @@ pub struct CurrentCommentResearchRunPreparationOutcomeV1 {
     pub concluded_excluded_total: i64,
     pub duplicate_input_excluded_total: i64,
     pub sources: Vec<CurrentCommentResearchPreparedSourceV1>,
+}
+
+/// A bounded read request for already-created local runs. It has no mutation,
+/// retry, cancellation, or execution controls.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchRunRecordsPageRequestV1 {
+    limit: i64,
+    offset: i64,
+}
+
+impl CurrentCommentResearchRunRecordsPageRequestV1 {
+    pub fn new(limit: i64, offset: i64) -> Result<Self, StorageError> {
+        if !(1..=COMMENT_RESEARCH_RUN_RECORDS_V1_MAX_LIMIT).contains(&limit) {
+            return Err(StorageError::InvalidCommentResearchRunRecordsLimit);
+        }
+        if offset < 0 {
+            return Err(StorageError::InvalidCommentResearchRunRecordsOffset);
+        }
+        Ok(Self { limit, offset })
+    }
+
+    pub const fn limit(self) -> i64 {
+        self.limit
+    }
+
+    pub const fn offset(self) -> i64 {
+        self.offset
+    }
+}
+
+/// Safe aggregate facts for one local run. It intentionally excludes every
+/// frozen text, fingerprint, locator, model strategy, and Analysis output.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchRunRecordV1 {
+    pub run_id: Uuid,
+    pub created_at: String,
+    pub execution_state: String,
+    pub frozen_item_total: i64,
+    pub awaiting_execution_total: i64,
+    pub blocked_needs_context_total: i64,
+    pub execution_excluded_total: i64,
+    pub finalized_conclusion_total: i64,
+    pub source_coverage_total: i64,
+}
+
+/// A page of immutable local run aggregates, ordered newest first.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchRunRecordsPageV1 {
+    pub total: i64,
+    pub runs: Vec<CurrentCommentResearchRunRecordV1>,
+}
+
+/// One user-readable reason distribution. The storage code keeps the stable
+/// code only long enough for the HTTP boundary to map it to Chinese copy.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchRunFailureReasonV1 {
+    pub failure_code: String,
+    pub item_total: i64,
+}
+
+/// Detail aggregates for one local run. This is still a read projection, not
+/// an execution plan or a route to any frozen input.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchRunRecordDetailV1 {
+    pub run: CurrentCommentResearchRunRecordV1,
+    pub failure_reasons: Vec<CurrentCommentResearchRunFailureReasonV1>,
 }
 
 #[derive(Clone, Debug)]
@@ -1189,6 +1258,168 @@ impl CommentFactStore {
         })
     }
 
+    /// Lists immutable local run aggregates newest first. Every projected
+    /// value is a count, a local creation time, or the public run reference;
+    /// the SELECT never reads or returns frozen input text, locators,
+    /// fingerprints, model strategy, or analysis output.
+    pub async fn list_current_comment_research_run_records_v1(
+        &self,
+        workspace_id: &str,
+        page: CurrentCommentResearchRunRecordsPageRequestV1,
+    ) -> Result<CurrentCommentResearchRunRecordsPageV1, StorageError> {
+        if workspace_id.trim().is_empty() {
+            return Err(StorageError::BlankWorkspaceId);
+        }
+
+        let client = self.client.lock().await;
+        let total = client
+            .query_one(
+                "SELECT count(*)::BIGINT FROM comment_research_run_v1 WHERE workspace_id = $1",
+                &[&workspace_id],
+            )
+            .await
+            .map_err(StorageError::Database)?
+            .get(0);
+        let rows = client
+            .query(
+                "WITH latest_event AS ( \
+                   SELECT DISTINCT ON (event.run_item_id) event.run_item_id, \
+                          event.execution_state, event.failure_code \
+                     FROM comment_research_run_item_event_v1 AS event \
+                    ORDER BY event.run_item_id, event.occurred_at DESC, event.id DESC \
+                 ), rollups AS ( \
+                   SELECT run.id, run.created_at, run.execution_state, \
+                          count(item.id)::BIGINT AS frozen_item_total, \
+                          count(item.id) FILTER ( \
+                            WHERE analysis.id IS NULL \
+                              AND COALESCE(latest_event.execution_state, item.execution_state) \
+                                IN ('prepared', 'queued', 'running', 'awaiting_recovery') \
+                          )::BIGINT AS awaiting_execution_total, \
+                          count(item.id) FILTER ( \
+                            WHERE analysis.id IS NULL \
+                              AND COALESCE(latest_event.execution_state, item.execution_state) = 'blocked' \
+                          )::BIGINT AS blocked_needs_context_total, \
+                          count(item.id) FILTER ( \
+                            WHERE analysis.id IS NULL \
+                              AND COALESCE(latest_event.execution_state, item.execution_state) \
+                                IN ('failed', 'timed_out', 'interrupted', 'cancelled') \
+                          )::BIGINT AS execution_excluded_total, \
+                          count(analysis.id)::BIGINT AS finalized_conclusion_total, \
+                          count(DISTINCT observation.note_id)::BIGINT AS source_coverage_total \
+                     FROM comment_research_run_v1 AS run \
+                LEFT JOIN comment_research_run_item_v1 AS item ON item.run_id = run.id \
+                LEFT JOIN latest_event ON latest_event.run_item_id = item.id \
+                LEFT JOIN comment_analysis_v1 AS analysis ON analysis.run_item_id = item.id \
+                LEFT JOIN comment_observation_v0 AS observation ON observation.id = item.comment_observation_id \
+                    WHERE run.workspace_id = $1 \
+                    GROUP BY run.id, run.created_at, run.execution_state \
+                 ) \
+                 SELECT id, \
+                        to_char(created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'), \
+                        execution_state, frozen_item_total, awaiting_execution_total, \
+                        blocked_needs_context_total, execution_excluded_total, \
+                        finalized_conclusion_total, source_coverage_total \
+                   FROM rollups \
+                  ORDER BY created_at DESC, id DESC \
+                  LIMIT $2 OFFSET $3",
+                &[&workspace_id, &page.limit(), &page.offset()],
+            )
+            .await
+            .map_err(StorageError::Database)?;
+        let runs = rows
+            .iter()
+            .map(current_comment_research_run_record_from_row_v1)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(CurrentCommentResearchRunRecordsPageV1 { total, runs })
+    }
+
+    /// Reads one local run's aggregate state and user-displayable reason
+    /// distribution. It intentionally has no RunItem identity or text route.
+    pub async fn get_current_comment_research_run_record_v1(
+        &self,
+        workspace_id: &str,
+        run_id: Uuid,
+    ) -> Result<Option<CurrentCommentResearchRunRecordDetailV1>, StorageError> {
+        if workspace_id.trim().is_empty() {
+            return Err(StorageError::BlankWorkspaceId);
+        }
+
+        let client = self.client.lock().await;
+        let row = client
+            .query_opt(
+                "WITH latest_event AS ( \
+                   SELECT DISTINCT ON (event.run_item_id) event.run_item_id, \
+                          event.execution_state, event.failure_code \
+                     FROM comment_research_run_item_event_v1 AS event \
+                    ORDER BY event.run_item_id, event.occurred_at DESC, event.id DESC \
+                 ) \
+                 SELECT run.id, \
+                        to_char(run.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'), \
+                        run.execution_state, \
+                        count(item.id)::BIGINT AS frozen_item_total, \
+                        count(item.id) FILTER ( \
+                          WHERE analysis.id IS NULL \
+                            AND COALESCE(latest_event.execution_state, item.execution_state) \
+                              IN ('prepared', 'queued', 'running', 'awaiting_recovery') \
+                        )::BIGINT AS awaiting_execution_total, \
+                        count(item.id) FILTER ( \
+                          WHERE analysis.id IS NULL \
+                            AND COALESCE(latest_event.execution_state, item.execution_state) = 'blocked' \
+                        )::BIGINT AS blocked_needs_context_total, \
+                        count(item.id) FILTER ( \
+                          WHERE analysis.id IS NULL \
+                            AND COALESCE(latest_event.execution_state, item.execution_state) \
+                              IN ('failed', 'timed_out', 'interrupted', 'cancelled') \
+                        )::BIGINT AS execution_excluded_total, \
+                        count(analysis.id)::BIGINT AS finalized_conclusion_total, \
+                        count(DISTINCT observation.note_id)::BIGINT AS source_coverage_total \
+                   FROM comment_research_run_v1 AS run \
+              LEFT JOIN comment_research_run_item_v1 AS item ON item.run_id = run.id \
+              LEFT JOIN latest_event ON latest_event.run_item_id = item.id \
+              LEFT JOIN comment_analysis_v1 AS analysis ON analysis.run_item_id = item.id \
+              LEFT JOIN comment_observation_v0 AS observation ON observation.id = item.comment_observation_id \
+                  WHERE run.workspace_id = $1 AND run.id = $2 \
+                  GROUP BY run.id, run.created_at, run.execution_state",
+                &[&workspace_id, &run_id],
+            )
+            .await
+            .map_err(StorageError::Database)?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let run = current_comment_research_run_record_from_row_v1(&row)?;
+        let reasons = client
+            .query(
+                "WITH latest_event AS ( \
+                   SELECT DISTINCT ON (event.run_item_id) event.run_item_id, event.failure_code \
+                     FROM comment_research_run_item_event_v1 AS event \
+                    ORDER BY event.run_item_id, event.occurred_at DESC, event.id DESC \
+                 ) \
+                 SELECT latest_event.failure_code, count(*)::BIGINT \
+                   FROM comment_research_run_item_v1 AS item \
+                   JOIN latest_event ON latest_event.run_item_id = item.id \
+                  WHERE item.workspace_id = $1 \
+                    AND item.run_id = $2 \
+                    AND latest_event.failure_code IS NOT NULL \
+                  GROUP BY latest_event.failure_code \
+                  ORDER BY count(*) DESC, latest_event.failure_code ASC",
+                &[&workspace_id, &run_id],
+            )
+            .await
+            .map_err(StorageError::Database)?;
+        let failure_reasons = reasons
+            .into_iter()
+            .map(|row| CurrentCommentResearchRunFailureReasonV1 {
+                failure_code: row.get(0),
+                item_total: row.get(1),
+            })
+            .collect();
+        Ok(Some(CurrentCommentResearchRunRecordDetailV1 {
+            run,
+            failure_reasons,
+        }))
+    }
+
     /// Returns source-backed work and related reply context for one current
     /// comment, or `None` when no complete, text-matching context capture has
     /// been admitted. This method performs no writes.
@@ -1786,6 +2017,8 @@ pub enum StorageError {
     InvalidCurrentCommentVoicesOffset,
     InvalidCommentResearchPlanPreviewLimit,
     InvalidCommentResearchRunPreparationLimit,
+    InvalidCommentResearchRunRecordsLimit,
+    InvalidCommentResearchRunRecordsOffset,
     InvalidCurrentCommentSourceRecordIndex,
     InvalidCommentDerivationMaterializationLimit,
     Preparation(EvidencePreparationError),
@@ -1829,6 +2062,14 @@ impl fmt::Display for StorageError {
             Self::InvalidCommentResearchRunPreparationLimit => write!(
                 formatter,
                 "comment research run preparation limit must be between 1 and {COMMENT_RESEARCH_RUN_PREPARATION_V1_MAX_LIMIT}"
+            ),
+            Self::InvalidCommentResearchRunRecordsLimit => write!(
+                formatter,
+                "comment research run records limit must be between 1 and {COMMENT_RESEARCH_RUN_RECORDS_V1_MAX_LIMIT}"
+            ),
+            Self::InvalidCommentResearchRunRecordsOffset => write!(
+                formatter,
+                "comment research run records offset must be zero or greater"
             ),
             Self::InvalidCurrentCommentSourceRecordIndex => write!(
                 formatter,
@@ -1906,6 +2147,26 @@ impl fmt::Display for StorageError {
 }
 
 impl std::error::Error for StorageError {}
+
+fn current_comment_research_run_record_from_row_v1(
+    row: &Row,
+) -> Result<CurrentCommentResearchRunRecordV1, StorageError> {
+    let execution_state: String = row.get(2);
+    if execution_state != "prepared" && execution_state != "blocked" {
+        return Err(StorageError::InvalidPersistedCurrent);
+    }
+    Ok(CurrentCommentResearchRunRecordV1 {
+        run_id: row.get(0),
+        created_at: row.get(1),
+        execution_state,
+        frozen_item_total: row.get(3),
+        awaiting_execution_total: row.get(4),
+        blocked_needs_context_total: row.get(5),
+        execution_excluded_total: row.get(6),
+        finalized_conclusion_total: row.get(7),
+        source_coverage_total: row.get(8),
+    })
+}
 
 async fn build_current_comment_research_context_pack_in_transaction_v1(
     transaction: &Transaction<'_>,

@@ -47,8 +47,8 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
       <main class="workspace" id="voices-main" tabindex="-1">
         <header class="page-heading">
           <div>
-            <p class="eyebrow">评论研究 · 清洗语料 V1</p>
-            <h1>用户原声</h1>
+            <p class="eyebrow" id="page-eyebrow">评论研究 · 清洗语料 V1</p>
+            <h1 id="page-title">用户原声</h1>
           </div>
           <div class="page-heading-actions">
             <button class="quiet-button" id="plan-preview-button" type="button" disabled aria-describedby="plan-preview-help">查看自动研究范围</button>
@@ -58,12 +58,12 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
 
         <div class="view-tabs" role="tablist" aria-label="评论研究视图">
           <button class="view-tab" type="button" role="tab" aria-selected="false" disabled>概览</button>
-          <button class="view-tab" type="button" role="tab" aria-selected="true">用户原声</button>
+          <button class="view-tab" id="voices-tab" type="button" role="tab" aria-selected="true">用户原声</button>
           <button class="view-tab" type="button" role="tab" aria-selected="false" disabled>用户问题</button>
           <button class="view-tab" type="button" role="tab" aria-selected="false" disabled>变化观察</button>
-          <button class="view-tab" type="button" role="tab" aria-selected="false" disabled>运行记录</button>
+          <button class="view-tab" id="run-records-tab" type="button" role="tab" aria-selected="false">运行记录</button>
         </div>
-        <p class="nav-note">其余视图尚未具备来源事实，本页不会用空白仪表盘代替。</p>
+        <p class="nav-note" id="unavailable-views-note">概览、用户问题和变化观察尚未具备来源事实，本页不会用空白仪表盘代替。</p>
 
         <form class="scope-panel" id="workspace-form" novalidate>
           <div>
@@ -118,6 +118,41 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
             <button class="quiet-button" id="previous-page" type="button" disabled>上一页</button>
             <span class="pagination-label" id="page-summary" aria-live="polite">未加载</span>
             <button class="quiet-button" id="next-page" type="button" disabled>下一页</button>
+          </nav>
+        </section>
+
+        <section class="run-records-view" id="run-records-view" aria-labelledby="run-records-title" hidden>
+          <div class="results-heading">
+            <div>
+              <h2 id="run-records-title">本地研究运行记录</h2>
+              <p class="run-records-intro">这里只记录本次怎样冻结输入与目前是否具备执行条件；它不展示评论结论或用户问题。</p>
+              <p class="run-records-intro">当前未配置执行器，尚未开始分析。</p>
+            </div>
+            <p class="result-count" id="run-records-count"></p>
+          </div>
+          <p class="status-message" id="run-records-status" role="status" aria-live="polite"></p>
+          <section class="empty-state run-records-empty" id="run-records-empty" aria-labelledby="run-records-empty-title" hidden>
+            <h3 id="run-records-empty-title">尚无待执行研究</h3>
+            <p>当前工作空间还没有通过明确确认创建的本地 Run。查看自动研究范围不会创建记录；当前版本也没有执行器。</p>
+          </section>
+          <div class="table-scroller" id="run-records-table-wrap" tabindex="0" aria-label="研究运行记录表格，可横向滚动" hidden>
+            <table class="run-records-table">
+              <thead>
+                <tr>
+                  <th scope="col">创建时间</th>
+                  <th scope="col">当前状态</th>
+                  <th scope="col">冻结输入</th>
+                  <th scope="col">来源作品</th>
+                  <th scope="col">查看</th>
+                </tr>
+              </thead>
+              <tbody id="run-records-body"></tbody>
+            </table>
+          </div>
+          <nav class="pagination" id="run-records-pagination" aria-label="运行记录分页" hidden>
+            <button class="quiet-button" id="previous-run-records-page" type="button" disabled>上一页</button>
+            <span class="pagination-label" id="run-records-page-summary" aria-live="polite">未加载</span>
+            <button class="quiet-button" id="next-run-records-page" type="button" disabled>下一页</button>
           </nav>
         </section>
       </main>
@@ -236,6 +271,35 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
       </section>
     </aside>
 
+    <aside class="drawer run-record-drawer" id="run-record-drawer" role="dialog" aria-modal="true" aria-labelledby="run-record-title" hidden>
+      <div class="drawer-header">
+        <h2 class="drawer-title" id="run-record-title">本次运行记录</h2>
+        <button class="icon-button" id="close-run-record" type="button" aria-label="关闭运行记录详情">×</button>
+      </div>
+      <section class="drawer-section" aria-labelledby="run-record-state-title">
+        <h3 id="run-record-state-title">当前状态</h3>
+        <p class="drawer-copy" id="run-record-state"></p>
+        <p class="context-field-note" id="run-record-execution-note"></p>
+      </section>
+      <section class="drawer-section" aria-labelledby="run-record-formation-title">
+        <h3 id="run-record-formation-title">这批怎样形成</h3>
+        <p class="drawer-copy" id="run-record-formation"></p>
+        <dl class="run-detail-totals" id="run-record-totals"></dl>
+      </section>
+      <section class="drawer-section" aria-labelledby="run-record-blocks-title">
+        <h3 id="run-record-blocks-title">阻断与未继续执行</h3>
+        <p class="context-field-note">需要补足上下文表示输入不能进入未来执行器，不是模型或执行失败。</p>
+        <div class="run-record-reasons" id="run-record-reasons" aria-live="polite"></div>
+      </section>
+      <section class="drawer-section" aria-labelledby="run-record-reference-title">
+        <h3 id="run-record-reference-title">Run 回执</h3>
+        <dl class="drawer-list">
+          <div><dt>本地运行参考</dt><dd class="mono" id="run-record-ref"></dd></div>
+          <div><dt>创建时间</dt><dd class="mono" id="run-record-created-at"></dd></div>
+        </dl>
+      </section>
+    </aside>
+
     <script>
       (() => {
         "use strict";
@@ -244,15 +308,21 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         const state = {
           workspaceId: "",
           filter: "available",
+          activeView: "voices",
           offset: 0,
           total: 0,
+          runRecordsOffset: 0,
+          runRecordsTotal: 0,
           currentVoice: null,
           lastTrigger: null,
           planLastTrigger: null,
+          runRecordLastTrigger: null,
           contextRequestToken: 0,
           contextPackRequestToken: 0,
           planRequestToken: 0,
           runPreparationRequestToken: 0,
+          runRecordsRequestToken: 0,
+          runRecordDetailRequestToken: 0,
           planPreviewPayload: null,
           runPreparedForCurrentPreview: false
         };
@@ -260,6 +330,11 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         const workspaceInput = document.getElementById("workspace-id");
         const voiceFilter = document.getElementById("voice-filter");
         const loadButton = document.getElementById("load-voices");
+        const pageEyebrow = document.getElementById("page-eyebrow");
+        const pageTitle = document.getElementById("page-title");
+        const unavailableViewsNote = document.getElementById("unavailable-views-note");
+        const voicesTab = document.getElementById("voices-tab");
+        const runRecordsTab = document.getElementById("run-records-tab");
         const previousButton = document.getElementById("previous-page");
         const nextButton = document.getElementById("next-page");
         const statusMessage = document.getElementById("status-message");
@@ -269,6 +344,16 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         const voicesBody = document.getElementById("voices-body");
         const resultCount = document.getElementById("result-count");
         const pageSummary = document.getElementById("page-summary");
+        const runRecordsView = document.getElementById("run-records-view");
+        const runRecordsStatus = document.getElementById("run-records-status");
+        const runRecordsCount = document.getElementById("run-records-count");
+        const runRecordsEmpty = document.getElementById("run-records-empty");
+        const runRecordsTableWrap = document.getElementById("run-records-table-wrap");
+        const runRecordsBody = document.getElementById("run-records-body");
+        const runRecordsPagination = document.getElementById("run-records-pagination");
+        const previousRunRecordsButton = document.getElementById("previous-run-records-page");
+        const nextRunRecordsButton = document.getElementById("next-run-records-page");
+        const runRecordsPageSummary = document.getElementById("run-records-page-summary");
         const drawer = document.getElementById("voice-drawer");
         const drawerBackdrop = document.getElementById("drawer-backdrop");
         const closeDrawerButton = document.getElementById("close-drawer");
@@ -294,6 +379,15 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         const cancelRunConfirmationButton = document.getElementById("cancel-run-confirmation");
         const confirmRunButton = document.getElementById("confirm-run-button");
         const runPreparationResult = document.getElementById("run-preparation-result");
+        const runRecordDrawer = document.getElementById("run-record-drawer");
+        const closeRunRecordButton = document.getElementById("close-run-record");
+        const runRecordState = document.getElementById("run-record-state");
+        const runRecordExecutionNote = document.getElementById("run-record-execution-note");
+        const runRecordFormation = document.getElementById("run-record-formation");
+        const runRecordTotals = document.getElementById("run-record-totals");
+        const runRecordReasons = document.getElementById("run-record-reasons");
+        const runRecordRef = document.getElementById("run-record-ref");
+        const runRecordCreatedAt = document.getElementById("run-record-created-at");
 
         function setStatus(message, kind) {
           statusMessage.textContent = message;
@@ -306,10 +400,12 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
 
         function setLoading(loading) {
           loadButton.disabled = loading;
-          loadButton.textContent = loading ? "正在加载…" : "加载用户原声";
+          loadButton.textContent = loading
+            ? "正在加载…"
+            : state.activeView === "runs" ? "加载运行记录" : "加载用户原声";
           previousButton.disabled = loading || state.offset === 0;
           nextButton.disabled = true;
-          planPreviewButton.disabled = loading || !state.workspaceId.trim();
+          planPreviewButton.disabled = loading || state.activeView !== "voices" || !state.workspaceId.trim();
         }
 
         function appendCell(row, label, content, className) {
@@ -380,6 +476,289 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           initialState.hidden = kind !== "initial";
           emptyState.hidden = kind !== "empty";
           results.hidden = kind !== "results";
+        }
+
+        function showRunRecordsView() {
+          initialState.hidden = true;
+          emptyState.hidden = true;
+          results.hidden = true;
+          runRecordsView.hidden = false;
+        }
+
+        function setRunRecordsStatus(message, kind) {
+          runRecordsStatus.textContent = message;
+          runRecordsStatus.dataset.state = kind || "";
+        }
+
+        function clearRunRecords() {
+          runRecordsBody.replaceChildren();
+          runRecordsCount.textContent = "";
+          runRecordsEmpty.hidden = true;
+          runRecordsTableWrap.hidden = true;
+          runRecordsPagination.hidden = true;
+          runRecordsPageSummary.textContent = "未加载";
+          previousRunRecordsButton.disabled = true;
+          nextRunRecordsButton.disabled = true;
+        }
+
+        function setRunRecordsLoading(loading) {
+          loadButton.disabled = loading;
+          loadButton.textContent = loading ? "正在读取…" : "加载运行记录";
+          previousRunRecordsButton.disabled = loading || state.runRecordsOffset === 0;
+          nextRunRecordsButton.disabled = true;
+        }
+
+        function isRunRecordsPayload(payload) {
+          return payload
+            && payload.pagination
+            && Number.isInteger(payload.pagination.total)
+            && Number.isInteger(payload.pagination.limit)
+            && Number.isInteger(payload.pagination.offset)
+            && Array.isArray(payload.runs)
+            && typeof payload.read_note === "string";
+        }
+
+        function isRunRecord(payload) {
+          return payload
+            && typeof payload.run_ref === "string"
+            && typeof payload.created_at === "string"
+            && typeof payload.run_state === "string"
+            && Number.isInteger(payload.frozen_input_total)
+            && Number.isInteger(payload.awaiting_execution_total)
+            && Number.isInteger(payload.blocked_needs_context_total)
+            && Number.isInteger(payload.execution_excluded_total)
+            && Number.isInteger(payload.finalized_conclusion_total)
+            && Number.isInteger(payload.source_coverage_total);
+        }
+
+        function runInputSummary(run) {
+          const parts = [`冻结 ${run.frozen_input_total} 条`];
+          if (run.awaiting_execution_total > 0) parts.push(`待执行 ${run.awaiting_execution_total} 条`);
+          if (run.blocked_needs_context_total > 0) parts.push(`上下文阻断 ${run.blocked_needs_context_total} 条`);
+          if (run.execution_excluded_total > 0) parts.push(`未继续执行 ${run.execution_excluded_total} 条`);
+          if (run.finalized_conclusion_total > 0) parts.push(`已记录最终状态 ${run.finalized_conclusion_total} 条`);
+          return parts.join(" · ");
+        }
+
+        function renderRunRecords(payload) {
+          clearRunRecords();
+          state.runRecordsTotal = payload.pagination.total;
+          state.runRecordsOffset = payload.pagination.offset;
+          const runs = payload.runs.filter(isRunRecord);
+          runRecordsCount.textContent = payload.pagination.total === 0
+            ? "尚无本地 Run"
+            : `共 ${payload.pagination.total} 个本地 Run`;
+          if (payload.pagination.total === 0) {
+            runRecordsEmpty.hidden = false;
+            setRunRecordsStatus("尚无待执行研究。自动研究范围预览不会创建记录。", "");
+            return;
+          }
+          for (const run of runs) {
+            const row = document.createElement("tr");
+            appendCell(row, "创建时间", run.created_at, "mono metadata");
+            appendCell(row, "当前状态", run.run_state, "fact-state context");
+            appendCell(row, "冻结输入", runInputSummary(run), "metadata");
+            appendCell(row, "来源作品", `${run.source_coverage_total} 个`, "metadata");
+            const actionCell = document.createElement("td");
+            actionCell.dataset.label = "查看";
+            const action = document.createElement("button");
+            action.className = "detail-button";
+            action.type = "button";
+            action.textContent = "查看本次记录";
+            action.addEventListener("click", () => openRunRecordDrawer(run.run_ref, action));
+            actionCell.append(action);
+            row.append(actionCell);
+            runRecordsBody.append(row);
+          }
+          runRecordsTableWrap.hidden = false;
+          runRecordsPagination.hidden = false;
+          const start = runs.length === 0 ? 0 : payload.pagination.offset + 1;
+          const end = payload.pagination.offset + runs.length;
+          runRecordsPageSummary.textContent = runs.length === 0 ? "没有更多记录" : `${start}-${end} / ${payload.pagination.total}`;
+          previousRunRecordsButton.disabled = payload.pagination.offset === 0;
+          nextRunRecordsButton.disabled = payload.pagination.offset + runs.length >= payload.pagination.total;
+          setRunRecordsStatus(payload.read_note, "");
+        }
+
+        async function loadRunRecords(offset, trigger) {
+          const workspaceId = state.workspaceId.trim();
+          showRunRecordsView();
+          if (!workspaceId) {
+            clearRunRecords();
+            setRunRecordsStatus("请先输入并确认工作空间 ID。当前没有请求运行记录。", "error");
+            workspaceInput.focus();
+            return;
+          }
+          state.runRecordLastTrigger = trigger || document.activeElement;
+          const requestToken = state.runRecordsRequestToken + 1;
+          state.runRecordsRequestToken = requestToken;
+          setRunRecordsLoading(true);
+          setRunRecordsStatus("正在只读加载本地运行记录；不会启动分析…", "loading");
+          try {
+            const parameters = new URLSearchParams({
+              workspace_id: workspaceId,
+              limit: String(pageLimit),
+              offset: String(offset)
+            });
+            const response = await fetch(`/api/v0/comment-research/runs?${parameters.toString()}`, {
+              headers: { "Accept": "application/json" },
+              credentials: "same-origin"
+            });
+            const payload = await response.json().catch(() => null);
+            if (requestToken !== state.runRecordsRequestToken || state.activeView !== "runs") return;
+            if (!response.ok || !isRunRecordsPayload(payload) || !payload.runs.every(isRunRecord)) {
+              throw new Error(errorMessage(payload));
+            }
+            renderRunRecords(payload);
+          } catch (error) {
+            if (requestToken !== state.runRecordsRequestToken || state.activeView !== "runs") return;
+            clearRunRecords();
+            setRunRecordsStatus(
+              error instanceof Error ? error.message : "无法读取本地运行记录。请稍后重试。",
+              "error"
+            );
+          } finally {
+            if (requestToken === state.runRecordsRequestToken) setRunRecordsLoading(false);
+          }
+        }
+
+        function isRunRecordDetailPayload(payload) {
+          return payload
+            && isRunRecord(payload.run)
+            && typeof payload.formation_note === "string"
+            && typeof payload.execution_note === "string"
+            && Array.isArray(payload.blocked_or_failure_reasons);
+        }
+
+        function appendRunDetailTotal(label, value, detail) {
+          const item = document.createElement("div");
+          const term = document.createElement("dt");
+          const definition = document.createElement("dd");
+          term.textContent = label;
+          definition.textContent = String(value);
+          item.append(term, definition);
+          if (detail) {
+            const note = document.createElement("p");
+            note.className = "plan-total-note";
+            note.textContent = detail;
+            item.append(note);
+          }
+          runRecordTotals.append(item);
+        }
+
+        function renderRunRecordDetail(payload) {
+          const run = payload.run;
+          runRecordState.textContent = run.run_state;
+          runRecordExecutionNote.textContent = payload.execution_note;
+          runRecordFormation.textContent = payload.formation_note;
+          runRecordRef.textContent = run.run_ref;
+          runRecordCreatedAt.textContent = run.created_at;
+          runRecordTotals.replaceChildren();
+          appendRunDetailTotal("冻结输入", run.frozen_input_total);
+          appendRunDetailTotal("待执行", run.awaiting_execution_total, "当前没有执行器，尚未开始分析");
+          appendRunDetailTotal("上下文阻断", run.blocked_needs_context_total, "阻断不是执行失败");
+          appendRunDetailTotal("未继续执行", run.execution_excluded_total);
+          appendRunDetailTotal("已记录最终状态", run.finalized_conclusion_total);
+          appendRunDetailTotal("来源作品覆盖", run.source_coverage_total);
+          runRecordReasons.replaceChildren();
+          if (payload.blocked_or_failure_reasons.length === 0) {
+            const note = document.createElement("p");
+            note.className = "context-field-note";
+            note.textContent = "当前没有阻断或未继续执行原因。";
+            runRecordReasons.append(note);
+            return;
+          }
+          for (const reason of payload.blocked_or_failure_reasons) {
+            if (!reason || typeof reason.reason !== "string" || !Number.isInteger(reason.item_total)) continue;
+            const item = document.createElement("p");
+            item.className = "run-record-reason";
+            item.textContent = `${reason.reason}：${reason.item_total} 条`;
+            runRecordReasons.append(item);
+          }
+        }
+
+        async function loadRunRecordDetail(runRef, requestToken) {
+          const parameters = new URLSearchParams({ workspace_id: state.workspaceId.trim() });
+          try {
+            const response = await fetch(`/api/v0/comment-research/runs/${encodeURIComponent(runRef)}?${parameters.toString()}`, {
+              headers: { "Accept": "application/json" },
+              credentials: "same-origin"
+            });
+            const payload = await response.json().catch(() => null);
+            if (requestToken !== state.runRecordDetailRequestToken || runRecordDrawer.hidden) return;
+            if (!response.ok || !isRunRecordDetailPayload(payload)) {
+              throw new Error(errorMessage(payload));
+            }
+            renderRunRecordDetail(payload);
+          } catch (error) {
+            if (requestToken !== state.runRecordDetailRequestToken || runRecordDrawer.hidden) return;
+            runRecordState.textContent = "无法读取本次运行记录";
+            runRecordExecutionNote.textContent = error instanceof Error ? error.message : "请返回运行记录后重试。";
+            runRecordFormation.textContent = "当前没有写入、重试或执行任何研究。";
+            runRecordTotals.replaceChildren();
+            runRecordReasons.replaceChildren();
+            runRecordRef.textContent = runRef;
+            runRecordCreatedAt.textContent = "未取得";
+          }
+        }
+
+        function openRunRecordDrawer(runRef, trigger) {
+          state.runRecordLastTrigger = trigger;
+          if (!drawer.hidden) {
+            state.contextRequestToken += 1;
+            drawer.hidden = true;
+          }
+          if (!planPreviewDrawer.hidden) {
+            state.planRequestToken += 1;
+            planPreviewDrawer.hidden = true;
+          }
+          drawerBackdrop.hidden = false;
+          runRecordDrawer.hidden = false;
+          runRecordState.textContent = "正在读取本次冻结记录…";
+          runRecordExecutionNote.textContent = "这不会启动分析或调用模型。";
+          runRecordFormation.textContent = "";
+          runRecordTotals.replaceChildren();
+          runRecordReasons.replaceChildren();
+          runRecordRef.textContent = runRef;
+          runRecordCreatedAt.textContent = "正在读取…";
+          const requestToken = state.runRecordDetailRequestToken + 1;
+          state.runRecordDetailRequestToken = requestToken;
+          closeRunRecordButton.focus();
+          loadRunRecordDetail(runRef, requestToken);
+        }
+
+        function closeRunRecordDrawer() {
+          state.runRecordDetailRequestToken += 1;
+          runRecordDrawer.hidden = true;
+          if (drawer.hidden && planPreviewDrawer.hidden) drawerBackdrop.hidden = true;
+          if (state.runRecordLastTrigger instanceof HTMLElement) {
+            state.runRecordLastTrigger.focus();
+          }
+        }
+
+        function activateView(view, trigger) {
+          if (state.activeView === view) return;
+          state.activeView = view;
+          state.runRecordsRequestToken += 1;
+          voicesTab.setAttribute("aria-selected", view === "voices" ? "true" : "false");
+          runRecordsTab.setAttribute("aria-selected", view === "runs" ? "true" : "false");
+          voiceFilter.disabled = view === "runs";
+          pageEyebrow.textContent = view === "runs" ? "评论研究 · 本地 Run V1" : "评论研究 · 清洗语料 V1";
+          pageTitle.textContent = view === "runs" ? "运行记录" : "用户原声";
+          unavailableViewsNote.textContent = view === "runs"
+            ? "概览、用户问题和变化观察尚未具备来源事实；运行记录只读取本地冻结批次。"
+            : "概览、用户问题和变化观察尚未具备来源事实，本页不会用空白仪表盘代替。";
+          planPreviewButton.disabled = view !== "voices" || !state.workspaceId.trim();
+          if (view === "runs") {
+            loadRunRecords(0, trigger);
+          } else {
+            runRecordsView.hidden = true;
+            if (state.workspaceId.trim()) {
+              loadVoices(0, trigger);
+            } else {
+              setVisibleState("initial");
+            }
+          }
         }
 
         function errorMessage(response) {
@@ -1106,7 +1485,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           state.planRequestToken += 1;
           state.runPreparationRequestToken += 1;
           planPreviewDrawer.hidden = true;
-          if (drawer.hidden) drawerBackdrop.hidden = true;
+          if (drawer.hidden && runRecordDrawer.hidden) drawerBackdrop.hidden = true;
           if (state.planLastTrigger instanceof HTMLElement) {
             state.planLastTrigger.focus();
           }
@@ -1123,6 +1502,10 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           if (!drawer.hidden) {
             state.contextRequestToken += 1;
             drawer.hidden = true;
+          }
+          if (!runRecordDrawer.hidden) {
+            state.runRecordDetailRequestToken += 1;
+            runRecordDrawer.hidden = true;
           }
           planPreviewScope.value = state.filter;
           drawerBackdrop.hidden = false;
@@ -1172,6 +1555,10 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
             state.planRequestToken += 1;
             planPreviewDrawer.hidden = true;
           }
+          if (!runRecordDrawer.hidden) {
+            state.runRecordDetailRequestToken += 1;
+            runRecordDrawer.hidden = true;
+          }
           document.getElementById("drawer-research-expression").textContent = voice.research_text;
           document.getElementById("drawer-original-voice").textContent = "正在按当前来源证据读取原始采集原声…";
           document.getElementById("drawer-note-id").textContent = voice.source_note_id;
@@ -1192,7 +1579,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           clearContextPackPreview();
           state.currentVoice = null;
           drawer.hidden = true;
-          if (planPreviewDrawer.hidden) drawerBackdrop.hidden = true;
+          if (planPreviewDrawer.hidden && runRecordDrawer.hidden) drawerBackdrop.hidden = true;
           if (state.lastTrigger instanceof HTMLElement) {
             state.lastTrigger.focus();
           }
@@ -1202,10 +1589,18 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           event.preventDefault();
           state.workspaceId = workspaceInput.value.trim();
           state.filter = voiceFilter.value;
-          loadVoices(0, loadButton);
+          if (state.activeView === "runs") {
+            loadRunRecords(0, loadButton);
+          } else {
+            loadVoices(0, loadButton);
+          }
         });
         previousButton.addEventListener("click", () => loadVoices(Math.max(0, state.offset - pageLimit), previousButton));
         nextButton.addEventListener("click", () => loadVoices(state.offset + pageLimit, nextButton));
+        previousRunRecordsButton.addEventListener("click", () => loadRunRecords(Math.max(0, state.runRecordsOffset - pageLimit), previousRunRecordsButton));
+        nextRunRecordsButton.addEventListener("click", () => loadRunRecords(state.runRecordsOffset + pageLimit, nextRunRecordsButton));
+        voicesTab.addEventListener("click", () => activateView("voices", voicesTab));
+        runRecordsTab.addEventListener("click", () => activateView("runs", runRecordsTab));
         planPreviewButton.addEventListener("click", () => openPlanPreview(planPreviewButton));
         contextPackButton.addEventListener("click", loadContextPack);
         planPreviewForm.addEventListener("submit", (event) => {
@@ -1217,9 +1612,12 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         confirmRunButton.addEventListener("click", submitRunPreparation);
         closeDrawerButton.addEventListener("click", closeDrawer);
         closePlanPreviewButton.addEventListener("click", closePlanPreview);
+        closeRunRecordButton.addEventListener("click", closeRunRecordDrawer);
         drawerBackdrop.addEventListener("click", () => {
           if (!planPreviewDrawer.hidden) {
             closePlanPreview();
+          } else if (!runRecordDrawer.hidden) {
+            closeRunRecordDrawer();
           } else {
             closeDrawer();
           }
@@ -1228,6 +1626,8 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           if (event.key === "Escape") {
             if (!planPreviewDrawer.hidden) {
               closePlanPreview();
+            } else if (!runRecordDrawer.hidden) {
+              closeRunRecordDrawer();
             } else if (!drawer.hidden) {
               closeDrawer();
             }
@@ -1271,6 +1671,14 @@ mod tests {
         assert!(USER_VOICES_PAGE_V0_HTML.contains("待执行，尚未开始分析"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("不会调用模型、不生成结论、不扣费"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("/api/v0/comment-research/runs"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("本地研究运行记录"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("尚无待执行研究"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("待执行，尚未开始分析"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("未配置执行器，尚未开始分析"));
+        assert!(
+            USER_VOICES_PAGE_V0_HTML
+                .contains("/api/v0/comment-research/runs/${encodeURIComponent(runRef)}")
+        );
         let run_submission = USER_VOICES_PAGE_V0_HTML
             .split("async function submitRunPreparation()")
             .nth(1)

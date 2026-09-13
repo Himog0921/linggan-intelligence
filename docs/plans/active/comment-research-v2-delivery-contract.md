@@ -197,6 +197,8 @@ P3 执行基础 V1 现追加了 append-only 的 Run/RunItem 输入快照、运�
 
 P3 运行准备 V1 现提供显式本地 `POST /api/v0/comment-research/runs`。它在同一数据库事务中重新计算来源轮换范围，忽略任何客户端候选或 Evidence ID，组装并冻结 Context Pack，再创建 Run、RunItem 与初始 `prepared` / `blocked` event。可选的 preview 摘要只用于报告 `scope_refreshed`，不能授权候选；用户原声页的确认流刻意只提交工作空间、范围和上限，完全不提交候选清单。当前 fingerprint 下的 `success` / `no_signal` 会被排除；历史未完成、取消和暂态失败 RunItem 不会被当成已研究。同一新 Run 的等价 semantic input 只冻结一次。响应只说明 `prepared_for_execution`、blocked/awaiting/excluded 数与最终来源分布，不投影输入文本、fingerprint、内部 identity 或模型数据。`0005` 是前向约束扩展，使初始 event 可精确表示 `prepared` 而不是伪称 queued。用户原声页在“自动研究范围”抽屉内提供明确确认：候选大于零才可准备，确认前说明当前范围会被重新核对、预览可能更新、只会创建待执行研究，且当前没有执行器、不会调用模型/生成结论/扣费。成功回执显示 Run ref、最终冻结数、来源覆盖与范围重新核对事实，原声表仍保持未研究；失败可回到预览。它仍没有队列、worker、provider、模型调用、token/费用记录或真实研究结果；完整隔离 HTTP/PostgreSQL 与页面静态合同证明见 [`comment-research-run-preparation-v1.md`](../../proofs/comment-research-run-preparation-v1.md)。
 
+P3 运行记录 V1 已启用同一用户原声页面的「运行记录」tab，并新增严格只读的 `GET /api/v0/comment-research/runs` 与 `GET /api/v0/comment-research/runs/{run_ref}`。列表和详情只投影 public Run ref、创建时间、冻结/待执行/上下文阻断/未继续执行/已记录最终状态的聚合数及来源作品覆盖；详情把阻断原因转换为用户可读语句，明确“需要补足上下文”不是执行失败。读取 SQL 从 Run、RunItem、最新 event 和存在的 Conclusion 计算聚合，但不返回任何评论正文、冻结 Context Pack、fingerprint、Evidence/Derivation/Observation ID、模型策略或结构化输出。页面明确当前未配置执行器、尚未开始分析；它不创建、重试、取消、调模型或修改评论。完整隔离 HTTP/PostgreSQL 与页面静态合同证明见 [`comment-research-run-records-v1.md`](../../proofs/comment-research-run-records-v1.md)。
+
 ### P4：问题组织与结果页
 
 交付：原子语义、向量接缝、候选召回、稳定 Problem、问题详情与覆盖口径、结果版本和证据回溯。算法计算与 LLM 复核必须分开；不要求人工逐条标注。

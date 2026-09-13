@@ -10,10 +10,10 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Query, State, rejection::JsonRejection},
+    extract::{Path, Query, State, rejection::JsonRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::get,
 };
 use linggan_contracts::ContextTextAvailabilityV0;
 use linggan_domain::comment_research::{
@@ -32,7 +32,9 @@ use linggan_storage_postgres::{
     CurrentCommentRelatedReplyV0, CurrentCommentResearchPlanPreviewRequestV0,
     CurrentCommentResearchPlanPreviewV0, CurrentCommentResearchPreparedSourceV1,
     CurrentCommentResearchPreviewCandidateV0, CurrentCommentResearchPreviewSourceV0,
-    CurrentCommentResearchRunPreparationOutcomeV1, CurrentCommentResearchRunPreparationRequestV1,
+    CurrentCommentResearchRunFailureReasonV1, CurrentCommentResearchRunPreparationOutcomeV1,
+    CurrentCommentResearchRunPreparationRequestV1, CurrentCommentResearchRunRecordDetailV1,
+    CurrentCommentResearchRunRecordV1, CurrentCommentResearchRunRecordsPageRequestV1,
     CurrentCommentResearchScopeCandidateSummaryV1, CurrentCommentSourceEvidenceRelationV0,
     CurrentCommentVoiceFilterV1, CurrentCommentVoiceV0, CurrentCommentVoicesPageRequestV0,
     CurrentCommentWorkContextV0, StorageError,
@@ -62,7 +64,12 @@ pub fn comment_research_router_v0(store: Arc<CommentFactStore>) -> Router {
         )
         .route(
             "/api/v0/comment-research/runs",
-            post(prepare_current_comment_research_run_v1),
+            get(list_current_comment_research_run_records_v1)
+                .post(prepare_current_comment_research_run_v1),
+        )
+        .route(
+            "/api/v0/comment-research/runs/{run_ref}",
+            get(get_current_comment_research_run_record_v1),
         )
         .route(
             "/api/v0/comment-research/voices/context",
@@ -460,6 +467,173 @@ fn preview_summary_differs_from_prepared_scope(
         })
         .collect::<Vec<_>>()
         != outcome.scoped_candidates
+}
+
+/// This endpoint reads only aggregate facts from immutable local Run records.
+/// It has no action that can queue, retry, cancel, invoke, or configure an
+/// executor.
+#[derive(Debug, Deserialize)]
+struct CurrentCommentResearchRunRecordsQueryV1 {
+    workspace_id: Option<String>,
+    limit: Option<String>,
+    offset: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct CurrentCommentResearchRunRecordsResponseV1 {
+    pagination: CurrentCommentResearchRunRecordsPaginationDtoV1,
+    runs: Vec<CurrentCommentResearchRunRecordDtoV1>,
+    read_note: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct CurrentCommentResearchRunRecordsPaginationDtoV1 {
+    total: i64,
+    limit: i64,
+    offset: i64,
+}
+
+/// Every field here is deliberately a public aggregate or the public Run
+/// reference. The DTO must never grow into a frozen-input or model-output API.
+#[derive(Debug, Serialize)]
+struct CurrentCommentResearchRunRecordDtoV1 {
+    run_ref: String,
+    created_at: String,
+    run_state: &'static str,
+    frozen_input_total: i64,
+    awaiting_execution_total: i64,
+    blocked_needs_context_total: i64,
+    execution_excluded_total: i64,
+    finalized_conclusion_total: i64,
+    source_coverage_total: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct CurrentCommentResearchRunRecordDetailResponseV1 {
+    run: CurrentCommentResearchRunRecordDtoV1,
+    formation_note: &'static str,
+    blocked_or_failure_reasons: Vec<CurrentCommentResearchRunReasonDtoV1>,
+    execution_note: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct CurrentCommentResearchRunReasonDtoV1 {
+    reason: &'static str,
+    item_total: i64,
+}
+
+impl From<CurrentCommentResearchRunRecordV1> for CurrentCommentResearchRunRecordDtoV1 {
+    fn from(run: CurrentCommentResearchRunRecordV1) -> Self {
+        let run_state = if run.finalized_conclusion_total > 0 {
+            "已记录最终状态"
+        } else if run.awaiting_execution_total > 0 {
+            "待执行，尚未开始分析"
+        } else if run.blocked_needs_context_total > 0 {
+            "等待补足上下文"
+        } else if run.execution_excluded_total > 0 {
+            "本次没有可继续执行的输入"
+        } else if run.execution_state == "blocked" {
+            "等待补足上下文"
+        } else {
+            "已冻结，等待执行状态更新"
+        };
+        Self {
+            run_ref: run.run_id.to_string(),
+            created_at: run.created_at,
+            run_state,
+            frozen_input_total: run.frozen_item_total,
+            awaiting_execution_total: run.awaiting_execution_total,
+            blocked_needs_context_total: run.blocked_needs_context_total,
+            execution_excluded_total: run.execution_excluded_total,
+            finalized_conclusion_total: run.finalized_conclusion_total,
+            source_coverage_total: run.source_coverage_total,
+        }
+    }
+}
+
+impl From<CurrentCommentResearchRunFailureReasonV1> for CurrentCommentResearchRunReasonDtoV1 {
+    fn from(reason: CurrentCommentResearchRunFailureReasonV1) -> Self {
+        let reason_text = match reason.failure_code.as_str() {
+            "needs_context_insufficient" => "需要补足上下文（阻断，不是执行失败）",
+            _ => "尚未具备继续执行条件",
+        };
+        Self {
+            reason: reason_text,
+            item_total: reason.item_total,
+        }
+    }
+}
+
+async fn list_current_comment_research_run_records_v1(
+    State(store): State<Arc<CommentFactStore>>,
+    Query(query): Query<CurrentCommentResearchRunRecordsQueryV1>,
+) -> Result<Json<CurrentCommentResearchRunRecordsResponseV1>, ApiError> {
+    let workspace_id = query
+        .workspace_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(ApiError::InvalidRequest {
+            message: "workspace_id is required",
+        })?;
+    let limit = parse_i64_parameter(query.limit, "limit", USER_VOICES_V0_DEFAULT_LIMIT)?;
+    let offset = parse_i64_parameter(query.offset, "offset", 0)?;
+    let page = CurrentCommentResearchRunRecordsPageRequestV1::new(limit, offset)
+        .map_err(ApiError::from_storage_input_error)?;
+    let result = store
+        .list_current_comment_research_run_records_v1(&workspace_id, page)
+        .await
+        .map_err(ApiError::from_storage_read_error)?;
+    Ok(Json(CurrentCommentResearchRunRecordsResponseV1 {
+        pagination: CurrentCommentResearchRunRecordsPaginationDtoV1 {
+            total: result.total,
+            limit,
+            offset,
+        },
+        runs: result
+            .runs
+            .into_iter()
+            .map(CurrentCommentResearchRunRecordDtoV1::from)
+            .collect(),
+        read_note: "本页只读取已冻结的本地运行记录；当前未配置执行器，不会调用模型或生成结论。",
+    }))
+}
+
+async fn get_current_comment_research_run_record_v1(
+    State(store): State<Arc<CommentFactStore>>,
+    Path(run_ref): Path<String>,
+    Query(query): Query<CurrentCommentResearchRunRecordsQueryV1>,
+) -> Result<Json<CurrentCommentResearchRunRecordDetailResponseV1>, ApiError> {
+    let workspace_id = query
+        .workspace_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(ApiError::InvalidRequest {
+            message: "workspace_id is required",
+        })?;
+    let run_id = Uuid::parse_str(&run_ref).map_err(|_| ApiError::InvalidRequest {
+        message: "run_ref must be a UUID",
+    })?;
+    let Some(detail) = store
+        .get_current_comment_research_run_record_v1(&workspace_id, run_id)
+        .await
+        .map_err(ApiError::from_storage_read_error)?
+    else {
+        return Err(ApiError::RunNotFound);
+    };
+    Ok(Json(run_record_detail_response_v1(detail)))
+}
+
+fn run_record_detail_response_v1(
+    detail: CurrentCommentResearchRunRecordDetailV1,
+) -> CurrentCommentResearchRunRecordDetailResponseV1 {
+    CurrentCommentResearchRunRecordDetailResponseV1 {
+        run: detail.run.into(),
+        formation_note: "这批输入在一次明确确认后按当时的当前语料重新核对并冻结；它不是页面逐条选择，也不是评论结论或用户问题。",
+        blocked_or_failure_reasons: detail
+            .failure_reasons
+            .into_iter()
+            .map(CurrentCommentResearchRunReasonDtoV1::from)
+            .collect(),
+        execution_note: "当前未配置执行器，尚未开始分析。本页只读取记录，不会重试、取消、调用模型或修改评论。",
+    }
 }
 
 fn parse_user_voices_filter(raw: Option<String>) -> Result<CurrentCommentVoiceFilterV1, ApiError> {
@@ -917,6 +1091,7 @@ fn parse_i64_parameter(
 enum ApiError {
     InvalidRequest { message: &'static str },
     CurrentVoiceNotFound,
+    RunNotFound,
     NoCurrentCandidates,
     RunPreparationFailed,
     ReadFailed,
@@ -940,6 +1115,12 @@ impl ApiError {
             StorageError::InvalidCommentResearchRunPreparationLimit => Self::InvalidRequest {
                 message: "limit must be between 1 and 100",
             },
+            StorageError::InvalidCommentResearchRunRecordsLimit => Self::InvalidRequest {
+                message: "limit must be between 1 and 100",
+            },
+            StorageError::InvalidCommentResearchRunRecordsOffset => Self::InvalidRequest {
+                message: "offset must be zero or greater",
+            },
             StorageError::InvalidCurrentCommentSourceRecordIndex => Self::InvalidRequest {
                 message: "record_index must be zero or greater",
             },
@@ -954,6 +1135,8 @@ impl ApiError {
             | StorageError::InvalidCurrentCommentVoicesOffset
             | StorageError::InvalidCommentResearchPlanPreviewLimit
             | StorageError::InvalidCommentResearchRunPreparationLimit
+            | StorageError::InvalidCommentResearchRunRecordsLimit
+            | StorageError::InvalidCommentResearchRunRecordsOffset
             | StorageError::InvalidCurrentCommentSourceRecordIndex => {
                 Self::from_storage_input_error(error)
             }
@@ -979,6 +1162,11 @@ impl IntoResponse for ApiError {
                 StatusCode::NOT_FOUND,
                 "comment_voice_not_found",
                 "source evidence locator does not name a current comment voice",
+            ),
+            Self::RunNotFound => (
+                StatusCode::NOT_FOUND,
+                "comment_research_run_not_found",
+                "run reference does not name a local comment research record",
             ),
             Self::NoCurrentCandidates => (
                 StatusCode::CONFLICT,

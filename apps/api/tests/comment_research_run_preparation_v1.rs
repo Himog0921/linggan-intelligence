@@ -87,6 +87,15 @@ async fn proves_confirmed_local_comment_research_run_preparation_v1() {
     let page = get_text(&app, "/comment-research/voices").await;
     assert_eq!(page.0, StatusCode::OK);
     assert_confirmation_page_contract(&page.1);
+    let empty_records = get_json(
+        &app,
+        "/api/v0/comment-research/runs?workspace_id=comment-research-run-preparation-v1-proof&limit=25&offset=0",
+    )
+    .await;
+    assert_eq!(empty_records.0, StatusCode::OK);
+    assert_eq!(empty_records.1["pagination"]["total"], 0);
+    assert_eq!(empty_records.1["runs"], json!([]));
+    assert_no_forbidden_run_response_field(&empty_records.1);
     let live_preview = get_json(
         &app,
         "/api/v0/comment-research/plan-preview?workspace_id=comment-research-run-preparation-v1-proof&scope=available&limit=4",
@@ -127,6 +136,39 @@ async fn proves_confirmed_local_comment_research_run_preparation_v1() {
             .expect("run ref is public UUID"),
     )
     .expect("run ref parses");
+    let counts_before_run_record_reads = run_counts(&inspector).await;
+    let records = get_json(
+        &app,
+        "/api/v0/comment-research/runs?workspace_id=comment-research-run-preparation-v1-proof&limit=25&offset=0",
+    )
+    .await;
+    assert_eq!(records.0, StatusCode::OK, "{:#}", records.1);
+    assert_eq!(records.1["pagination"]["total"], 1);
+    let record = &records.1["runs"][0];
+    assert_eq!(record["run_ref"], prepared.1["run_ref"]);
+    assert_eq!(record["run_state"], "待执行，尚未开始分析");
+    assert_eq!(record["frozen_input_total"], 3);
+    assert_eq!(record["awaiting_execution_total"], 2);
+    assert_eq!(record["blocked_needs_context_total"], 1);
+    assert_eq!(record["execution_excluded_total"], 0);
+    assert_eq!(record["finalized_conclusion_total"], 0);
+    assert_eq!(record["source_coverage_total"], 3);
+    assert_no_forbidden_run_response_field(&records.1);
+    let detail = get_json(
+        &app,
+        &format!("/api/v0/comment-research/runs/{run_id}?workspace_id={WORKSPACE}"),
+    )
+    .await;
+    assert_eq!(detail.0, StatusCode::OK, "{:#}", detail.1);
+    assert_eq!(detail.1["run"]["run_ref"], prepared.1["run_ref"]);
+    assert_eq!(detail.1["run"]["blocked_needs_context_total"], 1);
+    assert_eq!(
+        detail.1["blocked_or_failure_reasons"][0]["reason"],
+        "需要补足上下文（阻断，不是执行失败）"
+    );
+    assert_eq!(detail.1["blocked_or_failure_reasons"][0]["item_total"], 1);
+    assert_no_forbidden_run_response_field(&detail.1);
+    assert_eq!(run_counts(&inspector).await, counts_before_run_record_reads);
     let frozen = inspector
         .query(
             "SELECT item.cleaned_research_text, item.frozen_context_pack_text, \
@@ -419,6 +461,11 @@ fn assert_confirmation_page_contract(page: &str) {
     assert!(page.contains("待执行，尚未开始分析"));
     assert!(page.contains("不会调用模型、不生成结论、不扣费"));
     assert!(page.contains("/api/v0/comment-research/runs"));
+    assert!(page.contains("本地研究运行记录"));
+    assert!(page.contains("尚无待执行研究"));
+    assert!(page.contains("运行记录只读取本地冻结批次"));
+    assert!(page.contains("未配置执行器，尚未开始分析"));
+    assert!(page.contains("/api/v0/comment-research/runs/${encodeURIComponent(runRef)}"));
 
     let start = page
         .find("async function submitRunPreparation()")
