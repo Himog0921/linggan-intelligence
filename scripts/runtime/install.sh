@@ -125,7 +125,16 @@ mkdir -p "$log_dir" "$agents_dir" "$drain_dir"
 # 开发目录 checkout，同一个分支不能在两处。
 git -C "$repo_root" fetch --quiet origin main
 target_revision="$(git -C "$repo_root" rev-parse origin/main)"
-if [[ -d "$runtime_dir/.git" ]] || git -C "$repo_root" worktree list --porcelain | grep -qxF "worktree $runtime_dir"; then
+if [[ -e "$runtime_dir" ]]; then
+  # Linked worktrees keep .git as a file, so -d "$runtime_dir/.git" would
+  # wrongly treat a healthy existing runtime as absent.  Never overwrite an
+  # arbitrary existing directory: it must still be a worktree for this origin.
+  git -C "$runtime_dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+    || { print -r -- "运行目录已存在，但不是 Git 工作树；未覆盖：$runtime_dir" >&2; exit 1; }
+  runtime_origin="$(git -C "$runtime_dir" remote get-url origin 2>/dev/null || true)"
+  repo_origin="$(git -C "$repo_root" remote get-url origin)"
+  [[ "$runtime_origin" == "$repo_origin" ]] \
+    || { print -r -- "运行目录不属于当前仓库；未覆盖：$runtime_dir" >&2; exit 1; }
   log "运行目录已存在：$runtime_dir"
 else
   log "创建运行目录：$runtime_dir"
