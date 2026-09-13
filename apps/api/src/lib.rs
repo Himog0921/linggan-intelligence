@@ -10,10 +10,10 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Query, State},
+    extract::{Query, State, rejection::JsonRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
 };
 use linggan_contracts::ContextTextAvailabilityV0;
 use linggan_domain::comment_research::{
@@ -30,8 +30,10 @@ use linggan_storage_postgres::{
     COMMENT_RESEARCH_PLAN_PREVIEW_V0_DEFAULT_LIMIT, CURRENT_COMMENT_VOICES_V0_MAX_LIMIT,
     CommentFactStore, ContextSourceEvidenceRelationV0, CurrentCommentContextBySourceLocatorV0,
     CurrentCommentRelatedReplyV0, CurrentCommentResearchPlanPreviewRequestV0,
-    CurrentCommentResearchPlanPreviewV0, CurrentCommentResearchPreviewCandidateV0,
-    CurrentCommentResearchPreviewSourceV0, CurrentCommentSourceEvidenceRelationV0,
+    CurrentCommentResearchPlanPreviewV0, CurrentCommentResearchPreparedSourceV1,
+    CurrentCommentResearchPreviewCandidateV0, CurrentCommentResearchPreviewSourceV0,
+    CurrentCommentResearchRunPreparationOutcomeV1, CurrentCommentResearchRunPreparationRequestV1,
+    CurrentCommentResearchScopeCandidateSummaryV1, CurrentCommentSourceEvidenceRelationV0,
     CurrentCommentVoiceFilterV1, CurrentCommentVoiceV0, CurrentCommentVoicesPageRequestV0,
     CurrentCommentWorkContextV0, StorageError,
 };
@@ -41,10 +43,8 @@ use uuid::Uuid;
 /// The bounded default used when callers omit limit.
 pub const USER_VOICES_V0_DEFAULT_LIMIT: i64 = 50;
 
-/// Builds the only Comment Research HTTP route enabled by this V0 package.
-///
-/// The route is read-only by construction: its handler invokes the storage
-/// adapter's current-projection SELECT method and has no admission dependency.
+/// Builds Comment Research's read paths and its explicit local input-freezing
+/// action. The POST route does not start a worker or call a model.
 pub fn comment_research_router_v0(store: Arc<CommentFactStore>) -> Router {
     Router::new()
         .route(
@@ -59,6 +59,10 @@ pub fn comment_research_router_v0(store: Arc<CommentFactStore>) -> Router {
         .route(
             "/api/v0/comment-research/plan-preview",
             get(preview_current_comment_research_plan_v0),
+        )
+        .route(
+            "/api/v0/comment-research/runs",
+            post(prepare_current_comment_research_run_v1),
         )
         .route(
             "/api/v0/comment-research/voices/context",
@@ -300,6 +304,162 @@ impl From<CurrentCommentResearchPreviewCandidateV0>
             source_evidence: candidate.source_evidence.into(),
         }
     }
+}
+
+/// The confirmation request intentionally has no Evidence locator or candidate
+/// list. A preview summary only lets the service say that its live scope had
+/// changed; it cannot authorize a particular source record.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CurrentCommentResearchRunPreparationRequestDtoV1 {
+    workspace_id: String,
+    scope: String,
+    limit: i64,
+    #[serde(default)]
+    preview: Option<CurrentCommentResearchPreviewSummaryDtoV1>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CurrentCommentResearchPreviewSummaryDtoV1 {
+    candidate_total: i64,
+    sources: Vec<CurrentCommentResearchPreviewSummarySourceDtoV1>,
+    candidates: Vec<CurrentCommentResearchPreviewSummaryCandidateDtoV1>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CurrentCommentResearchPreviewSummarySourceDtoV1 {
+    source_note_id: String,
+    selected_total: i64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CurrentCommentResearchPreviewSummaryCandidateDtoV1 {
+    source_note_id: String,
+    current_admitted_at: String,
+    source_rotation_turn: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct CurrentCommentResearchRunPreparationResponseV1 {
+    run_ref: String,
+    run_state: &'static str,
+    scope: &'static str,
+    limit: i64,
+    scope_refreshed: bool,
+    frozen_item_total: i64,
+    prepared_for_execution_total: i64,
+    blocked_needs_context_total: i64,
+    awaiting_cleaning_total: i64,
+    excluded_by_cleaning_total: i64,
+    excluded_existing_conclusion_total: i64,
+    deduplicated_semantic_input_total: i64,
+    source_distribution: Vec<CurrentCommentResearchPreparedSourceDtoV1>,
+    execution_note: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct CurrentCommentResearchPreparedSourceDtoV1 {
+    source_note_id: String,
+    frozen_total: i64,
+    prepared_for_execution_total: i64,
+    blocked_needs_context_total: i64,
+}
+
+impl From<CurrentCommentResearchPreparedSourceV1> for CurrentCommentResearchPreparedSourceDtoV1 {
+    fn from(source: CurrentCommentResearchPreparedSourceV1) -> Self {
+        Self {
+            source_note_id: source.source_note_id,
+            frozen_total: source.frozen_total,
+            prepared_for_execution_total: source.prepared_total,
+            blocked_needs_context_total: source.blocked_total,
+        }
+    }
+}
+
+async fn prepare_current_comment_research_run_v1(
+    State(store): State<Arc<CommentFactStore>>,
+    payload: Result<Json<CurrentCommentResearchRunPreparationRequestDtoV1>, JsonRejection>,
+) -> Result<Json<CurrentCommentResearchRunPreparationResponseV1>, ApiError> {
+    let Json(payload) = payload.map_err(|_| ApiError::InvalidRequest {
+        message: "request must be a JSON object with workspace_id, scope, limit, and optional preview",
+    })?;
+    if payload.workspace_id.trim().is_empty() {
+        return Err(ApiError::InvalidRequest {
+            message: "workspace_id is required",
+        });
+    }
+    let scope = parse_current_comment_research_plan_scope(Some(payload.scope))?;
+    let request = CurrentCommentResearchRunPreparationRequestV1::with_scope(payload.limit, scope)
+        .map_err(ApiError::from_storage_input_error)?;
+    let outcome = store
+        .prepare_current_comment_research_run_v1(&payload.workspace_id, request)
+        .await
+        .map_err(ApiError::from_storage_write_error)?;
+
+    let scope_refreshed = payload
+        .preview
+        .as_ref()
+        .is_some_and(|preview| preview_summary_differs_from_prepared_scope(preview, &outcome));
+    let run_state = if outcome.execution_state == "prepared" {
+        "prepared_for_execution"
+    } else {
+        "blocked_by_context"
+    };
+    Ok(Json(CurrentCommentResearchRunPreparationResponseV1 {
+        run_ref: outcome.run_id.to_string(),
+        run_state,
+        scope: outcome.scope.as_storage_value(),
+        limit: outcome.limit,
+        scope_refreshed,
+        frozen_item_total: outcome.frozen_total,
+        prepared_for_execution_total: outcome.prepared_total,
+        blocked_needs_context_total: outcome.blocked_total,
+        awaiting_cleaning_total: outcome.totals.awaiting_cleaning_total,
+        excluded_by_cleaning_total: outcome.totals.excluded_total,
+        excluded_existing_conclusion_total: outcome.concluded_excluded_total,
+        deduplicated_semantic_input_total: outcome.duplicate_input_excluded_total,
+        source_distribution: outcome
+            .sources
+            .into_iter()
+            .map(CurrentCommentResearchPreparedSourceDtoV1::from)
+            .collect(),
+        execution_note: "本次只冻结输入并创建待执行研究；当前未配置执行器，未调用模型。",
+    }))
+}
+
+fn preview_summary_differs_from_prepared_scope(
+    preview: &CurrentCommentResearchPreviewSummaryDtoV1,
+    outcome: &CurrentCommentResearchRunPreparationOutcomeV1,
+) -> bool {
+    if preview.candidate_total != outcome.scoped_candidate_total {
+        return true;
+    }
+    let supplied = preview
+        .sources
+        .iter()
+        .map(|source| (source.source_note_id.as_str(), source.selected_total))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let refreshed = outcome
+        .scoped_source_distribution
+        .iter()
+        .map(|(source_note_id, selected_total)| (source_note_id.as_str(), *selected_total))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    if supplied != refreshed {
+        return true;
+    }
+    preview
+        .candidates
+        .iter()
+        .map(|candidate| CurrentCommentResearchScopeCandidateSummaryV1 {
+            source_note_id: candidate.source_note_id.clone(),
+            current_admitted_at: candidate.current_admitted_at.clone(),
+            source_turn: candidate.source_rotation_turn,
+        })
+        .collect::<Vec<_>>()
+        != outcome.scoped_candidates
 }
 
 fn parse_user_voices_filter(raw: Option<String>) -> Result<CurrentCommentVoiceFilterV1, ApiError> {
@@ -757,6 +917,8 @@ fn parse_i64_parameter(
 enum ApiError {
     InvalidRequest { message: &'static str },
     CurrentVoiceNotFound,
+    NoCurrentCandidates,
+    RunPreparationFailed,
     ReadFailed,
 }
 
@@ -775,6 +937,9 @@ impl ApiError {
             StorageError::InvalidCommentResearchPlanPreviewLimit => Self::InvalidRequest {
                 message: "limit must be between 1 and 100",
             },
+            StorageError::InvalidCommentResearchRunPreparationLimit => Self::InvalidRequest {
+                message: "limit must be between 1 and 100",
+            },
             StorageError::InvalidCurrentCommentSourceRecordIndex => Self::InvalidRequest {
                 message: "record_index must be zero or greater",
             },
@@ -788,10 +953,18 @@ impl ApiError {
             | StorageError::InvalidCurrentCommentVoicesLimit
             | StorageError::InvalidCurrentCommentVoicesOffset
             | StorageError::InvalidCommentResearchPlanPreviewLimit
+            | StorageError::InvalidCommentResearchRunPreparationLimit
             | StorageError::InvalidCurrentCommentSourceRecordIndex => {
                 Self::from_storage_input_error(error)
             }
             _ => Self::ReadFailed,
+        }
+    }
+
+    fn from_storage_write_error(error: StorageError) -> Self {
+        match error {
+            StorageError::NoCurrentCommentResearchCandidates => Self::NoCurrentCandidates,
+            _ => Self::RunPreparationFailed,
         }
     }
 }
@@ -806,6 +979,16 @@ impl IntoResponse for ApiError {
                 StatusCode::NOT_FOUND,
                 "comment_voice_not_found",
                 "source evidence locator does not name a current comment voice",
+            ),
+            Self::NoCurrentCandidates => (
+                StatusCode::CONFLICT,
+                "no_current_comment_research_candidates",
+                "the refreshed scope has no inputs to freeze",
+            ),
+            Self::RunPreparationFailed => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "comment_research_run_preparation_failed",
+                "comment research inputs could not be prepared",
             ),
             Self::ReadFailed => (
                 StatusCode::INTERNAL_SERVER_ERROR,

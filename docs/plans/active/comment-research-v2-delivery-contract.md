@@ -193,7 +193,9 @@ Context Storage V0 追加：`content_detail + comments + replies` 的三包 Sour
 
 P3 前置已完成：只读的范围预览 V0 已在用户原声页提供当前语料总数、清洗等待/排除口径、来源轮换候选和来源分布；它没有持久化计划、冻结样本、创建 run、生成 fingerprint 或调用模型。用户原声详情还可读取 Context Pack V1 的文本内容预览，显示直接评论证据、讨论语境、作品语境以及固定预算/省略事实；它仍不持久化输入、做上下文充分性判断或调用模型。隔离 PostgreSQL 证明见 [`comment-research-plan-preview-v0.md`](../../proofs/comment-research-plan-preview-v0.md) 与 [`comment-voice-context-pack-preview-v1.md`](../../proofs/comment-voice-context-pack-preview-v1.md)。这不代表 P3 其余交付已完成。
 
-P3 执行基础 V1 现追加了 append-only 的 Run/RunItem 输入快照、运行事件与未来结论存储边界，以及纯函数 fingerprint 和 Comment Analysis Structured Output Contract V1。`analyzable` 的 Context Pack 可冻结为 `prepared`；`needs_context` 也保留来源支撑的冻结快照以便追溯，但固定为 `insufficient_needs_context` / `blocked`，不得进入执行。Run/RunItem 的 `execution_state` 与 CommentAnalysis 的 `success` / `no_signal` 结论分表保存，不能互相替代。当前没有创建 Run 的 HTTP/API、队列、worker、provider、模型调用、token/费用记录或真实研究结果；具体隔离证明见 [`comment-research-execution-foundation-v1.md`](../../proofs/comment-research-execution-foundation-v1.md)。
+P3 执行基础 V1 现追加了 append-only 的 Run/RunItem 输入快照、运行事件与未来结论存储边界，以及纯函数 fingerprint 和 Comment Analysis Structured Output Contract V1。`analyzable` 的 Context Pack 可冻结为 `prepared`；`needs_context` 也保留来源支撑的冻结快照以便追溯，但固定为 `insufficient_needs_context` / `blocked`，不得进入执行。Run/RunItem 的 `execution_state` 与 CommentAnalysis 的 `success` / `no_signal` 结论分表保存，不能互相替代。
+
+P3 运行准备 V1 现提供显式本地 `POST /api/v0/comment-research/runs`。它在同一数据库事务中重新计算来源轮换范围，忽略任何客户端候选或 Evidence ID，组装并冻结 Context Pack，再创建 Run、RunItem 与初始 `prepared` / `blocked` event。浏览器可传的 preview 摘要只用于报告 `scope_refreshed`，不能授权候选。当前 fingerprint 下的 `success` / `no_signal` 会被排除；历史未完成、取消和暂态失败 RunItem 不会被当成已研究。同一新 Run 的等价 semantic input 只冻结一次。响应只说明 `prepared_for_execution`、blocked/awaiting/excluded 数与最终来源分布，不投影输入文本、fingerprint、内部 identity 或模型数据。`0005` 是前向约束扩展，使初始 event 可精确表示 `prepared` 而不是伪称 queued。该入口没有 UI 确认流、队列、worker、provider、模型调用、token/费用记录或真实研究结果；完整隔离 HTTP/PostgreSQL 证明见 [`comment-research-run-preparation-v1.md`](../../proofs/comment-research-run-preparation-v1.md)。
 
 ### P4：问题组织与结果页
 

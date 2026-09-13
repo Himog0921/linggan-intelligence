@@ -4,12 +4,15 @@
 //! the XHS runtime source contract before its transaction starts.
 
 use core::fmt;
+use std::collections::{BTreeMap, HashSet};
 
 use linggan_contracts::{CapturePackageV0, ContextTextAvailabilityV0};
 use linggan_domain::comment_research::{
-    CleaningReasonCode, CommentResearchContextPackInputV1, CommentResearchContextPackV1,
-    CommentResearchState, ContextPackReadinessV1, ContextPackRelatedDiscussionInputV1,
-    ContextPackSourceTextV1, build_comment_research_context_pack_v1, clean_comment_for_research,
+    COMMENT_ANALYSIS_OUTPUT_SCHEMA_V1, COMMENT_RESEARCH_EXECUTION_CONTRACT_V1, CleaningReasonCode,
+    CommentResearchContextPackInputV1, CommentResearchContextPackV1, CommentResearchState,
+    ContextPackReadinessV1, ContextPackRelatedDiscussionInputV1, ContextPackSourceTextV1,
+    ResearchFingerprintInputV1, ResearchModelStrategyV1, build_comment_research_context_pack_v1,
+    clean_comment_for_research, freeze_comment_research_context_pack_v1, research_fingerprint_v1,
 };
 use linggan_evidence::{
     CommentSourceIdentityV0, EvidencePreparationError, PreparedCommentContextEvidenceAdmissionV0,
@@ -21,6 +24,7 @@ use linggan_evidence::{
 use linggan_observation::{
     CommentObservationDecisionV0, CurrentCommentFactV0, decide_comment_observation_v0,
 };
+use tokio::sync::Mutex;
 use tokio_postgres::{Client, NoTls, Transaction};
 use uuid::Uuid;
 
@@ -43,9 +47,17 @@ pub const COMMENT_DERIVATION_V1_MIGRATION: &str =
 pub const COMMENT_RESEARCH_EXECUTION_FOUNDATION_V1_MIGRATION: &str =
     include_str!("../../../database/migrations/0004_comment_research_execution_foundation_v1.sql");
 
+/// Adds an explicit initial `prepared` event for frozen inputs. This is a
+/// lifecycle observation only; it does not imply a queue or an executor.
+pub const COMMENT_RESEARCH_RUN_PREPARATION_V1_MIGRATION: &str =
+    include_str!("../../../database/migrations/0005_comment_research_run_preparation_v1.sql");
+
 /// A PostgreSQL adapter with no knowledge of HTTP, workers, models, or UI.
 pub struct CommentFactStore {
-    client: Client,
+    // One PostgreSQL connection is shared by read and write paths. Serializing
+    // access prevents a transaction opened by the preparation endpoint from
+    // accidentally capturing unrelated concurrent HTTP reads on this session.
+    client: Mutex<Client>,
 }
 
 /// The largest page accepted by the current-comment read model.
@@ -62,6 +74,10 @@ pub const COMMENT_RESEARCH_PLAN_PREVIEW_V0_MAX_LIMIT: i64 = 100;
 /// The default preview size keeps the first read small while still showing a
 /// useful spread across source works.
 pub const COMMENT_RESEARCH_PLAN_PREVIEW_V0_DEFAULT_LIMIT: i64 = 50;
+
+/// Creation has the same explicit upper bound as the live scope preview. It
+/// is a safety bound for one confirmation, never an automatic schedule.
+pub const COMMENT_RESEARCH_RUN_PREPARATION_V1_MAX_LIMIT: i64 = 100;
 
 /// Backfill is intentionally bounded and local. It has no model, network, or
 /// worker dependency, and is never triggered by a User Voices read.
@@ -283,6 +299,104 @@ pub struct CurrentCommentResearchPlanPreviewV0 {
     pub candidates: Vec<CurrentCommentResearchPreviewCandidateV0>,
 }
 
+/// An explicit write request that creates a local immutable input snapshot.
+/// It deliberately has no candidate identities: storage always refreshes the
+/// current scope itself inside the transaction.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchRunPreparationRequestV1 {
+    limit: i64,
+    scope: CurrentCommentVoiceFilterV1,
+}
+
+impl CurrentCommentResearchRunPreparationRequestV1 {
+    pub fn with_scope(
+        limit: i64,
+        scope: CurrentCommentVoiceFilterV1,
+    ) -> Result<Self, StorageError> {
+        if !(1..=COMMENT_RESEARCH_RUN_PREPARATION_V1_MAX_LIMIT).contains(&limit) {
+            return Err(StorageError::InvalidCommentResearchRunPreparationLimit);
+        }
+        Ok(Self { limit, scope })
+    }
+
+    pub const fn limit(self) -> i64 {
+        self.limit
+    }
+
+    pub const fn scope(self) -> CurrentCommentVoiceFilterV1 {
+        self.scope
+    }
+}
+
+/// One source's final frozen-item distribution. It describes the actual
+/// transaction result, never the browser preview or research quality.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchPreparedSourceV1 {
+    pub source_note_id: String,
+    pub frozen_total: i64,
+    pub prepared_total: i64,
+    pub blocked_total: i64,
+}
+
+/// Public-preview facts used only to detect that a non-authoritative browser
+/// summary has gone stale. They contain neither Evidence locators nor research
+/// input hashes and cannot select a record for the write path.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchScopeCandidateSummaryV1 {
+    pub source_note_id: String,
+    pub current_admitted_at: String,
+    pub source_turn: i64,
+}
+
+/// The local result of a confirmed input-freezing action. A `prepared` item is
+/// only ready for a future separately authorized executor; no model call is
+/// made by this method.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchRunPreparationOutcomeV1 {
+    pub run_id: Uuid,
+    pub execution_state: &'static str,
+    pub scope: CurrentCommentVoiceFilterV1,
+    pub limit: i64,
+    pub totals: CurrentCommentResearchPreparationTotalsV0,
+    /// The refreshed bounded scope before conclusion and same-run semantic
+    /// exclusions. It is used only to determine whether a browser preview is
+    /// stale; it is not a persisted authorization list.
+    pub scoped_candidate_total: i64,
+    pub scoped_source_distribution: Vec<(String, i64)>,
+    pub scoped_candidates: Vec<CurrentCommentResearchScopeCandidateSummaryV1>,
+    pub frozen_total: i64,
+    pub prepared_total: i64,
+    pub blocked_total: i64,
+    pub concluded_excluded_total: i64,
+    pub duplicate_input_excluded_total: i64,
+    pub sources: Vec<CurrentCommentResearchPreparedSourceV1>,
+}
+
+#[derive(Clone, Debug)]
+struct CurrentCommentResearchPreparationCandidateV1 {
+    source_note_id: String,
+    comment_id: String,
+    source_evidence_id: Uuid,
+    source_record_index: i32,
+    current_admitted_at: String,
+    source_turn: i64,
+    observation_id: Uuid,
+    derivation_id: Uuid,
+    research_text: String,
+    readiness: CurrentCommentVoiceReadinessV1,
+}
+
+#[derive(Clone, Debug)]
+struct FrozenCommentResearchRunItemV1 {
+    candidate: CurrentCommentResearchPreparationCandidateV1,
+    frozen_context_text: String,
+    context_integrity_sha256: String,
+    research_fingerprint: String,
+    context_sufficiency_state: &'static str,
+    execution_state: &'static str,
+    initial_failure_code: Option<&'static str>,
+}
+
 /// The outcome of one bounded local materialization pass. This is deliberately
 /// internal/operator-facing and never appears in the User Voices DTO.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -352,8 +466,10 @@ pub const CURRENT_COMMENT_CONTEXT_V0_MAX_REPLIES: i64 = 100;
 
 impl CommentFactStore {
     /// Creates a store from a caller-managed PostgreSQL client.
-    pub const fn new(client: Client) -> Self {
-        Self { client }
+    pub fn new(client: Client) -> Self {
+        Self {
+            client: Mutex::new(client),
+        }
     }
 
     /// Opens PostgreSQL and drives the connection in a background task.
@@ -373,6 +489,8 @@ impl CommentFactStore {
     /// clean baseline exercised by the V0 integration proof.
     pub async fn apply_comment_fact_storage_v0_migration(&self) -> Result<(), StorageError> {
         self.client
+            .lock()
+            .await
             .batch_execute(COMMENT_FACT_STORAGE_V0_MIGRATION)
             .await
             .map_err(StorageError::Database)
@@ -384,6 +502,8 @@ impl CommentFactStore {
     /// attempts a fallback, implicit baseline, or legacy schema import.
     pub async fn apply_comment_context_storage_v0_migration(&self) -> Result<(), StorageError> {
         self.client
+            .lock()
+            .await
             .batch_execute(COMMENT_CONTEXT_STORAGE_V0_MIGRATION)
             .await
             .map_err(StorageError::Database)
@@ -394,6 +514,8 @@ impl CommentFactStore {
     /// materialized with the bounded explicit method below.
     pub async fn apply_comment_derivation_v1_migration(&self) -> Result<(), StorageError> {
         self.client
+            .lock()
+            .await
             .batch_execute(COMMENT_DERIVATION_V1_MIGRATION)
             .await
             .map_err(StorageError::Database)
@@ -406,7 +528,22 @@ impl CommentFactStore {
         &self,
     ) -> Result<(), StorageError> {
         self.client
+            .lock()
+            .await
             .batch_execute(COMMENT_RESEARCH_EXECUTION_FOUNDATION_V1_MIGRATION)
+            .await
+            .map_err(StorageError::Database)
+    }
+
+    /// Applies the forward-only preparation extension after the execution
+    /// foundation. It adds no worker, queue, provider, or model configuration.
+    pub async fn apply_comment_research_run_preparation_v1_migration(
+        &self,
+    ) -> Result<(), StorageError> {
+        self.client
+            .lock()
+            .await
+            .batch_execute(COMMENT_RESEARCH_RUN_PREPARATION_V1_MIGRATION)
             .await
             .map_err(StorageError::Database)
     }
@@ -432,8 +569,8 @@ impl CommentFactStore {
             return Err(StorageError::BlankWorkspaceId);
         }
 
-        let rows = self
-            .client
+        let client = self.client.lock().await;
+        let rows = client
             .query(
                 "WITH current_observations AS ( \
                    SELECT current_projection.note_id, current_projection.comment_id, \
@@ -541,8 +678,8 @@ impl CommentFactStore {
             return Err(StorageError::BlankWorkspaceId);
         }
 
-        let rows = self
-            .client
+        let client = self.client.lock().await;
+        let rows = client
             .query(
                 "WITH current_observations AS ( \
                    SELECT current_projection.note_id, current_projection.comment_id, \
@@ -716,6 +853,342 @@ impl CommentFactStore {
         })
     }
 
+    /// Recomputes the current automatic scope and freezes its selected V1
+    /// inputs in one PostgreSQL transaction. The caller cannot select evidence
+    /// records or carry a browser candidate list into this method.
+    ///
+    /// `needs_context` inputs are intentionally retained as blocked RunItems:
+    /// their frozen source-backed Context Pack makes the block auditable, while
+    /// their execution state and initial event make them ineligible for a
+    /// future executor. A `prepared` event means exactly input preparation; it
+    /// is not a queue reservation or a model invocation.
+    pub async fn prepare_current_comment_research_run_v1(
+        &self,
+        workspace_id: &str,
+        request: CurrentCommentResearchRunPreparationRequestV1,
+    ) -> Result<CurrentCommentResearchRunPreparationOutcomeV1, StorageError> {
+        if workspace_id.trim().is_empty() {
+            return Err(StorageError::BlankWorkspaceId);
+        }
+
+        let mut client = self.client.lock().await;
+        let transaction = client.transaction().await.map_err(StorageError::Database)?;
+
+        let totals_row = transaction
+            .query_one(
+                "WITH current_observations AS ( \
+                   SELECT derivation.research_state \
+                     FROM comment_current_v0 AS current_projection \
+                     JOIN comment_observation_v0 AS current_observation \
+                       ON current_observation.workspace_id = current_projection.workspace_id \
+                      AND current_observation.platform = current_projection.platform \
+                      AND current_observation.note_id = current_projection.note_id \
+                      AND current_observation.comment_id = current_projection.comment_id \
+                      AND current_observation.id = current_projection.current_observation_id \
+                     LEFT JOIN comment_derivation_v1 AS derivation \
+                       ON derivation.comment_observation_id = current_observation.id \
+                      AND derivation.cleaning_contract = 'comment-cleaning.v1' \
+                    WHERE current_projection.workspace_id = $1 \
+                      AND current_projection.platform = 'xhs' \
+                 ) \
+                 SELECT count(*)::BIGINT AS current_total, \
+                        count(*) FILTER (WHERE research_state IN ('analyzable', 'needs_context'))::BIGINT AS available_total, \
+                        count(*) FILTER (WHERE research_state = 'analyzable')::BIGINT AS ready_total, \
+                        count(*) FILTER (WHERE research_state = 'needs_context')::BIGINT AS needs_context_total, \
+                        count(*) FILTER (WHERE research_state IS NULL)::BIGINT AS awaiting_cleaning_total, \
+                        count(*) FILTER (WHERE research_state IN ('dropped', 'anomaly'))::BIGINT AS excluded_total \
+                   FROM current_observations",
+                &[&workspace_id],
+            )
+            .await
+            .map_err(StorageError::Database)?;
+        let totals = CurrentCommentResearchPreparationTotalsV0 {
+            current_total: totals_row.get(0),
+            available_total: totals_row.get(1),
+            ready_total: totals_row.get(2),
+            needs_context_total: totals_row.get(3),
+            awaiting_cleaning_total: totals_row.get(4),
+            excluded_total: totals_row.get(5),
+        };
+
+        // This is deliberately a fresh database query, not a browser preview.
+        // Source turns are recomputed before the bounded selection so every
+        // source has its first current voice considered before a second one.
+        let candidate_rows = transaction
+            .query(
+                "WITH current_observations AS ( \
+                   SELECT current_projection.note_id, current_projection.comment_id, \
+                          current_observation.id AS observation_id, \
+                          current_observation.source_evidence_id, \
+                          current_observation.source_record_index, \
+                          current_observation.admitted_at, derivation.id AS derivation_id, \
+                          derivation.research_state, derivation.research_text \
+                     FROM comment_current_v0 AS current_projection \
+                     JOIN comment_observation_v0 AS current_observation \
+                       ON current_observation.workspace_id = current_projection.workspace_id \
+                      AND current_observation.platform = current_projection.platform \
+                      AND current_observation.note_id = current_projection.note_id \
+                      AND current_observation.comment_id = current_projection.comment_id \
+                      AND current_observation.id = current_projection.current_observation_id \
+                     JOIN comment_derivation_v1 AS derivation \
+                       ON derivation.comment_observation_id = current_observation.id \
+                      AND derivation.cleaning_contract = 'comment-cleaning.v1' \
+                    WHERE current_projection.workspace_id = $1 \
+                      AND current_projection.platform = 'xhs' \
+                 ), eligible AS ( \
+                   SELECT * FROM current_observations \
+                    WHERE research_state IN ('analyzable', 'needs_context') \
+                      AND ( \
+                        $2 = 'available' \
+                        OR ($2 = 'ready' AND research_state = 'analyzable') \
+                        OR ($2 = 'needs_context' AND research_state = 'needs_context') \
+                      ) \
+                 ), ranked AS ( \
+                   SELECT eligible.*, \
+                          row_number() OVER ( \
+                            PARTITION BY note_id \
+                            ORDER BY admitted_at ASC, comment_id ASC \
+                          )::BIGINT AS source_turn, \
+                          min(admitted_at) OVER (PARTITION BY note_id) AS source_first_admitted_at \
+                     FROM eligible \
+                 ) \
+                 SELECT note_id, comment_id, source_evidence_id, source_record_index, \
+                        observation_id, derivation_id, research_text, research_state, \
+                        to_char(admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS current_admitted_at, \
+                        source_turn \
+                   FROM ranked \
+                  ORDER BY source_turn ASC, source_first_admitted_at ASC, note_id ASC, \
+                           admitted_at ASC, comment_id ASC \
+                  LIMIT $3",
+                &[
+                    &workspace_id,
+                    &request.scope().as_storage_value(),
+                    &request.limit(),
+                ],
+            )
+            .await
+            .map_err(StorageError::Database)?;
+
+        let mut candidates = Vec::with_capacity(candidate_rows.len());
+        for row in candidate_rows {
+            let research_state: String = row.get(7);
+            candidates.push(CurrentCommentResearchPreparationCandidateV1 {
+                source_note_id: row.get(0),
+                comment_id: row.get(1),
+                source_evidence_id: row.get(2),
+                source_record_index: row.get(3),
+                current_admitted_at: row.get(8),
+                source_turn: row.get(9),
+                observation_id: row.get(4),
+                derivation_id: row.get(5),
+                research_text: row
+                    .get::<_, Option<String>>(6)
+                    .ok_or(StorageError::InvalidPersistedCommentDerivation)?,
+                readiness: CurrentCommentVoiceReadinessV1::from_storage_value(&research_state)?,
+            });
+        }
+
+        if candidates.is_empty() {
+            return Err(StorageError::NoCurrentCommentResearchCandidates);
+        }
+
+        let scoped_candidate_total = candidates.len() as i64;
+        let mut scoped_source_counts = BTreeMap::new();
+        for candidate in &candidates {
+            *scoped_source_counts
+                .entry(candidate.source_note_id.clone())
+                .or_insert(0_i64) += 1;
+        }
+        let scoped_candidates = candidates
+            .iter()
+            .map(|candidate| CurrentCommentResearchScopeCandidateSummaryV1 {
+                source_note_id: candidate.source_note_id.clone(),
+                current_admitted_at: candidate.current_admitted_at.clone(),
+                source_turn: candidate.source_turn,
+            })
+            .collect();
+
+        let mut frozen_items = Vec::with_capacity(candidates.len());
+        let mut fingerprints = HashSet::new();
+        let mut concluded_excluded_total = 0;
+        let mut duplicate_input_excluded_total = 0;
+        for candidate in candidates {
+            let pack = build_current_comment_research_context_pack_in_transaction_v1(
+                &transaction,
+                workspace_id,
+                &candidate,
+            )
+            .await?;
+            let frozen_pack = freeze_comment_research_context_pack_v1(&pack);
+            let research_fingerprint = research_fingerprint_v1(&ResearchFingerprintInputV1 {
+                cleaned_research_text: candidate.research_text.clone(),
+                frozen_context_pack: frozen_pack.clone(),
+                cleaning_contract: "comment-cleaning.v1".to_owned(),
+                research_contract: COMMENT_RESEARCH_EXECUTION_CONTRACT_V1.to_owned(),
+                output_schema: COMMENT_ANALYSIS_OUTPUT_SCHEMA_V1.to_owned(),
+                // This is deliberately an execution-neutral strategy. An
+                // actual provider/model strategy must create a new semantic
+                // input rather than silently reuse this no-executor snapshot.
+                model_strategy: ResearchModelStrategyV1 {
+                    strategy_id: "comment-research-preparation".to_owned(),
+                    strategy_version: "v1".to_owned(),
+                },
+            })
+            .map_err(|_| StorageError::InvalidPersistedCommentDerivation)?;
+
+            let already_concluded = transaction
+                .query_one(
+                    "SELECT EXISTS( \
+                       SELECT 1 FROM comment_analysis_v1 \
+                        WHERE comment_derivation_id = $1 \
+                          AND research_fingerprint = $2 \
+                          AND conclusion_state IN ('success', 'no_signal') \
+                     )",
+                    &[&candidate.derivation_id, &research_fingerprint],
+                )
+                .await
+                .map_err(StorageError::Database)?
+                .get::<_, bool>(0);
+            if already_concluded {
+                concluded_excluded_total += 1;
+                continue;
+            }
+            if !fingerprints.insert(research_fingerprint.clone()) {
+                // Only one identical semantic input is frozen in a newly
+                // prepared run. This is never inferred from old incomplete
+                // RunItems, so an interrupted/cancelled item remains eligible
+                // on a later explicit confirmation.
+                duplicate_input_excluded_total += 1;
+                continue;
+            }
+
+            frozen_items.push(FrozenCommentResearchRunItemV1 {
+                context_sufficiency_state: frozen_pack.context_sufficiency.as_storage_value(),
+                execution_state: frozen_pack.context_sufficiency.initial_execution_state(),
+                initial_failure_code: frozen_pack.context_sufficiency.initial_failure_code(),
+                frozen_context_text: frozen_pack.text,
+                context_integrity_sha256: frozen_pack.integrity_sha256,
+                research_fingerprint,
+                candidate,
+            });
+        }
+
+        if frozen_items.is_empty() {
+            return Err(StorageError::NoCurrentCommentResearchCandidates);
+        }
+
+        let prepared_total = frozen_items
+            .iter()
+            .filter(|item| item.execution_state == "prepared")
+            .count() as i64;
+        let blocked_total = frozen_items.len() as i64 - prepared_total;
+        let run_execution_state = if prepared_total > 0 {
+            "prepared"
+        } else {
+            "blocked"
+        };
+        let run_id = Uuid::new_v4();
+        transaction
+            .execute(
+                "INSERT INTO comment_research_run_v1 (id, workspace_id, execution_state) \
+                 VALUES ($1, $2, $3)",
+                &[&run_id, &workspace_id, &run_execution_state],
+            )
+            .await
+            .map_err(StorageError::Database)?;
+
+        let mut source_counts: BTreeMap<String, (i64, i64, i64)> = BTreeMap::new();
+        for item in &frozen_items {
+            let run_item_id = Uuid::new_v4();
+            transaction
+                .execute(
+                    "INSERT INTO comment_research_run_item_v1 \
+                     (id, run_id, workspace_id, source_evidence_id, source_record_index, \
+                      comment_observation_id, comment_derivation_id, cleaned_research_text, \
+                      cleaning_contract, research_contract, output_schema, model_strategy_id, \
+                      model_strategy_version, research_fingerprint, context_pack_version, \
+                      context_pack_integrity_sha256, frozen_context_pack_text, \
+                      context_sufficiency_state, execution_state, initial_failure_code) \
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'comment-cleaning.v1', \
+                      'comment-research-execution.v1', 'comment-analysis-structured-output.v1', \
+                      'comment-research-preparation', 'v1', $9, \
+                      'comment-research-input-snapshot.v1', $10, $11, $12, $13, $14)",
+                    &[
+                        &run_item_id,
+                        &run_id,
+                        &workspace_id,
+                        &item.candidate.source_evidence_id,
+                        &item.candidate.source_record_index,
+                        &item.candidate.observation_id,
+                        &item.candidate.derivation_id,
+                        &item.candidate.research_text,
+                        &item.research_fingerprint,
+                        &item.context_integrity_sha256,
+                        &item.frozen_context_text,
+                        &item.context_sufficiency_state,
+                        &item.execution_state,
+                        &item.initial_failure_code,
+                    ],
+                )
+                .await
+                .map_err(StorageError::Database)?;
+            transaction
+                .execute(
+                    "INSERT INTO comment_research_run_item_event_v1 \
+                     (id, run_item_id, execution_state, failure_code, output_validation_state) \
+                     VALUES ($1, $2, $3, $4, 'not_submitted')",
+                    &[
+                        &Uuid::new_v4(),
+                        &run_item_id,
+                        &item.execution_state,
+                        &item.initial_failure_code,
+                    ],
+                )
+                .await
+                .map_err(StorageError::Database)?;
+
+            let entry = source_counts
+                .entry(item.candidate.source_note_id.clone())
+                .or_insert((0, 0, 0));
+            entry.0 += 1;
+            if item.execution_state == "prepared" {
+                entry.1 += 1;
+            } else {
+                entry.2 += 1;
+            }
+        }
+
+        transaction.commit().await.map_err(StorageError::Database)?;
+        Ok(CurrentCommentResearchRunPreparationOutcomeV1 {
+            run_id,
+            execution_state: run_execution_state,
+            scope: request.scope(),
+            limit: request.limit(),
+            totals,
+            scoped_candidate_total,
+            scoped_source_distribution: scoped_source_counts.into_iter().collect(),
+            scoped_candidates,
+            frozen_total: frozen_items.len() as i64,
+            prepared_total,
+            blocked_total,
+            concluded_excluded_total,
+            duplicate_input_excluded_total,
+            sources: source_counts
+                .into_iter()
+                .map(
+                    |(source_note_id, (frozen_total, prepared_total, blocked_total))| {
+                        CurrentCommentResearchPreparedSourceV1 {
+                            source_note_id,
+                            frozen_total,
+                            prepared_total,
+                            blocked_total,
+                        }
+                    },
+                )
+                .collect(),
+        })
+    }
+
     /// Returns source-backed work and related reply context for one current
     /// comment, or `None` when no complete, text-matching context capture has
     /// been admitted. This method performs no writes.
@@ -736,8 +1209,8 @@ impl CommentFactStore {
             return Err(StorageError::BlankCommentContextIdentity);
         }
 
-        let selected = self
-            .client
+        let client = self.client.lock().await;
+        let selected = client
             .query_opt(
                 "SELECT context_set.id, context_set.replies_evidence_id, \
                         work.source_evidence_id, work.source_record_index, \
@@ -790,8 +1263,7 @@ impl CommentFactStore {
             )?,
         };
 
-        let rows = self
-            .client
+        let rows = client
             .query(
                 "SELECT source_evidence_id, source_record_index, source_text, \
                         root_comment_id, parent_comment_id, reply_to_comment_id \
@@ -852,10 +1324,11 @@ impl CommentFactStore {
             return Err(StorageError::InvalidCurrentCommentSourceRecordIndex);
         }
 
-        let current_identity = self
-            .client
-            .query_opt(
-                "SELECT current_projection.note_id, current_projection.comment_id, \
+        let current_identity = {
+            let client = self.client.lock().await;
+            client
+                .query_opt(
+                    "SELECT current_projection.note_id, current_projection.comment_id, \
                         current_observation.source_text \
                    FROM comment_current_v0 AS current_projection \
                    JOIN comment_observation_v0 AS current_observation \
@@ -869,10 +1342,11 @@ impl CommentFactStore {
                     AND current_observation.source_evidence_id = $2 \
                     AND current_observation.source_record_index = $3 \
                   LIMIT 1",
-                &[&workspace_id, &source_evidence_id, &source_record_index],
-            )
-            .await
-            .map_err(StorageError::Database)?;
+                    &[&workspace_id, &source_evidence_id, &source_record_index],
+                )
+                .await
+                .map_err(StorageError::Database)?
+        };
 
         let Some(current_identity) = current_identity else {
             return Ok(None);
@@ -912,10 +1386,11 @@ impl CommentFactStore {
             return Err(StorageError::InvalidCurrentCommentSourceRecordIndex);
         }
 
-        let current_identity = self
-            .client
-            .query_opt(
-                "SELECT current_projection.note_id, current_projection.comment_id, \
+        let current_identity = {
+            let client = self.client.lock().await;
+            client
+                .query_opt(
+                    "SELECT current_projection.note_id, current_projection.comment_id, \
                         derivation.research_text, derivation.research_state \
                    FROM comment_current_v0 AS current_projection \
                    JOIN comment_observation_v0 AS current_observation \
@@ -933,10 +1408,11 @@ impl CommentFactStore {
                     AND current_observation.source_evidence_id = $2 \
                     AND current_observation.source_record_index = $3 \
                   LIMIT 1",
-                &[&workspace_id, &source_evidence_id, &source_record_index],
-            )
-            .await
-            .map_err(StorageError::Database)?;
+                    &[&workspace_id, &source_evidence_id, &source_record_index],
+                )
+                .await
+                .map_err(StorageError::Database)?
+        };
 
         let Some(current_identity) = current_identity else {
             return Ok(None);
@@ -1007,11 +1483,8 @@ impl CommentFactStore {
             return Err(StorageError::InvalidCommentDerivationMaterializationLimit);
         }
 
-        let transaction = self
-            .client
-            .transaction()
-            .await
-            .map_err(StorageError::Database)?;
+        let mut client = self.client.lock().await;
+        let transaction = client.transaction().await.map_err(StorageError::Database)?;
         let rows = transaction
             .query(
                 "SELECT current_observation.id, current_observation.source_text \
@@ -1094,11 +1567,8 @@ impl CommentFactStore {
         &mut self,
         prepared: PreparedCommentEvidenceAdmissionV0,
     ) -> Result<CommentFactAdmissionOutcomeV0, StorageError> {
-        let transaction = self
-            .client
-            .transaction()
-            .await
-            .map_err(StorageError::Database)?;
+        let mut client = self.client.lock().await;
+        let transaction = client.transaction().await.map_err(StorageError::Database)?;
 
         let detail_evidence = admit_source_evidence(
             &transaction,
@@ -1147,11 +1617,8 @@ impl CommentFactStore {
         &mut self,
         prepared: PreparedCommentContextEvidenceAdmissionV0,
     ) -> Result<CommentContextAdmissionOutcomeV0, StorageError> {
-        let transaction = self
-            .client
-            .transaction()
-            .await
-            .map_err(StorageError::Database)?;
+        let mut client = self.client.lock().await;
+        let transaction = client.transaction().await.map_err(StorageError::Database)?;
 
         let detail_evidence = admit_source_evidence(
             &transaction,
@@ -1318,6 +1785,7 @@ pub enum StorageError {
     InvalidCurrentCommentVoicesLimit,
     InvalidCurrentCommentVoicesOffset,
     InvalidCommentResearchPlanPreviewLimit,
+    InvalidCommentResearchRunPreparationLimit,
     InvalidCurrentCommentSourceRecordIndex,
     InvalidCommentDerivationMaterializationLimit,
     Preparation(EvidencePreparationError),
@@ -1335,6 +1803,7 @@ pub enum StorageError {
     InvalidPersistedContextTextAvailability,
     MissingPersistedCommentDerivation,
     InvalidPersistedCommentDerivation,
+    NoCurrentCommentResearchCandidates,
 }
 
 impl fmt::Display for StorageError {
@@ -1356,6 +1825,10 @@ impl fmt::Display for StorageError {
             Self::InvalidCommentResearchPlanPreviewLimit => write!(
                 formatter,
                 "comment research plan preview limit must be between 1 and {COMMENT_RESEARCH_PLAN_PREVIEW_V0_MAX_LIMIT}"
+            ),
+            Self::InvalidCommentResearchRunPreparationLimit => write!(
+                formatter,
+                "comment research run preparation limit must be between 1 and {COMMENT_RESEARCH_RUN_PREPARATION_V1_MAX_LIMIT}"
             ),
             Self::InvalidCurrentCommentSourceRecordIndex => write!(
                 formatter,
@@ -1424,11 +1897,120 @@ impl fmt::Display for StorageError {
                 formatter,
                 "persisted comment derivation does not match the deterministic cleaning contract"
             ),
+            Self::NoCurrentCommentResearchCandidates => write!(
+                formatter,
+                "current scope has no comment research inputs to freeze"
+            ),
         }
     }
 }
 
 impl std::error::Error for StorageError {}
+
+async fn build_current_comment_research_context_pack_in_transaction_v1(
+    transaction: &Transaction<'_>,
+    workspace_id: &str,
+    candidate: &CurrentCommentResearchPreparationCandidateV1,
+) -> Result<CommentResearchContextPackV1, StorageError> {
+    let selected = transaction
+        .query_opt(
+            "SELECT context_set.replies_evidence_id, work.source_evidence_id, \
+                    work.source_record_index, work.title_availability, \
+                    work.title_source_text, work.body_text_availability, \
+                    work.body_text_source_text \
+               FROM comment_current_v0 AS current_projection \
+               JOIN context_discussion_record_v0 AS matching_comment \
+                 ON matching_comment.workspace_id = current_projection.workspace_id \
+                AND matching_comment.platform = current_projection.platform \
+                AND matching_comment.note_id = current_projection.note_id \
+                AND matching_comment.comment_id = current_projection.comment_id \
+                AND matching_comment.record_kind = 'comment' \
+                AND matching_comment.text_sha256 = current_projection.text_sha256 \
+               JOIN source_context_capture_set_v0 AS context_set \
+                 ON context_set.workspace_id = matching_comment.workspace_id \
+                AND context_set.platform = matching_comment.platform \
+                AND context_set.note_id = matching_comment.note_id \
+                AND context_set.comments_evidence_id = matching_comment.source_evidence_id \
+               JOIN context_work_record_v0 AS work \
+                 ON work.source_evidence_id = context_set.detail_evidence_id \
+                AND work.source_record_index = 0 \
+              WHERE current_projection.workspace_id = $1 \
+                AND current_projection.platform = 'xhs' \
+                AND current_projection.note_id = $2 \
+                AND current_projection.comment_id = $3 \
+                AND current_projection.current_observation_id = $4 \
+              ORDER BY context_set.admitted_at DESC, context_set.id ASC \
+              LIMIT 1",
+            &[
+                &workspace_id,
+                &candidate.source_note_id,
+                &candidate.comment_id,
+                &candidate.observation_id,
+            ],
+        )
+        .await
+        .map_err(StorageError::Database)?;
+
+    let Some(selected) = selected else {
+        return Ok(build_comment_research_context_pack_v1(
+            CommentResearchContextPackInputV1 {
+                research_expression: candidate.research_text.clone(),
+                readiness: candidate.readiness.as_context_pack_readiness(),
+                has_source_backed_context: false,
+                related_discussion: Vec::new(),
+                work_title: ContextPackSourceTextV1::Unavailable,
+                work_body: ContextPackSourceTextV1::Unavailable,
+            },
+        ));
+    };
+
+    let replies_evidence_id: Uuid = selected.get(0);
+    let title =
+        read_context_text_availability(selected.get(3), selected.get::<_, Option<String>>(4))?;
+    let body_text =
+        read_context_text_availability(selected.get(5), selected.get::<_, Option<String>>(6))?;
+    let reply_rows = transaction
+        .query(
+            "SELECT source_text, root_comment_id, parent_comment_id, reply_to_comment_id \
+               FROM context_discussion_record_v0 \
+              WHERE source_evidence_id = $1 \
+                AND record_kind = 'reply' \
+                AND workspace_id = $2 \
+                AND platform = 'xhs' \
+                AND note_id = $3 \
+                AND (root_comment_id = $4 OR parent_comment_id = $4 OR reply_to_comment_id = $4) \
+              ORDER BY source_record_index ASC \
+              LIMIT $5",
+            &[
+                &replies_evidence_id,
+                &workspace_id,
+                &candidate.source_note_id,
+                &candidate.comment_id,
+                &CURRENT_COMMENT_CONTEXT_V0_MAX_REPLIES,
+            ],
+        )
+        .await
+        .map_err(StorageError::Database)?;
+
+    Ok(build_comment_research_context_pack_v1(
+        CommentResearchContextPackInputV1 {
+            research_expression: candidate.research_text.clone(),
+            readiness: candidate.readiness.as_context_pack_readiness(),
+            has_source_backed_context: true,
+            related_discussion: reply_rows
+                .into_iter()
+                .map(|row| ContextPackRelatedDiscussionInputV1 {
+                    text: row.get(0),
+                    root_comment: row.get::<_, Option<String>>(1).is_some(),
+                    parent_comment: row.get::<_, Option<String>>(2).is_some(),
+                    reply_to_comment: row.get::<_, Option<String>>(3).is_some(),
+                })
+                .collect(),
+            work_title: context_pack_source_text_v1(title),
+            work_body: context_pack_source_text_v1(body_text),
+        },
+    ))
+}
 
 fn context_discussion_sort_key(
     record: &PreparedContextDiscussionRecordV0,
