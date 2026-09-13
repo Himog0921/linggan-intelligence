@@ -17,8 +17,11 @@ use axum::{
 };
 use linggan_contracts::ContextTextAvailabilityV0;
 use linggan_storage_postgres::{
-    CURRENT_COMMENT_VOICES_V0_MAX_LIMIT, CommentFactStore, ContextSourceEvidenceRelationV0,
-    CurrentCommentContextBySourceLocatorV0, CurrentCommentRelatedReplyV0,
+    COMMENT_RESEARCH_PLAN_PREVIEW_V0_DEFAULT_LIMIT, CURRENT_COMMENT_VOICES_V0_MAX_LIMIT,
+    CommentFactStore, ContextSourceEvidenceRelationV0, CurrentCommentContextBySourceLocatorV0,
+    CurrentCommentRelatedReplyV0, CurrentCommentResearchPlanPreviewRequestV0,
+    CurrentCommentResearchPlanPreviewV0, CurrentCommentResearchPreviewCandidateV0,
+    CurrentCommentResearchPreviewSourceV0, CurrentCommentSourceEvidenceRelationV0,
     CurrentCommentVoiceFilterV1, CurrentCommentVoiceV0, CurrentCommentVoicesPageRequestV0,
     CurrentCommentWorkContextV0, StorageError,
 };
@@ -44,6 +47,10 @@ pub fn comment_research_router_v0(store: Arc<CommentFactStore>) -> Router {
         )
         .route("/api/v0/comment-research/voices", get(list_user_voices_v0))
         .route(
+            "/api/v0/comment-research/plan-preview",
+            get(preview_current_comment_research_plan_v0),
+        )
+        .route(
             "/api/v0/comment-research/voices/context",
             get(get_user_voice_context_v0),
         )
@@ -56,6 +63,13 @@ struct UserVoicesQueryV0 {
     limit: Option<String>,
     offset: Option<String>,
     filter: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CurrentCommentResearchPlanPreviewQueryV0 {
+    workspace_id: Option<String>,
+    scope: Option<String>,
+    limit: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -151,6 +165,129 @@ async fn list_user_voices_v0(
     }))
 }
 
+/// Returns a live scope explanation only. It intentionally does not create a
+/// plan, reserve rows, freeze an input sample, schedule work, or contact a
+/// model. Any later execution capability must use a separately authorized
+/// write path.
+async fn preview_current_comment_research_plan_v0(
+    State(store): State<Arc<CommentFactStore>>,
+    Query(query): Query<CurrentCommentResearchPlanPreviewQueryV0>,
+) -> Result<Json<CurrentCommentResearchPlanPreviewResponseV0>, ApiError> {
+    let workspace_id = query
+        .workspace_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(ApiError::InvalidRequest {
+            message: "workspace_id is required",
+        })?;
+    let scope = parse_current_comment_research_plan_scope(query.scope)?;
+    let limit = parse_i64_parameter(
+        query.limit,
+        "plan_preview_limit",
+        COMMENT_RESEARCH_PLAN_PREVIEW_V0_DEFAULT_LIMIT,
+    )?;
+    let request = CurrentCommentResearchPlanPreviewRequestV0::with_scope(limit, scope)
+        .map_err(ApiError::from_storage_input_error)?;
+    let preview = store
+        .preview_current_comment_research_plan_v0(&workspace_id, request)
+        .await
+        .map_err(ApiError::from_storage_read_error)?;
+
+    Ok(Json(preview.into()))
+}
+
+#[derive(Debug, Serialize)]
+struct CurrentCommentResearchPlanPreviewResponseV0 {
+    preview_state: &'static str,
+    scope: &'static str,
+    limit: i64,
+    preparation: CurrentCommentResearchPlanPreparationDtoV0,
+    source_distribution: Vec<CurrentCommentResearchPreviewSourceDtoV0>,
+    candidates: Vec<CurrentCommentResearchPreviewCandidateDtoV0>,
+}
+
+#[derive(Debug, Serialize)]
+struct CurrentCommentResearchPlanPreparationDtoV0 {
+    current_total: i64,
+    available_total: i64,
+    ready_total: i64,
+    needs_context_total: i64,
+    awaiting_cleaning_total: i64,
+    excluded_total: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct CurrentCommentResearchPreviewSourceDtoV0 {
+    source_note_id: String,
+    eligible_total: i64,
+    selected_total: i64,
+}
+
+/// Candidate text is the already-visible deterministic research expression,
+/// not the raw captured original. The browser gets only the same Evidence
+/// locator it can already use for the User Voices detail drawer.
+#[derive(Debug, Serialize)]
+struct CurrentCommentResearchPreviewCandidateDtoV0 {
+    source_note_id: String,
+    research_text: String,
+    readiness: &'static str,
+    current_admitted_at: String,
+    source_rotation_turn: i64,
+    source_evidence: UserVoiceSourceEvidenceDtoV0,
+}
+
+impl From<CurrentCommentResearchPlanPreviewV0> for CurrentCommentResearchPlanPreviewResponseV0 {
+    fn from(preview: CurrentCommentResearchPlanPreviewV0) -> Self {
+        Self {
+            preview_state: "live_read_only",
+            scope: preview.scope.as_storage_value(),
+            limit: preview.limit,
+            preparation: CurrentCommentResearchPlanPreparationDtoV0 {
+                current_total: preview.totals.current_total,
+                available_total: preview.totals.available_total,
+                ready_total: preview.totals.ready_total,
+                needs_context_total: preview.totals.needs_context_total,
+                awaiting_cleaning_total: preview.totals.awaiting_cleaning_total,
+                excluded_total: preview.totals.excluded_total,
+            },
+            source_distribution: preview
+                .sources
+                .into_iter()
+                .map(CurrentCommentResearchPreviewSourceDtoV0::from)
+                .collect(),
+            candidates: preview
+                .candidates
+                .into_iter()
+                .map(CurrentCommentResearchPreviewCandidateDtoV0::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<CurrentCommentResearchPreviewSourceV0> for CurrentCommentResearchPreviewSourceDtoV0 {
+    fn from(source: CurrentCommentResearchPreviewSourceV0) -> Self {
+        Self {
+            source_note_id: source.source_note_id,
+            eligible_total: source.eligible_total,
+            selected_total: source.selected_total,
+        }
+    }
+}
+
+impl From<CurrentCommentResearchPreviewCandidateV0>
+    for CurrentCommentResearchPreviewCandidateDtoV0
+{
+    fn from(candidate: CurrentCommentResearchPreviewCandidateV0) -> Self {
+        Self {
+            source_note_id: candidate.source_note_id,
+            research_text: candidate.research_text,
+            readiness: candidate.readiness.as_api_value(),
+            current_admitted_at: candidate.current_admitted_at,
+            source_rotation_turn: candidate.source_turn,
+            source_evidence: candidate.source_evidence.into(),
+        }
+    }
+}
+
 fn parse_user_voices_filter(raw: Option<String>) -> Result<CurrentCommentVoiceFilterV1, ApiError> {
     match raw.as_deref().unwrap_or("available") {
         "available" => Ok(CurrentCommentVoiceFilterV1::Available),
@@ -158,6 +295,19 @@ fn parse_user_voices_filter(raw: Option<String>) -> Result<CurrentCommentVoiceFi
         "needs_context" => Ok(CurrentCommentVoiceFilterV1::NeedsContext),
         _ => Err(ApiError::InvalidRequest {
             message: "filter must be available, ready, or needs_context",
+        }),
+    }
+}
+
+fn parse_current_comment_research_plan_scope(
+    raw: Option<String>,
+) -> Result<CurrentCommentVoiceFilterV1, ApiError> {
+    match raw.as_deref().unwrap_or("available") {
+        "available" => Ok(CurrentCommentVoiceFilterV1::Available),
+        "ready" => Ok(CurrentCommentVoiceFilterV1::Ready),
+        "needs_context" => Ok(CurrentCommentVoiceFilterV1::NeedsContext),
+        _ => Err(ApiError::InvalidRequest {
+            message: "scope must be available, ready, or needs_context",
         }),
     }
 }
@@ -214,6 +364,15 @@ struct UserVoiceRelatedDiscussionRelationshipDtoV0 {
 
 impl From<ContextSourceEvidenceRelationV0> for UserVoiceSourceEvidenceDtoV0 {
     fn from(relation: ContextSourceEvidenceRelationV0) -> Self {
+        Self {
+            evidence_id: relation.evidence_id.to_string(),
+            record_index: relation.record_index,
+        }
+    }
+}
+
+impl From<CurrentCommentSourceEvidenceRelationV0> for UserVoiceSourceEvidenceDtoV0 {
+    fn from(relation: CurrentCommentSourceEvidenceRelationV0) -> Self {
         Self {
             evidence_id: relation.evidence_id.to_string(),
             record_index: relation.record_index,
@@ -350,6 +509,7 @@ fn parse_i64_parameter(
             message: match parameter {
                 "limit" => "limit must be an integer",
                 "offset" => "offset must be an integer",
+                "plan_preview_limit" => "limit must be an integer",
                 _ => "invalid integer parameter",
             },
         }),
@@ -376,6 +536,9 @@ impl ApiError {
             StorageError::InvalidCurrentCommentVoicesOffset => Self::InvalidRequest {
                 message: "offset must be zero or greater",
             },
+            StorageError::InvalidCommentResearchPlanPreviewLimit => Self::InvalidRequest {
+                message: "limit must be between 1 and 100",
+            },
             StorageError::InvalidCurrentCommentSourceRecordIndex => Self::InvalidRequest {
                 message: "record_index must be zero or greater",
             },
@@ -388,6 +551,7 @@ impl ApiError {
             StorageError::BlankWorkspaceId
             | StorageError::InvalidCurrentCommentVoicesLimit
             | StorageError::InvalidCurrentCommentVoicesOffset
+            | StorageError::InvalidCommentResearchPlanPreviewLimit
             | StorageError::InvalidCurrentCommentSourceRecordIndex => {
                 Self::from_storage_input_error(error)
             }

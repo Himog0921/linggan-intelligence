@@ -50,7 +50,10 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
             <p class="eyebrow">评论研究 · 清洗语料 V1</p>
             <h1>用户原声</h1>
           </div>
-          <p class="page-summary">列表呈现确定性清洗后的可研究表达；打开详情可同时核对原始采集原声、来源证据与已采到的讨论语境。研究结论和趋势尚未生成。</p>
+          <div class="page-heading-actions">
+            <button class="quiet-button" id="plan-preview-button" type="button" disabled aria-describedby="plan-preview-help">查看自动研究范围</button>
+            <p class="page-summary" id="plan-preview-help">列表呈现确定性清洗后的可研究表达；打开详情可同时核对原始采集原声、来源证据与已采到的讨论语境。研究结论和趋势尚未生成。</p>
+          </div>
         </header>
 
         <div class="view-tabs" role="tablist" aria-label="评论研究视图">
@@ -154,12 +157,77 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
       </section>
     </aside>
 
+    <aside class="drawer plan-drawer" id="plan-preview-drawer" role="dialog" aria-modal="true" aria-labelledby="plan-preview-title" hidden>
+      <div class="drawer-header">
+        <h2 class="drawer-title" id="plan-preview-title">自动研究范围</h2>
+        <button class="icon-button" id="close-plan-preview" type="button" aria-label="关闭自动研究范围">×</button>
+      </div>
+      <section class="drawer-section" aria-labelledby="plan-preview-meaning-title">
+        <h3 id="plan-preview-meaning-title">这是范围预览，不是开始研究</h3>
+        <p class="drawer-copy">它只读取当前清洗语料，按来源作品轮换展示可能进入后续研究的一小段范围。不会创建任务、锁定样本、调用模型、组装上下文或执行研究。</p>
+      </section>
+      <form class="plan-controls" id="plan-preview-form" novalidate>
+        <div>
+          <label class="field-label" for="plan-preview-scope">查看范围</label>
+          <select class="workspace-input" id="plan-preview-scope" name="scope">
+            <option value="available">全部可用</option>
+            <option value="ready">可直接研究</option>
+            <option value="needs_context">需要上下文</option>
+          </select>
+        </div>
+        <div>
+          <label class="field-label" for="plan-preview-limit">显示上限</label>
+          <select class="workspace-input" id="plan-preview-limit" name="limit">
+            <option value="20">20 条</option>
+            <option value="50" selected>50 条</option>
+            <option value="100">100 条</option>
+          </select>
+        </div>
+        <button class="quiet-button" id="refresh-plan-preview" type="submit">更新预览</button>
+      </form>
+      <p class="status-message" id="plan-preview-status" role="status" aria-live="polite"></p>
+      <section class="drawer-section" aria-labelledby="plan-preparation-title">
+        <h3 id="plan-preparation-title">当前语料准备情况</h3>
+        <dl class="plan-totals" id="plan-preparation"></dl>
+      </section>
+      <section class="drawer-section" aria-labelledby="plan-sources-title">
+        <h3 id="plan-sources-title">本次预览中的来源分布</h3>
+        <p class="context-field-note">只列出本次实时预览实际选到的来源。它不是全量作品覆盖，也不是优先级或研究价值判断。</p>
+        <div class="drawer-table-scroller">
+          <table class="drawer-table">
+            <thead><tr><th scope="col">来源作品 ID</th><th scope="col">本范围可用</th><th scope="col">本次显示</th></tr></thead>
+            <tbody id="plan-sources-body"></tbody>
+          </table>
+        </div>
+      </section>
+      <section class="drawer-section" aria-labelledby="plan-candidates-title">
+        <h3 id="plan-candidates-title">当前候选原声</h3>
+        <p class="context-field-note" id="plan-candidates-note">候选按来源作品轮换；同一来源的第 1 条先于第 2 条出现。范围在每次读取时重新计算，尚未冻结。</p>
+        <div class="drawer-table-scroller">
+          <table class="drawer-table">
+            <thead><tr><th scope="col">清洗后研究表达</th><th scope="col">来源轮次</th><th scope="col">语料状态</th></tr></thead>
+            <tbody id="plan-candidates-body"></tbody>
+          </table>
+        </div>
+        <div class="context-notice" id="plan-preview-empty" hidden></div>
+      </section>
+    </aside>
+
     <script>
       (() => {
         "use strict";
 
         const pageLimit = 25;
-        const state = { workspaceId: "", filter: "available", offset: 0, total: 0, lastTrigger: null, contextRequestToken: 0 };
+        const state = {
+          workspaceId: "",
+          filter: "available",
+          offset: 0,
+          total: 0,
+          lastTrigger: null,
+          planLastTrigger: null,
+          contextRequestToken: 0,
+          planRequestToken: 0
+        };
         const form = document.getElementById("workspace-form");
         const workspaceInput = document.getElementById("workspace-id");
         const voiceFilter = document.getElementById("voice-filter");
@@ -178,6 +246,18 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         const closeDrawerButton = document.getElementById("close-drawer");
         const relatedDiscussion = document.getElementById("drawer-related-discussion");
         const workContext = document.getElementById("drawer-work-context");
+        const planPreviewButton = document.getElementById("plan-preview-button");
+        const planPreviewDrawer = document.getElementById("plan-preview-drawer");
+        const closePlanPreviewButton = document.getElementById("close-plan-preview");
+        const planPreviewForm = document.getElementById("plan-preview-form");
+        const planPreviewScope = document.getElementById("plan-preview-scope");
+        const planPreviewLimit = document.getElementById("plan-preview-limit");
+        const refreshPlanPreviewButton = document.getElementById("refresh-plan-preview");
+        const planPreviewStatus = document.getElementById("plan-preview-status");
+        const planPreparation = document.getElementById("plan-preparation");
+        const planSourcesBody = document.getElementById("plan-sources-body");
+        const planCandidatesBody = document.getElementById("plan-candidates-body");
+        const planPreviewEmpty = document.getElementById("plan-preview-empty");
 
         function setStatus(message, kind) {
           statusMessage.textContent = message;
@@ -193,6 +273,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           loadButton.textContent = loading ? "正在加载…" : "加载用户原声";
           previousButton.disabled = loading || state.offset === 0;
           nextButton.disabled = true;
+          planPreviewButton.disabled = loading || !state.workspaceId.trim();
         }
 
         function appendCell(row, label, content, className) {
@@ -309,6 +390,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
               setVisibleState("results");
               setStatus("列表显示确定性清洗后的研究表达；打开任意一条可核对原始采集原声与来源证据。", "");
             }
+            planPreviewButton.disabled = false;
           } catch (error) {
             clearRows();
             setVisibleState("initial");
@@ -447,6 +529,200 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           workContext.append(fields, evidence);
         }
 
+        function setPlanPreviewStatus(message, kind) {
+          planPreviewStatus.textContent = message;
+          planPreviewStatus.dataset.state = kind || "";
+        }
+
+        function setPlanPreviewLoading(loading) {
+          refreshPlanPreviewButton.disabled = loading;
+          refreshPlanPreviewButton.textContent = loading ? "正在读取…" : "更新预览";
+          planPreviewScope.disabled = loading;
+          planPreviewLimit.disabled = loading;
+        }
+
+        function appendPlanTotal(label, value, detail) {
+          const item = document.createElement("div");
+          const term = document.createElement("dt");
+          const definition = document.createElement("dd");
+          term.textContent = label;
+          definition.textContent = String(value);
+          if (detail) {
+            const note = document.createElement("p");
+            note.className = "plan-total-note";
+            note.textContent = detail;
+            item.append(term, definition, note);
+          } else {
+            item.append(term, definition);
+          }
+          planPreparation.append(item);
+        }
+
+        function clearPlanPreviewRows() {
+          planPreparation.replaceChildren();
+          planSourcesBody.replaceChildren();
+          planCandidatesBody.replaceChildren();
+          planPreviewEmpty.hidden = true;
+          planPreviewEmpty.replaceChildren();
+        }
+
+        function planScopeLabel(scope) {
+          if (scope === "ready") return "可直接研究";
+          if (scope === "needs_context") return "需要上下文";
+          return "全部可用";
+        }
+
+        function renderPlanPreparation(preparation) {
+          appendPlanTotal("当前原声", preparation.current_total, "当前 Comment Current 投影的数量");
+          appendPlanTotal("可用语料", preparation.available_total, "完成 V1 清洗、可进入范围预览");
+          appendPlanTotal("可直接研究", preparation.ready_total);
+          appendPlanTotal("需要上下文", preparation.needs_context_total, "后续研究需要另行读取已采上下文；本页没有组装它");
+          appendPlanTotal("等待清洗", preparation.awaiting_cleaning_total, "不会由预览自动物化");
+          appendPlanTotal("确定性排除", preparation.excluded_total, "纯无效或异常语料，不进入候选");
+        }
+
+        function appendPlanTableCell(row, text, className) {
+          const cell = document.createElement("td");
+          const content = document.createElement("span");
+          content.className = className || "";
+          content.textContent = text;
+          cell.append(content);
+          row.append(cell);
+        }
+
+        function renderPlanSources(sources) {
+          planSourcesBody.replaceChildren();
+          for (const source of sources) {
+            const row = document.createElement("tr");
+            appendPlanTableCell(row, source.source_note_id, "mono");
+            appendPlanTableCell(row, `${source.eligible_total} 条`, "metadata");
+            appendPlanTableCell(row, `${source.selected_total} 条`, "metadata");
+            planSourcesBody.append(row);
+          }
+        }
+
+        function renderPlanCandidates(candidates) {
+          planCandidatesBody.replaceChildren();
+          for (const candidate of candidates) {
+            const row = document.createElement("tr");
+            appendPlanTableCell(row, candidate.research_text, "plan-expression");
+            appendPlanTableCell(row, `该来源第 ${candidate.source_rotation_turn} 轮`, "metadata");
+            const status = candidate.readiness === "needs_context"
+              ? "需要上下文"
+              : "可直接研究";
+            appendPlanTableCell(row, status, candidate.readiness === "needs_context" ? "plan-caution" : "");
+            planCandidatesBody.append(row);
+          }
+        }
+
+        function renderPlanEmpty(preparation, scope) {
+          const message = document.createElement("p");
+          if (preparation.current_total === 0) {
+            message.textContent = "当前工作空间还没有已接入的用户原声，因此没有可预览的范围。";
+          } else if (preparation.available_total === 0 && preparation.awaiting_cleaning_total > 0) {
+            message.textContent = "当前原声尚在等待本地清洗物化。范围预览不会自行写入或触发清洗，因此暂不显示候选。";
+          } else if (preparation.available_total === 0 && preparation.excluded_total > 0) {
+            message.textContent = "当前原声均被确定性规则排除为无效或异常语料，因此没有进入候选范围。它不代表没有用户讨论。";
+          } else {
+            message.textContent = `“${planScopeLabel(scope)}”范围当前没有候选。可切换到其他语料状态查看；这不表示系统已经研究或拒绝了这些评论。`;
+          }
+          planPreviewEmpty.append(message);
+          planPreviewEmpty.hidden = false;
+        }
+
+        function isPlanPreviewPayload(payload) {
+          return payload
+            && payload.preview_state === "live_read_only"
+            && (payload.scope === "available" || payload.scope === "ready" || payload.scope === "needs_context")
+            && Number.isInteger(payload.limit)
+            && payload.preparation
+            && Array.isArray(payload.source_distribution)
+            && Array.isArray(payload.candidates);
+        }
+
+        function renderPlanPreview(payload) {
+          clearPlanPreviewRows();
+          renderPlanPreparation(payload.preparation);
+          renderPlanSources(payload.source_distribution);
+          renderPlanCandidates(payload.candidates);
+          if (payload.candidates.length === 0) {
+            renderPlanEmpty(payload.preparation, payload.scope);
+          }
+        }
+
+        async function loadPlanPreview() {
+          const workspaceId = state.workspaceId.trim();
+          if (!workspaceId) {
+            setPlanPreviewStatus("请先输入并加载工作空间 ID。当前没有读取自动研究范围。", "error");
+            return;
+          }
+          const requestToken = state.planRequestToken + 1;
+          state.planRequestToken = requestToken;
+          setPlanPreviewLoading(true);
+          setPlanPreviewStatus("正在读取当前范围；这不会创建任务或调用模型…", "loading");
+          try {
+            const parameters = new URLSearchParams({
+              workspace_id: workspaceId,
+              scope: planPreviewScope.value,
+              limit: planPreviewLimit.value
+            });
+            const response = await fetch(`/api/v0/comment-research/plan-preview?${parameters.toString()}`, {
+              headers: { "Accept": "application/json" },
+              credentials: "same-origin"
+            });
+            const payload = await response.json().catch(() => null);
+            if (requestToken !== state.planRequestToken || planPreviewDrawer.hidden) return;
+            if (!response.ok || !isPlanPreviewPayload(payload)) {
+              throw new Error(errorMessage(payload));
+            }
+            renderPlanPreview(payload);
+            const shown = payload.candidates.length;
+            setPlanPreviewStatus(
+              shown > 0
+                ? `实时范围显示 ${shown} 条候选；离开或再次更新后范围可能变化，当前没有冻结样本。`
+                : "已读取实时范围；当前没有符合该范围的候选。",
+              ""
+            );
+          } catch (error) {
+            if (requestToken !== state.planRequestToken || planPreviewDrawer.hidden) return;
+            clearPlanPreviewRows();
+            setPlanPreviewStatus(
+              error instanceof Error ? error.message : "无法读取自动研究范围。请稍后重试。",
+              "error"
+            );
+          } finally {
+            if (requestToken === state.planRequestToken) setPlanPreviewLoading(false);
+          }
+        }
+
+        function closePlanPreview() {
+          state.planRequestToken += 1;
+          planPreviewDrawer.hidden = true;
+          if (drawer.hidden) drawerBackdrop.hidden = true;
+          if (state.planLastTrigger instanceof HTMLElement) {
+            state.planLastTrigger.focus();
+          }
+        }
+
+        function openPlanPreview(trigger) {
+          const workspaceId = state.workspaceId.trim();
+          if (!workspaceId) {
+            setStatus("请先输入工作空间 ID 并加载用户原声，再查看自动研究范围。", "error");
+            workspaceInput.focus();
+            return;
+          }
+          state.planLastTrigger = trigger;
+          if (!drawer.hidden) {
+            state.contextRequestToken += 1;
+            drawer.hidden = true;
+          }
+          planPreviewScope.value = state.filter;
+          drawerBackdrop.hidden = false;
+          planPreviewDrawer.hidden = false;
+          closePlanPreviewButton.focus();
+          loadPlanPreview();
+        }
+
         function isContextPayload(payload) {
           return payload && (payload.availability === "available" || payload.availability === "unavailable");
         }
@@ -482,6 +758,10 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
 
         function openDrawer(voice, trigger) {
           state.lastTrigger = trigger;
+          if (!planPreviewDrawer.hidden) {
+            state.planRequestToken += 1;
+            planPreviewDrawer.hidden = true;
+          }
           document.getElementById("drawer-research-expression").textContent = voice.research_text;
           document.getElementById("drawer-original-voice").textContent = "正在按当前来源证据读取原始采集原声…";
           document.getElementById("drawer-note-id").textContent = voice.source_note_id;
@@ -500,7 +780,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         function closeDrawer() {
           state.contextRequestToken += 1;
           drawer.hidden = true;
-          drawerBackdrop.hidden = true;
+          if (planPreviewDrawer.hidden) drawerBackdrop.hidden = true;
           if (state.lastTrigger instanceof HTMLElement) {
             state.lastTrigger.focus();
           }
@@ -514,11 +794,27 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         });
         previousButton.addEventListener("click", () => loadVoices(Math.max(0, state.offset - pageLimit), previousButton));
         nextButton.addEventListener("click", () => loadVoices(state.offset + pageLimit, nextButton));
+        planPreviewButton.addEventListener("click", () => openPlanPreview(planPreviewButton));
+        planPreviewForm.addEventListener("submit", (event) => {
+          event.preventDefault();
+          loadPlanPreview();
+        });
         closeDrawerButton.addEventListener("click", closeDrawer);
-        drawerBackdrop.addEventListener("click", closeDrawer);
-        document.addEventListener("keydown", (event) => {
-          if (event.key === "Escape" && !drawer.hidden) {
+        closePlanPreviewButton.addEventListener("click", closePlanPreview);
+        drawerBackdrop.addEventListener("click", () => {
+          if (!planPreviewDrawer.hidden) {
+            closePlanPreview();
+          } else {
             closeDrawer();
+          }
+        });
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            if (!planPreviewDrawer.hidden) {
+              closePlanPreview();
+            } else if (!drawer.hidden) {
+              closeDrawer();
+            }
           }
         });
       })();
@@ -544,11 +840,18 @@ mod tests {
         assert!(USER_VOICES_PAGE_V0_HTML.contains("打开详情后按来源读取"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("已采到的相关讨论"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("/api/v0/comment-research/voices/context"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("查看自动研究范围"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("/api/v0/comment-research/plan-preview"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("不会创建任务、锁定样本、调用模型"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("范围在每次读取时重新计算，尚未冻结"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("当前原声与其来源证据仍可查看"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("等待本地清洗物化"));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("data-label=\\\"点赞\\\""));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("data-label=\\\"作者\\\""));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("data-label=\\\"发表时间\\\""));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("data-label=\\\"趋势\\\""));
+        assert!(!USER_VOICES_PAGE_V0_HTML.contains(">开始研究<"));
+        assert!(!USER_VOICES_PAGE_V0_HTML.contains("确认执行"));
+        assert!(!USER_VOICES_PAGE_V0_HTML.contains("type=\"checkbox\""));
     }
 }

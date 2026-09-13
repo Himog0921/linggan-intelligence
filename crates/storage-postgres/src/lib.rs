@@ -47,6 +47,15 @@ pub struct CommentFactStore {
 /// should be researched together.
 pub const CURRENT_COMMENT_VOICES_V0_MAX_LIMIT: i64 = 100;
 
+/// The maximum number of current User Voices displayed by one strictly
+/// read-only automatic-research scope preview. This is a display and planning
+/// bound only: it never creates a run, reserves a comment, or freezes input.
+pub const COMMENT_RESEARCH_PLAN_PREVIEW_V0_MAX_LIMIT: i64 = 100;
+
+/// The default preview size keeps the first read small while still showing a
+/// useful spread across source works.
+pub const COMMENT_RESEARCH_PLAN_PREVIEW_V0_DEFAULT_LIMIT: i64 = 50;
+
 /// Backfill is intentionally bounded and local. It has no model, network, or
 /// worker dependency, and is never triggered by a User Voices read.
 pub const COMMENT_DERIVATION_V1_MATERIALIZATION_MAX_LIMIT: i64 = 100;
@@ -119,6 +128,39 @@ impl CurrentCommentVoiceFilterV1 {
     }
 }
 
+/// A bounded, read-only request for the comments which would be considered by
+/// a future automatic-research action. There is deliberately no offset: this
+/// is a fresh scope preview, not a selection cart or a persisted plan.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchPlanPreviewRequestV0 {
+    limit: i64,
+    scope: CurrentCommentVoiceFilterV1,
+}
+
+impl CurrentCommentResearchPlanPreviewRequestV0 {
+    pub fn new(limit: i64) -> Result<Self, StorageError> {
+        Self::with_scope(limit, CurrentCommentVoiceFilterV1::Available)
+    }
+
+    pub fn with_scope(
+        limit: i64,
+        scope: CurrentCommentVoiceFilterV1,
+    ) -> Result<Self, StorageError> {
+        if !(1..=COMMENT_RESEARCH_PLAN_PREVIEW_V0_MAX_LIMIT).contains(&limit) {
+            return Err(StorageError::InvalidCommentResearchPlanPreviewLimit);
+        }
+        Ok(Self { limit, scope })
+    }
+
+    pub const fn limit(self) -> i64 {
+        self.limit
+    }
+
+    pub const fn scope(self) -> CurrentCommentVoiceFilterV1 {
+        self.scope
+    }
+}
+
 /// A compact research-readiness state for an already cleaned User Voice. It is
 /// preparation fact, not a model result or a task state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -177,6 +219,54 @@ pub struct CurrentCommentVoicesPageV0 {
     /// from table rows until the explicit bounded local materializer runs.
     pub awaiting_cleaning_total: i64,
     pub voices: Vec<CurrentCommentVoiceV0>,
+}
+
+/// Counts which make a scope preview explainable without claiming that a
+/// comment is already researched or that a task exists. All totals are over
+/// the current comment projection under `comment-cleaning.v1`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchPreparationTotalsV0 {
+    pub current_total: i64,
+    pub available_total: i64,
+    pub ready_total: i64,
+    pub needs_context_total: i64,
+    pub awaiting_cleaning_total: i64,
+    pub excluded_total: i64,
+}
+
+/// One source represented by candidates in the current bounded preview.
+/// `eligible_total` describes the chosen scope, while `selected_total` only
+/// describes this live preview. Neither is a research-quality score.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchPreviewSourceV0 {
+    pub source_note_id: String,
+    pub eligible_total: i64,
+    pub selected_total: i64,
+}
+
+/// One current, deterministically cleaned expression in a plan preview.
+/// Source turn is the explained rotation position within its own source work;
+/// it is not a platform ordering, priority score, or task identifier.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchPreviewCandidateV0 {
+    pub source_note_id: String,
+    pub research_text: String,
+    pub readiness: CurrentCommentVoiceReadinessV1,
+    pub current_admitted_at: String,
+    pub source_turn: i64,
+    pub source_evidence: CurrentCommentSourceEvidenceRelationV0,
+}
+
+/// The complete, live, side-effect-free automatic-research scope preview.
+/// It contains no execution object because previewing a scope must never
+/// reserve comments, write a plan, or trigger a model.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentResearchPlanPreviewV0 {
+    pub scope: CurrentCommentVoiceFilterV1,
+    pub limit: i64,
+    pub totals: CurrentCommentResearchPreparationTotalsV0,
+    pub sources: Vec<CurrentCommentResearchPreviewSourceV0>,
+    pub candidates: Vec<CurrentCommentResearchPreviewCandidateV0>,
 }
 
 /// The outcome of one bounded local materialization pass. This is deliberately
@@ -404,6 +494,199 @@ impl CommentFactStore {
             total,
             awaiting_cleaning_total,
             voices,
+        })
+    }
+
+    /// Previews a future automatic-research scope without doing any of the
+    /// things that start research. It issues one SELECT statement against the
+    /// current projection and V1 cleaning derivation only: no materialization,
+    /// no plan persistence, no task reservation, and no model or vector work.
+    ///
+    /// Candidates rotate through source works. The first current expression of
+    /// each source is considered before a second expression from any source;
+    /// ties are broken only by Linggan-local admission facts and stable source
+    /// identities. This does not claim platform chronology or research value.
+    pub async fn preview_current_comment_research_plan_v0(
+        &self,
+        workspace_id: &str,
+        request: CurrentCommentResearchPlanPreviewRequestV0,
+    ) -> Result<CurrentCommentResearchPlanPreviewV0, StorageError> {
+        if workspace_id.trim().is_empty() {
+            return Err(StorageError::BlankWorkspaceId);
+        }
+
+        let rows = self
+            .client
+            .query(
+                "WITH current_observations AS ( \
+                   SELECT current_projection.note_id, current_projection.comment_id, \
+                          current_observation.admitted_at, \
+                          current_observation.source_evidence_id, \
+                          current_observation.source_record_index, \
+                          derivation.research_state, derivation.research_text \
+                     FROM comment_current_v0 AS current_projection \
+                     JOIN comment_observation_v0 AS current_observation \
+                       ON current_observation.workspace_id = current_projection.workspace_id \
+                      AND current_observation.platform = current_projection.platform \
+                      AND current_observation.note_id = current_projection.note_id \
+                      AND current_observation.comment_id = current_projection.comment_id \
+                      AND current_observation.id = current_projection.current_observation_id \
+                     LEFT JOIN comment_derivation_v1 AS derivation \
+                       ON derivation.comment_observation_id = current_observation.id \
+                      AND derivation.cleaning_contract = 'comment-cleaning.v1' \
+                    WHERE current_projection.workspace_id = $1 \
+                      AND current_projection.platform = 'xhs' \
+                 ), totals AS ( \
+                   SELECT count(*)::BIGINT AS current_total, \
+                          count(*) FILTER (WHERE research_state IN ('analyzable', 'needs_context'))::BIGINT AS available_total, \
+                          count(*) FILTER (WHERE research_state = 'analyzable')::BIGINT AS ready_total, \
+                          count(*) FILTER (WHERE research_state = 'needs_context')::BIGINT AS needs_context_total, \
+                          count(*) FILTER (WHERE research_state IS NULL)::BIGINT AS awaiting_cleaning_total, \
+                          count(*) FILTER (WHERE research_state IN ('dropped', 'anomaly'))::BIGINT AS excluded_total \
+                     FROM current_observations \
+                 ), eligible AS ( \
+                   SELECT * FROM current_observations \
+                    WHERE research_state IN ('analyzable', 'needs_context') \
+                      AND ( \
+                        $2 = 'available' \
+                        OR ($2 = 'ready' AND research_state = 'analyzable') \
+                        OR ($2 = 'needs_context' AND research_state = 'needs_context') \
+                      ) \
+                 ), ranked AS ( \
+                   SELECT eligible.*, \
+                          row_number() OVER ( \
+                            PARTITION BY note_id \
+                            ORDER BY admitted_at ASC, comment_id ASC \
+                          )::BIGINT AS source_turn, \
+                          min(admitted_at) OVER (PARTITION BY note_id) AS source_first_admitted_at, \
+                          count(*) OVER (PARTITION BY note_id)::BIGINT AS source_eligible_total \
+                     FROM eligible \
+                 ), selected AS ( \
+                   SELECT * FROM ranked \
+                    ORDER BY source_turn ASC, source_first_admitted_at ASC, note_id ASC, admitted_at ASC, comment_id ASC \
+                    LIMIT $3 \
+                 ), preview_sources AS ( \
+                   SELECT note_id, \
+                          max(source_eligible_total)::BIGINT AS eligible_total, \
+                          count(*)::BIGINT AS selected_total, \
+                          min(source_first_admitted_at) AS source_first_admitted_at \
+                     FROM selected \
+                    GROUP BY note_id \
+                 ), rows AS ( \
+                   SELECT 0::INTEGER AS output_group, totals.current_total, totals.available_total, \
+                          totals.ready_total, totals.needs_context_total, totals.awaiting_cleaning_total, \
+                          totals.excluded_total, \
+                          NULL::TEXT AS source_note_id, NULL::TEXT AS research_text, \
+                          NULL::TEXT AS research_state, NULL::TEXT AS current_admitted_at, \
+                          NULL::UUID AS source_evidence_id, NULL::INTEGER AS source_record_index, \
+                          NULL::BIGINT AS source_turn, NULL::BIGINT AS eligible_total, \
+                          NULL::BIGINT AS selected_total, NULL::TIMESTAMPTZ AS source_first_admitted_at \
+                     FROM totals \
+                   UNION ALL \
+                   SELECT 1::INTEGER AS output_group, totals.current_total, totals.available_total, \
+                          totals.ready_total, totals.needs_context_total, totals.awaiting_cleaning_total, \
+                          totals.excluded_total, \
+                          selected.note_id, selected.research_text, selected.research_state, \
+                          to_char(selected.admitted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'), \
+                          selected.source_evidence_id, selected.source_record_index, selected.source_turn, \
+                          NULL::BIGINT AS eligible_total, NULL::BIGINT AS selected_total, \
+                          selected.source_first_admitted_at \
+                     FROM totals CROSS JOIN selected \
+                   UNION ALL \
+                   SELECT 2::INTEGER AS output_group, totals.current_total, totals.available_total, \
+                          totals.ready_total, totals.needs_context_total, totals.awaiting_cleaning_total, \
+                          totals.excluded_total, \
+                          preview_sources.note_id, NULL::TEXT AS research_text, NULL::TEXT AS research_state, \
+                          NULL::TEXT AS current_admitted_at, NULL::UUID AS source_evidence_id, \
+                          NULL::INTEGER AS source_record_index, NULL::BIGINT AS source_turn, \
+                          preview_sources.eligible_total, preview_sources.selected_total, \
+                          preview_sources.source_first_admitted_at \
+                     FROM totals CROSS JOIN preview_sources \
+                 ) \
+                 SELECT output_group, current_total, available_total, ready_total, needs_context_total, \
+                        awaiting_cleaning_total, excluded_total, source_note_id, research_text, \
+                        research_state, current_admitted_at, source_evidence_id, source_record_index, \
+                        source_turn, eligible_total, selected_total \
+                   FROM rows \
+                  ORDER BY output_group ASC, source_turn ASC NULLS LAST, \
+                           source_first_admitted_at ASC NULLS LAST, source_note_id ASC NULLS LAST, \
+                           current_admitted_at ASC NULLS LAST",
+                &[
+                    &workspace_id,
+                    &request.scope().as_storage_value(),
+                    &request.limit(),
+                ],
+            )
+            .await
+            .map_err(StorageError::Database)?;
+
+        let totals_row = rows.first().ok_or(StorageError::InvalidPersistedCurrent)?;
+        let totals = CurrentCommentResearchPreparationTotalsV0 {
+            current_total: totals_row.get(1),
+            available_total: totals_row.get(2),
+            ready_total: totals_row.get(3),
+            needs_context_total: totals_row.get(4),
+            awaiting_cleaning_total: totals_row.get(5),
+            excluded_total: totals_row.get(6),
+        };
+        let mut sources = Vec::new();
+        let mut candidates = Vec::new();
+        for row in rows {
+            match row.get::<_, i32>(0) {
+                0 => {}
+                1 => {
+                    let source_note_id = row
+                        .get::<_, Option<String>>(7)
+                        .ok_or(StorageError::InvalidPersistedCurrent)?;
+                    let research_text = row
+                        .get::<_, Option<String>>(8)
+                        .ok_or(StorageError::InvalidPersistedCommentDerivation)?;
+                    let research_state = row
+                        .get::<_, Option<String>>(9)
+                        .ok_or(StorageError::InvalidPersistedCommentDerivation)?;
+                    candidates.push(CurrentCommentResearchPreviewCandidateV0 {
+                        source_note_id,
+                        research_text,
+                        readiness: CurrentCommentVoiceReadinessV1::from_storage_value(
+                            &research_state,
+                        )?,
+                        current_admitted_at: row
+                            .get::<_, Option<String>>(10)
+                            .ok_or(StorageError::InvalidPersistedCurrent)?,
+                        source_evidence: CurrentCommentSourceEvidenceRelationV0 {
+                            evidence_id: row
+                                .get::<_, Option<Uuid>>(11)
+                                .ok_or(StorageError::InvalidPersistedCurrent)?,
+                            record_index: row
+                                .get::<_, Option<i32>>(12)
+                                .ok_or(StorageError::InvalidPersistedCurrent)?,
+                        },
+                        source_turn: row
+                            .get::<_, Option<i64>>(13)
+                            .ok_or(StorageError::InvalidPersistedCurrent)?,
+                    });
+                }
+                2 => sources.push(CurrentCommentResearchPreviewSourceV0 {
+                    source_note_id: row
+                        .get::<_, Option<String>>(7)
+                        .ok_or(StorageError::InvalidPersistedCurrent)?,
+                    eligible_total: row
+                        .get::<_, Option<i64>>(14)
+                        .ok_or(StorageError::InvalidPersistedCurrent)?,
+                    selected_total: row
+                        .get::<_, Option<i64>>(15)
+                        .ok_or(StorageError::InvalidPersistedCurrent)?,
+                }),
+                _ => return Err(StorageError::InvalidPersistedCurrent),
+            }
+        }
+
+        Ok(CurrentCommentResearchPlanPreviewV0 {
+            scope: request.scope(),
+            limit: request.limit(),
+            totals,
+            sources,
+            candidates,
         })
     }
 
@@ -908,6 +1191,7 @@ pub enum StorageError {
     BlankCommentContextIdentity,
     InvalidCurrentCommentVoicesLimit,
     InvalidCurrentCommentVoicesOffset,
+    InvalidCommentResearchPlanPreviewLimit,
     InvalidCurrentCommentSourceRecordIndex,
     InvalidCommentDerivationMaterializationLimit,
     Preparation(EvidencePreparationError),
@@ -942,6 +1226,10 @@ impl fmt::Display for StorageError {
             Self::InvalidCurrentCommentVoicesOffset => write!(
                 formatter,
                 "current comment voices offset must be zero or greater"
+            ),
+            Self::InvalidCommentResearchPlanPreviewLimit => write!(
+                formatter,
+                "comment research plan preview limit must be between 1 and {COMMENT_RESEARCH_PLAN_PREVIEW_V0_MAX_LIMIT}"
             ),
             Self::InvalidCurrentCommentSourceRecordIndex => write!(
                 formatter,

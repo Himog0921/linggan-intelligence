@@ -179,7 +179,7 @@ fingerprint 由研究正文、必要上下文版本、清洗版本、研究合�
 
 V0 进度：来源 validator、不可变 Evidence/CommentObservation、稳定身份、replay/current 规则与 PostgreSQL 攻击性证明已经落地；见 [`docs/proofs/comment-fact-storage-v0.md`](../../proofs/comment-fact-storage-v0.md)。它只覆盖配对 package 与原始正文变化，不代表 P2 原声浏览器、研究或问题页面已完成。
 
-Context Storage V0 追加：`content_detail + comments + replies` 的三包 Source Contract、不可变 Evidence 锚点、作品/讨论上下文存储和 hash 严格匹配的只读 context detail 已有隔离 PostgreSQL proof；其 HTTP 与原声详情抽屉读取已完成独立证明，见 [`docs/proofs/comment-context-storage-v0.md`](../../proofs/comment-context-storage-v0.md) 与 [`docs/proofs/comment-voice-context-read-api-v0.md`](../../proofs/comment-voice-context-read-api-v0.md)。它仍未实现清洗派生、Context Pack 截断、模型输入或研究结论。
+Context Storage V0 追加：`content_detail + comments + replies` 的三包 Source Contract、不可变 Evidence 锚点、作品/讨论上下文存储和 hash 严格匹配的只读 context detail 已有隔离 PostgreSQL proof；其 HTTP 与原声详情抽屉读取已完成独立证明，见 [`docs/proofs/comment-context-storage-v0.md`](../../proofs/comment-context-storage-v0.md) 与 [`docs/proofs/comment-voice-context-read-api-v0.md`](../../proofs/comment-voice-context-read-api-v0.md)。它已可与当前 comment-cleaning.v1 用户原声读取并用；仍未实现 Context Pack 截断、模型输入或研究结论。
 
 停止条件：没有更多真实 producer fixture 时，只完成已有形状的 validator 和缺口记录；不伪造 Capture/Evidence/Comment 已实现。
 
@@ -190,6 +190,8 @@ Context Storage V0 追加：`content_detail + comments + replies` 的三包 Sour
 ### P3：研究计划、Context Pack 与可观测运行
 
 交付：无副作用研究计划、fingerprint、跨 run 的可恢复调度、输入快照、模型/协议接缝、结构化输出与 evidence 校验、运行记录读模型。真实模型调用仅在用户明确授权后进行。
+
+P3 前置已完成：只读的范围预览 V0 已在用户原声页提供当前语料总数、清洗等待/排除口径、来源轮换候选和来源分布；它没有持久化计划、冻结样本、创建 run、生成 fingerprint、组装 Context Pack 或调用模型。隔离 PostgreSQL 证明见 [`comment-research-plan-preview-v0.md`](../../proofs/comment-research-plan-preview-v0.md)。这不代表 P3 其余交付已完成。
 
 ### P4：问题组织与结果页
 
