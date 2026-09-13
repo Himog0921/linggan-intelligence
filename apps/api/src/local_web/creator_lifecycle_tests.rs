@@ -500,7 +500,11 @@ fn target_drawer_styles_are_lids_bounded_for_the_desktop_workspace() {
     assert!(!TARGET_DRAWER_CSS.contains(".c-tg-row-open"));
     assert!(TARGET_DRAWER_CSS.contains(".life-control-row{min-width:0;"));
     assert!(TARGET_DRAWER_CSS.contains(".life-figure{min-width:0;"));
-    assert!(!TARGET_DRAWER_CSS.contains("gradient"));
+    // Mog explicitly approved one data-only gradient for the performance median line.  Keep
+    // the page-level LIDS guard closed for every other gradient-like treatment.
+    let allowed_trend_gradient = "background:linear-gradient(90deg,var(--lgi-body) 0%,var(--lgi-signal-ink) 56%,var(--lgi-signal) 100%)";
+    assert_eq!(TARGET_DRAWER_CSS.matches("gradient").count(), 1);
+    assert!(TARGET_DRAWER_CSS.contains(allowed_trend_gradient));
     assert!(!TARGET_DRAWER_CSS.contains("#fff"));
     assert!(!TARGET_DRAWER_CSS.contains("#000"));
     assert!(LIDS_TOKENS.contains("--lgi-focus: #335e72"));

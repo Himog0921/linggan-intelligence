@@ -1773,23 +1773,25 @@ fn lifecycle_overview(
         .then(|| performance_review(projection))
         .unwrap_or_default();
     let evidence = performance_evidence(target, projection, list_context);
-    // The reference surface leads with a time-bucket trend. The per-work scatter remains
-    // available as an explicit progressive disclosure: it is still the only precise way to
-    // inspect each qualified work without turning an aggregate bucket into a fake work record.
+    // Trend and distribution answer different questions from the same qualified point set:
+    // time buckets expose movement, while the scatter keeps every work inspectable.  Neither
+    // is a detail of the other, so both stay visible in the performance view.
     let distribution = if !has_points {
         String::new()
     } else {
         format!(
-            r#"<details class="life-distribution"><summary>查看每篇作品分布<span>每个点是一篇可分析作品</span></summary>
-                  <div class="life-legend" aria-label="散点含义">
+            r#"<article class="life-distribution-panel" aria-labelledby="life-distribution-title">
+                  <div class="life-trend-head"><div><div class="life-trend-eyebrow">逐篇证据</div><h2 id="life-distribution-title">逐篇作品分布</h2><p>每个点是一篇当前可分析作品；横轴保留发布时间，纵轴压缩 {metric} 的差距。</p></div><span class="life-trend-grain">逐篇可查</span></div>
+                  <div class="life-distribution-legend life-legend" aria-label="散点含义">
                     <span><i class="life-legend-dot life-legend-directory"></i>主页目录，详情待确认</span>
                     <span><i class="life-legend-dot life-legend-confirmed"></i>作者已确认</span>
                     <span><i class="life-legend-dot life-legend-new"></i>最近巡查新增</span>
                   </div>
                   {chart}{exclusions}
-                </details>"#,
+                </article>"#,
             chart = lifecycle_chart(target, projection, selected_work, list_context),
             exclusions = lifecycle_exclusions(projection),
+            metric = metric_label(projection.metric),
         )
     };
     let exclusions = if has_points {
@@ -1812,7 +1814,7 @@ fn lifecycle_overview(
               <div class="life-performance-controls"><div>{controls}</div><p>数据截至 <time>{as_of}</time></p></div>
               {summary}
               <div class="life-performance-grid{empty_state}"><article class="life-trend-panel">{trend}</article>{review}</div>
-              {evidence}{exclusions}{distribution}{selected}
+              {distribution}{evidence}{exclusions}{selected}
               <p class="life-boundary">这里比较的是该创作者自己的作品表现，不是“监控价值”评分。尚未建立内容分类，因此不按主题生成表现结论。</p>
             </section>"#,
         as_of = escape(&projection.as_of),
@@ -2052,7 +2054,7 @@ fn performance_trend_chart(projection: &CreatorLifecycleProjection) -> String {
     format!(
         r#"<div class="life-trend-head"><div><div class="life-trend-eyebrow">作品复核</div><h2>作品表现趋势</h2><p>柱形表示发布密度，主线使用同一时间桶的{metric}中位数；新巡查作品以信号环标出。</p></div><span class="life-trend-grain">自动聚合</span></div>
             <div class="life-trend-legend" aria-label="趋势图图例"><span><i class="life-legend-bar"></i>发布作品数</span><span><i class="life-legend-line"></i>{metric}中位数</span><span><i class="life-legend-dash"></i>最近窗口中位基准</span><span><i class="life-legend-ring"></i>巡查新增</span></div>
-            <figure class="life-trend-figure"><svg class="life-trend-chart" viewBox="0 0 980 470" role="img" aria-labelledby="life-trend-chart-title life-trend-chart-desc"><title id="life-trend-chart-title">创作者作品表现趋势</title><desc id="life-trend-chart-desc">横轴为当前时间窗口的月份，柱形表示可分析作品数，线条表示每月{metric}中位数。</desc>{grid}{bars}<line class="life-trend-benchmark" x1="{LEFT}" y1="{benchmark_y:.1}" x2="{trend_right:.1}" y2="{benchmark_y:.1}"/><text class="life-trend-benchmark-copy" x="{trend_right:.1}" y="{benchmark_copy_y:.1}" text-anchor="end">当前窗口中位 · {benchmark_label}</text><polyline class="life-trend-line" points="{line}"/>{dots}{labels}<text class="life-trend-axis" x="17" y="{vertical_label_y:.1}" transform="rotate(-90 17 {vertical_label_y:.1})" text-anchor="middle">{metric}中位数</text></svg></figure>"#,
+            <figure class="life-trend-figure"><svg class="life-trend-chart" viewBox="0 0 980 470" role="img" aria-labelledby="life-trend-chart-title life-trend-chart-desc"><title id="life-trend-chart-title">创作者作品表现趋势</title><desc id="life-trend-chart-desc">横轴为当前时间窗口的月份，柱形表示可分析作品数，线条表示每月{metric}中位数；线条从低饱和墨色过渡到信号橙，仍只表示同一条中位数序列。</desc><defs><linearGradient id="life-trend-line-gradient" gradientUnits="userSpaceOnUse" x1="{LEFT}" y1="{vertical_label_y:.1}" x2="{trend_right:.1}" y2="{vertical_label_y:.1}"><stop offset="0%" stop-color="var(--lgi-body)"/><stop offset="56%" stop-color="var(--lgi-signal-ink)"/><stop offset="100%" stop-color="var(--lgi-signal)"/></linearGradient></defs>{grid}{bars}<line class="life-trend-benchmark" x1="{LEFT}" y1="{benchmark_y:.1}" x2="{trend_right:.1}" y2="{benchmark_y:.1}"/><text class="life-trend-benchmark-copy" x="{trend_right:.1}" y="{benchmark_copy_y:.1}" text-anchor="end">当前窗口中位 · {benchmark_label}</text><polyline class="life-trend-line" points="{line}" stroke="url(#life-trend-line-gradient)"/>{dots}{labels}<text class="life-trend-axis" x="17" y="{vertical_label_y:.1}" transform="rotate(-90 17 {vertical_label_y:.1})" text-anchor="middle">{metric}中位数</text></svg></figure>"#,
         metric = metric_label(projection.metric),
         grid = grid,
         bars = bars,
