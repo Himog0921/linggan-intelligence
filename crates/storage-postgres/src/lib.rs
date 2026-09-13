@@ -38,6 +38,11 @@ pub const COMMENT_CONTEXT_STORAGE_V0_MIGRATION: &str =
 pub const COMMENT_DERIVATION_V1_MIGRATION: &str =
     include_str!("../../../database/migrations/0003_comment_derivation_v1.sql");
 
+/// Append-only V1 run-input and conclusion foundations. This migration has no
+/// worker, provider, queue, or HTTP entry point.
+pub const COMMENT_RESEARCH_EXECUTION_FOUNDATION_V1_MIGRATION: &str =
+    include_str!("../../../database/migrations/0004_comment_research_execution_foundation_v1.sql");
+
 /// A PostgreSQL adapter with no knowledge of HTTP, workers, models, or UI.
 pub struct CommentFactStore {
     client: Client,
@@ -390,6 +395,18 @@ impl CommentFactStore {
     pub async fn apply_comment_derivation_v1_migration(&self) -> Result<(), StorageError> {
         self.client
             .batch_execute(COMMENT_DERIVATION_V1_MIGRATION)
+            .await
+            .map_err(StorageError::Database)
+    }
+
+    /// Applies the V1 execution-foundation schema after Comment Fact and
+    /// Derivation V1. It only defines immutable storage; it does not create a
+    /// run, enqueue work, or contact a model.
+    pub async fn apply_comment_research_execution_foundation_v1_migration(
+        &self,
+    ) -> Result<(), StorageError> {
+        self.client
+            .batch_execute(COMMENT_RESEARCH_EXECUTION_FOUNDATION_V1_MIGRATION)
             .await
             .map_err(StorageError::Database)
     }

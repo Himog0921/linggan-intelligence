@@ -6,8 +6,16 @@
 //! results. Those are downstream concerns and must not be inferred from the
 //! producer's capture shape.
 
+pub mod comment_analysis_v1;
 pub mod xhs_comment_context_source_v0;
 pub mod xhs_comment_source_v0;
+
+pub use comment_analysis_v1::{
+    COMMENT_ANALYSIS_STRUCTURED_OUTPUT_CONTRACT_V1, CommentAnalysisFindingV1,
+    CommentAnalysisOutcomeV1, CommentAnalysisOutputV1, CommentAnalysisReferenceV1,
+    CommentAnalysisValidationErrorV1, DirectCommentEvidenceSpanV1,
+    ValidatedCommentAnalysisOutputV1, validate_comment_analysis_json_v1,
+};
 
 pub use xhs_comment_source_v0::{
     CapturePackageV0, CaptureRecordV0, PackageRole, SourceContractError, ValidatedCommentV0,

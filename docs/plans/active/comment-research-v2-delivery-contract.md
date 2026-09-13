@@ -193,6 +193,8 @@ Context Storage V0 追加：`content_detail + comments + replies` 的三包 Sour
 
 P3 前置已完成：只读的范围预览 V0 已在用户原声页提供当前语料总数、清洗等待/排除口径、来源轮换候选和来源分布；它没有持久化计划、冻结样本、创建 run、生成 fingerprint 或调用模型。用户原声详情还可读取 Context Pack V1 的文本内容预览，显示直接评论证据、讨论语境、作品语境以及固定预算/省略事实；它仍不持久化输入、做上下文充分性判断或调用模型。隔离 PostgreSQL 证明见 [`comment-research-plan-preview-v0.md`](../../proofs/comment-research-plan-preview-v0.md) 与 [`comment-voice-context-pack-preview-v1.md`](../../proofs/comment-voice-context-pack-preview-v1.md)。这不代表 P3 其余交付已完成。
 
+P3 执行基础 V1 现追加了 append-only 的 Run/RunItem 输入快照、运行事件与未来结论存储边界，以及纯函数 fingerprint 和 Comment Analysis Structured Output Contract V1。`analyzable` 的 Context Pack 可冻结为 `prepared`；`needs_context` 也保留来源支撑的冻结快照以便追溯，但固定为 `insufficient_needs_context` / `blocked`，不得进入执行。Run/RunItem 的 `execution_state` 与 CommentAnalysis 的 `success` / `no_signal` 结论分表保存，不能互相替代。当前没有创建 Run 的 HTTP/API、队列、worker、provider、模型调用、token/费用记录或真实研究结果；具体隔离证明见 [`comment-research-execution-foundation-v1.md`](../../proofs/comment-research-execution-foundation-v1.md)。
+
 ### P4：问题组织与结果页
 
 交付：原子语义、向量接缝、候选召回、稳定 Problem、问题详情与覆盖口径、结果版本和证据回溯。算法计算与 LLM 复核必须分开；不要求人工逐条标注。

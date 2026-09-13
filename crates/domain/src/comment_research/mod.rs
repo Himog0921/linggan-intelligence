@@ -6,6 +6,7 @@
 //! returned text only as a derived research representation.
 
 mod context_pack_v1;
+mod execution_v1;
 
 pub use context_pack_v1::{
     COMMENT_RESEARCH_CONTEXT_PACK_V1_DIRECT_EVIDENCE_MAX_CHARS,
@@ -18,6 +19,13 @@ pub use context_pack_v1::{
     ContextPackPreviewSourceTextV1, ContextPackPreviewTextV1, ContextPackReadinessV1,
     ContextPackRelatedDiscussionInputV1, ContextPackSourceTextV1,
     build_comment_research_context_pack_v1,
+};
+pub use execution_v1::{
+    COMMENT_ANALYSIS_OUTPUT_SCHEMA_V1, COMMENT_RESEARCH_EXECUTION_CONTRACT_V1,
+    COMMENT_RESEARCH_FINGERPRINT_V1, COMMENT_RESEARCH_INPUT_SNAPSHOT_VERSION_V1,
+    ContextSufficiencyV1, FrozenCommentResearchContextPackV1, ResearchFingerprintErrorV1,
+    ResearchFingerprintInputV1, ResearchModelStrategyV1, freeze_comment_research_context_pack_v1,
+    research_fingerprint_v1,
 };
 
 /// The outcome of deterministic preparation for comment research.
