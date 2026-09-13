@@ -7,7 +7,9 @@ use core::fmt;
 
 use linggan_contracts::{CapturePackageV0, ContextTextAvailabilityV0};
 use linggan_domain::comment_research::{
-    CleaningReasonCode, CommentResearchState, clean_comment_for_research,
+    CleaningReasonCode, CommentResearchContextPackInputV1, CommentResearchContextPackV1,
+    CommentResearchState, ContextPackReadinessV1, ContextPackRelatedDiscussionInputV1,
+    ContextPackSourceTextV1, build_comment_research_context_pack_v1, clean_comment_for_research,
 };
 use linggan_evidence::{
     CommentSourceIdentityV0, EvidencePreparationError, PreparedCommentContextEvidenceAdmissionV0,
@@ -182,6 +184,13 @@ impl CurrentCommentVoiceReadinessV1 {
         match self {
             Self::Ready => "ready",
             Self::NeedsContext => "needs_context",
+        }
+    }
+
+    const fn as_context_pack_readiness(self) -> ContextPackReadinessV1 {
+        match self {
+            Self::Ready => ContextPackReadinessV1::Ready,
+            Self::NeedsContext => ContextPackReadinessV1::NeedsContext,
         }
     }
 }
@@ -864,6 +873,106 @@ impl CommentFactStore {
         }))
     }
 
+    /// Resolves a list-visible Evidence locator into a pure, bounded Context
+    /// Pack V1 preview. This is only text assembly for inspection: it does not
+    /// create an input snapshot, reserve a comment, call a model, or make a
+    /// context-sufficiency decision for future execution.
+    ///
+    /// The locator must still back a current Observation with a current
+    /// `comment-cleaning.v1` analyzable/needs-context derivation. Thus an old
+    /// Evidence record cannot be used to view an input pack for a body that has
+    /// since advanced, and a dropped/anomalous comment never becomes a pack.
+    pub async fn get_current_comment_research_context_pack_by_source_locator_v1(
+        &self,
+        workspace_id: &str,
+        source_evidence_id: Uuid,
+        source_record_index: i32,
+    ) -> Result<Option<CommentResearchContextPackV1>, StorageError> {
+        if workspace_id.trim().is_empty() {
+            return Err(StorageError::BlankWorkspaceId);
+        }
+        if source_record_index < 0 {
+            return Err(StorageError::InvalidCurrentCommentSourceRecordIndex);
+        }
+
+        let current_identity = self
+            .client
+            .query_opt(
+                "SELECT current_projection.note_id, current_projection.comment_id, \
+                        derivation.research_text, derivation.research_state \
+                   FROM comment_current_v0 AS current_projection \
+                   JOIN comment_observation_v0 AS current_observation \
+                     ON current_observation.workspace_id = current_projection.workspace_id \
+                    AND current_observation.platform = current_projection.platform \
+                    AND current_observation.note_id = current_projection.note_id \
+                    AND current_observation.comment_id = current_projection.comment_id \
+                    AND current_observation.id = current_projection.current_observation_id \
+                   JOIN comment_derivation_v1 AS derivation \
+                     ON derivation.comment_observation_id = current_observation.id \
+                    AND derivation.cleaning_contract = 'comment-cleaning.v1' \
+                    AND derivation.research_state IN ('analyzable', 'needs_context') \
+                  WHERE current_projection.workspace_id = $1 \
+                    AND current_projection.platform = 'xhs' \
+                    AND current_observation.source_evidence_id = $2 \
+                    AND current_observation.source_record_index = $3 \
+                  LIMIT 1",
+                &[&workspace_id, &source_evidence_id, &source_record_index],
+            )
+            .await
+            .map_err(StorageError::Database)?;
+
+        let Some(current_identity) = current_identity else {
+            return Ok(None);
+        };
+        let note_id: String = current_identity.get(0);
+        let comment_id: String = current_identity.get(1);
+        let research_expression = current_identity
+            .get::<_, Option<String>>(2)
+            .ok_or(StorageError::InvalidPersistedCommentDerivation)?;
+        let research_state = current_identity
+            .get::<_, Option<String>>(3)
+            .ok_or(StorageError::InvalidPersistedCommentDerivation)?;
+        let readiness = CurrentCommentVoiceReadinessV1::from_storage_value(&research_state)?;
+        let context = self
+            .get_current_comment_context_detail_v0(workspace_id, &note_id, &comment_id)
+            .await?;
+
+        let pack = match context {
+            Some(context) => {
+                let CurrentCommentContextDetailV0 {
+                    work_context,
+                    related_replies,
+                } = context;
+                build_comment_research_context_pack_v1(CommentResearchContextPackInputV1 {
+                    research_expression,
+                    readiness: readiness.as_context_pack_readiness(),
+                    has_source_backed_context: true,
+                    related_discussion: related_replies
+                        .into_iter()
+                        .map(|reply| ContextPackRelatedDiscussionInputV1 {
+                            text: reply.text,
+                            root_comment: reply.root_comment_id.is_some(),
+                            parent_comment: reply.parent_comment_id.is_some(),
+                            reply_to_comment: reply.reply_to_comment_id.is_some(),
+                        })
+                        .collect(),
+                    work_title: context_pack_source_text_v1(work_context.title),
+                    work_body: context_pack_source_text_v1(work_context.body_text),
+                })
+            }
+            None => build_comment_research_context_pack_v1(CommentResearchContextPackInputV1 {
+                research_expression,
+                readiness: readiness.as_context_pack_readiness(),
+                has_source_backed_context: false,
+                related_discussion: Vec::new(),
+                work_title: ContextPackSourceTextV1::Unavailable,
+                work_body: ContextPackSourceTextV1::Unavailable,
+            }),
+        };
+
+        Ok(Some(pack))
+    }
+
     /// Materializes at most `limit` legacy current observations that predate
     /// Comment Derivation V1. This is intentionally explicit and bounded: a
     /// read request never mutates corpus state. Re-running the method after a
@@ -1321,6 +1430,14 @@ fn context_text_storage_values(
         ContextTextAvailabilityV0::Unavailable => ("unavailable", None),
         ContextTextAvailabilityV0::Blank => ("blank", None),
         ContextTextAvailabilityV0::Observed(value) => ("observed", Some(value)),
+    }
+}
+
+fn context_pack_source_text_v1(value: ContextTextAvailabilityV0) -> ContextPackSourceTextV1 {
+    match value {
+        ContextTextAvailabilityV0::Unavailable => ContextPackSourceTextV1::Unavailable,
+        ContextTextAvailabilityV0::Blank => ContextPackSourceTextV1::Blank,
+        ContextTextAvailabilityV0::Observed(value) => ContextPackSourceTextV1::Observed(value),
     }
 }
 

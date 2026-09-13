@@ -473,3 +473,45 @@ h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.2rem); font-weight: 650; letter
   .plan-controls .quiet-button { width: 100%; }
   .plan-totals { grid-template-columns: 1fr; }
 }
+
+.context-pack-button {
+  margin-top: 0.9rem;
+}
+
+.context-pack-preview[hidden] {
+  display: none;
+}
+
+.context-pack-preview {
+  display: grid;
+  gap: 0;
+  margin-top: 1rem;
+  border-top: 1px solid var(--rule);
+}
+
+.context-pack-subsection {
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--rule);
+}
+
+.context-pack-subsection h4 {
+  margin: 0 0 0.55rem;
+  color: var(--ink);
+  font-size: 0.76rem;
+  font-weight: 650;
+  letter-spacing: 0.035em;
+}
+
+.context-pack-omissions {
+  display: grid;
+  gap: 0.45rem;
+  margin: 0.8rem 0 0;
+  padding-left: 1.1rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.context-pack-subsection .context-notice {
+  margin-top: 0.9rem;
+}

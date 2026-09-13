@@ -5,6 +5,21 @@
 //! comment from any source. Callers retain the raw comment unchanged and use the
 //! returned text only as a derived research representation.
 
+mod context_pack_v1;
+
+pub use context_pack_v1::{
+    COMMENT_RESEARCH_CONTEXT_PACK_V1_DIRECT_EVIDENCE_MAX_CHARS,
+    COMMENT_RESEARCH_CONTEXT_PACK_V1_DISCUSSION_ITEM_LIMIT,
+    COMMENT_RESEARCH_CONTEXT_PACK_V1_DISCUSSION_ITEM_MAX_CHARS,
+    COMMENT_RESEARCH_CONTEXT_PACK_V1_TOTAL_MAX_CHARS,
+    COMMENT_RESEARCH_CONTEXT_PACK_V1_WORK_BODY_MAX_CHARS,
+    COMMENT_RESEARCH_CONTEXT_PACK_V1_WORK_TITLE_MAX_CHARS, CommentResearchContextPackInputV1,
+    CommentResearchContextPackV1, ContextPackDiscussionExcerptV1, ContextPackOmissionV1,
+    ContextPackPreviewSourceTextV1, ContextPackPreviewTextV1, ContextPackReadinessV1,
+    ContextPackRelatedDiscussionInputV1, ContextPackSourceTextV1,
+    build_comment_research_context_pack_v1,
+};
+
 /// The outcome of deterministic preparation for comment research.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommentResearchState {

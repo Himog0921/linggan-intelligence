@@ -16,6 +16,16 @@ use axum::{
     routing::get,
 };
 use linggan_contracts::ContextTextAvailabilityV0;
+use linggan_domain::comment_research::{
+    COMMENT_RESEARCH_CONTEXT_PACK_V1_DIRECT_EVIDENCE_MAX_CHARS,
+    COMMENT_RESEARCH_CONTEXT_PACK_V1_DISCUSSION_ITEM_LIMIT,
+    COMMENT_RESEARCH_CONTEXT_PACK_V1_DISCUSSION_ITEM_MAX_CHARS,
+    COMMENT_RESEARCH_CONTEXT_PACK_V1_TOTAL_MAX_CHARS,
+    COMMENT_RESEARCH_CONTEXT_PACK_V1_WORK_BODY_MAX_CHARS,
+    COMMENT_RESEARCH_CONTEXT_PACK_V1_WORK_TITLE_MAX_CHARS, CommentResearchContextPackV1,
+    ContextPackOmissionV1, ContextPackPreviewSourceTextV1, ContextPackPreviewTextV1,
+    ContextPackReadinessV1,
+};
 use linggan_storage_postgres::{
     COMMENT_RESEARCH_PLAN_PREVIEW_V0_DEFAULT_LIMIT, CURRENT_COMMENT_VOICES_V0_MAX_LIMIT,
     CommentFactStore, ContextSourceEvidenceRelationV0, CurrentCommentContextBySourceLocatorV0,
@@ -53,6 +63,10 @@ pub fn comment_research_router_v0(store: Arc<CommentFactStore>) -> Router {
         .route(
             "/api/v0/comment-research/voices/context",
             get(get_user_voice_context_v0),
+        )
+        .route(
+            "/api/v0/comment-research/voices/context-pack",
+            get(get_user_voice_context_pack_v1),
         )
         .with_state(store)
 }
@@ -482,6 +496,228 @@ async fn get_user_voice_context_v0(
     };
 
     Ok(Json(lookup.into()))
+}
+
+/// Returns a bounded, source-backed content assembly preview for one current
+/// cleaned User Voice. It has no prompt/system contract, execution state,
+/// provider choice, token data, or persistence side effect. The browser uses
+/// the same list-visible Evidence locator as the regular detail drawer.
+async fn get_user_voice_context_pack_v1(
+    State(store): State<Arc<CommentFactStore>>,
+    Query(query): Query<UserVoiceContextQueryV0>,
+) -> Result<Json<UserVoiceContextPackResponseV1>, ApiError> {
+    let workspace_id = query
+        .workspace_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(ApiError::InvalidRequest {
+            message: "workspace_id is required",
+        })?;
+    let evidence_id = query
+        .evidence_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(ApiError::InvalidRequest {
+            message: "evidence_id is required",
+        })?;
+    let evidence_id = Uuid::parse_str(&evidence_id).map_err(|_| ApiError::InvalidRequest {
+        message: "evidence_id must be a UUID",
+    })?;
+    let source_record_index = parse_source_record_index(query.record_index)?;
+
+    let Some(pack) = store
+        .get_current_comment_research_context_pack_by_source_locator_v1(
+            &workspace_id,
+            evidence_id,
+            source_record_index,
+        )
+        .await
+        .map_err(ApiError::from_storage_read_error)?
+    else {
+        return Err(ApiError::CurrentVoiceNotFound);
+    };
+
+    Ok(Json(pack.into()))
+}
+
+/// This DTO intentionally contains assembled source text only. It must never
+/// become a route for raw Evidence, comment identity, author identity, model
+/// settings, Prompt text, execution objects, or model output.
+#[derive(Debug, Serialize)]
+struct UserVoiceContextPackResponseV1 {
+    preview_state: &'static str,
+    readiness: &'static str,
+    direct_comment_evidence: UserVoiceContextPackPreviewTextDtoV1,
+    discussion_context: UserVoiceContextPackDiscussionDtoV1,
+    work_context: UserVoiceContextPackWorkDtoV1,
+    budget: UserVoiceContextPackBudgetDtoV1,
+    omissions: Vec<&'static str>,
+    future_execution_note: &'static str,
+}
+
+#[derive(Debug, Serialize)]
+struct UserVoiceContextPackPreviewTextDtoV1 {
+    text: String,
+    truncated: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct UserVoiceContextPackDiscussionDtoV1 {
+    availability: &'static str,
+    excerpts: Vec<UserVoiceContextPackDiscussionExcerptDtoV1>,
+}
+
+#[derive(Debug, Serialize)]
+struct UserVoiceContextPackDiscussionExcerptDtoV1 {
+    text: UserVoiceContextPackPreviewTextDtoV1,
+    relationship: UserVoiceRelatedDiscussionRelationshipDtoV0,
+}
+
+#[derive(Debug, Serialize)]
+struct UserVoiceContextPackWorkDtoV1 {
+    availability: &'static str,
+    title: UserVoiceContextPackSourceTextDtoV1,
+    body_text: UserVoiceContextPackSourceTextDtoV1,
+}
+
+#[derive(Debug, Serialize)]
+struct UserVoiceContextPackSourceTextDtoV1 {
+    availability: &'static str,
+    text: Option<String>,
+    truncated: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct UserVoiceContextPackBudgetDtoV1 {
+    included_characters: usize,
+    total_character_limit: usize,
+    direct_comment_evidence_character_limit: usize,
+    related_discussion_item_limit: usize,
+    related_discussion_item_character_limit: usize,
+    work_title_character_limit: usize,
+    work_body_character_limit: usize,
+}
+
+impl From<ContextPackPreviewTextV1> for UserVoiceContextPackPreviewTextDtoV1 {
+    fn from(value: ContextPackPreviewTextV1) -> Self {
+        Self {
+            text: value.text,
+            truncated: value.truncated,
+        }
+    }
+}
+
+impl From<ContextPackPreviewSourceTextV1> for UserVoiceContextPackSourceTextDtoV1 {
+    fn from(value: ContextPackPreviewSourceTextV1) -> Self {
+        match value {
+            ContextPackPreviewSourceTextV1::Observed(value) => Self {
+                availability: "observed",
+                text: Some(value.text),
+                truncated: value.truncated,
+            },
+            ContextPackPreviewSourceTextV1::Blank => Self {
+                availability: "blank",
+                text: None,
+                truncated: false,
+            },
+            ContextPackPreviewSourceTextV1::Unavailable => Self {
+                availability: "unavailable",
+                text: None,
+                truncated: false,
+            },
+        }
+    }
+}
+
+fn context_pack_readiness_api_value(value: ContextPackReadinessV1) -> &'static str {
+    match value {
+        ContextPackReadinessV1::Ready => "ready",
+        ContextPackReadinessV1::NeedsContext => "needs_context",
+    }
+}
+
+fn context_pack_omission_message(value: ContextPackOmissionV1) -> &'static str {
+    match value {
+        ContextPackOmissionV1::DirectEvidenceTruncated => {
+            "当前原声的研究表达超过预览上限，已仅保留前 480 个字符。"
+        }
+        ContextPackOmissionV1::DiscussionExcerptTruncated => {
+            "至少一条已采到的相关讨论超过每条 220 个字符，预览仅保留其前段。"
+        }
+        ContextPackOmissionV1::DiscussionItemLimitReached => {
+            "本次最多纳入 3 条已读取的相关讨论；其余已读取内容未放入预览。"
+        }
+        ContextPackOmissionV1::WorkTitleTruncated => {
+            "作品标题超过预览上限，已仅保留前 160 个字符。"
+        }
+        ContextPackOmissionV1::WorkBodyTruncated => "作品正文超过预览上限，已仅保留前 500 个字符。",
+        ContextPackOmissionV1::SourceBackedContextUnavailable => {
+            "当前原声尚无正文匹配的来源上下文；这不表示平台没有其他文本。"
+        }
+    }
+}
+
+impl From<CommentResearchContextPackV1> for UserVoiceContextPackResponseV1 {
+    fn from(pack: CommentResearchContextPackV1) -> Self {
+        let has_source_backed_context = pack.has_source_backed_context;
+        let readiness = pack.readiness;
+        Self {
+            preview_state: "source_backed_read_only",
+            readiness: context_pack_readiness_api_value(readiness),
+            direct_comment_evidence: pack.direct_comment_evidence.into(),
+            discussion_context: UserVoiceContextPackDiscussionDtoV1 {
+                availability: if has_source_backed_context {
+                    "available"
+                } else {
+                    "unavailable"
+                },
+                excerpts: pack
+                    .discussion_context
+                    .into_iter()
+                    .map(|entry| UserVoiceContextPackDiscussionExcerptDtoV1 {
+                        text: entry.text.into(),
+                        relationship: UserVoiceRelatedDiscussionRelationshipDtoV0 {
+                            root_comment: entry.root_comment,
+                            parent_comment: entry.parent_comment,
+                            reply_to_comment: entry.reply_to_comment,
+                        },
+                    })
+                    .collect(),
+            },
+            work_context: UserVoiceContextPackWorkDtoV1 {
+                availability: if has_source_backed_context {
+                    "available"
+                } else {
+                    "unavailable"
+                },
+                title: pack.work_title.into(),
+                body_text: pack.work_body.into(),
+            },
+            budget: UserVoiceContextPackBudgetDtoV1 {
+                included_characters: pack.included_characters,
+                total_character_limit: COMMENT_RESEARCH_CONTEXT_PACK_V1_TOTAL_MAX_CHARS,
+                direct_comment_evidence_character_limit:
+                    COMMENT_RESEARCH_CONTEXT_PACK_V1_DIRECT_EVIDENCE_MAX_CHARS,
+                related_discussion_item_limit:
+                    COMMENT_RESEARCH_CONTEXT_PACK_V1_DISCUSSION_ITEM_LIMIT,
+                related_discussion_item_character_limit:
+                    COMMENT_RESEARCH_CONTEXT_PACK_V1_DISCUSSION_ITEM_MAX_CHARS,
+                work_title_character_limit: COMMENT_RESEARCH_CONTEXT_PACK_V1_WORK_TITLE_MAX_CHARS,
+                work_body_character_limit: COMMENT_RESEARCH_CONTEXT_PACK_V1_WORK_BODY_MAX_CHARS,
+            },
+            omissions: pack
+                .omissions
+                .into_iter()
+                .map(context_pack_omission_message)
+                .collect(),
+            future_execution_note: match readiness {
+                ContextPackReadinessV1::NeedsContext => {
+                    "当前表达标记为需要上下文。此处只展示已采到的文本；后续实际研究仍必须单独检查上下文是否充足。"
+                }
+                ContextPackReadinessV1::Ready => {
+                    "这是只读内容装配预览，不会执行研究。后续实际研究仍必须单独检查输入是否充足。"
+                }
+            },
+        }
+    }
 }
 
 fn parse_source_record_index(raw: Option<String>) -> Result<i32, ApiError> {

@@ -146,6 +146,12 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         <h3 id="context-title">作品上下文</h3>
         <div id="drawer-work-context" aria-live="polite"></div>
       </section>
+      <section class="drawer-section" aria-labelledby="context-pack-title">
+        <h3 id="context-pack-title">研究输入预览</h3>
+        <p class="context-field-note">查看未来研究可能接收的已采到文本。当前评论的清洗表达单独作为直接证据；回复和作品内容只用于理解语境。这里不是实际 Prompt，不会执行研究。</p>
+        <button class="quiet-button context-pack-button" id="load-context-pack" type="button">查看研究输入预览</button>
+        <div class="context-pack-preview" id="drawer-context-pack" aria-live="polite" hidden></div>
+      </section>
       <section class="drawer-section" aria-labelledby="source-evidence-title">
         <h3 id="source-evidence-title">来源证据</h3>
         <dl class="drawer-list">
@@ -223,9 +229,11 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           filter: "available",
           offset: 0,
           total: 0,
+          currentVoice: null,
           lastTrigger: null,
           planLastTrigger: null,
           contextRequestToken: 0,
+          contextPackRequestToken: 0,
           planRequestToken: 0
         };
         const form = document.getElementById("workspace-form");
@@ -246,6 +254,8 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         const closeDrawerButton = document.getElementById("close-drawer");
         const relatedDiscussion = document.getElementById("drawer-related-discussion");
         const workContext = document.getElementById("drawer-work-context");
+        const contextPackButton = document.getElementById("load-context-pack");
+        const contextPackPreview = document.getElementById("drawer-context-pack");
         const planPreviewButton = document.getElementById("plan-preview-button");
         const planPreviewDrawer = document.getElementById("plan-preview-drawer");
         const closePlanPreviewButton = document.getElementById("close-plan-preview");
@@ -529,6 +539,210 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           workContext.append(fields, evidence);
         }
 
+        function clearContextPackPreview() {
+          state.contextPackRequestToken += 1;
+          contextPackButton.disabled = false;
+          contextPackButton.textContent = "查看研究输入预览";
+          contextPackPreview.hidden = true;
+          contextPackPreview.replaceChildren();
+        }
+
+        function setContextPackLoading(loading) {
+          contextPackButton.disabled = loading;
+          contextPackButton.textContent = loading ? "正在读取预览…" : "查看研究输入预览";
+        }
+
+        function appendContextPackText(root, title, value, unavailableMessage) {
+          const section = document.createElement("section");
+          section.className = "context-pack-subsection";
+          const heading = document.createElement("h4");
+          heading.textContent = title;
+          const text = document.createElement("p");
+          text.className = "drawer-copy";
+          if (value && typeof value.text === "string") {
+            text.textContent = value.text;
+          } else {
+            text.className = "context-field-note";
+            text.textContent = unavailableMessage;
+          }
+          section.append(heading, text);
+          if (value && value.truncated === true) {
+            const note = document.createElement("p");
+            note.className = "context-field-note";
+            note.textContent = "此处只保留了来源文本的前段，完整内容没有在预览中展示。";
+            section.append(note);
+          }
+          root.append(section);
+        }
+
+        function appendContextPackDiscussion(root, discussion) {
+          const section = document.createElement("section");
+          section.className = "context-pack-subsection";
+          const heading = document.createElement("h4");
+          heading.textContent = "讨论语境";
+          section.append(heading);
+          const excerpts = discussion && Array.isArray(discussion.excerpts) ? discussion.excerpts : [];
+          if (!discussion || discussion.availability !== "available") {
+            const note = document.createElement("p");
+            note.className = "context-field-note";
+            note.textContent = "当前没有正文匹配的已采到讨论语境。这不表示平台没有其他讨论。";
+            section.append(note);
+          } else if (excerpts.length === 0) {
+            const note = document.createElement("p");
+            note.className = "context-field-note";
+            note.textContent = "当前已采到的这组来源中，没有关联到这条原声的回复可放入预览。它不表示完整评论树为空。";
+            section.append(note);
+          } else {
+            const list = document.createElement("div");
+            list.className = "discussion-list";
+            for (const excerpt of excerpts) {
+              const entry = document.createElement("article");
+              entry.className = "discussion-entry";
+              const text = document.createElement("p");
+              text.className = "drawer-copy";
+              text.textContent = excerpt && excerpt.text && typeof excerpt.text.text === "string"
+                ? excerpt.text.text
+                : "已采到的讨论文本不可读取。";
+              const relation = document.createElement("p");
+              relation.className = "discussion-meta";
+              const labels = relationshipLabels(excerpt && excerpt.relationship);
+              relation.textContent = labels.length > 0
+                ? `与当前原声的已观察关系：${labels.join("、")}`
+                : "与当前原声的已观察关系未取得。";
+              entry.append(text, relation);
+              if (excerpt && excerpt.text && excerpt.text.truncated === true) {
+                const note = document.createElement("p");
+                note.className = "context-field-note";
+                note.textContent = "此处只保留了这条讨论的前段。";
+                entry.append(note);
+              }
+              list.append(entry);
+            }
+            section.append(list);
+          }
+          root.append(section);
+        }
+
+        function appendContextPackWork(root, work) {
+          const section = document.createElement("section");
+          section.className = "context-pack-subsection";
+          const heading = document.createElement("h4");
+          heading.textContent = "作品语境";
+          section.append(heading);
+          if (!work || work.availability !== "available") {
+            const note = document.createElement("p");
+            note.className = "context-field-note";
+            note.textContent = "当前没有正文匹配的已采到作品语境。这不表示平台没有作品正文。";
+            section.append(note);
+          } else {
+            const fields = document.createElement("div");
+            fields.className = "context-fields";
+            appendContextText(fields, "作品标题", work.title);
+            appendContextText(fields, "作品正文", work.body_text);
+            section.append(fields);
+          }
+          root.append(section);
+        }
+
+        function appendContextPackBoundary(root, payload) {
+          const section = document.createElement("section");
+          section.className = "context-pack-subsection";
+          const heading = document.createElement("h4");
+          heading.textContent = "本次省略与边界";
+          const budget = payload.budget || {};
+          const budgetNote = document.createElement("p");
+          budgetNote.className = "context-field-note";
+          const included = Number.isInteger(budget.included_characters) ? budget.included_characters : "未取得";
+          const total = Number.isInteger(budget.total_character_limit) ? budget.total_character_limit : "未取得";
+          budgetNote.textContent = `本预览纳入 ${included} / ${total} 个字符。当前原声、讨论和作品字段各有固定上限；这里不包含任何执行信息。`;
+          section.append(heading, budgetNote);
+          const omissions = Array.isArray(payload.omissions) ? payload.omissions : [];
+          if (omissions.length > 0) {
+            const list = document.createElement("ul");
+            list.className = "context-pack-omissions";
+            for (const omission of omissions) {
+              if (typeof omission !== "string") continue;
+              const item = document.createElement("li");
+              item.textContent = omission;
+              list.append(item);
+            }
+            section.append(list);
+          } else {
+            const note = document.createElement("p");
+            note.className = "context-field-note";
+            note.textContent = "当前已读取的字段没有因本预览上限被省略；这不代表来源覆盖完整。";
+            section.append(note);
+          }
+          if (typeof payload.future_execution_note === "string") {
+            const executionNote = document.createElement("p");
+            executionNote.className = "context-notice";
+            executionNote.textContent = payload.future_execution_note;
+            section.append(executionNote);
+          }
+          root.append(section);
+        }
+
+        function isContextPackPayload(payload) {
+          return payload
+            && payload.preview_state === "source_backed_read_only"
+            && (payload.readiness === "ready" || payload.readiness === "needs_context")
+            && payload.direct_comment_evidence
+            && typeof payload.direct_comment_evidence.text === "string"
+            && payload.discussion_context
+            && payload.work_context
+            && payload.budget
+            && Array.isArray(payload.omissions);
+        }
+
+        function renderContextPackPreview(payload) {
+          contextPackPreview.replaceChildren();
+          appendContextPackText(
+            contextPackPreview,
+            "当前评论的直接证据",
+            payload.direct_comment_evidence,
+            "当前清洗后研究表达不可读取。"
+          );
+          appendContextPackDiscussion(contextPackPreview, payload.discussion_context);
+          appendContextPackWork(contextPackPreview, payload.work_context);
+          appendContextPackBoundary(contextPackPreview, payload);
+          contextPackPreview.hidden = false;
+        }
+
+        async function loadContextPack() {
+          const currentVoice = state.currentVoice;
+          if (!currentVoice || drawer.hidden) return;
+          const requestToken = state.contextPackRequestToken + 1;
+          state.contextPackRequestToken = requestToken;
+          setContextPackLoading(true);
+          try {
+            const parameters = new URLSearchParams({
+              workspace_id: state.workspaceId,
+              evidence_id: currentVoice.source_evidence.evidence_id,
+              record_index: String(currentVoice.source_evidence.record_index)
+            });
+            const response = await fetch(`/api/v0/comment-research/voices/context-pack?${parameters.toString()}`, {
+              headers: { "Accept": "application/json" },
+              credentials: "same-origin"
+            });
+            const payload = await response.json().catch(() => null);
+            if (requestToken !== state.contextPackRequestToken || drawer.hidden) return;
+            if (!response.ok || !isContextPackPayload(payload)) {
+              throw new Error("无法读取研究输入预览。当前原声与来源详情仍可查看，请稍后重试。");
+            }
+            renderContextPackPreview(payload);
+          } catch (error) {
+            if (requestToken !== state.contextPackRequestToken || drawer.hidden) return;
+            contextPackPreview.replaceChildren();
+            const notice = document.createElement("p");
+            notice.className = "context-notice context-notice-error";
+            notice.textContent = error instanceof Error ? error.message : "无法读取研究输入预览。";
+            contextPackPreview.append(notice);
+            contextPackPreview.hidden = false;
+          } finally {
+            if (requestToken === state.contextPackRequestToken) setContextPackLoading(false);
+          }
+        }
+
         function setPlanPreviewStatus(message, kind) {
           planPreviewStatus.textContent = message;
           planPreviewStatus.dataset.state = kind || "";
@@ -758,6 +972,8 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
 
         function openDrawer(voice, trigger) {
           state.lastTrigger = trigger;
+          state.currentVoice = voice;
+          clearContextPackPreview();
           if (!planPreviewDrawer.hidden) {
             state.planRequestToken += 1;
             planPreviewDrawer.hidden = true;
@@ -779,6 +995,8 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
 
         function closeDrawer() {
           state.contextRequestToken += 1;
+          clearContextPackPreview();
+          state.currentVoice = null;
           drawer.hidden = true;
           if (planPreviewDrawer.hidden) drawerBackdrop.hidden = true;
           if (state.lastTrigger instanceof HTMLElement) {
@@ -795,6 +1013,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         previousButton.addEventListener("click", () => loadVoices(Math.max(0, state.offset - pageLimit), previousButton));
         nextButton.addEventListener("click", () => loadVoices(state.offset + pageLimit, nextButton));
         planPreviewButton.addEventListener("click", () => openPlanPreview(planPreviewButton));
+        contextPackButton.addEventListener("click", loadContextPack);
         planPreviewForm.addEventListener("submit", (event) => {
           event.preventDefault();
           loadPlanPreview();
@@ -839,7 +1058,11 @@ mod tests {
         assert!(USER_VOICES_PAGE_V0_HTML.contains("全部可用"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("打开详情后按来源读取"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("已采到的相关讨论"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("研究输入预览"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("当前评论的直接证据"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("本次省略与边界"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("/api/v0/comment-research/voices/context"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("/api/v0/comment-research/voices/context-pack"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("查看自动研究范围"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("/api/v0/comment-research/plan-preview"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("不会创建任务、锁定样本、调用模型"));
