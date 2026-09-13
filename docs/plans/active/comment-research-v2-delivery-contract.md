@@ -177,6 +177,8 @@ fingerprint 由研究正文、必要上下文版本、清洗版本、研究合�
 
 当前证据：`fixtures/xhs/comment-evidence-set-v1.json` 已提供一个去标识化的真实 `content_detail + comments` 来源形状对。它只解锁 package/record/跨包作品身份的 runtime validator；它不证明完整 collection profile，不能跳过缺口 fixture、PostgreSQL 约束或用户原声页面验收。
 
+V0 进度：来源 validator、不可变 Evidence/CommentObservation、稳定身份、replay/current 规则与 PostgreSQL 攻击性证明已经落地；见 [`docs/proofs/comment-fact-storage-v0.md`](../../proofs/comment-fact-storage-v0.md)。它只覆盖配对 package 与原始正文变化，不代表 P2 原声浏览器、研究或问题页面已完成。
+
 停止条件：没有更多真实 producer fixture 时，只完成已有形状的 validator 和缺口记录；不伪造 Capture/Evidence/Comment 已实现。
 
 ### P2：评论语料与原声浏览器
@@ -199,7 +201,7 @@ fingerprint 由研究正文、必要上下文版本、清洗版本、研究合�
 
 - 输入跨边界均做运行时验证；反例不能悄悄降级。
 - 原始 Comment/Observation 不能被清洗或 AI 覆盖。
-- 同身份 replay、不同行文更新、拒绝 observation、并发 current 推进、迟到结果和跨作品相同 comment id 均有隔离 PostgreSQL 证明。
+- P1 V0 已证明：同身份 replay、不同正文更新、来源 pair 追溯、跨作品相同 comment id、拒绝 history mutation，以及两个 client 对同一身份的本地接纳顺序推进。它没有证明 source time、迟到来源事件或模型结果的时间排序语义。
 - 计划预览无数据库副作用、无模型调用；同一 fingerprint 成功或 no-signal 不会重新收费；cancelled 能恢复；暂态失败不会无限循环。
 - Context Pack 实际包含允许的文本，而不仅是 ID/hash manifest；输出证据范围必须命中当前评论文本。
 - 用户页面能区分「没有原声」「原声未研究」「没有已发布结果」「范围不可比」「无法访问」，不把 Unknown 显示为 0 或正常。

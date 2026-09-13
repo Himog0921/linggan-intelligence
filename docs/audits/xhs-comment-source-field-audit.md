@@ -1,6 +1,6 @@
 # XHS Comment 来源字段审计（新 Rust 项目 P1）
 
-状态：`PARTIAL — 已有去标识化来源形状证据；仍不足以创建完整生产 DDL`
+状态：`PARTIAL — Comment Fact Storage V0 已有隔离 PostgreSQL 证明；完整生产来源模型仍冻结`
 审计日期：2026-09-13
 范围：只读审计 `references/current-v2/` 的插件与工作台固定快照；不代表新仓库已经接入这些 producer。
 
@@ -8,7 +8,7 @@
 
 当前参考快照足以确认：XHS 评论必须以 `noteId + commentId` 组成稳定身份，最小可确认字段是父作品身份和评论文本。它不足以证明父/根评论、评论者、点赞、发表时间、作品正文/OCR/ASR 在每个采集 profile 中都稳定可用。
 
-一组来自现有本地运行时、已去标识化的 `content_detail + comments` CapturePackage 已保存为 [`fixtures/xhs/comment-evidence-set-v1.json`](../../fixtures/xhs/comment-evidence-set-v1.json)，其 SHA-256 为 `0eb0dd567bafabb4b2511c5c83531959c544cb8a90261050c17a6e4ca38e6234`。它允许开始写入**来源形状 validator**，但只有一个配对样本，仍不能把所有可见字段写成必填或默认事实，更不能创建完整生产 DDL。特别是 `comment_probe` 不能伪造已获得作品正文或评论发表时间。
+一组来自现有本地运行时、已去标识化的 `content_detail + comments` CapturePackage 已保存为 [`fixtures/xhs/comment-evidence-set-v1.json`](../../fixtures/xhs/comment-evidence-set-v1.json)，其 SHA-256 为 `0eb0dd567bafabb4b2511c5c83531959c544cb8a90261050c17a6e4ca38e6234`。它已经支持一个严格限于已证明字段的 **Comment Fact Storage V0**：来源形状 validator、不可变 Evidence/CommentObservation、稳定评论身份与 current projection 均有隔离 PostgreSQL proof。由于只有一个配对样本，它仍不能把所有可见字段写成必填或默认事实，更不能扩展为完整生产 DDL。特别是 `comment_probe` 不能伪造已获得作品正文或评论发表时间。
 
 ## 已确认的来源线索
 
@@ -48,7 +48,7 @@ text: non-empty string
 
 已取得的 `comment-evidence-set-v1.json` 是真实 producer 的去标识化来源形状证据，不是手工按旧 schema 编造的 JSON。它证明本地运行时可分别交付 `content_detail` 与 `comments` 包，并让新项目在不接触原始个人数据的前提下验证外层包、record 和跨包 `noteId` 关系。
 
-它**不**证明完整性、评论树、replay、文本变更、缺字段包或不同 collection profile 的稳定行为。
+它**不**证明完整 collection profile、评论树、缺字段包或不同 collection profile 的稳定行为。V0 的 replay 与原文变化规则由对这个真实形状的脱敏、攻击性输入和隔离 PostgreSQL proof 验证；它不应被误读为 producer 已提供了所有这些场景。
 
 ## Fixture 仍需补齐的场景
 
@@ -62,14 +62,18 @@ text: non-empty string
 
 fixture 必须删除或替换账户名、原文 URL、Cookie、授权、个人联系方式和可反向识别信息，同时保留字段存在性、类型和 nested shape。其 canonical JSON、来源版本和 SHA-256 应写入新项目的 fixture manifest。
 
-## P1 开工门槛
+## P1 V0 开工门槛与剩余冻结项
 
-以下条件满足后，才可以新增数据库 baseline 与 Rust ingress：
+以下条件已满足，因此可以新增**仅限 V0** 的数据库 baseline 与 Rust ingress：
 
-- 当前 fixture 已进入本仓库；对应的 Rust runtime validator 与攻击性测试必须先通过；
-- 选定的 collection profile、terminal 和 coverage 字段已写成版本化合同；
-- Comment、CommentObservation 与 WorkObservation 的 accepted/current 规则有攻击性用例；
-- 明确 `comment_probe` 的父作品上下文不可用行为；
-- 有隔离 PostgreSQL 环境用以证明 append-only、replay、跨作品同 comment id 和 current pointer 约束。
+- 当前 fixture 已进入本仓库；对应的 Rust runtime validator 与攻击性测试通过；
+- Comment / CommentObservation / Current 的 V0 replay 规则有攻击性用例；
+- 有隔离 PostgreSQL proof 证明 append-only、replay、跨作品同 comment id 和 current pointer 约束。
 
-在此之前，本仓库可独立推进确定性清洗、页面信息合同与 fixture tooling，但不能宣称 Evidence 或 Comment 领域链已实现。
+以下更宽的 P1 条件仍未满足，必须继续冻结：
+
+- collection profile、terminal 和 coverage 的版本化语义；
+- `comment_probe` 的父作品上下文不可用行为；
+- WorkObservation、评论树、评论发表时间和完整来源字段的运行时合同。
+
+V0 只证明现有配对形状下的事实接入链。缺少这些 fixture 和合同，相关领域与页面能力仍不得声称已实现。

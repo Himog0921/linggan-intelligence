@@ -49,7 +49,11 @@ pub struct CapturePackageV0 {
 pub struct CaptureRecordV0 {
     pub kind: String,
     pub payload: Value,
-    #[serde(rename = "sourceObject", default)]
+    #[serde(
+        rename = "sourceObject",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub source_object: Option<Value>,
     #[serde(flatten)]
     pub extensions: Map<String, Value>,

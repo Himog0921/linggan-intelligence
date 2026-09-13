@@ -7,3 +7,8 @@ publish.workspace = true
 
 [lints]
 workspace = true
+
+[dependencies]
+linggan-contracts = { path = "../contracts" }
+serde_json = "1"
+sha2 = "0.10"
