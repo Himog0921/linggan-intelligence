@@ -135,6 +135,20 @@ pub struct CurrentCommentContextDetailV0 {
     pub related_replies: Vec<CurrentCommentRelatedReplyV0>,
 }
 
+/// The result of resolving a browser-supplied Evidence locator against the
+/// current comment projection.
+///
+/// `None` from the containing storage read means the locator no longer names a
+/// current comment source for this workspace. `context: None` instead means
+/// the locator is current, but no complete, text-matching context capture has
+/// been admitted. Keeping those cases separate prevents an old source record
+/// from being presented as a current voice, while avoiding a false claim that
+/// the platform has no context.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CurrentCommentContextBySourceLocatorV0 {
+    pub context: Option<CurrentCommentContextDetailV0>,
+}
+
 /// Context reads return at most this many related reply facts. This bound is a
 /// transport safety limit, not a claim that the complete discussion tree was
 /// captured.
@@ -373,6 +387,56 @@ impl CommentFactStore {
             work_context,
             related_replies,
         }))
+    }
+
+    /// Resolves a list-visible source Evidence locator only if it still backs
+    /// the current comment projection for this workspace. The browser never
+    /// supplies a comment ID: storage resolves it internally, then delegates to
+    /// the bounded context read above. This method performs no writes.
+    pub async fn get_current_comment_context_by_source_locator_v0(
+        &self,
+        workspace_id: &str,
+        source_evidence_id: Uuid,
+        source_record_index: i32,
+    ) -> Result<Option<CurrentCommentContextBySourceLocatorV0>, StorageError> {
+        if workspace_id.trim().is_empty() {
+            return Err(StorageError::BlankWorkspaceId);
+        }
+        if source_record_index < 0 {
+            return Err(StorageError::InvalidCurrentCommentSourceRecordIndex);
+        }
+
+        let current_identity = self
+            .client
+            .query_opt(
+                "SELECT current_projection.note_id, current_projection.comment_id \
+                   FROM comment_current_v0 AS current_projection \
+                   JOIN comment_observation_v0 AS current_observation \
+                     ON current_observation.workspace_id = current_projection.workspace_id \
+                    AND current_observation.platform = current_projection.platform \
+                    AND current_observation.note_id = current_projection.note_id \
+                    AND current_observation.comment_id = current_projection.comment_id \
+                    AND current_observation.id = current_projection.current_observation_id \
+                  WHERE current_projection.workspace_id = $1 \
+                    AND current_projection.platform = 'xhs' \
+                    AND current_observation.source_evidence_id = $2 \
+                    AND current_observation.source_record_index = $3 \
+                  LIMIT 1",
+                &[&workspace_id, &source_evidence_id, &source_record_index],
+            )
+            .await
+            .map_err(StorageError::Database)?;
+
+        let Some(current_identity) = current_identity else {
+            return Ok(None);
+        };
+        let note_id: String = current_identity.get(0);
+        let comment_id: String = current_identity.get(1);
+        let context = self
+            .get_current_comment_context_detail_v0(workspace_id, &note_id, &comment_id)
+            .await?;
+
+        Ok(Some(CurrentCommentContextBySourceLocatorV0 { context }))
     }
 
     /// Validates then admits two producer packages atomically.
@@ -644,6 +708,7 @@ pub enum StorageError {
     BlankCommentContextIdentity,
     InvalidCurrentCommentVoicesLimit,
     InvalidCurrentCommentVoicesOffset,
+    InvalidCurrentCommentSourceRecordIndex,
     Preparation(EvidencePreparationError),
     Database(tokio_postgres::Error),
     SourceRecordIndexOutOfRange,
@@ -674,6 +739,10 @@ impl fmt::Display for StorageError {
             Self::InvalidCurrentCommentVoicesOffset => write!(
                 formatter,
                 "current comment voices offset must be zero or greater"
+            ),
+            Self::InvalidCurrentCommentSourceRecordIndex => write!(
+                formatter,
+                "current comment source record index must be zero or greater"
             ),
             Self::Preparation(error) => {
                 write!(formatter, "comment evidence preparation failed: {error}")

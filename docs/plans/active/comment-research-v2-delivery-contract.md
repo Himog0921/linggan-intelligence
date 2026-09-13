@@ -179,7 +179,7 @@ fingerprint 由研究正文、必要上下文版本、清洗版本、研究合�
 
 V0 进度：来源 validator、不可变 Evidence/CommentObservation、稳定身份、replay/current 规则与 PostgreSQL 攻击性证明已经落地；见 [`docs/proofs/comment-fact-storage-v0.md`](../../proofs/comment-fact-storage-v0.md)。它只覆盖配对 package 与原始正文变化，不代表 P2 原声浏览器、研究或问题页面已完成。
 
-Context Storage V0 追加：`content_detail + comments + replies` 的三包 Source Contract、不可变 Evidence 锚点、作品/讨论上下文存储和 hash 严格匹配的只读 context detail 已有隔离 PostgreSQL proof；见 [`docs/proofs/comment-context-storage-v0.md`](../../proofs/comment-context-storage-v0.md)。它尚未接入 HTTP、原声详情 UI、清洗派生、Context Pack 截断或模型输入。
+Context Storage V0 追加：`content_detail + comments + replies` 的三包 Source Contract、不可变 Evidence 锚点、作品/讨论上下文存储和 hash 严格匹配的只读 context detail 已有隔离 PostgreSQL proof；其 HTTP 与原声详情抽屉读取已完成独立证明，见 [`docs/proofs/comment-context-storage-v0.md`](../../proofs/comment-context-storage-v0.md) 与 [`docs/proofs/comment-voice-context-read-api-v0.md`](../../proofs/comment-voice-context-read-api-v0.md)。它仍未实现清洗派生、Context Pack 截断、模型输入或研究结论。
 
 停止条件：没有更多真实 producer fixture 时，只完成已有形状的 validator 和缺口记录；不伪造 Capture/Evidence/Comment 已实现。
 

@@ -80,7 +80,9 @@ curl --fail --silent --show-error \
 
 grep -Fq "初始状态不读取任何数据" "$PAGE_RESPONSE"
 grep -Fq "尚未具备来源事实" "$PAGE_RESPONSE"
-grep -Fq "作品上下文未取得" "$PAGE_RESPONSE"
+grep -Fq "打开详情后按来源读取" "$PAGE_RESPONSE"
+grep -Fq "已采到的相关讨论" "$PAGE_RESPONSE"
+grep -Fq "/api/v0/comment-research/voices/context" "$PAGE_RESPONSE"
 grep -Fq -- "--canvas: oklch(0.965 0.008 85)" "$CSS_RESPONSE"
 
 # A malformed API range is rejected before the storage read; this proves the

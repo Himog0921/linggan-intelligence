@@ -319,3 +319,51 @@ h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.2rem); font-weight: 650; letter
   .voice-text { display: block; }
   .pagination { justify-content: space-between; }
 }
+
+.discussion-list,
+.context-fields {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.discussion-entry {
+  padding: 0 0 0.95rem;
+  border-bottom: 1px solid var(--rule);
+}
+
+.discussion-entry:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.discussion-meta,
+.context-field-label,
+.context-field-note {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.55;
+}
+
+.context-field-label {
+  margin-top: 0;
+  font-weight: 650;
+}
+
+.context-field-note {
+  max-width: 35rem;
+}
+
+.context-source {
+  margin-top: 1rem;
+  padding-top: 0.95rem;
+  border-top: 1px solid var(--rule);
+}
+
+.context-notice-error {
+  background: oklch(0.93 0.032 35);
+}
+
+.context-notice-error::before {
+  background: var(--signal);
+}

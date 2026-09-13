@@ -50,7 +50,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
             <p class="eyebrow">评论研究 · V0</p>
             <h1>用户原声</h1>
           </div>
-          <p class="page-summary">从当前已接入的评论事实开始，逐条回到来源证据。研究结论、作品上下文和趋势尚未在此版本中生成。</p>
+          <p class="page-summary">从当前已接入的评论事实开始，逐条回到来源证据。打开原声后，才按当前来源读取已采到的讨论与作品上下文；研究结论和趋势尚未生成。</p>
         </header>
 
         <div class="view-tabs" role="tablist" aria-label="评论研究视图">
@@ -96,7 +96,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
                   <th scope="col">来源作品 ID</th>
                   <th scope="col">系统接入时间</th>
                   <th scope="col">研究状态</th>
-                  <th scope="col">作品上下文</th>
+                  <th scope="col">来源与上下文</th>
                 </tr>
               </thead>
               <tbody id="voices-body"></tbody>
@@ -121,18 +121,22 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         <h3 id="voice-text-title">当前原声</h3>
         <p class="drawer-copy" id="drawer-voice-text"></p>
       </section>
+      <section class="drawer-section" aria-labelledby="discussion-title">
+        <h3 id="discussion-title">已采到的相关讨论</h3>
+        <div id="drawer-related-discussion" aria-live="polite"></div>
+      </section>
+      <section class="drawer-section" aria-labelledby="context-title">
+        <h3 id="context-title">作品上下文</h3>
+        <div id="drawer-work-context" aria-live="polite"></div>
+      </section>
       <section class="drawer-section" aria-labelledby="source-evidence-title">
-        <h3 id="source-evidence-title">来源证据关系</h3>
+        <h3 id="source-evidence-title">来源证据</h3>
         <dl class="drawer-list">
           <div><dt>来源作品 ID</dt><dd class="mono" id="drawer-note-id"></dd></div>
           <div><dt>Evidence ID</dt><dd class="mono" id="drawer-evidence-id"></dd></div>
           <div><dt>来源记录序号</dt><dd class="mono" id="drawer-record-index"></dd></div>
           <div><dt>系统接入时间</dt><dd class="mono" id="drawer-admitted-at"></dd></div>
         </dl>
-      </section>
-      <section class="drawer-section" aria-labelledby="context-title">
-        <h3 id="context-title">作品上下文</h3>
-        <p class="context-notice">作品上下文尚未取得。本页面不以推断出的标题、作者、媒体或正文片段补齐这个缺口。</p>
       </section>
     </aside>
 
@@ -141,7 +145,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         "use strict";
 
         const pageLimit = 25;
-        const state = { workspaceId: "", offset: 0, total: 0, lastTrigger: null };
+        const state = { workspaceId: "", offset: 0, total: 0, lastTrigger: null, contextRequestToken: 0 };
         const form = document.getElementById("workspace-form");
         const workspaceInput = document.getElementById("workspace-id");
         const loadButton = document.getElementById("load-voices");
@@ -157,6 +161,8 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         const drawer = document.getElementById("voice-drawer");
         const drawerBackdrop = document.getElementById("drawer-backdrop");
         const closeDrawerButton = document.getElementById("close-drawer");
+        const relatedDiscussion = document.getElementById("drawer-related-discussion");
+        const workContext = document.getElementById("drawer-work-context");
 
         function setStatus(message, kind) {
           statusMessage.textContent = message;
@@ -213,7 +219,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
             appendCell(row, "来源作品 ID", voice.source_note_id, "mono metadata");
             appendCell(row, "系统接入时间", voice.current_admitted_at, "mono metadata");
             appendFactCell(row, "研究状态", "尚未研究", false);
-            appendFactCell(row, "作品上下文", "作品上下文未取得", true);
+            appendFactCell(row, "来源与上下文", "打开详情后按来源读取", true);
             voicesBody.append(row);
           }
         }
@@ -284,6 +290,165 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           }
         }
 
+        function replaceContextMessage(target, message, stateName) {
+          target.replaceChildren();
+          const notice = document.createElement("p");
+          notice.className = stateName === "error" ? "context-notice context-notice-error" : "context-notice";
+          notice.textContent = message;
+          target.append(notice);
+        }
+
+        function renderContextLoading() {
+          const message = "正在按当前来源证据读取已采到的讨论与作品上下文…";
+          replaceContextMessage(relatedDiscussion, message, "loading");
+          replaceContextMessage(workContext, message, "loading");
+        }
+
+        function renderContextUnavailable() {
+          const message = "尚未取得与当前原声正文相匹配的完整来源上下文。它不表示平台没有作品或其他讨论。";
+          replaceContextMessage(relatedDiscussion, message, "unavailable");
+          replaceContextMessage(workContext, message, "unavailable");
+        }
+
+        function renderContextError(message) {
+          const safeMessage = message || "无法读取已采到的上下文。当前原声与其来源证据仍可查看，请稍后重试。";
+          replaceContextMessage(relatedDiscussion, safeMessage, "error");
+          replaceContextMessage(workContext, safeMessage, "error");
+        }
+
+        function appendDefinition(root, label, value, className) {
+          const item = document.createElement("div");
+          const term = document.createElement("dt");
+          const definition = document.createElement("dd");
+          term.textContent = label;
+          definition.className = className || "";
+          definition.textContent = value;
+          item.append(term, definition);
+          root.append(item);
+        }
+
+        function appendContextText(root, label, value) {
+          const item = document.createElement("div");
+          item.className = "context-field";
+          const heading = document.createElement("p");
+          heading.className = "context-field-label";
+          heading.textContent = label;
+          const text = document.createElement("p");
+          text.className = "drawer-copy";
+          if (value && value.availability === "observed" && typeof value.text === "string") {
+            text.textContent = value.text;
+          } else if (value && value.availability === "blank") {
+            text.className = "context-field-note";
+            text.textContent = `来源包已提供${label}字段，但内容为空。`;
+          } else {
+            text.className = "context-field-note";
+            text.textContent = `本组来源未提供${label}。`;
+          }
+          item.append(heading, text);
+          root.append(item);
+        }
+
+        function relationshipLabels(relationship) {
+          const labels = [];
+          if (relationship && relationship.root_comment === true) labels.push("根评论");
+          if (relationship && relationship.parent_comment === true) labels.push("父评论");
+          if (relationship && relationship.reply_to_comment === true) labels.push("被回复对象");
+          return labels;
+        }
+
+        function renderRelatedDiscussion(items) {
+          relatedDiscussion.replaceChildren();
+          if (!Array.isArray(items) || items.length === 0) {
+            replaceContextMessage(
+              relatedDiscussion,
+              "当前已接入的这组来源中，没有以根评论、父评论或被回复对象关系指向当前原声的回复。它不表示平台没有其他讨论。",
+              "unavailable"
+            );
+            return;
+          }
+          const list = document.createElement("div");
+          list.className = "discussion-list";
+          for (const item of items) {
+            const entry = document.createElement("article");
+            entry.className = "discussion-entry";
+            const text = document.createElement("p");
+            text.className = "drawer-copy";
+            text.textContent = typeof item.text === "string" ? item.text : "来源回复正文不可读取。";
+            const relation = document.createElement("p");
+            relation.className = "discussion-meta";
+            const labels = relationshipLabels(item.relationship);
+            relation.textContent = labels.length > 0
+              ? `与当前原声的已观察关系：${labels.join("、")}`
+              : "与当前原声的已观察关系未取得。";
+            const evidence = document.createElement("p");
+            evidence.className = "discussion-meta mono";
+            const source = item.source_evidence || {};
+            evidence.textContent = `Evidence ${typeof source.evidence_id === "string" ? source.evidence_id : "未取得"} · 记录 ${Number.isInteger(source.record_index) ? source.record_index : "未取得"}`;
+            entry.append(text, relation, evidence);
+            list.append(entry);
+          }
+          relatedDiscussion.append(list);
+        }
+
+        function renderWorkContext(context) {
+          workContext.replaceChildren();
+          if (!context || !context.source_evidence) {
+            renderContextUnavailable();
+            return;
+          }
+          const fields = document.createElement("div");
+          fields.className = "context-fields";
+          appendContextText(fields, "作品标题", context.title);
+          appendContextText(fields, "作品正文", context.body_text);
+          const evidence = document.createElement("dl");
+          evidence.className = "drawer-list context-source";
+          appendDefinition(
+            evidence,
+            "作品上下文来源 Evidence",
+            typeof context.source_evidence.evidence_id === "string" ? context.source_evidence.evidence_id : "未取得",
+            "mono"
+          );
+          appendDefinition(
+            evidence,
+            "作品上下文来源记录序号",
+            Number.isInteger(context.source_evidence.record_index) ? String(context.source_evidence.record_index) : "未取得",
+            "mono"
+          );
+          workContext.append(fields, evidence);
+        }
+
+        function isContextPayload(payload) {
+          return payload && (payload.availability === "available" || payload.availability === "unavailable");
+        }
+
+        async function loadContext(voice, requestToken) {
+          const parameters = new URLSearchParams({
+            workspace_id: state.workspaceId,
+            evidence_id: voice.source_evidence.evidence_id,
+            record_index: String(voice.source_evidence.record_index)
+          });
+          try {
+            const response = await fetch(`/api/v0/comment-research/voices/context?${parameters.toString()}`, {
+              headers: { "Accept": "application/json" },
+              credentials: "same-origin"
+            });
+            const payload = await response.json().catch(() => null);
+            if (requestToken !== state.contextRequestToken || drawer.hidden) return;
+            if (!response.ok || !isContextPayload(payload)) {
+              throw new Error("无法读取已采到的上下文。当前原声与其来源证据仍可查看，请稍后重试。");
+            }
+            if (payload.availability === "unavailable") {
+              renderContextUnavailable();
+              return;
+            }
+            renderRelatedDiscussion(payload.related_discussion);
+            renderWorkContext(payload.work_context);
+          } catch (error) {
+            if (requestToken !== state.contextRequestToken || drawer.hidden) return;
+            renderContextError(error instanceof Error ? error.message : null);
+          }
+        }
+
         function openDrawer(voice, trigger) {
           state.lastTrigger = trigger;
           document.getElementById("drawer-voice-text").textContent = voice.text;
@@ -293,10 +458,15 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           document.getElementById("drawer-admitted-at").textContent = voice.current_admitted_at;
           drawerBackdrop.hidden = false;
           drawer.hidden = false;
+          const requestToken = state.contextRequestToken + 1;
+          state.contextRequestToken = requestToken;
+          renderContextLoading();
           closeDrawerButton.focus();
+          loadContext(voice, requestToken);
         }
 
         function closeDrawer() {
+          state.contextRequestToken += 1;
           drawer.hidden = true;
           drawerBackdrop.hidden = true;
           if (state.lastTrigger instanceof HTMLElement) {
@@ -336,7 +506,10 @@ mod tests {
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("DOMContentLoaded"));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("window.onload"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("尚未研究"));
-        assert!(USER_VOICES_PAGE_V0_HTML.contains("作品上下文未取得"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("打开详情后按来源读取"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("已采到的相关讨论"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("/api/v0/comment-research/voices/context"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("当前原声与其来源证据仍可查看"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("尚未具备来源事实"));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("data-label=\\\"点赞\\\""));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("data-label=\\\"作者\\\""));

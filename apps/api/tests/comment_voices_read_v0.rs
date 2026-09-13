@@ -51,7 +51,8 @@ async fn proves_user_voices_v0_read_api_against_isolated_postgres() {
     assert!(page.contains("用户原声"));
     assert!(page.contains("初始状态不读取任何数据"));
     assert!(page.contains("尚未具备来源事实"));
-    assert!(page.contains("作品上下文未取得"));
+    assert!(page.contains("打开详情后按来源读取"));
+    assert!(page.contains("已采到的相关讨论"));
     assert!(page.contains("const workspaceId = state.workspaceId.trim()"));
 
     let (css_status, css_content_type, stylesheet) =
@@ -79,7 +80,6 @@ async fn proves_user_voices_v0_read_api_against_isolated_postgres() {
         .expect("voices must be an array");
     assert_eq!(first_voices.len(), 2);
     for voice in first_voices {
-        assert_eq!(voice["work_context"], "unavailable");
         assert_eq!(voice["research_status"], "not_researched");
         assert_eq!(
             voice
@@ -94,9 +94,8 @@ async fn proves_user_voices_v0_read_api_against_isolated_postgres() {
                 "source_evidence",
                 "source_note_id",
                 "text",
-                "work_context",
             ],
-            "read DTO must not leak unproven author, engagement, time, or reply fields"
+            "read DTO must not leak unproven author, engagement, platform time, or reply fields"
         );
         assert!(voice["source_evidence"]["evidence_id"].is_string());
         assert_eq!(voice["source_evidence"]["record_index"], 0);

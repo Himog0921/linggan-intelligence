@@ -15,11 +15,14 @@ use axum::{
     response::{IntoResponse, Response},
     routing::get,
 };
+use linggan_contracts::ContextTextAvailabilityV0;
 use linggan_storage_postgres::{
-    CURRENT_COMMENT_VOICES_V0_MAX_LIMIT, CommentFactStore, CurrentCommentVoiceV0,
-    CurrentCommentVoicesPageRequestV0, StorageError,
+    CURRENT_COMMENT_VOICES_V0_MAX_LIMIT, CommentFactStore, ContextSourceEvidenceRelationV0,
+    CurrentCommentContextDetailV0, CurrentCommentRelatedReplyV0, CurrentCommentVoiceV0,
+    CurrentCommentVoicesPageRequestV0, CurrentCommentWorkContextV0, StorageError,
 };
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 /// The bounded default used when callers omit limit.
 pub const USER_VOICES_V0_DEFAULT_LIMIT: i64 = 50;
@@ -39,6 +42,10 @@ pub fn comment_research_router_v0(store: Arc<CommentFactStore>) -> Router {
             get(user_voices_page_v0::user_voices_page_v0_stylesheet),
         )
         .route("/api/v0/comment-research/voices", get(list_user_voices_v0))
+        .route(
+            "/api/v0/comment-research/voices/context",
+            get(get_user_voice_context_v0),
+        )
         .with_state(store)
 }
 
@@ -62,18 +69,16 @@ struct UserVoicesPaginationV0 {
     offset: i64,
 }
 
-/// The intentionally narrow browser DTO.
-///
-/// work_context is an explicit absence rather than a guessed title, URL,
-/// author, or media summary. research_status is likewise a current-system
-/// fact: V0 has no analysis layer, so every listed voice is not researched.
+/// The intentionally narrow browser DTO. It returns only direct current
+/// comment facts. Work and discussion context is loaded separately from the
+/// list-visible Evidence locator, so this endpoint does not make a premature
+/// availability claim for the table.
 #[derive(Debug, Serialize)]
 struct UserVoiceDtoV0 {
     text: String,
     source_note_id: String,
     current_admitted_at: String,
     source_evidence: UserVoiceSourceEvidenceDtoV0,
-    work_context: &'static str,
     research_status: &'static str,
 }
 
@@ -93,7 +98,6 @@ impl From<CurrentCommentVoiceV0> for UserVoiceDtoV0 {
                 evidence_id: voice.source_evidence.evidence_id.to_string(),
                 record_index: voice.source_evidence.record_index,
             },
-            work_context: "unavailable",
             research_status: "not_researched",
         }
     }
@@ -133,6 +137,179 @@ async fn list_user_voices_v0(
     }))
 }
 
+#[derive(Debug, Deserialize)]
+struct UserVoiceContextQueryV0 {
+    workspace_id: Option<String>,
+    evidence_id: Option<String>,
+    record_index: Option<String>,
+}
+
+/// The browser-visible context response is deliberately narrower than the
+/// storage result: it has no comment IDs, author identities, URLs, engagement
+/// counts, platform time, OCR, or ASR. Relation booleans only say which
+/// observed pointer connected an already-captured reply to the current voice.
+#[derive(Debug, Serialize)]
+struct UserVoiceContextResponseV0 {
+    availability: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    work_context: Option<UserVoiceWorkContextDtoV0>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    related_discussion: Option<Vec<UserVoiceRelatedDiscussionDtoV0>>,
+}
+
+#[derive(Debug, Serialize)]
+struct UserVoiceWorkContextDtoV0 {
+    source_evidence: UserVoiceSourceEvidenceDtoV0,
+    title: UserVoiceContextTextDtoV0,
+    body_text: UserVoiceContextTextDtoV0,
+}
+
+#[derive(Debug, Serialize)]
+struct UserVoiceContextTextDtoV0 {
+    availability: &'static str,
+    text: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct UserVoiceRelatedDiscussionDtoV0 {
+    text: String,
+    relationship: UserVoiceRelatedDiscussionRelationshipDtoV0,
+    source_evidence: UserVoiceSourceEvidenceDtoV0,
+}
+
+#[derive(Debug, Serialize)]
+struct UserVoiceRelatedDiscussionRelationshipDtoV0 {
+    root_comment: bool,
+    parent_comment: bool,
+    reply_to_comment: bool,
+}
+
+impl From<ContextSourceEvidenceRelationV0> for UserVoiceSourceEvidenceDtoV0 {
+    fn from(relation: ContextSourceEvidenceRelationV0) -> Self {
+        Self {
+            evidence_id: relation.evidence_id.to_string(),
+            record_index: relation.record_index,
+        }
+    }
+}
+
+impl From<ContextTextAvailabilityV0> for UserVoiceContextTextDtoV0 {
+    fn from(availability: ContextTextAvailabilityV0) -> Self {
+        match availability {
+            ContextTextAvailabilityV0::Unavailable => Self {
+                availability: "unavailable",
+                text: None,
+            },
+            ContextTextAvailabilityV0::Blank => Self {
+                availability: "blank",
+                text: None,
+            },
+            ContextTextAvailabilityV0::Observed(text) => Self {
+                availability: "observed",
+                text: Some(text),
+            },
+        }
+    }
+}
+
+impl From<CurrentCommentWorkContextV0> for UserVoiceWorkContextDtoV0 {
+    fn from(context: CurrentCommentWorkContextV0) -> Self {
+        Self {
+            source_evidence: context.source_evidence.into(),
+            title: context.title.into(),
+            body_text: context.body_text.into(),
+        }
+    }
+}
+
+impl From<CurrentCommentRelatedReplyV0> for UserVoiceRelatedDiscussionDtoV0 {
+    fn from(reply: CurrentCommentRelatedReplyV0) -> Self {
+        Self {
+            text: reply.text,
+            relationship: UserVoiceRelatedDiscussionRelationshipDtoV0 {
+                root_comment: reply.root_comment_id.is_some(),
+                parent_comment: reply.parent_comment_id.is_some(),
+                reply_to_comment: reply.reply_to_comment_id.is_some(),
+            },
+            source_evidence: reply.source_evidence.into(),
+        }
+    }
+}
+
+impl From<CurrentCommentContextDetailV0> for UserVoiceContextResponseV0 {
+    fn from(context: CurrentCommentContextDetailV0) -> Self {
+        Self {
+            availability: "available",
+            work_context: Some(context.work_context.into()),
+            related_discussion: Some(
+                context
+                    .related_replies
+                    .into_iter()
+                    .map(UserVoiceRelatedDiscussionDtoV0::from)
+                    .collect(),
+            ),
+        }
+    }
+}
+
+async fn get_user_voice_context_v0(
+    State(store): State<Arc<CommentFactStore>>,
+    Query(query): Query<UserVoiceContextQueryV0>,
+) -> Result<Json<UserVoiceContextResponseV0>, ApiError> {
+    let workspace_id = query
+        .workspace_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(ApiError::InvalidRequest {
+            message: "workspace_id is required",
+        })?;
+    let evidence_id = query
+        .evidence_id
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(ApiError::InvalidRequest {
+            message: "evidence_id is required",
+        })?;
+    let evidence_id = Uuid::parse_str(&evidence_id).map_err(|_| ApiError::InvalidRequest {
+        message: "evidence_id must be a UUID",
+    })?;
+    let source_record_index = parse_source_record_index(query.record_index)?;
+
+    let Some(lookup) = store
+        .get_current_comment_context_by_source_locator_v0(
+            &workspace_id,
+            evidence_id,
+            source_record_index,
+        )
+        .await
+        .map_err(ApiError::from_storage_read_error)?
+    else {
+        return Err(ApiError::CurrentVoiceNotFound);
+    };
+
+    Ok(Json(match lookup.context {
+        Some(context) => context.into(),
+        None => UserVoiceContextResponseV0 {
+            availability: "unavailable",
+            work_context: None,
+            related_discussion: None,
+        },
+    }))
+}
+
+fn parse_source_record_index(raw: Option<String>) -> Result<i32, ApiError> {
+    let raw = raw.ok_or(ApiError::InvalidRequest {
+        message: "record_index is required",
+    })?;
+    let parsed = raw.parse::<i32>().map_err(|_| ApiError::InvalidRequest {
+        message: "record_index must be an integer",
+    })?;
+    if parsed < 0 {
+        return Err(ApiError::InvalidRequest {
+            message: "record_index must be zero or greater",
+        });
+    }
+    Ok(parsed)
+}
+
 fn parse_i64_parameter(
     raw: Option<String>,
     parameter: &'static str,
@@ -153,6 +330,7 @@ fn parse_i64_parameter(
 #[derive(Debug)]
 enum ApiError {
     InvalidRequest { message: &'static str },
+    CurrentVoiceNotFound,
     ReadFailed,
 }
 
@@ -168,6 +346,9 @@ impl ApiError {
             StorageError::InvalidCurrentCommentVoicesOffset => Self::InvalidRequest {
                 message: "offset must be zero or greater",
             },
+            StorageError::InvalidCurrentCommentSourceRecordIndex => Self::InvalidRequest {
+                message: "record_index must be zero or greater",
+            },
             _ => Self::ReadFailed,
         }
     }
@@ -176,7 +357,8 @@ impl ApiError {
         match error {
             StorageError::BlankWorkspaceId
             | StorageError::InvalidCurrentCommentVoicesLimit
-            | StorageError::InvalidCurrentCommentVoicesOffset => {
+            | StorageError::InvalidCurrentCommentVoicesOffset
+            | StorageError::InvalidCurrentCommentSourceRecordIndex => {
                 Self::from_storage_input_error(error)
             }
             _ => Self::ReadFailed,
@@ -190,6 +372,11 @@ impl IntoResponse for ApiError {
             Self::InvalidRequest { message } => {
                 (StatusCode::BAD_REQUEST, "invalid_request", message)
             }
+            Self::CurrentVoiceNotFound => (
+                StatusCode::NOT_FOUND,
+                "comment_voice_not_found",
+                "source evidence locator does not name a current comment voice",
+            ),
             Self::ReadFailed => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "comment_voice_read_failed",

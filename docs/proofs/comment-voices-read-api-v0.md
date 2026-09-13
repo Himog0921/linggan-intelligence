@@ -3,7 +3,7 @@
 状态：PROVEN IN ISOLATION
 
 日期：2026-09-13
-范围：当前评论事实的受控 HTTP 读取，以及仅消费此读取模型的「用户原声」只读浏览页。不是评论清洗、研究任务、模型调用、作品上下文、问题归并或变化观察的完成声明。
+范围：当前评论事实的受控 HTTP 读取，以及仅消费此读取模型的「用户原声」只读浏览页。列表只返回直接评论事实；详情中的上下文另见 [`comment-voice-context-read-api-v0.md`](comment-voice-context-read-api-v0.md)。不是评论清洗、研究任务、模型调用、问题归并或变化观察的完成声明。
 
 ## 接口
 
@@ -17,8 +17,9 @@
 - source_note_id：来源作品 noteId；
 - current_admitted_at：本系统接纳该 Current Observation 的 UTC 时间，而非平台发布时间或观察时间；
 - source_evidence.evidence_id 与 record_index：可以追溯到不可变来源 Evidence 的关系；
-- work_context: unavailable：V0 尚未证明可供浏览器使用的作品上下文；
 - research_status: not_researched：V0 尚无研究层。
+
+列表不预判作品或回复上下文是否存在；用户打开详情后才以列表 Evidence locator 读取已采到且正文匹配的 Context。
 
 接口不会输出作者、点赞、作品标题/链接、评论发表时间、回复关系、清洗状态、模型结论或趋势；这些字段在该 read model 中没有事实证明。
 
@@ -35,12 +36,12 @@
 | 场景 | 证明 |
 | --- | --- |
 | 三条已接纳 Current 评论 | total=3，首个 offset page 返回 2 条，第二页返回不重复的第 3 条 |
-| DTO 边界 | 断言每项只有 V0 允许的六个字段，并带有 unavailable / not_researched |
+| DTO 边界 | 断言每项只有 V0 允许的五个字段，并带有 not_researched；作品/讨论 Context 不在列表 DTO 预判 |
 | 空 workspace / 尾页之后的 offset | 前者返回 total=0，后者保留真实 total 并返回空数组 |
 | 非法参数 | 缺少或空 workspace、无效/越界 limit、无效 offset 均返回 400 JSON |
 | 纯读 | 各次 GET 后，Evidence、pair、identity、source record、Observation 和 Current 六张表行数保持不变 |
 | 页面初始状态 | 真实 Axum 页面含「初始状态不读取任何数据」；未提供 workspace 时不自动选择或请求语料范围 |
-| 页面事实边界 | 页面显示「尚未研究」「作品上下文未取得」和来源证据抽屉；不添加作者、点赞、发表时间、回复链、模型或趋势字段 |
+| 页面事实边界 | 页面显示「尚未研究」「打开详情后按来源读取」和来源证据抽屉；不添加作者、点赞、发表时间、模型或趋势字段。详情 Context 的 proof 另列 |
 | 页面可检视性 | 独立 Axum 进程经 curl 返回 HTML 与单一静态 CSS；CSS 使用暖白、近黑和朱砂 token，并包含 reduced-motion 规则 |
 
 ## 未证明、不得声称的能力
@@ -48,4 +49,4 @@
 - 通过生产数据库或现有 3000 端口的真实端到端读取；
 - offset 超出尾部时可区分“没有数据”和“游标已耗尽”的专门产品语义；
 - Source Evidence 的跨 workspace 权限、审计授权或证据原包下载；
-- 已完成的作品上下文、清洗结果、LLM、问题或趋势。
+- 清洗结果、LLM、问题或趋势；详情 Context 只证明已有来源可读，不证明完整平台上下文。
