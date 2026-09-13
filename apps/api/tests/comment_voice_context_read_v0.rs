@@ -35,6 +35,10 @@ async fn proves_user_voice_context_read_api_against_isolated_postgres() {
         .apply_comment_context_storage_v0_migration()
         .await
         .expect("context migration must apply after fact storage");
+    store
+        .apply_comment_derivation_v1_migration()
+        .await
+        .expect("derivation migration must apply after fact baseline");
     let inspector = connect_inspector(&database_url).await;
 
     let (detail, comments, replies) =
@@ -75,6 +79,7 @@ async fn proves_user_voice_context_read_api_against_isolated_postgres() {
     .await;
     assert_eq!(available.0, StatusCode::OK);
     assert_eq!(available.1["availability"], "available");
+    assert!(available.1["original_voice_text"].is_string());
     assert_eq!(
         available.1["work_context"]["title"]["availability"],
         "observed"
@@ -108,6 +113,7 @@ async fn proves_user_voice_context_read_api_against_isolated_postgres() {
     .await;
     assert_eq!(blank.0, StatusCode::OK);
     assert_eq!(blank.1["availability"], "available");
+    assert!(blank.1["original_voice_text"].is_string());
     assert_eq!(
         blank.1["work_context"]["title"],
         json!({"availability": "blank", "text": null})
@@ -124,7 +130,13 @@ async fn proves_user_voice_context_read_api_against_isolated_postgres() {
     )
     .await;
     assert_eq!(no_context.0, StatusCode::OK);
-    assert_eq!(no_context.1, json!({"availability": "unavailable"}));
+    assert_eq!(
+        no_context.1,
+        json!({
+            "availability": "unavailable",
+            "original_voice_text": "changed direct voice no-context"
+        })
+    );
 
     for invalid_uri in [
         "/api/v0/comment-research/voices/context",
@@ -180,7 +192,13 @@ async fn proves_user_voice_context_read_api_against_isolated_postgres() {
 
     let changed_locator = get_json(&app, &context_uri(changed_evidence_id, 0, WORKSPACE)).await;
     assert_eq!(changed_locator.0, StatusCode::OK);
-    assert_eq!(changed_locator.1, json!({"availability": "unavailable"}));
+    assert_eq!(
+        changed_locator.1,
+        json!({
+            "availability": "unavailable",
+            "original_voice_text": "changed direct voice changed-current"
+        })
+    );
 }
 
 #[derive(Clone, Copy)]

@@ -217,3 +217,9 @@ Context Storage V0 追加：`content_detail + comments + replies` 的三包 Sour
 - 不把模拟样本称为真实用户研究；
 - 不在本包中自动开启连续研究、采集、模型调用、共享数据库 migration 或 3000 部署；
 - 不要求用户逐条审阅评论、命名簇或维护分类关系。
+
+## P2 增补：Cleaning Derivation V1（已隔离证明）
+
+`comment_derivation_v1` 是 Observation 锚定的不可变派生，不是新的 current、run 或 Agent 对象。其唯一边界为 `comment_observation_id + cleaning_contract`；当前 User Voices read 明确只读 `comment-cleaning.v1`，使未来合同可以并存而不污染当前清洗语料。每个 Created/Advanced Observation 在 admission transaction 中创建 V1 派生；迁移前 current Observation 只能通过有界、幂等、显式调用的本地物化方法补齐，GET 不会写入。
+
+User Voices 默认显示 `available`，可切换 `ready` 与 `needs_context`，同时返回明确的 `awaiting_cleaning_total`。`dropped` / `anomaly` 保留原始 CommentObservation 事实但不显示为用户原声。表格文本是清洗后研究表达；详情按当前 Evidence locator 单独读取原始采集原声，且不在 DTO 暴露 reason codes、derivation ID 或 fingerprint。完整隔离证明见 [`comment-derivation-user-voices-v1.md`](../../proofs/comment-derivation-user-voices-v1.md)。

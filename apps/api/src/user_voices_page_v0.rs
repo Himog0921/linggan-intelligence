@@ -41,16 +41,16 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         <div class="research-nav">
           <span class="nav-item" aria-current="page"><span class="nav-index">02</span>用户原声</span>
         </div>
-        <p class="nav-note">当前只交付可回溯的评论事实。研究结论并未在此版本中生成。</p>
+        <p class="nav-note">当前交付可回溯的原始原声与确定性清洗表达。研究结论并未在此版本中生成。</p>
       </aside>
 
       <main class="workspace" id="voices-main" tabindex="-1">
         <header class="page-heading">
           <div>
-            <p class="eyebrow">评论研究 · V0</p>
+            <p class="eyebrow">评论研究 · 清洗语料 V1</p>
             <h1>用户原声</h1>
           </div>
-          <p class="page-summary">从当前已接入的评论事实开始，逐条回到来源证据。打开原声后，才按当前来源读取已采到的讨论与作品上下文；研究结论和趋势尚未生成。</p>
+          <p class="page-summary">列表呈现确定性清洗后的可研究表达；打开详情可同时核对原始采集原声、来源证据与已采到的讨论语境。研究结论和趋势尚未生成。</p>
         </header>
 
         <div class="view-tabs" role="tablist" aria-label="评论研究视图">
@@ -66,7 +66,16 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           <div>
             <label class="field-label" for="workspace-id">工作空间 ID</label>
             <input class="workspace-input" id="workspace-id" name="workspace_id" type="text" autocomplete="off" spellcheck="false" placeholder="输入工作空间 ID 后加载用户原声" aria-describedby="workspace-help status-message">
-            <p class="field-help" id="workspace-help">初始状态不读取任何数据。系统只在你确认工作空间后，以只读方式加载当前已接入的评论事实。</p>
+            <p class="field-help" id="workspace-help">初始状态不读取任何数据。系统只在你确认工作空间后，以只读方式加载当前可用的清洗语料。</p>
+          </div>
+          <div class="filter-field">
+            <label class="field-label" for="voice-filter">语料状态</label>
+            <select class="workspace-input" id="voice-filter" name="filter" aria-describedby="filter-help">
+              <option value="available">全部可用</option>
+              <option value="ready">可直接研究</option>
+              <option value="needs_context">需要上下文</option>
+            </select>
+            <p class="field-help" id="filter-help">纯 emoji、纯 @ 和异常内容不会进入用户原声。需要上下文的短表达仍保留。</p>
           </div>
           <button class="primary-button" id="load-voices" type="submit">加载用户原声</button>
         </form>
@@ -75,12 +84,12 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
 
         <section class="empty-state" id="initial-state" aria-labelledby="initial-state-title">
           <h2 id="initial-state-title">先确认要看的语料范围</h2>
-          <p>输入工作空间 ID 后，页面会读取其中已接入、可回溯至来源证据的当前评论原声。这里不会假定作品标题、作者、点赞、发表时间、回复关系或研究结论。</p>
+          <p>输入工作空间 ID 后，页面会读取其中已接入、完成确定性清洗且可回溯至来源证据的当前表达。这里不会假定作品标题、作者、点赞、发表时间、回复关系或研究结论。</p>
         </section>
 
         <section class="empty-state" id="empty-state" aria-labelledby="empty-state-title" hidden>
-          <h2 id="empty-state-title">当前范围没有可显示的用户原声</h2>
-          <p>这表示该工作空间尚未接入评论来源，或当前还没有已确认的评论事实；它不表示用户没有讨论，也不表示系统已经完成研究。</p>
+          <h2 id="empty-state-title">当前筛选没有可显示的用户原声</h2>
+          <p>这可能是当前没有可用清洗表达、所选状态没有匹配结果，或仍有原声等待本地清洗物化；它不表示用户没有讨论，也不表示系统已经完成研究。</p>
         </section>
 
         <section class="results" id="results" aria-labelledby="results-title" hidden>
@@ -92,10 +101,10 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
             <table class="voice-table">
               <thead>
                 <tr>
-                  <th scope="col">评论原声</th>
+                  <th scope="col">可研究表达</th>
                   <th scope="col">来源作品 ID</th>
                   <th scope="col">系统接入时间</th>
-                  <th scope="col">研究状态</th>
+                  <th scope="col">语料状态</th>
                   <th scope="col">来源与上下文</th>
                 </tr>
               </thead>
@@ -117,9 +126,14 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         <h2 class="drawer-title" id="drawer-title">原声与来源证据</h2>
         <button class="icon-button" id="close-drawer" type="button" aria-label="关闭原声详情">×</button>
       </div>
+      <section class="drawer-section" aria-labelledby="research-expression-title">
+        <h3 id="research-expression-title">清洗后研究表达</h3>
+        <p class="drawer-copy" id="drawer-research-expression"></p>
+        <p class="context-field-note">仅移除确定性无意义成分；它不替代原始采集原声。</p>
+      </section>
       <section class="drawer-section" aria-labelledby="voice-text-title">
-        <h3 id="voice-text-title">当前原声</h3>
-        <p class="drawer-copy" id="drawer-voice-text"></p>
+        <h3 id="voice-text-title">原始采集原声</h3>
+        <p class="drawer-copy" id="drawer-original-voice"></p>
       </section>
       <section class="drawer-section" aria-labelledby="discussion-title">
         <h3 id="discussion-title">已采到的相关讨论</h3>
@@ -145,9 +159,10 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         "use strict";
 
         const pageLimit = 25;
-        const state = { workspaceId: "", offset: 0, total: 0, lastTrigger: null, contextRequestToken: 0 };
+        const state = { workspaceId: "", filter: "available", offset: 0, total: 0, lastTrigger: null, contextRequestToken: 0 };
         const form = document.getElementById("workspace-form");
         const workspaceInput = document.getElementById("workspace-id");
+        const voiceFilter = document.getElementById("voice-filter");
         const loadButton = document.getElementById("load-voices");
         const previousButton = document.getElementById("previous-page");
         const nextButton = document.getElementById("next-page");
@@ -205,10 +220,10 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           for (const voice of voices) {
             const row = document.createElement("tr");
             const textCell = document.createElement("td");
-            textCell.dataset.label = "评论原声";
+            textCell.dataset.label = "可研究表达";
             const text = document.createElement("span");
             text.className = "voice-text";
-            text.textContent = voice.text;
+            text.textContent = voice.research_text;
             const detail = document.createElement("button");
             detail.className = "detail-button";
             detail.type = "button";
@@ -218,18 +233,27 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
             row.append(textCell);
             appendCell(row, "来源作品 ID", voice.source_note_id, "mono metadata");
             appendCell(row, "系统接入时间", voice.current_admitted_at, "mono metadata");
-            appendFactCell(row, "研究状态", "尚未研究", false);
+            appendFactCell(row, "语料状态", readinessLabel(voice.readiness), voice.readiness === "needs_context");
             appendFactCell(row, "来源与上下文", "打开详情后按来源读取", true);
             voicesBody.append(row);
           }
         }
 
-        function updatePagination(pagination, voicesCount) {
+        function readinessLabel(readiness) {
+          return readiness === "needs_context" ? "需要上下文" : "可直接研究";
+        }
+
+        function updatePagination(pagination, preparation, voicesCount) {
           state.total = pagination.total;
           state.offset = pagination.offset;
           const start = voicesCount === 0 ? 0 : pagination.offset + 1;
           const end = pagination.offset + voicesCount;
-          resultCount.textContent = `已接入 ${pagination.total} 条 · 当前显示 ${start}-${end}`;
+          const awaiting = preparation && Number.isInteger(preparation.awaiting_cleaning_total)
+            ? preparation.awaiting_cleaning_total
+            : 0;
+          resultCount.textContent = awaiting > 0
+            ? `可用 ${pagination.total} 条 · 等待清洗 ${awaiting} 条 · 当前显示 ${start}-${end}`
+            : `可用 ${pagination.total} 条 · 当前显示 ${start}-${end}`;
           pageSummary.textContent = voicesCount === 0 ? "没有更多原声" : `${start}-${end} / ${pagination.total}`;
           previousButton.disabled = pagination.offset === 0;
           nextButton.disabled = pagination.offset + voicesCount >= pagination.total;
@@ -261,24 +285,29 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           setLoading(true);
           setStatus("正在以只读方式加载当前已接入的用户原声…", "loading");
           try {
-            const parameters = new URLSearchParams({ workspace_id: workspaceId, limit: String(pageLimit), offset: String(offset) });
+            const parameters = new URLSearchParams({ workspace_id: workspaceId, filter: state.filter, limit: String(pageLimit), offset: String(offset) });
             const response = await fetch(`/api/v0/comment-research/voices?${parameters.toString()}`, {
               headers: { "Accept": "application/json" },
               credentials: "same-origin"
             });
             const payload = await response.json().catch(() => null);
-            if (!response.ok || !payload || !payload.pagination || !Array.isArray(payload.voices)) {
+            if (!response.ok || !payload || !payload.pagination || !payload.preparation || !Array.isArray(payload.voices)) {
               throw new Error(errorMessage(payload));
             }
 
             renderVoices(payload.voices);
-            updatePagination(payload.pagination, payload.voices.length);
+            updatePagination(payload.pagination, payload.preparation, payload.voices.length);
             if (payload.voices.length === 0) {
               setVisibleState("empty");
-              setStatus("已读取当前范围；未发现可显示的用户原声。", "");
+              const awaiting = Number.isInteger(payload.preparation.awaiting_cleaning_total)
+                ? payload.preparation.awaiting_cleaning_total
+                : 0;
+              setStatus(awaiting > 0
+                ? `当前筛选暂无可显示表达；仍有 ${awaiting} 条当前原声等待本地清洗物化。`
+                : "已读取当前范围；未发现符合当前语料状态的用户原声。", "");
             } else {
               setVisibleState("results");
-              setStatus("当前列表来自已接入的评论事实；打开任意一条可查看其来源证据关系。", "");
+              setStatus("列表显示确定性清洗后的研究表达；打开任意一条可核对原始采集原声与来源证据。", "");
             }
           } catch (error) {
             clearRows();
@@ -312,6 +341,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
 
         function renderContextError(message) {
           const safeMessage = message || "无法读取已采到的上下文。当前原声与其来源证据仍可查看，请稍后重试。";
+          document.getElementById("drawer-original-voice").textContent = "无法读取当前来源证据中的原始采集原声；清洗后研究表达仍保留在上方。";
           replaceContextMessage(relatedDiscussion, safeMessage, "error");
           replaceContextMessage(workContext, safeMessage, "error");
         }
@@ -434,9 +464,10 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
             });
             const payload = await response.json().catch(() => null);
             if (requestToken !== state.contextRequestToken || drawer.hidden) return;
-            if (!response.ok || !isContextPayload(payload)) {
+            if (!response.ok || !isContextPayload(payload) || typeof payload.original_voice_text !== "string") {
               throw new Error("无法读取已采到的上下文。当前原声与其来源证据仍可查看，请稍后重试。");
             }
+            document.getElementById("drawer-original-voice").textContent = payload.original_voice_text;
             if (payload.availability === "unavailable") {
               renderContextUnavailable();
               return;
@@ -451,7 +482,8 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
 
         function openDrawer(voice, trigger) {
           state.lastTrigger = trigger;
-          document.getElementById("drawer-voice-text").textContent = voice.text;
+          document.getElementById("drawer-research-expression").textContent = voice.research_text;
+          document.getElementById("drawer-original-voice").textContent = "正在按当前来源证据读取原始采集原声…";
           document.getElementById("drawer-note-id").textContent = voice.source_note_id;
           document.getElementById("drawer-evidence-id").textContent = voice.source_evidence.evidence_id;
           document.getElementById("drawer-record-index").textContent = String(voice.source_evidence.record_index);
@@ -477,6 +509,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         form.addEventListener("submit", (event) => {
           event.preventDefault();
           state.workspaceId = workspaceInput.value.trim();
+          state.filter = voiceFilter.value;
           loadVoices(0, loadButton);
         });
         previousButton.addEventListener("click", () => loadVoices(Math.max(0, state.offset - pageLimit), previousButton));
@@ -505,12 +538,14 @@ mod tests {
         assert!(USER_VOICES_PAGE_V0_HTML.contains("if (!workspaceId)"));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("DOMContentLoaded"));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("window.onload"));
-        assert!(USER_VOICES_PAGE_V0_HTML.contains("尚未研究"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("清洗后研究表达"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("原始采集原声"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("全部可用"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("打开详情后按来源读取"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("已采到的相关讨论"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("/api/v0/comment-research/voices/context"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("当前原声与其来源证据仍可查看"));
-        assert!(USER_VOICES_PAGE_V0_HTML.contains("尚未具备来源事实"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("等待本地清洗物化"));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("data-label=\\\"点赞\\\""));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("data-label=\\\"作者\\\""));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("data-label=\\\"发表时间\\\""));

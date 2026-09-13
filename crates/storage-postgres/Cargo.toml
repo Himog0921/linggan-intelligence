@@ -11,6 +11,7 @@ workspace = true
 [dependencies]
 linggan-contracts = { path = "../contracts" }
 linggan-evidence = { path = "../evidence" }
+linggan-domain = { path = "../domain" }
 linggan-observation = { path = "../observation" }
 serde_json = "1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }

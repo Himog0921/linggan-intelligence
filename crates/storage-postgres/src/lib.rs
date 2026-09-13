@@ -6,6 +6,9 @@
 use core::fmt;
 
 use linggan_contracts::{CapturePackageV0, ContextTextAvailabilityV0};
+use linggan_domain::comment_research::{
+    CleaningReasonCode, CommentResearchState, clean_comment_for_research,
+};
 use linggan_evidence::{
     CommentSourceIdentityV0, EvidencePreparationError, PreparedCommentContextEvidenceAdmissionV0,
     PreparedCommentEvidenceAdmissionV0, PreparedCommentRecordV0,
@@ -28,6 +31,11 @@ pub const COMMENT_FACT_STORAGE_V0_MIGRATION: &str =
 pub const COMMENT_CONTEXT_STORAGE_V0_MIGRATION: &str =
     include_str!("../../../database/migrations/0002_comment_context_storage_v0.sql");
 
+/// The immutable deterministic Cleaning Contract V1 storage extension.
+/// It depends on Comment Fact Storage V0.
+pub const COMMENT_DERIVATION_V1_MIGRATION: &str =
+    include_str!("../../../database/migrations/0003_comment_derivation_v1.sql");
+
 /// A PostgreSQL adapter with no knowledge of HTTP, workers, models, or UI.
 pub struct CommentFactStore {
     client: Client,
@@ -39,6 +47,10 @@ pub struct CommentFactStore {
 /// should be researched together.
 pub const CURRENT_COMMENT_VOICES_V0_MAX_LIMIT: i64 = 100;
 
+/// Backfill is intentionally bounded and local. It has no model, network, or
+/// worker dependency, and is never triggered by a User Voices read.
+pub const COMMENT_DERIVATION_V1_MATERIALIZATION_MAX_LIMIT: i64 = 100;
+
 /// A bounded, offset-based request for the User Voices V0 read model.
 ///
 /// Pagination belongs here instead of the HTTP layer so other callers cannot
@@ -47,17 +59,30 @@ pub const CURRENT_COMMENT_VOICES_V0_MAX_LIMIT: i64 = 100;
 pub struct CurrentCommentVoicesPageRequestV0 {
     limit: i64,
     offset: i64,
+    filter: CurrentCommentVoiceFilterV1,
 }
 
 impl CurrentCommentVoicesPageRequestV0 {
     pub fn new(limit: i64, offset: i64) -> Result<Self, StorageError> {
+        Self::with_filter(limit, offset, CurrentCommentVoiceFilterV1::Available)
+    }
+
+    pub fn with_filter(
+        limit: i64,
+        offset: i64,
+        filter: CurrentCommentVoiceFilterV1,
+    ) -> Result<Self, StorageError> {
         if !(1..=CURRENT_COMMENT_VOICES_V0_MAX_LIMIT).contains(&limit) {
             return Err(StorageError::InvalidCurrentCommentVoicesLimit);
         }
         if offset < 0 {
             return Err(StorageError::InvalidCurrentCommentVoicesOffset);
         }
-        Ok(Self { limit, offset })
+        Ok(Self {
+            limit,
+            offset,
+            filter,
+        })
     }
 
     pub const fn limit(self) -> i64 {
@@ -66,6 +91,56 @@ impl CurrentCommentVoicesPageRequestV0 {
 
     pub const fn offset(self) -> i64 {
         self.offset
+    }
+
+    pub const fn filter(self) -> CurrentCommentVoiceFilterV1 {
+        self.filter
+    }
+}
+
+/// The only useful User Voices cleaning filters in V1. `Available` is the
+/// default because both direct-ready expressions and short expressions that
+/// need discussion context are valid research corpus; hard dropped/anomalous
+/// observations are never a User Voices row.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CurrentCommentVoiceFilterV1 {
+    Available,
+    Ready,
+    NeedsContext,
+}
+
+impl CurrentCommentVoiceFilterV1 {
+    pub const fn as_storage_value(self) -> &'static str {
+        match self {
+            Self::Available => "available",
+            Self::Ready => "ready",
+            Self::NeedsContext => "needs_context",
+        }
+    }
+}
+
+/// A compact research-readiness state for an already cleaned User Voice. It is
+/// preparation fact, not a model result or a task state.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CurrentCommentVoiceReadinessV1 {
+    Ready,
+    NeedsContext,
+}
+
+impl CurrentCommentVoiceReadinessV1 {
+    fn from_storage_value(value: &str) -> Result<Self, StorageError> {
+        match value {
+            "analyzable" => Ok(Self::Ready),
+            "needs_context" => Ok(Self::NeedsContext),
+            _ => Err(StorageError::InvalidPersistedCommentDerivation),
+        }
+    }
+
+    pub const fn as_api_value(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::NeedsContext => "needs_context",
+        }
     }
 }
 
@@ -86,7 +161,10 @@ pub struct CurrentCommentSourceEvidenceRelationV0 {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CurrentCommentVoiceV0 {
     pub source_note_id: String,
-    pub text: String,
+    /// The deterministic Cleaning Contract V1 expression shown in the table.
+    /// Original source text remains in the detail drawer and Evidence only.
+    pub research_text: String,
+    pub readiness: CurrentCommentVoiceReadinessV1,
     pub current_admitted_at: String,
     pub source_evidence: CurrentCommentSourceEvidenceRelationV0,
 }
@@ -95,7 +173,17 @@ pub struct CurrentCommentVoiceV0 {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CurrentCommentVoicesPageV0 {
     pub total: i64,
+    /// Current comments not yet carrying a V1 derivation. They are excluded
+    /// from table rows until the explicit bounded local materializer runs.
+    pub awaiting_cleaning_total: i64,
     pub voices: Vec<CurrentCommentVoiceV0>,
+}
+
+/// The outcome of one bounded local materialization pass. This is deliberately
+/// internal/operator-facing and never appears in the User Voices DTO.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CurrentCommentDerivationMaterializationOutcomeV1 {
+    pub materialized_current_observations: i64,
 }
 
 /// An immutable Evidence record reference for a bounded context field or
@@ -146,6 +234,10 @@ pub struct CurrentCommentContextDetailV0 {
 /// the platform has no context.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CurrentCommentContextBySourceLocatorV0 {
+    /// The immutable source text of the current Observation selected by this
+    /// locator. It is not placed in the table, whose text is the cleaned
+    /// research expression; callers use it only in the evidence drawer.
+    pub original_source_text: String,
     pub context: Option<CurrentCommentContextDetailV0>,
 }
 
@@ -193,6 +285,16 @@ impl CommentFactStore {
             .map_err(StorageError::Database)
     }
 
+    /// Applies the deterministic Comment Derivation V1 extension after the
+    /// Comment Fact baseline. Existing current observations can then be
+    /// materialized with the bounded explicit method below.
+    pub async fn apply_comment_derivation_v1_migration(&self) -> Result<(), StorageError> {
+        self.client
+            .batch_execute(COMMENT_DERIVATION_V1_MIGRATION)
+            .await
+            .map_err(StorageError::Database)
+    }
+
     /// Reads the current User Voices V0 projection without changing any table.
     ///
     /// The query deliberately joins only `comment_current_v0` and its backing
@@ -217,11 +319,13 @@ impl CommentFactStore {
         let rows = self
             .client
             .query(
-                "WITH filtered AS ( \
+                "WITH current_observations AS ( \
                    SELECT current_projection.note_id, current_projection.comment_id, \
-                          current_observation.source_text, current_observation.admitted_at, \
+                          current_observation.id AS observation_id, \
+                          current_observation.admitted_at, \
                           current_observation.source_evidence_id, \
-                          current_observation.source_record_index \
+                          current_observation.source_record_index, \
+                          derivation.research_state, derivation.research_text \
                      FROM comment_current_v0 AS current_projection \
                      JOIN comment_observation_v0 AS current_observation \
                        ON current_observation.workspace_id = current_projection.workspace_id \
@@ -229,45 +333,78 @@ impl CommentFactStore {
                       AND current_observation.note_id = current_projection.note_id \
                       AND current_observation.comment_id = current_projection.comment_id \
                       AND current_observation.id = current_projection.current_observation_id \
+                     LEFT JOIN comment_derivation_v1 AS derivation \
+                       ON derivation.comment_observation_id = current_observation.id \
+                      AND derivation.cleaning_contract = 'comment-cleaning.v1' \
                     WHERE current_projection.workspace_id = $1 \
+                 ), filtered AS ( \
+                   SELECT * FROM current_observations \
+                    WHERE research_state IN ('analyzable', 'needs_context') \
+                      AND ( \
+                        $2 = 'available' \
+                        OR ($2 = 'ready' AND research_state = 'analyzable') \
+                        OR ($2 = 'needs_context' AND research_state = 'needs_context') \
+                      ) \
                  ), page AS ( \
                    SELECT * FROM filtered \
                     ORDER BY admitted_at ASC, note_id ASC, comment_id ASC \
-                    LIMIT $2 OFFSET $3 \
+                    LIMIT $3 OFFSET $4 \
                  ), total AS ( \
                    SELECT count(*)::BIGINT AS total FROM filtered \
+                 ), awaiting_cleaning AS ( \
+                   SELECT count(*)::BIGINT AS total \
+                     FROM current_observations \
+                    WHERE observation_id IS NOT NULL AND research_state IS NULL \
                  ) \
-                 SELECT page.note_id, page.source_text, \
+                 SELECT page.note_id, page.research_text, page.research_state, \
                         to_char(page.admitted_at AT TIME ZONE 'UTC', \
                           'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS current_admitted_at, \
-                        page.source_evidence_id, page.source_record_index, total.total \
-                   FROM total \
+                        page.source_evidence_id, page.source_record_index, total.total, \
+                        awaiting_cleaning.total \
+                   FROM total CROSS JOIN awaiting_cleaning \
                    LEFT JOIN page ON TRUE \
                   ORDER BY page.admitted_at ASC NULLS LAST, page.note_id ASC NULLS LAST, \
                            page.comment_id ASC NULLS LAST",
-                &[&workspace_id, &page.limit(), &page.offset()],
+                &[
+                    &workspace_id,
+                    &page.filter().as_storage_value(),
+                    &page.limit(),
+                    &page.offset(),
+                ],
             )
             .await
             .map_err(StorageError::Database)?;
 
-        let total = rows.first().map_or(0, |row| row.get(5));
-        let voices = rows
-            .into_iter()
-            .filter_map(|row| {
-                let source_note_id: Option<String> = row.get(0);
-                source_note_id.map(|source_note_id| CurrentCommentVoiceV0 {
-                    source_note_id,
-                    text: row.get(1),
-                    current_admitted_at: row.get(2),
-                    source_evidence: CurrentCommentSourceEvidenceRelationV0 {
-                        evidence_id: row.get(3),
-                        record_index: row.get(4),
-                    },
-                })
-            })
-            .collect();
+        let total = rows.first().map_or(0, |row| row.get(6));
+        let awaiting_cleaning_total = rows.first().map_or(0, |row| row.get(7));
+        let mut voices = Vec::with_capacity(rows.len());
+        for row in rows {
+            let Some(source_note_id) = row.get::<_, Option<String>>(0) else {
+                continue;
+            };
+            let research_text = row
+                .get::<_, Option<String>>(1)
+                .ok_or(StorageError::InvalidPersistedCommentDerivation)?;
+            let research_state = row
+                .get::<_, Option<String>>(2)
+                .ok_or(StorageError::InvalidPersistedCommentDerivation)?;
+            voices.push(CurrentCommentVoiceV0 {
+                source_note_id,
+                research_text,
+                readiness: CurrentCommentVoiceReadinessV1::from_storage_value(&research_state)?,
+                current_admitted_at: row.get(3),
+                source_evidence: CurrentCommentSourceEvidenceRelationV0 {
+                    evidence_id: row.get(4),
+                    record_index: row.get(5),
+                },
+            });
+        }
 
-        Ok(CurrentCommentVoicesPageV0 { total, voices })
+        Ok(CurrentCommentVoicesPageV0 {
+            total,
+            awaiting_cleaning_total,
+            voices,
+        })
     }
 
     /// Returns source-backed work and related reply context for one current
@@ -409,7 +546,8 @@ impl CommentFactStore {
         let current_identity = self
             .client
             .query_opt(
-                "SELECT current_projection.note_id, current_projection.comment_id \
+                "SELECT current_projection.note_id, current_projection.comment_id, \
+                        current_observation.source_text \
                    FROM comment_current_v0 AS current_projection \
                    JOIN comment_observation_v0 AS current_observation \
                      ON current_observation.workspace_id = current_projection.workspace_id \
@@ -432,11 +570,73 @@ impl CommentFactStore {
         };
         let note_id: String = current_identity.get(0);
         let comment_id: String = current_identity.get(1);
+        let original_source_text: String = current_identity.get(2);
         let context = self
             .get_current_comment_context_detail_v0(workspace_id, &note_id, &comment_id)
             .await?;
 
-        Ok(Some(CurrentCommentContextBySourceLocatorV0 { context }))
+        Ok(Some(CurrentCommentContextBySourceLocatorV0 {
+            original_source_text,
+            context,
+        }))
+    }
+
+    /// Materializes at most `limit` legacy current observations that predate
+    /// Comment Derivation V1. This is intentionally explicit and bounded: a
+    /// read request never mutates corpus state. Re-running the method after a
+    /// successful pass returns zero because the immutable observation anchor is
+    /// unique.
+    pub async fn materialize_missing_current_comment_derivations_v1(
+        &mut self,
+        workspace_id: &str,
+        limit: i64,
+    ) -> Result<CurrentCommentDerivationMaterializationOutcomeV1, StorageError> {
+        if workspace_id.trim().is_empty() {
+            return Err(StorageError::BlankWorkspaceId);
+        }
+        if !(1..=COMMENT_DERIVATION_V1_MATERIALIZATION_MAX_LIMIT).contains(&limit) {
+            return Err(StorageError::InvalidCommentDerivationMaterializationLimit);
+        }
+
+        let transaction = self
+            .client
+            .transaction()
+            .await
+            .map_err(StorageError::Database)?;
+        let rows = transaction
+            .query(
+                "SELECT current_observation.id, current_observation.source_text \
+                   FROM comment_current_v0 AS current_projection \
+                   JOIN comment_observation_v0 AS current_observation \
+                     ON current_observation.workspace_id = current_projection.workspace_id \
+                    AND current_observation.platform = current_projection.platform \
+                    AND current_observation.note_id = current_projection.note_id \
+                    AND current_observation.comment_id = current_projection.comment_id \
+                    AND current_observation.id = current_projection.current_observation_id \
+                   LEFT JOIN comment_derivation_v1 AS derivation \
+                     ON derivation.comment_observation_id = current_observation.id \
+                    AND derivation.cleaning_contract = 'comment-cleaning.v1' \
+                  WHERE current_projection.workspace_id = $1 \
+                    AND derivation.id IS NULL \
+                  ORDER BY current_observation.admission_sequence ASC \
+                  LIMIT $2 \
+                  FOR UPDATE OF current_projection SKIP LOCKED",
+                &[&workspace_id, &limit],
+            )
+            .await
+            .map_err(StorageError::Database)?;
+
+        let mut materialized = 0;
+        for row in rows {
+            let observation_id: Uuid = row.get(0);
+            let source_text: String = row.get(1);
+            materialize_comment_derivation_v1(&transaction, observation_id, &source_text).await?;
+            materialized += 1;
+        }
+        transaction.commit().await.map_err(StorageError::Database)?;
+        Ok(CurrentCommentDerivationMaterializationOutcomeV1 {
+            materialized_current_observations: materialized,
+        })
     }
 
     /// Validates then admits two producer packages atomically.
@@ -709,6 +909,7 @@ pub enum StorageError {
     InvalidCurrentCommentVoicesLimit,
     InvalidCurrentCommentVoicesOffset,
     InvalidCurrentCommentSourceRecordIndex,
+    InvalidCommentDerivationMaterializationLimit,
     Preparation(EvidencePreparationError),
     Database(tokio_postgres::Error),
     SourceRecordIndexOutOfRange,
@@ -722,6 +923,8 @@ pub enum StorageError {
     MissingPersistedContextRecord,
     InvalidPersistedContextRecord,
     InvalidPersistedContextTextAvailability,
+    MissingPersistedCommentDerivation,
+    InvalidPersistedCommentDerivation,
 }
 
 impl fmt::Display for StorageError {
@@ -743,6 +946,10 @@ impl fmt::Display for StorageError {
             Self::InvalidCurrentCommentSourceRecordIndex => write!(
                 formatter,
                 "current comment source record index must be zero or greater"
+            ),
+            Self::InvalidCommentDerivationMaterializationLimit => write!(
+                formatter,
+                "comment derivation materialization limit must be between 1 and {COMMENT_DERIVATION_V1_MATERIALIZATION_MAX_LIMIT}"
             ),
             Self::Preparation(error) => {
                 write!(formatter, "comment evidence preparation failed: {error}")
@@ -794,6 +1001,14 @@ impl fmt::Display for StorageError {
             Self::InvalidPersistedContextTextAvailability => write!(
                 formatter,
                 "context read contains an invalid text availability materialization"
+            ),
+            Self::MissingPersistedCommentDerivation => write!(
+                formatter,
+                "comment derivation was not returned after idempotent materialization"
+            ),
+            Self::InvalidPersistedCommentDerivation => write!(
+                formatter,
+                "persisted comment derivation does not match the deterministic cleaning contract"
             ),
         }
     }
@@ -1122,6 +1337,90 @@ async fn admit_source_capture_pair(
     Ok(SourceCapturePairAdmissionOutcomeV0 { inserted: false })
 }
 
+async fn materialize_comment_derivation_v1(
+    transaction: &Transaction<'_>,
+    comment_observation_id: Uuid,
+    source_text: &str,
+) -> Result<(), StorageError> {
+    let cleaned = clean_comment_for_research(source_text);
+    let research_state = comment_research_state_storage_value(cleaned.state);
+    let reason_codes = cleaned
+        .reason_codes
+        .iter()
+        .copied()
+        .map(cleaning_reason_code_storage_value)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let research_text = cleaned.research_text.as_deref();
+
+    let inserted = transaction
+        .query_opt(
+            "INSERT INTO comment_derivation_v1 \
+             (id, comment_observation_id, cleaning_contract, research_state, research_text, reason_codes) \
+             VALUES ($1, $2, 'comment-cleaning.v1', $3, $4, $5) \
+             ON CONFLICT (comment_observation_id, cleaning_contract) DO NOTHING \
+             RETURNING id",
+            &[
+                &Uuid::new_v4(),
+                &comment_observation_id,
+                &research_state,
+                &research_text,
+                &reason_codes,
+            ],
+        )
+        .await
+        .map_err(StorageError::Database)?;
+    if inserted.is_some() {
+        return Ok(());
+    }
+
+    // This path is only possible if an explicit materialization pass races a
+    // successful admission. The immutable row must be exactly the same
+    // deterministic contract result; otherwise silently accepting it would
+    // hide a corrupted derivation.
+    let stored = transaction
+        .query_opt(
+            "SELECT cleaning_contract, research_state, research_text, reason_codes \
+              FROM comment_derivation_v1 \
+              WHERE comment_observation_id = $1 \
+                AND cleaning_contract = 'comment-cleaning.v1'",
+            &[&comment_observation_id],
+        )
+        .await
+        .map_err(StorageError::Database)?
+        .ok_or(StorageError::MissingPersistedCommentDerivation)?;
+    if stored.get::<_, String>(0) != "comment-cleaning.v1"
+        || stored.get::<_, String>(1) != research_state
+        || stored.get::<_, Option<String>>(2).as_deref() != research_text
+        || stored.get::<_, Vec<String>>(3) != reason_codes
+    {
+        return Err(StorageError::InvalidPersistedCommentDerivation);
+    }
+    Ok(())
+}
+
+fn comment_research_state_storage_value(state: CommentResearchState) -> &'static str {
+    match state {
+        CommentResearchState::Dropped => "dropped",
+        CommentResearchState::Analyzable => "analyzable",
+        CommentResearchState::NeedsContext => "needs_context",
+        CommentResearchState::Anomaly => "anomaly",
+    }
+}
+
+fn cleaning_reason_code_storage_value(reason: CleaningReasonCode) -> &'static str {
+    match reason {
+        CleaningReasonCode::Blank => "blank",
+        CleaningReasonCode::MentionOnly => "mention_only",
+        CleaningReasonCode::EmojiOnly => "emoji_only",
+        CleaningReasonCode::MentionAndEmojiOnly => "mention_and_emoji_only",
+        CleaningReasonCode::PunctuationOnly => "punctuation_only",
+        CleaningReasonCode::NoEffectiveText => "no_effective_text",
+        CleaningReasonCode::ControlCharacter => "control_character",
+        CleaningReasonCode::ContextDependentReply => "context_dependent_reply",
+    }
+}
+
 async fn admit_comment_record(
     transaction: &Transaction<'_>,
     source_evidence_id: Uuid,
@@ -1264,6 +1563,12 @@ async fn admit_comment_record(
                 )
                 .await
                 .map_err(StorageError::Database)?;
+
+            // The original source text remains in CommentObservation. This
+            // immutable child stores only the deterministic research form and
+            // is created in this same admission transaction. A source replay
+            // reaches the earlier return and never creates another child.
+            materialize_comment_derivation_v1(transaction, observation_id, &comment.text).await?;
 
             let disposition = match current {
                 Some(current) => {

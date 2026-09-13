@@ -29,6 +29,10 @@ async fn proves_user_voices_v0_read_api_against_isolated_postgres() {
         .apply_comment_fact_storage_v0_migration()
         .await
         .expect("greenfield migration must apply");
+    store
+        .apply_comment_derivation_v1_migration()
+        .await
+        .expect("derivation migration must apply after fact baseline");
     let inspector = connect_inspector(&database_url).await;
 
     for identity_suffix in ["001", "002", "003"] {
@@ -50,7 +54,9 @@ async fn proves_user_voices_v0_read_api_against_isolated_postgres() {
     );
     assert!(page.contains("用户原声"));
     assert!(page.contains("初始状态不读取任何数据"));
-    assert!(page.contains("尚未具备来源事实"));
+    assert!(page.contains("清洗后研究表达"));
+    assert!(page.contains("原始采集原声"));
+    assert!(page.contains("全部可用"));
     assert!(page.contains("打开详情后按来源读取"));
     assert!(page.contains("已采到的相关讨论"));
     assert!(page.contains("const workspaceId = state.workspaceId.trim()"));
@@ -80,7 +86,7 @@ async fn proves_user_voices_v0_read_api_against_isolated_postgres() {
         .expect("voices must be an array");
     assert_eq!(first_voices.len(), 2);
     for voice in first_voices {
-        assert_eq!(voice["research_status"], "not_researched");
+        assert_eq!(voice["readiness"], "ready");
         assert_eq!(
             voice
                 .as_object()
@@ -90,12 +96,12 @@ async fn proves_user_voices_v0_read_api_against_isolated_postgres() {
                 .collect::<Vec<_>>(),
             vec![
                 "current_admitted_at",
-                "research_status",
+                "readiness",
+                "research_text",
                 "source_evidence",
                 "source_note_id",
-                "text",
             ],
-            "read DTO must not leak unproven author, engagement, platform time, or reply fields"
+            "read DTO must not leak raw source text, cleaning internals, author, engagement, platform time, or reply fields"
         );
         assert!(voice["source_evidence"]["evidence_id"].is_string());
         assert_eq!(voice["source_evidence"]["record_index"], 0);
@@ -106,6 +112,10 @@ async fn proves_user_voices_v0_read_api_against_isolated_postgres() {
                 .ends_with('Z')
         );
     }
+    assert_eq!(
+        first_page.1["preparation"],
+        json!({"filter": "available", "awaiting_cleaning_total": 0})
+    );
 
     let second_page = get_json(
         &app,
@@ -138,7 +148,11 @@ async fn proves_user_voices_v0_read_api_against_isolated_postgres() {
     assert_eq!(exhausted.0, StatusCode::OK);
     assert_eq!(
         exhausted.1,
-        json!({"pagination": {"total": 3, "limit": 2, "offset": 3}, "voices": []})
+        json!({
+            "pagination": {"total": 3, "limit": 2, "offset": 3},
+            "preparation": {"filter": "available", "awaiting_cleaning_total": 0},
+            "voices": []
+        })
     );
 
     let empty = get_json(
@@ -149,7 +163,11 @@ async fn proves_user_voices_v0_read_api_against_isolated_postgres() {
     assert_eq!(empty.0, StatusCode::OK);
     assert_eq!(
         empty.1,
-        json!({"pagination": {"total": 0, "limit": 2, "offset": 0}, "voices": []})
+        json!({
+            "pagination": {"total": 0, "limit": 2, "offset": 0},
+            "preparation": {"filter": "available", "awaiting_cleaning_total": 0},
+            "voices": []
+        })
     );
 
     for invalid_uri in [
@@ -159,6 +177,7 @@ async fn proves_user_voices_v0_read_api_against_isolated_postgres() {
         "/api/v0/comment-research/voices?workspace_id=voices-api-proof-workspace&limit=101",
         "/api/v0/comment-research/voices?workspace_id=voices-api-proof-workspace&limit=not-a-number",
         "/api/v0/comment-research/voices?workspace_id=voices-api-proof-workspace&offset=-1",
+        "/api/v0/comment-research/voices?workspace_id=voices-api-proof-workspace&filter=dropped",
     ] {
         let invalid = get_json(&app, invalid_uri).await;
         assert_eq!(invalid.0, StatusCode::BAD_REQUEST, "{invalid_uri}");

@@ -1,6 +1,8 @@
 # Comment Research · User Voices Read API V0
 
-状态：PROVEN IN ISOLATION
+状态：BASELINE PROOF — 当前列表行为已由 Cleaning Derivation V1 取代
+
+> 2026-09-13 更新：本文件保留 Comment Fact / 原声读取的历史 V0 边界。当前 `/api/v0/comment-research/voices` 已在读取时明确限定 `comment-cleaning.v1`，列表返回 `research_text`、`readiness`、`preparation.awaiting_cleaning_total`，并不再返回原始正文。当前有效验收见 [`comment-derivation-user-voices-v1.md`](comment-derivation-user-voices-v1.md)。原始采集正文只在当前 Evidence locator 的详情抽屉读取。
 
 日期：2026-09-13
 范围：当前评论事实的受控 HTTP 读取，以及仅消费此读取模型的「用户原声」只读浏览页。列表只返回直接评论事实；详情中的上下文另见 [`comment-voice-context-read-api-v0.md`](comment-voice-context-read-api-v0.md)。不是评论清洗、研究任务、模型调用、问题归并或变化观察的完成声明。

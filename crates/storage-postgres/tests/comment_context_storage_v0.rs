@@ -26,6 +26,10 @@ async fn proves_comment_context_storage_v0_against_an_isolated_postgres_database
         .apply_comment_context_storage_v0_migration()
         .await
         .expect("context migration must apply after fact baseline");
+    store
+        .apply_comment_derivation_v1_migration()
+        .await
+        .expect("derivation migration must apply after fact baseline");
     let inspector = connect_inspector(&database_url).await;
 
     let (detail, comments, mut replies) = fixture_packages();

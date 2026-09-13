@@ -476,6 +476,7 @@ name = "linggan-storage-postgres"
 version = "0.1.0"
 dependencies = [
  "linggan-contracts",
+ "linggan-domain",
  "linggan-evidence",
  "linggan-observation",
  "serde_json",

@@ -1,8 +1,8 @@
 //! Minimal HTTP composition for the Comment Research User Voices V0 read path.
 //!
-//! This module exposes only current comment facts proven by the V0 storage
-//! proof. It does not create research work, clean text, call a model, or
-//! invent unproven work metadata.
+//! This module exposes only current, deterministically cleaned comment
+//! expressions proven by the V0/V1 storage proofs. It does not create research
+//! work, call a model, or invent unproven work metadata.
 
 mod user_voices_page_v0;
 
@@ -18,8 +18,9 @@ use axum::{
 use linggan_contracts::ContextTextAvailabilityV0;
 use linggan_storage_postgres::{
     CURRENT_COMMENT_VOICES_V0_MAX_LIMIT, CommentFactStore, ContextSourceEvidenceRelationV0,
-    CurrentCommentContextDetailV0, CurrentCommentRelatedReplyV0, CurrentCommentVoiceV0,
-    CurrentCommentVoicesPageRequestV0, CurrentCommentWorkContextV0, StorageError,
+    CurrentCommentContextBySourceLocatorV0, CurrentCommentRelatedReplyV0,
+    CurrentCommentVoiceFilterV1, CurrentCommentVoiceV0, CurrentCommentVoicesPageRequestV0,
+    CurrentCommentWorkContextV0, StorageError,
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -54,11 +55,13 @@ struct UserVoicesQueryV0 {
     workspace_id: Option<String>,
     limit: Option<String>,
     offset: Option<String>,
+    filter: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct UserVoicesResponseV0 {
     pagination: UserVoicesPaginationV0,
+    preparation: UserVoicesPreparationSummaryV1,
     voices: Vec<UserVoiceDtoV0>,
 }
 
@@ -69,17 +72,23 @@ struct UserVoicesPaginationV0 {
     offset: i64,
 }
 
+#[derive(Debug, Serialize)]
+struct UserVoicesPreparationSummaryV1 {
+    filter: &'static str,
+    awaiting_cleaning_total: i64,
+}
+
 /// The intentionally narrow browser DTO. It returns only direct current
 /// comment facts. Work and discussion context is loaded separately from the
 /// list-visible Evidence locator, so this endpoint does not make a premature
 /// availability claim for the table.
 #[derive(Debug, Serialize)]
 struct UserVoiceDtoV0 {
-    text: String,
+    research_text: String,
     source_note_id: String,
     current_admitted_at: String,
     source_evidence: UserVoiceSourceEvidenceDtoV0,
-    research_status: &'static str,
+    readiness: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -91,14 +100,14 @@ struct UserVoiceSourceEvidenceDtoV0 {
 impl From<CurrentCommentVoiceV0> for UserVoiceDtoV0 {
     fn from(voice: CurrentCommentVoiceV0) -> Self {
         Self {
-            text: voice.text,
+            research_text: voice.research_text,
             source_note_id: voice.source_note_id,
             current_admitted_at: voice.current_admitted_at,
             source_evidence: UserVoiceSourceEvidenceDtoV0 {
                 evidence_id: voice.source_evidence.evidence_id.to_string(),
                 record_index: voice.source_evidence.record_index,
             },
-            research_status: "not_researched",
+            readiness: voice.readiness.as_api_value(),
         }
     }
 }
@@ -115,7 +124,8 @@ async fn list_user_voices_v0(
         })?;
     let limit = parse_i64_parameter(query.limit, "limit", USER_VOICES_V0_DEFAULT_LIMIT)?;
     let offset = parse_i64_parameter(query.offset, "offset", 0)?;
-    let page = CurrentCommentVoicesPageRequestV0::new(limit, offset)
+    let filter = parse_user_voices_filter(query.filter)?;
+    let page = CurrentCommentVoicesPageRequestV0::with_filter(limit, offset, filter)
         .map_err(ApiError::from_storage_input_error)?;
 
     let result = store
@@ -129,12 +139,27 @@ async fn list_user_voices_v0(
             limit,
             offset,
         },
+        preparation: UserVoicesPreparationSummaryV1 {
+            filter: filter.as_storage_value(),
+            awaiting_cleaning_total: result.awaiting_cleaning_total,
+        },
         voices: result
             .voices
             .into_iter()
             .map(UserVoiceDtoV0::from)
             .collect(),
     }))
+}
+
+fn parse_user_voices_filter(raw: Option<String>) -> Result<CurrentCommentVoiceFilterV1, ApiError> {
+    match raw.as_deref().unwrap_or("available") {
+        "available" => Ok(CurrentCommentVoiceFilterV1::Available),
+        "ready" => Ok(CurrentCommentVoiceFilterV1::Ready),
+        "needs_context" => Ok(CurrentCommentVoiceFilterV1::NeedsContext),
+        _ => Err(ApiError::InvalidRequest {
+            message: "filter must be available, ready, or needs_context",
+        }),
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -151,6 +176,9 @@ struct UserVoiceContextQueryV0 {
 #[derive(Debug, Serialize)]
 struct UserVoiceContextResponseV0 {
     availability: &'static str,
+    /// The captured current CommentObservation source text. It is shown only
+    /// in the detail drawer; the list remains the deterministic research text.
+    original_voice_text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     work_context: Option<UserVoiceWorkContextDtoV0>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -236,10 +264,19 @@ impl From<CurrentCommentRelatedReplyV0> for UserVoiceRelatedDiscussionDtoV0 {
     }
 }
 
-impl From<CurrentCommentContextDetailV0> for UserVoiceContextResponseV0 {
-    fn from(context: CurrentCommentContextDetailV0) -> Self {
+impl From<CurrentCommentContextBySourceLocatorV0> for UserVoiceContextResponseV0 {
+    fn from(lookup: CurrentCommentContextBySourceLocatorV0) -> Self {
+        let Some(context) = lookup.context else {
+            return Self {
+                availability: "unavailable",
+                original_voice_text: lookup.original_source_text,
+                work_context: None,
+                related_discussion: None,
+            };
+        };
         Self {
             availability: "available",
+            original_voice_text: lookup.original_source_text,
             work_context: Some(context.work_context.into()),
             related_discussion: Some(
                 context
@@ -285,14 +322,7 @@ async fn get_user_voice_context_v0(
         return Err(ApiError::CurrentVoiceNotFound);
     };
 
-    Ok(Json(match lookup.context {
-        Some(context) => context.into(),
-        None => UserVoiceContextResponseV0 {
-            availability: "unavailable",
-            work_context: None,
-            related_discussion: None,
-        },
-    }))
+    Ok(Json(lookup.into()))
 }
 
 fn parse_source_record_index(raw: Option<String>) -> Result<i32, ApiError> {

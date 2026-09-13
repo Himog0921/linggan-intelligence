@@ -172,7 +172,7 @@ h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.2rem); font-weight: 650; letter
 
 .scope-panel {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(11rem, 15rem) auto;
   gap: 1rem;
   align-items: end;
   padding: 1.4rem 0;
@@ -192,6 +192,8 @@ h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.2rem); font-weight: 650; letter
   border: 1px solid var(--rule);
   border-radius: 4px;
 }
+
+.filter-field .workspace-input { width: 100%; }
 
 .primary-button, .quiet-button {
   min-height: 42px;
