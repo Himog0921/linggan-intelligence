@@ -1,8 +1,10 @@
 //! Minimal HTTP composition for the Comment Research User Voices V0 read path.
 //!
 //! This module exposes only current comment facts proven by the V0 storage
-//! proof. It does not create research work, clean text, call a model, invent
-//! work metadata, or expose a page implementation.
+//! proof. It does not create research work, clean text, call a model, or
+//! invent unproven work metadata.
+
+mod user_voices_page_v0;
 
 use std::sync::Arc;
 
@@ -28,6 +30,14 @@ pub const USER_VOICES_V0_DEFAULT_LIMIT: i64 = 50;
 /// adapter's current-projection SELECT method and has no admission dependency.
 pub fn comment_research_router_v0(store: Arc<CommentFactStore>) -> Router {
     Router::new()
+        .route(
+            "/comment-research/voices",
+            get(user_voices_page_v0::user_voices_page_v0),
+        )
+        .route(
+            "/comment-research/voices/styles.css",
+            get(user_voices_page_v0::user_voices_page_v0_stylesheet),
+        )
         .route("/api/v0/comment-research/voices", get(list_user_voices_v0))
         .with_state(store)
 }

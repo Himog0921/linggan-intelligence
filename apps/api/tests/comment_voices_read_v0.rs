@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::{
     body::{Body, to_bytes},
-    http::{Request, StatusCode},
+    http::{Request, StatusCode, header},
 };
 use linggan_api::comment_research_router_v0;
 use linggan_contracts::CapturePackageV0;
@@ -41,6 +41,29 @@ async fn proves_user_voices_v0_read_api_against_isolated_postgres() {
     assert_all_counts(&inspector, [6, 3, 3, 3, 3, 3]).await;
 
     let app = comment_research_router_v0(Arc::new(store));
+
+    let (page_status, page_content_type, page) = get_text(&app, "/comment-research/voices").await;
+    assert_eq!(page_status, StatusCode::OK);
+    assert_eq!(
+        page_content_type.as_deref(),
+        Some("text/html; charset=utf-8")
+    );
+    assert!(page.contains("用户原声"));
+    assert!(page.contains("初始状态不读取任何数据"));
+    assert!(page.contains("尚未具备来源事实"));
+    assert!(page.contains("作品上下文未取得"));
+    assert!(page.contains("const workspaceId = state.workspaceId.trim()"));
+
+    let (css_status, css_content_type, stylesheet) =
+        get_text(&app, "/comment-research/voices/styles.css").await;
+    assert_eq!(css_status, StatusCode::OK);
+    assert_eq!(css_content_type.as_deref(), Some("text/css; charset=utf-8"));
+    assert!(stylesheet.contains("--canvas: oklch(0.965 0.008 85)"));
+    assert!(stylesheet.contains("@media (prefers-reduced-motion: reduce)"));
+
+    // Static page and stylesheet requests do not call the write admission path.
+    assert_all_counts(&inspector, [6, 3, 3, 3, 3, 3]).await;
+
     let first_page = get_json(
         &app,
         "/api/v0/comment-research/voices?workspace_id=voices-api-proof-workspace&limit=2&offset=0",
@@ -191,6 +214,30 @@ async fn get_json(app: &axum::Router, uri: &str) -> (StatusCode, Value) {
         .expect("response body must be readable");
     let body = serde_json::from_slice(&body).expect("response body must be JSON");
     (status, body)
+}
+
+async fn get_text(app: &axum::Router, uri: &str) -> (StatusCode, Option<String>, String) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(uri)
+                .body(Body::empty())
+                .expect("request must build"),
+        )
+        .await
+        .expect("router must respond");
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned);
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("response body must be readable");
+    let body = String::from_utf8(body.to_vec()).expect("page body must be UTF-8");
+    (status, content_type, body)
 }
 
 async fn connect_inspector(database_url: &str) -> Client {
