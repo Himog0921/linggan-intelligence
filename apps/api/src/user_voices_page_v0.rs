@@ -170,7 +170,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
       </div>
       <section class="drawer-section" aria-labelledby="plan-preview-meaning-title">
         <h3 id="plan-preview-meaning-title">这是范围预览，不是开始研究</h3>
-        <p class="drawer-copy">它只读取当前清洗语料，按来源作品轮换展示可能进入后续研究的一小段范围。不会创建任务、锁定样本、调用模型、组装上下文或执行研究。</p>
+        <p class="drawer-copy">查看预览时，它只读取当前清洗语料，按来源作品轮换展示可能进入后续研究的一小段范围。确认前不会创建任务、锁定样本、调用模型、组装上下文或执行研究。</p>
       </section>
       <form class="plan-controls" id="plan-preview-form" novalidate>
         <div>
@@ -217,6 +217,23 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         </div>
         <div class="context-notice" id="plan-preview-empty" hidden></div>
       </section>
+      <section class="drawer-section plan-preparation-action" aria-labelledby="prepare-run-title">
+        <div>
+          <h3 id="prepare-run-title">准备本次研究</h3>
+          <p class="drawer-copy">确认时会按当前语料重新核对范围，不使用表格中的逐条选择；本次只创建待执行研究。</p>
+        </div>
+        <button class="primary-button prepare-run-button" id="prepare-run-button" type="button" disabled>准备本次研究</button>
+        <div class="run-confirmation" id="run-confirmation" role="region" aria-labelledby="run-confirmation-title" hidden>
+          <h4 id="run-confirmation-title">核对后冻结输入</h4>
+          <p class="drawer-copy" id="run-confirmation-summary"></p>
+          <p class="run-confirmation-note">会创建“待执行研究”。当前版本没有执行器：确认不会调用模型、不生成结论、不扣费。</p>
+          <div class="run-confirmation-actions">
+            <button class="quiet-button" id="cancel-run-confirmation" type="button">返回预览</button>
+            <button class="primary-button" id="confirm-run-button" type="button">确认并冻结输入</button>
+          </div>
+        </div>
+        <div class="run-preparation-result" id="run-preparation-result" role="status" aria-live="polite" tabindex="-1" hidden></div>
+      </section>
     </aside>
 
     <script>
@@ -234,7 +251,10 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           planLastTrigger: null,
           contextRequestToken: 0,
           contextPackRequestToken: 0,
-          planRequestToken: 0
+          planRequestToken: 0,
+          runPreparationRequestToken: 0,
+          planPreviewPayload: null,
+          runPreparedForCurrentPreview: false
         };
         const form = document.getElementById("workspace-form");
         const workspaceInput = document.getElementById("workspace-id");
@@ -268,6 +288,12 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
         const planSourcesBody = document.getElementById("plan-sources-body");
         const planCandidatesBody = document.getElementById("plan-candidates-body");
         const planPreviewEmpty = document.getElementById("plan-preview-empty");
+        const prepareRunButton = document.getElementById("prepare-run-button");
+        const runConfirmation = document.getElementById("run-confirmation");
+        const runConfirmationSummary = document.getElementById("run-confirmation-summary");
+        const cancelRunConfirmationButton = document.getElementById("cancel-run-confirmation");
+        const confirmRunButton = document.getElementById("confirm-run-button");
+        const runPreparationResult = document.getElementById("run-preparation-result");
 
         function setStatus(message, kind) {
           statusMessage.textContent = message;
@@ -753,6 +779,38 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           refreshPlanPreviewButton.textContent = loading ? "正在读取…" : "更新预览";
           planPreviewScope.disabled = loading;
           planPreviewLimit.disabled = loading;
+          prepareRunButton.disabled = loading || state.runPreparedForCurrentPreview || !state.planPreviewPayload || state.planPreviewPayload.candidates.length === 0;
+        }
+
+        function clearRunPreparationState() {
+          state.runPreparationRequestToken += 1;
+          state.runPreparedForCurrentPreview = false;
+          runConfirmation.hidden = true;
+          runConfirmationSummary.textContent = "";
+          runPreparationResult.hidden = true;
+          runPreparationResult.removeAttribute("data-state");
+          runPreparationResult.replaceChildren();
+          confirmRunButton.disabled = false;
+          confirmRunButton.textContent = "确认并冻结输入";
+          cancelRunConfirmationButton.disabled = false;
+          planPreviewScope.disabled = false;
+          planPreviewLimit.disabled = false;
+          refreshPlanPreviewButton.disabled = false;
+        }
+
+        function clearPlanPreviewState() {
+          state.planPreviewPayload = null;
+          clearRunPreparationState();
+          prepareRunButton.disabled = true;
+          prepareRunButton.textContent = "准备本次研究";
+        }
+
+        function setRunPreparationLoading(loading) {
+          const hasCandidates = state.planPreviewPayload && state.planPreviewPayload.candidates.length > 0;
+          prepareRunButton.disabled = loading || state.runPreparedForCurrentPreview || !hasCandidates;
+          confirmRunButton.disabled = loading;
+          cancelRunConfirmationButton.disabled = loading;
+          confirmRunButton.textContent = loading ? "正在冻结输入…" : "确认并冻结输入";
         }
 
         function appendPlanTotal(label, value, detail) {
@@ -778,6 +836,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           planCandidatesBody.replaceChildren();
           planPreviewEmpty.hidden = true;
           planPreviewEmpty.replaceChildren();
+          clearPlanPreviewState();
         }
 
         function planScopeLabel(scope) {
@@ -856,11 +915,145 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
 
         function renderPlanPreview(payload) {
           clearPlanPreviewRows();
+          state.planPreviewPayload = payload;
+          prepareRunButton.disabled = payload.candidates.length === 0;
           renderPlanPreparation(payload.preparation);
           renderPlanSources(payload.source_distribution);
           renderPlanCandidates(payload.candidates);
           if (payload.candidates.length === 0) {
             renderPlanEmpty(payload.preparation, payload.scope);
+          }
+        }
+
+        function showRunConfirmation() {
+          const preview = state.planPreviewPayload;
+          if (!preview || preview.candidates.length === 0) {
+            setPlanPreviewStatus("当前范围没有可冻结的输入。可更新预览或切换范围后再试。", "error");
+            return;
+          }
+          const sourceTotal = preview.source_distribution.filter((source) => source.selected_total > 0).length;
+          runConfirmationSummary.textContent = `当前预览有 ${preview.candidates.length} 条候选，覆盖 ${sourceTotal} 个来源作品。确认时会重新核对当前语料和来源轮换，预览可能更新；系统将冻结最终范围并创建待执行研究。`;
+          runPreparationResult.hidden = true;
+          runConfirmation.hidden = false;
+          planPreviewScope.disabled = true;
+          planPreviewLimit.disabled = true;
+          refreshPlanPreviewButton.disabled = true;
+          confirmRunButton.focus();
+        }
+
+        function closeRunConfirmation() {
+          clearRunPreparationState();
+          if (!planPreviewDrawer.hidden) prepareRunButton.focus();
+        }
+
+        function isRunPreparationPayload(payload) {
+          return payload
+            && typeof payload.run_ref === "string"
+            && (payload.run_state === "prepared_for_execution" || payload.run_state === "blocked_by_context")
+            && typeof payload.scope_refreshed === "boolean"
+            && Number.isInteger(payload.frozen_item_total)
+            && Number.isInteger(payload.prepared_for_execution_total)
+            && Number.isInteger(payload.blocked_needs_context_total)
+            && Array.isArray(payload.source_distribution);
+        }
+
+        function appendRunReceiptLine(root, label, value, className) {
+          const item = document.createElement("div");
+          const term = document.createElement("dt");
+          const definition = document.createElement("dd");
+          term.textContent = label;
+          definition.className = className || "";
+          definition.textContent = value;
+          item.append(term, definition);
+          root.append(item);
+        }
+
+        function renderRunPreparationResult(payload) {
+          const sourceTotal = payload.source_distribution.filter((source) => source.frozen_total > 0).length;
+          const hasPreparedInput = payload.prepared_for_execution_total > 0;
+          const resultTitle = document.createElement("h4");
+          resultTitle.textContent = hasPreparedInput
+            ? "待执行，尚未开始分析"
+            : "已冻结，但因上下文不足暂不执行";
+          const resultCopy = document.createElement("p");
+          resultCopy.className = "drawer-copy";
+          resultCopy.textContent = `已冻结 ${payload.frozen_item_total} 条输入，覆盖 ${sourceTotal} 个来源作品；其中 ${payload.prepared_for_execution_total} 条待执行，${payload.blocked_needs_context_total} 条因上下文不足被阻断。`;
+          const refresh = document.createElement("p");
+          refresh.className = "run-receipt-note";
+          refresh.textContent = payload.scope_refreshed
+            ? "创建时范围已刷新，回执按重新核对后的当前语料生成。"
+            : "创建时已重新核对当前语料；本次没有提交候选清单，服务端不会按页面逐条创建。";
+          const receipt = document.createElement("dl");
+          receipt.className = "run-receipt";
+          appendRunReceiptLine(receipt, "Run 回执", payload.run_ref, "mono");
+          appendRunReceiptLine(receipt, "最终来源覆盖", `${sourceTotal} 个来源作品`);
+          appendRunReceiptLine(receipt, "范围刷新", payload.scope_refreshed ? "已刷新" : "已重新核对");
+          runPreparationResult.replaceChildren(resultTitle, resultCopy, refresh, receipt);
+          runPreparationResult.dataset.state = "success";
+          runPreparationResult.hidden = false;
+          state.runPreparedForCurrentPreview = true;
+          prepareRunButton.disabled = true;
+          prepareRunButton.textContent = "本次输入已冻结";
+          planPreviewScope.disabled = false;
+          planPreviewLimit.disabled = false;
+          refreshPlanPreviewButton.disabled = false;
+          runPreparationResult.focus();
+        }
+
+        function renderRunPreparationError(message) {
+          const heading = document.createElement("h4");
+          heading.textContent = "未能准备本次研究";
+          const copy = document.createElement("p");
+          copy.className = "drawer-copy";
+          copy.textContent = message;
+          const action = document.createElement("button");
+          action.className = "quiet-button";
+          action.type = "button";
+          action.textContent = "回到预览";
+          action.addEventListener("click", () => {
+            clearRunPreparationState();
+            prepareRunButton.focus();
+          });
+          runPreparationResult.replaceChildren(heading, copy, action);
+          runPreparationResult.dataset.state = "error";
+          runPreparationResult.hidden = false;
+          runPreparationResult.focus();
+        }
+
+        async function submitRunPreparation() {
+          const workspaceId = state.workspaceId.trim();
+          const preview = state.planPreviewPayload;
+          if (!workspaceId || !preview || preview.candidates.length === 0) {
+            renderRunPreparationError("当前预览没有可冻结输入。请回到预览并重新读取当前范围。");
+            return;
+          }
+          const requestToken = state.runPreparationRequestToken + 1;
+          state.runPreparationRequestToken = requestToken;
+          setRunPreparationLoading(true);
+          try {
+            const response = await fetch("/api/v0/comment-research/runs", {
+              method: "POST",
+              headers: { "Accept": "application/json", "Content-Type": "application/json" },
+              credentials: "same-origin",
+              body: JSON.stringify({
+                workspace_id: workspaceId,
+                scope: planPreviewScope.value,
+                limit: Number(planPreviewLimit.value)
+              })
+            });
+            const payload = await response.json().catch(() => null);
+            if (requestToken !== state.runPreparationRequestToken || planPreviewDrawer.hidden) return;
+            if (!response.ok || !isRunPreparationPayload(payload)) {
+              throw new Error(errorMessage(payload));
+            }
+            runConfirmation.hidden = true;
+            renderRunPreparationResult(payload);
+          } catch (error) {
+            if (requestToken !== state.runPreparationRequestToken || planPreviewDrawer.hidden) return;
+            runConfirmation.hidden = true;
+            renderRunPreparationError(error instanceof Error ? error.message : "无法准备本次研究。请回到预览后重试。");
+          } finally {
+            if (requestToken === state.runPreparationRequestToken) setRunPreparationLoading(false);
           }
         }
 
@@ -911,6 +1104,7 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
 
         function closePlanPreview() {
           state.planRequestToken += 1;
+          state.runPreparationRequestToken += 1;
           planPreviewDrawer.hidden = true;
           if (drawer.hidden) drawerBackdrop.hidden = true;
           if (state.planLastTrigger instanceof HTMLElement) {
@@ -1018,6 +1212,9 @@ const USER_VOICES_PAGE_V0_HTML: &str = r##"<!doctype html>
           event.preventDefault();
           loadPlanPreview();
         });
+        prepareRunButton.addEventListener("click", showRunConfirmation);
+        cancelRunConfirmationButton.addEventListener("click", closeRunConfirmation);
+        confirmRunButton.addEventListener("click", submitRunPreparation);
         closeDrawerButton.addEventListener("click", closeDrawer);
         closePlanPreviewButton.addEventListener("click", closePlanPreview);
         drawerBackdrop.addEventListener("click", () => {
@@ -1065,10 +1262,25 @@ mod tests {
         assert!(USER_VOICES_PAGE_V0_HTML.contains("/api/v0/comment-research/voices/context-pack"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("查看自动研究范围"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("/api/v0/comment-research/plan-preview"));
-        assert!(USER_VOICES_PAGE_V0_HTML.contains("不会创建任务、锁定样本、调用模型"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("确认前不会创建任务、锁定样本、调用模型"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("范围在每次读取时重新计算，尚未冻结"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("当前原声与其来源证据仍可查看"));
         assert!(USER_VOICES_PAGE_V0_HTML.contains("等待本地清洗物化"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("准备本次研究"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("确认并冻结输入"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("待执行，尚未开始分析"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("不会调用模型、不生成结论、不扣费"));
+        assert!(USER_VOICES_PAGE_V0_HTML.contains("/api/v0/comment-research/runs"));
+        let run_submission = USER_VOICES_PAGE_V0_HTML
+            .split("async function submitRunPreparation()")
+            .nth(1)
+            .expect("page has run submission")
+            .split("function closePlanPreview()")
+            .next()
+            .expect("run submission ends before close");
+        assert!(!run_submission.contains("evidence_id"));
+        assert!(!run_submission.contains("evidence_ids"));
+        assert!(!run_submission.contains("preview:"));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("data-label=\\\"点赞\\\""));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("data-label=\\\"作者\\\""));
         assert!(!USER_VOICES_PAGE_V0_HTML.contains("data-label=\\\"发表时间\\\""));

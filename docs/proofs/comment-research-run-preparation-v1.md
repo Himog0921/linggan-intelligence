@@ -1,4 +1,4 @@
-# 评论研究运行准备 V1 · 隔离 HTTP / PostgreSQL 证明
+# 评论研究运行准备 V1 · 隔离 HTTP / PostgreSQL 与页面确认合同证明
 
 状态：PROVEN IN ISOLATION
 日期：2026-09-13
@@ -11,7 +11,7 @@
 POST /api/v0/comment-research/runs
 ```
 
-请求对象只接受 `workspace_id`、`scope`、`limit` 与可选 `preview` 摘要。`limit` 必须在 1–100；`preview` 只含已在浏览器预览显示的来源分布、当前接入时间和来源轮次，用来告知用户预览是否已过期。它不携带 Evidence ID、评论 ID、Derivation ID 或候选授权列表。未知字段（包括 `evidence_ids`）一律以 `400 invalid_request` 拒绝。
+请求对象只接受 `workspace_id`、`scope`、`limit` 与可选 `preview` 摘要。`limit` 必须在 1–100；`preview` 只含已在浏览器预览显示的来源分布、当前接入时间和来源轮次，用来告知用户预览是否已过期。它不携带 Evidence ID、评论 ID、Derivation ID 或候选授权列表。未知字段（包括 `evidence_ids`）一律以 `400 invalid_request` 拒绝。用户原声页的确认流更严格，只发送前三个范围参数，不发送 `preview` 或任何候选清单。
 
 创建事务内重新计算 `available` / `ready` / `needs_context` 当前范围，并以来源作品轮换排序：每个来源的第 1 条在其第 2 条前被考虑。浏览器预览永远不能覆盖这次查询。若摘要与这次查询不一致，响应 `scope_refreshed=true`，并仅返回最终的来源分布和聚合数量。
 
@@ -48,9 +48,12 @@ scripts/prove-comment-research-run-preparation-v1.sh
 | 正文推进 | 当前评论正文更新后，旧浏览器摘要在 POST 时被刷新并返回 `scope_refreshed=true`；旧 Evidence locator 不再属于 Current。 |
 | 客户端边界 | 带 `evidence_ids` 的请求为 400，所有 Run/Item/Event/Analysis 行数不变。 |
 | 现有只读路径 | User Voices 和 plan preview 在创建后仍无 Run 表写入，且 DTO 没有 fingerprint、冻结 Context Pack 或模型策略字段。 |
+| 页面确认合同 | 测试通过真实 Router 读取用户原声 HTML，静态断言抽屉含“准备本次研究”“确认并冻结输入”“待执行，尚未开始分析”与无执行器说明；提交函数只序列化 `workspace_id`、`scope`、`limit`，不含 `preview`、`evidence_id` 或 `evidence_ids`。 |
+| 页面回执可显示 | 同一隔离 HTTP 流以这三个参数创建 Run，响应含 public `run_ref`、最终冻结数、待执行/阻断数和来源分布；页面合同要求以这些字段呈现“待执行，尚未开始分析”，不把它写回原声研究状态。 |
+| 无模型执行 | 证明脚本没有 Provider、模型、queue 或 worker 依赖；页面文案与 API `execution_note` 均明确当前没有执行器、未调用模型。 |
 
 ## 未证明、不得声称
 
-- 用户原声页面的确认按钮和浏览器验收；此卡只交付本地 POST，页面仍保持既有只读预览；
+- 有头浏览器的视觉验收、3000 runtime 或业务验收；本证明只在真实 Axum 页面响应上验证静态页面合同，并以同一隔离 HTTP 请求验证确认体和回执。它不启动本地 Web 服务；
 - 任何 Provider / 模型 / Prompt / Token / 费用、模型输出、真实研究结论或重试 worker；
 - 队列、租约、自动调度、连续研究、向量、问题归并、共享数据库 migration、main 合并、3000 runtime 或业务验收。

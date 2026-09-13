@@ -84,13 +84,15 @@ async fn proves_confirmed_local_comment_research_run_preparation_v1() {
 
     let shared_store = Arc::new(store);
     let app = comment_research_router_v0(shared_store.clone());
+    let page = get_text(&app, "/comment-research/voices").await;
+    assert_eq!(page.0, StatusCode::OK);
+    assert_confirmation_page_contract(&page.1);
     let live_preview = get_json(
         &app,
         "/api/v0/comment-research/plan-preview?workspace_id=comment-research-run-preparation-v1-proof&scope=available&limit=4",
     )
     .await;
     assert_eq!(live_preview.0, StatusCode::OK);
-    let preview_summary = browser_preview_summary(&live_preview.1);
 
     let prepared = post_json(
         &app,
@@ -99,7 +101,6 @@ async fn proves_confirmed_local_comment_research_run_preparation_v1() {
             "workspace_id": WORKSPACE,
             "scope": "available",
             "limit": 4,
-            "preview": preview_summary,
         }),
     )
     .await;
@@ -110,6 +111,10 @@ async fn proves_confirmed_local_comment_research_run_preparation_v1() {
     assert_eq!(prepared.1["prepared_for_execution_total"], 2);
     assert_eq!(prepared.1["blocked_needs_context_total"], 1);
     assert_eq!(prepared.1["deduplicated_semantic_input_total"], 1);
+    assert_eq!(
+        prepared.1["source_distribution"].as_array().map(Vec::len),
+        Some(3)
+    );
     assert_eq!(
         prepared.1["execution_note"],
         "本次只冻结输入并创建待执行研究；当前未配置执行器，未调用模型。"
@@ -385,6 +390,50 @@ async fn get_json(app: &axum::Router, uri: &str) -> (StatusCode, Value) {
             .expect("GET responds"),
     )
     .await
+}
+
+async fn get_text(app: &axum::Router, uri: &str) -> (StatusCode, String) {
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri(uri)
+                .body(Body::empty())
+                .expect("GET builds"),
+        )
+        .await
+        .expect("GET responds");
+    let status = response.status();
+    let body = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("page response reads");
+    (
+        status,
+        String::from_utf8(body.to_vec()).expect("page is UTF-8"),
+    )
+}
+
+fn assert_confirmation_page_contract(page: &str) {
+    assert!(page.contains("准备本次研究"));
+    assert!(page.contains("确认并冻结输入"));
+    assert!(page.contains("待执行，尚未开始分析"));
+    assert!(page.contains("不会调用模型、不生成结论、不扣费"));
+    assert!(page.contains("/api/v0/comment-research/runs"));
+
+    let start = page
+        .find("async function submitRunPreparation()")
+        .expect("page has run preparation submission");
+    let end = page[start..]
+        .find("function closePlanPreview()")
+        .map(|offset| start + offset)
+        .expect("submission ends before drawer close");
+    let submission = &page[start..end];
+    assert!(submission.contains("workspace_id: workspaceId"));
+    assert!(submission.contains("scope: planPreviewScope.value"));
+    assert!(submission.contains("limit: Number(planPreviewLimit.value)"));
+    assert!(!submission.contains("evidence_id"));
+    assert!(!submission.contains("evidence_ids"));
+    assert!(!submission.contains("preview:"));
 }
 
 async fn post_json(app: &axum::Router, uri: &str, value: Value) -> (StatusCode, Value) {

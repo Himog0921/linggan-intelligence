@@ -467,11 +467,104 @@ h1 { margin: 0; font-size: clamp(1.75rem, 3vw, 2.2rem); font-weight: 650; letter
 .plan-caution { color: oklch(0.43 0.10 68); }
 .plan-drawer .context-notice { margin-top: 0.9rem; }
 
+.plan-preparation-action {
+  display: grid;
+  gap: 0.8rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--rule);
+}
+
+.plan-preparation-action h3 { margin-bottom: 0.35rem; }
+
+.prepare-run-button {
+  width: 100%;
+  color: var(--surface);
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.run-confirmation,
+.run-preparation-result {
+  display: grid;
+  gap: 0.75rem;
+  padding: 1rem;
+  background: var(--canvas);
+  border: 1px solid var(--rule);
+}
+
+.run-confirmation[hidden],
+.run-preparation-result[hidden] { display: none; }
+
+.run-confirmation h4,
+.run-preparation-result h4 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+}
+
+.run-confirmation-note,
+.run-receipt-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.run-confirmation-note { color: oklch(0.40 0.085 48); }
+
+.run-confirmation-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.35fr);
+  gap: 0.6rem;
+}
+
+.run-confirmation-actions .primary-button {
+  color: var(--surface);
+  background: var(--signal);
+  border-color: var(--signal);
+}
+
+.run-preparation-result[data-state="success"] {
+  border-color: oklch(0.57 0.10 145 / 0.52);
+}
+
+.run-preparation-result[data-state="error"] {
+  background: oklch(0.95 0.018 38);
+  border-color: oklch(0.64 0.11 35 / 0.6);
+}
+
+.run-receipt {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
+  margin: 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--rule);
+}
+
+.run-receipt > div { min-width: 0; }
+
+.run-receipt dt {
+  color: var(--muted);
+  font-size: 0.68rem;
+  line-height: 1.35;
+}
+
+.run-receipt dd {
+  overflow-wrap: anywhere;
+  margin: 0.25rem 0 0;
+  color: var(--ink);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
 @media (max-width: 899px) {
   .page-heading-actions { justify-items: stretch; }
   .plan-controls { grid-template-columns: 1fr; align-items: stretch; }
   .plan-controls .quiet-button { width: 100%; }
   .plan-totals { grid-template-columns: 1fr; }
+  .run-confirmation-actions,
+  .run-receipt { grid-template-columns: 1fr; }
 }
 
 .context-pack-button {
