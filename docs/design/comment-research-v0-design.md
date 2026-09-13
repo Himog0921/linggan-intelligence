@@ -1,7 +1,7 @@
 # 评论研究 V0 · 页面设计基线
 
-状态：`ACCEPTED FOR P2 READ-ONLY IMPLEMENTATION`  
-日期：2026-09-13  
+状态：`ACCEPTED FOR P2 READ-ONLY IMPLEMENTATION`
+日期：2026-09-13
 范围：评论研究的五个视图共享页面壳；当前实现「用户原声」的 V0 只读页面，以及详情抽屉中按 Evidence 异步读取的已采到讨论/作品上下文。该文档不把未取得的数据设计成指标或卡片，也不把局部来源写成完整平台树。
 
 ## 1. 视觉主题与氛围

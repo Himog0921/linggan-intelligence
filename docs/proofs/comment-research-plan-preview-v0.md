@@ -1,7 +1,7 @@
 # 评论自动研究范围预览 V0 · 隔离 PostgreSQL 证明
 
-状态：PROVEN IN ISOLATION  
-日期：2026-09-13  
+状态：PROVEN IN ISOLATION
+日期：2026-09-13
 范围：向「用户原声」页提供一份当前、可解释、只读的自动研究范围预览。它只读取当前 Comment 投影和 comment-cleaning.v1 派生；不创建研究计划、任务、队列、指纹、输入包或模型调用。
 
 ## 用户可见的结果
