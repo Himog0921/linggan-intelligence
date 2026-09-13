@@ -24,6 +24,9 @@ pub struct MonitorRuleSummary {
     pub published_within_days: Option<i32>,
     pub next_run_at: Option<String>,
     pub last_succeeded_at: Option<String>,
+    /// 这条规则改到第几版。**按规则计**（`0078`）——规则台上的按钮要用它做乐观并发，
+    /// 用别条规则的版本号会永远撞「版本已过期」。读不到在用版本时为 0，那是「还没有版本」。
+    pub revision: i32,
 }
 
 /// 列出这个目标当前在用的规则。已停用的不返回——它们是历史，不是可管理的对象。
@@ -44,7 +47,7 @@ pub async fn read_target_monitor_rules(
     }
     let rows: Vec<MonitorRuleRow> = sqlx::query_as(
         "SELECT rule.rule_ref,rule.slot_key, \
-                revision.automatic_enabled, \
+                revision.automatic_enabled,COALESCE(revision.revision,0) AS revision, \
                 CASE WHEN revision.mode='fixed' THEN revision.fixed_interval_seconds \
                      ELSE revision.fallback_interval_seconds END AS interval_seconds, \
                 revision.scroll_rounds,revision.top_by_likes,revision.published_within_days, \
@@ -65,12 +68,13 @@ pub async fn read_target_monitor_rules(
                 rule_ref: row.0,
                 slot_key: row.1,
                 automatic_enabled: row.2.unwrap_or(false),
-                interval_seconds: row.3,
-                scroll_rounds: row.4,
-                top_by_likes: row.5,
-                published_within_days: row.6,
-                next_run_at: row.7,
-                last_succeeded_at: row.8,
+                revision: row.3,
+                interval_seconds: row.4,
+                scroll_rounds: row.5,
+                top_by_likes: row.6,
+                published_within_days: row.7,
+                next_run_at: row.8,
+                last_succeeded_at: row.9,
             })
             .collect(),
     ))
@@ -80,6 +84,8 @@ type MonitorRuleRow = (
     Uuid,
     String,
     Option<bool>,
+    // 版本号紧跟在 automatic_enabled 之后，与 SELECT 的列序一致。
+    i32,
     Option<i32>,
     Option<i32>,
     Option<i32>,

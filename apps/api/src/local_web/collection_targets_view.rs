@@ -293,6 +293,36 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
             "这是最后一条规则",
             "没有停用。观察中的目标必须有一条规则，否则调度不知道该按什么口径去看它。要完全停下来，用这一行的观察开关停止观察；那是另一个决定，不该由「停用一条规则」顺带完成。",
         ),
+        "monitor_rule_paused" => (
+            "c-src-feedback c-src-feedback-ok",
+            "这条规则已暂停",
+            "只停了这一条口径，这个目标的其他规则照自己的周期继续跑。人工观察仍可申请。",
+        ),
+        "monitor_rule_resumed" => (
+            "c-src-feedback c-src-feedback-ok",
+            "这条规则已启用",
+            "它重新排期了；尚未据此声称已经派出任务。",
+        ),
+        "monitor_rule_saved" => (
+            "c-src-feedback c-src-feedback-ok",
+            "规则已保存",
+            "只写入了一版规则，没有据此声称采集已开始或完成。",
+        ),
+        "monitor_rule_command_stale" => (
+            "c-src-feedback c-src-feedback-warn",
+            "页面上的版本已经旧了",
+            "这一条规则在你打开这一页之后被改过（可能是另一个标签页，也可能是一次巡检推进了它的版本）。**什么都没有改动**。刷新一下看当前的样子再点。",
+        ),
+        "monitor_rule_command_replayed" => (
+            "c-src-feedback c-src-feedback-ok",
+            "这条命令已经处理过了",
+            "重复提交没有再改一次；显示的是原来那次的耐久结果。",
+        ),
+        "monitor_rule_command_rejected" => (
+            "c-src-feedback c-src-feedback-warn",
+            "这次命令没有被接受",
+            "规则一动没动。原因记在这条命令的回执里；从这一行的「管理巡查」进去可以看到逐字说明。",
+        ),
         "monitor_rule_unknown" => (
             "c-src-feedback c-src-feedback-warn",
             "没找到这条规则",
@@ -337,6 +367,11 @@ fn action_feedback_markup(error: Option<&str>, ahead: Option<i64>) -> String {
             "c-src-feedback c-src-feedback-ok",
             "已恢复观察",
             "会按现有规则重新排巡检。",
+        ),
+        "patrol_toggle_partial" => (
+            "c-src-feedback c-src-feedback-warn",
+            "有规则没有翻过来",
+            "这个开关一次翻这个目标的全部规则，其中至少有一条在你打开这一页之后被改过（另一个标签页，或者一次巡检推进了它的版本），那一条没有改动。这一行的状态显示的是真实情况：只要还有一条在跑，它就仍然是「巡查中」。刷新后从检查器的规则台逐条确认。",
         ),
         "patrol_toggle_no_rule" => (
             "c-src-failure",

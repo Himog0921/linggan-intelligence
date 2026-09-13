@@ -44,6 +44,7 @@ fn save_rule(
         kind: MonitorCommandKind::SaveRule,
         actor: MonitorCommandActor::Person,
         source: "targets_ui",
+        slot_key: None,
         idempotency_key: Uuid::new_v4(),
         draft: Some(MonitorRuleDraft {
             mode: MonitorRuleMode::Fixed,
@@ -362,5 +363,197 @@ async fn three_rules_can_each_be_edited_afterwards() {
             ("most_liked", Some(86_400)),
         ],
         "三条各自改到的新周期都要落在自己那条上"
+    );
+}
+
+/// **单独暂停一条口径，不能把整个目标标成已暂停。**
+///
+/// 目标行上的「在不在被观察」是**所有规则的或**。此前它写的是这条命令那一版的
+/// `automatic_enabled`：一个关键词盯三个榜、只停点赞那一条，目标会被标成已暂停、生命周期
+/// 掉到 `paused`，而另外两条规则继续按自己的周期跑——列表说「已暂停」，队列里却一直出活。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn pausing_one_rule_leaves_the_target_and_the_other_rules_observing() {
+    let database = proof_database("monitor_rule_pause_one").await;
+    let target_ref = seed_keyword(&database, "考研自习::pause-one").await;
+    for ranking in ["comprehensive", "most_liked"] {
+        apply_monitor_rule_command(&database, &save_rule(target_ref, ranking, 86_400, 0))
+            .await
+            .unwrap_or_else(|error| panic!("{ranking} 存不进去：{error}"));
+    }
+    assert_target_observing(&database, target_ref, true, "monitoring").await;
+
+    // 只停点赞榜那一条。
+    let paused = apply_monitor_rule_command(
+        &database,
+        &MonitorRuleCommand {
+            target_ref,
+            expected_revision: 1,
+            idempotency_key: Uuid::new_v4(),
+            kind: MonitorCommandKind::Pause,
+            actor: MonitorCommandActor::Person,
+            source: "targets_ui",
+            draft: None,
+            slot_key: Some("most_liked".to_owned()),
+        },
+    )
+    .await
+    .expect("the pause command runs");
+    assert_eq!(
+        (paused.outcome, paused.reason_code),
+        (MonitorCommandOutcomeKind::Applied, "monitor_paused"),
+        "指定口径的暂停必须被接受"
+    );
+
+    let states = rule_states(&database, target_ref).await;
+    assert_eq!(
+        states,
+        vec![
+            ("comprehensive".to_owned(), true),
+            ("most_liked".to_owned(), false),
+        ],
+        "停的必须是点赞榜那一条，综合榜那条不受影响"
+    );
+    assert_target_observing(&database, target_ref, true, "monitoring").await;
+
+    // 把最后一条也停掉，这时目标才真的不再被观察。
+    apply_monitor_rule_command(
+        &database,
+        &MonitorRuleCommand {
+            target_ref,
+            expected_revision: 1,
+            idempotency_key: Uuid::new_v4(),
+            kind: MonitorCommandKind::Pause,
+            actor: MonitorCommandActor::Person,
+            source: "targets_ui",
+            draft: None,
+            slot_key: Some("comprehensive".to_owned()),
+        },
+    )
+    .await
+    .expect("the second pause runs");
+    assert_target_observing(&database, target_ref, false, "paused").await;
+}
+
+/// **列表上那个开关一起翻全部规则。**
+///
+/// 那一列讲的是目标，「巡查中」显示的是几条规则的或。此前它只翻最早那条：点「暂停」之后
+/// 另外两条继续跑，而那一列仍然显示「巡查中」——看不出点了没有。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn the_list_toggle_switches_every_rule_of_the_target() {
+    let database = proof_database("monitor_rule_list_toggle_all").await;
+    let target_ref = seed_keyword(&database, "考研自习::toggle-all").await;
+    for ranking in ["comprehensive", "most_liked", "most_commented"] {
+        apply_monitor_rule_command(&database, &save_rule(target_ref, ranking, 86_400, 0))
+            .await
+            .unwrap_or_else(|error| panic!("{ranking} 存不进去：{error}"));
+    }
+
+    linggan_evidence::toggle_target_patrol(&database, target_ref, false)
+        .await
+        .expect("the list pause runs");
+    assert!(
+        rule_states(&database, target_ref)
+            .await
+            .iter()
+            .all(|(_, automatic)| !automatic),
+        "列表上关掉，三条规则必须全部停下——留一条在跑，那一列却显示已暂停"
+    );
+    assert_target_observing(&database, target_ref, false, "paused").await;
+
+    linggan_evidence::toggle_target_patrol(&database, target_ref, true)
+        .await
+        .expect("the list resume runs");
+    assert!(
+        rule_states(&database, target_ref)
+            .await
+            .iter()
+            .all(|(_, automatic)| *automatic),
+        "列表上打开，三条规则必须全部恢复"
+    );
+    assert_target_observing(&database, target_ref, true, "monitoring").await;
+}
+
+/// 每条规则的口径与「自动巡查开着没有」，按建立顺序。
+async fn rule_states(database: &Database, target_ref: Uuid) -> Vec<(String, bool)> {
+    sqlx::query_as(
+        "SELECT rule.slot_key,COALESCE(revision.automatic_enabled,false) \
+         FROM collection_monitor_rule rule \
+         LEFT JOIN collection_monitor_rule_revision revision \
+                ON revision.rule_revision_ref=rule.active_revision_ref \
+         WHERE rule.target_ref=$1 AND rule.retired_at IS NULL \
+         ORDER BY rule.created_at,rule.rule_ref",
+    )
+    .bind(target_ref)
+    .fetch_all(database.pool())
+    .await
+    .expect("rule states are readable")
+}
+
+async fn assert_target_observing(
+    database: &Database,
+    target_ref: Uuid,
+    expected_enabled: bool,
+    expected_lifecycle: &str,
+) {
+    let state: (bool, String) = sqlx::query_as(
+        "SELECT monitoring_enabled,lifecycle_state FROM collection_observation_target \
+         WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .fetch_one(database.pool())
+    .await
+    .expect("the target row is readable");
+    assert_eq!(
+        (state.0, state.1.as_str()),
+        (expected_enabled, expected_lifecycle),
+        "目标级的「在不在被观察」是所有规则的或"
+    );
+}
+
+/// **「停止观察」不接受口径。**
+///
+/// 它把生命周期推到 `dismissed`，而那一支不看还有没有别的规则在跑。允许「只停一条口径」
+/// 走这条命令，整个目标会变成已停止观察，另外几条却还在按自己的周期出活。当前没有界面能
+/// 提交这个组合，但端点收得下——挡在这里，而不是等哪天加个按钮才发现。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn stopping_observation_does_not_accept_a_single_slot() {
+    let database = proof_database("monitor_rule_stop_with_slot").await;
+    let target_ref = seed_keyword(&database, "考研自习::stop-slot").await;
+    for ranking in ["comprehensive", "most_liked"] {
+        apply_monitor_rule_command(&database, &save_rule(target_ref, ranking, 86_400, 0))
+            .await
+            .unwrap_or_else(|error| panic!("{ranking} 存不进去：{error}"));
+    }
+
+    let refused = apply_monitor_rule_command(
+        &database,
+        &MonitorRuleCommand {
+            target_ref,
+            expected_revision: 1,
+            idempotency_key: Uuid::new_v4(),
+            kind: MonitorCommandKind::Stop,
+            actor: MonitorCommandActor::Person,
+            source: "targets_ui",
+            draft: None,
+            slot_key: Some("most_liked".to_owned()),
+        },
+    )
+    .await
+    .expect("the command is decided, not an infrastructure failure");
+    assert_eq!(
+        (refused.outcome, refused.reason_code),
+        (MonitorCommandOutcomeKind::Rejected, "invalid_mode"),
+        "带口径的「停止观察」必须被拒"
+    );
+    assert_target_observing(&database, target_ref, true, "monitoring").await;
+    assert!(
+        rule_states(&database, target_ref)
+            .await
+            .iter()
+            .all(|(_, automatic)| *automatic),
+        "被拒的命令不该改动任何规则"
     );
 }

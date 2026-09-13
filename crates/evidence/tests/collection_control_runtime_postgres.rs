@@ -1238,6 +1238,7 @@ fn save_rule(
         kind: MonitorCommandKind::SaveRule,
         actor: MonitorCommandActor::Person,
         source: "targets_ui",
+        slot_key: None,
         draft: Some(MonitorRuleDraft {
             mode: MonitorRuleMode::Fixed,
             automatic_enabled,
@@ -1267,6 +1268,7 @@ fn manual_observe(target_ref: Uuid, idempotency_key: Uuid) -> MonitorRuleCommand
         actor: MonitorCommandActor::Person,
         source: "targets_ui",
         draft: None,
+        slot_key: None,
     }
 }
 

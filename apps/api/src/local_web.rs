@@ -3582,6 +3582,12 @@ struct MonitorRuleWire {
     task_contract_version: Option<String>,
     return_filter: Option<String>,
     return_sort: Option<String>,
+    /// 从检查器的规则台点过来的（每条规则各自的暂停／启用），点完要回到那张表。
+    ///
+    /// 不带这两项的提交来自规则弹窗，点完留在弹窗里看回执。**两个入口对「点完该回哪」的
+    /// 答案不同**：在表上点暂停却被丢进一个规则编辑弹窗，人会以为自己误点了别的东西。
+    return_drawer: Option<String>,
+    return_dtab: Option<String>,
     /// 这次提交是在编辑哪一条口径（或 `new`）。**必须原样带回**：校验失败时服务端按查询串
     /// 重建表单，丢了它面板就回落到「最早那条规则」，于是排序是人选的、版本号却是另一条
     /// 规则的——人改完重试永远撞 `stale_revision`，而界面只说「版本已过期」。
@@ -3612,6 +3618,42 @@ fn monitor_rule_redirect(
     error: Option<&str>,
     receipt_ref: Option<uuid::Uuid>,
 ) -> Redirect {
+    // 从规则台点来的，回规则台。
+    if let Some(drawer) = form
+        .return_drawer
+        .as_deref()
+        .map(str::trim)
+        .and_then(|value| uuid::Uuid::parse_str(value).ok())
+    {
+        let mut pairs = Vec::new();
+        if let Some(filter @ ("creator" | "keyword" | "archiving" | "monitoring")) =
+            form.return_filter.as_deref()
+        {
+            pairs.push(format!("filter={filter}"));
+        }
+        if form.return_sort.as_deref() == Some("last") {
+            pairs.push("sort=last".to_owned());
+        }
+        pairs.push(format!("drawer={drawer}"));
+        pairs.push(format!(
+            "dtab={}",
+            match form.return_dtab.as_deref().map(str::trim) {
+                Some(tab @ ("patrol" | "works" | "archive" | "comments")) => tab,
+                _ => "patrol",
+            }
+        ));
+        // 成功也要说一句。规则台没有回执面板，什么都不说的话「改成功了」与「被拒了」
+        // 在页面上长得一模一样——这一行的状态字本来就可能因为别的原因没变。
+        pairs.push(format!(
+            "error={}",
+            error.unwrap_or(match form.command_kind.as_str() {
+                "pause" => "monitor_rule_paused",
+                "resume" => "monitor_rule_resumed",
+                _ => "monitor_rule_saved",
+            })
+        ));
+        return Redirect::to(&format!("/collection/targets?{}", pairs.join("&")));
+    }
     let mut params = vec![format!("rule={}", form.target_ref)];
     // 原样带回这次是在编辑哪一条。成功时回执会进一步把面板指向真正写进去的那条规则
     // （见 `read_monitor_rule_panel`）；失败时没有回执，就靠这个参数留在同一个模式上。
@@ -3772,6 +3814,9 @@ fn monitor_rule_error_code(error: &MonitorRuleCommandError) -> &'static str {
         MonitorRuleCommandError::SchemaUnavailable => "read_model_not_connected",
         MonitorRuleCommandError::UnknownTarget => "target_not_found",
         MonitorRuleCommandError::InvalidManualObserveCommand => "target_not_requestable",
+        // 只有列表上那个「一起开关」会产生它；单条命令这一路走不到。显式写出而不留兜底：
+        // 留了兜底，将来新增错误变体会悄悄变成一句通用文案。
+        MonitorRuleCommandError::NotEveryRuleSwitched { .. } => "patrol_toggle_partial",
         MonitorRuleCommandError::ManualObserveNotAdmitted { reason_code } => {
             match reason_code.as_str() {
                 "authorization_missing" => "authorization_missing",
@@ -3806,7 +3851,11 @@ async fn collection_target_rule_command(
     }) else {
         return monitor_rule_redirect(&form, Some("invalid_mode"), None);
     };
-    let draft = if kind == MonitorCommandKind::ManualObserve {
+    // **只有存规则才带草稿。** 非 SaveRule 的命令带草稿会被判 `invalid_mode`
+    // （`validate_monitor_command` 明确要求 `draft.is_none()`），而弹窗里的「暂停未来自动调度」
+    // 与保存共用同一个表单、提交的是同一批字段——于是那个按钮**从来没有生效过**：点下去
+    // 只拿到一句「模式不合法」，规则一动不动。
+    let draft = if kind != MonitorCommandKind::SaveRule {
         None
     } else {
         let interval = parse_rule_interval(form.fixed_interval_seconds.as_deref());
@@ -3855,10 +3904,61 @@ async fn collection_target_rule_command(
         actor: MonitorCommandActor::Person,
         source: "targets_ui",
         draft,
+        // 暂停／恢复／停止作用在表单说的那一条口径上。存规则不看它——新规则落到哪条口径
+        // 由草稿里的排序决定。
+        slot_key: (kind != MonitorCommandKind::SaveRule)
+            .then(|| {
+                form.rule_slot
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|slot| {
+                        matches!(
+                            *slot,
+                            "most_liked"
+                                | "most_collected"
+                                | "most_commented"
+                                | "latest"
+                                | "comprehensive"
+                                | "primary"
+                        )
+                    })
+                    .map(str::to_owned)
+            })
+            .flatten(),
     };
     match apply_monitor_rule_command(database, &command).await {
-        Ok(receipt) => monitor_rule_redirect(&form, None, Some(receipt.receipt_ref)),
+        // **`Ok` 不等于「命令被接受了」。** 这套命令系统里 Rust 的 `Err` 只留给基础设施故障；
+        // 「版本过期」「被拒」「重放」都是耐久事实，走 `Ok(receipt)` 带回执。只看 `Ok`/`Err`
+        // 的话，规则台上那个按钮点下去撞了 `stale_revision` 也会跳回去一句不说——页面上这一行
+        // 状态原封不动、没有任何文字，人分不清「点了没反应」和「点了但被拒」。
+        //
+        // 弹窗那条路靠 `rule_receipt` 把回执带回去逐字渲染，不需要这个码；规则台没有回执面板，
+        // 只有列表那张消息表，所以把结果翻成一个码给它。
+        Ok(receipt) => monitor_rule_redirect(
+            &form,
+            monitor_rule_outcome_code(&receipt),
+            Some(receipt.receipt_ref),
+        ),
         Err(error) => monitor_rule_redirect(&form, Some(monitor_rule_error_code(&error)), None),
+    }
+}
+
+/// 回执翻成列表那张消息表认的码。`None` 表示「这次真的改了，没什么要额外说的」。
+///
+/// 只给**从规则台点过来**的那条路用（带 `return_drawer` 的那种）——弹窗有自己的回执面板，
+/// 会把 outcome 与 reason 逐字渲染出来，再叠一个码是重复说同一件事。
+fn monitor_rule_outcome_code(
+    receipt: &linggan_evidence::MonitorRuleCommandReceipt,
+) -> Option<&'static str> {
+    match receipt.outcome {
+        linggan_evidence::MonitorCommandOutcomeKind::Applied => None,
+        linggan_evidence::MonitorCommandOutcomeKind::Replay => {
+            Some("monitor_rule_command_replayed")
+        }
+        linggan_evidence::MonitorCommandOutcomeKind::StaleRevision => {
+            Some("monitor_rule_command_stale")
+        }
+        _ => Some("monitor_rule_command_rejected"),
     }
 }
 
@@ -4096,6 +4196,11 @@ async fn collection_target_patrol_toggle(
         Ok(_) if enable => Redirect::to(&back("patrol_resumed")),
         Ok(_) => Redirect::to(&back("patrol_paused")),
         Err(MonitorRuleCommandError::UnknownTarget) => Redirect::to(&back("patrol_toggle_no_rule")),
+        // 一起开关时有规则没翻过来——多半是那一条在这一页打开之后被改过（另一个标签页，
+        // 或者一次巡检推进了它的版本）。不报成功：目标行是诚实的，撒谎的会是那句横幅。
+        Err(MonitorRuleCommandError::NotEveryRuleSwitched { .. }) => {
+            Redirect::to(&back("patrol_toggle_partial"))
+        }
         Err(_) => Redirect::to(&back("patrol_toggle_failed")),
     }
 }
