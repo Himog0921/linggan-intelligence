@@ -10,6 +10,18 @@
 
 一组来自现有本地运行时、已去标识化的 `content_detail + comments` CapturePackage 已保存为 [`fixtures/xhs/comment-evidence-set-v1.json`](../../fixtures/xhs/comment-evidence-set-v1.json)，其 SHA-256 为 `0eb0dd567bafabb4b2511c5c83531959c544cb8a90261050c17a6e4ca38e6234`。它已经支持一个严格限于已证明字段的 **Comment Fact Storage V0**：来源形状 validator、不可变 Evidence/CommentObservation、稳定评论身份与 current projection 均有隔离 PostgreSQL proof。由于只有一个配对样本，它仍不能把所有可见字段写成必填或默认事实，更不能扩展为完整生产 DDL。特别是 `comment_probe` 不能伪造已获得作品正文或评论发表时间。
 
+
+## Context V0 来源追加审计（2026-09-13）
+
+第二份真实 producer 去标识化证据集 [`fixtures/xhs/comment-context-evidence-set-v0.json`](../../fixtures/xhs/comment-context-evidence-set-v0.json) 已保存，SHA-256 为 `310c9fdad4f5c1634fa686036d36462f5e23471667c54bab6c258c6e3fb68c67`。它包含 `content_detail`、`comments`、`replies` 三份独立包，且保留一条同时具有 `parentCommentId` 与 `replyToCommentId` 的真实 reply 关系反例。
+
+已确认：
+
+- `content_detail` 的 `title`、`bodyText` 和 `authorId` 只能作为按字段可用的上下文；详情包存在不等于正文存在。
+- `replies` 的 `rootCommentId`、`parentCommentId` 与 `replyToCommentId` 必须分别保存；后两者不可按 XOR 或 fallback 规则折叠。
+- 所有上下文都必须带具体来源 Evidence/record 引用，并限定在同一平台、同一 `noteId`；它们帮助理解当前评论，不能被写成当前评论者的直接证据。
+- OCR、ASR、平台完整树、采集 profile/终态、评论发表时间与互动指标仍是 `UNKNOWN`。
+
 ## 已确认的来源线索
 
 | 事实 | 参考证据 | 新项目可采用的含义 | 确定性 |
