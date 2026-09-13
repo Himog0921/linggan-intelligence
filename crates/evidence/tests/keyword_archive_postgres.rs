@@ -776,6 +776,7 @@ async fn a_scheduler_tick_names_the_actual_admission_failure() {
             kind: linggan_evidence::MonitorCommandKind::SaveRule,
             actor: linggan_evidence::MonitorCommandActor::Person,
             source: "targets_ui",
+            slot_key: None,
             draft: Some(linggan_evidence::MonitorRuleDraft {
                 mode: linggan_evidence::MonitorRuleMode::Fixed,
                 automatic_enabled: true,

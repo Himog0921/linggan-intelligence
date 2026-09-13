@@ -3582,6 +3582,12 @@ struct MonitorRuleWire {
     task_contract_version: Option<String>,
     return_filter: Option<String>,
     return_sort: Option<String>,
+    /// 从检查器的规则台点过来的（每条规则各自的暂停／启用），点完要回到那张表。
+    ///
+    /// 不带这两项的提交来自规则弹窗，点完留在弹窗里看回执。**两个入口对「点完该回哪」的
+    /// 答案不同**：在表上点暂停却被丢进一个规则编辑弹窗，人会以为自己误点了别的东西。
+    return_drawer: Option<String>,
+    return_dtab: Option<String>,
     /// 这次提交是在编辑哪一条口径（或 `new`）。**必须原样带回**：校验失败时服务端按查询串
     /// 重建表单，丢了它面板就回落到「最早那条规则」，于是排序是人选的、版本号却是另一条
     /// 规则的——人改完重试永远撞 `stale_revision`，而界面只说「版本已过期」。
@@ -3612,6 +3618,35 @@ fn monitor_rule_redirect(
     error: Option<&str>,
     receipt_ref: Option<uuid::Uuid>,
 ) -> Redirect {
+    // 从规则台点来的，回规则台。
+    if let Some(drawer) = form
+        .return_drawer
+        .as_deref()
+        .map(str::trim)
+        .and_then(|value| uuid::Uuid::parse_str(value).ok())
+    {
+        let mut pairs = Vec::new();
+        if let Some(filter @ ("creator" | "keyword" | "archiving" | "monitoring")) =
+            form.return_filter.as_deref()
+        {
+            pairs.push(format!("filter={filter}"));
+        }
+        if form.return_sort.as_deref() == Some("last") {
+            pairs.push("sort=last".to_owned());
+        }
+        pairs.push(format!("drawer={drawer}"));
+        pairs.push(format!(
+            "dtab={}",
+            match form.return_dtab.as_deref().map(str::trim) {
+                Some(tab @ ("patrol" | "works" | "archive" | "comments")) => tab,
+                _ => "patrol",
+            }
+        ));
+        if let Some(error) = error {
+            pairs.push(format!("error={error}"));
+        }
+        return Redirect::to(&format!("/collection/targets?{}", pairs.join("&")));
+    }
     let mut params = vec![format!("rule={}", form.target_ref)];
     // 原样带回这次是在编辑哪一条。成功时回执会进一步把面板指向真正写进去的那条规则
     // （见 `read_monitor_rule_panel`）；失败时没有回执，就靠这个参数留在同一个模式上。
@@ -3806,7 +3841,11 @@ async fn collection_target_rule_command(
     }) else {
         return monitor_rule_redirect(&form, Some("invalid_mode"), None);
     };
-    let draft = if kind == MonitorCommandKind::ManualObserve {
+    // **只有存规则才带草稿。** 非 SaveRule 的命令带草稿会被判 `invalid_mode`
+    // （`validate_monitor_command` 明确要求 `draft.is_none()`），而弹窗里的「暂停未来自动调度」
+    // 与保存共用同一个表单、提交的是同一批字段——于是那个按钮**从来没有生效过**：点下去
+    // 只拿到一句「模式不合法」，规则一动不动。
+    let draft = if kind != MonitorCommandKind::SaveRule {
         None
     } else {
         let interval = parse_rule_interval(form.fixed_interval_seconds.as_deref());
@@ -3855,6 +3894,27 @@ async fn collection_target_rule_command(
         actor: MonitorCommandActor::Person,
         source: "targets_ui",
         draft,
+        // 暂停／恢复／停止作用在表单说的那一条口径上。存规则不看它——新规则落到哪条口径
+        // 由草稿里的排序决定。
+        slot_key: (kind != MonitorCommandKind::SaveRule)
+            .then(|| {
+                form.rule_slot
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|slot| {
+                        matches!(
+                            *slot,
+                            "most_liked"
+                                | "most_collected"
+                                | "most_commented"
+                                | "latest"
+                                | "comprehensive"
+                                | "primary"
+                        )
+                    })
+                    .map(str::to_owned)
+            })
+            .flatten(),
     };
     match apply_monitor_rule_command(database, &command).await {
         Ok(receipt) => monitor_rule_redirect(&form, None, Some(receipt.receipt_ref)),

@@ -1553,6 +1553,14 @@ pub struct MonitorRuleCommand {
     pub actor: MonitorCommandActor,
     pub source: &'static str,
     pub draft: Option<MonitorRuleDraft>,
+    /// 这条命令作用在哪一条口径上。**只对暂停／恢复／停止有意义**。
+    ///
+    /// `None` = 最早那条在用规则（博主永远只有一条，这就是它的既有行为）。一个关键词盯几个
+    /// 榜就是几条规则，各自可以单独暂停——不指定的话就没法说清要停哪一条。
+    ///
+    /// 存规则不看这一项：新规则落到哪条口径由草稿里的排序决定，那才是「这一版要盯哪个榜」
+    /// 的来源；用另一个字段说同一件事，两者不一致时没人说得清哪个作准。
+    pub slot_key: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1840,33 +1848,12 @@ pub async fn apply_monitor_rule_command(
         };
         let repairing_invalid_keyword_lifecycle = target_kind == "keyword"
             && matches!(lifecycle_state.as_str(), "archiving" | "archived");
-        let next_lifecycle_state = monitor_lifecycle_next_state(
-            &lifecycle_state,
-            command.kind,
-            automatic_enabled,
-            repairing_invalid_keyword_lifecycle,
-        );
-        // 目标行只写目标级的两样事实：这个目标在不在被观察、它的生命周期到哪一步。
-        //
-        // 排期、周期、当前版本**全部归规则**（`0078` 已把目标行上那份副本删掉）。此前那份
-        // 副本要靠「只有首要规则才写」来维持一致，而首要位本身又得靠交接来维持——一层补丁
-        // 叠一层。现在只有一个真相，这两件事一起消失了。
-        sqlx::query(
-            "UPDATE collection_observation_target \
-             SET monitoring_enabled=$2, \
-                 lifecycle_state=COALESCE($3,lifecycle_state), \
-                 lifecycle_changed_at=CASE WHEN $3 IS NULL THEN lifecycle_changed_at \
-                     ELSE scope_001_now() END \
-             WHERE target_ref=$1",
-        )
-        .bind(command.target_ref)
-        .bind(automatic_enabled)
-        .bind(next_lifecycle_state)
-        .execute(&mut *transaction)
-        .await?;
 
         // 排期状态只住在规则上。错峰偏移按**规则**算：一个关键词的三条规则若共用目标级
         // 偏移，会在同一时刻一起开跑。
+        //
+        // **规则先写，目标后写。** 目标行上的「在不在被观察」是由所有规则推导出来的，
+        // 写反顺序就会用这条规则改之前的状态去算。
         let commanded_rule_ref: Option<Uuid> = match saved_rule_ref {
             Some(rule_ref) => Some(rule_ref),
             None => commanded_rule,
@@ -1890,6 +1877,45 @@ pub async fn apply_monitor_rule_command(
             .execute(&mut *transaction)
             .await?;
         }
+
+        // 目标行只写目标级的两样事实：这个目标在不在被观察、它的生命周期到哪一步。
+        //
+        // 排期、周期、当前版本**全部归规则**（`0078` 已把目标行上那份副本删掉）。
+        //
+        // 「在不在被观察」是**所有规则的或**，不是这条命令那一版的 `automatic_enabled`。
+        // 一个关键词盯三个榜、只暂停其中一条时，这个目标显然还在被观察——照这条命令的值写，
+        // 目标会被标成已暂停、生命周期掉到 `paused`，而另外两条规则继续按自己的周期跑：
+        // 列表说「已暂停」，队列里却一直出活。
+        let target_automatic: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM collection_monitor_rule rule \
+               JOIN collection_monitor_rule_revision revision \
+                 ON revision.rule_revision_ref=rule.active_revision_ref \
+              WHERE rule.target_ref=$1 AND rule.retired_at IS NULL \
+                AND revision.automatic_enabled)",
+        )
+        .bind(command.target_ref)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let next_lifecycle_state = monitor_lifecycle_next_state(
+            &lifecycle_state,
+            command.kind,
+            target_automatic,
+            repairing_invalid_keyword_lifecycle,
+        );
+        sqlx::query(
+            "UPDATE collection_observation_target \
+             SET monitoring_enabled=$2, \
+                 lifecycle_state=COALESCE($3,lifecycle_state), \
+                 lifecycle_changed_at=CASE WHEN $3 IS NULL THEN lifecycle_changed_at \
+                     ELSE scope_001_now() END \
+             WHERE target_ref=$1",
+        )
+        .bind(command.target_ref)
+        .bind(target_automatic)
+        .bind(next_lifecycle_state)
+        .execute(&mut *transaction)
+        .await?;
+
         record_monitor_lifecycle_transition(
             &mut transaction,
             command.target_ref,
@@ -2427,6 +2453,13 @@ async fn commanded_monitor_rule(
 ) -> Result<Option<Uuid>, sqlx::Error> {
     let slot_key = match (command.kind, command.draft.as_ref()) {
         (MonitorCommandKind::SaveRule, Some(draft)) => monitor_rule_slot_key(target_kind, draft),
+        // 暂停／恢复／停止：命令说了作用在哪条口径就用那一条，没说才回落到最早那条。
+        // 一个关键词盯三个榜时，「暂停」必须能说清停哪一条——否则界面上三个按钮点下去
+        // 停的都是同一条，而另外两条继续按自己的周期跑，看不出任何异常。
+        (_, _) if command.slot_key.is_some() => command
+            .slot_key
+            .clone()
+            .expect("checked by the guard above"),
         _ => {
             return sqlx::query_scalar(
                 "SELECT rule_ref FROM collection_monitor_rule \
@@ -2630,46 +2663,60 @@ async fn record_monitor_lifecycle_transition(
     Ok(())
 }
 
+/// 这条命令之后，目标的生命周期该到哪一步。
+///
+/// `target_automatic` 是**这个目标还有没有任何一条规则在自动巡查**，不是这条命令那一版的
+/// 开关值。一个关键词盯几个榜就是几条规则，单独停掉其中一条时这个目标显然还在被观察。
 fn monitor_lifecycle_next_state(
     lifecycle_state: &str,
     kind: MonitorCommandKind,
-    automatic_enabled: bool,
+    target_automatic: bool,
     repairing_invalid_keyword_lifecycle: bool,
 ) -> Option<&'static str> {
     match kind {
         // Keyword observation has a monitor lifecycle. This also recovers a historical row
         // before the database invariant has been applied.
         MonitorCommandKind::SaveRule if repairing_invalid_keyword_lifecycle => {
-            Some(if automatic_enabled {
+            Some(if target_automatic {
                 "monitoring"
             } else {
                 "paused"
             })
         }
         MonitorCommandKind::Resume if repairing_invalid_keyword_lifecycle => Some("monitoring"),
-        MonitorCommandKind::Pause if repairing_invalid_keyword_lifecycle => Some("paused"),
+        MonitorCommandKind::Pause if repairing_invalid_keyword_lifecycle => {
+            Some(if target_automatic {
+                "monitoring"
+            } else {
+                "paused"
+            })
+        }
         // Observing a known target and historically archiving it are separate
         // capabilities. A creator need not first prove a complete archive in
         // order to enter ordinary automatic observation.
         MonitorCommandKind::SaveRule
-            if automatic_enabled && lifecycle_state == "pending_decision" =>
+            if target_automatic && lifecycle_state == "pending_decision" =>
         {
             Some("monitoring")
         }
         MonitorCommandKind::SaveRule
-            if !automatic_enabled && lifecycle_state == "pending_decision" =>
+            if !target_automatic && lifecycle_state == "pending_decision" =>
         {
             Some("paused")
         }
         MonitorCommandKind::SaveRule
-            if automatic_enabled && matches!(lifecycle_state, "archived" | "paused") =>
+            if target_automatic && matches!(lifecycle_state, "archived" | "paused") =>
         {
             Some("monitoring")
         }
-        MonitorCommandKind::SaveRule if !automatic_enabled && lifecycle_state == "monitoring" => {
+        MonitorCommandKind::SaveRule if !target_automatic && lifecycle_state == "monitoring" => {
             Some("paused")
         }
-        MonitorCommandKind::Pause if lifecycle_state == "monitoring" => Some("paused"),
+        // **只在最后一条也停下来时才掉到 `paused`。** 此前这一支不看开关值：盯三个榜的
+        // 关键词只停点赞那一条，目标就被标成已暂停，而另外两条继续按自己的周期出活。
+        MonitorCommandKind::Pause if lifecycle_state == "monitoring" && !target_automatic => {
+            Some("paused")
+        }
         MonitorCommandKind::Resume
             if matches!(lifecycle_state, "paused" | "archived" | "pending_decision") =>
         {
@@ -3144,51 +3191,66 @@ mod tests {
 
 /// 从列表上直接开关一个目标的自动巡查。
 ///
-/// 版本号在服务端读，不由表单带上来。乐观并发那道关卡是为**规则编辑表单**设的——那里
+/// **开关的是这个目标的全部在用规则，不是其中一条。** 列表上那一列讲的是目标——「巡查中」
+/// 显示的是几条规则的或。此前这个开关只翻最早那条：一个关键词盯三个榜时，点「暂停」之后
+/// 另外两条继续按自己的周期跑，而那一列仍然显示「巡查中」，看不出点了没有。
+///
+/// 要单独停某一条，用检查器的规则台——那里每条规则各有自己的按钮。这两个入口讲的是两件事：
+/// 列表管「这个目标还观察不观察」，规则台管「这个目标按哪几个口径观察」。
+///
+/// 版本号在服务端逐条读，不由表单带上来。乐观并发那道关卡是为**规则编辑表单**设的——那里
 /// 你提交的是一整套字段值，用一个过期的版本号覆盖别人刚改过的设置是真实风险。而这里
 /// 只翻一个开关，不携带任何字段值，读当前版本再发命令不会覆盖任何人的编辑。
 ///
-/// 它仍然走版本化命令这一条路：每次开关都留下一个新的规则版本与回执，不是裸改一个布尔
-/// 值——那条路早就因为「不能成为巡检的第二个真相源」被废弃了。
+/// 它仍然走版本化命令这一条路：每条规则每次开关都留下一个新的规则版本与回执，不是裸改一个
+/// 布尔值——那条路早就因为「不能成为巡检的第二个真相源」被废弃了。
+///
+/// 返回最后一条命令的回执。**逐条命令、不在一个事务里**：每条规则的版本推进本来就是独立
+/// 事实，硬绑成一笔会让其中一条的并发冲突连坐掉其他几条已经成功的开关。
 pub async fn toggle_target_patrol(
     database: &Database,
     target_ref: Uuid,
     enable: bool,
 ) -> Result<MonitorRuleCommandReceipt, MonitorRuleCommandError> {
-    // 暂停／恢复落在最早那条在用规则上（与 `commanded_monitor_rule` 同一个挑法），所以版本号
-    // 也对那一条问。**一个关键词配了几条规则时，这个开关只翻其中一条**——列表上的「巡查中」
-    // 是几条规则的或，于是关掉一条可能看不出变化。这是个还没做的产品决定，不是这里用错了数。
-    let current: Option<(i32,)> = sqlx::query_as(
-        "SELECT COALESCE(revision.revision,0) FROM collection_monitor_rule rule \
+    let rules: Vec<(String, i32)> = sqlx::query_as(
+        "SELECT rule.slot_key,COALESCE(revision.revision,0) \
+         FROM collection_monitor_rule rule \
          LEFT JOIN collection_monitor_rule_revision revision \
                 ON revision.rule_revision_ref=rule.active_revision_ref \
          WHERE rule.target_ref=$1 AND rule.retired_at IS NULL \
-         ORDER BY rule.created_at,rule.rule_ref LIMIT 1",
+         ORDER BY rule.created_at,rule.rule_ref",
     )
     .bind(target_ref)
-    .fetch_optional(database.pool())
+    .fetch_all(database.pool())
     .await?;
-    let Some((expected_revision,)) = current else {
+    if rules.is_empty() {
         // 没有生效的规则版本就没有可开关的东西。这不是失败，是「先去设一条规则」。
         return Err(MonitorRuleCommandError::UnknownTarget);
-    };
-    apply_monitor_rule_command(
-        database,
-        &MonitorRuleCommand {
-            target_ref,
-            expected_revision,
-            idempotency_key: Uuid::new_v4(),
-            kind: if enable {
-                MonitorCommandKind::Resume
-            } else {
-                MonitorCommandKind::Pause
-            },
-            actor: MonitorCommandActor::Person,
-            source: "targets_ui",
-            draft: None,
-        },
-    )
-    .await
+    }
+    let mut last = None;
+    for (slot_key, expected_revision) in rules {
+        last = Some(
+            apply_monitor_rule_command(
+                database,
+                &MonitorRuleCommand {
+                    target_ref,
+                    expected_revision,
+                    idempotency_key: Uuid::new_v4(),
+                    kind: if enable {
+                        MonitorCommandKind::Resume
+                    } else {
+                        MonitorCommandKind::Pause
+                    },
+                    actor: MonitorCommandActor::Person,
+                    source: "targets_ui",
+                    draft: None,
+                    slot_key: Some(slot_key),
+                },
+            )
+            .await?,
+        );
+    }
+    Ok(last.expect("the rule list was checked to be non-empty"))
 }
 
 #[cfg(test)]

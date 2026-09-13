@@ -163,6 +163,15 @@
 .c-dw-catalog-table{width:100%;min-width:840px;border-collapse:collapse;color:var(--lgi-body);font-size:var(--lgi-text-label)}
 .c-dw-catalog-table th,.c-dw-catalog-table td{padding:var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline);text-align:left;vertical-align:top}
 .c-dw-catalog-table th{color:var(--lgi-muted);font-weight:600;white-space:nowrap}
+/* 巡检规则表：复用上面那张只读目录表的排版，只补两处差异。
+ * 一是它比目录窄得多（七列），840px 的下限会让抽屉里无谓地横向滚动；
+ * 二是操作列里是三个并排的按钮/表单，各自是独立的 POST，必须横排且不被挤成换行。 */
+.c-dw-rule-table{min-width:640px}
+.c-dw-rule-table th[scope="row"]{color:var(--lgi-body);white-space:nowrap}
+.c-dw-rule-actions{white-space:nowrap}
+.c-dw-rule-actions>*{display:inline-block;vertical-align:middle;margin-right:var(--lgi-space-2)}
+.c-dw-rule-actions>*:last-child{margin-right:0}
+.c-dw-rule-actions form{display:inline-block;margin:0}
 .c-dw-catalog-work{display:grid;gap:var(--lgi-space-1);min-width:var(--lgi-space-24)}
 .c-dw-catalog-work b{color:var(--lgi-ink);font-weight:700}.c-dw-catalog-work span{color:var(--lgi-muted);font-family:var(--lgi-font-mono);overflow-wrap:anywhere}
 .c-dw-catalog-state{font-weight:600;white-space:nowrap}.c-dw-catalog-state[data-state="pending"]{color:var(--lgi-warning)}.c-dw-catalog-state[data-state="complete"]{color:var(--lgi-success)}

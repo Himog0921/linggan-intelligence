@@ -3127,7 +3127,7 @@ fn monitor_rule_list(
             add = add_rule_link(target, list_context),
         );
     }
-    let mut items = String::new();
+    let mut rows = String::new();
     for rule in rules {
         let cadence = rule.interval_seconds.map_or_else(
             || "周期读不到".to_owned(),
@@ -3149,29 +3149,17 @@ fn monitor_rule_list(
             sampling.join(" · ")
         };
         let state = if rule.automatic_enabled {
-            r#"<span class="c-tg-truth c-tg-ok">自动巡检开着</span>"#
+            r#"<span class="c-tg-truth c-tg-ok">巡查中</span>"#
         } else {
             r#"<span class="c-tg-truth c-tg-neutral">已暂停</span>"#
         };
         let next = rule.next_run_at.as_deref().unwrap_or("未排定");
         let last = rule.last_succeeded_at.as_deref().unwrap_or("尚未成功巡查");
-        // 最后一条规则不提供停用。**理由不再是数据库约束**——`0078` 删掉了「监控中必须有
-        // 规则」那两条 CHECK（调度改成遍历规则，没有规则自然产不出到期项）。留着这个限制
-        // 是产品判断：停掉最后一条规则，这个目标就在「还开着观察、却什么都不会跑」的状态
-        // 上，界面上看不出差别。要停就停止观察这个目标，那是另一个决定，不该藏在这里。
-        let retire = if rules.len() > 1 {
-            format!(
-                r#"<form method="post" action="/collection/targets/monitor-rules/retire">{fields}<input type="hidden" name="rule_ref" value="{rule_ref}"/><button class="c-btn-secondary" type="submit">停用</button></form>"#,
-                fields = list_context.return_fields(
-                    Some(target.target_ref),
-                    Some(TargetDrawerTab::Patrol),
-                    None,
-                ),
-                rule_ref = rule.rule_ref,
-            )
-        } else {
-            String::new()
-        };
+        let return_fields = list_context.return_fields(
+            Some(target.target_ref),
+            Some(TargetDrawerTab::Patrol),
+            None,
+        );
         // 编辑指定这一条的口径。此前规则台上只有「停用」，没有任何入口能编辑第二条
         // 规则——面板只按目标寻址，点开永远是最早那条。
         let edit_opener = format!("drawer-edit-rule-{}", rule.rule_ref);
@@ -3185,8 +3173,47 @@ fn monitor_rule_list(
             target_ref = target.target_ref,
             edit_opener = escape(&edit_opener),
         );
-        items.push_str(&format!(
-            r#"<li><div><b>{slot}</b><p>{cadence} · {sampling}</p><p>下次 {next} · 最近成功 {last}</p></div><div>{state}{edit}{retire}</div></li>"#,
+        // **每条规则各自的暂停／启用。** 列表上那个开关讲的是整个目标（一起开关全部规则）；
+        // 这里讲的是「这个目标按哪几个口径观察」——盯三个榜时想只停点赞那一条，只有这里能做。
+        //
+        // 版本号取**这条规则自己的**（`MonitorRuleSummary.revision`）：用别条的会永远撞
+        // 「版本已过期」，而界面只说版本过期，看不出是拿错了谁的号。
+        let (toggle_kind, toggle_label) = if rule.automatic_enabled {
+            ("pause", "暂停")
+        } else {
+            ("resume", "启用")
+        };
+        let toggle = format!(
+            r#"<form method="post" action="/collection/targets/rules">{return_fields}               <input type="hidden" name="target_ref" value="{target_ref}">               <input type="hidden" name="rule_slot" value="{slot_key}">               <input type="hidden" name="expected_revision" value="{revision}">               <input type="hidden" name="idempotency_key" value="{idempotency_key}">               <button class="c-btn-quiet" type="submit" name="command_kind" value="{toggle_kind}">{toggle_label}</button></form>"#,
+            target_ref = target.target_ref,
+            slot_key = escape(&rule.slot_key),
+            revision = rule.revision,
+            idempotency_key = uuid::Uuid::new_v4(),
+        );
+        // 最后一条规则不提供停用。**理由不再是数据库约束**——`0078` 删掉了「监控中必须有
+        // 规则」那两条 CHECK（调度改成遍历规则，没有规则自然产不出到期项）。留着这个限制
+        // 是产品判断：停掉最后一条规则，这个目标就在「还开着观察、却什么都不会跑」的状态
+        // 上，界面上看不出差别。要停就停止观察这个目标，那是另一个决定，不该藏在这里。
+        let retire = if rules.len() > 1 {
+            format!(
+                // `row_target_ref` 是 retire 那个 wire 的必填项，而 `return_fields` 只发
+                // `return_*`。少了它整个表单 422——**这个「停用」按钮从来没生效过**，
+                // 点下去只拿到一个 422，规则一动不动，页面也不说为什么。
+                concat!(
+                    r#"<form method="post" action="/collection/targets/monitor-rules/retire">{return_fields}"#,
+                    r#"<input type="hidden" name="row_target_ref" value="{target_ref}"/>"#,
+                    r#"<input type="hidden" name="rule_ref" value="{rule_ref}"/>"#,
+                    r#"<button class="c-btn-quiet" type="submit">停用</button></form>"#,
+                ),
+                return_fields = return_fields,
+                target_ref = target.target_ref,
+                rule_ref = rule.rule_ref,
+            )
+        } else {
+            String::new()
+        };
+        rows.push_str(&format!(
+            r#"<tr><th scope="row">{slot}</th><td>{state}</td><td>{cadence}</td><td>{sampling}</td><td>{next}</td><td>{last}</td><td class="c-dw-rule-actions">{edit}{toggle}{retire}</td></tr>"#,
             slot = escape(&monitor_slot_label(&rule.slot_key, target.target_kind == "creator")),
             cadence = escape(&cadence),
             sampling = escape(&sampling),
@@ -3194,17 +3221,23 @@ fn monitor_rule_list(
             last = escape(last),
         ));
     }
+    // 表格而不是一串卡片：几条规则之间要比的就是「哪条什么周期、哪条停了、哪条下次什么时候
+    // 跑」——同一列上下对齐才看得出差别，散着放要逐条读。
     format!(
-        r#"<section class="c-dw-section"><div class="c-dw-section-head"><b>巡检规则</b><span>{count} 条</span></div><ul class="c-dw-rules">{items}</ul><p class="c-dw-note">一个关键词可以同时盯几个榜，各有各的周期。停用只是不再排期，它签发过的工单与材料仍然留着——删掉会让那些材料说不清是按什么口径取回来的。</p>{add}</section>"#,
+        r#"<section class="c-dw-section"><div class="c-dw-section-head"><b>巡检规则</b><span>{count} 条</span></div>
+           <div class="c-dw-catalog-table-wrap c-dw-rule-table-wrap">
+             <table class="c-dw-catalog-table c-dw-rule-table">
+               <caption class="v7-sr-only">这个目标的巡检规则，一行一条口径</caption>
+               <thead><tr><th scope="col">口径</th><th scope="col">状态</th><th scope="col">周期</th><th scope="col">取样</th><th scope="col">下次巡查</th><th scope="col">最近成功</th><th scope="col">操作</th></tr></thead>
+               <tbody>{rows}</tbody>
+             </table>
+           </div>
+           <p class="c-dw-note">一个关键词可以同时盯几个榜，各有各的周期。这里的暂停只停这一条；列表上那个开关一起开关全部规则。停用只是不再排期，它签发过的工单与材料仍然留着——删掉会让那些材料说不清是按什么口径取回来的。</p>{add}</section>"#,
         count = rules.len(),
         add = add_rule_link(target, list_context),
     )
 }
 
-/// 口径的人话。关键词的口径是排序，博主没有排序可言——它只有一条看主页目录的规则。
-///
-/// `primary` 这个槽对两种目标含义不同：博主是「主页目录」，关键词是迁移之前留下的那一条
-/// （`0076` 把每个既有目标的规则回填成首要槽）。对关键词不说「主页目录」——它没有主页。
 fn monitor_slot_label(slot_key: &str, is_creator: bool) -> String {
     match slot_key {
         "comprehensive" => "综合排序".to_owned(),
@@ -3367,6 +3400,95 @@ mod tests {
             domain_name: None,
             domain_is_own: None,
         }
+    }
+
+    fn keyword_target() -> ObservationTarget {
+        let mut target = target("monitoring");
+        target.target_kind = "keyword".to_owned();
+        target.identity_key = "考研自习".to_owned();
+        target.display_name = Some("考研自习".to_owned());
+        target
+    }
+
+    fn rule(slot_key: &str, automatic_enabled: bool, revision: i32) -> linggan_evidence::MonitorRuleSummary {
+        linggan_evidence::MonitorRuleSummary {
+            rule_ref: uuid::Uuid::new_v4(),
+            slot_key: slot_key.to_owned(),
+            automatic_enabled,
+            revision,
+            interval_seconds: Some(86_400),
+            scroll_rounds: Some(3),
+            top_by_likes: Some(20),
+            published_within_days: Some(7),
+            next_run_at: Some("2026-09-14 08:00".to_owned()),
+            last_succeeded_at: None,
+        }
+    }
+
+    /// **规则台是一张表。** 几条规则之间要比的就是「哪条什么周期、哪条停了、哪条下次什么
+    /// 时候跑」——同一列上下对齐才看得出差别，散着放要逐条读。
+    #[test]
+    fn the_rule_board_is_a_table_with_one_row_per_rule() {
+        let target = keyword_target();
+        let rules = [rule("comprehensive", true, 1), rule("most_liked", false, 2)];
+        let html = monitor_rule_list(
+            &target,
+            Some(&rules),
+            TargetListContext {
+                filter: None,
+                sort: None,
+                domain: None,
+            },
+        );
+        assert!(html.contains("<table"), "规则台要是表格");
+        for column in [
+            "口径",
+            "状态",
+            "周期",
+            "取样",
+            "下次巡查",
+            "最近成功",
+            "操作",
+        ] {
+            assert!(html.contains(column), "缺表头 {column}");
+        }
+        assert_eq!(
+            html.matches("<tr><th scope=\"row\">").count(),
+            2,
+            "一行一条规则"
+        );
+    }
+
+    /// **每条规则各自的暂停／启用按钮，必须带齐这个命令需要的字段。**
+    ///
+    /// 少一项整个表单 422，点下去规则一动不动、页面也不说为什么——`row_target_ref` 少在
+    /// 「停用」上正是这样：那个按钮从来没生效过。
+    #[test]
+    fn each_rule_row_can_be_paused_or_resumed_on_its_own() {
+        let target = keyword_target();
+        let rules = [rule("comprehensive", true, 3), rule("most_liked", false, 1)];
+        let html = monitor_rule_list(
+            &target,
+            Some(&rules),
+            TargetListContext {
+                filter: None,
+                sort: None,
+                domain: None,
+            },
+        );
+        // 开着的那条给「暂停」，停着的那条给「启用」。
+        assert!(html.contains(r#"value="pause">暂停"#));
+        assert!(html.contains(r#"value="resume">启用"#));
+        // 各自报自己的版本号：用别条的会永远撞「版本已过期」。
+        assert!(html.contains(r#"name="expected_revision" value="3""#));
+        assert!(html.contains(r#"name="expected_revision" value="1""#));
+        // 各自说清作用在哪条口径上。
+        assert!(html.contains(r#"name="rule_slot" value="comprehensive""#));
+        assert!(html.contains(r#"name="rule_slot" value="most_liked""#));
+        // 点完要回到这张表，而不是被丢进规则编辑弹窗。
+        assert!(html.contains(r#"name="return_dtab" value="patrol""#));
+        // 停用要带 retire 那个 wire 的必填项，否则 422。
+        assert!(html.contains(r#"name="row_target_ref""#));
     }
 
     #[test]

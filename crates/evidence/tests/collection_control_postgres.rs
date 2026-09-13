@@ -1593,6 +1593,7 @@ async fn monitor_rule_commands_are_revisioned_idempotent_and_side_effect_bounded
         actor: MonitorCommandActor::Person,
         source: "targets_ui",
         draft: Some(fixed_rule(Some("hot"))),
+        slot_key: None,
     };
 
     let applied = apply_monitor_rule_command(&database, &command)
@@ -1655,6 +1656,7 @@ async fn monitor_rule_commands_are_revisioned_idempotent_and_side_effect_bounded
             actor: MonitorCommandActor::Person,
             source: "targets_ui",
             draft: Some(invalid_rule),
+            slot_key: None,
         },
     )
     .await
@@ -1682,6 +1684,7 @@ async fn monitor_rule_commands_are_revisioned_idempotent_and_side_effect_bounded
             actor: MonitorCommandActor::Person,
             source: "targets_ui",
             draft: Some(unsupported_interval),
+            slot_key: None,
         },
     )
     .await
@@ -1709,6 +1712,7 @@ async fn monitor_rule_commands_are_revisioned_idempotent_and_side_effect_bounded
             actor: MonitorCommandActor::Person,
             source: "targets_ui",
             draft: Some(fixed_rule(None)),
+            slot_key: None,
         },
     )
     .await
@@ -1767,6 +1771,7 @@ async fn target_list_toggle_uses_the_accepted_person_command_source() {
             actor: MonitorCommandActor::Person,
             source: "targets_ui",
             draft: Some(fixed_rule(None)),
+            slot_key: None,
         },
     )
     .await

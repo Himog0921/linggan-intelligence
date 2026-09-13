@@ -267,6 +267,7 @@ async fn creator_rule_queues_once_without_a_baseline_or_a_preassigned_station() 
             kind: MonitorCommandKind::SaveRule,
             actor: MonitorCommandActor::Person,
             source: "targets_ui",
+            slot_key: None,
             draft: Some(MonitorRuleDraft {
                 mode: MonitorRuleMode::Fixed,
                 automatic_enabled: true,
