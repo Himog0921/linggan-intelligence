@@ -175,7 +175,9 @@ fingerprint 由研究正文、必要上下文版本、清洗版本、研究合�
 
 交付：插件/现役参考的字段审计、真实 producer fixture 入口、XHS Comment 运行时 validator、稳定身份、Comment/CommentObservation 的最小 schema、append-only/replay/current 约束、隔离 PostgreSQL 攻击性测试。
 
-停止条件：没有真实 producer fixture 时，仅完成字段审计和 fixture 缺口记录；不伪造 Capture/Evidence/Comment 已实现。
+当前证据：`fixtures/xhs/comment-evidence-set-v1.json` 已提供一个去标识化的真实 `content_detail + comments` 来源形状对。它只解锁 package/record/跨包作品身份的 runtime validator；它不证明完整 collection profile，不能跳过缺口 fixture、PostgreSQL 约束或用户原声页面验收。
+
+停止条件：没有更多真实 producer fixture 时，只完成已有形状的 validator 和缺口记录；不伪造 Capture/Evidence/Comment 已实现。
 
 ### P2：评论语料与原声浏览器
 

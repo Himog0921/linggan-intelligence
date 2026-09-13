@@ -1,0 +1,330 @@
+{
+  "fixtureVersion": "xhs.comment-evidence-set.v1",
+  "packages": {
+    "commentsPackage": {
+      "capturedAt": "2026-01-01T00:00:00Z",
+      "contractVersion": "producer.capture-package.fixture.v0",
+      "coverage": {
+        "layers": [
+          {
+            "acquired": 1,
+            "attempted": 1,
+            "capability": "comment_collection",
+            "failed": 1,
+            "notAttempted": 1,
+            "observed": 1,
+            "stoppedReason": "<redacted>",
+            "unknown": 1,
+            "verified": 1
+          }
+        ],
+        "target": {
+          "basis": "<redacted>",
+          "commentCollection": {
+            "analysisUsability": "<redacted>",
+            "expectedCount": 1,
+            "noteId": "noteid-fixture-001",
+            "pageCommentCount": 1,
+            "requestedLimit": 1,
+            "scope": "<redacted>",
+            "state": "<redacted>",
+            "stopReason": "<redacted>",
+            "targetIdentity": "<redacted>",
+            "uniqueCollectedCount": 1,
+            "version": 1
+          },
+          "contentExternalId": "contentexternalid-fixture-001"
+        }
+      },
+      "observedAt": "2026-01-01T00:00:00Z",
+      "packageKind": "comments",
+      "packageRef": "packageref-fixture-001",
+      "platform": "xhs",
+      "records": [
+        {
+          "kind": "comment",
+          "payload": {
+            "author": "<redacted person>",
+            "authorId": "authorid-fixture-001",
+            "avatarUrl": "https://example.invalid/avatarurl",
+            "collectedAt": 1,
+            "collectionRunId": "collectionrunid-fixture-001",
+            "collectorVersion": "<redacted>",
+            "commentEntityId": "commententityid-fixture-001",
+            "commentId": "commentid-fixture-001",
+            "commentImageUrls": [
+              "https://example.invalid/commentimageurls",
+              "https://example.invalid/commentimageurls"
+            ],
+            "contentId": "contentid-fixture-001",
+            "createdAt": 1,
+            "dataQuality": "<redacted>",
+            "ipLocation": "<redacted person>",
+            "level": 1,
+            "likeText": "<redacted>",
+            "likes": 1,
+            "location": "<redacted person>",
+            "mentionLinks": [
+              "<redacted>"
+            ],
+            "noteId": "noteid-fixture-001",
+            "noteUrl": "https://example.invalid/noteurl",
+            "platform": "xhs",
+            "platformCommentId": "platformcommentid-fixture-001",
+            "profileUrl": "https://example.invalid/profileurl",
+            "publishedAt": 1,
+            "publishedAtText": "2026-01-01T00:00:00Z",
+            "qualityReason": "<redacted>",
+            "rawDomText": "<redacted text>",
+            "rawPayload": "<redacted>",
+            "rawShareText": "<redacted text>",
+            "rawSource": "<redacted>",
+            "rawUrl": "https://example.invalid/rawurl",
+            "replyCount": 1,
+            "replyCountText": "<redacted>",
+            "replyToNickname": "<redacted person>",
+            "replyToUserName": "<redacted person>",
+            "sortMode": "newest_first",
+            "sourceTier": "<redacted>",
+            "syncStatus": "<redacted>",
+            "text": "<redacted text>",
+            "time": "2026-01-01T00:00:00Z"
+          },
+          "sourceObject": {
+            "externalId": "externalid-fixture-001",
+            "platform": "xhs",
+            "type": "note"
+          }
+        }
+      ]
+    },
+    "detailPackage": {
+      "capturedAt": "2026-01-01T00:00:00Z",
+      "contractVersion": "producer.capture-package.fixture.v0",
+      "coverage": {
+        "layers": [
+          {
+            "acquired": 1,
+            "attempted": 1,
+            "capability": "detail_capture",
+            "failed": 1,
+            "notAttempted": 1,
+            "observed": 1,
+            "stoppedReason": "<redacted>",
+            "unknown": 1,
+            "verified": 1
+          }
+        ],
+        "target": {
+          "basis": "<redacted>",
+          "contentExternalId": "contentexternalid-fixture-001"
+        }
+      },
+      "observedAt": "2026-01-01T00:00:00Z",
+      "packageKind": "content_detail",
+      "packageRef": "packageref-fixture-002",
+      "platform": "xhs",
+      "records": [
+        {
+          "kind": "content_detail",
+          "payload": {
+            "atUserList": [],
+            "authorAvatar": "<redacted>",
+            "authorEntityId": "authorentityid-fixture-001",
+            "authorFollowed": 1,
+            "authorId": "authorid-fixture-002",
+            "authorName": "<redacted person>",
+            "bodyText": "<redacted text>",
+            "canonicalUrl": "https://example.invalid/canonicalurl",
+            "collectedAt": 1,
+            "collectionRunId": "collectionrunid-fixture-002",
+            "collectorVersion": "<redacted>",
+            "collects": 1,
+            "comments": 1,
+            "content": "<redacted text>",
+            "contentId": "contentid-fixture-001",
+            "cover": "<redacted>",
+            "createdAt": 1,
+            "dataSource": "<redacted>",
+            "detailCapture": {
+              "comments": {
+                "analysisUsability": "<redacted>",
+                "cap": 1,
+                "expectedCount": 1,
+                "noteId": "noteid-fixture-001",
+                "ordering": "newest_first",
+                "pageCommentCount": 1,
+                "repliesPreserved": 1,
+                "requestedLimit": 1,
+                "scope": "<redacted>",
+                "state": "<redacted>",
+                "stopReason": "<redacted>",
+                "targetIdentity": "<redacted>",
+                "uniqueCollectedCount": 1,
+                "version": 1
+              },
+              "detailSource": "<redacted>",
+              "kind": "content_detail",
+              "media": {
+                "acquisition": "<redacted>",
+                "observedSlots": 1
+              },
+              "noteId": "noteid-fixture-001"
+            },
+            "hashtags": [
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>"
+            ],
+            "imageCandidates": [
+              [
+                "<redacted>",
+                "<redacted>"
+              ]
+            ],
+            "images": [
+              "<redacted>"
+            ],
+            "ipLocation": "<redacted person>",
+            "keywords": [
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>"
+            ],
+            "lastSyncAt": null,
+            "lastUpdateTime": 1,
+            "likes": 1,
+            "livePhotoStreams": [],
+            "mediaQuality": "<redacted>",
+            "noteId": "noteid-fixture-001",
+            "platform": "xhs",
+            "platformContentId": "platformcontentid-fixture-001",
+            "publicCommentCount": 1,
+            "publicCommentCountKnown": 1,
+            "publishedAt": 1,
+            "publishedAtParserVersion": "<redacted>",
+            "publishedAtPrecision": "<redacted>",
+            "publishedAtReferenceObservedAt": null,
+            "publishedAtSourceField": "<redacted>",
+            "publishedAtSourceKind": "<redacted>",
+            "publishedAtText": "2026-01-01T00:00:00Z",
+            "rawDomText": "<redacted text>",
+            "rawPayload": "<redacted>",
+            "rawShareText": "<redacted text>",
+            "rawSource": "<redacted>",
+            "rawUrl": "https://example.invalid/rawurl",
+            "releaseDate": 1,
+            "shareRestricted": 1,
+            "shares": 1,
+            "syncStatus": "<redacted>",
+            "title": "<redacted text>",
+            "topicIds": [
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>",
+              "<redacted>"
+            ],
+            "type": "note",
+            "updatedAt": 1,
+            "url": "https://example.invalid/url",
+            "video": "<redacted>",
+            "videoStreams": [
+              {
+                "bitrate": 1,
+                "height": 1,
+                "qualityType": "<redacted>",
+                "score": 1,
+                "url": "https://example.invalid/url",
+                "width": 1
+              },
+              {
+                "bitrate": 1,
+                "height": 1,
+                "qualityType": "<redacted>",
+                "score": 1,
+                "url": "https://example.invalid/url",
+                "width": 1
+              },
+              {
+                "bitrate": 1,
+                "height": 1,
+                "qualityType": "<redacted>",
+                "score": 1,
+                "url": "https://example.invalid/url",
+                "width": 1
+              },
+              {
+                "bitrate": 1,
+                "height": 1,
+                "qualityType": "<redacted>",
+                "score": 1,
+                "url": "https://example.invalid/url",
+                "width": 1
+              },
+              {
+                "bitrate": 1,
+                "height": 1,
+                "qualityType": "<redacted>",
+                "score": 1,
+                "url": "https://example.invalid/url",
+                "width": 1
+              },
+              {
+                "bitrate": 1,
+                "height": 1,
+                "qualityType": "<redacted>",
+                "score": 1,
+                "url": "https://example.invalid/url",
+                "width": 1
+              }
+            ]
+          },
+          "sourceObject": {
+            "externalId": "externalid-fixture-001",
+            "platform": "xhs",
+            "type": "note"
+          }
+        }
+      ]
+    }
+  },
+  "provenance": {
+    "kind": "deidentified_local_producer_capture_pair",
+    "source": "local accepted content_detail and comments capture packages",
+    "capturedFrom": "existing local runtime on 2026-09-13",
+    "privacy": "Subject identifiers, free text, raw payload values, URLs, timestamps and counters are replaced. JSON keys, package and record kinds, and cross-record identity relations are retained.",
+    "notAClaim": "This fixture proves only a source-shape pair. It does not prove collection completeness, source truth, production availability, or model-analysis quality."
+  }
+}

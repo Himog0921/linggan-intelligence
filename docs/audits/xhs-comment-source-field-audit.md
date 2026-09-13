@@ -1,6 +1,6 @@
 # XHS Comment 来源字段审计（新 Rust 项目 P1）
 
-状态：`PARTIAL — 不足以创建生产 DDL`
+状态：`PARTIAL — 已有去标识化来源形状证据；仍不足以创建完整生产 DDL`
 审计日期：2026-09-13
 范围：只读审计 `references/current-v2/` 的插件与工作台固定快照；不代表新仓库已经接入这些 producer。
 
@@ -8,7 +8,7 @@
 
 当前参考快照足以确认：XHS 评论必须以 `noteId + commentId` 组成稳定身份，最小可确认字段是父作品身份和评论文本。它不足以证明父/根评论、评论者、点赞、发表时间、作品正文/OCR/ASR 在每个采集 profile 中都稳定可用。
 
-因此新项目在取得一组脱敏的真实 `CapturePackage` fixture 前，不能创建把这些字段写成必填或默认事实的数据库基线。特别是 `comment_probe` 不能伪造已获得作品正文或评论发表时间。
+一组来自现有本地运行时、已去标识化的 `content_detail + comments` CapturePackage 已保存为 [`fixtures/xhs/comment-evidence-set-v1.json`](../../fixtures/xhs/comment-evidence-set-v1.json)，其 SHA-256 为 `0eb0dd567bafabb4b2511c5c83531959c544cb8a90261050c17a6e4ca38e6234`。它允许开始写入**来源形状 validator**，但只有一个配对样本，仍不能把所有可见字段写成必填或默认事实，更不能创建完整生产 DDL。特别是 `comment_probe` 不能伪造已获得作品正文或评论发表时间。
 
 ## 已确认的来源线索
 
@@ -44,9 +44,15 @@ text: non-empty string
 - 采集时的排序、页面可见总数、采集数、停止原因和 coverage；
 - 评论媒体、位置、联系方式和其它附加字段。
 
-## Fixture 缺口与取得条件
+## 已取得 fixture 与仍存缺口
 
-第一份新项目 fixture 必须是来自真实 producer 的脱敏 `CapturePackage`，而不是人工按照旧 Prisma schema 拼出的 JSON。至少覆盖：
+已取得的 `comment-evidence-set-v1.json` 是真实 producer 的去标识化来源形状证据，不是手工按旧 schema 编造的 JSON。它证明本地运行时可分别交付 `content_detail` 与 `comments` 包，并让新项目在不接触原始个人数据的前提下验证外层包、record 和跨包 `noteId` 关系。
+
+它**不**证明完整性、评论树、replay、文本变更、缺字段包或不同 collection profile 的稳定行为。
+
+## Fixture 仍需补齐的场景
+
+后续 fixture 必须继续来自真实 producer 的脱敏 `CapturePackage`，而不是人工按照旧 Prisma schema 拼出的 JSON。至少覆盖：
 
 1. `note_full`：一条作品与一级/回复评论，包含包终态和 coverage；
 2. `comment_probe`：只有评论时的输入，明确没有作品内容而非填充空默认；
@@ -60,7 +66,7 @@ fixture 必须删除或替换账户名、原文 URL、Cookie、授权、个人�
 
 以下条件满足后，才可以新增数据库 baseline 与 Rust ingress：
 
-- fixture 已进入本仓库并通过 runtime validator；
+- 当前 fixture 已进入本仓库；对应的 Rust runtime validator 与攻击性测试必须先通过；
 - 选定的 collection profile、terminal 和 coverage 字段已写成版本化合同；
 - Comment、CommentObservation 与 WorkObservation 的 accepted/current 规则有攻击性用例；
 - 明确 `comment_probe` 的父作品上下文不可用行为；
