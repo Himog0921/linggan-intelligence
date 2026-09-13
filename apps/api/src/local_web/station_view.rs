@@ -20,8 +20,8 @@
 use super::collection::collection_control_surface_view::{RuntimeLaneControlView, RuntimeResourceView};
 use super::collection_targets_view::{beijing_now_minutes, minutes_since_epoch, moment_without_year};
 use linggan_evidence::{
-    CapabilityState, RuntimeCapacityOverview, StationCapability, StationOverview,
-    UnclaimedInstallation,
+    CONTROL_FRESHNESS_MINUTES, CapabilityState, RuntimeCapacityOverview, StationCapability,
+    StationOverview, UnclaimedInstallation,
 };
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -155,7 +155,7 @@ fn render_runtime_with_roster(
               {footer}
             </div>"#,
         verdict = verdict_markup(overview, control, stations),
-        table = station_table_markup(roster, capabilities, control),
+        table = station_table_markup(roster, capabilities, control, now_minutes),
         running = running_markup(overview),
         schedule = schedule_markup(overview),
         footer = footer_markup(roster, now_minutes, error),
@@ -449,6 +449,7 @@ fn station_table_markup(
     roster: Option<(&[StationOverview], &[UnclaimedInstallation])>,
     capabilities: &CapabilityMatrix,
     control: Option<&RuntimeControl<'_>>,
+    now_minutes: i64,
 ) -> String {
     let Some((stations, _)) = roster else {
         return r#"<section class="c-stn">
@@ -474,6 +475,7 @@ fn station_table_markup(
                 capabilities.get(&station.station_ref),
                 control.and_then(|control| control.resource(station.station_ref)),
                 control.is_none_or(|control| control.account_observation_available),
+                now_minutes,
             )
         })
         .collect();
@@ -500,13 +502,9 @@ fn station_entry(
     capabilities: Option<&Vec<StationCapability>>,
     control: Option<&RuntimeResourceView>,
     account_observation_available: bool,
+    now_minutes: i64,
 ) -> String {
-    // 在岗与空缺是两件不同的事，不能都渲染成一片灰。
-    let (state_label, state_tone) = match station.active_plugin_version {
-        Some(_) => ("在岗", "c-tg-ok"),
-        // 没有在岗安装不等于工位坏了，只是现在没插件连着它。
-        None => ("空缺", "c-tg-neutral"),
-    };
+    let (state_label, state_tone) = station_state(station, now_minutes);
     let plugin = station.active_plugin_version.as_deref().unwrap_or("—");
     let last_seen = station
         .active_last_seen_at
@@ -564,6 +562,37 @@ fn station_entry(
         dispatch_panel = dispatch_panel(station, dispatch_label, &dispatch_hint),
         matrix = capability_matrix_markup(capabilities),
     )
+}
+
+/// 「状态」一列：在岗 / 失联 / 空缺，三件不同的事。
+///
+/// **「有插件认领这台工位」与「这台工位现在还连着」是两回事。** 改写前这一列只分前者，
+/// 于是 2026-09-13 那次插件后台进程睡了 2 小时 26 分时，页面首屏已经正确地说「接不了活 ·
+/// installation_stale」，这一列却还写着「在岗」——同一屏上两个互相矛盾的答案，而那个让人
+/// 放心的那个在离眼睛更近的地方。
+///
+/// 阈值直接用准入判定的那一个常量（`CONTROL_FRESHNESS_MINUTES`），不另写一个数：
+/// 页面与判定各写一个 20，就是给「以后有人只改了一处」留了门。
+///
+/// 读不到报到时间时说「在岗」但不给肯定语气——我们知道有插件认领了它，只是判断不了新鲜度；
+/// 编一个「失联」出来和编一个「在岗」一样，都是拿未知冒充已知。
+fn station_state(station: &StationOverview, now_minutes: i64) -> (&'static str, &'static str) {
+    if station.active_plugin_version.is_none() {
+        // 没有在岗安装不等于工位坏了，只是现在没插件连着它。
+        return ("空缺", "c-tg-neutral");
+    }
+    let Some(seen) = station
+        .active_last_seen_at
+        .as_deref()
+        .and_then(minutes_since_epoch)
+    else {
+        return ("在岗", "c-tg-neutral");
+    };
+    if now_minutes - seen > i64::from(CONTROL_FRESHNESS_MINUTES) {
+        ("失联", "c-tg-warn")
+    } else {
+        ("在岗", "c-tg-ok")
+    }
 }
 
 /// 「接活」一列。读不到控制事实时说读不到，不写成「已暂停」——那会让人去开一个
@@ -2014,6 +2043,91 @@ mod tests {
             execution_failures: 0,
             last_failure_at: None,
         }
+    }
+
+    /// 「有插件认领这台工位」与「这台工位现在还连着」是两回事。
+    ///
+    /// 2026-09-13：插件后台进程睡了 2 小时 26 分，页面首屏已经正确地说「接不了活 ·
+    /// installation_stale」，这一列却还写着「在岗」——同一屏上两个互相矛盾的答案。
+    #[test]
+    fn a_station_that_stopped_reporting_is_not_still_called_on_duty() {
+        let now = test_now();
+        let mut fresh = station(Some("0.8.49"), 0);
+        fresh.active_last_seen_at = Some("2026-09-13 11:55".to_owned());
+        let mut stale = station(Some("0.8.49"), 0);
+        stale.display_name = "失联的那台".to_owned();
+        stale.active_last_seen_at = Some("2026-09-13 09:30".to_owned());
+
+        let html = render_runtime(
+            &base(),
+            Some(&overview(vec![lane("基线建档", available())])),
+            &[fresh, stale],
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+            now,
+            None,
+        );
+        assert!(html.contains(">在岗<"), "还在报到的那台仍是在岗");
+        assert!(html.contains(">失联<"), "两小时没报到的那台必须说失联");
+        // 失联不是「坏了」也不是「空缺」：工位还在，只是现在连不上。
+        assert!(!html.contains(">空缺<"));
+    }
+
+    /// 阈值必须与准入判定用同一个数，否则页面与判定会在边界上各说各话。
+    #[test]
+    fn the_page_uses_the_same_freshness_threshold_as_the_admission_check() {
+        let now = test_now();
+        let mut just_inside = station(Some("0.8.49"), 0);
+        // 19 分钟前：还在 20 分钟窗口内。
+        just_inside.active_last_seen_at = Some("2026-09-13 11:41".to_owned());
+        let inside = render_runtime(
+            &base(),
+            Some(&overview(vec![lane("基线建档", available())])),
+            &[just_inside],
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+            now,
+            None,
+        );
+        assert!(inside.contains(">在岗<"));
+
+        let mut just_outside = station(Some("0.8.49"), 0);
+        // 21 分钟前：越过 CONTROL_FRESHNESS_MINUTES。
+        just_outside.active_last_seen_at = Some("2026-09-13 11:39".to_owned());
+        let outside = render_runtime(
+            &base(),
+            Some(&overview(vec![lane("基线建档", available())])),
+            &[just_outside],
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+            now,
+            None,
+        );
+        assert!(outside.contains(">失联<"));
+        assert_eq!(CONTROL_FRESHNESS_MINUTES, 20);
+    }
+
+    /// 读不到报到时间时不许编：既不说「失联」，也不给「在岗」那个肯定语气。
+    #[test]
+    fn an_unreadable_heartbeat_is_not_rendered_as_either_answer() {
+        let mut unknown = station(Some("0.8.49"), 0);
+        unknown.active_last_seen_at = None;
+        let html = render_runtime(
+            &base(),
+            Some(&overview(vec![lane("基线建档", available())])),
+            &[unknown],
+            &[],
+            &CapabilityMatrix::new(),
+            None,
+            test_now(),
+            None,
+        );
+        assert!(html.contains(">在岗<"));
+        assert!(!html.contains(">失联<"));
+        assert!(html.contains("尚未报到"));
     }
 
     /// 关键词没有作品清单。两条巡检通道写成同一句话，就是把一个关键词说成创作者。

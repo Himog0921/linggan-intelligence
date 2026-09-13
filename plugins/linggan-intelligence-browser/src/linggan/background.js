@@ -478,9 +478,49 @@ export function patrolAlarmSchedule(seconds) {
   return { delayInMinutes: minutes, periodInMinutes: minutes };
 }
 
+/**
+ * 确保「还有人能叫醒我」这件事成立，且**不必要时绝不碰它**。
+ *
+ * 原来的写法是每轮结束都无脑重建一次闹钟。在 Chrome 里重建等于「先删旧的、再建新的」
+ * 两步，而这一步恰好排在一轮工作的最末尾——清发件箱、最多下载 12 个媒体之后，正是 MV3
+ * 最可能回收这个 worker 的时刻。一旦在「删」与「建」之间被掐断，旧闹钟没了、新闹钟还没
+ * 建起来，**插件从此再也没有任何东西能叫醒它**，只剩「人正好打开小红书」这一条活路：
+ * 内容脚本的被动上报会顺带把 worker 叫醒，于是「手动刷一下小红书就好了」成了这套系统
+ * 事实上的唯一节拍器。
+ *
+ * 2026-09-13 实测到这个状态：两台工位各自睡了 2 小时 26 分，期间服务端健康、凭据有效、
+ * 机器没休眠、Chrome 没重启；重载插件（走 onInstalled，那条路径是先建闹钟再干活）后
+ * 立刻恢复，并稳定按 5 分 00 秒的节奏报到。
+ *
+ * 三条一起改：
+ * - **节奏没变就不动它。** 绝大多数轮次都是 300 秒 → 300 秒，本来就不需要重建，
+ *   不重建就不会暴露在那个删-建的缝隙里。
+ * - **闹钟不在就补一个。** 兜底，防住这里没想到的其它丢失路径。
+ * - **由调用方在干活之前先调一次**（见 worker 启动处），而不是留到最后。
+ *
+ * `onlyIfMissing` 区分两种调用意图：worker 刚醒时只想确认「还有人能叫醒下一次」，
+ * 不该把服务端刚给的 5 分钟节奏改回 1 分钟；一轮跑完后才是真正要写入新节奏的时刻。
+ */
+export async function ensurePatrolAlarm(seconds, { onlyIfMissing = false } = {}) {
+  const alarms = globalThis.chrome?.alarms;
+  if (!alarms?.create) return null;
+  const schedule = patrolAlarmSchedule(seconds);
+  let existing = null;
+  try {
+    existing = typeof alarms.get === 'function' ? await alarms.get(PATROL_ALARM) : null;
+  } catch {
+    // 读不到就当它不存在：多建一个闹钟的代价，远小于一个永远醒不过来的 worker。
+    existing = null;
+  }
+  if (existing && (onlyIfMissing || existing.periodInMinutes === schedule.periodInMinutes)) {
+    return { created: false, schedule };
+  }
+  await alarms.create(PATROL_ALARM, schedule);
+  return { created: true, schedule };
+}
+
 async function scheduleNextClaim(seconds) {
-  if (!globalThis.chrome?.alarms?.create) return;
-  await globalThis.chrome.alarms.create(PATROL_ALARM, patrolAlarmSchedule(seconds));
+  return ensurePatrolAlarm(seconds);
 }
 
 let patrolInFlight = null;
@@ -561,7 +601,17 @@ async function runMediaAcquisitionOnce() {
     normalizeCandidate: normalizeMediaCandidateUri,
     outbox: localMediaOutbox,
     flush: flushMediaOutbox,
-    recordFailure: recordMediaDownloadFailure,
+    // 凭据必须一路带到失败上报。`recordMediaDownloadFailure` 的第四个参数原来没人传，
+    // 于是它永远发出一个「带 workRef、带 installKey、却没有凭据」的请求——服务端那一支
+    // 正是 `installation_credential_required`，稳定回 401。后果不是噪音：下载尝试虽然
+    // 记下了，但**这张工单失败这件事从来没有被服务端登记过**，401 又被上层 `.catch`
+    // 静静吞掉，于是工单侧看到的是「什么都没发生」。
+    recordFailure: (upload, error) => recordMediaDownloadFailure(
+      upload,
+      error,
+      fetch,
+      installationCredential,
+    ),
     scheduleRecovery: scheduleNextClaim,
   });
 }
@@ -579,6 +629,35 @@ export function recoverPatrolWakeAfterLifecycleRestart() {
   void checkInStationOnce().then(() => patrolTick());
 }
 
+/**
+ * 把 `chrome.storage.session` 对内容脚本放开。
+ *
+ * Chrome 的默认值是 `TRUSTED_CONTEXTS`：service worker、popup 读得到，内容脚本读不到，
+ * 报错原文是「Access to storage is not allowed from this context.」。本仓库此前从未调用过
+ * `setAccessLevel`，于是页面里的仪表盘桥接存不进 nonce，随后每条指令都被自己拒掉。
+ *
+ * 只放开 session 这一个区，且它本来就是**每次浏览器重启即清空**的短期区；放进去的是一次性
+ * 的会话 nonce，不是凭据、不是账号身份。
+ */
+function openSessionStorageToContentScripts() {
+  const session = globalThis.chrome?.storage?.session;
+  if (typeof session?.setAccessLevel !== 'function') return;
+  // 这一行跑在模块顶层：**同步抛错会让整个 background 模块加载失败**——闹钟监听器、
+  // onInstalled/onStartup、启动那一次补位全都注册不上，插件彻底变砖。而
+  // `Promise.resolve(f())` 接不住 `f()` 的同步异常：参数先求值，那一刻 promise 还不存在，
+  // 后面的 `.catch` 根本没机会介入。所以这里必须是 try/catch，不能只靠 `.catch`。
+  try {
+    void Promise.resolve(
+      session.setAccessLevel({ accessLevel: 'TRUSTED_AND_UNTRUSTED_CONTEXTS' }),
+    ).catch(() => {
+      // 放开失败不该影响插件其余功能：仪表盘桥接会退回只用 local，其余链路不依赖 session。
+    });
+  } catch {
+    // 同上：放不开就放不开，绝不能把整个 worker 拖下水。
+  }
+}
+openSessionStorageToContentScripts();
+
 chrome.runtime.onInstalled?.addListener(() => {
   // 安装、升级或开发者重载后先持久化一次最短唤醒，再报到并领活；不再要求用户打开弹窗点击「领取」。
   recoverPatrolWakeAfterLifecycleRestart();
@@ -586,9 +665,19 @@ chrome.runtime.onInstalled?.addListener(() => {
 chrome.runtime.onStartup?.addListener(() => {
   recoverPatrolWakeAfterLifecycleRestart();
 });
-// service worker 每次被唤醒都会执行到这里：先签到，再领一次。alarm 事件可能紧接着到达，
-// `patrolInFlight` 会把两次入口合并为同一个领取请求。
-void checkInStationOnce().then(() => patrolTick());
+// service worker 每次被唤醒都会执行到这里。
+//
+// **顺序是这一段的全部意义**：先确认「还有人能叫醒下一次」，再去签到和领活。下面那两件事
+// 可能跑很久（清发件箱、下载媒体），而 MV3 随时会回收这个 worker；把「保住唤醒能力」放在
+// 所有慢活之前，是整条链路上唯一不能被打断的一步。用 `onlyIfMissing` 是因为这里只负责
+// 兜底补一个，不负责改节奏——服务端刚给的 5 分钟不该被这里改回 1 分钟。
+//
+// alarm 事件可能紧接着到达，`patrolInFlight` 会把两次入口合并为同一个领取请求。
+void ensurePatrolAlarm(PATROL_BOOTSTRAP_SECONDS, { onlyIfMissing: true })
+  .catch(() => null)
+  .finally(() => {
+    void checkInStationOnce().then(() => patrolTick());
+  });
 
 /**
  * 领一个服务端派下来的任务并执行它。

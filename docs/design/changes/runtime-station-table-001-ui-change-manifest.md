@@ -67,6 +67,24 @@
 | 视觉一致 | `./scripts/check-project-governance.sh`、linggan-api 207/207、1440 / 1100 / 860 三档浏览器走查 | **VERIFIED**：治理检查通过；1440 与 1100 宽均无横向滚动；860 宽的外壳堆叠与已验收的观察目标页逐项一致（两页 sidebar 均 1040px、文档均不溢出），属外壳既有行为。控制台无错误 | 未做跨浏览器与高分屏验收；860 宽以下是外壳的既有欠账，不在本轮范围 |
 | 真实后果 | 所有写动作的 action 地址与字段与改写前逐字一致，仅位置改变 | **NOT VERIFIED**：本轮未实际点击提交任何写动作（会改动 Mog 的真实工位记录）。已核对六个表单的 method / action / 隐藏字段名与改写前完全相同，失败态文案与 `error` 码映射未改 | 未实点更名 / 停用 / 暂停接活 / 认领 / 开关窗口；不验证平台侧行为——本页不访问任何平台 |
 
+## 5b. 后续修订：状态列新增「失联」（PATROL-ALARM-RECOVERY-001，2026-09-13）
+
+本清单交付当天，一次真实的插件失联暴露出工位表的一处表达缺口：页面首屏已经正确地说
+「接不了活 · installation_stale」，而工位表的「状态」列仍写「在岗」——同一屏上两个互相
+矛盾的答案，且让人放心的那个离眼睛更近。
+
+- 「状态」列由两态（在岗 / 空缺）改为三态：**在岗 / 失联 / 空缺**；
+- 判据是插件最后报到时间越过 `CONTROL_FRESHNESS_MINUTES`（20 分钟），**直接引用准入判定
+  用的同一个常量**，页面不另写一个数；
+- 读不到报到时间时两边都不编：仍显示「在岗」但用中性语气，由「最后报到」列说「尚未报到」；
+- 「失联」不等于「坏了」，也不等于「空缺」——工位仍在册，只是此刻连不上，因此用警告色而
+  不是危险色，且不影响更名 / 停用 / 认领等动作的可用性。
+
+由 `a_station_that_stopped_reporting_is_not_still_called_on_duty`、
+`the_page_uses_the_same_freshness_threshold_as_the_admission_check`、
+`an_unreadable_heartbeat_is_not_rendered_as_either_answer` 三条断言自动执行；三条均已做
+变异验证（把判定改回「有插件即在岗」确认转红）。
+
 ## 6. 交接
 
 - 修改文件：`apps/api/src/local_web/station_view.rs`（重写）、`collection_control_surface_view.rs`（删除 runtime 渲染）、`local_web.rs`（handler 与页头计数）、`collection_targets_view.rs`（时间辅助函数提升可见性）、`tests.rs`（版式治理前缀表）、`collection_workspace.css`、`target_drawer.css`、`crates/evidence/src/runtime_capacity.rs`（通道显示名）
