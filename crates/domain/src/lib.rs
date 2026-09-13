@@ -1,5 +1,7 @@
 //! Pure domain language and invariants. Infrastructure dependencies are forbidden here.
 
+pub mod comment_research;
+
 pub mod lifecycle {
     /// The bootstrap intentionally distinguishes unknown facts from negative facts.
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
