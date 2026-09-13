@@ -79,7 +79,8 @@ pub use archive_completeness::{
 };
 pub use collection_control::{
     AccountEligibilityObservation, AccountEligibilityReceipt, AccountEligibilityState,
-    CapacitySelection, CollectionControlError, ComparableObservationRound,
+    CONTROL_FRESHNESS_MINUTES, CapacitySelection, CollectionControlError,
+    ComparableObservationRound,
     DEFAULT_MONITOR_INTERVAL_SECONDS, DynamicCadence, ExplicitAccountEligibilitySignal,
     InstallationCredentialSecret, IssuedInstallationCredential, MAXIMUM_MONITOR_INTERVAL_SECONDS,
     MINIMUM_MONITOR_INTERVAL_SECONDS, MINIMUM_PLUGIN_VERSION, MonitorCommandActor,

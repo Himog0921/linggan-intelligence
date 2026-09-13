@@ -20,27 +20,43 @@ function generateNonce() {
   return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function storeDashboardNonce(nonce) {
-  try {
-    const payload = { dashboardNonce: nonce, dashboardNonceAt: Date.now() };
-    const areas = [chrome.storage.session, chrome.storage.local]
-      .filter(Boolean)
-      .filter((area, index, list) => list.indexOf(area) === index);
-    await Promise.all(areas.map((area) => area.set(payload)));
-  } catch (e) {
-    console.error('[DashboardBridge] Failed to store nonce:', e);
+function dashboardNonceAreas() {
+  return [chrome.storage?.session, chrome.storage?.local]
+    .filter(Boolean)
+    .filter((area, index, list) => list.indexOf(area) === index);
+}
+
+/**
+ * 两个存储区各写各的，**一路失败不牵连另一路**。
+ *
+ * 原来用 `Promise.all` 同时写 session 与 local。内容脚本读不到 `chrome.storage.session`
+ * ——这是 Chrome 的默认访问级别，除非 service worker 调过 `setAccessLevel` 把它对非受信
+ * 上下文放开（本仓库此前从未调用过）。于是 session 那一路必然抛错，`Promise.all` 把整个
+ * 写入带崩，**本来能成功的 local 也一起没了**；nonce 存不进去，仪表盘随后每一条指令都被
+ * 自己判为「invalid or missing nonce」拒掉。
+ *
+ * 现在 session 那一路放开后本身能成功；即便将来它又因为任何原因不可用，local 仍会写进去，
+ * 面板不会整个失能。只有**两路都失败**才算真失败，那时才报错。
+ */
+async function writeDashboardNonceAreas(write) {
+  const areas = dashboardNonceAreas();
+  if (!areas.length) return { stored: 0, errors: [] };
+  const outcomes = await Promise.allSettled(areas.map((area) => write(area)));
+  const errors = outcomes.filter((o) => o.status === 'rejected').map((o) => o.reason);
+  return { stored: outcomes.length - errors.length, errors };
+}
+
+export async function storeDashboardNonce(nonce) {
+  const payload = { dashboardNonce: nonce, dashboardNonceAt: Date.now() };
+  const { stored, errors } = await writeDashboardNonceAreas((area) => area.set(payload));
+  if (!stored) {
+    console.error('[DashboardBridge] Failed to store nonce:', errors[0]);
   }
+  return stored > 0;
 }
 
 async function clearDashboardNonce() {
-  try {
-    const areas = [chrome.storage.session, chrome.storage.local]
-      .filter(Boolean)
-      .filter((area, index, list) => list.indexOf(area) === index);
-    await Promise.all(areas.map((area) => area.remove(['dashboardNonce', 'dashboardNonceAt'])));
-  } catch (e) {
-    // ignore
-  }
+  await writeDashboardNonceAreas((area) => area.remove(['dashboardNonce', 'dashboardNonceAt']));
 }
 
 export function createDashboardBridge({
