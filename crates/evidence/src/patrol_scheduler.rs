@@ -313,7 +313,18 @@ async fn queue_one_due_rule(
             ),
         },
         Err(crate::acquisition_chain::AcquisitionChainError::Database(error)) => return Err(error),
-        Err(_) => ("rejected", "target_not_requestable", None, false),
+        // **每种准入失败说出自己的原因。**
+        //
+        // 此前这里是 `Err(_) => "target_not_requestable"`：一个字符串吞掉了「这个目标还没
+        // 归属领域」「授权没签」「授权额度不够 200 篇」「schema 没装」「目标不存在」全部
+        // 情况。界面上只看到「目标不可请求」——而真实原因是目标没有领域，排查多花了两轮。
+        // 一个压平的原因码比没有原因码更坏：它看起来是个答案。
+        Err(error) => (
+            "rejected",
+            scheduler_admission_failure_reason(&error),
+            None,
+            false,
+        ),
     };
 
     if let Some(work_order_ref) = work_order_ref {
@@ -646,4 +657,28 @@ pub async fn set_target_monitoring(
         .await?;
     }
     Ok(())
+}
+
+/// 准入直接报错（还没走到决策）时，如实说出是哪一种。
+///
+/// 返回的是闭集里的机器原因码，与决策上持久化的那一套同源——调度写进
+/// `collection_scheduler_target_decision.reason_code`，界面按它显示。
+fn scheduler_admission_failure_reason(
+    error: &crate::acquisition_chain::AcquisitionChainError,
+) -> &'static str {
+    use crate::acquisition_chain::AcquisitionChainError as Failure;
+    match error {
+        Failure::SchemaUnavailable => "acquisition_schema_unavailable",
+        Failure::UnknownTarget => "unknown_target",
+        Failure::TargetDomainUnassigned => "target_domain_unassigned",
+        Failure::TargetNotRequestable { .. } => "target_not_requestable",
+        Failure::InvalidMaterialTargets => "invalid_material_targets",
+        Failure::ProgressiveArchiveAuthorizationTooSmall { .. } => "authorization_bound_too_small",
+        Failure::ProgressiveArchiveAuthorizationMissing => "authorization_missing",
+        Failure::ProgressiveArchivePurposeMismatch => "progressive_purpose_mismatch",
+        Failure::ProgressiveArchiveNotReady { .. } => "progressive_archive_not_ready",
+        // 数据库错误在上面就 return 了，不会走到这里——它不是「这个目标不能采」，
+        // 而是「这一轮没读成」，压成一个目标级原因码会把故障说成业务判断。
+        Failure::Database(_) => "acquisition_read_failed",
+    }
 }

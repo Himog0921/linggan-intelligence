@@ -122,6 +122,8 @@ const MIGRATIONS: &str = concat!(
     "\n",
     include_str!("../../../database/migrations/0065_account_observation_bootstrap.sql"),
     "\n",
+    include_str!("../../../database/migrations/0080_scheduler_admission_failure_reasons.sql"),
+    "\n",
     include_str!("../../../database/migrations/0071_cross_industry_sampling_provenance.sql"),
     "\n",
     include_str!("../../../database/migrations/0076_monitor_rule_slots.sql"),

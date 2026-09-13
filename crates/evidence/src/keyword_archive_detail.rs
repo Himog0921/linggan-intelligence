@@ -51,10 +51,11 @@ pub async fn advance_keyword_archive_detail(
     purpose: &str,
     requested_by: &str,
 ) -> Result<KeywordDetailAdvance, AcquisitionChainError> {
-    let schema_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('cross_industry_sample') IS NOT NULL \
-                AND to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
-    )
+    let schema_ready: bool = sqlx::query_scalar(concat!(
+        "SELECT ",
+        sample_facts_schema_ready_sql!(),
+        " AND to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
+    ))
     .fetch_one(database.pool())
     .await?;
     if !schema_ready {
@@ -237,20 +238,31 @@ pub async fn keyword_targets_pending_detail(
     if target_refs.is_empty() {
         return Ok(std::collections::HashSet::new());
     }
-    let schema_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('cross_industry_sample') IS NOT NULL \
-                AND to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
-    )
+    let schema_ready: bool = sqlx::query_scalar(concat!(
+        "SELECT ",
+        sample_facts_schema_ready_sql!(),
+        " AND to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
+    ))
     .fetch_one(database.pool())
     .await?;
     if !schema_ready {
         return Ok(std::collections::HashSet::new());
     }
     let rows: Vec<Uuid> = sqlx::query_scalar(concat!(
-        // 跨行业那一侧。
-        "SELECT DISTINCT sample.target_ref FROM cross_industry_sample sample \
-         WHERE sample.target_ref=ANY($1) AND ",
-        pending_detail_sql!(),
+        // 跨行业那一侧。哪些样本算这个目标的，按**观察记录**算而不是样本行上的
+        // `target_ref`——那一列只在第一次插入时写定，同一篇被另一个关键词先看到，
+        // 这个目标就永远不会给它补详情。
+        "SELECT DISTINCT seen_order.target_ref FROM cross_industry_sample sample \
+         JOIN cross_industry_sample_observation seen \
+           ON seen.sample_ref=sample.sample_ref \
+         JOIN linggan_runtime_capture_package seen_package \
+           ON seen_package.package_ref=seen.package_ref \
+         JOIN collection_work_order_lease_task seen_lease_task \
+           ON seen_lease_task.task_id=seen_package.task_id \
+         JOIN collection_work_order_lease seen_lease USING(lease_ref) \
+         JOIN collection_work_order seen_order USING(work_order_ref) \
+         WHERE seen_order.target_ref=ANY($1) AND ",
+        pending_detail_sql!("seen_order.target_ref"),
         // 证据侧。本领域的关键词材料住这儿，漏掉它，补详情的入口对本领域关键词
         // 根本不会出现。
         " UNION \
@@ -291,31 +303,32 @@ pub async fn keyword_targets_pending_detail(
 /// 「这一篇还等着补详情」这条判据本身。单篇挑选与列表页批量共用它，免得同一件事在两处
 /// 各写一遍、日后各自漂移。`sample` 是外层给的表别名。
 macro_rules! pending_detail_sql {
-    () => {
-        "sample.source_url IS NOT NULL \
-           AND NOT EXISTS ( \
-             SELECT 1 FROM collection_work_order done_order \
-             JOIN collection_work_order_lease done_lease USING (work_order_ref) \
-             JOIN collection_work_order_lease_task done_task USING (lease_ref) \
-             JOIN linggan_runtime_task done_runtime ON done_runtime.task_id=done_task.task_id \
-             WHERE done_order.target_ref=sample.target_ref \
-               AND done_task.execution_state IN ('completed','unavailable','blocked') \
-               AND done_runtime.task_spec->'capabilitiesRequested'->>0='content_detail' \
-               AND done_runtime.task_spec #>> '{target,contentExternalId}' \
-                   = sample.content_external_id) \
-           AND NOT EXISTS ( \
-             SELECT 1 FROM collection_work_order live_order \
-             JOIN collection_work_order_cross_industry_target live_scope \
-               USING (work_order_ref) \
-             LEFT JOIN collection_work_order_lease live_lease USING (work_order_ref) \
-             WHERE live_order.target_ref=sample.target_ref \
-               AND live_scope.sample_ref=sample.sample_ref \
-               AND (live_order.queue_state IN ('queued','leased') \
-                    OR (live_lease.released_at IS NULL \
-                        AND live_lease.expires_at>scope_001_now())))"
+    ($target:literal) => {
+        concat!(
+            "sample.source_url IS NOT NULL AND NOT ",
+            // 已经取到的不再排队。此前这里问的是运行任务：状态在
+            // `('completed','unavailable','blocked')` 里就算做过。后两个是「试过没成功」——
+            // 与取到了相反，于是**失败一次的笔记永久从待补清单里消失**；而 `completed`
+            // 也不保证材料进来（整包被隔离时任务照样完成）。现在只看 `0079` 那条材料事实。
+            sample_detail_obtained_sql!(),
+            " AND NOT EXISTS ( \
+                 SELECT 1 FROM collection_work_order live_order \
+                 JOIN collection_work_order_cross_industry_target live_scope \
+                   USING (work_order_ref) \
+                 LEFT JOIN collection_work_order_lease live_lease USING (work_order_ref) \
+                 WHERE live_order.target_ref=",
+            $target,
+            " AND live_scope.sample_ref=sample.sample_ref \
+                   AND (live_order.queue_state IN ('queued','leased') \
+                        OR (live_lease.released_at IS NULL \
+                            AND live_lease.expires_at>scope_001_now())))"
+        )
     };
 }
 
+use crate::cross_industry_sample_facts::{
+    sample_detail_obtained_sql, sample_facts_schema_ready_sql, sample_observed_by_target_sql,
+};
 use pending_detail_sql;
 
 /// 下一批该补详情的样本。
@@ -326,17 +339,23 @@ use pending_detail_sql;
 /// - 还没有取到过详情；
 /// - 没有排在某张还活着的工单上。
 ///
-/// 「取到过详情没有」由运行时事实回答：这个目标底下有没有一条已完成的 `content_detail`
-/// 任务指向这篇。**不另存一个「已补详情」布尔位**——那是第二份真相，一旦与运行时不符，
-/// 没人看得出来哪边是对的。
+/// 「取到过详情没有」由**材料事实**回答：`cross_industry_sample_detail` 里有没有这篇的行
+/// （`0079`）。此前它由运行任务的状态回答，而「任务跑完」与「材料进来」是两件事：整包被
+/// 隔离时一个字段都没写进样本行，租约任务照样是 `completed`；`blocked`／`unavailable` 更是
+/// 「试过没成功」，当时却也被算作做过，于是失败一次的笔记永久从清单里消失。
+///
+/// 仍然**不存「已补详情」布尔位**：`0079` 那张表记的是「这一次详情落库了什么」，是追加的
+/// 事实而不是一个会与运行时不符的状态位。
 async fn next_detail_batch(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     target_ref: Uuid,
 ) -> Result<Vec<Uuid>, sqlx::Error> {
     sqlx::query_scalar(concat!(
         "SELECT sample.sample_ref FROM cross_industry_sample sample \
-         WHERE sample.target_ref=$1 AND ",
-        pending_detail_sql!(),
+         WHERE ",
+        sample_observed_by_target_sql!("$1"),
+        " AND ",
+        pending_detail_sql!("$1"),
         " ORDER BY sample.like_count DESC NULLS LAST, sample.first_seen_at, sample.sample_ref \
          LIMIT $2",
     ))
@@ -369,10 +388,11 @@ pub async fn run_keyword_archive_details(
     purpose: &str,
 ) -> Result<KeywordDetailTickSummary, AcquisitionChainError> {
     let mut summary = KeywordDetailTickSummary::default();
-    let schema_ready: bool = sqlx::query_scalar(
-        "SELECT to_regclass('cross_industry_sample') IS NOT NULL \
-                AND to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
-    )
+    let schema_ready: bool = sqlx::query_scalar(concat!(
+        "SELECT ",
+        sample_facts_schema_ready_sql!(),
+        " AND to_regclass('collection_work_order_cross_industry_target') IS NOT NULL",
+    ))
     .fetch_one(database.pool())
     .await?;
     if !schema_ready {

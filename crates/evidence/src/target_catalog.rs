@@ -4,6 +4,9 @@
 //! target-scoped discovery records rather than reconstructing a directory from
 //! a creator name or an unscoped corpus search.
 
+use crate::cross_industry_sample_facts::{
+    sample_detail_obtained_sql, sample_facts_schema_ready_sql, sample_observed_by_target_sql,
+};
 use linggan_storage_postgres::Database;
 use sqlx::Row;
 use uuid::Uuid;
@@ -79,13 +82,13 @@ pub async fn read_cross_industry_hits(
     target_ref: Uuid,
 ) -> Result<Option<KeywordHitProjection>, sqlx::Error> {
     let schema_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample') IS NOT NULL")
+        sqlx::query_scalar(concat!("SELECT ", sample_facts_schema_ready_sql!()))
             .fetch_one(database.pool())
             .await?;
     if !schema_ready {
         return Ok(None);
     }
-    let rows = sqlx::query(
+    let rows = sqlx::query(concat!(
         "SELECT sample.sample_ref,sample.content_external_id,sample.title,sample.author_name, \
                 sample.published_at IS NOT NULL AS has_published, \
                 to_char(sample.published_at,'YYYY-MM-DD') AS published_on, \
@@ -94,39 +97,31 @@ pub async fn read_cross_industry_hits(
                 -- `discovery_order` 是 integer，而展示合同上的名次是 bigint。不显式转换
                 -- 的话这一列会在解码时炸掉（`INT4` 对不上 `Option<i64>`），而且只有在真的
                 -- 有观察记录的目标上才炸——空库一路绿灯。
+                --
+                -- 名次只算**这个目标自己那几轮**看到的位次。跨目标取 min 会把另一个关键词
+                -- 那一轮的位次摆在这个关键词的作品页上——同一篇在两个词底下的位次本来就
+                -- 不是同一件事，混起来看不出是错的。
                 (SELECT (min(seen.discovery_order)+1)::bigint \
                    FROM cross_industry_sample_observation seen \
-                  WHERE seen.sample_ref=sample.sample_ref) AS match_position, \
-                -- 「详情到手了」要看**材料真的进来了**，不是「那个任务跑完了」。
-                --
-                -- 包的身份与任务声明对不上时（`task_package_binding_valid` 为假），记录会被
-                -- 判为 `quarantined`、`insert_typed_materials` 整段跳过——一个字段都不会写进
-                -- 样本行；但租约任务仍然被标成 `completed`——完成与否说的是这一步执行过了，
-                -- 不是材料合格。只看 completed 就会对一篇什么都没有的笔记说「详情已取得」。
-                -- 2026-09-10 的 120 条整包隔离正是这个形状。
-                EXISTS (SELECT 1 FROM collection_work_order done_order \
-                        JOIN collection_work_order_lease done_lease USING (work_order_ref) \
-                        JOIN collection_work_order_lease_task done_task USING (lease_ref) \
-                        JOIN linggan_runtime_task done_runtime \
-                          ON done_runtime.task_id=done_task.task_id \
-                        JOIN linggan_runtime_capture_package done_package \
-                          ON done_package.task_id=done_runtime.task_id \
-                        JOIN linggan_runtime_submission_receipt done_receipt \
-                          ON done_receipt.package_ref=done_package.package_ref \
-                        WHERE done_order.target_ref=$1 \
-                          AND done_task.execution_state='completed' \
-                          AND done_receipt.material_admission='ACCEPTED' \
-                          AND done_runtime.task_spec->'capabilitiesRequested'->>0='content_detail' \
-                          AND done_runtime.task_spec #>> '{target,contentExternalId}' \
-                              = sample.content_external_id \
-                          AND NOT EXISTS ( \
-                            SELECT 1 FROM linggan_runtime_record_disposition quarantine \
-                            WHERE quarantine.package_ref=done_package.package_ref \
-                              AND quarantine.disposition='quarantined')) AS detail_done \
-         FROM cross_industry_sample sample \
-         WHERE sample.target_ref=$1 \
-         ORDER BY sample.like_count DESC NULLS LAST,sample.first_seen_at,sample.sample_ref",
-    )
+                   JOIN linggan_runtime_capture_package seen_package \
+                     ON seen_package.package_ref=seen.package_ref \
+                   JOIN collection_work_order_lease_task seen_lease_task \
+                     ON seen_lease_task.task_id=seen_package.task_id \
+                   JOIN collection_work_order_lease seen_lease USING(lease_ref) \
+                   JOIN collection_work_order seen_order USING(work_order_ref) \
+                  WHERE seen.sample_ref=sample.sample_ref \
+                    AND seen_order.target_ref=$1) AS match_position, \
+                -- 「详情到手了」看的是 `0079` 那条材料事实，不是运行任务的状态。
+                ",
+        sample_detail_obtained_sql!(),
+        " AS detail_done
+         FROM cross_industry_sample sample
+         -- 命中范围按**观察记录**算，不按样本行上的 `target_ref`：那一列只在第一次插入时
+         -- 写定，同一篇被另一个关键词先看到，这个目标就永远看不到它。
+         WHERE ",
+        sample_observed_by_target_sql!("$1"),
+        " ORDER BY sample.like_count DESC NULLS LAST,sample.first_seen_at,sample.sample_ref",
+    ))
     .bind(target_ref)
     .fetch_all(database.pool())
     .await?;
@@ -172,7 +167,7 @@ pub async fn read_keyword_catalog_counts(
         return Ok(std::collections::HashMap::new());
     }
     let cross_industry_ready: bool =
-        sqlx::query_scalar("SELECT to_regclass('cross_industry_sample') IS NOT NULL")
+        sqlx::query_scalar(concat!("SELECT ", sample_facts_schema_ready_sql!()))
             .fetch_one(database.pool())
             .await?;
     let mut counts: std::collections::HashMap<Uuid, KeywordCatalogCounts> =
@@ -213,32 +208,26 @@ pub async fn read_keyword_catalog_counts(
         return Ok(counts);
     }
 
-    // 跨行业侧：口径与检查器那条完全一致——材料被隔离的那一轮不算「详情已取得」。
-    let cross: Vec<(Uuid, i64, i64)> = sqlx::query_as(
-        "SELECT sample.target_ref,count(*), \
-                count(*) FILTER (WHERE EXISTS ( \
-                  SELECT 1 FROM collection_work_order done_order \
-                  JOIN collection_work_order_lease done_lease USING (work_order_ref) \
-                  JOIN collection_work_order_lease_task done_task USING (lease_ref) \
-                  JOIN linggan_runtime_task done_runtime \
-                    ON done_runtime.task_id=done_task.task_id \
-                  JOIN linggan_runtime_capture_package done_package \
-                    ON done_package.task_id=done_runtime.task_id \
-                  JOIN linggan_runtime_submission_receipt done_receipt \
-                    ON done_receipt.package_ref=done_package.package_ref \
-                  WHERE done_order.target_ref=sample.target_ref \
-                    AND done_task.execution_state='completed' \
-                    AND done_receipt.material_admission='ACCEPTED' \
-                    AND done_runtime.task_spec->'capabilitiesRequested'->>0='content_detail' \
-                    AND done_runtime.task_spec #>> '{target,contentExternalId}' \
-                        = sample.content_external_id \
-                    AND NOT EXISTS ( \
-                      SELECT 1 FROM linggan_runtime_record_disposition quarantine \
-                      WHERE quarantine.package_ref=done_package.package_ref \
-                        AND quarantine.disposition='quarantined'))) \
+    // 跨行业侧：口径与检查器那条完全一致——两处共用 `cross_industry_sample_facts` 里的
+    // 同一份判据，不再各写一遍。**按目标分组也走观察记录**：样本行上的 `target_ref` 只在
+    // 第一次插入时写定，用它分组会把同一篇只记在最早看到它的那个关键词名下。
+    let cross: Vec<(Uuid, i64, i64)> = sqlx::query_as(concat!(
+        "SELECT seen_order.target_ref, \
+                count(DISTINCT sample.sample_ref), \
+                count(DISTINCT sample.sample_ref) FILTER (WHERE ",
+        sample_detail_obtained_sql!(),
+        ") \
          FROM cross_industry_sample sample \
-         WHERE sample.target_ref=ANY($1) GROUP BY 1",
-    )
+         JOIN cross_industry_sample_observation seen \
+           ON seen.sample_ref=sample.sample_ref \
+         JOIN linggan_runtime_capture_package seen_package \
+           ON seen_package.package_ref=seen.package_ref \
+         JOIN collection_work_order_lease_task seen_lease_task \
+           ON seen_lease_task.task_id=seen_package.task_id \
+         JOIN collection_work_order_lease seen_lease USING(lease_ref) \
+         JOIN collection_work_order seen_order USING(work_order_ref) \
+         WHERE seen_order.target_ref=ANY($1) GROUP BY 1",
+    ))
     .bind(target_refs)
     .fetch_all(database.pool())
     .await?;

@@ -440,7 +440,10 @@ pub(crate) fn exact_string<'a>(
         .filter(|value| !value.is_empty())
 }
 
-fn exact_scalar_text(payload: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
+pub(crate) fn exact_scalar_text(
+    payload: &serde_json::Map<String, Value>,
+    key: &str,
+) -> Option<String> {
     payload.get(key).and_then(|value| match value {
         Value::String(value) => Some(value.clone()),
         Value::Number(value) => Some(value.to_string()),

@@ -16,6 +16,7 @@ use cross_industry::{
 };
 use fixture::proof_database;
 use linggan_evidence::{CatalogDetailState, read_cross_industry_hits, read_keyword_hits};
+use linggan_storage_postgres::Database;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -557,4 +558,350 @@ async fn a_board_row_cannot_claim_a_domain_its_sample_does_not_belong_to() {
         wrong_domain.is_err(),
         "榜单留痕不得声称一个不属于该样本的领域"
     );
+}
+
+/// **详情取到了，就得有一条说得出口的事实——而且正文真的要存下来。**
+///
+/// 此前跨行业的详情落库只把标题、作者、封面、互动数 upsert 回样本行，**正文直接丢掉**：
+/// 「补详情」除了刷新一遍数字什么也没留下，而正文正是详情这一轮存在的全部理由。
+/// 「详情已取得」也没有任何一行事实支撑，只能从运行任务的状态反推。`0079` 两件一起解决。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_completed_detail_round_records_the_body_and_the_fact_that_it_arrived() {
+    let database = proof_database("cross_industry_detail_fact").await;
+    let target_ref = seed_board_hit(&database, "考研自习::detail-fact", "note-detail-fact").await;
+
+    submit_package_for_target(
+        &database,
+        target_ref,
+        "考研自习::detail-fact-detail",
+        "patrol",
+        serde_json::json!({"contentExternalId":"note-detail-fact"}),
+        "content_detail",
+        detail_coverage("note-detail-fact"),
+        serde_json::Value::Null,
+        vec![serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"note-detail-fact"},
+            "payload":{
+                "noteId":"note-detail-fact",
+                "title":"自习室蹲了一个月",
+                "bodyText":"每天七点到馆，靠窗第三排最容易坚持。",
+                "publishedAtText":"3天前",
+                "likes":"24000"
+            }
+        })],
+    )
+    .await;
+
+    let detail: (Option<String>, String, Option<String>) = sqlx::query_as(
+        "SELECT detail.body_text,detail.body_state,detail.published_at_source_text \
+         FROM cross_industry_sample_detail detail \
+         JOIN cross_industry_sample sample USING(sample_ref) \
+         WHERE sample.content_external_id=$1",
+    )
+    .bind("note-detail-fact")
+    .fetch_one(database.pool())
+    .await
+    .expect("详情落库必须留下一行事实——没有它，「详情已取得」只能靠猜运行任务的状态");
+    assert_eq!(
+        detail.0.as_deref(),
+        Some("每天七点到馆，靠窗第三排最容易坚持。"),
+        "正文必须真的存下来；此前它被丢掉，补详情等于白采一轮"
+    );
+    assert_eq!(detail.1, "KNOWN");
+    assert_eq!(
+        detail.2.as_deref(),
+        Some("3天前"),
+        "平台给的相对时间原样保留，不压成一个它从没给过的绝对时刻"
+    );
+
+    let hits = read_cross_industry_hits(&database, target_ref)
+        .await
+        .expect("the cross-industry read runs")
+        .expect("the projection exists");
+    let work = hits
+        .works
+        .iter()
+        .find(|work| work.content_external_id == "note-detail-fact")
+        .expect("the sample is a hit of this target");
+    assert_eq!(
+        work.detail_state,
+        CatalogDetailState::Complete,
+        "材料真的进来了，就该显示成已取得"
+    );
+}
+
+/// **试过没成功不等于取到了。**
+///
+/// 补详情的待办判据此前认 `execution_state IN ('completed','unavailable','blocked')`：
+/// 后两个是「这一篇采不到」，与取到了相反。结果是**失败一次的笔记永久从待补清单里消失**，
+/// 界面上这个词看起来已经补齐了。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_blocked_detail_attempt_leaves_the_sample_pending() {
+    let database = proof_database("cross_industry_detail_blocked").await;
+    let target_ref = seed_board_hit(&database, "考研自习::detail-blocked", "note-blocked").await;
+
+    // 一次真的受阻的详情尝试：任务停在 `blocked`（`0047` 的 CHECK 要求它既没认领也没完成），
+    // 没有任何包、没有任何材料。工单已结束、租约已归还，所以它不算「还在飞」。
+    //
+    // 这一条造的正是旧判据会认的形状：`task_spec` 里要的能力是 `content_detail`、
+    // `{target,contentExternalId}` 对得上这一篇、状态在它认的那三个里。
+    blocked_detail_attempt(&database, target_ref, "note-blocked").await;
+
+    let pending = linggan_evidence::keyword_targets_pending_detail(&database, &[target_ref])
+        .await
+        .expect("the pending-detail read runs");
+    assert!(
+        pending.contains(&target_ref),
+        "受阻过的那一篇必须还在待补清单里——它一个字都没采到"
+    );
+}
+
+/// **一篇被另一个关键词先看到，这个关键词照样得数到它。**
+///
+/// 样本行上的 `target_ref` 只在第一次插入时写定
+/// （`target_ref = COALESCE(cross_industry_sample.target_ref, EXCLUDED.target_ref)`）。
+/// 读取侧按它划范围，于是第二个关键词永远看不到这一篇、也永远不会给它补详情——而两个词
+/// 各自的观察记录明明都在。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_note_first_seen_by_another_keyword_still_counts_for_this_one() {
+    let database = proof_database("cross_industry_shared_sample").await;
+    let first_ref = seed_board_hit(&database, "考研自习::shared-first", "note-shared").await;
+    let second_ref = seed_board_hit(&database, "图书馆打卡::shared-second", "note-shared").await;
+
+    // 前提：确实是同一篇样本，而样本行只认第一个目标。
+    let owner: (Uuid, i64) = sqlx::query_as(
+        "SELECT sample.target_ref,count(*) OVER () FROM cross_industry_sample sample \
+         WHERE sample.content_external_id=$1",
+    )
+    .bind("note-shared")
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(owner.1, 1, "同一个领域同一篇只有一行样本");
+    assert_eq!(owner.0, first_ref, "样本行上记的是最早看到它的那个关键词");
+
+    for (label, target_ref) in [("先看到的", first_ref), ("后看到的", second_ref)] {
+        let hits = read_cross_industry_hits(&database, target_ref)
+            .await
+            .expect("the cross-industry read runs")
+            .expect("the projection exists");
+        assert!(
+            hits.works
+                .iter()
+                .any(|work| work.content_external_id == "note-shared"),
+            "{label}那个关键词也在自己的榜上看到过这一篇，命中列表必须有它"
+        );
+    }
+    let counts = linggan_evidence::read_keyword_catalog_counts(&database, &[first_ref, second_ref])
+        .await
+        .expect("the catalog counts read runs");
+    for (label, target_ref) in [("先看到的", first_ref), ("后看到的", second_ref)] {
+        assert_eq!(
+            counts.get(&target_ref).map(|counts| counts.works),
+            Some(1),
+            "{label}那个关键词的命中计数必须算上这一篇"
+        );
+    }
+    let pending =
+        linggan_evidence::keyword_targets_pending_detail(&database, &[first_ref, second_ref])
+            .await
+            .expect("the pending-detail read runs");
+    assert!(
+        pending.contains(&second_ref),
+        "后看到的那个关键词也该能给这一篇补详情"
+    );
+}
+
+/// **跨行业目标的「最近命中」不能永远是「读不到」。**
+///
+/// 列表那一列走 `linggan_material_discovery_finding`，而外部领域的材料按 `0044` 的隔离一条
+/// 都不进证据侧。于是每一个跨行业目标的最近命中都是「读不到」、巡查状态永远停在「等待
+/// 首轮」——哪怕它刚采回来两百篇。而这一列上「读不到」与「采了一篇都没有」长得一样。
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn a_cross_industry_target_reports_its_latest_patrol_hits() {
+    let database = proof_database("cross_industry_latest_hits").await;
+    let target_ref = seed_board_hit(&database, "考研自习::latest-hits", "note-latest-hits").await;
+    sqlx::query(
+        "UPDATE collection_observation_target SET monitoring_enabled=true WHERE target_ref=$1",
+    )
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("the target is monitoring");
+
+    let targets = linggan_evidence::list_targets(&database, None, None, 50)
+        .await
+        .expect("the target list reads");
+    let summaries = linggan_evidence::read_target_observation_summaries(&database, &targets)
+        .await
+        .expect("the observation summary reads");
+    let summary = summaries
+        .get(&target_ref)
+        .expect("the target has a summary row");
+    assert_eq!(
+        summary.latest_hits,
+        Some(1),
+        "这一轮真的命中了一篇，不能报「读不到」"
+    );
+    assert_eq!(
+        summary.latest_new,
+        Some(1),
+        "第一次看到它，就是这一轮的新增"
+    );
+    assert_eq!(
+        summary.patrol_state,
+        linggan_evidence::PatrolReadState::Normal,
+        "有过一轮合格巡查，状态不该停在「等待首轮」"
+    );
+}
+
+/// 一个外部领域关键词目标 + 它从榜上命中的一篇样本。
+async fn seed_board_hit(database: &Database, identity_key: &str, external_id: &str) -> Uuid {
+    submit_external_package(
+        database,
+        identity_key,
+        "patrol",
+        serde_json::json!({"query":"考研自习","ranking":"most_liked","scrollRounds":3}),
+        "discovery_search",
+        search_coverage("考研自习", 1),
+        serde_json::Value::Null,
+        vec![discovery_card(
+            external_id,
+            "自习室蹲了一个月",
+            "2.4万",
+            &format!("https://www.xiaohongshu.com/search_result/{external_id}?xsec_token=ABseed"),
+        )],
+    )
+    .await;
+    sqlx::query_scalar("SELECT target_ref FROM collection_observation_target WHERE identity_key=$1")
+        .bind(identity_key)
+        .fetch_one(database.pool())
+        .await
+        .expect("the seeded target is readable")
+}
+
+/// 一轮详情采集的覆盖度。
+fn detail_coverage(external_id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "target":{"basis":"known_set","contentExternalId":external_id},
+        "layers":[{
+            "capability":"content_detail","observed":1,"attempted":1,"acquired":1,
+            "verified":0,"failed":0,"notAttempted":0,"unknown":0,
+            "stoppedReason":"known_set_complete"
+        }]
+    })
+}
+
+/// 一次受阻的详情尝试：有任务、有工单，但一个包都没有。
+///
+/// 工单置为已结束、租约已归还——否则它会落进「还排在一张活着的工单上」那一支，测试就会
+/// 因为错误的原因变绿。
+async fn blocked_detail_attempt(database: &Database, target_ref: Uuid, external_id: &str) {
+    let request_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_acquisition_request \
+             (request_ref,target_ref,lane,purpose,requested_by) \
+         VALUES ($1,$2,'patrol','blocked detail proof','person')",
+    )
+    .bind(request_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("request is stored");
+    let authorization_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_acquisition_authorization \
+             (authorization_ref,platform,target_kind,lane,purpose,granted_by,expires_at, \
+              allowed_task_templates,allowed_dispatch_lanes,max_work_units) \
+         VALUES ($1,'xhs','keyword','patrol','blocked detail proof','person', \
+                 scope_001_now()+interval '1 day', \
+                 ARRAY['keyword_patrol'],ARRAY['immediate','scheduled'],200)",
+    )
+    .bind(authorization_ref)
+    .execute(database.pool())
+    .await
+    .expect("authorization is stored");
+    let decision_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_admission_decision \
+             (decision_ref,request_ref,outcome,reason_code,authorization_ref,target_ref) \
+         VALUES ($1,$2,'admitted','blocked_detail_proof',$3,$4)",
+    )
+    .bind(decision_ref)
+    .bind(request_ref)
+    .bind(authorization_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("admission is stored");
+    let work_order_ref = Uuid::new_v4();
+    sqlx::query(
+        // `queue_state` 一旦离开 `legacy`／`cancelled`，`0036` 就要求它有排期时刻。
+        "INSERT INTO collection_work_order \
+             (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions, \
+              queue_state,scheduled_for) \
+         VALUES ($1,$2,$3,'patrol',1,'[\"maximum_quota\"]'::jsonb,'completed',scope_001_now())",
+    )
+    .bind(work_order_ref)
+    .bind(decision_ref)
+    .bind(target_ref)
+    .execute(database.pool())
+    .await
+    .expect("work order is stored");
+    let station_ref = linggan_evidence::register_station(
+        database,
+        &format!("受阻详情证明工位 {external_id}"),
+        200,
+    )
+    .await
+    .expect("station is stored");
+    let lease_ref = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO collection_work_order_lease \
+             (lease_ref,work_order_ref,station_ref,capture_identity,expires_at,released_at, \
+              release_reason) \
+         VALUES ($1,$2,$3,'{}'::jsonb,scope_001_now()+interval '1 hour',scope_001_now(),'partial')",
+    )
+    .bind(lease_ref)
+    .bind(work_order_ref)
+    .bind(station_ref)
+    .execute(database.pool())
+    .await
+    .expect("lease is stored");
+    let task_id = Uuid::new_v4();
+    let task_spec = serde_json::json!({
+        "contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"scheduled",
+        "platform":"xhs","pageType":"content_detail",
+        "target":{"contentExternalId":external_id},
+        "capabilitiesRequested":["content_detail"],"maximumQuota":1,
+        "commentLimit":"not_requested","acquireMedia":"not_requested",
+        "riskPolicy":"server_authorized_leased","stopConditions":["maximum_quota"]
+    })
+    .to_string();
+    sqlx::query(
+        "INSERT INTO linggan_runtime_task \
+             (task_id,task_spec_hash,task_spec,source,platform,page_type) \
+         VALUES ($1,encode(sha256(convert_to($2,'UTF8')),'hex'),$2::jsonb,'scheduled','xhs', \
+                 'content_detail')",
+    )
+    .bind(task_id)
+    .bind(&task_spec)
+    .execute(database.pool())
+    .await
+    .expect("task is stored");
+    sqlx::query(
+        "INSERT INTO collection_work_order_lease_task \
+             (lease_ref,task_id,sequence_no,execution_state) \
+         VALUES ($1,$2,1,'blocked')",
+    )
+    .bind(lease_ref)
+    .bind(task_id)
+    .execute(database.pool())
+    .await
+    .expect("the blocked attempt is recorded");
 }

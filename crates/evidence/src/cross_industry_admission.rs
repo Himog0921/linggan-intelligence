@@ -15,7 +15,8 @@
 
 use crate::cross_industry_observation::{ObservationReading, record_sample_observation};
 use crate::material_admission::{
-    exact_nonnegative_count, exact_string, known_state, observed_cover_url, target_string,
+    exact_nonnegative_count, exact_scalar_text, exact_string, known_state, observed_cover_url,
+    target_string,
 };
 use crate::producer_runtime::ProducerRuntimeError;
 use linggan_contracts::ProducerCapturePackage;
@@ -278,7 +279,7 @@ async fn insert_detail(
         if exact_string(payload, "noteId") != Some(expected) {
             continue;
         }
-        upsert_sample(
+        let sample_ref = upsert_sample(
             tx,
             package,
             domain,
@@ -297,7 +298,55 @@ async fn insert_detail(
             None,
         )
         .await?;
+        record_sample_detail(
+            tx,
+            package,
+            domain,
+            sample_ref,
+            ordinal,
+            exact_string(payload, "bodyText"),
+            exact_scalar_text(payload, "publishedAtText"),
+        )
+        .await?;
     }
+    Ok(())
+}
+
+/// 详情落库这件事本身。
+///
+/// 上面那次 upsert 只是把标题、作者、封面、互动数刷新到样本行上——**看不出详情到过手**。
+/// 此前读取侧只能从运行任务反推（任务声明里要的能力是 `content_detail`、`task_spec` 里的
+/// 外部 ID 对得上、任务状态是 completed），而「任务跑完」与「材料进来」是两件事：整包被
+/// 隔离时一个字段都没写进样本行，租约任务照样是 completed。`0079` 把这条事实真的记下来。
+///
+/// **正文只在这里有。** 样本表没有正文列，此前详情采回来的正文被直接丢掉——「补详情」
+/// 除了刷新互动数之外什么都没留下，而正文正是详情这一轮存在的理由。
+async fn record_sample_detail(
+    tx: &mut Transaction<'_, Postgres>,
+    package: &ProducerCapturePackage,
+    domain: &ExternalDomain,
+    sample_ref: Uuid,
+    ordinal: usize,
+    body_text: Option<&str>,
+    published_at_source_text: Option<String>,
+) -> Result<(), ProducerRuntimeError> {
+    let published = published_at_source_text.as_deref();
+    sqlx::query(
+        "INSERT INTO cross_industry_sample_detail              (detail_ref,sample_ref,domain_ref,package_ref,record_ordinal,               body_text,body_state,published_at_source_text,published_at_source_text_state,               observed_at)          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)          ON CONFLICT (package_ref, record_ordinal) DO NOTHING",
+    )
+    .bind(Uuid::new_v4())
+    .bind(sample_ref)
+    .bind(domain.domain_ref)
+    .bind(package.package_ref())
+    .bind(i32::try_from(ordinal).expect("package record count is bounded"))
+    .bind(body_text)
+    .bind(known_state(body_text))
+    .bind(published)
+    .bind(known_state(published))
+    .bind(package.observed_at())
+    .execute(&mut **tx)
+    .await
+    .map_err(ProducerRuntimeError::Internal)?;
     Ok(())
 }
 
