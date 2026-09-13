@@ -2373,6 +2373,12 @@ struct CollectionParams {
     catalog_filter: Option<String>,
     /// 规则 modal 的 target ref；与 drawer 并列，避免把规则命令状态塞进 JS。
     rule: Option<String>,
+    /// 面板打开哪一条规则的口径。缺省=最早那条（博主永远只有一条）；`new`=新开一条。
+    ///
+    /// 放进 URL 而不是 JS 状态：刷新和分享都不丢，而且「加一条规则」与「编辑第二条」
+    /// 是两个不同的页面状态，靠一个 target ref 区分不开——此前正因为区分不开，
+    /// 「加一条规则」拿到的是最早那条的表单。
+    rule_slot: Option<String>,
     /// 成功命令的 durable receipt ref，用于刷新后仍显示刚刚的回执。
     rule_receipt: Option<String>,
     /// 规则提交失败后，服务端将用户刚刚提交的受限字段值带回 modal；这些值只用于
@@ -2775,6 +2781,7 @@ async fn collection_targets(
         Some(target_ref) => match collection::collection_control_rule_view::read_monitor_rule_panel(
             database,
             target_ref,
+            monitor_rule_selection(params.rule_slot.as_deref()),
             params
                 .rule_receipt
                 .as_deref()
@@ -3565,6 +3572,25 @@ struct MonitorRuleWire {
     task_contract_version: Option<String>,
     return_filter: Option<String>,
     return_sort: Option<String>,
+}
+
+/// URL 上那个口径参数说的是哪一条规则。
+///
+/// 只认闭集：五个榜、`primary`（博主的主页目录与迁移留下的那条）、以及 `new`。**不认的值
+/// 一律当作「最早那条」**，不悄悄变成新开一条——后者会让一个拼错的链接变成「再加一条规则」，
+/// 那是个有副作用的误解。
+fn monitor_rule_selection(
+    slot: Option<&str>,
+) -> collection::collection_control_rule_view::MonitorRuleSelection<'_> {
+    use collection::collection_control_rule_view::MonitorRuleSelection;
+    match slot.map(str::trim) {
+        Some("new") => MonitorRuleSelection::NewRule,
+        Some(
+            value @ ("most_liked" | "most_collected" | "most_commented" | "latest"
+            | "comprehensive" | "primary"),
+        ) => MonitorRuleSelection::Slot(value),
+        _ => MonitorRuleSelection::CurrentRule,
+    }
 }
 
 fn monitor_rule_redirect(
