@@ -72,6 +72,16 @@ test('V1 problem resolution receives its distinct named schema',async()=>{
     assert.deepEqual(bodies.at(-1).text.format,{type:'json_schema',name:'comment_research_problem_resolution_v1',schema});
   });
 });
+test('V2 research packets retain structured output on the documented DeepSeek protocol',async()=>{
+  const semanticV2=JSON.stringify({contract:'comment-research.semantic.v2',task:'Return JSON only.',outputSchema:schema,untrustedMaterial:{comments:[]}});
+  const resolutionV2=JSON.stringify({contract:'comment-research.semantic.v2/problem-resolution',task:'Return JSON only.',outputSchema:schema,untrustedMaterial:{candidates:[]}});
+  await fixture(async bodies=>{
+    assert.equal((await execute({...request,prompt:semanticV2})).ok,true);
+    assert.equal(bodies.at(-1).text.format.name,'comment_research_semantic_v2');
+    assert.equal((await execute({...request,prompt:resolutionV2})).ok,true);
+    assert.equal(bodies.at(-1).text.format.name,'comment_research_problem_resolution_v2');
+  });
+});
 test('unknown host, path, model and unrelated prompts do not inherit structured capability',async()=>{
   await fixture(async bodies=>{
     for(const change of [
