@@ -39,7 +39,7 @@
     return state.view === 'problems' ? 10 : 20;
   }
 
-  function pagination(page, noun) {
+  function pagination(page, noun, placement = 'bottom') {
     const total = Number(page.total ?? 0);
     const limit = Number(page.limit ?? pageLimit());
     const offset = Number(page.offset ?? 0);
@@ -50,7 +50,8 @@
     const to = Math.min(offset + limit, total);
     const previous = Math.max(0, offset - limit);
     const next = offset + limit;
-    return '<nav class="cr-v1-pagination" aria-label="' + escape(noun) + '分页"><span>显示 ' + count(from) + '–' + count(to) + '，共 ' + count(total) + ' 条 · 第 ' + count(current) + ' / ' + count(pages) + ' 页</span><div><button type="button" data-page-offset="' + String(previous) + '"' + (offset === 0 ? ' disabled' : '') + '>上一页</button><button type="button" data-page-offset="' + String(next) + '"' + (next >= total ? ' disabled' : '') + '>下一页</button></div></nav>';
+    const placementLabel = placement === 'top' ? '表格上方' : '表格下方';
+    return '<nav class="cr-v1-pagination cr-v1-pagination--' + placement + '" aria-label="' + escape(noun) + '分页（' + placementLabel + '）"><span>显示 ' + count(from) + '–' + count(to) + '，共 ' + count(total) + ' 条 · 第 ' + count(current) + ' / ' + count(pages) + ' 页</span><div><button type="button" data-page-offset="' + String(previous) + '"' + (offset === 0 ? ' disabled' : '') + '>上一页</button><button type="button" data-page-offset="' + String(next) + '"' + (next >= total ? ' disabled' : '') + '>下一页</button></div></nav>';
   }
 
   async function request(path, options = {}) {
@@ -181,7 +182,7 @@
   function renderVoices(data) {
     const page = data.page || {items:[], total:0};
     result.innerHTML = `<section class="cr-v1-intro"><h2>用户原声</h2><p>这里呈现当前可读、已通过身份与清洗过滤的普通用户评论。原文是证据；研究正文是独立派生，不会改写原文。</p><p class="cr-v1-result-meta">当前共 ${count(page.total)} 条可读用户原声。没有对应研究运行的评论会如实显示为“尚未进入研究”。</p></section>` +
-      (page.items.length ? table(['评论原文', '研究正文', '作品与观察时间', '最新研究状态'], page.items.map(item => `<tr><td><blockquote>${escape(item.commentText || '正文尚未取得')}</blockquote></td><td><p>${escape(item.researchText || '未形成研究正文')}</p><span class="cr-v1-badge">普通用户</span></td><td><strong>${escape(item.workTitle || '作品标题未知')}</strong><p>${escape(date(item.observedAt))}</p></td><td>${escape(voiceResearchStatusLabel(item.researchStatus))}<p>${escape(voiceResearchDetail(item.researchStatus, item.researchFailureCode))}</p></td></tr>`)) : empty('当前没有可读的普通用户原声。作者回复、身份未知及已被清洗剔除的内容不会混入这里。', '暂时没有可显示的用户原声')) + pagination(page, '用户原声');
+      (page.items.length ? pagination(page, '用户原声', 'top') + table(['评论原文', '研究正文', '作品与观察时间', '最新研究状态'], page.items.map(item => `<tr><td><blockquote>${escape(item.commentText || '正文尚未取得')}</blockquote></td><td><p>${escape(item.researchText || '未形成研究正文')}</p><span class="cr-v1-badge">普通用户</span></td><td><strong>${escape(item.workTitle || '作品标题未知')}</strong><p>${escape(date(item.observedAt))}</p></td><td>${escape(voiceResearchStatusLabel(item.researchStatus))}<p>${escape(voiceResearchDetail(item.researchStatus, item.researchFailureCode))}</p></td></tr>`)) + pagination(page, '用户原声') : empty('当前没有可读的普通用户原声。作者回复、身份未知及已被清洗剔除的内容不会混入这里。', '暂时没有可显示的用户原声'));
   }
 
   function voiceResearchStatusLabel(state) {
@@ -223,7 +224,7 @@
       ? '本版冻结样本没有落入当前窗口，因此先展示实际被研究的基线样本；“变化观察”仍会明确说明不可比较。'
       : '不同表达只有在记录了归并依据后才属于同一问题；向量相似度本身不会合并身份。';
     result.innerHTML = '<section class="cr-v1-intro"><h2>稳定用户问题</h2><p>' + explanation + '</p>' + resultMeta(data) + '</section>' +
-      (page.items.length ? table(columns, rows) : empty('本版没有可显示的稳定问题。')) + pagination(page, '用户问题');
+      (page.items.length ? pagination(page, '用户问题', 'top') + table(columns, rows) + pagination(page, '用户问题') : empty('本版没有可显示的稳定问题。'));
   }
 
   function observationLabel(kind) {
@@ -349,10 +350,11 @@
           : item.state === 'completed_with_failures' ? '未发布：覆盖不足或有未组织的研究信号'
             : item.state === 'failed' ? '未发布：运行失败' : '尚未发布';
         return `<tr><td><strong>${escape(date(item.createdAt))}</strong><p>${escape(runStateLabel(item.state))} · 冻结 ${count(item.selectedSources)} 条评论</p>${item.finishedAt ? `<p>结束于 ${escape(date(item.finishedAt))}</p>` : ''}</td><td><strong>${escape(modelExecutionSummary(execution))}</strong><details class="cr-v1-run-detail"><summary>查看调用账本摘要</summary><p>${escape(modelExecutionDetails(execution))}</p></details></td><td><p>${escape(itemStates || '尚未开始处理')}</p>${runFailures ? `<p>${escape(runFailures)}</p>` : ''}${itemFailures ? `<p>${escape(itemFailures)}</p>` : ''}</td><td>${published}</td></tr>`;
-      })) : empty('还没有运行记录。保存策略后可先查看系统自动选择的范围。')) + pagination(page, '运行记录');
+      })) + pagination(page, '运行记录') : empty('还没有运行记录。保存策略后可先查看系统自动选择的范围。'));
   }
 
   function render(view, data) {
+    result.dataset.view = view;
     ({ overview:renderOverview, voices:renderVoices, problems:renderProblems, changes:renderChanges, runs:renderRuns })[view](data);
   }
 
