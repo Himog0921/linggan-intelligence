@@ -131,7 +131,9 @@ pub async fn read_overview(
            ON definition.problem_ref=current_stat.problem_ref \
           AND definition.revision=current_stat.definition_revision \
          WHERE current_stat.result_revision_ref=$1 AND current_stat.window_kind='current' \
-         ORDER BY current_stat.comment_count DESC,current_stat.work_count DESC,definition.name,definition.problem_ref \
+         ORDER BY CASE WHEN current_stat.comment_denominator=0 THEN baseline_stat.comment_count ELSE current_stat.comment_count END DESC, \
+                  CASE WHEN current_stat.work_denominator=0 THEN baseline_stat.work_count ELSE current_stat.work_count END DESC, \
+                  definition.name,definition.problem_ref \
          LIMIT 8",
     )
     .bind(context.result_revision_ref)
@@ -270,7 +272,9 @@ pub async fn read_problems(
            ON definition.problem_ref=current_stat.problem_ref \
           AND definition.revision=current_stat.definition_revision \
          WHERE current_stat.result_revision_ref=$1 AND current_stat.window_kind='current' \
-         ORDER BY current_stat.comment_count DESC,current_stat.work_count DESC,definition.name,definition.problem_ref \
+         ORDER BY CASE WHEN current_stat.comment_denominator=0 THEN baseline_stat.comment_count ELSE current_stat.comment_count END DESC, \
+                  CASE WHEN current_stat.work_denominator=0 THEN baseline_stat.work_count ELSE current_stat.work_count END DESC, \
+                  definition.name,definition.problem_ref \
          LIMIT $3 OFFSET $4",
     )
     .bind(context.result_revision_ref)

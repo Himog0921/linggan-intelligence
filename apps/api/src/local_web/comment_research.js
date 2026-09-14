@@ -96,6 +96,21 @@
     setStatus(setupSummary(), researchModelReady() && embeddingReady() ? 'ready' : 'warning');
   }
 
+  function resultWindow(data) {
+    const input = data.result?.inputCounts || {};
+    const currentComments = Number(input.currentCommentDenominator ?? 0);
+    const currentWorks = Number(input.currentWorkDenominator ?? 0);
+    const baselineComments = Number(input.baselineCommentDenominator ?? 0);
+    const baselineWorks = Number(input.baselineWorkDenominator ?? 0);
+    if (currentComments > 0) return { kind:'current', comments:currentComments, works:currentWorks };
+    if (baselineComments > 0) return { kind:'baseline', comments:baselineComments, works:baselineWorks };
+    return { kind:'none', comments:0, works:0 };
+  }
+
+  function share(countValue, denominator) {
+    return denominator > 0 ? Number(countValue ?? 0) / denominator : 0;
+  }
+
   function resultMeta(data) {
     const input = data.result?.inputCounts || {};
     const selected = Number(input.selectedCommentCount ?? input.analyzedCommentCount ?? 0);
@@ -103,16 +118,37 @@
     const excluded = Number(input.excludedTerminalCommentCount ?? 0);
     const organization = input.problemOrganizationCoverage || {};
     const partial = input.publicationCoverage === 'partial';
+    const window = resultWindow(data);
     const coverage = partial
-      ? `部分研究版本 · 本版纳入 ${count(included)} / ${count(selected)} 条冻结原声，${count(excluded)} 条未纳入；问题归并 ${count(organization.numerator)} / ${count(organization.denominator)} 条 Atom。`
-      : `完整研究版本 · 本版纳入 ${count(included)} / ${count(selected)} 条冻结原声。`;
-    return `<p class="cr-v1-result-meta">已发布 ${escape(date(data.result?.publishedAt))} · 当前窗口 ${escape(date(data.result?.comparison?.current?.start))} 至 ${escape(date(data.result?.comparison?.current?.end))} · ${escape(coverage)}${partial ? ' <a href="?view=runs">查看运行记录</a>' : ''}</p>`;
+      ? '部分研究版本 · 本版纳入 ' + count(included) + ' / ' + count(selected) + ' 条冻结原声，' + count(excluded) + ' 条未纳入；问题归并 ' + count(organization.numerator) + ' / ' + count(organization.denominator) + ' 条 Atom。'
+      : '完整研究版本 · 本版纳入 ' + count(included) + ' / ' + count(selected) + ' 条冻结原声。';
+    const comparison = data.result?.comparison || {};
+    const windowText = window.kind === 'baseline'
+      ? '本版样本位于基线窗口 ' + escape(date(comparison.baseline?.start)) + ' 至 ' + escape(date(comparison.baseline?.end)) + '；当前窗口没有可比样本。'
+      : '当前窗口 ' + escape(date(comparison.current?.start)) + ' 至 ' + escape(date(comparison.current?.end)) + '。';
+    return '<p class="cr-v1-result-meta">已发布 ' + escape(date(data.result?.publishedAt)) + ' · ' + windowText + ' · ' + escape(coverage) + (partial ? ' <a href="?view=runs">查看运行记录</a>' : '') + '</p>';
   }
 
   function renderOverview(data) {
     const items = data.currentProblems || [];
-    result.innerHTML = `<section class="cr-v1-intro"><h2>当前已被研究的问题</h2><p>这里回答“当前用户在表达什么”。变化信号只在“变化观察”中呈现。</p>${resultMeta(data)}</section>` +
-      (items.length ? table(['用户问题', '当前评论占比', '当前作品覆盖', '当前评论数'], items.map(item => `<tr><td><strong>${escape(item.name)}</strong><p>${escape(item.meaning)}</p></td><td>${pct(item.currentCommentShare)}</td><td>${pct(item.currentWorkShare)}</td><td>${count(item.currentCommentCount)}</td></tr>`)) : empty('本版研究没有形成可显示的问题。'));
+    const window = resultWindow(data);
+    const baselineOnly = window.kind === 'baseline';
+    const heading = baselineOnly ? '本版已被研究的问题' : '当前已被研究的问题';
+    const explanation = baselineOnly
+      ? '本版冻结原声全部位于基线窗口，当前窗口没有可比样本。这里呈现已完成的研究证据；变化是否成立仍只由“变化观察”判断。'
+      : '这里回答“当前用户在表达什么”。变化信号只在“变化观察”中呈现。';
+    const columns = baselineOnly
+      ? ['用户问题', '本版基线评论占比', '本版基线作品覆盖', '本版基线评论数']
+      : ['用户问题', '当前评论占比', '当前作品覆盖', '当前评论数'];
+    const rows = items.map(item => {
+      const commentCount = baselineOnly ? item.baselineCommentCount : item.currentCommentCount;
+      const workCount = baselineOnly ? item.baselineWorkCount : item.currentWorkCount;
+      const commentShare = baselineOnly ? share(commentCount, window.comments) : item.currentCommentShare;
+      const workShare = baselineOnly ? share(workCount, window.works) : item.currentWorkShare;
+      return '<tr><td><strong>' + escape(item.name) + '</strong><p>' + escape(item.meaning) + '</p></td><td>' + pct(commentShare) + '</td><td>' + pct(workShare) + '</td><td>' + count(commentCount) + '</td></tr>';
+    });
+    result.innerHTML = '<section class="cr-v1-intro"><h2>' + heading + '</h2><p>' + explanation + '</p>' + resultMeta(data) + '</section>' +
+      (items.length ? table(columns, rows) : empty('本版研究没有形成可显示的问题。'));
   }
 
   function renderVoices(data) {
@@ -142,8 +178,25 @@
 
   function renderProblems(data) {
     const page = data.page || {items:[], total:0};
-    result.innerHTML = `<section class="cr-v1-intro"><h2>稳定用户问题</h2><p>不同表达只有在记录了归并依据后才属于同一问题；向量相似度本身不会合并身份。</p>${resultMeta(data)}</section>` +
-      (page.items.length ? table(['问题定义', '当前窗口', '前一窗口', '证据 Atom'], page.items.map(item => `<tr><td><strong>${escape(item.name)}</strong><p>${escape(item.meaning)}</p></td><td>${count(item.current?.commentCount)} 条评论 · ${pct(item.current?.commentShare)}<p>${count(item.current?.workCount)} 篇作品 · ${pct(item.current?.workShare)}</p></td><td>${count(item.baseline?.commentCount)} 条评论 · ${pct(item.baseline?.commentShare)}<p>${count(item.baseline?.workCount)} 篇作品 · ${pct(item.baseline?.workShare)}</p></td><td>${count(item.evidenceAtomCount)}</td></tr>`)) : empty('本版没有可显示的稳定问题。'));
+    const window = resultWindow(data);
+    const baselineOnly = window.kind === 'baseline';
+    const columns = baselineOnly
+      ? ['问题定义', '本版基线样本', '证据 Atom']
+      : ['问题定义', '当前窗口', '前一窗口', '证据 Atom'];
+    const rows = page.items.map(item => {
+      const definition = '<td><strong>' + escape(item.name) + '</strong><p>' + escape(item.meaning) + '</p></td>';
+      if (baselineOnly) {
+        const commentShare = share(item.baseline?.commentCount, window.comments);
+        const workShare = share(item.baseline?.workCount, window.works);
+        return '<tr>' + definition + '<td>' + count(item.baseline?.commentCount) + ' 条评论 · ' + pct(commentShare) + '<p>' + count(item.baseline?.workCount) + ' 篇作品 · ' + pct(workShare) + '</p></td><td>' + count(item.evidenceAtomCount) + '</td></tr>';
+      }
+      return '<tr>' + definition + '<td>' + count(item.current?.commentCount) + ' 条评论 · ' + pct(item.current?.commentShare) + '<p>' + count(item.current?.workCount) + ' 篇作品 · ' + pct(item.current?.workShare) + '</p></td><td>' + count(item.baseline?.commentCount) + ' 条评论 · ' + pct(item.baseline?.commentShare) + '<p>' + count(item.baseline?.workCount) + ' 篇作品 · ' + pct(item.baseline?.workShare) + '</p></td><td>' + count(item.evidenceAtomCount) + '</td></tr>';
+    });
+    const explanation = baselineOnly
+      ? '本版冻结样本没有落入当前窗口，因此先展示实际被研究的基线样本；“变化观察”仍会明确说明不可比较。'
+      : '不同表达只有在记录了归并依据后才属于同一问题；向量相似度本身不会合并身份。';
+    result.innerHTML = '<section class="cr-v1-intro"><h2>稳定用户问题</h2><p>' + explanation + '</p>' + resultMeta(data) + '</section>' +
+      (page.items.length ? table(columns, rows) : empty('本版没有可显示的稳定问题。'));
   }
 
   function observationLabel(kind) {

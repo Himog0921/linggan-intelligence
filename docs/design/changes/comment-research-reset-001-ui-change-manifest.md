@@ -53,6 +53,14 @@
 | 视觉一致 | HTML/JS 断言与 localhost 浏览器走查 | 待实施 | 不做全站 token 迁移 |
 | 真实后果 | 账本调用数不变、ResultRevision 可读取 | 待实施 | 不重发模型请求 |
 
+## COMMENT-RESEARCH-WINDOW-001 补充（2026-09-14）
+
+- 事项：Issue #267；当前 ResultRevision 的 current 评论分母为 0 而 baseline 分母大于 0 时，概览和用户问题必须显示本版基线样本，而不是保留所有当前列为 0。
+- 表面：只调整现有 overview/problems 的标题、元信息、列标题、排序和说明；changes 保持既有不可比状态，voices/runs 不变。
+- 数据边界：只读取 immutable ResultRevision 的 baseline/current stat 和 inputCounts；不改 Run、Atom、Problem、变化、模型、调用账本或原始评论。
+- LIDS：复用 L1 intro、result meta 和 table；不新建组件、导航、token 或全局样式。
+- 验收：真实 localhost 页面显示基线样本数量和“当前窗口没有可比样本”；API 数字不变且没有新模型调用。
+
 ## 变更原因
 
 用户测试确认旧页面存在全量超级查询导致卡顿、tab 语义重复、作者徽标进入研究文本、重复授权，以及把“语义向量准备”暴露给普通用户的问题。旧页面和旧自动计划不能保留为迁移期 fallback。
