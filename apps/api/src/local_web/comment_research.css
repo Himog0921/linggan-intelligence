@@ -1,4 +1,4 @@
-.cr-v1{min-width:0;padding:var(--lgi-space-6);color:var(--lgi-body);font:var(--lgi-text-body)/var(--lgi-lh-body) var(--lgi-font-sans)}
+.cr-v1{box-sizing:border-box;min-width:0;padding:var(--lgi-space-6);color:var(--lgi-body);font:var(--lgi-text-body)/var(--lgi-lh-body) var(--lgi-font-sans)}
 .cr-v1-heading{display:flex;align-items:start;justify-content:space-between;gap:var(--lgi-space-6);padding-bottom:var(--lgi-space-6);border-bottom:2px solid var(--lgi-border-solid)}
 .cr-v1-kicker{margin:0 0 var(--lgi-space-2);color:var(--lgi-muted);font:var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono)}
 .cr-v1 h1,.cr-v1 h2{margin:0;color:var(--lgi-ink);font-weight:var(--lgi-weight-bold)}
@@ -17,7 +17,7 @@
 .cr-v1-tabs{display:flex;gap:var(--lgi-space-6);border-bottom:1px solid var(--lgi-border);overflow:auto}
 .cr-v1-tabs button{min-height:0;border:0;border-bottom:3px solid transparent;padding:var(--lgi-space-3) 0;background:transparent;white-space:nowrap;color:var(--lgi-body)}
 .cr-v1-tabs button[aria-current="page"]{border-color:var(--lgi-signal);color:var(--lgi-ink)}
-#research-result{padding-top:var(--lgi-space-6)}
+#research-result{box-sizing:border-box;padding-top:var(--lgi-space-6)}
 .cr-v1-intro{display:flex;align-items:start;justify-content:space-between;gap:var(--lgi-space-6);flex-wrap:wrap}
 .cr-v1-intro h2{min-width:12ch}
 .cr-v1-intro>p{margin:0;flex:1}
@@ -61,3 +61,20 @@
 @media (max-width:640px){.cr-v1-preview dl{grid-template-columns:1fr}.cr-v1-preview div:nth-last-child(2){border-bottom:1px solid var(--lgi-border)}}
 .cr-v1-overview-disclosure{display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-4);margin:var(--lgi-space-4) 0 0;color:var(--lgi-muted);font:var(--lgi-text-data)/var(--lgi-lh-data) var(--lgi-font-sans)}
 .cr-v1-overview-disclosure a{color:var(--lgi-signal-ink);font-weight:var(--lgi-weight-semibold)}
+.cr-v1-pagination--top{margin-top:var(--lgi-space-5);margin-bottom:var(--lgi-space-2);padding-bottom:var(--lgi-space-2);border-bottom:1px solid var(--lgi-border)}
+.cr-v1-pagination--top+ .cr-v1-table-wrap{margin-top:0}
+
+/* The desktop shell already owns the viewport. Keep the research page inside that work area
+ * instead of letting a long table push its only navigation below the fold. Paged views get a
+ * fixed reading surface: context and range controls stay visible, the table body scrolls, and
+ * the footer pager remains at the bottom of that same surface. */
+@media (min-width:901px){
+  .cr-v1{min-height:0;display:grid;grid-template-rows:auto auto auto minmax(0,1fr);overflow:hidden}
+  #research-result{min-height:0;overflow:auto}
+  #research-result[data-view="voices"],#research-result[data-view="problems"],#research-result[data-view="runs"]{display:grid;grid-template-rows:auto auto minmax(0,1fr) auto;min-height:0;overflow:hidden}
+  #research-result[data-view="voices"] .cr-v1-intro,#research-result[data-view="problems"] .cr-v1-intro,#research-result[data-view="runs"] .cr-v1-intro{margin-bottom:var(--lgi-space-3)}
+  #research-result[data-view="voices"] .cr-v1-pagination--top,#research-result[data-view="problems"] .cr-v1-pagination--top,#research-result[data-view="runs"] .cr-v1-pagination--top{margin-top:0;margin-bottom:0;padding:var(--lgi-space-2) 0;border-top:1px solid var(--lgi-border);border-bottom:1px solid var(--lgi-border)}
+  #research-result[data-view="voices"] .cr-v1-table-wrap,#research-result[data-view="problems"] .cr-v1-table-wrap,#research-result[data-view="runs"] .cr-v1-table-wrap{min-height:0;margin-top:0;overflow:auto;border-top:0}
+  #research-result[data-view="voices"] .cr-v1-table-wrap th,#research-result[data-view="problems"] .cr-v1-table-wrap th,#research-result[data-view="runs"] .cr-v1-table-wrap th{position:sticky;top:0;z-index:1;box-shadow:0 1px 0 var(--lgi-border-solid)}
+  #research-result[data-view="voices"] .cr-v1-pagination--bottom,#research-result[data-view="problems"] .cr-v1-pagination--bottom,#research-result[data-view="runs"] .cr-v1-pagination--bottom{margin-top:0;padding:var(--lgi-space-3) 0;background:var(--lgi-canvas);border-top:1px solid var(--lgi-border-solid)}
+}
