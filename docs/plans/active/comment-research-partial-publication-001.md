@@ -12,7 +12,7 @@
 
 当一轮已经终态、来源仍可读，并且达到明确的研究覆盖与问题归并覆盖门槛时，系统发布一个 **PARTIAL** 的只读研究版本。页面必须说明：冻结了多少条、实际纳入多少条、未纳入多少条、未纳入的安全原因、问题归并覆盖多少 Atom，以及到运行记录的回溯路径。
 
-这不是把失败伪装成成功：Run 保持 `completed_with_failures`，失败 Item 和失败调用仍保留在运行记录中；没有纳入的评论、Atom 和失败归并绝不进入问题统计、变化或证据计数。
+这不是把失败伪装成成功：Run 保持 `completed_with_failures`，失败 Item 和失败调用仍保留在运行记录中；没有纳入的评论、Atom 和失败归并绝不进入问题统计、变化或证据计数。后续的 COMMENT-RESEARCH-CUMULATIVE-STATE-001 另行规定：已经通过 membership 接纳的 Atom 即使本轮尚不能发布统计版本，也可作为累计绝对事实读取；它不改变本卡 ResultRevision 的分母或门槛。
 
 ## 2. 已核验触发与适用边界
 
@@ -21,7 +21,7 @@
 - 冻结评论 20；14 条提取到研究信号、5 条确认无研究信号、1 条语义 JSON schema 失败；
 - 已接纳 Atom：problem 13、need 6、experience 10、solution 3；
 - 当前 Problem membership：problem 11、need 6；两个 problem Atom 因归并 JSON schema 失败没有 membership；
-- 现行规则仅接受 Run `completed`，所以没有 ResultRevision，概览、用户问题和变化观察没有可显示结果。
+- 当时现行读取只接受 ResultRevision；后续 #281 已将概览和用户问题的累计 membership 读取与统计版本分开，变化观察仍没有可显示结果。
 
 此卡不重置、不再发送模型调用、不回写原始评论。它以这轮已经取得的对象验证发布策略。
 
@@ -74,9 +74,9 @@
 
 | 页面 | 用户需要理解 | 本次行为 |
 |---|---|---|
-| 概览 | 这一版是否完整、当前结论基于多少原声 | result meta 显示“本版研究覆盖 19 / 20；1 条未纳入”，链接/按钮进入运行记录 |
+| 概览 | 累计已确认问题与这一统计版是否完整 | 累计 membership 立即可读；若有 ResultRevision，result meta 显示“本版研究覆盖 19 / 20；1 条未纳入”，链接/按钮进入运行记录 |
 | 用户原声 | 原始证据当前状态 | 不依赖 ResultRevision；失败项仍是“模型研究未完成”，不被本次发布掩盖 |
-| 用户问题 | 哪些问题来自已组织的 Atom | 显示与结果版本相同的 PARTIAL 覆盖说明；无 membership 的 Atom 不出现 |
+| 用户问题 | 哪些问题来自已组织的 Atom | 显示累计已确认 membership；若有 ResultRevision，同时显示其 PARTIAL 覆盖说明；无 membership 的 Atom 不出现 |
 | 变化观察 | 哪些结论满足既有可比条件 | 显示同一覆盖说明；不因 PARTIAL 创建额外趋势 |
 | 运行记录 | 失败发生在哪里，影响是什么 | 已发布的 `completed_with_failures` 显示“已发布（部分覆盖）”，并保留逐项与调用失败原因 |
 
@@ -86,7 +86,7 @@
 |---|---|---|---|
 | 完整研究版本 | `publicationCoverage=complete` | 本轮冻结输入均有可用评论级结论、所有 problem/need Atom 已组织 | 模型或市场判断绝对正确 |
 | 部分研究版本 | `publicationCoverage=partial` 且冻结覆盖事实 | 这版只覆盖明确数量的原声；失败项未纳入 | 全部评论已研究、失败被修复或趋势已证实 |
-| 没有可发布版本 | 发布资格未满足 | 没有一版可作为研究结果读取 | 当前没有评论或没有讨论 |
+| 没有可发布统计版本 | 发布资格未满足 | 没有一版可用于分布或变化的统计结果；已确认 membership 仍可能可读 | 当前没有评论、没有讨论或没有累计问题 |
 | 运行失败 | Run/Item/Invocation 的安全 failure code | 哪一步未完成，且结果未发布或仅部分发布 | “没有发现” |
 
 ### LIDS 组合与范围
