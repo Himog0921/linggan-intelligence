@@ -16,8 +16,8 @@ use uuid::Uuid;
 
 pub const DERIVATION_VERSION: &str = "comment-research.derivation.v1";
 const MAX_DERIVATIONS_PER_PASS: i64 = 3000;
-const EXTRACTION_CONTRACT: &str = "comment-research.semantic.v3/extract:problem,need,solution,experience;output:exact-json-or-single-json-fence;examples:required";
-const MEMBERSHIP_CONTRACT: &str = "comment-research.semantic.v3/membership:retrieval-only-before-decision;output:exact-json-or-single-json-fence;examples:required";
+const EXTRACTION_CONTRACT: &str = "comment-research.semantic.v4/extract:problem,need,solution,experience;output:exact-json-or-single-json-fence;examples:required";
+const MEMBERSHIP_CONTRACT: &str = "comment-research.semantic.v4/membership:retrieval-only-before-decision;output:exact-json-or-single-json-fence;examples:required";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

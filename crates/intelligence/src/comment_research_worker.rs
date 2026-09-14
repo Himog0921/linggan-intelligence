@@ -793,18 +793,36 @@ fn parse_contract_json_value(text: &str) -> Option<Value> {
 }
 
 fn resolution_prompt(proposition: &str, candidates: &[Value]) -> Result<String, ModelError> {
+    let mut examples = vec![json!({
+        "decision":"new_problem",
+        "definition":{"name":"作业启动困难","meaning":"用户难以让孩子开始作业。"},
+        "rationale":"候选中没有同一具体困扰。"
+    })];
+    if let Some(candidate) = candidates.first() {
+        if let (Some(problem_ref), Some(definition_revision)) = (
+            candidate.get("problemRef").and_then(Value::as_str),
+            candidate.get("definitionRevision").and_then(Value::as_i64),
+        ) {
+            examples.insert(
+                0,
+                json!({
+                    "decision":"same_problem",
+                    "problemRef":problem_ref,
+                    "definitionRevision":definition_revision,
+                    "rationale":"表达与该候选定义中的同一具体困扰一致。"
+                }),
+            );
+        }
+    }
     serde_json::to_string(&json!({
-        "contract":"comment-research.semantic.v3/problem-resolution",
-        "task":"判断这个表达是否与候选定义代表同一个待解决的用户问题。若同一，输出 same_problem 且只能使用给定 problemRef 和 definitionRevision；若都不同，输出 new_problem 并给出简洁中文名称和定义。不能因主题相近而合并不同困扰。不要输出候选以外的 problemRef。",
+        "contract":"comment-research.semantic.v4/problem-resolution",
+        "task":"判断这个表达是否与候选定义代表同一个待解决的用户问题。若同一，输出 same_problem 且只能原样使用给定候选的 problemRef 和 definitionRevision；若都不同，输出 new_problem 并给出简洁中文名称和定义。不能因主题相近而合并不同困扰。不要输出候选以外的 problemRef。",
         "schema":{
             "same":{"decision":"same_problem","problemRef":"候选中的 UUID","definitionRevision":1,"rationale":"不超过300字"},
             "new":{"decision":"new_problem","definition":{"name":"不超过120字","meaning":"不超过1000字"},"rationale":"不超过300字"}
         },
         "outputSchema":resolution_output_schema(),
-        "examples":[
-            {"decision":"same_problem","problemRef":"00000000-0000-0000-0000-000000000001","definitionRevision":1,"rationale":"表达与候选定义中的同一具体困扰一致。"},
-            {"decision":"new_problem","definition":{"name":"作业启动困难","meaning":"用户难以让孩子开始作业。"},"rationale":"候选中没有同一具体困扰。"}
-        ],
+        "examples":examples,
         "atomProposition":proposition,
         "candidates":candidates,
     }))
@@ -1682,6 +1700,38 @@ mod tests {
             parse_contract_json::<SemanticExtractionOutput>(r#"{"outcome":"unknown"}"#),
             Err(ContractOutputError::SchemaRejected)
         );
+    }
+
+    #[test]
+    fn resolution_examples_only_use_current_candidate_references() {
+        let candidate = json!({
+            "problemRef":"11111111-2222-3333-4444-555555555555",
+            "definitionRevision":7,
+            "name":"作业启动困难"
+        });
+        let packet: Value = serde_json::from_str(
+            &resolution_prompt("总是拖到很晚才开始写作业", &[candidate]).unwrap(),
+        )
+        .unwrap();
+        let same_example = &packet["examples"][0];
+        assert_eq!(
+            same_example["problemRef"],
+            "11111111-2222-3333-4444-555555555555"
+        );
+        assert_eq!(same_example["definitionRevision"], 7);
+        assert_ne!(
+            same_example["problemRef"],
+            "00000000-0000-0000-0000-000000000001"
+        );
+    }
+
+    #[test]
+    fn resolution_without_candidates_does_not_advertise_a_static_same_problem_reference() {
+        let packet: Value =
+            serde_json::from_str(&resolution_prompt("总是拖到很晚才开始写作业", &[]).unwrap())
+                .unwrap();
+        assert_eq!(packet["examples"].as_array().map(Vec::len), Some(1));
+        assert_eq!(packet["examples"][0]["decision"], "new_problem");
     }
 
     #[test]
