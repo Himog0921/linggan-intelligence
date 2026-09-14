@@ -359,14 +359,20 @@ async fn a_home_domain_keyword_also_advances_to_details() {
     assert_eq!(cross_scope, 0, "本领域的作品不得写进跨行业作用域表");
 }
 
-/// 还没翻完搜索面的词不该跳到补详情这一步。
+/// 基线停在**失败**上时，已经发现的那一篇仍然要能补详情。
 ///
-/// 在一个没挖完的底座上补详情，补出来的是一份看上去完整、其实少了一截的档案，而且
-/// 没人看得出来少的是哪一截。
+/// 此前这里断言的是反面（`Skipped("archive_round_not_complete")`），用的就是这套夹具：它
+/// 踩中那道闸门靠的是判据开头「这一轮有没有失败」（`failed=0`），而这里塞了 2 条失败。
+/// 闸门已拆，且拆得有理由——它还读派发时冻进任务说明书的 `expectedCount`，早于该字段的
+/// 一轮永远没有它，`COALESCE(...,2147483647)` 于是恒不成立：采满了也说没采满，详情永久
+/// 排不进队列，而且一声不吭。
+///
+/// 覆盖不完整这件事没有被抹掉，只是不再连坐已经取得的原料：列表页的「建过档没有」照旧
+/// 由关键词建档合格判据回答（`keyword_baselines_qualified`）。这里钉的是详情不再问它。
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn an_unfinished_keyword_archive_does_not_jump_to_details() {
-    let database = proof_database("keyword_detail_needs_baseline").await;
+async fn a_keyword_archive_that_stopped_on_failures_still_continues_its_details() {
+    let database = proof_database("keyword_detail_after_failed_baseline").await;
     let target_ref =
         submit_keyword_archive(&database, "考研自习::detail-early", "surface_error", 1, 2).await;
 
@@ -374,11 +380,8 @@ async fn an_unfinished_keyword_archive_does_not_jump_to_details() {
         .await
         .expect("the detail advance runs");
     assert!(
-        matches!(
-            advance,
-            KeywordDetailAdvance::Skipped("archive_round_not_complete")
-        ),
-        "第一段没完成时要说第一段没完成：{advance:?}"
+        matches!(advance, KeywordDetailAdvance::Queued { works: 1, .. }),
+        "覆盖不完整不能连坐已经发现的那一篇：{advance:?}"
     );
 }
 

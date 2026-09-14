@@ -412,11 +412,11 @@ fn resolve_action(
     execution: &TargetInspectorExecution,
     monitoring_enabled: bool,
 ) -> TargetInspectorAction {
-    // Execution ownership and archive incompleteness are independent facts. A running worker
-    // cannot erase the human's route to quarantined or blocked material.
+    // Execution ownership and archive problems are independent facts. Quarantined material is
+    // checked before execution state, so a running worker cannot erase that human route; a
+    // detail gap is not one of them and keeps its own action (`a_detail_gap_keeps_its_own_action`).
     if archive.state == TargetInspectorArchiveState::Blocked
         || matches!(coverage.quarantined_records, TargetInspectorCount::Known(value) if value > 0)
-        || matches!(coverage.missing_details, TargetInspectorCount::Known(value) if value > 0)
     {
         return TargetInspectorAction::HandleArchiveProblems;
     }

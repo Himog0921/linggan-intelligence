@@ -371,6 +371,12 @@ pub async fn record_embedding_failure(
 
 /// Converts abandoned owners into an explicitly retryable (or exhausted terminal) checkpoint.
 /// It runs before every claim, so recovery needs no parallel queue or scheduler.
+///
+/// A `running` row with no deadline at all counts as abandoned too (`lease_until IS NULL`) —
+/// `NULL <= now()` is NULL, not true, so the deadline test alone would leave such a row owned by
+/// nobody. 0082 expires the rows that exist when it lands; this branch is what keeps the class
+/// closed afterwards, and it cannot reclaim a live lease: the claim path is the only writer of
+/// `state='running'` and it always writes a lease with it.
 pub async fn recover_expired_embedding_work(
     database: &Database,
 ) -> Result<u64, CommentResearchEmbeddingError> {
@@ -381,7 +387,7 @@ pub async fn recover_expired_embedding_work(
              failure_code='worker_interrupted', \
              next_attempt_at=CASE WHEN attempts>=$1 THEN NULL ELSE scope_001_now()+make_interval(secs=>$2) END, \
              lease_until=NULL,updated_at=scope_001_now() \
-         WHERE state='running' AND lease_until<=scope_001_now() \
+         WHERE state='running' AND (lease_until IS NULL OR lease_until<=scope_001_now()) \
          RETURNING atom_ref,invocation_ref",
     )
     .bind(MAX_EMBEDDING_ATTEMPTS)

@@ -2418,6 +2418,113 @@ async fn an_expired_embedding_claim_is_retried_and_cannot_be_settled_by_its_old_
     assert!(state.2.is_none());
 }
 
+/// **认领了却写不下到期时间的行，也必须被回收。**
+///
+/// `lease_until` 是可空列：在它存在之前就已经被认领、停在 `running` 的行没有这个值。而恢复
+/// 判据若只写 `lease_until<=scope_001_now()`，NULL 参与比较得 NULL、不为真，这些行就恰好落在
+/// 两个判据之间：认领只挑 `pending`/`retryable`，回收只挑「已过期的 running」——它既不再被
+/// 认领，也永不被回收，所属 run 永远不完成，而且**一声不吭**。
+///
+/// 这条钉住的是「没有任何到期时间的 running 行按已过期处理」，而不是某一次迁移有没有
+/// 把存量补齐：迁移只在它自己那一刻生效，之后新增的行仍然要靠判据本身兜住。
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn an_embedding_claim_without_a_lease_deadline_is_still_recovered() {
+    let database = fixture::proof_database("comment_research_embedding_null_lease").await;
+    detail_with_author(
+        &database,
+        "embedding-null-lease-note",
+        "SYNTHETIC embedding null lease note",
+        Some("creator-1"),
+    )
+    .await;
+    comment_with_author(
+        &database,
+        "embedding-null-lease-note",
+        "reader",
+        "孩子写作业总拖延，有什么办法吗",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(qualified_research_config(&database).await),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_ready_run(&database).await.unwrap();
+    let semantic_claim = claim_next_run_item(&database).await.unwrap().unwrap();
+    accept_semantic_output(
+        &database,
+        &semantic_claim,
+        SemanticExtractionOutput::Atoms {
+            atoms: vec![SemanticAtomProposal {
+                kind: AtomKind::Problem,
+                proposition: "孩子难以启动写作业".into(),
+                basis: AtomBasis::Explicit,
+                evidence_start: 0,
+                evidence_end: 5,
+            }],
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let atom = atom_ref(&database, run.run_ref, semantic_claim.derivation_ref).await;
+    let space = synthetic_qualified_embedding_space(&database).await;
+    let input = queue_atom_embedding(&database, atom, space.space_ref)
+        .await
+        .unwrap();
+    let first = claim_next_embedding_work(&database).await.unwrap().unwrap();
+    assert_eq!(first.attempt, 1);
+    sqlx::query(
+        "UPDATE linggan_comment_research_atom_embedding SET lease_until=NULL \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(&input.input_hash)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        recover_expired_embedding_work(&database).await.unwrap(),
+        1,
+        "没有到期时间的认领行不能落在认领与回收之间的缝里"
+    );
+    let recovered: (String, i32, Option<String>) = sqlx::query_as(
+        "SELECT state,attempts,next_attempt_at::text FROM linggan_comment_research_atom_embedding \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(&input.input_hash)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(recovered.0, "retryable");
+    assert_eq!(recovered.1, 1);
+    assert!(recovered.2.is_some());
+    sqlx::query(
+        "UPDATE linggan_comment_research_atom_embedding \
+         SET next_attempt_at=scope_001_now()-interval '1 second' \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3",
+    )
+    .bind(atom)
+    .bind(space.space_ref)
+    .bind(&input.input_hash)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let second = claim_next_embedding_work(&database).await.unwrap().unwrap();
+    assert_eq!(second.attempt, 2, "回收之后必须真的能再被认领一次");
+}
+
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
 async fn unavailable_embedding_settles_a_run_as_failure_instead_of_completed_unpublished() {

@@ -85,3 +85,28 @@ fn running_execution_does_not_hide_archive_problems() {
         "运行中与隔离材料是并列事实，不能用前者吞掉后者的处理入口"
     );
 }
+
+/// **详情缺口归自己的出口管，不能被并进「档案有问题」。**
+///
+/// 把 `missing_details` 也列进 `resolve_action` 开头那条早返回，`ContinueArchive` 就再也
+/// 走不到：抽屉里的「补采缺口」主按钮消失，只剩一句「存在已知阻塞」，而同一个目标在列表
+/// 行上仍然写着「补采缺口」——一个缺口两个说法，能一键补采的入口在抽屉里没了。
+///
+/// 这不是要求把缺口藏起来。覆盖读数与动作无关，照旧渲染 `已取得 / 总数`；要求的是别把
+/// 「系统自己会接着做」的活，说成「需要人来处理的已知阻塞」。
+///
+/// 断言取 `ContinueArchive` 而不是「不等于 HandleArchiveProblems」：后者在
+/// `NoActionHealthy` 上也会放行——缺口还在，动作却变成「当前无需处理」。
+#[test]
+fn a_detail_gap_keeps_its_own_action() {
+    let mut pending = facts();
+    pending.details = 40; // works 42，欠 2 篇详情
+    let execution = execution_projection(&LaneCounts::default());
+    let (archive, coverage) = archive_projection("creator", &pending, execution.state);
+    assert_eq!(coverage.missing_details, TargetInspectorCount::Known(2));
+    assert_eq!(
+        resolve_action(&archive, &coverage, &execution, true),
+        TargetInspectorAction::ContinueArchive,
+        "详情缺口要走 ContinueArchive；并进「已知阻塞」会让补采缺口的主按钮不可达"
+    );
+}
