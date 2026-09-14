@@ -223,11 +223,12 @@ async fn read_claimed_input(
          JOIN linggan_comment_research_run run USING(run_ref) \
          JOIN linggan_comment_research_policy_revision policy \
            ON policy.policy_revision_ref=run.policy_revision_ref \
-         WHERE item.run_ref=$1 AND item.derivation_ref=$2 AND item.state='running' \
+         WHERE item.run_ref=$1 AND item.derivation_ref=$2 AND item.attempts=$3 AND item.state='running' \
          FOR UPDATE OF item",
     )
     .bind(claim.run_ref)
     .bind(claim.derivation_ref)
+    .bind(claim.attempt)
     .fetch_optional(&mut **transaction)
     .await?
     .ok_or(CommentResearchAtomError::ClaimLost)?;
@@ -343,13 +344,13 @@ async fn insert_atom(
     extraction_rule_hash: &str,
     invocation_ref: Option<Uuid>,
 ) -> Result<(), CommentResearchAtomError> {
-    sqlx::query(
+    let changed = sqlx::query(
         "INSERT INTO linggan_comment_research_atom( \
              atom_ref,run_ref,derivation_ref,ordinal,kind,proposition,basis,research_start, \
              research_end,source_start,source_end,rule_hash,input_hash,invocation_ref \
          ) SELECT $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,item.input_hash,$13 \
            FROM linggan_comment_research_run_item item \
-           WHERE item.run_ref=$2 AND item.derivation_ref=$3 AND item.state='running'",
+           WHERE item.run_ref=$2 AND item.derivation_ref=$3 AND item.attempts=$14 AND item.state='running'",
     )
     .bind(Uuid::new_v4())
     .bind(claim.run_ref)
@@ -364,9 +365,13 @@ async fn insert_atom(
     .bind(i32::try_from(source_end).map_err(|_| CommentResearchAtomError::InvalidOutput)?)
     .bind(extraction_rule_hash)
     .bind(invocation_ref)
+    .bind(claim.attempt)
     .execute(&mut **transaction)
-    .await?;
-    Ok(())
+    .await?
+    .rows_affected();
+    (changed == 1)
+        .then_some(())
+        .ok_or(CommentResearchAtomError::ClaimLost)
 }
 
 fn validate_quote_atom(
@@ -434,11 +439,12 @@ async fn finish_item(
     let changed = sqlx::query(
         "UPDATE linggan_comment_research_run_item \
          SET state=$3,finished_at=scope_001_now(),lease_until=NULL,updated_at=scope_001_now() \
-         WHERE run_ref=$1 AND derivation_ref=$2 AND state='running'",
+         WHERE run_ref=$1 AND derivation_ref=$2 AND attempts=$4 AND state='running'",
     )
     .bind(claim.run_ref)
     .bind(claim.derivation_ref)
     .bind(state)
+    .bind(claim.attempt)
     .execute(&mut **transaction)
     .await?
     .rows_affected();

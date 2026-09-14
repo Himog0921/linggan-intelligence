@@ -27,6 +27,7 @@
 | [plans/active/comment-research-partial-publication-001.md](plans/active/comment-research-partial-publication-001.md) | 活跃计划；Issue #264 | 将足够覆盖但含单项终态失败的 V1 Run 发布为可追溯的部分 ResultRevision；失败不计入统计 |
 | [plans/active/comment-research-window-001.md](plans/active/comment-research-window-001.md) | 活跃计划；Issue #267 | 当前窗口无样本时按真实基线样本呈现已发布研究，避免全 0 伪装为空结果 |
 | [plans/active/comment-research-pagination-001.md](plans/active/comment-research-pagination-001.md) | 活跃计划；Issue #269 | 评论研究三张增长型列表的有界分页浏览与 URL 页码保持 |
+| [plans/active/aud-code-quality-20260914.md](plans/active/aud-code-quality-20260914.md) | 活跃计划；Issue #279 | 恢复任务所有权、历史详情可达、退役材料读取、目标问题入口与可信检查器；不触碰生产运行 |
 | [decisions/0003-comment-research-single-semantic-kernel.md](decisions/0003-comment-research-single-semantic-kernel.md) | 权威当前 | 旧评论语义路径的退役、可继承基础能力和新内核的长期边界 |
 | [design/pages/comment-research-v1-page.md](design/pages/comment-research-v1-page.md) | 权威当前；交付分支实现 | 评论研究 V1 的五视图、研究设置与用户状态合同 |
 | [design/changes/comment-research-reset-001-ui-change-manifest.md](design/changes/comment-research-reset-001-ui-change-manifest.md) | 权威当前；交付分支实现 | 旧评论页面/API/自动计划替代与用户体验验证范围 |

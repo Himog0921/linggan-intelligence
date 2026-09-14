@@ -880,13 +880,6 @@ fn second_bar(
                   <option value="creator">创作者</option>
                   <option value="keyword">关键词</option>
                 </select></label>
-              <label class="c-tg-field c-tg-field-ranking" data-keyword-only hidden data-drawn-select><span class="v7-sr-only">关键词排序</span><select name="ranking" aria-label="关键词排序">
-                  <option value="most_liked">最多点赞</option>
-                  <option value="most_collected">最多收藏</option>
-                  <option value="most_commented">最多评论</option>
-                  <option value="latest">最新</option>
-                  <option value="comprehensive">综合排序</option>
-                </select></label>
               <label class="c-tg-field c-tg-field-query"><span class="v7-sr-only">主页链接、ID 或关键词</span><input name="identity" required maxlength="120"
                      aria-label="创作者主页链接、ID 或关键词" placeholder="粘贴主页链接、ID 或输入关键词" /></label>
               <button class="c-btn-secondary c-tg-batch-open" type="button" data-target-batch-open aria-controls="target-batch-modal" disabled><span data-target-batch-label>批量编辑</span><strong data-target-selected-count hidden>0</strong></button>
@@ -1120,29 +1113,12 @@ mod domain_bar_tests {
         assert!(!html.contains("v7-domain-picker"));
     }
 
-    /// 关键词的排序必须能在建目标时选。
-    ///
-    /// 此前这里写死成综合排序，等于「一个词只能有一个观察面」——想按最多点赞观察同一个
-    /// 词根本建不出来，表单会命中已有的那个综合排序目标。而规格明写跨行业不采综合排序，
-    /// 于是页面能建的唯一形态恰好是规格禁止的那个。
+    /// 新建目标不再展示一个没有进入 Target identity 或 rule 的排序字段。
     #[test]
-    fn a_new_keyword_target_can_choose_its_ranking() {
+    fn a_new_target_does_not_offer_a_noop_keyword_ranking() {
         let html = render(Section::Targets, OperationsMode::Now, None, None, None);
-        assert!(html.contains(r#"<select name="ranking""#));
-        for ranking in [
-            "most_liked",
-            "most_collected",
-            "most_commented",
-            "latest",
-            "comprehensive",
-        ] {
-            assert!(
-                html.contains(&format!(r#"<option value="{ranking}">"#)),
-                "{ranking} 缺失"
-            );
-        }
-        // 创作者主页没有排序可言，所以它默认藏起来，由脚本按目标类型切换。
-        assert!(html.contains("data-keyword-only"));
+        assert!(!html.contains(r#"<select name="ranking""#));
+        assert!(!html.contains("data-keyword-only"));
         assert!(html.contains("data-target-kind"));
     }
 

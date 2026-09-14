@@ -172,6 +172,9 @@ fn kernel_response<T: Serialize>(
                 kernel::CommentResearchKernelError::DevelopmentResetBlocked { .. } => {
                     (StatusCode::CONFLICT, "comment_research_reset_blocked")
                 }
+                kernel::CommentResearchKernelError::ClaimLost => {
+                    (StatusCode::CONFLICT, "comment_research_claim_lost")
+                }
                 kernel::CommentResearchKernelError::DerivationPrewarmIncomplete
                 | kernel::CommentResearchKernelError::Database(_)
                 | kernel::CommentResearchKernelError::Serialization => (

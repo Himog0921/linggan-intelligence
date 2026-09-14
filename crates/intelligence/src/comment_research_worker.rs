@@ -155,7 +155,13 @@ pub async fn schema_ready(database: &Database) -> Result<bool, ModelError> {
                       AND attname='derivation_input_hash' AND NOT attisdropped) \
                 AND EXISTS(SELECT 1 FROM pg_attribute \
                     WHERE attrelid='linggan_comment_research_run_item'::regclass \
-                      AND attname='research_fingerprint' AND NOT attisdropped)",
+                      AND attname='research_fingerprint' AND NOT attisdropped) \
+                AND EXISTS(SELECT 1 FROM pg_attribute \
+                    WHERE attrelid='linggan_comment_research_atom_embedding'::regclass \
+                      AND attname='lease_until' AND NOT attisdropped) \
+                AND EXISTS(SELECT 1 FROM pg_attribute \
+                    WHERE attrelid='linggan_comment_research_atom_embedding'::regclass \
+                      AND attname='attempts' AND NOT attisdropped)",
     )
     .fetch_one(database.pool())
     .await?)
@@ -241,10 +247,6 @@ async fn advance_loaded_semantic(
     else {
         return Ok(());
     };
-    if let Err(error) = attach_semantic_invocation(database, claim, reserved.invocation_ref).await {
-        release_semantic_dispatch_permit(&mut reserved).await?;
-        return Err(error);
-    }
     let response = dispatch_generation(
         database,
         store,
@@ -272,6 +274,7 @@ async fn reserve_semantic_call(
         SEMANTIC_SYSTEM,
         prompt,
         "semantic_extraction",
+        Some(claim),
     )
     .await
     {
@@ -308,23 +311,6 @@ async fn reserve_semantic_call(
             Ok(None)
         }
     }
-}
-
-async fn attach_semantic_invocation(
-    database: &Database,
-    claim: &crate::comment_research_kernel::ResearchRunItemClaim,
-    invocation_ref: Uuid,
-) -> Result<(), ModelError> {
-    sqlx::query(
-        "UPDATE linggan_comment_research_run_item SET invocation_ref=$3,updated_at=scope_001_now() \
-         WHERE run_ref=$1 AND derivation_ref=$2 AND state='running'",
-    )
-    .bind(claim.run_ref)
-    .bind(claim.derivation_ref)
-    .bind(invocation_ref)
-    .execute(database.pool())
-    .await?;
-    Ok(())
 }
 
 async fn settle_semantic_response(
@@ -443,21 +429,14 @@ async fn advance_embedding(
         return Ok(true);
     };
     let payload = embedding_payload(&claim);
-    let reserved = match reserve_embedding_call(
-        database,
-        embedding_run_ref(&claim),
-        &profile,
-        &payload,
-        "embedding",
-    )
-    .await
-    {
-        Ok(reserved) => reserved,
-        Err(error) => {
-            fail_embedding_work(database, &claim, None, error.code()).await?;
-            return Ok(true);
-        }
-    };
+    let reserved =
+        match reserve_embedding_call(database, &claim, &profile, &payload, "embedding").await {
+            Ok(reserved) => reserved,
+            Err(error) => {
+                fail_embedding_work(database, &claim, None, error.code()).await?;
+                return Ok(true);
+            }
+        };
     let response = dispatch_embedding(adapter, payload, drain).await;
     settle_embedding_response(database, &claim, &reserved, response).await?;
     refresh_embedding_completion(database, &claim).await?;
@@ -570,6 +549,7 @@ async fn accept_embedding_values(
 ) -> Result<(), CommentResearchEmbeddingError> {
     accept_atom_embedding(
         database,
+        claim,
         AtomEmbeddingResult {
             atom_ref: claim.input.atom_ref,
             space_ref: claim.input.space_ref,
@@ -620,6 +600,7 @@ async fn advance_problem_resolution(
         RESOLUTION_SYSTEM,
         &prompt,
         "problem_resolution",
+        None,
     )
     .await
     {
@@ -816,7 +797,7 @@ fn semantic_prompt(input: &ClaimedResearchInput) -> Result<String, ModelError> {
         .text
     });
     serde_json::to_string(&json!({
-        "contract":"comment-research.semantic.v5",
+        "contract":"comment-research.semantic.v6",
         "task":"只判断当前研究正文中明确表达的用户问题、需求、解决方法或经历。父评论研究正文仅用于消解当前回复的指代或话题，不能单独构成用户结论。没有足够研究信号时必须输出 no_signal；不得输出空 atoms。每个 atom 的 evidence 必须逐字复制当前研究正文中支持该命题的一段连续、非空、唯一短句；不要输出字符位置、改写、概括、父评论文字或研究正文以外的文字。",
         "schema":{
             "atoms":{
@@ -882,7 +863,7 @@ fn resolution_prompt(proposition: &str, candidates: &[Value]) -> Result<String, 
         }
     }
     serde_json::to_string(&json!({
-        "contract":"comment-research.semantic.v5/problem-resolution",
+        "contract":"comment-research.semantic.v6/problem-resolution",
         "task":"判断这个表达是否与候选定义代表同一个待解决的用户问题。若同一，输出 same_problem 且只能原样使用给定候选的 problemRef 和 definitionRevision；若都不同，输出 new_problem 并给出简洁中文名称和定义。不能因主题相近而合并不同困扰。不要输出候选以外的 problemRef。",
         "schema":{
             "same":{"decision":"same_problem","problemRef":"候选中的 UUID","definitionRevision":1,"rationale":"不超过300字"},
@@ -901,7 +882,7 @@ fn semantic_output_schema() -> Value {
         "type":"object",
         "properties":{
             "outcome":{"type":"string","enum":["atoms","no_signal"]},
-            "atoms":{"type":"array","maxItems":8,"items":{
+            "atoms":{"type":"array","minItems":1,"maxItems":8,"items":{
                 "type":"object",
                 "properties":{
                     "kind":{"type":"string","enum":["problem","need","solution","experience"]},
@@ -915,7 +896,19 @@ fn semantic_output_schema() -> Value {
             "reason":{"type":"string","maxLength":200}
         },
         "required":["outcome"],
-        "additionalProperties":false
+        "additionalProperties":false,
+        "oneOf":[
+            {
+                "properties":{"outcome":{"const":"atoms"}},
+                "required":["outcome","atoms"],
+                "not":{"required":["reason"]}
+            },
+            {
+                "properties":{"outcome":{"const":"no_signal"}},
+                "required":["outcome","reason"],
+                "not":{"required":["atoms"]}
+            }
+        ]
     })
 }
 
@@ -933,7 +926,19 @@ fn resolution_output_schema() -> Value {
             "rationale":{"type":"string","maxLength":300}
         },
         "required":["decision","rationale"],
-        "additionalProperties":false
+        "additionalProperties":false,
+        "oneOf":[
+            {
+                "properties":{"decision":{"const":"same_problem"}},
+                "required":["decision","problemRef","definitionRevision","rationale"],
+                "not":{"required":["definition"]}
+            },
+            {
+                "properties":{"decision":{"const":"new_problem"}},
+                "required":["decision","definition","rationale"],
+                "not":{"anyOf":[{"required":["problemRef"]},{"required":["definitionRevision"]}]}
+            }
+        ]
     })
 }
 
@@ -944,6 +949,7 @@ async fn reserve_generation_call(
     system: &str,
     prompt: &str,
     stage: &'static str,
+    semantic_claim: Option<&crate::comment_research_kernel::ResearchRunItemClaim>,
 ) -> Result<ReservedCall, ModelError> {
     let mut embedding_transaction = database.pool().begin().await?;
     if !local_embedding_profile::ready_in_transaction(&mut embedding_transaction).await? {
@@ -1002,6 +1008,26 @@ async fn reserve_generation_call(
         .bind(json!({"runRef":run_ref,"stage":stage,"callStarted":false}))
         .execute(&mut *transaction)
         .await?;
+        if let Some(claim) = semantic_claim {
+            // The reservation and ownership association must commit together. Otherwise a
+            // worker crash between them leaves an unowned running invocation that recovery can
+            // never find, while its reserved tokens keep consuming this Run's budget.
+            let attached = sqlx::query(
+                "UPDATE linggan_comment_research_run_item \
+                 SET invocation_ref=$3,updated_at=scope_001_now() \
+                 WHERE run_ref=$1 AND derivation_ref=$2 AND attempts=$4 AND state='running'",
+            )
+            .bind(claim.run_ref)
+            .bind(claim.derivation_ref)
+            .bind(invocation_ref)
+            .bind(claim.attempt)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+            if attached != 1 {
+                return Err(ModelError::Source);
+            }
+        }
         let call = (
             invocation_ref,
             row.get("version_ref"),
@@ -1035,11 +1061,12 @@ async fn reserve_generation_call(
 
 async fn reserve_embedding_call(
     database: &Database,
-    run_ref: Uuid,
+    claim: &EmbeddingWorkClaim,
     profile: &local_embedding_profile::LocalEmbeddingProfile,
     payload: &str,
     stage: &'static str,
 ) -> Result<ReservedCall, ModelError> {
+    let run_ref = embedding_run_ref(claim);
     let mut transaction = database.pool().begin().await?;
     if !local_embedding_profile::ready_in_transaction(&mut transaction).await? {
         return Err(ModelError::EmbeddingNotQualified);
@@ -1079,6 +1106,24 @@ async fn reserve_embedding_call(
     .bind(json!({"runRef":run_ref,"stage":stage,"callStarted":false}))
     .execute(&mut *transaction)
     .await?;
+    // Embedding recovery owns this receipt through the embedding checkpoint. Attach it before
+    // the reservation commits so an interrupted worker cannot orphan a running invocation.
+    let attached = sqlx::query(
+        "UPDATE linggan_comment_research_atom_embedding \
+         SET invocation_ref=$4,updated_at=scope_001_now() \
+         WHERE atom_ref=$1 AND space_ref=$2 AND input_hash=$3 AND attempts=$5 AND state='running'",
+    )
+    .bind(claim.input.atom_ref)
+    .bind(claim.input.space_ref)
+    .bind(&claim.input.input_hash)
+    .bind(invocation_ref)
+    .bind(claim.attempt)
+    .execute(&mut *transaction)
+    .await?
+    .rows_affected();
+    if attached != 1 {
+        return Err(ModelError::Source);
+    }
     transaction.commit().await?;
     Ok(ReservedCall {
         invocation_ref,
@@ -1776,6 +1821,76 @@ mod tests {
             parse_contract_json::<SemanticQuoteExtractionOutput>(r#"{"outcome":"unknown"}"#),
             Err(ContractOutputError::SchemaRejected)
         );
+        assert_eq!(
+            parse_contract_json::<SemanticQuoteExtractionOutput>(r#"{"outcome":"atoms"}"#),
+            Err(ContractOutputError::SchemaRejected)
+        );
+        assert_eq!(
+            parse_contract_json::<SemanticQuoteExtractionOutput>(r#"{"outcome":"no_signal"}"#),
+            Err(ContractOutputError::SchemaRejected)
+        );
+        assert!(matches!(
+            parse_contract_json::<ResolutionOutput>(
+                r#"{"decision":"same_problem","rationale":"synthetic"}"#
+            ),
+            Err(ContractOutputError::SchemaRejected)
+        ));
+        assert!(matches!(
+            parse_contract_json::<ResolutionOutput>(
+                r#"{"decision":"new_problem","rationale":"synthetic"}"#
+            ),
+            Err(ContractOutputError::SchemaRejected)
+        ));
+    }
+
+    #[test]
+    fn provider_schemas_require_exactly_one_rust_tagged_variant() {
+        let semantic = semantic_output_schema();
+        assert_eq!(semantic["properties"]["atoms"]["minItems"], 1);
+        assert_eq!(
+            semantic["oneOf"][0]["properties"]["outcome"]["const"],
+            "atoms"
+        );
+        assert_eq!(
+            semantic["oneOf"][0]["required"],
+            json!(["outcome", "atoms"])
+        );
+        assert_eq!(semantic["oneOf"][0]["not"]["required"], json!(["reason"]));
+        assert_eq!(
+            semantic["oneOf"][1]["properties"]["outcome"]["const"],
+            "no_signal"
+        );
+        assert_eq!(
+            semantic["oneOf"][1]["required"],
+            json!(["outcome", "reason"])
+        );
+        assert_eq!(semantic["oneOf"][1]["not"]["required"], json!(["atoms"]));
+
+        let resolution = resolution_output_schema();
+        assert_eq!(
+            resolution["oneOf"][0]["properties"]["decision"]["const"],
+            "same_problem"
+        );
+        assert_eq!(
+            resolution["oneOf"][0]["required"],
+            json!(["decision", "problemRef", "definitionRevision", "rationale"])
+        );
+        assert_eq!(
+            resolution["oneOf"][0]["not"]["required"],
+            json!(["definition"])
+        );
+        assert_eq!(
+            resolution["oneOf"][1]["properties"]["decision"]["const"],
+            "new_problem"
+        );
+        assert_eq!(
+            resolution["oneOf"][1]["required"],
+            json!(["decision", "definition", "rationale"])
+        );
+        assert_eq!(
+            resolution["oneOf"][1]["not"]["anyOf"],
+            json!([{"required":["problemRef"]},{"required":["definitionRevision"]}])
+        );
     }
 
     #[test]
@@ -1841,6 +1956,7 @@ mod tests {
             token_limit: 10_000,
         };
         let packet: Value = serde_json::from_str(&semantic_prompt(&input).unwrap()).unwrap();
+        assert_eq!(packet["contract"], "comment-research.semantic.v6");
         assert_eq!(packet["currentResearchText"], "我也是……难受");
         assert_eq!(
             packet["parentResearchText"],
