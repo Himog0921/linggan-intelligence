@@ -171,8 +171,11 @@
       const workShare = baselineOnly ? share(workCount, window.works) : item.currentWorkShare;
       return '<tr><td><strong>' + escape(item.name) + '</strong><p>' + escape(item.meaning) + '</p></td><td>' + pct(commentShare) + '</td><td>' + pct(workShare) + '</td><td>' + count(commentCount) + '</td></tr>';
     });
+    const overviewDisclosure = items.length
+      ? '<p class="cr-v1-overview-disclosure">概览仅展示 ' + count(items.length) + ' 个代表问题。<a href="?view=problems">查看全部用户问题（可分页浏览）</a></p>'
+      : '';
     result.innerHTML = '<section class="cr-v1-intro"><h2>' + heading + '</h2><p>' + explanation + '</p>' + resultMeta(data) + '</section>' +
-      (items.length ? table(columns, rows) : empty('本版研究没有形成可显示的问题。'));
+      (items.length ? table(columns, rows) + overviewDisclosure : empty('本版研究没有形成可显示的问题。'));
   }
 
   function renderVoices(data) {
