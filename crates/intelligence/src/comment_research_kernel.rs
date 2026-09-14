@@ -94,6 +94,10 @@ pub enum CommentResearchKernelError {
     EmbeddingNotReady,
     #[error("the selected research model has not passed the V1 semantic probe")]
     ModelNotReady,
+    #[error(
+        "comment research reset is blocked while {active_operations} V1 model operation(s) are active"
+    )]
+    DevelopmentResetBlocked { active_operations: i64 },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -133,6 +137,7 @@ pub struct ResearchRunPreview {
     pub source_limit: Option<i32>,
     pub eligible_sources: usize,
     pub unprocessed_sources: usize,
+    pub recoverable_sources: usize,
     pub selected_sources: usize,
     pub selected_context_sources: usize,
     pub selected_missing_parent_context_sources: usize,
@@ -141,6 +146,17 @@ pub struct ResearchRunPreview {
     pub active_sources: usize,
     pub retryable_sources: usize,
     pub terminal_item_states: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevelopmentResetReceipt {
+    pub deleted_derivations: u64,
+    pub deleted_runs: u64,
+    pub deleted_run_items: u64,
+    pub deleted_atoms: u64,
+    pub deleted_problems: u64,
+    pub deleted_results: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -357,7 +373,8 @@ pub async fn start_run(
         return Err(CommentResearchKernelError::EmbeddingNotReady);
     }
     let policy = sqlx::query(
-        "SELECT policy.policy_revision_ref,policy.derivation_version,policy.source_limit,policy.config_ref \
+        "SELECT policy.policy_revision_ref,policy.derivation_version,policy.source_limit,policy.config_ref, \
+                policy.extraction_rule_hash,policy.membership_policy_hash \
          FROM linggan_comment_research_policy_active active \
          JOIN linggan_comment_research_policy_revision policy \
            ON policy.policy_revision_ref=active.policy_revision_ref \
@@ -403,13 +420,21 @@ pub async fn start_run(
     for source in &selected {
         sqlx::query(
             "INSERT INTO linggan_comment_research_run_item( \
-                 run_ref,derivation_ref,input_hash,context_hash \
-             ) VALUES($1,$2,$3,$4)",
+                 run_ref,derivation_ref,input_hash,context_hash,research_fingerprint,attempts \
+             ) SELECT $1,$2,$3,$4,$5,COALESCE(( \
+                 SELECT max(prior.attempts) FROM linggan_comment_research_run_item prior \
+                 WHERE prior.derivation_ref=$2 AND prior.research_fingerprint=$5 \
+             ),0)",
         )
         .bind(run_ref)
         .bind(source.derivation_ref)
         .bind(source.input_hash())
         .bind(source.context_hash())
+        .bind(source.research_fingerprint(
+            policy.get::<String, _>("extraction_rule_hash").as_str(),
+            policy.get::<String, _>("membership_policy_hash").as_str(),
+            config_ref,
+        ))
         .execute(&mut *transaction)
         .await?;
     }
@@ -432,7 +457,7 @@ pub async fn preview_run(
     derive_current_sources(database, MAX_DERIVATIONS_PER_PASS as usize).await?;
     let mut transaction = database.pool().begin().await?;
     let policy = sqlx::query(
-        "SELECT policy.derivation_version,policy.source_limit \
+        "SELECT policy.derivation_version,policy.source_limit,policy.config_ref,policy.extraction_rule_hash,policy.membership_policy_hash \
          FROM linggan_comment_research_policy_active active \
          JOIN linggan_comment_research_policy_revision policy \
            ON policy.policy_revision_ref=active.policy_revision_ref \
@@ -454,6 +479,7 @@ pub async fn preview_run(
          ) \
          SELECT count(*) AS eligible_sources, \
                 count(*) FILTER(WHERE latest_state IS NULL) AS unprocessed_sources, \
+                count(*) FILTER(WHERE latest_state='cancelled') AS recoverable_sources, \
                 count(*) FILTER(WHERE latest_state='succeeded') AS succeeded_sources, \
                 count(*) FILTER(WHERE latest_state='no_signal') AS no_signal_sources, \
                 count(*) FILTER(WHERE latest_state IN ('pending','running')) AS active_sources, \
@@ -481,7 +507,7 @@ pub async fn preview_run(
              WHERE derivation.derivation_version=$1 AND derivation.eligibility='eligible' \
          ), grouped AS ( \
              SELECT latest_state,count(*) AS item_count FROM current \
-             WHERE latest_state IN ('incompatible','unrecoverable','model_failed','restricted','cancelled') \
+             WHERE latest_state IN ('incompatible','unrecoverable','model_failed','restricted') \
              GROUP BY latest_state \
          ) \
          SELECT COALESCE(jsonb_object_agg(latest_state,item_count),'{}'::jsonb) FROM grouped",
@@ -524,6 +550,7 @@ pub async fn preview_run(
         source_limit,
         eligible_sources: summary.get::<i64, _>("eligible_sources") as usize,
         unprocessed_sources: summary.get::<i64, _>("unprocessed_sources") as usize,
+        recoverable_sources: summary.get::<i64, _>("recoverable_sources") as usize,
         selected_sources: selected.len(),
         selected_context_sources,
         selected_missing_parent_context_sources,
@@ -532,6 +559,130 @@ pub async fn preview_run(
         active_sources: summary.get::<i64, _>("active_sources") as usize,
         retryable_sources: summary.get::<i64, _>("retryable_sources") as usize,
         terminal_item_states,
+    })
+}
+
+/// Deletes only regenerable Comment Research V1 state for a local development reset.
+///
+/// Raw comments, content attribution, source restrictions, model configuration, embedding
+/// profiles, active policy and the generic invocation ledger are deliberately outside this
+/// operation.  It refuses to race a V1 model call; queued historical work is safe to remove.
+pub async fn reset_development_derived(
+    database: &Database,
+) -> Result<DevelopmentResetReceipt, CommentResearchKernelError> {
+    let mut transaction = database.pool().begin().await?;
+    let active_operations: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ( \
+             SELECT 1 FROM linggan_comment_research_run_item WHERE state='running' \
+             UNION ALL \
+             SELECT 1 FROM linggan_comment_research_run_item item \
+             JOIN linggan_model_invocation invocation ON invocation.invocation_ref=item.invocation_ref \
+             WHERE invocation.state='running' \
+             UNION ALL \
+             SELECT 1 FROM linggan_comment_research_atom_embedding embedding \
+             JOIN linggan_model_invocation invocation ON invocation.invocation_ref=embedding.invocation_ref \
+             WHERE invocation.state='running' \
+             UNION ALL \
+             SELECT 1 FROM linggan_comment_research_problem_resolution resolution \
+             JOIN linggan_model_invocation invocation ON invocation.invocation_ref=resolution.invocation_ref \
+             WHERE invocation.state='running' \
+         ) active",
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+    if active_operations > 0 {
+        return Err(CommentResearchKernelError::DevelopmentResetBlocked { active_operations });
+    }
+    sqlx::query(
+        "LOCK TABLE \
+           linggan_comment_research_change_observation, \
+           linggan_comment_research_problem_window_stat, \
+           linggan_comment_research_result_revision, \
+           linggan_comment_research_problem_resolution, \
+           linggan_comment_research_atom_problem_membership, \
+           linggan_comment_research_atom_embedding, \
+           linggan_comment_research_problem_definition, \
+           linggan_comment_research_problem, \
+           linggan_comment_research_atom, \
+           linggan_comment_research_run_item, \
+           linggan_comment_research_run, \
+           linggan_comment_research_derivation, \
+           linggan_comment_research_embedding_space \
+         IN SHARE ROW EXCLUSIVE MODE",
+    )
+    .execute(&mut *transaction)
+    .await?;
+    for statement in [
+        "ALTER TABLE linggan_comment_research_derivation DISABLE TRIGGER linggan_comment_research_derivation_immutable",
+        "ALTER TABLE linggan_comment_research_atom DISABLE TRIGGER linggan_comment_research_atom_immutable",
+        "ALTER TABLE linggan_comment_research_embedding_space DISABLE TRIGGER linggan_comment_research_embedding_space_immutable",
+        "ALTER TABLE linggan_comment_research_problem_definition DISABLE TRIGGER linggan_comment_research_problem_definition_immutable",
+    ] {
+        sqlx::query(statement).execute(&mut *transaction).await?;
+    }
+    let deleted_results = sqlx::query("DELETE FROM linggan_comment_research_change_observation")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+    sqlx::query("DELETE FROM linggan_comment_research_problem_window_stat")
+        .execute(&mut *transaction)
+        .await?;
+    let deleted_result_revisions =
+        sqlx::query("DELETE FROM linggan_comment_research_result_revision")
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected();
+    sqlx::query("DELETE FROM linggan_comment_research_problem_resolution")
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM linggan_comment_research_atom_problem_membership")
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM linggan_comment_research_atom_embedding")
+        .execute(&mut *transaction)
+        .await?;
+    sqlx::query("DELETE FROM linggan_comment_research_problem_definition")
+        .execute(&mut *transaction)
+        .await?;
+    let deleted_problems = sqlx::query("DELETE FROM linggan_comment_research_problem")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+    let deleted_atoms = sqlx::query("DELETE FROM linggan_comment_research_atom")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+    let deleted_run_items = sqlx::query("DELETE FROM linggan_comment_research_run_item")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+    let deleted_runs = sqlx::query("DELETE FROM linggan_comment_research_run")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+    let deleted_derivations = sqlx::query("DELETE FROM linggan_comment_research_derivation")
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
+    sqlx::query("DELETE FROM linggan_comment_research_embedding_space")
+        .execute(&mut *transaction)
+        .await?;
+    for statement in [
+        "ALTER TABLE linggan_comment_research_problem_definition ENABLE TRIGGER linggan_comment_research_problem_definition_immutable",
+        "ALTER TABLE linggan_comment_research_embedding_space ENABLE TRIGGER linggan_comment_research_embedding_space_immutable",
+        "ALTER TABLE linggan_comment_research_atom ENABLE TRIGGER linggan_comment_research_atom_immutable",
+        "ALTER TABLE linggan_comment_research_derivation ENABLE TRIGGER linggan_comment_research_derivation_immutable",
+    ] {
+        sqlx::query(statement).execute(&mut *transaction).await?;
+    }
+    transaction.commit().await?;
+    Ok(DevelopmentResetReceipt {
+        deleted_derivations,
+        deleted_runs,
+        deleted_run_items,
+        deleted_atoms,
+        deleted_problems,
+        deleted_results: deleted_results + deleted_result_revisions,
     })
 }
 
@@ -553,6 +704,7 @@ struct EligibleDerivation {
     derivation_ref: Uuid,
     source_sha256: String,
     research_sha256: String,
+    derivation_input_hash: String,
     research_text: String,
     clean_state: String,
     context_manifest: Value,
@@ -569,24 +721,52 @@ impl EligibleDerivation {
     fn context_hash(&self) -> String {
         content_hash(&self.context_manifest.to_string())
     }
+
+    fn research_fingerprint(
+        &self,
+        extraction_rule_hash: &str,
+        membership_policy_hash: &str,
+        config_ref: Uuid,
+    ) -> String {
+        content_hash(&format!(
+            "comment-research.fingerprint.v1\n{}\n{}\n{}\n{}\n{}",
+            self.derivation_input_hash,
+            extraction_rule_hash,
+            membership_policy_hash,
+            config_ref,
+            DERIVATION_VERSION,
+        ))
+    }
 }
 
 async fn select_eligible_derivations(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     policy: &sqlx::postgres::PgRow,
 ) -> Result<Vec<EligibleDerivation>, CommentResearchKernelError> {
+    let config_ref: Option<Uuid> = policy.get("config_ref");
+    let Some(config_ref) = config_ref else {
+        return Ok(Vec::new());
+    };
     let rows = sqlx::query(
-        "SELECT derivation_ref,source_sha256,research_sha256,research_text,clean_state,context_manifest \
+        "SELECT derivation_ref,source_sha256,research_sha256,derivation_input_hash,research_text,clean_state,context_manifest \
          FROM linggan_comment_research_derivation_current derivation \
          WHERE derivation_version=$1 AND eligibility='eligible' \
            AND NOT EXISTS ( \
              SELECT 1 FROM linggan_comment_research_run_item used \
              WHERE used.derivation_ref=derivation.derivation_ref \
+               AND used.research_fingerprint=encode(sha256(convert_to( \
+                   concat_ws(E'\\n','comment-research.fingerprint.v1',derivation.derivation_input_hash,$3,$4,$5::text,$6), \
+                   'UTF8')),'hex') \
+               AND used.state IN ('succeeded','no_signal','pending','running','retryable','incompatible','unrecoverable','model_failed') \
            ) \
          ORDER BY created_at DESC,derivation_ref DESC LIMIT $2",
     )
     .bind(policy.get::<String, _>("derivation_version"))
     .bind(policy.get::<i32, _>("source_limit"))
+    .bind(policy.get::<String, _>("extraction_rule_hash"))
+    .bind(policy.get::<String, _>("membership_policy_hash"))
+    .bind(config_ref)
+    .bind(DERIVATION_VERSION)
     .fetch_all(&mut **transaction)
     .await?;
     Ok(rows
@@ -595,6 +775,7 @@ async fn select_eligible_derivations(
             derivation_ref: row.get("derivation_ref"),
             source_sha256: row.get("source_sha256"),
             research_sha256: row.get("research_sha256"),
+            derivation_input_hash: row.get("derivation_input_hash"),
             research_text: row.get("research_text"),
             clean_state: row.get("clean_state"),
             context_manifest: row.get("context_manifest"),
@@ -632,6 +813,7 @@ pub async fn claim_next_run_item(
                ON derivation.derivation_ref=item.derivation_ref \
              WHERE run.state IN ('queued','running') \
                AND (item.state='pending' OR (item.state='retryable' AND item.next_attempt_at<=scope_001_now())) \
+               AND item.attempts < 3 \
              ORDER BY run.created_at,item.created_at,item.derivation_ref \
              LIMIT 1 FOR UPDATE OF item SKIP LOCKED \
          ), claimed AS ( \

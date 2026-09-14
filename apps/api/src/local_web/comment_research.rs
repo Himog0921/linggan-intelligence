@@ -166,6 +166,9 @@ fn kernel_response<T: Serialize>(
                 kernel::CommentResearchKernelError::ModelNotReady => {
                     (StatusCode::CONFLICT, "research_model_not_ready")
                 }
+                kernel::CommentResearchKernelError::DevelopmentResetBlocked { .. } => {
+                    (StatusCode::CONFLICT, "comment_research_reset_blocked")
+                }
                 kernel::CommentResearchKernelError::Database(_)
                 | kernel::CommentResearchKernelError::Serialization => (
                     StatusCode::SERVICE_UNAVAILABLE,

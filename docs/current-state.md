@@ -13,6 +13,10 @@
 - 本轮隔离 PostgreSQL 已通过作者归属、删除控制历史、阻止删除保护事实及名称确认等新增证明，并修正了四处旧测试夹具/断言，使其符合现有的 200 篇渐进建档、工单重排、租约历史与人可读北京时间合同。完整 LOCAL-001 脚本已通过，且其临时数据库、容器和卷均已清理；该结论仍只是候选源码证明，不代表共享迁移、PR 合并、运行时切换或真实采集。
 
 
+### COMMENT-RESEARCH-V1-REAL-CLOSURE-001 / Issue #254（源码实施中；开发期派生重置已获授权）
+
+Mog 已授权只重置评论研究派生层：Run、RunItem、Atom、向量空间/向量、Problem/Definition/Membership/Resolution、ResultRevision 和变化投影可以清空；Raw Comment、作品/父评论上下文、作者归属、来源限制、模型连接/配置、WeMM profile、active policy 与通用 ModelInvocation 账本必须保留。本项新增同一研究指纹下的有效结论复用、取消项恢复和局部 Atom 接纳，避免历史 Run 存在即永久阻断新研究。连续自动排程仍关闭；完成声明仍需要共享开发库的实际 reset、受控首轮 Run、published ResultRevision、localhost 页面和 Mog 业务验收分别提供证据。
+
 ### COMMENT-RESEARCH-RESET-001 / Issue #213（V1 已合并、开发库已切换、3000 已上线；首轮模型配置与业务验收待执行）
 
 Mog 已决定评论研究仍处开发期：既有研究派生结果可以删除，不做 Task B、P4 与新系统之间的数据迁移。新交付只保留 Raw Comment/Evidence、来源资格、作者事实、清洗定位、调用账本、预算与 lease/recovery 等可独立复用基础；旧 candidate/relation/vector、P4 HDBSCAN/Leiden/adapter/group、旧超级查询和页面读取将全部退役。唯一未来合同为 [COMMENT-RESEARCH-RESET-001](plans/active/comment-research-reset-001.md)，长期裁定为 [DEC-0003](decisions/0003-comment-research-single-semantic-kernel.md)。

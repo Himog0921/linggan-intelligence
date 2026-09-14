@@ -70,6 +70,7 @@ pub enum SemanticExtractionOutput {
 pub struct AtomAcceptanceReceipt {
     pub state: String,
     pub accepted_atoms: usize,
+    pub rejected_atoms: usize,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -100,12 +101,16 @@ pub async fn accept_semantic_output(
     let input = read_claimed_input(&mut transaction, claim).await?;
     let receipt = match output {
         SemanticExtractionOutput::Atoms { atoms } => {
-            let accepted =
+            let (accepted, rejected) =
                 accept_atoms(&mut transaction, claim, &input, &atoms, invocation_ref).await?;
+            if accepted == 0 {
+                return Err(CommentResearchAtomError::InvalidOutput);
+            }
             finish_item(&mut transaction, claim, "succeeded").await?;
             AtomAcceptanceReceipt {
                 state: "succeeded".into(),
                 accepted_atoms: accepted,
+                rejected_atoms: rejected,
             }
         }
         SemanticExtractionOutput::NoSignal { reason } => {
@@ -116,6 +121,7 @@ pub async fn accept_semantic_output(
             AtomAcceptanceReceipt {
                 state: "no_signal".into(),
                 accepted_atoms: 0,
+                rejected_atoms: 0,
             }
         }
     };
@@ -166,12 +172,21 @@ async fn accept_atoms(
     input: &ClaimedInput,
     atoms: &[SemanticAtomProposal],
     invocation_ref: Option<Uuid>,
-) -> Result<usize, CommentResearchAtomError> {
+) -> Result<(usize, usize), CommentResearchAtomError> {
     if atoms.is_empty() || atoms.len() > MAX_ATOMS_PER_ITEM {
         return Err(CommentResearchAtomError::InvalidOutput);
     }
+    let mut accepted = 0;
+    let mut rejected = 0;
     for (ordinal, atom) in atoms.iter().enumerate() {
-        let (source_start, source_end) = validate_atom(input, atom)?;
+        let (source_start, source_end) = match validate_atom(input, atom) {
+            Ok(offsets) => offsets,
+            Err(CommentResearchAtomError::InvalidOutput) => {
+                rejected += 1;
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         sqlx::query(
             "INSERT INTO linggan_comment_research_atom( \
                  atom_ref,run_ref,derivation_ref,ordinal,kind,proposition,basis,research_start, \
@@ -201,8 +216,9 @@ async fn accept_atoms(
         .bind(invocation_ref)
         .execute(&mut **transaction)
         .await?;
+        accepted += 1;
     }
-    Ok(atoms.len())
+    Ok((accepted, rejected))
 }
 
 fn validate_atom(
