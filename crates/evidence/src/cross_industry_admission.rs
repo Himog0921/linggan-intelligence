@@ -214,14 +214,16 @@ async fn sampling_provenance(
         keyword,
         sort_order,
         scroll_rounds: count("scrollRounds"),
-        // 「要了多少」是取样上限：设了取赞前 N 就是 N，否则是这一单的篇数上限。
-        requested_count: count("topByLikes").or_else(|| {
-            task_spec
-                .as_ref()
-                .and_then(|spec| spec.get("maximumQuota"))
-                .and_then(Value::as_i64)
-                .and_then(|value| i32::try_from(value).ok())
-        }),
+        // 「要了多少」就是这一单**该拿回多少**：派发那一刻算一次、冻在说明书里的 `expectedCount`。
+        // 不再从口径或配额现推——规则「取赞前 N」与这一单篇数上限谁小，派发侧已经答过；这里再
+        // 推一遍就是同一件事的第二个家，两处一旦不一致，复核的基数从起点就是错的。
+        // 说明书里没有这个数（本次上线前派出的任务）就留空：宁可没有基数，不可记一个错的。
+        requested_count: task_spec
+            .as_ref()
+            .and_then(|spec| spec.get("expectedCount"))
+            .and_then(Value::as_i64)
+            .filter(|value| *value >= 0)
+            .and_then(|value| i32::try_from(value).ok()),
         // 「实际拿到多少」用插件如实报告的取得数，而不是本次写库条数：采不满是常态，
         // 复核时基数错了比没有基数更糟。
         actual_count: crate::material_contract_validation::unique_coverage_layer(

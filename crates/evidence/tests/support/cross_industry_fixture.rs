@@ -21,6 +21,12 @@ pub const EXTERNAL_DOMAIN: &str = "00000000-0000-4000-8000-000000000002";
 /// 迁移预置的本领域（ADHD）。本领域只有一个，由 `0041` 预置。
 pub const HOME_DOMAIN: &str = "00000000-0000-4000-8000-000000000001";
 
+/// 夹具默认的单子篇数上限（授权给的额度）。
+///
+/// 它和规则口径的「取赞前 N」是两个数：额度 200 配口径 20 时两者取小仍是 20，看不出区别；
+/// 要证明记录读的是哪一个，就得有一条额度更小的链路，见 `submit_external_package_with_quota`。
+pub const FIXTURE_QUOTA: i32 = 200;
+
 /// 造出一条完整的「外部领域关键词目标 → 工单 → 租约 → 任务 → 包」链路并提交。
 ///
 /// 领域判定靠的正是这条链（`resolve_package_domain` 从包一路 JOIN 回观察目标），
@@ -43,6 +49,37 @@ pub async fn submit_external_package(
         identity_key,
         lane,
         task_target,
+        FIXTURE_QUOTA,
+        package_kind,
+        coverage,
+        checkpoint,
+        records,
+    )
+    .await
+}
+
+/// 同一条链路，但这一单的篇数上限由调用方给。
+///
+/// 「规则口径要 20」与「这一单能拿回 8」是两个数。上限不小于口径时，从哪个数推都得出同一个
+/// 答案，缺陷因此藏得住；只有上限更小的这一条链路才问得清记录里记的到底是哪一个。
+pub async fn submit_external_package_with_quota(
+    database: &Database,
+    identity_key: &str,
+    lane: &str,
+    task_target: serde_json::Value,
+    quota: i32,
+    package_kind: &str,
+    coverage: serde_json::Value,
+    checkpoint: serde_json::Value,
+    records: Vec<serde_json::Value>,
+) -> Uuid {
+    submit_package_in_domain(
+        database,
+        EXTERNAL_DOMAIN,
+        identity_key,
+        lane,
+        task_target,
+        quota,
         package_kind,
         coverage,
         checkpoint,
@@ -59,6 +96,7 @@ pub async fn submit_package_in_domain(
     identity_key: &str,
     lane: &str,
     task_target: serde_json::Value,
+    quota: i32,
     package_kind: &str,
     coverage: serde_json::Value,
     checkpoint: serde_json::Value,
@@ -74,6 +112,7 @@ pub async fn submit_package_in_domain(
         identity_key,
         lane,
         task_target,
+        quota,
         package_kind,
         coverage,
         checkpoint,
@@ -112,6 +151,7 @@ pub async fn submit_package_for_target(
     identity_key: &str,
     lane: &str,
     task_target: serde_json::Value,
+    quota: i32,
     package_kind: &str,
     coverage: serde_json::Value,
     checkpoint: serde_json::Value,
@@ -166,12 +206,13 @@ pub async fn submit_package_for_target(
     let work_order_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO collection_work_order (work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions) \
-         VALUES ($1,$2,$3,$4,200,'[\"maximum_quota\"]'::jsonb)",
+         VALUES ($1,$2,$3,$4,$5,'[\"maximum_quota\"]'::jsonb)",
     )
     .bind(work_order_ref)
     .bind(decision_ref)
     .bind(target_ref)
     .bind(lane)
+    .bind(quota)
     .execute(database.pool())
     .await
     .expect("work order fixture is stored");
@@ -197,10 +238,22 @@ pub async fn submit_package_for_target(
     let producer_instance_id = Uuid::new_v4();
     let attempt_id = Uuid::new_v4();
     let installation_ref = Uuid::new_v4();
+    // 说明书里「这一轮该拿回多少」，按派发侧同一条算法：口径取前 N 与这一单篇数上限取小；
+    // 没设取前 N（建档、详情这类）就是上限本身。夹具手写说明书也得照这条算法写，差这个数，
+    // 「记录读的是冻结值」这条断言就测不到真东西。
+    let expected_count = match task_target
+        .get("topByLikes")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|top_by_likes| i32::try_from(top_by_likes).ok())
+    {
+        Some(top_by_likes) => top_by_likes.min(quota),
+        None => quota,
+    };
     let task = serde_json::json!({
         "contractVersion":"linggan.producer.task-spec.v1","taskId":task_id,"source":"scheduled",
         "platform":"xhs","pageType":"search_results","target":task_target,
-        "capabilitiesRequested":[package_kind],"maximumQuota":200,
+        "capabilitiesRequested":[package_kind],"maximumQuota":quota,
+        "expectedCount":expected_count,
         "commentLimit":"not_requested","acquireMedia":"not_requested",
         // scheduled 任务必须配服务端签发的风险策略，本机自发那套只属于 manual。
         "riskPolicy":"server_authorized_leased","stopConditions":["maximum_quota"]
