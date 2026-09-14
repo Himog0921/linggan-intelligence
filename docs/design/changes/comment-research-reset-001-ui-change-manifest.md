@@ -91,3 +91,11 @@
 | 没有 published ResultRevision 时仍可浏览当前原声 | isolated PostgreSQL `read_voices` / HTTP proof：canonical V1 version filter、200、分页、无作者名/Atom 枚举、无模型调用；overview/problems/changes 仍返回 result unavailable |
 | 设置后直接开始研究 | HTTP mutation test；模型调用数断言 |
 | 运行时显示新页面 | exact-head runtime switch 与浏览器截图 |
+
+## COMMENT-RESEARCH-PAGINATION-001 补充（2026-09-14）
+
+- 事项：Issue #269；评论研究三个增长型只读表格（用户原声、用户问题、运行记录）必须给出清晰、可操作的分页。
+- 表面：复用现有 L1 表格与按钮材料，在表格后添加当前区间/总数/页码和上一页、下一页；不增加导航、抽屉、筛选器或新的用户对象。
+- 数据边界：仅使用既有 `limit` / `offset` 读取契约。翻页不改变 Comment、Derivation、Run、RunItem、Atom、Problem、ResultRevision、模型调用或向量任务。
+- 行为：用户问题每页 10 条；用户原声和运行记录每页 20 条。视图切换重置到第 1 页；URL 保存 `view` 和有意义的 `page`；越界页自动回到最后有效页。
+- 验收：浏览器实测多页问题列表的总数、页码与下一页/上一页；请求参数与页码一致，调用账本不增加。

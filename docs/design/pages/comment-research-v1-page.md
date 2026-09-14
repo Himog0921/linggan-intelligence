@@ -51,3 +51,14 @@
 4. 保存 policy 和开始研究都复用同一服务端 V1 语义就绪判断：所选 config 的精确 model/connection version 已启用，且该 model/version 最新 probe 为成功、`ok`、`modelCallable` 与 `semanticQualified` 均为真。保存 policy 不调用模型；通过预检后，开始研究一次请求直接创建 V1 Run。
 5. `no-store`、local-origin guard 与响应式状态在真实 local API 中验证。
 6. `completed_with_failures` 只有在 ResultRevision 冻结的研究覆盖和问题组织覆盖均达到 COMMENT-RESEARCH-PUBLISH-001 门槛时才可发布 PARTIAL 版本；Run 状态、失败 Item、失败调用和未组织 Atom 保持可回溯，未纳入的对象不进入问题、变化或统计分母。
+
+## COMMENT-RESEARCH-PAGINATION-001 补充（2026-09-14）
+
+“用户原声”“用户问题”“运行记录”是可增长的研究列表，不能只依赖页面自然滚动来暗示还有结果。三个视图均使用已有的 `limit` / `offset` 只读接口；页面按当前视图请求有界范围，并在表格后明确显示：当前区间、总条数、页码与上一页/下一页。
+
+- 用户问题每页 10 条，便于在研究定义、证据样本与 Atom 数之间保持可读密度；用户原声和运行记录每页 20 条。
+- 翻页只改变当前读取范围，不会创建 Run、改变研究结果、派生评论、调用模型或修改 ResultRevision。
+- 视图切换回到第 1 页；当前页码通过 `?view=…&page=N` 保留，便于刷新或复制页面链接。
+- 无效或已过期的页码必须回到最后一个有效页，不能呈现“看似空白”的假空态。
+
+新增验收：当发布问题数超过 10 条时，用户问题页明确显示“显示 1–10，共 N 条 · 第 1 / M 页”，下一页显示后续条目；原声与运行记录遵循同一信息与交互契约。
