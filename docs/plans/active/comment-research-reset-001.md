@@ -2,7 +2,7 @@
 
 > 状态: 活跃计划
 > 最后核对: 2026-09-12
-> 适用范围: Issue #213；评论研究的唯一语义内核、研究运行、读取模型、四个研究视图和开发期派生数据重置
+> 适用范围: Issue #213；评论研究的基础语义内核、研究运行、读取模型、四个研究视图和开发期派生数据重置。当前 Derivation 输入合同由 COMMENT-RESEARCH-CONTEXT-INPUT-001 替代
 > 事实来源: Mog 2026-09-09 明确授权、[DEC-0003](../../decisions/0003-comment-research-single-semantic-kernel.md)、Issue #213 三路只读走查、`origin/main@45ffdf0`
 > 冲突时以谁为准: 用户最新决定、`AGENTS.md`、真实代码/迁移/测试/运行证据
 
@@ -46,7 +46,7 @@ RawComment（不可变证据）
 - `research_text`：只用于研究的派生正文；原始 `body_text` 永不更新。
 - `author_role`：`ordinary_user | content_author_reply | author_identity_unknown`。
 - `attribution_basis`：作品作者身份来自何处、为何可比较或未知。
-- 父评论、作品正文等上下文的可读引用和 hash，不复制其正文真相。
+- 审计上下文保留父评论、作品正文等的可读引用和 hash；当前语义输入合同另以 `comment-research.derivation.v2` 冻结最多一层、同规则清洗的父评论 `researchText`，其余作品级正文语义尚未获准进入输入。详见 [COMMENT-RESEARCH-V1-REAL-CLOSURE-001 §3.1](comment-research-v1-real-closure-001.md#31-语义上下文与审计上下文comment-research-context-input-001)。
 - `eligibility`：可研究、不可研究或暂不可确定，以及确切原因。
 
 只有 `ordinary_user + eligible` 能进入新的研究 Run；`content_author_reply` 是可回看的作品作者语境，`author_identity_unknown` 保持未知且不进入问题/变化分母。
@@ -67,7 +67,7 @@ Embedding 产生同类型 Top-K 候选；确定性规则拒绝明显不同的类
 
 ### 3.4 Result Revision 与变化
 
-概览、用户问题与变化观察只读取已 `published` 的 `ResultRevision`；正在清洗、提取、向量化或归并的结果不会半成品混入这些研究结论。用户原声是例外：它只读 canonical `comment-research.derivation.v1` 的 current、readable、`ordinary_user + eligible` derivation 的原文与研究正文，并附该 derivation 最后一次 RunItem 状态；它不等待或返回 `ResultRevision`，不派生、冻结、认领或调用模型。每个 revision 固定：范围、`as_of`、样本 manifest hash、research/attribution/embedding/membership policy hash、输入/失败/排除计数。
+概览、用户问题与变化观察只读取已 `published` 的 `ResultRevision`；正在清洗、提取、向量化或归并的结果不会半成品混入这些研究结论。用户原声是例外：它只读当前语义输入合同（现为 `comment-research.derivation.v2`）的 current、readable、`ordinary_user + eligible` derivation 的原文与研究正文，并附该 derivation 最后一次 RunItem 状态；它不等待或返回 `ResultRevision`，不派生、冻结、认领或调用模型。每个 revision 固定：范围、`as_of`、样本 manifest hash、research/attribution/embedding/membership policy hash、输入/失败/排除计数。
 
 变化比较固定为 Asia/Shanghai 的两个完整自然周：`[as_of-14d, as_of-7d)` 对 `[as_of-7d, as_of)`；不使用当天未结束的部分日。统计同时计算去重评论占比和作品覆盖率。发布 `升温`、`降温`、`扩散`、`新出现` 前，必须满足冻结 membership basis、两期覆盖和范围可比性；否则只返回 `not_comparable` 与原因。它们是研究输入范围内的观察，不是“市场正在增长/下降”的断言。
 

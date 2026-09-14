@@ -46,9 +46,9 @@
 ## 验收
 
 1. 页面不含旧“每日观察、保存查询、分析所选、评论研究设置”入口或 API。
-2. 原声行不出现向量准备术语、评论作者显示名或 Atom 类型枚举；它只展示 canonical `comment-research.derivation.v1` 的 current、readable、`ordinary_user + eligible` 原文、研究正文和受控中文研究状态/安全失败说明，不依赖或返回 `ResultRevision`。读取原声只执行只读查询，不派生、冻结、认领或调用模型；`limit` / `offset` 保持有效。三类身份事实仍在 derivation 中保存，`content_author_reply` 与 `author_identity_unknown` 不进入研究原声、问题或变化分母。
+2. 原声行不出现向量准备术语、评论作者显示名或 Atom 类型枚举；它只展示 canonical `comment-research.derivation.v2` 的 current、readable、`ordinary_user + eligible` 原文、研究正文和受控中文研究状态/安全失败说明，不依赖或返回 `ResultRevision`。回复在父评论不可读且当前短句需要关联语境时，显示“需要父评论语境”，不写成“未提取到研究信号”。读取原声只执行只读查询，不派生、冻结、认领或调用模型；`limit` / `offset` 保持有效。三类身份事实仍在 derivation 中保存，`content_author_reply` 与 `author_identity_unknown` 不进入研究原声、问题或变化分母。
 3. 变化页只有 observation 与 `not_comparable`，不出现问题页副本。
-4. 保存 policy 和开始研究都复用同一服务端 V1 语义就绪判断：所选 config 的精确 model/connection version 已启用，且该 model/version 最新 probe 为成功、`ok`、`modelCallable` 与 `semanticQualified` 均为真。保存 policy 不调用模型；通过预检后，开始研究一次请求直接创建 V1 Run。
+4. 保存 policy 和开始研究都复用同一服务端 V1 语义就绪判断：所选 config 的精确 model/connection version 已启用，且该 model/version 最新 probe 为成功、`ok`、`modelCallable` 与 `semanticQualified` 均为真。保存 policy 不调用模型；若已保存策略仍指向旧输入合同，开始研究会拒绝并要求重新保存策略，绝不以旧合同创建 Run。通过预检后，开始研究一次请求直接创建冻结 Run。
 5. `no-store`、local-origin guard 与响应式状态在真实 local API 中验证。
 6. `completed_with_failures` 只有在 ResultRevision 冻结的研究覆盖和问题组织覆盖均达到 COMMENT-RESEARCH-PUBLISH-001 门槛时才可发布 PARTIAL 版本；Run 状态、失败 Item、失败调用和未组织 Atom 保持可回溯，未纳入的对象不进入问题、变化或统计分母。
 

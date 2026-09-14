@@ -4,7 +4,7 @@
 //! recreates the retired comment-analysis queue and never starts an external call in queue-only
 //! mode.
 use linggan_intelligence::{
-    comment_research_kernel::reset_development_derived,
+    comment_research_kernel::{prewarm_current_sources, reset_development_derived},
     model_runner::{model_schema_ready, model_worker_heartbeat, run_model_work_once},
     model_secrets::model_secret_store,
     pi_adapter::PiAdapter,
@@ -17,24 +17,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.iter().any(|arg| {
         !matches!(
             arg.as_str(),
-            "--once" | "--execute" | "--reset-development-derived"
+            "--once" | "--execute" | "--derive-current" | "--reset-development-derived"
         )
     }) {
         return Err(
-            "usage: linggan-comment-worker --execute [--once] | --reset-development-derived".into(),
+            "usage: linggan-comment-worker --execute [--once] | --derive-current | --reset-development-derived".into(),
         );
     }
     let reset = args.iter().any(|arg| arg == "--reset-development-derived");
     let execute = args.iter().any(|arg| arg == "--execute");
-    if reset && (execute || args.iter().any(|arg| arg == "--once")) {
+    let derive_current = args.iter().any(|arg| arg == "--derive-current");
+    if [reset, execute, derive_current]
+        .into_iter()
+        .filter(|selected| *selected)
+        .count()
+        != 1
+        || (args.iter().any(|arg| arg == "--once") && !execute)
+    {
         return Err(
-            "--reset-development-derived cannot be combined with --execute or --once".into(),
-        );
-    }
-    if !reset && !execute {
-        return Err(
-            "V1 has no queue-only compatibility mode; save a policy and start a Run in the UI"
-                .into(),
+            "choose exactly one of --execute, --derive-current, or --reset-development-derived; --once requires --execute".into(),
         );
     }
     let url = std::env::var("LINGGAN_LOCAL_DATABASE_URL")
@@ -59,6 +60,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             receipt.deleted_problems,
             receipt.deleted_results,
         );
+        return Ok(());
+    }
+    if derive_current {
+        let derived = prewarm_current_sources(&database).await?;
+        println!("comment research current derivations prewarmed: {derived}");
         return Ok(());
     }
     let once = args.iter().any(|arg| arg == "--once");

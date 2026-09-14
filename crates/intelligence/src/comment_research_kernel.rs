@@ -14,8 +14,12 @@ use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
-pub const DERIVATION_VERSION: &str = "comment-research.derivation.v1";
+/// V2 adds a semantic parent-comment context contract.  V1 derivations remain immutable and
+/// readable as historical inputs; they must never be silently executed under the new contract.
+pub const DERIVATION_VERSION: &str = "comment-research.derivation.v2";
+const CONTEXT_MANIFEST_CONTRACT: &str = "comment-research.context.v2";
 const MAX_DERIVATIONS_PER_PASS: i64 = 3000;
+const MAX_DERIVATION_PREWARM_PASSES: usize = 100;
 const EXTRACTION_CONTRACT: &str = "comment-research.semantic.v5/extract:problem,need,solution,experience;evidence:exact-source-quote;output:exact-json-or-single-json-fence;examples:required";
 const MEMBERSHIP_CONTRACT: &str = "comment-research.semantic.v5/membership:retrieval-only-before-decision;output:exact-json-or-single-json-fence;examples:required";
 
@@ -86,8 +90,14 @@ pub enum CommentResearchKernelError {
     InvalidPolicy,
     #[error("no saved comment research policy exists")]
     PolicyMissing,
+    #[error(
+        "the saved comment research policy uses an older input contract and must be saved again"
+    )]
+    PolicyInputContractStale,
     #[error("no eligible ordinary-user derivations are available")]
     NoEligibleDerivations,
+    #[error("current comment derivations did not settle within the bounded prewarm")]
+    DerivationPrewarmIncomplete,
     #[error("no enabled, qualified embedding configuration is available")]
     EmbeddingNotReady,
     #[error("the selected research model has not passed the V1 semantic probe")]
@@ -186,16 +196,35 @@ pub struct ResearchRunItemClaim {
 /// The worker may read this immutable execution input after it has claimed an Item.  Keeping the
 /// source text here means the transport layer never needs to discover a second, legacy comment
 /// projection just to construct a prompt.
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClaimedResearchInput {
     pub run_ref: Uuid,
     pub derivation_ref: Uuid,
     pub attempt: i32,
     pub research_text: String,
-    pub context_manifest: Value,
+    pub clean_state: String,
+    pub parent_context: ParentResearchContext,
     pub config_ref: Option<Uuid>,
     pub token_limit: i64,
+}
+
+/// The only reply context that a semantic model may receive.  Source references and hashes are
+/// intentionally not part of this value: they are retained in the derivation audit manifest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ParentResearchContext {
+    NotRequested,
+    Available { research_text: String },
+    Unavailable,
+    Invalid,
+}
+
+impl ParentResearchContext {
+    pub fn research_text(&self) -> Option<&str> {
+        match self {
+            Self::Available { research_text } => Some(research_text),
+            Self::NotRequested | Self::Unavailable | Self::Invalid => None,
+        }
+    }
 }
 
 /// A role is a comparison between two collected platform identities, never a name heuristic.
@@ -265,12 +294,13 @@ pub async fn derive_current_sources(
                 source.body_text,source.author_external_id, \
                 attribution.author_external_id AS content_author_external_id, \
                 attribution.attribution_source,attribution.observed_at::text AS attribution_observed_at, \
-                parent.material_ref AS parent_source_ref,parent.body_text AS parent_body_text \
+                parent.material_ref AS parent_source_ref,parent.body_text AS parent_body_text, \
+                parent.author_external_id AS parent_author_external_id \
          FROM linggan_comment_research_source_current source \
          LEFT JOIN linggan_material_content_author attribution \
            ON attribution.content_public_ref=source.content_public_ref \
          LEFT JOIN LATERAL ( \
-           SELECT candidate.material_ref,candidate.body_text \
+           SELECT candidate.material_ref,candidate.body_text,candidate.author_external_id \
            FROM linggan_comment_research_source_current candidate \
            WHERE candidate.content_public_ref=source.content_public_ref \
              AND candidate.comment_external_id=source.parent_comment_external_id \
@@ -289,17 +319,23 @@ pub async fn derive_current_sources(
                ELSE 'ordinary_user' END \
              AND existing.attribution_source IS NOT DISTINCT FROM attribution.attribution_source \
              AND existing.attribution_observed_at IS NOT DISTINCT FROM attribution.observed_at \
-             AND existing.context_manifest=jsonb_build_object( \
+             AND existing.context_manifest->>'contract'=$3 \
+             AND existing.context_manifest->'audit'=jsonb_build_object( \
                'workRef',source.content_public_ref, \
                'parentSourceRef',parent.material_ref, \
                'parentSourceSha256',CASE WHEN parent.body_text IS NULL THEN NULL ELSE encode(sha256(convert_to(parent.body_text,'UTF8')),'hex') END, \
-               'parentRequested',source.parent_comment_external_id IS NOT NULL \
+               'parentRequested',source.parent_comment_external_id IS NOT NULL, \
+               'parentAuthorRole',CASE WHEN parent.material_ref IS NULL THEN NULL WHEN NULLIF(btrim(parent.author_external_id),'') IS NULL \
+                 OR NULLIF(btrim(attribution.author_external_id),'') IS NULL THEN 'author_identity_unknown' \
+                 WHEN NULLIF(btrim(parent.author_external_id),'')=NULLIF(btrim(attribution.author_external_id),'') THEN 'content_author_reply' \
+                 ELSE 'ordinary_user' END \
              ) \
          ) \
          ORDER BY source.created_at DESC,source.material_ref DESC LIMIT $2",
     )
     .bind(DERIVATION_VERSION)
     .bind(limit)
+    .bind(CONTEXT_MANIFEST_CONTRACT)
     .fetch_all(database.pool())
     .await?;
     let mut derived = 0;
@@ -307,6 +343,24 @@ pub async fn derive_current_sources(
         derived += persist_derivation(database, &row).await?;
     }
     Ok(derived)
+}
+
+/// Brings the current, readable source projection onto the active derivation contract before a
+/// read surface is exposed. It is intentionally bounded so a deployment cannot spin forever if
+/// new source material keeps arriving; failure leaves the caller to keep the old surface running.
+/// This only persists deterministic derivations. It neither authorizes nor starts model work.
+pub async fn prewarm_current_sources(
+    database: &Database,
+) -> Result<u64, CommentResearchKernelError> {
+    let mut derived_total = 0;
+    for _ in 0..MAX_DERIVATION_PREWARM_PASSES {
+        let derived = derive_current_sources(database, usize::MAX).await?;
+        derived_total += derived;
+        if derived == 0 {
+            return Ok(derived_total);
+        }
+    }
+    Err(CommentResearchKernelError::DerivationPrewarmIncomplete)
 }
 
 /// Saving a policy is the only authorization boundary for a user-initiated run. Starting an
@@ -360,6 +414,14 @@ pub async fn save_active_policy(
     })
 }
 
+fn ensure_current_policy_contract(
+    policy: &sqlx::postgres::PgRow,
+) -> Result<(), CommentResearchKernelError> {
+    (policy.get::<String, _>("derivation_version") == DERIVATION_VERSION)
+        .then_some(())
+        .ok_or(CommentResearchKernelError::PolicyInputContractStale)
+}
+
 /// Creates a frozen eligible-source manifest using the previously saved policy. It neither asks
 /// for a second authorization nor calls an external provider. The worker will advance this queue.
 pub async fn start_run(
@@ -381,6 +443,7 @@ pub async fn start_run(
     .fetch_optional(&mut *transaction)
     .await?
     .ok_or(CommentResearchKernelError::PolicyMissing)?;
+    ensure_current_policy_contract(&policy)?;
     let config_ref: Option<Uuid> = policy.get("config_ref");
     let Some(config_ref) = config_ref else {
         return Err(CommentResearchKernelError::ModelNotReady);
@@ -463,6 +526,9 @@ pub async fn preview_run(
     )
     .fetch_optional(&mut *transaction)
     .await?;
+    if let Some(policy) = policy.as_ref() {
+        ensure_current_policy_contract(policy)?;
+    }
     let summary = sqlx::query(
         "WITH current AS ( \
              SELECT derivation.derivation_ref,latest_item.state AS latest_state \
@@ -530,15 +596,10 @@ pub async fn preview_run(
         .iter()
         .filter(|source| {
             source.clean_state == "context"
-                && source
-                    .context_manifest
-                    .get("parentRequested")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false)
-                && source
-                    .context_manifest
-                    .get("parentSourceRef")
-                    .is_none_or(Value::is_null)
+                && matches!(
+                    parent_context_from_manifest(&source.context_manifest),
+                    ParentResearchContext::Unavailable | ParentResearchContext::Invalid
+                )
         })
         .count();
     let source_limit = policy.as_ref().map(|row| row.get::<i32, _>("source_limit"));
@@ -836,14 +897,14 @@ pub async fn claim_next_run_item(
     }))
 }
 
-/// Returns only the frozen material belonging to a current V1 claim.  A missing row is a normal
+/// Returns only the frozen material belonging to a current V2 claim.  A missing row is a normal
 /// lease-loss outcome: another recovery path may have settled the Item while the caller waited.
 pub async fn load_claimed_research_input(
     database: &Database,
     claim: &ResearchRunItemClaim,
 ) -> Result<Option<ClaimedResearchInput>, CommentResearchKernelError> {
     let row = sqlx::query(
-        "SELECT derivation.research_text,derivation.context_manifest,policy.config_ref,policy.token_limit \
+        "SELECT derivation.research_text,derivation.clean_state,derivation.context_manifest,policy.config_ref,policy.token_limit \
          FROM linggan_comment_research_run_item item \
          JOIN linggan_comment_research_run run USING(run_ref) \
          JOIN linggan_comment_research_policy_revision policy \
@@ -861,7 +922,8 @@ pub async fn load_claimed_research_input(
         derivation_ref: claim.derivation_ref,
         attempt: claim.attempt,
         research_text: row.get("research_text"),
-        context_manifest: row.get("context_manifest"),
+        clean_state: row.get("clean_state"),
+        parent_context: parent_context_from_manifest(&row.get("context_manifest")),
         config_ref: row.get("config_ref"),
         token_limit: row.get("token_limit"),
     }))
@@ -1264,15 +1326,71 @@ fn classify_eligibility(
 
 fn context_manifest(row: &sqlx::postgres::PgRow, content_ref: Uuid) -> Value {
     let parent_ref: Option<Uuid> = row.get("parent_source_ref");
-    let parent_hash = row
-        .get::<Option<String>, _>("parent_body_text")
-        .map(|body| content_hash(&body));
+    let parent_body: Option<String> = row.get("parent_body_text");
+    let parent_hash = parent_body.as_deref().map(content_hash);
+    let parent_requested = row
+        .get::<Option<String>, _>("parent_comment_external_id")
+        .is_some();
+    let parent_author_role = parent_ref.map(|_| {
+        classify_author_role(
+            row.get::<Option<String>, _>("parent_author_external_id")
+                .as_deref(),
+            row.get::<Option<String>, _>("content_author_external_id")
+                .as_deref(),
+        )
+    });
+    let parent = match (parent_requested, parent_body.as_deref(), parent_author_role) {
+        (false, _, _) => json!({"state":"not_requested"}),
+        (true, Some(body), Some(role)) => {
+            let research = derive_research_text(body, role);
+            if research.text.trim().is_empty() {
+                json!({"state":"unavailable"})
+            } else {
+                json!({"state":"available","researchText":research.text})
+            }
+        }
+        (true, _, _) => json!({"state":"unavailable"}),
+    };
     json!({
-        "workRef":content_ref,
-        "parentSourceRef":parent_ref,
-        "parentSourceSha256":parent_hash,
-        "parentRequested":row.get::<Option<String>, _>("parent_comment_external_id").is_some(),
+        "contract":CONTEXT_MANIFEST_CONTRACT,
+        "semantic":{"parent":parent},
+        "audit":{
+            "workRef":content_ref,
+            "parentSourceRef":parent_ref,
+            "parentSourceSha256":parent_hash,
+            "parentRequested":parent_requested,
+            "parentAuthorRole":parent_author_role.map(CommentAuthorRole::as_db),
+        }
     })
+}
+
+fn parent_context_from_manifest(context_manifest: &Value) -> ParentResearchContext {
+    if context_manifest.get("contract").and_then(Value::as_str) != Some(CONTEXT_MANIFEST_CONTRACT) {
+        return ParentResearchContext::Invalid;
+    }
+    let Some(parent) = context_manifest
+        .get("semantic")
+        .and_then(|semantic| semantic.get("parent"))
+    else {
+        return ParentResearchContext::Invalid;
+    };
+    match parent.get("state").and_then(Value::as_str) {
+        Some("not_requested") if parent.get("researchText").is_none() => {
+            ParentResearchContext::NotRequested
+        }
+        Some("unavailable") if parent.get("researchText").is_none() => {
+            ParentResearchContext::Unavailable
+        }
+        Some("available") => parent
+            .get("researchText")
+            .and_then(Value::as_str)
+            .filter(|text| !text.trim().is_empty())
+            .map(|research_text| ParentResearchContext::Available {
+                research_text: research_text.to_owned(),
+            })
+            .unwrap_or(ParentResearchContext::Invalid),
+        _ => ParentResearchContext::Invalid,
+    }
 }
 
 #[cfg(test)]
@@ -1330,6 +1448,29 @@ mod tests {
         assert_eq!(
             classify_eligibility(true, &direct, CommentAuthorRole::AuthorIdentityUnknown),
             DerivationEligibility::AuthorIdentityUnknown
+        );
+    }
+
+    #[test]
+    fn parent_context_contract_never_treats_missing_required_text_as_no_context() {
+        assert_eq!(
+            parent_context_from_manifest(&json!({
+                "contract":"comment-research.context.v2",
+                "semantic":{"parent":{"state":"available","researchText":"习惯性熬夜"}}
+            })),
+            ParentResearchContext::Available {
+                research_text: "习惯性熬夜".into()
+            }
+        );
+        assert_eq!(
+            parent_context_from_manifest(
+                &json!({"contract":"comment-research.context.v2","semantic":{"parent":{"state":"unavailable"}}})
+            ),
+            ParentResearchContext::Unavailable
+        );
+        assert_eq!(
+            parent_context_from_manifest(&json!({"workRef":"not-a-semantic-context"})),
+            ParentResearchContext::Invalid
         );
     }
 }

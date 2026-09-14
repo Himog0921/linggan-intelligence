@@ -153,6 +153,33 @@ request_worker_drain "$runtime_revision" "$target_revision"
 cp "$repo_root/.env" "$runtime_dir/.env"
 log "已同步 .env 到运行目录"
 
+prepare_current_comment_derivations() {
+  # Complete the deterministic input cutover while the old API remains available.  The API
+  # launch gate below repeats this harmless no-op check for later standalone restarts.
+  local sync_copy
+  sync_copy="$(mktemp -t linggan-sync)"
+  cp "$runtime_dir/scripts/runtime/sync.sh" "$sync_copy"
+  LINGGAN_RUNTIME_DIR="$runtime_dir" LINGGAN_SUPPORT_DIR="$support_dir" /bin/zsh "$sync_copy"
+  rm -f "$sync_copy"
+
+  cd "$runtime_dir"
+  [[ "$(git rev-parse HEAD)" == "$target_revision" ]] \
+    || { print -r -- "运行目录未同步到目标 revision；未重启 API" >&2; exit 1; }
+  # `sync_copy` may have been the pre-update script, whose parsed build list does not yet include
+  # this new CLI. Build the exact target binary explicitly; never execute a leftover binary.
+  cargo build --quiet --bin linggan-comment-worker
+  [[ -x ./target/debug/linggan-comment-worker ]] \
+    || { print -r -- "预热 CLI 构建后仍不可执行；未重启 API" >&2; exit 1; }
+  set -a
+  source ./.env
+  set +a
+  export LINGGAN_LOCAL_DATABASE_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@127.0.0.1:${POSTGRES_PORT}/${POSTGRES_DB}"
+  ./target/debug/linggan-comment-worker --derive-current
+  log "当前评论输入合同已预热；可以切换 API"
+}
+
+prepare_current_comment_derivations
+
 write_plist() {
   local label="$1" binary="$2" logname="$3" port="${4:-}"
   local plist="$agents_dir/com.linggan-intelligence.$label.plist"

@@ -27,6 +27,45 @@ pub async fn comment_with_author(
         .await
         .unwrap()
 }
+
+pub async fn reply_with_author(
+    database: &Database,
+    note: &str,
+    id: &str,
+    parent_comment_id: &str,
+    body: &str,
+    author_id: Option<&str>,
+    observed_at: &str,
+) -> Uuid {
+    let mut payload = json!({
+        "commentId":id,
+        "noteId":note,
+        "rootCommentId":parent_comment_id,
+        "parentCommentId":parent_comment_id,
+        "text":body,
+    });
+    if let Some(author_id) = author_id {
+        payload["authorId"] = json!(author_id);
+    }
+    let package = submit_package_at(
+        database,
+        "replies",
+        json!({"contentExternalId":note}),
+        json!({
+            "kind":"reply",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":note},
+            "payload":payload,
+        }),
+        observed_at,
+    )
+    .await;
+    sqlx::query_scalar("SELECT material_ref FROM linggan_material_comment WHERE package_ref=$1")
+        .bind(package)
+        .fetch_one(database.pool())
+        .await
+        .unwrap()
+}
+
 pub async fn detail_with_author(
     database: &Database,
     note: &str,
