@@ -16,7 +16,8 @@ use linggan_intelligence::comment_research_kernel::{
     CommentResearchKernelError, DERIVATION_VERSION, ResearchRunReceipt, RunItemFailureClass,
     SaveResearchPolicy, claim_next_run_item, derive_current_sources,
     fail_active_runs_without_embedding_config, preview_run, record_run_item_failure,
-    recover_expired_run_items, refresh_run_completion_for_atom, save_active_policy, start_run,
+    recover_expired_run_items, refresh_run_completion_for_atom, reset_development_derived,
+    save_active_policy, start_run,
 };
 use linggan_intelligence::comment_research_problems::{
     CommentResearchProblemError, ExistingProblemAdmission, NewProblemAdmission,
@@ -1219,7 +1220,8 @@ async fn saved_policy_is_the_only_authorization_needed_to_queue_a_research_run()
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
-async fn automatic_run_preview_keeps_completed_retryable_and_cancelled_items_out_of_a_new_run() {
+async fn automatic_run_preview_recovers_cancelled_items_without_repeating_effective_or_active_research()
+ {
     let database = fixture::proof_database("comment_research_automatic_run_preview").await;
     detail_with_author(
         &database,
@@ -1321,11 +1323,12 @@ async fn automatic_run_preview_keeps_completed_retryable_and_cancelled_items_out
     assert_eq!(preview.source_limit, Some(10));
     assert_eq!(preview.eligible_sources, 5);
     assert_eq!(preview.unprocessed_sources, 1);
-    assert_eq!(preview.selected_sources, 1);
+    assert_eq!(preview.recoverable_sources, 1);
+    assert_eq!(preview.selected_sources, 2);
     assert_eq!(preview.succeeded_sources, 1);
     assert_eq!(preview.no_signal_sources, 1);
     assert_eq!(preview.retryable_sources, 1);
-    assert_eq!(preview.terminal_item_states["cancelled"], 1);
+    assert!(preview.terminal_item_states.get("cancelled").is_none());
     let public_preview = serde_json::to_value(&preview).unwrap();
     assert!(public_preview.get("derivationRefs").is_none());
     assert!(public_preview.get("commentText").is_none());
@@ -1339,7 +1342,7 @@ async fn automatic_run_preview_keeps_completed_retryable_and_cancelled_items_out
 
     let second_run = start_ready_run(&database).await.unwrap();
     assert_ne!(second_run.run_ref, first_run.run_ref);
-    assert_eq!(second_run.selected_sources, 1);
+    assert_eq!(second_run.selected_sources, 2);
     let selected: Vec<Uuid> = sqlx::query_scalar(
         "SELECT derivation_ref FROM linggan_comment_research_run_item WHERE run_ref=$1",
     )
@@ -1347,11 +1350,16 @@ async fn automatic_run_preview_keeps_completed_retryable_and_cancelled_items_out
     .fetch_all(database.pool())
     .await
     .unwrap();
-    assert_eq!(selected.len(), 1);
-    assert_ne!(selected[0], no_signal.derivation_ref);
-    assert_ne!(selected[0], succeeded.derivation_ref);
-    assert_ne!(selected[0], retryable.derivation_ref);
-    assert_ne!(selected[0], cancelled.derivation_ref);
+    assert_eq!(selected.len(), 2);
+    assert!(!selected.contains(&no_signal.derivation_ref));
+    assert!(!selected.contains(&succeeded.derivation_ref));
+    assert!(!selected.contains(&retryable.derivation_ref));
+    assert!(selected.contains(&cancelled.derivation_ref));
+    assert!(
+        selected
+            .iter()
+            .any(|derivation_ref| *derivation_ref != cancelled.derivation_ref)
+    );
 }
 
 #[tokio::test]
@@ -1744,13 +1752,22 @@ async fn accepted_atoms_are_evidence_bound_and_invalid_model_output_writes_nothi
         &database,
         &claim,
         SemanticExtractionOutput::Atoms {
-            atoms: vec![SemanticAtomProposal {
-                kind: AtomKind::Problem,
-                proposition: "孩子写作业时存在持续拖延".into(),
-                basis: AtomBasis::Explicit,
-                evidence_start: 0,
-                evidence_end: 5,
-            }],
+            atoms: vec![
+                SemanticAtomProposal {
+                    kind: AtomKind::Problem,
+                    proposition: "孩子写作业时存在持续拖延".into(),
+                    basis: AtomBasis::Explicit,
+                    evidence_start: 0,
+                    evidence_end: 5,
+                },
+                SemanticAtomProposal {
+                    kind: AtomKind::Need,
+                    proposition: " ".into(),
+                    basis: AtomBasis::Explicit,
+                    evidence_start: 0,
+                    evidence_end: 5,
+                },
+            ],
         },
         None,
     )
@@ -1758,6 +1775,7 @@ async fn accepted_atoms_are_evidence_bound_and_invalid_model_output_writes_nothi
     .unwrap();
     assert_eq!(receipt.state, "succeeded");
     assert_eq!(receipt.accepted_atoms, 1);
+    assert_eq!(receipt.rejected_atoms, 1);
 
     let atom: (String, i32, i32, i32, i32) = sqlx::query_as(
         "SELECT kind,research_start,research_end,source_start,source_end \
@@ -1777,6 +1795,174 @@ async fn accepted_atoms_are_evidence_bound_and_invalid_model_output_writes_nothi
             .await
             .unwrap();
     assert_eq!(run_state, "running");
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn development_reset_removes_only_comment_research_derivatives() {
+    let database = fixture::proof_database("comment_research_development_reset").await;
+    detail_with_author(
+        &database,
+        "development-reset-note",
+        "SYNTHETIC development reset note",
+        Some("creator-1"),
+    )
+    .await;
+    let source_ref = comment_with_author(
+        &database,
+        "development-reset-note",
+        "development-reset-comment",
+        "孩子写作业总拖延，有什么办法吗",
+        Some("reader-1"),
+        "2026-09-01T08:00:00Z",
+    )
+    .await;
+    let config_ref = qualified_research_config(&database).await;
+    save_active_policy(
+        &database,
+        SaveResearchPolicy {
+            config_ref: Some(config_ref),
+            source_limit: 10,
+            token_limit: 10_000,
+        },
+    )
+    .await
+    .unwrap();
+    let run = start_ready_run(&database).await.unwrap();
+    let claim = claim_next_run_item(&database).await.unwrap().unwrap();
+    accept_semantic_output(
+        &database,
+        &claim,
+        SemanticExtractionOutput::Atoms {
+            atoms: vec![SemanticAtomProposal {
+                kind: AtomKind::Problem,
+                proposition: "孩子写作业持续拖延".into(),
+                basis: AtomBasis::Explicit,
+                evidence_start: 0,
+                evidence_end: 5,
+            }],
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    let raw_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_material_comment WHERE material_ref=$1")
+            .bind(source_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    let policy_before: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_policy_active WHERE singleton",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let invocation_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    let profile_before: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_embedding_profile WHERE singleton",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+
+    let receipt = reset_development_derived(&database).await.unwrap();
+    assert!(receipt.deleted_derivations >= 1);
+    assert!(receipt.deleted_runs >= 1);
+    assert!(receipt.deleted_run_items >= 1);
+    assert!(receipt.deleted_atoms >= 1);
+    for (relation, statement) in [
+        (
+            "linggan_comment_research_derivation",
+            "SELECT count(*) FROM linggan_comment_research_derivation",
+        ),
+        (
+            "linggan_comment_research_run",
+            "SELECT count(*) FROM linggan_comment_research_run",
+        ),
+        (
+            "linggan_comment_research_run_item",
+            "SELECT count(*) FROM linggan_comment_research_run_item",
+        ),
+        (
+            "linggan_comment_research_atom",
+            "SELECT count(*) FROM linggan_comment_research_atom",
+        ),
+        (
+            "linggan_comment_research_atom_embedding",
+            "SELECT count(*) FROM linggan_comment_research_atom_embedding",
+        ),
+        (
+            "linggan_comment_research_problem",
+            "SELECT count(*) FROM linggan_comment_research_problem",
+        ),
+        (
+            "linggan_comment_research_problem_definition",
+            "SELECT count(*) FROM linggan_comment_research_problem_definition",
+        ),
+        (
+            "linggan_comment_research_problem_resolution",
+            "SELECT count(*) FROM linggan_comment_research_problem_resolution",
+        ),
+        (
+            "linggan_comment_research_result_revision",
+            "SELECT count(*) FROM linggan_comment_research_result_revision",
+        ),
+        (
+            "linggan_comment_research_problem_window_stat",
+            "SELECT count(*) FROM linggan_comment_research_problem_window_stat",
+        ),
+        (
+            "linggan_comment_research_change_observation",
+            "SELECT count(*) FROM linggan_comment_research_change_observation",
+        ),
+        (
+            "linggan_comment_research_embedding_space",
+            "SELECT count(*) FROM linggan_comment_research_embedding_space",
+        ),
+    ] {
+        let count: i64 = sqlx::query_scalar(statement)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+        assert_eq!(count, 0, "{relation} should be regenerated after reset");
+    }
+    let raw_after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM linggan_material_comment WHERE material_ref=$1")
+            .bind(source_ref)
+            .fetch_one(database.pool())
+            .await
+            .unwrap();
+    let policy_after: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_policy_active WHERE singleton",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    let invocation_after: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    let profile_after: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_comment_research_embedding_profile WHERE singleton",
+    )
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(raw_after, raw_before);
+    assert_eq!(policy_after, policy_before);
+    assert_eq!(invocation_after, invocation_before);
+    assert_eq!(profile_after, profile_before);
+    assert_eq!(derive_current_sources(&database, 10).await.unwrap(), 1);
+    let preview = preview_run(&database).await.unwrap();
+    assert_eq!(preview.selected_sources, 1);
+    let after_reset_run = start_run(&database).await.unwrap();
+    assert_eq!(after_reset_run.selected_sources, 1);
+    assert_ne!(after_reset_run.run_ref, run.run_ref);
 }
 
 #[tokio::test]

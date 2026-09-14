@@ -313,7 +313,7 @@
     if (!preview?.policyConfigured) return '请先保存研究策略，系统才有本轮自动选择上限。';
     if (!researchModelReady()) return errorText.research_model_not_ready;
     if (!embeddingReady()) return errorText.embedding_not_ready;
-    if (!Number(preview.selectedSources || 0)) return '当前没有尚未进入任何研究运行的可处理用户原声。已有成功、无信号、重试或限制状态会保留在各自的运行记录中。';
+    if (!Number(preview.selectedSources || 0)) return '当前没有可进入本轮研究的用户原声。已有有效结论、正在执行或当前合同已拒绝的项会保留在各自的运行记录中。';
     return '';
   }
 
@@ -325,7 +325,7 @@
     if (!preview.policyConfigured) {
       target.innerHTML = `<p>当前有 ${count(preview.eligibleSources)} 条可读普通用户原声，但尚未保存研究策略，系统不能计算本轮上限。</p>`;
     } else {
-      target.innerHTML = `<p>服务端会按当前策略和既有运行记录自动选择；确认时会再次计算并冻结范围。</p><dl><div><dt>本次自动处理</dt><dd>${count(preview.selectedSources)} 条</dd></div><div><dt>尚未进入研究</dt><dd>${count(preview.unprocessedSources)} 条</dd></div><div><dt>已提取研究信号</dt><dd>${count(preview.succeededSources)} 条</dd></div><div><dt>未提取到信号</dt><dd>${count(preview.noSignalSources)} 条</dd></div><div><dt>已有执行或恢复中</dt><dd>${count(Number(preview.activeSources) + Number(preview.retryableSources))} 条</dd></div><div><dt>需关联语境</dt><dd>${count(preview.selectedContextSources)} 条</dd></div></dl><p>已提取信号和未提取信号的原声保留在历史运行中，不会被重新加入本轮。执行或恢复中的原声继续由原 Run 推进。</p>${preview.selectedMissingParentContextSources ? `<p>所选范围中有 ${count(preview.selectedMissingParentContextSources)} 条需要关联语境，但当前没有可读父评论记录；该事实会随输入冻结保留，不会由页面补造。</p>` : ''}${terminal ? `<p>不会重新加入本轮：${escape(terminal)}。</p>` : ''}`;
+      target.innerHTML = `<p>服务端会按当前策略和既有运行记录自动选择；确认时会再次计算并冻结范围。</p><dl><div><dt>本次自动处理</dt><dd>${count(preview.selectedSources)} 条</dd></div><div><dt>尚未进入研究</dt><dd>${count(preview.unprocessedSources)} 条</dd></div><div><dt>可恢复</dt><dd>${count(preview.recoverableSources)} 条</dd></div><div><dt>已提取研究信号</dt><dd>${count(preview.succeededSources)} 条</dd></div><div><dt>未提取到信号</dt><dd>${count(preview.noSignalSources)} 条</dd></div><div><dt>已有执行或恢复中</dt><dd>${count(Number(preview.activeSources) + Number(preview.retryableSources))} 条</dd></div><div><dt>需关联语境</dt><dd>${count(preview.selectedContextSources)} 条</dd></div></dl><p>已提取信号和未提取信号的原声保留为有效研究结论，不会重复调用模型。执行中的原声由原 Run 推进；可恢复项会按当前研究输入自动判断是否进入本轮。</p>${preview.selectedMissingParentContextSources ? `<p>所选范围中有 ${count(preview.selectedMissingParentContextSources)} 条需要关联语境，但当前没有可读父评论记录；该事实会随输入冻结保留，不会由页面补造。</p>` : ''}${terminal ? `<p>当前研究输入下不再自动外发：${escape(terminal)}。</p>` : ''}`;
     }
     const blocker = previewBlocker(preview);
     feedback.textContent = blocker || (state.setup?.worker?.lastSeenAt ? '确认后会创建一个新的冻结 Run；模型是否已执行及其结果会在运行记录中如实更新。' : '确认后会创建一个新的冻结 Run；尚未记录 Worker 心跳，模型调用会等待 Worker 启动。');

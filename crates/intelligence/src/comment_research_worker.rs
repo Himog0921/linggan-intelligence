@@ -142,7 +142,10 @@ pub async fn schema_ready(database: &Database) -> Result<bool, ModelError> {
                 AND to_regclass('linggan_ci_problem') IS NULL \
                 AND EXISTS(SELECT 1 FROM pg_attribute \
                     WHERE attrelid='linggan_comment_research_derivation'::regclass \
-                      AND attname='derivation_input_hash' AND NOT attisdropped)",
+                      AND attname='derivation_input_hash' AND NOT attisdropped) \
+                AND EXISTS(SELECT 1 FROM pg_attribute \
+                    WHERE attrelid='linggan_comment_research_run_item'::regclass \
+                      AND attname='research_fingerprint' AND NOT attisdropped)",
     )
     .fetch_one(database.pool())
     .await?)

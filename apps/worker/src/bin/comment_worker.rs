@@ -4,6 +4,7 @@
 //! recreates the retired comment-analysis queue and never starts an external call in queue-only
 //! mode.
 use linggan_intelligence::{
+    comment_research_kernel::reset_development_derived,
     model_runner::{model_schema_ready, model_worker_heartbeat, run_model_work_once},
     model_secrets::model_secret_store,
     pi_adapter::PiAdapter,
@@ -13,13 +14,24 @@ use linggan_storage_postgres::Database;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    if args
-        .iter()
-        .any(|arg| !matches!(arg.as_str(), "--once" | "--execute"))
-    {
-        return Err("usage: linggan-comment-worker --execute [--once]".into());
+    if args.iter().any(|arg| {
+        !matches!(
+            arg.as_str(),
+            "--once" | "--execute" | "--reset-development-derived"
+        )
+    }) {
+        return Err(
+            "usage: linggan-comment-worker --execute [--once] | --reset-development-derived".into(),
+        );
     }
-    if !args.iter().any(|arg| arg == "--execute") {
+    let reset = args.iter().any(|arg| arg == "--reset-development-derived");
+    let execute = args.iter().any(|arg| arg == "--execute");
+    if reset && (execute || args.iter().any(|arg| arg == "--once")) {
+        return Err(
+            "--reset-development-derived cannot be combined with --execute or --once".into(),
+        );
+    }
+    if !reset && !execute {
         return Err(
             "V1 has no queue-only compatibility mode; save a policy and start a Run in the UI"
                 .into(),
@@ -32,9 +44,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map_err(|_| "local database is unavailable")?;
     if !model_schema_ready(&database).await {
         return Err(
-            "comment research V1 terminal migrations 0069–0070 are required; no work was started"
+            "comment research V1 terminal migrations 0069–0081 are required; no work was started"
                 .into(),
         );
+    }
+    if reset {
+        let receipt = reset_development_derived(&database).await?;
+        println!(
+            "comment research V1 development reset: derivations={}, runs={}, runItems={}, atoms={}, problems={}, results={}",
+            receipt.deleted_derivations,
+            receipt.deleted_runs,
+            receipt.deleted_run_items,
+            receipt.deleted_atoms,
+            receipt.deleted_problems,
+            receipt.deleted_results,
+        );
+        return Ok(());
     }
     let once = args.iter().any(|arg| arg == "--once");
     let store = model_secret_store();
