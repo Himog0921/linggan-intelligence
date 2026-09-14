@@ -17,6 +17,10 @@
 
 Mog 已授权只重置评论研究派生层：Run、RunItem、Atom、向量空间/向量、Problem/Definition/Membership/Resolution、ResultRevision 和变化投影可以清空；Raw Comment、作品/父评论上下文、作者归属、来源限制、模型连接/配置、WeMM profile、active policy 与通用 ModelInvocation 账本必须保留。本项新增同一研究指纹下的有效结论复用、取消项恢复和局部 Atom 接纳，避免历史 Run 存在即永久阻断新研究。连续自动排程仍关闭；完成声明仍需要共享开发库的实际 reset、受控首轮 Run、published ResultRevision、localhost 页面和 Mog 业务验收分别提供证据。
 
+### COMMENT-RESEARCH-SEMANTIC-OUTPUT-001 / Issue #256（源码实施中；受控首批暴露合同失败）
+
+2026-09-14 已在共享开发库执行仅派生层的实际 reset：删除 1,643 个 Derivation、4 个 Run、1,248 个 RunItem、58 个 Atom、3 个 Problem 与 0 个 ResultRevision；随后再次派生出当前 1,643 条研究输入。Raw Comment 为 3,102，模型调用账本、模型配置、向量 profile 与 active policy 均保留。20 条受控真实首批的 Run `4cfd518c-a1df-4046-88ce-1bc5190fd088` 完成为 `completed_with_failures`，没有发布 ResultRevision：语义提取有 3 次不可解析 JSON 和 1 次合同拒绝，问题归并有 2 次结构不合格。该事实证明当前发布门槛生效，也证明不能把现有结果展示为正式研究版本。Issue #256 只修复 V2 输出合同与安全传输边界，部署后仍只允许新的受控首批；全量和连续自动研究继续关闭。
+
 ### COMMENT-RESEARCH-RESET-001 / Issue #213（V1 已合并、开发库已切换、3000 已上线；首轮模型配置与业务验收待执行）
 
 Mog 已决定评论研究仍处开发期：既有研究派生结果可以删除，不做 Task B、P4 与新系统之间的数据迁移。新交付只保留 Raw Comment/Evidence、来源资格、作者事实、清洗定位、调用账本、预算与 lease/recovery 等可独立复用基础；旧 candidate/relation/vector、P4 HDBSCAN/Leiden/adapter/group、旧超级查询和页面读取将全部退役。唯一未来合同为 [COMMENT-RESEARCH-RESET-001](plans/active/comment-research-reset-001.md)，长期裁定为 [DEC-0003](decisions/0003-comment-research-single-semantic-kernel.md)。
