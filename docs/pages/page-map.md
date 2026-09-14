@@ -6,6 +6,8 @@
 > 事实来源: PRD 与目标领域对象
 > 冲突时以谁为准: 用户确认的产品流程和更新后的 PRD
 
+> **2026-09-06 范围更新**：Mog 最新讨论将当前产品收敛为独立首页与智能工作台、市场洞察、语料库、采集四个工作区，移出选题库及制作发布流程。本文件保留历史推演；其中选题卡、战绩回收、独立行动页等不再作为本轮页面依据。最新页面提案见[产品页面蓝图](intelligence-product-blueprint.md)，首页细化见[首页与 Three.js](intelligence-home-threejs.md)；新增设计仍待评审。
+
 页面设计服务于完整领域认知与行动工作流，不以旧工作台导航为模板。语料、Topic Map、市场洞察、情报和选题是领域情报内核的应用能力/视图；Agent/CLI 是受控服务入口。它们都不能成为新的事实源或技术模块，也不是同一种 Projection。Gate 2 只确认用户任务和跨资产探索路径；页面数量、Tab、区块顺序和 P0 优先级必须在 Gate 7 使用真实样本复核。
 
 Gate 7 的工作台导航、Topic 认知路径、Corpus/研究/行动/运行中心、页面 provenance envelope、API 能力边界与外部 Agent CLI 继续进入 [`product-interface-architecture.md`](product-interface-architecture.md)。本文保留总地图，子文档负责可验证的交互与接口候选。

@@ -6,6 +6,8 @@
 > 事实来源: 2026-08-21 用户逐题确认的 `HOME-01`–`HOME-17`
 > 冲突时以谁为准: 用户最新确认、`AGENTS.md`、`../product/domain-invariants.md`；真实可用样本的可用性测试可以推翻本文任何版面结论
 
+> **2026-09-06 范围更新**：Mog 最新讨论将当前产品收敛为独立首页与智能工作台、市场洞察、语料库、采集四个工作区，移出选题库及制作发布流程。本文件保留历史推演；其中选题卡、战绩回收、独立行动页等不再作为本轮页面依据。最新页面提案见[产品页面蓝图](intelligence-product-blueprint.md)，首页细化见[首页与 Three.js](intelligence-home-threejs.md)；新增设计仍待评审。
+
 本文是 [`product-interface-architecture.md`](product-interface-architecture.md) 的渐进披露子文档，把其中「今日关注」一节从原则细化为可评审的具体形态。它不创建 React 页面、API route、CLI binary 或数据库表。
 
 ## 授权边界（先读这一段）
